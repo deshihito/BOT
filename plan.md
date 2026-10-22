@@ -1,25 +1,19 @@
-# AGO Coder 実装計画
+# Web UI整理計画
 
 ## 目的
 
-ダッシュボードから、OpenCodeの操作感を参考にしたエージェント型コーディング画面へ移動できるようにする。モデル実行はLogfareのサーバー側API経由に限定し、ブラウザへAPIキーを公開しない。
+AGOBOT Webを、必要な案内と実装済みの操作だけに絞る。AGO Coderはダッシュボード内の1機能として扱い、モデル実行は既存Botサーバーに委譲する。
+
+## 実装方針
+
+- トップの表題を「使いたいこと、全部このボットでいい。」にする。
+- AGO Coderは入力、送信、回答だけを表示する。セッション、ファイル、権限、モデル選択、GitHub連携など未実装のUIは表示しない。
+- Web APIはDiscordログインを検証後、共有シークレット付きでBotの`/internal/coder/run`へリクエストを送る。APIキーはWebやブラウザに置かない。
+- Botは既存の`AI_PROVIDER_ORDER`とLogfare設定を使い、実際に設定済みのプロバイダーで回答する。
+- Discord OAuthのコールバックで署名付きのHTTP onlyセッションを作成し、ログイン完了後は`/dashboard`へ遷移する。
+- `/dashboard`と`/coder`は有効なDiscordセッションがない場合`/login`へ遷移する。
+- 未実装の画面は案内文を表示せず空欄にする。
 
 ## デザイン
 
-- **Design Movement**: OpenCodeのターミナル的な密度とIDEワークスペースの分割レイアウトを、AGOBOTの白地・青緑アクセントへ翻訳する。
-- **Core Principles**: 状態が常に見える、操作を止めない、Plan/Buildを明確に分ける、危険操作は許可を明示する。
-- **Color Philosophy**: 白と薄い灰色を作業面、濃いインク色をコード面、青緑を実行可能な状態、琥珀色を確認待ちに使う。
-- **Layout Paradigm**: 左にセッション/ファイル文脈、中央に会話と作業ログ、右にモデル・権限・差分のインスペクターを置くワークスペース型。
-- **Signature Elements**: セッションの状態ドット、Plan/Buildモード切替、実行ログの折りたたみ行。
-- **Interaction Philosophy**: まず計画を見せ、Buildでは何を実行しているかを逐次表示する。権限はAllow/Ask/Denyで可視化する。
-- **Typography**: UIは既存の日本語フォント、ログとモデル名は等幅フォント。
-- **Brand Essence**: AGOBOTをDiscordボットから、作業を前へ進めるエージェントへ広げる。
-
-## 実装範囲
-
-- `/dashboard`にAGO Coderカードを追加。
-- `/coder`にクライアントUIを追加。
-- `/api/coder/run`でLogfare Chat Completionsをサーバー側から呼び出す。
-- `/login`とDiscord OAuth開始・コールバックAPIを追加。
-- ルートマニフェストを更新。
-- GitHubコネクタは未設定時の案内を画面とドキュメントへ追加する。認証情報はコードやブラウザへ埋め込まない。
+白地、細い罫線、短いラベルのみで構成する。画面遷移と操作数を増やすためだけのパネル、状態表示、説明文は追加しない。
