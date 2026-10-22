@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import ipaddress
 import re
 import socket
@@ -80,9 +81,22 @@ def _safe_session() -> aiohttp.ClientSession:
 
 def _unwrap_result_url(href: str, base_url: str) -> str:
     absolute = urljoin(base_url, href)
-    query = parse_qs(urlparse(absolute).query)
+    parsed = urlparse(absolute)
+    query = parse_qs(parsed.query)
     if query.get("uddg"):
         return unquote(query["uddg"][0])
+    # Bing HTML results use a tracking URL with the destination in u=a1<base64>.
+    # Do not pass the tracking page itself to RAG: it returns only Bing's
+    # "click here if the page does not redirect" interstitial to HTTP clients.
+    encoded = query.get("u", [""])[0]
+    if encoded.startswith("a1"):
+        try:
+            padded = encoded[2:] + "=" * (-len(encoded[2:]) % 4)
+            decoded = base64.urlsafe_b64decode(padded).decode("utf-8")
+            if decoded.startswith(("http://", "https://")):
+                return decoded
+        except (ValueError, UnicodeError):
+            pass
     return absolute
 
 
@@ -169,7 +183,7 @@ async def search(query: str, *, max_results: int = 5) -> list[dict[str, str]]:
         link = result.select_one("h2 a")
         if not link or not link.get("href"):
             continue
-        result_url = str(link["href"])
+        result_url = _unwrap_result_url(str(link["href"]), bing_url)
         if not _is_public_url(result_url):
             continue
         snippet = result.select_one(".b_caption p") or result.select_one("p")

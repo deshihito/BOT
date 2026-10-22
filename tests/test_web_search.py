@@ -213,3 +213,16 @@ class PublicResolverTest(unittest.IsolatedAsyncioTestCase):
         resolver._resolver = self.Resolver(records)
         self.assertEqual(await resolver.resolve("example.com", 80, socket.AF_INET), records)
         resolver.close()
+
+
+class ResultUrlTest(unittest.TestCase):
+    def test_unwraps_bing_base64_destination(self):
+        import base64
+        destination = "https://claude.com/"
+        encoded = "a1" + base64.urlsafe_b64encode(destination.encode()).decode().rstrip("=")
+        href = "https://www.bing.com/ck/a?u=" + encoded
+        self.assertEqual(web_search._unwrap_result_url(href, "https://www.bing.com/search?q=claude"), destination)
+
+    def test_keeps_non_bing_tracking_url_when_destination_is_invalid(self):
+        href = "https://www.bing.com/ck/a?u=a1not-valid"
+        self.assertEqual(web_search._unwrap_result_url(href, "https://www.bing.com/search?q=test"), href)
