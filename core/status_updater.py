@@ -1,12 +1,17 @@
 """core/status_updater.py
 
-Botのステータス（プレイ中 / カスタムステータスなど）を定期更新する。
+Botのステータス（プレイ中 / 視聴中など）にメンバー数を定期表示する。
 例:
 - プレイ中: メンバー数: 123人
-- カスタムステータス: メンバー数: 123人
 
 読み込み方（main側）:
     await bot.load_extension("core.status_updater")
+
+discord.py 公式ドキュメントに沿った実装:
+- Client.change_presence(activity=..., status=...) を使う
+- activity は discord.Game / discord.Activity / discord.CustomActivity など BaseActivity
+- on_ready は何度も呼ばれうるので、その中では change_presence を呼ばない（FAQ 推奨）
+  → Bot 準備完了後に tasks.loop で更新する
 """
 
 from __future__ import annotations
@@ -17,9 +22,27 @@ import logging
 import discord
 from discord.ext import commands, tasks
 
-# "discord." 配下の子ロガーにしておくと、bot.run() が設定する discord.py 標準のログ出力に
-# そのまま乗るので、INFO ログも WARNING/ERROR も確実にコンソールへ出る。
+# "discord." 配下の子ロガーにして、discord.py のログ設定に乗せる
 logger = logging.getLogger("discord.status_updater")
+
+
+def _ensure_log_output() -> None:
+    """
+    ログ設定が一切無いときだけ、このモジュールのログをコンソールに出す。
+
+    discord.py のログは bot.run() を使ったときだけ自動設定される。
+    bot.start() / async with bot: で起動している場合は、設定しない限り
+    INFO ログはどこにも出力されない。
+    """
+    if logging.getLogger().handlers or logging.getLogger("discord").handlers:
+        return
+
+    handler = logging.StreamHandler()
+    handler.setFormatter(
+        logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s")
+    )
+    logger.addHandler(handler)
+    logger.setLevel(logging.INFO)
 
 
 # ======================================================
@@ -27,11 +50,11 @@ logger = logging.getLogger("discord.status_updater")
 # ======================================================
 
 # 表示形式
-# "playing"     -> プレイ中
-# "watching"    -> 視聴中
-# "listening"   -> リスニング中
-# "competing"   -> 競い合い中
-# "custom"      -> カスタムステータス（Botでは表示が不安定な場合あり）
+# "playing"     -> プレイ中   (discord.Game)
+# "watching"    -> 視聴中     (discord.Activity)
+# "listening"   -> リスニング中 (discord.Activity)
+# "competing"   -> 競い合い中  (discord.Activity)
+# "custom"      -> カスタムステータス（Botでは表示されないことがあります）
 STATUS_MODE = "playing"
 
 # 集計方法
@@ -61,7 +84,6 @@ TEXT_TEMPLATE = "メンバー数: {count}人"
 UPDATE_MINUTES = max(5.0, float(UPDATE_MINUTES))
 
 _ACTIVITY_TYPES = {
-    "playing": discord.ActivityType.playing,
     "watching": discord.ActivityType.watching,
     "listening": discord.ActivityType.listening,
     "competing": discord.ActivityType.competing,
@@ -85,8 +107,8 @@ class StatusUpdater(commands.Cog):
     # --------------------------------------------------
 
     async def cog_load(self):
-        # ループは cog_load で開始する（__init__ で start しない）。
-        # 初回は before_loop で Bot の準備完了を待ってから実行される。
+        _ensure_log_output()
+        # 初回は before_loop で Bot の準備完了を待ってから実行される
         self.update_status.start()
         logger.info(
             "StatusUpdater を読み込みました (mode=%s, source=%s, interval=%s分)",
@@ -137,13 +159,15 @@ class StatusUpdater(commands.Cog):
         mode = STATUS_MODE.lower()
 
         if mode == "custom":
-            # カスタムステータスは Activity(type=custom) ではなく CustomActivity を使う
-            return discord.CustomActivity(name=text)
+            # name と state の両方に同じ文字列を渡す（ライブラリのバージョン差を吸収）
+            return discord.CustomActivity(name=text, state=text)
 
         activity_type = _ACTIVITY_TYPES.get(mode)
         if activity_type is None:
-            logger.warning("STATUS_MODE=%r は未対応のため playing にします。", STATUS_MODE)
-            activity_type = discord.ActivityType.playing
+            if mode != "playing":
+                logger.warning("STATUS_MODE=%r は未対応のため playing にします。", STATUS_MODE)
+            # 公式ドキュメントの例と同じ discord.Game を使う
+            return discord.Game(name=text)
 
         return discord.Activity(type=activity_type, name=text)
 
@@ -156,8 +180,7 @@ class StatusUpdater(commands.Cog):
         ステータスを更新する。
 
         force=False のときだけ「前回と同じ文言ならスキップ」する。
-        定期ループと on_ready は force=True で呼ぶ。
-        （他の処理が presence を上書きしても、次回の定期更新で必ず張り直せるようにするため）
+        定期ループは force=True で呼ぶ（他の処理が presence を上書きしても張り直せるように）。
         """
         if not self.bot.is_ready():
             return
@@ -189,15 +212,12 @@ class StatusUpdater(commands.Cog):
             except Exception:
                 logger.exception("ステータスの更新に失敗しました")
 
-                # カスタムステータスが拒否された場合、プレイ中にフォールバック
+                # カスタムステータスが失敗した場合、プレイ中にフォールバック
                 if STATUS_MODE.lower() == "custom":
                     try:
                         await self.bot.change_presence(
                             status=discord.Status.online,
-                            activity=discord.Activity(
-                                type=discord.ActivityType.playing,
-                                name=text,
-                            ),
+                            activity=discord.Game(name=text),
                         )
                     except Exception:
                         logger.exception("プレイ中へのフォールバックにも失敗しました")
@@ -208,10 +228,11 @@ class StatusUpdater(commands.Cog):
                 return
 
             self.last_text = text
-            logger.info("ステータスを更新しました: %s", text)
+            # bot.activity はライブラリが保持している現在の activity
+            logger.info("ステータスを更新しました: %s (bot.activity=%r)", text, self.bot.activity)
 
     # --------------------------------------------------
-    # 定期ループ / イベント
+    # 定期ループ
     # --------------------------------------------------
 
     @tasks.loop(minutes=UPDATE_MINUTES)
@@ -225,12 +246,6 @@ class StatusUpdater(commands.Cog):
     @update_status.before_loop
     async def before_update_status(self):
         await self.bot.wait_until_ready()
-
-    @commands.Cog.listener()
-    async def on_ready(self):
-        # 再起動・再接続後にステータスを張り直す
-        self.last_text = None
-        await self._update(force=True)
 
 
 async def setup(bot: commands.Bot):
