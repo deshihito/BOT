@@ -4,6 +4,8 @@ from __future__ import annotations
 import asyncio
 from collections import defaultdict, deque
 from concurrent.futures import TimeoutError
+import hashlib
+import hmac
 import logging
 import os
 import re
@@ -22,8 +24,10 @@ app.config["MAX_CONTENT_LENGTH"] = 16 * 1024
 logger = logging.getLogger(__name__)
 _bot: Any | None = None
 _recent_requests: dict[str, deque[float]] = defaultdict(deque)
+_used_nonces: dict[str, float] = {}
 _WINDOW_SECONDS = 60
 _MAX_REQUESTS_PER_WINDOW = 8
+_SIGNATURE_TTL_SECONDS = 60
 
 
 @app.route("/")
@@ -38,11 +42,33 @@ def configure_coder(bot: Any) -> None:
 
 
 def _authorized() -> bool:
-    expected = os.getenv("CODER_SERVICE_SHARED_SECRET", "")
-    authorization = request.headers.get("Authorization", "")
-    if not expected or not authorization.startswith("Bearer "):
+    secret = os.getenv("CODER_SERVICE_SHARED_SECRET", "")
+    timestamp = request.headers.get("X-AGO-Coder-Timestamp", "")
+    nonce = request.headers.get("X-AGO-Coder-Nonce", "")
+    signature = request.headers.get("X-AGO-Coder-Signature", "")
+    if not secret or not timestamp or not re.fullmatch(r"[0-9a-f]{48}", nonce) or not signature:
         return False
-    return secrets.compare_digest(authorization.removeprefix("Bearer "), expected)
+    try:
+        signed_at = int(timestamp)
+    except ValueError:
+        return False
+    if abs(time.time() - signed_at) > _SIGNATURE_TTL_SECONDS:
+        return False
+
+    now = time.monotonic()
+    for used_nonce, expires_at in list(_used_nonces.items()):
+        if expires_at <= now:
+            del _used_nonces[used_nonce]
+    if nonce in _used_nonces:
+        return False
+
+    body_hash = hashlib.sha256(request.get_data(cache=True)).hexdigest()
+    signed_payload = f"POST\n/internal/coder/run\n{timestamp}\n{nonce}\n{body_hash}".encode()
+    expected = hmac.new(secret.encode(), signed_payload, hashlib.sha256).hexdigest()
+    if not secrets.compare_digest(signature, expected):
+        return False
+    _used_nonces[nonce] = now + _SIGNATURE_TTL_SECONDS
+    return True
 
 
 def _within_rate_limit(user_id: str) -> bool:
@@ -78,7 +104,7 @@ def run_coder():
     if not _within_rate_limit(user_id):
         return jsonify({"error": "rate_limited"}), 429
 
-    future = asyncio.run_coroutine_threadsafe(coder_service.reply(prompt), loop)
+    future = asyncio.run_coroutine_threadsafe(coder_service.reply(prompt, int(user_id)), loop)
     try:
         result = future.result(timeout=55)
     except TimeoutError:

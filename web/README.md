@@ -43,4 +43,4 @@ AI_PROVIDER_ORDER=logfare
 LOGFARE_API_KEY=...
 ```
 
-Botは`POST /internal/coder/run`を提供します。このURLはVercelからHTTPSで到達可能にし、ブラウザへ直接公開する用途には使いません。
+Botは`POST /internal/coder/run`を提供します。Webは時刻・nonce・本文ハッシュを含むHMAC署名を付けて呼び出します。このURLはVercelからHTTPSで到達可能にし、ブラウザへ直接公開する用途には使いません。

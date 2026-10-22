@@ -1,3 +1,4 @@
+import crypto from "node:crypto";
 import { NextResponse } from "next/server";
 import { getRequestUser } from "@/lib/auth";
 
@@ -53,13 +54,23 @@ export async function POST(request: Request) {
   }
 
   try {
+    const payload = JSON.stringify({ prompt, user });
+    const timestamp = Math.floor(Date.now() / 1000).toString();
+    const nonce = crypto.randomBytes(24).toString("hex");
+    const bodyHash = crypto.createHash("sha256").update(payload).digest("hex");
+    const signature = crypto
+      .createHmac("sha256", serviceSecret)
+      .update(`POST\n/internal/coder/run\n${timestamp}\n${nonce}\n${bodyHash}`)
+      .digest("hex");
     const response = await fetch(endpoint, {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${serviceSecret}`,
         "Content-Type": "application/json",
+        "X-AGO-Coder-Timestamp": timestamp,
+        "X-AGO-Coder-Nonce": nonce,
+        "X-AGO-Coder-Signature": signature,
       },
-      body: JSON.stringify({ prompt, user }),
+      body: payload,
       signal: AbortSignal.timeout(58_000),
     });
     if (!response.ok) return NextResponse.json({ error: "回答を取得できません。" }, { status: 502 });
