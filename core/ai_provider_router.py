@@ -53,6 +53,12 @@ class Answer:
     model: str
 
 
+class ProviderHTTPError(RuntimeError):
+    def __init__(self, status: int):
+        self.status = status
+        super().__init__(f"HTTP {status}")
+
+
 def logical_model() -> str:
     return os.getenv("AI_ROUTED_MODEL", "").strip()
 
@@ -87,9 +93,9 @@ def enabled() -> bool:
     return bool(routes())
 
 
-def _retry_after(response: aiohttp.ClientResponse) -> float:
+def _retry_after(value: str | None) -> float:
     try:
-        seconds = float(response.headers.get("Retry-After", COOLDOWN_SECONDS))
+        seconds = float(value) if value is not None else COOLDOWN_SECONDS
     except (TypeError, ValueError):
         seconds = COOLDOWN_SECONDS
     return max(1, min(seconds, 300))
@@ -97,7 +103,12 @@ def _retry_after(response: aiohttp.ClientResponse) -> float:
 
 async def _call(route: Route, messages: list[dict[str, str]], max_tokens: int) -> str:
     if route.name == "logfare":
-        return await logfare.chat(route.model, messages, max_tokens=max_tokens)
+        try:
+            return await logfare.chat(route.model, messages, max_tokens=max_tokens)
+        except logfare.LogfareHTTPError as exc:
+            if exc.status == 429:
+                _cooldown_until[route.name] = time.monotonic() + _retry_after(exc.retry_after)
+            raise
     headers = {"Authorization": f"Bearer {route.api_key}", "Content-Type": "application/json"}
     payload: dict[str, Any] = {
         "model": route.model, "messages": messages, "max_tokens": max_tokens,
@@ -108,9 +119,9 @@ async def _call(route: Route, messages: list[dict[str, str]], max_tokens: int) -
         ) as response:
             if response.status >= 400:
                 if response.status == 429:
-                    _cooldown_until[route.name] = time.monotonic() + _retry_after(response)
+                    _cooldown_until[route.name] = time.monotonic() + _retry_after(response.headers.get("Retry-After"))
                 # エラーボディに鍵やプロンプトが混ざる上流があるため記録しない。
-                raise RuntimeError(f"HTTP {response.status}")
+                raise ProviderHTTPError(response.status)
             data = await response.json()
     try:
         content = data["choices"][0]["message"]["content"]
@@ -142,5 +153,6 @@ async def chat(messages: list[dict[str, str]], *, max_tokens: int = 1200) -> Ans
             text = await asyncio.wait_for(_call(route, messages, max_tokens), remaining)
             return Answer(text, route.name, route.model)
         except (aiohttp.ClientError, asyncio.TimeoutError, RuntimeError, ValueError) as exc:
-            logger.warning("!ai provider failed: provider=%s error=%s", route.name, type(exc).__name__)
+            logger.warning("!ai provider failed: provider=%s status=%s error=%s",
+                           route.name, getattr(exc, "status", "-"), type(exc).__name__)
     raise RuntimeError("全AIプロバイダーが応答できませんでした") from None

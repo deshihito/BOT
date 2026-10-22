@@ -22,9 +22,7 @@ class AICog(commands.Cog):
         prompt = prompt.strip()
         if not prompt:
             return await ctx.reply("使い方: `!ai 質問内容`", mention_author=False)
-        preferred = (ai_preferences.get_model(ctx.author.id)
-                     or (ai_provider_router.AUTO_MODEL if ai_provider_router.enabled()
-                         else logfare.configured_default_model()))
+        preferred = ai_preferences.get_model(ctx.author.id) or logfare.configured_default_model()
         auto = preferred == ai_provider_router.AUTO_MODEL
         if auto and not ai_provider_router.enabled():
             return await ctx.reply("AIの自動切替が未設定です。", mention_author=False)

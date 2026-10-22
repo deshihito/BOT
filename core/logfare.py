@@ -15,6 +15,13 @@ AUTO_MODEL = "logfare/auto"
 DEFAULT_TIMEOUT = aiohttp.ClientTimeout(total=45)
 
 
+class LogfareHTTPError(RuntimeError):
+    def __init__(self, status: int, retry_after: str | None = None):
+        self.status = status
+        self.retry_after = retry_after
+        super().__init__(f"Logfare API error {status}")
+
+
 def api_key() -> str | None:
     return os.getenv("LOGFARE_API_KEY")
 
@@ -145,9 +152,8 @@ async def chat_completion(
     }
     async with aiohttp.ClientSession(timeout=DEFAULT_TIMEOUT) as session:
         async with session.post(f"{BASE_URL}/chat/completions", headers=headers, json=payload) as response:
-            body = await response.text()
             if response.status >= 400:
-                raise RuntimeError(f"Logfare API error {response.status}: {body[:300]}")
+                raise LogfareHTTPError(response.status, response.headers.get("Retry-After"))
             try:
                 data = await response.json()
             except ValueError as exc:

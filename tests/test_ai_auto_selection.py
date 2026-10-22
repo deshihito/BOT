@@ -33,7 +33,7 @@ class AiAutoSelectionTest(unittest.IsolatedAsyncioTestCase):
         ctx = SimpleNamespace(author=SimpleNamespace(id=123), typing=lambda: Typing(),
                               reply=AsyncMock())
         answer = ai.ai_provider_router.Answer("回答", "second", "same-model")
-        with patch.object(ai.ai_preferences, "get_model", return_value=None), \
+        with patch.object(ai.ai_preferences, "get_model", return_value="ai/auto"), \
              patch.object(ai.ai_provider_router, "enabled", return_value=True), \
              patch.object(ai.ai_provider_router, "chat", new_callable=AsyncMock,
                           return_value=answer) as chat, \
@@ -47,15 +47,35 @@ class AiAutoSelectionTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn("same-model", embed.footer.text)
         self.assertIn("second", embed.footer.text)
 
+    async def test_ai_keeps_logfare_default_when_auto_is_configured(self):
+        ai = load_cog("ai")
+        ctx = SimpleNamespace(author=SimpleNamespace(id=123), typing=lambda: Typing(),
+                              reply=AsyncMock())
+        with patch.object(ai.ai_preferences, "get_model", return_value=None), \
+             patch.object(ai.ai_provider_router, "enabled", return_value=True), \
+             patch.object(ai.ai_provider_router, "chat", new_callable=AsyncMock) as routed, \
+             patch.object(ai.logfare, "api_key", return_value="key"), \
+             patch.object(ai.logfare, "configured_default_model", return_value="logfare-model"), \
+             patch.object(ai.logfare, "resolve_model", new_callable=AsyncMock,
+                          return_value=("logfare-model", True)), \
+             patch.object(ai.logfare, "fetch_free_chat_models", new_callable=AsyncMock,
+                          return_value=[]), \
+             patch.object(ai.logfare, "chat", new_callable=AsyncMock,
+                          return_value="回答") as logfare_chat:
+            await ai.AICog.ai.callback(ai.AICog(None), ctx, prompt="質問")
+        routed.assert_not_awaited()
+        logfare_chat.assert_awaited_once()
+
     async def test_general_picker_has_one_auto_model(self):
         general = load_cog("general")
         with patch.object(general.ai_preferences, "ensure_loaded", new_callable=AsyncMock), \
              patch.object(general.ai_preferences, "get_model", return_value=None), \
              patch.object(general.ai_provider_router, "enabled", return_value=True), \
              patch.object(general.ai_provider_router, "logical_model", return_value="same-model"), \
+             patch.object(general.logfare, "configured_default_model", return_value="logfare/auto"), \
              patch.object(general.logfare, "fetch_free_chat_models", new_callable=AsyncMock,
                           return_value=[{"id": "logfare/auto"}]):
             view = await general.AIDefaultView.create(123)
         self.assertEqual(view.select.model_ids, {"ai/auto", "logfare/auto"})
-        self.assertTrue(any(option.default and option.value == "ai/auto"
+        self.assertTrue(any(option.default and option.value == "logfare/auto"
                             for option in view.select.options))

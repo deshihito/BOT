@@ -333,9 +333,7 @@ class AIDefaultSelect(discord.ui.Select):
         self.model_ids = {str(model.get("id")) for model in models if model.get("id")}
         self.page = page
         if kind == "chat":
-            current = (ai_preferences.get_model(user_id)
-                       or (ai_provider_router.AUTO_MODEL if ai_provider_router.enabled()
-                           else logfare.configured_default_model()))
+            current = ai_preferences.get_model(user_id) or logfare.configured_default_model()
         else:
             current = ai_preferences.get_image_model(user_id) or logfare.DEFAULT_IMAGE_MODEL
         start = page * MODEL_PAGE_SIZE
@@ -446,9 +444,7 @@ class AIDefaultView(discord.ui.View):
 
     def embed(self):
         if self.kind == "chat":
-            current = (ai_preferences.get_model(self.user_id)
-                       or (ai_provider_router.AUTO_MODEL if ai_provider_router.enabled()
-                           else logfare.configured_default_model()))
+            current = ai_preferences.get_model(self.user_id) or logfare.configured_default_model()
         else:
             current = ai_preferences.get_image_model(self.user_id) or logfare.DEFAULT_IMAGE_MODEL
         title = "AI設定" if self.kind == "chat" else "画像生成AI設定"
@@ -518,9 +514,7 @@ class ReasoningView(discord.ui.View):
     @classmethod
     async def create(cls, user_id: int):
         await ai_preferences.ensure_loaded()
-        model_id = (ai_preferences.get_model(user_id)
-                    or (ai_provider_router.AUTO_MODEL if ai_provider_router.enabled()
-                        else logfare.configured_default_model()))
+        model_id = ai_preferences.get_model(user_id) or logfare.configured_default_model()
         if model_id == ai_provider_router.AUTO_MODEL:
             return None, "自動切替モデルでは、この思考強度設定を使えません。"
         models = await logfare.fetch_free_chat_models()
