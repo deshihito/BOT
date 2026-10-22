@@ -58,6 +58,7 @@ SUPPORT_ACTIONS = [
     app_commands.Choice(name="ハニーポット", value="honeypot"),
     app_commands.Choice(name="チケットツール", value="ticket"),
     app_commands.Choice(name="認証パネル作成", value="auth_panel"),
+    app_commands.Choice(name="ロールパネル作成", value="role_panel"),
 ]
 
 SUPPORT_GENRES = {
@@ -67,7 +68,7 @@ SUPPORT_GENRES = {
     ),
     "server": (
         "サーバー管理",
-        "ロール操作、絵文字便乗、VC履歴、メッセージ編集履歴、認証パネル作成",
+        "ロール操作、絵文字便乗、VC履歴、メッセージ編集履歴、認証パネル、ロールパネル",
     ),
     "bumprta": ("bump/up・RTA", "通知設定と RTA 状態・ランキング"),
     "event": ("イベント", "抽選の作成"),
@@ -94,6 +95,7 @@ SUPPORT_ACTIONS_BY_GENRE = {
             SUPPORT_ACTIONS[10],
             SUPPORT_ACTIONS[11],
             SUPPORT_ACTIONS[15],
+            SUPPORT_ACTIONS[16],
         )
     ],
     "bumprta": [(c.name, c.value) for c in SUPPORT_ACTIONS[5:8]],
@@ -108,9 +110,11 @@ MODERATION_LOG_SECTION = "moderation_log"
 STICKY_SECTION = "sticky"
 
 AUTH_SECTION = "auth"
+ROLE_PANEL_SECTION = "role_panel"
 AUTH_MODE_SIMPLE = "simple"
 AUTH_MODE_FORM = "form"
 AUTH_MAX_QUESTIONS = 5
+ROLE_PANEL_MAX_ROLES = 25
 
 THINKING_EMOJI = discord.PartialEmoji(name="thinking", id=1561695212814995596)
 BINJOU_DEFAULTS = {"thinking": True, "thumbsup": True}
@@ -126,7 +130,7 @@ AUTH_DEFAULT_QUESTIONS = [
 ]
 
 
-def _auth_int(value) -> int | None:
+def _support_int(value) -> int | None:
     if isinstance(value, bool) or not isinstance(value, int):
         return None
     return value
@@ -146,7 +150,7 @@ def normalize_auth_questions(value) -> list[dict]:
             continue
 
         placeholder = str(item.get("placeholder") or "").strip()
-        max_length = _auth_int(item.get("max_length")) or 200
+        max_length = _support_int(item.get("max_length")) or 200
         max_length = max(1, min(1000, max_length))
 
         style_raw = str(item.get("style") or "short").strip().lower()
@@ -180,9 +184,9 @@ def get_auth_settings(store, guild_id: int) -> dict:
     if mode not in {AUTH_MODE_SIMPLE, AUTH_MODE_FORM}:
         mode = AUTH_MODE_FORM
 
-    role_id = _auth_int(raw.get("role_id"))
-    intro_channel_id = _auth_int(raw.get("intro_channel_id"))
-    panel_channel_id = _auth_int(raw.get("panel_channel_id"))
+    role_id = _support_int(raw.get("role_id"))
+    intro_channel_id = _support_int(raw.get("intro_channel_id"))
+    panel_channel_id = _support_int(raw.get("panel_channel_id"))
 
     raw_questions = raw.get("questions")
     if raw_questions is None:
@@ -200,15 +204,42 @@ def get_auth_settings(store, guild_id: int) -> dict:
     }
 
 
-def auth_role_error(guild: discord.Guild, role: discord.Role | None) -> str | None:
+def get_role_panel_settings(store, guild_id: int) -> dict:
+    """ロールパネル設定。未設定時はオン・送信先なし・ロールなし。"""
+    raw = store.get(guild_id, ROLE_PANEL_SECTION)
+    if not isinstance(raw, dict):
+        raw = {}
+
+    enabled = raw.get("enabled") if isinstance(raw.get("enabled"), bool) else True
+    panel_channel_id = _support_int(raw.get("panel_channel_id"))
+
+    raw_roles = raw.get("roles")
+    roles: list[int] = []
+    if isinstance(raw_roles, list):
+        for value in raw_roles:
+            role_id = _support_int(value)
+            if role_id is None or role_id in roles:
+                continue
+            roles.append(role_id)
+            if len(roles) >= ROLE_PANEL_MAX_ROLES:
+                break
+
+    return {
+        "enabled": enabled,
+        "panel_channel_id": panel_channel_id,
+        "roles": roles,
+    }
+
+
+def assignable_role_error(guild: discord.Guild, role: discord.Role | None) -> str | None:
     if role is None:
-        return "認証で付与するロールが選択されていません。"
+        return "対象ロールが見つかりません。"
 
     if role.is_default():
-        return "@everyone ロールは認証ロールにできません。"
+        return "@everyone ロールは使用できません。"
 
     if getattr(role, "managed", False):
-        return "連携サービスが管理するロールは認証ロールにできません。"
+        return "連携サービスが管理するロールは使用できません。"
 
     me = getattr(guild, "me", None)
     permissions = getattr(getattr(me, "guild_permissions", None), "manage_roles", False)
@@ -221,9 +252,9 @@ def auth_role_error(guild: discord.Guild, role: discord.Role | None) -> str | No
     return None
 
 
-def can_manage_auth_panel(interaction: discord.Interaction) -> bool:
+def can_manage_support_panel(interaction: discord.Interaction) -> bool:
     """
-    認証パネル設定を操作できるか。
+    認証パネル・ロールパネルの設定を操作できるか。
     既定: 管理者権限のみ。
 
     もしサーバー管理権限も許可したい場合は、
@@ -237,6 +268,14 @@ def can_manage_auth_panel(interaction: discord.Interaction) -> bool:
     """
     permissions = getattr(interaction.user, "guild_permissions", None)
     return bool(getattr(permissions, "administrator", False))
+
+
+def can_manage_auth_panel(interaction: discord.Interaction) -> bool:
+    return can_manage_support_panel(interaction)
+
+
+def can_manage_role_panel(interaction: discord.Interaction) -> bool:
+    return can_manage_support_panel(interaction)
 
 
 async def edit_auth_panel_message(interaction: discord.Interaction, panel):
@@ -768,7 +807,7 @@ class AuthRoleSelect(discord.ui.RoleSelect):
             )
 
         role = self.values[0]
-        if error := auth_role_error(interaction.guild, role):
+        if error := assignable_role_error(interaction.guild, role):
             return await interaction.response.send_message(error, ephemeral=True)
 
         await interaction.response.defer()
@@ -898,7 +937,7 @@ class AuthSendPanelButton(discord.ui.Button):
             )
 
         role = interaction.guild.get_role(settings["role_id"]) if settings["role_id"] else None
-        if error := auth_role_error(interaction.guild, role):
+        if error := assignable_role_error(interaction.guild, role):
             return await interaction.response.send_message(error, ephemeral=True)
 
         if settings["mode"] == AUTH_MODE_FORM:
@@ -1049,6 +1088,422 @@ class AuthPanelSettingsView(discord.ui.View):
         )
         self.notice = notice
 
+        self._add_items()
+        await edit_panel_v2(interaction, as_panel_v2(self))
+
+
+class RolePanelAssignSelect(discord.ui.Select):
+    def __init__(self, options: list[discord.SelectOption]):
+        super().__init__(
+            placeholder="付けてほしいロールを選択",
+            custom_id="role_panel:assign",
+            options=options[:ROLE_PANEL_MAX_ROLES],
+            min_values=1,
+            max_values=1,
+            row=0,
+        )
+
+    async def callback(self, interaction: discord.Interaction):
+        if interaction.response.is_done():
+            return
+
+        cog = interaction.client.get_cog("SupportCog")
+        if cog is None:
+            await interaction.response.send_message(
+                "ロール機能を読み込めません。",
+                ephemeral=True,
+            )
+            return
+
+        try:
+            role_id = int(self.values[0])
+        except (ValueError, IndexError):
+            await interaction.response.send_message(
+                "ロール選択が正しくありません。",
+                ephemeral=True,
+            )
+            return
+
+        await cog.handle_role_panel_assign(interaction, role_id)
+
+
+class RolePanelUserView(discord.ui.LayoutView):
+    def __init__(self, guild: discord.Guild, role_ids: list[int]):
+        super().__init__(timeout=None)
+
+        options: list[discord.SelectOption] = []
+        for role_id in role_ids[:ROLE_PANEL_MAX_ROLES]:
+            role = guild.get_role(role_id)
+            if role is None or role.is_default() or getattr(role, "managed", False):
+                continue
+
+            options.append(
+                discord.SelectOption(
+                    label=role.name[:100],
+                    value=str(role.id),
+                    description=f"ID: {role.id}",
+                )
+            )
+
+        if not options:
+            options.append(
+                discord.SelectOption(
+                    label="ロールが設定されていません",
+                    value="invalid",
+                )
+            )
+
+        self.add_item(
+            discord.ui.Container(
+                discord.ui.TextDisplay(
+                    "## ロールパネル\nドロップダウンからロールを選択すると付与されます。"
+                ),
+                discord.ui.ActionRow(RolePanelAssignSelect(options)),
+                accent_colour=0x9B59B6,
+            )
+        )
+
+
+class RolePanelAddRoleSelect(discord.ui.RoleSelect):
+    def __init__(self, parent: "RolePanelSettingsView"):
+        self.parent_view = parent
+        super().__init__(
+            placeholder="パネルに追加するロールを選択",
+            row=0,
+            min_values=1,
+            max_values=1,
+        )
+
+    async def callback(self, interaction: discord.Interaction):
+        if not self.parent_view.can_manage(interaction):
+            return await interaction.response.send_message(
+                "この設定は管理者のみ利用できます。",
+                ephemeral=True,
+            )
+
+        role = self.values[0]
+        if error := assignable_role_error(interaction.guild, role):
+            return await interaction.response.send_message(error, ephemeral=True)
+
+        settings = self.parent_view.settings
+        if role.id in settings["roles"]:
+            return await interaction.response.send_message(
+                "そのロールはすでに追加されています。",
+                ephemeral=True,
+            )
+
+        if len(settings["roles"]) >= ROLE_PANEL_MAX_ROLES:
+            return await interaction.response.send_message(
+                f"ロールは最大{ROLE_PANEL_MAX_ROLES}個までです。",
+                ephemeral=True,
+            )
+
+        await interaction.response.defer()
+
+        roles = list(settings["roles"])
+        roles.append(role.id)
+
+        store = guild_settings.get_store()
+        await store.ensure_loaded()
+        await store.update(interaction.guild_id, ROLE_PANEL_SECTION, roles=roles)
+
+        await self.parent_view.refresh(interaction, f"{role.name} を追加しました。")
+
+
+class RolePanelCurrentRoleSelect(discord.ui.Select):
+    def __init__(self, parent: "RolePanelSettingsView"):
+        self.parent_view = parent
+
+        options: list[discord.SelectOption] = []
+        for role_id in parent.settings["roles"][:ROLE_PANEL_MAX_ROLES]:
+            role = parent.guild.get_role(role_id)
+            if role is None:
+                continue
+
+            options.append(
+                discord.SelectOption(
+                    label=role.name[:100],
+                    value=str(role.id),
+                    description=f"ID: {role.id}",
+                    default=(role_id == parent.selected_role_id),
+                )
+            )
+
+        super().__init__(
+            placeholder="削除するロールを選択",
+            options=options[:ROLE_PANEL_MAX_ROLES],
+            row=1,
+            min_values=1,
+            max_values=1,
+        )
+
+    async def callback(self, interaction: discord.Interaction):
+        if not self.parent_view.can_manage(interaction):
+            return await interaction.response.send_message(
+                "この設定は管理者のみ利用できます。",
+                ephemeral=True,
+            )
+
+        try:
+            self.parent_view.selected_role_id = int(self.values[0])
+        except (ValueError, IndexError):
+            self.parent_view.selected_role_id = None
+
+        await interaction.response.defer()
+        self.parent_view._add_items()
+        await edit_panel_v2(interaction, as_panel_v2(self.parent_view))
+
+
+class RolePanelChannelSelect(discord.ui.ChannelSelect):
+    def __init__(self, parent: "RolePanelSettingsView"):
+        self.parent_view = parent
+        super().__init__(
+            placeholder="ロールパネルを送信するチャンネル",
+            channel_types=[discord.ChannelType.text, discord.ChannelType.news],
+            row=2,
+            min_values=1,
+            max_values=1,
+        )
+
+    async def callback(self, interaction: discord.Interaction):
+        if not self.parent_view.can_manage(interaction):
+            return await interaction.response.send_message(
+                "この設定は管理者のみ利用できます。",
+                ephemeral=True,
+            )
+
+        channel = self.values[0]
+        await interaction.response.defer()
+
+        store = guild_settings.get_store()
+        await store.ensure_loaded()
+        await store.update(interaction.guild_id, ROLE_PANEL_SECTION, panel_channel_id=channel.id)
+
+        self.parent_view.panel_channel_id = channel.id
+        await self.parent_view.refresh(interaction, "パネル送信先を設定しました。")
+
+
+class RolePanelRemoveButton(discord.ui.Button):
+    def __init__(self, parent: "RolePanelSettingsView"):
+        self.parent_view = parent
+        super().__init__(
+            label="選択ロールを削除",
+            style=discord.ButtonStyle.danger,
+            row=3,
+        )
+        self.disabled = parent.selected_role_id is None
+
+    async def callback(self, interaction: discord.Interaction):
+        if not self.parent_view.can_manage(interaction):
+            return await interaction.response.send_message(
+                "この設定は管理者のみ利用できます。",
+                ephemeral=True,
+            )
+
+        selected = self.parent_view.selected_role_id
+        roles = list(self.parent_view.settings["roles"])
+
+        if selected is None or selected not in roles:
+            return await interaction.response.send_message(
+                "削除するロールを選択してください。",
+                ephemeral=True,
+            )
+
+        await interaction.response.defer()
+
+        roles.remove(selected)
+
+        store = guild_settings.get_store()
+        await store.ensure_loaded()
+        await store.update(interaction.guild_id, ROLE_PANEL_SECTION, roles=roles)
+
+        self.parent_view.selected_role_id = None
+        await self.parent_view.refresh(interaction, "ロールを削除しました。")
+
+
+class RolePanelSendButton(discord.ui.Button):
+    def __init__(self, parent: "RolePanelSettingsView"):
+        self.parent_view = parent
+        super().__init__(
+            label="パネル送信",
+            style=discord.ButtonStyle.success,
+            row=3,
+        )
+
+    async def callback(self, interaction: discord.Interaction):
+        if not self.parent_view.can_manage(interaction):
+            return await interaction.response.send_message(
+                "この設定は管理者のみ利用できます。",
+                ephemeral=True,
+            )
+
+        settings = self.parent_view.settings
+        panel_channel_id = self.parent_view.panel_channel_id or settings.get("panel_channel_id")
+
+        if panel_channel_id is None:
+            return await interaction.response.send_message(
+                "先にロールパネルを送信するチャンネルを選択してください。",
+                ephemeral=True,
+            )
+
+        channel = interaction.guild.get_channel(panel_channel_id)
+        if channel is None:
+            return await interaction.response.send_message(
+                "パネル送信先チャンネルが見つかりません。",
+                ephemeral=True,
+            )
+
+        valid_role_ids = [
+            role_id
+            for role_id in settings["roles"]
+            if interaction.guild.get_role(role_id) is not None
+        ]
+
+        if not valid_role_ids:
+            return await interaction.response.send_message(
+                "ロールが1つも追加されていません。",
+                ephemeral=True,
+            )
+
+        await interaction.response.defer(ephemeral=True)
+
+        try:
+            await channel.send(view=RolePanelUserView(interaction.guild, valid_role_ids))
+        except (discord.Forbidden, discord.HTTPException):
+            logger.exception("ロールパネルの送信に失敗しました")
+            await interaction.followup.send(
+                "ロールパネルを送信できませんでした。Botの権限を確認してください。",
+                ephemeral=True,
+            )
+            return
+
+        await interaction.followup.send(
+            f"{channel.mention} にロールパネルを送信しました。",
+            ephemeral=True,
+        )
+
+
+class RolePanelToggleEnabledButton(discord.ui.Button):
+    def __init__(self, parent: "RolePanelSettingsView"):
+        self.parent_view = parent
+
+        enabled = parent.settings["enabled"]
+        super().__init__(
+            label="ロールパネルを無効にする" if enabled else "ロールパネルを有効にする",
+            style=discord.ButtonStyle.danger if enabled else discord.ButtonStyle.success,
+            row=3,
+        )
+
+    async def callback(self, interaction: discord.Interaction):
+        if not self.parent_view.can_manage(interaction):
+            return await interaction.response.send_message(
+                "この設定は管理者のみ利用できます。",
+                ephemeral=True,
+            )
+
+        await interaction.response.defer()
+
+        store = guild_settings.get_store()
+        await store.ensure_loaded()
+
+        enabled = not self.parent_view.settings["enabled"]
+        await store.update(interaction.guild_id, ROLE_PANEL_SECTION, enabled=enabled)
+
+        await self.parent_view.refresh(
+            interaction,
+            "ロールパネルを有効にしました。" if enabled else "ロールパネルを無効にしました。",
+        )
+
+
+class RolePanelSettingsView(discord.ui.View):
+    def __init__(
+        self,
+        cog: "SupportCog",
+        settings: dict,
+        guild: discord.Guild,
+        panel_channel_id: int | None = None,
+        selected_role_id: int | None = None,
+        notice: str | None = None,
+    ):
+        super().__init__(timeout=300)
+        self.cog = cog
+        self.settings = settings
+        self.guild = guild
+        self.panel_channel_id = panel_channel_id or settings.get("panel_channel_id")
+        self.selected_role_id = selected_role_id
+        self.notice = notice
+        self._add_items()
+
+    @staticmethod
+    def can_manage(interaction: discord.Interaction) -> bool:
+        return can_manage_role_panel(interaction)
+
+    def _add_items(self):
+        self.clear_items()
+
+        self.add_item(RolePanelAddRoleSelect(self))
+
+        if self.settings["roles"]:
+            self.add_item(RolePanelCurrentRoleSelect(self))
+
+        self.add_item(RolePanelChannelSelect(self))
+        self.add_item(RolePanelRemoveButton(self))
+        self.add_item(RolePanelSendButton(self))
+        self.add_item(RolePanelToggleEnabledButton(self))
+
+    def embed(self) -> discord.Embed:
+        lines: list[str] = []
+
+        if self.notice:
+            lines.append(self.notice)
+            lines.append("")
+
+        role_labels: list[str] = []
+        for role_id in self.settings["roles"][:ROLE_PANEL_MAX_ROLES]:
+            role = self.guild.get_role(role_id)
+            if role is not None:
+                role_labels.append(role.mention)
+
+        panel_channel_id = self.panel_channel_id or self.settings.get("panel_channel_id")
+        panel_label = f"<#{panel_channel_id}>" if panel_channel_id else "未選択"
+
+        lines.append(f"状態: **{'オン' if self.settings['enabled'] else 'オフ'}**")
+        lines.append(f"パネル送信先: {panel_label}")
+        lines.append(f"登録ロール数: **{len(self.settings['roles'])} / {ROLE_PANEL_MAX_ROLES}**")
+
+        if role_labels:
+            lines.append("登録ロール: " + ", ".join(role_labels))
+        else:
+            lines.append("登録ロール: 未設定")
+
+        lines.append("")
+        lines.append("※ この設定は管理者のみ変更できます。")
+        lines.append("※ ユーザーはドロップダウンからロールを選んで付与できます。")
+
+        return discord.Embed(
+            title="ロールパネル作成",
+            description="\n".join(lines)[:4000],
+            color=0x9B59B6,
+        )
+
+    async def refresh(self, interaction: discord.Interaction, notice: str | None = None):
+        store = guild_settings.get_store()
+        await store.ensure_loaded()
+
+        current_panel_channel_id = self.panel_channel_id
+        current_selected_role_id = self.selected_role_id
+
+        self.settings = get_role_panel_settings(store, interaction.guild_id)
+        self.panel_channel_id = (
+            self.settings.get("panel_channel_id") or current_panel_channel_id
+        )
+
+        if current_selected_role_id in self.settings["roles"]:
+            self.selected_role_id = current_selected_role_id
+        else:
+            self.selected_role_id = None
+
+        self.notice = notice
         self._add_items()
         await edit_panel_v2(interaction, as_panel_v2(self))
 
@@ -2142,12 +2597,13 @@ class SupportCog(commands.Cog):
         "honeypot": "manage_guild",
         "ticket": "manage_guild",
         "auth_panel": "administrator",
+        "role_panel": "administrator",
     }
 
     def __init__(self, bot: commands.Bot):
         self.bot = bot
         self._sticky_locks: dict[int, asyncio.Lock] = {}
-        self._auth_pending: set[int] = set()
+        self._panel_pending: set[int] = set()
 
     @staticmethod
     def has_support_permission(interaction: discord.Interaction, permission: str) -> bool:
@@ -2200,14 +2656,111 @@ class SupportCog(commands.Cog):
             ephemeral=True,
         )
 
+    async def show_role_panel_settings(self, interaction: discord.Interaction):
+        if interaction.guild is None:
+            return await interaction.response.send_message(
+                "この機能はサーバー内で利用できます。",
+                ephemeral=True,
+            )
+
+        if not can_manage_role_panel(interaction):
+            return await interaction.response.send_message(
+                "この機能は管理者のみ利用できます。",
+                ephemeral=True,
+            )
+
+        store = guild_settings.get_store()
+        await store.ensure_loaded()
+        settings = get_role_panel_settings(store, interaction.guild.id)
+
+        view = RolePanelSettingsView(self, settings, interaction.guild)
+        await interaction.response.send_message(
+            view=as_panel_v2(view),
+            ephemeral=True,
+        )
+
     @commands.Cog.listener()
     async def on_interaction(self, interaction: discord.Interaction):
         if interaction.type != discord.InteractionType.component:
             return
 
         custom_id = interaction.data.get("custom_id", "")
+
         if custom_id == "auth_panel:start":
             await self.handle_auth_start(interaction)
+            return
+
+        if custom_id == "role_panel:assign":
+            values = interaction.data.get("values") or []
+            if not values:
+                return
+
+            try:
+                role_id = int(values[0])
+            except (TypeError, ValueError):
+                return
+
+            await self.handle_role_panel_assign(interaction, role_id)
+
+    async def handle_role_panel_assign(self, interaction: discord.Interaction, role_id: int):
+        if interaction.guild is None:
+            return
+
+        if interaction.response.is_done():
+            return
+
+        pending = getattr(self, "_panel_pending", None)
+        if pending is None:
+            self._panel_pending = set()
+            pending = self._panel_pending
+
+        if interaction.id in pending:
+            return
+
+        pending.add(interaction.id)
+
+        try:
+            store = guild_settings.get_store()
+            await store.ensure_loaded()
+            settings = get_role_panel_settings(store, interaction.guild.id)
+
+            if not settings["enabled"]:
+                return await interaction.response.send_message(
+                    "現在、このサーバーではロールパネルを停止しています。",
+                    ephemeral=True,
+                )
+
+            if role_id not in settings["roles"]:
+                return await interaction.response.send_message(
+                    "このロールは現在選択できません。",
+                    ephemeral=True,
+                )
+
+            role = interaction.guild.get_role(role_id)
+            if role is None:
+                return await interaction.response.send_message(
+                    "ロールが見つかりません。",
+                    ephemeral=True,
+                )
+
+            if role in getattr(interaction.user, "roles", []):
+                return await interaction.response.send_message(
+                    f"あなたはすでに {role.mention} を持っています。",
+                    ephemeral=True,
+                )
+
+            if error := assignable_role_error(interaction.guild, role):
+                return await interaction.response.send_message(error, ephemeral=True)
+
+            await interaction.response.defer(ephemeral=True, thinking=True)
+
+            if await self._add_role(interaction, role, "ロールパネル"):
+                await interaction.followup.send(
+                    f"{role.mention} を付与しました。",
+                    ephemeral=True,
+                )
+        finally:
+            pending.discard(interaction.id)
 
     async def handle_auth_start(self, interaction: discord.Interaction):
         if interaction.guild is None:
@@ -2216,10 +2769,10 @@ class SupportCog(commands.Cog):
         if interaction.response.is_done():
             return
 
-        pending = getattr(self, "_auth_pending", None)
+        pending = getattr(self, "_panel_pending", None)
         if pending is None:
-            self._auth_pending = set()
-            pending = self._auth_pending
+            self._panel_pending = set()
+            pending = self._panel_pending
 
         if interaction.id in pending:
             return
@@ -2257,7 +2810,7 @@ class SupportCog(commands.Cog):
             if settings["mode"] == AUTH_MODE_SIMPLE:
                 await interaction.response.defer(ephemeral=True, thinking=True)
 
-                if await self._add_auth_role(interaction, role):
+                if await self._add_role(interaction, role, "認証パネル"):
                     await interaction.followup.send(
                         "認証が完了しました。ロールを付与しました。",
                         ephemeral=True,
@@ -2281,9 +2834,9 @@ class SupportCog(commands.Cog):
         finally:
             pending.discard(interaction.id)
 
-    async def _add_auth_role(self, interaction: discord.Interaction, role: discord.Role) -> bool:
+    async def _add_role(self, interaction: discord.Interaction, role: discord.Role, reason: str) -> bool:
         try:
-            await interaction.user.add_roles(role, reason="認証パネル")
+            await interaction.user.add_roles(role, reason=reason)
             return True
         except discord.Forbidden:
             await interaction.followup.send(
@@ -2292,7 +2845,7 @@ class SupportCog(commands.Cog):
             )
             return False
         except discord.HTTPException:
-            logger.exception("認証ロールの付与に失敗しました")
+            logger.exception("ロールの付与に失敗しました")
             await interaction.followup.send(
                 "Discordとの通信に失敗しました。少し待ってからもう一度試してください。",
                 ephemeral=True,
@@ -2322,10 +2875,10 @@ class SupportCog(commands.Cog):
                 ephemeral=True,
             )
 
-        if error := auth_role_error(interaction.guild, role):
+        if error := assignable_role_error(interaction.guild, role):
             return await interaction.followup.send(error, ephemeral=True)
 
-        if not await self._add_auth_role(interaction, role):
+        if not await self._add_role(interaction, role, "認証パネル"):
             return
 
         intro_channel = (
@@ -2993,6 +3546,9 @@ class SupportCog(commands.Cog):
 
         if selected == "auth_panel":
             return await self.show_auth_settings(interaction)
+
+        if selected == "role_panel":
+            return await self.show_role_panel_settings(interaction)
 
         if selected == "sticky":
             return await self.show_sticky_settings(interaction)
