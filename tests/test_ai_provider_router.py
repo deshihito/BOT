@@ -98,3 +98,25 @@ class AiProviderRouterTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn("provider=first status=401", logs.output[0])
         self.assertNotIn("key-1", "\n".join(logs.output))
         self.assertNotIn("private prompt", "\n".join(logs.output))
+
+    async def test_openrouter_key_alone_uses_free_router(self):
+        with patch.dict(os.environ, {
+            "AI_PROVIDER_ORDER": "", "AI_ROUTED_MODEL": "",
+            "AI_OPENROUTER_MODEL": "", "OPENROUTER_API_KEY": "secret",
+            "AI_OPENROUTER_BASE_URL": os.environ["AI_SECOND_BASE_URL"],
+        }):
+            route = router.routes()
+            answer = await router.chat([{"role": "user", "content": "質問"}])
+        self.assertEqual(len(route), 1)
+        self.assertEqual((route[0].name, route[0].model),
+                         ("openrouter", "openrouter/free"))
+        self.assertEqual((answer.provider, answer.text), ("openrouter", "回答"))
+        self.assertEqual(self.calls[0][2]["model"], "openrouter/free")
+
+    async def test_explicit_model_takes_priority_over_free_router(self):
+        with patch.dict(os.environ, {
+            "AI_PROVIDER_ORDER": "openrouter", "AI_ROUTED_MODEL": "chosen-model",
+            "AI_OPENROUTER_MODEL": "", "OPENROUTER_API_KEY": "secret",
+        }):
+            route = router.routes()
+        self.assertEqual(route[0].model, "chosen-model")

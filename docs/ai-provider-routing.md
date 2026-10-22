@@ -6,20 +6,36 @@ DSH を使わず、AGO BOT が複数の OpenAI Chat Completions 互換 API を�
 
 ## 設定例
 
-AGO BOT の `.env` に、使う接続先の順番、共通モデル、各社の API キーを設定します。
+AGO BOT の `.env` に API キーを設定します。必要なら接続先の順番と共通モデルも指定できます。
+
+OpenRouter の無料モデルを自動で使う場合は、キーだけで始められます。
 
 ```dotenv
-AI_PROVIDER_ORDER=groq,cerebras
-AI_ROUTED_MODEL=openai/gpt-oss-120b
-GROQ_API_KEY=<Groq のキー>
-CEREBRAS_API_KEY=<Cerebras のキー>
-AI_CEREBRAS_MODEL=gpt-oss-120b
+OPENROUTER_API_KEY=<OpenRouter のキー>
 ```
 
-上の例では同じ GPT-OSS 120B を使います。各社でモデル ID の書き方が違う場合だけ
+`AI_PROVIDER_ORDER` とモデルIDを省略すると、`openrouter/free` を使用します。
+OpenRouter がその時点で提供する無料モデルから選ぶため、DeepSeek系や期間限定の
+ステルスモデルも無料対象に入っていれば候補になります。回答ごとにモデルが
+変わる可能性があり、特定のモデルが選ばれる保証はありません。
+DeepSeek社のAPIキーを直接使う設定とは別です。直接のDeepSeek APIは無料モデルとして
+自動登録しません。
+Bot再起動後、ユーザーが `/general` で「自動切替」を選ぶと `!ai` に適用されます。
+
+同じモデルを接続先をまたいで使いたい場合は、従来どおり順番と共通モデルを指定します。
+
+```dotenv
+AI_PROVIDER_ORDER=groq,openrouter
+AI_ROUTED_MODEL=qwen/qwen3.8-27b
+GROQ_API_KEY=<Groq のキー>
+OPENROUTER_API_KEY=<OpenRouter のキー>
+AI_OPENROUTER_MODEL=qwen/qwen3.8-27b:free
+```
+
+上の例では同じ Qwen3.8 27B を使います。各社でモデル ID の書き方が違う場合だけ
 `AI_<PROVIDER>_MODEL` でその接続先の ID を指定します。実際に使えるモデル ID と
 料金・無料枠は各社のダッシュボードで確認してください。登録したキーでも
-`AI_PROVIDER_ORDER` にない接続先は使用しません。
+`AI_PROVIDER_ORDER` を指定した場合、その順番にない接続先は使用しません。
 
 組み込みの接続先は `groq`, `gemini`, `openrouter`, `cerebras`, `sambanova`,
 `deepseek`, `mistral`, `together`, `fireworks`, `nvidia_nim`, `openai`, `logfare` です。

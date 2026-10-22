@@ -429,8 +429,11 @@ class AIDefaultView(discord.ui.View):
                 models = await logfare.fetch_image_models()
             else:
                 models = []
-                if ai_provider_router.enabled():
-                    name = ai_provider_router.logical_model() or "設定済みモデル"
+                configured_routes = ai_provider_router.routes()
+                if configured_routes:
+                    name = (ai_provider_router.logical_model()
+                            or (configured_routes[0].model if len(configured_routes) == 1
+                                else "設定済みモデル"))
                     models.append({"id": ai_provider_router.AUTO_MODEL,
                                    "name": f"自動切替: {name}"})
                 try:
@@ -454,7 +457,7 @@ class AIDefaultView(discord.ui.View):
                 f"`{'!ai' if self.kind == 'chat' else '!generate'}` で使うデフォルトAIを選択してください。\n"
                 f"現在: `{current}`\n\n"
                 f"Logfareの{'チャット' if self.kind == 'chat' else '画像生成'}モデルを選べます。"
-                f"{'自動切替を選ぶと設定済みのAPIを順に使います。' if self.kind == 'chat' else ''}"
+                f"{'自動切替は設定済みのAPIを順に試します。OpenRouter無料ルーターでは無料モデルが選ばれます。' if self.kind == 'chat' else ''}"
                 f"Logfareの一部モデルはトレーニング利用への同意が必要です。\n"
                 f"モデル一覧 {self.page + 1}/{self.page_count}ページ（全{len(self.models)}件）"
             ),

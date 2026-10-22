@@ -70,7 +70,9 @@ class AiAutoSelectionTest(unittest.IsolatedAsyncioTestCase):
         general = load_cog("general")
         with patch.object(general.ai_preferences, "ensure_loaded", new_callable=AsyncMock), \
              patch.object(general.ai_preferences, "get_model", return_value=None), \
-             patch.object(general.ai_provider_router, "enabled", return_value=True), \
+             patch.object(general.ai_provider_router, "routes", return_value=[
+                 general.ai_provider_router.Route("test", "same-model", "https://example.com", "key")
+             ]), \
              patch.object(general.ai_provider_router, "logical_model", return_value="same-model"), \
              patch.object(general.logfare, "configured_default_model", return_value="logfare/auto"), \
              patch.object(general.logfare, "fetch_free_chat_models", new_callable=AsyncMock,
@@ -79,3 +81,17 @@ class AiAutoSelectionTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(view.select.model_ids, {"ai/auto", "logfare/auto"})
         self.assertTrue(any(option.default and option.value == "logfare/auto"
                             for option in view.select.options))
+
+    async def test_general_picker_labels_free_router_without_model_configuration(self):
+        general = load_cog("general")
+        free_route = general.ai_provider_router.Route(
+            "openrouter", "openrouter/free", "https://example.com", "key"
+        )
+        with patch.object(general.ai_preferences, "ensure_loaded", new_callable=AsyncMock), \
+             patch.object(general.ai_preferences, "get_model", return_value=None), \
+             patch.object(general.ai_provider_router, "routes", return_value=[free_route]), \
+             patch.object(general.ai_provider_router, "logical_model", return_value=""), \
+             patch.object(general.logfare, "fetch_free_chat_models", new_callable=AsyncMock,
+                          return_value=[]):
+            view = await general.AIDefaultView.create(123)
+        self.assertEqual(view.select.options[0].label, "自動切替: openrouter/free")

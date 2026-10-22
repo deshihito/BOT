@@ -64,8 +64,11 @@ def logical_model() -> str:
 
 
 def routes() -> list[Route]:
-    """順番を明示した、キーとモデルが揃う経路だけを使用する。"""
-    order = os.getenv("AI_PROVIDER_ORDER", "")
+    """キーとモデルが揃う経路を使用する。OpenRouter はキーだけでも無料ルーターを使える。"""
+    order = os.getenv("AI_PROVIDER_ORDER", "").strip()
+    if not order and (os.getenv("AI_OPENROUTER_API_KEY", "").strip()
+                      or os.getenv("OPENROUTER_API_KEY", "").strip()):
+        order = "openrouter"
     result = []
     seen = set()
     for raw_name in order.split(","):
@@ -81,7 +84,8 @@ def routes() -> list[Route]:
         else:
             key = (os.getenv(f"{prefix}_API_KEY", "").strip()
                    or os.getenv(f"{name.upper()}_API_KEY", "").strip())
-            model = os.getenv(f"{prefix}_MODEL", "").strip() or logical_model()
+            model = (os.getenv(f"{prefix}_MODEL", "").strip() or logical_model()
+                     or ("openrouter/free" if name == "openrouter" else ""))
             base_url = (os.getenv(f"{prefix}_BASE_URL", "").strip()
                         or BASE_URLS.get(name, ""))
         if key and model and base_url:
