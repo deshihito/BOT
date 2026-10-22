@@ -1,4 +1,4 @@
-"""!ai で Logfare のチャットモデルを呼び出す機能。"""
+"""!ai で自動切替または Logfare のチャットモデルを呼び出す機能。"""
 from __future__ import annotations
 
 import io
@@ -7,7 +7,7 @@ import logging
 import discord
 from discord.ext import commands
 
-from core import ai_preferences, ai_tools, logfare
+from core import ai_preferences, ai_provider_router, ai_tools, logfare
 
 logger = logging.getLogger(__name__)
 
@@ -16,30 +16,40 @@ class AICog(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
 
-    @commands.command(name="ai", help="LogfareのAIに質問します。例: !ai 今日の天気を教えて")
+    @commands.command(name="ai", help="AIに質問します。例: !ai 今日の天気を教えて")
     @commands.cooldown(1, 5.0, commands.BucketType.user)
     async def ai(self, ctx: commands.Context, *, prompt: str = ""):
         prompt = prompt.strip()
         if not prompt:
             return await ctx.reply("使い方: `!ai 質問内容`", mention_author=False)
-        if not logfare.api_key():
+        preferred = (ai_preferences.get_model(ctx.author.id)
+                     or (ai_provider_router.AUTO_MODEL if ai_provider_router.enabled()
+                         else logfare.configured_default_model()))
+        auto = preferred == ai_provider_router.AUTO_MODEL
+        if auto and not ai_provider_router.enabled():
+            return await ctx.reply("AIの自動切替が未設定です。", mention_author=False)
+        if not auto and not logfare.api_key():
             return await ctx.reply("Logfareが未設定です。`.env` に `LOGFARE_API_KEY` を設定してください。", mention_author=False)
 
-        preferred = ai_preferences.get_model(ctx.author.id) or logfare.configured_default_model()
         sources = []
         try:
-            model, exact = await logfare.resolve_model(preferred)
-            reasoning_effort = ai_preferences.get_reasoning_effort(ctx.author.id)
-            try:
-                model_info = next(
-                    (item for item in await logfare.fetch_free_chat_models() if item.get("id") == model),
-                    None,
-                )
-            except Exception:
+            if auto:
+                model, exact = preferred, True
+                reasoning_effort = None
                 model_info = None
-            if reasoning_effort:
-                if not model_info or reasoning_effort not in logfare.reasoning_efforts(model_info):
-                    reasoning_effort = None
+            else:
+                model, exact = await logfare.resolve_model(preferred)
+                reasoning_effort = ai_preferences.get_reasoning_effort(ctx.author.id)
+                try:
+                    model_info = next(
+                        (item for item in await logfare.fetch_free_chat_models() if item.get("id") == model),
+                        None,
+                    )
+                except Exception:
+                    model_info = None
+                if reasoning_effort:
+                    if not model_info or reasoning_effort not in logfare.reasoning_efforts(model_info):
+                        reasoning_effort = None
             can_use_web_search = bool(
                 model_info and (model_info.get("chat_capabilities") or {}).get("tools") is True
             )
@@ -54,7 +64,10 @@ class AICog(commands.Cog):
                 {"role": "user", "content": prompt},
             ]
             async with ctx.typing():
-                if can_use_web_search:
+                if auto:
+                    routed = await ai_provider_router.chat(messages)
+                    answer = routed.text
+                elif can_use_web_search:
                     answer, sources = await ai_tools.answer_with_web_search(
                         model, messages, reasoning_effort=reasoning_effort
                     )
@@ -72,7 +85,9 @@ class AICog(commands.Cog):
             description=answer[:4096],
             color=0x5865F2,
         )
-        embed.set_footer(text=f"モデル: {model}{notice}")
+        footer = (f"モデル: {routed.model} / 接続先: {routed.provider}（自動切替）"
+                  if auto else f"モデル: {model}{notice}")
+        embed.set_footer(text=footer)
         unique_sources = {source.get("url"): source for source in sources if source.get("url")}
         if unique_sources:
             links = "\n".join(
