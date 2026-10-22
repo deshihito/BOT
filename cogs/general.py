@@ -15,9 +15,7 @@ logger = logging.getLogger(__name__)
 GENERAL_GENRES = {
     "economy": ("コイン・ランキング", "所持状況、送金、コインや bump/up のランキング"),
     "survival": ("生存確認", "追跡、アクティブ頻度、フリーズ、失踪警報"),
-    "ai": ("AI設定", "あなたが !ai で使うデフォルトAIを設定"),
-    "image": ("画像生成", "あなたが !generate で使う画像生成AIを設定"),
-    "custom": ("custom", "メッセージで実行するショートカットの登録・編集・削除"),
+    "custom": ("カスタム・AI設定", "ショートカット、D1代理実行、チャットAI・画像生成AIの設定"),
 }
 GENERAL_ACTIONS = {
     "economy": [
@@ -34,12 +32,13 @@ GENERAL_ACTIONS = {
         ("フリーズ", "fujo_freeze"),
         ("失踪警報解除", "fujo_panic_disable"),
     ],
-    "ai": [
-        ("デフォルトAIを設定", "ai_default"),
-        ("思考強度を設定", "reasoning_default"),
+    "custom": [
+        ("ショートカットを管理", "shortcut_manage"),
+        ("D1機能代理実行を設定", "d1tools"),
+        ("チャットAIモデルを設定", "ai_default"),
+        ("画像生成AIモデルを設定", "image_default"),
+        ("AI思考強度を設定", "reasoning_default"),
     ],
-    "image": [("画像生成AIを設定", "image_default")],
-    "custom": [("ショートカットを管理", "shortcut_manage")],
 }
 
 SHORTCUT_ROOTS = {
@@ -543,6 +542,19 @@ class GeneralCog(commands.Cog):
         await interaction.response.send_message(view=as_panel_v2(view), ephemeral=True)
 
     async def dispatch_general(self, interaction: discord.Interaction, value: str):
+        if value == "d1tools":
+            from core import d1_command_preferences, d1_command_router
+            config = d1_command_preferences.get_config(interaction.user.id)
+            available = d1_command_router.action_candidates(config["actions"])
+            embed = discord.Embed(title="D1機能代理実行", color=0x5865F2)
+            embed.description = (
+                f"有効: `{config['enabled']}`\n"
+                f"許可機能: `{', '.join(config['actions']) or 'なし'}`\n"
+                f"解決可能: `{', '.join(available) or 'なし'}`\n\n"
+                "詳細設定は `!d1tools allow vc:join`、`!d1tools allow vc`、"
+                "`!d1tools on` で行えます。"
+            )
+            return await interaction.response.send_message(embed=embed, ephemeral=True)
         if value == "reasoning_default":
             await interaction.response.defer(ephemeral=True)
             try:

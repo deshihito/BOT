@@ -25,7 +25,16 @@ class MemoryStore:
 class ShortcutTest(unittest.IsolatedAsyncioTestCase):
     async def test_custom_genre_and_two_step_builder(self):
         self.assertIn("custom", GENERAL_GENRES)
-        self.assertEqual(GENERAL_ACTIONS["custom"], [("ショートカットを管理", "shortcut_manage")])
+        self.assertEqual(
+            GENERAL_ACTIONS["custom"],
+            [
+                ("ショートカットを管理", "shortcut_manage"),
+                ("D1機能代理実行を設定", "d1tools"),
+                ("チャットAIモデルを設定", "ai_default"),
+                ("画像生成AIモデルを設定", "image_default"),
+                ("AI思考強度を設定", "reasoning_default"),
+            ],
+        )
         view = ShortcutRootPanel()
         self.assertEqual(len(view.children[0].options), 5)
         self.assertEqual(view.children[0].options[0].value, "general")

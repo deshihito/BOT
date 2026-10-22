@@ -15,6 +15,8 @@ D1_RETRIES = max(1, int(os.getenv("D1_COMMAND_RETRIES", "1")))
 # 引数や確認モーダルを要する処理、権限操作、削除・送金系は代理実行対象外。
 BLOCKED_ACTIONS = {
     "general:pay", "general:fujo_register", "general:fujo_freeze", "general:fujo_panic_disable",
+    "general:shortcut_manage", "general:d1tools", "general:ai_default",
+    "general:image_default", "general:reasoning_default",
     "support:clear", "support:role_bulk", "support:muted", "support:ticket", "support:honeypot",
     "support:whisper", "support:binjou", "support:message_log", "support:moderation_log",
 }
