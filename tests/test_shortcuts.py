@@ -2,7 +2,8 @@ import types
 import unittest
 from unittest.mock import AsyncMock, patch
 from cogs.general import (GENERAL_ACTIONS, GENERAL_GENRES, GeneralPanel,
-                           GeneralCog, ShortcutManagerView, ShortcutRootPanel)
+                           GeneralCog, ShortcutManagerView, ShortcutRootPanel,
+                           ShortcutMessageInteraction)
 from cogs.game import GameDetailView, GameHubView
 from core import shortcuts
 from core.panel_v2 import as_panel_v2
@@ -158,6 +159,21 @@ class ShortcutTest(unittest.IsolatedAsyncioTestCase):
         item = {"user_id": 10, "action": {"root": "general", "value": "status"}}
 
         self.assertFalse(await cog.execute_shortcut(message, item))
+
+    async def test_shortcut_interaction_preserves_member_voice_state(self):
+        member = types.SimpleNamespace(id=10, voice=types.SimpleNamespace(channel=object()))
+        global_user = types.SimpleNamespace(id=10)
+        bot = types.SimpleNamespace(get_user=lambda user_id: global_user)
+        message = types.SimpleNamespace(
+            author=member,
+            channel=object(),
+            guild=types.SimpleNamespace(id=1),
+        )
+
+        interaction = ShortcutMessageInteraction(bot, message, 10)
+
+        self.assertIs(interaction.user, member)
+        self.assertIsNotNone(interaction.user.voice.channel)
 
 
 if __name__ == "__main__":

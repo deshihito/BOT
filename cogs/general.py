@@ -701,7 +701,9 @@ class ShortcutMessageInteraction:
         self.channel = message.channel
         self.guild = message.guild
         self.guild_id = message.guild.id
-        self.user = bot.get_user(user_id) or message.author
+        # Keep the guild Member from the message: bot.get_user() returns a
+        # global User and does not expose the member's current voice state.
+        self.user = message.author
         self.response = _MessageResponse(self)
         self.followup = _MessageFollowup(self)
 
