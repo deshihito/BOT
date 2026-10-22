@@ -22,6 +22,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               <Link href="/commands">コマンド一覧</Link>
               <Link href="/ranking">リーダーボード</Link>
               <Link href="/dashboard">ダッシュボード</Link>
+              <Link href="/coder" className="nav-coder-link">AGO Coder</Link>
             </div>
           </nav>
         </header>
