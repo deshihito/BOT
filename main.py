@@ -6,7 +6,7 @@ import asyncio
 import traceback
 import config
 import defining as df
-from keep_alive import keep_alive
+from keep_alive import configure_coder, keep_alive
 import logging
 from collections import deque
 
@@ -60,6 +60,7 @@ class MyBot(commands.Bot):
             print(df.format_log(f"Slash command sync failed:\n{traceback.format_exc()}"))
 
     async def on_ready(self):
+        self.coder_loop = asyncio.get_running_loop()
         print(df.format_log(f"Logged in as {self.user} (ID: {self.user.id})"))
         
         print(df.format_log(f"Active Cogs: {list(self.cogs.keys())}"))
@@ -95,6 +96,7 @@ logger.addHandler(log_buffer)
 bot.log_buffer = log_buffer
 
 if __name__ == "__main__":
+    configure_coder(bot)
     keep_alive()
     print("DEBUG: Keep-alive server initiated.")
     try:

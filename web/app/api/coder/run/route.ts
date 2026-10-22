@@ -1,56 +1,85 @@
+import crypto from "node:crypto";
 import { NextResponse } from "next/server";
+import { getRequestUser } from "@/lib/auth";
 
 export const runtime = "nodejs";
+export const maxDuration = 60;
 
-const baseUrl = (process.env.LOGFARE_BASE_URL || "https://logfare.ai/v1").replace(/\/$/, "");
+function publicOrigin(request: Request) {
+  const url = new URL(request.url);
+  const protocol = request.headers.get("x-forwarded-proto")?.split(",")[0]?.trim() || url.protocol.slice(0, -1);
+  const host = request.headers.get("x-forwarded-host")?.split(",")[0]?.trim() || request.headers.get("host") || url.host;
+  return `${protocol}://${host}`;
+}
+
+function coderEndpoint() {
+  const baseUrl = process.env.BOT_CODER_BASE_URL;
+  if (!baseUrl) return null;
+  try {
+    const url = new URL("/internal/coder/run", baseUrl);
+    if (process.env.NODE_ENV === "production" && url.protocol !== "https:") return null;
+    return url;
+  } catch {
+    return null;
+  }
+}
 
 export async function POST(request: Request) {
-  const session = request.headers.get("cookie")?.match(/(?:^|;\s*)ago_discord_user=([^;]+)/)?.[1];
-  if (!session) {
-    return NextResponse.json({ error: "AGO Coderを使うには先にDiscordでログインしてください。" }, { status: 401 });
-  }
-  const apiKey = process.env.LOGFARE_API_KEY;
-  if (!apiKey) {
-    return NextResponse.json({ error: "Logfare APIキーがWebサーバーに設定されていません。管理者に LOGFARE_API_KEY の設定を依頼してください。" }, { status: 503 });
+  const user = getRequestUser(request);
+  if (!user) {
+    return NextResponse.json({ error: "ログインしてください。" }, { status: 401 });
   }
 
-  let body: { model?: string; mode?: string; prompt?: string };
+  const origin = request.headers.get("origin");
+  if (origin && origin !== publicOrigin(request)) {
+    return NextResponse.json({ error: "リクエストを確認できません。" }, { status: 403 });
+  }
+
+  let body: { prompt?: unknown };
   try {
     body = await request.json();
   } catch {
-    return NextResponse.json({ error: "リクエスト形式が不正です。" }, { status: 400 });
+    return NextResponse.json({ error: "入力を確認できません。" }, { status: 400 });
   }
 
-  const prompt = String(body.prompt || "").trim();
-  const model = String(body.model || process.env.LOGFARE_DEFAULT_MODEL || "logfare/auto").trim();
-  const mode = body.mode === "build" ? "build" : "plan";
+  const prompt = typeof body.prompt === "string" ? body.prompt.trim() : "";
   if (!prompt || prompt.length > 4000) {
-    return NextResponse.json({ error: "指示は1〜4000文字で入力してください。" }, { status: 400 });
+    return NextResponse.json({ error: "入力を確認してください。" }, { status: 400 });
   }
 
-  const system = mode === "build"
-    ? "あなたはAGO CoderのBuildエージェントです。日本語で、実装方針・変更対象・確認方法を具体的に説明してください。現段階では実際のファイル編集やシェル実行はできないため、実行可能な手順と差分案を返してください。秘密情報を要求せず、破壊的操作は明示的に確認してください。"
-    : "あなたはAGO CoderのPlanエージェントです。日本語でコードベースを調査する前提の実装計画を作ってください。前提、変更対象、リスク、検証方法を簡潔に整理してください。実際のファイル編集やシェル実行はしません。";
+  const endpoint = coderEndpoint();
+  const serviceSecret = process.env.CODER_SERVICE_SHARED_SECRET;
+  if (!endpoint || !serviceSecret) {
+    return NextResponse.json({ error: "利用できません。" }, { status: 503 });
+  }
 
   try {
-    const response = await fetch(`${baseUrl}/chat/completions`, {
+    const payload = JSON.stringify({ prompt, user });
+    const timestamp = Math.floor(Date.now() / 1000).toString();
+    const nonce = crypto.randomBytes(24).toString("hex");
+    const bodyHash = crypto.createHash("sha256").update(payload).digest("hex");
+    const signature = crypto
+      .createHmac("sha256", serviceSecret)
+      .update(`POST\n/internal/coder/run\n${timestamp}\n${nonce}\n${bodyHash}`)
+      .digest("hex");
+    const response = await fetch(endpoint, {
       method: "POST",
-      headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
-      body: JSON.stringify({
-        model,
-        messages: [{ role: "system", content: system }, { role: "user", content: prompt }],
-        max_tokens: 1400,
-      }),
-      signal: AbortSignal.timeout(45_000),
+      headers: {
+        "Content-Type": "application/json",
+        "X-AGO-Coder-Timestamp": timestamp,
+        "X-AGO-Coder-Nonce": nonce,
+        "X-AGO-Coder-Signature": signature,
+      },
+      body: payload,
+      signal: AbortSignal.timeout(58_000),
     });
-    const text = await response.text();
-    if (!response.ok) return NextResponse.json({ error: `Logfare API error ${response.status}: ${text.slice(0, 240)}` }, { status: 502 });
-    const data = JSON.parse(text) as { choices?: Array<{ message?: { content?: unknown } }> };
-    const answer = String(data.choices?.[0]?.message?.content || "").trim();
-    if (!answer) return NextResponse.json({ error: "Logfareから回答本文が返りませんでした。" }, { status: 502 });
-    return NextResponse.json({ answer, model, mode });
-  } catch (error) {
-    const message = error instanceof Error ? error.message : "Logfareへの接続に失敗しました。";
-    return NextResponse.json({ error: message.slice(0, 300) }, { status: 502 });
+    if (!response.ok) return NextResponse.json({ error: "回答を取得できません。" }, { status: 502 });
+
+    const data = await response.json() as { answer?: unknown };
+    const answer = typeof data.answer === "string" ? data.answer.trim() : "";
+    if (!answer) return NextResponse.json({ error: "回答を取得できません。" }, { status: 502 });
+    return NextResponse.json({ answer });
+  } catch {
+    return NextResponse.json({ error: "回答を取得できません。" }, { status: 502 });
   }
 }
