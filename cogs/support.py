@@ -108,9 +108,10 @@ VC_LOG_SECTION = "vc_log"
 MESSAGE_LOG_SECTION = "message_log"
 MODERATION_LOG_SECTION = "moderation_log"
 STICKY_SECTION = "sticky"
-
 AUTH_SECTION = "auth"
 ROLE_PANEL_SECTION = "role_panel"
+HONEYPOT_SECTION = "honeypot"
+
 AUTH_MODE_SIMPLE = "simple"
 AUTH_MODE_FORM = "form"
 AUTH_MAX_QUESTIONS = 5
@@ -231,7 +232,7 @@ def get_role_panel_settings(store, guild_id: int) -> dict:
     }
 
 
-def assignable_role_error(guild: discord.Guild, role: discord.Role | None) -> str | None:
+def assignable_role_error(guild: discord.Guild, role: discord.Role | None, action: str = "付与") -> str | None:
     if role is None:
         return "対象ロールが見つかりません。"
 
@@ -247,7 +248,7 @@ def assignable_role_error(guild: discord.Guild, role: discord.Role | None) -> st
         return "Botに「ロールの管理」権限がありません。"
 
     if role >= me.top_role:
-        return "Botより上位、または同順位のロールは付与できません。"
+        return f"Botより上位、または同順位のロールは{action}できません。"
 
     return None
 
@@ -256,15 +257,6 @@ def can_manage_support_panel(interaction: discord.Interaction) -> bool:
     """
     認証パネル・ロールパネルの設定を操作できるか。
     既定: 管理者権限のみ。
-
-    もしサーバー管理権限も許可したい場合は、
-    `return bool(getattr(permissions, "administrator", False))`
-    を以下に置き換えてください。
-
-    return bool(
-        getattr(permissions, "administrator", False)
-        or getattr(permissions, "manage_guild", False)
-    )
     """
     permissions = getattr(interaction.user, "guild_permissions", None)
     return bool(getattr(permissions, "administrator", False))
@@ -1156,7 +1148,9 @@ class RolePanelUserView(discord.ui.LayoutView):
         self.add_item(
             discord.ui.Container(
                 discord.ui.TextDisplay(
-                    "## ロールパネル\nドロップダウンからロールを選択すると付与されます。"
+                    """## ロールパネル
+ドロップダウンからロールを選択してください。
+まだロールを持っていない場合は付与され、すでに持っている場合は解除されます。"""
                 ),
                 discord.ui.ActionRow(RolePanelAssignSelect(options)),
                 accent_colour=0x9B59B6,
@@ -1478,7 +1472,7 @@ class RolePanelSettingsView(discord.ui.View):
 
         lines.append("")
         lines.append("※ この設定は管理者のみ変更できます。")
-        lines.append("※ ユーザーはドロップダウンからロールを選んで付与できます。")
+        lines.append("※ ユーザーはドロップダウンからロールを選んで付与/解除できます。")
 
         return discord.Embed(
             title="ロールパネル作成",
@@ -2016,21 +2010,22 @@ class StickySettingsView(discord.ui.View):
         await self.set_enabled(interaction, False)
 
 
-HONEYPOT_SECTION = "honeypot"
-
-
 def get_honeypot_settings(store, guild_id: int) -> dict[str, int | bool | None]:
     """Return the configured honeypot channel and its warning-panel message."""
     raw = store.get(guild_id, HONEYPOT_SECTION)
     if not isinstance(raw, dict):
         raw = {}
+
     channel_id = raw.get("channel_id")
     if not isinstance(channel_id, int) or isinstance(channel_id, bool):
         channel_id = None
+
     message_id = raw.get("message_id")
     if not isinstance(message_id, int) or isinstance(message_id, bool):
         message_id = None
+
     enabled = raw.get("enabled") if isinstance(raw.get("enabled"), bool) else bool(channel_id)
+
     return {"enabled": enabled, "channel_id": channel_id, "message_id": message_id}
 
 
@@ -2039,15 +2034,16 @@ class HoneypotPanelView(discord.ui.LayoutView):
 
     def __init__(self):
         super().__init__(timeout=None)
-        self.add_item(discord.ui.Container(
-            discord.ui.TextDisplay(
-                "## ⚠️ 警告\n"
-                "このチャンネルはハニーポットです。\n"
-                "ここにメッセージを送信すると、自動的にサーバーからキックされ、"
-                "メッセージも削除されます。"
-            ),
-            accent_colour=0xFFFFFF,
-        ))
+        self.add_item(
+            discord.ui.Container(
+                discord.ui.TextDisplay(
+                    """## ⚠️ 警告
+このチャンネルはハニーポットです。
+ここにメッセージを送信すると、自動的にサーバーからキックされ、メッセージも削除されます。"""
+                ),
+                accent_colour=0xFFFFFF,
+            )
+        )
 
 
 class HoneypotChannelSelect(discord.ui.ChannelSelect):
@@ -2063,12 +2059,16 @@ class HoneypotChannelSelect(discord.ui.ChannelSelect):
     async def callback(self, interaction: discord.Interaction):
         if not self.parent_view.can_manage(interaction):
             return await interaction.response.send_message(
-                "この設定にはサーバー管理権限が必要です。", ephemeral=True
+                "この設定にはサーバー管理権限が必要です。",
+                ephemeral=True,
             )
+
         await interaction.response.defer()
+
         try:
             channel = self.values[0]
             old = self.parent_view.settings
+
             if old.get("channel_id") and old.get("message_id") and old["channel_id"] != channel.id:
                 old_channel = self.parent_view.cog.bot.get_channel(old["channel_id"])
                 if old_channel is not None:
@@ -2077,18 +2077,33 @@ class HoneypotChannelSelect(discord.ui.ChannelSelect):
                     except discord.NotFound:
                         pass
                     except (discord.Forbidden, discord.HTTPException):
-                        logger.warning("旧ハニーポット警告パネルを削除できません (guild=%s)", interaction.guild_id)
+                        logger.warning(
+                            "旧ハニーポット警告パネルを削除できません (guild=%s)",
+                            interaction.guild_id,
+                        )
+
             await guild_settings.get_store().update(
-                interaction.guild_id, HONEYPOT_SECTION,
-                channel_id=channel.id, message_id=None, enabled=True,
+                interaction.guild_id,
+                HONEYPOT_SECTION,
+                channel_id=channel.id,
+                message_id=None,
+                enabled=True,
             )
-            self.parent_view.settings.update({"channel_id": channel.id, "message_id": None, "enabled": True})
+
+            self.parent_view.settings.update(
+                {"channel_id": channel.id, "message_id": None, "enabled": True}
+            )
+
             await self.parent_view.cog.send_honeypot_panel(interaction.guild, force=True)
-            await self.parent_view.refresh(interaction, "ハニーポットを有効にし、警告パネルを設置しました。")
+            await self.parent_view.refresh(
+                interaction,
+                "ハニーポットを有効にし、警告パネルを設置しました。",
+            )
         except Exception:
             logger.exception("ハニーポットの設置に失敗しました")
             await interaction.followup.send(
-                "ハニーポットの設置に失敗しました。Botのログを確認してください。", ephemeral=True
+                "ハニーポットの設置に失敗しました。Botのログを確認してください。",
+                ephemeral=True,
             )
 
 
@@ -2102,20 +2117,27 @@ class HoneypotSettingsView(discord.ui.View):
     @staticmethod
     def can_manage(interaction: discord.Interaction) -> bool:
         permissions = getattr(interaction.user, "guild_permissions", None)
-        return bool(getattr(permissions, "manage_guild", False) or getattr(permissions, "administrator", False))
+        return bool(
+            getattr(permissions, "manage_guild", False)
+            or getattr(permissions, "administrator", False)
+        )
 
     def embed(self, notice: str | None = None) -> discord.Embed:
         if notice is None:
             notice = getattr(self, "notice", None)
+
         channel_id = self.settings.get("channel_id")
+
         description = (
             f"状態: **{'オン' if self.settings.get('enabled') else 'オフ'}**\n"
             f"設置先: {f'<#{channel_id}>' if channel_id else '未設定'}\n\n"
             "選択したチャンネルに警告パネルを設置します。ユーザーが投稿すると、"
             "その投稿を削除して対象ユーザーをソフトバン（7日分のメッセージ削除後に解除）します。"
         )
+
         if notice:
             description = f"{notice}\n\n{description}"
+
         return discord.Embed(title="ハニーポットの設定", description=description, color=0xFFFFFF)
 
     async def refresh(self, interaction: discord.Interaction, notice: str | None = None):
@@ -2485,7 +2507,6 @@ class SupportGenreSelect(discord.ui.Select):
         container = self.view
         view: SupportPanelView = getattr(container, "panel", container)
 
-        # Components V2の再構築より先にACKし、3秒の初回応答制限を避ける。
         await interaction.response.defer()
 
         try:
@@ -2493,7 +2514,6 @@ class SupportGenreSelect(discord.ui.Select):
             view.action = None
             view.refresh()
 
-            # V2ではLayoutViewを維持し、旧 content/embed/attachments を明示的に消す。
             if hasattr(container, "_sync"):
                 container._sync()
                 await edit_panel_v2(interaction, container)
@@ -2743,22 +2763,30 @@ class SupportCog(commands.Cog):
                     ephemeral=True,
                 )
 
-            if role in getattr(interaction.user, "roles", []):
-                return await interaction.response.send_message(
-                    f"あなたはすでに {role.mention} を持っています。",
-                    ephemeral=True,
-                )
+            has_role = role in getattr(interaction.user, "roles", [])
 
-            if error := assignable_role_error(interaction.guild, role):
-                return await interaction.response.send_message(error, ephemeral=True)
+            if has_role:
+                if error := assignable_role_error(interaction.guild, role, "解除"):
+                    return await interaction.response.send_message(error, ephemeral=True)
 
-            await interaction.response.defer(ephemeral=True, thinking=True)
+                await interaction.response.defer(ephemeral=True, thinking=True)
 
-            if await self._add_role(interaction, role, "ロールパネル"):
-                await interaction.followup.send(
-                    f"{role.mention} を付与しました。",
-                    ephemeral=True,
-                )
+                if await self._remove_role(interaction, role, "ロールパネル"):
+                    await interaction.followup.send(
+                        f"{role.mention} を解除しました。",
+                        ephemeral=True,
+                    )
+            else:
+                if error := assignable_role_error(interaction.guild, role, "付与"):
+                    return await interaction.response.send_message(error, ephemeral=True)
+
+                await interaction.response.defer(ephemeral=True, thinking=True)
+
+                if await self._add_role(interaction, role, "ロールパネル"):
+                    await interaction.followup.send(
+                        f"{role.mention} を付与しました。",
+                        ephemeral=True,
+                    )
         finally:
             pending.discard(interaction.id)
 
@@ -2846,6 +2874,24 @@ class SupportCog(commands.Cog):
             return False
         except discord.HTTPException:
             logger.exception("ロールの付与に失敗しました")
+            await interaction.followup.send(
+                "Discordとの通信に失敗しました。少し待ってからもう一度試してください。",
+                ephemeral=True,
+            )
+            return False
+
+    async def _remove_role(self, interaction: discord.Interaction, role: discord.Role, reason: str) -> bool:
+        try:
+            await interaction.user.remove_roles(role, reason=reason)
+            return True
+        except discord.Forbidden:
+            await interaction.followup.send(
+                f"ロールを解除できませんでした。\n理由: {role_failure_reason(interaction.guild, role)}",
+                ephemeral=True,
+            )
+            return False
+        except discord.HTTPException:
+            logger.exception("ロールの解除に失敗しました")
             await interaction.followup.send(
                 "Discordとの通信に失敗しました。少し待ってからもう一度試してください。",
                 ephemeral=True,
@@ -3058,7 +3104,6 @@ class SupportCog(commands.Cog):
 
     @commands.Cog.listener()
     async def on_member_update(self, before: discord.Member, after: discord.Member):
-        # discord.py 2.7 は timed_out_until を使用する。旧版互換のため旧名も見る。
         old_until = getattr(before, "timed_out_until", None)
         if old_until is None:
             old_until = getattr(before, "communication_disabled_until", None)
@@ -3162,12 +3207,18 @@ class SupportCog(commands.Cog):
 
     async def show_honeypot_settings(self, interaction: discord.Interaction):
         if interaction.guild_id is None:
-            return await interaction.response.send_message("この設定はサーバー内で利用できます。", ephemeral=True)
+            return await interaction.response.send_message(
+                "この設定はサーバー内で利用できます。",
+                ephemeral=True,
+            )
+
         store = guild_settings.get_store()
         await store.ensure_loaded()
         settings = get_honeypot_settings(store, interaction.guild_id)
+
         await interaction.response.send_message(
-            view=as_panel_v2(HoneypotSettingsView(self, settings)), ephemeral=True
+            view=as_panel_v2(HoneypotSettingsView(self, settings)),
+            ephemeral=True,
         )
 
     async def _honeypot_channel(self, guild: discord.Guild, channel_id: int):
@@ -3176,22 +3227,35 @@ class SupportCog(commands.Cog):
             try:
                 target = await self.bot.fetch_channel(channel_id)
             except (discord.NotFound, discord.Forbidden, discord.HTTPException):
-                logger.warning("ハニーポットチャンネルを取得できません (guild=%s channel=%s)", guild.id, channel_id)
+                logger.warning(
+                    "ハニーポットチャンネルを取得できません (guild=%s channel=%s)",
+                    guild.id,
+                    channel_id,
+                )
                 return None
+
         if getattr(getattr(target, "guild", None), "id", guild.id) != guild.id:
-            logger.warning("ハニーポットチャンネルが別サーバーです (guild=%s channel=%s)", guild.id, channel_id)
+            logger.warning(
+                "ハニーポットチャンネルが別サーバーです (guild=%s channel=%s)",
+                guild.id,
+                channel_id,
+            )
             return None
+
         return target
 
     async def send_honeypot_panel(self, guild: discord.Guild, *, force: bool = False):
         store = guild_settings.get_store()
         await store.ensure_loaded()
         settings = get_honeypot_settings(store, guild.id)
+
         if not settings["enabled"] or settings["channel_id"] is None:
             return None
+
         target = await self._honeypot_channel(guild, settings["channel_id"])
         if target is None:
             return None
+
         old_id = settings.get("message_id")
         if old_id:
             try:
@@ -3199,12 +3263,22 @@ class SupportCog(commands.Cog):
             except discord.NotFound:
                 pass
             except (discord.Forbidden, discord.HTTPException):
-                logger.warning("ハニーポット警告パネルを削除できません (guild=%s message=%s)", guild.id, old_id)
+                logger.warning(
+                    "ハニーポット警告パネルを削除できません (guild=%s message=%s)",
+                    guild.id,
+                    old_id,
+                )
+
         try:
             panel = await target.send(view=HoneypotPanelView())
         except (discord.Forbidden, discord.HTTPException):
-            logger.exception("ハニーポット警告パネルを送信できません (guild=%s channel=%s)", guild.id, target.id)
+            logger.exception(
+                "ハニーポット警告パネルを送信できません (guild=%s channel=%s)",
+                guild.id,
+                target.id,
+            )
             return None
+
         await store.update(guild.id, HONEYPOT_SECTION, message_id=panel.id)
         return panel
 
@@ -3212,18 +3286,30 @@ class SupportCog(commands.Cog):
         store = guild_settings.get_store()
         await store.ensure_loaded()
         settings = get_honeypot_settings(store, message.guild.id)
+
         if not settings["enabled"] or settings["channel_id"] != message.channel.id:
             return False
+
         author = message.author
         if getattr(author, "bot", False):
             return False
+
         permissions = getattr(author, "guild_permissions", None)
-        if any(getattr(permissions, name, False) for name in ("administrator", "manage_guild", "ban_members")):
+        if any(
+            getattr(permissions, name, False)
+            for name in ("administrator", "manage_guild", "ban_members")
+        ):
             return False
+
         try:
             await message.delete()
         except (discord.NotFound, discord.Forbidden, discord.HTTPException):
-            logger.warning("ハニーポット投稿を削除できません (guild=%s message=%s)", message.guild.id, message.id)
+            logger.warning(
+                "ハニーポット投稿を削除できません (guild=%s message=%s)",
+                message.guild.id,
+                message.id,
+            )
+
         try:
             await message.guild.ban(
                 author,
@@ -3232,7 +3318,12 @@ class SupportCog(commands.Cog):
             )
             await message.guild.unban(author, reason="ハニーポットによる一時BAN解除")
         except (discord.Forbidden, discord.HTTPException):
-            logger.exception("ハニーポット対象者のソフトバンに失敗しました (guild=%s user=%s)", message.guild.id, author.id)
+            logger.exception(
+                "ハニーポット対象者のソフトバンに失敗しました (guild=%s user=%s)",
+                message.guild.id,
+                author.id,
+            )
+
         return True
 
     async def _sticky_channel(self, guild: discord.Guild, channel_id: int):
@@ -3269,7 +3360,6 @@ class SupportCog(commands.Cog):
 
         lock = self._sticky_locks.setdefault(guild.id, asyncio.Lock())
         async with lock:
-            # 競合中に設定が変わっていないか、ロック取得後に読み直す。
             settings = get_sticky_settings(store, guild.id)
             if not settings["enabled"] or settings["channel_id"] is None or not settings["content"]:
                 return None
@@ -3307,7 +3397,6 @@ class SupportCog(commands.Cog):
 
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message):
-        # Botの再送メッセージを無視しないと、Sticky自身が無限に再送される。
         if message.guild is None or getattr(message.author, "bot", False):
             return
 
