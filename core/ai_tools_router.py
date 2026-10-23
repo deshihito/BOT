@@ -1,4 +1,4 @@
-"""ローカルD1のchoice判定で既存BOT機能を代理実行する処理。"""
+"""Logfare Clefで既存BOT機能を判断・実行するAI tools処理。"""
 from __future__ import annotations
 
 import asyncio
@@ -10,34 +10,37 @@ import aiohttp
 
 from core import logfare
 
-D1_MODEL = "clef"
-D1_TIMEOUT = float(os.getenv("D1_COMMAND_TIMEOUT", "30"))
-D1_RETRIES = max(1, int(os.getenv("D1_COMMAND_RETRIES", "1")))
+AITOOLS_MODEL = "clef"
+AITOOLS_TIMEOUT = float(os.getenv("AITOOLS_TIMEOUT", "30"))
+AITOOLS_RETRIES = max(1, int(os.getenv("AITOOLS_RETRIES", "1")))
 
 # 引数や確認モーダルを要する処理、権限操作、削除・送金系は代理実行対象外。
 BLOCKED_ACTIONS = {
     "general:pay", "general:fujo_register", "general:fujo_freeze", "general:fujo_panic_disable",
-    "general:shortcut_manage", "general:d1tools", "general:ai_default",
+    "general:shortcut_manage", "general:aitools", "general:ai_default",
     "general:image_default", "general:reasoning_default",
     "support:clear", "support:role_bulk", "support:muted", "support:ticket", "support:honeypot",
     "support:whisper", "support:binjou", "support:message_log", "support:moderation_log",
+    "support:bumprta_on", "support:bumprta_off",
+    # 音声の記録・文字起こしや、参加先を指定する必要があるコミュニティ機能は明示操作に限定。
+    "vc:record_start", "vc:echo_start", "vc:transcribe_start", "vc:karaoke_start",
+    "vc:global_start", "vc:match_start",
 }
 
 
-class D1DecisionError(RuntimeError):
+class AIToolsDecisionError(RuntimeError):
     pass
 
 
-def action_candidates(allowed: list[str]) -> dict[str, dict[str, str]]:
-    """既存Shortcutのジャンル/機能をD1用の候補へ変換する。"""
+def action_candidates() -> dict[str, dict[str, str]]:
+    """危険な操作を除き、AI toolsが選択可能な全機能を候補化する。"""
     from cogs.general import SHORTCUT_ROOTS
 
-    allowed_set = {item.strip().lower() for item in allowed}
     candidates: dict[str, dict[str, str]] = {}
     for root, (root_label, items) in SHORTCUT_ROOTS.items():
         for label, value in items:
             key = f"{root}:{value}".lower()
-            if key in BLOCKED_ACTIONS or key not in allowed_set:
+            if key in BLOCKED_ACTIONS:
                 continue
             candidates[key] = {"root": root, "value": value, "label": label, "genre": root_label}
     return candidates
@@ -45,14 +48,14 @@ def action_candidates(allowed: list[str]) -> dict[str, dict[str, str]]:
 
 def _extract_choice(data: dict[str, Any], key: str) -> str:
     if data.get("success") is False or data.get("errors"):
-        raise D1DecisionError("Logfare decision APIが判定に失敗しました。")
+        raise AIToolsDecisionError("Logfare decision APIが判定に失敗しました。")
     # Workers AIの互換応答は {result: {model, answers}, success, errors, messages}。
     result = data.get("result")
     if isinstance(result, dict):
         data = result
     answers = data.get("answers")
     if not isinstance(answers, dict):
-        raise D1DecisionError("D1応答にanswersオブジェクトがありません。")
+        raise AIToolsDecisionError("Clef応答にanswersオブジェクトがありません。")
     answer = answers.get(key)
     if isinstance(answer, str):
         value = answer
@@ -61,13 +64,13 @@ def _extract_choice(data: dict[str, Any], key: str) -> str:
     else:
         value = data.get("choice")
     if not isinstance(value, str) or not value.strip():
-        raise D1DecisionError("D1応答にchoiceがありません。")
+        raise AIToolsDecisionError("Clef応答にchoiceがありません。")
     return value.strip().lower()
 
 
-async def decide_action(prompt: str, candidates: dict[str, dict[str, str]], instruction: str) -> str:
+async def decide_action(prompt: str, candidates: dict[str, dict[str, str]]) -> str:
     if not candidates:
-        raise D1DecisionError("許可された機能アクションがありません。")
+        raise AIToolsDecisionError("実行可能な安全な機能がありません。")
     criteria = {"none": "適切な機能がない、引数不足、または安全に判断できない場合"}
     for key, item in candidates.items():
         criteria[key] = f"{item['genre']} / {item['label']}"
@@ -75,7 +78,6 @@ async def decide_action(prompt: str, candidates: dict[str, dict[str, str]], inst
         "state": json.dumps({
             "user_request": prompt,
             "allowed_actions": criteria,
-            "custom_policy": instruction or "なし",
         }, ensure_ascii=False),
         "questions": {
             "action": {
@@ -89,44 +91,56 @@ async def decide_action(prompt: str, candidates: dict[str, dict[str, str]], inst
         },
     }
     last_error: Exception | None = None
-    for attempt in range(D1_RETRIES):
+    for attempt in range(AITOOLS_RETRIES):
         try:
             data = await asyncio.wait_for(
                 logfare.decision(
-                    D1_MODEL,
+                    AITOOLS_MODEL,
                     payload["state"],
                     payload["questions"],
-                    timeout=aiohttp.ClientTimeout(total=D1_TIMEOUT),
+                    timeout=aiohttp.ClientTimeout(total=AITOOLS_TIMEOUT),
                 ),
-                timeout=D1_TIMEOUT,
+                timeout=AITOOLS_TIMEOUT,
             )
             selected = _extract_choice(data, "action")
             if selected == "none":
-                raise D1DecisionError("Clefが実行不要または判断不能と判定しました。")
+                raise AIToolsDecisionError("Clefが実行不要または判断不能と判定しました。")
             if selected not in candidates:
-                raise D1DecisionError("Clefが許可されていない機能を選択しました。")
+                raise AIToolsDecisionError("Clefが許可されていない機能を選択しました。")
             return selected
         except asyncio.CancelledError:
             raise
-        except D1DecisionError:
+        except logfare.LogfareHTTPError as exc:
+            if exc.status == 401:
+                raise AIToolsDecisionError("Logfare APIキーが無効です。運用環境のLOGFARE_API_KEYを確認してください。") from exc
+            if exc.status == 403:
+                raise AIToolsDecisionError(
+                    "LogfareがClef利用を拒否しました。APIキーの利用権限とClefのトレーニング利用オプトインを確認してください。"
+                ) from exc
+            if exc.status not in {429, 500, 502, 503, 504}:
+                raise AIToolsDecisionError(f"Logfare decision APIがHTTP {exc.status}を返しました。") from exc
+            last_error = exc
+            if attempt + 1 < AITOOLS_RETRIES:
+                await asyncio.sleep(0.5)
+        except AIToolsDecisionError:
             # abstain/不正な選択は再試行しても同じ判断コストだけが増えるため即時停止。
             raise
         except (aiohttp.ClientError, asyncio.TimeoutError, OSError, RuntimeError, ValueError) as exc:
             last_error = exc
-            if attempt + 1 < D1_RETRIES:
+            if attempt + 1 < AITOOLS_RETRIES:
                 await asyncio.sleep(0.5)
-    raise D1DecisionError(f"Clefの判定に失敗しました: {last_error}")
+    raise AIToolsDecisionError(f"Clefの判定に失敗しました: {last_error}")
 
 
-async def invoke_action(bot, message, item: dict[str, str]) -> None:
+async def invoke_action(bot, message, item: dict[str, str], *, invoker=None) -> None:
     """既存GeneralCogのShortcutMessageInteraction経路を再利用する。"""
     if item["root"] in {"support", "general"} and item["value"] in {"pay", "clear"}:
-        raise D1DecisionError("この機能は代理実行できません。")
+        raise AIToolsDecisionError("この操作はAI toolsから実行できません。")
     general = bot.get_cog("GeneralCog")
     if general is None:
-        raise D1DecisionError("機能ディスパッチャーが読み込まれていません。")
+        raise AIToolsDecisionError("機能ディスパッチャーが読み込まれていません。")
     shortcut = {
         "user_id": str(message.author.id),
         "action": {"root": item["root"], "value": item["value"]},
     }
-    await general.execute_shortcut(message, shortcut)
+    await general.execute_shortcut(message, shortcut, invoker=invoker)
