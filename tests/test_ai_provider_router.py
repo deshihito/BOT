@@ -27,10 +27,19 @@ class AiProviderRouterTest(unittest.IsolatedAsyncioTestCase):
             self.calls.append(("logfare", request.headers.get("Authorization"), await request.json()))
             return web.Response(status=429, headers={"Retry-After": "120"}, text="private upstream response")
 
+        async def kios_models(request):
+            self.calls.append(("kios-models", request.headers.get("Authorization"), None))
+            return web.json_response({"object": "list", "data": [
+                {"id": "gpt-example", "owned_by": "openai"},
+                {"id": "claude-example", "owned_by": "anthropic"},
+            ]})
+
         app = web.Application()
         app.router.add_post("/first/v1/chat/completions", first)
         app.router.add_post("/second/v1/chat/completions", second)
         app.router.add_post("/logfare/v1/chat/completions", logfare_limited)
+        app.router.add_get("/kios/v1/models", kios_models)
+        app.router.add_post("/kios/v1/chat/completions", second)
         self.runner = web.AppRunner(app)
         await self.runner.setup()
         site = web.TCPSite(self.runner, "127.0.0.1", 0)
@@ -98,3 +107,20 @@ class AiProviderRouterTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn("provider=first status=401", logs.output[0])
         self.assertNotIn("key-1", "\n".join(logs.output))
         self.assertNotIn("private prompt", "\n".join(logs.output))
+
+    async def test_kiosapi_catalog_and_selected_model(self):
+        base = self.logfare_url.removesuffix("/logfare/v1") + "/kios/v1"
+        with patch.dict(os.environ, {
+            "AI_KIOSAPI_BASE_URL": base,
+            "AI_KIOSAPI_API_KEY": "kios-secret",
+        }):
+            models = await router.fetch_kiosapi_models()
+            answer = await router.chat_with_model(
+                "kiosapi", "claude-example", [{"role": "user", "content": "質問"}]
+            )
+        self.assertEqual([model["id"] for model in models], ["claude-example", "gpt-example"])
+        self.assertEqual((answer.text, answer.provider, answer.model),
+                         ("回答", "kiosapi", "claude-example"))
+        self.assertEqual([item[0] for item in self.calls], ["kios-models", "second"])
+        self.assertEqual(self.calls[0][1], "Bearer kios-secret")
+        self.assertEqual(self.calls[1][2]["model"], "claude-example")

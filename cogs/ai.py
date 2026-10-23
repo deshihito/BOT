@@ -24,14 +24,15 @@ class AICog(commands.Cog):
             return await ctx.reply("使い方: `!ai 質問内容`", mention_author=False)
         preferred = ai_preferences.get_model(ctx.author.id) or logfare.configured_default_model()
         auto = preferred == ai_provider_router.AUTO_MODEL
+        kios_model = preferred.partition("kiosapi::")[2] if preferred.startswith("kiosapi::") else None
         if auto and not ai_provider_router.enabled():
             return await ctx.reply("AIの自動切替が未設定です。", mention_author=False)
-        if not auto and not logfare.api_key():
+        if not auto and not kios_model and not logfare.api_key():
             return await ctx.reply("Logfareが未設定です。`.env` に `LOGFARE_API_KEY` を設定してください。", mention_author=False)
 
         sources = []
         try:
-            if auto:
+            if auto or kios_model:
                 model, exact = preferred, True
                 reasoning_effort = None
                 model_info = None
@@ -65,6 +66,9 @@ class AICog(commands.Cog):
                 if auto:
                     routed = await ai_provider_router.chat(messages)
                     answer = routed.text
+                elif kios_model:
+                    routed = await ai_provider_router.chat_with_model("kiosapi", kios_model, messages)
+                    answer = routed.text
                 elif can_use_web_search:
                     answer, sources = await ai_tools.answer_with_web_search(
                         model, messages, reasoning_effort=reasoning_effort
@@ -84,7 +88,8 @@ class AICog(commands.Cog):
             color=0x5865F2,
         )
         footer = (f"モデル: {routed.model} / 接続先: {routed.provider}（自動切替）"
-                  if auto else f"モデル: {model}{notice}")
+                  if auto else f"モデル: {routed.model} / 接続先: KiosAPI" if kios_model
+                  else f"モデル: {model}{notice}")
         embed.set_footer(text=footer)
         unique_sources = {source.get("url"): source for source in sources if source.get("url")}
         if unique_sources:

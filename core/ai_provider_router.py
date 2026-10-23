@@ -93,6 +93,43 @@ def enabled() -> bool:
     return bool(routes())
 
 
+async def fetch_kiosapi_models() -> list[dict[str, Any]]:
+    """KiosAPIキーで利用可能なチャットモデルを取得する。"""
+    key = (os.getenv("AI_KIOSAPI_API_KEY", "").strip()
+           or os.getenv("KIOSAPI_API_KEY", "").strip())
+    if not key:
+        return []
+    base_url = os.getenv("AI_KIOSAPI_BASE_URL", "https://kiosapi.com/v1").strip().rstrip("/")
+    async with aiohttp.ClientSession(timeout=TIMEOUT) as session:
+        async with session.get(
+            f"{base_url}/models",
+            headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
+        ) as response:
+            response.raise_for_status()
+            payload = await response.json()
+    return sorted(
+        (model for model in payload.get("data", [])
+         if isinstance(model, dict) and isinstance(model.get("id"), str) and model["id"].strip()),
+        key=lambda model: model["id"].lower(),
+    )
+
+
+async def chat_with_model(provider: str, model: str, messages: list[dict[str, str]], *,
+                          max_tokens: int = 1200) -> Answer:
+    """特定プロバイダーの指定モデルをフォールバックなしで呼び出す。"""
+    name = provider.strip().lower().replace("-", "_")
+    prefix = f"AI_{name.upper()}"
+    key = (os.getenv(f"{prefix}_API_KEY", "").strip()
+           or os.getenv(f"{name.upper()}_API_KEY", "").strip())
+    base_url = (os.getenv(f"{prefix}_BASE_URL", "").strip()
+                or BASE_URLS.get(name, "https://kiosapi.com/v1" if name == "kiosapi" else ""))
+    if not key or not base_url or not model:
+        raise RuntimeError("指定プロバイダーの設定がありません")
+    route = Route(name, model, base_url.rstrip("/"), key)
+    text = await _call(route, messages, max_tokens)
+    return Answer(text, name, model)
+
+
 def _retry_after(value: str | None) -> float:
     try:
         seconds = float(value) if value is not None else COOLDOWN_SECONDS

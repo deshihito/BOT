@@ -359,7 +359,7 @@ class AIDefaultSelect(discord.ui.Select):
         selected = self.values[0] if self.values else ""
         if selected not in self.model_ids:
             return await interaction.response.send_message(
-                "選択したモデルは現在のLogfare一覧にありません。設定画面を開き直してください。",
+                "選択したモデルは現在のモデル一覧にありません。設定画面を開き直してください。",
                 ephemeral=True,
             )
         try:
@@ -433,11 +433,23 @@ class AIDefaultView(discord.ui.View):
                     name = ai_provider_router.logical_model() or "設定済みモデル"
                     models.append({"id": ai_provider_router.AUTO_MODEL,
                                    "name": f"自動切替: {name}"})
+                logfare_error = None
                 try:
                     models.extend(await logfare.fetch_free_chat_models())
+                except Exception as exc:
+                    logfare_error = exc
+                try:
+                    kios_models = await ai_provider_router.fetch_kiosapi_models()
+                    models.extend({
+                        **model,
+                        "id": f"kiosapi::{model['id']}",
+                        "name": f"KiosAPI · {model['id']}",
+                    } for model in kios_models)
                 except Exception:
-                    if not models:
-                        raise
+                    # 片方のカタログが一時的に取得できなくても、もう片方を表示する。
+                    pass
+                if not models and logfare_error:
+                    raise logfare_error
         except Exception as exc:
             return cls(user_id, [], kind, exc)
         return cls(user_id, models, kind)
@@ -453,7 +465,7 @@ class AIDefaultView(discord.ui.View):
             description=(
                 f"`{'!ai' if self.kind == 'chat' else '!generate'}` で使うデフォルトAIを選択してください。\n"
                 f"現在: `{current}`\n\n"
-                f"Logfareの{'チャット' if self.kind == 'chat' else '画像生成'}モデルを選べます。"
+                f"{'Logfare・KiosAPIのチャット' if self.kind == 'chat' else 'Logfareの画像生成'}モデルを選べます。"
                 f"{'自動切替を選ぶと設定済みのAPIを順に使います。' if self.kind == 'chat' else ''}"
                 f"Logfareの一部モデルはトレーニング利用への同意が必要です。\n"
                 f"モデル一覧 {self.page + 1}/{self.page_count}ページ（全{len(self.models)}件）"
