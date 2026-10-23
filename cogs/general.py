@@ -6,7 +6,7 @@ import logging
 from discord import app_commands
 from discord.ext import commands
 from core.panel_v2 import as_panel_v2, edit_panel_v2
-from core import ai_preferences, ai_provider_router, guild_settings, logfare, shortcuts
+from core import ai_omnirush, ai_preferences, ai_provider_router, guild_settings, logfare, shortcuts
 from core.game_guides import GAME_GUIDES, GAME_ORDER
 
 logger = logging.getLogger(__name__)
@@ -458,6 +458,7 @@ class AIDefaultView(discord.ui.View):
                 except Exception:
                     # 片方のカタログが一時的に取得できなくても、もう片方を表示する。
                     pass
+                models.extend(ai_omnirush.model_choices())
                 if not models and logfare_error:
                     raise logfare_error
         except Exception as exc:
@@ -475,9 +476,9 @@ class AIDefaultView(discord.ui.View):
             description=(
                 f"`{'!ai' if self.kind == 'chat' else '!generate'}` で使うデフォルトAIを選択してください。\n"
                 f"現在: `{current}`\n\n"
-                f"{'Logfare・KiosAPI・APInex Freeのチャット' if self.kind == 'chat' else 'Logfareの画像生成'}モデルを選べます。"
+                f"{'Logfare・KiosAPI・APInex Free・OmniRush CLIのチャット' if self.kind == 'chat' else 'Logfareの画像生成'}モデルを選べます。"
                 f"{'自動切替を選ぶと設定済みのAPIを順に使います。' if self.kind == 'chat' else ''}"
-                f"{'画像入力は対応モデルのみ利用できます。APInexはFreeモデルのみ表示します。Logfareの一部モデルはトレーニング利用への同意が必要です。' if self.kind == 'chat' else ''}\n"
+                f"{'画像入力は対応モデルのみ利用できます。APInexはFreeモデルのみ表示します。OmniRushはBot実行ユーザーのログインと共有日次枠を使い、質問を同サービスへ送信します（[プライバシー](https://omnirush.ai/privacy)）。Logfareの一部モデルはトレーニング利用への同意が必要です。' if self.kind == 'chat' else ''}\n"
                 f"モデル一覧 {self.page + 1}/{self.page_count}ページ（全{len(self.models)}件）"
             ),
             color=0xFFFFFF,
@@ -546,6 +547,11 @@ class ReasoningView(discord.ui.View):
             efforts = ai_provider_router.supported_reasoning_efforts("apinex", apinex_model)
             if not efforts:
                 return None, f"APInexモデル `{apinex_model}` は思考強度の設定に対応していません。"
+            return cls(user_id, model_id, efforts), None
+        if model_id.startswith("omnirush::"):
+            efforts = ai_omnirush.supports_reasoning_efforts(model_id)
+            if not efforts:
+                return None, "選択したOmniRushモデルは思考強度を設定できません。"
             return cls(user_id, model_id, efforts), None
         models = await logfare.fetch_free_chat_models()
         model = next((item for item in models if item.get("id") == model_id), None)

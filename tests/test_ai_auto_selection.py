@@ -79,3 +79,37 @@ class AiAutoSelectionTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(view.select.model_ids, {"ai/auto", "logfare/auto"})
         self.assertTrue(any(option.default and option.value == "logfare/auto"
                             for option in view.select.options))
+
+    async def test_ai_uses_selected_omnirush_cli_model(self):
+        ai = load_cog("ai")
+        ctx = SimpleNamespace(author=SimpleNamespace(id=123), typing=lambda: Typing(),
+                              reply=AsyncMock())
+        with patch.object(ai.ai_preferences, "get_model", return_value="omnirush::gpt-6-sol"), \
+             patch.object(ai.ai_preferences, "get_reasoning_effort", return_value="medium"), \
+             patch.object(ai.logfare, "api_key", return_value=None), \
+             patch.object(ai.ai_omnirush, "chat", new_callable=AsyncMock,
+                          return_value="OmniRushの回答") as omnirush_chat:
+            await ai.AICog.ai.callback(ai.AICog(None), ctx, prompt="質問")
+        omnirush_chat.assert_awaited_once_with(
+            "omnirush::gpt-6-sol", "質問", reasoning_effort="medium"
+        )
+        embed = ctx.reply.await_args.kwargs["embed"]
+        self.assertEqual(embed.description, "OmniRushの回答")
+        self.assertIn("OmniRush CLI", embed.footer.text)
+
+    async def test_general_picker_adds_only_official_omnirush_models_when_cli_exists(self):
+        general = load_cog("general")
+        with patch.object(general.ai_preferences, "ensure_loaded", new_callable=AsyncMock), \
+             patch.object(general.ai_preferences, "get_model", return_value=None), \
+             patch.object(general.ai_provider_router, "enabled", return_value=False), \
+             patch.object(general.logfare, "fetch_free_chat_models", new_callable=AsyncMock,
+                          return_value=[]), \
+             patch.object(general.ai_provider_router, "fetch_kiosapi_models", new_callable=AsyncMock,
+                          return_value=[]), \
+             patch.object(general.ai_provider_router, "fetch_apinex_free_models", new_callable=AsyncMock,
+                          return_value=[]), \
+             patch.object(general.ai_omnirush, "cli_path", return_value="/fake/omnirush"):
+            view = await general.AIDefaultView.create(123)
+        self.assertEqual(view.select.model_ids, {
+            "omnirush::gpt-6-astra", "omnirush::gpt-6.1-sol", "omnirush::gpt-6-sol",
+        })

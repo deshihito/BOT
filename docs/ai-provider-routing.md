@@ -55,6 +55,17 @@ APInexでは公式に思考強度が案内されているモデルファミリ�
 Logfare/KiosAPIのモデルメタデータ、またはAPInex公式の画像対応モデルであることを確認してから送信します。
 能力情報を確認できないモデルは画像を受け付けません。添付は1回4件、各8MB、合計12MBまでです。
 
+OmniRushはHTTP APIではなく、Bot上のチャットモデル選択から認証済みCLIを呼び出します。
+CLIがBot実行ユーザーから見つかった場合、GPT 6 Astra（OmniRush既定）、GPT 6.1 Sol、GPT 6 Solを表示します。
+初回はBotと同じLinuxユーザーで `omnirush login` を行ってください。systemdなどでPATHから見つからない場合は
+`.env` の `OMNIRUSH_CLI_PATH` にCLI実行ファイルの絶対パスを指定します。
+
+CLIは空の一時作業ディレクトリで `careful` 権限を使い、BOTのAPIキー等を子プロセスへ渡しません。
+画像はOmniRush選択時には受け付けず、リクエストは90秒で打ち切ります。日次利用枠はBotアカウントで共有です。
+思考強度はOmniRush CLIの `--thinking` に `minimal` / `low` / `medium` / `high` / `xhigh` / `max` を渡します。
+OmniRushへの質問は同サービスへ送信され、
+[OmniRushのプライバシー条件](https://omnirush.ai/privacy)に従って処理されます。
+
 上記以外の OpenAI 互換 API も、名前を順番に追加し、URL とキーを指定できます。
 
 ```dotenv
