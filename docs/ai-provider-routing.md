@@ -61,7 +61,8 @@ CLIがBot実行ユーザーから見つかった場合、GPT 6 Astra（OmniRush�
 `.env` の `OMNIRUSH_CLI_PATH` にCLI実行ファイルの絶対パスを指定します。
 
 CLIは空の一時作業ディレクトリで `careful` 権限を使い、BOTのAPIキー等を子プロセスへ渡しません。
-画像はOmniRush選択時には受け付けず、リクエストは90秒で打ち切ります。日次利用枠はBotアカウントで共有です。
+画像はOmniRush選択時には受け付けず、リクエストは既定300秒で打ち切ります。
+待ち時間は `.env` の `OMNIRUSH_TIMEOUT_SECONDS` で30〜600秒の範囲に調整できます。日次利用枠はBotアカウントで共有です。
 思考強度はOmniRush CLIの `--thinking` に `minimal` / `low` / `medium` / `high` / `xhigh` / `max` を渡します。
 OmniRushへの質問は同サービスへ送信され、
 [OmniRushのプライバシー条件](https://omnirush.ai/privacy)に従って処理されます。

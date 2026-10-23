@@ -60,6 +60,18 @@ class OmniRushCliTest(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(ai_omnirush.OmniRushError):
             await ai_omnirush.chat("omnirush::made-up-model", "質問")
 
+    def test_cli_timeout_defaults_and_is_bounded_by_environment_setting(self):
+        with patch.dict(os.environ, {}, clear=True):
+            self.assertEqual(ai_omnirush.cli_timeout_seconds(), 300)
+        with patch.dict(os.environ, {"OMNIRUSH_TIMEOUT_SECONDS": "420"}, clear=True):
+            self.assertEqual(ai_omnirush.cli_timeout_seconds(), 420)
+        with patch.dict(os.environ, {"OMNIRUSH_TIMEOUT_SECONDS": "5"}, clear=True):
+            self.assertEqual(ai_omnirush.cli_timeout_seconds(), 30)
+        with patch.dict(os.environ, {"OMNIRUSH_TIMEOUT_SECONDS": "900"}, clear=True):
+            self.assertEqual(ai_omnirush.cli_timeout_seconds(), 600)
+        with patch.dict(os.environ, {"OMNIRUSH_TIMEOUT_SECONDS": "invalid"}, clear=True):
+            self.assertEqual(ai_omnirush.cli_timeout_seconds(), 300)
+
 
 if __name__ == "__main__":
     unittest.main()
