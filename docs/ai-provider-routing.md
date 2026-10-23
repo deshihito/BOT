@@ -26,6 +26,18 @@ AI_CEREBRAS_MODEL=gpt-oss-120b
 各社のキーは `<PROVIDER>_API_KEY` または `AI_<PROVIDER>_API_KEY` を使います。
 `logfare` は従来の `LOGFARE_API_KEY` を使います。
 
+KiosAPI は汎用の OpenAI 互換プロバイダーとして追加できます。KiosAPI のモデル一覧は
+`/general` の「チャットAIモデルを設定」を開いたときに API キーで取得し、一覧から選んだモデルは KiosAPI に直接送ります。
+
+```dotenv
+AI_PROVIDER_ORDER=logfare,kiosapi
+AI_KIOSAPI_BASE_URL=https://kiosapi.com/v1
+AI_KIOSAPI_API_KEY=<KiosAPI のキー>
+```
+
+モデル一覧の取得には `GET https://kiosapi.com/v1/models` を使います。
+Logfare を既定のまま使う場合は、KiosAPI モデルを選択しない限り従来の動作は変わりません。
+
 上記以外の OpenAI 互換 API も、名前を順番に追加し、URL とキーを指定できます。
 
 ```dotenv
