@@ -2941,7 +2941,8 @@ def _sns_x_token() -> str:
 
 
 def _sns_x_rss_template() -> str:
-    return (os.getenv("X_RSS_URL") or "").strip()
+    # ローカルRSSサービスを既定値として使用。必要なら環境変数で上書きできる。
+    return (os.getenv("X_RSS_URL") or "http://192.168.11.15:1200/x/user/{username}").strip()
 
 
 class SnsFetcher:
@@ -3068,7 +3069,7 @@ class SnsFetcher:
         template = _sns_x_rss_template()
         if not template:
             raise SnsError(
-                "X_RSS_URLを設定してください（RSSHub等のRSS URLに {username} を含めます）。"
+                "X RSSの取得に失敗しました。RSSサービスと X_RSS_URL の設定を確認してください。"
             )
         # URL内でプレースホルダーが %7Busername%7D とURLエンコードされていても対応する。
         url = re.sub(r"%7Busername%7D", quote(username), template, flags=re.I)
@@ -3096,7 +3097,7 @@ class SnsFetcher:
             items = await self.x_rss_posts(username)
             return {"key": username.lower(), "name": f"@{username}", "uid": None, "items": items}
         raise SnsError(
-            "X_RSS_URLを設定してください（RSSHub等のRSS URLに {username} を含めます）。"
+            "X RSSの取得に失敗しました。RSSサービスと X_RSS_URL の設定を確認してください。"
         )
 
     async def poll(self, sub: dict) -> tuple[list[SnsItem], str | None]:
@@ -3109,7 +3110,7 @@ class SnsFetcher:
         # X通知はRSSを使用。APIの課金・トークン設定には依存しない。
         if _sns_x_rss_template():
             return await self.x_rss_posts(username), None
-        raise SnsError("X_RSS_URLが未設定です。RSSHub等のRSS URLを設定してください。")
+        raise SnsError("X RSSの取得先が設定されていません。RSSサービスと X_RSS_URL の設定を確認してください。")
 
 
 def get_sns_settings(store, guild_id: int) -> dict:
@@ -3361,7 +3362,7 @@ class SnsNotifyPanel(discord.ui.LayoutView):
         s = self.settings
         channel = f"<#{s['channel_id']}>" if s["channel_id"] else "未設定"
         role = f"<@&{s['role_id']}>" if s["role_id"] else "なし"
-        x_state = "無料RSS（X_RSS_URL）" if _sns_x_rss_template() else "未設定（X_RSS_URLが必要）"
+        x_state = "RSS（ローカルRSSサービス）" if _sns_x_rss_template() else "RSS設定確認（X_RSS_URL）"
         return (
             f"状態: **{'オン' if s['enabled'] else 'オフ'}**\n"
             f"送信先: {channel}\n"
