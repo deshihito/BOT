@@ -4,8 +4,8 @@ from datetime import timedelta
 from unittest.mock import AsyncMock, patch
 
 from cogs.support import (
-    ActivityLogSettingsView, BINJOU_SECTION, EmojiBinjouView, MESSAGE_LOG_SECTION, MODERATION_LOG_SECTION,
-    RoleBulkView, RoleTargetSelect, SupportCog, SUPPORT_ACTIONS, THINKING_EMOJI,
+    ActivityLogSettingsView, AUTO_REACT_SECTION, AutoReactSettingsView, BINJOU_SECTION, EmojiBinjouView, MESSAGE_LOG_SECTION, MODERATION_LOG_SECTION,
+    RoleBulkView, RoleTargetSelect, SupportCog, SUPPORT_ACTIONS, SUPPORT_ACTIONS_BY_GENRE, THINKING_EMOJI,
     THINKING_SECTION, VC_LOG_SECTION, get_activity_log_settings, get_binjou_settings,
     get_vc_log_settings,
 )
@@ -232,6 +232,33 @@ class SupportThinkingReactionTest(unittest.IsolatedAsyncioTestCase):
             await cog.on_raw_reaction_add(payload)
         channel.fetch_message.assert_not_awaited()
         message.add_reaction.assert_not_awaited()
+
+
+class SupportAutoReactTest(unittest.IsolatedAsyncioTestCase):
+    async def test_adds_multiple_reactions_for_configured_channel(self):
+        cog = SupportCog(None)
+        message = types.SimpleNamespace(
+            guild=types.SimpleNamespace(id=7),
+            channel=types.SimpleNamespace(id=8),
+            author=types.SimpleNamespace(bot=False),
+            add_reaction=AsyncMock(),
+        )
+        store = types.SimpleNamespace(
+            ensure_loaded=AsyncMock(),
+            get=lambda guild_id, section: (
+                {"channels": {"8": ["🎉", "✨"]}} if section == AUTO_REACT_SECTION else {}
+            ),
+        )
+        with patch("cogs.support.guild_settings.get_store", return_value=store):
+            await cog.on_message(message)
+        self.assertEqual(message.add_reaction.await_args_list[0].args, ("🎉",))
+        self.assertEqual(message.add_reaction.await_args_list[1].args, ("✨",))
+
+    def test_auto_react_is_a_server_support_action(self):
+        self.assertIn("auto_react", [choice.value for choice in SUPPORT_ACTIONS])
+        self.assertIn("auto_react", [value for _, value in SUPPORT_ACTIONS_BY_GENRE["server"]])
+        view = AutoReactSettingsView({"channels": {"8": ["🎉"]}})
+        self.assertIn("< #8>".replace(" ", ""), view.embed().description)
 
 
 class SupportVCLogTest(unittest.IsolatedAsyncioTestCase):
