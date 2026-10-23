@@ -200,14 +200,27 @@ class SupportThinkingReactionTest(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(
             get_binjou_settings(store, 1),
-            {"thinking": False, "thumbsup": True},
+            {"thinking": False, "thumbsup": True, "custom": []},
         )
 
     def test_binjou_controls_are_separately_configurable(self):
         view = EmojiBinjouView(SupportCog(None), {"thinking": True, "thumbsup": False})
-        self.assertEqual(len(view.children), 4)
+        self.assertEqual(len(view.children), 6)
         self.assertEqual(view.settings, {"thinking": True, "thumbsup": False})
         self.assertEqual(BINJOU_SECTION, "binjou")
+
+    async def test_custom_rule_adds_configured_reaction(self):
+        cog, store, channel, message = self.make_cog(None)
+        store.get = lambda guild_id, section: (
+            {"custom": [{"source": "✨", "target": "🎉"}]} if section == BINJOU_SECTION else {}
+        )
+        payload = types.SimpleNamespace(
+            guild_id=1, user_id=2, emoji="✨", member=types.SimpleNamespace(bot=False),
+            channel_id=3, message_id=4,
+        )
+        with patch("cogs.support.guild_settings.get_store", return_value=store):
+            await cog.on_raw_reaction_add(payload)
+        message.add_reaction.assert_awaited_once_with("🎉")
 
     async def test_explicitly_disabled_setting_does_not_mirror(self):
         cog, store, channel, message = self.make_cog(False)
