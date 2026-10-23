@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 GENERAL_GENRES = {
     "economy": ("コイン・ランキング", "所持状況、送金、コインや bump/up のランキング"),
     "survival": ("生存確認", "追跡、アクティブ頻度、フリーズ、失踪警報"),
-    "custom": ("カスタム・AI設定", "ショートカット、D1代理実行、チャットAI・画像生成AIの設定"),
+    "custom": ("設定・AI", "ショートカット、AI tools、チャットAI・画像生成AIの設定"),
 }
 GENERAL_ACTIONS = {
     "economy": [
@@ -34,7 +34,7 @@ GENERAL_ACTIONS = {
     ],
     "custom": [
         ("ショートカットを管理", "shortcut_manage"),
-        ("D1機能代理実行を設定", "d1tools"),
+        ("AI tools稼働状態", "aitools"),
         ("チャットAIモデルを設定", "ai_default"),
         ("画像生成AIモデルを設定", "image_default"),
         ("AI思考強度を設定", "reasoning_default"),
@@ -548,17 +548,17 @@ class GeneralCog(commands.Cog):
         await interaction.response.send_message(view=as_panel_v2(view), ephemeral=True)
 
     async def dispatch_general(self, interaction: discord.Interaction, value: str):
-        if value == "d1tools":
-            from core import d1_command_preferences, d1_command_router
-            config = d1_command_preferences.get_config(interaction.user.id)
-            available = d1_command_router.action_candidates(config["actions"])
-            embed = discord.Embed(title="D1機能代理実行", color=0x5865F2)
+        if value == "aitools":
+            from core import ai_tools_router
+            from cogs.ai_tools import _enabled as ai_tools_enabled
+            available = ai_tools_router.action_candidates()
+            key_status = "設定済み" if logfare.api_key() else "未設定"
+            embed = discord.Embed(title="AI tools", color=0x5865F2)
             embed.description = (
-                f"有効: `{config['enabled']}`\n"
-                f"許可機能: `{', '.join(config['actions']) or 'なし'}`\n"
-                f"解決可能: `{', '.join(available) or 'なし'}`\n\n"
-                "詳細設定は `!d1tools allow vc:join`、`!d1tools allow vc`、"
-                "`!d1tools on` で行えます。"
+                f"全体有効: `{ai_tools_enabled()}`\n"
+                f"Logfare APIキー: `{key_status}`\n"
+                f"利用可能な安全ツール: `{len(available)}件`\n\n"
+                "BOTにメンションして依頼してください。個人別・機能別の設定はありません。"
             )
             return await interaction.response.send_message(embed=embed, ephemeral=True)
         if value == "reasoning_default":
@@ -612,7 +612,7 @@ class GeneralCog(commands.Cog):
         action = value.removeprefix("fujo_")
         return await fujo.fujo(interaction, action, None, "active", None, None)
 
-    async def execute_shortcut(self, message: discord.Message, item: dict):
+    async def execute_shortcut(self, message: discord.Message, item: dict, *, invoker=None):
         # Message shortcuts are personal settings.  Keep this guard here as well
         # as in ``on_message`` so callers cannot accidentally bypass ownership
         # validation by invoking the executor directly.
@@ -624,7 +624,7 @@ class GeneralCog(commands.Cog):
         if author_id != owner_id:
             return False
         action = item.get("action") or {}
-        source = ShortcutMessageInteraction(self.bot, message, author_id)
+        source = ShortcutMessageInteraction(self.bot, message, author_id, invoker=invoker)
         root, value = action.get("root"), action.get("value")
         try:
             if root == "general":
@@ -694,16 +694,17 @@ class _MessageFollowup:
 
 class ShortcutMessageInteraction:
     """既存のinteractionベース実装をメッセージトリガーから再利用する薄いアダプター。"""
-    def __init__(self, bot, message, user_id: int):
+    def __init__(self, bot, message, user_id: int, *, invoker=None):
         self.client = bot
         self.bot = bot
         self.message = message
         self.channel = message.channel
         self.guild = message.guild
         self.guild_id = message.guild.id
-        # Keep the guild Member from the message: bot.get_user() returns a
-        # global User and does not expose the member's current voice state.
-        self.user = message.author
+        # Keep the real guild Member for voice state/permissions. For explicit
+        # AI-bot tool calls, invoker is resolved from the source interaction/context.
+        self.user = invoker or message.author
+        self.user_id = self.user.id
         self.response = _MessageResponse(self)
         self.followup = _MessageFollowup(self)
 

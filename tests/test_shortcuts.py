@@ -30,7 +30,7 @@ class ShortcutTest(unittest.IsolatedAsyncioTestCase):
             GENERAL_ACTIONS["custom"],
             [
                 ("ショートカットを管理", "shortcut_manage"),
-                ("D1機能代理実行を設定", "d1tools"),
+                ("AI tools稼働状態", "aitools"),
                 ("チャットAIモデルを設定", "ai_default"),
                 ("画像生成AIモデルを設定", "image_default"),
                 ("AI思考強度を設定", "reasoning_default"),
