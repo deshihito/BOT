@@ -45,3 +45,9 @@ VCジャンルの安全な機能をまとめて許可する場合は、`!d1tools
 LogfareのHTTPエラー、タイムアウト、JSON形式不正、`answers`や`choice`の欠落、許可リスト外の選択、実行対象が不明な場合は、機能を実行しません。別モデルやローカルD1へのフォールバックも行いません。
 
 実行は既存のショートカット用機能ディスパッチャーを再利用します。したがって、VC参加、VC退出、VC状態、一般のステータスなど、すでにパネルから実行できる機能単位へ接続できます。引数入力や確認モーダルが必要な機能、送金・削除・権限操作、AI系機能は代理実行対象から除外しています。
+
+## API仕様の根拠
+
+- [Logfare API仕様](https://logfare.ai/docs) と [公開OpenAPI](https://logfare.ai/openapi.json): `POST /v1/decisions`はモデルのdecision requestを転送し、Cloudflare形式の`result` envelopeを返します。
+- [Cloudflare Clef仕様](https://developers.cloudflare.com/workers-ai/models/clef/): `choice`質問は固定候補を採点し、選択結果と候補別確率を返します。
+- [Logfareモデル一覧](https://logfare.ai/v1/models): `clef`は`decisions`対応として掲載され、premium tierは推論前にトレーニング利用へのオプトインが必要です。
