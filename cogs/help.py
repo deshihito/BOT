@@ -63,8 +63,10 @@ def overview_embed(catalog: dict) -> discord.Embed:
     embed = discord.Embed(
         title="コマンド一覧",
         description=(
-            "下のメニューでカテゴリを選ぶと、そのカテゴリのコマンドと使い方が表示されます。\n"
-            "`/help command:` にコマンド名を入れると、1 つのコマンドの詳しい説明を見られます。"
+            "下のメニューからカテゴリを選ぶと、コマンドと使い方を確認できます。\n"
+            "`/help command:` にコマンド名を入れると詳しい説明が表示されます。\n\n"
+            "ゲーム・音楽・ボイス・AI・コインなどを利用できます。\n"
+            "隠し機能: 会話を追うときは、チャンネルで「今北産業」と送ると直近の会話を最大3行で要約します。"
         ),
         color=COLOR,
     )
@@ -366,8 +368,9 @@ class CatalogHelpCommand(commands.HelpCommand):
     async def send_bot_help(self, mapping):
         embed = overview_embed(self.help_cog.catalog())
         embed.description = (
-            "カテゴリごとの一覧と使い方は、スラッシュコマンドの `/help` で見られます。\n"
-            f"1 つのコマンドの使い方は `{self.context.clean_prefix}help コマンド名` でも表示できます。"
+            "カテゴリごとの一覧と使い方は `/help` で見られます。\n"
+            f"個別の使い方は `{self.context.clean_prefix}help コマンド名` で確認できます。\n"
+            "隠し機能: チャンネルで「今北産業」と送ると、直近の会話を最大3行で要約します。"
         )
         await self.get_destination().send(embed=embed)
 
