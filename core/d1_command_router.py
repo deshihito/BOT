@@ -8,7 +8,9 @@ from typing import Any
 
 import aiohttp
 
-D1_ENDPOINT = os.getenv("D1_ENDPOINT", "http://127.0.0.1:8082/v1/systemone")
+from core import logfare
+
+D1_MODEL = "clef"
 D1_TIMEOUT = float(os.getenv("D1_COMMAND_TIMEOUT", "30"))
 D1_RETRIES = max(1, int(os.getenv("D1_COMMAND_RETRIES", "1")))
 
@@ -42,6 +44,12 @@ def action_candidates(allowed: list[str]) -> dict[str, dict[str, str]]:
 
 
 def _extract_choice(data: dict[str, Any], key: str) -> str:
+    if data.get("success") is False or data.get("errors"):
+        raise D1DecisionError("Logfare decision APIが判定に失敗しました。")
+    # Workers AIの互換応答は {result: {model, answers}, success, errors, messages}。
+    result = data.get("result")
+    if isinstance(result, dict):
+        data = result
     answers = data.get("answers")
     if not isinstance(answers, dict):
         raise D1DecisionError("D1応答にanswersオブジェクトがありません。")
@@ -80,32 +88,34 @@ async def decide_action(prompt: str, candidates: dict[str, dict[str, str]], inst
             }
         },
     }
-    timeout = aiohttp.ClientTimeout(total=D1_TIMEOUT)
     last_error: Exception | None = None
     for attempt in range(D1_RETRIES):
         try:
-            async with aiohttp.ClientSession(timeout=timeout) as session:
-                async with session.post(D1_ENDPOINT, json=payload) as response:
-                    body = await response.text()
-                    if response.status != 200:
-                        raise D1DecisionError(f"D1 HTTP {response.status}: {body[:240]}")
-                    try:
-                        data = json.loads(body)
-                    except json.JSONDecodeError as exc:
-                        raise D1DecisionError("D1応答がJSONではありません。") from exc
-                    selected = _extract_choice(data, "action")
-                    if selected == "none":
-                        raise D1DecisionError("D1が実行不要または判断不能と判定しました。")
-                    if selected not in candidates:
-                        raise D1DecisionError("D1が許可されていない機能を選択しました。")
-                    return selected
+            data = await asyncio.wait_for(
+                logfare.decision(
+                    D1_MODEL,
+                    payload["state"],
+                    payload["questions"],
+                    timeout=aiohttp.ClientTimeout(total=D1_TIMEOUT),
+                ),
+                timeout=D1_TIMEOUT,
+            )
+            selected = _extract_choice(data, "action")
+            if selected == "none":
+                raise D1DecisionError("Clefが実行不要または判断不能と判定しました。")
+            if selected not in candidates:
+                raise D1DecisionError("Clefが許可されていない機能を選択しました。")
+            return selected
         except asyncio.CancelledError:
             raise
-        except (aiohttp.ClientError, asyncio.TimeoutError, OSError, D1DecisionError) as exc:
+        except D1DecisionError:
+            # abstain/不正な選択は再試行しても同じ判断コストだけが増えるため即時停止。
+            raise
+        except (aiohttp.ClientError, asyncio.TimeoutError, OSError, RuntimeError, ValueError) as exc:
             last_error = exc
             if attempt + 1 < D1_RETRIES:
                 await asyncio.sleep(0.5)
-    raise D1DecisionError(f"D1の判定に失敗しました: {last_error}")
+    raise D1DecisionError(f"Clefの判定に失敗しました: {last_error}")
 
 
 async def invoke_action(bot, message, item: dict[str, str]) -> None:
