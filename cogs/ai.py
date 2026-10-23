@@ -7,7 +7,7 @@ import logging
 import discord
 from discord.ext import commands
 
-from core import ai_input, ai_preferences, ai_provider_router, ai_tools, logfare
+from core import ai_input, ai_omnirush, ai_preferences, ai_provider_router, ai_tools, logfare
 
 logger = logging.getLogger(__name__)
 
@@ -28,9 +28,10 @@ class AICog(commands.Cog):
         auto = preferred == ai_provider_router.AUTO_MODEL
         kios_model = preferred.partition("kiosapi::")[2] if preferred.startswith("kiosapi::") else None
         apinex_model = preferred.partition("apinex::")[2] if preferred.startswith("apinex::") else None
+        omnirush_model = preferred if preferred.startswith("omnirush::") else None
         if auto and not ai_provider_router.enabled():
             return await ctx.reply("AIの自動切替が未設定です。", mention_author=False)
-        if not auto and not kios_model and not apinex_model and not logfare.api_key():
+        if not auto and not kios_model and not apinex_model and not omnirush_model and not logfare.api_key():
             return await ctx.reply("Logfareが未設定です。`.env` に `LOGFARE_API_KEY` を設定してください。", mention_author=False)
 
         sources = []
@@ -51,6 +52,13 @@ class AICog(commands.Cog):
                 reasoning_effort = requested_effort if requested_effort in supported_efforts else None
                 model_info = None
                 images_supported = ai_provider_router.supports_images("apinex", apinex_model)
+            elif omnirush_model:
+                model, exact = omnirush_model, True
+                requested_effort = ai_preferences.get_reasoning_effort(ctx.author.id)
+                efforts = ai_omnirush.supports_reasoning_efforts(omnirush_model)
+                reasoning_effort = requested_effort if requested_effort in efforts else None
+                model_info = None
+                images_supported = False
             else:
                 model, exact = await logfare.resolve_model(preferred)
                 reasoning_effort = ai_preferences.get_reasoning_effort(ctx.author.id)
@@ -98,6 +106,10 @@ class AICog(commands.Cog):
                         "apinex", apinex_model, messages, reasoning_effort=reasoning_effort
                     )
                     answer = routed.text
+                elif omnirush_model:
+                    answer = await ai_omnirush.chat(
+                        omnirush_model, str(user_content), reasoning_effort=reasoning_effort
+                    )
                 elif can_use_web_search:
                     answer, sources = await ai_tools.answer_with_web_search(
                         model, messages, reasoning_effort=reasoning_effort
@@ -105,6 +117,18 @@ class AICog(commands.Cog):
                 else:
                     answer = await logfare.chat(model, messages, reasoning_effort=reasoning_effort)
         except ai_input.AttachmentInputError as exc:
+            return await ctx.reply(str(exc), mention_author=False)
+        except ai_omnirush.OmniRushLoginRequired:
+            return await ctx.reply(
+                "OmniRushが未ログインです。Botと同じLinuxユーザーで `omnirush login` を実行してください。",
+                mention_author=False,
+            )
+        except ai_omnirush.OmniRushUnavailable:
+            return await ctx.reply(
+                "OmniRush CLIが見つかりません。Botの実行ユーザーから利用可能か確認してください。",
+                mention_author=False,
+            )
+        except ai_omnirush.OmniRushError as exc:
             return await ctx.reply(str(exc), mention_author=False)
         except Exception:
             logger.exception("!ai request failed: user=%s model=%s", ctx.author.id, preferred)
@@ -121,6 +145,7 @@ class AICog(commands.Cog):
         footer = (f"モデル: {routed.model} / 接続先: {routed.provider}（自動切替）"
                   if auto else f"モデル: {routed.model} / 接続先: KiosAPI" if kios_model
                   else f"モデル: {routed.model} / 接続先: APInex" if apinex_model
+                  else f"モデル: {ai_omnirush.model_name(omnirush_model)} / 接続先: OmniRush CLI" if omnirush_model
                   else f"モデル: {model}{notice}")
         embed.set_footer(text=footer)
         unique_sources = {source.get("url"): source for source in sources if source.get("url")}
