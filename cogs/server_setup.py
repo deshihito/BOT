@@ -48,9 +48,9 @@ def welcome_embed(bot_name: str = "AGOBOT") -> discord.Embed:
     embed = discord.Embed(
         title=f"👋 {bot_name} を追加してくれてありがとう！",
         description=(
-            "ゲーム・音楽・録音・グローバルチャットなど、サーバーをにぎやかにする Bot です。\n\n"
-            "📖 `/help` … できることの一覧と使い方\n"
-            "🎮 `/game` … みんなで遊べるゲーム"
+            "みんなで遊ぶゲーム、音楽、ボイス機能、AI、コインなどが使えます。\n\n"
+            "`/help` で機能と使い方を確認できます。\n"
+            "ゲームは `/game` から。過去の会話を追いたいときは、チャンネルで「今北産業」と送ってください。"
         ),
         color=EMBED_COLOR,
     )

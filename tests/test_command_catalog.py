@@ -282,6 +282,7 @@ class CommandCatalogTest(unittest.TestCase):
 
         async def check():
             overview = help_module.HelpView(self.catalog)
+            self.assertIn("今北産業", overview.embed().description)
             assert_embed_ok(self, overview.embed(), 'overview')
             assert_view_ok(self, overview, 'overview')
             for category in self.catalog['categories']:
