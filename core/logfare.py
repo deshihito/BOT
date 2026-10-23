@@ -104,7 +104,7 @@ async def resolve_model(preferred: str | None = None) -> tuple[str, bool]:
 
 async def chat(
     model: str,
-    messages: list[dict[str, str]],
+    messages: list[dict[str, Any]],
     *,
     max_tokens: int = 1200,
     reasoning_effort: str | None = None,
@@ -120,6 +120,11 @@ async def chat(
         content = data["choices"][0]["message"]["content"]
     except (KeyError, IndexError, TypeError) as exc:
         raise RuntimeError("Logfare API の応答に回答本文がありませんでした。") from exc
+    if isinstance(content, list):
+        content = "\n".join(
+            part.get("text", "") for part in content
+            if isinstance(part, dict) and isinstance(part.get("text"), str)
+        )
     return str(content or "").strip()
 
 

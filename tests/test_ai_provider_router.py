@@ -34,12 +34,22 @@ class AiProviderRouterTest(unittest.IsolatedAsyncioTestCase):
                 {"id": "claude-example", "owned_by": "anthropic"},
             ]})
 
+        async def apinex_models(request):
+            self.calls.append(("apinex-models", request.headers.get("Authorization"), None))
+            return web.json_response({"object": "list", "data": [
+                {"id": "free/deepseek-v4-flash", "owned_by": "DeepSeek"},
+                {"id": "free/muse-spark-1.3", "owned_by": "Muse"},
+                {"id": "gpt-6-sol", "owned_by": "GPT"},
+            ]})
+
         app = web.Application()
         app.router.add_post("/first/v1/chat/completions", first)
         app.router.add_post("/second/v1/chat/completions", second)
         app.router.add_post("/logfare/v1/chat/completions", logfare_limited)
         app.router.add_get("/kios/v1/models", kios_models)
         app.router.add_post("/kios/v1/chat/completions", second)
+        app.router.add_get("/apinex/v1/models", apinex_models)
+        app.router.add_post("/apinex/v1/chat/completions", second)
         self.runner = web.AppRunner(app)
         await self.runner.setup()
         site = web.TCPSite(self.runner, "127.0.0.1", 0)
@@ -124,3 +134,37 @@ class AiProviderRouterTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([item[0] for item in self.calls], ["kios-models", "second"])
         self.assertEqual(self.calls[0][1], "Bearer kios-secret")
         self.assertEqual(self.calls[1][2]["model"], "claude-example")
+
+    async def test_apinex_free_catalog_and_reasoning_filter(self):
+        base = self.logfare_url.removesuffix("/logfare/v1") + "/apinex/v1"
+        with patch.dict(os.environ, {
+            "AI_APINEX_BASE_URL": base,
+            "AI_APINEX_API_KEY": "apinex-secret",
+            "AI_KIOSAPI_BASE_URL": base,
+            "AI_KIOSAPI_API_KEY": "kios-secret",
+        }):
+            models = await router.fetch_apinex_free_models()
+            supported = await router.chat_with_model(
+                "apinex", "free/deepseek-v4-flash", [{"role": "user", "content": "質問"}],
+                reasoning_effort="medium",
+            )
+            unsupported = await router.chat_with_model(
+                "apinex", "free/muse-spark-1.3", [{"role": "user", "content": "質問"}],
+                reasoning_effort="high",
+            )
+            other_provider = await router.chat_with_model(
+                "kiosapi", "claude-example", [{"role": "user", "content": "質問"}],
+                reasoning_effort="high",
+            )
+        self.assertEqual([model["id"] for model in models],
+                         ["free/deepseek-v4-flash", "free/muse-spark-1.3"])
+        self.assertEqual(supported.provider, "apinex")
+        self.assertEqual(unsupported.provider, "apinex")
+        self.assertEqual(other_provider.provider, "kiosapi")
+        payloads = [call[2] for call in self.calls if call[0] == "second"]
+        self.assertEqual(payloads[0].get("reasoning_effort"), "medium")
+        self.assertNotIn("reasoning_effort", payloads[1])
+        self.assertNotIn("reasoning_effort", payloads[2])
+        self.assertEqual(router.supported_reasoning_efforts("apinex", "free/glm-5.3"),
+                         ["low", "medium", "high"])
+        self.assertEqual(router.supported_reasoning_efforts("apinex", "free/muse-spark-1.3"), [])
