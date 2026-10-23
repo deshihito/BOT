@@ -163,6 +163,35 @@ async def chat_completion(
     return data
 
 
+async def decision(
+    model: str,
+    state: str | dict[str, Any] | list[Any],
+    questions: dict[str, Any],
+    *,
+    timeout: aiohttp.ClientTimeout | None = None,
+) -> dict[str, Any]:
+    """Logfare decision-model endpointへSystem One形式の判断を送る。"""
+    key = api_key()
+    if not key:
+        raise RuntimeError("LOGFARE_API_KEY が設定されていません。")
+    payload = {"model": model, "state": state, "questions": questions}
+    headers = {
+        "Authorization": f"Bearer {key}",
+        "Content-Type": "application/json",
+    }
+    async with aiohttp.ClientSession(timeout=timeout or DEFAULT_TIMEOUT) as session:
+        async with session.post(f"{BASE_URL}/decisions", headers=headers, json=payload) as response:
+            if response.status >= 400:
+                raise LogfareHTTPError(response.status, response.headers.get("Retry-After"))
+            try:
+                data = await response.json()
+            except ValueError as exc:
+                raise RuntimeError("Logfare decision API の応答をJSONとして解釈できませんでした。") from exc
+    if not isinstance(data, dict):
+        raise RuntimeError("Logfare decision APIの応答形式が不正です。")
+    return data
+
+
 async def generate_image(model: str, prompt: str, *, size: str = "1024x1024") -> bytes:
     """画像生成結果をPNG/JPEG等のバイト列として返す。"""
     key = api_key()

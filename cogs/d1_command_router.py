@@ -1,4 +1,4 @@
-"""ローカルD1を使った機能アクション代理実行。AIチャットとは別機能。"""
+"""Logfare Clefを使った機能アクション代理実行。AIチャットとは別機能。"""
 from __future__ import annotations
 
 import logging
@@ -29,7 +29,7 @@ class D1CommandRouterCog(commands.Cog):
             return content.strip()
         return re.sub(rf"<@!?{self.bot.user.id}>", "", content).strip()
 
-    @commands.command(name="d1tools", help="ローカルD1による機能代理実行の設定")
+    @commands.command(name="d1tools", help="Clefによる機能代理実行の設定")
     async def d1tools(self, ctx: commands.Context, action: str = "", *, value: str = ""):
         config = d1_command_preferences.get_config(ctx.author.id)
         action = action.lower().strip()

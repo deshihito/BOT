@@ -1,17 +1,19 @@
-# ローカルD1によるBOT機能代理実行
+# ClefによるBOT機能代理実行
 
-これはAIチャット機能とは別の機能です。BlockRun APIやLogfareは使いません。`d1_test.py`と同じローカルD1サービス、既定では`http://127.0.0.1:8082/v1/systemone`へ`state`と`questions`を送り、D1の`choice`判定に従って既存パネルの機能アクションを実行します。
+これはAIチャット機能とは別の機能です。ユーザーが明示的にBOTへメンションした場合、許可済みの既存パネル機能から1つを選ぶため、Logfareのdecision endpointへClefの構造化判定を依頼します。自由文生成や`/chat/completions`ではなく、`POST https://logfare.ai/v1/decisions`にSystem One形式の`model: "clef"`、`state`、`questions`を送り、`result.answers.action.choice`を読み取ります。
 
 ## `.env`
 
 ```dotenv
 D1_COMMAND_ROUTER_ENABLED=true
-D1_ENDPOINT=http://127.0.0.1:8082/v1/systemone
+LOGFARE_API_KEY=<Logfare API key>
 D1_COMMAND_TIMEOUT=30
 D1_COMMAND_RETRIES=1
 ```
 
-D1が停止している場合の自動起動は行いません。必要なら既存の所有者専用コマンドを使います。
+ClefはLogfareの公開モデル一覧でpremium tier（tier 2）かつトレーニング利用へのオプトインが必要なモデルとして掲載されています。APIキーに利用権限がない場合、判定は失敗しアクションを実行しません。モデルカタログの問い合わせや別モデルへのフォールバックは行わず、既定ではメンション1件につき判定リクエストを1回だけ送ります。
+
+`D1_ENDPOINT`はダンジョンD1など既存のローカルD1機能用であり、この代理実行ルーターでは使用しません。
 
 ```text
 !d1ping
@@ -40,6 +42,12 @@ VCジャンルの安全な機能をまとめて許可する場合は、`!d1tools
 
 ## 安全な失敗動作
 
-D1のHTTPエラー、タイムアウト、JSON形式不正、`answers`や`choice`の欠落、許可リスト外の選択、実行対象が不明な場合は、機能を実行しません。Logfare、BlockRun、別AIへのフォールバックも行いません。
+LogfareのHTTPエラー、タイムアウト、JSON形式不正、`answers`や`choice`の欠落、許可リスト外の選択、実行対象が不明な場合は、機能を実行しません。別モデルやローカルD1へのフォールバックも行いません。
 
 実行は既存のショートカット用機能ディスパッチャーを再利用します。したがって、VC参加、VC退出、VC状態、一般のステータスなど、すでにパネルから実行できる機能単位へ接続できます。引数入力や確認モーダルが必要な機能、送金・削除・権限操作、AI系機能は代理実行対象から除外しています。
+
+## API仕様の根拠
+
+- [Logfare API仕様](https://logfare.ai/docs) と [公開OpenAPI](https://logfare.ai/openapi.json): `POST /v1/decisions`はモデルのdecision requestを転送し、Cloudflare形式の`result` envelopeを返します。
+- [Cloudflare Clef仕様](https://developers.cloudflare.com/workers-ai/models/clef/): `choice`質問は固定候補を採点し、選択結果と候補別確率を返します。
+- [Logfareモデル一覧](https://logfare.ai/v1/models): `clef`は`decisions`対応として掲載され、premium tierは推論前にトレーニング利用へのオプトインが必要です。
