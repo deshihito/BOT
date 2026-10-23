@@ -3065,7 +3065,14 @@ class SnsFetcher:
         ]
 
     async def x_rss_posts(self, username: str) -> list[SnsItem]:
-        url = _sns_x_rss_template().replace("{username}", username)
+        template = _sns_x_rss_template()
+        if not template:
+            raise SnsError(
+                "X_RSS_URLを設定してください（RSSHub等のRSS URLに {username} を含めます）。"
+            )
+        # URL内でプレースホルダーが %7Busername%7D とURLエンコードされていても対応する。
+        url = re.sub(r"%7Busername%7D", quote(username), template, flags=re.I)
+        url = url.replace("{username}", quote(username))
         status, body = await self._get(url)
         if status != 200:
             raise SnsError(f"XのRSS取得に失敗しました（HTTP {status}）。")
@@ -3084,16 +3091,12 @@ class SnsFetcher:
             return {"key": channel_id, "name": name or channel_id, "uid": None, "items": items}
 
         username = parse_x_username(raw)
-        if _sns_x_token():
-            uid, name = await self.x_lookup_user(username)
-            items = await self.x_api_posts(uid, username, None)
-            return {"key": username.lower(), "name": f"{name} (@{username})", "uid": uid, "items": items}
+        # Xは無料のRSS経由に統一し、X APIトークンが設定されていても使用しない。
         if _sns_x_rss_template():
             items = await self.x_rss_posts(username)
             return {"key": username.lower(), "name": f"@{username}", "uid": None, "items": items}
         raise SnsError(
-            "Xの取得方法が未設定です。環境変数 X_BEARER_TOKEN（X API）か "
-            "X_RSS_URL（RSSHub等・{username}を含むURL）を設定してください。"
+            "X_RSS_URLを設定してください（RSSHub等のRSS URLに {username} を含めます）。"
         )
 
     async def poll(self, sub: dict) -> tuple[list[SnsItem], str | None]:
@@ -3103,12 +3106,10 @@ class SnsFetcher:
             return items, None
 
         username = sub["key"]
-        if _sns_x_token():
-            uid = sub.get("uid") or (await self.x_lookup_user(username))[0]
-            return await self.x_api_posts(uid, username, sns_x_since_id(sub["seen"])), uid
+        # X通知はRSSを使用。APIの課金・トークン設定には依存しない。
         if _sns_x_rss_template():
             return await self.x_rss_posts(username), None
-        raise SnsError("Xの取得方法（X_BEARER_TOKEN または X_RSS_URL）が未設定です。")
+        raise SnsError("X_RSS_URLが未設定です。RSSHub等のRSS URLを設定してください。")
 
 
 def get_sns_settings(store, guild_id: int) -> dict:
@@ -3360,12 +3361,7 @@ class SnsNotifyPanel(discord.ui.LayoutView):
         s = self.settings
         channel = f"<#{s['channel_id']}>" if s["channel_id"] else "未設定"
         role = f"<@&{s['role_id']}>" if s["role_id"] else "なし"
-        sources = []
-        if _sns_x_token():
-            sources.append("X API")
-        if _sns_x_rss_template():
-            sources.append("X RSS")
-        x_state = " / ".join(sources) if sources else "未設定（Xは追加不可）"
+        x_state = "無料RSS（X_RSS_URL）" if _sns_x_rss_template() else "未設定（X_RSS_URLが必要）"
         return (
             f"状態: **{'オン' if s['enabled'] else 'オフ'}**\n"
             f"送信先: {channel}\n"
