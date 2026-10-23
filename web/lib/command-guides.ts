@@ -222,7 +222,7 @@ export const COMMAND_GUIDES: CommandGuide[] = [
         description: "ロールやログ、リアクション設定を管理します。",
         functions: [
           { title: "一括ロール付与・剥奪", description: "対象ロールと対象アカウントを選び、確認して一括で付与または剥奪します。", note: "ロールの管理権限が必要です。" },
-          { title: "絵文字便乗設定", description: "thinking と 👍 の便乗リアクションを個別にオン／オフします。", note: "サーバーの管理権限が必要です。" },
+          { title: "絵文字便乗設定", description: "thinking と 👍 のオン／オフに加え、サーバー共通のカスタム便乗リアクションを追加・編集・削除します。", note: "サーバーの管理権限が必要です。" },
           { title: "VC入退室履歴", description: "VC入退室の履歴を送るチャンネルとオン／オフを設定します。", note: "サーバーの管理権限が必要です。" },
           { title: "メッセージ編集履歴", description: "メッセージ編集前後を記録する送信先とオン／オフを設定します。", note: "サーバーの管理権限が必要です。" },
         ],
