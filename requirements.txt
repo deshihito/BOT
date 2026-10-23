@@ -22,6 +22,7 @@ groq
 mplfinance
 pandas
 scipy
+pypdf
 vosk
 yfinance
 duckduckgo-search

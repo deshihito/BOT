@@ -7,7 +7,7 @@ import logging
 import discord
 from discord.ext import commands
 
-from core import ai_preferences, ai_provider_router, ai_tools, logfare
+from core import ai_input, ai_preferences, ai_provider_router, ai_tools, logfare
 
 logger = logging.getLogger(__name__)
 
@@ -16,12 +16,14 @@ class AICog(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
 
-    @commands.command(name="ai", help="AIに質問します。例: !ai 今日の天気を教えて")
+    @commands.command(name="ai", help="AIに質問します。PDF/DOCX/テキスト添付に対応。画像は対応モデルのみ。")
     @commands.cooldown(1, 5.0, commands.BucketType.user)
     async def ai(self, ctx: commands.Context, *, prompt: str = ""):
         prompt = prompt.strip()
-        if not prompt:
+        attachments = list(getattr(getattr(ctx, "message", None), "attachments", []) or [])
+        if not prompt and not attachments:
             return await ctx.reply("使い方: `!ai 質問内容`", mention_author=False)
+        has_images = ai_input.has_image_attachment(attachments)
         preferred = ai_preferences.get_model(ctx.author.id) or logfare.configured_default_model()
         auto = preferred == ai_provider_router.AUTO_MODEL
         kios_model = preferred.partition("kiosapi::")[2] if preferred.startswith("kiosapi::") else None
@@ -37,12 +39,18 @@ class AICog(commands.Cog):
                 model, exact = preferred, True
                 reasoning_effort = None
                 model_info = None
+                images_supported = False
+                if kios_model and has_images:
+                    kios_catalog = await ai_provider_router.fetch_kiosapi_models()
+                    model_info = next((item for item in kios_catalog if item.get("id") == kios_model), None)
+                    images_supported = ai_provider_router.supports_images("kiosapi", kios_model, model_info)
             elif apinex_model:
                 model, exact = apinex_model, True
                 requested_effort = ai_preferences.get_reasoning_effort(ctx.author.id)
                 supported_efforts = ai_provider_router.supported_reasoning_efforts("apinex", apinex_model)
                 reasoning_effort = requested_effort if requested_effort in supported_efforts else None
                 model_info = None
+                images_supported = ai_provider_router.supports_images("apinex", apinex_model)
             else:
                 model, exact = await logfare.resolve_model(preferred)
                 reasoning_effort = ai_preferences.get_reasoning_effort(ctx.author.id)
@@ -53,11 +61,20 @@ class AICog(commands.Cog):
                     )
                 except Exception:
                     model_info = None
+                images_supported = ai_provider_router.supports_images("logfare", model, model_info)
                 if reasoning_effort:
                     if not model_info or reasoning_effort not in logfare.reasoning_efforts(model_info):
                         reasoning_effort = None
             can_use_web_search = bool(
                 model_info and (model_info.get("chat_capabilities") or {}).get("tools") is True
+            )
+            if has_images and not images_supported:
+                return await ctx.reply(
+                    "選択中のモデルは画像入力に対応していません。画像対応モデルを選んでください。",
+                    mention_author=False,
+                )
+            user_content = await ai_input.build_user_content(
+                prompt, attachments, images_supported=images_supported
             )
             messages = [
                 {
@@ -67,7 +84,7 @@ class AICog(commands.Cog):
                         + ("必要に応じてweb_searchを使い、回答に参照URLを含めてください。" if can_use_web_search else "")
                     ),
                 },
-                {"role": "user", "content": prompt},
+                {"role": "user", "content": user_content},
             ]
             async with ctx.typing():
                 if auto:
@@ -87,6 +104,8 @@ class AICog(commands.Cog):
                     )
                 else:
                     answer = await logfare.chat(model, messages, reasoning_effort=reasoning_effort)
+        except ai_input.AttachmentInputError as exc:
+            return await ctx.reply(str(exc), mention_author=False)
         except Exception:
             logger.exception("!ai request failed: user=%s model=%s", ctx.author.id, preferred)
             return await ctx.reply("AIへの問い合わせに失敗しました。しばらくしてから再試行してください。", mention_author=False)

@@ -149,7 +149,35 @@ def supported_reasoning_efforts(provider: str, model: str) -> list[str]:
     return []
 
 
-async def chat_with_model(provider: str, model: str, messages: list[dict[str, str]], *,
+def supports_images(provider: str, model: str, metadata: dict[str, Any] | None = None) -> bool:
+    """確認できる入力モダリティ、またはAPInex公式対応モデルだけを許可する。"""
+    name = provider.lower()
+    if name == "apinex":
+        model_id = model.lower().removeprefix("free/")
+        documented = (
+            "gemini-3.8-flash", "gemini-3.1-pro", "claude-sonnet-5.5",
+            "claude-opus-5.5", "gpt-5.6-luna", "gpt-5.6-sol", "gpt-6-luna",
+            "gpt-6-astra",
+        )
+        return any(model_id == candidate or model_id.startswith(candidate + "-")
+                   for candidate in documented)
+    if not isinstance(metadata, dict):
+        return False
+    chat = metadata.get("chat_capabilities") or {}
+    upstream = metadata.get("upstream_metadata") or {}
+    modality_values = (
+        metadata.get("input_modalities"), metadata.get("modalities"),
+        chat.get("input_modalities") if isinstance(chat, dict) else None,
+        upstream.get("input_modalities") if isinstance(upstream, dict) else None,
+    )
+    return any(
+        isinstance(values, (list, tuple, set))
+        and any(str(value).lower() in {"image", "images", "vision"} for value in values)
+        for values in modality_values
+    )
+
+
+async def chat_with_model(provider: str, model: str, messages: list[dict[str, Any]], *,
                           max_tokens: int = 1200, reasoning_effort: str | None = None) -> Answer:
     """特定プロバイダーの指定モデルをフォールバックなしで呼び出す。"""
     name = provider.strip().lower().replace("-", "_")
@@ -175,7 +203,7 @@ def _retry_after(value: str | None) -> float:
     return max(1, min(seconds, 300))
 
 
-async def _call(route: Route, messages: list[dict[str, str]], max_tokens: int,
+async def _call(route: Route, messages: list[dict[str, Any]], max_tokens: int,
                 *, reasoning_effort: str | None = None) -> str:
     if route.name == "logfare":
         try:
@@ -215,7 +243,7 @@ async def _call(route: Route, messages: list[dict[str, str]], max_tokens: int,
     return text
 
 
-async def chat(messages: list[dict[str, str]], *, max_tokens: int = 1200) -> Answer:
+async def chat(messages: list[dict[str, Any]], *, max_tokens: int = 1200) -> Answer:
     configured = routes()
     if not configured:
         raise RuntimeError("利用可能なAIプロバイダーが設定されていません")

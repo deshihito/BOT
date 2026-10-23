@@ -477,7 +477,7 @@ class AIDefaultView(discord.ui.View):
                 f"現在: `{current}`\n\n"
                 f"{'Logfare・KiosAPI・APInex Freeのチャット' if self.kind == 'chat' else 'Logfareの画像生成'}モデルを選べます。"
                 f"{'自動切替を選ぶと設定済みのAPIを順に使います。' if self.kind == 'chat' else ''}"
-                f"{'APInexはFreeモデルのみ表示します。Logfareの一部モデルはトレーニング利用への同意が必要です。' if self.kind == 'chat' else ''}\n"
+                f"{'画像入力は対応モデルのみ利用できます。APInexはFreeモデルのみ表示します。Logfareの一部モデルはトレーニング利用への同意が必要です。' if self.kind == 'chat' else ''}\n"
                 f"モデル一覧 {self.page + 1}/{self.page_count}ページ（全{len(self.models)}件）"
             ),
             color=0xFFFFFF,

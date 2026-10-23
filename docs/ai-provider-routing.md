@@ -51,6 +51,10 @@ AI_APINEX_API_KEY=<APInex のキー>
 APInexでは公式に思考強度が案内されているモデルファミリーに限り `low` / `medium` / `high` を反映します。
 未対応のAPInexモデルとKiosAPIモデルには送信しません。
 
+`!ai` はUTF-8テキスト、PDF、DOCXの内容を取り込めます。画像はJPG/PNG/WEBPを扱い、
+Logfare/KiosAPIのモデルメタデータ、またはAPInex公式の画像対応モデルであることを確認してから送信します。
+能力情報を確認できないモデルは画像を受け付けません。添付は1回4件、各8MB、合計12MBまでです。
+
 上記以外の OpenAI 互換 API も、名前を順番に追加し、URL とキーを指定できます。
 
 ```dotenv
