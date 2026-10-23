@@ -25,9 +25,10 @@ class AICog(commands.Cog):
         preferred = ai_preferences.get_model(ctx.author.id) or logfare.configured_default_model()
         auto = preferred == ai_provider_router.AUTO_MODEL
         kios_model = preferred.partition("kiosapi::")[2] if preferred.startswith("kiosapi::") else None
+        apinex_model = preferred.partition("apinex::")[2] if preferred.startswith("apinex::") else None
         if auto and not ai_provider_router.enabled():
             return await ctx.reply("AIの自動切替が未設定です。", mention_author=False)
-        if not auto and not kios_model and not logfare.api_key():
+        if not auto and not kios_model and not apinex_model and not logfare.api_key():
             return await ctx.reply("Logfareが未設定です。`.env` に `LOGFARE_API_KEY` を設定してください。", mention_author=False)
 
         sources = []
@@ -35,6 +36,12 @@ class AICog(commands.Cog):
             if auto or kios_model:
                 model, exact = preferred, True
                 reasoning_effort = None
+                model_info = None
+            elif apinex_model:
+                model, exact = apinex_model, True
+                requested_effort = ai_preferences.get_reasoning_effort(ctx.author.id)
+                supported_efforts = ai_provider_router.supported_reasoning_efforts("apinex", apinex_model)
+                reasoning_effort = requested_effort if requested_effort in supported_efforts else None
                 model_info = None
             else:
                 model, exact = await logfare.resolve_model(preferred)
@@ -69,6 +76,11 @@ class AICog(commands.Cog):
                 elif kios_model:
                     routed = await ai_provider_router.chat_with_model("kiosapi", kios_model, messages)
                     answer = routed.text
+                elif apinex_model:
+                    routed = await ai_provider_router.chat_with_model(
+                        "apinex", apinex_model, messages, reasoning_effort=reasoning_effort
+                    )
+                    answer = routed.text
                 elif can_use_web_search:
                     answer, sources = await ai_tools.answer_with_web_search(
                         model, messages, reasoning_effort=reasoning_effort
@@ -89,6 +101,7 @@ class AICog(commands.Cog):
         )
         footer = (f"モデル: {routed.model} / 接続先: {routed.provider}（自動切替）"
                   if auto else f"モデル: {routed.model} / 接続先: KiosAPI" if kios_model
+                  else f"モデル: {routed.model} / 接続先: APInex" if apinex_model
                   else f"モデル: {model}{notice}")
         embed.set_footer(text=footer)
         unique_sources = {source.get("url"): source for source in sources if source.get("url")}

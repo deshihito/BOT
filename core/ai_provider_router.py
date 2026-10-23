@@ -33,6 +33,7 @@ BASE_URLS = {
     "fireworks": "https://api.fireworks.ai/inference/v1",
     "nvidia_nim": "https://integrate.api.nvidia.com/v1",
     "openai": "https://api.openai.com/v1",
+    "apinex": "https://api.apinex.bond/v1",
 }
 
 _cooldown_until: dict[str, float] = {}
@@ -114,8 +115,42 @@ async def fetch_kiosapi_models() -> list[dict[str, Any]]:
     )
 
 
+async def fetch_apinex_free_models() -> list[dict[str, Any]]:
+    """APInexの認証済みカタログからFreeカテゴリだけを返す。"""
+    key = (os.getenv("AI_APINEX_API_KEY", "").strip()
+           or os.getenv("APINEX_API_KEY", "").strip())
+    if not key:
+        return []
+    base_url = os.getenv("AI_APINEX_BASE_URL", "https://api.apinex.bond/v1").strip().rstrip("/")
+    async with aiohttp.ClientSession(timeout=TIMEOUT) as session:
+        async with session.get(
+            f"{base_url}/models",
+            headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
+        ) as response:
+            response.raise_for_status()
+            payload = await response.json()
+    return sorted(
+        (model for model in payload.get("data", [])
+         if isinstance(model, dict) and isinstance(model.get("id"), str)
+         and model["id"].startswith("free/") and model["id"].strip()),
+        key=lambda model: model["id"].lower(),
+    )
+
+
+def supported_reasoning_efforts(provider: str, model: str) -> list[str]:
+    """APIとモデルで明示的に対応する場合だけ思考強度を返す。"""
+    if provider.lower() != "apinex":
+        return []
+    model_id = model.lower().removeprefix("free/")
+    supported_families = ("deepseek-", "deepseek/", "gemini-", "gemini/", "claude-",
+                          "claude/", "gpt-", "gpt/", "glm-", "glm/", "grok-")
+    if model_id.startswith(supported_families):
+        return ["low", "medium", "high"]
+    return []
+
+
 async def chat_with_model(provider: str, model: str, messages: list[dict[str, str]], *,
-                          max_tokens: int = 1200) -> Answer:
+                          max_tokens: int = 1200, reasoning_effort: str | None = None) -> Answer:
     """特定プロバイダーの指定モデルをフォールバックなしで呼び出す。"""
     name = provider.strip().lower().replace("-", "_")
     prefix = f"AI_{name.upper()}"
@@ -125,8 +160,10 @@ async def chat_with_model(provider: str, model: str, messages: list[dict[str, st
                 or BASE_URLS.get(name, "https://kiosapi.com/v1" if name == "kiosapi" else ""))
     if not key or not base_url or not model:
         raise RuntimeError("指定プロバイダーの設定がありません")
+    if reasoning_effort not in supported_reasoning_efforts(name, model):
+        reasoning_effort = None
     route = Route(name, model, base_url.rstrip("/"), key)
-    text = await _call(route, messages, max_tokens)
+    text = await _call(route, messages, max_tokens, reasoning_effort=reasoning_effort)
     return Answer(text, name, model)
 
 
@@ -138,7 +175,8 @@ def _retry_after(value: str | None) -> float:
     return max(1, min(seconds, 300))
 
 
-async def _call(route: Route, messages: list[dict[str, str]], max_tokens: int) -> str:
+async def _call(route: Route, messages: list[dict[str, str]], max_tokens: int,
+                *, reasoning_effort: str | None = None) -> str:
     if route.name == "logfare":
         try:
             return await logfare.chat(route.model, messages, max_tokens=max_tokens)
@@ -150,6 +188,8 @@ async def _call(route: Route, messages: list[dict[str, str]], max_tokens: int) -
     payload: dict[str, Any] = {
         "model": route.model, "messages": messages, "max_tokens": max_tokens,
     }
+    if reasoning_effort and reasoning_effort in {"low", "medium", "high"}:
+        payload["reasoning_effort"] = reasoning_effort
     async with aiohttp.ClientSession(timeout=TIMEOUT) as session:
         async with session.post(
             f"{route.base_url}/chat/completions", headers=headers, json=payload,

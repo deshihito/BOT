@@ -22,7 +22,7 @@ AI_CEREBRAS_MODEL=gpt-oss-120b
 `AI_PROVIDER_ORDER` にない接続先は使用しません。
 
 組み込みの接続先は `groq`, `gemini`, `openrouter`, `cerebras`, `sambanova`,
-`deepseek`, `mistral`, `together`, `fireworks`, `nvidia_nim`, `openai`, `logfare` です。
+`deepseek`, `mistral`, `together`, `fireworks`, `nvidia_nim`, `openai`, `logfare`, `apinex` です。
 各社のキーは `<PROVIDER>_API_KEY` または `AI_<PROVIDER>_API_KEY` を使います。
 `logfare` は従来の `LOGFARE_API_KEY` を使います。
 
@@ -37,6 +37,19 @@ AI_KIOSAPI_API_KEY=<KiosAPI のキー>
 
 モデル一覧の取得には `GET https://kiosapi.com/v1/models` を使います。
 Logfare を既定のまま使う場合は、KiosAPI モデルを選択しない限り従来の動作は変わりません。
+
+APInex はチャットモデル選択画面に `free/` で始まるモデルだけを表示します。
+モデル一覧には `GET https://api.apinex.bond/v1/models` を使います。選択したモデルは APInex に直接送信します。
+Free モデルはAPIのモデルIDで識別し、課金モデルは候補に含めません。
+
+```dotenv
+AI_APINEX_BASE_URL=https://api.apinex.bond/v1
+AI_APINEX_API_KEY=<APInex のキー>
+```
+
+思考強度は選択中のモデルと接続先が明示的に対応する場合だけ送信します。
+APInexでは公式に思考強度が案内されているモデルファミリーに限り `low` / `medium` / `high` を反映します。
+未対応のAPInexモデルとKiosAPIモデルには送信しません。
 
 上記以外の OpenAI 互換 API も、名前を順番に追加し、URL とキーを指定できます。
 

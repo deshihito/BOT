@@ -448,6 +448,16 @@ class AIDefaultView(discord.ui.View):
                 except Exception:
                     # 片方のカタログが一時的に取得できなくても、もう片方を表示する。
                     pass
+                try:
+                    apinex_models = await ai_provider_router.fetch_apinex_free_models()
+                    models.extend({
+                        **model,
+                        "id": f"apinex::{model['id']}",
+                        "name": f"APInex Free · {model['id'].removeprefix('free/')}",
+                    } for model in apinex_models)
+                except Exception:
+                    # 片方のカタログが一時的に取得できなくても、もう片方を表示する。
+                    pass
                 if not models and logfare_error:
                     raise logfare_error
         except Exception as exc:
@@ -465,9 +475,9 @@ class AIDefaultView(discord.ui.View):
             description=(
                 f"`{'!ai' if self.kind == 'chat' else '!generate'}` で使うデフォルトAIを選択してください。\n"
                 f"現在: `{current}`\n\n"
-                f"{'Logfare・KiosAPIのチャット' if self.kind == 'chat' else 'Logfareの画像生成'}モデルを選べます。"
+                f"{'Logfare・KiosAPI・APInex Freeのチャット' if self.kind == 'chat' else 'Logfareの画像生成'}モデルを選べます。"
                 f"{'自動切替を選ぶと設定済みのAPIを順に使います。' if self.kind == 'chat' else ''}"
-                f"Logfareの一部モデルはトレーニング利用への同意が必要です。\n"
+                f"{'APInexはFreeモデルのみ表示します。Logfareの一部モデルはトレーニング利用への同意が必要です。' if self.kind == 'chat' else ''}\n"
                 f"モデル一覧 {self.page + 1}/{self.page_count}ページ（全{len(self.models)}件）"
             ),
             color=0xFFFFFF,
@@ -529,6 +539,14 @@ class ReasoningView(discord.ui.View):
         model_id = ai_preferences.get_model(user_id) or logfare.configured_default_model()
         if model_id == ai_provider_router.AUTO_MODEL:
             return None, "自動切替モデルでは、この思考強度設定を使えません。"
+        if model_id.startswith("kiosapi::"):
+            return None, f"モデル `{model_id.removeprefix('kiosapi::')}` はこの接続先の思考強度設定に対応していません。"
+        if model_id.startswith("apinex::"):
+            apinex_model = model_id.removeprefix("apinex::")
+            efforts = ai_provider_router.supported_reasoning_efforts("apinex", apinex_model)
+            if not efforts:
+                return None, f"APInexモデル `{apinex_model}` は思考強度の設定に対応していません。"
+            return cls(user_id, model_id, efforts), None
         models = await logfare.fetch_free_chat_models()
         model = next((item for item in models if item.get("id") == model_id), None)
         if model is None:
