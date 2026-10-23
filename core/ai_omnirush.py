@@ -7,7 +7,9 @@ from pathlib import Path
 import shutil
 import tempfile
 
-CLI_TIMEOUT_SECONDS = 90
+DEFAULT_CLI_TIMEOUT_SECONDS = 300
+MIN_CLI_TIMEOUT_SECONDS = 30
+MAX_CLI_TIMEOUT_SECONDS = 600
 MAX_PROMPT_CHARS = 32_000
 
 # OmniRush公式CLIで案内されているモデルのみ。Astraは公式既定モデル。
@@ -84,6 +86,15 @@ def model_name(model_id: str | None) -> str:
     return MODEL_NAMES.get(model_id or "", "OmniRush")
 
 
+def cli_timeout_seconds() -> int:
+    """`.env` で指定されたCLI待機時間を安全な範囲へ丸める。"""
+    try:
+        configured = int(os.getenv("OMNIRUSH_TIMEOUT_SECONDS", ""))
+    except (TypeError, ValueError):
+        return DEFAULT_CLI_TIMEOUT_SECONDS
+    return max(MIN_CLI_TIMEOUT_SECONDS, min(MAX_CLI_TIMEOUT_SECONDS, configured))
+
+
 async def chat(model_id: str, prompt: str, *, reasoning_effort: str | None = None) -> str:
     """一時ディレクトリと最小環境で、許可済みモデルを一度だけ呼び出す。"""
     if model_id not in MODEL_IDS:
@@ -118,6 +129,7 @@ async def chat(model_id: str, prompt: str, *, reasoning_effort: str | None = Non
         "LANG": "C.UTF-8",
         "LC_ALL": "C.UTF-8",
     }
+    timeout_seconds = cli_timeout_seconds()
 
     async with _request_lock:
         with tempfile.TemporaryDirectory(prefix="bot-omnirush-") as workdir:
@@ -131,13 +143,15 @@ async def chat(model_id: str, prompt: str, *, reasoning_effort: str | None = Non
                     stderr=asyncio.subprocess.PIPE,
                 )
                 stdout, stderr = await asyncio.wait_for(
-                    process.communicate(), timeout=CLI_TIMEOUT_SECONDS
+                    process.communicate(), timeout=timeout_seconds
                 )
             except asyncio.TimeoutError as exc:
                 if "process" in locals() and process.returncode is None:
                     process.kill()
                     await process.communicate()
-                raise OmniRushError("OmniRushの応答が90秒以内に完了しませんでした。") from exc
+                raise OmniRushError(
+                    f"OmniRushの応答が{timeout_seconds}秒以内に完了しませんでした。"
+                ) from exc
             except asyncio.CancelledError:
                 if "process" in locals() and process.returncode is None:
                     process.kill()
