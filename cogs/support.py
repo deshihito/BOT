@@ -59,6 +59,7 @@ SUPPORT_ACTIONS = [
     app_commands.Choice(name="チケットツール", value="ticket"),
     app_commands.Choice(name="認証パネル作成", value="auth_panel"),
     app_commands.Choice(name="ロールパネル作成", value="role_panel"),
+    app_commands.Choice(name="Auto react設定", value="auto_react"),
 ]
 
 SUPPORT_GENRES = {
@@ -101,6 +102,7 @@ SUPPORT_ACTIONS_BY_GENRE = {
     "bumprta": [(c.name, c.value) for c in SUPPORT_ACTIONS[5:8]],
     "event": [(SUPPORT_ACTIONS[9].name, SUPPORT_ACTIONS[9].value)],
 }
+SUPPORT_ACTIONS_BY_GENRE["server"].append((SUPPORT_ACTIONS[17].name, SUPPORT_ACTIONS[17].value))
 
 THINKING_SECTION = "thinking_reaction"
 BINJOU_SECTION = "binjou"
@@ -111,6 +113,7 @@ STICKY_SECTION = "sticky"
 AUTH_SECTION = "auth"
 ROLE_PANEL_SECTION = "role_panel"
 HONEYPOT_SECTION = "honeypot"
+AUTO_REACT_SECTION = "auto_react"
 
 AUTH_MODE_SIMPLE = "simple"
 AUTH_MODE_FORM = "form"
@@ -2681,6 +2684,98 @@ class SupportPanelView(discord.ui.View):
         return discord.Embed(title="サポート操作", description=description, color=0xFFFFFF)
 
 
+class AutoReactChannelSelect(discord.ui.ChannelSelect):
+    def __init__(self, parent_view):
+        self.parent_view = parent_view
+        super().__init__(
+            placeholder="Auto reactを設定するチャンネルを選択",
+            channel_types=[discord.ChannelType.text, discord.ChannelType.news],
+            min_values=1,
+            max_values=1,
+        )
+
+    async def callback(self, interaction: discord.Interaction):
+        if not self.parent_view.can_manage(interaction):
+            return await interaction.response.send_message("この設定にはサーバー管理権限が必要です。", ephemeral=True)
+        self.parent_view.channel_id = self.values[0].id
+        await self.parent_view.refresh(interaction)
+
+
+class AutoReactModal(discord.ui.Modal, title="Auto reactの絵文字"):
+    emojis = discord.ui.TextInput(
+        label="自動で付ける絵文字（改行またはカンマ区切り・空欄で解除）",
+        placeholder="🎉, <:custom:123456789012345678>",
+        max_length=500,
+        required=False,
+        style=discord.TextStyle.paragraph,
+    )
+
+    def __init__(self, parent_view):
+        super().__init__()
+        self.parent_view = parent_view
+
+    async def on_submit(self, interaction: discord.Interaction):
+        await self.parent_view.save(interaction, self.emojis.value)
+
+
+class AutoReactSettingsView(discord.ui.View):
+    def __init__(self, settings: dict):
+        super().__init__(timeout=300)
+        self.settings = settings
+        self.channel_id = None
+        self.add_item(AutoReactChannelSelect(self))
+
+    @staticmethod
+    def can_manage(interaction):
+        permissions = getattr(interaction.user, "guild_permissions", None)
+        return bool(getattr(permissions, "manage_guild", False) or getattr(permissions, "administrator", False))
+
+    def embed(self):
+        rows = self.settings.get("channels", {})
+        lines = [f"<#{channel_id}>: {' '.join(emojis)}" for channel_id, emojis in rows.items()]
+        return discord.Embed(
+            title="Auto react設定",
+            description=("メッセージ受信時に自動で付ける絵文字をチャンネルごとに設定します。\n"
+                         "複数の絵文字は改行またはカンマで区切ってください。空欄で選択チャンネルの設定を解除します。\n\n"
+                         + ("\n".join(lines) if lines else "設定済みチャンネルはありません。")),
+            color=0xFFFFFF,
+        )
+
+    async def refresh(self, interaction):
+        await edit_panel_v2(interaction, as_panel_v2(self))
+
+    @discord.ui.button(label="選択チャンネルの絵文字を設定", style=discord.ButtonStyle.primary, row=1)
+    async def configure(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not self.can_manage(interaction):
+            return await interaction.response.send_message("この設定にはサーバー管理権限が必要です。", ephemeral=True)
+        if self.channel_id is None:
+            return await interaction.response.send_message("先にチャンネルを選択してください。", ephemeral=True)
+        await interaction.response.send_modal(AutoReactModal(self))
+
+    async def save(self, interaction, text):
+        if not self.can_manage(interaction):
+            return await interaction.response.send_message("この設定にはサーバー管理権限が必要です。", ephemeral=True)
+        raw_emojis = [value.strip() for value in str(text or "").replace("\n", ",").split(",") if value.strip()]
+        if len(raw_emojis) > 20:
+            return await interaction.response.send_message("絵文字は1チャンネルにつき20個までです。", ephemeral=True)
+        try:
+            emojis = [str(normalize_binjou_emoji(value)) for value in raw_emojis]
+        except ValueError as exc:
+            return await interaction.response.send_message(str(exc), ephemeral=True)
+        rows = dict(self.settings.get("channels", {}))
+        if emojis:
+            rows[str(self.channel_id)] = list(dict.fromkeys(emojis))
+        else:
+            rows.pop(str(self.channel_id), None)
+        try:
+            await guild_settings.get_store().update(interaction.guild_id, AUTO_REACT_SECTION, channels=rows)
+            self.settings["channels"] = rows
+            await interaction.response.send_message("Auto react設定を更新しました。", ephemeral=True)
+        except Exception:
+            logger.exception("Auto react設定の保存に失敗しました")
+            await interaction.response.send_message("設定の保存に失敗しました。", ephemeral=True)
+
+
 class SupportCog(commands.Cog):
     SUPPORT_REQUIRED_PERMISSIONS = {
         "muted": "manage_roles",
@@ -2689,6 +2784,7 @@ class SupportCog(commands.Cog):
         "clear": "manage_messages",
         "role_bulk": "manage_roles",
         "binjou": "manage_guild",
+        "auto_react": "manage_guild",
         "giveaway": "manage_guild",
         "vc_log": "manage_guild",
         "message_log": "manage_guild",
@@ -3484,6 +3580,18 @@ class SupportCog(commands.Cog):
 
         store = guild_settings.get_store()
         await store.ensure_loaded()
+        auto_react = store.get(message.guild.id, AUTO_REACT_SECTION).get("channels", {})
+        emojis = auto_react.get(str(message.channel.id), []) if isinstance(auto_react, dict) else []
+        for emoji_value in emojis if isinstance(emojis, list) else []:
+            try:
+                await message.add_reaction(normalize_binjou_emoji(emoji_value))
+            except (ValueError, discord.Forbidden, discord.HTTPException):
+                logger.warning(
+                    "Auto reactを追加できません (guild=%s channel=%s emoji=%s)",
+                    message.guild.id,
+                    message.channel.id,
+                    emoji_value,
+                )
         settings = get_sticky_settings(store, message.guild.id)
 
         if settings["enabled"] and settings["channel_id"] == message.channel.id:
@@ -3773,6 +3881,13 @@ class SupportCog(commands.Cog):
                 view=as_panel_v2(view),
                 ephemeral=True,
             )
+
+        if selected == "auto_react":
+            store = guild_settings.get_store()
+            await store.ensure_loaded()
+            settings = store.get(interaction.guild_id, AUTO_REACT_SECTION)
+            view = AutoReactSettingsView(settings if isinstance(settings, dict) else {})
+            return await interaction.response.send_message(view=as_panel_v2(view), ephemeral=True)
 
         if selected == "role_bulk":
             return await self._role_bulk(interaction, None)
