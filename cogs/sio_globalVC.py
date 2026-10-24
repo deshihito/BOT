@@ -5,6 +5,7 @@ import asyncio
 import dataclasses
 import io
 import logging
+import re
 import sys
 import threading
 import time
@@ -36,6 +37,7 @@ JITTER_PREFILL_FRAMES = 3  # 話し始めにこの分(60ms)溜めてから流し
 TAIL_FLUSH_SECONDS = 0.08  # 溜まりきらない端数も、新しい音声がこれだけ来なければ流しきる
 TRACK_IDLE_SECONDS = 2.0   # 無音が続いた話者のバッファを破棄するまでの時間
 PLAYBACK_WATCHDOG_SECONDS = 2.0  # 再生が止まっていないか見回る間隔
+STALE_VC_GRACE_SECONDS = 15.0    # 切断されたままの接続をルーム一覧から外すまでの猶予 (再接続中は消さない)
 
 
 # ============================================================
@@ -71,6 +73,35 @@ def _remove_vc_from_rooms(vc: voice_recv.VoiceRecvClient) -> Optional[str]:
     return None
 
 
+def _prune_dead_clients(room_name: Optional[str] = None) -> None:
+    """切断されたまま戻ってこない接続を GLOBAL_ROOMS から外す。
+
+    外部切断・キック・ネットワーク断などで一覧にだけ残ると、「すでに参加しています」や満員扱いが
+    永久に解けず、他サーバーの音声も存在しない接続へ送り続けてしまう。再接続中の一時的な切断は猶予で吸収する。
+    """
+    now = time.monotonic()
+    names = [room_name] if room_name else list(GLOBAL_ROOMS)
+    for name in names:
+        for vc in list(GLOBAL_ROOMS.get(name, ())):
+            try:
+                connected = vc.is_connected()
+            except Exception:
+                connected = False
+            if connected:
+                vc._gvc_down_since = None
+                continue
+            since = getattr(vc, "_gvc_down_since", None)
+            if since is None:
+                vc._gvc_down_since = now
+            elif now - since >= STALE_VC_GRACE_SECONDS:
+                logger.info("グローバルVC: 切断されたままの接続を一覧から外します (room=%s)", name)
+                _remove_vc_from_rooms(vc)
+                try:
+                    vc.stop_listening()
+                except Exception:
+                    logger.debug("stop_listening 失敗 (無視)", exc_info=True)
+
+
 async def _disconnect_and_cleanup(vc: voice_recv.VoiceRecvClient) -> None:
     """listen/play を止めて切断し、ルーム管理からも除去する。"""
     _remove_vc_from_rooms(vc)
@@ -82,6 +113,17 @@ async def _disconnect_and_cleanup(vc: voice_recv.VoiceRecvClient) -> None:
         await vc.disconnect(force=True)
     except Exception:
         logger.debug("disconnect 失敗 (無視)", exc_info=True)
+
+
+_WEBHOOK_BANNED_WORDS = (("discord", "i", "і"), ("clyde", "y", "у"))  # Webhook名に使えない語は見た目が近い文字へ置換
+
+
+def _safe_webhook_username(name: str) -> str:
+    """Webhook の username に使えない語 (discord / clyde) を含むと送信が 400 で失敗するので避ける。"""
+    for word, ch, repl in _WEBHOOK_BANNED_WORDS:
+        name = re.sub(word, lambda m: m.group(0).replace(ch, repl).replace(ch.upper(), repl.upper()),
+                      name, flags=re.IGNORECASE)
+    return name[:80].strip() or "unknown"
 
 
 def _can_delete_room(room: RoomConfig, user, guild: Optional[discord.Guild]) -> bool:
@@ -187,6 +229,22 @@ def _media_type_candidates(session=None) -> list:
     return candidates
 
 
+_DAVE_SILENCE_FRAME = b"\xf8\xff\xfe"  # Opus の無音フレームは DAVE でも暗号化されずに送られてくる
+_candidates_cache: list = []
+
+
+def _cached_media_type_candidates(session) -> list:
+    """MediaType 候補は一度だけ組み立てて使い回す。
+
+    以前は復号に失敗するたびに sys.modules 全体を走査していたため、無音フレームなど復号できない
+    パケットが続くだけで受信スレッドが詰まり、音声が途切れる原因になっていた。
+    """
+    global _candidates_cache
+    if not _candidates_cache:
+        _candidates_cache = _media_type_candidates(session)
+    return _candidates_cache
+
+
 def _patch_voice_recv_client() -> None:
     vc_cls = voice_recv.VoiceRecvClient
     if getattr(vc_cls, "_dave_patch_applied", False):
@@ -205,6 +263,8 @@ def _patch_voice_recv_client() -> None:
         session = _get_dave_session(self)
         if session is None:
             return data
+        if data == _DAVE_SILENCE_FRAME:
+            return data  # 無音フレームは平文のまま。そのままデコーダへ渡せばよい
 
         cached = _media_type_audio
         if cached is not _UNSET:
@@ -215,23 +275,15 @@ def _patch_voice_recv_client() -> None:
                 logger.debug("DAVE decrypt: キャッシュ済み MediaType %r が型不一致。再探索します。", cached)
                 _media_type_audio = _UNSET
             except Exception as e:
-                # 型は合っていたが復号自体が失敗 (セッションのエポック更新等の可能性)。
-                # キャッシュを破棄して候補を再探索する。ここを再探索しないままだと
-                # このユーザーの音声が復元されるまで永久に無音になり得る。
-                logger.debug(
-                    "DAVE decrypt: キャッシュ済み MediaType %r で復号失敗 (%r)。再探索します。",
-                    cached, e,
-                )
-                _media_type_audio = _UNSET
+                # 型は合っている。復号失敗はそのパケット/ユーザー固有 (エポック更新直後など) なので、
+                # キャッシュは捨てずにこのパケットだけ落とす。
+                raise RuntimeError(f"DAVE decrypt 失敗: {e!r}") from e
 
         last_error: Exception | None = None
-        for candidate in _media_type_candidates(session):
+        for candidate in _cached_media_type_candidates(session):
             try:
                 result = session.decrypt(user_id, candidate, data)
             except Exception as e:
-                # 元のコードは TypeError しか継続対象にしておらず、それ以外の例外で
-                # ループを即座に抜けてしまい他の候補を一切試さないバグがあった。
-                # (これが「音声が全く聞こえない」の主要因になり得る)
                 last_error = e
                 continue
             _media_type_audio = candidate
@@ -489,6 +541,10 @@ def _request_playback(vc) -> None:
         pass  # ループが閉じている (終了処理中)
 
 
+class _JoinRefused(Exception):
+    """満員・重複参加など、利用者に理由をそのまま伝えられる参加拒否。"""
+
+
 # ============================================================
 # ルームオプション (gvc create で指定するフラグ)
 # ============================================================
@@ -506,6 +562,7 @@ class GlobalVCCog(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
         self.voice_sessions = get_manager(bot)
+        self._join_locks: dict[int, asyncio.Lock] = {}
 
     async def cog_load(self):
         self._playback_watchdog.start()
@@ -516,6 +573,7 @@ class GlobalVCCog(commands.Cog):
     @tasks.loop(seconds=PLAYBACK_WATCHDOG_SECONDS)
     async def _playback_watchdog(self):
         """再接続や外部からの stop などで再生が止まったサーバーを、定期的に見回って再開させる。"""
+        _prune_dead_clients()
         for clients in list(GLOBAL_ROOMS.values()):
             for vc in list(clients):
                 _ensure_playing(vc)
@@ -537,6 +595,46 @@ class GlobalVCCog(commands.Cog):
                     except Exception:
                         logger.debug("stop_listening 失敗 (無視)", exc_info=True)
         return cleanup
+
+    async def _connect_room(self, guild: discord.Guild, vc_channel, user, text_channel, room_name: str):
+        """VC に接続し、受信Sink・再生Sourceを付けてルームへ登録する。ルーム作成時と参加時で共通。"""
+        lock = self._join_locks.setdefault(guild.id, asyncio.Lock())
+        async with lock:  # 同じサーバーからの同時参加で二重に接続しないようにする
+            _prune_dead_clients()
+            room = ROOMS.get(room_name)
+            if room is None:
+                raise _JoinRefused(f"ルーム **{room_name}** は存在しません。")
+            for name, clients in GLOBAL_ROOMS.items():
+                if any(c.guild and c.guild.id == guild.id for c in clients):
+                    raise _JoinRefused(f"このサーバーはすでにルーム **{name}** に参加しています。")
+            if room.max_servers and len(GLOBAL_ROOMS.get(room_name, [])) >= room.max_servers:
+                raise _JoinRefused(f"ルーム **{room_name}** は満員です ({room.max_servers}サーバーまで)。")
+
+            # 別の機能（音楽・録音など）が VC を使っているときは VoiceBusy になる
+            vc = await self.voice_sessions.acquire(
+                guild, vc_channel, "global", user,
+                cleanup=self._cleanup(guild.id), text_channel=text_channel, force=True, timeout=30.0,
+            )
+
+            try:
+                vc.global_source = GlobalAudioSource()
+                is_listening = getattr(vc, "is_listening", None)
+                if callable(is_listening) and is_listening():
+                    vc.stop_listening()  # 使い回された接続に古いSinkが残っていると listen() が失敗する
+                vc.listen(GlobalAudioSink(room_name, vc))
+            except Exception:
+                # 途中で失敗したら VC を掴んだままにせず手放す (接続だけ残って無音になるのを防ぐ)
+                await self._leave_room(vc, reason="error")
+                raise
+
+            vc._gvc_down_since = None
+            members = GLOBAL_ROOMS.setdefault(room_name, [])
+            if vc not in members:
+                members.append(vc)
+
+            # 参加してきたサーバー自身はもちろん、すでに接続中の他サーバーも、止まっていれば再生を始める
+            _start_room_playback(room_name)
+            return vc
 
     async def _leave_room(self, vc, *, reason: str = "stop", notice=None) -> None:
         guild = getattr(vc, "guild", None)
@@ -596,6 +694,23 @@ class GlobalVCCog(commands.Cog):
             embed.add_field(name="説明", value=description, inline=False)
         embed.set_footer(text=f"/voice のパネルからグローバルVC開始/参加 room:{room_name} で参加できます")
         await ctx.send(embed=embed)
+
+        # 作成者がボイスチャンネルにいるなら、そのままボットも参加させる
+        voice = getattr(ctx.author, "voice", None)
+        if not voice or not voice.channel:
+            return await ctx.send(
+                "ℹ️ ボイスチャンネルに入った状態でルームを作成すると、ボットが自動で参加します。"
+                "参加するには /voice のパネルから参加してください。"
+            )
+        try:
+            await self._connect_room(ctx.guild, voice.channel, ctx.author, ctx.channel, room_name)
+        except (_JoinRefused, VoiceBusy) as e:
+            await ctx.send(f"⚠️ ルームは作成しましたが、VC には参加できませんでした: {e}")
+        except Exception as e:
+            logger.warning("グローバルVC: ルーム %s 作成後の自動参加に失敗しました", room_name, exc_info=True)
+            await ctx.send(f"⚠️ ルームは作成しましたが、VC への参加に失敗しました: `{e}`")
+        else:
+            await ctx.send(f"🎙️ **{voice.channel.name}** に参加し、ルーム **{room_name}** に接続しました。")
 
     @gvc_group.command(name="list")
     async def gvc_list(self, ctx: commands.Context):
@@ -698,6 +813,7 @@ class GlobalVCCog(commands.Cog):
         if room.private and password != room.password:
             return await r.send("🔒 このルームは非公開です。正しいパスワードを指定してください。")
 
+        _prune_dead_clients(room_name)
         current_members = GLOBAL_ROOMS.get(room_name, [])
         if room.max_servers and len(current_members) >= room.max_servers:
             return await r.send(f"⚠️ ルーム **{room_name}** は満員です ({room.max_servers}サーバーまで)。")
@@ -717,29 +833,15 @@ class GlobalVCCog(commands.Cog):
                 "先に `/voice のパネルからグローバルVC終了/退出` してください。"
             )
 
-        # 別の機能（音楽・録音など）が VC を使っているときは追い出さずに断る。
         try:
-            vc = await self.voice_sessions.acquire(
-                r.guild, vc_channel, "global", r.user,
-                cleanup=self._cleanup(r.guild.id), text_channel=r.channel, force=True, timeout=30.0,
-            )
+            await self._connect_room(r.guild, vc_channel, r.user, r.channel, room_name)
+        except _JoinRefused as refused:
+            return await r.send(f"⚠️ {refused}")
         except VoiceBusy as busy:
             return await r.send(str(busy))
         except Exception as e:
+            logger.warning("グローバルVC: ルーム %s への参加に失敗しました", room_name, exc_info=True)
             return await r.send(f"<:failed:1490986584676368535> ボイス接続に失敗しました: `{e}`")
-
-        # 再生用 AudioSource を登録する (再生の開始は下の _start_room_playback で行う)
-        vc.global_source = GlobalAudioSource()
-
-        # 受信 Sink の設定
-        sink = GlobalAudioSink(room_name, vc)
-        vc.listen(sink)
-
-        # ルーム管理に追加
-        GLOBAL_ROOMS.setdefault(room_name, []).append(vc)
-
-        # 参加してきたサーバー自身はもちろん、すでに接続中の他サーバーも、止まっていれば再生を始める
-        _start_room_playback(room_name)
 
         await r.send(
             f"🌐 ルーム **{room_name}** に参加しました！\n"
@@ -774,6 +876,8 @@ class GlobalVCCog(commands.Cog):
 
     @gvc_chat_group.command(name="connect")
     async def gvc_chat_connect(self, ctx: commands.Context, room_name: str, password: str = None):
+        if ctx.guild is None:
+            return await ctx.send("⚠️ グロチャはサーバー内のチャンネルで接続してください。")
         room = ROOMS.get(room_name)
         if room is None:
             return await ctx.send(
@@ -853,13 +957,10 @@ class GlobalVCCog(commands.Cog):
                 logger.debug("グロチャ: 添付ファイル取得失敗 (%s)", attachment.filename, exc_info=True)
 
         content = (message.content or "")[:2000]
-        username = f"{message.author.display_name} [{message.guild.name}]"[:80] or "unknown"
+        username = _safe_webhook_username(f"{message.author.display_name} [{message.guild.name}]")
         avatar_url = message.author.display_avatar.url
 
-        for link in links:
-            if link.channel_id == message.channel.id:
-                continue
-
+        async def relay(link: TextLink) -> None:
             files = [discord.File(io.BytesIO(data), filename=name) for data, name in attachment_payloads]
             try:
                 await link.webhook.send(
@@ -881,6 +982,9 @@ class GlobalVCCog(commands.Cog):
                     "ルーム %s: グロチャ中継に失敗しました (channel_id=%s): %r",
                     room_name, link.channel_id, e,
                 )
+
+        # 1サーバーの遅延や失敗が他サーバーへの中継を止めないよう、並行して送る
+        await asyncio.gather(*(relay(link) for link in list(links) if link.channel_id != message.channel.id))
 
     @commands.Cog.listener("on_guild_channel_delete")
     async def on_guild_channel_delete(self, channel: discord.abc.GuildChannel):
