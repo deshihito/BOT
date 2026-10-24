@@ -1,4 +1,4 @@
-"""!ai で自動切替または Logfare のチャットモデルを呼び出す機能。"""
+"""!ai  のチャットモデルを呼び出す機能。"""
 from __future__ import annotations
 
 import io
