@@ -3438,24 +3438,24 @@ class SnsNotifyPanel(discord.ui.LayoutView):
 
 
 # ===== Discord Quest 通知 ==============================================
-# 取得元は既定で discordquest.com の公開API（https://discordquest.com/document）。
-# 環境変数 QUEST_FEED_URL で別のURL（JSON または RSS 2.0）に差し替えられる。
+# 取得元は discordquest.com の公開API（https://discordquest.com/document）。
+# 別の取得元に変えたい場合は QUEST_FEED_URL を書き換える（JSON または RSS 2.0 に対応）。
 # DiscordのユーザートークンでQuest APIを叩く方式（セルフボット）は、
 # Discord利用規約違反でアカウント停止のリスクがあるため実装していない。
 QUEST_SECTION = "quest_notify"
 QUEST_MAX_SEEN = 200
 QUEST_MAX_SEND_PER_CYCLE = 5
 QUEST_MAX_BODY = 2 * 1024 * 1024
-QUEST_POLL_SECONDS = _sns_env_int("QUEST_POLL_SECONDS", 900, 300)
+QUEST_POLL_SECONDS = 900  # 確認間隔（秒）
 QUEST_USER_AGENT = "SupportBot-QuestNotifier/1.0"
 _ORBS_RE = re.compile(r"\borbs?\b", re.I)
 
 
-QUEST_DEFAULT_FEED_URL = "https://api.discordquest.com/api/quests"
+QUEST_FEED_URL = "https://api.discordquest.com/api/quests"
 
 
 def _quest_feed_url() -> str:
-    url = (os.getenv("QUEST_FEED_URL") or QUEST_DEFAULT_FEED_URL).strip()
+    url = QUEST_FEED_URL.strip()
     return url if urlparse(url).scheme in {"http", "https"} else ""
 
 
@@ -3633,7 +3633,7 @@ class QuestFetcher:
     async def fetch(self) -> list[QuestItem]:
         url = _quest_feed_url()
         if not url:
-            raise QuestError("環境変数 QUEST_FEED_URL のURLが不正です。")
+            raise QuestError("QUEST_FEED_URL のURLが不正です。")
         if time.monotonic() < self._next_allowed:
             return list(self._items)
 
@@ -3917,7 +3917,7 @@ class QuestNotifyPanel(discord.ui.LayoutView):
         s = self.settings
         channel = f"<#{s['channel_id']}>" if s["channel_id"] else "未設定"
         role = f"<@&{s['role_id']}>" if s["role_id"] else "なし"
-        source = "カスタム（QUEST_FEED_URL）" if os.getenv("QUEST_FEED_URL") else "discordquest.com（既定）"
+        source = urlparse(_quest_feed_url()).hostname or "未設定"
         text = (
             f"状態: **{'オン' if s['enabled'] else 'オフ'}**\n"
             f"送信先: {channel}\n"
