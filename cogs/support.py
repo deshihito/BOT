@@ -1109,7 +1109,7 @@ class AuthPanelSettingsView(discord.ui.View):
 class RolePanelAssignSelect(discord.ui.Select):
     def __init__(self, options: list[discord.SelectOption]):
         super().__init__(
-            placeholder="付けてほしいロールを選択",
+            placeholder="付与／解除するロールを選択",
             custom_id="role_panel:assign",
             options=options[:ROLE_PANEL_MAX_ROLES],
             min_values=1,
@@ -1146,11 +1146,13 @@ class RolePanelUserView(discord.ui.LayoutView):
         super().__init__(timeout=None)
 
         options: list[discord.SelectOption] = []
+        role_mentions: list[str] = []
         for role_id in role_ids[:ROLE_PANEL_MAX_ROLES]:
             role = guild.get_role(role_id)
             if role is None or role.is_default() or getattr(role, "managed", False):
                 continue
 
+            role_mentions.append(f"• {role.mention}")
             options.append(
                 discord.SelectOption(
                     label=role.name[:100],
@@ -1167,12 +1169,16 @@ class RolePanelUserView(discord.ui.LayoutView):
                 )
             )
 
+        role_list = "\n".join(role_mentions) or "（付与・解除できるロールはありません）"
         self.add_item(
             discord.ui.Container(
                 discord.ui.TextDisplay(
-                    """## ロールパネル
+                    f"""## ロールパネル
+**このパネルで付与・解除できるロール:**
+{role_list}
+
 ドロップダウンからロールを選択してください。
-まだロールを持っていない場合は付与され、すでに持っている場合は解除されます。"""
+まだ持っていないロールは付与され、すでに持っているロールは解除されます。"""
                 ),
                 discord.ui.ActionRow(RolePanelAssignSelect(options)),
                 accent_colour=0x9B59B6,
