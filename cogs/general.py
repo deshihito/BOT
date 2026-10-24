@@ -16,18 +16,17 @@ logger = logging.getLogger(__name__)
 # ============================================================
 # EXP 設定
 # ============================================================
-# レベル L -> L+1 に必要なEXP = round(base * ratio**(L-1))
 CHAT_EXP_BASE = 10
 CHAT_EXP_RATIO = 1.25
 VC_EXP_BASE = 10
 VC_EXP_RATIO = 1.25
 
-CHAT_EXP_INTERVAL = 5 * 60      # 5分ごと
-VC_EXP_INTERVAL = 5 * 60        # 5分ごと（VC滞在）
+CHAT_EXP_INTERVAL = 5 * 60
+VC_EXP_INTERVAL = 5 * 60
 CHAT_EXP_PER_GRANT = 1
 VC_EXP_PER_GRANT = 1
-VC_MAX_GAP_SECONDS = 3 * 60     # tick間隔(1分)より大きく空いた分は滞在とみなさない (再起動中などの水増し防止)
-HISTORY_FUTURE_TOLERANCE = 60   # これ以上未来の履歴時刻は壊れたデータとして扱う
+VC_MAX_GAP_SECONDS = 3 * 60
+HISTORY_FUTURE_TOLERANCE = 60
 
 EXP_STORE_KEY = "exp"
 
@@ -89,14 +88,12 @@ SHORTCUT_ROOTS = {
 # EXP 計算ユーティリティ
 # ============================================================
 def exp_for_next(level: int, base: int, ratio: float) -> int:
-    """レベル level -> level+1 に必要なEXP。"""
     if level < 1:
         level = 1
     return max(1, round(base * (ratio ** (level - 1))))
 
 
 def level_from_exp(total_exp: int, base: int, ratio: float) -> tuple[int, int, int]:
-    """(level, 現在レベル内のexp, 次レベルまでに必要なexp) を返す。"""
     level = 1
     remaining = max(0, int(total_exp))
     while True:
@@ -110,7 +107,6 @@ def level_from_exp(total_exp: int, base: int, ratio: float) -> tuple[int, int, i
 
 
 def general_level(chat_exp: int, vc_exp: int) -> int:
-    """chat と vc の平均で general レベルを算出。"""
     cl, _, _ = level_from_exp(chat_exp, CHAT_EXP_BASE, CHAT_EXP_RATIO)
     vl, _, _ = level_from_exp(vc_exp, VC_EXP_BASE, VC_EXP_RATIO)
     return max(1, (cl + vl) // 2)
@@ -136,60 +132,148 @@ def _as_int(value, default: int = 0) -> int:
 
 _warned_detached_store = False
 
+# ストアに登録できなかった場合のフォールバック。
+# プロセス内で共有される dict を保持し、加算が消えないようにする。
+_DETACHED_EXP: dict = {}
+
+
+def _store_attach(store, key: str, data: dict) -> bool:
+    """store に key: data を登録できるか試す。成功したら True。"""
+    # 1) 通常の dict / MutableMapping
+    try:
+        store[key] = data
+        return True
+    except Exception:
+        pass
+
+    # 2) setdefault フォールバック
+    try:
+        setdefault = getattr(store, "setdefault", None)
+        if callable(setdefault):
+            setdefault(key, data)
+            return True
+    except Exception:
+        pass
+
+    # 3) update / __update__ 系
+    try:
+        update = getattr(store, "update", None)
+        if callable(update):
+            update({key: data})
+            return True
+    except Exception:
+        pass
+
+    # 4) __setitem__ を持たないラッパーで、内部 dict に直接触れる場合
+    for attr in ("_data", "data", "store", "_store", "_values", "values"):
+        inner = getattr(store, attr, None)
+        if isinstance(inner, dict):
+            try:
+                inner[key] = data
+                return True
+            except Exception:
+                pass
+    return False
+
+
+def _store_fetch(store, key: str):
+    getter = getattr(store, "get", None)
+    if not callable(getter):
+        return None
+    try:
+        return getter(key)
+    except Exception:
+        return None
+
 
 def _exp_root() -> dict:
-    """ストア内のEXPデータ(生の dict)を返す。未登録ならストアに登録してから返す。
+    """ストア内のEXPデータ(生の dict)を返す。
 
-    以前は未登録のとき使い捨ての {} を返していたため、そこへ加算しても保存対象に入らず、
-    EXPが一切残らない状態になり得た。
+    未登録ならストアへ登録する。登録できない場合でも、モジュール共有の
+    フォールバック dict を使い続けることで加算が失われないようにする。
     """
     global _warned_detached_store
     store = guild_settings.get_store()
-    getter = getattr(store, "get", None)
 
-    def fetch():
-        if not callable(getter):
-            return None
-        try:
-            return getter(EXP_STORE_KEY)
-        except Exception:
-            return None
-
-    data = fetch()
+    data = _store_fetch(store, EXP_STORE_KEY)
     if isinstance(data, dict):
         return data
 
     data = {}
-    attached = False
-    try:
-        store[EXP_STORE_KEY] = data
-        attached = True
-    except Exception:
-        try:
-            store.setdefault(EXP_STORE_KEY, data)
-            attached = True
-        except Exception:
-            pass
-    if attached:
-        current = fetch()
-        return current if isinstance(current, dict) else data
+    if _store_attach(store, EXP_STORE_KEY, data):
+        current = _store_fetch(store, EXP_STORE_KEY)
+        if isinstance(current, dict):
+            return current
+        return data
+
+    # 登録できなかった → 共有フォールバックを使う
     if not _warned_detached_store:
         _warned_detached_store = True
-        logger.warning("EXP: ストアに '%s' を登録できませんでした。加算が保存されない可能性があります。", EXP_STORE_KEY)
-    return data
+        logger.warning(
+            "EXP: ストア(%s)に '%s' を登録できませんでした。共有フォールバックストアを使用します。",
+            type(store).__name__,
+            EXP_STORE_KEY,
+        )
+    return _DETACHED_EXP
 
 
 async def _exp_load() -> dict:
     store = guild_settings.get_store()
-    if hasattr(store, "ensure_loaded"):
-        await store.ensure_loaded()
+    ensure = getattr(store, "ensure_loaded", None)
+    if callable(ensure):
+        try:
+            await ensure()
+        except Exception:
+            logger.exception("EXP: ensure_loaded に失敗しました")
     return _exp_root()
 
 
 async def _exp_save():
     store = guild_settings.get_store()
-    if hasattr(store, "save"):
-        await store.save()
+    save = getattr(store, "save", None)
+    if callable(save):
+        try:
+            await save()
+        except Exception:
+            logger.exception("EXP: ストアの保存に失敗しました")
+            return
+    # フォールバックが使われている場合は、ストア側に登録できるか再試行する
+    if _DETACHED_EXP:
+        data = _store_fetch(store, EXP_STORE_KEY)
+        if isinstance(data, dict):
+            # ストア側の dict にフォールバックの内容をマージ
+            _merge_exp(data, _DETACHED_EXP)
+            await _try_save_again(store)
+
+
+async def _try_save_again(store):
+    save = getattr(store, "save", None)
+    if callable(save):
+        try:
+            await save()
+        except Exception:
+            logger.exception("EXP: 再保存に失敗しました")
+
+
+def _merge_exp(dst: dict, src: dict):
+    for gid, users in src.items():
+        if not isinstance(users, dict):
+            continue
+        dusers = dst.get(gid)
+        if not isinstance(dusers, dict):
+            dusers = dst[gid] = {}
+        for uid, u in users.items():
+            if not isinstance(u, dict):
+                continue
+            du = dusers.get(uid)
+            if not isinstance(du, dict):
+                dusers[uid] = u
+                continue
+            for k, v in u.items():
+                if k in ("chat_exp", "vc_exp"):
+                    du[k] = max(_as_int(du.get(k)), _as_int(v))
+                elif k in ("last_chat_grant", "vc_last_tick", "vc_accum_sec"):
+                    du[k] = max(_as_float(du.get(k)), _as_float(v))
 
 
 def _exp_ensure(data: dict, guild_id: int, user_id: int) -> dict:
@@ -208,11 +292,6 @@ def _exp_ensure(data: dict, guild_id: int, user_id: int) -> dict:
 
 
 def _grant_chat_exp(user: dict, now: float) -> bool:
-    """メッセージを送ったときに呼ぶ。前回付与から CHAT_EXP_INTERVAL 以上たっていれば +付与。
-
-    付与履歴がない・壊れている(数値でない/未来の時刻など)場合は、待たずにその場で付与して履歴を作り直す。
-    以前は履歴がないと「基準時刻を記録するだけ」で付与せず、履歴が未来時刻だと永久に付与されなかった。
-    """
     last = _as_float(user.get("last_chat_grant"))
     has_history = 0.0 < last <= now + HISTORY_FUTURE_TOLERANCE
     if has_history and now - last < CHAT_EXP_INTERVAL:
@@ -223,14 +302,9 @@ def _grant_chat_exp(user: dict, now: float) -> bool:
 
 
 def _grant_vc_exp(user: dict, now: float) -> bool:
-    """VC滞在時間を累積し、VC_EXP_INTERVAL を超えるたびに付与する。付与したら True。
-
-    状態(vc_last_tick / vc_accum_sec)は付与がなくても毎回更新されるので、呼び出し側は
-    更新のたびに保存すること。
-    """
     last = _as_float(user.get("vc_last_tick"))
     if last <= 0.0 or last > now + HISTORY_FUTURE_TOLERANCE:
-        user["vc_last_tick"] = now  # 履歴がない/壊れている: ここを起点にする
+        user["vc_last_tick"] = now
         return False
     delta = min(max(0.0, now - last), VC_MAX_GAP_SECONDS)
     accum = _as_float(user.get("vc_accum_sec")) + delta
@@ -245,7 +319,6 @@ def _grant_vc_exp(user: dict, now: float) -> bool:
 
 
 def _iter_voice_members(guild: discord.Guild):
-    """ボイスチャンネル/ステージチャンネルにいる人間のメンバーを返す。"""
     for channel in (*guild.voice_channels, *guild.stage_channels):
         for member in channel.members:
             if not member.bot:
@@ -401,7 +474,6 @@ class ShortcutRootSelect(discord.ui.Select):
 
 
 class ShortcutRootPanel(discord.ui.View):
-    """ショートカット登録の入口。選択後は各コマンドの既存パネルを使う。"""
     def __init__(self, item: dict | None = None):
         super().__init__(timeout=300)
         self.item = item
@@ -438,7 +510,6 @@ class ShortcutRootPanel(discord.ui.View):
 
 
 class ShortcutCommitButton(discord.ui.Button):
-    """既存パネルの現在の選択状態をショートカットとして確定する。"""
     def __init__(self):
         super().__init__(label="この内容で決定", style=discord.ButtonStyle.success, row=4)
 
@@ -515,18 +586,15 @@ class ShortcutManagerView(discord.ui.View):
 
 
 # ============================================================
-# EXP パネル (Components V2 前提)
+# EXP パネル
 # ============================================================
 class ExpStatusView(discord.ui.View):
-    """自分のEXP状況を表示するパネル。"""
     def __init__(self, author_id: int, guild_id: int):
         super().__init__(timeout=300)
         self.author_id, self.guild_id = author_id, guild_id
-        # as_panel_v2 が同期で embed() を呼ぶため、初期値のキャッシュを持つ
         self._user_cache = _exp_ensure(_exp_root(), self.guild_id, self.author_id)
 
     async def _load_latest(self):
-        """最新のEXPデータを非同期で読み込んでキャッシュを更新する。"""
         data = await _exp_load()
         self._user_cache = _exp_ensure(data, self.guild_id, self.author_id)
 
@@ -538,7 +606,6 @@ class ExpStatusView(discord.ui.View):
         return "█" * filled + "░" * (width - filled)
 
     def embed(self) -> discord.Embed:
-        """as_panel_v2 (および PanelLayoutView.refresh) が呼び出す同期メソッド。"""
         chat_exp = _as_int(self._user_cache.get("chat_exp"))
         vc_exp = _as_int(self._user_cache.get("vc_exp"))
         cl, ccur, cneed = level_from_exp(chat_exp, CHAT_EXP_BASE, CHAT_EXP_RATIO)
@@ -562,10 +629,7 @@ class ExpStatusView(discord.ui.View):
     async def refresh_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
         if interaction.user.id != self.author_id:
             return await interaction.response.send_message("このパネルを開いたユーザーだけ更新できます。", ephemeral=True)
-        
-        # 最新データをロードしてキャッシュを更新
         await self._load_latest()
-        # self はこの View 自身なので self.view は存在しない。パネルを再構築して編集する
         await edit_panel_v2(interaction, as_panel_v2(self))
 
 
@@ -579,7 +643,6 @@ class ExpRankingView(discord.ui.View):
         self._data_cache = await _exp_load()
 
     def embed(self) -> discord.Embed:
-        """as_panel_v2 (および PanelLayoutView.refresh) が呼び出す同期メソッド。"""
         guild = self._data_cache.get(str(self.guild_id), {})
         rows = []
         for uid, u in guild.items():
@@ -679,8 +742,6 @@ class AIDefaultPageButton(discord.ui.Button):
             )
         self.owner_view.page = next_page
         self.owner_view.refresh_select()
-        
-        # PanelLayoutView の仕様に合わせてリフレッシュ
         if hasattr(self.view, "panel"):
             await self.view.refresh(interaction)
         else:
@@ -929,17 +990,17 @@ class GeneralCog(commands.Cog):
             return await interaction.response.send_message(view=as_panel_v2(view), ephemeral=True)
         if value == "exp_status":
             view = ExpStatusView(interaction.user.id, interaction.guild_id)
-            await view._load_latest()  # 非同期で最新データをキャッシュへ
+            await view._load_latest()
             return await interaction.response.send_message(
                 view=as_panel_v2(view), ephemeral=True
             )
         if value == "exp_ranking":
             view = ExpRankingView(interaction.guild_id)
-            await view._load_latest()  # 非同期で最新データをキャッシュへ
+            await view._load_latest()
             return await interaction.response.send_message(
                 view=as_panel_v2(view), ephemeral=True
             )
-        
+
         wallet = self.bot.get_cog("WalletCog")
         fujo = self.bot.get_cog("FujoSurvival")
         if value == "pay":
@@ -995,7 +1056,6 @@ class GeneralCog(commands.Cog):
         if message.author.bot or message.guild is None:
             return
 
-        # EXP を先に処理する。後ろのショートカット処理で例外が出ても、EXP が付かなくならないように。
         try:
             data = await _exp_load()
             user = _exp_ensure(data, message.guild.id, message.author.id)
@@ -1030,7 +1090,7 @@ class GeneralCog(commands.Cog):
                 _grant_vc_exp(user, now)
                 user["vc_last_tick"] = 0.0
             else:
-                return  # ミュート切替・チャンネル移動など。滞在の計測には影響しない
+                return
             await _exp_save()
         except Exception:
             logger.exception("EXP: VC入退室の処理に失敗しました")
@@ -1040,7 +1100,6 @@ class GeneralCog(commands.Cog):
     # ============================================================
     @tasks.loop(minutes=1)
     async def exp_vc_tick(self):
-        # tasks.loop は例外が1回出るとループごと止まる(以後VC EXPが一切付かなくなる)ので、必ずここで受ける
         try:
             data = await _exp_load()
             now = time.time()
@@ -1051,7 +1110,6 @@ class GeneralCog(commands.Cog):
                     _grant_vc_exp(user, now)
                     touched = True
             if touched:
-                # 付与がなくても基準時刻・累積秒は更新しているので毎回保存する
                 await _exp_save()
         except Exception:
             logger.exception("EXP: VC tick に失敗しました (次の周期で再試行します)")
@@ -1059,7 +1117,6 @@ class GeneralCog(commands.Cog):
     @exp_vc_tick.before_loop
     async def before_exp_vc_tick(self):
         await self.bot.wait_until_ready()
-        # 起動時点でVCにいる人の計測をここから始める (再起動中の分を水増ししない・最初の1周期を無駄にしない)
         try:
             data = await _exp_load()
             now = time.time()
@@ -1109,7 +1166,6 @@ class _MessageFollowup:
 
 
 class ShortcutMessageInteraction:
-    """既存のinteractionベース実装をメッセージトリガーから再利用する薄いアダプター。"""
     def __init__(self, bot, message, user_id: int, *, invoker=None):
         self.client = bot
         self.bot = bot
