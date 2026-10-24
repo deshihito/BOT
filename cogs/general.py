@@ -452,10 +452,6 @@ class ShortcutManagerView(discord.ui.View):
 
     @discord.ui.button(label="一覧更新", style=discord.ButtonStyle.secondary, row=0)
     async def refresh_list(self, interaction: discord.Interaction, button: discord.ui.Button):
-        wrapper = getattr(self.view, "panel", None)
-        if wrapper is not None:
-            wrapper._sync()
-            return await edit_panel_v2(interaction, self.view)
         return await edit_panel_v2(interaction, as_panel_v2(self))
 
 
@@ -510,13 +506,8 @@ class ExpStatusView(discord.ui.View):
         
         # 最新データをロードしてキャッシュを更新
         await self._load_latest()
-        
-        # PanelLayoutView の場合、view.refresh(interaction) で再構築＆編集を行う
-        if hasattr(self.view, "panel"):
-            await self.view.refresh(interaction)
-        else:
-            embed = self.embed()
-            await interaction.response.edit_message(embed=embed, view=self)
+        # self はこの View 自身なので self.view は存在しない。パネルを再構築して編集する
+        await edit_panel_v2(interaction, as_panel_v2(self))
 
 
 class ExpRankingView(discord.ui.View):
@@ -550,12 +541,7 @@ class ExpRankingView(discord.ui.View):
     @discord.ui.button(label="更新", style=discord.ButtonStyle.secondary, row=0)
     async def refresh_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
         await self._load_latest()
-        
-        if hasattr(self.view, "panel"):
-            await self.view.refresh(interaction)
-        else:
-            embed = self.embed()
-            await interaction.response.edit_message(embed=embed, view=self)
+        await edit_panel_v2(interaction, as_panel_v2(self))
 
 
 # ============================================================
