@@ -3368,13 +3368,11 @@ class SnsNotifyPanel(discord.ui.LayoutView):
         s = self.settings
         channel = f"<#{s['channel_id']}>" if s["channel_id"] else "未設定"
         role = f"<@&{s['role_id']}>" if s["role_id"] else "なし"
-        x_state = "RSS（ローカルRSSサービス）" if _sns_x_rss_template() else "RSS設定確認（X_RSS_URL）"
         return (
             f"状態: **{'オン' if s['enabled'] else 'オフ'}**\n"
             f"送信先: {channel}\n"
             f"メンション: {role}\n"
             f"確認間隔: 約{SNS_POLL_SECONDS // 60}分ごと\n"
-            f"Xの取得方法: {x_state}"
         )
 
     def _subs_text(self) -> str:
