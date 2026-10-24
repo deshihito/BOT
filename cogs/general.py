@@ -26,6 +26,8 @@ CHAT_EXP_INTERVAL = 5 * 60      # 5分ごと
 VC_EXP_INTERVAL = 5 * 60        # 5分ごと（VC滞在）
 CHAT_EXP_PER_GRANT = 1
 VC_EXP_PER_GRANT = 1
+VC_MAX_GAP_SECONDS = 3 * 60     # tick間隔(1分)より大きく空いた分は滞在とみなさない (再起動中などの水増し防止)
+HISTORY_FUTURE_TOLERANCE = 60   # これ以上未来の履歴時刻は壊れたデータとして扱う
 
 EXP_STORE_KEY = "exp"
 
@@ -117,27 +119,71 @@ def general_level(chat_exp: int, vc_exp: int) -> int:
 # ============================================================
 # EXP 永続化ヘルパ
 # ============================================================
+def _as_float(value, default: float = 0.0) -> float:
+    try:
+        f = float(value)
+    except (TypeError, ValueError):
+        return default
+    return f if f == f and abs(f) != float("inf") else default
+
+
+def _as_int(value, default: int = 0) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+_warned_detached_store = False
+
+
 def _exp_root() -> dict:
+    """ストア内のEXPデータ(生の dict)を返す。未登録ならストアに登録してから返す。
+
+    以前は未登録のとき使い捨ての {} を返していたため、そこへ加算しても保存対象に入らず、
+    EXPが一切残らない状態になり得た。
+    """
+    global _warned_detached_store
     store = guild_settings.get_store()
-    data = None
-    if hasattr(store, "get"):
+    getter = getattr(store, "get", None)
+
+    def fetch():
+        if not callable(getter):
+            return None
         try:
-            data = store.get(EXP_STORE_KEY)
+            return getter(EXP_STORE_KEY)
         except Exception:
-            data = None
-    if data is None and isinstance(store, dict):
-        data = store.get(EXP_STORE_KEY)
-    return data if isinstance(data, dict) else {}
+            return None
+
+    data = fetch()
+    if isinstance(data, dict):
+        return data
+
+    data = {}
+    attached = False
+    try:
+        store[EXP_STORE_KEY] = data
+        attached = True
+    except Exception:
+        try:
+            store.setdefault(EXP_STORE_KEY, data)
+            attached = True
+        except Exception:
+            pass
+    if attached:
+        current = fetch()
+        return current if isinstance(current, dict) else data
+    if not _warned_detached_store:
+        _warned_detached_store = True
+        logger.warning("EXP: ストアに '%s' を登録できませんでした。加算が保存されない可能性があります。", EXP_STORE_KEY)
+    return data
 
 
 async def _exp_load() -> dict:
     store = guild_settings.get_store()
     if hasattr(store, "ensure_loaded"):
         await store.ensure_loaded()
-    data = _exp_root()
-    if not isinstance(data, dict):
-        data = {}
-    return data
+    return _exp_root()
 
 
 async def _exp_save():
@@ -147,50 +193,63 @@ async def _exp_save():
 
 
 def _exp_ensure(data: dict, guild_id: int, user_id: int) -> dict:
-    g = data.setdefault(str(guild_id), {})
-    u = g.setdefault(str(user_id), {})
+    g = data.get(str(guild_id))
+    if not isinstance(g, dict):
+        g = data[str(guild_id)] = {}
+    u = g.get(str(user_id))
+    if not isinstance(u, dict):
+        u = g[str(user_id)] = {}
     u.setdefault("chat_exp", 0)
     u.setdefault("vc_exp", 0)
     u.setdefault("last_chat_grant", 0.0)
     u.setdefault("vc_accum_sec", 0.0)
     u.setdefault("vc_last_tick", 0.0)
-    u.setdefault("chat_pending", False)
     return u
 
 
 def _grant_chat_exp(user: dict, now: float) -> bool:
-    """前回付与からCHAT_EXP_INTERVAL経過 + メッセージ有り なら付与。"""
-    last = float(user.get("last_chat_grant") or 0.0)
-    if last <= 0.0:
-        user["last_chat_grant"] = now
-        user["chat_pending"] = False
+    """メッセージを送ったときに呼ぶ。前回付与から CHAT_EXP_INTERVAL 以上たっていれば +付与。
+
+    付与履歴がない・壊れている(数値でない/未来の時刻など)場合は、待たずにその場で付与して履歴を作り直す。
+    以前は履歴がないと「基準時刻を記録するだけ」で付与せず、履歴が未来時刻だと永久に付与されなかった。
+    """
+    last = _as_float(user.get("last_chat_grant"))
+    has_history = 0.0 < last <= now + HISTORY_FUTURE_TOLERANCE
+    if has_history and now - last < CHAT_EXP_INTERVAL:
         return False
-    if now - last < CHAT_EXP_INTERVAL:
-        return False
-    if not user.get("chat_pending"):
-        user["last_chat_grant"] = now
-        return False
-    user["chat_exp"] = int(user.get("chat_exp", 0)) + CHAT_EXP_PER_GRANT
+    user["chat_exp"] = _as_int(user.get("chat_exp")) + CHAT_EXP_PER_GRANT
     user["last_chat_grant"] = now
-    user["chat_pending"] = False
     return True
 
 
 def _grant_vc_exp(user: dict, now: float) -> bool:
-    """VC滞在累積がVC_EXP_INTERVALを超えるたびに付与。"""
-    last = float(user.get("vc_last_tick") or 0.0)
-    if last <= 0.0:
-        user["vc_last_tick"] = now
+    """VC滞在時間を累積し、VC_EXP_INTERVAL を超えるたびに付与する。付与したら True。
+
+    状態(vc_last_tick / vc_accum_sec)は付与がなくても毎回更新されるので、呼び出し側は
+    更新のたびに保存すること。
+    """
+    last = _as_float(user.get("vc_last_tick"))
+    if last <= 0.0 or last > now + HISTORY_FUTURE_TOLERANCE:
+        user["vc_last_tick"] = now  # 履歴がない/壊れている: ここを起点にする
         return False
-    delta = max(0.0, now - last)
-    user["vc_accum_sec"] = float(user.get("vc_accum_sec", 0.0)) + delta
+    delta = min(max(0.0, now - last), VC_MAX_GAP_SECONDS)
+    accum = _as_float(user.get("vc_accum_sec")) + delta
     user["vc_last_tick"] = now
     granted = False
-    while user["vc_accum_sec"] >= VC_EXP_INTERVAL:
-        user["vc_accum_sec"] -= VC_EXP_INTERVAL
-        user["vc_exp"] = int(user.get("vc_exp", 0)) + VC_EXP_PER_GRANT
+    while accum >= VC_EXP_INTERVAL:
+        accum -= VC_EXP_INTERVAL
+        user["vc_exp"] = _as_int(user.get("vc_exp")) + VC_EXP_PER_GRANT
         granted = True
+    user["vc_accum_sec"] = accum
     return granted
+
+
+def _iter_voice_members(guild: discord.Guild):
+    """ボイスチャンネル/ステージチャンネルにいる人間のメンバーを返す。"""
+    for channel in (*guild.voice_channels, *guild.stage_channels):
+        for member in channel.members:
+            if not member.bot:
+                yield member
 
 
 # ============================================================
@@ -480,8 +539,8 @@ class ExpStatusView(discord.ui.View):
 
     def embed(self) -> discord.Embed:
         """as_panel_v2 (および PanelLayoutView.refresh) が呼び出す同期メソッド。"""
-        chat_exp = int(self._user_cache.get("chat_exp", 0))
-        vc_exp = int(self._user_cache.get("vc_exp", 0))
+        chat_exp = _as_int(self._user_cache.get("chat_exp"))
+        vc_exp = _as_int(self._user_cache.get("vc_exp"))
         cl, ccur, cneed = level_from_exp(chat_exp, CHAT_EXP_BASE, CHAT_EXP_RATIO)
         vl, vcur, vneed = level_from_exp(vc_exp, VC_EXP_BASE, VC_EXP_RATIO)
         gl = general_level(chat_exp, vc_exp)
@@ -524,8 +583,8 @@ class ExpRankingView(discord.ui.View):
         guild = self._data_cache.get(str(self.guild_id), {})
         rows = []
         for uid, u in guild.items():
-            chat_exp = int(u.get("chat_exp", 0))
-            vc_exp = int(u.get("vc_exp", 0))
+            chat_exp = _as_int(u.get("chat_exp"))
+            vc_exp = _as_int(u.get("vc_exp"))
             gl = general_level(chat_exp, vc_exp)
             rows.append((gl, chat_exp, vc_exp, uid))
         rows.sort(key=lambda x: (x[0], x[1] + x[2]), reverse=True)
@@ -935,19 +994,22 @@ class GeneralCog(commands.Cog):
     async def on_message(self, message: discord.Message):
         if message.author.bot or message.guild is None:
             return
+
+        # EXP を先に処理する。後ろのショートカット処理で例外が出ても、EXP が付かなくならないように。
+        try:
+            data = await _exp_load()
+            user = _exp_ensure(data, message.guild.id, message.author.id)
+            if _grant_chat_exp(user, time.time()):
+                await _exp_save()
+        except Exception:
+            logger.exception("EXP: チャットEXPの付与に失敗しました")
+
         store = guild_settings.get_store()
         await store.ensure_loaded()
         for item in shortcuts.matching(
             store, message.guild.id, message.content.strip(), user_id=message.author.id
         ):
             await self.execute_shortcut(message, item)
-
-        # EXP: メッセージ有りフラグを立て、5分間隔判定
-        data = await _exp_load()
-        user = _exp_ensure(data, message.guild.id, message.author.id)
-        user["chat_pending"] = True
-        _grant_chat_exp(user, time.time())
-        await _exp_save()
 
     # ============================================================
     # EXP: VC入退室
@@ -956,40 +1018,60 @@ class GeneralCog(commands.Cog):
     async def on_voice_state_update(self, member, before, after):
         if member.bot or member.guild is None:
             return
-        data = await _exp_load()
-        user = _exp_ensure(data, member.guild.id, member.id)
-        now = time.time()
-        was_in = before.channel is not None
-        now_in = after.channel is not None
-        if not was_in and now_in:
-            user["vc_last_tick"] = now
-        elif was_in and not now_in:
-            _grant_vc_exp(user, now)
-            user["vc_last_tick"] = 0.0
-        await _exp_save()
+        try:
+            data = await _exp_load()
+            user = _exp_ensure(data, member.guild.id, member.id)
+            now = time.time()
+            was_in = before.channel is not None
+            now_in = after.channel is not None
+            if not was_in and now_in:
+                user["vc_last_tick"] = now
+            elif was_in and not now_in:
+                _grant_vc_exp(user, now)
+                user["vc_last_tick"] = 0.0
+            else:
+                return  # ミュート切替・チャンネル移動など。滞在の計測には影響しない
+            await _exp_save()
+        except Exception:
+            logger.exception("EXP: VC入退室の処理に失敗しました")
 
     # ============================================================
     # EXP: VC定期tick
     # ============================================================
     @tasks.loop(minutes=1)
     async def exp_vc_tick(self):
-        data = await _exp_load()
-        now = time.time()
-        changed = False
-        for guild in self.bot.guilds:
-            for vc in guild.voice_channels:
-                for m in vc.members:
-                    if m.bot:
-                        continue
-                    user = _exp_ensure(data, guild.id, m.id)
-                    if _grant_vc_exp(user, now):
-                        changed = True
-        if changed:
-            await _exp_save()
+        # tasks.loop は例外が1回出るとループごと止まる(以後VC EXPが一切付かなくなる)ので、必ずここで受ける
+        try:
+            data = await _exp_load()
+            now = time.time()
+            touched = False
+            for guild in list(self.bot.guilds):
+                for member in _iter_voice_members(guild):
+                    user = _exp_ensure(data, guild.id, member.id)
+                    _grant_vc_exp(user, now)
+                    touched = True
+            if touched:
+                # 付与がなくても基準時刻・累積秒は更新しているので毎回保存する
+                await _exp_save()
+        except Exception:
+            logger.exception("EXP: VC tick に失敗しました (次の周期で再試行します)")
 
     @exp_vc_tick.before_loop
     async def before_exp_vc_tick(self):
         await self.bot.wait_until_ready()
+        # 起動時点でVCにいる人の計測をここから始める (再起動中の分を水増ししない・最初の1周期を無駄にしない)
+        try:
+            data = await _exp_load()
+            now = time.time()
+            touched = False
+            for guild in list(self.bot.guilds):
+                for member in _iter_voice_members(guild):
+                    _exp_ensure(data, guild.id, member.id)["vc_last_tick"] = now
+                    touched = True
+            if touched:
+                await _exp_save()
+        except Exception:
+            logger.exception("EXP: 起動時のVC計測の初期化に失敗しました")
 
 
 # ============================================================
