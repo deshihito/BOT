@@ -17,8 +17,6 @@ logger = logging.getLogger(__name__)
 # EXP 設定
 # ============================================================
 # レベル L -> L+1 に必要なEXP = round(base * ratio**(L-1))
-# chat: base=10(メッセージ), ratio=1.25
-# vc  : base=10(分),       ratio=1.25
 CHAT_EXP_BASE = 10
 CHAT_EXP_RATIO = 1.25
 VC_EXP_BASE = 10
@@ -469,10 +467,13 @@ class ExpStatusView(discord.ui.View):
     def __init__(self, author_id: int, guild_id: int):
         super().__init__(timeout=300)
         self.author_id, self.guild_id = author_id, guild_id
+        # as_panel_v2 が同期で embed() を呼ぶため、初期値のキャッシュを持つ
+        self._user_cache = _exp_ensure(_exp_root(), self.guild_id, self.author_id)
 
-    async def snapshot(self) -> dict:
+    async def _load_latest(self):
+        """最新のEXPデータを非同期で読み込んでキャッシュを更新する。"""
         data = await _exp_load()
-        return _exp_ensure(data, self.guild_id, self.author_id)
+        self._user_cache = _exp_ensure(data, self.guild_id, self.author_id)
 
     @staticmethod
     def _bar(cur: int, need: int, width: int = 12) -> str:
@@ -481,9 +482,10 @@ class ExpStatusView(discord.ui.View):
         filled = min(width, int(width * cur / need))
         return "█" * filled + "░" * (width - filled)
 
-    def embed_for(self, user: dict) -> discord.Embed:
-        chat_exp = int(user.get("chat_exp", 0))
-        vc_exp = int(user.get("vc_exp", 0))
+    def embed(self) -> discord.Embed:
+        """as_panel_v2 (および PanelLayoutView.refresh) が呼び出す同期メソッド。"""
+        chat_exp = int(self._user_cache.get("chat_exp", 0))
+        vc_exp = int(self._user_cache.get("vc_exp", 0))
         cl, ccur, cneed = level_from_exp(chat_exp, CHAT_EXP_BASE, CHAT_EXP_RATIO)
         vl, vcur, vneed = level_from_exp(vc_exp, VC_EXP_BASE, VC_EXP_RATIO)
         gl = general_level(chat_exp, vc_exp)
@@ -505,18 +507,30 @@ class ExpStatusView(discord.ui.View):
     async def refresh_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
         if interaction.user.id != self.author_id:
             return await interaction.response.send_message("このパネルを開いたユーザーだけ更新できます。", ephemeral=True)
-        user = await self.snapshot()
-        await interaction.response.edit_message(embed=self.embed_for(user), view=self)
+        
+        # 最新データをロードしてキャッシュを更新
+        await self._load_latest()
+        
+        # PanelLayoutView の場合、view.refresh(interaction) で再構築＆編集を行う
+        if hasattr(self.view, "panel"):
+            await self.view.refresh(interaction)
+        else:
+            embed = self.embed()
+            await interaction.response.edit_message(embed=embed, view=self)
 
 
 class ExpRankingView(discord.ui.View):
     def __init__(self, guild_id: int):
         super().__init__(timeout=300)
         self.guild_id = guild_id
+        self._data_cache = _exp_root()
 
-    async def build_embed(self) -> discord.Embed:
-        data = await _exp_load()
-        guild = data.get(str(self.guild_id), {})
+    async def _load_latest(self):
+        self._data_cache = await _exp_load()
+
+    def embed(self) -> discord.Embed:
+        """as_panel_v2 (および PanelLayoutView.refresh) が呼び出す同期メソッド。"""
+        guild = self._data_cache.get(str(self.guild_id), {})
         rows = []
         for uid, u in guild.items():
             chat_exp = int(u.get("chat_exp", 0))
@@ -535,7 +549,13 @@ class ExpRankingView(discord.ui.View):
 
     @discord.ui.button(label="更新", style=discord.ButtonStyle.secondary, row=0)
     async def refresh_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.edit_message(embed=await self.build_embed(), view=self)
+        await self._load_latest()
+        
+        if hasattr(self.view, "panel"):
+            await self.view.refresh(interaction)
+        else:
+            embed = self.embed()
+            await interaction.response.edit_message(embed=embed, view=self)
 
 
 # ============================================================
@@ -614,9 +634,14 @@ class AIDefaultPageButton(discord.ui.Button):
             )
         self.owner_view.page = next_page
         self.owner_view.refresh_select()
-        await interaction.response.edit_message(
-            embed=self.owner_view.embed(), view=self.owner_view
-        )
+        
+        # PanelLayoutView の仕様に合わせてリフレッシュ
+        if hasattr(self.view, "panel"):
+            await self.view.refresh(interaction)
+        else:
+            await interaction.response.edit_message(
+                embed=self.owner_view.embed(), view=self.owner_view
+            )
 
 
 class AIDefaultView(discord.ui.View):
@@ -859,15 +884,17 @@ class GeneralCog(commands.Cog):
             return await interaction.response.send_message(view=as_panel_v2(view), ephemeral=True)
         if value == "exp_status":
             view = ExpStatusView(interaction.user.id, interaction.guild_id)
-            embed = view.embed_for(await view.snapshot())
+            await view._load_latest()  # 非同期で最新データをキャッシュへ
             return await interaction.response.send_message(
-                embed=embed, view=as_panel_v2(view), ephemeral=True
+                view=as_panel_v2(view), ephemeral=True
             )
         if value == "exp_ranking":
             view = ExpRankingView(interaction.guild_id)
+            await view._load_latest()  # 非同期で最新データをキャッシュへ
             return await interaction.response.send_message(
-                embed=await view.build_embed(), view=as_panel_v2(view), ephemeral=True
+                view=as_panel_v2(view), ephemeral=True
             )
+        
         wallet = self.bot.get_cog("WalletCog")
         fujo = self.bot.get_cog("FujoSurvival")
         if value == "pay":
