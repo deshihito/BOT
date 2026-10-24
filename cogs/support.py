@@ -2,17 +2,21 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import html as _html
+import io
 import json
 import logging
 import os
 import random
 import re
 import time
+import wave
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
+from pathlib import Path
 from urllib.parse import quote, urlparse
 
 import aiohttp
@@ -25,18 +29,25 @@ from cogs.auth import get_intro_webhook, sanitize_webhook_name, role_failure_rea
 from core import guild_settings
 from core.panel_v2 import as_embed_v2, as_panel_v2, edit_panel_v2
 
+try:
+    import torch
+    import torchaudio
+    from encodec import EncodecModel, compress, decompress
+    from encodec.utils import convert_audio
+    _ENCODEC_AVAILABLE = True
+except ImportError:
+    _ENCODEC_AVAILABLE = False
+
 logger = logging.getLogger(__name__)
 
 
 async def edit_interaction_message(interaction: discord.Interaction, **kwargs):
-    """未応答なら初回応答で、defer済みなら元の応答を編集する。"""
     if interaction.response.is_done():
         return await interaction.edit_original_response(**kwargs)
     return await interaction.response.edit_message(**kwargs)
 
 
 async def report_callback_error(interaction: discord.Interaction, context: str):
-    """コールバック例外をログに残し、可能ならユーザーにも通知する。"""
     logger.exception("%s", context)
     try:
         if interaction.response.is_done():
@@ -74,6 +85,7 @@ SUPPORT_ACTIONS = [
     app_commands.Choice(name="Auto react設定", value="auto_react"),
     app_commands.Choice(name="SNS新着通知（X・YouTube）", value="sns_notify"),
     app_commands.Choice(name="Quest通知（Discord Orbs）", value="quest_notify"),
+    app_commands.Choice(name="音声トリガー", value="voice_trigger"),
 ]
 
 SUPPORT_GENRES = {
@@ -83,7 +95,7 @@ SUPPORT_GENRES = {
     ),
     "server": (
         "サーバー管理",
-        "ロール操作、絵文字便乗、VC履歴、メッセージ編集履歴、認証パネル、ロールパネル",
+        "ロール操作、絵文字便乗、VC履歴、メッセージ編集履歴、認証パネル、ロールパネル、音声トリガー",
     ),
     "bumprta": ("bump/up・RTA", "通知設定と RTA 状態・ランキング"),
     "event": ("イベント", "抽選の作成"),
@@ -118,6 +130,7 @@ SUPPORT_ACTIONS_BY_GENRE = {
     "event": [(SUPPORT_ACTIONS[9].name, SUPPORT_ACTIONS[9].value)],
 }
 SUPPORT_ACTIONS_BY_GENRE["server"].append((SUPPORT_ACTIONS[17].name, SUPPORT_ACTIONS[17].value))
+SUPPORT_ACTIONS_BY_GENRE["server"].append((SUPPORT_ACTIONS[20].name, SUPPORT_ACTIONS[20].value))
 SUPPORT_ACTIONS_BY_GENRE["notify"] = [
     (SUPPORT_ACTIONS[18].name, SUPPORT_ACTIONS[18].value),
     (SUPPORT_ACTIONS[19].name, SUPPORT_ACTIONS[19].value),
@@ -133,11 +146,16 @@ AUTH_SECTION = "auth"
 ROLE_PANEL_SECTION = "role_panel"
 HONEYPOT_SECTION = "honeypot"
 AUTO_REACT_SECTION = "auto_react"
+VOICE_TRIGGER_SECTION = "voice_trigger"
 
 AUTH_MODE_SIMPLE = "simple"
 AUTH_MODE_FORM = "form"
 AUTH_MAX_QUESTIONS = 5
 ROLE_PANEL_MAX_ROLES = 25
+
+VOICE_TRIGGER_MAX_ENTRIES = 10
+VOICE_TRIGGER_MAX_SECONDS = 5.0
+VOICE_TRIGGER_BANDWIDTH = 6.0
 
 THINKING_EMOJI = discord.PartialEmoji(name="thinking", id=1561695212814995596)
 BINJOU_DEFAULTS = {"thinking": True, "thumbsup": True}
@@ -151,6 +169,94 @@ AUTH_DEFAULT_QUESTIONS = [
         "required": True,
     },
 ]
+
+_encodec_model = None
+
+
+def _get_encodec_model():
+    global _encodec_model
+    if not _ENCODEC_AVAILABLE:
+        raise RuntimeError("encodec / torch がインストールされていません。")
+    if _encodec_model is None:
+        model = EncodecModel.encodec_model_24khz()
+        model.set_target_bandwidth(VOICE_TRIGGER_BANDWIDTH)
+        model.eval()
+        _encodec_model = model
+    return _encodec_model
+
+
+def get_voice_trigger_settings(store, guild_id: int) -> dict:
+    raw = store.get(guild_id, VOICE_TRIGGER_SECTION)
+    if not isinstance(raw, dict):
+        raw = {}
+
+    entries: list[dict] = []
+    raw_entries = raw.get("entries")
+    if isinstance(raw_entries, list):
+        for item in raw_entries[:VOICE_TRIGGER_MAX_ENTRIES]:
+            if not isinstance(item, dict):
+                continue
+            trigger = item.get("trigger")
+            audio_b64 = item.get("audio_b64")
+            if not isinstance(trigger, str) or not trigger:
+                continue
+            if not isinstance(audio_b64, str) or not audio_b64:
+                continue
+            entries.append(
+                {
+                    "trigger": trigger[:100],
+                    "audio_b64": audio_b64,
+                    "label": str(item.get("label") or trigger)[:100],
+                }
+            )
+
+    return {
+        "enabled": raw.get("enabled") if isinstance(raw.get("enabled"), bool) else False,
+        "channel_id": _support_int(raw.get("channel_id")),
+        "admin_only": raw.get("admin_only") if isinstance(raw.get("admin_only"), bool) else True,
+        "entries": entries,
+    }
+
+
+def _voice_trigger_compress_sync(wav_bytes: bytes) -> bytes:
+    model = _get_encodec_model()
+    import tempfile
+    with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
+        tmp.write(wav_bytes)
+        tmp_path = tmp.name
+    try:
+        wav, sr = torchaudio.load(tmp_path)
+    finally:
+        Path(tmp_path).unlink(missing_ok=True)
+
+    max_len = int(sr * VOICE_TRIGGER_MAX_SECONDS)
+    if wav.shape[-1] > max_len:
+        wav = wav[..., :max_len]
+
+    wav = convert_audio(wav, sr, model.sample_rate, model.channels)
+    return compress(model, wav.unsqueeze(0))
+
+
+def _voice_trigger_decompress_sync(compressed: bytes) -> bytes:
+    model = _get_encodec_model()
+    wav = decompress(model, compressed)
+    pcm = (wav.clamp(-1, 1) * 32767).short().numpy().tobytes()
+
+    buf = io.BytesIO()
+    with wave.open(buf, "wb") as wf:
+        wf.setnchannels(model.channels)
+        wf.setsampwidth(2)
+        wf.setframerate(model.sample_rate)
+        wf.writeframes(pcm)
+    return buf.getvalue()
+
+
+async def encodec_compress_wav(wav_bytes: bytes) -> bytes:
+    return await asyncio.to_thread(_voice_trigger_compress_sync, wav_bytes)
+
+
+async def encodec_decompress_to_wav(compressed: bytes) -> bytes:
+    return await asyncio.to_thread(_voice_trigger_decompress_sync, compressed)
 
 
 def _support_int(value) -> int | None:
@@ -276,10 +382,6 @@ def assignable_role_error(guild: discord.Guild, role: discord.Role | None, actio
 
 
 def can_manage_support_panel(interaction: discord.Interaction) -> bool:
-    """
-    認証パネル・ロールパネルの設定を操作できるか。
-    既定: 管理者権限のみ。
-    """
     permissions = getattr(interaction.user, "guild_permissions", None)
     return bool(getattr(permissions, "administrator", False))
 
@@ -293,7 +395,6 @@ def can_manage_role_panel(interaction: discord.Interaction) -> bool:
 
 
 async def edit_auth_panel_message(interaction: discord.Interaction, panel):
-    """Modal後などでも設定パネルを再描画するための補助。"""
     try:
         await interaction.response.edit_message(
             content=None,
@@ -309,7 +410,6 @@ async def edit_auth_panel_message(interaction: discord.Interaction, panel):
 
 
 def get_sticky_settings(store, guild_id: int) -> dict[str, int | str | bool | None]:
-    """Stickyパネル設定。未設定時はオフ・送信先なし・文言なし。"""
     raw = store.get(guild_id, STICKY_SECTION)
     if not isinstance(raw, dict):
         raw = {}
@@ -347,7 +447,6 @@ def mention_with_id(user) -> str:
 
 
 def get_vc_log_settings(store, guild_id: int) -> dict[str, int | bool | None]:
-    """VC入退室ログ設定。未設定時はオフ・送信先なし。"""
     raw = store.get(guild_id, VC_LOG_SECTION)
     if not isinstance(raw, dict):
         raw = {}
@@ -381,7 +480,6 @@ def vc_log_embed(member: discord.Member, channel: discord.VoiceChannel, joined: 
 
 
 def get_activity_log_settings(store, guild_id: int, section: str) -> dict[str, int | bool | None]:
-    """メッセージ・モデレート履歴の共通設定を返す。未設定時はオフ。"""
     raw = store.get(guild_id, section)
     if not isinstance(raw, dict):
         raw = {}
@@ -1819,7 +1917,6 @@ class VCLogSettingsView(discord.ui.View):
     async def turn_off(self, interaction: discord.Interaction, button: discord.ui.Button):
         await self.set_enabled(interaction, False)
 
-
 class StickyChannelSelect(discord.ui.ChannelSelect):
     def __init__(self, parent: "StickySettingsView"):
         self.parent_view = parent
@@ -2795,6 +2892,186 @@ class AutoReactSettingsView(discord.ui.View):
             await interaction.response.send_message("設定の保存に失敗しました。", ephemeral=True)
 
 
+class VoiceTriggerChannelSelect(discord.ui.ChannelSelect):
+    def __init__(self, parent: "VoiceTriggerSettingsView"):
+        self.parent_view = parent
+        super().__init__(
+            placeholder="トリガーを監視するテキストチャンネルを選択",
+            channel_types=[discord.ChannelType.text, discord.ChannelType.news],
+            min_values=1,
+            max_values=1,
+        )
+
+    async def callback(self, interaction: discord.Interaction):
+        if not self.parent_view.can_manage(interaction):
+            return await interaction.response.send_message(
+                "この設定にはサーバー管理権限が必要です。", ephemeral=True
+            )
+        await interaction.response.defer()
+        try:
+            channel = self.values[0]
+            await guild_settings.get_store().update(
+                interaction.guild_id, VOICE_TRIGGER_SECTION, channel_id=channel.id
+            )
+            await self.parent_view.refresh(interaction, "監視チャンネルを設定しました。")
+        except Exception:
+            logger.exception("音声トリガーの監視チャンネル更新に失敗しました")
+            await interaction.followup.send(
+                "設定の更新に失敗しました。Botのログを確認してください。", ephemeral=True
+            )
+
+
+class VoiceTriggerRemoveSelect(discord.ui.Select):
+    def __init__(self, parent: "VoiceTriggerSettingsView"):
+        self.parent_view = parent
+        entries = parent.settings["entries"]
+        options = [
+            discord.SelectOption(
+                label=f"{e['label']} → 「{e['trigger']}」"[:100], value=str(i)
+            )
+            for i, e in enumerate(entries)
+        ]
+        if not options:
+            options = [discord.SelectOption(label="登録なし", value="invalid")]
+        super().__init__(
+            placeholder="削除するトリガーを選択",
+            options=options[:25],
+            min_values=1,
+            max_values=1,
+        )
+
+    async def callback(self, interaction: discord.Interaction):
+        if not self.parent_view.can_manage(interaction):
+            return await interaction.response.send_message(
+                "この設定にはサーバー管理権限が必要です。", ephemeral=True
+            )
+        if self.values[0] == "invalid":
+            return await interaction.response.send_message(
+                "削除対象がありません。", ephemeral=True
+            )
+        await interaction.response.defer()
+        try:
+            idx = int(self.values[0])
+            entries = list(self.parent_view.settings["entries"])
+            if 0 <= idx < len(entries):
+                entries.pop(idx)
+                await guild_settings.get_store().update(
+                    interaction.guild_id, VOICE_TRIGGER_SECTION, entries=entries
+                )
+            await self.parent_view.refresh(interaction, "トリガーを削除しました。")
+        except Exception:
+            logger.exception("音声トリガーの削除に失敗しました")
+            await interaction.followup.send("削除に失敗しました。", ephemeral=True)
+
+
+class VoiceTriggerSettingsView(discord.ui.View):
+    def __init__(self, cog: "SupportCog", settings: dict):
+        super().__init__(timeout=300)
+        self.cog = cog
+        self.settings = settings
+        self.notice: str | None = None
+        self.add_item(VoiceTriggerChannelSelect(self))
+        if settings["entries"]:
+            self.add_item(VoiceTriggerRemoveSelect(self))
+
+    @staticmethod
+    def can_manage(interaction: discord.Interaction) -> bool:
+        permissions = getattr(interaction.user, "guild_permissions", None)
+        return bool(
+            getattr(permissions, "manage_guild", False)
+            or getattr(permissions, "administrator", False)
+        )
+
+    def embed(self, notice: str | None = None) -> discord.Embed:
+        channel_id = self.settings.get("channel_id")
+        channel_label = f"<#{channel_id}>" if channel_id else "未設定"
+        entries = self.settings["entries"]
+        lines = [f"{i + 1}. 「{e['trigger']}」" for i, e in enumerate(entries)] or ["登録なし"]
+        description = (
+            f"状態: **{'オン' if self.settings['enabled'] else 'オフ'}**\n"
+            f"監視チャンネル: {channel_label}\n"
+            f"登録権限: **{'管理者のみ' if self.settings['admin_only'] else 'サーバーメンバー全員'}**\n"
+            f"登録数: **{len(entries)} / {VOICE_TRIGGER_MAX_ENTRIES}**\n\n"
+            + "\n".join(lines)
+            + "\n\n※ 登録は `/voice_trigger` で音声ファイルを添付して行います。"
+            + "\n※ 再生にはBotがVCに参加している必要があります。"
+        )
+        if notice:
+            description = f"{notice}\n\n{description}"
+        return discord.Embed(
+            title="音声トリガー設定", description=description[:4000], color=0x1ABC9C
+        )
+
+    async def refresh(self, interaction: discord.Interaction, notice: str | None = None):
+        self.settings = get_voice_trigger_settings(
+            guild_settings.get_store(), interaction.guild_id
+        )
+        self.notice = notice
+        self.clear_items()
+        self.add_item(VoiceTriggerChannelSelect(self))
+        if self.settings["entries"]:
+            self.add_item(VoiceTriggerRemoveSelect(self))
+        await interaction.edit_original_response(
+            embed=self.embed(notice), view=self
+        )
+
+    async def set_enabled(self, interaction: discord.Interaction, enabled: bool):
+        if not self.can_manage(interaction):
+            return await interaction.response.send_message(
+                "この設定にはサーバー管理権限が必要です。", ephemeral=True
+            )
+        if enabled and self.settings.get("channel_id") is None:
+            return await interaction.response.send_message(
+                "先に監視チャンネルを選択してください。", ephemeral=True
+            )
+        await interaction.response.defer()
+        try:
+            await guild_settings.get_store().update(
+                interaction.guild_id, VOICE_TRIGGER_SECTION, enabled=enabled
+            )
+            await self.refresh(
+                interaction, f"音声トリガーを{'オン' if enabled else 'オフ'}にしました。"
+            )
+        except Exception:
+            logger.exception("音声トリガーの有効状態更新に失敗しました")
+            await interaction.followup.send("更新に失敗しました。", ephemeral=True)
+
+    async def set_admin_only(self, interaction: discord.Interaction, admin_only: bool):
+        if not self.can_manage(interaction):
+            return await interaction.response.send_message(
+                "この設定にはサーバー管理権限が必要です。", ephemeral=True
+            )
+        await interaction.response.defer()
+        try:
+            await guild_settings.get_store().update(
+                interaction.guild_id, VOICE_TRIGGER_SECTION, admin_only=admin_only
+            )
+            await self.refresh(
+                interaction,
+                "登録を管理者のみに制限しました。"
+                if admin_only
+                else "登録を全メンバーに開放しました。",
+            )
+        except Exception:
+            logger.exception("音声トリガーの権限設定更新に失敗しました")
+            await interaction.followup.send("更新に失敗しました。", ephemeral=True)
+
+    @discord.ui.button(label="オン", style=discord.ButtonStyle.success, row=1)
+    async def turn_on(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self.set_enabled(interaction, True)
+
+    @discord.ui.button(label="オフ", style=discord.ButtonStyle.secondary, row=1)
+    async def turn_off(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self.set_enabled(interaction, False)
+
+    @discord.ui.button(label="管理者のみ登録", style=discord.ButtonStyle.primary, row=2)
+    async def set_admin(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self.set_admin_only(interaction, True)
+
+    @discord.ui.button(label="全員登録可", style=discord.ButtonStyle.primary, row=2)
+    async def set_all(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self.set_admin_only(interaction, False)
+
 # ===== SNS新着通知（X / YouTube） ======================================
 SNS_SECTION = "sns_notify"
 SNS_MAX_SUBS = 10
@@ -2947,7 +3224,6 @@ def _sns_x_token() -> str:
 
 
 def _sns_x_rss_template() -> str:
-    # ローカルRSSサービスを既定値として使用。必要なら環境変数で上書きできる。
     return (os.getenv("X_RSS_URL") or "http://192.168.11.15:1200/x/user/{username}").strip()
 
 
@@ -3051,7 +3327,6 @@ class SnsFetcher:
         return str(data["id"]), str(data.get("name") or username)
 
     async def x_api_posts(self, uid: str, username: str, since_id: str | None) -> list[SnsItem]:
-        # 課金は「返ったポスト数」単位なので、since_idで新着だけを取得する
         params = {
             "max_results": "10" if since_id else "5",
             "exclude": "replies,retweets",
@@ -3077,7 +3352,6 @@ class SnsFetcher:
             raise SnsError(
                 "X RSSの取得に失敗しました。RSSサービスと X_RSS_URL の設定を確認してください。"
             )
-        # URL内でプレースホルダーが %7Busername%7D とURLエンコードされていても対応する。
         url = re.sub(r"%7Busername%7D", quote(username), template, flags=re.I)
         url = url.replace("{username}", quote(username))
         status, body = await self._get(url)
@@ -3098,7 +3372,6 @@ class SnsFetcher:
             return {"key": channel_id, "name": name or channel_id, "uid": None, "items": items}
 
         username = parse_x_username(raw)
-        # Xは無料のRSS経由に統一し、X APIトークンが設定されていても使用しない。
         if _sns_x_rss_template():
             items = await self.x_rss_posts(username)
             return {"key": username.lower(), "name": f"@{username}", "uid": None, "items": items}
@@ -3113,7 +3386,6 @@ class SnsFetcher:
             return items, None
 
         username = sub["key"]
-        # X通知はRSSを使用。APIの課金・トークン設定には依存しない。
         if _sns_x_rss_template():
             return await self.x_rss_posts(username), None
         raise SnsError("X RSSの取得先が設定されていません。RSSサービスと X_RSS_URL の設定を確認してください。")
@@ -3436,15 +3708,11 @@ class SnsNotifyPanel(discord.ui.LayoutView):
 
 
 # ===== Discord Quest 通知 ==============================================
-# 取得元は discordquest.com の公開API（https://discordquest.com/document）。
-# 別の取得元に変えたい場合は QUEST_FEED_URL を書き換える（JSON または RSS 2.0 に対応）。
-# DiscordのユーザートークンでQuest APIを叩く方式（セルフボット）は、
-# Discord利用規約違反でアカウント停止のリスクがあるため実装していない。
 QUEST_SECTION = "quest_notify"
 QUEST_MAX_SEEN = 200
 QUEST_MAX_SEND_PER_CYCLE = 5
 QUEST_MAX_BODY = 2 * 1024 * 1024
-QUEST_POLL_SECONDS = 900  # 確認間隔（秒）
+QUEST_POLL_SECONDS = 900
 QUEST_USER_AGENT = "SupportBot-QuestNotifier/1.0"
 _ORBS_RE = re.compile(r"\borbs?\b", re.I)
 
@@ -3484,11 +3752,6 @@ class QuestItem:
 
 
 def _quest_from_discord(row: dict) -> "QuestItem | None":
-    """Discordのクエスト形式（{id, config:{messages, rewards_config, ...}} など）を変換する。
-
-    項目名は非公式ドキュメント(docs.discord.food)の Quest Object に基づく。
-    報酬タイプ 4 (VIRTUAL_CURRENCY) または orb_quantity があればOrbs報酬とみなす。
-    """
     cfg = row.get("config") if isinstance(row.get("config"), dict) else row
     raw_id = row.get("id") or cfg.get("id")
     if isinstance(raw_id, bool) or not isinstance(raw_id, (str, int)) or not str(raw_id).strip():
@@ -3496,7 +3759,7 @@ def _quest_from_discord(row: dict) -> "QuestItem | None":
     if row.get("preview") is True:
         return None
     features = cfg.get("features")
-    if isinstance(features, list) and 21 in features:  # DO_NOT_DISPLAY
+    if isinstance(features, list) and 21 in features:
         return None
 
     msgs = cfg.get("messages") if isinstance(cfg.get("messages"), dict) else {}
@@ -3532,11 +3795,6 @@ def _quest_from_discord(row: dict) -> "QuestItem | None":
 
 
 def parse_quest_feed(data: bytes) -> list[QuestItem]:
-    """JSON（配列 or {"quests": [...]}）または RSS 2.0 を QuestItem に変換する。
-
-    JSONの各要素: id, title, reward, reward_type, game, url, image, ends_at
-    （Discordのクエスト形式 {id, config:{...}} もそのまま受け付ける）
-    """
     if data.lstrip()[:1] in (b"{", b"["):
         try:
             payload = json.loads(data)
@@ -3599,14 +3857,7 @@ def parse_quest_feed(data: bytes) -> list[QuestItem]:
 
 
 class QuestFetcher:
-    """Questフィードの取得。取得先に負荷をかけないための配慮をここに集約する。
-
-    - 条件付きGET（ETag / Last-Modified）で変化がなければ本文を取らない
-    - 429/503・通信失敗は指数バックオフ（Retry-Afterを優先）＋ゆらぎ
-    - バックオフ中はネットワークに出ず、前回の結果を返す
-    - 全サーバー共通で1回だけ取得する（サーバー数に比例して増やさない）
-    - 取得元を偽らないUser-Agentを名乗る
-    """
+    """Questフィードの取得。"""
 
     def __init__(self, session: aiohttp.ClientSession):
         self.session = session
@@ -3619,7 +3870,7 @@ class QuestFetcher:
         self.last_error: str | None = None
 
     def _defer(self, seconds: float) -> None:
-        self._next_allowed = time.monotonic() + seconds * random.uniform(1.0, 1.3)  # 指定より短くはしない
+        self._next_allowed = time.monotonic() + seconds * random.uniform(1.0, 1.3)
 
     def _fail(self, message: str, retry_after: float | None = None) -> QuestError:
         self._failures += 1
@@ -3683,11 +3934,6 @@ class QuestFetcher:
 
 
 def get_quest_settings(store, guild_id: int) -> dict:
-    """Quest通知設定。未設定時はオフ・送信先なし・全Quest対象。
-
-    primed が False のサーバーは未初期化。次の巡回で現在のQuestを既読にするだけで、
-    過去分を一斉通知しない（オンにした直後も同様）。
-    """
     raw = store.get(guild_id, QUEST_SECTION)
     if not isinstance(raw, dict):
         raw = {}
@@ -3812,7 +4058,7 @@ class QuestToggleButton(discord.ui.Button):
             )
         values: dict = {"enabled": enabled}
         if enabled:
-            values["primed"] = False  # 次の巡回で現在のQuestを既読化（停止中の分は通知しない）
+            values["primed"] = False
         await self.parent_view.save(
             interaction,
             f"通知を{'オン' if enabled else 'オフ'}にしました。",
@@ -3972,7 +4218,6 @@ class QuestNotifyPanel(discord.ui.LayoutView):
             )
         await self.refresh(interaction, notice)
 
-
 class SupportCog(commands.Cog):
     SUPPORT_REQUIRED_PERMISSIONS = {
         "muted": "manage_roles",
@@ -3992,6 +4237,7 @@ class SupportCog(commands.Cog):
         "role_panel": "administrator",
         "sns_notify": "administrator",
         "quest_notify": "administrator",
+        "voice_trigger": "manage_guild",
     }
 
     def __init__(self, bot: commands.Bot):
@@ -4091,7 +4337,6 @@ class SupportCog(commands.Cog):
             if any(s["platform"] == platform and s["key"] == found["key"] for s in subs):
                 raise SnsError("そのアカウントはすでに登録されています。")
 
-            # 追加時点の最新分を既読にし、過去の投稿が一斉に通知されないようにする
             subs.append(
                 {
                     "platform": platform,
@@ -4184,11 +4429,10 @@ class SupportCog(commands.Cog):
             items, uid = result
             seen_set = set(seen)
             fresh = [i for i in items if i.id not in seen_set]
-            fresh.reverse()  # フィードは新しい順なので古い順にそろえる
+            fresh.reverse()
             fresh.sort(key=lambda i: sns_epoch(i.published) or 0)
 
             if len(fresh) > SNS_MAX_SEND_PER_CYCLE:
-                # 長期停止明けなどの大量通知は直近分だけにする（残りは既読扱い）
                 seen.extend(i.id for i in fresh[:-SNS_MAX_SEND_PER_CYCLE])
                 fresh = fresh[-SNS_MAX_SEND_PER_CYCLE:]
 
@@ -4214,7 +4458,6 @@ class SupportCog(commands.Cog):
         if not updates:
             return
 
-        # 巡回中に管理者が設定を変えていても失わないよう、最新の設定へ差分だけ反映する
         async with self.sns_lock(guild.id):
             latest = get_sns_settings(store, guild.id)
             subs = [dict(s) for s in latest["subs"]]
@@ -4311,9 +4554,8 @@ class SupportCog(commands.Cog):
             if settings["enabled"] and settings["channel_id"]:
                 targets.append((guild, settings))
         if not targets:
-            return  # 誰も使っていない間は取得先にアクセスしない
+            return
 
-        # 毎回きっちり同じ秒に叩かないよう、巡回の開始をずらす
         await asyncio.sleep(random.uniform(0, min(60, QUEST_POLL_SECONDS / 10)))
 
         try:
@@ -4340,7 +4582,6 @@ class SupportCog(commands.Cog):
         seen = list(settings["seen"])
 
         if not settings["primed"]:
-            # 初回/再オン直後: 現在あるQuestを既読にするだけ（過去分を一斉通知しない）
             seen.extend(i.id for i in items if i.id not in set(seen))
             async with self.quest_lock(guild.id):
                 await store.update(guild.id, QUEST_SECTION, seen=seen[-QUEST_MAX_SEEN:], primed=True)
@@ -4351,7 +4592,6 @@ class SupportCog(commands.Cog):
         if not fresh:
             return
 
-        # すでに終了したQuestは通知せず既読にする（一覧に過去分が含まれていても無害にする）
         now = time.time()
         expired_ids = {i.id for i in fresh if (sns_epoch(i.ends_at) or now + 1) < now}
         if expired_ids:
@@ -4366,13 +4606,11 @@ class SupportCog(commands.Cog):
         mentions = self._quest_mentions(role_id)
 
         if settings["orbs_only"]:
-            # 対象外のQuestは通知しないが、既読にして再判定しない
             seen.extend(i.id for i in fresh if not i.is_orbs)
             fresh = [i for i in fresh if i.is_orbs]
 
         fresh.sort(key=lambda i: sns_epoch(i.ends_at) or 0)
         if len(fresh) > QUEST_MAX_SEND_PER_CYCLE:
-            # 長期停止明けなどの大量通知は直近分だけにする（残りは既読扱い）
             seen.extend(i.id for i in fresh[:-QUEST_MAX_SEND_PER_CYCLE])
             fresh = fresh[-QUEST_MAX_SEND_PER_CYCLE:]
 
@@ -4383,7 +4621,7 @@ class SupportCog(commands.Cog):
                 logger.warning("Quest通知の送信に失敗 (guild=%s %s): %s", guild.id, item.id, exc)
                 break
             seen.append(item.id)
-            await asyncio.sleep(1)  # 連続送信でレート制限に当たらないよう間隔を空ける
+            await asyncio.sleep(1)
 
         async with self.quest_lock(guild.id):
             await store.update(guild.id, QUEST_SECTION, seen=seen[-QUEST_MAX_SEEN:])
@@ -5157,6 +5395,17 @@ class SupportCog(commands.Cog):
         if settings["enabled"] and settings["channel_id"] == message.channel.id:
             await self.send_sticky_panel(message.guild)
 
+        # 音声トリガー
+        try:
+            vt = get_voice_trigger_settings(store, message.guild.id)
+            if vt["enabled"] and vt["channel_id"] == message.channel.id:
+                for entry in vt["entries"]:
+                    if entry["trigger"] and entry["trigger"] in message.content:
+                        await self.play_voice_trigger(message.guild, entry["audio_b64"])
+                        break
+        except Exception:
+            logger.exception("音声トリガー処理でエラー (guild=%s)", message.guild.id)
+
     @commands.Cog.listener()
     async def on_voice_state_update(
         self,
@@ -5378,6 +5627,123 @@ class SupportCog(commands.Cog):
         view = RoleBulkView(self, interaction.guild, role)
         await interaction.response.send_message(view=as_panel_v2(view), ephemeral=True)
 
+    async def play_voice_trigger(self, guild: discord.Guild, audio_b64: str):
+        """VCに参加中なら、EnCodec圧縮音声をデコードして再生する。"""
+        vc = guild.voice_client
+        if vc is None or not vc.is_connected() or vc.is_playing():
+            return
+        try:
+            compressed = base64.b64decode(audio_b64)
+            wav_bytes = await encodec_decompress_to_wav(compressed)
+            source = discord.FFmpegPCMAudio(io.BytesIO(wav_bytes), pipe=True)
+            vc.play(source)
+        except Exception:
+            logger.exception("音声トリガーの再生に失敗しました (guild=%s)", guild.id)
+
+    async def show_voice_trigger_settings(self, interaction: discord.Interaction):
+        if interaction.guild_id is None:
+            return await interaction.response.send_message(
+                "この設定はサーバー内で利用できます。", ephemeral=True
+            )
+        if not _ENCODEC_AVAILABLE:
+            return await interaction.response.send_message(
+                "サーバー側に encodec / torch がインストールされていないため利用できません。",
+                ephemeral=True,
+            )
+        store = guild_settings.get_store()
+        await store.ensure_loaded()
+        settings = get_voice_trigger_settings(store, interaction.guild_id)
+        view = VoiceTriggerSettingsView(self, settings)
+        await interaction.response.send_message(
+            embed=view.embed(), view=view, ephemeral=True
+        )
+
+    @app_commands.command(
+        name="voice_trigger", description="音声トリガーを登録・管理します"
+    )
+    @app_commands.guild_only()
+    @app_commands.describe(
+        audio="5秒以内の音声ファイル（WAV/MP3）",
+        trigger="反応する語句",
+        label="一覧に表示する名前（任意）",
+    )
+    async def voice_trigger(
+        self,
+        interaction: discord.Interaction,
+        audio: discord.Attachment | None = None,
+        trigger: str | None = None,
+        label: str | None = None,
+    ):
+        if interaction.guild_id is None:
+            return await interaction.response.send_message(
+                "サーバー内でのみ利用できます。", ephemeral=True
+            )
+        if not _ENCODEC_AVAILABLE:
+            return await interaction.response.send_message(
+                "サーバー側に encodec / torch がインストールされていません。", ephemeral=True
+            )
+
+        store = guild_settings.get_store()
+        await store.ensure_loaded()
+        settings = get_voice_trigger_settings(store, interaction.guild_id)
+
+        if audio is None or trigger is None:
+            view = VoiceTriggerSettingsView(self, settings)
+            return await interaction.response.send_message(
+                embed=view.embed(), view=view, ephemeral=True
+            )
+
+        if settings["admin_only"] and not can_manage_support_panel(interaction):
+            return await interaction.response.send_message(
+                "このサーバーでは管理者のみ登録できます。", ephemeral=True
+            )
+
+        if len(settings["entries"]) >= VOICE_TRIGGER_MAX_ENTRIES:
+            return await interaction.response.send_message(
+                f"登録は最大{VOICE_TRIGGER_MAX_ENTRIES}件までです。", ephemeral=True
+            )
+
+        if audio.size > 8 * 1024 * 1024:
+            return await interaction.response.send_message(
+                "音声ファイルは8MB以内にしてください。", ephemeral=True
+            )
+
+        await interaction.response.defer(ephemeral=True, thinking=True)
+
+        try:
+            wav_bytes = await audio.read()
+            compressed = await encodec_compress_wav(wav_bytes)
+            audio_b64 = base64.b64encode(compressed).decode("ascii")
+        except Exception:
+            logger.exception("音声の圧縮に失敗しました")
+            return await interaction.followup.send(
+                "音声の圧縮に失敗しました。WAV/MP3か確認してください。", ephemeral=True
+            )
+
+        entries = list(settings["entries"])
+        entries.append(
+            {
+                "trigger": trigger[:100],
+                "audio_b64": audio_b64,
+                "label": (label or trigger)[:100],
+            }
+        )
+        try:
+            await store.update(
+                interaction.guild_id, VOICE_TRIGGER_SECTION, entries=entries
+            )
+        except Exception:
+            logger.exception("音声トリガーの保存に失敗しました")
+            return await interaction.followup.send(
+                "保存に失敗しました。", ephemeral=True
+            )
+
+        await interaction.followup.send(
+            f"「{trigger}」の音声トリガーを登録しました"
+            f"（{len(entries)}/{VOICE_TRIGGER_MAX_ENTRIES}）。",
+            ephemeral=True,
+        )
+
     @app_commands.command(name="support", description="サポート機能の操作パネルを表示します")
     @app_commands.guild_only()
     async def support(self, interaction: discord.Interaction):
@@ -5408,6 +5774,9 @@ class SupportCog(commands.Cog):
 
         if selected == "honeypot":
             return await self.show_honeypot_settings(interaction)
+
+        if selected == "voice_trigger":
+            return await self.show_voice_trigger_settings(interaction)
 
         if selected == "ticket":
             cog = self.bot.get_cog("TicketCog")
