@@ -6,7 +6,9 @@ import html as _html
 import json
 import logging
 import os
+import random
 import re
+import time
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -71,6 +73,7 @@ SUPPORT_ACTIONS = [
     app_commands.Choice(name="ロールパネル作成", value="role_panel"),
     app_commands.Choice(name="Auto react設定", value="auto_react"),
     app_commands.Choice(name="SNS新着通知（X・YouTube）", value="sns_notify"),
+    app_commands.Choice(name="Quest通知（Discord Orbs）", value="quest_notify"),
 ]
 
 SUPPORT_GENRES = {
@@ -84,7 +87,7 @@ SUPPORT_GENRES = {
     ),
     "bumprta": ("bump/up・RTA", "通知設定と RTA 状態・ランキング"),
     "event": ("イベント", "抽選の作成"),
-    "notify": ("SNS通知", "X・YouTubeの新着ポスト/動画の通知（管理者のみ）"),
+    "notify": ("SNS・Quest通知", "X・YouTubeの新着通知、Discord Quest（Orbs）の通知（管理者のみ）"),
 }
 
 SUPPORT_ACTIONS_BY_GENRE = {
@@ -115,7 +118,10 @@ SUPPORT_ACTIONS_BY_GENRE = {
     "event": [(SUPPORT_ACTIONS[9].name, SUPPORT_ACTIONS[9].value)],
 }
 SUPPORT_ACTIONS_BY_GENRE["server"].append((SUPPORT_ACTIONS[17].name, SUPPORT_ACTIONS[17].value))
-SUPPORT_ACTIONS_BY_GENRE["notify"] = [(SUPPORT_ACTIONS[18].name, SUPPORT_ACTIONS[18].value)]
+SUPPORT_ACTIONS_BY_GENRE["notify"] = [
+    (SUPPORT_ACTIONS[18].name, SUPPORT_ACTIONS[18].value),
+    (SUPPORT_ACTIONS[19].name, SUPPORT_ACTIONS[19].value),
+]
 
 THINKING_SECTION = "thinking_reaction"
 BINJOU_SECTION = "binjou"
@@ -2941,7 +2947,8 @@ def _sns_x_token() -> str:
 
 
 def _sns_x_rss_template() -> str:
-    return (os.getenv("X_RSS_URL") or "").strip()
+    # ローカルRSSサービスを既定値として使用。必要なら環境変数で上書きできる。
+    return (os.getenv("X_RSS_URL") or "http://192.168.11.15:1200/x/user/{username}").strip()
 
 
 class SnsFetcher:
@@ -3065,7 +3072,14 @@ class SnsFetcher:
         ]
 
     async def x_rss_posts(self, username: str) -> list[SnsItem]:
-        url = _sns_x_rss_template().replace("{username}", username)
+        template = _sns_x_rss_template()
+        if not template:
+            raise SnsError(
+                "X RSSの取得に失敗しました。RSSサービスと X_RSS_URL の設定を確認してください。"
+            )
+        # URL内でプレースホルダーが %7Busername%7D とURLエンコードされていても対応する。
+        url = re.sub(r"%7Busername%7D", quote(username), template, flags=re.I)
+        url = url.replace("{username}", quote(username))
         status, body = await self._get(url)
         if status != 200:
             raise SnsError(f"XのRSS取得に失敗しました（HTTP {status}）。")
@@ -3084,16 +3098,12 @@ class SnsFetcher:
             return {"key": channel_id, "name": name or channel_id, "uid": None, "items": items}
 
         username = parse_x_username(raw)
-        if _sns_x_token():
-            uid, name = await self.x_lookup_user(username)
-            items = await self.x_api_posts(uid, username, None)
-            return {"key": username.lower(), "name": f"{name} (@{username})", "uid": uid, "items": items}
+        # Xは無料のRSS経由に統一し、X APIトークンが設定されていても使用しない。
         if _sns_x_rss_template():
             items = await self.x_rss_posts(username)
             return {"key": username.lower(), "name": f"@{username}", "uid": None, "items": items}
         raise SnsError(
-            "Xの取得方法が未設定です。環境変数 X_BEARER_TOKEN（X API）か "
-            "X_RSS_URL（RSSHub等・{username}を含むURL）を設定してください。"
+            "X RSSの取得に失敗しました。RSSサービスと X_RSS_URL の設定を確認してください。"
         )
 
     async def poll(self, sub: dict) -> tuple[list[SnsItem], str | None]:
@@ -3103,12 +3113,10 @@ class SnsFetcher:
             return items, None
 
         username = sub["key"]
-        if _sns_x_token():
-            uid = sub.get("uid") or (await self.x_lookup_user(username))[0]
-            return await self.x_api_posts(uid, username, sns_x_since_id(sub["seen"])), uid
+        # X通知はRSSを使用。APIの課金・トークン設定には依存しない。
         if _sns_x_rss_template():
             return await self.x_rss_posts(username), None
-        raise SnsError("Xの取得方法（X_BEARER_TOKEN または X_RSS_URL）が未設定です。")
+        raise SnsError("X RSSの取得先が設定されていません。RSSサービスと X_RSS_URL の設定を確認してください。")
 
 
 def get_sns_settings(store, guild_id: int) -> dict:
@@ -3360,12 +3368,7 @@ class SnsNotifyPanel(discord.ui.LayoutView):
         s = self.settings
         channel = f"<#{s['channel_id']}>" if s["channel_id"] else "未設定"
         role = f"<@&{s['role_id']}>" if s["role_id"] else "なし"
-        sources = []
-        if _sns_x_token():
-            sources.append("X API")
-        if _sns_x_rss_template():
-            sources.append("X RSS")
-        x_state = " / ".join(sources) if sources else "未設定（Xは追加不可）"
+        x_state = "RSS（ローカルRSSサービス）" if _sns_x_rss_template() else "RSS設定確認（X_RSS_URL）"
         return (
             f"状態: **{'オン' if s['enabled'] else 'オフ'}**\n"
             f"送信先: {channel}\n"
@@ -3434,6 +3437,544 @@ class SnsNotifyPanel(discord.ui.LayoutView):
         await self.refresh(interaction, notice)
 
 
+# ===== Discord Quest 通知 ==============================================
+# 取得元は既定で discordquest.com の公開API（https://discordquest.com/document）。
+# 環境変数 QUEST_FEED_URL で別のURL（JSON または RSS 2.0）に差し替えられる。
+# DiscordのユーザートークンでQuest APIを叩く方式（セルフボット）は、
+# Discord利用規約違反でアカウント停止のリスクがあるため実装していない。
+QUEST_SECTION = "quest_notify"
+QUEST_MAX_SEEN = 200
+QUEST_MAX_SEND_PER_CYCLE = 5
+QUEST_MAX_BODY = 2 * 1024 * 1024
+QUEST_POLL_SECONDS = _sns_env_int("QUEST_POLL_SECONDS", 900, 300)
+QUEST_USER_AGENT = "SupportBot-QuestNotifier/1.0"
+_ORBS_RE = re.compile(r"\borbs?\b", re.I)
+
+
+QUEST_DEFAULT_FEED_URL = "https://api.discordquest.com/api/quests"
+
+
+def _quest_feed_url() -> str:
+    url = (os.getenv("QUEST_FEED_URL") or QUEST_DEFAULT_FEED_URL).strip()
+    return url if urlparse(url).scheme in {"http", "https"} else ""
+
+
+def _quest_http_url(value) -> str | None:
+    if isinstance(value, str) and urlparse(value.strip()).scheme in {"http", "https"}:
+        return value.strip()[:500]
+    return None
+
+
+class QuestError(Exception):
+    """管理者にそのまま見せてよい取得・設定エラー。"""
+
+
+@dataclass
+class QuestItem:
+    id: str
+    title: str
+    url: str = ""
+    reward: str = ""
+    reward_type: str = ""
+    game: str = ""
+    ends_at: str | None = None
+    image: str | None = None
+
+    @property
+    def is_orbs(self) -> bool:
+        return bool(_ORBS_RE.search(f"{self.reward_type} {self.reward} {self.title}"))
+
+
+def _quest_from_discord(row: dict) -> "QuestItem | None":
+    """Discordのクエスト形式（{id, config:{messages, rewards_config, ...}} など）を変換する。
+
+    項目名は非公式ドキュメント(docs.discord.food)の Quest Object に基づく。
+    報酬タイプ 4 (VIRTUAL_CURRENCY) または orb_quantity があればOrbs報酬とみなす。
+    """
+    cfg = row.get("config") if isinstance(row.get("config"), dict) else row
+    raw_id = row.get("id") or cfg.get("id")
+    if isinstance(raw_id, bool) or not isinstance(raw_id, (str, int)) or not str(raw_id).strip():
+        return None
+    if row.get("preview") is True:
+        return None
+    features = cfg.get("features")
+    if isinstance(features, list) and 21 in features:  # DO_NOT_DISPLAY
+        return None
+
+    msgs = cfg.get("messages") if isinstance(cfg.get("messages"), dict) else {}
+    rewards_cfg = cfg.get("rewards_config") if isinstance(cfg.get("rewards_config"), dict) else {}
+    rewards = [r for r in (rewards_cfg.get("rewards") or []) if isinstance(r, dict)]
+
+    orbs = 0
+    names: list[str] = []
+    reward_type = ""
+    for r in rewards:
+        qty = r.get("orb_quantity")
+        if r.get("type") == 4 or (isinstance(qty, int) and not isinstance(qty, bool) and qty > 0):
+            reward_type = "orbs"
+            if isinstance(qty, int) and not isinstance(qty, bool):
+                orbs = max(orbs, qty)
+        elif not reward_type and r.get("type") is not None:
+            reward_type = str(r.get("type"))
+        r_msgs = r.get("messages") if isinstance(r.get("messages"), dict) else {}
+        if r_msgs.get("name"):
+            names.append(str(r_msgs["name"]))
+
+    parts = ([f"{orbs:,} Orbs"] if orbs else []) + [n for n in names if not (orbs and "orb" in n.lower())]
+    cta = cfg.get("cta_config") if isinstance(cfg.get("cta_config"), dict) else {}
+    return QuestItem(
+        id=str(raw_id).strip()[:100],
+        title=str(msgs.get("quest_name") or "").strip()[:200],
+        url=_quest_http_url(cta.get("link")) or "",
+        reward=", ".join(parts)[:100],
+        reward_type=reward_type,
+        game=str(msgs.get("game_title") or "").strip()[:100],
+        ends_at=str(cfg["expires_at"]) if cfg.get("expires_at") else None,
+    )
+
+
+def parse_quest_feed(data: bytes) -> list[QuestItem]:
+    """JSON（配列 or {"quests": [...]}）または RSS 2.0 を QuestItem に変換する。
+
+    JSONの各要素: id, title, reward, reward_type, game, url, image, ends_at
+    （Discordのクエスト形式 {id, config:{...}} もそのまま受け付ける）
+    """
+    if data.lstrip()[:1] in (b"{", b"["):
+        try:
+            payload = json.loads(data)
+        except ValueError as exc:
+            raise QuestError("フィードのJSONを解析できませんでした。") from exc
+        rows = payload
+        if isinstance(payload, dict):
+            for key in ("quests", "data", "items", "results"):
+                if isinstance(payload.get(key), list):
+                    rows = payload[key]
+                    break
+            else:
+                vals = list(payload.values())
+                rows = vals if vals and all(isinstance(v, dict) for v in vals) else None
+        if not isinstance(rows, list):
+            raise QuestError('JSONは配列、または {"quests": [...]} の形式にしてください。')
+
+        items: list[QuestItem] = []
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            if isinstance(row.get("config"), dict) or "rewards_config" in row:
+                converted = _quest_from_discord(row)
+                if converted is not None:
+                    items.append(converted)
+                continue
+            raw_id = row.get("id")
+            if isinstance(raw_id, bool) or not isinstance(raw_id, (str, int)) or not str(raw_id).strip():
+                continue
+            items.append(
+                QuestItem(
+                    id=str(raw_id).strip()[:100],
+                    title=str(row.get("title") or row.get("name") or row.get("quest_name") or "").strip()[:200],
+                    url=_quest_http_url(row.get("url")) or "",
+                    reward=str(row.get("reward") or "").strip()[:100],
+                    reward_type=str(row.get("reward_type") or "").strip()[:30],
+                    game=str(row.get("game") or "").strip()[:100],
+                    ends_at=str(row["ends_at"]) if row.get("ends_at") else None,
+                    image=_quest_http_url(row.get("image")),
+                )
+            )
+        if rows and not items:
+            sample = next((r for r in rows if isinstance(r, dict)), None)
+            keys = ", ".join(list(sample)[:12]) if sample else "?"
+            raise QuestError(f"Questの形式を認識できませんでした（先頭項目のキー: {keys}）。")
+        return items
+
+    try:
+        _, rss_items = parse_rss_feed(data)
+    except SnsError as exc:
+        raise QuestError("フィードを解析できませんでした（JSONまたはRSS 2.0に対応）。") from exc
+    return [
+        QuestItem(
+            id=i.id[:100],
+            title=(i.title.splitlines() or [""])[0][:200],
+            url=_quest_http_url(i.url) or "",
+        )
+        for i in rss_items
+    ]
+
+
+class QuestFetcher:
+    """Questフィードの取得。取得先に負荷をかけないための配慮をここに集約する。
+
+    - 条件付きGET（ETag / Last-Modified）で変化がなければ本文を取らない
+    - 429/503・通信失敗は指数バックオフ（Retry-Afterを優先）＋ゆらぎ
+    - バックオフ中はネットワークに出ず、前回の結果を返す
+    - 全サーバー共通で1回だけ取得する（サーバー数に比例して増やさない）
+    - 取得元を偽らないUser-Agentを名乗る
+    """
+
+    def __init__(self, session: aiohttp.ClientSession):
+        self.session = session
+        self._etag: str | None = None
+        self._last_modified: str | None = None
+        self._items: list[QuestItem] = []
+        self._next_allowed = 0.0
+        self._failures = 0
+        self.last_ok: float | None = None
+        self.last_error: str | None = None
+
+    def _defer(self, seconds: float) -> None:
+        self._next_allowed = time.monotonic() + seconds * random.uniform(1.0, 1.3)  # 指定より短くはしない
+
+    def _fail(self, message: str, retry_after: float | None = None) -> QuestError:
+        self._failures += 1
+        delay = retry_after if retry_after else min(3600, QUEST_POLL_SECONDS * (2 ** self._failures))
+        self._defer(max(delay, QUEST_POLL_SECONDS))
+        self.last_error = message
+        return QuestError(message)
+
+    async def fetch(self) -> list[QuestItem]:
+        url = _quest_feed_url()
+        if not url:
+            raise QuestError("環境変数 QUEST_FEED_URL のURLが不正です。")
+        if time.monotonic() < self._next_allowed:
+            return list(self._items)
+
+        headers = {
+            "User-Agent": QUEST_USER_AGENT,
+            "Accept": "application/json, application/rss+xml;q=0.9, */*;q=0.1",
+        }
+        if self._etag:
+            headers["If-None-Match"] = self._etag
+        if self._last_modified:
+            headers["If-Modified-Since"] = self._last_modified
+
+        try:
+            async with self.session.get(url, headers=headers) as resp:
+                if resp.status == 304:
+                    body = None
+                elif resp.status == 200:
+                    body = await resp.content.read(QUEST_MAX_BODY + 1)
+                    if len(body) > QUEST_MAX_BODY:
+                        raise self._fail("フィードが大きすぎます。")
+                elif resp.status in (429, 503):
+                    try:
+                        retry_after = float(resp.headers.get("Retry-After", ""))
+                    except ValueError:
+                        retry_after = None
+                    raise self._fail(f"取得元が混雑しています（HTTP {resp.status}）。", retry_after)
+                else:
+                    raise self._fail(f"フィードの取得に失敗しました（HTTP {resp.status}）。")
+                etag = resp.headers.get("ETag")
+                modified = resp.headers.get("Last-Modified")
+        except QuestError:
+            raise
+        except asyncio.TimeoutError as exc:
+            raise self._fail("通信がタイムアウトしました。") from exc
+        except aiohttp.ClientError as exc:
+            raise self._fail(f"通信に失敗しました（{type(exc).__name__}）。") from exc
+
+        if body is not None:
+            try:
+                self._items = parse_quest_feed(body)
+            except QuestError as exc:
+                raise self._fail(str(exc)) from exc
+            self._etag, self._last_modified = etag, modified
+
+        self._failures = 0
+        self.last_error = None
+        self.last_ok = time.time()
+        return list(self._items)
+
+
+def get_quest_settings(store, guild_id: int) -> dict:
+    """Quest通知設定。未設定時はオフ・送信先なし・全Quest対象。
+
+    primed が False のサーバーは未初期化。次の巡回で現在のQuestを既読にするだけで、
+    過去分を一斉通知しない（オンにした直後も同様）。
+    """
+    raw = store.get(guild_id, QUEST_SECTION)
+    if not isinstance(raw, dict):
+        raw = {}
+
+    raw_seen = raw.get("seen")
+    seen = (
+        [str(s) for s in raw_seen if isinstance(s, (str, int)) and not isinstance(s, bool)][-QUEST_MAX_SEEN:]
+        if isinstance(raw_seen, list)
+        else []
+    )
+    return {
+        "enabled": raw.get("enabled") if isinstance(raw.get("enabled"), bool) else False,
+        "channel_id": _support_int(raw.get("channel_id")),
+        "role_id": _support_int(raw.get("role_id")),
+        "orbs_only": raw.get("orbs_only") if isinstance(raw.get("orbs_only"), bool) else False,
+        "primed": raw.get("primed") is True,
+        "seen": seen,
+    }
+
+
+class QuestNotifyMessage(discord.ui.LayoutView):
+    """チャンネルに投稿するQuest通知（Components V2）。"""
+
+    def __init__(self, item: QuestItem, role_id: int | None = None):
+        super().__init__(timeout=None)
+        children: list[discord.ui.Item] = []
+
+        if role_id:
+            children.append(discord.ui.TextDisplay(f"<@&{role_id}>"))
+        children.append(discord.ui.TextDisplay("### 🎯 新しい Discord Quest"))
+
+        title = discord.utils.escape_markdown(item.title)[:200] or "(タイトルなし)"
+        lines = [f"**{title}**"]
+        if item.game:
+            lines.append(f"ゲーム: {discord.utils.escape_markdown(item.game)}")
+        if item.reward:
+            lines.append(f"報酬: {discord.utils.escape_markdown(item.reward)}")
+        stamp = sns_epoch(item.ends_at)
+        if stamp:
+            lines.append(f"期限: <t:{stamp}:f>（<t:{stamp}:R>）")
+        children.append(discord.ui.TextDisplay("\n".join(lines)))
+
+        if item.image:
+            children.append(discord.ui.MediaGallery(discord.MediaGalleryItem(item.image)))
+
+        if item.url:
+            children.append(discord.ui.Separator())
+            children.append(
+                discord.ui.ActionRow(
+                    discord.ui.Button(label="詳細を開く", style=discord.ButtonStyle.link, url=item.url)
+                )
+            )
+
+        self.add_item(discord.ui.Container(*children, accent_colour=0x5865F2))
+
+
+class QuestChannelSelect(discord.ui.ChannelSelect):
+    def __init__(self, parent: "QuestNotifyPanel"):
+        self.parent_view = parent
+        channel_id = parent.settings.get("channel_id")
+        super().__init__(
+            placeholder="Quest通知を送るテキストチャンネルを選択",
+            channel_types=[discord.ChannelType.text, discord.ChannelType.news],
+            min_values=1,
+            max_values=1,
+            default_values=(
+                [discord.SelectDefaultValue(id=channel_id, type=discord.SelectDefaultValueType.channel)]
+                if channel_id
+                else []
+            ),
+        )
+
+    async def callback(self, interaction: discord.Interaction):
+        await self.parent_view.save(interaction, "送信先を設定しました。", channel_id=self.values[0].id)
+
+
+class QuestRoleSelect(discord.ui.RoleSelect):
+    def __init__(self, parent: "QuestNotifyPanel"):
+        self.parent_view = parent
+        role_id = parent.settings.get("role_id")
+        super().__init__(
+            placeholder="メンションするロール（任意・解除は選択を外す）",
+            min_values=0,
+            max_values=1,
+            default_values=(
+                [discord.SelectDefaultValue(id=role_id, type=discord.SelectDefaultValueType.role)]
+                if role_id
+                else []
+            ),
+        )
+
+    async def callback(self, interaction: discord.Interaction):
+        role = self.values[0] if self.values else None
+        if role is not None and (role.is_default() or role.managed):
+            return await interaction.response.send_message(
+                "@everyone や連携サービス用のロールは指定できません。",
+                ephemeral=True,
+            )
+        await self.parent_view.save(
+            interaction,
+            "メンション先を設定しました。" if role else "メンションを解除しました。",
+            role_id=role.id if role else None,
+        )
+
+
+class QuestToggleButton(discord.ui.Button):
+    def __init__(self, parent: "QuestNotifyPanel"):
+        self.parent_view = parent
+        enabled = parent.settings["enabled"]
+        super().__init__(
+            label="通知をオフにする" if enabled else "通知をオンにする",
+            style=discord.ButtonStyle.secondary if enabled else discord.ButtonStyle.success,
+        )
+
+    async def callback(self, interaction: discord.Interaction):
+        settings = self.parent_view.settings
+        enabled = not settings["enabled"]
+        if enabled and not settings.get("channel_id"):
+            return await interaction.response.send_message(
+                "先に通知を送るテキストチャンネルを選択してください。",
+                ephemeral=True,
+            )
+        values: dict = {"enabled": enabled}
+        if enabled:
+            values["primed"] = False  # 次の巡回で現在のQuestを既読化（停止中の分は通知しない）
+        await self.parent_view.save(
+            interaction,
+            f"通知を{'オン' if enabled else 'オフ'}にしました。",
+            **values,
+        )
+
+
+class QuestOrbsOnlyButton(discord.ui.Button):
+    def __init__(self, parent: "QuestNotifyPanel"):
+        self.parent_view = parent
+        orbs_only = parent.settings["orbs_only"]
+        super().__init__(
+            label="Orbs報酬のみ: オン" if orbs_only else "Orbs報酬のみ: オフ",
+            style=discord.ButtonStyle.primary if orbs_only else discord.ButtonStyle.secondary,
+        )
+
+    async def callback(self, interaction: discord.Interaction):
+        orbs_only = not self.parent_view.settings["orbs_only"]
+        await self.parent_view.save(
+            interaction,
+            "Orbs報酬のQuestだけを通知します。" if orbs_only else "すべてのQuestを通知します。",
+            orbs_only=orbs_only,
+        )
+
+
+class QuestManualButton(discord.ui.Button):
+    def __init__(self, parent: "QuestNotifyPanel"):
+        self.parent_view = parent
+        super().__init__(label="手動で通知を送る", style=discord.ButtonStyle.secondary)
+
+    async def callback(self, interaction: discord.Interaction):
+        await interaction.response.send_modal(QuestManualModal(self.parent_view))
+
+
+class QuestManualModal(discord.ui.Modal):
+    """取得元が使えない時の代替。管理者がQuest情報を入力して送信先に通知する。"""
+
+    def __init__(self, panel: "QuestNotifyPanel"):
+        super().__init__(title="Questを手動で通知")
+        self.panel = panel
+        self.quest_title = discord.ui.TextInput(label="Quest名", max_length=100)
+        self.reward = discord.ui.TextInput(
+            label="報酬（任意）", placeholder="例: 700 Orbs", max_length=100, required=False
+        )
+        self.url = discord.ui.TextInput(label="URL（任意）", max_length=300, required=False)
+        for field in (self.quest_title, self.reward, self.url):
+            self.add_item(field)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        if not can_manage_support_panel(interaction):
+            return await interaction.response.send_message(
+                "この機能は管理者のみ利用できます。",
+                ephemeral=True,
+            )
+
+        await interaction.response.defer()
+        item = QuestItem(
+            id=f"manual:{int(time.time())}",
+            title=self.quest_title.value.strip(),
+            reward=self.reward.value.strip(),
+            url=_quest_http_url(self.url.value) or "",
+        )
+        try:
+            notice = await self.panel.cog.quest_send_manual(interaction.guild, item)
+        except QuestError as exc:
+            notice = f"⚠️ {exc}"
+        except Exception:
+            logger.exception("Quest手動通知に失敗しました")
+            notice = "⚠️ 送信中にエラーが発生しました。Botのログを確認してください。"
+        await self.panel.refresh(interaction, notice)
+
+    async def on_error(self, interaction: discord.Interaction, error: Exception):
+        await report_callback_error(interaction, "Quest手動通知モーダルでエラー")
+
+
+class QuestNotifyPanel(discord.ui.LayoutView):
+    """Quest通知の設定パネル（Components V2・管理者専用）。"""
+
+    def __init__(self, cog: "SupportCog", settings: dict, notice: str | None = None):
+        super().__init__(timeout=300)
+        self.cog = cog
+        self.settings = settings
+        self.notice = notice
+        self._build()
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if can_manage_support_panel(interaction):
+            return True
+        await interaction.response.send_message(
+            "この機能は管理者のみ利用できます。",
+            ephemeral=True,
+        )
+        return False
+
+    async def on_error(self, interaction: discord.Interaction, error: Exception, item: discord.ui.Item):
+        logger.error("Quest通知パネルでエラー", exc_info=error)
+        await report_callback_error(interaction, "Quest通知パネルでエラー")
+
+    def _status_text(self) -> str:
+        s = self.settings
+        channel = f"<#{s['channel_id']}>" if s["channel_id"] else "未設定"
+        role = f"<@&{s['role_id']}>" if s["role_id"] else "なし"
+        source = "カスタム（QUEST_FEED_URL）" if os.getenv("QUEST_FEED_URL") else "discordquest.com（既定）"
+        text = (
+            f"状態: **{'オン' if s['enabled'] else 'オフ'}**\n"
+            f"送信先: {channel}\n"
+            f"メンション: {role}\n"
+            f"対象: {'Orbs報酬のみ' if s['orbs_only'] else 'すべてのQuest'}\n"
+            f"取得元: {source}\n"
+            f"確認間隔: 約{QUEST_POLL_SECONDS // 60}分ごと"
+        )
+        error = self.cog.quest_last_error()
+        if error:
+            text += f"\n-# ⚠️ 直近の取得エラー: {error}"
+        return text
+
+    def _build(self):
+        self.clear_items()
+        head = "## 🎯 Quest通知\nDiscord QuestとOrbs報酬の新着をチャンネルへ通知します。（管理者専用）"
+        if self.notice:
+            head = f"{self.notice}\n\n{head}"
+
+        self.add_item(
+            discord.ui.Container(
+                discord.ui.TextDisplay(head),
+                discord.ui.TextDisplay(self._status_text()),
+                discord.ui.Separator(),
+                discord.ui.ActionRow(QuestChannelSelect(self)),
+                discord.ui.ActionRow(QuestRoleSelect(self)),
+                discord.ui.ActionRow(
+                    QuestToggleButton(self),
+                    QuestOrbsOnlyButton(self),
+                    QuestManualButton(self),
+                ),
+                accent_colour=0x5865F2,
+            )
+        )
+
+    async def refresh(self, interaction: discord.Interaction, notice: str | None = None):
+        store = guild_settings.get_store()
+        await store.ensure_loaded()
+        self.settings = get_quest_settings(store, interaction.guild_id)
+        self.notice = notice
+        self._build()
+        await edit_interaction_message(interaction, view=self)
+
+    async def save(self, interaction: discord.Interaction, notice: str, **values):
+        await interaction.response.defer()
+        try:
+            async with self.cog.quest_lock(interaction.guild_id):
+                await guild_settings.get_store().update(interaction.guild_id, QUEST_SECTION, **values)
+        except Exception:
+            logger.exception("Quest通知設定の更新に失敗しました")
+            return await interaction.followup.send(
+                "設定の更新に失敗しました。Botのログを確認してください。",
+                ephemeral=True,
+            )
+        await self.refresh(interaction, notice)
+
+
 class SupportCog(commands.Cog):
     SUPPORT_REQUIRED_PERMISSIONS = {
         "muted": "manage_roles",
@@ -3452,6 +3993,7 @@ class SupportCog(commands.Cog):
         "auth_panel": "administrator",
         "role_panel": "administrator",
         "sns_notify": "administrator",
+        "quest_notify": "administrator",
     }
 
     def __init__(self, bot: commands.Bot):
@@ -3461,6 +4003,8 @@ class SupportCog(commands.Cog):
         self._sns_locks: dict[int, asyncio.Lock] = {}
         self._http: aiohttp.ClientSession | None = None
         self._sns: SnsFetcher | None = None
+        self._quest_locks: dict[int, asyncio.Lock] = {}
+        self._quest: QuestFetcher | None = None
 
     @staticmethod
     def has_support_permission(interaction: discord.Interaction, permission: str) -> bool:
@@ -3498,9 +4042,12 @@ class SupportCog(commands.Cog):
         )
         self._sns = SnsFetcher(self._http)
         self.sns_poll.start()
+        self._quest = QuestFetcher(self._http)
+        self.quest_poll.start()
 
     async def cog_unload(self):
         self.sns_poll.cancel()
+        self.quest_poll.cancel()
         if self._http is not None and not self._http.closed:
             await self._http.close()
 
@@ -3684,6 +4231,164 @@ class SupportCog(commands.Cog):
                         dirty = True
             if dirty:
                 await store.update(guild.id, SNS_SECTION, subs=subs)
+
+    # ===== Discord Quest 通知 ==============================================
+    def quest_lock(self, guild_id: int) -> asyncio.Lock:
+        return self._quest_locks.setdefault(guild_id, asyncio.Lock())
+
+    def quest_last_error(self) -> str | None:
+        return self._quest.last_error if self._quest is not None else None
+
+    async def show_quest_notify_settings(self, interaction: discord.Interaction):
+        if interaction.guild is None:
+            return await interaction.response.send_message(
+                "この機能はサーバー内で利用できます。",
+                ephemeral=True,
+            )
+
+        if not can_manage_support_panel(interaction):
+            return await interaction.response.send_message(
+                "この機能は管理者のみ利用できます。",
+                ephemeral=True,
+            )
+
+        store = guild_settings.get_store()
+        await store.ensure_loaded()
+        settings = get_quest_settings(store, interaction.guild.id)
+        await interaction.response.send_message(
+            view=QuestNotifyPanel(self, settings),
+            ephemeral=True,
+        )
+
+    def _quest_channel(self, guild: discord.Guild, settings: dict):
+        """送信先テキストチャンネル。投稿できない状態ならNone。"""
+        channel = guild.get_channel(settings["channel_id"]) if settings["channel_id"] else None
+        me = guild.me
+        if not isinstance(channel, discord.TextChannel) or me is None:
+            return None
+        perms = channel.permissions_for(me)
+        if not (perms.view_channel and perms.send_messages):
+            logger.warning("Quest通知の送信先に投稿できません (guild=%s channel=%s)", guild.id, channel.id)
+            return None
+        return channel
+
+    @staticmethod
+    def _quest_mentions(role_id: int | None) -> discord.AllowedMentions:
+        return discord.AllowedMentions(
+            everyone=False,
+            users=False,
+            roles=[discord.Object(id=role_id)] if role_id else False,
+        )
+
+    async def quest_send_manual(self, guild: discord.Guild, item: QuestItem) -> str:
+        store = guild_settings.get_store()
+        await store.ensure_loaded()
+        settings = get_quest_settings(store, guild.id)
+        channel = self._quest_channel(guild, settings)
+        if channel is None:
+            raise QuestError("送信先が未設定、またはBotが投稿できないチャンネルです。")
+        if not item.title:
+            raise QuestError("Quest名を入力してください。")
+        try:
+            await channel.send(
+                view=QuestNotifyMessage(item, settings["role_id"]),
+                allowed_mentions=self._quest_mentions(settings["role_id"]),
+            )
+        except (discord.Forbidden, discord.HTTPException) as exc:
+            logger.warning("Quest手動通知の送信に失敗 (guild=%s): %s", guild.id, exc)
+            raise QuestError("通知メッセージの送信に失敗しました。Botの権限を確認してください。") from exc
+        return f"{channel.mention} に通知を送信しました。"
+
+    @tasks.loop(seconds=QUEST_POLL_SECONDS)
+    async def quest_poll(self):
+        if self._quest is None or not _quest_feed_url():
+            return
+
+        store = guild_settings.get_store()
+        await store.ensure_loaded()
+
+        targets = []
+        for guild in list(self.bot.guilds):
+            settings = get_quest_settings(store, guild.id)
+            if settings["enabled"] and settings["channel_id"]:
+                targets.append((guild, settings))
+        if not targets:
+            return  # 誰も使っていない間は取得先にアクセスしない
+
+        # 毎回きっちり同じ秒に叩かないよう、巡回の開始をずらす
+        await asyncio.sleep(random.uniform(0, min(60, QUEST_POLL_SECONDS / 10)))
+
+        try:
+            items = await self._quest.fetch()
+        except QuestError as exc:
+            logger.warning("Questフィードの取得に失敗: %s", exc)
+            return
+
+        for guild, settings in targets:
+            try:
+                await self._quest_poll_guild(guild, store, settings, items)
+            except Exception:
+                logger.exception("Quest通知の巡回に失敗しました (guild=%s)", guild.id)
+
+    @quest_poll.before_loop
+    async def _quest_poll_before(self):
+        await self.bot.wait_until_ready()
+
+    @quest_poll.error
+    async def _quest_poll_error(self, error: BaseException):
+        logger.error("Quest通知の巡回ループが異常終了しました", exc_info=error)
+
+    async def _quest_poll_guild(self, guild: discord.Guild, store, settings: dict, items: list[QuestItem]):
+        seen = list(settings["seen"])
+
+        if not settings["primed"]:
+            # 初回/再オン直後: 現在あるQuestを既読にするだけ（過去分を一斉通知しない）
+            seen.extend(i.id for i in items if i.id not in set(seen))
+            async with self.quest_lock(guild.id):
+                await store.update(guild.id, QUEST_SECTION, seen=seen[-QUEST_MAX_SEEN:], primed=True)
+            return
+
+        seen_set = set(seen)
+        fresh = [i for i in items if i.id not in seen_set]
+        if not fresh:
+            return
+
+        # すでに終了したQuestは通知せず既読にする（一覧に過去分が含まれていても無害にする）
+        now = time.time()
+        expired_ids = {i.id for i in fresh if (sns_epoch(i.ends_at) or now + 1) < now}
+        if expired_ids:
+            seen.extend(sorted(expired_ids))
+            fresh = [i for i in fresh if i.id not in expired_ids]
+
+        channel = self._quest_channel(guild, settings)
+        if channel is None:
+            return
+
+        role_id = settings["role_id"]
+        mentions = self._quest_mentions(role_id)
+
+        if settings["orbs_only"]:
+            # 対象外のQuestは通知しないが、既読にして再判定しない
+            seen.extend(i.id for i in fresh if not i.is_orbs)
+            fresh = [i for i in fresh if i.is_orbs]
+
+        fresh.sort(key=lambda i: sns_epoch(i.ends_at) or 0)
+        if len(fresh) > QUEST_MAX_SEND_PER_CYCLE:
+            # 長期停止明けなどの大量通知は直近分だけにする（残りは既読扱い）
+            seen.extend(i.id for i in fresh[:-QUEST_MAX_SEND_PER_CYCLE])
+            fresh = fresh[-QUEST_MAX_SEND_PER_CYCLE:]
+
+        for item in fresh:
+            try:
+                await channel.send(view=QuestNotifyMessage(item, role_id), allowed_mentions=mentions)
+            except (discord.Forbidden, discord.HTTPException) as exc:
+                logger.warning("Quest通知の送信に失敗 (guild=%s %s): %s", guild.id, item.id, exc)
+                break
+            seen.append(item.id)
+            await asyncio.sleep(1)  # 連続送信でレート制限に当たらないよう間隔を空ける
+
+        async with self.quest_lock(guild.id):
+            await store.update(guild.id, QUEST_SECTION, seen=seen[-QUEST_MAX_SEEN:])
 
     async def show_auth_settings(self, interaction: discord.Interaction):
         if interaction.guild is None:
@@ -4696,6 +5401,9 @@ class SupportCog(commands.Cog):
 
         if selected == "sns_notify":
             return await self.show_sns_notify_settings(interaction)
+
+        if selected == "quest_notify":
+            return await self.show_quest_notify_settings(interaction)
 
         if selected == "sticky":
             return await self.show_sticky_settings(interaction)
