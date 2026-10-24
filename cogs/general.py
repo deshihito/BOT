@@ -1,10 +1,11 @@
-"""/general: コイン・生存確認・ランキング系機能の操作パネル。"""
+"""/general: コイン・生存確認・EXP・ランキング系機能の操作パネル。"""
 from __future__ import annotations
 
+import time
 import discord
 import logging
 from discord import app_commands
-from discord.ext import commands
+from discord.ext import commands, tasks
 from core.panel_v2 import as_panel_v2, edit_panel_v2
 from core import ai_omnirush, ai_preferences, ai_provider_router, guild_settings, logfare, shortcuts
 from core.game_guides import GAME_GUIDES, GAME_ORDER
@@ -12,9 +13,28 @@ from core.game_guides import GAME_GUIDES, GAME_ORDER
 logger = logging.getLogger(__name__)
 
 
+# ============================================================
+# EXP 設定
+# ============================================================
+# レベル L -> L+1 に必要なEXP = round(base * ratio**(L-1))
+# chat: base=10(メッセージ), ratio=1.25
+# vc  : base=10(分),       ratio=1.25
+CHAT_EXP_BASE = 10
+CHAT_EXP_RATIO = 1.25
+VC_EXP_BASE = 10
+VC_EXP_RATIO = 1.25
+
+CHAT_EXP_INTERVAL = 5 * 60      # 5分ごと
+VC_EXP_INTERVAL = 5 * 60        # 5分ごと（VC滞在）
+CHAT_EXP_PER_GRANT = 1
+VC_EXP_PER_GRANT = 1
+
+EXP_STORE_KEY = "exp"
+
 GENERAL_GENRES = {
     "economy": ("コイン・ランキング", "所持状況、送金、コインや bump/up のランキング"),
     "survival": ("生存確認", "追跡、アクティブ頻度、フリーズ、失踪警報"),
+    "exp": ("EXP・レベル", "チャット/VC/generalのEXPとレベルを確認"),
     "custom": ("設定・AI", "ショートカット、AI tools、チャットAI・画像生成AIの設定"),
 }
 GENERAL_ACTIONS = {
@@ -31,6 +51,10 @@ GENERAL_ACTIONS = {
         ("生存確認ランキング", "fujo_ranking"),
         ("フリーズ", "fujo_freeze"),
         ("失踪警報解除", "fujo_panic_disable"),
+    ],
+    "exp": [
+        ("自分のEXP状況", "exp_status"),
+        ("EXPランキング", "exp_ranking"),
     ],
     "custom": [
         ("ショートカットを管理", "shortcut_manage"),
@@ -61,6 +85,119 @@ SHORTCUT_ROOTS = {
 }
 
 
+# ============================================================
+# EXP 計算ユーティリティ
+# ============================================================
+def exp_for_next(level: int, base: int, ratio: float) -> int:
+    """レベル level -> level+1 に必要なEXP。"""
+    if level < 1:
+        level = 1
+    return max(1, round(base * (ratio ** (level - 1))))
+
+
+def level_from_exp(total_exp: int, base: int, ratio: float) -> tuple[int, int, int]:
+    """(level, 現在レベル内のexp, 次レベルまでに必要なexp) を返す。"""
+    level = 1
+    remaining = max(0, int(total_exp))
+    while True:
+        need = exp_for_next(level, base, ratio)
+        if remaining < need:
+            return level, remaining, need
+        remaining -= need
+        level += 1
+        if level > 9999:
+            return level, remaining, need
+
+
+def general_level(chat_exp: int, vc_exp: int) -> int:
+    """chat と vc の平均で general レベルを算出。"""
+    cl, _, _ = level_from_exp(chat_exp, CHAT_EXP_BASE, CHAT_EXP_RATIO)
+    vl, _, _ = level_from_exp(vc_exp, VC_EXP_BASE, VC_EXP_RATIO)
+    return max(1, (cl + vl) // 2)
+
+
+# ============================================================
+# EXP 永続化ヘルパ
+# ============================================================
+def _exp_root() -> dict:
+    store = guild_settings.get_store()
+    data = None
+    if hasattr(store, "get"):
+        try:
+            data = store.get(EXP_STORE_KEY)
+        except Exception:
+            data = None
+    if data is None and isinstance(store, dict):
+        data = store.get(EXP_STORE_KEY)
+    return data if isinstance(data, dict) else {}
+
+
+async def _exp_load() -> dict:
+    store = guild_settings.get_store()
+    if hasattr(store, "ensure_loaded"):
+        await store.ensure_loaded()
+    data = _exp_root()
+    if not isinstance(data, dict):
+        data = {}
+    return data
+
+
+async def _exp_save():
+    store = guild_settings.get_store()
+    if hasattr(store, "save"):
+        await store.save()
+
+
+def _exp_ensure(data: dict, guild_id: int, user_id: int) -> dict:
+    g = data.setdefault(str(guild_id), {})
+    u = g.setdefault(str(user_id), {})
+    u.setdefault("chat_exp", 0)
+    u.setdefault("vc_exp", 0)
+    u.setdefault("last_chat_grant", 0.0)
+    u.setdefault("vc_accum_sec", 0.0)
+    u.setdefault("vc_last_tick", 0.0)
+    u.setdefault("chat_pending", False)
+    return u
+
+
+def _grant_chat_exp(user: dict, now: float) -> bool:
+    """前回付与からCHAT_EXP_INTERVAL経過 + メッセージ有り なら付与。"""
+    last = float(user.get("last_chat_grant") or 0.0)
+    if last <= 0.0:
+        user["last_chat_grant"] = now
+        user["chat_pending"] = False
+        return False
+    if now - last < CHAT_EXP_INTERVAL:
+        return False
+    if not user.get("chat_pending"):
+        user["last_chat_grant"] = now
+        return False
+    user["chat_exp"] = int(user.get("chat_exp", 0)) + CHAT_EXP_PER_GRANT
+    user["last_chat_grant"] = now
+    user["chat_pending"] = False
+    return True
+
+
+def _grant_vc_exp(user: dict, now: float) -> bool:
+    """VC滞在累積がVC_EXP_INTERVALを超えるたびに付与。"""
+    last = float(user.get("vc_last_tick") or 0.0)
+    if last <= 0.0:
+        user["vc_last_tick"] = now
+        return False
+    delta = max(0.0, now - last)
+    user["vc_accum_sec"] = float(user.get("vc_accum_sec", 0.0)) + delta
+    user["vc_last_tick"] = now
+    granted = False
+    while user["vc_accum_sec"] >= VC_EXP_INTERVAL:
+        user["vc_accum_sec"] -= VC_EXP_INTERVAL
+        user["vc_exp"] = int(user.get("vc_exp", 0)) + VC_EXP_PER_GRANT
+        granted = True
+    return granted
+
+
+# ============================================================
+# 既存 UI
+# ============================================================
 class PayModal(discord.ui.Modal, title="コインを送金"):
     receiver_id = discord.ui.TextInput(label="送金先のユーザーID", max_length=20)
     amount = discord.ui.TextInput(label="送金するAGO", max_length=9)
@@ -324,6 +461,86 @@ class ShortcutManagerView(discord.ui.View):
         return await edit_panel_v2(interaction, as_panel_v2(self))
 
 
+# ============================================================
+# EXP パネル (Components V2 前提)
+# ============================================================
+class ExpStatusView(discord.ui.View):
+    """自分のEXP状況を表示するパネル。"""
+    def __init__(self, author_id: int, guild_id: int):
+        super().__init__(timeout=300)
+        self.author_id, self.guild_id = author_id, guild_id
+
+    async def snapshot(self) -> dict:
+        data = await _exp_load()
+        return _exp_ensure(data, self.guild_id, self.author_id)
+
+    @staticmethod
+    def _bar(cur: int, need: int, width: int = 12) -> str:
+        if need <= 0:
+            return "█" * width
+        filled = min(width, int(width * cur / need))
+        return "█" * filled + "░" * (width - filled)
+
+    def embed_for(self, user: dict) -> discord.Embed:
+        chat_exp = int(user.get("chat_exp", 0))
+        vc_exp = int(user.get("vc_exp", 0))
+        cl, ccur, cneed = level_from_exp(chat_exp, CHAT_EXP_BASE, CHAT_EXP_RATIO)
+        vl, vcur, vneed = level_from_exp(vc_exp, VC_EXP_BASE, VC_EXP_RATIO)
+        gl = general_level(chat_exp, vc_exp)
+        return discord.Embed(
+            title="EXP状況",
+            description=(
+                f"**general Lv.{gl}**（chat/vc の平均）\n\n"
+                f"**チャット** Lv.{cl} — {ccur}/{cneed} EXP\n"
+                f"`{self._bar(ccur, cneed)}`\n"
+                f"累計 {chat_exp} EXP（5分毎・メッセージ有りで+{CHAT_EXP_PER_GRANT}）\n\n"
+                f"**VC** Lv.{vl} — {vcur}/{vneed} EXP\n"
+                f"`{self._bar(vcur, vneed)}`\n"
+                f"累計 {vc_exp} EXP（5分滞在ごとに+{VC_EXP_PER_GRANT}）"
+            ),
+            color=0x3498DB,
+        )
+
+    @discord.ui.button(label="更新", style=discord.ButtonStyle.secondary, row=0)
+    async def refresh_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user.id != self.author_id:
+            return await interaction.response.send_message("このパネルを開いたユーザーだけ更新できます。", ephemeral=True)
+        user = await self.snapshot()
+        await interaction.response.edit_message(embed=self.embed_for(user), view=self)
+
+
+class ExpRankingView(discord.ui.View):
+    def __init__(self, guild_id: int):
+        super().__init__(timeout=300)
+        self.guild_id = guild_id
+
+    async def build_embed(self) -> discord.Embed:
+        data = await _exp_load()
+        guild = data.get(str(self.guild_id), {})
+        rows = []
+        for uid, u in guild.items():
+            chat_exp = int(u.get("chat_exp", 0))
+            vc_exp = int(u.get("vc_exp", 0))
+            gl = general_level(chat_exp, vc_exp)
+            rows.append((gl, chat_exp, vc_exp, uid))
+        rows.sort(key=lambda x: (x[0], x[1] + x[2]), reverse=True)
+        lines = []
+        for i, (gl, ce, ve, uid) in enumerate(rows[:20], start=1):
+            lines.append(f"`{i:>2}.` <@{uid}> — general Lv.{gl}（chat {ce} / vc {ve}）")
+        return discord.Embed(
+            title="EXPランキング（general順）",
+            description="\n".join(lines) or "まだEXPデータがありません。",
+            color=0x9B59B6,
+        )
+
+    @discord.ui.button(label="更新", style=discord.ButtonStyle.secondary, row=0)
+    async def refresh_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.edit_message(embed=await self.build_embed(), view=self)
+
+
+# ============================================================
+# AI 設定 UI
+# ============================================================
 MODEL_PAGE_SIZE = 25
 
 
@@ -368,8 +585,7 @@ class AIDefaultSelect(discord.ui.Select):
             else:
                 await ai_preferences.set_image_model(self.user_id, selected)
         except Exception:
-            import logging
-            logging.getLogger(__name__).exception("AI model preference save failed: user=%s", self.user_id)
+            logger.exception("AI model preference save failed: user=%s", self.user_id)
             return await interaction.response.send_message(
                 "AI設定の保存に失敗しました。しばらくしてから再試行してください。", ephemeral=True
             )
@@ -446,7 +662,6 @@ class AIDefaultView(discord.ui.View):
                         "name": f"KiosAPI · {model['id']}",
                     } for model in kios_models)
                 except Exception:
-                    # 片方のカタログが一時的に取得できなくても、もう片方を表示する。
                     pass
                 try:
                     apinex_models = await ai_provider_router.fetch_apinex_free_models()
@@ -456,7 +671,6 @@ class AIDefaultView(discord.ui.View):
                         "name": f"APInex Free · {model['id'].removeprefix('free/')}",
                     } for model in apinex_models)
                 except Exception:
-                    # 片方のカタログが一時的に取得できなくても、もう片方を表示する。
                     pass
                 models.extend(ai_omnirush.model_choices())
                 if not models and logfare_error:
@@ -574,9 +788,18 @@ class ReasoningView(discord.ui.View):
         )
 
 
+# ============================================================
+# Cog
+# ============================================================
 class GeneralCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
+
+    async def cog_load(self):
+        self.exp_vc_tick.start()
+
+    def cog_unload(self):
+        self.exp_vc_tick.cancel()
 
     @app_commands.command(name="general", description="一般機能の操作パネルを表示します")
     async def general(self, interaction: discord.Interaction):
@@ -634,6 +857,17 @@ class GeneralCog(commands.Cog):
         if value == "shortcut_manage":
             view = ShortcutManagerView(self, interaction.guild_id, interaction.user.id)
             return await interaction.response.send_message(view=as_panel_v2(view), ephemeral=True)
+        if value == "exp_status":
+            view = ExpStatusView(interaction.user.id, interaction.guild_id)
+            embed = view.embed_for(await view.snapshot())
+            return await interaction.response.send_message(
+                embed=embed, view=as_panel_v2(view), ephemeral=True
+            )
+        if value == "exp_ranking":
+            view = ExpRankingView(interaction.guild_id)
+            return await interaction.response.send_message(
+                embed=await view.build_embed(), view=as_panel_v2(view), ephemeral=True
+            )
         wallet = self.bot.get_cog("WalletCog")
         fujo = self.bot.get_cog("FujoSurvival")
         if value == "pay":
@@ -649,9 +883,6 @@ class GeneralCog(commands.Cog):
         return await fujo.fujo(interaction, action, None, "active", None, None)
 
     async def execute_shortcut(self, message: discord.Message, item: dict, *, invoker=None):
-        # Message shortcuts are personal settings.  Keep this guard here as well
-        # as in ``on_message`` so callers cannot accidentally bypass ownership
-        # validation by invoking the executor directly.
         try:
             owner_id = int(item.get("user_id"))
             author_id = int(message.author.id)
@@ -681,10 +912,12 @@ class GeneralCog(commands.Cog):
             if root == "help":
                 return await message.channel.send("ヘルプは `/help` で確認できます。")
         except Exception:
-            import logging
-            logging.getLogger(__name__).exception("shortcut execution failed: %s", item)
+            logger.exception("shortcut execution failed: %s", item)
             await message.channel.send("ショートカットの実行中にエラーが発生しました。")
 
+    # ============================================================
+    # EXP: メッセージ
+    # ============================================================
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message):
         if message.author.bot or message.guild is None:
@@ -696,7 +929,59 @@ class GeneralCog(commands.Cog):
         ):
             await self.execute_shortcut(message, item)
 
+        # EXP: メッセージ有りフラグを立て、5分間隔判定
+        data = await _exp_load()
+        user = _exp_ensure(data, message.guild.id, message.author.id)
+        user["chat_pending"] = True
+        _grant_chat_exp(user, time.time())
+        await _exp_save()
 
+    # ============================================================
+    # EXP: VC入退室
+    # ============================================================
+    @commands.Cog.listener()
+    async def on_voice_state_update(self, member, before, after):
+        if member.bot or member.guild is None:
+            return
+        data = await _exp_load()
+        user = _exp_ensure(data, member.guild.id, member.id)
+        now = time.time()
+        was_in = before.channel is not None
+        now_in = after.channel is not None
+        if not was_in and now_in:
+            user["vc_last_tick"] = now
+        elif was_in and not now_in:
+            _grant_vc_exp(user, now)
+            user["vc_last_tick"] = 0.0
+        await _exp_save()
+
+    # ============================================================
+    # EXP: VC定期tick
+    # ============================================================
+    @tasks.loop(minutes=1)
+    async def exp_vc_tick(self):
+        data = await _exp_load()
+        now = time.time()
+        changed = False
+        for guild in self.bot.guilds:
+            for vc in guild.voice_channels:
+                for m in vc.members:
+                    if m.bot:
+                        continue
+                    user = _exp_ensure(data, guild.id, m.id)
+                    if _grant_vc_exp(user, now):
+                        changed = True
+        if changed:
+            await _exp_save()
+
+    @exp_vc_tick.before_loop
+    async def before_exp_vc_tick(self):
+        await self.bot.wait_until_ready()
+
+
+# ============================================================
+# ショートカット用メッセージアダプタ
+# ============================================================
 class _MessageResponse:
     def __init__(self, source):
         self.source, self.done = source, False
@@ -737,8 +1022,6 @@ class ShortcutMessageInteraction:
         self.channel = message.channel
         self.guild = message.guild
         self.guild_id = message.guild.id
-        # Keep the real guild Member for voice state/permissions. For explicit
-        # AI-bot tool calls, invoker is resolved from the source interaction/context.
         self.user = invoker or message.author
         self.user_id = self.user.id
         self.response = _MessageResponse(self)
