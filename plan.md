@@ -30,7 +30,7 @@ Discord内で利用者がActivityを起動すると、そのActivityが同じボ
 
 1. 既存Next.jsアプリ内にActivityルートを追加し、`@discord/embedded-app-sdk`と公式YouTube IFrame Player APIを使う。SDKの`patchUrlMappings`とDiscord Developer PortalのURL MappingでYouTube通信をプロキシ経由にする。Activityに初参加した利用者が「同期して再生」を押してから、常にミュートしたプレイヤーを再生する。ブラウザーの自動再生制限、利用者ごとのバッファリング、YouTubeの埋め込み・年齢・地域制限には従い、それらを回避しない。
 2. Activity SDKの認証コードを既存Next.jsサーバーでDiscordに交換し、短寿命の署名済みActivityトークンを発行する。Activityからの状態取得ではそのトークンを検証し、既存のHMAC署名付きWeb-Bot連携パターンを再利用する。Discord/共有シークレットはサーバー環境に置き、Supabaseキー、YouTubeの音声ストリームURLやHTTPヘッダーはブラウザーへ返さない。
-3. Botに読み取り専用のActivity状態APIを追加し、呼出者が対象guild・voice channelに参加していることを確認する。返却データはYouTube動画ID、タイトル、再生状態、現在位置、再生速度、サーバー時刻に限定する。既存の`VoiceCog`状態を利用し、新しいDBや外部LLM呼び出しは追加しない。
+3. Botに読み取り専用のActivity状態APIを追加し、呼出者が対象guild・voice channelに参加していることを確認する。返却データはYouTube動画ID、タイトル、再生状態、現在位置、再生速度、サーバー時刻に限定する。既存の`VoiceCog`状態を利用し、新しいDBや外部LLM呼び出しは追加しない。BotのHTTP APIは`BOT_API_PORT`（既定値8081）で待ち受け、Cloudflare Tunnelから`http://localhost:8081`へ転送する。
 4. Activityは表示中のみ約2秒間隔で状態を取得し、動画／再生状態／位置をBotに追従させる。ネットワークやYouTubeのバッファリングにより完全なフレーム単位同期は保証せず、数秒程度のずれがあり得る。
 5. 同期用スナップショットとYouTubeプレイヤー接続部を分離し、将来の拡張余地は残すが、今回の対象はYouTube動画のみとする。
 
@@ -45,7 +45,7 @@ Discord内で利用者がActivityを起動すると、そのActivityが同じボ
 - `web/app/globals.css`: Activityルート内だけに適用する全画面・レスポンシブスタイル。既存ページの外観は変えない。
 - `web/public/manus-routes.json`: Activityページのルート宣言。
 - `cogs/sio_music.py`と`core/music_activity.py`: 既存Music状態から、秘密情報を含まないYouTube同期スナップショットを作成。
-- `keep_alive.py`: HMAC検証済みのBot内部Music状態ルート。Webサーバーからのみ利用。
+- `keep_alive.py`: `BOT_API_PORT`（既定値8081）で待ち受けるHMAC検証済みBot内部ルート。Tunnel経由でWebから利用。
 - `tests/`と`web/tests/`: 既存テスト環境に沿った同期データ／認証回帰カバレッジ。
 
 ## 必要な設定と注意点

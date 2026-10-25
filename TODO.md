@@ -28,3 +28,7 @@
 ## Vercelビルド安定化
 
 - [x] **`/map`のビルドブロック防止** — `/map`はSupabaseマップデータを使った表示を維持し、取得データは60秒キャッシュする。Supabaseへの取得はNext.jsの静的ページ生成時ではなくリクエスト時に行い、応答が遅い場合は有限時間で中止して既存の「準備中」表示へフォールバックする。そのため、Supabaseの応答待ちでVercelの本番ビルドが停止しない。
+
+## Raspberry Pi / Cloudflare Tunnel
+
+- [ ] **Bot APIのポートとVercel接続** — Raspberry Pi上のFlask APIは`BOT_API_PORT`（既定値`8081`）で待ち受け、Cloudflare Tunnelの公開ホストは`http://localhost:8081`へ転送する。Vercelの`BOT_CODER_BASE_URL`にはTunnelの公開HTTPSホストを設定し、`CODER_SERVICE_SHARED_SECRET`はPiとVercelで同じ値にする。ManusのCloudflare Tunnel設定とPi上でのサービス稼働確認後、Activity状態取得とAGO CoderがPiへ到達できることを確認する。
