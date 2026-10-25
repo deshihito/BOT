@@ -365,8 +365,29 @@ _PROBE_PATTERNS: list[tuple[str, dict[str, str], dict[str, str]]] = [
 ]
 
 
-async def probe_transcription_languages(audio: bytes) -> list[tuple[str, str]]:
-    """同じ音声を複数の言語指定で送り、[(パターン名, 認識結果またはエラー内容)] を返す。"""
+async def fetch_transcription_models() -> list[str]:
+    """Logfare の公開カタログから、音声認識に使えそうなモデルIDを返す。
+
+    endpoints に audio/transcriptions があるものを優先し、無ければ名前から推測した候補を返す。
+    """
+    async with aiohttp.ClientSession(timeout=DEFAULT_TIMEOUT) as session:
+        async with session.get(f"{BASE_URL}/models") as response:
+            response.raise_for_status()
+            payload = await response.json()
+    models = [m for m in payload.get("data", []) if isinstance(m, dict) and isinstance(m.get("id"), str)]
+    exact = [m["id"] for m in models if "audio/transcriptions" in (m.get("endpoints") or [])]
+    if exact:
+        return sorted(exact)
+    hints = ("whisper", "nova", "transcri", "stt", "speech", "parakeet", "scribe")
+    return sorted(m["id"] for m in models if any(h in m["id"].lower() for h in hints))
+
+
+async def probe_transcription_languages(audio: bytes, model: str | None = None) -> list[tuple[str, str]]:
+    """同じ音声を複数の言語指定で送り、[(パターン名, 認識結果またはエラー内容)] を返す。
+
+    model を省略すると TRANSCRIPTION_MODEL を使う。
+    """
+    model = (model or TRANSCRIPTION_MODEL).strip()
     key = api_key()
     if not key:
         raise RuntimeError("LOGFARE_API_KEY が設定されていません。")
@@ -375,7 +396,7 @@ async def probe_transcription_languages(audio: bytes) -> list[tuple[str, str]]:
     async with aiohttp.ClientSession(timeout=timeout) as session:
         for label, fields, query in _PROBE_PATTERNS:
             form = aiohttp.FormData()
-            form.add_field("model", TRANSCRIPTION_MODEL)
+            form.add_field("model", model)
             for name, value in fields.items():
                 form.add_field(name, value)
             form.add_field("response_format", "json")
