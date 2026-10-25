@@ -7,7 +7,7 @@ import logging
 import discord
 from discord.ext import commands
 
-from core import ai_input, ai_omnirush, ai_preferences, ai_provider_router, ai_tools, logfare
+from core import ai_input, ai_latex, ai_omnirush, ai_preferences, ai_provider_router, ai_tools, logfare
 
 logger = logging.getLogger(__name__)
 
@@ -90,6 +90,7 @@ class AICog(commands.Cog):
                     "content": (
                         "あなたはDiscord上の親切なアシスタントです。日本語で簡潔かつ正確に回答してください。"
                         + ("必要に応じてweb_searchを使い、回答に参照URLを含めてください。" if can_use_web_search else "")
+                        + ai_latex.SYSTEM_HINT
                     ),
                 },
                 {"role": "user", "content": user_content},
@@ -108,7 +109,7 @@ class AICog(commands.Cog):
                     answer = routed.text
                 elif omnirush_model:
                     answer = await ai_omnirush.chat(
-                        omnirush_model, str(user_content), reasoning_effort=reasoning_effort
+                        omnirush_model, f"{ai_latex.SYSTEM_HINT}\n\n{user_content}", reasoning_effort=reasoning_effort
                     )
                 elif can_use_web_search:
                     answer, sources = await ai_tools.answer_with_web_search(
@@ -137,9 +138,16 @@ class AICog(commands.Cog):
         if not answer:
             return await ctx.reply("AIから空の回答が返りました。", mention_author=False)
         notice = "" if exact else f"（指定モデルがfree一覧にないため `{model}` を使用）"
+        latex = await ai_latex.process(answer)
+        description = latex.text[:4096]
+        math_files = [
+            discord.File(io.BytesIO(image.data), filename=image.filename, description=image.alt)
+            for image in latex.images
+            if image.marker in description  # 4096字で切れた分の画像は添付しない
+        ]
         embed = discord.Embed(
             title="AI回答",
-            description=answer[:4096],
+            description=description,
             color=0x5865F2,
         )
         footer = (f"モデル: {routed.model} / 接続先: {routed.provider}（自動切替）"
@@ -155,6 +163,9 @@ class AICog(commands.Cog):
                 for url, source in list(unique_sources.items())[:5]
             )
             embed.add_field(name="参照ソース", value=links[:1024], inline=False)
+        # 数式画像は回答より上に出す。複数枚を1メッセージにするとDiscordが切り取って並べるため、1枚ずつ送る
+        for math_file in math_files:
+            await ctx.send(file=math_file)
         await ctx.reply(embed=embed, mention_author=False)
 
     @ai.error
