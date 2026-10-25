@@ -34,9 +34,12 @@ Discord内で利用者がActivityを起動すると、そのActivityが同じボ
 4. Activityは表示中のみ約2秒間隔で状態を取得し、動画／再生状態／位置をBotに追従させる。ネットワークやYouTubeのバッファリングにより完全なフレーム単位同期は保証せず、数秒程度のずれがあり得る。
 5. 同期用スナップショットとYouTubeプレイヤー接続部を分離し、将来の拡張余地は残すが、今回の対象はYouTube動画のみとする。
 
+既存の`/map`はSupabaseの共有マップを表示し続けるが、ビルド時の静的生成ではなくリクエスト時に読み込む。Supabaseデータは60秒キャッシュし、有限時間で取得を打ち切り、失敗時は既存の準備中表示へフォールバックすることでVercelのビルドを外部データ応答待ちにしない。
+
 ## プロジェクト構造
 
 - `web/app/activity/music/`: Discord Activityの画面、SDK初期化、YouTubeプレイヤー同期。
+- `web/middleware.ts`: Discordの`frame_id`と`instance_id`を含むルート起動だけをActivityページへ転送し、通常のトップページは変えない。
 - `web/app/api/activity/`: Activity OAuthコード交換、短寿命トークン発行、Music状態取得のNext.js APIルート。
 - `web/lib/activity-auth.ts`: Activity用短寿命トークンの署名と検証。
 - `web/app/globals.css`: Activityルート内だけに適用する全画面・レスポンシブスタイル。既存ページの外観は変えない。

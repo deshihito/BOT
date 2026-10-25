@@ -7,6 +7,7 @@ async function get<T>(path: string): Promise<T> {
   const res = await fetch(`${process.env.SUPABASE_URL}/rest/v1/${path}`, {
     headers: { apikey: process.env.SUPABASE_KEY!, Authorization: `Bearer ${process.env.SUPABASE_KEY}` },
     next: { revalidate: 60 },
+    signal: AbortSignal.timeout(10_000),
   });
   if (!res.ok) throw new Error(`supabase ${res.status}`);
   return (await res.json()) as T;
