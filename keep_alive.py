@@ -91,7 +91,6 @@ def _authorized(expected_path: str = "/internal/coder/run") -> bool:
                     del _used_nonces[used_nonce]
             _next_nonce_cleanup = now + 10
             
-        # 修正: ポーリングによる連続リクエストを許可するため、10秒以内の同一ノンスは有効とする
         if nonce in _used_nonces:
             if now - _used_nonces[nonce] < 10.0:
                 return True
@@ -156,10 +155,8 @@ async def _fetch_activity_music_snapshot(guild_id: int, channel_id: int, user_id
 
 
 def _run_ffmpeg_task(video_id: str, directory: Path, manifest: Path):
-    """バックグラウンドスレッドで実行されるFFmpeg起動タスク"""
     try:
         options = {
-            # 修正: エラーになりにくいよう、フォールバックを充実させる
             "format": "bestvideo[height<=720]+bestaudio/best[height<=720]/best",
             "noplaylist": True,
             "quiet": True,
@@ -233,17 +230,14 @@ def _prepare_activity_hls(video_id: str) -> Path | None:
             status = _video_status.get(video_id)
             process = _hls_processes.get(video_id)
             
-            # すでに生成済みの場合
             if status == "ready" and process and process.poll() is None and manifest.exists():
                 return directory
                 
-            # 失敗しているか、プロセスが死んでいる場合はリセット
             if status == "error" or (process and process.poll() is not None):
                 _video_status.pop(video_id, None)
                 _hls_processes.pop(video_id, None)
                 status = None
 
-            # まだ起動していない場合はバックグラウンドタスクを開始
             if status is None:
                 directory.mkdir(parents=True, exist_ok=True)
                 for old in directory.iterdir():
@@ -251,14 +245,14 @@ def _prepare_activity_hls(video_id: str) -> Path | None:
                 
                 _video_status[video_id] = "processing"
                 Thread(target=_run_ffmpeg_task, args=(video_id, directory, manifest), daemon=True).start()
-                return None # 準備中
+                return None
                 
-            # status == "processing" の場合
             return None
             
     return directory
 
 
+# ... (run_coder, activity_music_state は前回と同じ) ...
 @app.post("/internal/coder/run")
 def run_coder():
     if not _authorized("/internal/coder/run"):
@@ -363,8 +357,6 @@ def activity_music_video():
     
     try:
         directory = _prepare_activity_hls(video_id)
-        
-        # 準備中（バックグラウンドで起動した直後）の場合、202 Accepted を返す
         if directory is None:
             return jsonify({"status": "processing"}), 202
             
@@ -373,6 +365,13 @@ def activity_music_video():
                 return jsonify({"error": "video_unavailable", "detail": "FFmpeg conversion failed"}), 502
 
         output = directory / asset
+        
+        # 修正: セグメントファイルがまだ生成されていない場合、最大5秒間待機する
+        if not output.exists() and asset.endswith(".ts"):
+            for _ in range(50): # 0.1秒 × 50 = 5秒
+                time.sleep(0.1)
+                if output.exists():
+                    break
         
         if not output.exists():
             logger.warning("[ActivityVideo] asset not ready video_id=%s asset=%s", video_id, asset)
