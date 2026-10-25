@@ -21,15 +21,15 @@ logger = logging.getLogger(__name__)
 # ============================================================
 # EXP 設定
 # ============================================================
-CHAT_EXP_BASE = 10
+CHAT_EXP_BASE = 50
 CHAT_EXP_RATIO = 1.25
-VC_EXP_BASE = 10
+VC_EXP_BASE = 50
 VC_EXP_RATIO = 1.25
 
 CHAT_EXP_INTERVAL = 5 * 60
 VC_EXP_INTERVAL = 5 * 60
-CHAT_EXP_PER_GRANT = 1
-VC_EXP_PER_GRANT = 1
+CHAT_EXP_PER_GRANT = 5
+VC_EXP_PER_GRANT = 5
 VC_MAX_GAP_SECONDS = 3 * 60
 HISTORY_FUTURE_TOLERANCE = 60
 
