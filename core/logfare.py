@@ -18,6 +18,26 @@ TRANSCRIPTION_MODEL = os.getenv("LOGFARE_TRANSCRIPTION_MODEL", "nova-3").strip()
 # Nova 3 は言語指定が無いと英語扱いになり、日本語音声は認識結果が空になりやすい。
 # 空文字にすると言語指定なしで送る。
 TRANSCRIPTION_LANGUAGE = os.getenv("LOGFARE_TRANSCRIPTION_LANGUAGE", "ja").strip()
+
+
+def _json_env(name: str) -> dict[str, str]:
+    """環境変数に入れた JSON オブジェクト（例: {"detect_language": "true"}）を {str: str} で返す。"""
+    raw = os.getenv(name, "").strip()
+    if not raw:
+        return {}
+    try:
+        data = json.loads(raw)
+    except ValueError:
+        logging.getLogger(__name__).warning("%s が JSON として読めないので無視します", name)
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    return {str(k): str(v).lower() if isinstance(v, bool) else str(v) for k, v in data.items()}
+
+
+# Logfare が language を取り込まないときの調整用。フォーム項目 / クエリ文字列を追加で送れる。
+TRANSCRIPTION_EXTRA_FIELDS = _json_env("LOGFARE_TRANSCRIPTION_EXTRA_FIELDS")
+TRANSCRIPTION_EXTRA_QUERY = _json_env("LOGFARE_TRANSCRIPTION_EXTRA_QUERY")
 DEFAULT_TIMEOUT = aiohttp.ClientTimeout(total=45)
 
 logger = logging.getLogger(__name__)
@@ -207,11 +227,14 @@ def _extract_transcript(result: Any) -> str | None:
     return None
 
 
-def _transcription_form(audio: bytes, filename: str, language: str) -> aiohttp.FormData:
+def _transcription_form(audio: bytes, filename: str, language: str, extra: dict[str, str]) -> aiohttp.FormData:
     form = aiohttp.FormData()
     form.add_field("model", TRANSCRIPTION_MODEL)
     if language:
         form.add_field("language", language)
+    for name, value in extra.items():
+        if name not in ("model", "file"):
+            form.add_field(name, value)
     form.add_field("response_format", "json")
     form.add_field("file", audio, filename=filename, content_type="audio/wav")
     return form
@@ -220,24 +243,33 @@ def _transcription_form(audio: bytes, filename: str, language: str) -> aiohttp.F
 async def transcribe_audio(audio: bytes, *, filename: str = "voice.wav") -> str:
     """Logfare の音声認識 endpoint を呼び、認識テキストを返す。
 
-    言語指定が 400/422 で拒否された場合だけ、言語指定なしでもう一度送る。
+    言語などの追加パラメータが 400/422 で拒否された場合だけ、何も足さずにもう一度送る。
     """
     key = api_key()
     if not key:
         raise RuntimeError("LOGFARE_API_KEY が設定されていません。")
     headers = {"Authorization": f"Bearer {key}"}
     timeout = aiohttp.ClientTimeout(total=90)
-    languages = [TRANSCRIPTION_LANGUAGE, ""] if TRANSCRIPTION_LANGUAGE else [""]
+    # (language, 追加フォーム項目, 追加クエリ)。1回目が拒否されたら、何も足さずに再送する
+    attempts: list[tuple[str, dict[str, str], dict[str, str]]] = [("", {}, {})]
+    if TRANSCRIPTION_LANGUAGE or TRANSCRIPTION_EXTRA_FIELDS or TRANSCRIPTION_EXTRA_QUERY:
+        attempts.insert(0, (TRANSCRIPTION_LANGUAGE, TRANSCRIPTION_EXTRA_FIELDS, TRANSCRIPTION_EXTRA_QUERY))
     raw = ""
     async with aiohttp.ClientSession(timeout=timeout) as session:
-        for language in languages:
-            form = _transcription_form(audio, filename, language)
-            async with session.post(f"{BASE_URL}/audio/transcriptions", headers=headers, data=form) as response:
+        for index, (language, extra_fields, extra_query) in enumerate(attempts):
+            form = _transcription_form(audio, filename, language, extra_fields)
+            async with session.post(
+                f"{BASE_URL}/audio/transcriptions",
+                headers=headers,
+                data=form,
+                params=extra_query or None,
+            ) as response:
                 if response.status >= 400:
-                    if language and response.status in (400, 422):
+                    if index < len(attempts) - 1 and response.status in (400, 422):
                         logger.warning(
-                            "Logfare が language=%s を受け付けませんでした (HTTP %s)。言語指定なしで再送します",
-                            language, response.status,
+                            "Logfare が追加パラメータ (language=%s, fields=%s, query=%s) を受け付けませんでした "
+                            "(HTTP %s)。指定なしで再送します",
+                            language, extra_fields, extra_query, response.status,
                         )
                         continue
                     raise LogfareHTTPError(response.status, response.headers.get("Retry-After"))
@@ -314,3 +346,68 @@ async def generate_image(model: str, prompt: str, *, size: str = "1024x1024") ->
         async with session.get(image_url) as image_response:
             image_response.raise_for_status()
             return await image_response.read()
+
+
+# ============================================================
+# 動作確認用: どの指定なら日本語として認識されるかを調べる
+#   python -m core.logfare 日本語を話したWAV.wav     (BOT のフォルダで実行)
+#   LOGFARE_API_KEY が必要。Bot 本体からは使われない。
+# ============================================================
+_PROBE_PATTERNS: list[tuple[str, dict[str, str], dict[str, str]]] = [
+    ("指定なし", {}, {}),
+    ("form language=ja", {"language": "ja"}, {}),
+    ("form language=ja-JP", {"language": "ja-JP"}, {}),
+    ("form detect_language=true", {"detect_language": "true"}, {}),
+    ("form language=ja + detect_language=true", {"language": "ja", "detect_language": "true"}, {}),
+    ("query ?language=ja", {}, {"language": "ja"}),
+    ("query ?language=ja-JP", {}, {"language": "ja-JP"}),
+    ("query ?detect_language=true", {}, {"detect_language": "true"}),
+]
+
+
+async def probe_transcription(path: str) -> None:
+    """同じ音声を複数の言語指定で送り、認識結果を並べて表示する。"""
+    key = api_key()
+    if not key:
+        raise SystemExit("LOGFARE_API_KEY が設定されていません")
+    with open(path, "rb") as f:
+        audio = f.read()
+    print(f"音声: {path} ({len(audio)} bytes) / モデル: {TRANSCRIPTION_MODEL} / {BASE_URL}\n")
+    timeout = aiohttp.ClientTimeout(total=90)
+    async with aiohttp.ClientSession(timeout=timeout) as session:
+        for label, fields, query in _PROBE_PATTERNS:
+            form = aiohttp.FormData()
+            form.add_field("model", TRANSCRIPTION_MODEL)
+            for name, value in fields.items():
+                form.add_field(name, value)
+            form.add_field("response_format", "json")
+            form.add_field("file", audio, filename="voice.wav", content_type="audio/wav")
+            try:
+                async with session.post(
+                    f"{BASE_URL}/audio/transcriptions",
+                    headers={"Authorization": f"Bearer {key}"},
+                    data=form,
+                    params=query or None,
+                ) as response:
+                    raw = await response.text()
+                    status = response.status
+            except Exception as exc:  # noqa: BLE001
+                print(f"[{label}] 通信エラー: {exc!r}")
+                continue
+            if status >= 400:
+                print(f"[{label}] HTTP {status}: {raw[:150]}")
+                continue
+            try:
+                text = _extract_transcript(json.loads(raw))
+            except ValueError:
+                text = raw
+            print(f"[{label}] -> {text!r}" + ("" if text else f"  (応答: {raw[:200]})"))
+            await asyncio.sleep(0.5)
+
+
+if __name__ == "__main__":
+    import sys
+
+    if len(sys.argv) != 2:
+        raise SystemExit("使い方: python -m core.logfare 日本語を話したWAV.wav")
+    asyncio.run(probe_transcription(sys.argv[1]))
