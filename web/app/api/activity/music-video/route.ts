@@ -9,7 +9,9 @@ export async function GET(request: Request) {
   const url = new URL(request.url);
   const claims = readActivityToken(url.searchParams.get("token") || undefined);
   const videoId = url.searchParams.get("videoId") || "";
+  const asset = url.searchParams.get("asset") || "index.m3u8";
   if (!claims || !VIDEO_ID.test(videoId)) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  if (!/^(?:index\.m3u8|seg-\d{6}\.ts)$/.test(asset)) return NextResponse.json({ error: "invalid_asset" }, { status: 400 });
 
   const baseUrl = process.env.BOT_CODER_BASE_URL;
   const secret = process.env.CODER_SERVICE_SHARED_SECRET;
@@ -23,7 +25,7 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: "activity_not_configured" }, { status: 503 });
   }
 
-  const body = JSON.stringify({ guild_id: claims.guildId, channel_id: claims.channelId, user_id: claims.userId, video_id: videoId });
+  const body = JSON.stringify({ guild_id: claims.guildId, channel_id: claims.channelId, user_id: claims.userId, video_id: videoId, asset });
   const timestamp = String(Math.floor(Date.now() / 1000));
   const nonce = crypto.randomBytes(24).toString("hex");
   const bodyHash = crypto.createHash("sha256").update(body).digest("hex");
@@ -46,13 +48,25 @@ export async function GET(request: Request) {
       return NextResponse.json({ error: upstream.status === 409 ? "video_not_current" : "video_unavailable" }, { status: upstream.status === 409 ? 409 : 502 });
     }
     const headers = new Headers();
-    headers.set("Content-Type", upstream.headers.get("content-type") || "video/mp4");
+    let bodyStream = upstream.body;
+    const contentType = upstream.headers.get("content-type") || "";
+    if (asset === "index.m3u8") {
+      const manifest = await upstream.text();
+      const prefix = `/api/activity/music-video?token=${encodeURIComponent(url.searchParams.get("token") || "")}&videoId=${encodeURIComponent(videoId)}&asset=`;
+      const rewritten = manifest.split("\n").map((line) => {
+        const trimmed = line.trim();
+        return trimmed && !trimmed.startsWith("#") ? `${prefix}${encodeURIComponent(trimmed)}` : line;
+      }).join("\n");
+      bodyStream = new ReadableStream({ start(controller) { controller.enqueue(new TextEncoder().encode(rewritten)); controller.close(); } });
+    }
+    headers.set("Content-Type", contentType || (asset === "index.m3u8" ? "application/vnd.apple.mpegurl" : "video/mp2t"));
     for (const name of ["content-length", "content-range", "accept-ranges", "etag", "last-modified"]) {
+      if (asset === "index.m3u8" && name === "content-length") continue;
       const value = upstream.headers.get(name);
       if (value) headers.set(name, value);
     }
     headers.set("Cache-Control", "no-store, max-age=0");
-    return new Response(upstream.body, { status: upstream.status, headers });
+    return new Response(bodyStream, { status: upstream.status, headers });
   } catch {
     return NextResponse.json({ error: "video_unavailable" }, { status: 502 });
   }
