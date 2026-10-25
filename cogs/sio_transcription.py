@@ -464,6 +464,8 @@ class TranscriptionCog(commands.Cog):
         self.sessions: dict[int, dict] = {}
         self.voice_sessions = get_manager(bot)
         self._start_lock = asyncio.Lock()
+        # サーバーごとの直近の発話 (表示名, 16kHz WAV, 時刻)。!sttdebug が使う
+        self.last_audio: dict[int, tuple[str, bytes, float]] = {}
 
     async def _get_or_create_webhook(self, channel: discord.TextChannel) -> discord.Webhook:
         webhooks = await channel.webhooks()
@@ -546,6 +548,7 @@ class TranscriptionCog(commands.Cog):
 
         async def send_webhook(display_name: str, avatar_url: str | None, audio_wav: bytes):
             nonlocal premium_notice_sent
+            self.last_audio[guild_id] = (display_name, audio_wav, time.time())
             try:
                 text = await logfare.transcribe_audio(audio_wav)
             except logfare.LogfareHTTPError as ex:
@@ -599,9 +602,59 @@ class TranscriptionCog(commands.Cog):
             "音楽・GVC・読み上げと同時に利用できます。利用者の音声は外部サービスで処理されます。"
         ))
 
+    # --------------------------------------------------
+    # デバッグ: 言語指定の比較（Botオーナー専用。スラッシュコマンドは増やさずプレフィックスで提供）
+    # --------------------------------------------------
+    @commands.command(name="sttdebug")
+    @commands.is_owner()
+    async def stt_debug(self, ctx: commands.Context):
+        """直近の文字起こし音声（またはWAV添付）を、言語指定の8パターンでLogfareに送って結果を比べる。"""
+        audio: bytes | None = None
+        source = ""
+        for attachment in ctx.message.attachments:
+            if attachment.filename.lower().endswith(".wav") and attachment.size <= 5 * 1024 * 1024:
+                audio = await attachment.read()
+                source = f"添付ファイル `{attachment.filename}`"
+                break
+        if audio is None and ctx.guild is not None:
+            last = self.last_audio.get(ctx.guild.id)
+            if last:
+                name, audio, ts = last
+                source = f"**{name}** の直近の発話（{int(time.time() - ts)}秒前）"
+        if audio is None:
+            return await ctx.send(embed=we(
+                "⚠️ 調べる音声がありません。文字起こし中のVCで話してからもう一度実行するか、"
+                "WAVファイル(5MBまで)を添付して `!sttdebug` を実行してください。"
+            ))
+
+        try:
+            with wave.open(io.BytesIO(audio), "rb") as wav:
+                frames = wav.readframes(wav.getnframes())
+                seconds = wav.getnframes() / wav.getframerate()
+            samples = np.frombuffer(frames, dtype=np.int16)
+            rms = int(np.sqrt(np.mean(samples.astype(np.float32) ** 2))) if len(samples) else 0
+            peak = int(np.max(np.abs(samples.astype(np.int32)))) if len(samples) else 0
+            stats = f"{seconds:.2f}秒 / rms={rms} / peak={peak}"
+        except Exception:
+            stats = "WAVを解析できませんでした"
+
+        async with ctx.typing():
+            try:
+                results = await logfare.probe_transcription_languages(audio)
+            except Exception as e:
+                logger.exception("sttdebug failed")
+                return await ctx.send(embed=we(f"<:failed:1490986584676368535> 実行に失敗しました: `{e}`"))
+
+        lines = [f"`{label}`\n→ {outcome[:150]}" for label, outcome in results]
+        await ctx.send(embed=we(
+            f"🔍 **文字起こし言語指定テスト** — {logfare.TRANSCRIPTION_MODEL}\n"
+            f"音声: {source}（{stats}）\n\n" + "\n".join(lines)
+        ))
+
     def _cleanup(self, guild_id: int):
         """VC を手放すときの後片付け（切断は VoiceSessionManager が行う）。"""
         def cleanup(reason: str) -> None:
+            self.last_audio.pop(guild_id, None)
             session = self.sessions.pop(guild_id, None)
             if not session:
                 return
