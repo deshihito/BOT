@@ -87,3 +87,30 @@ th,td { padding:6px 8px; border-bottom:1px solid var(--line); text-align:left; }
 .nation-map { display:block; width:100%; max-width:720px; height:auto; margin:0 auto; background:var(--bg); }
 .swatch { display:inline-block; width:14px; height:14px; margin-right:8px; border:1px solid var(--line); border-radius:4px; vertical-align:middle; }
 @media (max-width:650px) { header nav { gap:12px; align-items:flex-start; } .main-nav-links a { padding:3px 6px; font-size:13px; } main { padding-top:36px; } .home-hero { gap:18px; } .home-hero img { width:64px; height:64px; } .home-command-grid { grid-template-columns:1fr; } .command-card,.genre-card { gap:14px; padding:17px 0; } }
+
+/* Discord Activity: these selectors activate only on the Music Activity route. */
+body:has([data-activity-root]) > header,
+body:has([data-activity-root]) > footer { display:none; }
+body:has([data-activity-root]) > main { max-width:none; min-height:100svh; margin:0; padding:0; }
+.activity-screen { display:grid; min-height:100vh; min-height:100svh; place-items:center; padding:clamp(14px,3vw,32px); }
+.activity-content { display:grid; width:min(100%,1000px); gap:12px; }
+.activity-heading { display:grid; gap:2px; }
+.activity-heading h1 { font-size:clamp(22px,4vw,30px); }
+.activity-eyebrow { color:var(--accent); font-size:11px; font-weight:800; letter-spacing:.14em; }
+.activity-status { color:var(--muted); font-size:14px; }
+.activity-track-title { overflow:hidden; color:var(--text); font-size:15px; font-weight:700; text-overflow:ellipsis; white-space:nowrap; }
+.activity-player-frame { position:relative; width:100%; aspect-ratio:16/9; overflow:hidden; border:1px solid var(--line); border-radius:10px; background:#101010; }
+.activity-player-host,.activity-player-host iframe { display:block; width:100%; height:100%; border:0; }
+.activity-player-frame[data-started="false"] .activity-player-host iframe { pointer-events:none; }
+.activity-player-placeholder { position:absolute; inset:0; display:grid; place-items:center; padding:16px; background:#101010; color:#fff; font-size:14px; text-align:center; pointer-events:none; }
+.activity-actions { display:flex; flex-wrap:wrap; gap:8px; }
+.activity-button { min-height:40px; padding:7px 14px; border:1px solid var(--accent); border-radius:7px; background:var(--accent); color:#fff; cursor:pointer; font:inherit; font-weight:700; }
+.activity-button:disabled { cursor:not-allowed; opacity:.45; }
+.activity-button-secondary { background:transparent; color:var(--accent); }
+.activity-note,.activity-error { color:var(--muted); font-size:12px; }
+.activity-error { color:#a34848; }
+@media (max-width:650px) {
+  .activity-screen { align-items:start; padding:14px 12px; }
+  .activity-content { gap:10px; }
+  .activity-track-title { white-space:normal; }
+}

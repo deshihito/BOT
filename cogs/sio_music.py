@@ -28,6 +28,7 @@ import discord.opus
 from core.voice_session import SHARED_FEATURES, VoiceBusy, get_manager
 from core.voice_media import add_audio_source, has_audio_source, remove_audio_source
 from core.legacy import Responder
+from core.music_activity import build_music_activity_snapshot
 
 logger = logging.getLogger(__name__)
  
@@ -1464,6 +1465,12 @@ class VoiceCog(commands.Cog):
                 'progress_task': None,
             }
         return self.states[guild_id]
+
+    def activity_snapshot(self, guild_id: int, *, is_playing: bool, now: float | None = None) -> dict:
+        """Return only the safe, read-only fields needed by the Music Activity."""
+        return build_music_activity_snapshot(
+            self.get_state(guild_id), is_playing=is_playing, now=now
+        )
 
     def _reset_playback(self, guild_id: int):
         """キューと再生中の曲を空にし、裏で動いているタスクを止める（退出時の後片付け）。"""
