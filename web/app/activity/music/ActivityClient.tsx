@@ -1,5 +1,6 @@
 "use client";
 import { DiscordSDK } from "@discord/embedded-app-sdk";
+import Hls from "hls.js";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 type MusicSnapshot = {
@@ -39,6 +40,7 @@ export default function ActivityClient({ clientId }: { clientId: string }) {
   const requestActivityAuthRef = useRef<(() => Promise<boolean>) | null>(null);
   const startedRef = useRef(false);
   const loadedVideoIdRef = useRef("");
+  const hlsRef = useRef<Hls | null>(null);
   const [snapshot, setSnapshot] = useState<MusicSnapshot | null>(null);
   const [statusMessage, setStatusMessage] = useState("Discordに接続しています…");
   const [hasStarted, setHasStarted] = useState(false);
@@ -51,6 +53,23 @@ export default function ActivityClient({ clientId }: { clientId: string }) {
     return Math.max(0, (value.positionSeconds || 0) + (value.status === "playing" ? correction / 1000 * (value.playbackRate || 1) : 0));
   }, []);
 
+  const loadStream = useCallback((videoId: string) => {
+    const video = videoRef.current;
+    if (!video) return;
+    const url = `/api/activity/music-video?token=${encodeURIComponent(activityTokenRef.current)}&videoId=${encodeURIComponent(videoId)}&asset=index.m3u8`;
+    hlsRef.current?.destroy();
+    hlsRef.current = null;
+    if (Hls.isSupported()) {
+      const hls = new Hls({ lowLatencyMode: true, backBufferLength: 10, maxBufferLength: 6 });
+      hlsRef.current = hls;
+      hls.loadSource(url);
+      hls.attachMedia(video);
+    } else {
+      video.src = url;
+      video.load();
+    }
+  }, []);
+
   const syncVideo = useCallback((timed: TimedSnapshot) => {
     const video = videoRef.current;
     const value = timed.value;
@@ -61,8 +80,7 @@ export default function ActivityClient({ clientId }: { clientId: string }) {
     }
     if (loadedVideoIdRef.current !== value.videoId) {
       loadedVideoIdRef.current = value.videoId;
-      video.src = `/api/activity/music-video?token=${encodeURIComponent(activityTokenRef.current)}&videoId=${encodeURIComponent(value.videoId)}`;
-      video.load();
+      loadStream(value.videoId);
       video.currentTime = expectedPosition(timed);
     }
     const position = expectedPosition(timed);
@@ -70,7 +88,7 @@ export default function ActivityClient({ clientId }: { clientId: string }) {
     if (value.playbackRate && video.playbackRate !== value.playbackRate) video.playbackRate = value.playbackRate;
     if (value.status === "paused" || value.status === "loading") video.pause();
     if (value.status === "playing") void video.play().catch(() => setStatusMessage("動画の再生には「同期して再生」を押してください。"));
-  }, [expectedPosition]);
+  }, [expectedPosition, loadStream]);
 
   useEffect(() => {
     let stopped = false;
@@ -134,7 +152,7 @@ export default function ActivityClient({ clientId }: { clientId: string }) {
       await requestActivityAuth();
     };
     void connect().catch(() => { if (!stopped) { setAuthNeeded(true); setStatusMessage("Discord Activity内で起動し、接続を確認してください。"); } });
-    return () => { stopped = true; if (pollTimer) clearTimeout(pollTimer); if (refreshTimer) clearTimeout(refreshTimer); activityTokenRef.current = ""; requestActivityAuthRef.current = null; discordSdkRef.current = null; };
+    return () => { stopped = true; if (pollTimer) clearTimeout(pollTimer); if (refreshTimer) clearTimeout(refreshTimer); hlsRef.current?.destroy(); hlsRef.current = null; activityTokenRef.current = ""; requestActivityAuthRef.current = null; discordSdkRef.current = null; };
   }, [clientId, syncVideo]);
 
   const startPlayer = () => {
