@@ -351,7 +351,7 @@ async def generate_image(model: str, prompt: str, *, size: str = "1024x1024") ->
 # ============================================================
 # 動作確認用: どの指定なら日本語として認識されるかを調べる
 #   python -m core.logfare 日本語を話したWAV.wav     (BOT のフォルダで実行)
-#   LOGFARE_API_KEY が必要。Bot 本体からは使われない。
+#   LOGFARE_API_KEY が必要。Discord からは cogs/sio_transcription.py の !sttdebug でも呼べる。
 # ============================================================
 _PROBE_PATTERNS: list[tuple[str, dict[str, str], dict[str, str]]] = [
     ("指定なし", {}, {}),
@@ -365,14 +365,12 @@ _PROBE_PATTERNS: list[tuple[str, dict[str, str], dict[str, str]]] = [
 ]
 
 
-async def probe_transcription(path: str) -> None:
-    """同じ音声を複数の言語指定で送り、認識結果を並べて表示する。"""
+async def probe_transcription_languages(audio: bytes) -> list[tuple[str, str]]:
+    """同じ音声を複数の言語指定で送り、[(パターン名, 認識結果またはエラー内容)] を返す。"""
     key = api_key()
     if not key:
-        raise SystemExit("LOGFARE_API_KEY が設定されていません")
-    with open(path, "rb") as f:
-        audio = f.read()
-    print(f"音声: {path} ({len(audio)} bytes) / モデル: {TRANSCRIPTION_MODEL} / {BASE_URL}\n")
+        raise RuntimeError("LOGFARE_API_KEY が設定されていません。")
+    results: list[tuple[str, str]] = []
     timeout = aiohttp.ClientTimeout(total=90)
     async with aiohttp.ClientSession(timeout=timeout) as session:
         for label, fields, query in _PROBE_PATTERNS:
@@ -392,17 +390,27 @@ async def probe_transcription(path: str) -> None:
                     raw = await response.text()
                     status = response.status
             except Exception as exc:  # noqa: BLE001
-                print(f"[{label}] 通信エラー: {exc!r}")
+                results.append((label, f"通信エラー: {exc!r}"))
                 continue
             if status >= 400:
-                print(f"[{label}] HTTP {status}: {raw[:150]}")
+                results.append((label, f"HTTP {status}: {raw[:150]}"))
                 continue
             try:
                 text = _extract_transcript(json.loads(raw))
             except ValueError:
                 text = raw
-            print(f"[{label}] -> {text!r}" + ("" if text else f"  (応答: {raw[:200]})"))
+            results.append((label, repr(text) if text else f"(空) 応答: {raw[:200]}"))
             await asyncio.sleep(0.5)
+    return results
+
+
+async def probe_transcription(path: str) -> None:
+    """WAVファイルを probe_transcription_languages に通して、結果を表示する（CLI用）。"""
+    with open(path, "rb") as f:
+        audio = f.read()
+    print(f"音声: {path} ({len(audio)} bytes) / モデル: {TRANSCRIPTION_MODEL} / {BASE_URL}\n")
+    for label, outcome in await probe_transcription_languages(audio):
+        print(f"[{label}] -> {outcome}")
 
 
 if __name__ == "__main__":
@@ -410,4 +418,7 @@ if __name__ == "__main__":
 
     if len(sys.argv) != 2:
         raise SystemExit("使い方: python -m core.logfare 日本語を話したWAV.wav")
-    asyncio.run(probe_transcription(sys.argv[1]))
+    try:
+        asyncio.run(probe_transcription(sys.argv[1]))
+    except RuntimeError as exc:
+        raise SystemExit(str(exc))
