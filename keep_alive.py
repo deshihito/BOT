@@ -180,10 +180,12 @@ def _run_ffmpeg_task(video_id: str, directory: Path, manifest: Path):
             "-i", stream_url,
             "-map", "0:v:0", "-map", "0:a:0?",
             "-c:v", "libx264", "-preset", "ultrafast", "-tune", "zerolatency",
-            "-pix_fmt", "yuv420p", "-g", "30", "-keyint_min", "30",
-            "-sc_threshold", "0", "-force_key_frames", "expr:gte(t,n_forced*1)",
+            "-r", "24",  # ★ 24fpsに固定
+            "-pix_fmt", "yuv420p", 
+            "-g", "48", "-keyint_min", "48",  # ★ 24fpsの2秒間隔（48フレーム）
+            "-sc_threshold", "0", "-force_key_frames", "expr:gte(t,n_forced*2)", # ★ 2秒ごとに強制キーフレーム
             "-c:a", "aac", "-b:a", "128k", "-f", "hls",
-            "-hls_time", "1", "-hls_list_size", "6",
+            "-hls_time", "2", "-hls_list_size", "6", # ★ 2秒セグメント
             "-hls_flags", "delete_segments+append_list+independent_segments",
             "-hls_segment_filename", str(directory / "seg-%06d.ts"),
             str(manifest),
@@ -252,7 +254,6 @@ def _prepare_activity_hls(video_id: str) -> Path | None:
     return directory
 
 
-# ... (run_coder, activity_music_state は前回と同じ) ...
 @app.post("/internal/coder/run")
 def run_coder():
     if not _authorized("/internal/coder/run"):
@@ -366,9 +367,8 @@ def activity_music_video():
 
         output = directory / asset
         
-        # 修正: セグメントファイルがまだ生成されていない場合、最大5秒間待機する
         if not output.exists() and asset.endswith(".ts"):
-            for _ in range(50): # 0.1秒 × 50 = 5秒
+            for _ in range(50):
                 time.sleep(0.1)
                 if output.exists():
                     break
