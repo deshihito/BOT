@@ -599,23 +599,14 @@ class ExpStatusView(discord.ui.View):
         return discord.Embed(
             title="EXP状況",
             description=(
-                f"**general Lv.{gl}**（chat/vc の平均）\n\n"
+                f"**general Lv.{gl}**\n\n"
                 f"**チャット** Lv.{cl} — {ccur}/{cneed} EXP\n"
-                f"`{self._bar(ccur, cneed)}`\n"
-                f"累計 {chat_exp} EXP（5分毎・メッセージ有りで+{CHAT_EXP_PER_GRANT}）\n\n"
+                f"`{self._bar(ccur, cneed)}`\n\n"
                 f"**VC** Lv.{vl} — {vcur}/{vneed} EXP\n"
-                f"`{self._bar(vcur, vneed)}`\n"
-                f"累計 {vc_exp} EXP（5分滞在ごとに+{VC_EXP_PER_GRANT}）"
+                f"`{self._bar(vcur, vneed)}`"
             ),
             color=0x3498DB,
         )
-
-    @discord.ui.button(label="更新", style=discord.ButtonStyle.secondary, row=0)
-    async def refresh_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if interaction.user.id != self.author_id:
-            return await interaction.response.send_message("このパネルを開いたユーザーだけ更新できます。", ephemeral=True)
-        await self._load_latest()
-        await edit_panel_v2(interaction, as_panel_v2(self))
 
 
 class ExpRankingView(discord.ui.View):
