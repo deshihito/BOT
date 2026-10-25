@@ -14,9 +14,12 @@ BASE_URL = os.getenv("LOGFARE_BASE_URL", "https://logfare.ai/v1").rstrip("/")
 DEFAULT_MODEL = "claude-haiku-5-5"
 DEFAULT_IMAGE_MODEL = "flux-2-dev"
 AUTO_MODEL = "logfare/auto"
-TRANSCRIPTION_MODEL = os.getenv("LOGFARE_TRANSCRIPTION_MODEL", "nova-3").strip() or "nova-3"
-# Nova 3 は言語指定が無いと英語扱いになり、日本語音声は認識結果が空になりやすい。
-# 空文字にすると言語指定なしで送る。
+# nova-3 は日本語音声を認識できず空の結果を返したため（!sttdebug で検証）、日本語に強い Whisper を既定にする。
+# 環境変数 LOGFARE_TRANSCRIPTION_MODEL で変更できる。
+DEFAULT_TRANSCRIPTION_MODEL = "whisper-large-v3-turbo"
+TRANSCRIPTION_MODEL = os.getenv("LOGFARE_TRANSCRIPTION_MODEL", DEFAULT_TRANSCRIPTION_MODEL).strip() or DEFAULT_TRANSCRIPTION_MODEL
+# 認識する言語。Whisper は "ja" のような2文字コードのみ受け付ける（"ja-JP" は 400 になる）。
+# 空文字にすると言語指定なしで送る（Whisper は自動判定する）。
 TRANSCRIPTION_LANGUAGE = os.getenv("LOGFARE_TRANSCRIPTION_LANGUAGE", "ja").strip()
 
 
