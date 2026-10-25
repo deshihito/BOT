@@ -140,11 +140,12 @@ class AICog(commands.Cog):
         notice = "" if exact else f"（指定モデルがfree一覧にないため `{model}` を使用）"
         latex = await ai_latex.process(answer)
         description = latex.text[:4096]
-        math_files = [
-            discord.File(io.BytesIO(image.data), filename=image.filename, description=image.alt)
-            for image in latex.images
-            if image.marker in description  # 4096字で切れた分の画像は添付しない
-        ]
+        # 4096字で切れた分の数式は除き、残りを1枚にまとめてembedの画像にする
+        composed = await ai_latex.compose([image for image in latex.images if image.marker in description])
+        send_kwargs = {}
+        if composed:
+            math_data, math_alt = composed
+            send_kwargs["file"] = discord.File(io.BytesIO(math_data), filename="math.png", description=math_alt)
         embed = discord.Embed(
             title="AI回答",
             description=description,
@@ -156,6 +157,8 @@ class AICog(commands.Cog):
                   else f"モデル: {ai_omnirush.model_name(omnirush_model)} / 接続先: OmniRush CLI" if omnirush_model
                   else f"モデル: {model}{notice}")
         embed.set_footer(text=footer)
+        if composed:
+            embed.set_image(url="attachment://math.png")
         unique_sources = {source.get("url"): source for source in sources if source.get("url")}
         if unique_sources:
             links = "\n".join(
@@ -163,10 +166,7 @@ class AICog(commands.Cog):
                 for url, source in list(unique_sources.items())[:5]
             )
             embed.add_field(name="参照ソース", value=links[:1024], inline=False)
-        # 数式画像は回答より上に出す。複数枚を1メッセージにするとDiscordが切り取って並べるため、1枚ずつ送る
-        for math_file in math_files:
-            await ctx.send(file=math_file)
-        await ctx.reply(embed=embed, mention_author=False)
+        await ctx.reply(embed=embed, mention_author=False, **send_kwargs)
 
     @ai.error
     async def ai_error(self, ctx: commands.Context, error: commands.CommandError):
