@@ -6,13 +6,16 @@ export const runtime = "nodejs";
 const VIDEO_ID = /^[A-Za-z0-9_-]{11}$/;
 const ASSET = /^(?:index\.m3u8|seg-\d{6}\.ts)$/;
 
+// HLS セグメント行のみを対象にする（コメント・空行・絶対 URL・既に書き換え済みは除外）
 function rewriteManifest(manifest: string, prefix: string): string {
   return manifest
     .split("\n")
     .map((line) => {
       const trimmed = line.trim();
       if (!trimmed || trimmed.startsWith("#")) return line;
+      // 絶対 URL はそのまま（プロキシ対象外）
       if (/^[a-z][a-z0-9+.-]*:\/\//i.test(trimmed)) return line;
+      // 想定するセグメント名のみ書き換え（クエリ・パス付きは弾く）
       if (!ASSET.test(trimmed) || trimmed === "index.m3u8") return line;
       return `${prefix}${trimmed}`;
     })
@@ -55,23 +58,28 @@ export async function GET(request: Request) {
     video_id: videoId,
     asset,
   });
-  const timestamp = String(Math.floor(Date.now() / 1000));
-  const nonce = crypto.randomBytes(24).toString("hex");
-  const bodyHash = crypto.createHash("sha256").update(body).digest("hex");
-  const signedPayload = `POST\n${endpoint.pathname}\n${timestamp}\n${nonce}\n${bodyHash}`;
-  const signature = crypto.createHmac("sha256", secret).update(signedPayload).digest("hex");
-
-  const forwardHeaders: Record<string, string> = {
-    "Content-Type": "application/json",
-    "X-AGO-Coder-Timestamp": timestamp,
-    "X-AGO-Coder-Nonce": nonce,
-    "X-AGO-Coder-Signature": signature,
+  
+  // リクエストごとにヘッダーを生成する関数（リトライ時の401エラーを防ぐ）
+  const buildHeaders = () => {
+    const ts = String(Math.floor(Date.now() / 1000));
+    const nc = crypto.randomBytes(24).toString("hex");
+    const bh = crypto.createHash("sha256").update(body).digest("hex");
+    const payload = `POST\n${endpoint.pathname}\n${ts}\n${nc}\n${bh}`;
+    const sig = crypto.createHmac("sha256", secret).update(payload).digest("hex");
+    
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+      "X-AGO-Coder-Timestamp": ts,
+      "X-AGO-Coder-Nonce": nc,
+      "X-AGO-Coder-Signature": sig,
+    };
+    const range = request.headers.get("range");
+    if (range && asset !== "index.m3u8") headers["Range"] = range;
+    return headers;
   };
-  const range = request.headers.get("range");
-  if (range && asset !== "index.m3u8") forwardHeaders["Range"] = range;
 
   try {
-    // タイムアウトを8秒に設定
+    // 初回リクエスト（タイムアウト8秒）
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 8000);
 
@@ -79,7 +87,7 @@ export async function GET(request: Request) {
     try {
       upstream = await fetch(endpoint, {
         method: "POST",
-        headers: forwardHeaders,
+        headers: buildHeaders(),
         body,
         cache: "no-store",
         signal: controller.signal,
@@ -88,9 +96,9 @@ export async function GET(request: Request) {
       clearTimeout(timeoutId);
     }
 
-    // Bot側が準備中(202)を返した場合のリトライ処理
+    // Bot側が準備中(202)を返した場合のリトライループ
     if (upstream.status === 202) {
-      let retries = 15; // 最大15回 (約7.5秒)
+      let retries = 15; // 最大15回 (0.5秒×15 = 7.5秒)
       while (retries > 0) {
         await new Promise((r) => setTimeout(r, 500));
         
@@ -99,7 +107,7 @@ export async function GET(request: Request) {
         try {
           upstream = await fetch(endpoint, {
             method: "POST",
-            headers: forwardHeaders,
+            headers: buildHeaders(), // 毎回新しい署名を生成して送信
             body,
             cache: "no-store",
             signal: retryController.signal,
@@ -123,6 +131,7 @@ export async function GET(request: Request) {
         asset,
         detail: detail.slice(0, 500),
       });
+      // クライアントにも上流ステータスと detail を返す（デバッグ容易化）
       return NextResponse.json(
         {
           error: upstream.status === 409 ? "video_not_current" : "video_unavailable",
@@ -152,6 +161,7 @@ export async function GET(request: Request) {
       headers.set("Content-Type", "application/vnd.apple.mpegurl");
     } else {
       headers.set("Content-Type", contentType || "video/mp2t");
+      // セグメントは Range / 長さ / キャッシュ系ヘッダを透過
       for (const name of [
         "content-length",
         "content-range",
