@@ -39,7 +39,6 @@ _video_lock = Lock()
 _video_locks: dict[str, Lock] = defaultdict(Lock)
 _hls_processes: dict[str, subprocess.Popen] = {}
 _hls_last_access: dict[str, float] = {}
-# 準備中・エラーステータスを保持する辞書 {"video_id": "processing" | "error" | "ready"}
 _video_status: dict[str, str] = {}
 
 _next_nonce_cleanup = 0.0
@@ -91,7 +90,11 @@ def _authorized(expected_path: str = "/internal/coder/run") -> bool:
                 if expires_at <= now:
                     del _used_nonces[used_nonce]
             _next_nonce_cleanup = now + 10
+            
+        # 修正: ポーリングによる連続リクエストを許可するため、10秒以内の同一ノンスは有効とする
         if nonce in _used_nonces:
+            if now - _used_nonces[nonce] < 10.0:
+                return True
             return False
         _used_nonces[nonce] = now + _SIGNATURE_TTL_SECONDS
     return True
@@ -151,15 +154,18 @@ async def _fetch_activity_music_snapshot(guild_id: int, channel_id: int, user_id
         now=time.time(),
     )
 
+
 def _run_ffmpeg_task(video_id: str, directory: Path, manifest: Path):
     """バックグラウンドスレッドで実行されるFFmpeg起動タスク"""
     try:
         options = {
-            "format": "best[height<=720]/best",
+            # 修正: エラーになりにくいよう、フォールバックを充実させる
+            "format": "bestvideo[height<=720]+bestaudio/best[height<=720]/best",
             "noplaylist": True,
             "quiet": True,
             "no_warnings": True,
             "socket_timeout": 10,
+            "extractor_args": {"youtube": {"player_client": ["android", "web"]}},
         }
         with yt_dlp.YoutubeDL(options) as ydl:
             info = ydl.extract_info(f"https://www.youtube.com/watch?v={video_id}", download=False)
@@ -198,7 +204,6 @@ def _run_ffmpeg_task(video_id: str, directory: Path, manifest: Path):
                     logger.error("[ActivityVideo][ffmpeg][%s] %s", video_id, line)
         Thread(target=read_ffmpeg_errors, daemon=True).start()
         
-        # マニフェスト生成待ち
         deadline = time.monotonic() + 15
         while not manifest.exists() and process.poll() is None and time.monotonic() < deadline:
             time.sleep(0.5)
@@ -216,7 +221,7 @@ def _run_ffmpeg_task(video_id: str, directory: Path, manifest: Path):
             _video_status[video_id] = "error"
 
 
-def _prepare_activity_hls(video_id: str) -> Path:
+def _prepare_activity_hls(video_id: str) -> Path | None:
     _HLS_CACHE_DIR.mkdir(parents=True, exist_ok=True)
     directory = _HLS_CACHE_DIR / video_id
     
@@ -258,7 +263,6 @@ def _prepare_activity_hls(video_id: str) -> Path:
 def run_coder():
     if not _authorized("/internal/coder/run"):
         return jsonify({"error": "unauthorized"}), 401
-
     payload = request.get_json(silent=True)
     if not isinstance(payload, dict):
         return jsonify({"error": "invalid_request"}), 400
@@ -269,13 +273,11 @@ def run_coder():
         return jsonify({"error": "invalid_prompt"}), 400
     if not isinstance(user_id, str) or not re.fullmatch(r"\d{1,30}", user_id):
         return jsonify({"error": "invalid_user"}), 400
-
     loop = getattr(_bot, "coder_loop", None)
     if _bot is None or loop is None or not _bot.is_ready():
         return jsonify({"error": "bot_unavailable"}), 503
     if not _within_rate_limit(user_id):
         return jsonify({"error": "rate_limited"}), 429
-
     future = asyncio.run_coroutine_threadsafe(coder_service.reply(prompt, int(user_id)), loop)
     try:
         result = future.result(timeout=55)
@@ -285,7 +287,6 @@ def run_coder():
     except Exception:
         logger.exception("Coder request failed")
         return jsonify({"error": "upstream_failed"}), 502
-
     return jsonify({"answer": result.text, "provider": result.provider, "model": result.model})
 
 
@@ -294,7 +295,6 @@ def activity_music_state():
     path = "/internal/activity/music-state"
     if not _authorized(path):
         return jsonify({"error": "unauthorized"}), 401
-
     payload = request.get_json(silent=True)
     if not isinstance(payload, dict):
         return jsonify({"error": "invalid_request"}), 400
@@ -304,13 +304,11 @@ def activity_music_state():
     for value in (guild_id, channel_id, user_id):
         if not isinstance(value, str) or not re.fullmatch(r"\d{1,30}", value):
             return jsonify({"error": "invalid_request"}), 400
-
     loop = getattr(_bot, "coder_loop", None)
     if _bot is None or loop is None or not _bot.is_ready():
         return jsonify({"error": "bot_unavailable"}), 503
     if not _within_activity_rate_limit(user_id, guild_id, channel_id):
         return jsonify({"error": "rate_limited"}), 429
-
     future = asyncio.run_coroutine_threadsafe(
         _fetch_activity_music_snapshot(int(guild_id), int(channel_id), int(user_id)), loop
     )
