@@ -63,7 +63,12 @@ export default function ActivityClient({ clientId }: { clientId: string }) {
       const hls = new Hls({ lowLatencyMode: true, backBufferLength: 10, maxBufferLength: 6 });
       hlsRef.current = hls;
       hls.on(Hls.Events.ERROR, (_event, data) => {
-        if (data.fatal) setVideoError(`HLS動画を再生できません（${data.details || "配信エラー"}）。`);
+        if (data.fatal) {
+          const status = data.response?.code ? ` HTTP ${data.response.code}` : "";
+          const detail = data.response?.text || data.error?.message || data.details || "配信エラー";
+          setVideoError(`HLS動画を再生できません（${data.type}/${data.details || "error"}${status}: ${detail}）。`);
+          console.error("[ActivityVideo] HLS fatal error", data);
+        }
       });
       hls.loadSource(url);
       hls.attachMedia(video);
@@ -92,6 +97,14 @@ export default function ActivityClient({ clientId }: { clientId: string }) {
     if (value.status === "paused" || value.status === "loading") video.pause();
     if (value.status === "playing") void video.play().catch(() => setStatusMessage("動画の再生には「同期して再生」を押してください。"));
   }, [expectedPosition, loadStream]);
+
+  const handleVideoError = useCallback(() => {
+    const error = videoRef.current?.error;
+    const code = error?.code || 0;
+    const message = code === 1 ? "中断" : code === 2 ? "ネットワーク" : code === 3 ? "デコード" : code === 4 ? "非対応形式または配信応答" : "不明";
+    setVideoError(`動画を再生できません（HTML5 error.code=${code}: ${message}）。`);
+    console.error("[ActivityVideo] HTML5 video error", { code, message, currentSrc: videoRef.current?.currentSrc });
+  }, []);
 
   useEffect(() => {
     let stopped = false;
@@ -178,7 +191,7 @@ export default function ActivityClient({ clientId }: { clientId: string }) {
     <p className="activity-status" role="status" aria-live="polite">{statusMessage}</p>
     {snapshot?.title && <p className="activity-track-title">{snapshot.title}</p>}
     <div className="activity-player-frame" data-started={hasStarted ? "true" : "false"}>
-      <video ref={videoRef} className="activity-video" playsInline muted controls={false} onError={() => setVideoError("動画の取得または再生に失敗しました。")} />
+      <video ref={videoRef} className="activity-video" playsInline muted controls={false} onError={handleVideoError} />
       {!snapshot?.videoId && <div className="activity-player-placeholder">{snapshot?.status === "unsupported" ? "動画を表示できません" : "Musicの再生を待っています"}</div>}
     </div>
     <div className="activity-actions"><button type="button" className="activity-button" onClick={startPlayer} disabled={!snapshot?.videoId}>同期して再生</button>{authNeeded && <button type="button" className="activity-button activity-button-secondary" onClick={reconnect}>Discordに再接続</button>}</div>

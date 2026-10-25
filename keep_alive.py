@@ -154,6 +154,7 @@ def _prepare_activity_hls(video_id: str) -> Path:
     with _video_lock:
         process = _hls_processes.get(video_id)
         if process and process.poll() is None and manifest.exists():
+            logger.info("[ActivityVideo] reuse HLS video_id=%s manifest=%s", video_id, manifest)
             return directory
         directory.mkdir(parents=True, exist_ok=True)
         for old in directory.iterdir():
@@ -169,9 +170,14 @@ def _prepare_activity_hls(video_id: str) -> Path:
             info = ydl.extract_info(f"https://www.youtube.com/watch?v={video_id}", download=False)
         stream_url = info.get("url")
         if not isinstance(stream_url, str) or not stream_url:
+            logger.error("[ActivityVideo] yt-dlp returned no stream video_id=%s keys=%s", video_id, sorted(info.keys()))
             raise RuntimeError("yt-dlp did not return a playable stream URL")
         headers = info.get("http_headers") or {}
         header_value = "".join(f"{key}: {value}\r\n" for key, value in headers.items())
+        logger.info(
+            "[ActivityVideo] start HLS video_id=%s format=%s width=%s height=%s duration=%s",
+            video_id, info.get("format_id"), info.get("width"), info.get("height"), info.get("duration"),
+        )
         process = subprocess.Popen([
             "ffmpeg", "-hide_banner", "-loglevel", "error",
             "-headers", header_value,
@@ -185,14 +191,24 @@ def _prepare_activity_hls(video_id: str) -> Path:
             "-hls_flags", "delete_segments+append_list+independent_segments",
             "-hls_segment_filename", str(directory / "seg-%06d.ts"),
             str(manifest),
-        ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        ], stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True)
         _hls_processes[video_id] = process
+        def read_ffmpeg_errors() -> None:
+            if process.stderr is None:
+                return
+            for line in process.stderr:
+                line = line.strip()
+                if line:
+                    logger.error("[ActivityVideo][ffmpeg][%s] %s", video_id, line)
+        Thread(target=read_ffmpeg_errors, daemon=True).start()
         deadline = time.monotonic() + 15
         while not manifest.exists() and process.poll() is None and time.monotonic() < deadline:
             time.sleep(0.1)
         if not manifest.exists():
+            logger.error("[ActivityVideo] HLS manifest timeout video_id=%s returncode=%s dir=%s", video_id, process.poll(), directory)
             process.terminate()
             raise RuntimeError("FFmpeg did not create an HLS manifest")
+        logger.info("[ActivityVideo] HLS ready video_id=%s manifest=%s files=%s", video_id, manifest, [item.name for item in directory.iterdir()])
     return directory
 
 
@@ -308,8 +324,10 @@ def activity_music_video():
         directory = _prepare_activity_hls(video_id)
         output = directory / asset
         if not output.exists():
+            logger.warning("[ActivityVideo] asset not ready video_id=%s asset=%s files=%s", video_id, asset, [item.name for item in directory.iterdir()])
             return jsonify({"error": "segment_not_ready"}), 404
         mimetype = "application/vnd.apple.mpegurl" if asset.endswith(".m3u8") else "video/mp2t"
+        logger.info("[ActivityVideo] serve video_id=%s asset=%s size=%s", video_id, asset, output.stat().st_size)
         response = send_file(output, mimetype=mimetype, conditional=True, max_age=0, etag=True)
         response.headers["Cache-Control"] = "no-store"
         return response
