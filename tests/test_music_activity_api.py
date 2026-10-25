@@ -125,6 +125,11 @@ class MusicActivityApiTest(unittest.TestCase):
             "user_id": str(self.user_id),
         }
 
+    def test_http_server_defaults_to_port_8081(self):
+        with patch.dict(os.environ, {}, clear=True), patch.object(keep_alive.app, "run") as run_server:
+            keep_alive.run()
+        run_server.assert_called_once_with(host="0.0.0.0", port=8081)
+
     def test_hmac_authorized_state_contains_only_video_metadata(self):
         response = self.post_signed(self.valid_payload())
         self.assertEqual(response.status_code, 200)

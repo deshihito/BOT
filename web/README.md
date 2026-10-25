@@ -39,11 +39,12 @@ Botサーバーには、Webと同じ`CODER_SERVICE_SHARED_SECRET`と、既存の
 
 ```text
 CODER_SERVICE_SHARED_SECRET=<Webと同じランダムな値>
+BOT_API_PORT=8081
 AI_PROVIDER_ORDER=logfare
 LOGFARE_API_KEY=...
 ```
 
-Botは`POST /internal/coder/run`を提供します。Webは時刻・nonce・本文ハッシュを含むHMAC署名を付けて呼び出します。このURLはVercelからHTTPSで到達可能にし、ブラウザーへ直接公開する用途には使いません。
+Botは`POST /internal/coder/run`と`POST /internal/activity/music-state`を提供します。Flask APIは`BOT_API_PORT`（既定値`8081`）で待ち受けます。Cloudflare TunnelのPublished application routeは`http://localhost:8081`へ転送し、Vercelの`BOT_CODER_BASE_URL`にはTunnelの公開HTTPSホストだけを設定します。Webは時刻・nonce・本文ハッシュを含むHMAC署名を付けて呼び出すため、共有シークレットなしの内部API呼び出しは拒否されます。APIを保護するCloudflare Accessログインは、VercelからのAccess認証ヘッダーを実装するまで有効にしないでください。
 
 ## Discord Music Video Activity
 

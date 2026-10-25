@@ -215,7 +215,8 @@ def activity_music_state():
 
 
 def run():
-    app.run(host="0.0.0.0", port=10000)
+    port = int(os.getenv("BOT_API_PORT", "8081"))
+    app.run(host="0.0.0.0", port=port)
 
 
 def keep_alive():
