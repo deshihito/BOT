@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import json
+import logging
 import os
 from typing import Any
 
@@ -13,7 +15,12 @@ DEFAULT_MODEL = "claude-haiku-5-5"
 DEFAULT_IMAGE_MODEL = "flux-2-dev"
 AUTO_MODEL = "logfare/auto"
 TRANSCRIPTION_MODEL = os.getenv("LOGFARE_TRANSCRIPTION_MODEL", "nova-3").strip() or "nova-3"
+# Nova 3 は言語指定が無いと英語扱いになり、日本語音声は認識結果が空になりやすい。
+# 空文字にすると言語指定なしで送る。
+TRANSCRIPTION_LANGUAGE = os.getenv("LOGFARE_TRANSCRIPTION_LANGUAGE", "ja").strip()
 DEFAULT_TIMEOUT = aiohttp.ClientTimeout(total=45)
+
+logger = logging.getLogger(__name__)
 
 
 class LogfareHTTPError(RuntimeError):
@@ -169,26 +176,76 @@ async def chat_completion(
     return data
 
 
+def _extract_transcript(result: Any) -> str | None:
+    """応答から認識テキストを取り出す。OpenAI互換 {"text": ...} が基本で、Deepgram系の形も拾う。
+
+    認識結果が空 (text が null など) の場合は "" を返し、どの形にも当てはまらないときだけ None。
+    """
+    if isinstance(result, str):
+        return result
+    if not isinstance(result, dict):
+        return None
+    for key in ("text", "transcript"):
+        if key in result:
+            value = result[key]
+            return value if isinstance(value, str) else ""
+    try:
+        value = result["results"]["channels"][0]["alternatives"][0].get("transcript")
+        return value if isinstance(value, str) else ""
+    except (KeyError, IndexError, TypeError, AttributeError):
+        pass
+    segments = result.get("segments")
+    if isinstance(segments, list):
+        return "".join(
+            seg.get("text", "") for seg in segments
+            if isinstance(seg, dict) and isinstance(seg.get("text"), str)
+        )
+    return None
+
+
+def _transcription_form(audio: bytes, filename: str, language: str) -> aiohttp.FormData:
+    form = aiohttp.FormData()
+    form.add_field("model", TRANSCRIPTION_MODEL)
+    if language:
+        form.add_field("language", language)
+    form.add_field("response_format", "json")
+    form.add_field("file", audio, filename=filename, content_type="audio/wav")
+    return form
+
+
 async def transcribe_audio(audio: bytes, *, filename: str = "voice.wav") -> str:
-    """Logfare の音声認識 endpoint を1回だけ呼び、認識テキストを返す。"""
+    """Logfare の音声認識 endpoint を呼び、認識テキストを返す。
+
+    言語指定が 400/422 で拒否された場合だけ、言語指定なしでもう一度送る。
+    """
     key = api_key()
     if not key:
         raise RuntimeError("LOGFARE_API_KEY が設定されていません。")
-    form = aiohttp.FormData()
-    form.add_field("model", TRANSCRIPTION_MODEL)
-    form.add_field("file", audio, filename=filename, content_type="audio/wav")
     headers = {"Authorization": f"Bearer {key}"}
     timeout = aiohttp.ClientTimeout(total=90)
+    languages = [TRANSCRIPTION_LANGUAGE, ""] if TRANSCRIPTION_LANGUAGE else [""]
+    raw = ""
     async with aiohttp.ClientSession(timeout=timeout) as session:
-        async with session.post(f"{BASE_URL}/audio/transcriptions", headers=headers, data=form) as response:
-            if response.status >= 400:
-                raise LogfareHTTPError(response.status, response.headers.get("Retry-After"))
-            try:
-                result = await response.json()
-            except (ValueError, aiohttp.ContentTypeError):
-                result = {"text": await response.text()}
-    text = result.get("text") if isinstance(result, dict) else None
-    if not isinstance(text, str):
+        for language in languages:
+            form = _transcription_form(audio, filename, language)
+            async with session.post(f"{BASE_URL}/audio/transcriptions", headers=headers, data=form) as response:
+                if response.status >= 400:
+                    if language and response.status in (400, 422):
+                        logger.warning(
+                            "Logfare が language=%s を受け付けませんでした (HTTP %s)。言語指定なしで再送します",
+                            language, response.status,
+                        )
+                        continue
+                    raise LogfareHTTPError(response.status, response.headers.get("Retry-After"))
+                raw = await response.text()
+            break
+    try:
+        result: Any = json.loads(raw)
+    except ValueError:
+        result = raw  # プレーンテキストで返ってきた場合
+    text = _extract_transcript(result)
+    if text is None:
+        logger.warning("Logfare 音声認識の応答に text がありません。応答の先頭: %s", raw[:500])
         raise RuntimeError("Logfare 音声認識 API の応答に文字起こし結果がありませんでした。")
     return text.strip()
 
