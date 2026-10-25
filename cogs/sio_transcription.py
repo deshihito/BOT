@@ -612,8 +612,8 @@ class TranscriptionCog(commands.Cog):
     @commands.command(name="sttdebug")
     @commands.guild_only()
     @commands.cooldown(1, 30.0, commands.BucketType.guild)
-    async def stt_debug(self, ctx: commands.Context):
-        """直近の文字起こし音声（またはWAV添付）を、言語指定の8パターンでLogfareに送って結果を比べる。"""
+    async def stt_debug(self, ctx: commands.Context, model: str | None = None):
+        """`!sttdebug [モデル名]` 直近の文字起こし音声（またはWAV添付）を、言語指定の8パターンでLogfareに送って結果を比べる。"""
         audio: bytes | None = None
         source = ""
         for attachment in ctx.message.attachments:
@@ -634,26 +634,41 @@ class TranscriptionCog(commands.Cog):
 
         try:
             with wave.open(io.BytesIO(audio), "rb") as wav:
+                channels, rate, width = wav.getnchannels(), wav.getframerate(), wav.getsampwidth()
                 frames = wav.readframes(wav.getnframes())
-                seconds = wav.getnframes() / wav.getframerate()
-            samples = np.frombuffer(frames, dtype=np.int16)
-            rms = int(np.sqrt(np.mean(samples.astype(np.float32) ** 2))) if len(samples) else 0
-            peak = int(np.max(np.abs(samples.astype(np.int32)))) if len(samples) else 0
-            stats = f"{seconds:.2f}秒 / rms={rms} / peak={peak}"
+                seconds = wav.getnframes() / rate
+            fmt = f"{rate}Hz / {channels}ch / {width * 8}bit"
+            if width == 2:
+                samples = np.frombuffer(frames, dtype=np.int16)
+                rms = int(np.sqrt(np.mean(samples.astype(np.float32) ** 2))) if len(samples) else 0
+                peak = int(np.max(np.abs(samples.astype(np.int32)))) if len(samples) else 0
+                stats = f"{seconds:.2f}秒 / {fmt} / rms={rms} / peak={peak}"
+            else:
+                stats = f"{seconds:.2f}秒 / {fmt}（16bitではないので音量は計測しません）"
         except Exception:
             stats = "WAVを解析できませんでした"
 
+        used_model = (model or logfare.TRANSCRIPTION_MODEL).strip()
         async with ctx.typing():
             try:
-                results = await logfare.probe_transcription_languages(audio)
+                results = await logfare.probe_transcription_languages(audio, used_model)
             except Exception as e:
                 logger.exception("sttdebug failed")
                 return await ctx.send(embed=we(f"<:failed:1490986584676368535> 実行に失敗しました: `{e}`"))
+            try:
+                available = await logfare.fetch_transcription_models()
+            except Exception:
+                available = []
 
         lines = [f"`{label}`\n→ {outcome[:150]}" for label, outcome in results]
+        models_line = (
+            "Logfareの音声認識モデル候補: " + ", ".join(f"`{m}`" for m in available[:12])
+            + "\n他のモデルを試すには `!sttdebug モデル名`"
+            if available else "Logfareの音声認識モデル候補を取得できませんでした"
+        )
         text = (
-            f"🔍 **文字起こし言語指定テスト** — {logfare.TRANSCRIPTION_MODEL}\n"
-            f"音声: {source}（{stats}）\n\n" + "\n".join(lines)
+            f"🔍 **文字起こし言語指定テスト** — {used_model}\n"
+            f"音声: {source}（{stats}）\n\n" + "\n".join(lines) + f"\n\n{models_line}"
         )
         try:
             await ctx.send(embed=we(text))
