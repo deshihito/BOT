@@ -3,10 +3,13 @@ from __future__ import annotations
 import asyncio
 import io
 import logging
+import os
 import sys
 import threading
 import time
 import wave
+from collections import deque
+
 import numpy as np
 
 import aiohttp
@@ -19,6 +22,11 @@ from core.legacy import Responder
 from core import logfare
 from core.voice_session import VoiceBusy, get_manager
 from core.voice_media import add_receive_sink, remove_receive_sink
+
+try:  # あれば高品質なポリフェーズ・リサンプラーを使う（無くても numpy だけで動く）
+    from scipy.signal import resample_poly  # type: ignore
+except Exception:  # pragma: no cover
+    resample_poly = None  # type: ignore[assignment]
 
 logger = logging.getLogger(__name__)
 
@@ -36,7 +44,20 @@ SILENCE_THRESHOLD_SEC = 0.8
 MIN_UTTERANCE_SECONDS = 0.4
 MAX_UTTERANCE_SECONDS = 20
 # 音量判定の閾値（RMS値）
-RMS_SILENCE_THRESHOLD = 400
+RMS_SILENCE_THRESHOLD = 300
+# 発話として扱うために必要な「声のあるフレーム」数（1フレーム=20ms）。咳やクリックノイズ除外用
+MIN_LOUD_FRAMES = 6
+# 発話の頭が欠けないよう、発話開始の直前から付け足す音声（秒）
+PRE_ROLL_SEC = 0.3
+# パケットが届かなかった区間（DTX・ロス）を無音で埋める上限（秒）
+MAX_GAP_FILL_SEC = 1.0
+# 小さい声を持ち上げる（ピークがこの割合になるまで、最大 MAX_GAIN 倍）
+TARGET_PEAK = 0.9
+MAX_GAIN = 8.0
+# 環境変数にディレクトリを入れると、Logfareへ送った音声をWAVで保存する（原因調査用）
+DEBUG_DUMP_DIR = os.environ.get("STT_DEBUG_DIR")
+
+FRAME_SEC = 0.02  # Discord の Opus 1フレーム
 
 # voice_recv が無音時に渡してくる Opus パケット
 OPUS_SILENCE = b"\xf8\xff\xfe"
@@ -153,19 +174,40 @@ _patch_voice_recv_client()
 # ============================================================
 # 音声リサンプル関数 (48kHz ステレオ -> 16kHz モノラル 16bit PCM)
 # ============================================================
+def _lowpass_taps(num_taps: int = 95, cutoff_hz: float = 7200.0, fs: float = DISCORD_SAMPLE_RATE) -> np.ndarray:
+    """間引き前に折り返し雑音を消すための FIR ローパス（窓付き sinc）"""
+    n = np.arange(num_taps) - (num_taps - 1) / 2
+    h = np.sinc(2.0 * cutoff_hz / fs * n) * np.hamming(num_taps)
+    return (h / h.sum()).astype(np.float32)
+
+
+_LPF_TAPS = _lowpass_taps()
+
+
 def resample_48k_to_16k(pcm_data: bytes) -> bytes:
-    """PCMバイナリを高速に 16kHz モノラル 16bit PCM に変換"""
+    """48kHz ステレオ 16bit PCM -> 16kHz モノラル 16bit PCM（ローパス付き + 音量補正）"""
     audio_16bit = np.frombuffer(pcm_data, dtype=np.int16)
-    if len(audio_16bit) == 0:
+    usable = len(audio_16bit) - (len(audio_16bit) % CHANNELS)
+    if usable <= 0:
         return b""
 
     # ステレオ -> モノラル
-    audio_stereo = audio_16bit.reshape(-1, CHANNELS)
-    audio_mono = audio_stereo.mean(axis=1)
+    mono = audio_16bit[:usable].reshape(-1, CHANNELS).astype(np.float32).mean(axis=1)
 
-    # 48kHz -> 16kHz (3:1 スライスダウンサンプリングで超軽量化)
-    audio_16k = audio_mono[::3].astype(np.int16)
-    return audio_16k.tobytes()
+    # 48kHz -> 16kHz（単純な [::3] 間引きだと高域が折り返して子音が潰れ、認識できなくなる）
+    if resample_poly is not None:
+        audio_16k = resample_poly(mono, 1, 3).astype(np.float32)
+    else:
+        audio_16k = np.convolve(mono, _LPF_TAPS, mode="same")[::3]
+
+    # 小さい声はピークが TARGET_PEAK になるまで持ち上げる（持ち上げのみ、MAX_GAIN 倍まで）
+    peak = float(np.max(np.abs(audio_16k))) if audio_16k.size else 0.0
+    if peak > 0:
+        gain = min(MAX_GAIN, TARGET_PEAK * 32767.0 / peak)
+        if gain > 1.0:
+            audio_16k = audio_16k * gain
+
+    return np.clip(audio_16k, -32768, 32767).astype(np.int16).tobytes()
 
 
 # ============================================================
@@ -176,41 +218,84 @@ class UserAudioBuffer:
         self.user_id = user_id
         self.display_name = display_name
         self.avatar_url = avatar_url
-        self.buffer = bytearray()
-        self.last_speech_time = time.time()
+        self.buffer = bytearray()  # 48kHz ステレオ 16bit PCM（発話中のみ）
+        self.pre_roll: deque[bytes] = deque(maxlen=max(1, int(PRE_ROLL_SEC / FRAME_SEC)))
+        self.last_speech_time = time.monotonic()
         self.is_speaking = False
+        self.loud_frames = 0
+        self._last_rtp_end: int | None = None
+        self._last_arrival: float | None = None
 
-    def append(self, pcm_data: bytes):
+    def _missing_samples(self, n_samples: int, rtp_timestamp: int | None) -> int:
+        """直前のパケットから今回のパケットまでに「届かなかった」サンプル数（48kHz基準）"""
+        now = time.monotonic()
+        missing = 0
+        if rtp_timestamp is not None:
+            if self._last_rtp_end is not None:
+                diff = (rtp_timestamp - self._last_rtp_end) & 0xFFFFFFFF
+                missing = diff if diff < 0x80000000 else 0  # 巻き戻りは無視
+            self._last_rtp_end = (rtp_timestamp + n_samples) & 0xFFFFFFFF
+        else:
+            # RTP タイムスタンプが取れない場合は到着時刻から推定
+            if self._last_arrival is not None:
+                gap = now - self._last_arrival - FRAME_SEC
+                if gap > 0.06:
+                    missing = int(gap * DISCORD_SAMPLE_RATE)
+        self._last_arrival = now
+        return min(missing, int(MAX_GAP_FILL_SEC * DISCORD_SAMPLE_RATE))
+
+    def append(self, pcm_data: bytes, rtp_timestamp: int | None = None):
         audio_np = np.frombuffer(pcm_data, dtype=np.int16)
         if len(audio_np) == 0:
             return
 
-        rms = np.sqrt(np.mean(audio_np.astype(np.float32) ** 2))
+        n_samples = len(audio_np) // CHANNELS
+        missing = self._missing_samples(n_samples, rtp_timestamp)
+        rms = float(np.sqrt(np.mean(audio_np.astype(np.float32) ** 2)))
+        now = time.monotonic()
+        loud = rms > RMS_SILENCE_THRESHOLD
 
-        if rms > RMS_SILENCE_THRESHOLD:
+        if not self.is_speaking:
+            if not loud:
+                if missing:
+                    self.pre_roll.clear()  # 連続していない音声は頭出し用に使わない
+                self.pre_roll.append(pcm_data)
+                return
+            # 発話開始: 直前の音声を付けて語頭が欠けないようにする
             self.is_speaking = True
-            self.last_speech_time = time.time()
-            self.buffer.extend(pcm_data)
-        elif self.is_speaking:
-            self.buffer.extend(pcm_data)
+            for chunk in self.pre_roll:
+                self.buffer.extend(chunk)
+            self.pre_roll.clear()
+        elif missing:
+            # 発話中にパケットが届かなかった時間は無音で埋め、実時間どおりの長さにする
+            self.buffer.extend(bytes(missing * FRAME_SIZE))
+
+        if loud:
+            self.last_speech_time = now
+            self.loud_frames += 1
+        self.buffer.extend(pcm_data)
 
     def should_transcribe(self) -> bool:
-        if self.is_speaking and (
-            time.time() - self.last_speech_time > SILENCE_THRESHOLD_SEC
+        if not self.is_speaking or len(self.buffer) == 0:
+            return False
+        return (
+            time.monotonic() - self.last_speech_time > SILENCE_THRESHOLD_SEC
             or len(self.buffer) >= DISCORD_SAMPLE_RATE * FRAME_SIZE * MAX_UTTERANCE_SECONDS
-        ):
-            return len(self.buffer) > 0
-        return False
+        )
 
-    def pop_audio_for_transcription(self) -> bytes | None:
+    def pop_audio(self) -> tuple[bytes, int] | None:
+        """溜めた 48kHz PCM と声のあったフレーム数を返す（重い変換はここではやらない）"""
         if len(self.buffer) == 0:
+            self.is_speaking = False
+            self.loud_frames = 0
             return None
 
         pcm = bytes(self.buffer)
+        loud_frames = self.loud_frames
         self.buffer.clear()
         self.is_speaking = False
-
-        return resample_48k_to_16k(pcm)
+        self.loud_frames = 0
+        return pcm, loud_frames
 
 
 # ============================================================
@@ -233,6 +318,8 @@ class TranscriptionSink(voice_recv.AudioSink):
         self._lock = threading.Lock()
         self.opus_available = discord.opus.is_loaded()
         self._running = True
+        self._decrypt_failures = 0
+        self._decode_failures = 0
 
         self.monitor_thread = threading.Thread(target=self._monitor_loop, daemon=True)
         self.monitor_thread.start()
@@ -256,10 +343,12 @@ class TranscriptionSink(voice_recv.AudioSink):
         if not pcm:
             return
 
+        rtp_timestamp = getattr(getattr(data, 'packet', None), 'timestamp', None)
+
         with self._lock:
             if user_id not in self.user_buffers:
                 self.user_buffers[user_id] = UserAudioBuffer(user_id, display_name, avatar_url)
-            self.user_buffers[user_id].append(pcm)
+            self.user_buffers[user_id].append(pcm, rtp_timestamp)
 
     def _decode_opus(self, user_id: int, raw_opus: bytes) -> bytes | None:
         if not self.opus_available:
@@ -268,7 +357,11 @@ class TranscriptionSink(voice_recv.AudioSink):
         if raw_opus != OPUS_SILENCE:
             try:
                 payload = self.vc.dave_decrypt(user_id, raw_opus)
-            except Exception:
+            except Exception as e:
+                self._decrypt_failures += 1
+                n = self._decrypt_failures
+                if n in (1, 10, 100) or n % 1000 == 0:
+                    logger.warning("DAVE 復号に失敗しました (累計 %d 件): %r", n, e)
                 return None
         else:
             payload = raw_opus
@@ -283,38 +376,73 @@ class TranscriptionSink(voice_recv.AudioSink):
 
         try:
             return decoder.decode(payload, fec=False)
-        except discord.opus.OpusError:
+        except discord.opus.OpusError as e:
+            self._decode_failures += 1
+            n = self._decode_failures
+            if n in (1, 10, 100) or n % 1000 == 0:
+                logger.warning("Opus デコードに失敗しました (累計 %d 件): %r", n, e)
             return None
 
     def _monitor_loop(self):
         while self._running:
-            time.sleep(0.2)
+            time.sleep(0.1)
+            ready: list[tuple[str, str | None, bytes, int]] = []
+            # ロックは「取り出すだけ」にする。重い変換中に write() をブロックすると受信が詰まり音が欠ける
             with self._lock:
-                for user_id, ubuf in list(self.user_buffers.items()):
+                for ubuf in list(self.user_buffers.values()):
                     if ubuf.should_transcribe():
-                        pcm_16k = ubuf.pop_audio_for_transcription()
-                        if pcm_16k and len(pcm_16k) >= TRANSCRIPTION_SAMPLE_RATE * 2 * MIN_UTTERANCE_SECONDS:
-                            threading.Thread(
-                                target=self._run_transcription,
-                                args=(ubuf.display_name, ubuf.avatar_url, pcm_16k),
-                                daemon=True
-                            ).start()
+                        item = ubuf.pop_audio()
+                        if item:
+                            ready.append((ubuf.display_name, ubuf.avatar_url, item[0], item[1]))
+            for display_name, avatar_url, pcm_48k, loud_frames in ready:
+                threading.Thread(
+                    target=self._run_transcription,
+                    args=(display_name, avatar_url, pcm_48k, loud_frames),
+                    daemon=True,
+                ).start()
 
-    def _run_transcription(self, display_name: str, avatar_url: str | None, pcm_16k: bytes):
+    def _run_transcription(self, display_name: str, avatar_url: str | None, pcm_48k: bytes, loud_frames: int):
         try:
+            if loud_frames < MIN_LOUD_FRAMES:
+                return
+            pcm_16k = resample_48k_to_16k(pcm_48k)
+            if len(pcm_16k) < TRANSCRIPTION_SAMPLE_RATE * SAMPLE_WIDTH * MIN_UTTERANCE_SECONDS:
+                return
+
+            samples = np.frombuffer(pcm_16k, dtype=np.int16)
+            logger.info(
+                "[STT] %s: %.2f秒 rms=%d peak=%d 声フレーム=%d",
+                display_name,
+                len(samples) / TRANSCRIPTION_SAMPLE_RATE,
+                int(np.sqrt(np.mean(samples.astype(np.float32) ** 2))),
+                int(np.max(np.abs(samples.astype(np.int32)))),
+                loud_frames,
+            )
+
             audio_file = io.BytesIO()
             with wave.open(audio_file, "wb") as wav:
                 wav.setnchannels(1)
                 wav.setsampwidth(SAMPLE_WIDTH)
                 wav.setframerate(TRANSCRIPTION_SAMPLE_RATE)
                 wav.writeframes(pcm_16k)
+            wav_bytes = audio_file.getvalue()
+
+            if DEBUG_DUMP_DIR:
+                try:
+                    os.makedirs(DEBUG_DUMP_DIR, exist_ok=True)
+                    path = os.path.join(DEBUG_DUMP_DIR, f"{time.strftime('%Y%m%d-%H%M%S')}-{abs(hash(display_name)) % 10000:04d}.wav")
+                    with open(path, "wb") as f:
+                        f.write(wav_bytes)
+                except Exception:
+                    logger.exception("デバッグ用WAVの保存に失敗しました")
+
             future = asyncio.run_coroutine_threadsafe(
-                self.callback_coro(display_name, avatar_url, audio_file.getvalue()),
+                self.callback_coro(display_name, avatar_url, wav_bytes),
                 self.bot.loop,
             )
             future.add_done_callback(self._log_transcription_error)
         except Exception as e:
-            logger.error("[Logfare transcription error] %s", e)
+            logger.exception("[Logfare transcription error] %s", e)
 
     @staticmethod
     def _log_transcription_error(future):
@@ -428,10 +556,17 @@ class TranscriptionCog(commands.Cog):
                         "Logfareの文字起こしモデルが利用できません。モデルのトレーニング利用へのオプトインと、APIキーの利用権限を確認してください。"
                     )
                 return
+            except RuntimeError as ex:
+                if "文字起こし結果がありません" in str(ex):
+                    # 雑音・息・短すぎる発話などで認識結果が空だっただけ。エラー扱いにしない
+                    logger.info("Logfare: 認識結果が空でした (user=%s)", display_name)
+                else:
+                    logger.exception("Logfare transcription request failed")
+                return
             except Exception:
                 logger.exception("Logfare transcription request failed")
                 return
-            if not text:
+            if not text or not text.strip():
                 return
             async with aiohttp.ClientSession() as session:
                 wh_obj = discord.Webhook.from_url(webhook.url, session=session)
