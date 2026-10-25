@@ -37,6 +37,7 @@ Discord内で利用者がActivityを起動すると、そのActivityが同じボ
 ## プロジェクト構造
 
 - `web/app/activity/music/`: Discord Activityの画面、SDK初期化、YouTubeプレイヤー同期。
+- `web/middleware.ts`: Discordの`frame_id`と`instance_id`を含むルート起動だけをActivityページへ転送し、通常のトップページは変えない。
 - `web/app/api/activity/`: Activity OAuthコード交換、短寿命トークン発行、Music状態取得のNext.js APIルート。
 - `web/lib/activity-auth.ts`: Activity用短寿命トークンの署名と検証。
 - `web/app/globals.css`: Activityルート内だけに適用する全画面・レスポンシブスタイル。既存ページの外観は変えない。
