@@ -6,16 +6,13 @@ export const runtime = "nodejs";
 const VIDEO_ID = /^[A-Za-z0-9_-]{11}$/;
 const ASSET = /^(?:index\.m3u8|seg-\d{6}\.ts)$/;
 
-// HLS セグメント行のみを対象にする（コメント・空行・絶対 URL・既に書き換え済みは除外）
 function rewriteManifest(manifest: string, prefix: string): string {
   return manifest
     .split("\n")
     .map((line) => {
       const trimmed = line.trim();
       if (!trimmed || trimmed.startsWith("#")) return line;
-      // 絶対 URL はそのまま（プロキシ対象外）
       if (/^[a-z][a-z0-9+.-]*:\/\//i.test(trimmed)) return line;
-      // 想定するセグメント名のみ書き換え（クエリ・パス付きは弾く）
       if (!ASSET.test(trimmed) || trimmed === "index.m3u8") return line;
       return `${prefix}${trimmed}`;
     })
@@ -27,6 +24,7 @@ export async function GET(request: Request) {
   const claims = readActivityToken(url.searchParams.get("token") || undefined);
   const videoId = url.searchParams.get("videoId") || "";
   const asset = url.searchParams.get("asset") || "index.m3u8";
+  
   if (!claims || !VIDEO_ID.test(videoId)) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
@@ -60,7 +58,6 @@ export async function GET(request: Request) {
   const timestamp = String(Math.floor(Date.now() / 1000));
   const nonce = crypto.randomBytes(24).toString("hex");
   const bodyHash = crypto.createHash("sha256").update(body).digest("hex");
-  // 署名対象パスは endpoint.pathname を使う（baseUrl にパスが含まれても一致させる）
   const signedPayload = `POST\n${endpoint.pathname}\n${timestamp}\n${nonce}\n${bodyHash}`;
   const signature = crypto.createHmac("sha256", secret).update(signedPayload).digest("hex");
 
@@ -70,14 +67,13 @@ export async function GET(request: Request) {
     "X-AGO-Coder-Nonce": nonce,
     "X-AGO-Coder-Signature": signature,
   };
-  // Range リクエストを透過する（セグメント取得で重要）
   const range = request.headers.get("range");
   if (range && asset !== "index.m3u8") forwardHeaders["Range"] = range;
 
   try {
-    // タイムアウト設定を追加 (15秒)
+    // タイムアウトを8秒に設定
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 15_000);
+    const timeoutId = setTimeout(() => controller.abort(), 8000);
 
     let upstream: Response;
     try {
@@ -92,6 +88,34 @@ export async function GET(request: Request) {
       clearTimeout(timeoutId);
     }
 
+    // Bot側が準備中(202)を返した場合のリトライ処理
+    if (upstream.status === 202) {
+      let retries = 15; // 最大15回 (約7.5秒)
+      while (retries > 0) {
+        await new Promise((r) => setTimeout(r, 500));
+        
+        const retryController = new AbortController();
+        const retryTimeoutId = setTimeout(() => retryController.abort(), 8000);
+        try {
+          upstream = await fetch(endpoint, {
+            method: "POST",
+            headers: forwardHeaders,
+            body,
+            cache: "no-store",
+            signal: retryController.signal,
+          });
+        } finally {
+          clearTimeout(retryTimeoutId);
+        }
+        
+        if (upstream.status !== 202) break;
+        retries--;
+      }
+      if (upstream.status === 202) {
+        return NextResponse.json({ error: "video_unavailable", detail: "Processing timeout" }, { status: 504 });
+      }
+    }
+
     if (!upstream.ok || !upstream.body) {
       const detail = await upstream.text().catch(() => "");
       console.error("[ActivityVideo] upstream failure", {
@@ -99,7 +123,6 @@ export async function GET(request: Request) {
         asset,
         detail: detail.slice(0, 500),
       });
-      // クライアントにも上流ステータスと detail を返す（デバッグ容易化）
       return NextResponse.json(
         {
           error: upstream.status === 409 ? "video_not_current" : "video_unavailable",
@@ -129,7 +152,6 @@ export async function GET(request: Request) {
       headers.set("Content-Type", "application/vnd.apple.mpegurl");
     } else {
       headers.set("Content-Type", contentType || "video/mp2t");
-      // セグメントは Range / 長さ / キャッシュ系ヘッダを透過
       for (const name of [
         "content-length",
         "content-range",
