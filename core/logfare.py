@@ -177,7 +177,7 @@ async def chat_completion(
 
 
 def _extract_transcript(result: Any) -> str | None:
-    """応答から認識テキストを取り出す。OpenAI互換 {"text": ...} が基本で、Deepgram系の形も拾う。
+    """応答から認識テキストを取り出す。OpenAI互換 {"text": ...} が基本で、Deepgram系（{"result": {"results": {"channels": ...}}} の包み形式を含む）も拾う。
 
     認識結果が空 (text が null など) の場合は "" を返し、どの形にも当てはまらないときだけ None。
     """
@@ -189,6 +189,10 @@ def _extract_transcript(result: Any) -> str | None:
         if key in result:
             value = result[key]
             return value if isinstance(value, str) else ""
+    # {"result": {...}, "success": true, ...} のように包まれて返る場合は、中身を読む
+    inner = result.get("result")
+    if isinstance(inner, (dict, str)):
+        return _extract_transcript(inner)
     try:
         value = result["results"]["channels"][0]["alternatives"][0].get("transcript")
         return value if isinstance(value, str) else ""
