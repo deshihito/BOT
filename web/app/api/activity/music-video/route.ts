@@ -75,12 +75,23 @@ export async function GET(request: Request) {
   if (range && asset !== "index.m3u8") forwardHeaders["Range"] = range;
 
   try {
-    const upstream = await fetch(endpoint, {
-      method: "POST",
-      headers: forwardHeaders,
-      body,
-      cache: "no-store",
-    });
+    // タイムアウト設定を追加 (15秒)
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 15_000);
+
+    let upstream: Response;
+    try {
+      upstream = await fetch(endpoint, {
+        method: "POST",
+        headers: forwardHeaders,
+        body,
+        cache: "no-store",
+        signal: controller.signal,
+      });
+    } finally {
+      clearTimeout(timeoutId);
+    }
+
     if (!upstream.ok || !upstream.body) {
       const detail = await upstream.text().catch(() => "");
       console.error("[ActivityVideo] upstream failure", {
@@ -92,6 +103,7 @@ export async function GET(request: Request) {
       return NextResponse.json(
         {
           error: upstream.status === 409 ? "video_not_current" : "video_unavailable",
+          stage: "upstream",
           upstreamStatus: upstream.status,
           detail: detail.slice(0, 500),
         },
@@ -133,8 +145,16 @@ export async function GET(request: Request) {
     headers.set("Cache-Control", "no-store, max-age=0");
     return new Response(bodyStream, { status: upstream.status, headers });
   } catch (error) {
-    const detail = error instanceof Error ? error.message : "unknown error";
+    const isAbort = error instanceof Error && error.name === "AbortError";
+    const detail = isAbort
+      ? "upstream timeout (Next.js)"
+      : error instanceof Error
+        ? error.message
+        : "unknown error";
     console.error("[ActivityVideo] proxy exception", { asset, detail });
-    return NextResponse.json({ error: "video_unavailable", detail }, { status: 502 });
+    return NextResponse.json(
+      { error: "video_unavailable", stage: "fetch", detail },
+      { status: 502 },
+    );
   }
 }
