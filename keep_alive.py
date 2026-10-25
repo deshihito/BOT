@@ -10,11 +10,13 @@ import logging
 import os
 import re
 import secrets
+import tempfile
 import time
+from pathlib import Path
 from threading import Lock, Thread
 from typing import Any
 
-from flask import Flask, jsonify, request
+from flask import Flask, jsonify, request, send_file
 
 from core import coder_service
 
@@ -28,11 +30,14 @@ _activity_requests: dict[tuple[str, str, str], deque[float]] = defaultdict(deque
 _used_nonces: dict[str, float] = {}
 _nonce_lock = Lock()
 _activity_rate_lock = Lock()
+_video_lock = Lock()
 _next_nonce_cleanup = 0.0
 _WINDOW_SECONDS = 60
 _MAX_REQUESTS_PER_WINDOW = 8
 _ACTIVITY_MAX_REQUESTS_PER_WINDOW = 45
 _SIGNATURE_TTL_SECONDS = 60
+_VIDEO_CACHE_TTL_SECONDS = 15 * 60
+_VIDEO_CACHE_DIR = Path(os.getenv("ACTIVITY_VIDEO_CACHE_DIR", tempfile.gettempdir())) / "agobot-activity-video"
 
 
 @app.route("/")
@@ -139,6 +144,42 @@ async def _fetch_activity_music_snapshot(guild_id: int, channel_id: int, user_id
     )
 
 
+def _download_activity_video(video_id: str) -> Path:
+    """Download the current test video once and return a local MP4 path."""
+    _VIDEO_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    output = _VIDEO_CACHE_DIR / f"{video_id}.mp4"
+    if output.exists() and output.stat().st_size > 0 and time.time() - output.stat().st_mtime < _VIDEO_CACHE_TTL_SECONDS:
+        return output
+
+    import yt_dlp
+
+    with _video_lock:
+        if output.exists() and output.stat().st_size > 0 and time.time() - output.stat().st_mtime < _VIDEO_CACHE_TTL_SECONDS:
+            return output
+        temporary = _VIDEO_CACHE_DIR / f"{video_id}.{os.getpid()}.{secrets.token_hex(4)}"
+        options = {
+            "format": "bestvideo[height<=720]+bestaudio/best[height<=720]/best",
+            "outtmpl": str(temporary) + ".%(ext)s",
+            "merge_output_format": "mp4",
+            "noplaylist": True,
+            "quiet": True,
+            "no_warnings": True,
+        }
+        with yt_dlp.YoutubeDL(options) as ydl:
+            ydl.download([f"https://www.youtube.com/watch?v={video_id}"])
+        candidates = sorted(
+            _VIDEO_CACHE_DIR.glob(f"{temporary.name}.*"),
+            key=lambda item: item.stat().st_mtime,
+            reverse=True,
+        )
+        if not candidates:
+            raise FileNotFoundError("yt-dlp did not create a video file")
+        candidates[0].replace(output)
+        for candidate in candidates[1:]:
+            candidate.unlink(missing_ok=True)
+    return output
+
+
 @app.post("/internal/coder/run")
 def run_coder():
     if not _authorized("/internal/coder/run"):
@@ -212,6 +253,46 @@ def activity_music_state():
     response = jsonify(snapshot)
     response.headers["Cache-Control"] = "no-store, max-age=0"
     return response
+
+
+@app.post("/internal/activity/music-video")
+def activity_music_video():
+    path = "/internal/activity/music-video"
+    if not _authorized(path):
+        return jsonify({"error": "unauthorized"}), 401
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict):
+        return jsonify({"error": "invalid_request"}), 400
+    guild_id = payload.get("guild_id")
+    channel_id = payload.get("channel_id")
+    user_id = payload.get("user_id")
+    video_id = payload.get("video_id")
+    for value in (guild_id, channel_id, user_id):
+        if not isinstance(value, str) or not re.fullmatch(r"\d{1,30}", value):
+            return jsonify({"error": "invalid_request"}), 400
+    if not isinstance(video_id, str) or not re.fullmatch(r"[A-Za-z0-9_-]{11}", video_id):
+        return jsonify({"error": "invalid_video"}), 400
+    loop = getattr(_bot, "coder_loop", None)
+    if _bot is None or loop is None or not _bot.is_ready():
+        return jsonify({"error": "bot_unavailable"}), 503
+    future = asyncio.run_coroutine_threadsafe(
+        _fetch_activity_music_snapshot(int(guild_id), int(channel_id), int(user_id)), loop
+    )
+    try:
+        snapshot = future.result(timeout=3)
+    except Exception:
+        logger.exception("Music Activity video state request failed")
+        return jsonify({"error": "music_state_unavailable"}), 502
+    if not snapshot or snapshot.get("videoId") != video_id:
+        return jsonify({"error": "video_not_current"}), 409
+    try:
+        output = _download_activity_video(video_id)
+        response = send_file(output, mimetype="video/mp4", conditional=True, max_age=0, etag=True)
+        response.headers["Cache-Control"] = "no-store"
+        return response
+    except Exception:
+        logger.exception("Music Activity video download failed for %s", video_id)
+        return jsonify({"error": "video_unavailable"}), 502
 
 
 def run():
