@@ -3,7 +3,7 @@
 - 4 個の統合サブコマンドが、各機能の実装関数を正しい引数で呼ぶこと
 - 旧コマンド（/join・!rec・!stt・!saito・!gvc join など）が登録されていないこと
 - /voice connection action:状態 が、VC を使っている機能と開始した人を表示すること
-- 音声認識モデルが無いとき、文字起こし・カラオケは VC に入らずに断ること
+- Logfareキーが無いとき文字起こし、Voskモデルが無いときカラオケは VC に入らずに断ること
 - /voice studio feature:録音 action:音程解析が NameError にならず音階を返すこと
 - 録音を始めると、テキストチャンネルに全員に見えるお知らせが出ること
 """
@@ -235,12 +235,22 @@ class ModelMissingTest(Base):
         self.assertIsNone(self.manager.get(self.w.guild.id))
         self.assertIsNone(self.w.guild.voice_client)
 
-    async def test_transcribe_refuses_without_model(self):
-        with patch.object(sio_transcription, 'MODEL_PATH', self.missing):
+    async def test_transcribe_refuses_without_logfare_key(self):
+        with patch.object(sio_transcription.logfare, 'api_key', return_value=None):
             interaction = await self.voice('transcribe', action=choice('start'))
-        self.assertIn('音声認識モデルが入っていません', interaction.texts())
+        self.assertIn('LOGFARE_API_KEY', interaction.texts())
         self.assertTrue(interaction.sent[-1][1]['ephemeral'])
         self.assert_not_touched()
+
+    async def test_transcribe_does_not_take_over_an_active_voice_feature(self):
+        await self.rec._record_impl(Responder(self.ctx(self.w.alice)), 'start')
+        active_vc = self.w.guild.voice_client
+        with patch.object(sio_transcription.logfare, 'api_key', return_value='configured'):
+            interaction = await self.voice('transcribe', action=choice('start'))
+        self.assertIn('録音', interaction.texts())
+        self.assertEqual(self.manager.owner(self.w.guild.id), 'record')
+        self.assertIs(self.w.guild.voice_client, active_vc)
+        self.assertTrue(active_vc.is_connected())
 
     async def test_karaoke_refuses_without_model(self):
         with patch.object(sio_karaoke, 'MODEL_PATH', self.missing):

@@ -12,6 +12,7 @@ BASE_URL = os.getenv("LOGFARE_BASE_URL", "https://logfare.ai/v1").rstrip("/")
 DEFAULT_MODEL = "claude-haiku-5-5"
 DEFAULT_IMAGE_MODEL = "flux-2-dev"
 AUTO_MODEL = "logfare/auto"
+TRANSCRIPTION_MODEL = os.getenv("LOGFARE_TRANSCRIPTION_MODEL", "nova-3").strip() or "nova-3"
 DEFAULT_TIMEOUT = aiohttp.ClientTimeout(total=45)
 
 
@@ -166,6 +167,30 @@ async def chat_completion(
     if not isinstance(data, dict):
         raise RuntimeError("Logfare APIの応答形式が不正です。")
     return data
+
+
+async def transcribe_audio(audio: bytes, *, filename: str = "voice.wav") -> str:
+    """Logfare の音声認識 endpoint を1回だけ呼び、認識テキストを返す。"""
+    key = api_key()
+    if not key:
+        raise RuntimeError("LOGFARE_API_KEY が設定されていません。")
+    form = aiohttp.FormData()
+    form.add_field("model", TRANSCRIPTION_MODEL)
+    form.add_field("file", audio, filename=filename, content_type="audio/wav")
+    headers = {"Authorization": f"Bearer {key}"}
+    timeout = aiohttp.ClientTimeout(total=90)
+    async with aiohttp.ClientSession(timeout=timeout) as session:
+        async with session.post(f"{BASE_URL}/audio/transcriptions", headers=headers, data=form) as response:
+            if response.status >= 400:
+                raise LogfareHTTPError(response.status, response.headers.get("Retry-After"))
+            try:
+                result = await response.json()
+            except (ValueError, aiohttp.ContentTypeError):
+                result = {"text": await response.text()}
+    text = result.get("text") if isinstance(result, dict) else None
+    if not isinstance(text, str):
+        raise RuntimeError("Logfare 音声認識 API の応答に文字起こし結果がありませんでした。")
+    return text.strip()
 
 
 async def decision(

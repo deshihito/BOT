@@ -241,6 +241,47 @@ class ManagerTest(unittest.IsolatedAsyncioTestCase):
         self.assertIs(vc.channel, other)
         self.assertEqual(w.voice.connect_calls, 1)
 
+    async def test_music_gvc_tts_and_transcription_share_one_connection(self):
+        w = self.w
+        vc = await self.manager.acquire(w.guild, w.voice, 'music', w.alice)
+        for feature in ('global', 'tts', 'transcribe'):
+            shared = await self.manager.acquire(w.guild, w.voice, feature, w.bob, force=True)
+            self.assertIs(shared, vc)
+        self.assertEqual(set(self.manager.get(w.guild.id).shared_leases), {'global', 'tts', 'transcribe'})
+        self.assertTrue(vc.is_connected())
+        self.assertEqual(vc.disconnect_calls, 0)
+
+    async def test_shared_feature_stop_only_releases_its_lease(self):
+        w = self.w
+        vc = await self.manager.acquire(w.guild, w.voice, 'music', w.alice)
+        await self.manager.acquire(w.guild, w.voice, 'global', w.bob, force=True)
+        self.assertTrue(await self.manager.release(w.guild.id, 'global'))
+        self.assertTrue(vc.is_connected())
+        self.assertEqual(vc.disconnect_calls, 0)
+        self.assertEqual(self.manager.owner(w.guild.id), 'music')
+        self.assertNotIn('global', self.manager.get(w.guild.id).shared_leases)
+
+    async def test_releasing_primary_promotes_shared_feature_without_disconnect(self):
+        w = self.w
+        vc = await self.manager.acquire(w.guild, w.voice, 'music', w.alice)
+        await self.manager.acquire(w.guild, w.voice, 'transcribe', w.bob)
+        self.assertTrue(await self.manager.release(w.guild.id, 'music'))
+        self.assertIs(self.manager.get(w.guild.id).vc, vc)
+        self.assertEqual(self.manager.owner(w.guild.id), 'transcribe')
+        self.assertTrue(vc.is_connected())
+        self.assertEqual(vc.disconnect_calls, 0)
+
+    async def test_shared_features_refuse_to_move_the_common_voice_client(self):
+        w = self.w
+        vc = await self.manager.acquire(w.guild, w.voice, 'global', w.alice)
+        other = FakeVoiceChannel(w.guild, 999, [w.bob])
+        with self.assertRaises(vs.VoiceBusy):
+            await self.manager.acquire(w.guild, other, 'music', w.bob, force=True)
+        self.assertIs(w.guild.voice_client, vc)
+        self.assertIs(vc.channel, w.voice)
+        self.assertTrue(vc.is_connected())
+        self.assertEqual(vc.disconnect_calls, 0)
+
     async def test_release_runs_cleanup_then_disconnects(self):
         w = self.w
         order = []
