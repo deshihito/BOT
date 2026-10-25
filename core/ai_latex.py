@@ -3,7 +3,8 @@
 Discordは数式を描画できないため、次のように処理する。
 
 * ``$$...$$`` / ``\\[...\\]`` / ``\\begin{align}...`` などの独立数式
-    → matplotlib(mathtext)でPNG画像にし、本文には ``【数式 n】`` を置く
+    → matplotlib(mathtext)でPNG画像にし、本文には ``【数式 n】`` を置く。
+      複数ある場合は ``compose()`` で縦に並べた1枚の画像にまとめ、embedの画像として使う
 * ``$...$`` / ``\\(...\\)`` などの文中数式
     → Unicode文字（α, x², √2 など）に置き換える。変換できない場合は画像にする
 * 描画できない式（行列・日本語入り・未対応コマンドなど）
@@ -48,6 +49,7 @@ class LatexRenderError(Exception):
 
 @dataclass
 class MathImage:
+    number: int
     marker: str      # 本文中の目印（例: 【数式 1】）
     filename: str
     data: bytes
@@ -329,8 +331,49 @@ async def _resolve(formula: _Formula, images: list[MathImage]) -> str:
         else:
             n = len(images) + 1
             marker = f"【数式 {n}】"
-            images.append(MathImage(marker, f"math-{n}.png", data, formula.src[:1000]))
+            images.append(MathImage(n, marker, f"math-{n}.png", data, formula.src[:1000]))
             return f"\n**{marker}**\n" if formula.display else f"**{marker}**"
     if formula.display:
         return f"\n```latex\n{formula.src}\n```\n"
     return f"`{formula.src}`"
+
+
+# ---- 複数の数式画像を1枚にまとめる -----------------------------------------
+def _compose_sync(images: list[MathImage]) -> tuple[bytes, str]:
+    if len(images) == 1:
+        return images[0].data, images[0].alt
+    import matplotlib as mpl
+    from PIL import Image, ImageDraw, ImageFont
+
+    font_path = mpl.get_data_path() + "/fonts/ttf/DejaVuSans.ttf"
+    font = ImageFont.truetype(font_path, 18)
+    rows = [Image.open(io.BytesIO(img.data)).convert("RGB") for img in images]
+    labels = [f"({img.number})" for img in images]
+    label_w = int(max(font.getlength(t) for t in labels)) + 16
+    width = label_w + max(r.width for r in rows)
+    height = sum(r.height for r in rows) + (len(rows) - 1)  # 行間の区切り線1px
+    canvas = Image.new("RGB", (width, height), BG_COLOR)
+    draw = ImageDraw.Draw(canvas)
+    y = 0
+    for i, (row, label) in enumerate(zip(rows, labels)):
+        canvas.paste(row, (label_w + (width - label_w - row.width) // 2, y))
+        draw.text((8, y + row.height // 2), label, fill="#888888", font=font, anchor="lm")
+        y += row.height
+        if i < len(rows) - 1:
+            draw.line([(0, y), (width, y)], fill="#dddddd")
+            y += 1
+    buf = io.BytesIO()
+    canvas.save(buf, format="PNG")
+    alt = "\n".join(f"({img.number}) {img.alt}" for img in images)
+    return buf.getvalue(), alt[:1000]
+
+
+async def compose(images: list[MathImage]) -> tuple[bytes, str] | None:
+    """数式画像を縦に並べた1枚のPNGと代替テキストにする。失敗時は None。"""
+    if not images:
+        return None
+    try:
+        return await asyncio.to_thread(_compose_sync, images)
+    except Exception:
+        logger.exception("数式画像の結合に失敗しました")
+        return None
