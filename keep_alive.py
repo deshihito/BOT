@@ -18,7 +18,6 @@ from pathlib import Path
 from threading import Lock, Thread
 from typing import Any
 
-# 追加: yt_dlp と Flask の依存関係
 import yt_dlp
 from flask import Flask, jsonify, request, send_file
 
@@ -179,13 +178,14 @@ def _prepare_activity_hls(video_id: str) -> Path:
                 "noplaylist": True,
                 "quiet": True,
                 "no_warnings": True,
+                "socket_timeout": 10, # yt-dlpのタイムアウトを追加
             }
             try:
                 with yt_dlp.YoutubeDL(options) as ydl:
                     info = ydl.extract_info(f"https://www.youtube.com/watch?v={video_id}", download=False)
             except Exception as e:
                 logger.error("[ActivityVideo] yt-dlp failed to extract video_id=%s error=%s", video_id, e)
-                raise RuntimeError("yt-dlp extraction failed") from e
+                raise RuntimeError(f"yt-dlp extraction failed: {e}") from e
                 
             stream_url = info.get("url")
             if not isinstance(stream_url, str) or not stream_url:
@@ -200,12 +200,13 @@ def _prepare_activity_hls(video_id: str) -> Path:
                 video_id, info.get("format_id"), info.get("width"), info.get("height"), info.get("duration"),
             )
             
+            # FFmpegの起動 (ultrafastに変更)
             process = subprocess.Popen([
                 "ffmpeg", "-hide_banner", "-loglevel", "error",
                 "-headers", header_value,
                 "-i", stream_url,
                 "-map", "0:v:0", "-map", "0:a:0?",
-                "-c:v", "libx264", "-preset", "veryfast", "-tune", "zerolatency",
+                "-c:v", "libx264", "-preset", "ultrafast", "-tune", "zerolatency",
                 "-pix_fmt", "yuv420p", "-g", "30", "-keyint_min", "30",
                 "-sc_threshold", "0", "-force_key_frames", "expr:gte(t,n_forced*1)",
                 "-c:a", "aac", "-b:a", "128k", "-f", "hls",
@@ -226,14 +227,15 @@ def _prepare_activity_hls(video_id: str) -> Path:
                         logger.error("[ActivityVideo][ffmpeg][%s] %s", video_id, line)
             Thread(target=read_ffmpeg_errors, daemon=True).start()
             
-            deadline = time.monotonic() + 15
+            # マニフェストが生成されるのを待つ（最大5秒に短縮）
+            deadline = time.monotonic() + 5
             while not manifest.exists() and process.poll() is None and time.monotonic() < deadline:
                 time.sleep(0.1)
                 
             if not manifest.exists():
                 logger.error("[ActivityVideo] HLS manifest timeout video_id=%s returncode=%s dir=%s", video_id, process.poll(), directory)
                 process.terminate()
-                raise RuntimeError("FFmpeg did not create an HLS manifest")
+                raise RuntimeError("FFmpeg did not create an HLS manifest in time")
                 
             logger.info("[ActivityVideo] HLS ready video_id=%s manifest=%s files=%s", video_id, manifest, [item.name for item in directory.iterdir()])
             
@@ -369,9 +371,10 @@ def activity_music_video():
         response = send_file(output, mimetype=mimetype, conditional=True, max_age=0, etag=True)
         response.headers["Cache-Control"] = "no-store"
         return response
-    except Exception:
+    except Exception as e:
         logger.exception("Music Activity video download failed for %s", video_id)
-        return jsonify({"error": "video_unavailable"}), 502
+        # 例外の内容をレスポンスに含める
+        return jsonify({"error": "video_unavailable", "detail": str(e)}), 502
 
 
 def _hls_cleanup_worker() -> None:
