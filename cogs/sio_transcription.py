@@ -467,6 +467,9 @@ class TranscriptionCog(commands.Cog):
         # サーバーごとの直近の発話 (表示名, 16kHz WAV, 時刻)。!sttdebug が使う
         self.last_audio: dict[int, tuple[str, bytes, float]] = {}
 
+    async def cog_load(self):
+        logger.info("文字起こしデバッグコマンド !sttdebug を登録しました")
+
     async def _get_or_create_webhook(self, channel: discord.TextChannel) -> discord.Webhook:
         webhooks = await channel.webhooks()
         for wh in webhooks:
@@ -603,10 +606,12 @@ class TranscriptionCog(commands.Cog):
         ))
 
     # --------------------------------------------------
-    # デバッグ: 言語指定の比較（Botオーナー専用。スラッシュコマンドは増やさずプレフィックスで提供）
+    # デバッグ: 言語指定の比較（誰でも実行可。スラッシュコマンドは増やさずプレフィックスで提供）
+    # 1回で外部APIを8回呼ぶので、サーバーごとに30秒に1回までに制限している
     # --------------------------------------------------
     @commands.command(name="sttdebug")
-    @commands.is_owner()
+    @commands.guild_only()
+    @commands.cooldown(1, 30.0, commands.BucketType.guild)
     async def stt_debug(self, ctx: commands.Context):
         """直近の文字起こし音声（またはWAV添付）を、言語指定の8パターンでLogfareに送って結果を比べる。"""
         audio: bytes | None = None
@@ -646,10 +651,30 @@ class TranscriptionCog(commands.Cog):
                 return await ctx.send(embed=we(f"<:failed:1490986584676368535> 実行に失敗しました: `{e}`"))
 
         lines = [f"`{label}`\n→ {outcome[:150]}" for label, outcome in results]
-        await ctx.send(embed=we(
+        text = (
             f"🔍 **文字起こし言語指定テスト** — {logfare.TRANSCRIPTION_MODEL}\n"
             f"音声: {source}（{stats}）\n\n" + "\n".join(lines)
-        ))
+        )
+        try:
+            await ctx.send(embed=we(text))
+        except (discord.Forbidden, discord.HTTPException):
+            # 「埋め込みリンク」権限が無いチャンネルでは埋め込みが表示されないので、普通のテキストで送り直す
+            await ctx.send(text[:1900])
+
+    @stt_debug.error
+    async def stt_debug_error(self, ctx: commands.Context, error: commands.CommandError):
+        """失敗しても必ず何か返す（以前は無言になるだけだった）。"""
+        if isinstance(error, commands.CommandOnCooldown):
+            message = f"⏳ `!sttdebug` は続けて実行できません。{error.retry_after:.0f}秒後にもう一度お試しください。"
+        elif isinstance(error, commands.NoPrivateMessage):
+            message = "⚠️ `!sttdebug` はサーバーのテキストチャンネルで実行してください。"
+        else:
+            logger.error("sttdebug でエラー", exc_info=error)
+            message = f"⚠️ `!sttdebug` でエラーが発生しました: `{error!r}`"[:1900]
+        try:
+            await ctx.send(message)
+        except Exception:
+            logger.exception("sttdebug のエラー通知を送れませんでした")
 
     def _cleanup(self, guild_id: int):
         """VC を手放すときの後片付け（切断は VoiceSessionManager が行う）。"""
