@@ -62,6 +62,9 @@ export default function ActivityClient({ clientId }: { clientId: string }) {
     if (Hls.isSupported()) {
       const hls = new Hls({ lowLatencyMode: true, backBufferLength: 10, maxBufferLength: 6 });
       hlsRef.current = hls;
+      hls.on(Hls.Events.ERROR, (_event, data) => {
+        if (data.fatal) setVideoError(`HLS動画を再生できません（${data.details || "配信エラー"}）。`);
+      });
       hls.loadSource(url);
       hls.attachMedia(video);
     } else {
@@ -81,7 +84,7 @@ export default function ActivityClient({ clientId }: { clientId: string }) {
     if (loadedVideoIdRef.current !== value.videoId) {
       loadedVideoIdRef.current = value.videoId;
       loadStream(value.videoId);
-      video.currentTime = expectedPosition(timed);
+      setVideoError("");
     }
     const position = expectedPosition(timed);
     if (Number.isFinite(video.currentTime) && Math.abs(video.currentTime - position) > 1.75) video.currentTime = position;
