@@ -45,7 +45,9 @@ export async function GET(request: Request) {
       cache: "no-store",
     });
     if (!upstream.ok || !upstream.body) {
-      return NextResponse.json({ error: upstream.status === 409 ? "video_not_current" : "video_unavailable" }, { status: upstream.status === 409 ? 409 : 502 });
+      const detail = await upstream.text().catch(() => "");
+      console.error("[ActivityVideo] upstream failure", { status: upstream.status, asset, detail: detail.slice(0, 500) });
+      return NextResponse.json({ error: upstream.status === 409 ? "video_not_current" : "video_unavailable", upstreamStatus: upstream.status, detail: detail.slice(0, 500) }, { status: upstream.status === 409 ? 409 : 502 });
     }
     const headers = new Headers();
     let bodyStream = upstream.body;
@@ -67,7 +69,9 @@ export async function GET(request: Request) {
     }
     headers.set("Cache-Control", "no-store, max-age=0");
     return new Response(bodyStream, { status: upstream.status, headers });
-  } catch {
-    return NextResponse.json({ error: "video_unavailable" }, { status: 502 });
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : "unknown error";
+    console.error("[ActivityVideo] proxy exception", { asset, detail });
+    return NextResponse.json({ error: "video_unavailable", detail }, { status: 502 });
   }
 }
