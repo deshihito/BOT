@@ -28,6 +28,7 @@ import discord.opus
 from core.voice_session import SHARED_FEATURES, VoiceBusy, get_manager
 from core.voice_media import add_audio_source, has_audio_source, remove_audio_source
 from core.legacy import Responder
+from core.music_activity import build_music_activity_snapshot
 
 logger = logging.getLogger(__name__)
  
@@ -678,98 +679,6 @@ class PythonSpatialAudioSource(discord.AudioSource):
 
     def cleanup(self):
         self.source.cleanup()
-            
-        # ==================================================
-        # それ以外のモード（従来のサンプル単位処理）
-        # ==================================================
-        out_samples = []
-
-        # rotate用の事前計算
-        rot_angle = (self.count / 400.0) * 2.0 * math.pi
-        rot_l = 0.5 + 0.5 * math.sin(rot_angle)
-        rot_r = 1.0 - rot_l
-
-        for i in range(num_samples):
-            in_l = samples[i * 2] / 32768.0
-            in_r = samples[i * 2 + 1] / 32768.0
-
-            if mode == 'flat':
-                out_l, out_r = in_l, in_r
-
-            elif mode in ('bass', 'superbass'):
-                boost = 2.8 if mode == 'superbass' else 1.8
-                self.bass_lp_l = self.bass_lp_l + 0.06 * (in_l - self.bass_lp_l)
-                self.bass_lp_r = self.bass_lp_r + 0.06 * (in_r - self.bass_lp_r)
-                out_l = in_l + self.bass_lp_l * boost
-                out_r = in_r + self.bass_lp_r * boost
-                out_l = out_l / (1.0 + abs(out_l) * 0.2)
-                out_r = out_r / (1.0 + abs(out_r) * 0.2)
-
-            elif mode == 'echo':
-                el = self.echo_buf_l[self.echo_idx]
-                er = self.echo_buf_r[self.echo_idx]
-                out_l = in_l + el * 0.4
-                out_r = in_r + er * 0.4
-                self.echo_buf_l[self.echo_idx] = in_l
-                self.echo_buf_r[self.echo_idx] = in_r
-                self.echo_idx = (self.echo_idx + 1) % 9600
-
-            elif mode == 'hall':
-                diff = in_l - in_r
-                out_l = in_l + diff * 0.75
-                out_r = in_r - diff * 0.75
-
-            elif mode == 'vocal':
-                self.vocal_lp_l = self.vocal_lp_l + 0.35 * (in_l - self.vocal_lp_l)
-                self.vocal_lp_r = self.vocal_lp_r + 0.35 * (in_r - self.vocal_lp_r)
-                out_l = self.vocal_lp_l * 1.4
-                out_r = self.vocal_lp_r * 1.4
-
-            elif mode == 'live':
-                ll = self.live_buf_l[self.live_idx]
-                lr = self.live_buf_r[self.live_idx]
-                mix_l = in_l + ll * 0.4
-                mix_r = in_r + lr * 0.4
-                self.live_buf_l[self.live_idx] = in_l
-                self.live_buf_r[self.live_idx] = in_r
-                self.live_idx = (self.live_idx + 1) % 2880
-                
-                self.live_lp_l = self.live_lp_l + 0.85 * (mix_l - self.live_lp_l)
-                self.live_lp_r = self.live_lp_r + 0.85 * (mix_r - self.live_lp_r)
-                
-                diff = self.live_lp_l - self.live_lp_r
-                out_l = self.live_lp_l + diff * 0.3
-                out_r = self.live_lp_r - diff * 0.3
-
-            elif mode == 'rotate':
-                out_l = in_l * rot_l
-                out_r = in_r * rot_r
-
-            elif mode == 'reverb':
-                r1 = self.rev_buf_l[(self.rev_idx - 5771) % 12000]
-                r2 = self.rev_buf_l[(self.rev_idx - 8641) % 12000]
-                r3 = self.rev_buf_r[(self.rev_idx - 11549) % 12000]
-                
-                out_l = in_l + (r1 * 0.25 + r2 * 0.15)
-                out_r = in_r + (r3 * 0.25 + r2 * 0.15)
-                
-                self.rev_buf_l[self.rev_idx] = in_l + r3 * 0.3
-                self.rev_buf_r[self.rev_idx] = in_r + r1 * 0.3
-                self.rev_idx = (self.rev_idx + 1) % 12000
-            else:
-                out_l, out_r = in_l, in_r
-
-            volume = float(np.clip(self.state.get('volume', 1.0), 0.0, 2.0))
-            out_l = max(-1.0, min(1.0, out_l * volume))
-            out_r = max(-1.0, min(1.0, out_r * volume))
-            
-            out_samples.append(int(out_l * 32767))
-            out_samples.append(int(out_r * 32767))
-            
-        return struct.pack(fmt, *out_samples)
-
-    def cleanup(self):
-        self.source.cleanup()
 
 
 # ==================================================
@@ -1046,8 +955,8 @@ class VoiceControlView(discord.ui.View):
             previous_speed = state.get('speed', 1.0)
             state['speed'] = float(self.values[0])
             await interaction.response.send_message(embed=we(f"⚡ 再生速度を `{state['speed']}` 倍に設定しました（現在位置から即時反映）。"), ephemeral=True)
-            ctx = state['current_ctx'] or interaction
-            await self.cog.apply_immediate_setting(ctx, elapsed_speed=previous_speed)
+            # ★ 古い current_ctx ではなく、いま操作した interaction を渡す
+            await self.cog.apply_immediate_setting(interaction, elapsed_speed=previous_speed)
 
     class VolumeSelect(discord.ui.Select):
         def __init__(self, cog, guild_id):
@@ -1068,8 +977,8 @@ class VoiceControlView(discord.ui.View):
             state = self.cog.get_state(self.guild_id)
             state['volume'] = float(self.values[0])
             await interaction.response.send_message(embed=we(f"🔊 音量を `{int(state['volume']*100)}%` に設定しました（即時反映）。"), ephemeral=True)
-            ctx = state['current_ctx'] or interaction
-            await self.cog.apply_immediate_setting(ctx)
+            # ★ 古い current_ctx ではなく、いま操作した interaction を渡す
+            await self.cog.apply_immediate_setting(interaction)
 
     class EQSelect(discord.ui.Select):
         def __init__(self, cog, guild_id):
@@ -1095,8 +1004,8 @@ class VoiceControlView(discord.ui.View):
             state['eq'] = self.values[0]
             state['custom_eq_filter'] = None
             await interaction.response.send_message(embed=we(f"🎬 エフェクトを `{state['eq']}` に変更しました（即時反映）。"), ephemeral=True)
-            ctx = state['current_ctx'] or interaction
-            await self.cog.apply_immediate_setting(ctx)
+            # ★ current_ctx ではなく interaction を渡す。これが「次の曲に飛ぶ」バグの修正点。
+            await self.cog.apply_immediate_setting(interaction)
 
     @discord.ui.button(label="🔎", style=discord.ButtonStyle.success, row=3)
     async def search_button(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -1465,6 +1374,12 @@ class VoiceCog(commands.Cog):
             }
         return self.states[guild_id]
 
+    def activity_snapshot(self, guild_id: int, *, is_playing: bool, now: float | None = None) -> dict:
+        """Return only the safe, read-only fields needed by the Music Activity."""
+        return build_music_activity_snapshot(
+            self.get_state(guild_id), is_playing=is_playing, now=now
+        )
+
     def _reset_playback(self, guild_id: int):
         """キューと再生中の曲を空にし、裏で動いているタスクを止める（退出時の後片付け）。"""
         state = self.get_state(guild_id)
@@ -1812,6 +1727,9 @@ class VoiceCog(commands.Cog):
             playback_speed = elapsed_speed if elapsed_speed is not None else state.get('speed', 1.0)
             actual_played = (time.time() - state['start_time']) * playback_speed
             state['elapsed_offset'] += actual_played
+
+            # ★ 先にフラグを立てる。remove_audio_source の after コールバック
+            #   (play_next) が current_track を破棄しないようにする。
             state['is_changing_setting'] = True
             remove_audio_source(vc, "music", notify=True)
 
@@ -1826,7 +1744,10 @@ class VoiceCog(commands.Cog):
                 state['is_changing_setting'] = False
                 return
 
+            # ★ current_track と elapsed_offset は保持したまま check_queue で再開。
+            #   play_next は is_changing_setting 中なので return している。
             state['is_changing_setting'] = False
+            state['is_processing_queue'] = False
             await self.check_queue(guild.id)
         else:
             await self.update_panel(guild.id)
@@ -2332,6 +2253,13 @@ class VoiceCog(commands.Cog):
 
     def play_next(self, guild_id: int, error=None):
         state = self.get_state(guild_id)
+
+        # ★ 設定変更中は何もしない（current_track / elapsed_offset を保持）。
+        #   apply_immediate_setting() が remove_audio_source() で止めた際に
+        #   呼ばれる after コールバックが、キューを次へ進めてしまうのを防ぐ。
+        if state.get('is_changing_setting'):
+            return
+
         if error:
             logger.error("Player error: %r", error)
             failed_track = state.get('current_track')
