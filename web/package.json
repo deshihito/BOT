@@ -2,6 +2,7 @@
   "name": "agobot-web",
   "private": true,
   "version": "0.1.0",
+  "packageManager": "npm@10.9.2",
   "scripts": {
     "dev": "next dev",
     "build": "next build",
@@ -9,10 +10,16 @@
     "test": "node --test tests/*.mjs"
   },
   "dependencies": {
+    "@discord/embedded-app-sdk": "^2.5.0",
     "marked": "^14.1.0",
     "next": "^15.5.0",
     "react": "^19.1.0",
     "react-dom": "^19.1.0"
+  },
+  "overrides": {
+    "@discord/embedded-app-sdk": {
+      "zod": "4.6.6"
+    }
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

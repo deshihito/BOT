@@ -1,1 +1,21 @@
-{"routes":[{"path":"/","title":"AGOBOT サポート"},{"path":"/commands","title":"コマンド一覧"},{"path":"/commands/:command","title":"コマンドのジャンル"},{"path":"/commands/:command/:genre","title":"機能の説明"},{"path":"/dashboard","title":"ダッシュボード"},{"path":"/coder","title":"AGO Coder"},{"path":"/login","title":"Discordでログイン"},{"path":"/games","title":"ゲーム"},{"path":"/games/:id","title":"ゲームのルール"},{"path":"/jinrou/roles","title":"人狼 役職図鑑"},{"path":"/jinrou/roles/:id","title":"人狼 役職"},{"path":"/map","title":"マップ"},{"path":"/nation","title":"国づくり"},{"path":"/ranking","title":"リーダーボード"},{"path":"/terms","title":"利用規約"},{"path":"/privacy","title":"プライバシーポリシー"}]}
+{
+  "routes": [
+    { "path": "/", "title": "AGOBOT サポート" },
+    { "path": "/commands", "title": "コマンド一覧" },
+    { "path": "/commands/:command", "title": "コマンドのジャンル" },
+    { "path": "/commands/:command/:genre", "title": "機能の説明" },
+    { "path": "/dashboard", "title": "ダッシュボード" },
+    { "path": "/coder", "title": "AGO Coder" },
+    { "path": "/activity/music", "title": "Music動画Activity" },
+    { "path": "/login", "title": "Discordでログイン" },
+    { "path": "/games", "title": "ゲーム" },
+    { "path": "/games/:id", "title": "ゲームのルール" },
+    { "path": "/jinrou/roles", "title": "人狼 役職図鑑" },
+    { "path": "/jinrou/roles/:id", "title": "人狼 役職" },
+    { "path": "/map", "title": "マップ" },
+    { "path": "/nation", "title": "国づくり" },
+    { "path": "/ranking", "title": "リーダーボード" },
+    { "path": "/terms", "title": "利用規約" },
+    { "path": "/privacy", "title": "プライバシーポリシー" }
+  ]
+}
