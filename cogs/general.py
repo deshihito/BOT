@@ -1,9 +1,14 @@
 """/general: コイン・生存確認・EXP・ランキング系機能の操作パネル。"""
 from __future__ import annotations
 
-import time
-import discord
+import asyncio
+import json
 import logging
+import os
+import time
+from pathlib import Path
+
+import discord
 from discord import app_commands
 from discord.ext import commands, tasks
 from core.panel_v2 import as_panel_v2, edit_panel_v2
@@ -130,53 +135,32 @@ def _as_int(value, default: int = 0) -> int:
         return default
 
 
-_warned_detached_store = False
+# ------------------------------------------------------------
+# 保存先
+# ------------------------------------------------------------
+# guild_settings のストアは store["exp"] = ... のような汎用キー保存を受け付けず
+# (登録の4方式すべて失敗)、EXPが永続化されなかった。そのためEXPは
+# このcog専用のJSONファイルへ保存する(一時ファイル→置換のアトミック書き込み)。
+# 保存先は環境変数 EXP_DATA_PATH で変更可能。既定は <プロジェクト直下>/data/exp.json
+EXP_FILE = Path(
+    os.getenv("EXP_DATA_PATH")
+    or (Path(__file__).resolve().parent.parent / "data" / "exp.json")
+)
 
-# ストアに登録できなかった場合のフォールバック。
-# プロセス内で共有される dict を保持し、加算が消えないようにする。
-_DETACHED_EXP: dict = {}
+_EXP_DATA: dict | None = None
+_EXP_LOCK: asyncio.Lock | None = None
 
 
-def _store_attach(store, key: str, data: dict) -> bool:
-    """store に key: data を登録できるか試す。成功したら True。"""
-    # 1) 通常の dict / MutableMapping
-    try:
-        store[key] = data
-        return True
-    except Exception:
-        pass
-
-    # 2) setdefault フォールバック
-    try:
-        setdefault = getattr(store, "setdefault", None)
-        if callable(setdefault):
-            setdefault(key, data)
-            return True
-    except Exception:
-        pass
-
-    # 3) update / __update__ 系
-    try:
-        update = getattr(store, "update", None)
-        if callable(update):
-            update({key: data})
-            return True
-    except Exception:
-        pass
-
-    # 4) __setitem__ を持たないラッパーで、内部 dict に直接触れる場合
-    for attr in ("_data", "data", "store", "_store", "_values", "values"):
-        inner = getattr(store, attr, None)
-        if isinstance(inner, dict):
-            try:
-                inner[key] = data
-                return True
-            except Exception:
-                pass
-    return False
+def _exp_lock() -> asyncio.Lock:
+    # Lock はイベントループ上で遅延生成する (import時生成によるループ不一致を避ける)
+    global _EXP_LOCK
+    if _EXP_LOCK is None:
+        _EXP_LOCK = asyncio.Lock()
+    return _EXP_LOCK
 
 
 def _store_fetch(store, key: str):
+    """旧ストアに残っているEXPを取り込むための読み取り専用ヘルパ。"""
     getter = getattr(store, "get", None)
     if not callable(getter):
         return None
@@ -186,73 +170,67 @@ def _store_fetch(store, key: str):
         return None
 
 
+def _read_exp_file() -> dict:
+    try:
+        with EXP_FILE.open("r", encoding="utf-8") as f:
+            data = json.load(f)
+        return data if isinstance(data, dict) else {}
+    except FileNotFoundError:
+        return {}
+    except Exception:
+        logger.exception("EXP: %s の読み込みに失敗しました。壊れたファイルを退避して続行します", EXP_FILE)
+        try:
+            os.replace(EXP_FILE, EXP_FILE.with_name(EXP_FILE.name + f".broken-{int(time.time())}"))
+        except OSError:
+            pass
+        return {}
+
+
+def _write_exp_file(payload: str) -> None:
+    EXP_FILE.parent.mkdir(parents=True, exist_ok=True)
+    tmp = EXP_FILE.with_name(EXP_FILE.name + ".tmp")
+    with tmp.open("w", encoding="utf-8") as f:
+        f.write(payload)
+        f.flush()
+        os.fsync(f.fileno())
+    os.replace(tmp, EXP_FILE)
+
+
 def _exp_root() -> dict:
-    """ストア内のEXPデータ(生の dict)を返す。
+    """EXPデータ(生の dict)を返す。初回のみファイルから読み込む。
 
-    未登録ならストアへ登録する。登録できない場合でも、モジュール共有の
-    フォールバック dict を使い続けることで加算が失われないようにする。
+    旧ストア(guild_settings)に 'exp' が残っていれば、最大値でマージして引き継ぐ。
     """
-    global _warned_detached_store
-    store = guild_settings.get_store()
-
-    data = _store_fetch(store, EXP_STORE_KEY)
-    if isinstance(data, dict):
-        return data
-
-    data = {}
-    if _store_attach(store, EXP_STORE_KEY, data):
-        current = _store_fetch(store, EXP_STORE_KEY)
-        if isinstance(current, dict):
-            return current
-        return data
-
-    # 登録できなかった → 共有フォールバックを使う
-    if not _warned_detached_store:
-        _warned_detached_store = True
-        logger.warning(
-            "EXP: ストア(%s)に '%s' を登録できませんでした。共有フォールバックストアを使用します。",
-            type(store).__name__,
-            EXP_STORE_KEY,
-        )
-    return _DETACHED_EXP
+    global _EXP_DATA
+    if _EXP_DATA is None:
+        data = _read_exp_file()
+        try:
+            legacy = _store_fetch(guild_settings.get_store(), EXP_STORE_KEY)
+            if isinstance(legacy, dict) and legacy:
+                _merge_exp(data, legacy)
+        except Exception:
+            logger.exception("EXP: 旧ストアからの引き継ぎに失敗しました (無視して続行)")
+        _EXP_DATA = data
+    return _EXP_DATA
 
 
 async def _exp_load() -> dict:
-    store = guild_settings.get_store()
-    ensure = getattr(store, "ensure_loaded", None)
-    if callable(ensure):
-        try:
-            await ensure()
-        except Exception:
-            logger.exception("EXP: ensure_loaded に失敗しました")
     return _exp_root()
 
 
-async def _exp_save():
-    store = guild_settings.get_store()
-    save = getattr(store, "save", None)
-    if callable(save):
+async def _exp_save() -> bool:
+    data = _exp_root()
+    async with _exp_lock():
         try:
-            await save()
+            # 書き込み順が前後しないよう、ロック内で最新状態をシリアライズする
+            payload = json.dumps(data, ensure_ascii=False)
+            await asyncio.to_thread(_write_exp_file, payload)
+            return True
         except Exception:
-            logger.exception("EXP: ストアの保存に失敗しました")
-            return
-    # フォールバックが使われている場合は、ストア側に登録できるか再試行する
-    if _DETACHED_EXP:
-        data = _store_fetch(store, EXP_STORE_KEY)
-        if isinstance(data, dict):
-            # ストア側の dict にフォールバックの内容をマージ
-            _merge_exp(data, _DETACHED_EXP)
-            await _try_save_again(store)
+            logger.exception("EXP: %s への保存に失敗しました", EXP_FILE)
+            return False
 
 
-async def _try_save_again(store):
-    save = getattr(store, "save", None)
-    if callable(save):
-        try:
-            await save()
-        except Exception:
-            logger.exception("EXP: 再保存に失敗しました")
 
 
 def _merge_exp(dst: dict, src: dict):
@@ -318,11 +296,18 @@ def _grant_vc_exp(user: dict, now: float) -> bool:
     return granted
 
 
-def _iter_voice_members(guild: discord.Guild):
+def _iter_voice_user_ids(guild: discord.Guild):
+    """VCに実際にいる(ボイス状態を持つ)人間のユーザーIDを返す。
+
+    channel.members は member キャッシュ(members intent / チャンク)に依存し、
+    キャッシュが無いと空になるため、ボイス状態 channel.voice_states を直接見る。
+    """
     for channel in (*guild.voice_channels, *guild.stage_channels):
-        for member in channel.members:
-            if not member.bot:
-                yield member
+        for uid in list(channel.voice_states.keys()):
+            member = guild.get_member(uid)
+            if member is not None and member.bot:
+                continue
+            yield uid
 
 
 # ============================================================
@@ -1104,11 +1089,23 @@ class GeneralCog(commands.Cog):
             data = await _exp_load()
             now = time.time()
             touched = False
+            active: set[tuple[str, str]] = set()
             for guild in list(self.bot.guilds):
-                for member in _iter_voice_members(guild):
-                    user = _exp_ensure(data, guild.id, member.id)
+                for uid in _iter_voice_user_ids(guild):
+                    active.add((str(guild.id), str(uid)))
+                    user = _exp_ensure(data, guild.id, uid)
                     _grant_vc_exp(user, now)
                     touched = True
+            # VCにいないのに計測中のままの人(退室イベント取りこぼし等)は計測を止める
+            for gid, users in data.items():
+                if not isinstance(users, dict):
+                    continue
+                for uid, u in users.items():
+                    if (gid, uid) in active or not isinstance(u, dict):
+                        continue
+                    if _as_float(u.get("vc_last_tick")) > 0.0:
+                        u["vc_last_tick"] = 0.0
+                        touched = True
             if touched:
                 await _exp_save()
         except Exception:
@@ -1122,8 +1119,8 @@ class GeneralCog(commands.Cog):
             now = time.time()
             touched = False
             for guild in list(self.bot.guilds):
-                for member in _iter_voice_members(guild):
-                    _exp_ensure(data, guild.id, member.id)["vc_last_tick"] = now
+                for uid in _iter_voice_user_ids(guild):
+                    _exp_ensure(data, guild.id, uid)["vc_last_tick"] = now
                     touched = True
             if touched:
                 await _exp_save()
