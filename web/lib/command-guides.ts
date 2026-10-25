@@ -173,7 +173,7 @@ export const COMMAND_GUIDES: CommandGuide[] = [
         functions: [
           { title: "録音", description: "録音の開始・停止・状態確認・音程解析を行います。" },
           { title: "やまびこ", description: "やまびこの開始・停止と、遅延の変更を行います。" },
-          { title: "文字起こし", description: "ボイスチャンネルの文字起こしを開始・停止します。" },
+          { title: "文字起こし", description: "Logfareで文字起こしを開始・停止します。結果は選んだテキストチャンネルに投稿され、音楽・GVC・読み上げと同時に使えます（同じVC接続が必要）。音声は外部処理されます。" },
           { title: "カラオケ", description: "カラオケを開始・停止し、採点を行います。" },
         ],
       },

@@ -23,7 +23,8 @@ from discord import app_commands
 from discord.ext import commands
 
 from core.legacy import Responder
-from core.voice_session import get_manager, stop_hint
+from core.voice_session import VoiceBusy, feature_label, get_manager, stop_hint
+from core.voice_media import add_audio_source, remove_audio_source
 from core.panel_v2 import as_panel_v2, edit_panel_v2
 
 CONNECTION_ACTIONS = [
@@ -149,12 +150,14 @@ class VoiceHub(commands.Cog):
             channel = guild.get_channel(session.channel_id) if session.channel_id else None
             channel_text = getattr(channel, "mention", None) or getattr(channel, "name", None) or "不明"
             embed = discord.Embed(title="🔊 ボイスチャンネルの使用状況", color=0x2ECC71)
-            embed.add_field(name="機能", value=session.label, inline=True)
+            active = [session.feature, *session.shared_leases.keys()]
+            embed.add_field(name="機能", value="、".join(feature_label(feature) for feature in active), inline=True)
             embed.add_field(name="開始した人", value=session.user_name, inline=True)
             embed.add_field(name="チャンネル", value=channel_text, inline=True)
             embed.add_field(name="経過時間", value=format_elapsed(time.time() - session.started_at), inline=True)
-            embed.add_field(name="終了するには", value=f"`{stop_hint(session.feature)}`", inline=False)
-            embed.set_footer(text="別の機能を始められるのは、開始した人・管理者か、開始した人が VC にいないときです。")
+            hints = "\n".join(f"{feature_label(feature)}: `{stop_hint(feature)}`" for feature in active)
+            embed.add_field(name="機能を個別に停止", value=hints, inline=False)
+            embed.set_footer(text="音楽・GVC・読み上げ・文字起こしは同じVC接続を共有します。")
             return embed
 
         embed = discord.Embed(title="🔇 ボイスチャンネルの使用状況", color=0x95A5A6)
@@ -377,7 +380,7 @@ class GlobalRoomModal(discord.ui.Modal, title="グローバルVCに参加"):
 # スラッシュコマンドは増やさず、/vc パネルの「読み上げ」ジャンルから操作する。
 #   開始 / 停止 / 話者・ピッチ・話速の設定（モーダル）/ 1回だけ読む（モーダル）
 #
-# 読み上げ中は音楽を一時停止し、読み上げが全部終わったら同じ位置から再開する。
+# 読み上げと音楽・グローバルVCは共通のPCMミキサーで同時に再生する。
 # API には話者以外のパラメーターが無いので、ピッチと話速は FFmpeg 側で加工する。
 # ====================================================================
 logger = logging.getLogger(__name__)
@@ -476,6 +479,7 @@ class TTSCog(commands.Cog):
 
     def __init__(self, bot: commands.Bot):
         self.bot = bot
+        self.voice_sessions = get_manager(bot)
         self.settings: dict[int, TTSSettings] = {}
         self.read_channels: dict[int, int] = {}            # guild_id -> 読み上げ対象のテキストチャンネル
         self.queues: dict[int, asyncio.Queue] = {}
@@ -634,40 +638,6 @@ class TTSCog(commands.Cog):
         except OSError:
             pass
 
-    # ------------------------------------------------------------ 音楽との切り替え
-    async def _pause_music(self, guild: discord.Guild) -> bool:
-        """音楽が流れていたら、VoiceCog の一時停止と同じ手順で止める。止めたら True。"""
-        music = self.bot.get_cog("VoiceCog")
-        vc = guild.voice_client
-        if music is None or vc is None or not vc.is_playing():
-            return False
-        state = music.get_state(guild.id)
-        if state.get("is_paused") or not state.get("current_track"):
-            return False
-        state["elapsed_offset"] += (time.time() - state["start_time"]) * state.get("speed", 1.0)
-        state["is_paused"] = True
-        vc.stop()
-        for _ in range(40):
-            if not vc.is_playing():
-                break
-            await asyncio.sleep(0.05)
-        return True
-
-    async def _resume_music(self, guild: discord.Guild):
-        """読み上げ中にスキップ・停止されていなければ、止めた位置から再開する。"""
-        music = self.bot.get_cog("VoiceCog")
-        vc = guild.voice_client
-        if music is None or vc is None or not vc.is_connected():
-            return
-        state = music.get_state(guild.id)
-        if state.get("is_paused") and state.get("current_track"):
-            for _ in range(40):
-                if not vc.is_playing():
-                    break
-                await asyncio.sleep(0.05)
-            state["is_paused"] = False
-            await music.check_queue(guild.id)
-
     # ------------------------------------------------------------ 再生
     async def _play_file(self, vc: discord.VoiceClient, path: str, cfg: TTSSettings):
         options = "-vn -ar 48000 -ac 2"
@@ -682,13 +652,13 @@ class TTSCog(commands.Cog):
         def after(error):
             loop.call_soon_threadsafe(lambda: done.done() or done.set_result(error))
 
-        vc.play(source, after=after)
+        add_audio_source(vc, "tts", source, after=after)
         try:
             error = await asyncio.wait_for(done, timeout=120)
             if error:
                 logger.warning("TTS再生エラー: %s", error)
         except (asyncio.CancelledError, asyncio.TimeoutError):
-            vc.stop()
+            remove_audio_source(vc, "tts")
             raise
 
     async def enqueue(self, guild: discord.Guild, text: str, user_id: int) -> bool:
@@ -703,9 +673,8 @@ class TTSCog(commands.Cog):
         return True
 
     async def _worker(self, guild: discord.Guild):
-        """キューを順に読み上げる。音楽は最初の1件の直前に止め、キューが空になったら再開する。"""
+        """キューを順に読み上げ、音楽/GVCとは共有ミキサー上で重ねて再生する。"""
         queue = self.queues[guild.id]
-        music_paused = False
         try:
             while not queue.empty():
                 text, cfg = queue.get_nowait()
@@ -720,8 +689,6 @@ class TTSCog(commands.Cog):
                     logger.warning("TTS合成に失敗: %s", exc)
                     continue
                 try:
-                    if not music_paused:
-                        music_paused = await self._pause_music(guild)
                     for path in paths:
                         await self._play_file(vc, path, cfg)
                 except asyncio.CancelledError:
@@ -732,8 +699,8 @@ class TTSCog(commands.Cog):
                     for path in paths:
                         self._remove(path)
         finally:
-            if music_paused:
-                await self._resume_music(guild)
+            if self.read_channels.get(guild.id) is None:
+                await self.voice_sessions.release(guild.id, "tts", reason="stop")
 
     # ------------------------------------------------------------ 読み上げ対象の発言
     @commands.Cog.listener()
@@ -759,11 +726,44 @@ class TTSCog(commands.Cog):
 
     # ------------------------------------------------------------ 実装（/voice パネルからも呼ぶ）
     async def _ensure_connection(self, r: Responder) -> str | None:
-        """Bot が VC にいなければ、実行した人の VC に入る。だめなら理由を返す。"""
-        music = self.bot.get_cog("VoiceCog")
-        if music is None:
-            return "⚠️ 音楽機能（VoiceCog）が読み込まれていないため、VC に参加できません。"
-        return await music._ensure_music_connection(r)
+        """TTSの独立したリースを取得。既存の共有機能には同じVCで合流する。"""
+        guild = r.guild
+        if guild is None:
+            return "サーバーの中で実行してください。"
+        vc = getattr(guild, "voice_client", None)
+        channel = getattr(vc, "channel", None) if vc is not None and vc.is_connected() else None
+        if channel is None:
+            voice = getattr(r.user, "voice", None)
+            channel = getattr(voice, "channel", None)
+        if channel is None:
+            return "先にボイスチャンネルに参加してください。"
+        try:
+            await self.voice_sessions.acquire(
+                guild, channel, "tts", r.user, cleanup=self._cleanup_tts(guild.id),
+                text_channel=r.channel, force=False,
+            )
+        except VoiceBusy as busy:
+            return str(busy)
+        except Exception as exc:
+            logger.exception("TTS voice-session acquisition failed")
+            return f"ボイスチャンネルへ接続できませんでした: {exc}"
+        return None
+
+    def _cleanup_tts(self, guild_id: int):
+        def cleanup(reason: str) -> None:
+            self.read_channels.pop(guild_id, None)
+            queue = self.queues.get(guild_id)
+            if queue is not None:
+                while not queue.empty():
+                    queue.get_nowait()
+            guild = self.bot.get_guild(guild_id)
+            vc = getattr(guild, "voice_client", None) if guild else None
+            if vc is not None:
+                remove_audio_source(vc, "tts")
+            worker = self.workers.get(guild_id)
+            if worker is not None and worker is not asyncio.current_task() and not worker.done():
+                worker.cancel()
+        return cleanup
 
     async def _start_impl(self, r: Responder, channel: discord.abc.Messageable | None = None):
         await r.defer()
@@ -775,7 +775,7 @@ class TTSCog(commands.Cog):
         await r.send(
             f"🗣️ <#{target.id}> の発言を読み上げます（VC にいる人だけ）。\n"
             f"話者: **{await self._speaker_name(cfg.speaker)}** / ピッチ {cfg.pitch:+g} / 話速 {cfg.speed:g}倍\n"
-            f"設定と停止は `/vc` →「読み上げ」から。読み上げ中は音楽を一時停止します。\n"
+            f"設定と停止は `/vc` →「読み上げ」から。このチャンネルを読み上げ対象にし、音楽・GVC・文字起こしと同時利用できます（同じVC接続）。\n"
             "-# 音声: VOICEVOX（tts.quest）。クレジット表記など各キャラクターの利用規約に従ってください。"
         )
 
@@ -788,8 +788,13 @@ class TTSCog(commands.Cog):
                 queue.get_nowait()
         worker = self.workers.get(guild_id)
         if worker is not None and not worker.done():
-            worker.cancel()   # 再生中の読み上げを止め、止めていた音楽を再開する
+            worker.cancel()
             was_active = True
+        guild = r.guild
+        vc = getattr(guild, "voice_client", None) if guild else None
+        if vc is not None:
+            remove_audio_source(vc, "tts")
+        await self.voice_sessions.release(guild_id, "tts", reason="stop")
         if was_active:
             await r.send("🔇 読み上げを停止しました。VC には残っています（退出は `/vc` →「VC接続」の退出）。")
         else:

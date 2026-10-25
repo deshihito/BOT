@@ -4,11 +4,13 @@ Bot はサーバーごとに 1 つしか VC に入れない。以前は録音・
 ボイスチェンジャー・!saito・!gvc join がそれぞれ「接続中なら強制切断して入り直す」実装だったため、
 別の機能を使っている人を黙って追い出していた（バグ10）。
 
-ここではサーバーごとに「いま VC を使っている機能（持ち主）」を 1 つだけ記録する。
+音楽・GVC・読み上げ・文字起こしは、1つの VoiceClient を共有する複数リースとして記録する。
+PCM再生と受信Sinkは ``core.voice_media`` が合成・多重化し、各機能の停止は自分のリースだけを解放する。
+それ以外の機能は従来どおり排他的に接続を所有する。
 
-- ``acquire()``: 別の機能が使用中なら追い出さずに ``VoiceBusy`` を投げる。
-  ``force=True`` のときだけ、開始した本人・管理者（または開始した人がもう VC にいない場合）が切り替えられる。
-- ``release()``: 持ち主の後片付け（cleanup）を呼んでから切断する。
+- ``acquire()``: 同じVCチャンネルの共有対象機能は同じ接続に追加する。非対応機能は ``VoiceBusy``。
+  ``force=True`` のときだけ、開始した本人・管理者（または全開始者が VC にいない場合）が排他機能へ切り替えられる。
+- ``release()``: 指定機能のcleanupだけ実行し、最後のリースが解放されたときに接続を切断する。
 - ``on_voice_state_update``（Bot に 1 つだけ登録）:
   - VC に人がいない状態が ``AUTO_LEAVE_SECONDS`` 続いたら、どの機能でも終了して退出する。
   - Bot が外部から切断された（キック・チャンネル削除など）ときも後片付けを呼ぶ。
@@ -35,15 +37,18 @@ RECONNECT_DELAY_SECONDS = 1.0  # 切断してから入り直すまでの待ち�
 
 # 機能名 → (表示名, voiceパネルの終了案内)。
 FEATURES: dict[str, tuple[str, str]] = {
-    "music": ("音楽再生", "/voice のパネルからVC退出"),
+    "music": ("音楽再生", "/music の操作パネルから停止"),
     "record": ("録音", "/voice のパネルから録音停止"),
     "echo": ("やまびこ", "/voice のパネルからやまびこ停止"),
     "transcribe": ("文字起こし", "/voice のパネルから文字起こし停止"),
+    "tts": ("読み上げ", "/vc のパネルから読み上げ停止"),
     "karaoke": ("カラオケ", "/voice のパネルからカラオケ停止"),
     "changer": ("ボイスチェンジャー", "/voice のパネルからボイスチェンジャー停止"),
     "match": ("ランダム通話", "/voice のパネルからランダム通話退出"),
     "global": ("グローバルVC", "/voice のパネルからグローバルVC退出"),
 }
+# These features share a single voice client and the PCM/sink multiplexers in voice_media.
+SHARED_FEATURES = frozenset({"music", "global", "transcribe", "tts"})
 
 # release() の理由ごとに、使っていたチャンネルへ送るお知らせ。None は送らない（コマンド側で返信する）。
 DEFAULT_NOTICES: dict[str, Optional[str]] = {
@@ -84,6 +89,16 @@ def _has_humans(channel) -> bool:
 
 
 @dataclasses.dataclass(eq=False)
+class VoiceLease:
+    feature: str
+    user_id: int
+    user_name: str
+    started_at: float
+    cleanup: Optional[Cleanup] = None
+    text_channel: Any = None
+
+
+@dataclasses.dataclass(eq=False)
 class VoiceSession:
     guild: Any
     feature: str
@@ -95,6 +110,7 @@ class VoiceSession:
     text_channel: Any = None
     vc: Any = None
     idle_task: Optional[asyncio.Task] = None
+    shared_leases: dict[str, VoiceLease] = dataclasses.field(default_factory=dict)
 
     @property
     def guild_id(self) -> int:
@@ -165,17 +181,21 @@ class VoiceSessionManager:
         """
         if member is None:
             return False
-        if getattr(member, "id", None) == session.user_id or _is_admin(member):
+        active_ids = {session.user_id, *(lease.user_id for lease in session.shared_leases.values())}
+        if getattr(member, "id", None) in active_ids or _is_admin(member):
             return True
-        return not self._starter_present(session)
+        channel = self._current_channel(session)
+        members = getattr(channel, "members", None) or []
+        return not any(getattr(m, "id", None) in active_ids for m in members)
 
     def can_leave(self, session: VoiceSession, member) -> bool:
         """`/voice` の退出操作で止めてよいか。音楽は今までどおり誰でも止められる。"""
         return session.feature == "music" or self.can_override(session, member)
 
     def busy_message(self, session: VoiceSession) -> str:
+        labels = [session.label, *(feature_label(name) for name in session.shared_leases)]
         return (
-            f"⚠️ いまこのサーバーのボイスチャンネルは **{session.label}**（{session.user_name} さんが開始）で使用中です。\n"
+            f"⚠️ いまこのサーバーのボイスチャンネルは **{'、'.join(labels)}**（{session.user_name} さんが開始）で使用中です。\n"
             f"先に `{stop_hint(session.feature)}` で終了するか、`/voice` のパネルから退出させてから実行してください。\n"
             "（開始した人・管理者が実行した場合や、開始した人が VC にいない場合はそのまま切り替わります）"
         )
@@ -198,6 +218,8 @@ class VoiceSessionManager:
 
             if existing is not None and existing.feature == feature:
                 if connected:
+                    if getattr(vc, "channel", None) != channel and existing.shared_leases:
+                        raise VoiceBusy(existing, self.busy_message(existing))
                     if getattr(vc, "channel", None) != channel:
                         await vc.move_to(channel)
                     existing.channel_id = getattr(channel, "id", None)
@@ -210,6 +232,26 @@ class VoiceSessionManager:
                 # 記録だけ残って接続が切れていた -> 片付けてから入り直す
                 await self._release_locked(existing, reason="disconnected", disconnect=False)
                 existing = None
+
+            if existing is not None and feature in SHARED_FEATURES and existing.feature in SHARED_FEATURES:
+                if connected and getattr(vc, "channel", None) == channel:
+                    lease = existing.shared_leases.get(feature)
+                    if lease is None:
+                        existing.shared_leases[feature] = VoiceLease(
+                            feature=feature, user_id=getattr(user, "id", 0), user_name=_display_name(user),
+                            started_at=time.time(), cleanup=cleanup, text_channel=text_channel,
+                        )
+                    else:
+                        if cleanup is not None:
+                            lease.cleanup = cleanup
+                        if text_channel is not None:
+                            lease.text_channel = text_channel
+                    self._evaluate_idle(existing)
+                    return vc
+                raise VoiceBusy(
+                    existing,
+                    self.busy_message(existing) + "\n共有対象の機能は同じボイスチャンネルでのみ併用できます。先に稼働中の機能を停止してください。",
+                )
 
             disconnected = False
             if existing is not None:
@@ -251,10 +293,36 @@ class VoiceSessionManager:
         guild_id = guild if isinstance(guild, int) else guild.id
         async with self._lock(guild_id):
             session = self._sessions.get(guild_id)
-            if session is None or (feature is not None and session.feature != feature):
+            if session is None:
                 return False
+            if feature is not None and feature != session.feature:
+                lease = session.shared_leases.pop(feature, None)
+                if lease is None:
+                    return False
+                await self._run_cleanup(session, feature, lease.cleanup, reason)
+                return True
+            if feature is not None and session.shared_leases:
+                await self._run_cleanup(session, session.feature, session.cleanup, reason)
+                promoted_feature, promoted = session.shared_leases.popitem()
+                session.feature = promoted_feature
+                session.user_id = promoted.user_id
+                session.user_name = promoted.user_name
+                session.started_at = promoted.started_at
+                session.cleanup = promoted.cleanup
+                session.text_channel = promoted.text_channel
+                return True
             await self._release_locked(session, reason=reason, by=by, notice=notice, disconnect=disconnect)
             return True
+
+    async def _run_cleanup(self, session: VoiceSession, feature: str, cleanup, reason: str) -> None:
+        if cleanup is None:
+            return
+        try:
+            result = cleanup(reason)
+            if inspect.isawaitable(result):
+                await result
+        except Exception:
+            logger.exception("guild %s: %s の後片付けに失敗しました", session.guild_id, feature)
 
     async def _release_locked(self, session: VoiceSession, *, reason: str, by=None, by_feature: Optional[str] = None,
                               notice: Optional[str] = None, disconnect: bool = True) -> None:
@@ -264,13 +332,10 @@ class VoiceSessionManager:
         if task is not None and task is not asyncio.current_task() and not task.done():
             task.cancel()
 
-        if session.cleanup is not None:
-            try:
-                result = session.cleanup(reason)
-                if inspect.isawaitable(result):
-                    await result
-            except Exception:
-                logger.exception("guild %s: %s の後片付けに失敗しました", session.guild_id, session.feature)
+        await self._run_cleanup(session, session.feature, session.cleanup, reason)
+        for feature, lease in list(session.shared_leases.items()):
+            await self._run_cleanup(session, feature, lease.cleanup, reason)
+        session.shared_leases.clear()
 
         if disconnect:
             vc = getattr(session.guild, "voice_client", None) or session.vc

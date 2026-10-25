@@ -2,13 +2,11 @@ from __future__ import annotations
 
 import asyncio
 import io
-import json
 import logging
-import os
 import sys
 import threading
 import time
-import collections
+import wave
 import numpy as np
 
 import aiohttp
@@ -18,15 +16,9 @@ from discord.ext import commands
 from discord.ext import voice_recv
 
 from core.legacy import Responder
-from core.vosk_model import ensure_model
+from core import logfare
 from core.voice_session import VoiceBusy, get_manager
-
-# 超軽量音声認識 Vosk
-try:
-    from vosk import Model, KaldiRecognizer
-except ImportError:
-    Model = None
-    KaldiRecognizer = None
+from core.voice_media import add_receive_sink, remove_receive_sink
 
 logger = logging.getLogger(__name__)
 
@@ -34,16 +26,15 @@ logger = logging.getLogger(__name__)
 # 定数設定
 # ============================================================
 DISCORD_SAMPLE_RATE = 48000  # Discord 音声 (48kHz)
-VOSK_SAMPLE_RATE = 16000     # Vosk 入力用 (16kHz)
+TRANSCRIPTION_SAMPLE_RATE = 16000  # Logfareへ送る音声 (16kHz)
 CHANNELS = 2
 SAMPLE_WIDTH = 2
 FRAME_SIZE = CHANNELS * SAMPLE_WIDTH
 
-# Vosk 日本語モデルのフォルダパス
-MODEL_PATH = "model"  # 例: vosk-model-small-japanese-0.22 フォルダを model にリネーム
-
 # 無音判定の閾値（秒）
 SILENCE_THRESHOLD_SEC = 0.8
+MIN_UTTERANCE_SECONDS = 0.4
+MAX_UTTERANCE_SECONDS = 20
 # 音量判定の閾値（RMS値）
 RMS_SILENCE_THRESHOLD = 400
 
@@ -204,11 +195,14 @@ class UserAudioBuffer:
             self.buffer.extend(pcm_data)
 
     def should_transcribe(self) -> bool:
-        if self.is_speaking and (time.time() - self.last_speech_time > SILENCE_THRESHOLD_SEC):
+        if self.is_speaking and (
+            time.time() - self.last_speech_time > SILENCE_THRESHOLD_SEC
+            or len(self.buffer) >= DISCORD_SAMPLE_RATE * FRAME_SIZE * MAX_UTTERANCE_SECONDS
+        ):
             return len(self.buffer) > 0
         return False
 
-    def pop_audio_for_vosk(self) -> bytes | None:
+    def pop_audio_for_transcription(self) -> bytes | None:
         if len(self.buffer) == 0:
             return None
 
@@ -220,20 +214,18 @@ class UserAudioBuffer:
 
 
 # ============================================================
-# Vosk 文字起こし AudioSink
+# Logfare 文字起こし AudioSink
 # ============================================================
 class TranscriptionSink(voice_recv.AudioSink):
     def __init__(
         self,
         bot: commands.Bot,
         vc: voice_recv.VoiceRecvClient,
-        vosk_model: Model,
         callback_coro
     ):
         super().__init__()
         self.bot = bot
         self.vc = vc
-        self.vosk_model = vosk_model
         self.callback_coro = callback_coro
 
         self.user_buffers: dict[int, UserAudioBuffer] = {}
@@ -300,29 +292,36 @@ class TranscriptionSink(voice_recv.AudioSink):
             with self._lock:
                 for user_id, ubuf in list(self.user_buffers.items()):
                     if ubuf.should_transcribe():
-                        pcm_16k = ubuf.pop_audio_for_vosk()
-                        if pcm_16k and len(pcm_16k) > VOSK_SAMPLE_RATE * 2 * 0.4:
+                        pcm_16k = ubuf.pop_audio_for_transcription()
+                        if pcm_16k and len(pcm_16k) >= TRANSCRIPTION_SAMPLE_RATE * 2 * MIN_UTTERANCE_SECONDS:
                             threading.Thread(
-                                target=self._run_vosk,
+                                target=self._run_transcription,
                                 args=(ubuf.display_name, ubuf.avatar_url, pcm_16k),
                                 daemon=True
                             ).start()
 
-    def _run_vosk(self, display_name: str, avatar_url: str | None, pcm_16k: bytes):
+    def _run_transcription(self, display_name: str, avatar_url: str | None, pcm_16k: bytes):
         try:
-            # 各認識タスクごとに Recognizer を用意
-            rec = KaldiRecognizer(self.vosk_model, VOSK_SAMPLE_RATE)
-            rec.AcceptWaveform(pcm_16k)
-            result_json = json.loads(rec.FinalResult())
-            text = result_json.get("text", "").replace(" ", "").strip()
-
-            if text:
-                asyncio.run_coroutine_threadsafe(
-                    self.callback_coro(display_name, avatar_url, text),
-                    self.bot.loop
-                )
+            audio_file = io.BytesIO()
+            with wave.open(audio_file, "wb") as wav:
+                wav.setnchannels(1)
+                wav.setsampwidth(SAMPLE_WIDTH)
+                wav.setframerate(TRANSCRIPTION_SAMPLE_RATE)
+                wav.writeframes(pcm_16k)
+            future = asyncio.run_coroutine_threadsafe(
+                self.callback_coro(display_name, avatar_url, audio_file.getvalue()),
+                self.bot.loop,
+            )
+            future.add_done_callback(self._log_transcription_error)
         except Exception as e:
-            logger.error(f"[Vosk Error] {e}")
+            logger.error("[Logfare transcription error] %s", e)
+
+    @staticmethod
+    def _log_transcription_error(future):
+        try:
+            future.result()
+        except Exception:
+            logger.exception("Logfare 文字起こし処理に失敗しました")
 
     def cleanup(self):
         self._running = False
@@ -336,16 +335,7 @@ class TranscriptionCog(commands.Cog):
         self.bot = bot
         self.sessions: dict[int, dict] = {}
         self.voice_sessions = get_manager(bot)
-
-        self.vosk_model = None
-        if Model is None:
-            logger.warning("Voskが未インストールのため、文字起こし機能を無効化します。")
-        elif not os.path.exists(MODEL_PATH):
-            logger.warning("Voskモデルが見つからないため、文字起こし機能を無効化します: %s", MODEL_PATH)
-        else:
-            logger.info("Vosk 日本語モデルをロード中...")
-            self.vosk_model = Model(MODEL_PATH)
-            logger.info("Vosk モデルのロードが完了しました。")
+        self._start_lock = asyncio.Lock()
 
     async def _get_or_create_webhook(self, channel: discord.TextChannel) -> discord.Webhook:
         webhooks = await channel.webhooks()
@@ -371,7 +361,7 @@ class TranscriptionCog(commands.Cog):
         session = self.sessions.get(r.guild.id)
         if session:
             await r.send(embed=we(
-                f"🎙️ **Vosk 文字起こし実行中**\n"
+                f"🎙️ **Logfare {logfare.TRANSCRIPTION_MODEL} 文字起こし実行中**\n"
                 f"ボイスチャンネル: **{session['vc_channel_name']}**\n"
                 f"送信先チャンネル: {session['target_channel_mention']}\n"
                 f"停止コマンド: `/voice のパネルから文字起こし停止`"
@@ -380,10 +370,14 @@ class TranscriptionCog(commands.Cog):
             await r.send(embed=we("<:Pause:1561700510447312916> 文字起こし停止中 (`/voice のパネルから文字起こし開始` で開始)"))
 
     async def _start(self, r: Responder, target_channel: discord.TextChannel | None):
-        # モデルが無いときは VC に入る前に断る。
-        problem = await ensure_model(self, Model, MODEL_PATH)
-        if problem:
-            return await r.send(embed=we(problem), ephemeral=True)
+        async with self._start_lock:
+            return await self._start_once(r, target_channel)
+
+    async def _start_once(self, r: Responder, target_channel: discord.TextChannel | None):
+        if not logfare.api_key():
+            return await r.send(embed=we(
+                "<:failed:1490986584676368535> `LOGFARE_API_KEY` が設定されていないため、文字起こしを開始できません。"
+            ), ephemeral=True)
         voice = getattr(r.user, "voice", None)
         if not voice or not voice.channel:
             return await r.send(embed=we("⚠️ 先にボイスチャンネルに参加してから実行してください。"), ephemeral=True)
@@ -396,25 +390,49 @@ class TranscriptionCog(commands.Cog):
         await r.defer()
         send_channel: discord.TextChannel = target_channel or r.channel
 
-        try:
-            webhook = await self._get_or_create_webhook(send_channel)
-        except discord.Forbidden:
-            return await r.send(embed=we(f"<:failed:1490986584676368535> Botに {send_channel.mention} の `ウェブフックの管理 (Manage Webhooks)` 権限がありません。"))
-        except Exception as e:
-            return await r.send(embed=we(f"<:failed:1490986584676368535> Webhookの取得に失敗しました: `{e}`"))
-
-        # 別の機能が VC を使っているときは追い出さずに断る。
+        # 共有対象の機能には同じ接続で合流する。競合時は先に拒否してから
+        # webhook を作ることで、不要なAPI/Discord操作を避ける。
         try:
             vc = await self.voice_sessions.acquire(
                 r.guild, vc_channel, "transcribe", r.user,
-                cleanup=self._cleanup(guild_id), text_channel=r.channel, force=True, timeout=30.0,
+                cleanup=self._cleanup(guild_id), text_channel=r.channel, force=False, timeout=30.0,
             )
         except VoiceBusy as busy:
-            return await r.send(embed=we(str(busy)))
+            return await r.send(embed=we(
+                f"⚠️ いまVCは **{busy.session.label}** が使用中です。先にその機能を停止してから文字起こしを開始してください。\n"
+                "文字起こしは、実行中のVC機能を自動停止・切り替えしません。"
+            ))
         except Exception as e:
             return await r.send(embed=we(f"<:failed:1490986584676368535> ボイス接続に失敗しました: `{e}`"))
 
-        async def send_webhook(display_name: str, avatar_url: str | None, text: str):
+        try:
+            webhook = await self._get_or_create_webhook(send_channel)
+        except discord.Forbidden:
+            await self.voice_sessions.release(r.guild.id, "transcribe", reason="webhook-error")
+            return await r.send(embed=we(f"<:failed:1490986584676368535> Botに {send_channel.mention} の `ウェブフックの管理 (Manage Webhooks)` 権限がありません。"))
+        except Exception as e:
+            await self.voice_sessions.release(r.guild.id, "transcribe", reason="webhook-error")
+            return await r.send(embed=we(f"<:failed:1490986584676368535> Webhookの取得に失敗しました: `{e}`"))
+
+        premium_notice_sent = False
+
+        async def send_webhook(display_name: str, avatar_url: str | None, audio_wav: bytes):
+            nonlocal premium_notice_sent
+            try:
+                text = await logfare.transcribe_audio(audio_wav)
+            except logfare.LogfareHTTPError as ex:
+                logger.warning("Logfare transcription API returned HTTP %s", ex.status)
+                if ex.status == 403 and not premium_notice_sent:
+                    premium_notice_sent = True
+                    await r.channel.send(
+                        "Logfareの文字起こしモデルが利用できません。モデルのトレーニング利用へのオプトインと、APIキーの利用権限を確認してください。"
+                    )
+                return
+            except Exception:
+                logger.exception("Logfare transcription request failed")
+                return
+            if not text:
+                return
             async with aiohttp.ClientSession() as session:
                 wh_obj = discord.Webhook.from_url(webhook.url, session=session)
                 try:
@@ -424,15 +442,14 @@ class TranscriptionCog(commands.Cog):
                         avatar_url=avatar_url
                     )
                 except Exception as ex:
-                    logger.error(f"[Webhook Send Error] {ex}")
+                    logger.error("[Webhook Send Error] %s", ex)
 
         sink = TranscriptionSink(
             bot=self.bot,
             vc=vc,
-            vosk_model=self.vosk_model,
             callback_coro=send_webhook
         )
-        vc.listen(sink)
+        add_receive_sink(vc, "transcribe", sink)
 
         self.sessions[guild_id] = {
             "sink": sink,
@@ -442,8 +459,9 @@ class TranscriptionCog(commands.Cog):
         }
 
         await r.send(embed=we(
-            f"🎙️ **{vc_channel.name}** で Vosk 軽量文字起こしを開始しました！\n"
-            f"🤖 結果を {send_channel.mention} へ送信します。"
+            f"🎙️ **{vc_channel.name}** で Logfare {logfare.TRANSCRIPTION_MODEL} による文字起こしを開始しました。\n"
+            f"音声は無音区間ごとにLogfareへ送信され、結果を {send_channel.mention} へ投稿します。\n"
+            "音楽・GVC・読み上げと同時に利用できます。利用者の音声は外部サービスで処理されます。"
         ))
 
     def _cleanup(self, guild_id: int):
@@ -452,11 +470,7 @@ class TranscriptionCog(commands.Cog):
             session = self.sessions.pop(guild_id, None)
             if not session:
                 return
-            session["sink"].cleanup()
-            try:
-                session["vc"].stop_listening()
-            except Exception:
-                pass
+            remove_receive_sink(session["vc"], "transcribe")
         return cleanup
 
 

@@ -25,7 +25,8 @@ import numpy as np
 import re
 import wave
 import discord.opus
-from core.voice_session import VoiceBusy, get_manager
+from core.voice_session import SHARED_FEATURES, VoiceBusy, get_manager
+from core.voice_media import add_audio_source, has_audio_source, remove_audio_source
 from core.legacy import Responder
 
 logger = logging.getLogger(__name__)
@@ -957,7 +958,7 @@ class SearchModal(discord.ui.Modal, title="YouTube 楽曲検索"):
 
             # バグ修正: interaction.guild から voice_client を取得するように修正
             vc = interaction.guild.voice_client if interaction.guild else None
-            if vc and not vc.is_playing() and not state['is_processing_queue'] and not state['is_paused']:
+            if vc and not has_audio_source(vc, "music") and not state['is_processing_queue'] and not state['is_paused']:
                 await self.cog.check_queue(self.guild_id)
             else:
                 await self.cog.update_panel(self.guild_id)
@@ -1111,11 +1112,11 @@ class VoiceControlView(discord.ui.View):
     async def pause_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         vc = interaction.guild.voice_client
         state = self.cog.get_state(self.guild_id)
-        if vc and vc.is_playing():
+        if vc and has_audio_source(vc, "music"):
             actual_played = (time.time() - state['start_time']) * state.get('speed', 1.0)
             state['elapsed_offset'] += actual_played
             state['is_paused'] = True
-            vc.stop()
+            remove_audio_source(vc, "music", notify=True)
             await interaction.response.send_message(embed=we(f"<:Pause:1561700510447312916> 再生を一時停止しました。(`{int(state['elapsed_offset'])}秒` 時点)"), ephemeral=True)
             await self.cog.update_panel(self.guild_id)
         else:
@@ -1136,11 +1137,11 @@ class VoiceControlView(discord.ui.View):
     async def skip_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         vc = interaction.guild.voice_client
         state = self.cog.get_state(self.guild_id)
-        if vc and (vc.is_playing() or state['is_paused']):
+        if vc and (has_audio_source(vc, "music") or state['is_paused']):
             state['current_track'] = None
             state['elapsed_offset'] = 0
             state['is_paused'] = False
-            vc.stop()
+            remove_audio_source(vc, "music", notify=True)
             await interaction.response.send_message(embed=we("⏭️ トラックをスキップしました。"), ephemeral=True)
         else:
             await interaction.response.send_message(embed=we("<:failed:1490986584676368535> 現在再生中の楽曲がありません。"), ephemeral=True)
@@ -1189,7 +1190,7 @@ class VoiceControlView(discord.ui.View):
             state['is_paused'] = False
             while not state['queue'].empty():
                 state['queue'].get_nowait()
-            vc.stop()
+            remove_audio_source(vc, "music", notify=True)
             await interaction.response.send_message(embed=we("⏹️ 再生を完全に停止し、キューをクリアしました。"), ephemeral=True)
             await self.cog.update_panel(self.guild_id)
         else:
@@ -1487,7 +1488,7 @@ class VoiceCog(commands.Cog):
     def _busy_message(self, guild) -> str | None:
         """音楽以外の機能が VC を使っているときの案内文。音楽が使える状態なら None。"""
         session = self.voice_sessions.get(guild.id) if guild else None
-        if session is not None and session.feature != 'music':
+        if session is not None and session.feature not in SHARED_FEATURES:
             return self.voice_sessions.busy_message(session)
         return None
 
@@ -1512,7 +1513,7 @@ class VoiceCog(commands.Cog):
                 guild = self.bot.get_guild(guild_id)
                 vc = guild.voice_client if guild else None
                 state = self.get_state(guild_id)
-                if not vc or not vc.is_connected() or not vc.is_playing() or not state.get('current_track'):
+                if not vc or not vc.is_connected() or not has_audio_source(vc, "music") or not state.get('current_track'):
                     return
                 await self.update_panel(guild_id)
         except asyncio.CancelledError:
@@ -1561,7 +1562,7 @@ class VoiceCog(commands.Cog):
 
                 if await self.enqueue_track(guild_id, track):
                     added += 1
-                    if not vc.is_playing() and not state['is_processing_queue'] and not state['is_paused']:
+                    if not has_audio_source(vc, "music") and not state['is_processing_queue'] and not state['is_paused']:
                         await self.check_queue(guild_id)
                 else:
                     skipped += 1
@@ -1807,17 +1808,17 @@ class VoiceCog(commands.Cog):
         vc = guild.voice_client
         state = self.get_state(guild.id)
 
-        if vc and (vc.is_playing() or vc.is_paused()) and state['current_track']:
+        if vc and has_audio_source(vc, "music") and state['current_track']:
             playback_speed = elapsed_speed if elapsed_speed is not None else state.get('speed', 1.0)
             actual_played = (time.time() - state['start_time']) * playback_speed
             state['elapsed_offset'] += actual_played
             state['is_changing_setting'] = True
-            vc.stop()
+            remove_audio_source(vc, "music", notify=True)
 
             # afterコールバックが状態を解放する前に再生を開始すると、
             # VoiceClient.play() が "Already playing audio" を送出する。
             for _ in range(40):
-                if not vc.is_playing() and not vc.is_paused():
+                if not has_audio_source(vc, "music"):
                     break
                 await asyncio.sleep(0.05)
             else:
@@ -2091,7 +2092,7 @@ class VoiceCog(commands.Cog):
                 )
 
             vc = Responder(self.ctx).voice_client
-            if vc and not vc.is_playing() and not state['is_processing_queue'] and not state['is_paused']:
+            if vc and not has_audio_source(vc, "music") and not state['is_processing_queue'] and not state['is_paused']:
                 await self.cog.check_queue(self.guild_id)
                 await interaction.response.send_message(embed=we(f"<:music:1561710964238450809> **{selected_track['title']}** を再生します！"))
             else:
@@ -2172,12 +2173,12 @@ class VoiceCog(commands.Cog):
             state['is_processing_queue'] = False
             return
 
-        # 録音など別の機能が VC を使っているときは、その音声を上書きしない。
+        # 録音など共有対象外の機能が VC を使っているときは、その音声を上書きしない。
         if self._busy_message(guild):
             return
 
         # 同一ギルドで既に再生中・一時停止中なら、別経路からの二重開始を防ぐ。
-        if vc.is_playing() or vc.is_paused():
+        if has_audio_source(vc, "music") or state.get('is_paused'):
             return
 
         # yt-dlp取得などのawaitより前にフラグを確保する。
@@ -2268,25 +2269,28 @@ class VoiceCog(commands.Cog):
             source = PythonSpatialAudioSource(raw_source, state) if eq_mode == 'spatial' else raw_source
             
             # 開始直前にも状態を確認し、外部イベントとの競合を吸収する。
-            if vc.is_playing() or vc.is_paused():
+            if has_audio_source(vc, "music") or state.get('is_paused'):
                 state['is_processing_queue'] = False
                 return
 
             state['start_time'] = time.time()
-            vc.play(source, after=lambda e: self.bot.loop.call_soon_threadsafe(self.play_next, guild_id, e))
+            add_audio_source(
+                vc, "music", source,
+                after=lambda e: self.bot.loop.call_soon_threadsafe(self.play_next, guild_id, e),
+            )
             self._start_progress_task(guild_id)
             await self.update_panel(guild_id)
 
             # FFmpegが少なくとも1フレームのPCMを出力するまで待つ。vc.play()直後の
             # 表示では、URLの403やデコーダー失敗でも「再生中」と誤表示されるため。
             for _ in range(20):
-                if source.has_output and vc.is_playing():
+                if source.has_output and has_audio_source(vc, "music"):
                     break
-                if not vc.is_playing():
+                if not has_audio_source(vc, "music"):
                     break
                 await asyncio.sleep(0.1)
 
-            if source.has_output and vc.is_playing() and state.get('elapsed_offset', 0) < 1:
+            if source.has_output and has_audio_source(vc, "music") and state.get('elapsed_offset', 0) < 1:
                 current_eq_mode = state.get('eq', 'flat')
                 eq_label = "custom" if current_eq_mode == "custom" else current_eq_mode
                 status = f"Speed: {state.get('speed', 1.0)}x / Vol: {state.get('volume', 1.0)} / EQ: {eq_label}"
@@ -2389,7 +2393,7 @@ class VoiceCog(commands.Cog):
     async def _ensure_music_connection(self, r: Responder) -> str | None:
         """音楽を流せる状態にする。だめなときは理由（そのまま返信できる文）を返す。
 
-        - 別の機能（録音など）が VC を使っているときは断る
+        - 共有対象外の機能（録音など）が VC を使っているときは断る
         - Bot が VC にいなければ、実行した人の VC に「音楽」として入る（VoiceSessionManager 経由）
         """
         guild = r.guild
@@ -2399,6 +2403,15 @@ class VoiceCog(commands.Cog):
             return busy
         vc = guild.voice_client
         if vc is not None and vc.is_connected():
+            session = self.voice_sessions.get(guild.id)
+            if session is not None and session.feature != "music" and "music" not in session.shared_leases:
+                try:
+                    await self._acquire_music(guild, vc.channel, r.user, r.channel)
+                except VoiceBusy as busy:
+                    return str(busy)
+                except Exception as exc:
+                    logger.exception("Failed to join shared music session")
+                    return f"共有ボイスセッションに参加できませんでした: {exc}"
             return None
         voice = getattr(r.user, 'voice', None)
         channel = getattr(voice, 'channel', None)
@@ -2537,7 +2550,7 @@ class VoiceCog(commands.Cog):
 
         # 再生状態の安全確認
         vc = interaction.guild.voice_client
-        is_playing = vc.is_playing() if vc else False
+        is_playing = has_audio_source(vc, "music") if vc else False
         is_processing = state.get('is_processing_queue', False)
         is_paused = state.get('is_paused', False)
 
@@ -2563,7 +2576,7 @@ class VoiceCog(commands.Cog):
         state['is_paused'] = False
         while not state['queue'].empty(): 
             state['queue'].get_nowait()
-        vc.stop()
+        remove_audio_source(vc, "music", notify=True)
         await r.send(embed=we("完全に停止し、キューをクリアしました。"))
         await self.update_panel(r.guild.id)
 
@@ -2579,9 +2592,9 @@ class VoiceCog(commands.Cog):
             return await interaction.response.send_message(embed=we(f"移動先は曲の長さ（{int(duration)}秒）未満にしてください。"), ephemeral=True)
         state['elapsed_offset'] = seconds
         state['is_changing_setting'] = True
-        vc.stop()
+        remove_audio_source(vc, "music", notify=True)
         for _ in range(40):
-            if not vc.is_playing() and not vc.is_paused():
+            if not has_audio_source(vc, "music") and not state.get('is_paused'):
                 break
             await asyncio.sleep(0.05)
         state['is_changing_setting'] = False
@@ -2596,11 +2609,11 @@ class VoiceCog(commands.Cog):
             return await interaction.response.send_message(embed=we("ボットがボイスチャンネルに入っていません。"), ephemeral=True)
 
         # 1. 再生中の場合 -> 一時停止処理
-        if vc.is_playing():
+        if has_audio_source(vc, "music"):
             actual_played = (time.time() - state['start_time']) * state.get('speed', 1.0)
             state['elapsed_offset'] += actual_played
             state['is_paused'] = True
-            vc.stop()
+            remove_audio_source(vc, "music", notify=True)
             
             await interaction.response.send_message(
                 embed=we(f"<:Pause:1561700510447312916> 再生を一時停止しました。(`{int(state['elapsed_offset'])}秒` 時点)\nもう一度 `/music` の操作パネルから再開できます。")
@@ -2622,11 +2635,11 @@ class VoiceCog(commands.Cog):
         vc = interaction.guild.voice_client
         state = self.get_state(interaction.guild_id)
 
-        if vc and (vc.is_playing() or state['is_paused']):
+        if vc and (has_audio_source(vc, "music") or state['is_paused']):
             state['current_track'] = None
             state['elapsed_offset'] = 0
             state['is_paused'] = False
-            vc.stop()
+            remove_audio_source(vc, "music", notify=True)
             await interaction.response.send_message(embed=we("スキップしました。"))
         else:
             await interaction.response.send_message(embed=we("現在再生中の楽曲がありません。"))

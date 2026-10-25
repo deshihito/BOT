@@ -18,6 +18,7 @@ from discord.ext import voice_recv
 
 from core.legacy import Responder
 from core.voice_session import VoiceBusy, get_manager
+from core.voice_media import add_audio_source, add_receive_sink, remove_audio_source, remove_receive_sink
 
 try:
     import numpy as np  # type: ignore
@@ -499,17 +500,8 @@ def _ensure_playing(vc) -> bool:
     try:
         if not vc.is_connected():
             return False
-        if vc.source is source:
-            if vc.is_playing():
-                return True
-            if vc.is_paused():
-                vc.resume()
-                return True
-        if vc.is_playing() or vc.is_paused():
-            # グローバルVC中の VC は他の機能が使わない決まりなので、残っている別の再生は止める
-            vc.stop()
+        add_audio_source(vc, "gvc", source)
         source.discard_stale()  # 止まっていた間に溜まった古い音だけ捨てる (直近の音は残す)
-        vc.play(source, after=_log_play_end)
         vc._gvc_play_warned = False
         logger.debug("グローバルVC: 再生を開始しました (guild=%s)", getattr(getattr(vc, "guild", None), "id", None))
         return True
@@ -590,10 +582,10 @@ class GlobalVCCog(commands.Cog):
                     if getattr(getattr(vc, "guild", None), "id", None) != guild_id:
                         continue
                     _remove_vc_from_rooms(vc)
-                    try:
-                        vc.stop_listening()
-                    except Exception:
-                        logger.debug("stop_listening 失敗 (無視)", exc_info=True)
+                    remove_receive_sink(vc, "gvc")
+                    remove_audio_source(vc, "gvc")
+                    if hasattr(vc, "global_source"):
+                        delattr(vc, "global_source")
         return cleanup
 
     async def _connect_room(self, guild: discord.Guild, vc_channel, user, text_channel, room_name: str):
@@ -610,7 +602,7 @@ class GlobalVCCog(commands.Cog):
             if room.max_servers and len(GLOBAL_ROOMS.get(room_name, [])) >= room.max_servers:
                 raise _JoinRefused(f"ルーム **{room_name}** は満員です ({room.max_servers}サーバーまで)。")
 
-            # 別の機能（音楽・録音など）が VC を使っているときは VoiceBusy になる
+            # 音楽・読み上げ・文字起こしとは同じVC接続を共有し、それ以外は VoiceBusy になる
             vc = await self.voice_sessions.acquire(
                 guild, vc_channel, "global", user,
                 cleanup=self._cleanup(guild.id), text_channel=text_channel, force=True, timeout=30.0,
@@ -618,11 +610,12 @@ class GlobalVCCog(commands.Cog):
 
             try:
                 vc.global_source = GlobalAudioSource()
-                is_listening = getattr(vc, "is_listening", None)
-                if callable(is_listening) and is_listening():
-                    vc.stop_listening()  # 使い回された接続に古いSinkが残っていると listen() が失敗する
-                vc.listen(GlobalAudioSink(room_name, vc))
+                add_receive_sink(vc, "gvc", GlobalAudioSink(room_name, vc))
             except Exception:
+                remove_receive_sink(vc, "gvc")
+                remove_audio_source(vc, "gvc")
+                if hasattr(vc, "global_source"):
+                    delattr(vc, "global_source")
                 # 途中で失敗したら VC を掴んだままにせず手放す (接続だけ残って無音になるのを防ぐ)
                 await self._leave_room(vc, reason="error")
                 raise
