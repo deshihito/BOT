@@ -1,4 +1,4 @@
-"""!ai  のチャットモデルを呼び出す機能。つかれた"""
+"""!ai  のチャットモデルを呼び出す機能。バグが多すぎてつかれたんだよー(ちいかわ)"""
 from __future__ import annotations
 
 import io
