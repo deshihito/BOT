@@ -213,6 +213,44 @@ class TempVoiceSettingsTest(unittest.IsolatedAsyncioTestCase):
         overwrite = guild.temp.set_permissions.await_args.kwargs["overwrite"]
         self.assertFalse(overwrite.connect)
 
+    async def test_consecutive_locks_keep_first_original_permission(self):
+        cog, guild = self.make_cog()
+        await tempvoice._put_entry(20, {"channel_id": 20, "guild_id": 1, "owner_id": 1, "panel_id": 900})
+        guild.temp.overwrite.connect = True
+        interaction = types.SimpleNamespace(
+            guild=guild,
+            guild_id=1,
+            channel_id=20,
+            user=types.SimpleNamespace(id=1, guild_permissions=types.SimpleNamespace(administrator=False, manage_channels=False)),
+            response=types.SimpleNamespace(send_message=AsyncMock(), send_modal=AsyncMock()),
+        )
+        await tempvoice.handle_action(cog, interaction, "lock")
+        await tempvoice.handle_action(cog, interaction, "lock")
+        await tempvoice.handle_action(cog, interaction, "unlock")
+        overwrite = guild.temp.set_permissions.await_args.kwargs["overwrite"]
+        self.assertTrue(overwrite.connect)
+
+    async def test_failed_unlock_keeps_original_permission_for_retry(self):
+        cog, guild = self.make_cog()
+        await tempvoice._put_entry(20, {"channel_id": 20, "guild_id": 1, "owner_id": 1, "panel_id": 900})
+        guild.temp.overwrite.connect = True
+        interaction = types.SimpleNamespace(
+            guild=guild,
+            guild_id=1,
+            channel_id=20,
+            user=types.SimpleNamespace(id=1, guild_permissions=types.SimpleNamespace(administrator=False, manage_channels=False)),
+            response=types.SimpleNamespace(send_message=AsyncMock(), send_modal=AsyncMock()),
+        )
+        await tempvoice.handle_action(cog, interaction, "lock")
+        guild.temp.set_permissions.side_effect = discord.Forbidden(
+            types.SimpleNamespace(status=403, reason="Forbidden"), "no permission",
+        )
+        await tempvoice.handle_action(cog, interaction, "unlock")
+        guild.temp.set_permissions.side_effect = None
+        await tempvoice.handle_action(cog, interaction, "unlock")
+        overwrite = guild.temp.set_permissions.await_args.kwargs["overwrite"]
+        self.assertTrue(overwrite.connect)
+
     async def test_other_member_without_permission_is_denied(self):
         cog, guild = self.make_cog()
         await tempvoice._put_entry(20, {"channel_id": 20, "guild_id": 1, "owner_id": 1, "panel_id": 900})

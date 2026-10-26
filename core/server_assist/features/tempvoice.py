@@ -296,15 +296,17 @@ async def handle_action(cog: Any, interaction: discord.Interaction, action: str)
         try:
             overwrite = channel.overwrites_for(default_role)
             if action == "lock":
-                entry["lock_connect"] = overwrite.connect
+                entry.setdefault("lock_connect", overwrite.connect)
                 overwrite.connect = False
             else:
-                overwrite.connect = entry.pop("lock_connect", None)
+                overwrite.connect = entry.get("lock_connect")
             await channel.set_permissions(
                 default_role,
                 overwrite=overwrite,
                 reason="TempVoice lock" if action == "lock" else "TempVoice unlock",
             )
+            if action == "unlock":
+                entry.pop("lock_connect", None)
             await _put_entry(interaction.channel_id, entry)
         except (discord.Forbidden, discord.HTTPException):
             return await interaction.response.send_message("権限を変更できませんでした。", ephemeral=True)
