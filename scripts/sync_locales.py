@@ -11,6 +11,7 @@ import asyncio
 import json
 import os
 import re
+import subprocess
 import sys
 from pathlib import Path
 
@@ -55,13 +56,13 @@ def save_json(path: Path, data: dict[str, str]) -> None:
 
 
 async def sync_target(client: LibreTranslateClient, source: dict[str, str], target: str,
-                      output_dir: Path, overwrite: bool) -> int:
+                      output_dir: Path, overwrite: bool) -> Path | None:
     path = output_dir / f"{target}.json"
     existing = load_json(path)
     pending = [key for key in source if overwrite or key not in existing]
     if not pending:
         print(f"{target}: up to date ({len(existing)} keys)")
-        return 0
+        return None
     print(f"{target}: translating {len(pending)} key(s)")
     for index, key in enumerate(pending, 1):
         protected, tokens = protect(source[key])
@@ -72,7 +73,37 @@ async def sync_target(client: LibreTranslateClient, source: dict[str, str], targ
         existing[key] = translated
         print(f"  [{index}/{len(pending)}] {key}")
     save_json(path, existing)
-    return len(pending)
+    return path
+
+
+def git(*args: str, check: bool = True) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(["git", *args], cwd=ROOT, text=True, capture_output=True, check=check)
+
+
+def commit_and_push(paths: list[Path], message: str, push: bool, remote: str) -> None:
+    if not paths:
+        print("No locale files changed; nothing to commit")
+        return
+    if git("diff", "--cached", "--quiet", check=False).returncode != 0:
+        raise RuntimeError("Refusing to commit: the Git index already contains staged changes")
+    relative_paths: list[str] = []
+    for path in paths:
+        try:
+            relative_paths.append(str(path.resolve().relative_to(ROOT.resolve())))
+        except ValueError as exc:
+            raise RuntimeError(f"Refusing to commit a file outside the repository: {path}") from exc
+    git("add", "--", *relative_paths)
+    if git("diff", "--cached", "--quiet", check=False).returncode == 0:
+        print("No locale changes detected; nothing to commit")
+        return
+    git("commit", "-m", message)
+    print(f"Committed {', '.join(relative_paths)}")
+    if push:
+        branch = git("branch", "--show-current").stdout.strip()
+        if not branch:
+            raise RuntimeError("Refusing to push from a detached HEAD")
+        git("push", remote, branch)
+        print(f"Pushed {remote}/{branch}")
 
 
 async def main() -> int:
@@ -85,6 +116,12 @@ async def main() -> int:
     parser.add_argument("--overwrite", action="store_true", help="replace existing translations")
     parser.add_argument("--check-only", action="store_true",
                         help="report missing keys without contacting LibreTranslate")
+    parser.add_argument("--git-commit", action="store_true",
+                        help="commit changed locale JSON files after translation")
+    parser.add_argument("--git-push", action="store_true",
+                        help="commit and push changed locale JSON files")
+    parser.add_argument("--git-remote", default="origin")
+    parser.add_argument("--commit-message", default="chore: update locale catalogs")
     args = parser.parse_args()
     source = load_json(Path(args.source))
     if not source:
@@ -106,11 +143,20 @@ async def main() -> int:
             for key in keys:
                 print(f"  - {key}")
         return 1
+    if args.git_commit or args.git_push:
+        if git("diff", "--cached", "--quiet", check=False).returncode != 0:
+            print("Locale sync stopped: staged Git changes already exist", file=sys.stderr)
+            return 2
     client = LibreTranslateClient(args.url, args.api_key)
+    changed_paths: list[Path] = []
     try:
         for target in targets:
-            await sync_target(client, source, target, Path(args.output_dir), args.overwrite)
-    except (OSError, json.JSONDecodeError, LibreTranslateError) as exc:
+            changed = await sync_target(client, source, target, Path(args.output_dir), args.overwrite)
+            if changed is not None:
+                changed_paths.append(changed)
+        if args.git_commit or args.git_push:
+            commit_and_push(changed_paths, args.commit_message, args.git_push, args.git_remote)
+    except (OSError, json.JSONDecodeError, LibreTranslateError, RuntimeError, subprocess.CalledProcessError) as exc:
         print(f"Locale sync failed: {exc}", file=sys.stderr)
         return 1
     return 0

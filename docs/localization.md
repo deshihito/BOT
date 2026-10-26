@@ -54,9 +54,26 @@ CIやコミット前に、APIへ接続せず翻訳漏れだけを確認できま
 
 ```bash
 python scripts/sync_locales.py \
-  --targets en,zh,ko,id,th,ar,hi \
-  --check-only
+  --targets en,zh,ko,id,th,ar,hi
 ```
+
+翻訳後に生成されたlocale JSONだけをcommitすることもできます。既存のstaged変更がある場合は、巻き込み防止のため停止します。
+
+```bash
+python3 scripts/sync_locales.py \
+  --targets en,zh,ko,id,th,ar,hi \
+  --git-commit
+```
+
+現在のGitブランチへcommitしてpushする場合は、明示的に`--git-push`を付けます。
+
+```bash
+python3 scripts/sync_locales.py \
+  --targets en,zh,ko,id,th,ar,hi \
+  --git-push
+```
+
+`--git-push`がcommitするのは、今回更新された`locales/*.json`だけです。Botコード、`.env`、その他の作業中ファイルはcommitしません。
 
 The generated files are committed with the code change:
 
