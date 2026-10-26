@@ -96,6 +96,7 @@ class WarningTest(unittest.IsolatedAsyncioTestCase):
             client=self.db,
             path=os.path.join(self.tmp.name, "warnings.json"),
         )
+        warnings.WARN_COOLDOWN = 0.0
 
     def test_feature_is_discovered(self):
         keys = [feature.key for feature in discover_features(refresh=True)]
@@ -220,6 +221,25 @@ class WarningTest(unittest.IsolatedAsyncioTestCase):
         )
         await panel.callback(interaction)
         guild.panel.send.assert_awaited_once()
+
+    async def test_warning_cooldown_rejects_rapid_repeat(self):
+        warnings.WARN_COOLDOWN = 100.0
+        await warnings.update_settings(
+            1, warnings.KEY, enabled=True, panel_channel_id=100, log_channel_id=101,
+        )
+        guild = FakeGuild()
+        modal = warnings.WarningReasonModal(None, 1, 2, "対象")
+        modal.reason_input._value = "理由"
+        interaction = types.SimpleNamespace(
+            guild=guild, guild_id=1, user=FakeUser(),
+            client=types.SimpleNamespace(fetch_user=AsyncMock(return_value=guild.member)),
+            response=types.SimpleNamespace(send_message=AsyncMock(), defer=AsyncMock()),
+            followup=types.SimpleNamespace(send=AsyncMock()),
+        )
+        await modal.on_submit(interaction)
+        await modal.on_submit(interaction)
+        interaction.response.send_message.assert_awaited_once()
+        self.assertEqual((await warnings._cache_data())["1:2"]["total"], 1)
 
     def test_register_views(self):
         add_view = MagicMock()

@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import datetime
 import logging
+import time
 import uuid
 from typing import Any
 
@@ -17,6 +18,7 @@ logger = logging.getLogger(__name__)
 
 KEY = "warnings"
 MAX_WARNINGS = 100
+WARN_COOLDOWN = 3.0
 
 FEATURE = Feature(
     key=KEY,
@@ -29,6 +31,7 @@ FEATURE = Feature(
 _entries: KVStore | None = None
 _cache: dict[str, dict[str, Any]] | None = None
 _locks: dict[str, asyncio.Lock] = {}
+_last_warn: dict[tuple[int, int, int], float] = {}
 
 
 def reset_cache() -> None:
@@ -36,6 +39,7 @@ def reset_cache() -> None:
     _entries = None
     _cache = None
     _locks.clear()
+    _last_warn.clear()
 
 
 def _store() -> KVStore:
@@ -211,6 +215,13 @@ class WarningReasonModal(discord.ui.Modal, title="警告"):
         current = settings(interaction.guild_id)
         if not current["enabled"]:
             return await interaction.response.send_message("警告機能は現在オフです。", ephemeral=True)
+        cooldown_key = (interaction.guild_id, interaction.user.id, self.user_id)
+        now = time.monotonic()
+        if now - _last_warn.get(cooldown_key, 0.0) < WARN_COOLDOWN:
+            return await interaction.response.send_message(
+                "同じメンバーへの連続警告は少し待ってください。", ephemeral=True,
+            )
+        _last_warn[cooldown_key] = now
         await interaction.response.defer(ephemeral=True)
         reason = str(self.reason_input.value or "").strip()[:500] or "理由なし"
         warning = {
