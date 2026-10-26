@@ -307,7 +307,11 @@ class PollTest(unittest.IsolatedAsyncioTestCase):
         guild = FakeGuild()
         cog = types.SimpleNamespace(bot=types.SimpleNamespace(get_guild=lambda _id: guild))
         view = polls.build_view(cog, 1)
-        self.assertEqual(len([item for item in view.children if isinstance(item, discord.ui.Select)]), 1)
+        self.assertEqual(
+            len([item for item in view.children
+                 if isinstance(item, (discord.ui.Select, discord.ui.ChannelSelect))]),
+            1,
+        )
         labels = {item.label for item in view.children if isinstance(item, discord.ui.Button)}
         self.assertIn("投票", labels)
         self.assertIn("複数選択: オフ", labels)
