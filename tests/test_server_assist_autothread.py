@@ -49,7 +49,8 @@ class FakeGuild:
 
 
 class FakeMessage:
-    def __init__(self, guild, channel=None, author=None, content="質問です"):
+    def __init__(self, guild, channel=None, author=None, content="質問です", message_id=500):
+        self.id = message_id
         self.guild = guild
         self.channel = channel or guild.channel
         self.author = author or FakeUser()
@@ -68,6 +69,7 @@ class AutoThreadTest(unittest.IsolatedAsyncioTestCase):
         )
         guild_settings.set_store(self.store)
         self.addCleanup(guild_settings.set_store, None)
+        autothread.reset_state()
 
     def test_feature_is_discovered(self):
         keys = [feature.key for feature in discover_features(refresh=True)]
@@ -84,24 +86,28 @@ class AutoThreadTest(unittest.IsolatedAsyncioTestCase):
         guild = FakeGuild()
         message = FakeMessage(guild, content="質問です\n詳しくは本文")
         await autothread.on_message(None, message)
+        await autothread.drain()
         message.create_thread.assert_awaited_once_with(name="質問です", auto_archive_duration=60)
 
     async def test_empty_content_uses_fallback_name(self):
         await autothread.update_settings(1, autothread.KEY, enabled=True, channel_id=100)
         message = FakeMessage(FakeGuild(), content="")
         await autothread.on_message(None, message)
+        await autothread.drain()
         message.create_thread.assert_awaited_once_with(name="新しいスレッド", auto_archive_duration=1440)
 
     async def test_bot_message_is_ignored(self):
         await autothread.update_settings(1, autothread.KEY, enabled=True, channel_id=100)
         message = FakeMessage(FakeGuild(), author=FakeUser(bot=True))
         await autothread.on_message(None, message)
+        await autothread.drain()
         message.create_thread.assert_not_awaited()
 
     async def test_other_channel_is_ignored(self):
         await autothread.update_settings(1, autothread.KEY, enabled=True, channel_id=100)
         message = FakeMessage(FakeGuild(), channel=FakeChannel(200, "別チャンネル"))
         await autothread.on_message(None, message)
+        await autothread.drain()
         message.create_thread.assert_not_awaited()
 
     async def test_message_with_existing_thread_is_ignored(self):
@@ -109,11 +115,13 @@ class AutoThreadTest(unittest.IsolatedAsyncioTestCase):
         message = FakeMessage(FakeGuild())
         message.thread = types.SimpleNamespace(id=999)
         await autothread.on_message(None, message)
+        await autothread.drain()
         message.create_thread.assert_not_awaited()
 
     async def test_disabled_is_ignored(self):
         message = FakeMessage(FakeGuild())
         await autothread.on_message(None, message)
+        await autothread.drain()
         message.create_thread.assert_not_awaited()
 
     async def test_failure_is_logged_not_raised(self):
@@ -122,6 +130,15 @@ class AutoThreadTest(unittest.IsolatedAsyncioTestCase):
         message.create_thread.side_effect = RuntimeError("boom")
         with self.assertLogs("core.server_assist.features.autothread", level="ERROR"):
             await autothread.on_message(None, message)
+            await autothread.drain()
+
+    async def test_same_message_is_only_created_once(self):
+        await autothread.update_settings(1, autothread.KEY, enabled=True, channel_id=100)
+        message = FakeMessage(FakeGuild())
+        await autothread.on_message(None, message)
+        await autothread.on_message(None, message)
+        await autothread.drain()
+        message.create_thread.assert_awaited_once()
 
     async def test_settings_view_controls_and_updates(self):
         await autothread.update_settings(1, autothread.KEY, enabled=True, channel_id=100)
