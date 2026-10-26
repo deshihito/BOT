@@ -71,6 +71,12 @@ class ServerAssistCog(commands.Cog):
             except Exception:
                 logger.exception("サーバーアシスト機能を読み込めませんでした: %s", feature.key)
 
+    async def cog_load(self):
+        for module in self.modules.values():
+            hook = getattr(module, "register_views", None)
+            if callable(hook):
+                hook(self)
+
     async def show_home(self, interaction: discord.Interaction):
         if not has_manage_permission(interaction):
             return await interaction.response.send_message(
@@ -112,6 +118,14 @@ class ServerAssistCog(commands.Cog):
         if module is None:
             return
         return await module.handle_level_rewards(self, guild, member, old_level, new_level)
+
+    async def handle_temp_voice_action(self, interaction, action: str):
+        module = self.modules.get("tempvoice")
+        if module is None:
+            return await interaction.response.send_message(
+                "一時VC機能を読み込めませんでした。", ephemeral=True,
+            )
+        return await module.handle_action(self, interaction, action)
 
     async def _dispatch(self, hook: str, *args: Any):
         for key, module in self.modules.items():
