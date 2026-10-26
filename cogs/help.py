@@ -414,7 +414,7 @@ class HelpCog(commands.Cog):
             self._cache = (signature, build_catalog(self.bot))
         return self._cache[1]
 
-    @app_commands.command(name="help", description="コマンドの一覧と使い方を表示します")
+    @app_commands.command(name="help", description="Show the command list and usage guide")
     @app_commands.describe(command="使い方を見たいコマンド（入力すると候補が出ます）")
     async def help(self, interaction: discord.Interaction, command: str | None = None):
         catalog = self.catalog()

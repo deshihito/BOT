@@ -245,7 +245,7 @@ class VoiceHub(commands.Cog):
         else:
             await interaction.response.send_modal(TTSSettingsModal(cog, interaction.user.id))
 
-    @app_commands.command(name="vc", description="音楽・ボイス機能の操作パネルを表示します")
+    @app_commands.command(name="vc", description="Show the music and voice control panel")
     async def vc(self, interaction: discord.Interaction):
         view = VoicePanelView(self)
         await interaction.response.send_message(view=as_panel_v2(view), ephemeral=True)

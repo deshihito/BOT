@@ -396,7 +396,7 @@ class GameHub(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
 
-    @app_commands.command(name="game", description="パーティーゲームとダンジョン（人狼・ワードウルフ・UNO・ダウト・NGワード・お題しりとり・じゃんけん・Wordle・神経衰弱・ババ抜き・オセロ・ポーカー・将棋・チェス）のルール確認と開始")
+    @app_commands.command(name="game", description="Browse and start party games and dungeon games")
     async def game(self, interaction: discord.Interaction):
         view = GameHubView(self)
         await interaction.response.send_message(view=as_panel_v2(view), ephemeral=True)

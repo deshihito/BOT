@@ -16,7 +16,7 @@ class AICog(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
 
-    @commands.command(name="ai", help="AIに質問します。PDF/DOCX/テキスト添付に対応。画像は対応モデルのみ。")
+    @commands.command(name="ai", help="Ask AI a question. Supports PDF, DOCX, and text attachments; images depend on the selected model.")
     @commands.cooldown(1, 5.0, commands.BucketType.user)
     async def ai(self, ctx: commands.Context, *, prompt: str = ""):
         prompt = prompt.strip()
@@ -174,7 +174,7 @@ class AICog(commands.Cog):
             return await ctx.reply(f"少し待ってから再試行してください（{error.retry_after:.1f}秒）。", mention_author=False)
         logger.exception("!ai command error", exc_info=error)
 
-    @commands.command(name="generate", help="Logfareで画像を生成します。例: !generate 星空の下の猫")
+    @commands.command(name="generate", help="Generate an image with Logfare. Example: !generate cat under a starry sky")
     @commands.cooldown(1, 15.0, commands.BucketType.user)
     async def generate(self, ctx: commands.Context, *, prompt: str = ""):
         prompt = prompt.strip()

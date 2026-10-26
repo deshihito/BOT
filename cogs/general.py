@@ -1234,7 +1234,7 @@ class GeneralCog(commands.Cog):
         for task in list(self._bg_tasks):
             task.cancel()
 
-    @app_commands.command(name="general", description="一般機能の操作パネルを表示します")
+    @app_commands.command(name="general", description="Show the general features control panel")
     async def general(self, interaction: discord.Interaction):
         view = GeneralPanel(self)
         await interaction.response.send_message(view=as_panel_v2(view), ephemeral=True)

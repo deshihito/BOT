@@ -70,7 +70,7 @@ class AIToolsCog(commands.Cog):
             return content.strip()
         return re.sub(rf"<@!?{self.bot.user.id}>", "", content).strip()
 
-    @commands.command(name="aitools", help="AI toolsの稼働状態を確認")
+    @commands.command(name="aitools", help="Check the status of AI tools")
     async def aitools(self, ctx: commands.Context, action: str = "status"):
         action = action.strip().lower()
         if action not in {"", "status"}:
