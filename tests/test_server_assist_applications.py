@@ -335,6 +335,10 @@ class ApplicationSettingsTest(unittest.IsolatedAsyncioTestCase):
         guild = FakeGuild()
         cog = types.SimpleNamespace(bot=types.SimpleNamespace(get_guild=lambda _id: guild))
         view = applications.build_view(cog, 1)
+        self.assertEqual(
+            len([item for item in view.children if isinstance(item, discord.ui.ChannelSelect)]),
+            2,
+        )
         labels = {item.label for item in view.children if isinstance(item, discord.ui.Button)}
         self.assertIn("応募フォーム", labels)
         self.assertIn("パネルを送信", labels)
