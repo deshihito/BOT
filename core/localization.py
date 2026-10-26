@@ -1,5 +1,7 @@
 """Guild-scoped localization settings and small translation helpers."""
 from __future__ import annotations
+import json
+from pathlib import Path
 from typing import Any
 from core.guild_settings import get_store
 
@@ -54,6 +56,16 @@ _TRANSLATIONS = {
     },
 }
 
+_CATALOG_PATH = Path(__file__).with_name("locales") / "ja_to_en.json"
+try:
+    _ENGLISH_CATALOG: dict[str, str] = json.loads(_CATALOG_PATH.read_text(encoding="utf-8"))
+except (FileNotFoundError, OSError, ValueError):
+    _ENGLISH_CATALOG = {}
+_ENGLISH_PAIRS = sorted(
+    ((source, target) for source, target in _ENGLISH_CATALOG.items() if source and target and source != target),
+    key=lambda pair: len(pair[0]), reverse=True,
+)
+
 def normalize_locale(value: Any) -> str:
     value = str(value or "").lower().replace("-", "_").split("_")[0]
     return value if value in SUPPORTED_LOCALES else DEFAULT_LOCALE
@@ -69,3 +81,85 @@ def text(key: str, locale: str = DEFAULT_LOCALE, **values: Any) -> str:
     translations = _TRANSLATIONS.get(key, {})
     result = translations.get(normalize_locale(locale), translations.get(DEFAULT_LOCALE, key))
     return result.format(**values)
+
+def translate_text(value: str, locale: str = DEFAULT_LOCALE) -> str:
+    """Translate a message and its static Japanese fragments for the selected locale."""
+    if not isinstance(value, str) or normalize_locale(locale) != "en" or not _ENGLISH_PAIRS:
+        return value
+    result = value
+    for source, target in _ENGLISH_PAIRS:
+        if source in result:
+            result = result.replace(source, target)
+    return result
+
+def guild_id_for_sender(sender: Any) -> int | None:
+    guild = getattr(sender, "guild", None)
+    if guild is not None and isinstance(getattr(guild, "id", None), int):
+        return guild.id
+    parent = getattr(sender, "_parent", None)
+    if parent is not None:
+        value = getattr(parent, "guild_id", None)
+        if isinstance(value, int):
+            return value
+    value = getattr(sender, "guild_id", None)
+    return value if isinstance(value, int) else None
+
+def _translate_embed(embed: Any, locale: str) -> None:
+    for attribute in ("title", "description"):
+        value = getattr(embed, attribute, None)
+        if isinstance(value, str):
+            setattr(embed, attribute, translate_text(value, locale))
+    footer = getattr(embed, "footer", None)
+    if footer is not None and isinstance(getattr(footer, "text", None), str):
+        embed.set_footer(text=translate_text(footer.text, locale), icon_url=getattr(footer, "icon_url", None))
+    author = getattr(embed, "author", None)
+    if author is not None and isinstance(getattr(author, "name", None), str):
+        embed.set_author(name=translate_text(author.name, locale), icon_url=getattr(author, "icon_url", None))
+    for index, field in enumerate(getattr(embed, "fields", ())):
+        embed.set_field_at(index, name=translate_text(field.name, locale),
+                           value=translate_text(field.value, locale), inline=field.inline)
+
+def _translate_view(view: Any, locale: str) -> None:
+    title = getattr(view, "title", None)
+    if isinstance(title, str):
+        try:
+            view.title = translate_text(title, locale)
+        except (AttributeError, TypeError):
+            pass
+    for item in getattr(view, "children", ()):
+        for attribute in ("label", "placeholder", "title"):
+            value = getattr(item, attribute, None)
+            if isinstance(value, str):
+                setattr(item, attribute, translate_text(value, locale))
+        for option in getattr(item, "options", ()):
+            for attribute in ("label", "description"):
+                value = getattr(option, attribute, None)
+                if isinstance(value, str):
+                    setattr(option, attribute, translate_text(value, locale))
+
+def localize_kwargs(sender: Any, kwargs: dict[str, Any]) -> dict[str, Any]:
+    """Translate Discord send/edit keyword payloads without changing business logic."""
+    guild_id = guild_id_for_sender(sender)
+    locale = guild_locale(guild_id) if guild_id is not None else DEFAULT_LOCALE
+    if normalize_locale(locale) != "en":
+        return kwargs
+    result = dict(kwargs)
+    if isinstance(result.get("content"), str):
+        result["content"] = translate_text(result["content"], locale)
+    embeds = result.get("embeds")
+    if embeds:
+        for embed in embeds:
+            _translate_embed(embed, locale)
+    embed = result.get("embed")
+    if embed is not None:
+        _translate_embed(embed, locale)
+    view = result.get("view")
+    if view is not None:
+        _translate_view(view, locale)
+    return result
+
+def localize_object(value: Any, locale: str = DEFAULT_LOCALE) -> Any:
+    """Translate a positional Discord UI object such as a Modal."""
+    if normalize_locale(locale) == "en" and hasattr(value, "children"):
+        _translate_view(value, locale)
+    return value
