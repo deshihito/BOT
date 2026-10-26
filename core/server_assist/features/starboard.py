@@ -1,6 +1,7 @@
 """Starboard: repost messages that receive enough star reactions."""
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any
 
@@ -27,13 +28,17 @@ FEATURE = Feature(
 
 _entries: KVStore | None = None
 _cache: dict[str, dict[str, Any]] | None = None
+_cache_lock: asyncio.Lock | None = None
+_locks: dict[str, asyncio.Lock] = {}
 
 
 def reset_cache() -> None:
     """Test helper: forget the in-memory starboard mapping."""
-    global _entries, _cache
+    global _entries, _cache, _cache_lock
     _entries = None
     _cache = None
+    _cache_lock = None
+    _locks.clear()
 
 
 def _entry_store() -> KVStore:
@@ -44,10 +49,18 @@ def _entry_store() -> KVStore:
 
 
 async def _entries_cache() -> dict[str, dict[str, Any]]:
-    global _cache
+    global _cache, _cache_lock
     if _cache is None:
-        _cache = dict(await _entry_store().load_all())
+        if _cache_lock is None:
+            _cache_lock = asyncio.Lock()
+        async with _cache_lock:
+            if _cache is None:
+                _cache = dict(await _entry_store().load_all())
     return _cache
+
+
+def _lock_for(key: str) -> asyncio.Lock:
+    return _locks.setdefault(key, asyncio.Lock())
 
 
 def _entry_key(guild_id: int, message_id: int) -> str:
@@ -335,6 +348,12 @@ async def _handle(cog: Any, payload: Any) -> None:
         source_channel = getattr(cog.bot, "get_channel", lambda _id: None)(getattr(payload, "channel_id", None))
     if source_channel is None:
         return
+    lock_key = f"{guild.id}:{getattr(payload, 'message_id', 0)}"
+    async with _lock_for(lock_key):
+        await _handle_locked(guild, payload, current, source_channel)
+
+
+async def _handle_locked(guild: Any, payload: Any, current: dict[str, Any], source_channel: Any) -> None:
     try:
         message = await source_channel.fetch_message(int(payload.message_id))
     except (discord.NotFound, discord.Forbidden, discord.HTTPException):

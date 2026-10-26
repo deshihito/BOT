@@ -58,6 +58,28 @@ def has_manage_permission(interaction: Any) -> bool:
     )
 
 
+def can_assign_roles(interaction: Any, guild: Any, role_ids: list[int]) -> bool:
+    """Check that the actor can actually manage the configured roles."""
+    permissions = getattr(getattr(interaction, "user", None), "guild_permissions", None)
+    if getattr(permissions, "administrator", False):
+        return True
+    if not getattr(permissions, "manage_roles", False):
+        return False
+    top_role = getattr(getattr(interaction, "user", None), "top_role", None)
+    if top_role is None:
+        return True
+    for role_id in role_ids:
+        role = guild.get_role(int(role_id)) if guild is not None else None
+        if role is None:
+            continue
+        try:
+            if role >= top_role:
+                return False
+        except TypeError:
+            continue
+    return True
+
+
 def format_template(template: str, member: Any, guild: Any) -> str:
     """Replace the small, documented placeholder set without str.format.
 

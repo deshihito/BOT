@@ -142,6 +142,38 @@ class AutoRoleSettingsTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn("BOTにも付与", labels)
         self.assertIn("自分に適用して確認", labels)
 
+    async def test_select_rejects_missing_manage_roles(self):
+        guild = FakeGuild()
+        cog = types.SimpleNamespace(bot=types.SimpleNamespace(get_guild=lambda _id: guild))
+        view = autorole.build_view(cog, guild.id)
+        select = next(item for item in view.children if isinstance(item, discord.ui.Select))
+        select._values = ["10"]
+        interaction = types.SimpleNamespace(
+            user=types.SimpleNamespace(
+                guild_permissions=types.SimpleNamespace(administrator=False, manage_roles=False),
+                top_role=FakeRole(999, "user", position=999),
+            ),
+            response=types.SimpleNamespace(send_message=AsyncMock()),
+        )
+        await select.callback(interaction)
+        interaction.response.send_message.assert_awaited_once()
+
+    async def test_select_rejects_role_above_actor(self):
+        guild = FakeGuild()
+        cog = types.SimpleNamespace(bot=types.SimpleNamespace(get_guild=lambda _id: guild))
+        view = autorole.build_view(cog, guild.id)
+        select = next(item for item in view.children if isinstance(item, discord.ui.Select))
+        select._values = ["10"]
+        interaction = types.SimpleNamespace(
+            user=types.SimpleNamespace(
+                guild_permissions=types.SimpleNamespace(administrator=False, manage_roles=True),
+                top_role=FakeRole(5, "user", position=5),
+            ),
+            response=types.SimpleNamespace(send_message=AsyncMock()),
+        )
+        await select.callback(interaction)
+        interaction.response.send_message.assert_awaited_once()
+
 
 if __name__ == "__main__":
     unittest.main()

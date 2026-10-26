@@ -135,6 +135,23 @@ class SuggestionSettingsTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(entry["up"], [])
         self.assertEqual(entry["down"], [2])
 
+    async def test_vote_cap_reports_error(self):
+        await suggestions._put_entry(500, {
+            "guild_id": 1, "channel_id": 100, "author_id": 1, "author_name": "あおい",
+            "title": "案", "body": "本文", "up": list(range(500)), "down": [], "status": "受付中",
+        })
+        cog = types.SimpleNamespace()
+        interaction = types.SimpleNamespace(
+            message=types.SimpleNamespace(id=500),
+            user=FakeUser(999),
+            response=types.SimpleNamespace(
+                edit_message=AsyncMock(), send_message=AsyncMock(),
+            ),
+        )
+        await suggestions.handle_vote(cog, interaction, "up")
+        interaction.response.send_message.assert_awaited_once()
+        self.assertEqual(len((await suggestions._entries_cache())["500"]["up"]), 500)
+
     async def test_settings_view_controls_and_panel_send(self):
         await suggestions.update_settings(1, suggestions.KEY, enabled=True, channel_id=100)
         guild = FakeGuild()

@@ -16,6 +16,7 @@ from core import guild_settings
 from core.storage import KVStore
 from core.server_assist import discover_features, format_template
 from core.server_assist.features import welcome
+from core.panel_v2 import as_panel_v2
 from cogs.support import (
     SUPPORT_ACTIONS,
     SUPPORT_ACTIONS_BY_GENRE,
@@ -205,6 +206,31 @@ class ServerAssistPanelTest(unittest.IsolatedAsyncioTestCase):
             self.assertLessEqual(len(rows), 5)
             for row in rows:
                 self.assertLessEqual(len(row.children), 5)
+
+    async def test_wrapped_welcome_toggle_refreshes_without_signature_error(self):
+        guild = FakeGuild()
+        cog = types.SimpleNamespace(bot=types.SimpleNamespace(get_guild=lambda _id: guild))
+        panel = welcome.build_view(cog, guild.id)
+        wrapped = as_panel_v2(panel)
+        button = next(
+            item
+            for row in wrapped.children[0].children
+            for item in getattr(row, "children", [])
+            if getattr(item, "label", None) == "参加メッセージ"
+        )
+        interaction = types.SimpleNamespace(
+            user=types.SimpleNamespace(
+                id=1,
+                guild_permissions=types.SimpleNamespace(administrator=True, manage_guild=True),
+            ),
+            response=types.SimpleNamespace(
+                is_done=lambda: False,
+                edit_message=AsyncMock(),
+                send_message=AsyncMock(),
+            ),
+        )
+        await button.callback(interaction)
+        interaction.response.edit_message.assert_awaited_once()
 
 
 if __name__ == "__main__":

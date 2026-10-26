@@ -46,7 +46,7 @@ class ShortcutTest(unittest.IsolatedAsyncioTestCase):
         select = wrapper.children[0].children[1].children[0]
         select._values = ["custom"]
         interaction = types.SimpleNamespace(
-            response=types.SimpleNamespace(edit_message=AsyncMock())
+            response=types.SimpleNamespace(edit_message=AsyncMock(), is_done=lambda: False)
         )
 
         await select.callback(interaction)
@@ -63,7 +63,7 @@ class ShortcutTest(unittest.IsolatedAsyncioTestCase):
         wrapper = as_panel_v2(manager)
         register = wrapper.children[0].children[1].children[0]
         interaction = types.SimpleNamespace(
-            response=types.SimpleNamespace(edit_message=AsyncMock())
+            response=types.SimpleNamespace(edit_message=AsyncMock(), is_done=lambda: False)
         )
 
         self.assertEqual(manager.embed().color.value, 0xFFFFFF)
@@ -78,7 +78,7 @@ class ShortcutTest(unittest.IsolatedAsyncioTestCase):
         genre_select = wrapper.children[0].children[1].children[0]
         genre_select._values = ["party"]
         genre_interaction = types.SimpleNamespace(
-            response=types.SimpleNamespace(edit_message=AsyncMock())
+            response=types.SimpleNamespace(edit_message=AsyncMock(), is_done=lambda: False)
         )
 
         await genre_select.callback(genre_interaction)
@@ -92,7 +92,7 @@ class ShortcutTest(unittest.IsolatedAsyncioTestCase):
         game_select = wrapper.children[0].children[2].children[0]
         game_select._values = ["uno"]
         game_interaction = types.SimpleNamespace(
-            response=types.SimpleNamespace(edit_message=AsyncMock())
+            response=types.SimpleNamespace(edit_message=AsyncMock(), is_done=lambda: False)
         )
         await game_select.callback(game_interaction)
 
@@ -108,7 +108,7 @@ class ShortcutTest(unittest.IsolatedAsyncioTestCase):
             if getattr(item, "label", None) == "戻る"
         )
         interaction = types.SimpleNamespace(
-            response=types.SimpleNamespace(edit_message=AsyncMock())
+            response=types.SimpleNamespace(edit_message=AsyncMock(), is_done=lambda: False)
         )
 
         await back.callback(interaction)

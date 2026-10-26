@@ -198,8 +198,11 @@ async def _delete_temp(guild: Any, channel: Any) -> None:
         return
     try:
         await channel.delete(reason="TempVoice empty")
-    except (discord.NotFound, discord.Forbidden, discord.HTTPException):
-        logger.debug("一時VCを削除できませんでした: channel=%s", getattr(channel, "id", None))
+    except discord.NotFound:
+        pass
+    except (discord.Forbidden, discord.HTTPException):
+        logger.warning("一時VCを削除できませんでした: channel=%s", getattr(channel, "id", None))
+        return
     await _pop_entry(channel.id)
 
 
@@ -291,9 +294,11 @@ async def handle_action(cog: Any, interaction: discord.Interaction, action: str)
         if default_role is None:
             return await interaction.response.send_message("サーバーのロールを取得できませんでした。", ephemeral=True)
         try:
+            overwrite = channel.overwrites_for(default_role)
+            overwrite.connect = action == "unlock"
             await channel.set_permissions(
                 default_role,
-                connect=action == "unlock",
+                overwrite=overwrite,
                 reason="TempVoice lock" if action == "lock" else "TempVoice unlock",
             )
         except (discord.Forbidden, discord.HTTPException):

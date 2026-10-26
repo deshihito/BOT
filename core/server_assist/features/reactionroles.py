@@ -7,7 +7,7 @@ from typing import Any
 
 import discord
 
-from core.server_assist import Feature, get_settings, update_settings
+from core.server_assist import Feature, can_assign_roles, get_settings, update_settings
 from core.server_assist.ui import AssistFeatureView, channel_label, notice_line
 
 logger = logging.getLogger(__name__)
@@ -265,6 +265,13 @@ class ReactionRoleToggleButton(discord.ui.Button):
             return await interaction.response.send_message(
                 "チャンネル・メッセージ・絵文字マッピングを先に設定してください。", ephemeral=True,
             )
+        if not view.settings["enabled"] and interaction.guild is not None and not can_assign_roles(
+            interaction, interaction.guild, list(view.settings["mappings"].values()),
+        ):
+            return await interaction.response.send_message(
+                "ロールの管理権限、または自分より上のロールが設定されています。",
+                ephemeral=True,
+            )
         value = not view.settings["enabled"]
         await update_settings(view.guild_id, KEY, enabled=value)
         view.settings["enabled"] = value
@@ -324,6 +331,13 @@ class ReactionRoleMappingModal(discord.ui.Modal, title="絵文字とロール"):
             mappings = parse_mappings(str(self.text.value or ""))
         except (TypeError, ValueError) as exc:
             return await interaction.response.send_message(f"保存できませんでした: {exc}", ephemeral=True)
+        if interaction.guild is not None and not can_assign_roles(
+            interaction, interaction.guild, list(mappings.values()),
+        ):
+            return await interaction.response.send_message(
+                "ロールの管理権限、または自分より上のロールを設定しようとしています。",
+                ephemeral=True,
+            )
         await update_settings(self.parent_view.guild_id, KEY, mappings=mappings)
         self.parent_view.settings["mappings"] = mappings
         if interaction.guild is not None:
