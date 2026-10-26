@@ -213,6 +213,10 @@ class EventTest(unittest.IsolatedAsyncioTestCase):
                  if isinstance(item, (discord.ui.Select, discord.ui.ChannelSelect))]),
             1,
         )
+        self.assertEqual(
+            len([item for item in view.children if isinstance(item, discord.ui.ChannelSelect)]),
+            1,
+        )
         labels = {item.label for item in view.children if isinstance(item, discord.ui.Button)}
         self.assertIn("イベント", labels)
         self.assertIn("パネルを送信", labels)
