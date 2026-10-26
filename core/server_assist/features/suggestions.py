@@ -221,6 +221,14 @@ async def handle_vote(cog: Any, interaction: discord.Interaction, action: str) -
     down = [value for value in (entry.get("down") or []) if value != user_id]
     was_up = user_id in (entry.get("up") or [])
     was_down = user_id in (entry.get("down") or [])
+    if action == "up" and not was_up and len(up) >= 500:
+        return await interaction.response.send_message(
+            "賛成票が上限（500件）に達しています。", ephemeral=True,
+        )
+    if action == "down" and not was_down and len(down) >= 500:
+        return await interaction.response.send_message(
+            "反対票が上限（500件）に達しています。", ephemeral=True,
+        )
     if action == "up" and not was_up:
         up.append(user_id)
     elif action == "down" and not was_down:

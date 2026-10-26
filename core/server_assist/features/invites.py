@@ -23,10 +23,12 @@ FEATURE = Feature(
 )
 
 _invites: dict[str, int] = {}
+_primed: set[int] = set()
 
 
 def reset_cache() -> None:
     _invites.clear()
+    _primed.clear()
 
 
 def _key(guild_id: int, code: str) -> str:
@@ -73,6 +75,7 @@ async def prime(cog: Any) -> None:
         except (discord.Forbidden, discord.HTTPException, AttributeError):
             continue
         _remember(list(invites))
+        _primed.add(guild.id)
 
 
 def start_tasks(cog: Any) -> None:
@@ -129,17 +132,20 @@ async def on_member_join(cog: Any, member: Any) -> None:
         invites = list(await guild.invites())
     except (discord.Forbidden, discord.HTTPException, AttributeError):
         invites = []
+    primed = guild.id in _primed
     used = None
     best = 0
-    for invite in invites:
-        code = getattr(invite, "code", None)
-        if not code:
-            continue
-        old = _invites.get(_key(guild.id, code), 0)
-        now = int(getattr(invite, "uses", 0) or 0)
-        if now > old and now - old > best:
-            used, best = invite, now - old
+    if primed:
+        for invite in invites:
+            code = getattr(invite, "code", None)
+            if not code:
+                continue
+            old = _invites.get(_key(guild.id, code), 0)
+            now = int(getattr(invite, "uses", 0) or 0)
+            if now > old and now - old > best:
+                used, best = invite, now - old
     _remember(invites)
+    _primed.add(guild.id)
     channel = guild.get_channel(current["channel_id"])
     if channel is None:
         return

@@ -16,7 +16,7 @@ import discord
 
 from core import guild_settings
 from core.storage import KVStore
-from core.server_assist import discover_features
+from core.server_assist import can_assign_roles, discover_features
 from core.server_assist.features import reactionroles
 from tests.fake_kv_supabase import FakeKVSupabase
 
@@ -180,6 +180,19 @@ class ReactionRoleSettingsTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn("リアクションを反映", labels)
         self.assertIn("リアクションロール", labels)
         self.assertIn("サーバーアシストへ戻る", labels)
+
+    def test_actor_role_hierarchy_check(self):
+        guild = FakeGuild()
+        low_user = types.SimpleNamespace(
+            guild_permissions=types.SimpleNamespace(administrator=False, manage_roles=True),
+            top_role=FakeRole(5, position=5),
+        )
+        admin_user = types.SimpleNamespace(
+            guild_permissions=types.SimpleNamespace(administrator=True, manage_roles=False),
+            top_role=FakeRole(5, position=5),
+        )
+        self.assertFalse(can_assign_roles(types.SimpleNamespace(user=low_user), guild, [10]))
+        self.assertTrue(can_assign_roles(types.SimpleNamespace(user=admin_user), guild, [10]))
 
 
 if __name__ == "__main__":

@@ -6,7 +6,7 @@ from typing import Any
 
 import discord
 
-from core.server_assist import Feature, get_settings, update_settings
+from core.server_assist import Feature, can_assign_roles, get_settings, update_settings
 from core.server_assist.ui import AssistFeatureView, notice_line
 
 logger = logging.getLogger(__name__)
@@ -43,7 +43,7 @@ def _is_default(role: Any) -> bool:
     return bool(marker() if callable(marker) else marker)
 
 
-def _assignable_roles(guild: Any) -> list[Any]:
+def _assignable_roles(guild: Any, limit: int | None = 25) -> list[Any]:
     me = getattr(guild, "me", None)
     top = getattr(me, "top_role", None)
     roles: list[Any] = []
@@ -57,11 +57,11 @@ def _assignable_roles(guild: Any) -> list[Any]:
             except TypeError:
                 pass
         roles.append(role)
-    return roles[:25]
+    return roles[:limit] if limit is not None else roles
 
 
 def _resolve_roles(guild: Any, role_ids: list[int]) -> list[Any]:
-    assignable = {getattr(role, "id", None): role for role in _assignable_roles(guild)}
+    assignable = {getattr(role, "id", None): role for role in _assignable_roles(guild, None)}
     return [assignable[role_id] for role_id in role_ids if role_id in assignable]
 
 
@@ -119,6 +119,11 @@ class AutoRoleSelect(discord.ui.Select):
                 "Botが付与できるロールがありません。ロールの位置を確認してください。", ephemeral=True,
             )
         role_ids = [int(value) for value in self.values][:MAX_ROLES]
+        if not can_assign_roles(interaction, self.parent_view.guild, role_ids):
+            return await interaction.response.send_message(
+                "ロールの管理権限、または自分より上のロールを付与しようとしています。",
+                ephemeral=True,
+            )
         await update_settings(self.parent_view.guild_id, KEY, role_ids=role_ids)
         self.parent_view.settings["role_ids"] = role_ids
         await self.parent_view.refresh(interaction, "自動付与するロールを保存しました。")
@@ -135,6 +140,13 @@ class AutoRoleToggleButton(discord.ui.Button):
                 "この設定には「サーバーの管理」権限が必要です。", ephemeral=True,
             )
         value = not view.settings["enabled"]
+        if value and view.settings["role_ids"] and not can_assign_roles(
+            interaction, view.guild, view.settings["role_ids"],
+        ):
+            return await interaction.response.send_message(
+                "ロールの管理権限、または自分より上のロールが設定されています。",
+                ephemeral=True,
+            )
         await update_settings(view.guild_id, KEY, enabled=value)
         view.settings["enabled"] = value
         await view.refresh(interaction, f"自動ロールを{'オン' if value else 'オフ'}にしました。")
@@ -170,6 +182,11 @@ class AutoRoleTestButton(discord.ui.Button):
         if not hasattr(member, "add_roles"):
             return await interaction.response.send_message(
                 "サーバー内で実行してください。", ephemeral=True,
+            )
+        if not can_assign_roles(interaction, view.guild, view.settings["role_ids"]):
+            return await interaction.response.send_message(
+                "ロールの管理権限、または自分より上のロールを付与しようとしています。",
+                ephemeral=True,
             )
         count = await apply_roles(view.guild, member, view.settings["role_ids"], reason="AutoRole test")
         if count:
