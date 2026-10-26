@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import logging
 import re
+import time
 from typing import Any
 
 import discord
@@ -14,6 +15,9 @@ logger = logging.getLogger(__name__)
 
 KEY = "embed"
 COLOR_RE = re.compile(r"^#?([0-9a-fA-F]{6})$")
+CREATE_COOLDOWN = 3.0
+
+_last_create: dict[tuple[int, int], float] = {}
 
 FEATURE = Feature(
     key=KEY,
@@ -50,6 +54,14 @@ def _channels(guild: Any) -> list[Any]:
                 pass
         usable.append(channel)
     return usable[:25]
+
+
+def _can_manage(interaction: discord.Interaction) -> bool:
+    permissions = getattr(getattr(interaction, "user", None), "guild_permissions", None)
+    return bool(
+        getattr(permissions, "administrator", False)
+        or getattr(permissions, "manage_guild", False)
+    )
 
 
 def parse_color(value: Any) -> int | None:
@@ -97,6 +109,10 @@ class EmbedCreateModal(discord.ui.Modal, title="埋め込みを作成"):
     async def on_submit(self, interaction: discord.Interaction):
         if interaction.guild is None:
             return await interaction.response.send_message("サーバー内で実行してください。", ephemeral=True)
+        if not _can_manage(interaction):
+            return await interaction.response.send_message(
+                "この操作には「サーバーの管理」権限が必要です。", ephemeral=True,
+            )
         current = settings(interaction.guild_id)
         if not current["enabled"] or current["channel_id"] is None:
             return await interaction.response.send_message("埋め込みビルダーは現在オフです。", ephemeral=True)
@@ -129,9 +145,20 @@ class EmbedCreateModal(discord.ui.Modal, title="埋め込みを作成"):
 async def handle_create(interaction: discord.Interaction) -> None:
     if interaction.guild is None or interaction.guild_id is None:
         return await interaction.response.send_message("サーバー内で実行してください。", ephemeral=True)
+    if not _can_manage(interaction):
+        return await interaction.response.send_message(
+            "この操作には「サーバーの管理」権限が必要です。", ephemeral=True,
+        )
     current = settings(interaction.guild_id)
     if not current["enabled"] or current["channel_id"] is None:
         return await interaction.response.send_message("埋め込みビルダーは現在オフです。", ephemeral=True)
+    key = (interaction.guild_id, interaction.user.id)
+    now = time.monotonic()
+    if now - _last_create.get(key, 0.0) < CREATE_COOLDOWN:
+        return await interaction.response.send_message(
+            "連続で作成できません。少し待ってください。", ephemeral=True,
+        )
+    _last_create[key] = now
     return await interaction.response.send_modal(EmbedCreateModal(interaction.guild_id))
 
 
@@ -192,11 +219,7 @@ class EmbedCreateButton(discord.ui.Button):
             return await interaction.response.send_message(
                 "この設定には「サーバーの管理」権限が必要です。", ephemeral=True,
             )
-        if not view.settings["enabled"] or view.settings["channel_id"] is None:
-            return await interaction.response.send_message(
-                "先に投稿先を選び、埋め込みビルダーをオンにしてください。", ephemeral=True,
-            )
-        return await interaction.response.send_modal(EmbedCreateModal(view.guild_id))
+        return await handle_create(interaction)
 
 
 class EmbedSettingsView(AssistFeatureView):
