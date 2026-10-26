@@ -50,6 +50,14 @@ Generate only English during the English-first migration:
 python scripts/sync_locales.py --targets en
 ```
 
+CIやコミット前に、APIへ接続せず翻訳漏れだけを確認できます。漏れがある場合は終了コード1になります。
+
+```bash
+python scripts/sync_locales.py \
+  --targets en,zh,ko,id,th,ar,hi \
+  --check-only
+```
+
 The generated files are committed with the code change:
 
 ```text

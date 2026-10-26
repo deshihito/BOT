@@ -14,9 +14,12 @@ import re
 import sys
 from pathlib import Path
 
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
 from core.libretranslate import LibreTranslateClient, LibreTranslateError
 
-ROOT = Path(__file__).resolve().parents[1]
 TOKEN_RE = re.compile(r"\{[^{}]+\}|`[^`]+`|https?://[^\s)]+")
 
 
@@ -80,12 +83,29 @@ async def main() -> int:
     parser.add_argument("--url", default=os.getenv("LIBRETRANSLATE_URL", "http://127.0.0.1:18080"))
     parser.add_argument("--api-key", default=os.getenv("LIBRETRANSLATE_API_KEY", ""))
     parser.add_argument("--overwrite", action="store_true", help="replace existing translations")
+    parser.add_argument("--check-only", action="store_true",
+                        help="report missing keys without contacting LibreTranslate")
     args = parser.parse_args()
     source = load_json(Path(args.source))
     if not source:
         print(f"No source keys found in {args.source}", file=sys.stderr)
         return 2
     targets = [value.strip() for value in args.targets.split(",") if value.strip() and value.strip() != "ja"]
+    missing: dict[str, list[str]] = {}
+    for target in targets:
+        existing = load_json(Path(args.output_dir) / f"{target}.json")
+        keys = [key for key in source if key not in existing]
+        if keys:
+            missing[target] = keys
+    if args.check_only:
+        if not missing:
+            print("Locale catalogs are complete")
+            return 0
+        for target, keys in missing.items():
+            print(f"{target}: {len(keys)} missing key(s)")
+            for key in keys:
+                print(f"  - {key}")
+        return 1
     client = LibreTranslateClient(args.url, args.api_key)
     try:
         for target in targets:
