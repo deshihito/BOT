@@ -135,6 +135,16 @@ async def on_message(cog: Any, message: Any) -> None:
     channel = getattr(message, "channel", None)
     if channel is None or getattr(channel, "id", None) != current["channel_id"]:
         return
+    me = getattr(guild, "me", None)
+    if me is not None:
+        try:
+            permissions = channel.permissions_for(me)
+            if not getattr(permissions, "read_message_history", False):
+                return
+            if not getattr(permissions, "add_reactions", False):
+                return
+        except Exception:
+            pass
     add_reaction = getattr(message, "add_reaction", None)
     if not callable(add_reaction):
         return

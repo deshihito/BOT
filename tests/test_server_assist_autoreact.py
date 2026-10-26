@@ -32,12 +32,18 @@ class FakeUser:
 
 
 class FakeChannel:
-    def __init__(self, channel_id=100, name="雑談"):
+    def __init__(self, channel_id=100, name="雑談", add_reactions=True, read_message_history=True):
         self.id = channel_id
         self.name = name
+        self.add_reactions = add_reactions
+        self.read_message_history = read_message_history
 
     def permissions_for(self, member):
-        return types.SimpleNamespace(send_messages=True)
+        return types.SimpleNamespace(
+            send_messages=True,
+            add_reactions=self.add_reactions,
+            read_message_history=self.read_message_history,
+        )
 
 
 class FakeGuild:
@@ -138,6 +144,18 @@ class AutoReactTest(unittest.IsolatedAsyncioTestCase):
         await autoreact.on_message(None, message)
         await autoreact.drain()
         message.add_reaction.assert_awaited_once()
+
+    async def test_missing_permissions_skip_reactions(self):
+        await autoreact.update_settings(
+            1, autoreact.KEY, enabled=True, channel_id=100, emojis=["👍"],
+        )
+        guild = FakeGuild()
+        guild.channel = FakeChannel(add_reactions=False, read_message_history=False)
+        guild.text_channels = [guild.channel]
+        message = FakeMessage(guild)
+        await autoreact.on_message(None, message)
+        await autoreact.drain()
+        message.add_reaction.assert_not_awaited()
 
     async def test_modal_saves_emojis(self):
         modal = autoreact.AutoReactEmojiModal(1)
