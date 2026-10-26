@@ -43,21 +43,6 @@ def settings(guild_id: int) -> dict[str, Any]:
     }
 
 
-def _channels(guild: Any) -> list[Any]:
-    me = getattr(guild, "me", None)
-    channels = list(getattr(guild, "text_channels", []) or [])
-    usable: list[Any] = []
-    for channel in channels:
-        if me is not None:
-            try:
-                if not channel.permissions_for(me).send_messages:
-                    continue
-            except Exception:
-                pass
-        usable.append(channel)
-    return usable[:25]
-
-
 def _can_manage(interaction: discord.Interaction) -> bool:
     permissions = getattr(getattr(interaction, "user", None), "guild_permissions", None)
     return bool(
@@ -176,30 +161,31 @@ async def handle_create(interaction: discord.Interaction) -> None:
     return await interaction.response.send_modal(EmbedCreateModal(interaction.guild_id))
 
 
-class EmbedChannelSelect(discord.ui.Select):
+class EmbedChannelSelect(discord.ui.ChannelSelect):
     def __init__(self, parent: "EmbedSettingsView"):
         self.parent_view = parent
-        current = parent.settings["channel_id"]
-        options = [
-            discord.SelectOption(
-                label=str(getattr(channel, "name", "チャンネル"))[:100],
-                value=str(channel.id),
-                default=channel.id == current,
-            )
-            for channel in _channels(parent.guild)
-        ]
-        if not options:
-            options = [discord.SelectOption(label="送信できるチャンネルがありません", value="__none__")]
-        super().__init__(placeholder="Embedを投稿するチャンネル", options=options[:25], row=0)
+        super().__init__(
+            placeholder="Embedを投稿するチャンネル",
+            channel_types=[discord.ChannelType.text, discord.ChannelType.news],
+            row=0,
+        )
 
     async def callback(self, interaction: discord.Interaction):
         if not self.parent_view.can_manage(interaction):
             return await interaction.response.send_message(
                 "この設定には「サーバーの管理」権限が必要です。", ephemeral=True,
             )
-        if self.values[0] == "__none__":
-            return await interaction.response.send_message("送信できるチャンネルがありません。", ephemeral=True)
-        channel_id = int(self.values[0])
+        channel_id = self.values[0].id
+        channel = self.parent_view.guild.get_channel(channel_id)
+        me = getattr(self.parent_view.guild, "me", None)
+        if channel is not None and me is not None:
+            try:
+                if not channel.permissions_for(me).send_messages:
+                    return await interaction.response.send_message(
+                        "そのチャンネルには送信できません。", ephemeral=True,
+                    )
+            except Exception:
+                pass
         await update_settings(self.parent_view.guild_id, KEY, channel_id=channel_id)
         self.parent_view.settings["channel_id"] = channel_id
         await self.parent_view.refresh(interaction, "投稿先のチャンネルを保存しました。")
