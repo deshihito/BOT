@@ -153,12 +153,18 @@ class PanelLayoutView(discord.ui.LayoutView):
         except discord.HTTPException:
             pass
 
-    def refresh(self, interaction: discord.Interaction | None = None):
+    def refresh(self, interaction: discord.Interaction | None = None, *args, **kwargs):
         """状態を更新する。戻り値は常に await 可能。
 
-        - ``view.refresh()``                  : 画面部品だけ再構築（await有無どちらでも可）。
-        - ``await view.refresh(interaction)`` : 再構築 + メッセージ編集まで行う。
+        - view.refresh()                  : 画面部品だけ再構築（await有無どちらでも可）。
+        - await view.refresh(interaction) : 再構築 + メッセージ編集まで行う。
+
+        サーバーアシストの設定画面は refresh(interaction, notice) のように
+        notice を追加で渡す。その場合はラップしているパネル側の refresh に
+        委譲する（このラッパー自身の refresh とシグネチャが衝突するため）。
         """
+        if args or kwargs:
+            return self.panel.refresh(interaction, *args, **kwargs)
         self.panel.genre = getattr(self, "genre", getattr(self.panel, "genre", None))
         pending = self.panel.refresh()
 

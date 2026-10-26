@@ -2,6 +2,8 @@ import types
 import unittest
 from unittest.mock import AsyncMock
 
+import discord
+
 from discord.interactions import interaction_message_response_params
 from cogs.game import GameDetailView
 from cogs.sio_voice import VoicePanelView
@@ -10,6 +12,22 @@ from core.panel_v2 import as_panel_v2, edit_message_v2
 
 
 class PanelV2StateTest(unittest.IsolatedAsyncioTestCase):
+    async def test_wrapped_refresh_forwards_notice_arguments(self):
+        panel = discord.ui.View(timeout=300)
+        panel.embed = lambda: discord.Embed(title="test")
+        panel.refresh = AsyncMock(return_value=None)
+        wrapped = as_panel_v2(panel)
+        interaction = types.SimpleNamespace(
+            response=types.SimpleNamespace(
+                is_done=lambda: False,
+                edit_message=AsyncMock(),
+            )
+        )
+
+        await wrapped.refresh(interaction, "保存しました")
+
+        panel.refresh.assert_awaited_once_with(interaction, "保存しました")
+
     async def test_v2_edit_payload_is_accepted_by_discord_py_serializer(self):
         wrapped = as_panel_v2(VoicePanelView(None))
 
@@ -51,7 +69,7 @@ class PanelV2StateTest(unittest.IsolatedAsyncioTestCase):
         select = wrapped.children[0].children[1].children[0]
         select._values = ["connection"]
         interaction = types.SimpleNamespace(
-            response=types.SimpleNamespace(edit_message=AsyncMock())
+            response=types.SimpleNamespace(edit_message=AsyncMock(), is_done=lambda: False)
         )
 
         await select.callback(interaction)
@@ -70,7 +88,7 @@ class PanelV2StateTest(unittest.IsolatedAsyncioTestCase):
         select._view = panel
         select._values = ["connection"]
         interaction = types.SimpleNamespace(
-            response=types.SimpleNamespace(edit_message=AsyncMock())
+            response=types.SimpleNamespace(edit_message=AsyncMock(), is_done=lambda: False)
         )
 
         await select.callback(interaction)
@@ -85,7 +103,7 @@ class PanelV2StateTest(unittest.IsolatedAsyncioTestCase):
         select = wrapped.children[0].children[2].children[0]
         select._values = [select.options[0].value]
         interaction = types.SimpleNamespace(
-            response=types.SimpleNamespace(edit_message=AsyncMock())
+            response=types.SimpleNamespace(edit_message=AsyncMock(), is_done=lambda: False)
         )
 
         await select.callback(interaction)
@@ -99,7 +117,7 @@ class PanelV2StateTest(unittest.IsolatedAsyncioTestCase):
         select = wrapped.children[0].children[2].children[0]
         select._values = [select.options[0].value]
         interaction = types.SimpleNamespace(
-            response=types.SimpleNamespace(edit_message=AsyncMock())
+            response=types.SimpleNamespace(edit_message=AsyncMock(), is_done=lambda: False)
         )
 
         await select.callback(interaction)
