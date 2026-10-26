@@ -54,7 +54,7 @@ class MyBot(commands.Bot):
             print(df.format_log("ERROR: './cogs' directory not found."))
         
         try:
-            synced = await self.tree.sync()
+            synced = await sync_application_commands(self)
             print(df.format_log(f"Slash commands synced: {len(synced)}"))
         except Exception:
             print(df.format_log(f"Slash command sync failed:\n{traceback.format_exc()}"))
@@ -76,12 +76,39 @@ class MyBot(commands.Bot):
 bot = MyBot()
 bot.supabase = supabase
 
+
+async def sync_application_commands(client: commands.Bot):
+    """Sync local commands without removing Discord's Entry Point command."""
+    tree = client.tree
+    commands_to_sync = tree._get_all_commands(guild=None)
+    payload = [command.to_dict(tree) for command in commands_to_sync]
+    remote = await client.http.get_global_commands(client.application_id)
+    for command in remote:
+        if command.get("type") != 4:
+            continue
+        preserved = {
+            key: value
+            for key, value in command.items()
+            if key not in {"id", "application_id", "guild_id", "version"}
+        }
+        if not any(item.get("type") == 4 for item in payload):
+            payload.append(preserved)
+        break
+    return await client.http.bulk_upsert_global_commands(client.application_id, payload=payload)
+
 @bot.command()
 @commands.is_owner()
 async def sync(ctx):
     try:
-        synced = await bot.tree.sync()
+        synced = await sync_application_commands(bot)
         await ctx.send(f"<:success:1490985168100659322> {len(synced)} 個のスラッシュコマンドを同期しました！")
+    except discord.HTTPException as e:
+        if e.code == 50240:
+            await ctx.send(
+                "<:failed:1490986584676368535> 同期できませんでした。DiscordのEntry Pointコマンドを保持したまま再同期してください。"
+            )
+        else:
+            await ctx.send(f"<:failed:1490986584676368535> 同期失敗: {e}")
     except Exception as e:
         await ctx.send(f"<:failed:1490986584676368535> 同期失敗: {e}")
 
