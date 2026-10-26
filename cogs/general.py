@@ -507,12 +507,19 @@ def _levelup_safe_name(name: str, can_cjk: bool) -> str:
     return "".join(out).strip()
 
 
-def render_levelup_card(avatar_bytes: bytes | None, name: str, before: int, after: int, seed: int = 0) -> bytes:
+def render_levelup_card(
+    avatar_bytes: bytes | None,
+    name: str,
+    before: int,
+    after: int,
+    seed: int = 0,
+    *,
+    bot_avatar_bytes: bytes | None = None,
+) -> bytes:
     """レベルアップ画像(PNG)を生成して bytes で返す。CPU処理なので to_thread で呼ぶこと。
 
-    白基調の落ち着いたカード。参考画像の横並び(アイコン | LEVEL UP | 9 > 10)を踏襲しつつ、
-    チップ・太い矢印・グラデ・影などの装飾は使わず、細いリング・細い区切り線・
-    控えめなラベルだけを残した「足して2で割った」デザイン。
+    白基調。左にユーザーアイコン、中央に見出しとレベル変化(矢印付き)、右上に小さな BOT バッジ。
+    アイコン未取得時はユーザー側は白いシルエット、BOT 側はバッジ自体を描画しない。
     必ず含める情報: ユーザーのアイコン / 前のレベル / レベルアップ後のレベル。
     seed は互換のため残している(未使用)。
     """
@@ -530,6 +537,7 @@ def render_levelup_card(avatar_bytes: bytes | None, name: str, before: int, afte
     MUTE = (150, 156, 170, 255)   # 前のレベル / ラベル / ユーザー名
     LINE = (228, 232, 240, 255)   # 区切り線・リング
     ACCENT = (59, 91, 255, 255)   # アクセント青(参考画像の赤の代わり)
+    RING = (127, 178, 201, 255)   # BOT アイコン由来の水色アクセント
 
     img = Image.new("RGBA", (W, H), (0, 0, 0, 0))
     d = ImageDraw.Draw(img)
@@ -540,17 +548,15 @@ def render_levelup_card(avatar_bytes: bytes | None, name: str, before: int, afte
         fill=BG, outline=LINE, width=px(2),
     )
 
-    # ---- アイコン(薄いリング付き) ----
+    # ============================================================
+    # 左: ユーザーアイコン(リング付き)
+    # ============================================================
     D = px(196)
     ax, ay = px(56), (H - D) // 2
     ring_w = px(4)
     R = D // 2 + px(8) + ring_w  # リング外半径(控えめ)
     acx, acy = ax + D // 2, ay + D // 2
-
-    d.ellipse(
-        [acx - R, acy - R, acx + R, acy + R],
-        outline=LINE, width=ring_w,
-    )
+    d.ellipse([acx - R, acy - R, acx + R, acy + R], outline=RING, width=ring_w)
 
     avatar = None
     if avatar_bytes:
@@ -567,57 +573,109 @@ def render_levelup_card(avatar_bytes: bytes | None, name: str, before: int, afte
     ImageDraw.Draw(amask).ellipse([0, 0, D - 1, D - 1], fill=255)
     img.paste(avatar, (ax, ay), amask)
 
-    # ---- レイアウト ----
+    # ============================================================
+    # 右上: BOT バッジ(小さな円形アイコン)
+    # ============================================================
+    BOT_D = px(56)
+    BOT_MARGIN = px(28)
+    bx = W - BOT_MARGIN - BOT_D
+    by = BOT_MARGIN
+
+    if bot_avatar_bytes:
+        try:
+            bot_avatar = (
+                Image.open(io.BytesIO(bot_avatar_bytes))
+                .convert("RGBA")
+                .resize((BOT_D, BOT_D), Image.LANCZOS)
+            )
+        except Exception:
+            bot_avatar = None
+        if bot_avatar is not None:
+            bring_w = px(2)
+            bR = BOT_D // 2 + px(4) + bring_w
+            bcx, bcy = bx + BOT_D // 2, by + BOT_D // 2
+            d.ellipse([bcx - bR, bcy - bR, bcx + bR, bcy + bR], outline=LINE, width=bring_w)
+
+            bmask = Image.new("L", (BOT_D, BOT_D), 0)
+            ImageDraw.Draw(bmask).ellipse([0, 0, BOT_D - 1, BOT_D - 1], fill=255)
+            img.paste(bot_avatar, (bx, by), bmask)
+
+    # ============================================================
+    # 中央: 見出し + レベル変化
+    # ============================================================
     TX = ax + D + px(52)
     right = W - px(56)
-    mid = H // 2
+    center_y = H // 2
 
-    # 「LEVEL UP」 極太ディスプレイフォント・インク色(「!」は控えめに外す=装飾削減)
+    # 「LEVEL UP」 極太ディスプレイフォント・インク色
     up_text = "LEVEL UP"
     up_size = px(60)
     up_font = _levelup_display_font(up_size)
-    while up_size > px(28) and d.textlength(up_text, font=up_font) > (right - TX) * 0.5:
+    # BOT バッジの分だけ右側の余白を考慮して縮める
+    available = (right - px(80)) - TX
+    while up_size > px(28) and d.textlength(up_text, font=up_font) > available * 0.5:
         up_size -= px(2)
         up_font = _levelup_display_font(up_size)
-
-    # 上に小さな控えめラベル
-    label = "GENERAL"
-    lfont = _levelup_font(px(15))
-    d.text((TX + px(2), mid - px(38)), label, font=lfont, fill=MUTE, anchor="ls")
-
-    # 「LEVEL UP」本体
-    d.text((TX, mid - px(4)), up_text, font=up_font, fill=INK, anchor="ls")
     up_w = d.textlength(up_text, font=up_font)
+    up_h = up_size
 
-    # レベル変化(前:ミュート / > :ミュート / 後:アクセント青)
-    prev_text, sep_text, new_text = str(before), ">", str(after)
-    pfont = _levelup_display_font(px(42))
-    sfont = _levelup_display_font(px(36))
-    nfont = _levelup_display_font(px(64))
+    title_baseline = center_y + int(up_h * 0.35)
+
+    # GENERAL ラベルはベースラインの上に独立配置(見出しと重ねない)
+    label = "GENERAL"
+    lfont = _levelup_font(px(14))
+    label_y = title_baseline - int(up_h * 0.62) - px(6)
+    d.text((TX + px(2), label_y), label, font=lfont, fill=MUTE, anchor="ls")
+    d.text((TX, title_baseline), up_text, font=up_font, fill=INK, anchor="ls")
+
+    # 矢印(図形): 文字 ">" ではなく図形で描画してレベルアップを強調
+    arrow_w = px(56)
+    arrow_h = px(28)
+    arrow_x0 = TX + int(up_w) + px(44)
+    arrow_y = center_y + px(6)
+    shaft_h = max(px(4), int(arrow_h * 0.18))
+    d.rectangle(
+        [arrow_x0, arrow_y - shaft_h // 2, arrow_x0 + arrow_w - px(14), arrow_y + shaft_h // 2],
+        fill=ACCENT,
+    )
+    d.polygon(
+        [
+            (arrow_x0 + arrow_w - px(18), arrow_y - arrow_h // 2),
+            (arrow_x0 + arrow_w, arrow_y),
+            (arrow_x0 + arrow_w - px(18), arrow_y + arrow_h // 2),
+            (arrow_x0 + arrow_w - px(28), arrow_y),  # 内側のくぼみで矢じりを締める
+        ],
+        fill=ACCENT,
+    )
+
+    # レベル変化(前:ミュート / 後:アクセント青・強調)
+    prev_text, new_text = str(before), str(after)
+    pfont = _levelup_display_font(px(44))
+    nfont = _levelup_display_font(px(76))
 
     p_w = d.textlength(prev_text, font=pfont)
-    s_w = d.textlength(sep_text, font=sfont)
     n_w = d.textlength(new_text, font=nfont)
-    gap = px(14)
-    group_w = p_w + gap + s_w + gap + n_w
+    gap_before = px(22)
+    gap_after = px(18)
 
-    gx = TX + up_w + px(52)
-    if gx + group_w > right:
-        gx = max(TX + up_w + px(20), right - group_w)
+    p_x = arrow_x0 - gap_before - p_w
+    if p_x < TX + up_w + px(12):
+        p_x = TX + up_w + px(12)
+    d.text((p_x, title_baseline), prev_text, font=pfont, fill=MUTE, anchor="ls")
 
-    baseline = mid + px(2)
-    d.text((gx, baseline), prev_text, font=pfont, fill=MUTE, anchor="ls")
-    d.text((gx + p_w + gap, baseline - px(4)), sep_text, font=sfont, fill=MUTE, anchor="ls")
-    d.text((gx + p_w + gap + s_w + gap, baseline + px(2)), new_text, font=nfont, fill=ACCENT, anchor="ls")
+    n_x = arrow_x0 + arrow_w + gap_after
+    d.text((n_x, title_baseline + px(2)), new_text, font=nfont, fill=ACCENT, anchor="ls")
 
-    # ---- 下部: 区切り線 + ユーザー名 ----
+    # ============================================================
+    # 下部: 区切り線 + ユーザー名
+    # ============================================================
     line_y = H - px(58)
     d.line([px(56), line_y, W - px(56), line_y], fill=LINE, width=px(2))
 
     shown = _levelup_safe_name(name, can_cjk)
     if shown:
         nfont_small = _levelup_font(px(20))
-        maxw = W - px(112)
+        maxw = W - px(112) - px(80)  # 右上 BOT バッジと干渉しない範囲(実質影響なし)
         text = shown
         while len(text) > 1 and d.textlength(text, font=nfont_small) > maxw:
             text = text[:-1]
@@ -1381,7 +1439,20 @@ class GeneralCog(commands.Cog):
         can_send = perms.send_messages_in_threads if isinstance(channel, discord.Thread) else perms.send_messages
         return bool(can_send), bool(perms.attach_files)
 
-    async def render_levelup_image(self, user, before: int, after: int) -> bytes | None:
+    async def _fetch_bot_avatar(self) -> bytes | None:
+        """レベルアップ画像用の BOT アイコンを取得する(失敗時 None)。"""
+        try:
+            bot_user = self.bot.user
+            if bot_user is None:
+                return None
+            return await bot_user.display_avatar.replace(size=128, format="png").read()
+        except Exception:
+            logger.debug("BOTアイコンの取得に失敗しました", exc_info=True)
+            return None
+
+    async def render_levelup_image(
+        self, user, before: int, after: int, *, bot_avatar_bytes: bytes | None = None
+    ) -> bytes | None:
         """レベルアップ画像(PNGのbytes)を作る。Pillowが無い等で作れなければ None。/support のプレビューからも使う。"""
         avatar_bytes = None
         try:
@@ -1389,10 +1460,14 @@ class GeneralCog(commands.Cog):
         except Exception:
             logger.debug("レベルアップ画像: アイコンの取得に失敗 (user=%s)", getattr(user, "id", "?"), exc_info=True)
         name = getattr(user, "display_name", None) or getattr(user, "name", "") or ""
+        if bot_avatar_bytes is None:
+            bot_avatar_bytes = await self._fetch_bot_avatar()
         try:
             async with self._levelup_sem:
                 return await asyncio.to_thread(
-                    render_levelup_card, avatar_bytes, name, before, after, getattr(user, "id", 0)
+                    render_levelup_card,
+                    avatar_bytes, name, before, after, getattr(user, "id", 0),
+                    bot_avatar_bytes=bot_avatar_bytes,
                 )
         except ImportError:
             if not self._levelup_pillow_warned:
@@ -1439,7 +1514,10 @@ class GeneralCog(commands.Cog):
                 "allowed_mentions": discord.AllowedMentions.none(),  # 表示はメンション、通知(ピング)は飛ばさない
             }
             if can_attach:
-                png = await self.render_levelup_image(user, before, after)
+                bot_avatar_bytes = await self._fetch_bot_avatar()
+                png = await self.render_levelup_image(
+                    user, before, after, bot_avatar_bytes=bot_avatar_bytes
+                )
                 if png:
                     kwargs["file"] = discord.File(io.BytesIO(png), filename="levelup.png")
             await target.send(**kwargs)
