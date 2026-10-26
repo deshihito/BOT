@@ -19,6 +19,7 @@ from core import guild_settings
 from core.storage import KVStore
 from core.server_assist import discover_features
 from core.server_assist.features import autoreact
+from cogs.server_assist import ServerAssistCog
 from tests.fake_kv_supabase import FakeKVSupabase
 
 
@@ -207,6 +208,25 @@ class AutoReactTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(first.add_reaction.await_count, 1)
         second.add_reaction.assert_not_awaited()
         await autoreact.shutdown()
+        self.assertFalse(autoreact._tasks)
+
+    async def test_cog_unload_cancels_reaction_tasks(self):
+        await autoreact.update_settings(
+            1, autoreact.KEY, enabled=True, channel_id=100, emojis=["👍"],
+        )
+        gate = asyncio.Event()
+
+        async def slow(emoji):
+            await gate.wait()
+
+        message = FakeMessage(FakeGuild())
+        message.add_reaction = AsyncMock(side_effect=slow)
+        await autoreact.on_message(None, message)
+        await asyncio.sleep(0)
+        self.assertTrue(autoreact._tasks)
+        cog = ServerAssistCog(types.SimpleNamespace())
+        cog.modules = {"autoreact": autoreact}
+        await cog.cog_unload()
         self.assertFalse(autoreact._tasks)
 
 
