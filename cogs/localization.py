@@ -7,6 +7,45 @@ from core import localization
 from core.guild_settings import get_store
 
 logger = logging.getLogger(__name__)
+_PATCHED = False
+
+def install_discord_localization() -> None:
+    """Translate every Discord-facing payload at the common transport boundary."""
+    global _PATCHED
+    if _PATCHED:
+        return
+    _PATCHED = True
+
+    # These are the common paths used by cogs, webhooks, interactions and edits.
+    import discord
+    import discord.abc
+    targets = (
+        (discord.abc.Messageable, "send"),
+        (discord.InteractionResponse, "send_message"),
+        (discord.InteractionResponse, "edit_message"),
+        (discord.InteractionResponse, "send_modal"),
+        (discord.Webhook, "send"),
+        (discord.Webhook, "edit_message"),
+        (discord.Message, "edit"),
+        (discord.Interaction, "edit_original_response"),
+    )
+    for cls, method_name in targets:
+        original = getattr(cls, method_name, None)
+        if original is None or getattr(original, "_agobot_localized", False):
+            continue
+        async def localized(self, *args, __original=original, **kwargs):
+            from core.localization import localize_kwargs, localize_object, guild_id_for_sender, guild_locale, translate_text
+            kwargs = localize_kwargs(self, kwargs)
+            args = list(args)
+            guild_id = guild_id_for_sender(self)
+            locale = guild_locale(guild_id) if guild_id is not None else "en"
+            if args and isinstance(args[0], str):
+                args[0] = translate_text(args[0], locale)
+            elif args:
+                args[0] = localize_object(args[0], locale)
+            return await __original(self, *args, **kwargs)
+        localized._agobot_localized = True
+        setattr(cls, method_name, localized)
 
 class LanguageSelect(discord.ui.Select):
     def __init__(self, cog: "LocalizationCog", current: str):
@@ -36,6 +75,9 @@ class LanguageView(discord.ui.View):
 class LocalizationCog(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
+
+    async def cog_load(self):
+        await get_store().ensure_loaded()
 
     async def set_locale(self, guild_id: int, locale: str) -> str:
         locale = localization.normalize_locale(locale)
@@ -83,4 +125,5 @@ class LocalizationCog(commands.Cog):
                 logger.info("language panel could not be updated", exc_info=True)
 
 async def setup(bot: commands.Bot):
+    install_discord_localization()
     await bot.add_cog(LocalizationCog(bot))
