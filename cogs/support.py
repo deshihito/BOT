@@ -75,6 +75,7 @@ SUPPORT_ACTIONS = [
     app_commands.Choice(name="SNS新着通知（X・YouTube）", value="sns_notify"),
     app_commands.Choice(name="Quest通知（Discord Orbs）", value="quest_notify"),
     app_commands.Choice(name="レベルアップ通知（EXP）", value="levelup_notify"),
+    app_commands.Choice(name="サーバーアシスト設定", value="server_assist"),
 ]
 
 SUPPORT_GENRES = {
@@ -85,6 +86,10 @@ SUPPORT_GENRES = {
     "server": (
         "サーバー管理",
         "ロール操作、絵文字便乗、VC履歴、メッセージ編集履歴、認証パネル、ロールパネル、レベルアップ通知",
+    ),
+    "assist": (
+        "サーバーアシスト",
+        "参加・退出メッセージ、自動ロール、Starboard、レベル、一時VC",
     ),
     "bumprta": ("bump/up・RTA", "通知設定と RTA 状態・ランキング"),
     "event": ("イベント", "抽選の作成"),
@@ -117,6 +122,7 @@ SUPPORT_ACTIONS_BY_GENRE = {
     ],
     "bumprta": [(c.name, c.value) for c in SUPPORT_ACTIONS[5:8]],
     "event": [(SUPPORT_ACTIONS[9].name, SUPPORT_ACTIONS[9].value)],
+    "assist": [("サーバーアシスト設定", "server_assist")],
 }
 SUPPORT_ACTIONS_BY_GENRE["server"].append((SUPPORT_ACTIONS[17].name, SUPPORT_ACTIONS[17].value))
 SUPPORT_ACTIONS_BY_GENRE["server"].append((SUPPORT_ACTIONS[20].name, SUPPORT_ACTIONS[20].value))
@@ -4185,6 +4191,7 @@ class SupportCog(commands.Cog):
         "sns_notify": "administrator",
         "quest_notify": "administrator",
         "levelup_notify": "manage_guild",
+        "server_assist": "manage_guild",
     }
 
     def __init__(self, bot: commands.Bot):
@@ -5600,6 +5607,12 @@ class SupportCog(commands.Cog):
     async def dispatch(self, interaction: discord.Interaction, selected: str):
         if not await self.check_support_permission(interaction, selected):
             return
+
+        if selected == "server_assist":
+            cog = self.bot.get_cog("ServerAssistCog")
+            if cog is None:
+                return await self._missing(interaction, "サーバーアシスト")
+            return await cog.show_home(interaction)
 
         if selected == "auth_panel":
             return await self.show_auth_settings(interaction)

@@ -87,7 +87,8 @@ SHORTCUT_ROOTS = {
                               ("bump/upオン", "bumprta_on"), ("bump/upオフ", "bumprta_off"),
                               ("絵文字便乗設定", "binjou"), ("VC入退室履歴", "vc_log"),
                               ("メッセージ編集履歴", "message_log"), ("モデレート履歴", "moderation_log"),
-                              ("ハニーポット", "honeypot"), ("チケットツール", "ticket")]),
+                              ("ハニーポット", "honeypot"), ("チケットツール", "ticket"),
+                              ("サーバーアシスト", "server_assist")]),
     "help": ("/help", [("ヘルプを表示", "overview")]),
 }
 
