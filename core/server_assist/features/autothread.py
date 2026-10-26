@@ -1,6 +1,7 @@
 """Create a thread for every message in a configured channel."""
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any
 
@@ -20,6 +21,10 @@ ARCHIVE_CHOICES = {
     10080: "1週間",
 }
 DEFAULT_ARCHIVE = 1440
+SEEN_LIMIT = 1000
+
+_seen: set[int] = set()
+_tasks: set[asyncio.Task] = set()
 
 FEATURE = Feature(
     key=KEY,
@@ -66,6 +71,28 @@ def _thread_name(message: Any) -> str:
     return (first_line or "新しいスレッド")[:100]
 
 
+def reset_state() -> None:
+    _seen.clear()
+
+
+async def drain() -> None:
+    """テスト用: バックグラウンドのスレッド作成が終わるまで待つ。"""
+    if _tasks:
+        await asyncio.gather(*list(_tasks), return_exceptions=True)
+
+
+async def _create_thread(
+    message: Any, name: str, archive_minutes: int, guild_id: Any, channel_id: Any,
+) -> None:
+    try:
+        await message.create_thread(name=name, auto_archive_duration=archive_minutes)
+    except Exception:
+        logger.exception(
+            "自動スレッドを作成できませんでした: guild=%s channel=%s",
+            guild_id, channel_id,
+        )
+
+
 async def on_message(cog: Any, message: Any) -> None:
     guild = getattr(message, "guild", None)
     if guild is None:
@@ -79,21 +106,27 @@ async def on_message(cog: Any, message: Any) -> None:
     channel = getattr(message, "channel", None)
     if channel is None or getattr(channel, "id", None) != current["channel_id"]:
         return
+    message_id = getattr(message, "id", None)
+    if message_id is not None:
+        if message_id in _seen:
+            return
+        if len(_seen) >= SEEN_LIMIT:
+            _seen.clear()
+        _seen.add(message_id)
     if getattr(message, "thread", None) is not None:
         return
     create_thread = getattr(message, "create_thread", None)
     if not callable(create_thread):
         return
-    try:
-        await create_thread(
-            name=_thread_name(message),
-            auto_archive_duration=current["archive_minutes"],
-        )
-    except Exception:
-        logger.exception(
-            "自動スレッドを作成できませんでした: guild=%s channel=%s",
+    # レート制限待ちで他のサーバーアシスト処理を止めないよう、作成はバックグラウンドで行う。
+    task = asyncio.create_task(
+        _create_thread(
+            message, _thread_name(message), current["archive_minutes"],
             getattr(guild, "id", None), current["channel_id"],
         )
+    )
+    _tasks.add(task)
+    task.add_done_callback(_tasks.discard)
 
 
 class AutoThreadChannelSelect(discord.ui.Select):
