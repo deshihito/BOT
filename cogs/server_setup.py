@@ -18,6 +18,7 @@ from discord.ext import commands
 
 from core.command_catalog import permission_label
 from core.guild_settings import NATION_SECTION, NOTIFY_ALL, NOTIFY_LEVELS, NOTIFY_MAJOR, get_store, nation_settings
+from core import localization
 
 logger = logging.getLogger(__name__)
 
@@ -44,18 +45,36 @@ def pick_welcome_channel(guild):
     return None
 
 
-def welcome_embed(bot_name: str = "AGOBOT") -> discord.Embed:
-    embed = discord.Embed(
-        title=f"👋 {bot_name} を追加してくれてありがとう！",
-        description=(
+def welcome_embed(bot_name: str = "AGOBOT", locale: str = localization.DEFAULT_LOCALE) -> discord.Embed:
+    if localization.normalize_locale(locale) == "en":
+        title = f"👋 Thanks for adding {bot_name}!"
+        description = (
+            "Five commands (5つのコマンド) unlock more than 100 features (100以上の機能).\n"
+            "Server tools are available from `/support`, including frontier AI models (フロンティアモデル).\n"
+            "Use `/help` to browse the command guide.\n\n"
+            "Tip: send `今北産業` in a channel to summarize the latest conversation in three lines."
+        )
+    else:
+        title = f"👋 {bot_name} を追加してくれてありがとう！"
+        description = (
             "コマンドはたった5つ。それだけで100以上の機能が使えます。\n"
             "サポート機能は `/support` に集約。主要AIフロンティアモデルも使い放題です。\n"
             "機能一覧と使い方は `/help` から。\n\n"
             "*おまけ：チャンネルで「今北産業」と送ると、直近の会話を3行で要約します。*"
-        ),
+        )
+    embed = discord.Embed(
+        title=title,
+        description=description,
         color=EMBED_COLOR,
     )
     return embed
+
+def language_panel_embed() -> discord.Embed:
+    return discord.Embed(
+        title="🌐 Choose a server language / サーバーの言語を選択",
+        description=localization.text("welcome_language", localization.DEFAULT_LOCALE),
+        color=EMBED_COLOR,
+    )
 
 
 # ---------------------------------------------------------------- 権限チェック
@@ -515,6 +534,17 @@ class ServerSetup(commands.Cog):
             return
         try:
             await channel.send(embed=welcome_embed(getattr(self.bot.user, "name", None) or "AGOBOT"))
+            panel = await channel.send(embed=language_panel_embed())
+            for locale in localization.SUPPORTED_LOCALES:
+                await panel.add_reaction(localization.LOCALE_FLAGS[locale])
+            panel_id = getattr(panel, "id", None)
+            if isinstance(panel_id, int) and not isinstance(panel_id, bool):
+                await get_store().update(
+                    guild.id,
+                    localization.LANGUAGE_SECTION,
+                    locale=localization.DEFAULT_LOCALE,
+                    panel_message_id=panel_id,
+                )
         except discord.HTTPException:
             logger.warning("あいさつを送れませんでした: guild=%s", guild.id, exc_info=True)
 
