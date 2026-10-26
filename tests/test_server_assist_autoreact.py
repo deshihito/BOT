@@ -6,6 +6,7 @@ import sys
 import tempfile
 import types
 import unittest
+import asyncio
 from unittest.mock import AsyncMock
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -167,6 +168,28 @@ class AutoReactTest(unittest.IsolatedAsyncioTestCase):
         )
         await emoji_button.callback(interaction)
         interaction.response.send_modal.assert_awaited_once()
+
+    async def test_pending_task_cap_and_shutdown(self):
+        self.addCleanup(setattr, autoreact, "MAX_TASKS", 100)
+        autoreact.MAX_TASKS = 1
+        await autoreact.update_settings(
+            1, autoreact.KEY, enabled=True, channel_id=100, emojis=["👍"],
+        )
+        gate = asyncio.Event()
+
+        async def slow(emoji):
+            await gate.wait()
+
+        first = FakeMessage(FakeGuild(), message_id=1)
+        first.add_reaction = AsyncMock(side_effect=slow)
+        second = FakeMessage(FakeGuild(), message_id=2)
+        await autoreact.on_message(None, first)
+        await asyncio.sleep(0)
+        await autoreact.on_message(None, second)
+        self.assertEqual(first.add_reaction.await_count, 1)
+        second.add_reaction.assert_not_awaited()
+        await autoreact.shutdown()
+        self.assertFalse(autoreact._tasks)
 
 
 if __name__ == "__main__":

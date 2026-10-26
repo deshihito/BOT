@@ -102,6 +102,15 @@ async def drain() -> None:
         await asyncio.gather(*list(_tasks), return_exceptions=True)
 
 
+async def shutdown(cog: Any = None) -> None:
+    """Cog終了時に、待っているリアクション付与を止める。"""
+    tasks = list(_tasks)
+    for task in tasks:
+        task.cancel()
+    if tasks:
+        await asyncio.gather(*tasks, return_exceptions=True)
+
+
 async def _add_reactions(message: Any, emojis: list[str]) -> None:
     for emoji in emojis:
         try:
