@@ -161,7 +161,10 @@ class TempVoiceControlView(discord.ui.View):
 def register_views(cog: Any) -> None:
     add_view = getattr(getattr(cog, "bot", None), "add_view", None)
     if callable(add_view):
-        add_view(TempVoiceControlView(cog))
+        try:
+            add_view(TempVoiceControlView(cog))
+        except Exception:
+            logger.exception("一時VCの操作パネルを永続登録できませんでした")
 
 
 def _allowed(interaction: discord.Interaction, entry: dict[str, Any]) -> bool:

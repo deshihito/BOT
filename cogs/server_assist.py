@@ -75,7 +75,10 @@ class ServerAssistCog(commands.Cog):
         for module in self.modules.values():
             hook = getattr(module, "register_views", None)
             if callable(hook):
-                hook(self)
+                try:
+                    hook(self)
+                except Exception:
+                    logger.exception("サーバーアシストの永続ビュー登録に失敗しました")
 
     async def show_home(self, interaction: discord.Interaction):
         if not has_manage_permission(interaction):
