@@ -212,6 +212,10 @@ class WarningTest(unittest.IsolatedAsyncioTestCase):
                  if isinstance(item, (discord.ui.Select, discord.ui.ChannelSelect))]),
             3,
         )
+        self.assertEqual(
+            len([item for item in view.children if isinstance(item, discord.ui.ChannelSelect)]),
+            2,
+        )
         labels = {item.label for item in view.children if isinstance(item, discord.ui.Button)}
         self.assertIn("警告", labels)
         self.assertIn("パネルを送信", labels)
