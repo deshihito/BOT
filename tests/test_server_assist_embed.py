@@ -66,6 +66,7 @@ class EmbedBuilderTest(unittest.IsolatedAsyncioTestCase):
         )
         guild_settings.set_store(self.store)
         self.addCleanup(guild_settings.set_store, None)
+        embedbuilder.CREATE_COOLDOWN = 0.0
 
     def test_feature_is_discovered(self):
         keys = [feature.key for feature in discover_features(refresh=True)]
@@ -131,6 +132,7 @@ class EmbedBuilderTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn("サーバーアシストへ戻る", labels)
         create = next(item for item in view.children if getattr(item, "label", None) == "埋め込みを作成")
         interaction = types.SimpleNamespace(
+            guild=guild, guild_id=1,
             user=FakeUser(),
             response=types.SimpleNamespace(send_modal=AsyncMock(), send_message=AsyncMock()),
         )
@@ -143,12 +145,47 @@ class EmbedBuilderTest(unittest.IsolatedAsyncioTestCase):
         view = embedbuilder.build_view(cog, 1)
         create = next(item for item in view.children if getattr(item, "label", None) == "埋め込みを作成")
         interaction = types.SimpleNamespace(
+            guild=guild, guild_id=1,
             user=FakeUser(),
             response=types.SimpleNamespace(send_modal=AsyncMock(), send_message=AsyncMock()),
         )
         await create.callback(interaction)
         interaction.response.send_message.assert_awaited_once()
         interaction.response.send_modal.assert_not_awaited()
+
+    async def test_modal_rejects_non_manager(self):
+        await embedbuilder.update_settings(1, embedbuilder.KEY, enabled=True, channel_id=100)
+        guild = FakeGuild()
+        modal = embedbuilder.EmbedCreateModal(1)
+        modal.title_input._value = "タイトル"
+        modal.body_input._value = "本文"
+        user = FakeUser()
+        user.guild_permissions = types.SimpleNamespace(administrator=False, manage_guild=False)
+        interaction = types.SimpleNamespace(
+            guild=guild, guild_id=1, user=user,
+            response=types.SimpleNamespace(send_message=AsyncMock(), defer=AsyncMock()),
+            followup=types.SimpleNamespace(send=AsyncMock()),
+        )
+        await modal.on_submit(interaction)
+        interaction.response.send_message.assert_awaited_once()
+        guild.channel.send.assert_not_awaited()
+
+    async def test_create_cooldown_rejects_rapid_repeat(self):
+        embedbuilder.CREATE_COOLDOWN = 100.0
+        await embedbuilder.update_settings(1, embedbuilder.KEY, enabled=True, channel_id=100)
+        guild = FakeGuild()
+        first = types.SimpleNamespace(
+            guild=guild, guild_id=1, user=FakeUser(),
+            response=types.SimpleNamespace(send_modal=AsyncMock(), send_message=AsyncMock()),
+        )
+        second = types.SimpleNamespace(
+            guild=guild, guild_id=1, user=FakeUser(),
+            response=types.SimpleNamespace(send_modal=AsyncMock(), send_message=AsyncMock()),
+        )
+        await embedbuilder.handle_create(first)
+        await embedbuilder.handle_create(second)
+        first.response.send_modal.assert_awaited_once()
+        second.response.send_message.assert_awaited_once()
 
 
 if __name__ == "__main__":
