@@ -211,12 +211,25 @@ class PollCloseButton(discord.ui.Button):
         await self.cog.handle_poll_close(interaction)
 
 
+class PollRefreshButton(discord.ui.Button):
+    def __init__(self, cog: Any, *, disabled: bool = False):
+        self.cog = cog
+        super().__init__(label="表示を更新", style=discord.ButtonStyle.secondary,
+                         custom_id="assist:poll:refresh", disabled=disabled, row=1)
+
+    async def callback(self, interaction: discord.Interaction):
+        if self.disabled:
+            return
+        await self.cog.handle_poll_refresh(interaction)
+
+
 class PollVoteView(discord.ui.View):
     def __init__(self, cog: Any, entry: dict[str, Any] | None = None, *, disabled: bool = False):
         self.cog = cog
         super().__init__(timeout=None)
         self.add_item(PollVoteSelect(cog, entry, disabled=disabled))
         self.add_item(PollCloseButton(cog, disabled=disabled))
+        self.add_item(PollRefreshButton(cog, disabled=disabled))
 
 
 def register_views(cog: Any) -> None:
@@ -373,7 +386,7 @@ async def handle_vote(cog: Any, interaction: discord.Interaction, values: list[s
         except Exception:
             logger.exception("投票の表示を更新できませんでした: message=%s", message.id)
             return await interaction.followup.send(
-                "投票は保存しましたが、表示を更新できませんでした。もう一度選ぶと再表示します。",
+                "投票は保存しましたが、表示を更新できませんでした。「表示を更新」を押してください。",
                 ephemeral=True,
             )
 
@@ -421,6 +434,25 @@ async def handle_close(cog: Any, interaction: discord.Interaction) -> None:
         )
     if changed:
         return await interaction.followup.send("投票を締め切りました。", ephemeral=True)
+
+
+async def handle_refresh(cog: Any, interaction: discord.Interaction) -> None:
+    message = getattr(interaction, "message", None)
+    if message is None:
+        return await interaction.response.send_message("投票メッセージを取得できませんでした。", ephemeral=True)
+    await interaction.response.defer()
+    async with _lock(message.id):
+        entry = (await _cache_data()).get(str(message.id))
+        if entry is None:
+            return await interaction.followup.send("この投票は見つかりません。", ephemeral=True)
+        try:
+            await message.edit(
+                embed=build_embed(entry),
+                view=PollVoteView(cog, entry, disabled=entry.get("status") == "closed"),
+            )
+        except Exception:
+            logger.exception("投票の表示を更新できませんでした: message=%s", message.id)
+            return await interaction.followup.send("表示を更新できませんでした。", ephemeral=True)
 
 
 class PollChannelSelect(discord.ui.Select):
