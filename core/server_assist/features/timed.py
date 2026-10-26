@@ -3,10 +3,12 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import re
 import uuid
 from datetime import datetime
 from typing import Any
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import discord
 
@@ -19,6 +21,11 @@ logger = logging.getLogger(__name__)
 KEY = "timed"
 MAX_SCHEDULES = 10
 TIME_RE = re.compile(r"^([01]?\d|2[0-3]):([0-5]\d)$")
+CATCHUP_MINUTES = 2
+try:
+    TIMEZONE = ZoneInfo(os.getenv("TIMED_TIMEZONE", "Asia/Tokyo"))
+except ZoneInfoNotFoundError:
+    TIMEZONE = None
 
 FEATURE = Feature(
     key=KEY,
@@ -94,18 +101,23 @@ def _channels(guild: Any) -> list[Any]:
 
 
 def due_schedules(current: dict[str, Any], now: datetime) -> list[dict[str, Any]]:
-    stamp = now.strftime("%H:%M")
     today = now.date().isoformat()
-    return [
-        schedule for schedule in current.get("schedules", [])
-        if schedule.get("time") == stamp and schedule.get("last_sent") != today
-    ]
+    now_minutes = now.hour * 60 + now.minute
+    due = []
+    for schedule in current.get("schedules", []):
+        parsed = parse_time(str(schedule.get("time") or ""))
+        if parsed is None or schedule.get("last_sent") == today:
+            continue
+        scheduled_minutes = parsed[0] * 60 + parsed[1]
+        if (now_minutes - scheduled_minutes) % 1440 <= CATCHUP_MINUTES:
+            due.append(schedule)
+    return due
 
 
 async def send_due(guild: Any, current: dict[str, Any], now: datetime | None = None) -> None:
     if not current["enabled"] or current["channel_id"] is None:
         return
-    now = now or datetime.now()
+    now = now or (datetime.now(TIMEZONE) if TIMEZONE is not None else datetime.now())
     due = due_schedules(current, now)
     if not due:
         return
@@ -137,7 +149,7 @@ async def send_due(guild: Any, current: dict[str, Any], now: datetime | None = N
 async def _runner(cog: Any) -> None:
     await cog.bot.wait_until_ready()
     while True:
-        now = datetime.now()
+        now = datetime.now(TIMEZONE) if TIMEZONE is not None else datetime.now()
         for guild in list(getattr(cog.bot, "guilds", []) or []):
             current = settings(guild.id)
             if current["enabled"]:
@@ -246,7 +258,10 @@ class TimedDeleteButton(discord.ui.Button):
             )
         if view.selected_id is None:
             return await interaction.response.send_message("先に告知を選んでください。", ephemeral=True)
-        schedules = [item for item in view.settings["schedules"] if item.get("id") != view.selected_id]
+        schedules = [
+            item for item in settings(view.guild_id)["schedules"]
+            if item.get("id") != view.selected_id
+        ]
         await _save(view.guild_id, schedules)
         view.selected_id = None
         await view.reopen(interaction, "告知を削除しました。")
@@ -304,12 +319,21 @@ class TimedModal(discord.ui.Modal):
         message = str(self.message_input.value or "").strip()
         if not message:
             return await interaction.response.send_message("メッセージを入力してください。", ephemeral=True)
-        schedules = list(self.parent_view.settings["schedules"])
+        schedules = list(settings(self.parent_view.guild_id)["schedules"])
         if self.schedule:
+            found = False
             for item in schedules:
                 if item.get("id") == self.schedule.get("id"):
                     item.update({"time": time_text.zfill(5), "message": message[:1500]})
+                    found = True
                     break
+            if not found:
+                schedules.append({
+                    "id": self.schedule.get("id"),
+                    "time": time_text.zfill(5),
+                    "message": message[:1500],
+                    "last_sent": self.schedule.get("last_sent", ""),
+                })
             selected = self.schedule.get("id")
         else:
             selected = uuid.uuid4().hex[:8]

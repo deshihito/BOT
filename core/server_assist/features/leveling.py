@@ -7,7 +7,7 @@ from typing import Any
 
 import discord
 
-from core.server_assist import Feature, get_settings, update_settings
+from core.server_assist import Feature, can_assign_roles, get_settings, update_settings
 from core.server_assist.ui import AssistFeatureView, notice_line
 
 logger = logging.getLogger(__name__)
@@ -123,6 +123,13 @@ class LevelingToggleButton(discord.ui.Button):
                 "この設定には「サーバーの管理」権限が必要です。", ephemeral=True,
             )
         value = not view.settings["enabled"]
+        if value and view.settings["role_rewards"] and not can_assign_roles(
+            interaction, view.guild, list(view.settings["role_rewards"].values()),
+        ):
+            return await interaction.response.send_message(
+                "ロールの管理権限、または自分より上のロールが設定されています。",
+                ephemeral=True,
+            )
         await update_settings(view.guild_id, KEY, enabled=value)
         view.settings["enabled"] = value
         await view.refresh(interaction, f"レベル報酬を{'オン' if value else 'オフ'}にしました。")
@@ -167,6 +174,13 @@ class LevelRewardsModal(discord.ui.Modal, title="レベル報酬"):
             return await interaction.response.send_message(
                 f"保存できませんでした: {exc}", ephemeral=True,
             )
+        if interaction.guild is not None and not can_assign_roles(
+            interaction, interaction.guild, list(rewards.values()),
+        ):
+            return await interaction.response.send_message(
+                "ロールの管理権限、または自分より上のロールを設定しようとしています。",
+                ephemeral=True,
+            )
         await update_settings(self.parent_view.guild_id, KEY, role_rewards=rewards)
         self.parent_view.settings["role_rewards"] = rewards
         await self.parent_view.refresh(interaction, "レベル報酬を保存しました。")
@@ -177,6 +191,7 @@ class LevelingSettingsView(AssistFeatureView):
     feature_title = "レベル報酬"
 
     def __init__(self, cog: Any, guild_id: int):
+        self.guild = getattr(cog.bot, "get_guild", lambda _id: None)(guild_id)
         self.settings = settings(guild_id)
         super().__init__(cog, guild_id)
         self.add_item(LevelingToggleButton())
