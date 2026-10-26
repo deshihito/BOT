@@ -342,10 +342,13 @@ class ApplicationSettingsTest(unittest.IsolatedAsyncioTestCase):
         interaction = types.SimpleNamespace(
             guild=guild,
             user=FakeUser(),
-            response=types.SimpleNamespace(send_message=AsyncMock()),
+            response=types.SimpleNamespace(send_message=AsyncMock(), defer=AsyncMock()),
+            followup=types.SimpleNamespace(send=AsyncMock()),
         )
         await panel_button.callback(interaction)
         guild.panel.send.assert_awaited_once()
+        interaction.response.defer.assert_awaited_once()
+        interaction.followup.send.assert_awaited_once()
 
     def test_register_views(self):
         add_view = __import__("unittest.mock", fromlist=["MagicMock"]).MagicMock()
