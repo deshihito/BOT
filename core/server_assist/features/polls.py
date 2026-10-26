@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from typing import Any
 
 import discord
@@ -17,6 +18,8 @@ KEY = "polls"
 
 MAX_OPTIONS = 10
 MAX_VOTERS_PER_OPTION = 2000
+CREATE_COOLDOWN = 60.0
+VOTE_COOLDOWN = 2.0
 
 FEATURE = Feature(
     key=KEY,
@@ -29,6 +32,8 @@ FEATURE = Feature(
 _entries: KVStore | None = None
 _cache: dict[str, dict[str, Any]] | None = None
 _locks: dict[str, asyncio.Lock] = {}
+_last_create: dict[tuple[int, int], float] = {}
+_last_vote: dict[tuple[int, int], float] = {}
 
 
 def reset_cache() -> None:
@@ -36,6 +41,8 @@ def reset_cache() -> None:
     _entries = None
     _cache = None
     _locks.clear()
+    _last_create.clear()
+    _last_vote.clear()
 
 
 def _store() -> KVStore:
@@ -264,6 +271,13 @@ class PollCreateModal(discord.ui.Modal, title="投票を作成"):
             return await interaction.response.send_message(
                 f"選択肢は{MAX_OPTIONS}個までです。", ephemeral=True,
             )
+        cooldown_key = (interaction.guild_id, interaction.user.id)
+        now = time.monotonic()
+        if now - _last_create.get(cooldown_key, 0.0) < CREATE_COOLDOWN:
+            return await interaction.response.send_message(
+                "連続で投票を作成できません。少し待ってください。", ephemeral=True,
+            )
+        _last_create[cooldown_key] = now
         await interaction.response.defer(ephemeral=True)
         entry: dict[str, Any] = {
             "guild_id": interaction.guild_id,
@@ -304,15 +318,24 @@ async def handle_vote(cog: Any, interaction: discord.Interaction, values: list[s
     message = getattr(interaction, "message", None)
     if message is None:
         return await interaction.response.send_message("投票メッセージを取得できませんでした。", ephemeral=True)
+    user_id = interaction.user.id
+    cooldown_key = (message.id, user_id)
+    now = time.monotonic()
+    if now - _last_vote.get(cooldown_key, 0.0) < VOTE_COOLDOWN:
+        return await interaction.response.send_message(
+            "少し待ってから投票してください。", ephemeral=True,
+        )
+    _last_vote[cooldown_key] = now
+    # ロック待ちや初回のKV読込みより先にACKする。
+    await interaction.response.defer()
     async with _lock(message.id):
         entry = (await _cache_data()).get(str(message.id))
         if entry is None:
-            return await interaction.response.send_message("この投票は見つかりません。", ephemeral=True)
+            return await interaction.followup.send("この投票は見つかりません。", ephemeral=True)
         if entry.get("status") != "open":
-            return await interaction.response.send_message("この投票は締め切られています。", ephemeral=True)
+            return await interaction.followup.send("この投票は締め切られています。", ephemeral=True)
         options = list(entry.get("options") or [])
         votes = _normalized_votes(entry, len(options))
-        user_id = interaction.user.id
         chosen: set[int] = set()
         for value in values:
             try:
@@ -331,7 +354,7 @@ async def handle_vote(cog: Any, interaction: discord.Interaction, values: list[s
         for index in range(len(options)):
             if index in selected and user_id not in votes[index]:
                 if len(votes[index]) >= MAX_VOTERS_PER_OPTION:
-                    return await interaction.response.send_message(
+                    return await interaction.followup.send(
                         "この選択肢は票の上限に達しています。", ephemeral=True,
                     )
         for index in range(len(options)):
@@ -345,10 +368,14 @@ async def handle_vote(cog: Any, interaction: discord.Interaction, values: list[s
         entry["votes"] = votes
         await _put_entry(message.id, entry)
         # 編集もロック内で行い、同時投票で古い集計が最後に表示されるのを防ぐ。
-        return await interaction.response.edit_message(
-            embed=build_embed(entry),
-            view=PollVoteView(cog, entry),
-        )
+        try:
+            await message.edit(embed=build_embed(entry), view=PollVoteView(cog, entry))
+        except Exception:
+            logger.exception("投票の表示を更新できませんでした: message=%s", message.id)
+            return await interaction.followup.send(
+                "投票は保存しましたが、表示を更新できませんでした。もう一度選ぶと再表示します。",
+                ephemeral=True,
+            )
 
 
 def _can_manage(interaction: discord.Interaction) -> bool:
@@ -363,25 +390,37 @@ async def handle_close(cog: Any, interaction: discord.Interaction) -> None:
     message = getattr(interaction, "message", None)
     if message is None:
         return await interaction.response.send_message("投票メッセージを取得できませんでした。", ephemeral=True)
+    await interaction.response.defer()
+    changed = False
+    edited = False
     async with _lock(message.id):
         entry = (await _cache_data()).get(str(message.id))
         if entry is None:
-            return await interaction.response.send_message("この投票は見つかりません。", ephemeral=True)
+            return await interaction.followup.send("この投票は見つかりません。", ephemeral=True)
         user = getattr(interaction, "user", None)
         user_id = getattr(user, "id", None)
         if user_id != entry.get("author_id") and not _can_manage(interaction):
-            return await interaction.response.send_message(
+            return await interaction.followup.send(
                 "締め切れるのは作成者か「サーバーの管理」権限を持つ人だけです。", ephemeral=True,
             )
-        if entry.get("status") == "closed":
-            return await interaction.response.send_message("この投票はすでに締め切られています。", ephemeral=True)
-        entry["status"] = "closed"
-        entry["closed_by"] = user_id
-        await _put_entry(message.id, entry)
-        return await interaction.response.edit_message(
-            embed=build_embed(entry),
-            view=PollVoteView(cog, entry, disabled=True),
+        if entry.get("status") != "closed":
+            entry["status"] = "closed"
+            entry["closed_by"] = user_id
+            await _put_entry(message.id, entry)
+            changed = True
+        # 状態が締め切り済みでも、表示更新に失敗していたら再試行で直せるようにする。
+        try:
+            await message.edit(embed=build_embed(entry), view=PollVoteView(cog, entry, disabled=True))
+            edited = True
+        except Exception:
+            logger.exception("投票の締め切り表示を更新できませんでした: message=%s", message.id)
+    if not edited:
+        return await interaction.followup.send(
+            "締め切りは保存しましたが、表示を更新できませんでした。もう一度押してください。",
+            ephemeral=True,
         )
+    if changed:
+        return await interaction.followup.send("投票を締め切りました。", ephemeral=True)
 
 
 class PollChannelSelect(discord.ui.Select):
