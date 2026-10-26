@@ -16,8 +16,10 @@ logger = logging.getLogger(__name__)
 KEY = "embed"
 COLOR_RE = re.compile(r"^#?([0-9a-fA-F]{6})$")
 CREATE_COOLDOWN = 3.0
+POST_COOLDOWN = 3.0
 
 _last_create: dict[tuple[int, int], float] = {}
+_last_post: dict[tuple[int, int], float] = {}
 
 FEATURE = Feature(
     key=KEY,
@@ -125,7 +127,6 @@ class EmbedCreateModal(discord.ui.Modal, title="埋め込みを作成"):
             return await interaction.response.send_message(
                 "色は #RRGGBB の形式で指定してください。", ephemeral=True,
             )
-        await interaction.response.defer(ephemeral=True)
         embed = discord.Embed(
             title=str(self.title_input.value or "")[:256],
             description=str(self.body_input.value or "")[:4000],
@@ -134,6 +135,19 @@ class EmbedCreateModal(discord.ui.Modal, title="埋め込みを作成"):
         footer = str(self.footer_input.value or "").strip()
         if footer:
             embed.set_footer(text=footer[:2048])
+        if len(embed) > 6000:
+            return await interaction.response.send_message(
+                f"Embedの合計が6000文字を超えています（{len(embed)}文字）。本文やフッターを短くしてください。",
+                ephemeral=True,
+            )
+        post_key = (interaction.guild_id, interaction.user.id)
+        now = time.monotonic()
+        if now - _last_post.get(post_key, 0.0) < POST_COOLDOWN:
+            return await interaction.response.send_message(
+                "連続で投稿できません。少し待ってください。", ephemeral=True,
+            )
+        _last_post[post_key] = now
+        await interaction.response.defer(ephemeral=True)
         try:
             await channel.send(embed=embed)
         except (discord.Forbidden, discord.HTTPException):
