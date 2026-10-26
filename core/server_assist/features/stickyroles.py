@@ -108,6 +108,7 @@ async def on_member_join(cog: Any, member: Any) -> None:
             await member.add_roles(*roles, reason="Sticky roles restore")
     except (discord.Forbidden, discord.HTTPException):
         logger.warning("ロール復元に失敗しました: guild=%s member=%s", member.guild.id, member.id)
+        return
     cache.pop(key, None)
     await _store().delete(key)
 

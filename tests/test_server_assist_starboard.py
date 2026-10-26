@@ -1,6 +1,7 @@
 """Tests for the Starboard server-assist feature."""
 from __future__ import annotations
 
+import asyncio
 import os
 import sys
 import tempfile
@@ -171,6 +172,22 @@ class StarboardSettingsTest(unittest.IsolatedAsyncioTestCase):
         )
         guild.source.fetch_message.return_value = FakeMessage(count=4, channel=guild.source)
         await starboard.on_raw_reaction_add(cog, payload)
+        board.edit.assert_awaited_once()
+
+    async def test_concurrent_reactions_create_one_board_post(self):
+        await starboard.update_settings(1, starboard.KEY, enabled=True, channel_id=20, threshold=3)
+        cog, guild = self.make_cog()
+        payload = types.SimpleNamespace(
+            guild_id=1, channel_id=10, message_id=50, user_id=2, emoji="⭐",
+        )
+        guild.source.fetch_message.return_value = FakeMessage(count=3, channel=guild.source)
+        board = FakeMessage(900, channel=guild.board)
+        guild.board.fetch_message.return_value = board
+        await asyncio.gather(
+            starboard.on_raw_reaction_add(cog, payload),
+            starboard.on_raw_reaction_add(cog, payload),
+        )
+        guild.board.send.assert_awaited_once()
         board.edit.assert_awaited_once()
 
     async def test_removing_below_threshold_deletes_board(self):

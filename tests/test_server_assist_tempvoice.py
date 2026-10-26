@@ -52,6 +52,9 @@ class FakeChannel:
     def permissions_for(self, member):
         return types.SimpleNamespace(connect=True, send_messages=True, manage_channels=True)
 
+    def overwrites_for(self, target):
+        return discord.PermissionOverwrite()
+
 
 class FakeGuild:
     def __init__(self):
@@ -177,8 +180,21 @@ class TempVoiceSettingsTest(unittest.IsolatedAsyncioTestCase):
         )
         await tempvoice.handle_action(cog, interaction, "lock")
         guild.temp.set_permissions.assert_awaited_once()
-        self.assertFalse(guild.temp.set_permissions.await_args.kwargs["connect"])
+        overwrite = guild.temp.set_permissions.await_args.kwargs["overwrite"]
+        self.assertFalse(overwrite.connect)
         interaction.response.send_message.assert_awaited_once()
+
+    async def test_delete_failure_keeps_tracking_entry(self):
+        await tempvoice.update_settings(1, tempvoice.KEY, enabled=True, join_channel_id=10)
+        cog, guild = self.make_cog()
+        await tempvoice._put_entry(20, {"channel_id": 20, "guild_id": 1, "owner_id": 1, "panel_id": 900})
+        guild.temp.delete.side_effect = discord.Forbidden(
+            types.SimpleNamespace(status=403, reason="Forbidden"), "missing permissions",
+        )
+        before = types.SimpleNamespace(channel=guild.temp)
+        after = types.SimpleNamespace(channel=None)
+        await tempvoice.on_voice_state_update(cog, FakeMember(guild), before, after)
+        self.assertIn("20", await tempvoice._entries_cache())
 
     async def test_other_member_without_permission_is_denied(self):
         cog, guild = self.make_cog()

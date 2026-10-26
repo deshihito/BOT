@@ -113,6 +113,18 @@ class StickyRolesTest(unittest.IsolatedAsyncioTestCase):
         await stickyroles.on_member_remove(None, member)
         self.assertEqual((await stickyroles._cache_data())["1:1"], [10])
 
+    async def test_restore_failure_keeps_stored_roles(self):
+        await stickyroles.update_settings(1, stickyroles.KEY, enabled=True)
+        guild = FakeGuild()
+        await stickyroles._cache_data()
+        stickyroles._cache["1:1"] = [10]
+        member = FakeMember(guild)
+        member.add_roles.side_effect = discord.Forbidden(
+            types.SimpleNamespace(status=403, reason="Forbidden"), "missing permissions",
+        )
+        await stickyroles.on_member_join(None, member)
+        self.assertIn("1:1", await stickyroles._cache_data())
+
     def test_settings_view_controls(self):
         guild = FakeGuild()
         cog = types.SimpleNamespace(bot=types.SimpleNamespace(get_guild=lambda _id: guild))
