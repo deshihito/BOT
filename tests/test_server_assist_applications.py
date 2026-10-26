@@ -131,15 +131,14 @@ class ApplicationSettingsTest(unittest.IsolatedAsyncioTestCase):
             user=FakeUser(2),
             client=types.SimpleNamespace(fetch_user=AsyncMock(return_value=guild.member)),
             message=FakeMessage(500),
-            response=types.SimpleNamespace(
-                send_message=AsyncMock(), edit_message=AsyncMock(),
-            ),
+            response=types.SimpleNamespace(send_message=AsyncMock(), defer=AsyncMock()),
+            followup=types.SimpleNamespace(send=AsyncMock()),
         )
         await applications.handle_review(cog, interaction, "accept")
         entry = (await applications._cache_data())["500"]
         self.assertEqual(entry["status"], "accepted")
         guild.member.send.assert_awaited_once()
-        interaction.response.edit_message.assert_awaited_once()
+        interaction.message.edit.assert_awaited_once()
 
     async def test_review_requires_manage_guild(self):
         await applications._put_entry(500, {
@@ -163,10 +162,12 @@ class ApplicationSettingsTest(unittest.IsolatedAsyncioTestCase):
         })
         interaction = types.SimpleNamespace(
             guild=FakeGuild(), user=FakeUser(2), message=FakeMessage(500),
-            response=types.SimpleNamespace(send_message=AsyncMock(), edit_message=AsyncMock()),
+            response=types.SimpleNamespace(send_message=AsyncMock(), defer=AsyncMock()),
+            followup=types.SimpleNamespace(send=AsyncMock()),
         )
         await applications.handle_review(None, interaction, "deny")
-        interaction.response.send_message.assert_awaited_once()
+        interaction.followup.send.assert_awaited_once()
+        self.assertEqual((await applications._cache_data())["500"]["status"], "accepted")
 
     async def test_concurrent_reviews_only_decide_once(self):
         await applications._put_entry(500, {
@@ -175,16 +176,16 @@ class ApplicationSettingsTest(unittest.IsolatedAsyncioTestCase):
         })
         guild = FakeGuild()
         cog = types.SimpleNamespace(bot=types.SimpleNamespace(get_guild=lambda _id: guild))
+        message = FakeMessage(500)
 
         def interaction(action):
             return types.SimpleNamespace(
                 guild=guild,
                 user=FakeUser(2),
                 client=types.SimpleNamespace(fetch_user=AsyncMock(return_value=guild.member)),
-                message=FakeMessage(500),
-                response=types.SimpleNamespace(
-                    send_message=AsyncMock(), edit_message=AsyncMock(),
-                ),
+                message=message,
+                response=types.SimpleNamespace(send_message=AsyncMock(), defer=AsyncMock()),
+                followup=types.SimpleNamespace(send=AsyncMock()),
             )
 
         accept = interaction("accept")
@@ -195,14 +196,59 @@ class ApplicationSettingsTest(unittest.IsolatedAsyncioTestCase):
         )
         entry = (await applications._cache_data())["500"]
         self.assertIn(entry["status"], {"accepted", "denied"})
-        self.assertEqual(
-            accept.response.edit_message.await_count + deny.response.edit_message.await_count,
-            1,
+        self.assertGreaterEqual(message.edit.await_count, 1)
+        self.assertEqual(guild.member.send.await_count, 1)
+
+    async def test_failed_display_and_dm_are_repaired_on_retry(self):
+        await applications._put_entry(500, {
+            "id": "app-1", "applicant_id": 1, "status": "pending", "name": "a",
+            "reason": "b", "experience": "c", "decided_by": None,
+        })
+        guild = FakeGuild()
+        message = FakeMessage(500)
+        message.edit = AsyncMock(side_effect=[RuntimeError("edit failed"), None])
+        guild.member.send = AsyncMock(side_effect=[RuntimeError("dm failed"), None])
+        cog = types.SimpleNamespace(bot=types.SimpleNamespace(get_guild=lambda _id: guild))
+        interaction = types.SimpleNamespace(
+            guild=guild, user=FakeUser(2),
+            client=types.SimpleNamespace(fetch_user=AsyncMock(return_value=guild.member)),
+            message=message,
+            response=types.SimpleNamespace(send_message=AsyncMock(), defer=AsyncMock()),
+            followup=types.SimpleNamespace(send=AsyncMock()),
         )
-        self.assertEqual(
-            accept.response.send_message.await_count + deny.response.send_message.await_count,
-            1,
+        await applications.handle_review(cog, interaction, "accept")
+        entry = (await applications._cache_data())["500"]
+        self.assertEqual(entry["status"], "accepted")
+        self.assertFalse(entry.get("notified"))
+        await applications.handle_review(cog, interaction, "accept")
+        entry = (await applications._cache_data())["500"]
+        self.assertEqual(entry["status"], "accepted")
+        self.assertTrue(entry.get("notified"))
+        self.assertEqual(message.edit.await_count, 2)
+        self.assertEqual(guild.member.send.await_count, 2)
+
+    async def test_duplicate_pending_application_is_rejected(self):
+        await applications.update_settings(
+            1, applications.KEY, enabled=True, panel_channel_id=100, review_channel_id=101,
         )
+        await applications._put_entry(500, {
+            "id": "app-1", "guild_id": 1, "applicant_id": 1, "status": "pending",
+            "name": "a", "reason": "b", "experience": "c", "decided_by": None,
+        })
+        guild = FakeGuild()
+        cog = types.SimpleNamespace(bot=types.SimpleNamespace(get_guild=lambda _id: guild))
+        modal = applications.ApplicationModal(cog, 1)
+        modal.name_input._value = "あおい"
+        modal.reason_input._value = "理由"
+        modal.experience_input._value = "経験"
+        interaction = types.SimpleNamespace(
+            guild=guild, guild_id=1, user=FakeUser(),
+            response=types.SimpleNamespace(send_message=AsyncMock(), defer=AsyncMock()),
+            followup=types.SimpleNamespace(send=AsyncMock()),
+        )
+        await modal.on_submit(interaction)
+        interaction.followup.send.assert_awaited_once()
+        guild.review.send.assert_not_awaited()
 
     async def test_settings_panel_send(self):
         await applications.update_settings(
