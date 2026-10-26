@@ -56,6 +56,16 @@ _TRANSLATIONS = {
     },
 }
 
+_KEY_CATALOG_DIR = Path(__file__).resolve().parent.parent / "locales"
+_KEY_CATALOGS: dict[str, dict[str, str]] = {}
+for _locale in SUPPORTED_LOCALES:
+    try:
+        _data = json.loads((_KEY_CATALOG_DIR / f"{_locale}.json").read_text(encoding="utf-8"))
+    except (FileNotFoundError, OSError, ValueError):
+        _data = {}
+    if isinstance(_data, dict):
+        _KEY_CATALOGS[_locale] = {str(k): str(v) for k, v in _data.items()}
+
 _CATALOG_PATH = Path(__file__).with_name("locales") / "ja_to_en.json"
 try:
     _ENGLISH_CATALOG: dict[str, str] = json.loads(_CATALOG_PATH.read_text(encoding="utf-8"))
@@ -78,8 +88,24 @@ def guild_locale(guild_id: int, store=None) -> str:
     return locale_settings(store or get_store(), guild_id)["locale"]
 
 def text(key: str, locale: str = DEFAULT_LOCALE, **values: Any) -> str:
-    translations = _TRANSLATIONS.get(key, {})
-    result = translations.get(normalize_locale(locale), translations.get(DEFAULT_LOCALE, key))
+    locale = normalize_locale(locale)
+    result = _KEY_CATALOGS.get(locale, {}).get(key)
+    if result is None:
+        translations = _TRANSLATIONS.get(key, {})
+        result = translations.get(locale, translations.get(DEFAULT_LOCALE, key))
+    return result.format(**values)
+
+def tr(key: str, guild_id: int | None = None, locale: str | None = None, **values: Any) -> str:
+    """Return a translated catalog key, falling back to English then Japanese."""
+    if locale is None:
+        locale = guild_locale(guild_id) if guild_id is not None else DEFAULT_LOCALE
+    locale = normalize_locale(locale)
+    result = (_KEY_CATALOGS.get(locale, {}).get(key)
+              or _KEY_CATALOGS.get(DEFAULT_LOCALE, {}).get(key)
+              or _KEY_CATALOGS.get("ja", {}).get(key)
+              or _TRANSLATIONS.get(key, {}).get(locale)
+              or _TRANSLATIONS.get(key, {}).get(DEFAULT_LOCALE)
+              or key)
     return result.format(**values)
 
 def translate_text(value: str, locale: str = DEFAULT_LOCALE) -> str:

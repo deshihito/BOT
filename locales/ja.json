@@ -1,0 +1,6 @@
+{
+  "language_settings_title": "言語設定",
+  "language_settings_description": "このサーバーで AGOBOT が使用する言語を選択します。設定はサーバー全体で共有されます。",
+  "language_saved": "言語を {language} に変更しました。",
+  "welcome_language": "下の国旗にリアクションして、このサーバーの言語を選択してください。後から `/support` → 言語設定で変更できます。"
+}

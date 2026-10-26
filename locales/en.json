@@ -1,0 +1,6 @@
+{
+  "language_settings_title": "Language settings",
+  "language_settings_description": "Choose the language used by AGOBOT in this server. The setting is shared by all members.",
+  "language_saved": "Language changed to {language}.",
+  "welcome_language": "Select a language for this server by reacting below. You can change it later from `/support` → Language settings."
+}
