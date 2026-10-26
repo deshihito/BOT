@@ -177,7 +177,10 @@ class CustomReplyDeleteButton(discord.ui.Button):
             )
         if view.selected_id is None:
             return await interaction.response.send_message("先に返信を選んでください。", ephemeral=True)
-        replies = [reply for reply in view.settings["replies"] if reply.get("id") != view.selected_id]
+        replies = [
+            reply for reply in settings(view.guild_id)["replies"]
+            if reply.get("id") != view.selected_id
+        ]
         await _save(view.guild_id, replies)
         view.selected_id = None
         await view.reopen(interaction, "返信を削除しました。")
@@ -228,12 +231,18 @@ class CustomReplyModal(discord.ui.Modal):
         response = str(self.response_input.value or "").strip()
         if not trigger or not response:
             return await interaction.response.send_message("言葉と返信内容を入力してください。", ephemeral=True)
-        replies = list(self.parent_view.settings["replies"])
+        replies = list(settings(self.parent_view.guild_id)["replies"])
         if self.reply:
+            found = False
             for item in replies:
                 if item.get("id") == self.reply.get("id"):
                     item.update({"trigger": trigger[:100], "response": response[:1500]})
+                    found = True
                     break
+            if not found:
+                return await interaction.response.send_message(
+                    "この返信はすでに削除されています。", ephemeral=True,
+                )
             selected = self.reply.get("id")
         else:
             selected = uuid.uuid4().hex[:8]
