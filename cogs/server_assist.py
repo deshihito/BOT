@@ -177,6 +177,26 @@ class ServerAssistCog(commands.Cog):
         await self._dispatch("on_raw_message_delete", payload)
 
     @commands.Cog.listener()
+    async def on_message_delete(self, message: discord.Message):
+        await self._dispatch("on_message_delete", message)
+
+    @commands.Cog.listener()
+    async def on_guild_role_create(self, role: discord.Role):
+        await self._dispatch("on_guild_role_create", role)
+
+    @commands.Cog.listener()
+    async def on_guild_role_delete(self, role: discord.Role):
+        await self._dispatch("on_guild_role_delete", role)
+
+    @commands.Cog.listener()
+    async def on_guild_channel_create(self, channel: discord.abc.GuildChannel):
+        await self._dispatch("on_guild_channel_create", channel)
+
+    @commands.Cog.listener()
+    async def on_guild_channel_delete(self, channel: discord.abc.GuildChannel):
+        await self._dispatch("on_guild_channel_delete", channel)
+
+    @commands.Cog.listener()
     async def on_message(self, message: discord.Message):
         await self._dispatch("on_message", message)
 
