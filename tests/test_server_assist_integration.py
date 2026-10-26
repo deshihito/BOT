@@ -8,7 +8,7 @@ from pathlib import Path
 from core.server_assist import discover_features
 
 FEATURES = Path(__file__).resolve().parents[1] / "core" / "server_assist" / "features"
-NEW_KEYS = {"applications", "polls", "autothread", "embed", "warnings", "autoreact"}
+NEW_KEYS = {"applications", "polls", "autothread", "embed", "warnings", "autoreact", "events"}
 
 
 class IntegrationInvariantTest(unittest.TestCase):
