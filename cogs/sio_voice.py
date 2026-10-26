@@ -773,10 +773,8 @@ class TTSCog(commands.Cog):
         self.read_channels[r.guild.id] = target.id
         cfg = self.get_settings(r.user.id)
         await r.send(
-            f"🗣️ <#{target.id}> の発言を読み上げます（VC にいる人だけ）。\n"
+            f"<#{target.id}>の発言を読み上げます（VC にいる人だけ）。\n"
             f"話者: **{await self._speaker_name(cfg.speaker)}** / ピッチ {cfg.pitch:+g} / 話速 {cfg.speed:g}倍\n"
-            f"設定と停止は `/vc` →「読み上げ」から。このチャンネルを読み上げ対象にし、音楽・GVC・文字起こしと同時利用できます（同じVC接続）。\n"
-            "-# 音声: VOICEVOX（tts.quest）。クレジット表記など各キャラクターの利用規約に従ってください。"
         )
 
     async def _stop_impl(self, r: Responder):
