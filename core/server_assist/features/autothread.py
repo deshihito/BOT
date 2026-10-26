@@ -79,6 +79,8 @@ async def on_message(cog: Any, message: Any) -> None:
     channel = getattr(message, "channel", None)
     if channel is None or getattr(channel, "id", None) != current["channel_id"]:
         return
+    if getattr(message, "thread", None) is not None:
+        return
     create_thread = getattr(message, "create_thread", None)
     if not callable(create_thread):
         return

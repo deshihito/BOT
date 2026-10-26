@@ -54,6 +54,7 @@ class FakeMessage:
         self.channel = channel or guild.channel
         self.author = author or FakeUser()
         self.content = content
+        self.thread = None
         self.create_thread = AsyncMock()
 
 
@@ -100,6 +101,13 @@ class AutoThreadTest(unittest.IsolatedAsyncioTestCase):
     async def test_other_channel_is_ignored(self):
         await autothread.update_settings(1, autothread.KEY, enabled=True, channel_id=100)
         message = FakeMessage(FakeGuild(), channel=FakeChannel(200, "別チャンネル"))
+        await autothread.on_message(None, message)
+        message.create_thread.assert_not_awaited()
+
+    async def test_message_with_existing_thread_is_ignored(self):
+        await autothread.update_settings(1, autothread.KEY, enabled=True, channel_id=100)
+        message = FakeMessage(FakeGuild())
+        message.thread = types.SimpleNamespace(id=999)
         await autothread.on_message(None, message)
         message.create_thread.assert_not_awaited()
 
