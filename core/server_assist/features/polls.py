@@ -20,6 +20,7 @@ MAX_OPTIONS = 10
 MAX_VOTERS_PER_OPTION = 2000
 CREATE_COOLDOWN = 60.0
 VOTE_COOLDOWN = 2.0
+REFRESH_COOLDOWN = 2.0
 
 FEATURE = Feature(
     key=KEY,
@@ -34,6 +35,7 @@ _cache: dict[str, dict[str, Any]] | None = None
 _locks: dict[str, asyncio.Lock] = {}
 _last_create: dict[tuple[int, int], float] = {}
 _last_vote: dict[tuple[int, int], float] = {}
+_last_refresh: dict[int, float] = {}
 
 
 def reset_cache() -> None:
@@ -43,6 +45,7 @@ def reset_cache() -> None:
     _locks.clear()
     _last_create.clear()
     _last_vote.clear()
+    _last_refresh.clear()
 
 
 def _store() -> KVStore:
@@ -440,6 +443,12 @@ async def handle_refresh(cog: Any, interaction: discord.Interaction) -> None:
     message = getattr(interaction, "message", None)
     if message is None:
         return await interaction.response.send_message("投票メッセージを取得できませんでした。", ephemeral=True)
+    now = time.monotonic()
+    if now - _last_refresh.get(message.id, 0.0) < REFRESH_COOLDOWN:
+        return await interaction.response.send_message(
+            "少し待ってから更新してください。", ephemeral=True,
+        )
+    _last_refresh[message.id] = now
     await interaction.response.defer()
     async with _lock(message.id):
         entry = (await _cache_data()).get(str(message.id))

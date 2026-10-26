@@ -88,6 +88,7 @@ class PollTest(unittest.IsolatedAsyncioTestCase):
         )
         polls.CREATE_COOLDOWN = 0.0
         polls.VOTE_COOLDOWN = 0.0
+        polls.REFRESH_COOLDOWN = 0.0
 
     def test_feature_is_discovered(self):
         keys = [feature.key for feature in discover_features(refresh=True)]
@@ -286,6 +287,20 @@ class PollTest(unittest.IsolatedAsyncioTestCase):
         await polls.handle_refresh(None, interaction)
         message.edit.assert_awaited_once()
         self.assertEqual((await polls._cache_data())["500"]["votes"], [[2], []])
+
+    async def test_refresh_cooldown_rejects_rapid_repeat(self):
+        polls.REFRESH_COOLDOWN = 100.0
+        await polls._put_entry(500, entry(votes=[[2], []]))
+        message = FakeMessage(500)
+        interaction = types.SimpleNamespace(
+            message=message, user=FakeUser(2),
+            response=types.SimpleNamespace(defer=AsyncMock(), send_message=AsyncMock()),
+            followup=types.SimpleNamespace(send=AsyncMock()),
+        )
+        await polls.handle_refresh(None, interaction)
+        await polls.handle_refresh(None, interaction)
+        self.assertEqual(message.edit.await_count, 1)
+        interaction.response.send_message.assert_awaited_once()
 
     async def test_settings_view_controls_and_panel_send(self):
         await polls.update_settings(1, polls.KEY, enabled=True, channel_id=100)
