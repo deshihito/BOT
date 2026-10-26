@@ -5,6 +5,7 @@ import os
 import sys
 import tempfile
 import unittest
+import asyncio
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -30,6 +31,122 @@ class Base(unittest.IsolatedAsyncioTestCase):
 
 
 class RemoteTest(Base):
+    async def test_background_set_updates_local_immediately_and_remote_later(self):
+        db = FakeKVSupabase()
+        store = self.store(db)
+        await store.set("k", 1, wait=False)
+        self.assertEqual(self.local()["ns"], {"k": 1})
+        await asyncio.sleep(0.1)
+        self.assertEqual(db.value("ns", "k"), 1)
+
+    async def test_background_writes_coalesce_to_latest_value(self):
+        db = FakeKVSupabase()
+        store = self.store(db)
+        await store.set("k", 1, wait=False)
+        await store.set("k", 2, wait=False)
+        await asyncio.sleep(0.1)
+        self.assertEqual(db.value("ns", "k"), 2)
+
+    async def test_background_set_does_not_overwrite_newer_sync_set(self):
+        db = FakeKVSupabase()
+        db.block_next_write()
+        store = self.store(db)
+        await store.set("k", "old", wait=False)
+        await asyncio.to_thread(db.gate_started.wait, 2)
+        task = asyncio.create_task(store.set("k", "new"))
+        await asyncio.sleep(0.05)
+        db.release()
+        await task
+        self.assertEqual(db.value("ns", "k"), "new")
+
+    async def test_delete_after_background_set_is_not_resurrected(self):
+        db = FakeKVSupabase()
+        db.block_next_write()
+        store = self.store(db)
+        await store.set("k", "old", wait=False)
+        await asyncio.to_thread(db.gate_started.wait, 2)
+        task = asyncio.create_task(store.delete("k"))
+        await asyncio.sleep(0.05)
+        db.release()
+        await task
+        self.assertIsNone(db.value("ns", "k"))
+        self.assertNotIn("ns", self.local())
+
+    async def test_load_does_not_revert_value_saved_during_read(self):
+        db = FakeKVSupabase(rows=[{"namespace": "ns", "key": "k", "value": "old"}])
+        db.block_next("select")
+        store = self.store(db)
+        task = asyncio.create_task(store.load_all())
+        await asyncio.to_thread(db.gate_started.wait, 2)
+        await store.set("k", "new")
+        db.release()
+        self.assertEqual(await task, {"k": "new"})
+        self.assertEqual(self.local()["ns"], {"k": "new"})
+
+    async def test_unsent_value_survives_restart_and_beats_stale_remote(self):
+        db = FakeKVSupabase(rows=[{"namespace": "ns", "key": "k", "value": False}])
+        db.error = APIError("temporary unavailable")
+        store = self.store(db)
+        with self.assertLogs("core.storage", level="WARNING"):
+            await store.set("k", True)
+        self.assertEqual(self.local()["ns"], {"k": True})
+
+        db.error = None
+        restarted = self.store(db)
+        self.assertEqual(await restarted.load_all(), {"k": True})
+        self.assertEqual(self.local()["ns"], {"k": True})
+        self.assertTrue(restarted.has_pending)
+        self.assertTrue(await restarted.flush(timeout=2))
+        self.assertEqual(db.value("ns", "k"), True)
+        self.assertFalse(restarted.has_pending)
+
+    async def test_failed_write_is_retried_without_another_edit(self):
+        db = FakeKVSupabase()
+        db.error = APIError("temporary unavailable")
+        store = self.store(db)
+        with self.assertLogs("core.storage", level="WARNING"):
+            await store.set("k", 1)
+        self.assertTrue(store.has_pending)
+        db.error = None
+        self.assertTrue(await store.flush(timeout=2))
+        self.assertEqual(db.value("ns", "k"), 1)
+
+    async def test_background_failure_schedules_retry(self):
+        db = FakeKVSupabase()
+        db.error = APIError("temporary unavailable")
+        store = self.store(db)
+        store.retry_delay = 0.05
+        store.max_retry_delay = 0.05
+        with self.assertLogs("core.storage", level="WARNING"):
+            await store.set("k", 1, wait=False)
+            await asyncio.sleep(0.15)
+        self.assertTrue(store.has_pending)
+        db.error = None
+        await asyncio.sleep(0.3)
+        self.assertEqual(db.value("ns", "k"), 1)
+        self.assertFalse(store.has_pending)
+
+    async def test_cancel_during_timeout_drain_keeps_order(self):
+        db = FakeKVSupabase()
+        db.block_next_write()
+        store = self.store(db)
+        store.timeout = 0.1
+        await store.set("k", "old", wait=False)
+        await asyncio.to_thread(db.gate_started.wait, 2)
+        await asyncio.sleep(0.15)  # タイムアウトして、スレッド完了待ちに入る
+        newest = asyncio.create_task(store.set("k", "new"))
+
+        async def release_later():
+            await asyncio.sleep(0.2)
+            db.release()
+
+        release = asyncio.create_task(release_later())
+        await store.aclose()
+        await release
+        await newest
+        self.assertEqual(db.value("ns", "k"), "new")
+        self.assertEqual(self.local()["ns"], {"k": "new"})
+
     async def test_set_load_delete_in_supabase_and_local_copy(self):
         db = FakeKVSupabase()
         store = self.store(db)

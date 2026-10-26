@@ -55,7 +55,8 @@ class GuildSettings:
         """設定の写しを返す（未設定なら空の dict）。"""
         return copy.deepcopy(self._data.get(str(guild_id), {}).get(section, {}))
 
-    async def update(self, guild_id: int, section: str, **values: Any) -> dict[str, Any]:
+    async def update(self, guild_id: int, section: str, *, background: bool = False,
+                     **values: Any) -> dict[str, Any]:
         """値を書き換えて保存する。値に None を渡すとその項目を消す。"""
         await self.ensure_loaded()
         key = str(guild_id)
@@ -69,10 +70,10 @@ class GuildSettings:
         if not current:
             guild.pop(section, None)
         if guild:
-            await self.kv.set(key, copy.deepcopy(guild))
+            await self.kv.set(key, copy.deepcopy(guild), wait=not background)
         else:
             self._data.pop(key, None)
-            await self.kv.delete(key)
+            await self.kv.delete(key, wait=not background)
         return copy.deepcopy(current)
 
 

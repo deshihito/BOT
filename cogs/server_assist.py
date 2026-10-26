@@ -8,6 +8,7 @@ from typing import Any
 import discord
 from discord.ext import commands
 
+from core import guild_settings
 from core.panel_v2 import as_panel_v2, edit_panel_v2
 from core.server_assist import discover_features, has_manage_permission
 
@@ -73,6 +74,10 @@ class ServerAssistCog(commands.Cog):
                 logger.exception("サーバーアシスト機能を読み込めませんでした: %s", feature.key)
 
     async def cog_load(self):
+        try:
+            await guild_settings.get_store().ensure_loaded()
+        except Exception:
+            logger.exception("サーバーアシスト設定の読み込みに失敗しました")
         for module in self.modules.values():
             for name in ("register_views", "start_tasks"):
                 hook = getattr(module, name, None)
