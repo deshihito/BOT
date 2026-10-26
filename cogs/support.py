@@ -74,6 +74,7 @@ SUPPORT_ACTIONS = [
     app_commands.Choice(name="Auto react設定", value="auto_react"),
     app_commands.Choice(name="SNS新着通知（X・YouTube）", value="sns_notify"),
     app_commands.Choice(name="Quest通知（Discord Orbs）", value="quest_notify"),
+    app_commands.Choice(name="レベルアップ通知（EXP）", value="levelup_notify"),
 ]
 
 SUPPORT_GENRES = {
@@ -83,7 +84,7 @@ SUPPORT_GENRES = {
     ),
     "server": (
         "サーバー管理",
-        "ロール操作、絵文字便乗、VC履歴、メッセージ編集履歴、認証パネル、ロールパネル",
+        "ロール操作、絵文字便乗、VC履歴、メッセージ編集履歴、認証パネル、ロールパネル、レベルアップ通知",
     ),
     "bumprta": ("bump/up・RTA", "通知設定と RTA 状態・ランキング"),
     "event": ("イベント", "抽選の作成"),
@@ -118,6 +119,7 @@ SUPPORT_ACTIONS_BY_GENRE = {
     "event": [(SUPPORT_ACTIONS[9].name, SUPPORT_ACTIONS[9].value)],
 }
 SUPPORT_ACTIONS_BY_GENRE["server"].append((SUPPORT_ACTIONS[17].name, SUPPORT_ACTIONS[17].value))
+SUPPORT_ACTIONS_BY_GENRE["server"].append((SUPPORT_ACTIONS[20].name, SUPPORT_ACTIONS[20].value))
 SUPPORT_ACTIONS_BY_GENRE["notify"] = [
     (SUPPORT_ACTIONS[18].name, SUPPORT_ACTIONS[18].value),
     (SUPPORT_ACTIONS[19].name, SUPPORT_ACTIONS[19].value),
@@ -3979,6 +3981,190 @@ class QuestNotifyPanel(discord.ui.LayoutView):
         await self.refresh(interaction, notice)
 
 
+# ===== レベルアップ通知（general のEXP） ===================================
+# 通知の送信処理・画像生成は cogs/general.py (GeneralCog)。ここは設定パネルだけを持つ。
+# 設定の保存先キー・読み取りは general 側の LEVELUP_SECTION / get_levelup_settings を使う。
+class LevelUpChannelSelect(discord.ui.ChannelSelect):
+    def __init__(self, parent: "LevelUpNotifyPanel"):
+        self.parent_view = parent
+        channel = parent.channel()
+        super().__init__(
+            placeholder="レベルアップ通知を送るテキストチャンネルを選択",
+            channel_types=[discord.ChannelType.text, discord.ChannelType.news],
+            min_values=1,
+            max_values=1,
+            default_values=(
+                [discord.SelectDefaultValue(id=channel.id, type=discord.SelectDefaultValueType.channel)]
+                if channel is not None
+                else []
+            ),
+        )
+
+    async def callback(self, interaction: discord.Interaction):
+        await self.parent_view.save(interaction, "送信先を設定しました。", channel_id=self.values[0].id)
+
+
+class LevelUpToggleButton(discord.ui.Button):
+    def __init__(self, parent: "LevelUpNotifyPanel"):
+        self.parent_view = parent
+        enabled = parent.settings["enabled"]
+        super().__init__(
+            label="通知をオフにする" if enabled else "通知をオンにする",
+            style=discord.ButtonStyle.secondary if enabled else discord.ButtonStyle.success,
+        )
+
+    async def callback(self, interaction: discord.Interaction):
+        enabled = not self.parent_view.settings["enabled"]
+        await self.parent_view.save(
+            interaction,
+            f"通知を{'オン' if enabled else 'オフ'}にしました。",
+            enabled=enabled,
+        )
+
+
+class LevelUpResetChannelButton(discord.ui.Button):
+    def __init__(self, parent: "LevelUpNotifyPanel"):
+        self.parent_view = parent
+        super().__init__(
+            label="送信先の指定を解除",
+            style=discord.ButtonStyle.secondary,
+            disabled=not parent.settings.get("channel_id"),
+        )
+
+    async def callback(self, interaction: discord.Interaction):
+        await self.parent_view.save(
+            interaction,
+            "送信先の指定を解除しました。発言したチャンネルへ通知します。",
+            channel_id=None,
+        )
+
+
+class LevelUpPreviewButton(discord.ui.Button):
+    def __init__(self, parent: "LevelUpNotifyPanel"):
+        self.parent_view = parent
+        super().__init__(label="画像プレビュー", style=discord.ButtonStyle.primary)
+
+    async def callback(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True)
+        cog = interaction.client.get_cog("GeneralCog")
+        if cog is None or not hasattr(cog, "render_levelup_image"):
+            return await interaction.followup.send("general が読み込まれていないためプレビューできません。", ephemeral=True)
+        png = await cog.render_levelup_image(interaction.user, 4, 5)
+        if png is None:
+            return await interaction.followup.send(
+                "画像を生成できませんでした。Pillow が入っているか確認してください（`pip install pillow`）。"
+                "未導入の間は、レベルアップ通知は画像なしのテキストで送られます。",
+                ephemeral=True,
+            )
+        import io
+
+        await interaction.followup.send(
+            "プレビューです（Lv.4 → Lv.5 の例）。実際は、レベルが上がったユーザー本人のアイコンと前後のレベルが入ります。",
+            file=discord.File(io.BytesIO(png), filename="levelup_preview.png"),
+            ephemeral=True,
+        )
+
+
+class LevelUpNotifyPanel(discord.ui.LayoutView):
+    """レベルアップ通知の設定パネル（Components V2・サーバー管理権限）。"""
+
+    def __init__(self, cog: "SupportCog", settings: dict, guild: discord.Guild, notice: str | None = None):
+        super().__init__(timeout=300)
+        self.cog = cog
+        self.settings = settings
+        self.guild = guild
+        self.notice = notice
+        self._build()
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        permissions = getattr(interaction.user, "guild_permissions", None)
+        if getattr(permissions, "administrator", False) or getattr(permissions, "manage_guild", False):
+            return True
+        await interaction.response.send_message(
+            "この設定にはサーバー管理権限が必要です。",
+            ephemeral=True,
+        )
+        return False
+
+    async def on_error(self, interaction: discord.Interaction, error: Exception, item: discord.ui.Item):
+        logger.error("レベルアップ通知パネルでエラー", exc_info=error)
+        await report_callback_error(interaction, "レベルアップ通知パネルでエラー")
+
+    def channel(self):
+        """指定済みで実在するチャンネル。無ければ None。"""
+        channel_id = self.settings.get("channel_id")
+        return self.guild.get_channel_or_thread(channel_id) if channel_id else None
+
+    def _status_text(self) -> str:
+        s = self.settings
+        channel = self.channel()
+        if channel is not None:
+            target = channel.mention
+        elif s.get("channel_id"):
+            target = "⚠️ 指定のチャンネルが見つかりません（発言したチャンネルへ通知します）"
+        else:
+            target = "未指定（レベルが上がった時に発言していたチャンネル／VCの場合はそのVCのチャット）"
+        text = (
+            f"状態: **{'オン' if s['enabled'] else 'オフ'}**\n"
+            f"送信先: {target}\n"
+            "対象: generalレベル（チャットとVCのレベルから算出）\n"
+            "内容: ユーザーのアイコン・前のレベル・上がった後のレベルの画像"
+        )
+        me = self.guild.me
+        if channel is not None and me is not None:
+            perms = channel.permissions_for(me)
+            if not (perms.view_channel and perms.send_messages):
+                text += "\n-# ⚠️ Botがこのチャンネルに投稿できません。権限を確認してください。"
+            elif not perms.attach_files:
+                text += "\n-# ⚠️ Botに「ファイルを添付」権限がないため、画像なしのテキストで通知されます。"
+        return text
+
+    def _build(self):
+        self.clear_items()
+        head = "## 🎉 レベルアップ通知\nEXPのgeneralレベルが上がった時に、画像つきで通知します。"
+        if self.notice:
+            head = f"{self.notice}\n\n{head}"
+
+        self.add_item(
+            discord.ui.Container(
+                discord.ui.TextDisplay(head),
+                discord.ui.TextDisplay(self._status_text()),
+                discord.ui.Separator(),
+                discord.ui.ActionRow(LevelUpChannelSelect(self)),
+                discord.ui.ActionRow(
+                    LevelUpToggleButton(self),
+                    LevelUpResetChannelButton(self),
+                    LevelUpPreviewButton(self),
+                ),
+                accent_colour=0xF1C40F,
+            )
+        )
+
+    async def refresh(self, interaction: discord.Interaction, notice: str | None = None):
+        from cogs.general import get_levelup_settings
+
+        store = guild_settings.get_store()
+        await store.ensure_loaded()
+        self.settings = get_levelup_settings(store, interaction.guild_id)
+        self.notice = notice
+        self._build()
+        await edit_interaction_message(interaction, view=self)
+
+    async def save(self, interaction: discord.Interaction, notice: str, **values):
+        from cogs.general import LEVELUP_SECTION
+
+        await interaction.response.defer()
+        try:
+            await guild_settings.get_store().update(interaction.guild_id, LEVELUP_SECTION, **values)
+        except Exception:
+            logger.exception("レベルアップ通知設定の更新に失敗しました")
+            return await interaction.followup.send(
+                "設定の更新に失敗しました。Botのログを確認してください。",
+                ephemeral=True,
+            )
+        await self.refresh(interaction, notice)
+
+
 class SupportCog(commands.Cog):
     SUPPORT_REQUIRED_PERMISSIONS = {
         "muted": "manage_roles",
@@ -3998,6 +4184,7 @@ class SupportCog(commands.Cog):
         "role_panel": "administrator",
         "sns_notify": "administrator",
         "quest_notify": "administrator",
+        "levelup_notify": "manage_guild",
     }
 
     def __init__(self, bot: commands.Bot):
@@ -4261,6 +4448,23 @@ class SupportCog(commands.Cog):
         settings = get_quest_settings(store, interaction.guild.id)
         await interaction.response.send_message(
             view=QuestNotifyPanel(self, settings),
+            ephemeral=True,
+        )
+
+    async def show_levelup_notify_settings(self, interaction: discord.Interaction):
+        if interaction.guild is None:
+            return await interaction.response.send_message(
+                "この機能はサーバー内で利用できます。",
+                ephemeral=True,
+            )
+
+        from cogs.general import get_levelup_settings
+
+        store = guild_settings.get_store()
+        await store.ensure_loaded()
+        settings = get_levelup_settings(store, interaction.guild.id)
+        await interaction.response.send_message(
+            view=LevelUpNotifyPanel(self, settings, interaction.guild),
             ephemeral=True,
         )
 
@@ -5408,6 +5612,9 @@ class SupportCog(commands.Cog):
 
         if selected == "quest_notify":
             return await self.show_quest_notify_settings(interaction)
+
+        if selected == "levelup_notify":
+            return await self.show_levelup_notify_settings(interaction)
 
         if selected == "sticky":
             return await self.show_sticky_settings(interaction)
