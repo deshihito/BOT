@@ -81,6 +81,10 @@ class TimedSettingsTest(unittest.IsolatedAsyncioTestCase):
         }
         now = datetime(2026, 10, 26, 12, 0)
         self.assertEqual([item["id"] for item in timed.due_schedules(current, now)], ["a"])
+        self.assertEqual(
+            [item["id"] for item in timed.due_schedules(current, datetime(2026, 10, 26, 12, 2))],
+            ["a", "c"],
+        )
 
     async def test_send_due_marks_last_sent(self):
         now = datetime(2026, 10, 26, 12, 0)
@@ -117,6 +121,33 @@ class TimedSettingsTest(unittest.IsolatedAsyncioTestCase):
         schedules = timed.settings(1)["schedules"]
         self.assertEqual(len(schedules), 1)
         self.assertEqual(schedules[0]["time"], "20:00")
+
+    async def test_stale_modal_does_not_rewind_last_sent(self):
+        await timed.update_settings(
+            1, timed.KEY, enabled=True, channel_id=100,
+            schedules=[{"id": "a", "time": "12:00", "message": "old", "last_sent": ""}],
+        )
+        guild = FakeGuild()
+        cog = types.SimpleNamespace(bot=types.SimpleNamespace(get_guild=lambda _id: guild))
+        stale_view = timed.build_view(cog, 1)
+        await timed.update_settings(
+            1, timed.KEY,
+            schedules=[{"id": "a", "time": "12:00", "message": "old", "last_sent": "2026-10-26"}],
+        )
+        modal = timed.TimedModal(stale_view, stale_view.settings["schedules"][0])
+        modal.message_input._value = "new"
+        interaction = types.SimpleNamespace(
+            user=types.SimpleNamespace(
+                id=1, guild_permissions=types.SimpleNamespace(administrator=True, manage_guild=True),
+            ),
+            response=types.SimpleNamespace(
+                is_done=lambda: False, send_message=AsyncMock(), edit_message=AsyncMock(),
+            ),
+            guild=guild,
+            guild_id=1,
+        )
+        await modal.on_submit(interaction)
+        self.assertEqual(timed.settings(1)["schedules"][0]["last_sent"], "2026-10-26")
 
     def test_settings_view_controls(self):
         guild = FakeGuild()

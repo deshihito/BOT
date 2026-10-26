@@ -150,7 +150,7 @@ class AutoRoleSettingsTest(unittest.IsolatedAsyncioTestCase):
         select._values = ["10"]
         interaction = types.SimpleNamespace(
             user=types.SimpleNamespace(
-                guild_permissions=types.SimpleNamespace(administrator=False, manage_roles=False),
+                guild_permissions=types.SimpleNamespace(administrator=False, manage_guild=True, manage_roles=False),
                 top_role=FakeRole(999, "user", position=999),
             ),
             response=types.SimpleNamespace(send_message=AsyncMock()),
@@ -166,7 +166,7 @@ class AutoRoleSettingsTest(unittest.IsolatedAsyncioTestCase):
         select._values = ["10"]
         interaction = types.SimpleNamespace(
             user=types.SimpleNamespace(
-                guild_permissions=types.SimpleNamespace(administrator=False, manage_roles=True),
+                guild_permissions=types.SimpleNamespace(administrator=False, manage_guild=True, manage_roles=True),
                 top_role=FakeRole(5, "user", position=5),
             ),
             response=types.SimpleNamespace(send_message=AsyncMock()),

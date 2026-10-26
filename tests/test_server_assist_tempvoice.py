@@ -48,12 +48,13 @@ class FakeChannel:
         self.edit = AsyncMock()
         self.delete = AsyncMock()
         self.set_permissions = AsyncMock()
+        self.overwrite = discord.PermissionOverwrite()
 
     def permissions_for(self, member):
         return types.SimpleNamespace(connect=True, send_messages=True, manage_channels=True)
 
     def overwrites_for(self, target):
-        return discord.PermissionOverwrite()
+        return self.overwrite
 
 
 class FakeGuild:
@@ -195,6 +196,22 @@ class TempVoiceSettingsTest(unittest.IsolatedAsyncioTestCase):
         after = types.SimpleNamespace(channel=None)
         await tempvoice.on_voice_state_update(cog, FakeMember(guild), before, after)
         self.assertIn("20", await tempvoice._entries_cache())
+
+    async def test_unlock_restores_original_connect_permission(self):
+        cog, guild = self.make_cog()
+        await tempvoice._put_entry(20, {"channel_id": 20, "guild_id": 1, "owner_id": 1, "panel_id": 900})
+        guild.temp.overwrite.connect = False
+        interaction = types.SimpleNamespace(
+            guild=guild,
+            guild_id=1,
+            channel_id=20,
+            user=types.SimpleNamespace(id=1, guild_permissions=types.SimpleNamespace(administrator=False, manage_channels=False)),
+            response=types.SimpleNamespace(send_message=AsyncMock(), send_modal=AsyncMock()),
+        )
+        await tempvoice.handle_action(cog, interaction, "lock")
+        await tempvoice.handle_action(cog, interaction, "unlock")
+        overwrite = guild.temp.set_permissions.await_args.kwargs["overwrite"]
+        self.assertFalse(overwrite.connect)
 
     async def test_other_member_without_permission_is_denied(self):
         cog, guild = self.make_cog()
