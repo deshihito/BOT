@@ -157,6 +157,30 @@ class ServerAssistCog(commands.Cog):
             )
         return await module.handle_vote(self, interaction, action)
 
+    async def handle_poll_create(self, interaction):
+        module = self.modules.get("polls")
+        if module is None:
+            return await interaction.response.send_message(
+                "投票を読み込めませんでした。", ephemeral=True,
+            )
+        return await module.handle_create(self, interaction)
+
+    async def handle_poll_vote(self, interaction, values):
+        module = self.modules.get("polls")
+        if module is None:
+            return await interaction.response.send_message(
+                "投票を読み込めませんでした。", ephemeral=True,
+            )
+        return await module.handle_vote(self, interaction, values)
+
+    async def handle_poll_close(self, interaction):
+        module = self.modules.get("polls")
+        if module is None:
+            return await interaction.response.send_message(
+                "投票を読み込めませんでした。", ephemeral=True,
+            )
+        return await module.handle_close(self, interaction)
+
     async def _dispatch(self, hook: str, *args: Any):
         for key, module in self.modules.items():
             callback = getattr(module, hook, None)
