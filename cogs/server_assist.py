@@ -203,6 +203,14 @@ class ServerAssistCog(commands.Cog):
         await self._dispatch("on_guild_channel_delete", channel)
 
     @commands.Cog.listener()
+    async def on_invite_create(self, invite: discord.Invite):
+        await self._dispatch("on_invite_create", invite)
+
+    @commands.Cog.listener()
+    async def on_invite_delete(self, invite: discord.Invite):
+        await self._dispatch("on_invite_delete", invite)
+
+    @commands.Cog.listener()
     async def on_message(self, message: discord.Message):
         await self._dispatch("on_message", message)
 
