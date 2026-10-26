@@ -385,11 +385,19 @@ _LEVELUP_LATIN_FONTS = (
     "/System/Library/Fonts/Helvetica.ttc",
 )
 
-# 参考画像に寄せるための「極太サンセリフ体」。見出し(LEVEL UP!)とレベル数字に使う。
+# 参考画像(Bahnschrift / DIN 系コンデンス)を優先する
 _LEVELUP_DISPLAY_FONTS = (
     os.getenv("LEVELUP_DISPLAY_FONT_PATH") or "",
     str(Path(__file__).resolve().parent.parent / "assets" / "fonts" / "levelup-display.ttf"),
     str(Path(__file__).resolve().parent.parent / "assets" / "fonts" / "levelup-display.otf"),
+    # ★ 参考画像 (Bahnschrift / DIN 系コンデンス) を優先
+    "/usr/share/fonts/truetype/bahnschrift/bahnschrift.ttf",
+    "/usr/share/fonts/truetype/oswald/Oswald-Medium.ttf",
+    "/usr/share/fonts/truetype/oswald/Oswald-SemiBold.ttf",
+    "/usr/share/fonts/truetype/barlow-condensed/BarlowCondensed-SemiBold.ttf",
+    "/usr/share/fonts/truetype/barlow-condensed/BarlowCondensed-Bold.ttf",
+    "C:/Windows/Fonts/bahnschrift.ttf",
+    "C:/Windows/Fonts/BAHNSCHRIFT.TTF",
     # Linux (fontconfig)
     "/usr/share/fonts/truetype/anton/Anton-Regular.ttf",
     "/usr/share/fonts/truetype/bebasneue/BebasNeue-Regular.ttf",
@@ -409,7 +417,6 @@ _LEVELUP_DISPLAY_FONTS = (
     "C:/Windows/Fonts/impact.ttf",
     "C:/Windows/Fonts/ariblk.ttf",
     "C:/Windows/Fonts/arialbd.ttf",
-    "C:/Windows/Fonts/bahnschrift.ttf",
 )
 
 _LEVELUP_FONT_PICK: tuple[str | None, bool] | None = None
@@ -441,9 +448,9 @@ def _levelup_pick_font() -> tuple[str | None, bool]:
 
 
 def _levelup_pick_display_font() -> str | None:
-    """「LEVEL UP!」などの見出しに使う極太ディスプレイフォントを返す。
+    """「LEVEL UP」などの見出しに使う極太ディスプレイフォントを返す。
 
-    参考画像に寄せるため、まず専用の太字サンセリフ体(Anton / Impact / Archivo Black 等)を探し、
+    参考画像に寄せるため、まず専用の太字サンセリフ体(Bahnschrift / Oswald / Anton 等)を探し、
     無ければ本文フォントにフォールバックする。
     """
     global _LEVELUP_DISPLAY_PICK
@@ -494,6 +501,28 @@ def _levelup_display_font(size: int):
     return _levelup_font(size)
 
 
+def _levelup_draw_tracked(d, xy, text, font, fill, tracking: float, anchor: str = "ls"):
+    """字間(tracking px)を加えてテキストを描く。戻り値は (描画幅, 描画高さ)。"""
+    x, y = xy
+    total_w = 0.0
+    for ch in text:
+        total_w += d.textlength(ch, font=font)
+    total_w += tracking * max(0, len(text) - 1)
+
+    # アンカー調整: ls(左ベースライン) のみサポート
+    if anchor.startswith("m"):
+        x -= total_w / 2
+    elif anchor.startswith("r"):
+        x -= total_w
+
+    for ch in text:
+        d.text((x, y), ch, font=font, fill=fill, anchor=anchor)
+        x += d.textlength(ch, font=font) + tracking
+
+    bbox = font.getbbox(text)
+    return total_w, bbox[3] - bbox[1]
+
+
 def _levelup_safe_name(name: str, can_cjk: bool) -> str:
     """画像に描けない文字(絵文字など)を落とす。日本語フォントが無ければASCIIのみ。"""
     out = []
@@ -518,10 +547,8 @@ def render_levelup_card(
 ) -> bytes:
     """レベルアップ画像(PNG)を生成して bytes で返す。CPU処理なので to_thread で呼ぶこと。
 
-    白基調。左にユーザーアイコン、中央に見出しとレベル変化(矢印付き)、右上に小さな BOT バッジ。
-    アイコン未取得時はユーザー側は白いシルエット、BOT 側はバッジ自体を描画しない。
-    必ず含める情報: ユーザーのアイコン / 前のレベル / レベルアップ後のレベル。
-    seed は互換のため残している(未使用)。
+    白基調・装飾最小。Bahnschrift/DIN 系コンデンスフォントにトラッキングを加えた見出し。
+    矢印は軸+三角形の2段構成、レベル数字は視覚的中心でベースラインを揃える。
     """
     from PIL import Image, ImageDraw
 
@@ -532,29 +559,28 @@ def render_levelup_card(
     def px(v: float) -> int:
         return int(round(v * S))
 
-    BG = (255, 255, 255, 255)     # 白地
-    INK = (24, 28, 44, 255)       # 見出し・新しいレベル
-    MUTE = (150, 156, 170, 255)   # 前のレベル / ラベル / ユーザー名
-    LINE = (228, 232, 240, 255)   # 区切り線・リング
-    ACCENT = (59, 91, 255, 255)   # アクセント青(参考画像の赤の代わり)
-    RING = (127, 178, 201, 255)   # BOT アイコン由来の水色アクセント
+    BG = (255, 255, 255, 255)
+    INK = (44, 52, 74, 255)       # 濃紺(参考画像の文字色)
+    MUTE = (150, 156, 170, 255)
+    LINE = (228, 232, 240, 255)
+    ACCENT = (59, 91, 255, 255)
+    RING = (127, 178, 201, 255)
 
     img = Image.new("RGBA", (W, H), (0, 0, 0, 0))
     d = ImageDraw.Draw(img)
 
-    # 角丸の白カード + ごく薄い枠線
     d.rounded_rectangle(
         [0, 0, W - 1, H - 1], radius=px(28),
         fill=BG, outline=LINE, width=px(2),
     )
 
     # ============================================================
-    # 左: ユーザーアイコン(リング付き)
+    # 左: ユーザーアイコン
     # ============================================================
     D = px(196)
     ax, ay = px(56), (H - D) // 2
     ring_w = px(4)
-    R = D // 2 + px(8) + ring_w  # リング外半径(控えめ)
+    R = D // 2 + px(8) + ring_w
     acx, acy = ax + D // 2, ay + D // 2
     d.ellipse([acx - R, acy - R, acx + R, acy + R], outline=RING, width=ring_w)
 
@@ -574,7 +600,7 @@ def render_levelup_card(
     img.paste(avatar, (ax, ay), amask)
 
     # ============================================================
-    # 右上: BOT バッジ(小さな円形アイコン)
+    # 右上: BOT バッジ
     # ============================================================
     BOT_D = px(56)
     BOT_MARGIN = px(28)
@@ -595,76 +621,103 @@ def render_levelup_card(
             bR = BOT_D // 2 + px(4) + bring_w
             bcx, bcy = bx + BOT_D // 2, by + BOT_D // 2
             d.ellipse([bcx - bR, bcy - bR, bcx + bR, bcy + bR], outline=LINE, width=bring_w)
-
             bmask = Image.new("L", (BOT_D, BOT_D), 0)
             ImageDraw.Draw(bmask).ellipse([0, 0, BOT_D - 1, BOT_D - 1], fill=255)
             img.paste(bot_avatar, (bx, by), bmask)
 
     # ============================================================
-    # 中央: 見出し + レベル変化
+    # 中央: 見出し + レベル
     # ============================================================
     TX = ax + D + px(52)
     right = W - px(56)
     center_y = H // 2
 
-    # 「LEVEL UP」 極太ディスプレイフォント・インク色
+    # --- 見出し「LEVEL UP」(トラッキング付き) ---
     up_text = "LEVEL UP"
-    up_size = px(60)
+    up_size = px(64)
     up_font = _levelup_display_font(up_size)
-    # BOT バッジの分だけ右側の余白を考慮して縮める
-    available = (right - px(80)) - TX
-    while up_size > px(28) and d.textlength(up_text, font=up_font) > available * 0.5:
+
+    # 収まるまで縮める(収まるときは縮めない)
+    max_up_w = (right - TX) * 0.58
+    while up_size > px(30) and d.textlength(up_text, font=up_font) > max_up_w:
         up_size -= px(2)
         up_font = _levelup_display_font(up_size)
-    up_w = d.textlength(up_text, font=up_font)
-    up_h = up_size
 
-    title_baseline = center_y + int(up_h * 0.35)
+    up_tracking = px(3)  # 参考画像の広めの字間
+    up_w, up_bbox_h = _levelup_draw_tracked(
+        d, (TX, 0), up_text, up_font, INK, up_tracking, anchor="ls"
+    )
 
-    # GENERAL ラベルはベースラインの上に独立配置(見出しと重ねない)
-    label = "GENERAL"
-    lfont = _levelup_font(px(14))
-    label_y = title_baseline - int(up_h * 0.62) - px(6)
-    d.text((TX + px(2), label_y), label, font=lfont, fill=MUTE, anchor="ls")
-    d.text((TX, title_baseline), up_text, font=up_font, fill=INK, anchor="ls")
+    # --- レベル変化「9 → 10」 ---
+    prev_text, new_text = str(before), str(after)
+    pfont = _levelup_display_font(px(42))
+    nfont = _levelup_display_font(px(72))
 
-    # 矢印(図形): 文字 ">" ではなく図形で描画してレベルアップを強調
+    p_w = d.textlength(prev_text, font=pfont)
+    n_w = d.textlength(new_text, font=nfont)
+
+    # 矢印の寸法
     arrow_w = px(56)
-    arrow_h = px(28)
-    arrow_x0 = TX + int(up_w) + px(44)
-    arrow_y = center_y + px(6)
+    arrow_h = px(26)
     shaft_h = max(px(4), int(arrow_h * 0.18))
+
+    # 全体幅 = 前 + gap + 矢印 + gap + 後
+    gap_before = px(20)
+    gap_after = px(16)
+    group_w = p_w + gap_before + arrow_w + gap_after + n_w
+
+    # 見出し + 余白 + レベル群 が右端に収まるよう配置
+    group_x = TX + up_w + px(56)
+    if group_x + group_w > right:
+        group_x = max(TX + up_w + px(24), right - group_w)
+
+    # --- ベースラインの計算 ---
+    # 見出しの視覚的な中心を、カードの中央よりやや上に置く
+    heading_cy = center_y - px(22)
+
+    # 「LEVEL UP」のベースライン: bbox のアセント分を補正
+    up_bbox = up_font.getbbox(up_text)
+    up_top = heading_cy - (up_bbox[3] - up_bbox[1]) / 2 - up_bbox[1]
+    _levelup_draw_tracked(
+        d, (TX, up_top), up_text, up_font, INK, up_tracking, anchor="ls"
+    )
+
+    # --- レベル変化のベースライン ---
+    # 見出しと同じ視覚的中心 heading_cy に揃える
+    p_bbox = pfont.getbbox(prev_text)
+    n_bbox = nfont.getbbox(new_text)
+
+    p_top = heading_cy - (p_bbox[3] - p_bbox[1]) / 2 - p_bbox[1]
+    n_top = heading_cy - (n_bbox[3] - n_bbox[1]) / 2 - n_bbox[1]
+
+    d.text((group_x, p_top), prev_text, font=pfont, fill=MUTE, anchor="ls")
+
+    # --- 矢印(軸 + 三角形) ---
+    arrow_x0 = group_x + p_w + gap_before
+    arrow_cy = heading_cy
+
+    # 軸
     d.rectangle(
-        [arrow_x0, arrow_y - shaft_h // 2, arrow_x0 + arrow_w - px(14), arrow_y + shaft_h // 2],
+        [
+            arrow_x0,
+            arrow_cy - shaft_h // 2,
+            arrow_x0 + arrow_w - px(16),
+            arrow_cy + shaft_h // 2,
+        ],
         fill=ACCENT,
     )
+    # 矢じり(3点の三角形)
+    tip_x = arrow_x0 + arrow_w
     d.polygon(
         [
-            (arrow_x0 + arrow_w - px(18), arrow_y - arrow_h // 2),
-            (arrow_x0 + arrow_w, arrow_y),
-            (arrow_x0 + arrow_w - px(18), arrow_y + arrow_h // 2),
-            (arrow_x0 + arrow_w - px(28), arrow_y),  # 内側のくぼみで矢じりを締める
+            (tip_x, arrow_cy),                                    # 頂点
+            (arrow_x0 + arrow_w - px(20), arrow_cy - arrow_h // 2),  # 上
+            (arrow_x0 + arrow_w - px(20), arrow_cy + arrow_h // 2),  # 下
         ],
         fill=ACCENT,
     )
 
-    # レベル変化(前:ミュート / 後:アクセント青・強調)
-    prev_text, new_text = str(before), str(after)
-    pfont = _levelup_display_font(px(44))
-    nfont = _levelup_display_font(px(76))
-
-    p_w = d.textlength(prev_text, font=pfont)
-    n_w = d.textlength(new_text, font=nfont)
-    gap_before = px(22)
-    gap_after = px(18)
-
-    p_x = arrow_x0 - gap_before - p_w
-    if p_x < TX + up_w + px(12):
-        p_x = TX + up_w + px(12)
-    d.text((p_x, title_baseline), prev_text, font=pfont, fill=MUTE, anchor="ls")
-
-    n_x = arrow_x0 + arrow_w + gap_after
-    d.text((n_x, title_baseline + px(2)), new_text, font=nfont, fill=ACCENT, anchor="ls")
+    d.text((arrow_x0 + arrow_w + gap_after, n_top), new_text, font=nfont, fill=ACCENT, anchor="ls")
 
     # ============================================================
     # 下部: 区切り線 + ユーザー名
@@ -675,7 +728,7 @@ def render_levelup_card(
     shown = _levelup_safe_name(name, can_cjk)
     if shown:
         nfont_small = _levelup_font(px(20))
-        maxw = W - px(112) - px(80)  # 右上 BOT バッジと干渉しない範囲(実質影響なし)
+        maxw = W - px(112)
         text = shown
         while len(text) > 1 and d.textlength(text, font=nfont_small) > maxw:
             text = text[:-1]
