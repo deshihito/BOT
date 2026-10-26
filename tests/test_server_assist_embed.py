@@ -67,6 +67,9 @@ class EmbedBuilderTest(unittest.IsolatedAsyncioTestCase):
         guild_settings.set_store(self.store)
         self.addCleanup(guild_settings.set_store, None)
         embedbuilder.CREATE_COOLDOWN = 0.0
+        embedbuilder.POST_COOLDOWN = 0.0
+        embedbuilder._last_create.clear()
+        embedbuilder._last_post.clear()
 
     def test_feature_is_discovered(self):
         keys = [feature.key for feature in discover_features(refresh=True)]
@@ -185,6 +188,60 @@ class EmbedBuilderTest(unittest.IsolatedAsyncioTestCase):
         await embedbuilder.handle_create(first)
         await embedbuilder.handle_create(second)
         first.response.send_modal.assert_awaited_once()
+        second.response.send_message.assert_awaited_once()
+
+    async def test_embed_total_length_limit(self):
+        await embedbuilder.update_settings(1, embedbuilder.KEY, enabled=True, channel_id=100)
+        guild = FakeGuild()
+
+        def interaction():
+            return types.SimpleNamespace(
+                guild=guild, guild_id=1, user=FakeUser(),
+                response=types.SimpleNamespace(send_message=AsyncMock(), defer=AsyncMock()),
+                followup=types.SimpleNamespace(send=AsyncMock()),
+            )
+
+        too_long = embedbuilder.EmbedCreateModal(1)
+        too_long.title_input._value = "a" * 256
+        too_long.body_input._value = "b" * 4000
+        too_long.footer_input._value = "c" * 1745
+        rejected = interaction()
+        await too_long.on_submit(rejected)
+        rejected.response.send_message.assert_awaited_once()
+        self.assertIn("6000", rejected.response.send_message.await_args.args[0])
+        guild.channel.send.assert_not_awaited()
+
+        exactly = embedbuilder.EmbedCreateModal(1)
+        exactly.title_input._value = "a" * 256
+        exactly.body_input._value = "b" * 4000
+        exactly.footer_input._value = "c" * 1744
+        accepted = interaction()
+        await exactly.on_submit(accepted)
+        guild.channel.send.assert_awaited_once()
+
+    async def test_submit_cooldown_rejects_two_open_modals(self):
+        embedbuilder.POST_COOLDOWN = 100.0
+        await embedbuilder.update_settings(1, embedbuilder.KEY, enabled=True, channel_id=100)
+        guild = FakeGuild()
+
+        def modal():
+            item = embedbuilder.EmbedCreateModal(1)
+            item.title_input._value = "タイトル"
+            item.body_input._value = "本文"
+            return item
+
+        def interaction():
+            return types.SimpleNamespace(
+                guild=guild, guild_id=1, user=FakeUser(),
+                response=types.SimpleNamespace(send_message=AsyncMock(), defer=AsyncMock()),
+                followup=types.SimpleNamespace(send=AsyncMock()),
+            )
+
+        first = interaction()
+        second = interaction()
+        await modal().on_submit(first)
+        await modal().on_submit(second)
+        guild.channel.send.assert_awaited_once()
         second.response.send_message.assert_awaited_once()
 
 
