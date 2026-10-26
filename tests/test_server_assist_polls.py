@@ -275,6 +275,18 @@ class PollTest(unittest.IsolatedAsyncioTestCase):
         interaction.response.send_message.assert_awaited_once()
         self.assertEqual((await polls._cache_data())["500"]["votes"], [[2], []])
 
+    async def test_refresh_repaints_without_changing_votes(self):
+        await polls._put_entry(500, entry(votes=[[2], []]))
+        message = FakeMessage(500)
+        interaction = types.SimpleNamespace(
+            message=message, user=FakeUser(2),
+            response=types.SimpleNamespace(defer=AsyncMock(), send_message=AsyncMock()),
+            followup=types.SimpleNamespace(send=AsyncMock()),
+        )
+        await polls.handle_refresh(None, interaction)
+        message.edit.assert_awaited_once()
+        self.assertEqual((await polls._cache_data())["500"]["votes"], [[2], []])
+
     async def test_settings_view_controls_and_panel_send(self):
         await polls.update_settings(1, polls.KEY, enabled=True, channel_id=100)
         guild = FakeGuild()
