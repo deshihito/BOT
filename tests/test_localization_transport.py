@@ -40,6 +40,18 @@ class LocalizationTransportTest(unittest.TestCase):
             result = localization.localize_kwargs(sender, {"content": "日本語"})
         self.assertEqual(result["content"], "日本語")
 
+    def test_localize_nested_components_v2_panel(self):
+        button = discord.ui.Button(label="設定を保存")
+        nested_panel = types.SimpleNamespace(
+            children=[types.SimpleNamespace(children=[button])],
+        )
+        sender = types.SimpleNamespace(guild=types.SimpleNamespace(id=77))
+        store = types.SimpleNamespace(get=lambda guild_id, section: {"locale": "en"})
+        with patch.object(localization, "_ENGLISH_PAIRS", [("設定を保存", "Save settings")]), \
+             patch.object(localization, "get_store", return_value=store):
+            localization.localize_kwargs(sender, {"view": nested_panel})
+        self.assertEqual(button.label, "Save settings")
+
 
 if __name__ == "__main__":
     unittest.main()

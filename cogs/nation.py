@@ -171,7 +171,7 @@ class NationCog(commands.Cog):
 
     # --- コマンド ---
 
-    @nation_group.command(name="found", help="このサーバーの国を建国します（管理者かオーナーのみ）")
+    @nation_group.command(name="found", help="Found a nation for this server (administrator or owner only)")
     async def found(self, ctx: commands.Context):
         guild, user = ctx.guild, ctx.author
         perms = getattr(user, "guild_permissions", None)
@@ -195,7 +195,7 @@ class NationCog(commands.Cog):
             "建国しました", f"**{guild.name}** が建国されました！\n首都: ({x}, {y})\n国王: {user.mention}\n"
             "このサーバーのメンバーも国民として参加できます。", COLOR_OK))
 
-    @nation_group.command(name="join", help="このサーバーの国に国民として参加します")
+    @nation_group.command(name="join", help="Join this server's nation as a citizen")
     async def join(self, ctx: commands.Context):
         if not self._enabled(ctx.guild):
             await self._reply(ctx, self._embed("参加できません", DISABLED_TEXT, COLOR_ERROR), ephemeral=True)
@@ -214,7 +214,7 @@ class NationCog(commands.Cog):
         await self._reply(ctx, self._embed(
             "参加しました", f"{ctx.author.mention} が **{ctx.guild.name}** の国民になりました！\n空腹度: {MAX_HUNGER}/{MAX_HUNGER}", COLOR_OK))
 
-    @nation_group.command(name="status", help="自分の所属国・役職・所持金・空腹度を表示します")
+    @nation_group.command(name="status", help="Show your nation, role, balance, and hunger")
     async def status(self, ctx: commands.Context):
         uid = str(ctx.author.id)
         player = await self._player(uid)

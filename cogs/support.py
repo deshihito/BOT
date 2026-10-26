@@ -5598,7 +5598,7 @@ class SupportCog(commands.Cog):
         view = RoleBulkView(self, interaction.guild, role)
         await interaction.response.send_message(view=as_panel_v2(view), ephemeral=True)
 
-    @app_commands.command(name="support", description="サポート機能の操作パネルを表示します")
+    @app_commands.command(name="support", description="Show the support features control panel")
     @app_commands.guild_only()
     async def support(self, interaction: discord.Interaction):
         view = SupportPanelView(self)

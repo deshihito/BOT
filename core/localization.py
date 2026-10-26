@@ -146,22 +146,29 @@ def _translate_embed(embed: Any, locale: str) -> None:
                            value=translate_text(field.value, locale), inline=field.inline)
 
 def _translate_view(view: Any, locale: str) -> None:
-    title = getattr(view, "title", None)
-    if isinstance(title, str):
-        try:
-            view.title = translate_text(title, locale)
-        except (AttributeError, TypeError):
-            pass
-    for item in getattr(view, "children", ()):
-        for attribute in ("label", "placeholder", "title"):
+    """Translate V1 views and nested Components V2 containers/rows."""
+    visited: set[int] = set()
+
+    def visit(item: Any) -> None:
+        if item is None or isinstance(item, (str, bytes, int, float, bool)) or id(item) in visited:
+            return
+        visited.add(id(item))
+        for attribute in ("label", "placeholder", "title", "description", "content"):
             value = getattr(item, attribute, None)
             if isinstance(value, str):
-                setattr(item, attribute, translate_text(value, locale))
-        for option in getattr(item, "options", ()):
-            for attribute in ("label", "description"):
-                value = getattr(option, attribute, None)
-                if isinstance(value, str):
-                    setattr(option, attribute, translate_text(value, locale))
+                try:
+                    setattr(item, attribute, translate_text(value, locale))
+                except (AttributeError, TypeError):
+                    pass
+        for option in getattr(item, "options", ()) or ():
+            visit(option)
+        for attribute in ("children", "items", "components"):
+            children = getattr(item, attribute, None)
+            if children:
+                for child in children:
+                    visit(child)
+
+    visit(view)
 
 def localize_kwargs(sender: Any, kwargs: dict[str, Any]) -> dict[str, Any]:
     """Translate Discord send/edit keyword payloads without changing business logic."""
