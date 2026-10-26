@@ -1451,6 +1451,18 @@ class GeneralCog(commands.Cog):
     # ============================================================
     # EXP: メッセージ
     # ============================================================
+    async def _notify_level_rewards(self, guild, member, old_level: int, new_level: int):
+        if new_level <= old_level or self.bot is None:
+            return
+        cog = self.bot.get_cog("ServerAssistCog")
+        handler = getattr(cog, "handle_level_rewards", None)
+        if handler is None:
+            return
+        try:
+            await handler(guild, member, old_level, new_level)
+        except Exception:
+            logger.exception("レベル報酬の連携に失敗しました")
+
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message):
         if message.author.bot or message.guild is None:
@@ -1468,6 +1480,9 @@ class GeneralCog(commands.Cog):
                         message.guild, message.author, level_before, level_after,
                         fallback_channel=message.channel,
                     ))
+                    await self._notify_level_rewards(
+                        message.guild, message.author, level_before, level_after,
+                    )
         except Exception:
             logger.exception("EXP: チャットEXPの付与に失敗しました")
 
@@ -1508,6 +1523,9 @@ class GeneralCog(commands.Cog):
                 self._spawn(self._notify_levelup(
                     member.guild, member, levelup[0], levelup[1], fallback_channel=before.channel,
                 ))
+                await self._notify_level_rewards(
+                    member.guild, member, levelup[0], levelup[1],
+                )
         except Exception:
             logger.exception("EXP: VC入退室の処理に失敗しました")
 
@@ -1545,6 +1563,11 @@ class GeneralCog(commands.Cog):
             if touched:
                 await _exp_save()
             for guild, uid, level_before, level_after, voice_channel in levelups:
+                member = guild.get_member(uid)
+                if member is not None:
+                    await self._notify_level_rewards(
+                        guild, member, level_before, level_after,
+                    )
                 self._spawn(self._notify_levelup(
                     guild, uid, level_before, level_after, fallback_channel=voice_channel,
                 ))
