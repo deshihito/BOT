@@ -438,11 +438,12 @@ class ApplicationPanelButton(discord.ui.Button):
         channel = interaction.guild.get_channel(channel_id) if interaction.guild and channel_id else None
         if channel is None:
             return await interaction.response.send_message("先に応募パネルの送信先を選んでください。", ephemeral=True)
+        await interaction.response.defer(ephemeral=True)
         try:
             await channel.send(embed=build_panel_embed(), view=ApplicationPanelView(view.cog))
         except (discord.Forbidden, discord.HTTPException):
-            return await interaction.response.send_message("パネルを送信できませんでした。", ephemeral=True)
-        return await interaction.response.send_message("応募パネルを送信しました。", ephemeral=True)
+            return await interaction.followup.send("パネルを送信できませんでした。", ephemeral=True)
+        return await interaction.followup.send("応募パネルを送信しました。", ephemeral=True)
 
 
 class ApplicationSettingsView(AssistFeatureView):
