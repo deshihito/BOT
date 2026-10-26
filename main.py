@@ -33,6 +33,15 @@ class MyBot(commands.Bot):
         super().__init__(command_prefix=config.PREFIX, intents=intents)
         self.updated_notified = False
 
+    async def close(self):
+        # 終了前に、Supabase へ送れていない設定を送っておく（送れなくても次回起動時に再送する）。
+        try:
+            from core.storage import flush_all
+            await flush_all(timeout=5.0)
+        except Exception:
+            logging.getLogger(__name__).exception("未送信の設定を保存できませんでした")
+        await super().close()
+
     async def setup_hook(self):
         print(df.format_log("--- COGS LOADING PROCESS START ---"))
         

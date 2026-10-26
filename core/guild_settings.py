@@ -73,7 +73,7 @@ class GuildSettings:
             await self.kv.set(key, copy.deepcopy(guild), wait=not background)
         else:
             self._data.pop(key, None)
-            await self.kv.delete(key)
+            await self.kv.delete(key, wait=not background)
         return copy.deepcopy(current)
 
 
