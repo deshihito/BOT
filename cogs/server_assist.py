@@ -65,6 +65,7 @@ class ServerAssistCog(commands.Cog):
         self.features = discover_features(refresh=True)
         self.by_key = {feature.key: feature for feature in self.features}
         self.modules: dict[str, Any] = {}
+        self._feature_tasks: list[Any] = []
         for feature in self.features:
             try:
                 self.modules[feature.key] = importlib.import_module(feature.module_name)
@@ -73,12 +74,17 @@ class ServerAssistCog(commands.Cog):
 
     async def cog_load(self):
         for module in self.modules.values():
-            hook = getattr(module, "register_views", None)
-            if callable(hook):
-                try:
-                    hook(self)
-                except Exception:
-                    logger.exception("サーバーアシストの永続ビュー登録に失敗しました")
+            for name in ("register_views", "start_tasks"):
+                hook = getattr(module, name, None)
+                if callable(hook):
+                    try:
+                        hook(self)
+                    except Exception:
+                        logger.exception("サーバーアシストの %s に失敗しました", name)
+
+    async def cog_unload(self):
+        for task in self._feature_tasks:
+            task.cancel()
 
     async def show_home(self, interaction: discord.Interaction):
         if not has_manage_permission(interaction):
@@ -175,6 +181,34 @@ class ServerAssistCog(commands.Cog):
     @commands.Cog.listener()
     async def on_raw_message_delete(self, payload: discord.RawMessageDeleteEvent):
         await self._dispatch("on_raw_message_delete", payload)
+
+    @commands.Cog.listener()
+    async def on_message_delete(self, message: discord.Message):
+        await self._dispatch("on_message_delete", message)
+
+    @commands.Cog.listener()
+    async def on_guild_role_create(self, role: discord.Role):
+        await self._dispatch("on_guild_role_create", role)
+
+    @commands.Cog.listener()
+    async def on_guild_role_delete(self, role: discord.Role):
+        await self._dispatch("on_guild_role_delete", role)
+
+    @commands.Cog.listener()
+    async def on_guild_channel_create(self, channel: discord.abc.GuildChannel):
+        await self._dispatch("on_guild_channel_create", channel)
+
+    @commands.Cog.listener()
+    async def on_guild_channel_delete(self, channel: discord.abc.GuildChannel):
+        await self._dispatch("on_guild_channel_delete", channel)
+
+    @commands.Cog.listener()
+    async def on_invite_create(self, invite: discord.Invite):
+        await self._dispatch("on_invite_create", invite)
+
+    @commands.Cog.listener()
+    async def on_invite_delete(self, invite: discord.Invite):
+        await self._dispatch("on_invite_delete", invite)
 
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message):
