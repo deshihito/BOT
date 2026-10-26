@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections import OrderedDict
 from typing import Any
 
 import discord
@@ -22,8 +23,9 @@ ARCHIVE_CHOICES = {
 }
 DEFAULT_ARCHIVE = 1440
 SEEN_LIMIT = 1000
+MAX_PENDING_TASKS = 100
 
-_seen: set[int] = set()
+_seen: "OrderedDict[int, None]" = OrderedDict()
 _tasks: set[asyncio.Task] = set()
 
 FEATURE = Feature(
@@ -75,10 +77,28 @@ def reset_state() -> None:
     _seen.clear()
 
 
+def _remember(message_id: int) -> bool:
+    if message_id in _seen:
+        return False
+    _seen[message_id] = None
+    while len(_seen) > SEEN_LIMIT:
+        _seen.popitem(last=False)
+    return True
+
+
 async def drain() -> None:
     """テスト用: バックグラウンドのスレッド作成が終わるまで待つ。"""
     if _tasks:
         await asyncio.gather(*list(_tasks), return_exceptions=True)
+
+
+async def shutdown(cog: Any = None) -> None:
+    """Cog終了時に、待っているスレッド作成を止める。"""
+    tasks = list(_tasks)
+    for task in tasks:
+        task.cancel()
+    if tasks:
+        await asyncio.gather(*tasks, return_exceptions=True)
 
 
 async def _create_thread(
@@ -106,17 +126,27 @@ async def on_message(cog: Any, message: Any) -> None:
     channel = getattr(message, "channel", None)
     if channel is None or getattr(channel, "id", None) != current["channel_id"]:
         return
+    me = getattr(guild, "me", None)
+    if me is not None:
+        try:
+            if not getattr(channel.permissions_for(me), "create_public_threads", False):
+                return
+        except Exception:
+            pass
     message_id = getattr(message, "id", None)
     if message_id is not None:
-        if message_id in _seen:
+        if not _remember(message_id):
             return
-        if len(_seen) >= SEEN_LIMIT:
-            _seen.clear()
-        _seen.add(message_id)
     if getattr(message, "thread", None) is not None:
         return
     create_thread = getattr(message, "create_thread", None)
     if not callable(create_thread):
+        return
+    if len(_tasks) >= MAX_PENDING_TASKS:
+        logger.debug(
+            "自動スレッドの待ちタスクが上限に達しました: guild=%s channel=%s",
+            getattr(guild, "id", None), current["channel_id"],
+        )
         return
     # レート制限待ちで他のサーバーアシスト処理を止めないよう、作成はバックグラウンドで行う。
     task = asyncio.create_task(
