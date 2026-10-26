@@ -78,21 +78,6 @@ def settings(guild_id: int) -> dict[str, Any]:
     }
 
 
-def _channels(guild: Any) -> list[Any]:
-    me = getattr(guild, "me", None)
-    channels = list(getattr(guild, "text_channels", []) or [])
-    usable: list[Any] = []
-    for channel in channels:
-        if me is not None:
-            try:
-                if not channel.permissions_for(me).send_messages:
-                    continue
-            except Exception:
-                pass
-        usable.append(channel)
-    return usable[:25]
-
-
 def can_warn(interaction: discord.Interaction) -> bool:
     permissions = getattr(getattr(interaction, "user", None), "guild_permissions", None)
     if getattr(permissions, "administrator", False) or getattr(permissions, "manage_guild", False):
@@ -266,26 +251,14 @@ class WarningReasonModal(discord.ui.Modal, title="警告"):
         )
 
 
-class WarningChannelSelect(discord.ui.Select):
+class WarningChannelSelect(discord.ui.ChannelSelect):
     def __init__(self, parent: "WarningSettingsView", kind: str):
         self.parent_view = parent
         self.kind = kind
-        field = f"{kind}_channel_id"
-        current = parent.settings[field]
-        options = [
-            discord.SelectOption(
-                label=str(getattr(channel, "name", "チャンネル"))[:100],
-                value=str(channel.id),
-                default=channel.id == current,
-            )
-            for channel in _channels(parent.guild)
-        ]
-        if not options:
-            options = [discord.SelectOption(label="送信できるチャンネルがありません", value="__none__")]
         labels = {"panel": "警告パネルを置くチャンネル", "log": "警告ログを送るチャンネル"}
         super().__init__(
             placeholder=labels.get(kind, "チャンネル"),
-            options=options[:25],
+            channel_types=[discord.ChannelType.text, discord.ChannelType.news],
             row=0 if kind == "panel" else 1,
         )
 
@@ -294,9 +267,17 @@ class WarningChannelSelect(discord.ui.Select):
             return await interaction.response.send_message(
                 "この設定には「サーバーの管理」権限が必要です。", ephemeral=True,
             )
-        if self.values[0] == "__none__":
-            return await interaction.response.send_message("送信できるチャンネルがありません。", ephemeral=True)
-        channel_id = int(self.values[0])
+        channel_id = self.values[0].id
+        channel = self.parent_view.guild.get_channel(channel_id)
+        me = getattr(self.parent_view.guild, "me", None)
+        if channel is not None and me is not None:
+            try:
+                if not channel.permissions_for(me).send_messages:
+                    return await interaction.response.send_message(
+                        "そのチャンネルには送信できません。", ephemeral=True,
+                    )
+            except Exception:
+                pass
         field = f"{self.kind}_channel_id"
         await update_settings(self.parent_view.guild_id, KEY, **{field: channel_id})
         self.parent_view.settings[field] = channel_id
