@@ -17,6 +17,7 @@ logger = logging.getLogger(__name__)
 
 KEY = "applications"
 APPLY_COOLDOWN = 30.0
+DECIDED = {"accepted", "denied", "on_hold"}
 
 FEATURE = Feature(
     key=KEY,
@@ -30,6 +31,7 @@ _entries: KVStore | None = None
 _cache: dict[str, dict[str, Any]] | None = None
 _review_locks: dict[str, asyncio.Lock] = {}
 _dm_locks: dict[str, asyncio.Lock] = {}
+_apply_locks: dict[tuple[int, int], asyncio.Lock] = {}
 _last_apply: dict[tuple[int, int], float] = {}
 
 
@@ -39,6 +41,7 @@ def reset_cache() -> None:
     _cache = None
     _review_locks.clear()
     _dm_locks.clear()
+    _apply_locks.clear()
     _last_apply.clear()
 
 
@@ -48,6 +51,10 @@ def _review_lock(message_id: int) -> asyncio.Lock:
 
 def _dm_lock(message_id: int) -> asyncio.Lock:
     return _dm_locks.setdefault(str(message_id), asyncio.Lock())
+
+
+def _apply_lock(guild_id: int, user_id: int) -> asyncio.Lock:
+    return _apply_locks.setdefault((guild_id, user_id), asyncio.Lock())
 
 
 def _store() -> KVStore:
@@ -216,42 +223,44 @@ class ApplicationModal(discord.ui.Modal, title="スタッフ応募"):
             return await interaction.response.send_message("レビュー先チャンネルが見つかりません。", ephemeral=True)
         await interaction.response.defer(ephemeral=True)
         cooldown_key = (interaction.guild_id, interaction.user.id)
-        now = time.monotonic()
-        if now - _last_apply.get(cooldown_key, 0.0) < APPLY_COOLDOWN:
-            return await interaction.followup.send(
-                "連続で応募できません。少し待ってください。", ephemeral=True,
-            )
-        existing = await _cache_data()
-        if any(
-            item.get("guild_id") == interaction.guild_id
-            and item.get("applicant_id") == interaction.user.id
-            and item.get("status") == "pending"
-            for item in existing.values()
-        ):
-            return await interaction.followup.send(
-                "すでに審査中の応募があります。結果をお待ちください。", ephemeral=True,
-            )
-        _last_apply[cooldown_key] = now
-        entry = {
-            "id": f"{interaction.user.id}-{uuid.uuid4().hex[:8]}",
-            "guild_id": interaction.guild_id,
-            "applicant_id": interaction.user.id,
-            "applicant_name": getattr(interaction.user, "display_name", None) or getattr(interaction.user, "name", "メンバー"),
-            "name": str(self.name_input.value or "")[:100],
-            "reason": str(self.reason_input.value or "")[:1000],
-            "experience": str(self.experience_input.value or "")[:1000],
-            "status": "pending",
-            "decided_by": None,
-        }
-        try:
-            message = await review.send(
-                embed=build_application_embed(entry),
-                view=ApplicationReviewView(self.cog),
-            )
-        except (discord.Forbidden, discord.HTTPException):
-            logger.exception("応募を投稿できませんでした: guild=%s", interaction.guild_id)
-            return await interaction.followup.send("応募を投稿できませんでした。", ephemeral=True)
-        await _put_entry(message.id, entry)
+        # 同じ人の同時送信で審査中の応募が2件できないよう、確認から保存まで直列化する。
+        async with _apply_lock(interaction.guild_id, interaction.user.id):
+            now = time.monotonic()
+            if now - _last_apply.get(cooldown_key, 0.0) < APPLY_COOLDOWN:
+                return await interaction.followup.send(
+                    "連続で応募できません。少し待ってください。", ephemeral=True,
+                )
+            existing = await _cache_data()
+            if any(
+                item.get("guild_id") == interaction.guild_id
+                and item.get("applicant_id") == interaction.user.id
+                and item.get("status") == "pending"
+                for item in existing.values()
+            ):
+                return await interaction.followup.send(
+                    "すでに審査中の応募があります。結果をお待ちください。", ephemeral=True,
+                )
+            _last_apply[cooldown_key] = now
+            entry = {
+                "id": f"{interaction.user.id}-{uuid.uuid4().hex[:8]}",
+                "guild_id": interaction.guild_id,
+                "applicant_id": interaction.user.id,
+                "applicant_name": getattr(interaction.user, "display_name", None) or getattr(interaction.user, "name", "メンバー"),
+                "name": str(self.name_input.value or "")[:100],
+                "reason": str(self.reason_input.value or "")[:1000],
+                "experience": str(self.experience_input.value or "")[:1000],
+                "status": "pending",
+                "decided_by": None,
+            }
+            try:
+                message = await review.send(
+                    embed=build_application_embed(entry),
+                    view=ApplicationReviewView(self.cog),
+                )
+            except (discord.Forbidden, discord.HTTPException):
+                logger.exception("応募を投稿できませんでした: guild=%s", interaction.guild_id)
+                return await interaction.followup.send("応募を投稿できませんでした。", ephemeral=True)
+            await _put_entry(message.id, entry)
         return await interaction.followup.send("応募を受け付けました。", ephemeral=True)
 
 
@@ -299,7 +308,7 @@ async def handle_review(cog: Any, interaction: discord.Interaction, action: str)
         try:
             await message.edit(
                 embed=build_application_embed(entry),
-                view=ApplicationReviewView(cog, disabled=True),
+                view=ApplicationReviewView(cog, disabled=bool(entry.get("notified"))),
             )
             edited = True
         except Exception:
@@ -309,44 +318,60 @@ async def handle_review(cog: Any, interaction: discord.Interaction, action: str)
                 "判定は保存しましたが、表示を更新できませんでした。もう一度押すと再表示します。",
                 ephemeral=True,
             )
-    await _notify_applicant(interaction, message.id, entry)
+    await _notify_applicant(cog, interaction, message, entry)
     if already and edited:
         return await interaction.followup.send(
             "この応募はすでに判定済みです。表示を更新しました。", ephemeral=True,
         )
 
 
-async def _notify_applicant(interaction: discord.Interaction, message_id: int, entry: dict[str, Any]) -> None:
-    if entry.get("status") not in {"accepted", "denied", "on_hold"} or entry.get("notified"):
+async def _notify_applicant(
+    cog: Any, interaction: discord.Interaction, message: Any, entry: dict[str, Any],
+) -> None:
+    if entry.get("status") not in DECIDED or entry.get("notified"):
         return
-    async with _dm_lock(message_id):
-        latest = (await _cache_data()).get(str(message_id)) or entry
-        if latest.get("notified") or latest.get("status") not in {"accepted", "denied", "on_hold"}:
+    async with _dm_lock(message.id):
+        latest = (await _cache_data()).get(str(message.id)) or entry
+        if latest.get("notified") or latest.get("status") not in DECIDED:
             return
         try:
             applicant_id = int(latest.get("applicant_id"))
         except (TypeError, ValueError):
             applicant_id = None
-        applicant = None
-        if applicant_id is not None and interaction.guild is not None:
-            applicant = interaction.guild.get_member(applicant_id)
-        if applicant is None and applicant_id is not None:
-            try:
-                applicant = await interaction.client.fetch_user(applicant_id)
-            except Exception:
-                applicant = None
-        delivered = applicant is None
-        if applicant is not None:
-            try:
-                await applicant.send(
-                    f"スタッフ応募の結果: **{_status_label(str(latest.get('status')))}**"
-                )
-                delivered = True
-            except Exception:
-                logger.debug("応募結果のDMを送信できませんでした: user=%s", applicant_id)
-        if delivered:
-            latest["notified"] = True
-            await _put_entry(message_id, latest)
+        delivered = False
+        if applicant_id is None:
+            # 応募にユーザーIDが無い場合は、これ以上再試行できない。
+            delivered = True
+        else:
+            applicant = interaction.guild.get_member(applicant_id) if interaction.guild is not None else None
+            if applicant is None:
+                try:
+                    applicant = await interaction.client.fetch_user(applicant_id)
+                except discord.NotFound:
+                    # 削除済みユーザー。再試行しても届かない。
+                    delivered = True
+                except Exception:
+                    delivered = False
+            if applicant is not None:
+                try:
+                    await applicant.send(
+                        f"スタッフ応募の結果: **{_status_label(str(latest.get('status')))}**"
+                    )
+                    delivered = True
+                except Exception:
+                    logger.debug("応募結果のDMを送信できませんでした: user=%s", applicant_id)
+        if not delivered:
+            return
+        latest["notified"] = True
+        await _put_entry(message.id, latest)
+        # DMまで終わったらボタンを閉じる。失敗した場合は開けたままにして再試行できるようにする。
+        try:
+            await message.edit(
+                embed=build_application_embed(latest),
+                view=ApplicationReviewView(cog, disabled=True),
+            )
+        except Exception:
+            logger.debug("応募の判定ボタンを閉じられませんでした: message=%s", message.id)
 
 
 class ApplicationChannelSelect(discord.ui.Select):

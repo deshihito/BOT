@@ -84,6 +84,7 @@ class ApplicationSettingsTest(unittest.IsolatedAsyncioTestCase):
             client=self.db,
             path=os.path.join(self.tmp.name, "applications.json"),
         )
+        applications.APPLY_COOLDOWN = 0.0
 
     def test_feature_is_discovered(self):
         keys = [feature.key for feature in discover_features(refresh=True)]
@@ -137,8 +138,9 @@ class ApplicationSettingsTest(unittest.IsolatedAsyncioTestCase):
         await applications.handle_review(cog, interaction, "accept")
         entry = (await applications._cache_data())["500"]
         self.assertEqual(entry["status"], "accepted")
+        self.assertTrue(entry.get("notified"))
         guild.member.send.assert_awaited_once()
-        interaction.message.edit.assert_awaited_once()
+        self.assertEqual(interaction.message.edit.await_count, 2)
 
     async def test_review_requires_manage_guild(self):
         await applications._put_entry(500, {
@@ -206,7 +208,7 @@ class ApplicationSettingsTest(unittest.IsolatedAsyncioTestCase):
         })
         guild = FakeGuild()
         message = FakeMessage(500)
-        message.edit = AsyncMock(side_effect=[RuntimeError("edit failed"), None])
+        message.edit = AsyncMock(side_effect=[RuntimeError("edit failed"), None, None])
         guild.member.send = AsyncMock(side_effect=[RuntimeError("dm failed"), None])
         cog = types.SimpleNamespace(bot=types.SimpleNamespace(get_guild=lambda _id: guild))
         interaction = types.SimpleNamespace(
@@ -224,8 +226,84 @@ class ApplicationSettingsTest(unittest.IsolatedAsyncioTestCase):
         entry = (await applications._cache_data())["500"]
         self.assertEqual(entry["status"], "accepted")
         self.assertTrue(entry.get("notified"))
-        self.assertEqual(message.edit.await_count, 2)
+        self.assertEqual(message.edit.await_count, 3)
         self.assertEqual(guild.member.send.await_count, 2)
+
+    async def test_fetch_failure_keeps_dm_retryable(self):
+        await applications._put_entry(500, {
+            "id": "app-1", "applicant_id": 2, "status": "pending", "name": "a",
+            "reason": "b", "experience": "c", "decided_by": None,
+        })
+        guild = FakeGuild()
+        message = FakeMessage(500)
+        fetched = FakeUser(2)
+        cog = types.SimpleNamespace(bot=types.SimpleNamespace(get_guild=lambda _id: guild))
+        interaction = types.SimpleNamespace(
+            guild=guild, user=FakeUser(3),
+            client=types.SimpleNamespace(fetch_user=AsyncMock(side_effect=[RuntimeError("api"), fetched])),
+            message=message,
+            response=types.SimpleNamespace(send_message=AsyncMock(), defer=AsyncMock()),
+            followup=types.SimpleNamespace(send=AsyncMock()),
+        )
+        await applications.handle_review(cog, interaction, "accept")
+        entry = (await applications._cache_data())["500"]
+        self.assertFalse(entry.get("notified"))
+        await applications.handle_review(cog, interaction, "accept")
+        entry = (await applications._cache_data())["500"]
+        self.assertTrue(entry.get("notified"))
+        fetched.send.assert_awaited_once()
+        self.assertEqual(message.edit.await_count, 3)
+
+    async def test_concurrent_applications_keep_one_pending(self):
+        await applications.update_settings(
+            1, applications.KEY, enabled=True, panel_channel_id=100, review_channel_id=101,
+        )
+        guild = FakeGuild()
+        cog = types.SimpleNamespace(bot=types.SimpleNamespace(get_guild=lambda _id: guild))
+        modal = applications.ApplicationModal(cog, 1)
+        modal.name_input._value = "あおい"
+        modal.reason_input._value = "理由"
+        modal.experience_input._value = "経験"
+
+        def interaction():
+            return types.SimpleNamespace(
+                guild=guild, guild_id=1, user=FakeUser(),
+                response=types.SimpleNamespace(send_message=AsyncMock(), defer=AsyncMock()),
+                followup=types.SimpleNamespace(send=AsyncMock()),
+            )
+
+        first = interaction()
+        second = interaction()
+        await asyncio.gather(modal.on_submit(first), modal.on_submit(second))
+        self.assertEqual(guild.review.send.await_count, 1)
+        rejected = first.followup.send.await_args_list + second.followup.send.await_args_list
+        self.assertTrue(any("審査中" in str(call) for call in rejected))
+
+    async def test_apply_cooldown_rejects_rapid_repeat(self):
+        applications.APPLY_COOLDOWN = 100.0
+        await applications.update_settings(
+            1, applications.KEY, enabled=True, panel_channel_id=100, review_channel_id=101,
+        )
+        guild = FakeGuild()
+        cog = types.SimpleNamespace(bot=types.SimpleNamespace(get_guild=lambda _id: guild))
+        modal = applications.ApplicationModal(cog, 1)
+        modal.name_input._value = "あおい"
+        modal.reason_input._value = "理由"
+        modal.experience_input._value = "経験"
+        first = types.SimpleNamespace(
+            guild=guild, guild_id=1, user=FakeUser(),
+            response=types.SimpleNamespace(send_message=AsyncMock(), defer=AsyncMock()),
+            followup=types.SimpleNamespace(send=AsyncMock()),
+        )
+        second = types.SimpleNamespace(
+            guild=guild, guild_id=1, user=FakeUser(),
+            response=types.SimpleNamespace(send_message=AsyncMock(), defer=AsyncMock()),
+            followup=types.SimpleNamespace(send=AsyncMock()),
+        )
+        await modal.on_submit(first)
+        await modal.on_submit(second)
+        self.assertEqual(guild.review.send.await_count, 1)
+        second.followup.send.assert_awaited_once()
 
     async def test_duplicate_pending_application_is_rejected(self):
         await applications.update_settings(
