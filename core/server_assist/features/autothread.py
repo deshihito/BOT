@@ -52,21 +52,6 @@ def settings(guild_id: int) -> dict[str, Any]:
     }
 
 
-def _channels(guild: Any) -> list[Any]:
-    me = getattr(guild, "me", None)
-    channels = list(getattr(guild, "text_channels", []) or [])
-    usable: list[Any] = []
-    for channel in channels:
-        if me is not None:
-            try:
-                if not channel.permissions_for(me).send_messages:
-                    continue
-            except Exception:
-                pass
-        usable.append(channel)
-    return usable[:25]
-
-
 def _thread_name(message: Any) -> str:
     content = str(getattr(message, "content", "") or "").strip()
     first_line = content.splitlines()[0].strip() if content else ""
@@ -159,30 +144,31 @@ async def on_message(cog: Any, message: Any) -> None:
     task.add_done_callback(_tasks.discard)
 
 
-class AutoThreadChannelSelect(discord.ui.Select):
+class AutoThreadChannelSelect(discord.ui.ChannelSelect):
     def __init__(self, parent: "AutoThreadSettingsView"):
         self.parent_view = parent
-        current = parent.settings["channel_id"]
-        options = [
-            discord.SelectOption(
-                label=str(getattr(channel, "name", "チャンネル"))[:100],
-                value=str(channel.id),
-                default=channel.id == current,
-            )
-            for channel in _channels(parent.guild)
-        ]
-        if not options:
-            options = [discord.SelectOption(label="利用できるチャンネルがありません", value="__none__")]
-        super().__init__(placeholder="自動スレッドを作るチャンネル", options=options[:25], row=0)
+        super().__init__(
+            placeholder="自動スレッドを作るチャンネル",
+            channel_types=[discord.ChannelType.text, discord.ChannelType.news],
+            row=0,
+        )
 
     async def callback(self, interaction: discord.Interaction):
         if not self.parent_view.can_manage(interaction):
             return await interaction.response.send_message(
                 "この設定には「サーバーの管理」権限が必要です。", ephemeral=True,
             )
-        if self.values[0] == "__none__":
-            return await interaction.response.send_message("利用できるチャンネルがありません。", ephemeral=True)
-        channel_id = int(self.values[0])
+        channel_id = self.values[0].id
+        channel = self.parent_view.guild.get_channel(channel_id)
+        me = getattr(self.parent_view.guild, "me", None)
+        if channel is not None and me is not None:
+            try:
+                if not channel.permissions_for(me).send_messages:
+                    return await interaction.response.send_message(
+                        "そのチャンネルには送信できません。", ephemeral=True,
+                    )
+            except Exception:
+                pass
         await update_settings(self.parent_view.guild_id, KEY, channel_id=channel_id)
         self.parent_view.settings["channel_id"] = channel_id
         await self.parent_view.refresh(interaction, "自動スレッドのチャンネルを保存しました。")
