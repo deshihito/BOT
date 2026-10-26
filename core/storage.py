@@ -106,7 +106,27 @@ class KVStore:
     async def _run(self, build: Callable[[], Any]):
         def call():
             return build().execute()
-        return await asyncio.wait_for(asyncio.to_thread(call), timeout=self.timeout)
+
+        future = asyncio.ensure_future(asyncio.to_thread(call))
+        try:
+            return await asyncio.wait_for(asyncio.shield(future), timeout=self.timeout)
+        except asyncio.TimeoutError:
+            # to_thread のスレッドは止められない。先に進むと、遅れて届いた古い書き込みが
+            # 新しい書き込みを上書きするので、実際に終わるまで待ってからタイムアウトにする。
+            try:
+                await asyncio.shield(future)
+            except Exception:
+                pass
+            raise
+        except asyncio.CancelledError:
+            # キャンセルでロックを手放すときも、送信中のスレッドが後から書かないよう待つ。
+            try:
+                await asyncio.shield(future)
+            except asyncio.CancelledError:
+                pass
+            except Exception:
+                pass
+            raise
 
     def _row(self, key: str, value: Any) -> dict[str, Any]:
         return {
@@ -163,6 +183,10 @@ class KVStore:
                     self._persist_pending()
                     return True
 
+    async def _write_in_background(self, key: str) -> None:
+        if not await self._write_key(key):
+            self._schedule_retry()
+
     def _schedule_retry(self) -> None:
         if not self._pending or not self.remote_enabled:
             return
@@ -187,14 +211,16 @@ class KVStore:
             return True
         if not self.remote_enabled:
             return False
-        try:
-            results = await asyncio.wait_for(
-                asyncio.gather(*(self._write_key(key) for key in list(self._pending))),
-                timeout=timeout,
-            )
-        except asyncio.TimeoutError:
+        # タイムアウトしても書き込みはキャンセルしない（送信中のスレッドは止められず、
+        # 途中でロックを手放すと順序が崩れるため）。時間切れは False で知らせる。
+        tasks = [self._spawn(self._write_key(key)) for key in list(self._pending)]
+        done, pending = await asyncio.wait(tasks, timeout=timeout)
+        if pending:
             return False
-        return all(results) and not self._pending
+        return not self._pending and all(
+            task.cancelled() is False and task.exception() is None and task.result() is True
+            for task in done
+        )
 
     async def aclose(self) -> None:
         """バックグラウンドの再送を止める（終了前の後片付け用）。"""
@@ -346,7 +372,7 @@ class KVStore:
             if not await self._write_key(key):
                 self._schedule_retry()
         else:
-            self._spawn(self._write_key(key))
+            self._spawn(self._write_in_background(key))
 
     async def delete(self, key: str, *, wait: bool = True) -> None:
         key = str(key)
@@ -359,7 +385,7 @@ class KVStore:
             if not await self._write_key(key):
                 self._schedule_retry()
         else:
-            self._spawn(self._write_key(key))
+            self._spawn(self._write_in_background(key))
 
 
 async def flush_all(timeout: float = FLUSH_TIMEOUT) -> bool:

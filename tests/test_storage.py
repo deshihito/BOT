@@ -111,6 +111,21 @@ class RemoteTest(Base):
         self.assertTrue(await store.flush(timeout=2))
         self.assertEqual(db.value("ns", "k"), 1)
 
+    async def test_background_failure_schedules_retry(self):
+        db = FakeKVSupabase()
+        db.error = APIError("temporary unavailable")
+        store = self.store(db)
+        store.retry_delay = 0.05
+        store.max_retry_delay = 0.05
+        with self.assertLogs("core.storage", level="WARNING"):
+            await store.set("k", 1, wait=False)
+            await asyncio.sleep(0.15)
+        self.assertTrue(store.has_pending)
+        db.error = None
+        await asyncio.sleep(0.3)
+        self.assertEqual(db.value("ns", "k"), 1)
+        self.assertFalse(store.has_pending)
+
     async def test_set_load_delete_in_supabase_and_local_copy(self):
         db = FakeKVSupabase()
         store = self.store(db)
