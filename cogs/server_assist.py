@@ -107,6 +107,12 @@ class ServerAssistCog(commands.Cog):
             )
         return await edit_panel_v2(interaction, as_panel_v2(view))
 
+    async def handle_level_rewards(self, guild, member, old_level: int, new_level: int):
+        module = self.modules.get("leveling")
+        if module is None:
+            return
+        return await module.handle_level_rewards(self, guild, member, old_level, new_level)
+
     async def _dispatch(self, hook: str, *args: Any):
         for key, module in self.modules.items():
             callback = getattr(module, hook, None)
