@@ -86,6 +86,8 @@ class PollTest(unittest.IsolatedAsyncioTestCase):
             client=self.db,
             path=os.path.join(self.tmp.name, "polls.json"),
         )
+        polls.CREATE_COOLDOWN = 0.0
+        polls.VOTE_COOLDOWN = 0.0
 
     def test_feature_is_discovered(self):
         keys = [feature.key for feature in discover_features(refresh=True)]
@@ -152,10 +154,13 @@ class PollTest(unittest.IsolatedAsyncioTestCase):
         await polls._put_entry(500, entry())
         user = FakeUser(2)
         interaction = types.SimpleNamespace(
-            message=types.SimpleNamespace(id=500),
+            message=FakeMessage(500),
             user=user,
             data={"values": ["0"]},
-            response=types.SimpleNamespace(edit_message=AsyncMock(), send_message=AsyncMock()),
+            response=types.SimpleNamespace(
+                defer=AsyncMock(), send_message=AsyncMock(),
+            ),
+            followup=types.SimpleNamespace(send=AsyncMock()),
         )
         await polls.handle_vote(None, interaction, ["0"])
         self.assertEqual((await polls._cache_data())["500"]["votes"], [[2], []])
@@ -167,10 +172,13 @@ class PollTest(unittest.IsolatedAsyncioTestCase):
     async def test_multiple_vote_replaces_selection(self):
         await polls._put_entry(500, entry(options=["A", "B", "C"], votes=[[], [], []], multiple=True))
         interaction = types.SimpleNamespace(
-            message=types.SimpleNamespace(id=500),
+            message=FakeMessage(500),
             user=FakeUser(2),
             data={"values": ["0", "2"]},
-            response=types.SimpleNamespace(edit_message=AsyncMock(), send_message=AsyncMock()),
+            response=types.SimpleNamespace(
+                defer=AsyncMock(), send_message=AsyncMock(),
+            ),
+            followup=types.SimpleNamespace(send=AsyncMock()),
         )
         await polls.handle_vote(None, interaction, ["0", "2"])
         self.assertEqual((await polls._cache_data())["500"]["votes"], [[2], [], [2]])
@@ -182,10 +190,13 @@ class PollTest(unittest.IsolatedAsyncioTestCase):
         responses = []
         for user_id in (2, 3):
             interaction = types.SimpleNamespace(
-                message=types.SimpleNamespace(id=500),
+                message=FakeMessage(500),
                 user=FakeUser(user_id),
                 data={"values": ["0"]},
-                response=types.SimpleNamespace(edit_message=AsyncMock(), send_message=AsyncMock()),
+                response=types.SimpleNamespace(
+                    defer=AsyncMock(), send_message=AsyncMock(),
+                ),
+                followup=types.SimpleNamespace(send=AsyncMock()),
             )
             responses.append(polls.handle_vote(None, interaction, ["0"]))
         await asyncio.gather(*responses)
@@ -194,40 +205,75 @@ class PollTest(unittest.IsolatedAsyncioTestCase):
     async def test_closed_poll_rejects_vote(self):
         await polls._put_entry(500, entry(status="closed"))
         interaction = types.SimpleNamespace(
-            message=types.SimpleNamespace(id=500),
+            message=FakeMessage(500),
             user=FakeUser(2),
-            response=types.SimpleNamespace(edit_message=AsyncMock(), send_message=AsyncMock()),
+            response=types.SimpleNamespace(
+                defer=AsyncMock(), send_message=AsyncMock(),
+            ),
+            followup=types.SimpleNamespace(send=AsyncMock()),
         )
         await polls.handle_vote(None, interaction, ["0"])
-        interaction.response.send_message.assert_awaited_once()
+        interaction.followup.send.assert_awaited_once()
         self.assertEqual((await polls._cache_data())["500"]["votes"], [[], []])
 
     async def test_close_allowed_for_author_or_manager_only(self):
         await polls._put_entry(500, entry())
         author = types.SimpleNamespace(
-            message=types.SimpleNamespace(id=500), user=FakeUser(1),
-            response=types.SimpleNamespace(edit_message=AsyncMock(), send_message=AsyncMock()),
+            message=FakeMessage(500), user=FakeUser(1),
+            response=types.SimpleNamespace(defer=AsyncMock(), send_message=AsyncMock()),
+            followup=types.SimpleNamespace(send=AsyncMock()),
         )
         await polls.handle_close(None, author)
         self.assertEqual((await polls._cache_data())["500"]["status"], "closed")
 
         await polls._put_entry(501, entry())
         stranger = types.SimpleNamespace(
-            message=types.SimpleNamespace(id=501), user=FakeUser(2),
-            response=types.SimpleNamespace(edit_message=AsyncMock(), send_message=AsyncMock()),
+            message=FakeMessage(501), user=FakeUser(2),
+            response=types.SimpleNamespace(defer=AsyncMock(), send_message=AsyncMock()),
+            followup=types.SimpleNamespace(send=AsyncMock()),
         )
         await polls.handle_close(None, stranger)
-        stranger.response.send_message.assert_awaited_once()
+        stranger.followup.send.assert_awaited_once()
         self.assertEqual((await polls._cache_data())["501"]["status"], "open")
 
         manager = FakeUser(3)
         manager.guild_permissions = types.SimpleNamespace(administrator=False, manage_guild=True)
         moderator = types.SimpleNamespace(
-            message=types.SimpleNamespace(id=501), user=manager,
-            response=types.SimpleNamespace(edit_message=AsyncMock(), send_message=AsyncMock()),
+            message=FakeMessage(501), user=manager,
+            response=types.SimpleNamespace(defer=AsyncMock(), send_message=AsyncMock()),
+            followup=types.SimpleNamespace(send=AsyncMock()),
         )
         await polls.handle_close(None, moderator)
         self.assertEqual((await polls._cache_data())["501"]["status"], "closed")
+
+    async def test_close_retry_repairs_failed_display_update(self):
+        await polls._put_entry(500, entry())
+        message = FakeMessage(500)
+        message.edit = AsyncMock(side_effect=[RuntimeError("boom"), None])
+        interaction = types.SimpleNamespace(
+            message=message, user=FakeUser(1),
+            response=types.SimpleNamespace(defer=AsyncMock(), send_message=AsyncMock()),
+            followup=types.SimpleNamespace(send=AsyncMock()),
+        )
+        await polls.handle_close(None, interaction)
+        self.assertEqual((await polls._cache_data())["500"]["status"], "closed")
+        interaction.followup.send.assert_awaited_once()
+        await polls.handle_close(None, interaction)
+        self.assertEqual(message.edit.await_count, 2)
+
+    async def test_vote_cooldown_rejects_rapid_repeat(self):
+        polls.VOTE_COOLDOWN = 100.0
+        await polls._put_entry(500, entry())
+        interaction = types.SimpleNamespace(
+            message=FakeMessage(500), user=FakeUser(2),
+            data={"values": ["0"]},
+            response=types.SimpleNamespace(defer=AsyncMock(), send_message=AsyncMock()),
+            followup=types.SimpleNamespace(send=AsyncMock()),
+        )
+        await polls.handle_vote(None, interaction, ["0"])
+        await polls.handle_vote(None, interaction, ["1"])
+        interaction.response.send_message.assert_awaited_once()
+        self.assertEqual((await polls._cache_data())["500"]["votes"], [[2], []])
 
     async def test_settings_view_controls_and_panel_send(self):
         await polls.update_settings(1, polls.KEY, enabled=True, channel_id=100)
