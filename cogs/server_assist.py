@@ -71,6 +71,15 @@ class ServerAssistCog(commands.Cog):
             except Exception:
                 logger.exception("サーバーアシスト機能を読み込めませんでした: %s", feature.key)
 
+    async def cog_load(self):
+        for module in self.modules.values():
+            hook = getattr(module, "register_views", None)
+            if callable(hook):
+                try:
+                    hook(self)
+                except Exception:
+                    logger.exception("サーバーアシストの永続ビュー登録に失敗しました")
+
     async def show_home(self, interaction: discord.Interaction):
         if not has_manage_permission(interaction):
             return await interaction.response.send_message(
@@ -106,6 +115,36 @@ class ServerAssistCog(commands.Cog):
                 "設定画面の読み込みに失敗しました。Botのログを確認してください。", ephemeral=True,
             )
         return await edit_panel_v2(interaction, as_panel_v2(view))
+
+    async def handle_level_rewards(self, guild, member, old_level: int, new_level: int):
+        module = self.modules.get("leveling")
+        if module is None:
+            return
+        return await module.handle_level_rewards(self, guild, member, old_level, new_level)
+
+    async def handle_temp_voice_action(self, interaction, action: str):
+        module = self.modules.get("tempvoice")
+        if module is None:
+            return await interaction.response.send_message(
+                "一時VC機能を読み込めませんでした。", ephemeral=True,
+            )
+        return await module.handle_action(self, interaction, action)
+
+    async def handle_suggestion_create(self, interaction):
+        module = self.modules.get("suggestions")
+        if module is None:
+            return await interaction.response.send_message(
+                "提案箱を読み込めませんでした。", ephemeral=True,
+            )
+        return await module.handle_create(self, interaction)
+
+    async def handle_suggestion_vote(self, interaction, action: str):
+        module = self.modules.get("suggestions")
+        if module is None:
+            return await interaction.response.send_message(
+                "提案箱を読み込めませんでした。", ephemeral=True,
+            )
+        return await module.handle_vote(self, interaction, action)
 
     async def _dispatch(self, hook: str, *args: Any):
         for key, module in self.modules.items():
