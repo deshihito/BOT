@@ -207,7 +207,11 @@ class WarningTest(unittest.IsolatedAsyncioTestCase):
         guild = FakeGuild()
         cog = types.SimpleNamespace(bot=types.SimpleNamespace(get_guild=lambda _id: guild))
         view = warnings.build_view(cog, 1)
-        self.assertEqual(len([item for item in view.children if isinstance(item, discord.ui.Select)]), 3)
+        self.assertEqual(
+            len([item for item in view.children
+                 if isinstance(item, (discord.ui.Select, discord.ui.ChannelSelect))]),
+            3,
+        )
         labels = {item.label for item in view.children if isinstance(item, discord.ui.Button)}
         self.assertIn("警告", labels)
         self.assertIn("パネルを送信", labels)
