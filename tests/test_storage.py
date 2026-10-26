@@ -126,6 +126,27 @@ class RemoteTest(Base):
         self.assertEqual(db.value("ns", "k"), 1)
         self.assertFalse(store.has_pending)
 
+    async def test_cancel_during_timeout_drain_keeps_order(self):
+        db = FakeKVSupabase()
+        db.block_next_write()
+        store = self.store(db)
+        store.timeout = 0.1
+        await store.set("k", "old", wait=False)
+        await asyncio.to_thread(db.gate_started.wait, 2)
+        await asyncio.sleep(0.15)  # タイムアウトして、スレッド完了待ちに入る
+        newest = asyncio.create_task(store.set("k", "new"))
+
+        async def release_later():
+            await asyncio.sleep(0.2)
+            db.release()
+
+        release = asyncio.create_task(release_later())
+        await store.aclose()
+        await release
+        await newest
+        self.assertEqual(db.value("ns", "k"), "new")
+        self.assertEqual(self.local()["ns"], {"k": "new"})
+
     async def test_set_load_delete_in_supabase_and_local_copy(self):
         db = FakeKVSupabase()
         store = self.store(db)

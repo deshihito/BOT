@@ -103,6 +103,31 @@ class KVStore:
         else:
             logger.debug("Supabase の %s を %s できませんでした: %s", TABLE, action, error)
 
+    async def _wait_for_thread(self, future: asyncio.Future) -> bool:
+        """to_thread の処理が終わるまで待つ。待っている間にキャンセルされたら True。
+
+        スレッドはキャンセルできない。ここで待たずにロックを手放すと、遅れて届いた古い
+        書き込みが新しい書き込みの後着になる。待機中にさらにキャンセルされても、実際に
+        終わるまでは待ち続ける。
+        """
+        cancelled = False
+        while True:
+            if future.done():
+                break
+            try:
+                await asyncio.shield(future)
+            except asyncio.CancelledError:
+                cancelled = True
+                continue
+            except Exception:
+                break
+        if not future.cancelled():
+            try:
+                future.exception()
+            except Exception:
+                pass
+        return cancelled
+
     async def _run(self, build: Callable[[], Any]):
         def call():
             return build().execute()
@@ -111,21 +136,11 @@ class KVStore:
         try:
             return await asyncio.wait_for(asyncio.shield(future), timeout=self.timeout)
         except asyncio.TimeoutError:
-            # to_thread のスレッドは止められない。先に進むと、遅れて届いた古い書き込みが
-            # 新しい書き込みを上書きするので、実際に終わるまで待ってからタイムアウトにする。
-            try:
-                await asyncio.shield(future)
-            except Exception:
-                pass
+            if await self._wait_for_thread(future):
+                raise asyncio.CancelledError from None
             raise
         except asyncio.CancelledError:
-            # キャンセルでロックを手放すときも、送信中のスレッドが後から書かないよう待つ。
-            try:
-                await asyncio.shield(future)
-            except asyncio.CancelledError:
-                pass
-            except Exception:
-                pass
+            await self._wait_for_thread(future)
             raise
 
     def _row(self, key: str, value: Any) -> dict[str, Any]:
