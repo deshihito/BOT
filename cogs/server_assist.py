@@ -65,6 +65,7 @@ class ServerAssistCog(commands.Cog):
         self.features = discover_features(refresh=True)
         self.by_key = {feature.key: feature for feature in self.features}
         self.modules: dict[str, Any] = {}
+        self._feature_tasks: list[Any] = []
         for feature in self.features:
             try:
                 self.modules[feature.key] = importlib.import_module(feature.module_name)
@@ -73,12 +74,17 @@ class ServerAssistCog(commands.Cog):
 
     async def cog_load(self):
         for module in self.modules.values():
-            hook = getattr(module, "register_views", None)
-            if callable(hook):
-                try:
-                    hook(self)
-                except Exception:
-                    logger.exception("サーバーアシストの永続ビュー登録に失敗しました")
+            for name in ("register_views", "start_tasks"):
+                hook = getattr(module, name, None)
+                if callable(hook):
+                    try:
+                        hook(self)
+                    except Exception:
+                        logger.exception("サーバーアシストの %s に失敗しました", name)
+
+    async def cog_unload(self):
+        for task in self._feature_tasks:
+            task.cancel()
 
     async def show_home(self, interaction: discord.Interaction):
         if not has_manage_permission(interaction):
