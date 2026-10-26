@@ -6,6 +6,7 @@ import sys
 import tempfile
 import types
 import unittest
+import asyncio
 from unittest.mock import AsyncMock
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -31,12 +32,16 @@ class FakeUser:
 
 
 class FakeChannel:
-    def __init__(self, channel_id=100, name="質問"):
+    def __init__(self, channel_id=100, name="質問", create_public_threads=True):
         self.id = channel_id
         self.name = name
+        self.create_public_threads = create_public_threads
 
     def permissions_for(self, member):
-        return types.SimpleNamespace(send_messages=True)
+        return types.SimpleNamespace(
+            send_messages=True,
+            create_public_threads=self.create_public_threads,
+        )
 
 
 class FakeGuild:
@@ -139,6 +144,49 @@ class AutoThreadTest(unittest.IsolatedAsyncioTestCase):
         await autothread.on_message(None, message)
         await autothread.drain()
         message.create_thread.assert_awaited_once()
+
+    async def test_missing_thread_permission_is_ignored(self):
+        await autothread.update_settings(1, autothread.KEY, enabled=True, channel_id=100)
+        guild = FakeGuild()
+        guild.channel = FakeChannel(create_public_threads=False)
+        guild.text_channels = [guild.channel]
+        message = FakeMessage(guild)
+        await autothread.on_message(None, message)
+        await autothread.drain()
+        message.create_thread.assert_not_awaited()
+
+    async def test_recent_ids_survive_bounded_cache(self):
+        self.addCleanup(setattr, autothread, "SEEN_LIMIT", 1000)
+        autothread.SEEN_LIMIT = 2
+        await autothread.update_settings(1, autothread.KEY, enabled=True, channel_id=100)
+        guild = FakeGuild()
+        for message_id in (1, 2, 3):
+            await autothread.on_message(None, FakeMessage(guild, message_id=message_id))
+        newest = FakeMessage(guild, message_id=3)
+        await autothread.on_message(None, newest)
+        await autothread.drain()
+        newest.create_thread.assert_not_awaited()
+
+    async def test_pending_task_cap_and_shutdown(self):
+        self.addCleanup(setattr, autothread, "MAX_PENDING_TASKS", 100)
+        autothread.MAX_PENDING_TASKS = 1
+        await autothread.update_settings(1, autothread.KEY, enabled=True, channel_id=100)
+        guild = FakeGuild()
+        gate = asyncio.Event()
+
+        async def slow(**kwargs):
+            await gate.wait()
+
+        first = FakeMessage(guild, message_id=1)
+        first.create_thread = AsyncMock(side_effect=slow)
+        second = FakeMessage(guild, message_id=2)
+        await autothread.on_message(None, first)
+        await asyncio.sleep(0)
+        await autothread.on_message(None, second)
+        self.assertEqual(first.create_thread.await_count, 1)
+        second.create_thread.assert_not_awaited()
+        await autothread.shutdown()
+        self.assertFalse(autothread._tasks)
 
     async def test_settings_view_controls_and_updates(self):
         await autothread.update_settings(1, autothread.KEY, enabled=True, channel_id=100)
