@@ -85,6 +85,10 @@ class TimedSettingsTest(unittest.IsolatedAsyncioTestCase):
             [item["id"] for item in timed.due_schedules(current, datetime(2026, 10, 26, 12, 2))],
             ["a", "c"],
         )
+        self.assertEqual(
+            [item["id"] for item in timed.due_schedules(current, datetime(2026, 10, 27, 0, 0))],
+            [],
+        )
 
     async def test_send_due_marks_last_sent(self):
         now = datetime(2026, 10, 26, 12, 0)
@@ -148,6 +152,25 @@ class TimedSettingsTest(unittest.IsolatedAsyncioTestCase):
         )
         await modal.on_submit(interaction)
         self.assertEqual(timed.settings(1)["schedules"][0]["last_sent"], "2026-10-26")
+
+    async def test_send_due_preserves_concurrent_message_edit(self):
+        await timed.update_settings(
+            1, timed.KEY, enabled=True, channel_id=100,
+            schedules=[{"id": "a", "time": "12:00", "message": "old", "last_sent": ""}],
+        )
+        guild = FakeGuild()
+
+        async def send_side_effect(**kwargs):
+            await timed.update_settings(
+                1, timed.KEY,
+                schedules=[{"id": "a", "time": "12:00", "message": "new", "last_sent": ""}],
+            )
+
+        guild.channel.send.side_effect = send_side_effect
+        await timed.send_due(guild, timed.settings(1), datetime(2026, 10, 26, 12, 0))
+        schedule = timed.settings(1)["schedules"][0]
+        self.assertEqual(schedule["message"], "new")
+        self.assertEqual(schedule["last_sent"], "2026-10-26")
 
     def test_settings_view_controls(self):
         guild = FakeGuild()

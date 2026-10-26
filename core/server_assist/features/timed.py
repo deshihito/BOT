@@ -109,7 +109,7 @@ def due_schedules(current: dict[str, Any], now: datetime) -> list[dict[str, Any]
         if parsed is None or schedule.get("last_sent") == today:
             continue
         scheduled_minutes = parsed[0] * 60 + parsed[1]
-        if (now_minutes - scheduled_minutes) % 1440 <= CATCHUP_MINUTES:
+        if 0 <= now_minutes - scheduled_minutes <= CATCHUP_MINUTES:
             due.append(schedule)
     return due
 
@@ -124,8 +124,7 @@ async def send_due(guild: Any, current: dict[str, Any], now: datetime | None = N
     channel = guild.get_channel(current["channel_id"])
     if channel is None:
         return
-    schedules = list(current.get("schedules") or [])
-    changed = False
+    sent_ids: list[str] = []
     for schedule in due:
         embed = discord.Embed(
             title="定期告知",
@@ -137,13 +136,17 @@ async def send_due(guild: Any, current: dict[str, Any], now: datetime | None = N
         except (discord.Forbidden, discord.HTTPException):
             logger.debug("タイマー告知を送信できませんでした: guild=%s", getattr(guild, "id", None))
             continue
-        for item in schedules:
-            if item.get("id") == schedule.get("id"):
-                item["last_sent"] = now.date().isoformat()
-                changed = True
-                break
+        sent_ids.append(str(schedule.get("id")))
+    if not sent_ids:
+        return
+    latest = list(settings(guild.id)["schedules"])
+    changed = False
+    for item in latest:
+        if str(item.get("id")) in sent_ids and item.get("last_sent") != now.date().isoformat():
+            item["last_sent"] = now.date().isoformat()
+            changed = True
     if changed:
-        await _save(guild.id, schedules)
+        await _save(guild.id, latest)
 
 
 async def _runner(cog: Any) -> None:
