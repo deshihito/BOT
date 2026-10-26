@@ -5,6 +5,7 @@ import os
 import sys
 import tempfile
 import unittest
+import asyncio
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -30,6 +31,22 @@ class Base(unittest.IsolatedAsyncioTestCase):
 
 
 class RemoteTest(Base):
+    async def test_background_set_updates_local_immediately_and_remote_later(self):
+        db = FakeKVSupabase()
+        store = self.store(db)
+        await store.set("k", 1, wait=False)
+        self.assertEqual(self.local(), {"ns": {"k": 1}})
+        await asyncio.sleep(0.1)
+        self.assertEqual(db.value("ns", "k"), 1)
+
+    async def test_background_writes_coalesce_to_latest_value(self):
+        db = FakeKVSupabase()
+        store = self.store(db)
+        await store.set("k", 1, wait=False)
+        await store.set("k", 2, wait=False)
+        await asyncio.sleep(0.1)
+        self.assertEqual(db.value("ns", "k"), 2)
+
     async def test_set_load_delete_in_supabase_and_local_copy(self):
         db = FakeKVSupabase()
         store = self.store(db)

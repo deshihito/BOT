@@ -58,6 +58,8 @@ class KVStore:
         self.timeout = timeout
         self._remote_disabled = False   # テーブルが無いときは、再起動まで Supabase を使わない
         self._warned = False
+        self._pending_writes: dict[str, Any] = {}
+        self._writer_task: asyncio.Task | None = None
 
     # ------------------------------------------------------------ 状態
     @property
@@ -82,6 +84,33 @@ class KVStore:
         def call():
             return build().execute()
         return await asyncio.wait_for(asyncio.to_thread(call), timeout=self.timeout)
+
+    def _row(self, key: str, value: Any) -> dict[str, Any]:
+        return {
+            "namespace": self.namespace, "key": key, "value": value,
+            "updated_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        }
+
+    async def _upsert_remote(self, key: str, value: Any) -> None:
+        row = self._row(key, value)
+        try:
+            await self._run(lambda: self.client.table(TABLE).upsert(row, on_conflict="namespace,key"))
+        except Exception as error:
+            self._remote_failed("保存", error)
+
+    async def _writer_loop(self) -> None:
+        while self._pending_writes:
+            key, value = next(iter(self._pending_writes.items()))
+            self._pending_writes.pop(key, None)
+            if not self.remote_enabled:
+                self._pending_writes.clear()
+                return
+            await self._upsert_remote(key, value)
+
+    def _queue_remote(self, key: str, value: Any) -> None:
+        self._pending_writes[key] = value
+        if self._writer_task is None or self._writer_task.done():
+            self._writer_task = asyncio.create_task(self._writer_loop())
 
     # ------------------------------------------------------------ ローカルファイル
     def _read_file(self) -> dict:
@@ -148,19 +177,15 @@ class KVStore:
                 return result
         return self.load_local()
 
-    async def set(self, key: str, value: Any) -> None:
+    async def set(self, key: str, value: Any, *, wait: bool = True) -> None:
         key = str(key)
         self._update_local(lambda section: section.__setitem__(key, value))
         if not self.remote_enabled:
             return
-        row = {
-            "namespace": self.namespace, "key": key, "value": value,
-            "updated_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
-        }
-        try:
-            await self._run(lambda: self.client.table(TABLE).upsert(row, on_conflict="namespace,key"))
-        except Exception as error:
-            self._remote_failed("保存", error)
+        if wait:
+            await self._upsert_remote(key, value)
+        else:
+            self._queue_remote(key, value)
 
     async def delete(self, key: str) -> None:
         key = str(key)

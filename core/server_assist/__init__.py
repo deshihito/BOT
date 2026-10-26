@@ -47,7 +47,9 @@ def get_settings(guild_id: int, key: str) -> dict[str, Any]:
 
 
 async def update_settings(guild_id: int, key: str, **values: Any) -> dict[str, Any]:
-    return await guild_settings.get_store().update(guild_id, section(key), **values)
+    return await guild_settings.get_store().update(
+        guild_id, section(key), background=True, **values,
+    )
 
 
 def has_manage_permission(interaction: Any) -> bool:
