@@ -125,6 +125,25 @@ class InviteSettingsTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn("不明", embed.fields[1].value)
         self.assertEqual(invites._invites["1:abc"], 5)
 
+    async def test_failed_fetch_is_not_marked_primed(self):
+        await invites.update_settings(1, invites.KEY, enabled=True, channel_id=100)
+        guild = FakeGuild()
+        guild.invite.uses = 100
+        forbidden = discord.Forbidden(
+            types.SimpleNamespace(status=403, reason="Forbidden"), "no permission",
+        )
+        guild.invites.side_effect = [forbidden, [guild.invite], [guild.invite]]
+        cog = types.SimpleNamespace(bot=types.SimpleNamespace(guilds=[guild]))
+        await invites.on_member_join(cog, FakeMember(guild))
+        self.assertNotIn(1, invites._primed)
+        guild.invite.uses = 101
+        await invites.on_member_join(cog, FakeMember(guild))
+        self.assertIn(1, invites._primed)
+        guild.invite.uses = 102
+        await invites.on_member_join(cog, FakeMember(guild))
+        embed = guild.channel.send.await_args.kwargs["embed"]
+        self.assertNotIn("不明", embed.fields[1].value)
+
     async def test_invite_create_and_delete_update_cache(self):
         guild = FakeGuild()
         invite = FakeInvite(guild, code="new", uses=3)

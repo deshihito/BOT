@@ -128,14 +128,16 @@ async def on_member_join(cog: Any, member: Any) -> None:
     current = settings(guild.id)
     if not current["enabled"] or current["channel_id"] is None:
         return
+    fetched = True
     try:
         invites = list(await guild.invites())
     except (discord.Forbidden, discord.HTTPException, AttributeError):
         invites = []
+        fetched = False
     primed = guild.id in _primed
     used = None
     best = 0
-    if primed:
+    if primed and fetched:
         for invite in invites:
             code = getattr(invite, "code", None)
             if not code:
@@ -145,7 +147,8 @@ async def on_member_join(cog: Any, member: Any) -> None:
             if now > old and now - old > best:
                 used, best = invite, now - old
     _remember(invites)
-    _primed.add(guild.id)
+    if fetched:
+        _primed.add(guild.id)
     channel = guild.get_channel(current["channel_id"])
     if channel is None:
         return

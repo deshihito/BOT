@@ -136,6 +136,40 @@ class LevelingRewardsTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn("レベル報酬を設定", labels)
         self.assertIn("サーバーアシストへ戻る", labels)
 
+    async def test_toggle_rejects_missing_manage_roles(self):
+        await leveling.update_settings(1, leveling.KEY, role_rewards={"10": 50})
+        guild = FakeGuild()
+        cog = types.SimpleNamespace(bot=types.SimpleNamespace(get_guild=lambda _id: guild))
+        view = leveling.build_view(cog, 1)
+        button = next(item for item in view.children if getattr(item, "label", None) == "レベル報酬")
+        interaction = types.SimpleNamespace(
+            user=types.SimpleNamespace(
+                guild_permissions=types.SimpleNamespace(administrator=False, manage_guild=True, manage_roles=False),
+                top_role=FakeRole(999, "user", position=999),
+            ),
+            response=types.SimpleNamespace(send_message=AsyncMock(), edit_message=AsyncMock()),
+        )
+        await button.callback(interaction)
+        interaction.response.send_message.assert_awaited_once()
+        self.assertFalse(leveling.settings(1)["enabled"])
+
+    async def test_toggle_rejects_role_above_actor(self):
+        await leveling.update_settings(1, leveling.KEY, role_rewards={"10": 50})
+        guild = FakeGuild()
+        cog = types.SimpleNamespace(bot=types.SimpleNamespace(get_guild=lambda _id: guild))
+        view = leveling.build_view(cog, 1)
+        button = next(item for item in view.children if getattr(item, "label", None) == "レベル報酬")
+        interaction = types.SimpleNamespace(
+            user=types.SimpleNamespace(
+                guild_permissions=types.SimpleNamespace(administrator=False, manage_guild=True, manage_roles=True),
+                top_role=FakeRole(5, "user", position=5),
+            ),
+            response=types.SimpleNamespace(send_message=AsyncMock(), edit_message=AsyncMock()),
+        )
+        await button.callback(interaction)
+        interaction.response.send_message.assert_awaited_once()
+        self.assertFalse(leveling.settings(1)["enabled"])
+
 
 class LevelingGeneralIntegrationTest(unittest.IsolatedAsyncioTestCase):
     async def test_general_on_message_notifies_rewards(self):
