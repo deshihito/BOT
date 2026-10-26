@@ -218,10 +218,13 @@ class EventTest(unittest.IsolatedAsyncioTestCase):
             user=types.SimpleNamespace(
                 id=1, guild_permissions=types.SimpleNamespace(administrator=True, manage_guild=True),
             ),
-            response=types.SimpleNamespace(send_message=AsyncMock()),
+            response=types.SimpleNamespace(send_message=AsyncMock(), defer=AsyncMock()),
+            followup=types.SimpleNamespace(send=AsyncMock()),
         )
         await panel.callback(interaction)
         guild.channel.send.assert_awaited_once()
+        interaction.response.defer.assert_awaited_once()
+        interaction.followup.send.assert_awaited_once()
 
     def test_register_views(self):
         add_view = MagicMock()

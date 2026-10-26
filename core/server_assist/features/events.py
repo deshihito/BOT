@@ -434,11 +434,12 @@ class EventPanelButton(discord.ui.Button):
         channel = interaction.guild.get_channel(channel_id) if interaction.guild and channel_id else None
         if channel is None:
             return await interaction.response.send_message("先に投稿先を選んでください。", ephemeral=True)
+        await interaction.response.defer(ephemeral=True)
         try:
             await channel.send(embed=build_panel_embed(), view=EventPanelView(view.cog))
         except (discord.Forbidden, discord.HTTPException):
-            return await interaction.response.send_message("パネルを送信できませんでした。", ephemeral=True)
-        return await interaction.response.send_message("イベントパネルを送信しました。", ephemeral=True)
+            return await interaction.followup.send("パネルを送信できませんでした。", ephemeral=True)
+        return await interaction.followup.send("イベントパネルを送信しました。", ephemeral=True)
 
 
 class EventSettingsView(AssistFeatureView):
