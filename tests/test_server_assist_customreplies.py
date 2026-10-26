@@ -119,6 +119,78 @@ class CustomReplySettingsTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn("カスタム返信", labels)
         self.assertIn("サーバーアシストへ戻る", labels)
 
+    async def test_concurrent_adds_are_both_kept(self):
+        cog = types.SimpleNamespace(bot=types.SimpleNamespace(get_guild=lambda _id: None))
+        stale_view = customreplies.build_view(cog, 1)
+        await customreplies.update_settings(
+            1, customreplies.KEY,
+            replies=[{"id": "a", "trigger": "a", "response": "A"}],
+        )
+        modal = customreplies.CustomReplyModal(stale_view)
+        modal.trigger_input._value = "b"
+        modal.response_input._value = "B"
+        interaction = types.SimpleNamespace(
+            user=types.SimpleNamespace(
+                guild_permissions=types.SimpleNamespace(administrator=True, manage_guild=True),
+            ),
+            response=types.SimpleNamespace(
+                is_done=lambda: False, send_message=AsyncMock(), edit_message=AsyncMock(),
+            ),
+        )
+        await modal.on_submit(interaction)
+        triggers = {reply["trigger"] for reply in customreplies.settings(1)["replies"]}
+        self.assertEqual(triggers, {"a", "b"})
+
+    async def test_stale_delete_keeps_other_new_reply(self):
+        await customreplies.update_settings(
+            1, customreplies.KEY,
+            replies=[{"id": "a", "trigger": "a", "response": "A"}],
+        )
+        cog = types.SimpleNamespace(bot=types.SimpleNamespace(get_guild=lambda _id: None))
+        stale_view = customreplies.build_view(cog, 1)
+        stale_view.selected_id = "a"
+        await customreplies.update_settings(
+            1, customreplies.KEY,
+            replies=[
+                {"id": "a", "trigger": "a", "response": "A"},
+                {"id": "b", "trigger": "b", "response": "B"},
+            ],
+        )
+        button = next(item for item in stale_view.children if getattr(item, "label", None) == "削除")
+        interaction = types.SimpleNamespace(
+            user=types.SimpleNamespace(
+                guild_permissions=types.SimpleNamespace(administrator=True, manage_guild=True),
+            ),
+            response=types.SimpleNamespace(
+                is_done=lambda: False, send_message=AsyncMock(), edit_message=AsyncMock(),
+            ),
+        )
+        await button.callback(interaction)
+        triggers = {reply["trigger"] for reply in customreplies.settings(1)["replies"]}
+        self.assertEqual(triggers, {"b"})
+
+    async def test_stale_edit_does_not_revive_deleted_reply(self):
+        await customreplies.update_settings(
+            1, customreplies.KEY,
+            replies=[{"id": "a", "trigger": "a", "response": "A"}],
+        )
+        cog = types.SimpleNamespace(bot=types.SimpleNamespace(get_guild=lambda _id: None))
+        stale_view = customreplies.build_view(cog, 1)
+        await customreplies.update_settings(1, customreplies.KEY, replies=[])
+        modal = customreplies.CustomReplyModal(stale_view, stale_view.settings["replies"][0])
+        modal.response_input._value = "changed"
+        interaction = types.SimpleNamespace(
+            user=types.SimpleNamespace(
+                guild_permissions=types.SimpleNamespace(administrator=True, manage_guild=True),
+            ),
+            response=types.SimpleNamespace(
+                is_done=lambda: False, send_message=AsyncMock(), edit_message=AsyncMock(),
+            ),
+        )
+        await modal.on_submit(interaction)
+        interaction.response.send_message.assert_awaited_once()
+        self.assertEqual(customreplies.settings(1)["replies"], [])
+
 
 if __name__ == "__main__":
     unittest.main()
