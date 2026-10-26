@@ -1151,7 +1151,7 @@
   "EXP: %s の読み込みに失敗しました。壊れたファイルを退避して続行します": "EXP: Failed to load %s. Moving the corrupted file aside and continuing.",
   "ジャンルを選択してください": "Select a category",
   "機能を選択してください": "Select a feature",
-  "** の機能を選択してください。": "Select a feature for **.",
+  "** の機能を選択してください。": "** — choose a feature.",
   "一般機能": "General features",
   "ショートカットを編集しました。": "Shortcut updated.",
   "ショートカットを登録しました。": "Shortcut registered.",
