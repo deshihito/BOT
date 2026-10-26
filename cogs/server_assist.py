@@ -172,6 +172,37 @@ class ServerAssistCog(commands.Cog):
                 "応募フォームを読み込めませんでした。", ephemeral=True,
             )
         return await module.handle_review(self, interaction, action)
+    async def handle_event_create(self, interaction):
+        module = self.modules.get("events")
+        if module is None:
+            return await interaction.response.send_message(
+                "イベントを読み込めませんでした。", ephemeral=True,
+            )
+        return await module.handle_create(self, interaction)
+
+    async def handle_event_rsvp(self, interaction, choice):
+        module = self.modules.get("events")
+        if module is None:
+            return await interaction.response.send_message(
+                "イベントを読み込めませんでした。", ephemeral=True,
+            )
+        return await module.handle_rsvp(self, interaction, choice)
+
+    async def handle_event_close(self, interaction):
+        module = self.modules.get("events")
+        if module is None:
+            return await interaction.response.send_message(
+                "イベントを読み込めませんでした。", ephemeral=True,
+            )
+        return await module.handle_close(self, interaction)
+
+    async def handle_event_refresh(self, interaction):
+        module = self.modules.get("events")
+        if module is None:
+            return await interaction.response.send_message(
+                "イベントを読み込めませんでした。", ephemeral=True,
+            )
+        return await module.handle_refresh(self, interaction)
 
     async def _dispatch(self, hook: str, *args: Any):
         for key, module in self.modules.items():
