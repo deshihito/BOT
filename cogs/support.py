@@ -71,6 +71,7 @@ SUPPORT_ACTIONS = [
     app_commands.Choice(name="チケットツール", value="ticket"),
     app_commands.Choice(name="認証パネル作成", value="auth_panel"),
     app_commands.Choice(name="ロールパネル作成", value="role_panel"),
+    app_commands.Choice(name="言語設定", value="language"),
     app_commands.Choice(name="Auto react設定", value="auto_react"),
     app_commands.Choice(name="SNS新着通知（X・YouTube）", value="sns_notify"),
     app_commands.Choice(name="Quest通知（Discord Orbs）", value="quest_notify"),
@@ -125,10 +126,11 @@ SUPPORT_ACTIONS_BY_GENRE = {
     "assist": [("サーバーアシスト設定", "server_assist")],
 }
 SUPPORT_ACTIONS_BY_GENRE["server"].append((SUPPORT_ACTIONS[17].name, SUPPORT_ACTIONS[17].value))
-SUPPORT_ACTIONS_BY_GENRE["server"].append((SUPPORT_ACTIONS[20].name, SUPPORT_ACTIONS[20].value))
+SUPPORT_ACTIONS_BY_GENRE["server"].append((SUPPORT_ACTIONS[18].name, SUPPORT_ACTIONS[18].value))
+SUPPORT_ACTIONS_BY_GENRE["server"].append((SUPPORT_ACTIONS[21].name, SUPPORT_ACTIONS[21].value))
 SUPPORT_ACTIONS_BY_GENRE["notify"] = [
-    (SUPPORT_ACTIONS[18].name, SUPPORT_ACTIONS[18].value),
     (SUPPORT_ACTIONS[19].name, SUPPORT_ACTIONS[19].value),
+    (SUPPORT_ACTIONS[20].name, SUPPORT_ACTIONS[20].value),
 ]
 
 THINKING_SECTION = "thinking_reaction"
@@ -4188,6 +4190,7 @@ class SupportCog(commands.Cog):
         "ticket": "manage_guild",
         "auth_panel": "administrator",
         "role_panel": "administrator",
+        "language": "manage_guild",
         "sns_notify": "administrator",
         "quest_notify": "administrator",
         "levelup_notify": "manage_guild",
@@ -5619,6 +5622,11 @@ class SupportCog(commands.Cog):
 
         if selected == "role_panel":
             return await self.show_role_panel_settings(interaction)
+        if selected == "language":
+            cog = self.bot.get_cog("LocalizationCog")
+            if cog is None:
+                return await self._missing(interaction, "言語設定")
+            return await cog.show_language_settings(interaction)
 
         if selected == "sns_notify":
             return await self.show_sns_notify_settings(interaction)

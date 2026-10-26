@@ -364,10 +364,13 @@ class WelcomeTest(Base):
 
     async def test_on_guild_join_posts_welcome(self):
         await self.cog.on_guild_join(self.guild)
-        embed = self.guild.general.send.await_args.kwargs["embed"]
+        self.assertEqual(self.guild.general.send.await_count, 2)
+        embed = self.guild.general.send.await_args_list[0].kwargs["embed"]
         for text in ("5つ", "100以上", "/support", "フロンティアモデル", "/help", "今北産業"):
             self.assertIn(text, embed.description)
         self.assertNotIn("/setup", embed.description)
+        panel = self.guild.general.send.await_args_list[1].kwargs["embed"]
+        self.assertIn("language", panel.description)
 
 
 class AuthTest(Base):
