@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import importlib
+import inspect
 import logging
 from typing import Any
 
@@ -90,6 +91,16 @@ class ServerAssistCog(commands.Cog):
     async def cog_unload(self):
         for task in self._feature_tasks:
             task.cancel()
+        for key, module in self.modules.items():
+            hook = getattr(module, "shutdown", None)
+            if not callable(hook):
+                continue
+            try:
+                result = hook(self)
+                if inspect.isawaitable(result):
+                    await result
+            except Exception:
+                logger.exception("サーバーアシストの shutdown に失敗しました: %s", key)
 
     async def show_home(self, interaction: discord.Interaction):
         if not has_manage_permission(interaction):
