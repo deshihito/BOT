@@ -2,9 +2,12 @@
 from __future__ import annotations
 
 import asyncio
+import io
 import json
 import logging
+import math
 import os
+import random
 import time
 from pathlib import Path
 
@@ -115,6 +118,11 @@ def general_level(chat_exp: int, vc_exp: int) -> int:
     cl, _, _ = level_from_exp(chat_exp, CHAT_EXP_BASE, CHAT_EXP_RATIO)
     vl, _, _ = level_from_exp(vc_exp, VC_EXP_BASE, VC_EXP_RATIO)
     return max(1, (cl + vl) // 2)
+
+
+def _user_general_level(user: dict) -> int:
+    """EXPレコード(dict)から現在のgeneralレベルを求める。レベルアップ検知用。"""
+    return general_level(_as_int(user.get("chat_exp")), _as_int(user.get("vc_exp")))
 
 
 # ============================================================
@@ -308,6 +316,318 @@ def _iter_voice_user_ids(guild: discord.Guild):
             if member is not None and member.bot:
                 continue
             yield uid
+
+
+def _iter_voice_user_channels(guild: discord.Guild):
+    """_iter_voice_user_ids と同じ対象を (ユーザーID, いるVC) で返す。レベルアップ通知のフォールバック先に使う。"""
+    for channel in (*guild.voice_channels, *guild.stage_channels):
+        for uid in list(channel.voice_states.keys()):
+            member = guild.get_member(uid)
+            if member is not None and member.bot:
+                continue
+            yield uid, channel
+
+
+# ============================================================
+# レベルアップ通知（画像生成）
+# ============================================================
+# 通知先・オン/オフは /support の「レベルアップ通知」で設定する(guild_settings の LEVELUP_SECTION)。
+# 画像生成には Pillow が必要 (pip install pillow)。入っていない/失敗した場合は
+# 画像なしのテキスト通知にフォールバックする。
+# ユーザー名に日本語を描くには日本語フォントが必要。環境変数 LEVELUP_FONT_PATH か
+# <プロジェクト直下>/assets/fonts/levelup.(ttf|otf|ttc) に置くか、OSのフォントを自動検出する。
+# Linuxなら `sudo apt install fonts-noto-cjk` でOK。
+LEVELUP_SECTION = "levelup_notify"
+
+
+def get_levelup_settings(store, guild_id: int) -> dict:
+    """/support の「レベルアップ通知」の設定(support側のパネルからも使う)。
+
+    未設定時は『オン・EXPが入った場所(発言したチャンネル/いたVC)へ通知』。
+    """
+    raw = store.get(guild_id, LEVELUP_SECTION)
+    if not isinstance(raw, dict):
+        raw = {}
+    enabled = raw.get("enabled")
+    channel_id = raw.get("channel_id")
+    return {
+        "enabled": enabled if isinstance(enabled, bool) else True,
+        "channel_id": channel_id if isinstance(channel_id, int) and not isinstance(channel_id, bool) else None,
+    }
+LEVELUP_CARD_W, LEVELUP_CARD_H = 1000, 360
+_LEVELUP_SS = 2  # 内部は2倍解像度で描いて縮小(ジャギー防止)
+
+_LEVELUP_CJK_FONTS = (
+    os.getenv("LEVELUP_FONT_PATH") or "",
+    str(Path(__file__).resolve().parent.parent / "assets" / "fonts" / "levelup.ttf"),
+    str(Path(__file__).resolve().parent.parent / "assets" / "fonts" / "levelup.otf"),
+    str(Path(__file__).resolve().parent.parent / "assets" / "fonts" / "levelup.ttc"),
+    "C:/Windows/Fonts/meiryob.ttc",
+    "C:/Windows/Fonts/YuGothB.ttc",
+    "C:/Windows/Fonts/msgothic.ttc",
+    "/System/Library/Fonts/ヒラギノ角ゴシック W6.ttc",
+    "/System/Library/Fonts/Hiragino Sans GB.ttc",
+    "/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc",
+    "/usr/share/fonts/opentype/noto/NotoSansCJKjp-Bold.otf",
+    "/usr/share/fonts/truetype/noto/NotoSansCJK-Bold.ttc",
+    "/usr/share/fonts/noto-cjk/NotoSansCJK-Bold.ttc",
+    "/usr/share/fonts/google-noto-cjk/NotoSansCJK-Bold.ttc",
+    "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+    "/usr/share/fonts/opentype/ipaexfont-gothic/ipaexg.ttf",
+    "/usr/share/fonts/truetype/fonts-japanese-gothic.ttf",
+    "/usr/share/fonts/truetype/takao-gothic/TakaoPGothic.ttf",
+)
+_LEVELUP_LATIN_FONTS = (
+    "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+    "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
+    "C:/Windows/Fonts/arialbd.ttf",
+    "/System/Library/Fonts/Helvetica.ttc",
+)
+
+# 参考画像に寄せるための「極太サンセリフ体」。見出し(LEVEL UP!)とレベル数字に使う。
+_LEVELUP_DISPLAY_FONTS = (
+    os.getenv("LEVELUP_DISPLAY_FONT_PATH") or "",
+    str(Path(__file__).resolve().parent.parent / "assets" / "fonts" / "levelup-display.ttf"),
+    str(Path(__file__).resolve().parent.parent / "assets" / "fonts" / "levelup-display.otf"),
+    # Linux (fontconfig)
+    "/usr/share/fonts/truetype/anton/Anton-Regular.ttf",
+    "/usr/share/fonts/truetype/bebasneue/BebasNeue-Regular.ttf",
+    "/usr/share/fonts/truetype/archivo-black/ArchivoBlack-Regular.ttf",
+    "/usr/share/fonts/truetype/barlow-condensed/BarlowCondensed-Bold.ttf",
+    "/usr/share/fonts/truetype/oswald/Oswald-Bold.ttf",
+    "/usr/share/fonts/truetype/noto/NotoSansDisplay-Black.ttf",
+    "/usr/share/fonts/truetype/noto/NotoSansDisplay-CondensedBlack.ttf",
+    "/usr/share/fonts/truetype/dejavu/DejaVuSansCondensed-Bold.ttf",
+    "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
+    # macOS
+    "/System/Library/Fonts/Supplemental/Impact.ttf",
+    "/System/Library/Fonts/Supplemental/Arial Black.ttf",
+    "/System/Library/Fonts/Supplemental/Arial Bold.ttf",
+    "/System/Library/Fonts/Helvetica.ttc",
+    # Windows
+    "C:/Windows/Fonts/impact.ttf",
+    "C:/Windows/Fonts/ariblk.ttf",
+    "C:/Windows/Fonts/arialbd.ttf",
+    "C:/Windows/Fonts/bahnschrift.ttf",
+)
+
+_LEVELUP_FONT_PICK: tuple[str | None, bool] | None = None
+_LEVELUP_DISPLAY_PICK: str | None | bool = False  # 未探索は False
+
+
+def _levelup_pick_font() -> tuple[str | None, bool]:
+    """本文用フォント(CJK 可なら True)を返す(初回のみ探索)。"""
+    global _LEVELUP_FONT_PICK
+    if _LEVELUP_FONT_PICK is not None:
+        return _LEVELUP_FONT_PICK
+    from PIL import ImageFont
+
+    pick: tuple[str | None, bool] = (None, False)
+    for cjk, paths in ((True, _LEVELUP_CJK_FONTS), (False, _LEVELUP_LATIN_FONTS)):
+        for path in paths:
+            if not path or not os.path.exists(path):
+                continue
+            try:
+                ImageFont.truetype(path, 20)
+            except Exception:
+                continue
+            pick = (path, cjk)
+            break
+        if pick[0]:
+            break
+    _LEVELUP_FONT_PICK = pick
+    return pick
+
+
+def _levelup_pick_display_font() -> str | None:
+    """「LEVEL UP!」などの見出しに使う極太ディスプレイフォントを返す。
+
+    参考画像に寄せるため、まず専用の太字サンセリフ体(Anton / Impact / Archivo Black 等)を探し、
+    無ければ本文フォントにフォールバックする。
+    """
+    global _LEVELUP_DISPLAY_PICK
+    if _LEVELUP_DISPLAY_PICK is not False:
+        return _LEVELUP_DISPLAY_PICK  # type: ignore[return-value]
+    from PIL import ImageFont
+
+    chosen: str | None = None
+    for path in _LEVELUP_DISPLAY_FONTS:
+        if not path or not os.path.exists(path):
+            continue
+        try:
+            ImageFont.truetype(path, 20)
+        except Exception:
+            continue
+        chosen = path
+        break
+    if chosen is None:
+        chosen = _levelup_pick_font()[0]
+    _LEVELUP_DISPLAY_PICK = chosen
+    return chosen
+
+
+def _levelup_font(size: int):
+    from PIL import ImageFont
+
+    path, _ = _levelup_pick_font()
+    if path:
+        try:
+            return ImageFont.truetype(path, size)
+        except Exception:
+            pass
+    try:
+        return ImageFont.load_default(size=size)  # Pillow>=10.1
+    except TypeError:
+        return ImageFont.load_default()
+
+
+def _levelup_display_font(size: int):
+    from PIL import ImageFont
+
+    path = _levelup_pick_display_font()
+    if path:
+        try:
+            return ImageFont.truetype(path, size)
+        except Exception:
+            pass
+    return _levelup_font(size)
+
+
+def _levelup_safe_name(name: str, can_cjk: bool) -> str:
+    """画像に描けない文字(絵文字など)を落とす。日本語フォントが無ければASCIIのみ。"""
+    out = []
+    for ch in str(name or ""):
+        o = ord(ch)
+        if o >= 0x1F000 or 0x2190 <= o <= 0x2BFF or o in (0x200D, 0xFE0F, 0xFE0E) or o < 0x20:
+            continue
+        if not can_cjk and o > 0x7E:
+            continue
+        out.append(ch)
+    return "".join(out).strip()
+
+
+def render_levelup_card(avatar_bytes: bytes | None, name: str, before: int, after: int, seed: int = 0) -> bytes:
+    """レベルアップ画像(PNG)を生成して bytes で返す。CPU処理なので to_thread で呼ぶこと。
+
+    白基調の落ち着いたカード。参考画像の横並び(アイコン | LEVEL UP | 9 > 10)を踏襲しつつ、
+    チップ・太い矢印・グラデ・影などの装飾は使わず、細いリング・細い区切り線・
+    控えめなラベルだけを残した「足して2で割った」デザイン。
+    必ず含める情報: ユーザーのアイコン / 前のレベル / レベルアップ後のレベル。
+    seed は互換のため残している(未使用)。
+    """
+    from PIL import Image, ImageDraw
+
+    S = _LEVELUP_SS
+    W, H = LEVELUP_CARD_W * S, LEVELUP_CARD_H * S
+    _, can_cjk = _levelup_pick_font()
+
+    def px(v: float) -> int:
+        return int(round(v * S))
+
+    BG = (255, 255, 255, 255)     # 白地
+    INK = (24, 28, 44, 255)       # 見出し・新しいレベル
+    MUTE = (150, 156, 170, 255)   # 前のレベル / ラベル / ユーザー名
+    LINE = (228, 232, 240, 255)   # 区切り線・リング
+    ACCENT = (59, 91, 255, 255)   # アクセント青(参考画像の赤の代わり)
+
+    img = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    d = ImageDraw.Draw(img)
+
+    # 角丸の白カード + ごく薄い枠線
+    d.rounded_rectangle(
+        [0, 0, W - 1, H - 1], radius=px(28),
+        fill=BG, outline=LINE, width=px(2),
+    )
+
+    # ---- アイコン(薄いリング付き) ----
+    D = px(196)
+    ax, ay = px(56), (H - D) // 2
+    ring_w = px(4)
+    R = D // 2 + px(8) + ring_w  # リング外半径(控えめ)
+    acx, acy = ax + D // 2, ay + D // 2
+
+    d.ellipse(
+        [acx - R, acy - R, acx + R, acy + R],
+        outline=LINE, width=ring_w,
+    )
+
+    avatar = None
+    if avatar_bytes:
+        try:
+            avatar = Image.open(io.BytesIO(avatar_bytes)).convert("RGBA").resize((D, D), Image.LANCZOS)
+        except Exception:
+            avatar = None
+    if avatar is None:
+        avatar = Image.new("RGBA", (D, D), (235, 238, 245, 255))
+        ad = ImageDraw.Draw(avatar)
+        ad.ellipse([D * 0.34, D * 0.20, D * 0.66, D * 0.52], fill=(255, 255, 255, 255))
+        ad.ellipse([D * 0.18, D * 0.58, D * 0.82, D * 1.15], fill=(255, 255, 255, 255))
+    amask = Image.new("L", (D, D), 0)
+    ImageDraw.Draw(amask).ellipse([0, 0, D - 1, D - 1], fill=255)
+    img.paste(avatar, (ax, ay), amask)
+
+    # ---- レイアウト ----
+    TX = ax + D + px(52)
+    right = W - px(56)
+    mid = H // 2
+
+    # 「LEVEL UP」 極太ディスプレイフォント・インク色(「!」は控えめに外す=装飾削減)
+    up_text = "LEVEL UP"
+    up_size = px(60)
+    up_font = _levelup_display_font(up_size)
+    while up_size > px(28) and d.textlength(up_text, font=up_font) > (right - TX) * 0.5:
+        up_size -= px(2)
+        up_font = _levelup_display_font(up_size)
+
+    # 上に小さな控えめラベル
+    label = "GENERAL"
+    lfont = _levelup_font(px(15))
+    d.text((TX + px(2), mid - px(38)), label, font=lfont, fill=MUTE, anchor="ls")
+
+    # 「LEVEL UP」本体
+    d.text((TX, mid - px(4)), up_text, font=up_font, fill=INK, anchor="ls")
+    up_w = d.textlength(up_text, font=up_font)
+
+    # レベル変化(前:ミュート / > :ミュート / 後:アクセント青)
+    prev_text, sep_text, new_text = str(before), ">", str(after)
+    pfont = _levelup_display_font(px(42))
+    sfont = _levelup_display_font(px(36))
+    nfont = _levelup_display_font(px(64))
+
+    p_w = d.textlength(prev_text, font=pfont)
+    s_w = d.textlength(sep_text, font=sfont)
+    n_w = d.textlength(new_text, font=nfont)
+    gap = px(14)
+    group_w = p_w + gap + s_w + gap + n_w
+
+    gx = TX + up_w + px(52)
+    if gx + group_w > right:
+        gx = max(TX + up_w + px(20), right - group_w)
+
+    baseline = mid + px(2)
+    d.text((gx, baseline), prev_text, font=pfont, fill=MUTE, anchor="ls")
+    d.text((gx + p_w + gap, baseline - px(4)), sep_text, font=sfont, fill=MUTE, anchor="ls")
+    d.text((gx + p_w + gap + s_w + gap, baseline + px(2)), new_text, font=nfont, fill=ACCENT, anchor="ls")
+
+    # ---- 下部: 区切り線 + ユーザー名 ----
+    line_y = H - px(58)
+    d.line([px(56), line_y, W - px(56), line_y], fill=LINE, width=px(2))
+
+    shown = _levelup_safe_name(name, can_cjk)
+    if shown:
+        nfont_small = _levelup_font(px(20))
+        maxw = W - px(112)
+        text = shown
+        while len(text) > 1 and d.textlength(text, font=nfont_small) > maxw:
+            text = text[:-1]
+        if text != shown:
+            text = text.rstrip() + ("…" if can_cjk else "...")
+        d.text((px(56), H - px(32)), text, font=nfont_small, fill=MUTE, anchor="ls")
+
+    out = img.resize((LEVELUP_CARD_W, LEVELUP_CARD_H), Image.LANCZOS)
+    buf = io.BytesIO()
+    out.save(buf, format="PNG", optimize=True)
+    return buf.getvalue()
 
 
 # ============================================================
@@ -901,12 +1221,17 @@ class ReasoningView(discord.ui.View):
 class GeneralCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
+        self._bg_tasks: set[asyncio.Task] = set()
+        self._levelup_sem = asyncio.Semaphore(2)  # 画像生成の同時実行数(低スペック機での詰まり防止)
+        self._levelup_pillow_warned = False
 
     async def cog_load(self):
         self.exp_vc_tick.start()
 
     def cog_unload(self):
         self.exp_vc_tick.cancel()
+        for task in list(self._bg_tasks):
+            task.cancel()
 
     @app_commands.command(name="general", description="一般機能の操作パネルを表示します")
     async def general(self, interaction: discord.Interaction):
@@ -1025,6 +1350,104 @@ class GeneralCog(commands.Cog):
             await message.channel.send("ショートカットの実行中にエラーが発生しました。")
 
     # ============================================================
+    # レベルアップ通知
+    # ============================================================
+    def _spawn(self, coro) -> None:
+        """通知は EXP の保存や他の処理を待たせないよう、バックグラウンドで送る。"""
+        task = asyncio.create_task(coro)
+        self._bg_tasks.add(task)
+        task.add_done_callback(self._bg_tasks.discard)
+
+    async def _levelup_user(self, guild: discord.Guild, user_id: int):
+        member = guild.get_member(user_id)
+        if member is not None:
+            return member
+        try:
+            return await guild.fetch_member(user_id)
+        except discord.HTTPException:
+            pass
+        try:
+            return await self.bot.fetch_user(user_id)
+        except discord.HTTPException:
+            return None
+
+    @staticmethod
+    def _levelup_can_post(channel, me) -> tuple[bool, bool]:
+        """(投稿できるか, 画像を添付できるか)"""
+        perms = channel.permissions_for(me)
+        if not perms.view_channel:
+            return False, False
+        can_send = perms.send_messages_in_threads if isinstance(channel, discord.Thread) else perms.send_messages
+        return bool(can_send), bool(perms.attach_files)
+
+    async def render_levelup_image(self, user, before: int, after: int) -> bytes | None:
+        """レベルアップ画像(PNGのbytes)を作る。Pillowが無い等で作れなければ None。/support のプレビューからも使う。"""
+        avatar_bytes = None
+        try:
+            avatar_bytes = await user.display_avatar.replace(size=256, format="png").read()
+        except Exception:
+            logger.debug("レベルアップ画像: アイコンの取得に失敗 (user=%s)", getattr(user, "id", "?"), exc_info=True)
+        name = getattr(user, "display_name", None) or getattr(user, "name", "") or ""
+        try:
+            async with self._levelup_sem:
+                return await asyncio.to_thread(
+                    render_levelup_card, avatar_bytes, name, before, after, getattr(user, "id", 0)
+                )
+        except ImportError:
+            if not self._levelup_pillow_warned:
+                self._levelup_pillow_warned = True
+                logger.warning("レベルアップ画像: Pillow が未インストールです (pip install pillow)。テキスト通知のみ送ります")
+            return None
+        except Exception:
+            logger.exception("レベルアップ画像の生成に失敗しました")
+            return None
+
+    async def _notify_levelup(self, guild: discord.Guild, user, before: int, after: int, *, fallback_channel=None):
+        """generalレベルが上がった時の通知。user はユーザーオブジェクトかユーザーID。"""
+        try:
+            store = guild_settings.get_store()
+            await store.ensure_loaded()
+            cfg = get_levelup_settings(store, guild.id)
+            if not cfg["enabled"]:
+                return
+            me = guild.me
+            if me is None:
+                return
+
+            # 通知先: /support で指定したチャンネル → 無い/投稿不可なら、EXPが入った場所(発言したチャンネル/いたVC)
+            configured = guild.get_channel_or_thread(cfg["channel_id"]) if cfg["channel_id"] else None
+            target, can_attach = None, False
+            for channel in (configured, fallback_channel):
+                if channel is None:
+                    continue
+                ok, attach = self._levelup_can_post(channel, me)
+                if ok:
+                    target, can_attach = channel, attach
+                    break
+            if target is None:
+                logger.info("レベルアップ通知: 投稿できるチャンネルがありません (guild=%s)", guild.id)
+                return
+
+            if isinstance(user, int):
+                user = await self._levelup_user(guild, user)
+            if user is None:
+                return
+
+            kwargs = {
+                "content": f"🎉 {user.mention} がレベルアップしました！ **Lv.{before} → Lv.{after}**",
+                "allowed_mentions": discord.AllowedMentions.none(),  # 表示はメンション、通知(ピング)は飛ばさない
+            }
+            if can_attach:
+                png = await self.render_levelup_image(user, before, after)
+                if png:
+                    kwargs["file"] = discord.File(io.BytesIO(png), filename="levelup.png")
+            await target.send(**kwargs)
+        except discord.HTTPException:
+            logger.warning("レベルアップ通知の送信に失敗しました (guild=%s)", guild.id, exc_info=True)
+        except Exception:
+            logger.exception("レベルアップ通知で予期しないエラーが発生しました")
+
+    # ============================================================
     # EXP: メッセージ
     # ============================================================
     @commands.Cog.listener()
@@ -1035,8 +1458,15 @@ class GeneralCog(commands.Cog):
         try:
             data = await _exp_load()
             user = _exp_ensure(data, message.guild.id, message.author.id)
+            level_before = _user_general_level(user)
             if _grant_chat_exp(user, time.time()):
+                level_after = _user_general_level(user)  # 保存のawaitを挟む前に確定させる
                 await _exp_save()
+                if level_after > level_before:
+                    self._spawn(self._notify_levelup(
+                        message.guild, message.author, level_before, level_after,
+                        fallback_channel=message.channel,
+                    ))
         except Exception:
             logger.exception("EXP: チャットEXPの付与に失敗しました")
 
@@ -1060,14 +1490,23 @@ class GeneralCog(commands.Cog):
             now = time.time()
             was_in = before.channel is not None
             now_in = after.channel is not None
+            levelup = None
             if not was_in and now_in:
                 user["vc_last_tick"] = now
             elif was_in and not now_in:
+                level_before = _user_general_level(user)
                 _grant_vc_exp(user, now)
+                level_after = _user_general_level(user)
+                if level_after > level_before:
+                    levelup = (level_before, level_after)
                 user["vc_last_tick"] = 0.0
             else:
                 return
             await _exp_save()
+            if levelup:
+                self._spawn(self._notify_levelup(
+                    member.guild, member, levelup[0], levelup[1], fallback_channel=before.channel,
+                ))
         except Exception:
             logger.exception("EXP: VC入退室の処理に失敗しました")
 
@@ -1081,11 +1520,16 @@ class GeneralCog(commands.Cog):
             now = time.time()
             touched = False
             active: set[tuple[str, str]] = set()
+            levelups: list[tuple[discord.Guild, int, int, int, object]] = []
             for guild in list(self.bot.guilds):
-                for uid in _iter_voice_user_ids(guild):
+                for uid, voice_channel in _iter_voice_user_channels(guild):
                     active.add((str(guild.id), str(uid)))
                     user = _exp_ensure(data, guild.id, uid)
+                    level_before = _user_general_level(user)
                     _grant_vc_exp(user, now)
+                    level_after = _user_general_level(user)
+                    if level_after > level_before:
+                        levelups.append((guild, uid, level_before, level_after, voice_channel))
                     touched = True
             # VCにいないのに計測中のままの人(退室イベント取りこぼし等)は計測を止める
             for gid, users in data.items():
@@ -1099,6 +1543,10 @@ class GeneralCog(commands.Cog):
                         touched = True
             if touched:
                 await _exp_save()
+            for guild, uid, level_before, level_after, voice_channel in levelups:
+                self._spawn(self._notify_levelup(
+                    guild, uid, level_before, level_after, fallback_channel=voice_channel,
+                ))
         except Exception:
             logger.exception("EXP: VC tick に失敗しました (次の周期で再試行します)")
 
