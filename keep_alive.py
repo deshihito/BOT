@@ -51,6 +51,8 @@ _ACTIVITY_MAX_REQUESTS_PER_WINDOW = 45
 _SIGNATURE_TTL_SECONDS = 60
 _HLS_CACHE_TTL_SECONDS = 15 * 60
 _HLS_ERROR_COOLDOWN_SECONDS = 20
+_WORKER_RETRY_AFTER_SECONDS = 30
+_worker_down_until = 0.0
 _HLS_MANIFEST_WAIT_SECONDS = 25
 _HLS_CACHE_DIR = Path(os.getenv("ACTIVITY_VIDEO_CACHE_DIR", tempfile.gettempdir())) / "agobot-activity-hls"
 
@@ -60,7 +62,13 @@ def _media_worker_configured() -> bool:
 
 
 def _proxy_activity_hls_to_worker(video_id: str, asset: str):
-    """Forward only the authorized, current-video HLS request to the worker."""
+    """Forward only the authorized, current-video HLS request to the worker.
+
+    ワーカーに接続できない場合は None を返す（呼び出し側がBot内の生成処理へフォールバックする）。
+    """
+    global _worker_down_until
+    if time.monotonic() < _worker_down_until:
+        return None
     base_url = os.getenv("ACTIVITY_MEDIA_WORKER_URL", "").rstrip("/")
     secret = os.getenv("ACTIVITY_MEDIA_WORKER_SECRET", "")
     body = json.dumps({"video_id": video_id, "asset": asset}, separators=(",", ":")).encode()
@@ -82,9 +90,15 @@ def _proxy_activity_hls_to_worker(video_id: str, asset: str):
             stream=True,
             timeout=(3, 10),
         )
-    except requests.RequestException:
-        logger.exception("Activity Media Worker request failed")
-        return jsonify({"error": "media_worker_unavailable"}), 503
+    except requests.RequestException as exc:
+        _worker_down_until = time.monotonic() + _WORKER_RETRY_AFTER_SECONDS
+        logger.warning(
+            "Activity Media Worker (%s) に接続できません。%d秒間はBot内のHLS生成にフォールバックします: %s",
+            base_url,
+            _WORKER_RETRY_AFTER_SECONDS,
+            exc.__class__.__name__,
+        )
+        return None
 
     if upstream.status_code != 200:
         try:
@@ -473,7 +487,10 @@ def activity_music_video():
     # configured. The bot remains the authorization boundary for guild/voice
     # membership and only proxies the resulting bytes.
     if _media_worker_configured():
-        return _proxy_activity_hls_to_worker(video_id, asset)
+        worker_response = _proxy_activity_hls_to_worker(video_id, asset)
+        if worker_response is not None:
+            return worker_response
+        # ワーカー未起動などの場合は、下のBot内生成処理で配信する
     
     try:
         try:
