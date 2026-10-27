@@ -72,6 +72,7 @@ PLAYLIST_ACTION_CHOICES = [
     app_commands.Choice(name="保存", value="save"),
     app_commands.Choice(name="一覧", value="list"),
     app_commands.Choice(name="再生", value="play"),
+    app_commands.Choice(name="削除", value="delete"),
 ]
 PLAYLIST_SCOPE_CHOICES = [
     app_commands.Choice(name="自分", value="me"),
@@ -1179,8 +1180,12 @@ class PlaylistLibraryView(discord.ui.View):
         await self.cog._playlist_impl(Responder(interaction), "list", scope=self.scope)
 
     @discord.ui.button(label="再生", emoji="<:music:1561710964238450809>", style=discord.ButtonStyle.primary)
-    async def play_button(self, interaction: discord.Interaction, button: discord.Button):
+    async def play_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.send_modal(PlaylistNameModal(self.cog, "play", self.scope))
+
+    @discord.ui.button(label="削除", style=discord.ButtonStyle.danger)
+    async def delete_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_modal(PlaylistNameModal(self.cog, "delete", self.scope))
 
 
 RECORDING_ENABLED = False
@@ -1551,6 +1556,9 @@ class VoiceCog(commands.Cog):
             return 0
             
     async def get_attachment_info(self, b62_id: str, requesting_guild_id: int | None = None):
+        if isinstance(b62_id, str) and b62_id.startswith(('http://', 'https://')):
+            filename = b62_id.rsplit('/', 1)[-1].split('?', 1)[0] or 'audio'
+            return b62_id, filename
         try:
             guild_id, channel_id, message_id = decode_full_id(b62_id)
             if requesting_guild_id is not None and guild_id != requesting_guild_id:
@@ -2416,12 +2424,9 @@ class VoiceCog(commands.Cog):
         # 2. ファイルが添付されている場合
         elif file:
             url, filename = file.url, file.filename
-            if hasattr(self, 'encode_full_id'):
-                final_id = self.encode_full_id(interaction.guild_id, interaction.channel_id, interaction.id)
-            elif 'encode_full_id' in globals():
-                final_id = encode_full_id(interaction.guild_id, interaction.channel_id, interaction.id)
-            else:
-                final_id = str(interaction.id)
+            # Interaction IDは添付ファイルを持つメッセージIDではないため、後から
+            # get_attachment_info()で再取得できない。Discordの添付URLを保存する。
+            final_id = url
 
         # 3. BASE62 のユニバーサルID指定（または検索へのフォールバック）
         elif input_str and len(input_str.split()) == 1 and all(c in BASE62 for c in input_str):
@@ -2630,15 +2635,37 @@ class VoiceCog(commands.Cog):
         return f"{guild_id}:{name}"
 
     def _server_playlist_ids(self, guild_id: int):
-        """サーバー共有プレイリスト（旧 !save_current）用に、現在曲とキューのユニバーサルIDを集める。"""
+        """サーバー共有プレイリスト用に、現在曲とキューを再生可能な形で集める。
+
+        旧形式の添付IDは文字列のまま保持し、YouTubeや直接添付URLなどIDを
+        持たないトラックは辞書で保存する。既存の ``playlists.ids`` JSON列を
+        そのまま利用しながら、通常の音楽プレイリストも共有できる。
+        """
         state = self.get_state(guild_id)
-        ids = []
-        if state['current_track'] and state['current_track'][3]:
-            ids.append(state['current_track'][3])
+        entries = []
+
+        def add(track):
+            if not track:
+                return
+            source_input, title, _duration, reference, is_yt = track
+            source = state.get('current_yt_page_url') if is_yt and track is state.get('current_track') else source_input
+            source = source or reference
+            if not source:
+                return
+            if not is_yt and reference and not str(reference).startswith(('http://', 'https://')):
+                entries.append(reference)
+            else:
+                entries.append({
+                    'input': source,
+                    'title': title,
+                    'attachment_id': reference,
+                    'is_youtube': bool(is_yt),
+                })
+
+        add(state.get('current_track'))
         for item in list(state['queue']._queue):
-            if item[2]:
-                ids.append(item[2])
-        return ids
+            add(item)
+        return entries
 
     async def _playlist_impl(self, r: Responder, action: str, name: str | None = None, scope: str = 'me',
                              file: discord.Attachment | None = None):
@@ -2671,6 +2698,26 @@ class VoiceCog(commands.Cog):
                 logger.exception("Failed to play personal playlist")
                 await r.send(embed=we("個人プレイリストの読込に失敗しました。"), ephemeral=True)
             return
+
+        if action == 'delete':
+            if not name:
+                return await r.send(embed=we("削除するプレイリスト名を指定してください。"), ephemeral=True)
+            try:
+                if scope == 'server':
+                    result = db.table("playlists").delete().eq(
+                        "name", self._server_playlist_key(r.guild.id, name)
+                    ).execute()
+                else:
+                    result = db.table('user_music_playlists').delete().eq(
+                        'guild_id', r.guild.id
+                    ).eq('owner_user_id', r.user.id).eq('name', name).execute()
+                if not result.data:
+                    label = '共有' if scope == 'server' else '個人'
+                    return await r.send(embed=we(f"{label}プレイリスト `{name}` が見つかりません。"), ephemeral=True)
+                return await r.send(embed=we(f"プレイリスト `{name}` を削除しました。"), ephemeral=True)
+            except Exception:
+                logger.exception("Failed to delete playlist")
+                return await r.send(embed=we("プレイリストの削除に失敗しました。"), ephemeral=True)
 
         if not db:
             return await r.send(embed=we("プレイリストを使うにはSupabaseを設定してください。"), ephemeral=True)

@@ -1,6 +1,6 @@
 import types
 import unittest
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
 
 import httpx
 from groq import NotFoundError, RateLimitError
@@ -114,6 +114,19 @@ class ImakitaSummaryTest(unittest.IsolatedAsyncioTestCase):
         await cog.on_message(trigger)
 
         trigger.reply.assert_awaited_once_with(FAILURE_MESSAGE, mention_author=False)
+
+    async def test_english_server_does_not_run_japanese_summary(self):
+        trigger = FakeMessage(3, "今北産業")
+        trigger.channel = FakeChannel([trigger, FakeMessage(1, "recent English chat")])
+        trigger.guild = types.SimpleNamespace(id=99)
+        client, create = self.make_client(self.completion("should not be used"))
+        cog = ImakitaSummaryCog(types.SimpleNamespace(command_prefix="!"), client=client, clock=lambda: 100)
+
+        with patch("cogs.imakita.guild_locale", return_value="en"):
+            await cog.on_message(trigger)
+
+        create.assert_not_awaited()
+        trigger.reply.assert_not_awaited()
 
 
 if __name__ == "__main__":
