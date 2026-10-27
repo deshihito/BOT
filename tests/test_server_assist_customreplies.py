@@ -60,6 +60,14 @@ class CustomReplySettingsTest(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(customreplies.match_reply(replies, "hello!"))
         self.assertIsNone(customreplies.match_reply(replies, "/hello"))
 
+    async def test_settings_deduplicates_legacy_trigger_conflicts(self):
+        await self.store.update(1, customreplies.KEY, replies=[
+            {"id": "a", "trigger": " Hello ", "response": "first"},
+            {"id": "b", "trigger": "hello", "response": "second"},
+        ])
+        replies = customreplies.settings(1)["replies"]
+        self.assertEqual([item["id"] for item in replies], ["a"])
+
     async def test_on_message_replies(self):
         await customreplies.update_settings(
             1, customreplies.KEY, enabled=True,
@@ -108,6 +116,28 @@ class CustomReplySettingsTest(unittest.IsolatedAsyncioTestCase):
         replies = customreplies.settings(1)["replies"]
         self.assertEqual(len(replies), 1)
         self.assertEqual(replies[0]["trigger"], "ping")
+
+    async def test_modal_rejects_duplicate_trigger(self):
+        await customreplies.update_settings(
+            1, customreplies.KEY,
+            replies=[{"id": "a", "trigger": "ping", "response": "pong"}],
+        )
+        cog = types.SimpleNamespace(bot=types.SimpleNamespace(get_guild=lambda _id: None))
+        view = customreplies.build_view(cog, 1)
+        modal = customreplies.CustomReplyModal(view)
+        modal.trigger_input._value = " PING "
+        modal.response_input._value = "another response"
+        interaction = types.SimpleNamespace(
+            user=types.SimpleNamespace(
+                id=1, guild_permissions=types.SimpleNamespace(administrator=True, manage_guild=True),
+            ),
+            response=types.SimpleNamespace(
+                is_done=lambda: False, send_message=AsyncMock(), edit_message=AsyncMock(),
+            ),
+        )
+        await modal.on_submit(interaction)
+        interaction.response.send_message.assert_awaited_once()
+        self.assertEqual(len(customreplies.settings(1)["replies"]), 1)
 
     def test_settings_view_controls(self):
         view = customreplies.build_view(types.SimpleNamespace(bot=types.SimpleNamespace(get_guild=lambda _id: None)), 1)

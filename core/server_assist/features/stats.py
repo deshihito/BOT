@@ -37,21 +37,6 @@ def settings(guild_id: int) -> dict[str, Any]:
     }
 
 
-def _voice_channels(guild: Any) -> list[Any]:
-    me = getattr(guild, "me", None)
-    channels = list(getattr(guild, "voice_channels", []) or [])
-    usable: list[Any] = []
-    for channel in channels:
-        if me is not None:
-            try:
-                if not channel.permissions_for(me).manage_channels:
-                    continue
-            except Exception:
-                pass
-        usable.append(channel)
-    return usable[:25]
-
-
 def _counts(guild: Any) -> dict[str, int]:
     members = list(getattr(guild, "members", []) or [])
     member_count = getattr(guild, "member_count", None)
@@ -100,29 +85,35 @@ def start_tasks(cog: Any) -> None:
     getattr(cog, "_feature_tasks", []).append(task)
 
 
-class StatsChannelSelect(discord.ui.Select):
+class StatsChannelSelect(discord.ui.ChannelSelect):
     def __init__(self, parent: "StatsSettingsView", kind: str):
         self.parent_view = parent
         self.kind = kind
         current = parent.settings.get(f"{kind}_channel_id")
-        options = [discord.SelectOption(label="設定しない", value="0", default=current is None)]
-        options += [
-            discord.SelectOption(
-                label=str(getattr(channel, "name", "VC"))[:100],
-                value=str(channel.id),
-                default=channel.id == current,
-            )
-            for channel in _voice_channels(parent.guild)
-        ]
         labels = {"member": "メンバー数", "online": "オンライン数", "boost": "ブースト数"}
-        super().__init__(placeholder=f"{labels.get(kind, kind)}を表示するVC", options=options[:25], row=0 if kind == "member" else 1 if kind == "online" else 2)
+        super().__init__(
+            placeholder=f"{labels.get(kind, kind)}を表示するVC",
+            channel_types=[discord.ChannelType.voice, discord.ChannelType.stage_voice],
+            min_values=0,
+            max_values=1,
+            default_values=(
+                [discord.SelectDefaultValue(id=current, type=discord.SelectDefaultValueType.channel)]
+                if current is not None else []
+            ),
+            row=0 if kind == "member" else 1 if kind == "online" else 2,
+        )
 
     async def callback(self, interaction: discord.Interaction):
         if not self.parent_view.can_manage(interaction):
             return await interaction.response.send_message(
                 "この設定には「サーバーの管理」権限が必要です。", ephemeral=True,
             )
-        value = None if self.values[0] == "0" else int(self.values[0])
+        channel = self.values[0] if self.values else None
+        if channel is not None:
+            me = getattr(self.parent_view.guild, "me", None)
+            if me is not None and not getattr(channel.permissions_for(me), "manage_channels", False):
+                return await interaction.response.send_message("そのVCを管理する権限がありません。", ephemeral=True)
+        value = getattr(channel, "id", None)
         field = f"{self.kind}_channel_id"
         await update_settings(self.parent_view.guild_id, KEY, **{field: value})
         self.parent_view.settings[field] = value

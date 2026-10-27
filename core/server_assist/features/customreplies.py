@@ -47,13 +47,25 @@ def _normalize(raw: Any) -> dict[str, str] | None:
     }
 
 
+def _trigger_key(value: str) -> str:
+    return " ".join(str(value or "").split()).casefold()
+
+
 def settings(guild_id: int) -> dict[str, Any]:
     raw = get_settings(guild_id, KEY)
     replies = []
+    seen_triggers: set[str] = set()
     for item in raw.get("replies") or []:
         normalized = _normalize(item)
-        if normalized is not None:
-            replies.append(normalized)
+        if normalized is None:
+            continue
+        trigger_key = _trigger_key(normalized["trigger"])
+        # 旧データや同時保存の競合で同じトリガーが残っていても、最初の
+        # 1件だけを有効にして、どの返信が選ばれるか不定にならないようにする。
+        if trigger_key in seen_triggers:
+            continue
+        seen_triggers.add(trigger_key)
+        replies.append(normalized)
     return {
         "enabled": bool(raw.get("enabled", False)),
         "replies": replies[:MAX_REPLIES],
@@ -65,11 +77,11 @@ async def _save(guild_id: int, replies: list[dict[str, str]]) -> None:
 
 
 def match_reply(replies: list[dict[str, str]], content: str) -> dict[str, str] | None:
-    text = (content or "").strip().casefold()
+    text = _trigger_key(content)
     if not text:
         return None
     return next(
-        (reply for reply in replies if reply["trigger"].strip().casefold() == text),
+        (reply for reply in replies if _trigger_key(reply["trigger"]) == text),
         None,
     )
 
@@ -232,6 +244,20 @@ class CustomReplyModal(discord.ui.Modal):
         if not trigger or not response:
             return await interaction.response.send_message("言葉と返信内容を入力してください。", ephemeral=True)
         replies = list(settings(self.parent_view.guild_id)["replies"])
+        trigger_key = _trigger_key(trigger)
+        duplicate = next(
+            (
+                item for item in replies
+                if item.get("id") != (self.reply or {}).get("id")
+                and _trigger_key(item.get("trigger", "")) == trigger_key
+            ),
+            None,
+        )
+        if duplicate is not None:
+            return await interaction.response.send_message(
+                f"同じトリガー `{duplicate['trigger']}` は既に登録されています。別の言葉を指定してください。",
+                ephemeral=True,
+            )
         if self.reply:
             found = False
             for item in replies:

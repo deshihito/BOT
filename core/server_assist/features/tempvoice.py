@@ -387,30 +387,23 @@ class TempVoiceLimitModal(discord.ui.Modal, title="一時VCの人数制限"):
         return await interaction.response.send_message("人数制限を変更しました。", ephemeral=True)
 
 
-class TempVoiceChannelSelect(discord.ui.Select):
+class TempVoiceChannelSelect(discord.ui.ChannelSelect):
     def __init__(self, parent: "TempVoiceSettingsView"):
         self.parent_view = parent
         current = parent.settings["join_channel_id"]
-        options = [
-            discord.SelectOption(
-                label=str(getattr(channel, "name", "VC"))[:100],
-                value=str(channel.id),
-                default=channel.id == current,
-            )
-            for channel in _voice_channels(parent.guild)
-        ]
-        if not options:
-            options = [discord.SelectOption(label="作成できるVCがありません", value="__none__")]
-        super().__init__(placeholder="参加すると作成されるVC", options=options[:25], row=0)
+        super().__init__(placeholder="参加すると作成されるVC", channel_types=[discord.ChannelType.voice],
+                         min_values=0, max_values=1,
+                         default_values=([discord.SelectDefaultValue(id=current, type=discord.SelectDefaultValueType.channel)]
+                                         if current is not None else []), row=0)
 
     async def callback(self, interaction: discord.Interaction):
         if not self.parent_view.can_manage(interaction):
             return await interaction.response.send_message(
                 "この設定には「サーバーの管理」権限が必要です。", ephemeral=True,
             )
-        if self.values[0] == "__none__":
+        if not self.values:
             return await interaction.response.send_message("作成できるVCがありません。", ephemeral=True)
-        channel_id = int(self.values[0])
+        channel_id = self.values[0].id
         await update_settings(self.parent_view.guild_id, KEY, join_channel_id=channel_id)
         self.parent_view.settings["join_channel_id"] = channel_id
         await self.parent_view.refresh(interaction, "作成用VCを保存しました。")

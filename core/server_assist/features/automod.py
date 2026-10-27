@@ -155,27 +155,21 @@ async def on_message(cog: Any, message: Any) -> None:
             logger.debug("AutoMod: ログを送信できませんでした: %s", getattr(guild, "id", None))
 
 
-class AutoModLogChannelSelect(discord.ui.Select):
+class AutoModLogChannelSelect(discord.ui.ChannelSelect):
     def __init__(self, parent: "AutoModSettingsView"):
         self.parent_view = parent
         current = parent.settings["log_channel_id"]
-        options = [discord.SelectOption(label="ログを送らない", value="0", default=current is None)]
-        options += [
-            discord.SelectOption(
-                label=str(getattr(channel, "name", "チャンネル"))[:100],
-                value=str(channel.id),
-                default=channel.id == current,
-            )
-            for channel in _channels(parent.guild)
-        ]
-        super().__init__(placeholder="AutoModのログ送信先", options=options[:25], row=0)
+        super().__init__(placeholder="AutoModのログ送信先", channel_types=[discord.ChannelType.text, discord.ChannelType.news],
+                         min_values=0, max_values=1,
+                         default_values=([discord.SelectDefaultValue(id=current, type=discord.SelectDefaultValueType.channel)]
+                                         if current is not None else []), row=0)
 
     async def callback(self, interaction: discord.Interaction):
         if not self.parent_view.can_manage(interaction):
             return await interaction.response.send_message(
                 "この設定には「サーバーの管理」権限が必要です。", ephemeral=True,
             )
-        channel_id = None if self.values[0] == "0" else int(self.values[0])
+        channel_id = self.values[0].id if self.values else None
         await update_settings(self.parent_view.guild_id, KEY, log_channel_id=channel_id)
         self.parent_view.settings["log_channel_id"] = channel_id
         await self.parent_view.refresh(interaction, "AutoModのログ送信先を保存しました。")
