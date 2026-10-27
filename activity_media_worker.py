@@ -217,4 +217,4 @@ def _cleanup_worker() -> None:
 if __name__ == "__main__":
     logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"))
     threading.Thread(target=_cleanup_worker, daemon=True).start()
-    app.run(host=os.getenv("ACTIVITY_MEDIA_WORKER_HOST", "0.0.0.0"), port=int(os.getenv("ACTIVITY_MEDIA_WORKER_PORT", "10001")))
+    app.run(host=os.getenv("ACTIVITY_MEDIA_WORKER_HOST", "0.0.0.0"), port=int(os.getenv("ACTIVITY_MEDIA_WORKER_PORT", "10002")))

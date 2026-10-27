@@ -66,7 +66,7 @@ Media WorkerはBotリポジトリのルートで次のように起動できま�
 
 ```bash
 export ACTIVITY_MEDIA_WORKER_SECRET='<同じ共有シークレット>'
-export ACTIVITY_MEDIA_WORKER_PORT=10001
+export ACTIVITY_MEDIA_WORKER_PORT=10002
 python3 activity_media_worker.py
 ```
 
