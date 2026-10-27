@@ -157,7 +157,9 @@ export default function ActivityClient({ clientId }: { clientId: string }) {
         else if (response.ok) applySnapshot(await response.json() as MusicSnapshot, startedAt);
         else setStatusMessage("Musicの状態を取得できません。Botの接続を確認してください。");
       } catch { setStatusMessage("同期状態を取得できません。接続を確認しています…"); }
-      finally { schedulePoll(2_000); }
+      // Playback position is extrapolated locally between snapshots, so the
+      // API does not need to be polled every two seconds for smooth playback.
+      finally { schedulePoll(5_000); }
     };
     const connect = async () => {
       if (!clientId) throw new Error("DiscordアプリIDが設定されていません。");
