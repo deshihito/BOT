@@ -9,6 +9,7 @@ import time
 import discord
 from discord.ext import commands
 from groq import APIStatusError, AsyncGroq, RateLimitError
+from core.localization import guild_locale
 
 logger = logging.getLogger(__name__)
 TRIGGER_PHRASE = "今北産業"
@@ -39,6 +40,11 @@ class ImakitaSummaryCog(commands.Cog):
         if getattr(getattr(message, "author", None), "bot", False):
             return
         if TRIGGER_PHRASE not in (getattr(message, "content", "") or ""):
+            return
+        # 要約プロンプトと返信は日本語固定のため、英語など別言語のサーバーでは
+        # 実行しない。guild属性のないテスト/DM相当のメッセージは従来どおり扱う。
+        guild = getattr(message, "guild", None)
+        if guild is not None and guild_locale(guild.id) != "ja":
             return
 
         channel_id = message.channel.id

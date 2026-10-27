@@ -181,6 +181,8 @@ class SubcommandImplementationTest(Base):
                          {'action': 'list', 'name': None, 'scope': 'me', 'file': None})
         await self.check('_playlist_impl', 'library', kwargs('play', 'mix', 'server'),
                          {'action': 'play', 'name': 'mix', 'scope': 'server', 'file': None})
+        await self.check('_playlist_impl', 'library', kwargs('delete', 'mix', 'server'),
+                         {'action': 'delete', 'name': 'mix', 'scope': 'server', 'file': None})
 
 
 # 削除した旧コマンド（移行期間を終えて PR で削除）
@@ -228,7 +230,10 @@ class PlaylistScopeTest(Base):
         personal = tables['user_music_playlists']
         self.assertEqual([(r['owner_user_id'], r['name'], len(r['tracks'])) for r in personal],
                          [(self.w.alice.id, 'mine', 3)])
-        self.assertEqual(tables['playlists'], [{'id': 1, 'name': f'{self.w.guild.id}:shared', 'ids': ['ID1', 'ID2']}])
+        self.assertEqual(tables['playlists'][0]['name'], f'{self.w.guild.id}:shared')
+        self.assertEqual(tables['playlists'][0]['ids'][:1], ['ID1'])
+        self.assertEqual(tables['playlists'][0]['ids'][1]['input'], 'https://youtube.com/watch?v=a')
+        self.assertTrue(tables['playlists'][0]['ids'][1]['is_youtube'])
 
     async def test_list_scopes(self):
         await self.run_playlist('save', 'mine', 'me')
@@ -277,6 +282,19 @@ class PlaylistScopeTest(Base):
             {'id': 99, 'name': f'{self.w.guild.id}:old-saved', 'ids': ['X1']})
         server = await self.run_playlist('list', scope='server')
         self.assertIn('old-saved', server.texts())
+
+    async def test_delete_scoped_playlist(self):
+        await self.run_playlist('save', 'mine', 'me')
+        await self.run_playlist('save', 'shared', 'server')
+        await self.run_playlist('delete', 'mine', 'me')
+        self.assertFalse(self.bot.supabase.tables['user_music_playlists'])
+        self.assertTrue(self.bot.supabase.tables['playlists'])
+        await self.run_playlist('delete', 'shared', 'server')
+        self.assertFalse(self.bot.supabase.tables['playlists'])
+
+    async def test_direct_attachment_url_can_be_loaded_without_message_lookup(self):
+        url = 'https://cdn.discordapp.com/attachments/1/2/song.mp3?x=1'
+        self.assertEqual(await self.cog.get_attachment_info(url, self.w.guild.id), (url, 'song.mp3'))
 
 
 class PlayAutoJoinTest(Base):

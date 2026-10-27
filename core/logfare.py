@@ -246,17 +246,20 @@ def _transcription_form(audio: bytes, filename: str, language: str, extra: dict[
 async def transcribe_audio(audio: bytes, *, filename: str = "voice.wav") -> str:
     """Logfare の音声認識 endpoint を呼び、認識テキストを返す。
 
-    言語などの追加パラメータが 400/422 で拒否された場合だけ、何も足さずにもう一度送る。
+    追加フォーム項目が 400/422 で拒否された場合だけ、言語指定を維持して再送する。
+    日本語の文字起こしで言語指定まで外すと、Whisperの自動判定で英語が混ざるため。
     """
     key = api_key()
     if not key:
         raise RuntimeError("LOGFARE_API_KEY が設定されていません。")
     headers = {"Authorization": f"Bearer {key}"}
     timeout = aiohttp.ClientTimeout(total=90)
-    # (language, 追加フォーム項目, 追加クエリ)。1回目が拒否されたら、何も足さずに再送する
-    attempts: list[tuple[str, dict[str, str], dict[str, str]]] = [("", {}, {})]
-    if TRANSCRIPTION_LANGUAGE or TRANSCRIPTION_EXTRA_FIELDS or TRANSCRIPTION_EXTRA_QUERY:
-        attempts.insert(0, (TRANSCRIPTION_LANGUAGE, TRANSCRIPTION_EXTRA_FIELDS, TRANSCRIPTION_EXTRA_QUERY))
+    # (language, 追加フォーム項目, 追加クエリ)。追加項目だけを外して再送する。
+    fallback = (TRANSCRIPTION_LANGUAGE, {}, {})
+    attempts: list[tuple[str, dict[str, str], dict[str, str]]] = [fallback]
+    configured = (TRANSCRIPTION_LANGUAGE, TRANSCRIPTION_EXTRA_FIELDS, TRANSCRIPTION_EXTRA_QUERY)
+    if configured != fallback:
+        attempts.insert(0, configured)
     raw = ""
     async with aiohttp.ClientSession(timeout=timeout) as session:
         for index, (language, extra_fields, extra_query) in enumerate(attempts):
