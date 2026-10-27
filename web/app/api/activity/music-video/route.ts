@@ -6,6 +6,15 @@ export const runtime = "nodejs";
 const VIDEO_ID = /^[A-Za-z0-9_-]{11}$/;
 const ASSET = /^(?:index\.m3u8|seg-\d{6}\.ts)$/;
 
+// Cloudflare（Discordのプロキシ）はオリジンの 502/504 を自前のHTMLエラーページに
+// 差し替えてしまい、JSONの原因が見えなくなる。そのため 502/504 は返さず 503 を使う。
+function unavailable(body: Record<string, unknown>, status = 503) {
+  return NextResponse.json(body, {
+    status,
+    headers: { "Cache-Control": "no-store", "Retry-After": "2" },
+  });
+}
+
 function rewriteManifest(manifest: string, prefix: string): string {
   return manifest
     .split("\n")
@@ -114,7 +123,7 @@ export async function GET(request: Request) {
         retries--;
       }
       if (upstream.status === 202) {
-        return NextResponse.json({ error: "video_unavailable", detail: "Processing timeout" }, { status: 504 });
+        return unavailable({ error: "video_unavailable", stage: "processing", detail: "Processing timeout" });
       }
     }
 
@@ -126,9 +135,9 @@ export async function GET(request: Request) {
         detail: detail.slice(0, 500),
       });
       
-      // 修正: 404エラー（セグメント準備中）の場合は、502に変換せずそのまま404を返す
-      const status = upstream.status === 409 ? 409 : (upstream.status === 404 ? 404 : 502);
-      
+      // 404/409/429 はそのまま返す。それ以外は 502 にせず 503 で返して原因(detail)を見えるようにする
+      const status = [404, 409, 429].includes(upstream.status) ? upstream.status : 503;
+
       return NextResponse.json(
         {
           error: upstream.status === 409 ? "video_not_current" : "video_unavailable",
@@ -136,7 +145,7 @@ export async function GET(request: Request) {
           upstreamStatus: upstream.status,
           detail: detail.slice(0, 500),
         },
-        { status },
+        { status, headers: { "Cache-Control": "no-store" } },
       );
     }
 
@@ -180,9 +189,6 @@ export async function GET(request: Request) {
         ? error.message
         : "unknown error";
     console.error("[ActivityVideo] proxy exception", { asset, detail });
-    return NextResponse.json(
-      { error: "video_unavailable", stage: "fetch", detail },
-      { status: 502 },
-    );
+    return unavailable({ error: "video_unavailable", stage: "fetch", detail });
   }
 }
