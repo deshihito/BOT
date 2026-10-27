@@ -42,6 +42,7 @@ _video_locks: dict[str, Lock] = defaultdict(Lock)
 _hls_processes: dict[str, subprocess.Popen] = {}
 _hls_last_access: dict[str, float] = {}
 _video_status: dict[str, str] = {}
+_video_errors: dict[str, tuple[float, str]] = {}
 
 _next_nonce_cleanup = 0.0
 _WINDOW_SECONDS = 60
@@ -49,6 +50,8 @@ _MAX_REQUESTS_PER_WINDOW = 8
 _ACTIVITY_MAX_REQUESTS_PER_WINDOW = 45
 _SIGNATURE_TTL_SECONDS = 60
 _HLS_CACHE_TTL_SECONDS = 15 * 60
+_HLS_ERROR_COOLDOWN_SECONDS = 20
+_HLS_MANIFEST_WAIT_SECONDS = 25
 _HLS_CACHE_DIR = Path(os.getenv("ACTIVITY_VIDEO_CACHE_DIR", tempfile.gettempdir())) / "agobot-activity-hls"
 
 
@@ -150,8 +153,6 @@ def _authorized(expected_path: str = "/internal/coder/run") -> bool:
             _next_nonce_cleanup = now + 10
             
         if nonce in _used_nonces:
-            if now - _used_nonces[nonce] < 10.0:
-                return True
             return False
         _used_nonces[nonce] = now + _SIGNATURE_TTL_SECONDS
     return True
@@ -212,108 +213,158 @@ async def _fetch_activity_music_snapshot(guild_id: int, channel_id: int, user_id
     )
 
 
+class _HlsFailed(RuntimeError):
+    """HLS生成が失敗したことを表す。detail は呼び出し側へそのまま返す。"""
+
+
+def _pick_video_source(info: dict) -> tuple[str, dict]:
+    """yt-dlp の結果から映像ストリームのURLとHTTPヘッダを取り出す。
+
+    "bestvideo+bestaudio" のようにフォーマットを結合した場合、トップレベルの
+    info["url"] は存在せず requested_formats の中にURLが入る。
+    """
+    candidates = info.get("requested_formats") or [info]
+    for fmt in candidates:
+        url = fmt.get("url")
+        if not isinstance(url, str) or not url:
+            continue
+        if fmt.get("vcodec") in (None, "none") and fmt is not info and len(candidates) > 1:
+            continue  # 音声のみのフォーマットは使わない
+        headers = fmt.get("http_headers") or info.get("http_headers") or {}
+        return url, headers
+    raise RuntimeError("yt-dlp did not return a playable video stream URL")
+
+
 def _run_ffmpeg_task(video_id: str, directory: Path, manifest: Path):
+    process: subprocess.Popen | None = None
+    stderr_tail: deque[str] = deque(maxlen=8)
     try:
+        # 映像のみ取得（音声はBotがVCで再生するのでActivity側は無音）。
+        # extractor_args でクライアントを固定すると取得できなくなることがあるため、
+        # yt-dlp の既定に任せる。
         options = {
-            "format": "bestvideo[height<=720]+bestaudio/best[height<=720]/best",
+            "format": "bestvideo[height<=720]/best[height<=720]/best",
             "noplaylist": True,
             "quiet": True,
             "no_warnings": True,
             "socket_timeout": 10,
-            "extractor_args": {"youtube": {"player_client": ["android", "web"]}},
         }
         with yt_dlp.YoutubeDL(options) as ydl:
             info = ydl.extract_info(f"https://www.youtube.com/watch?v={video_id}", download=False)
-        
-        stream_url = info.get("url")
-        if not isinstance(stream_url, str) or not stream_url:
-            raise RuntimeError("yt-dlp did not return a playable stream URL")
-            
-        headers = info.get("http_headers") or {}
+
+        stream_url, headers = _pick_video_source(info)
         header_value = "".join(f"{key}: {value}\r\n" for key, value in headers.items())
-        
-        process = subprocess.Popen([
-            "ffmpeg", "-hide_banner", "-loglevel", "error",
-            "-headers", header_value,
+
+        command = ["ffmpeg", "-hide_banner", "-loglevel", "error"]
+        if header_value:
+            command += ["-headers", header_value]
+        command += [
+            "-re",  # 実時間で変換する（全編を一気に変換するとプレイリストが終端だけになる）
             "-i", stream_url,
-            "-map", "0:v:0", "-map", "0:a:0?",
+            "-map", "0:v:0", "-an",
             "-c:v", "libx264", "-preset", "ultrafast", "-tune", "zerolatency",
-            "-r", "24",  # 24fpsに固定
-            "-pix_fmt", "yuv420p", 
-            "-g", "48", "-keyint_min", "48",  # 24fpsの2秒間隔
+            "-r", "24",
+            "-pix_fmt", "yuv420p",
+            "-g", "48", "-keyint_min", "48",
             "-sc_threshold", "0", "-force_key_frames", "expr:gte(t,n_forced*2)",
-            "-c:a", "aac", "-b:a", "128k", "-f", "hls",
-            "-hls_time", "2", "-hls_list_size", "6", # 2秒セグメント
+            "-f", "hls",
+            "-hls_time", "2", "-hls_list_size", "6",
             "-hls_flags", "delete_segments+append_list+independent_segments",
             "-hls_segment_filename", str(directory / "seg-%06d.ts"),
             str(manifest),
-        ], stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True)
-        
+        ]
+        process = subprocess.Popen(
+            command, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True
+        )
+
         with _video_lock:
             _hls_processes[video_id] = process
-        
-        def read_ffmpeg_errors() -> None:
-            if process.stderr is None:
+
+        def read_ffmpeg_errors(proc: subprocess.Popen = process) -> None:
+            if proc.stderr is None:
                 return
-            for line in process.stderr:
+            for line in proc.stderr:
                 line = line.strip()
                 if line:
+                    stderr_tail.append(line)
                     logger.error("[ActivityVideo][ffmpeg][%s] %s", video_id, line)
+
         Thread(target=read_ffmpeg_errors, daemon=True).start()
-        
-        deadline = time.monotonic() + 15
+
+        deadline = time.monotonic() + _HLS_MANIFEST_WAIT_SECONDS
         while not manifest.exists() and process.poll() is None and time.monotonic() < deadline:
-            time.sleep(0.5)
-            
+            time.sleep(0.25)
+
         if not manifest.exists():
-            process.terminate()
-            raise RuntimeError("FFmpeg did not create an HLS manifest in time")
-            
+            if process.poll() is None:
+                process.terminate()
+                raise RuntimeError("FFmpeg did not create an HLS manifest in time")
+            time.sleep(0.2)  # stderr の読み取りが追いつくのを少し待つ
+            reason = " / ".join(stderr_tail) or f"exit code {process.returncode}"
+            raise RuntimeError(f"FFmpeg exited before creating a manifest: {reason}")
+
         with _video_lock:
             _video_status[video_id] = "ready"
-            
+
     except Exception as e:
-        logger.error("[ActivityVideo] HLS background task failed video_id=%s error=%s", video_id, e)
+        detail = str(e)[:400]
+        logger.error("[ActivityVideo] HLS background task failed video_id=%s error=%s", video_id, detail)
+        if process is not None and process.poll() is None:
+            process.terminate()
         with _video_lock:
             _video_status[video_id] = "error"
+            _video_errors[video_id] = (time.monotonic(), detail)
 
 
 def _prepare_activity_hls(video_id: str) -> Path | None:
+    """生成済みならディレクトリを返す。生成中なら None。失敗なら _HlsFailed。"""
     _HLS_CACHE_DIR.mkdir(parents=True, exist_ok=True)
     directory = _HLS_CACHE_DIR / video_id
-    
+
     # video_id 単位のロックで、同時アクセス時に1人だけが生成処理に入るようにする
     with _video_locks[video_id]:
         _hls_last_access[video_id] = time.time()
         manifest = directory / "index.m3u8"
-        
+
         with _video_lock:
             status = _video_status.get(video_id)
             process = _hls_processes.get(video_id)
-            
-            # すでに生成済みで、プロセスも生きている場合はそのままディレクトリを返す
-            if status == "ready" and process and process.poll() is None and manifest.exists():
-                return directory
-                
-            # エラー状態、またはプロセスが死んでいる場合は状態をリセット
-            if status == "error" or (process and process.poll() is not None):
+
+            if status == "error":
+                failed_at, detail = _video_errors.get(video_id, (0.0, "unknown error"))
+                # 失敗直後は再試行せずエラーを返す（YouTubeへの連打とffmpegの再起動ループを防ぐ）
+                if time.monotonic() - failed_at < _HLS_ERROR_COOLDOWN_SECONDS:
+                    raise _HlsFailed(detail)
+                _video_status.pop(video_id, None)
+                _video_errors.pop(video_id, None)
+                status = None
+
+            if status == "ready" and process is not None and manifest.exists():
+                code = process.poll()
+                if code is None:
+                    return directory
+                # 正常終了した直後なら終端付きプレイリストをそのまま返す
+                if code == 0 and time.time() - manifest.stat().st_mtime < 60:
+                    return directory
+
+            if status == "ready":
+                # プロセスが異常終了した／古い／manifestが無い → 作り直す
+                if process is not None and process.poll() is None:
+                    process.terminate()
                 _video_status.pop(video_id, None)
                 _hls_processes.pop(video_id, None)
                 status = None
 
-            # 新規生成が必要な場合はバックグラウンドスレッドを起動
             if status is None:
                 directory.mkdir(parents=True, exist_ok=True)
                 for old in directory.iterdir():
                     old.unlink(missing_ok=True)
-                
+
                 _video_status[video_id] = "processing"
                 Thread(target=_run_ffmpeg_task, args=(video_id, directory, manifest), daemon=True).start()
                 return None
-                
-            return None
-            
-    return directory
+
+            return None  # processing
 
 
 @app.post("/internal/coder/run")
@@ -425,13 +476,12 @@ def activity_music_video():
         return _proxy_activity_hls_to_worker(video_id, asset)
     
     try:
-        directory = _prepare_activity_hls(video_id)
+        try:
+            directory = _prepare_activity_hls(video_id)
+        except _HlsFailed as e:
+            return jsonify({"error": "video_unavailable", "detail": str(e)}), 502
         if directory is None:
             return jsonify({"status": "processing"}), 202
-            
-        with _video_lock:
-            if _video_status.get(video_id) == "error":
-                return jsonify({"error": "video_unavailable", "detail": "FFmpeg conversion failed"}), 502
 
         output = directory / asset
         
@@ -469,13 +519,14 @@ def _hls_cleanup_worker() -> None:
         now = time.time()
         with _video_lock:
             for vid, proc in list(_hls_processes.items()):
-                if proc.poll() is not None:
-                    del _hls_processes[vid]
-                    _video_status.pop(vid, None)
-                elif now - _hls_last_access.get(vid, 0) > _HLS_CACHE_TTL_SECONDS:
+                # 終了済みでも、しばらくアクセスがある間は状態を残す（消すと再生成が走る）
+                if now - _hls_last_access.get(vid, 0) <= _HLS_CACHE_TTL_SECONDS:
+                    continue
+                if proc.poll() is None:
                     proc.terminate()
-                    del _hls_processes[vid]
-                    _video_status.pop(vid, None)
+                _hls_processes.pop(vid, None)
+                _video_status.pop(vid, None)
+                _video_errors.pop(vid, None)
                     
         if _HLS_CACHE_DIR.exists():
             for d in _HLS_CACHE_DIR.iterdir():
