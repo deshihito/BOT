@@ -17,6 +17,7 @@ import subprocess
 import tempfile
 import threading
 import time
+from collections import deque
 from pathlib import Path
 
 import yt_dlp
@@ -30,6 +31,8 @@ SECRET = os.getenv("ACTIVITY_MEDIA_WORKER_SECRET", "")
 CACHE_DIR = Path(os.getenv("ACTIVITY_MEDIA_CACHE_DIR", tempfile.gettempdir())) / "agobot-activity-hls"
 CACHE_TTL_SECONDS = int(os.getenv("ACTIVITY_MEDIA_CACHE_TTL_SECONDS", str(15 * 60)))
 SIGNATURE_TTL_SECONDS = 60
+ERROR_COOLDOWN_SECONDS = 20
+MANIFEST_WAIT_SECONDS = 25
 VIDEO_ID = re.compile(r"^[A-Za-z0-9_-]{11}$")
 ASSET = re.compile(r"^(?:index\.m3u8|seg-\d{6}\.ts)$")
 
@@ -39,6 +42,29 @@ _processes: dict[str, subprocess.Popen] = {}
 _status: dict[str, str] = {}
 _last_access: dict[str, float] = {}
 _used_nonces: dict[str, float] = {}
+_errors: dict[str, tuple[float, str]] = {}
+
+
+class HlsFailed(RuntimeError):
+    """HLS生成に失敗した。detail は呼び出し側へそのまま返す。"""
+
+
+def _pick_video_source(info: dict) -> tuple[str, dict]:
+    """yt-dlp の結果から映像ストリームのURLとHTTPヘッダを取り出す。
+
+    "bestvideo+bestaudio" のように結合フォーマットを選ぶとトップレベルの
+    info["url"] は無く、requested_formats の中にURLが入る。
+    """
+    candidates = info.get("requested_formats") or [info]
+    for fmt in candidates:
+        url = fmt.get("url")
+        if not isinstance(url, str) or not url:
+            continue
+        if len(candidates) > 1 and fmt.get("vcodec") in (None, "none"):
+            continue  # 音声のみのフォーマットは使わない
+        headers = fmt.get("http_headers") or info.get("http_headers") or {}
+        return url, headers
+    raise RuntimeError("yt-dlp did not return a playable video stream URL")
 
 
 def _video_lock(video_id: str) -> threading.Lock:
@@ -79,61 +105,77 @@ def _authorized() -> bool:
 
 def _run_ffmpeg(video_id: str, directory: Path, manifest: Path) -> None:
     process: subprocess.Popen | None = None
+    stderr_tail: deque[str] = deque(maxlen=8)
     try:
+        # 映像のみ取得（音声はBotがVCで再生するのでActivity側は無音）。
+        # player_client の固定は取得失敗の原因になるため外し、yt-dlp の既定に任せる。
         options = {
-            "format": "bestvideo[height<=720]+bestaudio/best[height<=720]/best",
+            "format": "bestvideo[height<=720]/best[height<=720]/best",
             "noplaylist": True,
             "quiet": True,
             "no_warnings": True,
             "socket_timeout": 10,
-            "extractor_args": {"youtube": {"player_client": ["android", "web"]}},
         }
         with yt_dlp.YoutubeDL(options) as ydl:
             info = ydl.extract_info(f"https://www.youtube.com/watch?v={video_id}", download=False)
-        stream_url = info.get("url")
-        if not isinstance(stream_url, str) or not stream_url:
-            raise RuntimeError("yt-dlp did not return a playable stream URL")
-        headers = info.get("http_headers") or {}
+        stream_url, headers = _pick_video_source(info)
         header_value = "".join(f"{key}: {value}\r\n" for key, value in headers.items())
-        process = subprocess.Popen([
-            "ffmpeg", "-hide_banner", "-loglevel", "error",
-            "-headers", header_value,
+
+        command = ["ffmpeg", "-hide_banner", "-loglevel", "error"]
+        if header_value:
+            command += ["-headers", header_value]
+        command += [
+            "-re",  # 実時間で変換する（全編を一気に変換するとプレイリストが終端だけになる）
             "-i", stream_url,
-            "-map", "0:v:0", "-map", "0:a:0?",
+            "-map", "0:v:0", "-an",
             "-c:v", "libx264", "-preset", "ultrafast", "-tune", "zerolatency",
             "-r", "24", "-pix_fmt", "yuv420p",
             "-g", "48", "-keyint_min", "48", "-sc_threshold", "0",
             "-force_key_frames", "expr:gte(t,n_forced*2)",
-            "-c:a", "aac", "-b:a", "128k", "-f", "hls",
+            "-f", "hls",
             "-hls_time", "2", "-hls_list_size", "6",
             "-hls_flags", "delete_segments+append_list+independent_segments",
             "-hls_segment_filename", str(directory / "seg-%06d.ts"), str(manifest),
-        ], stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True)
+        ]
+        process = subprocess.Popen(command, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True)
         with _state_lock:
             _processes[video_id] = process
-        if process.stderr is not None:
-            def drain_errors() -> None:
-                for line in process.stderr:
-                    line = line.strip()
-                    if line:
-                        logger.error("[Activity HLS][%s] %s", video_id, line)
-            threading.Thread(target=drain_errors, daemon=True).start()
-        deadline = time.monotonic() + 15
+
+        def drain_errors(proc: subprocess.Popen = process) -> None:
+            if proc.stderr is None:
+                return
+            for line in proc.stderr:
+                line = line.strip()
+                if line:
+                    stderr_tail.append(line)
+                    logger.error("[Activity HLS][%s] %s", video_id, line)
+
+        threading.Thread(target=drain_errors, daemon=True).start()
+
+        deadline = time.monotonic() + MANIFEST_WAIT_SECONDS
         while not manifest.exists() and process.poll() is None and time.monotonic() < deadline:
             time.sleep(0.25)
         if not manifest.exists():
-            raise RuntimeError("FFmpeg did not create an HLS manifest in time")
+            if process.poll() is None:
+                process.terminate()
+                raise RuntimeError("FFmpeg did not create an HLS manifest in time")
+            time.sleep(0.2)  # stderr の読み取りが追いつくのを少し待つ
+            reason = " / ".join(stderr_tail) or f"exit code {process.returncode}"
+            raise RuntimeError(f"FFmpeg exited before creating a manifest: {reason}")
         with _state_lock:
             _status[video_id] = "ready"
-    except Exception:
-        logger.exception("Activity HLS worker failed for %s", video_id)
+    except Exception as exc:
+        detail = str(exc)[:400]
+        logger.error("Activity HLS worker failed for %s: %s", video_id, detail)
         if process and process.poll() is None:
             process.terminate()
         with _state_lock:
             _status[video_id] = "error"
+            _errors[video_id] = (time.monotonic(), detail)
 
 
 def _prepare(video_id: str) -> Path | None:
+    """生成済みならディレクトリを返す。生成中なら None。失敗なら HlsFailed。"""
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
     directory = CACHE_DIR / video_id
     manifest = directory / "index.m3u8"
@@ -142,12 +184,32 @@ def _prepare(video_id: str) -> Path | None:
         with _state_lock:
             status = _status.get(video_id)
             process = _processes.get(video_id)
-            if status == "ready" and process and process.poll() is None and manifest.exists():
-                return directory
-            if status == "error" or (process and process.poll() is not None):
+
+            if status == "error":
+                failed_at, detail = _errors.get(video_id, (0.0, "unknown error"))
+                # 失敗直後は再試行せずエラーを返す（YouTubeへの連打とffmpeg再起動ループを防ぐ）
+                if time.monotonic() - failed_at < ERROR_COOLDOWN_SECONDS:
+                    raise HlsFailed(detail)
+                _status.pop(video_id, None)
+                _errors.pop(video_id, None)
+                status = None
+
+            if status == "ready" and process is not None and manifest.exists():
+                code = process.poll()
+                if code is None:
+                    return directory
+                # 正常終了した直後なら、終端付きプレイリストをそのまま返す
+                if code == 0 and time.time() - manifest.stat().st_mtime < 60:
+                    return directory
+
+            if status == "ready":
+                # 異常終了した／古い／manifestが無い → 作り直す
+                if process is not None and process.poll() is None:
+                    process.terminate()
                 _status.pop(video_id, None)
                 _processes.pop(video_id, None)
                 status = None
+
             if status is None:
                 directory.mkdir(parents=True, exist_ok=True)
                 for old in directory.iterdir():
@@ -170,16 +232,16 @@ def hls_asset():
         return jsonify({"error": "invalid_video"}), 400
     if not isinstance(asset, str) or not ASSET.fullmatch(asset):
         return jsonify({"error": "invalid_asset"}), 400
-    directory = _prepare(video_id)
+    try:
+        directory = _prepare(video_id)
+    except HlsFailed as exc:
+        return jsonify({"error": "video_unavailable", "detail": str(exc)}), 502
     if directory is None:
         return jsonify({"status": "processing"}), 202
     try:
         os.utime(directory, None)
     except OSError:
         pass
-    with _state_lock:
-        if _status.get(video_id) == "error":
-            return jsonify({"error": "video_unavailable"}), 502
     output = directory / asset
     if asset.endswith(".ts"):
         for _ in range(50):
@@ -200,11 +262,14 @@ def _cleanup_worker() -> None:
         now = time.time()
         with _state_lock:
             for video_id, process in list(_processes.items()):
-                if process.poll() is not None or now - _last_access.get(video_id, 0) > CACHE_TTL_SECONDS:
-                    if process.poll() is None:
-                        process.terminate()
-                    _processes.pop(video_id, None)
-                    _status.pop(video_id, None)
+                # 終了済みでも、しばらくアクセスがある間は状態を残す（消すと再生成が走る）
+                if now - _last_access.get(video_id, 0) <= CACHE_TTL_SECONDS:
+                    continue
+                if process.poll() is None:
+                    process.terminate()
+                _processes.pop(video_id, None)
+                _status.pop(video_id, None)
+                _errors.pop(video_id, None)
         if CACHE_DIR.exists():
             for directory in CACHE_DIR.iterdir():
                 try:
@@ -217,4 +282,4 @@ def _cleanup_worker() -> None:
 if __name__ == "__main__":
     logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"))
     threading.Thread(target=_cleanup_worker, daemon=True).start()
-    app.run(host=os.getenv("ACTIVITY_MEDIA_WORKER_HOST", "0.0.0.0"), port=int(os.getenv("ACTIVITY_MEDIA_WORKER_PORT", "10002")))
+    app.run(host=os.getenv("ACTIVITY_MEDIA_WORKER_HOST", "0.0.0.0"), port=int(os.getenv("ACTIVITY_MEDIA_WORKER_PORT", "10001")))
