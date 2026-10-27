@@ -6,6 +6,7 @@ from collections import defaultdict, deque
 from concurrent.futures import TimeoutError
 import hashlib
 import hmac
+import json
 import logging
 import os
 import re
@@ -19,7 +20,8 @@ from threading import Lock, Thread
 from typing import Any
 
 import yt_dlp
-from flask import Flask, jsonify, request, send_file
+import requests
+from flask import Flask, Response, jsonify, request, send_file
 
 from core import coder_service
 
@@ -48,6 +50,62 @@ _ACTIVITY_MAX_REQUESTS_PER_WINDOW = 45
 _SIGNATURE_TTL_SECONDS = 60
 _HLS_CACHE_TTL_SECONDS = 15 * 60
 _HLS_CACHE_DIR = Path(os.getenv("ACTIVITY_VIDEO_CACHE_DIR", tempfile.gettempdir())) / "agobot-activity-hls"
+
+
+def _media_worker_configured() -> bool:
+    return bool(os.getenv("ACTIVITY_MEDIA_WORKER_URL") and os.getenv("ACTIVITY_MEDIA_WORKER_SECRET"))
+
+
+def _proxy_activity_hls_to_worker(video_id: str, asset: str):
+    """Forward only the authorized, current-video HLS request to the worker."""
+    base_url = os.getenv("ACTIVITY_MEDIA_WORKER_URL", "").rstrip("/")
+    secret = os.getenv("ACTIVITY_MEDIA_WORKER_SECRET", "")
+    body = json.dumps({"video_id": video_id, "asset": asset}, separators=(",", ":")).encode()
+    timestamp = str(int(time.time()))
+    nonce = secrets.token_hex(24)
+    body_hash = hashlib.sha256(body).hexdigest()
+    signed = f"POST\n/v1/hls\n{timestamp}\n{nonce}\n{body_hash}".encode()
+    signature = hmac.new(secret.encode(), signed, hashlib.sha256).hexdigest()
+    try:
+        upstream = requests.post(
+            f"{base_url}/v1/hls",
+            data=body,
+            headers={
+                "Content-Type": "application/json",
+                "X-AGO-Media-Timestamp": timestamp,
+                "X-AGO-Media-Nonce": nonce,
+                "X-AGO-Media-Signature": signature,
+            },
+            stream=True,
+            timeout=(3, 10),
+        )
+    except requests.RequestException:
+        logger.exception("Activity Media Worker request failed")
+        return jsonify({"error": "media_worker_unavailable"}), 503
+
+    if upstream.status_code != 200:
+        try:
+            payload = upstream.json()
+        except ValueError:
+            payload = {"error": "media_worker_failed"}
+        status = upstream.status_code if upstream.status_code in {202, 404, 409, 429} else 502
+        upstream.close()
+        return jsonify(payload), status
+
+    def stream():
+        try:
+            for chunk in upstream.iter_content(chunk_size=64 * 1024):
+                if chunk:
+                    yield chunk
+        finally:
+            upstream.close()
+
+    headers = {"Content-Type": upstream.headers.get("Content-Type", "application/octet-stream")}
+    for name in ("Content-Length", "Content-Range", "Accept-Ranges", "ETag", "Last-Modified", "Cache-Control"):
+        value = upstream.headers.get(name)
+        if value:
+            headers[name] = value
+    return Response(stream(), status=200, headers=headers, direct_passthrough=True)
 
 
 @app.route("/")
@@ -359,6 +417,12 @@ def activity_music_video():
         return jsonify({"error": "music_state_unavailable"}), 502
     if not snapshot or snapshot.get("videoId") != video_id:
         return jsonify({"error": "video_not_current"}), 409
+
+    # CPU-heavy yt-dlp/FFmpeg/HLS work runs in the dedicated worker when
+    # configured. The bot remains the authorization boundary for guild/voice
+    # membership and only proxies the resulting bytes.
+    if _media_worker_configured():
+        return _proxy_activity_hls_to_worker(video_id, asset)
     
     try:
         directory = _prepare_activity_hls(video_id)
