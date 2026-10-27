@@ -154,47 +154,36 @@ def build_board_embed(message: Any, count: int, emoji: str) -> discord.Embed:
     return embed
 
 
-def _channels(guild: Any) -> list[Any]:
-    me = getattr(guild, "me", None)
-    channels = list(getattr(guild, "text_channels", []) or [])
-    usable: list[Any] = []
-    for channel in channels:
-        if me is not None:
-            try:
-                if not channel.permissions_for(me).send_messages:
-                    continue
-            except Exception:
-                pass
-        usable.append(channel)
-    return usable[:25]
-
-
-class StarboardChannelSelect(discord.ui.Select):
+class StarboardChannelSelect(discord.ui.ChannelSelect):
     def __init__(self, parent: "StarboardSettingsView"):
         self.parent_view = parent
         current = parent.settings["channel_id"]
-        options = [
-            discord.SelectOption(
-                label=str(getattr(channel, "name", "チャンネル"))[:100],
-                value=str(channel.id),
-                default=channel.id == current,
-            )
-            for channel in _channels(parent.guild)
-        ]
-        if not options:
-            options = [discord.SelectOption(label="送信できるチャンネルがありません", value="__none__")]
-        super().__init__(placeholder="Starboardの送信先", options=options, row=0)
+        super().__init__(
+            placeholder="Starboardの送信先",
+            channel_types=[discord.ChannelType.text, discord.ChannelType.news],
+            min_values=0,
+            max_values=1,
+            default_values=(
+                [discord.SelectDefaultValue(id=current, type=discord.SelectDefaultValueType.channel)]
+                if current is not None else []
+            ),
+            row=0,
+        )
 
     async def callback(self, interaction: discord.Interaction):
         if not self.parent_view.can_manage(interaction):
             return await interaction.response.send_message(
                 "この設定には「サーバーの管理」権限が必要です。", ephemeral=True,
             )
-        if self.values[0] == "__none__":
+        channel = self.values[0] if self.values else None
+        if channel is None:
             return await interaction.response.send_message(
                 "Botが送信できるテキストチャンネルがありません。", ephemeral=True,
             )
-        channel_id = int(self.values[0])
+        me = getattr(self.parent_view.guild, "me", None)
+        if me is not None and not getattr(channel.permissions_for(me), "send_messages", False):
+            return await interaction.response.send_message("そのチャンネルにはBotが送信できません。", ephemeral=True)
+        channel_id = channel.id
         await update_settings(self.parent_view.guild_id, KEY, channel_id=channel_id)
         self.parent_view.settings["channel_id"] = channel_id
         await self.parent_view.refresh(interaction, "Starboardの送信先を保存しました。")

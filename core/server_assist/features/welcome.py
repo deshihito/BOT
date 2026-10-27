@@ -69,45 +69,20 @@ def build_embed(member: Any, guild: Any, template: str, *, kind: str = "welcome"
     return embed
 
 
-def _channels(guild: Any) -> list[Any]:
-    channels = list(getattr(guild, "text_channels", []) or [])
-    me = getattr(guild, "me", None)
-    usable: list[Any] = []
-    for channel in channels:
-        if me is not None:
-            try:
-                permissions = channel.permissions_for(me)
-            except Exception:
-                permissions = None
-            if permissions is not None and not getattr(permissions, "send_messages", False):
-                continue
-        usable.append(channel)
-    return usable[:25]
-
-
-class WelcomeChannelSelect(discord.ui.Select):
+class WelcomeChannelSelect(discord.ui.ChannelSelect):
     def __init__(self, parent: "WelcomeSettingsView", kind: str):
         self.parent_view = parent
         self.kind = kind
         current = parent.settings["welcome_channel_id" if kind == "welcome" else "goodbye_channel_id"]
-        options: list[discord.SelectOption] = []
-        if kind == "goodbye":
-            options.append(discord.SelectOption(
-                label="参加メッセージと同じ",
-                value="0",
-                default=current is None,
-            ))
-        for channel in _channels(parent.guild):
-            options.append(discord.SelectOption(
-                label=str(getattr(channel, "name", "チャンネル"))[:100],
-                value=str(channel.id),
-                default=current == channel.id,
-            ))
-        if not options:
-            options.append(discord.SelectOption(label="送信できるチャンネルがありません", value="__none__"))
         super().__init__(
             placeholder="参加メッセージの送信先" if kind == "welcome" else "退出メッセージの送信先",
-            options=options[:25],
+            channel_types=[discord.ChannelType.text, discord.ChannelType.news],
+            min_values=0,
+            max_values=1,
+            default_values=(
+                [discord.SelectDefaultValue(id=current, type=discord.SelectDefaultValueType.channel)]
+                if current is not None else []
+            ),
             row=0 if kind == "welcome" else 1,
         )
 
@@ -116,12 +91,18 @@ class WelcomeChannelSelect(discord.ui.Select):
             return await interaction.response.send_message(
                 "この設定には「サーバーの管理」権限が必要です。", ephemeral=True,
             )
-        value = self.values[0]
-        if value == "__none__":
+        channel = self.values[0] if self.values else None
+        if channel is not None:
+            me = getattr(self.parent_view.guild, "me", None)
+            if me is not None and not getattr(channel.permissions_for(me), "send_messages", False):
+                return await interaction.response.send_message(
+                    "そのチャンネルにはBotがメッセージを送信できません。", ephemeral=True,
+                )
+        if channel is None and self.kind == "welcome":
             return await interaction.response.send_message(
                 "Botがメッセージを送信できるテキストチャンネルがありません。", ephemeral=True,
             )
-        channel_id = None if value == "0" else int(value)
+        channel_id = getattr(channel, "id", None)
         field = "welcome_channel_id" if self.kind == "welcome" else "goodbye_channel_id"
         await update_settings(self.parent_view.guild_id, KEY, **{field: channel_id})
         self.parent_view.settings[field] = channel_id
