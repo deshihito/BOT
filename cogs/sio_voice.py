@@ -1,5 +1,5 @@
 """/voice グループ: ボイスチャンネルを使う機能（参加・退出・録音・やまびこ・文字起こし・カラオケ・
-ボイスチェンジャー・ランダム通話・グローバルVC・VOICEVOX読み上げ）の入口。
+ボイスチェンジャー・ランダム通話・グローバルVC・VOICEVOX読み上げ・音声トリガー）の入口。
 
 それぞれの処理は各機能の cog にある実装関数（``_xxx_impl``）を呼ぶだけ。
 VC を誰が使っているかは core/voice_session.py が持つ。
@@ -12,6 +12,7 @@ import logging
 import os
 import re
 import shlex
+import subprocess
 import tempfile
 import time
 from dataclasses import asdict, dataclass
@@ -19,6 +20,9 @@ from pathlib import Path
 
 import aiohttp
 import discord
+import encodec
+import soundfile as sf
+import torch
 from discord import app_commands
 from discord.ext import commands
 
@@ -869,6 +873,227 @@ class TTSSayModal(discord.ui.Modal, title="1回だけ読み上げ"):
         await self.cog._say_impl(Responder(interaction), self.text.value)
 
 
+# ====================================================================
+# 音声トリガー（EnCodec 6kbps）
+#   テキストのトリガー単語で、登録済みの圧縮音声を再生する。
+#   登録は /support の「音声トリガー登録」から（音声ファイル添付 → 単語入力）。
+#   保存先は環境変数 VOICE_TRIGGER_DIR で変更できる（例: SDカード）。
+# ====================================================================
+VOICE_TRIGGER_DIR = Path(os.getenv("VOICE_TRIGGER_DIR", "data/voice_triggers"))
+VOICE_TRIGGER_MAX_SECONDS = 5.0
+VOICE_TRIGGER_MAX_PER_GUILD = 10
+VOICE_TRIGGER_SAMPLE_RATE = 24000
+VOICE_TRIGGER_BANDWIDTH = 6.0
+
+_ENCODEC_MODEL = None
+
+
+class VoiceTriggerError(Exception):
+    pass
+
+
+def _get_encodec_model():
+    """EnCodec 24kHz モデルをシングルトンで返す（ロードは初回のみ）。"""
+    global _ENCODEC_MODEL
+    if _ENCODEC_MODEL is None:
+        model = encodec.EncodecModel.encodec_model_24khz()
+        model.set_target_bandwidth(VOICE_TRIGGER_BANDWIDTH)
+        model.eval()
+        _ENCODEC_MODEL = model
+    return _ENCODEC_MODEL
+
+
+def _trim_to_wav(src_path: str, dst_path: str, max_seconds: float = VOICE_TRIGGER_MAX_SECONDS):
+    """FFmpeg で 5 秒にトリミングし、24kHz モノラル WAV に変換する。"""
+    cmd = [
+        "ffmpeg", "-y", "-i", src_path,
+        "-t", str(max_seconds),
+        "-ar", str(VOICE_TRIGGER_SAMPLE_RATE), "-ac", "1",
+        "-f", "wav", dst_path,
+    ]
+    result = subprocess.run(cmd, capture_output=True)
+    if result.returncode != 0:
+        raise VoiceTriggerError("音声の変換に失敗しました。対応形式か確認してください。")
+
+
+def _encodec_compress(wav_path: str, ecdc_path: str):
+    """WAV を EnCodec 6kbps で圧縮して .ecdc として保存する。"""
+    model = _get_encodec_model()
+    data, sr = sf.read(wav_path, dtype="float32", always_2d=True)
+    if sr != VOICE_TRIGGER_SAMPLE_RATE:
+        raise VoiceTriggerError("サンプルレートが不正です。")
+    wav = torch.from_numpy(data.T).unsqueeze(0)  # (1, channels, time)
+    with torch.no_grad():
+        frames = model.encode(wav)
+    with open(ecdc_path, "wb") as fh:
+        torch.save(frames, fh)
+
+
+def _encodec_decompress(ecdc_path: str, wav_path: str):
+    """.ecdc をデコードして WAV に書き出す。"""
+    model = _get_encodec_model()
+    with open(ecdc_path, "rb") as fh:
+        frames = torch.load(fh, map_location="cpu")
+    with torch.no_grad():
+        wav = model.decode(frames)
+    audio = wav.squeeze(0).cpu().numpy().T
+    sf.write(wav_path, audio, VOICE_TRIGGER_SAMPLE_RATE)
+
+
+def _wav_to_mp3_for_discord(wav_path: str, mp3_path: str):
+    """discord.py の FFmpegPCMAudio で扱いやすい mp3 に変換する。"""
+    cmd = ["ffmpeg", "-y", "-i", wav_path, "-b:a", "64k", mp3_path]
+    result = subprocess.run(cmd, capture_output=True)
+    if result.returncode != 0:
+        raise VoiceTriggerError("再生用音声の生成に失敗しました。")
+
+
+class VoiceTriggerCog(commands.Cog):
+    """テキストのトリガー単語で登録済み音声を再生する。"""
+
+    def __init__(self, bot: commands.Bot):
+        self.bot = bot
+        self.voice_sessions = get_manager(bot)
+        self.triggers: dict[int, dict[str, dict]] = {}  # guild_id -> {word: meta}
+        self._load()
+
+    # ------------------------------------------------------------ 永続化
+    def _guild_dir(self, guild_id: int) -> Path:
+        path = VOICE_TRIGGER_DIR / str(guild_id)
+        path.mkdir(parents=True, exist_ok=True)
+        return path
+
+    def _meta_path(self, guild_id: int) -> Path:
+        return self._guild_dir(guild_id) / "meta.json"
+
+    def _load(self):
+        if not VOICE_TRIGGER_DIR.exists():
+            return
+        for guild_dir in VOICE_TRIGGER_DIR.iterdir():
+            if not guild_dir.is_dir():
+                continue
+            try:
+                guild_id = int(guild_dir.name)
+            except ValueError:
+                continue
+            meta_path = guild_dir / "meta.json"
+            if meta_path.exists():
+                try:
+                    self.triggers[guild_id] = json.loads(meta_path.read_text(encoding="utf-8"))
+                except Exception:
+                    logger.exception("トリガー設定の読み込みに失敗 (guild=%s)", guild_id)
+
+    def _save(self, guild_id: int):
+        self._meta_path(guild_id).write_text(
+            json.dumps(self.triggers.get(guild_id, {}), ensure_ascii=False),
+            encoding="utf-8",
+        )
+
+    # ------------------------------------------------------------ 登録 API
+    async def register(self, guild: discord.Guild, word: str, attachment: discord.Attachment,
+                       user: discord.abc.User) -> str:
+        """音声を 5 秒にトリミング → EnCodec 6kbps 圧縮 → 登録。"""
+        word = word.strip()
+        if not word:
+            raise VoiceTriggerError("トリガー単語を入力してください。")
+        if len(word) > 50:
+            raise VoiceTriggerError("トリガー単語は 50 文字以内にしてください。")
+
+        current = self.triggers.setdefault(guild.id, {})
+        if word not in current and len(current) >= VOICE_TRIGGER_MAX_PER_GUILD:
+            raise VoiceTriggerError(f"登録できるのはギルドあたり {VOICE_TRIGGER_MAX_PER_GUILD} 個までです。")
+
+        gdir = self._guild_dir(guild.id)
+        src = gdir / f"tmp_{attachment.id}_{attachment.filename}"
+        wav = gdir / f"tmp_{attachment.id}.wav"
+        ecdc = gdir / f"{word}.ecdc"
+
+        try:
+            await attachment.save(src)
+            await asyncio.to_thread(_trim_to_wav, str(src), str(wav))
+            await asyncio.to_thread(_encodec_compress, str(wav), str(ecdc))
+        except VoiceTriggerError:
+            raise
+        except Exception as exc:
+            logger.exception("音声トリガー登録に失敗")
+            raise VoiceTriggerError(f"登録処理に失敗しました: {exc}") from exc
+        finally:
+            for p in (src, wav):
+                try:
+                    p.unlink()
+                except OSError:
+                    pass
+
+        current[word] = {
+            "ecdc": str(ecdc),
+            "registered_by": user.id,
+            "registered_at": time.time(),
+        }
+        self._save(guild.id)
+        return f"「{word}」を登録しました（EnCodec 6kbps）。"
+
+    async def unregister(self, guild: discord.Guild, word: str) -> str:
+        current = self.triggers.get(guild.id, {})
+        meta = current.pop(word, None)
+        if meta is None:
+            raise VoiceTriggerError("その単語は登録されていません。")
+        try:
+            Path(meta["ecdc"]).unlink()
+        except OSError:
+            pass
+        self._save(guild.id)
+        return f"「{word}」の登録を解除しました。"
+
+    def list_triggers(self, guild_id: int) -> dict[str, dict]:
+        return dict(self.triggers.get(guild_id, {}))
+
+    # ------------------------------------------------------------ 再生
+    async def _play(self, guild: discord.Guild, meta: dict):
+        vc = guild.voice_client
+        if vc is None or not vc.is_connected():
+            return
+
+        gdir = self._guild_dir(guild.id)
+        stamp = int(time.time() * 1000)
+        wav = gdir / f"play_{stamp}.wav"
+        mp3 = gdir / f"play_{stamp}.mp3"
+        try:
+            await asyncio.to_thread(_encodec_decompress, meta["ecdc"], str(wav))
+            await asyncio.to_thread(_wav_to_mp3_for_discord, str(wav), str(mp3))
+            source = discord.FFmpegPCMAudio(str(mp3))
+            loop = asyncio.get_running_loop()
+            done: asyncio.Future = loop.create_future()
+
+            def after(error):
+                loop.call_soon_threadsafe(lambda: done.done() or done.set_result(error))
+
+            add_audio_source(vc, "trigger", source, after=after)
+            try:
+                await asyncio.wait_for(done, timeout=30)
+            except asyncio.TimeoutError:
+                remove_audio_source(vc, "trigger")
+        finally:
+            for p in (wav, mp3):
+                try:
+                    p.unlink()
+                except OSError:
+                    pass
+
+    @commands.Cog.listener()
+    async def on_message(self, message: discord.Message):
+        if message.guild is None or message.author.bot:
+            return
+        triggers = self.triggers.get(message.guild.id)
+        if not triggers:
+            return
+        # 長い単語を優先してマッチ
+        for word in sorted(triggers, key=len, reverse=True):
+            if word in message.content:
+                await self._play(message.guild, triggers[word])
+                return
+
+
 async def setup(bot: commands.Bot):
     await bot.add_cog(VoiceHub(bot))
     await bot.add_cog(TTSCog(bot))
+    await bot.add_cog(VoiceTriggerCog(bot))
