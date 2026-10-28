@@ -89,6 +89,7 @@ VOICE_GENRES = {
     "effects": ("音声加工", "ボイスチェンジャー"),
     "community": ("通話ネットワーク", "ランダム通話、グローバルVC"),
     "tts": ("読み上げ", "VOICEVOXによるテキスト読み上げ"),
+    "trigger": ("音声トリガー", "登録済みのトリガー一覧・削除"),  # ← 追加
 }
 VOICE_ACTIONS_BY_GENRE = {
     "connection": [("参加", "join"), ("退出", "leave"), ("状態", "status")],
@@ -105,6 +106,7 @@ VOICE_ACTIONS_BY_GENRE = {
                    ("グローバルVC: 開始/参加", "global_start"), ("グローバルVC: 終了/退出", "global_stop")],
     "tts": [("読み上げ: 開始（このチャンネルを読む）", "tts_start"), ("読み上げ: 停止", "tts_stop"),
             ("読み上げ: 話者・ピッチ・話速の設定", "tts_config"), ("読み上げ: 1回だけ読む", "tts_say")],
+    "trigger": [("トリガー一覧・削除", "trigger_panel")],  # ← 追加
 }
 
 # 各機能の cog の名前（クラス名）
@@ -267,6 +269,17 @@ class VoiceHub(commands.Cog):
         else:
             await interaction.response.send_modal(TTSSettingsModal(cog, interaction.user.id))
 
+    async def voice_trigger(self, interaction: discord.Interaction, operation: str):
+        cog = self.bot.get_cog("VoiceTriggerCog")
+        if cog is None:
+            return await Responder(interaction).send(
+                "⚠️ 音声トリガー機能がいま読み込まれていません。", ephemeral=True
+            )
+        if operation == "panel":
+            view = VoiceTriggerManageView(cog, interaction.guild_id)
+            return await interaction.response.send_message(view=view, ephemeral=True)
+        return await Responder(interaction).send("操作を選択してください。", ephemeral=True)
+
     @app_commands.command(name="vc", description="Show the music and voice control panel")
     async def vc(self, interaction: discord.Interaction):
         view = VoicePanelView(self)
@@ -298,6 +311,8 @@ class VoiceHub(commands.Cog):
         if key == "changer":
             return await self.voice_effects(
                 interaction, app_commands.Choice(name=operation, value=operation), pitch, buffer_ms, max_ms)
+        if key == "trigger":  # ← 追加
+            return await self.voice_trigger(interaction, operation)
         return await self.voice_community(
             interaction, app_commands.Choice(name=key, value=key),
             app_commands.Choice(name=operation, value=operation), room, password)
@@ -1134,6 +1149,102 @@ class VoiceTriggerCog(commands.Cog):
             if word in message.content:
                 await self._play(message.guild, triggers[word])
                 return
+
+
+# ====================================================================
+# /vc パネル用: 音声トリガーの一覧・削除（Components V2）
+# ====================================================================
+class VoiceTriggerDeleteSelect(discord.ui.Select):
+    def __init__(self, parent: "VoiceTriggerManageView", words: list[str]):
+        self.parent_view = parent
+        super().__init__(
+            placeholder="削除するトリガーを選択",
+            options=[discord.SelectOption(label=w[:100], value=w[:100]) for w in words[:25]],
+        )
+
+    async def callback(self, interaction: discord.Interaction):
+        # 権限チェック（support.py の設定と共通）
+        try:
+            from cogs.support import get_voice_trigger_settings
+            from core import guild_settings
+
+            store = guild_settings.get_store()
+            await store.ensure_loaded()
+            settings = get_voice_trigger_settings(store, interaction.guild_id)
+            if settings["permission"] == "admin":
+                perms = getattr(interaction.user, "guild_permissions", None)
+                if not getattr(perms, "administrator", False):
+                    return await interaction.response.send_message(
+                        "このサーバーでは管理者のみ操作できます。", ephemeral=True
+                    )
+        except Exception:
+            logger.exception("音声トリガー権限チェックに失敗しました")
+
+        word = self.values[0]
+        try:
+            msg = await self.parent_view.cog.unregister(interaction.guild, word)
+        except Exception as exc:
+            return await interaction.response.send_message(f"⚠️ {exc}", ephemeral=True)
+
+        self.parent_view._build()
+        await interaction.response.edit_message(view=self.parent_view)
+        await interaction.followup.send(msg, ephemeral=True)
+
+
+class VoiceTriggerManageView(discord.ui.LayoutView):
+    """音声トリガーの一覧・削除パネル（Components V2）。"""
+
+    def __init__(self, cog, guild_id: int):
+        super().__init__(timeout=300)
+        self.cog = cog
+        self.guild_id = guild_id
+        self._build()
+
+    def _build(self):
+        self.clear_items()
+
+        if not VOICE_TRIGGER_AVAILABLE:
+            self.add_item(
+                discord.ui.Container(
+                    discord.ui.TextDisplay(
+                        "## ⚠️ 音声トリガー機能は利用できません\n"
+                        "`encodec` / `torch` / `soundfile` の読み込みに失敗しています。Botのログを確認してください。"
+                    ),
+                    accent_colour=0xE74C3C,
+                )
+            )
+            return
+
+        triggers = self.cog.list_triggers(self.guild_id)
+        if not triggers:
+            self.add_item(
+                discord.ui.Container(
+                    discord.ui.TextDisplay(
+                        "## 🎤 音声トリガー\n"
+                        "登録されているトリガーはありません。\n\n"
+                        "**登録方法**: チャンネルに音声ファイルを添付して送信すると、"
+                        "「この音声をトリガー登録」ボタンが表示されます。\n"
+                        "5秒にトリミングされ、EnCodec 6kbps で圧縮されて保存されます。\n\n"
+                        "**詳細設定**: `/support` →「サーバー管理」→「音声トリガー登録」から権限設定・削除ができます。"
+                    ),
+                    accent_colour=0xF1C40F,
+                )
+            )
+            return
+
+        lines = "\n".join(f"• `{w}`" for w in triggers)
+        children = [
+            discord.ui.TextDisplay(
+                f"## 🎤 音声トリガー\n"
+                f"**登録済み ({len(triggers)}/{VOICE_TRIGGER_MAX_PER_GUILD})**\n{lines}"
+            ),
+            discord.ui.Separator(),
+            discord.ui.TextDisplay(
+                "-# トリガー単語がテキストに含まれると、登録した音声が再生されます。"
+            ),
+            discord.ui.ActionRow(VoiceTriggerDeleteSelect(self, list(triggers))),
+        ]
+        self.add_item(discord.ui.Container(*children, accent_colour=0xF1C40F))
 
 
 async def setup(bot: commands.Bot):
