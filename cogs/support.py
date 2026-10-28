@@ -77,6 +77,8 @@ SUPPORT_ACTIONS = [
     app_commands.Choice(name="Quest通知（Discord Orbs）", value="quest_notify"),
     app_commands.Choice(name="レベルアップ通知（EXP）", value="levelup_notify"),
     app_commands.Choice(name="サーバーアシスト設定", value="server_assist"),
+    # === 追加: 音声トリガー ===
+    app_commands.Choice(name="音声トリガー登録", value="voice_trigger"),
 ]
 
 SUPPORT_GENRES = {
@@ -86,7 +88,7 @@ SUPPORT_GENRES = {
     ),
     "server": (
         "サーバー管理",
-        "ロール操作、絵文字便乗、VC履歴、メッセージ編集履歴、認証パネル、ロールパネル、レベルアップ通知",
+        "ロール操作、絵文字便乗、VC履歴、メッセージ編集履歴、認証パネル、ロールパネル、レベルアップ通知、音声トリガー",
     ),
     "assist": (
         "サーバーアシスト",
@@ -128,6 +130,8 @@ SUPPORT_ACTIONS_BY_GENRE = {
 SUPPORT_ACTIONS_BY_GENRE["server"].append((SUPPORT_ACTIONS[17].name, SUPPORT_ACTIONS[17].value))
 SUPPORT_ACTIONS_BY_GENRE["server"].append((SUPPORT_ACTIONS[18].name, SUPPORT_ACTIONS[18].value))
 SUPPORT_ACTIONS_BY_GENRE["server"].append((SUPPORT_ACTIONS[21].name, SUPPORT_ACTIONS[21].value))
+# === 追加: 音声トリガーをサーバー管理ジャンルに追加 ===
+SUPPORT_ACTIONS_BY_GENRE["server"].append((SUPPORT_ACTIONS[23].name, SUPPORT_ACTIONS[23].value))
 SUPPORT_ACTIONS_BY_GENRE["notify"] = [
     (SUPPORT_ACTIONS[19].name, SUPPORT_ACTIONS[19].value),
     (SUPPORT_ACTIONS[20].name, SUPPORT_ACTIONS[20].value),
@@ -143,6 +147,8 @@ AUTH_SECTION = "auth"
 ROLE_PANEL_SECTION = "role_panel"
 HONEYPOT_SECTION = "honeypot"
 AUTO_REACT_SECTION = "auto_react"
+# === 追加: 音声トリガー設定 ===
+VOICE_TRIGGER_SETTINGS_SECTION = "voice_trigger"
 
 AUTH_MODE_SIMPLE = "simple"
 AUTH_MODE_FORM = "form"
@@ -410,6 +416,18 @@ def get_activity_log_settings(store, guild_id: int, section: str) -> dict[str, i
             settings[key] = raw.get(key) if isinstance(raw.get(key), bool) else False
 
     return settings
+
+
+# === 追加: 音声トリガー設定の読み取り ===
+def get_voice_trigger_settings(store, guild_id: int) -> dict:
+    """音声トリガー設定。未設定時は管理者のみ操作可能。"""
+    raw = store.get(guild_id, VOICE_TRIGGER_SETTINGS_SECTION)
+    if not isinstance(raw, dict):
+        raw = {}
+    permission = raw.get("permission")
+    if permission not in {"admin", "everyone"}:
+        permission = "admin"
+    return {"permission": permission}
 
 
 class AuthQuestionAddModal(discord.ui.Modal, title="質問を追加"):
@@ -2809,6 +2827,148 @@ class AutoReactSettingsView(discord.ui.View):
         except Exception:
             logger.exception("Auto react設定の保存に失敗しました")
             await interaction.response.send_message("設定の保存に失敗しました。", ephemeral=True)
+
+
+# === 追加: 音声トリガー UI（Components V2） ===
+class VoiceTriggerPermissionSelect(discord.ui.Select):
+    def __init__(self, parent: "VoiceTriggerPanel"):
+        self.parent_view = parent
+        current = parent.settings["permission"]
+        super().__init__(
+            placeholder="操作権限を選択",
+            options=[
+                discord.SelectOption(label="管理者のみ", value="admin", default=current == "admin"),
+                discord.SelectOption(label="ギルド内の全ユーザー", value="everyone", default=current == "everyone"),
+            ],
+            min_values=1, max_values=1,
+        )
+
+    async def callback(self, interaction: discord.Interaction):
+        await self.parent_view.save(interaction, "権限設定を更新しました。", permission=self.values[0])
+
+
+class VoiceTriggerDeleteSelect(discord.ui.Select):
+    def __init__(self, parent: "VoiceTriggerPanel", triggers: dict):
+        self.parent_view = parent
+        options = [discord.SelectOption(label=w[:100], value=w[:100]) for w in list(triggers)[:25]]
+        if not options:
+            options = [discord.SelectOption(label="登録なし", value="__none__")]
+        super().__init__(placeholder="削除するトリガーを選択", options=options)
+
+    async def callback(self, interaction: discord.Interaction):
+        if self.values[0] == "__none__":
+            return await interaction.response.send_message("削除するトリガーがありません。", ephemeral=True)
+        cog = interaction.client.get_cog("VoiceTriggerCog")
+        if cog is None:
+            return await interaction.response.send_message("音声トリガー機能が読み込まれていません。", ephemeral=True)
+        try:
+            msg = await cog.unregister(interaction.guild, self.values[0])
+        except Exception as exc:
+            return await interaction.response.send_message(f"⚠️ {exc}", ephemeral=True)
+        await interaction.response.send_message(msg, ephemeral=True)
+        await self.parent_view.refresh(interaction)
+
+
+class VoiceTriggerPanel(discord.ui.LayoutView):
+    """音声トリガー設定パネル（Components V2）。"""
+
+    def __init__(self, cog: "SupportCog", settings: dict, triggers: dict, notice: str | None = None):
+        super().__init__(timeout=300)
+        self.cog = cog
+        self.settings = settings
+        self.triggers = triggers
+        self.notice = notice
+        self._build()
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if self.settings["permission"] == "admin":
+            perms = getattr(interaction.user, "guild_permissions", None)
+            if not getattr(perms, "administrator", False):
+                await interaction.response.send_message("このパネルは管理者のみ操作できます。", ephemeral=True)
+                return False
+        return True
+
+    def _build(self):
+        self.clear_items()
+        head = "## 🎤 音声トリガー登録\nテキストのトリガー単語で登録済み音声を再生します。（5秒まで・ギルドあたり10個）"
+        if self.notice:
+            head = f"{self.notice}\n\n{head}"
+        rows = "\n".join(f"• `{w}`" for w in self.triggers) or "登録なし"
+        self.add_item(
+            discord.ui.Container(
+                discord.ui.TextDisplay(head),
+                discord.ui.TextDisplay(f"### 登録済み ({len(self.triggers)}/10)\n{rows}"),
+                discord.ui.Separator(),
+                discord.ui.ActionRow(VoiceTriggerPermissionSelect(self)),
+                discord.ui.ActionRow(VoiceTriggerDeleteSelect(self, self.triggers)),
+                accent_colour=0xF1C40F,
+            )
+        )
+
+    async def refresh(self, interaction: discord.Interaction, notice: str | None = None):
+        store = guild_settings.get_store()
+        await store.ensure_loaded()
+        self.settings = get_voice_trigger_settings(store, interaction.guild_id)
+        cog = interaction.client.get_cog("VoiceTriggerCog")
+        self.triggers = cog.list_triggers(interaction.guild_id) if cog else {}
+        self.notice = notice
+        self._build()
+        await interaction.edit_original_response(view=self)
+
+    async def save(self, interaction: discord.Interaction, notice: str, **values):
+        await interaction.response.defer()
+        try:
+            await guild_settings.get_store().update(
+                interaction.guild_id, VOICE_TRIGGER_SETTINGS_SECTION, **values)
+        except Exception:
+            logger.exception("音声トリガー設定の更新に失敗")
+            return await interaction.followup.send("設定の更新に失敗しました。", ephemeral=True)
+        await self.refresh(interaction, notice)
+
+
+class VoiceTriggerRegisterModal(discord.ui.Modal, title="音声トリガー登録"):
+    word = discord.ui.TextInput(label="トリガー単語", max_length=50)
+
+    def __init__(self, panel: "VoiceTriggerPanel | None", attachment: discord.Attachment):
+        super().__init__()
+        self.panel = panel
+        self.attachment = attachment
+
+    async def on_submit(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        cog = interaction.client.get_cog("VoiceTriggerCog")
+        if cog is None:
+            return await interaction.followup.send("音声トリガー機能が読み込まれていません。", ephemeral=True)
+        try:
+            msg = await cog.register(interaction.guild, self.word.value, self.attachment, interaction.user)
+        except Exception as exc:
+            return await interaction.followup.send(f"⚠️ {exc}", ephemeral=True)
+        await interaction.followup.send(msg, ephemeral=True)
+        if self.panel is not None:
+            await self.panel.refresh(interaction, "登録しました。")
+
+
+class VoiceTriggerAttachView(discord.ui.View):
+    """音声ファイル付きメッセージに付ける登録ボタン。"""
+
+    def __init__(self, attachment: discord.Attachment):
+        super().__init__(timeout=600)
+        self.attachment = attachment
+
+    @discord.ui.button(label="この音声をトリガー登録", style=discord.ButtonStyle.primary)
+    async def register(self, interaction: discord.Interaction, button: discord.ui.Button):
+        cog = interaction.client.get_cog("SupportCog")
+        if cog is None:
+            return await interaction.response.send_message("サポート機能が読み込まれていません。", ephemeral=True)
+        store = guild_settings.get_store()
+        await store.ensure_loaded()
+        settings = get_voice_trigger_settings(store, interaction.guild_id)
+        if settings["permission"] == "admin":
+            perms = getattr(interaction.user, "guild_permissions", None)
+            if not getattr(perms, "administrator", False):
+                return await interaction.response.send_message(
+                    "このサーバーでは管理者のみ登録できます。", ephemeral=True)
+        await interaction.response.send_modal(VoiceTriggerRegisterModal(None, self.attachment))
 
 
 # ===== SNS新着通知（X / YouTube） ======================================
@@ -5377,6 +5537,25 @@ class SupportCog(commands.Cog):
         if settings["enabled"] and settings["channel_id"] == message.channel.id:
             await self.send_sticky_panel(message.guild)
 
+        # === 追加: 音声トリガー登録の導線 ===
+        if message.attachments:
+            audio = next(
+                (a for a in message.attachments
+                 if a.content_type and a.content_type.startswith("audio/")),
+                None,
+            )
+            if audio is not None:
+                vt_settings = get_voice_trigger_settings(store, message.guild.id)
+                allowed = True
+                if vt_settings["permission"] == "admin":
+                    perms = getattr(message.author, "guild_permissions", None)
+                    allowed = bool(getattr(perms, "administrator", False))
+                if allowed:
+                    await message.reply(
+                        "この音声をトリガー登録しますか？（5秒にトリミングし、EnCodec 6kbps で圧縮します）",
+                        view=VoiceTriggerAttachView(audio),
+                    )
+
     @commands.Cog.listener()
     async def on_voice_state_update(
         self,
@@ -5714,6 +5893,16 @@ class SupportCog(commands.Cog):
 
         if selected == "clear":
             return await interaction.response.send_modal(SupportClearModal(self))
+
+        # === 追加: 音声トリガー ===
+        if selected == "voice_trigger":
+            store = guild_settings.get_store()
+            await store.ensure_loaded()
+            settings = get_voice_trigger_settings(store, interaction.guild_id)
+            cog = self.bot.get_cog("VoiceTriggerCog")
+            triggers = cog.list_triggers(interaction.guild_id) if cog else {}
+            return await interaction.response.send_message(
+                view=VoiceTriggerPanel(self, settings, triggers), ephemeral=True)
 
         cog = self.bot.get_cog("BumpRta")
         if cog is None:
