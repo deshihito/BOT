@@ -20,11 +20,29 @@ from pathlib import Path
 
 import aiohttp
 import discord
-import encodec
-import soundfile as sf
-import torch
 from discord import app_commands
 from discord.ext import commands
+
+# --- 音声トリガー用の重い依存はここで安全に読み込む ---------------------------
+# encodec / torch / soundfile のどれか1つでも import に失敗すると、このモジュール
+# 全体の読み込みが止まり、VoiceHub や TTSCog まで道連れになる。それを避けるため、
+# 失敗しても VOICE_TRIGGER_AVAILABLE=False にして、音声トリガー機能だけを無効化する。
+try:
+    import encodec
+    import soundfile as sf
+    import torch
+
+    VOICE_TRIGGER_AVAILABLE = True
+except Exception:  # ImportError だけでなく共有ライブラリ不整合 (OSError) 等も捕捉
+    encodec = None
+    sf = None
+    torch = None
+    VOICE_TRIGGER_AVAILABLE = False
+    logging.getLogger(__name__).warning(
+        "EnCodec/torch/soundfile を読み込めなかったため、音声トリガー機能は無効になります",
+        exc_info=True,
+    )
+# ---------------------------------------------------------------------------
 
 from core.legacy import Responder
 from core.voice_session import VoiceBusy, feature_label, get_manager, stop_hint
@@ -878,6 +896,9 @@ class TTSSayModal(discord.ui.Modal, title="1回だけ読み上げ"):
 #   テキストのトリガー単語で、登録済みの圧縮音声を再生する。
 #   登録は /support の「音声トリガー登録」から（音声ファイル添付 → 単語入力）。
 #   保存先は環境変数 VOICE_TRIGGER_DIR で変更できる（例: SDカード）。
+#
+#   依存 (encodec / torch / soundfile) が無い環境では VOICE_TRIGGER_AVAILABLE=False
+#   となり、この Cog は安全に無効化される。VoiceHub や TTSCog は影響を受けない。
 # ====================================================================
 VOICE_TRIGGER_DIR = Path(os.getenv("VOICE_TRIGGER_DIR", "data/voice_triggers"))
 VOICE_TRIGGER_MAX_SECONDS = 5.0
@@ -896,6 +917,8 @@ def _get_encodec_model():
     """EnCodec 24kHz モデルをシングルトンで返す（ロードは初回のみ）。"""
     global _ENCODEC_MODEL
     if _ENCODEC_MODEL is None:
+        if not VOICE_TRIGGER_AVAILABLE:
+            raise VoiceTriggerError("EnCodec が利用できません。")
         model = encodec.EncodecModel.encodec_model_24khz()
         model.set_target_bandwidth(VOICE_TRIGGER_BANDWIDTH)
         model.eval()
@@ -918,6 +941,8 @@ def _trim_to_wav(src_path: str, dst_path: str, max_seconds: float = VOICE_TRIGGE
 
 def _encodec_compress(wav_path: str, ecdc_path: str):
     """WAV を EnCodec 6kbps で圧縮して .ecdc として保存する。"""
+    if not VOICE_TRIGGER_AVAILABLE:
+        raise VoiceTriggerError("EnCodec が利用できません。")
     model = _get_encodec_model()
     data, sr = sf.read(wav_path, dtype="float32", always_2d=True)
     if sr != VOICE_TRIGGER_SAMPLE_RATE:
@@ -931,6 +956,8 @@ def _encodec_compress(wav_path: str, ecdc_path: str):
 
 def _encodec_decompress(ecdc_path: str, wav_path: str):
     """.ecdc をデコードして WAV に書き出す。"""
+    if not VOICE_TRIGGER_AVAILABLE:
+        raise VoiceTriggerError("EnCodec が利用できません。")
     model = _get_encodec_model()
     with open(ecdc_path, "rb") as fh:
         frames = torch.load(fh, map_location="cpu")
@@ -955,7 +982,10 @@ class VoiceTriggerCog(commands.Cog):
         self.bot = bot
         self.voice_sessions = get_manager(bot)
         self.triggers: dict[int, dict[str, dict]] = {}  # guild_id -> {word: meta}
-        self._load()
+        if VOICE_TRIGGER_AVAILABLE:
+            self._load()
+        else:
+            logger.warning("音声トリガー機能は無効です（encodec / torch / soundfile が未導入）")
 
     # ------------------------------------------------------------ 永続化
     def _guild_dir(self, guild_id: int) -> Path:
@@ -969,7 +999,12 @@ class VoiceTriggerCog(commands.Cog):
     def _load(self):
         if not VOICE_TRIGGER_DIR.exists():
             return
-        for guild_dir in VOICE_TRIGGER_DIR.iterdir():
+        try:
+            entries = list(VOICE_TRIGGER_DIR.iterdir())
+        except OSError:
+            logger.exception("音声トリガーディレクトリの読み込みに失敗しました")
+            return
+        for guild_dir in entries:
             if not guild_dir.is_dir():
                 continue
             try:
@@ -993,6 +1028,10 @@ class VoiceTriggerCog(commands.Cog):
     async def register(self, guild: discord.Guild, word: str, attachment: discord.Attachment,
                        user: discord.abc.User) -> str:
         """音声を 5 秒にトリミング → EnCodec 6kbps 圧縮 → 登録。"""
+        if not VOICE_TRIGGER_AVAILABLE:
+            raise VoiceTriggerError(
+                "音声トリガー機能が利用できません。encodec / torch / soundfile の導入を確認してください。"
+            )
         word = word.strip()
         if not word:
             raise VoiceTriggerError("トリガー単語を入力してください。")
@@ -1049,6 +1088,8 @@ class VoiceTriggerCog(commands.Cog):
 
     # ------------------------------------------------------------ 再生
     async def _play(self, guild: discord.Guild, meta: dict):
+        if not VOICE_TRIGGER_AVAILABLE:
+            return
         vc = guild.voice_client
         if vc is None or not vc.is_connected():
             return
@@ -1081,6 +1122,8 @@ class VoiceTriggerCog(commands.Cog):
 
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message):
+        if not VOICE_TRIGGER_AVAILABLE:
+            return
         if message.guild is None or message.author.bot:
             return
         triggers = self.triggers.get(message.guild.id)
