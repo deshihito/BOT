@@ -32,8 +32,11 @@ try:
     import soundfile as sf
     import torch
 
+    # CPU 推論はスレッドを増やしすぎると逆に遅くなることがある。上限を絞る。
+    torch.set_num_threads(min(4, os.cpu_count() or 4))
+
     VOICE_TRIGGER_AVAILABLE = True
-except Exception:
+except Exception:  # ImportError だけでなく共有ライブラリ不整合 (OSError) 等も捕捉
     encodec = None
     sf = None
     torch = None
@@ -971,13 +974,6 @@ def _encodec_decompress(ecdc_path: str, wav_path: str):
     sf.write(wav_path, audio, VOICE_TRIGGER_SAMPLE_RATE)
 
 
-def _wav_to_mp3_for_discord(wav_path: str, mp3_path: str):
-    cmd = ["ffmpeg", "-y", "-i", wav_path, "-b:a", "64k", mp3_path]
-    result = subprocess.run(cmd, capture_output=True)
-    if result.returncode != 0:
-        raise VoiceTriggerError("再生用音声の生成に失敗しました。")
-
-
 class VoiceTriggerCog(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
@@ -987,6 +983,16 @@ class VoiceTriggerCog(commands.Cog):
             self._load()
         else:
             logger.warning("音声トリガー機能は無効です（encodec / torch / soundfile が未導入）")
+
+    async def cog_load(self):
+        """起動直後に EnCodec モデルをウォームアップし、初回再生の待ちをなくす。"""
+        if not VOICE_TRIGGER_AVAILABLE:
+            return
+        try:
+            await asyncio.to_thread(_get_encodec_model)
+            logger.info("EnCodec モデルをウォームアップしました")
+        except Exception:
+            logger.exception("EnCodec モデルのウォームアップに失敗")
 
     def _guild_dir(self, guild_id: int) -> Path:
         path = VOICE_TRIGGER_DIR / str(guild_id)
@@ -1094,11 +1100,10 @@ class VoiceTriggerCog(commands.Cog):
         gdir = self._guild_dir(guild.id)
         stamp = int(time.time() * 1000)
         wav = gdir / f"play_{stamp}.wav"
-        mp3 = gdir / f"play_{stamp}.mp3"
         try:
             await asyncio.to_thread(_encodec_decompress, meta["ecdc"], str(wav))
-            await asyncio.to_thread(_wav_to_mp3_for_discord, str(wav), str(mp3))
-            source = discord.FFmpegPCMAudio(str(mp3))
+            # MP3 変換を挟まず WAV を直接再生する（ffmpeg 呼び出しを1回減らす）
+            source = discord.FFmpegPCMAudio(str(wav))
             loop = asyncio.get_running_loop()
             done: asyncio.Future = loop.create_future()
 
@@ -1111,11 +1116,10 @@ class VoiceTriggerCog(commands.Cog):
             except asyncio.TimeoutError:
                 remove_audio_source(vc, "trigger")
         finally:
-            for p in (wav, mp3):
-                try:
-                    p.unlink()
-                except OSError:
-                    pass
+            try:
+                wav.unlink()
+            except OSError:
+                pass
 
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message):
@@ -1160,8 +1164,6 @@ async def _scan_recent_audios(
 
 
 class VoiceTriggerPickAudioSelect(discord.ui.Select):
-    """チャンネル内の音声ファイルから登録するものを選ぶ。"""
-
     def __init__(self, cog: VoiceTriggerCog, audios: list[tuple[discord.Message, discord.Attachment]]):
         self.cog = cog
         options: list[discord.SelectOption] = []
@@ -1221,8 +1223,6 @@ class VoiceTriggerWordModal(discord.ui.Modal, title="トリガー単語を入力
 
 
 class VoiceTriggerRegisterView(discord.ui.LayoutView):
-    """チャンネル内の音声から選んで登録するパネル（Components V2）。"""
-
     def __init__(self, cog: VoiceTriggerCog, audios: list[tuple[discord.Message, discord.Attachment]]):
         super().__init__(timeout=300)
 
