@@ -33,7 +33,7 @@ try:
     import torch
 
     VOICE_TRIGGER_AVAILABLE = True
-except Exception:  # ImportError だけでなく共有ライブラリ不整合 (OSError) 等も捕捉
+except Exception:
     encodec = None
     sf = None
     torch = None
@@ -89,7 +89,7 @@ VOICE_GENRES = {
     "effects": ("音声加工", "ボイスチェンジャー"),
     "community": ("通話ネットワーク", "ランダム通話、グローバルVC"),
     "tts": ("読み上げ", "VOICEVOXによるテキスト読み上げ"),
-    "trigger": ("音声トリガー", "登録済みのトリガー一覧・削除"),
+    "trigger": ("音声トリガー", "登録・一覧・削除"),
 }
 VOICE_ACTIONS_BY_GENRE = {
     "connection": [("参加", "join"), ("退出", "leave"), ("状態", "status")],
@@ -106,10 +106,12 @@ VOICE_ACTIONS_BY_GENRE = {
                    ("グローバルVC: 開始/参加", "global_start"), ("グローバルVC: 終了/退出", "global_stop")],
     "tts": [("読み上げ: 開始（このチャンネルを読む）", "tts_start"), ("読み上げ: 停止", "tts_stop"),
             ("読み上げ: 話者・ピッチ・話速の設定", "tts_config"), ("読み上げ: 1回だけ読む", "tts_say")],
-    "trigger": [("トリガー一覧・削除", "trigger_panel")],
+    "trigger": [
+        ("トリガー登録（このチャンネルの音声から選ぶ）", "trigger_register"),
+        ("トリガー一覧・削除", "trigger_panel"),
+    ],
 }
 
-# 各機能の cog の名前（クラス名）
 COGS = {
     "music": "VoiceCog",
     "record": "RecordingCog",
@@ -168,7 +170,6 @@ class VoiceHub(commands.Cog):
 
     # ------------------------------------------------------------ 状態
     def status_embed(self, guild) -> discord.Embed:
-        """このサーバーの VC を、どの機能が・誰の操作で使っているか。"""
         session = self.voice_sessions.get(guild.id)
         if session is not None:
             channel = guild.get_channel(session.channel_id) if session.channel_id else None
@@ -275,9 +276,38 @@ class VoiceHub(commands.Cog):
             return await Responder(interaction).send(
                 "⚠️ 音声トリガー機能がいま読み込まれていません。", ephemeral=True
             )
+
+        # 権限チェック（support.py の設定と共通）
+        try:
+            from cogs.support import get_voice_trigger_settings
+            from core import guild_settings
+
+            store = guild_settings.get_store()
+            await store.ensure_loaded()
+            settings = get_voice_trigger_settings(store, interaction.guild_id)
+            if settings["permission"] == "admin":
+                perms = getattr(interaction.user, "guild_permissions", None)
+                if not getattr(perms, "administrator", False):
+                    return await Responder(interaction).send(
+                        "このサーバーでは管理者のみ操作できます。", ephemeral=True
+                    )
+        except Exception:
+            logger.exception("音声トリガー権限チェックに失敗しました")
+
         if operation == "panel":
             view = VoiceTriggerManageView(cog, interaction.guild_id)
             return await interaction.response.send_message(view=view, ephemeral=True)
+
+        if operation == "register":
+            if interaction.channel is None:
+                return await Responder(interaction).send(
+                    "チャンネル情報を取得できません。", ephemeral=True
+                )
+            await interaction.response.defer(ephemeral=True, thinking=True)
+            audios = await _scan_recent_audios(self.bot, interaction.channel)
+            view = VoiceTriggerRegisterView(cog, audios)
+            return await interaction.followup.send(view=view, ephemeral=True)
+
         return await Responder(interaction).send("操作を選択してください。", ephemeral=True)
 
     @app_commands.command(name="vc", description="Show the music and voice control panel")
@@ -362,8 +392,6 @@ class VoiceActionSelect(discord.ui.Select):
 
 
 class VoicePanelView(discord.ui.View):
-    """引数を覚えなくてもボイス機能を選べるジャンル別操作パネル。"""
-
     def __init__(self, hub: VoiceHub, genre: str | None = None, shortcut_mode: bool = False,
                  shortcut_item: dict | None = None):
         super().__init__(timeout=900)
@@ -412,13 +440,6 @@ class GlobalRoomModal(discord.ui.Modal, title="グローバルVCに参加"):
 
 # ====================================================================
 # VOICEVOX 読み上げ（tts.quest v3 API）
-#   https://github.com/ts-klassen/ttsQuestV3Voicevox
-#
-# スラッシュコマンドは増やさず、/vc パネルの「読み上げ」ジャンルから操作する。
-#   開始 / 停止 / 話者・ピッチ・話速の設定（モーダル）/ 1回だけ読む（モーダル）
-#
-# 読み上げと音楽・グローバルVCは共通のPCMミキサーで同時に再生する。
-# API には話者以外のパラメーターが無いので、ピッチと話速は FFmpeg 側で加工する。
 # ====================================================================
 logger = logging.getLogger(__name__)
 
@@ -504,8 +525,6 @@ def clean_message_text(message: discord.Message) -> str:
 
 
 class TTSCog(commands.Cog):
-    """VOICEVOX 読み上げ。スラッシュコマンドは持たず、VoiceHub の /vc パネルから呼ばれる。"""
-
     def __init__(self, bot: commands.Bot):
         self.bot = bot
         self.voice_sessions = get_manager(bot)
@@ -888,12 +907,6 @@ class TTSSayModal(discord.ui.Modal, title="1回だけ読み上げ"):
 
 # ====================================================================
 # 音声トリガー（EnCodec 6kbps）
-#   テキストのトリガー単語で、登録済みの圧縮音声を再生する。
-#   登録は /support の「音声トリガー登録」から（音声ファイル添付 → 単語入力）。
-#   保存先は環境変数 VOICE_TRIGGER_DIR で変更できる（例: SDカード）。
-#
-#   依存 (encodec / torch / soundfile) が無い環境では VOICE_TRIGGER_AVAILABLE=False
-#   となり、この Cog は安全に無効化される。VoiceHub や TTSCog は影響を受けない。
 # ====================================================================
 VOICE_TRIGGER_DIR = Path(os.getenv("VOICE_TRIGGER_DIR", "data/voice_triggers"))
 VOICE_TRIGGER_MAX_SECONDS = 5.0
@@ -909,7 +922,6 @@ class VoiceTriggerError(Exception):
 
 
 def _get_encodec_model():
-    """EnCodec 24kHz モデルをシングルトンで返す（ロードは初回のみ）。"""
     global _ENCODEC_MODEL
     if _ENCODEC_MODEL is None:
         if not VOICE_TRIGGER_AVAILABLE:
@@ -922,7 +934,6 @@ def _get_encodec_model():
 
 
 def _trim_to_wav(src_path: str, dst_path: str, max_seconds: float = VOICE_TRIGGER_MAX_SECONDS):
-    """FFmpeg で 5 秒にトリミングし、24kHz モノラル WAV に変換する。"""
     cmd = [
         "ffmpeg", "-y", "-i", src_path,
         "-t", str(max_seconds),
@@ -935,7 +946,6 @@ def _trim_to_wav(src_path: str, dst_path: str, max_seconds: float = VOICE_TRIGGE
 
 
 def _encodec_compress(wav_path: str, ecdc_path: str):
-    """WAV を EnCodec 6kbps で圧縮して .ecdc として保存する。"""
     if not VOICE_TRIGGER_AVAILABLE:
         raise VoiceTriggerError("EnCodec が利用できません。")
     model = _get_encodec_model()
@@ -950,7 +960,6 @@ def _encodec_compress(wav_path: str, ecdc_path: str):
 
 
 def _encodec_decompress(ecdc_path: str, wav_path: str):
-    """.ecdc をデコードして WAV に書き出す。"""
     if not VOICE_TRIGGER_AVAILABLE:
         raise VoiceTriggerError("EnCodec が利用できません。")
     model = _get_encodec_model()
@@ -963,7 +972,6 @@ def _encodec_decompress(ecdc_path: str, wav_path: str):
 
 
 def _wav_to_mp3_for_discord(wav_path: str, mp3_path: str):
-    """discord.py の FFmpegPCMAudio で扱いやすい mp3 に変換する。"""
     cmd = ["ffmpeg", "-y", "-i", wav_path, "-b:a", "64k", mp3_path]
     result = subprocess.run(cmd, capture_output=True)
     if result.returncode != 0:
@@ -971,8 +979,6 @@ def _wav_to_mp3_for_discord(wav_path: str, mp3_path: str):
 
 
 class VoiceTriggerCog(commands.Cog):
-    """テキストのトリガー単語で登録済み音声を再生する。"""
-
     def __init__(self, bot: commands.Bot):
         self.bot = bot
         self.voice_sessions = get_manager(bot)
@@ -1127,6 +1133,145 @@ class VoiceTriggerCog(commands.Cog):
 
 
 # ====================================================================
+# /vc パネル用: 音声トリガーの登録（チャンネル内の最近の音声から選択）
+# ====================================================================
+_AUDIO_EXTS = (".mp3", ".wav", ".m4a", ".ogg", ".flac", ".aac", ".opus", ".webm")
+
+
+async def _scan_recent_audios(
+    bot: commands.Bot, channel: discord.abc.Messageable, limit: int = 50, max_results: int = 25
+) -> list[tuple[discord.Message, discord.Attachment]]:
+    """チャンネル内の直近メッセージから音声ファイルを抽出する。"""
+    results: list[tuple[discord.Message, discord.Attachment]] = []
+    try:
+        async for msg in channel.history(limit=limit):
+            if msg.author.id == bot.user.id:
+                continue
+            for att in msg.attachments:
+                ct = (att.content_type or "").lower()
+                if ct.startswith("audio/") or att.filename.lower().endswith(_AUDIO_EXTS):
+                    results.append((msg, att))
+                    break
+            if len(results) >= max_results:
+                break
+    except Exception:
+        logger.exception("音声メッセージのスキャンに失敗")
+    return results
+
+
+class VoiceTriggerPickAudioSelect(discord.ui.Select):
+    """チャンネル内の音声ファイルから登録するものを選ぶ。"""
+
+    def __init__(self, cog: VoiceTriggerCog, audios: list[tuple[discord.Message, discord.Attachment]]):
+        self.cog = cog
+        options: list[discord.SelectOption] = []
+        for msg, att in audios[:25]:
+            size_kb = max(1, att.size // 1024)
+            try:
+                when = msg.created_at.astimezone().strftime("%m/%d %H:%M")
+            except Exception:
+                when = ""
+            options.append(
+                discord.SelectOption(
+                    label=att.filename[:100],
+                    description=f"{msg.author.display_name} • {size_kb}KB • {when}",
+                    value=f"{msg.channel.id}:{msg.id}:{att.id}",
+                )
+            )
+        super().__init__(placeholder="登録する音声を選択", options=options)
+
+    async def callback(self, interaction: discord.Interaction):
+        try:
+            ch_id, msg_id, att_id = self.values[0].split(":")
+            channel = self.cog.bot.get_channel(int(ch_id))
+            if channel is None:
+                channel = await self.cog.bot.fetch_channel(int(ch_id))
+            msg = await channel.fetch_message(int(msg_id))
+            attachment = next((a for a in msg.attachments if a.id == int(att_id)), None)
+            if attachment is None:
+                return await interaction.response.send_message(
+                    "音声ファイルが見つかりません。", ephemeral=True
+                )
+        except Exception as exc:
+            logger.exception("音声ファイルの取得に失敗")
+            return await interaction.response.send_message(
+                f"⚠️ 音声ファイルを取得できませんでした: {exc}", ephemeral=True
+            )
+
+        await interaction.response.send_modal(VoiceTriggerWordModal(self.cog, attachment))
+
+
+class VoiceTriggerWordModal(discord.ui.Modal, title="トリガー単語を入力"):
+    word = discord.ui.TextInput(label="トリガー単語", max_length=50)
+
+    def __init__(self, cog: VoiceTriggerCog, attachment: discord.Attachment):
+        super().__init__()
+        self.cog = cog
+        self.attachment = attachment
+
+    async def on_submit(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        try:
+            msg = await self.cog.register(
+                interaction.guild, self.word.value, self.attachment, interaction.user
+            )
+        except Exception as exc:
+            return await interaction.followup.send(f"⚠️ {exc}", ephemeral=True)
+        await interaction.followup.send(msg, ephemeral=True)
+
+
+class VoiceTriggerRegisterView(discord.ui.LayoutView):
+    """チャンネル内の音声から選んで登録するパネル（Components V2）。"""
+
+    def __init__(self, cog: VoiceTriggerCog, audios: list[tuple[discord.Message, discord.Attachment]]):
+        super().__init__(timeout=300)
+
+        if not VOICE_TRIGGER_AVAILABLE:
+            self.add_item(
+                discord.ui.Container(
+                    discord.ui.TextDisplay(
+                        "## ⚠️ 音声トリガー機能は利用できません\n"
+                        "`encodec` / `torch` / `soundfile` の読み込みに失敗しています。"
+                    ),
+                    accent_colour=0xE74C3C,
+                )
+            )
+            return
+
+        head = (
+            "## 🎤 音声トリガー登録\n"
+            "このチャンネルの直近メッセージから音声ファイルを選んで登録できます。\n"
+            "5秒にトリミングされ、EnCodec 6kbps で圧縮されます。"
+        )
+        children: list[discord.ui.Item] = [discord.ui.TextDisplay(head)]
+
+        if audios:
+            children.append(discord.ui.Separator())
+            children.append(
+                discord.ui.TextDisplay(
+                    f"### 直近の音声ファイル ({len(audios)}件)\n"
+                    "-# ドロップダウンから選択してください。"
+                )
+            )
+            children.append(discord.ui.ActionRow(VoiceTriggerPickAudioSelect(cog, audios)))
+        else:
+            children.append(discord.ui.Separator())
+            children.append(
+                discord.ui.TextDisplay(
+                    "⚠️ このチャンネルに音声ファイルが見つかりませんでした。\n\n"
+                    "**登録方法**\n"
+                    "1. このチャンネルに音声ファイル（5秒以内）を添付して送信してください\n"
+                    "2. Bot が「この音声をトリガー登録」ボタン付きで返信します\n"
+                    "3. ボタンを押してトリガー単語を入力してください\n\n"
+                    "または、音声を送信したあと、もう一度 `/vc` →「音声トリガー」→「トリガー登録」を開くと、"
+                    "その音声が候補に表示されます。"
+                )
+            )
+
+        self.add_item(discord.ui.Container(*children, accent_colour=0xF1C40F))
+
+
+# ====================================================================
 # /vc パネル用: 音声トリガーの一覧・削除（Components V2）
 # ====================================================================
 class VoiceTriggerDeleteSelect(discord.ui.Select):
@@ -1166,9 +1311,7 @@ class VoiceTriggerDeleteSelect(discord.ui.Select):
 
 
 class VoiceTriggerManageView(discord.ui.LayoutView):
-    """音声トリガーの一覧・削除パネル（Components V2）。"""
-
-    def __init__(self, cog, guild_id: int):
+    def __init__(self, cog: VoiceTriggerCog, guild_id: int):
         super().__init__(timeout=300)
         self.cog = cog
         self.guild_id = guild_id
@@ -1196,10 +1339,10 @@ class VoiceTriggerManageView(discord.ui.LayoutView):
                     discord.ui.TextDisplay(
                         "## 🎤 音声トリガー\n"
                         "登録されているトリガーはありません。\n\n"
-                        "**登録方法**: チャンネルに音声ファイルを添付して送信すると、"
-                        "「この音声をトリガー登録」ボタンが表示されます。\n"
-                        "5秒にトリミングされ、EnCodec 6kbps で圧縮されて保存されます。\n\n"
-                        "**詳細設定**: `/support` →「サーバー管理」→「音声トリガー登録」から権限設定・削除ができます。"
+                        "**登録方法**: `/vc` →「音声トリガー」→「トリガー登録（このチャンネルの音声から選ぶ）」"
+                        "で、チャンネル内の音声から選んで登録できます。\n"
+                        "または、音声ファイルをチャンネルに添付すると Bot が「この音声をトリガー登録」"
+                        "ボタン付きで返信します。"
                     ),
                     accent_colour=0xF1C40F,
                 )
