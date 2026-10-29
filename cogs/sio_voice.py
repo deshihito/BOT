@@ -89,7 +89,7 @@ VOICE_GENRES = {
     "effects": ("音声加工", "ボイスチェンジャー"),
     "community": ("通話ネットワーク", "ランダム通話、グローバルVC"),
     "tts": ("読み上げ", "VOICEVOXによるテキスト読み上げ"),
-    "trigger": ("音声トリガー", "登録済みのトリガー一覧・削除"),  # ← 追加
+    "trigger": ("音声トリガー", "登録済みのトリガー一覧・削除"),
 }
 VOICE_ACTIONS_BY_GENRE = {
     "connection": [("参加", "join"), ("退出", "leave"), ("状態", "status")],
@@ -106,7 +106,7 @@ VOICE_ACTIONS_BY_GENRE = {
                    ("グローバルVC: 開始/参加", "global_start"), ("グローバルVC: 終了/退出", "global_stop")],
     "tts": [("読み上げ: 開始（このチャンネルを読む）", "tts_start"), ("読み上げ: 停止", "tts_stop"),
             ("読み上げ: 話者・ピッチ・話速の設定", "tts_config"), ("読み上げ: 1回だけ読む", "tts_say")],
-    "trigger": [("トリガー一覧・削除", "trigger_panel")],  # ← 追加
+    "trigger": [("トリガー一覧・削除", "trigger_panel")],
 }
 
 # 各機能の cog の名前（クラス名）
@@ -311,7 +311,7 @@ class VoiceHub(commands.Cog):
         if key == "changer":
             return await self.voice_effects(
                 interaction, app_commands.Choice(name=operation, value=operation), pitch, buffer_ms, max_ms)
-        if key == "trigger":  # ← 追加
+        if key == "trigger":
             return await self.voice_trigger(interaction, operation)
         return await self.voice_community(
             interaction, app_commands.Choice(name=key, value=key),
@@ -423,15 +423,14 @@ class GlobalRoomModal(discord.ui.Modal, title="グローバルVCに参加"):
 logger = logging.getLogger(__name__)
 
 TTS_API_BASE = "https://api.tts.quest/v3/voicevox"
-# 任意。設定すると高速合成になる（https://su-shiki.com/api/ で VOICEVOX 用に取得）。
 TTS_API_KEY = os.getenv("TTSQUEST_API_KEY")
-TTS_DEFAULT_SPEAKER = 3          # ずんだもん（ノーマル）
-TTS_MAX_CHARS = 300              # 1メッセージで読む最大文字数（超えた分は切り捨て）
-TTS_CHUNK_CHARS = 100            # API へ 1 回で送る最大文字数（長文はここで分割）
-TTS_QUEUE_MAX = 10               # 読み上げ待ちの上限（荒らし対策）
-TTS_PITCH_RANGE = (-12.0, 12.0)  # 半音
+TTS_DEFAULT_SPEAKER = 3
+TTS_MAX_CHARS = 300
+TTS_CHUNK_CHARS = 100
+TTS_QUEUE_MAX = 10
+TTS_PITCH_RANGE = (-12.0, 12.0)
 TTS_SPEED_RANGE = (0.5, 2.0)
-TTS_IGNORE_PREFIXES = ("/", ";", "；")  # これで始まる発言は読まない
+TTS_IGNORE_PREFIXES = ("/", ";", "；")
 TTS_SETTINGS_PATH = Path(os.getenv("TTS_SETTINGS_PATH", "data/tts_settings.json"))
 
 
@@ -442,12 +441,11 @@ class TTSError(Exception):
 @dataclass
 class TTSSettings:
     speaker: int = TTS_DEFAULT_SPEAKER
-    pitch: float = 0.0   # 半音（-12〜+12）
-    speed: float = 1.0   # 倍速（0.5〜2.0）
+    pitch: float = 0.0
+    speed: float = 1.0
 
 
 def _tempo_filters(tempo: float) -> list[str]:
-    """atempo は 0.5〜2.0 の範囲なので、範囲外は連結して表現する。"""
     filters: list[str] = []
     while tempo > 2.0:
         filters.append("atempo=2.0")
@@ -460,10 +458,6 @@ def _tempo_filters(tempo: float) -> list[str]:
 
 
 def build_tts_filters(pitch: float, speed: float) -> str:
-    """ピッチ（半音）と話速から FFmpeg の -af 文字列を作る。何も要らなければ空文字。
-
-    asetrate でピッチ（と速度）を変え、atempo で速度だけを元に戻す。
-    """
     factor = 2 ** (pitch / 12) if abs(pitch) >= 0.01 else 1.0
     filters: list[str] = []
     if factor != 1.0:
@@ -475,7 +469,6 @@ def build_tts_filters(pitch: float, speed: float) -> str:
 
 
 def split_tts_text(text: str, limit: int = TTS_CHUNK_CHARS) -> list[str]:
-    """句点・改行を優先して limit 文字以内に分ける。"""
     chunks: list[str] = []
     current = ""
     for part in re.split(r"(?<=[。！？!?\n])", text[:TTS_MAX_CHARS]):
@@ -499,7 +492,6 @@ def split_tts_text(text: str, limit: int = TTS_CHUNK_CHARS) -> list[str]:
 
 
 def clean_message_text(message: discord.Message) -> str:
-    """発言を読み上げ向けに整える（メンション→名前、URL・絵文字・コードは置き換え）。"""
     text = message.clean_content
     text = re.sub(r"```.*?```", "コード省略", text, flags=re.DOTALL)
     text = re.sub(r"\|\|.*?\|\|", "ネタバレ", text, flags=re.DOTALL)
@@ -518,7 +510,7 @@ class TTSCog(commands.Cog):
         self.bot = bot
         self.voice_sessions = get_manager(bot)
         self.settings: dict[int, TTSSettings] = {}
-        self.read_channels: dict[int, int] = {}            # guild_id -> 読み上げ対象のテキストチャンネル
+        self.read_channels: dict[int, int] = {}
         self.queues: dict[int, asyncio.Queue] = {}
         self.workers: dict[int, asyncio.Task] = {}
         self._speakers: list | None = None
@@ -531,7 +523,6 @@ class TTSCog(commands.Cog):
         if self._session is not None and not self._session.closed:
             await self._session.close()
 
-    # ------------------------------------------------------------ 設定
     def _load_settings(self):
         try:
             raw = json.loads(TTS_SETTINGS_PATH.read_text(encoding="utf-8"))
@@ -569,7 +560,6 @@ class TTSCog(commands.Cog):
 
     async def _apply_config(self, user_id: int, speaker: int | None, pitch: float | None,
                             speed: float | None) -> str:
-        """設定を検証して保存し、確認メッセージを返す。不正値は ValueError。"""
         cfg = TTSSettings(**asdict(self.get_settings(user_id)))
         if speaker is not None:
             speakers = await self._load_speakers()
@@ -591,7 +581,6 @@ class TTSCog(commands.Cog):
         return (f"🗣️ 読み上げ設定\n話者: **{await self._speaker_name(cfg.speaker)}**（ID {cfg.speaker}）\n"
                 f"ピッチ: **{cfg.pitch:+g}** 半音 / 話速: **{cfg.speed:g}** 倍")
 
-    # ------------------------------------------------------------ API
     async def _get_session(self) -> aiohttp.ClientSession:
         if self._session is None or self._session.closed:
             self._session = aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=30))
@@ -612,7 +601,6 @@ class TTSCog(commands.Cog):
         return self._speakers or []
 
     async def _synthesize(self, text: str, speaker: int) -> str:
-        """合成して mp3 を一時ファイルに保存し、そのパスを返す。"""
         session = await self._get_session()
         params = {"speaker": speaker, "text": text}
         if TTS_API_KEY:
@@ -624,14 +612,14 @@ class TTSCog(commands.Cog):
                 data = await resp.json(content_type=None)
             if data.get("success"):
                 break
-            if data.get("retryAfter"):  # 429: 指定秒数待って再送
+            if data.get("retryAfter"):
                 await asyncio.sleep(min(float(data["retryAfter"]), 10.0))
                 continue
             raise TTSError(str(data.get("errorMessage") or data))
         else:
             raise TTSError("tts.quest がビジー状態です。少し待ってからもう一度お試しください。")
 
-        for _ in range(60):  # 合成完了待ち（最大約30秒）
+        for _ in range(60):
             async with session.get(data["audioStatusUrl"]) as resp:
                 status = await resp.json(content_type=None)
             if status.get("isAudioError"):
@@ -675,7 +663,6 @@ class TTSCog(commands.Cog):
         except OSError:
             pass
 
-    # ------------------------------------------------------------ 再生
     async def _play_file(self, vc: discord.VoiceClient, path: str, cfg: TTSSettings):
         options = "-vn -ar 48000 -ac 2"
         filters = build_tts_filters(cfg.pitch, cfg.speed)
@@ -710,7 +697,6 @@ class TTSCog(commands.Cog):
         return True
 
     async def _worker(self, guild: discord.Guild):
-        """キューを順に読み上げ、音楽/GVCとは共有ミキサー上で重ねて再生する。"""
         queue = self.queues[guild.id]
         try:
             while not queue.empty():
@@ -739,7 +725,6 @@ class TTSCog(commands.Cog):
             if self.read_channels.get(guild.id) is None:
                 await self.voice_sessions.release(guild.id, "tts", reason="stop")
 
-    # ------------------------------------------------------------ 読み上げ対象の発言
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message):
         guild = message.guild
@@ -751,7 +736,6 @@ class TTSCog(commands.Cog):
         if vc is None or not vc.is_connected():
             self.read_channels.pop(guild.id, None)
             return
-        # VC にいない人の発言は読まない（Bot と同じ VC にいる人だけ）
         voice = getattr(message.author, "voice", None)
         if voice is None or voice.channel != vc.channel:
             return
@@ -761,9 +745,7 @@ class TTSCog(commands.Cog):
         if text:
             await self.enqueue(guild, text, message.author.id)
 
-    # ------------------------------------------------------------ 実装（/voice パネルからも呼ぶ）
     async def _ensure_connection(self, r: Responder) -> str | None:
-        """TTSの独立したリースを取得。既存の共有機能には同じVCで合流する。"""
         guild = r.guild
         if guild is None:
             return "サーバーの中で実行してください。"
@@ -836,7 +818,6 @@ class TTSCog(commands.Cog):
             await r.send("読み上げは開始されていません。", ephemeral=True)
 
     async def _say_impl(self, r: Responder, text: str):
-        """入力した文章を、自分の設定で1回だけ読み上げる。"""
         text = text.strip()
         if not text:
             return await r.send("⚠️ 読み上げる文章を入力してください。", ephemeral=True)
@@ -849,7 +830,6 @@ class TTSCog(commands.Cog):
         await r.send(f"🗣️ 読み上げます（{await self._speaker_name(cfg.speaker)}）", ephemeral=True)
 
     async def _resolve_speaker(self, value: str) -> int:
-        """話者ID（数字）または名前の一部から話者IDを決める。決められなければ ValueError。"""
         value = value.strip()
         if value.isdigit():
             return int(value)
@@ -962,7 +942,7 @@ def _encodec_compress(wav_path: str, ecdc_path: str):
     data, sr = sf.read(wav_path, dtype="float32", always_2d=True)
     if sr != VOICE_TRIGGER_SAMPLE_RATE:
         raise VoiceTriggerError("サンプルレートが不正です。")
-    wav = torch.from_numpy(data.T).unsqueeze(0)  # (1, channels, time)
+    wav = torch.from_numpy(data.T).unsqueeze(0)
     with torch.no_grad():
         frames = model.encode(wav)
     with open(ecdc_path, "wb") as fh:
@@ -996,13 +976,12 @@ class VoiceTriggerCog(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
         self.voice_sessions = get_manager(bot)
-        self.triggers: dict[int, dict[str, dict]] = {}  # guild_id -> {word: meta}
+        self.triggers: dict[int, dict[str, dict]] = {}
         if VOICE_TRIGGER_AVAILABLE:
             self._load()
         else:
             logger.warning("音声トリガー機能は無効です（encodec / torch / soundfile が未導入）")
 
-    # ------------------------------------------------------------ 永続化
     def _guild_dir(self, guild_id: int) -> Path:
         path = VOICE_TRIGGER_DIR / str(guild_id)
         path.mkdir(parents=True, exist_ok=True)
@@ -1039,10 +1018,8 @@ class VoiceTriggerCog(commands.Cog):
             encoding="utf-8",
         )
 
-    # ------------------------------------------------------------ 登録 API
     async def register(self, guild: discord.Guild, word: str, attachment: discord.Attachment,
                        user: discord.abc.User) -> str:
-        """音声を 5 秒にトリミング → EnCodec 6kbps 圧縮 → 登録。"""
         if not VOICE_TRIGGER_AVAILABLE:
             raise VoiceTriggerError(
                 "音声トリガー機能が利用できません。encodec / torch / soundfile の導入を確認してください。"
@@ -1101,7 +1078,6 @@ class VoiceTriggerCog(commands.Cog):
     def list_triggers(self, guild_id: int) -> dict[str, dict]:
         return dict(self.triggers.get(guild_id, {}))
 
-    # ------------------------------------------------------------ 再生
     async def _play(self, guild: discord.Guild, meta: dict):
         if not VOICE_TRIGGER_AVAILABLE:
             return
@@ -1144,7 +1120,6 @@ class VoiceTriggerCog(commands.Cog):
         triggers = self.triggers.get(message.guild.id)
         if not triggers:
             return
-        # 長い単語を優先してマッチ
         for word in sorted(triggers, key=len, reverse=True):
             if word in message.content:
                 await self._play(message.guild, triggers[word])
@@ -1163,7 +1138,6 @@ class VoiceTriggerDeleteSelect(discord.ui.Select):
         )
 
     async def callback(self, interaction: discord.Interaction):
-        # 権限チェック（support.py の設定と共通）
         try:
             from cogs.support import get_voice_trigger_settings
             from core import guild_settings
