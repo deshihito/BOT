@@ -443,7 +443,7 @@ class VoiceChangerCog(commands.Cog):
             f"🎙️ **ボイスチェンジャー動作中 (20ms低遅延・無音待機再同期モード)**\n"
             f"<:music:1561710964238450809> 設定ピッチ: `{sink.semitones:+.1f}` 半音\n\n"
             f"📊 **遅延ステータス (数値)**\n"
-            f"├ ⚡ 変換処理時間: `{proc_ms:.2f} ms` (平均: `{avg_ms:.2f} ms`)\n"
+            f"├ <:thu:1563559478220038175> 変換処理時間: `{proc_ms:.2f} ms` (平均: `{avg_ms:.2f} ms`)\n"
             f"├ 📦 バッファ滞留量: `{buf_ms:.1f} ms`\n"
             f"├ 🎯 目標プリバッファ: `{src.target_buffer_ms:.0f} ms` / 上限: `{src.max_buffer_ms:.0f} ms`\n"
             f"├ ⚠️ アンダーラン(待機発生)回数: `{src.underrun_count}` 回\n"
