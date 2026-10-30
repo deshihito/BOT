@@ -949,7 +949,7 @@ class VoiceControlView(discord.ui.View):
                 discord.SelectOption(label="32.0x", value="32.0"),
                 discord.SelectOption(label="64.0x", value="64.0"),
             ]
-            super().__init__(placeholder=f"<:thu:1563559478220038175> 速度変更 (現在: {state['speed']}x)", min_values=1, max_values=1, options=options, row=0)
+            super().__init__(placeholder=f"⚡ 速度変更 (現在: {state['speed']}x)", min_values=1, max_values=1, options=options, row=0)
 
         async def callback(self, interaction: discord.Interaction):
             state = self.cog.get_state(self.guild_id)
@@ -972,7 +972,7 @@ class VoiceControlView(discord.ui.View):
                 discord.SelectOption(label="150%", value="1.5"),
                 discord.SelectOption(label="200% (最大)", value="2.0"),
             ]
-            super().__init__(placeholder=f"<:vol:1563559476265488414> 音量変更 (現在: {int(state['volume']*100)}%)", min_values=1, max_values=1, options=options, row=1)
+            super().__init__(placeholder=f"🔊 音量変更 (現在: {int(state['volume']*100)}%)", min_values=1, max_values=1, options=options, row=1)
 
         async def callback(self, interaction: discord.Interaction):
             state = self.cog.get_state(self.guild_id)
@@ -1013,7 +1013,7 @@ class VoiceControlView(discord.ui.View):
         modal = SearchModal(self.cog, self.guild_id)
         await interaction.response.send_modal(modal)
 
-    @discord.ui.button(label="<:gear:1564624326509203557>", style=discord.ButtonStyle.secondary, row=3)
+    @discord.ui.button(label="", emoji="<:gear:1564624326509203557>", style=discord.ButtonStyle.secondary, row=3)
     async def custom_eq_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         modal = CustomEQModal(self.cog, self.guild_id)
         await interaction.response.send_modal(modal)
@@ -1043,7 +1043,7 @@ class VoiceControlView(discord.ui.View):
         else:
             await interaction.response.send_message(embed=we("<:failed:1490986584676368535> 再開できる一時停止中のトラックがありません。"), ephemeral=True)
 
-    @discord.ui.button(label="<:skip_right:1564624324508262500>", style=discord.ButtonStyle.secondary, row=4)
+    @discord.ui.button(label="", emoji="<:skip_right:1564624324508262500>", style=discord.ButtonStyle.secondary, row=4)
     async def skip_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         vc = interaction.guild.voice_client
         state = self.cog.get_state(self.guild_id)
@@ -1056,7 +1056,7 @@ class VoiceControlView(discord.ui.View):
         else:
             await interaction.response.send_message(embed=we("<:failed:1490986584676368535> 現在再生中の楽曲がありません。"), ephemeral=True)
 
-    @discord.ui.button(label="<:shuffle:1563559485170122802>", style=discord.ButtonStyle.secondary, row=3)
+    @discord.ui.button(label="", emoji="<:shuffle:1563559485170122802>", style=discord.ButtonStyle.secondary, row=3)
     async def shuffle_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         state = self.cog.get_state(self.guild_id)
         state['shuffle_enabled'] = not state.get('shuffle_enabled', False)
@@ -1064,7 +1064,7 @@ class VoiceControlView(discord.ui.View):
         await interaction.response.send_message(embed=we(f"<:shuffle:1563559485170122802> シャッフルを `{label}` に設定しました。"), ephemeral=True)
         await self.cog.update_panel(self.guild_id)
 
-    @discord.ui.button(label="<:restart:1563559489121030184>", style=discord.ButtonStyle.secondary, row=3)
+    @discord.ui.button(label="", emoji="<:restart:1563559489121030184>", style=discord.ButtonStyle.secondary, row=3)
     async def loop_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         state = self.cog.get_state(self.guild_id)
         next_mode = {'off': 'track', 'track': 'queue', 'queue': 'off'}[state.get('loop_mode', 'off')]
@@ -1090,7 +1090,7 @@ class VoiceControlView(discord.ui.View):
             ephemeral=True,
         )
 
-    @discord.ui.button(label="<:reset:1563559487351160972>", style=discord.ButtonStyle.danger, row=4)
+    @discord.ui.button(label="", emoji="<:reset:1563559487351160972>", style=discord.ButtonStyle.danger, row=4)
     async def stop_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         vc = interaction.guild.voice_client
         state = self.cog.get_state(self.guild_id)
