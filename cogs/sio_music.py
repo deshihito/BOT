@@ -734,7 +734,7 @@ class SpatialControlView(discord.ui.View):
         speaker_names = {
             'studio': '🎙️ スタジオモニター (高解像度・フラット)',
             'theater': '🎬 シアター (重低音・サラウンド)',
-            'pa': '🔊 PAスピーカー (高音圧・指向性強)',
+            'pa': '<:vol:1563559476265488414> PAスピーカー (高音圧・指向性強)',
             'small': '📻 小型スピーカー (コンパクト)'
         }
 
@@ -782,7 +782,7 @@ class SpatialControlView(discord.ui.View):
 
     # 4. 音量引き上げ幅 (AGC) 選択メニュー
     @discord.ui.select(
-        placeholder="🔊 自動音量引き上げ幅 (AGC) を選択...",
+        placeholder="<:vol:1563559476265488414> 自動音量引き上げ幅 (AGC) を選択...",
         options=[
             discord.SelectOption(label="引き上げなし (1.0x / 0dB)", value="1.0"),
             discord.SelectOption(label="控えめ (2.0x / +6dB)", value="2.0"),
@@ -815,7 +815,7 @@ class SpatialControlView(discord.ui.View):
 # UI Panel Component
 # =====================
 # ==========================================
-# ⚡ 動的にコンポーネントが組み替わる統合パネルView
+# <:thu:1563559478220038175> 動的にコンポーネントが組み替わる統合パネルView
 # ==========================================
 # =====================
 # Search & Custom EQ Modals
@@ -899,7 +899,7 @@ class CustomEQModal(discord.ui.Modal, title="カスタムEQ (FFmpegフィルタ�
         if not user_filter:
             state['eq'] = "flat"
             state['custom_eq_filter'] = None
-            await interaction.response.send_message(embed=we("⚙️ カスタムEQを解除しました（Flatに戻します）。"), ephemeral=True)
+            await interaction.response.send_message(embed=we("<:gear:1564624326509203557> カスタムEQを解除しました（Flatに戻します）。"), ephemeral=True)
         else:
             if not is_safe_custom_audio_filter(user_filter):
                 await interaction.response.send_message(
@@ -910,7 +910,7 @@ class CustomEQModal(discord.ui.Modal, title="カスタムEQ (FFmpegフィルタ�
                 return
             state['eq'] = "custom"
             state['custom_eq_filter'] = user_filter
-            await interaction.response.send_message(embed=we(f"⚙️ カスタムEQを設定しました:\n`{user_filter}`\n即時反映します。"), ephemeral=True)
+            await interaction.response.send_message(embed=we(f"<:gear:1564624326509203557> カスタムEQを設定しました:\n`{user_filter}`\n即時反映します。"), ephemeral=True)
 
         ctx = state['current_ctx'] or interaction
         await self.cog.apply_immediate_setting(ctx)
@@ -949,13 +949,13 @@ class VoiceControlView(discord.ui.View):
                 discord.SelectOption(label="32.0x", value="32.0"),
                 discord.SelectOption(label="64.0x", value="64.0"),
             ]
-            super().__init__(placeholder=f"⚡ 速度変更 (現在: {state['speed']}x)", min_values=1, max_values=1, options=options, row=0)
+            super().__init__(placeholder=f"<:thu:1563559478220038175> 速度変更 (現在: {state['speed']}x)", min_values=1, max_values=1, options=options, row=0)
 
         async def callback(self, interaction: discord.Interaction):
             state = self.cog.get_state(self.guild_id)
             previous_speed = state.get('speed', 1.0)
             state['speed'] = float(self.values[0])
-            await interaction.response.send_message(embed=we(f"⚡ 再生速度を `{state['speed']}` 倍に設定しました（現在位置から即時反映）。"), ephemeral=True)
+            await interaction.response.send_message(embed=we(f"<:thu:1563559478220038175> 再生速度を `{state['speed']}` 倍に設定しました（現在位置から即時反映）。"), ephemeral=True)
             # ★ 古い current_ctx ではなく、いま操作した interaction を渡す
             await self.cog.apply_immediate_setting(interaction, elapsed_speed=previous_speed)
 
@@ -972,12 +972,12 @@ class VoiceControlView(discord.ui.View):
                 discord.SelectOption(label="150%", value="1.5"),
                 discord.SelectOption(label="200% (最大)", value="2.0"),
             ]
-            super().__init__(placeholder=f"🔊 音量変更 (現在: {int(state['volume']*100)}%)", min_values=1, max_values=1, options=options, row=1)
+            super().__init__(placeholder=f"<:vol:1563559476265488414> 音量変更 (現在: {int(state['volume']*100)}%)", min_values=1, max_values=1, options=options, row=1)
 
         async def callback(self, interaction: discord.Interaction):
             state = self.cog.get_state(self.guild_id)
             state['volume'] = float(self.values[0])
-            await interaction.response.send_message(embed=we(f"🔊 音量を `{int(state['volume']*100)}%` に設定しました（即時反映）。"), ephemeral=True)
+            await interaction.response.send_message(embed=we(f"<:vol:1563559476265488414> 音量を `{int(state['volume']*100)}%` に設定しました（即時反映）。"), ephemeral=True)
             # ★ 古い current_ctx ではなく、いま操作した interaction を渡す
             await self.cog.apply_immediate_setting(interaction)
 
@@ -1013,7 +1013,7 @@ class VoiceControlView(discord.ui.View):
         modal = SearchModal(self.cog, self.guild_id)
         await interaction.response.send_modal(modal)
 
-    @discord.ui.button(label="⚙️", style=discord.ButtonStyle.secondary, row=3)
+    @discord.ui.button(label="<:gear:1564624326509203557>", style=discord.ButtonStyle.secondary, row=3)
     async def custom_eq_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         modal = CustomEQModal(self.cog, self.guild_id)
         await interaction.response.send_modal(modal)
@@ -1043,7 +1043,7 @@ class VoiceControlView(discord.ui.View):
         else:
             await interaction.response.send_message(embed=we("<:failed:1490986584676368535> 再開できる一時停止中のトラックがありません。"), ephemeral=True)
 
-    @discord.ui.button(label="⏭️", style=discord.ButtonStyle.secondary, row=4)
+    @discord.ui.button(label="<:skip_right:1564624324508262500>", style=discord.ButtonStyle.secondary, row=4)
     async def skip_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         vc = interaction.guild.voice_client
         state = self.cog.get_state(self.guild_id)
@@ -1052,25 +1052,25 @@ class VoiceControlView(discord.ui.View):
             state['elapsed_offset'] = 0
             state['is_paused'] = False
             remove_audio_source(vc, "music", notify=True)
-            await interaction.response.send_message(embed=we("⏭️ トラックをスキップしました。"), ephemeral=True)
+            await interaction.response.send_message(embed=we("<:skip_right:1564624324508262500> トラックをスキップしました。"), ephemeral=True)
         else:
             await interaction.response.send_message(embed=we("<:failed:1490986584676368535> 現在再生中の楽曲がありません。"), ephemeral=True)
 
-    @discord.ui.button(label="🔀", style=discord.ButtonStyle.secondary, row=3)
+    @discord.ui.button(label="<:shuffle:1563559485170122802>", style=discord.ButtonStyle.secondary, row=3)
     async def shuffle_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         state = self.cog.get_state(self.guild_id)
         state['shuffle_enabled'] = not state.get('shuffle_enabled', False)
         label = 'ON' if state['shuffle_enabled'] else 'OFF'
-        await interaction.response.send_message(embed=we(f"🔀 シャッフルを `{label}` に設定しました。"), ephemeral=True)
+        await interaction.response.send_message(embed=we(f"<:shuffle:1563559485170122802> シャッフルを `{label}` に設定しました。"), ephemeral=True)
         await self.cog.update_panel(self.guild_id)
 
-    @discord.ui.button(label="🔁", style=discord.ButtonStyle.secondary, row=3)
+    @discord.ui.button(label="<:restart:1563559489121030184>", style=discord.ButtonStyle.secondary, row=3)
     async def loop_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         state = self.cog.get_state(self.guild_id)
         next_mode = {'off': 'track', 'track': 'queue', 'queue': 'off'}[state.get('loop_mode', 'off')]
         state['loop_mode'] = next_mode
         labels = {'off': 'OFF', 'track': '1曲', 'queue': 'キュー'}
-        await interaction.response.send_message(embed=we(f"🔁 ループを `{labels[next_mode]}` に設定しました。"), ephemeral=True)
+        await interaction.response.send_message(embed=we(f"<:restart:1563559489121030184> ループを `{labels[next_mode]}` に設定しました。"), ephemeral=True)
         await self.cog.update_panel(self.guild_id)
 
     @discord.ui.button(label="📋", style=discord.ButtonStyle.secondary, row=4)
@@ -1090,7 +1090,7 @@ class VoiceControlView(discord.ui.View):
             ephemeral=True,
         )
 
-    @discord.ui.button(label="⏹️", style=discord.ButtonStyle.danger, row=4)
+    @discord.ui.button(label="<:reset:1563559487351160972>", style=discord.ButtonStyle.danger, row=4)
     async def stop_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         vc = interaction.guild.voice_client
         state = self.cog.get_state(self.guild_id)
@@ -1101,7 +1101,7 @@ class VoiceControlView(discord.ui.View):
             while not state['queue'].empty():
                 state['queue'].get_nowait()
             remove_audio_source(vc, "music", notify=True)
-            await interaction.response.send_message(embed=we("⏹️ 再生を完全に停止し、キューをクリアしました。"), ephemeral=True)
+            await interaction.response.send_message(embed=we("<:reset:1563559487351160972> 再生を完全に停止し、キューをクリアしました。"), ephemeral=True)
             await self.cog.update_panel(self.guild_id)
         else:
             await interaction.response.send_message(embed=we("<:failed:1490986584676368535> ボイスチャンネルに接続していません。"), ephemeral=True)
@@ -1602,7 +1602,7 @@ class VoiceCog(commands.Cog):
                 self._acquire_music(r.guild, channel, r.user, r.channel),
                 timeout=TIMEOUT_SECONDS,
             )
-            await r.send(embed=we(f"🔊 **{channel.name}** に参加しました。"))
+            await r.send(embed=we(f"<:vol:1563559476265488414> **{channel.name}** に参加しました。"))
         except VoiceBusy as busy:
             await r.send(embed=we(str(busy)), ephemeral=True)
         except asyncio.TimeoutError:
@@ -1674,7 +1674,7 @@ class VoiceCog(commands.Cog):
 
         if state['is_paused']: status_icon = "<:Pause:1561700510447312916> 一時停止中"
         elif state['current_track']: status_icon = "▶️ 再生中"
-        else: status_icon = "⏹️ 停止中"
+        else: status_icon = "<:reset:1563559487351160972> 停止中"
 
         if state['current_track']:
             _, filename, duration, _, _ = state['current_track']
@@ -1706,7 +1706,7 @@ class VoiceCog(commands.Cog):
         panel_text = (
             "# <:music:1561710964238450809> ボイスコントロールパネル\n"
             f"**状態:** {status_icon}\n"
-            f"**オーディオ:** 🔊 `{int(state['volume']*100)}%`　⚡ `{state['speed']}x`　🎬 `{eq_label}`\n"
+            f"**オーディオ:** <:vol:1563559476265488414> `{int(state['volume']*100)}%`　<:thu:1563559478220038175> `{state['speed']}x`　🎬 `{eq_label}`\n"
             f"**再生中:** {track_info}\n"
             f"**進捗:** {progress_info}\n"
         )
@@ -1770,7 +1770,7 @@ class VoiceCog(commands.Cog):
         else:
             state['eq'] = "custom"
             state['custom_eq_filter'] = mode
-            msg = f"⚙️ カスタムEQフィルターを設定しました:\n`{mode}`"
+            msg = f"<:gear:1564624326509203557> カスタムEQフィルターを設定しました:\n`{mode}`"
 
         await interaction.response.send_message(embed=we(msg))
         # 曲を止めずにパネルだけ更新
@@ -1793,7 +1793,7 @@ class VoiceCog(commands.Cog):
             return await r.send(embed=we("音量は 0.1 から 2.0 の間で指定してください。"), ephemeral=True)
         state = self.get_state(r.guild.id)
         state['volume'] = value
-        await r.send(embed=we(f"🔊 音量を `{value}` に設定しました。"))
+        await r.send(embed=we(f"<:vol:1563559476265488414> 音量を `{value}` に設定しました。"))
         await self.apply_immediate_setting(r.source)
 
     async def _speed_impl(self, r: Responder, value: float):
@@ -1802,7 +1802,7 @@ class VoiceCog(commands.Cog):
         state = self.get_state(r.guild.id)
         previous_speed = state.get('speed', 1.0)
         state['speed'] = value
-        await r.send(embed=we(f"⚡ 再生速度を `{value}` 倍に設定しました（現在位置から反映）。"))
+        await r.send(embed=we(f"<:thu:1563559478220038175> 再生速度を `{value}` 倍に設定しました（現在位置から反映）。"))
         await self.apply_immediate_setting(r.source, elapsed_speed=previous_speed)
 
     async def get_yt_info(self, url_or_search):
@@ -2832,7 +2832,7 @@ class VoiceCog(commands.Cog):
         if resolution is not None:
             state['fdn_resolution'] = resolution
             mode_str = "8次元ハウスホルダー（高密度・シルキー）" if resolution == 8 else "4次元ハウスホルダー（軽量・クリア）"
-            lines.append(f"⚙️ リバーブ解像度を `{resolution}` に切り替えました。\n現在のモード: **{mode_str}**")
+            lines.append(f"<:gear:1564624326509203557> リバーブ解像度を `{resolution}` に切り替えました。\n現在のモード: **{mode_str}**")
         await r.send(embed=we("\n".join(lines)))
         # コントロールパネルの表示を更新
         await self.update_panel(guild_id)
@@ -2856,7 +2856,7 @@ class VoiceCog(commands.Cog):
         speaker_names = {
             'studio': '🎙️ スタジオモニター',
             'theater': '🎬 シアター',
-            'pa': '🔊 PAスピーカー',
+            'pa': '<:vol:1563559476265488414> PAスピーカー',
             'small': '📻 小型スピーカー'
         }
 

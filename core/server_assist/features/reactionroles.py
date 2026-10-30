@@ -311,7 +311,7 @@ class ReactionRoleMappingModal(discord.ui.Modal, title="絵文字とロール"):
             default=current[:1500],
             max_length=1500,
             required=True,
-            placeholder="例:\n🎮=123456789012345678\n📚=123456789012345679",
+            placeholder="例:\n<:game:1564624331663745034>=123456789012345678\n📚=123456789012345679",
         )
         self.add_item(self.text)
 

@@ -54,7 +54,7 @@ def _permission_note(entry: dict) -> str:
 
 
 def entry_line(entry: dict) -> str:
-    guide = " 📖" if entry["guide"] else ""
+    guide = " <:book:1564624329889681418>" if entry["guide"] else ""
     return f"`{clip(entry['usage'], 150)}`{guide}\n{clip(entry['summary'], 200)}{_permission_note(entry)}"
 
 
@@ -100,7 +100,7 @@ def category_pages(catalog: dict, category_id: str) -> list[discord.Embed]:
         title = category["label"] + (f"（{number}/{len(pages)}）" if len(pages) > 1 else "")
         body = header + "\n\n" + ("\n\n".join(page) if page else "表示できるコマンドはありません。")
         embed = discord.Embed(title=clip(title, EMBED_TITLE), description=clip(body, EMBED_DESCRIPTION), color=COLOR)
-        embed.set_footer(text="📖 はガイド（くわしい説明）があるコマンドです")
+        embed.set_footer(text="<:book:1564624329889681418> はガイド（くわしい説明）があるコマンドです")
         embeds.append(embed)
     return embeds
 
@@ -130,7 +130,7 @@ def command_embed(entry: dict, catalog: dict | None = None) -> discord.Embed:
     if catalog is not None:
         category = _category(catalog, entry["category"])
         if category:
-            embed.set_footer(text=f"カテゴリ: {category['label']}" + ("　📖 ガイドあり" if entry["guide"] else ""))
+            embed.set_footer(text=f"カテゴリ: {category['label']}" + ("　<:book:1564624329889681418> ガイドあり" if entry["guide"] else ""))
     return embed
 
 
@@ -331,7 +331,7 @@ class CommandView(discord.ui.View):
     def embed(self) -> discord.Embed:
         return command_embed(self.entry, self.catalog)
 
-    @discord.ui.button(label="ガイドを読む", emoji="📖", style=discord.ButtonStyle.success)
+    @discord.ui.button(label="ガイドを読む", emoji="<:book:1564624329889681418>", style=discord.ButtonStyle.success)
     async def read_guide(self, interaction: discord.Interaction, button: discord.ui.Button):
         key = command_key(self.entry["kind"], self.entry["name"])
         await edit_panel_v2(interaction, as_panel_v2(BackView(

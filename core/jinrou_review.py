@@ -67,7 +67,7 @@ def record_night(game, night: int, actions: dict, cancelled: set, attacks: dict,
         cancel = "（取り消し）" if uid in cancelled else ""
         if role == "占い師" and uid in divines:
             t, res = divines[uid]
-            lines.append(f"🔍 {name_of(game, uid)} が {name_of(game, t)} を占い →【{res}】{cancel}")
+            lines.append(f"<:loupe:1563559480069853245> {name_of(game, uid)} が {name_of(game, t)} を占い →【{res}】{cancel}")
         elif role == "ミュージシャン" and tid == 0:
             lines.append(f"🎵 {name_of(game, uid)} がパーティを開催{cancel}")
         elif role in ACTION_TEXT and tid:

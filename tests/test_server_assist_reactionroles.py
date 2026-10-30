@@ -102,19 +102,19 @@ class ReactionRoleSettingsTest(unittest.IsolatedAsyncioTestCase):
         )
 
     def test_parse_mappings(self):
-        self.assertEqual(reactionroles.parse_mappings("🎮=10\n📚=20"), {"🎮": 10, "📚": 20})
+        self.assertEqual(reactionroles.parse_mappings("<:game:1564624331663745034>=10\n📚=20"), {"<:game:1564624331663745034>": 10, "📚": 20})
         with self.assertRaises(ValueError):
             reactionroles.parse_mappings("bad")
 
     async def test_reaction_add_and_remove(self):
         await reactionroles.update_settings(
             1, reactionroles.KEY,
-            enabled=True, channel_id=10, message_id=50, mappings={"🎮": 10},
+            enabled=True, channel_id=10, message_id=50, mappings={"<:game:1564624331663745034>": 10},
         )
         guild = FakeGuild()
         cog = types.SimpleNamespace(bot=types.SimpleNamespace(get_guild=lambda _id: guild))
         payload = types.SimpleNamespace(
-            guild_id=1, channel_id=10, message_id=50, user_id=1, emoji="🎮",
+            guild_id=1, channel_id=10, message_id=50, user_id=1, emoji="<:game:1564624331663745034>",
         )
         await reactionroles.on_raw_reaction_add(cog, payload)
         member = guild.get_member(1)
@@ -126,7 +126,7 @@ class ReactionRoleSettingsTest(unittest.IsolatedAsyncioTestCase):
         guild = FakeGuild()
         cog = types.SimpleNamespace(bot=types.SimpleNamespace(get_guild=lambda _id: guild))
         payload = types.SimpleNamespace(
-            guild_id=1, channel_id=10, message_id=50, user_id=1, emoji="🎮",
+            guild_id=1, channel_id=10, message_id=50, user_id=1, emoji="<:game:1564624331663745034>",
         )
         await reactionroles.on_raw_reaction_add(cog, payload)
         guild.get_member(1).add_roles.assert_not_awaited()
@@ -134,11 +134,11 @@ class ReactionRoleSettingsTest(unittest.IsolatedAsyncioTestCase):
     async def test_wrong_message_or_emoji_is_ignored(self):
         await reactionroles.update_settings(
             1, reactionroles.KEY,
-            enabled=True, channel_id=10, message_id=50, mappings={"🎮": 10},
+            enabled=True, channel_id=10, message_id=50, mappings={"<:game:1564624331663745034>": 10},
         )
         guild = FakeGuild()
         cog = types.SimpleNamespace(bot=types.SimpleNamespace(get_guild=lambda _id: guild))
-        for message_id, emoji in ((51, "🎮"), (50, "📚")):
+        for message_id, emoji in ((51, "<:game:1564624331663745034>"), (50, "📚")):
             payload = types.SimpleNamespace(
                 guild_id=1, channel_id=10, message_id=message_id, user_id=1, emoji=emoji,
             )
@@ -148,12 +148,12 @@ class ReactionRoleSettingsTest(unittest.IsolatedAsyncioTestCase):
     async def test_high_role_is_ignored(self):
         await reactionroles.update_settings(
             1, reactionroles.KEY,
-            enabled=True, channel_id=10, message_id=50, mappings={"🎮": 20},
+            enabled=True, channel_id=10, message_id=50, mappings={"<:game:1564624331663745034>": 20},
         )
         guild = FakeGuild()
         cog = types.SimpleNamespace(bot=types.SimpleNamespace(get_guild=lambda _id: guild))
         payload = types.SimpleNamespace(
-            guild_id=1, channel_id=10, message_id=50, user_id=1, emoji="🎮",
+            guild_id=1, channel_id=10, message_id=50, user_id=1, emoji="<:game:1564624331663745034>",
         )
         await reactionroles.on_raw_reaction_add(cog, payload)
         guild.get_member(1).add_roles.assert_not_awaited()
@@ -161,7 +161,7 @@ class ReactionRoleSettingsTest(unittest.IsolatedAsyncioTestCase):
     async def test_apply_reactions(self):
         await reactionroles.update_settings(
             1, reactionroles.KEY,
-            enabled=True, channel_id=10, message_id=50, mappings={"🎮": 10, "📚": 20},
+            enabled=True, channel_id=10, message_id=50, mappings={"<:game:1564624331663745034>": 10, "📚": 20},
         )
         guild = FakeGuild()
         current = reactionroles.settings(1)

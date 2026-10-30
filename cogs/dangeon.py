@@ -78,10 +78,10 @@ I_SLOT = "i_slot"
 
 # バイオーム定義 (フロア範囲, 名前, 壁emoji, 床emoji, 霧emoji, 色)
 D_BIOMES = [
-    (range(1,  10),  "洞窟",     "⬜", "⬛", "🌫️", 0x5C4033),
-    (range(10,  20),  "森",       "🟫", "🟩", "🌫️", 0x2D5A1B),
+    (range(1,  10),  "洞窟",     "⬜", "<:b_:1563559473422016512>", "🌫️", 0x5C4033),
+    (range(10,  20),  "森",       "🟫", "<:g_:1563559471048032376>", "🌫️", 0x2D5A1B),
     (range(20,  30),  "氷雪地帯", "⬜", "🔹", "🌫️", 0x5B9BD5),
-    (range(30, 41),  "砂漠地帯", "🟧", "🟨", "🌫️", 0xC8600A),
+    (range(30, 41),  "砂漠地帯", "🟧", "<:y_:1563559481768411257>", "🌫️", 0xC8600A),
 ]
 
 # エンカウント率
@@ -324,7 +324,7 @@ def d_get_biome(floor):
     for r, name, wall_e, floor_e, fog_e, color in D_BIOMES:
         if floor in r:
             return name, wall_e, floor_e, fog_e, color
-    return "洞窟", "⬜", "⬛", "🌫️", 0x5C4033
+    return "洞窟", "⬜", "<:b_:1563559473422016512>", "🌫️", 0x5C4033
 
 def d_ensure_map(floor):
     """フロアのマップが存在しなければ生成"""

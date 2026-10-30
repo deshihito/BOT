@@ -667,7 +667,7 @@ class TranscriptionCog(commands.Cog):
             if available else "Logfareの音声認識モデル候補を取得できませんでした"
         )
         text = (
-            f"🔍 **文字起こし言語指定テスト** — {used_model}\n"
+            f"<:loupe:1563559480069853245> **文字起こし言語指定テスト** — {used_model}\n"
             f"音声: {source}（{stats}）\n\n" + "\n".join(lines) + f"\n\n{models_line}"
         )
         try:

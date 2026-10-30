@@ -163,7 +163,7 @@ class AssistPanelRefreshRegressionTest(unittest.IsolatedAsyncioTestCase):
         await invites.update_settings(1, invites.KEY, channel_id=100)
         await reactionroles.update_settings(
             1, reactionroles.KEY,
-            channel_id=100, message_id=500, mappings={"🎮": 50},
+            channel_id=100, message_id=500, mappings={"<:game:1564624331663745034>": 50},
         )
         cases = [
             (welcome, "参加メッセージ"),
