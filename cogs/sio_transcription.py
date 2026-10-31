@@ -574,6 +574,9 @@ class TranscriptionCog(commands.Cog):
                 return
             if not text or not text.strip():
                 return
+            if logfare.is_likely_transcription_hallucination(text):
+                logger.info("Logfare: 定型的な誤認識結果を破棄しました (user=%s)", display_name)
+                return
             async with aiohttp.ClientSession() as session:
                 wh_obj = discord.Webhook.from_url(webhook.url, session=session)
                 try:

@@ -230,6 +230,39 @@ def _extract_transcript(result: Any) -> str | None:
     return None
 
 
+_TRANSCRIPTION_HALLUCINATIONS = (
+    "ご視聴ありがとうございました",
+    "ご視聴ありがとう",
+    "ご覧いただきありがとうございました",
+    "ご覧いただきありがとう",
+    "またお会いしましょう",
+    "チャンネル登録よろしくお願いします",
+    "チャンネル登録お願いします",
+    "高評価よろしくお願いします",
+)
+
+
+def is_likely_transcription_hallucination(text: str) -> bool:
+    """音声がない区間でWhisperが返しがちな定型文だけの結果を検出する。"""
+    import re
+
+    normalized = re.sub(r"[^ぁ-んァ-ヶー一-龯a-zA-Z0-9]", "", text).lower()
+    if not normalized:
+        return False
+    phrases = sorted(
+        (re.sub(r"[^ぁ-んァ-ヶー一-龯a-zA-Z0-9]", "", phrase).lower()
+         for phrase in _TRANSCRIPTION_HALLUCINATIONS),
+        key=len,
+        reverse=True,
+    )
+    remaining = normalized
+    for phrase in phrases:
+        if phrase:
+            remaining = remaining.replace(phrase, "")
+    # 定型句が繰り返されても抑止する一方、通常の発話に一度含まれるだけなら残す。
+    return not remaining
+
+
 def _transcription_form(audio: bytes, filename: str, language: str, extra: dict[str, str]) -> aiohttp.FormData:
     form = aiohttp.FormData()
     form.add_field("model", TRANSCRIPTION_MODEL)
