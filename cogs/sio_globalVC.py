@@ -538,13 +538,107 @@ class _JoinRefused(Exception):
 
 
 # ============================================================
-# ルームオプション (gvc create で指定するフラグ)
+# ルーム一覧 (Components V2) / 参加ボタン
 # ============================================================
-class RoomOptions(commands.FlagConverter, prefix="--", delimiter=" ", case_insensitive=True):
-    max: int = commands.flag(default=0, description="最大参加サーバー数 (0=無制限)")
-    private: bool = commands.flag(default=False, description="非公開ルームにする (参加時にパスワードが必要)")
-    password: str = commands.flag(default="", description="非公開ルームのパスワード")
-    desc: str = commands.flag(default="", description="ルームの説明")
+class _RoomJoinButton(discord.ui.Button):
+    """ルーム一覧の「参加」ボタン。押すとそのルームに参加する。"""
+
+    def __init__(self, index: int, room_name: str, private: bool, disabled: bool):
+        super().__init__(
+            label=room_name[:80],
+            emoji="🔒" if private else "🌍",
+            style=discord.ButtonStyle.secondary if disabled else discord.ButtonStyle.primary,
+            disabled=disabled,
+            custom_id=f"gvc_join:{index}",
+        )
+        self.room_name = room_name
+
+    async def callback(self, interaction: discord.Interaction):
+        await self.view.join(interaction, self.room_name)
+
+
+class _PrivateRoomJoinModal(discord.ui.Modal, title="非公開ルームに参加"):
+    password = discord.ui.TextInput(label="パスワード", max_length=100)
+
+    def __init__(self, cog: "GlobalVCCog", room_name: str):
+        super().__init__()
+        self.cog = cog
+        self.room_name = room_name
+
+    async def on_submit(self, interaction: discord.Interaction):
+        await self.cog._join(Responder(interaction), self.room_name, self.password.value)
+
+
+class GlobalRoomListView(discord.ui.LayoutView):
+    """ルーム一覧。各ルームの「参加」ボタンからそのまま参加できる (非公開ルームはパスワード入力)。"""
+
+    MAX_ROOMS = 25  # 1メッセージのコンポーネント上限 (40) に収まる件数
+
+    def __init__(self, cog: "GlobalVCCog", guild_id: Optional[int]):
+        super().__init__(timeout=300)
+        self.cog = cog
+        self.guild_id = guild_id
+        self._build()
+
+    def _build(self):
+        self.clear_items()
+        _prune_dead_clients()
+        if not ROOMS:
+            self.add_item(discord.ui.Container(
+                discord.ui.TextDisplay("## 🌐 ルーム一覧\n現在作成されているグローバルVCルームはありません。"),
+                accent_colour=0x95A5A6,
+            ))
+            return
+
+        # このサーバーがすでにどこかのルームに参加中なら、参加ボタンは全部使えない (1サーバー1ルーム)
+        joined_here = self.guild_id is not None and any(
+            c.guild is not None and c.guild.id == self.guild_id
+            for clients in GLOBAL_ROOMS.values() for c in clients
+        )
+
+        names = list(ROOMS)[: self.MAX_ROOMS]
+        lines: list[str] = []
+        buttons: list[_RoomJoinButton] = []
+        for index, name in enumerate(names):
+            room = ROOMS[name]
+            servers = [vc.guild.name for vc in GLOBAL_ROOMS.get(name, []) if vc.guild]
+            full = bool(room.max_servers) and len(servers) >= room.max_servers
+            cap = "無制限" if room.max_servers == 0 else f"{len(servers)}/{room.max_servers}"
+            lock = "🔒" if room.private else "🌍"
+            line = f"{lock} **{name}** ・ VC参加 {cap} ・ グロチャ {len(ROOM_TEXT_LINKS.get(name, []))}"
+            if full:
+                line += " ・ 満員"
+            if room.description:
+                line += "\n-# " + room.description.replace("\n", " ")[:30]
+            lines.append(line)
+            buttons.append(_RoomJoinButton(index, name, room.private, disabled=joined_here or full))
+
+        header = "## 🌐 ルーム一覧\nボタンを押すと、そのルームに参加します（ボイスチャンネルに入っている必要があります）。"
+        notes: list[str] = []
+        if len(ROOMS) > self.MAX_ROOMS:
+            notes.append(f"表示は先頭 {self.MAX_ROOMS} 件です（全 {len(ROOMS)} 件）")
+        if joined_here:
+            notes.append("このサーバーはすでにルームに参加中のため、参加ボタンは使えません")
+        if notes:
+            header += "\n" + "\n".join(f"-# {note}" for note in notes)
+
+        children: list = [
+            discord.ui.TextDisplay(header + "\n\n" + "\n".join(lines)),
+            discord.ui.Separator(),
+        ]
+        for start in range(0, len(buttons), 5):
+            children.append(discord.ui.ActionRow(*buttons[start:start + 5]))
+        self.add_item(discord.ui.Container(*children, accent_colour=0x2ECC71))
+
+    async def join(self, interaction: discord.Interaction, room_name: str):
+        room = ROOMS.get(room_name)
+        if room is None:
+            return await interaction.response.send_message(
+                f"<:failed:1490986584676368535> ルーム **{room_name}** は存在しません。", ephemeral=True
+            )
+        if room.private:
+            return await interaction.response.send_modal(_PrivateRoomJoinModal(self.cog, room_name))
+        await self.cog._join(Responder(interaction), room_name, None)
 
 
 # ============================================================
@@ -634,46 +728,31 @@ class GlobalVCCog(commands.Cog):
         if guild is None or not await self.voice_sessions.release(guild.id, "global", reason=reason, notice=notice):
             await _disconnect_and_cleanup(vc)
 
-    @commands.group(name="gvc", invoke_without_command=True)
-    async def gvc_group(self, ctx: commands.Context):
-        embed = discord.Embed(title="🌐 グローバルVC コマンド一覧", color=0x3498DB)
-        embed.description = (
-            f"`{ctx.prefix}gvc create <ルーム名> [--max 5] [--private] [--password xxxx] [--desc 説明]` "
-            f": 新しいルームを作成\n"
-            f"`/voice のパネルからグローバルVC開始/参加 room:<ルーム名> [password]` : 指定したルームに参加 (要ボイスチャンネル在室)\n"
-            f"`{ctx.prefix}gvc list` : ルーム一覧を表示\n"
-            f"`{ctx.prefix}gvc info <ルーム名>` : ルームの詳細設定を表示\n"
-            f"`{ctx.prefix}gvc delete <ルーム名>` : ルームを削除 (作成者か、作成したサーバーの管理者のみ)\n"
-            f"`/voice のパネルからグローバルVC終了/退出` : グローバルVCから離脱 (ルーム自体は残ります)\n"
-            f"`{ctx.prefix}gvc chat connect <ルーム名> [パスワード]` : このチャンネルをグロチャに接続\n"
-            f"`{ctx.prefix}gvc chat disconnect` : このチャンネルのグロチャ接続を解除\n\n"
-            f"ルーム名にスペースを含める場合は `\"\"` で囲んでください。"
-        )
-        await ctx.send(embed=embed)
+    # --------------------------------------------------
+    # ルーム管理（/vc →「グローバルVCルーム」から呼ばれる）
+    # --------------------------------------------------
+    def room_list_view(self, guild: Optional[discord.Guild]) -> "GlobalRoomListView":
+        """ルーム一覧（参加ボタン付き / Components V2）を返す。"""
+        return GlobalRoomListView(self, getattr(guild, "id", None))
 
-    @gvc_group.command(name="create")
-    async def gvc_create(self, ctx: commands.Context, room_name: str, *, options: RoomOptions = None):
-        # フラグが一切指定されなかった場合、discord.py は空文字列を RoomOptions に変換して
-        # 各フラグのデフォルト値を持つインスタンスを渡してくる。念のため None の場合の保険も入れる。
-        if ctx.guild is None:
-            return await ctx.send("⚠️ ルームはサーバー内で作成してください。")
+    async def _room_create_impl(self, r: Responder, room_name: str, max_servers: int,
+                                password: str, description: str):
+        """ルームを作成する。パスワードがあれば非公開。作成者がVCにいれば、そのVCにボットも参加する。"""
+        await r.defer()
+        if r.guild is None:
+            return await r.send("⚠️ ルームはサーバー内で作成してください。", ephemeral=True)
+        if not room_name:
+            return await r.send("⚠️ ルーム名を入力してください。", ephemeral=True)
         if room_name in ROOMS:
-            return await ctx.send(f"⚠️ ルーム **{room_name}** はすでに存在します。")
-
-        max_servers = options.max if options else 0
-        private = options.private if options else False
-        password = options.password if options else ""
-        description = options.desc if options else ""
-
-        if private and not password:
-            return await ctx.send("⚠️ 非公開ルームにする場合は `--password` でパスワードを指定してください。")
+            return await r.send(f"⚠️ ルーム **{room_name}** はすでに存在します。", ephemeral=True)
         if max_servers < 0:
-            return await ctx.send("⚠️ `--max` は 0 以上の値を指定してください。")
+            return await r.send("⚠️ 最大参加サーバー数は 0 以上の値を指定してください。", ephemeral=True)
 
+        private = bool(password)
         ROOMS[room_name] = RoomConfig(
             name=room_name,
-            owner_id=ctx.author.id,
-            owner_guild_id=ctx.guild.id,
+            owner_id=r.user.id,
+            owner_guild_id=r.guild.id,
             max_servers=max_servers,
             private=private,
             password=password,
@@ -685,58 +764,39 @@ class GlobalVCCog(commands.Cog):
         embed.add_field(name="公開設定", value="🔒 非公開" if private else "🌍 公開")
         if description:
             embed.add_field(name="説明", value=description, inline=False)
-        embed.set_footer(text=f"/voice のパネルからグローバルVC開始/参加 room:{room_name} で参加できます")
-        await ctx.send(embed=embed)
+        embed.set_footer(text="/vc →「グローバルVCルーム」→「ルーム一覧」の参加ボタンから参加できます")
+        await r.send(embed=embed)
 
         # 作成者がボイスチャンネルにいるなら、そのままボットも参加させる
-        voice = getattr(ctx.author, "voice", None)
+        voice = getattr(r.user, "voice", None)
         if not voice or not voice.channel:
-            return await ctx.send(
+            return await r.send(
                 "ℹ️ ボイスチャンネルに入った状態でルームを作成すると、ボットが自動で参加します。"
-                "参加するには /voice のパネルから参加してください。"
+                "参加するには `/vc` のパネルから参加してください。",
+                ephemeral=True,
             )
         try:
-            await self._connect_room(ctx.guild, voice.channel, ctx.author, ctx.channel, room_name)
+            await self._connect_room(r.guild, voice.channel, r.user, r.channel, room_name)
         except (_JoinRefused, VoiceBusy) as e:
-            await ctx.send(f"⚠️ ルームは作成しましたが、VC には参加できませんでした: {e}")
+            await r.send(f"⚠️ ルームは作成しましたが、VC には参加できませんでした: {e}", ephemeral=True)
         except Exception as e:
             logger.warning("グローバルVC: ルーム %s 作成後の自動参加に失敗しました", room_name, exc_info=True)
-            await ctx.send(f"⚠️ ルームは作成しましたが、VC への参加に失敗しました: `{e}`")
+            await r.send(f"⚠️ ルームは作成しましたが、VC への参加に失敗しました: `{e}`", ephemeral=True)
         else:
-            await ctx.send(f"🎙️ **{voice.channel.name}** に参加し、ルーム **{room_name}** に接続しました。")
+            await r.send(f"🎙️ **{voice.channel.name}** に参加し、ルーム **{room_name}** に接続しました。")
 
-    @gvc_group.command(name="list")
-    async def gvc_list(self, ctx: commands.Context):
-        if not ROOMS:
-            return await ctx.send("現在作成されているグローバルVCルームはありません。")
-
-        embed = discord.Embed(title="🌐 ルーム一覧", color=0x2ECC71)
-        for room_name, room in ROOMS.items():
-            clients = GLOBAL_ROOMS.get(room_name, [])
-            servers = [vc.guild.name for vc in clients if vc.guild]
-            lock = "🔒" if room.private else "🌍"
-            cap = "無制限" if room.max_servers == 0 else f"{len(servers)}/{room.max_servers}"
-            chat_count = len(ROOM_TEXT_LINKS.get(room_name, []))
-            value = f"{lock} VC参加サーバー数: {cap} / グロチャ接続数: {chat_count}"
-            if servers:
-                value += f"\n接続中: {', '.join(servers)}"
-            if room.description:
-                value += f"\n説明: {room.description}"
-            embed.add_field(name=f"🎙️ {room_name}", value=value, inline=False)
-        await ctx.send(embed=embed)
-
-    @gvc_group.command(name="info")
-    async def gvc_info(self, ctx: commands.Context, room_name: str):
+    async def _room_info_impl(self, r: Responder, room_name: str):
+        await r.defer()
         room = ROOMS.get(room_name)
         if room is None:
-            return await ctx.send(f"<:failed:1490986584676368535> ルーム **{room_name}** は存在しません。")
+            return await r.send(
+                f"<:failed:1490986584676368535> ルーム **{room_name}** は存在しません。", ephemeral=True
+            )
 
         clients = GLOBAL_ROOMS.get(room_name, [])
         servers = [vc.guild.name for vc in clients if vc.guild]
-
-        text_links = ROOM_TEXT_LINKS.get(room_name, [])
         chat_channels = []
-        for link in text_links:
+        for link in ROOM_TEXT_LINKS.get(room_name, []):
             channel = self.bot.get_channel(link.channel_id)
             if channel:
                 chat_channels.append(f"#{channel.name} ({channel.guild.name})")
@@ -753,22 +813,25 @@ class GlobalVCCog(commands.Cog):
         if room.description:
             embed.add_field(name="説明", value=room.description, inline=False)
         embed.add_field(name="作成日時", value=f"<t:{int(room.created_at)}:R>", inline=False)
-        await ctx.send(embed=embed)
+        await r.send(embed=embed)
 
-    @gvc_group.command(name="delete")
-    async def gvc_delete(self, ctx: commands.Context, room_name: str):
+    async def _room_delete_impl(self, r: Responder, room_name: str):
+        await r.defer()
         room = ROOMS.get(room_name)
         if room is None:
-            return await ctx.send(f"<:failed:1490986584676368535> ルーム **{room_name}** は存在しません。")
+            return await r.send(
+                f"<:failed:1490986584676368535> ルーム **{room_name}** は存在しません。", ephemeral=True
+            )
 
-        if not _can_delete_room(room, ctx.author, ctx.guild):
-            return await ctx.send(
+        if not _can_delete_room(room, r.user, r.guild):
+            return await r.send(
                 "⚠️ このルームを削除できるのは、作成者か、ルームを作ったサーバーで"
-                "「サーバー管理」権限を持つ人だけです。"
+                "「サーバー管理」権限を持つ人だけです。",
+                ephemeral=True,
             )
 
         for vc in list(GLOBAL_ROOMS.get(room_name, [])):
-            own = ctx.guild is not None and getattr(vc.guild, "id", None) == ctx.guild.id
+            own = r.guild is not None and getattr(vc.guild, "id", None) == r.guild.id
             await self._leave_room(vc, reason="room_deleted", notice=None if own else
                                    f"🗑️ ルーム **{room_name}** が削除されたため、グローバルVCから切断しました。")
 
@@ -778,7 +841,7 @@ class GlobalVCCog(commands.Cog):
         GLOBAL_ROOMS.pop(room_name, None)
         ROOM_TEXT_LINKS.pop(room_name, None)
         del ROOMS[room_name]
-        await ctx.send(f"🗑️ ルーム **{room_name}** を削除しました (VC・グロチャの連携もすべて解除)。")
+        await r.send(f"🗑️ ルーム **{room_name}** を削除しました (VC・グロチャの連携もすべて解除)。")
 
     # --------------------------------------------------
     # 実装（/voice community）
@@ -800,7 +863,7 @@ class GlobalVCCog(commands.Cog):
         if room is None:
             return await r.send(
                 f"<:failed:1490986584676368535> ルーム **{room_name}** は存在しません。"
-                f"先に `!gvc create {room_name}` で作成してください。"
+                f"先に `/vc` →「グローバルVCルーム」→「ルーム作成」で作成してください。"
             )
 
         if room.private and password != room.password:
@@ -823,7 +886,7 @@ class GlobalVCCog(commands.Cog):
                            if any(c.guild and c.guild.id == r.guild.id for c in clients)), None)
             return await r.send(
                 f"⚠️ このサーバーはすでにルーム **{joined or '不明'}** に参加しています。"
-                "先に `/voice のパネルからグローバルVC終了/退出` してください。"
+                "先に `/vc のパネルからグローバルVC終了/退出` してください。"
             )
 
         try:
@@ -858,65 +921,65 @@ class GlobalVCCog(commands.Cog):
     # ------------------------------------------------------------
     # グロチャ (テキストチャット連携)
     # ------------------------------------------------------------
-    @gvc_group.group(name="chat", invoke_without_command=True)
-    async def gvc_chat_group(self, ctx: commands.Context):
-        embed = discord.Embed(title="🌐 グロチャ コマンド一覧", color=0x3498DB)
-        embed.description = (
-            f"`{ctx.prefix}gvc chat connect <ルーム名> [パスワード]` : このチャンネルを指定ルームのグロチャに接続\n"
-            f"`{ctx.prefix}gvc chat disconnect` : このチャンネルのグロチャ接続を解除"
-        )
-        await ctx.send(embed=embed)
-
-    @gvc_chat_group.command(name="connect")
-    async def gvc_chat_connect(self, ctx: commands.Context, room_name: str, password: str = None):
-        if ctx.guild is None:
-            return await ctx.send("⚠️ グロチャはサーバー内のチャンネルで接続してください。")
+    async def _chat_connect_impl(self, r: Responder, room_name: str, password: Optional[str]):
+        """このチャンネルを指定ルームのグロチャ (テキスト中継) に接続する。Webhook を作って中継する。"""
+        await r.defer()
+        if r.guild is None:
+            return await r.send("⚠️ グロチャはサーバー内のチャンネルで接続してください。", ephemeral=True)
+        channel = r.channel
         room = ROOMS.get(room_name)
         if room is None:
-            return await ctx.send(
+            return await r.send(
                 f"<:failed:1490986584676368535> ルーム **{room_name}** は存在しません。"
-                f"先に `{ctx.prefix}gvc create {room_name}` で作成してください。"
+                "先に `/vc` →「グローバルVCルーム」→「ルーム作成」で作成してください。",
+                ephemeral=True,
             )
 
         if room.private and password != room.password:
-            return await ctx.send("🔒 このルームは非公開です。正しいパスワードを指定してください。")
+            return await r.send("🔒 このルームは非公開です。正しいパスワードを指定してください。", ephemeral=True)
 
-        if ctx.channel.id in CHANNEL_TO_ROOM:
-            current_room = CHANNEL_TO_ROOM[ctx.channel.id]
-            return await ctx.send(
+        if channel.id in CHANNEL_TO_ROOM:
+            current_room = CHANNEL_TO_ROOM[channel.id]
+            return await r.send(
                 f"⚠️ このチャンネルはすでにルーム **{current_room}** のグロチャに接続されています。"
-                f"先に `{ctx.prefix}gvc chat disconnect` してください。"
+                "先にグロチャの接続解除をしてください。",
+                ephemeral=True,
             )
 
-        if any(link.guild_id == ctx.guild.id for link in ROOM_TEXT_LINKS.get(room_name, [])):
-            return await ctx.send(f"⚠️ このサーバーはすでに別のチャンネルでルーム **{room_name}** のグロチャに接続済みです。")
+        if any(link.guild_id == r.guild.id for link in ROOM_TEXT_LINKS.get(room_name, [])):
+            return await r.send(
+                f"⚠️ このサーバーはすでに別のチャンネルでルーム **{room_name}** のグロチャに接続済みです。",
+                ephemeral=True,
+            )
 
-        perms = ctx.channel.permissions_for(ctx.guild.me)
+        perms = channel.permissions_for(r.guild.me)
         if not perms.manage_webhooks:
-            return await ctx.send("⚠️ このチャンネルで Webhook を管理する権限がボットにありません。")
+            return await r.send("⚠️ このチャンネルで Webhook を管理する権限がボットにありません。", ephemeral=True)
 
         try:
-            webhook = await ctx.channel.create_webhook(
+            webhook = await channel.create_webhook(
                 name=f"グロチャ: {room_name}", reason="グローバルチャット連携"
             )
         except Exception as e:
-            return await ctx.send(f"<:failed:1490986584676368535> Webhook の作成に失敗しました: `{e}`")
+            return await r.send(
+                f"<:failed:1490986584676368535> Webhook の作成に失敗しました: `{e}`", ephemeral=True
+            )
 
-        link = TextLink(guild_id=ctx.guild.id, channel_id=ctx.channel.id, webhook=webhook)
+        link = TextLink(guild_id=r.guild.id, channel_id=channel.id, webhook=webhook)
         ROOM_TEXT_LINKS.setdefault(room_name, []).append(link)
-        CHANNEL_TO_ROOM[ctx.channel.id] = room_name
+        CHANNEL_TO_ROOM[channel.id] = room_name
 
-        await ctx.send(
+        await r.send(
             f"🌐 このチャンネルをルーム **{room_name}** のグロチャに接続しました！\n"
             f"以降、このチャンネルの発言は同ルームに接続中の他サーバーへ、送信者の名前とアイコンで中継されます。"
         )
 
-    @gvc_chat_group.command(name="disconnect")
-    async def gvc_chat_disconnect(self, ctx: commands.Context):
-        room_name = await _remove_text_link(ctx.channel.id)
+    async def _chat_disconnect_impl(self, r: Responder):
+        await r.defer()
+        room_name = await _remove_text_link(r.channel.id)
         if room_name is None:
-            return await ctx.send("このチャンネルはグロチャに接続されていません。")
-        await ctx.send(f"🌐 ルーム **{room_name}** のグロチャ接続を解除しました。")
+            return await r.send("このチャンネルはグロチャに接続されていません。", ephemeral=True)
+        await r.send(f"🌐 ルーム **{room_name}** のグロチャ接続を解除しました。")
 
     @commands.Cog.listener("on_message")
     async def on_message(self, message: discord.Message):

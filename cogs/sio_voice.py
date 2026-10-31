@@ -91,6 +91,7 @@ VOICE_GENRES = {
     "studio": ("録音・音声制作", "録音、やまびこ、文字起こし、カラオケ"),
     "effects": ("音声加工", "ボイスチェンジャー"),
     "community": ("通話ネットワーク", "ランダム通話、グローバルVC"),
+    "gvc_rooms": ("グローバルVCルーム", "ルーム一覧・作成・情報・削除、グロチャ接続"),
     "tts": ("読み上げ", "VOICEVOXによるテキスト読み上げ"),
     "trigger": ("音声トリガー", "登録・一覧・削除"),
 }
@@ -107,6 +108,10 @@ VOICE_ACTIONS_BY_GENRE = {
     "effects": [("開始", "changer_start"), ("停止", "changer_stop"), ("状態/設定", "changer_status")],
     "community": [("ランダム通話: 開始/参加", "match_start"), ("ランダム通話: 終了/退出", "match_stop"),
                    ("グローバルVC: 開始/参加", "global_start"), ("グローバルVC: 終了/退出", "global_stop")],
+    "gvc_rooms": [("ルーム一覧（参加ボタン付き）", "gvc_room_list"), ("ルーム作成", "gvc_room_create"),
+                  ("ルーム情報", "gvc_room_info"), ("ルーム削除", "gvc_room_delete"),
+                  ("グロチャ: 接続（このチャンネル）", "gvc_chat_connect"),
+                  ("グロチャ: 接続解除（このチャンネル）", "gvc_chat_disconnect")],
     "tts": [("読み上げ: 開始（このチャンネルを読む）", "tts_start"), ("読み上げ: 停止", "tts_stop"),
             ("読み上げ: 話者・ピッチ・話速の設定", "tts_config"), ("読み上げ: 1回だけ読む", "tts_say")],
     "trigger": [
@@ -114,6 +119,25 @@ VOICE_ACTIONS_BY_GENRE = {
         ("トリガー一覧・削除", "trigger_panel"),
     ],
 }
+
+# グローバルVCルームの操作（/vc パネルから使う）
+# 値: (入力フォームのタイトル, [(キー, ラベル, 最大文字数, 必須, 初期値)])
+GVC_ROOM_FORMS = {
+    "gvc_room_create": ("グローバルVCルームを作成", [
+        ("name", "ルーム名", 100, True, ""),
+        ("max", "最大参加サーバー数（0=無制限）", 4, False, "0"),
+        ("password", "パスワード（入力すると非公開）", 100, False, ""),
+        ("desc", "説明（任意）", 200, False, ""),
+    ]),
+    "gvc_room_info": ("ルーム情報を表示", [("name", "ルーム名", 100, True, "")]),
+    "gvc_room_delete": ("ルームを削除", [("name", "ルーム名", 100, True, "")]),
+    "gvc_chat_connect": ("グロチャに接続（このチャンネル）", [
+        ("name", "ルーム名", 100, True, ""),
+        ("password", "パスワード（非公開ルームのみ）", 100, False, ""),
+    ]),
+}
+# 入力なしでパネルから直接実行できる操作
+GVC_ROOM_ACTIONS = {"gvc_room_list", "gvc_chat_disconnect", *GVC_ROOM_FORMS}
 
 COGS = {
     "music": "VoiceCog",
@@ -313,6 +337,37 @@ class VoiceHub(commands.Cog):
 
         return await Responder(interaction).send("操作を選択してください。", ephemeral=True)
 
+    async def voice_global_rooms(self, interaction: discord.Interaction, value: str,
+                                 form: dict | None = None):
+        """グローバルVCルームの操作。入力が要る操作は form（モーダルの入力）を受け取って実行する。"""
+        cog = await self._cog(interaction, "global")
+        if cog is None:
+            return
+        r = Responder(interaction)
+        if value == "gvc_room_list":
+            return await interaction.response.send_message(
+                view=cog.room_list_view(interaction.guild), ephemeral=True
+            )
+        if value == "gvc_chat_disconnect":
+            return await cog._chat_disconnect_impl(r)
+        if form is None:
+            return await r.send("⚠️ この操作は `/vc` のパネルから入力してください。", ephemeral=True)
+
+        name = form.get("name", "")
+        if value == "gvc_room_create":
+            try:
+                max_servers = int(form.get("max") or 0)
+            except ValueError:
+                return await r.send("⚠️ 最大参加サーバー数は数字で入力してください。", ephemeral=True)
+            return await cog._room_create_impl(r, name, max_servers, form.get("password", ""), form.get("desc", ""))
+        if value == "gvc_room_info":
+            return await cog._room_info_impl(r, name)
+        if value == "gvc_room_delete":
+            return await cog._room_delete_impl(r, name)
+        if value == "gvc_chat_connect":
+            return await cog._chat_connect_impl(r, name, form.get("password") or None)
+        return await r.send("操作を選択してください。", ephemeral=True)
+
     @app_commands.command(name="vc", description="Show the music and voice control panel")
     async def vc(self, interaction: discord.Interaction):
         view = VoicePanelView(self)
@@ -330,6 +385,8 @@ class VoiceHub(commands.Cog):
             if cog:
                 await cog._panel_impl(Responder(interaction))
             return
+        if value in GVC_ROOM_ACTIONS:
+            return await self.voice_global_rooms(interaction, value)
         if value in {"join", "leave", "status"}:
             return await self.voice_connection(interaction, app_commands.Choice(name=value, value=value))
         if "_" not in value:
@@ -391,6 +448,8 @@ class VoiceActionSelect(discord.ui.Select):
             return await edit_panel_v2(interaction, as_panel_v2(panel))
         if value == "global_start":
             return await interaction.response.send_modal(GlobalRoomModal(self.hub))
+        if value in GVC_ROOM_FORMS:
+            return await interaction.response.send_modal(GvcRoomModal(self.hub, value))
         await self.hub.dispatch_voice_action(interaction, value)
 
 
@@ -439,6 +498,27 @@ class GlobalRoomModal(discord.ui.Modal, title="グローバルVCに参加"):
         await self.hub.dispatch_voice_action(
             interaction, "global_start", room=self.room.value, password=self.password.value or None
         )
+
+
+class GvcRoomModal(discord.ui.Modal):
+    """グローバルVCルームの操作（作成・情報・削除・グロチャ接続）の入力フォーム。"""
+
+    def __init__(self, hub: VoiceHub, action: str):
+        title, fields = GVC_ROOM_FORMS[action]
+        super().__init__(title=title)
+        self.hub = hub
+        self.action = action
+        self.inputs: dict[str, discord.ui.TextInput] = {}
+        for key, label, max_length, required, initial in fields:
+            item = discord.ui.TextInput(
+                label=label, max_length=max_length, required=required, default=initial or None
+            )
+            self.inputs[key] = item
+            self.add_item(item)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        form = {key: item.value.strip() for key, item in self.inputs.items()}
+        await self.hub.voice_global_rooms(interaction, self.action, form)
 
 
 # ====================================================================
