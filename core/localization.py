@@ -172,6 +172,8 @@ def _translate_view(view: Any, locale: str) -> None:
 
 def localize_kwargs(sender: Any, kwargs: dict[str, Any]) -> dict[str, Any]:
     """Translate Discord send/edit keyword payloads without changing business logic."""
+    if kwargs.get("_agobot_skip_localization"):
+        return kwargs
     guild_id = guild_id_for_sender(sender)
     locale = guild_locale(guild_id) if guild_id is not None else DEFAULT_LOCALE
     if normalize_locale(locale) != "en":

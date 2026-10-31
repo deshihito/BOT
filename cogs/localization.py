@@ -35,15 +35,17 @@ def install_discord_localization() -> None:
             continue
         async def localized(self, *args, __original=original, **kwargs):
             from core.localization import localize_kwargs, localize_object, guild_id_for_sender, guild_locale, translate_text
+            skip_localization = kwargs.pop("_agobot_skip_localization", False)
             args = list(args)
             try:
-                kwargs = localize_kwargs(self, kwargs)
-                guild_id = guild_id_for_sender(self)
-                locale = guild_locale(guild_id) if guild_id is not None else "en"
-                if args and isinstance(args[0], str):
-                    args[0] = translate_text(args[0], locale)
-                elif args:
-                    args[0] = localize_object(args[0], locale)
+                if not skip_localization:
+                    kwargs = localize_kwargs(self, kwargs)
+                    guild_id = guild_id_for_sender(self)
+                    locale = guild_locale(guild_id) if guild_id is not None else "en"
+                    if args and isinstance(args[0], str):
+                        args[0] = translate_text(args[0], locale)
+                    elif args:
+                        args[0] = localize_object(args[0], locale)
             except Exception:  # Localization must never prevent the Discord response.
                 logger.exception("localization failed; sending the original Discord payload")
             return await __original(self, *args, **kwargs)

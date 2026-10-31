@@ -40,6 +40,15 @@ class LocalizationTransportTest(unittest.TestCase):
             result = localization.localize_kwargs(sender, {"content": "日本語"})
         self.assertEqual(result["content"], "日本語")
 
+    def test_localization_can_be_skipped_for_transcribed_user_content(self):
+        sender = types.SimpleNamespace(guild=types.SimpleNamespace(id=77))
+        store = types.SimpleNamespace(get=lambda guild_id, section: {"locale": "en"})
+        payload = {"content": "今日は日本語で話します", "_agobot_skip_localization": True}
+        with patch.object(localization, "_ENGLISH_PAIRS", [("日本語", "English")]), \
+             patch.object(localization, "get_store", return_value=store):
+            result = localization.localize_kwargs(sender, payload)
+        self.assertEqual(result["content"], "今日は日本語で話します")
+
     def test_localize_nested_components_v2_panel(self):
         button = discord.ui.Button(label="設定を保存")
         nested_panel = types.SimpleNamespace(
