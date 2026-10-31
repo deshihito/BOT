@@ -133,8 +133,10 @@ def _run_ffmpeg(video_id: str, directory: Path, manifest: Path) -> None:
             "-g", "48", "-keyint_min", "48", "-sc_threshold", "0",
             "-force_key_frames", "expr:gte(t,n_forced*2)",
             "-f", "hls",
-            "-hls_time", "2", "-hls_list_size", "6",
-            "-hls_flags", "delete_segments+append_list+independent_segments",
+            # Keep the complete timeline available for track-loop seeks and
+            # Activity clients that join after the live edge has moved on.
+            "-hls_time", "2", "-hls_list_size", "0",
+            "-hls_flags", "independent_segments",
             "-hls_segment_filename", str(directory / "seg-%06d.ts"), str(manifest),
         ]
         process = subprocess.Popen(command, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True)
