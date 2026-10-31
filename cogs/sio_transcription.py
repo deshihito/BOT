@@ -580,7 +580,8 @@ class TranscriptionCog(commands.Cog):
                     await wh_obj.send(
                         content=text,
                         username=display_name,
-                        avatar_url=avatar_url
+                        avatar_url=avatar_url,
+                        _agobot_skip_localization=True,
                     )
                 except Exception as ex:
                     logger.error("[Webhook Send Error] %s", ex)
