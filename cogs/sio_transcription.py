@@ -22,6 +22,7 @@ from core.legacy import Responder
 from core import logfare
 from core.voice_session import VoiceBusy, get_manager
 from core.voice_media import add_receive_sink, remove_receive_sink
+from core.speech_vad import SpeechDetector
 
 try:  # あれば高品質なポリフェーズ・リサンプラーを使う（無くても numpy だけで動く）
     from scipy.signal import resample_poly  # type: ignore
@@ -44,7 +45,6 @@ SILENCE_THRESHOLD_SEC = 0.8
 MIN_UTTERANCE_SECONDS = 0.4
 MAX_UTTERANCE_SECONDS = 20
 # 音量判定の閾値（RMS値）
-RMS_SILENCE_THRESHOLD = 300
 # 発話として扱うために必要な「声のあるフレーム」数（1フレーム=20ms）。咳やクリックノイズ除外用
 MIN_LOUD_FRAMES = 6
 # 発話の頭が欠けないよう、発話開始の直前から付け足す音声（秒）
@@ -223,6 +223,7 @@ class UserAudioBuffer:
         self.last_speech_time = time.monotonic()
         self.is_speaking = False
         self.loud_frames = 0
+        self.speech_detector = SpeechDetector(aggressiveness=2)
         self._last_rtp_end: int | None = None
         self._last_arrival: float | None = None
 
@@ -251,12 +252,13 @@ class UserAudioBuffer:
 
         n_samples = len(audio_np) // CHANNELS
         missing = self._missing_samples(n_samples, rtp_timestamp)
-        rms = float(np.sqrt(np.mean(audio_np.astype(np.float32) ** 2)))
+        if missing:
+            self.speech_detector.reset()
+        speech = self.speech_detector.has_speech(pcm_data)
         now = time.monotonic()
-        loud = rms > RMS_SILENCE_THRESHOLD
 
         if not self.is_speaking:
-            if not loud:
+            if not speech:
                 if missing:
                     self.pre_roll.clear()  # 連続していない音声は頭出し用に使わない
                 self.pre_roll.append(pcm_data)
@@ -270,7 +272,7 @@ class UserAudioBuffer:
             # 発話中にパケットが届かなかった時間は無音で埋め、実時間どおりの長さにする
             self.buffer.extend(bytes(missing * FRAME_SIZE))
 
-        if loud:
+        if speech:
             self.last_speech_time = now
             self.loud_frames += 1
         self.buffer.extend(pcm_data)
@@ -573,9 +575,6 @@ class TranscriptionCog(commands.Cog):
                 logger.exception("Logfare transcription request failed")
                 return
             if not text or not text.strip():
-                return
-            if logfare.is_likely_transcription_hallucination(text):
-                logger.info("Logfare: 定型的な誤認識結果を破棄しました (user=%s)", display_name)
                 return
             async with aiohttp.ClientSession() as session:
                 wh_obj = discord.Webhook.from_url(webhook.url, session=session)
