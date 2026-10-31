@@ -166,7 +166,12 @@ class AICog(commands.Cog):
                 for url, source in list(unique_sources.items())[:5]
             )
             embed.add_field(name="参照ソース", value=links[:1024], inline=False)
-        await ctx.reply(embed=embed, mention_author=False, **send_kwargs)
+        await ctx.reply(
+            embed=embed,
+            mention_author=False,
+            _agobot_skip_localization=True,
+            **send_kwargs,
+        )
 
     @ai.error
     async def ai_error(self, ctx: commands.Context, error: commands.CommandError):

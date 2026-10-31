@@ -359,7 +359,12 @@ class KaraokeCog(commands.Cog):
             async with aiohttp.ClientSession() as session:
                 wh_obj = discord.Webhook.from_url(webhook.url, session=session)
                 try:
-                    await wh_obj.send(content=f"<:music:1561710964238450809> {text}", username=f"🎤 {display_name}", avatar_url=avatar_url)
+                    await wh_obj.send(
+                        content=f"<:music:1561710964238450809> {text}",
+                        username=f"🎤 {display_name}",
+                        avatar_url=avatar_url,
+                        _agobot_skip_localization=True,
+                    )
                 except Exception as ex:
                     logger.error(f"[Webhook Error] {ex}")
 
@@ -377,7 +382,7 @@ class KaraokeCog(commands.Cog):
             f"🎤 **{vc_channel.name}** でカラオケを開始しました！\n\n"
             f"📜 **お題の歌詞:**\n```\n{target_lyrics}\n```\n"
             "歌った声がリアルタイムで字幕表示されます。終わったら `/voice のパネルからカラオケ採点` で採点！"
-        ))
+        ), skip_localization=True)
 
     async def _score(self, r: Responder):
         session = self.sessions.get(r.guild.id)

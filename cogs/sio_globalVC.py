@@ -1025,6 +1025,7 @@ class GlobalVCCog(commands.Cog):
                     avatar_url=avatar_url,
                     files=files if files else discord.utils.MISSING,
                     allowed_mentions=discord.AllowedMentions.none(),
+                    _agobot_skip_localization=True,
                 )
             except discord.NotFound:
                 # webhook が手動で削除された等 -> このチャンネルの連携を自動解除
