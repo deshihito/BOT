@@ -175,7 +175,9 @@ def localize_kwargs(sender: Any, kwargs: dict[str, Any]) -> dict[str, Any]:
     if kwargs.get("_agobot_skip_localization"):
         return kwargs
     guild_id = guild_id_for_sender(sender)
-    locale = guild_locale(guild_id) if guild_id is not None else DEFAULT_LOCALE
+    if guild_id is None:
+        return kwargs
+    locale = guild_locale(guild_id)
     if normalize_locale(locale) != "en":
         return kwargs
     result = dict(kwargs)

@@ -49,6 +49,15 @@ class LocalizationTransportTest(unittest.TestCase):
             result = localization.localize_kwargs(sender, payload)
         self.assertEqual(result["content"], "今日は日本語で話します")
 
+    def test_sender_without_guild_context_is_not_assumed_to_be_english(self):
+        sender = types.SimpleNamespace()
+        payload = {"content": "日本語のWebhook本文"}
+        with patch.object(localization, "_ENGLISH_PAIRS", [("日本語", "English")]), \
+             patch.object(localization, "get_store") as get_store:
+            result = localization.localize_kwargs(sender, payload)
+        self.assertEqual(result["content"], "日本語のWebhook本文")
+        get_store.assert_not_called()
+
     def test_localize_nested_components_v2_panel(self):
         button = discord.ui.Button(label="設定を保存")
         nested_panel = types.SimpleNamespace(
