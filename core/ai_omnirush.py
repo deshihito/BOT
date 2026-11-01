@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import os
 from pathlib import Path
+import re
 import shutil
 import tempfile
 
@@ -50,7 +51,7 @@ class OmniRushBusy(OmniRushError):
 
 
 def cli_path() -> str | None:
-    """PATH、明示設定、nvmのユーザー領域からCLIを探す。"""
+    """PATH、明示設定、npm-global、nvmのユーザー領域からCLIを探す。"""
     configured = os.getenv("OMNIRUSH_CLI_PATH", "").strip()
     if configured:
         expanded = os.path.abspath(os.path.expanduser(configured))
@@ -65,12 +66,32 @@ def cli_path() -> str | None:
     if found:
         return found
 
-    nvm_root = Path.home() / ".nvm" / "versions" / "node"
-    candidates = [path for path in nvm_root.glob("*/bin/omnirush")
-                  if path.is_file() and os.access(path, os.X_OK)]
-    if not candidates:
-        return None
-    return str(max(candidates, key=lambda path: path.stat().st_mtime))
+    home = Path.home()
+    candidates: list[Path] = []
+
+    # `npm config set prefix ~/.npm-global` の標準的な配置。
+    npm_prefix = (
+        os.getenv("NPM_CONFIG_PREFIX")
+        or os.getenv("npm_config_prefix")
+        or str(home / ".npm-global")
+    ).strip()
+    if npm_prefix:
+        candidates.append(Path(npm_prefix).expanduser() / "bin" / "omnirush")
+
+    # システム共通のnpm prefixを使ったインストールにも対応。
+    candidates.extend((
+        Path("/usr/local/bin/omnirush"),
+        Path("/usr/bin/omnirush"),
+    ))
+
+    # nvmでNode/npmを管理している場合にも対応。
+    nvm_root = home / ".nvm" / "versions" / "node"
+    candidates.extend(nvm_root.glob("*/bin/omnirush"))
+
+    for candidate in candidates:
+        if candidate.is_file() and os.access(candidate, os.X_OK):
+            return str(candidate)
+    return None
 
 
 def model_choices() -> list[dict[str, str]]:
@@ -106,7 +127,10 @@ async def chat(model_id: str, prompt: str, *, reasoning_effort: str | None = Non
         raise OmniRushError("OmniRushへ送る質問は32,000文字までです。")
     executable = cli_path()
     if not executable:
-        raise OmniRushUnavailable("OmniRush CLIが見つかりません。")
+        raise OmniRushUnavailable(
+            "OmniRush CLIが見つかりません。Bot実行ユーザーのPATH、または "
+            "OMNIRUSH_CLI_PATH=/home/luna/.npm-global/bin/omnirush を確認してください。"
+        )
     if _request_lock.locked():
         raise OmniRushBusy("OmniRushの別リクエストを処理中です。少し待ってから再試行してください。")
 
@@ -120,9 +144,23 @@ async def chat(model_id: str, prompt: str, *, reasoning_effort: str | None = Non
 
     # BotのAPIキーやDB資格情報をCLIとその子プロセスへ継承しない。
     home = str(Path.home())
-    safe_path = os.pathsep.join(dict.fromkeys([
-        str(Path(executable).parent), "/usr/local/bin", "/usr/bin", "/bin",
-    ]))
+    # CLIランチャーの#!/usr/bin/env node が、nvm等のNode.jsも見つけられるようにする。
+    path_entries = [str(Path(executable).parent)]
+    node_executable = shutil.which("node")
+    if node_executable:
+        path_entries.append(str(Path(node_executable).parent))
+    else:
+        # systemd等からnvmのPATHが引き継がれていない場合もNode.jsを見つける。
+        nvm_node_root = Path.home() / ".nvm" / "versions" / "node"
+        nvm_nodes = [
+            path for path in nvm_node_root.glob("*/bin/node")
+            if path.is_file() and os.access(path, os.X_OK)
+        ]
+        if nvm_nodes:
+            newest_node = max(nvm_nodes, key=lambda path: path.stat().st_mtime)
+            path_entries.append(str(newest_node.parent))
+    path_entries.extend(("/usr/local/bin", "/usr/bin", "/bin"))
+    safe_path = os.pathsep.join(dict.fromkeys(path_entries))
     child_env = {
         "HOME": home,
         "PATH": safe_path,
@@ -161,13 +199,30 @@ async def chat(model_id: str, prompt: str, *, reasoning_effort: str | None = Non
                 raise OmniRushUnavailable("OmniRush CLIを起動できませんでした。") from exc
 
     answer = stdout.decode("utf-8", errors="replace").strip()
-    error_text = (stderr + stdout).decode("utf-8", errors="replace").lower()
+    stderr_text = stderr.decode("utf-8", errors="replace").strip()
+    stdout_text = stdout.decode("utf-8", errors="replace").strip()
+    error_text = f"{stderr_text}\n{stdout_text}".lower()
+
     if process.returncode != 0:
         if any(token in error_text for token in ("login", "log in", "sign in", "unauthoriz", "authenticat")):
-            raise OmniRushLoginRequired("OmniRush CLIのログインが必要です。")
+            raise OmniRushLoginRequired(
+                f"OmniRush CLIのログインが必要です。CLI出力: {(stderr_text or stdout_text)[-1200:]}"
+            )
         if any(token in error_text for token in ("unknown model", "invalid model", "model not found", "model unavailable")):
-            raise OmniRushError("選択したOmniRushモデルを利用できません。モデル一覧を開き直してください。")
-        raise OmniRushError("OmniRush CLIがエラーを返しました。")
+            raise OmniRushError(
+                f"選択したOmniRushモデルを利用できません。モデル一覧を開き直してください。詳細: {(stderr_text or stdout_text)[-1200:]}"
+            )
+
+        # CLIの端末制御文字を除去し、stderrだけでなくstdoutも診断対象にする。
+        detail = stderr_text or stdout_text or "stderr/stdout が空です"
+        detail = re.sub(r"\x1b\[[0-?]*[ -/]*[@-~]", "", detail)
+        detail = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f]", "", detail)
+        detail = detail[-1800:]
+        raise OmniRushError(
+            f"OmniRush CLIがエラーを返しました (exit {process.returncode})\n{detail}"
+        )
+
     if not answer:
-        raise OmniRushError("OmniRush CLIから空の回答が返りました。")
+        detail = stderr_text[-1000:] if stderr_text else "CLIの標準出力が空です"
+        raise OmniRushError(f"OmniRush CLIから空の回答が返りました。\n{detail}")
     return answer
