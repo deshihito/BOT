@@ -185,8 +185,8 @@ class CharacterSelectView(discord.ui.View):
 class ZetaModoki(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
-        # Logfare公開カタログ掲載の現行モデル。長い会話でもペルソナを保てる文脈長を重視。
-        default_model = "deepseek-v4.1-flash-1017"
+        # ロールプレイ向けの会話品質を優先し、LogfareのGemma 4 26Bを既定にする。
+        default_model = "gemma-4-26b"
         self.model_name = os.getenv("LOGFARE_ZETAMODOKI_MODEL", default_model).strip() or default_model
 
         # チャンネルID (int) をキーとして管理
@@ -249,6 +249,8 @@ class ZetaModoki(commands.Cog):
 
         try:
             bot_reply = await logfare.chat(self.model_name, messages, max_tokens=1200)
+            if not bot_reply.strip():
+                return "（AIから返答がありませんでした。少し待ってからもう一度試してください。）"
 
             # 履歴管理（直近20件）
             history.append({"user": user_input, "bot": bot_reply})
