@@ -17,7 +17,7 @@ class ZetaModokiLogfareTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result, "窓の外を見ます。")
         chat.assert_awaited_once()
         args, kwargs = chat.await_args
-        self.assertEqual(args[0], "deepseek-v4.1-flash-1017")
+        self.assertEqual(args[0], "gemma-4-26b")
         self.assertEqual(args[1][0], {
             "role": "system",
             "content": PRESETS["alice"].build_system_instruction(),
@@ -40,6 +40,18 @@ class ZetaModokiLogfareTests(unittest.IsolatedAsyncioTestCase):
         with patch.dict("os.environ", {"LOGFARE_ZETAMODOKI_MODEL": "model-x"}):
             cog = ZetaModoki(bot=None)
         self.assertEqual(cog.model_name, "model-x")
+
+    async def test_empty_model_reply_does_not_add_an_invalid_turn(self):
+        cog = ZetaModoki(bot=None)
+        cog.active_personas[123] = PRESETS["alice"]
+        cog.chat_histories[123] = []
+
+        with patch("cogs.zetamodoki.logfare.chat", new_callable=AsyncMock) as chat:
+            chat.return_value = ""
+            result = await cog._generate_response(123, "こんにちは")
+
+        self.assertIn("AIから返答がありませんでした", result)
+        self.assertEqual(cog.chat_histories[123], [])
 
 
 if __name__ == "__main__":
