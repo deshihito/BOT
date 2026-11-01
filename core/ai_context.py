@@ -422,6 +422,8 @@ async def build_context(ctx: Any, options: ContextOptions) -> ContextResult:
 
     if urls:
         result.links = await fetch_links(urls[:MAX_LINKS])
+        for link in result.links:
+            logger.info("!ai link: %s -> %s", link.url, link.error or f"ok {len(link.text)}文字")
         budget = MAX_LINK_TOTAL_CHARS
         for index, link in enumerate(result.links, 1):
             if link.error:
