@@ -13,7 +13,6 @@ import re
 import socket
 from dataclasses import dataclass, field
 from datetime import timedelta, timezone
-from html.parser import HTMLParser
 from io import BytesIO
 from typing import Any
 from urllib.parse import urljoin, urlsplit
@@ -185,52 +184,29 @@ def _check_url(url: str) -> None:
         raise LinkFetchError("非公開アドレスのリンクは読み込めません。")
 
 
-class _TextExtractor(HTMLParser):
-    SKIP = {"script", "style", "noscript", "svg", "template", "iframe", "canvas", "head"}
-    BLOCK = {
-        "p", "div", "br", "li", "tr", "section", "article", "header", "footer", "main",
-        "table", "ul", "ol", "pre", "blockquote", "h1", "h2", "h3", "h4", "h5", "h6",
-    }
-
-    def __init__(self) -> None:
-        super().__init__(convert_charrefs=True)
-        self.parts: list[str] = []
-        self.title = ""
-        self._skip = 0
-        self._in_title = False
-
-    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
-        if tag == "title":
-            self._in_title = True
-        elif tag in self.SKIP:
-            self._skip += 1
-        elif tag in self.BLOCK:
-            self.parts.append("\n")
-
-    def handle_endtag(self, tag: str) -> None:
-        if tag == "title":
-            self._in_title = False
-        elif tag in self.SKIP:
-            self._skip = max(0, self._skip - 1)
-        elif tag in self.BLOCK:
-            self.parts.append("\n")
-
-    def handle_data(self, data: str) -> None:
-        if self._in_title:
-            self.title += data
-        elif not self._skip:
-            self.parts.append(data)
+_STRIP_TAGS = ("script", "style", "noscript", "svg", "template", "iframe", "canvas",
+               "form", "nav", "header", "footer", "aside")
 
 
 def _html_to_text(html: str) -> tuple[str, str]:
-    parser = _TextExtractor()
+    """BeautifulSoupでタイトルと本文を取り出す。main/article があればそこを優先する。"""
     try:
-        parser.feed(html)
-        parser.close()
-    except Exception:  # 壊れたHTMLでも取れた分だけ使う
-        logger.debug("html parse error", exc_info=True)
-    text = "".join(parser.parts)
-    return parser.title.strip(), _normalize(text)
+        from bs4 import BeautifulSoup
+    except ImportError as exc:
+        raise LinkFetchError("beautifulsoup4 が未インストールです（pip install beautifulsoup4）。") from exc
+    soup = BeautifulSoup(html, "html.parser")
+    title = _normalize(soup.title.get_text(" ")) if soup.title else ""
+    meta = soup.find("meta", attrs={"name": "description"}) or soup.find("meta", attrs={"property": "og:description"})
+    description = _normalize(str(meta.get("content", ""))) if meta else ""
+    for tag in soup(_STRIP_TAGS):
+        tag.decompose()
+    root = soup.find("main") or soup.find("article") or soup.body or soup
+    text = _normalize(root.get_text("\n"))
+    if len(text) < 200 and soup.body is not None and root is not soup.body:
+        text = _normalize(soup.body.get_text("\n"))  # main/article が極端に短いときは全体へ戻す
+    if description and description not in text:
+        text = f"{description}\n\n{text}" if text else description
+    return title, text
 
 
 def _normalize(text: str) -> str:
