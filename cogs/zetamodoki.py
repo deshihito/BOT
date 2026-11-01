@@ -81,16 +81,39 @@ class ResponseModal(discord.ui.Modal):
         # ユーザーの発言を表示
         await interaction.channel.send(f"**{interaction.user.display_name}**: {user_text}")
 
-        # AI応答の生成とWebhook送信（チャンネル単位）
-        async with interaction.channel.typing():
-            response_text = await self.cog._generate_response(self.channel_id, user_text)
-            formatted_response = self.cog._format_narration(response_text)
+        # SSEで受け取った本文を文単位でWebhook送信し、長文でも途中で切らない。
+        pending = ""
 
-            # Webhook経由でキャラクターとして発言
+        async def send_ready_text(delta: str):
+            nonlocal pending
+            pending += delta
+            while True:
+                cut = self.cog._ready_stream_cut(pending)
+                if cut is None:
+                    break
+                part, pending = pending[:cut], pending[cut:]
+                await self.cog._send_webhook_message(
+                    channel=interaction.channel,
+                    channel_id=self.channel_id,
+                    content=self.cog._format_narration(part.strip()),
+                )
+
+        async with interaction.channel.typing():
+            response_text = await self.cog._generate_response(
+                self.channel_id, user_text, on_delta=send_ready_text
+            )
+
+        if pending.strip():
             await self.cog._send_webhook_message(
                 channel=interaction.channel,
                 channel_id=self.channel_id,
-                content=formatted_response
+                content=self.cog._format_narration(pending.strip()),
+            )
+        if response_text.startswith(("（エラーが発生しました:", "（AIから返答がありませんでした")):
+            await self.cog._send_webhook_message(
+                channel=interaction.channel,
+                channel_id=self.channel_id,
+                content=self.cog._format_narration(response_text),
             )
 
 
@@ -227,15 +250,53 @@ class ZetaModoki(commands.Cog):
             return
 
         webhook = await self._get_or_create_webhook(channel)
+        for part in self._split_long_message(content):
+            await webhook.send(
+                content=part,
+                username=persona.name,
+                avatar_url=persona.icon_url,
+                view=ChatButtonView(self),
+            )
 
-        await webhook.send(
-            content=content,
-            username=persona.name,
-            avatar_url=persona.icon_url,
-            view=ChatButtonView(self)
-        )
+    @staticmethod
+    def _split_long_message(text: str, limit: int = 1800) -> list[str]:
+        """Discordの本文上限を越えないよう、文境界を優先して分割する。"""
+        chunks = []
+        while len(text) > limit:
+            candidates = [
+                text.rfind(mark, 0, limit) + len(mark)
+                for mark in ("\n", "。", "！", "？", "!", "?")
+                if text.rfind(mark, 0, limit) >= 0
+            ]
+            cut = max(candidates, default=0)
+            if cut < limit // 2:
+                cut = limit
+            chunks.append(text[:cut])
+            text = text[cut:]
+        if text:
+            chunks.append(text)
+        return chunks
 
-    async def _generate_response(self, channel_id: int, user_input: str) -> str:
+    @staticmethod
+    def _ready_stream_cut(text: str) -> int | None:
+        """文末が届いたら送信し、長い未完文も上限内で順次表示する。"""
+        limit = 1400
+        search_text = text[:limit]
+        boundaries = [
+            search_text.rfind(mark) + len(mark)
+            for mark in ("\n", "。", "！", "？", "!", "?", "…")
+            if search_text.rfind(mark) >= 0
+        ]
+        boundary = max(boundaries, default=0)
+        if boundary >= 60:
+            return boundary
+        if len(text) >= limit:
+            return limit
+        if len(text) >= 500:
+            return 500
+        return None
+
+    async def _generate_response(self, channel_id: int, user_input: str, on_delta=None) -> str:
         persona = self.active_personas[channel_id]
         history = self.chat_histories.get(channel_id, [])
 
@@ -248,7 +309,12 @@ class ZetaModoki(commands.Cog):
         messages.append({"role": "user", "content": user_input})
 
         try:
-            bot_reply = await logfare.chat(self.model_name, messages, max_tokens=1200)
+            reply_parts = []
+            async for delta in logfare.chat_stream(self.model_name, messages, max_tokens=2400):
+                reply_parts.append(delta)
+                if on_delta is not None:
+                    await on_delta(delta)
+            bot_reply = "".join(reply_parts).strip()
             if not bot_reply.strip():
                 return "（AIから返答がありませんでした。少し待ってからもう一度試してください。）"
 
