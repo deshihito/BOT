@@ -426,14 +426,16 @@ class ZetaModoki(commands.Cog):
                     retry_input=retry_input,
                     private_thread=private_thread,
                 )
-            message = await webhook.send(
+            message_kwargs = dict(
                 content=part,
                 username=persona.name,
                 avatar_url=persona.icon_url,
-                view=view,
                 **send_kwargs,
                 wait=True,
             )
+            if view is not None:
+                message_kwargs["view"] = view
+            message = await webhook.send(**message_kwargs)
             if message is not None:
                 sent_messages.append(message)
         return sent_messages
