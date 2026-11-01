@@ -357,27 +357,9 @@ class VoiceHub(commands.Cog):
         return await r.send("操作を選択してください。", ephemeral=True)
 
     @app_commands.command(name="vc", description="Show the music and voice control panel")
-    @app_commands.describe(
-        trigger_method="音声トリガーを登録する方法（省略すると通常のパネルを開きます）",
-        audio="登録する音声ファイル（添付方式のとき。5秒まで）",
-        word="トリガー単語（添付方式のとき）",
-    )
-    @app_commands.choices(trigger_method=[
-        app_commands.Choice(name="メニューから登録", value="menu"),
-        app_commands.Choice(name="添付ファイルから登録", value="attachment"),
-    ])
-    async def vc(self, interaction: discord.Interaction, trigger_method: str | None = None,
-                 audio: discord.Attachment | None = None, word: str | None = None):
-        if trigger_method is None:
-            if audio is not None or word is not None:
-                return await interaction.response.send_message(
-                    "⚠️ 音声やトリガー単語を指定するときは「登録方法」も選んでください。", ephemeral=True
-                )
-            view = VoicePanelView(self)
-            return await interaction.response.send_message(view=as_panel_v2(view), ephemeral=True)
-        if trigger_method == "menu":
-            return await self._vc_trigger_menu(interaction, audio, word)
-        return await self._vc_trigger_attachment(interaction, audio, word)
+    async def vc(self, interaction: discord.Interaction):
+        view = VoicePanelView(self)
+        await interaction.response.send_message(view=as_panel_v2(view), ephemeral=True)
 
     async def _trigger_denied_reason(self, interaction: discord.Interaction) -> str | None:
         """音声トリガーを操作できないときは理由を返す（support.py の権限設定と共通）。"""
@@ -395,62 +377,6 @@ class VoiceHub(commands.Cog):
         except Exception:
             logger.exception("音声トリガー権限チェックに失敗しました")
         return None
-
-    async def _vc_trigger_menu(self, interaction: discord.Interaction,
-                               audio: discord.Attachment | None, word: str | None):
-        """「メニューから登録」: チャンネル内の直近の音声から選んで登録する（従来のメニュー）。"""
-        cog = self.bot.get_cog("VoiceTriggerCog")
-        if cog is None:
-            return await interaction.response.send_message(
-                "⚠️ 音声トリガー機能がいま読み込まれていません。", ephemeral=True
-            )
-        if audio is not None or word is not None:
-            return await interaction.response.send_message(
-                "⚠️ メニューから登録する場合は、音声とトリガー単語を指定しないでください。", ephemeral=True
-            )
-        reason = await self._trigger_denied_reason(interaction)
-        if reason:
-            return await interaction.response.send_message(reason, ephemeral=True)
-        if interaction.channel is None:
-            return await interaction.response.send_message(
-                "チャンネル情報を取得できません。", ephemeral=True
-            )
-        await interaction.response.defer(ephemeral=True, thinking=True)
-        audios = await _scan_recent_audios(self.bot, interaction.channel)
-        view = VoiceTriggerRegisterView(cog, audios)
-        await interaction.followup.send(view=view, ephemeral=True)
-
-    async def _vc_trigger_attachment(self, interaction: discord.Interaction,
-                                     audio: discord.Attachment | None, word: str | None):
-        """「添付ファイルから登録」: /vc に添付した音声とトリガー単語で直接登録する。"""
-        cog = self.bot.get_cog("VoiceTriggerCog")
-        if cog is None:
-            return await interaction.response.send_message(
-                "⚠️ 音声トリガー機能がいま読み込まれていません。", ephemeral=True
-            )
-        if audio is None or not (word or "").strip():
-            return await interaction.response.send_message(
-                "⚠️ 添付方式では「音声」と「トリガー単語」の両方を指定してください。", ephemeral=True
-            )
-        if interaction.guild is None:
-            return await interaction.response.send_message(
-                "⚠️ この操作はサーバー内で使ってください。", ephemeral=True
-            )
-        ct = (audio.content_type or "").lower()
-        if not (ct.startswith("audio/") or audio.filename.lower().endswith(_AUDIO_EXTS)):
-            return await interaction.response.send_message(
-                "⚠️ 音声ファイルを添付してください。", ephemeral=True
-            )
-        reason = await self._trigger_denied_reason(interaction)
-        if reason:
-            return await interaction.response.send_message(reason, ephemeral=True)
-
-        await interaction.response.defer(ephemeral=True, thinking=True)
-        try:
-            msg = await cog.register(interaction.guild, word, audio, interaction.user)
-        except Exception as exc:
-            return await interaction.followup.send(f"⚠️ {exc}", ephemeral=True)
-        await interaction.followup.send(msg, ephemeral=True)
 
     async def dispatch_voice_action(self, interaction: discord.Interaction, value: str,
                     delay: app_commands.Range[float, 0.1, 30.0] | None = None,
@@ -1421,8 +1347,8 @@ class VoiceTriggerRegisterView(discord.ui.LayoutView):
                 discord.ui.TextDisplay(
                     "⚠️ このチャンネルに音声ファイルが見つかりませんでした。\n\n"
                     "**登録方法**\n"
-                    "・音声ファイル（5秒以内）をこのチャンネルに送信してから、`/vc` の「登録方法」で「メニューから登録」を選んでください\n"
-                    "・または `/vc` の「登録方法」で「添付ファイルから登録」を選び、音声とトリガー単語を指定してください"
+                    "音声ファイル（5秒以内）をこのチャンネルに送信してから、もう一度 `/vc` →「音声トリガー」→「トリガー登録」を開くと、"
+                    "その音声が候補に表示されます。"
                 )
             )
 
@@ -1497,9 +1423,8 @@ class VoiceTriggerManageView(discord.ui.LayoutView):
                     discord.ui.TextDisplay(
                         "## 🎤 音声トリガー\n"
                         "登録されているトリガーはありません。\n\n"
-                        "**登録方法**: `/vc` の「登録方法」で次のどちらかを選んでください。\n"
-                        "・「メニューから登録」: チャンネル内の音声から選んで登録\n"
-                        "・「添付ファイルから登録」: 音声とトリガー単語を指定して登録"
+                        "**登録方法**: `/vc` →「音声トリガー」→「トリガー登録（このチャンネルの音声から選ぶ）」"
+                        "で、チャンネル内の音声から選んで登録できます。"
                     ),
                     accent_colour=0xF1C40F,
                 )
