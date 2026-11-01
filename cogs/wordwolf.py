@@ -271,7 +271,11 @@ class CheckWordView(discord.ui.View):
     async def check(self, interaction: discord.Interaction, button: discord.ui.Button):
         word = self.cog.player_words.get(interaction.user.id)
         if word:
-            await interaction.response.send_message(embed=self.cog._white_embed(f"あなたのワードは【**{word}**】です。"), ephemeral=True)
+            await interaction.response.send_message(
+                embed=self.cog._white_embed(f"あなたのワードは【**{word}**】です。"),
+                ephemeral=True,
+                _agobot_skip_localization=True,
+            )
         else:
             await interaction.response.send_message(embed=self.cog._white_embed("プレイヤーではありません。"), ephemeral=True)
 
