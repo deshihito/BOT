@@ -43,6 +43,7 @@ GENERAL_GENRES = {
     "survival": ("生存確認", "追跡、アクティブ頻度、フリーズ、失踪警報"),
     "exp": ("EXP・レベル", "チャット/VC/generalのEXPとレベルを確認"),
     "custom": ("設定・AI", "ショートカット、AI tools、チャットAI・画像生成AIの設定"),
+    "zeta": ("ZetaModoki", "ロールプレイ会話の開始、シチュエーション・キャラクターの登録と管理"),
 }
 GENERAL_ACTIONS = {
     "economy": [
@@ -69,6 +70,12 @@ GENERAL_ACTIONS = {
         ("チャットAIモデルを設定", "ai_default"),
         ("画像生成AIモデルを設定", "image_default"),
         ("AI思考強度を設定", "reasoning_default"),
+    ],
+    "zeta": [
+        ("ZetaModokiと会話", "zetamodoki"),
+        ("ZetaModoki会話をリセット", "zeta_reset"),
+        ("シチュエーション・キャラクターを登録", "zeta_register"),
+        ("登録を管理（編集・削除）", "zeta_manage"),
     ],
 }
 
@@ -1351,6 +1358,19 @@ class GeneralCog(commands.Cog):
         await interaction.response.send_message(view=as_panel_v2(view), ephemeral=True)
 
     async def dispatch_general(self, interaction: discord.Interaction, value: str):
+        if value in {"zetamodoki", "zeta_reset", "zeta_register", "zeta_manage"}:
+            cog = self.bot.get_cog("ZetaModoki")
+            if cog is None:
+                return await interaction.response.send_message(
+                    "ZetaModokiが読み込まれていません。", ephemeral=True
+                )
+            if value == "zetamodoki":
+                return await cog.start(interaction)
+            if value == "zeta_register":
+                return await cog.register(interaction)
+            if value == "zeta_manage":
+                return await cog.manage(interaction)
+            return await cog.reset(interaction)
         if value == "aitools":
             from core import ai_tools_router
             from cogs.ai_tools import _enabled as ai_tools_enabled
