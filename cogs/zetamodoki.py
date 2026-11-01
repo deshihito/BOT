@@ -80,48 +80,33 @@ class ResponseModal(discord.ui.Modal):
 
         # ユーザーの発言を表示
         await interaction.channel.send(f"**{interaction.user.display_name}**: {user_text}")
-
-        # SSEで受け取った本文を文単位でWebhook送信し、長文でも途中で切らない。
-        pending = ""
-
-        async def send_ready_text(delta: str):
-            nonlocal pending
-            pending += delta
-            while True:
-                cut = self.cog._ready_stream_cut(pending)
-                if cut is None:
-                    break
-                part, pending = pending[:cut], pending[cut:]
-                await self.cog._send_webhook_message(
-                    channel=interaction.channel,
-                    channel_id=self.channel_id,
-                    content=self.cog._format_narration(part.strip()),
-                )
-
         async with interaction.channel.typing():
-            response_text = await self.cog._generate_response(
-                self.channel_id, user_text, on_delta=send_ready_text
-            )
-
-        if pending.strip():
-            await self.cog._send_webhook_message(
+            await self.cog._send_streamed_response(
                 channel=interaction.channel,
                 channel_id=self.channel_id,
-                content=self.cog._format_narration(pending.strip()),
-            )
-        if response_text.startswith(("（エラーが発生しました:", "（AIから返答がありませんでした")):
-            await self.cog._send_webhook_message(
-                channel=interaction.channel,
-                channel_id=self.channel_id,
-                content=self.cog._format_narration(response_text),
+                user_input=user_text,
+                requester_id=interaction.user.id,
             )
 
 
 # --- 返信ボタン View ---
 class ChatButtonView(discord.ui.View):
-    def __init__(self, cog):
+    def __init__(
+        self,
+        cog,
+        *,
+        retry_owner_id: int | None = None,
+        retry_input: str | None = None,
+        private_thread: bool = False,
+    ):
         super().__init__(timeout=None)
         self.cog = cog
+        self.retry_owner_id = retry_owner_id
+        self.retry_input = retry_input
+        if retry_owner_id is None or retry_input is None:
+            self.remove_item(self.retry_button)
+        if not private_thread:
+            self.remove_item(self.delete_thread_button)
 
     @discord.ui.button(label="返信する", style=discord.ButtonStyle.primary, emoji="💬")
     async def reply_button(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -133,11 +118,118 @@ class ChatButtonView(discord.ui.View):
         modal = ResponseModal(self.cog, channel_id)
         await interaction.response.send_modal(modal)
 
+    @discord.ui.button(label="再試行", style=discord.ButtonStyle.secondary, row=0)
+    async def retry_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user.id != self.retry_owner_id:
+            await interaction.response.send_message("この発言を送信したユーザーだけが再試行できます。", ephemeral=True)
+            return
+        failed = self.cog.failed_requests.get(interaction.channel_id)
+        if (
+            not failed
+            or failed["user_id"] != interaction.user.id
+            or failed["user_input"] != self.retry_input
+        ):
+            await interaction.response.send_message("再試行できる失敗した発言が見つかりません。", ephemeral=True)
+            return
+
+        channel = interaction.channel
+        private_thread = (
+            isinstance(channel, discord.Thread)
+            and channel.type == discord.ChannelType.private_thread
+        )
+        await interaction.response.edit_message(
+            view=ChatButtonView(self.cog, private_thread=private_thread)
+        )
+        async with interaction.channel.typing():
+            await self.cog._send_streamed_response(
+                channel=interaction.channel,
+                channel_id=interaction.channel_id,
+                user_input=self.retry_input,
+                requester_id=interaction.user.id,
+            )
+
+    @discord.ui.button(label="このスレッドを削除", style=discord.ButtonStyle.danger, row=0)
+    async def delete_thread_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        channel = interaction.channel
+        if not isinstance(channel, discord.Thread) or channel.type != discord.ChannelType.private_thread:
+            await interaction.response.send_message("このボタンはプライベートスレッド内でのみ使えます。", ephemeral=True)
+            return
+        await interaction.response.send_message(
+            "このプライベートスレッドと会話履歴を削除しますか？この操作は取り消せません。",
+            view=DeleteThreadConfirmView(self.cog, channel.id, interaction.user.id),
+            ephemeral=True,
+        )
+
+
+class DeleteThreadConfirmView(discord.ui.View):
+    def __init__(self, cog, thread_id: int, requester_id: int):
+        super().__init__(timeout=60)
+        self.cog = cog
+        self.thread_id = thread_id
+        self.requester_id = requester_id
+
+    @discord.ui.button(label="削除する", style=discord.ButtonStyle.danger)
+    async def confirm_delete(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user.id != self.requester_id:
+            await interaction.response.send_message("削除を確認したユーザーだけが操作できます。", ephemeral=True)
+            return
+        if interaction.channel_id != self.thread_id or not isinstance(interaction.channel, discord.Thread):
+            await interaction.response.send_message("対象のスレッドを確認できません。", ephemeral=True)
+            return
+
+        await interaction.response.defer(ephemeral=True)
+        try:
+            await interaction.channel.delete(reason="ZetaModoki private conversation deleted by user")
+        except discord.HTTPException:
+            await interaction.followup.send("スレッドを削除できませんでした。Botのスレッド管理権限を確認してください。", ephemeral=True)
+            return
+        self.cog.active_personas.pop(self.thread_id, None)
+        self.cog.chat_histories.pop(self.thread_id, None)
+        self.cog.failed_requests.pop(self.thread_id, None)
+        await interaction.followup.send("プライベートスレッドを削除しました。", ephemeral=True)
+
+    @discord.ui.button(label="キャンセル", style=discord.ButtonStyle.secondary)
+    async def cancel_delete(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user.id != self.requester_id:
+            await interaction.response.send_message("削除を確認したユーザーだけが操作できます。", ephemeral=True)
+            return
+        await interaction.response.edit_message(content="削除をキャンセルしました。", view=None)
+
 
 # --- ドロップダウンUI ---
+class SessionModeSelect(discord.ui.Select):
+    def __init__(self, parent_view):
+        self.parent_view = parent_view
+        options = [
+            discord.SelectOption(
+                label="公開チャンネル",
+                value="public",
+                description="会話をこのチャンネルで行います",
+                default=parent_view.mode == "public",
+            ),
+            discord.SelectOption(
+                label="プライベートスレッド",
+                value="private",
+                description="自分とBotだけが見えるスレッドで会話します",
+                default=parent_view.mode == "private",
+            ),
+        ]
+        super().__init__(placeholder="会話モードを選択してください", options=options, row=0)
+
+    async def callback(self, interaction: discord.Interaction):
+        self.parent_view.mode = self.values[0]
+        self.parent_view.rebuild()
+        label = "公開チャンネル" if self.parent_view.mode == "public" else "プライベートスレッド"
+        await interaction.response.edit_message(
+            content=f"会話モード: **{label}**。続けてキャラクターを選択してください。",
+            view=self.parent_view,
+        )
+
+
 class CharacterSelect(discord.ui.Select):
-    def __init__(self, cog):
+    def __init__(self, cog, parent_view):
         self.cog = cog
+        self.parent_view = parent_view
         options = [
             discord.SelectOption(
                 label="るなち（〇〇しないと出られない部屋）",
@@ -158,19 +250,58 @@ class CharacterSelect(discord.ui.Select):
                 emoji="🤖"
             )
         ]
-        super().__init__(placeholder="会話したいキャラクターを選択してください", options=options)
+        super().__init__(placeholder="会話したいキャラクターを選択してください", options=options, row=1)
 
     async def callback(self, interaction: discord.Interaction):
         selected_key = self.values[0]
         persona = PRESETS[selected_key]
-        channel_id = interaction.channel_id
+        target_channel = interaction.channel
+        if self.parent_view.mode == "private":
+            if not isinstance(interaction.channel, discord.TextChannel):
+                await interaction.response.send_message(
+                    "プライベートスレッドは通常のテキストチャンネルから開始してください。",
+                    ephemeral=True,
+                )
+                return
+            await interaction.response.defer()
+            thread = None
+            try:
+                thread = await interaction.channel.create_thread(
+                    name=f"{persona.name}との会話",
+                    type=discord.ChannelType.private_thread,
+                    invitable=False,
+                    auto_archive_duration=1440,
+                )
+                await thread.add_user(interaction.user)
+                target_channel = thread
+            except discord.HTTPException:
+                if thread is not None:
+                    try:
+                        await thread.delete(reason="Failed to add conversation starter")
+                    except discord.HTTPException:
+                        pass
+                await interaction.edit_original_response(
+                    content="プライベートスレッドを作成できませんでした。Botにプライベートスレッド作成・管理権限があるか確認してください。",
+                    view=None,
+                )
+                return
+        else:
+            await interaction.response.defer()
 
-        # チャンネルごとに設定とメモリ（会話履歴）を記憶・初期化
+        channel_id = target_channel.id
         self.cog.active_personas[channel_id] = persona
         self.cog.chat_histories[channel_id] = []
+        self.cog.failed_requests.pop(channel_id, None)
 
-        # 1. Ephemeralの元のメッセージは「設定完了」として閉じる
-        await interaction.response.edit_message(content=f"【{persona.name}】を選択しました。会話を開始します！", view=None)
+        is_private_thread = (
+            isinstance(target_channel, discord.Thread)
+            and target_channel.type == discord.ChannelType.private_thread
+        )
+        mode_text = "プライベートスレッド" if is_private_thread else "公開チャンネル"
+        await interaction.edit_original_response(
+            content=f"【{persona.name}】で会話を開始します。会話先: {target_channel.mention}（{mode_text}）",
+            view=None,
+        )
 
         # 2. チャンネル全体に見える Embed を作成して送信
         embed = discord.Embed(
@@ -180,20 +311,24 @@ class CharacterSelect(discord.ui.Select):
         )
         embed.set_footer(text="下の「返信する」ボタンから入力して対話を進めてください")
         
-        await interaction.channel.send(embed=embed)
+        await target_channel.send(embed=embed)
 
         # 3. キャラクターの初期メッセージを Webhook で送信
         first_msg_formatted = self.cog._format_narration(persona.first_message)
         try:
             await self.cog._send_webhook_message(
-                channel=interaction.channel,
+                channel=target_channel,
                 channel_id=channel_id,
                 content=first_msg_formatted
             )
         except Exception as e:
-            await interaction.channel.send(
+            await target_channel.send(
                 f"**{persona.name}**: {first_msg_formatted}", 
-                view=ChatButtonView(self.cog)
+                view=ChatButtonView(
+                    self.cog,
+                    private_thread=isinstance(target_channel, discord.Thread)
+                    and target_channel.type == discord.ChannelType.private_thread,
+                ),
             )
             print(f"Webhook送信エラー: {e}")
 
@@ -201,7 +336,14 @@ class CharacterSelect(discord.ui.Select):
 class CharacterSelectView(discord.ui.View):
     def __init__(self, cog):
         super().__init__(timeout=60)
-        self.add_item(CharacterSelect(cog))
+        self.cog = cog
+        self.mode = "public"
+        self.rebuild()
+
+    def rebuild(self):
+        self.clear_items()
+        self.add_item(SessionModeSelect(self))
+        self.add_item(CharacterSelect(self.cog, self))
 
 
 # --- Main Cog ---
@@ -215,15 +357,21 @@ class ZetaModoki(commands.Cog):
         # チャンネルID (int) をキーとして管理
         self.active_personas: Dict[int, BotPersona] = {}
         self.chat_histories: Dict[int, List[dict]] = {}
+        self.failed_requests: Dict[int, dict] = {}
 
     async def start(self, interaction: discord.Interaction):
         view = CharacterSelectView(self)
-        await interaction.response.send_message("対話したいキャラクターとシチュエーションを選択してください：", view=view, ephemeral=True)
+        await interaction.response.send_message(
+            "会話モードと、対話したいキャラクターを選択してください：",
+            view=view,
+            ephemeral=True,
+        )
 
     async def reset(self, interaction: discord.Interaction):
         channel_id = interaction.channel_id
         if channel_id in self.chat_histories:
             self.chat_histories[channel_id] = []
+            self.failed_requests.pop(channel_id, None)
             await interaction.response.send_message("このチャンネルの会話履歴をリセットしました。", ephemeral=True)
         else:
             await interaction.response.send_message("リセットする会話履歴がありません。", ephemeral=True)
@@ -235,28 +383,122 @@ class ZetaModoki(commands.Cog):
         text = re.sub(r'\n+', '\n', text).strip()
         return text
 
-    async def _get_or_create_webhook(self, channel: discord.TextChannel) -> discord.Webhook:
-        """チャンネル内に管理用Webhookを取得または作成する"""
-        webhooks = await channel.webhooks()
+    async def _get_or_create_webhook(self, channel: discord.TextChannel | discord.Thread) -> discord.Webhook:
+        """親テキストチャンネルから管理用Webhookを取得または作成する"""
+        parent = channel.parent if isinstance(channel, discord.Thread) else channel
+        if not isinstance(parent, discord.TextChannel):
+            raise RuntimeError("Webhookの親テキストチャンネルを取得できませんでした。")
+        webhooks = await parent.webhooks()
         for wh in webhooks:
             if wh.name == "ZetaModoki_Webhook":
                 return wh
-        return await channel.create_webhook(name="ZetaModoki_Webhook")
+        return await parent.create_webhook(name="ZetaModoki_Webhook")
 
-    async def _send_webhook_message(self, channel: discord.TextChannel, channel_id: int, content: str):
-        """キャラクターの名前とアイコンを設定してWebhook送信する"""
+    async def _send_webhook_message(
+        self,
+        channel: discord.TextChannel | discord.Thread,
+        channel_id: int,
+        content: str,
+        *,
+        retry_owner_id: int | None = None,
+        retry_input: str | None = None,
+        include_view: bool = True,
+    ):
+        """キャラクターの名前・アイコンを設定し、長文を分割して送る"""
         persona = self.active_personas.get(channel_id)
         if not persona:
             return
 
         webhook = await self._get_or_create_webhook(channel)
-        for part in self._split_long_message(content):
-            await webhook.send(
+        private_thread = (
+            isinstance(channel, discord.Thread)
+            and channel.type == discord.ChannelType.private_thread
+        )
+        send_kwargs = {"thread": channel} if isinstance(channel, discord.Thread) else {}
+        parts = self._split_long_message(content)
+        sent_messages = []
+        for index, part in enumerate(parts):
+            view = None
+            if include_view and index == len(parts) - 1:
+                view = ChatButtonView(
+                    self,
+                    retry_owner_id=retry_owner_id,
+                    retry_input=retry_input,
+                    private_thread=private_thread,
+                )
+            message = await webhook.send(
                 content=part,
                 username=persona.name,
                 avatar_url=persona.icon_url,
-                view=ChatButtonView(self),
+                view=view,
+                **send_kwargs,
+                wait=True,
             )
+            if message is not None:
+                sent_messages.append(message)
+        return sent_messages
+
+    async def _send_streamed_response(
+        self,
+        channel: discord.TextChannel | discord.Thread,
+        channel_id: int,
+        user_input: str,
+        requester_id: int,
+    ):
+        """Logfareの生成差分を文単位で送り、失敗時は再試行ボタンを付ける。"""
+        pending = ""
+        last_message = None
+
+        async def send_ready_text(delta: str):
+            nonlocal pending, last_message
+            pending += delta
+            while True:
+                cut = self._ready_stream_cut(pending)
+                if cut is None:
+                    break
+                part, pending = pending[:cut], pending[cut:]
+                sent = await self._send_webhook_message(
+                    channel=channel,
+                    channel_id=channel_id,
+                    content=self._format_narration(part.strip()),
+                    include_view=False,
+                )
+                if sent:
+                    last_message = sent[-1]
+
+        response_text = await self._generate_response(
+            channel_id,
+            user_input,
+            on_delta=send_ready_text,
+            requester_id=requester_id,
+        )
+        is_error = response_text.startswith(("（エラーが発生しました:", "（AIから返答がありませんでした"))
+        if pending.strip():
+            sent = await self._send_webhook_message(
+                channel=channel,
+                channel_id=channel_id,
+                content=self._format_narration(pending.strip()),
+                include_view=not is_error,
+            )
+            if sent:
+                last_message = sent[-1]
+        if is_error:
+            await self._send_webhook_message(
+                channel=channel,
+                channel_id=channel_id,
+                content=self._format_narration(response_text),
+                retry_owner_id=requester_id,
+                retry_input=user_input,
+            )
+        elif pending.strip() == "" and last_message is not None:
+            private_thread = (
+                isinstance(channel, discord.Thread)
+                and channel.type == discord.ChannelType.private_thread
+            )
+            await last_message.edit(
+                view=ChatButtonView(self, private_thread=private_thread)
+            )
+        return response_text
 
     @staticmethod
     def _split_long_message(text: str, limit: int = 1800) -> list[str]:
@@ -296,7 +538,13 @@ class ZetaModoki(commands.Cog):
             return 500
         return None
 
-    async def _generate_response(self, channel_id: int, user_input: str, on_delta=None) -> str:
+    async def _generate_response(
+        self,
+        channel_id: int,
+        user_input: str,
+        on_delta=None,
+        requester_id: int | None = None,
+    ) -> str:
         persona = self.active_personas[channel_id]
         history = self.chat_histories.get(channel_id, [])
 
@@ -316,6 +564,11 @@ class ZetaModoki(commands.Cog):
                     await on_delta(delta)
             bot_reply = "".join(reply_parts).strip()
             if not bot_reply.strip():
+                if requester_id is not None:
+                    self.failed_requests[channel_id] = {
+                        "user_id": requester_id,
+                        "user_input": user_input,
+                    }
                 return "（AIから返答がありませんでした。少し待ってからもう一度試してください。）"
 
             # 履歴管理（直近20件）
@@ -323,10 +576,16 @@ class ZetaModoki(commands.Cog):
             if len(history) > 20:
                 history = history[-20:]
             self.chat_histories[channel_id] = history
+            self.failed_requests.pop(channel_id, None)
 
             return bot_reply
 
         except Exception as e:
+            if requester_id is not None:
+                self.failed_requests[channel_id] = {
+                    "user_id": requester_id,
+                    "user_input": user_input,
+                }
             return f"（エラーが発生しました: {e}）"
 
 
