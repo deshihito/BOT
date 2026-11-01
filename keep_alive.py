@@ -282,8 +282,10 @@ def _run_ffmpeg_task(video_id: str, directory: Path, manifest: Path):
             "-g", "48", "-keyint_min", "48",
             "-sc_threshold", "0", "-force_key_frames", "expr:gte(t,n_forced*2)",
             "-f", "hls",
-            "-hls_time", "2", "-hls_list_size", "6",
-            "-hls_flags", "delete_segments+append_list+independent_segments",
+            # Preserve the complete timeline so Music track-loop seeks and late
+            # Activity joins can reach segments older than the live-edge window.
+            "-hls_time", "2", "-hls_list_size", "0",
+            "-hls_flags", "independent_segments",
             "-hls_segment_filename", str(directory / "seg-%06d.ts"),
             str(manifest),
         ]
