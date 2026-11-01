@@ -127,14 +127,14 @@ class ZetaModokiLogfareTests(unittest.IsolatedAsyncioTestCase):
             sent = await cog._send_webhook_message(object(), 123, "あ" * 1801)
 
         self.assertEqual(len(sent), 2)
-        self.assertIsNone(webhook.calls[0]["view"])
+        self.assertNotIn("view", webhook.calls[0])
         self.assertIsInstance(webhook.calls[1]["view"], ChatButtonView)
         self.assertTrue(all(call["wait"] for call in webhook.calls))
 
         webhook.calls.clear()
         with patch.object(cog, "_get_or_create_webhook", new=AsyncMock(return_value=webhook)):
             await cog._send_webhook_message(object(), 123, "あ" * 1801, include_view=False)
-        self.assertTrue(all(call["view"] is None for call in webhook.calls))
+        self.assertTrue(all("view" not in call for call in webhook.calls))
 
     def test_discord_content_is_split_without_losing_characters(self):
         text = ("あ" * 1801) + "。" + ("い" * 1900)
