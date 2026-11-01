@@ -78,6 +78,11 @@ SUPPORT_ACTIONS = [
     app_commands.Choice(name="レベルアップ通知（EXP）", value="levelup_notify"),
     app_commands.Choice(name="サーバーアシスト設定", value="server_assist"),
     app_commands.Choice(name="音声トリガー登録", value="voice_trigger"),
+    app_commands.Choice(name="即抜けRTA状態", value="sokunuke_status"),
+    app_commands.Choice(name="即抜けRTA計測オン", value="sokunuke_on"),
+    app_commands.Choice(name="即抜けRTA計測オフ", value="sokunuke_off"),
+    app_commands.Choice(name="VC自動参加オン", value="sokunuke_vc_on"),
+    app_commands.Choice(name="VC自動参加オフ", value="sokunuke_vc_off"),
 ]
 
 SUPPORT_GENRES = {
@@ -94,6 +99,7 @@ SUPPORT_GENRES = {
         "参加・退出メッセージ、自動ロール、Starboard、レベル、一時VC",
     ),
     "bumprta": ("bump/up・RTA", "通知設定と RTA 状態・ランキング"),
+    "sokunuke": ("即抜けRTA", "24時間以内の退出計測、ランキング、VC自動参加"),
     "event": ("イベント", "抽選の作成"),
     "notify": ("SNS・Quest通知", "X・YouTubeの新着通知、Discord Quest（Orbs）の通知（管理者のみ）"),
 }
@@ -123,6 +129,7 @@ SUPPORT_ACTIONS_BY_GENRE = {
         )
     ],
     "bumprta": [(c.name, c.value) for c in SUPPORT_ACTIONS[5:8]],
+    "sokunuke": [(c.name, c.value) for c in SUPPORT_ACTIONS[24:29]],
     "event": [(SUPPORT_ACTIONS[9].name, SUPPORT_ACTIONS[9].value)],
     "assist": [("サーバーアシスト設定", "server_assist")],
 }
@@ -4267,6 +4274,11 @@ class SupportCog(commands.Cog):
         "quest_notify": "administrator",
         "levelup_notify": "manage_guild",
         "server_assist": "manage_guild",
+        "sokunuke_status": "manage_guild",
+        "sokunuke_on": "manage_guild",
+        "sokunuke_off": "manage_guild",
+        "sokunuke_vc_on": "manage_guild",
+        "sokunuke_vc_off": "manage_guild",
     }
 
     def __init__(self, bot: commands.Bot):
@@ -5789,6 +5801,18 @@ class SupportCog(commands.Cog):
             triggers = cog.list_triggers(interaction.guild_id) if cog else {}
             return await interaction.response.send_message(
                 view=VoiceTriggerPanel(self, settings, triggers), ephemeral=True)
+
+        if selected.startswith("sokunuke_"):
+            cog = self.bot.get_cog("SokuNukeRta")
+            if cog is None:
+                return await self._missing(interaction, "即抜けRTA")
+            action = selected.removeprefix("sokunuke_")
+            if action == "vc_on":
+                action = "vc_on"
+            return await cog.sokunuke_command(
+                interaction,
+                app_commands.Choice(name=action, value=action),
+            )
 
         cog = self.bot.get_cog("BumpRta")
         if cog is None:
