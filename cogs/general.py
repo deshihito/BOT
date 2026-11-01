@@ -69,6 +69,8 @@ GENERAL_ACTIONS = {
         ("チャットAIモデルを設定", "ai_default"),
         ("画像生成AIモデルを設定", "image_default"),
         ("AI思考強度を設定", "reasoning_default"),
+        ("ZetaModokiと会話", "zetamodoki"),
+        ("ZetaModoki会話をリセット", "zeta_reset"),
     ],
 }
 
@@ -1351,6 +1353,15 @@ class GeneralCog(commands.Cog):
         await interaction.response.send_message(view=as_panel_v2(view), ephemeral=True)
 
     async def dispatch_general(self, interaction: discord.Interaction, value: str):
+        if value in {"zetamodoki", "zeta_reset"}:
+            cog = self.bot.get_cog("ZetaModoki")
+            if cog is None:
+                return await interaction.response.send_message(
+                    "ZetaModokiが読み込まれていません。", ephemeral=True
+                )
+            if value == "zetamodoki":
+                return await cog.start(interaction)
+            return await cog.reset(interaction)
         if value == "aitools":
             from core import ai_tools_router
             from cogs.ai_tools import _enabled as ai_tools_enabled
