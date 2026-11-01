@@ -1,14 +1,10 @@
 import discord
 import asyncio
 from discord.ext import commands
-from discord import app_commands
 from typing import Dict, List, Optional
 import re
 import os
-from google import genai
-from google.genai import types
-import config
-from core.gemini_compat import generate_content
+from core import logfare
 
 
 # --- キャラクター＆シチュエーション構造定義 ---
@@ -108,7 +104,7 @@ class ChatButtonView(discord.ui.View):
     async def reply_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         channel_id = interaction.channel_id
         if channel_id not in self.cog.active_personas:
-            await interaction.response.send_message("このチャンネルではセッションが開始されていません。`/zetamodoki` でキャラクターを選んでください。", ephemeral=True)
+            await interaction.response.send_message("このチャンネルではセッションが開始されていません。`/general` の「設定・AI」から会話を開始してください。", ephemeral=True)
             return
 
         modal = ResponseModal(self.cog, channel_id)
@@ -189,19 +185,19 @@ class CharacterSelectView(discord.ui.View):
 class ZetaModoki(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
-        self.api_key = os.environ.get("GEMINI_API_KEY")
-        self.gemini_client = genai.Client(api_key=self.api_key)
-        self.model_name = "gemini-3.5-flash-lite"
+        # Logfare公開カタログ掲載の現行モデル。長い会話でもペルソナを保てる文脈長を重視。
+        default_model = "deepseek-v4.1-flash-1017"
+        self.model_name = os.getenv("LOGFARE_ZETAMODOKI_MODEL", default_model).strip() or default_model
 
         # チャンネルID (int) をキーとして管理
         self.active_personas: Dict[int, BotPersona] = {}
         self.chat_histories: Dict[int, List[dict]] = {}
 
-    async def zetamodoki(self, interaction: discord.Interaction):
+    async def start(self, interaction: discord.Interaction):
         view = CharacterSelectView(self)
         await interaction.response.send_message("対話したいキャラクターとシチュエーションを選択してください：", view=view, ephemeral=True)
 
-    async def zeta_reset(self, interaction: discord.Interaction):
+    async def reset(self, interaction: discord.Interaction):
         channel_id = interaction.channel_id
         if channel_id in self.chat_histories:
             self.chat_histories[channel_id] = []
@@ -243,42 +239,16 @@ class ZetaModoki(commands.Cog):
         persona = self.active_personas[channel_id]
         history = self.chat_histories.get(channel_id, [])
 
-        contents = []
-
-        # 1. 初期メッセージをセット
-        contents.append(
-            types.Content(
-                role="model",
-                parts=[types.Part.from_text(text=persona.first_message)]
-            )
-        )
-
-        # 2. 会話履歴を追加
+        messages = [{"role": "system", "content": persona.build_system_instruction()}]
+        # 最初の発言も含め、assistant/userの対話順をLogfareへ渡して人格と文脈を維持する。
+        messages.append({"role": "assistant", "content": persona.first_message})
         for turn in history:
-            contents.append(
-                types.Content(role="user", parts=[types.Part.from_text(text=turn["user"])])
-            )
-            contents.append(
-                types.Content(role="model", parts=[types.Part.from_text(text=turn["bot"])])
-            )
-
-        # 3. 今回の入力
-        contents.append(
-            types.Content(role="user", parts=[types.Part.from_text(text=user_input)])
-        )
+            messages.append({"role": "user", "content": turn["user"]})
+            messages.append({"role": "assistant", "content": turn["bot"]})
+        messages.append({"role": "user", "content": user_input})
 
         try:
-            response = await generate_content(
-                self.gemini_client,
-                model=self.model_name,
-                contents=contents,
-                config=types.GenerateContentConfig(
-                    system_instruction=persona.build_system_instruction(),
-                    temperature=0.85,
-                ),
-            )
-
-            bot_reply = response.text
+            bot_reply = await logfare.chat(self.model_name, messages, max_tokens=1200)
 
             # 履歴管理（直近20件）
             history.append({"user": user_input, "bot": bot_reply})
