@@ -139,6 +139,11 @@ GVC_ROOM_FORMS = {
 # 入力なしでパネルから直接実行できる操作
 GVC_ROOM_ACTIONS = {"gvc_room_list", "gvc_chat_disconnect", *GVC_ROOM_FORMS}
 
+# 起動時のロード一覧に漏れていても、初回利用時に読み込み直せる拡張（機能キー -> モジュール名）
+LAZY_EXTENSIONS = {
+    "transcribe": "sio_transcription",
+}
+
 COGS = {
     "music": "VoiceCog",
     "record": "RecordingCog",
@@ -192,8 +197,28 @@ class VoiceHub(commands.Cog):
     async def _cog(self, interaction: discord.Interaction, key: str):
         cog = self.bot.get_cog(COGS[key])
         if cog is None:
+            cog = await self._try_load_cog(key)
+        if cog is None:
             await Responder(interaction).send("⚠️ この機能はいま読み込まれていません。", ephemeral=True)
         return cog
+
+    async def _try_load_cog(self, key: str):
+        """未ロードのCogを、同じパッケージの拡張として読み込み直す（失敗理由はログに残す）。"""
+        module_name = LAZY_EXTENSIONS.get(key)
+        if not module_name:
+            return None
+        package = __name__.rpartition(".")[0]
+        extension = f"{package}.{module_name}" if package else module_name
+        try:
+            await self.bot.load_extension(extension)
+        except commands.ExtensionAlreadyLoaded:
+            logger.warning("%s は読み込み済みですが Cog %s が見つかりません", extension, COGS[key])
+        except Exception:
+            logger.exception("拡張 %s の読み込みに失敗しました（Cog: %s）", extension, COGS[key])
+            return None
+        else:
+            logger.info("拡張 %s を遅延ロードしました", extension)
+        return self.bot.get_cog(COGS[key])
 
     # ------------------------------------------------------------ 状態
     def status_embed(self, guild) -> discord.Embed:
