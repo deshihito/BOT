@@ -78,6 +78,11 @@ SUPPORT_ACTIONS = [
     app_commands.Choice(name="レベルアップ通知（EXP）", value="levelup_notify"),
     app_commands.Choice(name="サーバーアシスト設定", value="server_assist"),
     app_commands.Choice(name="音声トリガー登録", value="voice_trigger"),
+    app_commands.Choice(name="即抜けRTA状態", value="sokunuke_status"),
+    app_commands.Choice(name="即抜けRTA計測オン", value="sokunuke_on"),
+    app_commands.Choice(name="即抜けRTA計測オフ", value="sokunuke_off"),
+    app_commands.Choice(name="VC自動参加オン", value="sokunuke_vc_on"),
+    app_commands.Choice(name="VC自動参加オフ", value="sokunuke_vc_off"),
 ]
 
 SUPPORT_GENRES = {
@@ -94,6 +99,7 @@ SUPPORT_GENRES = {
         "参加・退出メッセージ、自動ロール、Starboard、レベル、一時VC",
     ),
     "bumprta": ("bump/up・RTA", "通知設定と RTA 状態・ランキング"),
+    "sokunuke": ("即抜けRTA", "24時間以内の退出計測、ランキング、VC自動参加"),
     "event": ("イベント", "抽選の作成"),
     "notify": ("SNS・Quest通知", "X・YouTubeの新着通知、Discord Quest（Orbs）の通知（管理者のみ）"),
 }
@@ -123,6 +129,7 @@ SUPPORT_ACTIONS_BY_GENRE = {
         )
     ],
     "bumprta": [(c.name, c.value) for c in SUPPORT_ACTIONS[5:8]],
+    "sokunuke": [(c.name, c.value) for c in SUPPORT_ACTIONS[24:29]],
     "event": [(SUPPORT_ACTIONS[9].name, SUPPORT_ACTIONS[9].value)],
     "assist": [("サーバーアシスト設定", "server_assist")],
 }
@@ -2569,8 +2576,11 @@ class GiveawayModal(discord.ui.Modal, title="抽選を作成"):
         self.cog = cog
 
     async def on_submit(self, interaction: discord.Interaction):
+        # A modal submit has the same short acknowledgement deadline as a
+        # slash command.  Defer before validation or handing off to GiveawayCog.
+        await interaction.response.defer(ephemeral=True, thinking=True)
         if interaction.guild is None:
-            return await interaction.response.send_message(
+            return await interaction.followup.send(
                 "この機能はサーバー内で利用できます。",
                 ephemeral=True,
             )
@@ -2580,7 +2590,7 @@ class GiveawayModal(discord.ui.Modal, title="抽選を作成"):
             getattr(permissions, "manage_guild", False)
             or getattr(permissions, "administrator", False)
         ):
-            return await interaction.response.send_message(
+            return await interaction.followup.send(
                 "抽選の作成にはサーバー管理権限が必要です。",
                 ephemeral=True,
             )
@@ -2589,7 +2599,7 @@ class GiveawayModal(discord.ui.Modal, title="抽選を作成"):
             winners = int(self.winners.value)
             minutes = int(self.minutes.value)
         except ValueError:
-            return await interaction.response.send_message(
+            return await interaction.followup.send(
                 "当選人数と分数は整数で入力してください。",
                 ephemeral=True,
             )
@@ -3560,7 +3570,7 @@ class SnsNotifyPanel(discord.ui.LayoutView):
 QUEST_SECTION = "quest_notify"
 QUEST_MAX_SEEN = 200
 QUEST_MAX_SEND_PER_CYCLE = 5
-QUEST_MAX_BODY = 2 * 1024 * 1024
+QUEST_MAX_BODY = 16 * 1024 * 1024  # 全Questの履歴を含むため大きい（2MB超を確認済み）
 QUEST_POLL_SECONDS = 900  # 確認間隔（秒）
 QUEST_USER_AGENT = "SupportBot-QuestNotifier/1.0"
 _ORBS_RE = re.compile(r"\borbs?\b", re.I)
@@ -3644,11 +3654,18 @@ def _quest_from_discord(row: dict) -> "QuestItem | None":
 
 
 def parse_quest_feed(data: bytes) -> list[QuestItem]:
+    data = data.removeprefix(b"\xef\xbb\xbf")  # UTF-8 BOM
     if data.lstrip()[:1] in (b"{", b"["):
         try:
             payload = json.loads(data)
         except ValueError as exc:
-            raise QuestError("フィードのJSONを解析できませんでした。") from exc
+            logger.warning(
+                "QuestフィードのJSON解析に失敗: %s (size=%d, head=%r, tail=%r)",
+                exc, len(data), data[:80], data[-80:],
+            )
+            raise QuestError(
+                f"フィードのJSONを解析できませんでした（{len(data):,}バイト受信: {exc}）。"
+            ) from exc
         rows = payload
         if isinstance(payload, dict):
             for key in ("quests", "data", "items", "results"):
@@ -3665,7 +3682,11 @@ def parse_quest_feed(data: bytes) -> list[QuestItem]:
         for row in rows:
             if not isinstance(row, dict):
                 continue
-            if isinstance(row.get("config"), dict) or "rewards_config" in row:
+            if (
+                isinstance(row.get("config"), dict)
+                or "rewards_config" in row
+                or isinstance(row.get("messages"), dict)  # フラット形式 {id, expires_at, messages, ...}
+            ):
                 converted = _quest_from_discord(row)
                 if converted is not None:
                     items.append(converted)
@@ -3747,9 +3768,18 @@ class QuestFetcher:
                 if resp.status == 304:
                     body = None
                 elif resp.status == 200:
-                    body = await resp.content.read(QUEST_MAX_BODY + 1)
-                    if len(body) > QUEST_MAX_BODY:
-                        raise self._fail("フィードが大きすぎます。")
+                    # StreamReader.read(n) は「最大nバイト」しか保証せず、受信済み分だけ返すため
+                    # 大きなJSONが途中で切れる。EOFまでチャンクで読み切る。
+                    chunks: list[bytes] = []
+                    size = 0
+                    async for chunk in resp.content.iter_chunked(64 * 1024):
+                        size += len(chunk)
+                        if size > QUEST_MAX_BODY:
+                            raise self._fail(
+                                f"フィードが大きすぎます（{QUEST_MAX_BODY // 1024 // 1024}MB超）。"
+                            )
+                        chunks.append(chunk)
+                    body = b"".join(chunks)
                 elif resp.status in (429, 503):
                     try:
                         retry_after = float(resp.headers.get("Retry-After", ""))
@@ -3769,7 +3799,7 @@ class QuestFetcher:
 
         if body is not None:
             try:
-                self._items = parse_quest_feed(body)
+                self._items = await asyncio.to_thread(parse_quest_feed, body)
             except QuestError as exc:
                 raise self._fail(str(exc)) from exc
             self._etag, self._last_modified = etag, modified
@@ -4267,6 +4297,11 @@ class SupportCog(commands.Cog):
         "quest_notify": "administrator",
         "levelup_notify": "manage_guild",
         "server_assist": "manage_guild",
+        "sokunuke_status": "manage_guild",
+        "sokunuke_on": "manage_guild",
+        "sokunuke_off": "manage_guild",
+        "sokunuke_vc_on": "manage_guild",
+        "sokunuke_vc_off": "manage_guild",
     }
 
     def __init__(self, bot: commands.Bot):
@@ -5519,10 +5554,10 @@ class SupportCog(commands.Cog):
         )
 
     async def _missing(self, interaction: discord.Interaction, name: str):
-        await interaction.response.send_message(
-            f"{name}機能が読み込まれていません。",
-            ephemeral=True,
-        )
+        message = f"{name}機能が読み込まれていません。"
+        if interaction.response.is_done():
+            return await interaction.followup.send(message, ephemeral=True)
+        await interaction.response.send_message(message, ephemeral=True)
 
     @commands.Cog.listener()
     async def on_raw_reaction_add(self, payload: discord.RawReactionActionEvent):
@@ -5789,6 +5824,18 @@ class SupportCog(commands.Cog):
             triggers = cog.list_triggers(interaction.guild_id) if cog else {}
             return await interaction.response.send_message(
                 view=VoiceTriggerPanel(self, settings, triggers), ephemeral=True)
+
+        if selected.startswith("sokunuke_"):
+            cog = self.bot.get_cog("SokuNukeRta")
+            if cog is None:
+                return await self._missing(interaction, "即抜けRTA")
+            action = selected.removeprefix("sokunuke_")
+            if action == "vc_on":
+                action = "vc_on"
+            return await cog.sokunuke_command(
+                interaction,
+                app_commands.Choice(name=action, value=action),
+            )
 
         cog = self.bot.get_cog("BumpRta")
         if cog is None:
