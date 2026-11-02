@@ -33,6 +33,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands, tasks
 from core.supabase_client import key_role, select_key
+from core.supabase_retry import run_with_retry
 
 logger = logging.getLogger(__name__)
 DISBOARD_BOT_ID = 302050872383242240
@@ -530,7 +531,9 @@ class BumpRta(commands.Cog):
         self._ntp_executor.shutdown(wait=False, cancel_futures=True)
 
     async def _call(self, fn):
-        return await asyncio.get_running_loop().run_in_executor(self._executor, fn)
+        return await asyncio.get_running_loop().run_in_executor(
+            self._executor, lambda: run_with_retry(fn)
+        )
 
     async def _is_enabled(self, guild_id):
         gid = str(guild_id)
