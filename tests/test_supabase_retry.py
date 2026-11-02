@@ -10,6 +10,13 @@ class PostgrestError(Exception):
         self.code = code
 
 
+class ReadTimeout(Exception):
+    pass
+
+
+ReadTimeout.__module__ = "httpx"
+
+
 class SupabaseRetryTest(unittest.TestCase):
     def test_retries_schema_cache_error_and_returns_result(self):
         calls = 0
@@ -42,6 +49,20 @@ class SupabaseRetryTest(unittest.TestCase):
         sleep.assert_not_called()
         self.assertTrue(is_transient_error(PostgrestError("PGRST002")))
         self.assertFalse(is_transient_error(error))
+
+    def test_retries_http_read_timeout(self):
+        calls = 0
+
+        def operation():
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                raise ReadTimeout("The read operation timed out")
+            return "ok"
+
+        with patch("core.supabase_retry.time.sleep"):
+            self.assertEqual(run_with_retry(operation, delays=(0.1,)), "ok")
+        self.assertEqual(calls, 2)
 
 
 if __name__ == "__main__":

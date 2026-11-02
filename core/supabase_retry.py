@@ -8,6 +8,10 @@ from typing import TypeVar
 
 T = TypeVar("T")
 TRANSIENT_CODES = frozenset({"PGRST002"})
+TRANSIENT_HTTP_ERRORS = frozenset({
+    "ConnectError", "ConnectTimeout", "NetworkError", "PoolTimeout",
+    "ReadError", "ReadTimeout", "RemoteProtocolError", "WriteError", "WriteTimeout",
+})
 DEFAULT_DELAYS = (0.5, 1.0, 2.0)
 
 
@@ -20,7 +24,10 @@ def is_transient_error(exc: BaseException) -> bool:
     # and the lightweight fakes in the test suite.
     if isinstance(exc.args[0] if exc.args else None, dict):
         return exc.args[0].get("code") in TRANSIENT_CODES
-    return False
+    return (
+        exc.__class__.__module__.split(".", 1)[0] in {"httpcore", "httpx"}
+        and exc.__class__.__name__ in TRANSIENT_HTTP_ERRORS
+    )
 
 
 def run_with_retry(

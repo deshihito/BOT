@@ -27,6 +27,8 @@ import threading
 import weakref
 from typing import Any, Callable
 
+from core.supabase_retry import run_with_retry
+
 logger = logging.getLogger(__name__)
 
 TABLE = "bot_kv"
@@ -130,7 +132,7 @@ class KVStore:
 
     async def _run(self, build: Callable[[], Any]):
         def call():
-            return build().execute()
+            return run_with_retry(lambda: build().execute())
 
         future = asyncio.ensure_future(asyncio.to_thread(call))
         try:
@@ -411,4 +413,3 @@ async def flush_all(timeout: float = FLUSH_TIMEOUT) -> bool:
     results = await asyncio.gather(*(store.flush(timeout=timeout) for store in stores),
                                    return_exceptions=True)
     return all(result is True for result in results)
-
