@@ -19,6 +19,7 @@ from datetime import date, datetime, timedelta, timezone
 import discord
 from discord import app_commands
 from discord.ext import commands, tasks
+from core.supabase_retry import run_with_retry
 
 try:  # テストでは supabase.create_client が差し替えられる
     import supabase as supabase_module
@@ -112,7 +113,9 @@ class FujoSurvival(commands.Cog):
         """``build()`` で組み立てたクエリを別スレッドで実行し、data を返す。"""
         if self.supabase is None:
             raise RuntimeError("Supabase が設定されていません")
-        return (await asyncio.to_thread(lambda: build().execute())).data
+        return (await asyncio.to_thread(
+            run_with_retry, lambda: build().execute()
+        )).data
 
     async def _fetch_all(self, build) -> list[dict]:
         """1000 件を超える結果もページを分けて全部読む。"""
