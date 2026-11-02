@@ -2576,8 +2576,11 @@ class GiveawayModal(discord.ui.Modal, title="抽選を作成"):
         self.cog = cog
 
     async def on_submit(self, interaction: discord.Interaction):
+        # A modal submit has the same short acknowledgement deadline as a
+        # slash command.  Defer before validation or handing off to GiveawayCog.
+        await interaction.response.defer(ephemeral=True, thinking=True)
         if interaction.guild is None:
-            return await interaction.response.send_message(
+            return await interaction.followup.send(
                 "この機能はサーバー内で利用できます。",
                 ephemeral=True,
             )
@@ -2587,7 +2590,7 @@ class GiveawayModal(discord.ui.Modal, title="抽選を作成"):
             getattr(permissions, "manage_guild", False)
             or getattr(permissions, "administrator", False)
         ):
-            return await interaction.response.send_message(
+            return await interaction.followup.send(
                 "抽選の作成にはサーバー管理権限が必要です。",
                 ephemeral=True,
             )
@@ -2596,7 +2599,7 @@ class GiveawayModal(discord.ui.Modal, title="抽選を作成"):
             winners = int(self.winners.value)
             minutes = int(self.minutes.value)
         except ValueError:
-            return await interaction.response.send_message(
+            return await interaction.followup.send(
                 "当選人数と分数は整数で入力してください。",
                 ephemeral=True,
             )
@@ -5531,10 +5534,10 @@ class SupportCog(commands.Cog):
         )
 
     async def _missing(self, interaction: discord.Interaction, name: str):
-        await interaction.response.send_message(
-            f"{name}機能が読み込まれていません。",
-            ephemeral=True,
-        )
+        message = f"{name}機能が読み込まれていません。"
+        if interaction.response.is_done():
+            return await interaction.followup.send(message, ephemeral=True)
+        await interaction.response.send_message(message, ephemeral=True)
 
     @commands.Cog.listener()
     async def on_raw_reaction_add(self, payload: discord.RawReactionActionEvent):
