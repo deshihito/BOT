@@ -6,7 +6,7 @@ import base64
 import json
 import logging
 import os
-from typing import Any
+from typing import Any, AsyncIterator
 
 import aiohttp
 
@@ -42,6 +42,7 @@ def _json_env(name: str) -> dict[str, str]:
 TRANSCRIPTION_EXTRA_FIELDS = _json_env("LOGFARE_TRANSCRIPTION_EXTRA_FIELDS")
 TRANSCRIPTION_EXTRA_QUERY = _json_env("LOGFARE_TRANSCRIPTION_EXTRA_QUERY")
 DEFAULT_TIMEOUT = aiohttp.ClientTimeout(total=45)
+STREAM_TIMEOUT = aiohttp.ClientTimeout(total=120)
 
 logger = logging.getLogger(__name__)
 
@@ -157,6 +158,61 @@ async def chat(
             if isinstance(part, dict) and isinstance(part.get("text"), str)
         )
     return str(content or "").strip()
+
+
+async def chat_stream(
+    model: str,
+    messages: list[dict[str, Any]],
+    *,
+    max_tokens: int = 2400,
+    reasoning_effort: str | None = None,
+) -> AsyncIterator[str]:
+    """Chat CompletionsのSSEストリームから回答本文を順次返す。"""
+    key = api_key()
+    if not key:
+        raise RuntimeError("LOGFARE_API_KEY が設定されていません。")
+    payload: dict[str, Any] = {
+        "model": model,
+        "messages": messages,
+        "max_tokens": max_tokens,
+        "stream": True,
+    }
+    if reasoning_effort:
+        payload["reasoning_effort"] = reasoning_effort
+    headers = {
+        "Authorization": f"Bearer {key}",
+        "Content-Type": "application/json",
+        "Accept": "text/event-stream",
+    }
+    async with aiohttp.ClientSession(timeout=STREAM_TIMEOUT) as session:
+        async with session.post(
+            f"{BASE_URL}/chat/completions", headers=headers, json=payload
+        ) as response:
+            if response.status >= 400:
+                raise LogfareHTTPError(response.status, response.headers.get("Retry-After"))
+            async for raw_line in response.content:
+                line = raw_line.decode("utf-8", errors="replace").strip()
+                if not line.startswith("data:"):
+                    continue
+                event_data = line[5:].strip()
+                if event_data == "[DONE]":
+                    break
+                try:
+                    event = json.loads(event_data)
+                except ValueError:
+                    logger.warning("Logfare returned an invalid chat stream event")
+                    continue
+                choices = event.get("choices") or []
+                if not choices or not isinstance(choices[0], dict):
+                    continue
+                delta = (choices[0].get("delta") or {}).get("content")
+                if isinstance(delta, list):
+                    delta = "".join(
+                        part.get("text", "") for part in delta
+                        if isinstance(part, dict) and isinstance(part.get("text"), str)
+                    )
+                if isinstance(delta, str) and delta:
+                    yield delta
 
 
 async def chat_completion(

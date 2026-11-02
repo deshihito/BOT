@@ -184,6 +184,28 @@ class AIToolsTest(unittest.IsolatedAsyncioTestCase):
                     await ai_tools_router.decide_action("依頼", self.candidates)
             decision.assert_awaited_once()
 
+    async def test_no_action_does_not_send_a_notification(self):
+        bot_user = types.SimpleNamespace(id=123)
+        bot = types.SimpleNamespace(user=bot_user)
+        cog = AIToolsCog(bot)
+        message = types.SimpleNamespace(
+            author=types.SimpleNamespace(bot=False, id=456),
+            guild=types.SimpleNamespace(id=67),
+            mentions=[bot_user],
+            content="<@123> こんにちは",
+            reply=AsyncMock(),
+            channel=types.SimpleNamespace(typing=AsyncMock()),
+        )
+        with patch.dict(os.environ, {"AITOOLS_ENABLED": "true"}), patch(
+            "cogs.ai_tools.logfare.api_key", return_value="configured"
+        ), patch(
+            "cogs.ai_tools.ai_tools_router.decide_action",
+            new_callable=AsyncMock,
+            side_effect=ai_tools_router.AIToolsNoAction("不要"),
+        ):
+            await cog.on_message(message)
+        message.reply.assert_not_awaited()
+
     async def test_rejects_failed_envelope_and_missing_choice(self):
         for result in (
             {"success": False, "errors": [{"message": "no access"}]},
