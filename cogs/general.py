@@ -1354,8 +1354,12 @@ class GeneralCog(commands.Cog):
 
     @app_commands.command(name="general", description="Show the general features control panel")
     async def general(self, interaction: discord.Interaction):
+        # Building the panel may touch lazily loaded settings/models.  Reserve
+        # the interaction response before doing any work so Discord's 3-second
+        # acknowledgement deadline cannot turn a valid command into 10062.
+        await interaction.response.defer(ephemeral=True, thinking=True)
         view = GeneralPanel(self)
-        await interaction.response.send_message(view=as_panel_v2(view), ephemeral=True)
+        await interaction.followup.send(view=as_panel_v2(view), ephemeral=True)
 
     async def dispatch_general(self, interaction: discord.Interaction, value: str):
         if value in {"zetamodoki", "zeta_reset", "zeta_register", "zeta_manage"}:
