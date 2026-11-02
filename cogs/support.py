@@ -3570,7 +3570,7 @@ class SnsNotifyPanel(discord.ui.LayoutView):
 QUEST_SECTION = "quest_notify"
 QUEST_MAX_SEEN = 200
 QUEST_MAX_SEND_PER_CYCLE = 5
-QUEST_MAX_BODY = 2 * 1024 * 1024
+QUEST_MAX_BODY = 16 * 1024 * 1024  # 全Questの履歴を含むため大きい（2MB超を確認済み）
 QUEST_POLL_SECONDS = 900  # 確認間隔（秒）
 QUEST_USER_AGENT = "SupportBot-QuestNotifier/1.0"
 _ORBS_RE = re.compile(r"\borbs?\b", re.I)
@@ -3775,7 +3775,9 @@ class QuestFetcher:
                     async for chunk in resp.content.iter_chunked(64 * 1024):
                         size += len(chunk)
                         if size > QUEST_MAX_BODY:
-                            raise self._fail("フィードが大きすぎます。")
+                            raise self._fail(
+                                f"フィードが大きすぎます（{QUEST_MAX_BODY // 1024 // 1024}MB超）。"
+                            )
                         chunks.append(chunk)
                     body = b"".join(chunks)
                 elif resp.status in (429, 503):
@@ -3797,7 +3799,7 @@ class QuestFetcher:
 
         if body is not None:
             try:
-                self._items = parse_quest_feed(body)
+                self._items = await asyncio.to_thread(parse_quest_feed, body)
             except QuestError as exc:
                 raise self._fail(str(exc)) from exc
             self._etag, self._last_modified = etag, modified
