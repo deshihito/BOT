@@ -3654,11 +3654,18 @@ def _quest_from_discord(row: dict) -> "QuestItem | None":
 
 
 def parse_quest_feed(data: bytes) -> list[QuestItem]:
+    data = data.removeprefix(b"\xef\xbb\xbf")  # UTF-8 BOM
     if data.lstrip()[:1] in (b"{", b"["):
         try:
             payload = json.loads(data)
         except ValueError as exc:
-            raise QuestError("フィードのJSONを解析できませんでした。") from exc
+            logger.warning(
+                "QuestフィードのJSON解析に失敗: %s (size=%d, head=%r, tail=%r)",
+                exc, len(data), data[:80], data[-80:],
+            )
+            raise QuestError(
+                f"フィードのJSONを解析できませんでした（{len(data):,}バイト受信: {exc}）。"
+            ) from exc
         rows = payload
         if isinstance(payload, dict):
             for key in ("quests", "data", "items", "results"):
@@ -3675,7 +3682,11 @@ def parse_quest_feed(data: bytes) -> list[QuestItem]:
         for row in rows:
             if not isinstance(row, dict):
                 continue
-            if isinstance(row.get("config"), dict) or "rewards_config" in row:
+            if (
+                isinstance(row.get("config"), dict)
+                or "rewards_config" in row
+                or isinstance(row.get("messages"), dict)  # フラット形式 {id, expires_at, messages, ...}
+            ):
                 converted = _quest_from_discord(row)
                 if converted is not None:
                     items.append(converted)
@@ -3757,9 +3768,16 @@ class QuestFetcher:
                 if resp.status == 304:
                     body = None
                 elif resp.status == 200:
-                    body = await resp.content.read(QUEST_MAX_BODY + 1)
-                    if len(body) > QUEST_MAX_BODY:
-                        raise self._fail("フィードが大きすぎます。")
+                    # StreamReader.read(n) は「最大nバイト」しか保証せず、受信済み分だけ返すため
+                    # 大きなJSONが途中で切れる。EOFまでチャンクで読み切る。
+                    chunks: list[bytes] = []
+                    size = 0
+                    async for chunk in resp.content.iter_chunked(64 * 1024):
+                        size += len(chunk)
+                        if size > QUEST_MAX_BODY:
+                            raise self._fail("フィードが大きすぎます。")
+                        chunks.append(chunk)
+                    body = b"".join(chunks)
                 elif resp.status in (429, 503):
                     try:
                         retry_after = float(resp.headers.get("Retry-After", ""))

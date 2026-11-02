@@ -509,7 +509,7 @@ class ChatButtonView(discord.ui.View):
     async def reply_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         channel_id = interaction.channel_id
         if channel_id not in self.cog.active_personas:
-            await interaction.response.send_message("このチャンネルではセッションが開始されていません。`/general` の「設定・AI」から会話を開始してください。", ephemeral=True)
+            await interaction.response.send_message("このチャンネルではセッションが開始されていません。`/general` の「ZetaModoki」から会話を開始してください。", ephemeral=True)
             return
 
         modal = ResponseModal(self.cog, channel_id)
@@ -551,11 +551,8 @@ class ChatButtonView(discord.ui.View):
         if not isinstance(channel, discord.Thread) or channel.type != discord.ChannelType.private_thread:
             await interaction.response.send_message("このボタンはプライベートスレッド内でのみ使えます。", ephemeral=True)
             return
-        await interaction.response.send_message(
-            "このプライベートスレッドと会話履歴を削除しますか？この操作は取り消せません。",
-            view=DeleteThreadConfirmView(self.cog, channel.id, interaction.user.id),
-            ephemeral=True,
-        )
+        confirm = DeleteThreadConfirmView(self.cog, channel.id, interaction.user.id)
+        await interaction.response.send_message(view=as_panel_v2(confirm), ephemeral=True)
 
 
 class DeleteThreadConfirmView(discord.ui.View):
@@ -564,6 +561,13 @@ class DeleteThreadConfirmView(discord.ui.View):
         self.cog = cog
         self.thread_id = thread_id
         self.requester_id = requester_id
+
+    def embed(self) -> discord.Embed:
+        return discord.Embed(
+            title="プライベートスレッドの削除",
+            description="このプライベートスレッドと会話履歴を削除しますか？この操作は取り消せません。",
+            color=discord.Color.red(),
+        )
 
     @discord.ui.button(label="削除する", style=discord.ButtonStyle.danger)
     async def confirm_delete(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -578,49 +582,59 @@ class DeleteThreadConfirmView(discord.ui.View):
         try:
             await interaction.channel.delete(reason="ZetaModoki private conversation deleted by user")
         except discord.HTTPException:
-            await interaction.followup.send("スレッドを削除できませんでした。Botのスレッド管理権限を確認してください。", ephemeral=True)
+            await interaction.followup.send(
+                view=as_panel_v2(ZetaInfoView(discord.Embed(
+                    title="スレッドを削除できませんでした",
+                    description="Botのスレッド管理権限を確認してください。",
+                    color=discord.Color.red()))),
+                ephemeral=True,
+            )
             return
         self.cog.active_personas.pop(self.thread_id, None)
         self.cog.chat_histories.pop(self.thread_id, None)
         self.cog.failed_requests.pop(self.thread_id, None)
-        await interaction.followup.send("プライベートスレッドを削除しました。", ephemeral=True)
+        await interaction.followup.send(
+            view=as_panel_v2(ZetaInfoView(discord.Embed(
+                title="プライベートスレッドを削除しました", color=discord.Color.purple()))),
+            ephemeral=True,
+        )
 
     @discord.ui.button(label="キャンセル", style=discord.ButtonStyle.secondary)
     async def cancel_delete(self, interaction: discord.Interaction, button: discord.ui.Button):
         if interaction.user.id != self.requester_id:
             await interaction.response.send_message("削除を確認したユーザーだけが操作できます。", ephemeral=True)
             return
-        await interaction.response.edit_message(content="削除をキャンセルしました。", view=None)
+        await edit_panel_v2(interaction, as_panel_v2(ZetaInfoView(discord.Embed(
+            title="削除をキャンセルしました", color=discord.Color.purple()))))
 
 
-# --- ドロップダウンUI ---
-class SessionModeSelect(discord.ui.Select):
-    def __init__(self, parent_view):
-        self.parent_view = parent_view
-        options = [
-            discord.SelectOption(
-                label="公開チャンネル",
-                value="public",
-                description="会話をこのチャンネルで行います",
-                default=parent_view.mode == "public",
-            ),
-            discord.SelectOption(
-                label="プライベートスレッド",
-                value="private",
-                description="自分とBotだけが見えるスレッドで会話します",
-                default=parent_view.mode == "private",
-            ),
-        ]
-        super().__init__(placeholder="会話モードを選択してください", options=options, row=0)
+# --- 開始フロー: ① 会話モード選択 → ② キャラクター選択 ---
+class ModeButton(discord.ui.Button):
+    def __init__(self, parent_view: "CharacterSelectView", mode: str, label: str, emoji: str, disabled: bool = False):
+        self.parent_view, self.mode = parent_view, mode
+        super().__init__(label=label, emoji=emoji, style=discord.ButtonStyle.primary, disabled=disabled, row=0)
 
     async def callback(self, interaction: discord.Interaction):
-        self.parent_view.mode = self.values[0]
-        self.parent_view.rebuild()
-        label = "公開チャンネル" if self.parent_view.mode == "public" else "プライベートスレッド"
-        await interaction.response.edit_message(
-            content=f"会話モード: **{label}**。続けてキャラクターを選択してください。",
-            view=self.parent_view,
-        )
+        view = self.parent_view
+        if interaction.user.id != view.user_id:
+            return await interaction.response.send_message("この画面を開いたユーザーだけ操作できます。", ephemeral=True)
+        view.mode = self.mode
+        view.rebuild()
+        await edit_panel_v2(interaction, as_panel_v2(view))
+
+
+class ModeBackButton(discord.ui.Button):
+    def __init__(self, parent_view: "CharacterSelectView"):
+        self.parent_view = parent_view
+        super().__init__(label="会話モードを選び直す", emoji="↩️", style=discord.ButtonStyle.secondary, row=2)
+
+    async def callback(self, interaction: discord.Interaction):
+        view = self.parent_view
+        if interaction.user.id != view.user_id:
+            return await interaction.response.send_message("この画面を開いたユーザーだけ操作できます。", ephemeral=True)
+        view.mode = None
+        view.rebuild()
+        await edit_panel_v2(interaction, as_panel_v2(view))
 
 
 class CharacterSelect(discord.ui.Select):
@@ -688,31 +702,35 @@ class CharacterSelect(discord.ui.Select):
         super().__init__(placeholder="会話したいキャラクターを選択してください", options=options, row=1)
 
     async def callback(self, interaction: discord.Interaction):
+        view = self.parent_view
+        if interaction.user.id != view.user_id:
+            return await interaction.response.send_message("この画面を開いたユーザーだけ操作できます。", ephemeral=True)
+        if view.mode is None:
+            return await interaction.response.send_message("先に会話モードを選択してください。", ephemeral=True)
+
         selected_key = self.values[0]
         if selected_key.startswith("custom:"):
             entry = self.cog.custom.get(interaction.user.id, selected_key.removeprefix("custom:"))
             if entry is None:
-                await interaction.response.send_message(
+                return await interaction.response.send_message(
                     "その登録が見つかりません。削除された可能性があります。もう一度 `/general` から開始してください。",
                     ephemeral=True,
                 )
-                return
             persona = self.cog.custom.to_persona(entry)
         else:
             persona = PRESETS[selected_key]
+
         target_channel = interaction.channel
-        if self.parent_view.mode == "private":
+        if view.mode == "private":
             if not isinstance(interaction.channel, discord.TextChannel):
-                await interaction.response.send_message(
+                return await interaction.response.send_message(
                     "プライベートスレッドは通常のテキストチャンネルから開始してください。",
                     ephemeral=True,
                 )
-                return
-            await interaction.response.defer()
             thread = None
             try:
                 thread = await interaction.channel.create_thread(
-                    name=f"{persona.name}との会話",
+                    name=_clip(f"{persona.name}との会話", 100),
                     type=discord.ChannelType.private_thread,
                     invitable=False,
                     auto_archive_duration=1440,
@@ -725,13 +743,12 @@ class CharacterSelect(discord.ui.Select):
                         await thread.delete(reason="Failed to add conversation starter")
                     except discord.HTTPException:
                         pass
-                await interaction.edit_original_response(
-                    content="プライベートスレッドを作成できませんでした。Botにプライベートスレッド作成・管理権限があるか確認してください。",
-                    view=None,
+                failed = discord.Embed(
+                    title="プライベートスレッドを作成できませんでした",
+                    description="Botに「プライベートスレッドの作成」「スレッドの管理」権限があるか確認してください。",
+                    color=discord.Color.red(),
                 )
-                return
-        else:
-            await interaction.response.defer()
+                return await edit_panel_v2(interaction, as_panel_v2(ZetaInfoView(failed)))
 
         channel_id = target_channel.id
         self.cog.active_personas[channel_id] = persona
@@ -743,12 +760,14 @@ class CharacterSelect(discord.ui.Select):
             and target_channel.type == discord.ChannelType.private_thread
         )
         mode_text = "プライベートスレッド" if is_private_thread else "公開チャンネル"
-        await interaction.edit_original_response(
-            content=f"【{persona.name}】で会話を開始します。会話先: {target_channel.mention}（{mode_text}）",
-            view=None,
+        started = discord.Embed(
+            title=f"【{persona.name}】で会話を開始します",
+            description=f"会話先: {target_channel.mention}（{mode_text}）",
+            color=discord.Color.purple(),
         )
+        await edit_panel_v2(interaction, as_panel_v2(ZetaInfoView(started)))
 
-        # 2. チャンネル全体に見える Embed を作成して送信
+        # チャンネル(スレッド)全体に見えるお知らせ
         embed = discord.Embed(
             title=f"【{persona.name}】との会話を開始しました！",
             description=(
@@ -757,10 +776,9 @@ class CharacterSelect(discord.ui.Select):
             ),
             color=discord.Color.purple()
         )
-
         await target_channel.send(view=as_panel_v2(ZetaInfoView(embed)))
 
-        # 3. キャラクターの初期メッセージを Webhook で送信
+        # キャラクターの初期メッセージを Webhook で送信
         first_msg_formatted = self.cog._format_narration(persona.first_message)
         try:
             await self.cog._send_webhook_message(
@@ -770,28 +788,54 @@ class CharacterSelect(discord.ui.Select):
             )
         except Exception as e:
             await target_channel.send(
-                f"**{persona.name}**: {first_msg_formatted}", 
-                view=ChatButtonView(
-                    self.cog,
-                    private_thread=isinstance(target_channel, discord.Thread)
-                    and target_channel.type == discord.ChannelType.private_thread,
-                ),
+                f"**{persona.name}**: {first_msg_formatted}",
+                view=ChatButtonView(self.cog, private_thread=is_private_thread),
+                allowed_mentions=discord.AllowedMentions.none(),
             )
-            print(f"Webhook送信エラー: {e}")
+            logger.warning("Webhook送信エラー: %s", e)
 
 
 class CharacterSelectView(discord.ui.View):
-    def __init__(self, cog, user_id: int):
-        super().__init__(timeout=60)
+    """① 公開/プライベートを選ぶ → ② キャラクターを選ぶ。モード未選択ではキャラを選べない。"""
+
+    def __init__(self, cog, user_id: int, private_ok: bool = True):
+        super().__init__(timeout=120)
         self.cog = cog
         self.user_id = user_id
-        self.mode = "public"
+        self.private_ok = private_ok
+        self.mode: str | None = None
         self.rebuild()
 
     def rebuild(self):
         self.clear_items()
-        self.add_item(SessionModeSelect(self))
-        self.add_item(CharacterSelect(self.cog, self))
+        if self.mode is None:
+            self.add_item(ModeButton(self, "public", "公開チャンネル", "📢"))
+            self.add_item(ModeButton(self, "private", "プライベートスレッド", "🔒", disabled=not self.private_ok))
+        else:
+            self.add_item(CharacterSelect(self.cog, self))
+            self.add_item(ModeBackButton(self))
+
+    def embed(self) -> discord.Embed:
+        if self.mode is None:
+            lines = [
+                "会話を行う場所を選んでください。",
+                "",
+                "**📢 公開チャンネル**",
+                "このチャンネルで会話します。他のメンバーにも見えます。",
+                "",
+                "**🔒 プライベートスレッド**",
+                "あなたとBotだけが見えるスレッドを作って会話します。",
+            ]
+            if not self.private_ok:
+                lines += ["", "-# ここは通常のテキストチャンネルではないため、プライベートスレッドは選べません。"]
+            return discord.Embed(title="ZetaModoki — 会話モードの選択",
+                                 description="\n".join(lines), color=discord.Color.purple())
+        label = "公開チャンネル" if self.mode == "public" else "プライベートスレッド"
+        return discord.Embed(
+            title="ZetaModoki — キャラクターの選択",
+            description=f"会話モード: **{label}**\n会話したいキャラクターを選んでください。選ぶとすぐに開始します。",
+            color=discord.Color.purple(),
+        )
 
 
 # --- Main Cog ---
@@ -810,12 +854,11 @@ class ZetaModoki(commands.Cog):
         self.custom = CustomSituationStore()
 
     async def start(self, interaction: discord.Interaction):
-        view = CharacterSelectView(self, interaction.user.id)
-        await interaction.response.send_message(
-            "会話モードと、対話したいキャラクターを選択してください：",
-            view=view,
-            ephemeral=True,
+        view = CharacterSelectView(
+            self, interaction.user.id,
+            private_ok=isinstance(interaction.channel, discord.TextChannel),
         )
+        await interaction.response.send_message(view=as_panel_v2(view), ephemeral=True)
 
     async def register(self, interaction: discord.Interaction):
         """キャラクター＋シチュエーションの新規登録フォームを開く。"""
