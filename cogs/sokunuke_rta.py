@@ -31,6 +31,27 @@ def _duration(seconds: float) -> str:
     return f"{total // 3600}時間{(total % 3600) // 60}分{total % 60}秒"
 
 
+def _human_voice_states(guild) -> list[object]:
+    """Return human voice states across voice/stage channels.
+
+    ``Guild.voice_states`` is not exposed by every supported discord.py build;
+    channel-level ``voice_states`` is the portable source of truth.
+    """
+    channels = list(getattr(guild, "voice_channels", ()) or ())
+    channels.extend(getattr(guild, "stage_channels", ()) or ())
+    states = []
+    seen_users = set()
+    for channel in channels:
+        for user_id, state in (getattr(channel, "voice_states", {}) or {}).items():
+            if user_id in seen_users or getattr(state, "channel", None) is None:
+                continue
+            member = getattr(state, "member", None) or guild.get_member(user_id)
+            if member is not None and not getattr(member, "bot", False):
+                states.append(state)
+                seen_users.add(user_id)
+    return states
+
+
 class SokuNukeRta(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
@@ -89,10 +110,7 @@ class SokuNukeRta(commands.Cog):
         settings = await self._get_settings(member.guild.id)
         if not _enabled(settings, "vc_auto_join_enabled"):
             return
-        humans = [
-            state for state in member.guild.voice_states.values()
-            if state.channel and not getattr(state.member, "bot", False)
-        ]
+        humans = _human_voice_states(member.guild)
         voice_client = member.guild.voice_client
         try:
             connected = voice_client is not None and voice_client.is_connected()
