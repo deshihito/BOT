@@ -1367,13 +1367,25 @@ class GeneralCog(commands.Cog):
         view = GeneralPanel(self)
         await interaction.followup.send(view=as_panel_v2(view), ephemeral=True)
 
+    async def _safe_respond(self, interaction: discord.Interaction, message: str, *, ephemeral: bool = True):
+        """interaction の応答状態に応じて安全にメッセージを返す。
+
+        通常の Interaction でも ShortcutMessageInteraction（メッセージアダプタ）でも
+        同じように動作する。既に応答済みなら followup に切り替える。
+        """
+        try:
+            if interaction.response.is_done():
+                return await interaction.followup.send(message, ephemeral=ephemeral)
+            return await interaction.response.send_message(message, ephemeral=ephemeral)
+        except discord.HTTPException:
+            logger.warning("dispatch_general: error response failed", exc_info=True)
+        return None
+
     async def dispatch_general(self, interaction: discord.Interaction, value: str):
         if value in {"zetamodoki", "zeta_reset", "zeta_register", "zeta_manage"}:
             cog = self.bot.get_cog("ZetaModoki")
             if cog is None:
-                return await interaction.response.send_message(
-                    "ZetaModokiが読み込まれていません。", ephemeral=True
-                )
+                return await self._safe_respond(interaction, "ZetaModokiが読み込まれていません。")
             if value == "zetamodoki":
                 return await cog.start(interaction)
             if value == "zeta_register":
@@ -1381,6 +1393,7 @@ class GeneralCog(commands.Cog):
             if value == "zeta_manage":
                 return await cog.manage(interaction)
             return await cog.reset(interaction)
+
         if value == "aitools":
             from core import ai_tools_router
             from cogs.ai_tools import _enabled as ai_tools_enabled
@@ -1394,6 +1407,7 @@ class GeneralCog(commands.Cog):
                 "BOTにメンションして依頼してください。個人別・機能別の設定はありません。"
             )
             return await interaction.response.send_message(embed=embed, ephemeral=True)
+
         if value == "reasoning_default":
             await interaction.response.defer(ephemeral=True)
             try:
@@ -1408,9 +1422,8 @@ class GeneralCog(commands.Cog):
                 )
             if error:
                 return await interaction.followup.send(error, ephemeral=True)
-            return await interaction.followup.send(
-                embed=view.embed(), view=view, ephemeral=True
-            )
+            return await interaction.followup.send(embed=view.embed(), view=view, ephemeral=True)
+
         if value in {"ai_default", "image_default"}:
             await interaction.response.defer(ephemeral=True)
             kind = "chat" if value == "ai_default" else "image"
@@ -1428,15 +1441,18 @@ class GeneralCog(commands.Cog):
                     ephemeral=True,
                 )
             return await interaction.followup.send(embed=view.embed(), view=view, ephemeral=True)
+
         if value == "shortcut_manage":
             view = ShortcutManagerView(self, interaction.guild_id, interaction.user.id)
             return await interaction.response.send_message(view=as_panel_v2(view), ephemeral=True)
+
         if value == "exp_status":
             view = ExpStatusView(interaction.user.id, interaction.guild_id)
             await view._load_latest()
             return await interaction.response.send_message(
                 view=as_panel_v2(view), ephemeral=True
             )
+
         if value == "exp_ranking":
             view = ExpRankingView(interaction.guild_id)
             await view._load_latest()
@@ -1446,17 +1462,42 @@ class GeneralCog(commands.Cog):
 
         wallet = self.bot.get_cog("WalletCog")
         fujo = self.bot.get_cog("FujoSurvival")
-        if value == "pay":
-            return await interaction.response.send_modal(PayModal(self))
-        if value == "status":
-            return await wallet.user_status(interaction)
-        if value == "coin_leaderboard":
-            return await wallet.leaderboard(interaction)
-        if value in {"bump_leaderboard", "up_leaderboard"}:
+
+        # ===== 経済系 =====
+        if value in {"pay", "status", "coin_leaderboard", "bump_leaderboard", "up_leaderboard"}:
+            if wallet is None:
+                return await self._safe_respond(interaction, "WalletCogが読み込まれていません。")
+            if value == "pay":
+                return await interaction.response.send_modal(PayModal(self))
+            if value == "status":
+                return await wallet.user_status(interaction)
+            if value == "coin_leaderboard":
+                return await wallet.leaderboard(interaction)
             event_type = value.removesuffix("_leaderboard")
-            return await wallet.leaderboard(interaction, app_commands.Choice(name=event_type, value=event_type))
-        action = value.removeprefix("fujo_")
-        return await fujo.fujo(interaction, action, None, "active", None, None)
+            return await wallet.leaderboard(
+                interaction, app_commands.Choice(name=event_type, value=event_type)
+            )
+
+        # ===== fujo（生存確認）系 =====
+        if value.startswith("fujo_"):
+            if fujo is None:
+                return await self._safe_respond(interaction, "FujoSurvivalが読み込まれていません。")
+            action = value.removeprefix("fujo_")
+            try:
+                return await fujo.fujo(interaction, action, None, "active", None, None)
+            except Exception:
+                logger.exception(
+                    "fujo dispatch failed: action=%s user=%s guild=%s",
+                    action, interaction.user.id,
+                    getattr(interaction, "guild_id", None),
+                )
+                return await self._safe_respond(
+                    interaction,
+                    "生存確認機能の処理中にエラーが発生しました。時間をおいて再試行してください。",
+                )
+
+        logger.warning("dispatch_general: unknown action %r", value)
+        return await self._safe_respond(interaction, "この機能は現在利用できません。")
 
     async def execute_shortcut(self, message: discord.Message, item: dict, *, invoker=None):
         try:
