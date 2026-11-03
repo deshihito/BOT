@@ -24,13 +24,15 @@ class FakeSettingsStore:
 class FakeVoiceChannel:
     def __init__(self):
         self.connect = AsyncMock()
+        self.voice_states = {}
 
 
 class FakeGuild:
     def __init__(self, voice_client):
         self.id = 1
         self.voice_client = voice_client
-        self.voice_states = {}
+        self.voice_channels = []
+        self.stage_channels = []
         self.channel = FakeVoiceChannel()
 
     def get_role(self, role_id):
@@ -59,7 +61,8 @@ class SokuNukeRtaFixTest(unittest.IsolatedAsyncioTestCase):
         guild = FakeGuild(voice_client)
         member = types.SimpleNamespace(id=2, bot=False, guild=guild)
         state = types.SimpleNamespace(channel=guild.channel, member=member)
-        guild.voice_states[member.id] = state
+        guild.channel.voice_states[member.id] = state
+        guild.voice_channels.append(guild.channel)
 
         await SokuNukeRta(types.SimpleNamespace()).on_voice_state_update(
             member,
