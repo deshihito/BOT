@@ -125,12 +125,12 @@ class Guess(commands.Cog):
 
     async def _get_profile(self, user_id: str) -> dict:
         result = await asyncio.to_thread(
-            lambda: config.supabase.table("users").select("balance").eq("user_id", user_id).execute()
+            lambda: config.db_api.table("users").select("balance").eq("user_id", user_id).execute()
         )
         if result.data:
             return result.data[0]
         inserted = await asyncio.to_thread(
-            lambda: config.supabase.table("users").insert({
+            lambda: config.db_api.table("users").insert({
                 "user_id": user_id,
                 "balance": 0,
                 "max_box_slots": 20,
@@ -146,14 +146,14 @@ class Guess(commands.Cog):
         """
         for _ in range(UPDATE_ATTEMPTS):
             current = await asyncio.to_thread(
-                lambda: config.supabase.table("users").select("balance").eq("user_id", user_id).execute()
+                lambda: config.db_api.table("users").select("balance").eq("user_id", user_id).execute()
             )
             if not current.data:
                 return None
             old_balance = int(current.data[0].get("balance") or 0)
             new_balance = max(0, old_balance + delta)
             result = await asyncio.to_thread(
-                lambda: config.supabase.table("users")
+                lambda: config.db_api.table("users")
                 .update({"balance": new_balance})
                 .eq("user_id", user_id)
                 .eq("balance", old_balance)
@@ -164,7 +164,7 @@ class Guess(commands.Cog):
             actual_delta = new_balance - old_balance
             try:
                 await asyncio.to_thread(
-                    lambda: config.supabase.table("transaction_history").insert({
+                    lambda: config.db_api.table("transaction_history").insert({
                         "sender_id": user_id if not won else "SYSTEM_GUESS",
                         "receiver_id": "SYSTEM_GUESS" if not won else user_id,
                         "amount": abs(actual_delta),

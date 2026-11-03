@@ -19,14 +19,14 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-for _name, _value in {'SUPABASE_URL': 'https://example.supabase.co', 'SUPABASE_KEY': 'dummy-key'}.items():
+for _name, _value in {'BOT_API_BASE_URL': 'http://127.0.0.1:8787', 'BOT_API_KEY': 'dummy-key'}.items():
     os.environ.setdefault(_name, _value)
 
 from discord import app_commands  # noqa: E402
 
 from core import legacy as legacy_module  # noqa: E402
 from cogs import sio_music  # noqa: E402
-from tests.test_all_commands import FakeSupabase  # noqa: E402
+from tests.test_all_commands import FakeDBAPI  # noqa: E402
 from tests.test_voice_session import make_bot, make_world  # noqa: E402
 
 
@@ -98,7 +98,7 @@ def choice(value):
 class Base(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.bot, self.manager = make_bot()
-        self.bot.supabase = FakeSupabase()
+        self.bot.db_api = FakeDBAPI()
         self.bot.get_guild = lambda gid: self.w.guild if gid == self.w.guild.id else None
         self.w = make_world()
         self.cog = sio_music.VoiceCog(self.bot)
@@ -226,7 +226,7 @@ class PlaylistScopeTest(Base):
     async def test_save_scopes_use_separate_tables(self):
         await self.run_playlist('save', 'mine', 'me')
         await self.run_playlist('save', 'shared', 'server')
-        tables = self.bot.supabase.tables
+        tables = self.bot.db_api.tables
         personal = tables['user_music_playlists']
         self.assertEqual([(r['owner_user_id'], r['name'], len(r['tracks'])) for r in personal],
                          [(self.w.alice.id, 'mine', 3)])
@@ -238,7 +238,7 @@ class PlaylistScopeTest(Base):
     async def test_list_scopes(self):
         await self.run_playlist('save', 'mine', 'me')
         await self.run_playlist('save', 'shared', 'server')
-        self.bot.supabase.tables['playlists'].append({'name': '999:other-guild', 'ids': ['X']})
+        self.bot.db_api.tables['playlists'].append({'name': '999:other-guild', 'ids': ['X']})
         mine = await self.run_playlist('list', scope='me')
         server = await self.run_playlist('list', scope='server')
         bob = await self.run_playlist('list', scope='me', user=self.w.bob)
@@ -250,8 +250,8 @@ class PlaylistScopeTest(Base):
 
     async def test_default_scope_is_personal(self):
         await self.run_playlist('save', 'mine')
-        self.assertIn('user_music_playlists', self.bot.supabase.tables)
-        self.assertNotIn('playlists', self.bot.supabase.tables)
+        self.assertIn('user_music_playlists', self.bot.db_api.tables)
+        self.assertNotIn('playlists', self.bot.db_api.tables)
 
     async def test_play_server_playlist_by_name_ids_and_json(self):
         await self.run_playlist('save', 'shared', 'server')
@@ -278,7 +278,7 @@ class PlaylistScopeTest(Base):
 
     async def test_reads_rows_saved_by_old_commands(self):
         # 旧 !save_current（playlists に "ギルドID:名前"）で保存された行も、scope:サーバー で見える
-        self.bot.supabase.tables.setdefault('playlists', []).append(
+        self.bot.db_api.tables.setdefault('playlists', []).append(
             {'id': 99, 'name': f'{self.w.guild.id}:old-saved', 'ids': ['X1']})
         server = await self.run_playlist('list', scope='server')
         self.assertIn('old-saved', server.texts())
@@ -287,10 +287,10 @@ class PlaylistScopeTest(Base):
         await self.run_playlist('save', 'mine', 'me')
         await self.run_playlist('save', 'shared', 'server')
         await self.run_playlist('delete', 'mine', 'me')
-        self.assertFalse(self.bot.supabase.tables['user_music_playlists'])
-        self.assertTrue(self.bot.supabase.tables['playlists'])
+        self.assertFalse(self.bot.db_api.tables['user_music_playlists'])
+        self.assertTrue(self.bot.db_api.tables['playlists'])
         await self.run_playlist('delete', 'shared', 'server')
-        self.assertFalse(self.bot.supabase.tables['playlists'])
+        self.assertFalse(self.bot.db_api.tables['playlists'])
 
     async def test_direct_attachment_url_can_be_loaded_without_message_lookup(self):
         url = 'https://cdn.discordapp.com/attachments/1/2/song.mp3?x=1'

@@ -165,7 +165,7 @@ if __name__ == "__main__":
 class YandereTeamTest(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         from unittest.mock import patch
-        p = patch.object(jinrou, "supabase", MagicMock())
+        p = patch.object(jinrou, "db_api", MagicMock())
         p.start()
         self.addCleanup(p.stop)
 

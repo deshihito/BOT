@@ -2675,7 +2675,7 @@ class VoiceCog(commands.Cog):
         scope='server' : サーバー共有（テーブル playlists。旧 !save_current・!plist。再生では ID の並びや JSON も受け付ける）
         """
         name = (name or '').strip()
-        db = self.bot.supabase
+        db = self.bot.db_api
         if action == 'play':
             await r.defer()
             if error := await self._ensure_music_connection(r):
@@ -2748,7 +2748,7 @@ class VoiceCog(commands.Cog):
                 logger.exception("Failed to save personal playlist")
                 detail = str(exc).lower()
                 if 'row-level security' in detail or 'permission denied' in detail or '42501' in detail:
-                    message = '保存権限がありません。SupabaseのRLSポリシーと、Botに設定したSupabaseキー（SUPABASE_SERVICE_ROLE_KEY / SUPABASE_KEY）の権限を確認してください。'
+                    message = '保存権限がありません。SupabaseのRLSポリシーと、Botに設定したSupabaseキー（BOT_API_KEY / BOT_API_KEY）の権限を確認してください。'
                 else:
                     message = f'保存に失敗しました。Botログを確認してください。({type(exc).__name__})'
                 return await r.send(embed=we(message), ephemeral=True)
@@ -2789,9 +2789,9 @@ class VoiceCog(commands.Cog):
                 return await r.send(embed=we(f"JSON解析エラー: {e}"))
         elif name:
             tokens = name.replace(',', ' ').split()
-            if self.bot.supabase:
+            if self.bot.db_api:
                 try:
-                    res = self.bot.supabase.table("playlists").select("ids").eq(
+                    res = self.bot.db_api.table("playlists").select("ids").eq(
                         "name", self._server_playlist_key(r.guild.id, name)).execute()
                     if res.data:
                         tokens = res.data[0]["ids"]

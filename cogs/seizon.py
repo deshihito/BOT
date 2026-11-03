@@ -1,16 +1,15 @@
 """生存確認（/fujo）機能。
 
-Supabase の ``fujo_users``（登録者と設定）と ``fujo_activities``（検知ログ）を使う。
+自前DB APIの ``fujo_users``（登録者と設定）と ``fujo_activities``（検知ログ）を使う。
 必要な列は ``docs/sql/fujo.sql`` を参照。
 
-- Supabase のクライアントは同期なので、呼び出しはすべて ``asyncio.to_thread`` で行い、
+- DB API クライアントは同期なので、呼び出しはすべて ``asyncio.to_thread`` で行い、
   Bot 全体が止まらないようにする。
 - 検知はユーザーごとに ``RECORD_INTERVAL`` に 1 回までに間引く（オンライン状態の変化は
   サーバーごとに何度も届くため）。
 - 登録者は起動後にまとめて読み込み、メモリに持つ。未登録者の発言では DB を触らない。
 - 見回りタスクはエラーが出ても止まらない。
-- Supabase 前段の Cloudflare が HTML の 400 を返したり、HTTP/2 接続が
-  瞬間的に切断される（``h2.ConnectionTerminated`` 等）ことがあるため、
+- HTTP接続が瞬間的に切断される（``h2.ConnectionTerminated`` 等）ことがあるため、
   検知ログの INSERT は「一時エラー判定 + 指数バックオフ + ジッター + 直列化」で行う
   （``_is_transient_error`` / ``_insert_activity_with_retry``）。
 """
@@ -24,12 +23,7 @@ from datetime import date, datetime, timedelta, timezone
 import discord
 from discord import app_commands
 from discord.ext import commands, tasks
-from core.supabase_retry import run_with_retry
-
-try:  # テストでは supabase.create_client が差し替えられる
-    import supabase as supabase_module
-except ImportError:  # pragma: no cover
-    supabase_module = None
+from core.api_retry import run_with_retry
 
 log = logging.getLogger(__name__)
 
@@ -110,6 +104,9 @@ def _is_transient_error(exc: Exception) -> bool:
     - asyncio / socket の Connection reset 系
     を対象とする。
     """
+    if getattr(exc, "code", None) == "API_UNAVAILABLE":
+        # 自前APIがDB poolを取得できず、SQL未開始と明示した応答だけ。
+        return True
     if _is_gateway_html_error(exc):
         return True
     # 例外クラス名（MRO 全体）で判定
@@ -141,10 +138,10 @@ def _today() -> date:
 class FujoSurvival(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
-        self.supabase = getattr(bot, "supabase", None)
-        if self.supabase is None and supabase_module is not None:
-            from core.supabase_client import create_client_from_env
-            self.supabase = create_client_from_env()
+        self.db_api = getattr(bot, "db_api", None)
+        if self.db_api is None:
+            from core.api_client import get_client
+            self.db_api = get_client()
         # user_id -> fujo_users の行（メモリ上の写し）
         self.users: dict[int, dict] = {}
         self.users_loaded = False
@@ -209,8 +206,8 @@ class FujoSurvival(commands.Cog):
 
     async def _run(self, build):
         """``build()`` で組み立てたクエリを別スレッドで実行し、data を返す。"""
-        if self.supabase is None:
-            raise RuntimeError("Supabase が設定されていません")
+        if self.db_api is None:
+            raise RuntimeError("BOT_API_BASE_URL または BOT_API_KEY が設定されていません")
         return (await asyncio.to_thread(
             run_with_retry, lambda: build().execute()
         )).data
@@ -226,7 +223,7 @@ class FujoSurvival(commands.Cog):
         for attempt in range(1, _ACTIVITY_INSERT_MAX_ATTEMPTS + 1):
             try:
                 async with _get_insert_sem():
-                    await self._run(lambda: self.supabase.table("fujo_activities").insert(payload))
+                    await self._run(lambda: self.db_api.table("fujo_activities").insert(payload))
                 return True
             except Exception as exc:
                 if not _is_transient_error(exc):
@@ -270,18 +267,18 @@ class FujoSurvival(commands.Cog):
         async with self._load_lock:
             if self.users_loaded:
                 return
-            rows = await self._fetch_all(lambda: self.supabase.table("fujo_users").select(USER_COLUMNS))
+            rows = await self._fetch_all(lambda: self.db_api.table("fujo_users").select(USER_COLUMNS))
             self.users = {int(r["user_id"]): r for r in rows}
             self.users_loaded = True
 
     async def _update_user(self, user_id: int, values: dict):
-        await self._run(lambda: self.supabase.table("fujo_users").update(values).eq("user_id", user_id))
+        await self._run(lambda: self.db_api.table("fujo_users").update(values).eq("user_id", user_id))
         if user_id in self.users:
             self.users[user_id].update(values)
 
     async def _latest_activity(self, user_id: int) -> dict | None:
         rows = await self._run(
-            lambda: self.supabase.table("fujo_activities")
+            lambda: self.db_api.table("fujo_activities")
             .select("detected_at, signal_type, status")
             .eq("user_id", user_id)
             .order("detected_at", desc=True)
@@ -291,7 +288,7 @@ class FujoSurvival(commands.Cog):
 
     async def _activities_since(self, since: datetime, user_id: int | None = None, columns: str = "detected_at") -> list[dict]:
         def build():
-            q = self.supabase.table("fujo_activities").select(columns).gte("detected_at", since.isoformat())
+            q = self.db_api.table("fujo_activities").select(columns).gte("detected_at", since.isoformat())
             return q.eq("user_id", user_id) if user_id is not None else q
         return await self._fetch_all(build)
 
@@ -453,13 +450,13 @@ class FujoSurvival(commands.Cog):
         user_id = interaction.user.id
         await self._ensure_users()
         if user_id in self.users:
-            await self._run(lambda: self.supabase.table("fujo_users").delete().eq("user_id", user_id))
+            await self._run(lambda: self.db_api.table("fujo_users").delete().eq("user_id", user_id))
             self.users.pop(user_id, None)
             self._last_record.pop(user_id, None)
             embed = self.create_simple_embed("追跡解除", "生存確認の追跡を解除しました。これまでの記録と設定も消えました。", 0xe74c3c)
         else:
             row = {"user_id": user_id, "streak_count": 0, "is_frozen": False, "last_pester_level": 0}
-            await self._run(lambda: self.supabase.table("fujo_users").upsert(row, on_conflict="user_id"))
+            await self._run(lambda: self.db_api.table("fujo_users").upsert(row, on_conflict="user_id"))
             self.users[user_id] = dict(row)
             embed = self.create_simple_embed(
                 "追跡開始",
@@ -569,7 +566,7 @@ class FujoSurvival(commands.Cog):
             embed = discord.Embed(title="化石ランキング TOP5", color=0x34495e, description="\n".join(lines) or "まだ記録がありません。")
         else:
             rows = await self._fetch_all(
-                lambda: self.supabase.table("fujo_activities").select("user_id")
+                lambda: self.db_api.table("fujo_activities").select("user_id")
                 .gte("detected_at", (datetime.now(timezone.utc) - timedelta(days=30)).isoformat())
                 .in_("user_id", list(ids))
             )

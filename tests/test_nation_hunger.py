@@ -11,12 +11,12 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from tests.test_nation import NationFakeSupabase, NationTest  # noqa: E402
+from tests.test_nation import NationFakeDBAPI, NationTest  # noqa: E402
 
 from cogs import nation as nation_module  # noqa: E402
 
 
-class AdjustFake(NationFakeSupabase):
+class AdjustFake(NationFakeDBAPI):
     """nation_adjust を、空腹だけ減らす形で再現する。"""
 
     def rpc(self, name, params=None, **kwargs):
@@ -48,7 +48,7 @@ class HungerTest(unittest.TestCase):
     def setUp(self):
         NationTest.setUp(self)
         self.db = AdjustFake()
-        self.bot.supabase = self.db
+        self.bot.db_api = self.db
         self.cog = nation_module.NationCog(self.bot)
         self.db.tables.setdefault("nation_players", []).append(
             {"user_id": "111", "guild_id": "999", "role": "citizen", "hunger": 2})

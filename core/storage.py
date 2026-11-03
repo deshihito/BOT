@@ -1,10 +1,10 @@
-"""小さなキー・バリューの保存先（Supabase のテーブル ``bot_kv``、使えなければローカルの JSON ファイル）。
+"""小さなキー・バリューの保存先（自前API のテーブル ``bot_kv``、使えなければローカルの JSON ファイル）。
 
-ラズパイは git から自動で更新されるため、ローカルのファイルは消えることがある。そこで本命は Supabase に置き、
-Supabase が未設定・テーブルがまだ無い・通信エラーのときはローカルの JSON ファイルに切り替える（落ちない）。
-ローカルのファイルには常に同じ内容を書いておく（Supabase が一時的に使えないときの控え）。
+ラズパイは git から自動で更新されるため、ローカルのファイルは消えることがある。そこで本命は 自前API に置き、
+自前API が未設定・テーブルがまだ無い・通信エラーのときはローカルの JSON ファイルに切り替える（落ちない）。
+ローカルのファイルには常に同じ内容を書いておく（自前API が一時的に使えないときの控え）。
 
-まだ Supabase に送れていない変更は、同じファイルの ``__pending__`` に残す。起動時に読み直しても
+まだ 自前API に送れていない変更は、同じファイルの ``__pending__`` に残す。起動時に読み直しても
 未送信の値を古いリモート値で上書きせず、再接続後に送り直す。同じキーへの set / delete は 1 本の順序で送るので、
 遅い古い保存が新しい保存や削除を打ち消すことはない。
 
@@ -48,9 +48,12 @@ def _lock_for(path: str) -> threading.Lock:
 
 
 def is_missing_table(error: Exception) -> bool:
-    """テーブルが無いことを表すエラーか（PostgREST の PGRST205 / Postgres の 42P01 など）。"""
+    """テーブルが無いことを表すエラーか（旧REST API の PGRST205 / Postgres の 42P01 など）。"""
     text = f"{getattr(error, 'code', '')} {getattr(error, 'message', '')} {error}"
-    return any(s in text for s in ("PGRST205", "42P01", "does not exist", "Could not find the table"))
+    return any(s in text for s in (
+        "TABLE_NOT_FOUND", "TABLE_NOT_ALLOWED", "PGRST205", "42P01",
+        "does not exist", "Could not find the table",
+    ))
 
 
 class KVStore:
@@ -60,7 +63,7 @@ class KVStore:
         if client is _MISSING:
             try:
                 import config
-                client = getattr(config, "supabase", None)
+                client = getattr(config, "db_api", None)
             except Exception:
                 client = None
         self.namespace = namespace
@@ -69,9 +72,9 @@ class KVStore:
         self.timeout = timeout
         self.retry_delay = retry_delay
         self.max_retry_delay = max_retry_delay
-        self._remote_disabled = False   # テーブルが無いときは、再起動まで Supabase を使わない
+        self._remote_disabled = False   # テーブルが無いときは、再起動まで 自前API を使わない
         self._warned = False
-        # key -> {"value": ...} または {"deleted": True}。まだ Supabase に届いていない最新の変更。
+        # key -> {"value": ...} または {"deleted": True}。まだ 自前API に届いていない最新の変更。
         self._pending: dict[str, dict[str, Any]] = self._load_pending()
         self._locks: dict[str, asyncio.Lock] = {}
         self._tasks: set[asyncio.Task] = set()
@@ -86,7 +89,7 @@ class KVStore:
 
     @property
     def has_pending(self) -> bool:
-        """Supabase にまだ送れていない変更があるか。"""
+        """自前API にまだ送れていない変更があるか。"""
         return bool(self._pending)
 
     def _remote_failed(self, action: str, error: Exception) -> None:
@@ -95,13 +98,13 @@ class KVStore:
         if not self._warned:
             self._warned = True
             logger.warning(
-                "Supabase の %s を %s できませんでした。ローカルのファイル（%s）を使います%s: %s",
+                "自前API の %s を %s できませんでした。ローカルのファイル（%s）を使います%s: %s",
                 TABLE, action, self.path,
                 "（テーブルがありません。docs/sql/bot_kv.sql を実行してください）" if self._remote_disabled else "",
                 error,
             )
         else:
-            logger.debug("Supabase の %s を %s できませんでした: %s", TABLE, action, error)
+            logger.debug("自前API の %s を %s できませんでした: %s", TABLE, action, error)
 
     async def _wait_for_thread(self, future: asyncio.Future) -> bool:
         """to_thread の処理が終わるまで待つ。待っている間にキャンセルされたら True。
@@ -411,4 +414,3 @@ async def flush_all(timeout: float = FLUSH_TIMEOUT) -> bool:
     results = await asyncio.gather(*(store.flush(timeout=timeout) for store in stores),
                                    return_exceptions=True)
     return all(result is True for result in results)
-

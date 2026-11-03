@@ -15,8 +15,8 @@ if ROOT not in sys.path:
 
 # 読み込み時にクライアントを作る cog 用のダミー値（実際の通信はしない）
 for name, value in {
-    "SUPABASE_URL": "https://example.supabase.co",
-    "SUPABASE_KEY": "dummy-key",
+    "BOT_API_BASE_URL": "http://127.0.0.1:8787",
+    "BOT_API_KEY": "dummy-key",
     "GROQ_API_KEY": "dummy-key",
     "GEMINI_API_KEY": "dummy-key",
 }.items():

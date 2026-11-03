@@ -1,6 +1,6 @@
-"""/pay の送金の安全性と !gvc delete の権限のテスト。Discord・Supabase には接続しない。
+"""/pay の送金の安全性と !gvc delete の権限のテスト。Discord・DB APIには接続しない。
 
-偽の Discord と偽の Supabase は tests/test_all_commands.py のものを使う。
+偽の Discord とDB APIは tests/test_all_commands.py のものを使う。
 """
 
 import asyncio
@@ -16,19 +16,20 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from tests.test_all_commands import USER_ID, FakeSupabase, fake_context, fake_interaction  # noqa: E402
+from tests.test_all_commands import USER_ID, FakeDBAPI, fake_context, fake_interaction  # noqa: E402
 
 import discord  # noqa: E402
 from discord.ext import commands  # noqa: E402
 
 import config  # noqa: E402
+from core.api_client import APIError  # noqa: E402
 from cogs import sio_globalVC as gvc  # noqa: E402
 from cogs import wallet as wallet_module  # noqa: E402
 
 SENDER, RECEIVER, THIRD = str(USER_ID), str(USER_ID + 1), str(USER_ID + 2)
 
 
-class ThreadSafeFakeSupabase(FakeSupabase):
+class ThreadSafeFakeDBAPI(FakeDBAPI):
     """asyncio.to_thread から同時に呼ばれても壊れないように、1 回の execute をロックで守る。
 
     hooks[(table, action)] に関数を入れると、その操作の直前に呼ばれる（割り込みや失敗の再現用）。
@@ -84,10 +85,13 @@ def user(user_id, bot=False):
 
 class PayTest(unittest.TestCase):
     def setUp(self):
-        self.db = ThreadSafeFakeSupabase()
-        self.patch = patch.object(config, 'supabase', self.db)
+        self.db = ThreadSafeFakeDBAPI()
+        self.patch = patch.object(config, 'db_api', self.db)
         self.patch.start()
         self.addCleanup(self.patch.stop)
+        def rpc_unavailable(*_args, **_kwargs):
+            raise APIError("function is not available", code="RPC_NOT_ALLOWED", status_code=404)
+        self.db.rpc = rpc_unavailable
         self.bot = commands.Bot(command_prefix='!', intents=discord.Intents.none())
         self.cog = wallet_module.WalletCog(self.bot)
 
@@ -100,7 +104,7 @@ class PayTest(unittest.TestCase):
 
     async def pay(self, receiver, amount, sender=USER_ID):
         interaction = make_interaction(self.bot, sender)
-        await self.cog.pay.callback(self.cog, interaction, receiver, amount)
+        await self.cog.pay(interaction, receiver, amount)
         return interaction._sent
 
     def test_successful_pay_moves_coins_and_records_history(self):
@@ -126,7 +130,7 @@ class PayTest(unittest.TestCase):
     def test_wallet_reply_is_coin_embed(self):
         self.set_balance(SENDER, 1234)
         interaction = make_interaction(self.bot, SENDER)
-        asyncio.run(self.cog.user_status.callback(self.cog, interaction))
+        asyncio.run(self.cog.user_status(interaction))
         message = interaction._sent[-1]
         self.assertEqual(message['embed'].fields[0].value, '1,234 AGO')
         self.assertEqual(message['embed'].thumbnail.url, 'attachment://coin.png')
@@ -163,6 +167,19 @@ class PayTest(unittest.TestCase):
         self.assertIn('残高が不足', sent[-1]['content'])
         self.assertEqual(self.balance(SENDER), 10)
         self.assertIsNone(self.balance(RECEIVER))
+
+    def test_ambiguous_atomic_rpc_failure_does_not_run_legacy_transfer(self):
+        self.set_balance(SENDER, 100)
+        self.set_balance(RECEIVER, 5)
+
+        def ambiguous(*_args, **_kwargs):
+            raise APIError("connection lost", code="API_CONNECTION_ERROR")
+        self.db.rpc = ambiguous
+
+        sent = asyncio.run(self.pay(user(RECEIVER), 30))
+        self.assertEqual((self.balance(SENDER), self.balance(RECEIVER)), (100, 5))
+        self.assertIn('二重送金を防ぐ', sent[-1]['content'])
+        self.assertNotIn('transaction_history', self.db.tables)
 
     def test_failure_after_debit_refunds_sender(self):
         self.set_balance(SENDER, 100)

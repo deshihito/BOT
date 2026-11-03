@@ -153,7 +153,7 @@ class JinrouAutoplayTest(unittest.IsolatedAsyncioTestCase):
         self.channel = FakeChannel(300, self.guild)
         self.players = [FakeMember(i, self.guild) for i in range(1, 5)]
         self.cog = jinrou.JinrouCog(FakeBot(self.channel))
-        p = patch.object(jinrou, 'supabase', MagicMock())
+        p = patch.object(jinrou, 'db_api', MagicMock())
         p.start()
         self.addCleanup(p.stop)
         game = self.cog.get_game(self.channel.id)

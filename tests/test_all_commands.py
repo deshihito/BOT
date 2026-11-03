@@ -1,7 +1,7 @@
 """全コマンド（スラッシュ・プレフィックス）を実際に実行してみるテスト。Discord・外部には接続しない。
 
-- Supabase は PostgREST の呼び出し形をまねたメモリ上の偽クライアントに差し替える
-  （``supabase.create_client`` / ``config.supabase`` / ``bot.supabase`` のすべて）。
+- DB API は呼び出し形をまねたメモリ上の偽クライアントに差し替える
+  （``config.db_api`` / ``bot.db_api`` の両方）。
 - ソケット接続とサブプロセスの起動（``sudo systemctl`` やシェル）を禁止する。Gemini・Groq・
   YouTube・D1 などの外部サービスには届かないので、「つながらなくても落ちずに返信する」ことを確かめる。
 - 偽の ``Interaction`` / ``Context`` で全コマンドを代表的な引数で呼び出し、
@@ -30,7 +30,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-for _name, _value in {'SUPABASE_URL': 'https://example.supabase.co', 'SUPABASE_KEY': 'dummy-key',
+for _name, _value in {'BOT_API_BASE_URL': 'http://127.0.0.1:8787', 'BOT_API_KEY': 'dummy-key',
                       'GROQ_API_KEY': 'dummy-key', 'GEMINI_API_KEY': 'dummy-key'}.items():
     os.environ.setdefault(_name, _value)
 
@@ -202,7 +202,7 @@ class FakeQuery:
         return FakeResponse(data)
 
 
-class FakeSupabase:
+class FakeDBAPI:
     def __init__(self):
         self.tables: dict[str, list] = {}
 
@@ -441,12 +441,12 @@ class AllCommandsTest(unittest.TestCase):
             if (ROOT / name).exists():
                 shutil.copy(ROOT / name, work / name)
         os.chdir(work)
-        cls.supabase = FakeSupabase()
-        import supabase as supabase_module
+        cls.db_api = FakeDBAPI()
         import config
+        from core import api_client
         cls.patches = [
-            patch.object(supabase_module, 'create_client', lambda *a, **k: cls.supabase),
-            patch.object(config, 'supabase', cls.supabase),
+            patch.object(api_client, 'get_client', lambda: cls.db_api),
+            patch.object(config, 'db_api', cls.db_api),
             patch.object(socket.socket, 'connect', _blocked),
             patch.object(socket, 'create_connection', _blocked),
             patch.object(socket, 'getaddrinfo', _blocked),
@@ -485,7 +485,7 @@ class AllCommandsTest(unittest.TestCase):
     @classmethod
     async def _run_all(cls):
         cls.bot = commands.Bot(command_prefix='!', intents=discord.Intents.none())
-        cls.bot.supabase = cls.supabase
+        cls.bot.db_api = cls.db_api
         cls.bot.wait_until_ready = AsyncMock(side_effect=asyncio.CancelledError)
         cls.bot.loop = asyncio.get_running_loop()  # ログイン後と同じく bot.loop を使えるようにする
         cls.skipped = {}

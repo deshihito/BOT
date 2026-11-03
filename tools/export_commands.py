@@ -1,4 +1,4 @@
-"""全コマンドのカタログ（JSON）を書き出す。Discord・Supabase・外部サービスには接続しない。
+"""全コマンドのカタログ（JSON）を書き出す。Discord・DB API・外部サービスには接続しない。
 
     python -m tools.export_commands              # 標準出力へ
     python -m tools.export_commands -o commands.json
@@ -28,8 +28,8 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 DUMMY_ENV = {
-    "SUPABASE_URL": "https://example.supabase.co",
-    "SUPABASE_KEY": "dummy-key",
+    "BOT_API_BASE_URL": "http://127.0.0.1:8787",
+    "BOT_API_KEY": "dummy-key",
     "GROQ_API_KEY": "dummy-key",
     "GEMINI_API_KEY": "dummy-key",
 }
@@ -39,8 +39,8 @@ OPTIONAL_COGS = {"judgement": "needle"}
 SHARED_FILES = ("Assets", "assets", "font.ttf", "model", "global_channels.json")
 
 
-class OfflineSupabase:
-    """どんな呼び出しにも自分を返し、execute() で空の結果を返すだけの Supabase の代わり。"""
+class OfflineDBAPI:
+    """どんな呼び出しにも自分を返し、execute() で空の結果を返すオフラインDB API。"""
 
     def __getattr__(self, name):
         return self
@@ -70,16 +70,16 @@ def offline_environment():
     """ダミーのキー・ネットワーク禁止・一時フォルダの中で実行する。"""
     for name, value in DUMMY_ENV.items():
         os.environ.setdefault(name, value)
-    import supabase as supabase_module
-    offline = OfflineSupabase()
+    offline = OfflineDBAPI()
     previous_cwd = os.getcwd()
     with tempfile.TemporaryDirectory() as work, contextlib.ExitStack() as stack:
         for name in SHARED_FILES:
             if (ROOT / name).exists():
                 (Path(work) / name).symlink_to(ROOT / name, target_is_directory=(ROOT / name).is_dir())
-        stack.enter_context(patch.object(supabase_module, "create_client", lambda *a, **k: offline))
         import config
-        stack.enter_context(patch.object(config, "supabase", offline))
+        from core import api_client
+        stack.enter_context(patch.object(api_client, "get_client", lambda: offline))
+        stack.enter_context(patch.object(config, "db_api", offline))
         for target, name, value in (
             (socket.socket, "connect", _blocked),
             (socket, "create_connection", _blocked),
@@ -102,7 +102,7 @@ async def load_offline_bot():
     from discord.ext import commands
 
     bot = commands.Bot(command_prefix="!", intents=discord.Intents.none())
-    bot.supabase = OfflineSupabase()
+    bot.db_api = OfflineDBAPI()
     bot.loop = asyncio.get_running_loop()
 
     async def never_ready():

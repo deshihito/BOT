@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 import os
 import discord
-import config  # config.py から JST や supabase を参照
+import config  # config.py から JST や db_api を参照
 
 def format_log(message: str) -> str:
     """

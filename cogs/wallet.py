@@ -6,6 +6,8 @@ import logging
 import config
 import os
 import traceback
+from core.api_client import APIError
+from core.api_retry import run_with_retry
 
 logger = logging.getLogger(__name__)
 
@@ -58,17 +60,17 @@ class WalletCog(commands.Cog):
             return
         user_id = str(ctx.author.id)
         try:
-            current = config.supabase.table("users").select("balance").eq("user_id", user_id).execute()
+            current = config.db_api.table("users").select("balance").eq("user_id", user_id).execute()
             old_balance = int(current.data[0].get("balance") or 0) if current.data else 0
             if current.data:
-                updated = (config.supabase.table("users").update({"balance": amount})
+                updated = (config.db_api.table("users").update({"balance": amount})
                            .eq("user_id", user_id).eq("balance", old_balance).execute())
             else:
-                updated = config.supabase.table("users").insert({"user_id": user_id, "balance": amount, "debt": 0}).execute()
+                updated = config.db_api.table("users").insert({"user_id": user_id, "balance": amount, "debt": 0}).execute()
             if not updated.data:
                 raise RuntimeError("残高を更新できませんでした。")
             delta = amount - old_balance
-            config.supabase.table("transaction_history").insert({
+            config.db_api.table("transaction_history").insert({
                 "sender_id": "SYSTEM_ADMIN",
                 "receiver_id": user_id,
                 "amount": abs(delta),
@@ -85,11 +87,11 @@ class WalletCog(commands.Cog):
         user_id = str(target.id)
 
         try:
-            response = config.supabase.table("users").select("balance, debt").eq("user_id", user_id).execute()
+            response = config.db_api.table("users").select("balance, debt").eq("user_id", user_id).execute()
             data = response.data
 
             if not data:
-                config.supabase.table("users").insert({"user_id": user_id, "balance": 10, "debt": 0}).execute()
+                config.db_api.table("users").insert({"user_id": user_id, "balance": 10, "debt": 0}).execute()
                 balance = 10
                 debt = 0
             else:
@@ -140,9 +142,24 @@ class WalletCog(commands.Cog):
         # RPCがまだ適用されていない環境では、後段のCASフォールバックを使う。
         try:
             atomic_balance = await self._transfer_atomic(sender_id, receiver_id, amount)
+        except APIError as exc:
+            if exc.code in {"RPC_NOT_ALLOWED", "42883"}:
+                logger.warning("pay: transfer_coins RPC is unavailable; using legacy fallback: %s", exc)
+                atomic_balance = None
+            else:
+                logger.exception("pay: transfer result is uncertain; refusing legacy fallback sender=%s receiver=%s amount=%s", sender_id, receiver_id, amount)
+                await interaction.followup.send(
+                    "送金結果を確認できません。二重送金を防ぐため再処理を中止しました。残高を確認し、解決しない場合は管理者に連絡してください。",
+                    ephemeral=True,
+                )
+                return
         except Exception:
             logger.exception("pay: 原子送金RPCに失敗 sender=%s receiver=%s amount=%s", sender_id, receiver_id, amount)
-            atomic_balance = None
+            await interaction.followup.send(
+                "送金結果を確認できません。二重送金を防ぐため再処理を中止しました。残高を確認し、解決しない場合は管理者に連絡してください。",
+                ephemeral=True,
+            )
+            return
         if atomic_balance is not None:
             mine, extra = coin_embed("送金しました", f"{receiver.mention} に **{amount:,} AGO** を送りました。")
             mine.add_field(name="あなたの残高", value=f"{atomic_balance:,} AGO", inline=True)
@@ -194,7 +211,7 @@ class WalletCog(commands.Cog):
             return
 
         try:
-            await asyncio.to_thread(lambda: config.supabase.table("transaction_history").insert({
+            await asyncio.to_thread(lambda: config.db_api.table("transaction_history").insert({
                 "sender_id": sender_id,
                 "receiver_id": receiver_id,
                 "amount": amount,
@@ -220,7 +237,7 @@ class WalletCog(commands.Cog):
         """
         for _ in range(BALANCE_UPDATE_ATTEMPTS):
             current = await asyncio.to_thread(
-                lambda: config.supabase.table("users").select("balance").eq("user_id", user_id).execute())
+                lambda: config.db_api.table("users").select("balance").eq("user_id", user_id).execute())
             if not current.data:
                 if require_funds:
                     return INSUFFICIENT
@@ -228,7 +245,7 @@ class WalletCog(commands.Cog):
                     return None
                 new_balance = create_with + delta
                 try:
-                    inserted = await asyncio.to_thread(lambda: config.supabase.table("users").insert(
+                    inserted = await asyncio.to_thread(lambda: config.db_api.table("users").insert(
                         {"user_id": user_id, "balance": new_balance, "debt": 0}).execute())
                 except Exception:
                     # 同時に別の処理が行を作った場合など。読み直してやり直す。
@@ -242,7 +259,7 @@ class WalletCog(commands.Cog):
             if require_funds and new_balance < 0:
                 return INSUFFICIENT
             updated = await asyncio.to_thread(
-                lambda: config.supabase.table("users").update({"balance": new_balance})
+                lambda: config.db_api.table("users").update({"balance": new_balance})
                 .eq("user_id", user_id).eq("balance", old_balance).execute())
             if updated.data:
                 return new_balance
@@ -255,20 +272,22 @@ class WalletCog(commands.Cog):
         表すため成功扱いにしない。実DBの関数は送金後の送り手残高(bigint)を返す。
         """
         def _call():
-            response = config.supabase.rpc("transfer_coins", {
+            response = run_with_retry(lambda: config.db_api.rpc("transfer_coins", {
                 "p_sender_id": sender_id,
                 "p_receiver_id": receiver_id,
                 "p_amount": int(amount),
                 "p_new_user_balance": NEW_USER_BALANCE,
-            }).execute()
+            }).execute())
             data = response.data
             if data is None:
-                return None
+                raise APIError("transfer_coins returned no balance", code="RPC_INVALID_RESPONSE", status_code=502)
             if isinstance(data, list):
                 data = data[0] if data else None
             if isinstance(data, dict):
                 data = data.get("balance")
-            return int(data) if data is not None else None
+            if data is None:
+                raise APIError("transfer_coins returned no balance", code="RPC_INVALID_RESPONSE", status_code=502)
+            return int(data)
 
         return await asyncio.to_thread(_call)
 
@@ -293,7 +312,7 @@ class WalletCog(commands.Cog):
             return
         try:
             response = await asyncio.to_thread(
-                lambda: config.supabase.table("users").select("user_id, balance")
+                lambda: config.db_api.table("users").select("user_id, balance")
                 .order("balance", desc=True).limit(10).execute())
             data = response.data or []
             if not data:

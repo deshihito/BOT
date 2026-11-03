@@ -32,8 +32,7 @@ from statistics import median
 import discord
 from discord import app_commands
 from discord.ext import commands, tasks
-from core.supabase_client import key_role, select_key
-from core.supabase_retry import run_with_retry
+from core.api_retry import run_with_retry
 
 logger = logging.getLogger(__name__)
 DISBOARD_BOT_ID = 302050872383242240
@@ -488,7 +487,7 @@ _GONE = object()           # channel permanently unavailable
 class BumpRta(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
-        self.db = getattr(bot, "supabase", None)
+        self.db = getattr(bot, "db_api", None)
         self.clock = DiscordClock()
         # Dedicated pools: other cogs (voice, recording, ...) can saturate the
         # default executor, which used to delay both the DB claim and the send.
@@ -511,13 +510,8 @@ class BumpRta(commands.Cog):
     async def cog_load(self):
         if not self.reminder_worker.is_running():
             self.reminder_worker.start()
-        key, source = select_key()
-        role = key_role(key) if key else "not-set"
-        if self.db is not None and role not in {"anon", "service_role"}:
-            logger.warning(
-                "bump/up RTA RPC requires an anon/service_role key and matching SQL grant; source=%s role=%s",
-                source or "not-set", role,
-            )
+        if self.db is None:
+            logger.warning("bump/up RTA database API is not configured; durable records are disabled")
 
     def cog_unload(self):
         self.reminder_worker.cancel()

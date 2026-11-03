@@ -41,7 +41,7 @@ class AdminPrefixTest(unittest.TestCase):
 
     def test_dungeon_reset_ignores_others(self):
         from cogs import dangeon
-        cog = types.SimpleNamespace(supabase=None)
+        cog = types.SimpleNamespace(db_api=None)
         with patch.object(dangeon, 'dg_maps') as maps:
             c = self.run_cmd(dangeon.DungeonCog.dungeon_reset, cog, 1)
         self.assertFalse(c.send.await_count)
