@@ -43,6 +43,7 @@ GENERAL_GENRES = {
     "survival": ("生存確認", "追跡、アクティブ頻度、フリーズ、失踪警報"),
     "exp": ("EXP・レベル", "チャット/VC/generalのEXPとレベルを確認"),
     "custom": ("設定・AI", "ショートカット、AI tools、チャットAI・画像生成AIの設定"),
+    "zeta": ("ZetaModoki", "ロールプレイ会話の開始、シチュエーション・キャラクターの登録と管理"),
 }
 GENERAL_ACTIONS = {
     "economy": [
@@ -70,6 +71,12 @@ GENERAL_ACTIONS = {
         ("画像生成AIモデルを設定", "image_default"),
         ("AI思考強度を設定", "reasoning_default"),
     ],
+    "zeta": [
+        ("ZetaModokiと会話", "zetamodoki"),
+        ("ZetaModoki会話をリセット", "zeta_reset"),
+        ("シチュエーション・キャラクターを登録", "zeta_register"),
+        ("登録を管理（編集・削除）", "zeta_manage"),
+    ],
 }
 
 SHORTCUT_ROOTS = {
@@ -80,7 +87,13 @@ SHORTCUT_ROOTS = {
                     ("文字起こし開始", "transcribe_start"), ("文字起こし停止", "transcribe_stop"),
                     ("カラオケ開始", "karaoke_start"), ("カラオケ停止", "karaoke_stop"),
                     ("ランダム通話開始", "match_start"), ("ランダム通話終了", "match_stop"),
-                    ("グローバルVC開始", "global_start"), ("グローバルVC終了", "global_stop")]),
+                    ("グローバルVC開始", "global_start"), ("グローバルVC終了", "global_stop"),
+                    # AI toolsからは入力フォームを開かずに完結する操作だけを公開する。
+                    ("録音状態", "record_status"), ("録音音程解析", "record_pitch"),
+                    ("やまびこ状態", "echo_status"), ("カラオケ採点", "karaoke_score"),
+                    ("ボイスチェンジャー停止", "changer_stop"), ("ボイスチェンジャー状態", "changer_status"),
+                    ("グローバルVCルーム一覧", "gvc_room_list"), ("グロチャ接続解除", "gvc_chat_disconnect"),
+                    ("読み上げ停止", "tts_stop"), ("音声トリガー一覧・削除", "trigger_panel")]),
     "game": ("/game", [("ゲーム開始: " + GAME_GUIDES[game]["name"], "game:" + game) for game in GAME_ORDER]),
     "support": ("/support", [("Muted設定", "muted"), ("匿名つぶやき", "whisper"), ("メッセージ削除", "clear"),
                               ("一括ロール操作", "role_bulk"), ("bump/up状態", "bumprta_status"),
@@ -1347,10 +1360,27 @@ class GeneralCog(commands.Cog):
 
     @app_commands.command(name="general", description="Show the general features control panel")
     async def general(self, interaction: discord.Interaction):
+        # Building the panel may touch lazily loaded settings/models.  Reserve
+        # the interaction response before doing any work so Discord's 3-second
+        # acknowledgement deadline cannot turn a valid command into 10062.
+        await interaction.response.defer(ephemeral=True, thinking=True)
         view = GeneralPanel(self)
-        await interaction.response.send_message(view=as_panel_v2(view), ephemeral=True)
+        await interaction.followup.send(view=as_panel_v2(view), ephemeral=True)
 
     async def dispatch_general(self, interaction: discord.Interaction, value: str):
+        if value in {"zetamodoki", "zeta_reset", "zeta_register", "zeta_manage"}:
+            cog = self.bot.get_cog("ZetaModoki")
+            if cog is None:
+                return await interaction.response.send_message(
+                    "ZetaModokiが読み込まれていません。", ephemeral=True
+                )
+            if value == "zetamodoki":
+                return await cog.start(interaction)
+            if value == "zeta_register":
+                return await cog.register(interaction)
+            if value == "zeta_manage":
+                return await cog.manage(interaction)
+            return await cog.reset(interaction)
         if value == "aitools":
             from core import ai_tools_router
             from cogs.ai_tools import _enabled as ai_tools_enabled

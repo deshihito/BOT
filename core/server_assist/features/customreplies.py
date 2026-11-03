@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import random
 import time
 import uuid
 from typing import Any
@@ -86,6 +87,24 @@ def match_reply(replies: list[dict[str, str]], content: str) -> dict[str, str] |
     )
 
 
+def choose_response(response: str) -> str:
+    """選択記法がある返信から、送信する候補を1つ選ぶ。
+
+    返信内容に ``:`` で始まる行がある場合だけ、各行を候補として扱う。
+    ``:`` のない通常行も候補に含め、候補行の先頭の ``:`` は取り除く。
+    記法がない既存の複数行返信は、従来どおり全文を返す。
+    """
+    lines = response.splitlines()
+    if not any(line.startswith(":") for line in lines):
+        return response
+    candidates = [
+        line[1:] if line.startswith(":") else line
+        for line in lines
+        if line.startswith(":") or line.strip()
+    ]
+    return random.choice(candidates) if candidates else response
+
+
 async def on_message(cog: Any, message: Any) -> None:
     guild = getattr(message, "guild", None)
     author = getattr(message, "author", None)
@@ -105,16 +124,17 @@ async def on_message(cog: Any, message: Any) -> None:
     if now - _last_sent.get(key, 0.0) < COOLDOWN_SECONDS:
         return
     _last_sent[key] = now
+    response = choose_response(reply["response"])
     try:
         await message.reply(
-            reply["response"],
+            response,
             mention_author=False,
             allowed_mentions=discord.AllowedMentions.none(),
         )
     except (discord.Forbidden, discord.HTTPException, AttributeError):
         try:
             await message.channel.send(
-                reply["response"],
+                response,
                 allowed_mentions=discord.AllowedMentions.none(),
             )
         except (discord.Forbidden, discord.HTTPException):
@@ -225,7 +245,7 @@ class CustomReplyModal(discord.ui.Modal):
             required=True,
         )
         self.response_input = discord.ui.TextInput(
-            label="返信内容",
+            label="返信内容（候補は各行の先頭に :）",
             style=discord.TextStyle.paragraph,
             default=str((reply or {}).get("response") or "")[:1500],
             max_length=1500,

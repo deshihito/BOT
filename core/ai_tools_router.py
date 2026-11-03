@@ -32,6 +32,10 @@ class AIToolsDecisionError(RuntimeError):
     pass
 
 
+class AIToolsNoAction(AIToolsDecisionError):
+    """Clefが実行対象なしと判断したことを示す。"""
+
+
 def action_candidates() -> dict[str, dict[str, str]]:
     """危険な操作を除き、AI toolsが選択可能な全機能を候補化する。"""
     from cogs.general import SHORTCUT_ROOTS
@@ -104,7 +108,7 @@ async def decide_action(prompt: str, candidates: dict[str, dict[str, str]]) -> s
             )
             selected = _extract_choice(data, "action")
             if selected == "none":
-                raise AIToolsDecisionError("Clefが実行不要または判断不能と判定しました。")
+                raise AIToolsNoAction("Clefが実行不要または判断不能と判定しました。")
             if selected not in candidates:
                 raise AIToolsDecisionError("Clefが許可されていない機能を選択しました。")
             return selected

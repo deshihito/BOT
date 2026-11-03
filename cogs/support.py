@@ -1416,7 +1416,11 @@ class RolePanelSendButton(discord.ui.Button):
         await interaction.response.defer(ephemeral=True)
 
         try:
-            await channel.send(view=RolePanelUserView(interaction.guild, valid_role_ids))
+            await channel.send(
+                view=RolePanelUserView(interaction.guild, valid_role_ids),
+                # Show role mentions for readability without notifying those roles.
+                allowed_mentions=discord.AllowedMentions.none(),
+            )
         except (discord.Forbidden, discord.HTTPException):
             logger.exception("ロールパネルの送信に失敗しました")
             await interaction.followup.send(
