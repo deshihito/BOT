@@ -82,9 +82,6 @@ class LocalizationCog(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
 
-    async def cog_load(self):
-        await get_store().ensure_loaded()
-
     async def set_locale(self, guild_id: int, locale: str) -> str:
         locale = localization.normalize_locale(locale)
         await get_store().update(guild_id, localization.LANGUAGE_SECTION, locale=locale)
