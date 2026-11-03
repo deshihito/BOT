@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import html as _html
+import inspect
 import json
 import logging
 import os
@@ -78,6 +79,11 @@ SUPPORT_ACTIONS = [
     app_commands.Choice(name="レベルアップ通知（EXP）", value="levelup_notify"),
     app_commands.Choice(name="サーバーアシスト設定", value="server_assist"),
     app_commands.Choice(name="音声トリガー登録", value="voice_trigger"),
+    app_commands.Choice(name="即抜けRTA状態", value="sokunuke_status"),
+    app_commands.Choice(name="即抜けRTA計測オン", value="sokunuke_on"),
+    app_commands.Choice(name="即抜けRTA計測オフ", value="sokunuke_off"),
+    app_commands.Choice(name="VC自動参加オン", value="sokunuke_vc_on"),
+    app_commands.Choice(name="VC自動参加オフ", value="sokunuke_vc_off"),
 ]
 
 SUPPORT_GENRES = {
@@ -94,6 +100,7 @@ SUPPORT_GENRES = {
         "参加・退出メッセージ、自動ロール、Starboard、レベル、一時VC",
     ),
     "bumprta": ("bump/up・RTA", "通知設定と RTA 状態・ランキング"),
+    "sokunuke": ("即抜けRTA", "24時間以内の退出計測、ランキング、VC自動参加"),
     "event": ("イベント", "抽選の作成"),
     "notify": ("SNS・Quest通知", "X・YouTubeの新着通知、Discord Quest（Orbs）の通知（管理者のみ）"),
 }
@@ -123,6 +130,7 @@ SUPPORT_ACTIONS_BY_GENRE = {
         )
     ],
     "bumprta": [(c.name, c.value) for c in SUPPORT_ACTIONS[5:8]],
+    "sokunuke": [(c.name, c.value) for c in SUPPORT_ACTIONS[24:29]],
     "event": [(SUPPORT_ACTIONS[9].name, SUPPORT_ACTIONS[9].value)],
     "assist": [("サーバーアシスト設定", "server_assist")],
 }
@@ -2569,8 +2577,11 @@ class GiveawayModal(discord.ui.Modal, title="抽選を作成"):
         self.cog = cog
 
     async def on_submit(self, interaction: discord.Interaction):
+        # A modal submit has the same short acknowledgement deadline as a
+        # slash command.  Defer before validation or handing off to GiveawayCog.
+        await interaction.response.defer(ephemeral=True, thinking=True)
         if interaction.guild is None:
-            return await interaction.response.send_message(
+            return await interaction.followup.send(
                 "この機能はサーバー内で利用できます。",
                 ephemeral=True,
             )
@@ -2580,7 +2591,7 @@ class GiveawayModal(discord.ui.Modal, title="抽選を作成"):
             getattr(permissions, "manage_guild", False)
             or getattr(permissions, "administrator", False)
         ):
-            return await interaction.response.send_message(
+            return await interaction.followup.send(
                 "抽選の作成にはサーバー管理権限が必要です。",
                 ephemeral=True,
             )
@@ -2589,7 +2600,7 @@ class GiveawayModal(discord.ui.Modal, title="抽選を作成"):
             winners = int(self.winners.value)
             minutes = int(self.minutes.value)
         except ValueError:
-            return await interaction.response.send_message(
+            return await interaction.followup.send(
                 "当選人数と分数は整数で入力してください。",
                 ephemeral=True,
             )
@@ -3558,15 +3569,99 @@ class SnsNotifyPanel(discord.ui.LayoutView):
 
 # ===== Discord Quest 通知 ==============================================
 QUEST_SECTION = "quest_notify"
-QUEST_MAX_SEEN = 200
+QUEST_MAX_SEEN = 2000  # 安全弁。通常は「現在も有効なQuestのID」だけを保持するので小さく収まる
 QUEST_MAX_SEND_PER_CYCLE = 5
-QUEST_MAX_BODY = 2 * 1024 * 1024
+QUEST_MAX_BODY = 16 * 1024 * 1024  # 全Questの履歴を含むため大きい（2MB超を確認済み）
 QUEST_POLL_SECONDS = 900  # 確認間隔（秒）
 QUEST_USER_AGENT = "SupportBot-QuestNotifier/1.0"
 _ORBS_RE = re.compile(r"\borbs?\b", re.I)
 
 
 QUEST_FEED_URL = "https://api.discordquest.com/api/quests"
+QUEST_REGIONS_URL = "https://api.discordquest.com/api/regions"
+
+# ギルドの言語 → 通知対象にする国・地域（ISO 3166-1 alpha-2）。
+# Questは国ごとに提供有無が違う。いずれかの国で提供されているQuestだけ通知する。
+QUEST_LANGUAGE_COUNTRIES: dict[str, frozenset[str]] = {
+    k: frozenset(v.split())
+    for k, v in {
+        "ja": "JP", "ko": "KR", "zh": "CN TW HK", "zh-cn": "CN", "zh-tw": "TW HK",
+        "en": "US GB CA AU NZ IE", "en-us": "US", "en-gb": "GB",
+        "fr": "FR BE CH CA", "de": "DE AT CH", "it": "IT", "nl": "NL",
+        "es": "ES MX AR CL CO", "es-es": "ES", "es-419": "MX AR CL CO",
+        "pt": "BR PT", "pt-br": "BR", "ru": "RU", "uk": "UA", "pl": "PL",
+        "tr": "TR", "id": "ID", "th": "TH", "vi": "VN", "hi": "IN",
+        "sv": "SE", "sv-se": "SE", "da": "DK", "fi": "FI", "no": "NO",
+        "cs": "CZ", "hu": "HU", "el": "GR", "ro": "RO", "bg": "BG",
+        "hr": "HR", "lt": "LT", "ar": "SA AE EG",
+    }.items()
+}
+_QUEST_LANG_RE = re.compile(r"[A-Za-z]{2,3}(?:[-_][A-Za-z0-9]{2,4})?")
+QUEST_LANG_SECTIONS = ("language", "localization", "locale", "lang")
+QUEST_LANG_KEYS = ("language", "locale", "lang", "code", "value")
+
+
+def quest_language_countries(language: str | None) -> frozenset[str]:
+    """言語コード（ja / en-US / zh_TW など）を国コード集合にする。不明なら空集合。"""
+    code = str(language or "").strip().lower().replace("_", "-")
+    if not _QUEST_LANG_RE.fullmatch(code):
+        return frozenset()
+    return QUEST_LANGUAGE_COUNTRIES.get(code) or QUEST_LANGUAGE_COUNTRIES.get(code.split("-")[0], frozenset())
+
+
+@dataclass(frozen=True)
+class QuestRegion:
+    include: frozenset[str] = frozenset()
+    exclude: frozenset[str] = frozenset()
+    is_global: bool = False
+
+    def available_in(self, countries: frozenset[str]) -> bool:
+        """countries のいずれかで提供されるか。提供範囲が不明なQuestは除外しない。"""
+        if not self.include and not self.exclude and not self.is_global:
+            return True
+        return any(
+            c not in self.exclude and (not self.include or c in self.include)
+            for c in countries
+        )
+
+
+def _quest_country(value) -> str | None:
+    if not isinstance(value, str) or not value.strip():
+        return None
+    code = value.strip().upper()
+    return "GB" if code == "UK" else code
+
+
+def parse_quest_regions(data: bytes) -> dict[str, QuestRegion]:
+    """/api/regions を {quest_id: QuestRegion} にする。"""
+    try:
+        payload = json.loads(data.removeprefix(b"\xef\xbb\xbf"))
+    except ValueError as exc:
+        raise QuestError(f"リージョン情報のJSONを解析できませんでした（{exc}）。") from exc
+    rows = payload.get("quests") if isinstance(payload, dict) else payload
+    if not isinstance(rows, list):
+        raise QuestError("リージョン情報の形式を認識できませんでした。")
+
+    result: dict[str, QuestRegion] = {}
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        raw_id = row.get("id")
+        if isinstance(raw_id, bool) or not isinstance(raw_id, (str, int)) or not str(raw_id).strip():
+            continue
+        regions = row.get("regions")
+        if isinstance(regions, list):
+            include, exclude = regions, []
+        elif isinstance(regions, dict):
+            include, exclude = regions.get("include") or [], regions.get("exclude") or []
+        else:
+            include, exclude = [], []
+        result[str(raw_id).strip()[:100]] = QuestRegion(
+            include=frozenset(filter(None, map(_quest_country, include if isinstance(include, list) else []))),
+            exclude=frozenset(filter(None, map(_quest_country, exclude if isinstance(exclude, list) else []))),
+            is_global=row.get("is_global") is True,
+        )
+    return result
 
 
 def _quest_feed_url() -> str:
@@ -3644,11 +3739,18 @@ def _quest_from_discord(row: dict) -> "QuestItem | None":
 
 
 def parse_quest_feed(data: bytes) -> list[QuestItem]:
+    data = data.removeprefix(b"\xef\xbb\xbf")  # UTF-8 BOM
     if data.lstrip()[:1] in (b"{", b"["):
         try:
             payload = json.loads(data)
         except ValueError as exc:
-            raise QuestError("フィードのJSONを解析できませんでした。") from exc
+            logger.warning(
+                "QuestフィードのJSON解析に失敗: %s (size=%d, head=%r, tail=%r)",
+                exc, len(data), data[:80], data[-80:],
+            )
+            raise QuestError(
+                f"フィードのJSONを解析できませんでした（{len(data):,}バイト受信: {exc}）。"
+            ) from exc
         rows = payload
         if isinstance(payload, dict):
             for key in ("quests", "data", "items", "results"):
@@ -3665,7 +3767,11 @@ def parse_quest_feed(data: bytes) -> list[QuestItem]:
         for row in rows:
             if not isinstance(row, dict):
                 continue
-            if isinstance(row.get("config"), dict) or "rewards_config" in row:
+            if (
+                isinstance(row.get("config"), dict)
+                or "rewards_config" in row
+                or isinstance(row.get("messages"), dict)  # フラット形式 {id, expires_at, messages, ...}
+            ):
                 converted = _quest_from_discord(row)
                 if converted is not None:
                     items.append(converted)
@@ -3711,6 +3817,8 @@ class QuestFetcher:
         self._etag: str | None = None
         self._last_modified: str | None = None
         self._items: list[QuestItem] = []
+        self.regions: dict[str, QuestRegion] = {}
+        self._regions_etag: str | None = None
         self._next_allowed = 0.0
         self._failures = 0
         self.last_ok: float | None = None
@@ -3747,9 +3855,18 @@ class QuestFetcher:
                 if resp.status == 304:
                     body = None
                 elif resp.status == 200:
-                    body = await resp.content.read(QUEST_MAX_BODY + 1)
-                    if len(body) > QUEST_MAX_BODY:
-                        raise self._fail("フィードが大きすぎます。")
+                    # StreamReader.read(n) は「最大nバイト」しか保証せず、受信済み分だけ返すため
+                    # 大きなJSONが途中で切れる。EOFまでチャンクで読み切る。
+                    chunks: list[bytes] = []
+                    size = 0
+                    async for chunk in resp.content.iter_chunked(64 * 1024):
+                        size += len(chunk)
+                        if size > QUEST_MAX_BODY:
+                            raise self._fail(
+                                f"フィードが大きすぎます（{QUEST_MAX_BODY // 1024 // 1024}MB超）。"
+                            )
+                        chunks.append(chunk)
+                    body = b"".join(chunks)
                 elif resp.status in (429, 503):
                     try:
                         retry_after = float(resp.headers.get("Retry-After", ""))
@@ -3769,7 +3886,7 @@ class QuestFetcher:
 
         if body is not None:
             try:
-                self._items = parse_quest_feed(body)
+                self._items = await asyncio.to_thread(parse_quest_feed, body)
             except QuestError as exc:
                 raise self._fail(str(exc)) from exc
             self._etag, self._last_modified = etag, modified
@@ -3777,7 +3894,36 @@ class QuestFetcher:
         self._failures = 0
         self.last_error = None
         self.last_ok = time.time()
+        await self._fetch_regions()
         return list(self._items)
+
+    async def _fetch_regions(self) -> None:
+        """国別の提供情報。失敗してもQuest通知自体は止めず、前回の取得分を使い続ける。"""
+        headers = {"User-Agent": QUEST_USER_AGENT, "Accept": "application/json"}
+        if self._regions_etag and self.regions:
+            headers["If-None-Match"] = self._regions_etag
+        try:
+            async with self.session.get(QUEST_REGIONS_URL, headers=headers) as resp:
+                if resp.status == 304:
+                    return
+                if resp.status != 200:
+                    logger.warning("Questリージョン情報の取得に失敗（HTTP %s）", resp.status)
+                    return
+                chunks: list[bytes] = []
+                size = 0
+                async for chunk in resp.content.iter_chunked(64 * 1024):
+                    size += len(chunk)
+                    if size > QUEST_MAX_BODY:
+                        logger.warning("Questリージョン情報が大きすぎます")
+                        return
+                    chunks.append(chunk)
+                etag = resp.headers.get("ETag")
+            self.regions = await asyncio.to_thread(parse_quest_regions, b"".join(chunks))
+            self._regions_etag = etag
+        except QuestError as exc:
+            logger.warning("Questリージョン情報の解析に失敗: %s", exc)
+        except (asyncio.TimeoutError, aiohttp.ClientError) as exc:
+            logger.warning("Questリージョン情報の取得に失敗（%s）", type(exc).__name__)
 
 
 def get_quest_settings(store, guild_id: int) -> dict:
@@ -3982,11 +4128,12 @@ class QuestManualModal(discord.ui.Modal):
 class QuestNotifyPanel(discord.ui.LayoutView):
     """Quest通知の設定パネル（Components V2・管理者専用）。"""
 
-    def __init__(self, cog: "SupportCog", settings: dict, notice: str | None = None):
+    def __init__(self, cog: "SupportCog", settings: dict, notice: str | None = None, lang_label: str = ""):
         super().__init__(timeout=300)
         self.cog = cog
         self.settings = settings
         self.notice = notice
+        self.lang_label = lang_label
         self._build()
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
@@ -4012,7 +4159,8 @@ class QuestNotifyPanel(discord.ui.LayoutView):
             f"送信先: {channel}\n"
             f"メンション: {role}\n"
             f"対象: {'Orbs報酬のみ' if s['orbs_only'] else 'すべてのQuest'}\n"
-            f"取得元: {source}\n"
+            + (f"言語圏: {self.lang_label}\n" if self.lang_label else "")
+            + f"取得元: {source}\n"
             f"確認間隔: 約{QUEST_POLL_SECONDS // 60}分ごと"
         )
         error = self.cog.quest_last_error()
@@ -4047,6 +4195,7 @@ class QuestNotifyPanel(discord.ui.LayoutView):
         await store.ensure_loaded()
         self.settings = get_quest_settings(store, interaction.guild_id)
         self.notice = notice
+        self.lang_label = await self.cog.quest_language_label(interaction.guild)
         self._build()
         await edit_interaction_message(interaction, view=self)
 
@@ -4267,6 +4416,11 @@ class SupportCog(commands.Cog):
         "quest_notify": "administrator",
         "levelup_notify": "manage_guild",
         "server_assist": "manage_guild",
+        "sokunuke_status": "manage_guild",
+        "sokunuke_on": "manage_guild",
+        "sokunuke_off": "manage_guild",
+        "sokunuke_vc_on": "manage_guild",
+        "sokunuke_vc_off": "manage_guild",
     }
 
     def __init__(self, bot: commands.Bot):
@@ -4508,6 +4662,59 @@ class SupportCog(commands.Cog):
     def quest_last_error(self) -> str | None:
         return self._quest.last_error if self._quest is not None else None
 
+    async def quest_guild_language(self, guild: discord.Guild) -> tuple[str, str]:
+        """ギルドに設定された言語を (言語コード, 取得元) で返す。"""
+        store = guild_settings.get_store()
+        await store.ensure_loaded()
+
+        cog = self.bot.get_cog("LocalizationCog")
+        if cog is not None:
+            for name in (
+                "get_guild_language", "guild_language", "get_language",
+                "get_guild_locale", "get_locale", "language_for", "get_lang",
+            ):
+                fn = getattr(cog, name, None)
+                if not callable(fn):
+                    continue
+                for arg in (guild.id, guild):
+                    try:
+                        value = fn(arg)
+                        if inspect.isawaitable(value):
+                            value = await value
+                    except Exception:
+                        continue
+                    if isinstance(value, str) and quest_language_countries(value):
+                        return value.strip(), f"LocalizationCog.{name}"
+
+        for section in QUEST_LANG_SECTIONS:
+            try:
+                raw = store.get(guild.id, section)
+            except Exception:
+                continue
+            candidates = [raw] if isinstance(raw, str) else (
+                [raw.get(k) for k in QUEST_LANG_KEYS] if isinstance(raw, dict) else []
+            )
+            for value in candidates:
+                if isinstance(value, str) and quest_language_countries(value):
+                    return value.strip(), f"設定:{section}"
+
+        preferred = getattr(guild, "preferred_locale", None)
+        preferred = str(getattr(preferred, "value", preferred) or "")
+        if quest_language_countries(preferred):
+            return preferred, "サーバーの優先言語"
+        return "en", "既定値"
+
+    async def quest_language_label(self, guild: discord.Guild | None) -> str:
+        if guild is None:
+            return ""
+        try:
+            language, source = await self.quest_guild_language(guild)
+        except Exception:
+            logger.exception("Quest通知の言語設定を取得できませんでした (guild=%s)", guild.id)
+            return ""
+        countries = ", ".join(sorted(quest_language_countries(language)))
+        return f"**{language}**（{countries}で提供のQuestのみ）\n-# 言語の取得元: {source}"
+
     async def show_quest_notify_settings(self, interaction: discord.Interaction):
         if interaction.guild is None:
             return await interaction.response.send_message(
@@ -4524,8 +4731,9 @@ class SupportCog(commands.Cog):
         store = guild_settings.get_store()
         await store.ensure_loaded()
         settings = get_quest_settings(store, interaction.guild.id)
+        label = await self.quest_language_label(interaction.guild)
         await interaction.response.send_message(
-            view=QuestNotifyPanel(self, settings),
+            view=QuestNotifyPanel(self, settings, lang_label=label),
             ephemeral=True,
         )
 
@@ -4624,24 +4832,55 @@ class SupportCog(commands.Cog):
         logger.error("Quest通知の巡回ループが異常終了しました", exc_info=error)
 
     async def _quest_poll_guild(self, guild: discord.Guild, store, settings: dict, items: list[QuestItem]):
-        seen = list(settings["seen"])
-
-        if not settings["primed"]:
-            seen.extend(i.id for i in items if i.id not in set(seen))
-            async with self.quest_lock(guild.id):
-                await store.update(guild.id, QUEST_SECTION, seen=seen[-QUEST_MAX_SEEN:], primed=True)
-            return
-
-        seen_set = set(seen)
-        fresh = [i for i in items if i.id not in seen_set]
-        if not fresh:
-            return
+        # フィードは過去分を含めて数百件以上ある。期限切れは通知対象にせず、
+        # 既読(seen)も「現在有効なQuest」のIDだけを保持する。
+        # （固定件数で古い順に捨てると、捨てたIDが「新着」と誤判定されて再通知される）
+        if not items:
+            return  # 取得結果が空のときは既読を触らない（一時的な空応答での巻き戻し防止）
 
         now = time.time()
-        expired_ids = {i.id for i in fresh if (sns_epoch(i.ends_at) or now + 1) < now}
-        if expired_ids:
-            seen.extend(sorted(expired_ids))
-            fresh = [i for i in fresh if i.id not in expired_ids]
+        live = [i for i in items if (sns_epoch(i.ends_at) or now + 1) >= now]
+        live_ids = {i.id for i in live}
+        seen_before = list(settings["seen"])
+
+        if not settings["primed"]:
+            async with self.quest_lock(guild.id):
+                await store.update(
+                    guild.id, QUEST_SECTION,
+                    seen=list(dict.fromkeys(i.id for i in live))[-QUEST_MAX_SEEN:],
+                    primed=True,
+                )
+            return
+
+        # まだ有効なものだけ既読として残す（期限切れ・フィードから消えたIDは捨てる）
+        keep = [sid for sid in dict.fromkeys(seen_before) if sid in live_ids]
+        keep_set = set(keep)
+        fresh = [i for i in live if i.id not in keep_set]
+
+        # ギルドの言語圏で提供されていないQuestは通知せず既読にする
+        regions = self._quest.regions if self._quest is not None else {}
+        if regions and fresh:
+            language, source = await self.quest_guild_language(guild)
+            countries = quest_language_countries(language)
+            if countries:
+                blocked = [
+                    i for i in fresh
+                    if i.id in regions and not regions[i.id].available_in(countries)
+                ]
+                if blocked:
+                    logger.info(
+                        "Quest通知: 言語圏(%s=%s, %s)外の%d件を除外 (guild=%s)",
+                        language, "/".join(sorted(countries)), source, len(blocked), guild.id,
+                    )
+                    blocked_ids = {i.id for i in blocked}
+                    keep.extend(blocked_ids)
+                    fresh = [i for i in fresh if i.id not in blocked_ids]
+
+        if not fresh:
+            if len(keep) != len(seen_before):
+                async with self.quest_lock(guild.id):
+                    await store.update(guild.id, QUEST_SECTION, seen=keep[-QUEST_MAX_SEEN:])
+            return
 
         channel = self._quest_channel(guild, settings)
         if channel is None:
@@ -4651,25 +4890,30 @@ class SupportCog(commands.Cog):
         mentions = self._quest_mentions(role_id)
 
         if settings["orbs_only"]:
-            seen.extend(i.id for i in fresh if not i.is_orbs)
+            keep.extend(i.id for i in fresh if not i.is_orbs)
             fresh = [i for i in fresh if i.is_orbs]
 
         fresh.sort(key=lambda i: sns_epoch(i.ends_at) or 0)
         if len(fresh) > QUEST_MAX_SEND_PER_CYCLE:
-            seen.extend(i.id for i in fresh[:-QUEST_MAX_SEND_PER_CYCLE])
+            keep.extend(i.id for i in fresh[:-QUEST_MAX_SEND_PER_CYCLE])
             fresh = fresh[-QUEST_MAX_SEND_PER_CYCLE:]
 
-        for item in fresh:
-            try:
-                await channel.send(view=QuestNotifyMessage(item, role_id), allowed_mentions=mentions)
-            except (discord.Forbidden, discord.HTTPException) as exc:
-                logger.warning("Quest通知の送信に失敗 (guild=%s %s): %s", guild.id, item.id, exc)
-                break
-            seen.append(item.id)
-            await asyncio.sleep(1)
-
-        async with self.quest_lock(guild.id):
-            await store.update(guild.id, QUEST_SECTION, seen=seen[-QUEST_MAX_SEEN:])
+        try:
+            for item in fresh:
+                try:
+                    await channel.send(view=QuestNotifyMessage(item, role_id), allowed_mentions=mentions)
+                except (discord.Forbidden, discord.HTTPException) as exc:
+                    logger.warning("Quest通知の送信に失敗 (guild=%s %s): %s", guild.id, item.id, exc)
+                    break
+                keep.append(item.id)
+                await asyncio.sleep(1)
+        finally:
+            # 途中で例外が起きても、送信済みIDは必ず保存して重複通知を防ぐ
+            async with self.quest_lock(guild.id):
+                await store.update(
+                    guild.id, QUEST_SECTION,
+                    seen=list(dict.fromkeys(keep))[-QUEST_MAX_SEEN:],
+                )
 
     async def show_auth_settings(self, interaction: discord.Interaction):
         if interaction.guild is None:
@@ -5519,10 +5763,10 @@ class SupportCog(commands.Cog):
         )
 
     async def _missing(self, interaction: discord.Interaction, name: str):
-        await interaction.response.send_message(
-            f"{name}機能が読み込まれていません。",
-            ephemeral=True,
-        )
+        message = f"{name}機能が読み込まれていません。"
+        if interaction.response.is_done():
+            return await interaction.followup.send(message, ephemeral=True)
+        await interaction.response.send_message(message, ephemeral=True)
 
     @commands.Cog.listener()
     async def on_raw_reaction_add(self, payload: discord.RawReactionActionEvent):
@@ -5789,6 +6033,18 @@ class SupportCog(commands.Cog):
             triggers = cog.list_triggers(interaction.guild_id) if cog else {}
             return await interaction.response.send_message(
                 view=VoiceTriggerPanel(self, settings, triggers), ephemeral=True)
+
+        if selected.startswith("sokunuke_"):
+            cog = self.bot.get_cog("SokuNukeRta")
+            if cog is None:
+                return await self._missing(interaction, "即抜けRTA")
+            action = selected.removeprefix("sokunuke_")
+            if action == "vc_on":
+                action = "vc_on"
+            return await cog.sokunuke_command(
+                interaction,
+                app_commands.Choice(name=action, value=action),
+            )
 
         cog = self.bot.get_cog("BumpRta")
         if cog is None:
