@@ -29,6 +29,12 @@ class TranslationTest(unittest.IsolatedAsyncioTestCase):
             {"enabled": True, "source_locale": "ja", "target_locale": "en"},
         )
 
+    def test_kvstore_like_settings_are_read_from_load_local(self):
+        store = types.SimpleNamespace(
+            load_local=lambda: {"42": {"enabled": True, "source_locale": "ja", "target_locale": "en"}}
+        )
+        self.assertTrue(translation.translation_settings(42, 99, store)["enabled"])
+
     async def test_update_settings_uses_user_id_as_storage_key(self):
         store = types.SimpleNamespace(
             load_local=lambda: {"42": {"enabled": False}},

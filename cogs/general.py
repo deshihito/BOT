@@ -2295,6 +2295,77 @@ class GeneralCog(commands.Cog):
         logger.warning("dispatch_general: unknown action %r", value)
         return await self._safe_respond(interaction, "この機能は現在利用できません。")
 
+    async def _translation_webhook(self, channel):
+        """Return the per-channel webhook used for translated messages."""
+        parent = channel.parent if isinstance(channel, discord.Thread) else channel
+        cached = self._translation_webhooks.get(parent.id)
+        if cached is not None:
+            return cached
+        webhooks = await parent.webhooks()
+        webhook = discord.utils.get(webhooks, name="AGOBOT-Translate")
+        if webhook is None:
+            webhook = await parent.create_webhook(name="AGOBOT-Translate")
+        self._translation_webhooks[parent.id] = webhook
+        return webhook
+
+    @commands.Cog.listener("on_message")
+    async def on_message_translation(self, message: discord.Message):
+        """Replace human messages with a webhook-posted translation when enabled."""
+        if (
+            message.guild is None
+            or message.author.bot
+            or message.webhook_id is not None
+            or (not message.content.strip() and not message.attachments)
+        ):
+            return
+
+        store = guild_settings.get_store()
+        await store.ensure_loaded()
+        settings = translation.translation_settings(message.author.id, message.guild.id)
+        if not settings["enabled"]:
+            return
+
+        me = message.guild.me
+        permissions = message.channel.permissions_for(me) if me is not None else None
+        if not permissions or not permissions.manage_messages or not permissions.manage_webhooks:
+            logger.warning(
+                "自動翻訳にはメッセージ管理とWebhook管理権限が必要です (guild=%s channel=%s)",
+                message.guild.id, message.channel.id,
+            )
+            return
+
+        try:
+            files = []
+            for attachment in message.attachments:
+                # Download before deleting the source message.  use_cached=True
+                # also keeps Discord CDN URLs usable after the source is removed.
+                files.append(await attachment.to_file(use_cached=True))
+            translated = await translation.translate_message(
+                message.content,
+                settings["source_locale"],
+                settings["target_locale"],
+                client=self._translation_client,
+            )
+            webhook = await self._translation_webhook(message.channel)
+            await message.delete()
+            kwargs = {
+                "content": translated or None,
+                "username": str(message.author.display_name)[:80],
+                "avatar_url": str(message.author.display_avatar.url),
+                "files": files,
+                "allowed_mentions": discord.AllowedMentions.none(),
+                "_agobot_skip_localization": True,
+            }
+            if isinstance(message.channel, discord.Thread):
+                kwargs["thread"] = message.channel
+            await webhook.send(**kwargs)
+        except LibreTranslateError:
+            logger.warning("自動翻訳APIの呼び出しに失敗しました (guild=%s)", message.guild.id, exc_info=True)
+        except discord.HTTPException:
+            logger.warning("自動翻訳メッセージの削除または送信に失敗しました", exc_info=True)
+        except Exception:
+            logger.exception("自動翻訳で予期しないエラーが発生しました")
+
     async def execute_shortcut(self, message: discord.Message, item: dict, *, invoker=None):
         try:
             owner_id = int(item.get("user_id"))
@@ -2599,7 +2670,7 @@ class GeneralCog(commands.Cog):
             logger.exception("EXP: チャットEXPの付与に失敗しました")
 
         # MIQ: 引用したいメッセージに返信して「@BOT miq」と送ると発動
-        if is_miq_trigger(message, self.bot.user):
+        if is_miq_trigger(message, self.bot.user if self.bot is not None else None):
             self._spawn(self._miq_from_reply(message))
 
         store = guild_settings.get_store()
