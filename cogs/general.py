@@ -47,6 +47,7 @@ GENERAL_GENRES = {
     "survival": ("生存確認", "追跡、アクティブ頻度、フリーズ、失踪警報"),
     "custom": ("設定・AI", "ショートカット、AI tools、チャットAI・画像生成AIの設定"),
     "zeta": ("ZetaModoki", "ロールプレイ会話の開始、シチュエーション・キャラクターの登録と管理"),
+    "translation": ("翻訳", "メッセージの自動翻訳と翻訳元・翻訳先の設定"),
     "miq": ("引用画像 (MIQ)", "メッセージを引用画像にする。見た目の設定と、引用の拒否設定"),
 }
 GENERAL_ACTIONS = {
@@ -80,6 +81,9 @@ GENERAL_ACTIONS = {
         ("ZetaModoki会話をリセット", "zeta_reset"),
         ("シチュエーション・キャラクターを登録", "zeta_register"),
         ("登録を管理（編集・削除）", "zeta_manage"),
+    ],
+    "translation": [
+        ("自動翻訳を設定", "translation_settings"),
     ],
     "miq": [
         ("MIQ設定（見た目・引用拒否）", "miq_settings"),
