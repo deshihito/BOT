@@ -4857,8 +4857,28 @@ class SupportCog(commands.Cog):
             return
 
         # まだ有効なものだけ既読として残す（期限切れ・フィードから消えたIDは捨てる）
+        keep = [sid for sid in dict.fromkeys(seen_before) if sid in live_ids]
         keep_set = set(keep)
         fresh = [i for i in live if i.id not in keep_set]
+
+        # ギルドの言語圏で提供されていないQuestは通知せず既読にする
+        regions = self._quest.regions if self._quest is not None else {}
+        if regions and fresh:
+            language, source = await self.quest_guild_language(guild)
+            countries = quest_language_countries(language)
+            if countries:
+                blocked = [
+                    i for i in fresh
+                    if i.id in regions and not regions[i.id].available_in(countries)
+                ]
+                if blocked:
+                    logger.info(
+                        "Quest通知: 言語圏(%s=%s, %s)外の%d件を除外 (guild=%s)",
+                        language, "/".join(sorted(countries)), source, len(blocked), guild.id,
+                    )
+                    blocked_ids = {i.id for i in blocked}
+                    keep.extend(blocked_ids)
+                    fresh = [i for i in fresh if i.id not in blocked_ids]
 
         # ギルドの言語圏で提供されていないQuestは通知せず既読にする
         regions = self._quest.regions if self._quest is not None else {}
