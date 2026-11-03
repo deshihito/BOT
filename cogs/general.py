@@ -2674,8 +2674,11 @@ class GeneralCog(commands.Cog):
             logger.exception("EXP: チャットEXPの付与に失敗しました")
 
         # MIQ: 引用したいメッセージに返信して「@BOT miq」と送ると発動
+        # MIQ として処理した場合は、以降のショートカット処理へ進ませない
+        # (トリガー「miq」のショートカットが誤爆して設定パネル等が出るのを防ぐ)。
         if is_miq_trigger(message, self.bot.user if self.bot is not None else None):
             self._spawn(self._miq_from_reply(message))
+            return
 
         store = guild_settings.get_store()
         await store.ensure_loaded()
