@@ -23,9 +23,9 @@ import random
 import asyncio
 import io
 import time
-import base64
 import hashlib
 import aiohttp
+from core import logfare
 import datetime
 import logging
 from discord.ui import View
@@ -151,7 +151,7 @@ RELIC_MASTER = {
     "phoenix_ash": {"name": "不死鳥の灰", "description": "HP0時に一度だけ30%で復活", "effect": "revive"},
     "explorer_compass": {"name": "探検家の羅針盤", "description": "隠し部屋とイベントを発見しやすい", "effect": "explore"},
     "iron_will": {"name": "鉄の意志", "description": "HP30%未満で防御力+8", "effect": "survive"},
-    "d1_tactics": {"name": "作戦教本", "description": "D1の安全重視作戦を強化", "effect": "d1"},
+    "d1_tactics": {"name": "作戦教本", "description": "Clefの安全重視作戦を強化", "effect": "d1"},
 }
 QUEST_MASTER = {
     "first_10_steps": {"name": "最初の遠征", "description": "10ターン移動する", "kind": "turns", "target": 10, "reward": {"xp": 80, "season_score": 50}},
@@ -165,25 +165,18 @@ ROOM_MODIFIERS = {
     "cursed": {"name": "呪われた階", "description": "報酬は増えるが罠も増える"},
     "treasure": {"name": "宝物の階", "description": "宝箱が多い"},
 }
-D1_PLANS = {
+CLEF_PLANS = {
     "safe": "安全探索", "speed": "最短攻略", "treasure": "財宝優先",
     "battle": "戦闘優先", "explore": "探索優先", "boss": "ボス準備優先",
     "xp": "経験値優先",
 }
-# D1は小型の意思決定モデルなので、渡す文脈は常に短く保つ（コンテキスト長対策）。
-D1_STATE_CHARS = int(os.environ.get("D1_STATE_CHARS", 2400))
-D1_LOG_LINES = int(os.environ.get("D1_LOG_LINES", 6))
-D1_MAX_TURNS = int(os.environ.get("D1_MAX_TURNS", 10))
-# pingではなく画像付き推論の完了までを測る。画像モデルの初回推論は
-# モデルロード直後に30秒を超えることがあるため、短いpingのtimeoutと分離する。
-D1_HTTP_TIMEOUT = float(os.environ.get("D1_HTTP_TIMEOUT", 90))
-D1_HTTP_RETRIES = max(1, int(os.environ.get("D1_HTTP_RETRIES", 2)))
-D1_HTTP_RETRY_DELAY = float(os.environ.get("D1_HTTP_RETRY_DELAY", 1.5))
-D1_READY_CACHE_SECONDS = float(os.environ.get("D1_READY_CACHE_SECONDS", 300))
-D1_TIMING_LOG = os.environ.get("D1_TIMING_LOG", "0").lower() in ("1", "true", "yes", "on")
-# 移動判断に必要な盤面情報はstate/criteriaのテキストで渡す。
-# visionは必要な環境でのみ明示的に有効化する（既定: 無効）。
-D1_SEND_IMAGES = os.environ.get("D1_SEND_IMAGES", "0").lower() in ("1", "true", "yes", "on")
+# Clefへ送る文脈は、渡す文脈は常に短く保つ（コンテキスト長対策）。
+CLEF_STATE_CHARS = int(os.environ.get("CLEF_DUNGEON_STATE_CHARS", 2400))
+CLEF_LOG_LINES = int(os.environ.get("CLEF_DUNGEON_LOG_LINES", 6))
+CLEF_MAX_TURNS = int(os.environ.get("CLEF_DUNGEON_MAX_TURNS", 10))
+CLEF_TIMEOUT = float(os.environ.get("CLEF_DUNGEON_TIMEOUT", 30))
+CLEF_RETRIES = max(1, int(os.environ.get("CLEF_DUNGEON_RETRIES", 2)))
+CLEF_RETRY_DELAY = float(os.environ.get("CLEF_DUNGEON_RETRY_DELAY", 1.5))
 # 8方向の定義。移動・経路探索・選択肢の基準提示で共通利用する。
 _DIRECTIONS = {
     "up": (0, -1), "down": (0, 1), "left": (-1, 0), "right": (1, 0),
@@ -198,7 +191,7 @@ ACHIEVEMENTS = {
     "floor_40": "深層の覇者", "first_boss": "ボスブレイカー", "treasure_hunter": "宝箱荒らし",
     "skill_user": "スキルの使い手", "camp_builder": "野営地の開拓者",
 }
-# NPCとフロア目標。D1へ渡すゴール提示にも利用する。
+# NPCとフロア目標。Clefへ渡すゴール提示にも利用する。
 NPC_MASTER = {
     "traveler": {"name": "旅人レオン", "steps": [{"text": "安全な道を教える", "flag": "traveler_help", "reward": {"bread": 2}}, {"text": "地図を交換する", "flag": "traveler_map", "reward": {"material": "map_fragment"}}]},
     "blacksmith": {"name": "鍛冶師ミナ", "steps": [{"text": "素材を渡す", "flag": "forge_help", "reward": {"material": "iron_ore"}}, {"text": "武器を強化する", "flag": "forge_upgrade", "reward": {"season_score": 30}}]},
@@ -314,7 +307,6 @@ _PLAYER_SAVE_DIGESTS = {}
 
 # 環境変数
 DUNGEON_IMG_CHANNEL_ID = int(os.environ.get("DUNGEON_IMG_CHANNEL_ID", 0))
-D1_ENDPOINT = os.environ.get("D1_ENDPOINT", "http://127.0.0.1:8082/v1/systemone")
 logger = logging.getLogger(__name__)
 
 # ============================================================
@@ -490,7 +482,7 @@ def d_upgrade_equipment(uid, key, material="iron_ore"):
     return True
 
 def d_floor_modifier(floor):
-    """フロアごとの軽量な変異。固定化してD1にもログで伝えられる。"""
+    """フロアごとの軽量な変異。固定化してClefにもログで伝えられる。"""
     key = list(ROOM_MODIFIERS)[(floor - 1) % len(ROOM_MODIFIERS)]
     return ROOM_MODIFIERS[key]["name"]
 
@@ -1153,12 +1145,12 @@ async def dg_save_base(uid, floor, x, y, db_api):
 #  Views
 # ============================================================
 # ============================================================
-#  D1 作戦ヘルパー（旧 d1_dangeon.py から統廃合）
+#  Clef作戦ヘルパー（旧 dungeon_dangeon.py から統廃合）
 # ============================================================
-# D1へ渡す合法手。待機（enter/check）は選択肢に含めない。
-D1_MOVE_KEYS = tuple(_DIRECTIONS)
+# Clefへ渡す合法手。待機（enter/check）は選択肢に含めない。
+CLEF_MOVE_KEYS = tuple(_DIRECTIONS)
 
-D1_PLAN_GUIDANCE = {
+CLEF_PLAN_GUIDANCE = {
     "safe": "HPと被弾を最優先で避け、敵の少ない経路で階段を目指す",
     "speed": "最短手数で階段へ向かう",
     "treasure": "宝箱・鉱山・祭壇などの報酬タイルを優先して回収する",
@@ -1169,19 +1161,19 @@ D1_PLAN_GUIDANCE = {
 }
 
 
-def d1_plan_key(plan):
+def dungeon_plan_key(plan):
     """表示名・キーのどちらからでも作戦キーを解決する。"""
-    if plan in D1_PLANS:
+    if plan in CLEF_PLANS:
         return plan
-    for key, name in D1_PLANS.items():
+    for key, name in CLEF_PLANS.items():
         if name == plan:
             return key
     return "safe"
 
 
-def d1_plan_guidance(plan):
-    """作戦ごとの優先基準。D1への指示文に含める。"""
-    return D1_PLAN_GUIDANCE.get(d1_plan_key(plan), D1_PLAN_GUIDANCE["safe"])
+def dungeon_plan_guidance(plan):
+    """作戦ごとの優先基準。Clefへの指示文に含める。"""
+    return CLEF_PLAN_GUIDANCE.get(dungeon_plan_key(plan), CLEF_PLAN_GUIDANCE["safe"])
 
 
 def d_floor_routes(uid):
@@ -1193,27 +1185,27 @@ def d_floor_routes(uid):
     ]
 
 
-def d1_action_candidates(uid, plan="安全探索"):
+def dungeon_action_candidates(uid, plan="安全探索"):
     """作戦の重みを掛けた候補評価。危険度と報酬のどちらを取るかを明示する。"""
     routes = d_floor_routes(uid)
     weights = {"safe": (3, -2), "speed": (1, 5), "treasure": (4, 0), "battle": (-1, 2),
                "explore": (2, 1), "boss": (1, 3), "xp": (0, 4)}
-    risk_w, reward_w = weights.get(d1_plan_key(plan), weights["safe"])
+    risk_w, reward_w = weights.get(dungeon_plan_key(plan), weights["safe"])
     for route in routes:
         route["plan_score"] = route["reward"] * reward_w - route["risk"] * risk_w
     return routes
 
 
-def d1_candidate_log(uid, plan):
-    """画面表示用の候補評価ログ。D1への入力には含めない（コンテキスト長対策）。"""
-    candidates = d1_action_candidates(uid, plan)
+def dungeon_candidate_log(uid, plan):
+    """画面表示用の候補評価ログ。Clefへの入力には含めない（コンテキスト長対策）。"""
+    candidates = dungeon_action_candidates(uid, plan)
     return "候補評価: " + " / ".join(
         f"{c['id']}:{c['label']} 危険度{c['risk']} 報酬{c['reward']} 作戦点{c['plan_score']}" for c in candidates
     )
 
 
 def d_normalize_choice(value, legal, fallback=None):
-    """D1の応答を合法手へ寄せる。表記ゆれだけを吸収し、それ以外はfallbackを返す。"""
+    """Clefの応答を合法手へ寄せる。表記ゆれだけを吸収し、それ以外はfallbackを返す。"""
     value = str(value or "").strip().lower().replace(" ", "")
     aliases = {"north": "up", "south": "down", "west": "left", "east": "right",
                "upward": "up", "downward": "down", "leftward": "left", "rightward": "right",
@@ -1222,8 +1214,8 @@ def d_normalize_choice(value, legal, fallback=None):
     return value if value in legal else (fallback if fallback in legal else None)
 
 
-def d1_cell_label(floor, x, y):
-    """セルの日本語ラベル。D1へ選択肢の基準を渡すために使う。"""
+def dungeon_cell_label(floor, x, y):
+    """セルの日本語ラベル。Clefへ選択肢の基準を渡すために使う。"""
     cell = d_get_cell(floor, x, y)
     return {
         D_WALL: "壁", D_FLOOR: "床", D_START: "開始地点", D_STAIRS: "階段", D_CHEST: "宝箱",
@@ -1232,7 +1224,7 @@ def d1_cell_label(floor, x, y):
     }.get(cell, "床")
 
 
-def d1_relative_label(dx, dy):
+def dungeon_relative_label(dx, dy):
     """差分ベクトルを方角ラベルへ変換する。"""
     if dx == 0 and dy == 0:
         return "現在地"
@@ -1248,7 +1240,7 @@ def d1_relative_label(dx, dy):
     return "".join(parts)
 
 
-def d1_bfs(floor, x, y):
+def dungeon_bfs(floor, x, y):
     """現在地からの歩数マップ（8方向・壁と角抜けは通行不可）。"""
     dist = {(x, y): 0}
     queue = [(x, y)]
@@ -1270,7 +1262,7 @@ def d1_bfs(floor, x, y):
     return dist
 
 
-def d1_stairs_cell(floor):
+def dungeon_stairs_cell(floor):
     """フロア内の階段座標を返す。"""
     d_ensure_map(floor)
     for gy, row in enumerate(dg_maps[floor]):
@@ -1280,28 +1272,28 @@ def d1_stairs_cell(floor):
     return None
 
 
-def d1_stairs_hint(floor, x, y, dist=None):
-    """階段までの方角と歩数。D1が迷わないための明示的な目標情報。"""
-    stairs = d1_stairs_cell(floor)
+def dungeon_stairs_hint(floor, x, y, dist=None):
+    """階段までの方角と歩数。Clefへ示す目標情報。"""
+    stairs = dungeon_stairs_cell(floor)
     if not stairs:
         return "このフロアに階段なし"
     if dist is None:
-        dist = d1_bfs(floor, x, y)
+        dist = dungeon_bfs(floor, x, y)
     steps = dist.get(stairs)
     if steps is None:
         return "階段は壁で区切られ到達不可"
-    return f"{d1_relative_label(stairs[0] - x, stairs[1] - y)} {steps}マス"
+    return f"{dungeon_relative_label(stairs[0] - x, stairs[1] - y)} {steps}マス"
 
 
-def d1_surround_text(floor, x, y):
+def dungeon_surround_text(floor, x, y):
     """現在地と8方向のタイルを短く列挙する。"""
-    parts = [f"現在地={d1_cell_label(floor, x, y)}"]
+    parts = [f"現在地={dungeon_cell_label(floor, x, y)}"]
     for key, (dx, dy) in _DIRECTIONS.items():
-        parts.append(f"{_DIRECTION_LABELS[key]}={d1_cell_label(floor, x + dx, y + dy)}")
+        parts.append(f"{_DIRECTION_LABELS[key]}={dungeon_cell_label(floor, x + dx, y + dy)}")
     return " ".join(parts)
 
 
-def d1_local_grid(floor, x, y):
+def dungeon_local_grid(floor, x, y):
     """画像に依存しない3x3局所盤面。#は壁、@は現在地、.は通行可能。"""
     symbols = {
         D_WALL: "#", D_FLOOR: ".", D_START: ".", D_STAIRS: "S", D_CHEST: "C",
@@ -1317,11 +1309,11 @@ def d1_local_grid(floor, x, y):
     return " / ".join(rows) + "（#=壁・進入不可 @=現在地 .=通行可 S=階段）"
 
 
-def d1_move_criteria(floor, x, y, dist=None):
-    """D1へ渡す「各方向がどういう状況か」の基準。壁・特殊タイル・階段距離を明示する。"""
+def dungeon_move_criteria(floor, x, y, dist=None):
+    """Clefへ渡す「各方向がどういう状況か」の基準。壁・特殊タイル・階段距離を明示する。"""
     if dist is None:
-        dist = d1_bfs(floor, x, y)
-    stairs = d1_stairs_cell(floor)
+        dist = dungeon_bfs(floor, x, y)
+    stairs = dungeon_stairs_cell(floor)
     stairs_steps = dist.get(stairs) if stairs else None
     criteria = {}
     for key, (dx, dy) in _DIRECTIONS.items():
@@ -1336,7 +1328,7 @@ def d1_move_criteria(floor, x, y, dist=None):
         if dx and dy and (d_get_cell(floor, x + dx, y) == D_WALL or d_get_cell(floor, x, y + dy) == D_WALL):
             criteria[key] = f"{label}は角の壁に阻まれて進めない"
             continue
-        note = f"{label}は{d1_cell_label(floor, nx, ny)}（移動可）"
+        note = f"{label}は{dungeon_cell_label(floor, nx, ny)}（移動可）"
         steps = dist.get((nx, ny))
         if stairs_steps is not None and steps is not None:
             note += f" 階段まで{steps}マス" + ("（近づく）" if steps < stairs_steps else "")
@@ -1344,8 +1336,8 @@ def d1_move_criteria(floor, x, y, dist=None):
     return criteria
 
 
-def d1_goal_text(uid):
-    """D1へ渡すゴール。階層目標・フロア目標・クエストを短くまとめる。"""
+def dungeon_goal_text(uid):
+    """Clefへ渡すゴール。階層目標・フロア目標・クエストを短くまとめる。"""
     p = d_get_player(uid)
     floor = p["floor"]
     parts = [f"{min(floor + 1, D_FLOORS)}Fへ進むため階段を探す"]
@@ -1359,18 +1351,18 @@ def d1_goal_text(uid):
     return " / ".join(parts)
 
 
-def d1_best_direction(uid, plan="安全探索", dist=None):
-    """D1の応答が使えない時のフォールバック。作戦に沿った合法手を必ず1つ返す。"""
+def dungeon_best_direction(uid, plan="安全探索", dist=None):
+    """Clefの応答が使えない時のフォールバック。作戦に沿った合法手を必ず1つ返す。"""
     p = d_get_player(uid)
     floor, x, y = p["floor"], p["x"], p["y"]
     if dist is None:
-        dist = d1_bfs(floor, x, y)
-    criteria = d1_move_criteria(floor, x, y, dist)
+        dist = dungeon_bfs(floor, x, y)
+    criteria = dungeon_move_criteria(floor, x, y, dist)
     legal = [key for key, text in criteria.items() if "移動可" in text]
     if not legal:
         return "up"
     specials = ("宝箱", "鉱山", "祭壇", "イベント", "商店", "休憩所", "階段")
-    if d1_plan_key(plan) == "treasure":
+    if dungeon_plan_key(plan) == "treasure":
         ranked = sorted(legal, key=lambda k: (
             not any(word in criteria[k] for word in specials),
             dist.get((x + _DIRECTIONS[k][0], y + _DIRECTIONS[k][1]), 9999),
@@ -1429,7 +1421,7 @@ def d_end_run(uid, reason="ended"):
 
 
 def d_record_action(uid, action, source="manual", result=None, reward=None, hp_before=None):
-    """行動ログを記録する。D1の判断材料とUI表示の双方で使う。"""
+    """行動ログを記録する。Clefの判断材料とUI表示の双方で使う。"""
     p = d_get_player(uid)
     p["state_version"] += 1
     entry = {
@@ -1523,7 +1515,7 @@ class _NoopInteraction:
 
 
 # 実行中の自動操作ヤー。DungeonCogが生成し、各Viewから参照する。
-_D1_PLAYER = None
+_CLEF_PLAYER = None
 
 
 def d_lock_callback(func):
@@ -1582,18 +1574,18 @@ async def d_return_to_dungeon(interaction, uid, db_api, msg=""):
     )
 
 
-def d1_plan_for(uid):
-    """現在のD1作戦。実行中は実行中のもの、停止中は最後に選んだものを返す。"""
-    if _D1_PLAYER is None:
-        return D1_PLANS["safe"]
-    return _D1_PLAYER.plan_for(uid)
+def clef_plan_for(uid):
+    """現在のClef作戦。実行中は実行中のもの、停止中は最後に選んだものを返す。"""
+    if _CLEF_PLAYER is None:
+        return CLEF_PLANS["safe"]
+    return _CLEF_PLAYER.plan_for(uid)
 
 
-def d1_status_text(uid):
-    """ステータス画面に表示するD1の実行状況。"""
-    if _D1_PLAYER is None:
+def clef_status_text(uid):
+    """ステータス画面に表示するClefの実行状況。"""
+    if _CLEF_PLAYER is None:
         return "未初期化"
-    return _D1_PLAYER.status_text(uid)
+    return _CLEF_PLAYER.status_text(uid)
 
 
 class DungeonStatusView(DungeonViewBase):
@@ -1605,7 +1597,7 @@ class DungeonStatusView(DungeonViewBase):
         self.x = x
         self.y = y
         self.db_api = db_api
-        self.d1_plan = d1_plan_for(uid)
+        self.clef_plan = clef_plan_for(uid)
 
     def _embed(self, msg="", image_url=None):
         p = self.sync_state()
@@ -1623,7 +1615,7 @@ class DungeonStatusView(DungeonViewBase):
         em.add_field(name="遺物・属性", value=f"遺物: {', '.join(RELIC_MASTER.get(k, {}).get('name', k) for k in p.get('relics', [])) or 'なし'}\n装備属性: {', '.join(EQUIPMENT_MASTER.get(k, {}).get('element', 'none') for k in p.get('equipment', {}).values()) or 'none'}", inline=False)
         quests, _ = d_content_summary(self.uid)
         em.add_field(name="クエスト", value="\n".join(quests) if quests else "全クエスト達成", inline=False)
-        em.add_field(name="自動操作", value=f"作戦: **{self.d1_plan}**\n状態: {d1_status_text(self.uid)}", inline=False)
+        em.add_field(name="自動操作", value=f"作戦: **{self.clef_plan}**\n状態: {clef_status_text(self.uid)}", inline=False)
         return em
 
     async def _render(self, interaction, msg=""):
@@ -1634,12 +1626,12 @@ class DungeonStatusView(DungeonViewBase):
         )
 
     @discord.ui.button(label="自動操作開始", style=discord.ButtonStyle.blurple, row=0)
-    async def start_d1(self, interaction, button):
-        if _D1_PLAYER is None:
+    async def start_autoplay(self, interaction, button):
+        if _CLEF_PLAYER is None:
             await interaction.response.send_message("自動操作機能が初期化されていません。", ephemeral=True)
             return
-        # 押した時点の現在状態と作戦でD1を開始する（状態はダンジョンと共有）。
-        await _D1_PLAYER.start(interaction, self.d1_plan)
+        # 押した時点の現在状態と作戦で自動操作を開始する（状態はダンジョンと共有）。
+        await _CLEF_PLAYER.start(interaction, self.clef_plan)
 
     @discord.ui.button(label="操作メニュー", style=discord.ButtonStyle.green, row=0)
     async def operations(self, interaction, button):
@@ -1657,17 +1649,17 @@ class DungeonStatusView(DungeonViewBase):
         await d_return_to_dungeon(interaction, self.uid, self.db_api, "")
 
     @discord.ui.select(
-        placeholder="D1作戦を選択",
-        options=[discord.SelectOption(label=name, value=key) for key, name in D1_PLANS.items()],
+        placeholder="Clef作戦を選択",
+        options=[discord.SelectOption(label=name, value=key) for key, name in CLEF_PLANS.items()],
         row=1,
     )
     async def select_plan(self, interaction, select):
         await interaction.response.defer()
-        self.d1_plan = D1_PLANS.get(select.values[0], D1_PLANS["safe"])
-        if _D1_PLAYER is not None:
+        self.clef_plan = CLEF_PLANS.get(select.values[0], CLEF_PLANS["safe"])
+        if _CLEF_PLAYER is not None:
             # 実行中の場合は走行中の作戦も即時更新する。
-            _D1_PLAYER.set_plan(self.uid, self.d1_plan)
-        await self._render(interaction, f"D1作戦を **{self.d1_plan}** に設定しました。")
+            _CLEF_PLAYER.set_plan(self.uid, self.clef_plan)
+        await self._render(interaction, f"Clef作戦を **{self.clef_plan}** に設定しました。")
 
 
 class DungeonStairsView(DungeonViewBase):
@@ -2092,7 +2084,7 @@ class DungeonMainView(DungeonViewBase):
         quests, relics = d_content_summary(self.uid)
         em.add_field(name="冒険パネル", value=f"職業: {d_job_name(self.uid)}\nターン: {p['turns']} / スコア: {p['season_score']}\n遺物: {', '.join(relics) if relics else 'なし'}", inline=False)
         em.add_field(name="進行中の目的", value="\n".join(quests) if quests else "全クエスト達成", inline=False)
-        em.add_field(name="自動操作", value=f"作戦: {getattr(self, 'd1_plan', d1_plan_for(self.uid))} / 状態: {d1_status_text(self.uid)}", inline=False)
+        em.add_field(name="自動操作", value=f"作戦: {getattr(self, 'clef_plan', clef_plan_for(self.uid))} / 状態: {clef_status_text(self.uid)}", inline=False)
         if msg:
             em.add_field(name="ログ", value=msg, inline=False)
         return em
@@ -2262,12 +2254,12 @@ class DungeonMainView(DungeonViewBase):
 class DungeonUnifiedView(DungeonMainView):
     """ゲームハブから起動したダンジョン一つで操作を完結させる圧縮UI。
 
-    D1の接続ボタンと作戦選択はSTATUS画面へ集約し、このパネルには移動と終了だけを残す。
+    Clef自動操作の開始ボタンと作戦選択はSTATUS画面へ集約し、このパネルには移動と終了だけを残す。
     """
 
     def __init__(self, uid, floor, x, y, db_api, plan=None):
         super().__init__(uid, floor, x, y, db_api)
-        self.d1_plan = plan or d1_plan_for(uid)
+        self.clef_plan = plan or clef_plan_for(uid)
         self.clear_items()
         directions = [
             ("北西", -1, -1, 0), ("北", 0, -1, 0), ("北東", 1, -1, 0),
@@ -2291,17 +2283,17 @@ class DungeonUnifiedView(DungeonMainView):
         self.add_item(stop)
 
     async def open_status(self, interaction):
-        """ステータス画面（D1開始・作戦選択を含む）を開く。"""
+        """ステータス画面（自動操作開始・作戦選択を含む）を開く。"""
         await interaction.response.defer()
         p = self.sync_state()
         sv = DungeonStatusView(self.uid, p["floor"], p["x"], p["y"], self.db_api)
-        sv.d1_plan = self.d1_plan
+        sv.clef_plan = self.clef_plan
         await sv._render(interaction, "")
 
     async def end_session(self, interaction):
-        """D1を止め、操作を終了する。"""
-        if _D1_PLAYER is not None:
-            await _D1_PLAYER.stop(self.uid)
+        """自動操作を止め、操作を終了する。"""
+        if _CLEF_PLAYER is not None:
+            await _CLEF_PLAYER.stop(self.uid)
         self.stop()
         await interaction.response.defer()
         p = self.sync_state()
@@ -2358,7 +2350,7 @@ class DungeonOperationView(DungeonViewBase):
         await d_return_to_dungeon(interaction, self.uid, self.db_api, msg)
 
     async def status(self, interaction):
-        """ステータス画面（D1開始・作戦選択）を開く。"""
+        """ステータス画面（自動操作開始・作戦選択）を開く。"""
         await interaction.response.defer()
         p = self.sync_state()
         status = DungeonStatusView(self.uid, p["floor"], p["x"], p["y"], self.db_api)
@@ -2517,10 +2509,10 @@ class DungeonRewardChoiceView(DungeonViewBase):
             self.add_item(button)
 
 
-class D1DungeonPlayer:
-    """d1-omni によるダンジョン代理プレイ（旧 d1_dangeon.py を統合）。
+class ClefDungeonPlayer:
+    """Logfare Clef によるダンジョン代理プレイ。
 
-    D1へ渡すのは「現在の状態」「今回の選択肢と判断基準」「直近のログ」だけに絞る。
+    Clefへ渡すのは「現在の状態」「今回の選択肢と判断基準」「直近のログ」だけに絞る。
     ゲーム状態の確定・ダメージ・報酬・保存はすべて本体側が担当し、
     モデルは次の1手を選ぶことだけに責務を限定する。
     """
@@ -2531,112 +2523,24 @@ class D1DungeonPlayer:
         self._stops = {}
         self._plans = {}
         self._run_stats = {}
-        self.service_name = os.environ.get("D1_SERVICE_NAME", "llama-d1-omni")
-        self.start_command = os.environ.get("D1_START_COMMAND", "")
-        self._vision_ready = False
-        self._service_lock = asyncio.Lock()
-        self._ready_until = 0.0
-
-    # ---------- D1サービス疎通 ----------
-
-    async def _test_vision_capability(self):
-        """/v1/modelsを確認し、現在のサービスが画像対応で起動しているか判定する。"""
-        try:
-            timeout = aiohttp.ClientTimeout(total=3.0)
-            async with aiohttp.ClientSession(timeout=timeout) as session:
-                async with session.get(D1_ENDPOINT.rsplit("/", 1)[0] + "/models") as response:
-                    if response.status != 200:
-                        return False
-                    data = await response.json(content_type=None)
-                    text = str(data).lower()
-                    return "multimodal" in text or "vision" in text or "image" in text
-        except (aiohttp.ClientError, asyncio.TimeoutError, OSError, ValueError):
-            return False
-
-    async def _test_response(self):
-        """d1_test.pyと同じ最小pingでsystemoneの稼働を確認する。"""
-        payload = {"state": "ping", "questions": {"ping": {"type": "noul", "instructions": "Is this a test?"}}}
-        started = time.perf_counter()
-        try:
-            timeout = aiohttp.ClientTimeout(total=3.0)
-            async with aiohttp.ClientSession(timeout=timeout) as session:
-                async with session.post(D1_ENDPOINT, json=payload) as response:
-                    self._timing("ping status=%s elapsed_ms=%.0f", response.status, (time.perf_counter() - started) * 1000)
-                    return response.status == 200
-        except (aiohttp.ClientError, asyncio.TimeoutError, OSError):
-            self._timing("ping failed elapsed_ms=%.0f", (time.perf_counter() - started) * 1000)
-            return False
-
-    def _timing(self, message, *args):
-        """D1の遅延調査用ログ。通常は無効で、UIには表示しない。"""
-        if D1_TIMING_LOG:
-            logger.info("[d1-timing] " + message, *args)
-
-    async def _start_service(self):
-        """d1_test.pyと同じsystemdサービス起動手順を実行する。"""
-        try:
-            if self.start_command:
-                process = await asyncio.create_subprocess_shell(
-                    self.start_command, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
-                )
-            else:
-                process = await asyncio.create_subprocess_exec(
-                    "sudo", "systemctl", "restart", self.service_name,
-                    stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
-                )
-            await asyncio.wait_for(process.communicate(), timeout=15.0)
-            return process.returncode == 0
-        except (asyncio.TimeoutError, OSError):
-            return False
-
-    async def _ensure_d1_ready(self, logs, require_vision=False):
-        """ping→起動→モデルロード待機→再pingを一度だけ行う。"""
-        if time.monotonic() < self._ready_until and (not require_vision or self._vision_ready):
-            return True
-        async with self._service_lock:
-            if time.monotonic() < self._ready_until and (not require_vision or self._vision_ready):
-                return True
-            if await self._test_response():
-                self._vision_ready = await self._test_vision_capability() if require_vision else False
-                self._ready_until = time.monotonic() + D1_READY_CACHE_SECONDS
-                if require_vision and not self._vision_ready:
-                    logs.append("D1サービスは応答しますが画像機能が無効です。mmproj付き起動が必要です。")
-                return True
-            logs.append("D1応答なし。systemdサービスを起動します。")
-            if not await self._start_service():
-                logs.append(f"D1サービス起動失敗: {self.service_name}")
-                return False
-            logs.append("D1サービスを起動しました。モデルロードを待機中です。")
-            for _ in range(12):
-                await asyncio.sleep(2.5)
-                if await self._test_response():
-                    self._vision_ready = await self._test_vision_capability() if require_vision else False
-                    self._ready_until = time.monotonic() + D1_READY_CACHE_SECONDS
-                    logs.append("D1サービスの応答を確認しました。")
-                    if require_vision and not self._vision_ready:
-                        logs.append("D1サービスの画像機能を確認できません。D1_MMPROJまたは--mmprojを設定してください。")
-                    return True
-            logs.append("D1サービスは起動しましたが、応答待ちがタイムアウトしました。")
-            return False
-
-    # ---------- D1への入力生成 ----------
+    # ---------- Clefへの入力生成 ----------
 
     def _state_text(self, uid, plan, logs):
-        """D1へ渡す唯一のテキスト。ゴールと現在状態を先頭に、ログは短く末尾へ置く。"""
+        """Clefへ渡す唯一のテキスト。ゴールと現在状態を先頭に、ログは短く末尾へ置く。"""
         p = d_get_player(uid)
         stats = d_effective_stats(p)
         floor, x, y = p["floor"], p["x"], p["y"]
         bname, *_ = d_get_biome(floor)
-        dist = d1_bfs(floor, x, y)
+        dist = dungeon_bfs(floor, x, y)
         hp_pct = int(p["hp"] / max(1, stats["max_hp"]) * 100)
         header = [
             "# 現在の状態",
             f"作戦: {plan}",
             f"階層: {floor}F({bname}) / 位置: ({x},{y}) / フロア特性: {d_floor_modifier(floor)}",
             f"HP: {p['hp']}/{stats['max_hp']} ({hp_pct}%) / ATK {stats['atk']} DEF {stats['def_']} / 職業: {d_job_name(uid)}",
-            f"目的: {d1_goal_text(uid)}",
-            f"階段: {d1_stairs_hint(floor, x, y, dist)}",
-            f"周囲: {d1_surround_text(floor, x, y)}",
+            f"目的: {dungeon_goal_text(uid)}",
+            f"階段: {dungeon_stairs_hint(floor, x, y, dist)}",
+            f"周囲: {dungeon_surround_text(floor, x, y)}",
         ]
         last = self._run_stats.get(uid, {}).get("last_result")
         if last:
@@ -2644,12 +2548,12 @@ class D1DungeonPlayer:
         header.append("直近のログ:")
         head_text = "\n".join(header)
         lines = []
-        for line in [entry for entry in logs if entry and not str(entry).startswith("候補評価:")][-D1_LOG_LINES:]:
+        for line in [entry for entry in logs if entry and not str(entry).startswith("候補評価:")][-CLEF_LOG_LINES:]:
             lines.append("- " + " ".join(str(line).split())[:160])
         log_text = "\n".join(lines)
-        remaining = D1_STATE_CHARS - len(head_text) - 1
+        remaining = CLEF_STATE_CHARS - len(head_text) - 1
         if remaining <= 0:
-            return head_text[:D1_STATE_CHARS]
+            return head_text[:CLEF_STATE_CHARS]
         return head_text + "\n" + log_text[-remaining:]
 
     def _battle_criteria(self, uid, enemy):
@@ -2668,96 +2572,48 @@ class D1DungeonPlayer:
         }
 
     async def _decide(self, uid, logs, plan, questions):
-        """テキスト盤面を基本に、設定時だけ地図画像を添えてD1へ1問だけ投げる。"""
-        p = d_get_player(uid)
-        image_bytes = None
-        if D1_SEND_IMAGES:
-            image = d_build_map_image(uid, p["floor"], p["x"], p["y"])
-            buf = io.BytesIO()
-            image.save(buf, format="PNG")
-            image_bytes = buf.getvalue()
-        return await self._call_d1(logs, self._state_text(uid, plan, logs), image_bytes, questions)
-
-    async def _call_d1(self, logs, state_text, image_bytes, questions):
-        """公式のSystem One形式でd1-omniへテキスト、必要時のみ画像を送る。"""
-        if not await self._ensure_d1_ready(logs, require_vision=bool(image_bytes)):
-            return ""
-        payload = {
-            "state": state_text,
-            "questions": questions,
-        }
-        if image_bytes:
-            payload["images"] = ["data:image/png;base64," + base64.b64encode(image_bytes).decode("ascii")]
-        timeout = aiohttp.ClientTimeout(total=D1_HTTP_TIMEOUT)
-        for attempt in range(1, D1_HTTP_RETRIES + 1):
-            started = time.perf_counter()
+        """Clefに状態と選択肢を送り、選択肢キーだけを返す。"""
+        state_text = self._state_text(uid, plan, logs)
+        timeout = aiohttp.ClientTimeout(total=CLEF_TIMEOUT)
+        last_error = None
+        for attempt in range(1, CLEF_RETRIES + 1):
             try:
-                async with aiohttp.ClientSession(timeout=timeout) as session:
-                    async with session.post(D1_ENDPOINT, json=payload) as response:
-                        body = await response.text()
-                        self._timing(
-                            "request attempt=%s status=%s elapsed_ms=%.0f state_chars=%s question_chars=%s image_bytes=%s",
-                            attempt, response.status, (time.perf_counter() - started) * 1000,
-                            len(state_text), sum(len(str(v)) for v in questions.values()), len(image_bytes or b""),
-                        )
-                        if response.status != 200:
-                            self._ready_until = 0.0
-                            detail = " ".join(body.split())[:240]
-                            if response.status == 501 and ("image input" in body.lower() or "mmproj" in body.lower()):
-                                self._vision_ready = False
-                                logs.append("D1画像入力が拒否されました。クライアント形式は正しいため、D1サービスをmmproj付きで再起動してください。")
-                            logs.append(f"D1 APIエラー: HTTP {response.status}" + (f" / {detail}" if detail else ""))
-                            # 5xx/429はモデルロードや一時的な過負荷の可能性があるため再試行する。
-                            if attempt < D1_HTTP_RETRIES and response.status in (408, 429, 500, 502, 503, 504):
-                                await asyncio.sleep(D1_HTTP_RETRY_DELAY * attempt)
-                                continue
-                            return ""
-                        try:
-                            data = await response.json(content_type=None)
-                        except Exception:
-                            detail = " ".join(body.split())[:240]
-                            logs.append("D1 APIエラー: JSON応答を解釈できません" + (f" / {detail}" if detail else ""))
-                            if attempt < D1_HTTP_RETRIES:
-                                await asyncio.sleep(D1_HTTP_RETRY_DELAY * attempt)
-                                continue
-                            return ""
-                        answers = data.get("answers", {}) if isinstance(data, dict) else {}
-                        key = next(iter(questions), "")
-                        answer = answers.get(key, {}) if isinstance(answers, dict) else {}
-                        if isinstance(answer, str):
-                            return answer
-                        if isinstance(answer, dict):
-                            choice = answer.get("choice") or answer.get("answer") or answer.get("value")
-                            if choice is not None:
-                                return str(choice)
-                        if isinstance(data, dict) and data.get("choice") is not None:
-                            return str(data["choice"])
-                        logs.append("D1 APIエラー: choice結果がありません")
-                        if attempt < D1_HTTP_RETRIES:
-                            await asyncio.sleep(D1_HTTP_RETRY_DELAY * attempt)
-                            continue
-                        return ""
+                data = await asyncio.wait_for(
+                    logfare.decision("clef", state_text, questions, timeout=timeout),
+                    timeout=CLEF_TIMEOUT,
+                )
+                if isinstance(data.get("result"), dict):
+                    data = data["result"]
+                answers = data.get("answers", {})
+                key = next(iter(questions), "")
+                answer = answers.get(key, {}) if isinstance(answers, dict) else {}
+                if isinstance(answer, str):
+                    return answer
+                if isinstance(answer, dict):
+                    choice = answer.get("choice") or answer.get("answer") or answer.get("value")
+                    if choice is not None:
+                        return str(choice)
+                choice = data.get("choice") if isinstance(data, dict) else None
+                if choice is not None:
+                    return str(choice)
+                raise ValueError("Clef response did not contain an answer choice")
             except asyncio.CancelledError:
                 raise
-            except asyncio.TimeoutError:
-                # pingは成功しても、画像エンコード＋推論はモデルロード直後に時間がかかる。
-                # これはサービス停止ではないため、再試行後にのみ1回の判断失敗として記録する。
-                if attempt < D1_HTTP_RETRIES:
-                    logs.append(f"D1推論が{D1_HTTP_TIMEOUT:.0f}秒で未完了。{attempt + 1}回目を再試行します。")
-                    await asyncio.sleep(D1_HTTP_RETRY_DELAY * attempt)
-                    continue
-                logs.append(f"D1推論タイムアウト（{D1_HTTP_RETRIES}回試行）。作戦フォールバックを使用します。")
-            except (aiohttp.ClientError, OSError) as exc:
-                if attempt < D1_HTTP_RETRIES:
-                    logs.append(f"D1接続一時失敗（{type(exc).__name__}）。再試行します。")
-                    await asyncio.sleep(D1_HTTP_RETRY_DELAY * attempt)
-                    continue
-                logs.append(f"D1接続エラー: {type(exc).__name__}")
+            except (logfare.LogfareHTTPError, aiohttp.ClientError, asyncio.TimeoutError, OSError, RuntimeError, ValueError) as exc:
+                last_error = exc
+                status = getattr(exc, "status", None)
+                logs.append(f"Clef APIエラー{f' (HTTP {status})' if status else ''}。")
+                retryable = status is None or status in (408, 429, 500, 502, 503, 504)
+                if not retryable or attempt >= CLEF_RETRIES:
+                    break
+                await asyncio.sleep(CLEF_RETRY_DELAY * attempt)
             except Exception as exc:
-                logs.append(f"D1接続エラー: {type(exc).__name__}")
-                return ""
+                last_error = exc
+                logs.append(f"Clef判断エラー: {type(exc).__name__}")
+                break
+        if last_error:
+            logger.warning("Dungeon Clef decision failed: %s", type(last_error).__name__)
         return ""
-
     # ---------- 実行制御 ----------
 
     def is_running(self, uid):
@@ -2765,7 +2621,7 @@ class D1DungeonPlayer:
         return bool(task and not task.done())
 
     def plan_for(self, uid):
-        return self._plans.get(str(uid), D1_PLANS["safe"])
+        return self._plans.get(str(uid), CLEF_PLANS["safe"])
 
     def set_plan(self, uid, plan):
         self._plans[str(uid)] = plan
@@ -2786,7 +2642,7 @@ class D1DungeonPlayer:
             return False
         await interaction.response.defer()
         self._plans[uid] = plan
-        # 押した時点の保存済み状態から、表示もD1の判断も同一のフレームで始める。
+        # 押した時点の保存済み状態から、表示もClefの判断も同一のフレームで始める。
         p = d_get_player(uid)
         view = DungeonUnifiedView(uid, p["floor"], p["x"], p["y"], self.bot.db_api, plan=plan)
         message = interaction.message or await interaction.original_response()
@@ -2819,10 +2675,10 @@ class D1DungeonPlayer:
             description="\n".join(str(x) for x in logs[-8:])[-1500:] or "ログはまだありません。",
             color=0x666666 if final else 0x8B5CF6,
         )
-        embed.add_field(name="作戦", value=f"{view.d1_plan} / 停止: 終了ボタン", inline=False)
+        embed.add_field(name="作戦", value=f"{view.clef_plan} / 停止: 終了ボタン", inline=False)
         embed.add_field(
             name="停止条件",
-            value=f"HP30%未満 / ボス / 遺物 / {D1_MAX_TURNS}ターン / APIエラー3回 / 同一地点3回",
+            value=f"HP30%未満 / ボス / 遺物 / {CLEF_MAX_TURNS}ターン / APIエラー3回 / 同一地点3回",
             inline=False,
         )
         embed.add_field(
@@ -2838,7 +2694,7 @@ class D1DungeonPlayer:
         self._run_stats.setdefault(uid, {"turns": 0, "positions": []})["last_result"] = text
 
     def _stop_reason(self, uid, logs):
-        """D1の安全停止条件をゲーム側で一元判定する。1ターンにつき1回だけ呼ぶ。"""
+        """Clefの安全停止条件をゲーム側で一元判定する。1ターンにつき1回だけ呼ぶ。"""
         p = d_get_player(uid)
         stats = d_effective_stats(p)
         run = self._run_stats.setdefault(uid, {"turns": 0, "positions": []})
@@ -2855,19 +2711,19 @@ class D1DungeonPlayer:
             return "ボス遭遇"
         if any("遺物" in line for line in logs[-8:]):
             return "希少アイテム発見"
-        if run.get("turns", 0) >= D1_MAX_TURNS:
-            return f"1回のD1実行が{D1_MAX_TURNS}ターンに到達"
+        if run.get("turns", 0) >= CLEF_MAX_TURNS:
+            return f"1回の自動操作が{CLEF_MAX_TURNS}ターンに到達"
         if len(positions) >= 3 and positions[-1] == positions[-2] == positions[-3]:
             return "同じ場所で3回連続停止"
-        if sum("D1 APIエラー" in line or "D1接続エラー" in line for line in logs[-6:]) >= 3:
-            return "D1 APIエラーが連続3回"
+        if sum("Clef APIエラー" in line or "Clef接続エラー" in line for line in logs[-6:]) >= 3:
+            return "Clef APIエラーが連続3回"
         if sum("と遭遇しました" in line for line in logs[-8:]) >= 3:
             return "連続戦闘が多いため"
         return ""
 
     async def _run_loop(self, uid, message, view, stop_event, plan):
         logs = [f"自動操作を開始しました。作戦: {plan} / 終了ボタンで停止できます。"]
-        d_begin_run(uid, "d1")
+        d_begin_run(uid, "clef")
         self._run_stats[uid] = {"turns": 0, "positions": [], "last_result": ""}
         # 初回判断の前に、ゲームハブのダンジョンと同じ現在状態のフレームを表示する。
         await self._edit_screen(message, view, logs)
@@ -2877,9 +2733,7 @@ class D1DungeonPlayer:
                 if reason:
                     logs.append(f"停止しました: {reason}")
                     break
-                turn_started = time.perf_counter()
                 await self._play_turn(uid, logs, plan)
-                self._timing("turn uid=%s elapsed_ms=%.0f", uid, (time.perf_counter() - turn_started) * 1000)
                 self._run_stats[uid]["turns"] += 1
                 await self._edit_screen(message, view, logs)
                 await asyncio.sleep(1.0)
@@ -2892,7 +2746,7 @@ class D1DungeonPlayer:
             self._tasks.pop(uid, None)
             self._stops.pop(uid, None)
             self._run_stats.pop(uid, None)
-            d_end_run(uid, "d1_stop")
+            d_end_run(uid, "clef_stop")
             logs.append("自動操作を終了しました。")
             try:
                 await self._edit_screen(message, view, logs, final=True)
@@ -2906,8 +2760,8 @@ class D1DungeonPlayer:
         stats = d_effective_stats(p)
         floor, x, y = p["floor"], p["x"], p["y"]
         cell = d_get_cell(floor, x, y)
-        logs.append(d1_candidate_log(uid, plan))
-        d_record_action(uid, "decision", source="d1", result=plan)
+        logs.append(dungeon_candidate_log(uid, plan))
+        d_record_action(uid, "decision", source="clef", result=plan)
 
         if cell == D_STAIRS:
             raw = await self._decide(uid, logs, plan, {
@@ -2915,8 +2769,8 @@ class D1DungeonPlayer:
                     "type": "choice",
                     "instructions": (
                         "階段の上にいます。次に取る行動を1つだけ選んでください。\n"
-                        f"目的: {d1_goal_text(uid)}\n"
-                        f"作戦: {plan}（{d1_plan_guidance(plan)}）\n"
+                        f"目的: {dungeon_goal_text(uid)}\n"
+                        f"作戦: {plan}（{dungeon_plan_guidance(plan)}）\n"
                         "基準: 上の階へ進むとHPが全回復し、より深い階へ移動します。"
                         "この階の探索や回収を優先したい場合は残ってください。\n"
                         "回答は up か stay のどちらか1語のみ。"
@@ -2946,8 +2800,8 @@ class D1DungeonPlayer:
                     "type": "choice",
                     "instructions": (
                         "鉱山の上にいます。次に取る行動を1つだけ選んでください。\n"
-                        f"目的: {d1_goal_text(uid)}\n"
-                        f"作戦: {plan}（{d1_plan_guidance(plan)}）\n"
+                        f"目的: {dungeon_goal_text(uid)}\n"
+                        f"作戦: {plan}（{dungeon_plan_guidance(plan)}）\n"
                         "基準: 採掘するとコインを獲得でき、この鉱山は消滅します。\n"
                         "回答は dig か leave のどちらか1語のみ。"
                     ),
@@ -2984,8 +2838,8 @@ class D1DungeonPlayer:
                     "type": "choice",
                     "instructions": (
                         "商店の上にいます。次に取る行動を1つだけ選んでください。\n"
-                        f"目的: {d1_goal_text(uid)}\n"
-                        f"作戦: {plan}（{d1_plan_guidance(plan)}）\n"
+                        f"目的: {dungeon_goal_text(uid)}\n"
+                        f"作戦: {plan}（{dungeon_plan_guidance(plan)}）\n"
                         f"基準: レアパンは30コインでHP回復に使えます（所持パン {p['bread']} 個）。\n"
                         "回答は buy か leave のどちらか1語のみ。"
                     ),
@@ -3008,18 +2862,18 @@ class D1DungeonPlayer:
             return
 
         # 通常移動。待機手は用意せず、必ず1方向を選ばせる。
-        dist = d1_bfs(floor, x, y)
-        move_criteria = d1_move_criteria(floor, x, y, dist)
+        dist = dungeon_bfs(floor, x, y)
+        move_criteria = dungeon_move_criteria(floor, x, y, dist)
         criteria_text = "\n".join(f"{key}: {value}" for key, value in move_criteria.items())
         instructions = (
             "あなたはダンジョン探索の意思決定者です。画像ではなく、以下のテキスト盤面を正として次の1手を選んでください。\n"
-            f"目的: {d1_goal_text(uid)}\n"
-            f"作戦: {plan}（{d1_plan_guidance(plan)}）\n"
-            f"現在地: {floor}F ({x},{y}) / 階段: {d1_stairs_hint(floor, x, y, dist)}\n"
-            f"局所盤面: {d1_local_grid(floor, x, y)}\n"
+            f"目的: {dungeon_goal_text(uid)}\n"
+            f"作戦: {plan}（{dungeon_plan_guidance(plan)}）\n"
+            f"現在地: {floor}F ({x},{y}) / 階段: {dungeon_stairs_hint(floor, x, y, dist)}\n"
+            f"局所盤面: {dungeon_local_grid(floor, x, y)}\n"
             f"方向ごとの判定基準:\n{criteria_text}\n"
             "制約: 壁へは進めません。階段へ近づく方向を優先します。HPが30%未満なら回復タイルや階段へ向かってください。\n"
-            "回答は次のいずれか1語のみ: " + ", ".join(D1_MOVE_KEYS)
+            "回答は次のいずれか1語のみ: " + ", ".join(CLEF_MOVE_KEYS)
         )
         raw = await self._decide(uid, logs, plan, {
             "move": {
@@ -3028,10 +2882,10 @@ class D1DungeonPlayer:
                 "criteria": move_criteria,
             }
         })
-        choice = d_normalize_choice(raw, set(D1_MOVE_KEYS), None)
+        choice = d_normalize_choice(raw, set(CLEF_MOVE_KEYS), None)
         if choice is None:
-            choice = d1_best_direction(uid, plan, dist)
-            logs.append(f"D1の応答を解釈できなかったため、作戦に沿って{_DIRECTION_LABELS[choice]}へ進みます。")
+            choice = dungeon_best_direction(uid, plan, dist)
+            logs.append(f"Clefの応答を解釈できなかったため、作戦に沿って{_DIRECTION_LABELS[choice]}へ進みます。")
         dx, dy = _DIRECTIONS[choice]
         nx, ny = x + dx, y + dy
         corner_cut = dx != 0 and dy != 0 and (
@@ -3040,7 +2894,7 @@ class D1DungeonPlayer:
         if (not (0 <= nx < D_MAP_W and 0 <= ny < D_MAP_H)
                 or d_get_cell(floor, nx, ny) == D_WALL or corner_cut):
             blocked_choice = choice
-            choice = d1_best_direction(uid, plan, dist)
+            choice = dungeon_best_direction(uid, plan, dist)
             dx, dy = _DIRECTIONS[choice]
             nx, ny = x + dx, y + dy
             logs.append(f"{_DIRECTION_LABELS[blocked_choice]}({blocked_choice})は壁でした。サーバー判定で{_DIRECTION_LABELS[choice]}({choice})へ補正します。")
@@ -3103,7 +2957,7 @@ class D1DungeonPlayer:
             await self._auto_combat(uid, enemy, logs)
 
     async def _auto_combat(self, uid, enemy, logs):
-        """戦闘もD1に選ばせる。ダメージ計算と結果確定は本体側で行う。"""
+        """戦闘もClefに選ばせる。ダメージ計算と結果確定は本体側で行う。"""
         p = d_get_player(uid)
         combat = DungeonCombatView(uid, p["floor"], p["x"], p["y"], enemy, self.bot.db_api)
         while enemy["hp"] > 0 and d_get_player(uid)["hp"] > 0:
@@ -3112,7 +2966,7 @@ class D1DungeonPlayer:
                     "type": "choice",
                     "instructions": (
                         "戦闘中です。次の行動を1つだけ選んでください。\n"
-                        f"目的: {d1_goal_text(uid)}\n"
+                        f"目的: {dungeon_goal_text(uid)}\n"
                         f"敵: {enemy['name']}（HP {enemy['hp']}/{enemy['max_hp']}）\n"
                         "基準: HPが少ない時は防御や逃走も有効です。ボスからは逃げられません。\n"
                         "回答は attack, skill, defend, escape のいずれか1語のみ。"
@@ -3158,13 +3012,13 @@ class DungeonCog(Cog):
     def __init__(self, bot):
         self.bot = bot
         self.db_api = None
-        # 自動操作は同一ファイル内で管理する（旧 d1_dangeon.py を統合）。
-        self.d1 = D1DungeonPlayer(bot)
+        # 自動操作は同一ファイル内で管理する（Clefによる自動操作）。
+        self.clef = ClefDungeonPlayer(bot)
 
     async def cog_load(self):
         """Cog読み込み時"""
-        global _D1_PLAYER
-        _D1_PLAYER = self.d1
+        global _CLEF_PLAYER
+        _CLEF_PLAYER = self.clef
         # 親botから自前DB APIクライアントを取得
         if hasattr(self.bot, 'db_api'):
             self.db_api = self.bot.db_api
@@ -3179,7 +3033,7 @@ class DungeonCog(Cog):
 
     def cog_unload(self):
         """Cog アンロード時"""
-        self.d1.shutdown()
+        self.clef.shutdown()
         if self.dungeon_monthly_task.is_running():
             self.dungeon_monthly_task.cancel()
 
@@ -3204,12 +3058,12 @@ class DungeonCog(Cog):
             if self.db_api:
                 await dg_save_player(uid, self.db_api)
 
-        # すべての通常操作・ステータス・D1開始/停止を1つの画面へ集約する。
+        # すべての通常操作・ステータス・自動操作開始/停止を1つの画面へ集約する。
         mv = DungeonUnifiedView(uid, floor, x, y, self.db_api)
 
         # 初期画像は専用チャンネルへ投げず、コマンド応答へ直接添付する。
         map_file, map_url = d_map_attachment(uid, floor, x, y)
-        em = mv._embed("ダンジョンへようこそ！ D1の接続と作戦はSTATUS画面から選べます。", image_url=map_url)
+        em = mv._embed("ダンジョンへようこそ！ Clef自動操作と作戦はSTATUS画面から設定できます。", image_url=map_url)
         await interaction.followup.send(embed=em, view=mv, file=map_file)
 
     @commands.command(name="dungeon_reset")
