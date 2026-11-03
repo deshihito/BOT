@@ -2,7 +2,7 @@
 from __future__ import annotations
 import json
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping
 from core.guild_settings import get_store
 
 LANGUAGE_SECTION = "localization"
@@ -81,7 +81,12 @@ def normalize_locale(value: Any) -> str:
     return value if value in SUPPORTED_LOCALES else DEFAULT_LOCALE
 
 def locale_settings(store, guild_id: int) -> dict[str, Any]:
+    # Servers installed before localization was added do not have this section.
+    # Be defensive about legacy/corrupt stores too: localization is a response
+    # enhancement and must never make a command fail.
     raw = store.get(guild_id, LANGUAGE_SECTION)
+    if not isinstance(raw, Mapping):
+        raw = {}
     return {"locale": normalize_locale(raw.get("locale")), "panel_message_id": raw.get("panel_message_id")}
 
 def guild_locale(guild_id: int, store=None) -> str:
@@ -177,7 +182,11 @@ def localize_kwargs(sender: Any, kwargs: dict[str, Any]) -> dict[str, Any]:
     guild_id = guild_id_for_sender(sender)
     if guild_id is None:
         return kwargs
-    locale = guild_locale(guild_id)
+    try:
+        locale = guild_locale(guild_id)
+    except Exception:
+        # A missing or unavailable guild-settings store must not block sends.
+        return kwargs
     if normalize_locale(locale) != "en":
         return kwargs
     result = dict(kwargs)

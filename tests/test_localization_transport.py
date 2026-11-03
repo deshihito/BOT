@@ -58,6 +58,24 @@ class LocalizationTransportTest(unittest.TestCase):
         self.assertEqual(result["content"], "日本語のWebhook本文")
         get_store.assert_not_called()
 
+    def test_missing_or_legacy_language_setting_falls_back_without_blocking_send(self):
+        sender = types.SimpleNamespace(guild=types.SimpleNamespace(id=77))
+        payload = {"content": "日本語本文"}
+        for stored_value in ({}, None, "legacy-value"):
+            store = types.SimpleNamespace(get=lambda guild_id, section, value=stored_value: value)
+            with self.subTest(stored_value=stored_value), \
+                    patch.object(localization, "_ENGLISH_PAIRS", [("日本語本文", "English body")]), \
+                    patch.object(localization, "get_store", return_value=store):
+                result = localization.localize_kwargs(sender, payload)
+            self.assertEqual(result["content"], "English body")
+
+    def test_settings_store_failure_does_not_block_send(self):
+        sender = types.SimpleNamespace(guild=types.SimpleNamespace(id=77))
+        store = types.SimpleNamespace(get=lambda *_: (_ for _ in ()).throw(RuntimeError("store unavailable")))
+        with patch.object(localization, "get_store", return_value=store):
+            result = localization.localize_kwargs(sender, {"content": "日本語本文"})
+        self.assertEqual(result["content"], "日本語本文")
+
     def test_localize_nested_components_v2_panel(self):
         button = discord.ui.Button(label="設定を保存")
         nested_panel = types.SimpleNamespace(
