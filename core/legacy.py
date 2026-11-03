@@ -57,7 +57,7 @@ class Responder:
             await self.source.response.defer(ephemeral=ephemeral)
 
     async def send(self, content: Any = None, *, embed=None, view=None, file=None, ephemeral: bool = False,
-                   want_message: bool = False):
+                   want_message: bool = False, skip_localization: bool = False):
         """返信する。``want_message`` のときは送ったメッセージを返す（あとで編集するため）。"""
         kwargs: dict[str, Any] = {}
         if content is not None:
@@ -68,6 +68,8 @@ class Responder:
             kwargs["view"] = view
         if file is not None:
             kwargs["file"] = file
+        if skip_localization:
+            kwargs["_agobot_skip_localization"] = True
         if not self.is_interaction:
             return await self.source.send(**kwargs)
         kwargs["ephemeral"] = ephemeral
