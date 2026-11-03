@@ -125,7 +125,8 @@ class GlobalChatCog(commands.Cog):
                     content=message.content,
                     username=f"{message.author.display_name} [{message.guild.name}]", # どこから来たか分かるようにサーバー名も付与
                     avatar_url=message.author.display_avatar.url,
-                    allowed_mentions=discord.AllowedMentions.none() # 二重のメンション対策
+                    allowed_mentions=discord.AllowedMentions.none(), # 二重のメンション対策
+                    _agobot_skip_localization=True,
                 )
             except Exception as e:
                 print(f"チャンネル {cid} への転送中にエラーが発生しました: {e}")

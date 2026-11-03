@@ -18,6 +18,8 @@ from discord.ext import commands, tasks
 from core.panel_v2 import as_panel_v2, edit_panel_v2
 from core import ai_omnirush, ai_preferences, ai_provider_router, guild_settings, logfare, shortcuts
 from core.game_guides import GAME_GUIDES, GAME_ORDER
+from core import localization, translation
+from core.libretranslate import LibreTranslateClient, LibreTranslateError
 
 logger = logging.getLogger(__name__)
 
@@ -1503,6 +1505,94 @@ class GeneralActionSelect(discord.ui.Select):
         await self.cog.dispatch_general(interaction, self.values[0])
 
 
+class TranslationLocaleSelect(discord.ui.Select):
+    def __init__(self, parent: "TranslationView", *, source: bool):
+        self.parent_view = parent
+        self.source = source
+        locales = translation.SOURCE_LOCALES if source else localization.SUPPORTED_LOCALES
+        current = parent.source_locale if source else parent.target_locale
+        labels = translation.SOURCE_LOCALE_LABELS if source else localization.LOCALE_LABELS
+        flags = translation.SOURCE_LOCALE_FLAGS if source else localization.LOCALE_FLAGS
+        super().__init__(
+            placeholder="翻訳前の言語を選択してください" if source else "翻訳後の言語を選択してください",
+            options=[
+                discord.SelectOption(label=labels[locale], value=locale, emoji=flags[locale], default=locale == current)
+                for locale in locales
+            ],
+            row=0 if source else 1,
+        )
+
+    async def callback(self, interaction: discord.Interaction):
+        locale = (
+            translation.normalize_source_locale(self.values[0])
+            if self.source else localization.normalize_locale(self.values[0])
+        )
+        if self.source:
+            self.parent_view.source_locale = locale
+            await translation_settings_update(self.parent_view.user_id, source_locale=locale)
+        else:
+            self.parent_view.target_locale = locale
+            await translation_settings_update(self.parent_view.user_id, target_locale=locale)
+        await interaction.response.edit_message(embed=self.parent_view.embed(), view=self.parent_view)
+
+
+class TranslationToggleButton(discord.ui.Button):
+    def __init__(self, parent: "TranslationView", enabled: bool):
+        self.parent_view = parent
+        super().__init__(
+            label="自動翻訳をオフにする" if enabled else "自動翻訳をオンにする",
+            style=discord.ButtonStyle.danger if enabled else discord.ButtonStyle.success,
+            row=2,
+        )
+
+    async def callback(self, interaction: discord.Interaction):
+        self.parent_view.enabled = not self.parent_view.enabled
+        await translation_settings_update(self.parent_view.user_id, enabled=self.parent_view.enabled)
+        self.parent_view.refresh()
+        await interaction.response.edit_message(embed=self.parent_view.embed(), view=self.parent_view)
+
+
+async def translation_settings_update(
+    user_id: int, *, enabled: bool | None = None,
+    source_locale: str | None = None, target_locale: str | None = None,
+):
+    return await translation.update_translation_settings(
+        user_id, enabled=enabled, source_locale=source_locale, target_locale=target_locale
+    )
+
+
+class TranslationView(discord.ui.View):
+    def __init__(self, user_id: int, guild_id: int):
+        super().__init__(timeout=600)
+        self.user_id, self.guild_id = user_id, guild_id
+        settings = translation.translation_settings(user_id, guild_id)
+        self.enabled = settings["enabled"]
+        self.source_locale = settings["source_locale"]
+        self.target_locale = settings["target_locale"]
+        self.refresh()
+
+    def refresh(self):
+        self.clear_items()
+        self.add_item(TranslationLocaleSelect(self, source=True))
+        self.add_item(TranslationLocaleSelect(self, source=False))
+        self.add_item(TranslationToggleButton(self, self.enabled))
+
+    def embed(self):
+        status = "オン" if self.enabled else "オフ"
+        source = translation.SOURCE_LOCALE_LABELS[self.source_locale]
+        target = localization.LOCALE_LABELS[self.target_locale]
+        return discord.Embed(
+            title="自動翻訳設定",
+            description=(
+                f"状態: **{status}**\n"
+                f"翻訳前: **{source}** → 翻訳後: **{target}**\n\n"
+                "オンにすると、あなたのメッセージを削除し、"
+                "送信者の名前とアイコンで翻訳結果を再投稿します。"
+            ),
+            color=0x5865F2,
+        )
+
+
 class GeneralPanel(discord.ui.View):
     def __init__(self, cog, genre: str | None = None, shortcut_mode: bool = False, shortcut_item: dict | None = None):
         super().__init__(timeout=300)
@@ -2036,6 +2126,7 @@ class GeneralCog(commands.Cog):
         self.miq_menu = app_commands.ContextMenu(name="Make it a Quote", callback=self.miq_context)
 
     async def cog_load(self):
+        await translation.ensure_loaded()
         self.exp_vc_tick.start()
         self.bot.tree.add_command(self.miq_menu, override=True)
 
