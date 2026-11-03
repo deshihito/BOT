@@ -1,31 +1,42 @@
 import types
 import unittest
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
 
 from core import localization, translation
 
 
 class TranslationTest(unittest.IsolatedAsyncioTestCase):
-    async def test_settings_share_localization_locale_as_target_by_default(self):
-        store = types.SimpleNamespace(
-            get=lambda guild_id, section: (
-                {"enabled": True} if section == translation.TRANSLATION_SECTION else {"locale": "ja"}
-            )
+    def test_settings_are_scoped_to_user_and_use_guild_locale_as_default(self):
+        user_store = types.SimpleNamespace(
+            get=lambda key, default=None: {"enabled": True} if key == "42" else default
         )
-        settings = translation.translation_settings(42, store)
+        guild_store = types.SimpleNamespace(get=lambda *_: {"locale": "ja"})
+        with patch("core.translation.get_guild_store", return_value=guild_store):
+            settings = translation.translation_settings(42, 99, user_store)
         self.assertEqual(
             settings,
             {"enabled": True, "source_locale": "auto", "target_locale": "ja"},
         )
 
-    async def test_settings_accept_explicit_source_and_target(self):
+    def test_settings_accept_explicit_source_and_target(self):
         store = types.SimpleNamespace(
-            get=lambda *_: {"enabled": True, "source_locale": "ja", "target_locale": "en"}
+            get=lambda key, default=None: {
+                "enabled": True, "source_locale": "ja", "target_locale": "en"
+            }
         )
         self.assertEqual(
-            translation.translation_settings(42, store),
+            translation.translation_settings(42, 99, store),
             {"enabled": True, "source_locale": "ja", "target_locale": "en"},
         )
+
+    async def test_update_settings_uses_user_id_as_storage_key(self):
+        store = types.SimpleNamespace(
+            load_local=lambda: {"42": {"enabled": False}},
+            set=AsyncMock(),
+        )
+        with patch.object(translation, "_store", store):
+            await translation.update_translation_settings(42, enabled=True, target_locale="en")
+        store.set.assert_awaited_once_with("42", {"enabled": True, "target_locale": "en"})
 
     async def test_translate_message_uses_source_and_target(self):
         client = types.SimpleNamespace(translate=AsyncMock(return_value="hello"))
