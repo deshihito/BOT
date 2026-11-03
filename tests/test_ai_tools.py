@@ -36,6 +36,14 @@ class AIToolsTest(unittest.IsolatedAsyncioTestCase):
         for key in ("vc:record_start", "vc:transcribe_start", "vc:global_start", "vc:match_start"):
             self.assertNotIn(key, candidates)
 
+        # 後から追加されたVC操作も、フォーム入力を必要としないものはAI toolsから選べる。
+        for key in (
+            "vc:record_status", "vc:record_pitch", "vc:echo_status", "vc:karaoke_score",
+            "vc:changer_stop", "vc:changer_status", "vc:gvc_room_list",
+            "vc:gvc_chat_disconnect", "vc:tts_stop", "vc:trigger_panel",
+        ):
+            self.assertIn(key, candidates)
+
     async def test_ai_tools_is_enabled_by_default_without_legacy_d1_flag(self):
         with patch.dict(os.environ, {}, clear=True):
             self.assertTrue(_enabled())
