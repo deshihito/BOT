@@ -89,59 +89,41 @@ SUPPORT_ACTIONS = [
 SUPPORT_GENRES = {
     "moderation": (
         "モデレーション",
-        "Muted、匿名つぶやき、Stickyパネル、メッセージ削除、モデレート履歴、ハニーポット、チケット",
+        "Muted、匿名つぶやき、Stickyパネル、メッセージ削除、ハニーポット、チケット",
     ),
-    "server": (
-        "サーバー管理",
-        "ロール操作、絵文字便乗、VC履歴、メッセージ編集履歴、認証パネル、ロールパネル、レベルアップ通知、音声トリガー",
-    ),
+    "roles": ("ロール・認証", "一括ロール操作、認証パネル、ロールパネル、言語設定"),
+    "logs": ("履歴・ログ", "VC入退室、メッセージ編集、モデレートの履歴"),
+    "automation": ("自動化・通知", "絵文字便乗、Auto react、レベルアップ、音声トリガー、SNS・Quest通知"),
     "assist": (
         "サーバーアシスト",
         "参加・退出メッセージ、自動ロール、Starboard、レベル、一時VC",
     ),
-    "bumprta": ("bump/up・RTA", "通知設定と RTA 状態・ランキング"),
-    "sokunuke": ("即抜けRTA", "24時間以内の退出計測、ランキング、VC自動参加"),
     "event": ("イベント", "抽選の作成"),
-    "notify": ("SNS・Quest通知", "X・YouTubeの新着通知、Discord Quest（Orbs）の通知（管理者のみ）"),
+    "rta": ("RTA", "bump/up・即抜けの計測、通知、ランキング、VC自動参加"),
 }
 
+# 旧バージョンで保存されたショートカットを新しいジャンルへ移行する。
+SUPPORT_GENRE_ALIASES = {"server": "roles", "notify": "automation", "bumprta": "rta", "sokunuke": "rta"}
+
+_SUPPORT_ACTION_BY_VALUE = {choice.value: (choice.name, choice.value) for choice in SUPPORT_ACTIONS}
+
+
+def _support_actions(*values: str) -> list[tuple[str, str]]:
+    return [_SUPPORT_ACTION_BY_VALUE[value] for value in values]
+
+
 SUPPORT_ACTIONS_BY_GENRE = {
-    "moderation": [
-        (c.name, c.value)
-        for c in (
-            SUPPORT_ACTIONS[0],
-            SUPPORT_ACTIONS[1],
-            SUPPORT_ACTIONS[2],
-            SUPPORT_ACTIONS[3],
-            SUPPORT_ACTIONS[12],
-            SUPPORT_ACTIONS[13],
-            SUPPORT_ACTIONS[14],
-        )
-    ],
-    "server": [
-        (c.name, c.value)
-        for c in (
-            SUPPORT_ACTIONS[4],
-            SUPPORT_ACTIONS[8],
-            SUPPORT_ACTIONS[10],
-            SUPPORT_ACTIONS[11],
-            SUPPORT_ACTIONS[15],
-            SUPPORT_ACTIONS[16],
-        )
-    ],
-    "bumprta": [(c.name, c.value) for c in SUPPORT_ACTIONS[5:8]],
-    "sokunuke": [(c.name, c.value) for c in SUPPORT_ACTIONS[24:29]],
-    "event": [(SUPPORT_ACTIONS[9].name, SUPPORT_ACTIONS[9].value)],
-    "assist": [("サーバーアシスト設定", "server_assist")],
+    "moderation": _support_actions("muted", "whisper", "sticky", "clear", "honeypot", "ticket"),
+    "roles": _support_actions("role_bulk", "auth_panel", "role_panel", "language"),
+    "logs": _support_actions("vc_log", "message_log", "moderation_log"),
+    "automation": _support_actions("binjou", "auto_react", "levelup_notify", "voice_trigger", "sns_notify", "quest_notify"),
+    "assist": _support_actions("server_assist"),
+    "event": _support_actions("giveaway"),
+    "rta": _support_actions(
+        "bumprta_status", "bumprta_on", "bumprta_off", "sokunuke_status", "sokunuke_on",
+        "sokunuke_off", "sokunuke_vc_on", "sokunuke_vc_off",
+    ),
 }
-SUPPORT_ACTIONS_BY_GENRE["server"].append((SUPPORT_ACTIONS[17].name, SUPPORT_ACTIONS[17].value))
-SUPPORT_ACTIONS_BY_GENRE["server"].append((SUPPORT_ACTIONS[18].name, SUPPORT_ACTIONS[18].value))
-SUPPORT_ACTIONS_BY_GENRE["server"].append((SUPPORT_ACTIONS[21].name, SUPPORT_ACTIONS[21].value))
-SUPPORT_ACTIONS_BY_GENRE["server"].append((SUPPORT_ACTIONS[23].name, SUPPORT_ACTIONS[23].value))
-SUPPORT_ACTIONS_BY_GENRE["notify"] = [
-    (SUPPORT_ACTIONS[19].name, SUPPORT_ACTIONS[19].value),
-    (SUPPORT_ACTIONS[20].name, SUPPORT_ACTIONS[20].value),
-]
 
 THINKING_SECTION = "thinking_reaction"
 BINJOU_SECTION = "binjou"
@@ -2634,11 +2616,11 @@ class SupportGenreSelect(discord.ui.Select):
             options=[
                 discord.SelectOption(
                     label=label,
-                    description=description,
+                    description=f"{len(SUPPORT_ACTIONS_BY_GENRE[value])}個の機能",
                     value=value,
                     default=value == selected,
                 )
-                for value, (label, description) in SUPPORT_GENRES.items()
+                for value, (label, _description) in SUPPORT_GENRES.items()
             ],
             row=0,
         )
@@ -2710,7 +2692,8 @@ class SupportPanelView(discord.ui.View):
         self.cog = cog
 
         saved = (shortcut_item or {}).get("action", {})
-        self.genre = genre or saved.get("genre")
+        saved_genre = saved.get("genre")
+        self.genre = SUPPORT_GENRE_ALIASES.get(genre or saved_genre, genre or saved_genre)
         self.action = saved.get("value")
         self.shortcut_mode = shortcut_mode
         self.shortcut_item = shortcut_item

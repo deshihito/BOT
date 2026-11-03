@@ -88,12 +88,12 @@ COMMUNITY_ACTIONS = [
 VOICE_GENRES = {
     "connection": ("VC接続", "参加、退出、現在の使用状況"),
     "music": ("音楽", "音楽操作パネル"),
+    "tts": ("読み上げ", "VOICEVOXによるテキスト読み上げ"),
     "studio": ("録音・音声制作", "録音、やまびこ、文字起こし、カラオケ"),
     "effects": ("音声加工", "ボイスチェンジャー"),
+    "trigger": ("音声トリガー", "登録・一覧・削除"),
     "community": ("通話ネットワーク", "ランダム通話、グローバルVC"),
     "gvc_rooms": ("グローバルVCルーム", "ルーム一覧・作成・情報・削除、グロチャ接続"),
-    "tts": ("読み上げ", "VOICEVOXによるテキスト読み上げ"),
-    "trigger": ("音声トリガー", "登録・一覧・削除"),
 }
 VOICE_ACTIONS_BY_GENRE = {
     "connection": [("参加", "join"), ("退出", "leave"), ("状態", "status")],
@@ -442,8 +442,9 @@ class VoiceGenreSelect(discord.ui.Select):
     def __init__(self, hub: VoiceHub, selected: str | None = None):
         self.hub = hub
         super().__init__(placeholder="ジャンルを選択してください", options=[
-            discord.SelectOption(label=label, description=description, value=value, default=value == selected)
-            for value, (label, description) in VOICE_GENRES.items()
+            discord.SelectOption(label=label, description=f"{len(VOICE_ACTIONS_BY_GENRE[value])}個の機能",
+                                 value=value, default=value == selected)
+            for value, (label, _description) in VOICE_GENRES.items()
         ], row=0)
 
     async def callback(self, interaction: discord.Interaction):
