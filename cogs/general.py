@@ -1394,10 +1394,10 @@ class TranslationLocaleSelect(discord.ui.Select):
         )
         if self.source:
             self.parent_view.source_locale = locale
-            await translation_settings_update(interaction.guild_id, source_locale=locale)
+            await translation_settings_update(self.parent_view.user_id, source_locale=locale)
         else:
             self.parent_view.target_locale = locale
-            await translation_settings_update(interaction.guild_id, target_locale=locale)
+            await translation_settings_update(self.parent_view.user_id, target_locale=locale)
         await interaction.response.edit_message(embed=self.parent_view.embed(), view=self.parent_view)
 
 
@@ -1412,32 +1412,25 @@ class TranslationToggleButton(discord.ui.Button):
 
     async def callback(self, interaction: discord.Interaction):
         self.parent_view.enabled = not self.parent_view.enabled
-        await translation_settings_update(interaction.guild_id, enabled=self.parent_view.enabled)
+        await translation_settings_update(self.parent_view.user_id, enabled=self.parent_view.enabled)
         self.parent_view.refresh()
         await interaction.response.edit_message(embed=self.parent_view.embed(), view=self.parent_view)
 
 
 async def translation_settings_update(
-    guild_id: int, *, enabled: bool | None = None,
+    user_id: int, *, enabled: bool | None = None,
     source_locale: str | None = None, target_locale: str | None = None,
 ):
-    values = {}
-    if enabled is not None:
-        values["enabled"] = bool(enabled)
-    if source_locale is not None:
-        values["source_locale"] = translation.normalize_source_locale(source_locale)
-    if target_locale is not None:
-        values["target_locale"] = localization.normalize_locale(target_locale)
-    await guild_settings.get_store().update(
-        guild_id, translation.TRANSLATION_SECTION, **values
+    return await translation.update_translation_settings(
+        user_id, enabled=enabled, source_locale=source_locale, target_locale=target_locale
     )
 
 
 class TranslationView(discord.ui.View):
-    def __init__(self, guild_id: int):
+    def __init__(self, user_id: int, guild_id: int):
         super().__init__(timeout=600)
-        self.guild_id = guild_id
-        settings = translation.translation_settings(guild_id)
+        self.user_id, self.guild_id = user_id, guild_id
+        settings = translation.translation_settings(user_id, guild_id)
         self.enabled = settings["enabled"]
         self.source_locale = settings["source_locale"]
         self.target_locale = settings["target_locale"]
@@ -1458,7 +1451,7 @@ class TranslationView(discord.ui.View):
             description=(
                 f"状態: **{status}**\n"
                 f"翻訳前: **{source}** → 翻訳後: **{target}**\n\n"
-                "オンにすると、このサーバーの人間のメッセージを削除し、"
+                "オンにすると、あなたのメッセージを削除し、"
                 "送信者の名前とアイコンで翻訳結果を再投稿します。"
             ),
             color=0x5865F2,
@@ -2000,6 +1993,7 @@ class GeneralCog(commands.Cog):
         self.miq_menu = app_commands.ContextMenu(name="Make it a Quote", callback=self.miq_context)
 
     async def cog_load(self):
+        await translation.ensure_loaded()
         self.exp_vc_tick.start()
         self.bot.tree.add_command(self.miq_menu, override=True)
 
@@ -2034,9 +2028,7 @@ class GeneralCog(commands.Cog):
 
     async def dispatch_general(self, interaction: discord.Interaction, value: str):
         if value == "translation_settings":
-            store = guild_settings.get_store()
-            await store.ensure_loaded()
-            view = TranslationView(interaction.guild_id)
+            view = TranslationView(interaction.user.id, interaction.guild_id)
             return await interaction.response.send_message(
                 embed=view.embed(), view=view, ephemeral=True
             )
@@ -2199,7 +2191,7 @@ class GeneralCog(commands.Cog):
 
         store = guild_settings.get_store()
         await store.ensure_loaded()
-        settings = translation.translation_settings(message.guild.id, store)
+        settings = translation.translation_settings(message.author.id, message.guild.id)
         if not settings["enabled"]:
             return
 
