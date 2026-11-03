@@ -2,7 +2,7 @@
 
 テーブルは ``docs/sql/nation.sql`` を参照。所持金は /user_status と共通の ``users.balance``。
 
-- Supabase のクライアントは同期なので、呼び出しはすべて ``asyncio.to_thread`` で行う。
+- DB API クライアントは同期なので、呼び出しはすべて ``asyncio.to_thread`` で行う。
 - 1 サーバーにつき 1 国（``nation_guilds.guild_id`` が主キー）。1 人が入れる国は 1 つだけ。
 - 空腹度は、国民がサーバーで発言すると 5 分に 1 回だけ 1 減る（0 で止まる）。
 - 国づくりをオフにしたサーバーでは、建国・参加・空腹の減少をしない。
@@ -19,12 +19,8 @@ from discord.ext import commands
 
 from core.emojis import COIN
 from core.guild_settings import nation_settings
-from core.supabase_retry import run_with_retry
-
-try:  # テストでは supabase.create_client が差し替えられる
-    import supabase as supabase_module
-except ImportError:  # pragma: no cover
-    supabase_module = None
+from core.api_client import get_client
+from core.api_retry import run_with_retry
 
 log = logging.getLogger(__name__)
 
@@ -64,10 +60,7 @@ def hunger_bar(hunger: int) -> str:
 class NationCog(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
-        self.supabase = getattr(bot, "supabase", None)
-        if self.supabase is None and supabase_module is not None:
-            from core.supabase_client import create_client_from_env
-            self.supabase = create_client_from_env()
+        self.db_api = getattr(bot, "db_api", None) or get_client()
         self._last_drain: dict[str, float] = {}  # user_id -> 最後に空腹を減らした time.monotonic()
 
     @commands.group(name="nation", invoke_without_command=True)
@@ -78,31 +71,31 @@ class NationCog(commands.Cog):
     # --- DB ヘルパー ---
 
     async def _run(self, build):
-        if self.supabase is None:
-            raise RuntimeError("Supabase が設定されていません")
+        if self.db_api is None:
+            raise RuntimeError("BOT_API_BASE_URL または BOT_API_KEY が設定されていません")
         return (await asyncio.to_thread(
             run_with_retry, lambda: build().execute()
         )).data or []
 
     async def _nation(self, guild_id: str):
-        rows = await self._run(lambda: self.supabase.table("nation_guilds").select("*").eq("guild_id", guild_id))
+        rows = await self._run(lambda: self.db_api.table("nation_guilds").select("*").eq("guild_id", guild_id))
         return rows[0] if rows else None
 
     async def _player(self, user_id: str):
-        rows = await self._run(lambda: self.supabase.table("nation_players").select("*").eq("user_id", user_id))
+        rows = await self._run(lambda: self.db_api.table("nation_players").select("*").eq("user_id", user_id))
         return rows[0] if rows else None
 
     async def _balance(self, user_id: str):
-        rows = await self._run(lambda: self.supabase.table("users").select("balance").eq("user_id", user_id))
+        rows = await self._run(lambda: self.db_api.table("users").select("balance").eq("user_id", user_id))
         return (rows[0].get("balance") or 0) if rows else None
 
     async def _found_rpc(self, guild_id: str, user_id: str):
         """建国を DB 関数 nation_found（docs/sql/nation_found.sql）で 1 トランザクションで行う。"""
-        if self.supabase is None:
-            raise RuntimeError("Supabase が設定されていません")
+        if self.db_api is None:
+            raise RuntimeError("BOT_API_BASE_URL または BOT_API_KEY が設定されていません")
         res = await asyncio.to_thread(
             run_with_retry,
-            lambda: self.supabase.rpc(
+            lambda: self.db_api.rpc(
                 "nation_found", {"p_guild_id": guild_id, "p_user_id": user_id}
             ).execute(),
         )
@@ -122,12 +115,12 @@ class NationCog(commands.Cog):
 
     async def drain_hunger(self, user_id: str, amount: int = HUNGER_PER_MESSAGE) -> bool:
         """空腹を amount 減らす（nation_adjust）。国民でない・すでに 0 のときは何もしない。減らしたら True。"""
-        if self.supabase is None:
+        if self.db_api is None:
             return False
         try:
             await asyncio.to_thread(
                 run_with_retry,
-                lambda: self.supabase.rpc(
+                lambda: self.db_api.rpc(
                     "nation_adjust",
                     {"p_user_id": user_id, "p_coins_delta": 0, "p_hunger_delta": -amount},
                 ).execute(),
@@ -221,7 +214,7 @@ class NationCog(commands.Cog):
             text = "あなたはもうこの国の国民です。" if player["guild_id"] == gid else "あなたはすでに別の国に所属しています。"
             await self._reply(ctx, self._embed("参加できません", text), ephemeral=True)
             return
-        await self._run(lambda: self.supabase.table("nation_players").upsert(
+        await self._run(lambda: self.db_api.table("nation_players").upsert(
             {"user_id": uid, "guild_id": gid, "role": "citizen", "hunger": MAX_HUNGER}, on_conflict="user_id"))
         await self._reply(ctx, self._embed(
             "参加しました", f"{ctx.author.mention} が **{ctx.guild.name}** の国民になりました！\n空腹度: {MAX_HUNGER}/{MAX_HUNGER}", COLOR_OK))

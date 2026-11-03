@@ -10,10 +10,10 @@ from keep_alive import configure_coder, keep_alive
 import logging
 from collections import deque
 
-# Supabase クライアントは config（core/supabase_client.py）で作った 1 つを共有する。
-supabase = config.supabase
-if supabase is None:
-    raise RuntimeError('SUPABASE_URL と SUPABASE_KEYを設定してください。')
+# configで作成した自前DB APIクライアントを全Cogで共有する。
+db_api = config.db_api
+if db_api is None:
+    raise RuntimeError('BOT_API_BASE_URL と BOT_API_KEYを設定してください。')
 
 NOTIFY_CHANNEL_ID = 1513038883787505764
 DEBUG_CHANNEL_ID = 1407389497016193177
@@ -34,7 +34,7 @@ class MyBot(commands.Bot):
         self.updated_notified = False
 
     async def close(self):
-        # 終了前に、Supabase へ送れていない設定を送っておく（送れなくても次回起動時に再送する）。
+        # 終了前にAPIへ送れていない設定を送っておく（送れなくても次回起動時に再送する）。
         try:
             from core.storage import flush_all
             await flush_all(timeout=5.0)
@@ -83,7 +83,7 @@ class MyBot(commands.Bot):
             self.updated_notified = True 
 
 bot = MyBot()
-bot.supabase = supabase
+bot.db_api = db_api
 
 
 async def sync_application_commands(client: commands.Bot):

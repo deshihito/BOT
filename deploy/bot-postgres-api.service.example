@@ -1,0 +1,21 @@
+[Unit]
+Description=BOT private PostgreSQL API
+After=network.target postgresql.service
+Wants=postgresql.service
+
+[Service]
+Type=simple
+User=luna
+Group=luna
+WorkingDirectory=/home/luna/BOT
+EnvironmentFile=/etc/bot-postgres-api.env
+ExecStart=/home/luna/BOT/.venv/bin/uvicorn api.app:app --host 127.0.0.1 --port 8787
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+
+[Install]
+WantedBy=multi-user.target

@@ -22,9 +22,9 @@ import math
 import config
 
 # ======================================================
-#  Supabase クライアント（config.supabase を共有）
+#  自前DB APIクライアント（config.db_api を共有）
 # ======================================================
-supabase = config.supabase  # core/supabase_client.py の共有クライアント
+db_api = config.db_api
 RATINGS_TABLE = "jinrou_ratings"
 
 # ======================================================
@@ -204,7 +204,7 @@ def can_end_game(game, user) -> bool:
 async def get_player_rating(player_id: int) -> float:
     """Supabaseからプレイヤーのレートを取得"""
     try:
-        response = supabase.table(RATINGS_TABLE).select("rating").eq("player_id", player_id).execute()
+        response = db_api.table(RATINGS_TABLE).select("rating").eq("player_id", player_id).execute()
         if response.data and len(response.data) > 0:
             return float(response.data[0]["rating"])
         else:
@@ -216,7 +216,7 @@ async def get_player_rating(player_id: int) -> float:
 async def update_player_rating(player_id: int, new_rating: float, won: Optional[bool] = None):
     """Supabaseにプレイヤーのレートを保存（won を渡すと勝敗数・試合数も数える）"""
     try:
-        response = supabase.table(RATINGS_TABLE).select("id, wins, losses, games_played").eq("player_id", player_id).execute()
+        response = db_api.table(RATINGS_TABLE).select("id, wins, losses, games_played").eq("player_id", player_id).execute()
         row = response.data[0] if response.data else None
         values = {"rating": new_rating}
         if won is not None:
@@ -225,16 +225,16 @@ async def update_player_rating(player_id: int, new_rating: float, won: Optional[
             values["games_played"] = int((row or {}).get("games_played") or 0) + 1
         if row:
             values["updated_at"] = "now()"
-            supabase.table(RATINGS_TABLE).update(values).eq("player_id", player_id).execute()
+            db_api.table(RATINGS_TABLE).update(values).eq("player_id", player_id).execute()
         else:
-            supabase.table(RATINGS_TABLE).insert({"player_id": player_id, **values}).execute()
+            db_api.table(RATINGS_TABLE).insert({"player_id": player_id, **values}).execute()
     except Exception as e:
         print(f"Error updating rating: {e}")
 
 async def get_top_ratings(limit: int = 10):
     """上位レーティングを取得"""
     try:
-        response = supabase.table(RATINGS_TABLE).select("player_id, rating").order("rating", desc=True).limit(limit).execute()
+        response = db_api.table(RATINGS_TABLE).select("player_id, rating").order("rating", desc=True).limit(limit).execute()
         return response.data if response.data else []
     except Exception as e:
         print(f"Error getting rankings: {e}")

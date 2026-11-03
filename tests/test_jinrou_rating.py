@@ -72,7 +72,7 @@ def game_with(roles):
 
 class RatingTest(unittest.IsolatedAsyncioTestCase):
     def use(self, db):
-        p = patch.object(jinrou, "supabase", db)
+        p = patch.object(jinrou, "db_api", db)
         p.start()
         self.addCleanup(p.stop)
 
