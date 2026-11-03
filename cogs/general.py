@@ -8,6 +8,7 @@ import logging
 import math
 import os
 import random
+import re
 import time
 from pathlib import Path
 
@@ -47,6 +48,7 @@ GENERAL_GENRES = {
     "custom": ("設定・AI", "ショートカット、AI tools、チャットAI・画像生成AIの設定"),
     "zeta": ("ZetaModoki", "ロールプレイ会話の開始、シチュエーション・キャラクターの登録と管理"),
     "translation": ("翻訳", "メッセージの自動翻訳と翻訳先言語の設定"),
+    "miq": ("引用画像 (MIQ)", "メッセージを引用画像にして、フォント・配色・レイアウトを変更"),
 }
 GENERAL_ACTIONS = {
     "economy": [
@@ -82,6 +84,9 @@ GENERAL_ACTIONS = {
     ],
     "translation": [
         ("自動翻訳を設定", "translation_settings"),
+    ],
+    "miq": [
+        ("使い方", "miq_help"),
     ],
 }
 
@@ -762,6 +767,544 @@ def render_levelup_card(
 
 
 # ============================================================
+# MIQ (Make it a Quote) 引用画像
+# ============================================================
+MIQ_W, MIQ_H = 1200, 630
+MIQ_MAX_CHARS = 400
+MIQ_VIEW_TIMEOUT = 10 * 60
+MIQ_COOLDOWN = 3.0
+MIQ_GIF_MAX_FRAMES = 24
+
+_MIQ_ASSET_FONTS = Path(__file__).resolve().parent.parent / "assets" / "fonts"
+
+
+def _miq_af(name: str) -> str:
+    return str(_MIQ_ASSET_FONTS / name)
+
+
+# (key, 表示名, 探索パス)。見つかったものだけが選択肢に出る。
+# assets/fonts/ に置くか、環境変数 MIQ_FONT_<KEY大文字> でパスを指定できる。
+_MIQ_FONT_DEFS = (
+    ("mplus", "M PLUS Rounded 1c", (
+        os.getenv("MIQ_FONT_MPLUS") or "",
+        _miq_af("MPLUSRounded1c-Medium.ttf"), _miq_af("MPLUSRounded1c-Regular.ttf"),
+        _miq_af("MPLUSRounded1c-Bold.ttf"), _miq_af("mplus.ttf"),
+        "/usr/share/fonts/truetype/mplus/MPLUSRounded1c-Medium.ttf",
+        "/usr/share/fonts/truetype/mplus/MPLUSRounded1c-Regular.ttf",
+        "/usr/share/fonts/truetype/google-fonts/MPLUSRounded1c-Medium.ttf",
+        "C:/Windows/Fonts/MPLUSRounded1c-Medium.ttf",
+        os.path.expandvars("%LOCALAPPDATA%/Microsoft/Windows/Fonts/MPLUSRounded1c-Medium.ttf"),
+        os.path.expanduser("~/.local/share/fonts/MPLUSRounded1c-Medium.ttf"),
+    )),
+    ("notosans", "Noto Sans JP", (
+        os.getenv("MIQ_FONT_NOTOSANS") or "",
+        _miq_af("NotoSansJP-Regular.ttf"), _miq_af("NotoSansJP-Medium.ttf"), _miq_af("NotoSansJP[wght].ttf"),
+        "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+        "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
+        "/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc",
+        "/usr/share/fonts/google-noto-cjk/NotoSansCJK-Regular.ttc",
+        "/usr/share/fonts/opentype/noto/NotoSansCJKjp-Regular.otf",
+    )),
+    ("notoserif", "Noto Serif JP", (
+        os.getenv("MIQ_FONT_NOTOSERIF") or "",
+        _miq_af("NotoSerifJP-Regular.ttf"), _miq_af("NotoSerifJP-Medium.ttf"), _miq_af("NotoSerifJP[wght].ttf"),
+        "/usr/share/fonts/opentype/noto/NotoSerifCJK-Regular.ttc",
+        "/usr/share/fonts/opentype/noto/NotoSerifCJK-Bold.ttc",
+        "/usr/share/fonts/truetype/noto/NotoSerifCJK-Regular.ttc",
+        "/usr/share/fonts/noto-cjk/NotoSerifCJK-Regular.ttc",
+        "/usr/share/fonts/opentype/noto/NotoSerifCJKjp-Regular.otf",
+    )),
+    ("yugothic", "游ゴシック", (
+        "C:/Windows/Fonts/YuGothM.ttc", "C:/Windows/Fonts/YuGothR.ttc",
+        "/System/Library/Fonts/Supplemental/YuGothic.ttc",
+    )),
+    ("meiryo", "メイリオ", ("C:/Windows/Fonts/meiryo.ttc",)),
+    ("hiragino", "ヒラギノ角ゴ", (
+        "/System/Library/Fonts/ヒラギノ角ゴシック W3.ttc",
+        "/System/Library/Fonts/ヒラギノ角ゴシック W6.ttc",
+    )),
+)
+
+# key -> (表示名, 絵文字, 背景色, 文字色)
+MIQ_THEMES = {
+    "bw": ("Black/White (default)", "🖤", (0, 0, 0), (255, 255, 255)),
+    "wb": ("White/Black", "🤍", (255, 255, 255), (0, 0, 0)),
+    "navy": ("Navy/Ice", "💙", (9, 16, 38), (214, 232, 255)),
+    "rose": ("Wine/Rose", "❤️", (46, 8, 20), (255, 224, 232)),
+    "forest": ("Forest/Mint", "💚", (8, 30, 22), (212, 255, 232)),
+    "sepia": ("Paper/Brown", "🤎", (244, 235, 214), (62, 42, 22)),
+}
+
+_MIQ_FONTS_CACHE: list[tuple[str, str, str | None]] | None = None
+
+
+def _miq_available_fonts() -> list[tuple[str, str, str | None]]:
+    """利用可能なフォント [(key, label, path)] を返す(初回のみ探索)。常に1件以上返る。"""
+    global _MIQ_FONTS_CACHE
+    if _MIQ_FONTS_CACHE is not None:
+        return _MIQ_FONTS_CACHE
+    from PIL import ImageFont
+
+    found: list[tuple[str, str, str | None]] = []
+    for key, label, paths in _MIQ_FONT_DEFS:
+        for path in paths:
+            if not path or not os.path.exists(path):
+                continue
+            try:
+                ImageFont.truetype(path, 20)
+            except Exception:
+                continue
+            found.append((key, label, path))
+            break
+    if not found:
+        found.append(("default", "Default", _levelup_pick_font()[0]))
+    _MIQ_FONTS_CACHE = found
+    return found
+
+
+def _miq_load_font(path: str | None, size: int):
+    from PIL import ImageFont
+
+    if path:
+        try:
+            return ImageFont.truetype(path, size)
+        except Exception:
+            pass
+    return _levelup_font(size)
+
+
+_MIQ_CUSTOM_EMOJI = re.compile(r"<a?:\w+:\d+>")
+
+
+def _miq_clean_text(text: str | None) -> str:
+    """画像に描けない文字(絵文字など)と装飾記号を落として整形する。"""
+    text = _MIQ_CUSTOM_EMOJI.sub("", text or "")
+    try:
+        text = discord.utils.remove_markdown(text)
+    except Exception:
+        pass
+    out: list[str] = []
+    for ch in text:
+        o = ord(ch)
+        if ch == "\n":
+            out.append(ch)
+        elif ch == "\t" or o < 0x20:
+            out.append(" ")
+        elif o >= 0x1F000 or 0x2190 <= o <= 0x2BFF or o in (0x200D, 0xFE0F, 0xFE0E, 0x20E3):
+            continue
+        else:
+            out.append(ch)
+    cleaned = re.sub(r"\n{3,}", "\n\n", "".join(out)).strip()
+    if len(cleaned) > MIQ_MAX_CHARS:
+        cleaned = cleaned[:MIQ_MAX_CHARS - 1].rstrip() + "…"
+    return cleaned
+
+
+_MIQ_NO_LINE_START = set("。、，．,.!?！？」』）)］]｝}ー々ゝゞぁぃぅぇぉっゃゅょァィゥェォッャュョ…・:;：；")
+
+
+def _miq_wrap(draw, text: str, font, max_w: float) -> list[str]:
+    """文字幅ベースの折り返し(日本語は文字単位、英数字は単語単位を優先、行頭禁則つき)。"""
+    lines: list[str] = []
+    for para in text.split("\n"):
+        line = ""
+        for ch in para:
+            test = line + ch
+            if not line or draw.textlength(test, font=font) <= max_w:
+                line = test
+                continue
+            if ch in _MIQ_NO_LINE_START and len(line) > 1:
+                # 行頭禁則: 直前の1文字ごと次の行へ送る(枠からはみ出さないように)
+                lines.append(line[:-1].rstrip())
+                line = line[-1] + ch
+                continue
+            prev = line[-1:]
+            if ch.isascii() and ch.isalnum() and prev.isascii() and prev.isalnum() and " " in line:
+                head, tail = line.rsplit(" ", 1)
+                lines.append(head.rstrip())
+                line = tail + ch
+            else:
+                lines.append(line.rstrip())
+                line = ch.lstrip()
+        lines.append(line.rstrip())
+    return lines
+
+
+def _miq_fit(draw, text: str, font_path: str | None, max_w: int, max_h: int, *, max_size: int = 72, min_size: int = 22):
+    size = max_size
+    while True:
+        font = _miq_load_font(font_path, size)
+        lines = _miq_wrap(draw, text, font, max_w)
+        lh = int(size * 1.34)
+        if len(lines) * lh <= max_h or size <= min_size:
+            break
+        size -= 2
+    max_lines = max(1, max_h // lh)
+    if len(lines) > max_lines:
+        lines = lines[:max_lines]
+        last = lines[-1]
+        while last and draw.textlength(last + "…", font=font) > max_w:
+            last = last[:-1]
+        lines[-1] = last + "…"
+    return font, lines, lh, size
+
+
+def _miq_mix(a, b, t: float):
+    """a に b を t の割合で混ぜる。"""
+    return tuple(int(round(x * (1 - t) + y * t)) for x, y in zip(a, b))
+
+
+def _miq_lum(c) -> float:
+    return 0.299 * c[0] + 0.587 * c[1] + 0.114 * c[2]
+
+
+def _miq_contrast(color, dark_bg: bool):
+    """アバター平均色から作った文字色が背景に埋もれないよう明暗を寄せる。"""
+    target = (255, 255, 255) if dark_bg else (0, 0, 0)
+    c = _miq_mix(color, target, 0.35)
+    for _ in range(20):
+        lum = _miq_lum(c)
+        if (dark_bg and lum >= 170) or (not dark_bg and lum <= 85):
+            break
+        c = _miq_mix(c, target, 0.12)
+    return c
+
+
+def render_miq_frames(
+    frames: list,
+    text: str,
+    name: str,
+    username: str,
+    *,
+    watermark: str = "",
+    grayscale: bool = True,
+    color_text: bool = False,
+    flip: bool = False,
+    bold: bool = False,
+    full: bool = False,
+    font_path: str | None = None,
+    theme: str = "bw",
+) -> list:
+    """アバターのフレーム(PIL.Image)ごとに引用画像(RGB)を合成して返す。CPU処理なので to_thread で呼ぶこと。"""
+    from PIL import Image, ImageDraw, ImageOps
+
+    W, H = MIQ_W, MIQ_H
+    _label, _emoji, bg, fg = MIQ_THEMES.get(theme) or MIQ_THEMES["bw"]
+    dark_bg = _miq_lum(bg) < 128
+
+    if color_text and frames:
+        avg = frames[0].convert("RGB").resize((1, 1), Image.BILINEAR).getpixel((0, 0))
+        fg = _miq_contrast(avg, dark_bg)
+    sub = _miq_mix(fg, bg, 0.42)
+
+    # ---- 文字レイヤ(全フレーム共通) ----
+    layer = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    d = ImageDraw.Draw(layer)
+    if full:
+        cx, text_w = W // 2, 960
+    else:
+        side = W - H
+        cx = side // 2 if flip else H + side // 2
+        text_w = side - 80
+
+    shown_name = _levelup_safe_name(name, True) or _levelup_safe_name(username, True) or "unknown"
+    shown_user = _levelup_safe_name(username, True)
+
+    font, lines, lh, size = _miq_fit(d, text, font_path, text_w, 350)
+    name_size = 34
+    name_font = _miq_load_font(font_path, name_size)
+    while name_size > 18 and d.textlength(f"- {shown_name}", font=name_font) > text_w:
+        name_size -= 2
+        name_font = _miq_load_font(font_path, name_size)
+    user_font = _miq_load_font(font_path, 22)
+    wm_font = _miq_load_font(font_path, 20)
+
+    name_lh, user_lh, gap = int(name_size * 1.4), 32, 26
+    block_h = len(lines) * lh + gap + name_lh + (user_lh if shown_user else 0)
+    y = max(24, (H - block_h) // 2)
+
+    sw = max(1, size // 36) if bold else 0
+    fg4 = tuple(fg) + (255,)
+    for line in lines:
+        if line:
+            d.text((cx, y), line, font=font, fill=fg4, anchor="ma", stroke_width=sw, stroke_fill=fg4)
+        y += lh
+    y += gap
+    nsw = 1 if bold else 0
+    d.text((cx, y), f"- {shown_name}", font=name_font, fill=fg4, anchor="ma", stroke_width=nsw, stroke_fill=fg4)
+    y += name_lh
+    if shown_user:
+        d.text((cx, y), f"@{shown_user}", font=user_font, fill=tuple(sub) + (255,), anchor="ma")
+    if watermark:
+        wm = _levelup_safe_name(watermark, True)
+        if flip and not full:
+            d.text((24, H - 18), wm, font=wm_font, fill=tuple(sub) + (255,), anchor="ls")
+        else:
+            d.text((W - 24, H - 18), wm, font=wm_font, fill=tuple(sub) + (255,), anchor="rs")
+
+    # ---- アバターのフェード用マスク(通常レイアウトのみ) ----
+    mask = None
+    if not full:
+        mask = Image.new("L", (H, H), 0)
+        md = ImageDraw.Draw(mask)
+        for x in range(H):
+            t = x / (H - 1)
+            a = 255 if t <= 0.32 else int(255 * max(0.0, 1 - (t - 0.32) / 0.68) ** 1.15)
+            px = H - 1 - x if flip else x
+            md.line([(px, 0), (px, H)], fill=a)
+
+    out = []
+    for frame in frames:
+        if frame.mode in ("RGBA", "LA", "P"):
+            rgba = frame.convert("RGBA")
+            av = Image.new("RGB", rgba.size, bg)
+            av.paste(rgba, mask=rgba.split()[-1])
+        else:
+            av = frame.convert("RGB")
+        if grayscale:
+            av = ImageOps.grayscale(av).convert("RGB")
+        if full:
+            av = ImageOps.fit(av, (W, H), Image.LANCZOS)
+            base = Image.blend(av, Image.new("RGB", (W, H), bg), 0.74)
+        else:
+            av = ImageOps.fit(av, (H, H), Image.LANCZOS)
+            base = Image.new("RGB", (W, H), bg)
+            base.paste(av, (W - H if flip else 0, 0), mask)
+        base.paste(layer, (0, 0), layer)
+        out.append(base)
+    return out
+
+
+def _miq_open_avatar(avatar_bytes: bytes | None):
+    from PIL import Image
+
+    if avatar_bytes:
+        try:
+            return Image.open(io.BytesIO(avatar_bytes))
+        except Exception:
+            logger.debug("MIQ: アイコンの読み込みに失敗", exc_info=True)
+    return Image.new("RGBA", (512, 512), (70, 70, 78, 255))
+
+
+def render_miq_png(avatar_bytes: bytes | None, text: str, name: str, username: str, **opts) -> bytes:
+    src = _miq_open_avatar(avatar_bytes)
+    frame = src.convert("RGBA")
+    img = render_miq_frames([frame], text, name, username, **opts)[0]
+    buf = io.BytesIO()
+    img.save(buf, "PNG", optimize=True)
+    return buf.getvalue()
+
+
+def render_miq_gif(avatar_bytes: bytes | None, text: str, name: str, username: str, *, max_bytes: int, **opts) -> bytes:
+    """アバターがGIFアニメなら動く引用GIF、静止画なら1フレームのGIFを返す。サイズ超過時は段階的に縮小。"""
+    from PIL import Image, ImageSequence
+
+    src = _miq_open_avatar(avatar_bytes)
+    raw: list = []
+    durs: list[int] = []
+    for i, fr in enumerate(ImageSequence.Iterator(src)):
+        if i >= 120:
+            break
+        raw.append(fr.convert("RGBA").copy())
+        durs.append(int(fr.info.get("duration", 80) or 80))
+    if not raw:
+        raw, durs = [src.convert("RGBA")], [100]
+
+    stride = max(1, math.ceil(len(raw) / MIQ_GIF_MAX_FRAMES))
+    picked = raw[::stride]
+    picked_durs = [max(20, sum(durs[i:i + stride])) for i in range(0, len(raw), stride)]
+
+    frames = render_miq_frames(picked, text, name, username, **opts)
+    data = b""
+    for width in (800, 600, 420):
+        height = int(round(width * MIQ_H / MIQ_W))
+        small = [f.resize((width, height), Image.LANCZOS) for f in frames]
+        buf = io.BytesIO()
+        if len(small) == 1:
+            small[0].save(buf, "GIF")
+        else:
+            small[0].save(
+                buf, "GIF", save_all=True, append_images=small[1:],
+                duration=picked_durs, loop=0, disposal=2,
+            )
+        data = buf.getvalue()
+        if len(data) <= max_bytes:
+            break
+    return data
+
+
+class MiqView(discord.ui.View):
+    """引用画像の操作パネル(モノクロ/文字色/左右反転/太字/レイアウト・フォント・配色・削除・GIF)。"""
+
+    def __init__(self, cog: "GeneralCog", author, text: str, requester_id: int, avatar_bytes: bytes | None):
+        super().__init__(timeout=MIQ_VIEW_TIMEOUT)
+        self.cog = cog
+        self.author = author
+        self.text = text
+        self.name = getattr(author, "display_name", None) or getattr(author, "name", "") or ""
+        self.username = getattr(author, "name", "") or ""
+        self.requester_id = requester_id
+        self.avatar_bytes = avatar_bytes
+        self.message: discord.Message | None = None
+
+        self.grayscale = True
+        self.color_text = False
+        self.flip = False
+        self.bold = False
+        self.full = False
+        self.fonts = _miq_available_fonts()
+        self.font_key = self.fonts[0][0]
+        self.theme = "bw"
+        self._lock = asyncio.Lock()
+
+        self.font_select = discord.ui.Select(options=self._font_options(), row=1)
+        self.font_select.callback = self._on_font
+        self.theme_select = discord.ui.Select(options=self._theme_options(), row=2)
+        self.theme_select.callback = self._on_theme
+        self.add_item(self.font_select)
+        self.add_item(self.theme_select)
+        self._sync()
+
+    # ---- 描画用の値 ----
+    @property
+    def font_path(self) -> str | None:
+        for key, _label, path in self.fonts:
+            if key == self.font_key:
+                return path
+        return self.fonts[0][2]
+
+    def render_kwargs(self) -> dict:
+        bot_user = self.cog.bot.user
+        return {
+            "watermark": str(bot_user) if bot_user else "",
+            "grayscale": self.grayscale, "color_text": self.color_text,
+            "flip": self.flip, "bold": self.bold, "full": self.full,
+            "font_path": self.font_path, "theme": self.theme,
+        }
+
+    def _font_options(self):
+        return [discord.SelectOption(label=f"{label} ({key})", value=key, default=key == self.font_key)
+                for key, label, _path in self.fonts]
+
+    def _theme_options(self):
+        return [discord.SelectOption(label=label, value=key, emoji=emoji, default=key == self.theme)
+                for key, (label, emoji, _bg, _fg) in MIQ_THEMES.items()]
+
+    def _sync(self):
+        on, off = discord.ButtonStyle.primary, discord.ButtonStyle.secondary
+        self.btn_gray.style = off if self.grayscale else on   # カラー表示中は強調
+        self.btn_ink.style = on if self.color_text else off
+        self.btn_flip.style = on if self.flip else off
+        self.btn_bold.style = on if self.bold else off
+        self.btn_full.style = on if self.full else off
+        self.font_select.options = self._font_options()
+        self.theme_select.options = self._theme_options()
+
+    async def render_file(self) -> discord.File | None:
+        png = await self.cog.miq_render_png(self)
+        if png is None:
+            return None
+        return discord.File(io.BytesIO(png), filename="quote.png")
+
+    async def _refresh(self, interaction: discord.Interaction):
+        await interaction.response.defer()
+        async with self._lock:
+            file = await self.render_file()
+        if file is None:
+            return await interaction.followup.send("画像を作れませんでした。時間をおいて再試行してください。", ephemeral=True)
+        self._sync()
+        try:
+            await interaction.edit_original_response(attachments=[file], view=self)
+        except discord.HTTPException:
+            logger.warning("MIQ: メッセージの更新に失敗しました", exc_info=True)
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        uid = interaction.user.id
+        if uid in (self.requester_id, getattr(self.author, "id", None)):
+            return True
+        perms = getattr(interaction.user, "guild_permissions", None)
+        if perms is not None and perms.manage_messages:
+            return True
+        await interaction.response.send_message(
+            "この引用は、作成した人か引用された本人だけが操作できます。", ephemeral=True
+        )
+        return False
+
+    async def on_timeout(self):
+        if self.message is not None:
+            try:
+                await self.message.edit(view=None)
+            except discord.HTTPException:
+                pass
+
+    # ---- ボタン(row 0) ----
+    @discord.ui.button(emoji="⚫", style=discord.ButtonStyle.secondary, row=0)
+    async def btn_gray(self, interaction: discord.Interaction, button: discord.ui.Button):
+        """アイコンのモノクロ/カラー切替。"""
+        self.grayscale = not self.grayscale
+        await self._refresh(interaction)
+
+    @discord.ui.button(emoji="🎨", style=discord.ButtonStyle.secondary, row=0)
+    async def btn_ink(self, interaction: discord.Interaction, button: discord.ui.Button):
+        """文字色をアイコンの色味に合わせる/戻す。"""
+        self.color_text = not self.color_text
+        await self._refresh(interaction)
+
+    @discord.ui.button(emoji="🔄", style=discord.ButtonStyle.secondary, row=0)
+    async def btn_flip(self, interaction: discord.Interaction, button: discord.ui.Button):
+        """アイコンを左右反転(左⇄右)。"""
+        self.flip = not self.flip
+        await self._refresh(interaction)
+
+    @discord.ui.button(label="B", style=discord.ButtonStyle.secondary, row=0)
+    async def btn_bold(self, interaction: discord.Interaction, button: discord.ui.Button):
+        """太字。"""
+        self.bold = not self.bold
+        await self._refresh(interaction)
+
+    @discord.ui.button(label="NEW", style=discord.ButtonStyle.secondary, row=0)
+    async def btn_full(self, interaction: discord.Interaction, button: discord.ui.Button):
+        """アイコンを背景全面に敷く新レイアウト。"""
+        self.full = not self.full
+        await self._refresh(interaction)
+
+    # ---- セレクト(row 1, 2) ----
+    async def _on_font(self, interaction: discord.Interaction):
+        self.font_key = self.font_select.values[0]
+        await self._refresh(interaction)
+
+    async def _on_theme(self, interaction: discord.Interaction):
+        self.theme = self.theme_select.values[0]
+        await self._refresh(interaction)
+
+    # ---- ボタン(row 3) ----
+    @discord.ui.button(label="Remove my Quote", emoji="🗑️", style=discord.ButtonStyle.secondary, row=3)
+    async def btn_remove(self, interaction: discord.Interaction, button: discord.ui.Button):
+        try:
+            await interaction.response.defer()
+            await interaction.delete_original_response()
+        except discord.HTTPException:
+            try:
+                if interaction.message is not None:
+                    await interaction.message.delete()
+            except discord.HTTPException:
+                return await interaction.followup.send("引用を削除できませんでした。", ephemeral=True)
+        self.stop()
+
+    @discord.ui.button(label="to GIF", emoji="🖼️", style=discord.ButtonStyle.secondary, row=3)
+    async def btn_gif(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.defer(thinking=True)
+        guild = interaction.guild
+        limit = int((getattr(guild, "filesize_limit", None) or 8 * 1024 * 1024) * 0.9)
+        data = await self.cog.miq_render_gif(self, limit)
+        if data is None:
+            return await interaction.followup.send("GIFを作れませんでした。時間をおいて再試行してください。", ephemeral=True)
+        if len(data) > limit:
+            return await interaction.followup.send("GIFがアップロード上限を超えてしまいました。", ephemeral=True)
+        await interaction.followup.send(file=discord.File(io.BytesIO(data), filename="quote.gif"))
+
+
+# ============================================================
 # 既存 UI
 # ============================================================
 class PayModal(discord.ui.Modal, title="コインを送金"):
@@ -828,31 +1371,33 @@ class GeneralActionSelect(discord.ui.Select):
 
 
 class TranslationLocaleSelect(discord.ui.Select):
-    def __init__(self, parent: "TranslationView", current: str):
+    def __init__(self, parent: "TranslationView", *, source: bool):
         self.parent_view = parent
+        self.source = source
+        locales = translation.SOURCE_LOCALES if source else localization.SUPPORTED_LOCALES
+        current = parent.source_locale if source else parent.target_locale
+        labels = translation.SOURCE_LOCALE_LABELS if source else localization.LOCALE_LABELS
+        flags = translation.SOURCE_LOCALE_FLAGS if source else localization.LOCALE_FLAGS
         super().__init__(
-            placeholder="翻訳先の言語を選択してください",
+            placeholder="翻訳前の言語を選択してください" if source else "翻訳後の言語を選択してください",
             options=[
-                discord.SelectOption(
-                    label=localization.LOCALE_LABELS[locale],
-                    value=locale,
-                    emoji=localization.LOCALE_FLAGS[locale],
-                    default=locale == current,
-                )
-                for locale in localization.SUPPORTED_LOCALES
+                discord.SelectOption(label=labels[locale], value=locale, emoji=flags[locale], default=locale == current)
+                for locale in locales
             ],
+            row=0 if source else 1,
         )
 
     async def callback(self, interaction: discord.Interaction):
-        locale = localization.normalize_locale(self.values[0])
-        localization_cog = interaction.client.get_cog("LocalizationCog")
-        if localization_cog is not None:
-            await localization_cog.set_locale(interaction.guild_id, locale)
+        locale = (
+            translation.normalize_source_locale(self.values[0])
+            if self.source else localization.normalize_locale(self.values[0])
+        )
+        if self.source:
+            self.parent_view.source_locale = locale
+            await translation_settings_update(interaction.guild_id, source_locale=locale)
         else:
-            await guild_settings.get_store().update(
-                interaction.guild_id, localization.LANGUAGE_SECTION, locale=locale
-            )
-        self.parent_view.locale = locale
+            self.parent_view.target_locale = locale
+            await translation_settings_update(interaction.guild_id, target_locale=locale)
         await interaction.response.edit_message(embed=self.parent_view.embed(), view=self.parent_view)
 
 
@@ -862,7 +1407,7 @@ class TranslationToggleButton(discord.ui.Button):
         super().__init__(
             label="自動翻訳をオフにする" if enabled else "自動翻訳をオンにする",
             style=discord.ButtonStyle.danger if enabled else discord.ButtonStyle.success,
-            row=1,
+            row=2,
         )
 
     async def callback(self, interaction: discord.Interaction):
@@ -872,9 +1417,19 @@ class TranslationToggleButton(discord.ui.Button):
         await interaction.response.edit_message(embed=self.parent_view.embed(), view=self.parent_view)
 
 
-async def translation_settings_update(guild_id: int, *, enabled: bool):
+async def translation_settings_update(
+    guild_id: int, *, enabled: bool | None = None,
+    source_locale: str | None = None, target_locale: str | None = None,
+):
+    values = {}
+    if enabled is not None:
+        values["enabled"] = bool(enabled)
+    if source_locale is not None:
+        values["source_locale"] = translation.normalize_source_locale(source_locale)
+    if target_locale is not None:
+        values["target_locale"] = localization.normalize_locale(target_locale)
     await guild_settings.get_store().update(
-        guild_id, translation.TRANSLATION_SECTION, enabled=bool(enabled)
+        guild_id, translation.TRANSLATION_SECTION, **values
     )
 
 
@@ -884,22 +1439,25 @@ class TranslationView(discord.ui.View):
         self.guild_id = guild_id
         settings = translation.translation_settings(guild_id)
         self.enabled = settings["enabled"]
-        self.locale = settings["locale"]
+        self.source_locale = settings["source_locale"]
+        self.target_locale = settings["target_locale"]
         self.refresh()
 
     def refresh(self):
         self.clear_items()
-        self.add_item(TranslationLocaleSelect(self, self.locale))
+        self.add_item(TranslationLocaleSelect(self, source=True))
+        self.add_item(TranslationLocaleSelect(self, source=False))
         self.add_item(TranslationToggleButton(self, self.enabled))
 
     def embed(self):
         status = "オン" if self.enabled else "オフ"
-        language = localization.LOCALE_LABELS.get(self.locale, self.locale)
+        source = translation.SOURCE_LOCALE_LABELS[self.source_locale]
+        target = localization.LOCALE_LABELS[self.target_locale]
         return discord.Embed(
             title="自動翻訳設定",
             description=(
                 f"状態: **{status}**\n"
-                f"翻訳先: **{language}**\n\n"
+                f"翻訳前: **{source}** → 翻訳後: **{target}**\n\n"
                 "オンにすると、このサーバーの人間のメッセージを削除し、"
                 "送信者の名前とアイコンで翻訳結果を再投稿します。"
             ),
@@ -1437,12 +1995,17 @@ class GeneralCog(commands.Cog):
         self._levelup_pillow_warned = False
         self._translation_webhooks: dict[int, discord.Webhook] = {}
         self._translation_client = LibreTranslateClient()
+        self._miq_last: dict[int, float] = {}
+        # メッセージの右クリックメニュー(アプリ → Make it a Quote)
+        self.miq_menu = app_commands.ContextMenu(name="Make it a Quote", callback=self.miq_context)
 
     async def cog_load(self):
         self.exp_vc_tick.start()
+        self.bot.tree.add_command(self.miq_menu, override=True)
 
     def cog_unload(self):
         self.exp_vc_tick.cancel()
+        self.bot.tree.remove_command(self.miq_menu.name, type=self.miq_menu.type)
         for task in list(self._bg_tasks):
             task.cancel()
 
@@ -1489,6 +2052,21 @@ class GeneralCog(commands.Cog):
             if value == "zeta_manage":
                 return await cog.manage(interaction)
             return await cog.reset(interaction)
+
+        if value == "miq_help":
+            embed = discord.Embed(title="引用画像 (MIQ)", color=0xFFFFFF)
+            embed.description = (
+                "**作り方**\n"
+                "・メッセージを右クリック(スマホは長押し) → アプリ → **Make it a Quote**\n"
+                "・引用したいメッセージに返信して、`@BOT miq` と送信\n\n"
+                "**ボタン**\n"
+                "⚫ モノクロ/カラー　🎨 文字色をアイコンに合わせる　🔄 左右反転　**B** 太字　"
+                "**NEW** アイコンを背景全面に敷く\n"
+                "フォントと配色はセレクトで変更できます。`to GIF` でGIF化(アイコンがGIFなら動きます)、"
+                "`Remove my Quote` で削除。\n\n"
+                "操作できるのは、作成した人・引用された本人・メッセージ管理権限のある人です。"
+            )
+            return await interaction.response.send_message(embed=embed, ephemeral=True)
 
         if value == "aitools":
             from core import ai_tools_router
@@ -1636,7 +2214,10 @@ class GeneralCog(commands.Cog):
 
         try:
             translated = await translation.translate_message(
-                message.content, settings["locale"], client=self._translation_client
+                message.content,
+                settings["source_locale"],
+                settings["target_locale"],
+                client=self._translation_client,
             )
             webhook = await self._translation_webhook(message.channel)
             await message.delete()
@@ -1689,6 +2270,110 @@ class GeneralCog(commands.Cog):
         except Exception:
             logger.exception("shortcut execution failed: %s", item)
             await message.channel.send("ショートカットの実行中にエラーが発生しました。")
+
+    # ============================================================
+    # MIQ (Make it a Quote)
+    # ============================================================
+    def _miq_cooldown_ok(self, user_id: int) -> bool:
+        now = time.monotonic()
+        if now - self._miq_last.get(user_id, 0.0) < MIQ_COOLDOWN:
+            return False
+        self._miq_last[user_id] = now
+        if len(self._miq_last) > 500:
+            self._miq_last = {k: v for k, v in self._miq_last.items() if now - v < 60}
+        return True
+
+    async def _miq_prepare(self, target: discord.Message, requester_id: int, text: str) -> MiqView:
+        avatar_bytes = None
+        try:
+            avatar_bytes = await target.author.display_avatar.replace(size=512, format="png").read()
+        except Exception:
+            logger.debug("MIQ: アイコンの取得に失敗 (user=%s)", getattr(target.author, "id", "?"), exc_info=True)
+        return MiqView(self, target.author, text, requester_id, avatar_bytes)
+
+    def _miq_pillow_missing(self) -> None:
+        if not self._levelup_pillow_warned:
+            self._levelup_pillow_warned = True
+            logger.warning("MIQ: Pillow が未インストールです (pip install pillow)")
+
+    async def miq_render_png(self, view: MiqView) -> bytes | None:
+        try:
+            async with self._levelup_sem:
+                return await asyncio.to_thread(
+                    render_miq_png, view.avatar_bytes, view.text, view.name, view.username,
+                    **view.render_kwargs(),
+                )
+        except ImportError:
+            self._miq_pillow_missing()
+        except Exception:
+            logger.exception("MIQ: 引用画像の生成に失敗しました")
+        return None
+
+    async def miq_render_gif(self, view: MiqView, max_bytes: int) -> bytes | None:
+        avatar_bytes = view.avatar_bytes
+        try:
+            asset = view.author.display_avatar
+            if asset.is_animated():
+                avatar_bytes = await asset.replace(size=256, format="gif").read()
+        except Exception:
+            logger.debug("MIQ: アニメーションアイコンの取得に失敗", exc_info=True)
+        try:
+            async with self._levelup_sem:
+                return await asyncio.to_thread(
+                    render_miq_gif, avatar_bytes, view.text, view.name, view.username,
+                    max_bytes=max_bytes, **view.render_kwargs(),
+                )
+        except ImportError:
+            self._miq_pillow_missing()
+        except Exception:
+            logger.exception("MIQ: GIFの生成に失敗しました")
+        return None
+
+    async def miq_context(self, interaction: discord.Interaction, message: discord.Message):
+        """メッセージの右クリックメニュー「Make it a Quote」。"""
+        text = _miq_clean_text(message.clean_content)
+        if not text:
+            return await interaction.response.send_message(
+                "文字のあるメッセージを選んでください(画像や埋め込みだけのメッセージは引用できません)。",
+                ephemeral=True,
+            )
+        if not self._miq_cooldown_ok(interaction.user.id):
+            return await interaction.response.send_message("少し待ってからもう一度お試しください。", ephemeral=True)
+        await interaction.response.defer(thinking=True)
+        view = await self._miq_prepare(message, interaction.user.id, text)
+        file = await view.render_file()
+        if file is None:
+            return await interaction.followup.send("引用画像を作れませんでした。")
+        view.message = await interaction.followup.send(file=file, view=view, wait=True)
+
+    async def _miq_from_reply(self, message: discord.Message):
+        """引用したいメッセージに返信してBOTをメンションした時の処理。"""
+        try:
+            ref = message.reference
+            if ref is None or ref.message_id is None:
+                return
+            can_post, can_attach = self._levelup_can_post(message.channel, message.guild.me)
+            if not (can_post and can_attach):
+                return
+            target = ref.resolved if isinstance(ref.resolved, discord.Message) else None
+            if target is None:
+                target = await message.channel.fetch_message(ref.message_id)
+            text = _miq_clean_text(target.clean_content)
+            if not text:
+                await message.reply("文字のあるメッセージに返信してください。", mention_author=False)
+                return
+            if not self._miq_cooldown_ok(message.author.id):
+                return
+            async with message.channel.typing():
+                view = await self._miq_prepare(target, message.author.id, text)
+                file = await view.render_file()
+            if file is None:
+                return
+            view.message = await message.reply(file=file, view=view, mention_author=False)
+        except discord.HTTPException:
+            logger.debug("MIQ: 返信での引用生成に失敗しました", exc_info=True)
+        except Exception:
+            logger.exception("MIQ: 返信での引用生成に失敗しました")
 
     # ============================================================
     # レベルアップ通知
@@ -1845,6 +2530,15 @@ class GeneralCog(commands.Cog):
                     )
         except Exception:
             logger.exception("EXP: チャットEXPの付与に失敗しました")
+
+        # MIQ: 引用したいメッセージに返信して「@BOT miq」と送ると発動
+        bot_user = self.bot.user if self.bot is not None else None
+        if getattr(message, "reference", None) is not None and bot_user is not None and (
+            f"<@{bot_user.id}>" in message.content or f"<@!{bot_user.id}>" in message.content
+        ):
+            rest = re.sub(r"<@!?\d+>", "", message.content).strip().lower()
+            if rest == "miq":
+                self._spawn(self._miq_from_reply(message))
 
         store = guild_settings.get_store()
         await store.ensure_loaded()
