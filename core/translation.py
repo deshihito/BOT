@@ -34,7 +34,10 @@ def translation_settings(user_id: int, guild_id: int | None = None, store=None) 
     the user has not selected a target language yet.
     """
     store = store or _store
-    raw = store.get(str(user_id), {}) if hasattr(store, "get") else {}
+    if hasattr(store, "get"):
+        raw = store.get(str(user_id), {})
+    else:
+        raw = store.load_local().get(str(user_id), {})
     if not isinstance(raw, dict):
         raw = {}
     target = raw.get("target_locale") or raw.get("locale")

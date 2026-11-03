@@ -2185,7 +2185,7 @@ class GeneralCog(commands.Cog):
             message.guild is None
             or message.author.bot
             or message.webhook_id is not None
-            or not message.content.strip()
+            or (not message.content.strip() and not message.attachments)
         ):
             return
 
@@ -2205,6 +2205,11 @@ class GeneralCog(commands.Cog):
             return
 
         try:
+            files = []
+            for attachment in message.attachments:
+                # Download before deleting the source message.  use_cached=True
+                # also keeps Discord CDN URLs usable after the source is removed.
+                files.append(await attachment.to_file(use_cached=True))
             translated = await translation.translate_message(
                 message.content,
                 settings["source_locale"],
@@ -2214,9 +2219,10 @@ class GeneralCog(commands.Cog):
             webhook = await self._translation_webhook(message.channel)
             await message.delete()
             kwargs = {
-                "content": translated,
+                "content": translated or None,
                 "username": str(message.author.display_name)[:80],
                 "avatar_url": str(message.author.display_avatar.url),
+                "files": files,
                 "allowed_mentions": discord.AllowedMentions.none(),
                 "_agobot_skip_localization": True,
             }
