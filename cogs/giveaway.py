@@ -377,10 +377,12 @@ class GiveawayCog(commands.Cog):
                        cost: app_commands.Range[int, 0, MAX_COST] = 0,
                        winner_dm_message: Optional[app_commands.Range[str, 1, 500]] = None,
                        winner_dm_link: Optional[app_commands.Range[str, 1, 500]] = None):
+        if not interaction.response.is_done():
+            await interaction.response.defer(ephemeral=True, thinking=True)
         channel = channel or interaction.channel
         if cost and self.wallet() is None:
-            return await interaction.response.send_message("コインの機能が読み込まれていないため、参加費は設定できません。", ephemeral=True)
-        await interaction.response.defer(ephemeral=True, thinking=True)
+            message = "コインの機能が読み込まれていないため、参加費は設定できません。"
+            return await interaction.followup.send(message, ephemeral=True)
         g = {"prize": prize, "winners": winners, "ends_at": self.clock() + minutes * 60, "host_id": interaction.user.id,
              "role_id": required_role.id if required_role else None, "cost": cost,
              "winner_dm_message": winner_dm_message, "winner_dm_link": winner_dm_link,
