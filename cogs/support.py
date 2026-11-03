@@ -3568,7 +3568,7 @@ class SnsNotifyPanel(discord.ui.LayoutView):
 
 # ===== Discord Quest 通知 ==============================================
 QUEST_SECTION = "quest_notify"
-QUEST_MAX_SEEN = 200
+QUEST_MAX_SEEN = 2000  # 安全弁。通常は「現在も有効なQuestのID」だけを保持するので小さく収まる
 QUEST_MAX_SEND_PER_CYCLE = 5
 QUEST_MAX_BODY = 16 * 1024 * 1024  # 全Questの履歴を含むため大きい（2MB超を確認済み）
 QUEST_POLL_SECONDS = 900  # 確認間隔（秒）
@@ -4659,24 +4659,36 @@ class SupportCog(commands.Cog):
         logger.error("Quest通知の巡回ループが異常終了しました", exc_info=error)
 
     async def _quest_poll_guild(self, guild: discord.Guild, store, settings: dict, items: list[QuestItem]):
-        seen = list(settings["seen"])
-
-        if not settings["primed"]:
-            seen.extend(i.id for i in items if i.id not in set(seen))
-            async with self.quest_lock(guild.id):
-                await store.update(guild.id, QUEST_SECTION, seen=seen[-QUEST_MAX_SEEN:], primed=True)
-            return
-
-        seen_set = set(seen)
-        fresh = [i for i in items if i.id not in seen_set]
-        if not fresh:
-            return
+        # フィードは過去分を含めて数百件以上ある。期限切れは通知対象にせず、
+        # 既読(seen)も「現在有効なQuest」のIDだけを保持する。
+        # （固定件数で古い順に捨てると、捨てたIDが「新着」と誤判定されて再通知される）
+        if not items:
+            return  # 取得結果が空のときは既読を触らない（一時的な空応答での巻き戻し防止）
 
         now = time.time()
-        expired_ids = {i.id for i in fresh if (sns_epoch(i.ends_at) or now + 1) < now}
-        if expired_ids:
-            seen.extend(sorted(expired_ids))
-            fresh = [i for i in fresh if i.id not in expired_ids]
+        live = [i for i in items if (sns_epoch(i.ends_at) or now + 1) >= now]
+        live_ids = {i.id for i in live}
+        seen_before = list(settings["seen"])
+
+        if not settings["primed"]:
+            async with self.quest_lock(guild.id):
+                await store.update(
+                    guild.id, QUEST_SECTION,
+                    seen=list(dict.fromkeys(i.id for i in live))[-QUEST_MAX_SEEN:],
+                    primed=True,
+                )
+            return
+
+        # まだ有効なものだけ既読として残す（期限切れ・フィードから消えたIDは捨てる）
+        keep = [sid for sid in dict.fromkeys(seen_before) if sid in live_ids]
+        keep_set = set(keep)
+        fresh = [i for i in live if i.id not in keep_set]
+
+        if not fresh:
+            if len(keep) != len(seen_before):
+                async with self.quest_lock(guild.id):
+                    await store.update(guild.id, QUEST_SECTION, seen=keep[-QUEST_MAX_SEEN:])
+            return
 
         channel = self._quest_channel(guild, settings)
         if channel is None:
@@ -4686,25 +4698,30 @@ class SupportCog(commands.Cog):
         mentions = self._quest_mentions(role_id)
 
         if settings["orbs_only"]:
-            seen.extend(i.id for i in fresh if not i.is_orbs)
+            keep.extend(i.id for i in fresh if not i.is_orbs)
             fresh = [i for i in fresh if i.is_orbs]
 
         fresh.sort(key=lambda i: sns_epoch(i.ends_at) or 0)
         if len(fresh) > QUEST_MAX_SEND_PER_CYCLE:
-            seen.extend(i.id for i in fresh[:-QUEST_MAX_SEND_PER_CYCLE])
+            keep.extend(i.id for i in fresh[:-QUEST_MAX_SEND_PER_CYCLE])
             fresh = fresh[-QUEST_MAX_SEND_PER_CYCLE:]
 
-        for item in fresh:
-            try:
-                await channel.send(view=QuestNotifyMessage(item, role_id), allowed_mentions=mentions)
-            except (discord.Forbidden, discord.HTTPException) as exc:
-                logger.warning("Quest通知の送信に失敗 (guild=%s %s): %s", guild.id, item.id, exc)
-                break
-            seen.append(item.id)
-            await asyncio.sleep(1)
-
-        async with self.quest_lock(guild.id):
-            await store.update(guild.id, QUEST_SECTION, seen=seen[-QUEST_MAX_SEEN:])
+        try:
+            for item in fresh:
+                try:
+                    await channel.send(view=QuestNotifyMessage(item, role_id), allowed_mentions=mentions)
+                except (discord.Forbidden, discord.HTTPException) as exc:
+                    logger.warning("Quest通知の送信に失敗 (guild=%s %s): %s", guild.id, item.id, exc)
+                    break
+                keep.append(item.id)
+                await asyncio.sleep(1)
+        finally:
+            # 途中で例外が起きても、送信済みIDは必ず保存して重複通知を防ぐ
+            async with self.quest_lock(guild.id):
+                await store.update(
+                    guild.id, QUEST_SECTION,
+                    seen=list(dict.fromkeys(keep))[-QUEST_MAX_SEEN:],
+                )
 
     async def show_auth_settings(self, interaction: discord.Interaction):
         if interaction.guild is None:
