@@ -47,8 +47,7 @@ GENERAL_GENRES = {
     "survival": ("生存確認", "追跡、アクティブ頻度、フリーズ、失踪警報"),
     "custom": ("設定・AI", "ショートカット、AI tools、チャットAI・画像生成AIの設定"),
     "zeta": ("ZetaModoki", "ロールプレイ会話の開始、シチュエーション・キャラクターの登録と管理"),
-    "translation": ("翻訳", "メッセージの自動翻訳と翻訳先言語の設定"),
-    "miq": ("引用画像 (MIQ)", "メッセージを引用画像にして、フォント・配色・レイアウトを変更"),
+    "miq": ("引用画像 (MIQ)", "メッセージを引用画像にする。見た目の設定と、引用の拒否設定"),
 }
 GENERAL_ACTIONS = {
     "economy": [
@@ -82,10 +81,8 @@ GENERAL_ACTIONS = {
         ("シチュエーション・キャラクターを登録", "zeta_register"),
         ("登録を管理（編集・削除）", "zeta_manage"),
     ],
-    "translation": [
-        ("自動翻訳を設定", "translation_settings"),
-    ],
     "miq": [
+        ("MIQ設定（見た目・引用拒否）", "miq_settings"),
         ("使い方", "miq_help"),
     ],
 }
@@ -771,7 +768,6 @@ def render_levelup_card(
 # ============================================================
 MIQ_W, MIQ_H = 1200, 630
 MIQ_MAX_CHARS = 400
-MIQ_VIEW_TIMEOUT = 10 * 60
 MIQ_COOLDOWN = 3.0
 MIQ_GIF_MAX_FRAMES = 24
 
@@ -1133,175 +1129,314 @@ def render_miq_gif(avatar_bytes: bytes | None, text: str, name: str, username: s
     return data
 
 
-class MiqView(discord.ui.View):
-    """引用画像の操作パネル(モノクロ/文字色/左右反転/太字/レイアウト・フォント・配色・削除・GIF)。"""
+# ------------------------------------------------------------
+# MIQ ユーザー設定(見た目・引用拒否)の保存
+# ------------------------------------------------------------
+# ユーザーごと(サーバー共通)の設定を data/miq.json に保存する。
+# EXP と同様に、一時ファイル→置換のアトミック書き込み。保存先は環境変数 MIQ_DATA_PATH で変更可能。
+MIQ_FILE = Path(
+    os.getenv("MIQ_DATA_PATH")
+    or (Path(__file__).resolve().parent.parent / "data" / "miq.json")
+)
 
-    def __init__(self, cog: "GeneralCog", author, text: str, requester_id: int, avatar_bytes: bytes | None):
-        super().__init__(timeout=MIQ_VIEW_TIMEOUT)
-        self.cog = cog
-        self.author = author
-        self.text = text
-        self.name = getattr(author, "display_name", None) or getattr(author, "name", "") or ""
-        self.username = getattr(author, "name", "") or ""
-        self.requester_id = requester_id
-        self.avatar_bytes = avatar_bytes
-        self.message: discord.Message | None = None
+# refuse: True にすると、他の人があなたのメッセージを引用できなくなる(自分の引用は可)。既定はオフ。
+MIQ_DEFAULT_PREFS: dict = {
+    "grayscale": True,
+    "color_text": False,
+    "flip": False,
+    "bold": False,
+    "full": False,
+    "gif": False,
+    "font": None,
+    "theme": "bw",
+    "refuse": False,
+}
 
-        self.grayscale = True
-        self.color_text = False
-        self.flip = False
-        self.bold = False
-        self.full = False
-        self.fonts = _miq_available_fonts()
-        self.font_key = self.fonts[0][0]
-        self.theme = "bw"
-        self._lock = asyncio.Lock()
+_MIQ_DATA: dict | None = None
+_MIQ_LOCK: asyncio.Lock | None = None
 
-        self.font_select = discord.ui.Select(options=self._font_options(), row=1)
-        self.font_select.callback = self._on_font
-        self.theme_select = discord.ui.Select(options=self._theme_options(), row=2)
-        self.theme_select.callback = self._on_theme
-        self.add_item(self.font_select)
-        self.add_item(self.theme_select)
-        self._sync()
 
-    # ---- 描画用の値 ----
-    @property
-    def font_path(self) -> str | None:
-        for key, _label, path in self.fonts:
-            if key == self.font_key:
-                return path
-        return self.fonts[0][2]
+def _miq_lock() -> asyncio.Lock:
+    global _MIQ_LOCK
+    if _MIQ_LOCK is None:
+        _MIQ_LOCK = asyncio.Lock()
+    return _MIQ_LOCK
 
-    def render_kwargs(self) -> dict:
-        bot_user = self.cog.bot.user
-        return {
-            "watermark": str(bot_user) if bot_user else "",
-            "grayscale": self.grayscale, "color_text": self.color_text,
-            "flip": self.flip, "bold": self.bold, "full": self.full,
-            "font_path": self.font_path, "theme": self.theme,
-        }
 
-    def _font_options(self):
-        return [discord.SelectOption(label=f"{label} ({key})", value=key, default=key == self.font_key)
-                for key, label, _path in self.fonts]
-
-    def _theme_options(self):
-        return [discord.SelectOption(label=label, value=key, emoji=emoji, default=key == self.theme)
-                for key, (label, emoji, _bg, _fg) in MIQ_THEMES.items()]
-
-    def _sync(self):
-        on, off = discord.ButtonStyle.primary, discord.ButtonStyle.secondary
-        self.btn_gray.style = off if self.grayscale else on   # カラー表示中は強調
-        self.btn_ink.style = on if self.color_text else off
-        self.btn_flip.style = on if self.flip else off
-        self.btn_bold.style = on if self.bold else off
-        self.btn_full.style = on if self.full else off
-        self.font_select.options = self._font_options()
-        self.theme_select.options = self._theme_options()
-
-    async def render_file(self) -> discord.File | None:
-        png = await self.cog.miq_render_png(self)
-        if png is None:
-            return None
-        return discord.File(io.BytesIO(png), filename="quote.png")
-
-    async def _refresh(self, interaction: discord.Interaction):
-        await interaction.response.defer()
-        async with self._lock:
-            file = await self.render_file()
-        if file is None:
-            return await interaction.followup.send("画像を作れませんでした。時間をおいて再試行してください。", ephemeral=True)
-        self._sync()
+def _miq_read_file() -> dict:
+    try:
+        with MIQ_FILE.open("r", encoding="utf-8") as f:
+            data = json.load(f)
+        return data if isinstance(data, dict) else {}
+    except FileNotFoundError:
+        return {}
+    except Exception:
+        logger.exception("MIQ: %s の読み込みに失敗しました。壊れたファイルを退避して続行します", MIQ_FILE)
         try:
-            await interaction.edit_original_response(attachments=[file], view=self)
-        except discord.HTTPException:
-            logger.warning("MIQ: メッセージの更新に失敗しました", exc_info=True)
+            os.replace(MIQ_FILE, MIQ_FILE.with_name(MIQ_FILE.name + f".broken-{int(time.time())}"))
+        except OSError:
+            pass
+        return {}
 
-    async def interaction_check(self, interaction: discord.Interaction) -> bool:
-        uid = interaction.user.id
-        if uid in (self.requester_id, getattr(self.author, "id", None)):
+
+def _miq_write_file(payload: str) -> None:
+    MIQ_FILE.parent.mkdir(parents=True, exist_ok=True)
+    tmp = MIQ_FILE.with_name(MIQ_FILE.name + ".tmp")
+    with tmp.open("w", encoding="utf-8") as f:
+        f.write(payload)
+        f.flush()
+        os.fsync(f.fileno())
+    os.replace(tmp, MIQ_FILE)
+
+
+def _miq_root() -> dict:
+    global _MIQ_DATA
+    if _MIQ_DATA is None:
+        data = _miq_read_file()
+        if not isinstance(data.get("users"), dict):
+            data["users"] = {}
+        _MIQ_DATA = data
+    return _MIQ_DATA
+
+
+def miq_get_prefs(user_id: int) -> dict:
+    """ユーザーのMIQ設定を返す(未設定の項目は既定値、壊れた値は無視)。"""
+    raw = _miq_root()["users"].get(str(user_id))
+    prefs = dict(MIQ_DEFAULT_PREFS)
+    if isinstance(raw, dict):
+        for key, default in MIQ_DEFAULT_PREFS.items():
+            value = raw.get(key)
+            if isinstance(default, bool):
+                if isinstance(value, bool):
+                    prefs[key] = value
+            elif key == "theme":
+                if value in MIQ_THEMES:
+                    prefs[key] = value
+            elif key == "font":
+                if isinstance(value, str):
+                    prefs[key] = value
+    return prefs
+
+
+def miq_is_refusing(user_id: int | None) -> bool:
+    """そのユーザーが「自分のメッセージの引用を拒否」しているか。"""
+    if user_id is None:
+        return False
+    return bool(miq_get_prefs(user_id)["refuse"])
+
+
+async def miq_save_prefs(user_id: int, prefs: dict) -> bool:
+    users = _miq_root()["users"]
+    clean = {key: prefs.get(key, default) for key, default in MIQ_DEFAULT_PREFS.items()}
+    if clean == MIQ_DEFAULT_PREFS:
+        users.pop(str(user_id), None)  # 既定値のままなら保存しない
+    else:
+        users[str(user_id)] = clean
+    async with _miq_lock():
+        try:
+            payload = json.dumps(_miq_root(), ensure_ascii=False)
+            await asyncio.to_thread(_miq_write_file, payload)
             return True
-        perms = getattr(interaction.user, "guild_permissions", None)
-        if perms is not None and perms.manage_messages:
-            return True
-        await interaction.response.send_message(
-            "この引用は、作成した人か引用された本人だけが操作できます。", ephemeral=True
+        except Exception:
+            logger.exception("MIQ: %s への保存に失敗しました", MIQ_FILE)
+            return False
+
+
+def miq_render_options(prefs: dict, bot_user=None) -> dict:
+    """保存済み設定を render_miq_* に渡す引数へ変換する。"""
+    fonts = _miq_available_fonts()
+    font_path = next((path for key, _label, path in fonts if key == prefs.get("font")), fonts[0][2])
+    return {
+        "watermark": str(bot_user) if bot_user else "",
+        "grayscale": bool(prefs.get("grayscale")),
+        "color_text": bool(prefs.get("color_text")),
+        "flip": bool(prefs.get("flip")),
+        "bold": bool(prefs.get("bold")),
+        "full": bool(prefs.get("full")),
+        "font_path": font_path,
+        "theme": prefs.get("theme") if prefs.get("theme") in MIQ_THEMES else "bw",
+    }
+
+
+def is_miq_trigger(message, bot_user) -> bool:
+    """「引用したいメッセージに返信して `@BOT miq`」と送られたメッセージか。
+
+    他のcogがBOTメンションに反応して説明などを返している場合は、
+    on_message の先頭で `if is_miq_trigger(message, self.bot.user): return` として除外する。
+    """
+    if bot_user is None or getattr(message, "reference", None) is None:
+        return False
+    content = message.content or ""
+    if f"<@{bot_user.id}>" not in content and f"<@!{bot_user.id}>" not in content:
+        return False
+    return re.sub(r"<@!?\d+>", "", content).strip().lower() == "miq"
+
+
+# ------------------------------------------------------------
+# MIQ 設定パネル (/general → 引用画像 (MIQ) → MIQ設定)。components v2 で表示する
+# ------------------------------------------------------------
+MIQ_TOGGLES = (
+    ("grayscale", "モノクロ"),
+    ("color_text", "文字色連動"),
+    ("flip", "左右反転"),
+    ("bold", "太字"),
+    ("full", "全面レイアウト"),
+)
+
+
+class MiqToggleButton(discord.ui.Button):
+    def __init__(self, parent: "MiqSettingsView", field: str, label: str, *, row: int, danger: bool = False):
+        self.parent_view, self.field = parent, field
+        on = bool(parent.prefs.get(field))
+        if on:
+            style = discord.ButtonStyle.danger if danger else discord.ButtonStyle.primary
+        else:
+            style = discord.ButtonStyle.secondary
+        super().__init__(label=f"{label}: {'ON' if on else 'OFF'}", style=style, row=row)
+
+    async def callback(self, interaction: discord.Interaction):
+        parent = self.parent_view
+        if not await parent.check_owner(interaction):
+            return
+        parent.prefs[self.field] = not parent.prefs.get(self.field)
+        await parent.commit(interaction)
+
+
+class MiqFontSelect(discord.ui.Select):
+    def __init__(self, parent: "MiqSettingsView"):
+        self.parent_view = parent
+        current = parent.current_font_key()
+        super().__init__(
+            placeholder="フォントを選択",
+            options=[discord.SelectOption(label=f"{label} ({key})"[:100], value=key, default=key == current)
+                     for key, label, _path in parent.fonts],
+            row=1,
         )
+
+    async def callback(self, interaction: discord.Interaction):
+        parent = self.parent_view
+        if not await parent.check_owner(interaction):
+            return
+        parent.prefs["font"] = self.values[0]
+        await parent.commit(interaction)
+
+
+class MiqThemeSelect(discord.ui.Select):
+    def __init__(self, parent: "MiqSettingsView"):
+        self.parent_view = parent
+        current = parent.prefs.get("theme")
+        super().__init__(
+            placeholder="配色を選択",
+            options=[discord.SelectOption(label=label, value=key, emoji=emoji, default=key == current)
+                     for key, (label, emoji, _bg, _fg) in MIQ_THEMES.items()],
+            row=2,
+        )
+
+    async def callback(self, interaction: discord.Interaction):
+        parent = self.parent_view
+        if not await parent.check_owner(interaction):
+            return
+        parent.prefs["theme"] = self.values[0]
+        await parent.commit(interaction)
+
+
+class MiqPreviewButton(discord.ui.Button):
+    def __init__(self, parent: "MiqSettingsView"):
+        self.parent_view = parent
+        super().__init__(label="プレビュー", emoji="🖼️", style=discord.ButtonStyle.success, row=3)
+
+    async def callback(self, interaction: discord.Interaction):
+        parent = self.parent_view
+        if not await parent.check_owner(interaction):
+            return
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        limit = getattr(interaction.guild, "filesize_limit", None)
+        file = await parent.cog._miq_build_file(
+            interaction.user, "プレビューです。\n見た目の確認ができます。", parent.prefs, limit,
+        )
+        if file is None:
+            return await interaction.followup.send("プレビューを作れませんでした。時間をおいて再試行してください。", ephemeral=True)
+        await interaction.followup.send(file=file, ephemeral=True)
+
+
+class MiqResetButton(discord.ui.Button):
+    def __init__(self, parent: "MiqSettingsView"):
+        self.parent_view = parent
+        super().__init__(label="見た目を初期化", style=discord.ButtonStyle.secondary, row=3)
+
+    async def callback(self, interaction: discord.Interaction):
+        parent = self.parent_view
+        if not await parent.check_owner(interaction):
+            return
+        for key, default in MIQ_DEFAULT_PREFS.items():
+            if key != "refuse":  # 引用拒否の設定は初期化しない
+                parent.prefs[key] = default
+        await parent.commit(interaction)
+
+
+class MiqSettingsView(discord.ui.View):
+    """MIQの見た目と引用拒否の設定パネル。設定はユーザーごとに保存され、MIQを作る時に使われる。"""
+
+    def __init__(self, cog: "GeneralCog", user_id: int):
+        super().__init__(timeout=300)
+        self.cog, self.user_id = cog, user_id
+        self.prefs = miq_get_prefs(user_id)
+        self.fonts = _miq_available_fonts()
+        self.refresh()
+
+    def current_font_key(self) -> str:
+        keys = [key for key, _label, _path in self.fonts]
+        return self.prefs.get("font") if self.prefs.get("font") in keys else keys[0]
+
+    def refresh(self):
+        self.clear_items()
+        for field, label in MIQ_TOGGLES:
+            self.add_item(MiqToggleButton(self, field, label, row=0))
+        self.add_item(MiqFontSelect(self))
+        self.add_item(MiqThemeSelect(self))
+        self.add_item(MiqToggleButton(self, "gif", "GIF出力", row=3))
+        self.add_item(MiqToggleButton(self, "refuse", "引用を拒否", row=3, danger=True))
+        self.add_item(MiqPreviewButton(self))
+        self.add_item(MiqResetButton(self))
+
+    async def check_owner(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id == self.user_id:
+            return True
+        await interaction.response.send_message("この設定画面を開いたユーザーだけ変更できます。", ephemeral=True)
         return False
 
-    async def on_timeout(self):
-        if self.message is not None:
+    async def commit(self, interaction: discord.Interaction):
+        ok = await miq_save_prefs(self.user_id, self.prefs)
+        self.refresh()
+        await edit_panel_v2(interaction, as_panel_v2(self))
+        if not ok:
             try:
-                await self.message.edit(view=None)
+                await interaction.followup.send("設定の保存に失敗しました。時間をおいて再試行してください。", ephemeral=True)
             except discord.HTTPException:
                 pass
 
-    # ---- ボタン(row 0) ----
-    @discord.ui.button(emoji="⚫", style=discord.ButtonStyle.secondary, row=0)
-    async def btn_gray(self, interaction: discord.Interaction, button: discord.ui.Button):
-        """アイコンのモノクロ/カラー切替。"""
-        self.grayscale = not self.grayscale
-        await self._refresh(interaction)
+    def embed(self) -> discord.Embed:
+        p = self.prefs
 
-    @discord.ui.button(emoji="🎨", style=discord.ButtonStyle.secondary, row=0)
-    async def btn_ink(self, interaction: discord.Interaction, button: discord.ui.Button):
-        """文字色をアイコンの色味に合わせる/戻す。"""
-        self.color_text = not self.color_text
-        await self._refresh(interaction)
+        def onoff(value) -> str:
+            return "ON" if value else "OFF"
 
-    @discord.ui.button(emoji="🔄", style=discord.ButtonStyle.secondary, row=0)
-    async def btn_flip(self, interaction: discord.Interaction, button: discord.ui.Button):
-        """アイコンを左右反転(左⇄右)。"""
-        self.flip = not self.flip
-        await self._refresh(interaction)
-
-    @discord.ui.button(label="B", style=discord.ButtonStyle.secondary, row=0)
-    async def btn_bold(self, interaction: discord.Interaction, button: discord.ui.Button):
-        """太字。"""
-        self.bold = not self.bold
-        await self._refresh(interaction)
-
-    @discord.ui.button(label="NEW", style=discord.ButtonStyle.secondary, row=0)
-    async def btn_full(self, interaction: discord.Interaction, button: discord.ui.Button):
-        """アイコンを背景全面に敷く新レイアウト。"""
-        self.full = not self.full
-        await self._refresh(interaction)
-
-    # ---- セレクト(row 1, 2) ----
-    async def _on_font(self, interaction: discord.Interaction):
-        self.font_key = self.font_select.values[0]
-        await self._refresh(interaction)
-
-    async def _on_theme(self, interaction: discord.Interaction):
-        self.theme = self.theme_select.values[0]
-        await self._refresh(interaction)
-
-    # ---- ボタン(row 3) ----
-    @discord.ui.button(label="Remove my Quote", emoji="🗑️", style=discord.ButtonStyle.secondary, row=3)
-    async def btn_remove(self, interaction: discord.Interaction, button: discord.ui.Button):
-        try:
-            await interaction.response.defer()
-            await interaction.delete_original_response()
-        except discord.HTTPException:
-            try:
-                if interaction.message is not None:
-                    await interaction.message.delete()
-            except discord.HTTPException:
-                return await interaction.followup.send("引用を削除できませんでした。", ephemeral=True)
-        self.stop()
-
-    @discord.ui.button(label="to GIF", emoji="🖼️", style=discord.ButtonStyle.secondary, row=3)
-    async def btn_gif(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.defer(thinking=True)
-        guild = interaction.guild
-        limit = int((getattr(guild, "filesize_limit", None) or 8 * 1024 * 1024) * 0.9)
-        data = await self.cog.miq_render_gif(self, limit)
-        if data is None:
-            return await interaction.followup.send("GIFを作れませんでした。時間をおいて再試行してください。", ephemeral=True)
-        if len(data) > limit:
-            return await interaction.followup.send("GIFがアップロード上限を超えてしまいました。", ephemeral=True)
-        await interaction.followup.send(file=discord.File(io.BytesIO(data), filename="quote.gif"))
+        font_key = self.current_font_key()
+        font_label = next((label for key, label, _path in self.fonts if key == font_key), font_key)
+        theme_label = MIQ_THEMES.get(p.get("theme"), MIQ_THEMES["bw"])[0]
+        lines = [
+            "**見た目**（あなたがMIQを作る時に使われます）",
+            f"モノクロ: `{onoff(p['grayscale'])}`　文字色連動: `{onoff(p['color_text'])}`　左右反転: `{onoff(p['flip'])}`",
+            f"太字: `{onoff(p['bold'])}`　全面レイアウト: `{onoff(p['full'])}`　GIF出力: `{onoff(p['gif'])}`",
+            f"フォント: `{font_label}`　配色: `{theme_label}`",
+            "",
+            "**引用の拒否**",
+            f"あなたのメッセージの引用を拒否: `{onoff(p['refuse'])}`",
+            "ONにすると、他の人はあなたのメッセージをMIQにできません（自分の引用は可能）。",
+            "",
+            "GIF出力はアイコンがGIFアニメの時だけ有効です（それ以外はPNG）。",
+        ]
+        return discord.Embed(title="MIQ設定", description="\n".join(lines), color=0xFFFFFF)
 
 
 # ============================================================
@@ -1986,8 +2121,6 @@ class GeneralCog(commands.Cog):
         self._bg_tasks: set[asyncio.Task] = set()
         self._levelup_sem = asyncio.Semaphore(2)  # 画像生成の同時実行数(低スペック機での詰まり防止)
         self._levelup_pillow_warned = False
-        self._translation_webhooks: dict[int, discord.Webhook] = {}
-        self._translation_client = LibreTranslateClient()
         self._miq_last: dict[int, float] = {}
         # メッセージの右クリックメニュー(アプリ → Make it a Quote)
         self.miq_menu = app_commands.ContextMenu(name="Make it a Quote", callback=self.miq_context)
@@ -2027,12 +2160,6 @@ class GeneralCog(commands.Cog):
         return None
 
     async def dispatch_general(self, interaction: discord.Interaction, value: str):
-        if value == "translation_settings":
-            view = TranslationView(interaction.user.id, interaction.guild_id)
-            return await interaction.response.send_message(
-                embed=view.embed(), view=view, ephemeral=True
-            )
-
         if value in {"zetamodoki", "zeta_reset", "zeta_register", "zeta_manage"}:
             cog = self.bot.get_cog("ZetaModoki")
             if cog is None:
@@ -2045,18 +2172,21 @@ class GeneralCog(commands.Cog):
                 return await cog.manage(interaction)
             return await cog.reset(interaction)
 
+        if value == "miq_settings":
+            view = MiqSettingsView(self, interaction.user.id)
+            return await interaction.response.send_message(view=as_panel_v2(view), ephemeral=True)
+
         if value == "miq_help":
             embed = discord.Embed(title="引用画像 (MIQ)", color=0xFFFFFF)
             embed.description = (
                 "**作り方**\n"
                 "・メッセージを右クリック(スマホは長押し) → アプリ → **Make it a Quote**\n"
                 "・引用したいメッセージに返信して、`@BOT miq` と送信\n\n"
-                "**ボタン**\n"
-                "⚫ モノクロ/カラー　🎨 文字色をアイコンに合わせる　🔄 左右反転　**B** 太字　"
-                "**NEW** アイコンを背景全面に敷く\n"
-                "フォントと配色はセレクトで変更できます。`to GIF` でGIF化(アイコンがGIFなら動きます)、"
-                "`Remove my Quote` で削除。\n\n"
-                "操作できるのは、作成した人・引用された本人・メッセージ管理権限のある人です。"
+                "**設定**\n"
+                "`/general` → 引用画像 (MIQ) → **MIQ設定** で、モノクロ・文字色連動・左右反転・太字・"
+                "全面レイアウト・GIF出力・フォント・配色を変更できます。設定はあなたがMIQを作る時に使われます。\n\n"
+                "**引用の拒否**\n"
+                "MIQ設定の「引用を拒否」をONにすると、他の人があなたのメッセージを引用できなくなります（初期はOFF）。"
             )
             return await interaction.response.send_message(embed=embed, ephemeral=True)
 
@@ -2281,54 +2411,54 @@ class GeneralCog(commands.Cog):
             self._miq_last = {k: v for k, v in self._miq_last.items() if now - v < 60}
         return True
 
-    async def _miq_prepare(self, target: discord.Message, requester_id: int, text: str) -> MiqView:
-        avatar_bytes = None
-        try:
-            avatar_bytes = await target.author.display_avatar.replace(size=512, format="png").read()
-        except Exception:
-            logger.debug("MIQ: アイコンの取得に失敗 (user=%s)", getattr(target.author, "id", "?"), exc_info=True)
-        return MiqView(self, target.author, text, requester_id, avatar_bytes)
-
     def _miq_pillow_missing(self) -> None:
         if not self._levelup_pillow_warned:
             self._levelup_pillow_warned = True
             logger.warning("MIQ: Pillow が未インストールです (pip install pillow)")
 
-    async def miq_render_png(self, view: MiqView) -> bytes | None:
+    async def _miq_build_file(
+        self, author, text: str, prefs: dict, size_limit: int | None,
+    ) -> discord.File | None:
+        """引用画像を作って discord.File にする。prefs は引用を作る人(要求者)の設定。"""
+        opts = miq_render_options(prefs, self.bot.user)
+        name = getattr(author, "display_name", None) or getattr(author, "name", "") or ""
+        username = getattr(author, "name", "") or ""
+        avatar_bytes, animated = None, False
+        try:
+            asset = author.display_avatar
+            animated = bool(prefs.get("gif") and asset.is_animated())
+            if animated:
+                avatar_bytes = await asset.replace(size=256, format="gif").read()
+            else:
+                avatar_bytes = await asset.replace(size=512, format="png").read()
+        except Exception:
+            animated = False
+            logger.debug("MIQ: アイコンの取得に失敗 (user=%s)", getattr(author, "id", "?"), exc_info=True)
         try:
             async with self._levelup_sem:
-                return await asyncio.to_thread(
-                    render_miq_png, view.avatar_bytes, view.text, view.name, view.username,
-                    **view.render_kwargs(),
-                )
+                if animated:
+                    limit = int((size_limit or 8 * 1024 * 1024) * 0.9)
+                    data = await asyncio.to_thread(
+                        render_miq_gif, avatar_bytes, text, name, username, max_bytes=limit, **opts,
+                    )
+                    if len(data) <= limit:
+                        return discord.File(io.BytesIO(data), filename="quote.gif")
+                    # 上限超過ならPNG(アイコンの1コマ目)にフォールバック
+                data = await asyncio.to_thread(render_miq_png, avatar_bytes, text, name, username, **opts)
+            return discord.File(io.BytesIO(data), filename="quote.png")
         except ImportError:
             self._miq_pillow_missing()
         except Exception:
             logger.exception("MIQ: 引用画像の生成に失敗しました")
         return None
 
-    async def miq_render_gif(self, view: MiqView, max_bytes: int) -> bytes | None:
-        avatar_bytes = view.avatar_bytes
-        try:
-            asset = view.author.display_avatar
-            if asset.is_animated():
-                avatar_bytes = await asset.replace(size=256, format="gif").read()
-        except Exception:
-            logger.debug("MIQ: アニメーションアイコンの取得に失敗", exc_info=True)
-        try:
-            async with self._levelup_sem:
-                return await asyncio.to_thread(
-                    render_miq_gif, avatar_bytes, view.text, view.name, view.username,
-                    max_bytes=max_bytes, **view.render_kwargs(),
-                )
-        except ImportError:
-            self._miq_pillow_missing()
-        except Exception:
-            logger.exception("MIQ: GIFの生成に失敗しました")
-        return None
-
     async def miq_context(self, interaction: discord.Interaction, message: discord.Message):
         """メッセージの右クリックメニュー「Make it a Quote」。"""
+        author_id = getattr(message.author, "id", None)
+        if author_id != interaction.user.id and miq_is_refusing(author_id):
+            return await interaction.response.send_message(
+                "このユーザーは引用画像(MIQ)を拒否しています。", ephemeral=True
+            )
         text = _miq_clean_text(message.clean_content)
         if not text:
             return await interaction.response.send_message(
@@ -2338,14 +2468,16 @@ class GeneralCog(commands.Cog):
         if not self._miq_cooldown_ok(interaction.user.id):
             return await interaction.response.send_message("少し待ってからもう一度お試しください。", ephemeral=True)
         await interaction.response.defer(thinking=True)
-        view = await self._miq_prepare(message, interaction.user.id, text)
-        file = await view.render_file()
+        prefs = miq_get_prefs(interaction.user.id)
+        file = await self._miq_build_file(
+            message.author, text, prefs, getattr(interaction.guild, "filesize_limit", None),
+        )
         if file is None:
             return await interaction.followup.send("引用画像を作れませんでした。")
-        view.message = await interaction.followup.send(file=file, view=view, wait=True)
+        await interaction.followup.send(file=file)
 
     async def _miq_from_reply(self, message: discord.Message):
-        """引用したいメッセージに返信してBOTをメンションした時の処理。"""
+        """引用したいメッセージに返信して `@BOT miq` と送った時の処理。"""
         try:
             ref = message.reference
             if ref is None or ref.message_id is None:
@@ -2356,18 +2488,26 @@ class GeneralCog(commands.Cog):
             target = ref.resolved if isinstance(ref.resolved, discord.Message) else None
             if target is None:
                 target = await message.channel.fetch_message(ref.message_id)
+            author_id = getattr(target.author, "id", None)
+            if author_id != message.author.id and miq_is_refusing(author_id):
+                await message.reply(
+                    "このユーザーは引用画像(MIQ)を拒否しています。", mention_author=False, delete_after=8,
+                )
+                return
             text = _miq_clean_text(target.clean_content)
             if not text:
-                await message.reply("文字のあるメッセージに返信してください。", mention_author=False)
+                await message.reply("文字のあるメッセージに返信してください。", mention_author=False, delete_after=8)
                 return
             if not self._miq_cooldown_ok(message.author.id):
                 return
+            prefs = miq_get_prefs(message.author.id)
             async with message.channel.typing():
-                view = await self._miq_prepare(target, message.author.id, text)
-                file = await view.render_file()
+                file = await self._miq_build_file(
+                    target.author, text, prefs, getattr(message.guild, "filesize_limit", None),
+                )
             if file is None:
                 return
-            view.message = await message.reply(file=file, view=view, mention_author=False)
+            await message.reply(file=file, mention_author=False)
         except discord.HTTPException:
             logger.debug("MIQ: 返信での引用生成に失敗しました", exc_info=True)
         except Exception:
@@ -2530,13 +2670,8 @@ class GeneralCog(commands.Cog):
             logger.exception("EXP: チャットEXPの付与に失敗しました")
 
         # MIQ: 引用したいメッセージに返信して「@BOT miq」と送ると発動
-        bot_user = self.bot.user if self.bot is not None else None
-        if getattr(message, "reference", None) is not None and bot_user is not None and (
-            f"<@{bot_user.id}>" in message.content or f"<@!{bot_user.id}>" in message.content
-        ):
-            rest = re.sub(r"<@!?\d+>", "", message.content).strip().lower()
-            if rest == "miq":
-                self._spawn(self._miq_from_reply(message))
+        if is_miq_trigger(message, self.bot.user if self.bot is not None else None):
+            self._spawn(self._miq_from_reply(message))
 
         store = guild_settings.get_store()
         await store.ensure_loaded()
