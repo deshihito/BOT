@@ -17,6 +17,8 @@ from discord.ext import commands, tasks
 from core.panel_v2 import as_panel_v2, edit_panel_v2
 from core import ai_omnirush, ai_preferences, ai_provider_router, guild_settings, logfare, shortcuts
 from core.game_guides import GAME_GUIDES, GAME_ORDER
+from core import localization, translation
+from core.libretranslate import LibreTranslateClient, LibreTranslateError
 
 logger = logging.getLogger(__name__)
 
@@ -44,6 +46,7 @@ GENERAL_GENRES = {
     "survival": ("生存確認", "追跡、アクティブ頻度、フリーズ、失踪警報"),
     "custom": ("設定・AI", "ショートカット、AI tools、チャットAI・画像生成AIの設定"),
     "zeta": ("ZetaModoki", "ロールプレイ会話の開始、シチュエーション・キャラクターの登録と管理"),
+    "translation": ("翻訳", "メッセージの自動翻訳と翻訳先言語の設定"),
 }
 GENERAL_ACTIONS = {
     "economy": [
@@ -76,6 +79,9 @@ GENERAL_ACTIONS = {
         ("ZetaModoki会話をリセット", "zeta_reset"),
         ("シチュエーション・キャラクターを登録", "zeta_register"),
         ("登録を管理（編集・削除）", "zeta_manage"),
+    ],
+    "translation": [
+        ("自動翻訳を設定", "translation_settings"),
     ],
 }
 
@@ -821,6 +827,86 @@ class GeneralActionSelect(discord.ui.Select):
         await self.cog.dispatch_general(interaction, self.values[0])
 
 
+class TranslationLocaleSelect(discord.ui.Select):
+    def __init__(self, parent: "TranslationView", current: str):
+        self.parent_view = parent
+        super().__init__(
+            placeholder="翻訳先の言語を選択してください",
+            options=[
+                discord.SelectOption(
+                    label=localization.LOCALE_LABELS[locale],
+                    value=locale,
+                    emoji=localization.LOCALE_FLAGS[locale],
+                    default=locale == current,
+                )
+                for locale in localization.SUPPORTED_LOCALES
+            ],
+        )
+
+    async def callback(self, interaction: discord.Interaction):
+        locale = localization.normalize_locale(self.values[0])
+        localization_cog = interaction.client.get_cog("LocalizationCog")
+        if localization_cog is not None:
+            await localization_cog.set_locale(interaction.guild_id, locale)
+        else:
+            await guild_settings.get_store().update(
+                interaction.guild_id, localization.LANGUAGE_SECTION, locale=locale
+            )
+        self.parent_view.locale = locale
+        await interaction.response.edit_message(embed=self.parent_view.embed(), view=self.parent_view)
+
+
+class TranslationToggleButton(discord.ui.Button):
+    def __init__(self, parent: "TranslationView", enabled: bool):
+        self.parent_view = parent
+        super().__init__(
+            label="自動翻訳をオフにする" if enabled else "自動翻訳をオンにする",
+            style=discord.ButtonStyle.danger if enabled else discord.ButtonStyle.success,
+            row=1,
+        )
+
+    async def callback(self, interaction: discord.Interaction):
+        self.parent_view.enabled = not self.parent_view.enabled
+        await translation_settings_update(interaction.guild_id, enabled=self.parent_view.enabled)
+        self.parent_view.refresh()
+        await interaction.response.edit_message(embed=self.parent_view.embed(), view=self.parent_view)
+
+
+async def translation_settings_update(guild_id: int, *, enabled: bool):
+    await guild_settings.get_store().update(
+        guild_id, translation.TRANSLATION_SECTION, enabled=bool(enabled)
+    )
+
+
+class TranslationView(discord.ui.View):
+    def __init__(self, guild_id: int):
+        super().__init__(timeout=600)
+        self.guild_id = guild_id
+        settings = translation.translation_settings(guild_id)
+        self.enabled = settings["enabled"]
+        self.locale = settings["locale"]
+        self.refresh()
+
+    def refresh(self):
+        self.clear_items()
+        self.add_item(TranslationLocaleSelect(self, self.locale))
+        self.add_item(TranslationToggleButton(self, self.enabled))
+
+    def embed(self):
+        status = "オン" if self.enabled else "オフ"
+        language = localization.LOCALE_LABELS.get(self.locale, self.locale)
+        return discord.Embed(
+            title="自動翻訳設定",
+            description=(
+                f"状態: **{status}**\n"
+                f"翻訳先: **{language}**\n\n"
+                "オンにすると、このサーバーの人間のメッセージを削除し、"
+                "送信者の名前とアイコンで翻訳結果を再投稿します。"
+            ),
+            color=0x5865F2,
+        )
+
+
 class GeneralPanel(discord.ui.View):
     def __init__(self, cog, genre: str | None = None, shortcut_mode: bool = False, shortcut_item: dict | None = None):
         super().__init__(timeout=300)
@@ -1349,6 +1435,8 @@ class GeneralCog(commands.Cog):
         self._bg_tasks: set[asyncio.Task] = set()
         self._levelup_sem = asyncio.Semaphore(2)  # 画像生成の同時実行数(低スペック機での詰まり防止)
         self._levelup_pillow_warned = False
+        self._translation_webhooks: dict[int, discord.Webhook] = {}
+        self._translation_client = LibreTranslateClient()
 
     async def cog_load(self):
         self.exp_vc_tick.start()
@@ -1382,6 +1470,14 @@ class GeneralCog(commands.Cog):
         return None
 
     async def dispatch_general(self, interaction: discord.Interaction, value: str):
+        if value == "translation_settings":
+            store = guild_settings.get_store()
+            await store.ensure_loaded()
+            view = TranslationView(interaction.guild_id)
+            return await interaction.response.send_message(
+                embed=view.embed(), view=view, ephemeral=True
+            )
+
         if value in {"zetamodoki", "zeta_reset", "zeta_register", "zeta_manage"}:
             cog = self.bot.get_cog("ZetaModoki")
             if cog is None:
@@ -1498,6 +1594,68 @@ class GeneralCog(commands.Cog):
 
         logger.warning("dispatch_general: unknown action %r", value)
         return await self._safe_respond(interaction, "この機能は現在利用できません。")
+
+    async def _translation_webhook(self, channel):
+        """Return the per-channel webhook used for translated messages."""
+        parent = channel.parent if isinstance(channel, discord.Thread) else channel
+        cached = self._translation_webhooks.get(parent.id)
+        if cached is not None:
+            return cached
+        webhooks = await parent.webhooks()
+        webhook = discord.utils.get(webhooks, name="AGOBOT-Translate")
+        if webhook is None:
+            webhook = await parent.create_webhook(name="AGOBOT-Translate")
+        self._translation_webhooks[parent.id] = webhook
+        return webhook
+
+    @commands.Cog.listener("on_message")
+    async def on_message_translation(self, message: discord.Message):
+        """Replace human messages with a webhook-posted translation when enabled."""
+        if (
+            message.guild is None
+            or message.author.bot
+            or message.webhook_id is not None
+            or not message.content.strip()
+        ):
+            return
+
+        store = guild_settings.get_store()
+        await store.ensure_loaded()
+        settings = translation.translation_settings(message.guild.id, store)
+        if not settings["enabled"]:
+            return
+
+        me = message.guild.me
+        permissions = message.channel.permissions_for(me) if me is not None else None
+        if not permissions or not permissions.manage_messages or not permissions.manage_webhooks:
+            logger.warning(
+                "自動翻訳にはメッセージ管理とWebhook管理権限が必要です (guild=%s channel=%s)",
+                message.guild.id, message.channel.id,
+            )
+            return
+
+        try:
+            translated = await translation.translate_message(
+                message.content, settings["locale"], client=self._translation_client
+            )
+            webhook = await self._translation_webhook(message.channel)
+            await message.delete()
+            kwargs = {
+                "content": translated,
+                "username": str(message.author.display_name)[:80],
+                "avatar_url": str(message.author.display_avatar.url),
+                "allowed_mentions": discord.AllowedMentions.none(),
+                "_agobot_skip_localization": True,
+            }
+            if isinstance(message.channel, discord.Thread):
+                kwargs["thread"] = message.channel
+            await webhook.send(**kwargs)
+        except LibreTranslateError:
+            logger.warning("自動翻訳APIの呼び出しに失敗しました (guild=%s)", message.guild.id, exc_info=True)
+        except discord.HTTPException:
+            logger.warning("自動翻訳メッセージの削除または送信に失敗しました", exc_info=True)
+        except Exception:
+            logger.exception("自動翻訳で予期しないエラーが発生しました")
 
     async def execute_shortcut(self, message: discord.Message, item: dict, *, invoker=None):
         try:

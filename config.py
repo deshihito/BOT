@@ -20,7 +20,7 @@ GROQ_API_KEY = os.getenv('GROQ_API_KEY')
 GEMINI_API_KEY = os.getenv('GEMINI_API_KEY')
 
 # --- LibreTranslate設定 ---
-# Bot実行時には翻訳APIを呼ばず、翻訳カタログ生成スクリプトだけが利用する。
+# 自動翻訳とローカライズ用の翻訳経路で共有する設定。
 LIBRETRANSLATE_URL = os.getenv('LIBRETRANSLATE_URL', 'http://127.0.0.1:18080').rstrip('/')
 LIBRETRANSLATE_API_KEY = os.getenv('LIBRETRANSLATE_API_KEY', '')
 
