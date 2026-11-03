@@ -57,8 +57,6 @@ SLASH_ARGUMENTS = {
     'pay': {'receiver': 'OTHER', 'amount': 1},
     'leaderboard': {},
     'nation join': {}, 'nation found': {}, 'nation status': {},
-    'zetamodoki': {},
-    'zeta_reset': {},
     'judgement': None,  # needle3 が無い環境では読み込まれない（下で除外）
 }
 

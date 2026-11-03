@@ -40,8 +40,8 @@ EXP_STORE_KEY = "exp"
 
 GENERAL_GENRES = {
     "economy": ("コイン・ランキング", "所持状況、送金、コインや bump/up のランキング"),
-    "survival": ("生存確認", "追跡、アクティブ頻度、フリーズ、失踪警報"),
     "exp": ("EXP・レベル", "チャット/VC/generalのEXPとレベルを確認"),
+    "survival": ("生存確認", "追跡、アクティブ頻度、フリーズ、失踪警報"),
     "custom": ("設定・AI", "ショートカット、AI tools、チャットAI・画像生成AIの設定"),
     "zeta": ("ZetaModoki", "ロールプレイ会話の開始、シチュエーション・キャラクターの登録と管理"),
 }
@@ -780,9 +780,9 @@ class GeneralGenreSelect(discord.ui.Select):
         self.cog = cog
         super().__init__(
             placeholder="ジャンルを選択してください",
-            options=[discord.SelectOption(label=label, description=description, value=value,
+            options=[discord.SelectOption(label=label, description=f"{len(GENERAL_ACTIONS[value])}個の機能", value=value,
                                           default=value == selected)
-                     for value, (label, description) in GENERAL_GENRES.items()],
+                     for value, (label, _description) in GENERAL_GENRES.items()],
             row=0,
         )
 

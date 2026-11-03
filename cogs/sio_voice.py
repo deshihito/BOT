@@ -88,12 +88,12 @@ COMMUNITY_ACTIONS = [
 VOICE_GENRES = {
     "connection": ("VC接続", "参加、退出、現在の使用状況"),
     "music": ("音楽", "音楽操作パネル"),
+    "tts": ("読み上げ", "VOICEVOXによるテキスト読み上げ"),
     "studio": ("録音・音声制作", "録音、やまびこ、文字起こし、カラオケ"),
     "effects": ("音声加工", "ボイスチェンジャー"),
+    "trigger": ("音声トリガー", "登録・一覧・削除"),
     "community": ("通話ネットワーク", "ランダム通話、グローバルVC"),
     "gvc_rooms": ("グローバルVCルーム", "ルーム一覧・作成・情報・削除、グロチャ接続"),
-    "tts": ("読み上げ", "VOICEVOXによるテキスト読み上げ"),
-    "trigger": ("音声トリガー", "登録・一覧・削除"),
 }
 VOICE_ACTIONS_BY_GENRE = {
     "connection": [("参加", "join"), ("退出", "leave"), ("状態", "status")],
@@ -138,6 +138,11 @@ GVC_ROOM_FORMS = {
 }
 # 入力なしでパネルから直接実行できる操作
 GVC_ROOM_ACTIONS = {"gvc_room_list", "gvc_chat_disconnect", *GVC_ROOM_FORMS}
+
+# 起動時のロード一覧に漏れていても、初回利用時に読み込み直せる拡張（機能キー -> モジュール名）
+LAZY_EXTENSIONS = {
+    "transcribe": "sio_transcription",
+}
 
 COGS = {
     "music": "VoiceCog",
@@ -192,8 +197,28 @@ class VoiceHub(commands.Cog):
     async def _cog(self, interaction: discord.Interaction, key: str):
         cog = self.bot.get_cog(COGS[key])
         if cog is None:
+            cog = await self._try_load_cog(key)
+        if cog is None:
             await Responder(interaction).send("⚠️ この機能はいま読み込まれていません。", ephemeral=True)
         return cog
+
+    async def _try_load_cog(self, key: str):
+        """未ロードのCogを、同じパッケージの拡張として読み込み直す（失敗理由はログに残す）。"""
+        module_name = LAZY_EXTENSIONS.get(key)
+        if not module_name:
+            return None
+        package = __name__.rpartition(".")[0]
+        extension = f"{package}.{module_name}" if package else module_name
+        try:
+            await self.bot.load_extension(extension)
+        except commands.ExtensionAlreadyLoaded:
+            logger.warning("%s は読み込み済みですが Cog %s が見つかりません", extension, COGS[key])
+        except Exception:
+            logger.exception("拡張 %s の読み込みに失敗しました（Cog: %s）", extension, COGS[key])
+            return None
+        else:
+            logger.info("拡張 %s を遅延ロードしました", extension)
+        return self.bot.get_cog(COGS[key])
 
     # ------------------------------------------------------------ 状態
     def status_embed(self, guild) -> discord.Embed:
@@ -305,21 +330,9 @@ class VoiceHub(commands.Cog):
             )
 
         # 権限チェック（support.py の設定と共通）
-        try:
-            from cogs.support import get_voice_trigger_settings
-            from core import guild_settings
-
-            store = guild_settings.get_store()
-            await store.ensure_loaded()
-            settings = get_voice_trigger_settings(store, interaction.guild_id)
-            if settings["permission"] == "admin":
-                perms = getattr(interaction.user, "guild_permissions", None)
-                if not getattr(perms, "administrator", False):
-                    return await Responder(interaction).send(
-                        "このサーバーでは管理者のみ操作できます。", ephemeral=True
-                    )
-        except Exception:
-            logger.exception("音声トリガー権限チェックに失敗しました")
+        reason = await self._trigger_denied_reason(interaction)
+        if reason:
+            return await Responder(interaction).send(reason, ephemeral=True)
 
         if operation == "panel":
             view = VoiceTriggerManageView(cog, interaction.guild_id)
@@ -373,6 +386,23 @@ class VoiceHub(commands.Cog):
         view = VoicePanelView(self)
         await interaction.response.send_message(view=as_panel_v2(view), ephemeral=True)
 
+    async def _trigger_denied_reason(self, interaction: discord.Interaction) -> str | None:
+        """音声トリガーを操作できないときは理由を返す（support.py の権限設定と共通）。"""
+        try:
+            from cogs.support import get_voice_trigger_settings
+            from core import guild_settings
+
+            store = guild_settings.get_store()
+            await store.ensure_loaded()
+            settings = get_voice_trigger_settings(store, interaction.guild_id)
+            if settings["permission"] == "admin":
+                perms = getattr(interaction.user, "guild_permissions", None)
+                if not getattr(perms, "administrator", False):
+                    return "このサーバーでは管理者のみ操作できます。"
+        except Exception:
+            logger.exception("音声トリガー権限チェックに失敗しました")
+        return None
+
     async def dispatch_voice_action(self, interaction: discord.Interaction, value: str,
                     delay: app_commands.Range[float, 0.1, 30.0] | None = None,
                     channel: discord.TextChannel | None = None, lyrics: str | None = None,
@@ -412,8 +442,9 @@ class VoiceGenreSelect(discord.ui.Select):
     def __init__(self, hub: VoiceHub, selected: str | None = None):
         self.hub = hub
         super().__init__(placeholder="ジャンルを選択してください", options=[
-            discord.SelectOption(label=label, description=description, value=value, default=value == selected)
-            for value, (label, description) in VOICE_GENRES.items()
+            discord.SelectOption(label=label, description=f"{len(VOICE_ACTIONS_BY_GENRE[value])}個の機能",
+                                 value=value, default=value == selected)
+            for value, (label, _description) in VOICE_GENRES.items()
         ], row=0)
 
     async def callback(self, interaction: discord.Interaction):
@@ -1121,6 +1152,8 @@ class VoiceTriggerCog(commands.Cog):
             raise VoiceTriggerError("トリガー単語を入力してください。")
         if len(word) > 50:
             raise VoiceTriggerError("トリガー単語は 50 文字以内にしてください。")
+        if any(c in word for c in "/\\\x00") or word in {".", ".."}:
+            raise VoiceTriggerError("トリガー単語に / や \\ は使えません。")
 
         current = self.triggers.setdefault(guild.id, {})
         if word not in current and len(current) >= VOICE_TRIGGER_MAX_PER_GUILD:
@@ -1340,10 +1373,7 @@ class VoiceTriggerRegisterView(discord.ui.LayoutView):
                 discord.ui.TextDisplay(
                     "⚠️ このチャンネルに音声ファイルが見つかりませんでした。\n\n"
                     "**登録方法**\n"
-                    "1. このチャンネルに音声ファイル（5秒以内）を添付して送信してください\n"
-                    "2. Bot が「この音声をトリガー登録」ボタン付きで返信します\n"
-                    "3. ボタンを押してトリガー単語を入力してください\n\n"
-                    "または、音声を送信したあと、もう一度 `/vc` →「音声トリガー」→「トリガー登録」を開くと、"
+                    "音声ファイル（5秒以内）をこのチャンネルに送信してから、もう一度 `/vc` →「音声トリガー」→「トリガー登録」を開くと、"
                     "その音声が候補に表示されます。"
                 )
             )
@@ -1420,9 +1450,7 @@ class VoiceTriggerManageView(discord.ui.LayoutView):
                         "## 🎤 音声トリガー\n"
                         "登録されているトリガーはありません。\n\n"
                         "**登録方法**: `/vc` →「音声トリガー」→「トリガー登録（このチャンネルの音声から選ぶ）」"
-                        "で、チャンネル内の音声から選んで登録できます。\n"
-                        "または、音声ファイルをチャンネルに添付すると Bot が「この音声をトリガー登録」"
-                        "ボタン付きで返信します。"
+                        "で、チャンネル内の音声から選んで登録できます。"
                     ),
                     accent_colour=0xF1C40F,
                 )

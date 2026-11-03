@@ -23,6 +23,7 @@ LEADERBOARD_TYPES = [
     app_commands.Choice(name="コイン", value="coin"),
     app_commands.Choice(name="bump RTA", value="bump"),
     app_commands.Choice(name="up RTA", value="up"),
+    app_commands.Choice(name="即抜けRTA", value="sokunuke"),
 ]
 RTA_SCOPES = [
     app_commands.Choice(name="自分のベスト", value="me"),
@@ -282,6 +283,13 @@ class WalletCog(commands.Cog):
                 await interaction.followup.send("RTAランキング機能は現在利用できません。", ephemeral=True)
                 return
             await rta.leaderboard(interaction, selected, scope.value if scope else "local")
+            return
+        if selected == "sokunuke":
+            rta = self.bot.get_cog("SokuNukeRta")
+            if rta is None:
+                await interaction.followup.send("即抜けRTAランキング機能は現在利用できません。", ephemeral=True)
+                return
+            await rta.leaderboard(interaction, scope.value if scope else "local")
             return
         try:
             response = await asyncio.to_thread(

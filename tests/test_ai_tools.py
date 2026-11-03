@@ -36,6 +36,14 @@ class AIToolsTest(unittest.IsolatedAsyncioTestCase):
         for key in ("vc:record_start", "vc:transcribe_start", "vc:global_start", "vc:match_start"):
             self.assertNotIn(key, candidates)
 
+        # 後から追加されたVC操作も、フォーム入力を必要としないものはAI toolsから選べる。
+        for key in (
+            "vc:record_status", "vc:record_pitch", "vc:echo_status", "vc:karaoke_score",
+            "vc:changer_stop", "vc:changer_status", "vc:gvc_room_list",
+            "vc:gvc_chat_disconnect", "vc:tts_stop", "vc:trigger_panel",
+        ):
+            self.assertIn(key, candidates)
+
     async def test_ai_tools_is_enabled_by_default_without_legacy_d1_flag(self):
         with patch.dict(os.environ, {}, clear=True):
             self.assertTrue(_enabled())
@@ -183,6 +191,28 @@ class AIToolsTest(unittest.IsolatedAsyncioTestCase):
                 with self.assertRaises(ai_tools_router.AIToolsDecisionError):
                     await ai_tools_router.decide_action("依頼", self.candidates)
             decision.assert_awaited_once()
+
+    async def test_no_action_does_not_send_a_notification(self):
+        bot_user = types.SimpleNamespace(id=123)
+        bot = types.SimpleNamespace(user=bot_user)
+        cog = AIToolsCog(bot)
+        message = types.SimpleNamespace(
+            author=types.SimpleNamespace(bot=False, id=456),
+            guild=types.SimpleNamespace(id=67),
+            mentions=[bot_user],
+            content="<@123> こんにちは",
+            reply=AsyncMock(),
+            channel=types.SimpleNamespace(typing=AsyncMock()),
+        )
+        with patch.dict(os.environ, {"AITOOLS_ENABLED": "true"}), patch(
+            "cogs.ai_tools.logfare.api_key", return_value="configured"
+        ), patch(
+            "cogs.ai_tools.ai_tools_router.decide_action",
+            new_callable=AsyncMock,
+            side_effect=ai_tools_router.AIToolsNoAction("不要"),
+        ):
+            await cog.on_message(message)
+        message.reply.assert_not_awaited()
 
     async def test_rejects_failed_envelope_and_missing_choice(self):
         for result in (
