@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import functools
 import io
 import logging
 import os
@@ -22,6 +23,7 @@ from core.legacy import Responder
 from core import logfare
 from core.voice_session import VoiceBusy, get_manager
 from core.voice_media import add_receive_sink, remove_receive_sink
+from core.speech_vad import SpeechDetector
 
 try:  # あれば高品質なポリフェーズ・リサンプラーを使う（無くても numpy だけで動く）
     from scipy.signal import resample_poly  # type: ignore
@@ -43,10 +45,23 @@ FRAME_SIZE = CHANNELS * SAMPLE_WIDTH
 SILENCE_THRESHOLD_SEC = 0.8
 MIN_UTTERANCE_SECONDS = 0.4
 MAX_UTTERANCE_SECONDS = 20
-# 音量判定の閾値（RMS値）
-RMS_SILENCE_THRESHOLD = 300
 # 発話として扱うために必要な「声のあるフレーム」数（1フレーム=20ms）。咳やクリックノイズ除外用
-MIN_LOUD_FRAMES = 6
+MIN_LOUD_FRAMES = 10
+
+# ------------------------------------------------------------
+# 雑音カット（声だけを残す）設定。誤反応が多ければ厳しく、声が欠けるなら緩くする
+# ------------------------------------------------------------
+VAD_AGGRESSIVENESS = 3            # 0〜3。大きいほど声以外を厳しく弾く（SpeechDetector が受け付けない場合は 2 に戻す）
+ONSET_FRAMES = 5                  # 発話開始に必要な「連続した声フレーム」数（5×20ms=100ms）。単発のクリック・物音を除外
+CONFIRM_FRAMES = 2                # 発話中に「声」と認める連続フレーム数。物音で無音判定が延びるのを防ぐ
+HANGOVER_SEC = 0.25               # 声が途切れた後もそのまま残す長さ（語尾・息継ぎ用）。超えた雑音は無音に置換する
+TAIL_PAD_SEC = 0.2                # 送信時、最後の声のあとに残す余白
+MIN_VOICE_RMS = 120               # これ未満の音量は声とみなさない（int16換算）
+VOICE_SNR_RATIO = 3.0             # 背景ノイズ量のこの倍以上の音だけ声とみなす（約+9.5dB）
+VOICE_BAND_HZ = (120.0, 4000.0)   # 声の帯域
+MIN_VOICE_BAND_RATIO = 0.5        # 全エネルギーのうち声の帯域が占める割合の下限（ファン・風・キーボード対策）
+MIN_VOICE_RATIO = 0.2             # 送信する区間のうち声フレームが占める割合の下限
+HIGHPASS_HZ = 80.0                # これ未満（ゴロゴロ音・吹かれ）を除去
 # 発話の頭が欠けないよう、発話開始の直前から付け足す音声（秒）
 PRE_ROLL_SEC = 0.3
 # パケットが届かなかった区間（DTX・ロス）を無音で埋める上限（秒）
@@ -58,6 +73,7 @@ MAX_GAIN = 8.0
 DEBUG_DUMP_DIR = os.environ.get("STT_DEBUG_DIR")
 
 FRAME_SEC = 0.02  # Discord の Opus 1フレーム
+BYTES_PER_FRAME = int(DISCORD_SAMPLE_RATE * FRAME_SEC) * FRAME_SIZE  # 48kHz ステレオ 16bit の 20ms 分
 
 # voice_recv が無音時に渡してくる Opus パケット
 OPUS_SILENCE = b"\xf8\xff\xfe"
@@ -184,6 +200,43 @@ def _lowpass_taps(num_taps: int = 95, cutoff_hz: float = 7200.0, fs: float = DIS
 _LPF_TAPS = _lowpass_taps()
 
 
+@functools.lru_cache(maxsize=8)
+def _spectrum_masks(n: int) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """フレーム長 n 用の (窓, 全帯域マスク, 声帯域マスク)"""
+    freqs = np.fft.rfftfreq(n, 1.0 / DISCORD_SAMPLE_RATE)
+    lo, hi = VOICE_BAND_HZ
+    return (
+        np.hanning(n).astype(np.float32),
+        freqs >= 50.0,
+        (freqs >= lo) & (freqs <= hi),
+    )
+
+
+def _frame_features(pcm_data: bytes) -> tuple[float, float]:
+    """1フレーム(20ms, 48kHzステレオ)の (RMS, 声の帯域に入っているエネルギー割合) を返す"""
+    x = np.frombuffer(pcm_data, dtype=np.int16)
+    usable = len(x) - (len(x) % CHANNELS)
+    if usable <= 0:
+        return 0.0, 0.0
+    mono = x[:usable].reshape(-1, CHANNELS).astype(np.float32).mean(axis=1)
+    rms = float(np.sqrt(np.mean(mono * mono)))
+    window, full_mask, band_mask = _spectrum_masks(len(mono))
+    power = np.abs(np.fft.rfft(mono * window)) ** 2
+    total = float(power[full_mask].sum())
+    if total <= 0.0:
+        return rms, 0.0
+    return rms, float(power[band_mask].sum()) / total
+
+
+def _highpass(x: np.ndarray, cutoff_hz: float = HIGHPASS_HZ, fs: int = TRANSCRIPTION_SAMPLE_RATE) -> np.ndarray:
+    """低域の雑音（ゴロゴロ音・吹かれ）を落とす"""
+    if x.size < 8:
+        return x
+    spec = np.fft.rfft(x)
+    spec[np.fft.rfftfreq(x.size, 1.0 / fs) < cutoff_hz] = 0
+    return np.fft.irfft(spec, n=x.size).astype(np.float32)
+
+
 def resample_48k_to_16k(pcm_data: bytes) -> bytes:
     """48kHz ステレオ 16bit PCM -> 16kHz モノラル 16bit PCM（ローパス付き + 音量補正）"""
     audio_16bit = np.frombuffer(pcm_data, dtype=np.int16)
@@ -199,6 +252,8 @@ def resample_48k_to_16k(pcm_data: bytes) -> bytes:
         audio_16k = resample_poly(mono, 1, 3).astype(np.float32)
     else:
         audio_16k = np.convolve(mono, _LPF_TAPS, mode="same")[::3]
+
+    audio_16k = _highpass(audio_16k)
 
     # 小さい声はピークが TARGET_PEAK になるまで持ち上げる（持ち上げのみ、MAX_GAIN 倍まで）
     peak = float(np.max(np.abs(audio_16k))) if audio_16k.size else 0.0
@@ -223,6 +278,10 @@ class UserAudioBuffer:
         self.last_speech_time = time.monotonic()
         self.is_speaking = False
         self.loud_frames = 0
+        self.speech_detector = SpeechDetector(aggressiveness=VAD_AGGRESSIVENESS)
+        self.noise_floor: float | None = None  # 背景ノイズの大きさ（RMS）。ユーザーごとに自動で学習
+        self.voice_run = 0  # 「声」と判定されたフレームの連続数
+        self.voiced_end = 0  # buffer 内で最後に声があった位置（バイト）
         self._last_rtp_end: int | None = None
         self._last_arrival: float | None = None
 
@@ -244,6 +303,23 @@ class UserAudioBuffer:
         self._last_arrival = now
         return min(missing, int(MAX_GAP_FILL_SEC * DISCORD_SAMPLE_RATE))
 
+    def _is_voice_frame(self, pcm_data: bytes, vad_speech: bool) -> bool:
+        """VAD・音量（背景ノイズ比）・声の帯域の3条件をすべて満たすフレームだけを「声」とする"""
+        rms, band_ratio = _frame_features(pcm_data)
+        floor = self.noise_floor if self.noise_floor is not None else min(max(rms, 20.0), 300.0)
+        is_voice = (
+            vad_speech
+            and rms >= max(MIN_VOICE_RMS, floor * VOICE_SNR_RATIO)
+            and band_ratio >= MIN_VOICE_BAND_RATIO
+        )
+        # 背景ノイズ量の学習: 静かになれば素早く下がり、声以外の音が続けば（ファン等）ゆっくり上がる
+        if rms < floor:
+            floor = floor * 0.8 + rms * 0.2
+        else:
+            floor += (rms - floor) * (0.0002 if is_voice else 0.002)
+        self.noise_floor = max(floor, 20.0)
+        return is_voice
+
     def append(self, pcm_data: bytes, rtp_timestamp: int | None = None):
         audio_np = np.frombuffer(pcm_data, dtype=np.int16)
         if len(audio_np) == 0:
@@ -251,29 +327,42 @@ class UserAudioBuffer:
 
         n_samples = len(audio_np) // CHANNELS
         missing = self._missing_samples(n_samples, rtp_timestamp)
-        rms = float(np.sqrt(np.mean(audio_np.astype(np.float32) ** 2)))
+        if missing:
+            self.speech_detector.reset()
+            self.voice_run = 0  # 連続していない音声は「連続した声」として数えない
+        vad_speech = self.speech_detector.has_speech(pcm_data)
+        is_voice = self._is_voice_frame(pcm_data, vad_speech)
+        self.voice_run = self.voice_run + 1 if is_voice else 0
         now = time.monotonic()
-        loud = rms > RMS_SILENCE_THRESHOLD
 
         if not self.is_speaking:
-            if not loud:
+            if self.voice_run < ONSET_FRAMES:
+                # まだ声と言い切れない（物音・咳・息など）。頭出し用に取っておくだけで送信はしない
                 if missing:
                     self.pre_roll.clear()  # 連続していない音声は頭出し用に使わない
                 self.pre_roll.append(pcm_data)
                 return
             # 発話開始: 直前の音声を付けて語頭が欠けないようにする
             self.is_speaking = True
+            self.loud_frames = self.voice_run - 1  # 今回のフレーム分は下で数える
+            self.last_speech_time = now
             for chunk in self.pre_roll:
                 self.buffer.extend(chunk)
             self.pre_roll.clear()
+            self.voiced_end = len(self.buffer)
         elif missing:
             # 発話中にパケットが届かなかった時間は無音で埋め、実時間どおりの長さにする
             self.buffer.extend(bytes(missing * FRAME_SIZE))
 
-        if loud:
+        if is_voice and self.voice_run >= CONFIRM_FRAMES:
             self.last_speech_time = now
             self.loud_frames += 1
-        self.buffer.extend(pcm_data)
+            self.buffer.extend(pcm_data)
+            self.voiced_end = len(self.buffer)
+        elif now - self.last_speech_time <= HANGOVER_SEC:
+            self.buffer.extend(pcm_data)  # 語尾・息継ぎはそのまま残す
+        else:
+            self.buffer.extend(bytes(len(pcm_data)))  # 声のない区間の雑音は無音に置き換える
 
     def should_transcribe(self) -> bool:
         if not self.is_speaking or len(self.buffer) == 0:
@@ -288,13 +377,17 @@ class UserAudioBuffer:
         if len(self.buffer) == 0:
             self.is_speaking = False
             self.loud_frames = 0
+            self.voiced_end = 0
             return None
 
-        pcm = bytes(self.buffer)
+        # 最後の声より後ろ（無音・雑音）は余白だけ残して切り捨てる
+        keep = min(len(self.buffer), self.voiced_end + int(TAIL_PAD_SEC / FRAME_SEC) * BYTES_PER_FRAME)
+        pcm = bytes(self.buffer[:keep])
         loud_frames = self.loud_frames
         self.buffer.clear()
         self.is_speaking = False
         self.loud_frames = 0
+        self.voiced_end = 0
         return pcm, loud_frames
 
 
@@ -403,7 +496,12 @@ class TranscriptionSink(voice_recv.AudioSink):
 
     def _run_transcription(self, display_name: str, avatar_url: str | None, pcm_48k: bytes, loud_frames: int):
         try:
-            if loud_frames < MIN_LOUD_FRAMES:
+            total_frames = len(pcm_48k) / BYTES_PER_FRAME
+            if loud_frames < MIN_LOUD_FRAMES or loud_frames < total_frames * MIN_VOICE_RATIO:
+                logger.debug(
+                    "[STT] %s: 雑音として破棄 声フレーム=%d / 全体=%.0f",
+                    display_name, loud_frames, total_frames,
+                )
                 return
             pcm_16k = resample_48k_to_16k(pcm_48k)
             if len(pcm_16k) < TRANSCRIPTION_SAMPLE_RATE * SAMPLE_WIDTH * MIN_UTTERANCE_SECONDS:
@@ -580,7 +678,8 @@ class TranscriptionCog(commands.Cog):
                     await wh_obj.send(
                         content=text,
                         username=display_name,
-                        avatar_url=avatar_url
+                        avatar_url=avatar_url,
+                        _agobot_skip_localization=True,
                     )
                 except Exception as ex:
                     logger.error("[Webhook Send Error] %s", ex)

@@ -115,6 +115,8 @@ class AIToolsCog(commands.Cog):
             selected = await ai_tools_router.decide_action(prompt, candidates)
             async with message.channel.typing():
                 await ai_tools_router.invoke_action(self.bot, message, candidates[selected], invoker=invoker)
+        except ai_tools_router.AIToolsNoAction as exc:
+            logger.info("AI tools skipped: %s", exc)
         except ai_tools_router.AIToolsDecisionError as exc:
             logger.info("AI tools stopped: %s", exc)
             await message.reply(f"AI toolsは実行されませんでした。理由: {exc}", mention_author=False)

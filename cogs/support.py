@@ -1416,7 +1416,11 @@ class RolePanelSendButton(discord.ui.Button):
         await interaction.response.defer(ephemeral=True)
 
         try:
-            await channel.send(view=RolePanelUserView(interaction.guild, valid_role_ids))
+            await channel.send(
+                view=RolePanelUserView(interaction.guild, valid_role_ids),
+                # Show role mentions for readability without notifying those roles.
+                allowed_mentions=discord.AllowedMentions.none(),
+            )
         except (discord.Forbidden, discord.HTTPException):
             logger.exception("ロールパネルの送信に失敗しました")
             await interaction.followup.send(
@@ -4853,7 +4857,6 @@ class SupportCog(commands.Cog):
             return
 
         # まだ有効なものだけ既読として残す（期限切れ・フィードから消えたIDは捨てる）
-        keep = [sid for sid in dict.fromkeys(seen_before) if sid in live_ids]
         keep_set = set(keep)
         fresh = [i for i in live if i.id not in keep_set]
 
