@@ -560,13 +560,17 @@ class BumpRta(commands.Cog):
             if scope == "me":
                 uid, gid = str(interaction.user.id), str(interaction.guild_id)
                 local = await self._call(lambda: self.db.table("bump_rta_records").select(
-                    "elapsed_ms,completed_at").eq("guild_id", gid).eq("user_id", uid).eq("event_type", event_type).limit(1).execute())
+                    "elapsed_ms,completed_at").eq("guild_id", gid).eq("user_id", uid).eq("event_type", event_type).order(
+                        "elapsed_ms").limit(1).execute())
                 global_best = await self._call(lambda: self.db.table("bump_rta_events").select(
                     "elapsed_ms,completed_at").eq("user_id", uid).eq("event_type", event_type).order("elapsed_ms").limit(1).execute())
                 local_text = f"{local.data[0]['elapsed_ms'] / 1000:.2f}秒" if local.data else "記録なし"
                 global_text = f"{global_best.data[0]['elapsed_ms'] / 1000:.2f}秒" if global_best.data else "記録なし"
-                return await interaction.followup.send(embed=_white_embed(
-                    f"<@{uid}> の**{event_type}自己ベスト**\nこのサーバー: **{local_text}**\n全サーバー: **{global_text}**"))
+                return await interaction.followup.send(
+                    embed=_white_embed(
+                        f"<@{uid}> の**{event_type}自己ベスト**\nこのサーバー: **{local_text}**\n全サーバー: **{global_text}**"),
+                    allowed_mentions=discord.AllowedMentions.none(),
+                )
             if scope == "global":
                 rows = await self._call(lambda: self.db.rpc("get_bump_rta_global_ranking", {
                     "p_event_type": event_type, "p_limit": 10}).execute())
@@ -581,7 +585,9 @@ class BumpRta(commands.Cog):
                 lines = [f"**{i}.** <@{r['user_id']}> — **{r['elapsed_ms'] / 1000:.2f}秒**" for i, r in enumerate(data, 1)]
                 title = f"このサーバー {event_type} RTAランキング"
             return await interaction.followup.send(
-                embed=_white_embed(f"**{title}**\n" + ("\n".join(lines) if lines else "まだ記録がありません。")))
+                embed=_white_embed(f"**{title}**\n" + ("\n".join(lines) if lines else "まだ記録がありません。")),
+                allowed_mentions=discord.AllowedMentions.none(),
+            )
         except Exception as e:
             logger.exception("bump/up leaderboard query failed: scope=%s kind=%s", scope, event_type)
             return await interaction.followup.send(
