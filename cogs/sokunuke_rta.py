@@ -93,7 +93,12 @@ class SokuNukeRta(commands.Cog):
             state for state in member.guild.voice_states.values()
             if state.channel and not getattr(state.member, "bot", False)
         ]
-        if len(humans) != 1 or member.guild.voice_client is not None:
+        voice_client = member.guild.voice_client
+        try:
+            connected = voice_client is not None and voice_client.is_connected()
+        except (AttributeError, TypeError):
+            connected = voice_client is not None
+        if len(humans) != 1 or connected:
             return
         try:
             await after.channel.connect(self_deaf=True)
@@ -110,7 +115,7 @@ class SokuNukeRta(commands.Cog):
         records.sort(key=lambda row: float(row.get("elapsed", 0)))
         lines = [f"**{i}.** <@{row['user_id']}> — **{_duration(row['elapsed'])}**" for i, row in enumerate(records[:10], 1)]
         embed = discord.Embed(title=f"即抜けRTAランキング（{'自分' if scope == 'me' else 'このサーバー'}）", description="\n".join(lines) if lines else "まだ記録がありません。", color=0xFFFFFF)
-        await interaction.followup.send(embed=embed)
+        await interaction.followup.send(embed=embed, allowed_mentions=discord.AllowedMentions.none())
 
     async def sokunuke_command(self, interaction: discord.Interaction, action: app_commands.Choice[str]):
         if interaction.guild_id is None:
