@@ -7,22 +7,41 @@ import logging
 import discord
 from discord.ext import commands
 
-from core import ai_input, ai_latex, ai_omnirush, ai_preferences, ai_provider_router, ai_tools, logfare
+from core import ai_context, ai_input, ai_latex, ai_omnirush, ai_preferences, ai_provider_router, ai_tools, logfare
 
 logger = logging.getLogger(__name__)
+
+
+async def _reply_without_localization(ctx: commands.Context, *args, **kwargs):
+    """Send an !ai response verbatim, without the transport translator."""
+    kwargs["_agobot_skip_localization"] = True
+    try:
+        return await ctx.reply(*args, **kwargs)
+    except TypeError as exc:
+        # Keep !ai usable where the localization patch is not installed.
+        if "_agobot_skip_localization" not in str(exc):
+            raise
+        kwargs.pop("_agobot_skip_localization", None)
+        return await ctx.reply(*args, **kwargs)
 
 
 class AICog(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
 
-    @commands.command(name="ai", help="Ask AI a question. Supports PDF, DOCX, and text attachments; images depend on the selected model.")
+    @commands.command(name="ai", help="Ask AI a question. Supports PDF, DOCX, text attachments and links in the prompt (images depend on the model). Options: --history[=N] reads recent chat, --nolink skips link loading.")
     @commands.cooldown(1, 5.0, commands.BucketType.user)
     async def ai(self, ctx: commands.Context, *, prompt: str = ""):
-        prompt = prompt.strip()
+        options = ai_context.parse_options(prompt)
+        prompt = options.prompt
         attachments = list(getattr(getattr(ctx, "message", None), "attachments", []) or [])
+        if not prompt and options.history:
+            prompt = "このチャンネルの直近の会話を要約してください。"
         if not prompt and not attachments:
-            return await ctx.reply("使い方: `!ai 質問内容`", mention_author=False)
+            return await _reply_without_localization(ctx,
+                "使い方: `!ai 質問内容`（URLを含めると本文を読み込みます。`--history=10` で直近の会話も参照、`--nolink` でリンク読み込みを無効化）",
+                mention_author=False,
+            )
         has_images = ai_input.has_image_attachment(attachments)
         preferred = ai_preferences.get_model(ctx.author.id) or logfare.configured_default_model()
         auto = preferred == ai_provider_router.AUTO_MODEL
@@ -30,11 +49,12 @@ class AICog(commands.Cog):
         apinex_model = preferred.partition("apinex::")[2] if preferred.startswith("apinex::") else None
         omnirush_model = preferred if preferred.startswith("omnirush::") else None
         if auto and not ai_provider_router.enabled():
-            return await ctx.reply("AIの自動切替が未設定です。", mention_author=False)
+            return await _reply_without_localization(ctx, "AIの自動切替が未設定です。", mention_author=False)
         if not auto and not kios_model and not apinex_model and not omnirush_model and not logfare.api_key():
-            return await ctx.reply("Logfareが未設定です。`.env` に `LOGFARE_API_KEY` を設定してください。", mention_author=False)
+            return await _reply_without_localization(ctx, "Logfareが未設定です。`.env` に `LOGFARE_API_KEY` を設定してください。", mention_author=False)
 
         sources = []
+        context = ai_context.ContextResult()
         try:
             if auto or kios_model:
                 model, exact = preferred, True
@@ -77,12 +97,15 @@ class AICog(commands.Cog):
                 model_info and (model_info.get("chat_capabilities") or {}).get("tools") is True
             )
             if has_images and not images_supported:
-                return await ctx.reply(
+                return await _reply_without_localization(ctx,
                     "選択中のモデルは画像入力に対応していません。画像対応モデルを選んでください。",
                     mention_author=False,
                 )
+            async with ctx.typing():
+                context = await ai_context.build_context(ctx, options)
+            full_prompt = f"{prompt}\n\n{context.text}" if context.text else prompt
             user_content = await ai_input.build_user_content(
-                prompt, attachments, images_supported=images_supported
+                full_prompt, attachments, images_supported=images_supported
             )
             messages = [
                 {
@@ -91,6 +114,7 @@ class AICog(commands.Cog):
                         "あなたはDiscord上の親切なアシスタントです。日本語で簡潔かつ正確に回答してください。"
                         + ("必要に応じてweb_searchを使い、回答に参照URLを含めてください。" if can_use_web_search else "")
                         + ai_latex.SYSTEM_HINT
+                        + (ai_context.SYSTEM_HINT if context.text else "")
                     ),
                 },
                 {"role": "user", "content": user_content},
@@ -109,7 +133,9 @@ class AICog(commands.Cog):
                     answer = routed.text
                 elif omnirush_model:
                     answer = await ai_omnirush.chat(
-                        omnirush_model, f"{ai_latex.SYSTEM_HINT}\n\n{user_content}", reasoning_effort=reasoning_effort
+                        omnirush_model,
+                        f"{ai_latex.SYSTEM_HINT}{ai_context.SYSTEM_HINT if context.text else ''}\n\n{user_content}",
+                        reasoning_effort=reasoning_effort,
                     )
                 elif can_use_web_search:
                     answer, sources = await ai_tools.answer_with_web_search(
@@ -117,26 +143,26 @@ class AICog(commands.Cog):
                     )
                 else:
                     answer = await logfare.chat(model, messages, reasoning_effort=reasoning_effort)
-        except ai_input.AttachmentInputError as exc:
-            return await ctx.reply(str(exc), mention_author=False)
+        except (ai_input.AttachmentInputError, ai_context.ContextError) as exc:
+            return await _reply_without_localization(ctx, str(exc), mention_author=False)
         except ai_omnirush.OmniRushLoginRequired:
-            return await ctx.reply(
+            return await _reply_without_localization(ctx,
                 "OmniRushが未ログインです。Botと同じLinuxユーザーで `omnirush login` を実行してください。",
                 mention_author=False,
             )
         except ai_omnirush.OmniRushUnavailable:
-            return await ctx.reply(
+            return await _reply_without_localization(ctx,
                 "OmniRush CLIが見つかりません。Botの実行ユーザーから利用可能か確認してください。",
                 mention_author=False,
             )
         except ai_omnirush.OmniRushError as exc:
-            return await ctx.reply(str(exc), mention_author=False)
+            return await _reply_without_localization(ctx, str(exc), mention_author=False)
         except Exception:
             logger.exception("!ai request failed: user=%s model=%s", ctx.author.id, preferred)
-            return await ctx.reply("AIへの問い合わせに失敗しました。しばらくしてから再試行してください。", mention_author=False)
+            return await _reply_without_localization(ctx, "AIへの問い合わせに失敗しました。しばらくしてから再試行してください。", mention_author=False)
 
         if not answer:
-            return await ctx.reply("AIから空の回答が返りました。", mention_author=False)
+            return await _reply_without_localization(ctx, "AIから空の回答が返りました。", mention_author=False)
         notice = "" if exact else f"（指定モデルがfree一覧にないため `{model}` を使用）"
         latex = await ai_latex.process(answer)
         description = latex.text[:4096]
@@ -159,6 +185,9 @@ class AICog(commands.Cog):
         embed.set_footer(text=footer)
         if composed:
             embed.set_image(url="attachment://math.png")
+        context_lines = context.summary_lines()
+        if context_lines:
+            embed.add_field(name="読み込んだ情報", value="\n".join(context_lines)[:1024], inline=False)
         unique_sources = {source.get("url"): source for source in sources if source.get("url")}
         if unique_sources:
             links = "\n".join(
@@ -166,12 +195,12 @@ class AICog(commands.Cog):
                 for url, source in list(unique_sources.items())[:5]
             )
             embed.add_field(name="参照ソース", value=links[:1024], inline=False)
-        await ctx.reply(embed=embed, mention_author=False, **send_kwargs)
+        await _reply_without_localization(ctx, embed=embed, mention_author=False, **send_kwargs)
 
     @ai.error
     async def ai_error(self, ctx: commands.Context, error: commands.CommandError):
         if isinstance(error, commands.CommandOnCooldown):
-            return await ctx.reply(f"少し待ってから再試行してください（{error.retry_after:.1f}秒）。", mention_author=False)
+            return await _reply_without_localization(ctx, f"少し待ってから再試行してください（{error.retry_after:.1f}秒）。", mention_author=False)
         logger.exception("!ai command error", exc_info=error)
 
     @commands.command(name="generate", help="Generate an image with Logfare. Example: !generate cat under a starry sky")
