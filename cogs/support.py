@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import html as _html
+import inspect
 import json
 import logging
 import os
@@ -3581,6 +3582,90 @@ _ORBS_RE = re.compile(r"\borbs?\b", re.I)
 
 
 QUEST_FEED_URL = "https://api.discordquest.com/api/quests"
+QUEST_REGIONS_URL = "https://api.discordquest.com/api/regions"
+
+# ギルドの言語 → 通知対象にする国・地域（ISO 3166-1 alpha-2）。
+# Questは国ごとに提供有無が違う。いずれかの国で提供されているQuestだけ通知する。
+QUEST_LANGUAGE_COUNTRIES: dict[str, frozenset[str]] = {
+    k: frozenset(v.split())
+    for k, v in {
+        "ja": "JP", "ko": "KR", "zh": "CN TW HK", "zh-cn": "CN", "zh-tw": "TW HK",
+        "en": "US GB CA AU NZ IE", "en-us": "US", "en-gb": "GB",
+        "fr": "FR BE CH CA", "de": "DE AT CH", "it": "IT", "nl": "NL",
+        "es": "ES MX AR CL CO", "es-es": "ES", "es-419": "MX AR CL CO",
+        "pt": "BR PT", "pt-br": "BR", "ru": "RU", "uk": "UA", "pl": "PL",
+        "tr": "TR", "id": "ID", "th": "TH", "vi": "VN", "hi": "IN",
+        "sv": "SE", "sv-se": "SE", "da": "DK", "fi": "FI", "no": "NO",
+        "cs": "CZ", "hu": "HU", "el": "GR", "ro": "RO", "bg": "BG",
+        "hr": "HR", "lt": "LT", "ar": "SA AE EG",
+    }.items()
+}
+_QUEST_LANG_RE = re.compile(r"[A-Za-z]{2,3}(?:[-_][A-Za-z0-9]{2,4})?")
+QUEST_LANG_SECTIONS = ("language", "localization", "locale", "lang")
+QUEST_LANG_KEYS = ("language", "locale", "lang", "code", "value")
+
+
+def quest_language_countries(language: str | None) -> frozenset[str]:
+    """言語コード（ja / en-US / zh_TW など）を国コード集合にする。不明なら空集合。"""
+    code = str(language or "").strip().lower().replace("_", "-")
+    if not _QUEST_LANG_RE.fullmatch(code):
+        return frozenset()
+    return QUEST_LANGUAGE_COUNTRIES.get(code) or QUEST_LANGUAGE_COUNTRIES.get(code.split("-")[0], frozenset())
+
+
+@dataclass(frozen=True)
+class QuestRegion:
+    include: frozenset[str] = frozenset()
+    exclude: frozenset[str] = frozenset()
+    is_global: bool = False
+
+    def available_in(self, countries: frozenset[str]) -> bool:
+        """countries のいずれかで提供されるか。提供範囲が不明なQuestは除外しない。"""
+        if not self.include and not self.exclude and not self.is_global:
+            return True
+        return any(
+            c not in self.exclude and (not self.include or c in self.include)
+            for c in countries
+        )
+
+
+def _quest_country(value) -> str | None:
+    if not isinstance(value, str) or not value.strip():
+        return None
+    code = value.strip().upper()
+    return "GB" if code == "UK" else code
+
+
+def parse_quest_regions(data: bytes) -> dict[str, QuestRegion]:
+    """/api/regions を {quest_id: QuestRegion} にする。"""
+    try:
+        payload = json.loads(data.removeprefix(b"\xef\xbb\xbf"))
+    except ValueError as exc:
+        raise QuestError(f"リージョン情報のJSONを解析できませんでした（{exc}）。") from exc
+    rows = payload.get("quests") if isinstance(payload, dict) else payload
+    if not isinstance(rows, list):
+        raise QuestError("リージョン情報の形式を認識できませんでした。")
+
+    result: dict[str, QuestRegion] = {}
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        raw_id = row.get("id")
+        if isinstance(raw_id, bool) or not isinstance(raw_id, (str, int)) or not str(raw_id).strip():
+            continue
+        regions = row.get("regions")
+        if isinstance(regions, list):
+            include, exclude = regions, []
+        elif isinstance(regions, dict):
+            include, exclude = regions.get("include") or [], regions.get("exclude") or []
+        else:
+            include, exclude = [], []
+        result[str(raw_id).strip()[:100]] = QuestRegion(
+            include=frozenset(filter(None, map(_quest_country, include if isinstance(include, list) else []))),
+            exclude=frozenset(filter(None, map(_quest_country, exclude if isinstance(exclude, list) else []))),
+            is_global=row.get("is_global") is True,
+        )
+    return result
 
 
 def _quest_feed_url() -> str:
@@ -3736,6 +3821,8 @@ class QuestFetcher:
         self._etag: str | None = None
         self._last_modified: str | None = None
         self._items: list[QuestItem] = []
+        self.regions: dict[str, QuestRegion] = {}
+        self._regions_etag: str | None = None
         self._next_allowed = 0.0
         self._failures = 0
         self.last_ok: float | None = None
@@ -3811,7 +3898,36 @@ class QuestFetcher:
         self._failures = 0
         self.last_error = None
         self.last_ok = time.time()
+        await self._fetch_regions()
         return list(self._items)
+
+    async def _fetch_regions(self) -> None:
+        """国別の提供情報。失敗してもQuest通知自体は止めず、前回の取得分を使い続ける。"""
+        headers = {"User-Agent": QUEST_USER_AGENT, "Accept": "application/json"}
+        if self._regions_etag and self.regions:
+            headers["If-None-Match"] = self._regions_etag
+        try:
+            async with self.session.get(QUEST_REGIONS_URL, headers=headers) as resp:
+                if resp.status == 304:
+                    return
+                if resp.status != 200:
+                    logger.warning("Questリージョン情報の取得に失敗（HTTP %s）", resp.status)
+                    return
+                chunks: list[bytes] = []
+                size = 0
+                async for chunk in resp.content.iter_chunked(64 * 1024):
+                    size += len(chunk)
+                    if size > QUEST_MAX_BODY:
+                        logger.warning("Questリージョン情報が大きすぎます")
+                        return
+                    chunks.append(chunk)
+                etag = resp.headers.get("ETag")
+            self.regions = await asyncio.to_thread(parse_quest_regions, b"".join(chunks))
+            self._regions_etag = etag
+        except QuestError as exc:
+            logger.warning("Questリージョン情報の解析に失敗: %s", exc)
+        except (asyncio.TimeoutError, aiohttp.ClientError) as exc:
+            logger.warning("Questリージョン情報の取得に失敗（%s）", type(exc).__name__)
 
 
 def get_quest_settings(store, guild_id: int) -> dict:
@@ -4016,11 +4132,12 @@ class QuestManualModal(discord.ui.Modal):
 class QuestNotifyPanel(discord.ui.LayoutView):
     """Quest通知の設定パネル（Components V2・管理者専用）。"""
 
-    def __init__(self, cog: "SupportCog", settings: dict, notice: str | None = None):
+    def __init__(self, cog: "SupportCog", settings: dict, notice: str | None = None, lang_label: str = ""):
         super().__init__(timeout=300)
         self.cog = cog
         self.settings = settings
         self.notice = notice
+        self.lang_label = lang_label
         self._build()
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
@@ -4046,7 +4163,8 @@ class QuestNotifyPanel(discord.ui.LayoutView):
             f"送信先: {channel}\n"
             f"メンション: {role}\n"
             f"対象: {'Orbs報酬のみ' if s['orbs_only'] else 'すべてのQuest'}\n"
-            f"取得元: {source}\n"
+            + (f"言語圏: {self.lang_label}\n" if self.lang_label else "")
+            + f"取得元: {source}\n"
             f"確認間隔: 約{QUEST_POLL_SECONDS // 60}分ごと"
         )
         error = self.cog.quest_last_error()
@@ -4081,6 +4199,7 @@ class QuestNotifyPanel(discord.ui.LayoutView):
         await store.ensure_loaded()
         self.settings = get_quest_settings(store, interaction.guild_id)
         self.notice = notice
+        self.lang_label = await self.cog.quest_language_label(interaction.guild)
         self._build()
         await edit_interaction_message(interaction, view=self)
 
@@ -4547,6 +4666,59 @@ class SupportCog(commands.Cog):
     def quest_last_error(self) -> str | None:
         return self._quest.last_error if self._quest is not None else None
 
+    async def quest_guild_language(self, guild: discord.Guild) -> tuple[str, str]:
+        """ギルドに設定された言語を (言語コード, 取得元) で返す。"""
+        store = guild_settings.get_store()
+        await store.ensure_loaded()
+
+        cog = self.bot.get_cog("LocalizationCog")
+        if cog is not None:
+            for name in (
+                "get_guild_language", "guild_language", "get_language",
+                "get_guild_locale", "get_locale", "language_for", "get_lang",
+            ):
+                fn = getattr(cog, name, None)
+                if not callable(fn):
+                    continue
+                for arg in (guild.id, guild):
+                    try:
+                        value = fn(arg)
+                        if inspect.isawaitable(value):
+                            value = await value
+                    except Exception:
+                        continue
+                    if isinstance(value, str) and quest_language_countries(value):
+                        return value.strip(), f"LocalizationCog.{name}"
+
+        for section in QUEST_LANG_SECTIONS:
+            try:
+                raw = store.get(guild.id, section)
+            except Exception:
+                continue
+            candidates = [raw] if isinstance(raw, str) else (
+                [raw.get(k) for k in QUEST_LANG_KEYS] if isinstance(raw, dict) else []
+            )
+            for value in candidates:
+                if isinstance(value, str) and quest_language_countries(value):
+                    return value.strip(), f"設定:{section}"
+
+        preferred = getattr(guild, "preferred_locale", None)
+        preferred = str(getattr(preferred, "value", preferred) or "")
+        if quest_language_countries(preferred):
+            return preferred, "サーバーの優先言語"
+        return "en", "既定値"
+
+    async def quest_language_label(self, guild: discord.Guild | None) -> str:
+        if guild is None:
+            return ""
+        try:
+            language, source = await self.quest_guild_language(guild)
+        except Exception:
+            logger.exception("Quest通知の言語設定を取得できませんでした (guild=%s)", guild.id)
+            return ""
+        countries = ", ".join(sorted(quest_language_countries(language)))
+        return f"**{language}**（{countries}で提供のQuestのみ）\n-# 言語の取得元: {source}"
+
     async def show_quest_notify_settings(self, interaction: discord.Interaction):
         if interaction.guild is None:
             return await interaction.response.send_message(
@@ -4563,8 +4735,9 @@ class SupportCog(commands.Cog):
         store = guild_settings.get_store()
         await store.ensure_loaded()
         settings = get_quest_settings(store, interaction.guild.id)
+        label = await self.quest_language_label(interaction.guild)
         await interaction.response.send_message(
-            view=QuestNotifyPanel(self, settings),
+            view=QuestNotifyPanel(self, settings, lang_label=label),
             ephemeral=True,
         )
 
@@ -4684,9 +4857,27 @@ class SupportCog(commands.Cog):
             return
 
         # まだ有効なものだけ既読として残す（期限切れ・フィードから消えたIDは捨てる）
-        keep = [sid for sid in dict.fromkeys(seen_before) if sid in live_ids]
         keep_set = set(keep)
         fresh = [i for i in live if i.id not in keep_set]
+
+        # ギルドの言語圏で提供されていないQuestは通知せず既読にする
+        regions = self._quest.regions if self._quest is not None else {}
+        if regions and fresh:
+            language, source = await self.quest_guild_language(guild)
+            countries = quest_language_countries(language)
+            if countries:
+                blocked = [
+                    i for i in fresh
+                    if i.id in regions and not regions[i.id].available_in(countries)
+                ]
+                if blocked:
+                    logger.info(
+                        "Quest通知: 言語圏(%s=%s, %s)外の%d件を除外 (guild=%s)",
+                        language, "/".join(sorted(countries)), source, len(blocked), guild.id,
+                    )
+                    blocked_ids = {i.id for i in blocked}
+                    keep.extend(blocked_ids)
+                    fresh = [i for i in fresh if i.id not in blocked_ids]
 
         if not fresh:
             if len(keep) != len(seen_before):
