@@ -6,7 +6,7 @@ import sys
 import tempfile
 import types
 import unittest
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if ROOT not in sys.path:
@@ -60,6 +60,16 @@ class CustomReplySettingsTest(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(customreplies.match_reply(replies, "hello!"))
         self.assertIsNone(customreplies.match_reply(replies, "/hello"))
 
+    def test_choose_response_keeps_legacy_multiline_response(self):
+        response = "1行目\n2行目"
+        self.assertEqual(customreplies.choose_response(response), response)
+
+    def test_choose_response_uses_plain_and_colon_prefixed_lines_as_candidates(self):
+        with patch.object(customreplies.random, "choice", return_value="🌱🌱") as choice:
+            selected = customreplies.choose_response("🌱\n:🌱🌱\n:ガチ草")
+        self.assertEqual(selected, "🌱🌱")
+        choice.assert_called_once_with(["🌱", "🌱🌱", "ガチ草"])
+
     async def test_settings_deduplicates_legacy_trigger_conflicts(self):
         await self.store.update(1, customreplies.KEY, replies=[
             {"id": "a", "trigger": " Hello ", "response": "first"},
@@ -76,6 +86,20 @@ class CustomReplySettingsTest(unittest.IsolatedAsyncioTestCase):
         message = FakeMessage("おはよう")
         await customreplies.on_message(None, message)
         message.reply.assert_awaited_once()
+
+    async def test_on_message_sends_selected_random_response(self):
+        await customreplies.update_settings(
+            1, customreplies.KEY, enabled=True,
+            replies=[{"id": "a", "trigger": "草", "response": "🌱\n:🌱🌱\n:ガチ草"}],
+        )
+        message = FakeMessage("草")
+        with patch.object(customreplies.random, "choice", return_value="ガチ草"):
+            await customreplies.on_message(None, message)
+        message.reply.assert_awaited_once_with(
+            "ガチ草",
+            mention_author=False,
+            allowed_mentions=discord.AllowedMentions.none(),
+        )
 
     async def test_disabled_bot_and_commands_are_ignored(self):
         await customreplies.update_settings(

@@ -19,6 +19,7 @@ from discord.ext import commands
 
 from core.emojis import COIN
 from core.guild_settings import nation_settings
+from core.supabase_retry import run_with_retry
 
 try:  # テストでは supabase.create_client が差し替えられる
     import supabase as supabase_module
@@ -79,7 +80,9 @@ class NationCog(commands.Cog):
     async def _run(self, build):
         if self.supabase is None:
             raise RuntimeError("Supabase が設定されていません")
-        return (await asyncio.to_thread(lambda: build().execute())).data or []
+        return (await asyncio.to_thread(
+            run_with_retry, lambda: build().execute()
+        )).data or []
 
     async def _nation(self, guild_id: str):
         rows = await self._run(lambda: self.supabase.table("nation_guilds").select("*").eq("guild_id", guild_id))
@@ -98,7 +101,11 @@ class NationCog(commands.Cog):
         if self.supabase is None:
             raise RuntimeError("Supabase が設定されていません")
         res = await asyncio.to_thread(
-            lambda: self.supabase.rpc("nation_found", {"p_guild_id": guild_id, "p_user_id": user_id}).execute())
+            run_with_retry,
+            lambda: self.supabase.rpc(
+                "nation_found", {"p_guild_id": guild_id, "p_user_id": user_id}
+            ).execute(),
+        )
         data = res.data
         row = data[0] if isinstance(data, list) else data
         if not row:
@@ -118,8 +125,13 @@ class NationCog(commands.Cog):
         if self.supabase is None:
             return False
         try:
-            await asyncio.to_thread(lambda: self.supabase.rpc(
-                "nation_adjust", {"p_user_id": user_id, "p_coins_delta": 0, "p_hunger_delta": -amount}).execute())
+            await asyncio.to_thread(
+                run_with_retry,
+                lambda: self.supabase.rpc(
+                    "nation_adjust",
+                    {"p_user_id": user_id, "p_coins_delta": 0, "p_hunger_delta": -amount},
+                ).execute(),
+            )
             return True
         except Exception as e:  # noqa: BLE001
             msg = str(e)

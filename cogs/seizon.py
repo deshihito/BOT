@@ -9,23 +9,27 @@ Supabase の ``fujo_users``（登録者と設定）と ``fujo_activities``（検
   サーバーごとに何度も届くため）。
 - 登録者は起動後にまとめて読み込み、メモリに持つ。未登録者の発言では DB を触らない。
 - 見回りタスクはエラーが出ても止まらない。
+- Supabase 前段の Cloudflare が HTML の 400 を返したり、HTTP/2 接続が
+  瞬間的に切断される（``h2.ConnectionTerminated`` 等）ことがあるため、
+  検知ログの INSERT は「一時エラー判定 + 指数バックオフ + ジッター + 直列化」で行う
+  （``_is_transient_error`` / ``_insert_activity_with_retry``）。
 """
 from __future__ import annotations
 
 import asyncio
 import logging
+import random
 from datetime import date, datetime, timedelta, timezone
 
 import discord
 from discord import app_commands
 from discord.ext import commands, tasks
+from core.supabase_retry import run_with_retry
 
 try:  # テストでは supabase.create_client が差し替えられる
     import supabase as supabase_module
 except ImportError:  # pragma: no cover
     supabase_module = None
-
-import os
 
 log = logging.getLogger(__name__)
 
@@ -37,6 +41,91 @@ USER_COLUMNS = (
     "user_id, streak_count, last_streak_date, is_frozen, last_pester_level, "
     "panic_days, panic_message, panic_channel_id, last_panic_at"
 )
+
+# --- INSERT のリトライ / 直列化 ---
+# Cloudflare の HTML 400 や、HTTP/2 接続の瞬断 (h2.ConnectionTerminated) など
+# 一時的な失敗をリトライする。同時 INSERT は Semaphore で直列化する。
+# Semaphore はイベントループ上で遅延生成する (import時生成によるループ不一致を避ける)。
+_ACTIVITY_INSERT_SEM: asyncio.Semaphore | None = None
+_ACTIVITY_INSERT_MAX_ATTEMPTS = 3
+_ACTIVITY_INSERT_BASE_DELAY = 0.5  # 秒(指数バックオフの初項)
+_ACTIVITY_INSERT_MAX_DELAY = 4.0   # 秒(バックオフの上限)
+_ACTIVITY_INSERT_JITTER = 0.3      # 秒(同時多発リトライの揺らぎ)
+
+# 名前で一時エラーと判定する例外クラス群。
+# httpx / h2 / httpcore / socket 等の接続系例外を網羅する。
+_TRANSIENT_EXCEPTION_NAMES: frozenset[str] = frozenset({
+    # h2
+    "ConnectionTerminated",
+    "ProtocolError",
+    # httpcore / httpx
+    "ConnectError",
+    "ConnectTimeout",
+    "ReadError",
+    "ReadTimeout",
+    "WriteError",
+    "WriteTimeout",
+    "PoolTimeout",
+    "RemoteProtocolError",
+    "LocalProtocolError",
+    # asyncio / socket
+    "ConnectionResetError",
+    "ConnectionAbortedError",
+    "BrokenPipeError",
+    "ConnectionError",
+    "TimeoutError",
+})
+
+
+def _get_insert_sem() -> asyncio.Semaphore:
+    global _ACTIVITY_INSERT_SEM
+    if _ACTIVITY_INSERT_SEM is None:
+        _ACTIVITY_INSERT_SEM = asyncio.Semaphore(2)
+    return _ACTIVITY_INSERT_SEM
+
+
+def _is_gateway_html_error(exc: Exception) -> bool:
+    """Cloudflare 等が返す HTML の 400 を検出する。
+
+    postgrest は HTML 応答を JSON パースできず ``JSON could not be generated`` の
+    APIError を投げる。``details`` に HTML が入っている／文字列に ``<html>`` と
+    ``cloudflare`` が含まれていれば gateway 起因とみなす。
+    """
+    text = str(exc)
+    low = text.lower()
+    if "<html" in low and ("cloudflare" in low or "400 bad request" in low):
+        return True
+    details = getattr(exc, "details", None)
+    if isinstance(details, str) and "<html" in details.lower():
+        return True
+    return False
+
+
+def _is_transient_error(exc: Exception) -> bool:
+    """再試行で解消しうる一時エラーかどうか。
+
+    - Cloudflare の HTML 400（前段 WAF による弾き）
+    - HTTP/2 接続の瞬断（``h2.exceptions.ConnectionTerminated`` 等）
+    - httpx / httpcore の接続系例外・タイムアウト
+    - asyncio / socket の Connection reset 系
+    を対象とする。
+    """
+    if _is_gateway_html_error(exc):
+        return True
+    # 例外クラス名（MRO 全体）で判定
+    for cls in type(exc).__mro__:
+        if cls.__name__ in _TRANSIENT_EXCEPTION_NAMES:
+            return True
+    # 文字列フォールバック（ラップされた例外・サードパーティ独自型向け）
+    text = str(exc)
+    low = text.lower()
+    if "connectionterminated" in low or "connection terminated" in low:
+        return True
+    if "connection reset" in low or "connection aborted" in low:
+        return True
+    if "remoteprotocolerror" in low or "protocol error" in low:
+        return True
+    return False
 
 
 def _parse_ts(value: str) -> datetime:
@@ -61,12 +150,22 @@ class FujoSurvival(commands.Cog):
         self.users_loaded = False
         self._load_lock = asyncio.Lock()
         self._last_record: dict[int, datetime] = {}
+        # バックグラウンドタスク（INSERT / ストリーク更新）を保持して
+        # cog_unload でキャンセルできるようにする。
+        self._bg_tasks: set[asyncio.Task] = set()
         self.check_panic_alerts.start()
         self.check_duo_pester.start()
 
     def cog_unload(self):
         self.check_panic_alerts.cancel()
         self.check_duo_pester.cancel()
+        for task in list(self._bg_tasks):
+            task.cancel()
+
+    def _spawn(self, coro) -> None:
+        task = asyncio.create_task(coro)
+        self._bg_tasks.add(task)
+        task.add_done_callback(self._bg_tasks.discard)
 
     FUJO_ACTIONS = [
         app_commands.Choice(name="追跡登録・解除", value="register"),
@@ -112,7 +211,46 @@ class FujoSurvival(commands.Cog):
         """``build()`` で組み立てたクエリを別スレッドで実行し、data を返す。"""
         if self.supabase is None:
             raise RuntimeError("Supabase が設定されていません")
-        return (await asyncio.to_thread(lambda: build().execute())).data
+        return (await asyncio.to_thread(
+            run_with_retry, lambda: build().execute()
+        )).data
+
+    async def _insert_activity_with_retry(self, payload: dict) -> bool:
+        """fujo_activities への INSERT。一時エラーを検知してリトライする。
+
+        - 同時 INSERT は Semaphore で直列化（Cloudflare 等の短時間レート制限を回避）
+        - 一時エラー（HTML 400 / ConnectionTerminated / 接続タイムアウト等）は
+          指数バックオフ + ジッターで最大 3 回まで再試行
+        - 恒久的な失敗はログを残して諦める（例外は投げない）
+        """
+        for attempt in range(1, _ACTIVITY_INSERT_MAX_ATTEMPTS + 1):
+            try:
+                async with _get_insert_sem():
+                    await self._run(lambda: self.supabase.table("fujo_activities").insert(payload))
+                return True
+            except Exception as exc:
+                if not _is_transient_error(exc):
+                    log.warning(
+                        "fujo: activity insert failed: user=%s signal=%s err=%s",
+                        payload.get("user_id"), payload.get("signal_type"), str(exc)[:200],
+                    )
+                    return False
+                if attempt >= _ACTIVITY_INSERT_MAX_ATTEMPTS:
+                    log.warning(
+                        "fujo: activity insert gave up after %d attempts: user=%s signal=%s err=%s",
+                        _ACTIVITY_INSERT_MAX_ATTEMPTS, payload.get("user_id"),
+                        payload.get("signal_type"), str(exc)[:200],
+                    )
+                    return False
+                base = _ACTIVITY_INSERT_BASE_DELAY * (2 ** (attempt - 1))
+                delay = min(base + random.uniform(0, _ACTIVITY_INSERT_JITTER), _ACTIVITY_INSERT_MAX_DELAY)
+                log.info(
+                    "fujo: activity insert hit transient error (attempt %d/%d), retrying in %.2fs: user=%s err=%s",
+                    attempt, _ACTIVITY_INSERT_MAX_ATTEMPTS, delay,
+                    payload.get("user_id"), type(exc).__name__,
+                )
+                await asyncio.sleep(delay)
+        return False
 
     async def _fetch_all(self, build) -> list[dict]:
         """1000 件を超える結果もページを分けて全部読む。"""
@@ -192,24 +330,45 @@ class FujoSurvival(commands.Cog):
     # --- 検知と連続日数 ---
 
     async def record_activity(self, user_id: int, signal_type: str, status: str):
+        """アクティビティを記録する。
+
+        重い処理（INSERT のリトライやストリーク更新の DB 書き込み）は
+        バックグラウンドタスクに切り出し、このメソッドは即座に戻る。
+        イベントハンドラ（``on_message`` / ``on_presence_update`` /
+        ``on_voice_state_update``）や ``register`` の応答をブロックしない。
+        """
         try:
             await self._ensure_users()
-            user = self.users.get(user_id)
-            if user is None:
+            if user_id not in self.users:
                 return
             now = datetime.now(timezone.utc)
             last = self._last_record.get(user_id)
             if last and now - last < RECORD_INTERVAL:
                 return
             self._last_record[user_id] = now
+            self._spawn(self._record_activity_async(user_id, signal_type, status, now))
+        except Exception:
+            log.warning("fujo: failed to schedule activity record for %s", user_id, exc_info=True)
 
-            await self._run(lambda: self.supabase.table("fujo_activities").insert({
+    async def _record_activity_async(
+        self, user_id: int, signal_type: str, status: str, now: datetime
+    ):
+        # 1) INSERT（失敗してもストリーク更新は続行）
+        try:
+            await self._insert_activity_with_retry({
                 "user_id": user_id,
                 "detected_at": now.isoformat(),
                 "signal_type": signal_type,
                 "status": status,
-            }))
+            })
+        except Exception:
+            log.warning("fujo: activity insert crashed for %s", user_id, exc_info=True)
 
+        # 2) ストリーク・警報フラグの更新（メモリは即時、DB は別クエリ）
+        try:
+            user = self.users.get(user_id)
+            if user is None:
+                return
             today = _today()
             last_str = user.get("last_streak_date")
             last_date = date.fromisoformat(str(last_str)[:10]) if last_str else None
@@ -228,9 +387,12 @@ class FujoSurvival(commands.Cog):
             if user.get("last_pester_level"):
                 changes["last_pester_level"] = 0
             if changes:
-                await self._update_user(user_id, changes)
+                try:
+                    await self._update_user(user_id, changes)
+                except Exception:
+                    log.warning("fujo: streak update failed for %s", user_id, exc_info=True)
         except Exception:
-            log.exception("fujo: failed to record activity for %s", user_id)
+            log.warning("fujo: streak calculation failed for %s", user_id, exc_info=True)
 
     def calculate_title(self, records: list[dict]) -> str:
         total = len(records)
@@ -305,6 +467,7 @@ class FujoSurvival(commands.Cog):
                 "もう一度 `/fujo register` を実行すると解除できます。",
                 0x2ecc71,
             )
+            # record_activity は内部でバックグラウンド化されるため、ここでは即座に戻る
             await self.record_activity(user_id, "COMMAND", "online")
         await self._reply(interaction, embed, ephemeral=True)
 
