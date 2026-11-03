@@ -91,7 +91,8 @@ SUPPORT_GENRES = {
         "モデレーション",
         "Muted、匿名つぶやき、Stickyパネル、メッセージ削除、ハニーポット、チケット",
     ),
-    "roles": ("ロール・認証", "一括ロール操作、認証パネル、ロールパネル、言語設定"),
+    "roles": ("ロール・認証", "一括ロール操作、認証パネル、ロールパネル"),
+    "language": ("言語", "サーバーで使用する言語の設定"),
     "logs": ("履歴・ログ", "VC入退室、メッセージ編集、モデレートの履歴"),
     "automation": ("自動化・通知", "絵文字便乗、Auto react、レベルアップ、音声トリガー、SNS・Quest通知"),
     "assist": (
@@ -114,7 +115,8 @@ def _support_actions(*values: str) -> list[tuple[str, str]]:
 
 SUPPORT_ACTIONS_BY_GENRE = {
     "moderation": _support_actions("muted", "whisper", "sticky", "clear", "honeypot", "ticket"),
-    "roles": _support_actions("role_bulk", "auth_panel", "role_panel", "language"),
+    "roles": _support_actions("role_bulk", "auth_panel", "role_panel"),
+    "language": _support_actions("language"),
     "logs": _support_actions("vc_log", "message_log", "moderation_log"),
     "automation": _support_actions("binjou", "auto_react", "levelup_notify", "voice_trigger", "sns_notify", "quest_notify"),
     "assist": _support_actions("server_assist"),
