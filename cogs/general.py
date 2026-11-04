@@ -1974,15 +1974,38 @@ class GeneralPanel(discord.ui.View):
         return discord.Embed(title="一般機能", description=description, color=0xFFFFFF)
 
 
+def shortcut_vc_params(value: str, params: dict) -> dict:
+    """vc ショートカットの params を ParamSpec で検証し、定義済みキーだけを返す。
+
+    保存データが古い・壊れている場合でも実行自体は止めず、不正なキー・値は
+    そのキーだけ落として実行する（落としたことはログに残す）。
+    """
+    if not params:
+        return {}
+    spec = action_registry.default_registry().get(f"vc:{value}")
+    if spec is None or not spec.params:
+        return {}
+    cleaned: dict = {}
+    for name, raw in params.items():
+        try:
+            cleaned.update(action_registry.validate_params(spec, {name: raw}))
+        except ValueError:
+            logger.warning("shortcut vc params dropped: %s.%s=%r", value, name, raw)
+    return cleaned
+
+
 class ShortcutNameModal(discord.ui.Modal, title="ショートカット名"):
     trigger = discord.ui.TextInput(
         label="メッセージで送るトリガー（空白なし）", max_length=80,
         placeholder="例: VC参加", required=True,
     )
 
-    def __init__(self, cog: "GeneralCog", action: dict, item: dict | None = None):
+    def __init__(self, cog: "GeneralCog", action: dict, item: dict | None = None,
+                 params: dict | None = None):
         super().__init__()
         self.cog, self.action, self.item = cog, action, item
+        # params はパラメータ設定ステップを経たときだけ渡される（None は変更しない）。
+        self.params = params
         if item:
             self.trigger.default = item.get("trigger", "")
 
@@ -1991,17 +2014,185 @@ class ShortcutNameModal(discord.ui.Modal, title="ショートカット名"):
             store = guild_settings.get_store()
             if self.item:
                 await shortcuts.update(store, interaction.guild_id, interaction.user.id,
-                                       self.item["id"], self.trigger.value, self.action)
+                                       self.item["id"], self.trigger.value, self.action,
+                                       params=self.params)
                 text = "ショートカットを編集しました。"
             else:
                 await shortcuts.add(store, interaction.guild_id, interaction.user.id,
-                                    self.trigger.value, self.action)
+                                    self.trigger.value, self.action, params=self.params)
                 text = "ショートカットを登録しました。"
         except (ValueError, KeyError) as exc:
             return await interaction.response.send_message(str(exc), ephemeral=True)
         await interaction.response.send_message(
             embed=discord.Embed(title=text, description=f"トリガー: `{self.trigger.value}`", color=0x2ECC71),
             ephemeral=True,
+        )
+
+
+class ShortcutParamSelect(discord.ui.Select):
+    """choice / bool 型パラメータ1件の設定セレクト。"""
+
+    def __init__(self, parent: "ShortcutParamsView", param, row: int):
+        self.parent_view = parent
+        self.param = param
+        if param.type == "choice":
+            options = [
+                discord.SelectOption(label=str(label), value=str(value),
+                                     default=parent.params.get(param.name) == value)
+                for label, value in param.choices
+            ]
+        else:  # bool
+            options = [
+                discord.SelectOption(label="オン", value="true",
+                                     default=parent.params.get(param.name) is True),
+                discord.SelectOption(label="オフ", value="false",
+                                     default=parent.params.get(param.name) is False),
+            ]
+        super().__init__(placeholder=f"{param.label}を選択", options=options, row=row)
+
+    async def callback(self, interaction: discord.Interaction):
+        raw = self.values[0]
+        if self.param.type == "bool":
+            value: object = raw == "true"
+        else:
+            value = next((v for _label, v in self.param.choices if str(v) == raw), raw)
+        self.parent_view.params[self.param.name] = value
+        self.parent_view.refresh()
+        await interaction.response.edit_message(embed=self.parent_view.embed(), view=self.parent_view)
+
+
+class ShortcutParamModal(discord.ui.Modal, title="パラメータ設定"):
+    """int / number / text 型パラメータをまとめて入力するモーダル（最大5件）。"""
+
+    def __init__(self, parent: "ShortcutParamsView"):
+        super().__init__()
+        self.parent_view = parent
+        self.inputs: dict[str, discord.ui.TextInput] = {}
+        for param in parent.modal_params[:5]:
+            current = parent.params.get(param.name)
+            item = discord.ui.TextInput(
+                label=param.label[:45],
+                required=False,
+                default="" if current is None else str(current),
+                placeholder=param.help or "未入力なら既定値のまま",
+                style=(discord.TextStyle.paragraph if param.name == "lyrics"
+                       else discord.TextStyle.short),
+            )
+            self.inputs[param.name] = item
+            self.add_item(item)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        view = self.parent_view
+        by_name = {param.name: param for param in view.spec.params}
+        errors: list[str] = []
+        for name, item in self.inputs.items():
+            param = by_name[name]
+            raw = item.value.strip()
+            if not raw:
+                view.params.pop(name, None)
+                continue
+            try:
+                if param.type == "int":
+                    value: object = int(raw)
+                elif param.type in {"number", "duration"}:
+                    value = float(raw)
+                else:
+                    value = raw
+                action_registry.validate_params(view.spec, {name: value})
+            except ValueError as exc:
+                errors.append(str(exc))
+                continue
+            view.params[name] = value
+        if errors:
+            return await interaction.response.send_message(
+                "入力に誤りがあります:\n" + "\n".join(errors), ephemeral=True)
+        view.refresh()
+        await interaction.response.edit_message(embed=view.embed(), view=view)
+
+
+class ShortcutParamInputButton(discord.ui.Button):
+    def __init__(self, parent: "ShortcutParamsView", row: int):
+        self.parent_view = parent
+        super().__init__(label="数値・テキストを入力", style=discord.ButtonStyle.primary, row=row)
+
+    async def callback(self, interaction: discord.Interaction):
+        await interaction.response.send_modal(ShortcutParamModal(self.parent_view))
+
+
+class ShortcutParamsCommitButton(discord.ui.Button):
+    def __init__(self, parent: "ShortcutParamsView"):
+        self.parent_view = parent
+        super().__init__(label="この内容で決定", style=discord.ButtonStyle.success, row=4)
+
+    async def callback(self, interaction: discord.Interaction):
+        view = self.parent_view
+        await interaction.response.send_modal(
+            ShortcutNameModal(view.cog, view.action, view.item, params=dict(view.params)))
+
+
+class ShortcutParamsSkipButton(discord.ui.Button):
+    def __init__(self, parent: "ShortcutParamsView"):
+        self.parent_view = parent
+        super().__init__(label="設定しない（既定値で登録）", style=discord.ButtonStyle.secondary, row=4)
+
+    async def callback(self, interaction: discord.Interaction):
+        view = self.parent_view
+        # 編集時に既存プリセットを消す意味も含め、空の params で登録へ進む。
+        await interaction.response.send_modal(
+            ShortcutNameModal(view.cog, view.action, view.item, params={}))
+
+
+class ShortcutParamsView(discord.ui.View):
+    """ショートカット登録時のパラメータ設定ステップ。
+
+    ParamSpec を持つアクションを選んだときだけ、名前モーダルの前に挟む。
+    パラメータは登録時のプリセット専用で、メッセージ経由の実行時に追加で
+    聞くことはしない（モーダルを出せないため。仕様書 D-4）。
+    """
+
+    def __init__(self, cog: "GeneralCog", action: dict, item: dict | None, spec):
+        super().__init__(timeout=300)
+        self.cog, self.action, self.item, self.spec = cog, action, item, spec
+        self.params: dict = {}
+        saved = (item or {}).get("action", {})
+        if (item and saved.get("root") == action.get("root")
+                and saved.get("value") == action.get("value")):
+            # 編集時は保存済みプリセットを初期表示する。
+            names = {param.name for param in spec.params}
+            self.params = {key: value for key, value in shortcuts.effective_params(item).items()
+                           if key in names}
+        self.select_params = [p for p in spec.params if p.type in {"choice", "bool"}]
+        self.modal_params = [p for p in spec.params
+                             if p.type in {"text", "int", "number", "duration"}]
+        self.refresh()
+
+    def refresh(self):
+        self.clear_items()
+        for index, param in enumerate(self.select_params[:4]):
+            self.add_item(ShortcutParamSelect(self, param, row=index))
+        if self.modal_params:
+            # セレクトが4行を占める場合は入力ボタンも最終行に同居させる。
+            row = len(self.select_params) if len(self.select_params) < 4 else 4
+            self.add_item(ShortcutParamInputButton(self, row=row))
+        self.add_item(ShortcutParamsCommitButton(self))
+        self.add_item(ShortcutParamsSkipButton(self))
+
+    def embed(self):
+        lines = []
+        for param in self.spec.params:
+            value = self.params.get(param.name)
+            shown = "（未設定：既定値）" if value is None else f"`{value}`"
+            suffix = " ※実行に必要" if param.required else ""
+            lines.append(f"**{param.label}**: {shown}{suffix}")
+        return discord.Embed(
+            title=f"パラメータ設定: {self.spec.label}",
+            description=(
+                "ショートカットに保存する値（プリセット）を設定してください。\n"
+                "未設定の項目は実行時の既定値が使われます。パラメータは登録時の設定専用で、"
+                "メッセージで実行するときに追加で聞かれることはありません。\n\n"
+                + "\n".join(lines)
+            ),
+            color=0xFFFFFF,
         )
 
 
@@ -2071,7 +2262,14 @@ class ShortcutCommitButton(discord.ui.Button):
         if action is None:
             return await interaction.response.send_message("機能を選択してから決定してください。", ephemeral=True)
         cog = interaction.client.get_cog("GeneralCog")
-        await interaction.response.send_modal(ShortcutNameModal(cog, action, getattr(panel, "shortcut_item", None)))
+        item = getattr(panel, "shortcut_item", None)
+        spec = action_registry.default_registry().get(
+            f"{action.get('root')}:{action.get('value')}")
+        if spec is not None and spec.params:
+            # ParamSpec を持つアクションだけ、名前モーダルの前にパラメータ設定を挟む。
+            view = ShortcutParamsView(cog, action, item, spec)
+            return await interaction.response.send_message(embed=view.embed(), view=view, ephemeral=True)
+        await interaction.response.send_modal(ShortcutNameModal(cog, action, item))
 
 
 class ShortcutManageSelect(discord.ui.Select):
@@ -2739,18 +2937,22 @@ class GeneralCog(commands.Cog):
         action = item.get("action") or {}
         source = ShortcutMessageInteraction(self.bot, message, author_id, invoker=invoker)
         root, value = action.get("root"), action.get("value")
+        # v2 のプリセット値（旧形式では action["options"]）。メッセージ経由の
+        # 実行ではモーダルを出せないため、params は登録時のプリセット専用で、
+        # 実行時に追加で聞くことはしない（仕様書 D-4）。
+        params = shortcuts.effective_params(item)
         try:
             if root == "general":
                 return await self.dispatch_general(source, value)
             if root == "vc":
                 cog = self.bot.get_cog("VoiceHub")
                 if cog:
-                    return await cog.dispatch_voice_action(source, value)
+                    return await cog.dispatch_voice_action(
+                        source, value, **shortcut_vc_params(value, params))
             if root == "game":
                 cog = self.bot.get_cog("GameHub")
                 if cog and value.startswith("game:"):
-                    options = action.get("options") or {}
-                    return await cog.start_game(source, value.removeprefix("game:"), **options)
+                    return await cog.start_game(source, value.removeprefix("game:"), **params)
             if root == "support":
                 cog = self.bot.get_cog("SupportCog")
                 if cog:
