@@ -969,11 +969,277 @@ def _miq_load_font(path: str | None, size: int):
     return _levelup_font(size)
 
 
+# ---- MIQ: 文字ごとのフォールバック描画（絵文字・記号対応） ----
+# 単一フォントで描くと、選択フォントに無い文字（記号・絵文字・珍しい漢字）は
+# □ になる。そこで本文・名前は文字ごとに「その文字を持つフォント」を探して描く。
+# 絵文字は Noto Color Emoji だけが特殊（Pillow では size=109 でしか読めない
+# ビットマップフォント）なので、109px で描いてから文字サイズへ縮小して貼る。
+_MIQ_EMOJI_SIZE = 109
+_MIQ_EMOJI_PATHS = (
+    "assets/fonts/NotoColorEmoji.ttf",
+    "assets/fonts/emoji.ttf",
+    "/usr/share/fonts/truetype/noto/NotoColorEmoji.ttf",
+    "/usr/share/fonts/truetype/noto/NotoColorEmoji-Regular.ttf",
+)
+_MIQ_SYMBOL_PATHS = (
+    "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+    "/usr/share/fonts/truetype/noto/NotoSansSymbols-Regular.ttf",
+    "/usr/share/fonts/truetype/noto/NotoSansSymbols2-Regular.ttf",
+    "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
+)
+_MIQ_FONT_CMAP_CACHE: dict = {}
+_MIQ_FONT_OBJ_CACHE: dict = {}
+_MIQ_EMOJI_PATH_CACHE = None
+
+
+def _miq_emoji_font_path() -> str | None:
+    global _MIQ_EMOJI_PATH_CACHE
+    if _MIQ_EMOJI_PATH_CACHE is not None:
+        return _MIQ_EMOJI_PATH_CACHE
+    _MIQ_EMOJI_PATH_CACHE = ""
+    root = Path(__file__).parent.parent
+    for cand in _MIQ_EMOJI_PATHS:
+        p = str(root / cand) if not cand.startswith("/") else cand
+        if os.path.exists(p):
+            try:
+                from PIL import ImageFont
+
+                ImageFont.truetype(p, _MIQ_EMOJI_SIZE)
+                _MIQ_EMOJI_PATH_CACHE = p
+                break
+            except Exception:
+                continue
+    return _MIQ_EMOJI_PATH_CACHE or None
+
+
+def _miq_font_cmap(path: str):
+    if path in _MIQ_FONT_CMAP_CACHE:
+        return _MIQ_FONT_CMAP_CACHE[path]
+    cmap = None
+    try:
+        from fontTools.ttLib import TTFont
+
+        cmap = TTFont(path).getBestCmap()
+    except Exception:
+        cmap = None
+    _MIQ_FONT_CMAP_CACHE[path] = cmap
+    return cmap
+
+
+def _miq_font_has_char(path: str, ch: str) -> bool:
+    cmap = _miq_font_cmap(path)
+    if cmap is None:
+        return True  # fontTools が無い環境では従来通り「ある」とみなす
+    return ord(ch) in cmap
+
+
+def _miq_split_units(text: str) -> list[str]:
+    """絵文字シーケンス（VS16・肌色・ZWJ・キーキャップ）を1単位にまとめる。"""
+    units: list[str] = []
+    i = 0
+    n = len(text)
+    while i < n:
+        unit = text[i]
+        i += 1
+        while i < n:
+            o = ord(text[i])
+            if o in (0xFE0F, 0xFE0E) or 0x1F3FB <= o <= 0x1F3FF:
+                unit += text[i]
+                i += 1
+                continue
+            if o == 0x200D and i + 1 < n:
+                unit += text[i] + text[i + 1]
+                i += 2
+                continue
+            if o == 0x20E3:
+                unit += text[i]
+                i += 1
+                break
+            break
+        units.append(unit)
+    return units
+
+
+def _miq_unit_bases(unit: str) -> str:
+    """単位から修飾子（VS・ZWJ・肌色・キーキャップ）を除いた実体文字だけ返す。"""
+    return "".join(
+        ch
+        for ch in unit
+        if ord(ch) not in (0xFE0F, 0xFE0E, 0x200D, 0x20E3)
+        and not 0x1F3FB <= ord(ch) <= 0x1F3FF
+    )
+
+
+def _miq_is_emoji_unit(unit: str, emoji_path: str | None) -> bool:
+    if not emoji_path:
+        return False
+    bases = _miq_unit_bases(unit)
+    if not bases:
+        return False
+    o = ord(bases[0])
+    if o < 0x2000 and bases[0] not in "©®":
+        return False
+    return _miq_font_has_char(emoji_path, bases[0])
+
+
+def _miq_fallback_fonts(primary_path: str | None, size: int):
+    """本文フォント→他のMIQフォント→ルートfont.ttf→OS記号フォントの順の描画用フォント列。"""
+    chain = []
+    seen: set = set()
+
+    def _add(path):
+        if not path or path in seen or not os.path.exists(path):
+            return
+        seen.add(path)
+        key = (path, size)
+        font = _MIQ_FONT_OBJ_CACHE.get(key)
+        if font is None:
+            try:
+                font = _miq_load_font(path, size)
+            except Exception:
+                return
+            _MIQ_FONT_OBJ_CACHE[key] = font
+        chain.append((path, font))
+
+    _add(primary_path)
+    try:
+        for _k, _l, path in _miq_available_fonts():
+            _add(path)
+    except Exception:
+        pass
+    _add(_MIQ_REPO_FONT)
+    for cand in _MIQ_SYMBOL_PATHS:
+        _add(cand)
+    return chain
+
+
+def _miq_unit_font(unit: str, chain, emoji_path: str | None):
+    """単位を描けるフォントを返す。('emoji', None) / ('font', font) / (None, None)。"""
+    if _miq_is_emoji_unit(unit, emoji_path):
+        return ("emoji", None)
+    bases = _miq_unit_bases(unit) or unit
+    for path, font in chain:
+        if all(_miq_font_has_char(path, ch) for ch in bases):
+            return ("font", font)
+    return (None, None)
+
+
+def _miq_emoji_width(unit: str, size: int, emoji_path: str) -> float:
+    """カラー絵文字の実描画幅（縦横比を保って size 高さで貼ったときの幅）。"""
+    try:
+        from PIL import Image, ImageDraw, ImageFont
+
+        font = ImageFont.truetype(emoji_path, _MIQ_EMOJI_SIZE)
+        tmp = Image.new("RGBA", (160, 160), (0, 0, 0, 0))
+        ImageDraw.Draw(tmp).text((10, 10), unit, font=font, embedded_color=True)
+        bbox = tmp.getbbox()
+        if not bbox:
+            return float(size)
+        return float(size * (bbox[2] - bbox[0]) / (bbox[3] - bbox[1]))
+    except Exception:
+        return float(size)
+
+
+def _miq_unit_width(unit: str, draw, chain, size: int, emoji_path: str | None) -> float:
+    kind, font = _miq_unit_font(unit, chain, emoji_path)
+    if kind == "emoji":
+        return _miq_emoji_width(unit, size, emoji_path)
+    if kind == "font":
+        bases = _miq_unit_bases(unit) or unit
+        try:
+            return float(draw.textlength(bases, font=font))
+        except Exception:
+            return float(size)
+    return 0.0
+
+
+def _miq_render_emoji_unit(layer, draw, x: float, y: float, unit: str, size: int, emoji_path: str) -> float:
+    """カラー絵文字1単位を109pxで描いて size へ縮小し、(x, y)へ貼る。幅を返す。"""
+    from PIL import Image, ImageDraw, ImageFont
+
+    try:
+        font = ImageFont.truetype(emoji_path, _MIQ_EMOJI_SIZE)
+        tmp = Image.new("RGBA", (160, 160), (0, 0, 0, 0))
+        td = ImageDraw.Draw(tmp)
+        td.text((10, 10), unit, font=font, embedded_color=True)
+        bbox = tmp.getbbox()
+        if not bbox:
+            return 0.0
+        crop = tmp.crop(bbox)
+        # 高さ = 文字サイズ、幅は縦横比を保つ
+        w = max(1, int(round(size * crop.width / crop.height)))
+        emoji_img = crop.resize((w, size), Image.LANCZOS)
+        # 本文は anchor="ma"（ascender上端が y）なので、絵文字の上端を y に合わせる
+        layer.paste(emoji_img, (int(round(x)), int(round(y))), emoji_img)
+        return float(w)
+    except Exception:
+        logger.debug("MIQ: 絵文字の描画に失敗", exc_info=True)
+        return 0.0
+
+
+def _miq_draw_centered(layer, draw, cx: float, y: float, text: str, size: int, fill, stroke_width: int, primary_path: str | None):
+    """中央揃えで1行描く。文字ごとにフォールバックし、描けない文字は落とす（□にしない）。"""
+    if not text:
+        return
+    chain = _miq_fallback_fonts(primary_path, size)
+    emoji_path = _miq_emoji_font_path()
+    units = _miq_split_units(text)
+    widths = []
+    total = 0.0
+    for unit in units:
+        kind, font = _miq_unit_font(unit, chain, emoji_path)
+        if kind == "emoji":
+            w = _miq_emoji_width(unit, size, emoji_path)
+        elif kind == "font":
+            bases = _miq_unit_bases(unit) or unit
+            try:
+                w = float(draw.textlength(bases, font=font))
+            except Exception:
+                w = float(size)
+        else:
+            w = 0.0
+        widths.append(w)
+        total += w
+    x = cx - total / 2.0
+    for unit, w in zip(units, widths):
+        if w <= 0:
+            continue
+        kind, font = _miq_unit_font(unit, chain, emoji_path)
+        if kind == "emoji":
+            x += _miq_render_emoji_unit(layer, draw, x, y, unit, size, emoji_path)
+        elif kind == "font":
+            bases = _miq_unit_bases(unit) or unit
+            draw.text((x, y), bases, font=font, fill=fill, anchor="la", stroke_width=stroke_width, stroke_fill=fill)
+            x += w
+        # kind is None: 描けない文字は落とす（□を出さない）
+
+
+def _miq_display_text(text: str | None) -> str:
+    """名前・ユーザー名用：制御文字と改行だけ落とし、絵文字・記号は残す。"""
+    if not text:
+        return ""
+    out = []
+    for ch in text:
+        o = ord(ch)
+        if o < 0x20 or o == 0x7F:
+            out.append(" ")
+        else:
+            out.append(ch)
+    return "".join(out).strip()
+
+
 _MIQ_CUSTOM_EMOJI = re.compile(r"<a?:\w+:\d+>")
 
 
 def _miq_clean_text(text: str | None) -> str:
-    """画像に描けない文字(絵文字など)と装飾記号を落として整形する。"""
+    """引用テキストを整形する。
+
+    以前は絵文字・記号（U+1F000以上、U+2190〜U+2BFF、ZWJ、VSなど）を
+    ここで落としていたため、絵文字が消え、対応フォントが無い文字は
+    描画時に □ になっていた。今は落とさない。描画側が文字ごとに
+    フォールバックフォント／カラー絵文字を選び、どのフォントにも
+    無い文字だけを描画時に落とす（□ にはしない）。
+    """
     text = _MIQ_CUSTOM_EMOJI.sub("", text or "")
     try:
         text = discord.utils.remove_markdown(text)
@@ -986,7 +1252,7 @@ def _miq_clean_text(text: str | None) -> str:
             out.append(ch)
         elif ch == "\t" or o < 0x20:
             out.append(" ")
-        elif o >= 0x1F000 or 0x2190 <= o <= 0x2BFF or o in (0x200D, 0xFE0F, 0xFE0E, 0x20E3):
+        elif o in (0x200B, 0xFEFF):
             continue
         else:
             out.append(ch)
@@ -1103,14 +1369,14 @@ def render_miq_frames(
         cx = side // 2 if flip else H + side // 2
         text_w = side - 80
 
-    # 名前・透かしも本文フォントに合わせる。日本語非対応フォントに
-    # 日本語を渡すと □ になるため、対応していない場合はASCIIのみに落とす。
+    # 名前はフォールバック描画するため、絵文字・記号を残す。
+    # 描けない文字だけが描画時に落とされる（□にしない）。
     if font_path:
         _miq_can_cjk = _font_covers_japanese(font_path)
     else:
         _miq_can_cjk = _levelup_pick_font()[1]
-    shown_name = _levelup_safe_name(name, _miq_can_cjk) or _levelup_safe_name(username, _miq_can_cjk) or "unknown"
-    shown_user = _levelup_safe_name(username, _miq_can_cjk)
+    shown_name = _miq_display_text(name) or _miq_display_text(username) or "unknown"
+    shown_user = _miq_display_text(username)
 
     font, lines, lh, size = _miq_fit(d, text, font_path, text_w, 350)
     name_size = 34
@@ -1129,14 +1395,14 @@ def render_miq_frames(
     fg4 = tuple(fg) + (255,)
     for line in lines:
         if line:
-            d.text((cx, y), line, font=font, fill=fg4, anchor="ma", stroke_width=sw, stroke_fill=fg4)
+            _miq_draw_centered(layer, d, cx, y, line, size, fg4, sw, font_path)
         y += lh
     y += gap
     nsw = 1 if bold else 0
-    d.text((cx, y), f"- {shown_name}", font=name_font, fill=fg4, anchor="ma", stroke_width=nsw, stroke_fill=fg4)
+    _miq_draw_centered(layer, d, cx, y, f"- {shown_name}", name_size, fg4, nsw, font_path)
     y += name_lh
     if shown_user:
-        d.text((cx, y), f"@{shown_user}", font=user_font, fill=tuple(sub) + (255,), anchor="ma")
+        _miq_draw_centered(layer, d, cx, y, f"@{shown_user}", 22, tuple(sub) + (255,), 0, font_path)
     if watermark:
         wm = _levelup_safe_name(watermark, _miq_can_cjk)
         if flip and not full:
