@@ -2194,6 +2194,10 @@ class GeneralCog(commands.Cog):
             )
             return await interaction.response.send_message(embed=embed, ephemeral=True)
 
+        if value == "translation_settings":
+            view = TranslationView(interaction.user.id, interaction.guild_id)
+            return await interaction.response.send_message(embed=view.embed(), view=view, ephemeral=True)
+
         if value == "aitools":
             from core import ai_tools_router
             from cogs.ai_tools import _enabled as ai_tools_enabled
