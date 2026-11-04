@@ -182,6 +182,9 @@ CLEF_PLANS = {
 CLEF_STATE_CHARS = int(os.environ.get("CLEF_DUNGEON_STATE_CHARS", 2400))
 CLEF_LOG_LINES = int(os.environ.get("CLEF_DUNGEON_LOG_LINES", 6))
 CLEF_MAX_TURNS = int(os.environ.get("CLEF_DUNGEON_MAX_TURNS", 10))
+# Phase 1-E: Phase 1-C 以降、Clef の1ターンは 1 journey（行き先までの
+# 自動歩行）なので、CLEF_MAX_TURNS は「最大 journey 数」を意味する。
+# 値は従来どおり10（1回の自動操作でフロア1枚分にほぼ相当する）。
 CLEF_TIMEOUT = float(os.environ.get("CLEF_DUNGEON_TIMEOUT", 30))
 CLEF_RETRIES = max(1, int(os.environ.get("CLEF_DUNGEON_RETRIES", 2)))
 CLEF_RETRY_DELAY = float(os.environ.get("CLEF_DUNGEON_RETRY_DELAY", 1.5))
@@ -212,6 +215,7 @@ D_WALK_STOP_TEXTS = {
     "dead_end": "行き止まりに着いた。",
     "room_edge": "部屋の壁際で止まった。",
     "door": "部屋の出口に着いた。",
+    "center_line": "部屋の中心へ向かえる位置で止まった。",
     "max_steps": "一旦立ち止まった。",
     "low_hp": "HPが低下したため立ち止まった。",
     "ambush": "不意打ちを受けた！",
@@ -450,6 +454,7 @@ def d_migrate_player_v2(uid):
     p["hp"] = d_effective_stats(p)["max_hp"]
     p["turns"] = 0
     p["season_score"] = 0
+    d_reset_floor_counters(p)
     return True
 
 
@@ -592,6 +597,320 @@ def d_floor_progress_text(uid):
     )
 
 
+# ============================================================
+#  Phase 1-E: 部屋グラフ・Clef の行き先判断・「階段へ」ナビ・踏破計測
+#  設計書 dungeon-phase1-design.md §8 / §9（PR 1-E）。
+# ============================================================
+
+def _d_corridor_component(instance, x, y):
+    """(x, y) を含む通路（部屋の外の通行可能マス）の連結成分と、接する部屋id集合。
+
+    部屋の中や壁を指定した場合は (空集合, 空集合) を返す（純粋関数）。
+    """
+    grid = instance["grid"]
+    if not (0 <= x < D2_MAP_W and 0 <= y < D2_MAP_H) or grid[y][x] == D_WALL:
+        return set(), set()
+    if d_room_at(instance, x, y) is not None:
+        return set(), set()
+    cells = {(x, y)}
+    touching = set()
+    stack = [(x, y)]
+    while stack:
+        cx, cy = stack.pop()
+        for vx, vy in _DIRECTIONS.values():
+            nx, ny = cx + vx, cy + vy
+            if not (0 <= nx < D2_MAP_W and 0 <= ny < D2_MAP_H) or grid[ny][nx] == D_WALL:
+                continue
+            room = d_room_at(instance, nx, ny)
+            if room is not None:
+                touching.add(room["id"])
+            elif (nx, ny) not in cells:
+                cells.add((nx, ny))
+                stack.append((nx, ny))
+    return cells, touching
+
+
+def d_room_graph(instance):
+    """部屋同士の隣接関係（部屋グラフ）をグリッドから導出する（純粋関数）。
+
+    通路は交差しない設計（§3-1）のため、通路の連結成分ごとに「接する
+    部屋同士」を結べば隣接関係が得られる。部屋同士が直接接している
+    場合も隣接として扱う。戻り値: {room_id: set(room_id)}（双方向）。
+    """
+    rooms = instance.get("rooms", []) or []
+    grid = instance["grid"]
+    graph = {room["id"]: set() for room in rooms}
+    room_of = {}
+    for room in rooms:
+        rx, ry, rw, rh = room["rect"]
+        for gy in range(ry, ry + rh):
+            for gx in range(rx, rx + rw):
+                room_of[(gx, gy)] = room["id"]
+    # 部屋同士の直接隣接。
+    for (gx, gy), rid in room_of.items():
+        for vx, vy in _DIRECTIONS.values():
+            other = room_of.get((gx + vx, gy + vy))
+            if other is not None and other != rid:
+                graph[rid].add(other)
+    # 通路の連結成分ごとに、接する部屋同士を結ぶ。
+    seen = set()
+    for y in range(D2_MAP_H):
+        for x in range(D2_MAP_W):
+            if grid[y][x] == D_WALL or (x, y) in room_of or (x, y) in seen:
+                continue
+            cells, touching = _d_corridor_component(instance, x, y)
+            seen |= cells
+            for a in touching:
+                for b in touching:
+                    if a != b:
+                        graph[a].add(b)
+    return graph
+
+
+def d_room_distances(instance, start_room_id):
+    """部屋グラフ上の BFS 距離（単位は部屋）。到達不能な部屋は含まない（純粋関数）。"""
+    graph = d_room_graph(instance)
+    dist = {start_room_id: 0}
+    queue = [start_room_id]
+    head = 0
+    while head < len(queue):
+        cur = queue[head]
+        head += 1
+        for nxt in sorted(graph.get(cur, ())):
+            if nxt not in dist:
+                dist[nxt] = dist[cur] + 1
+                queue.append(nxt)
+    return dist
+
+
+def d_rooms_to_stairs(uid, floor, x, y):
+    """現在位置から階段の間まで、あと何部屋通るか（純粋ロジック）。
+
+    階段の間の中なら 0、隣の部屋なら 1。通路では「次に入る部屋」を
+    1つ数える（接する部屋のうち最も近い経路で数える）。
+    階段の間が無い/到達不能な場合は None。
+    """
+    inst = d_get_instance(uid, floor)
+    stairs = next((r for r in inst.get("rooms", []) or [] if r["role"] == "stairs"), None)
+    if stairs is None:
+        return None
+    room = d_room_at(inst, x, y)
+    if room is not None:
+        return d_room_distances(inst, room["id"]).get(stairs["id"])
+    _, touching = _d_corridor_component(inst, x, y)
+    best = None
+    for rid in touching:
+        rest = d_room_distances(inst, rid).get(stairs["id"])
+        if rest is not None and (best is None or rest + 1 < best):
+            best = rest + 1
+    return best
+
+
+def d_room_summary_text(uid, floor, x, y):
+    """Clef向けの部屋グラフ要約（Phase 1-E / 設計 §8）。
+
+    現在の部屋（役割・制圧状況）、各方向の行き先（発見済みなら役割名、
+    未発見なら「未探索」）、階段の間までの部屋数、階段番の制圧状況を
+    返す。旧「周囲3×3」情報の置き換え。
+    """
+    inst = d_get_instance(uid, floor)
+    rooms = inst.get("rooms", []) or []
+    room = d_room_at(inst, x, y)
+    if room is None:
+        here = "通路（部屋の外）"
+    elif room["role"] == "start":
+        here = D_ROOM_ROLE_NAMES.get(room["role"], "部屋")
+    else:
+        state = "制圧済み" if d_room_cleared(inst, room["id"]) else "未制圧"
+        here = f"{D_ROOM_ROLE_NAMES.get(room['role'], '部屋')}（{state}）"
+    exits = []
+    for key in ("up", "down", "left", "right"):
+        label = _DIRECTION_LABELS[key]
+        if d_direction_blocked(uid, floor, x, y, key):
+            exits.append(f"{label}: 壁（進めない）")
+        else:
+            dest = d_destination_label(uid, floor, x, y, key)
+            exits.append(f"{label}: {dest or '通路'}")
+    remain = d_rooms_to_stairs(uid, floor, x, y)
+    stairs_room = next((r for r in rooms if r["role"] == "stairs"), None)
+    if stairs_room is None:
+        guard = "このフロアに階段の間はない"
+    elif d_room_cleared(inst, stairs_room["id"]):
+        guard = "階段の番人は制圧済み（階段が使える）"
+    else:
+        guard = "階段の番人は未制圧（倒すまで階段は使えない）"
+    return "\n".join([
+        f"現在地の部屋: {here}",
+        "各方向の行き先: " + " / ".join(exits),
+        f"階段の間まで: {'あと' + str(remain) + '部屋' if remain is not None else '不明'}",
+        guard,
+    ])
+
+
+def d_next_direction_toward(uid, floor, x, y, target):
+    """target へのグリッドBFS最短路の「最初の一歩」の方向を返す（純粋ロジック）。
+
+    目標からの距離が1つ減る隣接マスへの方向を返す。到達済み
+    （現在地 == target）または到達不能なら None。Clef フォールバック
+    （dungeon_best_direction）が使う。「階段へ」ナビゲーションは
+    journey 整合を優先する d_plan_navigation_direction を主に使い、
+    本関数へは最終フォールバックとして落ちる。
+    """
+    if target is None or (x, y) == tuple(target):
+        return None
+    dist = dungeon_bfs(uid, floor, target[0], target[1])
+    here = dist.get((x, y))
+    if here is None:
+        return None
+    for key in ("up", "left", "right", "down"):
+        vx, vy = _DIRECTIONS[key]
+        if dist.get((x + vx, y + vy)) == here - 1:
+            return key
+    return None
+
+
+def d_plan_navigation_direction(uid, floor, x, y, target):
+    """target へ向かう次の journey の方向を決める（「階段へ」ナビの計画部分）。
+
+    単純な「BFS最短路の最初の一歩」だけでは、特殊タイルのない部屋を
+    journey が横断して行き過ぎ、同じ部屋同士を行き来する振動が起きる。
+    そこで方向ごとに d_plan_walk を試し、journey の停止セルが目標への
+    BFS距離を縮める方向を優先する（journey 実行と矛盾しない計画）。
+    どの方向でも停止セルが近づかない場合のみ、最初の一歩へ落ちる。
+    到達済み/到達不能なら None。
+    """
+    if target is None or (x, y) == tuple(target):
+        return None
+    dist = dungeon_bfs(uid, floor, target[0], target[1])
+    here = dist.get((x, y))
+    if here is None:
+        return None
+    best = None
+    for order, key in enumerate(("up", "left", "right", "down")):
+        if d_direction_blocked(uid, floor, x, y, key):
+            continue
+        plan = d_plan_walk(uid, floor, x, y, key)
+        if not plan["path"]:
+            continue
+        stop_dist = dist.get(plan["stop_cell"])
+        if stop_dist is None or stop_dist >= here:
+            continue
+        cand = (stop_dist, len(plan["path"]), order, key)
+        if best is None or cand < best:
+            best = cand
+    if best is not None:
+        return best[3]
+    return d_next_direction_toward(uid, floor, x, y, target)
+
+
+def _d_route_anchor_index(inst, x, y, main_rooms):
+    """プレイヤーがメインルート上で到達した最も先の部屋の順序（無ければ -1）。
+
+    部屋の中ではその部屋、サブルームでは接続先のメイン部屋、通路では
+    接するメイン部屋のうち最も先のものを「現在地の前進度」とみなす。
+    main_rooms はルート順（生成順）に並んでいる前提。
+    """
+    index_of = {room["id"]: i for i, room in enumerate(main_rooms)}
+    room = d_room_at(inst, x, y)
+    if room is not None:
+        if room["id"] in index_of:
+            return index_of[room["id"]]
+        return index_of.get(room.get("host_id"), -1)
+    _, touching = _d_corridor_component(inst, x, y)
+    idxs = [index_of[rid] for rid in touching if rid in index_of]
+    return max(idxs) if idxs else -1
+
+
+def d_target_room(uid, plan="安全探索"):
+    """作戦に応じた目標部屋を返す（Phase 1-E）。目標が決まらなければ None。
+
+    - safe/speed/boss/xp: メインルート上で現在地より先にある未制圧の部屋
+      → 無ければ階段の間（設計 §8 の決定的フォールバック方針）
+    - treasure: 未消化の宝箱の間（と休憩所のサブルーム）
+    - battle: 未制圧の combat 部屋（最も近いもの）
+    - explore: 未発見の部屋（最も近いもの）
+    作戦固有の候補が無い場合は safe と同じ方針へ落ちる。
+    """
+    p = d_get_player(uid)
+    floor, x, y = p["floor"], p["x"], p["y"]
+    inst = d_get_instance(uid, floor)
+    rooms = inst.get("rooms", []) or []
+    if not rooms:
+        return None
+    cleared = inst.get("cleared") or set()
+    key = dungeon_plan_key(plan)
+    dist_p = dungeon_bfs(uid, floor, x, y)
+
+    def nearest(candidates):
+        ranked = sorted(candidates,
+                        key=lambda r: (dist_p.get(r["center"], 1 << 30), r["id"]))
+        return ranked[0] if ranked else None
+
+    if key == "treasure":
+        target = nearest([r for r in rooms if r["id"] not in cleared
+                          and (r["role"] == "chest"
+                               or (r.get("route") == "sub" and r["role"] == "rest"))])
+        if target is not None:
+            return target
+    elif key == "battle":
+        target = nearest([r for r in rooms
+                          if r["role"] == "combat" and r["id"] not in cleared])
+        if target is not None:
+            return target
+    elif key == "explore":
+        target = nearest([r for r in rooms if not d_room_discovered(inst, r)])
+        if target is not None:
+            return target
+
+    # safe/speed/boss/xp、および作戦固有の候補が無い場合の共通方針:
+    # メインルートを先へ進み、未制圧の部屋を順に片付けて階段を目指す。
+    main_rooms = [r for r in rooms if r.get("route") == "main"]
+    anchor = _d_route_anchor_index(inst, x, y, main_rooms)
+    for idx, room in enumerate(main_rooms):
+        if idx <= anchor or room["role"] == "start" or room["id"] in cleared:
+            continue
+        return room
+    return next((r for r in rooms if r["role"] == "stairs"), None)
+
+
+def d_stairs_discovered(uid, floor):
+    """階段の間が発見済みか（「階段へ」ボタンの有効条件。進捗表示と同一基準）。"""
+    inst = d_get_instance(uid, floor)
+    room = next((r for r in inst.get("rooms", []) or [] if r["role"] == "stairs"), None)
+    return room is not None and d_room_discovered(inst, room)
+
+
+def d_reset_floor_counters(p):
+    """フロアへ入った時点を踏破計測の起点にする（Phase 1-E）。
+
+    階段での移動・死亡送還・移行・月次リセットの各遷移で呼ぶ。
+    """
+    p["floor_start_turns"] = p.get("turns", 0)
+    p["floor_journeys"] = 0
+
+
+def d_record_floor_clear(uid):
+    """踏破したフロアの実績を floor_history へ1件記録する（Phase 1-E）。
+
+    階段で次のフロアへ進む直前に呼ぶ。戻り値は記録したエントリ
+    {floor, turns_used, journeys_used, cleared_at}。
+    floor_history は直近50件だけを保持する。
+    """
+    p = d_get_player(uid)
+    start_turns = p.get("floor_start_turns")
+    turns_used = p.get("turns", 0) - start_turns if start_turns is not None else 0
+    entry = {
+        "floor": p["floor"],
+        "turns_used": max(0, turns_used),
+        "journeys_used": p.get("floor_journeys", 0),
+        "cleared_at": datetime.datetime.now(JST).isoformat(),
+    }
+    history = p.setdefault("floor_history", [])
+    history.append(entry)
+    del history[:-50]
+    return entry
+
+
 def d_destination_label(uid, floor, x, y, direction):
     """方向ボタンの行き先ラベル（Phase 1-D / 設計 §6-2）。
 
@@ -633,7 +952,7 @@ def d_plan_walk(uid, floor, x, y, direction):
     戻り値: {
       direction: キー文字列,
       path: [進む座標...]（開始マスは含まない）,
-      stop_reason: "room"|"special"|"junction"|"dead_end"|"room_edge"|"door"|"max_steps"|"blocked",
+      stop_reason: "room"|"special"|"junction"|"dead_end"|"room_edge"|"door"|"center_line"|"max_steps"|"blocked",
       stop_cell: 最後に到達する座標（1歩も進めない場合は開始座標）,
       entered_room_id: stop_reason == "room" のとき入った部屋の id、それ以外は None,
     }
@@ -707,6 +1026,20 @@ def d_plan_walk(uid, floor, x, y, direction):
             ):
                 result["stop_reason"] = "door"
                 break
+            # 停止条件（中心タイルへの折り返し）: 部屋の中心タイル（階段・
+            # 宝箱等の特殊タイル）と列/行が揃うマスでは止まり、そこから
+            # 中心へ曲がれるようにする。通路は中心同士を L字で結ぶため、
+            # 折れ点が部屋の中にあると出入口が中心の行・列からずれ、
+            # 壁際まで直進するだけでは中心タイルに永遠に届かないケースが
+            # ある（生成インスタンスの約2割で階段タイル到達不能だった。
+            # Phase 1-E の「階段へ」ナビ前提として同じ系統の欠陥を塞ぐ）。
+            # 中心タイルへ直進中のマスは特殊タイル停止に任せ、対象外。
+            center = room.get("center")
+            if (center is not None and (cx, cy) != tuple(center)
+                    and grid[center[1]][center[0]] in D_WALK_SPECIAL_CELLS
+                    and ((dx != 0 and cx == center[0]) or (dy != 0 and cy == center[1]))):
+                result["stop_reason"] = "center_line"
+                break
             # 開始部屋の中では真っ直ぐ進み続ける。直進できなければ次ループ
             # 先頭の判定で room_edge になる。ただし隣に部屋の外への出口が
             # 1つだけある場合は、そこへ滑り込む（扉の位置ずれ吸収）。
@@ -762,6 +1095,9 @@ def d_default_player():
         "battle_flags": {},
         "equipment_upgrades": {},
         "instances": {}, "phase1b_v2": False,
+        # Phase 1-E のフロア踏破計測（設計 §9 1-E）。floor_history は直近50件、
+        # floor_start_turns / floor_journeys は現在フロアの計測カウンタ。
+        "floor_history": [], "floor_start_turns": 0, "floor_journeys": 0,
     }
 
 def d_get_player(uid):
@@ -1638,6 +1974,10 @@ async def dg_load_all(db_api):
                 "equipment_upgrades": meta.get("equipment_upgrades", {}) or {},
                 "instances": meta.get("instances", {}) or {},
                 "phase1b_v2": bool(meta.get("phase1b_v2", False)),
+                # Phase 1-E の踏破計測。旧データに無い場合は「読み込み時点」を起点にする。
+                "floor_history": meta.get("floor_history", []) or [],
+                "floor_start_turns": meta.get("floor_start_turns", row.get("turns", 0)),
+                "floor_journeys": meta.get("floor_journeys", 0),
             }
             # Phase 1-B 移行（設計 §7-2）: フラグの無い既存プレイヤーは一度だけ新基盤へ移す。
             d_migrate_player_v2(row["user_id"])
@@ -1688,6 +2028,9 @@ async def dg_save_player(uid, db_api):
             "equipment_upgrades": p.get("equipment_upgrades", {}),
             "instances": p.get("instances", {}),
             "phase1b_v2": bool(p.get("phase1b_v2", False)),
+            "floor_history": p.get("floor_history", [])[-50:],
+            "floor_start_turns": p.get("floor_start_turns", 0),
+            "floor_journeys": p.get("floor_journeys", 0),
         }
         payload = {
             "user_id": uid,
@@ -1805,16 +2148,6 @@ def d_normalize_choice(value, legal, fallback=None):
     return value if value in legal else (fallback if fallback in legal else None)
 
 
-def dungeon_cell_label(uid, floor, x, y):
-    """セルの日本語ラベル。Clefへ選択肢の基準を渡すために使う。"""
-    cell = d_get_cell(uid, floor, x, y)
-    return {
-        D_WALL: "壁", D_FLOOR: "床", D_START: "開始地点", D_STAIRS: "階段", D_CHEST: "宝箱",
-        D_TRAP: "罠", D_SHOP: "商店", D_BASE: "拠点", D_MINE: "鉱山", D_REST: "休憩所",
-        D_SHRINE: "祭壇", D_EVENT: "イベント",
-    }.get(cell, "床")
-
-
 def dungeon_relative_label(dx, dy):
     """差分ベクトルを方角ラベルへ変換する。"""
     if dx == 0 and dy == 0:
@@ -1873,51 +2206,41 @@ def dungeon_stairs_hint(uid, floor, x, y, dist=None):
     return f"{dungeon_relative_label(stairs[0] - x, stairs[1] - y)} {steps}マス"
 
 
-def dungeon_surround_text(uid, floor, x, y):
-    """現在地と4方向のタイルを短く列挙する。"""
-    parts = [f"現在地={dungeon_cell_label(uid, floor, x, y)}"]
-    for key, (dx, dy) in _DIRECTIONS.items():
-        parts.append(f"{_DIRECTION_LABELS[key]}={dungeon_cell_label(uid, floor, x + dx, y + dy)}")
-    return " ".join(parts)
-
-
-def dungeon_local_grid(uid, floor, x, y):
-    """画像に依存しない3x3局所盤面。#は壁、@は現在地、.は通行可能。"""
-    symbols = {
-        D_WALL: "#", D_FLOOR: ".", D_START: ".", D_STAIRS: "S", D_CHEST: "C",
-        D_TRAP: "T", D_SHOP: "$", D_BASE: "B", D_MINE: "M", D_REST: "R",
-        D_SHRINE: "H", D_EVENT: "E",
-    }
-    rows = []
-    for dy in (-1, 0, 1):
-        cells = []
-        for dx in (-1, 0, 1):
-            cells.append("@" if (dx, dy) == (0, 0) else symbols.get(d_get_cell(uid, floor, x + dx, y + dy), "#"))
-        rows.append("".join(cells))
-    return " / ".join(rows) + "（#=壁・進入不可 @=現在地 .=通行可 S=階段）"
-
-
 def dungeon_move_criteria(uid, floor, x, y, dist=None):
-    """Clefへ渡す「各方向がどういう状況か」の基準。壁・特殊タイル・階段距離を明示する。"""
-    if dist is None:
-        dist = dungeon_bfs(uid, floor, x, y)
-    stairs = dungeon_stairs_cell(uid, floor)
-    stairs_steps = dist.get(stairs) if stairs else None
+    """Clefへ渡す「各方向へ進むとどうなるか」の基準（Phase 1-E で部屋前提に改修）。
+
+    1方向 = 1 journey として、到達点がどの部屋か（発見済みなら役割名と
+    制圧状況、未発見なら「未探索」）、通路なら分岐/行き止まり等を明示する。
+    dist 引数は互換のため残すが、判定は d_plan_walk と部屋グラフで行う。
+    """
+    inst = d_get_instance(uid, floor)
     criteria = {}
-    for key, (dx, dy) in _DIRECTIONS.items():
+    for key in _DIRECTIONS:
         label = _DIRECTION_LABELS[key]
-        nx, ny = x + dx, y + dy
-        if not (0 <= nx < D2_MAP_W and 0 <= ny < D2_MAP_H):
-            criteria[key] = f"{label}はマップ外（進めない）"
-            continue
-        if d_get_cell(uid, floor, nx, ny) == D_WALL:
+        if d_direction_blocked(uid, floor, x, y, key):
             criteria[key] = f"{label}は壁（進めない）"
             continue
-        note = f"{label}は{dungeon_cell_label(uid, floor, nx, ny)}（移動可）"
-        steps = dist.get((nx, ny))
-        if stairs_steps is not None and steps is not None:
-            note += f" 階段まで{steps}マス" + ("（近づく）" if steps < stairs_steps else "")
-        criteria[key] = note
+        plan = d_plan_walk(uid, floor, x, y, key)
+        if not plan["path"]:
+            criteria[key] = f"{label}は壁（進めない）"
+            continue
+        sx, sy = plan["stop_cell"]
+        room = d_room_at(inst, sx, sy)
+        remain = d_rooms_to_stairs(uid, floor, sx, sy)
+        tail = f"（階段の間まであと{remain}部屋）" if remain is not None else ""
+        if room is None:
+            kind = {"junction": "通路の分岐", "dead_end": "通路の行き止まり"}.get(
+                plan["stop_reason"], "通路")
+            criteria[key] = f"{label}は{kind}まで進む（移動可）{tail}"
+        elif d_room_discovered(inst, room):
+            name = D_ROOM_ROLE_NAMES.get(room["role"], "部屋")
+            if room["role"] == "start":
+                criteria[key] = f"{label}は{name}まで進む（移動可）{tail}"
+            else:
+                state = "制圧済み" if d_room_cleared(inst, room["id"]) else "未制圧"
+                criteria[key] = f"{label}は{name}（{state}）まで進む（移動可）{tail}"
+        else:
+            criteria[key] = f"{label}は未探索の部屋まで進む（移動可）{tail}"
     return criteria
 
 
@@ -1937,24 +2260,31 @@ def dungeon_goal_text(uid):
 
 
 def dungeon_best_direction(uid, plan="安全探索", dist=None):
-    """Clefの応答が使えない時のフォールバック。作戦に沿った合法手を必ず1つ返す。"""
+    """Clefの応答が使えない時のフォールバック（Phase 1-E で目標部屋方式に改修）。
+
+    作戦に応じた目標部屋（d_target_room）を決め、その中心へのグリッドBFS
+    最短路の最初の一歩を返す。journey は分岐・部屋で止まるため、ターン
+    毎に再計算すれば目標部屋へ辿り着ける。目標が決まらない場合は
+    階段へ近づく合法手、合法手自体が無い場合は従来どおり "up" を返す。
+    """
     p = d_get_player(uid)
     floor, x, y = p["floor"], p["x"], p["y"]
-    if dist is None:
-        dist = dungeon_bfs(uid, floor, x, y)
-    criteria = dungeon_move_criteria(uid, floor, x, y, dist)
-    legal = [key for key, text in criteria.items() if "移動可" in text]
+    target = d_target_room(uid, plan)
+    if target is not None:
+        direction = d_next_direction_toward(uid, floor, x, y, target["center"])
+        if direction is not None:
+            return direction
+    # 保険: 進める方向のうち階段タイルへ最も近いものを選ぶ。
+    legal = [key for key in _DIRECTIONS
+             if not d_direction_blocked(uid, floor, x, y, key)]
     if not legal:
         return "up"
-    specials = ("宝箱", "鉱山", "祭壇", "イベント", "商店", "休憩所", "階段")
-    if dungeon_plan_key(plan) == "treasure":
-        ranked = sorted(legal, key=lambda k: (
-            not any(word in criteria[k] for word in specials),
-            dist.get((x + _DIRECTIONS[k][0], y + _DIRECTIONS[k][1]), 9999),
-        ))
-    else:
-        ranked = sorted(legal, key=lambda k: dist.get((x + _DIRECTIONS[k][0], y + _DIRECTIONS[k][1]), 9999))
-    return ranked[0]
+    stairs = dungeon_stairs_cell(uid, floor)
+    if stairs:
+        dist_from_stairs = dungeon_bfs(uid, floor, stairs[0], stairs[1])
+        legal.sort(key=lambda k: dist_from_stairs.get(
+            (x + _DIRECTIONS[k][0], y + _DIRECTIONS[k][1]), 9999))
+    return legal[0]
 
 
 def d_make_reward_choices(uid, enemy):
@@ -2097,10 +2427,12 @@ async def d_current_cell_action(uid, db_api):
         # Phase 1-D: 未制圧の階段部屋では番人を倒すまで階段を使えない。
         msg = "階段は番人に守られている。番人を倒さないと使えない。"
     elif cell == D_STAIRS and floor < D_FLOORS:
+        d_record_floor_clear(uid)
         p["floor"] = floor + 1
         p["hp"] = d_effective_stats(p)["max_hp"]
         d_clear_status(uid)
         p["x"], p["y"] = d_instance_start(uid, p["floor"])
+        d_reset_floor_counters(p)
         d_progress_quest(uid, "floor", 1)
         msg = f"階段を上り、{p['floor']}Fへ進みました。"
     elif cell == D_MINE:
@@ -2221,6 +2553,9 @@ async def d_execute_journey(uid, db_api, direction, *, source="manual"):
     }
     if not plan["path"]:
         return result
+    # Phase 1-E の計測: 実際に歩いた journey を現在フロアのカウンタへ加算する
+    # （手動・Clef・「階段へ」ナビの合算。フロア踏破時に floor_history へ移る）。
+    p["floor_journeys"] = p.get("floor_journeys", 0) + 1
     inst = d_get_instance(uid, floor)
     prev_room = d_room_at(inst, start[0], start[1])
     # 立っている開始マスは「踏んだ」ものとして扱う（アンブッシュ抽選の対象外）。
@@ -2232,6 +2567,7 @@ async def d_execute_journey(uid, db_api, direction, *, source="manual"):
         p["hp"] = d_effective_stats(p)["max_hp"]
         p["floor"] = 1
         p["x"], p["y"] = d_instance_start(uid, 1)
+        d_reset_floor_counters(p)
         result["messages"].append("力尽きた… スタート地点へ戻された")
 
     for nx, ny in plan["path"]:
@@ -2474,6 +2810,15 @@ class DungeonStatusView(DungeonViewBase):
         quests, _ = d_content_summary(self.uid)
         em.add_field(name="クエスト", value="\n".join(quests) if quests else "全クエスト達成", inline=False)
         em.add_field(name="自動操作", value=f"作戦: **{self.clef_plan}**\n状態: {clef_status_text(self.uid)}", inline=False)
+        # Phase 1-E の踏破計測: 直近に踏破したフロアの実績を小さく添える。
+        history = p.get("floor_history") or []
+        if history:
+            last = history[-1]
+            em.add_field(
+                name="前フロアの実績",
+                value=f"{last.get('floor', '?')}F: {last.get('turns_used', 0)}ターン / {last.get('journeys_used', 0)}回移動",
+                inline=False,
+            )
         return em
 
     async def _render(self, interaction, msg=""):
@@ -2554,10 +2899,12 @@ class DungeonStairsView(DungeonViewBase):
             await self._render(i, "階段は番人に守られている。番人を倒さないと使えない。")
             return
         if floor < D_FLOORS:
+            d_record_floor_clear(self.uid)
             p["floor"] = floor + 1
             p["hp"] = d_effective_stats(p)["max_hp"]
             d_clear_status(self.uid)
             p["x"], p["y"] = d_instance_start(self.uid, p["floor"])
+            d_reset_floor_counters(p)
             d_progress_quest(self.uid, "floor", 1)
             await dg_save_player(self.uid, self.db_api)
             await d_return_to_dungeon(i, self.uid, self.db_api, f"フロア {p['floor']}へ到達！")
@@ -2833,6 +3180,7 @@ class DungeonCombatView(DungeonViewBase):
         p["hp"] = d_effective_stats(p)["max_hp"]
         p["floor"] = 1
         p["x"], p["y"] = d_instance_start(self.uid, 1)
+        d_reset_floor_counters(p)
         self.log.append("敗北… スタート地点へ送還された")
         await dg_save_player(self.uid, self.db_api)
         self.stop()
@@ -3016,25 +3364,28 @@ class DungeonMainView(DungeonViewBase):
         result = await d_execute_journey(self.uid, self.db_api, direction, source="manual")
         p = self.sync_state()
         msg = "\n".join(result["messages"])
+        await self._render_journey_result(i, result, msg, p)
 
+    async def _render_journey_result(self, interaction, result, msg, p):
+        """journey 結果に応じた View 遷移と最終描画（手動移動と「階段へ」で共用）。"""
         if result["view"] == "stairs":
             sv = DungeonStairsView(self.uid, p["floor"], p["x"], p["y"], self.db_api)
-            await self._redraw(i, "階段がある。どうする？", p, view=sv)
+            await self._redraw(interaction, "階段がある。どうする？", p, view=sv)
             return
         if result["view"] == "shop":
             shop = DungeonShopView(self.uid, p["floor"], p["x"], p["y"], self.db_api)
-            await self._redraw(i, "商店を発見！", p, view=shop)
+            await self._redraw(interaction, "商店を発見！", p, view=shop)
             return
         if result["view"] == "mine":
             mv = DungeonMineView(self.uid, p["floor"], p["x"], p["y"], self.db_api)
-            await self._redraw(i, "鉱山を発見！", p, view=mv)
+            await self._redraw(interaction, "鉱山を発見！", p, view=mv)
             return
         if result["view"] == "combat":
             cv = DungeonCombatView(self.uid, p["floor"], p["x"], p["y"], result["enemy"], self.db_api,
                                    room_id=result.get("room_id"))
-            await self._redraw(i, msg, p, view=cv)
+            await self._redraw(interaction, msg, p, view=cv)
             return
-        await self._redraw(i, msg, p, view=self._fresh_main_view(p))
+        await self._redraw(interaction, msg, p, view=self._fresh_main_view(p))
 
     @discord.ui.button(label="北", style=discord.ButtonStyle.grey, row=0, custom_id="dg_u")
     async def up(self, i, b): await self._move(i, "up")
@@ -3092,9 +3443,65 @@ class DungeonUnifiedView(DungeonMainView):
         status_button = discord.ui.Button(label="STATUS", style=discord.ButtonStyle.green, row=3)
         status_button.callback = self.open_status
         self.add_item(status_button)
+        # Phase 1-E「階段へ」: 階段の間が発見済みのときだけ有効（設計 §4-1）。
+        stairs_button = discord.ui.Button(
+            label="階段へ", style=discord.ButtonStyle.primary, row=3,
+            disabled=not d_stairs_discovered(uid, floor),
+        )
+        stairs_button.callback = self.go_stairs
+        self.add_item(stairs_button)
         stop = discord.ui.Button(label="終了", style=discord.ButtonStyle.red, row=3)
         stop.callback = self.end_session
         self.add_item(stop)
+
+    async def go_stairs(self, interaction):
+        """「階段へ」: 発見済みの階段の間まで最短路を journey で辿る（Phase 1-E）。
+
+        計画（次に進む方向）は d_plan_navigation_direction で停止のたびに
+        再計算し、実行は通常移動と同じ d_execute_journey を上限10回
+        繰り返す。戦闘開始・View遷移（商店/鉱山/階段）・HP低下停止・
+        死亡などの割り込みがあれば即座に止め、最後の journey の結果を
+        通常移動と同様に描画する。
+        """
+        lock = d_get_lock(self.uid)
+        if lock.locked():
+            await interaction.response.send_message("前の操作を処理中です。少し待ってください。", ephemeral=True)
+            return
+        await lock.acquire()
+        try:
+            await interaction.response.defer()
+            p = self.sync_state()
+            floor = p["floor"]
+            inst = d_get_instance(self.uid, floor)
+            stairs_room = next((r for r in inst.get("rooms", []) if r["role"] == "stairs"), None)
+            if stairs_room is None or not d_room_discovered(inst, stairs_room):
+                await self._redraw(interaction, "階段の間はまだ見つかっていない。", p,
+                                    view=self._fresh_main_view(p))
+                return
+            target = stairs_room["center"]
+            messages = []
+            result = None
+            for _ in range(10):
+                p = self.sync_state()
+                if (p["x"], p["y"]) == tuple(target):
+                    break
+                direction = d_plan_navigation_direction(self.uid, floor, p["x"], p["y"], target)
+                if direction is None:
+                    break
+                result = await d_execute_journey(self.uid, self.db_api, direction, source="manual")
+                messages.extend(result["messages"])
+                if (result["view"] is not None or result["enemy"] is not None
+                        or result["died"] or result["steps"] == 0
+                        or result["stop_reason"] == "low_hp"):
+                    break
+            p = self.sync_state()
+            msg = "\n".join(messages) or "階段へ移動した。"
+            if result is None:
+                await self._redraw(interaction, msg, p, view=self._fresh_main_view(p))
+                return
+            await self._render_journey_result(interaction, result, msg, p)
+        finally:
+            lock.release()
 
     def _fresh_main_view(self, p):
         return DungeonUnifiedView(self.uid, p["floor"], p["x"], p["y"], self.db_api, plan=self.clef_plan)
@@ -3318,7 +3725,8 @@ class ClefDungeonPlayer:
             f"HP: {p['hp']}/{stats['max_hp']} ({hp_pct}%) / ATK {stats['atk']} DEF {stats['def_']} / 職業: {d_job_name(uid)}",
             f"目的: {dungeon_goal_text(uid)}",
             f"階段: {dungeon_stairs_hint(uid, floor, x, y, dist)}",
-            f"周囲: {dungeon_surround_text(uid, floor, x, y)}",
+            # Phase 1-E: 旧「周囲3×3」は部屋グラフ要約へ置き換えた（設計 §8）。
+            d_room_summary_text(uid, floor, x, y),
         ]
         last = self._run_stats.get(uid, {}).get("last_result")
         if last:
@@ -3408,7 +3816,7 @@ class ClefDungeonPlayer:
         uid = str(uid)
         if self.is_running(uid):
             run = self._run_stats.get(uid, {})
-            return f"実行中（{run.get('turns', 0)}ターン / 作戦: {self.plan_for(uid)}）"
+            return f"実行中（{run.get('turns', 0)}journey / 作戦: {self.plan_for(uid)}）"
         return "停止中"
 
     async def start(self, interaction, plan=None):
@@ -3456,7 +3864,7 @@ class ClefDungeonPlayer:
         embed.add_field(name="作戦", value=f"{view.clef_plan} / 停止: 終了ボタン", inline=False)
         embed.add_field(
             name="停止条件",
-            value=f"HP30%未満 / ボス / 遺物 / {CLEF_MAX_TURNS}ターン / APIエラー3回 / 同一地点3回",
+            value=f"HP30%未満 / ボス / 遺物 / {CLEF_MAX_TURNS}journey / APIエラー3回 / 同一地点3回",
             inline=False,
         )
         embed.add_field(
@@ -3490,7 +3898,8 @@ class ClefDungeonPlayer:
         if any("遺物" in line for line in logs[-8:]):
             return "希少アイテム発見"
         if run.get("turns", 0) >= CLEF_MAX_TURNS:
-            return f"1回の自動操作が{CLEF_MAX_TURNS}ターンに到達"
+            # Phase 1-E: 上限の単位はターン数ではなく journey 数。
+            return f"1回の自動操作が{CLEF_MAX_TURNS}journeyに到達"
         if len(positions) >= 3 and positions[-1] == positions[-2] == positions[-3]:
             return "同じ場所で3回連続停止"
         if sum("Clef APIエラー" in line or "Clef接続エラー" in line for line in logs[-6:]) >= 3:
@@ -3561,10 +3970,12 @@ class ClefDungeonPlayer:
             })
             choice = d_normalize_choice(raw, {"up", "stay"}, "stay")
             if choice == "up" and floor < D_FLOORS:
+                d_record_floor_clear(uid)
                 p["floor"] = floor + 1
                 p["hp"] = d_effective_stats(p)["max_hp"]
                 d_clear_status(uid)
                 p["x"], p["y"] = d_instance_start(uid, p["floor"])
+                d_reset_floor_counters(p)
                 d_progress_quest(uid, "floor", 1)
                 logs.append(f"階段を上り、{p['floor']}Fへ進みました。")
             else:
@@ -3652,7 +4063,7 @@ class ClefDungeonPlayer:
             f"目的: {dungeon_goal_text(uid)}\n"
             f"作戦: {plan}（{dungeon_plan_guidance(plan)}）\n"
             f"現在地: {floor}F ({x},{y}) / 階段: {dungeon_stairs_hint(uid, floor, x, y, dist)}\n"
-            f"局所盤面: {dungeon_local_grid(uid, floor, x, y)}\n"
+            f"{d_room_summary_text(uid, floor, x, y)}\n"
             f"方向ごとの判定基準:\n{criteria_text}\n"
             "制約: 壁へは進めません。階段へ近づく方向を優先します。HPが30%未満なら回復タイルや階段へ向かってください。\n"
             "回答は次のいずれか1語のみ: " + ", ".join(CLEF_MOVE_KEYS)
@@ -3834,6 +4245,7 @@ class DungeonCog(Cog):
                 player["x"], player["y"] = d_instance_start(uid, 1)
                 player["hp"] = d_effective_stats(player)["max_hp"]
                 player["turns"] = 0
+                d_reset_floor_counters(player)
                 player["cooldowns"] = {}
 
             if self.db_api:
