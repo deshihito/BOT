@@ -15,8 +15,12 @@ AITOOLS_TIMEOUT = float(os.getenv("AITOOLS_TIMEOUT", "30"))
 AITOOLS_RETRIES = max(1, int(os.getenv("AITOOLS_RETRIES", "1")))
 
 # 引数や確認モーダルを要する処理、権限操作、削除・送金系は代理実行対象外。
+# MIQ設定も対象外：個人の設定パネルで、/general から ephemeral で開くもの。
+# AITools経由だと ShortcutMessageInteraction が ephemeral を捨ててチャンネルへ
+# 公開送信してしまい、MIQ実行時に引用画像と一緒に設定が出てしまうため。
 BLOCKED_ACTIONS = {
     "general:pay", "general:fujo_register", "general:fujo_freeze", "general:fujo_panic_disable",
+    "general:miq_settings",
     "general:shortcut_manage", "general:aitools", "general:ai_default",
     "general:image_default", "general:reasoning_default",
     "support:clear", "support:role_bulk", "support:muted", "support:ticket", "support:honeypot",
@@ -140,6 +144,8 @@ async def invoke_action(bot, message, item: dict[str, str], *, invoker=None) -> 
     """既存GeneralCogのShortcutMessageInteraction経路を再利用する。"""
     if item["root"] in {"support", "general"} and item["value"] in {"pay", "clear"}:
         raise AIToolsDecisionError("この操作はAI toolsから実行できません。")
+    if item["root"] == "general" and item["value"] == "miq_settings":
+        raise AIToolsDecisionError("MIQ設定はAI toolsから実行できません。/general から開いてください。")
     general = bot.get_cog("GeneralCog")
     if general is None:
         raise AIToolsDecisionError("機能ディスパッチャーが読み込まれていません。")
