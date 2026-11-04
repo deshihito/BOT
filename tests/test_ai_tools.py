@@ -19,16 +19,21 @@ class AIToolsTest(unittest.IsolatedAsyncioTestCase):
         }
 
     async def test_default_candidates_include_all_safe_and_exclude_sensitive_tools(self):
-        from cogs.general import SHORTCUT_ROOTS
+        from core import action_registry
 
         candidates = ai_tools_router.action_candidates()
+        # 候補はアクションレジストリから生成される（surfaces に aitools を含み
+        # risk が blocked でないアクションのみ）。
         expected = {
-            f"{root}:{value}".lower()
-            for root, (_, items) in SHORTCUT_ROOTS.items()
-            for _, value in items
-            if f"{root}:{value}".lower() not in ai_tools_router.BLOCKED_ACTIONS
+            spec.id.lower()
+            for spec in action_registry.default_registry().all()
+            if "aitools" in spec.surfaces and spec.risk != "blocked"
         }
         self.assertEqual(set(candidates), expected)
+        # /support の新規候補のうち AI に入るのは読み取り専用の状態確認だけ。
+        self.assertIn("support:sokunuke_status", candidates)
+        self.assertNotIn("support:sns_notify", candidates)
+        self.assertNotIn("support:sticky", candidates)
         self.assertTrue(candidates)
         self.assertNotIn("support:clear", candidates)
         self.assertNotIn("general:pay", candidates)
