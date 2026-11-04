@@ -16,7 +16,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands, tasks
 from core.panel_v2 import as_panel_v2, edit_panel_v2
-from core import ai_omnirush, ai_preferences, ai_provider_router, guild_settings, logfare, shortcuts
+from core import action_registry, ai_omnirush, ai_preferences, ai_provider_router, guild_settings, logfare, shortcuts
 from core.game_guides import GAME_GUIDES, GAME_ORDER
 from core import localization, translation
 from core.libretranslate import LibreTranslateClient, LibreTranslateError
@@ -91,31 +91,9 @@ GENERAL_ACTIONS = {
     ],
 }
 
-SHORTCUT_ROOTS = {
-    "general": ("/general", [(label, value) for values in GENERAL_ACTIONS.values() for label, value in values if value != "shortcut_manage"]),
-    "vc": ("/vc", [("VC参加", "join"), ("VC退出", "leave"), ("VC状態", "status"),
-                    ("音楽操作パネル", "music_panel"), ("録音開始", "record_start"), ("録音停止", "record_stop"),
-                    ("やまびこ開始", "echo_start"), ("やまびこ停止", "echo_stop"),
-                    ("文字起こし開始", "transcribe_start"), ("文字起こし停止", "transcribe_stop"),
-                    ("カラオケ開始", "karaoke_start"), ("カラオケ停止", "karaoke_stop"),
-                    ("ランダム通話開始", "match_start"), ("ランダム通話終了", "match_stop"),
-                    ("グローバルVC開始", "global_start"), ("グローバルVC終了", "global_stop"),
-                    # AI toolsからは入力フォームを開かずに完結する操作だけを公開する。
-                    ("録音状態", "record_status"), ("録音音程解析", "record_pitch"),
-                    ("やまびこ状態", "echo_status"), ("カラオケ採点", "karaoke_score"),
-                    ("ボイスチェンジャー停止", "changer_stop"), ("ボイスチェンジャー状態", "changer_status"),
-                    ("グローバルVCルーム一覧", "gvc_room_list"), ("グロチャ接続解除", "gvc_chat_disconnect"),
-                    ("読み上げ停止", "tts_stop"), ("音声トリガー一覧・削除", "trigger_panel")]),
-    "game": ("/game", [("ゲーム開始: " + GAME_GUIDES[game]["name"], "game:" + game) for game in GAME_ORDER]),
-    "support": ("/support", [("Muted設定", "muted"), ("匿名つぶやき", "whisper"), ("メッセージ削除", "clear"),
-                              ("一括ロール操作", "role_bulk"), ("bump/up状態", "bumprta_status"),
-                              ("bump/upオン", "bumprta_on"), ("bump/upオフ", "bumprta_off"),
-                              ("絵文字便乗設定", "binjou"), ("VC入退室履歴", "vc_log"),
-                              ("メッセージ編集履歴", "message_log"), ("モデレート履歴", "moderation_log"),
-                              ("ハニーポット", "honeypot"), ("チケットツール", "ticket"),
-                              ("サーバーアシスト", "server_assist")]),
-    "help": ("/help", [("ヘルプを表示", "overview")]),
-}
+# アクション定義の単一の真実は core/action_registry。SHORTCUT_ROOTS は
+# レジストリからの生成物（名前・形状・import 互換は従来どおり維持する）。
+SHORTCUT_ROOTS = action_registry.build_shortcut_roots()
 
 
 # ============================================================
