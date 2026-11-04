@@ -144,6 +144,66 @@ class ActionSpec:
             raise ValueError(f"ActionSpec {self.id!r}: params の名前が重複しています")
 
 
+def validate_params(spec: ActionSpec, params: dict | None) -> dict[str, Any]:
+    """保存された params を ActionSpec の ParamSpec で検証し、検証済みの dict を返す。
+
+    未知のキー・型違い・範囲外・choices 外があれば ValueError。
+    未指定のキーは検証しない（プリセットは部分指定が前提で、未設定分は
+    実行側の既定値に任せる。required は「実行に必要」という表示・案内用）。
+    """
+    if not params:
+        return {}
+    if not isinstance(params, dict):
+        raise ValueError("params は辞書で指定してください。")
+    by_name = {param.name: param for param in spec.params}
+    cleaned: dict[str, Any] = {}
+    for name, value in params.items():
+        param = by_name.get(name)
+        if param is None:
+            raise ValueError(f"{spec.label}: 未知のパラメータです: {name}")
+        cleaned[name] = _validate_param_value(param, value)
+    return cleaned
+
+
+def _validate_param_value(param: ParamSpec, value: Any) -> Any:
+    label = param.label or param.name
+    if param.type == "bool":
+        if not isinstance(value, bool):
+            raise ValueError(f"{label}: オン/オフで指定してください。")
+        return value
+    if param.type == "int":
+        if isinstance(value, bool) or not isinstance(value, int):
+            raise ValueError(f"{label}: 整数で指定してください。")
+        _check_param_range(param, value)
+        return value
+    if param.type in {"number", "duration"}:
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise ValueError(f"{label}: 数値で指定してください。")
+        _check_param_range(param, value)
+        return float(value)
+    if param.type == "choice":
+        values = [choice_value for _choice_label, choice_value in param.choices]
+        if value not in values:
+            raise ValueError(f"{label}: 選択肢の中から指定してください。")
+        return value
+    if param.type == "text":
+        if not isinstance(value, str):
+            raise ValueError(f"{label}: 文字列で指定してください。")
+        return value
+    # member / user / channel / role は Discord の ID（整数）だけを受け付ける。
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ValueError(f"{label}: ID（整数）で指定してください。")
+    return value
+
+
+def _check_param_range(param: ParamSpec, value: float) -> None:
+    label = param.label or param.name
+    if param.min_value is not None and value < param.min_value:
+        raise ValueError(f"{label}: {param.min_value} 以上で指定してください。")
+    if param.max_value is not None and value > param.max_value:
+        raise ValueError(f"{label}: {param.max_value} 以下で指定してください。")
+
+
 def make_action(root: str, value: str, label: str, genre: str, genre_label: str, **kwargs) -> ActionSpec:
     """id を root:value から組み立て、AI 代理実行対象外なら surfaces/risk を落とす。"""
     action_id = f"{root}:{value}"
@@ -237,9 +297,47 @@ VC_SHORTCUT_ACTIONS: tuple[tuple[str, str], ...] = (
 )
 
 
+# /vc の ParamSpec。cogs/sio_voice.py の dispatch_voice_action が実際に受け取り、
+# 値ごとの分岐先（_echo_impl 等）が使う引数だけを定義する。範囲は dispatch の
+# app_commands.Range 指定に合わせた。dispatch が受け取っても分岐先で使われない
+# 引数（record の delay、transcribe の channel など）は定義しない。
+_CHANGER_PARAMS: tuple[ParamSpec, ...] = (
+    ParamSpec(name="pitch", label="ピッチ（半音）", type="number",
+              min_value=-24.0, max_value=24.0, help="声の高さのずらし幅"),
+    ParamSpec(name="buffer_ms", label="目標バッファ（ms）", type="number",
+              min_value=20.0, max_value=2000.0),
+    ParamSpec(name="max_ms", label="上限バッファ（ms）", type="number",
+              min_value=20.0, max_value=4000.0),
+)
+
+VC_ACTION_PARAMS: dict[str, tuple[ParamSpec, ...]] = {
+    # _echo_impl: 開始時に遅延として使う（未指定なら 2.0 秒）。
+    "echo_start": (
+        ParamSpec(name="delay", label="遅延（秒）", type="number",
+                  min_value=0.1, max_value=30.0, help="やまびこの遅延時間"),
+    ),
+    # _karaoke_impl: 開始には歌詞が必須（未指定だと開始できない）。
+    "karaoke_start": (
+        ParamSpec(name="lyrics", label="お題の歌詞", type="text", required=True,
+                  help="カラオケのお題にする歌詞"),
+    ),
+    # _changer_impl: start では開始時設定、status では動作中の設定変更になる。
+    "changer_start": _CHANGER_PARAMS,
+    "changer_status": _CHANGER_PARAMS,
+    # _global_impl: 参加にはルーム名が必須。パスワードは非公開ルーム用。
+    "global_start": (
+        ParamSpec(name="room", label="ルーム名", type="text", required=True,
+                  help="参加するグローバルVCルーム名"),
+        ParamSpec(name="password", label="パスワード", type="text",
+                  help="非公開ルームのパスワード"),
+    ),
+}
+
+
 def build_vc_actions() -> list[ActionSpec]:
     return [
-        make_action("vc", value, label, "vc", ROOT_LABELS["vc"])
+        make_action("vc", value, label, "vc", ROOT_LABELS["vc"],
+                    params=VC_ACTION_PARAMS.get(value, ()))
         for label, value in VC_SHORTCUT_ACTIONS
     ]
 
