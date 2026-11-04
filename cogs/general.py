@@ -787,10 +787,12 @@ def _miq_af(name: str) -> str:
 
 # (key, 表示名, 探索パス)。見つかったものだけが選択肢に出る。
 # assets/fonts/ に置くか、環境変数 MIQ_FONT_<KEY大文字> でパスを指定できる。
-# 注意: リポジトリには assets/fonts が存在しない。リポジトリ同梱の font.ttf
-# (Hachi Maru Pop、日本語対応) を最後の選択肢として必ず探索する。
-# これにより、OSに日本語フォントが無くても MIQ が欧文フォントに
-# フォールバックして日本語が □ になることがなくなる。
+# 注意: このPRで assets/fonts/ を新設する。ユーザーが後からフォントを
+# assets/fonts/ に入れると、_miq_discover_asset_fonts() がファイル名から
+# 自動で選択肢にするため、ここへの追加は必須ではない。
+# リポジトリ同梱の font.ttf (Hachi Maru Pop、日本語対応) を最後の選択肢
+# として必ず探索する。これにより、OSに日本語フォントが無くても MIQ が
+# 欧文フォントにフォールバックして日本語が □ になることがなくなる。
 _MIQ_REPO_FONT = str(Path(__file__).resolve().parent.parent / "font.ttf")
 _MIQ_FONT_DEFS = (
     ("mplus", "M PLUS Rounded 1c", (
@@ -875,11 +877,41 @@ def _font_covers_japanese(path: str) -> bool:
         return False
 
 
+def _miq_discover_asset_fonts() -> list[tuple[str, str, str]]:
+    """assets/fonts/ に置かれたフォントを自動で選択肢にする。
+
+    ユーザーが後からフォントファイル (.ttf/.otf/.ttc) を assets/fonts/ に
+    入れるだけで、コードを変更しなくても MIQ のフォント選択肢に出る。
+    ファイル名がそのまま表示名になり、キーはファイル名から作る。
+    日本語非対応のファイルは □ 防止のため除外する。
+    """
+    from PIL import ImageFont
+
+    if not _MIQ_ASSET_FONTS.is_dir():
+        return []
+    discovered: list[tuple[str, str, str]] = []
+    for entry in sorted(_MIQ_ASSET_FONTS.iterdir(), key=lambda p: p.name.lower()):
+        if not entry.is_file() or entry.suffix.lower() not in (".ttf", ".otf", ".ttc"):
+            continue
+        path = str(entry)
+        try:
+            ImageFont.truetype(path, 20)
+        except Exception:
+            continue
+        if not _font_covers_japanese(path):
+            continue
+        key = re.sub(r"[^a-z0-9]+", "_", entry.stem.lower()).strip("_") or "asset"
+        discovered.append((key, entry.stem, path))
+    return discovered
+
+
 def _miq_available_fonts() -> list[tuple[str, str, str | None]]:
     """利用可能なフォント [(key, label, path)] を返す(初回のみ探索)。常に1件以上返る。
 
     以前は「Pillowで読み込めるか」だけで選んでいたため、日本語非対応の
     フォントが選ばれて □ になることがあった。今は日本語対応も確認する。
+    assets/fonts/ に置かれたフォントは、上の _MIQ_FONT_DEFS に無くても
+    自動で選択肢に加わる。
     """
     global _MIQ_FONTS_CACHE
     if _MIQ_FONTS_CACHE is not None:
@@ -899,6 +931,16 @@ def _miq_available_fonts() -> list[tuple[str, str, str | None]]:
                 continue
             found.append((key, label, path))
             break
+    # assets/fonts/ に後から入れられたフォントを自動で追加する。
+    # 既存の選択肢とパスが重複するものは二重に出さない。
+    _seen_paths = {path for _k, _l, path in found if path}
+    _seen_keys = {key for key, _l, _p in found}
+    for key, label, path in _miq_discover_asset_fonts():
+        if path in _seen_paths or key in _seen_keys:
+            continue
+        found.append((key, label, path))
+        _seen_paths.add(path)
+        _seen_keys.add(key)
     if not found:
         # 最後の砦はリポジトリ同梱の日本語フォント。欧文フォントへの
         # フォールバックは日本語を □ にするため、ここでは使わない。
