@@ -4,6 +4,7 @@ from __future__ import annotations
 import logging
 import os
 import re
+from typing import Any
 
 import discord
 from discord.ext import commands
@@ -78,6 +79,210 @@ def _resolve_invoker(message, bot_user):
     return next(iter(members.values())) if len(members) == 1 else None
 
 
+def _parse_param_input(param: dict, raw: str) -> Any:
+    """補完モーダルの文字列入力を ParamSpec の型に変換する（変換できなければ ValueError）。"""
+    raw = (raw or "").strip()
+    label = param.get("label") or param.get("name") or "引数"
+    ptype = param.get("type")
+    if ptype == "int":
+        try:
+            return int(raw)
+        except ValueError:
+            try:
+                value = float(raw)
+            except ValueError:
+                raise ValueError(f"{label}は整数で入力してください。") from None
+            if not value.is_integer():
+                raise ValueError(f"{label}は整数で入力してください。")
+            return int(value)
+    if ptype in {"number", "duration"}:
+        try:
+            return float(raw)
+        except ValueError:
+            raise ValueError(f"{label}は数値で入力してください。") from None
+    if ptype == "bool":
+        lowered = raw.lower()
+        if lowered in {"true", "on", "オン", "有効", "yes", "1"}:
+            return True
+        if lowered in {"false", "off", "オフ", "無効", "no", "0"}:
+            return False
+        raise ValueError(f"{label}はオン/オフで入力してください。")
+    if ptype == "choice":
+        for choice_label, choice_value in param.get("choices") or []:
+            if raw == str(choice_value) or raw == str(choice_label):
+                return choice_value
+        raise ValueError(f"{label}は選択肢の中から入力してください。")
+    if ptype in {"member", "user", "channel", "role"}:
+        digits = re.sub(r"\D", "", raw)
+        if not digits:
+            raise ValueError(f"{label}は対象を指定してください。")
+        return int(digits)
+    return raw
+
+
+class AIToolsConfirmView(discord.ui.View):
+    """risk="confirm" のアクションで、実行前に明示確認を挟むビュー。
+
+    押せるのは依頼者（invoker）だけ。確認するまで対象アクションは実行されず、
+    キャンセル／タイムアウトでも実行しない。
+    """
+
+    def __init__(self, *, invoker_id: int, base_text: str, on_execute, timeout: float = 180):
+        super().__init__(timeout=timeout)
+        self.invoker_id = invoker_id
+        self.base_text = base_text
+        self.on_execute = on_execute
+        self.message: discord.Message | None = None
+        self.finished = False
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        return interaction.user.id == self.invoker_id
+
+    def _disable_all(self) -> None:
+        for child in self.children:
+            child.disabled = True
+
+    @discord.ui.button(label="実行する", style=discord.ButtonStyle.danger)
+    async def confirm_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.finished = True
+        self._disable_all()
+        await interaction.response.edit_message(content=self.base_text + "\n実行します。", view=self)
+        self.stop()
+        await self.on_execute()
+
+    @discord.ui.button(label="やめる", style=discord.ButtonStyle.secondary)
+    async def cancel_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.finished = True
+        self._disable_all()
+        await interaction.response.edit_message(content=self.base_text + "\nキャンセルしました。実行していません。", view=self)
+        self.stop()
+
+    async def on_timeout(self) -> None:
+        if self.finished or self.message is None:
+            return
+        self._disable_all()
+        try:
+            await self.message.edit(content=self.base_text + "\n時間切れのため実行しませんでした。", view=self)
+        except Exception:
+            logger.debug("AI tools confirm view timeout edit failed", exc_info=True)
+
+
+class AIToolsParamModal(discord.ui.Modal, title="不足している引数の入力"):
+    """不足している required 引数を入力するモーダル（最大5件）。"""
+
+    def __init__(self, parent_view: "AIToolsParamCompletionView"):
+        super().__init__()
+        self.parent_view = parent_view
+        self.inputs: dict[str, discord.ui.TextInput] = {}
+        for param in parent_view.missing[:5]:
+            text_input = discord.ui.TextInput(
+                label=(param.get("label") or param.get("name") or "引数")[:45],
+                required=True,
+                placeholder=(param.get("help") or "")[:100],
+                max_length=200,
+            )
+            self.inputs[param["name"]] = text_input
+            self.add_item(text_input)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        raw = {name: text_input.value for name, text_input in self.inputs.items()}
+        await self.parent_view.accept_values(interaction, raw)
+
+
+class AIToolsParamCompletionView(discord.ui.View):
+    """required 引数が不足したときに、依頼者へ入力を求めるビュー。
+
+    押せるのは依頼者だけ。入力が確定するまで対象アクションは実行されず、
+    キャンセル／タイムアウトでも実行しない。
+    """
+
+    def __init__(self, *, item: dict, base_params: dict, missing: list[dict],
+                 invoker_id: int, base_text: str, execute, timeout: float = 300):
+        super().__init__(timeout=timeout)
+        self.item = item
+        self.base_params = base_params
+        self.missing = missing
+        self.invoker_id = invoker_id
+        self.base_text = base_text
+        self.execute = execute
+        self.message: discord.Message | None = None
+        self.finished = False
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        return interaction.user.id == self.invoker_id
+
+    def _disable_all(self) -> None:
+        for child in self.children:
+            child.disabled = True
+
+    @discord.ui.button(label="不足分を入力", style=discord.ButtonStyle.primary)
+    async def input_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_modal(AIToolsParamModal(self))
+
+    @discord.ui.button(label="やめる", style=discord.ButtonStyle.secondary)
+    async def cancel_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.finished = True
+        self._disable_all()
+        await interaction.response.edit_message(content=self.base_text + "\nキャンセルしました。実行していません。", view=self)
+        self.stop()
+
+    async def on_timeout(self) -> None:
+        if self.finished or self.message is None:
+            return
+        self._disable_all()
+        try:
+            await self.message.edit(content=self.base_text + "\n時間切れのため実行しませんでした。", view=self)
+        except Exception:
+            logger.debug("AI tools completion view timeout edit failed", exc_info=True)
+
+    async def accept_values(self, interaction: discord.Interaction, raw_values: dict[str, str]) -> None:
+        """モーダルの入力を検証し、問題なければ実行（または確認ビューへ遷移）する。"""
+        values: dict[str, Any] = {}
+        for param in self.missing:
+            name = param["name"]
+            if name not in raw_values:
+                continue
+            try:
+                values[name] = _parse_param_input(param, raw_values[name])
+            except ValueError as exc:
+                await interaction.response.send_message(str(exc), ephemeral=True)
+                return
+        merged = {**self.base_params, **values}
+        try:
+            merged = ai_tools_router.validate_params_for(self.item, merged)
+        except ValueError as exc:
+            await interaction.response.send_message(str(exc), ephemeral=True)
+            return
+        label = self.item.get("label") or self.item.get("value")
+        summary = ai_tools_router.format_params_summary(self.item, merged)
+        await interaction.response.defer()
+        self.finished = True
+        self._disable_all()
+        if ai_tools_router.requires_confirmation(self.item):
+            # 補完できても confirm リスクなら、実行前に確認ビューを挟む。
+            text = f"AI tools: 「{label}」を実行しますか？" + (f"\n引数: {summary}" if summary else "")
+            confirm_view = AIToolsConfirmView(
+                invoker_id=self.invoker_id,
+                base_text=text,
+                on_execute=lambda: self.execute(merged),
+            )
+            if self.message is not None:
+                await self.message.edit(content=text, view=confirm_view)
+                confirm_view.message = self.message
+            self.stop()
+            return
+        if self.message is not None:
+            await self.message.edit(content=self.base_text + "\n実行します。", view=self)
+        self.stop()
+        await self.execute(merged)
+        if self.message is not None:
+            done_text = f"AI tools: 「{label}」を実行しました。" + (f"（引数: {summary}）" if summary else "")
+            try:
+                await self.message.edit(content=done_text, view=self)
+            except Exception:
+                logger.debug("AI tools completion view done edit failed", exc_info=True)
+
+
 class AIToolsCog(commands.Cog):
     """Mention-driven tool selection; no per-user or per-action configuration."""
 
@@ -88,6 +293,12 @@ class AIToolsCog(commands.Cog):
         if not self.bot.user:
             return content.strip()
         return re.sub(rf"<@!?{self.bot.user.id}>", "", content).strip()
+
+    async def _execute_ai_action(self, message, item: dict, invoker, params: dict) -> None:
+        """補完／確認ビューから確定した実行（invoke_action への委譲）。"""
+        async with message.channel.typing():
+            await ai_tools_router.invoke_action(
+                self.bot, message, item, invoker=invoker, params=params)
 
     @commands.command(name="aitools", help="Check the status of AI tools")
     async def aitools(self, ctx: commands.Context, action: str = "status"):
@@ -136,8 +347,49 @@ class AIToolsCog(commands.Cog):
         try:
             candidates = ai_tools_router.action_candidates()
             selected = await ai_tools_router.decide_action(prompt, candidates)
+            item = candidates[selected]
+            label = item.get("label") or selected
+            # 引数があるアクションだけ、依頼文からの抽出（第2段）を行う。
+            params = await ai_tools_router.extract_params(prompt, item)
+            missing = ai_tools_router.missing_required_params(item, params)
+            if missing:
+                # required な引数が不足していたら推測で実行せず、依頼者にだけ
+                # 操作できる補完ビューで入力を求める。
+                names = "、".join(p.get("label") or p.get("name") for p in missing)
+                text = (
+                    f"AI tools: 「{label}」には引数（{names}）が不足しています。"
+                    "下のボタンから入力してください。入力がなければ実行しません。"
+                )
+                view = AIToolsParamCompletionView(
+                    item=item,
+                    base_params=params,
+                    missing=missing,
+                    invoker_id=invoker.id,
+                    base_text=text,
+                    execute=lambda p: self._execute_ai_action(message, item, invoker, p),
+                )
+                view.message = await message.reply(text, view=view, mention_author=False)
+                return
+            if ai_tools_router.requires_confirmation(item):
+                # risk="confirm" は実行前に確認ビューを挟む（確認なしには実行しない）。
+                summary = ai_tools_router.format_params_summary(item, params)
+                text = f"AI tools: 「{label}」を実行しますか？" + (f"\n引数: {summary}" if summary else "")
+                view = AIToolsConfirmView(
+                    invoker_id=invoker.id,
+                    base_text=text,
+                    on_execute=lambda: self._execute_ai_action(message, item, invoker, params),
+                )
+                view.message = await message.reply(text, view=view, mention_author=False)
+                return
+            if params:
+                # 引数付きで実行するときは、何を・どの引数で実行するか先に明示する。
+                summary = ai_tools_router.format_params_summary(item, params)
+                await message.reply(
+                    f"AI tools: 「{label}」を実行します（引数: {summary}）。",
+                    mention_author=False,
+                )
             async with message.channel.typing():
-                await ai_tools_router.invoke_action(self.bot, message, candidates[selected], invoker=invoker)
+                await ai_tools_router.invoke_action(self.bot, message, item, invoker=invoker, params=params)
         except ai_tools_router.AIToolsNoAction as exc:
             logger.info("AI tools skipped: %s", exc)
         except ai_tools_router.AIToolsDecisionError as exc:
