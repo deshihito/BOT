@@ -2745,6 +2745,12 @@ class GeneralCog(commands.Cog):
             logger.exception("自動翻訳で予期しないエラーが発生しました")
 
     async def execute_shortcut(self, message: discord.Message, item: dict, *, invoker=None):
+        # MIQトリガー（引用への返信で「@BOT miq」）からは、どのショートカットも
+        # 実行しない。AITools等がこの経路で miq_settings を選ぶと、メッセージ経由の
+        # Interaction は ephemeral を使えず、MIQ設定パネルがチャンネルへ公開送信
+        # されて引用画像と一緒に出てしまうため。画像生成は on_message の MIQ側が行う。
+        if is_miq_trigger(message, self.bot.user if self.bot is not None else None):
+            return False
         try:
             owner_id = int(item.get("user_id"))
             author_id = int(message.author.id)
