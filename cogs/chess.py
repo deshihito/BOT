@@ -15,9 +15,11 @@ RECRUIT_SECONDS = 30
 TURN_SECONDS = 90
 ASSET = Path(__file__).resolve().parents[1] / "Assets" / "chess" / "IMG_4904.png"
 MOVE_LABELS = tuple("123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz")
-REACTION_PAGE_SIZE = 20
-NEXT_PAGE = discord.PartialEmoji(name="Right", id=1561698129655373845)
-PREVIOUS_PAGE = discord.PartialEmoji(name="Left", id=1561698207757500537)
+# Discord の Select は最大25択。候補は1ページ24件までとし、残りの枠を
+# ページ移動用の疑似選択肢に使う（前後両方の移動が要る中間ページは23件）。
+SELECT_PAGE_SIZE = 24
+PAGE_NEXT_VALUE = "__next_page__"
+PAGE_PREV_VALUE = "__prev_page__"
 
 # board[row][col], row 0 is rank 8. Uppercase = white, lowercase = black.
 BACK_RANK = "RNBQKBNR"
@@ -31,12 +33,38 @@ DIRECTIONS = {
 }
 
 
-def reaction_emoji(label):
-    if label in "123456789" and len(label) == 1:
-        return f"{label}\ufe0f\u20e3"
-    if label.isalpha() and len(label) == 1:
-        return chr(0x1F1E6 + ord(label.upper()) - ord("A"))
-    raise ValueError(label)
+def _page_starts(total):
+    """ページ先頭インデックスの列。
+
+    先頭ページは「次のページ」用に1枠、中間ページは前後2枠をページ移動に
+    空けるため、1ページの候補数は 24 件（中間ページは 23 件）になる。
+    """
+    starts = [0]
+    while total - starts[-1] > SELECT_PAGE_SIZE:
+        capacity = SELECT_PAGE_SIZE if len(starts) == 1 else SELECT_PAGE_SIZE - 1
+        starts.append(starts[-1] + capacity)
+    return starts
+
+
+def paginate_labels(labels, page=0):
+    """(そのページの (label, pos) 列, ページ番号, 総ページ数) を返す。"""
+    labels = list(labels)
+    starts = _page_starts(len(labels))
+    page = max(0, min(page, len(starts) - 1))
+    start = starts[page]
+    end = starts[page + 1] if page + 1 < len(starts) else len(labels)
+    return labels[start:end], page, len(starts)
+
+
+def page_options(page_labels, page, total_pages):
+    """候補の選択肢に、必要ならページ移動用の疑似選択肢を添えた列を返す。"""
+    options = [discord.SelectOption(label=f"{label}番", value=label) for label, _ in page_labels]
+    if total_pages > 1:
+        if page > 0:
+            options.append(discord.SelectOption(label="◀ 前のページ", value=PAGE_PREV_VALUE))
+        if page < total_pages - 1:
+            options.append(discord.SelectOption(label="次のページ ▶", value=PAGE_NEXT_VALUE))
+    return options
 
 
 def inside(r, c):
@@ -308,6 +336,14 @@ def move_label(index):
     return MOVE_LABELS[index]
 
 
+def turn_description(g):
+    side_name = "白" if g.turn == "white" else "黒"
+    desc = f"{g.current_user().mention} さんの番（{side_name}）。駒を選んでください。"
+    if in_check(g.board, g.turn):
+        desc += "\n王手です。"
+    return desc
+
+
 def build_sprites(sheet):
     """スプライトシートから (side, kind) -> 駒画像 の対応を作る。
 
@@ -407,35 +443,53 @@ class JoinView(discord.ui.View):
 
 
 class ChessMoveSelect(discord.ui.Select):
-    def __init__(self, cog, game, labels, stage):
-        self.cog, self.game, self.labels, self.stage = cog, game, dict(labels), stage
-        options = [discord.SelectOption(label=f"{label}番", value=label) for label, _ in labels[:25]]
-        super().__init__(placeholder="番号を選んでください", options=options)
+    def __init__(self, cog, game, labels, stage, page=0):
+        self.cog, self.game, self.stage = cog, game, stage
+        self.all_labels = list(labels)
+        page_labels, self.page, total_pages = paginate_labels(self.all_labels, page)
+        self.labels = dict(page_labels)
+        super().__init__(placeholder="番号を選んでください",
+                         options=page_options(page_labels, self.page, total_pages))
 
     async def callback(self, interaction):
-        await self.cog.handle_select(interaction, self.game, self.labels, self.stage, self.values[0])
+        await self.cog.handle_select(interaction, self.game, self.all_labels, self.stage,
+                                     self.values[0], page=self.page)
 
 
 class ChessMoveView(discord.ui.View):
-    def __init__(self, cog, game, labels, stage):
+    def __init__(self, cog, game, labels, stage, page=0):
         super().__init__(timeout=TURN_SECONDS)
-        self.add_item(ChessMoveSelect(cog, game, labels, stage))
+        self.add_item(ChessMoveSelect(cog, game, labels, stage, page))
 
 
 class Chess(commands.Cog):
     def __init__(self, bot):
-        self.bot, self.games, self.reaction_sessions = bot, {}, {}
+        self.bot, self.games = bot, {}
 
-    async def _add_reactions(self, message, emojis):
-        await asyncio.gather(
-            *(message.add_reaction(emoji) for emoji in emojis),
-            return_exceptions=True,
-        )
+    async def _redraw_stage(self, interaction, g, labels, stage, page):
+        """ページ移動時に、同じステージの盤面とセレクトを描き直す（着手しない）。"""
+        page_labels, page, _ = paginate_labels(labels, page)
+        if stage == "source":
+            desc, selected = turn_description(g), None
+        else:
+            desc, selected = "移動先の番号を選んでください。", g.selected
+        file = discord.File(render_board(g.board, page_labels, selected), filename="chess_board.png")
+        embed = discord.Embed(description=desc, color=COLOR)
+        embed.set_image(url="attachment://chess_board.png")
+        await interaction.message.edit(embed=embed, attachments=[file],
+                                       view=ChessMoveView(self, g, labels, stage, page))
 
-    async def handle_select(self, interaction, g, labels, stage, label):
+    async def handle_select(self, interaction, g, labels, stage, value, page=0):
         await interaction.response.defer()
-        chosen = labels.get(label)
-        if chosen is None or g.phase != "playing" or g.acted:
+        if g.phase != "playing" or g.acted:
+            return
+        if value == PAGE_NEXT_VALUE:
+            return await self._redraw_stage(interaction, g, labels, stage, page + 1)
+        if value == PAGE_PREV_VALUE:
+            return await self._redraw_stage(interaction, g, labels, stage, page - 1)
+        page_labels, _, _ = paginate_labels(labels, page)
+        chosen = dict(page_labels).get(value)
+        if chosen is None:
             return
         if stage == "source":
             g.selected = chosen
@@ -443,7 +497,8 @@ class Chess(commands.Cog):
             if not destinations:
                 return
             move_labels = [(move_label(i), dest) for i, dest in enumerate(destinations)]
-            file = discord.File(render_board(g.board, move_labels, chosen), filename="chess_board.png")
+            first_page, _, _ = paginate_labels(move_labels, 0)
+            file = discord.File(render_board(g.board, first_page, chosen), filename="chess_board.png")
             embed = discord.Embed(description="移動先の番号を選んでください。", color=COLOR)
             embed.set_image(url="attachment://chess_board.png")
             await interaction.message.edit(embed=embed, attachments=[file],
@@ -483,18 +538,15 @@ class Chess(commands.Cog):
             self.games.pop(channel.id, None)
 
     async def show_turn(self, channel, g):
-        side_name = "白" if g.turn == "white" else "黒"
         moves = legal_moves(g.board, g.turn, castling=g.castling, ep=g.ep_square)
         sources = []
         for source, _ in moves:
             if source not in sources:
                 sources.append(source)
         labels = [(move_label(i), pos) for i, pos in enumerate(sources[:len(MOVE_LABELS)])]
-        desc = f"{g.current_user().mention} さんの番（{side_name}）。駒を選んでください。"
-        if in_check(g.board, g.turn):
-            desc += "\n王手です。"
-        file = discord.File(render_board(g.board, labels, g.selected), filename="chess_board.png")
-        embed = discord.Embed(description=desc, color=COLOR)
+        first_page, _, _ = paginate_labels(labels, 0)
+        file = discord.File(render_board(g.board, first_page, g.selected), filename="chess_board.png")
+        embed = discord.Embed(description=turn_description(g), color=COLOR)
         embed.set_image(url="attachment://chess_board.png")
         if g.current_msg is None:
             g.current_msg = await game_panels.replace(channel, "party", embed=embed, file=file,
@@ -502,8 +554,6 @@ class Chess(commands.Cog):
         else:
             await g.current_msg.edit(embed=embed, attachments=[file],
                                      view=ChessMoveView(self, g, labels, "source"))
-        self.reaction_sessions[g.current_msg.id] = {"game": g, "labels": dict(labels), "sources": sources}
-        await self._add_reactions(g.current_msg, [reaction_emoji(label) for label, _ in labels])
 
     async def run_game(self, channel, g):
         if len(g.players) != 2:
@@ -549,40 +599,6 @@ class Chess(commands.Cog):
                 await channel.send(f"{g.current_user().mention} さんは時間切れです。{winner} の勝ちです。チェスを終了しました。")
                 break
         await channel.send("チェスを終了しました。")
-
-    @commands.Cog.listener()
-    async def on_reaction_add(self, reaction, user):
-        if user.bot:
-            return
-        data = self.reaction_sessions.get(reaction.message.id)
-        if not data:
-            return
-        g = data["game"]
-        if g.phase != "playing" or g.current_user().id != user.id or g.acted:
-            return
-        try:
-            await reaction.message.remove_reaction(reaction.emoji, user)
-        except Exception:
-            pass
-        chosen = next((pos for label, pos in data["labels"].items() if reaction_emoji(label) == str(reaction.emoji)), None)
-        if chosen is None:
-            return
-        if g.selected is None:
-            g.selected = chosen
-            destinations = [dest for source, dest in legal_moves(g.board, g.turn, castling=g.castling, ep=g.ep_square) if source == chosen]
-            labels = [(move_label(i), dest) for i, dest in enumerate(destinations)]
-            file = discord.File(render_board(g.board, labels, chosen), filename="chess_board.png")
-            embed = discord.Embed(description="移動先を選んでください。", color=COLOR)
-            embed.set_image(url="attachment://chess_board.png")
-            await reaction.message.edit(embed=embed, attachments=[file])
-            self.reaction_sessions[reaction.message.id] = {"game": g, "labels": dict(labels), "sources": destinations}
-            await self._add_reactions(reaction.message, [reaction_emoji(label) for label, _ in labels])
-            return
-        source = g.selected
-        if (source, chosen) not in legal_moves(g.board, g.turn, castling=g.castling, ep=g.ep_square):
-            return
-        g.push_move((source, chosen))
-        g.acted = True
 
 
 async def setup(bot):

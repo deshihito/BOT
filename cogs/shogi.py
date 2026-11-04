@@ -22,11 +22,47 @@ BOARD_SIZE = 9 * SQUARE_SIZE
 IMG_W = BOARD_SIZE + 2 * MARGIN
 IMG_H = BOARD_SIZE + 2 * MARGIN
 MOVE_LABELS = tuple("123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ")
-REACTION_PAGE_SIZE = 16
-NEXT_PAGE = discord.PartialEmoji(name="Right", id=1561698129655373845)
-PREV_PAGE = discord.PartialEmoji(name="Left", id=1561698207757500537)
-HAND_EMOJI = "✋"
-CANCEL_EMOJI = "<:Back:1561700549236097034>"
+# Discord の Select は最大25択。候補は1ページ24件までとし、残りの枠を
+# ページ移動用の疑似選択肢に使う（前後両方の移動が要る中間ページは23件）。
+# ラベルはページ内でのみ一意であればよいので、ページごとに付け直す。
+SELECT_PAGE_SIZE = 24
+PAGE_NEXT_VALUE = "__next_page__"
+PAGE_PREV_VALUE = "__prev_page__"
+
+
+def _page_starts(total):
+    """ページ先頭インデックスの列（容量は先頭ページ24件、中間ページ23件）。"""
+    starts = [0]
+    while total - starts[-1] > SELECT_PAGE_SIZE:
+        capacity = SELECT_PAGE_SIZE if len(starts) == 1 else SELECT_PAGE_SIZE - 1
+        starts.append(starts[-1] + capacity)
+    return starts
+
+
+def paginate_labels(labels, page=0):
+    """(そのページの (label, pos) 列, ページ番号, 総ページ数) を返す。"""
+    labels = list(labels)
+    starts = _page_starts(len(labels))
+    page = max(0, min(page, len(starts) - 1))
+    start = starts[page]
+    end = starts[page + 1] if page + 1 < len(starts) else len(labels)
+    return labels[start:end], page, len(starts)
+
+
+def make_labels(positions):
+    """候補列にページローカルなラベルを付けた (label, pos) 列を返す。
+
+    打ち駒の移動先のように候補がラベル総数を超える場合でも、ページ単位で
+    ラベルを付け直すことで全候補に到達できる。
+    """
+    positions = list(positions)
+    starts = _page_starts(len(positions))
+    labels = []
+    for page_index, start in enumerate(starts):
+        end = starts[page_index + 1] if page_index + 1 < len(starts) else len(positions)
+        for local, pos in enumerate(positions[start:end]):
+            labels.append((MOVE_LABELS[local], pos))
+    return labels
 
 
 SHOGI_VALUES = {
@@ -110,13 +146,6 @@ def choose_ai_move(game, difficulty=5):
     if not scored:
         return random.choice(candidates)
     return max(scored, key=lambda item: item[0])[1]
-
-def reaction_emoji(label: str) -> str:
-    if label in "123456789" and len(label) == 1:
-        return f"{label}\ufe0f\u20e3"
-    if label in MOVE_LABELS[9:] and len(label) == 1:
-        return chr(0x1F1E6 + ord(label) - ord("A"))
-    raise ValueError(label)
 
 class ShogiRenderer:
     def __init__(self):
@@ -278,27 +307,36 @@ class JoinView(discord.ui.View):
 
 
 class ShogiMoveSelect(discord.ui.Select):
-    def __init__(self, cog, session, labels):
-        self.cog, self.session, self.labels = cog, session, dict(labels)
+    def __init__(self, cog, session, labels, page=0):
+        self.cog, self.session = cog, session
+        self.all_labels = list(labels.items()) if isinstance(labels, dict) else list(labels)
+        page_labels, self.page, total_pages = paginate_labels(self.all_labels, page)
+        self.labels = dict(page_labels)
         options = [
             discord.SelectOption(
                 label=(f"{label}番" if isinstance(pos, tuple) else f"{label}番: {pos.value}"),
                 value=label,
             )
-            for label, pos in labels[:25]
+            for label, pos in page_labels
         ]
+        if total_pages > 1:
+            if self.page > 0:
+                options.append(discord.SelectOption(label="◀ 前のページ", value=PAGE_PREV_VALUE))
+            if self.page < total_pages - 1:
+                options.append(discord.SelectOption(label="次のページ ▶", value=PAGE_NEXT_VALUE))
         super().__init__(placeholder="番号を選んでください", options=options)
 
     async def callback(self, interaction):
-        await self.cog.handle_select(interaction, self.session, self.labels, self.values[0])
+        await self.cog.handle_select(interaction, self.session, self.all_labels,
+                                     self.values[0], page=self.page)
 
 
 class ShogiMoveView(discord.ui.View):
-    def __init__(self, cog, session, labels):
+    def __init__(self, cog, session, labels, page=0):
         super().__init__(timeout=TURN_SECONDS)
         state = getattr(session, "state", "select_piece")
         if labels:
-            self.add_item(ShogiMoveSelect(cog, session, labels))
+            self.add_item(ShogiMoveSelect(cog, session, labels, page))
         if state == "select_piece":
             self.add_item(ShogiHandButton(cog, session))
         elif state in ("select_dest", "select_hand", "select_drop_dest"):
@@ -374,18 +412,6 @@ class Shogi(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
         self.sessions = {}
-        self.reaction_sessions = {}
-
-    async def _add_reactions(self, msg, emojis):
-        # Parallel-ish for speed
-        tasks = [msg.add_reaction(e) for e in emojis]
-        await asyncio.gather(*tasks, return_exceptions=True)
-
-    async def _clear_reactions(self, msg):
-        try:
-            await msg.clear_reactions()
-        except Exception:
-            pass
 
     def _needs_promote_choice(self, s, from_pos, to_pos) -> bool:
         """True when the move may optionally promote and the player must choose."""
@@ -424,13 +450,36 @@ class Shogi(commands.Cog):
         if channel is not None and dests:
             await self._update_board_msg(
                 s, channel, f"移動先の番号を選んでください（{len(dests)}箇所）。",
-                labels=list(zip(MOVE_LABELS, dests))[:REACTION_PAGE_SIZE], selected=from_pos,
+                labels=make_labels(dests), selected=from_pos,
             )
 
-    async def handle_select(self, interaction, s, labels, label):
+    async def _redraw_page(self, interaction, s, items, page):
+        """ページ移動時に、現在の状態のまま盤面とセレクトを描き直す（着手しない）。"""
+        if s.state == "select_dest":
+            desc, selected = f"移動先の番号を選んでください（{len(items)}箇所）。", s.selected
+        elif s.state == "select_drop_dest":
+            desc, selected = "打ち場所を選択してください。", None
+        elif s.state == "select_hand":
+            desc, selected = "持ち駒を選択してください。", None
+        else:
+            desc, selected = "駒を選択してください。", None
+        channel = getattr(getattr(interaction, "message", None), "channel", None)
+        if channel is None:
+            channel = getattr(interaction, "channel", None)
+        await self._update_board_msg(s, channel, desc, labels=items, selected=selected, page=page)
+
+    async def handle_select(self, interaction, s, labels, label, page=0):
         await interaction.response.defer()
-        pos = labels.get(label)
+        items = list(labels.items()) if isinstance(labels, dict) else list(labels)
         if s.phase != "playing" or s.acted:
+            return
+        if label == PAGE_NEXT_VALUE:
+            return await self._redraw_page(interaction, s, items, page + 1)
+        if label == PAGE_PREV_VALUE:
+            return await self._redraw_page(interaction, s, items, page - 1)
+        page_items, _, _ = paginate_labels(items, page)
+        pos = dict(page_items).get(label)
+        if pos is None:
             return
         if s.state == "select_piece":
             if not isinstance(pos, tuple):
@@ -440,7 +489,7 @@ class Shogi(commands.Cog):
             if not dests:
                 return
             s.state = "select_dest"
-            dest_labels = list(zip(MOVE_LABELS, dests))[:REACTION_PAGE_SIZE]
+            dest_labels = make_labels(dests)
             await self._update_board_msg(s, interaction.message.channel,
                                           f"移動先の番号を選んでください（{len(dests)}箇所）。",
                                           labels=dest_labels, selected=pos)
@@ -463,7 +512,7 @@ class Shogi(commands.Cog):
             s.state = "select_drop_dest"
             await self._update_board_msg(
                 s, interaction.channel, "打ち場所を選択してください。",
-                labels=list(zip(MOVE_LABELS, drops)), extra_emojis=None,
+                labels=make_labels(drops),
             )
         elif s.state == "select_drop_dest" and isinstance(pos, tuple):
             if s.game.make_move(None, pos, drop_type=s.selected_drop):
@@ -485,7 +534,7 @@ class Shogi(commands.Cog):
             s.selected = pos
             dests = s.game.legal_destinations(*pos)
             s.state = "select_dest"
-            await self._update_board_msg(s, interaction.channel, f"移動先を選択してください（{len(dests)}箇所）。", labels=list(zip(MOVE_LABELS, dests)), selected=pos)
+            await self._update_board_msg(s, interaction.channel, f"移動先を選択してください（{len(dests)}箇所）。", labels=make_labels(dests), selected=pos)
         elif s.state == "select_dest" and s.selected:
             if self._needs_promote_choice(s, s.selected, pos):
                 await self._begin_promote_choice(s, interaction.channel, s.selected, pos)
@@ -521,7 +570,7 @@ class Shogi(commands.Cog):
         s.pending_from = None
         s.pending_to = None
         selectables = s.game.get_legal_selectable_pieces()
-        await self._update_board_msg(s, interaction.channel, "駒を選択してください。", labels=list(zip(MOVE_LABELS, selectables)))
+        await self._update_board_msg(s, interaction.channel, "駒を選択してください。", labels=make_labels(selectables))
 
     async def start_recruit(self, interaction, mode="human", difficulty=5):
         ch = interaction.channel
@@ -552,13 +601,15 @@ class Shogi(commands.Cog):
             s.phase = "done"
             self.sessions.pop(ch.id, None)
 
-    async def _update_board_msg(self, s: ShogiSession, channel, description, labels=None, selected=None, extra_emojis=None):
-        buf = s.renderer.render(s.game, labels=labels, selected=selected)
+    async def _update_board_msg(self, s: ShogiSession, channel, description, labels=None, selected=None, page=0):
+        # 盤面画像の番号ラベルは、表示中のページの候補だけに付ける。
+        render_labels = paginate_labels(labels, page)[0] if labels else labels
+        buf = s.renderer.render(s.game, labels=render_labels, selected=selected)
         file = discord.File(buf, "shogi.png")
         embed = discord.Embed(description=description, color=COLOR)
         embed.set_image(url="attachment://shogi.png")
         if labels:
-            select_view = ShogiMoveView(self, s, labels)
+            select_view = ShogiMoveView(self, s, labels, page=page)
         elif getattr(s, "state", None) == "select_promote":
             select_view = ShogiPromoteView(self, s)
         else:
@@ -573,8 +624,6 @@ class Shogi(commands.Cog):
                 # Fallback if edit fails
                 s.current_msg = await game_panels.replace(channel, "party", embed=embed, file=file,
                                                           view=select_view)
-        # 将棋の操作はセレクトメニューと座標入力に統一し、リアクションは追加しない。
-        self.reaction_sessions.pop(s.current_msg.id, None)
 
     async def run_game(self, channel, s: ShogiSession):
         if len(s.players) != 2:
@@ -612,7 +661,7 @@ class Shogi(commands.Cog):
             s.pending_from = None
             s.pending_to = None
             selectables = s.game.get_legal_selectable_pieces()
-            labels = list(zip(MOVE_LABELS, selectables))
+            labels = make_labels(selectables)
             desc = (f"{turn_user.mention} さんの番（{'先手' if s.game.turn == Color.SENTE else '後手'}）。\n"
                     + ("王手を受けています。\n" if s.game.is_in_check(s.game.turn) else "")
                     + "セレクトメニューまたは「座標を入力」から駒を選んでください。")
@@ -621,8 +670,6 @@ class Shogi(commands.Cog):
                 if s.acted or s.phase != "playing":
                     break
                 await asyncio.sleep(1)
-            if s.current_msg:
-                self.reaction_sessions.pop(s.current_msg.id, None)
             if not s.acted:
                 idle += 1
                 await channel.send(f"{turn_user.mention} さんは時間切れのためパスしました。")
@@ -633,77 +680,6 @@ class Shogi(commands.Cog):
                 idle = 0
         await channel.send("将棋を終了しました。")
 
-    @commands.Cog.listener()
-    async def on_reaction_add(self, reaction, user):
-        if user.bot:
-            return
-        session_data = self.reaction_sessions.get(reaction.message.id)
-        if not session_data:
-            return
-        s: ShogiSession = session_data["session"]
-        if s.phase != "playing" or s.players.get(s.game.turn, None) is None or s.players[s.game.turn].id != user.id or s.acted:
-            return
-        emoji = str(reaction.emoji)
-        try:
-            await reaction.message.remove_reaction(reaction.emoji, user)
-        except Exception:
-            pass
-        labels = session_data.get("labels", {})
-        if emoji == HAND_EMOJI and s.state == "select_piece":
-            hand_pieces = s.game.get_hand_pieces()
-            if not hand_pieces:
-                await reaction.message.channel.send("手駒がありません。", delete_after=3)
-                return
-            # Switch to hand selection
-            s.state = "select_hand"
-            hand_labels = list(zip(MOVE_LABELS, hand_pieces))[:REACTION_PAGE_SIZE]
-            desc = f"{s.players[s.game.turn].mention} さんの手駒選択。打ちたい駒を選んでください。"
-            await self._update_board_msg(s, reaction.message.channel, desc, labels=hand_labels, extra_emojis=[CANCEL_EMOJI])
-            return
-        if emoji == CANCEL_EMOJI and s.state in ("select_hand", "select_drop_dest"):
-            s.state = "select_piece"
-            s.selected_drop = None
-            # Re-show piece selection
-            selectables = s.game.get_legal_selectable_pieces()
-            labels = list(zip(MOVE_LABELS, selectables))[:REACTION_PAGE_SIZE]
-            desc = f"{s.players[s.game.turn].mention} さんの番。駒を選んでください。"
-            await self._update_board_msg(s, reaction.message.channel, desc, labels=labels, extra_emojis=[HAND_EMOJI])
-            return
-        for label, pos in labels.items():
-            if reaction_emoji(label) == emoji:
-                if s.state == "select_piece":
-                    # Select piece, show destinations
-                    s.selected = pos
-                    dests = s.game.legal_destinations(*pos)
-                    if not dests:
-                        return
-                    s.state = "select_dest"
-                    dest_labels = list(zip(MOVE_LABELS, dests))[:REACTION_PAGE_SIZE]
-                    desc = f"移動先を選択してください（{len(dests)}箇所）。<:Back:1561700549236097034>でキャンセル。"
-                    await self._update_board_msg(s, reaction.message.channel, desc, labels=dest_labels, selected=pos, extra_emojis=[CANCEL_EMOJI])
-                elif s.state == "select_dest":
-                    # Execute move (optional promotion is chosen via the
-                    # select/coordinate flow; forced promotion still applies)
-                    success = s.game.make_move(s.selected, pos, promote=False)
-                    if success:
-                        s.acted = True
-                        # Force refresh on next loop
-                elif s.state == "select_hand":
-                    # pos is PieceType
-                    s.selected_drop = pos
-                    drops = s.game.get_drop_squares(pos)
-                    if not drops:
-                        await reaction.message.channel.send("打てる場所がありません。", delete_after=3)
-                        return
-                    s.state = "select_drop_dest"
-                    drop_labels = list(zip(MOVE_LABELS, drops))[:REACTION_PAGE_SIZE]
-                    desc = f"打ち場所を選択してください。<:Back:1561700549236097034>でキャンセル。"
-                    await self._update_board_msg(s, reaction.message.channel, desc, labels=drop_labels, extra_emojis=[CANCEL_EMOJI])
-                elif s.state == "select_drop_dest":
-                    success = s.game.make_move(None, pos, drop_type=s.selected_drop)
-                    if success:
-                        s.acted = True
-                break
 
 async def setup(bot):
     await bot.add_cog(Shogi(bot))

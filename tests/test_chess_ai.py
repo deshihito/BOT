@@ -1,11 +1,16 @@
 import unittest
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import discord
 from PIL import Image
 
+import cogs.chess as chess_module
 from cogs.chess import (
-    ASSET, START_BOARD, apply_move, build_sprites, choose_ai_move, in_check,
-    legal_moves, next_ep_square, render_board, updated_castling,
+    ASSET, PAGE_NEXT_VALUE, PAGE_PREV_VALUE, START_BOARD, Chess, ChessGame,
+    ChessMoveSelect, apply_move, build_sprites, choose_ai_move, in_check,
+    legal_moves, move_label, next_ep_square, paginate_labels, render_board,
+    updated_castling,
 )
 from cogs.game import ChessDifficultySelect, ChessModeSelect, GameDetailView
 
@@ -163,6 +168,108 @@ class ChessEndgameTest(unittest.TestCase):
         board[7][2] = "K"
         self.assertFalse(in_check(board, "black"))
         self.assertEqual(legal_moves(board, "black"), [])
+
+
+def queen_board():
+    board = empty_board()
+    board[0][0] = "K"
+    board[7][7] = "k"
+    board[4][3] = "Q"
+    return board
+
+
+def queen_destinations(board):
+    return [dest for source, dest in legal_moves(board, "white") if source == (4, 3)]
+
+
+class ChessPaginationTest(unittest.TestCase):
+    def test_queen_destinations_are_all_reachable_across_pages(self):
+        destinations = queen_destinations(queen_board())
+        # A lone queen on d4-ish has 28 destinations: more than one Select page.
+        self.assertGreater(len(destinations), 25)
+        labels = [(move_label(i), dest) for i, dest in enumerate(destinations)]
+
+        reached = []
+        page = 0
+        while True:
+            page_labels, page, total = paginate_labels(labels, page)
+            self.assertLessEqual(len(page_labels), 24)
+            reached.extend(pos for _, pos in page_labels)
+            if page + 1 >= total:
+                break
+            page += 1
+        self.assertEqual(reached, destinations)
+
+        for page_index in range(total):
+            select = ChessMoveSelect(None, object(), labels, "destination", page_index)
+            self.assertLessEqual(len(select.options), 25)
+            values = [option.value for option in select.options]
+            if page_index > 0:
+                self.assertIn(PAGE_PREV_VALUE, values)
+            if page_index + 1 < total:
+                self.assertIn(PAGE_NEXT_VALUE, values)
+
+    def test_single_page_has_no_navigation_options(self):
+        labels = [(move_label(i), (0, i)) for i in range(10)]
+        select = ChessMoveSelect(None, object(), labels, "source", 0)
+        self.assertEqual([option.value for option in select.options],
+                         [label for label, _ in labels])
+
+    def test_chess_has_no_reaction_input_path(self):
+        self.assertFalse(hasattr(Chess, "on_reaction_add"))
+        self.assertFalse(hasattr(chess_module, "reaction_emoji"))
+        self.assertFalse(hasattr(Chess(None), "reaction_sessions"))
+
+
+class ChessPageTurnTest(unittest.IsolatedAsyncioTestCase):
+    def make_interaction(self):
+        return SimpleNamespace(
+            response=SimpleNamespace(defer=AsyncMock()),
+            message=SimpleNamespace(edit=AsyncMock()),
+        )
+
+    async def test_page_navigation_does_not_change_board_or_turn(self):
+        cog = Chess(None)
+        g = ChessGame(1, 1, 1, mode="cpu")
+        g.phase = "playing"
+        g.board = queen_board()
+        g.selected = (4, 3)
+        destinations = queen_destinations(g.board)
+        labels = [(move_label(i), dest) for i, dest in enumerate(destinations)]
+        board_before = [row[:] for row in g.board]
+        interaction = self.make_interaction()
+
+        await cog.handle_select(interaction, g, labels, "destination", PAGE_NEXT_VALUE, page=0)
+
+        self.assertFalse(g.acted)
+        self.assertEqual(g.turn, "white")
+        self.assertEqual(g.board, board_before)
+        self.assertEqual(g.selected, (4, 3))
+        interaction.message.edit.assert_awaited_once()
+        view = interaction.message.edit.call_args.kwargs["view"]
+        select = view.children[0]
+        self.assertEqual(select.page, 1)
+        page_labels, _, _ = paginate_labels(labels, 1)
+        self.assertEqual(select.labels, dict(page_labels))
+
+    async def test_candidate_on_second_page_executes_the_move(self):
+        cog = Chess(None)
+        g = ChessGame(1, 1, 1, mode="cpu")
+        g.phase = "playing"
+        g.board = queen_board()
+        g.selected = (4, 3)
+        destinations = queen_destinations(g.board)
+        labels = [(move_label(i), dest) for i, dest in enumerate(destinations)]
+        page_labels, _, _ = paginate_labels(labels, 1)
+        label, dest = page_labels[0]
+        interaction = self.make_interaction()
+
+        await cog.handle_select(interaction, g, labels, "destination", label, page=1)
+
+        self.assertTrue(g.acted)
+        self.assertEqual(g.turn, "black")
+        self.assertEqual(g.board[dest[0]][dest[1]], "Q")
+        self.assertEqual(g.board[4][3], ".")
 
 
 if __name__ == "__main__":

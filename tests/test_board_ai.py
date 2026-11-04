@@ -4,7 +4,11 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 from cogs.othello import BLACK, WHITE, choose_ai_move as choose_othello_move, legal_moves as othello_moves, new_board
-from cogs.shogi import Shogi, ShogiRenderer, ShogiSession, _shogi_candidates, choose_ai_move as choose_shogi_move
+from cogs.shogi import (
+    PAGE_NEXT_VALUE, PAGE_PREV_VALUE, Shogi, ShogiMoveView, ShogiRenderer,
+    ShogiSession, _shogi_candidates, choose_ai_move as choose_shogi_move,
+    make_labels, paginate_labels,
+)
 from core.shogi_engine import Color, Piece, PieceType, ShogiGame
 
 
@@ -223,6 +227,95 @@ class ShogiMoveFlowTest(unittest.IsolatedAsyncioTestCase):
         interaction.followup.send.assert_awaited_once()
         _, kwargs = interaction.followup.send.call_args
         self.assertTrue(kwargs.get("ephemeral"))
+
+class ShogiPaginationTest(unittest.TestCase):
+    def drop_setup(self):
+        game = ShogiGame()
+        game.board = [[None for _ in range(9)] for _ in range(9)]
+        game.board[8][4] = Piece(PieceType.KING, Color.SENTE)
+        game.board[0][4] = Piece(PieceType.KING, Color.GOTE)
+        game.hands[Color.SENTE][PieceType.ROOK] = 1
+        game.turn = Color.SENTE
+        return game
+
+    def test_drop_destinations_are_all_reachable_across_pages(self):
+        game = self.drop_setup()
+        drops = game.get_drop_squares(PieceType.ROOK)
+        # A rook can be dropped on almost every empty square (79 here).
+        self.assertGreater(len(drops), 25)
+        labels = make_labels(drops)
+        self.assertEqual(len(labels), len(drops))
+
+        reached = []
+        page = 0
+        while True:
+            page_labels, page, total = paginate_labels(labels, page)
+            self.assertLessEqual(len(page_labels), 24)
+            # Labels only need to be unique within a page.
+            self.assertEqual(len({label for label, _ in page_labels}), len(page_labels))
+            reached.extend(pos for _, pos in page_labels)
+            if page + 1 >= total:
+                break
+            page += 1
+        self.assertEqual(reached, drops)
+        self.assertGreater(total, 2)
+
+        session = SimpleNamespace(state="select_drop_dest")
+        view = ShogiMoveView(None, session, labels)
+        options = view.children[0].options
+        self.assertEqual(len(options), 25)
+        self.assertIn(PAGE_NEXT_VALUE, [option.value for option in options])
+
+    def test_shogi_has_no_reaction_input_path(self):
+        self.assertFalse(hasattr(Shogi, "on_reaction_add"))
+        self.assertFalse(hasattr(Shogi(None), "reaction_sessions"))
+
+
+class ShogiPageTurnTest(unittest.IsolatedAsyncioTestCase):
+    async def test_page_navigation_does_not_change_board_or_turn(self):
+        cog = Shogi(None)
+        cog._update_board_msg = AsyncMock()
+        session = ShogiSession(1, 1, 1, mode="cpu")
+        session.phase = "playing"
+        game = session.game
+        game.board = [[None for _ in range(9)] for _ in range(9)]
+        game.board[8][4] = Piece(PieceType.KING, Color.SENTE)
+        game.board[0][4] = Piece(PieceType.KING, Color.GOTE)
+        game.hands[Color.SENTE][PieceType.ROOK] = 1
+        game.turn = Color.SENTE
+        session.state = "select_drop_dest"
+        session.selected_drop = PieceType.ROOK
+        drops = game.get_drop_squares(PieceType.ROOK)
+        labels = make_labels(drops)
+
+        class Response:
+            async def defer(self):
+                return None
+
+        channel = SimpleNamespace()
+        interaction = SimpleNamespace(
+            response=Response(), message=SimpleNamespace(channel=channel),
+            channel=channel, followup=AsyncMock(),
+        )
+
+        await cog.handle_select(interaction, session, labels, PAGE_NEXT_VALUE, page=0)
+
+        self.assertFalse(session.acted)
+        self.assertEqual(session.state, "select_drop_dest")
+        self.assertEqual(session.game.turn, Color.SENTE)
+        self.assertTrue(all(piece is None or piece.type == PieceType.KING
+                            for row in session.game.board for piece in row))
+        _, kwargs = cog._update_board_msg.call_args
+        self.assertEqual(kwargs.get("page"), 1)
+
+        # A candidate shown on page 1 is still executable from that page.
+        page_labels, _, _ = paginate_labels(labels, 1)
+        label, dest = page_labels[0]
+        await cog.handle_select(interaction, session, labels, label, page=1)
+        self.assertTrue(session.acted)
+        self.assertEqual(session.game.board[dest[0]][dest[1]].type, PieceType.ROOK)
+        self.assertEqual(session.game.hands[Color.SENTE][PieceType.ROOK], 0)
+
 
 if __name__ == "__main__":
     unittest.main()
