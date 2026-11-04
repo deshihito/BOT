@@ -185,10 +185,25 @@ CLEF_MAX_TURNS = int(os.environ.get("CLEF_DUNGEON_MAX_TURNS", 10))
 CLEF_TIMEOUT = float(os.environ.get("CLEF_DUNGEON_TIMEOUT", 30))
 CLEF_RETRIES = max(1, int(os.environ.get("CLEF_DUNGEON_RETRIES", 2)))
 CLEF_RETRY_DELAY = float(os.environ.get("CLEF_DUNGEON_RETRY_DELAY", 1.5))
-# 8方向の定義。移動・経路探索・選択肢の基準提示で共通利用する。
+# 移動の定義（Phase 1-C: 斜め移動は廃止し4方向のみ）。
+# 移動・経路探索・選択肢の基準提示で共通利用する。
 _DIRECTIONS = {
     "up": (0, -1), "down": (0, 1), "left": (-1, 0), "right": (1, 0),
-    "leftup": (-1, -1), "rightup": (1, -1), "leftdown": (-1, 1), "rightdown": (1, 1),
+}
+# fast-forward ウォーカー（Phase 1-C / 設計 §4-2）の定数。
+D_WALK_MAX_STEPS = 18
+# 乗ったら journey を止めて処理する特殊タイル。
+D_WALK_SPECIAL_CELLS = frozenset({
+    D_STAIRS, D_CHEST, D_TRAP, D_SHOP, D_MINE, D_REST, D_SHRINE, D_EVENT,
+})
+# journey の停止理由 → ログ文言（先頭に「○へN歩進んだ。」が付く）。
+D_WALK_STOP_TEXTS = {
+    "room": "部屋に入った。",
+    "junction": "分岐に着いた。",
+    "dead_end": "行き止まりに着いた。",
+    "room_edge": "部屋の壁際で止まった。",
+    "max_steps": "一旦立ち止まった。",
+    "low_hp": "HPが低下したため立ち止まった。",
 }
 _DIRECTION_LABELS = {
     "up": "北", "down": "南", "left": "西", "right": "東",
@@ -421,6 +436,128 @@ def d_consume(uid, floor, x, y):
     inst["consumed"].add((x, y))
     if 0 <= y < D2_MAP_H and 0 <= x < D2_MAP_W:
         inst["grid"][y][x] = D_FLOOR
+
+
+def d_room_at(instance, x, y):
+    """座標を含む部屋 dict を返す（通路など部屋の外は None）。"""
+    for room in instance.get("rooms", []) or []:
+        rx, ry, rw, rh = room["rect"]
+        if rx <= x < rx + rw and ry <= y < ry + rh:
+            return room
+    return None
+
+
+def d_direction_blocked(uid, floor, x, y, direction):
+    """その方向の1歩目が進めない（範囲外または壁）かどうか。"""
+    vec = _DIRECTIONS.get(direction)
+    if vec is None:
+        return True
+    nx, ny = x + vec[0], y + vec[1]
+    if not (0 <= nx < D2_MAP_W and 0 <= ny < D2_MAP_H):
+        return True
+    return d_get_cell(uid, floor, nx, ny) == D_WALL
+
+
+def d_plan_walk(uid, floor, x, y, direction):
+    """fast-forward ウォーカーの経路計画（Phase 1-C / 設計 §4-2）。
+
+    現在位置から direction（"up"/"down"/"left"/"right" のキー、または
+    (dx, dy) タプル）へ、停止条件のいずれかに当たるまで進む経路を返す。
+    エンカウント抽選と状態異常による HP 判定は実行側（d_execute_journey）
+    の責務で、ここでは構造的な停止条件だけを判定する純粋ロジックとする。
+
+    戻り値: {
+      direction: キー文字列,
+      path: [進む座標...]（開始マスは含まない）,
+      stop_reason: "room"|"special"|"junction"|"dead_end"|"room_edge"|"max_steps"|"blocked",
+      stop_cell: 最後に到達する座標（1歩も進めない場合は開始座標）,
+      entered_room_id: stop_reason == "room" のとき入った部屋の id、それ以外は None,
+    }
+    """
+    if isinstance(direction, (tuple, list)):
+        direction = next((k for k, v in _DIRECTIONS.items() if tuple(direction) == v), None)
+    result = {
+        "direction": direction,
+        "path": [],
+        "stop_reason": "blocked",
+        "stop_cell": (x, y),
+        "entered_room_id": None,
+    }
+    if direction not in _DIRECTIONS:
+        return result
+    inst = d_get_instance(uid, floor)
+    grid = inst["grid"]
+
+    def passable(cx, cy):
+        return 0 <= cx < D2_MAP_W and 0 <= cy < D2_MAP_H and grid[cy][cx] != D_WALL
+
+    start_room = d_room_at(inst, x, y)
+    cx, cy = x, y
+    dx, dy = _DIRECTIONS[direction]
+    came_from = None  # 直前にいた座標（逆方向を出口数えから除外する）
+    while len(result["path"]) < D_WALK_MAX_STEPS:
+        nx, ny = cx + dx, cy + dy
+        if not passable(nx, ny):
+            # 進めない。1歩目なら blocked、部屋の壁際なら room_edge、
+            # それ以外（通路で進路だけが塞がれる形）は行き止まり扱い。
+            if not result["path"]:
+                result["stop_reason"] = "blocked"
+            elif start_room is not None and d_room_at(inst, cx, cy) is start_room:
+                result["stop_reason"] = "room_edge"
+            else:
+                result["stop_reason"] = "dead_end"
+            break
+        came_from = (cx, cy)
+        cx, cy = nx, ny
+        result["path"].append((cx, cy))
+        result["stop_cell"] = (cx, cy)
+        cell = grid[cy][cx]
+        # 停止条件2: 特殊タイルに乗った。
+        if cell in D_WALK_SPECIAL_CELLS:
+            result["stop_reason"] = "special"
+            break
+        room = d_room_at(inst, cx, cy)
+        # 停止条件1: 開始部屋とは別の部屋に入った。
+        if room is not None and room is not start_room:
+            result["stop_reason"] = "room"
+            result["entered_room_id"] = room["id"]
+            break
+        # 停止条件6: 歩数上限。
+        if len(result["path"]) >= D_WALK_MAX_STEPS:
+            result["stop_reason"] = "max_steps"
+            break
+        if room is not None:
+            # 開始部屋の中では真っ直ぐ進み続ける。直進できなければ次ループ
+            # 先頭の判定で room_edge になる。ただし隣に部屋の外への出口が
+            # 1つだけある場合は、そこへ滑り込む（扉の位置ずれ吸収）。
+            if passable(cx + dx, cy + dy):
+                continue
+            outside = [
+                (cx + vx, cy + vy) for vx, vy in _DIRECTIONS.values()
+                if (cx + vx, cy + vy) != came_from
+                and passable(cx + vx, cy + vy)
+                and d_room_at(inst, cx + vx, cy + vy) is not room
+            ]
+            if len(outside) == 1:
+                dx, dy = outside[0][0] - cx, outside[0][1] - cy
+                continue
+            result["stop_reason"] = "room_edge"
+            break
+        # 通路: 来た方向以外の出口の数で分岐/行き止まりを判定する。
+        exits = [
+            (cx + vx, cy + vy) for vx, vy in _DIRECTIONS.values()
+            if (cx + vx, cy + vy) != came_from and passable(cx + vx, cy + vy)
+        ]
+        if not exits:
+            result["stop_reason"] = "dead_end"
+            break
+        if len(exits) >= 2:
+            result["stop_reason"] = "junction"
+            break
+        dx, dy = exits[0][0] - cx, exits[0][1] - cy
+    else:
+        result["stop_reason"] = "max_steps"
+    return result
 
 def d_default_player():
     """新規プレイヤーの初期状態。拡張項目も含めてここで一元管理する。"""
@@ -1401,6 +1538,7 @@ async def dg_save_base(uid, floor, x, y, db_api):
 #  Clef作戦ヘルパー（旧 dungeon_dangeon.py から統廃合）
 # ============================================================
 # Clefへ渡す合法手。待機（enter/check）は選択肢に含めない。
+# Phase 1-C で移動が4方向化したため、合法手も4方向のみ（journey 単位で実行する）。
 CLEF_MOVE_KEYS = tuple(_DIRECTIONS)
 
 CLEF_PLAN_GUIDANCE = {
@@ -1461,8 +1599,7 @@ def d_normalize_choice(value, legal, fallback=None):
     """Clefの応答を合法手へ寄せる。表記ゆれだけを吸収し、それ以外はfallbackを返す。"""
     value = str(value or "").strip().lower().replace(" ", "")
     aliases = {"north": "up", "south": "down", "west": "left", "east": "right",
-               "upward": "up", "downward": "down", "leftward": "left", "rightward": "right",
-               "northeast": "rightup", "northwest": "leftup", "southeast": "rightdown", "southwest": "leftdown"}
+               "upward": "up", "downward": "down", "leftward": "left", "rightward": "right"}
     value = aliases.get(value, value)
     return value if value in legal else (fallback if fallback in legal else None)
 
@@ -1494,7 +1631,7 @@ def dungeon_relative_label(dx, dy):
 
 
 def dungeon_bfs(uid, floor, x, y):
-    """現在地からの歩数マップ（8方向・壁と角抜けは通行不可）。"""
+    """現在地からの歩数マップ（4方向・壁は通行不可）。"""
     dist = {(x, y): 0}
     queue = [(x, y)]
     head = 0
@@ -1507,8 +1644,6 @@ def dungeon_bfs(uid, floor, x, y):
             if (nx, ny) in dist or not (0 <= nx < D2_MAP_W and 0 <= ny < D2_MAP_H):
                 continue
             if d_get_cell(uid, floor, nx, ny) == D_WALL:
-                continue
-            if dx and dy and (d_get_cell(uid, floor, cx + dx, cy) == D_WALL or d_get_cell(uid, floor, cx, cy + dy) == D_WALL):
                 continue
             dist[(nx, ny)] = step
             queue.append((nx, ny))
@@ -1538,7 +1673,7 @@ def dungeon_stairs_hint(uid, floor, x, y, dist=None):
 
 
 def dungeon_surround_text(uid, floor, x, y):
-    """現在地と8方向のタイルを短く列挙する。"""
+    """現在地と4方向のタイルを短く列挙する。"""
     parts = [f"現在地={dungeon_cell_label(uid, floor, x, y)}"]
     for key, (dx, dy) in _DIRECTIONS.items():
         parts.append(f"{_DIRECTION_LABELS[key]}={dungeon_cell_label(uid, floor, x + dx, y + dy)}")
@@ -1577,10 +1712,7 @@ def dungeon_move_criteria(uid, floor, x, y, dist=None):
         if d_get_cell(uid, floor, nx, ny) == D_WALL:
             criteria[key] = f"{label}は壁（進めない）"
             continue
-        if dx and dy and (d_get_cell(uid, floor, x + dx, y) == D_WALL or d_get_cell(uid, floor, x, y + dy) == D_WALL):
-            criteria[key] = f"{label}は角の壁に阻まれて進めない"
-            continue
-        note = f"{label}は{dungeon_cell_label(floor, nx, ny)}（移動可）"
+        note = f"{label}は{dungeon_cell_label(uid, floor, nx, ny)}（移動可）"
         steps = dist.get((nx, ny))
         if stairs_steps is not None and steps is not None:
             note += f" 階段まで{steps}マス" + ("（近づく）" if steps < stairs_steps else "")
@@ -1747,6 +1879,179 @@ def d_use_job_skill(uid, enemy):
         resource["rage"] = min(100, resource.get("rage", 0) + 30)
         return "料理人の料理！ 怒気が上昇", 0
     return "様子を見た。", 0
+
+
+async def d_current_cell_action(uid, db_api):
+    """現在マスのタイルを再発動し、表示用メッセージを返す。
+
+    操作メニューの「現在地を操作」と、メインパネル中央ボタン「部屋で行動」
+    で共用する（Phase 1-C）。階段・採掘・休憩・商店のみが対象。
+    """
+    uid = str(uid)
+    p = d_get_player(uid)
+    floor = p["floor"]
+    cell = d_get_cell(uid, floor, p["x"], p["y"])
+    msg = "この場所では操作できません。"
+    if cell == D_STAIRS and floor < D_FLOORS:
+        p["floor"] = floor + 1
+        p["hp"] = d_effective_stats(p)["max_hp"]
+        d_clear_status(uid)
+        p["x"], p["y"] = d_instance_start(uid, p["floor"])
+        d_progress_quest(uid, "floor", 1)
+        msg = f"階段を上り、{p['floor']}Fへ進みました。"
+    elif cell == D_MINE:
+        gain = d_do_mine(uid)
+        await d_apply_reward(uid, db_api, coins=gain)
+        d_consume(uid, floor, p["x"], p["y"])
+        msg = f"採掘してコインを{gain}枚獲得しました。"
+    elif cell == D_REST:
+        stats = d_effective_stats(p)
+        before = p["hp"]
+        p["hp"] = min(stats["max_hp"], p["hp"] + max(20, stats["max_hp"] // 3))
+        d_clear_status(uid)
+        d_consume(uid, floor, p["x"], p["y"])
+        msg = f"休憩してHPが {p['hp'] - before} 回復しました。"
+    elif cell == D_SHOP:
+        try:
+            await d_apply_reward(uid, db_api, coins=-30, bread=1)
+            msg = "商店でレアパンを購入しました。"
+        except Exception:
+            msg = "コイン不足で購入できません。"
+    await dg_save_player(uid, db_api)
+    return msg
+
+
+async def d_execute_journey(uid, db_api, direction, *, source="manual"):
+    """1回の移動判断（journey）を実行する（Phase 1-C / 設計 §4）。
+
+    d_plan_walk で計画した経路を1歩ずつ適用し、各歩で従来の1マス処理
+    （turns/スコア加算、状態異常 tick、クエスト進行、特殊タイル処理、
+    バイオーム率のエンカウント判定）を行う。保存は journey の最後に
+    1回だけ。描画と View 遷移は呼び出し側の責務とし、本関数は結果だけ
+    を返す。action_log には journey を1件として記録する。
+
+    戻り値: {
+      direction, steps, stop_reason, start, end, path,
+      messages: [ログ断片...]（先頭は「○へN歩進んだ。…」）,
+      view: None | "stairs" | "shop" | "mine" | "combat",
+      enemy: view == "combat" のときの敵 dict、それ以外は None,
+      died: journey 中に力尽きたか,
+    }
+    """
+    uid = str(uid)
+    p = d_get_player(uid)
+    floor = p["floor"]
+    start = (p["x"], p["y"])
+    hp_before = p["hp"]
+    plan = d_plan_walk(uid, floor, start[0], start[1], direction)
+    result = {
+        "direction": plan["direction"],
+        "steps": 0,
+        "stop_reason": plan["stop_reason"],
+        "start": start,
+        "end": start,
+        "path": [],
+        "messages": [],
+        "view": None,
+        "enemy": None,
+        "died": False,
+    }
+    if not plan["path"]:
+        return result
+
+    def _apply_death():
+        result["stop_reason"] = "death"
+        result["died"] = True
+        p["hp"] = d_effective_stats(p)["max_hp"]
+        p["floor"] = 1
+        p["x"], p["y"] = d_instance_start(uid, 1)
+        result["messages"].append("力尽きた… スタート地点へ戻された")
+
+    for nx, ny in plan["path"]:
+        p["x"], p["y"] = nx, ny
+        result["steps"] += 1
+        result["path"].append((nx, ny))
+        p["turns"] += 1
+        p["season_score"] += 1
+        # 状態異常は移動ターンでも1回進める（Phase 0 のライフサイクル）。
+        status_logs = d_tick_status(uid)
+        if status_logs:
+            result["messages"].extend(status_logs)
+        if p["hp"] <= 0:
+            _apply_death()
+            break
+        for quest_key in d_progress_quest(uid, "turns", 1):
+            await d_apply_reward(uid, db_api, **QUEST_MASTER[quest_key]["reward"])
+        d_unlock_achievement(uid, "first_step")
+        if floor >= 10: d_unlock_achievement(uid, "floor_10")
+        if floor >= 20: d_unlock_achievement(uid, "floor_20")
+        if floor >= 40: d_unlock_achievement(uid, "floor_40")
+
+        ct = d_get_cell(uid, floor, nx, ny)
+        if ct == D_STAIRS:
+            result["stop_reason"] = "special"
+            result["view"] = "stairs"
+            break
+        if ct == D_SHOP:
+            result["stop_reason"] = "special"
+            result["view"] = "shop"
+            break
+        if ct == D_MINE:
+            result["stop_reason"] = "special"
+            result["view"] = "mine"
+            break
+        if ct in (D_CHEST, D_TRAP, D_REST, D_SHRINE, D_EVENT):
+            if ct == D_CHEST:
+                text, reward = d_open_chest(uid, db_api)
+                await d_apply_reward(uid, db_api, **reward)
+            elif ct == D_TRAP:
+                text, penalty = d_trigger_trap(uid)
+                await d_apply_reward(uid, db_api, **penalty)
+            elif ct == D_REST:
+                before = p["hp"]
+                stats = d_effective_stats(p)
+                p["hp"] = min(stats["max_hp"], p["hp"] + max(20, stats["max_hp"] // 3))
+                d_clear_status(uid)
+                text = f"休憩した。HPが {p['hp'] - before} 回復し、状態異常が治った。"
+            elif ct == D_SHRINE:
+                p["atk"] += 2
+                text = "祭壇の祝福！ 基礎ATKが2上昇した。"
+            else:  # D_EVENT
+                gain = random.randint(20, 80)
+                await d_apply_reward(uid, db_api, coins=gain, xp=gain, season_score=25)
+                text = f"旅人の依頼を達成した。コイン+{gain}、XP+{gain}"
+            d_consume(uid, floor, nx, ny)
+            result["messages"].append(text)
+            result["stop_reason"] = "special"
+            if p["hp"] <= 0:
+                _apply_death()
+            break
+
+        # 通常マス: バイオーム率でエンカウント判定（固定配置化は Phase 1-D）。
+        rate = D_ENCOUNTER_RATES.get(d_get_biome(floor)[0], 0.10)
+        if random.random() < rate:
+            result["enemy"] = d_make_enemy(floor)
+            result["stop_reason"] = "encounter"
+            result["view"] = "combat"
+            break
+        # 停止条件7: HPが30%未満まで低下したら、それ以上は進まない。
+        stats = d_effective_stats(p)
+        if p["hp"] < hp_before and p["hp"] < stats["max_hp"] * 0.30:
+            result["stop_reason"] = "low_hp"
+            break
+
+    result["end"] = (p["x"], p["y"])
+    label = _DIRECTION_LABELS.get(result["direction"], "")
+    head = f"{label}へ{result['steps']}歩進んだ。"
+    head += D_WALK_STOP_TEXTS.get(result["stop_reason"], "")
+    result["messages"].insert(0, head)
+    d_record_action(
+        uid, "journey", source=source,
+        result=f"{start}->{result['end']} {result['steps']}歩 {result['stop_reason']}",
+        hp_before=hp_before,
+    )
+    await dg_save_player(uid, db_api)
+    return result
 
 
 class _NoopResponse:
@@ -2324,6 +2629,23 @@ class DungeonMainView(DungeonViewBase):
         self.x = x
         self.y = y
         self.db_api = db_api
+        # 進めない方向のボタンは最初から無効化する（「壁！」の空振り防止）。
+        for child in self.children:
+            key = {"dg_u": "up", "dg_d": "down", "dg_l": "left", "dg_r": "right"}.get(
+                getattr(child, "custom_id", None))
+            if key is not None:
+                child.disabled = d_direction_blocked(uid, floor, x, y, key)
+
+    def _fresh_main_view(self, p):
+        """移動後の再描画用に作り直したメインView（ボタン無効状態を最新化する）。"""
+        return self
+
+    async def act_here_action(self, interaction):
+        """中央ボタン「部屋で行動」: 現在マスのタイルを再発動する。"""
+        await interaction.response.defer()
+        msg = await d_current_cell_action(self.uid, self.db_api)
+        p = self.sync_state()
+        await self._redraw(interaction, msg, p, view=self._fresh_main_view(p))
 
     def _embed(self, msg="", image_url=None):
         p = self.sync_state()
@@ -2351,166 +2673,69 @@ class DungeonMainView(DungeonViewBase):
             embed=target._embed(msg, image_url=map_url), view=target, attachments=[map_file]
         )
 
-    async def _move(self, i, dx, dy):
+    async def _move(self, i, direction):
         lock = d_get_lock(self.uid)
         if lock.locked():
             await i.response.send_message("前の操作を処理中です。少し待ってください。", ephemeral=True)
             return
         await lock.acquire()
         try:
-            await self._move_locked(i, dx, dy)
+            await self._move_locked(i, direction)
         finally:
             lock.release()
 
-    async def _move_locked(self, i, dx, dy):
+    async def _move_locked(self, i, direction):
         await i.response.defer()
 
         # ビュー生成時のスナップショットではなく、常に保存済みの現在状態を使う。
         p = self.sync_state()
         floor = p["floor"]
-        nx, ny = p["x"] + dx, p["y"] + dy
 
-        # 境界チェック
-        if not (0 <= nx < D2_MAP_W and 0 <= ny < D2_MAP_H):
+        # 進めない方向は通常ボタン側で無効化しているが、古いパネル等からの
+        # 押下に備えてサーバー側でも弾く（描画は従来どおり1回だけ行う）。
+        if direction not in _DIRECTIONS or d_direction_blocked(
+                self.uid, floor, p["x"], p["y"], direction):
             await self._redraw(i, "壁！進めない", p)
             return
 
-        ct = d_get_cell(self.uid, floor, nx, ny)
-        if dx != 0 and dy != 0 and (
-            d_get_cell(self.uid, floor, p["x"] + dx, p["y"]) == D_WALL
-            or d_get_cell(self.uid, floor, p["x"], p["y"] + dy) == D_WALL
-        ):
-            ct = D_WALL
-        if ct == D_WALL:
-            await self._redraw(i, "壁！進めない", p)
-            return
+        # 1押下 = 1 journey。歩行・タイル処理・保存は d_execute_journey 側で
+        # 行い、ここでは結果に応じた View 遷移と最終描画だけを行う。
+        result = await d_execute_journey(self.uid, self.db_api, direction, source="manual")
+        p = self.sync_state()
+        msg = "\n".join(result["messages"])
 
-        # 座標更新
-        p["x"], p["y"] = nx, ny
-
-        msg = ""
-
-        p["turns"] += 1
-        p["season_score"] += 1
-        # 状態異常は移動ターンでも1回進める（戦闘中は敵ターン側で進むため二重にはならない）。
-        status_logs = d_tick_status(self.uid)
-        if status_logs:
-            msg = " / ".join(status_logs)
-        if p["hp"] <= 0:
-            # 状態異常で力尽きた場合は特殊タイルを発動させず、既存の死亡処理に乗せる。
-            p["hp"] = d_effective_stats(p)["max_hp"]
-            p["floor"] = 1
-            p["x"], p["y"] = d_instance_start(self.uid, 1)
-            msg += "\n力尽きた… スタート地点へ戻された"
-            await dg_save_player(self.uid, self.db_api)
-            await self._redraw(i, msg, p)
-            return
-        completed_quests = d_progress_quest(self.uid, "turns", 1)
-        for quest_key in completed_quests:
-            quest_reward = QUEST_MASTER[quest_key]["reward"]
-            await d_apply_reward(self.uid, self.db_api, **quest_reward)
-        d_unlock_achievement(self.uid, "first_step")
-        if floor >= 10: d_unlock_achievement(self.uid, "floor_10")
-        if floor >= 20: d_unlock_achievement(self.uid, "floor_20")
-        if floor >= 40: d_unlock_achievement(self.uid, "floor_40")
-
-        # 特殊タイル判定
-        if ct == D_STAIRS:
-            await dg_save_player(self.uid, self.db_api)
-            sv = DungeonStairsView(self.uid, floor, p["x"], p["y"], self.db_api)
+        if result["view"] == "stairs":
+            sv = DungeonStairsView(self.uid, p["floor"], p["x"], p["y"], self.db_api)
             await self._redraw(i, "階段がある。どうする？", p, view=sv)
             return
-
-        elif ct == D_CHEST:
-            msg, reward = d_open_chest(self.uid, self.db_api)
-            await d_apply_reward(self.uid, self.db_api, **reward)
-            d_consume(self.uid, floor, p["x"], p["y"])
-            await dg_save_player(self.uid, self.db_api)
-
-        elif ct == D_TRAP:
-            msg, penalty = d_trigger_trap(self.uid)
-            await d_apply_reward(self.uid, self.db_api, **penalty)
-            d_consume(self.uid, floor, p["x"], p["y"])
-            await dg_save_player(self.uid, self.db_api)
-
-        elif ct == D_SHOP:
-            await dg_save_player(self.uid, self.db_api)
-            shop = DungeonShopView(self.uid, floor, p["x"], p["y"], self.db_api)
+        if result["view"] == "shop":
+            shop = DungeonShopView(self.uid, p["floor"], p["x"], p["y"], self.db_api)
             await self._redraw(i, "商店を発見！", p, view=shop)
             return
-
-        elif ct == D_REST:
-            before = p["hp"]
-            p["hp"] = min(d_effective_stats(p)["max_hp"], p["hp"] + max(20, d_effective_stats(p)["max_hp"] // 3))
-            d_clear_status(self.uid)
-            msg = f"休憩した。HPが {p['hp'] - before} 回復し、状態異常が治った。"
-            d_consume(self.uid, floor, p["x"], p["y"])
-            await dg_save_player(self.uid, self.db_api)
-
-        elif ct == D_SHRINE:
-            p["atk"] += 2
-            msg = "祭壇の祝福！ 基礎ATKが2上昇した。"
-            d_consume(self.uid, floor, p["x"], p["y"])
-            await dg_save_player(self.uid, self.db_api)
-
-        elif ct == D_EVENT:
-            gain = random.randint(20, 80)
-            await d_apply_reward(self.uid, self.db_api, coins=gain, xp=gain, season_score=25)
-            msg = f"旅人の依頼を達成した。コイン+{gain}、XP+{gain}"
-            d_consume(self.uid, floor, p["x"], p["y"])
-            await dg_save_player(self.uid, self.db_api)
-
-        elif ct == D_MINE:
-            mv = DungeonMineView(self.uid, floor, p["x"], p["y"], self.db_api)
+        if result["view"] == "mine":
+            mv = DungeonMineView(self.uid, p["floor"], p["x"], p["y"], self.db_api)
             await self._redraw(i, "鉱山を発見！", p, view=mv)
             return
-
-        else:
-            rate = D_ENCOUNTER_RATES.get(d_get_biome(floor)[0], 0.10)
-            if random.random() < rate:
-                enemy = d_make_enemy(floor)
-                cv = DungeonCombatView(self.uid, floor, p["x"], p["y"], enemy, self.db_api)
-                await dg_save_player(self.uid, self.db_api)
-                await self._redraw(i, "", p, view=cv)
-                return
-
-        # 死亡判定
-        if p["hp"] <= 0:
-            p["hp"] = d_effective_stats(p)["max_hp"]
-            p["floor"] = 1
-            p["x"], p["y"] = d_instance_start(self.uid, 1)
-            msg += "\n力尽きた… スタート地点へ戻された"
-
-        # 最終的な画面更新
-        await dg_save_player(self.uid, self.db_api)
-        await self._redraw(i, msg, p)
-
-    @discord.ui.button(label="北西", style=discord.ButtonStyle.grey, row=0, custom_id="dg_lu")
-    async def leftup(self, i, b): await self._move(i, -1, -1)
+        if result["view"] == "combat":
+            cv = DungeonCombatView(self.uid, p["floor"], p["x"], p["y"], result["enemy"], self.db_api)
+            await self._redraw(i, msg, p, view=cv)
+            return
+        await self._redraw(i, msg, p, view=self._fresh_main_view(p))
 
     @discord.ui.button(label="北", style=discord.ButtonStyle.grey, row=0, custom_id="dg_u")
-    async def up(self, i, b): await self._move(i, 0, -1)
-
-    @discord.ui.button(label="北東", style=discord.ButtonStyle.grey, row=0, custom_id="dg_ru")
-    async def rightup(self, i, b): await self._move(i, 1, -1)
+    async def up(self, i, b): await self._move(i, "up")
 
     @discord.ui.button(label="西", style=discord.ButtonStyle.grey, row=1, custom_id="dg_l")
-    async def left(self, i, b): await self._move(i, -1, 0)
+    async def left(self, i, b): await self._move(i, "left")
 
-    @discord.ui.button(label="ENTER", style=discord.ButtonStyle.grey, row=1, custom_id="dg_c")
-    async def check(self, i, b): await self._move(i, 0, 0)
+    @discord.ui.button(label="部屋で行動", style=discord.ButtonStyle.green, row=1, custom_id="dg_c")
+    async def act_here(self, i, b): await self.act_here_action(i)
 
     @discord.ui.button(label="東", style=discord.ButtonStyle.grey, row=1, custom_id="dg_r")
-    async def right(self, i, b): await self._move(i, 1, 0)
-
-    @discord.ui.button(label="南西", style=discord.ButtonStyle.grey, row=2, custom_id="dg_ld")
-    async def leftdown(self, i, b): await self._move(i, -1, 1)
+    async def right(self, i, b): await self._move(i, "right")
 
     @discord.ui.button(label="南", style=discord.ButtonStyle.grey, row=2, custom_id="dg_d")
-    async def down(self, i, b): await self._move(i, 0, 1)
-
-    @discord.ui.button(label="南東", style=discord.ButtonStyle.grey, row=2, custom_id="dg_rd")
-    async def rightdown(self, i, b): await self._move(i, 1, 1)
+    async def down(self, i, b): await self._move(i, "down")
 
     @discord.ui.button(label="STATUS", style=discord.ButtonStyle.green, row=3, custom_id="dg_status")
     async def status(self, i, b):
@@ -2528,19 +2753,23 @@ class DungeonUnifiedView(DungeonMainView):
         super().__init__(uid, floor, x, y, db_api)
         self.clef_plan = plan or clef_plan_for(uid)
         self.clear_items()
+        # Phase 1-C: 4方向＋中央「部屋で行動」。進めない方向は disabled。
         directions = [
-            ("北西", -1, -1, 0), ("北", 0, -1, 0), ("北東", 1, -1, 0),
-            ("西", -1, 0, 1), ("ENTER", 0, 0, 1), ("東", 1, 0, 1),
-            ("南西", -1, 1, 2), ("南", 0, 1, 2), ("南東", 1, 1, 2),
+            ("北", "up", 0), ("西", "left", 1), ("東", "right", 1), ("南", "down", 2),
         ]
-        for label, dx, dy, row in directions:
+        for label, key, row in directions:
             button = discord.ui.Button(
-                label=label, style=discord.ButtonStyle.green if label == "ENTER" else discord.ButtonStyle.grey, row=row
+                label=label, style=discord.ButtonStyle.grey, row=row,
+                disabled=d_direction_blocked(uid, floor, x, y, key),
             )
-            async def move_callback(interaction, dx=dx, dy=dy):
-                await self._move(interaction, dx, dy)
+            async def move_callback(interaction, key=key):
+                await self._move(interaction, key)
             button.callback = move_callback
             self.add_item(button)
+
+        center = discord.ui.Button(label="部屋で行動", style=discord.ButtonStyle.green, row=1)
+        center.callback = self.act_here_action
+        self.add_item(center)
 
         status_button = discord.ui.Button(label="STATUS", style=discord.ButtonStyle.green, row=3)
         status_button.callback = self.open_status
@@ -2548,6 +2777,9 @@ class DungeonUnifiedView(DungeonMainView):
         stop = discord.ui.Button(label="終了", style=discord.ButtonStyle.red, row=3)
         stop.callback = self.end_session
         self.add_item(stop)
+
+    def _fresh_main_view(self, p):
+        return DungeonUnifiedView(self.uid, p["floor"], p["x"], p["y"], self.db_api, plan=self.clef_plan)
 
     async def open_status(self, interaction):
         """ステータス画面（自動操作開始・作戦選択を含む）を開く。"""
@@ -2696,38 +2928,8 @@ class DungeonOperationView(DungeonViewBase):
 
     async def current_action(self, interaction):
         await interaction.response.defer()
-        p = self.sync_state()
-        floor = p["floor"]
-        cell = d_get_cell(self.uid, floor, p["x"], p["y"])
-        msg = "この場所では操作できません。"
-        if cell == D_STAIRS and floor < D_FLOORS:
-            p["floor"] = floor + 1
-            p["hp"] = d_effective_stats(p)["max_hp"]
-            d_clear_status(self.uid)
-            p["x"], p["y"] = d_instance_start(self.uid, p["floor"])
-            d_progress_quest(self.uid, "floor", 1)
-            msg = f"階段を上り、{p['floor']}Fへ進みました。"
-        elif cell == D_MINE:
-            gain = d_do_mine(self.uid)
-            await d_apply_reward(self.uid, self.db_api, coins=gain)
-            d_consume(self.uid, floor, p["x"], p["y"])
-            await dg_save_player(self.uid, self.db_api)
-            msg = f"採掘してコインを{gain}枚獲得しました。"
-        elif cell == D_REST:
-            stats = d_effective_stats(p)
-            before = p["hp"]
-            p["hp"] = min(stats["max_hp"], p["hp"] + max(20, stats["max_hp"] // 3))
-            d_clear_status(self.uid)
-            d_consume(self.uid, floor, p["x"], p["y"])
-            await dg_save_player(self.uid, self.db_api)
-            msg = f"休憩してHPが {p['hp'] - before} 回復しました。"
-        elif cell == D_SHOP:
-            try:
-                await d_apply_reward(self.uid, self.db_api, coins=-30, bread=1)
-                msg = "商店でレアパンを購入しました。"
-            except Exception:
-                msg = "コイン不足で購入できません。"
-        await dg_save_player(self.uid, self.db_api)
+        # 実処理は d_current_cell_action に集約（メインパネルの中央ボタンと共用）。
+        msg = await d_current_cell_action(self.uid, self.db_api)
         await self._back(interaction, msg)
 
     async def back(self, interaction):
@@ -3121,11 +3323,14 @@ class ClefDungeonPlayer:
             return
 
         # 通常移動。待機手は用意せず、必ず1方向を選ばせる。
+        # Phase 1-C 以降、1回の判断は1マスではなく1 journey（分岐・部屋・
+        # 特殊タイル等で止まるまで自動で進む）を実行する。
         dist = dungeon_bfs(uid, floor, x, y)
         move_criteria = dungeon_move_criteria(uid, floor, x, y, dist)
         criteria_text = "\n".join(f"{key}: {value}" for key, value in move_criteria.items())
         instructions = (
-            "あなたはダンジョン探索の意思決定者です。画像ではなく、以下のテキスト盤面を正として次の1手を選んでください。\n"
+            "あなたはダンジョン探索の意思決定者です。画像ではなく、以下のテキスト盤面を正として次に進む方向を1つ選んでください。\n"
+            "選んだ方向へは、分岐・部屋・特殊タイル・エンカウントのいずれかに当たるまで自動で進みます。\n"
             f"目的: {dungeon_goal_text(uid)}\n"
             f"作戦: {plan}（{dungeon_plan_guidance(plan)}）\n"
             f"現在地: {floor}F ({x},{y}) / 階段: {dungeon_stairs_hint(uid, floor, x, y, dist)}\n"
@@ -3145,86 +3350,25 @@ class ClefDungeonPlayer:
         if choice is None:
             choice = dungeon_best_direction(uid, plan, dist)
             logs.append(f"Clefの応答を解釈できなかったため、作戦に沿って{_DIRECTION_LABELS[choice]}へ進みます。")
-        dx, dy = _DIRECTIONS[choice]
-        nx, ny = x + dx, y + dy
-        corner_cut = dx != 0 and dy != 0 and (
-            d_get_cell(uid, floor, x + dx, y) == D_WALL or d_get_cell(uid, floor, x, y + dy) == D_WALL
-        )
-        if (not (0 <= nx < D2_MAP_W and 0 <= ny < D2_MAP_H)
-                or d_get_cell(uid, floor, nx, ny) == D_WALL or corner_cut):
+        if d_direction_blocked(uid, floor, x, y, choice):
             blocked_choice = choice
             choice = dungeon_best_direction(uid, plan, dist)
-            dx, dy = _DIRECTIONS[choice]
-            nx, ny = x + dx, y + dy
-            logs.append(f"{_DIRECTION_LABELS[blocked_choice]}({blocked_choice})は壁でした。サーバー判定で{_DIRECTION_LABELS[choice]}({choice})へ補正します。")
-            self._note_result(uid, f"{blocked_choice}は壁のため{choice}へ補正")
-            fallback_corner_cut = dx != 0 and dy != 0 and (
-                d_get_cell(uid, floor, x + dx, y) == D_WALL or d_get_cell(uid, floor, x, y + dy) == D_WALL
-            )
-            if (not (0 <= nx < D2_MAP_W and 0 <= ny < D2_MAP_H)
-                    or d_get_cell(uid, floor, nx, ny) == D_WALL or fallback_corner_cut):
+            if d_direction_blocked(uid, floor, x, y, choice):
                 logs.append("周囲に合法な移動先がないため、このターンは移動しません。")
                 return
-        p["x"], p["y"] = nx, ny
-        p["turns"] += 1
-        p["season_score"] += 1
-        # 手動移動と同じく、移動ターンで状態異常を1回進める。
-        status_logs = d_tick_status(uid)
-        if status_logs:
-            logs.append(" / ".join(status_logs))
-        if p["hp"] <= 0:
-            p["hp"] = d_effective_stats(p)["max_hp"]
-            p["floor"] = 1
-            p["x"], p["y"] = d_instance_start(uid, 1)
-            logs.append("力尽きた… スタート地点へ戻された")
-            await dg_save_player(uid, self.bot.db_api)
-            return
-        d_progress_quest(uid, "turns", 1)
-        logs.append(f"{choice}へ移動しました。現在地: {floor}F ({nx},{ny}) / {d_floor_modifier(floor)}")
-        self._note_result(uid, f"{choice}へ移動して ({nx},{ny}) に到着")
-        await self._resolve_tile(uid, logs)
-        await dg_save_player(uid, self.bot.db_api)
-
-    async def _resolve_tile(self, uid, logs):
+            logs.append(f"{_DIRECTION_LABELS[blocked_choice]}({blocked_choice})は壁でした。サーバー判定で{_DIRECTION_LABELS[choice]}({choice})へ補正します。")
+            self._note_result(uid, f"{blocked_choice}は壁のため{choice}へ補正")
+        result = await d_execute_journey(uid, self.bot.db_api, choice, source="clef")
+        logs.extend(result["messages"])
         p = d_get_player(uid)
-        floor, x, y = p["floor"], p["x"], p["y"]
-        cell = d_get_cell(uid, floor, x, y)
-        if cell == D_CHEST:
-            text, reward = d_open_chest(uid, self.bot.db_api)
-            await d_apply_reward(uid, self.bot.db_api, **reward)
-            d_consume(uid, floor, x, y)
-            logs.append(text)
+        logs.append(f"現在地: {p['floor']}F ({p['x']},{p['y']}) / {d_floor_modifier(p['floor'])}")
+        self._note_result(uid, f"{choice}へ{result['steps']}歩進んで ({p['x']},{p['y']}) に到着")
+        if result["enemy"] is not None:
+            # journey 途中でエンカウントした場合はその場で自動戦闘に入る。
+            # （階段・商店・鉱山に着いた場合は次ターンの判断で扱う。）
+            logs.append(f"{result['enemy']['name']}と遭遇しました。")
+            await self._auto_combat(uid, result["enemy"], logs)
             await dg_save_player(uid, self.bot.db_api)
-            return
-        if cell == D_TRAP:
-            text, penalty = d_trigger_trap(uid)
-            await d_apply_reward(uid, self.bot.db_api, **penalty)
-            d_consume(uid, floor, x, y)
-            logs.append(text)
-            await dg_save_player(uid, self.bot.db_api)
-            return
-        if cell == D_SHRINE:
-            p["atk"] += 2
-            d_consume(uid, floor, x, y)
-            logs.append("祭壇の祝福: 基礎ATKが2上昇しました。")
-            await dg_save_player(uid, self.bot.db_api)
-            return
-        if cell == D_EVENT:
-            gain = random.randint(40, 120)
-            await d_apply_reward(uid, self.bot.db_api, coins=gain, xp=gain, season_score=25, material="ancient_shard")
-            d_consume(uid, floor, x, y)
-            logs.append(f"旅人の依頼: コイン+{gain} / XP+{gain} / 古代欠片+1")
-            await dg_save_player(uid, self.bot.db_api)
-            return
-        if cell in (D_STAIRS, D_MINE, D_REST, D_SHOP):
-            # 特殊タイルは次のターンの判断（階段・採掘・休憩・購入）で扱う。
-            # ここでエンカウントを引くと、到着した特殊タイルを無視して戦闘に入ってしまう。
-            return
-        biome, *_ = d_get_biome(floor)
-        if random.random() < D_ENCOUNTER_RATES.get(biome, 0.1):
-            enemy = d_make_enemy(floor)
-            logs.append(f"{enemy['name']}と遭遇しました。")
-            await self._auto_combat(uid, enemy, logs)
 
     async def _auto_combat(self, uid, enemy, logs):
         """戦闘もClefに選ばせる。ダメージ計算と結果確定は本体側で行う。"""
