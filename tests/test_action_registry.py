@@ -153,7 +153,8 @@ class AICandidatesTest(unittest.TestCase):
 
     def test_candidate_shape(self):
         for key, item in self.candidates.items():
-            self.assertEqual(set(item), {"root", "value", "label", "genre"})
+            # PR 4 で候補に params スキーマと risk が加わった。
+            self.assertEqual(set(item), {"root", "value", "label", "genre", "risk", "params"})
             self.assertEqual(key, f"{item['root']}:{item['value']}".lower())
             self.assertEqual(item["genre"], f"/{item['root']}")
 
