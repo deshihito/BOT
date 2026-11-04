@@ -22,6 +22,7 @@ import discord
 import json
 import random
 import asyncio
+import base64
 import io
 import time
 import hashlib
@@ -34,7 +35,7 @@ from discord import app_commands, Interaction
 from discord.ext import commands, tasks
 from cogs.terminal import ALLOWED_USER_IDS
 from discord.ext.commands import Cog
-from PIL import Image, ImageDraw
+from PIL import Image, ImageDraw, ImageEnhance
 from zoneinfo import ZoneInfo
 from core.api_client import APIError
 from core.api_retry import run_with_retry
@@ -52,7 +53,11 @@ JST = ZoneInfo("Asia/Tokyo")
 D_MAP_W = 101
 D_MAP_H = 101
 D_FLOORS = 40
-D_VIEW_R = 5
+# マップ描画の窓半径（17x17タイル）。現在視界 D_SIGHT_R より広く取り、
+# 視界外の探索済みセルを「記憶」として暗く描く（Phase 1-D / 設計 §6-1）。
+D_VIEW_R = 8
+# 現在視界の半径。これより遠い探索済みセルは明度を落として描画する。
+D_SIGHT_R = 6
 TILE = 32
 
 # Phase 1 の新マップ定義（並行導入。現行マップとは独立に使う）
@@ -94,13 +99,8 @@ D_BIOMES = [
     (range(30, 41),  "砂漠地帯", "🟧", "<:y_:1563559481768411257>", "🌫️", 0xC8600A),
 ]
 
-# エンカウント率
-D_ENCOUNTER_RATES = {
-    "洞窟":     0.05,
-    "森":       0.20,
-    "氷雪地帯": 0.07,
-    "砂漠地帯": 0.13,
-}
+# 歩行時のバイオーム率エンカウントは Phase 1-D で廃止した。戦闘は部屋の
+# 固定配置と、通路の初回通過時のアンブッシュ（D_AMBUSH_RATE）で発生する。
 
 SEASON_ID = os.environ.get(
     "DUNGEON_SEASON_ID",
@@ -192,6 +192,15 @@ _DIRECTIONS = {
 }
 # fast-forward ウォーカー（Phase 1-C / 設計 §4-2）の定数。
 D_WALK_MAX_STEPS = 18
+# 通路アンブッシュ率（Phase 1-D / 設計 §4-2 停止条件5、確定事項 D4）。
+# そのインスタンスで初めて踏む通路マスでのみ抽選する。
+D_AMBUSH_RATE = 0.12
+# 部屋の役割 → 表示名（Phase 1-D: 進捗表示・方向ボタン・ログで使う）。
+D_ROOM_ROLE_NAMES = {
+    "start": "スタートの間", "combat": "戦闘の間", "event": "イベントの間",
+    "chest": "宝箱の間", "stairs": "階段の間", "shop": "商店",
+    "mine": "採掘場", "rest": "休憩所", "shrine": "祠",
+}
 # 乗ったら journey を止めて処理する特殊タイル。
 D_WALK_SPECIAL_CELLS = frozenset({
     D_STAIRS, D_CHEST, D_TRAP, D_SHOP, D_MINE, D_REST, D_SHRINE, D_EVENT,
@@ -202,8 +211,11 @@ D_WALK_STOP_TEXTS = {
     "junction": "分岐に着いた。",
     "dead_end": "行き止まりに着いた。",
     "room_edge": "部屋の壁際で止まった。",
+    "door": "部屋の出口に着いた。",
     "max_steps": "一旦立ち止まった。",
     "low_hp": "HPが低下したため立ち止まった。",
+    "ambush": "不意打ちを受けた！",
+    "guard": "階段の番人が立ちはだかった！",
 }
 _DIRECTION_LABELS = {
     "up": "北", "down": "南", "left": "西", "right": "東",
@@ -358,7 +370,8 @@ def d_get_instance(uid, floor):
         seed = d_floor_seed(SEASON_ID, uid, floor)
         grid, rooms = d_gen_floor_v2(seed, floor)
         start = next((tuple(r["center"]) for r in rooms if r["role"] == "start"), (1, 1))
-        inst = {"seed": seed, "grid": grid, "rooms": rooms, "start": start, "consumed": set()}
+        inst = {"seed": seed, "grid": grid, "rooms": rooms, "start": start,
+                "consumed": set(), "visited": set(), "cleared": set(), "traversed": set()}
         saved = {}
         p = dg_players.get(uid)
         if p is not None:
@@ -371,6 +384,20 @@ def d_get_instance(uid, floor):
             if 0 <= cx < D2_MAP_W and 0 <= cy < D2_MAP_H:
                 inst["consumed"].add((cx, cy))
                 grid[cy][cx] = D_FLOOR
+        # Phase 1-D: フォグ（visited）と部屋の制圧状態（cleared）を復元する。
+        inst["visited"] = d_decode_visited(saved.get("visited"))
+        # アンブッシュ抽選済みの判定用に、実際に踏んだセルも復元する
+        # （visited は表示用に周囲も含むため、踏んだセルとは一致しない）。
+        inst["traversed"] = d_decode_visited(saved.get("traversed"))
+        for rid in saved.get("cleared", []) or []:
+            try:
+                inst["cleared"].add(int(rid))
+            except (TypeError, ValueError):
+                continue
+        # 開始時はスタート部屋を公開済みにする（冪等。復元済みなら無変化）。
+        start_room = next((r for r in rooms if r["role"] == "start"), None)
+        if start_room is not None:
+            d_reveal_room(inst, start_room)
         dg_instances[key] = inst
     return inst
 
@@ -390,12 +417,18 @@ def d_instances_snapshot(uid):
         snapshot[str(fkey)] = {
             "seed": data.get("seed"),
             "consumed": [list(c) for c in data.get("consumed", []) or []],
+            "visited": data.get("visited"),
+            "cleared": [int(r) for r in data.get("cleared", []) or []],
+            "traversed": data.get("traversed"),
         }
     for (u, f), inst in dg_instances.items():
         if u == uid:
             snapshot[str(f)] = {
                 "seed": inst["seed"],
                 "consumed": sorted(list(c) for c in inst["consumed"]),
+                "visited": d_encode_visited(inst.get("visited") or set()),
+                "cleared": sorted(int(r) for r in inst.get("cleared") or set()),
+                "traversed": d_encode_visited(inst.get("traversed") or set()),
             }
     return snapshot
 
@@ -447,6 +480,137 @@ def d_room_at(instance, x, y):
     return None
 
 
+# ============================================================
+#  Phase 1-D: フォグ（visited）と部屋の制圧状態（cleared）
+#  設計書 dungeon-phase1-design.md §5 / §6-1。
+# ============================================================
+
+def d_encode_visited(visited):
+    """踏破済みセルの集合を 29x29=841bit のビットセット Base64 にする（純粋関数）。"""
+    bits = bytearray((D2_MAP_W * D2_MAP_H + 7) // 8)
+    for x, y in visited or ():
+        if 0 <= x < D2_MAP_W and 0 <= y < D2_MAP_H:
+            idx = y * D2_MAP_W + x
+            bits[idx // 8] |= 1 << (idx % 8)
+    return base64.b64encode(bytes(bits)).decode("ascii")
+
+
+def d_decode_visited(text):
+    """d_encode_visited の逆変換。壊れた入力では空集合を返す（純粋関数）。"""
+    visited = set()
+    if not text:
+        return visited
+    try:
+        raw = base64.b64decode(text, validate=True)
+    except Exception:
+        return visited
+    for idx in range(D2_MAP_W * D2_MAP_H):
+        byte = raw[idx // 8] if idx // 8 < len(raw) else 0
+        if (byte >> (idx % 8)) & 1:
+            visited.add((idx % D2_MAP_W, idx // D2_MAP_W))
+    return visited
+
+
+def d_reveal_room(inst, room):
+    """部屋の公開（設計 §6-1）: 部屋全体＋接続通路の次マスまでを visited にする。"""
+    visited = inst.setdefault("visited", set())
+    grid = inst["grid"]
+    rx, ry, rw, rh = room["rect"]
+    for gy in range(ry, ry + rh):
+        for gx in range(rx, rx + rw):
+            visited.add((gx, gy))
+    # 部屋の境界に隣接する通路マス（部屋の外で壁でないマス）を1マスだけ公開する。
+    for gy in range(ry, ry + rh):
+        for gx in range(rx, rx + rw):
+            for vx, vy in _DIRECTIONS.values():
+                nx, ny = gx + vx, gy + vy
+                if (0 <= nx < D2_MAP_W and 0 <= ny < D2_MAP_H
+                        and not (rx <= nx < rx + rw and ry <= ny < ry + rh)
+                        and grid[ny][nx] != D_WALL):
+                    visited.add((nx, ny))
+    return visited
+
+
+def d_mark_corridor_visited(inst, x, y):
+    """通路の公開（設計 §6-1）: 通過マスとその周囲1マスを visited にする。"""
+    visited = inst.setdefault("visited", set())
+    for dy in range(-1, 2):
+        for dx in range(-1, 2):
+            nx, ny = x + dx, y + dy
+            if 0 <= nx < D2_MAP_W and 0 <= ny < D2_MAP_H:
+                visited.add((nx, ny))
+    return visited
+
+
+def d_room_cleared(inst, room_id):
+    """部屋が制圧/消化済みかどうか。"""
+    return room_id in (inst.get("cleared") or set())
+
+
+def d_mark_room_cleared(inst, room_id):
+    """部屋を制圧/消化済みにする。"""
+    inst.setdefault("cleared", set()).add(room_id)
+
+
+def d_room_discovered(inst, room):
+    """部屋が発見済みか（rect 内のいずれかのセルが visited）。"""
+    visited = inst.get("visited") or set()
+    rx, ry, rw, rh = room["rect"]
+    return any((gx, gy) in visited
+               for gy in range(ry, ry + rh) for gx in range(rx, rx + rw))
+
+
+def d_stairs_room_blocked(uid, floor, x, y):
+    """座標の階段部屋が未制圧で、階段が番人に守られているかどうか。"""
+    inst = d_get_instance(uid, floor)
+    room = d_room_at(inst, x, y)
+    return bool(room is not None and room.get("role") == "stairs"
+                and not d_room_cleared(inst, room["id"]))
+
+
+def d_floor_progress_text(uid):
+    """フロア進捗の表示文（発見部屋数・階段の発見/番人制圧・現在の目的）。"""
+    p = d_get_player(uid)
+    inst = d_get_instance(uid, p["floor"])
+    rooms = inst.get("rooms", []) or []
+    discovered = [r for r in rooms if d_room_discovered(inst, r)]
+    stairs_room = next((r for r in rooms if r["role"] == "stairs"), None)
+    stairs_found = stairs_room is not None and d_room_discovered(inst, stairs_room)
+    guard_done = stairs_room is not None and d_room_cleared(inst, stairs_room["id"])
+    if stairs_room is None:
+        objective = "階段を探す"
+    elif not stairs_found:
+        objective = "階段の間を探す（番人が守っている）"
+    elif not guard_done:
+        objective = "階段の間の番人を倒す"
+    else:
+        objective = "階段から上の階へ進む"
+    return (
+        f"発見: 部屋 {len(discovered)}/{len(rooms)}\n"
+        f"階段: {'発見済み' if stairs_found else '未発見'} / 番人: {'制圧済み' if guard_done else '未制圧'}\n"
+        f"目的: {objective}"
+    )
+
+
+def d_destination_label(uid, floor, x, y, direction):
+    """方向ボタンの行き先ラベル（Phase 1-D / 設計 §6-2）。
+
+    その方向へ進んだ先（d_plan_walk の到達点）にある部屋が発見済みなら
+    役割名、未発見なら「未探索」、部屋でなければ「通路」を返す。
+    1歩も進めない場合は None（ボタンは disabled 前提）。
+    """
+    plan = d_plan_walk(uid, floor, x, y, direction)
+    if not plan["path"]:
+        return None
+    inst = d_get_instance(uid, floor)
+    room = d_room_at(inst, *plan["stop_cell"])
+    if room is None:
+        return "通路"
+    if d_room_discovered(inst, room):
+        return D_ROOM_ROLE_NAMES.get(room["role"], "部屋")
+    return "未探索"
+
+
 def d_direction_blocked(uid, floor, x, y, direction):
     """その方向の1歩目が進めない（範囲外または壁）かどうか。"""
     vec = _DIRECTIONS.get(direction)
@@ -469,7 +633,7 @@ def d_plan_walk(uid, floor, x, y, direction):
     戻り値: {
       direction: キー文字列,
       path: [進む座標...]（開始マスは含まない）,
-      stop_reason: "room"|"special"|"junction"|"dead_end"|"room_edge"|"max_steps"|"blocked",
+      stop_reason: "room"|"special"|"junction"|"dead_end"|"room_edge"|"door"|"max_steps"|"blocked",
       stop_cell: 最後に到達する座標（1歩も進めない場合は開始座標）,
       entered_room_id: stop_reason == "room" のとき入った部屋の id、それ以外は None,
     }
@@ -527,6 +691,22 @@ def d_plan_walk(uid, floor, x, y, direction):
             result["stop_reason"] = "max_steps"
             break
         if room is not None:
+            # 停止条件（ドア）: 到達したセルに、来たマスと直進先以外へ部屋の
+            # 外へ出る隣接マスがある場合はそこで止まる。通路は部屋の中心同士
+            # を結ぶためドアが中心線からずれることが多く、直進を優先すると
+            # 横方向のドアを素通りして部屋から出られなくなる（実機報告で
+            # 検証済みの欠陥）。直進先の出口はそのまま通過できるため対象外
+            # とし、部屋から部屋への1押下移動（Phase 1-C の契約）を保つ。
+            # 特殊タイル/別部屋入室の判定より後、直進継続の判定より前に置く。
+            if any(
+                (cx + vx, cy + vy) != came_from
+                and (cx + vx, cy + vy) != (cx + dx, cy + dy)
+                and passable(cx + vx, cy + vy)
+                and d_room_at(inst, cx + vx, cy + vy) is not room
+                for vx, vy in _DIRECTIONS.values()
+            ):
+                result["stop_reason"] = "door"
+                break
             # 開始部屋の中では真っ直ぐ進み続ける。直進できなければ次ループ
             # 先頭の判定で room_edge になる。ただし隣に部屋の外への出口が
             # 1つだけある場合は、そこへ滑り込む（扉の位置ずれ吸収）。
@@ -912,8 +1092,8 @@ def d_do_mine(uid):
     gain = random.randint(30, 200)
     return gain
 
-def d_make_enemy(floor, forced_name=None):
-    """敵を生成"""
+def d_make_enemy(floor, forced_name=None, forced_rank=None):
+    """敵を生成。forced_rank ("normal"/"elite"/"boss") でランク抽選を固定できる（Phase 1-D）。"""
     base_hp  = 15 + floor * 8
     base_atk = 4  + floor * 2
     base_def = 1  + floor
@@ -923,6 +1103,12 @@ def d_make_enemy(floor, forced_name=None):
     if forced_name:
         name = forced_name
         etype = "normal"
+    elif forced_rank in ("normal", "elite", "boss"):
+        etype = forced_rank
+        name = random.choice({
+            "boss": D_BOSS_NAMES.get(bname, ["ボス"]),
+            "elite": D_SUPERENEMY_NAMES.get(bname, ["精鋭"]),
+        }.get(etype, D_ENEMY_NAMES.get(bname, ["謎の敵"])))
     else:
         r = random.random()
         if r < 0.01:
@@ -1324,8 +1510,16 @@ def _draw_tile(draw, img, x, y, cell, biome, is_player=False, is_fog=False):
         draw.text((px+TILE//2-4, py+TILE//2-6), "🏠", fill=(255, 255, 255))
 
 def d_build_map_image(uid, floor, px, py, radius=D_VIEW_R):
-    """マップをPillow Imageとして生成（そのプレイヤーのインスタンスを描く）"""
-    grid = d_get_instance(uid, floor)["grid"]
+    """マップをPillow Imageとして生成（そのプレイヤーのインスタンスを描く）。
+
+    Phase 1-D のフォグ・オブ・ウォー（設計 §6-1）:
+      - 未探索セル: 黒（霧）
+      - 探索済みだが現在視界（D_SIGHT_R）の外: 明度45%で描画（記憶表示）
+      - 視界内の探索済みセル: 通常描画
+    """
+    inst = d_get_instance(uid, floor)
+    grid = inst["grid"]
+    visited = inst.get("visited") or set()
     bname, *_ = d_get_biome(floor)
     size = radius * 2 + 1
     img = Image.new("RGB", (size * TILE, size * TILE), (0, 0, 0))
@@ -1337,8 +1531,15 @@ def d_build_map_image(uid, floor, px, py, radius=D_VIEW_R):
             if not (0 <= vx < D2_MAP_W and 0 <= vy < D2_MAP_H):
                 _draw_tile(draw, img, vx_i, vy_i, D_WALL, bname, is_fog=True)
                 continue
+            if not is_player and (vx, vy) not in visited:
+                _draw_tile(draw, img, vx_i, vy_i, D_WALL, bname, is_fog=True)
+                continue
             cell = grid[vy][vx]
             _draw_tile(draw, img, vx_i, vy_i, cell, bname, is_player=is_player)
+            if not is_player and max(abs(vx - px), abs(vy - py)) > D_SIGHT_R:
+                # 探索済みの記憶表示: そのセルの描画だけ明度を落とす。
+                box = (vx_i * TILE, vy_i * TILE, (vx_i + 1) * TILE, (vy_i + 1) * TILE)
+                img.paste(ImageEnhance.Brightness(img.crop(box)).enhance(0.45), box[:2])
 
     return img
 
@@ -1892,7 +2093,10 @@ async def d_current_cell_action(uid, db_api):
     floor = p["floor"]
     cell = d_get_cell(uid, floor, p["x"], p["y"])
     msg = "この場所では操作できません。"
-    if cell == D_STAIRS and floor < D_FLOORS:
+    if cell == D_STAIRS and d_stairs_room_blocked(uid, floor, p["x"], p["y"]):
+        # Phase 1-D: 未制圧の階段部屋では番人を倒すまで階段を使えない。
+        msg = "階段は番人に守られている。番人を倒さないと使えない。"
+    elif cell == D_STAIRS and floor < D_FLOORS:
         p["floor"] = floor + 1
         p["hp"] = d_effective_stats(p)["max_hp"]
         d_clear_status(uid)
@@ -1921,20 +2125,78 @@ async def d_current_cell_action(uid, db_api):
     return msg
 
 
+async def d_activate_room_entry(uid, db_api, room, result):
+    """部屋への初入室時に役割を発動する（Phase 1-D / 設計 §5）。
+
+    戦闘を開始する場合は敵 dict を返し、呼び出し側（journey）が結果へ
+    繋ぐ。それ以外は None を返す。商店/採掘の部屋は result["view"] を
+    設定する（消化扱いにはしない）。一度きりの部屋（宝箱/イベント/祠/
+    休憩）は発動と同時に制圧済みにし、部屋中央の役割タイルを消費する。
+    戦闘系（combat/stairs）は勝利時に DungeonCombatView._win から
+    制圧済みにされるため、ここでは倒すまで未制圧のままにしておく。
+    """
+    uid = str(uid)
+    p = d_get_player(uid)
+    floor = p["floor"]
+    inst = d_get_instance(uid, floor)
+    role = room.get("role")
+    if role == "combat":
+        if d_room_cleared(inst, room["id"]):
+            return None
+        result["messages"].append("戦闘の間だ。敵が現れた！")
+        return d_make_enemy(floor, forced_rank="normal")
+    if role == "stairs":
+        if d_room_cleared(inst, room["id"]):
+            return None
+        result["messages"].append("階段の間だ。番人が立ちはだかっている！")
+        return d_make_enemy(floor, forced_rank="boss" if room.get("boss") else "elite")
+    if role in ("shop", "mine"):
+        result["view"] = role
+        return None
+    if role not in ("chest", "event", "shrine", "rest"):
+        return None
+    if d_room_cleared(inst, room["id"]):
+        return None
+    if role == "chest":
+        text, reward = d_open_chest(uid, db_api)
+        await d_apply_reward(uid, db_api, **reward)
+    elif role == "event":
+        gain = random.randint(20, 80)
+        await d_apply_reward(uid, db_api, coins=gain, xp=gain, season_score=25)
+        text = f"旅人の依頼を達成した。コイン+{gain}、XP+{gain}"
+    elif role == "shrine":
+        p["atk"] += 2
+        text = "祭壇の祝福！ 基礎ATKが2上昇した。"
+    else:  # rest
+        before = p["hp"]
+        stats = d_effective_stats(p)
+        p["hp"] = min(stats["max_hp"], p["hp"] + max(20, stats["max_hp"] // 3))
+        d_clear_status(uid)
+        text = f"休憩した。HPが {p['hp'] - before} 回復し、状態異常が治った。"
+    cx, cy = room["center"]
+    d_consume(uid, floor, cx, cy)
+    d_mark_room_cleared(inst, room["id"])
+    result["messages"].append(text)
+    return None
+
+
 async def d_execute_journey(uid, db_api, direction, *, source="manual"):
     """1回の移動判断（journey）を実行する（Phase 1-C / 設計 §4）。
 
     d_plan_walk で計画した経路を1歩ずつ適用し、各歩で従来の1マス処理
-    （turns/スコア加算、状態異常 tick、クエスト進行、特殊タイル処理、
-    バイオーム率のエンカウント判定）を行う。保存は journey の最後に
-    1回だけ。描画と View 遷移は呼び出し側の責務とし、本関数は結果だけ
-    を返す。action_log には journey を1件として記録する。
+    （turns/スコア加算、状態異常 tick、クエスト進行、特殊タイル処理）を
+    行う。Phase 1-D 以降は、部屋への初入室で役割が発動し（戦闘・宝箱・
+    イベント等）、通路では初回通過マスだけアンブッシュ抽選を行う。
+    保存は journey の最後に1回だけ。描画と View 遷移は呼び出し側の
+    責務とし、本関数は結果だけを返す。action_log には journey を
+    1件として記録する。
 
     戻り値: {
       direction, steps, stop_reason, start, end, path,
       messages: [ログ断片...]（先頭は「○へN歩進んだ。…」）,
       view: None | "stairs" | "shop" | "mine" | "combat",
       enemy: view == "combat" のときの敵 dict、それ以外は None,
+      room_id: 戦闘が部屋発動の場合その部屋 id、それ以外は None,
       died: journey 中に力尽きたか,
     }
     """
@@ -1954,10 +2216,15 @@ async def d_execute_journey(uid, db_api, direction, *, source="manual"):
         "messages": [],
         "view": None,
         "enemy": None,
+        "room_id": None,
         "died": False,
     }
     if not plan["path"]:
         return result
+    inst = d_get_instance(uid, floor)
+    prev_room = d_room_at(inst, start[0], start[1])
+    # 立っている開始マスは「踏んだ」ものとして扱う（アンブッシュ抽選の対象外）。
+    inst.setdefault("traversed", set()).add(start)
 
     def _apply_death():
         result["stop_reason"] = "death"
@@ -1987,8 +2254,40 @@ async def d_execute_journey(uid, db_api, direction, *, source="manual"):
         if floor >= 20: d_unlock_achievement(uid, "floor_20")
         if floor >= 40: d_unlock_achievement(uid, "floor_40")
 
+        # Phase 1-D: フォグの公開と部屋の初入室発動（設計 §5 / §6-1）。
+        room = d_room_at(inst, nx, ny)
+        traversed = inst.setdefault("traversed", set())
+        first_step_on_cell = (nx, ny) not in traversed
+        traversed.add((nx, ny))
+        first_corridor_step = False
+        if room is None:
+            first_corridor_step = first_step_on_cell
+            d_mark_corridor_visited(inst, nx, ny)
+        elif room is not prev_room:
+            d_reveal_room(inst, room)
+            enemy = await d_activate_room_entry(uid, db_api, room, result)
+            if enemy is not None:
+                result["enemy"] = enemy
+                result["view"] = "combat"
+                result["room_id"] = room["id"]
+                prev_room = room
+                break
+            if result["view"] in ("shop", "mine"):
+                prev_room = room
+                break
+        prev_room = room
+
         ct = d_get_cell(uid, floor, nx, ny)
         if ct == D_STAIRS:
+            if d_stairs_room_blocked(uid, floor, nx, ny):
+                # 未制圧の階段部屋では階段を使えず、番人戦になる（設計 §5）。
+                guard_room = d_room_at(inst, nx, ny)
+                result["enemy"] = d_make_enemy(
+                    floor, forced_rank="boss" if guard_room and guard_room.get("boss") else "elite")
+                result["stop_reason"] = "guard"
+                result["view"] = "combat"
+                result["room_id"] = guard_room["id"] if guard_room else None
+                break
             result["stop_reason"] = "special"
             result["view"] = "stairs"
             break
@@ -2027,11 +2326,12 @@ async def d_execute_journey(uid, db_api, direction, *, source="manual"):
                 _apply_death()
             break
 
-        # 通常マス: バイオーム率でエンカウント判定（固定配置化は Phase 1-D）。
-        rate = D_ENCOUNTER_RATES.get(d_get_biome(floor)[0], 0.10)
-        if random.random() < rate:
-            result["enemy"] = d_make_enemy(floor)
-            result["stop_reason"] = "encounter"
+        # 通路アンブッシュ（Phase 1-D / 確定事項 D4）: 部屋の外のマスを
+        # そのインスタンスで初めて踏んだときだけ 12% で通常戦闘が起きる。
+        # 歩行時のバイオーム率エンカウントは廃止した。
+        if room is None and first_corridor_step and random.random() < D_AMBUSH_RATE:
+            result["enemy"] = d_make_enemy(floor, forced_rank="normal")
+            result["stop_reason"] = "ambush"
             result["view"] = "combat"
             break
         # 停止条件7: HPが30%未満まで低下したら、それ以上は進まない。
@@ -2249,6 +2549,10 @@ class DungeonStairsView(DungeonViewBase):
         await i.response.defer()
         p = self.sync_state()
         floor = p["floor"]
+        if d_stairs_room_blocked(self.uid, floor, p["x"], p["y"]):
+            # Phase 1-D: 番人を倒すまでは階段を使えない（防御的な再確認）。
+            await self._render(i, "階段は番人に守られている。番人を倒さないと使えない。")
+            return
         if floor < D_FLOORS:
             p["floor"] = floor + 1
             p["hp"] = d_effective_stats(p)["max_hp"]
@@ -2350,7 +2654,7 @@ class DungeonShopView(DungeonViewBase):
 class DungeonCombatView(DungeonViewBase):
     """戦闘View"""
 
-    def __init__(self, uid, floor, x, y, enemy, db_api):
+    def __init__(self, uid, floor, x, y, enemy, db_api, room_id=None):
         super().__init__(uid, timeout=180)
         self.uid = uid
         self.floor = floor
@@ -2360,6 +2664,9 @@ class DungeonCombatView(DungeonViewBase):
         self.log = []
         self.defending = False
         self.db_api = db_api
+        # Phase 1-D: 部屋発動の戦闘の場合、勝利時にその部屋を制圧済みに
+        # する（combat 部屋の再発動防止、階段部屋のガード解除）。
+        self.room_id = room_id
 
     def _embed(self, msg="", image_url=None):
         p = self.sync_state()
@@ -2490,6 +2797,10 @@ class DungeonCombatView(DungeonViewBase):
     async def _win(self, i):
         e = self.enemy
         p = d_get_player(self.uid)
+        if self.room_id is not None:
+            # 部屋発動の戦闘に勝利したので部屋を制圧済みにする（Phase 1-D）。
+            # 逃走・敗北では呼ばれないため、未制圧のまま再挑戦できる。
+            d_mark_room_cleared(d_get_instance(self.uid, self.floor), self.room_id)
         if isinstance(i, _NoopInteraction):
             # 自動操作中は選択UIを挟まず、その場で戦利品を反映する。
             p["pending_rewards"] = []
@@ -2658,6 +2969,8 @@ class DungeonMainView(DungeonViewBase):
         em.add_field(name="HP", value=f"{d_hpbar(p['hp'], stats['max_hp'])} {p['hp']}/{stats['max_hp']}", inline=True)
         quests, relics = d_content_summary(self.uid)
         em.add_field(name="冒険パネル", value=f"職業: {d_job_name(self.uid)}\nターン: {p['turns']} / スコア: {p['season_score']}\n遺物: {', '.join(relics) if relics else 'なし'}", inline=False)
+        em.add_field(name="フロア進捗", value=d_floor_progress_text(self.uid), inline=False)
+        em.add_field(name="凡例", value="🟩自分 🟨宝箱 🟥階段 🟪店 ⛏採掘 ✦祠・イベント R休憩 ⬛未探索（暗い場所は探索済み）", inline=False)
         em.add_field(name="進行中の目的", value="\n".join(quests) if quests else "全クエスト達成", inline=False)
         em.add_field(name="自動操作", value=f"作戦: {getattr(self, 'clef_plan', clef_plan_for(self.uid))} / 状態: {clef_status_text(self.uid)}", inline=False)
         if msg:
@@ -2717,7 +3030,8 @@ class DungeonMainView(DungeonViewBase):
             await self._redraw(i, "鉱山を発見！", p, view=mv)
             return
         if result["view"] == "combat":
-            cv = DungeonCombatView(self.uid, p["floor"], p["x"], p["y"], result["enemy"], self.db_api)
+            cv = DungeonCombatView(self.uid, p["floor"], p["x"], p["y"], result["enemy"], self.db_api,
+                                   room_id=result.get("room_id"))
             await self._redraw(i, msg, p, view=cv)
             return
         await self._redraw(i, msg, p, view=self._fresh_main_view(p))
@@ -2754,13 +3068,17 @@ class DungeonUnifiedView(DungeonMainView):
         self.clef_plan = plan or clef_plan_for(uid)
         self.clear_items()
         # Phase 1-C: 4方向＋中央「部屋で行動」。進めない方向は disabled。
+        # Phase 1-D: ラベルに行き先情報（発見済み=役割名 / 未発見=未探索 / 通路）。
         directions = [
             ("北", "up", 0), ("西", "left", 1), ("東", "right", 1), ("南", "down", 2),
         ]
         for label, key, row in directions:
+            blocked = d_direction_blocked(uid, floor, x, y, key)
+            dest = None if blocked else d_destination_label(uid, floor, x, y, key)
             button = discord.ui.Button(
-                label=label, style=discord.ButtonStyle.grey, row=row,
-                disabled=d_direction_blocked(uid, floor, x, y, key),
+                label=f"{label}: {dest}" if dest else label,
+                style=discord.ButtonStyle.grey, row=row,
+                disabled=blocked,
             )
             async def move_callback(interaction, key=key):
                 await self._move(interaction, key)
@@ -3223,7 +3541,7 @@ class ClefDungeonPlayer:
         logs.append(dungeon_candidate_log(uid, plan))
         d_record_action(uid, "decision", source="clef", result=plan)
 
-        if cell == D_STAIRS:
+        if cell == D_STAIRS and not d_stairs_room_blocked(uid, floor, x, y):
             raw = await self._decide(uid, logs, plan, {
                 "stairs": {
                     "type": "choice",
@@ -3367,13 +3685,14 @@ class ClefDungeonPlayer:
             # journey 途中でエンカウントした場合はその場で自動戦闘に入る。
             # （階段・商店・鉱山に着いた場合は次ターンの判断で扱う。）
             logs.append(f"{result['enemy']['name']}と遭遇しました。")
-            await self._auto_combat(uid, result["enemy"], logs)
+            await self._auto_combat(uid, result["enemy"], logs, room_id=result.get("room_id"))
             await dg_save_player(uid, self.bot.db_api)
 
-    async def _auto_combat(self, uid, enemy, logs):
+    async def _auto_combat(self, uid, enemy, logs, room_id=None):
         """戦闘もClefに選ばせる。ダメージ計算と結果確定は本体側で行う。"""
         p = d_get_player(uid)
-        combat = DungeonCombatView(uid, p["floor"], p["x"], p["y"], enemy, self.bot.db_api)
+        combat = DungeonCombatView(uid, p["floor"], p["x"], p["y"], enemy, self.bot.db_api,
+                                    room_id=room_id)
         while enemy["hp"] > 0 and d_get_player(uid)["hp"] > 0:
             raw = await self._decide(uid, logs, "戦闘", {
                 "battle": {
