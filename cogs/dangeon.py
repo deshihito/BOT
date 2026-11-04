@@ -122,7 +122,9 @@ ELEMENTS = {
     "none": {"name": "無", "weak": [], "resist": []},
     "fire": {"name": "火", "weak": ["ice"], "resist": ["fire"]},
     "ice": {"name": "氷", "weak": ["fire", "thunder"], "resist": ["ice"]},
-    "thunder": {"name": "雷", "weak": ["water"], "resist": ["thunder"]},
+    # Phase 2-A: 現行3属性（火/氷/雷）の弱点をプレイヤーが実際に
+    # 突けるよう、雷の弱点へ氷を追加した（マスタの削除はしない）。
+    "thunder": {"name": "雷", "weak": ["water", "ice"], "resist": ["thunder"]},
     "water": {"name": "水", "weak": ["fire"], "resist": ["water"]},
     "light": {"name": "光", "weak": ["dark"], "resist": ["light"]},
     "dark": {"name": "闇", "weak": ["light"], "resist": ["dark"]},
@@ -132,6 +134,37 @@ STATUS_EFFECTS = {
     "freeze": {"name": "凍結", "turns": 1}, "paralyze": {"name": "麻痺", "turns": 1},
     "bleed": {"name": "出血", "turns": 3}, "silence": {"name": "沈黙", "turns": 2},
     "curse": {"name": "呪い", "turns": 4},
+}
+# Phase 2-A: 属性・状態異常の整理。新規に生成・付与される経路で使うのは
+# 各3種だけに絞る（ELEMENTS / STATUS_EFFECTS のマスタ自体は旧セーブ互換の
+# ため残す。対象外の状態異常も tick・解除・表示は従来どおり処理される）。
+D_ACTIVE_ELEMENTS = ("fire", "ice", "thunder")
+D_ACTIVE_STATUSES = ("poison", "burn", "freeze")
+# Phase 2-A: 敵アーキタイプと意図（次手予告）。意図は決定的なサイクルで
+# 遷移し、DungeonCombatView._enemy_turn は表示した意図どおりに行動する。
+D_INTENT_CYCLES = {
+    "brute": ("attack", "charge", "heavy"),   # 溜めてから大ダメージを放つ型
+    "venom": ("attack", "status", "attack"),  # 状態異常を撒く型
+    "healer": ("attack", "attack", "heal"),   # 自己回復する型
+    "normal": ("attack", "attack", "strong"),  # 通常型
+    "passive": ("wait",),                      # 様子見だけの特殊個体用
+}
+D_ARCHETYPE_NAMES = {
+    "brute": "溜め型", "venom": "状態異常型", "healer": "回復型",
+    "normal": "通常型", "passive": "静観型",
+}
+D_INTENT_LABELS = {
+    "attack": "通常攻撃", "strong": "強攻撃",
+    "charge": "溜め（次に大ダメージ）", "heavy": "大ダメージ攻撃",
+    "status": "状態異常攻撃", "heal": "回復", "wait": "様子見",
+}
+# 意図ごとのダメージ倍率（防御時は _calculate_damage 側の防御2倍で軽減）。
+D_INTENT_DAMAGE_MUL = {"attack": 1.0, "strong": 1.4, "heavy": 1.8, "status": 0.7}
+# 名前で固定するアーキタイプ（無い敵は ai / ランクから推定する）。
+D_ENEMY_ARCHETYPES = {
+    "毒キノコ": "venom", "サソリ": "venom", "砂蛇": "venom",
+    "トレント": "healer", "毒沼蛙": "healer", "深淵騎士": "healer",
+    "雷獣": "brute", "洞窟コウモリ王": "brute",
 }
 WEAPON_TYPES = {
     "iron_sword": {"name": "鉄の剣", "kind": "sword", "element": "none", "description": "安定した単体攻撃"},
@@ -1428,6 +1461,67 @@ def d_do_mine(uid):
     gain = random.randint(30, 200)
     return gain
 
+def d_enemy_archetype(name, etype="normal", master=None):
+    """敵のアーキタイプを決める純粋関数（Phase 2-A）。
+
+    名前で固定のもの → ai に heal を含む回復型 → 様子見のみの静観型 →
+    精鋭/ボスと強攻撃持ちは溜め型 → それ以外は通常型、の順で決める。
+    """
+    clean = str(name or "").split()[0].replace("👾", "").strip()
+    if clean in D_ENEMY_ARCHETYPES:
+        return D_ENEMY_ARCHETYPES[clean]
+    if master is None:
+        master = ENEMY_STATS_MASTER.get(clean, ENEMY_STATS_MASTER["default"])
+    ai = master.get("ai", ["attack"])
+    if ai and all(action == "wait" for action in ai):
+        return "passive"
+    if "heal" in ai:
+        return "healer"
+    if etype in ("elite", "boss") or "strong_attack" in ai:
+        return "brute"
+    return "normal"
+
+
+def d_intent_at(archetype, turn_index):
+    """アーキタイプのサイクル上で turn_index 番目の意図を返す純粋関数。"""
+    cycle = D_INTENT_CYCLES.get(archetype, D_INTENT_CYCLES["normal"])
+    return cycle[int(turn_index) % len(cycle)]
+
+
+def d_ensure_intent(enemy):
+    """敵 dict にアーキタイプと現在の意図（次に取る行動）を保証する。
+
+    d_make_enemy 経由でない敵（旧データ・手作り）にも意図を持たせる。
+    """
+    if enemy.get("archetype") not in D_INTENT_CYCLES:
+        enemy["archetype"] = d_enemy_archetype(
+            enemy.get("name", ""), enemy.get("type", "normal"))
+    if not isinstance(enemy.get("intent_turn"), int):
+        enemy["intent_turn"] = 0
+    enemy["intent"] = d_intent_at(enemy["archetype"], enemy["intent_turn"])
+    return enemy
+
+
+def d_advance_intent(enemy):
+    """敵の意図をサイクルの次へ進め、新しい意図を返す。"""
+    d_ensure_intent(enemy)
+    enemy["intent_turn"] = int(enemy.get("intent_turn", 0)) + 1
+    enemy["intent"] = d_intent_at(enemy["archetype"], enemy["intent_turn"])
+    return enemy["intent"]
+
+
+def d_intent_label(enemy):
+    """表示用に、敵の現在の意図のラベルを返す。"""
+    d_ensure_intent(enemy)
+    return D_INTENT_LABELS.get(enemy.get("intent", "attack"), "通常攻撃")
+
+
+def d_element_weakness(element):
+    """その属性を持つ敵に有効な攻撃属性（弱点）を返す。無ければ None。"""
+    weak = ELEMENTS.get(element, {}).get("weak", [])
+    return weak[0] if weak else None
+
+
 def d_make_enemy(floor, forced_name=None, forced_rank=None):
     """敵を生成。forced_rank ("normal"/"elite"/"boss") でランク抽選を固定できる（Phase 1-D）。"""
     base_hp  = 15 + floor * 8
@@ -1490,6 +1584,7 @@ def d_make_enemy(floor, forced_name=None, forced_rank=None):
         reward_xp    = int(random.randint(10, 30) * floor * m_xp_m)
         reward_box   = m_boxes if m_boxes > 0 else (1 if random.random() < 0.05 else 0)
 
+    archetype = d_enemy_archetype(name, etype, m)
     return {
         "name":         name,
         "type":         etype,
@@ -1499,8 +1594,13 @@ def d_make_enemy(floor, forced_name=None, forced_rank=None):
         "def_":         defe,
         "spd":          m.get("spd", 10),
         "crit":         m.get("crit", 0.05),
-        "element":      random.choice(["none", "fire", "ice", "thunder"] if bname != "砂漠地帯" else ["none", "fire", "dark"]),
-        "status_effect": random.choice(["poison", "burn", "freeze", "bleed"]),
+        # Phase 2-A: 新規生成の属性・状態異常は現行3種だけを使う。
+        # 全ての敵に属性（＝弱点）を持たせ、弱点はダメージ計算で実際に効く。
+        "element":      random.choice(D_ACTIVE_ELEMENTS),
+        "status_effect": random.choice(D_ACTIVE_STATUSES),
+        "archetype":    archetype,
+        "intent_turn":  0,
+        "intent":       d_intent_at(archetype, 0),
         "reward_coins": reward_coins,
         "reward_xp":    reward_xp,
         "reward_box":   reward_box,
@@ -2394,7 +2494,8 @@ def d_use_job_skill(uid, enemy):
         p.setdefault("battle_flags", {}).clear()
         return "状態異常を解除しました", 0
     if skill in ("mark", "curse", "acid"):
-        d_apply_special_status(uid, "curse" if skill == "curse" else "bleed", 3)
+        # Phase 2-A: 新規付与する状態異常は現行3種（毒/火傷/凍結）に絞る。
+        d_apply_special_status(uid, "poison", 3)
         damage = max(1, int(stats["atk"] * 1.4) - enemy.get("def_", 0))
         return f"{job['name']}の{skill}！ {damage}ダメージ", damage
     if skill in ("first_shot", "scout", "lucky_find"):
@@ -3008,7 +3109,7 @@ class DungeonCombatView(DungeonViewBase):
         self.floor = floor
         self.x = x
         self.y = y
-        self.enemy = enemy
+        self.enemy = d_ensure_intent(enemy)
         self.log = []
         self.defending = False
         self.db_api = db_api
@@ -3032,18 +3133,25 @@ class DungeonCombatView(DungeonViewBase):
                      value=f"`{d_hpbar(p['hp'],p_stats['max_hp'])}`{p['hp']}/{p_stats['max_hp']}\nATK:{p_stats['atk']} DEF:{p_stats['def_']}",
                      inline=True)
 
+        element_name = ELEMENTS.get(e.get("element", "none"), {}).get("name", "無")
+        weakness = d_element_weakness(e.get("element", "none"))
+        weakness_name = ELEMENTS.get(weakness, {}).get("name", "なし") if weakness else "なし"
         em.add_field(name=e["name"],
-                     value=f"`{d_hpbar(e['hp'],e['max_hp'])}`{e['hp']}/{e['max_hp']}\nATK:{e['atk']} DEF:{e['def_']}",
+                     value=f"`{d_hpbar(e['hp'],e['max_hp'])}`{e['hp']}/{e['max_hp']}\nATK:{e['atk']} DEF:{e['def_']}\n属性:{element_name} 弱点:{weakness_name}",
                      inline=True)
 
         player_first = p_stats.get("spd", 10) >= e.get("spd", 10)
-        raw_name = e["name"].split()[0].replace("👾", "").strip()
-        enemy_ai = ENEMY_STATS_MASTER.get(raw_name, ENEMY_STATS_MASTER["default"]).get("ai", ["attack"])
-        preview = {"attack": "通常攻撃", "strong_attack": "強攻撃", "heal": "回復", "wait": "様子見"}
-        next_action = preview.get(enemy_ai[0], "通常攻撃")
+        # Phase 2-A: 予告は実在の意図（次に必ず取る行動）を表示する。
+        intent_note = ""
+        if e.get("intent") == "heavy":
+            intent_note = "（防御で軽減できる）"
+        elif e.get("intent") == "charge":
+            intent_note = "（このターンは攻撃してこない）"
         em.add_field(
-            name="行動順 / 敵の予告",
-            value=f"{'あなた → ' + e['name'] if player_first else e['name'] + ' → あなた'}\n次: **{next_action}**",
+            name="行動順 / 敵の意図",
+            value=(f"{'あなた → ' + e['name'] if player_first else e['name'] + ' → あなた'}\n"
+                   f"次: **{d_intent_label(e)}**{intent_note}"
+                   f"（{D_ARCHETYPE_NAMES.get(e.get('archetype', 'normal'), '通常型')}）"),
             inline=False,
         )
 
@@ -3073,9 +3181,12 @@ class DungeonCombatView(DungeonViewBase):
             attacker_element = EQUIPMENT_MASTER.get(weapon_key, {}).get("element", "none")
         defender_element = defender.get("element", "none") if isinstance(defender, dict) else "none"
         if attacker_element in ELEMENTS and defender_element in ELEMENTS:
-            if defender_element in ELEMENTS[attacker_element].get("weak", []):
+            # Phase 2-A: 弱点/耐性の向きを修正した。ELEMENTS[X]["weak"] は
+            # 「X が弱点とする攻撃属性」の一覧なので、防御側のエントリで
+            # 攻撃属性を引く（旧実装は攻撃側で引いており向きが逆だった）。
+            if attacker_element in ELEMENTS[defender_element].get("weak", []):
                 dmg = int(dmg * 1.35)
-            elif defender_element in ELEMENTS[attacker_element].get("resist", []):
+            elif attacker_element in ELEMENTS[defender_element].get("resist", []):
                 dmg = max(1, int(dmg * 0.75))
         if is_crit:
             return int(dmg * 1.5), True
@@ -3094,31 +3205,40 @@ class DungeonCombatView(DungeonViewBase):
             return "麻痺で行動に失敗しました"
 
         effect_logs = d_tick_status(self.uid)
-        raw_name = e["name"].split()[0].replace("👾", "").strip()
-        master = ENEMY_STATS_MASTER.get(raw_name, ENEMY_STATS_MASTER["default"])
-        action = random.choice(master.get("ai", ["attack"]))
+        # Phase 2-A: 行動はランダムではなく、表示中の意図どおりに実行する。
+        d_ensure_intent(e)
+        action = e["intent"]
 
         log_msg = ""
-        if action == "strong_attack":
+        if action == "charge":
+            log_msg = f"{e['name']}は力を溜めている…次の攻撃は大ダメージになる！"
+        elif action in ("heavy", "strong"):
             dmg, crit = self._calculate_damage(e, p, self.defending)
-            dmg = int(dmg * 1.4)
+            dmg = int(dmg * D_INTENT_DAMAGE_MUL[action])
             p["hp"] = max(0, p["hp"] - dmg)
-            log_msg = f"**{e['name']}の強攻撃！！** {dmg} ダメージ"
+            label = "大ダメージ攻撃" if action == "heavy" else "強攻撃"
+            log_msg = f"**{e['name']}の{label}！！** {dmg} ダメージ"
         elif action == "heal":
             heal_amt = int(e["max_hp"] * 0.15)
             e["hp"] = min(e["max_hp"], e["hp"] + heal_amt)
             log_msg = f"{e['name']}は傷口を舐めて {heal_amt} 回復した"
         elif action == "wait":
             log_msg = f"{e['name']}は様子を伺っている..."
-        else:
+        else:  # "attack" / "status"
             dmg, crit = self._calculate_damage(e, p, self.defending)
+            if action == "status":
+                dmg = max(1, int(dmg * D_INTENT_DAMAGE_MUL["status"]))
             p["hp"] = max(0, p["hp"] - dmg)
             c_msg = "**CRITICAL!!** " if crit else ""
             log_msg = f"{c_msg}{e['name']}の攻撃：{dmg} ダメージ"
 
-        if p["hp"] > 0 and random.random() < 0.25 and e.get("status_effect"):
-            d_apply_special_status(self.uid, e["status_effect"])
-            log_msg += f" / {STATUS_EFFECTS[e['status_effect']]['name']}を受けた"
+        # 状態異常の付与: 「状態異常攻撃」の意図では確実に、それ以外の
+        # 攻撃では従来どおり25%で付与する。
+        if p["hp"] > 0 and e.get("status_effect"):
+            if action == "status" or (action in ("attack", "strong", "heavy") and random.random() < 0.25):
+                d_apply_special_status(self.uid, e["status_effect"])
+                log_msg += f" / {STATUS_EFFECTS[e['status_effect']]['name']}を受けた"
+        d_advance_intent(e)
 
         self.defending = False
         p_cooldowns = d_get_player(self.uid).setdefault("cooldowns", {})
@@ -3751,10 +3871,22 @@ class ClefDungeonPlayer:
         skill = job.get("skill", "power_strike")
         cooldown = p.get("cooldowns", {}).get(skill, 0)
         hp_pct = int(p["hp"] / max(1, stats["max_hp"]) * 100)
+        # Phase 2-A: 敵の意図（次の行動）も判断材料に含める。
+        d_ensure_intent(enemy)
+        intent = enemy.get("intent", "attack")
+        intent_text = (f"敵の意図: 次は「{d_intent_label(enemy)}」"
+                       f"（{D_ARCHETYPE_NAMES.get(enemy.get('archetype', 'normal'), '通常型')}）")
+        if intent == "heavy":
+            intent_text += "。大ダメージは防御で大きく軽減できるため防御が有効"
+        elif intent == "charge":
+            intent_text += "。このターンは攻撃してこないので攻撃の好機"
+        elif intent == "heal":
+            intent_text += "。回復される前に倒し切るか大きな一撃が有効"
         return {
+            "intent": intent_text,
             "attack": f"通常攻撃（自分のHP {hp_pct}% / 敵HP {enemy['hp']}/{enemy['max_hp']}）",
             "skill": f"{job['name']}のスキル" + ("（使用可）" if cooldown <= 0 else f"（あと{cooldown}ターン使用不可）"),
-            "defend": "防御して次の被ダメージを半減する（HPが少ない時に有効）",
+            "defend": "防御して次の被ダメージを軽減する（敵の大ダメージ予告時・HPが少ない時に有効）",
             "escape": "逃走する（ボスからは逃げられない・失敗すると攻撃を受ける）" if enemy.get("type") == "boss" else "逃走する（失敗すると攻撃を受ける）",
         }
 
