@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import io
 import json
 import logging
@@ -10,6 +11,7 @@ import os
 import random
 import re
 import time
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import discord
@@ -752,9 +754,20 @@ def render_levelup_card(
 # MIQ (Make it a Quote) 引用画像
 # ============================================================
 MIQ_W, MIQ_H = 1200, 630
+MIQ_NEW_W, MIQ_NEW_H = 1200, 675  # 新フォーマット(漫画風/音楽再生風/LINE風)のサイズ
 MIQ_MAX_CHARS = 400
 MIQ_COOLDOWN = 3.0
 MIQ_GIF_MAX_FRAMES = 24
+# LINE風で遡れる件数(対象メッセージを含む)
+MIQ_LINE_MAX_MESSAGES = 4
+
+# format -> (表示名, 絵文字)。quote が従来の引用画像。
+MIQ_FORMATS = {
+    "quote": ("引用 (従来)", "🖼️"),
+    "manga": ("漫画風", "💥"),
+    "music": ("音楽再生風", "🎵"),
+    "line": ("LINE風", "💬"),
+}
 
 _MIQ_ASSET_FONTS = Path(__file__).resolve().parent.parent / "assets" / "fonts"
 
@@ -1480,6 +1493,373 @@ def render_miq_gif(avatar_bytes: bytes | None, text: str, name: str, username: s
 
 
 # ------------------------------------------------------------
+# MIQ 新フォーマット (漫画風 / 音楽再生風 / LINE風)。いずれも PNG 固定 (1200x675)
+# ------------------------------------------------------------
+def _miq_save_png(img) -> bytes:
+    buf = io.BytesIO()
+    img.save(buf, "PNG", optimize=True)
+    return buf.getvalue()
+
+
+def render_miq_manga_png(avatar_bytes: bytes | None, text: str, name: str, username: str, *, font_path: str | None = None) -> bytes:
+    """漫画風: 左に劇画調アバターのコマ、右に集中線+フキダシ。"""
+    from PIL import Image, ImageDraw, ImageEnhance, ImageOps
+
+    W, H = MIQ_NEW_W, MIQ_NEW_H
+    img = Image.new("RGB", (W, H), (255, 255, 255))
+    left_w = int(W * 0.38)
+
+    # 左コマ: アバターをグレースケール+強いコントラストで劇画調に
+    src = _miq_open_avatar(avatar_bytes)
+    av = ImageOps.fit(src.convert("RGB"), (left_w, H), Image.LANCZOS)
+    av = ImageOps.grayscale(av)
+    av = ImageOps.autocontrast(av, cutoff=1)
+    av = ImageEnhance.Contrast(av).enhance(1.55)
+    av = ImageOps.posterize(av, 2).convert("RGB")
+    img.paste(av, (0, 0))
+
+    # 右コマ: 集中線 (右コマ範囲でクリップ)
+    cx, cy = (left_w + W) // 2, H // 2
+    lines_layer = Image.new("RGB", (W, H), (255, 255, 255))
+    ld = ImageDraw.Draw(lines_layer)
+    for deg in range(0, 360, 3):
+        rad = math.radians(deg + (deg % 7))
+        x2 = cx + int(900 * math.cos(rad))
+        y2 = cy + int(900 * math.sin(rad))
+        ld.line([(cx, cy), (x2, y2)], fill=(175, 175, 175), width=2)
+    clip = Image.new("L", (W, H), 0)
+    ImageDraw.Draw(clip).rectangle([left_w, 0, W, H], fill=255)
+    img = Image.composite(lines_layer, img, clip)
+    d = ImageDraw.Draw(img)
+
+    # フキダシ (楕円+左コマ方向への尾)
+    bubble = [left_w + 72, 104, W - 56, H - 104]
+    tail = [(bubble[0] + 26, 428), (bubble[0] + 118, 486), (left_w + 18, 548)]
+    d.polygon(tail, fill=(255, 255, 255))
+    d.line([tail[0], tail[2]], fill=(0, 0, 0), width=6)
+    d.line([tail[1], tail[2]], fill=(0, 0, 0), width=6)
+    d.ellipse(bubble, fill=(255, 255, 255), outline=(0, 0, 0), width=6)
+
+    # 本文 (中央揃え)
+    shown_text = _miq_display_text(text) or text
+    font, wrapped, lh, _size = _miq_fit(
+        d, shown_text, font_path, bubble[2] - bubble[0] - 130, bubble[3] - bubble[1] - 120,
+        max_size=64, min_size=20,
+    )
+    ty = cy - (len(wrapped) * lh) // 2
+    for line in wrapped:
+        if line:
+            d.text((cx, ty), line, font=font, fill=(0, 0, 0), anchor="ma")
+        ty += lh
+
+    # 作者名の札 (右コマ左上)
+    shown_name = _miq_display_text(name) or _miq_display_text(username) or "unknown"
+    name_font = _miq_load_font(font_path, 26)
+    name_w = d.textlength(shown_name, font=name_font)
+    tag = [left_w + 26, 24, left_w + 26 + int(name_w) + 24, 24 + 44]
+    d.rectangle(tag, fill=(255, 255, 255), outline=(0, 0, 0), width=3)
+    d.text((tag[0] + 12, tag[1] + 8), shown_name, font=name_font, fill=(0, 0, 0))
+
+    # コマ枠
+    d.rectangle([5, 5, W - 6, H - 6], outline=(0, 0, 0), width=10)
+    d.line([(left_w, 0), (left_w, H)], fill=(0, 0, 0), width=8)
+    return _miq_save_png(img)
+
+
+def render_miq_music_png(avatar_bytes: bytes | None, text: str, name: str, username: str, *, font_path: str | None = None) -> bytes:
+    """音楽再生風: ぼかしたアバター背景+アートワーク+再生UI。"""
+    from PIL import Image, ImageDraw, ImageEnhance, ImageFilter, ImageOps
+
+    W, H = MIQ_NEW_W, MIQ_NEW_H
+    src = _miq_open_avatar(avatar_bytes)
+    art_src = src.convert("RGB")
+    avg = art_src.resize((1, 1), Image.BILINEAR).getpixel((0, 0))
+
+    bg = ImageOps.fit(art_src, (W, H), Image.LANCZOS)
+    bg = bg.filter(ImageFilter.GaussianBlur(55))
+    bg = ImageEnhance.Brightness(bg).enhance(0.55)
+    bg = Image.blend(bg, Image.new("RGB", (W, H), avg), 0.32)
+    img = bg
+    d = ImageDraw.Draw(img, "RGBA")
+
+    # アートワーク (角丸の正方形)
+    art_size = 360
+    art = ImageOps.fit(art_src, (art_size, art_size), Image.LANCZOS)
+    mask = Image.new("L", (art_size, art_size), 0)
+    ImageDraw.Draw(mask).rounded_rectangle([0, 0, art_size, art_size], radius=28, fill=255)
+    art_x, art_y = 70, (H - art_size) // 2
+    img.paste(art, (art_x, art_y), mask)
+    d = ImageDraw.Draw(img, "RGBA")
+
+    rx = 500  # 右カラム開始位置
+    right_edge = W - 60
+
+    # NOW PLAYING / 名前 / @username
+    d.text((rx, 64), "N O W  P L A Y I N G", font=_miq_load_font(font_path, 22), fill=(255, 255, 255, 190))
+    shown_name = _miq_display_text(name) or _miq_display_text(username) or "unknown"
+    name_size = 46
+    name_font = _miq_load_font(font_path, name_size)
+    while name_size > 22 and d.textlength(shown_name, font=name_font) > right_edge - rx:
+        name_size -= 2
+        name_font = _miq_load_font(font_path, name_size)
+    d.text((rx, 98), shown_name, font=name_font, fill=(255, 255, 255, 255))
+    shown_user = _miq_display_text(username)
+    if shown_user:
+        d.text((rx, 158), f"@{shown_user}", font=_miq_load_font(font_path, 26), fill=(235, 235, 235, 170))
+
+    # 本文
+    shown_text = _miq_display_text(text) or text
+    font, wrapped, lh, _size = _miq_fit(d, shown_text, font_path, right_edge - rx, 210, max_size=54, min_size=20)
+    ty = 248
+    for line in wrapped:
+        if line:
+            d.text((rx, ty), line, font=font, fill=(255, 255, 255, 255))
+        ty += lh
+
+    # 再生時間は本文ハッシュから決定的に決める (総 120〜240 秒、経過 52%)
+    digest = hashlib.md5((shown_text or "").encode("utf-8")).hexdigest()
+    total = 120 + (int(digest[:6], 16) % 121)
+    elapsed = int(total * 0.52)
+
+    def _fmt(sec: int) -> str:
+        return f"{sec // 60}:{sec % 60:02d}"
+
+    bar_y = 528
+    d.line([(rx, bar_y), (right_edge, bar_y)], fill=(255, 255, 255, 110), width=4)
+    prog_x = rx + int((right_edge - rx) * (elapsed / total)) if total else rx
+    d.line([(rx, bar_y), (prog_x, bar_y)], fill=(255, 255, 255, 255), width=6)
+    time_font = _miq_load_font(font_path, 20)
+    d.text((rx, bar_y + 12), _fmt(elapsed), font=time_font, fill=(255, 255, 255, 210))
+    d.text((right_edge, bar_y + 12), f"-{_fmt(total - elapsed)}", font=time_font, fill=(255, 255, 255, 210), anchor="ra")
+
+    # 再生コントロール (図形のみ)
+    ctrl_y = 624
+    ccx = (rx + right_edge) // 2
+    dark = _miq_mix(avg, (0, 0, 0), 0.55)
+    # 前へ: 縦棒+左向き三角
+    d.rectangle([ccx - 168, ctrl_y - 16, ccx - 162, ctrl_y + 16], fill=(255, 255, 255, 255))
+    d.polygon([(ccx - 160, ctrl_y), (ccx - 128, ctrl_y - 17), (ccx - 128, ctrl_y + 17)], fill=(255, 255, 255, 255))
+    # 次へ: 右向き三角+縦棒
+    d.polygon([(ccx + 160, ctrl_y), (ccx + 128, ctrl_y - 17), (ccx + 128, ctrl_y + 17)], fill=(255, 255, 255, 255))
+    d.rectangle([ccx + 162, ctrl_y - 16, ccx + 168, ctrl_y + 16], fill=(255, 255, 255, 255))
+    # 中央: 白丸に一時停止の2本棒
+    d.ellipse([ccx - 32, ctrl_y - 32, ccx + 32, ctrl_y + 32], fill=(255, 255, 255, 255))
+    d.rectangle([ccx - 11, ctrl_y - 15, ccx - 3, ctrl_y + 15], fill=dark + (255,))
+    d.rectangle([ccx + 3, ctrl_y - 15, ccx + 11, ctrl_y + 15], fill=dark + (255,))
+    return _miq_save_png(img)
+
+
+class MiqLineEntry:
+    """LINE風の1メッセージ分。render_miq_line_png は dict でもこの形でも受け付ける。
+
+    (dataclass にしないのは、モジュールを sys.modules 外で読み込むテスト用ローダで
+    dataclass のアノテーション解決が失敗するため)
+    """
+
+    def __init__(self, name: str, text: str, created_at=None, avatar_bytes: bytes | None = None,
+                 avatar_image=None, author_key=None):
+        self.name = name
+        self.text = text
+        self.created_at = created_at
+        self.avatar_bytes = avatar_bytes
+        self.avatar_image = avatar_image
+        self.author_key = author_key
+
+    def __repr__(self) -> str:
+        return f"MiqLineEntry(name={self.name!r}, text={self.text!r}, author_key={self.author_key!r})"
+
+
+def _miq_line_field(entry, key, default=None):
+    if isinstance(entry, dict):
+        return entry.get(key, default)
+    return getattr(entry, key, default)
+
+
+def _miq_line_time_str(created_at) -> str:
+    """created_at を JST の HH:MM にする。"""
+    if created_at is None:
+        return ""
+    try:
+        from zoneinfo import ZoneInfo
+
+        jst = ZoneInfo("Asia/Tokyo")
+    except Exception:
+        jst = timezone(timedelta(hours=9))
+    dt = created_at
+    if isinstance(dt, datetime) and dt.tzinfo is not None:
+        dt = dt.astimezone(jst)
+    try:
+        return dt.strftime("%H:%M")
+    except Exception:
+        return ""
+
+
+def _miq_line_avatar_image(entry):
+    image = _miq_line_field(entry, "avatar_image")
+    if image is not None:
+        return image
+    image = _miq_line_field(entry, "avatar")
+    if image is not None and not isinstance(image, (bytes, bytearray)):
+        return image
+    avatar_bytes = _miq_line_field(entry, "avatar_bytes")
+    if avatar_bytes is None and isinstance(image, (bytes, bytearray)):
+        avatar_bytes = image
+    return _miq_open_avatar(avatar_bytes)
+
+
+def render_miq_line_png(entries, *, font_path: str | None = None) -> bytes:
+    """LINE風: 会話リストを左右バブルで描く。最後の要素の作者が右側 (緑)。"""
+    from PIL import Image, ImageDraw, ImageOps
+
+    W, H = MIQ_NEW_W, MIQ_NEW_H
+    # 背景: 薄い青灰の縦グラデーション
+    top, bottom = (215, 227, 242), (238, 243, 247)
+    grad = Image.new("RGB", (1, H))
+    for yy in range(H):
+        grad.putpixel((0, yy), _miq_mix(top, bottom, yy / max(1, H - 1)))
+    img = grad.resize((W, H))
+    d = ImageDraw.Draw(img)
+
+    items = list(entries or [])
+    if not items:
+        return _miq_save_png(img)
+
+    last_key = _miq_line_field(items[-1], "author_key")
+    last_name = _miq_line_field(items[-1], "name")
+    norm = []
+    for entry in items:
+        key = _miq_line_field(entry, "author_key")
+        name = _miq_display_text(_miq_line_field(entry, "name") or "") or "unknown"
+        is_right = (key == last_key) if key is not None or last_key is not None else (name == last_name)
+        norm.append({
+            "name": name,
+            "text": str(_miq_line_field(entry, "text") or ""),
+            "time": _miq_line_time_str(_miq_line_field(entry, "created_at")),
+            "avatar": _miq_line_avatar_image(entry),
+            "right": bool(is_right),
+        })
+
+    green = (131, 226, 79)
+    ink = (30, 35, 40)
+    sub = (95, 105, 118)
+    name_font = _miq_load_font(font_path, 22)
+    meta_font = _miq_load_font(font_path, 17)
+    max_text_w = 560 - 44
+
+    # 全要素が収まるフォントサイズを探す
+    laid = []
+    for font_size in (36, 32, 28, 24, 20, 17):
+        font = _miq_load_font(font_path, font_size)
+        lh = int(font_size * 1.34)
+        laid = []
+        total_h = 28
+        for item in norm:
+            wrapped = _miq_wrap(d, item["text"], font, max_text_w) or [""]
+            text_w = max((d.textlength(line, font=font) for line in wrapped), default=0)
+            bubble_w = int(text_w) + 44
+            bubble_h = len(wrapped) * lh + 30
+            entry_h = 26 + bubble_h
+            laid.append((item, wrapped, bubble_w, bubble_h, entry_h))
+            total_h += entry_h + 16
+        if total_h <= H - 12 or font_size == 17:
+            break
+
+    avatar_size = 72
+    y = 24
+    for item, wrapped, bubble_w, bubble_h, entry_h in laid:
+        font = _miq_load_font(font_path, font_size)
+        lh = int(font_size * 1.34)
+        bubble_top = y + 26
+        avatar_top = bubble_top
+        if item["right"]:
+            av_x = W - 36 - avatar_size
+            bubble_right = av_x - 16
+            bubble_x = bubble_right - bubble_w
+            d.text((bubble_right, y), item["name"], font=name_font, fill=sub, anchor="ra")
+            # 既読+時刻 (バブル左下に縦積み)
+            meta_y = bubble_top + bubble_h - 40
+            d.text((bubble_x - 10, meta_y), "既読", font=meta_font, fill=sub, anchor="ra")
+            d.text((bubble_x - 10, meta_y + 20), item["time"], font=meta_font, fill=sub, anchor="ra")
+            bubble_fill = green
+        else:
+            av_x = 36
+            bubble_x = av_x + avatar_size + 16
+            d.text((bubble_x, y), item["name"], font=name_font, fill=sub)
+            d.text((bubble_x + bubble_w + 10, bubble_top + bubble_h - 22), item["time"], font=meta_font, fill=sub)
+            bubble_fill = (255, 255, 255)
+        # 円形アバター
+        av = ImageOps.fit(item["avatar"].convert("RGB"), (avatar_size, avatar_size), Image.LANCZOS)
+        circle = Image.new("L", (avatar_size, avatar_size), 0)
+        ImageDraw.Draw(circle).ellipse([0, 0, avatar_size, avatar_size], fill=255)
+        img.paste(av, (av_x, avatar_top), circle)
+        d = ImageDraw.Draw(img)
+        # バブル
+        d.rounded_rectangle(
+            [bubble_x, bubble_top, bubble_x + bubble_w, bubble_top + bubble_h],
+            radius=18, fill=bubble_fill,
+        )
+        ty = bubble_top + 15
+        for line in wrapped:
+            if line:
+                d.text((bubble_x + 22, ty), line, font=font, fill=ink)
+            ty += lh
+        y += entry_h + 16
+    return _miq_save_png(img)
+
+
+async def miq_collect_line_chain(message, *, max_messages: int = MIQ_LINE_MAX_MESSAGES, channel_resolver=None) -> list:
+    """対象メッセージから reference を辿り、時系列順 (古い→新しい) のチェーンを返す。
+
+    対象を含めて最大 max_messages 件。解決できない参照では静かに打ち切る。
+    channel_resolver は channel_id -> channel の callable (無ければ対象と同じチャンネルを使う)。
+    """
+    chain: list = []
+    seen: set = set()
+    current = message
+    while current is not None and len(chain) < max_messages:
+        mid = getattr(current, "id", None)
+        if mid is not None:
+            if mid in seen:
+                break
+            seen.add(mid)
+        chain.append(current)
+        if len(chain) >= max_messages:
+            break
+        ref = getattr(current, "reference", None)
+        if ref is None:
+            break
+        ref_id = getattr(ref, "message_id", None)
+        if ref_id is None or ref_id in seen:
+            break
+        resolved = getattr(ref, "resolved", None)
+        nxt = None
+        if resolved is not None and getattr(resolved, "id", None) is not None and (
+            isinstance(resolved, discord.Message)
+            or (hasattr(resolved, "author") and hasattr(resolved, "content"))
+        ):
+            nxt = resolved
+        else:
+            channel = None
+            channel_id = getattr(ref, "channel_id", None)
+            if channel_resolver is not None and channel_id is not None:
+                try:
+                    channel = channel_resolver(channel_id)
+                except Exception:
+                    channel = None
+            if channel is None:
+                channel = getattr(current, "channel", None)
+            if channel is None or not hasattr(channel, "fetch_message"):
+                break
+            try:
+                nxt = await channel.fetch_message(ref_id)
+            except discord.HTTPException:
+                break
+        current = nxt
+    chain.reverse()
+    return chain
+
+
+# ------------------------------------------------------------
 # MIQ ユーザー設定(見た目・引用拒否)の保存
 # ------------------------------------------------------------
 # ユーザーごと(サーバー共通)の設定を data/miq.json に保存する。
@@ -1499,6 +1879,7 @@ MIQ_DEFAULT_PREFS: dict = {
     "gif": False,
     "font": None,
     "theme": "bw",
+    "format": "quote",
     "refuse": False,
 }
 
@@ -1562,6 +1943,9 @@ def miq_get_prefs(user_id: int) -> dict:
             elif key == "theme":
                 if value in MIQ_THEMES:
                     prefs[key] = value
+            elif key == "format":
+                if value in MIQ_FORMATS:
+                    prefs[key] = value
             elif key == "font":
                 if isinstance(value, str):
                     prefs[key] = value
@@ -1578,6 +1962,8 @@ def miq_is_refusing(user_id: int | None) -> bool:
 async def miq_save_prefs(user_id: int, prefs: dict) -> bool:
     users = _miq_root()["users"]
     clean = {key: prefs.get(key, default) for key, default in MIQ_DEFAULT_PREFS.items()}
+    if clean.get("format") not in MIQ_FORMATS:
+        clean["format"] = MIQ_DEFAULT_PREFS["format"]
     if clean == MIQ_DEFAULT_PREFS:
         users.pop(str(user_id), None)  # 既定値のままなら保存しない
     else:
@@ -1605,6 +1991,7 @@ def miq_render_options(prefs: dict, bot_user=None) -> dict:
         "full": bool(prefs.get("full")),
         "font_path": font_path,
         "theme": prefs.get("theme") if prefs.get("theme") in MIQ_THEMES else "bw",
+        "format": prefs.get("format") if prefs.get("format") in MIQ_FORMATS else "quote",
     }
 
 
@@ -1690,10 +2077,29 @@ class MiqThemeSelect(discord.ui.Select):
         await parent.commit(interaction)
 
 
+class MiqFormatSelect(discord.ui.Select):
+    def __init__(self, parent: "MiqSettingsView"):
+        self.parent_view = parent
+        current = parent.prefs.get("format")
+        super().__init__(
+            placeholder="フォーマットを選択",
+            options=[discord.SelectOption(label=label, value=key, emoji=emoji, default=key == current)
+                     for key, (label, emoji) in MIQ_FORMATS.items()],
+            row=3,
+        )
+
+    async def callback(self, interaction: discord.Interaction):
+        parent = self.parent_view
+        if not await parent.check_owner(interaction):
+            return
+        parent.prefs["format"] = self.values[0]
+        await parent.commit(interaction)
+
+
 class MiqPreviewButton(discord.ui.Button):
     def __init__(self, parent: "MiqSettingsView"):
         self.parent_view = parent
-        super().__init__(label="プレビュー", emoji="🖼️", style=discord.ButtonStyle.success, row=3)
+        super().__init__(label="プレビュー", emoji="🖼️", style=discord.ButtonStyle.success, row=4)
 
     async def callback(self, interaction: discord.Interaction):
         parent = self.parent_view
@@ -1701,9 +2107,25 @@ class MiqPreviewButton(discord.ui.Button):
             return
         await interaction.response.defer(ephemeral=True, thinking=True)
         limit = getattr(interaction.guild, "filesize_limit", None)
-        file = await parent.cog._miq_build_file(
-            interaction.user, "プレビューです。\n見た目の確認ができます。", parent.prefs, limit,
-        )
+        if parent.prefs.get("format") == "line":
+            # LINE風のプレビューはサンプルの2件会話で作る
+            now = datetime.now(timezone.utc)
+            avatar_bytes = None
+            try:
+                avatar_bytes = await interaction.user.display_avatar.replace(size=128, format="png").read()
+            except Exception:
+                avatar_bytes = None
+            entries = [
+                {"name": "サンプル", "text": "こんにちは！", "created_at": now,
+                 "avatar_bytes": None, "author_key": "miq-preview-other"},
+                {"name": interaction.user.display_name, "text": "プレビューです。\n見た目の確認ができます。",
+                 "created_at": now, "avatar_bytes": avatar_bytes, "author_key": "miq-preview-self"},
+            ]
+            file = await parent.cog._miq_render_line_file(entries, parent.prefs)
+        else:
+            file = await parent.cog._miq_build_file(
+                interaction.user, "プレビューです。\n見た目の確認ができます。", parent.prefs, limit,
+            )
         if file is None:
             return await interaction.followup.send("プレビューを作れませんでした。時間をおいて再試行してください。", ephemeral=True)
         await interaction.followup.send(file=file, ephemeral=True)
@@ -1712,7 +2134,7 @@ class MiqPreviewButton(discord.ui.Button):
 class MiqResetButton(discord.ui.Button):
     def __init__(self, parent: "MiqSettingsView"):
         self.parent_view = parent
-        super().__init__(label="見た目を初期化", style=discord.ButtonStyle.secondary, row=3)
+        super().__init__(label="見た目を初期化", style=discord.ButtonStyle.secondary, row=4)
 
     async def callback(self, interaction: discord.Interaction):
         parent = self.parent_view
@@ -1744,8 +2166,9 @@ class MiqSettingsView(discord.ui.View):
             self.add_item(MiqToggleButton(self, field, label, row=0))
         self.add_item(MiqFontSelect(self))
         self.add_item(MiqThemeSelect(self))
-        self.add_item(MiqToggleButton(self, "gif", "GIF出力", row=3))
-        self.add_item(MiqToggleButton(self, "refuse", "引用を拒否", row=3, danger=True))
+        self.add_item(MiqFormatSelect(self))
+        self.add_item(MiqToggleButton(self, "gif", "GIF出力", row=4))
+        self.add_item(MiqToggleButton(self, "refuse", "引用を拒否", row=4, danger=True))
         self.add_item(MiqPreviewButton(self))
         self.add_item(MiqResetButton(self))
 
@@ -1774,8 +2197,10 @@ class MiqSettingsView(discord.ui.View):
         font_key = self.current_font_key()
         font_label = next((label for key, label, _path in self.fonts if key == font_key), font_key)
         theme_label = MIQ_THEMES.get(p.get("theme"), MIQ_THEMES["bw"])[0]
+        format_label = MIQ_FORMATS.get(p.get("format"), MIQ_FORMATS["quote"])[0]
         lines = [
             "**見た目**（あなたがMIQを作る時に使われます）",
+            f"フォーマット: `{format_label}`",
             f"モノクロ: `{onoff(p['grayscale'])}`　文字色連動: `{onoff(p['color_text'])}`　左右反転: `{onoff(p['flip'])}`",
             f"太字: `{onoff(p['bold'])}`　全面レイアウト: `{onoff(p['full'])}`　GIF出力: `{onoff(p['gif'])}`",
             f"フォント: `{font_label}`　配色: `{theme_label}`",
@@ -1785,6 +2210,7 @@ class MiqSettingsView(discord.ui.View):
             "ONにすると、他の人はあなたのメッセージをMIQにできません（自分の引用は可能）。",
             "",
             "GIF出力はアイコンがGIFアニメの時だけ有効です（それ以外はPNG）。",
+            "漫画風・音楽再生風・LINE風は常にPNGです（モノクロ等の設定は引用 (従来) 専用）。",
         ]
         return discord.Embed(title="MIQ設定", description="\n".join(lines), color=0xFFFFFF)
 
@@ -2774,6 +3200,11 @@ class GeneralCog(commands.Cog):
                 "**設定**\n"
                 "`/general` → 引用画像 (MIQ) → **MIQ設定** で、モノクロ・文字色連動・左右反転・太字・"
                 "全面レイアウト・GIF出力・フォント・配色を変更できます。設定はあなたがMIQを作る時に使われます。\n\n"
+                "**フォーマット**\n"
+                "MIQ設定で **引用 (従来) / 漫画風 / 音楽再生風 / LINE風** を選べます。"
+                "漫画風・音楽再生風・LINE風は常にPNGで出力され、GIF出力やモノクロ・配色などの設定は引用 (従来) 専用です（フォント設定は全フォーマット共通）。\n"
+                "LINE風では、対象のメッセージが返信でつながっている場合、対象を含めて最大4件まで遡って会話形式にします"
+                "（対象が返信でない場合はその1件だけ）。対象の作者が右側の緑の吹き出しになります。\n\n"
                 "**引用の拒否**\n"
                 "MIQ設定の「引用を拒否」をONにすると、他の人があなたのメッセージを引用できなくなります（初期はOFF）。"
             )
@@ -3019,17 +3450,69 @@ class GeneralCog(commands.Cog):
             self._levelup_pillow_warned = True
             logger.warning("MIQ: Pillow が未インストールです (pip install pillow)")
 
+    async def _miq_fetch_avatar_bytes(self, author, *, size: int = 512) -> bytes | None:
+        try:
+            return await author.display_avatar.replace(size=size, format="png").read()
+        except Exception:
+            logger.debug("MIQ: アイコンの取得に失敗 (user=%s)", getattr(author, "id", "?"), exc_info=True)
+            return None
+
+    async def _miq_render_line_file(self, entries: list, prefs: dict) -> discord.File | None:
+        """LINE風エントリ (dict のリスト) から discord.File を作る。"""
+        opts = miq_render_options(prefs, self.bot.user)
+        try:
+            async with self._levelup_sem:
+                data = await asyncio.to_thread(render_miq_line_png, entries, font_path=opts.get("font_path"))
+            return discord.File(io.BytesIO(data), filename="quote-line.png")
+        except ImportError:
+            self._miq_pillow_missing()
+        except Exception:
+            logger.exception("MIQ: LINE風引用画像の生成に失敗しました")
+        return None
+
+    async def _miq_build_line_file(
+        self, chain_messages: list, prefs: dict, size_limit: int | None = None,
+    ) -> discord.File | None:
+        """返信チェーンのメッセージ群から LINE風の引用画像を作る。
+
+        本文が空の要素は除外する。アバターは作者ごとに1回だけ取得する。
+        """
+        entries: list = []
+        avatar_cache: dict = {}
+        for msg in chain_messages:
+            text = _miq_clean_text(getattr(msg, "clean_content", None) or getattr(msg, "content", ""))
+            if not text:
+                continue
+            author = getattr(msg, "author", None)
+            author_key = getattr(author, "id", None)
+            if author_key not in avatar_cache:
+                avatar_cache[author_key] = (
+                    await self._miq_fetch_avatar_bytes(author, size=128) if author is not None else None
+                )
+            entries.append({
+                "name": getattr(author, "display_name", None) or getattr(author, "name", "") or "",
+                "text": text,
+                "created_at": getattr(msg, "created_at", None),
+                "avatar_bytes": avatar_cache[author_key],
+                "author_key": author_key,
+            })
+        if not entries:
+            return None
+        return await self._miq_render_line_file(entries, prefs)
+
     async def _miq_build_file(
         self, author, text: str, prefs: dict, size_limit: int | None,
     ) -> discord.File | None:
         """引用画像を作って discord.File にする。prefs は引用を作る人(要求者)の設定。"""
         opts = miq_render_options(prefs, self.bot.user)
+        fmt = opts.pop("format", "quote")
         name = getattr(author, "display_name", None) or getattr(author, "name", "") or ""
         username = getattr(author, "name", "") or ""
         avatar_bytes, animated = None, False
         try:
             asset = author.display_avatar
-            animated = bool(prefs.get("gif") and asset.is_animated())
+            # 新フォーマットは PNG 固定なので GIF アイコンでも静止画で取得する
+            animated = bool(prefs.get("gif") and fmt == "quote" and asset.is_animated())
             if animated:
                 avatar_bytes = await asset.replace(size=256, format="gif").read()
             else:
@@ -3039,6 +3522,24 @@ class GeneralCog(commands.Cog):
             logger.debug("MIQ: アイコンの取得に失敗 (user=%s)", getattr(author, "id", "?"), exc_info=True)
         try:
             async with self._levelup_sem:
+                if fmt == "line":
+                    # チェーンが無い単体呼び出し (プレビュー等) は1件のLINE風にする
+                    entries = [{
+                        "name": name, "text": text,
+                        "created_at": datetime.now(timezone.utc),
+                        "avatar_bytes": avatar_bytes,
+                        "author_key": getattr(author, "id", None),
+                    }]
+                    data = await asyncio.to_thread(
+                        render_miq_line_png, entries, font_path=opts.get("font_path"),
+                    )
+                    return discord.File(io.BytesIO(data), filename="quote-line.png")
+                if fmt in ("manga", "music"):
+                    renderer = render_miq_manga_png if fmt == "manga" else render_miq_music_png
+                    data = await asyncio.to_thread(
+                        renderer, avatar_bytes, text, name, username, font_path=opts.get("font_path"),
+                    )
+                    return discord.File(io.BytesIO(data), filename="quote.png")
                 if animated:
                     limit = int((size_limit or 8 * 1024 * 1024) * 0.9)
                     data = await asyncio.to_thread(
@@ -3054,6 +3555,33 @@ class GeneralCog(commands.Cog):
         except Exception:
             logger.exception("MIQ: 引用画像の生成に失敗しました")
         return None
+
+    def _miq_line_channel_resolver(self, channel_id):
+        bot = getattr(self, "bot", None)
+        if bot is None:
+            return None
+        try:
+            return bot.get_channel(channel_id)
+        except Exception:
+            return None
+
+    async def _miq_line_file_for(
+        self, target, requester_id: int, prefs: dict, size_limit: int | None,
+    ) -> tuple[discord.File | None, bool]:
+        """LINE風: チェーンを収集し、全作者の引用拒否を確認してから生成する。
+
+        戻り値 (file, refused)。refused=True の時は拒否により中止したことを表す。
+        """
+        chain = await miq_collect_line_chain(
+            target, channel_resolver=self._miq_line_channel_resolver,
+        )
+        for chained in chain:
+            chained_author = getattr(chained, "author", None)
+            chained_id = getattr(chained_author, "id", None)
+            if chained_id is not None and chained_id != requester_id and miq_is_refusing(chained_id):
+                return None, True
+        file = await self._miq_build_line_file(chain, prefs, size_limit)
+        return file, False
 
     async def miq_context(self, interaction: discord.Interaction, message: discord.Message):
         """メッセージの右クリックメニュー「Make it a Quote」。"""
@@ -3072,9 +3600,13 @@ class GeneralCog(commands.Cog):
             return await interaction.response.send_message("少し待ってからもう一度お試しください。", ephemeral=True)
         await interaction.response.defer(thinking=True)
         prefs = miq_get_prefs(interaction.user.id)
-        file = await self._miq_build_file(
-            message.author, text, prefs, getattr(interaction.guild, "filesize_limit", None),
-        )
+        size_limit = getattr(interaction.guild, "filesize_limit", None)
+        if prefs.get("format") == "line":
+            file, refused = await self._miq_line_file_for(message, interaction.user.id, prefs, size_limit)
+            if refused:
+                return await interaction.followup.send("このユーザーは引用画像(MIQ)を拒否しています。")
+        else:
+            file = await self._miq_build_file(message.author, text, prefs, size_limit)
         if file is None:
             return await interaction.followup.send("引用画像を作れませんでした。")
         await interaction.followup.send(file=file)
@@ -3104,10 +3636,17 @@ class GeneralCog(commands.Cog):
             if not self._miq_cooldown_ok(message.author.id):
                 return
             prefs = miq_get_prefs(message.author.id)
+            size_limit = getattr(message.guild, "filesize_limit", None)
             async with message.channel.typing():
-                file = await self._miq_build_file(
-                    target.author, text, prefs, getattr(message.guild, "filesize_limit", None),
-                )
+                if prefs.get("format") == "line":
+                    file, refused = await self._miq_line_file_for(target, message.author.id, prefs, size_limit)
+                    if refused:
+                        await message.reply(
+                            "このユーザーは引用画像(MIQ)を拒否しています。", mention_author=False, delete_after=8,
+                        )
+                        return
+                else:
+                    file = await self._miq_build_file(target.author, text, prefs, size_limit)
             if file is None:
                 return
             await message.reply(file=file, mention_author=False)
