@@ -1,31 +1,29 @@
 """生存確認（/fujo）機能。
 
-Supabase の ``fujo_users``（登録者と設定）と ``fujo_activities``（検知ログ）を使う。
+自前DB APIの ``fujo_users``（登録者と設定）と ``fujo_activities``（検知ログ）を使う。
 必要な列は ``docs/sql/fujo.sql`` を参照。
 
-- Supabase のクライアントは同期なので、呼び出しはすべて ``asyncio.to_thread`` で行い、
+- DB API クライアントは同期なので、呼び出しはすべて ``asyncio.to_thread`` で行い、
   Bot 全体が止まらないようにする。
 - 検知はユーザーごとに ``RECORD_INTERVAL`` に 1 回までに間引く（オンライン状態の変化は
   サーバーごとに何度も届くため）。
 - 登録者は起動後にまとめて読み込み、メモリに持つ。未登録者の発言では DB を触らない。
 - 見回りタスクはエラーが出ても止まらない。
+- HTTP接続が瞬間的に切断される（``h2.ConnectionTerminated`` 等）ことがあるため、
+  検知ログの INSERT は「一時エラー判定 + 指数バックオフ + ジッター + 直列化」で行う
+  （``_is_transient_error`` / ``_insert_activity_with_retry``）。
 """
 from __future__ import annotations
 
 import asyncio
 import logging
+import random
 from datetime import date, datetime, timedelta, timezone
 
 import discord
 from discord import app_commands
 from discord.ext import commands, tasks
-
-try:  # テストでは supabase.create_client が差し替えられる
-    import supabase as supabase_module
-except ImportError:  # pragma: no cover
-    supabase_module = None
-
-import os
+from core.api_retry import run_with_retry
 
 log = logging.getLogger(__name__)
 
@@ -37,6 +35,94 @@ USER_COLUMNS = (
     "user_id, streak_count, last_streak_date, is_frozen, last_pester_level, "
     "panic_days, panic_message, panic_channel_id, last_panic_at"
 )
+
+# --- INSERT のリトライ / 直列化 ---
+# Cloudflare の HTML 400 や、HTTP/2 接続の瞬断 (h2.ConnectionTerminated) など
+# 一時的な失敗をリトライする。同時 INSERT は Semaphore で直列化する。
+# Semaphore はイベントループ上で遅延生成する (import時生成によるループ不一致を避ける)。
+_ACTIVITY_INSERT_SEM: asyncio.Semaphore | None = None
+_ACTIVITY_INSERT_MAX_ATTEMPTS = 3
+_ACTIVITY_INSERT_BASE_DELAY = 0.5  # 秒(指数バックオフの初項)
+_ACTIVITY_INSERT_MAX_DELAY = 4.0   # 秒(バックオフの上限)
+_ACTIVITY_INSERT_JITTER = 0.3      # 秒(同時多発リトライの揺らぎ)
+
+# 名前で一時エラーと判定する例外クラス群。
+# httpx / h2 / httpcore / socket 等の接続系例外を網羅する。
+_TRANSIENT_EXCEPTION_NAMES: frozenset[str] = frozenset({
+    # h2
+    "ConnectionTerminated",
+    "ProtocolError",
+    # httpcore / httpx
+    "ConnectError",
+    "ConnectTimeout",
+    "ReadError",
+    "ReadTimeout",
+    "WriteError",
+    "WriteTimeout",
+    "PoolTimeout",
+    "RemoteProtocolError",
+    "LocalProtocolError",
+    # asyncio / socket
+    "ConnectionResetError",
+    "ConnectionAbortedError",
+    "BrokenPipeError",
+    "ConnectionError",
+    "TimeoutError",
+})
+
+
+def _get_insert_sem() -> asyncio.Semaphore:
+    global _ACTIVITY_INSERT_SEM
+    if _ACTIVITY_INSERT_SEM is None:
+        _ACTIVITY_INSERT_SEM = asyncio.Semaphore(2)
+    return _ACTIVITY_INSERT_SEM
+
+
+def _is_gateway_html_error(exc: Exception) -> bool:
+    """Cloudflare 等が返す HTML の 400 を検出する。
+
+    postgrest は HTML 応答を JSON パースできず ``JSON could not be generated`` の
+    APIError を投げる。``details`` に HTML が入っている／文字列に ``<html>`` と
+    ``cloudflare`` が含まれていれば gateway 起因とみなす。
+    """
+    text = str(exc)
+    low = text.lower()
+    if "<html" in low and ("cloudflare" in low or "400 bad request" in low):
+        return True
+    details = getattr(exc, "details", None)
+    if isinstance(details, str) and "<html" in details.lower():
+        return True
+    return False
+
+
+def _is_transient_error(exc: Exception) -> bool:
+    """再試行で解消しうる一時エラーかどうか。
+
+    - Cloudflare の HTML 400（前段 WAF による弾き）
+    - HTTP/2 接続の瞬断（``h2.exceptions.ConnectionTerminated`` 等）
+    - httpx / httpcore の接続系例外・タイムアウト
+    - asyncio / socket の Connection reset 系
+    を対象とする。
+    """
+    if getattr(exc, "code", None) == "API_UNAVAILABLE":
+        # 自前APIがDB poolを取得できず、SQL未開始と明示した応答だけ。
+        return True
+    if _is_gateway_html_error(exc):
+        return True
+    # 例外クラス名（MRO 全体）で判定
+    for cls in type(exc).__mro__:
+        if cls.__name__ in _TRANSIENT_EXCEPTION_NAMES:
+            return True
+    # 文字列フォールバック（ラップされた例外・サードパーティ独自型向け）
+    text = str(exc)
+    low = text.lower()
+    if "connectionterminated" in low or "connection terminated" in low:
+        return True
+    if "connection reset" in low or "connection aborted" in low:
+        return True
+    if "remoteprotocolerror" in low or "protocol error" in low:
+        return True
+    return False
 
 
 def _parse_ts(value: str) -> datetime:
@@ -52,21 +138,31 @@ def _today() -> date:
 class FujoSurvival(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
-        self.supabase = getattr(bot, "supabase", None)
-        if self.supabase is None and supabase_module is not None:
-            from core.supabase_client import create_client_from_env
-            self.supabase = create_client_from_env()
+        self.db_api = getattr(bot, "db_api", None)
+        if self.db_api is None:
+            from core.api_client import get_client
+            self.db_api = get_client()
         # user_id -> fujo_users の行（メモリ上の写し）
         self.users: dict[int, dict] = {}
         self.users_loaded = False
         self._load_lock = asyncio.Lock()
         self._last_record: dict[int, datetime] = {}
+        # バックグラウンドタスク（INSERT / ストリーク更新）を保持して
+        # cog_unload でキャンセルできるようにする。
+        self._bg_tasks: set[asyncio.Task] = set()
         self.check_panic_alerts.start()
         self.check_duo_pester.start()
 
     def cog_unload(self):
         self.check_panic_alerts.cancel()
         self.check_duo_pester.cancel()
+        for task in list(self._bg_tasks):
+            task.cancel()
+
+    def _spawn(self, coro) -> None:
+        task = asyncio.create_task(coro)
+        self._bg_tasks.add(task)
+        task.add_done_callback(self._bg_tasks.discard)
 
     FUJO_ACTIONS = [
         app_commands.Choice(name="追跡登録・解除", value="register"),
@@ -110,9 +206,48 @@ class FujoSurvival(commands.Cog):
 
     async def _run(self, build):
         """``build()`` で組み立てたクエリを別スレッドで実行し、data を返す。"""
-        if self.supabase is None:
-            raise RuntimeError("Supabase が設定されていません")
-        return (await asyncio.to_thread(lambda: build().execute())).data
+        if self.db_api is None:
+            raise RuntimeError("BOT_API_BASE_URL または BOT_API_KEY が設定されていません")
+        return (await asyncio.to_thread(
+            run_with_retry, lambda: build().execute()
+        )).data
+
+    async def _insert_activity_with_retry(self, payload: dict) -> bool:
+        """fujo_activities への INSERT。一時エラーを検知してリトライする。
+
+        - 同時 INSERT は Semaphore で直列化（Cloudflare 等の短時間レート制限を回避）
+        - 一時エラー（HTML 400 / ConnectionTerminated / 接続タイムアウト等）は
+          指数バックオフ + ジッターで最大 3 回まで再試行
+        - 恒久的な失敗はログを残して諦める（例外は投げない）
+        """
+        for attempt in range(1, _ACTIVITY_INSERT_MAX_ATTEMPTS + 1):
+            try:
+                async with _get_insert_sem():
+                    await self._run(lambda: self.db_api.table("fujo_activities").insert(payload))
+                return True
+            except Exception as exc:
+                if not _is_transient_error(exc):
+                    log.warning(
+                        "fujo: activity insert failed: user=%s signal=%s err=%s",
+                        payload.get("user_id"), payload.get("signal_type"), str(exc)[:200],
+                    )
+                    return False
+                if attempt >= _ACTIVITY_INSERT_MAX_ATTEMPTS:
+                    log.warning(
+                        "fujo: activity insert gave up after %d attempts: user=%s signal=%s err=%s",
+                        _ACTIVITY_INSERT_MAX_ATTEMPTS, payload.get("user_id"),
+                        payload.get("signal_type"), str(exc)[:200],
+                    )
+                    return False
+                base = _ACTIVITY_INSERT_BASE_DELAY * (2 ** (attempt - 1))
+                delay = min(base + random.uniform(0, _ACTIVITY_INSERT_JITTER), _ACTIVITY_INSERT_MAX_DELAY)
+                log.info(
+                    "fujo: activity insert hit transient error (attempt %d/%d), retrying in %.2fs: user=%s err=%s",
+                    attempt, _ACTIVITY_INSERT_MAX_ATTEMPTS, delay,
+                    payload.get("user_id"), type(exc).__name__,
+                )
+                await asyncio.sleep(delay)
+        return False
 
     async def _fetch_all(self, build) -> list[dict]:
         """1000 件を超える結果もページを分けて全部読む。"""
@@ -132,18 +267,18 @@ class FujoSurvival(commands.Cog):
         async with self._load_lock:
             if self.users_loaded:
                 return
-            rows = await self._fetch_all(lambda: self.supabase.table("fujo_users").select(USER_COLUMNS))
+            rows = await self._fetch_all(lambda: self.db_api.table("fujo_users").select(USER_COLUMNS))
             self.users = {int(r["user_id"]): r for r in rows}
             self.users_loaded = True
 
     async def _update_user(self, user_id: int, values: dict):
-        await self._run(lambda: self.supabase.table("fujo_users").update(values).eq("user_id", user_id))
+        await self._run(lambda: self.db_api.table("fujo_users").update(values).eq("user_id", user_id))
         if user_id in self.users:
             self.users[user_id].update(values)
 
     async def _latest_activity(self, user_id: int) -> dict | None:
         rows = await self._run(
-            lambda: self.supabase.table("fujo_activities")
+            lambda: self.db_api.table("fujo_activities")
             .select("detected_at, signal_type, status")
             .eq("user_id", user_id)
             .order("detected_at", desc=True)
@@ -153,7 +288,7 @@ class FujoSurvival(commands.Cog):
 
     async def _activities_since(self, since: datetime, user_id: int | None = None, columns: str = "detected_at") -> list[dict]:
         def build():
-            q = self.supabase.table("fujo_activities").select(columns).gte("detected_at", since.isoformat())
+            q = self.db_api.table("fujo_activities").select(columns).gte("detected_at", since.isoformat())
             return q.eq("user_id", user_id) if user_id is not None else q
         return await self._fetch_all(build)
 
@@ -192,24 +327,45 @@ class FujoSurvival(commands.Cog):
     # --- 検知と連続日数 ---
 
     async def record_activity(self, user_id: int, signal_type: str, status: str):
+        """アクティビティを記録する。
+
+        重い処理（INSERT のリトライやストリーク更新の DB 書き込み）は
+        バックグラウンドタスクに切り出し、このメソッドは即座に戻る。
+        イベントハンドラ（``on_message`` / ``on_presence_update`` /
+        ``on_voice_state_update``）や ``register`` の応答をブロックしない。
+        """
         try:
             await self._ensure_users()
-            user = self.users.get(user_id)
-            if user is None:
+            if user_id not in self.users:
                 return
             now = datetime.now(timezone.utc)
             last = self._last_record.get(user_id)
             if last and now - last < RECORD_INTERVAL:
                 return
             self._last_record[user_id] = now
+            self._spawn(self._record_activity_async(user_id, signal_type, status, now))
+        except Exception:
+            log.warning("fujo: failed to schedule activity record for %s", user_id, exc_info=True)
 
-            await self._run(lambda: self.supabase.table("fujo_activities").insert({
+    async def _record_activity_async(
+        self, user_id: int, signal_type: str, status: str, now: datetime
+    ):
+        # 1) INSERT（失敗してもストリーク更新は続行）
+        try:
+            await self._insert_activity_with_retry({
                 "user_id": user_id,
                 "detected_at": now.isoformat(),
                 "signal_type": signal_type,
                 "status": status,
-            }))
+            })
+        except Exception:
+            log.warning("fujo: activity insert crashed for %s", user_id, exc_info=True)
 
+        # 2) ストリーク・警報フラグの更新（メモリは即時、DB は別クエリ）
+        try:
+            user = self.users.get(user_id)
+            if user is None:
+                return
             today = _today()
             last_str = user.get("last_streak_date")
             last_date = date.fromisoformat(str(last_str)[:10]) if last_str else None
@@ -228,9 +384,12 @@ class FujoSurvival(commands.Cog):
             if user.get("last_pester_level"):
                 changes["last_pester_level"] = 0
             if changes:
-                await self._update_user(user_id, changes)
+                try:
+                    await self._update_user(user_id, changes)
+                except Exception:
+                    log.warning("fujo: streak update failed for %s", user_id, exc_info=True)
         except Exception:
-            log.exception("fujo: failed to record activity for %s", user_id)
+            log.warning("fujo: streak calculation failed for %s", user_id, exc_info=True)
 
     def calculate_title(self, records: list[dict]) -> str:
         total = len(records)
@@ -291,13 +450,13 @@ class FujoSurvival(commands.Cog):
         user_id = interaction.user.id
         await self._ensure_users()
         if user_id in self.users:
-            await self._run(lambda: self.supabase.table("fujo_users").delete().eq("user_id", user_id))
+            await self._run(lambda: self.db_api.table("fujo_users").delete().eq("user_id", user_id))
             self.users.pop(user_id, None)
             self._last_record.pop(user_id, None)
             embed = self.create_simple_embed("追跡解除", "生存確認の追跡を解除しました。これまでの記録と設定も消えました。", 0xe74c3c)
         else:
             row = {"user_id": user_id, "streak_count": 0, "is_frozen": False, "last_pester_level": 0}
-            await self._run(lambda: self.supabase.table("fujo_users").upsert(row, on_conflict="user_id"))
+            await self._run(lambda: self.db_api.table("fujo_users").upsert(row, on_conflict="user_id"))
             self.users[user_id] = dict(row)
             embed = self.create_simple_embed(
                 "追跡開始",
@@ -305,6 +464,7 @@ class FujoSurvival(commands.Cog):
                 "もう一度 `/fujo register` を実行すると解除できます。",
                 0x2ecc71,
             )
+            # record_activity は内部でバックグラウンド化されるため、ここでは即座に戻る
             await self.record_activity(user_id, "COMMAND", "online")
         await self._reply(interaction, embed, ephemeral=True)
 
@@ -406,7 +566,7 @@ class FujoSurvival(commands.Cog):
             embed = discord.Embed(title="化石ランキング TOP5", color=0x34495e, description="\n".join(lines) or "まだ記録がありません。")
         else:
             rows = await self._fetch_all(
-                lambda: self.supabase.table("fujo_activities").select("user_id")
+                lambda: self.db_api.table("fujo_activities").select("user_id")
                 .gte("detected_at", (datetime.now(timezone.utc) - timedelta(days=30)).isoformat())
                 .in_("user_id", list(ids))
             )

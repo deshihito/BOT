@@ -13,7 +13,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from tests.test_all_commands import USER_ID, FakeSupabase, fake_interaction  # noqa: E402  (環境変数もここで用意される)
+from tests.test_all_commands import USER_ID, FakeDBAPI, fake_interaction  # noqa: E402  (環境変数もここで用意される)
 
 import discord  # noqa: E402
 from discord.ext import commands  # noqa: E402
@@ -46,8 +46,8 @@ def make_interaction(bot):
 
 class GuessTest(unittest.TestCase):
     def setUp(self):
-        self.db = FakeSupabase()
-        self.patch = patch.object(config, 'supabase', self.db)
+        self.db = FakeDBAPI()
+        self.patch = patch.object(config, 'db_api', self.db)
         self.patch.start()
         self.addCleanup(self.patch.stop)
         self.bot = commands.Bot(command_prefix='!', intents=discord.Intents.none())

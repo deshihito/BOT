@@ -1,7 +1,7 @@
 import { loadNation } from "@/lib/nation";
 import { calcBounds, countByGuild, guildColor } from "@/lib/nation-map";
 
-// Supabaseが応答しないとビルドを止めるため、マップはリクエスト時に描画する。
+// DB APIが応答しなくてもビルドを止めないよう、マップはリクエスト時に描画する。
 export const dynamic = "force-dynamic";
 export const metadata = { title: "マップ | AGOBOT" };
 

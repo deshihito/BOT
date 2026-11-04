@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import html as _html
+import inspect
 import json
 import logging
 import os
@@ -73,67 +74,58 @@ SUPPORT_ACTIONS = [
     app_commands.Choice(name="ロールパネル作成", value="role_panel"),
     app_commands.Choice(name="言語設定", value="language"),
     app_commands.Choice(name="Auto react設定", value="auto_react"),
-    app_commands.Choice(name="SNS新着通知（X・YouTube）", value="sns_notify"),
+    app_commands.Choice(name="SNS新着通知（X・YouTube・GitHub）", value="sns_notify"),
     app_commands.Choice(name="Quest通知（Discord Orbs）", value="quest_notify"),
     app_commands.Choice(name="レベルアップ通知（EXP）", value="levelup_notify"),
     app_commands.Choice(name="サーバーアシスト設定", value="server_assist"),
     app_commands.Choice(name="音声トリガー登録", value="voice_trigger"),
+    app_commands.Choice(name="即抜けRTA状態", value="sokunuke_status"),
+    app_commands.Choice(name="即抜けRTA計測オン", value="sokunuke_on"),
+    app_commands.Choice(name="即抜けRTA計測オフ", value="sokunuke_off"),
+    app_commands.Choice(name="VC自動参加オン", value="sokunuke_vc_on"),
+    app_commands.Choice(name="VC自動参加オフ", value="sokunuke_vc_off"),
 ]
 
 SUPPORT_GENRES = {
     "moderation": (
         "モデレーション",
-        "Muted、匿名つぶやき、Stickyパネル、メッセージ削除、モデレート履歴、ハニーポット、チケット",
+        "Muted、匿名つぶやき、Stickyパネル、メッセージ削除、ハニーポット、チケット",
     ),
-    "server": (
-        "サーバー管理",
-        "ロール操作、絵文字便乗、VC履歴、メッセージ編集履歴、認証パネル、ロールパネル、レベルアップ通知、音声トリガー",
-    ),
+    "roles": ("ロール・認証", "一括ロール操作、認証パネル、ロールパネル"),
+    "language": ("言語", "サーバーで使用する言語の設定"),
+    "logs": ("履歴・ログ", "VC入退室、メッセージ編集、モデレートの履歴"),
+    "automation": ("自動化・通知", "絵文字便乗、Auto react、レベルアップ、音声トリガー、SNS・Quest通知"),
     "assist": (
         "サーバーアシスト",
         "参加・退出メッセージ、自動ロール、Starboard、レベル、一時VC",
     ),
-    "bumprta": ("bump/up・RTA", "通知設定と RTA 状態・ランキング"),
     "event": ("イベント", "抽選の作成"),
-    "notify": ("SNS・Quest通知", "X・YouTubeの新着通知、Discord Quest（Orbs）の通知（管理者のみ）"),
+    "rta": ("RTA", "bump/up・即抜けの計測、通知、ランキング、VC自動参加"),
 }
 
+# 旧バージョンで保存されたショートカットを新しいジャンルへ移行する。
+SUPPORT_GENRE_ALIASES = {"server": "roles", "notify": "automation", "bumprta": "rta", "sokunuke": "rta"}
+
+_SUPPORT_ACTION_BY_VALUE = {choice.value: (choice.name, choice.value) for choice in SUPPORT_ACTIONS}
+
+
+def _support_actions(*values: str) -> list[tuple[str, str]]:
+    return [_SUPPORT_ACTION_BY_VALUE[value] for value in values]
+
+
 SUPPORT_ACTIONS_BY_GENRE = {
-    "moderation": [
-        (c.name, c.value)
-        for c in (
-            SUPPORT_ACTIONS[0],
-            SUPPORT_ACTIONS[1],
-            SUPPORT_ACTIONS[2],
-            SUPPORT_ACTIONS[3],
-            SUPPORT_ACTIONS[12],
-            SUPPORT_ACTIONS[13],
-            SUPPORT_ACTIONS[14],
-        )
-    ],
-    "server": [
-        (c.name, c.value)
-        for c in (
-            SUPPORT_ACTIONS[4],
-            SUPPORT_ACTIONS[8],
-            SUPPORT_ACTIONS[10],
-            SUPPORT_ACTIONS[11],
-            SUPPORT_ACTIONS[15],
-            SUPPORT_ACTIONS[16],
-        )
-    ],
-    "bumprta": [(c.name, c.value) for c in SUPPORT_ACTIONS[5:8]],
-    "event": [(SUPPORT_ACTIONS[9].name, SUPPORT_ACTIONS[9].value)],
-    "assist": [("サーバーアシスト設定", "server_assist")],
+    "moderation": _support_actions("muted", "whisper", "sticky", "clear", "honeypot", "ticket"),
+    "roles": _support_actions("role_bulk", "auth_panel", "role_panel"),
+    "language": _support_actions("language"),
+    "logs": _support_actions("vc_log", "message_log", "moderation_log"),
+    "automation": _support_actions("binjou", "auto_react", "levelup_notify", "voice_trigger", "sns_notify", "quest_notify"),
+    "assist": _support_actions("server_assist"),
+    "event": _support_actions("giveaway"),
+    "rta": _support_actions(
+        "bumprta_status", "bumprta_on", "bumprta_off", "sokunuke_status", "sokunuke_on",
+        "sokunuke_off", "sokunuke_vc_on", "sokunuke_vc_off",
+    ),
 }
-SUPPORT_ACTIONS_BY_GENRE["server"].append((SUPPORT_ACTIONS[17].name, SUPPORT_ACTIONS[17].value))
-SUPPORT_ACTIONS_BY_GENRE["server"].append((SUPPORT_ACTIONS[18].name, SUPPORT_ACTIONS[18].value))
-SUPPORT_ACTIONS_BY_GENRE["server"].append((SUPPORT_ACTIONS[21].name, SUPPORT_ACTIONS[21].value))
-SUPPORT_ACTIONS_BY_GENRE["server"].append((SUPPORT_ACTIONS[23].name, SUPPORT_ACTIONS[23].value))
-SUPPORT_ACTIONS_BY_GENRE["notify"] = [
-    (SUPPORT_ACTIONS[19].name, SUPPORT_ACTIONS[19].value),
-    (SUPPORT_ACTIONS[20].name, SUPPORT_ACTIONS[20].value),
-]
 
 THINKING_SECTION = "thinking_reaction"
 BINJOU_SECTION = "binjou"
@@ -1408,7 +1400,11 @@ class RolePanelSendButton(discord.ui.Button):
         await interaction.response.defer(ephemeral=True)
 
         try:
-            await channel.send(view=RolePanelUserView(interaction.guild, valid_role_ids))
+            await channel.send(
+                view=RolePanelUserView(interaction.guild, valid_role_ids),
+                # Show role mentions for readability without notifying those roles.
+                allowed_mentions=discord.AllowedMentions.none(),
+            )
         except (discord.Forbidden, discord.HTTPException):
             logger.exception("ロールパネルの送信に失敗しました")
             await interaction.followup.send(
@@ -2569,8 +2565,11 @@ class GiveawayModal(discord.ui.Modal, title="抽選を作成"):
         self.cog = cog
 
     async def on_submit(self, interaction: discord.Interaction):
+        # A modal submit has the same short acknowledgement deadline as a
+        # slash command.  Defer before validation or handing off to GiveawayCog.
+        await interaction.response.defer(ephemeral=True, thinking=True)
         if interaction.guild is None:
-            return await interaction.response.send_message(
+            return await interaction.followup.send(
                 "この機能はサーバー内で利用できます。",
                 ephemeral=True,
             )
@@ -2580,7 +2579,7 @@ class GiveawayModal(discord.ui.Modal, title="抽選を作成"):
             getattr(permissions, "manage_guild", False)
             or getattr(permissions, "administrator", False)
         ):
-            return await interaction.response.send_message(
+            return await interaction.followup.send(
                 "抽選の作成にはサーバー管理権限が必要です。",
                 ephemeral=True,
             )
@@ -2589,7 +2588,7 @@ class GiveawayModal(discord.ui.Modal, title="抽選を作成"):
             winners = int(self.winners.value)
             minutes = int(self.minutes.value)
         except ValueError:
-            return await interaction.response.send_message(
+            return await interaction.followup.send(
                 "当選人数と分数は整数で入力してください。",
                 ephemeral=True,
             )
@@ -2619,11 +2618,11 @@ class SupportGenreSelect(discord.ui.Select):
             options=[
                 discord.SelectOption(
                     label=label,
-                    description=description,
+                    description=f"{len(SUPPORT_ACTIONS_BY_GENRE[value])}個の機能",
                     value=value,
                     default=value == selected,
                 )
-                for value, (label, description) in SUPPORT_GENRES.items()
+                for value, (label, _description) in SUPPORT_GENRES.items()
             ],
             row=0,
         )
@@ -2695,7 +2694,8 @@ class SupportPanelView(discord.ui.View):
         self.cog = cog
 
         saved = (shortcut_item or {}).get("action", {})
-        self.genre = genre or saved.get("genre")
+        saved_genre = saved.get("genre")
+        self.genre = SUPPORT_GENRE_ALIASES.get(genre or saved_genre, genre or saved_genre)
         self.action = saved.get("value")
         self.shortcut_mode = shortcut_mode
         self.shortcut_item = shortcut_item
@@ -2916,7 +2916,7 @@ class VoiceTriggerPanel(discord.ui.LayoutView):
         await self.refresh(interaction, notice)
 
 
-# ===== SNS新着通知（X / YouTube） ======================================
+# ===== SNS新着通知（X / YouTube / GitHub） ======================================
 SNS_SECTION = "sns_notify"
 SNS_MAX_SUBS = 10
 SNS_MAX_SEEN = 100
@@ -2939,6 +2939,7 @@ SNS_USER_AGENT = (
 SNS_PLATFORMS = {
     "youtube": {"label": "YouTube", "emoji": "▶️", "color": 0xFF0000, "noun": "動画", "open": "YouTubeで開く"},
     "x": {"label": "X", "emoji": "𝕏", "color": 0xFFFFFF, "noun": "ポスト", "open": "Xで開く"},
+    "github": {"label": "GitHub", "emoji": "🐙", "color": 0x24292F, "noun": "更新", "open": "GitHubで開く"},
 }
 
 _SNS_NS = {
@@ -2948,6 +2949,114 @@ _SNS_NS = {
 }
 _YT_ID_RE = re.compile(r"UC[0-9A-Za-z_-]{22}")
 _X_USER_RE = re.compile(r"[A-Za-z0-9_]{1,15}")
+_GH_OWNER_RE = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?")
+_GH_REPO_RE = re.compile(r"[A-Za-z0-9._-]{1,100}")
+SNS_GITHUB_KINDS = {"prs": "PR", "issues": "Issue", "commits": "コミット"}
+
+
+def default_github_options() -> dict:
+    return {kind: True for kind in SNS_GITHUB_KINDS}
+
+
+def normalize_github_options(raw) -> dict:
+    """GitHub通知の種類ごとのオン/オフ。欠けた種類はオンとして扱う。"""
+    options = default_github_options()
+    if isinstance(raw, dict):
+        for kind in options:
+            if isinstance(raw.get(kind), bool):
+                options[kind] = raw[kind]
+    return options
+
+
+def parse_github_repo(raw: str) -> str:
+    """owner/repo 形式またはGitHubのリポジトリURLを owner/repo に正規化する。"""
+    text = (raw or "").strip()
+    match = re.match(
+        r"^(?:https?://)?(?:www\.)?github\.com/([^/\s]+)/([^/\s#?]+)(?:[/?#].*)?$",
+        text,
+        re.I,
+    )
+    if match:
+        owner, repo = match.group(1), match.group(2)
+    else:
+        parts = text.split("/")
+        if len(parts) != 2:
+            raise SnsError("リポジトリを owner/repo の形式か、GitHubのリポジトリURLで入力してください。")
+        owner, repo = parts
+    repo = repo.removesuffix(".git")
+    if not _GH_OWNER_RE.fullmatch(owner) or not _GH_REPO_RE.fullmatch(repo) or repo in {".", ".."}:
+        raise SnsError("リポジトリ名の形式が正しくありません（例: deshihito/BOT）。")
+    return f"{owner}/{repo}"
+
+
+def github_items_from_pulls(pulls, full_name: str) -> list:
+    """Pull requests 一覧（作成日時の降順）を作成されたPRの通知アイテムにする。"""
+    items: list = []
+    for pr in pulls if isinstance(pulls, list) else []:
+        if not isinstance(pr, dict):
+            continue
+        number = pr.get("number")
+        if not isinstance(number, int) or isinstance(number, bool):
+            continue
+        published = pr.get("created_at")
+        items.append(SnsItem(
+            id=f"gh:pr:{number}",
+            title=f"新しいPR #{number}: {str(pr.get('title') or '').strip()}",
+            url=str(pr.get("html_url") or f"https://github.com/{full_name}/pull/{number}"),
+            author=full_name,
+            published=published if isinstance(published, str) else None,
+        ))
+    return items
+
+
+def github_items_from_issues(issues, full_name: str) -> list:
+    """Issues 一覧を作成されたIssueの通知アイテムにする（PRは混ざるので除く）。"""
+    items: list = []
+    for issue in issues if isinstance(issues, list) else []:
+        if not isinstance(issue, dict) or "pull_request" in issue:
+            continue
+        number = issue.get("number")
+        if not isinstance(number, int) or isinstance(number, bool):
+            continue
+        published = issue.get("created_at")
+        items.append(SnsItem(
+            id=f"gh:issue:{number}",
+            title=f"新しいIssue #{number}: {str(issue.get('title') or '').strip()}",
+            url=str(issue.get("html_url") or f"https://github.com/{full_name}/issues/{number}"),
+            author=full_name,
+            published=published if isinstance(published, str) else None,
+        ))
+    return items
+
+
+def github_items_from_commits(commits, full_name: str) -> list:
+    """Commits 一覧を push されたコミットの通知アイテムにする。"""
+    items: list = []
+    for row in commits if isinstance(commits, list) else []:
+        if not isinstance(row, dict):
+            continue
+        sha = str(row.get("sha") or "").strip()
+        if not sha:
+            continue
+        commit = row.get("commit") if isinstance(row.get("commit"), dict) else {}
+        lines = str(commit.get("message") or "").strip().splitlines()
+        stamp = commit.get("committer") if isinstance(commit.get("committer"), dict) else {}
+        published = stamp.get("date")
+        if not isinstance(published, str):
+            author = commit.get("author") if isinstance(commit.get("author"), dict) else {}
+            published = author.get("date")
+        items.append(SnsItem(
+            id=f"gh:commit:{sha}",
+            title=f"新しいコミット: {lines[0] if lines else sha[:7]}",
+            url=str(row.get("html_url") or f"https://github.com/{full_name}/commit/{sha}"),
+            author=full_name,
+            published=published if isinstance(published, str) else None,
+        ))
+    return items
+
+
+def _sns_github_token() -> str:
+    return (os.getenv("GITHUB_TOKEN") or os.getenv("GH_TOKEN") or "").strip()
 
 
 class SnsError(Exception):
@@ -3073,7 +3182,7 @@ def _sns_x_rss_template() -> str:
 
 
 class SnsFetcher:
-    """YouTube / X の新着取得。ネットワーク周りはここに集約する。"""
+    """YouTube / X / GitHub の新着取得。ネットワーク周りはここに集約する。"""
 
     def __init__(self, session: aiohttp.ClientSession):
         self.session = session
@@ -3210,6 +3319,58 @@ class SnsFetcher:
                 item.url = f"https://x.com/{username}/status/{item.id}"
         return items
 
+    # --- GitHub ------------------------------------------------------------
+    def _github_headers(self) -> dict:
+        headers = {"Accept": "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28"}
+        token = _sns_github_token()
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
+        return headers
+
+    async def _github_json(self, path: str, params=None):
+        status, body = await self._get(
+            f"https://api.github.com{path}", params=params, headers=self._github_headers()
+        )
+        if status == 404:
+            raise SnsError("リポジトリが見つかりませんでした。")
+        if status == 403:
+            raise SnsError("GitHub APIのレート制限に達した可能性があります。GITHUB_TOKEN を設定すると緩和されます。")
+        if status != 200:
+            raise SnsError(f"GitHub APIがHTTP {status}を返しました。")
+        try:
+            return json.loads(body)
+        except ValueError as exc:
+            raise SnsError("GitHub APIの応答を解析できませんでした。") from exc
+
+    async def resolve_github(self, raw: str) -> str:
+        full_name = parse_github_repo(raw)
+        data = await self._github_json(f"/repos/{full_name}")
+        canonical = data.get("full_name") if isinstance(data, dict) else None
+        return str(canonical) if canonical else full_name
+
+    async def github_items(self, full_name: str, options) -> list:
+        """オンになっている種類だけAPIを叩く（レート制限の節約）。"""
+        options = normalize_github_options(options)
+        items: list = []
+        if options["prs"]:
+            data = await self._github_json(
+                f"/repos/{full_name}/pulls",
+                params={"state": "all", "sort": "created", "direction": "desc", "per_page": "10"},
+            )
+            items += github_items_from_pulls(data, full_name)
+        if options["issues"]:
+            data = await self._github_json(
+                f"/repos/{full_name}/issues",
+                params={"state": "all", "sort": "created", "direction": "desc", "per_page": "10"},
+            )
+            items += github_items_from_issues(data, full_name)
+        if options["commits"]:
+            data = await self._github_json(
+                f"/repos/{full_name}/commits", params={"per_page": "10"}
+            )
+            items += github_items_from_commits(data, full_name)
+        return items
+
     # --- 共通 ------------------------------------------------------------
     async def lookup(self, platform: str, raw: str) -> dict:
         """追加時の解決。現在の最新分も返す（既読の基準にするため）。"""
@@ -3217,6 +3378,11 @@ class SnsFetcher:
             channel_id = await self.resolve_youtube(raw)
             name, items = await self.youtube_feed(channel_id)
             return {"key": channel_id, "name": name or channel_id, "uid": None, "items": items}
+
+        if platform == "github":
+            full_name = await self.resolve_github(raw)
+            items = await self.github_items(full_name, default_github_options())
+            return {"key": full_name, "name": full_name, "uid": None, "items": items}
 
         username = parse_x_username(raw)
         # Xは無料のRSS経由に統一し、X APIトークンが設定されていても使用しない。
@@ -3232,6 +3398,9 @@ class SnsFetcher:
         if sub["platform"] == "youtube":
             _, items = await self.youtube_feed(sub["key"])
             return items, None
+
+        if sub["platform"] == "github":
+            return await self.github_items(sub["key"], sub.get("options")), None
 
         username = sub["key"]
         # X通知はRSSを使用。APIの課金・トークン設定には依存しない。
@@ -3265,6 +3434,7 @@ def get_sns_settings(store, guild_id: int) -> dict:
                 "uid": uid if isinstance(uid, str) and uid else None,
                 "seen": seen[-SNS_MAX_SEEN:],
                 "error": error[:200] if isinstance(error, str) and error else None,
+                "options": normalize_github_options(item.get("options")),
             }
         )
 
@@ -3293,7 +3463,7 @@ class SnsNotifyMessage(discord.ui.LayoutView):
             header += f"\n-# <t:{stamp}:R>"
         children.append(discord.ui.TextDisplay(header))
 
-        if sub["platform"] == "youtube":
+        if sub["platform"] in ("youtube", "github"):
             title = discord.utils.escape_markdown(item.title)[:200] or "(タイトルなし)"
             children.append(discord.ui.TextDisplay(f"**{title}**"))
             if item.thumbnail:
@@ -3426,14 +3596,54 @@ class SnsRemoveSelect(discord.ui.Select):
         await self.parent_view.refresh(interaction, notice)
 
 
+class SnsGithubKindSelect(discord.ui.Select):
+    def __init__(self, parent: "SnsNotifyPanel"):
+        self.parent_view = parent
+        options = []
+        for sub in parent.settings["subs"]:
+            if sub["platform"] != "github":
+                continue
+            current = sub.get("options") or {}
+            for kind, label in SNS_GITHUB_KINDS.items():
+                on = current.get(kind, True)
+                options.append(
+                    discord.SelectOption(
+                        label=f"{sub['name']}: {label}通知を{'オフ' if on else 'オン'}にする"[:100],
+                        value=f"{sub['key']}|{kind}"[:100],
+                        description=f"現在: {'オン' if on else 'オフ'}",
+                    )
+                )
+        super().__init__(
+            placeholder="GitHub通知の種類を変更（リポジトリ × 種類）",
+            options=options[:25],
+        )
+
+    async def callback(self, interaction: discord.Interaction):
+        await interaction.response.defer()
+        key, _, kind = self.values[0].rpartition("|")
+        try:
+            notice = await self.parent_view.cog.sns_toggle_github_option(
+                interaction.guild_id, key, kind
+            )
+        except SnsError as exc:
+            notice = f"⚠️ {exc}"
+        except Exception:
+            logger.exception("GitHub通知の種類変更に失敗しました")
+            notice = "⚠️ 変更中にエラーが発生しました。Botのログを確認してください。"
+        await self.parent_view.refresh(interaction, notice)
+
+
 class SnsAddModal(discord.ui.Modal):
     def __init__(self, panel: "SnsNotifyPanel", platform: str):
         meta = SNS_PLATFORMS[platform]
-        super().__init__(title=f"{meta['label']}アカウントを追加"[:45])
+        modal_title = f"{meta['label']}リポジトリを追加" if platform == "github" else f"{meta['label']}アカウントを追加"
+        super().__init__(title=modal_title[:45])
         self.panel = panel
         self.platform = platform
         if platform == "youtube":
             label, placeholder = "チャンネル", "@ハンドル / チャンネルURL / チャンネルID(UC…)"
+        elif platform == "github":
+            label, placeholder = "リポジトリ", "owner/repo / リポジトリURL"
         else:
             label, placeholder = "Xアカウント", "@ユーザー名 / プロフィールURL"
         self.account = discord.ui.TextInput(label=label, placeholder=placeholder, max_length=200)
@@ -3504,6 +3714,13 @@ class SnsNotifyPanel(discord.ui.LayoutView):
         for i, sub in enumerate(subs, 1):
             meta = SNS_PLATFORMS[sub["platform"]]
             line = f"{i}. {meta['emoji']} **{discord.utils.escape_markdown(sub['name'])}**"
+            if sub["platform"] == "github":
+                opts = sub.get("options") or {}
+                kinds = " / ".join(
+                    f"{label}: {'オン' if opts.get(kind, True) else 'オフ'}"
+                    for kind, label in SNS_GITHUB_KINDS.items()
+                )
+                line += f"\n-# {kinds}"
             if sub["error"]:
                 line += f"\n-# ⚠️ {sub['error']}"
             lines.append(line)
@@ -3511,7 +3728,7 @@ class SnsNotifyPanel(discord.ui.LayoutView):
 
     def _build(self):
         self.clear_items()
-        head = "## 📡 SNS新着通知\nXとYouTubeの新着ポスト・動画をチャンネルへ通知します。（管理者専用）"
+        head = "## 📡 SNS新着通知\nX・YouTube・GitHubの新着をチャンネルへ通知します。（管理者専用）"
         if self.notice:
             head = f"{self.notice}\n\n{head}"
 
@@ -3526,9 +3743,12 @@ class SnsNotifyPanel(discord.ui.LayoutView):
             discord.ui.ActionRow(
                 SnsAddButton(self, "youtube"),
                 SnsAddButton(self, "x"),
+                SnsAddButton(self, "github"),
                 SnsToggleButton(self),
             ),
         ]
+        if any(s["platform"] == "github" for s in self.settings["subs"]):
+            children.append(discord.ui.ActionRow(SnsGithubKindSelect(self)))
         if self.settings["subs"]:
             children.append(discord.ui.ActionRow(SnsRemoveSelect(self)))
 
@@ -3558,15 +3778,99 @@ class SnsNotifyPanel(discord.ui.LayoutView):
 
 # ===== Discord Quest 通知 ==============================================
 QUEST_SECTION = "quest_notify"
-QUEST_MAX_SEEN = 200
+QUEST_MAX_SEEN = 2000  # 安全弁。通常は「現在も有効なQuestのID」だけを保持するので小さく収まる
 QUEST_MAX_SEND_PER_CYCLE = 5
-QUEST_MAX_BODY = 2 * 1024 * 1024
+QUEST_MAX_BODY = 16 * 1024 * 1024  # 全Questの履歴を含むため大きい（2MB超を確認済み）
 QUEST_POLL_SECONDS = 900  # 確認間隔（秒）
 QUEST_USER_AGENT = "SupportBot-QuestNotifier/1.0"
 _ORBS_RE = re.compile(r"\borbs?\b", re.I)
 
 
 QUEST_FEED_URL = "https://api.discordquest.com/api/quests"
+QUEST_REGIONS_URL = "https://api.discordquest.com/api/regions"
+
+# ギルドの言語 → 通知対象にする国・地域（ISO 3166-1 alpha-2）。
+# Questは国ごとに提供有無が違う。いずれかの国で提供されているQuestだけ通知する。
+QUEST_LANGUAGE_COUNTRIES: dict[str, frozenset[str]] = {
+    k: frozenset(v.split())
+    for k, v in {
+        "ja": "JP", "ko": "KR", "zh": "CN TW HK", "zh-cn": "CN", "zh-tw": "TW HK",
+        "en": "US GB CA AU NZ IE", "en-us": "US", "en-gb": "GB",
+        "fr": "FR BE CH CA", "de": "DE AT CH", "it": "IT", "nl": "NL",
+        "es": "ES MX AR CL CO", "es-es": "ES", "es-419": "MX AR CL CO",
+        "pt": "BR PT", "pt-br": "BR", "ru": "RU", "uk": "UA", "pl": "PL",
+        "tr": "TR", "id": "ID", "th": "TH", "vi": "VN", "hi": "IN",
+        "sv": "SE", "sv-se": "SE", "da": "DK", "fi": "FI", "no": "NO",
+        "cs": "CZ", "hu": "HU", "el": "GR", "ro": "RO", "bg": "BG",
+        "hr": "HR", "lt": "LT", "ar": "SA AE EG",
+    }.items()
+}
+_QUEST_LANG_RE = re.compile(r"[A-Za-z]{2,3}(?:[-_][A-Za-z0-9]{2,4})?")
+QUEST_LANG_SECTIONS = ("language", "localization", "locale", "lang")
+QUEST_LANG_KEYS = ("language", "locale", "lang", "code", "value")
+
+
+def quest_language_countries(language: str | None) -> frozenset[str]:
+    """言語コード（ja / en-US / zh_TW など）を国コード集合にする。不明なら空集合。"""
+    code = str(language or "").strip().lower().replace("_", "-")
+    if not _QUEST_LANG_RE.fullmatch(code):
+        return frozenset()
+    return QUEST_LANGUAGE_COUNTRIES.get(code) or QUEST_LANGUAGE_COUNTRIES.get(code.split("-")[0], frozenset())
+
+
+@dataclass(frozen=True)
+class QuestRegion:
+    include: frozenset[str] = frozenset()
+    exclude: frozenset[str] = frozenset()
+    is_global: bool = False
+
+    def available_in(self, countries: frozenset[str]) -> bool:
+        """countries のいずれかで提供されるか。提供範囲が不明なQuestは除外しない。"""
+        if not self.include and not self.exclude and not self.is_global:
+            return True
+        return any(
+            c not in self.exclude and (not self.include or c in self.include)
+            for c in countries
+        )
+
+
+def _quest_country(value) -> str | None:
+    if not isinstance(value, str) or not value.strip():
+        return None
+    code = value.strip().upper()
+    return "GB" if code == "UK" else code
+
+
+def parse_quest_regions(data: bytes) -> dict[str, QuestRegion]:
+    """/api/regions を {quest_id: QuestRegion} にする。"""
+    try:
+        payload = json.loads(data.removeprefix(b"\xef\xbb\xbf"))
+    except ValueError as exc:
+        raise QuestError(f"リージョン情報のJSONを解析できませんでした（{exc}）。") from exc
+    rows = payload.get("quests") if isinstance(payload, dict) else payload
+    if not isinstance(rows, list):
+        raise QuestError("リージョン情報の形式を認識できませんでした。")
+
+    result: dict[str, QuestRegion] = {}
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        raw_id = row.get("id")
+        if isinstance(raw_id, bool) or not isinstance(raw_id, (str, int)) or not str(raw_id).strip():
+            continue
+        regions = row.get("regions")
+        if isinstance(regions, list):
+            include, exclude = regions, []
+        elif isinstance(regions, dict):
+            include, exclude = regions.get("include") or [], regions.get("exclude") or []
+        else:
+            include, exclude = [], []
+        result[str(raw_id).strip()[:100]] = QuestRegion(
+            include=frozenset(filter(None, map(_quest_country, include if isinstance(include, list) else []))),
+            exclude=frozenset(filter(None, map(_quest_country, exclude if isinstance(exclude, list) else []))),
+            is_global=row.get("is_global") is True,
+        )
+    return result
 
 
 def _quest_feed_url() -> str:
@@ -3644,11 +3948,18 @@ def _quest_from_discord(row: dict) -> "QuestItem | None":
 
 
 def parse_quest_feed(data: bytes) -> list[QuestItem]:
+    data = data.removeprefix(b"\xef\xbb\xbf")  # UTF-8 BOM
     if data.lstrip()[:1] in (b"{", b"["):
         try:
             payload = json.loads(data)
         except ValueError as exc:
-            raise QuestError("フィードのJSONを解析できませんでした。") from exc
+            logger.warning(
+                "QuestフィードのJSON解析に失敗: %s (size=%d, head=%r, tail=%r)",
+                exc, len(data), data[:80], data[-80:],
+            )
+            raise QuestError(
+                f"フィードのJSONを解析できませんでした（{len(data):,}バイト受信: {exc}）。"
+            ) from exc
         rows = payload
         if isinstance(payload, dict):
             for key in ("quests", "data", "items", "results"):
@@ -3665,7 +3976,11 @@ def parse_quest_feed(data: bytes) -> list[QuestItem]:
         for row in rows:
             if not isinstance(row, dict):
                 continue
-            if isinstance(row.get("config"), dict) or "rewards_config" in row:
+            if (
+                isinstance(row.get("config"), dict)
+                or "rewards_config" in row
+                or isinstance(row.get("messages"), dict)  # フラット形式 {id, expires_at, messages, ...}
+            ):
                 converted = _quest_from_discord(row)
                 if converted is not None:
                     items.append(converted)
@@ -3711,6 +4026,8 @@ class QuestFetcher:
         self._etag: str | None = None
         self._last_modified: str | None = None
         self._items: list[QuestItem] = []
+        self.regions: dict[str, QuestRegion] = {}
+        self._regions_etag: str | None = None
         self._next_allowed = 0.0
         self._failures = 0
         self.last_ok: float | None = None
@@ -3747,9 +4064,18 @@ class QuestFetcher:
                 if resp.status == 304:
                     body = None
                 elif resp.status == 200:
-                    body = await resp.content.read(QUEST_MAX_BODY + 1)
-                    if len(body) > QUEST_MAX_BODY:
-                        raise self._fail("フィードが大きすぎます。")
+                    # StreamReader.read(n) は「最大nバイト」しか保証せず、受信済み分だけ返すため
+                    # 大きなJSONが途中で切れる。EOFまでチャンクで読み切る。
+                    chunks: list[bytes] = []
+                    size = 0
+                    async for chunk in resp.content.iter_chunked(64 * 1024):
+                        size += len(chunk)
+                        if size > QUEST_MAX_BODY:
+                            raise self._fail(
+                                f"フィードが大きすぎます（{QUEST_MAX_BODY // 1024 // 1024}MB超）。"
+                            )
+                        chunks.append(chunk)
+                    body = b"".join(chunks)
                 elif resp.status in (429, 503):
                     try:
                         retry_after = float(resp.headers.get("Retry-After", ""))
@@ -3769,7 +4095,7 @@ class QuestFetcher:
 
         if body is not None:
             try:
-                self._items = parse_quest_feed(body)
+                self._items = await asyncio.to_thread(parse_quest_feed, body)
             except QuestError as exc:
                 raise self._fail(str(exc)) from exc
             self._etag, self._last_modified = etag, modified
@@ -3777,7 +4103,36 @@ class QuestFetcher:
         self._failures = 0
         self.last_error = None
         self.last_ok = time.time()
+        await self._fetch_regions()
         return list(self._items)
+
+    async def _fetch_regions(self) -> None:
+        """国別の提供情報。失敗してもQuest通知自体は止めず、前回の取得分を使い続ける。"""
+        headers = {"User-Agent": QUEST_USER_AGENT, "Accept": "application/json"}
+        if self._regions_etag and self.regions:
+            headers["If-None-Match"] = self._regions_etag
+        try:
+            async with self.session.get(QUEST_REGIONS_URL, headers=headers) as resp:
+                if resp.status == 304:
+                    return
+                if resp.status != 200:
+                    logger.warning("Questリージョン情報の取得に失敗（HTTP %s）", resp.status)
+                    return
+                chunks: list[bytes] = []
+                size = 0
+                async for chunk in resp.content.iter_chunked(64 * 1024):
+                    size += len(chunk)
+                    if size > QUEST_MAX_BODY:
+                        logger.warning("Questリージョン情報が大きすぎます")
+                        return
+                    chunks.append(chunk)
+                etag = resp.headers.get("ETag")
+            self.regions = await asyncio.to_thread(parse_quest_regions, b"".join(chunks))
+            self._regions_etag = etag
+        except QuestError as exc:
+            logger.warning("Questリージョン情報の解析に失敗: %s", exc)
+        except (asyncio.TimeoutError, aiohttp.ClientError) as exc:
+            logger.warning("Questリージョン情報の取得に失敗（%s）", type(exc).__name__)
 
 
 def get_quest_settings(store, guild_id: int) -> dict:
@@ -3982,11 +4337,12 @@ class QuestManualModal(discord.ui.Modal):
 class QuestNotifyPanel(discord.ui.LayoutView):
     """Quest通知の設定パネル（Components V2・管理者専用）。"""
 
-    def __init__(self, cog: "SupportCog", settings: dict, notice: str | None = None):
+    def __init__(self, cog: "SupportCog", settings: dict, notice: str | None = None, lang_label: str = ""):
         super().__init__(timeout=300)
         self.cog = cog
         self.settings = settings
         self.notice = notice
+        self.lang_label = lang_label
         self._build()
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
@@ -4012,7 +4368,8 @@ class QuestNotifyPanel(discord.ui.LayoutView):
             f"送信先: {channel}\n"
             f"メンション: {role}\n"
             f"対象: {'Orbs報酬のみ' if s['orbs_only'] else 'すべてのQuest'}\n"
-            f"取得元: {source}\n"
+            + (f"言語圏: {self.lang_label}\n" if self.lang_label else "")
+            + f"取得元: {source}\n"
             f"確認間隔: 約{QUEST_POLL_SECONDS // 60}分ごと"
         )
         error = self.cog.quest_last_error()
@@ -4047,6 +4404,7 @@ class QuestNotifyPanel(discord.ui.LayoutView):
         await store.ensure_loaded()
         self.settings = get_quest_settings(store, interaction.guild_id)
         self.notice = notice
+        self.lang_label = await self.cog.quest_language_label(interaction.guild)
         self._build()
         await edit_interaction_message(interaction, view=self)
 
@@ -4267,6 +4625,11 @@ class SupportCog(commands.Cog):
         "quest_notify": "administrator",
         "levelup_notify": "manage_guild",
         "server_assist": "manage_guild",
+        "sokunuke_status": "manage_guild",
+        "sokunuke_on": "manage_guild",
+        "sokunuke_off": "manage_guild",
+        "sokunuke_vc_on": "manage_guild",
+        "sokunuke_vc_off": "manage_guild",
     }
 
     def __init__(self, bot: commands.Bot):
@@ -4390,6 +4753,26 @@ class SupportCog(commands.Cog):
             await store.update(guild_id, SNS_SECTION, subs=kept)
         return "登録を解除しました。"
 
+    async def sns_toggle_github_option(self, guild_id: int, key: str, kind: str) -> str:
+        if kind not in SNS_GITHUB_KINDS:
+            raise SnsError("通知の種類が正しくありません。")
+        async with self.sns_lock(guild_id):
+            store = guild_settings.get_store()
+            await store.ensure_loaded()
+            settings = get_sns_settings(store, guild_id)
+            subs = [dict(s) for s in settings["subs"]]
+            target = next(
+                (s for s in subs if s["platform"] == "github" and s["key"] == key), None
+            )
+            if target is None:
+                return "⚠️ 対象のリポジトリはすでに解除されています。"
+            options = normalize_github_options(target.get("options"))
+            options[kind] = not options[kind]
+            target["options"] = options
+            await store.update(guild_id, SNS_SECTION, subs=subs)
+        state = "オン" if options[kind] else "オフ"
+        return f"GitHub「{key}」の{SNS_GITHUB_KINDS[kind]}通知を{state}にしました。"
+
     @tasks.loop(seconds=SNS_POLL_SECONDS)
     async def sns_poll(self):
         store = guild_settings.get_store()
@@ -4508,6 +4891,59 @@ class SupportCog(commands.Cog):
     def quest_last_error(self) -> str | None:
         return self._quest.last_error if self._quest is not None else None
 
+    async def quest_guild_language(self, guild: discord.Guild) -> tuple[str, str]:
+        """ギルドに設定された言語を (言語コード, 取得元) で返す。"""
+        store = guild_settings.get_store()
+        await store.ensure_loaded()
+
+        cog = self.bot.get_cog("LocalizationCog")
+        if cog is not None:
+            for name in (
+                "get_guild_language", "guild_language", "get_language",
+                "get_guild_locale", "get_locale", "language_for", "get_lang",
+            ):
+                fn = getattr(cog, name, None)
+                if not callable(fn):
+                    continue
+                for arg in (guild.id, guild):
+                    try:
+                        value = fn(arg)
+                        if inspect.isawaitable(value):
+                            value = await value
+                    except Exception:
+                        continue
+                    if isinstance(value, str) and quest_language_countries(value):
+                        return value.strip(), f"LocalizationCog.{name}"
+
+        for section in QUEST_LANG_SECTIONS:
+            try:
+                raw = store.get(guild.id, section)
+            except Exception:
+                continue
+            candidates = [raw] if isinstance(raw, str) else (
+                [raw.get(k) for k in QUEST_LANG_KEYS] if isinstance(raw, dict) else []
+            )
+            for value in candidates:
+                if isinstance(value, str) and quest_language_countries(value):
+                    return value.strip(), f"設定:{section}"
+
+        preferred = getattr(guild, "preferred_locale", None)
+        preferred = str(getattr(preferred, "value", preferred) or "")
+        if quest_language_countries(preferred):
+            return preferred, "サーバーの優先言語"
+        return "en", "既定値"
+
+    async def quest_language_label(self, guild: discord.Guild | None) -> str:
+        if guild is None:
+            return ""
+        try:
+            language, source = await self.quest_guild_language(guild)
+        except Exception:
+            logger.exception("Quest通知の言語設定を取得できませんでした (guild=%s)", guild.id)
+            return ""
+        countries = ", ".join(sorted(quest_language_countries(language)))
+        return f"**{language}**（{countries}で提供のQuestのみ）\n-# 言語の取得元: {source}"
+
     async def show_quest_notify_settings(self, interaction: discord.Interaction):
         if interaction.guild is None:
             return await interaction.response.send_message(
@@ -4524,8 +4960,9 @@ class SupportCog(commands.Cog):
         store = guild_settings.get_store()
         await store.ensure_loaded()
         settings = get_quest_settings(store, interaction.guild.id)
+        label = await self.quest_language_label(interaction.guild)
         await interaction.response.send_message(
-            view=QuestNotifyPanel(self, settings),
+            view=QuestNotifyPanel(self, settings, lang_label=label),
             ephemeral=True,
         )
 
@@ -4624,24 +5061,74 @@ class SupportCog(commands.Cog):
         logger.error("Quest通知の巡回ループが異常終了しました", exc_info=error)
 
     async def _quest_poll_guild(self, guild: discord.Guild, store, settings: dict, items: list[QuestItem]):
-        seen = list(settings["seen"])
-
-        if not settings["primed"]:
-            seen.extend(i.id for i in items if i.id not in set(seen))
-            async with self.quest_lock(guild.id):
-                await store.update(guild.id, QUEST_SECTION, seen=seen[-QUEST_MAX_SEEN:], primed=True)
-            return
-
-        seen_set = set(seen)
-        fresh = [i for i in items if i.id not in seen_set]
-        if not fresh:
-            return
+        # フィードは過去分を含めて数百件以上ある。期限切れは通知対象にせず、
+        # 既読(seen)も「現在有効なQuest」のIDだけを保持する。
+        # （固定件数で古い順に捨てると、捨てたIDが「新着」と誤判定されて再通知される）
+        if not items:
+            return  # 取得結果が空のときは既読を触らない（一時的な空応答での巻き戻し防止）
 
         now = time.time()
-        expired_ids = {i.id for i in fresh if (sns_epoch(i.ends_at) or now + 1) < now}
-        if expired_ids:
-            seen.extend(sorted(expired_ids))
-            fresh = [i for i in fresh if i.id not in expired_ids]
+        live = [i for i in items if (sns_epoch(i.ends_at) or now + 1) >= now]
+        live_ids = {i.id for i in live}
+        seen_before = list(settings["seen"])
+
+        if not settings["primed"]:
+            async with self.quest_lock(guild.id):
+                await store.update(
+                    guild.id, QUEST_SECTION,
+                    seen=list(dict.fromkeys(i.id for i in live))[-QUEST_MAX_SEEN:],
+                    primed=True,
+                )
+            return
+
+        # まだ有効なものだけ既読として残す（期限切れ・フィードから消えたIDは捨てる）
+        keep = [sid for sid in dict.fromkeys(seen_before) if sid in live_ids]
+        keep_set = set(keep)
+        fresh = [i for i in live if i.id not in keep_set]
+
+        # ギルドの言語圏で提供されていないQuestは通知せず既読にする
+        regions = self._quest.regions if self._quest is not None else {}
+        if regions and fresh:
+            language, source = await self.quest_guild_language(guild)
+            countries = quest_language_countries(language)
+            if countries:
+                blocked = [
+                    i for i in fresh
+                    if i.id in regions and not regions[i.id].available_in(countries)
+                ]
+                if blocked:
+                    logger.info(
+                        "Quest通知: 言語圏(%s=%s, %s)外の%d件を除外 (guild=%s)",
+                        language, "/".join(sorted(countries)), source, len(blocked), guild.id,
+                    )
+                    blocked_ids = {i.id for i in blocked}
+                    keep.extend(blocked_ids)
+                    fresh = [i for i in fresh if i.id not in blocked_ids]
+
+        # ギルドの言語圏で提供されていないQuestは通知せず既読にする
+        regions = self._quest.regions if self._quest is not None else {}
+        if regions and fresh:
+            language, source = await self.quest_guild_language(guild)
+            countries = quest_language_countries(language)
+            if countries:
+                blocked = [
+                    i for i in fresh
+                    if i.id in regions and not regions[i.id].available_in(countries)
+                ]
+                if blocked:
+                    logger.info(
+                        "Quest通知: 言語圏(%s=%s, %s)外の%d件を除外 (guild=%s)",
+                        language, "/".join(sorted(countries)), source, len(blocked), guild.id,
+                    )
+                    blocked_ids = {i.id for i in blocked}
+                    keep.extend(blocked_ids)
+                    fresh = [i for i in fresh if i.id not in blocked_ids]
+
+        if not fresh:
+            if len(keep) != len(seen_before):
+                async with self.quest_lock(guild.id):
+                    await store.update(guild.id, QUEST_SECTION, seen=keep[-QUEST_MAX_SEEN:])
+            return
 
         channel = self._quest_channel(guild, settings)
         if channel is None:
@@ -4651,25 +5138,30 @@ class SupportCog(commands.Cog):
         mentions = self._quest_mentions(role_id)
 
         if settings["orbs_only"]:
-            seen.extend(i.id for i in fresh if not i.is_orbs)
+            keep.extend(i.id for i in fresh if not i.is_orbs)
             fresh = [i for i in fresh if i.is_orbs]
 
         fresh.sort(key=lambda i: sns_epoch(i.ends_at) or 0)
         if len(fresh) > QUEST_MAX_SEND_PER_CYCLE:
-            seen.extend(i.id for i in fresh[:-QUEST_MAX_SEND_PER_CYCLE])
+            keep.extend(i.id for i in fresh[:-QUEST_MAX_SEND_PER_CYCLE])
             fresh = fresh[-QUEST_MAX_SEND_PER_CYCLE:]
 
-        for item in fresh:
-            try:
-                await channel.send(view=QuestNotifyMessage(item, role_id), allowed_mentions=mentions)
-            except (discord.Forbidden, discord.HTTPException) as exc:
-                logger.warning("Quest通知の送信に失敗 (guild=%s %s): %s", guild.id, item.id, exc)
-                break
-            seen.append(item.id)
-            await asyncio.sleep(1)
-
-        async with self.quest_lock(guild.id):
-            await store.update(guild.id, QUEST_SECTION, seen=seen[-QUEST_MAX_SEEN:])
+        try:
+            for item in fresh:
+                try:
+                    await channel.send(view=QuestNotifyMessage(item, role_id), allowed_mentions=mentions)
+                except (discord.Forbidden, discord.HTTPException) as exc:
+                    logger.warning("Quest通知の送信に失敗 (guild=%s %s): %s", guild.id, item.id, exc)
+                    break
+                keep.append(item.id)
+                await asyncio.sleep(1)
+        finally:
+            # 途中で例外が起きても、送信済みIDは必ず保存して重複通知を防ぐ
+            async with self.quest_lock(guild.id):
+                await store.update(
+                    guild.id, QUEST_SECTION,
+                    seen=list(dict.fromkeys(keep))[-QUEST_MAX_SEEN:],
+                )
 
     async def show_auth_settings(self, interaction: discord.Interaction):
         if interaction.guild is None:
@@ -5519,10 +6011,10 @@ class SupportCog(commands.Cog):
         )
 
     async def _missing(self, interaction: discord.Interaction, name: str):
-        await interaction.response.send_message(
-            f"{name}機能が読み込まれていません。",
-            ephemeral=True,
-        )
+        message = f"{name}機能が読み込まれていません。"
+        if interaction.response.is_done():
+            return await interaction.followup.send(message, ephemeral=True)
+        await interaction.response.send_message(message, ephemeral=True)
 
     @commands.Cog.listener()
     async def on_raw_reaction_add(self, payload: discord.RawReactionActionEvent):
@@ -5789,6 +6281,18 @@ class SupportCog(commands.Cog):
             triggers = cog.list_triggers(interaction.guild_id) if cog else {}
             return await interaction.response.send_message(
                 view=VoiceTriggerPanel(self, settings, triggers), ephemeral=True)
+
+        if selected.startswith("sokunuke_"):
+            cog = self.bot.get_cog("SokuNukeRta")
+            if cog is None:
+                return await self._missing(interaction, "即抜けRTA")
+            action = selected.removeprefix("sokunuke_")
+            if action == "vc_on":
+                action = "vc_on"
+            return await cog.sokunuke_command(
+                interaction,
+                app_commands.Choice(name=action, value=action),
+            )
 
         cog = self.bot.get_cog("BumpRta")
         if cog is None:

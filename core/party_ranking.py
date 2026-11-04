@@ -1,12 +1,12 @@
 # -*- coding: utf-8 -*-
 """パーティーゲームのサーバーごとの勝利数（docs/sql/party_game_ranking.sql）。
 
-- 勝ったら ``record_win`` を呼ぶ。メモリの表には必ず足し、Supabase の関数
+- 勝ったら ``record_win`` を呼ぶ。メモリの表には必ず足し、自前API の関数
   ``party_game_record_win`` にも送る。関数がまだ無い・通信に失敗したときは
   ログを 1 回だけ出して、以後はメモリだけで続ける（ゲームは止めない）。
 - ``top`` はビュー ``party_game_ranking`` を読み、読めなければメモリの表を返す。
-- Supabase クライアントの取り出しは ``_default_client`` の 1 か所だけ。
-  共通の接続モジュール core/supabase_client.py（#59）があればそれを、無ければ config.supabase を使う。
+- 自前API クライアントの取り出しは ``_default_client`` の 1 か所だけ。
+  共通の接続モジュール core/api_client.py（#59）があればそれを、無ければ config.db_api を使う。
 """
 import asyncio
 import logging
@@ -19,15 +19,15 @@ _MISSING = object()
 
 def _default_client():
     try:  # #59 の共通モジュールがあればそれを使う
-        from core import supabase_client
-        return supabase_client.get_client()
+        from core import api_client
+        return api_client.get_client()
     except ImportError:
         pass
     except Exception:
         return None
     try:
         import config
-        return getattr(config, "supabase", None)
+        return getattr(config, "db_api", None)
     except Exception:
         return None
 
@@ -46,7 +46,11 @@ class PartyRanking:
 
     def _failed(self, action, error):
         text = f"{getattr(error, 'code', '')} {getattr(error, 'message', '')} {error}"
-        if any(s in text for s in ("PGRST202", "PGRST205", "42883", "42P01", "does not exist", "Could not find")):
+        missing = (
+            "RPC_NOT_ALLOWED", "TABLE_NOT_ALLOWED", "TABLE_NOT_FOUND",
+            "PGRST202", "PGRST205", "42883", "42P01", "does not exist", "Could not find",
+        )
+        if any(s in text for s in missing):
             self.remote_disabled = True   # 関数・ビューがまだ無い。再起動までメモリだけ
         if not self._warned:
             self._warned = True

@@ -62,6 +62,19 @@ SPOTIFY_PLAYLIST_RE = re.compile(
     r"https?://open\.spotify\.com/(?:intl-[^/]+/)?playlist/([A-Za-z0-9]+)",
     re.IGNORECASE,
 )
+SOUNDCLOUD_URL_RE = re.compile(
+    r"https?://(?:[a-z0-9-]+\.)?soundcloud\.com/",
+    re.IGNORECASE,
+)
+
+
+def soundcloud_url_kind(value: str) -> str | None:
+    """SoundCloudのURLなら 'set'（プレイリスト）か 'track'（単曲）を返す。"""
+    text = (value or "").strip()
+    if not SOUNDCLOUD_URL_RE.match(text):
+        return None
+    path = text.split("soundcloud.com", 1)[-1]
+    return "set" if "/sets/" in path else "track"
 MAX_TTS_CHARS = 300
 LOOP_CHOICES = [
     app_commands.Choice(name="OFF", value="off"),
@@ -848,7 +861,14 @@ class SearchModal(discord.ui.Modal, title="YouTube 楽曲検索"):
                 await self.cog.start_spotify_playlist_load(interaction, keyword)
                 return
 
-            if "youtube.com" in keyword or "youtu.be" in keyword:
+            if soundcloud_url_kind(keyword) == "set":
+                await self.cog.start_soundcloud_playlist_load(interaction, keyword)
+                return
+
+            if soundcloud_url_kind(keyword) == "track":
+                info = await self.cog.get_yt_info(keyword)
+                url, filename, is_yt = info['webpage_url'], info['title'], True
+            elif "youtube.com" in keyword or "youtu.be" in keyword:
                 info = await self.cog.get_yt_info(keyword)
                 url, filename, is_yt = keyword, info['title'], True
             else:
@@ -1988,6 +2008,81 @@ class VoiceCog(commands.Cog):
             self._load_youtube_playlist_in_background(interaction, playlist_url, status_message)
         )
 
+    @staticmethod
+    def _soundcloud_kind(value: str) -> str | None:
+        """SoundCloud URLなら 'set' / 'track'、それ以外は None。"""
+        return soundcloud_url_kind(value)
+
+    async def get_soundcloud_playlist_entries(self, playlist_url: str):
+        """個別の音声URLを解決せず、SoundCloudセットの曲ページURLだけを取得する。"""
+        loop = asyncio.get_running_loop()
+        options = YTDL_OPTIONS.copy()
+        options.update({
+            'noplaylist': False,
+            'extract_flat': 'in_playlist',
+            'lazy_playlist': True,
+            'skip_download': True,
+        })
+
+        def _extract():
+            with yt_dlp.YoutubeDL(options) as ydl:
+                data = ydl.extract_info(playlist_url, download=False)
+                entries = []
+                for entry in data.get('entries') or []:
+                    if not entry:
+                        continue
+                    webpage_url = entry.get('webpage_url') or entry.get('url')
+                    if not webpage_url:
+                        continue
+                    title = entry.get('title')
+                    if not title:
+                        # フラット抽出ではタイトルが得られないため、URL末尾から仮タイトルを作る。
+                        slug = webpage_url.rstrip('/').rsplit('/', 1)[-1]
+                        title = slug.replace('-', ' ').strip() or '不明なタイトル'
+                    entries.append({
+                        'input': webpage_url,
+                        'title': title,
+                        'is_youtube': True,
+                    })
+                return data.get('title') or 'SoundCloudセット', entries
+
+        return await loop.run_in_executor(None, _extract)
+
+    async def _load_soundcloud_playlist_in_background(self, interaction, playlist_url: str, status_message):
+        state = self.get_state(interaction.guild_id)
+        try:
+            await status_message.edit(content='SoundCloudセットの曲一覧を取得しています…')
+            title, tracks = await self.get_soundcloud_playlist_entries(playlist_url)
+            if not tracks:
+                await status_message.edit(content='SoundCloudセットから再生可能な曲を取得できませんでした。')
+                return
+            await status_message.edit(content=f'セット `{title}` を取得しました（全 {len(tracks)} 件）。キューへ順次追加します…')
+            await self._load_playlist_in_background(interaction, tracks, title, status_message)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            logger.exception('SoundCloud playlist extraction failed')
+            try:
+                await status_message.edit(content=f'SoundCloudセットの取得に失敗しました: {exc}')
+            except discord.HTTPException:
+                pass
+        finally:
+            state['playlist_load_task'] = None
+
+    async def start_soundcloud_playlist_load(self, interaction, playlist_url: str):
+        state = self.get_state(interaction.guild_id)
+        state['current_ctx'] = interaction
+        existing = state.get('playlist_load_task')
+        if existing and not existing.done():
+            existing.cancel()
+        status_message = await interaction.followup.send(
+            'SoundCloudセットの読込を受け付けました。バックグラウンドで曲一覧を取得します。',
+            wait=True,
+        )
+        state['playlist_load_task'] = asyncio.create_task(
+            self._load_soundcloud_playlist_in_background(interaction, playlist_url, status_message)
+        )
+
     class SearchView(discord.ui.View):
         def __init__(self, cog, guild_id, ctx, tracks):
             super().__init__(timeout=60.0)
@@ -2050,6 +2145,19 @@ class VoiceCog(commands.Cog):
                 return await self.start_playlist_load(r.source, tracks, title)
             except Exception as exc:
                 return await r.send(embed=we(f"Spotifyプレイリストの取得に失敗しました: {exc}"))
+        if self._soundcloud_kind(keyword.strip()) == "set":
+            try:
+                title, tracks = await self.get_soundcloud_playlist_entries(keyword.strip())
+                return await self.start_playlist_load(r.source, tracks, title)
+            except Exception as exc:
+                return await r.send(embed=we(f"SoundCloudセットの取得に失敗しました: {exc}"))
+        if self._soundcloud_kind(keyword.strip()) == "track":
+            try:
+                info = await self.get_yt_info(keyword.strip())
+                tracks = [{'input': info['webpage_url'], 'title': info['title'], 'is_youtube': True}]
+                return await self.start_playlist_load(r.source, tracks, info['title'])
+            except Exception as exc:
+                return await r.send(embed=we(f"SoundCloudの取得に失敗しました: {exc}"))
         await r.send(f"🔎 YouTubeで「{keyword}」の上位10件を検索中...")
         search_options = YTDL_OPTIONS.copy()
         search_options['default_search'] = 'ytsearch10'
@@ -2408,6 +2516,11 @@ class VoiceCog(commands.Cog):
             await self.start_youtube_playlist_load(interaction, input_str)
             return
 
+        # 2.5. SoundCloudセットも同様に、即時受付してバックグラウンド処理へ渡す。
+        if input_str and self._soundcloud_kind(input_str) == "set":
+            await self.start_soundcloud_playlist_load(interaction, input_str)
+            return
+
         # 3. YouTube単曲URLが直接指定された場合
         if input_str and yt_pattern.search(input_str):
             await interaction.followup.send("<:crock:1561710960387956757> YouTubeを解析中...")
@@ -2418,6 +2531,17 @@ class VoiceCog(commands.Cog):
                 url, filename, is_yt = info['webpage_url'], info['title'], True
             except asyncio.TimeoutError:
                 return await interaction.followup.send("⏱️ タイムアウト: YouTube情報の解析に時間がかかりすぎたため中断しました。")
+            except Exception as e:
+                return await interaction.followup.send(embed=we(f"<:failed:1490986584676368535> 解析失敗: {e}"))
+
+        # 3.5. SoundCloud単曲URLが直接指定された場合（再生時にページURLから再解析する）
+        elif input_str and self._soundcloud_kind(input_str) == "track":
+            await interaction.followup.send("🎵 SoundCloudを解析中...")
+            try:
+                info = await asyncio.wait_for(self.get_yt_info(input_str), timeout=TIMEOUT_SECONDS)
+                url, filename, is_yt = info['webpage_url'], info['title'], True
+            except asyncio.TimeoutError:
+                return await interaction.followup.send("⏱️ タイムアウト: SoundCloud情報の解析に時間がかかりすぎたため中断しました。")
             except Exception as e:
                 return await interaction.followup.send(embed=we(f"<:failed:1490986584676368535> 解析失敗: {e}"))
 
@@ -2463,7 +2587,7 @@ class VoiceCog(commands.Cog):
 
         # 5. 引数が何もない場合
         else:
-            msg = "ファイル添付、ID、YouTube URL、または検索キーワードを指定してください。"
+            msg = "ファイル添付、ID、YouTube URL、SoundCloud URL、または検索キーワードを指定してください。"
             embed = we(msg) if hasattr(self, 'we') else (we(msg) if 'we' in globals() else discord.Embed(description=msg, color=0xFF0000))
             return await interaction.followup.send(embed=embed)
 
@@ -2675,7 +2799,7 @@ class VoiceCog(commands.Cog):
         scope='server' : サーバー共有（テーブル playlists。旧 !save_current・!plist。再生では ID の並びや JSON も受け付ける）
         """
         name = (name or '').strip()
-        db = self.bot.supabase
+        db = self.bot.db_api
         if action == 'play':
             await r.defer()
             if error := await self._ensure_music_connection(r):
@@ -2748,7 +2872,7 @@ class VoiceCog(commands.Cog):
                 logger.exception("Failed to save personal playlist")
                 detail = str(exc).lower()
                 if 'row-level security' in detail or 'permission denied' in detail or '42501' in detail:
-                    message = '保存権限がありません。SupabaseのRLSポリシーと、Botに設定したSupabaseキー（SUPABASE_SERVICE_ROLE_KEY / SUPABASE_KEY）の権限を確認してください。'
+                    message = '保存権限がありません。SupabaseのRLSポリシーと、Botに設定したSupabaseキー（BOT_API_KEY / BOT_API_KEY）の権限を確認してください。'
                 else:
                     message = f'保存に失敗しました。Botログを確認してください。({type(exc).__name__})'
                 return await r.send(embed=we(message), ephemeral=True)
@@ -2789,9 +2913,9 @@ class VoiceCog(commands.Cog):
                 return await r.send(embed=we(f"JSON解析エラー: {e}"))
         elif name:
             tokens = name.replace(',', ' ').split()
-            if self.bot.supabase:
+            if self.bot.db_api:
                 try:
-                    res = self.bot.supabase.table("playlists").select("ids").eq(
+                    res = self.bot.db_api.table("playlists").select("ids").eq(
                         "name", self._server_playlist_key(r.guild.id, name)).execute()
                     if res.data:
                         tokens = res.data[0]["ids"]

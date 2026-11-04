@@ -20,7 +20,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-for _name, _value in {'SUPABASE_URL': 'https://example.supabase.co', 'SUPABASE_KEY': 'dummy-key'}.items():
+for _name, _value in {'BOT_API_BASE_URL': 'http://127.0.0.1:8787', 'BOT_API_KEY': 'dummy-key'}.items():
     os.environ.setdefault(_name, _value)
 
 import discord  # noqa: E402
@@ -31,7 +31,7 @@ from core.legacy import Responder  # noqa: E402
 from cogs import (  # noqa: E402
     sio_globalVC, sio_karaoke, sio_music, sio_rec, sio_saito, sio_transcription, sio_voice, sio_voicechanger,
 )
-from tests.test_all_commands import FakeSupabase  # noqa: E402
+from tests.test_all_commands import FakeDBAPI  # noqa: E402
 from tests.test_music_group import FakeCtx, FakeInteraction, choice  # noqa: E402
 from tests.test_voice_session import make_bot, make_world  # noqa: E402
 
@@ -39,7 +39,7 @@ from tests.test_voice_session import make_bot, make_world  # noqa: E402
 class Base(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.bot, self.manager = make_bot()
-        self.bot.supabase = FakeSupabase()
+        self.bot.db_api = FakeDBAPI()
         self.w = make_world()
         self.opus = patch.object(sio_rec.discord.opus, 'is_loaded', return_value=True)
         self.opus.start()

@@ -14,7 +14,7 @@ class JinrouReviewTest(unittest.IsolatedAsyncioTestCase):
         self.channel = FakeChannel(310, self.guild)
         self.players = [FakeMember(i, self.guild) for i in range(1, 6)]
         self.cog = jinrou.JinrouCog(FakeBot(self.channel))
-        sb = patch.object(jinrou, 'supabase', MagicMock())
+        sb = patch.object(jinrou, 'db_api', MagicMock())
         sb.start()
         self.addCleanup(sb.stop)
 

@@ -4,7 +4,11 @@ requests
 matplotlib
 Pillow
 numpy
-supabase
+fastapi>=0.115,<1
+pydantic>=2.7,<3
+uvicorn>=0.30,<1
+httpx>=0.27,<1
+psycopg[binary,pool]>=3.2,<4
 discord-ext-voice-recv
 yt-dlp[default,curl-cffi]>=2026.8.19
 google-genai
@@ -26,3 +30,4 @@ pypdf
 vosk
 yfinance
 duckduckgo-search
+webrtcvad-wheels

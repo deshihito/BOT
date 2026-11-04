@@ -53,6 +53,11 @@ class FakeMember:
 
 
 class SupportRoleBulkTest(unittest.IsolatedAsyncioTestCase):
+    def test_language_has_its_own_support_genre(self):
+        self.assertIn("language", SUPPORT_ACTIONS_BY_GENRE)
+        self.assertEqual([value for _, value in SUPPORT_ACTIONS_BY_GENRE["language"]], ["language"])
+        self.assertNotIn("language", [value for _, value in SUPPORT_ACTIONS_BY_GENRE["roles"]])
+
     async def test_adds_only_members_without_role(self):
         cog = SupportCog(None)
         role = FakeRole()

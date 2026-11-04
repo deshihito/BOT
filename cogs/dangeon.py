@@ -7,10 +7,11 @@ dungeon.py - Discord.py Cog形式
   .env:
     DUNGEON_IMG_CHANNEL_ID=画像投稿チャンネルID
   
-  Supabase テーブル:
-    - dungeon_maps (floor, grid, used_coords, start_pos)
+  自前DB API テーブル:
     - dungeon_players (user_id, floor, x, y, hp, max_hp, atk, def_, spd, crit)
-    - dungeon_bases (user_id, floor, x, y)
+      ※マップは Phase 1-B からプレイヤー個人インスタンス（シード再生成＋
+        差分は inventory._dungeon_meta の instances に保存）。
+        旧 dungeon_maps / dungeon_bases テーブルは読み書きしない。
   
   main.py:
     await bot.load_extension('cogs.dungeon')
@@ -21,11 +22,12 @@ import discord
 import json
 import random
 import asyncio
+import base64
 import io
 import time
-import base64
 import hashlib
 import aiohttp
+from core import logfare
 import datetime
 import logging
 from discord.ui import View
@@ -33,8 +35,10 @@ from discord import app_commands, Interaction
 from discord.ext import commands, tasks
 from cogs.terminal import ALLOWED_USER_IDS
 from discord.ext.commands import Cog
-from PIL import Image, ImageDraw
+from PIL import Image, ImageDraw, ImageEnhance
 from zoneinfo import ZoneInfo
+from core.api_client import APIError
+from core.api_retry import run_with_retry
 
 # ============================================================
 #  タイムゾーン
@@ -49,8 +53,19 @@ JST = ZoneInfo("Asia/Tokyo")
 D_MAP_W = 101
 D_MAP_H = 101
 D_FLOORS = 40
-D_VIEW_R = 5
+# マップ描画の窓半径（17x17タイル）。現在視界 D_SIGHT_R より広く取り、
+# 視界外の探索済みセルを「記憶」として暗く描く（Phase 1-D / 設計 §6-1）。
+D_VIEW_R = 8
+# 現在視界の半径。これより遠い探索済みセルは明度を落として描画する。
+D_SIGHT_R = 6
 TILE = 32
+
+# Phase 1 の新マップ定義（並行導入。現行マップとは独立に使う）
+D2_MAP_W = 29
+D2_MAP_H = 29
+D2_SECTOR_N = 3          # 3x3 セクター配置
+D2_MAIN_ROLES = ("start", "combat", "event", "combat_or_chest", "stairs")
+D2_SUB_ROLES = ("chest", "shop", "mine", "rest")
 
 # タイルタイプ
 D_WALL = "wall"
@@ -84,13 +99,8 @@ D_BIOMES = [
     (range(30, 41),  "砂漠地帯", "🟧", "<:y_:1563559481768411257>", "🌫️", 0xC8600A),
 ]
 
-# エンカウント率
-D_ENCOUNTER_RATES = {
-    "洞窟":     0.05,
-    "森":       0.20,
-    "氷雪地帯": 0.07,
-    "砂漠地帯": 0.13,
-}
+# 歩行時のバイオーム率エンカウントは Phase 1-D で廃止した。戦闘は部屋の
+# 固定配置と、通路の初回通過時のアンブッシュ（D_AMBUSH_RATE）で発生する。
 
 SEASON_ID = os.environ.get(
     "DUNGEON_SEASON_ID",
@@ -149,7 +159,7 @@ RELIC_MASTER = {
     "phoenix_ash": {"name": "不死鳥の灰", "description": "HP0時に一度だけ30%で復活", "effect": "revive"},
     "explorer_compass": {"name": "探検家の羅針盤", "description": "隠し部屋とイベントを発見しやすい", "effect": "explore"},
     "iron_will": {"name": "鉄の意志", "description": "HP30%未満で防御力+8", "effect": "survive"},
-    "d1_tactics": {"name": "作戦教本", "description": "D1の安全重視作戦を強化", "effect": "d1"},
+    "d1_tactics": {"name": "作戦教本", "description": "Clefの安全重視作戦を強化", "effect": "d1"},
 }
 QUEST_MASTER = {
     "first_10_steps": {"name": "最初の遠征", "description": "10ターン移動する", "kind": "turns", "target": 10, "reward": {"xp": 80, "season_score": 50}},
@@ -163,29 +173,49 @@ ROOM_MODIFIERS = {
     "cursed": {"name": "呪われた階", "description": "報酬は増えるが罠も増える"},
     "treasure": {"name": "宝物の階", "description": "宝箱が多い"},
 }
-D1_PLANS = {
+CLEF_PLANS = {
     "safe": "安全探索", "speed": "最短攻略", "treasure": "財宝優先",
     "battle": "戦闘優先", "explore": "探索優先", "boss": "ボス準備優先",
     "xp": "経験値優先",
 }
-# D1は小型の意思決定モデルなので、渡す文脈は常に短く保つ（コンテキスト長対策）。
-D1_STATE_CHARS = int(os.environ.get("D1_STATE_CHARS", 2400))
-D1_LOG_LINES = int(os.environ.get("D1_LOG_LINES", 6))
-D1_MAX_TURNS = int(os.environ.get("D1_MAX_TURNS", 10))
-# pingではなく画像付き推論の完了までを測る。画像モデルの初回推論は
-# モデルロード直後に30秒を超えることがあるため、短いpingのtimeoutと分離する。
-D1_HTTP_TIMEOUT = float(os.environ.get("D1_HTTP_TIMEOUT", 90))
-D1_HTTP_RETRIES = max(1, int(os.environ.get("D1_HTTP_RETRIES", 2)))
-D1_HTTP_RETRY_DELAY = float(os.environ.get("D1_HTTP_RETRY_DELAY", 1.5))
-D1_READY_CACHE_SECONDS = float(os.environ.get("D1_READY_CACHE_SECONDS", 300))
-D1_TIMING_LOG = os.environ.get("D1_TIMING_LOG", "0").lower() in ("1", "true", "yes", "on")
-# 移動判断に必要な盤面情報はstate/criteriaのテキストで渡す。
-# visionは必要な環境でのみ明示的に有効化する（既定: 無効）。
-D1_SEND_IMAGES = os.environ.get("D1_SEND_IMAGES", "0").lower() in ("1", "true", "yes", "on")
-# 8方向の定義。移動・経路探索・選択肢の基準提示で共通利用する。
+# Clefへ送る文脈は、渡す文脈は常に短く保つ（コンテキスト長対策）。
+CLEF_STATE_CHARS = int(os.environ.get("CLEF_DUNGEON_STATE_CHARS", 2400))
+CLEF_LOG_LINES = int(os.environ.get("CLEF_DUNGEON_LOG_LINES", 6))
+CLEF_MAX_TURNS = int(os.environ.get("CLEF_DUNGEON_MAX_TURNS", 10))
+CLEF_TIMEOUT = float(os.environ.get("CLEF_DUNGEON_TIMEOUT", 30))
+CLEF_RETRIES = max(1, int(os.environ.get("CLEF_DUNGEON_RETRIES", 2)))
+CLEF_RETRY_DELAY = float(os.environ.get("CLEF_DUNGEON_RETRY_DELAY", 1.5))
+# 移動の定義（Phase 1-C: 斜め移動は廃止し4方向のみ）。
+# 移動・経路探索・選択肢の基準提示で共通利用する。
 _DIRECTIONS = {
     "up": (0, -1), "down": (0, 1), "left": (-1, 0), "right": (1, 0),
-    "leftup": (-1, -1), "rightup": (1, -1), "leftdown": (-1, 1), "rightdown": (1, 1),
+}
+# fast-forward ウォーカー（Phase 1-C / 設計 §4-2）の定数。
+D_WALK_MAX_STEPS = 18
+# 通路アンブッシュ率（Phase 1-D / 設計 §4-2 停止条件5、確定事項 D4）。
+# そのインスタンスで初めて踏む通路マスでのみ抽選する。
+D_AMBUSH_RATE = 0.12
+# 部屋の役割 → 表示名（Phase 1-D: 進捗表示・方向ボタン・ログで使う）。
+D_ROOM_ROLE_NAMES = {
+    "start": "スタートの間", "combat": "戦闘の間", "event": "イベントの間",
+    "chest": "宝箱の間", "stairs": "階段の間", "shop": "商店",
+    "mine": "採掘場", "rest": "休憩所", "shrine": "祠",
+}
+# 乗ったら journey を止めて処理する特殊タイル。
+D_WALK_SPECIAL_CELLS = frozenset({
+    D_STAIRS, D_CHEST, D_TRAP, D_SHOP, D_MINE, D_REST, D_SHRINE, D_EVENT,
+})
+# journey の停止理由 → ログ文言（先頭に「○へN歩進んだ。」が付く）。
+D_WALK_STOP_TEXTS = {
+    "room": "部屋に入った。",
+    "junction": "分岐に着いた。",
+    "dead_end": "行き止まりに着いた。",
+    "room_edge": "部屋の壁際で止まった。",
+    "door": "部屋の出口に着いた。",
+    "max_steps": "一旦立ち止まった。",
+    "low_hp": "HPが低下したため立ち止まった。",
+    "ambush": "不意打ちを受けた！",
+    "guard": "階段の番人が立ちはだかった！",
 }
 _DIRECTION_LABELS = {
     "up": "北", "down": "南", "left": "西", "right": "東",
@@ -196,7 +226,7 @@ ACHIEVEMENTS = {
     "floor_40": "深層の覇者", "first_boss": "ボスブレイカー", "treasure_hunter": "宝箱荒らし",
     "skill_user": "スキルの使い手", "camp_builder": "野営地の開拓者",
 }
-# NPCとフロア目標。D1へ渡すゴール提示にも利用する。
+# NPCとフロア目標。Clefへ渡すゴール提示にも利用する。
 NPC_MASTER = {
     "traveler": {"name": "旅人レオン", "steps": [{"text": "安全な道を教える", "flag": "traveler_help", "reward": {"bread": 2}}, {"text": "地図を交換する", "flag": "traveler_map", "reward": {"material": "map_fragment"}}]},
     "blacksmith": {"name": "鍛冶師ミナ", "steps": [{"text": "素材を渡す", "flag": "forge_help", "reward": {"material": "iron_ore"}}, {"text": "武器を強化する", "flag": "forge_upgrade", "reward": {"season_score": 30}}]},
@@ -302,7 +332,8 @@ dg_maps    = {}  # {floor: [[...], [...]]}
 dg_players = {}  # {uid: {floor, x, y, hp, max_hp, atk, def_, spd, crit}}
 dg_starts  = {}  # {floor: (x, y)}
 dg_used    = {}  # {floor: set((x, y), ...)}
-dg_bases   = {}  # {uid: (floor, x, y)}
+dg_bases   = {}  # {uid: (floor, x, y)} ※Phase 1-Bで無効化（データは保持）
+dg_instances = {}  # {(uid, floor): {seed, grid, rooms, start, consumed}} Phase 1-B: 個人インスタンス
 _ASSET_CACHE = {}
 _PLAYER_LOCKS = {}
 # 正常保存済みペイロードのハッシュ。同一状態の再保存を省略して、
@@ -312,7 +343,6 @@ _PLAYER_SAVE_DIGESTS = {}
 
 # 環境変数
 DUNGEON_IMG_CHANNEL_ID = int(os.environ.get("DUNGEON_IMG_CHANNEL_ID", 0))
-D1_ENDPOINT = os.environ.get("D1_ENDPOINT", "http://127.0.0.1:8082/v1/systemone")
 logger = logging.getLogger(__name__)
 
 # ============================================================
@@ -326,23 +356,388 @@ def d_get_biome(floor):
             return name, wall_e, floor_e, fog_e, color
     return "洞窟", "⬜", "<:b_:1563559473422016512>", "🌫️", 0x5C4033
 
-def d_ensure_map(floor):
-    """フロアのマップが存在しなければ生成"""
-    if floor not in dg_maps:
-        dg_maps[floor] = d_gen_floor(floor)
-        dg_used[floor] = set()
+def d_get_instance(uid, floor):
+    """プレイヤー個人のフロアインスタンスを取得する（Phase 1-B）。
 
-def d_get_cell(floor, x, y):
-    """指定座標のセルタイプを取得"""
-    d_ensure_map(floor)
-    if 0 <= y < D_MAP_H and 0 <= x < D_MAP_W:
-        return dg_maps[floor][y][x]
+    グリッドは d_floor_seed / d_gen_floor_v2 で決定的に再生成し、メモリに
+    キャッシュする。保存済みの差分（消費済みセル）があれば再適用して復元する。
+    """
+    uid = str(uid)
+    floor = int(floor)
+    key = (uid, floor)
+    inst = dg_instances.get(key)
+    if inst is None:
+        seed = d_floor_seed(SEASON_ID, uid, floor)
+        grid, rooms = d_gen_floor_v2(seed, floor)
+        start = next((tuple(r["center"]) for r in rooms if r["role"] == "start"), (1, 1))
+        inst = {"seed": seed, "grid": grid, "rooms": rooms, "start": start,
+                "consumed": set(), "visited": set(), "cleared": set(), "traversed": set()}
+        saved = {}
+        p = dg_players.get(uid)
+        if p is not None:
+            saved = (p.get("instances") or {}).get(str(floor)) or {}
+        for cell in saved.get("consumed", []) or []:
+            try:
+                cx, cy = int(cell[0]), int(cell[1])
+            except (TypeError, ValueError, IndexError):
+                continue
+            if 0 <= cx < D2_MAP_W and 0 <= cy < D2_MAP_H:
+                inst["consumed"].add((cx, cy))
+                grid[cy][cx] = D_FLOOR
+        # Phase 1-D: フォグ（visited）と部屋の制圧状態（cleared）を復元する。
+        inst["visited"] = d_decode_visited(saved.get("visited"))
+        # アンブッシュ抽選済みの判定用に、実際に踏んだセルも復元する
+        # （visited は表示用に周囲も含むため、踏んだセルとは一致しない）。
+        inst["traversed"] = d_decode_visited(saved.get("traversed"))
+        for rid in saved.get("cleared", []) or []:
+            try:
+                inst["cleared"].add(int(rid))
+            except (TypeError, ValueError):
+                continue
+        # 開始時はスタート部屋を公開済みにする（冪等。復元済みなら無変化）。
+        start_room = next((r for r in rooms if r["role"] == "start"), None)
+        if start_room is not None:
+            d_reveal_room(inst, start_room)
+        dg_instances[key] = inst
+    return inst
+
+
+def d_instance_start(uid, floor):
+    """そのプレイヤーの対象フロアのスタート座標を返す。"""
+    return d_get_instance(uid, floor)["start"]
+
+
+def d_instances_snapshot(uid):
+    """保存用に、プレイヤーの全フロア分のインスタンス差分を辞書化する。"""
+    uid = str(uid)
+    snapshot = {}
+    p = dg_players.get(uid) or {}
+    for fkey, data in (p.get("instances") or {}).items():
+        data = data or {}
+        snapshot[str(fkey)] = {
+            "seed": data.get("seed"),
+            "consumed": [list(c) for c in data.get("consumed", []) or []],
+            "visited": data.get("visited"),
+            "cleared": [int(r) for r in data.get("cleared", []) or []],
+            "traversed": data.get("traversed"),
+        }
+    for (u, f), inst in dg_instances.items():
+        if u == uid:
+            snapshot[str(f)] = {
+                "seed": inst["seed"],
+                "consumed": sorted(list(c) for c in inst["consumed"]),
+                "visited": d_encode_visited(inst.get("visited") or set()),
+                "cleared": sorted(int(r) for r in inst.get("cleared") or set()),
+                "traversed": d_encode_visited(inst.get("traversed") or set()),
+            }
+    return snapshot
+
+
+def d_migrate_player_v2(uid):
+    """Phase 1-B の一回限り移行（設計 §7-2）。
+
+    フラグの無い既存プレイヤーは、フロア/位置/HP/turns/season_score だけを
+    リセットして個人インスタンスのスタートへ移す。レベル・装備・所持品・
+    遺物・実績・クエスト・ウォレットには触らない。
+    """
+    uid = str(uid)
+    p = dg_players.get(uid)
+    if p is None or p.get("phase1b_v2"):
+        return False
+    p["phase1b_v2"] = True
+    p["floor"] = 1
+    p["x"], p["y"] = d_instance_start(uid, 1)
+    p["hp"] = d_effective_stats(p)["max_hp"]
+    p["turns"] = 0
+    p["season_score"] = 0
+    return True
+
+
+def d_ensure_map(uid, floor):
+    """そのプレイヤーのフロアインスタンスが存在しなければ生成する。"""
+    return d_get_instance(uid, floor)
+
+def d_get_cell(uid, floor, x, y):
+    """指定座標のセルタイプを取得（個人インスタンス基準）"""
+    if 0 <= y < D2_MAP_H and 0 <= x < D2_MAP_W:
+        return d_get_instance(uid, floor)["grid"][y][x]
     return D_WALL
 
-def d_consume(floor, x, y):
-    """座標を消費（床に変更）"""
-    dg_used[floor].add((x, y))
-    dg_maps[floor][y][x] = D_FLOOR
+def d_consume(uid, floor, x, y):
+    """座標を消費（そのプレイヤーのインスタンス内でのみ床に変更）"""
+    inst = d_get_instance(uid, floor)
+    inst["consumed"].add((x, y))
+    if 0 <= y < D2_MAP_H and 0 <= x < D2_MAP_W:
+        inst["grid"][y][x] = D_FLOOR
+
+
+def d_room_at(instance, x, y):
+    """座標を含む部屋 dict を返す（通路など部屋の外は None）。"""
+    for room in instance.get("rooms", []) or []:
+        rx, ry, rw, rh = room["rect"]
+        if rx <= x < rx + rw and ry <= y < ry + rh:
+            return room
+    return None
+
+
+# ============================================================
+#  Phase 1-D: フォグ（visited）と部屋の制圧状態（cleared）
+#  設計書 dungeon-phase1-design.md §5 / §6-1。
+# ============================================================
+
+def d_encode_visited(visited):
+    """踏破済みセルの集合を 29x29=841bit のビットセット Base64 にする（純粋関数）。"""
+    bits = bytearray((D2_MAP_W * D2_MAP_H + 7) // 8)
+    for x, y in visited or ():
+        if 0 <= x < D2_MAP_W and 0 <= y < D2_MAP_H:
+            idx = y * D2_MAP_W + x
+            bits[idx // 8] |= 1 << (idx % 8)
+    return base64.b64encode(bytes(bits)).decode("ascii")
+
+
+def d_decode_visited(text):
+    """d_encode_visited の逆変換。壊れた入力では空集合を返す（純粋関数）。"""
+    visited = set()
+    if not text:
+        return visited
+    try:
+        raw = base64.b64decode(text, validate=True)
+    except Exception:
+        return visited
+    for idx in range(D2_MAP_W * D2_MAP_H):
+        byte = raw[idx // 8] if idx // 8 < len(raw) else 0
+        if (byte >> (idx % 8)) & 1:
+            visited.add((idx % D2_MAP_W, idx // D2_MAP_W))
+    return visited
+
+
+def d_reveal_room(inst, room):
+    """部屋の公開（設計 §6-1）: 部屋全体＋接続通路の次マスまでを visited にする。"""
+    visited = inst.setdefault("visited", set())
+    grid = inst["grid"]
+    rx, ry, rw, rh = room["rect"]
+    for gy in range(ry, ry + rh):
+        for gx in range(rx, rx + rw):
+            visited.add((gx, gy))
+    # 部屋の境界に隣接する通路マス（部屋の外で壁でないマス）を1マスだけ公開する。
+    for gy in range(ry, ry + rh):
+        for gx in range(rx, rx + rw):
+            for vx, vy in _DIRECTIONS.values():
+                nx, ny = gx + vx, gy + vy
+                if (0 <= nx < D2_MAP_W and 0 <= ny < D2_MAP_H
+                        and not (rx <= nx < rx + rw and ry <= ny < ry + rh)
+                        and grid[ny][nx] != D_WALL):
+                    visited.add((nx, ny))
+    return visited
+
+
+def d_mark_corridor_visited(inst, x, y):
+    """通路の公開（設計 §6-1）: 通過マスとその周囲1マスを visited にする。"""
+    visited = inst.setdefault("visited", set())
+    for dy in range(-1, 2):
+        for dx in range(-1, 2):
+            nx, ny = x + dx, y + dy
+            if 0 <= nx < D2_MAP_W and 0 <= ny < D2_MAP_H:
+                visited.add((nx, ny))
+    return visited
+
+
+def d_room_cleared(inst, room_id):
+    """部屋が制圧/消化済みかどうか。"""
+    return room_id in (inst.get("cleared") or set())
+
+
+def d_mark_room_cleared(inst, room_id):
+    """部屋を制圧/消化済みにする。"""
+    inst.setdefault("cleared", set()).add(room_id)
+
+
+def d_room_discovered(inst, room):
+    """部屋が発見済みか（rect 内のいずれかのセルが visited）。"""
+    visited = inst.get("visited") or set()
+    rx, ry, rw, rh = room["rect"]
+    return any((gx, gy) in visited
+               for gy in range(ry, ry + rh) for gx in range(rx, rx + rw))
+
+
+def d_stairs_room_blocked(uid, floor, x, y):
+    """座標の階段部屋が未制圧で、階段が番人に守られているかどうか。"""
+    inst = d_get_instance(uid, floor)
+    room = d_room_at(inst, x, y)
+    return bool(room is not None and room.get("role") == "stairs"
+                and not d_room_cleared(inst, room["id"]))
+
+
+def d_floor_progress_text(uid):
+    """フロア進捗の表示文（発見部屋数・階段の発見/番人制圧・現在の目的）。"""
+    p = d_get_player(uid)
+    inst = d_get_instance(uid, p["floor"])
+    rooms = inst.get("rooms", []) or []
+    discovered = [r for r in rooms if d_room_discovered(inst, r)]
+    stairs_room = next((r for r in rooms if r["role"] == "stairs"), None)
+    stairs_found = stairs_room is not None and d_room_discovered(inst, stairs_room)
+    guard_done = stairs_room is not None and d_room_cleared(inst, stairs_room["id"])
+    if stairs_room is None:
+        objective = "階段を探す"
+    elif not stairs_found:
+        objective = "階段の間を探す（番人が守っている）"
+    elif not guard_done:
+        objective = "階段の間の番人を倒す"
+    else:
+        objective = "階段から上の階へ進む"
+    return (
+        f"発見: 部屋 {len(discovered)}/{len(rooms)}\n"
+        f"階段: {'発見済み' if stairs_found else '未発見'} / 番人: {'制圧済み' if guard_done else '未制圧'}\n"
+        f"目的: {objective}"
+    )
+
+
+def d_destination_label(uid, floor, x, y, direction):
+    """方向ボタンの行き先ラベル（Phase 1-D / 設計 §6-2）。
+
+    その方向へ進んだ先（d_plan_walk の到達点）にある部屋が発見済みなら
+    役割名、未発見なら「未探索」、部屋でなければ「通路」を返す。
+    1歩も進めない場合は None（ボタンは disabled 前提）。
+    """
+    plan = d_plan_walk(uid, floor, x, y, direction)
+    if not plan["path"]:
+        return None
+    inst = d_get_instance(uid, floor)
+    room = d_room_at(inst, *plan["stop_cell"])
+    if room is None:
+        return "通路"
+    if d_room_discovered(inst, room):
+        return D_ROOM_ROLE_NAMES.get(room["role"], "部屋")
+    return "未探索"
+
+
+def d_direction_blocked(uid, floor, x, y, direction):
+    """その方向の1歩目が進めない（範囲外または壁）かどうか。"""
+    vec = _DIRECTIONS.get(direction)
+    if vec is None:
+        return True
+    nx, ny = x + vec[0], y + vec[1]
+    if not (0 <= nx < D2_MAP_W and 0 <= ny < D2_MAP_H):
+        return True
+    return d_get_cell(uid, floor, nx, ny) == D_WALL
+
+
+def d_plan_walk(uid, floor, x, y, direction):
+    """fast-forward ウォーカーの経路計画（Phase 1-C / 設計 §4-2）。
+
+    現在位置から direction（"up"/"down"/"left"/"right" のキー、または
+    (dx, dy) タプル）へ、停止条件のいずれかに当たるまで進む経路を返す。
+    エンカウント抽選と状態異常による HP 判定は実行側（d_execute_journey）
+    の責務で、ここでは構造的な停止条件だけを判定する純粋ロジックとする。
+
+    戻り値: {
+      direction: キー文字列,
+      path: [進む座標...]（開始マスは含まない）,
+      stop_reason: "room"|"special"|"junction"|"dead_end"|"room_edge"|"door"|"max_steps"|"blocked",
+      stop_cell: 最後に到達する座標（1歩も進めない場合は開始座標）,
+      entered_room_id: stop_reason == "room" のとき入った部屋の id、それ以外は None,
+    }
+    """
+    if isinstance(direction, (tuple, list)):
+        direction = next((k for k, v in _DIRECTIONS.items() if tuple(direction) == v), None)
+    result = {
+        "direction": direction,
+        "path": [],
+        "stop_reason": "blocked",
+        "stop_cell": (x, y),
+        "entered_room_id": None,
+    }
+    if direction not in _DIRECTIONS:
+        return result
+    inst = d_get_instance(uid, floor)
+    grid = inst["grid"]
+
+    def passable(cx, cy):
+        return 0 <= cx < D2_MAP_W and 0 <= cy < D2_MAP_H and grid[cy][cx] != D_WALL
+
+    start_room = d_room_at(inst, x, y)
+    cx, cy = x, y
+    dx, dy = _DIRECTIONS[direction]
+    came_from = None  # 直前にいた座標（逆方向を出口数えから除外する）
+    while len(result["path"]) < D_WALK_MAX_STEPS:
+        nx, ny = cx + dx, cy + dy
+        if not passable(nx, ny):
+            # 進めない。1歩目なら blocked、部屋の壁際なら room_edge、
+            # それ以外（通路で進路だけが塞がれる形）は行き止まり扱い。
+            if not result["path"]:
+                result["stop_reason"] = "blocked"
+            elif start_room is not None and d_room_at(inst, cx, cy) is start_room:
+                result["stop_reason"] = "room_edge"
+            else:
+                result["stop_reason"] = "dead_end"
+            break
+        came_from = (cx, cy)
+        cx, cy = nx, ny
+        result["path"].append((cx, cy))
+        result["stop_cell"] = (cx, cy)
+        cell = grid[cy][cx]
+        # 停止条件2: 特殊タイルに乗った。
+        if cell in D_WALK_SPECIAL_CELLS:
+            result["stop_reason"] = "special"
+            break
+        room = d_room_at(inst, cx, cy)
+        # 停止条件1: 開始部屋とは別の部屋に入った。
+        if room is not None and room is not start_room:
+            result["stop_reason"] = "room"
+            result["entered_room_id"] = room["id"]
+            break
+        # 停止条件6: 歩数上限。
+        if len(result["path"]) >= D_WALK_MAX_STEPS:
+            result["stop_reason"] = "max_steps"
+            break
+        if room is not None:
+            # 停止条件（ドア）: 到達したセルに、来たマスと直進先以外へ部屋の
+            # 外へ出る隣接マスがある場合はそこで止まる。通路は部屋の中心同士
+            # を結ぶためドアが中心線からずれることが多く、直進を優先すると
+            # 横方向のドアを素通りして部屋から出られなくなる（実機報告で
+            # 検証済みの欠陥）。直進先の出口はそのまま通過できるため対象外
+            # とし、部屋から部屋への1押下移動（Phase 1-C の契約）を保つ。
+            # 特殊タイル/別部屋入室の判定より後、直進継続の判定より前に置く。
+            if any(
+                (cx + vx, cy + vy) != came_from
+                and (cx + vx, cy + vy) != (cx + dx, cy + dy)
+                and passable(cx + vx, cy + vy)
+                and d_room_at(inst, cx + vx, cy + vy) is not room
+                for vx, vy in _DIRECTIONS.values()
+            ):
+                result["stop_reason"] = "door"
+                break
+            # 開始部屋の中では真っ直ぐ進み続ける。直進できなければ次ループ
+            # 先頭の判定で room_edge になる。ただし隣に部屋の外への出口が
+            # 1つだけある場合は、そこへ滑り込む（扉の位置ずれ吸収）。
+            if passable(cx + dx, cy + dy):
+                continue
+            outside = [
+                (cx + vx, cy + vy) for vx, vy in _DIRECTIONS.values()
+                if (cx + vx, cy + vy) != came_from
+                and passable(cx + vx, cy + vy)
+                and d_room_at(inst, cx + vx, cy + vy) is not room
+            ]
+            if len(outside) == 1:
+                dx, dy = outside[0][0] - cx, outside[0][1] - cy
+                continue
+            result["stop_reason"] = "room_edge"
+            break
+        # 通路: 来た方向以外の出口の数で分岐/行き止まりを判定する。
+        exits = [
+            (cx + vx, cy + vy) for vx, vy in _DIRECTIONS.values()
+            if (cx + vx, cy + vy) != came_from and passable(cx + vx, cy + vy)
+        ]
+        if not exits:
+            result["stop_reason"] = "dead_end"
+            break
+        if len(exits) >= 2:
+            result["stop_reason"] = "junction"
+            break
+        dx, dy = exits[0][0] - cx, exits[0][1] - cy
+    else:
+        result["stop_reason"] = "max_steps"
+    return result
 
 def d_default_player():
     """新規プレイヤーの初期状態。拡張項目も含めてここで一元管理する。"""
@@ -365,6 +760,8 @@ def d_default_player():
         "action_log": [], "state_version": 0, "front_back": "front",
         "battle_resource": {"mp": 20, "max_mp": 20, "rage": 0, "combo": 0, "guard": 0},
         "battle_flags": {},
+        "equipment_upgrades": {},
+        "instances": {}, "phase1b_v2": False,
     }
 
 def d_get_player(uid):
@@ -373,6 +770,9 @@ def d_get_player(uid):
     p = dg_players.get(uid)
     if p is None:
         p = dg_players[uid] = d_default_player()
+        # 新規プレイヤーは移行対象ではない。初期位置は個人インスタンスのスタート。
+        p["phase1b_v2"] = True
+        p["x"], p["y"] = d_instance_start(uid, p["floor"])
     else:
         for key, value in d_default_player().items():
             if key not in p:
@@ -403,8 +803,9 @@ def d_effective_stats(player):
         stats["def_"] += item.get("def_", 0)
         stats["max_hp"] += item.get("hp", 0)
         stats["crit"] += item.get("crit", 0)
-        # 強化レベルとパッシブは保存済みJSON状態から決定的に再現する。
-        upgrade = int(item.get("upgrade_level", 0))
+        # 強化レベルはプレイヤー個別の equipment_upgrades から読む
+        # （旧実装は共有の EQUIPMENT_MASTER を書き換えていたため全員に影響した）。
+        upgrade = int(p.get("equipment_upgrades", {}).get(key, 0))
         stats["atk"] += upgrade
         stats["def_"] += upgrade
         if "speed_up" in item.get("passive_effects", []):
@@ -425,7 +826,7 @@ def d_effective_stats(player):
     return stats
 
 
-def d_progress_quest(uid, kind, amount=1, supabase=None):
+def d_progress_quest(uid, kind, amount=1, db_api=None):
     """既存JSON状態だけで進むクエスト。報酬は完了時に一度だけ付与する。"""
     p = d_get_player(uid)
     completed = []
@@ -479,16 +880,21 @@ def d_equipment_profile(uid):
     return [dict(EQUIPMENT_MASTER.get(k, {}), key=k) for k in p.get("inventory", {}) if k in EQUIPMENT_MASTER]
 
 def d_upgrade_equipment(uid, key, material="iron_ore"):
-    """素材を消費して装備を1段階強化する。"""
+    """素材を消費して装備を1段階強化する。
+
+    強化レベルはプレイヤー個別の equipment_upgrades に保存する。
+    共有マスタ EQUIPMENT_MASTER は絶対に書き換えない（他プレイヤーへの波及防止）。
+    """
     p = d_get_player(uid)
     if key not in EQUIPMENT_MASTER or p.get("materials", {}).get(material, 0) <= 0:
         return False
     p["materials"][material] -= 1
-    EQUIPMENT_MASTER[key]["upgrade_level"] = int(EQUIPMENT_MASTER[key].get("upgrade_level", 0)) + 1
+    upgrades = p.setdefault("equipment_upgrades", {})
+    upgrades[key] = int(upgrades.get(key, 0)) + 1
     return True
 
 def d_floor_modifier(floor):
-    """フロアごとの軽量な変異。固定化してD1にもログで伝えられる。"""
+    """フロアごとの軽量な変異。固定化してClefにもログで伝えられる。"""
     key = list(ROOM_MODIFIERS)[(floor - 1) % len(ROOM_MODIFIERS)]
     return ROOM_MODIFIERS[key]["name"]
 
@@ -510,8 +916,24 @@ def d_apply_status(uid, status_key, turns=None):
             return
     effects.append({"key": status_key, "turns": turns})
 
+def d_clear_status(uid):
+    """状態異常を全解除する（休憩・次フロア到達時のライフサイクル規則）。
+
+    戦闘用フラグ（凍結による行動不能など）も状態異常と一体なので一緒に消す。
+    """
+    p = d_get_player(uid)
+    p["active_effects"] = []
+    p.setdefault("battle_flags", {}).clear()
+
+
 def d_tick_status(uid):
-    """状態異常を1ターン進め、表示用ログとダメージを返す。"""
+    """状態異常を1ターン進め、表示用ログとダメージを返す。
+
+    ライフサイクル規則（Phase 0 で定義）:
+      - 進行: 戦闘中は敵ターン（DungeonCombatView._enemy_turn）、探索中は移動ターン
+        （DungeonMainView._move_locked）でそれぞれ1回だけ進める。二重に進めないこと。
+      - 解除: 休憩タイル（D_REST）と階段で次フロアへ進む際に全解除する（d_clear_status）。
+    """
     p = d_get_player(uid)
     logs = []
     remaining = []
@@ -549,30 +971,34 @@ def d_get_lock(uid):
     return _PLAYER_LOCKS.setdefault(uid, asyncio.Lock())
 
 
-async def d_apply_economy(uid, supabase, coins=0):
+async def d_apply_economy(uid, db_api, coins=0):
     """ウォレットを更新する。SQL RPCがあれば原子処理を優先し、旧環境には安全なフォールバックを使う。"""
-    if not supabase or not coins:
+    if not db_api or not coins:
         return True
 
     def _apply():
         try:
-            result = supabase.rpc("dungeon_apply_coins", {
+            result = run_with_retry(lambda: db_api.rpc("dungeon_apply_coins", {
                 "p_user_id": str(uid), "p_delta": int(coins)
-            }).execute()
-            if result.data is not False:
-                return True
+            }).execute())
+            return result.data is not False
+        except APIError as exc:
+            if exc.code not in {"RPC_NOT_ALLOWED", "42883"}:
+                raise
+            logger.warning("dungeon_apply_coins RPC is unavailable; using legacy fallback", exc_info=True)
         except Exception:
-            logger.warning("dungeon_apply_coins RPC unavailable; using fallback", exc_info=True)
+            logger.exception("dungeon_apply_coins RPC failed unexpectedly; refusing legacy fallback")
+            raise
 
-        row = supabase.table("users").select("balance").eq("user_id", str(uid)).execute()
+        row = db_api.table("users").select("balance").eq("user_id", str(uid)).execute()
         current = int(row.data[0].get("balance") or 0) if row.data else 10
         # 罠などの減算は残高0を下限とし、ゲーム操作自体は失敗させない。
         new_balance = max(0, current + int(coins))
         if row.data:
-            updated = (supabase.table("users").update({"balance": new_balance})
+            updated = (db_api.table("users").update({"balance": new_balance})
                        .eq("user_id", str(uid)).eq("balance", current).execute())
             return bool(updated.data)
-        inserted = supabase.table("users").insert({
+        inserted = db_api.table("users").insert({
             "user_id": str(uid), "balance": new_balance, "debt": 0
         }).execute()
         return bool(inserted.data)
@@ -580,9 +1006,9 @@ async def d_apply_economy(uid, supabase, coins=0):
     return await asyncio.to_thread(_apply)
 
 
-async def d_apply_reward(uid, supabase, *, coins=0, xp=0, boxes=0, bread=0, chips=0, items=None, equipment=None, relic=None, material=None, achievement=None, season_score=0):
+async def d_apply_reward(uid, db_api, *, coins=0, xp=0, boxes=0, bread=0, chips=0, items=None, equipment=None, relic=None, material=None, achievement=None, season_score=0):
     """戦利品をプレイヤーとウォレットへ一度のアクションで反映する。"""
-    if not await d_apply_economy(uid, supabase, coins):
+    if not await d_apply_economy(uid, db_api, coins):
         raise RuntimeError("コイン残高を更新できませんでした")
     p = d_get_player(uid)
     p["xp"] = max(0, p["xp"] + int(xp))
@@ -616,7 +1042,7 @@ def d_hpbar(hp, max_hp, width=10):
     filled = int(width * hp / max(max_hp, 1))
     return "█" * filled + "░" * (width - filled)
 
-def d_open_chest(uid, supabase):
+def d_open_chest(uid, db_api):
     """宝箱の結果を決定する。反映は呼び出し側のd_apply_rewardで行う。"""
     p = d_get_player(uid)
     stats = p.setdefault("battle_stats", {})
@@ -666,8 +1092,8 @@ def d_do_mine(uid):
     gain = random.randint(30, 200)
     return gain
 
-def d_make_enemy(floor, forced_name=None):
-    """敵を生成"""
+def d_make_enemy(floor, forced_name=None, forced_rank=None):
+    """敵を生成。forced_rank ("normal"/"elite"/"boss") でランク抽選を固定できる（Phase 1-D）。"""
     base_hp  = 15 + floor * 8
     base_atk = 4  + floor * 2
     base_def = 1  + floor
@@ -677,6 +1103,12 @@ def d_make_enemy(floor, forced_name=None):
     if forced_name:
         name = forced_name
         etype = "normal"
+    elif forced_rank in ("normal", "elite", "boss"):
+        etype = forced_rank
+        name = random.choice({
+            "boss": D_BOSS_NAMES.get(bname, ["ボス"]),
+            "elite": D_SUPERENEMY_NAMES.get(bname, ["精鋭"]),
+        }.get(etype, D_ENEMY_NAMES.get(bname, ["謎の敵"])))
     else:
         r = random.random()
         if r < 0.01:
@@ -845,6 +1277,166 @@ def d_gen_floor(floor):
     
     return grid
 
+# ============================================================
+#  Phase 1: 新フロアジェネレータ（部屋＋通路方式・シード決定的）
+#  設計書 dungeon-phase1-design.md §3 に準拠。現行の d_gen_floor とは
+#  並行導入であり、ゲーム動作にはまだ切り替えていない（Phase 1-B 以降）。
+# ============================================================
+
+# v2 の役割タイル対応。combat 部屋はタイルを置かず入室で発動する（Phase 1-D）。
+_D2_ROLE_TILES = {
+    "start": D_START,
+    "stairs": D_STAIRS,
+    "chest": D_CHEST,
+    "shop": D_SHOP,
+    "mine": D_MINE,
+    "rest": D_REST,
+    "event": D_EVENT,
+}
+
+
+def d_floor_seed(season_id, user_id, floor):
+    """(season, user, floor) から v2 フロア生成用の決定的シードを導出する。"""
+    digest = hashlib.sha256(f"{season_id}:{user_id}:{floor}:v2".encode("utf-8")).hexdigest()
+    return int(digest[:16], 16)
+
+
+def _d2_sector_origin(sector_index):
+    """セクター番号 (0..2) の左上座標。外周1マスは壁として残す。"""
+    return 1 + sector_index * ((D2_MAP_W - 2) // D2_SECTOR_N)
+
+
+def _d2_main_route(rng):
+    """3x3 セクターグリッド上で重複なし・隣接のみの5セクタールートを作る。"""
+    neighbors = [(0, -1), (0, 1), (-1, 0), (1, 0)]
+    for _ in range(1000):
+        route = [(rng.randrange(D2_SECTOR_N), rng.randrange(D2_SECTOR_N))]
+        while len(route) < len(D2_MAIN_ROLES):
+            cx, cy = route[-1]
+            options = [
+                (cx + dx, cy + dy) for dx, dy in neighbors
+                if 0 <= cx + dx < D2_SECTOR_N and 0 <= cy + dy < D2_SECTOR_N
+                and (cx + dx, cy + dy) not in route
+            ]
+            if not options:
+                break
+            route.append(rng.choice(options))
+        if len(route) == len(D2_MAIN_ROLES):
+            return route
+    raise RuntimeError("d_gen_floor_v2: メインルートを生成できませんでした")
+
+
+def d_gen_floor_v2(seed, floor):
+    """シード決定的な部屋＋通路フロアを生成し、(grid, rooms) を返す。
+
+    grid は D2_MAP_H x D2_MAP_W のタイル文字列の2次元リスト（grid[y][x]）。
+    rooms は各部屋の dict のリストで、少なくとも
+    {id, role, rect:(x, y, w, h), center:(x, y), sector:(sx, sy), route}
+    を含む。階段部屋には guarded=True、5フロア毎は boss=True も付く。
+    乱数は引数 seed から作る random.Random のみを使い、再現性を保証する。
+    """
+    rng = random.Random(seed)
+    grid = [[D_WALL] * D2_MAP_W for _ in range(D2_MAP_H)]
+
+    # --- セクター決定: メインルート5 + サブ1〜2 ---
+    main_sectors = _d2_main_route(rng)
+    main_set = set(main_sectors)
+    sub_candidates = []
+    for sy in range(D2_SECTOR_N):
+        for sx in range(D2_SECTOR_N):
+            if (sx, sy) in main_set:
+                continue
+            if any((sx + dx, sy + dy) in main_set for dx, dy in ((0, -1), (0, 1), (-1, 0), (1, 0))):
+                sub_candidates.append((sx, sy))
+    rng.shuffle(sub_candidates)
+    sub_count = min(len(sub_candidates), rng.randint(1, 2)) if sub_candidates else 0
+    sub_sectors = sub_candidates[:sub_count]
+
+    # --- 役割割り当て ---
+    # メイン4番目 (combat_or_chest) は抽選で実役割に解決する。
+    fourth = "chest" if rng.random() < 0.5 else "combat"
+    main_roles = ["start", "combat", "event", fourth, "stairs"]
+    sub_roles = rng.sample(list(D2_SUB_ROLES), len(sub_sectors))
+
+    # --- 部屋配置（セクター内に 5x5〜7x7、ランダムオフセット） ---
+    rooms = []
+
+    def place_room(sector, role, route):
+        sx, sy = sector
+        ox, oy = _d2_sector_origin(sx), _d2_sector_origin(sy)
+        sector_size = (D2_MAP_W - 2) // D2_SECTOR_N
+        w = rng.randint(5, 7)
+        h = rng.randint(5, 7)
+        x = ox + rng.randint(0, sector_size - w)
+        y = oy + rng.randint(0, sector_size - h)
+        room = {
+            "id": len(rooms),
+            "role": role,
+            "rect": (x, y, w, h),
+            "center": (x + w // 2, y + h // 2),
+            "sector": (sx, sy),
+            "route": route,
+        }
+        if role == "stairs":
+            room["guarded"] = True
+            room["boss"] = (int(floor) % 5 == 0)
+        rooms.append(room)
+        for gy in range(y, y + h):
+            for gx in range(x, x + w):
+                grid[gy][gx] = D_FLOOR
+        return room
+
+    main_rooms = [place_room(sector, role, "main") for sector, role in zip(main_sectors, main_roles)]
+    sub_rooms = []
+    for sector, role in zip(sub_sectors, sub_roles):
+        room = place_room(sector, role, "sub")
+        # 接続先は隣接するメイン部屋から1つ選ぶ（行き止まりの寄り道にする）。
+        sx, sy = sector
+        hosts = [r for r in main_rooms
+                 if abs(r["sector"][0] - sx) + abs(r["sector"][1] - sy) == 1]
+        room["host_id"] = rng.choice(hosts)["id"]
+        sub_rooms.append(room)
+
+    # --- 通路: 隣接部屋の中心同士を L字（幅1）で接続 ---
+    corridor_cells = []
+
+    def carve_corridor(a, b):
+        x1, y1 = a
+        x2, y2 = b
+        cells = []
+        if rng.random() < 0.5:
+            points = [(x, y1) for x in range(min(x1, x2), max(x1, x2) + 1)]
+            points += [(x2, y) for y in range(min(y1, y2), max(y1, y2) + 1)]
+        else:
+            points = [(x1, y) for y in range(min(y1, y2), max(y1, y2) + 1)]
+            points += [(x, y2) for x in range(min(x1, x2), max(x1, x2) + 1)]
+        for gx, gy in points:
+            if grid[gy][gx] == D_WALL:
+                grid[gy][gx] = D_FLOOR
+                cells.append((gx, gy))
+        return cells
+
+    for prev, nxt in zip(main_rooms, main_rooms[1:]):
+        corridor_cells += carve_corridor(prev["center"], nxt["center"])
+    for room in sub_rooms:
+        host = main_rooms[room["host_id"]]
+        corridor_cells += carve_corridor(room["center"], host["center"])
+
+    # --- 役割タイルを部屋中央へ（通路で上書きされないよう最後に置く） ---
+    for room in rooms:
+        tile = _D2_ROLE_TILES.get(room["role"])
+        if tile is not None:
+            cx, cy = room["center"]
+            grid[cy][cx] = tile
+
+    # --- 罠: 通路マス（部屋の外）から 0〜2 個 ---
+    if corridor_cells:
+        trap_count = min(len(corridor_cells), rng.randint(0, 2))
+        for gx, gy in rng.sample(corridor_cells, trap_count):
+            grid[gy][gx] = D_TRAP
+
+    return grid, rooms
+
 def load_all_assets():
     """Assetsフォルダから画像を読み込みキャッシュする"""
     global _ASSET_CACHE
@@ -918,8 +1510,16 @@ def _draw_tile(draw, img, x, y, cell, biome, is_player=False, is_fog=False):
         draw.text((px+TILE//2-4, py+TILE//2-6), "🏠", fill=(255, 255, 255))
 
 def d_build_map_image(uid, floor, px, py, radius=D_VIEW_R):
-    """マップをPillow Imageとして生成"""
-    d_ensure_map(floor)
+    """マップをPillow Imageとして生成（そのプレイヤーのインスタンスを描く）。
+
+    Phase 1-D のフォグ・オブ・ウォー（設計 §6-1）:
+      - 未探索セル: 黒（霧）
+      - 探索済みだが現在視界（D_SIGHT_R）の外: 明度45%で描画（記憶表示）
+      - 視界内の探索済みセル: 通常描画
+    """
+    inst = d_get_instance(uid, floor)
+    grid = inst["grid"]
+    visited = inst.get("visited") or set()
     bname, *_ = d_get_biome(floor)
     size = radius * 2 + 1
     img = Image.new("RGB", (size * TILE, size * TILE), (0, 0, 0))
@@ -928,11 +1528,18 @@ def d_build_map_image(uid, floor, px, py, radius=D_VIEW_R):
     for vy_i, vy in enumerate(range(py - radius, py + radius + 1)):
         for vx_i, vx in enumerate(range(px - radius, px + radius + 1)):
             is_player = (vx == px and vy == py)
-            if not (0 <= vx < D_MAP_W and 0 <= vy < D_MAP_H):
+            if not (0 <= vx < D2_MAP_W and 0 <= vy < D2_MAP_H):
                 _draw_tile(draw, img, vx_i, vy_i, D_WALL, bname, is_fog=True)
                 continue
-            cell = dg_maps[floor][vy][vx]
+            if not is_player and (vx, vy) not in visited:
+                _draw_tile(draw, img, vx_i, vy_i, D_WALL, bname, is_fog=True)
+                continue
+            cell = grid[vy][vx]
             _draw_tile(draw, img, vx_i, vy_i, cell, bname, is_player=is_player)
+            if not is_player and max(abs(vx - px), abs(vy - py)) > D_SIGHT_R:
+                # 探索済みの記憶表示: そのセルの描画だけ明度を落とす。
+                box = (vx_i * TILE, vy_i * TILE, (vx_i + 1) * TILE, (vy_i + 1) * TILE)
+                img.paste(ImageEnhance.Brightness(img.crop(box)).enhance(0.45), box[:2])
 
     return img
 
@@ -979,24 +1586,18 @@ async def d_render_image(uid, floor, px, py, bot, radius=D_VIEW_R):
 #  DB 操作
 # ============================================================
 
-async def dg_load_all(supabase):
-    """Supabaseから全ダンジョンデータを読み込む"""
-    global dg_maps, dg_players, dg_starts, dg_used, dg_bases
-    
+async def dg_load_all(db_api):
+    """自前DB APIから全ダンジョンデータを読み込む。
+
+    Phase 1-B: マップはプレイヤー個人インスタンス（シード再生成＋差分復元）
+    になったため、dungeon_maps / dungeon_bases テーブルは読み込まない。
+    インスタンスは初回アクセス時に d_get_instance が生成し、プレイヤーに
+    保存された consumed 差分を再適用して復元する。
+    """
+    global dg_players
+
     try:
-        res = supabase.table("dungeon_maps").select("*").execute()
-        for row in res.data:
-            floor = row["floor"]
-            dg_maps[floor] = json.loads(row["grid"])
-            dg_used[floor] = set(tuple(p) for p in json.loads(row.get("used_coords", "[]")))
-            if "start_pos" in row and row["start_pos"]:
-                dg_starts[floor] = tuple(row["start_pos"])
-        print(f"✓ ダンジョンマップ読み込み完了: {len(dg_maps)}フロア")
-    except Exception as e:
-        print(f"<:failed:1490986584676368535> ダンジョンマップ読み込み失敗: {e}")
-    
-    try:
-        res = supabase.table("dungeon_players").select("*").execute()
+        res = db_api.table("dungeon_players").select("*").execute()
         for row in res.data:
             inventory = dict(row.get("inventory", {}) or {})
             meta = inventory.pop("_dungeon_meta", {}) if isinstance(inventory, dict) else {}
@@ -1034,48 +1635,33 @@ async def dg_load_all(supabase):
                 "action_log": meta.get("action_log", []) or [], "state_version": meta.get("state_version", 0),
                 "front_back": meta.get("front_back", "front"), "battle_resource": meta.get("battle_resource", {"mp": 20, "max_mp": 20, "rage": 0, "combo": 0, "guard": 0}),
                 "floor_goals": meta.get("floor_goals", {}) or {},
+                "equipment_upgrades": meta.get("equipment_upgrades", {}) or {},
+                "instances": meta.get("instances", {}) or {},
+                "phase1b_v2": bool(meta.get("phase1b_v2", False)),
             }
+            # Phase 1-B 移行（設計 §7-2）: フラグの無い既存プレイヤーは一度だけ新基盤へ移す。
+            d_migrate_player_v2(row["user_id"])
         print(f"✓ ダンジョンプレイヤー読み込み完了: {len(dg_players)}人")
     except Exception as e:
         print(f"<:failed:1490986584676368535> ダンジョンプレイヤー読み込み失敗: {e}")
-    
-    try:
-        res = supabase.table("dungeon_bases").select("*").execute()
-        for row in res.data:
-            dg_bases[row["user_id"]] = (row["floor"], row["x"], row["y"])
-        print(f"✓ ダンジョン拠点読み込み完了: {len(dg_bases)}個")
-    except Exception as e:
-        print(f"<:failed:1490986584676368535> ダンジョン拠点読み込み失敗: {e}")
 
-async def dg_save_map(floor, supabase):
-    """フロアマップをSupabaseに保存"""
-    if floor not in dg_maps:
-        return
-    try:
-        grid_json = json.dumps(dg_maps[floor], ensure_ascii=False, separators=(",", ":"))
-        used_coords = sorted(dg_used.get(floor, set()))
-        start_pos = dg_starts.get(floor, (1, 1))
-        payload = {
-            "floor": floor,
-            "grid": grid_json,
-            "used_coords": json.dumps(used_coords, separators=(",", ":")),
-            "start_pos": list(start_pos),
-        }
-        digest = hashlib.sha256(json.dumps(payload, ensure_ascii=False, sort_keys=True,
-                                           separators=(",", ":")).encode()).hexdigest()
-        if _MAP_SAVE_DIGESTS.get(floor) == digest:
-            return
-        supabase.table("dungeon_maps").upsert(payload, on_conflict="floor").execute()
-        _MAP_SAVE_DIGESTS[floor] = digest
-    except Exception as e:
-        print(f"dg_save_map失敗 floor={floor}: {e}")
+async def dg_save_map(uid, floor, db_api):
+    """互換ラッパー（Phase 1-B）。
 
-async def dg_save_player(uid, supabase):
-    """プレイヤーのダンジョンデータをSupabaseに保存"""
+    マップは個人インスタンス化され、差分はプレイヤー保存（_dungeon_meta）に
+    含まれるため、実体はプレイヤー保存へ委譲する。dungeon_maps テーブルへは
+    もう書かない。
+    """
+    await dg_save_player(uid, db_api)
+
+async def dg_save_player(uid, db_api):
+    """プレイヤーのダンジョンデータを自前DB APIに保存"""
     if uid not in dg_players:
         return
     try:
         p = dg_players[uid]
+        # ライブなインスタンス差分をプレイヤー状態へ同期してから保存する。
+        p["instances"] = d_instances_snapshot(uid)
         inventory = dict(p.get("inventory", {}))
         # テーブル列を増やさずに拡張状態を保存するため、JSONメタへ集約する。
         inventory["_dungeon_meta"] = {
@@ -1099,6 +1685,9 @@ async def dg_save_player(uid, supabase):
             "front_back": p.get("front_back", "front"),
             "battle_resource": p.get("battle_resource", {}),
             "floor_goals": p.get("floor_goals", {}),
+            "equipment_upgrades": p.get("equipment_upgrades", {}),
+            "instances": p.get("instances", {}),
+            "phase1b_v2": bool(p.get("phase1b_v2", False)),
         }
         payload = {
             "user_id": uid,
@@ -1125,16 +1714,16 @@ async def dg_save_player(uid, supabase):
                                            separators=(",", ":")).encode()).hexdigest()
         if _PLAYER_SAVE_DIGESTS.get(uid) == digest:
             return
-        supabase.table("dungeon_players").upsert(payload, on_conflict="user_id").execute()
+        db_api.table("dungeon_players").upsert(payload, on_conflict="user_id").execute()
         _PLAYER_SAVE_DIGESTS[uid] = digest
     except Exception as e:
         print(f"dg_save_player失敗 uid={uid}: {e}")
 
-async def dg_save_base(uid, floor, x, y, supabase):
-    """プレイヤーの拠点をSupabaseに保存"""
+async def dg_save_base(uid, floor, x, y, db_api):
+    """プレイヤーの拠点を自前DB APIに保存"""
     dg_bases[uid] = (floor, x, y)
     try:
-        supabase.table("dungeon_bases").upsert({
+        db_api.table("dungeon_bases").upsert({
             "user_id": uid,
             "floor": floor,
             "x": x,
@@ -1147,12 +1736,13 @@ async def dg_save_base(uid, floor, x, y, supabase):
 #  Views
 # ============================================================
 # ============================================================
-#  D1 作戦ヘルパー（旧 d1_dangeon.py から統廃合）
+#  Clef作戦ヘルパー（旧 dungeon_dangeon.py から統廃合）
 # ============================================================
-# D1へ渡す合法手。待機（enter/check）は選択肢に含めない。
-D1_MOVE_KEYS = tuple(_DIRECTIONS)
+# Clefへ渡す合法手。待機（enter/check）は選択肢に含めない。
+# Phase 1-C で移動が4方向化したため、合法手も4方向のみ（journey 単位で実行する）。
+CLEF_MOVE_KEYS = tuple(_DIRECTIONS)
 
-D1_PLAN_GUIDANCE = {
+CLEF_PLAN_GUIDANCE = {
     "safe": "HPと被弾を最優先で避け、敵の少ない経路で階段を目指す",
     "speed": "最短手数で階段へ向かう",
     "treasure": "宝箱・鉱山・祭壇などの報酬タイルを優先して回収する",
@@ -1163,19 +1753,19 @@ D1_PLAN_GUIDANCE = {
 }
 
 
-def d1_plan_key(plan):
+def dungeon_plan_key(plan):
     """表示名・キーのどちらからでも作戦キーを解決する。"""
-    if plan in D1_PLANS:
+    if plan in CLEF_PLANS:
         return plan
-    for key, name in D1_PLANS.items():
+    for key, name in CLEF_PLANS.items():
         if name == plan:
             return key
     return "safe"
 
 
-def d1_plan_guidance(plan):
-    """作戦ごとの優先基準。D1への指示文に含める。"""
-    return D1_PLAN_GUIDANCE.get(d1_plan_key(plan), D1_PLAN_GUIDANCE["safe"])
+def dungeon_plan_guidance(plan):
+    """作戦ごとの優先基準。Clefへの指示文に含める。"""
+    return CLEF_PLAN_GUIDANCE.get(dungeon_plan_key(plan), CLEF_PLAN_GUIDANCE["safe"])
 
 
 def d_floor_routes(uid):
@@ -1187,38 +1777,37 @@ def d_floor_routes(uid):
     ]
 
 
-def d1_action_candidates(uid, plan="安全探索"):
+def dungeon_action_candidates(uid, plan="安全探索"):
     """作戦の重みを掛けた候補評価。危険度と報酬のどちらを取るかを明示する。"""
     routes = d_floor_routes(uid)
     weights = {"safe": (3, -2), "speed": (1, 5), "treasure": (4, 0), "battle": (-1, 2),
                "explore": (2, 1), "boss": (1, 3), "xp": (0, 4)}
-    risk_w, reward_w = weights.get(d1_plan_key(plan), weights["safe"])
+    risk_w, reward_w = weights.get(dungeon_plan_key(plan), weights["safe"])
     for route in routes:
         route["plan_score"] = route["reward"] * reward_w - route["risk"] * risk_w
     return routes
 
 
-def d1_candidate_log(uid, plan):
-    """画面表示用の候補評価ログ。D1への入力には含めない（コンテキスト長対策）。"""
-    candidates = d1_action_candidates(uid, plan)
+def dungeon_candidate_log(uid, plan):
+    """画面表示用の候補評価ログ。Clefへの入力には含めない（コンテキスト長対策）。"""
+    candidates = dungeon_action_candidates(uid, plan)
     return "候補評価: " + " / ".join(
         f"{c['id']}:{c['label']} 危険度{c['risk']} 報酬{c['reward']} 作戦点{c['plan_score']}" for c in candidates
     )
 
 
 def d_normalize_choice(value, legal, fallback=None):
-    """D1の応答を合法手へ寄せる。表記ゆれだけを吸収し、それ以外はfallbackを返す。"""
+    """Clefの応答を合法手へ寄せる。表記ゆれだけを吸収し、それ以外はfallbackを返す。"""
     value = str(value or "").strip().lower().replace(" ", "")
     aliases = {"north": "up", "south": "down", "west": "left", "east": "right",
-               "upward": "up", "downward": "down", "leftward": "left", "rightward": "right",
-               "northeast": "rightup", "northwest": "leftup", "southeast": "rightdown", "southwest": "leftdown"}
+               "upward": "up", "downward": "down", "leftward": "left", "rightward": "right"}
     value = aliases.get(value, value)
     return value if value in legal else (fallback if fallback in legal else None)
 
 
-def d1_cell_label(floor, x, y):
-    """セルの日本語ラベル。D1へ選択肢の基準を渡すために使う。"""
-    cell = d_get_cell(floor, x, y)
+def dungeon_cell_label(uid, floor, x, y):
+    """セルの日本語ラベル。Clefへ選択肢の基準を渡すために使う。"""
+    cell = d_get_cell(uid, floor, x, y)
     return {
         D_WALL: "壁", D_FLOOR: "床", D_START: "開始地点", D_STAIRS: "階段", D_CHEST: "宝箱",
         D_TRAP: "罠", D_SHOP: "商店", D_BASE: "拠点", D_MINE: "鉱山", D_REST: "休憩所",
@@ -1226,7 +1815,7 @@ def d1_cell_label(floor, x, y):
     }.get(cell, "床")
 
 
-def d1_relative_label(dx, dy):
+def dungeon_relative_label(dx, dy):
     """差分ベクトルを方角ラベルへ変換する。"""
     if dx == 0 and dy == 0:
         return "現在地"
@@ -1242,8 +1831,8 @@ def d1_relative_label(dx, dy):
     return "".join(parts)
 
 
-def d1_bfs(floor, x, y):
-    """現在地からの歩数マップ（8方向・壁と角抜けは通行不可）。"""
+def dungeon_bfs(uid, floor, x, y):
+    """現在地からの歩数マップ（4方向・壁は通行不可）。"""
     dist = {(x, y): 0}
     queue = [(x, y)]
     head = 0
@@ -1253,49 +1842,46 @@ def d1_bfs(floor, x, y):
         step = dist[(cx, cy)] + 1
         for dx, dy in _DIRECTIONS.values():
             nx, ny = cx + dx, cy + dy
-            if (nx, ny) in dist or not (0 <= nx < D_MAP_W and 0 <= ny < D_MAP_H):
+            if (nx, ny) in dist or not (0 <= nx < D2_MAP_W and 0 <= ny < D2_MAP_H):
                 continue
-            if d_get_cell(floor, nx, ny) == D_WALL:
-                continue
-            if dx and dy and (d_get_cell(floor, cx + dx, cy) == D_WALL or d_get_cell(floor, cx, cy + dy) == D_WALL):
+            if d_get_cell(uid, floor, nx, ny) == D_WALL:
                 continue
             dist[(nx, ny)] = step
             queue.append((nx, ny))
     return dist
 
 
-def d1_stairs_cell(floor):
-    """フロア内の階段座標を返す。"""
-    d_ensure_map(floor)
-    for gy, row in enumerate(dg_maps[floor]):
+def dungeon_stairs_cell(uid, floor):
+    """そのプレイヤーのフロア内の階段座標を返す。"""
+    for gy, row in enumerate(d_get_instance(uid, floor)["grid"]):
         for gx, cell in enumerate(row):
             if cell == D_STAIRS:
                 return (gx, gy)
     return None
 
 
-def d1_stairs_hint(floor, x, y, dist=None):
-    """階段までの方角と歩数。D1が迷わないための明示的な目標情報。"""
-    stairs = d1_stairs_cell(floor)
+def dungeon_stairs_hint(uid, floor, x, y, dist=None):
+    """階段までの方角と歩数。Clefへ示す目標情報。"""
+    stairs = dungeon_stairs_cell(uid, floor)
     if not stairs:
         return "このフロアに階段なし"
     if dist is None:
-        dist = d1_bfs(floor, x, y)
+        dist = dungeon_bfs(uid, floor, x, y)
     steps = dist.get(stairs)
     if steps is None:
         return "階段は壁で区切られ到達不可"
-    return f"{d1_relative_label(stairs[0] - x, stairs[1] - y)} {steps}マス"
+    return f"{dungeon_relative_label(stairs[0] - x, stairs[1] - y)} {steps}マス"
 
 
-def d1_surround_text(floor, x, y):
-    """現在地と8方向のタイルを短く列挙する。"""
-    parts = [f"現在地={d1_cell_label(floor, x, y)}"]
+def dungeon_surround_text(uid, floor, x, y):
+    """現在地と4方向のタイルを短く列挙する。"""
+    parts = [f"現在地={dungeon_cell_label(uid, floor, x, y)}"]
     for key, (dx, dy) in _DIRECTIONS.items():
-        parts.append(f"{_DIRECTION_LABELS[key]}={d1_cell_label(floor, x + dx, y + dy)}")
+        parts.append(f"{_DIRECTION_LABELS[key]}={dungeon_cell_label(uid, floor, x + dx, y + dy)}")
     return " ".join(parts)
 
 
-def d1_local_grid(floor, x, y):
+def dungeon_local_grid(uid, floor, x, y):
     """画像に依存しない3x3局所盤面。#は壁、@は現在地、.は通行可能。"""
     symbols = {
         D_WALL: "#", D_FLOOR: ".", D_START: ".", D_STAIRS: "S", D_CHEST: "C",
@@ -1306,31 +1892,28 @@ def d1_local_grid(floor, x, y):
     for dy in (-1, 0, 1):
         cells = []
         for dx in (-1, 0, 1):
-            cells.append("@" if (dx, dy) == (0, 0) else symbols.get(d_get_cell(floor, x + dx, y + dy), "#"))
+            cells.append("@" if (dx, dy) == (0, 0) else symbols.get(d_get_cell(uid, floor, x + dx, y + dy), "#"))
         rows.append("".join(cells))
     return " / ".join(rows) + "（#=壁・進入不可 @=現在地 .=通行可 S=階段）"
 
 
-def d1_move_criteria(floor, x, y, dist=None):
-    """D1へ渡す「各方向がどういう状況か」の基準。壁・特殊タイル・階段距離を明示する。"""
+def dungeon_move_criteria(uid, floor, x, y, dist=None):
+    """Clefへ渡す「各方向がどういう状況か」の基準。壁・特殊タイル・階段距離を明示する。"""
     if dist is None:
-        dist = d1_bfs(floor, x, y)
-    stairs = d1_stairs_cell(floor)
+        dist = dungeon_bfs(uid, floor, x, y)
+    stairs = dungeon_stairs_cell(uid, floor)
     stairs_steps = dist.get(stairs) if stairs else None
     criteria = {}
     for key, (dx, dy) in _DIRECTIONS.items():
         label = _DIRECTION_LABELS[key]
         nx, ny = x + dx, y + dy
-        if not (0 <= nx < D_MAP_W and 0 <= ny < D_MAP_H):
+        if not (0 <= nx < D2_MAP_W and 0 <= ny < D2_MAP_H):
             criteria[key] = f"{label}はマップ外（進めない）"
             continue
-        if d_get_cell(floor, nx, ny) == D_WALL:
+        if d_get_cell(uid, floor, nx, ny) == D_WALL:
             criteria[key] = f"{label}は壁（進めない）"
             continue
-        if dx and dy and (d_get_cell(floor, x + dx, y) == D_WALL or d_get_cell(floor, x, y + dy) == D_WALL):
-            criteria[key] = f"{label}は角の壁に阻まれて進めない"
-            continue
-        note = f"{label}は{d1_cell_label(floor, nx, ny)}（移動可）"
+        note = f"{label}は{dungeon_cell_label(uid, floor, nx, ny)}（移動可）"
         steps = dist.get((nx, ny))
         if stairs_steps is not None and steps is not None:
             note += f" 階段まで{steps}マス" + ("（近づく）" if steps < stairs_steps else "")
@@ -1338,8 +1921,8 @@ def d1_move_criteria(floor, x, y, dist=None):
     return criteria
 
 
-def d1_goal_text(uid):
-    """D1へ渡すゴール。階層目標・フロア目標・クエストを短くまとめる。"""
+def dungeon_goal_text(uid):
+    """Clefへ渡すゴール。階層目標・フロア目標・クエストを短くまとめる。"""
     p = d_get_player(uid)
     floor = p["floor"]
     parts = [f"{min(floor + 1, D_FLOORS)}Fへ進むため階段を探す"]
@@ -1353,18 +1936,18 @@ def d1_goal_text(uid):
     return " / ".join(parts)
 
 
-def d1_best_direction(uid, plan="安全探索", dist=None):
-    """D1の応答が使えない時のフォールバック。作戦に沿った合法手を必ず1つ返す。"""
+def dungeon_best_direction(uid, plan="安全探索", dist=None):
+    """Clefの応答が使えない時のフォールバック。作戦に沿った合法手を必ず1つ返す。"""
     p = d_get_player(uid)
     floor, x, y = p["floor"], p["x"], p["y"]
     if dist is None:
-        dist = d1_bfs(floor, x, y)
-    criteria = d1_move_criteria(floor, x, y, dist)
+        dist = dungeon_bfs(uid, floor, x, y)
+    criteria = dungeon_move_criteria(uid, floor, x, y, dist)
     legal = [key for key, text in criteria.items() if "移動可" in text]
     if not legal:
         return "up"
     specials = ("宝箱", "鉱山", "祭壇", "イベント", "商店", "休憩所", "階段")
-    if d1_plan_key(plan) == "treasure":
+    if dungeon_plan_key(plan) == "treasure":
         ranked = sorted(legal, key=lambda k: (
             not any(word in criteria[k] for word in specials),
             dist.get((x + _DIRECTIONS[k][0], y + _DIRECTIONS[k][1]), 9999),
@@ -1377,10 +1960,11 @@ def d1_best_direction(uid, plan="安全探索", dist=None):
 def d_make_reward_choices(uid, enemy):
     """戦闘勝利時の3候補。作戦教本を持つとコイン報酬が少し強化される。"""
     p = d_get_player(uid)
+    box_count = max(1, enemy.get("reward_box", 0))
     base = [
-        {"label": "コイン", "reward": {"coins": enemy.get("reward_coins", 0)}},
-        {"label": "経験値", "reward": {"xp": enemy.get("reward_xp", 0)}},
-        {"label": "宝箱", "reward": {"boxes": max(1, enemy.get("reward_box", 0))}},
+        {"label": f"コイン +{enemy.get('reward_coins', 0)}", "reward": {"coins": enemy.get("reward_coins", 0)}},
+        {"label": f"経験値 +{enemy.get('reward_xp', 0)}", "reward": {"xp": enemy.get("reward_xp", 0)}},
+        {"label": f"宝箱 ×{box_count}", "reward": {"boxes": box_count}},
     ]
     if "d1_tactics" in p.get("relics", []):
         base[0]["reward"]["season_score"] = 10
@@ -1423,7 +2007,7 @@ def d_end_run(uid, reason="ended"):
 
 
 def d_record_action(uid, action, source="manual", result=None, reward=None, hp_before=None):
-    """行動ログを記録する。D1の判断材料とUI表示の双方で使う。"""
+    """行動ログを記録する。Clefの判断材料とUI表示の双方で使う。"""
     p = d_get_player(uid)
     p["state_version"] += 1
     entry = {
@@ -1498,6 +2082,278 @@ def d_use_job_skill(uid, enemy):
     return "様子を見た。", 0
 
 
+async def d_current_cell_action(uid, db_api):
+    """現在マスのタイルを再発動し、表示用メッセージを返す。
+
+    操作メニューの「現在地を操作」と、メインパネル中央ボタン「部屋で行動」
+    で共用する（Phase 1-C）。階段・採掘・休憩・商店のみが対象。
+    """
+    uid = str(uid)
+    p = d_get_player(uid)
+    floor = p["floor"]
+    cell = d_get_cell(uid, floor, p["x"], p["y"])
+    msg = "この場所では操作できません。"
+    if cell == D_STAIRS and d_stairs_room_blocked(uid, floor, p["x"], p["y"]):
+        # Phase 1-D: 未制圧の階段部屋では番人を倒すまで階段を使えない。
+        msg = "階段は番人に守られている。番人を倒さないと使えない。"
+    elif cell == D_STAIRS and floor < D_FLOORS:
+        p["floor"] = floor + 1
+        p["hp"] = d_effective_stats(p)["max_hp"]
+        d_clear_status(uid)
+        p["x"], p["y"] = d_instance_start(uid, p["floor"])
+        d_progress_quest(uid, "floor", 1)
+        msg = f"階段を上り、{p['floor']}Fへ進みました。"
+    elif cell == D_MINE:
+        gain = d_do_mine(uid)
+        await d_apply_reward(uid, db_api, coins=gain)
+        d_consume(uid, floor, p["x"], p["y"])
+        msg = f"採掘してコインを{gain}枚獲得しました。"
+    elif cell == D_REST:
+        stats = d_effective_stats(p)
+        before = p["hp"]
+        p["hp"] = min(stats["max_hp"], p["hp"] + max(20, stats["max_hp"] // 3))
+        d_clear_status(uid)
+        d_consume(uid, floor, p["x"], p["y"])
+        msg = f"休憩してHPが {p['hp'] - before} 回復しました。"
+    elif cell == D_SHOP:
+        try:
+            await d_apply_reward(uid, db_api, coins=-30, bread=1)
+            msg = "商店でレアパンを購入しました。"
+        except Exception:
+            msg = "コイン不足で購入できません。"
+    await dg_save_player(uid, db_api)
+    return msg
+
+
+async def d_activate_room_entry(uid, db_api, room, result):
+    """部屋への初入室時に役割を発動する（Phase 1-D / 設計 §5）。
+
+    戦闘を開始する場合は敵 dict を返し、呼び出し側（journey）が結果へ
+    繋ぐ。それ以外は None を返す。商店/採掘の部屋は result["view"] を
+    設定する（消化扱いにはしない）。一度きりの部屋（宝箱/イベント/祠/
+    休憩）は発動と同時に制圧済みにし、部屋中央の役割タイルを消費する。
+    戦闘系（combat/stairs）は勝利時に DungeonCombatView._win から
+    制圧済みにされるため、ここでは倒すまで未制圧のままにしておく。
+    """
+    uid = str(uid)
+    p = d_get_player(uid)
+    floor = p["floor"]
+    inst = d_get_instance(uid, floor)
+    role = room.get("role")
+    if role == "combat":
+        if d_room_cleared(inst, room["id"]):
+            return None
+        result["messages"].append("戦闘の間だ。敵が現れた！")
+        return d_make_enemy(floor, forced_rank="normal")
+    if role == "stairs":
+        if d_room_cleared(inst, room["id"]):
+            return None
+        result["messages"].append("階段の間だ。番人が立ちはだかっている！")
+        return d_make_enemy(floor, forced_rank="boss" if room.get("boss") else "elite")
+    if role in ("shop", "mine"):
+        result["view"] = role
+        return None
+    if role not in ("chest", "event", "shrine", "rest"):
+        return None
+    if d_room_cleared(inst, room["id"]):
+        return None
+    if role == "chest":
+        text, reward = d_open_chest(uid, db_api)
+        await d_apply_reward(uid, db_api, **reward)
+    elif role == "event":
+        gain = random.randint(20, 80)
+        await d_apply_reward(uid, db_api, coins=gain, xp=gain, season_score=25)
+        text = f"旅人の依頼を達成した。コイン+{gain}、XP+{gain}"
+    elif role == "shrine":
+        p["atk"] += 2
+        text = "祭壇の祝福！ 基礎ATKが2上昇した。"
+    else:  # rest
+        before = p["hp"]
+        stats = d_effective_stats(p)
+        p["hp"] = min(stats["max_hp"], p["hp"] + max(20, stats["max_hp"] // 3))
+        d_clear_status(uid)
+        text = f"休憩した。HPが {p['hp'] - before} 回復し、状態異常が治った。"
+    cx, cy = room["center"]
+    d_consume(uid, floor, cx, cy)
+    d_mark_room_cleared(inst, room["id"])
+    result["messages"].append(text)
+    return None
+
+
+async def d_execute_journey(uid, db_api, direction, *, source="manual"):
+    """1回の移動判断（journey）を実行する（Phase 1-C / 設計 §4）。
+
+    d_plan_walk で計画した経路を1歩ずつ適用し、各歩で従来の1マス処理
+    （turns/スコア加算、状態異常 tick、クエスト進行、特殊タイル処理）を
+    行う。Phase 1-D 以降は、部屋への初入室で役割が発動し（戦闘・宝箱・
+    イベント等）、通路では初回通過マスだけアンブッシュ抽選を行う。
+    保存は journey の最後に1回だけ。描画と View 遷移は呼び出し側の
+    責務とし、本関数は結果だけを返す。action_log には journey を
+    1件として記録する。
+
+    戻り値: {
+      direction, steps, stop_reason, start, end, path,
+      messages: [ログ断片...]（先頭は「○へN歩進んだ。…」）,
+      view: None | "stairs" | "shop" | "mine" | "combat",
+      enemy: view == "combat" のときの敵 dict、それ以外は None,
+      room_id: 戦闘が部屋発動の場合その部屋 id、それ以外は None,
+      died: journey 中に力尽きたか,
+    }
+    """
+    uid = str(uid)
+    p = d_get_player(uid)
+    floor = p["floor"]
+    start = (p["x"], p["y"])
+    hp_before = p["hp"]
+    plan = d_plan_walk(uid, floor, start[0], start[1], direction)
+    result = {
+        "direction": plan["direction"],
+        "steps": 0,
+        "stop_reason": plan["stop_reason"],
+        "start": start,
+        "end": start,
+        "path": [],
+        "messages": [],
+        "view": None,
+        "enemy": None,
+        "room_id": None,
+        "died": False,
+    }
+    if not plan["path"]:
+        return result
+    inst = d_get_instance(uid, floor)
+    prev_room = d_room_at(inst, start[0], start[1])
+    # 立っている開始マスは「踏んだ」ものとして扱う（アンブッシュ抽選の対象外）。
+    inst.setdefault("traversed", set()).add(start)
+
+    def _apply_death():
+        result["stop_reason"] = "death"
+        result["died"] = True
+        p["hp"] = d_effective_stats(p)["max_hp"]
+        p["floor"] = 1
+        p["x"], p["y"] = d_instance_start(uid, 1)
+        result["messages"].append("力尽きた… スタート地点へ戻された")
+
+    for nx, ny in plan["path"]:
+        p["x"], p["y"] = nx, ny
+        result["steps"] += 1
+        result["path"].append((nx, ny))
+        p["turns"] += 1
+        p["season_score"] += 1
+        # 状態異常は移動ターンでも1回進める（Phase 0 のライフサイクル）。
+        status_logs = d_tick_status(uid)
+        if status_logs:
+            result["messages"].extend(status_logs)
+        if p["hp"] <= 0:
+            _apply_death()
+            break
+        for quest_key in d_progress_quest(uid, "turns", 1):
+            await d_apply_reward(uid, db_api, **QUEST_MASTER[quest_key]["reward"])
+        d_unlock_achievement(uid, "first_step")
+        if floor >= 10: d_unlock_achievement(uid, "floor_10")
+        if floor >= 20: d_unlock_achievement(uid, "floor_20")
+        if floor >= 40: d_unlock_achievement(uid, "floor_40")
+
+        # Phase 1-D: フォグの公開と部屋の初入室発動（設計 §5 / §6-1）。
+        room = d_room_at(inst, nx, ny)
+        traversed = inst.setdefault("traversed", set())
+        first_step_on_cell = (nx, ny) not in traversed
+        traversed.add((nx, ny))
+        first_corridor_step = False
+        if room is None:
+            first_corridor_step = first_step_on_cell
+            d_mark_corridor_visited(inst, nx, ny)
+        elif room is not prev_room:
+            d_reveal_room(inst, room)
+            enemy = await d_activate_room_entry(uid, db_api, room, result)
+            if enemy is not None:
+                result["enemy"] = enemy
+                result["view"] = "combat"
+                result["room_id"] = room["id"]
+                prev_room = room
+                break
+            if result["view"] in ("shop", "mine"):
+                prev_room = room
+                break
+        prev_room = room
+
+        ct = d_get_cell(uid, floor, nx, ny)
+        if ct == D_STAIRS:
+            if d_stairs_room_blocked(uid, floor, nx, ny):
+                # 未制圧の階段部屋では階段を使えず、番人戦になる（設計 §5）。
+                guard_room = d_room_at(inst, nx, ny)
+                result["enemy"] = d_make_enemy(
+                    floor, forced_rank="boss" if guard_room and guard_room.get("boss") else "elite")
+                result["stop_reason"] = "guard"
+                result["view"] = "combat"
+                result["room_id"] = guard_room["id"] if guard_room else None
+                break
+            result["stop_reason"] = "special"
+            result["view"] = "stairs"
+            break
+        if ct == D_SHOP:
+            result["stop_reason"] = "special"
+            result["view"] = "shop"
+            break
+        if ct == D_MINE:
+            result["stop_reason"] = "special"
+            result["view"] = "mine"
+            break
+        if ct in (D_CHEST, D_TRAP, D_REST, D_SHRINE, D_EVENT):
+            if ct == D_CHEST:
+                text, reward = d_open_chest(uid, db_api)
+                await d_apply_reward(uid, db_api, **reward)
+            elif ct == D_TRAP:
+                text, penalty = d_trigger_trap(uid)
+                await d_apply_reward(uid, db_api, **penalty)
+            elif ct == D_REST:
+                before = p["hp"]
+                stats = d_effective_stats(p)
+                p["hp"] = min(stats["max_hp"], p["hp"] + max(20, stats["max_hp"] // 3))
+                d_clear_status(uid)
+                text = f"休憩した。HPが {p['hp'] - before} 回復し、状態異常が治った。"
+            elif ct == D_SHRINE:
+                p["atk"] += 2
+                text = "祭壇の祝福！ 基礎ATKが2上昇した。"
+            else:  # D_EVENT
+                gain = random.randint(20, 80)
+                await d_apply_reward(uid, db_api, coins=gain, xp=gain, season_score=25)
+                text = f"旅人の依頼を達成した。コイン+{gain}、XP+{gain}"
+            d_consume(uid, floor, nx, ny)
+            result["messages"].append(text)
+            result["stop_reason"] = "special"
+            if p["hp"] <= 0:
+                _apply_death()
+            break
+
+        # 通路アンブッシュ（Phase 1-D / 確定事項 D4）: 部屋の外のマスを
+        # そのインスタンスで初めて踏んだときだけ 12% で通常戦闘が起きる。
+        # 歩行時のバイオーム率エンカウントは廃止した。
+        if room is None and first_corridor_step and random.random() < D_AMBUSH_RATE:
+            result["enemy"] = d_make_enemy(floor, forced_rank="normal")
+            result["stop_reason"] = "ambush"
+            result["view"] = "combat"
+            break
+        # 停止条件7: HPが30%未満まで低下したら、それ以上は進まない。
+        stats = d_effective_stats(p)
+        if p["hp"] < hp_before and p["hp"] < stats["max_hp"] * 0.30:
+            result["stop_reason"] = "low_hp"
+            break
+
+    result["end"] = (p["x"], p["y"])
+    label = _DIRECTION_LABELS.get(result["direction"], "")
+    head = f"{label}へ{result['steps']}歩進んだ。"
+    head += D_WALK_STOP_TEXTS.get(result["stop_reason"], "")
+    result["messages"].insert(0, head)
+    d_record_action(
+        uid, "journey", source=source,
+        result=f"{start}->{result['end']} {result['steps']}歩 {result['stop_reason']}",
+        hp_before=hp_before,
+    )
+    await dg_save_player(uid, db_api)
+    return result
+
+
 class _NoopResponse:
     """自動操作中に画面更新を無効化するためのダミー応答。"""
 
@@ -1517,7 +2373,7 @@ class _NoopInteraction:
 
 
 # 実行中の自動操作ヤー。DungeonCogが生成し、各Viewから参照する。
-_D1_PLAYER = None
+_CLEF_PLAYER = None
 
 
 def d_lock_callback(func):
@@ -1560,46 +2416,46 @@ class DungeonViewBase(View):
             item.disabled = True
 
 
-def d_dungeon_view(uid, supabase=None, plan=None):
+def d_dungeon_view(uid, db_api=None, plan=None):
     """保存済み状態から統合パネルを作り直す。全画面の「戻る」はここへ揃える。"""
     p = d_get_player(uid)
-    return DungeonUnifiedView(uid, p["floor"], p["x"], p["y"], supabase, plan=plan)
+    return DungeonUnifiedView(uid, p["floor"], p["x"], p["y"], db_api, plan=plan)
 
 
-async def d_return_to_dungeon(interaction, uid, supabase, msg=""):
+async def d_return_to_dungeon(interaction, uid, db_api, msg=""):
     """現在状態の統合パネルへ戻る。全画面共通の復帰処理。"""
     p = d_get_player(uid)
-    view = d_dungeon_view(uid, supabase)
+    view = d_dungeon_view(uid, db_api)
     map_file, map_url = d_map_attachment(uid, p["floor"], p["x"], p["y"])
     await interaction.edit_original_response(
         embed=view._embed(msg, image_url=map_url), view=view, attachments=[map_file]
     )
 
 
-def d1_plan_for(uid):
-    """現在のD1作戦。実行中は実行中のもの、停止中は最後に選んだものを返す。"""
-    if _D1_PLAYER is None:
-        return D1_PLANS["safe"]
-    return _D1_PLAYER.plan_for(uid)
+def clef_plan_for(uid):
+    """現在のClef作戦。実行中は実行中のもの、停止中は最後に選んだものを返す。"""
+    if _CLEF_PLAYER is None:
+        return CLEF_PLANS["safe"]
+    return _CLEF_PLAYER.plan_for(uid)
 
 
-def d1_status_text(uid):
-    """ステータス画面に表示するD1の実行状況。"""
-    if _D1_PLAYER is None:
+def clef_status_text(uid):
+    """ステータス画面に表示するClefの実行状況。"""
+    if _CLEF_PLAYER is None:
         return "未初期化"
-    return _D1_PLAYER.status_text(uid)
+    return _CLEF_PLAYER.status_text(uid)
 
 
 class DungeonStatusView(DungeonViewBase):
     """ステータス表示。自動操作の接続と作戦選択はこの画面へ集約する。"""
 
-    def __init__(self, uid, floor, x, y, supabase):
+    def __init__(self, uid, floor, x, y, db_api):
         super().__init__(uid, timeout=300)
         self.floor = floor
         self.x = x
         self.y = y
-        self.supabase = supabase
-        self.d1_plan = d1_plan_for(uid)
+        self.db_api = db_api
+        self.clef_plan = clef_plan_for(uid)
 
     def _embed(self, msg="", image_url=None):
         p = self.sync_state()
@@ -1617,7 +2473,7 @@ class DungeonStatusView(DungeonViewBase):
         em.add_field(name="遺物・属性", value=f"遺物: {', '.join(RELIC_MASTER.get(k, {}).get('name', k) for k in p.get('relics', [])) or 'なし'}\n装備属性: {', '.join(EQUIPMENT_MASTER.get(k, {}).get('element', 'none') for k in p.get('equipment', {}).values()) or 'none'}", inline=False)
         quests, _ = d_content_summary(self.uid)
         em.add_field(name="クエスト", value="\n".join(quests) if quests else "全クエスト達成", inline=False)
-        em.add_field(name="自動操作", value=f"作戦: **{self.d1_plan}**\n状態: {d1_status_text(self.uid)}", inline=False)
+        em.add_field(name="自動操作", value=f"作戦: **{self.clef_plan}**\n状態: {clef_status_text(self.uid)}", inline=False)
         return em
 
     async def _render(self, interaction, msg=""):
@@ -1628,18 +2484,18 @@ class DungeonStatusView(DungeonViewBase):
         )
 
     @discord.ui.button(label="自動操作開始", style=discord.ButtonStyle.blurple, row=0)
-    async def start_d1(self, interaction, button):
-        if _D1_PLAYER is None:
+    async def start_autoplay(self, interaction, button):
+        if _CLEF_PLAYER is None:
             await interaction.response.send_message("自動操作機能が初期化されていません。", ephemeral=True)
             return
-        # 押した時点の現在状態と作戦でD1を開始する（状態はダンジョンと共有）。
-        await _D1_PLAYER.start(interaction, self.d1_plan)
+        # 押した時点の現在状態と作戦で自動操作を開始する（状態はダンジョンと共有）。
+        await _CLEF_PLAYER.start(interaction, self.clef_plan)
 
     @discord.ui.button(label="操作メニュー", style=discord.ButtonStyle.green, row=0)
     async def operations(self, interaction, button):
         await interaction.response.defer()
         p = self.sync_state()
-        op = DungeonOperationView(self.uid, p["floor"], p["x"], p["y"], self.supabase)
+        op = DungeonOperationView(self.uid, p["floor"], p["x"], p["y"], self.db_api)
         map_file, map_url = d_map_attachment(self.uid, p["floor"], p["x"], p["y"])
         await interaction.edit_original_response(
             embed=op._embed("操作メニュー", image_url=map_url), view=op, attachments=[map_file]
@@ -1648,31 +2504,31 @@ class DungeonStatusView(DungeonViewBase):
     @discord.ui.button(label="ダンジョンへ戻る", style=discord.ButtonStyle.grey, row=0)
     async def back(self, interaction, button):
         await interaction.response.defer()
-        await d_return_to_dungeon(interaction, self.uid, self.supabase, "")
+        await d_return_to_dungeon(interaction, self.uid, self.db_api, "")
 
     @discord.ui.select(
-        placeholder="D1作戦を選択",
-        options=[discord.SelectOption(label=name, value=key) for key, name in D1_PLANS.items()],
+        placeholder="Clef作戦を選択",
+        options=[discord.SelectOption(label=name, value=key) for key, name in CLEF_PLANS.items()],
         row=1,
     )
     async def select_plan(self, interaction, select):
         await interaction.response.defer()
-        self.d1_plan = D1_PLANS.get(select.values[0], D1_PLANS["safe"])
-        if _D1_PLAYER is not None:
+        self.clef_plan = CLEF_PLANS.get(select.values[0], CLEF_PLANS["safe"])
+        if _CLEF_PLAYER is not None:
             # 実行中の場合は走行中の作戦も即時更新する。
-            _D1_PLAYER.set_plan(self.uid, self.d1_plan)
-        await self._render(interaction, f"D1作戦を **{self.d1_plan}** に設定しました。")
+            _CLEF_PLAYER.set_plan(self.uid, self.clef_plan)
+        await self._render(interaction, f"Clef作戦を **{self.clef_plan}** に設定しました。")
 
 
 class DungeonStairsView(DungeonViewBase):
     """階段View"""
 
-    def __init__(self, uid, floor, x, y, supabase):
+    def __init__(self, uid, floor, x, y, db_api):
         super().__init__(uid, timeout=180)
         self.floor = floor
         self.x = x
         self.y = y
-        self.supabase = supabase
+        self.db_api = db_api
 
     def _embed(self, msg="", image_url=None):
         em = discord.Embed(title="階段がある", color=0xFFFFFF, description=msg)
@@ -1693,14 +2549,18 @@ class DungeonStairsView(DungeonViewBase):
         await i.response.defer()
         p = self.sync_state()
         floor = p["floor"]
+        if d_stairs_room_blocked(self.uid, floor, p["x"], p["y"]):
+            # Phase 1-D: 番人を倒すまでは階段を使えない（防御的な再確認）。
+            await self._render(i, "階段は番人に守られている。番人を倒さないと使えない。")
+            return
         if floor < D_FLOORS:
             p["floor"] = floor + 1
             p["hp"] = d_effective_stats(p)["max_hp"]
-            d_ensure_map(p["floor"])
-            p["x"], p["y"] = dg_starts[p["floor"]]
+            d_clear_status(self.uid)
+            p["x"], p["y"] = d_instance_start(self.uid, p["floor"])
             d_progress_quest(self.uid, "floor", 1)
-            await dg_save_player(self.uid, self.supabase)
-            await d_return_to_dungeon(i, self.uid, self.supabase, f"フロア {p['floor']}へ到達！")
+            await dg_save_player(self.uid, self.db_api)
+            await d_return_to_dungeon(i, self.uid, self.db_api, f"フロア {p['floor']}へ到達！")
         else:
             await i.edit_original_response(embed=discord.Embed(title="ゴール！", description="ダンジョンをクリアしました！", color=0xFFFFFF))
 
@@ -1708,18 +2568,18 @@ class DungeonStairsView(DungeonViewBase):
     @d_lock_callback
     async def back(self, i, b):
         await i.response.defer()
-        await d_return_to_dungeon(i, self.uid, self.supabase, "")
+        await d_return_to_dungeon(i, self.uid, self.db_api, "")
 
 
 class DungeonMineView(DungeonViewBase):
     """採掘View"""
 
-    def __init__(self, uid, floor, x, y, supabase):
+    def __init__(self, uid, floor, x, y, db_api):
         super().__init__(uid, timeout=60)
         self.floor = floor
         self.x = x
         self.y = y
-        self.supabase = supabase
+        self.db_api = db_api
 
     def _embed(self, msg="", image_url=None):
         em = discord.Embed(title="鉱山", color=0xFFFFFF, description=msg)
@@ -1732,25 +2592,25 @@ class DungeonMineView(DungeonViewBase):
     async def mine(self, i, b):
         await i.response.defer()
         gain = d_do_mine(self.uid)
-        await d_apply_reward(self.uid, self.supabase, coins=gain)
-        d_consume(self.floor, self.x, self.y)
-        await dg_save_map(self.floor, self.supabase)
-        await dg_save_player(self.uid, self.supabase)
-        await d_return_to_dungeon(i, self.uid, self.supabase, f"採掘！ **+{gain}** コイン")
+        await d_apply_reward(self.uid, self.db_api, coins=gain)
+        d_consume(self.uid, self.floor, self.x, self.y)
+        await dg_save_player(self.uid, self.db_api)
+        await dg_save_player(self.uid, self.db_api)
+        await d_return_to_dungeon(i, self.uid, self.db_api, f"採掘！ **+{gain}** コイン")
 
     @discord.ui.button(label="戻る", style=discord.ButtonStyle.grey)
     @d_lock_callback
     async def back(self, i, b):
         await i.response.defer()
-        await d_return_to_dungeon(i, self.uid, self.supabase, "")
+        await d_return_to_dungeon(i, self.uid, self.db_api, "")
 
 
 class DungeonShopView(DungeonViewBase):
     """軽量な商店View。購入はサーバー側で価格を検証する。"""
 
-    def __init__(self, uid, floor, x, y, supabase):
+    def __init__(self, uid, floor, x, y, db_api):
         super().__init__(uid, timeout=120)
-        self.floor, self.x, self.y, self.supabase = floor, x, y, supabase
+        self.floor, self.x, self.y, self.db_api = floor, x, y, db_api
 
     def _embed(self, msg="", image_url=None):
         p = d_get_player(self.uid)
@@ -1765,11 +2625,11 @@ class DungeonShopView(DungeonViewBase):
     async def _buy(self, i, price, reward, label):
         await i.response.defer()
         try:
-            await d_apply_reward(self.uid, self.supabase, coins=-price, **reward)
+            await d_apply_reward(self.uid, self.db_api, coins=-price, **reward)
             msg = f"{label}を購入しました。"
         except Exception:
             msg = "コインが足りないか、購入に失敗しました。"
-        await dg_save_player(self.uid, self.supabase)
+        await dg_save_player(self.uid, self.db_api)
         p = self.sync_state()
         map_file, map_url = d_map_attachment(self.uid, p["floor"], p["x"], p["y"])
         await i.edit_original_response(embed=self._embed(msg, image_url=map_url), view=self, attachments=[map_file])
@@ -1788,13 +2648,13 @@ class DungeonShopView(DungeonViewBase):
     @d_lock_callback
     async def back(self, i, b):
         await i.response.defer()
-        await d_return_to_dungeon(i, self.uid, self.supabase, "")
+        await d_return_to_dungeon(i, self.uid, self.db_api, "")
 
 
 class DungeonCombatView(DungeonViewBase):
     """戦闘View"""
 
-    def __init__(self, uid, floor, x, y, enemy, supabase):
+    def __init__(self, uid, floor, x, y, enemy, db_api, room_id=None):
         super().__init__(uid, timeout=180)
         self.uid = uid
         self.floor = floor
@@ -1803,7 +2663,10 @@ class DungeonCombatView(DungeonViewBase):
         self.enemy = enemy
         self.log = []
         self.defending = False
-        self.supabase = supabase
+        self.db_api = db_api
+        # Phase 1-D: 部屋発動の戦闘の場合、勝利時にその部屋を制圧済みに
+        # する（combat 部屋の再発動防止、階段部屋のガード解除）。
+        self.room_id = room_id
 
     def _embed(self, msg="", image_url=None):
         p = self.sync_state()
@@ -1929,17 +2792,21 @@ class DungeonCombatView(DungeonViewBase):
             d_unlock_achievement(self.uid, "first_boss")
         d_apply_floor_goal(self.uid, "kills", 1)
         for quest_key in d_progress_quest(self.uid, "kills", 1):
-            await d_apply_reward(self.uid, self.supabase, **QUEST_MASTER[quest_key]["reward"])
+            await d_apply_reward(self.uid, self.db_api, **QUEST_MASTER[quest_key]["reward"])
 
     async def _win(self, i):
         e = self.enemy
         p = d_get_player(self.uid)
+        if self.room_id is not None:
+            # 部屋発動の戦闘に勝利したので部屋を制圧済みにする（Phase 1-D）。
+            # 逃走・敗北では呼ばれないため、未制圧のまま再挑戦できる。
+            d_mark_room_cleared(d_get_instance(self.uid, self.floor), self.room_id)
         if isinstance(i, _NoopInteraction):
             # 自動操作中は選択UIを挟まず、その場で戦利品を反映する。
             p["pending_rewards"] = []
             await self._register_kill()
             await d_apply_reward(
-                self.uid, self.supabase,
+                self.uid, self.db_api,
                 coins=e["reward_coins"], xp=e["reward_xp"], boxes=e["reward_box"],
                 season_score=500 if e.get("type") == "boss" else 25,
             )
@@ -1947,16 +2814,16 @@ class DungeonCombatView(DungeonViewBase):
             if e["reward_box"] > 0:
                 msg += f" +宝箱{e['reward_box']}個"
             self.log.append(msg)
-            await dg_save_player(self.uid, self.supabase)
+            await dg_save_player(self.uid, self.db_api)
             return
 
         choices = d_make_reward_choices(self.uid, e)
         await self._register_kill()
         p["pending_rewards"] = [c["reward"] for c in choices]
         self.log.append("勝利！報酬を3候補から1つ選択してください")
-        await dg_save_player(self.uid, self.supabase)
+        await dg_save_player(self.uid, self.db_api)
         self.stop()
-        view = DungeonRewardChoiceView(self.uid, self.floor, self.x, self.y, self.supabase, choices)
+        view = DungeonRewardChoiceView(self.uid, self.floor, self.x, self.y, self.db_api, choices)
         p = self.sync_state()
         map_file, map_url = d_map_attachment(self.uid, p["floor"], p["x"], p["y"])
         await i.edit_original_response(embed=self._embed(image_url=map_url), view=view, attachments=[map_file])
@@ -1965,13 +2832,13 @@ class DungeonCombatView(DungeonViewBase):
         p = d_get_player(self.uid)
         p["hp"] = d_effective_stats(p)["max_hp"]
         p["floor"] = 1
-        p["x"], p["y"] = dg_starts.get(1, (1, 1))
+        p["x"], p["y"] = d_instance_start(self.uid, 1)
         self.log.append("敗北… スタート地点へ送還された")
-        await dg_save_player(self.uid, self.supabase)
+        await dg_save_player(self.uid, self.db_api)
         self.stop()
         if isinstance(i, _NoopInteraction):
             return
-        await d_return_to_dungeon(i, self.uid, self.supabase, "敗北して戻された…")
+        await d_return_to_dungeon(i, self.uid, self.db_api, "敗北して戻された…")
 
     @discord.ui.button(label="攻撃", style=discord.ButtonStyle.red, row=0)
     @d_lock_callback
@@ -2035,7 +2902,7 @@ class DungeonCombatView(DungeonViewBase):
             escape_rate = min(0.95, escape_rate + 0.30)
         if random.random() < escape_rate:
             self.stop()
-            await d_return_to_dungeon(i, self.uid, self.supabase, "逃走成功")
+            await d_return_to_dungeon(i, self.uid, self.db_api, "逃走成功")
         else:
             self.log.append("逃げ失敗！\n" + self._enemy_turn())
             if d_get_player(self.uid)["hp"] <= 0:
@@ -2059,20 +2926,37 @@ class DungeonCombatView(DungeonViewBase):
         if p["hp"] <= 0:
             await self._lose(i)
             return
-        await dg_save_player(self.uid, self.supabase)
+        await dg_save_player(self.uid, self.db_api)
         await self._render(i)
 
 
 class DungeonMainView(DungeonViewBase):
     """ダンジョンメインView（統合パネルの基底）"""
 
-    def __init__(self, uid, floor, x, y, supabase):
+    def __init__(self, uid, floor, x, y, db_api):
         super().__init__(uid, timeout=600)
         self.uid = uid
         self.floor = floor
         self.x = x
         self.y = y
-        self.supabase = supabase
+        self.db_api = db_api
+        # 進めない方向のボタンは最初から無効化する（「壁！」の空振り防止）。
+        for child in self.children:
+            key = {"dg_u": "up", "dg_d": "down", "dg_l": "left", "dg_r": "right"}.get(
+                getattr(child, "custom_id", None))
+            if key is not None:
+                child.disabled = d_direction_blocked(uid, floor, x, y, key)
+
+    def _fresh_main_view(self, p):
+        """移動後の再描画用に作り直したメインView（ボタン無効状態を最新化する）。"""
+        return self
+
+    async def act_here_action(self, interaction):
+        """中央ボタン「部屋で行動」: 現在マスのタイルを再発動する。"""
+        await interaction.response.defer()
+        msg = await d_current_cell_action(self.uid, self.db_api)
+        p = self.sync_state()
+        await self._redraw(interaction, msg, p, view=self._fresh_main_view(p))
 
     def _embed(self, msg="", image_url=None):
         p = self.sync_state()
@@ -2085,8 +2969,10 @@ class DungeonMainView(DungeonViewBase):
         em.add_field(name="HP", value=f"{d_hpbar(p['hp'], stats['max_hp'])} {p['hp']}/{stats['max_hp']}", inline=True)
         quests, relics = d_content_summary(self.uid)
         em.add_field(name="冒険パネル", value=f"職業: {d_job_name(self.uid)}\nターン: {p['turns']} / スコア: {p['season_score']}\n遺物: {', '.join(relics) if relics else 'なし'}", inline=False)
+        em.add_field(name="フロア進捗", value=d_floor_progress_text(self.uid), inline=False)
+        em.add_field(name="凡例", value="🟩自分 🟨宝箱 🟥階段 🟪店 ⛏採掘 ✦祠・イベント R休憩 ⬛未探索（暗い場所は探索済み）", inline=False)
         em.add_field(name="進行中の目的", value="\n".join(quests) if quests else "全クエスト達成", inline=False)
-        em.add_field(name="自動操作", value=f"作戦: {getattr(self, 'd1_plan', d1_plan_for(self.uid))} / 状態: {d1_status_text(self.uid)}", inline=False)
+        em.add_field(name="自動操作", value=f"作戦: {getattr(self, 'clef_plan', clef_plan_for(self.uid))} / 状態: {clef_status_text(self.uid)}", inline=False)
         if msg:
             em.add_field(name="ログ", value=msg, inline=False)
         return em
@@ -2100,182 +2986,108 @@ class DungeonMainView(DungeonViewBase):
             embed=target._embed(msg, image_url=map_url), view=target, attachments=[map_file]
         )
 
-    async def _move(self, i, dx, dy):
+    async def _move(self, i, direction):
         lock = d_get_lock(self.uid)
         if lock.locked():
             await i.response.send_message("前の操作を処理中です。少し待ってください。", ephemeral=True)
             return
         await lock.acquire()
         try:
-            await self._move_locked(i, dx, dy)
+            await self._move_locked(i, direction)
         finally:
             lock.release()
 
-    async def _move_locked(self, i, dx, dy):
+    async def _move_locked(self, i, direction):
         await i.response.defer()
 
         # ビュー生成時のスナップショットではなく、常に保存済みの現在状態を使う。
         p = self.sync_state()
         floor = p["floor"]
-        nx, ny = p["x"] + dx, p["y"] + dy
 
-        # 境界チェック
-        if not (0 <= nx < D_MAP_W and 0 <= ny < D_MAP_H):
+        # 進めない方向は通常ボタン側で無効化しているが、古いパネル等からの
+        # 押下に備えてサーバー側でも弾く（描画は従来どおり1回だけ行う）。
+        if direction not in _DIRECTIONS or d_direction_blocked(
+                self.uid, floor, p["x"], p["y"], direction):
             await self._redraw(i, "壁！進めない", p)
             return
 
-        ct = d_get_cell(floor, nx, ny)
-        if dx != 0 and dy != 0 and (
-            d_get_cell(floor, p["x"] + dx, p["y"]) == D_WALL
-            or d_get_cell(floor, p["x"], p["y"] + dy) == D_WALL
-        ):
-            ct = D_WALL
-        if ct == D_WALL:
-            await self._redraw(i, "壁！進めない", p)
-            return
+        # 1押下 = 1 journey。歩行・タイル処理・保存は d_execute_journey 側で
+        # 行い、ここでは結果に応じた View 遷移と最終描画だけを行う。
+        result = await d_execute_journey(self.uid, self.db_api, direction, source="manual")
+        p = self.sync_state()
+        msg = "\n".join(result["messages"])
 
-        # 座標更新
-        p["x"], p["y"] = nx, ny
-
-        msg = ""
-
-        p["turns"] += 1
-        p["season_score"] += 1
-        completed_quests = d_progress_quest(self.uid, "turns", 1)
-        for quest_key in completed_quests:
-            quest_reward = QUEST_MASTER[quest_key]["reward"]
-            await d_apply_reward(self.uid, self.supabase, **quest_reward)
-        d_unlock_achievement(self.uid, "first_step")
-        if floor >= 10: d_unlock_achievement(self.uid, "floor_10")
-        if floor >= 20: d_unlock_achievement(self.uid, "floor_20")
-        if floor >= 40: d_unlock_achievement(self.uid, "floor_40")
-
-        # 特殊タイル判定
-        if ct == D_STAIRS:
-            await dg_save_player(self.uid, self.supabase)
-            sv = DungeonStairsView(self.uid, floor, p["x"], p["y"], self.supabase)
+        if result["view"] == "stairs":
+            sv = DungeonStairsView(self.uid, p["floor"], p["x"], p["y"], self.db_api)
             await self._redraw(i, "階段がある。どうする？", p, view=sv)
             return
-
-        elif ct == D_CHEST:
-            msg, reward = d_open_chest(self.uid, self.supabase)
-            await d_apply_reward(self.uid, self.supabase, **reward)
-            d_consume(floor, p["x"], p["y"])
-            await dg_save_map(floor, self.supabase)
-
-        elif ct == D_TRAP:
-            msg, penalty = d_trigger_trap(self.uid)
-            await d_apply_reward(self.uid, self.supabase, **penalty)
-            d_consume(floor, p["x"], p["y"])
-            await dg_save_map(floor, self.supabase)
-
-        elif ct == D_SHOP:
-            await dg_save_player(self.uid, self.supabase)
-            shop = DungeonShopView(self.uid, floor, p["x"], p["y"], self.supabase)
+        if result["view"] == "shop":
+            shop = DungeonShopView(self.uid, p["floor"], p["x"], p["y"], self.db_api)
             await self._redraw(i, "商店を発見！", p, view=shop)
             return
-
-        elif ct == D_REST:
-            before = p["hp"]
-            p["hp"] = min(d_effective_stats(p)["max_hp"], p["hp"] + max(20, d_effective_stats(p)["max_hp"] // 3))
-            msg = f"休憩した。HPが {p['hp'] - before} 回復した。"
-            d_consume(floor, p["x"], p["y"])
-            await dg_save_map(floor, self.supabase)
-
-        elif ct == D_SHRINE:
-            p["atk"] += 2
-            msg = "祭壇の祝福！ 基礎ATKが2上昇した。"
-            d_consume(floor, p["x"], p["y"])
-            await dg_save_map(floor, self.supabase)
-
-        elif ct == D_EVENT:
-            gain = random.randint(20, 80)
-            await d_apply_reward(self.uid, self.supabase, coins=gain, xp=gain, season_score=25)
-            msg = f"旅人の依頼を達成した。コイン+{gain}、XP+{gain}"
-            d_consume(floor, p["x"], p["y"])
-            await dg_save_map(floor, self.supabase)
-
-        elif ct == D_MINE:
-            mv = DungeonMineView(self.uid, floor, p["x"], p["y"], self.supabase)
+        if result["view"] == "mine":
+            mv = DungeonMineView(self.uid, p["floor"], p["x"], p["y"], self.db_api)
             await self._redraw(i, "鉱山を発見！", p, view=mv)
             return
-
-        else:
-            rate = D_ENCOUNTER_RATES.get(d_get_biome(floor)[0], 0.10)
-            if random.random() < rate:
-                enemy = d_make_enemy(floor)
-                cv = DungeonCombatView(self.uid, floor, p["x"], p["y"], enemy, self.supabase)
-                await dg_save_player(self.uid, self.supabase)
-                await self._redraw(i, "", p, view=cv)
-                return
-
-        # 死亡判定
-        if p["hp"] <= 0:
-            p["hp"] = d_effective_stats(p)["max_hp"]
-            p["floor"] = 1
-            p["x"], p["y"] = dg_starts.get(1, (1, 1))
-            msg += "\n力尽きた… スタート地点へ戻された"
-
-        # 最終的な画面更新
-        await dg_save_player(self.uid, self.supabase)
-        await self._redraw(i, msg, p)
-
-    @discord.ui.button(label="北西", style=discord.ButtonStyle.grey, row=0, custom_id="dg_lu")
-    async def leftup(self, i, b): await self._move(i, -1, -1)
+        if result["view"] == "combat":
+            cv = DungeonCombatView(self.uid, p["floor"], p["x"], p["y"], result["enemy"], self.db_api,
+                                   room_id=result.get("room_id"))
+            await self._redraw(i, msg, p, view=cv)
+            return
+        await self._redraw(i, msg, p, view=self._fresh_main_view(p))
 
     @discord.ui.button(label="北", style=discord.ButtonStyle.grey, row=0, custom_id="dg_u")
-    async def up(self, i, b): await self._move(i, 0, -1)
-
-    @discord.ui.button(label="北東", style=discord.ButtonStyle.grey, row=0, custom_id="dg_ru")
-    async def rightup(self, i, b): await self._move(i, 1, -1)
+    async def up(self, i, b): await self._move(i, "up")
 
     @discord.ui.button(label="西", style=discord.ButtonStyle.grey, row=1, custom_id="dg_l")
-    async def left(self, i, b): await self._move(i, -1, 0)
+    async def left(self, i, b): await self._move(i, "left")
 
-    @discord.ui.button(label="ENTER", style=discord.ButtonStyle.grey, row=1, custom_id="dg_c")
-    async def check(self, i, b): await self._move(i, 0, 0)
+    @discord.ui.button(label="部屋で行動", style=discord.ButtonStyle.green, row=1, custom_id="dg_c")
+    async def act_here(self, i, b): await self.act_here_action(i)
 
     @discord.ui.button(label="東", style=discord.ButtonStyle.grey, row=1, custom_id="dg_r")
-    async def right(self, i, b): await self._move(i, 1, 0)
-
-    @discord.ui.button(label="南西", style=discord.ButtonStyle.grey, row=2, custom_id="dg_ld")
-    async def leftdown(self, i, b): await self._move(i, -1, 1)
+    async def right(self, i, b): await self._move(i, "right")
 
     @discord.ui.button(label="南", style=discord.ButtonStyle.grey, row=2, custom_id="dg_d")
-    async def down(self, i, b): await self._move(i, 0, 1)
-
-    @discord.ui.button(label="南東", style=discord.ButtonStyle.grey, row=2, custom_id="dg_rd")
-    async def rightdown(self, i, b): await self._move(i, 1, 1)
+    async def down(self, i, b): await self._move(i, "down")
 
     @discord.ui.button(label="STATUS", style=discord.ButtonStyle.green, row=3, custom_id="dg_status")
     async def status(self, i, b):
         await i.response.defer()
         p = self.sync_state()
-        sv = DungeonStatusView(self.uid, p["floor"], p["x"], p["y"], self.supabase)
+        sv = DungeonStatusView(self.uid, p["floor"], p["x"], p["y"], self.db_api)
         await sv._render(i, "")
 class DungeonUnifiedView(DungeonMainView):
     """ゲームハブから起動したダンジョン一つで操作を完結させる圧縮UI。
 
-    D1の接続ボタンと作戦選択はSTATUS画面へ集約し、このパネルには移動と終了だけを残す。
+    Clef自動操作の開始ボタンと作戦選択はSTATUS画面へ集約し、このパネルには移動と終了だけを残す。
     """
 
-    def __init__(self, uid, floor, x, y, supabase, plan=None):
-        super().__init__(uid, floor, x, y, supabase)
-        self.d1_plan = plan or d1_plan_for(uid)
+    def __init__(self, uid, floor, x, y, db_api, plan=None):
+        super().__init__(uid, floor, x, y, db_api)
+        self.clef_plan = plan or clef_plan_for(uid)
         self.clear_items()
+        # Phase 1-C: 4方向＋中央「部屋で行動」。進めない方向は disabled。
+        # Phase 1-D: ラベルに行き先情報（発見済み=役割名 / 未発見=未探索 / 通路）。
         directions = [
-            ("北西", -1, -1, 0), ("北", 0, -1, 0), ("北東", 1, -1, 0),
-            ("西", -1, 0, 1), ("ENTER", 0, 0, 1), ("東", 1, 0, 1),
-            ("南西", -1, 1, 2), ("南", 0, 1, 2), ("南東", 1, 1, 2),
+            ("北", "up", 0), ("西", "left", 1), ("東", "right", 1), ("南", "down", 2),
         ]
-        for label, dx, dy, row in directions:
+        for label, key, row in directions:
+            blocked = d_direction_blocked(uid, floor, x, y, key)
+            dest = None if blocked else d_destination_label(uid, floor, x, y, key)
             button = discord.ui.Button(
-                label=label, style=discord.ButtonStyle.green if label == "ENTER" else discord.ButtonStyle.grey, row=row
+                label=f"{label}: {dest}" if dest else label,
+                style=discord.ButtonStyle.grey, row=row,
+                disabled=blocked,
             )
-            async def move_callback(interaction, dx=dx, dy=dy):
-                await self._move(interaction, dx, dy)
+            async def move_callback(interaction, key=key):
+                await self._move(interaction, key)
             button.callback = move_callback
             self.add_item(button)
+
+        center = discord.ui.Button(label="部屋で行動", style=discord.ButtonStyle.green, row=1)
+        center.callback = self.act_here_action
+        self.add_item(center)
 
         status_button = discord.ui.Button(label="STATUS", style=discord.ButtonStyle.green, row=3)
         status_button.callback = self.open_status
@@ -2284,18 +3096,21 @@ class DungeonUnifiedView(DungeonMainView):
         stop.callback = self.end_session
         self.add_item(stop)
 
+    def _fresh_main_view(self, p):
+        return DungeonUnifiedView(self.uid, p["floor"], p["x"], p["y"], self.db_api, plan=self.clef_plan)
+
     async def open_status(self, interaction):
-        """ステータス画面（D1開始・作戦選択を含む）を開く。"""
+        """ステータス画面（自動操作開始・作戦選択を含む）を開く。"""
         await interaction.response.defer()
         p = self.sync_state()
-        sv = DungeonStatusView(self.uid, p["floor"], p["x"], p["y"], self.supabase)
-        sv.d1_plan = self.d1_plan
+        sv = DungeonStatusView(self.uid, p["floor"], p["x"], p["y"], self.db_api)
+        sv.clef_plan = self.clef_plan
         await sv._render(interaction, "")
 
     async def end_session(self, interaction):
-        """D1を止め、操作を終了する。"""
-        if _D1_PLAYER is not None:
-            await _D1_PLAYER.stop(self.uid)
+        """自動操作を止め、操作を終了する。"""
+        if _CLEF_PLAYER is not None:
+            await _CLEF_PLAYER.stop(self.uid)
         self.stop()
         await interaction.response.defer()
         p = self.sync_state()
@@ -2307,13 +3122,12 @@ class DungeonUnifiedView(DungeonMainView):
 class DungeonOperationView(DungeonViewBase):
     """ステータス・アイテム・拠点・現在地操作を1画面に集約する。"""
 
-    def __init__(self, uid, floor, x, y, supabase):
+    def __init__(self, uid, floor, x, y, db_api):
         super().__init__(uid, timeout=600)
-        self.floor, self.x, self.y, self.supabase = floor, x, y, supabase
+        self.floor, self.x, self.y, self.db_api = floor, x, y, db_api
         self._add("STATUS", self.status, 0, discord.ButtonStyle.green)
         self._add("パン", self.use_bread, 0, discord.ButtonStyle.blurple)
         self._add("現在地を操作", self.current_action, 1, discord.ButtonStyle.primary)
-        self._add("拠点", self.camp, 1, discord.ButtonStyle.grey)
         self._add("実績", self.achievements, 2, discord.ButtonStyle.grey)
         self._add("所持品", self.show_inventory, 2, discord.ButtonStyle.grey)
         self._add("NPC/依頼", self.show_npcs, 2, discord.ButtonStyle.grey)
@@ -2349,13 +3163,13 @@ class DungeonOperationView(DungeonViewBase):
         return em
 
     async def _back(self, interaction, msg=""):
-        await d_return_to_dungeon(interaction, self.uid, self.supabase, msg)
+        await d_return_to_dungeon(interaction, self.uid, self.db_api, msg)
 
     async def status(self, interaction):
-        """ステータス画面（D1開始・作戦選択）を開く。"""
+        """ステータス画面（自動操作開始・作戦選択）を開く。"""
         await interaction.response.defer()
         p = self.sync_state()
-        status = DungeonStatusView(self.uid, p["floor"], p["x"], p["y"], self.supabase)
+        status = DungeonStatusView(self.uid, p["floor"], p["x"], p["y"], self.db_api)
         await status._render(interaction, "")
 
     async def use_bread(self, interaction):
@@ -2368,22 +3182,13 @@ class DungeonOperationView(DungeonViewBase):
         before = p["hp"]
         p["bread"] -= 1
         p["hp"] = min(stats["max_hp"], p["hp"] + max(25, stats["max_hp"] // 4))
-        await dg_save_player(self.uid, self.supabase)
+        await dg_save_player(self.uid, self.db_api)
         await self._back(interaction, f"レアパンを使用し、HPが {p['hp'] - before} 回復しました。")
 
     async def camp(self, interaction):
+        """拠点は共有マップ前提の機能だったため Phase 1-B で無効化（既存データは保持する）。"""
         await interaction.response.defer()
-        p = self.sync_state()
-        if p["floor"] != 1 and p["floor"] % 5 != 0:
-            await self._back(interaction, "拠点は1階または5階ごとのフロアで設置できます。")
-            return
-        d_ensure_map(p["floor"])
-        dg_maps[p["floor"]][p["y"]][p["x"]] = D_BASE
-        await dg_save_base(self.uid, p["floor"], p["x"], p["y"], self.supabase)
-        await dg_save_map(p["floor"], self.supabase)
-        d_unlock_achievement(self.uid, "camp_builder")
-        await dg_save_player(self.uid, self.supabase)
-        await self._back(interaction, "現在地に拠点を設置しました。")
+        await self._back(interaction, "拠点機能は現在利用できません。")
 
     async def achievements(self, interaction):
         await interaction.response.defer()
@@ -2422,7 +3227,7 @@ class DungeonOperationView(DungeonViewBase):
         msg = "鍛冶対象の武器がありません。"
         if weapon and d_upgrade_equipment(self.uid, weapon):
             msg = f"{EQUIPMENT_MASTER[weapon]['name']}を強化しました。"
-        await dg_save_player(self.uid, self.supabase)
+        await dg_save_player(self.uid, self.db_api)
         await self._back(interaction, msg)
 
     async def select_job(self, interaction):
@@ -2436,42 +3241,13 @@ class DungeonOperationView(DungeonViewBase):
             await self._back(interaction, "無効な職業です。")
             return
         p["job"] = selected
-        await dg_save_player(self.uid, self.supabase)
+        await dg_save_player(self.uid, self.db_api)
         await self._back(interaction, f"職業を **{JOB_MASTER[selected]['name']}** に設定しました。")
 
     async def current_action(self, interaction):
         await interaction.response.defer()
-        p = self.sync_state()
-        floor = p["floor"]
-        cell = d_get_cell(floor, p["x"], p["y"])
-        msg = "この場所では操作できません。"
-        if cell == D_STAIRS and floor < D_FLOORS:
-            p["floor"] = floor + 1
-            p["hp"] = d_effective_stats(p)["max_hp"]
-            d_ensure_map(p["floor"])
-            p["x"], p["y"] = dg_starts[p["floor"]]
-            d_progress_quest(self.uid, "floor", 1)
-            msg = f"階段を上り、{p['floor']}Fへ進みました。"
-        elif cell == D_MINE:
-            gain = d_do_mine(self.uid)
-            await d_apply_reward(self.uid, self.supabase, coins=gain)
-            d_consume(floor, p["x"], p["y"])
-            await dg_save_map(floor, self.supabase)
-            msg = f"採掘してコインを{gain}枚獲得しました。"
-        elif cell == D_REST:
-            stats = d_effective_stats(p)
-            before = p["hp"]
-            p["hp"] = min(stats["max_hp"], p["hp"] + max(20, stats["max_hp"] // 3))
-            d_consume(floor, p["x"], p["y"])
-            await dg_save_map(floor, self.supabase)
-            msg = f"休憩してHPが {p['hp'] - before} 回復しました。"
-        elif cell == D_SHOP:
-            try:
-                await d_apply_reward(self.uid, self.supabase, coins=-30, bread=1)
-                msg = "商店でレアパンを購入しました。"
-            except Exception:
-                msg = "コイン不足で購入できません。"
-        await dg_save_player(self.uid, self.supabase)
+        # 実処理は d_current_cell_action に集約（メインパネルの中央ボタンと共用）。
+        msg = await d_current_cell_action(self.uid, self.db_api)
         await self._back(interaction, msg)
 
     async def back(self, interaction):
@@ -2482,13 +3258,13 @@ class DungeonOperationView(DungeonViewBase):
 class DungeonRewardChoiceView(DungeonViewBase):
     """戦闘勝利時に3候補から1つだけ受け取るView。"""
 
-    def __init__(self, uid, floor, x, y, supabase, choices):
+    def __init__(self, uid, floor, x, y, db_api, choices):
         super().__init__(uid, timeout=120)
-        self.floor, self.x, self.y, self.supabase, self.choices = floor, x, y, supabase, choices
+        self.floor, self.x, self.y, self.db_api, self.choices = floor, x, y, db_api, choices
         for index, item in enumerate(choices):
             button = discord.ui.Button(label=item["label"], style=discord.ButtonStyle.green, row=0)
 
-            async def choose(interaction, index=index):
+            async def choose(interaction, index=index, label=item["label"]):
                 await interaction.response.defer()
                 p = d_get_player(self.uid)
                 if not p.get("pending_rewards"):
@@ -2502,19 +3278,19 @@ class DungeonRewardChoiceView(DungeonViewBase):
                         embed=discord.Embed(title="報酬の選択に失敗しました"), view=self
                     )
                     return
-                await d_apply_reward(self.uid, self.supabase, **reward)
-                await dg_save_player(self.uid, self.supabase)
+                await d_apply_reward(self.uid, self.db_api, **reward)
+                await dg_save_player(self.uid, self.db_api)
                 self.stop()
-                await d_return_to_dungeon(interaction, self.uid, self.supabase, f"報酬を選択: {item['label']}")
+                await d_return_to_dungeon(interaction, self.uid, self.db_api, f"報酬を選択: {label}")
 
             button.callback = choose
             self.add_item(button)
 
 
-class D1DungeonPlayer:
-    """d1-omni によるダンジョン代理プレイ（旧 d1_dangeon.py を統合）。
+class ClefDungeonPlayer:
+    """Logfare Clef によるダンジョン代理プレイ。
 
-    D1へ渡すのは「現在の状態」「今回の選択肢と判断基準」「直近のログ」だけに絞る。
+    Clefへ渡すのは「現在の状態」「今回の選択肢と判断基準」「直近のログ」だけに絞る。
     ゲーム状態の確定・ダメージ・報酬・保存はすべて本体側が担当し、
     モデルは次の1手を選ぶことだけに責務を限定する。
     """
@@ -2525,112 +3301,24 @@ class D1DungeonPlayer:
         self._stops = {}
         self._plans = {}
         self._run_stats = {}
-        self.service_name = os.environ.get("D1_SERVICE_NAME", "llama-d1-omni")
-        self.start_command = os.environ.get("D1_START_COMMAND", "")
-        self._vision_ready = False
-        self._service_lock = asyncio.Lock()
-        self._ready_until = 0.0
-
-    # ---------- D1サービス疎通 ----------
-
-    async def _test_vision_capability(self):
-        """/v1/modelsを確認し、現在のサービスが画像対応で起動しているか判定する。"""
-        try:
-            timeout = aiohttp.ClientTimeout(total=3.0)
-            async with aiohttp.ClientSession(timeout=timeout) as session:
-                async with session.get(D1_ENDPOINT.rsplit("/", 1)[0] + "/models") as response:
-                    if response.status != 200:
-                        return False
-                    data = await response.json(content_type=None)
-                    text = str(data).lower()
-                    return "multimodal" in text or "vision" in text or "image" in text
-        except (aiohttp.ClientError, asyncio.TimeoutError, OSError, ValueError):
-            return False
-
-    async def _test_response(self):
-        """d1_test.pyと同じ最小pingでsystemoneの稼働を確認する。"""
-        payload = {"state": "ping", "questions": {"ping": {"type": "noul", "instructions": "Is this a test?"}}}
-        started = time.perf_counter()
-        try:
-            timeout = aiohttp.ClientTimeout(total=3.0)
-            async with aiohttp.ClientSession(timeout=timeout) as session:
-                async with session.post(D1_ENDPOINT, json=payload) as response:
-                    self._timing("ping status=%s elapsed_ms=%.0f", response.status, (time.perf_counter() - started) * 1000)
-                    return response.status == 200
-        except (aiohttp.ClientError, asyncio.TimeoutError, OSError):
-            self._timing("ping failed elapsed_ms=%.0f", (time.perf_counter() - started) * 1000)
-            return False
-
-    def _timing(self, message, *args):
-        """D1の遅延調査用ログ。通常は無効で、UIには表示しない。"""
-        if D1_TIMING_LOG:
-            logger.info("[d1-timing] " + message, *args)
-
-    async def _start_service(self):
-        """d1_test.pyと同じsystemdサービス起動手順を実行する。"""
-        try:
-            if self.start_command:
-                process = await asyncio.create_subprocess_shell(
-                    self.start_command, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
-                )
-            else:
-                process = await asyncio.create_subprocess_exec(
-                    "sudo", "systemctl", "restart", self.service_name,
-                    stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
-                )
-            await asyncio.wait_for(process.communicate(), timeout=15.0)
-            return process.returncode == 0
-        except (asyncio.TimeoutError, OSError):
-            return False
-
-    async def _ensure_d1_ready(self, logs, require_vision=False):
-        """ping→起動→モデルロード待機→再pingを一度だけ行う。"""
-        if time.monotonic() < self._ready_until and (not require_vision or self._vision_ready):
-            return True
-        async with self._service_lock:
-            if time.monotonic() < self._ready_until and (not require_vision or self._vision_ready):
-                return True
-            if await self._test_response():
-                self._vision_ready = await self._test_vision_capability() if require_vision else False
-                self._ready_until = time.monotonic() + D1_READY_CACHE_SECONDS
-                if require_vision and not self._vision_ready:
-                    logs.append("D1サービスは応答しますが画像機能が無効です。mmproj付き起動が必要です。")
-                return True
-            logs.append("D1応答なし。systemdサービスを起動します。")
-            if not await self._start_service():
-                logs.append(f"D1サービス起動失敗: {self.service_name}")
-                return False
-            logs.append("D1サービスを起動しました。モデルロードを待機中です。")
-            for _ in range(12):
-                await asyncio.sleep(2.5)
-                if await self._test_response():
-                    self._vision_ready = await self._test_vision_capability() if require_vision else False
-                    self._ready_until = time.monotonic() + D1_READY_CACHE_SECONDS
-                    logs.append("D1サービスの応答を確認しました。")
-                    if require_vision and not self._vision_ready:
-                        logs.append("D1サービスの画像機能を確認できません。D1_MMPROJまたは--mmprojを設定してください。")
-                    return True
-            logs.append("D1サービスは起動しましたが、応答待ちがタイムアウトしました。")
-            return False
-
-    # ---------- D1への入力生成 ----------
+    # ---------- Clefへの入力生成 ----------
 
     def _state_text(self, uid, plan, logs):
-        """D1へ渡す唯一のテキスト。ゴールと現在状態を先頭に、ログは短く末尾へ置く。"""
+        """Clefへ渡す唯一のテキスト。ゴールと現在状態を先頭に、ログは短く末尾へ置く。"""
         p = d_get_player(uid)
         stats = d_effective_stats(p)
         floor, x, y = p["floor"], p["x"], p["y"]
         bname, *_ = d_get_biome(floor)
-        dist = d1_bfs(floor, x, y)
+        dist = dungeon_bfs(uid, floor, x, y)
         hp_pct = int(p["hp"] / max(1, stats["max_hp"]) * 100)
         header = [
             "# 現在の状態",
             f"作戦: {plan}",
             f"階層: {floor}F({bname}) / 位置: ({x},{y}) / フロア特性: {d_floor_modifier(floor)}",
             f"HP: {p['hp']}/{stats['max_hp']} ({hp_pct}%) / ATK {stats['atk']} DEF {stats['def_']} / 職業: {d_job_name(uid)}",
-            f"目的: {d1_goal_text(uid)}",
-            f"階段: {d1_stairs_hint(floor, x, y, dist)}",
-            f"周囲: {d1_surround_text(floor, x, y)}",
+            f"目的: {dungeon_goal_text(uid)}",
+            f"階段: {dungeon_stairs_hint(uid, floor, x, y, dist)}",
+            f"周囲: {dungeon_surround_text(uid, floor, x, y)}",
         ]
         last = self._run_stats.get(uid, {}).get("last_result")
         if last:
@@ -2638,12 +3326,12 @@ class D1DungeonPlayer:
         header.append("直近のログ:")
         head_text = "\n".join(header)
         lines = []
-        for line in [entry for entry in logs if entry and not str(entry).startswith("候補評価:")][-D1_LOG_LINES:]:
+        for line in [entry for entry in logs if entry and not str(entry).startswith("候補評価:")][-CLEF_LOG_LINES:]:
             lines.append("- " + " ".join(str(line).split())[:160])
         log_text = "\n".join(lines)
-        remaining = D1_STATE_CHARS - len(head_text) - 1
+        remaining = CLEF_STATE_CHARS - len(head_text) - 1
         if remaining <= 0:
-            return head_text[:D1_STATE_CHARS]
+            return head_text[:CLEF_STATE_CHARS]
         return head_text + "\n" + log_text[-remaining:]
 
     def _battle_criteria(self, uid, enemy):
@@ -2662,96 +3350,48 @@ class D1DungeonPlayer:
         }
 
     async def _decide(self, uid, logs, plan, questions):
-        """テキスト盤面を基本に、設定時だけ地図画像を添えてD1へ1問だけ投げる。"""
-        p = d_get_player(uid)
-        image_bytes = None
-        if D1_SEND_IMAGES:
-            image = d_build_map_image(uid, p["floor"], p["x"], p["y"])
-            buf = io.BytesIO()
-            image.save(buf, format="PNG")
-            image_bytes = buf.getvalue()
-        return await self._call_d1(logs, self._state_text(uid, plan, logs), image_bytes, questions)
-
-    async def _call_d1(self, logs, state_text, image_bytes, questions):
-        """公式のSystem One形式でd1-omniへテキスト、必要時のみ画像を送る。"""
-        if not await self._ensure_d1_ready(logs, require_vision=bool(image_bytes)):
-            return ""
-        payload = {
-            "state": state_text,
-            "questions": questions,
-        }
-        if image_bytes:
-            payload["images"] = ["data:image/png;base64," + base64.b64encode(image_bytes).decode("ascii")]
-        timeout = aiohttp.ClientTimeout(total=D1_HTTP_TIMEOUT)
-        for attempt in range(1, D1_HTTP_RETRIES + 1):
-            started = time.perf_counter()
+        """Clefに状態と選択肢を送り、選択肢キーだけを返す。"""
+        state_text = self._state_text(uid, plan, logs)
+        timeout = aiohttp.ClientTimeout(total=CLEF_TIMEOUT)
+        last_error = None
+        for attempt in range(1, CLEF_RETRIES + 1):
             try:
-                async with aiohttp.ClientSession(timeout=timeout) as session:
-                    async with session.post(D1_ENDPOINT, json=payload) as response:
-                        body = await response.text()
-                        self._timing(
-                            "request attempt=%s status=%s elapsed_ms=%.0f state_chars=%s question_chars=%s image_bytes=%s",
-                            attempt, response.status, (time.perf_counter() - started) * 1000,
-                            len(state_text), sum(len(str(v)) for v in questions.values()), len(image_bytes or b""),
-                        )
-                        if response.status != 200:
-                            self._ready_until = 0.0
-                            detail = " ".join(body.split())[:240]
-                            if response.status == 501 and ("image input" in body.lower() or "mmproj" in body.lower()):
-                                self._vision_ready = False
-                                logs.append("D1画像入力が拒否されました。クライアント形式は正しいため、D1サービスをmmproj付きで再起動してください。")
-                            logs.append(f"D1 APIエラー: HTTP {response.status}" + (f" / {detail}" if detail else ""))
-                            # 5xx/429はモデルロードや一時的な過負荷の可能性があるため再試行する。
-                            if attempt < D1_HTTP_RETRIES and response.status in (408, 429, 500, 502, 503, 504):
-                                await asyncio.sleep(D1_HTTP_RETRY_DELAY * attempt)
-                                continue
-                            return ""
-                        try:
-                            data = await response.json(content_type=None)
-                        except Exception:
-                            detail = " ".join(body.split())[:240]
-                            logs.append("D1 APIエラー: JSON応答を解釈できません" + (f" / {detail}" if detail else ""))
-                            if attempt < D1_HTTP_RETRIES:
-                                await asyncio.sleep(D1_HTTP_RETRY_DELAY * attempt)
-                                continue
-                            return ""
-                        answers = data.get("answers", {}) if isinstance(data, dict) else {}
-                        key = next(iter(questions), "")
-                        answer = answers.get(key, {}) if isinstance(answers, dict) else {}
-                        if isinstance(answer, str):
-                            return answer
-                        if isinstance(answer, dict):
-                            choice = answer.get("choice") or answer.get("answer") or answer.get("value")
-                            if choice is not None:
-                                return str(choice)
-                        if isinstance(data, dict) and data.get("choice") is not None:
-                            return str(data["choice"])
-                        logs.append("D1 APIエラー: choice結果がありません")
-                        if attempt < D1_HTTP_RETRIES:
-                            await asyncio.sleep(D1_HTTP_RETRY_DELAY * attempt)
-                            continue
-                        return ""
+                data = await asyncio.wait_for(
+                    logfare.decision("clef", state_text, questions, timeout=timeout),
+                    timeout=CLEF_TIMEOUT,
+                )
+                if isinstance(data.get("result"), dict):
+                    data = data["result"]
+                answers = data.get("answers", {})
+                key = next(iter(questions), "")
+                answer = answers.get(key, {}) if isinstance(answers, dict) else {}
+                if isinstance(answer, str):
+                    return answer
+                if isinstance(answer, dict):
+                    choice = answer.get("choice") or answer.get("answer") or answer.get("value")
+                    if choice is not None:
+                        return str(choice)
+                choice = data.get("choice") if isinstance(data, dict) else None
+                if choice is not None:
+                    return str(choice)
+                raise ValueError("Clef response did not contain an answer choice")
             except asyncio.CancelledError:
                 raise
-            except asyncio.TimeoutError:
-                # pingは成功しても、画像エンコード＋推論はモデルロード直後に時間がかかる。
-                # これはサービス停止ではないため、再試行後にのみ1回の判断失敗として記録する。
-                if attempt < D1_HTTP_RETRIES:
-                    logs.append(f"D1推論が{D1_HTTP_TIMEOUT:.0f}秒で未完了。{attempt + 1}回目を再試行します。")
-                    await asyncio.sleep(D1_HTTP_RETRY_DELAY * attempt)
-                    continue
-                logs.append(f"D1推論タイムアウト（{D1_HTTP_RETRIES}回試行）。作戦フォールバックを使用します。")
-            except (aiohttp.ClientError, OSError) as exc:
-                if attempt < D1_HTTP_RETRIES:
-                    logs.append(f"D1接続一時失敗（{type(exc).__name__}）。再試行します。")
-                    await asyncio.sleep(D1_HTTP_RETRY_DELAY * attempt)
-                    continue
-                logs.append(f"D1接続エラー: {type(exc).__name__}")
+            except (logfare.LogfareHTTPError, aiohttp.ClientError, asyncio.TimeoutError, OSError, RuntimeError, ValueError) as exc:
+                last_error = exc
+                status = getattr(exc, "status", None)
+                logs.append(f"Clef APIエラー{f' (HTTP {status})' if status else ''}。")
+                retryable = status is None or status in (408, 429, 500, 502, 503, 504)
+                if not retryable or attempt >= CLEF_RETRIES:
+                    break
+                await asyncio.sleep(CLEF_RETRY_DELAY * attempt)
             except Exception as exc:
-                logs.append(f"D1接続エラー: {type(exc).__name__}")
-                return ""
+                last_error = exc
+                logs.append(f"Clef判断エラー: {type(exc).__name__}")
+                break
+        if last_error:
+            logger.warning("Dungeon Clef decision failed: %s", type(last_error).__name__)
         return ""
-
     # ---------- 実行制御 ----------
 
     def is_running(self, uid):
@@ -2759,7 +3399,7 @@ class D1DungeonPlayer:
         return bool(task and not task.done())
 
     def plan_for(self, uid):
-        return self._plans.get(str(uid), D1_PLANS["safe"])
+        return self._plans.get(str(uid), CLEF_PLANS["safe"])
 
     def set_plan(self, uid, plan):
         self._plans[str(uid)] = plan
@@ -2780,9 +3420,9 @@ class D1DungeonPlayer:
             return False
         await interaction.response.defer()
         self._plans[uid] = plan
-        # 押した時点の保存済み状態から、表示もD1の判断も同一のフレームで始める。
+        # 押した時点の保存済み状態から、表示もClefの判断も同一のフレームで始める。
         p = d_get_player(uid)
-        view = DungeonUnifiedView(uid, p["floor"], p["x"], p["y"], self.bot.supabase, plan=plan)
+        view = DungeonUnifiedView(uid, p["floor"], p["x"], p["y"], self.bot.db_api, plan=plan)
         message = interaction.message or await interaction.original_response()
         stop_event = asyncio.Event()
         self._stops[uid] = stop_event
@@ -2813,10 +3453,10 @@ class D1DungeonPlayer:
             description="\n".join(str(x) for x in logs[-8:])[-1500:] or "ログはまだありません。",
             color=0x666666 if final else 0x8B5CF6,
         )
-        embed.add_field(name="作戦", value=f"{view.d1_plan} / 停止: 終了ボタン", inline=False)
+        embed.add_field(name="作戦", value=f"{view.clef_plan} / 停止: 終了ボタン", inline=False)
         embed.add_field(
             name="停止条件",
-            value=f"HP30%未満 / ボス / 遺物 / {D1_MAX_TURNS}ターン / APIエラー3回 / 同一地点3回",
+            value=f"HP30%未満 / ボス / 遺物 / {CLEF_MAX_TURNS}ターン / APIエラー3回 / 同一地点3回",
             inline=False,
         )
         embed.add_field(
@@ -2832,7 +3472,7 @@ class D1DungeonPlayer:
         self._run_stats.setdefault(uid, {"turns": 0, "positions": []})["last_result"] = text
 
     def _stop_reason(self, uid, logs):
-        """D1の安全停止条件をゲーム側で一元判定する。1ターンにつき1回だけ呼ぶ。"""
+        """Clefの安全停止条件をゲーム側で一元判定する。1ターンにつき1回だけ呼ぶ。"""
         p = d_get_player(uid)
         stats = d_effective_stats(p)
         run = self._run_stats.setdefault(uid, {"turns": 0, "positions": []})
@@ -2849,19 +3489,19 @@ class D1DungeonPlayer:
             return "ボス遭遇"
         if any("遺物" in line for line in logs[-8:]):
             return "希少アイテム発見"
-        if run.get("turns", 0) >= D1_MAX_TURNS:
-            return f"1回のD1実行が{D1_MAX_TURNS}ターンに到達"
+        if run.get("turns", 0) >= CLEF_MAX_TURNS:
+            return f"1回の自動操作が{CLEF_MAX_TURNS}ターンに到達"
         if len(positions) >= 3 and positions[-1] == positions[-2] == positions[-3]:
             return "同じ場所で3回連続停止"
-        if sum("D1 APIエラー" in line or "D1接続エラー" in line for line in logs[-6:]) >= 3:
-            return "D1 APIエラーが連続3回"
+        if sum("Clef APIエラー" in line or "Clef接続エラー" in line for line in logs[-6:]) >= 3:
+            return "Clef APIエラーが連続3回"
         if sum("と遭遇しました" in line for line in logs[-8:]) >= 3:
             return "連続戦闘が多いため"
         return ""
 
     async def _run_loop(self, uid, message, view, stop_event, plan):
         logs = [f"自動操作を開始しました。作戦: {plan} / 終了ボタンで停止できます。"]
-        d_begin_run(uid, "d1")
+        d_begin_run(uid, "clef")
         self._run_stats[uid] = {"turns": 0, "positions": [], "last_result": ""}
         # 初回判断の前に、ゲームハブのダンジョンと同じ現在状態のフレームを表示する。
         await self._edit_screen(message, view, logs)
@@ -2871,9 +3511,7 @@ class D1DungeonPlayer:
                 if reason:
                     logs.append(f"停止しました: {reason}")
                     break
-                turn_started = time.perf_counter()
                 await self._play_turn(uid, logs, plan)
-                self._timing("turn uid=%s elapsed_ms=%.0f", uid, (time.perf_counter() - turn_started) * 1000)
                 self._run_stats[uid]["turns"] += 1
                 await self._edit_screen(message, view, logs)
                 await asyncio.sleep(1.0)
@@ -2886,7 +3524,7 @@ class D1DungeonPlayer:
             self._tasks.pop(uid, None)
             self._stops.pop(uid, None)
             self._run_stats.pop(uid, None)
-            d_end_run(uid, "d1_stop")
+            d_end_run(uid, "clef_stop")
             logs.append("自動操作を終了しました。")
             try:
                 await self._edit_screen(message, view, logs, final=True)
@@ -2899,18 +3537,18 @@ class D1DungeonPlayer:
         p = d_get_player(uid)
         stats = d_effective_stats(p)
         floor, x, y = p["floor"], p["x"], p["y"]
-        cell = d_get_cell(floor, x, y)
-        logs.append(d1_candidate_log(uid, plan))
-        d_record_action(uid, "decision", source="d1", result=plan)
+        cell = d_get_cell(uid, floor, x, y)
+        logs.append(dungeon_candidate_log(uid, plan))
+        d_record_action(uid, "decision", source="clef", result=plan)
 
-        if cell == D_STAIRS:
+        if cell == D_STAIRS and not d_stairs_room_blocked(uid, floor, x, y):
             raw = await self._decide(uid, logs, plan, {
                 "stairs": {
                     "type": "choice",
                     "instructions": (
                         "階段の上にいます。次に取る行動を1つだけ選んでください。\n"
-                        f"目的: {d1_goal_text(uid)}\n"
-                        f"作戦: {plan}（{d1_plan_guidance(plan)}）\n"
+                        f"目的: {dungeon_goal_text(uid)}\n"
+                        f"作戦: {plan}（{dungeon_plan_guidance(plan)}）\n"
                         "基準: 上の階へ進むとHPが全回復し、より深い階へ移動します。"
                         "この階の探索や回収を優先したい場合は残ってください。\n"
                         "回答は up か stay のどちらか1語のみ。"
@@ -2925,13 +3563,13 @@ class D1DungeonPlayer:
             if choice == "up" and floor < D_FLOORS:
                 p["floor"] = floor + 1
                 p["hp"] = d_effective_stats(p)["max_hp"]
-                d_ensure_map(p["floor"])
-                p["x"], p["y"] = dg_starts[p["floor"]]
+                d_clear_status(uid)
+                p["x"], p["y"] = d_instance_start(uid, p["floor"])
                 d_progress_quest(uid, "floor", 1)
                 logs.append(f"階段を上り、{p['floor']}Fへ進みました。")
             else:
                 logs.append("階段では探索を続けました。")
-            await dg_save_player(uid, self.bot.supabase)
+            await dg_save_player(uid, self.bot.db_api)
             return
 
         if cell == D_MINE:
@@ -2940,8 +3578,8 @@ class D1DungeonPlayer:
                     "type": "choice",
                     "instructions": (
                         "鉱山の上にいます。次に取る行動を1つだけ選んでください。\n"
-                        f"目的: {d1_goal_text(uid)}\n"
-                        f"作戦: {plan}（{d1_plan_guidance(plan)}）\n"
+                        f"目的: {dungeon_goal_text(uid)}\n"
+                        f"作戦: {plan}（{dungeon_plan_guidance(plan)}）\n"
                         "基準: 採掘するとコインを獲得でき、この鉱山は消滅します。\n"
                         "回答は dig か leave のどちらか1語のみ。"
                     ),
@@ -2954,22 +3592,23 @@ class D1DungeonPlayer:
             choice = d_normalize_choice(raw, {"dig", "leave"}, "leave")
             if choice == "dig":
                 gain = d_do_mine(uid)
-                await d_apply_reward(uid, self.bot.supabase, coins=gain, season_score=10)
-                d_consume(floor, x, y)
+                await d_apply_reward(uid, self.bot.db_api, coins=gain, season_score=10)
+                d_consume(uid, floor, x, y)
                 logs.append(f"鉱山を採掘し、コインを{gain}枚獲得しました。")
-                await dg_save_map(floor, self.bot.supabase)
+                await dg_save_player(uid, self.bot.db_api)
             else:
                 logs.append("鉱山を見送りました。")
-            await dg_save_player(uid, self.bot.supabase)
+            await dg_save_player(uid, self.bot.db_api)
             return
 
         if cell == D_REST:
             before = p["hp"]
             p["hp"] = min(stats["max_hp"], p["hp"] + max(20, stats["max_hp"] // 3))
-            d_consume(floor, x, y)
+            d_clear_status(uid)
+            d_consume(uid, floor, x, y)
             logs.append(f"休憩所でHPを{p['hp'] - before}回復しました。")
-            await dg_save_map(floor, self.bot.supabase)
-            await dg_save_player(uid, self.bot.supabase)
+            await dg_save_player(uid, self.bot.db_api)
+            await dg_save_player(uid, self.bot.db_api)
             return
 
         if cell == D_SHOP:
@@ -2978,8 +3617,8 @@ class D1DungeonPlayer:
                     "type": "choice",
                     "instructions": (
                         "商店の上にいます。次に取る行動を1つだけ選んでください。\n"
-                        f"目的: {d1_goal_text(uid)}\n"
-                        f"作戦: {plan}（{d1_plan_guidance(plan)}）\n"
+                        f"目的: {dungeon_goal_text(uid)}\n"
+                        f"作戦: {plan}（{dungeon_plan_guidance(plan)}）\n"
                         f"基準: レアパンは30コインでHP回復に使えます（所持パン {p['bread']} 個）。\n"
                         "回答は buy か leave のどちらか1語のみ。"
                     ),
@@ -2992,28 +3631,31 @@ class D1DungeonPlayer:
             choice = d_normalize_choice(raw, {"buy", "leave"}, "leave")
             if choice == "buy":
                 try:
-                    await d_apply_reward(uid, self.bot.supabase, coins=-30, bread=1)
+                    await d_apply_reward(uid, self.bot.db_api, coins=-30, bread=1)
                     logs.append("商店でレアパンを購入しました。")
                 except Exception:
                     logs.append("コイン不足で購入できませんでした。")
             else:
                 logs.append("商店で購入せずに進みました。")
-            await dg_save_player(uid, self.bot.supabase)
+            await dg_save_player(uid, self.bot.db_api)
             return
 
         # 通常移動。待機手は用意せず、必ず1方向を選ばせる。
-        dist = d1_bfs(floor, x, y)
-        move_criteria = d1_move_criteria(floor, x, y, dist)
+        # Phase 1-C 以降、1回の判断は1マスではなく1 journey（分岐・部屋・
+        # 特殊タイル等で止まるまで自動で進む）を実行する。
+        dist = dungeon_bfs(uid, floor, x, y)
+        move_criteria = dungeon_move_criteria(uid, floor, x, y, dist)
         criteria_text = "\n".join(f"{key}: {value}" for key, value in move_criteria.items())
         instructions = (
-            "あなたはダンジョン探索の意思決定者です。画像ではなく、以下のテキスト盤面を正として次の1手を選んでください。\n"
-            f"目的: {d1_goal_text(uid)}\n"
-            f"作戦: {plan}（{d1_plan_guidance(plan)}）\n"
-            f"現在地: {floor}F ({x},{y}) / 階段: {d1_stairs_hint(floor, x, y, dist)}\n"
-            f"局所盤面: {d1_local_grid(floor, x, y)}\n"
+            "あなたはダンジョン探索の意思決定者です。画像ではなく、以下のテキスト盤面を正として次に進む方向を1つ選んでください。\n"
+            "選んだ方向へは、分岐・部屋・特殊タイル・エンカウントのいずれかに当たるまで自動で進みます。\n"
+            f"目的: {dungeon_goal_text(uid)}\n"
+            f"作戦: {plan}（{dungeon_plan_guidance(plan)}）\n"
+            f"現在地: {floor}F ({x},{y}) / 階段: {dungeon_stairs_hint(uid, floor, x, y, dist)}\n"
+            f"局所盤面: {dungeon_local_grid(uid, floor, x, y)}\n"
             f"方向ごとの判定基準:\n{criteria_text}\n"
             "制約: 壁へは進めません。階段へ近づく方向を優先します。HPが30%未満なら回復タイルや階段へ向かってください。\n"
-            "回答は次のいずれか1語のみ: " + ", ".join(D1_MOVE_KEYS)
+            "回答は次のいずれか1語のみ: " + ", ".join(CLEF_MOVE_KEYS)
         )
         raw = await self._decide(uid, logs, plan, {
             "move": {
@@ -3022,91 +3664,42 @@ class D1DungeonPlayer:
                 "criteria": move_criteria,
             }
         })
-        choice = d_normalize_choice(raw, set(D1_MOVE_KEYS), None)
+        choice = d_normalize_choice(raw, set(CLEF_MOVE_KEYS), None)
         if choice is None:
-            choice = d1_best_direction(uid, plan, dist)
-            logs.append(f"D1の応答を解釈できなかったため、作戦に沿って{_DIRECTION_LABELS[choice]}へ進みます。")
-        dx, dy = _DIRECTIONS[choice]
-        nx, ny = x + dx, y + dy
-        corner_cut = dx != 0 and dy != 0 and (
-            d_get_cell(floor, x + dx, y) == D_WALL or d_get_cell(floor, x, y + dy) == D_WALL
-        )
-        if (not (0 <= nx < D_MAP_W and 0 <= ny < D_MAP_H)
-                or d_get_cell(floor, nx, ny) == D_WALL or corner_cut):
+            choice = dungeon_best_direction(uid, plan, dist)
+            logs.append(f"Clefの応答を解釈できなかったため、作戦に沿って{_DIRECTION_LABELS[choice]}へ進みます。")
+        if d_direction_blocked(uid, floor, x, y, choice):
             blocked_choice = choice
-            choice = d1_best_direction(uid, plan, dist)
-            dx, dy = _DIRECTIONS[choice]
-            nx, ny = x + dx, y + dy
-            logs.append(f"{_DIRECTION_LABELS[blocked_choice]}({blocked_choice})は壁でした。サーバー判定で{_DIRECTION_LABELS[choice]}({choice})へ補正します。")
-            self._note_result(uid, f"{blocked_choice}は壁のため{choice}へ補正")
-            fallback_corner_cut = dx != 0 and dy != 0 and (
-                d_get_cell(floor, x + dx, y) == D_WALL or d_get_cell(floor, x, y + dy) == D_WALL
-            )
-            if (not (0 <= nx < D_MAP_W and 0 <= ny < D_MAP_H)
-                    or d_get_cell(floor, nx, ny) == D_WALL or fallback_corner_cut):
+            choice = dungeon_best_direction(uid, plan, dist)
+            if d_direction_blocked(uid, floor, x, y, choice):
                 logs.append("周囲に合法な移動先がないため、このターンは移動しません。")
                 return
-        p["x"], p["y"] = nx, ny
-        p["turns"] += 1
-        p["season_score"] += 1
-        d_progress_quest(uid, "turns", 1)
-        logs.append(f"{choice}へ移動しました。現在地: {floor}F ({nx},{ny}) / {d_floor_modifier(floor)}")
-        self._note_result(uid, f"{choice}へ移動して ({nx},{ny}) に到着")
-        await self._resolve_tile(uid, logs)
-        await dg_save_player(uid, self.bot.supabase)
-
-    async def _resolve_tile(self, uid, logs):
+            logs.append(f"{_DIRECTION_LABELS[blocked_choice]}({blocked_choice})は壁でした。サーバー判定で{_DIRECTION_LABELS[choice]}({choice})へ補正します。")
+            self._note_result(uid, f"{blocked_choice}は壁のため{choice}へ補正")
+        result = await d_execute_journey(uid, self.bot.db_api, choice, source="clef")
+        logs.extend(result["messages"])
         p = d_get_player(uid)
-        floor, x, y = p["floor"], p["x"], p["y"]
-        cell = d_get_cell(floor, x, y)
-        if cell == D_CHEST:
-            text, reward = d_open_chest(uid, self.bot.supabase)
-            await d_apply_reward(uid, self.bot.supabase, **reward)
-            d_consume(floor, x, y)
-            logs.append(text)
-            await dg_save_map(floor, self.bot.supabase)
-            return
-        if cell == D_TRAP:
-            text, penalty = d_trigger_trap(uid)
-            await d_apply_reward(uid, self.bot.supabase, **penalty)
-            d_consume(floor, x, y)
-            logs.append(text)
-            await dg_save_map(floor, self.bot.supabase)
-            return
-        if cell == D_SHRINE:
-            p["atk"] += 2
-            d_consume(floor, x, y)
-            logs.append("祭壇の祝福: 基礎ATKが2上昇しました。")
-            await dg_save_map(floor, self.bot.supabase)
-            return
-        if cell == D_EVENT:
-            gain = random.randint(40, 120)
-            await d_apply_reward(uid, self.bot.supabase, coins=gain, xp=gain, season_score=25, material="ancient_shard")
-            d_consume(floor, x, y)
-            logs.append(f"旅人の依頼: コイン+{gain} / XP+{gain} / 古代欠片+1")
-            await dg_save_map(floor, self.bot.supabase)
-            return
-        if cell in (D_STAIRS, D_MINE, D_REST, D_SHOP):
-            # 特殊タイルは次のターンの判断（階段・採掘・休憩・購入）で扱う。
-            # ここでエンカウントを引くと、到着した特殊タイルを無視して戦闘に入ってしまう。
-            return
-        biome, *_ = d_get_biome(floor)
-        if random.random() < D_ENCOUNTER_RATES.get(biome, 0.1):
-            enemy = d_make_enemy(floor)
-            logs.append(f"{enemy['name']}と遭遇しました。")
-            await self._auto_combat(uid, enemy, logs)
+        logs.append(f"現在地: {p['floor']}F ({p['x']},{p['y']}) / {d_floor_modifier(p['floor'])}")
+        self._note_result(uid, f"{choice}へ{result['steps']}歩進んで ({p['x']},{p['y']}) に到着")
+        if result["enemy"] is not None:
+            # journey 途中でエンカウントした場合はその場で自動戦闘に入る。
+            # （階段・商店・鉱山に着いた場合は次ターンの判断で扱う。）
+            logs.append(f"{result['enemy']['name']}と遭遇しました。")
+            await self._auto_combat(uid, result["enemy"], logs, room_id=result.get("room_id"))
+            await dg_save_player(uid, self.bot.db_api)
 
-    async def _auto_combat(self, uid, enemy, logs):
-        """戦闘もD1に選ばせる。ダメージ計算と結果確定は本体側で行う。"""
+    async def _auto_combat(self, uid, enemy, logs, room_id=None):
+        """戦闘もClefに選ばせる。ダメージ計算と結果確定は本体側で行う。"""
         p = d_get_player(uid)
-        combat = DungeonCombatView(uid, p["floor"], p["x"], p["y"], enemy, self.bot.supabase)
+        combat = DungeonCombatView(uid, p["floor"], p["x"], p["y"], enemy, self.bot.db_api,
+                                    room_id=room_id)
         while enemy["hp"] > 0 and d_get_player(uid)["hp"] > 0:
             raw = await self._decide(uid, logs, "戦闘", {
                 "battle": {
                     "type": "choice",
                     "instructions": (
                         "戦闘中です。次の行動を1つだけ選んでください。\n"
-                        f"目的: {d1_goal_text(uid)}\n"
+                        f"目的: {dungeon_goal_text(uid)}\n"
                         f"敵: {enemy['name']}（HP {enemy['hp']}/{enemy['max_hp']}）\n"
                         "基準: HPが少ない時は防御や逃走も有効です。ボスからは逃げられません。\n"
                         "回答は attack, skill, defend, escape のいずれか1語のみ。"
@@ -3151,18 +3744,18 @@ class DungeonCog(Cog):
 
     def __init__(self, bot):
         self.bot = bot
-        self.supabase = None
-        # 自動操作は同一ファイル内で管理する（旧 d1_dangeon.py を統合）。
-        self.d1 = D1DungeonPlayer(bot)
+        self.db_api = None
+        # 自動操作は同一ファイル内で管理する（Clefによる自動操作）。
+        self.clef = ClefDungeonPlayer(bot)
 
     async def cog_load(self):
         """Cog読み込み時"""
-        global _D1_PLAYER
-        _D1_PLAYER = self.d1
-        # 親botのsupabaseを取得
-        if hasattr(self.bot, 'supabase'):
-            self.supabase = self.bot.supabase
-            await dg_load_all(self.supabase)
+        global _CLEF_PLAYER
+        _CLEF_PLAYER = self.clef
+        # 親botから自前DB APIクライアントを取得
+        if hasattr(self.bot, 'db_api'):
+            self.db_api = self.bot.db_api
+            await dg_load_all(self.db_api)
 
         # アセットを読み込み
         load_all_assets()
@@ -3173,7 +3766,7 @@ class DungeonCog(Cog):
 
     def cog_unload(self):
         """Cog アンロード時"""
-        self.d1.shutdown()
+        self.clef.shutdown()
         if self.dungeon_monthly_task.is_running():
             self.dungeon_monthly_task.cancel()
 
@@ -3186,95 +3779,66 @@ class DungeonCog(Cog):
         p = d_get_player(uid)
         floor, x, y = p["floor"], p["x"], p["y"]
 
-        # マップ確認
-        d_ensure_map(floor)
-
-        # 初期位置設定
-        sx, sy = dg_starts.get(floor, (1, 1))
-        if x == 1 and y == 1:
+        # そのプレイヤーのインスタンスを用意し、位置が不正（範囲外・壁）ならスタートへ戻す
+        sx, sy = d_instance_start(uid, floor)
+        if not (0 <= x < D2_MAP_W and 0 <= y < D2_MAP_H) or d_get_cell(uid, floor, x, y) == D_WALL:
             x, y = sx, sy
             p["x"] = x
             p["y"] = y
-            if self.supabase:
-                await dg_save_player(uid, self.supabase)
+            if self.db_api:
+                await dg_save_player(uid, self.db_api)
 
-        # すべての通常操作・ステータス・D1開始/停止を1つの画面へ集約する。
-        mv = DungeonUnifiedView(uid, floor, x, y, self.supabase)
+        # すべての通常操作・ステータス・自動操作開始/停止を1つの画面へ集約する。
+        mv = DungeonUnifiedView(uid, floor, x, y, self.db_api)
 
         # 初期画像は専用チャンネルへ投げず、コマンド応答へ直接添付する。
         map_file, map_url = d_map_attachment(uid, floor, x, y)
-        em = mv._embed("ダンジョンへようこそ！ D1の接続と作戦はSTATUS画面から選べます。", image_url=map_url)
+        em = mv._embed("ダンジョンへようこそ！ Clef自動操作と作戦はSTATUS画面から設定できます。", image_url=map_url)
         await interaction.followup.send(embed=em, view=mv, file=map_file)
 
     @commands.command(name="dungeon_reset")
     async def dungeon_reset(self, ctx: commands.Context):
-        """ダンジョンマップを全サーバー分リセット（Bot の持ち主専用）"""
+        """ダンジョンをリセット（Bot の持ち主専用）。Phase 1-B: 個人インスタンス基盤。"""
         if ctx.author.id not in ALLOWED_USER_IDS:
             return
-        global dg_maps, dg_players, dg_starts, dg_used, dg_bases
-        dg_maps.clear()
+        dg_instances.clear()
         dg_players.clear()
+        # 互換のため旧共有マップのキャッシュも掃除する（実データはもう使わない）。
+        dg_maps.clear()
         dg_starts.clear()
         dg_used.clear()
         dg_bases.clear()
 
-        # DBも全消去
-        if self.supabase:
+        # DBのプレイヤーデータも全消去する（マップはプレイヤー毎に生成されるため消去不要）。
+        if self.db_api:
             try:
-                self.supabase.table("dungeon_maps").delete().neq("floor", 0).execute()
-                self.supabase.table("dungeon_players").delete().neq("user_id", "").execute()
-                self.supabase.table("dungeon_bases").delete().neq("user_id", "").execute()
+                self.db_api.table("dungeon_players").delete().neq("user_id", "").execute()
             except Exception as e:
                 print(f"dungeon_reset DB削除失敗: {e}")
 
-        for fl in range(1, D_FLOORS+1):
-            d_ensure_map(fl)
-            if self.supabase:
-                await dg_save_map(fl, self.supabase)
-
-        em = discord.Embed(title="リセット完了", description="マップを再生成しました！", color=0xFFFFFF)
+        em = discord.Embed(title="リセット完了", description="プレイヤーデータを消去しました。マップはプレイヤー毎に再生成されます。", color=0xFFFFFF)
         await ctx.send(embed=em)
 
     @tasks.loop(hours=1)
     async def dungeon_monthly_task(self):
-        """月初にマップとラン中状態だけを更新し、永続進行は保持する。"""
+        """月初にインスタンスとラン中状態だけを更新し、永続進行は保持する。"""
         now = datetime.datetime.now(JST)
         if now.day == 1 and now.hour == 0:
-            global dg_maps, dg_players, dg_starts, dg_used, dg_bases
-            dg_maps.clear()
-            dg_starts.clear()
-            dg_used.clear()
-            dg_bases.clear()
+            dg_instances.clear()
 
-            for player in dg_players.values():
+            for uid, player in dg_players.items():
                 player["season_id"] = SEASON_ID
                 player["season_score"] = 0
                 player["floor"] = 1
-                player["x"] = 1
-                player["y"] = 1
+                player["instances"] = {}
+                player["x"], player["y"] = d_instance_start(uid, 1)
                 player["hp"] = d_effective_stats(player)["max_hp"]
                 player["turns"] = 0
                 player["cooldowns"] = {}
 
-            if self.supabase:
-                try:
-                    self.supabase.table("dungeon_maps").delete().neq("floor", 0).execute()
-                    self.supabase.table("dungeon_bases").delete().neq("user_id", "").execute()
-                    self.supabase.table("dungeon_players").update({
-                        "season_id": SEASON_ID,
-                        "season_score": 0,
-                        "floor": 1,
-                        "x": 1,
-                        "y": 1,
-                        "turns": 0,
-                        "cooldowns": {},
-                    }).neq("user_id", "").execute()
-                except Exception as e:
-                    print(f"dungeon月次リセットDB削除失敗: {e}")
-
-                for fl in range(1, D_FLOORS+1):
-                    d_ensure_map(fl)
-                    await dg_save_map(fl, self.supabase)
+            if self.db_api:
+                for uid in list(dg_players):
+                    await dg_save_player(uid, self.db_api)
 
             print("✓ ダンジョン月次リセット完了")
 

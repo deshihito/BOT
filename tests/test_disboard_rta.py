@@ -72,16 +72,16 @@ class BumpRtaDetectionTest(unittest.TestCase):
 
 class BumpRtaCogTest(unittest.IsolatedAsyncioTestCase):
     async def test_notifications_default_to_on(self):
-        cog = BumpRta(SimpleNamespace(supabase=None))
+        cog = BumpRta(SimpleNamespace(db_api=None))
         self.assertTrue(await cog._is_enabled(123))
 
     async def test_disabled_cache_is_respected(self):
-        cog = BumpRta(SimpleNamespace(supabase=None))
+        cog = BumpRta(SimpleNamespace(db_api=None))
         cog._enabled_cache["123"] = False
         self.assertFalse(await cog._is_enabled(123))
 
     async def test_disboard_and_disoku_responses_schedule_separate_types(self):
-        cog = BumpRta(SimpleNamespace(supabase=object()))
+        cog = BumpRta(SimpleNamespace(db_api=object()))
         cog._is_enabled = AsyncMock(return_value=True)
         cog._schedule_reminder = AsyncMock()
         cog._record_rta_event = AsyncMock()

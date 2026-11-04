@@ -30,8 +30,8 @@ class Typing:
 class AiAutoSelectionTest(unittest.IsolatedAsyncioTestCase):
     async def test_ai_uses_router_without_logfare_key(self):
         ai = load_cog("ai")
-        ctx = SimpleNamespace(author=SimpleNamespace(id=123), typing=lambda: Typing(),
-                              reply=AsyncMock())
+        ctx = SimpleNamespace(author=SimpleNamespace(id=123), message=SimpleNamespace(reference=None),
+                              typing=lambda: Typing(), reply=AsyncMock())
         answer = ai.ai_provider_router.Answer("回答", "second", "same-model")
         with patch.object(ai.ai_preferences, "get_model", return_value="ai/auto"), \
              patch.object(ai.ai_provider_router, "enabled", return_value=True), \
@@ -46,11 +46,12 @@ class AiAutoSelectionTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(embed.description, "回答")
         self.assertIn("same-model", embed.footer.text)
         self.assertIn("second", embed.footer.text)
+        self.assertTrue(ctx.reply.await_args.kwargs["_agobot_skip_localization"])
 
     async def test_ai_keeps_logfare_default_when_auto_is_configured(self):
         ai = load_cog("ai")
-        ctx = SimpleNamespace(author=SimpleNamespace(id=123), typing=lambda: Typing(),
-                              reply=AsyncMock())
+        ctx = SimpleNamespace(author=SimpleNamespace(id=123), message=SimpleNamespace(reference=None),
+                              typing=lambda: Typing(), reply=AsyncMock())
         with patch.object(ai.ai_preferences, "get_model", return_value=None), \
              patch.object(ai.ai_provider_router, "enabled", return_value=True), \
              patch.object(ai.ai_provider_router, "chat", new_callable=AsyncMock) as routed, \
@@ -82,17 +83,20 @@ class AiAutoSelectionTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_ai_uses_selected_omnirush_cli_model(self):
         ai = load_cog("ai")
-        ctx = SimpleNamespace(author=SimpleNamespace(id=123), typing=lambda: Typing(),
-                              reply=AsyncMock())
+        ctx = SimpleNamespace(author=SimpleNamespace(id=123), message=SimpleNamespace(reference=None),
+                              typing=lambda: Typing(), reply=AsyncMock())
         with patch.object(ai.ai_preferences, "get_model", return_value="omnirush::gpt-6-sol"), \
              patch.object(ai.ai_preferences, "get_reasoning_effort", return_value="medium"), \
              patch.object(ai.logfare, "api_key", return_value=None), \
              patch.object(ai.ai_omnirush, "chat", new_callable=AsyncMock,
                           return_value="OmniRushの回答") as omnirush_chat:
             await ai.AICog.ai.callback(ai.AICog(None), ctx, prompt="質問")
-        omnirush_chat.assert_awaited_once_with(
-            "omnirush::gpt-6-sol", "質問", reasoning_effort="medium"
-        )
+        omnirush_chat.assert_awaited_once()
+        call = omnirush_chat.await_args
+        self.assertEqual(call.args[0], "omnirush::gpt-6-sol")
+        self.assertIn(ai.ai_latex.SYSTEM_HINT, call.args[1])
+        self.assertIn("質問", call.args[1])
+        self.assertEqual(call.kwargs["reasoning_effort"], "medium")
         embed = ctx.reply.await_args.kwargs["embed"]
         self.assertEqual(embed.description, "OmniRushの回答")
         self.assertIn("OmniRush CLI", embed.footer.text)

@@ -32,7 +32,7 @@ from statistics import median
 import discord
 from discord import app_commands
 from discord.ext import commands, tasks
-from core.supabase_client import key_role, select_key
+from core.api_retry import run_with_retry
 
 logger = logging.getLogger(__name__)
 DISBOARD_BOT_ID = 302050872383242240
@@ -487,7 +487,7 @@ _GONE = object()           # channel permanently unavailable
 class BumpRta(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
-        self.db = getattr(bot, "supabase", None)
+        self.db = getattr(bot, "db_api", None)
         self.clock = DiscordClock()
         # Dedicated pools: other cogs (voice, recording, ...) can saturate the
         # default executor, which used to delay both the DB claim and the send.
@@ -510,13 +510,8 @@ class BumpRta(commands.Cog):
     async def cog_load(self):
         if not self.reminder_worker.is_running():
             self.reminder_worker.start()
-        key, source = select_key()
-        role = key_role(key) if key else "not-set"
-        if self.db is not None and role not in {"anon", "service_role"}:
-            logger.warning(
-                "bump/up RTA RPC requires an anon/service_role key and matching SQL grant; source=%s role=%s",
-                source or "not-set", role,
-            )
+        if self.db is None:
+            logger.warning("bump/up RTA database API is not configured; durable records are disabled")
 
     def cog_unload(self):
         self.reminder_worker.cancel()
@@ -530,7 +525,9 @@ class BumpRta(commands.Cog):
         self._ntp_executor.shutdown(wait=False, cancel_futures=True)
 
     async def _call(self, fn):
-        return await asyncio.get_running_loop().run_in_executor(self._executor, fn)
+        return await asyncio.get_running_loop().run_in_executor(
+            self._executor, lambda: run_with_retry(fn)
+        )
 
     async def _is_enabled(self, guild_id):
         gid = str(guild_id)
@@ -557,13 +554,17 @@ class BumpRta(commands.Cog):
             if scope == "me":
                 uid, gid = str(interaction.user.id), str(interaction.guild_id)
                 local = await self._call(lambda: self.db.table("bump_rta_records").select(
-                    "elapsed_ms,completed_at").eq("guild_id", gid).eq("user_id", uid).eq("event_type", event_type).limit(1).execute())
+                    "elapsed_ms,completed_at").eq("guild_id", gid).eq("user_id", uid).eq("event_type", event_type).order(
+                        "elapsed_ms").limit(1).execute())
                 global_best = await self._call(lambda: self.db.table("bump_rta_events").select(
                     "elapsed_ms,completed_at").eq("user_id", uid).eq("event_type", event_type).order("elapsed_ms").limit(1).execute())
                 local_text = f"{local.data[0]['elapsed_ms'] / 1000:.2f}秒" if local.data else "記録なし"
                 global_text = f"{global_best.data[0]['elapsed_ms'] / 1000:.2f}秒" if global_best.data else "記録なし"
-                return await interaction.followup.send(embed=_white_embed(
-                    f"<@{uid}> の**{event_type}自己ベスト**\nこのサーバー: **{local_text}**\n全サーバー: **{global_text}**"))
+                return await interaction.followup.send(
+                    embed=_white_embed(
+                        f"<@{uid}> の**{event_type}自己ベスト**\nこのサーバー: **{local_text}**\n全サーバー: **{global_text}**"),
+                    allowed_mentions=discord.AllowedMentions.none(),
+                )
             if scope == "global":
                 rows = await self._call(lambda: self.db.rpc("get_bump_rta_global_ranking", {
                     "p_event_type": event_type, "p_limit": 10}).execute())
@@ -578,7 +579,9 @@ class BumpRta(commands.Cog):
                 lines = [f"**{i}.** <@{r['user_id']}> — **{r['elapsed_ms'] / 1000:.2f}秒**" for i, r in enumerate(data, 1)]
                 title = f"このサーバー {event_type} RTAランキング"
             return await interaction.followup.send(
-                embed=_white_embed(f"**{title}**\n" + ("\n".join(lines) if lines else "まだ記録がありません。")))
+                embed=_white_embed(f"**{title}**\n" + ("\n".join(lines) if lines else "まだ記録がありません。")),
+                allowed_mentions=discord.AllowedMentions.none(),
+            )
         except Exception as e:
             logger.exception("bump/up leaderboard query failed: scope=%s kind=%s", scope, event_type)
             return await interaction.followup.send(

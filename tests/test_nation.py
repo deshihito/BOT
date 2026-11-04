@@ -10,7 +10,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from tests.test_all_commands import USER_ID, FakeSupabase, fake_interaction  # noqa: E402
+from tests.test_all_commands import USER_ID, FakeDBAPI, fake_interaction  # noqa: E402
 
 import discord  # noqa: E402
 from discord.ext import commands  # noqa: E402
@@ -18,8 +18,8 @@ from discord.ext import commands  # noqa: E402
 from cogs import nation as nation_module  # noqa: E402
 
 
-class NationFakeSupabase(FakeSupabase):
-    """呼ばれた rpc を記録する。nation_found の再現は tests/test_all_commands.py の FakeSupabase にある。"""
+class NationFakeDBAPI(FakeDBAPI):
+    """呼ばれた rpc を記録する。nation_found の再現は tests/test_all_commands.py の FakeDBAPI にある。"""
 
     def __init__(self):
         super().__init__()
@@ -36,9 +36,9 @@ def run(coro):
 
 class NationTest(unittest.TestCase):
     def setUp(self):
-        self.db = NationFakeSupabase()
+        self.db = NationFakeDBAPI()
         self.bot = commands.Bot(command_prefix='!', intents=discord.Intents.none())
-        self.bot.supabase = self.db
+        self.bot.db_api = self.db
         self.cog = nation_module.NationCog(self.bot)
 
     def test_nation_commands_are_prefix_only(self):
@@ -96,12 +96,12 @@ class NationTest(unittest.TestCase):
     def test_found_maps_rpc_errors_to_japanese(self):
         for code, title in (('ALREADY_IN_NATION', '建国できません'), ('NO_FREE_TILE', '建国できません'),
                             ('NATION_EXISTS', '建国済み')):
-            class Failing(NationFakeSupabase):
+            class Failing(NationFakeDBAPI):
                 def rpc(self, name, params=None, **kwargs):
                     def execute(code=code):
                         raise RuntimeError(f"{{'message': '{code}: x', 'code': 'P0001'}}")
                     return types.SimpleNamespace(execute=execute)
-            self.cog.supabase = Failing()
+            self.cog.db_api = Failing()
             sent = self.call('found')
             self.assertEqual(sent[0]['embed'].title, title, code)
 
@@ -112,12 +112,12 @@ class NationTest(unittest.TestCase):
         self.assertEqual(self.rows('nation_guilds'), [])
 
     def test_found_unknown_error_propagates(self):
-        class Down(NationFakeSupabase):
+        class Down(NationFakeDBAPI):
             def rpc(self, name, params=None, **kwargs):
                 def execute():
                     raise RuntimeError('connection reset')
                 return types.SimpleNamespace(execute=execute)
-        self.cog.supabase = Down()
+        self.cog.db_api = Down()
         with self.assertRaises(RuntimeError):
             self.call('found')
 
@@ -176,10 +176,10 @@ class NationTest(unittest.TestCase):
         self.assertEqual(sent[0]['embed'].title, '未参加')
 
     def test_db_error_gives_context_reply(self):
-        class Broken(FakeSupabase):
+        class Broken(FakeDBAPI):
             def table(self, name):
                 raise RuntimeError('down')
-        self.cog.supabase = Broken()
+        self.cog.db_api = Broken()
         interaction, _, _ = fake_interaction(self.bot)
         sent = []
 
