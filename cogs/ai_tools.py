@@ -17,6 +17,25 @@ def _enabled() -> bool:
     return os.getenv("AITOOLS_ENABLED", "true").strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _is_miq_trigger(message, bot_user) -> bool:
+    """MIQのトリガー（引用メッセージへの返信で「@BOT miq」）かどうか。
+
+    cogs/general.py の is_miq_trigger と同じ判定を、循環インポートを避けるため
+    ここにも持つ。MIQトリガーに AITools が反応すると、LLM が general:miq_settings
+    を選び、ShortcutMessageInteraction が ephemeral を捨てて MIQ設定パネルを
+    チャンネルへ公開送信してしまう（引用画像と一緒に設定が出る原因）。
+    そのため AITools は MIQトリガーには一切反応しない。画像生成は GeneralCog 側が行う。
+    """
+    if bot_user is None or getattr(message, "reference", None) is None:
+        return False
+    if getattr(message.reference, "message_id", None) is None:
+        return False
+    content = getattr(message, "content", "") or ""
+    if f"<@{bot_user.id}>" not in content and f"<@!{bot_user.id}>" not in content:
+        return False
+    return re.sub(r"<@!?\d+>", "", content).strip().lower() == "miq"
+
+
 def _resolve_invoker(message, bot_user):
     """Bot投稿ではinteraction/reply/明示mention、最後に単独VC参加者から人間を特定する。"""
     if not getattr(message.author, "bot", False):
@@ -93,6 +112,10 @@ class AIToolsCog(commands.Cog):
         if not message.guild:
             return
         if not self.bot.user or message.author.id == self.bot.user.id or self.bot.user not in message.mentions:
+            return
+        # MIQトリガーには反応しない。GeneralCog が引用画像を作る。
+        # ここで返さないと、AITools が miq_settings を選んで MIQ設定を公開送信する。
+        if _is_miq_trigger(message, self.bot.user):
             return
         if not _enabled():
             return await message.reply("AI toolsはサーバー設定で停止中です。", mention_author=False)
