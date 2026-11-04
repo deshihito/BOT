@@ -359,6 +359,7 @@ def d_default_player():
         "action_log": [], "state_version": 0, "front_back": "front",
         "battle_resource": {"mp": 20, "max_mp": 20, "rage": 0, "combo": 0, "guard": 0},
         "battle_flags": {},
+        "equipment_upgrades": {},
     }
 
 def d_get_player(uid):
@@ -397,8 +398,9 @@ def d_effective_stats(player):
         stats["def_"] += item.get("def_", 0)
         stats["max_hp"] += item.get("hp", 0)
         stats["crit"] += item.get("crit", 0)
-        # 強化レベルとパッシブは保存済みJSON状態から決定的に再現する。
-        upgrade = int(item.get("upgrade_level", 0))
+        # 強化レベルはプレイヤー個別の equipment_upgrades から読む
+        # （旧実装は共有の EQUIPMENT_MASTER を書き換えていたため全員に影響した）。
+        upgrade = int(p.get("equipment_upgrades", {}).get(key, 0))
         stats["atk"] += upgrade
         stats["def_"] += upgrade
         if "speed_up" in item.get("passive_effects", []):
@@ -473,12 +475,17 @@ def d_equipment_profile(uid):
     return [dict(EQUIPMENT_MASTER.get(k, {}), key=k) for k in p.get("inventory", {}) if k in EQUIPMENT_MASTER]
 
 def d_upgrade_equipment(uid, key, material="iron_ore"):
-    """素材を消費して装備を1段階強化する。"""
+    """素材を消費して装備を1段階強化する。
+
+    強化レベルはプレイヤー個別の equipment_upgrades に保存する。
+    共有マスタ EQUIPMENT_MASTER は絶対に書き換えない（他プレイヤーへの波及防止）。
+    """
     p = d_get_player(uid)
     if key not in EQUIPMENT_MASTER or p.get("materials", {}).get(material, 0) <= 0:
         return False
     p["materials"][material] -= 1
-    EQUIPMENT_MASTER[key]["upgrade_level"] = int(EQUIPMENT_MASTER[key].get("upgrade_level", 0)) + 1
+    upgrades = p.setdefault("equipment_upgrades", {})
+    upgrades[key] = int(upgrades.get(key, 0)) + 1
     return True
 
 def d_floor_modifier(floor):
@@ -504,8 +511,24 @@ def d_apply_status(uid, status_key, turns=None):
             return
     effects.append({"key": status_key, "turns": turns})
 
+def d_clear_status(uid):
+    """状態異常を全解除する（休憩・次フロア到達時のライフサイクル規則）。
+
+    戦闘用フラグ（凍結による行動不能など）も状態異常と一体なので一緒に消す。
+    """
+    p = d_get_player(uid)
+    p["active_effects"] = []
+    p.setdefault("battle_flags", {}).clear()
+
+
 def d_tick_status(uid):
-    """状態異常を1ターン進め、表示用ログとダメージを返す。"""
+    """状態異常を1ターン進め、表示用ログとダメージを返す。
+
+    ライフサイクル規則（Phase 0 で定義）:
+      - 進行: 戦闘中は敵ターン（DungeonCombatView._enemy_turn）、探索中は移動ターン
+        （DungeonMainView._move_locked）でそれぞれ1回だけ進める。二重に進めないこと。
+      - 解除: 休憩タイル（D_REST）と階段で次フロアへ進む際に全解除する（d_clear_status）。
+    """
     p = d_get_player(uid)
     logs = []
     remaining = []
@@ -1032,6 +1055,7 @@ async def dg_load_all(db_api):
                 "action_log": meta.get("action_log", []) or [], "state_version": meta.get("state_version", 0),
                 "front_back": meta.get("front_back", "front"), "battle_resource": meta.get("battle_resource", {"mp": 20, "max_mp": 20, "rage": 0, "combo": 0, "guard": 0}),
                 "floor_goals": meta.get("floor_goals", {}) or {},
+                "equipment_upgrades": meta.get("equipment_upgrades", {}) or {},
             }
         print(f"✓ ダンジョンプレイヤー読み込み完了: {len(dg_players)}人")
     except Exception as e:
@@ -1097,6 +1121,7 @@ async def dg_save_player(uid, db_api):
             "front_back": p.get("front_back", "front"),
             "battle_resource": p.get("battle_resource", {}),
             "floor_goals": p.get("floor_goals", {}),
+            "equipment_upgrades": p.get("equipment_upgrades", {}),
         }
         payload = {
             "user_id": uid,
@@ -1375,10 +1400,11 @@ def dungeon_best_direction(uid, plan="安全探索", dist=None):
 def d_make_reward_choices(uid, enemy):
     """戦闘勝利時の3候補。作戦教本を持つとコイン報酬が少し強化される。"""
     p = d_get_player(uid)
+    box_count = max(1, enemy.get("reward_box", 0))
     base = [
-        {"label": "コイン", "reward": {"coins": enemy.get("reward_coins", 0)}},
-        {"label": "経験値", "reward": {"xp": enemy.get("reward_xp", 0)}},
-        {"label": "宝箱", "reward": {"boxes": max(1, enemy.get("reward_box", 0))}},
+        {"label": f"コイン +{enemy.get('reward_coins', 0)}", "reward": {"coins": enemy.get("reward_coins", 0)}},
+        {"label": f"経験値 +{enemy.get('reward_xp', 0)}", "reward": {"xp": enemy.get("reward_xp", 0)}},
+        {"label": f"宝箱 ×{box_count}", "reward": {"boxes": box_count}},
     ]
     if "d1_tactics" in p.get("relics", []):
         base[0]["reward"]["season_score"] = 10
@@ -1694,6 +1720,7 @@ class DungeonStairsView(DungeonViewBase):
         if floor < D_FLOORS:
             p["floor"] = floor + 1
             p["hp"] = d_effective_stats(p)["max_hp"]
+            d_clear_status(self.uid)
             d_ensure_map(p["floor"])
             p["x"], p["y"] = dg_starts[p["floor"]]
             d_progress_quest(self.uid, "floor", 1)
@@ -2139,6 +2166,19 @@ class DungeonMainView(DungeonViewBase):
 
         p["turns"] += 1
         p["season_score"] += 1
+        # 状態異常は移動ターンでも1回進める（戦闘中は敵ターン側で進むため二重にはならない）。
+        status_logs = d_tick_status(self.uid)
+        if status_logs:
+            msg = " / ".join(status_logs)
+        if p["hp"] <= 0:
+            # 状態異常で力尽きた場合は特殊タイルを発動させず、既存の死亡処理に乗せる。
+            p["hp"] = d_effective_stats(p)["max_hp"]
+            p["floor"] = 1
+            p["x"], p["y"] = dg_starts.get(1, (1, 1))
+            msg += "\n力尽きた… スタート地点へ戻された"
+            await dg_save_player(self.uid, self.db_api)
+            await self._redraw(i, msg, p)
+            return
         completed_quests = d_progress_quest(self.uid, "turns", 1)
         for quest_key in completed_quests:
             quest_reward = QUEST_MASTER[quest_key]["reward"]
@@ -2176,7 +2216,8 @@ class DungeonMainView(DungeonViewBase):
         elif ct == D_REST:
             before = p["hp"]
             p["hp"] = min(d_effective_stats(p)["max_hp"], p["hp"] + max(20, d_effective_stats(p)["max_hp"] // 3))
-            msg = f"休憩した。HPが {p['hp'] - before} 回復した。"
+            d_clear_status(self.uid)
+            msg = f"休憩した。HPが {p['hp'] - before} 回復し、状態異常が治った。"
             d_consume(floor, p["x"], p["y"])
             await dg_save_map(floor, self.db_api)
 
@@ -2446,6 +2487,7 @@ class DungeonOperationView(DungeonViewBase):
         if cell == D_STAIRS and floor < D_FLOORS:
             p["floor"] = floor + 1
             p["hp"] = d_effective_stats(p)["max_hp"]
+            d_clear_status(self.uid)
             d_ensure_map(p["floor"])
             p["x"], p["y"] = dg_starts[p["floor"]]
             d_progress_quest(self.uid, "floor", 1)
@@ -2460,6 +2502,7 @@ class DungeonOperationView(DungeonViewBase):
             stats = d_effective_stats(p)
             before = p["hp"]
             p["hp"] = min(stats["max_hp"], p["hp"] + max(20, stats["max_hp"] // 3))
+            d_clear_status(self.uid)
             d_consume(floor, p["x"], p["y"])
             await dg_save_map(floor, self.db_api)
             msg = f"休憩してHPが {p['hp'] - before} 回復しました。"
@@ -2486,7 +2529,7 @@ class DungeonRewardChoiceView(DungeonViewBase):
         for index, item in enumerate(choices):
             button = discord.ui.Button(label=item["label"], style=discord.ButtonStyle.green, row=0)
 
-            async def choose(interaction, index=index):
+            async def choose(interaction, index=index, label=item["label"]):
                 await interaction.response.defer()
                 p = d_get_player(self.uid)
                 if not p.get("pending_rewards"):
@@ -2503,7 +2546,7 @@ class DungeonRewardChoiceView(DungeonViewBase):
                 await d_apply_reward(self.uid, self.db_api, **reward)
                 await dg_save_player(self.uid, self.db_api)
                 self.stop()
-                await d_return_to_dungeon(interaction, self.uid, self.db_api, f"報酬を選択: {item['label']}")
+                await d_return_to_dungeon(interaction, self.uid, self.db_api, f"報酬を選択: {label}")
 
             button.callback = choose
             self.add_item(button)
@@ -2785,6 +2828,7 @@ class ClefDungeonPlayer:
             if choice == "up" and floor < D_FLOORS:
                 p["floor"] = floor + 1
                 p["hp"] = d_effective_stats(p)["max_hp"]
+                d_clear_status(uid)
                 d_ensure_map(p["floor"])
                 p["x"], p["y"] = dg_starts[p["floor"]]
                 d_progress_quest(uid, "floor", 1)
@@ -2826,6 +2870,7 @@ class ClefDungeonPlayer:
         if cell == D_REST:
             before = p["hp"]
             p["hp"] = min(stats["max_hp"], p["hp"] + max(20, stats["max_hp"] // 3))
+            d_clear_status(uid)
             d_consume(floor, x, y)
             logs.append(f"休憩所でHPを{p['hp'] - before}回復しました。")
             await dg_save_map(floor, self.bot.db_api)
@@ -2909,6 +2954,17 @@ class ClefDungeonPlayer:
         p["x"], p["y"] = nx, ny
         p["turns"] += 1
         p["season_score"] += 1
+        # 手動移動と同じく、移動ターンで状態異常を1回進める。
+        status_logs = d_tick_status(uid)
+        if status_logs:
+            logs.append(" / ".join(status_logs))
+        if p["hp"] <= 0:
+            p["hp"] = d_effective_stats(p)["max_hp"]
+            p["floor"] = 1
+            p["x"], p["y"] = dg_starts.get(1, (1, 1))
+            logs.append("力尽きた… スタート地点へ戻された")
+            await dg_save_player(uid, self.bot.db_api)
+            return
         d_progress_quest(uid, "turns", 1)
         logs.append(f"{choice}へ移動しました。現在地: {floor}F ({nx},{ny}) / {d_floor_modifier(floor)}")
         self._note_result(uid, f"{choice}へ移動して ({nx},{ny}) に到着")
