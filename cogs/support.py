@@ -74,7 +74,7 @@ SUPPORT_ACTIONS = [
     app_commands.Choice(name="ロールパネル作成", value="role_panel"),
     app_commands.Choice(name="言語設定", value="language"),
     app_commands.Choice(name="Auto react設定", value="auto_react"),
-    app_commands.Choice(name="SNS新着通知（X・YouTube）", value="sns_notify"),
+    app_commands.Choice(name="SNS新着通知（X・YouTube・GitHub）", value="sns_notify"),
     app_commands.Choice(name="Quest通知（Discord Orbs）", value="quest_notify"),
     app_commands.Choice(name="レベルアップ通知（EXP）", value="levelup_notify"),
     app_commands.Choice(name="サーバーアシスト設定", value="server_assist"),
@@ -2916,7 +2916,7 @@ class VoiceTriggerPanel(discord.ui.LayoutView):
         await self.refresh(interaction, notice)
 
 
-# ===== SNS新着通知（X / YouTube） ======================================
+# ===== SNS新着通知（X / YouTube / GitHub） ======================================
 SNS_SECTION = "sns_notify"
 SNS_MAX_SUBS = 10
 SNS_MAX_SEEN = 100
@@ -2939,6 +2939,7 @@ SNS_USER_AGENT = (
 SNS_PLATFORMS = {
     "youtube": {"label": "YouTube", "emoji": "▶️", "color": 0xFF0000, "noun": "動画", "open": "YouTubeで開く"},
     "x": {"label": "X", "emoji": "𝕏", "color": 0xFFFFFF, "noun": "ポスト", "open": "Xで開く"},
+    "github": {"label": "GitHub", "emoji": "🐙", "color": 0x24292F, "noun": "更新", "open": "GitHubで開く"},
 }
 
 _SNS_NS = {
@@ -2948,6 +2949,114 @@ _SNS_NS = {
 }
 _YT_ID_RE = re.compile(r"UC[0-9A-Za-z_-]{22}")
 _X_USER_RE = re.compile(r"[A-Za-z0-9_]{1,15}")
+_GH_OWNER_RE = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?")
+_GH_REPO_RE = re.compile(r"[A-Za-z0-9._-]{1,100}")
+SNS_GITHUB_KINDS = {"prs": "PR", "issues": "Issue", "commits": "コミット"}
+
+
+def default_github_options() -> dict:
+    return {kind: True for kind in SNS_GITHUB_KINDS}
+
+
+def normalize_github_options(raw) -> dict:
+    """GitHub通知の種類ごとのオン/オフ。欠けた種類はオンとして扱う。"""
+    options = default_github_options()
+    if isinstance(raw, dict):
+        for kind in options:
+            if isinstance(raw.get(kind), bool):
+                options[kind] = raw[kind]
+    return options
+
+
+def parse_github_repo(raw: str) -> str:
+    """owner/repo 形式またはGitHubのリポジトリURLを owner/repo に正規化する。"""
+    text = (raw or "").strip()
+    match = re.match(
+        r"^(?:https?://)?(?:www\.)?github\.com/([^/\s]+)/([^/\s#?]+)(?:[/?#].*)?$",
+        text,
+        re.I,
+    )
+    if match:
+        owner, repo = match.group(1), match.group(2)
+    else:
+        parts = text.split("/")
+        if len(parts) != 2:
+            raise SnsError("リポジトリを owner/repo の形式か、GitHubのリポジトリURLで入力してください。")
+        owner, repo = parts
+    repo = repo.removesuffix(".git")
+    if not _GH_OWNER_RE.fullmatch(owner) or not _GH_REPO_RE.fullmatch(repo) or repo in {".", ".."}:
+        raise SnsError("リポジトリ名の形式が正しくありません（例: deshihito/BOT）。")
+    return f"{owner}/{repo}"
+
+
+def github_items_from_pulls(pulls, full_name: str) -> list:
+    """Pull requests 一覧（作成日時の降順）を作成されたPRの通知アイテムにする。"""
+    items: list = []
+    for pr in pulls if isinstance(pulls, list) else []:
+        if not isinstance(pr, dict):
+            continue
+        number = pr.get("number")
+        if not isinstance(number, int) or isinstance(number, bool):
+            continue
+        published = pr.get("created_at")
+        items.append(SnsItem(
+            id=f"gh:pr:{number}",
+            title=f"新しいPR #{number}: {str(pr.get('title') or '').strip()}",
+            url=str(pr.get("html_url") or f"https://github.com/{full_name}/pull/{number}"),
+            author=full_name,
+            published=published if isinstance(published, str) else None,
+        ))
+    return items
+
+
+def github_items_from_issues(issues, full_name: str) -> list:
+    """Issues 一覧を作成されたIssueの通知アイテムにする（PRは混ざるので除く）。"""
+    items: list = []
+    for issue in issues if isinstance(issues, list) else []:
+        if not isinstance(issue, dict) or "pull_request" in issue:
+            continue
+        number = issue.get("number")
+        if not isinstance(number, int) or isinstance(number, bool):
+            continue
+        published = issue.get("created_at")
+        items.append(SnsItem(
+            id=f"gh:issue:{number}",
+            title=f"新しいIssue #{number}: {str(issue.get('title') or '').strip()}",
+            url=str(issue.get("html_url") or f"https://github.com/{full_name}/issues/{number}"),
+            author=full_name,
+            published=published if isinstance(published, str) else None,
+        ))
+    return items
+
+
+def github_items_from_commits(commits, full_name: str) -> list:
+    """Commits 一覧を push されたコミットの通知アイテムにする。"""
+    items: list = []
+    for row in commits if isinstance(commits, list) else []:
+        if not isinstance(row, dict):
+            continue
+        sha = str(row.get("sha") or "").strip()
+        if not sha:
+            continue
+        commit = row.get("commit") if isinstance(row.get("commit"), dict) else {}
+        lines = str(commit.get("message") or "").strip().splitlines()
+        stamp = commit.get("committer") if isinstance(commit.get("committer"), dict) else {}
+        published = stamp.get("date")
+        if not isinstance(published, str):
+            author = commit.get("author") if isinstance(commit.get("author"), dict) else {}
+            published = author.get("date")
+        items.append(SnsItem(
+            id=f"gh:commit:{sha}",
+            title=f"新しいコミット: {lines[0] if lines else sha[:7]}",
+            url=str(row.get("html_url") or f"https://github.com/{full_name}/commit/{sha}"),
+            author=full_name,
+            published=published if isinstance(published, str) else None,
+        ))
+    return items
+
+
+def _sns_github_token() -> str:
+    return (os.getenv("GITHUB_TOKEN") or os.getenv("GH_TOKEN") or "").strip()
 
 
 class SnsError(Exception):
@@ -3073,7 +3182,7 @@ def _sns_x_rss_template() -> str:
 
 
 class SnsFetcher:
-    """YouTube / X の新着取得。ネットワーク周りはここに集約する。"""
+    """YouTube / X / GitHub の新着取得。ネットワーク周りはここに集約する。"""
 
     def __init__(self, session: aiohttp.ClientSession):
         self.session = session
@@ -3210,6 +3319,58 @@ class SnsFetcher:
                 item.url = f"https://x.com/{username}/status/{item.id}"
         return items
 
+    # --- GitHub ------------------------------------------------------------
+    def _github_headers(self) -> dict:
+        headers = {"Accept": "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28"}
+        token = _sns_github_token()
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
+        return headers
+
+    async def _github_json(self, path: str, params=None):
+        status, body = await self._get(
+            f"https://api.github.com{path}", params=params, headers=self._github_headers()
+        )
+        if status == 404:
+            raise SnsError("リポジトリが見つかりませんでした。")
+        if status == 403:
+            raise SnsError("GitHub APIのレート制限に達した可能性があります。GITHUB_TOKEN を設定すると緩和されます。")
+        if status != 200:
+            raise SnsError(f"GitHub APIがHTTP {status}を返しました。")
+        try:
+            return json.loads(body)
+        except ValueError as exc:
+            raise SnsError("GitHub APIの応答を解析できませんでした。") from exc
+
+    async def resolve_github(self, raw: str) -> str:
+        full_name = parse_github_repo(raw)
+        data = await self._github_json(f"/repos/{full_name}")
+        canonical = data.get("full_name") if isinstance(data, dict) else None
+        return str(canonical) if canonical else full_name
+
+    async def github_items(self, full_name: str, options) -> list:
+        """オンになっている種類だけAPIを叩く（レート制限の節約）。"""
+        options = normalize_github_options(options)
+        items: list = []
+        if options["prs"]:
+            data = await self._github_json(
+                f"/repos/{full_name}/pulls",
+                params={"state": "all", "sort": "created", "direction": "desc", "per_page": "10"},
+            )
+            items += github_items_from_pulls(data, full_name)
+        if options["issues"]:
+            data = await self._github_json(
+                f"/repos/{full_name}/issues",
+                params={"state": "all", "sort": "created", "direction": "desc", "per_page": "10"},
+            )
+            items += github_items_from_issues(data, full_name)
+        if options["commits"]:
+            data = await self._github_json(
+                f"/repos/{full_name}/commits", params={"per_page": "10"}
+            )
+            items += github_items_from_commits(data, full_name)
+        return items
+
     # --- 共通 ------------------------------------------------------------
     async def lookup(self, platform: str, raw: str) -> dict:
         """追加時の解決。現在の最新分も返す（既読の基準にするため）。"""
@@ -3217,6 +3378,11 @@ class SnsFetcher:
             channel_id = await self.resolve_youtube(raw)
             name, items = await self.youtube_feed(channel_id)
             return {"key": channel_id, "name": name or channel_id, "uid": None, "items": items}
+
+        if platform == "github":
+            full_name = await self.resolve_github(raw)
+            items = await self.github_items(full_name, default_github_options())
+            return {"key": full_name, "name": full_name, "uid": None, "items": items}
 
         username = parse_x_username(raw)
         # Xは無料のRSS経由に統一し、X APIトークンが設定されていても使用しない。
@@ -3232,6 +3398,9 @@ class SnsFetcher:
         if sub["platform"] == "youtube":
             _, items = await self.youtube_feed(sub["key"])
             return items, None
+
+        if sub["platform"] == "github":
+            return await self.github_items(sub["key"], sub.get("options")), None
 
         username = sub["key"]
         # X通知はRSSを使用。APIの課金・トークン設定には依存しない。
@@ -3265,6 +3434,7 @@ def get_sns_settings(store, guild_id: int) -> dict:
                 "uid": uid if isinstance(uid, str) and uid else None,
                 "seen": seen[-SNS_MAX_SEEN:],
                 "error": error[:200] if isinstance(error, str) and error else None,
+                "options": normalize_github_options(item.get("options")),
             }
         )
 
@@ -3293,7 +3463,7 @@ class SnsNotifyMessage(discord.ui.LayoutView):
             header += f"\n-# <t:{stamp}:R>"
         children.append(discord.ui.TextDisplay(header))
 
-        if sub["platform"] == "youtube":
+        if sub["platform"] in ("youtube", "github"):
             title = discord.utils.escape_markdown(item.title)[:200] or "(タイトルなし)"
             children.append(discord.ui.TextDisplay(f"**{title}**"))
             if item.thumbnail:
@@ -3426,14 +3596,54 @@ class SnsRemoveSelect(discord.ui.Select):
         await self.parent_view.refresh(interaction, notice)
 
 
+class SnsGithubKindSelect(discord.ui.Select):
+    def __init__(self, parent: "SnsNotifyPanel"):
+        self.parent_view = parent
+        options = []
+        for sub in parent.settings["subs"]:
+            if sub["platform"] != "github":
+                continue
+            current = sub.get("options") or {}
+            for kind, label in SNS_GITHUB_KINDS.items():
+                on = current.get(kind, True)
+                options.append(
+                    discord.SelectOption(
+                        label=f"{sub['name']}: {label}通知を{'オフ' if on else 'オン'}にする"[:100],
+                        value=f"{sub['key']}|{kind}"[:100],
+                        description=f"現在: {'オン' if on else 'オフ'}",
+                    )
+                )
+        super().__init__(
+            placeholder="GitHub通知の種類を変更（リポジトリ × 種類）",
+            options=options[:25],
+        )
+
+    async def callback(self, interaction: discord.Interaction):
+        await interaction.response.defer()
+        key, _, kind = self.values[0].rpartition("|")
+        try:
+            notice = await self.parent_view.cog.sns_toggle_github_option(
+                interaction.guild_id, key, kind
+            )
+        except SnsError as exc:
+            notice = f"⚠️ {exc}"
+        except Exception:
+            logger.exception("GitHub通知の種類変更に失敗しました")
+            notice = "⚠️ 変更中にエラーが発生しました。Botのログを確認してください。"
+        await self.parent_view.refresh(interaction, notice)
+
+
 class SnsAddModal(discord.ui.Modal):
     def __init__(self, panel: "SnsNotifyPanel", platform: str):
         meta = SNS_PLATFORMS[platform]
-        super().__init__(title=f"{meta['label']}アカウントを追加"[:45])
+        modal_title = f"{meta['label']}リポジトリを追加" if platform == "github" else f"{meta['label']}アカウントを追加"
+        super().__init__(title=modal_title[:45])
         self.panel = panel
         self.platform = platform
         if platform == "youtube":
             label, placeholder = "チャンネル", "@ハンドル / チャンネルURL / チャンネルID(UC…)"
+        elif platform == "github":
+            label, placeholder = "リポジトリ", "owner/repo / リポジトリURL"
         else:
             label, placeholder = "Xアカウント", "@ユーザー名 / プロフィールURL"
         self.account = discord.ui.TextInput(label=label, placeholder=placeholder, max_length=200)
@@ -3504,6 +3714,13 @@ class SnsNotifyPanel(discord.ui.LayoutView):
         for i, sub in enumerate(subs, 1):
             meta = SNS_PLATFORMS[sub["platform"]]
             line = f"{i}. {meta['emoji']} **{discord.utils.escape_markdown(sub['name'])}**"
+            if sub["platform"] == "github":
+                opts = sub.get("options") or {}
+                kinds = " / ".join(
+                    f"{label}: {'オン' if opts.get(kind, True) else 'オフ'}"
+                    for kind, label in SNS_GITHUB_KINDS.items()
+                )
+                line += f"\n-# {kinds}"
             if sub["error"]:
                 line += f"\n-# ⚠️ {sub['error']}"
             lines.append(line)
@@ -3511,7 +3728,7 @@ class SnsNotifyPanel(discord.ui.LayoutView):
 
     def _build(self):
         self.clear_items()
-        head = "## 📡 SNS新着通知\nXとYouTubeの新着ポスト・動画をチャンネルへ通知します。（管理者専用）"
+        head = "## 📡 SNS新着通知\nX・YouTube・GitHubの新着をチャンネルへ通知します。（管理者専用）"
         if self.notice:
             head = f"{self.notice}\n\n{head}"
 
@@ -3526,9 +3743,12 @@ class SnsNotifyPanel(discord.ui.LayoutView):
             discord.ui.ActionRow(
                 SnsAddButton(self, "youtube"),
                 SnsAddButton(self, "x"),
+                SnsAddButton(self, "github"),
                 SnsToggleButton(self),
             ),
         ]
+        if any(s["platform"] == "github" for s in self.settings["subs"]):
+            children.append(discord.ui.ActionRow(SnsGithubKindSelect(self)))
         if self.settings["subs"]:
             children.append(discord.ui.ActionRow(SnsRemoveSelect(self)))
 
@@ -4532,6 +4752,26 @@ class SupportCog(commands.Cog):
                 return "⚠️ 対象のアカウントはすでに解除されています。"
             await store.update(guild_id, SNS_SECTION, subs=kept)
         return "登録を解除しました。"
+
+    async def sns_toggle_github_option(self, guild_id: int, key: str, kind: str) -> str:
+        if kind not in SNS_GITHUB_KINDS:
+            raise SnsError("通知の種類が正しくありません。")
+        async with self.sns_lock(guild_id):
+            store = guild_settings.get_store()
+            await store.ensure_loaded()
+            settings = get_sns_settings(store, guild_id)
+            subs = [dict(s) for s in settings["subs"]]
+            target = next(
+                (s for s in subs if s["platform"] == "github" and s["key"] == key), None
+            )
+            if target is None:
+                return "⚠️ 対象のリポジトリはすでに解除されています。"
+            options = normalize_github_options(target.get("options"))
+            options[kind] = not options[kind]
+            target["options"] = options
+            await store.update(guild_id, SNS_SECTION, subs=subs)
+        state = "オン" if options[kind] else "オフ"
+        return f"GitHub「{key}」の{SNS_GITHUB_KINDS[kind]}通知を{state}にしました。"
 
     @tasks.loop(seconds=SNS_POLL_SECONDS)
     async def sns_poll(self):
