@@ -16,7 +16,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands, tasks
 from core.panel_v2 import as_panel_v2, edit_panel_v2
-from core import action_registry, ai_omnirush, ai_preferences, ai_provider_router, guild_settings, logfare, shortcuts
+from core import action_registry, action_usage, ai_omnirush, ai_preferences, ai_provider_router, guild_settings, logfare, shortcuts
 from core.game_guides import GAME_GUIDES, GAME_ORDER
 from core import localization, translation
 from core.libretranslate import LibreTranslateClient, LibreTranslateError
@@ -1809,15 +1809,33 @@ class PayModal(discord.ui.Modal, title="コインを送金"):
         await self.cog.bot.get_cog("WalletCog").pay(interaction, receiver, amount)
 
 
+class GeneralHistorySelect(discord.ui.Select):
+    """「よく使う／最近使った」機能への近道（履歴があるときだけ最上段に出る）。"""
+
+    def __init__(self, cog, specs, row: int = 0):
+        self.cog = cog
+        super().__init__(
+            placeholder="よく使う／最近使った機能",
+            options=[
+                discord.SelectOption(label=f"⭐ {spec.label}", value=spec.value)
+                for spec in specs
+            ],
+            row=row,
+        )
+
+    async def callback(self, interaction):
+        await self.cog.dispatch_general(interaction, self.values[0])
+
+
 class GeneralGenreSelect(discord.ui.Select):
-    def __init__(self, cog, selected: str | None = None):
+    def __init__(self, cog, selected: str | None = None, row: int = 0):
         self.cog = cog
         super().__init__(
             placeholder="ジャンルを選択してください",
             options=[discord.SelectOption(label=label, description=f"{len(GENERAL_ACTIONS[value])}個の機能", value=value,
                                           default=value == selected)
                      for value, (label, _description) in GENERAL_GENRES.items()],
-            row=0,
+            row=row,
         )
 
     async def callback(self, interaction):
@@ -1834,13 +1852,13 @@ class GeneralGenreSelect(discord.ui.Select):
 
 
 class GeneralActionSelect(discord.ui.Select):
-    def __init__(self, cog, genre: str):
+    def __init__(self, cog, genre: str, row: int = 1):
         self.cog = cog
         self.genre = genre
         super().__init__(
             placeholder="機能を選択してください",
             options=[discord.SelectOption(label=label, value=value) for label, value in GENERAL_ACTIONS[genre]],
-            row=1,
+            row=row,
         )
 
     async def callback(self, interaction):
@@ -1944,7 +1962,8 @@ class TranslationView(discord.ui.View):
 
 
 class GeneralPanel(discord.ui.View):
-    def __init__(self, cog, genre: str | None = None, shortcut_mode: bool = False, shortcut_item: dict | None = None):
+    def __init__(self, cog, genre: str | None = None, shortcut_mode: bool = False, shortcut_item: dict | None = None,
+                 history_specs: list | None = None):
         super().__init__(timeout=300)
         self.cog = cog
         saved = (shortcut_item or {}).get("action", {})
@@ -1952,13 +1971,20 @@ class GeneralPanel(discord.ui.View):
         self.action = saved.get("value")
         self.shortcut_mode = shortcut_mode
         self.shortcut_item = shortcut_item
+        # 「よく使う／最近」の対象（core.action_usage.history_panel_specs の結果）。
+        # 空ならセクション自体を出さず、従来の見た目と完全同一に保つ。
+        self.history_specs = list(history_specs or [])
         self.refresh()
 
     def refresh(self):
         self.clear_items()
-        self.add_item(GeneralGenreSelect(self.cog, self.genre))
+        offset = 0
+        if self.history_specs:
+            self.add_item(GeneralHistorySelect(self.cog, self.history_specs, row=0))
+            offset = 1
+        self.add_item(GeneralGenreSelect(self.cog, self.genre, row=offset))
         if self.genre:
-            self.add_item(GeneralActionSelect(self.cog, self.genre))
+            self.add_item(GeneralActionSelect(self.cog, self.genre, row=offset + 1))
         if self.shortcut_mode:
             self.add_item(ShortcutCommitButton())
 
@@ -2692,7 +2718,13 @@ class GeneralCog(commands.Cog):
         # the interaction response before doing any work so Discord's 3-second
         # acknowledgement deadline cannot turn a valid command into 10062.
         await interaction.response.defer(ephemeral=True, thinking=True)
-        view = GeneralPanel(self)
+        history_specs = []
+        if interaction.guild_id is not None:
+            store = guild_settings.get_store()
+            await store.ensure_loaded()
+            history_specs = action_usage.history_panel_specs(
+                store, interaction.guild_id, interaction.user.id, "general")
+        view = GeneralPanel(self, history_specs=history_specs)
         await interaction.followup.send(view=as_panel_v2(view), ephemeral=True)
 
     async def _safe_respond(self, interaction: discord.Interaction, message: str, *, ephemeral: bool = True):
@@ -2710,6 +2742,13 @@ class GeneralCog(commands.Cog):
         return None
 
     async def dispatch_general(self, interaction: discord.Interaction, value: str):
+        # 利用履歴（よく使う／最近）は入口ここで記録する。記録の失敗で
+        # dispatch を壊さないよう record_safely 側で例外は握る。
+        await action_usage.record_safely(
+            getattr(interaction, "guild_id", None),
+            getattr(getattr(interaction, "user", None), "id", None),
+            f"general:{value}",
+        )
         if value in {"zetamodoki", "zeta_reset", "zeta_register", "zeta_manage"}:
             cog = self.bot.get_cog("ZetaModoki")
             if cog is None:

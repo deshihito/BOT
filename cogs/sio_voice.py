@@ -47,6 +47,7 @@ except Exception:  # ImportError だけでなく共有ライブラリ不整合 (
     )
 # ---------------------------------------------------------------------------
 
+from core import action_usage
 from core.legacy import Responder
 from core.voice_session import VoiceBusy, feature_label, get_manager, stop_hint
 from core.voice_media import add_audio_source, remove_audio_source
@@ -410,6 +411,12 @@ class VoiceHub(commands.Cog):
                     buffer_ms: app_commands.Range[float, 20.0, 2000.0] | None = None,
                     max_ms: app_commands.Range[float, 20.0, 4000.0] | None = None,
                     room: str | None = None, password: str | None = None):
+        # 利用履歴（よく使う／最近）は入口ここで記録する（失敗しても壊さない）。
+        await action_usage.record_safely(
+            getattr(interaction, "guild_id", None),
+            getattr(getattr(interaction, "user", None), "id", None),
+            f"vc:{value}",
+        )
         if value == "music_panel":
             cog = await self._cog(interaction, "music")
             if cog:
