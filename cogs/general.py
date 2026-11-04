@@ -388,6 +388,9 @@ _LEVELUP_CJK_FONTS = (
     str(Path(__file__).resolve().parent.parent / "assets" / "fonts" / "levelup.ttf"),
     str(Path(__file__).resolve().parent.parent / "assets" / "fonts" / "levelup.otf"),
     str(Path(__file__).resolve().parent.parent / "assets" / "fonts" / "levelup.ttc"),
+    # リポジトリ同梱の日本語フォント。assets/fonts はリポジトリに存在しないため、
+    # OSフォントが無くてもここで日本語が描ける (Hachi Maru Pop)。
+    str(Path(__file__).resolve().parent.parent / "font.ttf"),
     "C:/Windows/Fonts/meiryob.ttc",
     "C:/Windows/Fonts/YuGothB.ttc",
     "C:/Windows/Fonts/msgothic.ttc",
@@ -784,6 +787,11 @@ def _miq_af(name: str) -> str:
 
 # (key, 表示名, 探索パス)。見つかったものだけが選択肢に出る。
 # assets/fonts/ に置くか、環境変数 MIQ_FONT_<KEY大文字> でパスを指定できる。
+# 注意: リポジトリには assets/fonts が存在しない。リポジトリ同梱の font.ttf
+# (Hachi Maru Pop、日本語対応) を最後の選択肢として必ず探索する。
+# これにより、OSに日本語フォントが無くても MIQ が欧文フォントに
+# フォールバックして日本語が □ になることがなくなる。
+_MIQ_REPO_FONT = str(Path(__file__).resolve().parent.parent / "font.ttf")
 _MIQ_FONT_DEFS = (
     ("mplus", "M PLUS Rounded 1c", (
         os.getenv("MIQ_FONT_MPLUS") or "",
@@ -823,6 +831,10 @@ _MIQ_FONT_DEFS = (
         "/System/Library/Fonts/ヒラギノ角ゴシック W3.ttc",
         "/System/Library/Fonts/ヒラギノ角ゴシック W6.ttc",
     )),
+    ("hachi", "Hachi Maru Pop (リポジトリ同梱)", (
+        os.getenv("MIQ_FONT_HACHI") or "",
+        _MIQ_REPO_FONT,
+    )),
 )
 
 # key -> (表示名, 絵文字, 背景色, 文字色)
@@ -837,9 +849,38 @@ MIQ_THEMES = {
 
 _MIQ_FONTS_CACHE: list[tuple[str, str, str | None]] | None = None
 
+_MIQ_JP_PROBE = "あア漢字かなカナ、。ー"
+
+
+def _font_covers_japanese(path: str) -> bool:
+    """フォントが日本語の基本字形を持つか。読み込めるだけでは □ にならない。
+
+    fontTools が無い環境では判定できないため True を返し、従来動作を保つ。
+    matplotlib 経由などで fontTools が入っている環境では厳密に判定する。
+    """
+    try:
+        from fontTools.ttLib import TTFont
+    except Exception:
+        return True
+    try:
+        try:
+            font = TTFont(path)
+            cmap = font.getBestCmap()
+        except Exception:
+            from fontTools.ttLib import TTCollection
+
+            cmap = TTCollection(path).fonts[0].getBestCmap()
+        return all(ord(ch) in cmap for ch in _MIQ_JP_PROBE)
+    except Exception:
+        return False
+
 
 def _miq_available_fonts() -> list[tuple[str, str, str | None]]:
-    """利用可能なフォント [(key, label, path)] を返す(初回のみ探索)。常に1件以上返る。"""
+    """利用可能なフォント [(key, label, path)] を返す(初回のみ探索)。常に1件以上返る。
+
+    以前は「Pillowで読み込めるか」だけで選んでいたため、日本語非対応の
+    フォントが選ばれて □ になることがあった。今は日本語対応も確認する。
+    """
     global _MIQ_FONTS_CACHE
     if _MIQ_FONTS_CACHE is not None:
         return _MIQ_FONTS_CACHE
@@ -854,8 +895,21 @@ def _miq_available_fonts() -> list[tuple[str, str, str | None]]:
                 ImageFont.truetype(path, 20)
             except Exception:
                 continue
+            if not _font_covers_japanese(path):
+                continue
             found.append((key, label, path))
             break
+    if not found:
+        # 最後の砦はリポジトリ同梱の日本語フォント。欧文フォントへの
+        # フォールバックは日本語を □ にするため、ここでは使わない。
+        repo = _MIQ_REPO_FONT
+        if repo and os.path.exists(repo):
+            try:
+                ImageFont.truetype(repo, 20)
+                if _font_covers_japanese(repo):
+                    found.append(("hachi", "Hachi Maru Pop (リポジトリ同梱)", repo))
+            except Exception:
+                pass
     if not found:
         found.append(("default", "Default", _levelup_pick_font()[0]))
     _MIQ_FONTS_CACHE = found
@@ -1007,8 +1061,14 @@ def render_miq_frames(
         cx = side // 2 if flip else H + side // 2
         text_w = side - 80
 
-    shown_name = _levelup_safe_name(name, True) or _levelup_safe_name(username, True) or "unknown"
-    shown_user = _levelup_safe_name(username, True)
+    # 名前・透かしも本文フォントに合わせる。日本語非対応フォントに
+    # 日本語を渡すと □ になるため、対応していない場合はASCIIのみに落とす。
+    if font_path:
+        _miq_can_cjk = _font_covers_japanese(font_path)
+    else:
+        _miq_can_cjk = _levelup_pick_font()[1]
+    shown_name = _levelup_safe_name(name, _miq_can_cjk) or _levelup_safe_name(username, _miq_can_cjk) or "unknown"
+    shown_user = _levelup_safe_name(username, _miq_can_cjk)
 
     font, lines, lh, size = _miq_fit(d, text, font_path, text_w, 350)
     name_size = 34
@@ -1036,7 +1096,7 @@ def render_miq_frames(
     if shown_user:
         d.text((cx, y), f"@{shown_user}", font=user_font, fill=tuple(sub) + (255,), anchor="ma")
     if watermark:
-        wm = _levelup_safe_name(watermark, True)
+        wm = _levelup_safe_name(watermark, _miq_can_cjk)
         if flip and not full:
             d.text((24, H - 18), wm, font=wm_font, fill=tuple(sub) + (255,), anchor="ls")
         else:
