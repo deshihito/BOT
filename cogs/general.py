@@ -2126,6 +2126,8 @@ class GeneralCog(commands.Cog):
         self._levelup_sem = asyncio.Semaphore(2)  # 画像生成の同時実行数(低スペック機での詰まり防止)
         self._levelup_pillow_warned = False
         self._miq_last: dict[int, float] = {}
+        self._translation_client = LibreTranslateClient()
+        self._translation_webhooks: dict[int, discord.Webhook] = {}
         # メッセージの右クリックメニュー(アプリ → Make it a Quote)
         self.miq_menu = app_commands.ContextMenu(name="Make it a Quote", callback=self.miq_context)
 
