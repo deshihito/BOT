@@ -54,6 +54,13 @@ D_FLOORS = 40
 D_VIEW_R = 5
 TILE = 32
 
+# Phase 1 の新マップ定義（並行導入。現行マップとは独立に使う）
+D2_MAP_W = 29
+D2_MAP_H = 29
+D2_SECTOR_N = 3          # 3x3 セクター配置
+D2_MAIN_ROLES = ("start", "combat", "event", "combat_or_chest", "stairs")
+D2_SUB_ROLES = ("chest", "shop", "mine", "rest")
+
 # タイルタイプ
 D_WALL = "wall"
 D_FLOOR = "floor"
@@ -865,6 +872,166 @@ def d_gen_floor(floor):
             placed_trap += 1
     
     return grid
+
+# ============================================================
+#  Phase 1: 新フロアジェネレータ（部屋＋通路方式・シード決定的）
+#  設計書 dungeon-phase1-design.md §3 に準拠。現行の d_gen_floor とは
+#  並行導入であり、ゲーム動作にはまだ切り替えていない（Phase 1-B 以降）。
+# ============================================================
+
+# v2 の役割タイル対応。combat 部屋はタイルを置かず入室で発動する（Phase 1-D）。
+_D2_ROLE_TILES = {
+    "start": D_START,
+    "stairs": D_STAIRS,
+    "chest": D_CHEST,
+    "shop": D_SHOP,
+    "mine": D_MINE,
+    "rest": D_REST,
+    "event": D_EVENT,
+}
+
+
+def d_floor_seed(season_id, user_id, floor):
+    """(season, user, floor) から v2 フロア生成用の決定的シードを導出する。"""
+    digest = hashlib.sha256(f"{season_id}:{user_id}:{floor}:v2".encode("utf-8")).hexdigest()
+    return int(digest[:16], 16)
+
+
+def _d2_sector_origin(sector_index):
+    """セクター番号 (0..2) の左上座標。外周1マスは壁として残す。"""
+    return 1 + sector_index * ((D2_MAP_W - 2) // D2_SECTOR_N)
+
+
+def _d2_main_route(rng):
+    """3x3 セクターグリッド上で重複なし・隣接のみの5セクタールートを作る。"""
+    neighbors = [(0, -1), (0, 1), (-1, 0), (1, 0)]
+    for _ in range(1000):
+        route = [(rng.randrange(D2_SECTOR_N), rng.randrange(D2_SECTOR_N))]
+        while len(route) < len(D2_MAIN_ROLES):
+            cx, cy = route[-1]
+            options = [
+                (cx + dx, cy + dy) for dx, dy in neighbors
+                if 0 <= cx + dx < D2_SECTOR_N and 0 <= cy + dy < D2_SECTOR_N
+                and (cx + dx, cy + dy) not in route
+            ]
+            if not options:
+                break
+            route.append(rng.choice(options))
+        if len(route) == len(D2_MAIN_ROLES):
+            return route
+    raise RuntimeError("d_gen_floor_v2: メインルートを生成できませんでした")
+
+
+def d_gen_floor_v2(seed, floor):
+    """シード決定的な部屋＋通路フロアを生成し、(grid, rooms) を返す。
+
+    grid は D2_MAP_H x D2_MAP_W のタイル文字列の2次元リスト（grid[y][x]）。
+    rooms は各部屋の dict のリストで、少なくとも
+    {id, role, rect:(x, y, w, h), center:(x, y), sector:(sx, sy), route}
+    を含む。階段部屋には guarded=True、5フロア毎は boss=True も付く。
+    乱数は引数 seed から作る random.Random のみを使い、再現性を保証する。
+    """
+    rng = random.Random(seed)
+    grid = [[D_WALL] * D2_MAP_W for _ in range(D2_MAP_H)]
+
+    # --- セクター決定: メインルート5 + サブ1〜2 ---
+    main_sectors = _d2_main_route(rng)
+    main_set = set(main_sectors)
+    sub_candidates = []
+    for sy in range(D2_SECTOR_N):
+        for sx in range(D2_SECTOR_N):
+            if (sx, sy) in main_set:
+                continue
+            if any((sx + dx, sy + dy) in main_set for dx, dy in ((0, -1), (0, 1), (-1, 0), (1, 0))):
+                sub_candidates.append((sx, sy))
+    rng.shuffle(sub_candidates)
+    sub_count = min(len(sub_candidates), rng.randint(1, 2)) if sub_candidates else 0
+    sub_sectors = sub_candidates[:sub_count]
+
+    # --- 役割割り当て ---
+    # メイン4番目 (combat_or_chest) は抽選で実役割に解決する。
+    fourth = "chest" if rng.random() < 0.5 else "combat"
+    main_roles = ["start", "combat", "event", fourth, "stairs"]
+    sub_roles = rng.sample(list(D2_SUB_ROLES), len(sub_sectors))
+
+    # --- 部屋配置（セクター内に 5x5〜7x7、ランダムオフセット） ---
+    rooms = []
+
+    def place_room(sector, role, route):
+        sx, sy = sector
+        ox, oy = _d2_sector_origin(sx), _d2_sector_origin(sy)
+        sector_size = (D2_MAP_W - 2) // D2_SECTOR_N
+        w = rng.randint(5, 7)
+        h = rng.randint(5, 7)
+        x = ox + rng.randint(0, sector_size - w)
+        y = oy + rng.randint(0, sector_size - h)
+        room = {
+            "id": len(rooms),
+            "role": role,
+            "rect": (x, y, w, h),
+            "center": (x + w // 2, y + h // 2),
+            "sector": (sx, sy),
+            "route": route,
+        }
+        if role == "stairs":
+            room["guarded"] = True
+            room["boss"] = (int(floor) % 5 == 0)
+        rooms.append(room)
+        for gy in range(y, y + h):
+            for gx in range(x, x + w):
+                grid[gy][gx] = D_FLOOR
+        return room
+
+    main_rooms = [place_room(sector, role, "main") for sector, role in zip(main_sectors, main_roles)]
+    sub_rooms = []
+    for sector, role in zip(sub_sectors, sub_roles):
+        room = place_room(sector, role, "sub")
+        # 接続先は隣接するメイン部屋から1つ選ぶ（行き止まりの寄り道にする）。
+        sx, sy = sector
+        hosts = [r for r in main_rooms
+                 if abs(r["sector"][0] - sx) + abs(r["sector"][1] - sy) == 1]
+        room["host_id"] = rng.choice(hosts)["id"]
+        sub_rooms.append(room)
+
+    # --- 通路: 隣接部屋の中心同士を L字（幅1）で接続 ---
+    corridor_cells = []
+
+    def carve_corridor(a, b):
+        x1, y1 = a
+        x2, y2 = b
+        cells = []
+        if rng.random() < 0.5:
+            points = [(x, y1) for x in range(min(x1, x2), max(x1, x2) + 1)]
+            points += [(x2, y) for y in range(min(y1, y2), max(y1, y2) + 1)]
+        else:
+            points = [(x1, y) for y in range(min(y1, y2), max(y1, y2) + 1)]
+            points += [(x, y2) for x in range(min(x1, x2), max(x1, x2) + 1)]
+        for gx, gy in points:
+            if grid[gy][gx] == D_WALL:
+                grid[gy][gx] = D_FLOOR
+                cells.append((gx, gy))
+        return cells
+
+    for prev, nxt in zip(main_rooms, main_rooms[1:]):
+        corridor_cells += carve_corridor(prev["center"], nxt["center"])
+    for room in sub_rooms:
+        host = main_rooms[room["host_id"]]
+        corridor_cells += carve_corridor(room["center"], host["center"])
+
+    # --- 役割タイルを部屋中央へ（通路で上書きされないよう最後に置く） ---
+    for room in rooms:
+        tile = _D2_ROLE_TILES.get(room["role"])
+        if tile is not None:
+            cx, cy = room["center"]
+            grid[cy][cx] = tile
+
+    # --- 罠: 通路マス（部屋の外）から 0〜2 個 ---
+    if corridor_cells:
+        trap_count = min(len(corridor_cells), rng.randint(0, 2))
+        for gx, gy in rng.sample(corridor_cells, trap_count):
+            grid[gy][gx] = D_TRAP
+
+    return grid, rooms
 
 def load_all_assets():
     """Assetsフォルダから画像を読み込みキャッシュする"""
