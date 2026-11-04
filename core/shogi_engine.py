@@ -103,23 +103,11 @@ class ShogiGame:
             self.board[2][f] = Piece(PieceType.PAWN, Color.GOTE)
 
     def get_piece_moves(self, rank: int, file: int) -> List[Tuple[int, int]]:
-        """Return list of (to_rank, to_file) legal moves for piece at position. Ignores check for now."""
+        """Return list of (to_rank, to_file) pseudo-legal moves for the piece
+        at the position. Ignores check; use legal_destinations for legal moves."""
         piece = self.board[rank][file]
         if not piece or piece.color != self.turn:
             return []
-        moves = []
-        # Simple movement generators
-        directions = self._get_directions(piece)
-        for dr, df in directions:
-            if piece.type in (PieceType.KNIGHT, PieceType.PAWN) or (piece.promoted and piece.type == PieceType.PAWN):
-                # Single step
-                nr, nf = rank + dr * piece.color.value, file + df  # color.value: SENTE=1 forward is -rank? Wait fix.
-                # Board: rank 0 top (Gote), rank 8 bottom (Sente).
-                # Sente forward is decreasing rank.
-                # So for Sente (color=1), forward dr should be negative.
-                # Let's redefine.
-            # Better redefine movement.
-        # Rewrite properly.
         return self._generate_moves(rank, file)
 
     def _generate_moves(self, rank: int, file: int) -> List[Tuple[int, int]]:
@@ -350,6 +338,28 @@ class ShogiGame:
         color = color or self.turn
         return self.is_in_check(color) and not self.has_legal_move(color, validate_uchifuzume)
 
+    def legal_destinations(self, rank: int, file: int) -> List[Tuple[int, int]]:
+        """Destinations the piece at (rank, file) can legally move to.
+
+        Unlike _generate_moves (pseudo-legal), every returned destination
+        passes _move_is_legal, so moves that leave the own king in check are
+        excluded. Both the promote and non-promote variants are considered:
+        a destination counts if either variant is legal.
+        """
+        if not (0 <= rank < 9 and 0 <= file < 9):
+            return []
+        piece = self.board[rank][file]
+        if not piece or piece.color != self.turn:
+            return []
+        destinations = []
+        for dest in self._generate_moves(rank, file):
+            if self._move_is_legal((rank, file), dest, promote=False):
+                destinations.append(dest)
+            elif self.can_promote(piece, rank, dest[0]) and self._move_is_legal(
+                    (rank, file), dest, promote=True):
+                destinations.append(dest)
+        return destinations
+
     def get_selectable_pieces(self) -> List[Tuple[int, int]]:
         """Positions of own pieces that have at least one move."""
         positions = []
@@ -357,6 +367,20 @@ class ShogiGame:
             for f in range(9):
                 p = self.board[r][f]
                 if p and p.color == self.turn and self._generate_moves(r, f):
+                    positions.append((r, f))
+        return positions
+
+    def get_legal_selectable_pieces(self) -> List[Tuple[int, int]]:
+        """Positions of own pieces that have at least one legal move.
+
+        Legal-move counterpart of get_selectable_pieces: pieces whose every
+        pseudo-legal move would leave the own king in check are excluded.
+        """
+        positions = []
+        for r in range(9):
+            for f in range(9):
+                p = self.board[r][f]
+                if p and p.color == self.turn and self.legal_destinations(r, f):
                     positions.append((r, f))
         return positions
 
