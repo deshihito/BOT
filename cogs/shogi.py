@@ -36,15 +36,39 @@ SHOGI_VALUES = {
 }
 
 
+def _is_forced_promotion(piece, to_rank) -> bool:
+    """True when moving ``piece`` to ``to_rank`` forces promotion.
+
+    Mirrors the forced-promotion rules applied by the engine in
+    ShogiGame._apply_move_unchecked: pawns/lances on the last rank and
+    knights on the last two ranks have no non-promoting move.
+    """
+    if piece is None or piece.promoted:
+        return False
+    if piece.type in (PieceType.PAWN, PieceType.LANCE):
+        return to_rank == 0 if piece.color == Color.SENTE else to_rank == 8
+    if piece.type == PieceType.KNIGHT:
+        return to_rank <= 1 if piece.color == Color.SENTE else to_rank >= 7
+    return False
+
+
 def _shogi_candidates(game):
     candidates = []
-    for source in game.get_selectable_pieces():
-        for dest in game._generate_moves(*source):
-            piece = game.board[source[0]][source[1]]
-            candidates.append((source, dest, game.can_promote(piece, source[0], dest[0]), None))
+    for source in game.get_legal_selectable_pieces():
+        piece = game.board[source[0]][source[1]]
+        for dest in game.legal_destinations(*source):
+            if game.can_promote(piece, source[0], dest[0]) and not _is_forced_promotion(piece, dest[0]):
+                # Optional promotion: offer both variants to the AI.
+                candidates.append((source, dest, False, None))
+                candidates.append((source, dest, True, None))
+            elif game.can_promote(piece, source[0], dest[0]):
+                candidates.append((source, dest, True, None))
+            else:
+                candidates.append((source, dest, False, None))
     for piece_type in game.get_hand_pieces():
         for dest in game.get_drop_squares(piece_type):
-            candidates.append((None, dest, False, piece_type))
+            if game._move_is_legal(None, dest, drop_type=piece_type):
+                candidates.append((None, dest, False, piece_type))
     return candidates
 
 
@@ -219,6 +243,8 @@ class ShogiSession:
         self.state = "select_piece"
         self.selected = None
         self.selected_drop = None
+        self.pending_from = None
+        self.pending_to = None
         self.acted = False
         self.renderer = ShogiRenderer()
         self.current_msg = None
@@ -281,6 +307,26 @@ class ShogiMoveView(discord.ui.View):
             self.add_item(ShogiCoordinateButton(cog, session))
 
 
+class ShogiPromoteView(discord.ui.View):
+    """「成る / 成らない」の2ボタンで任意成りを選ばせるビュー。
+
+    選択されるまで手は実行されない。タイムアウトした場合は何も実行されず、
+    手番タイマー側で時間切れとして扱われる。
+    """
+
+    def __init__(self, cog, session):
+        super().__init__(timeout=TURN_SECONDS)
+        self.cog, self.session = cog, session
+
+    @discord.ui.button(label="成る", style=discord.ButtonStyle.success)
+    async def promote(self, interaction, button):
+        await self.cog.handle_promote_choice(interaction, self.session, True)
+
+    @discord.ui.button(label="成らない", style=discord.ButtonStyle.secondary)
+    async def not_promote(self, interaction, button):
+        await self.cog.handle_promote_choice(interaction, self.session, False)
+
+
 class ShogiHandButton(discord.ui.Button):
     def __init__(self, cog, session):
         super().__init__(label="持ち駒を使う", style=discord.ButtonStyle.primary)
@@ -341,6 +387,46 @@ class Shogi(commands.Cog):
         except Exception:
             pass
 
+    def _needs_promote_choice(self, s, from_pos, to_pos) -> bool:
+        """True when the move may optionally promote and the player must choose."""
+        piece = s.game.board[from_pos[0]][from_pos[1]]
+        if piece is None:
+            return False
+        return (s.game.can_promote(piece, from_pos[0], to_pos[0])
+                and not _is_forced_promotion(piece, to_pos[0]))
+
+    async def _begin_promote_choice(self, s, channel, from_pos, to_pos):
+        """Park the move and ask 成る/成らない before executing it."""
+        s.pending_from = from_pos
+        s.pending_to = to_pos
+        s.state = "select_promote"
+        await self._update_board_msg(
+            s, channel, "この駒を成りますか？「成る」か「成らない」を選んでください。",
+            labels=None, selected=from_pos,
+        )
+
+    async def handle_promote_choice(self, interaction, s, promote):
+        await interaction.response.defer()
+        if s.phase != "playing" or s.acted or s.state != "select_promote":
+            return
+        from_pos, to_pos = s.pending_from, s.pending_to
+        if from_pos is None or to_pos is None:
+            return
+        if s.game.make_move(from_pos, to_pos, promote=promote):
+            s.pending_from = s.pending_to = None
+            s.acted = True
+            return
+        await interaction.followup.send("その手は指せません。", ephemeral=True)
+        s.pending_from = s.pending_to = None
+        s.state = "select_dest"
+        dests = s.game.legal_destinations(*from_pos)
+        channel = getattr(interaction, "channel", None)
+        if channel is not None and dests:
+            await self._update_board_msg(
+                s, channel, f"移動先の番号を選んでください（{len(dests)}箇所）。",
+                labels=list(zip(MOVE_LABELS, dests))[:REACTION_PAGE_SIZE], selected=from_pos,
+            )
+
     async def handle_select(self, interaction, s, labels, label):
         await interaction.response.defer()
         pos = labels.get(label)
@@ -350,7 +436,7 @@ class Shogi(commands.Cog):
             if not isinstance(pos, tuple):
                 return
             s.selected = pos
-            dests = s.game._generate_moves(*pos)
+            dests = s.game.legal_destinations(*pos)
             if not dests:
                 return
             s.state = "select_dest"
@@ -361,9 +447,13 @@ class Shogi(commands.Cog):
         elif s.state == "select_dest" and s.selected:
             if not isinstance(pos, tuple):
                 return
-            # 昇格 UI がないため通常手では昇格を強制しない。
+            if self._needs_promote_choice(s, s.selected, pos):
+                await self._begin_promote_choice(s, interaction.message.channel, s.selected, pos)
+                return
             if s.game.make_move(s.selected, pos, promote=False):
                 s.acted = True
+            else:
+                await interaction.followup.send("その手は指せません。", ephemeral=True)
         elif s.state == "select_hand" and isinstance(pos, PieceType):
             drops = s.game.get_drop_squares(pos)
             if not drops:
@@ -378,6 +468,8 @@ class Shogi(commands.Cog):
         elif s.state == "select_drop_dest" and isinstance(pos, tuple):
             if s.game.make_move(None, pos, drop_type=s.selected_drop):
                 s.acted = True
+            else:
+                await interaction.followup.send("その場所には打てません。", ephemeral=True)
 
     async def handle_coordinate_input(self, interaction, s, text):
         await interaction.response.defer()
@@ -388,18 +480,25 @@ class Shogi(commands.Cog):
             return await interaction.followup.send("座標は11〜99の範囲で入力してください。", ephemeral=True)
         pos = (row, col)
         if s.state == "select_piece":
-            if not s.game._generate_moves(*pos) or s.game.board[row][col].color != s.game.turn:
+            if not s.game.legal_destinations(*pos):
                 return await interaction.followup.send("その座標の駒は選択できません。", ephemeral=True)
             s.selected = pos
-            dests = s.game._generate_moves(*pos)
+            dests = s.game.legal_destinations(*pos)
             s.state = "select_dest"
             await self._update_board_msg(s, interaction.channel, f"移動先を選択してください（{len(dests)}箇所）。", labels=list(zip(MOVE_LABELS, dests)), selected=pos)
         elif s.state == "select_dest" and s.selected:
+            if self._needs_promote_choice(s, s.selected, pos):
+                await self._begin_promote_choice(s, interaction.channel, s.selected, pos)
+                return
             if s.game.make_move(s.selected, pos, promote=False):
                 s.acted = True
+            else:
+                await interaction.followup.send("その手は指せません。", ephemeral=True)
         elif s.state == "select_drop_dest" and s.selected_drop:
             if s.game.make_move(None, pos, drop_type=s.selected_drop):
                 s.acted = True
+            else:
+                await interaction.followup.send("その場所には打てません。", ephemeral=True)
 
     async def handle_hand(self, interaction, s):
         await interaction.response.defer()
@@ -419,7 +518,9 @@ class Shogi(commands.Cog):
         s.state = "select_piece"
         s.selected = None
         s.selected_drop = None
-        selectables = s.game.get_selectable_pieces()
+        s.pending_from = None
+        s.pending_to = None
+        selectables = s.game.get_legal_selectable_pieces()
         await self._update_board_msg(s, interaction.channel, "駒を選択してください。", labels=list(zip(MOVE_LABELS, selectables)))
 
     async def start_recruit(self, interaction, mode="human", difficulty=5):
@@ -456,7 +557,12 @@ class Shogi(commands.Cog):
         file = discord.File(buf, "shogi.png")
         embed = discord.Embed(description=description, color=COLOR)
         embed.set_image(url="attachment://shogi.png")
-        select_view = ShogiMoveView(self, s, labels) if labels else None
+        if labels:
+            select_view = ShogiMoveView(self, s, labels)
+        elif getattr(s, "state", None) == "select_promote":
+            select_view = ShogiPromoteView(self, s)
+        else:
+            select_view = None
         if s.current_msg is None:
             s.current_msg = await game_panels.replace(channel, "party", embed=embed, file=file,
                                                       view=select_view)
@@ -503,7 +609,9 @@ class Shogi(commands.Cog):
             s.state = "select_piece"
             s.selected = None
             s.selected_drop = None
-            selectables = s.game.get_selectable_pieces()
+            s.pending_from = None
+            s.pending_to = None
+            selectables = s.game.get_legal_selectable_pieces()
             labels = list(zip(MOVE_LABELS, selectables))
             desc = (f"{turn_user.mention} さんの番（{'先手' if s.game.turn == Color.SENTE else '後手'}）。\n"
                     + ("王手を受けています。\n" if s.game.is_in_check(s.game.turn) else "")
@@ -556,7 +664,7 @@ class Shogi(commands.Cog):
             s.state = "select_piece"
             s.selected_drop = None
             # Re-show piece selection
-            selectables = s.game.get_selectable_pieces()
+            selectables = s.game.get_legal_selectable_pieces()
             labels = list(zip(MOVE_LABELS, selectables))[:REACTION_PAGE_SIZE]
             desc = f"{s.players[s.game.turn].mention} さんの番。駒を選んでください。"
             await self._update_board_msg(s, reaction.message.channel, desc, labels=labels, extra_emojis=[HAND_EMOJI])
@@ -566,7 +674,7 @@ class Shogi(commands.Cog):
                 if s.state == "select_piece":
                     # Select piece, show destinations
                     s.selected = pos
-                    dests = s.game._generate_moves(*pos)
+                    dests = s.game.legal_destinations(*pos)
                     if not dests:
                         return
                     s.state = "select_dest"
@@ -574,8 +682,9 @@ class Shogi(commands.Cog):
                     desc = f"移動先を選択してください（{len(dests)}箇所）。<:Back:1561700549236097034>でキャンセル。"
                     await self._update_board_msg(s, reaction.message.channel, desc, labels=dest_labels, selected=pos, extra_emojis=[CANCEL_EMOJI])
                 elif s.state == "select_dest":
-                    # Execute move
-                    success = s.game.make_move(s.selected, pos, promote=True)
+                    # Execute move (optional promotion is chosen via the
+                    # select/coordinate flow; forced promotion still applies)
+                    success = s.game.make_move(s.selected, pos, promote=False)
                     if success:
                         s.acted = True
                         # Force refresh on next loop

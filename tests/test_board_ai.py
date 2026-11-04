@@ -1,9 +1,10 @@
 import unittest
+from copy import deepcopy
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 from cogs.othello import BLACK, WHITE, choose_ai_move as choose_othello_move, legal_moves as othello_moves, new_board
-from cogs.shogi import Shogi, ShogiRenderer, ShogiSession, choose_ai_move as choose_shogi_move
+from cogs.shogi import Shogi, ShogiRenderer, ShogiSession, _shogi_candidates, choose_ai_move as choose_shogi_move
 from core.shogi_engine import Color, Piece, PieceType, ShogiGame
 
 
@@ -67,6 +68,39 @@ class BoardAiTest(unittest.TestCase):
         self.assertFalse(game.make_move((7, 4), (7, 3)))
         self.assertIsNotNone(game.board[7][4])
 
+    def test_shogi_legal_destinations_exclude_check_leaving_moves(self):
+        game = self.empty_shogi()
+        game.board[8][4] = Piece(PieceType.KING, Color.SENTE)
+        game.board[7][4] = Piece(PieceType.BISHOP, Color.SENTE)
+        game.board[0][4] = Piece(PieceType.ROOK, Color.GOTE)
+        game.board[0][0] = Piece(PieceType.KING, Color.GOTE)
+        # The bishop is pinned: every pseudo-legal move exposes the king, so
+        # it shows up in the pseudo-legal selectable list but must not appear
+        # among the legal selection candidates.
+        self.assertIn((7, 4), game.get_selectable_pieces())
+        self.assertEqual(game.legal_destinations(7, 4), [])
+        self.assertNotIn((7, 4), game.get_legal_selectable_pieces())
+
+        # A rook on the same file can move along the file but not sideways.
+        game.board[7][4] = Piece(PieceType.ROOK, Color.SENTE)
+        destinations = game.legal_destinations(7, 4)
+        self.assertIn((6, 4), destinations)
+        self.assertNotIn((7, 3), destinations)
+
+    def test_shogi_ai_candidates_include_promote_and_non_promote(self):
+        game = self.empty_shogi()
+        game.board[8][4] = Piece(PieceType.KING, Color.SENTE)
+        game.board[0][0] = Piece(PieceType.KING, Color.GOTE)
+        game.board[3][3] = Piece(PieceType.PAWN, Color.SENTE)
+        candidates = _shogi_candidates(game)
+        self.assertIn(((3, 3), (2, 3), False, None), candidates)
+        self.assertIn(((3, 3), (2, 3), True, None), candidates)
+        # Every candidate the AI can pick must be executable as-is.
+        for source, dest, promote, drop_type in candidates:
+            with self.subTest(candidate=(source, dest, promote, drop_type)):
+                trial = deepcopy(game)
+                self.assertTrue(trial.make_move(source, dest, promote=promote, drop_type=drop_type))
+
     def test_shogi_detects_checkmate(self):
         game = self.empty_shogi()
         game.board[8][8] = Piece(PieceType.KING, Color.SENTE)
@@ -100,6 +134,95 @@ class ShogiMoveFlowTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertTrue(session.acted)
         self.assertEqual(session.game.turn, Color.GOTE)
+
+    def make_interaction(self, channel):
+        class Response:
+            async def defer(self):
+                return None
+
+        return SimpleNamespace(
+            response=Response(),
+            message=SimpleNamespace(channel=channel),
+            channel=channel,
+            followup=AsyncMock(),
+        )
+
+    def promotion_session(self, cog):
+        session = ShogiSession(1, 1, 1, mode="cpu")
+        session.phase = "playing"
+        game = session.game
+        game.board = [[None for _ in range(9)] for _ in range(9)]
+        game.board[8][4] = Piece(PieceType.KING, Color.SENTE)
+        game.board[0][0] = Piece(PieceType.KING, Color.GOTE)
+        game.board[3][3] = Piece(PieceType.PAWN, Color.SENTE)
+        game.turn = Color.SENTE
+        cog._update_board_msg = AsyncMock()
+        return session
+
+    async def test_select_flow_asks_promotion_and_promotes(self):
+        cog = Shogi(None)
+        session = self.promotion_session(cog)
+        channel = SimpleNamespace()
+        interaction = self.make_interaction(channel)
+
+        await cog.handle_select(interaction, session, {"A": (3, 3)}, "A")
+        self.assertEqual(session.state, "select_dest")
+        await cog.handle_select(interaction, session, {"A": (2, 3)}, "A")
+        # Promotion is optional here: the move must wait for the choice.
+        self.assertEqual(session.state, "select_promote")
+        self.assertFalse(session.acted)
+        self.assertEqual(session.game.turn, Color.SENTE)
+        self.assertIsNotNone(session.game.board[3][3])
+
+        await cog.handle_promote_choice(interaction, session, True)
+        self.assertTrue(session.acted)
+        self.assertTrue(session.game.board[2][3].promoted)
+        self.assertEqual(session.game.turn, Color.GOTE)
+
+    async def test_coordinate_flow_can_decline_promotion(self):
+        cog = Shogi(None)
+        session = self.promotion_session(cog)
+        channel = SimpleNamespace()
+        interaction = self.make_interaction(channel)
+
+        await cog.handle_coordinate_input(interaction, session, "44")
+        self.assertEqual(session.state, "select_dest")
+        await cog.handle_coordinate_input(interaction, session, "34")
+        self.assertEqual(session.state, "select_promote")
+        self.assertFalse(session.acted)
+
+        await cog.handle_promote_choice(interaction, session, False)
+        self.assertTrue(session.acted)
+        self.assertFalse(session.game.board[2][3].promoted)
+        self.assertEqual(session.game.turn, Color.GOTE)
+
+    async def test_illegal_destination_reports_error_and_keeps_state(self):
+        cog = Shogi(None)
+        cog._update_board_msg = AsyncMock()
+        session = ShogiSession(1, 1, 1, mode="cpu")
+        session.phase = "playing"
+        game = session.game
+        game.board = [[None for _ in range(9)] for _ in range(9)]
+        game.board[8][4] = Piece(PieceType.KING, Color.SENTE)
+        game.board[7][4] = Piece(PieceType.ROOK, Color.SENTE)
+        game.board[0][4] = Piece(PieceType.ROOK, Color.GOTE)
+        game.board[0][0] = Piece(PieceType.KING, Color.GOTE)
+        game.turn = Color.SENTE
+        channel = SimpleNamespace()
+        interaction = self.make_interaction(channel)
+
+        await cog.handle_select(interaction, session, {"A": (7, 4)}, "A")
+        self.assertEqual(session.state, "select_dest")
+        interaction.followup.reset_mock()
+        # Moving the pinned rook sideways would leave the king in check.
+        await cog.handle_select(interaction, session, {"B": (7, 3)}, "B")
+
+        self.assertFalse(session.acted)
+        self.assertEqual(session.state, "select_dest")
+        self.assertEqual(session.game.turn, Color.SENTE)
+        interaction.followup.send.assert_awaited_once()
+        _, kwargs = interaction.followup.send.call_args
+        self.assertTrue(kwargs.get("ephemeral"))
 
 if __name__ == "__main__":
     unittest.main()
