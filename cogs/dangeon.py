@@ -8,9 +8,10 @@ dungeon.py - Discord.py Cog形式
     DUNGEON_IMG_CHANNEL_ID=画像投稿チャンネルID
   
   自前DB API テーブル:
-    - dungeon_maps (floor, grid, used_coords, start_pos)
     - dungeon_players (user_id, floor, x, y, hp, max_hp, atk, def_, spd, crit)
-    - dungeon_bases (user_id, floor, x, y)
+      ※マップは Phase 1-B からプレイヤー個人インスタンス（シード再生成＋
+        差分は inventory._dungeon_meta の instances に保存）。
+        旧 dungeon_maps / dungeon_bases テーブルは読み書きしない。
   
   main.py:
     await bot.load_extension('cogs.dungeon')
@@ -304,7 +305,8 @@ dg_maps    = {}  # {floor: [[...], [...]]}
 dg_players = {}  # {uid: {floor, x, y, hp, max_hp, atk, def_, spd, crit}}
 dg_starts  = {}  # {floor: (x, y)}
 dg_used    = {}  # {floor: set((x, y), ...)}
-dg_bases   = {}  # {uid: (floor, x, y)}
+dg_bases   = {}  # {uid: (floor, x, y)} ※Phase 1-Bで無効化（データは保持）
+dg_instances = {}  # {(uid, floor): {seed, grid, rooms, start, consumed}} Phase 1-B: 個人インスタンス
 _ASSET_CACHE = {}
 _PLAYER_LOCKS = {}
 # 正常保存済みペイロードのハッシュ。同一状態の再保存を省略して、
@@ -327,23 +329,98 @@ def d_get_biome(floor):
             return name, wall_e, floor_e, fog_e, color
     return "洞窟", "⬜", "<:b_:1563559473422016512>", "🌫️", 0x5C4033
 
-def d_ensure_map(floor):
-    """フロアのマップが存在しなければ生成"""
-    if floor not in dg_maps:
-        dg_maps[floor] = d_gen_floor(floor)
-        dg_used[floor] = set()
+def d_get_instance(uid, floor):
+    """プレイヤー個人のフロアインスタンスを取得する（Phase 1-B）。
 
-def d_get_cell(floor, x, y):
-    """指定座標のセルタイプを取得"""
-    d_ensure_map(floor)
-    if 0 <= y < D_MAP_H and 0 <= x < D_MAP_W:
-        return dg_maps[floor][y][x]
+    グリッドは d_floor_seed / d_gen_floor_v2 で決定的に再生成し、メモリに
+    キャッシュする。保存済みの差分（消費済みセル）があれば再適用して復元する。
+    """
+    uid = str(uid)
+    floor = int(floor)
+    key = (uid, floor)
+    inst = dg_instances.get(key)
+    if inst is None:
+        seed = d_floor_seed(SEASON_ID, uid, floor)
+        grid, rooms = d_gen_floor_v2(seed, floor)
+        start = next((tuple(r["center"]) for r in rooms if r["role"] == "start"), (1, 1))
+        inst = {"seed": seed, "grid": grid, "rooms": rooms, "start": start, "consumed": set()}
+        saved = {}
+        p = dg_players.get(uid)
+        if p is not None:
+            saved = (p.get("instances") or {}).get(str(floor)) or {}
+        for cell in saved.get("consumed", []) or []:
+            try:
+                cx, cy = int(cell[0]), int(cell[1])
+            except (TypeError, ValueError, IndexError):
+                continue
+            if 0 <= cx < D2_MAP_W and 0 <= cy < D2_MAP_H:
+                inst["consumed"].add((cx, cy))
+                grid[cy][cx] = D_FLOOR
+        dg_instances[key] = inst
+    return inst
+
+
+def d_instance_start(uid, floor):
+    """そのプレイヤーの対象フロアのスタート座標を返す。"""
+    return d_get_instance(uid, floor)["start"]
+
+
+def d_instances_snapshot(uid):
+    """保存用に、プレイヤーの全フロア分のインスタンス差分を辞書化する。"""
+    uid = str(uid)
+    snapshot = {}
+    p = dg_players.get(uid) or {}
+    for fkey, data in (p.get("instances") or {}).items():
+        data = data or {}
+        snapshot[str(fkey)] = {
+            "seed": data.get("seed"),
+            "consumed": [list(c) for c in data.get("consumed", []) or []],
+        }
+    for (u, f), inst in dg_instances.items():
+        if u == uid:
+            snapshot[str(f)] = {
+                "seed": inst["seed"],
+                "consumed": sorted(list(c) for c in inst["consumed"]),
+            }
+    return snapshot
+
+
+def d_migrate_player_v2(uid):
+    """Phase 1-B の一回限り移行（設計 §7-2）。
+
+    フラグの無い既存プレイヤーは、フロア/位置/HP/turns/season_score だけを
+    リセットして個人インスタンスのスタートへ移す。レベル・装備・所持品・
+    遺物・実績・クエスト・ウォレットには触らない。
+    """
+    uid = str(uid)
+    p = dg_players.get(uid)
+    if p is None or p.get("phase1b_v2"):
+        return False
+    p["phase1b_v2"] = True
+    p["floor"] = 1
+    p["x"], p["y"] = d_instance_start(uid, 1)
+    p["hp"] = d_effective_stats(p)["max_hp"]
+    p["turns"] = 0
+    p["season_score"] = 0
+    return True
+
+
+def d_ensure_map(uid, floor):
+    """そのプレイヤーのフロアインスタンスが存在しなければ生成する。"""
+    return d_get_instance(uid, floor)
+
+def d_get_cell(uid, floor, x, y):
+    """指定座標のセルタイプを取得（個人インスタンス基準）"""
+    if 0 <= y < D2_MAP_H and 0 <= x < D2_MAP_W:
+        return d_get_instance(uid, floor)["grid"][y][x]
     return D_WALL
 
-def d_consume(floor, x, y):
-    """座標を消費（床に変更）"""
-    dg_used[floor].add((x, y))
-    dg_maps[floor][y][x] = D_FLOOR
+def d_consume(uid, floor, x, y):
+    """座標を消費（そのプレイヤーのインスタンス内でのみ床に変更）"""
+    inst = d_get_instance(uid, floor)
+    inst["consumed"].add((x, y))
+    if 0 <= y < D2_MAP_H and 0 <= x < D2_MAP_W:
+        inst["grid"][y][x] = D_FLOOR
 
 def d_default_player():
     """新規プレイヤーの初期状態。拡張項目も含めてここで一元管理する。"""
@@ -367,6 +444,7 @@ def d_default_player():
         "battle_resource": {"mp": 20, "max_mp": 20, "rage": 0, "combo": 0, "guard": 0},
         "battle_flags": {},
         "equipment_upgrades": {},
+        "instances": {}, "phase1b_v2": False,
     }
 
 def d_get_player(uid):
@@ -375,6 +453,9 @@ def d_get_player(uid):
     p = dg_players.get(uid)
     if p is None:
         p = dg_players[uid] = d_default_player()
+        # 新規プレイヤーは移行対象ではない。初期位置は個人インスタンスのスタート。
+        p["phase1b_v2"] = True
+        p["x"], p["y"] = d_instance_start(uid, p["floor"])
     else:
         for key, value in d_default_player().items():
             if key not in p:
@@ -1106,8 +1187,8 @@ def _draw_tile(draw, img, x, y, cell, biome, is_player=False, is_fog=False):
         draw.text((px+TILE//2-4, py+TILE//2-6), "🏠", fill=(255, 255, 255))
 
 def d_build_map_image(uid, floor, px, py, radius=D_VIEW_R):
-    """マップをPillow Imageとして生成"""
-    d_ensure_map(floor)
+    """マップをPillow Imageとして生成（そのプレイヤーのインスタンスを描く）"""
+    grid = d_get_instance(uid, floor)["grid"]
     bname, *_ = d_get_biome(floor)
     size = radius * 2 + 1
     img = Image.new("RGB", (size * TILE, size * TILE), (0, 0, 0))
@@ -1116,10 +1197,10 @@ def d_build_map_image(uid, floor, px, py, radius=D_VIEW_R):
     for vy_i, vy in enumerate(range(py - radius, py + radius + 1)):
         for vx_i, vx in enumerate(range(px - radius, px + radius + 1)):
             is_player = (vx == px and vy == py)
-            if not (0 <= vx < D_MAP_W and 0 <= vy < D_MAP_H):
+            if not (0 <= vx < D2_MAP_W and 0 <= vy < D2_MAP_H):
                 _draw_tile(draw, img, vx_i, vy_i, D_WALL, bname, is_fog=True)
                 continue
-            cell = dg_maps[floor][vy][vx]
+            cell = grid[vy][vx]
             _draw_tile(draw, img, vx_i, vy_i, cell, bname, is_player=is_player)
 
     return img
@@ -1168,21 +1249,15 @@ async def d_render_image(uid, floor, px, py, bot, radius=D_VIEW_R):
 # ============================================================
 
 async def dg_load_all(db_api):
-    """自前DB APIから全ダンジョンデータを読み込む"""
-    global dg_maps, dg_players, dg_starts, dg_used, dg_bases
-    
-    try:
-        res = db_api.table("dungeon_maps").select("*").execute()
-        for row in res.data:
-            floor = row["floor"]
-            dg_maps[floor] = json.loads(row["grid"])
-            dg_used[floor] = set(tuple(p) for p in json.loads(row.get("used_coords", "[]")))
-            if "start_pos" in row and row["start_pos"]:
-                dg_starts[floor] = tuple(row["start_pos"])
-        print(f"✓ ダンジョンマップ読み込み完了: {len(dg_maps)}フロア")
-    except Exception as e:
-        print(f"<:failed:1490986584676368535> ダンジョンマップ読み込み失敗: {e}")
-    
+    """自前DB APIから全ダンジョンデータを読み込む。
+
+    Phase 1-B: マップはプレイヤー個人インスタンス（シード再生成＋差分復元）
+    になったため、dungeon_maps / dungeon_bases テーブルは読み込まない。
+    インスタンスは初回アクセス時に d_get_instance が生成し、プレイヤーに
+    保存された consumed 差分を再適用して復元する。
+    """
+    global dg_players
+
     try:
         res = db_api.table("dungeon_players").select("*").execute()
         for row in res.data:
@@ -1223,41 +1298,23 @@ async def dg_load_all(db_api):
                 "front_back": meta.get("front_back", "front"), "battle_resource": meta.get("battle_resource", {"mp": 20, "max_mp": 20, "rage": 0, "combo": 0, "guard": 0}),
                 "floor_goals": meta.get("floor_goals", {}) or {},
                 "equipment_upgrades": meta.get("equipment_upgrades", {}) or {},
+                "instances": meta.get("instances", {}) or {},
+                "phase1b_v2": bool(meta.get("phase1b_v2", False)),
             }
+            # Phase 1-B 移行（設計 §7-2）: フラグの無い既存プレイヤーは一度だけ新基盤へ移す。
+            d_migrate_player_v2(row["user_id"])
         print(f"✓ ダンジョンプレイヤー読み込み完了: {len(dg_players)}人")
     except Exception as e:
         print(f"<:failed:1490986584676368535> ダンジョンプレイヤー読み込み失敗: {e}")
-    
-    try:
-        res = db_api.table("dungeon_bases").select("*").execute()
-        for row in res.data:
-            dg_bases[row["user_id"]] = (row["floor"], row["x"], row["y"])
-        print(f"✓ ダンジョン拠点読み込み完了: {len(dg_bases)}個")
-    except Exception as e:
-        print(f"<:failed:1490986584676368535> ダンジョン拠点読み込み失敗: {e}")
 
-async def dg_save_map(floor, db_api):
-    """フロアマップを自前DB APIに保存"""
-    if floor not in dg_maps:
-        return
-    try:
-        grid_json = json.dumps(dg_maps[floor], ensure_ascii=False, separators=(",", ":"))
-        used_coords = sorted(dg_used.get(floor, set()))
-        start_pos = dg_starts.get(floor, (1, 1))
-        payload = {
-            "floor": floor,
-            "grid": grid_json,
-            "used_coords": json.dumps(used_coords, separators=(",", ":")),
-            "start_pos": list(start_pos),
-        }
-        digest = hashlib.sha256(json.dumps(payload, ensure_ascii=False, sort_keys=True,
-                                           separators=(",", ":")).encode()).hexdigest()
-        if _MAP_SAVE_DIGESTS.get(floor) == digest:
-            return
-        db_api.table("dungeon_maps").upsert(payload, on_conflict="floor").execute()
-        _MAP_SAVE_DIGESTS[floor] = digest
-    except Exception as e:
-        print(f"dg_save_map失敗 floor={floor}: {e}")
+async def dg_save_map(uid, floor, db_api):
+    """互換ラッパー（Phase 1-B）。
+
+    マップは個人インスタンス化され、差分はプレイヤー保存（_dungeon_meta）に
+    含まれるため、実体はプレイヤー保存へ委譲する。dungeon_maps テーブルへは
+    もう書かない。
+    """
+    await dg_save_player(uid, db_api)
 
 async def dg_save_player(uid, db_api):
     """プレイヤーのダンジョンデータを自前DB APIに保存"""
@@ -1265,6 +1322,8 @@ async def dg_save_player(uid, db_api):
         return
     try:
         p = dg_players[uid]
+        # ライブなインスタンス差分をプレイヤー状態へ同期してから保存する。
+        p["instances"] = d_instances_snapshot(uid)
         inventory = dict(p.get("inventory", {}))
         # テーブル列を増やさずに拡張状態を保存するため、JSONメタへ集約する。
         inventory["_dungeon_meta"] = {
@@ -1289,6 +1348,8 @@ async def dg_save_player(uid, db_api):
             "battle_resource": p.get("battle_resource", {}),
             "floor_goals": p.get("floor_goals", {}),
             "equipment_upgrades": p.get("equipment_upgrades", {}),
+            "instances": p.get("instances", {}),
+            "phase1b_v2": bool(p.get("phase1b_v2", False)),
         }
         payload = {
             "user_id": uid,
@@ -1406,9 +1467,9 @@ def d_normalize_choice(value, legal, fallback=None):
     return value if value in legal else (fallback if fallback in legal else None)
 
 
-def dungeon_cell_label(floor, x, y):
+def dungeon_cell_label(uid, floor, x, y):
     """セルの日本語ラベル。Clefへ選択肢の基準を渡すために使う。"""
-    cell = d_get_cell(floor, x, y)
+    cell = d_get_cell(uid, floor, x, y)
     return {
         D_WALL: "壁", D_FLOOR: "床", D_START: "開始地点", D_STAIRS: "階段", D_CHEST: "宝箱",
         D_TRAP: "罠", D_SHOP: "商店", D_BASE: "拠点", D_MINE: "鉱山", D_REST: "休憩所",
@@ -1432,7 +1493,7 @@ def dungeon_relative_label(dx, dy):
     return "".join(parts)
 
 
-def dungeon_bfs(floor, x, y):
+def dungeon_bfs(uid, floor, x, y):
     """現在地からの歩数マップ（8方向・壁と角抜けは通行不可）。"""
     dist = {(x, y): 0}
     queue = [(x, y)]
@@ -1443,49 +1504,48 @@ def dungeon_bfs(floor, x, y):
         step = dist[(cx, cy)] + 1
         for dx, dy in _DIRECTIONS.values():
             nx, ny = cx + dx, cy + dy
-            if (nx, ny) in dist or not (0 <= nx < D_MAP_W and 0 <= ny < D_MAP_H):
+            if (nx, ny) in dist or not (0 <= nx < D2_MAP_W and 0 <= ny < D2_MAP_H):
                 continue
-            if d_get_cell(floor, nx, ny) == D_WALL:
+            if d_get_cell(uid, floor, nx, ny) == D_WALL:
                 continue
-            if dx and dy and (d_get_cell(floor, cx + dx, cy) == D_WALL or d_get_cell(floor, cx, cy + dy) == D_WALL):
+            if dx and dy and (d_get_cell(uid, floor, cx + dx, cy) == D_WALL or d_get_cell(uid, floor, cx, cy + dy) == D_WALL):
                 continue
             dist[(nx, ny)] = step
             queue.append((nx, ny))
     return dist
 
 
-def dungeon_stairs_cell(floor):
-    """フロア内の階段座標を返す。"""
-    d_ensure_map(floor)
-    for gy, row in enumerate(dg_maps[floor]):
+def dungeon_stairs_cell(uid, floor):
+    """そのプレイヤーのフロア内の階段座標を返す。"""
+    for gy, row in enumerate(d_get_instance(uid, floor)["grid"]):
         for gx, cell in enumerate(row):
             if cell == D_STAIRS:
                 return (gx, gy)
     return None
 
 
-def dungeon_stairs_hint(floor, x, y, dist=None):
+def dungeon_stairs_hint(uid, floor, x, y, dist=None):
     """階段までの方角と歩数。Clefへ示す目標情報。"""
-    stairs = dungeon_stairs_cell(floor)
+    stairs = dungeon_stairs_cell(uid, floor)
     if not stairs:
         return "このフロアに階段なし"
     if dist is None:
-        dist = dungeon_bfs(floor, x, y)
+        dist = dungeon_bfs(uid, floor, x, y)
     steps = dist.get(stairs)
     if steps is None:
         return "階段は壁で区切られ到達不可"
     return f"{dungeon_relative_label(stairs[0] - x, stairs[1] - y)} {steps}マス"
 
 
-def dungeon_surround_text(floor, x, y):
+def dungeon_surround_text(uid, floor, x, y):
     """現在地と8方向のタイルを短く列挙する。"""
-    parts = [f"現在地={dungeon_cell_label(floor, x, y)}"]
+    parts = [f"現在地={dungeon_cell_label(uid, floor, x, y)}"]
     for key, (dx, dy) in _DIRECTIONS.items():
-        parts.append(f"{_DIRECTION_LABELS[key]}={dungeon_cell_label(floor, x + dx, y + dy)}")
+        parts.append(f"{_DIRECTION_LABELS[key]}={dungeon_cell_label(uid, floor, x + dx, y + dy)}")
     return " ".join(parts)
 
 
-def dungeon_local_grid(floor, x, y):
+def dungeon_local_grid(uid, floor, x, y):
     """画像に依存しない3x3局所盤面。#は壁、@は現在地、.は通行可能。"""
     symbols = {
         D_WALL: "#", D_FLOOR: ".", D_START: ".", D_STAIRS: "S", D_CHEST: "C",
@@ -1496,28 +1556,28 @@ def dungeon_local_grid(floor, x, y):
     for dy in (-1, 0, 1):
         cells = []
         for dx in (-1, 0, 1):
-            cells.append("@" if (dx, dy) == (0, 0) else symbols.get(d_get_cell(floor, x + dx, y + dy), "#"))
+            cells.append("@" if (dx, dy) == (0, 0) else symbols.get(d_get_cell(uid, floor, x + dx, y + dy), "#"))
         rows.append("".join(cells))
     return " / ".join(rows) + "（#=壁・進入不可 @=現在地 .=通行可 S=階段）"
 
 
-def dungeon_move_criteria(floor, x, y, dist=None):
+def dungeon_move_criteria(uid, floor, x, y, dist=None):
     """Clefへ渡す「各方向がどういう状況か」の基準。壁・特殊タイル・階段距離を明示する。"""
     if dist is None:
-        dist = dungeon_bfs(floor, x, y)
-    stairs = dungeon_stairs_cell(floor)
+        dist = dungeon_bfs(uid, floor, x, y)
+    stairs = dungeon_stairs_cell(uid, floor)
     stairs_steps = dist.get(stairs) if stairs else None
     criteria = {}
     for key, (dx, dy) in _DIRECTIONS.items():
         label = _DIRECTION_LABELS[key]
         nx, ny = x + dx, y + dy
-        if not (0 <= nx < D_MAP_W and 0 <= ny < D_MAP_H):
+        if not (0 <= nx < D2_MAP_W and 0 <= ny < D2_MAP_H):
             criteria[key] = f"{label}はマップ外（進めない）"
             continue
-        if d_get_cell(floor, nx, ny) == D_WALL:
+        if d_get_cell(uid, floor, nx, ny) == D_WALL:
             criteria[key] = f"{label}は壁（進めない）"
             continue
-        if dx and dy and (d_get_cell(floor, x + dx, y) == D_WALL or d_get_cell(floor, x, y + dy) == D_WALL):
+        if dx and dy and (d_get_cell(uid, floor, x + dx, y) == D_WALL or d_get_cell(uid, floor, x, y + dy) == D_WALL):
             criteria[key] = f"{label}は角の壁に阻まれて進めない"
             continue
         note = f"{label}は{dungeon_cell_label(floor, nx, ny)}（移動可）"
@@ -1548,8 +1608,8 @@ def dungeon_best_direction(uid, plan="安全探索", dist=None):
     p = d_get_player(uid)
     floor, x, y = p["floor"], p["x"], p["y"]
     if dist is None:
-        dist = dungeon_bfs(floor, x, y)
-    criteria = dungeon_move_criteria(floor, x, y, dist)
+        dist = dungeon_bfs(uid, floor, x, y)
+    criteria = dungeon_move_criteria(uid, floor, x, y, dist)
     legal = [key for key, text in criteria.items() if "移動可" in text]
     if not legal:
         return "up"
@@ -1888,8 +1948,7 @@ class DungeonStairsView(DungeonViewBase):
             p["floor"] = floor + 1
             p["hp"] = d_effective_stats(p)["max_hp"]
             d_clear_status(self.uid)
-            d_ensure_map(p["floor"])
-            p["x"], p["y"] = dg_starts[p["floor"]]
+            p["x"], p["y"] = d_instance_start(self.uid, p["floor"])
             d_progress_quest(self.uid, "floor", 1)
             await dg_save_player(self.uid, self.db_api)
             await d_return_to_dungeon(i, self.uid, self.db_api, f"フロア {p['floor']}へ到達！")
@@ -1925,8 +1984,8 @@ class DungeonMineView(DungeonViewBase):
         await i.response.defer()
         gain = d_do_mine(self.uid)
         await d_apply_reward(self.uid, self.db_api, coins=gain)
-        d_consume(self.floor, self.x, self.y)
-        await dg_save_map(self.floor, self.db_api)
+        d_consume(self.uid, self.floor, self.x, self.y)
+        await dg_save_player(self.uid, self.db_api)
         await dg_save_player(self.uid, self.db_api)
         await d_return_to_dungeon(i, self.uid, self.db_api, f"採掘！ **+{gain}** コイン")
 
@@ -2157,7 +2216,7 @@ class DungeonCombatView(DungeonViewBase):
         p = d_get_player(self.uid)
         p["hp"] = d_effective_stats(p)["max_hp"]
         p["floor"] = 1
-        p["x"], p["y"] = dg_starts.get(1, (1, 1))
+        p["x"], p["y"] = d_instance_start(self.uid, 1)
         self.log.append("敗北… スタート地点へ送還された")
         await dg_save_player(self.uid, self.db_api)
         self.stop()
@@ -2312,14 +2371,14 @@ class DungeonMainView(DungeonViewBase):
         nx, ny = p["x"] + dx, p["y"] + dy
 
         # 境界チェック
-        if not (0 <= nx < D_MAP_W and 0 <= ny < D_MAP_H):
+        if not (0 <= nx < D2_MAP_W and 0 <= ny < D2_MAP_H):
             await self._redraw(i, "壁！進めない", p)
             return
 
-        ct = d_get_cell(floor, nx, ny)
+        ct = d_get_cell(self.uid, floor, nx, ny)
         if dx != 0 and dy != 0 and (
-            d_get_cell(floor, p["x"] + dx, p["y"]) == D_WALL
-            or d_get_cell(floor, p["x"], p["y"] + dy) == D_WALL
+            d_get_cell(self.uid, floor, p["x"] + dx, p["y"]) == D_WALL
+            or d_get_cell(self.uid, floor, p["x"], p["y"] + dy) == D_WALL
         ):
             ct = D_WALL
         if ct == D_WALL:
@@ -2341,7 +2400,7 @@ class DungeonMainView(DungeonViewBase):
             # 状態異常で力尽きた場合は特殊タイルを発動させず、既存の死亡処理に乗せる。
             p["hp"] = d_effective_stats(p)["max_hp"]
             p["floor"] = 1
-            p["x"], p["y"] = dg_starts.get(1, (1, 1))
+            p["x"], p["y"] = d_instance_start(self.uid, 1)
             msg += "\n力尽きた… スタート地点へ戻された"
             await dg_save_player(self.uid, self.db_api)
             await self._redraw(i, msg, p)
@@ -2365,14 +2424,14 @@ class DungeonMainView(DungeonViewBase):
         elif ct == D_CHEST:
             msg, reward = d_open_chest(self.uid, self.db_api)
             await d_apply_reward(self.uid, self.db_api, **reward)
-            d_consume(floor, p["x"], p["y"])
-            await dg_save_map(floor, self.db_api)
+            d_consume(self.uid, floor, p["x"], p["y"])
+            await dg_save_player(self.uid, self.db_api)
 
         elif ct == D_TRAP:
             msg, penalty = d_trigger_trap(self.uid)
             await d_apply_reward(self.uid, self.db_api, **penalty)
-            d_consume(floor, p["x"], p["y"])
-            await dg_save_map(floor, self.db_api)
+            d_consume(self.uid, floor, p["x"], p["y"])
+            await dg_save_player(self.uid, self.db_api)
 
         elif ct == D_SHOP:
             await dg_save_player(self.uid, self.db_api)
@@ -2385,21 +2444,21 @@ class DungeonMainView(DungeonViewBase):
             p["hp"] = min(d_effective_stats(p)["max_hp"], p["hp"] + max(20, d_effective_stats(p)["max_hp"] // 3))
             d_clear_status(self.uid)
             msg = f"休憩した。HPが {p['hp'] - before} 回復し、状態異常が治った。"
-            d_consume(floor, p["x"], p["y"])
-            await dg_save_map(floor, self.db_api)
+            d_consume(self.uid, floor, p["x"], p["y"])
+            await dg_save_player(self.uid, self.db_api)
 
         elif ct == D_SHRINE:
             p["atk"] += 2
             msg = "祭壇の祝福！ 基礎ATKが2上昇した。"
-            d_consume(floor, p["x"], p["y"])
-            await dg_save_map(floor, self.db_api)
+            d_consume(self.uid, floor, p["x"], p["y"])
+            await dg_save_player(self.uid, self.db_api)
 
         elif ct == D_EVENT:
             gain = random.randint(20, 80)
             await d_apply_reward(self.uid, self.db_api, coins=gain, xp=gain, season_score=25)
             msg = f"旅人の依頼を達成した。コイン+{gain}、XP+{gain}"
-            d_consume(floor, p["x"], p["y"])
-            await dg_save_map(floor, self.db_api)
+            d_consume(self.uid, floor, p["x"], p["y"])
+            await dg_save_player(self.uid, self.db_api)
 
         elif ct == D_MINE:
             mv = DungeonMineView(self.uid, floor, p["x"], p["y"], self.db_api)
@@ -2419,7 +2478,7 @@ class DungeonMainView(DungeonViewBase):
         if p["hp"] <= 0:
             p["hp"] = d_effective_stats(p)["max_hp"]
             p["floor"] = 1
-            p["x"], p["y"] = dg_starts.get(1, (1, 1))
+            p["x"], p["y"] = d_instance_start(self.uid, 1)
             msg += "\n力尽きた… スタート地点へ戻された"
 
         # 最終的な画面更新
@@ -2519,7 +2578,6 @@ class DungeonOperationView(DungeonViewBase):
         self._add("STATUS", self.status, 0, discord.ButtonStyle.green)
         self._add("パン", self.use_bread, 0, discord.ButtonStyle.blurple)
         self._add("現在地を操作", self.current_action, 1, discord.ButtonStyle.primary)
-        self._add("拠点", self.camp, 1, discord.ButtonStyle.grey)
         self._add("実績", self.achievements, 2, discord.ButtonStyle.grey)
         self._add("所持品", self.show_inventory, 2, discord.ButtonStyle.grey)
         self._add("NPC/依頼", self.show_npcs, 2, discord.ButtonStyle.grey)
@@ -2578,18 +2636,9 @@ class DungeonOperationView(DungeonViewBase):
         await self._back(interaction, f"レアパンを使用し、HPが {p['hp'] - before} 回復しました。")
 
     async def camp(self, interaction):
+        """拠点は共有マップ前提の機能だったため Phase 1-B で無効化（既存データは保持する）。"""
         await interaction.response.defer()
-        p = self.sync_state()
-        if p["floor"] != 1 and p["floor"] % 5 != 0:
-            await self._back(interaction, "拠点は1階または5階ごとのフロアで設置できます。")
-            return
-        d_ensure_map(p["floor"])
-        dg_maps[p["floor"]][p["y"]][p["x"]] = D_BASE
-        await dg_save_base(self.uid, p["floor"], p["x"], p["y"], self.db_api)
-        await dg_save_map(p["floor"], self.db_api)
-        d_unlock_achievement(self.uid, "camp_builder")
-        await dg_save_player(self.uid, self.db_api)
-        await self._back(interaction, "現在地に拠点を設置しました。")
+        await self._back(interaction, "拠点機能は現在利用できません。")
 
     async def achievements(self, interaction):
         await interaction.response.defer()
@@ -2649,29 +2698,28 @@ class DungeonOperationView(DungeonViewBase):
         await interaction.response.defer()
         p = self.sync_state()
         floor = p["floor"]
-        cell = d_get_cell(floor, p["x"], p["y"])
+        cell = d_get_cell(self.uid, floor, p["x"], p["y"])
         msg = "この場所では操作できません。"
         if cell == D_STAIRS and floor < D_FLOORS:
             p["floor"] = floor + 1
             p["hp"] = d_effective_stats(p)["max_hp"]
             d_clear_status(self.uid)
-            d_ensure_map(p["floor"])
-            p["x"], p["y"] = dg_starts[p["floor"]]
+            p["x"], p["y"] = d_instance_start(self.uid, p["floor"])
             d_progress_quest(self.uid, "floor", 1)
             msg = f"階段を上り、{p['floor']}Fへ進みました。"
         elif cell == D_MINE:
             gain = d_do_mine(self.uid)
             await d_apply_reward(self.uid, self.db_api, coins=gain)
-            d_consume(floor, p["x"], p["y"])
-            await dg_save_map(floor, self.db_api)
+            d_consume(self.uid, floor, p["x"], p["y"])
+            await dg_save_player(self.uid, self.db_api)
             msg = f"採掘してコインを{gain}枚獲得しました。"
         elif cell == D_REST:
             stats = d_effective_stats(p)
             before = p["hp"]
             p["hp"] = min(stats["max_hp"], p["hp"] + max(20, stats["max_hp"] // 3))
             d_clear_status(self.uid)
-            d_consume(floor, p["x"], p["y"])
-            await dg_save_map(floor, self.db_api)
+            d_consume(self.uid, floor, p["x"], p["y"])
+            await dg_save_player(self.uid, self.db_api)
             msg = f"休憩してHPが {p['hp'] - before} 回復しました。"
         elif cell == D_SHOP:
             try:
@@ -2741,7 +2789,7 @@ class ClefDungeonPlayer:
         stats = d_effective_stats(p)
         floor, x, y = p["floor"], p["x"], p["y"]
         bname, *_ = d_get_biome(floor)
-        dist = dungeon_bfs(floor, x, y)
+        dist = dungeon_bfs(uid, floor, x, y)
         hp_pct = int(p["hp"] / max(1, stats["max_hp"]) * 100)
         header = [
             "# 現在の状態",
@@ -2749,8 +2797,8 @@ class ClefDungeonPlayer:
             f"階層: {floor}F({bname}) / 位置: ({x},{y}) / フロア特性: {d_floor_modifier(floor)}",
             f"HP: {p['hp']}/{stats['max_hp']} ({hp_pct}%) / ATK {stats['atk']} DEF {stats['def_']} / 職業: {d_job_name(uid)}",
             f"目的: {dungeon_goal_text(uid)}",
-            f"階段: {dungeon_stairs_hint(floor, x, y, dist)}",
-            f"周囲: {dungeon_surround_text(floor, x, y)}",
+            f"階段: {dungeon_stairs_hint(uid, floor, x, y, dist)}",
+            f"周囲: {dungeon_surround_text(uid, floor, x, y)}",
         ]
         last = self._run_stats.get(uid, {}).get("last_result")
         if last:
@@ -2969,7 +3017,7 @@ class ClefDungeonPlayer:
         p = d_get_player(uid)
         stats = d_effective_stats(p)
         floor, x, y = p["floor"], p["x"], p["y"]
-        cell = d_get_cell(floor, x, y)
+        cell = d_get_cell(uid, floor, x, y)
         logs.append(dungeon_candidate_log(uid, plan))
         d_record_action(uid, "decision", source="clef", result=plan)
 
@@ -2996,8 +3044,7 @@ class ClefDungeonPlayer:
                 p["floor"] = floor + 1
                 p["hp"] = d_effective_stats(p)["max_hp"]
                 d_clear_status(uid)
-                d_ensure_map(p["floor"])
-                p["x"], p["y"] = dg_starts[p["floor"]]
+                p["x"], p["y"] = d_instance_start(uid, p["floor"])
                 d_progress_quest(uid, "floor", 1)
                 logs.append(f"階段を上り、{p['floor']}Fへ進みました。")
             else:
@@ -3026,9 +3073,9 @@ class ClefDungeonPlayer:
             if choice == "dig":
                 gain = d_do_mine(uid)
                 await d_apply_reward(uid, self.bot.db_api, coins=gain, season_score=10)
-                d_consume(floor, x, y)
+                d_consume(uid, floor, x, y)
                 logs.append(f"鉱山を採掘し、コインを{gain}枚獲得しました。")
-                await dg_save_map(floor, self.bot.db_api)
+                await dg_save_player(uid, self.bot.db_api)
             else:
                 logs.append("鉱山を見送りました。")
             await dg_save_player(uid, self.bot.db_api)
@@ -3038,9 +3085,9 @@ class ClefDungeonPlayer:
             before = p["hp"]
             p["hp"] = min(stats["max_hp"], p["hp"] + max(20, stats["max_hp"] // 3))
             d_clear_status(uid)
-            d_consume(floor, x, y)
+            d_consume(uid, floor, x, y)
             logs.append(f"休憩所でHPを{p['hp'] - before}回復しました。")
-            await dg_save_map(floor, self.bot.db_api)
+            await dg_save_player(uid, self.bot.db_api)
             await dg_save_player(uid, self.bot.db_api)
             return
 
@@ -3074,15 +3121,15 @@ class ClefDungeonPlayer:
             return
 
         # 通常移動。待機手は用意せず、必ず1方向を選ばせる。
-        dist = dungeon_bfs(floor, x, y)
-        move_criteria = dungeon_move_criteria(floor, x, y, dist)
+        dist = dungeon_bfs(uid, floor, x, y)
+        move_criteria = dungeon_move_criteria(uid, floor, x, y, dist)
         criteria_text = "\n".join(f"{key}: {value}" for key, value in move_criteria.items())
         instructions = (
             "あなたはダンジョン探索の意思決定者です。画像ではなく、以下のテキスト盤面を正として次の1手を選んでください。\n"
             f"目的: {dungeon_goal_text(uid)}\n"
             f"作戦: {plan}（{dungeon_plan_guidance(plan)}）\n"
-            f"現在地: {floor}F ({x},{y}) / 階段: {dungeon_stairs_hint(floor, x, y, dist)}\n"
-            f"局所盤面: {dungeon_local_grid(floor, x, y)}\n"
+            f"現在地: {floor}F ({x},{y}) / 階段: {dungeon_stairs_hint(uid, floor, x, y, dist)}\n"
+            f"局所盤面: {dungeon_local_grid(uid, floor, x, y)}\n"
             f"方向ごとの判定基準:\n{criteria_text}\n"
             "制約: 壁へは進めません。階段へ近づく方向を優先します。HPが30%未満なら回復タイルや階段へ向かってください。\n"
             "回答は次のいずれか1語のみ: " + ", ".join(CLEF_MOVE_KEYS)
@@ -3101,10 +3148,10 @@ class ClefDungeonPlayer:
         dx, dy = _DIRECTIONS[choice]
         nx, ny = x + dx, y + dy
         corner_cut = dx != 0 and dy != 0 and (
-            d_get_cell(floor, x + dx, y) == D_WALL or d_get_cell(floor, x, y + dy) == D_WALL
+            d_get_cell(uid, floor, x + dx, y) == D_WALL or d_get_cell(uid, floor, x, y + dy) == D_WALL
         )
-        if (not (0 <= nx < D_MAP_W and 0 <= ny < D_MAP_H)
-                or d_get_cell(floor, nx, ny) == D_WALL or corner_cut):
+        if (not (0 <= nx < D2_MAP_W and 0 <= ny < D2_MAP_H)
+                or d_get_cell(uid, floor, nx, ny) == D_WALL or corner_cut):
             blocked_choice = choice
             choice = dungeon_best_direction(uid, plan, dist)
             dx, dy = _DIRECTIONS[choice]
@@ -3112,10 +3159,10 @@ class ClefDungeonPlayer:
             logs.append(f"{_DIRECTION_LABELS[blocked_choice]}({blocked_choice})は壁でした。サーバー判定で{_DIRECTION_LABELS[choice]}({choice})へ補正します。")
             self._note_result(uid, f"{blocked_choice}は壁のため{choice}へ補正")
             fallback_corner_cut = dx != 0 and dy != 0 and (
-                d_get_cell(floor, x + dx, y) == D_WALL or d_get_cell(floor, x, y + dy) == D_WALL
+                d_get_cell(uid, floor, x + dx, y) == D_WALL or d_get_cell(uid, floor, x, y + dy) == D_WALL
             )
-            if (not (0 <= nx < D_MAP_W and 0 <= ny < D_MAP_H)
-                    or d_get_cell(floor, nx, ny) == D_WALL or fallback_corner_cut):
+            if (not (0 <= nx < D2_MAP_W and 0 <= ny < D2_MAP_H)
+                    or d_get_cell(uid, floor, nx, ny) == D_WALL or fallback_corner_cut):
                 logs.append("周囲に合法な移動先がないため、このターンは移動しません。")
                 return
         p["x"], p["y"] = nx, ny
@@ -3128,7 +3175,7 @@ class ClefDungeonPlayer:
         if p["hp"] <= 0:
             p["hp"] = d_effective_stats(p)["max_hp"]
             p["floor"] = 1
-            p["x"], p["y"] = dg_starts.get(1, (1, 1))
+            p["x"], p["y"] = d_instance_start(uid, 1)
             logs.append("力尽きた… スタート地点へ戻された")
             await dg_save_player(uid, self.bot.db_api)
             return
@@ -3141,33 +3188,33 @@ class ClefDungeonPlayer:
     async def _resolve_tile(self, uid, logs):
         p = d_get_player(uid)
         floor, x, y = p["floor"], p["x"], p["y"]
-        cell = d_get_cell(floor, x, y)
+        cell = d_get_cell(uid, floor, x, y)
         if cell == D_CHEST:
             text, reward = d_open_chest(uid, self.bot.db_api)
             await d_apply_reward(uid, self.bot.db_api, **reward)
-            d_consume(floor, x, y)
+            d_consume(uid, floor, x, y)
             logs.append(text)
-            await dg_save_map(floor, self.bot.db_api)
+            await dg_save_player(uid, self.bot.db_api)
             return
         if cell == D_TRAP:
             text, penalty = d_trigger_trap(uid)
             await d_apply_reward(uid, self.bot.db_api, **penalty)
-            d_consume(floor, x, y)
+            d_consume(uid, floor, x, y)
             logs.append(text)
-            await dg_save_map(floor, self.bot.db_api)
+            await dg_save_player(uid, self.bot.db_api)
             return
         if cell == D_SHRINE:
             p["atk"] += 2
-            d_consume(floor, x, y)
+            d_consume(uid, floor, x, y)
             logs.append("祭壇の祝福: 基礎ATKが2上昇しました。")
-            await dg_save_map(floor, self.bot.db_api)
+            await dg_save_player(uid, self.bot.db_api)
             return
         if cell == D_EVENT:
             gain = random.randint(40, 120)
             await d_apply_reward(uid, self.bot.db_api, coins=gain, xp=gain, season_score=25, material="ancient_shard")
-            d_consume(floor, x, y)
+            d_consume(uid, floor, x, y)
             logs.append(f"旅人の依頼: コイン+{gain} / XP+{gain} / 古代欠片+1")
-            await dg_save_map(floor, self.bot.db_api)
+            await dg_save_player(uid, self.bot.db_api)
             return
         if cell in (D_STAIRS, D_MINE, D_REST, D_SHOP):
             # 特殊タイルは次のターンの判断（階段・採掘・休憩・購入）で扱う。
@@ -3269,12 +3316,9 @@ class DungeonCog(Cog):
         p = d_get_player(uid)
         floor, x, y = p["floor"], p["x"], p["y"]
 
-        # マップ確認
-        d_ensure_map(floor)
-
-        # 初期位置設定
-        sx, sy = dg_starts.get(floor, (1, 1))
-        if x == 1 and y == 1:
+        # そのプレイヤーのインスタンスを用意し、位置が不正（範囲外・壁）ならスタートへ戻す
+        sx, sy = d_instance_start(uid, floor)
+        if not (0 <= x < D2_MAP_W and 0 <= y < D2_MAP_H) or d_get_cell(uid, floor, x, y) == D_WALL:
             x, y = sx, sy
             p["x"] = x
             p["y"] = y
@@ -3291,73 +3335,47 @@ class DungeonCog(Cog):
 
     @commands.command(name="dungeon_reset")
     async def dungeon_reset(self, ctx: commands.Context):
-        """ダンジョンマップを全サーバー分リセット（Bot の持ち主専用）"""
+        """ダンジョンをリセット（Bot の持ち主専用）。Phase 1-B: 個人インスタンス基盤。"""
         if ctx.author.id not in ALLOWED_USER_IDS:
             return
-        global dg_maps, dg_players, dg_starts, dg_used, dg_bases
-        dg_maps.clear()
+        dg_instances.clear()
         dg_players.clear()
+        # 互換のため旧共有マップのキャッシュも掃除する（実データはもう使わない）。
+        dg_maps.clear()
         dg_starts.clear()
         dg_used.clear()
         dg_bases.clear()
 
-        # DBも全消去
+        # DBのプレイヤーデータも全消去する（マップはプレイヤー毎に生成されるため消去不要）。
         if self.db_api:
             try:
-                self.db_api.table("dungeon_maps").delete().neq("floor", 0).execute()
                 self.db_api.table("dungeon_players").delete().neq("user_id", "").execute()
-                self.db_api.table("dungeon_bases").delete().neq("user_id", "").execute()
             except Exception as e:
                 print(f"dungeon_reset DB削除失敗: {e}")
 
-        for fl in range(1, D_FLOORS+1):
-            d_ensure_map(fl)
-            if self.db_api:
-                await dg_save_map(fl, self.db_api)
-
-        em = discord.Embed(title="リセット完了", description="マップを再生成しました！", color=0xFFFFFF)
+        em = discord.Embed(title="リセット完了", description="プレイヤーデータを消去しました。マップはプレイヤー毎に再生成されます。", color=0xFFFFFF)
         await ctx.send(embed=em)
 
     @tasks.loop(hours=1)
     async def dungeon_monthly_task(self):
-        """月初にマップとラン中状態だけを更新し、永続進行は保持する。"""
+        """月初にインスタンスとラン中状態だけを更新し、永続進行は保持する。"""
         now = datetime.datetime.now(JST)
         if now.day == 1 and now.hour == 0:
-            global dg_maps, dg_players, dg_starts, dg_used, dg_bases
-            dg_maps.clear()
-            dg_starts.clear()
-            dg_used.clear()
-            dg_bases.clear()
+            dg_instances.clear()
 
-            for player in dg_players.values():
+            for uid, player in dg_players.items():
                 player["season_id"] = SEASON_ID
                 player["season_score"] = 0
                 player["floor"] = 1
-                player["x"] = 1
-                player["y"] = 1
+                player["instances"] = {}
+                player["x"], player["y"] = d_instance_start(uid, 1)
                 player["hp"] = d_effective_stats(player)["max_hp"]
                 player["turns"] = 0
                 player["cooldowns"] = {}
 
             if self.db_api:
-                try:
-                    self.db_api.table("dungeon_maps").delete().neq("floor", 0).execute()
-                    self.db_api.table("dungeon_bases").delete().neq("user_id", "").execute()
-                    self.db_api.table("dungeon_players").update({
-                        "season_id": SEASON_ID,
-                        "season_score": 0,
-                        "floor": 1,
-                        "x": 1,
-                        "y": 1,
-                        "turns": 0,
-                        "cooldowns": {},
-                    }).neq("user_id", "").execute()
-                except Exception as e:
-                    print(f"dungeon月次リセットDB削除失敗: {e}")
-
-                for fl in range(1, D_FLOORS+1):
-                    d_ensure_map(fl)
-                    await dg_save_map(fl, self.db_api)
+                for uid in list(dg_players):
+                    await dg_save_player(uid, self.db_api)
 
             print("✓ ダンジョン月次リセット完了")
 
