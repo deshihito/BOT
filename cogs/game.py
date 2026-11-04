@@ -9,7 +9,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
-from core import party_ranking
+from core import action_usage, party_ranking
 from core.game_guides import GAME_GUIDES, GAME_ORDER, guide_for_discord
 from core.panel_v2 import as_panel_v2, edit_panel_v2
 
@@ -402,6 +402,12 @@ class GameHub(commands.Cog):
         await interaction.response.send_message(view=as_panel_v2(view), ephemeral=True)
 
     async def start_game(self, interaction: discord.Interaction, game_id: str, **options):
+        # 利用履歴（レジストリの game アクション id は "game:game:<id>"）。
+        await action_usage.record_safely(
+            getattr(interaction, "guild_id", None),
+            getattr(getattr(interaction, "user", None), "id", None),
+            f"game:game:{game_id}",
+        )
         cog = self.bot.get_cog(GAME_COGS[game_id])
         if cog is None or not hasattr(cog, "start_recruit"):
             name = GAME_GUIDES[game_id]["name"]

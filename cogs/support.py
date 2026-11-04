@@ -23,7 +23,7 @@ from discord.ext import commands, tasks
 
 from cogs.clear import MAX_CLEAR
 from cogs.auth import get_intro_webhook, sanitize_webhook_name, role_failure_reason
-from core import guild_settings
+from core import action_usage, guild_settings
 from core.panel_v2 import as_embed_v2, as_panel_v2, edit_panel_v2
 
 logger = logging.getLogger(__name__)
@@ -2610,8 +2610,26 @@ class GiveawayModal(discord.ui.Modal, title="抽選を作成"):
         )
 
 
+class SupportHistorySelect(discord.ui.Select):
+    """「よく使う／最近使った」機能への近道（履歴があるときだけ最上段に出る）。"""
+
+    def __init__(self, cog: "SupportCog", specs, row: int = 0):
+        self.cog = cog
+        super().__init__(
+            placeholder="よく使う／最近使った機能",
+            options=[
+                discord.SelectOption(label=f"⭐ {spec.label}", value=spec.value)
+                for spec in specs
+            ],
+            row=row,
+        )
+
+    async def callback(self, interaction: discord.Interaction):
+        await self.cog.dispatch(interaction, self.values[0])
+
+
 class SupportGenreSelect(discord.ui.Select):
-    def __init__(self, cog: "SupportCog", selected: str | None = None):
+    def __init__(self, cog: "SupportCog", selected: str | None = None, row: int = 0):
         self.cog = cog
         super().__init__(
             placeholder="ジャンルを選択してください",
@@ -2624,7 +2642,7 @@ class SupportGenreSelect(discord.ui.Select):
                 )
                 for value, (label, _description) in SUPPORT_GENRES.items()
             ],
-            row=0,
+            row=row,
         )
 
     async def callback(self, interaction: discord.Interaction):
@@ -2655,7 +2673,7 @@ class SupportGenreSelect(discord.ui.Select):
 
 
 class SupportActionSelect(discord.ui.Select):
-    def __init__(self, cog: "SupportCog", genre: str):
+    def __init__(self, cog: "SupportCog", genre: str, row: int = 1):
         self.cog = cog
         super().__init__(
             placeholder="機能を選択してください",
@@ -2663,7 +2681,7 @@ class SupportActionSelect(discord.ui.Select):
                 discord.SelectOption(label=label, value=value)
                 for label, value in SUPPORT_ACTIONS_BY_GENRE[genre]
             ],
-            row=1,
+            row=row,
         )
 
     async def callback(self, interaction: discord.Interaction):
@@ -2689,6 +2707,7 @@ class SupportPanelView(discord.ui.View):
         genre: str | None = None,
         shortcut_mode: bool = False,
         shortcut_item: dict | None = None,
+        history_specs: list | None = None,
     ):
         super().__init__(timeout=300)
         self.cog = cog
@@ -2699,15 +2718,21 @@ class SupportPanelView(discord.ui.View):
         self.action = saved.get("value")
         self.shortcut_mode = shortcut_mode
         self.shortcut_item = shortcut_item
+        # 「よく使う／最近」の対象。空ならセクション自体を出さない。
+        self.history_specs = list(history_specs or [])
 
         self.refresh()
 
     def refresh(self):
         self.clear_items()
-        self.add_item(SupportGenreSelect(self.cog, self.genre))
+        offset = 0
+        if self.history_specs:
+            self.add_item(SupportHistorySelect(self.cog, self.history_specs, row=0))
+            offset = 1
+        self.add_item(SupportGenreSelect(self.cog, self.genre, row=offset))
 
         if self.genre:
-            self.add_item(SupportActionSelect(self.cog, self.genre))
+            self.add_item(SupportActionSelect(self.cog, self.genre, row=offset + 1))
 
         if self.shortcut_mode:
             from cogs.general import ShortcutCommitButton
@@ -6159,7 +6184,11 @@ class SupportCog(commands.Cog):
     @app_commands.command(name="support", description="Show the support features control panel")
     @app_commands.guild_only()
     async def support(self, interaction: discord.Interaction):
-        view = SupportPanelView(self)
+        store = guild_settings.get_store()
+        await store.ensure_loaded()
+        history_specs = action_usage.history_panel_specs(
+            store, interaction.guild_id, interaction.user.id, "support")
+        view = SupportPanelView(self, history_specs=history_specs)
         await interaction.response.send_message(
             view=as_panel_v2(view),
             ephemeral=True,
@@ -6168,6 +6197,13 @@ class SupportCog(commands.Cog):
     async def dispatch(self, interaction: discord.Interaction, selected: str):
         if not await self.check_support_permission(interaction, selected):
             return
+
+        # 利用履歴（よく使う／最近）は権限チェックを通った実行だけを記録する。
+        await action_usage.record_safely(
+            getattr(interaction, "guild_id", None),
+            getattr(getattr(interaction, "user", None), "id", None),
+            f"support:{selected}",
+        )
 
         if selected == "server_assist":
             cog = self.bot.get_cog("ServerAssistCog")
