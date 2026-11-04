@@ -18,6 +18,7 @@ import os
 import sys
 import types
 import unittest
+from unittest.mock import patch
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -410,6 +411,39 @@ class DungeonLogicTestCase(unittest.TestCase):
         # 基礎HPは 15 + floor*8（±3）なので、10F は 1F より明確に大きい。
         self.assertGreater(high["max_hp"], low["max_hp"] + 50)
         self.assertGreater(high["atk"], low["atk"])
+
+    def test_elite_rank_multipliers_weakened(self):
+        """精鋭の倍率が HP 3.0 / ATK 2.0 / DEF 1.25 であること（弱体化の回帰）。
+
+        乱数を固定（randint は 0、choice は先頭）して正確値で検証する。
+        ボスの倍率（15.0 / 4.0 / 2.0）が変わっていないことも併せて確認する。
+        """
+        floor = 5
+        base_hp, base_atk, base_def = 15 + floor * 8, 4 + floor * 2, 1 + floor
+
+        def master_of(enemy):
+            clean_key = enemy["name"].split()[0].replace("👾", "").strip()
+            return dangeon.ENEMY_STATS_MASTER.get(
+                clean_key, dangeon.ENEMY_STATS_MASTER["default"])
+
+        with patch.object(dangeon.random, "randint", lambda a, b: 0), \
+                patch.object(dangeon.random, "choice", lambda seq: seq[0]):
+            elite = dangeon.d_make_enemy(floor, forced_rank="elite")
+            boss = dangeon.d_make_enemy(floor, forced_rank="boss")
+
+        self.assertEqual(elite["type"], "elite")
+        m = master_of(elite)
+        self.assertEqual(elite["hp"], int(base_hp * m["hp_m"] * 3.0))
+        self.assertEqual(elite["atk"], int(base_atk * m.get("atk_m", 1.0) * 2.0))
+        self.assertEqual(elite["def_"], int(base_def * m.get("def_m", 1.0) * 1.25))
+        # 精鋭の報酬枠（宝箱は最低1）は変更しない。
+        self.assertGreaterEqual(elite["reward_box"], 1)
+
+        self.assertEqual(boss["type"], "boss")
+        mb = master_of(boss)
+        self.assertEqual(boss["hp"], int(base_hp * mb["hp_m"] * 15.0))
+        self.assertEqual(boss["atk"], int(base_atk * mb.get("atk_m", 1.0) * 4.0))
+        self.assertEqual(boss["def_"], int(base_def * mb.get("def_m", 1.0) * 2.0))
 
     # 状態異常のライフサイクル ------------------------------------------------
 
