@@ -1461,10 +1461,11 @@ def d_make_enemy(floor, forced_name=None, forced_rank=None):
     clean_key = name.split()[0].replace("👾", "").strip()
     m = ENEMY_STATS_MASTER.get(clean_key, ENEMY_STATS_MASTER["default"])
 
-    # ランクによる倍率補正
-    rank_hp_mul  = 4.0 if etype == "elite" else (15.0 if etype == "boss" else 1.0)
-    rank_atk_mul = 2.5 if etype == "elite" else (4.0 if etype == "boss" else 1.0)
-    rank_def_mul = 1.5 if etype == "elite" else (2.0 if etype == "boss" else 1.0)
+    # ランクによる倍率補正（精鋭は実機感想を受けて控えめに弱体化:
+    # HP 4.0→3.0 / ATK 2.5→2.0 / DEF 1.5→1.25。通常・ボスと報酬は不変）
+    rank_hp_mul  = 3.0 if etype == "elite" else (15.0 if etype == "boss" else 1.0)
+    rank_atk_mul = 2.0 if etype == "elite" else (4.0 if etype == "boss" else 1.0)
+    rank_def_mul = 1.25 if etype == "elite" else (2.0 if etype == "boss" else 1.0)
 
     # ステータス確定
     hp = int((base_hp + random.randint(-3, 3)) * m.get("hp_m") * rank_hp_mul)
@@ -3891,8 +3892,9 @@ class ClefDungeonPlayer:
             return "HPが0"
         if p["hp"] < stats["max_hp"] * 0.30:
             return "HPが30%未満"
-        if p.get("active_effects"):
-            return "状態異常を検知"
+        # 状態異常（毒・出血など）があるだけでは停止しない。軽微/一時的な
+        # 異常で自動操作全体が終わってしまうため、停止条件から外した。
+        # 異常ダメージで HP が 30% 未満まで落ちれば上の HP 条件で止まる。
         if any("ボス" in line for line in logs[-8:]):
             return "ボス遭遇"
         if any("遺物" in line for line in logs[-8:]):

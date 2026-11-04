@@ -1,10 +1,21 @@
 import asyncio
+import os
+import sys
 import unittest
 from unittest.mock import AsyncMock, patch
 
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from cogs import dangeon
-from core import logfare
+try:
+    from tests.test_dungeon_logic import _install_dependency_stubs
+except Exception:  # tests をパッケージとして解決できない実行形態向け
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    from test_dungeon_logic import _install_dependency_stubs
+
+_install_dependency_stubs()
+
+from cogs import dangeon  # noqa: E402
+from core import logfare  # noqa: E402
 
 
 class DungeonClefDecisionTest(unittest.IsolatedAsyncioTestCase):
@@ -40,6 +51,44 @@ class DungeonClefDecisionTest(unittest.IsolatedAsyncioTestCase):
         ])) as decision, patch.object(dangeon, "CLEF_RETRY_DELAY", 0):
             self.assertEqual(await player._decide("42", [], "最短攻略", question), "up")
         self.assertEqual(decision.await_count, 2)
+
+
+class DungeonClefStopReasonTest(unittest.TestCase):
+    """Clef の安全停止条件の回帰テスト。
+
+    状態異常（毒・出血など）があるだけでは停止しないこと（Phase 1-E
+    追加要望で停止条件から除外）。HP 条件などの安全停止は残ること。
+    """
+
+    def setUp(self):
+        dangeon.dg_players.clear()
+        dangeon.dg_instances.clear()
+
+    def tearDown(self):
+        dangeon.dg_players.clear()
+        dangeon.dg_instances.clear()
+
+    def _clef(self):
+        player = dangeon.ClefDungeonPlayer.__new__(dangeon.ClefDungeonPlayer)
+        player._run_stats = {}
+        return player
+
+    def test_status_effect_alone_does_not_stop(self):
+        uid = "clef-status"
+        p = dangeon.d_get_player(uid)
+        stats = dangeon.d_effective_stats(p)
+        p["hp"] = stats["max_hp"]
+        for key in ("poison", "bleed", "burn"):
+            p["active_effects"] = [{"key": key, "turns": 3}]
+            self.assertEqual(self._clef()._stop_reason(uid, []), "")
+
+    def test_status_effect_with_low_hp_still_stops_for_hp(self):
+        uid = "clef-status-low"
+        p = dangeon.d_get_player(uid)
+        stats = dangeon.d_effective_stats(p)
+        p["active_effects"] = [{"key": "poison", "turns": 3}]
+        p["hp"] = max(1, int(stats["max_hp"] * 0.29))
+        self.assertEqual(self._clef()._stop_reason(uid, []), "HPが30%未満")
 
 
 if __name__ == "__main__":
