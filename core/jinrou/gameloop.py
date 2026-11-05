@@ -10,7 +10,7 @@ from core.emojis import FAILED, SUCCESS
 from core import jinrou_guide
 from discord import app_commands
 from discord.ext import commands
-from core import autoplay, jinrou_review
+from core import autoplay, game_restore, jinrou_review, jinrou_snapshot
 from core import party_ranking
 import math
 import config
@@ -34,6 +34,7 @@ class GameLoopMixin:
         game.alive_players = game.players.copy()
         game.started = True
         self.assign_roles(game)
+        jinrou_snapshot.save_boundary_safely(game, "roles_assigned")
 
         mentions = " ".join([p.mention for p in game.players])
 
@@ -86,6 +87,7 @@ class GameLoopMixin:
             while game.is_running:
                 await self.run_night_phase(game)
                 if not game.is_running or await self.check_victory(game): break
+                jinrou_snapshot.save_boundary_safely(game, "day_start")
 
                 game.chairman_ketsugu_target = None
                 game.chairman_forced_vote = False
@@ -100,6 +102,7 @@ class GameLoopMixin:
                     await self.run_voting_phase(game)
                 jinrou_review.record_day(game, game.day_count,
                                          [p.id for p in game.players if p.id in before_vote and p.id not in {a.id for a in game.alive_players}])
+                jinrou_snapshot.save_boundary_safely(game, "vote_done")
 
                 if not game.is_running or await self.check_victory(game): break
 
@@ -119,6 +122,7 @@ class GameLoopMixin:
                     except Exception:
                         logger.debug("人狼: 振り返りEmbedの送信に失敗しました", exc_info=True)
             game.is_running = False
+            jinrou_snapshot.clear_safely(game)
 
 
     async def run_discussion(self, game, seconds, title):
@@ -148,6 +152,7 @@ class GameLoopMixin:
 
     async def run_night_phase(self, game):
         if not game.is_running: return
+        jinrou_snapshot.save_boundary_safely(game, "night_start")
         game.day_count += 1
         await game.game_channel.send(f"ーー 第{game.day_count}夜（1分） ーー")
 
@@ -418,3 +423,114 @@ class GameLoopMixin:
             return True
 
         return False
+
+
+_BOUNDARY_LABELS = {
+    "roles_assigned": "役職を配った直後",
+    "night_start": "夜の開始時点",
+    "day_start": "夜が明けて昼に入る時点",
+    "vote_done": "投票が確定した直後",
+}
+
+
+async def resume_game_loop(cog, game, channel, boundary):
+    """保存された境界から対局を続行する（_start_game_loop の再開版）。"""
+    phase = boundary
+    try:
+        if phase == "roles_assigned":
+            await cog.run_discussion(game, seconds=150, title="特別ディスカッション")
+            phase = "night_start"
+        while game.is_running:
+            if phase == "night_start":
+                await cog.run_night_phase(game)
+                if not game.is_running or await cog.check_victory(game):
+                    break
+                jinrou_snapshot.save_boundary_safely(game, "day_start")
+                phase = "day_start"
+            if phase == "day_start":
+                game.chairman_ketsugu_target = None
+                game.chairman_forced_vote = False
+                await cog.run_discussion(game, seconds=150, title="昼のディスカッション")
+                if not game.is_running:
+                    break
+                before_vote = {p.id for p in game.alive_players}
+                if game.chairman_forced_vote:
+                    game.chairman_forced_vote = False
+                    await cog.run_chairman_vote_phase(game)
+                else:
+                    await cog.run_voting_phase(game)
+                jinrou_review.record_day(game, game.day_count,
+                                         [p.id for p in game.players if p.id in before_vote and p.id not in {a.id for a in game.alive_players}])
+                jinrou_snapshot.save_boundary_safely(game, "vote_done")
+                phase = "vote_done"
+            if phase == "vote_done":
+                if not game.is_running or await cog.check_victory(game):
+                    break
+                phase = "night_start"
+    except Exception:
+        logger.exception("人狼の復旧ループでエラーが発生しました")
+    finally:
+        game.silenced_players.clear()
+        game.in_discussion = False
+        game.started = False
+        if game.roles:
+            try:
+                await cog._announce_final_roles(game)
+            except Exception:
+                logger.debug("人狼: 最終役職の発表に失敗しました", exc_info=True)
+            if game.review:
+                try:
+                    await game.game_channel.send(embed=jinrou_review.build_embed(game))
+                except Exception:
+                    logger.debug("人狼: 振り返りEmbedの送信に失敗しました", exc_info=True)
+        game.is_running = False
+        jinrou_snapshot.clear_safely(game)
+
+
+async def restore_jinrou_sessions(cog):
+    """保存された境界スナップショットから対局を再構築する（ローカル対局のみ）。"""
+    entries = game_restore.session_entries("jinrou")
+    for channel_id, entry in entries.items():
+        try:
+            restored = await _restore_jinrou_session(cog, channel_id, entry)
+        except Exception:
+            logger.exception("channel %s: 人狼の復旧に失敗しました", channel_id)
+            restored = False
+        if not restored:
+            game_restore.clear_session("jinrou", channel_id)
+    game_restore.flush_store()
+
+
+async def _restore_jinrou_session(cog, channel_id, entry) -> bool:
+    state = entry.get("state")
+    if not isinstance(state, dict):
+        return False
+    boundary = state.get("boundary")
+    if boundary not in jinrou_snapshot.BOUNDARIES:
+        return False
+    channel = cog.bot.get_channel(channel_id)
+    if channel is None:
+        return False
+    existing = cog.games.get(channel_id)
+    if existing is not None and getattr(existing, "is_running", False):
+        return False
+    game = cog.get_game(channel_id)
+    guild = getattr(channel, "guild", None)
+
+    def resolve(ref):
+        return game_restore.resolve_member(guild, ref.get("id"), ref.get("name"))
+
+    if not jinrou_snapshot.apply_state(game, state, resolve):
+        return False
+    game.game_channel = channel
+    game._original_channel = channel
+    label = _BOUNDARY_LABELS.get(boundary, boundary)
+    mentions = " ".join(p.mention for p in game.players)
+    await channel.send(
+        f"{mentions}\n🔁 再起動前に進行中だった人狼を、{label}（第{game.day_count}日）から再開します。\n"
+        "※ フェーズの途中経過（その夜のアクションや発言）は失われ、直近の境界まで巻き戻っています。"
+        "役職は「役職確認」ボタンで確認し直してください。",
+        view=RoleCheckView(game, cog),
+    )
+    asyncio.create_task(resume_game_loop(cog, game, channel, boundary))
+    return True

@@ -14,13 +14,14 @@ import asyncio
 import logging
 import random
 import time
+from datetime import datetime
 from pathlib import Path
 
 import discord
 from core import game_panels, game_restore
 from discord.ext import commands
 
-from core import party_ranking
+from core import game_records, party_ranking
 
 logger = logging.getLogger(__name__)
 
@@ -45,6 +46,18 @@ def _load(name: str) -> list:
 
 ANSWERS = _load("answers.txt")
 VALID = set(ANSWERS) | set(_load("allowed.txt"))
+
+
+def daily_key(now: datetime = None) -> str:
+    """デイリーモードの日付キー（YYYY-MM-DD）。"""
+    return (now or datetime.now()).strftime("%Y-%m-%d")
+
+
+def daily_answer(key: str = None) -> str:
+    """日付シードで決まる、その日の全員共通の答え。"""
+    key = key or daily_key()
+    seed = int(key.replace("-", ""))
+    return random.Random(seed).choice(ANSWERS)
 
 
 def score(guess: str, answer: str) -> list:
@@ -80,6 +93,8 @@ class WordleGame:
         self.host = host
         self.answer = answer
         self.mode = mode
+        self.daily = False      # デイリーモードか（mode は shared として扱う）
+        self.date_key = None    # デイリーの日付キー
         self.guesses: list = []      # (user, word, colors)
         self.winner = None
         self.phase = "playing"       # playing / done
@@ -105,6 +120,8 @@ class WordleGame:
 
     def board_embed(self, reveal: bool = False) -> discord.Embed:
         mode = "みんなで" if self.mode == "shared" else f"ひとりで（{self.host.display_name}）"
+        if self.daily:
+            mode += f"・デイリー（{self.date_key}）"
         lines = [f"{''.join(cols)}　`{w.upper()}`　{getattr(u, 'display_name', '')}" for u, w, cols in self.guesses]
         lines += ["⬜⬜⬜⬜⬜"] * (MAX_GUESSES - len(self.guesses))
         embed = discord.Embed(title=f"Wordle（{mode}）", description="\n".join(lines), color=COLOR)
@@ -164,8 +181,15 @@ class Wordle(commands.Cog):
             return await interaction.response.send_message(
                 embed=discord.Embed(description="このチャンネルでは既に Wordle が進行中です。", color=COLOR),
                 ephemeral=True)
+        is_daily = mode == "daily"
         mode = mode if mode in dict(MODES) else "shared"
-        g = WordleGame(channel.id, interaction.guild_id, interaction.user, rng.choice(ANSWERS), mode)
+        if is_daily:
+            key = daily_key()
+            g = WordleGame(channel.id, interaction.guild_id, interaction.user, daily_answer(key), "shared")
+            g.daily = True
+            g.date_key = key
+        else:
+            g = WordleGame(channel.id, interaction.guild_id, interaction.user, rng.choice(ANSWERS), mode)
         self.games[channel.id] = g
         await interaction.response.send_message(
             embed=discord.Embed(description="Wordle を始めました。", color=COLOR))
@@ -216,6 +240,8 @@ class Wordle(commands.Cog):
             "host": game_restore.member_ref(g.host),
             "answer": g.answer,
             "mode": g.mode,
+            "daily": bool(g.daily),
+            "date_key": g.date_key,
             "guesses": [
                 [game_restore.member_ref(u), word, list(colors)]
                 for u, word, colors in g.guesses
@@ -257,6 +283,8 @@ class Wordle(commands.Cog):
             return False
         g = WordleGame(channel_id, guild_id, host, answer,
                        state.get("mode") or "shared")
+        g.daily = bool(state.get("daily"))
+        g.date_key = state.get("date_key")
         guesses = []
         for ref, word, colors in state.get("guesses") or []:
             user = game_restore.resolve_member(guild, ref.get("id"), ref.get("name"))
@@ -306,8 +334,31 @@ class Wordle(commands.Cog):
             text = f"🏆 {g.winner.mention} さんが {len(g.guesses)}/{MAX_GUESSES} で正解！"
         else:
             text = "正解できませんでした。"
+        if g.daily and g.date_key:
+            text += "\n" + self._record_daily(g)
         await channel.send(embed=discord.Embed(
             title="Wordle 終了", description=f"{text}\n答え: **{g.answer.upper()}**", color=COLOR))
+
+
+    def _record_daily(self, g: WordleGame) -> str:
+        """デイリーの結果を参加者全員分記録し、その日の比較表示を作る。"""
+        attempts = len(g.guesses)
+        guessers = []
+        for user, _word, _colors in g.guesses:
+            if user is not None and user.id not in [u.id for u in guessers]:
+                guessers.append(user)
+        for user in guessers:
+            game_records.record_wordle_daily_safely(
+                user.id, g.guild_id, g.date_key, attempts,
+                g.winner is not None, g.winner is not None and user.id == g.winner.id)
+        rows = game_records.shared().wordle_daily_for(g.date_key, g.guild_id)
+        if not rows:
+            return ""
+        lines = [f"📅 今日（{g.date_key}）のデイリー結果:"]
+        for uid, entry in rows[:10]:
+            mark = "🏆" if entry["won"] else "―"
+            lines.append(f"{mark} <@{uid}> — {entry['attempts']}/{MAX_GUESSES}" + (" 正解！" if entry["won"] else ""))
+        return "\n".join(lines)
 
 
 async def setup(bot):

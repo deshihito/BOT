@@ -61,11 +61,25 @@ def sort_hand(hand: list) -> list:
     return sorted(hand, key=lambda c: (strength(rank(c)), c))
 
 
+SUIT_MARKS = {"S": "スペード", "H": "ハート", "D": "ダイヤ", "C": "クラブ"}
+
+
+def card_label(card: str) -> str:
+    """表示用にスート名で表す（内部表記 "S5" はそのまま保持）。
+
+    大富豪は「絵文字を使わない」が設計上の約束（テストで担保）なので、
+    スート記号（♠ 等）ではなく日本語のスート名で読みやすくする。
+    """
+    if card == JOKER:
+        return "ジョーカー"
+    return f"{SUIT_MARKS.get(card[0], card[0])}{card[1:]}"
+
+
 def label(play) -> str:
-    return PASS if play == PASS else " ".join(play)
+    return PASS if play == PASS else " ".join(card_label(c) for c in play)
 
 
-def legal_plays(hand: list, table, revolution: bool) -> list:
+def legal_plays(hand: list, table, revolution: bool, spade3: bool = False) -> list:
     """出せる手（カードのタプル）の一覧。弱い順。table は場の手（なければ None）。"""
     groups = {}
     for c in sort_hand(hand):
@@ -77,7 +91,11 @@ def legal_plays(hand: list, table, revolution: bool) -> list:
             plays.append(tuple(cards[:n]))
     if table:
         need, top = len(table), strength(rank(table[0]), revolution)
-        plays = [p for p in plays if len(p) == need and strength(rank(p[0]), revolution) > top]
+        legal = [p for p in plays if len(p) == need and strength(rank(p[0]), revolution) > top]
+        # スペ3返し: ジョーカー1枚の場には ♠3 1枚だけ特別に出せる
+        if spade3 and tuple(table) == (JOKER,) and ("S3",) in plays and ("S3",) not in legal:
+            legal.append(("S3",))
+        plays = legal
     return sorted(plays, key=lambda p: (len(p), strength(rank(p[0]), revolution), p))
 
 
@@ -107,6 +125,8 @@ class DaifugoGame:
         self.acted = False           # この手番で行動した
         self.cleared = False         # 直前の行動で場が流れた
         self.eight_cut = False
+        self.rule_eight_cut = True   # ルールオプション: 8切り（既定 ON = 従来どおり）
+        self.rule_spade3 = False     # ルールオプション: スペ3返し（既定 OFF）
 
     def is_bot(self, uid) -> bool:
         return uid in BOT_IDS
@@ -141,7 +161,7 @@ class DaifugoGame:
         self.phase = "playing"
 
     def legal(self, uid) -> list:
-        return legal_plays(self.hands[uid], self.table, self.revolution)
+        return legal_plays(self.hands[uid], self.table, self.revolution, spade3=self.rule_spade3)
 
     def can_play(self, uid, cards) -> bool:
         """手札にあるカードで、出せる手と同じ数字・同じ枚数か（スートの選び方は問わない）。"""
@@ -169,7 +189,7 @@ class DaifugoGame:
             result = "revolution"
         if not self.hands[uid]:
             self.finished.append(uid)
-        self.eight_cut = any(rank(c) == "8" for c in cards)
+        self.eight_cut = bool(self.rule_eight_cut) and any(rank(c) == "8" for c in cards)
         if self.eight_cut and self.phase == "playing":
             self.table, self.passed = None, set()
             self.turn = self.next_active(uid)
@@ -282,13 +302,15 @@ class Daifugo(commands.Cog):
         self.bot = bot
         self.games: dict = {}   # channel_id -> DaifugoGame
 
-    async def start_recruit(self, interaction: discord.Interaction):
+    async def start_recruit(self, interaction: discord.Interaction, eight_cut: bool = True, spade3: bool = False):
         channel = interaction.channel
         if channel.id in self.games:
             return await interaction.response.send_message(
                 embed=discord.Embed(description="このチャンネルでは既に大富豪が進行中です。", color=COLOR),
                 ephemeral=True)
         g = DaifugoGame(channel.id, interaction.guild_id, interaction.user.id)
+        g.rule_eight_cut = bool(eight_cut)
+        g.rule_spade3 = bool(spade3)
         g.players[interaction.user.id] = interaction.user
         self.games[channel.id] = g
         await interaction.response.send_message(
@@ -298,7 +320,8 @@ class Daifugo(commands.Cog):
                 title="大富豪 参加者募集",
                 description=(f"{interaction.user.mention} さんが募集中です。\n"
                              f"{recruit_join_prompt(RECRUIT_SECONDS)}（{MIN_PLAYERS}〜{MAX_PLAYERS}人）。\n"
-                             f"{MIN_PLAYERS}人に足りないときは Bot が入ります。"),
+                             f"{MIN_PLAYERS}人に足りないときは Bot が入ります。\n"
+                             f"ルール: 8切り {'ON' if g.rule_eight_cut else 'OFF'} / スペ3返し {'ON' if g.rule_spade3 else 'OFF'}"),
                 color=COLOR), view=JoinView(self, g))
             await asyncio.sleep(RECRUIT_SECONDS)
             await self.run_game(channel, g)
@@ -446,6 +469,8 @@ class Daifugo(commands.Cog):
             "revolution": bool(g.revolution),
             "cleared": bool(g.cleared),
             "eight_cut": bool(g.eight_cut),
+            "rule_eight_cut": bool(g.rule_eight_cut),
+            "rule_spade3": bool(g.rule_spade3),
         }
         game_restore.save_session("daifugo", g.channel_id, g.guild_id, state)
 
@@ -493,6 +518,8 @@ class Daifugo(commands.Cog):
         g.revolution = bool(state.get("revolution"))
         g.cleared = bool(state.get("cleared"))
         g.eight_cut = bool(state.get("eight_cut"))
+        g.rule_eight_cut = bool(state.get("rule_eight_cut", True))
+        g.rule_spade3 = bool(state.get("rule_spade3", False))
         g.phase = "playing"
         self.games[channel_id] = g
         asyncio.create_task(self._run_restored_session(channel, g))

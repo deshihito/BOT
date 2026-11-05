@@ -8,7 +8,7 @@ from pathlib import Path
 
 import discord
 from discord.ext import commands
-from core import game_panels, game_restore, party_ranking
+from core import elo, game_panels, game_restore, party_ranking
 from PIL import Image, ImageDraw, ImageFont
 
 from core.shogi_engine import ShogiGame, Color, PieceType, Piece
@@ -19,15 +19,20 @@ GAME_ID = "shogi"
 party_ranking.register(GAME_ID)
 
 
-async def record_win(s, winner) -> None:
-    """対人戦の勝者をサーバー別ランキングに記録する（core/party_ranking.py）。
+async def record_win(s, winner) -> str:
+    """対人戦の勝者をランキングと Elo レートに記録し、レート表示の1行を返す。
 
     CPU戦は対人戦と混ぜないため記録しない。詰み以外の終了（合法手なし・
     時間切れの連続）は勝者を宣言していないので、どちらにも付けない。
     """
     if s.mode == "cpu" or winner is None:
-        return
+        return ""
     await party_ranking.shared().record_win(s.guild_id, winner.id, GAME_ID)
+    loser = next((m for m in getattr(s, "players", {}).values() if m is not None and getattr(m, "id", None) != winner.id), None)
+    if loser is None:
+        return ""
+    result = elo.record_match_safely(s.guild_id, GAME_ID, winner.id, loser.id)
+    return elo.format_match_line(winner, loser, result)
 
 COLOR = 0x8b4513
 RECRUIT_SECONDS = 45
@@ -706,8 +711,9 @@ class Shogi(commands.Cog):
         while s.phase == "playing":
             if s.game.is_checkmate(s.game.turn):
                 winner = s.players[Color.GOTE if s.game.turn == Color.SENTE else Color.SENTE]
-                await record_win(s, winner)
-                await channel.send(f"詰みです。{winner.mention} さんの勝利です。")
+                rating_line = await record_win(s, winner)
+                suffix = f"\n{rating_line}" if rating_line else ""
+                await channel.send(f"詰みです。{winner.mention} さんの勝利です。{suffix}")
                 break
             if not s.game.has_legal_move(s.game.turn):
                 await channel.send("合法な指し手がないため、対局を終了します。")

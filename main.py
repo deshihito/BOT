@@ -97,7 +97,7 @@ class MyBot(commands.Bot):
         for cog_name in ("VoiceCog", "GlobalVCCog", "TranscriptionCog",
                          "RecordingCog", "KaraokeCog", "VoiceChangerCog",
                          "Shogi", "Chess", "Othello", "Daifugo", "Babanuki",
-                         "Shinkei", "OdaiShiritori", "Uno", "Wordle"):
+                         "Shinkei", "OdaiShiritori", "Uno", "Wordle", "JinrouCog"):
             cog = self.get_cog(cog_name)
             restore = getattr(cog, "restore_after_restart", None)
             if restore is None:

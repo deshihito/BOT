@@ -5,7 +5,7 @@ import random
 from collections import Counter
 import os
 import discord
-from core import game_panels
+from core import game_panels, jinrou_snapshot
 from core.emojis import FAILED, SUCCESS
 from core import jinrou_guide
 from discord import app_commands
@@ -277,6 +277,7 @@ class LifecycleMixin:
             return await interaction.response.send_message(embed=embed, ephemeral=True)
 
         game.is_running = False
+        jinrou_snapshot.clear_safely(game)
         game.silenced_players.clear()
         game.in_discussion = False
         if game.chairman_skip_event:

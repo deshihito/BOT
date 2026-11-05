@@ -9,7 +9,7 @@ import discord
 from discord.ext import commands
 from PIL import Image, ImageDraw, ImageFont
 
-from core import game_panels, game_restore, party_ranking
+from core import elo, game_panels, game_restore, party_ranking
 
 logger = logging.getLogger(__name__)
 
@@ -17,17 +17,39 @@ GAME_ID = "chess"
 party_ranking.register(GAME_ID)
 
 
-async def record_win(g, winner_side) -> None:
-    """対人戦の勝者をサーバー別ランキングに記録する（core/party_ranking.py）。
+async def record_win(g, winner_side) -> str:
+    """対人戦の勝者をランキングと Elo レートに記録し、レート表示の1行を返す。
 
     CPU戦は対人戦と混ぜないため記録しない。ステイルメイト（引き分け）は
-    どちらにも付けない。チェックメイトと時間切れの両方から呼ばれる。
+    勝数を付けない（レートは record_draw で 0.5 同士で計算する）。
+    チェックメイトと時間切れの両方から呼ばれる。
     """
     if g.mode == "cpu":
-        return
+        return ""
     winner = g.players.get(winner_side)
-    if winner is not None:
-        await party_ranking.shared().record_win(g.guild_id, winner.id, GAME_ID)
+    if winner is None:
+        return ""
+    await party_ranking.shared().record_win(g.guild_id, winner.id, GAME_ID)
+    loser = g.players.get("black" if winner_side == "white" else "white")
+    if loser is None:
+        return ""
+    result = elo.record_match_safely(g.guild_id, GAME_ID, winner.id, loser.id)
+    return elo.format_match_line(winner, loser, result)
+
+
+async def record_draw(g) -> str:
+    """引き分け（ステイルメイト）を Elo レートにだけ記録し、表示の1行を返す。"""
+    if g.mode == "cpu":
+        return ""
+    white = g.players.get("white")
+    black = g.players.get("black")
+    if white is None or black is None:
+        return ""
+    result = elo.record_draw_safely(g.guild_id, GAME_ID, white.id, black.id)
+    if not result:
+        return ""
+    return (f"📈 レート（引き分け）: {white.mention} {result['a']['rating']:.0f}（{result['a_delta']:+.0f}）"
+            f" / {black.mention} {result['b']['rating']:.0f}（{result['b_delta']:+.0f}）")
 
 COLOR = 0x6F4E37
 RECRUIT_SECONDS = 30
@@ -599,10 +621,13 @@ class Chess(commands.Cog):
                 if in_check(g.board, g.turn):
                     winner_side = "black" if g.turn == "white" else "white"
                     winner = "CPU" if (g.mode == "cpu" and winner_side == "black") else g.players[winner_side].mention
-                    await record_win(g, winner_side)
-                    await channel.send(f"チェックメイト！ {winner} の勝ちです。")
+                    rating_line = await record_win(g, winner_side)
+                    suffix = f"\n{rating_line}" if rating_line else ""
+                    await channel.send(f"チェックメイト！ {winner} の勝ちです。{suffix}")
                 else:
-                    await channel.send("ステイルメイトです。引き分けになりました。")
+                    rating_line = await record_draw(g)
+                    suffix = f"\n{rating_line}" if rating_line else ""
+                    await channel.send(f"ステイルメイトです。引き分けになりました。{suffix}")
                 break
             if g.mode == "cpu" and g.turn == "black":
                 move = await asyncio.to_thread(choose_ai_move, g.board, "black", g.difficulty, g.castling, g.ep_square)
@@ -620,8 +645,9 @@ class Chess(commands.Cog):
             if not g.acted:
                 winner_side = "black" if g.turn == "white" else "white"
                 winner = "CPU" if (g.mode == "cpu" and winner_side == "black") else g.players[winner_side].mention
-                await record_win(g, winner_side)
-                await channel.send(f"{g.current_user().mention} さんは時間切れです。{winner} の勝ちです。チェスを終了しました。")
+                rating_line = await record_win(g, winner_side)
+                suffix = f"\n{rating_line}" if rating_line else ""
+                await channel.send(f"{g.current_user().mention} さんは時間切れです。{winner} の勝ちです。チェスを終了しました。{suffix}")
                 break
         await channel.send("チェスを終了しました。")
 
