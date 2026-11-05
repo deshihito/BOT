@@ -27,7 +27,7 @@ logger = logging.getLogger(__name__)
 
 STARTING_RATING = 1500.0
 K_FACTOR = 32
-GAMES = ("othello", "shogi", "chess")
+GAMES = ("othello", "shogi", "chess", "gomoku", "connect4")
 
 _DEFAULT_PATH = Path(__file__).resolve().parent.parent / "data" / "elo_ratings.json"
 

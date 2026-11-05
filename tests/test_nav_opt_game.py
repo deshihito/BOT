@@ -12,9 +12,12 @@ class GameHubOneStepTest(unittest.TestCase):
         selects = [c for c in view.children if isinstance(c, GameSelect)]
         genres = [c for c in view.children if isinstance(c, GameGenreSelect)]
         self.assertEqual(len(genres), 1)  # ジャンルは絞り込みとして残る
-        self.assertEqual(len(selects), 1)
-        self.assertEqual(len(selects[0].options), len(GAME_ORDER))
-        self.assertLessEqual(len(selects[0].options), 25)
+        # ラウンド3で全34ゲームとなり上限25件を超えたため、全ゲームは
+        # 25件ごとの複数セレクトに分割して出す（合算で全ゲームに1段で届く）。
+        values = [o.value for s in selects for o in s.options]
+        self.assertEqual(values, list(GAME_ORDER))
+        for s in selects:
+            self.assertLessEqual(len(s.options), 25)
 
     def test_hub_genre_filter_narrows_games(self):
         from cogs.game import GameHubView, GameSelect
@@ -25,7 +28,8 @@ class GameHubOneStepTest(unittest.TestCase):
         selects = [c for c in view.children if isinstance(c, GameSelect)]
         self.assertEqual(len(selects), 1)
         values = [o.value for o in selects[0].options]
-        self.assertEqual(sorted(values), ["flash", "guess", "shinkei", "wordle"])
+        self.assertEqual(sorted(values), ["flash", "game2048", "guess", "highlow", "minesweeper",
+                                          "nonogram", "shinkei", "sudoku", "wordle"])
 
     def test_custom_ids_unchanged(self):
         # PR-B 不変条件: 固定 custom_id は変更しない

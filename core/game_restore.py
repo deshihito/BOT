@@ -31,7 +31,7 @@
 
 対象ゲーム（ターン制で状態が素直に JSON 化できるもの）:
     shogi / chess / othello / daifugo / babanuki / shinkei / shiritori /
-    uno / wordle
+    uno / wordle / gomoku / connect4
 対象外（理由は各 cog ではなく本フェーズの報告に集約）:
     jinrou / wordwolf（Event 駆動のフェーズ機械で途中状態を再構築できない）、
     janken（同時選択の短時間ラウンド＋賭けコインのエスクロー途中）、
@@ -61,6 +61,7 @@ _DEFAULT_PATH = Path(__file__).resolve().parent.parent / "data" / "game_restore.
 GAME_IDS = (
     "shogi", "chess", "othello", "daifugo", "babanuki",
     "shinkei", "shiritori", "uno", "wordle",
+    "gomoku", "connect4",
 )
 
 FLUSH_EVERY_EVENTS = 5

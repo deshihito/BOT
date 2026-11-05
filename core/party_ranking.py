@@ -19,7 +19,7 @@ def current_month() -> str:
     """月次シーズンのキー（YYYY-MM）。"""
     return datetime.now().strftime("%Y-%m")
 
-KNOWN_GAMES = ("ngword", "shiritori", "wordwolf", "jinrou", "uno", "doubt", "janken", "wordle", "shinkei", "babanuki", "daifugo", "othello", "shogi", "chess", "poker", "quiz", "bingo", "majority", "onenight")
+KNOWN_GAMES = ("ngword", "shiritori", "wordwolf", "jinrou", "uno", "doubt", "janken", "wordle", "shinkei", "babanuki", "daifugo", "othello", "shogi", "chess", "poker", "quiz", "bingo", "majority", "onenight", "loveletter", "codenames", "thirtyone", "koikoi", "gomoku", "connect4")
 _MISSING = object()
 
 

@@ -99,6 +99,69 @@ def _clean_sweeper(raw: Any) -> dict[str, dict[str, dict[str, Any]]]:
     return out
 
 
+def _clean_highlow(raw: Any) -> dict[str, dict[str, int]]:
+    if not isinstance(raw, dict):
+        return {}
+    out: dict[str, dict[str, int]] = {}
+    for user_id, entry in raw.items():
+        if isinstance(entry, dict):
+            out[str(user_id)] = {
+                "plays": int(entry.get("plays") or 0),
+                "best_streak": int(entry.get("best_streak") or 0),
+                "total_correct": int(entry.get("total_correct") or 0),
+            }
+    return out
+
+
+def _clean_g2048(raw: Any) -> dict[str, dict[str, int]]:
+    if not isinstance(raw, dict):
+        return {}
+    out: dict[str, dict[str, int]] = {}
+    for user_id, entry in raw.items():
+        if isinstance(entry, dict):
+            out[str(user_id)] = {
+                "plays": int(entry.get("plays") or 0),
+                "best_score": int(entry.get("best_score") or 0),
+                "best_tile": int(entry.get("best_tile") or 0),
+                "clears": int(entry.get("clears") or 0),
+            }
+    return out
+
+
+def _clean_sudoku(raw: Any) -> dict[str, dict[str, dict[str, Any]]]:
+    if not isinstance(raw, dict):
+        return {}
+    out: dict[str, dict[str, dict[str, Any]]] = {}
+    for user_id, difficulties in raw.items():
+        if not isinstance(difficulties, dict):
+            continue
+        cleaned = {}
+        for key, entry in difficulties.items():
+            if isinstance(entry, dict):
+                best = entry.get("best_seconds")
+                cleaned[str(key)] = {
+                    "plays": int(entry.get("plays") or 0),
+                    "clears": int(entry.get("clears") or 0),
+                    "best_seconds": float(best) if best else None,
+                }
+        out[str(user_id)] = cleaned
+    return out
+
+
+def _clean_twochoice(raw: Any) -> dict[str, dict[str, int]]:
+    if not isinstance(raw, dict):
+        return {}
+    out: dict[str, dict[str, int]] = {}
+    for user_id, entry in raw.items():
+        if isinstance(entry, dict):
+            out[str(user_id)] = {
+                "sessions": int(entry.get("sessions") or 0),
+                "votes": int(entry.get("votes") or 0),
+                "minority": int(entry.get("minority") or 0),
+            }
+    return out
+
+
 def _clean_guess(raw: Any) -> dict[str, dict[str, int]]:
     if not isinstance(raw, dict):
         return {}
@@ -133,15 +196,22 @@ class GameRecordsStore:
         self._data = self._load()
 
     def _load(self) -> dict[str, Any]:
+        empty = {"flash": {}, "guess": {}, "sweeper": {}, "wordle_daily": {},
+                 "highlow": {}, "g2048": {}, "sudoku": {}, "nonogram": {}, "twochoice": {}}
         try:
             raw = json.loads(self._path.read_text(encoding="utf-8"))
         except Exception:
-            return {"flash": {}, "guess": {}, "sweeper": {}, "wordle_daily": {}}
+            return empty
         if not isinstance(raw, dict):
-            return {"flash": {}, "guess": {}, "sweeper": {}, "wordle_daily": {}}
+            return empty
         return {"flash": _clean_flash(raw.get("flash")), "guess": _clean_guess(raw.get("guess")),
                 "sweeper": _clean_sweeper(raw.get("sweeper")),
-                "wordle_daily": _clean_wordle_daily(raw.get("wordle_daily"))}
+                "wordle_daily": _clean_wordle_daily(raw.get("wordle_daily")),
+                "highlow": _clean_highlow(raw.get("highlow")),
+                "g2048": _clean_g2048(raw.get("g2048")),
+                "sudoku": _clean_sudoku(raw.get("sudoku")),
+                "nonogram": _clean_sudoku(raw.get("nonogram")),
+                "twochoice": _clean_twochoice(raw.get("twochoice"))}
 
     def flush(self) -> None:
         """現在の記録を JSON に書き出す（tmp 経由で原子的に差し替える）。"""
@@ -207,6 +277,108 @@ class GameRecordsStore:
             result = dict(entry)
         self._maybe_flush()
         return result
+
+    # ------------------------------------------------------------------ ハイ＆ロー
+    def record_highlow(self, user_id, streak: int) -> dict[str, Any]:
+        """1 プレイ（ゲームオーバーまで）を記録し、更新後の記録を返す。"""
+        with self._lock:
+            entry = self._data["highlow"].setdefault(
+                str(user_id), {"plays": 0, "best_streak": 0, "total_correct": 0}
+            )
+            entry["plays"] += 1
+            entry["total_correct"] += int(streak)
+            best_updated = int(streak) > entry["best_streak"]
+            if best_updated:
+                entry["best_streak"] = int(streak)
+            self._dirty += 1
+            result = dict(entry, best_updated=best_updated)
+        self._maybe_flush()
+        return result
+
+    def get_highlow(self, user_id) -> dict[str, int] | None:
+        with self._lock:
+            entry = self._data["highlow"].get(str(user_id))
+            return dict(entry) if entry is not None else None
+
+    # ------------------------------------------------------------------ 2048
+    def record_2048(self, user_id, score: int, max_tile: int) -> dict[str, Any]:
+        """1 プレイの終了を記録し、更新後の記録を返す。"""
+        with self._lock:
+            entry = self._data["g2048"].setdefault(
+                str(user_id), {"plays": 0, "best_score": 0, "best_tile": 0, "clears": 0}
+            )
+            entry["plays"] += 1
+            if int(max_tile) >= 2048:
+                entry["clears"] += 1
+            best_updated = int(score) > entry["best_score"]
+            if best_updated:
+                entry["best_score"] = int(score)
+            if int(max_tile) > entry["best_tile"]:
+                entry["best_tile"] = int(max_tile)
+            self._dirty += 1
+            result = dict(entry, best_updated=best_updated)
+        self._maybe_flush()
+        return result
+
+    def get_2048(self, user_id) -> dict[str, int] | None:
+        with self._lock:
+            entry = self._data["g2048"].get(str(user_id))
+            return dict(entry) if entry is not None else None
+
+    # ------------------------------------------------------------------ 数独 / ノノグラム（タイム記録）
+    def _record_timed(self, section: str, user_id, key: str, cleared: bool,
+                      seconds: float | None) -> dict[str, Any]:
+        with self._lock:
+            entry = self._data[section].setdefault(str(user_id), {}).setdefault(
+                str(key), {"plays": 0, "clears": 0, "best_seconds": None}
+            )
+            entry["plays"] += 1
+            best_updated = False
+            if cleared:
+                entry["clears"] += 1
+                if seconds is not None and (entry["best_seconds"] is None or seconds < entry["best_seconds"]):
+                    entry["best_seconds"] = float(seconds)
+                    best_updated = True
+            self._dirty += 1
+            result = dict(entry, best_updated=best_updated)
+        self._maybe_flush()
+        return result
+
+    def record_sudoku(self, user_id, difficulty: str, cleared: bool, seconds: float | None) -> dict[str, Any]:
+        return self._record_timed("sudoku", user_id, difficulty, cleared, seconds)
+
+    def get_sudoku(self, user_id, difficulty: str) -> dict[str, Any] | None:
+        with self._lock:
+            entry = self._data["sudoku"].get(str(user_id), {}).get(str(difficulty))
+            return dict(entry) if entry is not None else None
+
+    def record_nonogram(self, user_id, size: str, cleared: bool, seconds: float | None) -> dict[str, Any]:
+        return self._record_timed("nonogram", user_id, size, cleared, seconds)
+
+    def get_nonogram(self, user_id, size: str) -> dict[str, Any] | None:
+        with self._lock:
+            entry = self._data["nonogram"].get(str(user_id), {}).get(str(size))
+            return dict(entry) if entry is not None else None
+
+    # ------------------------------------------------------------------ 究極の二択
+    def record_twochoice(self, user_id, votes: int, minority: int) -> dict[str, int]:
+        """1 セッションへの参加（投票 votes 回・少数派 minority 回）を記録する。"""
+        with self._lock:
+            entry = self._data["twochoice"].setdefault(
+                str(user_id), {"sessions": 0, "votes": 0, "minority": 0}
+            )
+            entry["sessions"] += 1
+            entry["votes"] += int(votes)
+            entry["minority"] += int(minority)
+            self._dirty += 1
+            result = dict(entry)
+        self._maybe_flush()
+        return result
+
+    def get_twochoice(self, user_id) -> dict[str, int] | None:
+        with self._lock:
+            entry = self._data["twochoice"].get(str(user_id))
+            return dict(entry) if entry is not None else None
 
     # ------------------------------------------------------------------ マインスイーパー
     def record_sweeper(self, user_id, difficulty: str, cleared: bool, seconds: float | None) -> dict[str, Any]:
@@ -345,6 +517,77 @@ def record_wordle_daily_safely(user_id, guild_id, date_key: str, attempts: int, 
         return shared().record_wordle_daily(user_id, guild_id, date_key, attempts, won, winning_guess)
     except Exception:
         logger.debug("wordle daily record failed", exc_info=True)
+        return None
+
+
+def record_highlow_safely(user_id, streak: int) -> dict[str, Any] | None:
+    """記録に失敗してもゲームを止めないためのラッパ。失敗時は None。"""
+    try:
+        return shared().record_highlow(user_id, streak)
+    except Exception:
+        logger.debug("highlow record failed", exc_info=True)
+        return None
+
+
+def format_highlow_line(entry: dict[str, Any], streak: int) -> str:
+    """ハイ＆ローの結果に付ける、自分の記録の 1 行。"""
+    line = (f"📊 今回: 連続{streak}回正解／通算 {int(entry.get('plays') or 0)}プレイ"
+            f"・連続正解ベスト {int(entry.get('best_streak') or 0)}回")
+    if entry.get("best_updated"):
+        line += " 🎉 連続正解の自己ベスト更新！"
+    return line
+
+
+def record_2048_safely(user_id, score: int, max_tile: int) -> dict[str, Any] | None:
+    try:
+        return shared().record_2048(user_id, score, max_tile)
+    except Exception:
+        logger.debug("2048 record failed", exc_info=True)
+        return None
+
+
+def format_2048_line(entry: dict[str, Any], score: int, max_tile: int) -> str:
+    line = (f"📊 今回: スコア {score}・最大タイル {max_tile}／ベストスコア "
+            f"{int(entry.get('best_score') or 0)}・最大タイル記録 {int(entry.get('best_tile') or 0)}"
+            f"（{int(entry.get('plays') or 0)}プレイ）")
+    if entry.get("best_updated"):
+        line += " 🎉 スコアの自己ベスト更新！"
+    return line
+
+
+def record_sudoku_safely(user_id, difficulty: str, cleared: bool, seconds: float | None) -> dict[str, Any] | None:
+    try:
+        return shared().record_sudoku(user_id, difficulty, cleared, seconds)
+    except Exception:
+        logger.debug("sudoku record failed", exc_info=True)
+        return None
+
+
+def record_nonogram_safely(user_id, size: str, cleared: bool, seconds: float | None) -> dict[str, Any] | None:
+    try:
+        return shared().record_nonogram(user_id, size, cleared, seconds)
+    except Exception:
+        logger.debug("nonogram record failed", exc_info=True)
+        return None
+
+
+def format_timed_line(entry: dict[str, Any], label: str) -> str:
+    """数独・ノノグラムの結果に付ける、自分の記録の 1 行。"""
+    plays = int(entry.get("plays") or 0)
+    clears = int(entry.get("clears") or 0)
+    best = entry.get("best_seconds")
+    best_text = f"{best:.1f}秒" if best else "―"
+    line = f"📊 {label}の記録: {plays}回中{clears}回クリア／ベストタイム {best_text}"
+    if entry.get("best_updated"):
+        line += " 🎉 ベストタイム更新！"
+    return line
+
+
+def record_twochoice_safely(user_id, votes: int, minority: int) -> dict[str, int] | None:
+    try:
+        return shared().record_twochoice(user_id, votes, minority)
+    except Exception:
+        logger.debug("twochoice record failed", exc_info=True)
         return None
 
 

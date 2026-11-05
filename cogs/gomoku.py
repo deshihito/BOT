@@ -1,0 +1,361 @@
+"""/game の五目並べ（2人対戦 / CPU、15×15）。
+
+盤面は PIL で描く PNG、移動は行→列のセレクト。対人戦は
+core/party_ranking.py の勝数と core/elo.py のレートに記録し、
+対局は core/game_restore.py で再起動復旧する（オセロと同じ型）。
+"""
+import asyncio
+import io
+import logging
+import random
+from pathlib import Path
+
+import discord
+from discord.ext import commands
+from PIL import Image, ImageDraw, ImageFont
+
+from core import elo, game_panels, game_restore, party_ranking
+from core.gomoku import BLACK, EMPTY, SIZE, WHITE, choose_ai_move, is_full, is_win_at, legal_moves, new_board, winner
+
+logger = logging.getLogger(__name__)
+
+GAME_ID = "gomoku"
+party_ranking.register(GAME_ID)
+
+COLOR = 0xFFFFFF
+RECRUIT_SECONDS = 30
+TURN_SECONDS = 60
+IMG_SIZE = 640
+MARGIN = 40
+
+
+def render_board_image(board, last=None):
+    img = Image.new("RGB", (IMG_SIZE, IMG_SIZE), (238, 198, 130))
+    draw = ImageDraw.Draw(img)
+    step = (IMG_SIZE - MARGIN * 2) / (SIZE - 1)
+    for i in range(SIZE):
+        p = MARGIN + i * step
+        draw.line([(MARGIN, p), (IMG_SIZE - MARGIN, p)], fill=(90, 60, 20), width=1)
+        draw.line([(p, MARGIN), (p, IMG_SIZE - MARGIN)], fill=(90, 60, 20), width=1)
+    try:
+        font = ImageFont.truetype(str(Path(__file__).resolve().parents[1] / "font.ttf"), 16)
+    except Exception:
+        font = ImageFont.load_default()
+    for i in range(SIZE):
+        draw.text((MARGIN + i * step, 12), str(i + 1), font=font, fill=(60, 40, 10), anchor="mm")
+        draw.text((12, MARGIN + i * step), str(i + 1), font=font, fill=(60, 40, 10), anchor="mm")
+    radius = step * 0.42
+    for r in range(SIZE):
+        for c in range(SIZE):
+            v = board[r][c]
+            if v == EMPTY:
+                continue
+            cx, cy = MARGIN + c * step, MARGIN + r * step
+            fill = (20, 20, 20) if v == BLACK else (245, 245, 245)
+            draw.ellipse([cx - radius, cy - radius, cx + radius, cy + radius], fill=fill, outline=(60, 60, 60))
+            if last == (r, c):
+                draw.ellipse([cx - 4, cy - 4, cx + 4, cy + 4], fill=(230, 50, 50))
+    out = io.BytesIO()
+    img.save(out, format="PNG", optimize=True)
+    out.seek(0)
+    return out
+
+
+def board_attachment(board, last=None):
+    name = "gomoku_board.png"
+    return discord.File(render_board_image(board, last), filename=name), f"attachment://{name}"
+
+
+async def record_result(g) -> str:
+    if g.mode == "cpu":
+        return ""
+    win = winner(g.board)
+    black_p, white_p = g.players.get(BLACK), g.players.get(WHITE)
+    if black_p is None or white_p is None:
+        return ""
+    if win is None:
+        result = elo.record_draw_safely(g.guild_id, GAME_ID, black_p.id, white_p.id)
+        if result:
+            return (f"📈 レート（引き分け）: {black_p.mention} {result['a']['rating']:.0f}（{result['a_delta']:+.0f}）"
+                    f" / {white_p.mention} {result['b']['rating']:.0f}（{result['b_delta']:+.0f}）")
+        return ""
+    w = black_p if win == BLACK else white_p
+    l = white_p if win == BLACK else black_p
+    await party_ranking.shared().record_win(g.guild_id, w.id, GAME_ID)
+    return elo.format_match_line(w, l, elo.record_match_safely(g.guild_id, GAME_ID, w.id, l.id))
+
+
+class GomokuGame:
+    def __init__(self, channel_id, guild_id, host_id, mode="human", difficulty=5):
+        self.channel_id, self.guild_id, self.host_id = channel_id, guild_id, host_id
+        self.players = {}
+        self.board = new_board()
+        self.turn = BLACK
+        self.acted = False
+        self.phase = "recruit"
+        self.mode = mode
+        self.difficulty = max(1, min(10, int(difficulty)))
+        self.last_move = None
+
+    def current_user(self):
+        return self.players.get(self.turn)
+
+
+class JoinView(discord.ui.View):
+    def __init__(self, game):
+        super().__init__(timeout=RECRUIT_SECONDS + 30)
+        self.game = game
+
+    @discord.ui.button(label="参加（最大2人）", style=discord.ButtonStyle.success)
+    async def join(self, interaction, button):
+        g = self.game
+        if g.phase != "recruit":
+            return await interaction.response.send_message("募集は終了しました。", ephemeral=True)
+        if interaction.user.id in g.players:
+            return await interaction.response.send_message("すでに参加しています。", ephemeral=True)
+        if len(g.players) >= 2:
+            return await interaction.response.send_message("定員です。", ephemeral=True)
+        g.players[interaction.user.id] = interaction.user
+        await interaction.response.send_message("参加しました。")
+
+
+class MoveView(discord.ui.View):
+    """行→列の2段セレクト。両方選ぶと着手する。"""
+
+    def __init__(self, cog, game):
+        super().__init__(timeout=TURN_SECONDS)
+        self.cog = cog
+        self.game = game
+        self.row = None
+        self.col = None
+        row_select = discord.ui.Select(
+            placeholder="行（1〜15）", row=0,
+            options=[discord.SelectOption(label=f"{i+1}行", value=str(i)) for i in range(SIZE)])
+        row_select.callback = self._row_callback
+        self.add_item(row_select)
+        col_select = discord.ui.Select(
+            placeholder="列（1〜15）", row=1,
+            options=[discord.SelectOption(label=f"{i+1}列", value=str(i)) for i in range(SIZE)])
+        col_select.callback = self._col_callback
+        self.add_item(col_select)
+
+    async def _row_callback(self, interaction):
+        if not self._check_turn(interaction):
+            return await interaction.response.send_message("現在の手番のプレイヤーだけが選択できます。", ephemeral=True)
+        for item in self.children:
+            if isinstance(item, discord.ui.Select) and item.row == 0 and item.values:
+                self.row = int(item.values[0])
+        await interaction.response.defer()
+        await self._try_apply(interaction)
+
+    async def _col_callback(self, interaction):
+        if not self._check_turn(interaction):
+            return await interaction.response.send_message("現在の手番のプレイヤーだけが選択できます。", ephemeral=True)
+        for item in self.children:
+            if isinstance(item, discord.ui.Select) and item.row == 1 and item.values:
+                self.col = int(item.values[0])
+        await interaction.response.defer()
+        await self._try_apply(interaction, col=self.col)
+
+    def _check_turn(self, interaction) -> bool:
+        g = self.game
+        user = g.current_user()
+        return g.phase == "playing" and not g.acted and user is not None and user.id == interaction.user.id
+
+    async def _try_apply(self, interaction, col=None):
+        g = self.game
+        if self.row is None or col is None:
+            return
+        if g.board[self.row][col] != EMPTY:
+            await interaction.followup.send("そのマスには既に石があります。別の列を選んでください。", ephemeral=True)
+            return
+        g.board[self.row][col] = g.turn
+        g.last_move = (self.row, col)
+        g.acted = True
+
+
+class Gomoku(commands.Cog):
+    def __init__(self, bot):
+        self.bot, self.games = bot, {}
+
+    @staticmethod
+    def player_label(game, color):
+        player = game.players.get(color)
+        return "CPU" if player is None else player.mention
+
+    async def start_recruit(self, interaction, mode="human", difficulty=5):
+        channel = interaction.channel
+        if channel.id in self.games:
+            return await interaction.response.send_message("このチャンネルでは既にゲーム中です。", ephemeral=True)
+        g = GomokuGame(channel.id, interaction.guild_id, interaction.user.id, mode, difficulty)
+        self.games[channel.id] = g
+        if mode == "cpu":
+            g.players[BLACK] = interaction.user
+            g.players[WHITE] = None
+            await interaction.response.send_message(f"五目並べCPU対戦（難易度 {g.difficulty}/10）を開始します。")
+            try:
+                await self.run_game(channel, g)
+            finally:
+                self._teardown(channel.id, g)
+            return
+        g.players[interaction.user.id] = interaction.user
+        await interaction.response.send_message("五目並べの募集を開始しました。")
+        try:
+            await game_panels.replace(channel, "party", embed=discord.Embed(
+                title="五目並べ 参加者募集",
+                description=f"{interaction.user.mention} さんが募集中です。\n{RECRUIT_SECONDS}秒以内に参加してください（2人対戦）。",
+                color=COLOR), view=JoinView(g))
+            await asyncio.sleep(RECRUIT_SECONDS)
+            await self.run_game(channel, g)
+        finally:
+            self._teardown(channel.id, g)
+
+    def _teardown(self, channel_id, g):
+        g.phase = "done"
+        if self.games.get(channel_id) is g:
+            self.games.pop(channel_id, None)
+        self._clear_snapshot(channel_id)
+
+    async def run_game(self, channel, g):
+        if len(g.players) != 2:
+            await channel.send("参加者が2人集まらなかったため、五目並べを開始できませんでした。")
+            return
+        g.phase = "playing"
+        if g.mode != "cpu":
+            g.players[BLACK], g.players[WHITE] = list(g.players.values())
+        file, url = board_attachment(g.board)
+        embed = discord.Embed(description="五目並べを開始します。黒（●）が先手です。先に5つ並べた方が勝ちです。", color=COLOR)
+        embed.set_image(url=url)
+        await channel.send(embed=embed, file=file)
+        await self._play_loop(channel, g)
+
+    def _cpu_move(self, g):
+        if g.difficulty <= 3 and random.random() < 0.4:
+            from core.gomoku import candidates
+            return random.choice(candidates(g.board))
+        return choose_ai_move(g.board, g.turn)
+
+    async def _play_loop(self, channel, g):
+        while g.phase == "playing":
+            self._save_snapshot(g)
+            if winner(g.board) or is_full(g.board):
+                break
+            if g.mode == "cpu" and g.turn == WHITE:
+                move = await asyncio.to_thread(self._cpu_move, g)
+                if move is None:
+                    break
+                g.board[move[0]][move[1]] = WHITE
+                g.last_move = move
+                g.turn = BLACK
+                continue
+            g.acted = False
+            user = g.current_user()
+            file, url = board_attachment(g.board, g.last_move)
+            embed = discord.Embed(
+                description=(f"{user.mention} さんの番（{'黒 ●' if g.turn == BLACK else '白 ○'}）。\n"
+                             "行→列の順にセレクトで選んでください。"), color=COLOR)
+            embed.set_image(url=url)
+            await game_panels.replace(channel, "party", embed=embed, file=file, view=MoveView(self, g))
+            for _ in range(TURN_SECONDS):
+                if g.acted or g.phase != "playing":
+                    break
+                await asyncio.sleep(1)
+            if not g.acted:
+                move = random.choice(legal_moves(g.board))
+                g.board[move[0]][move[1]] = g.turn
+                g.last_move = move
+                await channel.send(f"{user.mention} さんは時間切れのため、ランダムなマス（{move[0]+1}行{move[1]+1}列）に置きました。")
+            g.turn = WHITE if g.turn == BLACK else BLACK
+        g.phase = "done"
+        win = winner(g.board)
+        if win is None:
+            outcome = "引き分けです。"
+        else:
+            outcome = f"勝者: {self.player_label(g, win)}（{'黒 ●' if win == BLACK else '白 ○'}）"
+        rating_line = await record_result(g)
+        if rating_line:
+            outcome += f"\n{rating_line}"
+        if g.mode == "cpu":
+            outcome += "\n（CPU戦はランキングに記録されません）"
+        file, url = board_attachment(g.board, g.last_move)
+        embed = discord.Embed(title="五目並べ 終了", description=outcome, color=COLOR)
+        embed.set_image(url=url)
+        await channel.send(embed=embed, file=file)
+
+    # ------------------------------------------------------------------ 復旧
+    def _save_snapshot(self, g):
+        if g.phase != "playing":
+            return
+        black = g.players.get(BLACK)
+        white = g.players.get(WHITE)
+        state = {
+            "mode": g.mode, "difficulty": g.difficulty, "host_id": g.host_id,
+            "players": {
+                "black": game_restore.member_ref(black) if black is not None else None,
+                "white": game_restore.member_ref(white) if white is not None else None,
+            },
+            "board": ["".join(row) for row in g.board],
+            "turn": g.turn,
+            "last_move": list(g.last_move) if g.last_move else None,
+        }
+        game_restore.save_session(GAME_ID, g.channel_id, g.guild_id, state)
+
+    def _clear_snapshot(self, channel_id) -> None:
+        game_restore.clear_session(GAME_ID, channel_id)
+
+    async def restore_after_restart(self) -> None:
+        entries = game_restore.session_entries(GAME_ID)
+        for channel_id, entry in entries.items():
+            try:
+                restored = await self._restore_session(channel_id, entry)
+            except Exception:
+                logger.exception("channel %s: 五目並べの復旧に失敗しました", channel_id)
+                restored = False
+            if not restored:
+                game_restore.clear_session(GAME_ID, channel_id)
+        game_restore.flush_store()
+
+    async def _restore_session(self, channel_id, entry) -> bool:
+        state = entry.get("state")
+        if not isinstance(state, dict) or channel_id in self.games:
+            return False
+        channel = self.bot.get_channel(channel_id)
+        if channel is None:
+            return False
+        guild = getattr(channel, "guild", None)
+        guild_id = entry.get("guild_id") or getattr(guild, "id", None)
+        g = GomokuGame(channel_id, guild_id, state.get("host_id"),
+                       state.get("mode") or "human", state.get("difficulty") or 5)
+        players = state.get("players") or {}
+        for key, color in (("black", BLACK), ("white", WHITE)):
+            ref = players.get(key)
+            if ref is None:
+                if g.mode == "cpu":
+                    g.players[color] = None
+                    continue
+                return False
+            g.players[color] = game_restore.resolve_member(guild, ref.get("id"), ref.get("name"))
+        board = state["board"]
+        if len(board) != SIZE or any(len(row) != SIZE for row in board):
+            return False
+        g.board = [list(row) for row in board]
+        if state.get("turn") in (BLACK, WHITE):
+            g.turn = state["turn"]
+        if state.get("last_move"):
+            g.last_move = tuple(state["last_move"])
+        g.phase = "playing"
+        self.games[channel_id] = g
+        asyncio.create_task(self._run_restored(channel, g))
+        return True
+
+    async def _run_restored(self, channel, g):
+        try:
+            await self._play_loop(channel, g)
+        except Exception:
+            logger.exception("channel %s: 復旧した五目並べの進行に失敗しました", g.channel_id)
+        finally:
+            self._teardown(g.channel_id, g)
+
+
+async def setup(bot):
+    await bot.add_cog(Gomoku(bot))
