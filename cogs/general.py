@@ -3312,7 +3312,7 @@ class GeneralCog(commands.Cog):
         for task in list(self._bg_tasks):
             task.cancel()
 
-    @app_commands.command(name="general", description="Show the general features control panel")
+    @app_commands.command(name="general", description="一般機能の操作パネルを表示します")
     async def general(self, interaction: discord.Interaction):
         # Building the panel may touch lazily loaded settings/models.  Reserve
         # the interaction response before doing any work so Discord's 3-second

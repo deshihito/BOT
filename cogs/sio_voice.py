@@ -382,7 +382,7 @@ class VoiceHub(commands.Cog):
             return await cog._chat_connect_impl(r, name, form.get("password") or None)
         return await r.send("操作を選択してください。", ephemeral=True)
 
-    @app_commands.command(name="vc", description="Show the music and voice control panel")
+    @app_commands.command(name="vc", description="音楽・ボイス機能の操作パネルを表示します")
     async def vc(self, interaction: discord.Interaction):
         view = VoicePanelView(self)
         await interaction.response.send_message(view=as_panel_v2(view), ephemeral=True)

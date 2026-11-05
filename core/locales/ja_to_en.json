@@ -4566,6 +4566,7 @@
   "ダウトの参加者を募集して始めます（3人以上）": "Recruit players and start a game of Cheat (3 or more players)",
   "/music（操作パネルを表示）": "/music (show the control panel)",
   "/voice（操作パネルを表示）": "/voice (show the control panel)",
+  "/vc（操作パネルを表示）": "/vc (show the control panel)",
   "過去の発言をもとに、特定のメンバーの口調で AI が返事をします": "AI replies in a specific member's style based on their past messages",
   "このチャンネルの直近3週間の雰囲気を AI が分析します": "AI analyzes the vibe of this channel over the past 3 weeks",
   "ダンジョンのマップを全サーバー分リセットします": "Reset dungeon maps across all servers",
