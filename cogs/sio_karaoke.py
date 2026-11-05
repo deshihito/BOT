@@ -22,7 +22,7 @@ from core.vosk_model import ensure_model
 from core.voice_session import VoiceBusy, get_manager
 from core.voice_recv_patch import patch_voice_recv_client
 from core.messages import VOICE_NOT_JOINED
-from core.emojis import MUSIC
+from core.emojis import FAILED, MUSIC
 
 try:
     from vosk import Model, KaldiRecognizer
@@ -219,7 +219,7 @@ class KaraokeCog(commands.Cog):
             return await self._score(r)
         if action == "stop":
             if r.guild.id not in self.sessions:
-                return await r.send(embed=we("⚠️ 現在カラオケは実行されていません。"), ephemeral=True)
+                return await r.send(embed=we(f"{FAILED} 現在カラオケは実行されていません。"), ephemeral=True)
             if not await self.voice_sessions.release(r.guild.id, "karaoke", reason="stop"):
                 self._cleanup(r.guild.id)("stop")
             return await r.send(embed=we("🛑 カラオケモードを終了しました！"))
@@ -232,7 +232,7 @@ class KaraokeCog(commands.Cog):
 
     async def _start(self, r: Responder, target_lyrics: str | None):
         if not target_lyrics or not target_lyrics.strip():
-            return await r.send(embed=we("⚠️ お題の歌詞を `lyrics` に入れてください。"), ephemeral=True)
+            return await r.send(embed=we(f"{FAILED} お題の歌詞を `lyrics` に入れてください。"), ephemeral=True)
         # モデルが無いときは VC に入る前に断る。
         problem = await ensure_model(self, Model, MODEL_PATH)
         if problem:
@@ -243,7 +243,7 @@ class KaraokeCog(commands.Cog):
 
         guild_id = r.guild.id
         if guild_id in self.sessions:
-            return await r.send(embed=we("⚠️ 既にカラオケ機能が実行中です。"), ephemeral=True)
+            return await r.send(embed=we(f"{FAILED} 既にカラオケ機能が実行中です。"), ephemeral=True)
 
         vc_channel = voice.channel
         await r.defer()
@@ -292,7 +292,7 @@ class KaraokeCog(commands.Cog):
     async def _score(self, r: Responder):
         session = self.sessions.get(r.guild.id)
         if not session:
-            return await r.send(embed=we("⚠️ 現在カラオケは実行されていません。"), ephemeral=True)
+            return await r.send(embed=we(f"{FAILED} 現在カラオケは実行されていません。"), ephemeral=True)
 
         sink: KaraokeSink = session["sink"]
         target = clean_text(session["target_lyrics"])

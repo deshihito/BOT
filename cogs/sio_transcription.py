@@ -25,6 +25,7 @@ from core.voice_recv_patch import patch_voice_recv_client
 from core.messages import voice_connection_failed
 from core.voice_media import add_receive_sink, remove_receive_sink
 from core.speech_vad import SpeechDetector
+from core.emojis import FAILED
 
 try:  # あれば高品質なポリフェーズ・リサンプラーを使う（無くても numpy だけで動く）
     from scipy.signal import resample_poly  # type: ignore
@@ -489,7 +490,7 @@ class TranscriptionCog(commands.Cog):
             return await self._start(r, target_channel)
         if action == "stop":
             if r.guild.id not in self.sessions:
-                return await r.send(embed=we("⚠️ 現在文字起こしは実行されていません。"), ephemeral=True)
+                return await r.send(embed=we(f"{FAILED} 現在文字起こしは実行されていません。"), ephemeral=True)
             if not await self.voice_sessions.release(r.guild.id, "transcribe", reason="stop"):
                 self._cleanup(r.guild.id)("stop")
             return await r.send(embed=we("🛑 文字起こしを停止しました。"))
@@ -515,11 +516,11 @@ class TranscriptionCog(commands.Cog):
             ), ephemeral=True)
         voice = getattr(r.user, "voice", None)
         if not voice or not voice.channel:
-            return await r.send(embed=we("⚠️ 先にボイスチャンネルに参加してから実行してください。"), ephemeral=True)
+            return await r.send(embed=we(f"{FAILED} 先にボイスチャンネルに参加してから実行してください。"), ephemeral=True)
 
         guild_id = r.guild.id
         if guild_id in self.sessions:
-            return await r.send(embed=we("⚠️ 既に文字起こしが実行中です。"), ephemeral=True)
+            return await r.send(embed=we(f"{FAILED} 既に文字起こしが実行中です。"), ephemeral=True)
 
         vc_channel = voice.channel
         await r.defer()
@@ -534,7 +535,7 @@ class TranscriptionCog(commands.Cog):
             )
         except VoiceBusy as busy:
             return await r.send(embed=we(
-                f"⚠️ いまVCは **{busy.session.label}** が使用中です。先にその機能を停止してから文字起こしを開始してください。\n"
+                f"{FAILED} いまVCは **{busy.session.label}** が使用中です。先にその機能を停止してから文字起こしを開始してください。\n"
                 "文字起こしは、実行中のVC機能を自動停止・切り替えしません。"
             ))
         except Exception as e:
@@ -631,7 +632,7 @@ class TranscriptionCog(commands.Cog):
                 source = f"**{name}** の直近の発話（{int(time.time() - ts)}秒前）"
         if audio is None:
             return await ctx.send(embed=we(
-                "⚠️ 調べる音声がありません。文字起こし中のVCで話してからもう一度実行するか、"
+                f"{FAILED} 調べる音声がありません。文字起こし中のVCで話してからもう一度実行するか、"
                 "WAVファイル(5MBまで)を添付して `!sttdebug` を実行してください。"
             ))
 
@@ -685,10 +686,10 @@ class TranscriptionCog(commands.Cog):
         if isinstance(error, commands.CommandOnCooldown):
             message = f"⏳ `!sttdebug` は続けて実行できません。{error.retry_after:.0f}秒後にもう一度お試しください。"
         elif isinstance(error, commands.NoPrivateMessage):
-            message = "⚠️ `!sttdebug` はサーバーのテキストチャンネルで実行してください。"
+            message = f"{FAILED} `!sttdebug` はサーバーのテキストチャンネルで実行してください。"
         else:
             logger.error("sttdebug でエラー", exc_info=error)
-            message = f"⚠️ `!sttdebug` でエラーが発生しました: `{error!r}`"[:1900]
+            message = f"{FAILED} `!sttdebug` でエラーが発生しました: `{error!r}`"[:1900]
         try:
             await ctx.send(message)
         except Exception:
