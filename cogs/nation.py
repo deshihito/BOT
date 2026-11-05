@@ -235,8 +235,7 @@ class NationCog(commands.Cog):
         embed.add_field(name="所属国", value=nation_name, inline=True)
         embed.add_field(name="役職", value=ROLE_NAMES.get(player.get("role"), player.get("role") or "-"), inline=True)
         embed.add_field(name="所持金", value=f"{COIN} {balance if balance is not None else 0:,} AGO", inline=True)
-        embed.add_field(name="空腹度", value=f"{hunger_bar(hunger)} {hunger}/{MAX_HUNGER}", inline=False)
-        embed.set_footer(text="空腹度はサーバーで発言すると少しずつ減ります")
+        embed.add_field(name="空腹度", value=f"{hunger_bar(hunger)} {hunger}/{MAX_HUNGER}\nサーバーで発言すると少しずつ減ります", inline=False)
         file = None
         if os.path.exists(COIN_PATH):
             file = discord.File(COIN_PATH, filename="COIN.png")

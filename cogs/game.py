@@ -75,7 +75,6 @@ def detail_embed(game_id: str) -> discord.Embed:
     embed = discord.Embed(title=guide["name"], description=guide["summary"], color=HUB_COLOR)
     embed.add_field(name="人数の目安", value=guide["players"], inline=True)
     embed.add_field(name="所要時間", value=guide["duration"], inline=True)
-    embed.set_footer(text="「募集する」を押すと、このチャンネルで参加者の募集が始まります。")
     return embed
 
 
@@ -98,7 +97,6 @@ async def ranking_embed(guild_id, game_id: str) -> discord.Embed:
     else:
         text = "まだ記録がありません。"
     embed = discord.Embed(title=f"{guide['name']} のサーバーランキング", description=text, color=HUB_COLOR)
-    embed.set_footer(text="勝利数の上位10人です。")
     return embed
 
 
