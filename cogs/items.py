@@ -85,9 +85,14 @@ class ItemAmountModal(discord.ui.Modal):
         self.action = action
         titles = {"buy": "アイテムを買う", "sell": "アイテムを売る", "use": "アイテムを使う"}
         super().__init__(title=titles[action])
+        # 入力形式の手がかりを常に見せる（監査 #7）。アイテム名はパネルの表記どおり。
+        self.item.placeholder = "例: スクラップ"
         if action == "use":
             self.amount.required = False
+            # 「1固定」の注意は使うときだけ意味があるので、買う/売るでは出さない。
             self.amount.placeholder = "使う場合は1固定です"
+        else:
+            self.amount.placeholder = "例: 1（半角数字）"
 
     async def on_submit(self, interaction: discord.Interaction):
         item_id = items_core.resolve_item_id(str(self.item.value))
