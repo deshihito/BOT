@@ -36,13 +36,19 @@ MIQ_FORMATS = {
     "pastel": ("パステル風", "🌸"),
     "ticket": ("チケット風", "🎫"),
     "note": ("ノート風", "📓"),
+    "pair": ("ペアハート風", "💞"),
+    "luxury": ("ゴールド縦書き風", "👑"),
+    "tate": ("和風縦書き風", "🎋"),
+    "novel": ("小説風", "📖"),
+    "glass": ("グラスカード風", "💠"),
 }
 
 # ランダムで選ばれる単体メッセージ系フォーマット。
-# line (返信チェーン前提) と random 自身は絶対に含めない。
+# line / pair (返信チェーン前提) と random 自身は絶対に含めない。
 MIQ_RANDOM_POOL = (
     "quote", "manga", "music", "news", "xpost", "rpg",
     "blueprint", "pixel", "card", "neon", "dark", "pop", "pastel", "ticket", "note",
+    "luxury", "tate", "novel", "glass",
 )
 
 
@@ -997,6 +1003,10 @@ class MiqMixin:
             file, refused = await self._miq_line_file_for(message, interaction.user.id, eff_prefs, size_limit)
             if refused:
                 return await interaction.followup.send("このユーザーは引用画像(MIQ)を拒否しています。")
+        elif fmt == "pair":
+            file, refused = await self._miq_pair_file_for(message, interaction.user.id, eff_prefs, size_limit)
+            if refused:
+                return await interaction.followup.send("このユーザーは引用画像(MIQ)を拒否しています。")
         else:
             file = await self._miq_build_file(
                 message.author, text, eff_prefs, size_limit,
@@ -1047,6 +1057,13 @@ class MiqMixin:
             async with message.channel.typing():
                 if fmt == "line":
                     file, refused = await self._miq_line_file_for(target, message.author.id, eff_prefs, size_limit)
+                    if refused:
+                        await message.reply(
+                            "このユーザーは引用画像(MIQ)を拒否しています。", mention_author=False, delete_after=8,
+                        )
+                        return
+                elif fmt == "pair":
+                    file, refused = await self._miq_pair_file_for(target, message.author.id, eff_prefs, size_limit)
                     if refused:
                         await message.reply(
                             "このユーザーは引用画像(MIQ)を拒否しています。", mention_author=False, delete_after=8,

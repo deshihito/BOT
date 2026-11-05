@@ -4,9 +4,11 @@ from __future__ import annotations
 
 from .common import *
 from .miq import (
-    MIQ_NEW_H, MIQ_NEW_W, _miq_display_text, _miq_fit, _miq_load_font,
-    _miq_mix, _miq_open_avatar,
-    _miq_save_png,
+    MIQ_NEW_H, MIQ_NEW_W, _miq_display_text, _miq_emoji_font_path,
+    _miq_fallback_fonts, _miq_fit, _miq_load_font,
+    _miq_mix, _miq_open_avatar, _miq_render_emoji_unit,
+    _miq_save_png, _miq_split_units, _miq_unit_bases, _miq_unit_font,
+    _miq_unit_width,
 )
 from .miq_styles import (
     _miq_circle_avatar, _miq_date_str, _miq_glow_lines, _miq_hash_int,
@@ -504,3 +506,125 @@ def render_miq_note_png(avatar_bytes: bytes | None, text: str, name: str, userna
 
 
 # 単体メッセージ系フォーマットのレンダラ表。_miq_build_file がここで分岐する。
+
+
+# ------------------------------------------------------------
+# グラスカード風: 本文中の Unicode 絵文字をカラーで描くための
+# 単位ベース折り返し/描画 (miq.py の単位機構を再利用する)
+# ------------------------------------------------------------
+def _miq_glass_wrap(draw, text, chain, size: int, emoji_path, max_w: float) -> list:
+    """本文を単位 (文字/絵文字) ごとに測って max_w で折り返す。
+
+    戻り値は [[(unit, width), ...], ...]。描けない単位 (幅0) は落とす。
+    """
+    lines: list = []
+    for para in (text or "").split("\n"):
+        line: list = []
+        line_w = 0.0
+        for unit in _miq_split_units(para):
+            w = _miq_unit_width(unit, draw, chain, size, emoji_path)
+            if w <= 0:
+                continue
+            if line and line_w + w > max_w:
+                lines.append(line)
+                line, line_w = [], 0.0
+            line.append((unit, w))
+            line_w += w
+        lines.append(line)
+    return [ln for ln in lines if ln]
+
+
+def _miq_glass_draw_line(img, draw, x: float, y: float, line, size: int, chain, emoji_path, fill):
+    """折り返し済みの1行を描く。絵文字はカラーで合成する。貼り付け後の Draw を返す。"""
+    from PIL import ImageDraw
+
+    cx = x
+    for unit, w in line:
+        kind, font = _miq_unit_font(unit, chain, emoji_path)
+        if kind == "emoji":
+            used = _miq_render_emoji_unit(img, draw, cx, y, unit, size, emoji_path)
+            draw = ImageDraw.Draw(img)
+            cx += used if used else w
+        elif kind == "font":
+            draw.text((cx, y), _miq_unit_bases(unit) or unit, font=font, fill=fill,
+                      stroke_width=1, stroke_fill=fill)
+            cx += w
+        else:
+            cx += w
+    return draw
+
+
+def render_miq_glass_png(avatar_bytes: bytes | None, text: str, name: str, username: str, *, font_path: str | None = None) -> bytes:
+    """グラスカード風: 鮮やかなメッシュグラデに半透明のすりガラスカード、白の太字本文。
+
+    本文中 の Unicode 絵文字は LINE風と同じ単位機構でカラー表示する
+    (対応しない環境ではその単位を落とす)。
+    """
+    from PIL import Image, ImageDraw, ImageFilter
+
+    W, H = MIQ_NEW_W, MIQ_NEW_H
+    shown_name = _miq_display_text(name) or _miq_display_text(username) or "unknown"
+    shown_user = _miq_display_text(username)
+    shown_text = _miq_display_text(text) or text
+
+    # 背景: 4隅の色を補間したメッシュグラデーション
+    mesh = Image.new("RGB", (2, 2))
+    mesh.putpixel((0, 0), (18, 186, 168))    # 左上 ティール
+    mesh.putpixel((1, 0), (96, 58, 208))     # 右上 紫
+    mesh.putpixel((0, 1), (219, 66, 138))    # 左下 ピンク
+    mesh.putpixel((1, 1), (52, 84, 196))     # 右下 青
+    img = mesh.resize((W, H), Image.BICUBIC)
+
+    # すりガラスカード: 背景をぼかして白を薄く重ね、明るい細枠を付ける
+    card = [64, 104, W - 64, H - 104]
+    region = img.crop(tuple(card)).filter(ImageFilter.GaussianBlur(22)).convert("RGBA")
+    region = Image.alpha_composite(region, Image.new("RGBA", region.size, (255, 255, 255, 58)))
+    mask = Image.new("L", region.size, 0)
+    ImageDraw.Draw(mask).rounded_rectangle([0, 0, region.size[0], region.size[1]], radius=38, fill=255)
+    img.paste(region.convert("RGB"), (card[0], card[1]), mask)
+    frame = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    ImageDraw.Draw(frame).rounded_rectangle(card, radius=38, outline=(255, 255, 255, 190), width=2)
+    img = Image.alpha_composite(img.convert("RGBA"), frame).convert("RGB")
+    d = ImageDraw.Draw(img)
+
+    # カード内左上: 丸アバター + 名前 (白・太字) + @ID (淡色)
+    av_size = 92
+    ax, ay = card[0] + 52, card[1] + 46
+    av = _miq_circle_avatar(avatar_bytes, av_size)
+    img.paste(av, (ax, ay), av)
+    d = ImageDraw.Draw(img)
+    name_font = _miq_load_font(font_path, 34)
+    disp_name = _miq_truncate(d, shown_name, name_font, 760)
+    d.text((ax + av_size + 26, ay + 4), disp_name, font=name_font, fill=(255, 255, 255),
+           stroke_width=1, stroke_fill=(255, 255, 255))
+    if shown_user:
+        d.text((ax + av_size + 26, ay + 52), f"@{shown_user}", font=_miq_load_font(font_path, 23), fill=(235, 238, 250))
+
+    # 本文: 白・太字。Unicode絵文字はカラーでインライン合成する
+    emoji_path = None
+    try:
+        from .miq_line import _miq_unicode_emoji_supported
+
+        if _miq_unicode_emoji_supported():
+            emoji_path = _miq_emoji_font_path()
+    except Exception:
+        logger.debug("MIQ: Unicode絵文字対応の判定に失敗しました", exc_info=True)
+        emoji_path = None
+    body_x, body_w = card[0] + 52, (card[2] - card[0]) - 104
+    body_top, body_h = card[1] + 196, (card[3] - card[1]) - 196 - 44
+    size = 54
+    while True:
+        chain = _miq_fallback_fonts(font_path, size)
+        lines = _miq_glass_wrap(d, shown_text, chain, size, emoji_path, body_w)
+        lh = int(size * 1.42)
+        if len(lines) * lh <= body_h or size <= 24:
+            break
+        size -= 2
+    max_lines = max(1, body_h // lh)
+    if len(lines) > max_lines:
+        lines = lines[:max_lines]
+    ty = body_top
+    for line in lines:
+        d = _miq_glass_draw_line(img, d, body_x, ty, line, size, chain, emoji_path, (255, 255, 255))
+        ty += lh
+    return _miq_save_png(img)

@@ -122,6 +122,22 @@ class MiqPreviewButton(discord.ui.Button):
                  "created_at": now, "avatar_bytes": avatar_bytes, "author_key": "miq-preview-self"},
             ]
             file = await parent.cog._miq_render_line_file(entries, parent.prefs)
+        elif resolved_fmt == "pair":
+            # ペアハート風のプレビューはサンプルの2人の会話で作る
+            avatar_bytes = None
+            try:
+                avatar_bytes = await interaction.user.display_avatar.replace(size=256, format="png").read()
+            except Exception:
+                logger.debug("MIQ: アバターの取得に失敗しました", exc_info=True)
+                avatar_bytes = None
+            entries = [
+                {"name": "サンプル", "username": "sample", "text": "人間の作り方を教えて",
+                 "avatar_bytes": None, "author_key": "miq-preview-other"},
+                {"name": interaction.user.display_name, "username": getattr(interaction.user, "name", ""),
+                 "text": "プレビューです。見た目の確認ができます。",
+                 "avatar_bytes": avatar_bytes, "author_key": "miq-preview-self"},
+            ]
+            file = await parent.cog._miq_render_pair_file(entries, parent.prefs)
         else:
             eff_prefs = dict(parent.prefs)
             eff_prefs["format"] = resolved_fmt
@@ -207,7 +223,7 @@ class MiqSettingsView(discord.ui.View):
         lines = [
             "**見た目**（あなたがMIQを作る時に使われます）",
             f"フォーマット: `{format_label}`",
-            "未設定の既定はランダムです。ランダムでは生成のたびに単体フォーマットから1つ選ばれます（LINE風は選ばれません）。",
+            "未設定の既定はランダムです。ランダムでは生成のたびに単体フォーマットから1つ選ばれます（LINE風・ペアハート風は選ばれません）。",
             f"モノクロ: `{onoff(p['grayscale'])}`　文字色連動: `{onoff(p['color_text'])}`　左右反転: `{onoff(p['flip'])}`",
             f"太字: `{onoff(p['bold'])}`　全面レイアウト: `{onoff(p['full'])}`　GIF出力: `{onoff(p['gif'])}`",
             f"フォント: `{font_label}`　配色: `{theme_label}`",
@@ -219,5 +235,6 @@ class MiqSettingsView(discord.ui.View):
             "GIF出力はアイコンがGIFアニメの時だけ有効です（それ以外はPNG）。",
             "引用 (従来) 以外のフォーマットは常にPNGです（モノクロ等の設定は引用 (従来) 専用）。",
             "LINE風は画像・スタンプ・絵文字の合成にも対応し、画像やスタンプだけのメッセージも変換できます。",
+            "ペアハート風は、対象のメッセージとその返信先の発言を左右に並べてハートでつなぎます（対象が返信でない場合は1人だけのレイアウトになります）。",
         ]
         return discord.Embed(title="MIQ設定", description="\n".join(lines), color=0xFFFFFF)
