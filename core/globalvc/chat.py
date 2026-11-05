@@ -27,7 +27,7 @@ except Exception:  # numpy が無い環境では純Pythonで合成する
 
 from core.globalvc.common import *  # noqa: F401,F403 - shared constants/helpers
 from core.globalvc.rooms import ROOMS, _safe_webhook_username  # noqa: F401
-from core.globalvc.textlink import CHANNEL_TO_ROOM, ROOM_TEXT_LINKS, TextLink, _remove_text_link  # noqa: F401
+from core.globalvc.textlink import CHANNEL_TO_ROOM, ROOM_TEXT_LINKS, TextLink, _persist_text_links, _remove_text_link  # noqa: F401
 
 logger = logging.getLogger("cogs.sio_globalVC")
 
@@ -80,6 +80,7 @@ class ChatMixin:
         link = TextLink(guild_id=r.guild.id, channel_id=channel.id, webhook=webhook)
         ROOM_TEXT_LINKS.setdefault(room_name, []).append(link)
         CHANNEL_TO_ROOM[channel.id] = room_name
+        _persist_text_links()
 
         await r.send(
             f"🌐 このチャンネルをルーム **{room_name}** のグロチャに接続しました！\n"
