@@ -84,7 +84,7 @@ SUPPORT_ACTIONS = [
     app_commands.Choice(name="Quest通知（Discord Orbs）", value="quest_notify"),
     app_commands.Choice(name="レベルアップ通知（EXP）", value="levelup_notify"),
     app_commands.Choice(name="サーバーアシスト設定", value="server_assist"),
-    app_commands.Choice(name="音声トリガー登録", value="voice_trigger"),
+    app_commands.Choice(name="音声トリガー設定・一覧", value="voice_trigger"),
     app_commands.Choice(name="即抜けRTA状態", value="sokunuke_status"),
     app_commands.Choice(name="即抜けRTA計測オン", value="sokunuke_on"),
     app_commands.Choice(name="即抜けRTA計測オフ", value="sokunuke_off"),
@@ -97,19 +97,17 @@ SUPPORT_ACTIONS = [
 SUPPORT_GENRES = {
     "moderation": ("モデレーション", ""),
     "roles": ("ロール・認証", ""),
-    "language": ("言語", ""),
     "logs": ("履歴・ログ", ""),
     "automation": ("自動化・通知", ""),
     "assist": (
         "サーバーアシスト",
         "サーバー運営の細かな設定をまとめた入口",
     ),
-    "event": ("イベント", ""),
     "rta": ("RTA", ""),
 }
 
 # 旧バージョンで保存されたショートカットを新しいジャンルへ移行する。
-SUPPORT_GENRE_ALIASES = {"server": "roles", "notify": "automation", "bumprta": "rta", "sokunuke": "rta"}
+SUPPORT_GENRE_ALIASES = {"server": "roles", "notify": "automation", "bumprta": "rta", "sokunuke": "rta", "language": "automation", "event": "moderation"}
 
 _SUPPORT_ACTION_BY_VALUE = {choice.value: (choice.name, choice.value) for choice in SUPPORT_ACTIONS}
 
@@ -119,13 +117,11 @@ def _support_actions(*values: str) -> list[tuple[str, str]]:
 
 
 SUPPORT_ACTIONS_BY_GENRE = {
-    "moderation": _support_actions("muted", "whisper", "sticky", "clear", "honeypot", "ticket"),
+    "moderation": _support_actions("muted", "whisper", "sticky", "clear", "honeypot", "ticket", "giveaway"),
     "roles": _support_actions("role_bulk", "auth_panel", "role_panel"),
-    "language": _support_actions("language"),
     "logs": _support_actions("vc_log", "message_log", "moderation_log"),
-    "automation": _support_actions("binjou", "auto_react", "levelup_notify", "voice_trigger", "sns_notify", "quest_notify"),
+    "automation": _support_actions("binjou", "auto_react", "levelup_notify", "voice_trigger", "sns_notify", "quest_notify", "language"),
     "assist": _support_actions("server_assist"),
-    "event": _support_actions("giveaway"),
     "rta": _support_actions(
         "bumprta_status", "bumprta_on", "bumprta_off", "bumprta_role", "sokunuke_status", "sokunuke_on",
         "sokunuke_off", "sokunuke_vc_on", "sokunuke_vc_off",

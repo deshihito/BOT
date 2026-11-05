@@ -34,6 +34,8 @@ class ShortcutTest(unittest.IsolatedAsyncioTestCase):
                 ("チャットAIモデルを設定", "ai_default"),
                 ("画像生成AIモデルを設定", "image_default"),
                 ("AI思考強度を設定", "reasoning_default"),
+                # 導線最適化 S7: 1件ジャンル「翻訳」から吸収
+                ("自動翻訳を設定", "translation_settings"),
             ],
         )
         view = ShortcutRootPanel()

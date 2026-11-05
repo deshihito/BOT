@@ -55,7 +55,8 @@ class GenreDescriptionPolicyTest(unittest.TestCase):
         self.assertEqual(GENERAL_GENRES["money"][1], "")
         self.assertEqual(GENERAL_GENRES["rta"][1], "")
         self.assertEqual(GENERAL_GENRES["custom"][1], "")
-        self.assertEqual(GENERAL_GENRES["translation"][1], "")
+        # 導線最適化 S7: 1件ジャンル「翻訳」は「設定・AI」に吸収され、ジャンル自体が無い
+        self.assertNotIn("translation", GENERAL_GENRES)
         self.assertEqual(GENERAL_GENRES["exp"][1], "チャット・VC・generalのEXPとレベル")
         self.assertEqual(GENERAL_GENRES["survival"][1], "メンバーの安否・不在の検知")
         self.assertEqual(GENERAL_GENRES["zeta"][1], "ロールプレイ会話")
@@ -63,8 +64,11 @@ class GenreDescriptionPolicyTest(unittest.TestCase):
         self.assertEqual(GENERAL_GENRES["meme"][1], "画像に上下テキストを入れてmeme画像を作成する")
 
     def test_support_genres(self):
-        for genre in ("moderation", "roles", "language", "logs", "automation", "event", "rta"):
+        for genre in ("moderation", "roles", "logs", "automation", "rta"):
             self.assertEqual(SUPPORT_GENRES[genre][1], "", genre)
+        # 導線最適化 S7: 1件ジャンル「言語」「イベント」は吸収され、ジャンル自体が無い
+        self.assertNotIn("language", SUPPORT_GENRES)
+        self.assertNotIn("event", SUPPORT_GENRES)
         # assist は HCD監査 quick fix #6 で部分列挙（5/22）をやめ、目的文に置換した
         self.assertEqual(
             SUPPORT_GENRES["assist"][1],
