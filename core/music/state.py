@@ -55,6 +55,7 @@ class StateMixin:
                 'current_ctx': None,
                 'is_processing_queue': False,
                 'current_track': None,
+                'current_thumbnail_url': None,
                 'start_time': 0,
                 'elapsed_offset': 0,
                 'retry_count': 0,
@@ -98,6 +99,7 @@ class StateMixin:
         while not state['queue'].empty():
             state['queue'].get_nowait()
         state['current_track'] = None
+        state['current_thumbnail_url'] = None
         state['current_yt_page_url'] = None
         state['elapsed_offset'] = 0
         state['is_paused'] = False

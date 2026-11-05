@@ -92,6 +92,7 @@ class PlaybackMixin:
                     # （例: "videoplayback"）になる場合があるため、保存済みのタイトルを優先する。
                     video_title = filename or info['title']
                     state['current_yt_page_url'] = info['webpage_url']
+                    state['current_thumbnail_url'] = info.get('thumbnail') or None
                     state['current_yt_headers'] = info['http_headers']
                     state['current_track'] = (info['stream_url'], video_title, info['duration'], b62_id, is_yt)
                 except Exception as e:
@@ -103,6 +104,7 @@ class PlaybackMixin:
             else:
                 duration = await self.get_duration(target_input)
                 state['current_yt_page_url'] = None
+                state['current_thumbnail_url'] = None
                 state['current_yt_headers'] = {}
                 state['current_track'] = (target_input, filename, duration, b62_id, is_yt) 
 
@@ -234,6 +236,7 @@ class PlaybackMixin:
             state['is_processing_queue'] = False
             state['current_track'] = None
             state['current_yt_page_url'] = None
+            state['current_thumbnail_url'] = None
             state['current_yt_headers'] = {}
             state['elapsed_offset'] = 0
             state['retry_count'] = 0
@@ -279,6 +282,7 @@ class PlaybackMixin:
 
         state['current_track'] = None
         state['current_yt_page_url'] = None
+        state['current_thumbnail_url'] = None
         state['current_yt_headers'] = {}
         state['elapsed_offset'] = 0
         state['retry_count'] = 0

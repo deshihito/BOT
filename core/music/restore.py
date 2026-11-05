@@ -275,6 +275,7 @@ class RestoreMixin:
             if paused:
                 info = await self.get_yt_info(page_url)
                 state['current_yt_page_url'] = info['webpage_url']
+                state['current_thumbnail_url'] = info.get('thumbnail') or None
                 state['current_yt_headers'] = info['http_headers']
                 state['current_track'] = (info['stream_url'], filename or info['title'],
                                           info['duration'], b62_id, True)
@@ -290,6 +291,7 @@ class RestoreMixin:
                 return False
             if paused:
                 state['current_yt_page_url'] = None
+                state['current_thumbnail_url'] = None
                 state['current_yt_headers'] = {}
                 state['current_track'] = (url, filename, current.get('duration'), b62_id, False)
             else:
