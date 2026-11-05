@@ -227,7 +227,7 @@ class NationCog(commands.Cog):
         if os.path.exists(COIN_PATH):
             file = discord.File(COIN_PATH, filename="COIN.png")
             embed.set_thumbnail(url="attachment://COIN.png")
-        await self._reply(ctx, embed, ephemeral=True, file=file)
+        await self._reply(ctx, embed, file=file)
 
 
 async def setup(bot: commands.Bot):

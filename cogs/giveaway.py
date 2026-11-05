@@ -379,7 +379,7 @@ class GiveawayCog(commands.Cog):
                        winner_dm_message: Optional[app_commands.Range[str, 1, 500]] = None,
                        winner_dm_link: Optional[app_commands.Range[str, 1, 500]] = None):
         if not interaction.response.is_done():
-            await interaction.response.defer(ephemeral=True, thinking=True)
+            await interaction.response.defer(thinking=True)
         channel = channel or interaction.channel
         if cost and self.wallet() is None:
             message = "コインの機能が読み込まれていないため、参加費は設定できません。"
@@ -398,8 +398,7 @@ class GiveawayCog(commands.Cog):
                           role_id=g["role_id"], cost=cost, winner_dm_message=winner_dm_message,
                           winner_dm_link=winner_dm_link)
         await message.edit(view=build_view(message.id, self.data[str(message.id)]))
-        await interaction.followup.send(f"{channel.mention} に抽選を出しました。メッセージの「管理」から終了・再抽選・中止ができます。",
-                                        ephemeral=True)
+        await interaction.followup.send(f"{channel.mention} に抽選を出しました。メッセージの「管理」から終了・再抽選・中止ができます。")
 
 
 async def setup(bot: commands.Bot):

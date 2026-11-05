@@ -183,7 +183,7 @@ class DoubtJoinView(discord.ui.View):
             await interaction.response.send_message(embed=we("募集は締め切られました。"), ephemeral=True)
         elif interaction.user.id not in self.players:
             self.players.append(interaction.user.id)
-            await interaction.response.send_message(embed=we(f"参加しました (現在: {len(self.players)}名)"), ephemeral=True)
+            await interaction.response.send_message(embed=we(f"参加しました (現在: {len(self.players)}名)"))
         else:
             await interaction.response.send_message(embed=we("既に参加しています"), ephemeral=True)
 

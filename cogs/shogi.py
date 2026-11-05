@@ -340,7 +340,7 @@ class JoinView(discord.ui.View):
         if len(s.players) >= 2:
             return await interaction.response.send_message("定員", ephemeral=True)
         s.players[interaction.user.id] = interaction.user
-        await interaction.response.send_message("参加しました", ephemeral=True)
+        await interaction.response.send_message("参加しました")
 
     @discord.ui.button(label="抜ける", style=discord.ButtonStyle.secondary)
     async def leave(self, interaction, button):
@@ -348,7 +348,7 @@ class JoinView(discord.ui.View):
         if s.phase != "recruit" or interaction.user.id not in s.players or interaction.user.id == s.host_id:
             return await interaction.response.send_message("抜けられません", ephemeral=True)
         del s.players[interaction.user.id]
-        await interaction.response.send_message("参加を取り消しました", ephemeral=True)
+        await interaction.response.send_message("参加を取り消しました")
 
 
 class ShogiMoveSelect(discord.ui.Select):

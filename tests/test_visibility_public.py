@@ -151,11 +151,45 @@ class GameStartNoticeSourceTest(unittest.TestCase):
                         f"{rel}:{lineno} の開始通知が ephemeral のままです",
                     )
 
-    def test_join_acks_stay_ephemeral(self):
+    def test_join_acks_are_public(self):
+        # ephemeral第2波方針（2026-11-06）: 参加・退出の成功ACKも公開する。
         text = (ROOT / "cogs/chess.py").read_text(encoding="utf-8")
-        self.assertIn('send_message("参加しました。", ephemeral=True)', text)
+        self.assertIn('send_message("参加しました。")', text)
+        self.assertNotIn('send_message("参加しました。", ephemeral=True)', text)
 
 
 if __name__ == "__main__":
     unittest.main()
 
+
+class Wave2PublicSourceTest(unittest.TestCase):
+    """第2波: 原則公開化と、維持した例外の回帰防止（ソース確認）。"""
+
+    def read(self, rel):
+        return (ROOT / rel).read_text(encoding="utf-8")
+
+    def test_root_panels_are_public(self):
+        self.assertNotIn("defer(ephemeral=True, thinking=True)", self.read("cogs/general.py"))
+        self.assertIn("await interaction.response.send_message(view=as_panel_v2(view))",
+                      self.read("cogs/game.py"))
+        self.assertIn("await interaction.response.send_message(view=as_panel_v2(view))",
+                      self.read("core/voice/hub.py"))
+
+    def test_panels_have_owner_checks(self):
+        for rel in ("core/general/panel.py", "core/voice/hub.py", "cogs/game.py", "cogs/help.py"):
+            self.assertIn("interaction_check", self.read(rel), rel)
+
+    def test_economy_panels_public_with_owner_check(self):
+        for rel in ("cogs/items.py", "cogs/workshop.py", "cogs/circulation.py", "cogs/market.py"):
+            self.assertIn("interaction_check", self.read(rel), rel)
+
+    def test_exceptions_stay_ephemeral(self):
+        # 手札表示（poker の交換後手札・daifugo の手札パネル）は維持
+        self.assertIn("交換後の手札", self.read("cogs/poker.py"))
+        self.assertIn("あなたの手札: {hand}", self.read("cogs/daifugo.py"))
+        # wordwolf の自分のワード確認は維持
+        self.assertIn("あなたのワードは", self.read("cogs/wordwolf.py"))
+        # panel_recovery の開き直しは維持
+        self.assertIn("ephemeral=True", self.read("cogs/panel_recovery.py"))
+        # auth（認証・秘密情報）は維持
+        self.assertIn("ephemeral=True", self.read("core/support/auth.py"))

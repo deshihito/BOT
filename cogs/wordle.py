@@ -149,7 +149,7 @@ class BoardView(discord.ui.View):
         g = self.game
         if g.phase != "playing" or interaction.user.id != g.host.id:
             return await interaction.response.send_message("ギブアップできるのは始めた人だけです。", ephemeral=True)
-        await interaction.response.send_message("ギブアップしました。", ephemeral=True)
+        await interaction.response.send_message("ギブアップしました。")
         g.finished.set()
 
 
@@ -168,7 +168,7 @@ class Wordle(commands.Cog):
         g = WordleGame(channel.id, interaction.guild_id, interaction.user, rng.choice(ANSWERS), mode)
         self.games[channel.id] = g
         await interaction.response.send_message(
-            embed=discord.Embed(description="Wordle を始めました。", color=COLOR), ephemeral=True)
+            embed=discord.Embed(description="Wordle を始めました。", color=COLOR))
         try:
             g.message = await game_panels.replace(channel, "party", embed=g.board_embed(), view=BoardView(self, g))
             self._save_snapshot(g)
@@ -200,7 +200,7 @@ class Wordle(commands.Cog):
         if w == g.answer:
             g.winner = interaction.user
         self._save_snapshot(g)
-        await interaction.response.send_message(f"{''.join(colors)} `{w.upper()}`", ephemeral=True)
+        await interaction.response.send_message(f"{''.join(colors)} `{w.upper()}`")
         if g.message is not None:
             await g.message.edit(embed=g.board_embed())
         if g.over:

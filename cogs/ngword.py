@@ -103,7 +103,7 @@ class JoinView(discord.ui.View):
         if len(g.players) >= MAX_PLAYERS:
             return await interaction.response.send_message(f"定員（{MAX_PLAYERS}人）に達しました。", ephemeral=True)
         g.players[interaction.user.id] = interaction.user
-        await interaction.response.send_message(f"参加しました（{len(g.players)}人）。", ephemeral=True)
+        await interaction.response.send_message(f"参加しました（{len(g.players)}人）。")
 
     @discord.ui.button(label="抜ける", style=discord.ButtonStyle.secondary)
     async def leave(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -111,7 +111,7 @@ class JoinView(discord.ui.View):
         if g.phase != "recruit" or interaction.user.id not in g.players:
             return await interaction.response.send_message("抜けられる募集がありません。", ephemeral=True)
         del g.players[interaction.user.id]
-        await interaction.response.send_message("参加をやめました。", ephemeral=True)
+        await interaction.response.send_message("参加をやめました。")
 
 
 class PlayView(discord.ui.View):

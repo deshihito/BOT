@@ -321,7 +321,7 @@ class JoinView(discord.ui.View):
     async def join(self, interaction: discord.Interaction, button: discord.ui.Button):
         if interaction.user not in self.session.players:
             self.session.players.append(interaction.user)
-            await interaction.response.send_message(embed=self.session.cog._white_embed("参加完了。"), ephemeral=True)
+            await interaction.response.send_message(embed=self.session.cog._white_embed("参加完了。"))
         else:
             await interaction.response.send_message(embed=self.session.cog._white_embed("参加済みです。"), ephemeral=True)
 

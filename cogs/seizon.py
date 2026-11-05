@@ -467,7 +467,7 @@ class FujoSurvival(commands.Cog):
             )
             # record_activity は内部でバックグラウンド化されるため、ここでは即座に戻る
             await self.record_activity(user_id, "COMMAND", "online")
-        await self._reply(interaction, embed, ephemeral=True)
+        await self._reply(interaction, embed)
 
     async def status(self, interaction: discord.Interaction, target: discord.User | None = None):
         target = target or interaction.user
@@ -590,7 +590,7 @@ class FujoSurvival(commands.Cog):
             "1 日分の保護をかけました。1 日まるごと姿を見せなくても、連続生存日数は途切れません。\n次に検知されたときに保護は使い切りになります。",
             0x3498db,
         )
-        await self._reply(interaction, embed, ephemeral=True)
+        await self._reply(interaction, embed)
 
     async def panic_set(self, interaction: discord.Interaction, days: app_commands.Range[int, 1, 365], message: app_commands.Range[str, 1, 1000]):
         user_id = interaction.user.id
@@ -607,14 +607,14 @@ class FujoSurvival(commands.Cog):
             f"{days} 日間反応がなければ、このチャンネルにメッセージを流します。\n\n> {message}",
             0xf1c40f,
         )
-        await self._reply(interaction, embed, ephemeral=True)
+        await self._reply(interaction, embed)
 
     async def panic_disable(self, interaction: discord.Interaction):
         user_id = interaction.user.id
         if not await self._require_registered(interaction, user_id, True):
             return
         await self._update_user(user_id, {"panic_days": None, "panic_message": None, "panic_channel_id": None, "last_panic_at": None})
-        await self._reply(interaction, self.create_simple_embed("警報解除", "失踪警報の設定を解除しました。", 0x95a5a6), ephemeral=True)
+        await self._reply(interaction, self.create_simple_embed("警報解除", "失踪警報の設定を解除しました。", 0x95a5a6))
 
     # --- 見回り ---
 
