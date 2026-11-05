@@ -76,7 +76,7 @@ class EmbedBuilderTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn("embed", keys)
 
     def test_defaults(self):
-        self.assertEqual(embedbuilder.settings(1), {"enabled": False, "channel_id": None})
+        self.assertEqual(embedbuilder.settings(1), {"enabled": False, "channel_id": None, "templates": {}})
 
     def test_parse_color(self):
         self.assertIsNone(embedbuilder.parse_color(""))
