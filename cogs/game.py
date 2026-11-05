@@ -41,9 +41,9 @@ RANKED_GAMES = {"ngword", "shiritori"}
 
 WORDWOLF_LISTS = [("standard", "標準"), ("starail", "崩壊：スターレイル"), ("genshin", "原神")]
 GAME_GENRES = {
-    "party": ("パーティーゲーム", "人狼、ワードウルフ、UNO、ダウトなど"),
-    "solo": ("ミニゲーム", "Wordle、神経衰弱、数字当て、フラッシュ暗算など"),
-    "board": ("ボード・カードゲーム", "大富豪、オセロ、ポーカー、将棋、チェス"),
+    "party": ("パーティーゲーム", "みんなで集まって遊ぶゲーム"),
+    "solo": ("ミニゲーム", "ひとりで遊べるゲーム"),
+    "board": ("ボード・カードゲーム", "2人以上で対戦するゲーム"),
     "adventure": ("アドベンチャー", "ダンジョンを探索します"),
 }
 GAME_GENRE_BY_GAME = {
@@ -394,7 +394,7 @@ class GameHub(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
 
-    @app_commands.command(name="game", description="パーティーゲームとダンジョンのルール確認と開始")
+    @app_commands.command(name="game", description="ゲームの操作パネルを表示します")
     async def game(self, interaction: discord.Interaction):
         view = GameHubView(self)
         await interaction.response.send_message(view=as_panel_v2(view), ephemeral=True)
