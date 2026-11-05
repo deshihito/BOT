@@ -59,12 +59,58 @@ def entry_line(entry: dict) -> str:
     return f"`{clip(entry['usage'], 150)}`{guide}\n{clip(entry['summary'], 200)}{_permission_note(entry)}"
 
 
+# ---------------------------------------------------------------- パネル機能の統合（導線最適化 M6）
+# /help のカテゴリに、パネル側のレジストリアクションを対応付ける対応表。
+# アクション側の情報（ラベル・ジャンル）は action_registry が単一の真実で、
+# ここに手書きのメタは増やさない。対応は (root, genre) の組で、genre=None は
+# そのルート全件。未対応のジャンルが残らないよう、全ジャンルをいずれかの
+# カテゴリに割り当てる（テストで網羅を固定する）。
+ACTION_CATEGORY_MAP: dict[str, list[tuple[str, str | None]]] = {
+    "support": [("general", "survival"), ("support", "automation")],
+    "economy": [("general", "money"), ("general", "rta")],
+    "game": [("game", None)],
+    "voice": [("vc", None)],
+    "fun": [("general", "custom"), ("general", "zeta"), ("general", "miq"),
+            ("general", "meme"), ("general", "exp")],
+    "admin": [("support", "moderation"), ("support", "roles"), ("support", "logs"),
+              ("support", "assist"), ("support", "rta")],
+}
+
+
+def panel_action_lines(category_id: str) -> list[str]:
+    """カテゴリに対応するパネル機能を「開き方」つきの行として生成する。
+
+    レジストリの読み込みに失敗しても /help 自体は壊さない（空リストを返す）。
+    """
+    try:
+        from core import action_registry
+
+        specs = action_registry.default_registry().all()
+    except Exception:
+        return []
+    targets = ACTION_CATEGORY_MAP.get(category_id, [])
+    lines: list[str] = []
+    for root, genre in targets:
+        for spec in specs:
+            if spec.root != root:
+                continue
+            if genre is not None and spec.genre != genre:
+                continue
+            if root in ("game", "vc"):
+                route = f"/{root}"
+            else:
+                route = f"/{root} → {spec.genre_label}"
+            lines.append(f"・{spec.label}（{route}）")
+    return lines
+
+
 # ---------------------------------------------------------------- 埋め込み
 def overview_embed(catalog: dict) -> discord.Embed:
     embed = discord.Embed(
         title="コマンド一覧",
         description=(
             "`/help command:` にコマンド名を入れると詳しい説明が表示されます。\n"
+            "パネル機能は `/quick` で名前から検索して直接実行できます。\n"
             "<:book:1564624329889681418> はガイド（くわしい説明）があるコマンドです\n\n"
             "隠し機能: 会話を追うときは、チャンネルで「今北産業」と送ると直近の会話を最大3行で要約します。"
         ),
@@ -87,6 +133,9 @@ def category_pages(catalog: dict, category_id: str) -> list[discord.Embed]:
     if category["guide"]:
         header += "\n下のメニューの「このカテゴリの説明」でくわしい案内を読めます。"
     lines = [entry_line(e) for e in visible_commands(catalog, category_id)]
+    action_lines = panel_action_lines(category_id)
+    if action_lines:
+        lines = lines + ["**パネル機能**（/quick で名前から直接実行できます）"] + action_lines
     pages: list[list[str]] = [[]]
     size = len(header)
     for line in lines:
