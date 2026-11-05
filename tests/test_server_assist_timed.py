@@ -62,7 +62,7 @@ class TimedSettingsTest(unittest.IsolatedAsyncioTestCase):
     def test_defaults(self):
         self.assertEqual(
             timed.settings(1),
-            {"enabled": False, "channel_id": None, "schedules": []},
+            {"enabled": False, "channel_id": None, "schedules": [], "reminders": []},
         )
 
     def test_parse_time(self):
@@ -179,6 +179,8 @@ class TimedSettingsTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len([item for item in view.children if isinstance(item, discord.ui.Select)]), 2)
         labels = {item.label for item in view.children if isinstance(item, discord.ui.Button)}
         self.assertIn("告知を追加", labels)
+        self.assertIn("リマインダーを追加", labels)
+        self.assertIn("リマインダーを削除", labels)
         self.assertIn("編集", labels)
         self.assertIn("削除", labels)
         self.assertIn("タイマー告知", labels)
