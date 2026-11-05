@@ -225,9 +225,9 @@ class KaraokeCog(commands.Cog):
             return await r.send(embed=we("🛑 カラオケモードを終了しました！"))
         await r.send(embed=we(
             "🎤 **カラオケ機能の使い方**\n"
-            "1. `/voice のパネルからカラオケ開始 lyrics:<お題の歌詞>` : 歌詞をセットして採点＆字幕開始\n"
-            "2. `/voice のパネルからカラオケ採点` : 現在の歌唱スコアを表示\n"
-            "3. `/voice のパネルからカラオケ終了` : カラオケを終了"
+            "1. `/vc のパネルからカラオケ開始 lyrics:<お題の歌詞>` : 歌詞をセットして採点＆字幕開始\n"
+            "2. `/vc のパネルからカラオケ採点` : 現在の歌唱スコアを表示\n"
+            "3. `/vc のパネルからカラオケ終了` : カラオケを終了"
         ))
 
     async def _start(self, r: Responder, target_lyrics: str | None):
@@ -275,7 +275,7 @@ class KaraokeCog(commands.Cog):
         await r.send(embed=we(
             f"🎤 **{vc_channel.name}** でカラオケを開始しました！\n\n"
             f"📜 **お題の歌詞:**\n```\n{target_lyrics}\n```\n"
-            "歌った声がリアルタイムで字幕表示されます。終わったら `/voice のパネルからカラオケ採点` で採点！"
+            "歌った声がリアルタイムで字幕表示されます。終わったら `/vc のパネルからカラオケ採点` で採点！"
         ), skip_localization=True)
 
     async def _score(self, r: Responder):
@@ -435,7 +435,7 @@ class KaraokeCog(commands.Cog):
             await text_channel.send(embed=we(
                 f"🎤 **{getattr(channel, 'name', '')}** でカラオケを再開しました！（Botの再起動による自動再開）\n\n"
                 f"📜 **お題の歌詞:**\n```\n{target_lyrics}\n```\n"
-                "歌った声がリアルタイムで字幕表示されます。終わったら `/voice のパネルからカラオケ採点` で採点！\n"
+                "歌った声がリアルタイムで字幕表示されます。終わったら `/vc のパネルからカラオケ採点` で採点！\n"
                 "※ 採点の履歴はリセットされています。"
             ))
         except Exception:

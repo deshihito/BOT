@@ -195,7 +195,7 @@ class SupportPanelView(discord.ui.View):
         shortcut_item: dict | None = None,
         history_specs: list | None = None,
     ):
-        super().__init__(timeout=300)
+        super().__init__(timeout=600)  # ルートパネル共通の寿命（導線最適化 S10）
         self.cog = cog
 
         saved = (shortcut_item or {}).get("action", {})

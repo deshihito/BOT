@@ -169,10 +169,12 @@ class CategorySelect(discord.ui.Select):
         for category in catalog["categories"]:
             if not visible_commands(catalog, category["id"]):
                 continue
+            # カテゴリ説明は overview_embed のフィールド側だけに寄せる（導線最適化 S4:
+            # 同一画面の二重表示をなくすため、option description には入れない）。
             options.append(discord.SelectOption(
                 label=clip(category["label"], OPTION_TEXT), value=category["id"],
-                description=clip(category["description"], OPTION_TEXT), default=category["id"] == current))
-        super().__init__(placeholder="カテゴリを選ぶ", options=options[:SELECT_OPTIONS], custom_id="panel:help:category", row=0)
+                default=category["id"] == current))
+        super().__init__(placeholder="カテゴリを選択してください", options=options[:SELECT_OPTIONS], custom_id="panel:help:category", row=0)
 
     async def callback(self, interaction: discord.Interaction):
         view: HelpView = self.view
@@ -191,7 +193,7 @@ class FunctionSelect(discord.ui.Select):
             options.append(discord.SelectOption(
                 label=clip(key, OPTION_TEXT), value=key[:OPTION_TEXT],
                 description=clip(entry["summary"], OPTION_TEXT)))
-        super().__init__(placeholder="機能（コマンド）を選ぶ", options=options[:SELECT_OPTIONS], custom_id="panel:help:function", row=1)
+        super().__init__(placeholder="機能（コマンド）を選択してください", options=options[:SELECT_OPTIONS], custom_id="panel:help:function", row=1)
 
     async def callback(self, interaction: discord.Interaction):
         entry = find_command(self.catalog, self.values[0])

@@ -501,10 +501,10 @@ class TranscriptionCog(commands.Cog):
                 f"🎙️ **Logfare {logfare.TRANSCRIPTION_MODEL} 文字起こし実行中**\n"
                 f"ボイスチャンネル: **{session['vc_channel_name']}**\n"
                 f"送信先チャンネル: {session['target_channel_mention']}\n"
-                f"停止コマンド: `/voice のパネルから文字起こし停止`"
+                f"停止コマンド: `/vc のパネルから文字起こし停止`"
             ))
         else:
-            await r.send(embed=we("<:Pause:1561700510447312916> 文字起こし停止中 (`/voice のパネルから文字起こし開始` で開始)"))
+            await r.send(embed=we("<:Pause:1561700510447312916> 文字起こし停止中 (`/vc のパネルから文字起こし開始` で開始)"))
 
     def _build_sender(self, guild_id: int, webhook, notice_channel):
         """文字起こし結果を Webhook へ送るコールバック（開始時・再開時で共用）。"""

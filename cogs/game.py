@@ -41,11 +41,12 @@ GAME_COGS = {
 RANKED_GAMES = {"ngword", "shiritori"}
 
 WORDWOLF_LISTS = [("standard", "標準"), ("starail", "崩壊：スターレイル"), ("genshin", "原神")]
+# ジャンル説明は他ルートの方針に合わせ、ラベルから自明なものは書かない（導線最適化 S8）。
 GAME_GENRES = {
-    "party": ("パーティーゲーム", "みんなで集まって遊ぶゲーム"),
-    "solo": ("ミニゲーム", "ひとりで遊べるゲーム"),
-    "board": ("ボード・カードゲーム", "2人以上で対戦するゲーム"),
-    "adventure": ("アドベンチャー", "ダンジョンを探索します"),
+    "party": ("パーティーゲーム", ""),
+    "solo": ("ミニゲーム", ""),
+    "board": ("ボード・カードゲーム", ""),
+    "adventure": ("アドベンチャー", ""),
 }
 GAME_GENRE_BY_GAME = {
     **{game: "party" for game in ("jinrou", "wordwolf", "uno", "doubt", "ngword", "shiritori", "janken", "babanuki")},
@@ -56,19 +57,13 @@ GAME_GENRE_BY_GAME = {
 
 
 def hub_embed() -> discord.Embed:
-    embed = discord.Embed(
+    # 初画面はタイトル＋1行だけ（導線最適化 S2）。ゲーム名・人数・所要時間は
+    # ゲームセレクトの label/description と詳細画面が担い、一覧テキストは出さない。
+    return discord.Embed(
         title="パーティーゲーム",
-        description="遊びたいゲームを下のメニューから選んでください。\nルールの確認と、このチャンネルでの募集ができます。",
+        description="遊びたいゲームを下のメニューから選んでください。",
         color=HUB_COLOR,
     )
-    for game_id in GAME_ORDER:
-        guide = GAME_GUIDES[game_id]
-        embed.add_field(
-            name=guide["name"],
-            value=f"{guide['summary']}\n <:AGOMUNI:1490254579336613898>{guide['players']}　⏱ {guide['duration']}",
-            inline=False,
-        )
-    return embed
 
 
 def detail_embed(game_id: str) -> discord.Embed:
@@ -103,7 +98,7 @@ async def ranking_embed(guild_id, game_id: str) -> discord.Embed:
 
 class GameGenreSelect(discord.ui.Select):
     def __init__(self, selected: str = None):
-        super().__init__(placeholder="ジャンルを選ぶ", options=[
+        super().__init__(placeholder="ジャンルを選択してください", options=[
             discord.SelectOption(label=label, description=description, value=value, default=value == selected)
             for value, (label, description) in GAME_GENRES.items()
         ], custom_id="panel:game:genre", row=0)
@@ -137,7 +132,7 @@ class GameSelect(discord.ui.Select):
             )
             for g in GAME_ORDER if genre is None or GAME_GENRE_BY_GAME[g] == genre
         ]
-        super().__init__(placeholder="ゲームを選ぶ", options=options, custom_id="panel:game:select", row=1 if genre else 0)
+        super().__init__(placeholder="ゲームを選択してください", options=options, custom_id="panel:game:select", row=1 if genre else 0)
 
     async def callback(self, interaction: discord.Interaction):
         game_id = self.values[0]

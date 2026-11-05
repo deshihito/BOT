@@ -319,7 +319,7 @@ class MemeMixin:
 
 
     async def meme_context(self, interaction: discord.Interaction, message: discord.Message):
-        """メッセージの右クリックメニュー「Make it a Meme」。
+        """メッセージの右クリックメニュー「meme画像にする」。
 
         ベース画像は 添付画像 → embed 画像 → 投稿者のアバター の順で決める。
         アバターを使う場合のみ MIQ の引用拒否を適用する (添付/embed は

@@ -61,12 +61,14 @@ class CoinHelpTest(unittest.TestCase):
 
 class ServerAssistHomeTest(unittest.TestCase):
     def test_home_embed_lists_every_feature(self):
-        from cogs.server_assist import ServerAssistCog, ServerAssistHomeView
+        # 導線最適化 S3 で仕様変更: 機能一覧は AssistFeatureSelect の option が担い、
+        # ホーム embed はタイトル＋説明だけ（同一画面の二重表示をしない）。
+        from cogs.server_assist import ServerAssistHomeView, ServerAssistCog
 
         cog = ServerAssistCog(types.SimpleNamespace())
         self.assertGreater(len(cog.features), 20)
         embed = ServerAssistHomeView(cog).embed()
-        self.assertEqual(len(embed.fields), len(cog.features))
+        self.assertEqual(len(embed.fields), 0)
         self.assertNotIn("ProBot", embed.description)
         self.assertNotIn("下のメニューから機能を選んでください", embed.description)
 
