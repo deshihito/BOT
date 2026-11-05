@@ -41,9 +41,9 @@ RANKED_GAMES = {"ngword", "shiritori"}
 
 WORDWOLF_LISTS = [("standard", "標準"), ("starail", "崩壊：スターレイル"), ("genshin", "原神")]
 GAME_GENRES = {
-    "party": ("パーティーゲーム", "みんなで集まって遊ぶゲーム"),
-    "solo": ("ミニゲーム", "ひとりで遊べるゲーム"),
-    "board": ("ボード・カードゲーム", "2人以上で対戦するゲーム"),
+    "party": ("パーティーゲーム", "人狼、ワードウルフ、UNO、ダウトなど"),
+    "solo": ("ミニゲーム", "Wordle、神経衰弱、数字当て、フラッシュ暗算など"),
+    "board": ("ボード・カードゲーム", "大富豪、オセロ、ポーカー、将棋、チェス"),
     "adventure": ("アドベンチャー", "ダンジョンを探索します"),
 }
 GAME_GENRE_BY_GAME = {
@@ -363,8 +363,7 @@ class GameDetailView(discord.ui.View):
 
     @discord.ui.button(label="ランキング", style=discord.ButtonStyle.primary, row=3, custom_id="panel:game:ranking")
     async def ranking(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.send_message(embed=await ranking_embed(interaction.guild_id, self.game_id),
-                                                ephemeral=True)
+        await interaction.response.send_message(embed=await ranking_embed(interaction.guild_id, self.game_id))
 
     @discord.ui.button(label="レート", style=discord.ButtonStyle.primary, row=4, custom_id="panel:game:rating")
     async def rating(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -395,7 +394,7 @@ class GameHub(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
 
-    @app_commands.command(name="game", description="ゲームの操作パネルを表示します")
+    @app_commands.command(name="game", description="パーティーゲームとダンジョンのルール確認と開始")
     async def game(self, interaction: discord.Interaction):
         view = GameHubView(self)
         await interaction.response.send_message(view=as_panel_v2(view), ephemeral=True)

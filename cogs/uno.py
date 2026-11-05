@@ -601,7 +601,7 @@ class Uno(commands.Cog):
         embed.add_field(name=f"参加者 (1人)", value=f"* <@{interaction.user.id}>", inline=False)
 
         view = JoinView(game, self)
-        await interaction.response.send_message("[+] UNOゲームの募集を開始しました！", ephemeral=True)
+        await interaction.response.send_message("[+] UNOゲームの募集を開始しました！")
         game.active_panel_message = await game_panels.replace(interaction.channel, "party", embed=embed, view=view)
 
         await asyncio.sleep(60)

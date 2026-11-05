@@ -236,8 +236,7 @@ class OdaiShiritori(commands.Cog):
         g.players[interaction.user.id] = interaction.user
         self.games[channel.id] = g
         await interaction.response.send_message(
-            embed=discord.Embed(description=f"お題しりとりの募集を開始しました（{RECRUIT_SECONDS}秒）。", color=COLOR),
-            ephemeral=True)
+            embed=discord.Embed(description=f"お題しりとりの募集を開始しました（{RECRUIT_SECONDS}秒）。", color=COLOR))
         try:
             embed = discord.Embed(
                 title="お題しりとり 参加者募集",

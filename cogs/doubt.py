@@ -249,7 +249,7 @@ class Doubt(commands.Cog):
         channel = interaction.channel
         if channel.id in self.games or channel.id in self.recruiting:
             return await interaction.response.send_message(embed=we("このチャンネルでは既にダウトが進行中です。"), ephemeral=True)
-        await interaction.response.send_message(embed=we("ダウトの募集を開始しました。"), ephemeral=True)
+        await interaction.response.send_message(embed=we("ダウトの募集を開始しました。"))
         await self._recruit(channel, interaction.user.id)
 
     async def _recruit(self, channel, host_id):

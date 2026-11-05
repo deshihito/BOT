@@ -276,7 +276,7 @@ class GeneralCog(
             view = ExpRankingView(interaction.guild_id)
             await view._load_latest()
             return await interaction.response.send_message(
-                view=as_panel_v2(view), ephemeral=True
+                view=as_panel_v2(view)
             )
 
         wallet = self.bot.get_cog("WalletCog")
