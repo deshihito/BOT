@@ -17,7 +17,7 @@ import config
 from core.jinrou.autoplay import logger, AutoplayMixin  # noqa: F401
 from core.jinrou.common import logger, db_api, RATINGS_TABLE, ELO_STARTING_RATING, ELO_BASE_K, ELO_WOLF_WIN_K, BLACK_ROLES_URANAI, BLACK_ROLES_REIBAI, uranai_color, reibai_color, URA_YAKUSHOKU, AHO_FAKE_CANDIDATES, HELP_ROLES, _is_wolf_side  # noqa: F401
 from core.jinrou.game import logger, JinrouGame  # noqa: F401
-from core.jinrou.gameloop import logger, GameLoopMixin  # noqa: F401
+from core.jinrou.gameloop import logger, GameLoopMixin, restore_jinrou_sessions  # noqa: F401
 from core.jinrou.helpers import logger, _guide_role_lookup, _get_display_role, _check_and_reveal_ura_yakushoku  # noqa: F401
 from core.jinrou.lifecycle import logger, LifecycleMixin  # noqa: F401
 from core.jinrou.ratings import logger, calculate_elo_change, can_end_game  # noqa: F401
@@ -73,6 +73,10 @@ class JinrouCog(LifecycleMixin, GameLoopMixin, AutoplayMixin, ResultsMixin, comm
     def __init__(self, bot):
         self.bot = bot
         self.games = {}
+
+    async def restore_after_restart(self):
+        """フェーズ境界スナップショット（core/jinrou_snapshot.py）からの復旧。"""
+        await restore_jinrou_sessions(self)
 
     async def rating_embed(self, user) -> discord.Embed:
         """/game の人狼画面の「レート」から呼ぶ。自分のレートと、レート上位10人。"""

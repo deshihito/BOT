@@ -9,7 +9,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
-from core import action_usage, party_ranking, usage_stats
+from core import action_usage, elo, party_ranking, usage_stats
 from core.emojis import BACK
 from core.game_guides import GAME_GUIDES, GAME_ORDER, guide_for_discord
 from core.panel_v2 import as_panel_v2, edit_panel_v2
@@ -30,12 +30,17 @@ GAME_COGS = {
     "babanuki": "Babanuki",
     "guess": "Guess",
     "flash": "FlashMentalArithmetic",
+    "minesweeper": "Minesweeper",
     "daifugo": "Daifugo",
     "othello": "Othello",
     "poker": "Poker",
     "shogi": "Shogi",
     "chess": "Chess",
     "dungeon": "DungeonCog",
+    "quiz": "Quiz",
+    "bingo": "Bingo",
+    "majority": "Majority",
+    "onenight": "OneNight",
 }
 
 RANKED_GAMES = {"ngword", "shiritori"}
@@ -49,8 +54,8 @@ GAME_GENRES = {
     "adventure": ("アドベンチャー", ""),
 }
 GAME_GENRE_BY_GAME = {
-    **{game: "party" for game in ("jinrou", "wordwolf", "uno", "doubt", "ngword", "shiritori", "janken", "babanuki")},
-    **{game: "solo" for game in ("wordle", "shinkei", "guess", "flash")},
+    **{game: "party" for game in ("jinrou", "wordwolf", "uno", "doubt", "ngword", "shiritori", "janken", "babanuki", "quiz", "bingo", "majority", "onenight")},
+    **{game: "solo" for game in ("wordle", "shinkei", "guess", "flash", "minesweeper")},
     **{game: "board" for game in ("daifugo", "othello", "poker", "shogi", "chess")},
     "dungeon": "adventure",
 }
@@ -83,6 +88,22 @@ def rules_embed(game_id: str) -> discord.Embed:
     return embed
 
 
+async def monthly_embed(guild_id) -> discord.Embed:
+    """今月のゲーム王: その月の全ゲーム合計勝利数の上位（月次シーズン）。"""
+    month = party_ranking.current_month()
+    rows = await party_ranking.shared().monthly_top(guild_id, limit=10) if guild_id else []
+    if rows:
+        medals = {1: "👑", 2: "🥈", 3: "🥉"}
+        lines = [f"{medals.get(i, f'{i}.')} <@{uid}> — {wins}勝" for i, (uid, wins) in enumerate(rows, 1)]
+        text = "\n".join(lines)
+    else:
+        text = "今月はまだ記録がありません。ゲームに勝って最初のゲーム王を目指しましょう。"
+    year, mon = month.split("-")
+    embed = discord.Embed(title=f"今月のゲーム王（{int(year)}年{int(mon)}月）", description=text, color=HUB_COLOR)
+    embed.set_footer(text="月が変わると集計はリセットされます（累積のランキングは各ゲームの画面で見られます）。")
+    return embed
+
+
 async def ranking_embed(guild_id, game_id: str) -> discord.Embed:
     guide = GAME_GUIDES[game_id]
     rows = await party_ranking.shared().top(guild_id, game_id, limit=10) if guild_id else []
@@ -93,6 +114,12 @@ async def ranking_embed(guild_id, game_id: str) -> discord.Embed:
     else:
         text = "まだ記録がありません。"
     embed = discord.Embed(title=f"{guide['name']} のサーバーランキング", description=text, color=HUB_COLOR)
+    if game_id in elo.GAMES and guild_id:
+        rows = elo.shared().top(guild_id, game_id, limit=10)
+        if rows:
+            lines = [f"{i}. <@{uid}> — レート {rating:.0f}（{wins}勝{losses}敗{draws}分）"
+                     for i, (uid, rating, wins, losses, draws) in enumerate(rows, 1)]
+            embed.add_field(name="📈 レート上位（対人戦）", value="\n".join(lines)[:1024], inline=False)
     return embed
 
 
@@ -197,9 +224,16 @@ class GameHubView(discord.ui.View):
         game_select = GameSelect(self.genre)
         game_select.row = offset + 1
         self.add_item(game_select)
+        monthly = discord.ui.Button(label="👑 今月のゲーム王", style=discord.ButtonStyle.primary,
+                                    custom_id="panel:game:monthly", row=offset + 2)
+        monthly.callback = self._monthly_callback
+        self.add_item(monthly)
         if self.shortcut_mode:
             from cogs.general import ShortcutCommitButton
             self.add_item(ShortcutCommitButton("game"))
+
+    async def _monthly_callback(self, interaction: discord.Interaction):
+        await interaction.response.send_message(embed=await monthly_embed(interaction.guild_id))
 
     def shortcut_action(self):
         return None
@@ -258,7 +292,7 @@ class NGModeSelect(discord.ui.Select):
         await edit_panel_v2(interaction, self.view)
 
 
-WORDLE_MODES = (("shared", "みんなで（チャンネルの全員で推理）"), ("solo", "ひとりで（始めた人だけ）"))
+WORDLE_MODES = (("shared", "みんなで（チャンネルの全員で推理）"), ("solo", "ひとりで（始めた人だけ）"), ("daily", "デイリー（今日の問題・全員同じ答え）"))
 
 
 class WordleModeSelect(discord.ui.Select):
@@ -325,6 +359,30 @@ class ChessDifficultySelect(discord.ui.Select):
         await edit_panel_v2(interaction, self.view)
 
 
+class DaifugoRuleSelect(discord.ui.Select):
+    """大富豪のルールオプション（8切り / スペ3返し）の ON/OFF 選択。"""
+
+    def __init__(self, kind: str, selected: bool):
+        self.kind = kind
+        label = "8切り" if kind == "eight_cut" else "スペ3返し"
+        options = [
+            discord.SelectOption(label=f"{label}: ON", value="on", default=selected),
+            discord.SelectOption(label=f"{label}: OFF", value="off", default=not selected),
+        ]
+        super().__init__(placeholder=label, options=options,
+                         custom_id=f"panel:game:daifugo_{kind}", row=1 if kind == "eight_cut" else 2)
+
+    async def callback(self, interaction: discord.Interaction):
+        value = self.values[0] == "on"
+        if self.kind == "eight_cut":
+            self.view.daifugo_eight_cut = value
+        else:
+            self.view.daifugo_spade3 = value
+        for option in self.options:
+            option.default = (option.value == self.values[0])
+        await edit_panel_v2(interaction, self.view)
+
+
 JANKEN_WAGER_CHOICES = (0, 10, 50, 100, 500)
 
 class JankenWagerSelect(discord.ui.Select):
@@ -358,6 +416,8 @@ class GameDetailView(discord.ui.View):
         self.wager = saved.get("wager", 0)
         self.chess_mode = saved.get("chess_mode", "human")
         self.chess_difficulty = saved.get("chess_difficulty", 5)
+        self.daifugo_eight_cut = saved.get("daifugo_eight_cut", True)
+        self.daifugo_spade3 = saved.get("daifugo_spade3", False)
         if game_id == "janken":
             self.add_item(JankenWagerSelect(self.wager))
         if game_id == "wordle":
@@ -370,6 +430,9 @@ class GameDetailView(discord.ui.View):
             self.add_item(WordlistSelect(self.wordlist))
         if game_id == "jinrou":
             self.add_item(JinrouModeSelect(self.jinrou_mode))
+        if game_id == "daifugo":
+            self.add_item(DaifugoRuleSelect("eight_cut", self.daifugo_eight_cut))
+            self.add_item(DaifugoRuleSelect("spade3", self.daifugo_spade3))
         if game_id in ("chess", "othello", "shogi"):
             self.add_item(ChessModeSelect(self.chess_mode) if game_id == "chess" else BoardGameModeSelect(self.chess_mode))
             self.add_item(ChessDifficultySelect(self.chess_difficulty))
@@ -396,7 +459,9 @@ class GameDetailView(discord.ui.View):
                 "options": {"wordlist": self.wordlist, "ng_minutes": self.ng_minutes,
                              "ng_mode": self.ng_mode, "wordle_mode": self.wordle_mode,
                              "jinrou_mode": self.jinrou_mode, "wager": self.wager,
-                             "chess_mode": self.chess_mode, "chess_difficulty": self.chess_difficulty}}
+                             "chess_mode": self.chess_mode, "chess_difficulty": self.chess_difficulty,
+                             "daifugo_eight_cut": self.daifugo_eight_cut,
+                             "daifugo_spade3": self.daifugo_spade3}}
 
     @discord.ui.button(label="ルール", style=discord.ButtonStyle.secondary, row=3, custom_id="panel:game:rules")
     async def rules(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -408,7 +473,9 @@ class GameDetailView(discord.ui.View):
                                   ng_minutes=self.ng_minutes, ng_mode=self.ng_mode,
                                   wordle_mode=self.wordle_mode, jinrou_mode=self.jinrou_mode,
                                   wager=self.wager, chess_mode=self.chess_mode,
-                                  chess_difficulty=self.chess_difficulty)
+                                  chess_difficulty=self.chess_difficulty,
+                                  daifugo_eight_cut=self.daifugo_eight_cut,
+                                  daifugo_spade3=self.daifugo_spade3)
 
     @discord.ui.button(label="ランキング", style=discord.ButtonStyle.primary, row=3, custom_id="panel:game:ranking")
     async def ranking(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -491,6 +558,9 @@ class GameHub(commands.Cog):
         if game_id in ("othello", "shogi"):
             return await cog.start_recruit(interaction, mode=options.get("chess_mode") or "human",
                                            difficulty=options.get("chess_difficulty") or 5)
+        if game_id == "daifugo":
+            return await cog.start_recruit(interaction, eight_cut=options.get("daifugo_eight_cut", True),
+                                           spade3=options.get("daifugo_spade3", False))
         return await cog.start_recruit(interaction)
 
 

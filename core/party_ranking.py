@@ -10,10 +10,16 @@
 """
 import asyncio
 import logging
+from datetime import datetime
 
 log = logging.getLogger(__name__)
 
-KNOWN_GAMES = ("ngword", "shiritori", "wordwolf", "jinrou", "uno", "doubt", "janken", "wordle", "shinkei", "babanuki", "daifugo", "othello", "shogi", "chess", "poker")
+
+def current_month() -> str:
+    """月次シーズンのキー（YYYY-MM）。"""
+    return datetime.now().strftime("%Y-%m")
+
+KNOWN_GAMES = ("ngword", "shiritori", "wordwolf", "jinrou", "uno", "doubt", "janken", "wordle", "shinkei", "babanuki", "daifugo", "othello", "shogi", "chess", "poker", "quiz", "bingo", "majority", "onenight")
 _MISSING = object()
 
 
@@ -37,6 +43,7 @@ class PartyRanking:
         self.client = _default_client() if client is _MISSING else client
         self.timeout = timeout
         self.memory: dict = {}          # (guild_id, game) -> {user_id: 勝利数}
+        self.monthly_memory: dict = {}  # (guild_id, "YYYY-MM") -> {user_id: 全ゲーム合計勝利数}
         self.remote_disabled = False
         self._warned = False
 
@@ -64,6 +71,11 @@ class PartyRanking:
             return
         board = self.memory.setdefault((int(guild_id), game), {})
         board[int(user_id)] = board.get(int(user_id), 0) + 1
+        # 月次シーズン（今月のゲーム王）: 全ゲーム合計を月ごとに併記する。
+        # DB 側は party_game_record_win の差し替え（docs/sql/party_game_monthly_ranking.sql）で
+        # 同じ RPC 呼び出しから月次テーブルにも書くので、リモート経路はこのままでよい。
+        monthly = self.monthly_memory.setdefault((int(guild_id), current_month()), {})
+        monthly[int(user_id)] = monthly.get(int(user_id), 0) + 1
         if not self.remote_enabled:
             return
         try:
@@ -83,6 +95,28 @@ class PartyRanking:
             except Exception as e:  # noqa: BLE001
                 self._failed("ランキングの読み込み", e)
         board = self.memory.get((int(guild_id), game), {})
+        return sorted(board.items(), key=lambda kv: (-kv[1], kv[0]))[:limit]
+
+    async def monthly_top(self, guild_id, limit: int = 10, month: str = None) -> list:
+        """その月の全ゲーム合計勝利数の上位 [(user_id, 勝利数), ...]。
+
+        リモートのビュー party_game_monthly_ranking が読めればそれを使い、
+        読めなければ（未適用・障害）メモリの月次集計を返す。月次ビューの
+        失敗で本体のランキング記録を止めないよう、ここでは remote_disabled
+        には触らない。
+        """
+        month = month or current_month()
+        if self.client is not None and not self.remote_disabled:
+            try:
+                res = await self._run(lambda: self.client.table("party_game_monthly_ranking").select("user_id, wins")
+                                      .eq("guild_id", int(guild_id)).eq("month", month)
+                                      .order("wins", desc=True).limit(limit).execute())
+                rows = [(int(r["user_id"]), int(r["wins"])) for r in (res.data or [])]
+                if rows:
+                    return rows
+            except Exception:  # noqa: BLE001
+                log.debug("party ranking: 月次ビューの読み込みに失敗したのでメモリを使います", exc_info=True)
+        board = self.monthly_memory.get((int(guild_id), month), {})
         return sorted(board.items(), key=lambda kv: (-kv[1], kv[0]))[:limit]
 
 

@@ -3,7 +3,7 @@ import discord
 from core import game_panels
 from discord.ext import commands
 
-from core import party_ranking
+from core import action_usage, party_ranking, usage_stats
 
 party_ranking.register("doubt")
 import asyncio
@@ -132,6 +132,28 @@ class GameControlView(discord.ui.View):
         self.game_engine = game_engine
         self.cog = cog
 
+    @discord.ui.button(label="ダウト！", style=discord.ButtonStyle.danger)
+    async def doubt(self, interaction: discord.Interaction, button: discord.ui.Button):
+        game = self.game_engine
+        if interaction.user.id not in game.hands:
+            return await interaction.response.send_message(embed=we("あなたはゲームに参加していません。"), ephemeral=True)
+        if not game.is_accepting_doubt:
+            return await interaction.response.send_message(embed=we("今はダウトできるタイミングではありません（カードが出てから5秒間だけです）。"), ephemeral=True)
+        await interaction.response.send_message(embed=we("ダウトを宣言しました。"), ephemeral=True)
+        await self.cog.apply_doubt(interaction.channel, game, interaction.user.id)
+
+    @discord.ui.button(label="パス", style=discord.ButtonStyle.secondary)
+    async def pass_turn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        game = self.game_engine
+        if interaction.user.id not in game.hands:
+            return await interaction.response.send_message(embed=we("あなたはゲームに参加していません。"), ephemeral=True)
+        if interaction.user.id != game.current_player_id:
+            return await interaction.response.send_message(embed=we("あなたのターンではありません"), ephemeral=True)
+        if game.is_accepting_doubt:
+            return await interaction.response.send_message(embed=we("ダウト受付中です。受付が終わってからにしてください。"), ephemeral=True)
+        await interaction.response.send_message(embed=we("パスしました。"), ephemeral=True)
+        await self.cog.apply_pass(interaction.channel, game, interaction.user.id)
+
     @discord.ui.button(label="手札確認", style=discord.ButtonStyle.grey)
     async def check_hand(self, interaction: discord.Interaction, button: discord.ui.Button):
         if interaction.user.id not in self.game_engine.hands:
@@ -240,6 +262,10 @@ class Doubt(commands.Cog):
     async def start_game(self, ctx):
         if ctx.channel.id in self.games or ctx.channel.id in self.recruiting:
             return await ctx.send(embed=we("このチャンネルでは既にダウトが進行中です。"))
+        # ハブ経由でなくても利用統計に数える（ハブ側 GameHub.start_game と同じ2系統）
+        await action_usage.record_safely(
+            getattr(ctx, "guild", None) and ctx.guild.id, ctx.author.id, "game:game:doubt")
+        usage_stats.record_action_safely("game:game:doubt")
         await self._recruit(ctx.channel, ctx.author.id)
 
     async def start_recruit(self, interaction: discord.Interaction):
@@ -264,62 +290,74 @@ class Doubt(commands.Cog):
         finally:
             self.recruiting.discard(channel.id)
 
+    async def apply_pass(self, channel, game, user_id):
+        """パスの処理（ボタンとチャット発言の共通）。"""
+        if user_id != game.current_player_id or game.is_accepting_doubt:
+            return False
+        game.pass_count += 1
+        if game.pass_count >= len(game.players):
+            game.next_required_num = 1
+            game.pass_count = 0
+            await channel.send(embed=we("全員がパスしたため、数字が1に戻ります。"))
+        game.next_turn()
+        await self.send_main_screen(channel, game)
+        return True
+
+    async def apply_doubt(self, channel, game, user_id):
+        """ダウトの処理（ボタンとチャット発言の共通）。"""
+        if not game.is_accepting_doubt or user_id not in game.hands:
+            return False
+        game.is_accepting_doubt = False
+        last_player, actual_card = game.field[-1]
+
+        if "JK" in actual_card:
+            is_lie = False
+        else:
+            try:
+                actual_num = int(''.join(filter(str.isdigit, actual_card.split('-')[-1])))
+            except ValueError:
+                actual_num = 0
+            is_lie = (actual_num != game.last_claimed_num)
+
+        embed = discord.Embed(title="審議結果", color=0xFFFFFF)
+        embed.add_field(name="宣言された数字", value=f"{game.last_claimed_num}")
+        embed.add_field(name="実際のカード", value=f"{actual_card}")
+
+        if is_lie:
+            embed.description = f"**嘘でした！**（ダウト成功）\n出した人 <@{last_player}> は場のカードをすべて回収します。"
+            penalty_user = last_player
+        else:
+            embed.description = f"**本当でした！**（ダウト失敗）\nダウトと言った <@{user_id}> がすべて回収します。"
+            penalty_user = user_id
+
+        for _, c in game.field:
+            game.hands[penalty_user].append(c)
+        sort_hand(game.hands[penalty_user])
+        game.field.clear()
+
+        await channel.send(embed=embed)
+
+        for p_id in game.players:
+            if len(game.hands.get(p_id, [])) == 0:
+                await self.declare_winner(channel, game, p_id)
+                return True
+
+        await self.send_main_screen(channel, game)
+        return True
+
     @commands.Cog.listener()
     async def on_message(self, message):
+        # 旧来のチャット発言（「ダウト」「パス」）は互換のため残し、処理はボタンと同じ共通メソッドを使う
         if message.author.bot: return
         game = self.games.get(message.channel.id)
         if not game: return
 
         if message.author.id == game.current_player_id and message.content == "パス" and not game.is_accepting_doubt:
-            game.pass_count += 1
-            if game.pass_count >= len(game.players):
-                game.next_required_num = 1
-                game.pass_count = 0
-                await message.channel.send(embed=we("全員がパスしたため、数字が1に戻ります。"))
-            
-            game.next_turn()
-            await self.send_main_screen(message.channel, game)
+            await self.apply_pass(message.channel, game, message.author.id)
             return
 
         elif "ダウト" in message.content and game.is_accepting_doubt:
-            if message.author.id not in game.hands:
-                return
-
-            game.is_accepting_doubt = False
-            last_player, actual_card = game.field[-1]
-            
-            if "JK" in actual_card:
-                is_lie = False
-            else:
-                try:
-                    actual_num = int(''.join(filter(str.isdigit, actual_card.split('-')[-1])))
-                except ValueError:
-                    actual_num = 0
-                is_lie = (actual_num != game.last_claimed_num)
-            
-            embed = discord.Embed(title="審議結果", color=0xFFFFFF)
-            embed.add_field(name="宣言された数字", value=f"{game.last_claimed_num}")
-            embed.add_field(name="実際のカード", value=f"{actual_card}")
-            
-            if is_lie:
-                embed.description = f"**嘘でした！**（ダウト成功）\n出した人 <@{last_player}> は場のカードをすべて回収します。"
-                penalty_user = last_player
-            else:
-                embed.description = f"**本当でした！**（ダウト失敗）\nダウトと言った <@{message.author.id}> がすべて回収します。"
-                penalty_user = message.author.id
-            
-            for _, c in game.field:
-                game.hands[penalty_user].append(c)
-            sort_hand(game.hands[penalty_user])
-            game.field.clear()
-            
-            await message.channel.send(embed=embed)
-            
-            for p_id in game.players:
-                if len(game.hands.get(p_id, [])) == 0:
-                    return await self.declare_winner(message.channel, game, p_id)
-
-            await self.send_main_screen(message.channel, game)
+            await self.apply_doubt(message.channel, game, message.author.id)
 
 async def setup(bot):
     await bot.add_cog(Doubt(bot))

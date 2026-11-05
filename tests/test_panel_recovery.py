@@ -71,9 +71,10 @@ class CustomIdTest(unittest.TestCase):
         self.assertIn("panel:vc:commit", child_ids(VoicePanelView(None, shortcut_mode=True)))
 
     def test_game_hub(self):
-        # 導線最適化 M3: 初期表示から全ゲームセレクト（panel:game:select）も出す
+        # 導線最適化 M3: 初期表示から全ゲームセレクト（panel:game:select）も出す。
+        # ラウンド2 R5: 月次ランキングボタン（panel:game:monthly）も追加。
         self.assertEqual(child_ids(GameHubView(None)),
-                         {"panel:game:genre", "panel:game:select"})
+                         {"panel:game:genre", "panel:game:select", "panel:game:monthly"})
         view = GameHubView(None)
         view.genre = "party"
         view.refresh()

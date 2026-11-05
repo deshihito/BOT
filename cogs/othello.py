@@ -7,7 +7,7 @@ from pathlib import Path
 
 import discord
 from discord.ext import commands
-from core import game_panels, game_restore, party_ranking
+from core import elo, game_panels, game_restore, party_ranking
 from PIL import Image, ImageDraw, ImageFont
 
 logger = logging.getLogger(__name__)
@@ -107,21 +107,32 @@ def play_move(board, player, row, col):
     return True
 
 
-async def record_result(g) -> None:
-    """対人戦の勝者をサーバー別ランキングに記録する（core/party_ranking.py）。
+async def record_result(g) -> str:
+    """対人戦の結果をランキングと Elo レートに記録し、レート表示の1行を返す。
 
-    CPU戦は対人戦と混ぜないため記録しない。引き分けはどちらにも付けない。
-    時間切れの連続で途中終了した場合も、その時点の石数で勝敗が付く以上は
-    通常の決着と同じく記録する。
+    CPU戦は対人戦と混ぜないため記録しない。勝敗は party_ranking の勝数と
+    core/elo.py のレートの両方へ。引き分けは勝数を付けないが、レートは
+    標準どおり 0.5 同士で計算する。時間切れの連続で途中終了した場合も、
+    その時点の石数で勝敗が付く以上は通常の決着と同じく記録する。
     """
     if g.mode == "cpu":
-        return
+        return ""
     black, white = g.score()
+    black_p = g.players.get(BLACK)
+    white_p = g.players.get(WHITE)
+    if black_p is None or white_p is None:
+        return ""
     if black == white:
-        return
-    winner = g.players.get(BLACK if black > white else WHITE)
-    if winner is not None:
-        await party_ranking.shared().record_win(g.guild_id, winner.id, GAME_ID)
+        result = elo.record_draw_safely(g.guild_id, GAME_ID, black_p.id, white_p.id)
+        if result:
+            return (f"📈 レート（引き分け）: {black_p.mention} {result['a']['rating']:.0f}（{result['a_delta']:+.0f}）"
+                    f" / {white_p.mention} {result['b']['rating']:.0f}（{result['b_delta']:+.0f}）")
+        return ""
+    winner = black_p if black > white else white_p
+    loser = white_p if black > white else black_p
+    await party_ranking.shared().record_win(g.guild_id, winner.id, GAME_ID)
+    result = elo.record_match_safely(g.guild_id, GAME_ID, winner.id, loser.id)
+    return elo.format_match_line(winner, loser, result)
 
 
 def _copy_board(board):
@@ -364,7 +375,9 @@ class Othello(commands.Cog):
         black, white = g.score()
         winner = BLACK if black > white else WHITE
         outcome = "引き分け" if black == white else f"勝者: {self.player_label(g, winner)}"
-        await record_result(g)
+        rating_line = await record_result(g)
+        if rating_line:
+            outcome += f"\n{rating_line}"
         if g.mode == "cpu":
             outcome += "\n（CPU戦はランキングに記録されません）"
         file, image_url = board_attachment(g.board)
