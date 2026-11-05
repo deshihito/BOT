@@ -263,8 +263,17 @@ class VoiceHub(commands.Cog):
 
     @app_commands.command(name="vc", description="音楽・ボイス機能の操作パネルを表示します")
     async def vc(self, interaction: discord.Interaction):
-        view = VoicePanelView(self, owner_id=interaction.user.id)
-        await interaction.response.send_message(view=as_panel_v2(view))
+        await interaction.response.defer(thinking=True)
+        history_specs = []
+        if interaction.guild_id is not None:
+            from core import guild_settings
+            store = guild_settings.get_store()
+            await store.ensure_loaded()
+            history_specs = action_usage.history_panel_specs(
+                store, interaction.guild_id, interaction.user.id, "vc")
+        view = VoicePanelView(self, owner_id=interaction.user.id,
+                              history_specs=history_specs)
+        await interaction.followup.send(view=as_panel_v2(view))
 
     async def _trigger_denied_reason(self, interaction: discord.Interaction) -> str | None:
         """音声トリガーを操作できないときは理由を返す（support.py の権限設定と共通）。"""
@@ -289,7 +298,9 @@ class VoiceHub(commands.Cog):
                     pitch: app_commands.Range[float, -24.0, 24.0] | None = None,
                     buffer_ms: app_commands.Range[float, 20.0, 2000.0] | None = None,
                     max_ms: app_commands.Range[float, 20.0, 4000.0] | None = None,
-                    room: str | None = None, password: str | None = None):
+                    room: str | None = None, password: str | None = None,
+                    name: str | None = None, max_servers: int | None = None,
+                    desc: str | None = None):
         # 利用履歴（よく使う／最近）は入口ここで記録する（失敗しても壊さない）。
         await action_usage.record_safely(
             getattr(interaction, "guild_id", None),
@@ -304,6 +315,12 @@ class VoiceHub(commands.Cog):
                 await cog._panel_impl(Responder(interaction))
             return
         if value in GVC_ROOM_ACTIONS:
+            if value in GVC_ROOM_FORMS and name is not None:
+                # /quick・ショートカット経由（導線最適化 M4）: ParamSpec で集めた
+                # 入力を、パネルのモーダルと同じ form 形式に変換して実行する。
+                form = {"name": name, "max": max_servers,
+                        "password": password or "", "desc": desc or ""}
+                return await self.voice_global_rooms(interaction, value, form)
             return await self.voice_global_rooms(interaction, value)
         if value in {"join", "leave", "status"}:
             return await self.voice_connection(interaction, app_commands.Choice(name=value, value=value))
@@ -372,12 +389,36 @@ class VoiceActionSelect(discord.ui.Select):
         await self.hub.dispatch_voice_action(interaction, value)
 
 
+class VoiceHistorySelect(discord.ui.Select):
+    """「よく使う／最近使った」機能への近道（導線最適化 M5、general/support と同機構）。"""
+
+    def __init__(self, hub: VoiceHub, specs, row: int = 0):
+        self.hub = hub
+        super().__init__(
+            placeholder="よく使う／最近使った機能",
+            options=[discord.SelectOption(label=f"⭐ {spec.label}", value=spec.value)
+                     for spec in specs],
+            custom_id="panel:vc:history",
+            row=row,
+        )
+
+    async def callback(self, interaction: discord.Interaction):
+        value = self.values[0]
+        if value == "global_start":
+            return await interaction.response.send_modal(GlobalRoomModal(self.hub))
+        if value in GVC_ROOM_FORMS:
+            return await interaction.response.send_modal(GvcRoomModal(self.hub, value))
+        await self.hub.dispatch_voice_action(interaction, value)
+
+
 class VoicePanelView(discord.ui.View):
     def __init__(self, hub: VoiceHub, genre: str | None = None, shortcut_mode: bool = False,
-                 shortcut_item: dict | None = None, owner_id: int | None = None):
+                 shortcut_item: dict | None = None, owner_id: int | None = None,
+                 history_specs: list | None = None):
         super().__init__(timeout=600)  # ルートパネル共通の寿命（導線最適化 S10）
         self.hub = hub
         self.owner_id = owner_id
+        self.history_specs = list(history_specs or [])
         saved = (shortcut_item or {}).get("action", {})
         self.genre = genre or saved.get("genre")
         self.action = saved.get("value")
@@ -387,9 +428,17 @@ class VoicePanelView(discord.ui.View):
 
     def refresh(self):
         self.clear_items()
-        self.add_item(VoiceGenreSelect(self.hub, self.genre))
+        offset = 0
+        if self.history_specs:
+            self.add_item(VoiceHistorySelect(self.hub, self.history_specs, row=0))
+            offset = 1
+        genre_select = VoiceGenreSelect(self.hub, self.genre)
+        genre_select.row = offset
+        self.add_item(genre_select)
         if self.genre:
-            self.add_item(VoiceActionSelect(self.hub, self.genre))
+            action_select = VoiceActionSelect(self.hub, self.genre)
+            action_select.row = offset + 1
+            self.add_item(action_select)
         if self.shortcut_mode:
             from cogs.general import ShortcutCommitButton
             self.add_item(ShortcutCommitButton("vc"))

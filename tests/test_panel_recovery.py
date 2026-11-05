@@ -71,7 +71,9 @@ class CustomIdTest(unittest.TestCase):
         self.assertIn("panel:vc:commit", child_ids(VoicePanelView(None, shortcut_mode=True)))
 
     def test_game_hub(self):
-        self.assertEqual(child_ids(GameHubView(None)), {"panel:game:genre"})
+        # 導線最適化 M3: 初期表示から全ゲームセレクト（panel:game:select）も出す
+        self.assertEqual(child_ids(GameHubView(None)),
+                         {"panel:game:genre", "panel:game:select"})
         view = GameHubView(None)
         view.genre = "party"
         view.refresh()

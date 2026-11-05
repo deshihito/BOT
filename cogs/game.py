@@ -143,22 +143,60 @@ class GameSelect(discord.ui.Select):
         return await edit_panel_v2(interaction, as_panel_v2(panel))
 
 
+class GameHistorySelect(discord.ui.Select):
+    """「よく使う／最近遊んだ」ゲームへの近道（導線最適化 M5）。
+
+    履歴はゲーム単位（start_game で記録される game:game:<id>）で、
+    選ぶとそのゲームの詳細画面を直接開く。
+    """
+
+    def __init__(self, specs, row: int = 0):
+        options = []
+        for spec in specs:
+            game_id = spec.value.removeprefix("game:")
+            if game_id in GAME_GUIDES:
+                options.append(discord.SelectOption(
+                    label=f"⭐ {GAME_GUIDES[game_id]['name']}", value=game_id))
+        super().__init__(placeholder="よく使う／最近遊んだゲーム",
+                         options=options, custom_id="panel:game:history", row=row)
+
+    async def callback(self, interaction: discord.Interaction):
+        view = self.view
+        panel = GameDetailView(view.cog, self.values[0], view.shortcut_mode,
+                               view.shortcut_item,
+                               owner_id=getattr(view, "owner_id", None))
+        return await edit_panel_v2(interaction, as_panel_v2(panel))
+
+
 class GameHubView(discord.ui.View):
     def __init__(self, cog, shortcut_mode: bool = False, shortcut_item: dict | None = None,
-                 owner_id: int | None = None):
+                 owner_id: int | None = None, history_specs: list | None = None):
         super().__init__(timeout=600)
         self.cog = cog
         self.owner_id = owner_id
         self.shortcut_mode = shortcut_mode
         self.shortcut_item = shortcut_item
+        self.history_specs = list(history_specs or [])
         self.genre = None
         self.refresh()
 
     def refresh(self):
         self.clear_items()
-        self.add_item(GameGenreSelect(self.genre))
-        if self.genre:
-            self.add_item(GameSelect(self.genre))
+        offset = 0
+        history_select = None
+        if self.history_specs:
+            history_select = GameHistorySelect(self.history_specs, row=0)
+            if history_select.options:
+                self.add_item(history_select)
+                offset = 1
+        genre_select = GameGenreSelect(self.genre)
+        genre_select.row = offset
+        self.add_item(genre_select)
+        # 導線最適化 M3: 既定はジャンルなし全ゲームセレクト1段（18件は上限25に収まる）。
+        # ジャンルセレクトは廃止せず「絞り込み」として残し、選んだ場合だけ一覧を絞る。
+        game_select = GameSelect(self.genre)
+        game_select.row = offset + 1
+        self.add_item(game_select)
         if self.shortcut_mode:
             from cogs.general import ShortcutCommitButton
             self.add_item(ShortcutCommitButton("game"))
@@ -410,8 +448,17 @@ class GameHub(commands.Cog):
 
     @app_commands.command(name="game", description="ゲームの操作パネルを表示します")
     async def game(self, interaction: discord.Interaction):
-        view = GameHubView(self, owner_id=interaction.user.id)
-        await interaction.response.send_message(view=as_panel_v2(view))
+        await interaction.response.defer(thinking=True)
+        history_specs = []
+        if interaction.guild_id is not None:
+            from core import action_usage, guild_settings
+            store = guild_settings.get_store()
+            await store.ensure_loaded()
+            history_specs = action_usage.history_panel_specs(
+                store, interaction.guild_id, interaction.user.id, "game")
+        view = GameHubView(self, owner_id=interaction.user.id,
+                           history_specs=history_specs)
+        await interaction.followup.send(view=as_panel_v2(view))
 
     async def start_game(self, interaction: discord.Interaction, game_id: str, **options):
         # 利用履歴（レジストリの game アクション id は "game:game:<id>"）。
