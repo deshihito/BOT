@@ -40,3 +40,17 @@ ROLE_HIERARCHY_ALREADY_SET = "ロールの管理権限、または自分より�
 
 #: 扱えない位置のロールを設定しようとしたときのエラー。
 ROLE_HIERARCHY_CANNOT_SET = "ロールの管理権限、または自分より上のロールを設定しようとしています。"
+
+
+# ---------------------------------------------------------------- 市場系
+
+#: 市場 cog が読み込まれていないときのエラー（/general の dispatch で共用）。
+MARKET_NOT_LOADED = "市場機能が読み込まれていません。"
+
+#: 売買モーダルの入力が解釈できないときのエラー。
+MARKET_INVALID_AMOUNT = "数量が正しくありません。半角数字で入力してください。"
+
+
+def market_trade_failed(reason: object) -> str:
+    """売買が成立しなかったときの文（理由をそのまま続ける）。"""
+    return f"{FAILED} {reason}"

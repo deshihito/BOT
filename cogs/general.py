@@ -21,6 +21,7 @@ from core.panel_v2 import as_panel_v2, edit_panel_v2
 from core import action_registry, action_usage, ai_omnirush, ai_preferences, ai_provider_router, guild_settings, logfare, shortcuts, usage_stats
 from core.game_guides import GAME_GUIDES, GAME_ORDER
 from core import localization, translation
+from core.messages import MARKET_NOT_LOADED
 from core.libretranslate import LibreTranslateClient, LibreTranslateError
 
 logger = logging.getLogger(__name__)
@@ -59,6 +60,9 @@ GENERAL_ACTIONS = {
     "economy": [
         ("プレイヤー状況", "status"),
         ("コイン送金", "pay"),
+        ("市場", "market"),
+        ("アゴトークンを買う", "token_buy"),
+        ("アゴトークンを売る", "token_sell"),
         ("コイン保有ランキング", "coin_leaderboard"),
         ("bump RTAランキング", "bump_leaderboard"),
         ("up RTAランキング", "up_leaderboard"),
@@ -4940,6 +4944,16 @@ class GeneralCog(commands.Cog):
         fujo = self.bot.get_cog("FujoSurvival")
 
         # ===== 経済系 =====
+        if value in {"market", "token_buy", "token_sell"}:
+            market_cog = self.bot.get_cog("MarketCog")
+            if market_cog is None:
+                return await self._safe_respond(interaction, MARKET_NOT_LOADED)
+            if value == "market":
+                return await market_cog.show_market(interaction)
+            if value == "token_buy":
+                return await market_cog.open_buy(interaction)
+            return await market_cog.open_sell(interaction)
+
         if value in {"pay", "status", "coin_leaderboard", "bump_leaderboard", "up_leaderboard"}:
             if wallet is None:
                 return await self._safe_respond(interaction, "WalletCogが読み込まれていません。")
