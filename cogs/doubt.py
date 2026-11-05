@@ -7,7 +7,11 @@ from core import party_ranking
 
 party_ranking.register("doubt")
 import asyncio
+import logging
 import random
+
+logger = logging.getLogger(__name__)
+
 
 def we(description: str = None, title: str = None) -> discord.Embed:
     """白色embedを生成するヘルパー"""
@@ -173,7 +177,7 @@ class DoubtJoinView(discord.ui.View):
             try:
                 await self.message.edit(view=self)
             except Exception:
-                pass
+                logger.debug("Doubt: 募集パネルのボタン無効化に失敗しました", exc_info=True)
 
     @discord.ui.button(label="参加", style=discord.ButtonStyle.green)
     async def join(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -195,8 +199,8 @@ class Doubt(commands.Cog):
         if game.last_panel_msg:
             try:
                 await game.last_panel_msg.delete()
-            except:
-                pass
+            except Exception:
+                logger.debug("Doubt: 前回パネルの削除に失敗しました", exc_info=True)
 
         embed = discord.Embed(title="Doubt Game", color=0xFFFFFF)
         embed.add_field(name="現在の手番", value=f"<@{game.current_player_id}>", inline=False)
@@ -291,7 +295,7 @@ class Doubt(commands.Cog):
             else:
                 try:
                     actual_num = int(''.join(filter(str.isdigit, actual_card.split('-')[-1])))
-                except:
+                except ValueError:
                     actual_num = 0
                 is_lie = (actual_num != game.last_claimed_num)
             

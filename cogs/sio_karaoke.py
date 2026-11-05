@@ -335,7 +335,7 @@ class KaraokeCog(commands.Cog):
             try:
                 session["vc"].stop_listening()
             except Exception:
-                pass
+                logger.debug("カラオケ: 後片付けの受信停止に失敗しました", exc_info=True)
         return cleanup
 
 

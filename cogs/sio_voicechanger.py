@@ -506,7 +506,7 @@ class VoiceChangerCog(commands.Cog):
                 vc.stop_listening()
                 vc.stop()
             except Exception:
-                pass
+                logger.debug("ボイスチェンジャー: 後片付けの停止に失敗しました", exc_info=True)
         return cleanup
 
 async def setup(bot: commands.Bot):

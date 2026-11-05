@@ -23,6 +23,9 @@ from scipy import signal
 import numpy as np
 
 
+logger = logging.getLogger(__name__)
+
+
 from core.legacy import Responder
 from core.voice_session import VoiceBusy, get_manager
 
@@ -42,7 +45,7 @@ class _RelaySink(voice_recv.AudioSink):
             try:
                 self.dest_vc.send_audio_packet(data.data)
             except Exception:
-                pass
+                logger.debug("ランダム通話: 音声パケットの転送に失敗しました", exc_info=True)
 
     def cleanup(self):
         self.dest_vc = None
@@ -64,7 +67,7 @@ class SaitoRelay(commands.Cog):
                 try:
                     vc.stop_listening()
                 except Exception:
-                    pass
+                    logger.debug("ランダム通話: 後片付けの受信停止に失敗しました", exc_info=True)
             peer_id = self.peers.pop(guild_id, None)
             if peer_id is None:
                 return

@@ -1,4 +1,5 @@
 import asyncio
+import logging
 import math
 import random
 
@@ -6,6 +7,8 @@ import discord
 from discord.ext import commands
 
 import config
+
+logger = logging.getLogger(__name__)
 
 WIN_MULTIPLIER = 2.8
 LOSS_MULTIPLIER = 1.5
@@ -173,7 +176,7 @@ class Guess(commands.Cog):
                 )
             except Exception:
                 # 残高はすでに反映済み。履歴だけ残せなかった場合も結果は有効にする。
-                pass
+                logger.warning("guess: 取引履歴の記録に失敗しました", exc_info=True)
             return actual_delta, new_balance
         return None
 

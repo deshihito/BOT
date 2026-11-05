@@ -1,7 +1,10 @@
 import io
+import logging
 from datetime import datetime
 import discord
 from discord.ext import commands
+
+logger = logging.getLogger(__name__)
 
 ALLOWED_USER_IDS = {
     1320705325686587408,  # ← ここを実際のユーザーIDに置き換える
@@ -133,7 +136,7 @@ class LogViewer(commands.Cog):
             try:
                 await ctx.send("❌ このコマンドは許可されたユーザーのみ使用できます。")
             except Exception:
-                pass
+                logger.debug("権限エラーの通知送信に失敗しました", exc_info=True)
             return
 
         # 引数の数字が不正な場合
@@ -141,14 +144,14 @@ class LogViewer(commands.Cog):
             try:
                 await ctx.send("❌ 行数は数字で指定してください。例: `!logs 50 ERROR`")
             except Exception:
-                pass
+                logger.debug("引数エラーの通知送信に失敗しました", exc_info=True)
             return
 
         # その他のエラー
         try:
             await ctx.send("❌ ログ取得中にエラーが発生しました。")
         except Exception:
-            pass
+            logger.debug("エラー通知の送信に失敗しました", exc_info=True)
         print(f"[LogViewer] logs command error: {error}")
 
 

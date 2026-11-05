@@ -172,7 +172,7 @@ class NationCog(commands.Cog):
                 "エラー", "国づくりのデータを読み書きできませんでした。少し待ってからもう一度試してください。", COLOR_ERROR),
                 ephemeral=True)
         except (discord.HTTPException, commands.CommandError):
-            pass
+            log.debug("nation: エラー通知の送信に失敗しました", exc_info=True)
 
     # --- コマンド ---
 

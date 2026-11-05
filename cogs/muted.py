@@ -202,7 +202,9 @@ class Muted(commands.Cog):
                     try:
                         await ch.set_permissions(role, send_messages=False, add_reactions=False, connect=False)
                         success += 1
-                    except: error += 1
+                    except Exception:
+                        logger.debug("Muted: チャンネルの権限同期に失敗しました", exc_info=True)
+                        error += 1
                 embed.description = f"同期完了 (成功: {success} / 失敗: {error})"
 
             elif select.values[0] == "hide_toggle":
@@ -218,7 +220,9 @@ class Muted(commands.Cog):
                 for ch in interaction.guild.text_channels:
                     try:
                         await ch.set_permissions(role, view_channel=new_view_state, send_messages=False)
-                    except: continue
+                    except Exception:
+                        logger.debug("Muted: チャンネルの非表示設定に失敗しました", exc_info=True)
+                        continue
                 
                 embed.description = "非表示設定を解除しました。" if is_hidden else "全てのチャンネルを非表示にしました。"
 
@@ -265,7 +269,9 @@ class Muted(commands.Cog):
                 try:
                     is_target = (ch.id == isolation_channel.id)
                     await ch.set_permissions(role, view_channel=is_target, send_messages=is_target)
-                except: continue
+                except Exception:
+                    logger.debug("Muted: 隔離用チャンネルの権限設定に失敗しました", exc_info=True)
+                    continue
             embed = discord.Embed(description=f"{isolation_channel.mention} 以外を非表示にしました。", color=self.embed_color)
             return await interaction.followup.send(embed=embed, ephemeral=True)
 
