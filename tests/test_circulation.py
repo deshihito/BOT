@@ -2,10 +2,14 @@
 CirculationCog）のテスト。
 
 見るもの: 各モジュールの保存則（失敗時に残高・所持・状態が不変）、
-キャップ類（採掘の個人/日次/グローバル供給、宝くじの購入上限、
-盗みの上限と対象保護の閾値）、クールダウン（実行者・対象）、
-宝くじの売上→プール→抽選→分配→繰越と払戻率90%、steal のギルド限定と
-ゼロサム性、永続化ラウンドトリップ、レジストリ登録。
+制限類（宝くじの購入上限、盗みの上限と対象保護の閾値）、
+クールダウン（実行者・対象）、宝くじの売上→プール→抽選→分配→繰越と
+払戻率90%、steal のギルド限定とゼロサム性、永続化ラウンドトリップ、
+レジストリ登録。
+
+採掘は 2026-11-06 の再仕様で原典準拠（セッション式＋損失還流プール
+払い）になった。旧仕様の日次キャップ類のテストは、セッション・
+クールダウン・プール clamp のテストに置き換えてある。
 """
 from __future__ import annotations
 
@@ -20,7 +24,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from core import action_registry, items, lottery, mining, steal
+from core import action_registry, economy_pool, items, lottery, mining, steal
 from cogs import wallet as wallet_module
 from cogs.circulation import CirculationCog
 
@@ -50,132 +54,158 @@ def _write_state(tmp: str, name: str, payload: dict) -> Path:
 # 採掘
 # ---------------------------------------------------------------------------
 
-class MiningDefinitionTest(unittest.TestCase):
-    def test_yield_table_is_valid(self):
-        total_weight = 0
-        for yield_items, coins, weight in mining.YIELD_TABLE:
-            self.assertGreater(weight, 0)
-            self.assertGreaterEqual(coins, 0)
-            # 主産物は素材: どの行にも素材が1個以上ある。
-            self.assertGreaterEqual(sum(yield_items.values()), 1)
-            for item_id, count in yield_items.items():
-                self.assertIn(item_id, items.ITEM_DEFS)
-                self.assertGreater(count, 0)
-            total_weight += weight
-        self.assertGreater(total_weight, 0)
+class _StubRng:
+    """採掘用 rng スタブ: randint/random/uniform を決め打ちする。"""
 
-    def test_coin_byproduct_is_small_relative_to_materials(self):
-        total = sum(w for _i, _c, w in mining.YIELD_TABLE)
-        ev_coins = sum(c * w for _i, c, w in mining.YIELD_TABLE) / total
-        ev_materials = sum(sum(i.values()) * w for i, _c, w in mining.YIELD_TABLE) / total
-        # コイン副産物の期待値は素材の想定価値より十分小さい。
-        material_value = sum(
-            sum(items.ITEM_DEFS[i]["price"] * n for i, n in row.items()) * w
-            for row, _c, w in mining.YIELD_TABLE) / total
-        self.assertLess(ev_coins, material_value)
-        self.assertGreater(ev_materials, 0)
+    def __init__(self, ints=(), floats=(), uniform_value=None):
+        self._ints = list(ints)
+        self._floats = list(floats)
+        self._uniform_value = uniform_value
+
+    def randint(self, a, b):
+        return self._ints.pop(0) if self._ints else a
+
+    def random(self):
+        return self._floats.pop(0) if self._floats else 0.99
+
+    def uniform(self, a, b):
+        return self._uniform_value if self._uniform_value is not None else a
+
+
+class MiningDefinitionTest(unittest.TestCase):
+    def test_constants_match_original(self):
+        # 原典 main.py の MiningView の値そのまま。
+        self.assertEqual(mining.COOLDOWN_SECONDS, 60)
+        self.assertEqual(
+            (mining.SESSION_MIN_DIGS, mining.SESSION_MAX_DIGS), (1, 20))
+        self.assertEqual(
+            (mining.BASE_MIN_COINS, mining.BASE_MAX_COINS), (10, 500))
+        self.assertEqual(mining.FAIL_RATE, 0.20)
+        self.assertEqual(mining.JACKPOT_RATE, 0.10)
+        self.assertEqual(
+            (mining.JACKPOT_POOL_MIN_RATE, mining.JACKPOT_POOL_MAX_RATE),
+            (0.01, 0.10))
+
+    def test_old_daily_caps_are_gone(self):
+        # 旧 AGO 仕様（素材テーブル・個人/日次/グローバルキャップ）は廃止。
+        for name in ("YIELD_TABLE", "DAILY_USER_LIMIT", "COOLDOWN_HOURS",
+                     "DAILY_GLOBAL_COIN_CAP", "DAILY_GLOBAL_MATERIAL_CAP"):
+            self.assertFalse(hasattr(mining, name), name)
 
 
 class MiningStoreTest(unittest.TestCase):
-    def test_dig_grants_table_outcome_and_records(self):
+    def test_session_grants_digs_and_dig_pays_base(self):
         with tempfile.TemporaryDirectory() as tmp:
             store = mining.MiningStore(
-                Path(tmp) / "mining.json", rng=_ScriptedRandom([0.0]))
-            result = store.dig("1", now=T0)
-            self.assertEqual(result["items"], {"scrap": 2})
-            self.assertEqual(result["coins"], 0)
+                Path(tmp) / "mining.json",
+                rng=_StubRng(ints=[3, 300], floats=[0.99, 0.99]))
+            self.assertEqual(store.start_session("1", now=T0), 3)
+            result = store.dig("1", 10_000, now=T0)
+            self.assertEqual(result["coins"], 300)
+            self.assertFalse(result["failed"])
+            self.assertFalse(result["jackpot"])
             status = store.status("1", T0)
-            self.assertEqual(status["today_count"], 1)
+            self.assertEqual(status["session_left"], 2)
             self.assertGreater(status["cooldown_remaining"], 0)
 
-    def test_cooldown_blocks_and_preserves_state(self):
+    def test_start_session_keeps_existing_session(self):
         with tempfile.TemporaryDirectory() as tmp:
             store = mining.MiningStore(
-                Path(tmp) / "mining.json", rng=_ScriptedRandom([0.0, 0.0]))
-            store.dig("1", now=T0)
-            with self.assertRaises(items.ItemError):
-                store.dig("1", now=T0 + timedelta(minutes=30))
-            self.assertEqual(store.status("1", T0)["today_count"], 1)
-            result = store.dig("1", now=T0 + timedelta(hours=1))
-            self.assertEqual(result["items"], {"scrap": 2})
-            self.assertEqual(
-                store.status("1", T0 + timedelta(hours=1))["today_count"], 2)
+                Path(tmp) / "mining.json", rng=_StubRng(ints=[5]))
+            self.assertEqual(store.start_session("1", now=T0), 5)
+            # セッションが残っている間は振り直さず、残りをそのまま返す。
+            self.assertEqual(store.start_session("1", now=T0), 5)
 
-    def test_daily_user_limit(self):
+    def test_cooldown_blocks_new_session_and_preserves_state(self):
         with tempfile.TemporaryDirectory() as tmp:
             store = mining.MiningStore(
-                Path(tmp) / "mining.json", rng=random.Random(42))
-            for hour in range(mining.DAILY_USER_LIMIT):
-                store.dig("1", now=T0 + timedelta(hours=hour))
+                Path(tmp) / "mining.json",
+                rng=_StubRng(ints=[1, 100, 2], floats=[0.99, 0.99]))
+            store.start_session("1", now=T0)
+            store.dig("1", 10_000, now=T0)
             with self.assertRaises(items.ItemError):
-                store.dig("1", now=T0 + timedelta(hours=mining.DAILY_USER_LIMIT))
-            status = store.status("1", T0 + timedelta(hours=10))
-            self.assertEqual(status["today_count"], mining.DAILY_USER_LIMIT)
-            # 日が変わればまた掘れる。
-            store.dig("1", now=T0 + timedelta(days=1))
+                store.start_session("1", now=T0 + timedelta(seconds=30))
             self.assertEqual(
-                store.status("1", T0 + timedelta(days=1))["today_count"], 1)
+                store.status("1", T0 + timedelta(seconds=30))["session_left"], 0)
+            # 60秒経てば次のセッションが始まる。
+            self.assertEqual(
+                store.start_session("1", now=T0 + timedelta(seconds=61)), 2)
 
-    def test_global_coin_cap_clamps_to_zero(self):
+    def test_dig_requires_session(self):
         with tempfile.TemporaryDirectory() as tmp:
-            path = _write_state(tmp, "mining.json", {
-                "users": {},
-                "daily": {"date": "2026-01-01",
-                          "coins": mining.DAILY_GLOBAL_COIN_CAP - 10,
-                          "materials": 0},
-            })
-            store = mining.MiningStore(path, rng=_ScriptedRandom([0.99, 0.99]))
-            # コイン80の行を引いても、残量10までしか出ない。
-            first = store.dig("1", now=T0)
-            self.assertEqual(first["coins"], 10)
-            self.assertEqual(first["items"], {"scrap": 2})
-            # コイン枠が尽きた後はコインだけ0になり、素材は出る。
-            second = store.dig("2", now=T0)
-            self.assertEqual(second["coins"], 0)
-            self.assertEqual(second["items"], {"scrap": 2})
-            status = store.status("1", T0)
-            self.assertEqual(status["global_coins_remaining"], 0)
+            store = mining.MiningStore(
+                Path(tmp) / "mining.json", rng=_StubRng())
+            with self.assertRaises(items.ItemError):
+                store.dig("1", 10_000, now=T0)
 
-    def test_global_material_cap_trims_and_then_blocks(self):
+    def test_failed_roll_pays_zero(self):
         with tempfile.TemporaryDirectory() as tmp:
-            path = _write_state(tmp, "mining.json", {
-                "users": {},
-                "daily": {"date": "2026-01-01",
-                          "coins": mining.DAILY_GLOBAL_COIN_CAP,
-                          "materials": mining.DAILY_GLOBAL_MATERIAL_CAP - 1},
-            })
-            store = mining.MiningStore(path, rng=_ScriptedRandom([0.0]))
-            result = store.dig("1", now=T0)
-            self.assertEqual(sum(result["items"].values()), 1)
+            store = mining.MiningStore(
+                Path(tmp) / "mining.json",
+                rng=_StubRng(ints=[2, 400], floats=[0.0, 0.99]))
+            store.start_session("1", now=T0)
+            result = store.dig("1", 10_000, now=T0)
+            self.assertTrue(result["failed"])
             self.assertEqual(result["coins"], 0)
-            # 両方の枠が尽きたら明示的にエラー（産出ゼロ）。
-            with self.assertRaises(items.ItemError):
-                store.dig("2", now=T0)
+
+    def test_jackpot_adds_pool_share(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            store = mining.MiningStore(
+                Path(tmp) / "mining.json",
+                rng=_StubRng(ints=[2, 100], floats=[0.99, 0.05],
+                             uniform_value=0.05))
+            store.start_session("1", now=T0)
+            result = store.dig("1", 100_000, now=T0)
+            self.assertTrue(result["jackpot"])
+            self.assertEqual(result["extra"], 5_000)
+            self.assertEqual(result["coins"], 5_100)
+
+    def test_payment_clamped_to_pool_balance(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            store = mining.MiningStore(
+                Path(tmp) / "mining.json",
+                rng=_StubRng(ints=[2, 500], floats=[0.99, 0.99]))
+            store.start_session("1", now=T0)
+            result = store.dig("1", 120, now=T0)
+            self.assertEqual(result["requested"], 500)
+            self.assertEqual(result["coins"], 120)
 
     def test_rollback_restores_state(self):
         with tempfile.TemporaryDirectory() as tmp:
             store = mining.MiningStore(
-                Path(tmp) / "mining.json", rng=_ScriptedRandom([0.99]))
+                Path(tmp) / "mining.json",
+                rng=_StubRng(ints=[4, 250], floats=[0.99, 0.99]))
+            store.start_session("1", now=T0)
             before = store.status("1", T0)
-            result = store.dig("1", now=T0)
-            self.assertEqual(result["coins"], 80)
+            result = store.dig("1", 10_000, now=T0)
+            self.assertEqual(result["coins"], 250)
             store.rollback_dig("1", result)
-            after = store.status("1", T0)
-            self.assertEqual(after, before)
+            self.assertEqual(store.status("1", T0), before)
 
     def test_persistence_roundtrip(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "mining.json"
-            store = mining.MiningStore(path, rng=_ScriptedRandom([0.0]))
-            store.dig("7", now=T0)
+            store = mining.MiningStore(
+                path, rng=_StubRng(ints=[6, 100], floats=[0.99, 0.99]))
+            store.start_session("7", now=T0)
+            store.dig("7", 10_000, now=T0)
             store.flush()
             loaded = mining.MiningStore(path)
             status = loaded.status("7", T0)
-            self.assertEqual(status["today_count"], 1)
+            self.assertEqual(status["session_left"], 5)
             self.assertGreater(status["cooldown_remaining"], 0)
-            self.assertEqual(
-                status["global_materials_remaining"],
-                mining.DAILY_GLOBAL_MATERIAL_CAP - 2)
+
+    def test_legacy_state_migration_keeps_last_only(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = _write_state(tmp, "mining.json", {
+                "users": {"7": {"last": T0.isoformat(),
+                                "day": "2026-01-01", "count": 3}},
+                "daily": {"date": "2026-01-01", "coins": 5, "materials": 5},
+            })
+            store = mining.MiningStore(path)
+            status = store.status("7", T0)
+            self.assertEqual(status["session_left"], 0)
+            self.assertGreater(status["cooldown_remaining"], 0)
 
 
 # ---------------------------------------------------------------------------
@@ -450,42 +480,64 @@ class CogFlowTest(unittest.TestCase):
             Path(tmp) / "lottery.json", rng=lottery_rng or random.Random(42))
         steal_store = steal.StealStore(
             Path(tmp) / "steal.json", rng=steal_rng or random.Random(42))
+        economy_store = economy_pool.EconomyPoolStore(
+            Path(tmp) / "economy_pool.json")
         bot = _FakeBot({"WalletCog": wallet})
         cog = CirculationCog(
             bot, mining_store=mining_store, lottery_store=lottery_store,
             steal_store=steal_store, item_store=item_store,
-            balance_reader=lambda uid: wallet.balances.get(uid, 0))
+            balance_reader=lambda uid: wallet.balances.get(uid, 0),
+            economy_store=economy_store)
         return cog, item_store
 
     # ---- 採掘
-    def test_mining_flow_grants_items_and_coin_byproduct(self):
+    def test_mining_flow_pays_from_pool(self):
         with tempfile.TemporaryDirectory() as tmp:
             wallet = _FakeWallet({})
-            cog, item_store = self._cog(tmp, wallet, mining_rng=_ScriptedRandom([0.99]))
+            cog, _store = self._cog(
+                tmp, wallet,
+                mining_rng=_StubRng(ints=[3, 300], floats=[0.99, 0.99]))
+            cog.economy_store.add_loss(10_000)  # プール 7,000
             message = asyncio.run(cog.execute_mining(1, now=T0))
-            self.assertIn("採掘しました", message)
-            self.assertEqual(item_store.count("1", "scrap"), 2)
-            # 新規ユーザーは初期残高10＋副産物80。
-            self.assertEqual(wallet.balances["1"], wallet_module.NEW_USER_BALANCE + 80)
+            self.assertIn("300 AGO を採掘しました", message)
+            # 新規ユーザーは初期残高10＋採掘300。支払いはプールから。
+            self.assertEqual(wallet.balances["1"], wallet_module.NEW_USER_BALANCE + 300)
+            self.assertEqual(cog.economy_store.pool_balance(), 7_000 - 300)
+            self.assertEqual(cog.mining_store.status("1", T0)["session_left"], 2)
+
+    def test_mining_flow_empty_pool_digs_nothing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            wallet = _FakeWallet({})
+            cog, _store = self._cog(tmp, wallet, mining_rng=_StubRng(ints=[3]))
+            message = asyncio.run(cog.execute_mining(1, now=T0))
+            self.assertIn("プールにコインがありません", message)
+            self.assertNotIn("1", wallet.balances)
+            # セッションは始まっているが回数は消費されていない。
+            self.assertEqual(cog.mining_store.status("1", T0)["session_left"], 3)
 
     def test_mining_flow_rolls_back_when_coin_credit_fails(self):
         with tempfile.TemporaryDirectory() as tmp:
             wallet = _FakeWallet({}, fail_credit=True)
-            cog, item_store = self._cog(tmp, wallet, mining_rng=_ScriptedRandom([0.99]))
+            cog, _store = self._cog(
+                tmp, wallet,
+                mining_rng=_StubRng(ints=[3, 300], floats=[0.99, 0.99]))
+            cog.economy_store.add_loss(10_000)
             message = asyncio.run(cog.execute_mining(1, now=T0))
             self.assertIn("失敗", message)
-            status = cog.mining_store.status("1", T0)
-            self.assertEqual(status["today_count"], 0)
-            self.assertEqual(status["cooldown_remaining"], 0)
-            self.assertEqual(item_store.count("1", "scrap"), 0)
+            # プールは払い戻され、セッション回数も戻る。
+            self.assertEqual(cog.economy_store.pool_balance(), 7_000)
+            self.assertEqual(cog.mining_store.status("1", T0)["session_left"], 3)
 
     def test_mining_flow_cooldown_message(self):
         with tempfile.TemporaryDirectory() as tmp:
             wallet = _FakeWallet({})
-            cog, _store = self._cog(tmp, wallet, mining_rng=_ScriptedRandom([0.0, 0.0]))
+            cog, _store = self._cog(
+                tmp, wallet,
+                mining_rng=_StubRng(ints=[1, 100], floats=[0.99, 0.99]))
+            cog.economy_store.add_loss(10_000)
             asyncio.run(cog.execute_mining(1, now=T0))
             message = asyncio.run(cog.execute_mining(1, now=T0))
-            self.assertIn("1時間に1回まで", message)
+            self.assertIn("クールタイム中", message)
 
     # ---- 宝くじ
     def test_lottery_buy_flow(self):

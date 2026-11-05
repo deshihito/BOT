@@ -21,7 +21,8 @@ import discord
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from core import action_registry, gambling, items, lottery, market, mining, steal, workshop
+from core import (action_registry, economy_pool, gambling, items, lottery,
+                  market, mining, steal, workshop)
 from cogs import wallet as wallet_module
 from cogs.circulation import CirculationCog
 from cogs.gambling import GamblingCog
@@ -117,6 +118,7 @@ def _build(tmp: str, wallet: _FakeWallet):
     lottery_store = lottery.LotteryStore(Path(tmp) / "lottery.json", rng=random.Random(42))
     steal_store = steal.StealStore(Path(tmp) / "steal.json", rng=random.Random(42))
     gambling_store = gambling.GamblingStore(Path(tmp) / "gambling.json", rng=random.Random(42))
+    economy_store = economy_pool.EconomyPoolStore(Path(tmp) / "economy_pool.json")
     bot = _FakeBot({})
     general = _FakeGeneral()
     bot._cogs.update({
@@ -128,7 +130,8 @@ def _build(tmp: str, wallet: _FakeWallet):
         "CirculationCog": CirculationCog(
             bot, mining_store=mining_store, lottery_store=lottery_store,
             steal_store=steal_store, item_store=item_store,
-            balance_reader=lambda uid: wallet.balances.get(uid, 0)),
+            balance_reader=lambda uid: wallet.balances.get(uid, 0),
+            economy_store=economy_store),
         "GamblingCog": GamblingCog(bot, store=gambling_store),
         "GeneralCog": general,
     })
@@ -140,7 +143,7 @@ def _build(tmp: str, wallet: _FakeWallet):
         bot=bot, general=general, panel_cog=panel_cog,
         item_store=item_store, market_store=market_store,
         workshop_store=workshop_store, lottery_store=lottery_store,
-        mining_store=mining_store)
+        mining_store=mining_store, economy_store=economy_store)
 
 
 def _seed(env) -> None:
@@ -180,7 +183,8 @@ class StatusAggregationTest(unittest.TestCase):
             self.assertEqual(
                 status["lottery_pool"], int(env.lottery_store.current_round()["pool"]))
             self.assertTrue(status["mining_ready"])
-            self.assertEqual(status["mining_today"], 0)
+            self.assertEqual(status["mining_session_left"], 0)
+            self.assertEqual(status["mining_pool"], 0)
             self.assertIsNone(status["session_kind"])
 
     def test_status_embed_shows_key_values(self):
@@ -296,6 +300,7 @@ class DirectExecutionTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             wallet = _FakeWallet({})
             env = _build(tmp, wallet)
+            env.economy_store.add_loss(100_000)  # プールにチャージしておく
             view = MoneyPanelView(env.panel_cog, 1)
             view.message = _FakeMessage()
             interaction = _FakeInteraction()
@@ -304,8 +309,8 @@ class DirectExecutionTest(unittest.TestCase):
             self.assertEqual(len(interaction.followup.sent), 1)
             sent_text = interaction.followup.sent[0][0][0]
             self.assertIn("採掘", sent_text)
-            # 実行結果がアイテムに反映され、パネルが更新される。
-            self.assertGreater(env.item_store.inventory("1").get("scrap", 0), 0)
+            # 掘った分だけプールが減り、パネルが更新される。
+            self.assertLess(env.economy_store.pool_balance(), 70_000)
             self.assertEqual(len(view.message.edits), 1)
             status = asyncio.run(env.panel_cog.collect_status(1))
             self.assertFalse(status["mining_ready"])

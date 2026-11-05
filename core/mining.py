@@ -1,17 +1,30 @@
 # -*- coding: utf-8 -*-
-"""採掘（mining 再仕様）の単一の置き場。
+"""採掘（mining）の単一の置き場。
 
-パンBot 資産移植 Phase 4（構成案 第4層）。原典の mining は短い
-クールダウンでコインが直接湧くボタンだった。再仕様では主産物を
-Phase 2/3 の合成素材（スクラップ／金属片、レアで回路片）に寄せ、
-コインは副産物として小さく抑える。新規創出は「日次グローバル供給
-キャップ（コイン・素材それぞれ）＋個人の1日回数上限」で縛り、
-キャップに達した資源はその日は産出ゼロになる（状態として明示する）。
+パンBot 資産移植 Phase 4 で AGO 流に組み直したものを、2026-11-06 の
+ユーザー指示（「軸足は本家に合わせて」＋「マイニングの核は損失還流
+プール」）で原典準拠に再仕様した。原典（main.py の MiningView）の形:
 
-保存は core/workshop.py と同じ流儀: 専用 JSON（既定 data/mining.json、
-環境変数 MINING_DATA_PATH で変更可）にメモリ主体＋バッチフラッシュ
-＋原子差し替え。素材の実増減は ItemStore 経由、コインの実移動は
-呼び出し側（cogs/circulation.py）が wallet の安全な経路で行う。
+- パネル（セッション）を開くと、そのセッションで掘れる回数が
+  1〜20 回の抽選で決まる。セッション開始のクールダウンは60秒
+- 1掘りの産出はコイン 10〜500（基本額の抽選）。20% で失敗して0
+- 10% で「大量採掘」が発動し、プール残高の 1〜10% が上乗せされる
+- コインは新規創出ではなく共有プール（core/economy_pool.py）から
+  支払われ、プールにある分までしか出ない。プールは経済系の損失の
+  還流でチャージされる（還流の発生源は economy_pool 側を参照）
+
+旧 AGO 仕様（素材中心・コインEV約4・個人10回/日・日次グローバル
+供給キャップ）は原典の手触りと別物だったため廃止した。素材の供給は
+ショップ・宝箱・工房が担う。安全弁として残したのは「支払いは
+プール残高の範囲内」という原典自身の制約だけで、日次キャップ類は
+置かない（プールが枯れれば掘れなくなるのが原典の調整弁）。
+
+このモジュールが持つのはセッション状態・クールダウン・産出の抽選
+まで。プールの支払いと wallet への反映は呼び出し側
+（cogs/circulation.py）が economy_pool と wallet の経路で行い、
+失敗したら巻き戻す。保存は core/workshop.py と同じ流儀: 専用 JSON
+（既定 data/mining.json、環境変数 MINING_DATA_PATH で変更可）に
+メモリ主体＋バッチフラッシュ＋原子差し替え。
 """
 from __future__ import annotations
 
@@ -22,51 +35,45 @@ import os
 import random
 import threading
 import time
-from datetime import datetime, timedelta
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from core.items import ITEM_DEFS, JST, ItemError
+from core.items import JST, ItemError
 
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
-# 経済定数（Phase 4 の暫定値。価格・上限の絶対値は AGO のコイン分布の
-# 実測後に調整する）
+# 経済定数（原典準拠の値。絶対額は AGO のコイン分布の実測後に調整する）
 # ---------------------------------------------------------------------------
 
-#: 採掘のクールダウン（秒）。原典の60秒はグローバル規模では連打に
-#: なるため1時間に伸ばす。
-COOLDOWN_SECONDS = 3600
+#: セッション開始のクールダウン（秒）。原典 MINING_COOLDOWN = 60。
+COOLDOWN_SECONDS = 60
 
-#: 1人あたりの1日の採掘回数上限。
-DAILY_USER_LIMIT = 10
+#: 1セッションで掘れる回数の抽選範囲（原典 random.randint(1, 20)）。
+SESSION_MIN_DIGS = 1
+SESSION_MAX_DIGS = 20
 
-#: 1日に全ユーザー合計で新規創出してよいコイン副産物の上限（AGO）。
-DAILY_GLOBAL_COIN_CAP = 50_000
+#: 1掘りの基本産出（コイン、原典 random.randint(10, 500)）。
+BASE_MIN_COINS = 10
+BASE_MAX_COINS = 500
 
-#: 1日に全ユーザー合計で新規創出してよい素材の上限（個数）。
-DAILY_GLOBAL_MATERIAL_CAP = 20_000
+#: 失敗率（原典: 0.8 の確率で成功＝20% で産出0）。
+FAIL_RATE = 0.20
 
-#: 採掘1回の産出テーブル: (素材 {item_id: 個数}, コイン副産物, 重み)。
-#: 主産物は素材で、コインは一部の行にだけ付く小さな副産物に抑える。
-#: 期待値: 素材 約2.0個/回、コイン 約4 AGO/回（上限まで掘っても
-#: 1人あたり素材 約20個・コイン 約40 AGO/日 が期待値ベースの目安）。
-YIELD_TABLE: tuple[tuple[dict[str, int], int, int], ...] = (
-    ({"scrap": 2}, 0, 40),
-    ({"scrap": 3}, 0, 25),
-    ({"metal_piece": 1}, 0, 20),
-    ({"metal_piece": 1, "scrap": 1}, 30, 8),
-    ({"circuit_piece": 1}, 0, 5),
-    ({"scrap": 2}, 80, 2),
-)
+#: 大量採掘の発動率（原典 lc = 0.1）。
+JACKPOT_RATE = 0.10
+
+#: 大量採掘の上乗せ（プール残高に対する割合、原典 uniform(0.01, 0.1)）。
+JACKPOT_POOL_MIN_RATE = 0.01
+JACKPOT_POOL_MAX_RATE = 0.10
 
 FLUSH_EVERY_EVENTS = 20
 FLUSH_INTERVAL_SECONDS = 60.0
 
 
 def _empty_state() -> dict[str, Any]:
-    return {"users": {}, "daily": {"date": None, "coins": 0, "materials": 0}}
+    return {"users": {}}
 
 
 def _clean_state(raw: Any) -> dict[str, Any]:
@@ -79,23 +86,13 @@ def _clean_state(raw: Any) -> dict[str, Any]:
             if not isinstance(entry, dict):
                 continue
             last = entry.get("last")
-            day = entry.get("day")
-            count = entry.get("count")
+            left = entry.get("session_left")
             state["users"][str(uid)] = {
+                # 旧仕様の保存（last/day/count）からは last だけ引き継ぐ。
                 "last": last if isinstance(last, str) else None,
-                "day": day if isinstance(day, str) else None,
-                "count": int(count) if isinstance(count, int) and count > 0 else 0,
+                "session_left": (
+                    int(left) if isinstance(left, int) and left > 0 else 0),
             }
-    daily = raw.get("daily")
-    if isinstance(daily, dict):
-        date = daily.get("date")
-        coins = daily.get("coins")
-        materials = daily.get("materials")
-        state["daily"] = {
-            "date": date if isinstance(date, str) else None,
-            "coins": int(coins) if isinstance(coins, int) and coins > 0 else 0,
-            "materials": int(materials) if isinstance(materials, int) and materials > 0 else 0,
-        }
     return state
 
 
@@ -107,7 +104,7 @@ def default_path() -> Path:
 
 
 class MiningStore:
-    """採掘のクールダウン・個人回数・日次グローバル供給量と JSON 保存。"""
+    """採掘セッション（残り回数）・クールダウンの状態と JSON 保存、産出抽選。"""
 
     def __init__(
         self,
@@ -161,14 +158,7 @@ class MiningStore:
     # ------------------------------------------------------------------ 状態参照
     def _user_locked(self, user_id: str) -> dict[str, Any]:
         return self._state["users"].setdefault(
-            str(user_id), {"last": None, "day": None, "count": 0})
-
-    def _daily_locked(self, today: str) -> dict[str, Any]:
-        daily = self._state["daily"]
-        if daily["date"] != today:
-            daily = {"date": today, "coins": 0, "materials": 0}
-            self._state["daily"] = daily
-        return daily
+            str(user_id), {"last": None, "session_left": 0})
 
     def _cooldown_remaining_locked(self, user: dict[str, Any], now: datetime) -> float:
         if not user["last"]:
@@ -180,90 +170,94 @@ class MiningStore:
         return max(0.0, COOLDOWN_SECONDS - (now - last).total_seconds())
 
     def status(self, user_id: str, now: datetime | None = None) -> dict[str, Any]:
-        """表示用: クールダウン残り・今日の回数・グローバル供給の残量。"""
+        """表示用: クールダウン残りと、進行中セッションの残り回数。"""
         now = now or datetime.now(JST)
-        today = now.date().isoformat()
         with self._lock:
             user = self._user_locked(str(user_id))
-            daily = self._daily_locked(today)
-            count = int(user["count"]) if user["day"] == today else 0
             return {
                 "cooldown_remaining": self._cooldown_remaining_locked(user, now),
-                "today_count": count,
-                "daily_limit": DAILY_USER_LIMIT,
-                "global_coins_remaining": max(
-                    0, DAILY_GLOBAL_COIN_CAP - int(daily["coins"])),
-                "global_materials_remaining": max(
-                    0, DAILY_GLOBAL_MATERIAL_CAP - int(daily["materials"])),
+                "session_left": int(user["session_left"]),
+                "session_max": SESSION_MAX_DIGS,
             }
 
-    # ------------------------------------------------------------------ 採掘
-    def _roll_yield(self) -> tuple[dict[str, int], int]:
-        total = sum(weight for _items, _coins, weight in YIELD_TABLE)
-        pick = self._rng.random() * total
-        cumulative = 0.0
-        for items, coins, weight in YIELD_TABLE:
-            cumulative += weight
-            if pick < cumulative:
-                return dict(items), int(coins)
-        items, coins, _w = YIELD_TABLE[-1]
-        return dict(items), int(coins)
+    # ------------------------------------------------------------------ セッション
+    def start_session(self, user_id: str, now: datetime | None = None) -> int:
+        """セッションを開始し、掘れる回数を返す。
 
-    def dig(self, user_id: str, now: datetime | None = None) -> dict[str, Any]:
-        """採掘を1回実行し、確定した産出を返す（記録まで済ませる）。
-
-        クールダウン中・個人の回数上限は ItemError（状態は不変）。
-        グローバル供給キャップに達した資源は産出が0に clamp され、
-        両方の資源が尽きている場合は ItemError で明示する。
-        コインの実移動が呼び出し側で失敗した場合は rollback_dig で戻す。
-        戻り値: {"items": {item_id: 個数}, "coins": int,
-                 "user_before": ..., "daily_before": ...}（後2つは rollback 用）
+        既にセッションが残っていれば、その残り回数をそのまま返す
+        （振り直さない）。クールダウン中は ItemError（状態は不変）。
         """
         now = now or datetime.now(JST)
-        today = now.date().isoformat()
         uid = str(user_id)
         with self._lock:
             user = self._user_locked(uid)
-            user_before = copy.deepcopy(user)
-            daily = self._daily_locked(today)
-            daily_before = copy.deepcopy(daily)
+            if int(user["session_left"]) > 0:
+                return int(user["session_left"])
             remaining = self._cooldown_remaining_locked(user, now)
             if remaining > 0:
-                minutes = int(remaining // 60) + (1 if remaining % 60 else 0)
-                raise ItemError(f"採掘は1時間に1回までです。あと約{minutes}分で掘れます。")
-            count = int(user["count"]) if user["day"] == today else 0
-            if count >= DAILY_USER_LIMIT:
+                seconds = int(remaining) + (1 if remaining % 1 else 0)
                 raise ItemError(
-                    f"今日の採掘は上限（{DAILY_USER_LIMIT}回）に達しています。")
-            coins_room = DAILY_GLOBAL_COIN_CAP - int(daily["coins"])
-            materials_room = DAILY_GLOBAL_MATERIAL_CAP - int(daily["materials"])
-            if coins_room <= 0 and materials_room <= 0:
-                raise ItemError(
-                    "本日の全体の産出上限に達しています。明日また掘れます。")
-            items, coins = self._roll_yield()
-            coins = max(0, min(coins, coins_room))
-            granted: dict[str, int] = {}
-            budget = max(0, materials_room)
-            for item_id, amount in items.items():
-                take = min(int(amount), budget)
-                if take > 0:
-                    granted[item_id] = take
-                    budget -= take
-            total_materials = sum(granted.values())
+                    f"クールタイム中です。あと約{seconds}秒で掘れます。")
+            digs = self._rng.randint(SESSION_MIN_DIGS, SESSION_MAX_DIGS)
             user["last"] = now.astimezone(JST).isoformat()
-            user["day"] = today
-            user["count"] = count + 1
-            daily["coins"] = int(daily["coins"]) + coins
-            daily["materials"] = int(daily["materials"]) + total_materials
+            user["session_left"] = digs
             self._mark_dirty()
-            return {
-                "items": granted, "coins": coins,
-                "user_before": user_before, "daily_before": daily_before,
-            }
+            return digs
+
+    # ------------------------------------------------------------------ 産出抽選
+    def _roll(self, pool_balance: int) -> dict[str, Any]:
+        """1掘り分の産出を抽選する（状態は変えない）。
+
+        原典の順序どおり: 基本額を抽選し、失敗なら基本額は0。
+        大量採掘は独立に抽選し、発動すればプール残高の割合が
+        基本額とは別に上乗せされる（失敗した掘りでも発動する）。
+        支払い要求額はプール残高で clamp する（ある分まで）。
+        """
+        base = self._rng.randint(BASE_MIN_COINS, BASE_MAX_COINS)
+        failed = self._rng.random() < FAIL_RATE
+        base_amount = 0 if failed else base
+        jackpot = self._rng.random() < JACKPOT_RATE
+        extra = 0
+        if jackpot:
+            rate = self._rng.uniform(JACKPOT_POOL_MIN_RATE, JACKPOT_POOL_MAX_RATE)
+            extra = max(1, int(pool_balance * rate)) if pool_balance > 0 else 0
+        requested = base_amount + extra
+        return {
+            "coins": max(0, min(requested, max(0, int(pool_balance)))),
+            "requested": requested,
+            "base": base_amount,
+            "failed": failed,
+            "jackpot": jackpot and extra > 0,
+            "extra": extra,
+        }
+
+    def dig(self, user_id: str, pool_balance: int,
+            now: datetime | None = None) -> dict[str, Any]:
+        """セッションの1回分を消費して産出を確定する。
+
+        セッションが無い場合は ItemError（状態は不変）。戻り値の
+        "user_before" は、支払いに失敗したときの rollback_dig 用。
+        """
+        now = now or datetime.now(JST)
+        uid = str(user_id)
+        with self._lock:
+            user = self._user_locked(uid)
+            if int(user["session_left"]) <= 0:
+                raise ItemError("採掘セッションが始まっていません。")
+            user_before = copy.deepcopy(user)
+            user["session_left"] = int(user["session_left"]) - 1
+            self._mark_dirty()
+            result = self._roll(pool_balance)
+            result["session_left"] = int(user["session_left"])
+            result["user_before"] = user_before
+            return result
+
+    def roll_bonus(self, pool_balance: int) -> dict[str, Any]:
+        """追加の1掘り分の抽選（採掘ドリンク用。セッションは消費しない）。"""
+        return self._roll(pool_balance)
 
     def rollback_dig(self, user_id: str, result: dict[str, Any]) -> None:
-        """dig の巻き戻し（コインの実移動に失敗したとき用）。"""
+        """dig の巻き戻し（プールの支払いやコイン反映に失敗したとき用）。"""
         with self._lock:
             self._state["users"][str(user_id)] = copy.deepcopy(result["user_before"])
-            self._state["daily"] = copy.deepcopy(result["daily_before"])
             self._mark_dirty()

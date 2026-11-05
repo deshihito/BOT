@@ -49,6 +49,26 @@ COIN_NAME = "AGO"
 FEE_DISCOUNT_EFFECT = "fee_discount"
 FEE_DISCOUNT_MULTIPLIER = 0.5
 
+#: 効果アイテム拡充（2026-11-06）の効果IDと倍率。いずれも「使うと
+#: 期間発動」する受動効果で、消費側が has_effect を引いて効かせる。
+#: 接続先は各定数のコメントと cogs 側の解決部を参照。
+#: 採掘ドリンク: 採掘1回ごとに通常テーブルを追加でもう1回引ける。
+MINING_BOOST_EFFECT = "mining_boost"
+#: 合成触媒: 合成・委託のレア結果の重み倍率（委託の倍率と乗算し、
+#: 合計は core/craft.py の RARE_BOOST_CAP でキャップ）。
+CRAFT_CATALYST_EFFECT = "craft_catalyst"
+CRAFT_CATALYST_MULTIPLIER = 1.5
+#: 防犯チャーム: 自分を対象とする steal が自動で失敗する。
+STEAL_GUARD_EFFECT = "steal_guard"
+#: 没収ガード: スロットの全額没収を1回だけペナルティ相当に変換する。
+CONFISCATION_GUARD_EFFECT = "confiscation_guard"
+#: 加速オイル: 工房の生産決済で経過時間がこの倍率で数えられる。
+WORKSHOP_HASTE_EFFECT = "workshop_haste"
+WORKSHOP_HASTE_MULTIPLIER = 2.0
+#: 優待パス: 市場の1回取引上限のプール比（手数料パスとは別効果）。
+TRADE_VIP_EFFECT = "trade_vip"
+TRADE_VIP_CAP_RATIO = 0.02
+
 #: 宝箱1個の価格（ショップ購入）。
 BOX_PRICE = 1000
 
@@ -192,6 +212,116 @@ ITEM_DEFS: dict[str, dict[str, Any]] = {
         "effect": None,
         "box_drop": True,
     },
+    "silver_scrap": {
+        "name": "銀のスクラップ",
+        "desc": "銀色に光る換金用コレクション。金のスクラップより手軽な一段下の換金先。",
+        "price": 2000,
+        "duration_hours": None,
+        "kind": "collectible",
+        "purchasable": False,
+        "sell_price": 1000,
+        "effect": None,
+        "box_drop": True,
+    },
+    "platinum_scrap": {
+        "name": "プラチナスクラップ",
+        "desc": "滅多に出ない最上位の換金用コレクション。ショップに高額で売却できる。",
+        "price": 50000,
+        "duration_hours": None,
+        "kind": "collectible",
+        "purchasable": False,
+        "sell_price": 25000,
+        "effect": None,
+        "box_drop": True,
+    },
+    "computing_unit": {
+        "name": "演算ユニット",
+        "desc": "電子基板と精密部品を組み上げた上位素材。さらに上の合成に使う。",
+        "price": 12000,
+        "duration_hours": None,
+        "kind": "material",
+        "purchasable": False,
+        "sell_price": None,
+        "effect": None,
+        "box_drop": False,
+    },
+    "enhanced_ago_core": {
+        "name": "強化アゴコア",
+        "desc": "アゴコアをさらに研ぎ上げた最上位のコレクション。ショップに最高額で売却できる。",
+        "price": 300000,
+        "duration_hours": None,
+        "kind": "collectible",
+        "purchasable": False,
+        "sell_price": 150000,
+        "effect": None,
+        "box_drop": False,
+    },
+    "mining_drink": {
+        "name": "採掘ドリンク",
+        "desc": "使うとしばらくの間、採掘で追加でもう一掘りできるようになる。",
+        "price": 500,
+        "duration_hours": 1,
+        "kind": "consumable",
+        "purchasable": True,
+        "sell_price": None,
+        "effect": MINING_BOOST_EFFECT,
+        "box_drop": True,
+    },
+    "craft_catalyst": {
+        "name": "合成触媒",
+        "desc": "使うとしばらくの間、合成でレアな結果が出やすくなる。",
+        "price": 1500,
+        "duration_hours": 2,
+        "kind": "consumable",
+        "purchasable": True,
+        "sell_price": None,
+        "effect": CRAFT_CATALYST_EFFECT,
+        "box_drop": True,
+    },
+    "steal_charm": {
+        "name": "防犯チャーム",
+        "desc": "使うとしばらくの間、盗みから自分のコインを守れる。",
+        "price": 2000,
+        "duration_hours": 24,
+        "kind": "consumable",
+        "purchasable": True,
+        "sell_price": None,
+        "effect": STEAL_GUARD_EFFECT,
+        "box_drop": False,
+    },
+    "confiscation_guard": {
+        "name": "没収ガード",
+        "desc": "使うとしばらくの間、スロットの全額没収を1回だけ防げる。",
+        "price": 5000,
+        "duration_hours": 24,
+        "kind": "consumable",
+        "purchasable": True,
+        "sell_price": None,
+        "effect": CONFISCATION_GUARD_EFFECT,
+        "box_drop": False,
+    },
+    "workshop_oil": {
+        "name": "加速オイル",
+        "desc": "使うとしばらくの間、工房の加工機の生産が速く進む。",
+        "price": 2000,
+        "duration_hours": 4,
+        "kind": "consumable",
+        "purchasable": True,
+        "sell_price": None,
+        "effect": WORKSHOP_HASTE_EFFECT,
+        "box_drop": True,
+    },
+    "trade_vip": {
+        "name": "優待パス",
+        "desc": "使うとしばらくの間、市場で一度に取引できる上限が広がる。",
+        "price": 4000,
+        "duration_hours": 24,
+        "kind": "consumable",
+        "purchasable": True,
+        "sell_price": None,
+        "effect": TRADE_VIP_EFFECT,
+        "box_drop": False,
+    },
     "fee_pass": {
         "name": "手数料パス",
         "desc": "使うと24時間、市場の売買手数料が半額になる。",
@@ -220,14 +350,17 @@ ITEM_DEFS: dict[str, dict[str, Any]] = {
 # 宝箱ドロップ（宣言的テーブル。原典 BOX_DROP_RATES / BOX_NEVER_DROP の分離を採用）
 #
 # 1個あたりの抽選は各行が独立。コインは常時出る行として置く。
-# 期待値（価格換算）は宝箱価格 1000 AGO の約7割に抑えてある
-# （コイン平均165＋素材・換金・パスの期待値 合計 約690）＝開け続けて増えない。
+# 期待値（価格換算）は宝箱価格 1000 AGO を下回るよう抑えてある
+# （拡充後の正確な値は box_expected_value() で算出し、テストで
+# 価格未満であることを固定する）＝開け続けて増えない。
 # ---------------------------------------------------------------------------
 
 #: 宝箱から絶対に出ないアイテム（定義側 box_drop=False と二重の防御）。
 BOX_NEVER_DROP = frozenset({"treasure_box"})
 
 #: kind="coins" の行は item ではなくコイン（min〜max の一様分布）。
+#: 2026-11-06 の拡充分（銀・プラチナのスクラップ、効果アイテム3種）を
+#: 含めても期待値は価格 1000 AGO を下回る（box_expected_value() で検証）。
 BOX_DROPS: tuple[dict[str, Any], ...] = (
     {"kind": "coins", "chance": 1.0, "min": 30, "max": 300},
     {"kind": "item", "item": "scrap", "chance": 0.35, "min": 1, "max": 3},
@@ -237,6 +370,11 @@ BOX_DROPS: tuple[dict[str, Any], ...] = (
     {"kind": "item", "item": "gold_scrap", "chance": 0.02, "min": 1, "max": 1},
     {"kind": "item", "item": "reinforced_alloy", "chance": 0.015, "min": 1, "max": 1},
     {"kind": "item", "item": "mystery_crystal", "chance": 0.003, "min": 1, "max": 1},
+    {"kind": "item", "item": "silver_scrap", "chance": 0.01, "min": 1, "max": 1},
+    {"kind": "item", "item": "platinum_scrap", "chance": 0.0005, "min": 1, "max": 1},
+    {"kind": "item", "item": "mining_drink", "chance": 0.02, "min": 1, "max": 1},
+    {"kind": "item", "item": "craft_catalyst", "chance": 0.015, "min": 1, "max": 1},
+    {"kind": "item", "item": "workshop_oil", "chance": 0.01, "min": 1, "max": 1},
 )
 
 
@@ -345,6 +483,30 @@ def _fee_discount_handler(store: "ItemStore", user_id: str, definition: dict[str
                           now: datetime) -> str:
     hours = definition.get("duration_hours") or 0
     return f"{definition['name']}を使いました。{hours}時間、市場の売買手数料が半額になります。"
+
+
+def _timed_effect_handler(verb: str) -> EffectHandler:
+    """期間発動型の受動効果に共通の発動文言ハンドラを作る。"""
+    def handler(store: "ItemStore", user_id: str, definition: dict[str, Any],
+                now: datetime) -> str:
+        hours = definition.get("duration_hours") or 0
+        return f"{definition['name']}を使いました。{hours}時間、{verb}。"
+
+    return handler
+
+
+register_effect(MINING_BOOST_EFFECT)(
+    _timed_effect_handler("採掘で追加でもう一掘りできます"))
+register_effect(CRAFT_CATALYST_EFFECT)(
+    _timed_effect_handler("合成でレアな結果が出やすくなります"))
+register_effect(STEAL_GUARD_EFFECT)(
+    _timed_effect_handler("盗みから自分のコインを守れます"))
+register_effect(CONFISCATION_GUARD_EFFECT)(
+    _timed_effect_handler("スロットの全額没収を1回だけ防げます"))
+register_effect(WORKSHOP_HASTE_EFFECT)(
+    _timed_effect_handler("工房の加工機の生産が速く進みます"))
+register_effect(TRADE_VIP_EFFECT)(
+    _timed_effect_handler("市場で一度に取引できる上限が広がります"))
 
 
 class ItemStore:
@@ -506,6 +668,25 @@ class ItemStore:
 
     def has_effect(self, user_id: str, effect_id: str, now: datetime | None = None) -> bool:
         return self.effect_expires(user_id, effect_id, now) is not None
+
+    def consume_effect(self, user_id: str, effect_id: str,
+                       now: datetime | None = None) -> bool:
+        """発動中の効果を1回分として消費する（没収ガード等の使い切り型用）。
+
+        効果が生きていれば消して True、無ければ（期限切れ含む）何も
+        変えず False を返す。判定と消費をロック内で原子的に行う。
+        """
+        now = now or datetime.now(JST)
+        with self._lock:
+            self._purge_user_locked(str(user_id), now)
+            effects = self._state["effects"].get(str(user_id), {})
+            if effect_id not in effects:
+                return False
+            del effects[effect_id]
+            if not effects:
+                self._state["effects"].pop(str(user_id), None)
+            self._mark_dirty()
+            return True
 
     def active_effects(self, user_id: str, now: datetime | None = None) -> dict[str, datetime]:
         now = now or datetime.now(JST)

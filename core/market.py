@@ -262,10 +262,15 @@ class MarketStore:
         with self._lock:
             return float(self._state["balances"].get(str(user_id), 0.0))
 
-    def trade_cap_aga(self) -> int:
-        """1回の取引上限（プールの AGO 準備の1%）。"""
+    def trade_cap_aga(self, cap_ratio: float | None = None) -> int:
+        """1回の取引上限（プールの AGO 準備に対する比率）。
+
+        cap_ratio は上限比率の上書き（優待パス等のアイテム効果から
+        渡す。fee_rate と同じ流儀）。None なら通常の TRADE_CAP_POOL_RATIO。
+        """
+        ratio = TRADE_CAP_POOL_RATIO if cap_ratio is None else cap_ratio
         with self._lock:
-            return int(self._state["pool_aga"] * TRADE_CAP_POOL_RATIO)
+            return int(self._state["pool_aga"] * ratio)
 
     # ------------------------------------------------------- サーキットブレーカー
     def halt_status(self, now: datetime) -> tuple[bool, str]:
@@ -398,15 +403,16 @@ class MarketStore:
             return {"rate": rate, "gross_aga": gross, "fee": fee, "net_aga": gross - fee}
 
     def validate_buy(self, aga_amount: int, now: datetime | None = None,
-                     fee_rate: float | None = None) -> None:
+                     fee_rate: float | None = None,
+                     cap_ratio: float | None = None) -> None:
         now = now or datetime.now(JST)
         if aga_amount < MIN_TRADE_AGA:
             raise TradeError(f"最低取引額は {MIN_TRADE_AGA} AGO です。")
         reason = self.side_halt("buy", now)
         if reason:
             raise TradeError(reason)
-        if aga_amount > self.trade_cap_aga():
-            raise TradeError("1回の取引上限（市場プールの準備の1%）を超えています。金額を下げてください。")
+        if aga_amount > self.trade_cap_aga(cap_ratio):
+            raise TradeError("1回の取引上限を超えています。金額を下げてください。")
         quote = self.quote_buy(aga_amount, fee_rate)
         if quote["tokens"] <= 0:
             raise TradeError("購入金額が小さすぎます。")
@@ -415,7 +421,8 @@ class MarketStore:
                 raise TradeError("市場プールのトークンが不足しています。")
 
     def validate_sell(self, user_id: str, token_amount: float, now: datetime | None = None,
-                      fee_rate: float | None = None) -> None:
+                      fee_rate: float | None = None,
+                      cap_ratio: float | None = None) -> None:
         now = now or datetime.now(JST)
         token_amount = quantize_tokens(token_amount)
         if token_amount <= 0:
@@ -428,8 +435,8 @@ class MarketStore:
         quote = self.quote_sell(token_amount, fee_rate)
         if quote["gross_aga"] < MIN_TRADE_AGA:
             raise TradeError(f"最低取引額は {MIN_TRADE_AGA} AGO です。")
-        if quote["gross_aga"] > self.trade_cap_aga():
-            raise TradeError("1回の取引上限（市場プールの準備の1%）を超えています。数量を下げてください。")
+        if quote["gross_aga"] > self.trade_cap_aga(cap_ratio):
+            raise TradeError("1回の取引上限を超えています。数量を下げてください。")
         with self._lock:
             if quote["net_aga"] > self._state["pool_aga"]:
                 raise TradeError("市場プールのコインが不足しています。")

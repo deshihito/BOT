@@ -59,8 +59,10 @@ class RecipeDefinitionTest(unittest.TestCase):
             self.assertIsNotNone(craft.find_recipe(*key))
 
     def test_ago_core_only_comes_from_upper_tier_inputs(self):
+        # computing_unit＋ago_core のレシピは強化アゴコア行きで、失敗時に
+        # 入力のアゴコア自体が戻るだけ（低位素材から新規に生えない）。
         upper = {"reinforced_frame", "reinforced_alloy", "mystery_crystal",
-                 "precision_parts"}
+                 "precision_parts", "computing_unit", "ago_core"}
         producers = [
             recipe for recipe in craft.RECIPES
             if any(row[0] == "ago_core" for row in recipe["outcomes"])

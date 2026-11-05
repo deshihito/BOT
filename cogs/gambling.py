@@ -34,6 +34,7 @@ import discord
 from discord.ext import commands, tasks
 
 import config
+from core import economy_pool as economy_core
 from core import gambling as gambling_core
 from core import items as items_core
 from core.messages import GAMBLING_INVALID_AMOUNT, gambling_action_failed
@@ -64,25 +65,27 @@ _SLOT_EVENT_LINES = {
 
 
 # ルール文は「ルール」ボタンの裏に隔離する（導線最適化 S9）。パネル本文は状態だけ。
+# HCD方針（2026-11-06）: 遊び方は出すが、確率・配当の詳細な数値仕様は
+# ユーザー向け文言に出さない（内部定数は core/gambling.py を参照）。
 GAMBLING_RULES = {
     "slot": (
         f"7リールスロット。1回 **{gambling_core.SLOT_BET:,} AGO** 固定で、"
         f"回数（{gambling_core.SLOT_MIN_SPINS}〜{gambling_core.SLOT_MAX_SPINS}）"
         "分のベットを先払いして回します。\n"
-        "同じ数字が揃うほど配当が伸び、7が3つ以上揃うと確変（配当3倍）に"
+        "同じ数字が揃うほど配当が伸び、7が3つ以上揃うと確変に"
         "入ります。6が5つ以上揃うと所持コイン全額没収、"
         "連敗が続くと天井もあります。"),
     "double": (
         "ベットして、GOで倍率を伸ばすか、CASHOUTで確定するか選ぶゲーム。"
-        f"GO成功で倍率が {gambling_core.DOUBLE_MULTIPLIER_STEP} 倍ずつ伸び、"
+        "GO成功で倍率が伸び、"
         "失敗するとベットは失われます。成功率は内部状態で変動します。"),
     "blackjack": (
         f"ディーラーとの対戦。ベットは {gambling_core.BLACKJACK_MIN_BET} AGO から。"
         "21に近い方が勝ち、超えるとバーストで負けです。"
-        "ディーラーは17未満で引き続けます。勝てばベットの2倍が戻ります。"),
+        "ディーラーは17未満で引き続けます。"),
     "dice": (
         f"1〜範囲（{gambling_core.DICE_MIN_MAX}〜{gambling_core.DICE_MAX_MAX}）の"
-        "数字を1つ予想してベットし、出目が一致すれば ベット×範囲 が賞金です。"
+        "数字を1つ予想してベットし、出目が一致すれば賞金です。"
         f"ベットは {gambling_core.DICE_MIN_BET} AGO から。"),
 }
 
@@ -169,7 +172,8 @@ def _slot_embed(cog: "GamblingCog", user_id: int, *, result: str | None = None,
         session = None
     color = GAMBLING_COLOR
     if result:
-        if "全額没収" in result:
+        # 没収ガードで防いだ結果（「…の全額没収を防ぎました」）は赤にしない。
+        if "所持コイン全額没収" in result:
             color = 0xE74C3C
         elif "超JACKPOT" in result:
             color = 0xF1C40F
@@ -315,11 +319,9 @@ def _double_embed(cog: "GamblingCog", user_id: int, *, result: str | None = None
         embed.add_field(name="結果", value=_fit(result), inline=False)
     embed.add_field(name="状態", value=_double_status_text(cog, user_id), inline=False)
     state = cog.store.user_state(str(user_id))
-    rate = cog.store.internal_rate(str(user_id))
     embed.add_field(
         name="内部状態",
-        value=(f"モード: **{state['internal_mode']}**"
-               f"／次のGO成功率: **{rate * 100:.0f}%**\n"
+        value=(f"モード: **{state['internal_mode']}**\n"
                f"連勝 {state['win_streak']}／連敗 {state['lose_streak']}"),
         inline=False)
     if balance is not None:
@@ -577,11 +579,43 @@ class DiceView(_SessionPanel, discord.ui.View):
 class GamblingCog(commands.Cog):
     def __init__(self, bot: commands.Bot,
                  store: gambling_core.GamblingStore | None = None,
-                 balance_reader: Callable[[str], int] | None = None):
+                 balance_reader: Callable[[str], int] | None = None,
+                 item_store: items_core.ItemStore | None = None,
+                 economy_store: economy_core.EconomyPoolStore | None = None):
         self.bot = bot
         self.store = store if store is not None else gambling_core.GamblingStore()
         self._balance_reader = balance_reader
+        self._injected_item_store = item_store
+        # 経済系の損失は採掘プール／国庫へ還流する（共有インスタンス）。
+        self.economy_store = (
+            economy_store if economy_store is not None
+            else economy_core.shared_store())
         self._refunded = False
+        # スロットのセッション内配当累計（終了時に純損失を還流するため）。
+        self._slot_rewards: dict[str, int] = {}
+
+    # ------------------------------------------------------------------ 共有ストア
+    def _item_store(self) -> items_core.ItemStore:
+        """ItemsCog のアイテムストア（市場の手数料パスと同じ参照の仕方）。"""
+        if self._injected_item_store is not None:
+            return self._injected_item_store
+        cog = self.bot.get_cog("ItemsCog")
+        if cog is None:
+            raise items_core.ItemError("アイテム機能が読み込まれていません。")
+        return cog.store
+
+    def _recycle(self, amount: int) -> None:
+        """経済系の損失を採掘プール／国庫へ還流する（best-effort）。
+
+        還流自体の失敗でゲーム本体を止めない（ログだけ残す）。
+        """
+        amount = int(amount)
+        if amount <= 0:
+            return
+        try:
+            self.economy_store.add_loss(amount)
+        except Exception:
+            logger.exception("gambling: 損失の還流に失敗しました amount=%s", amount)
 
     async def cog_load(self) -> None:
         if not self.flush_loop.is_running():
@@ -591,11 +625,13 @@ class GamblingCog(commands.Cog):
         if self.flush_loop.is_running():
             self.flush_loop.cancel()
         self.store.flush()
+        self.economy_store.flush()
 
     @tasks.loop(seconds=gambling_core.FLUSH_INTERVAL_SECONDS)
     async def flush_loop(self) -> None:
         try:
             self.store.maybe_flush()
+            self.economy_store.maybe_flush()
             await self._refund_orphaned()
         except Exception:
             logger.exception("gambling: 定期フラッシュ／返金に失敗しました")
@@ -653,6 +689,7 @@ class GamblingCog(commands.Cog):
         wallet = self._wallet()
         for refund in refunds:
             uid = refund["user_id"]
+            self._slot_rewards.pop(uid, None)  # 返金されるので収支台帳は破棄
             amount = int(refund["amount"])
             try:
                 credit = await wallet._change_balance(
@@ -749,6 +786,7 @@ class GamblingCog(commands.Cog):
             except items_core.ItemError as exc:
                 await wallet._change_balance(uid, total)
                 return gambling_action_failed(exc)
+            self._slot_rewards[uid] = 0
             await self._record_history(uid, GAMBLING_ID, total, "gamble_slot")
             return (f"🎰 **スロット開始！** {spins} 回分 {total:,} AGO を先払いしました。\n"
                     f"コイン残高: {debit:,} AGO")
@@ -778,10 +816,48 @@ class GamblingCog(commands.Cog):
             for event in result["events"]:
                 lines.append(_SLOT_EVENT_LINES[event])
             if result["confiscate"]:
-                taken = await self._confiscate_all(uid)
-                delta = -taken
-                if taken > 0:
-                    await self._record_history(uid, GAMBLING_ID, taken, "gamble_slot")
+                # 没収ガード（アイテム効果）が発動中なら、1回だけ
+                # 全額没収をペナルティ額へ変換してガードを消費する。
+                guarded = False
+                try:
+                    item_store = self._item_store()
+                    if item_store.has_effect(
+                            uid, items_core.CONFISCATION_GUARD_EFFECT):
+                        guarded = item_store.consume_effect(
+                            uid, items_core.CONFISCATION_GUARD_EFFECT)
+                except Exception:
+                    guarded = False
+                if guarded:
+                    penalty = (gambling_core.SLOT_BET
+                               * gambling_core.SLOT_SIX_PENALTY_MULTIPLIER)
+                    balance = await self._balance(uid)
+                    take = min(balance, penalty)
+                    if take > 0:
+                        debit = await wallet._change_balance(
+                            uid, -take, require_funds=True)
+                        if debit is None or debit is wallet_module.INSUFFICIENT:
+                            logger.critical(
+                                "gambling: 没収ガードのペナルティ引き落としに"
+                                "失敗しました user=%s take=%s", uid, take)
+                            take = 0
+                    delta = -take
+                    if take > 0:
+                        await self._record_history(
+                            uid, GAMBLING_ID, take, "gamble_slot")
+                        self._recycle(take)
+                    lines = [
+                        ("🛡️ 没収ガード発動！ 66666の全額没収を防ぎました"
+                         if line == _SLOT_EVENT_LINES["six_confiscate"] else line)
+                        for line in lines]
+                    lines.append(
+                        f"ペナルティとして **{take:,} AGO** を支払いました。")
+                else:
+                    taken = await self._confiscate_all(uid)
+                    delta = -taken
+                    if taken > 0:
+                        await self._record_history(
+                            uid, GAMBLING_ID, taken, "gamble_slot")
+                        self._recycle(taken)
             elif result["reward"] > 0:
                 credit = await wallet._change_balance(
                     uid, result["reward"], create_with=wallet_module.NEW_USER_BALANCE)
@@ -806,7 +882,17 @@ class GamblingCog(commands.Cog):
                     delta = result["reward"]
                     await self._record_history(
                         uid, GAMBLING_ID, -result["reward"], "gamble_slot")
+                    self._recycle(-result["reward"])
                 lines.append(f"**{result['reward']:+,} AGO**")
+            if delta > 0:
+                self._slot_rewards[uid] = self._slot_rewards.get(uid, 0) + delta
+            if result["finished"]:
+                # 先払い総額から配当総額を引いた純損失を還流する
+                # （ペナルティ・没収分は発生時に還流済みなので含めない）。
+                rewards = self._slot_rewards.pop(uid, 0)
+                net_loss = int(result["total"]) * gambling_core.SLOT_BET - rewards
+                if net_loss > 0:
+                    self._recycle(net_loss)
             if result["kakuhen"] > 0:
                 lines.append(f"⚡ 確変残り {result['kakuhen']} 回")
             lines.append(f"残り回数: {result['remaining']} / {result['total']}")
@@ -903,6 +989,7 @@ class GamblingCog(commands.Cog):
                 return (f"✅ **成功！** 倍率 {result['multiplier']:.2f} 倍"
                         f"（現在価値 {result['current_value']:,} AGO）\n"
                         "GOで続けるか、CASHOUTで確定してください。")
+            self._recycle(result["bet"])
             return (f"💀 **失敗…** ベット {result['bet']:,} AGO は失われました。")
         except items_core.ItemError as exc:
             return gambling_action_failed(exc)
@@ -974,6 +1061,7 @@ class GamblingCog(commands.Cog):
         try:
             result = self.store.blackjack_hit(uid)
             if result["bust"]:
+                self._recycle(result["bet"])
                 return (f"💥 **バースト！** あなた: {result['player']}"
                         f"（{result['total']}）\n"
                         f"負け -{result['bet']:,} AGO", True)
@@ -1009,6 +1097,7 @@ class GamblingCog(commands.Cog):
             elif result["outcome"] == "push":
                 headline = "🤝 **引き分け**（ベットが戻りました）"
             else:
+                self._recycle(result["bet"])
                 headline = f"💀 **負け -{result['bet']:,} AGO**"
             return (f"{headline}\n"
                     f"あなた: {result['player']}（{result['player_total']}）\n"
@@ -1056,6 +1145,7 @@ class GamblingCog(commands.Cog):
                 return (f"🎲 予想: {number}／結果: **{result['rolled']}**\n"
                         f"🎉 **当たり！ {prize:,} AGO 獲得！**\n"
                         f"コイン残高: {credit:,} AGO")
+            self._recycle(bet)
             return (f"🎲 予想: {number}／結果: **{result['rolled']}**\n"
                     "はずれ…ベットは失われました。")
         except items_core.ItemError as exc:

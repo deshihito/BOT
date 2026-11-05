@@ -867,7 +867,9 @@ class ViewEditTest(unittest.TestCase):
             self.assertIn("1.90", _field(embed, "状態"))
             internal = _field(embed, "内部状態")
             self.assertIn("NORMAL", internal)
-            self.assertIn("60%", internal)
+            # HCD方針: 成功率のような内部数値はユーザー向け表示に出さない。
+            self.assertNotIn("%", internal)
+            self.assertIn("連勝 1", internal)
             self.assertFalse(_button(view, "GO").disabled)
             asyncio.run(_button(view, "CASHOUT").callback(interaction))
             self.assertEqual(len(interaction.edited_original), 2)

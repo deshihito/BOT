@@ -43,24 +43,20 @@ def _item_name(item_id: str) -> str:
 
 
 def _tier_lines() -> list[str]:
+    # HCD方針（2026-11-06）: レア率や生産見込みの期待値のような数値仕様は
+    # ユーザー向け文言に出さない（遊び方と結果だけ出す）。
     lines = []
     for tier_id, tier in workshop_core.MACHINE_TIERS.items():
         materials = "・".join(
             items_core.ITEM_DEFS[item_id]["name"] for item_id, _w in tier["production"])
-        line = (
+        lines.append(
             f"・**{tier['name']}** — {tier['price']:,} AGO"
             f"（{tier['cycle_hours']}時間ごとに {materials} を生産、"
-            f"貯蔵は{tier['storage_hours']}時間分まで"
-        )
-        if tier["rare_rate"] > 0:
-            line += f"、レア素材 {tier['rare_rate'] * 100:.0f}%"
-        line += (
-            f"、寿命{tier['lifespan_cycles']}サイクル"
+            f"貯蔵は{tier['storage_hours']}時間分まで、"
+            f"寿命{tier['lifespan_cycles']}サイクル"
             f"（満稼働で約{workshop_core.lifetime_days(tier_id):.0f}日）で"
-            f"消える使い捨て、寿命までの生産見込み"
-            f"約{workshop_core.lifetime_expected_value(tier_id):,.0f} AGO相当）"
+            "消える使い捨て）"
         )
-        lines.append(line)
     return lines
 
 
@@ -91,7 +87,7 @@ def _workshop_embed(cog: "WorkshopCog", user_id: int) -> discord.Embed:
     if streak["days"]:
         embed.add_field(
             name="連続稼働ストリーク",
-            value=f"**{streak['days']} 日**（生産ボーナス +{streak['bonus_rate'] * 100:.0f}%）",
+            value=f"**{streak['days']} 日**（受け取り続けると生産ボーナスが付きます）",
             inline=False)
     jobs = store.commissions(uid)
     if jobs:
@@ -122,15 +118,11 @@ def _craft_embed(cog: "WorkshopCog", user_id: int) -> discord.Embed:
     embed.add_field(
         name="合成に使える所持素材", value="\n".join(owned) if owned else "（なし）",
         inline=False)
-    lines = []
-    for recipe in craft_core.public_recipes():
-        a, b = recipe["inputs"]
-        main_item = max(recipe["outcomes"], key=lambda row: row[2])[0]
-        lines.append(f"・{_item_name(a)} ＋ {_item_name(b)} → 主に{_item_name(main_item)}")
-    embed.add_field(name="レシピ", value="\n".join(lines), inline=False)
+    # レシピ（組み合わせの対応表）はユーザーに見せない。原典もそうで、
+    # 試して見つけるのが仕様（2026-11-06 ユーザー指示）。
     embed.set_footer(
         text="素材を2つ選んで「合成する」と即時、「委託する」と時間をかけてレア結果が出やすくなります。"
-             "一覧にない組み合わせが存在するかもしれません。")
+             "組み合わせは試して見つけてください。")
     return embed
 
 
@@ -368,7 +360,16 @@ class WorkshopCog(commands.Cog):
     def execute_claim(self, user_id: int) -> str:
         uid = str(user_id)
         try:
-            result = self.workshop_store.claim_production(uid)
+            # 加速オイル発動中は経過時間を2倍として数える（早く貯まる
+            # 代わりにサイクル消化＝寿命の消費も速い。貯蔵上限は不変）。
+            time_scale = 1.0
+            try:
+                if self._item_store().has_effect(
+                        uid, items_core.WORKSHOP_HASTE_EFFECT):
+                    time_scale = items_core.WORKSHOP_HASTE_MULTIPLIER
+            except Exception:
+                time_scale = 1.0
+            result = self.workshop_store.claim_production(uid, time_scale=time_scale)
             if result["cycles"] <= 0:
                 return workshop_action_failed("まだ受け取れる生産物がありません。")
             store = self._item_store()
@@ -384,7 +385,7 @@ class WorkshopCog(commands.Cog):
             if result["bonus_rate"] > 0:
                 lines.append(
                     f"連続稼働ストリーク {result['streak_days']} 日"
-                    f"（生産ボーナス +{result['bonus_rate'] * 100:.0f}%）")
+                    "（生産ボーナスが付きました）")
             return "\n".join(lines)
         except items_core.ItemError as exc:
             return workshop_action_failed(exc)
@@ -395,7 +396,16 @@ class WorkshopCog(commands.Cog):
     def execute_craft(self, user_id: int, item_a: str, item_b: str) -> str:
         uid = str(user_id)
         try:
-            result = craft_core.execute_craft(self._item_store(), uid, item_a, item_b)
+            # 合成触媒発動中はレア結果の重みを上げる。
+            rare_boost = 1.0
+            try:
+                if self._item_store().has_effect(
+                        uid, items_core.CRAFT_CATALYST_EFFECT):
+                    rare_boost = items_core.CRAFT_CATALYST_MULTIPLIER
+            except Exception:
+                rare_boost = 1.0
+            result = craft_core.execute_craft(
+                self._item_store(), uid, item_a, item_b, rare_boost=rare_boost)
             names = f"{_item_name(item_a)} ＋ {_item_name(item_b)}"
             outcome = f"{_item_name(result['item'])} ×{result['count']}"
             if result["rare"]:
@@ -430,7 +440,16 @@ class WorkshopCog(commands.Cog):
             jobs = self.workshop_store.commissions(uid)
             if not jobs:
                 return workshop_action_failed("委託加工中の品目がありません。")
-            results = self.workshop_store.claim_commissions(self._item_store(), uid)
+            # 合成触媒は委託加工にも効く（委託倍率と乗算、上限あり）。
+            extra_boost = 1.0
+            try:
+                if self._item_store().has_effect(
+                        uid, items_core.CRAFT_CATALYST_EFFECT):
+                    extra_boost = items_core.CRAFT_CATALYST_MULTIPLIER
+            except Exception:
+                extra_boost = 1.0
+            results = self.workshop_store.claim_commissions(
+                self._item_store(), uid, extra_rare_boost=extra_boost)
             if not results:
                 return workshop_action_failed("まだ完了した委託加工がありません。")
             lines = [f"✅ **委託加工を {len(results)} 件受け取りました**"]

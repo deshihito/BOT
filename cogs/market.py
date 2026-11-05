@@ -23,6 +23,7 @@ import discord
 from discord.ext import commands, tasks
 
 import config
+from core import economy_pool as economy_core
 from core import items as items_core
 from core import market as market_core
 from core.messages import MARKET_INVALID_AMOUNT, market_trade_failed
@@ -66,7 +67,7 @@ def _market_embed(store: market_core.MarketStore, user_id: int) -> discord.Embed
         embed.add_field(name="最近のニュース", value=str(state["last_news"]), inline=False)
     if halted:
         embed.add_field(name="⚠️ 取引停止中", value=reason, inline=False)
-    embed.set_footer(text="レートは5分ごとに更新されます。売買には1%の手数料がかかります。")
+    embed.set_footer(text="レートは5分ごとに更新されます。売買には手数料がかかります。")
     return embed
 
 
@@ -186,9 +187,24 @@ class MarketView(discord.ui.View):
 
 
 class MarketCog(commands.Cog):
-    def __init__(self, bot: commands.Bot, store: market_core.MarketStore | None = None):
+    def __init__(self, bot: commands.Bot, store: market_core.MarketStore | None = None,
+                 economy_store: economy_core.EconomyPoolStore | None = None):
         self.bot = bot
         self.store = store if store is not None else market_core.MarketStore()
+        # 手数料の消却分は経済系の損失として採掘プール／国庫へ還流する。
+        self.economy_store = (
+            economy_store if economy_store is not None
+            else economy_core.shared_store())
+
+    def _recycle_fee_burn(self, result: dict) -> None:
+        """手数料のうち消却された分を還流する（best-effort）。"""
+        burned = int(result.get("burned", 0))
+        if burned <= 0:
+            return
+        try:
+            self.economy_store.add_loss(burned)
+        except Exception:
+            logger.exception("market: 手数料消却分の還流に失敗しました")
 
     async def cog_load(self) -> None:
         if not self.tick_loop.is_running():
@@ -204,6 +220,7 @@ class MarketCog(commands.Cog):
         try:
             self.store.tick()
             self.store.maybe_flush()
+            self.economy_store.maybe_flush()
             await self._refresh_chart_cache()
         except Exception:
             logger.exception("market: tick の処理に失敗しました")
@@ -250,6 +267,20 @@ class MarketCog(commands.Cog):
                 logger.exception("market: 手数料パスの確認に失敗 user=%s", user_id)
         return market_core.FEE_RATE
 
+    def _effective_cap_ratio(self, user_id: str) -> float:
+        """1回取引上限の比率を決める。優待パス（core/items.py の
+        受動効果）が発動中なら上限を引き上げる。fee_rate と同じ流儀。
+        アイテム基盤が未読込なら通常の比率。"""
+        items_cog = self.bot.get_cog("ItemsCog")
+        store = getattr(items_cog, "store", None) if items_cog is not None else None
+        if store is not None:
+            try:
+                if store.has_effect(user_id, items_core.TRADE_VIP_EFFECT):
+                    return items_core.TRADE_VIP_CAP_RATIO
+            except Exception:
+                logger.exception("market: 優待パスの確認に失敗 user=%s", user_id)
+        return market_core.TRADE_CAP_POOL_RATIO
+
     def _wallet(self):
         wallet = self.bot.get_cog("WalletCog")
         if wallet is None:
@@ -273,7 +304,8 @@ class MarketCog(commands.Cog):
         uid = str(user_id)
         try:
             fee_rate = self._effective_fee_rate(uid)
-            self.store.validate_buy(aga_amount, fee_rate=fee_rate)
+            cap_ratio = self._effective_cap_ratio(uid)
+            self.store.validate_buy(aga_amount, fee_rate=fee_rate, cap_ratio=cap_ratio)
             wallet = self._wallet()
             debit = await wallet._change_balance(uid, -aga_amount, require_funds=True)
             if debit is INSUFFICIENT:
@@ -285,6 +317,7 @@ class MarketCog(commands.Cog):
             except market_core.TradeError as exc:
                 await wallet._change_balance(uid, aga_amount)
                 return market_trade_failed(exc)
+            self._recycle_fee_burn(result)
             await self._record_history(uid, "MARKET_POOL", aga_amount, "token_buy")
             return (
                 f"✅ **{market_core.TOKEN_NAME}を買いました**\n"
@@ -302,13 +335,15 @@ class MarketCog(commands.Cog):
         uid = str(user_id)
         try:
             fee_rate = self._effective_fee_rate(uid)
-            self.store.validate_sell(uid, token_amount, fee_rate=fee_rate)
+            cap_ratio = self._effective_cap_ratio(uid)
+            self.store.validate_sell(uid, token_amount, fee_rate=fee_rate, cap_ratio=cap_ratio)
             wallet = self._wallet()
             result = self.store.apply_sell(uid, token_amount, fee_rate=fee_rate)
             credit = await wallet._change_balance(uid, result["net_aga"], create_with=0)
             if credit is None or credit is INSUFFICIENT:
                 self.store.rollback_sell(uid, token_amount, result)
                 return market_trade_failed("コインの更新に失敗したため、売却を取り消しました。")
+            self._recycle_fee_burn(result)
             await self._record_history("MARKET_POOL", uid, result["net_aga"], "token_sell")
             return (
                 f"✅ **{market_core.TOKEN_NAME}を売りました**\n"
