@@ -51,16 +51,15 @@ EXP_STORE_KEY = "exp"
 # 機能名の列挙は書かない（空文字 = 説明なし）。
 GENERAL_GENRES = {
     "money": ("マネー", ""),
-    "rta": ("RTAランキング", ""),
+    "rta": ("ランキング", ""),
     "exp": ("EXP・レベル", "チャット・VC・generalのEXPとレベル"),
     "survival": ("生存確認", "メンバーの安否・不在の検知"),
     "custom": ("設定・AI", ""),
     "zeta": ("ZetaModoki", "ロールプレイ会話"),
-    "miq": ("引用画像 (MIQ)", "メッセージを引用画像にする"),
     "meme": ("meme作成", "画像に上下テキストを入れてmeme画像を作成する"),
 }
 # 旧ジャンルで保存されたショートカットを新しいジャンルへ移行する（導線最適化 S7）。
-GENERAL_GENRE_ALIASES = {"translation": "custom"}
+GENERAL_GENRE_ALIASES = {"translation": "custom", "miq": "custom"}
 
 GENERAL_ACTIONS = {
     "money": [
@@ -89,6 +88,7 @@ GENERAL_ACTIONS = {
         ("コイン保有ランキング", "coin_leaderboard"),
     ],
     "rta": [
+        ("ランキング一覧", "rankings"),
         ("bump RTAランキング", "bump_leaderboard"),
         ("up RTAランキング", "up_leaderboard"),
     ],
@@ -110,16 +110,13 @@ GENERAL_ACTIONS = {
         ("画像生成AIモデルを設定", "image_default"),
         ("AI思考強度を設定", "reasoning_default"),
         ("自動翻訳を設定", "translation_settings"),
+        ("MIQ設定（見た目・引用拒否）", "miq_settings"),
     ],
     "zeta": [
         ("ZetaModokiと会話", "zetamodoki"),
         ("ZetaModoki会話をリセット", "zeta_reset"),
         ("シチュエーション・キャラクターを登録", "zeta_register"),
         ("登録を管理（編集・削除）", "zeta_manage"),
-    ],
-    "miq": [
-        ("MIQ設定（見た目・引用拒否）", "miq_settings"),
-        ("使い方", "miq_help"),
     ],
     "meme": [
         ("memeを作成", "meme_create"),

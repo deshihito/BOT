@@ -221,6 +221,10 @@ class MiqSettingsView(discord.ui.View):
         theme_label = MIQ_THEMES.get(p.get("theme"), MIQ_THEMES["bw"])[0]
         format_label = MIQ_FORMATS.get(p.get("format"), MIQ_FORMATS["random"])[0]
         lines = [
+            "**作り方**",
+            "・メッセージを右クリック(スマホは長押し) → アプリ → **引用画像にする**",
+            "・引用したいメッセージに返信して、`@BOT miq` と送信",
+            "",
             "**見た目**（あなたがMIQを作る時に使われます）",
             f"フォーマット: `{format_label}`",
             "未設定の既定はランダムです。ランダムでは生成のたびに単体フォーマットから1つ選ばれます（LINE風・ペアハート風は選ばれません）。",
