@@ -62,6 +62,7 @@ GENERAL_GENRES = {
 }
 GENERAL_ACTIONS = {
     "money": [
+        ("マネーパネル", "money_panel"),
         ("プレイヤー状況", "status"),
         ("コイン送金", "pay"),
         ("市場", "market"),

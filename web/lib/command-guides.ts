@@ -86,6 +86,7 @@ export const COMMAND_GUIDES: CommandGuide[] = [
         title: "マネー",
         description: "AGOの状況確認、送金、市場でのアゴトークンの売買、アイテムと宝箱、合成と工房、採掘と宝くじ、盗む勝負、ギャンブル、コイン保有ランキングをまとめています。",
         functions: [
+          { title: "マネーパネル", description: "残高やレート、所持アイテム、加工機や宝くじの状況を見ながら、その場で売買や合成、採掘やギャンブルまで実行できる統合パネルです。" },
           { title: "プレイヤー状況", description: "自分の所持状況を確認します。" },
           { title: "コイン送金", description: "送金先のユーザーIDとAGOを入力して、ほかのユーザーへ送ります。" },
           { title: "市場", description: "アゴトークンの現在レートとチャート、市場の状況を確認します。" },

@@ -82,7 +82,7 @@ MESSAGE_SHORTCUT_BLOCKED_IDS = frozenset({
     "general:ai_default", "general:image_default", "general:reasoning_default",
     "general:translation_settings",
     "general:exp_status", "general:status",
-    "general:items", "general:workshop",
+    "general:items", "general:workshop", "general:money_panel",
 })
 
 # AI tools で「確認ビュー付きなら代理実行可」（risk="confirm"）とする集合（D-3 決定）。
