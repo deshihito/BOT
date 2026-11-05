@@ -1,8 +1,10 @@
-"""Configurable AutoMod filters for invite links, links, mentions, and caps."""
+"""Configurable AutoMod filters for invite links, links, mentions, caps, and spam."""
 from __future__ import annotations
 
 import logging
 import re
+import time
+from collections import deque
 from datetime import timedelta
 from typing import Any
 
@@ -18,10 +20,18 @@ KEY = "automod"
 FEATURE = Feature(
     key=KEY,
     label="AutoMod",
-    description="招待リンク・外部リンク・メンションスパム・大文字スパムを自動削除します。",
+    description="招待リンク・外部リンク・メンションスパム・大文字スパム・連投を自動削除します。",
     order=70,
     module_name=__name__,
 )
+
+# 連投検知: 状態はメモリ内のみ (再起動でリセット)。全メッセージ処理に入るため
+# 1ユーザーあたり直近の送信時刻と正規化済み本文だけを持ち、重い処理はしない。
+SPAM_WINDOW_SECONDS = 10.0
+SPAM_DUP_WINDOW_SECONDS = 60.0
+SPAM_DUP_COUNT = 3
+SPAM_COUNT_CHOICES = (0, 3, 5, 8)
+_spam_events: dict[tuple[int, int], deque] = {}
 
 INVITE_RE = re.compile(r"(?:discord(?:app)?\.(?:gg|com/invite)/[A-Za-z0-9-]+)", re.I)
 LINK_RE = re.compile(r"(?:https?://|www\.)\S+", re.I)
@@ -41,6 +51,10 @@ def settings(guild_id: int) -> dict[str, Any]:
         timeout_minutes = int(raw.get("timeout_minutes", 0))
     except (TypeError, ValueError):
         timeout_minutes = 0
+    try:
+        spam_count = int(raw.get("spam_count", 0))
+    except (TypeError, ValueError):
+        spam_count = 0
     return {
         "enabled": bool(raw.get("enabled", False)),
         "log_channel_id": raw.get("log_channel_id") if isinstance(raw.get("log_channel_id"), int) else None,
@@ -49,7 +63,37 @@ def settings(guild_id: int) -> dict[str, Any]:
         "max_mentions": max(0, min(25, max_mentions)),
         "caps_percent": max(0, min(100, caps_percent)),
         "timeout_minutes": max(0, min(1440, timeout_minutes)),
+        "spam_count": spam_count if spam_count in SPAM_COUNT_CHOICES else 0,
     }
+
+
+def detect_spam(
+    content: str, current: dict[str, Any], guild_id: int, user_id: int, now: float | None = None,
+) -> str | None:
+    """同一ユーザーの連投・重複メッセージを検知する。状態はメモリ内のみ。"""
+    limit = int(current.get("spam_count") or 0)
+    if not limit:
+        return None
+    now = time.monotonic() if now is None else now
+    if len(_spam_events) > 5000:
+        for key in [k for k, events in _spam_events.items() if not events or now - events[-1][0] > SPAM_DUP_WINDOW_SECONDS]:
+            _spam_events.pop(key, None)
+    events = _spam_events.setdefault((guild_id, user_id), deque(maxlen=32))
+    while events and now - events[0][0] > SPAM_DUP_WINDOW_SECONDS:
+        events.popleft()
+    normalized = " ".join((content or "").split()).lower()
+    events.append((now, normalized))
+    recent = sum(1 for stamp, _ in events if now - stamp <= SPAM_WINDOW_SECONDS)
+    if recent >= limit:
+        return f"連投スパム（{int(SPAM_WINDOW_SECONDS)}秒間に{recent}件）"
+    if normalized:
+        duplicates = sum(
+            1 for stamp, text in events
+            if text == normalized and now - stamp <= SPAM_DUP_WINDOW_SECONDS
+        )
+        if duplicates >= SPAM_DUP_COUNT:
+            return f"重複メッセージ（同一内容{duplicates}回）"
+    return None
 
 
 def detect_violation(content: str, mention_count: int, current: dict[str, Any]) -> str | None:
@@ -125,6 +169,13 @@ async def on_message(cog: Any, message: Any) -> None:
         len(getattr(message, "mentions", []) or []),
         current,
     )
+    if reason is None:
+        reason = detect_spam(
+            getattr(message, "content", "") or "",
+            current,
+            getattr(message.guild, "id", 0),
+            getattr(message.author, "id", 0),
+        )
     if reason is None:
         return
     guild = message.guild
@@ -289,6 +340,27 @@ class AutoModLinksButton(discord.ui.Button):
         await view.refresh(interaction, f"外部リンクの削除を{'オン' if value else 'オフ'}にしました。")
 
 
+class AutoModSpamButton(discord.ui.Button):
+    """連投検知のしきい値を切り替える (オフ → 3 → 5 → 8 件/10秒)。"""
+
+    def __init__(self):
+        super().__init__(label="連投検知", style=discord.ButtonStyle.secondary, row=4)
+
+    async def callback(self, interaction: discord.Interaction):
+        view: AutoModSettingsView = self.view
+        if not view.can_manage(interaction):
+            return await interaction.response.send_message(
+                "この設定には「サーバーの管理」権限が必要です。", ephemeral=True,
+            )
+        current = int(view.settings.get("spam_count") or 0)
+        index = SPAM_COUNT_CHOICES.index(current) if current in SPAM_COUNT_CHOICES else 0
+        value = SPAM_COUNT_CHOICES[(index + 1) % len(SPAM_COUNT_CHOICES)]
+        await update_settings(view.guild_id, KEY, spam_count=value)
+        view.settings["spam_count"] = value
+        label = f"{int(SPAM_WINDOW_SECONDS)}秒間に{value}件以上" if value else "オフ"
+        await view.refresh(interaction, f"連投検知を{label}にしました。")
+
+
 class AutoModSettingsView(AssistFeatureView):
     feature_key = KEY
     feature_title = "AutoMod"
@@ -305,8 +377,14 @@ class AutoModSettingsView(AssistFeatureView):
         self.add_item(AutoModToggleButton())
         self.add_item(AutoModInvitesButton())
         self.add_item(AutoModLinksButton())
+        self.add_item(AutoModSpamButton())
 
     def embed(self) -> discord.Embed:
+        spam_count = self.settings["spam_count"]
+        spam_text = (
+            f"{int(SPAM_WINDOW_SECONDS)}秒間に{spam_count}件以上 / 同一内容{SPAM_DUP_COUNT}回"
+            if spam_count else "オフ"
+        )
         return discord.Embed(
             title="AutoMod",
             description=(
@@ -317,6 +395,7 @@ class AutoModSettingsView(AssistFeatureView):
                 f"\n**外部リンク**: {'削除' if self.settings['block_links'] else '許可'}"
                 f"\n**メンション**: {self.settings['max_mentions'] or '制限なし'}"
                 f"\n**大文字**: {self.settings['caps_percent'] or 'チェックなし'}"
+                f"\n**連投検知**: {spam_text}"
                 f"\n**タイムアウト**: {self.settings['timeout_minutes'] or 'なし'}"
                 + notice_line(self.notice)
             )[:4096],
