@@ -29,7 +29,7 @@ from core.panel_v2 import as_panel_v2, edit_panel_v2
 from core import action_registry, action_usage, ai_omnirush, ai_preferences, ai_provider_router, guild_settings, levelup_card, logfare, shortcuts, usage_stats
 from core.game_guides import GAME_GUIDES, GAME_ORDER
 from core import localization, translation
-from core.messages import ITEMS_NOT_LOADED, MARKET_NOT_LOADED, WORKSHOP_NOT_LOADED
+from core.messages import CIRCULATION_NOT_LOADED, ITEMS_NOT_LOADED, MARKET_NOT_LOADED, WORKSHOP_NOT_LOADED
 from core.libretranslate import LibreTranslateClient, LibreTranslateError
 
 logger = logging.getLogger(__name__)
@@ -306,6 +306,18 @@ class GeneralCog(
             if value == "workshop_claim":
                 return await workshop_cog.open_claim(interaction)
             return await workshop_cog.show_craft(interaction)
+
+        if value in {"mining", "lottery", "lottery_buy", "steal"}:
+            circulation_cog = self.bot.get_cog("CirculationCog")
+            if circulation_cog is None:
+                return await self._safe_respond(interaction, CIRCULATION_NOT_LOADED)
+            if value == "mining":
+                return await circulation_cog.show_mining(interaction)
+            if value == "lottery":
+                return await circulation_cog.show_lottery(interaction)
+            if value == "lottery_buy":
+                return await circulation_cog.open_lottery_buy(interaction)
+            return await circulation_cog.open_steal(interaction)
 
         if value in {"market", "token_buy", "token_sell"}:
             market_cog = self.bot.get_cog("MarketCog")

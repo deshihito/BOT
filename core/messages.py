@@ -90,3 +90,14 @@ def craft_action_failed(reason: object) -> str:
 def workshop_action_failed(reason: object) -> str:
     """工房の操作が成立しなかったときの文（理由をそのまま続ける）。"""
     return f"{FAILED} {reason}"
+
+
+# ---------------------------------------------------------------- 循環系
+
+#: 循環 cog が読み込まれていないときのエラー（/general の dispatch で共用）。
+CIRCULATION_NOT_LOADED = "採掘・宝くじ・盗みの機能が読み込まれていません。"
+
+
+def circulation_action_failed(reason: object) -> str:
+    """採掘・宝くじ・盗みの操作が成立しなかったときの文（理由をそのまま続ける）。"""
+    return f"{FAILED} {reason}"
