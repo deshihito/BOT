@@ -26,7 +26,7 @@ class PanelEmbedTest(unittest.TestCase):
 
     def test_general_panel(self):
         self.assert_title_only(GeneralPanel(None), "一般機能")
-        self.assert_title_only(GeneralPanel(None, genre="economy"), "一般機能")
+        self.assert_title_only(GeneralPanel(None, genre="money"), "一般機能")
 
     def test_voice_panel(self):
         title = "<:vol:1563559476265488414> VC・音楽機能パネル"
@@ -52,7 +52,8 @@ class GenreDescriptionPolicyTest(unittest.TestCase):
     """ジャンル説明の削減方針: 列挙は空にし、残すのは読み取れない情報だけ。"""
 
     def test_general_genres(self):
-        self.assertEqual(GENERAL_GENRES["economy"][1], "")
+        self.assertEqual(GENERAL_GENRES["money"][1], "")
+        self.assertEqual(GENERAL_GENRES["rta"][1], "")
         self.assertEqual(GENERAL_GENRES["custom"][1], "")
         self.assertEqual(GENERAL_GENRES["translation"][1], "")
         self.assertEqual(GENERAL_GENRES["exp"][1], "チャット・VC・generalのEXPとレベル")
