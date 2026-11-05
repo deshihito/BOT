@@ -18,7 +18,6 @@ import logging
 import os
 import re
 import subprocess
-import sys
 import threading
 import time
 import wave
@@ -35,6 +34,7 @@ from discord.ext import voice_recv
 
 from core.legacy import Responder
 from core.voice_session import VoiceBusy, get_manager
+from core.voice_recv_patch import patch_voice_recv_client
 
 logger = logging.getLogger(__name__)
 
@@ -69,122 +69,9 @@ def we(description: str | None = None, title: str | None = None) -> discord.Embe
 
 
 # ============================================================
-# DAVE (Discord E2EE) 対応パッチ
+# DAVE (Discord E2EE) 対応パッチ（本体は core.voice_recv_patch に集約）
 # ============================================================
-try:
-    import davey  # type: ignore
-except Exception:
-    davey = None  # type: ignore[assignment]
-
-_UNSET = object()
-_media_type_audio = _UNSET
-
-
-def _media_type_classes(session=None) -> list:
-    found: list = []
-    def _add(cls) -> None:
-        if cls is not None and not any(cls is f for f in found):
-            found.append(cls)
-
-    if davey is not None:
-        _add(getattr(davey, "MediaType", None))
-    if session is not None:
-        mod = sys.modules.get(type(session).__module__)
-        if mod is not None:
-            _add(getattr(mod, "MediaType", None))
-    for name, mod in list(sys.modules.items()):
-        if mod is None or "dave" not in name.lower():
-            continue
-        _add(getattr(mod, "MediaType", None))
-    return found
-
-
-def _media_type_candidates(session=None) -> list:
-    candidates: list = []
-    seen: set = set()
-    def _add(value) -> None:
-        if value is None:
-            return
-        key = (id(type(value)), repr(value))
-        if key in seen:
-            return
-        seen.add(key)
-        candidates.append(value)
-
-    for cls in _media_type_classes(session):
-        for attr in ("audio", "Audio", "AUDIO"):
-            _add(getattr(cls, attr, None))
-        try:
-            _add(cls(0))
-        except Exception:
-            pass
-    _add(0)
-    return candidates
-
-
-def _patch_voice_recv_client() -> None:
-    vc_cls = voice_recv.VoiceRecvClient
-    if getattr(vc_cls, "_dave_patch_applied", False):
-        return
-    vc_cls._dave_patch_applied = True
-
-    def _get_dave_session(self):
-        connection = getattr(self, "_connection", None)
-        return getattr(connection, "dave_session", None) if connection else None
-
-    def dave_is_active(self) -> bool:
-        return _get_dave_session(self) is not None
-
-    def dave_is_ready(self) -> bool:
-        connection = getattr(self, "_connection", None)
-        if connection is not None:
-            state = getattr(connection, "is_e2ee", None)
-            if isinstance(state, bool):
-                return state
-            if callable(state):
-                try:
-                    return bool(state())
-                except Exception:
-                    pass
-        session = _get_dave_session(self)
-        return bool(getattr(session, "ready", False)) if session else False
-
-    def dave_decrypt(self, user_id: int, data: bytes) -> bytes:
-        global _media_type_audio
-        session = _get_dave_session(self)
-        if session is None:
-            return data
-
-        cached = _media_type_audio
-        if cached is not _UNSET:
-            try:
-                return session.decrypt(user_id, cached, data)
-            except TypeError:
-                _media_type_audio = _UNSET
-
-        last_error: Exception | None = None
-        for candidate in _media_type_candidates(session):
-            try:
-                result = session.decrypt(user_id, candidate, data)
-            except TypeError as e:
-                last_error = e
-                continue
-            _media_type_audio = candidate
-            return result
-
-        try:
-            return session.decrypt(user_id, data)
-        except TypeError as e:
-            last_error = e
-
-        raise RuntimeError(f"DAVE セッションの decrypt() 呼び出しに失敗しました: {last_error!r}")
-
-    vc_cls.dave_is_active = dave_is_active
-    vc_cls.dave_is_ready = dave_is_ready
-    vc_cls.dave_decrypt = dave_decrypt
-
-
-_patch_voice_recv_client()
+patch_voice_recv_client()
 
 NOTE_NAMES_SHARP = ["C", "C♯", "D", "D♯", "E", "F", "F♯", "G", "G♯", "A", "A♯", "B"]
 NOTE_NAMES_FLAT  = ["C", "D♭", "D", "E♭", "E", "F", "G♭", "G", "A♭", "A", "B♭", "B"]
