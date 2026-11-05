@@ -4236,18 +4236,24 @@ class GeneralCog(commands.Cog):
             was_in = before.channel is not None
             now_in = after.channel is not None
             levelup = None
+            tick_before = _as_float(user.get("vc_last_tick"))
+            changed = False
             if not was_in and now_in:
                 user["vc_last_tick"] = now
+                changed = tick_before != now
             elif was_in and not now_in:
                 level_before = _user_general_level(user)
-                _grant_vc_exp(user, now)
+                granted = _grant_vc_exp(user, now)
                 level_after = _user_general_level(user)
                 if level_after > level_before:
                     levelup = (level_before, level_after)
                 user["vc_last_tick"] = 0.0
+                # 付与があったか、計測中フラグが実際に下りたときだけ保存する
+                changed = granted or tick_before != 0.0
             else:
                 return
-            await _exp_save()
+            if changed:
+                await _exp_save()
             if levelup:
                 self._spawn(self._notify_levelup(
                     member.guild, member, levelup[0], levelup[1], fallback_channel=before.channel,
@@ -4274,11 +4280,14 @@ class GeneralCog(commands.Cog):
                     active.add((str(guild.id), str(uid)))
                     user = _exp_ensure(data, guild.id, uid)
                     level_before = _user_general_level(user)
-                    _grant_vc_exp(user, now)
+                    # 保存するのは実際にEXPが付与されたときだけにする。
+                    # vc_accum_sec / vc_last_tick の進行はメモリ上で保持され、
+                    # 次回の付与時 (または入退室時) の保存でまとめて永続化される。
+                    if _grant_vc_exp(user, now):
+                        touched = True
                     level_after = _user_general_level(user)
                     if level_after > level_before:
                         levelups.append((guild, uid, level_before, level_after, voice_channel))
-                    touched = True
             # VCにいないのに計測中のままの人(退室イベント取りこぼし等)は計測を止める
             for gid, users in data.items():
                 if not isinstance(users, dict):
@@ -4312,8 +4321,10 @@ class GeneralCog(commands.Cog):
             touched = False
             for guild in list(self.bot.guilds):
                 for uid in _iter_voice_user_ids(guild):
-                    _exp_ensure(data, guild.id, uid)["vc_last_tick"] = now
-                    touched = True
+                    user = _exp_ensure(data, guild.id, uid)
+                    if _as_float(user.get("vc_last_tick")) != now:
+                        user["vc_last_tick"] = now
+                        touched = True
             if touched:
                 await _exp_save()
         except Exception:
