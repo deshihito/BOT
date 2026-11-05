@@ -100,7 +100,10 @@ class EventTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn("events", keys)
 
     def test_defaults(self):
-        self.assertEqual(events.settings(1), {"enabled": False, "channel_id": None})
+        self.assertEqual(
+            events.settings(1),
+            {"enabled": False, "channel_id": None, "sync_scheduled": False},
+        )
 
     def test_build_embed_counts(self):
         embed = events.build_embed(entry(yes=[2, 3], no=[4], maybe=[5]))
