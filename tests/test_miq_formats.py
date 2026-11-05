@@ -400,6 +400,14 @@ class MiqHiddenVariationTest(unittest.TestCase):
             self.assertIn(g._miq_pick_card_rarity(rng), g._MIQ_CARD_RARITIES)
 
 
+# アゴアセット (透過PNG) はバイナリのため GitHub connector のテキスト push では
+# 送れず、別途リポジトリへ追加される。未配置のチェックアウトではアセット依存の
+# テストをスキップする (配置されれば自動で有効になる)。
+_AGO_DIR = Path(g.__file__).resolve().parent.parent / "assets" / "miq_ago"
+_AGO_PRESENT = _AGO_DIR.is_dir() and len(list(_AGO_DIR.glob("ago_*.png"))) == 5
+_needs_ago_assets = unittest.skipUnless(_AGO_PRESENT, "アゴアセット未配置のためスキップ")
+
+
 class MiqAgoOverlayTest(unittest.TestCase):
     """アゴのひょっこり合成 (隠し要素) の検証。"""
 
@@ -410,6 +418,7 @@ class MiqAgoOverlayTest(unittest.TestCase):
             _avatar_bytes(), "テスト本文", "名前", "user", font_path=self.font_path,
         )
 
+    @_needs_ago_assets
     def test_assets_are_five_transparent_pngs(self):
         images = g._miq_ago_images()
         self.assertEqual(len(images), 5)
@@ -418,6 +427,7 @@ class MiqAgoOverlayTest(unittest.TestCase):
             # 透過部分 (背景) と不透明部分 (キャラ) の両方がある
             self.assertEqual(im.split()[-1].getextrema(), (0, 255))
 
+    @_needs_ago_assets
     def test_force_overlay_changes_image(self):
         out = g.apply_ago_overlay(self.base, force=True, rng=random.Random(7))
         self.assertNotEqual(out, self.base)
@@ -441,6 +451,7 @@ class MiqAgoOverlayTest(unittest.TestCase):
     def test_rare_rate_is_two_percent(self):
         self.assertEqual(g.MIQ_AGO_RARE_RATE, 0.02)
 
+    @_needs_ago_assets
     def test_hit_ratio_roughly_matches_rate(self):
         # 乱数を差し替えて大まかな分布だけ確認する (厳密な統計検定はしない)
         class _SeqRng:
