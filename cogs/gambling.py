@@ -57,18 +57,43 @@ _SLOT_EVENT_LINES = {
 }
 
 
-def _slot_embed(cog: "GamblingCog", user_id: int) -> discord.Embed:
-    store = cog.store
-    state = store.user_state(str(user_id))
-    session = store.session(str(user_id))
-    embed = discord.Embed(title="スロット", color=GAMBLING_COLOR)
-    embed.description = (
+# ルール文は「ルール」ボタンの裏に隔離する（導線最適化 S9）。パネル本文は状態だけ。
+GAMBLING_RULES = {
+    "slot": (
         f"7リールスロット。1回 **{gambling_core.SLOT_BET:,} AGO** 固定で、"
         f"回数（{gambling_core.SLOT_MIN_SPINS}〜{gambling_core.SLOT_MAX_SPINS}）"
         "分のベットを先払いして回します。\n"
         "同じ数字が揃うほど配当が伸び、7が3つ以上揃うと確変（配当3倍）に"
         "入ります。6が5つ以上揃うと所持コイン全額没収、"
-        "連敗が続くと天井もあります。")
+        "連敗が続くと天井もあります。"),
+    "double": (
+        "ベットして、GOで倍率を伸ばすか、CASHOUTで確定するか選ぶゲーム。"
+        f"GO成功で倍率が {gambling_core.DOUBLE_MULTIPLIER_STEP} 倍ずつ伸び、"
+        "失敗するとベットは失われます。成功率は内部状態で変動します。"),
+    "blackjack": (
+        f"ディーラーとの対戦。ベットは {gambling_core.BLACKJACK_MIN_BET} AGO から。"
+        "21に近い方が勝ち、超えるとバーストで負けです。"
+        "ディーラーは17未満で引き続けます。勝てばベットの2倍が戻ります。"),
+    "dice": (
+        f"1〜範囲（{gambling_core.DICE_MIN_MAX}〜{gambling_core.DICE_MAX_MAX}）の"
+        "数字を1つ予想してベットし、出目が一致すれば ベット×範囲 が賞金です。"
+        f"ベットは {gambling_core.DICE_MIN_BET} AGO から。"),
+}
+
+_SLOT_RISK_LINE = "⚠️ 6が5つ以上揃うと所持コイン全額没収"
+
+
+def _rules_embed(game: str, title: str) -> discord.Embed:
+    return discord.Embed(title=f"{title}のルール", description=GAMBLING_RULES[game],
+                         color=GAMBLING_COLOR)
+
+
+def _slot_embed(cog: "GamblingCog", user_id: int) -> discord.Embed:
+    store = cog.store
+    state = store.user_state(str(user_id))
+    session = store.session(str(user_id))
+    embed = discord.Embed(title="スロット", color=GAMBLING_COLOR)
+    embed.set_footer(text=_SLOT_RISK_LINE)
     if session is not None and session["kind"] == "slot":
         embed.add_field(
             name="セッション",
@@ -120,10 +145,10 @@ class SlotView(discord.ui.View):
         message = await self.cog.execute_slot_spin(interaction.user.id)
         await interaction.followup.send(message)
 
-    @discord.ui.button(label="更新", style=discord.ButtonStyle.secondary)
-    async def refresh(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.edit_message(
-            embed=_slot_embed(self.cog, self.user_id), view=self)
+    @discord.ui.button(label="ルール", style=discord.ButtonStyle.secondary)
+    async def rules(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_message(
+            embed=_rules_embed("slot", "スロット"), ephemeral=True)
 
 
 # ---------------------------------------------------------------------------
@@ -141,10 +166,6 @@ def _double_status_text(cog: "GamblingCog", user_id: int) -> str:
 
 def _double_embed(cog: "GamblingCog", user_id: int) -> discord.Embed:
     embed = discord.Embed(title="ダブルアップ", color=GAMBLING_COLOR)
-    embed.description = (
-        "ベットして、GOで倍率を伸ばすか、CASHOUTで確定するか選ぶゲーム。"
-        f"GO成功で倍率が {gambling_core.DOUBLE_MULTIPLIER_STEP} 倍ずつ伸び、"
-        "失敗するとベットは失われます。成功率は内部状態で変動します。")
     embed.add_field(name="状態", value=_double_status_text(cog, user_id), inline=False)
     return embed
 
@@ -199,10 +220,10 @@ class DoubleView(discord.ui.View):
         message = await self.cog.execute_double_cashout(interaction.user.id)
         await interaction.followup.send(message)
 
-    @discord.ui.button(label="更新", style=discord.ButtonStyle.secondary)
-    async def refresh(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.edit_message(
-            embed=_double_embed(self.cog, self.user_id), view=self)
+    @discord.ui.button(label="ルール", style=discord.ButtonStyle.secondary)
+    async def rules(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_message(
+            embed=_rules_embed("double", "ダブルアップ"), ephemeral=True)
 
 
 # ---------------------------------------------------------------------------
@@ -211,10 +232,6 @@ class DoubleView(discord.ui.View):
 
 def _blackjack_embed(cog: "GamblingCog", user_id: int) -> discord.Embed:
     embed = discord.Embed(title="ブラックジャック", color=GAMBLING_COLOR)
-    embed.description = (
-        f"ディーラーとの対戦。ベットは {gambling_core.BLACKJACK_MIN_BET} AGO から。"
-        "21に近い方が勝ち、超えるとバーストで負けです。"
-        "ディーラーは17未満で引き続けます。勝てばベットの2倍が戻ります。")
     session = cog.store.session(str(user_id))
     if session is not None and session["kind"] == "blackjack":
         total = gambling_core.calc_total(session["player"])
@@ -251,10 +268,10 @@ class BlackjackView(discord.ui.View):
         message = await self.cog.execute_blackjack_stand(interaction.user.id)
         await interaction.followup.send(message)
 
-    @discord.ui.button(label="更新", style=discord.ButtonStyle.secondary)
-    async def refresh(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.edit_message(
-            embed=_blackjack_embed(self.cog, self.user_id), view=self)
+    @discord.ui.button(label="ルール", style=discord.ButtonStyle.secondary)
+    async def rules(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_message(
+            embed=_rules_embed("blackjack", "ブラックジャック"), ephemeral=True)
 
 
 # ---------------------------------------------------------------------------
@@ -263,10 +280,6 @@ class BlackjackView(discord.ui.View):
 
 def _dice_embed(cog: "GamblingCog", user_id: int) -> discord.Embed:
     embed = discord.Embed(title="ダイス（数字当て）", color=GAMBLING_COLOR)
-    embed.description = (
-        f"1〜範囲（{gambling_core.DICE_MIN_MAX}〜{gambling_core.DICE_MAX_MAX}）の"
-        "数字を1つ予想してベットし、出目が一致すれば ベット×範囲 が賞金です。"
-        f"ベットは {gambling_core.DICE_MIN_BET} AGO から。")
     return embed
 
 
@@ -308,6 +321,11 @@ class DiceView(discord.ui.View):
     @discord.ui.button(label="ダイスを振る", style=discord.ButtonStyle.primary)
     async def roll(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.send_modal(DiceModal(self.cog))
+
+    @discord.ui.button(label="ルール", style=discord.ButtonStyle.secondary)
+    async def rules(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_message(
+            embed=_rules_embed("dice", "ダイス（数字当て）"), ephemeral=True)
 
 
 # ---------------------------------------------------------------------------
