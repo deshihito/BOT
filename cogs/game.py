@@ -396,7 +396,7 @@ class GameHub(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
 
-    @app_commands.command(name="game", description="Browse and start party games and dungeon games")
+    @app_commands.command(name="game", description="パーティーゲームとダンジョンのルール確認と開始")
     async def game(self, interaction: discord.Interaction):
         view = GameHubView(self)
         await interaction.response.send_message(view=as_panel_v2(view), ephemeral=True)
