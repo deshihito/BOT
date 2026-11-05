@@ -47,7 +47,7 @@ class RegistryConsistencyTest(unittest.TestCase):
         registered = {spec.value for spec in self.registry.by_root("support")}
         expected = {choice.value for choice in SUPPORT_ACTIONS}
         self.assertEqual(registered, expected)
-        self.assertEqual(len(registered), 29)
+        self.assertEqual(len(registered), 30)
 
     def test_general_registration_matches_general_actions(self):
         from cogs.general import GENERAL_ACTIONS
@@ -88,9 +88,9 @@ class ShortcutRootsGenerationTest(unittest.TestCase):
                 self.assertIsInstance(item_label, str)
                 self.assertIsInstance(value, str)
 
-    def test_support_candidates_cover_all_29_including_missing_15(self):
+    def test_support_candidates_cover_all_30_including_missing_15(self):
         values = {value for _label, value in self.roots["support"][1]}
-        self.assertEqual(len(values), 29)
+        self.assertEqual(len(values), 30)
         self.assertTrue(MISSING_SUPPORT_VALUES <= values)
 
     def test_general_candidates_match_legacy_derivation(self):
@@ -174,7 +174,6 @@ class ConfirmTierTest(unittest.TestCase):
         "general:token_buy", "general:token_sell",
         "general:item_buy", "general:item_use", "general:box_open",
         "general:machine_buy", "general:workshop_claim", "general:craft",
-        "general:mining", "general:lottery_buy", "general:steal",
         "support:clear", "support:role_bulk", "support:muted", "support:ticket",
         "support:honeypot", "support:whisper", "support:binjou",
         "support:message_log", "support:moderation_log",

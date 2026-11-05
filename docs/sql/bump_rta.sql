@@ -5,6 +5,7 @@ CREATE TABLE IF NOT EXISTS public.bump_rta_settings (
     updated_at timestamptz NOT NULL DEFAULT now()
 );
 ALTER TABLE public.bump_rta_settings ADD COLUMN IF NOT EXISTS notifications_enabled boolean NOT NULL DEFAULT true;
+ALTER TABLE public.bump_rta_settings ADD COLUMN IF NOT EXISTS role_id text;
 ALTER TABLE public.bump_rta_settings DROP COLUMN IF EXISTS channel_id;
 ALTER TABLE public.bump_rta_settings DROP COLUMN IF EXISTS disboard_bot_id;
 ALTER TABLE public.bump_rta_settings DROP COLUMN IF EXISTS disoku_bot_id;

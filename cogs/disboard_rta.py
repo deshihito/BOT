@@ -37,10 +37,17 @@ from core.api_retry import run_with_retry
 logger = logging.getLogger(__name__)
 DISBOARD_BOT_ID = 302050872383242240
 DISOKU_BOT_ID = 761562078095867916
+SABACHA_BOT_ID = 1233072112139501608   # 鯖ちゃんねる (discord.sabach.jp)
+TAKASUMI_BOT_ID = 981314695543783484   # TakasumiBOT
 
 # Time between the service's success message and the moment the command can be
 # used again.  (Dis速's /up interval may differ from Disboard's; change it here.)
-COOLDOWN = {"bump": timedelta(hours=2), "up": timedelta(hours=2)}
+COOLDOWN = {
+    "bump": timedelta(hours=2),
+    "up": timedelta(hours=2),
+    "vote": timedelta(hours=2),       # 鯖ちゃんねる /vote (次回時刻が埋め込みにあればそちら優先)
+    "takasumi": timedelta(hours=1),   # TakasumiBOT up (応答本文「1時間後に通知します」)
+}
 # Which timestamp the cooldown is counted from:
 #   "latest"      - message Snowflake, or the edit time if the service answered
 #                   with a deferred response and edited it afterwards (default)
@@ -65,10 +72,13 @@ ACTION_CHOICES = [
     app_commands.Choice(name="状態", value="status"),
     app_commands.Choice(name="通知オン", value="on"),
     app_commands.Choice(name="通知オフ", value="off"),
+    app_commands.Choice(name="メンションロール設定", value="role"),
 ]
 EVENT_TYPE_CHOICES = [
     app_commands.Choice(name="bump", value="bump"),
     app_commands.Choice(name="up", value="up"),
+    app_commands.Choice(name="vote", value="vote"),
+    app_commands.Choice(name="takasumi", value="takasumi"),
 ]
 LEADERBOARD_SCOPE_CHOICES = [
     app_commands.Choice(name="自分のベスト", value="me"),
@@ -192,11 +202,55 @@ def _timing_summary(message):
         return "timing=unavailable"
 
 
+_JST = timezone(timedelta(hours=9))
+
+
+def _sabacha_next_time(embeds, event_at):
+    """鯖ちゃんねるの成功Embedの第1フィールドから次回可能時刻を読む。読めなければNone。
+
+    対応形式: Discordタイムスタンプ <t:...> / ISO8601 / YYYY/MM/DD HH:MM (JSTとして解釈)。
+    イベント時刻より後・24時間以内だけを採用する (外れた値は壊れたデータとして無視)。
+    """
+    for embed in embeds or ():
+        fields = getattr(embed, "fields", ()) or ()
+        if not fields:
+            continue
+        field = fields[0]
+        text = " ".join(str(getattr(field, attr, "") or "") for attr in ("name", "value"))
+        candidate = None
+        match = re.search(r"<t:(\d+)", text)
+        if match:
+            candidate = datetime.fromtimestamp(int(match.group(1)), tz=timezone.utc)
+        else:
+            match = re.search(r"\d{4}[-/]\d{1,2}[-/]\d{1,2}[ T]\d{1,2}:\d{2}(?::\d{2})?", text)
+            if match:
+                raw = match.group(0)
+                parsed = _parse_dt(raw)
+                if parsed is not None:
+                    candidate = parsed
+                else:
+                    try:
+                        naive = datetime.strptime(raw.replace("/", "-").replace("T", " "), "%Y-%m-%d %H:%M:%S")
+                    except ValueError:
+                        try:
+                            naive = datetime.strptime(raw.replace("/", "-").replace("T", " "), "%Y-%m-%d %H:%M")
+                        except ValueError:
+                            naive = None
+                    if naive is not None:
+                        candidate = naive.replace(tzinfo=_JST)
+        if candidate is not None and event_at < candidate <= event_at + timedelta(hours=24):
+            return candidate
+        return None
+    return None
+
+
 def detect_event(message):
-    """Return (kind, user_id, event_at) for an official successful service embed.
+    """Return (kind, user_id, event_at, due_at) for an official successful service embed.
 
     The event time is the Snowflake timestamp of the message (or of its edit for
-    deferred responses); see ``REMINDER_ANCHOR``.
+    deferred responses); see ``REMINDER_ANCHOR``.  ``due_at`` is set only when
+    the service itself states the next available time (鯖ちゃんねる); otherwise
+    None and the caller adds ``COOLDOWN[kind]``.
     """
     if not getattr(message, "guild", None):
         return None
@@ -232,13 +286,29 @@ def detect_event(message):
             getattr(message, "webhook_id", None),
         ) if value is not None
     }
-    is_disoku = DISOKU_BOT_ID in {int(value) for value in app_ids if value.isdigit()} and disoku_signature
+    app_id_set = {int(value) for value in app_ids if value.isdigit()}
+    is_disoku = DISOKU_BOT_ID in app_id_set and disoku_signature
     is_disboard = author_id == DISBOARD_BOT_ID
-    if not (is_disboard or is_disoku):
+    # 鯖ちゃんねる: 送信者Bot ID + 成功Embedフッター 'voted'
+    is_sabacha = SABACHA_BOT_ID in app_id_set and any(
+        "voted" in (getattr(getattr(embed, "footer", None), "text", "") or "")
+        for embed in embeds
+    )
+    # TakasumiBOT: 送信者Bot ID + Embed本文の成功文 (実地観測 2026-11-05)
+    is_takasumi = TAKASUMI_BOT_ID in app_id_set and any(
+        "UPしました" in (getattr(embed, "description", "") or "")
+        and "表示順位が更新されました" in (getattr(embed, "description", "") or "")
+        for embed in embeds
+    )
+    if not (is_disboard or is_disoku or is_sabacha or is_takasumi):
         return None
 
 
-    if is_disboard:
+    if is_sabacha:
+        kind = "vote"
+    elif is_takasumi:
+        kind = "takasumi"
+    elif is_disboard:
         if "表示順をアップしたよ" not in text and "bump done" not in folded:
             return None
         kind = "bump"
@@ -271,7 +341,8 @@ def detect_event(message):
     except (TypeError, ValueError, OverflowError):
         logger.exception("Could not decode message Snowflake timestamp: %s", getattr(message, "id", None))
         return None
-    return kind, int(user_id) if user_id is not None else None, event_at
+    due_at = _sabacha_next_time(embeds, event_at) if kind == "vote" else None
+    return kind, int(user_id) if user_id is not None else None, event_at, due_at
 
 
 class _BoundedSet:
@@ -494,6 +565,7 @@ class BumpRta(commands.Cog):
         self._executor = ThreadPoolExecutor(max_workers=4, thread_name_prefix="bumprta-db")
         self._ntp_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="bumprta-ntp")
         self._enabled_cache = {}
+        self._role_cache = {}
         self._locks = {}
         self._processed_messages = _BoundedSet(5000)
         self._done = _BoundedSet(5000)       # reminders finished in this process
@@ -544,6 +616,33 @@ class BumpRta(commands.Cog):
         except Exception:
             logger.exception("bump_rta_settings read failed; using default enabled state: guild=%s", gid)
             return True
+
+    async def _role_id(self, guild_id):
+        """通知時にメンションするロールID (任意設定・未設定/取得失敗時は None)。"""
+        gid = str(guild_id)
+        if gid in self._role_cache:
+            return self._role_cache[gid]
+        if self.db is None:
+            return None
+        try:
+            result = await self._call(lambda: self.db.table("bump_rta_settings").select(
+                "role_id").eq("guild_id", gid).limit(1).execute())
+            raw = result.data[0].get("role_id") if result.data else None
+            role_id = int(raw) if raw is not None and str(raw).isdigit() else None
+            self._role_cache[gid] = role_id
+            return role_id
+        except Exception:
+            logger.debug("bump_rta_settings role read failed: guild=%s", gid, exc_info=True)
+            return None
+
+    async def _set_role_id(self, guild_id, role_id):
+        gid = str(guild_id)
+        self._role_cache[gid] = role_id
+        if self.db is None:
+            return
+        await self._call(lambda: self.db.table("bump_rta_settings").upsert(
+            {"guild_id": gid, "role_id": str(role_id) if role_id else None},
+            on_conflict="guild_id").execute())
 
     async def leaderboard(self, interaction: discord.Interaction, event_type: str = "bump", scope: str = "local"):
         """/leaderboard から呼び出す bump/up RTA ランキング。"""
@@ -599,9 +698,21 @@ class BumpRta(commands.Cog):
         selected_action = action.value
         if selected_action == "status":
             enabled = await self._is_enabled(interaction.guild_id)
+            role_id = await self._role_id(interaction.guild_id)
+            role_text = f"<@&{role_id}>" if role_id else "なし"
             return await interaction.response.send_message(
                 embed=_white_embed(
-                    f"bump/up通知とRTA計測: **{'オン' if enabled else 'オフ'}**（初期状態: オン）"),
+                    f"bump/up通知とRTA計測: **{'オン' if enabled else 'オフ'}**（初期状態: オン）"
+                    f"\n通知メンションロール: {role_text}"),
+                ephemeral=True)
+        if selected_action == "role":
+            if not getattr(getattr(interaction.user, "guild_permissions", None), "manage_guild", False):
+                return await interaction.response.send_message(
+                    embed=_white_embed("この操作にはサーバー管理権限が必要です。"), ephemeral=True)
+            current_role = await self._role_id(interaction.guild_id)
+            return await interaction.response.send_message(
+                embed=_white_embed("通知時にメンションするロールを選んでください（選択を外すと解除）。"),
+                view=BumpRtaRoleView(self, interaction.guild_id, current_role),
                 ephemeral=True)
         if selected_action in {"on", "off"}:
             if not getattr(getattr(interaction.user, "guild_permissions", None), "manage_guild", False):
@@ -681,12 +792,12 @@ class BumpRta(commands.Cog):
             if rem.guild_id == guild_id:
                 self._cancel(rem.message_id)
 
-    def _register_reminder(self, message, user_id, kind, event_at):
+    def _register_reminder(self, message, user_id, kind, event_at, due_at=None):
         """In-memory part of scheduling.  Cannot fail because of the database."""
         rem = _Reminder(
             message_id=str(message.id), guild_id=message.guild.id, channel_id=message.channel.id,
             user_id=int(user_id) if user_id else None, kind=kind,
-            due_ts=(event_at + COOLDOWN[kind]).timestamp(),
+            due_ts=(due_at or (event_at + COOLDOWN[kind])).timestamp(),
         )
         superseded = []
         for other in list(self._reminders.values()):
@@ -769,9 +880,9 @@ class BumpRta(commands.Cog):
             prepared = await self._prepare(rem)
             if prepared is None:
                 return
-            channel, embed, reference = prepared
+            channel, embed, reference, role_id = prepared
             await self._sleep_until(lambda: self._fire_target(rem))
-            await self._fire(rem, channel, embed, reference)
+            await self._fire(rem, channel, embed, reference, role_id)
         except asyncio.CancelledError:
             raise
         except Exception:
@@ -810,7 +921,8 @@ class BumpRta(commands.Cog):
         if channel is _GONE:
             await self._finish(rem, "channel unavailable", logging.WARNING)
             return None
-        noun = "bump" if rem.kind == "bump" else "up"
+        role_id = await self._role_id(rem.guild_id)
+        noun = rem.kind if rem.kind in ("bump", "vote") else "up"
         # Keep the reminder wording exactly aligned with the supplied original.
         embed = discord.Embed(
             title=f"{noun.upper()} できます",
@@ -825,9 +937,9 @@ class BumpRta(commands.Cog):
             message_id=int(rem.message_id), channel_id=rem.channel_id,
             guild_id=rem.guild_id, fail_if_not_exists=False,
         )
-        return channel, embed, reference
+        return channel, embed, reference, role_id
 
-    async def _fire(self, rem, channel, embed, reference):
+    async def _fire(self, rem, channel, embed, reference, role_id=None):
         mid = rem.message_id
         if mid in self._done:
             return
@@ -851,7 +963,11 @@ class BumpRta(commands.Cog):
                 try:
                     sent = await self._send_timed(
                         channel, embed=embed, reference=reference, mention_author=False,
-                        allowed_mentions=discord.AllowedMentions.none(),
+                        content=f"<@&{role_id}>" if role_id else None,
+                        allowed_mentions=(
+                            discord.AllowedMentions(roles=[discord.Object(id=role_id)])
+                            if role_id else discord.AllowedMentions.none()
+                        ),
                     )
                 except discord.HTTPException as exc:
                     if exc.status in PERMANENT_HTTP_STATUS:
@@ -1008,7 +1124,7 @@ class BumpRta(commands.Cog):
         event = detect_event(message)
         if event is None:
             return
-        kind, user_id, event_at = event
+        kind, user_id, event_at, due_at = event
         guild_id = message.guild.id
         if not await self._is_enabled(guild_id):
             return
@@ -1016,7 +1132,7 @@ class BumpRta(commands.Cog):
         lock = self._locks.setdefault((guild_id, kind), asyncio.Lock())
         async with lock:
             # Schedule in memory first: the notification must not depend on the database.
-            rem, superseded = self._register_reminder(message, user_id, kind, event_at)
+            rem, superseded = self._register_reminder(message, user_id, kind, event_at, due_at)
             if self.db is None:
                 return
             try:
@@ -1105,6 +1221,46 @@ class BumpRta(commands.Cog):
                 "Failed to send RTA result embed: guild=%s kind=%s message=%s elapsed_ms=%s",
                 gid, kind, getattr(message, "id", None), elapsed,
             )
+
+
+class BumpRtaRoleView(discord.ui.View):
+    """bump/up通知のメンションロール設定 (任意)。"""
+
+    def __init__(self, cog, guild_id, current_role_id):
+        super().__init__(timeout=300)
+        self.cog = cog
+        self.guild_id = guild_id
+        select = discord.ui.RoleSelect(
+            placeholder="メンションするロール",
+            min_values=0,
+            max_values=1,
+            default_values=(
+                [discord.SelectDefaultValue(id=current_role_id, type=discord.SelectDefaultValueType.role)]
+                if current_role_id else []
+            ),
+        )
+        select.callback = self._on_select
+        self.add_item(select)
+
+    async def _on_select(self, interaction: discord.Interaction):
+        if not getattr(getattr(interaction.user, "guild_permissions", None), "manage_guild", False):
+            return await interaction.response.send_message(
+                embed=_white_embed("この操作にはサーバー管理権限が必要です。"), ephemeral=True)
+        select = self.children[0]
+        role = select.values[0] if select.values else None
+        if role is not None and (role.is_default() or role.managed):
+            return await interaction.response.send_message(
+                embed=_white_embed("@everyone や連携サービス用のロールは指定できません。"), ephemeral=True)
+        await interaction.response.defer(ephemeral=True)
+        try:
+            await self.cog._set_role_id(self.guild_id, role.id if role else None)
+        except Exception:
+            logger.exception("bump_rta role update failed: guild=%s", self.guild_id)
+            return await interaction.followup.send(
+                embed=_white_embed("設定の保存に失敗しました。時間をおいて再度お試しください。"),
+                ephemeral=True)
+        text = f"通知メンションロールを <@&{role.id}> にしました。" if role else "通知メンションロールを解除しました。"
+        return await interaction.followup.send(embed=_white_embed(text), ephemeral=True)
 
 
 async def setup(bot):
