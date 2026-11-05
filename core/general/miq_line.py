@@ -7,7 +7,7 @@ from .miq import (
     MIQ_LINE_MAX_IMAGES, MIQ_LINE_MAX_MESSAGES, MIQ_NEW_H, MIQ_NEW_W,
     _MIQ_CUSTOM_EMOJI_TOKEN, _MIQ_EMOJI_SIZE,
     _miq_clean_text, _miq_display_text, _miq_emoji_font_path, _miq_emoji_width,
-    _miq_fallback_fonts, _miq_is_emoji_unit, _miq_is_image_attachment,
+    _miq_fallback_fonts, _miq_fit, _miq_is_emoji_unit, _miq_is_image_attachment,
     _miq_load_font, _miq_mix, _miq_open_avatar, _miq_render_emoji_unit,
     _miq_save_png, _miq_split_units, _miq_sticker_renderable, _miq_unit_bases,
     _miq_unit_font, _miq_unit_width, _miq_wrap, miq_is_refusing,
@@ -15,15 +15,16 @@ from .miq import (
 )
 from .meme import MEME_MAX_IMAGE_BYTES
 from .miq_styles import (
-    _miq_date_str, render_miq_blueprint_png, render_miq_gif,
+    _miq_date_str, _miq_heart, _miq_rng, _miq_truncate,
+    render_miq_blueprint_png, render_miq_gif, render_miq_luxury_png,
     render_miq_manga_png, render_miq_music_png,
-    render_miq_news_png, render_miq_pixel_png, render_miq_rpg_png,
-    render_miq_xpost_png,
+    render_miq_news_png, render_miq_novel_png, render_miq_pixel_png,
+    render_miq_rpg_png, render_miq_tate_png, render_miq_xpost_png,
 )
 from .miq_cards import (
-    render_miq_card_png, render_miq_dark_png, render_miq_neon_png,
-    render_miq_note_png, render_miq_pastel_png, render_miq_pop_png,
-    render_miq_ticket_png,
+    render_miq_card_png, render_miq_dark_png, render_miq_glass_png,
+    render_miq_neon_png, render_miq_note_png, render_miq_pastel_png,
+    render_miq_pop_png, render_miq_ticket_png,
 )
 
 _MIQ_FORMAT_RENDERERS = {
@@ -41,6 +42,10 @@ _MIQ_FORMAT_RENDERERS = {
     "pastel": render_miq_pastel_png,
     "ticket": render_miq_ticket_png,
     "note": render_miq_note_png,
+    "luxury": render_miq_luxury_png,
+    "tate": render_miq_tate_png,
+    "novel": render_miq_novel_png,
+    "glass": render_miq_glass_png,
 }
 
 # 日付 (対象メッセージの作成日) を date_str として受け取るフォーマット
@@ -551,6 +556,106 @@ def render_miq_line_png(entries, *, font_path: str | None = None) -> bytes:
     return _miq_save_png(img)
 
 
+def render_miq_pair_png(entries, *, font_path: str | None = None) -> bytes:
+    """ペアハート風: ピンク地に小ハートを散らし、2人の丸アバターを大きなハートでつなぐ。
+
+    entries は LINE風と同じ dict 形式 (name/username/text/avatar_bytes 等)。
+    直近2件を使い、古い方 (返信先) が左、新しい方 (対象) が右。
+    1件だけの場合は単独レイアウト (アバター中央+ハート+吹き出し中央) になる。
+    テキストが空のエントリは吹き出しを省略し、アバターと名前だけ描く。
+    """
+    from PIL import Image, ImageDraw, ImageFilter, ImageOps
+
+    W, H = MIQ_NEW_W, MIQ_NEW_H
+    items = list(entries or [])[-2:]
+
+    # 背景: ピンクの縦グラデーション
+    grad = Image.new("RGB", (1, H))
+    for yy in range(H):
+        grad.putpixel((0, yy), _miq_mix((253, 221, 234), (247, 178, 205), yy / max(1, H - 1)))
+    img = grad.resize((W, H))
+
+    # 小さなハートを散らす (本文から決定的に)
+    seed_text = "".join(str(_miq_line_field(e, "text") or "") for e in items)
+    hearts = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    hd = ImageDraw.Draw(hearts)
+    hrng = _miq_rng(seed_text, "pair-hearts")
+    for _ in range(30):
+        hx, hy = hrng.randrange(20, W - 20), hrng.randrange(16, H - 16)
+        hs = hrng.choice((13, 18, 24, 30))
+        hc = hrng.choice(((244, 114, 182, 110), (249, 168, 212, 130), (236, 72, 153, 80), (255, 255, 255, 120)))
+        _miq_heart(hd, hx, hy, hs, hc)
+    img = Image.alpha_composite(img.convert("RGBA"), hearts).convert("RGB")
+    d = ImageDraw.Draw(img)
+
+    pink = (219, 39, 119)
+    ink = (74, 34, 54)
+    sub = (156, 110, 130)
+
+    def draw_person(cx: int, cy: int, size: int, entry):
+        """丸アバター (白リング) + 名前 (ピンク) + @ID を (cx, cy) 中心に描く。"""
+        d.ellipse([cx - size // 2 - 8, cy - size // 2 - 8, cx + size // 2 + 8, cy + size // 2 + 8], fill=(255, 255, 255))
+        av_img = _miq_line_avatar_image(entry)
+        av = ImageOps.fit(av_img.convert("RGB"), (size, size), Image.LANCZOS)
+        circle = Image.new("L", (size, size), 0)
+        ImageDraw.Draw(circle).ellipse([0, 0, size, size], fill=255)
+        img.paste(av, (cx - size // 2, cy - size // 2), circle)
+        name_font = _miq_load_font(font_path, 30)
+        shown = _miq_display_text(_miq_line_field(entry, "name") or "") or "unknown"
+        shown = _miq_truncate(d, shown, name_font, 330)
+        d.text((cx, cy + size // 2 + 18), shown, font=name_font, fill=pink, anchor="ma",
+               stroke_width=1, stroke_fill=pink)
+        user = _miq_display_text(_miq_line_field(entry, "username") or "")
+        if user:
+            d.text((cx, cy + size // 2 + 58), f"@{user}", font=_miq_load_font(font_path, 21), fill=sub, anchor="ma")
+
+    def draw_heart(cx: int, cy: int, size: int):
+        """大きなピンクハート (白ハート内包+白いグロー) を描く。"""
+        # ぼかしで縁に黒が混ざらないよう、透過部分も白で塗っておく
+        layer = Image.new("RGBA", (W, H), (255, 255, 255, 0))
+        _miq_heart(ImageDraw.Draw(layer), cx, cy, int(size * 1.22), (255, 255, 255, 235))
+        glow = layer.filter(ImageFilter.GaussianBlur(13))
+        base = Image.alpha_composite(img.convert("RGBA"), glow)
+        base = Image.alpha_composite(base, glow)
+        dd = ImageDraw.Draw(base)
+        _miq_heart(dd, cx, cy, size, (236, 64, 122))
+        _miq_heart(dd, cx - size * 0.16, cy - size * 0.14, size * 0.38, (255, 255, 255))
+        return base.convert("RGB")
+
+    def draw_bubble(box, entry):
+        """白いピル型吹き出しに本文を中央揃えで描く。テキストが無ければ描かない。"""
+        text = str(_miq_line_field(entry, "text") or "")
+        if not text.strip():
+            return
+        d.rounded_rectangle(box, radius=44, fill=(255, 255, 255))
+        font, wrapped, lh, _size = _miq_fit(
+            d, text, font_path, box[2] - box[0] - 76, box[3] - box[1] - 30,
+            max_size=34, min_size=16,
+        )
+        cx = (box[0] + box[2]) // 2
+        ty = (box[1] + box[3]) // 2 - (len(wrapped) * lh) // 2
+        for line in wrapped:
+            if line:
+                d.text((cx, ty), line, font=font, fill=ink, anchor="ma")
+            ty += lh
+
+    if len(items) >= 2:
+        left, right = items[0], items[1]
+        draw_person(300, 196, 190, left)
+        draw_person(900, 196, 190, right)
+        img = draw_heart(600, 208, 235)
+        d = ImageDraw.Draw(img)
+        draw_bubble([56, 452, 566, 586], left)
+        draw_bubble([634, 452, 1144, 586], right)
+    elif items:
+        entry = items[0]
+        draw_person(600, 190, 200, entry)
+        img = draw_heart(806, 118, 118)
+        d = ImageDraw.Draw(img)
+        draw_bubble([250, 452, 950, 586], entry)
+    return _miq_save_png(img)
+
+
 async def miq_collect_line_chain(message, *, max_messages: int = MIQ_LINE_MAX_MESSAGES, channel_resolver=None) -> list:
     """対象メッセージから reference を辿り、時系列順 (古い→新しい) のチェーンを返す。
 
@@ -658,6 +763,21 @@ class MiqLineMixin:
         return None
 
 
+    async def _miq_render_pair_file(self, entries: list, prefs: dict) -> discord.File | None:
+        """ペアハート風エントリ (dict のリスト) から discord.File を作る。"""
+        opts = miq_render_options(prefs, self.bot.user)
+        try:
+            async with self._levelup_sem:
+                data = await asyncio.to_thread(render_miq_pair_png, entries, font_path=opts.get("font_path"))
+                data = await asyncio.to_thread(apply_ago_overlay, data)
+            return discord.File(io.BytesIO(data), filename="quote-pair.png")
+        except ImportError:
+            self._miq_pillow_missing()
+        except Exception:
+            logger.exception("MIQ: ペアハート風引用画像の生成に失敗しました")
+        return None
+
+
     async def _miq_line_segments_for(self, msg, emoji_cache: dict, limit: int) -> list:
         """メッセージの生 content から LINE風用セグメント列を作る。
 
@@ -762,6 +882,44 @@ class MiqLineMixin:
         return await self._miq_render_line_file(entries, prefs)
 
 
+    async def _miq_build_pair_file(
+        self, chain_messages: list, prefs: dict, size_limit: int | None = None,
+    ) -> discord.File | None:
+        """返信チェーンの直近2件からペアハート風の引用画像を作る。
+
+        古い方 (返信先) が左、新しい方 (対象) が右。チェーンが1件だけなら
+        単独レイアウトになる。アバターは作者ごとに1回だけ取得する。
+        """
+        entries: list = []
+        avatar_cache: dict = {}
+        emoji_cache: dict = {}
+        limit = min(int(size_limit or MEME_MAX_IMAGE_BYTES), MEME_MAX_IMAGE_BYTES)
+        for msg in chain_messages:
+            segments = await self._miq_line_segments_for(msg, emoji_cache, limit)
+            text = _miq_clean_text("".join(
+                seg.get("text", "") if seg.get("type") == "text" else f":{seg.get('name') or 'emoji'}:"
+                for seg in segments
+            ))
+            author = getattr(msg, "author", None)
+            author_key = getattr(author, "id", None)
+            if author_key not in avatar_cache:
+                avatar_cache[author_key] = (
+                    await self._miq_fetch_avatar_bytes(author, size=256) if author is not None else None
+                )
+            entries.append({
+                "name": getattr(author, "display_name", None) or getattr(author, "name", "") or "",
+                "username": getattr(author, "name", "") or "",
+                "text": text,
+                "created_at": getattr(msg, "created_at", None),
+                "avatar_bytes": avatar_cache[author_key],
+                "author_key": author_key,
+            })
+        entries = entries[-2:]
+        if not entries:
+            return None
+        return await self._miq_render_pair_file(entries, prefs)
+
+
     async def _miq_build_file(
         self, author, text: str, prefs: dict, size_limit: int | None,
         *, created_at=None,
@@ -799,6 +957,18 @@ class MiqLineMixin:
                     )
                     data = await asyncio.to_thread(apply_ago_overlay, data)
                     return discord.File(io.BytesIO(data), filename="quote-line.png")
+                if fmt == "pair":
+                    # チェーンが無い単体呼び出し (プレビュー等) は1件の単独レイアウトにする
+                    entries = [{
+                        "name": name, "username": username, "text": text,
+                        "avatar_bytes": avatar_bytes,
+                        "author_key": getattr(author, "id", None),
+                    }]
+                    data = await asyncio.to_thread(
+                        render_miq_pair_png, entries, font_path=opts.get("font_path"),
+                    )
+                    data = await asyncio.to_thread(apply_ago_overlay, data)
+                    return discord.File(io.BytesIO(data), filename="quote-pair.png")
                 renderer = _MIQ_FORMAT_RENDERERS.get(fmt)
                 if renderer is not None:
                     kwargs = {"font_path": opts.get("font_path")}
@@ -855,4 +1025,23 @@ class MiqLineMixin:
             if chained_id is not None and chained_id != requester_id and miq_is_refusing(chained_id):
                 return None, True
         file = await self._miq_build_line_file(chain, prefs, size_limit)
+        return file, False
+
+
+    async def _miq_pair_file_for(
+        self, target, requester_id: int, prefs: dict, size_limit: int | None,
+    ) -> tuple[discord.File | None, bool]:
+        """ペアハート風: LINE風と同じくチェーンを収集し、全作者の引用拒否を確認してから生成する。
+
+        戻り値 (file, refused)。refused=True の時は拒否により中止したことを表す。
+        """
+        chain = await miq_collect_line_chain(
+            target, channel_resolver=self._miq_line_channel_resolver,
+        )
+        for chained in chain:
+            chained_author = getattr(chained, "author", None)
+            chained_id = getattr(chained_author, "id", None)
+            if chained_id is not None and chained_id != requester_id and miq_is_refusing(chained_id):
+                return None, True
+        file = await self._miq_build_pair_file(chain, prefs, size_limit)
         return file, False

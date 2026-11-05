@@ -1,10 +1,11 @@
 """MIQ の新フォーマット (漫画風/音楽再生風/LINE風/ニュース速報風/X投稿風/RPG風/
 設計図風/レトロゲーム風/トレカ風/ネオン風/ダーク風/ポップ風/パステル風/
-チケット風/ノート風) のテスト。
+チケット風/ノート風/ペアハート風/ゴールド縦書き風/和風縦書き風/小説風/
+グラスカード風) のテスト。
 
 Discord に接続せず、生成したテスト用アバターで各レンダラが 1200x675 の
 PNG を返すこと、prefs の format の扱い (既定はランダム)、ランダム解決で
-LINE が選ばれないこと、LINE の返信チェーン収集 (最大4件・時系列順・循環防止)、
+LINE/ペアが選ばれないこと、LINE の返信チェーン収集 (最大4件・時系列順・循環防止)、
 LINE のメディア合成 (写真/スタンプ/カスタム絵文字) を確認する。
 """
 import asyncio
@@ -161,6 +162,7 @@ class MiqFormatPrefsTest(unittest.TestCase):
         for i, fmt in enumerate((
             "quote", "manga", "music", "line", "news", "xpost", "rpg", "random",
             "blueprint", "pixel", "card", "neon", "dark", "pop", "pastel", "ticket", "note",
+            "pair", "luxury", "tate", "novel", "glass",
         )):
             prefs = g.miq_get_prefs(400 + i)
             prefs["format"] = fmt
@@ -177,11 +179,13 @@ class MiqFormatPrefsTest(unittest.TestCase):
         self.assertEqual(g.miq_render_options(prefs)["format"], "quote")
 
     def test_formats_constant(self):
+        self.assertEqual(len(g.MIQ_FORMATS), 22)
         self.assertEqual(
             set(g.MIQ_FORMATS),
             {
                 "random", "quote", "manga", "music", "line", "news", "xpost", "rpg",
                 "blueprint", "pixel", "card", "neon", "dark", "pop", "pastel", "ticket", "note",
+                "pair", "luxury", "tate", "novel", "glass",
             },
         )
         for label, emoji in g.MIQ_FORMATS.values():
@@ -193,18 +197,22 @@ class MiqResolveFormatTest(unittest.TestCase):
     def test_random_never_picks_line_or_random(self):
         seen = {g.miq_resolve_format("random") for _ in range(300)}
         self.assertNotIn("line", seen)
+        self.assertNotIn("pair", seen)
         self.assertNotIn("random", seen)
         self.assertTrue(seen <= set(g.MIQ_RANDOM_POOL))
         self.assertTrue(seen)  # 何かは返る
 
     def test_random_pool_composition(self):
         self.assertNotIn("line", g.MIQ_RANDOM_POOL)
+        self.assertNotIn("pair", g.MIQ_RANDOM_POOL)
         self.assertNotIn("random", g.MIQ_RANDOM_POOL)
+        self.assertEqual(len(g.MIQ_RANDOM_POOL), 19)
         self.assertEqual(
             set(g.MIQ_RANDOM_POOL),
             {
                 "quote", "manga", "music", "news", "xpost", "rpg",
                 "blueprint", "pixel", "card", "neon", "dark", "pop", "pastel", "ticket", "note",
+                "luxury", "tate", "novel", "glass",
             },
         )
 
@@ -212,6 +220,7 @@ class MiqResolveFormatTest(unittest.TestCase):
         for fmt in (
             "quote", "manga", "music", "line", "news", "xpost", "rpg",
             "blueprint", "pixel", "card", "neon", "dark", "pop", "pastel", "ticket", "note",
+            "pair", "luxury", "tate", "novel", "glass",
         ):
             self.assertEqual(g.miq_resolve_format(fmt), fmt)
             self.assertEqual(g.miq_resolve_format({"format": fmt}), fmt)
@@ -363,9 +372,9 @@ class MiqExtraRendererTest(unittest.TestCase):
         self._check_png(g.render_miq_note_png(None, "アバターなし", "名無し", "noname", font_path=self.font_path))
 
     def test_renderer_table_covers_all_single_formats(self):
-        # レンダラ表は random/quote/line を除く全フォーマットをカバーする
+        # レンダラ表は random/quote/line/pair (チェーン型) を除く全フォーマットをカバーする
         self.assertEqual(
-            set(g._MIQ_FORMAT_RENDERERS), set(g.MIQ_FORMATS) - {"random", "quote", "line"},
+            set(g._MIQ_FORMAT_RENDERERS), set(g.MIQ_FORMATS) - {"random", "quote", "line", "pair"},
         )
 
     def test_date_str_converts_to_jst(self):
@@ -373,6 +382,132 @@ class MiqExtraRendererTest(unittest.TestCase):
         dt = datetime(2026, 11, 4, 15, 30, tzinfo=timezone.utc)
         self.assertEqual(g._miq_date_str(dt), "2026.11.05")
         self.assertEqual(g._miq_date_str(None), g._miq_date_str())  # None は今日 (落ちないこと)
+
+
+class MiqMoreFormatsTest(unittest.TestCase):
+    """追加5フォーマット (ペア/ゴールド縦書き/和風縦書き/小説/グラス) と縦書きヘルパー。"""
+
+    def setUp(self):
+        self.avatar = _avatar_bytes()
+        self.font_path = _font_path()
+
+    def _check_png(self, data):
+        img = Image.open(io.BytesIO(data))
+        self.assertEqual(img.format, "PNG")
+        self.assertEqual(img.size, (1200, 675))
+        return img
+
+    def _pair_entry(self, name, username, text, author_key, minute=39):
+        entry = _entry(name, text, author_key, minute=minute)
+        entry["username"] = username
+        return entry
+
+    def test_pair_renderer_two_entries(self):
+        entries = [
+            self._pair_entry("あな", "anag2bgod", "人間の作り方を教えて", 1, minute=39),
+            self._pair_entry("いる科のCちゃん", "ciajo08", "おしえてあげよっか", 2, minute=40),
+        ]
+        self._check_png(g.render_miq_pair_png(entries, font_path=self.font_path))
+
+    def test_pair_renderer_single_entry(self):
+        entries = [self._pair_entry("ひとり", "solo", "単独モードの発言です", 1)]
+        self._check_png(g.render_miq_pair_png(entries, font_path=self.font_path))
+
+    def test_pair_renderer_uses_latest_two_of_chain(self):
+        entries = [
+            self._pair_entry("A", "a", "古い発言", 1, minute=36),
+            self._pair_entry("B", "b", "前の発言", 2, minute=37),
+            self._pair_entry("A", "a", "対象の発言", 1, minute=38),
+        ]
+        self._check_png(g.render_miq_pair_png(entries, font_path=self.font_path))
+
+    def test_pair_renderer_empty_text_omits_bubble(self):
+        entries = [
+            self._pair_entry("あな", "anag2bgod", "", 1, minute=39),
+            self._pair_entry("いる科のCちゃん", "ciajo08", "テキストあり", 2, minute=40),
+        ]
+        self._check_png(g.render_miq_pair_png(entries, font_path=self.font_path))
+
+    def test_pair_renderer_without_avatar(self):
+        entries = [
+            self._pair_entry("あな", "anag2bgod", "アバターなし", 1, minute=39),
+            self._pair_entry("Cちゃん", "ciajo08", "こちらもなし", 2, minute=40),
+        ]
+        for entry in entries:
+            entry["avatar_bytes"] = None
+        self._check_png(g.render_miq_pair_png(entries, font_path=self.font_path))
+
+    def test_luxury_renderer(self):
+        img = self._check_png(g.render_miq_luxury_png(
+            self.avatar, "あっ イク あう", "sahen", "lln_hen", font_path=self.font_path,
+        ))
+        # 金色の本文/枠が存在する
+        self.assertTrue(_has_color(img, (232, 201, 128)))
+
+    def test_luxury_renderer_long_text(self):
+        self._check_png(g.render_miq_luxury_png(
+            self.avatar, "長い文章も縦書きで収まるはずです。" * 6, "sahen", "lln_hen",
+            font_path=self.font_path,
+        ))
+
+    def test_luxury_renderer_without_avatar(self):
+        self._check_png(g.render_miq_luxury_png(None, "アバターなし", "名無し", "noname", font_path=self.font_path))
+
+    def test_tate_renderer(self):
+        self._check_png(g.render_miq_tate_png(
+            self.avatar, "オイシマサヨシにもたまねこさんにも負けた", "いる科のCちゃん", "ciajo08",
+            font_path=self.font_path,
+        ))
+
+    def test_tate_renderer_without_avatar(self):
+        self._check_png(g.render_miq_tate_png(None, "アバターなし", "名無し", "noname", font_path=self.font_path))
+
+    def test_novel_renderer(self):
+        self._check_png(g.render_miq_novel_png(
+            self.avatar, "ちいかわの世界で草むしり検定に落ち続けて、滑るのが得意、ということからフィギュアスケーターを志すも、オリンピック出場のかかった選手権でオイシマサヨシがトリプルアクセルを成功させてスタンディングオベーションが起きるって夢を見ました",
+            "いる科のCちゃん", "ciajo08", font_path=self.font_path,
+        ))
+
+    def test_novel_renderer_without_avatar(self):
+        self._check_png(g.render_miq_novel_png(None, "アバターなし", "名無し", "noname", font_path=self.font_path))
+
+    def test_glass_renderer(self):
+        self._check_png(g.render_miq_glass_png(
+            self.avatar, "イクぅぅぅ❤️❤️❤️❤️", "sahen", "karld114514", font_path=self.font_path,
+        ))
+
+    def test_glass_renderer_without_avatar(self):
+        self._check_png(g.render_miq_glass_png(None, "アバターなし", "名無し", "noname", font_path=self.font_path))
+
+    def test_glass_renderer_long_text(self):
+        self._check_png(g.render_miq_glass_png(
+            self.avatar, "長い本文でもカードの中に収まります。" * 8, "sahen", "karld114514",
+            font_path=self.font_path,
+        ))
+
+    def test_vertical_columns_split_into_columns(self):
+        font = g._miq_load_font(self.font_path, 40)
+        text = "あいうえおかきくけこさしすせそたちつてと"
+        columns, adv = g._miq_vertical_columns(text, font, 200)
+        # 200px に収まる文字数ごとに割れて複数列になる
+        self.assertGreaterEqual(len(columns), 2)
+        self.assertEqual("".join(columns), text)
+        for col in columns:
+            # 各列は col_h をはみ出さない
+            self.assertLessEqual(len(col) * adv, 200)
+
+    def test_vertical_columns_newline_breaks_column(self):
+        font = g._miq_load_font(self.font_path, 40)
+        columns, _adv = g._miq_vertical_columns("あっ\nイク\nあう", font, 1000)
+        self.assertEqual(columns, ["あっ", "イク", "あう"])
+
+    def test_fit_vertical_fits_width(self):
+        font, columns, adv_y, adv_x, _size = g._miq_fit_vertical(
+            "長い文章を縦書きにすると列が増えていきます" * 4, self.font_path,
+            300, 400, max_size=50, min_size=20,
+        )
+        # 収まるか、列数制限で切り捨てられて幅内に収まる
+        self.assertLessEqual(len(columns) * adv_x, 400)
 
 
 class MiqHiddenVariationTest(unittest.TestCase):

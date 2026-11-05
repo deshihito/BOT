@@ -55,7 +55,7 @@ from core.general.ai_ui import *
 from core.general.exp import _EXP_DATA, _EXP_LOCK, _as_float, _as_int, _exp_ensure, _exp_load, _exp_lock, _exp_root, _exp_save, _grant_chat_exp, _grant_vc_exp, _iter_voice_user_channels, _iter_voice_user_ids, _merge_exp, _read_exp_file, _store_fetch, _user_general_level, _write_exp_file
 from core.general.levelup import _LEVELUP_CJK_FONTS, _LEVELUP_DISPLAY_FONTS, _LEVELUP_DISPLAY_PICK, _LEVELUP_FONT_PICK, _LEVELUP_LATIN_FONTS, _LEVELUP_SS, _levelup_display_font, _levelup_draw_tracked, _levelup_font, _levelup_pick_display_font, _levelup_pick_font, _levelup_safe_name
 from core.general.miq import _MIQ_ASSET_FONTS, _MIQ_CUSTOM_EMOJI, _MIQ_CUSTOM_EMOJI_TOKEN, _MIQ_DATA, _MIQ_EMOJI_PATHS, _MIQ_EMOJI_PATH_CACHE, _MIQ_EMOJI_SIZE, _MIQ_FONTS_CACHE, _MIQ_FONT_CMAP_CACHE, _MIQ_FONT_DEFS, _MIQ_FONT_OBJ_CACHE, _MIQ_JP_PROBE, _MIQ_LOCK, _MIQ_NO_LINE_START, _MIQ_REPO_FONT, _MIQ_SYMBOL_PATHS, _font_covers_japanese, _miq_af, _miq_available_fonts, _miq_clean_text, _miq_contrast, _miq_discover_asset_fonts, _miq_display_text, _miq_draw_centered, _miq_emoji_font_path, _miq_emoji_width, _miq_fallback_fonts, _miq_fit, _miq_font_cmap, _miq_font_has_char, _miq_is_emoji_unit, _miq_is_image_attachment, _miq_line_message_has_media, _miq_load_font, _miq_lock, _miq_lum, _miq_mix, _miq_open_avatar, _miq_read_file, _miq_render_emoji_unit, _miq_root, _miq_save_png, _miq_split_units, _miq_sticker_renderable, _miq_unit_bases, _miq_unit_font, _miq_unit_width, _miq_wrap, _miq_write_file
-from core.general.miq_styles import _miq_circle_avatar, _miq_date_str, _miq_glow_lines, _miq_hash_int, _miq_heart, _miq_rng, _miq_rounded_avatar, _miq_special_font_path, _miq_star4, _miq_star5, _miq_truncate
+from core.general.miq_styles import _miq_circle_avatar, _miq_date_str, _miq_draw_vertical, _miq_fit_vertical, _miq_glow_lines, _miq_hash_int, _miq_heart, _miq_rng, _miq_rounded_avatar, _miq_special_font_path, _miq_star4, _miq_star5, _miq_truncate, _miq_vertical_columns
 from core.general.miq_cards import _MIQ_CARD_FRAME_STOPS, _MIQ_CARD_RARITIES, _MIQ_TICKET_PALETTES, _miq_pick_card_rarity, _miq_pick_ticket_palette
 from core.general.miq_line import _MIQ_AGO_CACHE, _MIQ_AGO_DIR, _MIQ_CUSTOM_EMOJI_TOKEN, _MIQ_DATED_FORMATS, _MIQ_FORMAT_RENDERERS, _MIQ_UNICODE_EMOJI_SUPPORTED, _miq_ago_images, _miq_line_atom_width, _miq_line_avatar_image, _miq_line_draw_atoms, _miq_line_entry_atoms, _miq_line_field, _miq_line_fit_media, _miq_line_media_image, _miq_line_split_segments, _miq_line_time_str, _miq_line_wrap_atoms, _miq_unicode_emoji_supported
 from core.general.meme import _meme_fit, _meme_font_path, _meme_image_attachment
@@ -175,12 +175,14 @@ class GeneralCog(
                 "`/general` → 引用画像 (MIQ) → **MIQ設定** で、モノクロ・文字色連動・左右反転・太字・"
                 "全面レイアウト・GIF出力・フォント・配色を変更できます。設定はあなたがMIQを作る時に使われます。\n\n"
                 "**フォーマット**\n"
-                "MIQ設定で **ランダム / 引用 (従来) / 漫画風 / 音楽再生風 / LINE風 / ニュース速報風 / X投稿風 / RPG風 / 設計図風 / レトロゲーム風 / トレカ風 / ネオン風 / ダーク風 / ポップ風 / パステル風 / チケット風 / ノート風** を選べます。"
-                "未設定の既定はランダムで、生成のたびに単体フォーマットから1つ選ばれます（ランダムでLINE風は選ばれません）。\n"
+                "MIQ設定で **ランダム / 引用 (従来) / 漫画風 / 音楽再生風 / LINE風 / ニュース速報風 / X投稿風 / RPG風 / 設計図風 / レトロゲーム風 / トレカ風 / ネオン風 / ダーク風 / ポップ風 / パステル風 / チケット風 / ノート風 / ペアハート風 / ゴールド縦書き風 / 和風縦書き風 / 小説風 / グラスカード風** を選べます。"
+                "未設定の既定はランダムで、生成のたびに単体フォーマットから1つ選ばれます（ランダムでLINE風・ペアハート風は選ばれません）。\n"
                 "引用 (従来) 以外は常にPNGで出力され、GIF出力やモノクロ・配色などの設定は引用 (従来) 専用です（フォント設定は全フォーマット共通）。\n"
                 "LINE風では、対象のメッセージが返信でつながっている場合、対象を含めて最大4件まで遡って会話形式にします"
                 "（対象が返信でない場合はその1件だけ）。対象の作者が右側の緑の吹き出しになります。"
-                "LINE風は画像・スタンプ・カスタム絵文字・Unicode絵文字の合成にも対応し、画像やスタンプだけのメッセージも変換できます。\n\n"
+                "LINE風は画像・スタンプ・カスタム絵文字・Unicode絵文字の合成にも対応し、画像やスタンプだけのメッセージも変換できます。\n"
+                "ペアハート風では、対象のメッセージとその返信先の発言を左右に並べてハートでつなぎます"
+                "（対象が返信でない場合は1人だけのレイアウトになります）。\n\n"
                 "**引用の拒否**\n"
                 "MIQ設定の「引用を拒否」をONにすると、他の人があなたのメッセージを引用できなくなります（初期はOFF）。"
             )

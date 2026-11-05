@@ -6,7 +6,7 @@ from .common import *
 from .miq import (
     MIQ_GIF_MAX_FRAMES, MIQ_H, MIQ_NEW_H, MIQ_NEW_W, MIQ_W, _MIQ_ASSET_FONTS,
     _miq_display_text, _miq_fit, _miq_load_font, _miq_mix, _miq_open_avatar,
-    _miq_save_png, render_miq_frames,
+    _miq_save_png, _miq_wrap, render_miq_frames,
 )
 
 def render_miq_gif(avatar_bytes: bytes | None, text: str, name: str, username: str, *, max_bytes: int, **opts) -> bytes:
@@ -681,4 +681,234 @@ def render_miq_pixel_png(avatar_bytes: bytes | None, text: str, name: str, usern
     # 右下の送り印 ▼
     vx, vy = wx1 - 52, wy1 - 42
     d.polygon([(vx - 12, vy), (vx + 12, vy), (vx, vy + 14)], fill=(255, 255, 255))
+    return _miq_save_png(img)
+
+
+# ------------------------------------------------------------
+# 縦書きレイアウト (ゴールド縦書き風 / 和風縦書き風で共用)
+# ------------------------------------------------------------
+def _miq_vertical_columns(text: str, font, col_h: int):
+    """縦書き用に text を列へ割る。(columns, advance) を返す。
+
+    columns[0] が最右列で、各列は上から下へ文字を積む。1列の高さが
+    col_h を超えないよう文字数で割り、改行は列を改める。句読点・長音等の
+    回転や寄せはせず、そのまま積む簡易対応。
+    """
+    size = getattr(font, "size", 32) or 32
+    adv = max(8, int(size * 1.16))
+    max_chars = max(1, col_h // adv)
+    columns: list[str] = []
+    cur = ""
+    for ch in text or "":
+        if ch == "\n":
+            columns.append(cur)
+            cur = ""
+            continue
+        if len(cur) >= max_chars:
+            columns.append(cur)
+            cur = ""
+        cur += ch
+    if cur or not columns:
+        columns.append(cur)
+    return columns, adv
+
+
+def _miq_fit_vertical(text: str, font_path: str | None, col_h: int, max_w: int, *, max_size: int = 54, min_size: int = 20):
+    """縦書き本文を (font, columns, adv_y, adv_x, size) に整える。
+
+    列全体の幅が max_w に収まるまでフォントを縮小し、最小サイズでも
+    収まらない場合は列数を制限して最終列の末尾に … を付ける。
+    """
+    size = max_size
+    while True:
+        font = _miq_load_font(font_path, size)
+        columns, adv_y = _miq_vertical_columns(text, font, col_h)
+        adv_x = max(adv_y, int(size * 1.55))
+        if len(columns) * adv_x <= max_w or size <= min_size:
+            break
+        size -= 2
+    max_cols = max(1, max_w // adv_x)
+    if len(columns) > max_cols:
+        columns = columns[:max_cols]
+        max_chars = max(1, col_h // adv_y)
+        last = columns[-1]
+        if len(last) >= max_chars:
+            last = last[:max_chars - 1]
+        columns[-1] = last + "…"
+    return font, columns, adv_y, adv_x, size
+
+
+def _miq_draw_vertical(draw, columns, right_cx: int, top: int, adv_y: int, adv_x: int, font, fill, **kwargs):
+    """縦書きの列群を描く。right_cx は最右列の中心 x、列は右から左へ進む。"""
+    for i, col in enumerate(columns):
+        x = right_cx - i * adv_x
+        for j, ch in enumerate(col):
+            draw.text((x, top + j * adv_y), ch, font=font, fill=fill, anchor="ma", **kwargs)
+
+
+def render_miq_luxury_png(avatar_bytes: bytes | None, text: str, name: str, username: str, *, font_path: str | None = None) -> bytes:
+    """ゴールド縦書き風: 深緑の放射グラデに金の二重枠、金リングのアバター、金の縦書き本文。"""
+    from PIL import Image, ImageDraw, ImageFilter
+
+    W, H = MIQ_NEW_W, MIQ_NEW_H
+    shown_name = _miq_display_text(name) or _miq_display_text(username) or "unknown"
+    shown_user = _miq_display_text(username)
+    shown_text = _miq_display_text(text) or text
+    gold = (206, 172, 102)
+    gold_bright = (232, 201, 128)
+    serif = _miq_special_font_path("ZenOldMincho") or font_path
+
+    # 背景: 中央が少し明るい深緑 (放射グラデーション相当をぼかし楕円で作る)
+    img = Image.new("RGB", (W, H), (4, 24, 16))
+    glow = Image.new("RGB", (W, H), (4, 24, 16))
+    ImageDraw.Draw(glow).ellipse([-260, -300, W + 260, H + 180], fill=(18, 66, 46))
+    img = Image.blend(img, glow.filter(ImageFilter.GaussianBlur(160)), 0.85)
+    d = ImageDraw.Draw(img)
+
+    # 金の二重細枠 + 四隅のダイヤ装飾
+    d.rectangle([26, 26, W - 26, H - 26], outline=gold, width=3)
+    d.rectangle([38, 38, W - 38, H - 38], outline=gold, width=1)
+    for cx, cy in ((26, 26), (W - 26, 26), (26, H - 26), (W - 26, H - 26)):
+        r = 9
+        d.polygon([(cx, cy - r), (cx + r, cy), (cx, cy + r), (cx - r, cy)], fill=gold_bright)
+
+    # 中央上: 金リング付き丸アバター
+    av_size = 148
+    ccx, top = W // 2, 64
+    d.ellipse([ccx - av_size // 2 - 7, top - 7, ccx + av_size // 2 + 7, top + av_size + 7], outline=gold_bright, width=4)
+    d.ellipse([ccx - av_size // 2 - 12, top - 12, ccx + av_size // 2 + 12, top + av_size + 12], outline=gold, width=1)
+    av = _miq_circle_avatar(avatar_bytes, av_size)
+    img.paste(av, (ccx - av_size // 2, top), av)
+    d = ImageDraw.Draw(img)
+
+    # 本文: 金色・明朝の縦書き (アバターの下、名前の上)
+    body_top, body_h = 252, 236
+    font, columns, adv_y, adv_x, _size = _miq_fit_vertical(
+        shown_text, serif, body_h, 880, max_size=56, min_size=22,
+    )
+    block_w = len(columns) * adv_x
+    right_cx = (W + block_w) // 2 - adv_x // 2
+    _miq_draw_vertical(d, columns, right_cx, body_top, adv_y, adv_x, font, gold_bright)
+
+    # 下部: 区切り線付きの名前と @ID (金色)
+    name_font = _miq_load_font(serif, 29)
+    disp_name = _miq_truncate(d, shown_name, name_font, 560)
+    nw = d.textlength(disp_name, font=name_font)
+    name_y = 540
+    line_len = 64
+    gap = 26
+    total_w = line_len * 2 + gap * 2 + nw
+    lx = (W - total_w) / 2
+    d.line([(lx, name_y + 18), (lx + line_len, name_y + 18)], fill=gold, width=2)
+    d.line([(lx + line_len + gap + nw + gap, name_y + 18), (lx + total_w, name_y + 18)], fill=gold, width=2)
+    d.text((lx + line_len + gap, name_y), disp_name, font=name_font, fill=gold_bright)
+    if shown_user:
+        d.text((W // 2, name_y + 52), f"@{shown_user}", font=_miq_load_font(font_path, 21), fill=gold, anchor="ma")
+    return _miq_save_png(img)
+
+
+def render_miq_tate_png(avatar_bytes: bytes | None, text: str, name: str, username: str, *, font_path: str | None = None) -> bytes:
+    """和風縦書き風: クリーム地の便箋。左に正方形アバターと赤いハートスタンプ、右に黒の縦書き本文。"""
+    from PIL import Image, ImageDraw
+
+    W, H = MIQ_NEW_W, MIQ_NEW_H
+    shown_name = _miq_display_text(name) or _miq_display_text(username) or "unknown"
+    shown_user = _miq_display_text(username)
+    shown_text = _miq_display_text(text) or text
+    ink = (34, 32, 30)
+    sub = (110, 104, 96)
+    serif = _miq_special_font_path("ZenOldMincho") or font_path
+
+    img = Image.new("RGB", (W, H), (247, 243, 233))
+    d = ImageDraw.Draw(img)
+
+    # 左: 正方形アバター
+    av_size = 300
+    av = _miq_rounded_avatar(avatar_bytes, av_size, 4)
+    img.paste(av, (56, 56), av)
+    d = ImageDraw.Draw(img)
+    d.rectangle([56, 56, 56 + av_size, 56 + av_size], outline=(198, 190, 174), width=2)
+
+    # 名前 (小さな装飾つき) と @ID
+    name_font = _miq_load_font(font_path, 27)
+    disp_name = _miq_truncate(d, shown_name, name_font, 300)
+    nw = d.textlength(disp_name, font=name_font)
+    d.text((62, 408), disp_name, font=name_font, fill=ink)
+    _miq_heart(d, 62 + nw + 22, 424, 16, (196, 80, 90))
+    if shown_user:
+        d.text((62, 448), f"@{shown_user}", font=_miq_load_font(font_path, 21), fill=sub)
+
+    # 赤い角丸四角 + 白ハートのスタンプ
+    stamp = [56, 512, 128, 584]
+    d.rounded_rectangle(stamp, radius=14, fill=(196, 44, 44))
+    _miq_heart(d, (stamp[0] + stamp[2]) // 2, (stamp[1] + stamp[3]) // 2 + 2, 40, (255, 255, 255))
+
+    # 細い縦の区切り線
+    d.line([(428, 64), (428, H - 64)], fill=(203, 196, 182), width=2)
+
+    # 右: 本文の縦書き (黒・明朝、列は右から左)
+    body_top, body_h = 84, 500
+    font, columns, adv_y, adv_x, _size = _miq_fit_vertical(
+        shown_text, serif, body_h, 620, max_size=50, min_size=20,
+    )
+    block_w = len(columns) * adv_x
+    right_cx = 470 + (680 - block_w) // 2 + block_w - adv_x // 2
+    _miq_draw_vertical(d, columns, right_cx, body_top, adv_y, adv_x, font, ink)
+    return _miq_save_png(img)
+
+
+def render_miq_novel_png(avatar_bytes: bytes | None, text: str, name: str, username: str, *, font_path: str | None = None) -> bytes:
+    """小説風: オフホワイト地。左に明朝・行間広めの本文、右に影付き正方形アバターと名前。"""
+    from PIL import Image, ImageDraw, ImageFilter
+
+    W, H = MIQ_NEW_W, MIQ_NEW_H
+    shown_name = _miq_display_text(name) or _miq_display_text(username) or "unknown"
+    shown_user = _miq_display_text(username)
+    shown_text = _miq_display_text(text) or text
+    ink = (28, 28, 28)
+    sub = (120, 118, 112)
+    serif = _miq_special_font_path("ZenOldMincho") or font_path
+
+    img = Image.new("RGB", (W, H), (250, 249, 246))
+    d = ImageDraw.Draw(img)
+
+    # 本文: 左 約62% に上揃え、行間は広め (1.85倍)。収まらなければ縮小/省略
+    body_x, body_w, body_top, body_h = 64, 668, 76, 520
+    size = 40
+    while True:
+        font = _miq_load_font(serif, size)
+        wrapped = _miq_wrap(d, shown_text, font, body_w)
+        lh = int(size * 1.85)
+        if len(wrapped) * lh <= body_h or size <= 20:
+            break
+        size -= 2
+    max_lines = max(1, body_h // lh)
+    if len(wrapped) > max_lines:
+        wrapped = wrapped[:max_lines]
+        last = wrapped[-1]
+        while last and d.textlength(last + "…", font=font) > body_w:
+            last = last[:-1]
+        wrapped[-1] = last + "…"
+    ty = body_top
+    for line in wrapped:
+        if line:
+            d.text((body_x, ty), line, font=font, fill=ink)
+        ty += lh
+
+    # 右: 正方形アバター (柔らかい影つき)
+    av_size = 300
+    ax, ay = 816, 84
+    shadow = Image.new("RGBA", (av_size + 40, av_size + 40), (0, 0, 0, 0))
+    ImageDraw.Draw(shadow).rectangle([20, 20, av_size + 20, av_size + 20], fill=(0, 0, 0, 90))
+    shadow = shadow.filter(ImageFilter.GaussianBlur(12))
+    img.paste(shadow, (ax - 14, ay - 8), shadow)
+    av = _miq_rounded_avatar(avatar_bytes, av_size, 6)
+    img.paste(av, (ax, ay), av)
+    d = ImageDraw.Draw(img)
+
+    # アバターの下: 名前と @ID (グレー)
+    name_font = _miq_load_font(font_path, 28)
+    d.text((ax, ay + av_size + 26), _miq_truncate(d, shown_name, name_font, 320), font=name_font, fill=ink)
+    if shown_user:
+        d.text((ax, ay + av_size + 68), f"@{shown_user}", font=_miq_load_font(font_path, 22), fill=sub)
     return _miq_save_png(img)
