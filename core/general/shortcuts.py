@@ -282,8 +282,12 @@ class ShortcutRootPanel(discord.ui.View):
 
 
 class ShortcutCommitButton(discord.ui.Button):
-    def __init__(self):
-        super().__init__(label="この内容で決定", style=discord.ButtonStyle.success, row=4)
+    def __init__(self, root: str = "general"):
+        # root は表示元のパネル (/general /vc /support /game /help)。
+        # 再起動後に死んだパネルが押されたとき、cogs/panel_recovery.py が
+        # この custom_id の root を見て正しいパネルを開き直すために使う。
+        super().__init__(label="この内容で決定", style=discord.ButtonStyle.success, row=4,
+                         custom_id=f"panel:{root}:commit")
 
     async def callback(self, interaction: discord.Interaction):
         panel = getattr(self.view, "panel", self.view)
