@@ -139,6 +139,10 @@ class BuyMachineView(discord.ui.View):
         super().__init__(timeout=180)
         self.cog = cog
         self.user_id = user_id
+
+    async def interaction_check(self, interaction) -> bool:
+        # 公開パネル化（ephemeral第2波）: 操作は本人のみ。
+        return interaction.user.id == self.user_id
         for tier_id, tier in workshop_core.MACHINE_TIERS.items():
             button = discord.ui.Button(
                 label=f"{tier['name']}（{tier['price']:,} AGO）",
@@ -149,9 +153,9 @@ class BuyMachineView(discord.ui.View):
 
     def _make_callback(self, tier_id: str):
         async def callback(interaction: discord.Interaction):
-            await interaction.response.defer(ephemeral=True)
+            await interaction.response.defer()
             message = await self.cog.execute_buy_machine(interaction.user.id, tier_id)
-            await interaction.followup.send(message, ephemeral=True)
+            await interaction.followup.send(message)
 
         return callback
 
@@ -162,6 +166,10 @@ class WorkshopView(discord.ui.View):
         self.cog = cog
         self.user_id = user_id
 
+    async def interaction_check(self, interaction) -> bool:
+        # 公開パネル化（ephemeral第2波）: 操作は本人のみ。
+        return interaction.user.id == self.user_id
+
     @discord.ui.button(label="更新", style=discord.ButtonStyle.secondary)
     async def refresh(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.edit_message(
@@ -171,19 +179,19 @@ class WorkshopView(discord.ui.View):
     async def buy(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.send_message(
             "購入する加工機を選んでください。",
-            view=BuyMachineView(self.cog, interaction.user.id), ephemeral=True)
+            view=BuyMachineView(self.cog, interaction.user.id))
 
     @discord.ui.button(label="生産物を受け取る", style=discord.ButtonStyle.primary)
     async def claim(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.defer(ephemeral=True)
+        await interaction.response.defer()
         message = self.cog.execute_claim(interaction.user.id)
-        await interaction.followup.send(message, ephemeral=True)
+        await interaction.followup.send(message)
 
     @discord.ui.button(label="委託を受け取る", style=discord.ButtonStyle.primary)
     async def claim_commission(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.defer(ephemeral=True)
+        await interaction.response.defer()
         message = self.cog.execute_claim_commissions(interaction.user.id)
-        await interaction.followup.send(message, ephemeral=True)
+        await interaction.followup.send(message)
 
 
 class CraftView(discord.ui.View):
@@ -191,6 +199,10 @@ class CraftView(discord.ui.View):
         super().__init__(timeout=180)
         self.cog = cog
         self.user_id = user_id
+
+    async def interaction_check(self, interaction) -> bool:
+        # 公開パネル化（ephemeral第2波）: 操作は本人のみ。
+        return interaction.user.id == self.user_id
         self.first: str | None = None
         self.second: str | None = None
         inventory = cog._item_store().inventory(str(user_id))
@@ -224,18 +236,18 @@ class CraftView(discord.ui.View):
         if not self.first or not self.second:
             return await interaction.response.send_message(
                 craft_action_failed("素材を2つ選んでください。"), ephemeral=True)
-        await interaction.response.defer(ephemeral=True)
+        await interaction.response.defer()
         message = self.cog.execute_craft(interaction.user.id, self.first, self.second)
-        await interaction.followup.send(message, ephemeral=True)
+        await interaction.followup.send(message)
 
     @discord.ui.button(label="委託する", style=discord.ButtonStyle.primary, row=2)
     async def craft_commission(self, interaction: discord.Interaction, button: discord.ui.Button):
         if not self.first or not self.second:
             return await interaction.response.send_message(
                 craft_action_failed("素材を2つ選んでください。"), ephemeral=True)
-        await interaction.response.defer(ephemeral=True)
+        await interaction.response.defer()
         message = self.cog.execute_commission(interaction.user.id, self.first, self.second)
-        await interaction.followup.send(message, ephemeral=True)
+        await interaction.followup.send(message)
 
 
 class WorkshopCog(commands.Cog):
@@ -281,17 +293,17 @@ class WorkshopCog(commands.Cog):
     async def show_workshop(self, interaction: discord.Interaction):
         view = WorkshopView(self, interaction.user.id)
         await interaction.response.send_message(
-            embed=_workshop_embed(self, interaction.user.id), view=view, ephemeral=True)
+            embed=_workshop_embed(self, interaction.user.id), view=view)
 
     async def open_buy_machine(self, interaction: discord.Interaction):
         await interaction.response.send_message(
             "購入する加工機を選んでください。",
-            view=BuyMachineView(self, interaction.user.id), ephemeral=True)
+            view=BuyMachineView(self, interaction.user.id))
 
     async def open_claim(self, interaction: discord.Interaction):
-        await interaction.response.defer(ephemeral=True)
+        await interaction.response.defer()
         message = self.execute_claim(interaction.user.id)
-        await interaction.followup.send(message, ephemeral=True)
+        await interaction.followup.send(message)
 
     async def show_craft(self, interaction: discord.Interaction):
         try:
@@ -300,7 +312,7 @@ class WorkshopCog(commands.Cog):
             return await interaction.response.send_message(
                 workshop_action_failed(exc), ephemeral=True)
         view = CraftView(self, interaction.user.id)
-        await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
+        await interaction.response.send_message(embed=embed, view=view)
 
     # ------------------------------------------------------------------ 実行
     def _wallet(self):

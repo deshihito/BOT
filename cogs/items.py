@@ -105,14 +105,14 @@ class ItemAmountModal(discord.ui.Modal):
             return await interaction.response.send_message(ITEM_INVALID_INPUT, ephemeral=True)
         if count <= 0:
             return await interaction.response.send_message(ITEM_INVALID_INPUT, ephemeral=True)
-        await interaction.response.defer(ephemeral=True)
+        await interaction.response.defer()
         if self.action == "buy":
             message = await self.cog.execute_buy(interaction.user.id, item_id, count)
         elif self.action == "sell":
             message = await self.cog.execute_sell(interaction.user.id, item_id, count)
         else:
             message = self.cog.execute_use(interaction.user.id, item_id)
-        await interaction.followup.send(message, ephemeral=True)
+        await interaction.followup.send(message)
 
 
 class ItemsView(discord.ui.View):
@@ -120,6 +120,10 @@ class ItemsView(discord.ui.View):
         super().__init__(timeout=180)
         self.cog = cog
         self.user_id = user_id
+
+    async def interaction_check(self, interaction) -> bool:
+        # 公開パネル化（ephemeral第2波）: 操作は本人のみ。
+        return interaction.user.id == self.user_id
 
     @discord.ui.button(label="更新", style=discord.ButtonStyle.secondary)
     async def refresh(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -140,9 +144,9 @@ class ItemsView(discord.ui.View):
 
     @discord.ui.button(label="宝箱を開ける", style=discord.ButtonStyle.danger)
     async def open_box(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.defer(ephemeral=True)
+        await interaction.response.defer()
         message = await self.cog.execute_open_boxes(interaction.user.id)
-        await interaction.followup.send(message, ephemeral=True)
+        await interaction.followup.send(message)
 
 
 class ItemsCog(commands.Cog):
@@ -174,7 +178,7 @@ class ItemsCog(commands.Cog):
     async def show_items(self, interaction: discord.Interaction):
         view = ItemsView(self, interaction.user.id)
         await interaction.response.send_message(
-            embed=_items_embed(self.store, interaction.user.id), view=view, ephemeral=True)
+            embed=_items_embed(self.store, interaction.user.id), view=view)
 
     async def open_buy(self, interaction: discord.Interaction):
         await interaction.response.send_modal(ItemAmountModal(self, "buy"))
@@ -183,9 +187,9 @@ class ItemsCog(commands.Cog):
         await interaction.response.send_modal(ItemAmountModal(self, "use"))
 
     async def open_boxes(self, interaction: discord.Interaction):
-        await interaction.response.defer(ephemeral=True)
+        await interaction.response.defer()
         message = await self.execute_open_boxes(interaction.user.id)
-        await interaction.followup.send(message, ephemeral=True)
+        await interaction.followup.send(message)
 
     # ------------------------------------------------------------------ 実行
     def _wallet(self):

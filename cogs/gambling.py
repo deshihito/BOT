@@ -96,9 +96,9 @@ class SlotStartModal(discord.ui.Modal, title="スロットを始める"):
         except ValueError:
             return await interaction.response.send_message(
                 GAMBLING_INVALID_AMOUNT, ephemeral=True)
-        await interaction.response.defer(ephemeral=True)
+        await interaction.response.defer()
         message = await self.cog.execute_slot_start(interaction.user.id, spins)
-        await interaction.followup.send(message, ephemeral=True)
+        await interaction.followup.send(message)
 
 
 class SlotView(discord.ui.View):
@@ -116,9 +116,9 @@ class SlotView(discord.ui.View):
 
     @discord.ui.button(label="🎰 回す", style=discord.ButtonStyle.success)
     async def spin(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.defer(ephemeral=True)
+        await interaction.response.defer()
         message = await self.cog.execute_slot_spin(interaction.user.id)
-        await interaction.followup.send(message, ephemeral=True)
+        await interaction.followup.send(message)
 
     @discord.ui.button(label="更新", style=discord.ButtonStyle.secondary)
     async def refresh(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -166,12 +166,12 @@ class BetModal(discord.ui.Modal):
         except ValueError:
             return await interaction.response.send_message(
                 GAMBLING_INVALID_AMOUNT, ephemeral=True)
-        await interaction.response.defer(ephemeral=True)
+        await interaction.response.defer()
         if self.game == "double":
             message = await self.cog.execute_double_start(interaction.user.id, bet)
         else:
             message = await self.cog.execute_blackjack_start(interaction.user.id, bet)
-        await interaction.followup.send(message, ephemeral=True)
+        await interaction.followup.send(message)
 
 
 class DoubleView(discord.ui.View):
@@ -189,15 +189,15 @@ class DoubleView(discord.ui.View):
 
     @discord.ui.button(label="GO", style=discord.ButtonStyle.success)
     async def go(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.defer(ephemeral=True)
+        await interaction.response.defer()
         message = await self.cog.execute_double_go(interaction.user.id)
-        await interaction.followup.send(message, ephemeral=True)
+        await interaction.followup.send(message)
 
     @discord.ui.button(label="CASHOUT", style=discord.ButtonStyle.danger)
     async def cashout(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.defer(ephemeral=True)
+        await interaction.response.defer()
         message = await self.cog.execute_double_cashout(interaction.user.id)
-        await interaction.followup.send(message, ephemeral=True)
+        await interaction.followup.send(message)
 
     @discord.ui.button(label="更新", style=discord.ButtonStyle.secondary)
     async def refresh(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -241,15 +241,15 @@ class BlackjackView(discord.ui.View):
 
     @discord.ui.button(label="ヒット", style=discord.ButtonStyle.success)
     async def hit(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.defer(ephemeral=True)
+        await interaction.response.defer()
         message, _finished = await self.cog.execute_blackjack_hit(interaction.user.id)
-        await interaction.followup.send(message, ephemeral=True)
+        await interaction.followup.send(message)
 
     @discord.ui.button(label="スタンド", style=discord.ButtonStyle.danger)
     async def stand(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.defer(ephemeral=True)
+        await interaction.response.defer()
         message = await self.cog.execute_blackjack_stand(interaction.user.id)
-        await interaction.followup.send(message, ephemeral=True)
+        await interaction.followup.send(message)
 
     @discord.ui.button(label="更新", style=discord.ButtonStyle.secondary)
     async def refresh(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -290,10 +290,10 @@ class DiceModal(discord.ui.Modal, title="ダイス（数字当て）"):
         except ValueError:
             return await interaction.response.send_message(
                 GAMBLING_INVALID_AMOUNT, ephemeral=True)
-        await interaction.response.defer(ephemeral=True)
+        await interaction.response.defer()
         message = await self.cog.execute_dice(
             interaction.user.id, max_value, number, bet)
-        await interaction.followup.send(message, ephemeral=True)
+        await interaction.followup.send(message)
 
 
 class DiceView(discord.ui.View):
@@ -439,22 +439,22 @@ class GamblingCog(commands.Cog):
     async def show_slot(self, interaction: discord.Interaction):
         view = SlotView(self, interaction.user.id)
         await interaction.response.send_message(
-            embed=_slot_embed(self, interaction.user.id), view=view, ephemeral=True)
+            embed=_slot_embed(self, interaction.user.id), view=view)
 
     async def show_double(self, interaction: discord.Interaction):
         view = DoubleView(self, interaction.user.id)
         await interaction.response.send_message(
-            embed=_double_embed(self, interaction.user.id), view=view, ephemeral=True)
+            embed=_double_embed(self, interaction.user.id), view=view)
 
     async def show_blackjack(self, interaction: discord.Interaction):
         view = BlackjackView(self, interaction.user.id)
         await interaction.response.send_message(
-            embed=_blackjack_embed(self, interaction.user.id), view=view, ephemeral=True)
+            embed=_blackjack_embed(self, interaction.user.id), view=view)
 
     async def show_dice(self, interaction: discord.Interaction):
         view = DiceView(self, interaction.user.id)
         await interaction.response.send_message(
-            embed=_dice_embed(self, interaction.user.id), view=view, ephemeral=True)
+            embed=_dice_embed(self, interaction.user.id), view=view)
 
     # ------------------------------------------------------------------ スロットの実行
     async def execute_slot_start(self, user_id: int, spins: int) -> str:
