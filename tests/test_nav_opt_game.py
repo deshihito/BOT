@@ -28,8 +28,32 @@ class GameHubOneStepTest(unittest.TestCase):
         selects = [c for c in view.children if isinstance(c, GameSelect)]
         self.assertEqual(len(selects), 1)
         values = [o.value for o in selects[0].options]
-        self.assertEqual(sorted(values), ["flash", "game2048", "guess", "highlow", "minesweeper",
+        # ラウンド3: ダンジョンは「アドベンチャー」1件ジャンルを畳んで solo へ寄せた
+        self.assertEqual(sorted(values), ["dungeon", "flash", "game2048", "guess", "highlow", "minesweeper",
                                           "nonogram", "shinkei", "sudoku", "wordle"])
+
+    def test_genres_have_no_single_game_genre(self):
+        # ラウンド3: 1件ジャンル（旧アドベンチャー）は器を畳んだ。ジャンルは3種
+        from cogs.game import GAME_GENRES, GAME_GENRE_BY_GAME
+
+        self.assertEqual(sorted(GAME_GENRES), ["board", "party", "solo"])
+        counts = {}
+        for genre in GAME_GENRE_BY_GAME.values():
+            counts[genre] = counts.get(genre, 0) + 1
+        self.assertTrue(all(n >= 2 for n in counts.values()))
+        self.assertEqual(GAME_GENRE_BY_GAME["dungeon"], "solo")
+
+    def test_select_options_have_no_description(self):
+        # ラウンド3: 人数・所要時間は詳細フィールドが担い、セレクトでは重ねない
+        from cogs.game import GameHubView, GameSelect, detail_embed
+
+        view = GameHubView(None)
+        for s in [c for c in view.children if isinstance(c, GameSelect)]:
+            for o in s.options:
+                self.assertIsNone(o.description)
+        fields = {f.name: f.value for f in detail_embed("dungeon").fields}
+        self.assertEqual(fields["人数の目安"], "1人")
+        self.assertIn("所要時間", fields)
 
     def test_custom_ids_unchanged(self):
         # PR-B 不変条件: 固定 custom_id は変更しない
