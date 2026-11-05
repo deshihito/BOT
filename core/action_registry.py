@@ -416,7 +416,10 @@ def build_support_actions(support_actions: list, actions_by_genre: dict, support
 
 
 def build_help_actions() -> list[ActionSpec]:
-    return [make_action("help", "overview", "ヘルプを表示", "help", ROOT_LABELS["help"])]
+    # /quick の候補からは外す（導線最適化 S5）: 選んでも「/help で確認できます」と
+    # 返すだけのデッドエンドのため。panel/shortcut/aitools の面は従来どおり残す。
+    return [make_action("help", "overview", "ヘルプを表示", "help", ROOT_LABELS["help"],
+                        surfaces=frozenset({"panel", "shortcut", "aitools"}))]
 
 
 def default_action_specs() -> list[ActionSpec]:

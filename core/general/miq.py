@@ -966,7 +966,7 @@ class MiqMixin:
 
 
     async def miq_context(self, interaction: discord.Interaction, message: discord.Message):
-        """メッセージの右クリックメニュー「Make it a Quote」。"""
+        """メッセージの右クリックメニュー「引用画像にする」。"""
         author_id = getattr(message.author, "id", None)
         if author_id != interaction.user.id and miq_is_refusing(author_id):
             return await interaction.response.send_message(

@@ -49,8 +49,8 @@ class ServerAssistHomeView(discord.ui.View):
             description="サーバー運営に役立つ設定をまとめた入口です。",
             color=0xFFFFFF,
         )
-        for feature in self.cog.features:
-            embed.add_field(name=feature.label, value=feature.description, inline=False)
+        # 初画面はタイトル＋状態だけ（導線最適化 S3）。機能の label/description は
+        # 直下の AssistFeatureSelect の option が担うため、embed には並べない。
         if not self.cog.features:
             embed.description = "利用できる機能がありません。時間をおいて再度お試しください。解決しない場合はBotの運営に連絡してください。"
         return embed

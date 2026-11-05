@@ -85,10 +85,10 @@ class GeneralCog(
         self._miq_last: dict[int, float] = {}
         self._translation_client = LibreTranslateClient()
         self._translation_webhooks: dict[int, discord.Webhook] = {}
-        # メッセージの右クリックメニュー(アプリ → Make it a Quote)
-        self.miq_menu = app_commands.ContextMenu(name="Make it a Quote", callback=self.miq_context)
-        # メッセージの右クリックメニュー(アプリ → Make it a Meme)
-        self.meme_menu = app_commands.ContextMenu(name="Make it a Meme", callback=self.meme_context)
+        # メッセージの右クリックメニュー(アプリ → 引用画像にする)
+        self.miq_menu = app_commands.ContextMenu(name="引用画像にする", callback=self.miq_context)
+        # メッセージの右クリックメニュー(アプリ → meme画像にする)
+        self.meme_menu = app_commands.ContextMenu(name="meme画像にする", callback=self.meme_context)
         # meme作成のパネル経由フローで画像待ち中のセッション {(channel_id, user_id): Event}
         self._meme_waits: dict[tuple[int, int], asyncio.Event] = {}
 
@@ -169,7 +169,7 @@ class GeneralCog(
             embed = discord.Embed(title="引用画像 (MIQ)", color=0xFFFFFF)
             embed.description = (
                 "**作り方**\n"
-                "・メッセージを右クリック(スマホは長押し) → アプリ → **Make it a Quote**\n"
+                "・メッセージを右クリック(スマホは長押し) → アプリ → **引用画像にする**\n"
                 "・引用したいメッセージに返信して、`@BOT miq` と送信\n\n"
                 "**設定**\n"
                 "`/general` → 引用画像 (MIQ) → **MIQ設定** で、モノクロ・文字色連動・左右反転・太字・"
@@ -199,7 +199,7 @@ class GeneralCog(
                 "**作り方**\n"
                 "・`/general` → meme作成 → **memeを作成**：上/下テキストを入力したあと、"
                 "同じチャンネルにベースにしたい画像を投稿してください（120秒以内）。\n"
-                "・画像のあるメッセージを右クリック(スマホは長押し) → アプリ → **Make it a Meme**："
+                "・画像のあるメッセージを右クリック(スマホは長押し) → アプリ → **meme画像にする**："
                 "その画像（無ければ投稿者のアバター）がベースになります。\n\n"
                 "**仕様**\n"
                 "・上テキスト/下テキストは各100文字まで。どちらか一方だけでも作れます。\n"

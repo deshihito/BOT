@@ -121,12 +121,12 @@ class VoiceHub(commands.Cog):
         voice_client = getattr(guild, "voice_client", None)
         if voice_client is not None:
             name = getattr(getattr(voice_client, "channel", None), "name", "不明")
-            embed.description = f"Bot は **{name}** に接続していますが、使っている機能の記録がありません。`/voice` のパネルから退出できます。"
+            embed.description = f"Bot は **{name}** に接続していますが、使っている機能の記録がありません。`/vc` のパネルから退出できます。"
         else:
             embed.description = "いまはどの機能も使っていません。"
         saito = self.bot.get_cog(COGS["match"])
         if saito is not None and any(getattr(r.guild, "id", None) == guild.id for r in getattr(saito, "matching_queue", [])):
-            embed.description += "\nランダム通話の相手を探しています（`/voice` のパネルから取り消し）。"
+            embed.description += "\nランダム通話の相手を探しています（`/vc` のパネルから取り消し）。"
         return embed
 
     # ------------------------------------------------------------ 統合サブコマンド
@@ -375,7 +375,7 @@ class VoiceActionSelect(discord.ui.Select):
 class VoicePanelView(discord.ui.View):
     def __init__(self, hub: VoiceHub, genre: str | None = None, shortcut_mode: bool = False,
                  shortcut_item: dict | None = None, owner_id: int | None = None):
-        super().__init__(timeout=900)
+        super().__init__(timeout=600)  # ルートパネル共通の寿命（導線最適化 S10）
         self.hub = hub
         self.owner_id = owner_id
         saved = (shortcut_item or {}).get("action", {})

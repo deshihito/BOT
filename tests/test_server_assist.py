@@ -193,7 +193,8 @@ class ServerAssistPanelTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn("welcome", [feature.key for feature in cog.features])
         select = next(item for item in view.children if isinstance(item, AssistFeatureSelect))
         self.assertIn("welcome", [option.value for option in select.options])
-        self.assertIn("参加・退出メッセージ", [field.name for field in view.embed().fields])
+        # 導線最適化 S3: ホーム embed は機能一覧を並べない（セレクトの option が担う）
+        self.assertEqual(view.embed().fields, [])
 
     def test_views_fit_components_v2_action_row_limits(self):
         from core.panel_v2 import as_panel_v2

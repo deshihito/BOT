@@ -91,7 +91,7 @@ class GeneralActionSelect(discord.ui.Select):
 class GeneralPanel(discord.ui.View):
     def __init__(self, cog, genre: str | None = None, shortcut_mode: bool = False, shortcut_item: dict | None = None,
                  history_specs: list | None = None, owner_id: int | None = None):
-        super().__init__(timeout=300)
+        super().__init__(timeout=600)  # ルートパネル共通の寿命（導線最適化 S10）
         self.cog = cog
         self.owner_id = owner_id
         saved = (shortcut_item or {}).get("action", {})
