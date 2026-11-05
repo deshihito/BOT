@@ -772,14 +772,41 @@ MIQ_COOLDOWN = 3.0
 MIQ_GIF_MAX_FRAMES = 24
 # LINE風で遡れる件数(対象メッセージを含む)
 MIQ_LINE_MAX_MESSAGES = 4
+# LINE風で1メッセージに合成する写真の最大枚数
+MIQ_LINE_MAX_IMAGES = 2
 
 # format -> (表示名, 絵文字)。quote が従来の引用画像。
+# random は保存値としての仮想フォーマットで、生成ごとに MIQ_RANDOM_POOL から
+# 実フォーマットを1つ選ぶ。未設定ユーザーの既定も random。
 MIQ_FORMATS = {
+    "random": ("ランダム", "🎲"),
     "quote": ("引用 (従来)", "🖼️"),
     "manga": ("漫画風", "💥"),
     "music": ("音楽再生風", "🎵"),
     "line": ("LINE風", "💬"),
+    "news": ("ニュース速報風", "📺"),
+    "xpost": ("X投稿風", "🐦"),
+    "rpg": ("RPG風", "🎮"),
 }
+
+# ランダムで選ばれる単体メッセージ系フォーマット。
+# line (返信チェーン前提) と random 自身は絶対に含めない。
+MIQ_RANDOM_POOL = ("quote", "manga", "music", "news", "xpost", "rpg")
+
+
+def miq_resolve_format(prefs_or_format) -> str:
+    """保存値 (prefs dict または format 文字列) を実フォーマットに解決する。
+
+    "random" なら MIQ_RANDOM_POOL から1つ選ぶ (line は選ばれない)。
+    それ以外はそのまま返し、不正値は "quote" にフォールバックする。
+    生成経路ごとに1回だけ呼ぶこと。
+    """
+    fmt = prefs_or_format.get("format") if isinstance(prefs_or_format, dict) else prefs_or_format
+    if fmt == "random":
+        return random.choice(MIQ_RANDOM_POOL)
+    if fmt in MIQ_FORMATS and fmt != "random":
+        return fmt
+    return "quote"
 
 _MIQ_ASSET_FONTS = Path(__file__).resolve().parent.parent / "assets" / "fonts"
 
@@ -1669,6 +1696,204 @@ def render_miq_music_png(avatar_bytes: bytes | None, text: str, name: str, usern
     return _miq_save_png(img)
 
 
+def render_miq_news_png(avatar_bytes: bytes | None, text: str, name: str, username: str, *, font_path: str | None = None) -> bytes:
+    """ニュース速報風: ぼかしたアバター背景+「速報」バッジ+下部の見出し帯。"""
+    from PIL import Image, ImageDraw, ImageEnhance, ImageFilter, ImageOps
+
+    W, H = MIQ_NEW_W, MIQ_NEW_H
+    src = _miq_open_avatar(avatar_bytes)
+    art_src = src.convert("RGB")
+
+    bg = ImageOps.fit(art_src, (W, H), Image.LANCZOS)
+    bg = bg.filter(ImageFilter.GaussianBlur(42))
+    bg = ImageEnhance.Brightness(bg).enhance(0.62)
+    bg = Image.blend(bg, Image.new("RGB", (W, H), (10, 22, 52)), 0.45)
+    img = bg
+    d = ImageDraw.Draw(img, "RGBA")
+
+    shown_name = _miq_display_text(name) or _miq_display_text(username) or "unknown"
+    shown_user = _miq_display_text(username)
+    shown_text = _miq_display_text(text) or text
+
+    # 左上: 赤い「速報」バッジ
+    badge_font = _miq_load_font(font_path, 36)
+    d.rounded_rectangle([36, 32, 176, 88], radius=10, fill=(208, 28, 38, 255))
+    d.text((106, 60), "速報", font=badge_font, fill=(255, 255, 255, 255), anchor="mm")
+    sub_font = _miq_load_font(font_path, 24)
+    d.text((196, 62), "MIQ NEWS", font=sub_font, fill=(255, 255, 255, 200), anchor="lm")
+
+    # 下部: 細い青帯 (名前) → 白い見出し帯 → ティッカー帯
+    ticker_h = 42
+    band_top, band_bottom = 452, H - ticker_h
+    blue_top = band_top - 44
+    d.rectangle([0, blue_top, W, band_top], fill=(18, 56, 132, 255))
+    who = shown_name + (f"  @{shown_user}" if shown_user and shown_user != shown_name else "")
+    name_font = _miq_load_font(font_path, 25)
+    nw = d.textlength(who, font=name_font)
+    while nw > W - 72 and who:
+        who = who[:-1]
+        nw = d.textlength(who, font=name_font)
+    d.text((36, blue_top + 22), who, font=name_font, fill=(255, 255, 255, 255), anchor="lm")
+
+    d.rectangle([0, band_top, W, band_bottom], fill=(255, 255, 255, 255))
+    font, wrapped, lh, _size = _miq_fit(
+        d, shown_text, font_path, W - 72, band_bottom - band_top - 28,
+        max_size=58, min_size=20,
+    )
+    ty = band_top + (band_bottom - band_top - len(wrapped) * lh) // 2
+    for line in wrapped:
+        if line:
+            d.text((36, ty), line, font=font, fill=(16, 20, 28, 255))
+        ty += lh
+
+    # ティッカー風の細帯
+    d.rectangle([0, band_bottom, W, H], fill=(6, 10, 24, 255))
+    tick_font = _miq_load_font(font_path, 21)
+    ticker = f"◆ {shown_name} さんの投稿を速報でお伝えしています ◆ MIQ NEWS"
+    tw = d.textlength(ticker, font=tick_font)
+    while tw > W - 72 and len(ticker) > 4:
+        ticker = ticker[:-1]
+        tw = d.textlength(ticker, font=tick_font)
+    d.text((36, band_bottom + ticker_h // 2), ticker, font=tick_font, fill=(210, 222, 245, 255), anchor="lm")
+    return _miq_save_png(img)
+
+
+def render_miq_xpost_png(avatar_bytes: bytes | None, text: str, name: str, username: str, *, font_path: str | None = None) -> bytes:
+    """X投稿風: 白カード+丸アバター+名前/@ID+本文+アクション行。"""
+    from PIL import Image, ImageDraw, ImageOps
+
+    W, H = MIQ_NEW_W, MIQ_NEW_H
+    img = Image.new("RGB", (W, H), (255, 255, 255))
+    d = ImageDraw.Draw(img)
+    ink = (15, 20, 25)
+    sub = (83, 100, 113)
+    line_color = (207, 217, 222)
+
+    shown_name = _miq_display_text(name) or _miq_display_text(username) or "unknown"
+    shown_user = _miq_display_text(username)
+    shown_text = _miq_display_text(text) or text
+
+    d.rectangle([0, 0, W - 1, H - 1], outline=line_color, width=2)
+
+    # 丸アバター
+    av_size = 96
+    av = ImageOps.fit(_miq_open_avatar(avatar_bytes).convert("RGB"), (av_size, av_size), Image.LANCZOS)
+    circle = Image.new("L", (av_size, av_size), 0)
+    ImageDraw.Draw(circle).ellipse([0, 0, av_size, av_size], fill=255)
+    img.paste(av, (48, 48), circle)
+    d = ImageDraw.Draw(img)
+
+    # 表示名 (太字気味に二度描き) + @username
+    name_font = _miq_load_font(font_path, 34)
+    nm = shown_name
+    while nm and d.textlength(nm, font=name_font) > W - 200:
+        nm = nm[:-1]
+    d.text((168, 56), nm, font=name_font, fill=ink, stroke_width=1, stroke_fill=ink)
+    if shown_user:
+        d.text((168, 102), f"@{shown_user}", font=_miq_load_font(font_path, 26), fill=sub)
+
+    # 本文 (左揃え)
+    font, wrapped, lh, _size = _miq_fit(d, shown_text, font_path, W - 96, 268, max_size=46, min_size=20)
+    ty = 178
+    for line in wrapped:
+        if line:
+            d.text((48, ty), line, font=font, fill=ink)
+        ty += lh
+
+    # アクション行の数字は本文ハッシュから決定的に生成する
+    digest = hashlib.md5((shown_text or "").encode("utf-8")).hexdigest()
+    nums = [int(digest[i * 4:(i + 1) * 4], 16) for i in range(4)]
+    counts = [
+        f"{nums[0] % 1000:,}",
+        f"{nums[1] % 5000:,}",
+        f"{nums[2] % 20000:,}",
+        f"{nums[3] % 900 + 1}万" if nums[3] % 3 else f"{nums[3] % 100000:,}",
+    ]
+    row_y = 566
+    d.line([(48, row_y - 34), (W - 48, row_y - 34)], fill=line_color, width=2)
+    num_font = _miq_load_font(font_path, 25)
+    col_x = [70, 360, 650, 940]
+    for i, cx0 in enumerate(col_x):
+        cy = row_y
+        if i == 0:
+            # 返信: フキダシの輪郭
+            d.rounded_rectangle([cx0, cy - 13, cx0 + 30, cy + 9], radius=8, outline=sub, width=3)
+            d.polygon([(cx0 + 8, cy + 8), (cx0 + 8, cy + 18), (cx0 + 18, cy + 8)], outline=sub)
+            d.line([(cx0 + 8, cy + 18), (cx0 + 8, cy + 9)], fill=sub, width=3)
+        elif i == 1:
+            # リポスト: 右向き矢印 (上) と左向き矢印 (下)
+            d.line([(cx0, cy - 8), (cx0 + 26, cy - 8)], fill=sub, width=3)
+            d.polygon([(cx0 + 26, cy - 14), (cx0 + 26, cy - 2), (cx0 + 36, cy - 8)], fill=sub)
+            d.line([(cx0 + 8, cy + 10), (cx0 + 34, cy + 10)], fill=sub, width=3)
+            d.polygon([(cx0 + 8, cy + 4), (cx0 + 8, cy + 16), (cx0 - 2, cy + 10)], fill=sub)
+        elif i == 2:
+            # いいね: ハート (2円+三角)
+            d.ellipse([cx0, cy - 12, cx0 + 15, cy + 3], fill=sub)
+            d.ellipse([cx0 + 13, cy - 12, cx0 + 28, cy + 3], fill=sub)
+            d.polygon([(cx0 + 1, cy), (cx0 + 27, cy), (cx0 + 14, cy + 18)], fill=sub)
+        else:
+            # 表示数: 棒グラフ
+            for j, bh in enumerate((10, 17, 24)):
+                d.rectangle([cx0 + j * 10, cy + 12 - bh, cx0 + j * 10 + 6, cy + 12], fill=sub)
+        d.text((cx0 + 46, cy + 1), counts[i], font=num_font, fill=sub, anchor="lm")
+    return _miq_save_png(img)
+
+
+def render_miq_rpg_png(avatar_bytes: bytes | None, text: str, name: str, username: str, *, font_path: str | None = None) -> bytes:
+    """RPG風: 暗い背景+画面下の紺グラデーションウィンドウ (二重枠+名前プレート)。"""
+    from PIL import Image, ImageDraw, ImageEnhance, ImageOps
+
+    W, H = MIQ_NEW_W, MIQ_NEW_H
+    src = _miq_open_avatar(avatar_bytes)
+    bg = ImageOps.fit(src.convert("RGB"), (W, H), Image.LANCZOS)
+    bg = ImageEnhance.Brightness(bg).enhance(0.5)
+    bg = Image.blend(bg, Image.new("RGB", (W, H), (10, 14, 38)), 0.35)
+    img = bg
+    d = ImageDraw.Draw(img, "RGBA")
+
+    shown_name = _miq_display_text(name) or _miq_display_text(username) or "unknown"
+    shown_text = _miq_display_text(text) or text
+
+    # ウィンドウ本体 (下半分、紺グラデーション)
+    wx0, wy0, wx1, wy1 = 28, 392, W - 28, H - 28
+    win = Image.new("RGB", (wx1 - wx0, wy1 - wy0))
+    wd = ImageDraw.Draw(win)
+    top_c, bot_c = (24, 36, 84), (8, 12, 36)
+    for yy in range(wy1 - wy0):
+        wd.line([(0, yy), (wx1 - wx0, yy)], fill=_miq_mix(top_c, bot_c, yy / max(1, wy1 - wy0 - 1)))
+    img.paste(win, (wx0, wy0))
+    d = ImageDraw.Draw(img, "RGBA")
+    # 二重枠
+    d.rounded_rectangle([wx0, wy0, wx1, wy1], radius=14, outline=(255, 255, 255, 255), width=4)
+    d.rounded_rectangle([wx0 + 9, wy0 + 9, wx1 - 9, wy1 - 9], radius=9, outline=(150, 180, 255, 200), width=2)
+
+    # 名前プレート (ウィンドウ左上に重ねる)
+    name_font = _miq_load_font(font_path, 28)
+    nm = shown_name
+    while nm and d.textlength(nm, font=name_font) > 380:
+        nm = nm[:-1]
+    plate_w = int(d.textlength(nm, font=name_font)) + 40
+    px0, py0 = wx0 + 24, wy0 - 24
+    d.rounded_rectangle([px0, py0, px0 + plate_w, py0 + 48], radius=8, fill=(10, 16, 44, 255), outline=(255, 255, 255, 255), width=3)
+    d.text((px0 + plate_w // 2, py0 + 24), nm, font=name_font, fill=(255, 255, 255, 255), anchor="mm")
+
+    # 本文 (左揃え、白)
+    font, wrapped, lh, _size = _miq_fit(
+        d, shown_text, font_path, (wx1 - wx0) - 72, (wy1 - wy0) - 84,
+        max_size=42, min_size=20,
+    )
+    ty = wy0 + 40
+    for line in wrapped:
+        if line:
+            d.text((wx0 + 36, ty), line, font=font, fill=(255, 255, 255, 255))
+        ty += lh
+
+    # 右下の送り印 ▼ (図形で描く)
+    tx, ty2 = wx1 - 58, wy1 - 44
+    d.polygon([(tx - 13, ty2), (tx + 13, ty2), (tx, ty2 + 15)], fill=(255, 255, 255, 235))
+    return _miq_save_png(img)
+
+
 class MiqLineEntry:
     """LINE風の1メッセージ分。render_miq_line_png は dict でもこの形でも受け付ける。
 
@@ -1677,13 +1902,19 @@ class MiqLineEntry:
     """
 
     def __init__(self, name: str, text: str, created_at=None, avatar_bytes: bytes | None = None,
-                 avatar_image=None, author_key=None):
+                 avatar_image=None, author_key=None, segments=None, images=None, stickers=None):
         self.name = name
         self.text = text
         self.created_at = created_at
         self.avatar_bytes = avatar_bytes
         self.avatar_image = avatar_image
         self.author_key = author_key
+        # segments: [{"type": "text", "text": str} | {"type": "emoji", "name": str,
+        # "image": bytes|Image}] の並び。カスタム絵文字を本文内にインライン合成する。
+        self.segments = segments
+        # images / stickers: bytes | PIL.Image のリスト (写真 / スタンプ)
+        self.images = images
+        self.stickers = stickers
 
     def __repr__(self) -> str:
         return f"MiqLineEntry(name={self.name!r}, text={self.text!r}, author_key={self.author_key!r})"
@@ -1729,8 +1960,180 @@ def _miq_line_avatar_image(entry):
     return _miq_open_avatar(avatar_bytes)
 
 
+# ---- LINE風: メディア (画像/スタンプ) と絵文字セグメント ----
+_MIQ_UNICODE_EMOJI_SUPPORTED = None
+
+
+def _miq_unicode_emoji_supported() -> bool:
+    """Unicode絵文字を Noto Color Emoji の embedded_color で描けるか (初回のみプローブ)。
+
+    描ける環境では本文行内にカラー絵文字を合成し、描けない環境では
+    その単位を落とす (従来の除去動作) ための判定。結果はキャッシュする。
+    """
+    global _MIQ_UNICODE_EMOJI_SUPPORTED
+    if _MIQ_UNICODE_EMOJI_SUPPORTED is not None:
+        return _MIQ_UNICODE_EMOJI_SUPPORTED
+    _MIQ_UNICODE_EMOJI_SUPPORTED = False
+    path = _miq_emoji_font_path()
+    if path:
+        try:
+            from PIL import Image, ImageDraw, ImageFont
+
+            font = ImageFont.truetype(path, _MIQ_EMOJI_SIZE)
+            tmp = Image.new("RGBA", (160, 160), (0, 0, 0, 0))
+            ImageDraw.Draw(tmp).text((10, 10), "\U0001F600", font=font, embedded_color=True)
+            if tmp.getbbox():
+                _MIQ_UNICODE_EMOJI_SUPPORTED = True
+        except Exception:
+            logger.debug("MIQ: Unicode絵文字のプローブに失敗しました", exc_info=True)
+    return _MIQ_UNICODE_EMOJI_SUPPORTED
+
+
+def _miq_line_media_image(value):
+    """bytes / bytearray / PIL.Image を RGBA 画像にする (GIF等は1フレーム目)。失敗時は None。"""
+    from PIL import Image
+
+    if value is None:
+        return None
+    if isinstance(value, Image.Image):
+        img = value
+    elif isinstance(value, (bytes, bytearray)):
+        try:
+            img = Image.open(io.BytesIO(bytes(value)))
+        except Exception:
+            logger.debug("MIQ: LINEメディア画像の読み込みに失敗しました", exc_info=True)
+            return None
+    else:
+        return None
+    try:
+        img.seek(0)
+    except Exception:
+        logger.debug("MIQ: LINEメディア画像のフレーム移動に失敗しました", exc_info=True)
+    try:
+        return img.convert("RGBA").copy()
+    except Exception:
+        logger.debug("MIQ: LINEメディア画像の変換に失敗しました", exc_info=True)
+        return None
+
+
+def _miq_line_entry_atoms(entry, emoji_ok: bool) -> list:
+    """エントリ本文を原子列にする。
+
+    原子は (kind, payload): "text" (1単位の文字列) / "cemoji" (PIL.Image) /
+    "uemoji" (Unicode絵文字の単位文字列) / "newline" (改行)。
+    segments があればそれを優先し、無ければ text から作る。
+    """
+    atoms: list = []
+    pieces: list = []
+    segments = _miq_line_field(entry, "segments")
+    if segments:
+        for seg in segments:
+            if isinstance(seg, dict):
+                if seg.get("type") == "emoji":
+                    img = _miq_line_media_image(
+                        seg.get("image") if seg.get("image") is not None else seg.get("image_bytes")
+                    )
+                    if img is not None:
+                        pieces.append(("cemoji", img))
+                        continue
+                    pieces.append(("text", f":{seg.get('name') or 'emoji'}:"))
+                else:
+                    pieces.append(("text", str(seg.get("text") or "")))
+            else:
+                pieces.append(("text", str(seg)))
+    else:
+        pieces.append(("text", str(_miq_line_field(entry, "text") or "")))
+    emoji_path = _miq_emoji_font_path() if emoji_ok else None
+    for kind, payload in pieces:
+        if kind == "cemoji":
+            atoms.append(("cemoji", payload))
+            continue
+        for unit in _miq_split_units(_miq_clean_text(payload)):
+            if unit == "\n":
+                atoms.append(("newline", None))
+            elif emoji_path and _miq_is_emoji_unit(unit, emoji_path):
+                atoms.append(("uemoji", unit))
+            else:
+                atoms.append(("text", unit))
+    return atoms
+
+
+def _miq_line_atom_width(atom, draw, chain, size: int, emoji_path) -> float:
+    kind, payload = atom
+    if kind == "cemoji":
+        return float(size)
+    if kind == "uemoji":
+        return _miq_emoji_width(payload, size, emoji_path) if emoji_path else float(size)
+    if kind == "newline":
+        return 0.0
+    return _miq_unit_width(payload, draw, chain, size, emoji_path)
+
+
+def _miq_line_wrap_atoms(atoms, draw, chain, size: int, emoji_path, max_w: float) -> list:
+    """原子列を max_w で折り返す。戻り値は [[(atom, width), ...], ...]。"""
+    lines: list = []
+    line: list = []
+    line_w = 0.0
+    for atom in atoms:
+        if atom[0] == "newline":
+            lines.append(line)
+            line, line_w = [], 0.0
+            continue
+        w = _miq_line_atom_width(atom, draw, chain, size, emoji_path)
+        if line and line_w + w > max_w:
+            lines.append(line)
+            line, line_w = [], 0.0
+        line.append((atom, w))
+        line_w += w
+    lines.append(line)
+    return lines
+
+
+def _miq_line_draw_atoms(img, draw, x: float, y: float, line_atoms, size: int, chain, emoji_path, fill):
+    """折り返し済みの1行 (原子列) を左揃えで描く。貼り付け後の Draw を返す。"""
+    from PIL import Image, ImageDraw
+
+    cx = x
+    for atom, w in line_atoms:
+        kind, payload = atom
+        if w <= 0:
+            continue
+        if kind == "cemoji":
+            sq = payload.resize((size, size), Image.LANCZOS)
+            img.paste(sq, (int(round(cx)), int(round(y))), sq)
+            draw = ImageDraw.Draw(img)
+            cx += w
+        elif kind == "uemoji":
+            used = _miq_render_emoji_unit(img, draw, cx, y, payload, size, emoji_path)
+            draw = ImageDraw.Draw(img)
+            cx += used if used else w
+        else:
+            kind2, font = _miq_unit_font(payload, chain, emoji_path)
+            if kind2 == "font":
+                bases = _miq_unit_bases(payload) or payload
+                draw.text((cx, y), bases, font=font, fill=fill)
+            cx += w
+    return draw
+
+
+def _miq_line_fit_media(image, max_w: int, max_h: int, scale: float):
+    """メディア画像の表示サイズ (w, h) を上限と全体スケールから決める。"""
+    w = min(max_w, image.width)
+    h = image.height * w / max(1, image.width)
+    if h > max_h:
+        w = int(w * max_h / h)
+        h = max_h
+    return max(1, int(w * scale)), max(1, int(h * scale))
+
+
 def render_miq_line_png(entries, *, font_path: str | None = None) -> bytes:
-    """LINE風: 会話リストを左右バブルで描く。最後の要素の作者が右側 (緑)。"""
+    """LINE風: 会話リストを左右バブルで描く。最後の要素の作者が右側 (緑)。
+
+    各エントリは「テキストバブル (カスタム絵文字/Unicode絵文字のインライン
+    合成対応)」「写真 (バブルなし、角丸)」「スタンプ (バブルなし)」の
+    ブロック列に展開され、ヘッダ (名前/アバター) はエントリに1回だけ、
+    時刻は最後のブロックに付く。
+    """
     from PIL import Image, ImageDraw, ImageOps
 
     W, H = MIQ_NEW_W, MIQ_NEW_H
@@ -1746,6 +2149,9 @@ def render_miq_line_png(entries, *, font_path: str | None = None) -> bytes:
     if not items:
         return _miq_save_png(img)
 
+    emoji_ok = _miq_unicode_emoji_supported()
+    emoji_path = _miq_emoji_font_path() if emoji_ok else None
+
     last_key = _miq_line_field(items[-1], "author_key")
     last_name = _miq_line_field(items[-1], "name")
     norm = []
@@ -1753,9 +2159,26 @@ def render_miq_line_png(entries, *, font_path: str | None = None) -> bytes:
         key = _miq_line_field(entry, "author_key")
         name = _miq_display_text(_miq_line_field(entry, "name") or "") or "unknown"
         is_right = (key == last_key) if key is not None or last_key is not None else (name == last_name)
+        atoms = _miq_line_entry_atoms(entry, emoji_ok)
+        has_text_atoms = any(kind != "newline" for kind, _p in atoms)
+        images = []
+        for value in _miq_line_field(entry, "images") or []:
+            media = _miq_line_media_image(value)
+            if media is not None:
+                images.append(media)
+        stickers = []
+        for value in _miq_line_field(entry, "stickers") or []:
+            media = _miq_line_media_image(value)
+            if media is not None:
+                stickers.append(media)
         norm.append({
             "name": name,
-            "text": str(_miq_line_field(entry, "text") or ""),
+            "plain": str(_miq_line_field(entry, "text") or ""),
+            "atoms": atoms,
+            "rich": any(kind in ("cemoji", "uemoji") for kind, _p in atoms),
+            "has_text": has_text_atoms,
+            "images": images,
+            "stickers": stickers,
             "time": _miq_line_time_str(_miq_line_field(entry, "created_at")),
             "avatar": _miq_line_avatar_image(entry),
             "right": bool(is_right),
@@ -1767,64 +2190,137 @@ def render_miq_line_png(entries, *, font_path: str | None = None) -> bytes:
     name_font = _miq_load_font(font_path, 22)
     meta_font = _miq_load_font(font_path, 17)
     max_text_w = 560 - 44
+    block_gap = 10
 
-    # 全要素が収まるフォントサイズを探す
-    laid = []
-    for font_size in (36, 32, 28, 24, 20, 17):
+    def layout(font_size: int, img_scale: float):
+        """(laid, total_h) を返す。laid は (item, blocks, entry_h)。blocks は描画用 dict の列。"""
         font = _miq_load_font(font_path, font_size)
+        chain = _miq_fallback_fonts(font_path, font_size)
         lh = int(font_size * 1.34)
         laid = []
         total_h = 28
         for item in norm:
-            wrapped = _miq_wrap(d, item["text"], font, max_text_w) or [""]
-            text_w = max((d.textlength(line, font=font) for line in wrapped), default=0)
-            bubble_w = int(text_w) + 44
-            bubble_h = len(wrapped) * lh + 30
-            entry_h = 26 + bubble_h
-            laid.append((item, wrapped, bubble_w, bubble_h, entry_h))
+            blocks = []
+            if item["has_text"]:
+                if item["rich"]:
+                    wrapped = _miq_line_wrap_atoms(item["atoms"], d, chain, font_size, emoji_path, max_text_w)
+                    text_w = max(
+                        (sum(w for _a, w in line) for line in wrapped), default=0.0,
+                    )
+                    bubble_w = min(int(text_w) + 44, max_text_w + 44)
+                    blocks.append({
+                        "kind": "bubble", "rich_lines": wrapped, "str_lines": None,
+                        "w": bubble_w, "h": len(wrapped) * lh + 30,
+                    })
+                else:
+                    wrapped = _miq_wrap(d, item["plain"], font, max_text_w) or [""]
+                    text_w = max((d.textlength(line, font=font) for line in wrapped), default=0)
+                    blocks.append({
+                        "kind": "bubble", "rich_lines": None, "str_lines": wrapped,
+                        "w": int(text_w) + 44, "h": len(wrapped) * lh + 30,
+                    })
+            for media in item["images"]:
+                w, h = _miq_line_fit_media(media, 420, 420, img_scale)
+                blocks.append({"kind": "image", "media": media, "w": w, "h": h})
+            for media in item["stickers"]:
+                w, h = _miq_line_fit_media(media, 280, 280, img_scale)
+                blocks.append({"kind": "sticker", "media": media, "w": w, "h": h})
+            if not blocks:
+                blocks.append({
+                    "kind": "bubble", "rich_lines": None, "str_lines": [""],
+                    "w": 44, "h": lh + 30,
+                })
+            entry_h = 26 + sum(b["h"] for b in blocks) + block_gap * (len(blocks) - 1)
+            laid.append((item, blocks, entry_h))
             total_h += entry_h + 16
-        if total_h <= H - 12 or font_size == 17:
+        return laid, total_h
+
+    # 全要素が収まるフォントサイズと画像スケールの組み合わせを探す
+    laid = []
+    font_size = 17
+    for fs in (36, 32, 28, 24, 20, 17):
+        chosen = None
+        for img_scale in (1.0, 0.75, 0.55, 0.4):
+            cand, total_h = layout(fs, img_scale)
+            if total_h <= H - 12:
+                chosen = cand
+                break
+        if chosen is not None:
+            laid, font_size = chosen, fs
             break
+    if not laid:
+        laid, _total = layout(17, 0.4)
+        font_size = 17
 
     avatar_size = 72
+    font = _miq_load_font(font_path, font_size)
+    chain = _miq_fallback_fonts(font_path, font_size)
+    lh = int(font_size * 1.34)
     y = 24
-    for item, wrapped, bubble_w, bubble_h, entry_h in laid:
-        font = _miq_load_font(font_path, font_size)
-        lh = int(font_size * 1.34)
-        bubble_top = y + 26
-        avatar_top = bubble_top
+    for item, blocks, entry_h in laid:
+        content_top = y + 26
         if item["right"]:
             av_x = W - 36 - avatar_size
-            bubble_right = av_x - 16
-            bubble_x = bubble_right - bubble_w
-            d.text((bubble_right, y), item["name"], font=name_font, fill=sub, anchor="ra")
-            # 既読+時刻 (バブル左下に縦積み)
-            meta_y = bubble_top + bubble_h - 40
-            d.text((bubble_x - 10, meta_y), "既読", font=meta_font, fill=sub, anchor="ra")
-            d.text((bubble_x - 10, meta_y + 20), item["time"], font=meta_font, fill=sub, anchor="ra")
-            bubble_fill = green
+            content_right = av_x - 16
+            d.text((content_right, y), item["name"], font=name_font, fill=sub, anchor="ra")
         else:
             av_x = 36
-            bubble_x = av_x + avatar_size + 16
-            d.text((bubble_x, y), item["name"], font=name_font, fill=sub)
-            d.text((bubble_x + bubble_w + 10, bubble_top + bubble_h - 22), item["time"], font=meta_font, fill=sub)
-            bubble_fill = (255, 255, 255)
-        # 円形アバター
+            content_left = av_x + avatar_size + 16
+            d.text((content_left, y), item["name"], font=name_font, fill=sub)
+        # 円形アバター (最初のブロックの上端に合わせる)
         av = ImageOps.fit(item["avatar"].convert("RGB"), (avatar_size, avatar_size), Image.LANCZOS)
         circle = Image.new("L", (avatar_size, avatar_size), 0)
         ImageDraw.Draw(circle).ellipse([0, 0, avatar_size, avatar_size], fill=255)
-        img.paste(av, (av_x, avatar_top), circle)
+        img.paste(av, (av_x, content_top), circle)
         d = ImageDraw.Draw(img)
-        # バブル
-        d.rounded_rectangle(
-            [bubble_x, bubble_top, bubble_x + bubble_w, bubble_top + bubble_h],
-            radius=18, fill=bubble_fill,
-        )
-        ty = bubble_top + 15
-        for line in wrapped:
-            if line:
-                d.text((bubble_x + 22, ty), line, font=font, fill=ink)
-            ty += lh
+
+        by = content_top
+        last_geo = None
+        for block in blocks:
+            bw, bh = block["w"], block["h"]
+            if item["right"]:
+                bx = content_right - bw
+            else:
+                bx = content_left
+            if block["kind"] == "bubble":
+                d.rounded_rectangle(
+                    [bx, by, bx + bw, by + bh], radius=18,
+                    fill=green if item["right"] else (255, 255, 255),
+                )
+                ty = by + 15
+                if block["rich_lines"] is not None:
+                    for line_atoms in block["rich_lines"]:
+                        if line_atoms:
+                            d = _miq_line_draw_atoms(
+                                img, d, bx + 22, ty, line_atoms, font_size, chain, emoji_path, ink,
+                            )
+                        ty += lh
+                else:
+                    for line in block["str_lines"] or []:
+                        if line:
+                            d.text((bx + 22, ty), line, font=font, fill=ink)
+                        ty += lh
+            elif block["kind"] == "image":
+                media = block["media"].resize((bw, bh), Image.LANCZOS)
+                mask = Image.new("L", (bw, bh), 0)
+                ImageDraw.Draw(mask).rounded_rectangle([0, 0, bw, bh], radius=16, fill=255)
+                img.paste(media, (bx, by), mask)
+                d = ImageDraw.Draw(img)
+            else:  # sticker: バブルなしでそのまま貼る
+                media = block["media"].resize((bw, bh), Image.LANCZOS)
+                img.paste(media, (bx, by), media)
+                d = ImageDraw.Draw(img)
+            last_geo = (bx, by, bw, bh)
+            by += bh + block_gap
+        # 時刻は最後のブロックに付ける
+        if last_geo is not None:
+            bx, byy, bw, bh = last_geo
+            if item["right"]:
+                meta_y = byy + bh - 40
+                d.text((bx - 10, meta_y), "既読", font=meta_font, fill=sub, anchor="ra")
+                d.text((bx - 10, meta_y + 20), item["time"], font=meta_font, fill=sub, anchor="ra")
+            else:
+                d.text((bx + bw + 10, byy + bh - 22), item["time"], font=meta_font, fill=sub)
         y += entry_h + 16
     return _miq_save_png(img)
 
@@ -1881,6 +2377,62 @@ async def miq_collect_line_chain(message, *, max_messages: int = MIQ_LINE_MAX_ME
         current = nxt
     chain.reverse()
     return chain
+
+
+# ------------------------------------------------------------
+# LINE風: メッセージからメディア/絵文字セグメントを取り出す補助
+# ------------------------------------------------------------
+_MIQ_CUSTOM_EMOJI_TOKEN = re.compile(r"<(a?):(\w+):(\d+)>")
+
+
+def _miq_line_split_segments(raw: str, emoji_images: dict) -> list:
+    """生の content をテキスト/カスタム絵文字のセグメント列に切り分ける。
+
+    emoji_images は {emoji_id: bytes|None}。取得できなかった絵文字は
+    :name: のテキスト表示にフォールバックする。
+    """
+    raw = raw or ""
+    segments: list = []
+    pos = 0
+    for m in _MIQ_CUSTOM_EMOJI_TOKEN.finditer(raw):
+        if m.start() > pos:
+            segments.append({"type": "text", "text": raw[pos:m.start()]})
+        eid = int(m.group(3))
+        img = (emoji_images or {}).get(eid)
+        if img:
+            segments.append({"type": "emoji", "name": m.group(2), "image": img})
+        else:
+            segments.append({"type": "text", "text": f":{m.group(2)}:"})
+        pos = m.end()
+    if pos < len(raw):
+        segments.append({"type": "text", "text": raw[pos:]})
+    return segments
+
+
+def _miq_sticker_renderable(sticker) -> bool:
+    """スタンプが画像として描ける形式か (PNG/APNG/GIF)。Lottie (JSON) は対象外。"""
+    ft = getattr(sticker, "format_type", None)
+    val = getattr(ft, "value", ft)
+    return val in (1, 2, 4)
+
+
+def _miq_is_image_attachment(att) -> bool:
+    ct = (getattr(att, "content_type", None) or "").lower()
+    if ct.startswith("image/"):
+        return True
+    fname = (getattr(att, "filename", "") or "").lower()
+    return fname.endswith((".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp"))
+
+
+def _miq_line_message_has_media(message) -> bool:
+    """LINE風で「テキストが無くても生成できる」メディア (画像/スタンプ/絵文字) があるか。"""
+    for att in getattr(message, "attachments", None) or []:
+        if _miq_is_image_attachment(att):
+            return True
+    for sticker in getattr(message, "stickers", None) or []:
+        if _miq_sticker_renderable(sticker):
+            return True
+    return bool(_MIQ_CUSTOM_EMOJI_TOKEN.search(getattr(message, "content", "") or ""))
 
 
 # ------------------------------------------------------------
@@ -2013,7 +2565,7 @@ MIQ_DEFAULT_PREFS: dict = {
     "gif": False,
     "font": None,
     "theme": "bw",
-    "format": "quote",
+    "format": "random",
     "refuse": False,
 }
 
@@ -2241,7 +2793,9 @@ class MiqPreviewButton(discord.ui.Button):
             return
         await interaction.response.defer(ephemeral=True, thinking=True)
         limit = getattr(interaction.guild, "filesize_limit", None)
-        if parent.prefs.get("format") == "line":
+        # ランダムは押すたびに1回だけ解決する
+        resolved_fmt = miq_resolve_format(parent.prefs)
+        if resolved_fmt == "line":
             # LINE風のプレビューはサンプルの2件会話で作る
             now = datetime.now(timezone.utc)
             avatar_bytes = None
@@ -2258,8 +2812,10 @@ class MiqPreviewButton(discord.ui.Button):
             ]
             file = await parent.cog._miq_render_line_file(entries, parent.prefs)
         else:
+            eff_prefs = dict(parent.prefs)
+            eff_prefs["format"] = resolved_fmt
             file = await parent.cog._miq_build_file(
-                interaction.user, "プレビューです。\n見た目の確認ができます。", parent.prefs, limit,
+                interaction.user, "プレビューです。\n見た目の確認ができます。", eff_prefs, limit,
             )
         if file is None:
             return await interaction.followup.send("プレビューを作れませんでした。時間をおいて再試行してください。", ephemeral=True)
@@ -2332,10 +2888,11 @@ class MiqSettingsView(discord.ui.View):
         font_key = self.current_font_key()
         font_label = next((label for key, label, _path in self.fonts if key == font_key), font_key)
         theme_label = MIQ_THEMES.get(p.get("theme"), MIQ_THEMES["bw"])[0]
-        format_label = MIQ_FORMATS.get(p.get("format"), MIQ_FORMATS["quote"])[0]
+        format_label = MIQ_FORMATS.get(p.get("format"), MIQ_FORMATS["random"])[0]
         lines = [
             "**見た目**（あなたがMIQを作る時に使われます）",
             f"フォーマット: `{format_label}`",
+            "未設定の既定はランダムです。ランダムでは生成のたびに引用/漫画風/音楽再生風/ニュース速報風/X投稿風/RPG風から1つ選ばれます（LINE風は選ばれません）。",
             f"モノクロ: `{onoff(p['grayscale'])}`　文字色連動: `{onoff(p['color_text'])}`　左右反転: `{onoff(p['flip'])}`",
             f"太字: `{onoff(p['bold'])}`　全面レイアウト: `{onoff(p['full'])}`　GIF出力: `{onoff(p['gif'])}`",
             f"フォント: `{font_label}`　配色: `{theme_label}`",
@@ -2345,7 +2902,8 @@ class MiqSettingsView(discord.ui.View):
             "ONにすると、他の人はあなたのメッセージをMIQにできません（自分の引用は可能）。",
             "",
             "GIF出力はアイコンがGIFアニメの時だけ有効です（それ以外はPNG）。",
-            "漫画風・音楽再生風・LINE風は常にPNGです（モノクロ等の設定は引用 (従来) 専用）。",
+            "漫画風・音楽再生風・LINE風・ニュース速報風・X投稿風・RPG風は常にPNGです（モノクロ等の設定は引用 (従来) 専用）。",
+            "LINE風は画像・スタンプ・絵文字の合成にも対応し、画像やスタンプだけのメッセージも変換できます。",
         ]
         return discord.Embed(title="MIQ設定", description="\n".join(lines), color=0xFFFFFF)
 
@@ -3390,10 +3948,12 @@ class GeneralCog(commands.Cog):
                 "`/general` → 引用画像 (MIQ) → **MIQ設定** で、モノクロ・文字色連動・左右反転・太字・"
                 "全面レイアウト・GIF出力・フォント・配色を変更できます。設定はあなたがMIQを作る時に使われます。\n\n"
                 "**フォーマット**\n"
-                "MIQ設定で **引用 (従来) / 漫画風 / 音楽再生風 / LINE風** を選べます。"
-                "漫画風・音楽再生風・LINE風は常にPNGで出力され、GIF出力やモノクロ・配色などの設定は引用 (従来) 専用です（フォント設定は全フォーマット共通）。\n"
+                "MIQ設定で **ランダム / 引用 (従来) / 漫画風 / 音楽再生風 / LINE風 / ニュース速報風 / X投稿風 / RPG風** を選べます。"
+                "未設定の既定はランダムで、生成のたびに単体フォーマットから1つ選ばれます（ランダムでLINE風は選ばれません）。\n"
+                "引用 (従来) 以外は常にPNGで出力され、GIF出力やモノクロ・配色などの設定は引用 (従来) 専用です（フォント設定は全フォーマット共通）。\n"
                 "LINE風では、対象のメッセージが返信でつながっている場合、対象を含めて最大4件まで遡って会話形式にします"
-                "（対象が返信でない場合はその1件だけ）。対象の作者が右側の緑の吹き出しになります。\n\n"
+                "（対象が返信でない場合はその1件だけ）。対象の作者が右側の緑の吹き出しになります。"
+                "LINE風は画像・スタンプ・カスタム絵文字・Unicode絵文字の合成にも対応し、画像やスタンプだけのメッセージも変換できます。\n\n"
                 "**引用の拒否**\n"
                 "MIQ設定の「引用を拒否」をONにすると、他の人があなたのメッセージを引用できなくなります（初期はOFF）。"
             )
@@ -3682,18 +4242,85 @@ class GeneralCog(commands.Cog):
             logger.exception("MIQ: LINE風引用画像の生成に失敗しました")
         return None
 
+    async def _miq_line_segments_for(self, msg, emoji_cache: dict, limit: int) -> list:
+        """メッセージの生 content から LINE風用セグメント列を作る。
+
+        メンションは表示名に置き換え、カスタム絵文字は CDN から取得して
+        画像セグメントにする (取得失敗時は :name: 表示)。絵文字の取得は
+        emoji_cache でチェーン全体を通して1回だけにする。
+        """
+        raw = getattr(msg, "content", "") or ""
+        for user in getattr(msg, "mentions", None) or []:
+            uname = getattr(user, "display_name", None) or getattr(user, "name", "") or ""
+            raw = raw.replace(f"<@{user.id}>", f"@{uname}").replace(f"<@!{user.id}>", f"@{uname}")
+        raw = re.sub(r"<@&?\d+>", "", raw)
+        raw = re.sub(r"<#\d+>", "", raw)
+        for m in _MIQ_CUSTOM_EMOJI_TOKEN.finditer(raw):
+            eid = int(m.group(3))
+            if eid not in emoji_cache:
+                ext = "gif" if m.group(1) else "png"
+                emoji_cache[eid] = await self._meme_fetch_url_image(
+                    f"https://cdn.discordapp.com/emojis/{eid}.{ext}?size=64", limit,
+                )
+        return _miq_line_split_segments(raw, emoji_cache)
+
+    async def _miq_line_image_bytes_for(self, msg, limit: int) -> list:
+        """メッセージの添付画像 (最大 MIQ_LINE_MAX_IMAGES 枚) のバイト列を返す。"""
+        out: list = []
+        for att in getattr(msg, "attachments", None) or []:
+            if len(out) >= MIQ_LINE_MAX_IMAGES:
+                break
+            if not _miq_is_image_attachment(att):
+                continue
+            if getattr(att, "size", 0) and att.size > limit:
+                continue
+            try:
+                data = await att.read()
+            except Exception:
+                logger.debug("MIQ: LINE写真の取得に失敗しました", exc_info=True)
+                continue
+            if data and len(data) <= limit:
+                out.append(data)
+        return out
+
+    async def _miq_line_sticker_bytes_for(self, msg, limit: int) -> list:
+        """メッセージのスタンプ (画像形式のみ。Lottieは対象外) のバイト列を返す。"""
+        out: list = []
+        for sticker in getattr(msg, "stickers", None) or []:
+            if not _miq_sticker_renderable(sticker):
+                continue
+            url = getattr(sticker, "url", None)
+            if not url:
+                continue
+            data = await self._meme_fetch_url_image(url, limit)
+            if data:
+                out.append(data)
+        return out
+
     async def _miq_build_line_file(
         self, chain_messages: list, prefs: dict, size_limit: int | None = None,
     ) -> discord.File | None:
         """返信チェーンのメッセージ群から LINE風の引用画像を作る。
 
-        本文が空の要素は除外する。アバターは作者ごとに1回だけ取得する。
+        テキスト・絵文字・写真・スタンプのいずれも無い要素は除外する。
+        アバターは作者ごとに1回だけ取得する。
         """
+        limit = min(int(size_limit or MEME_MAX_IMAGE_BYTES), MEME_MAX_IMAGE_BYTES)
         entries: list = []
         avatar_cache: dict = {}
+        emoji_cache: dict = {}
         for msg in chain_messages:
-            text = _miq_clean_text(getattr(msg, "clean_content", None) or getattr(msg, "content", ""))
-            if not text:
+            segments = await self._miq_line_segments_for(msg, emoji_cache, limit)
+            images = await self._miq_line_image_bytes_for(msg, limit)
+            stickers = await self._miq_line_sticker_bytes_for(msg, limit)
+            text = _miq_clean_text("".join(
+                seg.get("text", "") if seg.get("type") == "text" else f":{seg.get('name') or 'emoji'}:"
+                for seg in segments
+            ))
+            has_emoji_image = any(
+                seg.get("type") == "emoji" and seg.get("image") for seg in segments
+            )
+            if not text and not has_emoji_image and not images and not stickers:
                 continue
             author = getattr(msg, "author", None)
             author_key = getattr(author, "id", None)
@@ -3707,6 +4334,9 @@ class GeneralCog(commands.Cog):
                 "created_at": getattr(msg, "created_at", None),
                 "avatar_bytes": avatar_cache[author_key],
                 "author_key": author_key,
+                "segments": segments,
+                "images": images,
+                "stickers": stickers,
             })
         if not entries:
             return None
@@ -3717,7 +4347,8 @@ class GeneralCog(commands.Cog):
     ) -> discord.File | None:
         """引用画像を作って discord.File にする。prefs は引用を作る人(要求者)の設定。"""
         opts = miq_render_options(prefs, self.bot.user)
-        fmt = opts.pop("format", "quote")
+        # ランダムはここで生成ごとに1回だけ実フォーマットへ解決する
+        fmt = miq_resolve_format(opts.pop("format", "quote"))
         name = getattr(author, "display_name", None) or getattr(author, "name", "") or ""
         username = getattr(author, "name", "") or ""
         avatar_bytes, animated = None, False
@@ -3746,8 +4377,14 @@ class GeneralCog(commands.Cog):
                         render_miq_line_png, entries, font_path=opts.get("font_path"),
                     )
                     return discord.File(io.BytesIO(data), filename="quote-line.png")
-                if fmt in ("manga", "music"):
-                    renderer = render_miq_manga_png if fmt == "manga" else render_miq_music_png
+                if fmt in ("manga", "music", "news", "xpost", "rpg"):
+                    renderer = {
+                        "manga": render_miq_manga_png,
+                        "music": render_miq_music_png,
+                        "news": render_miq_news_png,
+                        "xpost": render_miq_xpost_png,
+                        "rpg": render_miq_rpg_png,
+                    }[fmt]
                     data = await asyncio.to_thread(
                         renderer, avatar_bytes, text, name, username, font_path=opts.get("font_path"),
                     )
@@ -3803,8 +4440,17 @@ class GeneralCog(commands.Cog):
             return await interaction.response.send_message(
                 "このユーザーは引用画像(MIQ)を拒否しています。", ephemeral=True
             )
+        prefs = miq_get_prefs(interaction.user.id)
+        fmt = miq_resolve_format(prefs)
         text = _miq_clean_text(message.clean_content)
-        if not text:
+        if fmt == "line":
+            # LINE風は画像/スタンプ/絵文字だけのメッセージでも生成できる
+            if not text and not _miq_line_message_has_media(message):
+                return await interaction.response.send_message(
+                    "文字・画像・スタンプのあるメッセージを選んでください。",
+                    ephemeral=True,
+                )
+        elif not text:
             return await interaction.response.send_message(
                 "文字のあるメッセージを選んでください(画像や埋め込みだけのメッセージは引用できません)。",
                 ephemeral=True,
@@ -3812,14 +4458,15 @@ class GeneralCog(commands.Cog):
         if not self._miq_cooldown_ok(interaction.user.id):
             return await interaction.response.send_message("少し待ってからもう一度お試しください。", ephemeral=True)
         await interaction.response.defer(thinking=True)
-        prefs = miq_get_prefs(interaction.user.id)
+        eff_prefs = dict(prefs)
+        eff_prefs["format"] = fmt
         size_limit = getattr(interaction.guild, "filesize_limit", None)
-        if prefs.get("format") == "line":
-            file, refused = await self._miq_line_file_for(message, interaction.user.id, prefs, size_limit)
+        if fmt == "line":
+            file, refused = await self._miq_line_file_for(message, interaction.user.id, eff_prefs, size_limit)
             if refused:
                 return await interaction.followup.send("このユーザーは引用画像(MIQ)を拒否しています。")
         else:
-            file = await self._miq_build_file(message.author, text, prefs, size_limit)
+            file = await self._miq_build_file(message.author, text, eff_prefs, size_limit)
         if file is None:
             return await interaction.followup.send("引用画像を作れませんでした。")
         await interaction.followup.send(file=file)
@@ -3842,24 +4489,35 @@ class GeneralCog(commands.Cog):
                     "このユーザーは引用画像(MIQ)を拒否しています。", mention_author=False, delete_after=8,
                 )
                 return
+            prefs = miq_get_prefs(message.author.id)
+            fmt = miq_resolve_format(prefs)
             text = _miq_clean_text(target.clean_content)
-            if not text:
+            if fmt == "line":
+                # LINE風は画像/スタンプ/絵文字だけのメッセージでも生成できる
+                if not text and not _miq_line_message_has_media(target):
+                    await message.reply(
+                        "文字・画像・スタンプのあるメッセージに返信してください。",
+                        mention_author=False, delete_after=8,
+                    )
+                    return
+            elif not text:
                 await message.reply("文字のあるメッセージに返信してください。", mention_author=False, delete_after=8)
                 return
             if not self._miq_cooldown_ok(message.author.id):
                 return
-            prefs = miq_get_prefs(message.author.id)
+            eff_prefs = dict(prefs)
+            eff_prefs["format"] = fmt
             size_limit = getattr(message.guild, "filesize_limit", None)
             async with message.channel.typing():
-                if prefs.get("format") == "line":
-                    file, refused = await self._miq_line_file_for(target, message.author.id, prefs, size_limit)
+                if fmt == "line":
+                    file, refused = await self._miq_line_file_for(target, message.author.id, eff_prefs, size_limit)
                     if refused:
                         await message.reply(
                             "このユーザーは引用画像(MIQ)を拒否しています。", mention_author=False, delete_after=8,
                         )
                         return
                 else:
-                    file = await self._miq_build_file(target.author, text, prefs, size_limit)
+                    file = await self._miq_build_file(target.author, text, eff_prefs, size_limit)
             if file is None:
                 return
             await message.reply(file=file, mention_author=False)
