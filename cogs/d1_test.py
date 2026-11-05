@@ -1,8 +1,6 @@
 import time
 import asyncio
 import aiohttp
-import discord
-from discord import app_commands
 from discord.ext import commands
 
 from cogs.terminal import ALLOWED_USER_IDS

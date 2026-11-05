@@ -96,15 +96,6 @@ async def dg_load_all(db_api):
     except Exception as e:
         print(f"<:failed:1490986584676368535> ダンジョンプレイヤー読み込み失敗: {e}")
 
-async def dg_save_map(uid, floor, db_api):
-    """互換ラッパー（Phase 1-B）。
-
-    マップは個人インスタンス化され、差分はプレイヤー保存（_dungeon_meta）に
-    含まれるため、実体はプレイヤー保存へ委譲する。dungeon_maps テーブルへは
-    もう書かない。
-    """
-    await dg_save_player(uid, db_api)
-
 async def dg_save_player(uid, db_api):
     """プレイヤーのダンジョンデータを自前DB APIに保存"""
     if uid not in dg_players:
@@ -172,16 +163,3 @@ async def dg_save_player(uid, db_api):
         _PLAYER_SAVE_DIGESTS[uid] = digest
     except Exception as e:
         print(f"dg_save_player失敗 uid={uid}: {e}")
-
-async def dg_save_base(uid, floor, x, y, db_api):
-    """プレイヤーの拠点を自前DB APIに保存"""
-    dg_bases[uid] = (floor, x, y)
-    try:
-        db_api.table("dungeon_bases").upsert({
-            "user_id": uid,
-            "floor": floor,
-            "x": x,
-            "y": y,
-        }, on_conflict="user_id").execute()
-    except Exception as e:
-        print(f"dg_save_base失敗 uid={uid}: {e}")

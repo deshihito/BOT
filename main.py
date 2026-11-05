@@ -17,7 +17,6 @@ if db_api is None:
     raise RuntimeError('BOT_API_BASE_URL と BOT_API_KEYを設定してください。')
 
 NOTIFY_CHANNEL_ID = 1513038883787505764
-DEBUG_CHANNEL_ID = 1407389497016193177
 
 class LogBuffer(logging.Handler):
     def __init__(self, maxlen=100):

@@ -67,12 +67,6 @@ class NationTest(unittest.TestCase):
     def rows(self, table):
         return self.db.tables.get(table, [])
 
-    def test_spiral_starts_at_origin_and_is_unique(self):
-        coords = list(nation_module.spiral_coords(3))
-        self.assertEqual(coords[0], (0, 0))
-        self.assertEqual(len(coords), len(set(coords)))
-        self.assertEqual(len(coords), 49)
-
     def test_found_creates_nation_capital_and_king(self):
         sent = self.call('found')
         self.assertEqual(sent[0]['embed'].title, '建国しました')

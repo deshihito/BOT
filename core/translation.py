@@ -9,7 +9,6 @@ from core.libretranslate import LibreTranslateClient
 from core.storage import KVStore
 
 TRANSLATION_NAMESPACE = "translation_preferences"
-TRANSLATION_DEFAULTS = {"enabled": False, "source_locale": "auto"}
 SOURCE_LOCALES = ("auto",) + localization.SUPPORTED_LOCALES
 SOURCE_LOCALE_LABELS = {"auto": "自動検出", **localization.LOCALE_LABELS}
 SOURCE_LOCALE_FLAGS = {"auto": "🌐", **localization.LOCALE_FLAGS}

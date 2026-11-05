@@ -87,22 +87,6 @@ def settings(guild_id: int) -> dict[str, Any]:
     }
 
 
-def _voice_channels(guild: Any) -> list[Any]:
-    me = getattr(guild, "me", None)
-    channels = list(getattr(guild, "voice_channels", []) or [])
-    usable: list[Any] = []
-    for channel in channels:
-        if me is not None:
-            try:
-                permissions = channel.permissions_for(me)
-                if not getattr(permissions, "connect", True):
-                    continue
-            except Exception:
-                pass
-        usable.append(channel)
-    return usable[:25]
-
-
 def _build_name(template: str, member: Any) -> str:
     name = template or DEFAULT_TEMPLATE
     name = name.replace("{user}", getattr(member, "display_name", None) or getattr(member, "name", "メンバー"))

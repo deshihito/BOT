@@ -99,7 +99,6 @@ POOL_SEED_AGA = 1_000_000
 
 #: 最低取引額（AGO）。トークンは小数 0.01 単位で保持する。
 MIN_TRADE_AGA = 10
-TOKEN_DECIMALS = 2
 #: 1回の取引上限（プールの AGO 準備に対する割合）。
 TRADE_CAP_POOL_RATIO = 0.01
 

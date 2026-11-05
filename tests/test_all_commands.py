@@ -202,6 +202,18 @@ class FakeQuery:
         return FakeResponse(data)
 
 
+def _spiral_coords(radius: int):
+    """docs/sql/nation_found.sql と同じ順に、原点から近い順の座標を返す（テスト用フェイク）。"""
+    yield 0, 0
+    for r in range(1, radius + 1):
+        for x in range(-r, r + 1):
+            yield x, -r
+            yield x, r
+        for y in range(-r + 1, r):
+            yield -r, y
+            yield r, y
+
+
 class FakeDBAPI:
     def __init__(self):
         self.tables: dict[str, list] = {}
@@ -218,14 +230,13 @@ class FakeDBAPI:
 
     def _nation_found(self, gid, uid):
         """docs/sql/nation_found.sql と同じ手順の再現（1 回の呼び出しで全部作るか、何も作らない）。"""
-        from cogs.nation import SEARCH_RADIUS, spiral_coords
         t = self.tables
         if any(g.get('guild_id') == gid for g in t.get('nation_guilds', [])):
             raise RuntimeError('NATION_EXISTS: guild already has a nation')
         if any(p.get('user_id') == uid and p.get('guild_id') for p in t.get('nation_players', [])):
             raise RuntimeError('ALREADY_IN_NATION: user already belongs to a nation')
         used = {(r.get('x'), r.get('y')) for r in t.get('nation_tiles', [])}
-        spot = next((c for c in spiral_coords(SEARCH_RADIUS) if c not in used), None)
+        spot = next((c for c in _spiral_coords(50) if c not in used), None)
         if spot is None:
             raise RuntimeError('NO_FREE_TILE: no free tile')
         x, y = spot

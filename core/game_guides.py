@@ -504,10 +504,6 @@ GAME_GUIDES["dungeon"] = {
 GAME_ORDER = ["jinrou", "wordwolf", "uno", "doubt", "ngword", "shiritori", "janken", "wordle", "shinkei", "babanuki", "guess", "flash", "daifugo", "othello", "poker", "shogi", "chess", "dungeon"]
 
 
-def get_guide(game_id: str) -> dict:
-    return GAME_GUIDES[game_id]
-
-
 def guide_for_discord(game_id: str, limit: int = DISCORD_DESCRIPTION_LIMIT) -> str:
     """guide の Markdown を Discord の埋め込み向けにする。
 

@@ -6,7 +6,6 @@ import asyncio
 import time
 import types
 import logging
-import configparser
 import string
 import subprocess
 import json
@@ -388,9 +387,6 @@ def build_music_panel_layout(cog, guild_id: int, panel_text: str,
     return layout
 
 
-# 録音経路は開始・停止・保存のコマンドが未実装のため、誤って有効化しない。
-# 受信音声を保存する機能を実装する際は、同意・保持期間・アクセス制御を含めて
-# 専用Cogとして設計し直すこと。
 class PlaylistNameModal(discord.ui.Modal, title="プレイリスト名"):
     name = discord.ui.TextInput(label="プレイリスト名", placeholder="保存名または再生名", max_length=100)
 

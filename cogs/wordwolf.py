@@ -6,7 +6,6 @@ from discord.ext import commands
 from core import party_ranking
 
 party_ranking.register("wordwolf")
-from discord import app_commands
 import asyncio
 import logging
 import random
