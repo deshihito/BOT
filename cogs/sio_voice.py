@@ -86,15 +86,17 @@ COMMUNITY_ACTIONS = [
     app_commands.Choice(name="終了/退出", value="stop"),
 ]
 
+# ジャンル説明は、ラベルや配下の機能名から読み取れない情報がある場合だけ書く。
+# 機能名の列挙は書かない（空文字 = 説明なし）。
 VOICE_GENRES = {
-    "connection": ("VC接続", "参加、退出、現在の使用状況"),
-    "music": ("音楽", "音楽操作パネル"),
+    "connection": ("VC接続", ""),
+    "music": ("音楽", ""),
     "tts": ("読み上げ", "VOICEVOXによるテキスト読み上げ"),
-    "studio": ("録音・音声制作", "録音、やまびこ、文字起こし、カラオケ"),
+    "studio": ("録音・音声制作", ""),
     "effects": ("音声加工", "ボイスチェンジャー"),
-    "trigger": ("音声トリガー", "登録・一覧・削除"),
-    "community": ("通話ネットワーク", "ランダム通話、グローバルVC"),
-    "gvc_rooms": ("グローバルVCルーム", "ルーム一覧・作成・情報・削除、グロチャ接続"),
+    "trigger": ("音声トリガー", ""),
+    "community": ("通話ネットワーク", ""),
+    "gvc_rooms": ("グローバルVCルーム", ""),
 }
 VOICE_ACTIONS_BY_GENRE = {
     "connection": [("参加", "join"), ("退出", "leave"), ("状態", "status")],
@@ -518,10 +520,7 @@ class VoicePanelView(discord.ui.View):
         return {"root": "vc", "genre": self.genre, "value": self.action}
 
     def embed(self):
-        description = "ジャンルを選ぶと、その中の機能を選択できます。"
-        if self.genre:
-            description = f"**{VOICE_GENRES[self.genre][0]}** の機能を選択してください。"
-        return discord.Embed(title="<:vol:1563559476265488414> VC・音楽機能パネル", description=description, color=0xFFFFFF)
+        return discord.Embed(title="<:vol:1563559476265488414> VC・音楽機能パネル", color=0xFFFFFF)
 
 
 class GlobalRoomModal(discord.ui.Modal, title="グローバルVCに参加"):
