@@ -69,6 +69,21 @@ AI_BLOCKED_IDS = frozenset({
     "vc:record_start", "vc:transcribe_start",
 })
 
+# メッセージ経由ショートカットでは実行しない集合（表示モダン化監査 §4.1-5）。
+# ShortcutMessageInteraction は ephemeral を捨てて公開送信するため、
+# ephemeral 前提の応答（個人設定パネル・残高/所持/自分のステータス等の
+# 個人情報表示）をこの経路で実行すると「本人のみ」のつもりが公開に反転する。
+# MIQ設定で個別に行っていた回避（AI_BLOCKED_IDS）を、メッセージ経由にも
+# 横展開して明文化したもの。登録候補（surfaces）から "shortcut" を落とし、
+# 登録済みのものは execute_shortcut 側のガードでも止める。
+MESSAGE_SHORTCUT_BLOCKED_IDS = frozenset({
+    "general:miq_settings",
+    "general:ai_default", "general:image_default", "general:reasoning_default",
+    "general:translation_settings",
+    "general:exp_status", "general:status",
+    "general:items", "general:workshop",
+})
+
 # AI tools で「確認ビュー付きなら代理実行可」（risk="confirm"）とする集合（D-3 決定）。
 # 可逆な通知トグルと、目に見えて停止で戻せる VC 開始系だけを対象にする。
 # surfaces は落とさない（"aitools" を含んだまま候補に残り、実行前に
@@ -292,6 +307,10 @@ def build_general_actions(general_actions: dict, general_genres: dict) -> list[A
             if value == "shortcut_manage":
                 # ショートカット管理そのものは従来どおりショートカット候補に入れない。
                 kwargs["surfaces"] = frozenset({"panel"})
+            if f"general:{value}" in MESSAGE_SHORTCUT_BLOCKED_IDS:
+                # ephemeral 前提の個人向け応答は、ephemeral を捨てる
+                # メッセージ経由ショートカットの候補に入れない。
+                kwargs["surfaces"] = frozenset({"panel", "palette", "aitools"})
             specs.append(make_action("general", value, label, genre, genre_label, **kwargs))
     return specs
 

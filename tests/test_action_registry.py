@@ -96,11 +96,16 @@ class ShortcutRootsGenerationTest(unittest.TestCase):
     def test_general_candidates_match_legacy_derivation(self):
         from cogs.general import GENERAL_ACTIONS
 
+        blocked_values = {
+            action_id.split(":", 1)[1]
+            for action_id in action_registry.MESSAGE_SHORTCUT_BLOCKED_IDS
+            if action_id.startswith("general:")
+        }
         expected = {
             value
             for items in GENERAL_ACTIONS.values()
             for _label, value in items
-            if value != "shortcut_manage"
+            if value != "shortcut_manage" and value not in blocked_values
         }
         values = {value for _label, value in self.roots["general"][1]}
         self.assertEqual(values, expected)

@@ -81,8 +81,9 @@ BYTES_PER_FRAME = int(DISCORD_SAMPLE_RATE * FRAME_SEC) * FRAME_SIZE  # 48kHz ス
 OPUS_SILENCE = b"\xf8\xff\xfe"
 
 
-def we(description: str | None = None, title: str | None = None) -> discord.Embed:
-    return discord.Embed(title=title, description=description, color=0x2ECC71)
+from functools import partial as _partial
+from core.embeds import we as _shared_we
+we = _partial(_shared_we, color=0x2ECC71)
 
 
 # ============================================================

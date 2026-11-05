@@ -13,9 +13,7 @@ import random
 logger = logging.getLogger(__name__)
 
 
-def we(description: str = None, title: str = None) -> discord.Embed:
-    """白色embedを生成するヘルパー"""
-    return discord.Embed(title=title, description=description, color=0xFFFFFF)
+from core.embeds import we  # noqa: F401  (共通の白 embed 工場)
 
 SUIT_ORDER = {"S": 0, "H": 1, "D": 2, "C": 3, "JK": 4}
 SELECT_LIMIT = 25  # Discord のセレクトメニューに入れられる選択肢の上限

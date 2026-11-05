@@ -262,11 +262,11 @@ class ExecuteShortcutParamsTest(unittest.IsolatedAsyncioTestCase):
         support = types.SimpleNamespace(dispatch=AsyncMock(return_value="ok"))
         cog = _cog({"SupportCog": support})
         cog.dispatch_general = AsyncMock(return_value="gen")
-        general_item = {"user_id": 10, "action": {"root": "general", "value": "status"},
+        general_item = {"user_id": 10, "action": {"root": "general", "value": "miq_help"},
                         "params": {"delay": 5}}
         self.assertEqual(await cog.execute_shortcut(_message(), general_item), "gen")
         args, kwargs = cog.dispatch_general.call_args
-        self.assertEqual(args[1], "status")
+        self.assertEqual(args[1], "miq_help")
         self.assertEqual(kwargs, {})
 
         support_item = {"user_id": 10, "action": {"root": "support", "value": "ticket"},

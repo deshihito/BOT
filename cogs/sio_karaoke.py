@@ -43,9 +43,10 @@ MODEL_PATH = "model"
 OPUS_SILENCE = b"\xf8\xff\xfe"
 
 
-def we(description: str | None = None, title: str | None = None, color: int = 0xFF69B4) -> discord.Embed:
-    """カラオケ風のピンク色 Embed"""
-    return discord.Embed(title=title, description=description, color=color)
+from functools import partial as _partial
+from core.embeds import we as _shared_we
+# カラオケ風のピンク色を基調色として共通工場を使う
+we = _partial(_shared_we, color=0xFF69B4)
 
 
 # ============================================================

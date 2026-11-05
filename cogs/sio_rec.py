@@ -65,9 +65,7 @@ RESYNC_THRESHOLD_BYTES = 5 * BYTES_PER_SECOND
 OPUS_SILENCE = b"\xf8\xff\xfe"
 
 
-def we(description: str | None = None, title: str | None = None) -> discord.Embed:
-    """白色 embed を生成するヘルパー"""
-    return discord.Embed(title=title, description=description, color=0xFFFFFF)
+from core.embeds import we  # noqa: F401  (共通の白 embed 工場)
 
 
 # ============================================================

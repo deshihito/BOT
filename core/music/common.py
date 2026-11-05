@@ -260,6 +260,4 @@ def decode_full_id(b62_id: str):
     message_id = combined & ((1 << 64) - 1)
     return guild_id, channel_id, message_id
 
-def we(description: str = None, title: str = None) -> discord.Embed:
-    """白色embedを生成するヘルパー"""
-    return discord.Embed(title=title, description=description, color=0xFFFFFF)
+from core.embeds import we  # noqa: F401  (共通の白 embed 工場。sio_music への re-export を維持)

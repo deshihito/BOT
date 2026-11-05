@@ -37,8 +37,9 @@ DEFAULT_MAX_BUFFER_MS = 40.0      # 上限バッファ量 (40msを超えたら�
 DEFAULT_FADE_MS = 5.0             # 接続時のクロスフェード長 (5ms)
 
 
-def we(description: str | None = None, title: str | None = None) -> discord.Embed:
-    return discord.Embed(title=title, description=description, color=0x3498DB)
+from functools import partial as _partial
+from core.embeds import we as _shared_we
+we = _partial(_shared_we, color=0x3498DB)
 
 
 # ============================================================
