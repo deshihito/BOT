@@ -131,10 +131,13 @@ class PanelHistorySelectTest(unittest.TestCase):
 
     def test_general_panel_without_history_is_unchanged(self):
         from cogs.general import GeneralGenreSelect, GeneralPanel
+        from core.general.shortcuts import RegisterShortcutButton
 
         panel = GeneralPanel(None)
-        self.assertEqual(len(panel.children), 1)
+        # 導線最適化 M9: 通常パネルにはショートカット登録ボタンが常駐する
+        self.assertEqual(len(panel.children), 2)
         self.assertIsInstance(panel.children[0], GeneralGenreSelect)
+        self.assertIsInstance(panel.children[1], RegisterShortcutButton)
 
     def test_general_panel_with_history_shows_star_select_on_top(self):
         from cogs.general import GeneralGenreSelect, GeneralHistorySelect, GeneralPanel

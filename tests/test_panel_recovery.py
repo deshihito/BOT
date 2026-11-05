@@ -42,10 +42,11 @@ def make_catalog():
 
 class CustomIdTest(unittest.TestCase):
     def test_general_panel(self):
-        self.assertEqual(child_ids(GeneralPanel(None)), {"panel:general:genre"})
+        # 導線最適化 M9: 通常パネルには登録ボタン（panel:general:register）が常駐
+        self.assertEqual(child_ids(GeneralPanel(None)), {"panel:general:genre", "panel:general:register"})
         self.assertEqual(
             child_ids(GeneralPanel(None, genre="money")),
-            {"panel:general:genre", "panel:general:action"},
+            {"panel:general:genre", "panel:general:action", "panel:general:register"},
         )
         specs = [types.SimpleNamespace(label="プレイヤー状況", value="status")]
         self.assertIn("panel:general:history", child_ids(GeneralPanel(None, history_specs=specs)))
@@ -53,20 +54,20 @@ class CustomIdTest(unittest.TestCase):
 
     def test_support_panel(self):
         genre = next(iter(SUPPORT_GENRES))
-        self.assertEqual(child_ids(SupportPanelView(None)), {"panel:support:genre"})
+        self.assertEqual(child_ids(SupportPanelView(None)), {"panel:support:genre", "panel:support:register"})
         self.assertEqual(
             child_ids(SupportPanelView(None, genre=genre)),
-            {"panel:support:genre", "panel:support:action"},
+            {"panel:support:genre", "panel:support:action", "panel:support:register"},
         )
         specs = [types.SimpleNamespace(label="プレイヤー状況", value="status")]
         self.assertIn("panel:support:history", child_ids(SupportPanelView(None, history_specs=specs)))
         self.assertIn("panel:support:commit", child_ids(SupportPanelView(None, shortcut_mode=True)))
 
     def test_voice_panel(self):
-        self.assertEqual(child_ids(VoicePanelView(None)), {"panel:vc:genre"})
+        self.assertEqual(child_ids(VoicePanelView(None)), {"panel:vc:genre", "panel:vc:register"})
         self.assertEqual(
             child_ids(VoicePanelView(None, genre="connection")),
-            {"panel:vc:genre", "panel:vc:action"},
+            {"panel:vc:genre", "panel:vc:action", "panel:vc:register"},
         )
         self.assertIn("panel:vc:commit", child_ids(VoicePanelView(None, shortcut_mode=True)))
 

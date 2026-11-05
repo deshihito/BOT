@@ -228,6 +228,10 @@ class SupportPanelView(discord.ui.View):
         if self.shortcut_mode:
             from cogs.general import ShortcutCommitButton
             self.add_item(ShortcutCommitButton("support"))
+        else:
+            # 導線最適化 M9: 選んだ機能をその場でショートカット登録できる。
+            from core.general.shortcuts import RegisterShortcutButton
+            self.add_item(RegisterShortcutButton("support"))
 
     def shortcut_action(self):
         if not self.genre or not self.action:

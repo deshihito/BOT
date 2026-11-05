@@ -116,6 +116,9 @@ class GeneralPanel(discord.ui.View):
             self.add_item(GeneralActionSelect(self.cog, self.genre, row=offset + 1))
         if self.shortcut_mode:
             self.add_item(ShortcutCommitButton())
+        else:
+            # 導線最適化 M9: 選んだ機能をその場でショートカット登録できる。
+            self.add_item(RegisterShortcutButton())
 
     def shortcut_action(self):
         if not self.genre or not self.action:
@@ -130,4 +133,4 @@ class GeneralPanel(discord.ui.View):
     def embed(self):
         return discord.Embed(title="一般機能", color=0xFFFFFF)
 
-from .shortcuts import ShortcutCommitButton  # 相互参照のため末尾で import
+from .shortcuts import RegisterShortcutButton, ShortcutCommitButton  # 相互参照のため末尾で import
