@@ -596,7 +596,6 @@ class Uno(commands.Cog):
             color=discord.Color.gold()
         )
         embed.add_field(name=f"参加者 (1人)", value=f"* <@{interaction.user.id}>", inline=False)
-        embed.set_footer(text="ホストはボタンから即時開始またはキャンセルが行えます。")
 
         view = JoinView(game, self)
         await interaction.response.send_message("[+] UNOゲームの募集を開始しました！", ephemeral=True)

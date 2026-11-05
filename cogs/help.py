@@ -65,7 +65,8 @@ def overview_embed(catalog: dict) -> discord.Embed:
     embed = discord.Embed(
         title="コマンド一覧",
         description=(
-            "`/help command:` にコマンド名を入れると詳しい説明が表示されます。\n\n"
+            "`/help command:` にコマンド名を入れると詳しい説明が表示されます。\n"
+            "<:book:1564624329889681418> はガイド（くわしい説明）があるコマンドです\n\n"
             "隠し機能: 会話を追うときは、チャンネルで「今北産業」と送ると直近の会話を最大3行で要約します。"
         ),
         color=COLOR,
@@ -100,7 +101,6 @@ def category_pages(catalog: dict, category_id: str) -> list[discord.Embed]:
         title = category["label"] + (f"（{number}/{len(pages)}）" if len(pages) > 1 else "")
         body = header + "\n\n" + ("\n\n".join(page) if page else "表示できるコマンドはありません。")
         embed = discord.Embed(title=clip(title, EMBED_TITLE), description=clip(body, EMBED_DESCRIPTION), color=COLOR)
-        embed.set_footer(text="<:book:1564624329889681418> はガイド（くわしい説明）があるコマンドです")
         embeds.append(embed)
     return embeds
 
