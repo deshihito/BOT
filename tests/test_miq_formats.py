@@ -1,4 +1,6 @@
-"""MIQ の新フォーマット (漫画風/音楽再生風/LINE風/ニュース速報風/X投稿風/RPG風) のテスト。
+"""MIQ の新フォーマット (漫画風/音楽再生風/LINE風/ニュース速報風/X投稿風/RPG風/
+設計図風/レトロゲーム風/トレカ風/ネオン風/ダーク風/ポップ風/パステル風/
+チケット風/ノート風) のテスト。
 
 Discord に接続せず、生成したテスト用アバターで各レンダラが 1200x675 の
 PNG を返すこと、prefs の format の扱い (既定はランダム)、ランダム解決で
@@ -9,6 +11,7 @@ import asyncio
 import io
 import json
 import os
+import random
 import sys
 import tempfile
 import unittest
@@ -155,7 +158,10 @@ class MiqFormatPrefsTest(unittest.TestCase):
         self.assertEqual(g.miq_get_prefs(333)["format"], "line")
 
     def test_each_format_roundtrips(self):
-        for i, fmt in enumerate(("quote", "manga", "music", "line", "news", "xpost", "rpg", "random")):
+        for i, fmt in enumerate((
+            "quote", "manga", "music", "line", "news", "xpost", "rpg", "random",
+            "blueprint", "pixel", "card", "neon", "dark", "pop", "pastel", "ticket", "note",
+        )):
             prefs = g.miq_get_prefs(400 + i)
             prefs["format"] = fmt
             self.assertTrue(asyncio.run(g.miq_save_prefs(400 + i, prefs)))
@@ -173,7 +179,10 @@ class MiqFormatPrefsTest(unittest.TestCase):
     def test_formats_constant(self):
         self.assertEqual(
             set(g.MIQ_FORMATS),
-            {"random", "quote", "manga", "music", "line", "news", "xpost", "rpg"},
+            {
+                "random", "quote", "manga", "music", "line", "news", "xpost", "rpg",
+                "blueprint", "pixel", "card", "neon", "dark", "pop", "pastel", "ticket", "note",
+            },
         )
         for label, emoji in g.MIQ_FORMATS.values():
             self.assertTrue(label)
@@ -192,11 +201,18 @@ class MiqResolveFormatTest(unittest.TestCase):
         self.assertNotIn("line", g.MIQ_RANDOM_POOL)
         self.assertNotIn("random", g.MIQ_RANDOM_POOL)
         self.assertEqual(
-            set(g.MIQ_RANDOM_POOL), {"quote", "manga", "music", "news", "xpost", "rpg"},
+            set(g.MIQ_RANDOM_POOL),
+            {
+                "quote", "manga", "music", "news", "xpost", "rpg",
+                "blueprint", "pixel", "card", "neon", "dark", "pop", "pastel", "ticket", "note",
+            },
         )
 
     def test_concrete_formats_pass_through(self):
-        for fmt in ("quote", "manga", "music", "line", "news", "xpost", "rpg"):
+        for fmt in (
+            "quote", "manga", "music", "line", "news", "xpost", "rpg",
+            "blueprint", "pixel", "card", "neon", "dark", "pop", "pastel", "ticket", "note",
+        ):
             self.assertEqual(g.miq_resolve_format(fmt), fmt)
             self.assertEqual(g.miq_resolve_format({"format": fmt}), fmt)
 
@@ -253,6 +269,214 @@ class MiqNewRendererTest(unittest.TestCase):
 
     def test_rpg_renderer_without_avatar(self):
         self._check_png(g.render_miq_rpg_png(None, "アバターなし", "名無し", "noname", font_path=self.font_path))
+
+
+class MiqExtraRendererTest(unittest.TestCase):
+    """追加9フォーマット (設計図/レトロ/トレカ/ネオン/ダーク/ポップ/パステル/チケット/ノート)。"""
+
+    def setUp(self):
+        self.avatar = _avatar_bytes()
+        self.font_path = _font_path()
+
+    def _check_png(self, data):
+        img = Image.open(io.BytesIO(data))
+        self.assertEqual(img.format, "PNG")
+        self.assertEqual(img.size, (1200, 675))
+        return img
+
+    def test_blueprint_renderer(self):
+        data = g.render_miq_blueprint_png(
+            self.avatar, "設計図風の本文です", "サンプル", "sample",
+            font_path=self.font_path, date_str="2026.11.05",
+        )
+        img = self._check_png(data)
+        # 背景の青が存在する
+        self.assertTrue(_has_color(img, (27, 90, 190)))
+
+    def test_blueprint_renderer_without_avatar(self):
+        self._check_png(g.render_miq_blueprint_png(None, "アバターなし", "名無し", "noname", font_path=self.font_path))
+
+    def test_pixel_renderer(self):
+        self._check_png(g.render_miq_pixel_png(
+            self.avatar, "レトロな本文です", "サンプル", "sample", font_path=self.font_path,
+        ))
+
+    def test_pixel_renderer_is_deterministic(self):
+        a = g.render_miq_pixel_png(self.avatar, "同じ本文", "名前", "user", font_path=self.font_path)
+        b = g.render_miq_pixel_png(self.avatar, "同じ本文", "名前", "user", font_path=self.font_path)
+        self.assertEqual(a, b)
+
+    def test_card_renderer(self):
+        self._check_png(g.render_miq_card_png(
+            self.avatar, "トレカ風の本文です", "サンプル", "sample",
+            font_path=self.font_path, date_str="2026.11.05",
+        ))
+
+    def test_card_renderer_without_avatar(self):
+        self._check_png(g.render_miq_card_png(None, "アバターなし", "名無し", "noname", font_path=self.font_path))
+
+    def test_neon_renderer(self):
+        self._check_png(g.render_miq_neon_png(
+            self.avatar, "ネオンな本文です", "サンプル", "sample", font_path=self.font_path,
+        ))
+
+    def test_dark_renderer(self):
+        self._check_png(g.render_miq_dark_png(
+            self.avatar, "ダークな本文です", "サンプル", "sample", font_path=self.font_path,
+        ))
+
+    def test_dark_renderer_without_avatar(self):
+        self._check_png(g.render_miq_dark_png(None, "アバターなし", "名無し", "noname", font_path=self.font_path))
+
+    def test_pop_renderer(self):
+        img = self._check_png(g.render_miq_pop_png(
+            self.avatar, "ポップな本文です", "サンプル", "sample", font_path=self.font_path,
+        ))
+        # 背景の黄色ドット地が存在する
+        self.assertTrue(_has_color(img, (255, 208, 40)))
+
+    def test_pastel_renderer(self):
+        self._check_png(g.render_miq_pastel_png(
+            self.avatar, "パステルな本文です", "サンプル", "sample", font_path=self.font_path,
+        ))
+
+    def test_ticket_renderer(self):
+        self._check_png(g.render_miq_ticket_png(
+            self.avatar, "チケット風の本文です", "サンプル", "sample",
+            font_path=self.font_path, date_str="2026.11.05",
+        ))
+
+    def test_ticket_renderer_is_deterministic(self):
+        # 配色抽選は乱数のため、本文から決まる数値 (No./SEAT) だけでは
+        # バイト一致はしない。例外なく2回描けることだけ確認する。
+        a = g.render_miq_ticket_png(self.avatar, "同じ本文", "名前", "user", font_path=self.font_path)
+        b = g.render_miq_ticket_png(self.avatar, "同じ本文", "名前", "user", font_path=self.font_path)
+        self._check_png(a)
+        self._check_png(b)
+
+    def test_note_renderer(self):
+        self._check_png(g.render_miq_note_png(
+            self.avatar, "ノート風の本文です", "サンプル", "sample", font_path=self.font_path,
+        ))
+
+    def test_note_renderer_without_avatar(self):
+        self._check_png(g.render_miq_note_png(None, "アバターなし", "名無し", "noname", font_path=self.font_path))
+
+    def test_renderer_table_covers_all_single_formats(self):
+        # レンダラ表は random/quote/line を除く全フォーマットをカバーする
+        self.assertEqual(
+            set(g._MIQ_FORMAT_RENDERERS), set(g.MIQ_FORMATS) - {"random", "quote", "line"},
+        )
+
+    def test_date_str_converts_to_jst(self):
+        # 2026-11-04 15:30 UTC = 2026-11-05 00:30 JST
+        dt = datetime(2026, 11, 4, 15, 30, tzinfo=timezone.utc)
+        self.assertEqual(g._miq_date_str(dt), "2026.11.05")
+        self.assertEqual(g._miq_date_str(None), g._miq_date_str())  # None は今日 (落ちないこと)
+
+
+class MiqHiddenVariationTest(unittest.TestCase):
+    """ticket の配色バリエーションと card のレアリティ段階 (隠し要素) の検証。"""
+
+    def test_ticket_palettes_are_weighted_with_standard_first(self):
+        weights = [p[0] for p in g._MIQ_TICKET_PALETTES]
+        self.assertGreaterEqual(len(g._MIQ_TICKET_PALETTES), 5)
+        self.assertEqual(weights[0], max(weights))  # 標準が最頻
+        rng = random.Random(42)
+        for _ in range(50):
+            self.assertIn(g._miq_pick_ticket_palette(rng), g._MIQ_TICKET_PALETTES)
+
+    def test_card_rarities_are_weighted_descending(self):
+        weights = [p[0] for p in g._MIQ_CARD_RARITIES]
+        self.assertEqual(weights, sorted(weights, reverse=True))
+        # 最上位レアリティは数%以下
+        self.assertLessEqual(min(weights) / sum(weights), 0.05)
+        for _w, (lo, hi), mult, key in g._MIQ_CARD_RARITIES:
+            self.assertIn(key, g._MIQ_CARD_FRAME_STOPS)
+            self.assertLessEqual(lo, hi)
+            self.assertGreaterEqual(mult, 1.0)
+        rng = random.Random(1)
+        for _ in range(50):
+            self.assertIn(g._miq_pick_card_rarity(rng), g._MIQ_CARD_RARITIES)
+
+
+# アゴアセット (透過PNG) はバイナリのため GitHub connector のテキスト push では
+# 送れず、別途リポジトリへ追加される。未配置のチェックアウトではアセット依存の
+# テストをスキップする (配置されれば自動で有効になる)。
+_AGO_DIR = Path(g.__file__).resolve().parent.parent / "assets" / "miq_ago"
+_AGO_PRESENT = _AGO_DIR.is_dir() and len(list(_AGO_DIR.glob("ago_*.png"))) == 5
+_needs_ago_assets = unittest.skipUnless(_AGO_PRESENT, "アゴアセット未配置のためスキップ")
+
+
+class MiqAgoOverlayTest(unittest.TestCase):
+    """アゴのひょっこり合成 (隠し要素) の検証。"""
+
+    def setUp(self):
+        self.font_path = _font_path()
+        g._MIQ_AGO_CACHE = None
+        self.base = g.render_miq_dark_png(
+            _avatar_bytes(), "テスト本文", "名前", "user", font_path=self.font_path,
+        )
+
+    @_needs_ago_assets
+    def test_assets_are_five_transparent_pngs(self):
+        images = g._miq_ago_images()
+        self.assertEqual(len(images), 5)
+        for im in images:
+            self.assertEqual(im.mode, "RGBA")
+            # 透過部分 (背景) と不透明部分 (キャラ) の両方がある
+            self.assertEqual(im.split()[-1].getextrema(), (0, 255))
+
+    @_needs_ago_assets
+    def test_force_overlay_changes_image(self):
+        out = g.apply_ago_overlay(self.base, force=True, rng=random.Random(7))
+        self.assertNotEqual(out, self.base)
+        img = Image.open(io.BytesIO(out))
+        self.assertEqual(img.format, "PNG")
+        self.assertEqual(img.size, (1200, 675))
+
+    def test_no_hit_returns_input_unchanged(self):
+        class _MissRng:
+            def random(self):
+                return 0.99  # MIQ_AGO_RARE_RATE 以上 → 当たらない
+
+            def choice(self, seq):
+                return seq[0]
+
+            def uniform(self, a, b):
+                return a
+
+        self.assertEqual(g.apply_ago_overlay(self.base, rng=_MissRng()), self.base)
+
+    def test_rare_rate_is_two_percent(self):
+        self.assertEqual(g.MIQ_AGO_RARE_RATE, 0.02)
+
+    @_needs_ago_assets
+    def test_hit_ratio_roughly_matches_rate(self):
+        # 乱数を差し替えて大まかな分布だけ確認する (厳密な統計検定はしない)
+        class _SeqRng:
+            def __init__(self):
+                self._values = [i / 1000 for i in range(1000)]
+                self._i = 0
+
+            def random(self):
+                v = self._values[self._i % len(self._values)]
+                self._i += 1
+                return v
+
+            def choice(self, seq):
+                return seq[0]
+
+            def uniform(self, a, b):
+                return a
+
+        rng = _SeqRng()
+        hits = sum(
+            1 for _ in range(1000)
+            if g.apply_ago_overlay(self.base, rng=rng) != self.base
+        )
+        # 0.000〜0.019 の20回だけ当たるはず (各呼び出しで random() は1回)
+        self.assertEqual(hits, 20)
 
 
 def _solid_bytes(color, size=(120, 90)) -> bytes:

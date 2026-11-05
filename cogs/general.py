@@ -787,11 +787,23 @@ MIQ_FORMATS = {
     "news": ("ニュース速報風", "📺"),
     "xpost": ("X投稿風", "🐦"),
     "rpg": ("RPG風", "🎮"),
+    "blueprint": ("設計図風", "📐"),
+    "pixel": ("レトロゲーム風", "👾"),
+    "card": ("トレカ風", "🎴"),
+    "neon": ("ネオン風", "🌃"),
+    "dark": ("ダーク風", "🎬"),
+    "pop": ("ポップ風", "💛"),
+    "pastel": ("パステル風", "🌸"),
+    "ticket": ("チケット風", "🎫"),
+    "note": ("ノート風", "📓"),
 }
 
 # ランダムで選ばれる単体メッセージ系フォーマット。
 # line (返信チェーン前提) と random 自身は絶対に含めない。
-MIQ_RANDOM_POOL = ("quote", "manga", "music", "news", "xpost", "rpg")
+MIQ_RANDOM_POOL = (
+    "quote", "manga", "music", "news", "xpost", "rpg",
+    "blueprint", "pixel", "card", "neon", "dark", "pop", "pastel", "ticket", "note",
+)
 
 
 def miq_resolve_format(prefs_or_format) -> str:
@@ -1894,6 +1906,876 @@ def render_miq_rpg_png(avatar_bytes: bytes | None, text: str, name: str, usernam
     return _miq_save_png(img)
 
 
+# ------------------------------------------------------------
+# MIQ 追加フォーマット (設計図風/レトロゲーム風/トレカ風/ネオン風/ダーク風/
+# ポップ風/パステル風/チケット風/ノート風) の共通ヘルパー
+# ------------------------------------------------------------
+def _miq_date_str(created_at=None) -> str:
+    """対象メッセージの作成日を JST で YYYY.MM.DD にする (None や不正値なら今日)。"""
+    try:
+        from zoneinfo import ZoneInfo
+
+        jst = ZoneInfo("Asia/Tokyo")
+    except Exception:
+        logger.debug("MIQ: タイムゾーンの解決に失敗しました", exc_info=True)
+        jst = timezone(timedelta(hours=9))
+    if isinstance(created_at, datetime):
+        dt = created_at.astimezone(jst) if created_at.tzinfo is not None else created_at.replace(tzinfo=jst)
+    else:
+        dt = datetime.now(jst)
+    return dt.strftime("%Y.%m.%d")
+
+
+def _miq_rng(text, salt: str):
+    """本文+ソルトから決定的な乱数生成器を作る (星の散布やバーコード用)。"""
+    seed = int.from_bytes(hashlib.md5(f"{salt}:{text or ''}".encode("utf-8")).digest()[:8], "big")
+    return random.Random(seed)
+
+
+def _miq_hash_int(text, salt: str) -> int:
+    """本文+ソルトから決定的な整数を作る (レアリティや ATK/DEF、座席番号用)。"""
+    return int(hashlib.md5(f"{salt}:{text or ''}".encode("utf-8")).hexdigest()[:8], 16)
+
+
+def _miq_special_font_path(*needles: str) -> str | None:
+    """assets/fonts からファイル名に needles のいずれかを含むフォントを探す。
+
+    card の明朝 (ZenOldMincho)、pop の極太ゴシック (DelaGothicOne)、
+    note の手書き風 (YuseiMagic) など、特定要素だけ別フォントに差し替える用。
+    無ければ None を返し、呼び出し側は通常の font_path にフォールバックする。
+    """
+    try:
+        entries = sorted(_MIQ_ASSET_FONTS.iterdir(), key=lambda p: p.name.lower())
+    except Exception:
+        logger.debug("MIQ: フォント探索に失敗しました", exc_info=True)
+        return None
+    for entry in entries:
+        if entry.is_file() and entry.suffix.lower() in (".ttf", ".otf", ".ttc"):
+            lname = entry.name.lower()
+            if any(n.lower() in lname for n in needles):
+                return str(entry)
+    return None
+
+
+def _miq_circle_avatar(avatar_bytes, size: int):
+    """アバターを正方形に fit し、円形マスク付き (RGBA) で返す。"""
+    from PIL import Image, ImageDraw, ImageOps
+
+    av = ImageOps.fit(_miq_open_avatar(avatar_bytes).convert("RGB"), (size, size), Image.LANCZOS).convert("RGBA")
+    mask = Image.new("L", (size, size), 0)
+    ImageDraw.Draw(mask).ellipse([0, 0, size, size], fill=255)
+    av.putalpha(mask)
+    return av
+
+
+def _miq_rounded_avatar(avatar_bytes, size: int, radius: int):
+    """アバターを正方形に fit し、角丸マスク付き (RGBA) で返す。"""
+    from PIL import Image, ImageDraw, ImageOps
+
+    av = ImageOps.fit(_miq_open_avatar(avatar_bytes).convert("RGB"), (size, size), Image.LANCZOS).convert("RGBA")
+    mask = Image.new("L", (size, size), 0)
+    ImageDraw.Draw(mask).rounded_rectangle([0, 0, size, size], radius=radius, fill=255)
+    av.putalpha(mask)
+    return av
+
+
+def _miq_star4(draw, cx, cy, r, fill, outline=None, width=2):
+    """4点星 (キラキラ) を描く。"""
+    k = 0.22
+    pts = [
+        (cx, cy - r), (cx + r * k, cy - r * k), (cx + r, cy), (cx + r * k, cy + r * k),
+        (cx, cy + r), (cx - r * k, cy + r * k), (cx - r, cy), (cx - r * k, cy - r * k),
+    ]
+    draw.polygon(pts, fill=fill)
+    if outline:
+        draw.line(pts + [pts[0]], fill=outline, width=width, joint="curve")
+
+
+def _miq_star5(draw, cx, cy, r, fill):
+    """5点星を描く (トレカのレアリティ表示用)。"""
+    pts = []
+    for i in range(10):
+        ang = -math.pi / 2 + i * math.pi / 5
+        rad = r if i % 2 == 0 else r * 0.45
+        pts.append((cx + rad * math.cos(ang), cy + rad * math.sin(ang)))
+    draw.polygon(pts, fill=fill)
+
+
+def _miq_heart(draw, cx, cy, size, fill):
+    """ハートを描く (size はおおよその幅)。"""
+    w = float(size)
+    h = w * 0.92
+    x0, y0 = cx - w / 2, cy - h / 2
+    draw.ellipse([x0, y0, x0 + w / 2, y0 + h / 2], fill=fill)
+    draw.ellipse([x0 + w / 2, y0, x0 + w, y0 + h / 2], fill=fill)
+    draw.polygon([(x0 + 2, y0 + h * 0.34), (x0 + w - 2, y0 + h * 0.34), (cx, y0 + h)], fill=fill)
+
+
+def _miq_glow_lines(img, lines, x, y, lh, font, core, glow, *, blur=9):
+    """複数行テキストをグロー (発光) 付きで描いた新しい画像を返す。"""
+    from PIL import Image, ImageDraw, ImageFilter
+
+    base = img.convert("RGBA")
+    layer = Image.new("RGBA", base.size, (0, 0, 0, 0))
+    ld = ImageDraw.Draw(layer)
+    ty = y
+    for line in lines:
+        if line:
+            ld.text((x, ty), line, font=font, fill=glow + (255,))
+        ty += lh
+    blurred = layer.filter(ImageFilter.GaussianBlur(blur))
+    base = Image.alpha_composite(base, blurred)
+    base = Image.alpha_composite(base, blurred)
+    d = ImageDraw.Draw(base)
+    ty = y
+    for line in lines:
+        if line:
+            d.text((x, ty), line, font=font, fill=core + (255,))
+        ty += lh
+    return base.convert("RGB")
+
+
+def _miq_truncate(draw, text: str, font, max_w: float) -> str:
+    """text が max_w に収まるよう末尾を切り、… を付ける。"""
+    if draw.textlength(text, font=font) <= max_w:
+        return text
+    while text and draw.textlength(text + "…", font=font) > max_w:
+        text = text[:-1]
+    return text + "…"
+
+
+def render_miq_blueprint_png(avatar_bytes: bytes | None, text: str, name: str, username: str, *, font_path: str | None = None, date_str: str | None = None) -> bytes:
+    """設計図風: 青地+白グリッド、右に線画アバターと寸法線・諸元表、左に白太字の本文。"""
+    from PIL import Image, ImageDraw, ImageFilter, ImageOps
+
+    W, H = MIQ_NEW_W, MIQ_NEW_H
+    img = Image.new("RGB", (W, H), (27, 90, 190))
+
+    # グリッド (細・太の2段階)
+    grid = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    gd = ImageDraw.Draw(grid)
+    for gx in range(0, W + 1, 24):
+        gd.line([(gx, 0), (gx, H)], fill=(255, 255, 255, 26), width=1)
+    for gy in range(0, H + 1, 24):
+        gd.line([(0, gy), (W, gy)], fill=(255, 255, 255, 26), width=1)
+    for gx in range(0, W + 1, 120):
+        gd.line([(gx, 0), (gx, H)], fill=(255, 255, 255, 64), width=1)
+    for gy in range(0, H + 1, 120):
+        gd.line([(0, gy), (W, gy)], fill=(255, 255, 255, 64), width=1)
+    img = Image.alpha_composite(img.convert("RGBA"), grid).convert("RGB")
+    d = ImageDraw.Draw(img)
+
+    shown_name = _miq_display_text(name) or _miq_display_text(username) or "unknown"
+    shown_user = _miq_display_text(username)
+    shown_text = _miq_display_text(text) or text
+
+    # 右: アバターの線画 (薄い反転塗り + 白いエッジ線)
+    src = _miq_open_avatar(avatar_bytes)
+    native_w, native_h = src.size
+    box = 330
+    bx, by = W - 70 - box, 52
+    gray = ImageOps.grayscale(ImageOps.fit(src.convert("RGB"), (box, box), Image.LANCZOS))
+    faint_mask = Image.new("L", (box, box), 44)
+    img.paste(ImageOps.invert(gray).convert("RGB"), (bx, by), faint_mask)
+    edges = ImageOps.autocontrast(gray.filter(ImageFilter.FIND_EDGES))
+    edge_mask = edges.point(lambda v: min(255, int(v * 1.9)))
+    img.paste(Image.new("RGB", (box, box), (255, 255, 255)), (bx, by), edge_mask)
+    d = ImageDraw.Draw(img)
+    d.rectangle([bx, by, bx + box, by + box], outline=(255, 255, 255), width=3)
+
+    # 寸法線 (枠の下に両端ティック付きの線 + FIG 表記)
+    dim_y = by + box + 24
+    d.line([(bx, dim_y), (bx + box, dim_y)], fill=(255, 255, 255), width=2)
+    d.line([(bx, dim_y - 6), (bx, dim_y + 6)], fill=(255, 255, 255), width=2)
+    d.line([(bx + box, dim_y - 6), (bx + box, dim_y + 6)], fill=(255, 255, 255), width=2)
+    d.text((bx + box // 2, dim_y + 10), f"FIG.1  {native_w}x{native_h}",
+           font=_miq_load_font(font_path, 19), fill=(255, 255, 255), anchor="ma")
+
+    # 諸元表 (NAME / ID / DATE)
+    tx0, tx1 = bx, bx + box
+    ty0 = dim_y + 48
+    row_h = 46
+    rows = [
+        ("NAME", shown_name),
+        ("ID", f"@{shown_user}" if shown_user else "-"),
+        ("DATE", date_str or _miq_date_str()),
+    ]
+    label_font = _miq_load_font(font_path, 15)
+    value_font = _miq_load_font(font_path, 21)
+    d.rectangle([tx0, ty0, tx1, ty0 + row_h * 3], outline=(255, 255, 255), width=2)
+    for i, (label, value) in enumerate(rows):
+        ry = ty0 + i * row_h
+        if i:
+            d.line([(tx0, ry), (tx1, ry)], fill=(255, 255, 255), width=1)
+        d.text((tx0 + 10, ry + row_h // 2), label, font=label_font, fill=(210, 228, 255), anchor="lm")
+        value = _miq_truncate(d, value, value_font, (tx1 - tx0) - 84)
+        d.text((tx0 + 72, ry + row_h // 2), value, font=value_font, fill=(255, 255, 255), anchor="lm")
+    d.line([(tx0 + 62, ty0), (tx0 + 62, ty0 + row_h * 3)], fill=(255, 255, 255), width=1)
+
+    # 左: 本文 (白・太字・左揃え、縦中央)
+    font, wrapped, lh, _size = _miq_fit(d, shown_text, font_path, 620, 440, max_size=58, min_size=22)
+    ty = (H - len(wrapped) * lh) // 2
+    for line in wrapped:
+        if line:
+            d.text((56, ty), line, font=font, fill=(255, 255, 255), stroke_width=1, stroke_fill=(255, 255, 255))
+        ty += lh
+    return _miq_save_png(img)
+
+
+def render_miq_pixel_png(avatar_bytes: bytes | None, text: str, name: str, username: str, *, font_path: str | None = None) -> bytes:
+    """レトロゲーム風: 星空+山影、下部の二重枠ウィンドウ内にドット絵ポートレートと本文。"""
+    from PIL import Image, ImageDraw, ImageOps
+
+    W, H = MIQ_NEW_W, MIQ_NEW_H
+    shown_text = _miq_display_text(text) or text
+    shown_name = _miq_display_text(name) or _miq_display_text(username) or "unknown"
+    img = Image.new("RGB", (W, H), (10, 10, 34))
+    d = ImageDraw.Draw(img, "RGBA")
+
+    # 星空 (本文ハッシュで決定的に散布)
+    rng = _miq_rng(shown_text, "pixel-stars")
+    for _ in range(110):
+        sx, sy = rng.randrange(W), rng.randrange(0, 430)
+        s = rng.choice((2, 2, 3))
+        shade = rng.choice(((255, 255, 255, 235), (205, 208, 230, 200), (150, 155, 190, 170)))
+        d.rectangle([sx, sy, sx + s, sy + s], fill=shade)
+
+    # 山影シルエット (2層、ブロック状の稜線)
+    for salt, base_y, span, color in (("pixel-mtn-far", 320, 110, (21, 21, 50, 255)), ("pixel-mtn-near", 396, 84, (15, 15, 40, 255))):
+        mrng = _miq_rng(shown_text, salt)
+        pts = [(0, H)]
+        x = 0
+        while x < W:
+            pts.append((x, base_y + mrng.randrange(0, span)))
+            x += 48
+        pts.append((W, base_y + mrng.randrange(0, span)))
+        pts.append((W, H))
+        d.polygon(pts, fill=color)
+    img = img.convert("RGB")
+    d = ImageDraw.Draw(img)
+
+    # ウィンドウ (白い二重枠)
+    wx0, wy0, wx1, wy1 = 24, 436, W - 24, H - 24
+    d.rectangle([wx0, wy0, wx1, wy1], fill=(8, 10, 36))
+    d.rectangle([wx0, wy0, wx1, wy1], outline=(255, 255, 255), width=4)
+    d.rectangle([wx0 + 9, wy0 + 9, wx1 - 9, wy1 - 9], outline=(255, 255, 255), width=2)
+
+    # 名前タブ (ウィンドウ左上に重なる小箱)
+    name_font = _miq_load_font(font_path, 22)
+    tab_name = _miq_truncate(d, shown_name, name_font, 320)
+    tab_w = int(d.textlength(tab_name, font=name_font)) + 28
+    tab = [wx0 + 14, wy0 - 38, wx0 + 14 + tab_w, wy0 + 4]
+    d.rectangle(tab, fill=(8, 10, 36), outline=(255, 255, 255), width=3)
+    d.text(((tab[0] + tab[2]) // 2, (tab[1] + tab[3]) // 2), tab_name, font=name_font, fill=(255, 255, 255), anchor="mm")
+
+    # ポートレート (ドット絵化したアバター)
+    p_size = 148
+    px, py = wx0 + 26, wy0 + 24
+    av = ImageOps.fit(_miq_open_avatar(avatar_bytes).convert("RGB"), (p_size, p_size), Image.LANCZOS)
+    av = av.resize((30, 30), Image.BILINEAR).resize((p_size, p_size), Image.NEAREST)
+    img.paste(av, (px, py))
+    d = ImageDraw.Draw(img)
+    d.rectangle([px, py, px + p_size, py + p_size], outline=(255, 255, 255), width=3)
+
+    # 本文 (ポートレートの右、白字)
+    tx = px + p_size + 28
+    font, wrapped, lh, _size = _miq_fit(d, shown_text, font_path, wx1 - tx - 30, wy1 - wy0 - 56, max_size=38, min_size=16)
+    ty = wy0 + 30
+    for line in wrapped:
+        if line:
+            d.text((tx, ty), line, font=font, fill=(255, 255, 255))
+        ty += lh
+
+    # 右下の送り印 ▼
+    vx, vy = wx1 - 52, wy1 - 42
+    d.polygon([(vx - 12, vy), (vx + 12, vy), (vx, vy + 14)], fill=(255, 255, 255))
+    return _miq_save_png(img)
+
+
+# card のレアリティ段階 (生成ごとに重み付き抽選する隠し要素。設定には出さない)
+# (重み, ★数の (下限, 上限), ATK/DEF レンジ補正倍率, 枠キー)
+_MIQ_CARD_RARITIES = (
+    (70, (1, 3), 1.0, "normal"),
+    (20, (3, 4), 1.6, "rare"),
+    (7, (4, 5), 2.4, "super"),
+    (3, (5, 5), 3.6, "ultra"),
+)
+
+# レアリティ段階ごとのカード枠グラデーション (色 stops)
+_MIQ_CARD_FRAME_STOPS = {
+    "normal": [(255, 80, 120), (255, 170, 40), (250, 235, 90), (90, 220, 120), (70, 170, 255), (170, 100, 255)],
+    "rare": [(70, 140, 255), (60, 200, 255), (140, 240, 255), (80, 160, 255), (150, 120, 255), (50, 110, 240)],
+    "super": [(255, 216, 92), (255, 178, 40), (255, 242, 175), (232, 164, 32), (255, 205, 80), (214, 144, 24)],
+    "ultra": [(255, 40, 110), (255, 150, 0), (255, 255, 40), (40, 255, 110), (0, 190, 255), (190, 60, 255)],
+}
+
+
+def _miq_pick_card_rarity(rng=None):
+    r = rng if rng is not None else random
+    weights = [p[0] for p in _MIQ_CARD_RARITIES]
+    return r.choices(_MIQ_CARD_RARITIES, weights=weights, k=1)[0]
+
+
+def render_miq_card_png(avatar_bytes: bytes | None, text: str, name: str, username: str, *, font_path: str | None = None, date_str: str | None = None) -> bytes:
+    """トレカ風: 左に虹枠カード (レアリティ/ATK/DEF)、右に明朝の本文と署名。"""
+    from PIL import Image, ImageDraw, ImageOps
+
+    W, H = MIQ_NEW_W, MIQ_NEW_H
+    shown_name = _miq_display_text(name) or _miq_display_text(username) or "unknown"
+    shown_user = _miq_display_text(username)
+    shown_text = _miq_display_text(text) or text
+    _rw, (star_lo, star_hi), stat_mult, frame_key = _miq_pick_card_rarity()
+
+    # 背景: 濃紫グラデーション + 星屑
+    img = Image.new("RGB", (W, H), (26, 10, 46))
+    bd = ImageDraw.Draw(img)
+    for yy in range(H):
+        bd.line([(0, yy), (W, yy)], fill=_miq_mix((30, 12, 54), (16, 6, 30), yy / max(1, H - 1)))
+    sparkle_layer = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    sd = ImageDraw.Draw(sparkle_layer)
+    srng = _miq_rng(shown_text, "card-bg")
+    for _ in range(26):
+        sx, sy = srng.randrange(W), srng.randrange(H)
+        _miq_star4(sd, sx, sy, srng.choice((4, 6, 8)), (255, 255, 255, srng.choice((90, 140, 190))))
+        sd.ellipse([sx - 1, sy - 1, sx + 1, sy + 1], fill=(255, 255, 255, 160))
+    img = Image.alpha_composite(img.convert("RGBA"), sparkle_layer).convert("RGB")
+    d = ImageDraw.Draw(img)
+
+    # カード枠: 虹色グラデーション (斜め)
+    cx0, cy0, cw, ch = 40, 30, 368, 615
+    grad = Image.new("RGB", (cw, ch))
+    gstops = _MIQ_CARD_FRAME_STOPS[frame_key]
+    gdraw = ImageDraw.Draw(grad)
+    for gx in range(cw):
+        t = gx / max(1, cw - 1)
+        pos = t * (len(gstops) - 1)
+        i0 = min(len(gstops) - 2, int(pos))
+        gdraw.line([(gx, 0), (gx, ch)], fill=_miq_mix(gstops[i0], gstops[i0 + 1], pos - i0))
+    cmask = Image.new("L", (cw, ch), 0)
+    ImageDraw.Draw(cmask).rounded_rectangle([0, 0, cw, ch], radius=20, fill=255)
+    img.paste(grad, (cx0, cy0), cmask)
+    d = ImageDraw.Draw(img)
+    # 内側: クリーム地
+    ix0, iy0, ix1, iy1 = cx0 + 11, cy0 + 11, cx0 + cw - 11, cy0 + ch - 11
+    d.rounded_rectangle([ix0, iy0, ix1, iy1], radius=13, fill=(247, 243, 233))
+
+    # 上部黒帯: 名前 + レアリティ ★
+    band = [ix0 + 12, iy0 + 12, ix1 - 12, iy0 + 64]
+    d.rounded_rectangle(band, radius=8, fill=(17, 17, 26))
+    name_font = _miq_load_font(font_path, 23)
+    band_name = _miq_truncate(d, shown_name, name_font, 190)
+    d.text((band[0] + 14, (band[1] + band[3]) // 2), band_name, font=name_font, fill=(255, 255, 255), anchor="lm", stroke_width=1, stroke_fill=(255, 255, 255))
+    star_n = star_lo + _miq_hash_int(shown_text, "card-stars") % (star_hi - star_lo + 1)
+    for i in range(star_n):
+        _miq_star5(d, band[2] - 18 - i * 27, (band[1] + band[3]) // 2, 11, (245, 197, 66))
+
+    # アバターエリア
+    ax0, ay0, ax1, ay1 = ix0 + 12, band[3] + 12, ix1 - 12, band[3] + 334
+    av = ImageOps.fit(_miq_open_avatar(avatar_bytes).convert("RGB"), (ax1 - ax0, ay1 - ay0), Image.LANCZOS)
+    img.paste(av, (ax0, ay0))
+    d = ImageDraw.Draw(img)
+    d.rectangle([ax0, ay0, ax1, ay1], outline=(40, 40, 52), width=2)
+    if shown_user:
+        d.text((ax0, ay1 + 14), f"@{shown_user}", font=_miq_load_font(font_path, 20), fill=(96, 96, 108))
+    d.text((ax0, ay1 + 50), date_str or _miq_date_str(), font=_miq_load_font(font_path, 18), fill=(122, 120, 112))
+    atk = 100 + _miq_hash_int(shown_text, "card-atk") % 9900
+    dfn = 100 + _miq_hash_int(shown_text, "card-def") % 9900
+    if stat_mult != 1.0:
+        # 上位レアリティでは ATK/DEF のレンジを引き上げる (生成自体は決定的ハッシュのまま)
+        atk = min(9999, int(100 + (atk - 100) * stat_mult))
+        dfn = min(9999, int(100 + (dfn - 100) * stat_mult))
+    stat_font = _miq_load_font(font_path, 24)
+    d.text((ax0, iy1 - 42), f"ATK {atk}", font=stat_font, fill=(26, 26, 36))
+    d.text((ax1, iy1 - 42), f"DEF {dfn}", font=stat_font, fill=(26, 26, 36), anchor="ra")
+
+    # 上位レアリティの追加演出 (隠し要素): 金のキラキラ追加 / 全面ホログラム光沢
+    if frame_key in ("super", "ultra"):
+        fx = _miq_rng(shown_text, "card-rare-fx")
+        fx_layer = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+        fd = ImageDraw.Draw(fx_layer)
+        for _ in range(10):
+            fx_x = fx.randrange(cx0 + cw + 30, W - 20)
+            fx_y = fx.randrange(30, H - 30)
+            _miq_star4(fd, fx_x, fx_y, fx.choice((6, 9, 12)), (245, 197, 66, 200))
+        img = Image.alpha_composite(img.convert("RGBA"), fx_layer).convert("RGB")
+        d = ImageDraw.Draw(img)
+    if frame_key == "ultra":
+        sheen = Image.new("RGBA", (cw, ch), (0, 0, 0, 0))
+        shd = ImageDraw.Draw(sheen)
+        for sx in range(-ch, cw + ch, 54):
+            shd.polygon(
+                [(sx, 0), (sx + 20, 0), (sx + 20 - int(ch * 0.45), ch), (sx - int(ch * 0.45), ch)],
+                fill=(255, 255, 255, 34),
+            )
+        img.paste(Image.alpha_composite(img.crop((cx0, cy0, cx0 + cw, cy0 + ch)).convert("RGBA"), sheen).convert("RGB"), (cx0, cy0), cmask)
+        d = ImageDraw.Draw(img)
+
+    # 右: 本文 (明朝優先) + 署名
+    serif = _miq_special_font_path("ZenOldMincho") or font_path
+    tx = cx0 + cw + 46
+    font, wrapped, lh, _size = _miq_fit(d, shown_text, serif, W - tx - 50, 300, max_size=56, min_size=22)
+    ty = 150
+    for line in wrapped:
+        if line:
+            d.text((tx, ty), line, font=font, fill=(255, 255, 255))
+        ty += lh
+    sig_font = _miq_load_font(serif, 27)
+    d.text((tx, 528), _miq_truncate(d, f"― {shown_name}", sig_font, W - tx - 50), font=sig_font, fill=(235, 230, 250))
+    _miq_star4(d, tx + 6, 586, 9, (255, 255, 255, 255))
+    return _miq_save_png(img)
+
+
+def render_miq_neon_png(avatar_bytes: bytes | None, text: str, name: str, username: str, *, font_path: str | None = None) -> bytes:
+    """ネオン風: 黒〜濃紫背景、右にマゼンタのグロー付きリングアバター、左にシアンのグロー文字。"""
+    from PIL import Image, ImageDraw, ImageFilter
+
+    W, H = MIQ_NEW_W, MIQ_NEW_H
+    shown_name = _miq_display_text(name) or _miq_display_text(username) or "unknown"
+    shown_user = _miq_display_text(username)
+    shown_text = _miq_display_text(text) or text
+
+    img = Image.new("RGB", (W, H), (8, 4, 16))
+    bd = ImageDraw.Draw(img)
+    for yy in range(H):
+        bd.line([(0, yy), (W, yy)], fill=_miq_mix((10, 5, 20), (30, 7, 42), yy / max(1, H - 1)))
+    d = ImageDraw.Draw(img)
+
+    # 右: アバターのグロー付き二重リング
+    ccx, ccy, r = 884, 330, 186
+    glow = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    ImageDraw.Draw(glow).ellipse([ccx - r - 16, ccy - r - 16, ccx + r + 16, ccy + r + 16], fill=(255, 43, 214, 255))
+    glow = glow.filter(ImageFilter.GaussianBlur(36))
+    img = Image.alpha_composite(img.convert("RGBA"), glow)
+    img = Image.alpha_composite(img, glow).convert("RGB")
+    av = _miq_circle_avatar(avatar_bytes, r * 2)
+    img.paste(av, (ccx - r, ccy - r), av)
+    d = ImageDraw.Draw(img)
+    d.ellipse([ccx - r - 9, ccy - r - 9, ccx + r + 9, ccy + r + 9], outline=(255, 43, 214), width=6)
+    d.ellipse([ccx - r + 4, ccy - r + 4, ccx + r - 4, ccy + r - 4], outline=(255, 140, 245), width=3)
+
+    # 左: 本文 (シアンのネオングロー)
+    font, wrapped, lh, _size = _miq_fit(d, shown_text, font_path, 540, 360, max_size=58, min_size=22)
+    ty = max(90, (470 - len(wrapped) * lh) // 2 + 40)
+    img = _miq_glow_lines(img, wrapped, 64, ty, lh, font, (196, 255, 255), (0, 224, 255))
+    d = ImageDraw.Draw(img)
+
+    # 左下: 表示名 (ピンクのグロー) + @username
+    name_font = _miq_load_font(font_path, 30)
+    shown_name = _miq_truncate(d, shown_name, name_font, 540)
+    img = _miq_glow_lines(img, [shown_name], 64, 548, 40, name_font, (255, 190, 248), (255, 43, 214), blur=7)
+    d = ImageDraw.Draw(img)
+    if shown_user:
+        d.text((64, 596), f"@{shown_user}", font=_miq_load_font(font_path, 22), fill=(168, 168, 186))
+    return _miq_save_png(img)
+
+
+def render_miq_dark_png(avatar_bytes: bytes | None, text: str, name: str, username: str, *, font_path: str | None = None) -> bytes:
+    """ダーク風: アバター全面のモノクロ写真に下部グラデーション、左下に大きな白字。"""
+    from PIL import Image, ImageDraw, ImageEnhance, ImageOps
+
+    W, H = MIQ_NEW_W, MIQ_NEW_H
+    shown_name = _miq_display_text(name) or _miq_display_text(username) or "unknown"
+    shown_user = _miq_display_text(username)
+    shown_text = _miq_display_text(text) or text
+
+    src = _miq_open_avatar(avatar_bytes)
+    img = ImageOps.fit(src.convert("RGB"), (W, H), Image.LANCZOS)
+    img = ImageOps.grayscale(img).convert("RGB")
+    img = ImageEnhance.Brightness(img).enhance(0.85)
+    img = ImageEnhance.Contrast(img).enhance(1.06)
+
+    # 下部グラデーション (黒)
+    shade = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    shd = ImageDraw.Draw(shade)
+    for yy in range(H):
+        if yy < 260:
+            continue
+        alpha = int(238 * (yy - 260) / max(1, H - 260))
+        shd.line([(0, yy), (W, yy)], fill=(0, 0, 0, alpha))
+    img = Image.alpha_composite(img.convert("RGBA"), shade).convert("RGB")
+    d = ImageDraw.Draw(img)
+
+    # 本文 (左下、白・太字)
+    font, wrapped, lh, _size = _miq_fit(d, shown_text, font_path, 830, 290, max_size=64, min_size=24)
+    ty = 472 - len(wrapped) * lh
+    for line in wrapped:
+        if line:
+            d.text((56, ty), line, font=font, fill=(255, 255, 255), stroke_width=2, stroke_fill=(255, 255, 255))
+        ty += lh
+    d.line([(56, 496), (172, 496)], fill=(255, 255, 255), width=3)
+    name_font = _miq_load_font(font_path, 29)
+    d.text((56, 512), _miq_truncate(d, shown_name, name_font, 700), font=name_font,
+           fill=(255, 255, 255), stroke_width=1, stroke_fill=(255, 255, 255))
+    if shown_user:
+        d.text((56, 552), f"@{shown_user}", font=_miq_load_font(font_path, 21), fill=(203, 203, 203))
+    return _miq_save_png(img)
+
+
+def render_miq_pop_png(avatar_bytes: bytes | None, text: str, name: str, username: str, *, font_path: str | None = None) -> bytes:
+    """ポップ風: 黄色ドット地に白カード+オフセットシャドウ、右に角丸アバターとピンクのピル。"""
+    from PIL import Image, ImageDraw
+
+    W, H = MIQ_NEW_W, MIQ_NEW_H
+    shown_name = _miq_display_text(name) or _miq_display_text(username) or "unknown"
+    shown_user = _miq_display_text(username)
+    shown_text = _miq_display_text(text) or text
+
+    img = Image.new("RGB", (W, H), (255, 208, 40))
+    d = ImageDraw.Draw(img)
+    for gx in range(14, W, 27):
+        for gy in range(14, H, 27):
+            d.ellipse([gx - 2, gy - 2, gx + 2, gy + 2], fill=(243, 183, 16))
+
+    # 白カード (黒太枠 + 右下オフセットの黒シャドウ)
+    card = [36, 64, 800, 610]
+    d.rounded_rectangle([card[0] + 13, card[1] + 13, card[2] + 13, card[3] + 13], radius=16, fill=(0, 0, 0))
+    d.rounded_rectangle(card, radius=16, fill=(255, 255, 255), outline=(0, 0, 0), width=5)
+    _miq_star4(d, 798, 56, 30, (255, 255, 255), outline=(0, 0, 0), width=3)
+
+    # 本文 (DelaGothicOne があれば優先、黒の極太字)
+    dela = _miq_special_font_path("DelaGothicOne") or font_path
+    font, wrapped, lh, _size = _miq_fit(d, shown_text, dela, 684, 420, max_size=54, min_size=22)
+    ty = (card[1] + card[3]) // 2 - (len(wrapped) * lh) // 2
+    for line in wrapped:
+        if line:
+            d.text((74, ty), line, font=font, fill=(10, 10, 10))
+        ty += lh
+
+    # 右: アバター (角丸四角、黒枠+シャドウ)
+    av_box = [848, 88, 1140, 380]
+    d.rounded_rectangle([av_box[0] + 10, av_box[1] + 10, av_box[2] + 10, av_box[3] + 10], radius=18, fill=(0, 0, 0))
+    av = _miq_rounded_avatar(avatar_bytes, av_box[2] - av_box[0], 18)
+    img.paste(av, (av_box[0], av_box[1]), av)
+    d = ImageDraw.Draw(img)
+    d.rounded_rectangle(av_box, radius=18, outline=(0, 0, 0), width=5)
+
+    # ピンクのピル型バッジ (表示名)
+    pill = [848, 420, 1140, 484]
+    d.rounded_rectangle([pill[0] + 6, pill[1] + 6, pill[2] + 6, pill[3] + 6], radius=32, fill=(0, 0, 0))
+    d.rounded_rectangle(pill, radius=32, fill=(255, 110, 190))
+    name_font = _miq_load_font(font_path, 25)
+    pill_name = _miq_truncate(d, shown_name, name_font, 252)
+    d.text(((pill[0] + pill[2]) // 2, (pill[1] + pill[3]) // 2), pill_name, font=name_font, fill=(10, 10, 10), anchor="mm")
+    if shown_user:
+        user_font = _miq_load_font(font_path, 23)
+        d.text(((pill[0] + pill[2]) // 2, 522), _miq_truncate(d, f"@{shown_user}", user_font, 280),
+               font=user_font, fill=(10, 10, 10), anchor="ma", stroke_width=1, stroke_fill=(10, 10, 10))
+    return _miq_save_png(img)
+
+
+def render_miq_pastel_png(avatar_bytes: bytes | None, text: str, name: str, username: str, *, font_path: str | None = None) -> bytes:
+    """パステル風: ピンク→水色グラデーションに白ドット、右に白リングの丸アバター。"""
+    from PIL import Image, ImageDraw
+
+    W, H = MIQ_NEW_W, MIQ_NEW_H
+    shown_name = _miq_display_text(name) or _miq_display_text(username) or "unknown"
+    shown_user = _miq_display_text(username)
+    shown_text = _miq_display_text(text) or text
+
+    # 横グラデーション (ピンク → ラベンダー → 水色) + 白ドット
+    img = Image.new("RGB", (W, H), (253, 216, 233))
+    bd = ImageDraw.Draw(img)
+    stops = [(253, 216, 233), (216, 206, 245), (188, 226, 250)]
+    for gx in range(W):
+        t = gx / max(1, W - 1)
+        if t < 0.5:
+            c = _miq_mix(stops[0], stops[1], t * 2)
+        else:
+            c = _miq_mix(stops[1], stops[2], (t - 0.5) * 2)
+        bd.line([(gx, 0), (gx, H)], fill=c)
+    dots = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    dd = ImageDraw.Draw(dots)
+    for gx in range(15, W, 30):
+        for gy in range(15, H, 30):
+            dd.ellipse([gx - 2, gy - 2, gx + 2, gy + 2], fill=(255, 255, 255, 110))
+    img = Image.alpha_composite(img.convert("RGBA"), dots).convert("RGB")
+    d = ImageDraw.Draw(img)
+
+    # 装飾 (ハートと星)
+    _miq_heart(d, 676, 108, 46, (248, 130, 175))
+    _miq_heart(d, 796, 74, 26, (250, 205, 80))
+    _miq_star4(d, 876, 156, 17, (255, 255, 255))
+    _miq_star4(d, 1078, 108, 21, (250, 205, 80))
+    _miq_star4(d, 726, 470, 19, (110, 220, 190))
+    _miq_star4(d, 1128, 500, 25, (248, 130, 175))
+
+    # 右: アバター (白い太リング + 内側ピンク)
+    ccx, ccy = 922, 302
+    d.ellipse([ccx - 180, ccy - 180, ccx + 180, ccy + 180], fill=(255, 255, 255))
+    d.ellipse([ccx - 169, ccy - 169, ccx + 169, ccy + 169], fill=(251, 131, 175))
+    av = _miq_circle_avatar(avatar_bytes, 318)
+    img.paste(av, (ccx - 159, ccy - 159), av)
+    d = ImageDraw.Draw(img)
+
+    # アバター下: 白ピル (表示名ピンク字) + @username
+    name_font = _miq_load_font(font_path, 24)
+    pill_name = _miq_truncate(d, shown_name, name_font, 300)
+    tw = d.textlength(pill_name, font=name_font)
+    pill = [ccx - tw / 2 - 26, 506, ccx + tw / 2 + 26, 552]
+    d.rounded_rectangle(pill, radius=23, fill=(255, 255, 255))
+    d.text((ccx, 529), pill_name, font=name_font, fill=(238, 108, 160), anchor="mm")
+    if shown_user:
+        d.text((ccx, 574), f"@{shown_user}", font=_miq_load_font(font_path, 20), fill=(122, 126, 152), anchor="ma")
+
+    # 左: 本文 (濃いグレー、柔らかめ)
+    font, wrapped, lh, _size = _miq_fit(d, shown_text, font_path, 576, 380, max_size=47, min_size=20)
+    ty = (H - len(wrapped) * lh) // 2
+    for line in wrapped:
+        if line:
+            d.text((60, ty), line, font=font, fill=(76, 74, 98))
+        ty += lh
+    return _miq_save_png(img)
+
+
+# ticket の配色バリエーション (生成ごとに重み付き抽選する隠し要素。設定には出さない)
+# (重み, 背景, 帯, チケット地, アクセント)
+_MIQ_TICKET_PALETTES = (
+    (52, (37, 41, 17), (96, 104, 44), (246, 242, 230), (84, 90, 38)),     # 標準: クリーム×オリーブ
+    (12, (46, 22, 22), (150, 44, 44), (248, 238, 232), (150, 44, 44)),    # 赤系
+    (12, (16, 28, 48), (44, 84, 150), (236, 242, 250), (44, 84, 150)),    # 青系
+    (12, (34, 20, 52), (106, 62, 160), (242, 238, 250), (106, 62, 160)),  # 紫系
+    (7, (16, 16, 16), (24, 24, 24), (240, 234, 214), (148, 114, 40)),     # 黒×金
+    (5, (66, 30, 48), (214, 96, 140), (252, 240, 246), (196, 70, 118)),   # ピンク系
+)
+
+
+def _miq_pick_ticket_palette(rng=None):
+    r = rng if rng is not None else random
+    weights = [p[0] for p in _MIQ_TICKET_PALETTES]
+    return r.choices(_MIQ_TICKET_PALETTES, weights=weights, k=1)[0]
+
+
+def render_miq_ticket_png(avatar_bytes: bytes | None, text: str, name: str, username: str, *, font_path: str | None = None, date_str: str | None = None) -> bytes:
+    """チケット風: クリーム色の横長チケット。右スタブに丸アバターとバーコード。"""
+    from PIL import Image, ImageDraw
+
+    W, H = MIQ_NEW_W, MIQ_NEW_H
+    shown_name = _miq_display_text(name) or _miq_display_text(username) or "unknown"
+    shown_user = _miq_display_text(username)
+    shown_text = _miq_display_text(text) or text
+    _weight, bg_color, band_color, paper_color, accent_color = _miq_pick_ticket_palette()
+    ink = (22, 22, 20)
+
+    img = Image.new("RGB", (W, H), bg_color)
+
+    # チケット本体 + 左端の帯。角丸マスクで帯の角も揃える
+    tx0, ty0, tx1, ty1 = 52, 150, 1148, 525
+    ticket = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    td = ImageDraw.Draw(ticket)
+    td.rounded_rectangle([tx0, ty0, tx1, ty1], radius=16, fill=paper_color + (255,))
+    td.rectangle([tx0, ty0, tx0 + 18, ty1], fill=band_color + (255,))
+    tmask = Image.new("L", (W, H), 0)
+    ImageDraw.Draw(tmask).rounded_rectangle([tx0, ty0, tx1, ty1], radius=16, fill=255)
+    ticket.putalpha(tmask)
+    img.paste(ticket, (0, 0), ticket)
+    d = ImageDraw.Draw(img)
+
+    # ミシン目 (縦の破線) + 上下の半円ノッチ
+    perf_x = 928
+    for yy in range(ty0 + 18, ty1 - 16, 18):
+        d.line([(perf_x, yy), (perf_x, yy + 10)], fill=(142, 142, 132), width=2)
+    d.ellipse([perf_x - 15, ty0 - 15, perf_x + 15, ty0 + 15], fill=bg_color)
+    d.ellipse([perf_x - 15, ty1 - 15, perf_x + 15, ty1 + 15], fill=bg_color)
+
+    # ヘッダ: ADMIT ONE / No.
+    head_font = _miq_load_font(font_path, 20)
+    d.text((94, 178), "ADMIT ONE", font=head_font, fill=accent_color, stroke_width=1, stroke_fill=accent_color)
+    no_str = f"No.{100000 + _miq_hash_int(shown_text, 'ticket-no') % 900000}"
+    d.text((896, 178), no_str, font=head_font, fill=(110, 104, 90), anchor="ra")
+
+    # 本文 (黒・太字・左揃え)
+    font, wrapped, lh, _size = _miq_fit(d, shown_text, font_path, 786, 176, max_size=50, min_size=21)
+    ty = 226
+    for line in wrapped:
+        if line:
+            d.text((94, ty), line, font=font, fill=ink, stroke_width=1, stroke_fill=ink)
+        ty += lh
+    d.line([(94, 448), (896, 448)], fill=(202, 198, 182), width=2)
+
+    # 下段カラム: GUEST / DATE / SEAT
+    label_font = _miq_load_font(font_path, 15)
+    value_font = _miq_load_font(font_path, 22)
+    seat = f"{chr(ord('A') + _miq_hash_int(shown_text, 'ticket-seat') % 26)}-{1 + _miq_hash_int(shown_text, 'ticket-seat2') % 20}"
+    cols = [
+        (94, "GUEST", _miq_truncate(d, shown_name, value_font, 240)),
+        (380, "DATE", date_str or _miq_date_str()),
+        (640, "SEAT", seat),
+    ]
+    for col_x, label, value in cols:
+        d.text((col_x, 462), label, font=label_font, fill=(122, 118, 106))
+        d.text((col_x, 482), value, font=value_font, fill=ink)
+
+    # スタブ: 丸アバター (黒リング) + @username + バーコード
+    scx, scy = 1038, 250
+    d.ellipse([scx - 69, scy - 69, scx + 69, scy + 69], fill=(15, 15, 15))
+    av = _miq_circle_avatar(avatar_bytes, 124)
+    img.paste(av, (scx - 62, scy - 62), av)
+    d = ImageDraw.Draw(img)
+    if shown_user:
+        user_font = _miq_load_font(font_path, 20)
+        d.text((scx, 338), _miq_truncate(d, f"@{shown_user}", user_font, 190), font=user_font, fill=ink, anchor="ma")
+    brng = _miq_rng(shown_text, "ticket-barcode")
+    bx = 964
+    while bx < 1106:
+        bw = brng.choice((2, 3, 4, 6))
+        if brng.random() < 0.78:
+            d.rectangle([bx, 418, bx + bw, 496], fill=(15, 15, 15))
+        bx += bw + brng.choice((2, 3, 4))
+    return _miq_save_png(img)
+
+
+def render_miq_note_png(avatar_bytes: bytes | None, text: str, name: str, username: str, *, font_path: str | None = None) -> bytes:
+    """ノート風: 罫線ノート紙に手書き風の本文、右に少し傾けた写真プリント風アバター。"""
+    from PIL import Image, ImageDraw, ImageOps
+
+    W, H = MIQ_NEW_W, MIQ_NEW_H
+    shown_name = _miq_display_text(name) or _miq_display_text(username) or "unknown"
+    shown_user = _miq_display_text(username)
+    shown_text = _miq_display_text(text) or text
+
+    img = Image.new("RGB", (W, H), (250, 247, 238))
+    d = ImageDraw.Draw(img)
+    # 横罫線 + 左の赤マージン線 + パンチ穴
+    for yy in range(64, H, 44):
+        d.line([(0, yy), (W, yy)], fill=(170, 198, 230), width=1)
+    d.line([(104, 0), (104, H)], fill=(243, 158, 158), width=2)
+    for hy in (180, 480):
+        d.ellipse([40 - 14, hy - 14, 40 + 14, hy + 14], fill=(233, 229, 221), outline=(208, 203, 192), width=2)
+
+    # 本文 (手書き風フォントがあれば優先、紺色)
+    hand = _miq_special_font_path("YuseiMagic") or font_path
+    font, wrapped, lh, _size = _miq_fit(d, shown_text, hand, 586, 340, max_size=46, min_size=20)
+    ty = (H - len(wrapped) * lh) // 2
+    for line in wrapped:
+        if line:
+            d.text((150, ty), line, font=font, fill=(40, 54, 112))
+        ty += lh
+
+    # 右: 写真プリント風アバター (白枠、少し傾け、上部にマスキングテープ)
+    src = _miq_open_avatar(avatar_bytes)
+    photo = Image.new("RGBA", (332, 366), (0, 0, 0, 0))
+    ImageDraw.Draw(photo).rectangle([0, 0, 332, 366], fill=(255, 255, 255, 255))
+    photo.paste(ImageOps.fit(src.convert("RGB"), (300, 300), Image.LANCZOS), (16, 16))
+    rot = photo.rotate(-4, resample=Image.BICUBIC, expand=True)
+    shadow = Image.new("RGBA", rot.size, (0, 0, 0, 0))
+    ImageDraw.Draw(shadow).rectangle([0, 0, rot.size[0], rot.size[1]], fill=(0, 0, 0, 0))
+    shadow.putalpha(rot.split()[-1].point(lambda v: int(v * 0.28)))
+    shadow_rgb = Image.new("RGBA", rot.size, (60, 55, 40, 255))
+    shadow_rgb.putalpha(shadow.split()[-1])
+    img.paste(shadow_rgb, (796, 76), shadow_rgb)
+    img.paste(rot, (788, 66), rot)
+    tape = Image.new("RGBA", (150, 40), (250, 231, 150, 190))
+    tape = tape.rotate(8, resample=Image.BICUBIC, expand=True)
+    img.paste(tape, (872, 48), tape)
+    d = ImageDraw.Draw(img, "RGBA")
+
+    # 写真の下: 星 + 表示名 (黄色マーカーハイライト) + @username
+    _miq_star4(d, 758, 452, 14, (40, 54, 112))
+    name_font = _miq_load_font(hand, 26)
+    disp_name = _miq_truncate(d, shown_name, name_font, 330)
+    tw = d.textlength(disp_name, font=name_font)
+    d.rectangle([800, 470, 800 + tw + 16, 506], fill=(255, 236, 130, 150))
+    d.text((808, 474), disp_name, font=name_font, fill=(32, 36, 60))
+    if shown_user:
+        d.text((808, 516), f"@{shown_user}", font=_miq_load_font(font_path, 19), fill=(115, 115, 125))
+    return _miq_save_png(img.convert("RGB") if img.mode == "RGBA" else img)
+
+
+# 単体メッセージ系フォーマットのレンダラ表。_miq_build_file がここで分岐する。
+_MIQ_FORMAT_RENDERERS = {
+    "manga": render_miq_manga_png,
+    "music": render_miq_music_png,
+    "news": render_miq_news_png,
+    "xpost": render_miq_xpost_png,
+    "rpg": render_miq_rpg_png,
+    "blueprint": render_miq_blueprint_png,
+    "pixel": render_miq_pixel_png,
+    "card": render_miq_card_png,
+    "neon": render_miq_neon_png,
+    "dark": render_miq_dark_png,
+    "pop": render_miq_pop_png,
+    "pastel": render_miq_pastel_png,
+    "ticket": render_miq_ticket_png,
+    "note": render_miq_note_png,
+}
+
+# 日付 (対象メッセージの作成日) を date_str として受け取るフォーマット
+_MIQ_DATED_FORMATS = frozenset({"blueprint", "card", "ticket"})
+
+
+# ------------------------------------------------------------
+# MIQ 隠し要素: アゴのひょっこり合成 (開発者向け。利用者向け文言には出さない)
+# ------------------------------------------------------------
+MIQ_AGO_RARE_RATE = 0.02
+_MIQ_AGO_DIR = Path(__file__).resolve().parent.parent / "assets" / "miq_ago"
+_MIQ_AGO_CACHE: list | None = None
+
+
+def _miq_ago_images() -> list:
+    """assets/miq_ago/ の透過PNGアセットを読み込む (初回のみ、読めない分は除く)。"""
+    global _MIQ_AGO_CACHE
+    if _MIQ_AGO_CACHE is not None:
+        return _MIQ_AGO_CACHE
+    from PIL import Image
+
+    found = []
+    try:
+        paths = sorted(_MIQ_AGO_DIR.glob("ago_*.png"))
+    except Exception:
+        logger.debug("MIQ: アゴアセットの探索に失敗しました", exc_info=True)
+        paths = []
+    for path in paths:
+        try:
+            with Image.open(path) as im:
+                found.append(im.convert("RGBA").copy())
+        except Exception:
+            logger.debug("MIQ: アゴアセットの読み込みに失敗しました", exc_info=True)
+    _MIQ_AGO_CACHE = found
+    return found
+
+
+def apply_ago_overlay(png_bytes: bytes, *, force: bool = False, rng=None) -> bytes:
+    """生成済みPNGに、確率 MIQ_AGO_RARE_RATE でアゴを隅からひょっこり合成する。
+
+    force=True で抽選を経ず必ず合成する (テスト・確認用)。rng には
+    random.Random 互換オブジェクトを渡せる。アセットが無い/読めない場合は
+    元のバイト列をそのまま返す。GIF には適用しない (呼び出し側で分岐)。
+    """
+    r = rng if rng is not None else random
+    if not force and r.random() >= MIQ_AGO_RARE_RATE:
+        return png_bytes
+    images = _miq_ago_images()
+    if not images:
+        return png_bytes
+    try:
+        from PIL import Image, ImageOps
+
+        base = Image.open(io.BytesIO(png_bytes)).convert("RGBA")
+        ago = r.choice(images)
+        scale = r.uniform(0.25, 0.35)
+        tw = max(24, int(base.width * scale))
+        th = max(1, int(ago.height * tw / ago.width))
+        ago_img = ago.resize((tw, th), Image.LANCZOS)
+        corner = r.choice(("bl", "br", "tl", "tr"))
+        over = r.uniform(0.22, 0.38)
+        if corner[1] == "l":
+            ago_img = ImageOps.mirror(ago_img)  # 左側の隅では内側を向かせる
+            x = -int(tw * over)
+        else:
+            x = base.width - tw + int(tw * over)
+        if corner[0] == "b":
+            y = base.height - th + int(th * over)
+        else:
+            y = -int(th * over)
+        base.paste(ago_img, (x, y), ago_img)
+        buf = io.BytesIO()
+        base.convert("RGB").save(buf, "PNG", optimize=True)
+        return buf.getvalue()
+    except Exception:
+        logger.debug("MIQ: アゴ合成に失敗しました", exc_info=True)
+        return png_bytes
+
+
 class MiqLineEntry:
     """LINE風の1メッセージ分。render_miq_line_png は dict でもこの形でも受け付ける。
 
@@ -2892,7 +3774,7 @@ class MiqSettingsView(discord.ui.View):
         lines = [
             "**見た目**（あなたがMIQを作る時に使われます）",
             f"フォーマット: `{format_label}`",
-            "未設定の既定はランダムです。ランダムでは生成のたびに引用/漫画風/音楽再生風/ニュース速報風/X投稿風/RPG風から1つ選ばれます（LINE風は選ばれません）。",
+            "未設定の既定はランダムです。ランダムでは生成のたびに単体フォーマットから1つ選ばれます（LINE風は選ばれません）。",
             f"モノクロ: `{onoff(p['grayscale'])}`　文字色連動: `{onoff(p['color_text'])}`　左右反転: `{onoff(p['flip'])}`",
             f"太字: `{onoff(p['bold'])}`　全面レイアウト: `{onoff(p['full'])}`　GIF出力: `{onoff(p['gif'])}`",
             f"フォント: `{font_label}`　配色: `{theme_label}`",
@@ -2902,7 +3784,7 @@ class MiqSettingsView(discord.ui.View):
             "ONにすると、他の人はあなたのメッセージをMIQにできません（自分の引用は可能）。",
             "",
             "GIF出力はアイコンがGIFアニメの時だけ有効です（それ以外はPNG）。",
-            "漫画風・音楽再生風・LINE風・ニュース速報風・X投稿風・RPG風は常にPNGです（モノクロ等の設定は引用 (従来) 専用）。",
+            "引用 (従来) 以外のフォーマットは常にPNGです（モノクロ等の設定は引用 (従来) 専用）。",
             "LINE風は画像・スタンプ・絵文字の合成にも対応し、画像やスタンプだけのメッセージも変換できます。",
         ]
         return discord.Embed(title="MIQ設定", description="\n".join(lines), color=0xFFFFFF)
@@ -3950,7 +4832,7 @@ class GeneralCog(commands.Cog):
                 "`/general` → 引用画像 (MIQ) → **MIQ設定** で、モノクロ・文字色連動・左右反転・太字・"
                 "全面レイアウト・GIF出力・フォント・配色を変更できます。設定はあなたがMIQを作る時に使われます。\n\n"
                 "**フォーマット**\n"
-                "MIQ設定で **ランダム / 引用 (従来) / 漫画風 / 音楽再生風 / LINE風 / ニュース速報風 / X投稿風 / RPG風** を選べます。"
+                "MIQ設定で **ランダム / 引用 (従来) / 漫画風 / 音楽再生風 / LINE風 / ニュース速報風 / X投稿風 / RPG風 / 設計図風 / レトロゲーム風 / トレカ風 / ネオン風 / ダーク風 / ポップ風 / パステル風 / チケット風 / ノート風** を選べます。"
                 "未設定の既定はランダムで、生成のたびに単体フォーマットから1つ選ばれます（ランダムでLINE風は選ばれません）。\n"
                 "引用 (従来) 以外は常にPNGで出力され、GIF出力やモノクロ・配色などの設定は引用 (従来) 専用です（フォント設定は全フォーマット共通）。\n"
                 "LINE風では、対象のメッセージが返信でつながっている場合、対象を含めて最大4件まで遡って会話形式にします"
@@ -4237,6 +5119,7 @@ class GeneralCog(commands.Cog):
         try:
             async with self._levelup_sem:
                 data = await asyncio.to_thread(render_miq_line_png, entries, font_path=opts.get("font_path"))
+                data = await asyncio.to_thread(apply_ago_overlay, data)
             return discord.File(io.BytesIO(data), filename="quote-line.png")
         except ImportError:
             self._miq_pillow_missing()
@@ -4346,6 +5229,7 @@ class GeneralCog(commands.Cog):
 
     async def _miq_build_file(
         self, author, text: str, prefs: dict, size_limit: int | None,
+        *, created_at=None,
     ) -> discord.File | None:
         """引用画像を作って discord.File にする。prefs は引用を作る人(要求者)の設定。"""
         opts = miq_render_options(prefs, self.bot.user)
@@ -4378,18 +5262,18 @@ class GeneralCog(commands.Cog):
                     data = await asyncio.to_thread(
                         render_miq_line_png, entries, font_path=opts.get("font_path"),
                     )
+                    data = await asyncio.to_thread(apply_ago_overlay, data)
                     return discord.File(io.BytesIO(data), filename="quote-line.png")
-                if fmt in ("manga", "music", "news", "xpost", "rpg"):
-                    renderer = {
-                        "manga": render_miq_manga_png,
-                        "music": render_miq_music_png,
-                        "news": render_miq_news_png,
-                        "xpost": render_miq_xpost_png,
-                        "rpg": render_miq_rpg_png,
-                    }[fmt]
+                renderer = _MIQ_FORMAT_RENDERERS.get(fmt)
+                if renderer is not None:
+                    kwargs = {"font_path": opts.get("font_path")}
+                    if fmt in _MIQ_DATED_FORMATS:
+                        # 日付を使うフォーマットには対象メッセージの作成日 (JST) を渡す
+                        kwargs["date_str"] = _miq_date_str(created_at)
                     data = await asyncio.to_thread(
-                        renderer, avatar_bytes, text, name, username, font_path=opts.get("font_path"),
+                        renderer, avatar_bytes, text, name, username, **kwargs,
                     )
+                    data = await asyncio.to_thread(apply_ago_overlay, data)
                     return discord.File(io.BytesIO(data), filename="quote.png")
                 if animated:
                     limit = int((size_limit or 8 * 1024 * 1024) * 0.9)
@@ -4400,6 +5284,7 @@ class GeneralCog(commands.Cog):
                         return discord.File(io.BytesIO(data), filename="quote.gif")
                     # 上限超過ならPNG(アイコンの1コマ目)にフォールバック
                 data = await asyncio.to_thread(render_miq_png, avatar_bytes, text, name, username, **opts)
+                data = await asyncio.to_thread(apply_ago_overlay, data)
             return discord.File(io.BytesIO(data), filename="quote.png")
         except ImportError:
             self._miq_pillow_missing()
@@ -4468,7 +5353,10 @@ class GeneralCog(commands.Cog):
             if refused:
                 return await interaction.followup.send("このユーザーは引用画像(MIQ)を拒否しています。")
         else:
-            file = await self._miq_build_file(message.author, text, eff_prefs, size_limit)
+            file = await self._miq_build_file(
+                message.author, text, eff_prefs, size_limit,
+                created_at=getattr(message, "created_at", None),
+            )
         if file is None:
             return await interaction.followup.send("引用画像を作れませんでした。")
         await interaction.followup.send(file=file)
@@ -4519,7 +5407,10 @@ class GeneralCog(commands.Cog):
                         )
                         return
                 else:
-                    file = await self._miq_build_file(target.author, text, eff_prefs, size_limit)
+                    file = await self._miq_build_file(
+                        target.author, text, eff_prefs, size_limit,
+                        created_at=getattr(target, "created_at", None),
+                    )
             if file is None:
                 return
             await message.reply(file=file, mention_author=False)
