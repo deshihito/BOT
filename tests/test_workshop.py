@@ -1,6 +1,7 @@
 """core/workshop.py（加工機・委託加工・ストリーク）と WorkshopCog のテスト。
 
-見るもの: ティア定義と価格の回収期間（60日以上、ストリーク最大時も）、
+見るもの: ティア定義と使い捨てモデルの価格（寿命まで回し切れば総生産 EV
+が価格を上回る）、耐久の消費と寿命での消滅、恒久モデルからの移行、
 購入の保存則（コインと加工機の対応、残高不足で不変）、生産の lazy 決済と
 貯蔵上限、端数時間の持ち越し、レア率、ストリークの加算/上限/猶予リセット、
 委託加工（ロック→時間経過→claim、並行上限）、永続化ラウンドトリップ、
@@ -9,6 +10,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import random
 import sys
 import tempfile
@@ -63,6 +65,11 @@ class TierDefinitionTest(unittest.TestCase):
             self.assertGreaterEqual(tier["rare_rate"], 0.0, tier_id)
             self.assertLess(tier["rare_rate"], 1.0, tier_id)
             self.assertGreaterEqual(tier["commission_slots"], 1, tier_id)
+            # 寿命（使い捨ての総サイクル数）があり、実時間で数日〜2週間程度。
+            self.assertGreater(tier["lifespan_cycles"], 0, tier_id)
+            span_days = tier["lifespan_cycles"] * tier["cycle_hours"] / 24
+            self.assertGreaterEqual(span_days, 2, tier_id)
+            self.assertLessEqual(span_days, 15, tier_id)
 
     def test_rare_rates_match_spec(self):
         self.assertEqual(workshop.MACHINE_TIERS["small"]["rare_rate"], 0.0)
@@ -79,12 +86,16 @@ class TierDefinitionTest(unittest.TestCase):
              workshop.MACHINE_TIERS["large"]["storage_hours"]), (8, 24))
         self.assertEqual(workshop.MACHINE_TIERS["large"]["commission_slots"], 2)
 
-    def test_payback_period_is_at_least_60_days(self):
+    def test_lifetime_value_exceeds_price(self):
+        # 使い捨てモデル: 寿命まで回し切れば総生産 EV が価格を上回り
+        # （かけるだけで得はできる）、価格は総 EV の 40〜60% に収まる。
         for tier_id in workshop.MACHINE_TIERS:
-            days = workshop.payback_days(tier_id)
-            self.assertGreaterEqual(days, 60.0, tier_id)
-            # ストリーク最大（+25%）で回し続けても60日を割らないこと。
-            self.assertGreaterEqual(days / 1.25, 60.0, tier_id)
+            total = workshop.lifetime_expected_value(tier_id)
+            price = workshop.MACHINE_TIERS[tier_id]["price"]
+            self.assertGreater(total, price, tier_id)
+            ratio = price / total
+            self.assertGreaterEqual(ratio, 0.4, tier_id)
+            self.assertLessEqual(ratio, 0.6, tier_id)
 
 
 class ProductionTest(unittest.TestCase):
@@ -258,6 +269,121 @@ class CommissionTest(unittest.TestCase):
             self.assertEqual(item_store.count("1", "fee_pass"), 1)
 
 
+def _raw_store(tmp: str, machines: list) -> workshop.WorkshopStore:
+    """保存 JSON を直接書いて読み込んだストア（移行・耐久の検証用）。"""
+    path = Path(tmp) / "workshop.json"
+    path.write_text(json.dumps({"users": {"1": {
+        "machines": machines, "commissions": [],
+        "streak": {"days": 0, "last": None}}}}), encoding="utf-8")
+    return workshop.WorkshopStore(path, rng=random.Random(42))
+
+
+class DurabilityTest(unittest.TestCase):
+    def test_cycles_left_decrements_and_machine_expires(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            store = _ws_store(tmp, rng=random.Random(7))
+            store.add_machine("1", "small", now=T0)
+            lifespan = workshop.MACHINE_TIERS["small"]["lifespan_cycles"]
+            self.assertEqual(store.machines("1")[0]["cycles_left"], lifespan)
+            settled = 0
+            result = None
+            # 貯蔵上限は2サイクルなので、8時間ごとに claim して回し切る。
+            for i in range(lifespan):
+                result = store.claim_production(
+                    "1", now=T0 + timedelta(hours=8 * (i + 1)))
+                settled += result["cycles"]
+                if not store.machines("1"):
+                    break
+            self.assertEqual(settled, lifespan)
+            self.assertEqual(store.machines("1"), [])
+            assert result is not None
+            self.assertEqual(result["exhausted"], ["small"])
+            # 寿命が尽きた後は生産も委託スロットも無い（買い直し前提）。
+            self.assertEqual(store.total_pending("1", T0 + timedelta(days=365)), 0)
+            self.assertEqual(store.commission_slots("1"), 0)
+
+    def test_pending_is_capped_by_cycles_left(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            store = _raw_store(tmp, [
+                {"tier": "small", "anchor": T0.isoformat(), "cycles_left": 1}])
+            machine = store.machines("1")[0]
+            # 貯蔵上は2サイクル溜まる時間でも、残り寿命1が上限になる。
+            self.assertEqual(
+                store.pending_cycles(machine, T0 + timedelta(hours=100)), 1)
+            self.assertEqual(store.commission_slots("1"), 1)
+            result = store.claim_production("1", now=T0 + timedelta(hours=100))
+            self.assertEqual(result["cycles"], 1)
+            self.assertEqual(result["exhausted"], ["small"])
+            self.assertEqual(store.machines("1"), [])
+            self.assertEqual(store.commission_slots("1"), 0)
+
+    def test_bonus_items_do_not_consume_extra_durability(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            store = _ws_store(tmp, rng=random.Random(1234))
+            for _ in range(10):
+                store.add_machine("1", "small", now=T0)
+            total_cycles = 0
+            result = None
+            for day in range(6):
+                result = store.claim_production(
+                    "1", now=T0 + timedelta(days=day, hours=4))
+                total_cycles += result["cycles"]
+            assert result is not None
+            # この claim ではストリークボーナスで生産数がサイクル数を超える。
+            self.assertGreater(sum(result["items"].values()), result["cycles"])
+            lifespan = workshop.MACHINE_TIERS["small"]["lifespan_cycles"]
+            remaining = sum(m["cycles_left"] for m in store.machines("1"))
+            # 寿命の消費は決済サイクル分ちょうど（ボーナス分は減らない）。
+            self.assertEqual(remaining, 10 * lifespan - total_cycles)
+
+    def test_expired_machine_cannot_start_commission(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            item_store = _item_store(tmp)
+            store = _raw_store(tmp, [
+                {"tier": "small", "anchor": T0.isoformat(), "cycles_left": 1}])
+            store.claim_production("1", now=T0 + timedelta(hours=4))
+            self.assertEqual(store.machines("1"), [])
+            item_store.add("1", "scrap", 2)
+            with self.assertRaises(items.ItemError):
+                store.start_commission(
+                    item_store, "1", "scrap", "scrap",
+                    now=T0 + timedelta(hours=4))
+            self.assertEqual(item_store.count("1", "scrap"), 2)  # 消費されない
+
+
+class MigrationTest(unittest.TestCase):
+    def test_legacy_machine_without_durability_gets_full_lifespan(self):
+        # 恒久モデル時代の保存形式（cycles_left 無し）は没収されず、
+        # そのティアの満タン耐久を付与されて消耗モデルへ移行する。
+        with tempfile.TemporaryDirectory() as tmp:
+            store = _raw_store(tmp, [{"tier": "auto", "anchor": T0.isoformat()}])
+            machines = store.machines("1")
+            self.assertEqual(len(machines), 1)
+            self.assertEqual(
+                machines[0]["cycles_left"],
+                workshop.MACHINE_TIERS["auto"]["lifespan_cycles"])
+            # 移行後も通常どおり生産・決済できる。
+            result = store.claim_production("1", now=T0 + timedelta(hours=6))
+            self.assertEqual(result["cycles"], 1)
+            self.assertEqual(
+                store.machines("1")[0]["cycles_left"],
+                workshop.MACHINE_TIERS["auto"]["lifespan_cycles"] - 1)
+
+    def test_invalid_durability_is_normalized(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            store = _raw_store(tmp, [
+                {"tier": "small", "anchor": T0.isoformat(), "cycles_left": 0},
+                {"tier": "large", "anchor": T0.isoformat(), "cycles_left": 9999},
+            ])
+            machines = store.machines("1")
+            # 0以下は寿命切れとして落ち、上限超えは満タンに丸める。
+            self.assertEqual(len(machines), 1)
+            self.assertEqual(machines[0]["tier"], "large")
+            self.assertEqual(
+                machines[0]["cycles_left"],
+                workshop.MACHINE_TIERS["large"]["lifespan_cycles"])
+
+
 class PersistenceTest(unittest.TestCase):
     def test_roundtrip(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -272,6 +398,10 @@ class PersistenceTest(unittest.TestCase):
             machines = loaded.machines("9")
             self.assertEqual(len(machines), 1)
             self.assertEqual(machines[0]["tier"], "large")
+            # claim で1サイクル決済した分、残り寿命が減って保存される。
+            self.assertEqual(
+                machines[0]["cycles_left"],
+                workshop.MACHINE_TIERS["large"]["lifespan_cycles"] - 1)
             self.assertEqual(len(loaded.commissions("9")), 1)
             status = loaded.streak_status("9", T0 + timedelta(hours=8))
             self.assertEqual(status["days"], 1)
@@ -315,8 +445,14 @@ class BuyMachineFlowTest(unittest.TestCase):
             cog, wallet, ws_store = self._cog(tmp, {"1": price + 500})
             message = asyncio.run(cog.execute_buy_machine(1, "small"))
             self.assertIn("購入しました", message)
+            # 購入前に使い捨てであることが分かる文言が含まれる。
+            self.assertIn("使い捨て", message)
             self.assertEqual(wallet.balances["1"], 500)
-            self.assertEqual(len(ws_store.machines("1")), 1)
+            machines = ws_store.machines("1")
+            self.assertEqual(len(machines), 1)
+            self.assertEqual(
+                machines[0]["cycles_left"],
+                workshop.MACHINE_TIERS["small"]["lifespan_cycles"])
 
     def test_buy_with_insufficient_funds_changes_nothing(self):
         with tempfile.TemporaryDirectory() as tmp:
