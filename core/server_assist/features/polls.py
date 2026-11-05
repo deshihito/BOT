@@ -279,7 +279,7 @@ class PollCreateModal(discord.ui.Modal, title="投票を作成"):
                 "連続で投票を作成できません。少し待ってください。", ephemeral=True,
             )
         _last_create[cooldown_key] = now
-        await interaction.response.defer(ephemeral=True)
+        await interaction.response.defer()
         entry: dict[str, Any] = {
             "guild_id": interaction.guild_id,
             "channel_id": channel.id,
@@ -303,7 +303,7 @@ class PollCreateModal(discord.ui.Modal, title="投票を作成"):
             logger.exception("投票を投稿できませんでした: guild=%s", interaction.guild_id)
             return await interaction.followup.send("投票を投稿できませんでした。", ephemeral=True)
         await _put_entry(message.id, entry)
-        return await interaction.followup.send("投票を作成しました。", ephemeral=True)
+        return await interaction.followup.send("投票を作成しました。")
 
 
 async def handle_create(cog: Any, interaction: discord.Interaction) -> None:
@@ -421,7 +421,7 @@ async def handle_close(cog: Any, interaction: discord.Interaction) -> None:
             ephemeral=True,
         )
     if changed:
-        return await interaction.followup.send("投票を締め切りました。", ephemeral=True)
+        return await interaction.followup.send("投票を締め切りました。")
 
 
 async def handle_refresh(cog: Any, interaction: discord.Interaction) -> None:
@@ -532,12 +532,12 @@ class PollPanelButton(discord.ui.Button):
         channel = interaction.guild.get_channel(channel_id) if interaction.guild and channel_id else None
         if channel is None:
             return await interaction.response.send_message("先に投稿先を選んでください。", ephemeral=True)
-        await interaction.response.defer(ephemeral=True)
+        await interaction.response.defer()
         try:
             await channel.send(embed=build_panel_embed(), view=PollPanelView(view.cog))
         except (discord.Forbidden, discord.HTTPException):
             return await interaction.followup.send("パネルを送信できませんでした。", ephemeral=True)
-        return await interaction.followup.send("投票パネルを送信しました。", ephemeral=True)
+        return await interaction.followup.send("投票パネルを送信しました。")
 
 
 class PollSettingsView(AssistFeatureView):

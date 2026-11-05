@@ -195,7 +195,7 @@ class SuggestionCreateModal(discord.ui.Modal, title="提案を送信"):
             logger.exception("提案を投稿できませんでした: guild=%s", interaction.guild_id)
             return await interaction.response.send_message("提案を投稿できませんでした。", ephemeral=True)
         await _put_entry(message.id, entry)
-        return await interaction.response.send_message("提案を投稿しました。", ephemeral=True)
+        return await interaction.response.send_message("提案を投稿しました。")
 
 
 async def handle_create(cog: Any, interaction: discord.Interaction) -> None:
@@ -300,7 +300,7 @@ class SuggestionPanelButton(discord.ui.Button):
             await channel.send(embed=build_panel_embed(), view=SuggestionCreateView(view.cog))
         except (discord.Forbidden, discord.HTTPException):
             return await interaction.response.send_message("パネルを送信できませんでした。", ephemeral=True)
-        return await interaction.response.send_message("提案パネルを送信しました。", ephemeral=True)
+        return await interaction.response.send_message("提案パネルを送信しました。")
 
 
 class SuggestionSettingsView(AssistFeatureView):

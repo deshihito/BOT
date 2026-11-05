@@ -157,7 +157,7 @@ class StatsRefreshButton(discord.ui.Button):
                 "先にサーバースタッツをオンにしてください。", ephemeral=True,
             )
         await update_stats(interaction.guild, view.settings)
-        return await interaction.response.send_message("スタッツを更新しました。", ephemeral=True)
+        return await interaction.response.send_message("スタッツを更新しました。")
 
 
 class StatsSettingsView(AssistFeatureView):

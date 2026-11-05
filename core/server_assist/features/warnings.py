@@ -271,7 +271,7 @@ class WarningReasonModal(discord.ui.Modal, title="警告"):
                 "同じメンバーへの連続警告は少し待ってください。", ephemeral=True,
             )
         _last_warn[cooldown_key] = now
-        await interaction.response.defer(ephemeral=True)
+        await interaction.response.defer()
         reason = str(self.reason_input.value or "").strip()[:500] or "理由なし"
         warning = {
             "id": uuid.uuid4().hex[:12],
@@ -316,7 +316,7 @@ class WarningReasonModal(discord.ui.Modal, title="警告"):
         if applied:
             note += f" / エスカレーション: {applied}を適用しました"
         return await interaction.followup.send(
-            f"{self.user_name} に警告を記録しました（通算{total}件）{note}", ephemeral=True,
+            f"{self.user_name} に警告を記録しました（通算{total}件）{note}",
         )
 
 
@@ -416,12 +416,12 @@ class WarningPanelButton(discord.ui.Button):
         channel = interaction.guild.get_channel(channel_id) if interaction.guild and channel_id else None
         if channel is None:
             return await interaction.response.send_message("先に警告パネルのチャンネルを選んでください。", ephemeral=True)
-        await interaction.response.defer(ephemeral=True)
+        await interaction.response.defer()
         try:
             await channel.send(embed=build_panel_embed(), view=WarningPanelView(view.cog))
         except (discord.Forbidden, discord.HTTPException):
             return await interaction.followup.send("パネルを送信できませんでした。", ephemeral=True)
-        return await interaction.followup.send("警告パネルを送信しました。", ephemeral=True)
+        return await interaction.followup.send("警告パネルを送信しました。")
 
 
 class WarningEscalationToggleButton(discord.ui.Button):
