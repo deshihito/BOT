@@ -62,13 +62,13 @@ GAME_GENRES = {
     "party": ("パーティーゲーム", ""),
     "solo": ("ミニゲーム", ""),
     "board": ("ボード・カードゲーム", ""),
-    "adventure": ("アドベンチャー", ""),
 }
+# 導線最適化ラウンド3: 1件ジャンル「アドベンチャー」（ダンジョンのみ）は器を畳み、
+# ダンジョン（1人・自由にプレイ）を solo へ寄せた。分類だけの変更で機能には触らない。
 GAME_GENRE_BY_GAME = {
     **{game: "party" for game in ("jinrou", "wordwolf", "uno", "doubt", "ngword", "shiritori", "janken", "babanuki", "quiz", "bingo", "majority", "onenight", "loveletter", "codenames", "twochoice", "thirtyone")},
-    **{game: "solo" for game in ("wordle", "shinkei", "guess", "flash", "minesweeper", "sudoku", "game2048", "nonogram", "highlow")},
+    **{game: "solo" for game in ("wordle", "shinkei", "guess", "flash", "minesweeper", "sudoku", "game2048", "nonogram", "highlow", "dungeon")},
     **{game: "board" for game in ("daifugo", "othello", "poker", "shogi", "chess", "koikoi", "gomoku", "connect4")},
-    "dungeon": "adventure",
 }
 
 
@@ -178,11 +178,13 @@ class GameSelect(discord.ui.Select):
                     if selected in chunk:
                         page = i
                         break
+        # 導線最適化ラウンド3: 人数・所要時間は詳細画面のフィールドが担う。
+        # セレクトの description にも出すとハブ経由で2回表示になるため付けない
+        # （履歴セレクト・/quick 経由では詳細が唯一の表示になる点も詳細を残す理由）。
         options = [
             discord.SelectOption(
                 label=GAME_GUIDES[g]["name"],
                 value=g,
-                description=f"{GAME_GUIDES[g]['players']}・{GAME_GUIDES[g]['duration']}"[:100],
                 default=(g == selected),
             )
             for g in pages[page]
