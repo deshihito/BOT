@@ -170,10 +170,13 @@ class Wave2PublicSourceTest(unittest.TestCase):
 
     def test_root_panels_are_public(self):
         self.assertNotIn("defer(ephemeral=True, thinking=True)", self.read("cogs/general.py"))
-        self.assertIn("await interaction.response.send_message(view=as_panel_v2(view))",
-                      self.read("cogs/game.py"))
-        self.assertIn("await interaction.response.send_message(view=as_panel_v2(view))",
-                      self.read("core/voice/hub.py"))
+        # 導線最適化 M5: /game・/vc は履歴セレクトの読み込みのため defer→followup に
+        # 変わったが、defer は ephemeral=False（公開）が既定で公開方針は不変。
+        for rel in ("cogs/game.py", "core/voice/hub.py"):
+            src = self.read(rel)
+            # ルートコマンドの defer は公開（ephemeral 指定なし）であること
+            self.assertIn("await interaction.response.defer(thinking=True)", src, rel)
+            self.assertIn("await interaction.followup.send(view=as_panel_v2(view))", src, rel)
 
     def test_panels_have_owner_checks(self):
         for rel in ("core/general/panel.py", "core/voice/hub.py", "cogs/game.py", "cogs/help.py"):

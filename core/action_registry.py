@@ -335,7 +335,24 @@ VC_SHORTCUT_ACTIONS: tuple[tuple[str, str], ...] = (
     ("ボイスチェンジャー状態", "changer_status"),
     ("グローバルVCルーム一覧", "gvc_room_list"), ("グロチャ接続解除", "gvc_chat_disconnect"),
     ("読み上げ停止", "tts_stop"), ("音声トリガー一覧・削除", "trigger_panel"),
+    # 導線最適化 M4: パネルでフォーム必須だった9件も登録し、/quick・ショートカット
+    # から辿れるようにする（開始/停止の非対称の解消）。入力は ParamSpec 経由で
+    # QuickParamModal / ショートカットのプリセットが吸収する。AI tools には
+    # 出さない（フォーム/モーダル前提の操作と削除系は明示操作に限る）。
+    ("グローバルVCルーム作成", "gvc_room_create"),
+    ("グローバルVCルーム情報", "gvc_room_info"),
+    ("グローバルVCルーム削除", "gvc_room_delete"),
+    ("グロチャ接続", "gvc_chat_connect"),
+    ("読み上げ開始", "tts_start"), ("読み上げ: 1回だけ読む", "tts_say"),
+    ("読み上げ設定", "tts_config"), ("音声トリガー登録", "trigger_register"),
+    ("やまびこ遅延変更", "echo_delay"),
 )
+
+# M4 で登録したフォーム系アクション（AI tools 対象外にする集合）。
+VC_FORM_ACTION_VALUES = frozenset({
+    "gvc_room_create", "gvc_room_info", "gvc_room_delete", "gvc_chat_connect",
+    "tts_start", "tts_say", "tts_config", "trigger_register", "echo_delay",
+})
 
 
 # /vc の ParamSpec。cogs/sio_voice.py の dispatch_voice_action が実際に受け取り、
@@ -365,6 +382,31 @@ VC_ACTION_PARAMS: dict[str, tuple[ParamSpec, ...]] = {
     # _changer_impl: start では開始時設定、status では動作中の設定変更になる。
     "changer_start": _CHANGER_PARAMS,
     "changer_status": _CHANGER_PARAMS,
+    # やまびこ遅延変更: 遅延は必須（パネル側モーダルと同じ前提）。
+    "echo_delay": (
+        ParamSpec(name="delay", label="遅延（秒）", type="number", required=True,
+                  min_value=0.1, max_value=30.0, help="やまびこの遅延時間"),
+    ),
+    # グローバルVCルーム作成: フォーム（GVC_ROOM_FORMS）の項目をそのまま写す。
+    "gvc_room_create": (
+        ParamSpec(name="name", label="ルーム名", type="text", required=True),
+        ParamSpec(name="max_servers", label="最大参加サーバー数（0=無制限）", type="int",
+                  min_value=0, max_value=9999),
+        ParamSpec(name="password", label="パスワード", type="text",
+                  help="入力すると非公開ルーム"),
+        ParamSpec(name="desc", label="説明", type="text"),
+    ),
+    "gvc_room_info": (
+        ParamSpec(name="name", label="ルーム名", type="text", required=True),
+    ),
+    "gvc_room_delete": (
+        ParamSpec(name="name", label="ルーム名", type="text", required=True),
+    ),
+    "gvc_chat_connect": (
+        ParamSpec(name="name", label="ルーム名", type="text", required=True),
+        ParamSpec(name="password", label="パスワード", type="text",
+                  help="非公開ルームのみ"),
+    ),
     # _global_impl: 参加にはルーム名が必須。パスワードは非公開ルーム用。
     "global_start": (
         ParamSpec(name="room", label="ルーム名", type="text", required=True,
@@ -376,11 +418,13 @@ VC_ACTION_PARAMS: dict[str, tuple[ParamSpec, ...]] = {
 
 
 def build_vc_actions() -> list[ActionSpec]:
-    return [
-        make_action("vc", value, label, "vc", ROOT_LABELS["vc"],
-                    params=VC_ACTION_PARAMS.get(value, ()))
-        for label, value in VC_SHORTCUT_ACTIONS
-    ]
+    specs: list[ActionSpec] = []
+    for label, value in VC_SHORTCUT_ACTIONS:
+        kwargs: dict[str, Any] = {"params": VC_ACTION_PARAMS.get(value, ())}
+        if value in VC_FORM_ACTION_VALUES:
+            kwargs["surfaces"] = frozenset({"panel", "shortcut", "palette"})
+        specs.append(make_action("vc", value, label, "vc", ROOT_LABELS["vc"], **kwargs))
+    return specs
 
 
 def build_game_actions(game_order: list, game_guides: dict) -> list[ActionSpec]:

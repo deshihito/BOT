@@ -70,7 +70,8 @@ class RegistryConsistencyTest(unittest.TestCase):
         # changer_start は dispatch_voice_action が引数なしで実行できるため候補に含める。
         vc_values = {spec.value for spec in self.registry.by_root("vc")}
         self.assertIn("changer_start", vc_values)
-        self.assertEqual(len(vc_values), 27)
+        # 導線最適化 M4: フォーム系9件（gvc/tts/trigger/echo_delay）を追加し 27→36
+        self.assertEqual(len(vc_values), 36)
 
 
 class ShortcutRootsGenerationTest(unittest.TestCase):
