@@ -261,6 +261,13 @@ class SupportCog(
         # 管理者向け総量統計も同じ入口で数える（個人履歴とは別集計）。
         usage_stats.record_action_safely(f"support:{selected}")
 
+        if selected.startswith("assist_"):
+            # 導線最適化 M2: /quick・ショートカットから個別機能を直接開く。
+            cog = self.bot.get_cog("ServerAssistCog")
+            if cog is None:
+                return await self._missing(interaction, "サーバーアシスト")
+            return await cog.show_feature(interaction, selected.removeprefix("assist_"))
+
         if selected == "server_assist":
             cog = self.bot.get_cog("ServerAssistCog")
             if cog is None:

@@ -134,6 +134,11 @@ class SupportGenreSelect(discord.ui.Select):
         container = self.view
         view: SupportPanelView = getattr(container, "panel", container)
 
+        if self.values[0] == "assist" and not getattr(view, "shortcut_mode", False):
+            # 導線最適化 M2: アシストは1件ジャンル+1アクションの入れ子を畳み、
+            # ジャンル選択でそのままアシストホームを開く（1操作短縮）。
+            return await self.cog.dispatch(interaction, "server_assist")
+
         await interaction.response.defer()
 
         try:
