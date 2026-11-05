@@ -11,7 +11,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import AsyncMock
 
-from cogs.allstats import SystemStatsCog
+from cogs.allstats import FIELD_VALUE_LIMIT, SystemStatsCog, _limit_field_value
 from cogs.ggrks import GoogleSearch
 from cogs.status_updater import truncate_text
 
@@ -61,6 +61,68 @@ class PyFileTreeTests(unittest.TestCase):
             (Path(tmp) / "a.txt").write_text("x")
             tree = self._tree(tmp)
         self.assertEqual(tree, "`.py` ファイルが見つかりません")
+
+
+class LimitFieldValueTests(unittest.TestCase):
+    def test_short_value_unchanged(self):
+        self.assertEqual(_limit_field_value("abc"), "abc")
+
+    def test_exactly_at_limit_unchanged(self):
+        value = "a" * FIELD_VALUE_LIMIT
+        self.assertEqual(_limit_field_value(value), value)
+
+    def test_over_limit_is_truncated_to_limit(self):
+        out = _limit_field_value("a" * 2000)
+        self.assertEqual(len(out), FIELD_VALUE_LIMIT)
+        self.assertTrue(out.endswith("…"))
+
+
+class _FakeTyping:
+    async def __aenter__(self):
+        return None
+
+    async def __aexit__(self, *exc):
+        return False
+
+
+class AllStatsEmbedTests(unittest.IsolatedAsyncioTestCase):
+    """Cog が大量でも all_stats の全フィールドが上限以下になること (400エラー対策)。"""
+
+    async def _run_all_stats(self, cog_names):
+        bot = types.SimpleNamespace(
+            cogs={name: object() for name in cog_names},
+            guilds=[],
+            latency=0.0,
+        )
+        cog = SystemStatsCog(bot)
+        sent = []
+        ctx = types.SimpleNamespace(
+            typing=lambda: _FakeTyping(),
+            author=types.SimpleNamespace(
+                display_avatar=types.SimpleNamespace(url="https://example.com/a.png")
+            ),
+            send=AsyncMock(side_effect=lambda *a, **k: sent.append((a, k))),
+        )
+        await cog.all_stats.callback(cog, ctx)
+        return sent[0][1]["embed"]
+
+    async def test_many_cogs_fields_within_limit_and_remainder_shown(self):
+        embed = await self._run_all_stats([f"cog_{i:03d}" for i in range(120)])
+        for field in embed.fields:
+            self.assertLessEqual(len(field.value), FIELD_VALUE_LIMIT, field.name)
+        scale = next(f for f in embed.fields if f.name == "Discord接続規模")
+        # 総数が分かり、入りきらなかった分が「…他N件」で明示される
+        self.assertIn("(120件)", scale.value)
+        self.assertRegex(scale.value, r"…他\d+件$")
+
+    async def test_few_cogs_all_listed(self):
+        embed = await self._run_all_stats(["alpha", "beta"])
+        for field in embed.fields:
+            self.assertLessEqual(len(field.value), FIELD_VALUE_LIMIT, field.name)
+        scale = next(f for f in embed.fields if f.name == "Discord接続規模")
+        self.assertIn("`alpha`", scale.value)
+        self.assertIn("`beta`", scale.value)
+        self.assertNotIn("他", scale.value)
 
 
 class GgrksTests(unittest.IsolatedAsyncioTestCase):

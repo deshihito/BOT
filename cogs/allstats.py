@@ -7,6 +7,16 @@ import discord
 from discord.ext import commands
 import psutil
 
+FIELD_VALUE_LIMIT = 1024  # Discord の Embed フィールド値の上限
+
+
+def _limit_field_value(value: str, limit: int = FIELD_VALUE_LIMIT) -> str:
+    """Embed フィールド値が上限文字数に収まるよう切り詰める。"""
+    if len(value) <= limit:
+        return value
+    return value[: limit - 1] + "…"
+
+
 class SystemStatsCog(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
@@ -92,7 +102,8 @@ class SystemStatsCog(commands.Cog):
 
             guild_count = len(self.bot.guilds)
             user_count = sum(g.member_count or 0 for g in self.bot.guilds)
-            loaded_cogs = ", ".join(f"`{cog}`" for cog in self.bot.cogs.keys()) or "なし"
+            cog_names = list(self.bot.cogs.keys())
+            loaded_cogs = ", ".join(f"`{cog}`" for cog in cog_names) or "なし"
 
             embed = discord.Embed(
                 title="システム＆Bot総合ステータス",
@@ -130,25 +141,41 @@ class SystemStatsCog(commands.Cog):
                 inline=True
             )
 
+            scale_head = (
+                f"**参加サーバー数:** `{guild_count}`\n"
+                f"**アクセスユーザー数:** `{user_count}`\n"
+                f"**読み込み済Cog ({len(cog_names)}件):** "
+            )
+            scale_value = scale_head + loaded_cogs
+            if len(scale_value) > FIELD_VALUE_LIMIT and cog_names:
+                # Cog一覧が入りきらない場合は、収まる分だけ並べて残りを件数で示す
+                shown: list[str] = []
+                best = None
+                for name in cog_names:
+                    shown.append(name)
+                    remaining = len(cog_names) - len(shown)
+                    suffix = f" …他{remaining}件" if remaining else ""
+                    candidate = scale_head + ", ".join(f"`{n}`" for n in shown) + suffix
+                    if len(candidate) > FIELD_VALUE_LIMIT:
+                        break
+                    best = candidate
+                scale_value = best if best is not None else _limit_field_value(scale_value)
+
             embed.add_field(
                 name="Discord接続規模",
-                value=(
-                    f"**参加サーバー数:** `{guild_count}`\n"
-                    f"**アクセスユーザー数:** `{user_count}`\n"
-                    f"**読み込み済Cog:** {loaded_cogs}"
-                ),
+                value=scale_value,
                 inline=False
             )
 
             embed.add_field(
                 name="最新Gitコミット",
-                value=self._get_git_info(),
+                value=_limit_field_value(self._get_git_info()),
                 inline=False
             )
 
             embed.add_field(
                 name="プロジェクト .py ファイル構成",
-                value=self._get_py_file_tree(),
+                value=_limit_field_value(self._get_py_file_tree()),
                 inline=False
             )
 

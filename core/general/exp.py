@@ -77,12 +77,38 @@ def _exp_lock() -> asyncio.Lock:
 
 
 def _store_fetch(store, key: str):
-    """旧ストアに残っているEXPを取り込むための読み取り専用ヘルパ。"""
+    """旧ストアに残っているEXPを取り込むための読み取り専用ヘルパ。
+
+    対応する旧ストアの形:
+    - GuildSettings: 内部データ _data にトップレベルキー key のエントリ
+      ({gid: {uid: record}}) が残っている場合と、各ギルドの section=key に
+      ({uid: record}) 保存されている場合の両方を取り込む。
+    - 汎用キーで引ける dict-like ストア: get(key) を従来どおり使う。
+    GuildSettings.get のように引数が合わない get しか持たないストアは
+    「旧データなし」と等価なので、警告を出さず None を返す。
+    """
+    data = getattr(store, "_data", None)
+    if isinstance(data, dict):
+        found: dict = {}
+        top = data.get(key)
+        if isinstance(top, dict) and top:
+            found.update(top)
+        for gid, sections in data.items():
+            if not isinstance(sections, dict):
+                continue
+            section = sections.get(key)
+            if isinstance(section, dict) and section:
+                found[str(gid)] = section
+        if found:
+            return found
     getter = getattr(store, "get", None)
     if not callable(getter):
         return None
     try:
         return getter(key)
+    except TypeError:
+        # get(guild_id, section) のように1引数で呼べないストアは旧データなし
+        return None
     except Exception:
         logger.warning("EXP: 旧ストアからの読み取りに失敗しました", exc_info=True)
         return None
