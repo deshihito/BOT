@@ -211,7 +211,7 @@ async def get_player_rating(player_id: int) -> float:
         else:
             return ELO_STARTING_RATING
     except Exception as e:
-        print(f"Error getting rating: {e}")
+        logger.exception("人狼のレート取得に失敗しました")
         return ELO_STARTING_RATING
 
 async def update_player_rating(player_id: int, new_rating: float, won: Optional[bool] = None):
@@ -230,7 +230,7 @@ async def update_player_rating(player_id: int, new_rating: float, won: Optional[
         else:
             db_api.table(RATINGS_TABLE).insert({"player_id": player_id, **values}).execute()
     except Exception as e:
-        print(f"Error updating rating: {e}")
+        logger.exception("人狼のレート更新に失敗しました")
 
 async def get_top_ratings(limit: int = 10):
     """上位レーティングを取得"""
@@ -238,7 +238,7 @@ async def get_top_ratings(limit: int = 10):
         response = db_api.table(RATINGS_TABLE).select("player_id, rating").order("rating", desc=True).limit(limit).execute()
         return response.data if response.data else []
     except Exception as e:
-        print(f"Error getting rankings: {e}")
+        logger.exception("人狼のランキング取得に失敗しました")
         return []
 
 # ======================================================
@@ -339,7 +339,8 @@ class JinrouCog(commands.Cog):
         # 死亡・追放された参加者は、昼・夜・投票中を問わず発言できない
         if game.is_dead_player(message.author.id):
             try: await message.delete()
-            except: pass
+            except Exception:
+                logger.debug("人狼: メッセージの削除に失敗しました", exc_info=True)
             return
 
         player_role = game.roles.get(message.author.id)
@@ -348,12 +349,14 @@ class JinrouCog(commands.Cog):
         if is_alive and player_role == "ネット民":
             if game.in_discussion:
                 try: await message.delete()
-                except: pass
+                except Exception:
+                    logger.debug("人狼: メッセージの削除に失敗しました", exc_info=True)
                 return
         else:
             if message.author.id in game.silenced_players:
                 try: await message.delete()
-                except: pass
+                except Exception:
+                    logger.debug("人狼: メッセージの削除に失敗しました", exc_info=True)
                 return
 
         if game.in_discussion:
@@ -380,7 +383,8 @@ class JinrouCog(commands.Cog):
                 last_time = game.last_speak_time.get(message.author.id, 0)
                 if now - last_time < 1.0:
                     try: await message.delete()
-                    except: pass
+                    except Exception:
+                        logger.debug("人狼: メッセージの削除に失敗しました", exc_info=True)
                     return
                 game.last_speak_time[message.author.id] = now
 
@@ -406,8 +410,8 @@ class JinrouCog(commands.Cog):
                                 avatar_url=message.author.display_avatar.url,
                                 allowed_mentions=discord.AllowedMentions.none()
                             )
-                        except:
-                            pass
+                        except Exception:
+                            logger.debug("人狼: グローバル対戦の発言転送に失敗しました", exc_info=True)
     # ======================================================
     #  役職割当
     # ======================================================
@@ -626,6 +630,7 @@ class JinrouCog(commands.Cog):
                 fetched = await self.bot.fetch_user(player_id)
                 name = fetched.display_name if fetched else f"ID: {player_id}"
             except Exception:
+                logger.debug("人狼: プレイヤー名の解決に失敗しました", exc_info=True)
                 name = f"ID: {player_id}"
             lines.append(f"{i}. **{name}**: {entry['rating']:.0f} pts")
         ranking_text = "\n".join(lines) if lines else "ランキングデータがまだありません。"
@@ -683,21 +688,24 @@ class JinrouCog(commands.Cog):
                         other_m = channel.guild.get_member(other_id)
                         name = other_m.display_name if other_m else "不明"
                         try: await p.send(f"【リア充】あなたの相方は {name} さんです。")
-                        except: pass
+                        except Exception:
+                            logger.debug("人狼: 役職情報のDM送信に失敗しました", exc_info=True)
             elif role == "貴族":
                 slave_id = game.kizoku_slave.get(p.id)
                 if slave_id:
                     slave_m = channel.guild.get_member(slave_id)
                     name = slave_m.display_name if slave_m else "不明"
                     try: await p.send(f"【貴族】あなたの奴隷は {name} さんです。")
-                    except: pass
+                    except Exception:
+                        logger.debug("人狼: 役職情報のDM送信に失敗しました", exc_info=True)
             elif role == "奴隷":
                 for k_id, s_id in game.kizoku_slave.items():
                     if s_id == p.id:
                         k_m = channel.guild.get_member(k_id)
                         name = k_m.display_name if k_m else "不明"
                         try: await p.send(f"【奴隷】あなたのご主人様（貴族）は {name} さんです。")
-                        except: pass
+                        except Exception:
+                            logger.debug("人狼: 役職情報のDM送信に失敗しました", exc_info=True)
 
         try:
             await self.run_discussion(game, seconds=150, title="特別ディスカッション")
@@ -723,7 +731,7 @@ class JinrouCog(commands.Cog):
                 if not game.is_running or await self.check_victory(game): break
 
         except Exception as e:
-            print(f"Game Error: {e}")
+            logger.exception("人狼のゲームループでエラーが発生しました")
         finally:
             # 終了時は発言制限をすべて解除する（死亡者の制限も解く）
             game.silenced_players.clear()
@@ -731,10 +739,12 @@ class JinrouCog(commands.Cog):
             game.started = False
             if game.roles:
                 try: await self._announce_final_roles(game)
-                except Exception: pass
+                except Exception:
+                    logger.debug("人狼: 最終役職の発表に失敗しました", exc_info=True)
                 if game.review:
                     try: await game.game_channel.send(embed=jinrou_review.build_embed(game))
-                    except Exception: pass
+                    except Exception:
+                        logger.debug("人狼: 振り返りEmbedの送信に失敗しました", exc_info=True)
             game.is_running = False
 
     async def run_discussion(self, game, seconds, title):
@@ -795,7 +805,8 @@ class JinrouCog(commands.Cog):
             if not game.is_running: break
 
         try: await msg.delete()
-        except: pass
+        except Exception:
+            logger.debug("人狼: メッセージの削除に失敗しました", exc_info=True)
 
         if game.is_running:
             await self._autoplay_night(game)
@@ -889,7 +900,7 @@ class JinrouCog(commands.Cog):
             if m is not None:
                 await m.send(text)
         except Exception:
-            pass
+            logger.debug("人狼: 代打ち通知のDM送信に失敗しました", exc_info=True)
 
     async def _autoplay_votes(self, game):
         """投票しなかった生存者の分を代わりに選ぶ（d1 が使えないときはスキップ。オフのサーバーでは何もしない）。"""
@@ -1269,8 +1280,8 @@ class JinrouCog(commands.Cog):
                         f"<:REIBAI:1490254585413148703>大霊媒師の霊媒結果：**{ex_name}** は【{result}】"
                         f"（役職：**{role}**）でした。"
                     )
-            except:
-                pass
+            except Exception:
+                logger.debug("人狼: 霊媒結果のDM送信に失敗しました", exc_info=True)
 
     # ======================================================
     #  議長の強制追放
@@ -1344,7 +1355,8 @@ class JinrouCog(commands.Cog):
             await asyncio.sleep(1)
             if not game.is_running: break
         try: await msg.delete()
-        except: pass
+        except Exception:
+            logger.debug("人狼: メッセージの削除に失敗しました", exc_info=True)
         if game.is_running:
             await self._autoplay_votes(game)
 
@@ -1444,7 +1456,8 @@ class JinrouCog(commands.Cog):
             if not game.is_running: break
 
         try: await msg.delete()
-        except: pass
+        except Exception:
+            logger.debug("人狼: メッセージの削除に失敗しました", exc_info=True)
 
         for p in game.alive_players:
             game.silenced_players.discard(p.id)
@@ -1705,8 +1718,8 @@ class GlobalChannelProxy:
                     msg = await chan.send(*args, **kwargs)
                     if chan.id == self.game._original_channel.id:
                         res = msg
-                except:
-                    pass
+                except Exception:
+                    logger.debug("人狼: グローバルチャンネルへの送信に失敗しました", exc_info=True)
             return res
         else:
             return await self.game._original_channel.send(*args, **kwargs)
@@ -1737,7 +1750,7 @@ class GlobalJoinView(discord.ui.View):
                 await chan.send(f"<a:AGOMUNIMUNI:1490255555632037909>{interaction.user.display_name} さんが別のサーバーから参加しました。",
                                 allowed_mentions=discord.AllowedMentions.none())
             except discord.HTTPException:
-                pass
+                logger.debug("人狼: 参加通知の送信に失敗しました", exc_info=True)
 
 
 class RoleCheckView(discord.ui.View):

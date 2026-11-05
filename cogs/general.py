@@ -188,6 +188,7 @@ def _store_fetch(store, key: str):
     try:
         return getter(key)
     except Exception:
+        logger.warning("EXP: 旧ストアからの読み取りに失敗しました", exc_info=True)
         return None
 
 
@@ -203,7 +204,7 @@ def _read_exp_file() -> dict:
         try:
             os.replace(EXP_FILE, EXP_FILE.with_name(EXP_FILE.name + f".broken-{int(time.time())}"))
         except OSError:
-            pass
+            logger.debug("EXP: 壊れたファイルの退避に失敗しました", exc_info=True)
         return {}
 
 
@@ -453,6 +454,7 @@ def _levelup_pick_font() -> tuple[str | None, bool]:
             try:
                 ImageFont.truetype(path, 20)
             except Exception:
+                logger.debug("レベルアップカード: フォント候補の読み込みに失敗しました", exc_info=True)
                 continue
             pick = (path, cjk)
             break
@@ -480,6 +482,7 @@ def _levelup_pick_display_font() -> str | None:
         try:
             ImageFont.truetype(path, 20)
         except Exception:
+            logger.debug("レベルアップカード: 表示フォント候補の読み込みに失敗しました", exc_info=True)
             continue
         chosen = path
         break
@@ -497,7 +500,7 @@ def _levelup_font(size: int):
         try:
             return ImageFont.truetype(path, size)
         except Exception:
-            pass
+            logger.debug("レベルアップカード: フォントの読み込みに失敗しました", exc_info=True)
     try:
         return ImageFont.load_default(size=size)  # Pillow>=10.1
     except TypeError:
@@ -512,7 +515,7 @@ def _levelup_display_font(size: int):
         try:
             return ImageFont.truetype(path, size)
         except Exception:
-            pass
+            logger.debug("レベルアップカード: 表示フォントの読み込みに失敗しました", exc_info=True)
     return _levelup_font(size)
 
 
@@ -604,6 +607,7 @@ def render_levelup_card(
         try:
             avatar = Image.open(io.BytesIO(avatar_bytes)).convert("RGBA").resize((D, D), Image.LANCZOS)
         except Exception:
+            logger.debug("レベルアップカード: アバターの取得に失敗しました", exc_info=True)
             avatar = None
     if avatar is None:
         avatar = Image.new("RGBA", (D, D), (235, 238, 245, 255))
@@ -630,6 +634,7 @@ def render_levelup_card(
                 .resize((BOT_D, BOT_D), Image.LANCZOS)
             )
         except Exception:
+            logger.debug("レベルアップカード: Botアバターの取得に失敗しました", exc_info=True)
             bot_avatar = None
         if bot_avatar is not None:
             bring_w = px(2)
@@ -895,6 +900,7 @@ def _miq_discover_asset_fonts() -> list[tuple[str, str, str]]:
         try:
             ImageFont.truetype(path, 20)
         except Exception:
+            logger.debug("MIQ: フォント探索中の読み込みに失敗しました", exc_info=True)
             continue
         if not _font_covers_japanese(path):
             continue
@@ -924,6 +930,7 @@ def _miq_available_fonts() -> list[tuple[str, str, str | None]]:
             try:
                 ImageFont.truetype(path, 20)
             except Exception:
+                logger.debug("MIQ: フォント候補の読み込みに失敗しました", exc_info=True)
                 continue
             if not _font_covers_japanese(path):
                 continue
@@ -949,7 +956,7 @@ def _miq_available_fonts() -> list[tuple[str, str, str | None]]:
                 if _font_covers_japanese(repo):
                     found.append(("hachi", "Hachi Maru Pop (リポジトリ同梱)", repo))
             except Exception:
-                pass
+                logger.debug("MIQ: フォント情報の読み込みに失敗しました", exc_info=True)
     if not found:
         found.append(("default", "Default", _levelup_pick_font()[0]))
     _MIQ_FONTS_CACHE = found
@@ -963,7 +970,7 @@ def _miq_load_font(path: str | None, size: int):
         try:
             return ImageFont.truetype(path, size)
         except Exception:
-            pass
+            logger.debug("MIQ: フォントの読み込みに失敗しました", exc_info=True)
     return _levelup_font(size)
 
 
@@ -1006,6 +1013,7 @@ def _miq_emoji_font_path() -> str | None:
                 _MIQ_EMOJI_PATH_CACHE = p
                 break
             except Exception:
+                logger.debug("MIQ: 絵文字フォントの探索に失敗しました", exc_info=True)
                 continue
     return _MIQ_EMOJI_PATH_CACHE or None
 
@@ -1019,6 +1027,7 @@ def _miq_font_cmap(path: str):
 
         cmap = TTFont(path).getBestCmap()
     except Exception:
+        logger.debug("MIQ: フォントの cmap 取得に失敗しました", exc_info=True)
         cmap = None
     _MIQ_FONT_CMAP_CACHE[path] = cmap
     return cmap
@@ -1095,6 +1104,7 @@ def _miq_fallback_fonts(primary_path: str | None, size: int):
             try:
                 font = _miq_load_font(path, size)
             except Exception:
+                logger.debug("MIQ: フォールバックフォントの追加に失敗しました", exc_info=True)
                 return
             _MIQ_FONT_OBJ_CACHE[key] = font
         chain.append((path, font))
@@ -1104,7 +1114,7 @@ def _miq_fallback_fonts(primary_path: str | None, size: int):
         for _k, _l, path in _miq_available_fonts():
             _add(path)
     except Exception:
-        pass
+        logger.debug("MIQ: フォールバックフォントの収集に失敗しました", exc_info=True)
     _add(_MIQ_REPO_FONT)
     for cand in _MIQ_SYMBOL_PATHS:
         _add(cand)
@@ -1135,6 +1145,7 @@ def _miq_emoji_width(unit: str, size: int, emoji_path: str) -> float:
             return float(size)
         return float(size * (bbox[2] - bbox[0]) / (bbox[3] - bbox[1]))
     except Exception:
+        logger.debug("MIQ: 絵文字幅の計測に失敗しました", exc_info=True)
         return float(size)
 
 
@@ -1147,6 +1158,7 @@ def _miq_unit_width(unit: str, draw, chain, size: int, emoji_path: str | None) -
         try:
             return float(draw.textlength(bases, font=font))
         except Exception:
+            logger.debug("MIQ: 文字幅の計測に失敗しました", exc_info=True)
             return float(size)
     return 0.0
 
@@ -1193,6 +1205,7 @@ def _miq_draw_centered(layer, draw, cx: float, y: float, text: str, size: int, f
             try:
                 w = float(draw.textlength(bases, font=font))
             except Exception:
+                logger.debug("MIQ: 文字幅の計測に失敗しました", exc_info=True)
                 w = float(size)
         else:
             w = 0.0
@@ -1242,7 +1255,7 @@ def _miq_clean_text(text: str | None) -> str:
     try:
         text = discord.utils.remove_markdown(text)
     except Exception:
-        pass
+        logger.debug("MIQ: マークダウン除去に失敗しました", exc_info=True)
     out: list[str] = []
     for ch in text:
         o = ord(ch)
@@ -1691,6 +1704,7 @@ def _miq_line_time_str(created_at) -> str:
 
         jst = ZoneInfo("Asia/Tokyo")
     except Exception:
+        logger.debug("MIQ: タイムゾーンの解決に失敗しました", exc_info=True)
         jst = timezone(timedelta(hours=9))
     dt = created_at
     if isinstance(dt, datetime) and dt.tzinfo is not None:
@@ -1698,6 +1712,7 @@ def _miq_line_time_str(created_at) -> str:
     try:
         return dt.strftime("%H:%M")
     except Exception:
+        logger.debug("MIQ: 時刻文字列の生成に失敗しました", exc_info=True)
         return ""
 
 
@@ -1852,6 +1867,7 @@ async def miq_collect_line_chain(message, *, max_messages: int = MIQ_LINE_MAX_ME
                 try:
                     channel = channel_resolver(channel_id)
                 except Exception:
+                    logger.debug("MIQ: 返信チェーンのチャンネル解決に失敗しました", exc_info=True)
                     channel = None
             if channel is None:
                 channel = getattr(current, "channel", None)
@@ -1860,6 +1876,7 @@ async def miq_collect_line_chain(message, *, max_messages: int = MIQ_LINE_MAX_ME
             try:
                 nxt = await channel.fetch_message(ref_id)
             except discord.HTTPException:
+                logger.debug("MIQ: 返信チェーンの取得に失敗しました", exc_info=True)
                 break
         current = nxt
     chain.reverse()
@@ -2023,7 +2040,7 @@ def _miq_read_file() -> dict:
         try:
             os.replace(MIQ_FILE, MIQ_FILE.with_name(MIQ_FILE.name + f".broken-{int(time.time())}"))
         except OSError:
-            pass
+            logger.debug("MIQ: 壊れたファイルの退避に失敗しました", exc_info=True)
         return {}
 
 
@@ -2231,6 +2248,7 @@ class MiqPreviewButton(discord.ui.Button):
             try:
                 avatar_bytes = await interaction.user.display_avatar.replace(size=128, format="png").read()
             except Exception:
+                logger.debug("MIQ: アバターの取得に失敗しました", exc_info=True)
                 avatar_bytes = None
             entries = [
                 {"name": "サンプル", "text": "こんにちは！", "created_at": now,
@@ -2303,7 +2321,7 @@ class MiqSettingsView(discord.ui.View):
             try:
                 await interaction.followup.send("設定の保存に失敗しました。時間をおいて再試行してください。", ephemeral=True)
             except discord.HTTPException:
-                pass
+                logger.debug("MIQ: 設定保存の失敗通知の送信に失敗しました", exc_info=True)
 
     def embed(self) -> discord.Embed:
         p = self.prefs
@@ -3151,7 +3169,7 @@ class AIDefaultView(discord.ui.View):
                         "name": f"KiosAPI · {model['id']}",
                     } for model in kios_models)
                 except Exception:
-                    pass
+                    logger.warning("AI設定: KiosAPI のモデル一覧の取得に失敗しました", exc_info=True)
                 try:
                     apinex_models = await ai_provider_router.fetch_apinex_free_models()
                     models.extend({
@@ -3160,7 +3178,7 @@ class AIDefaultView(discord.ui.View):
                         "name": f"APInex Free · {model['id'].removeprefix('free/')}",
                     } for model in apinex_models)
                 except Exception:
-                    pass
+                    logger.warning("AI設定: APInex のモデル一覧の取得に失敗しました", exc_info=True)
                 models.extend(ai_omnirush.model_choices())
                 if not models and logfare_error:
                     raise logfare_error
@@ -3757,6 +3775,7 @@ class GeneralCog(commands.Cog):
         try:
             return bot.get_channel(channel_id)
         except Exception:
+            logger.debug("MIQ: チャンネルの解決に失敗しました", exc_info=True)
             return None
 
     async def _miq_line_file_for(
@@ -3935,7 +3954,7 @@ class GeneralCog(commands.Cog):
                         content="時間切れのためmeme作成を終了しました。", view=None,
                     )
                 except discord.HTTPException:
-                    pass
+                    logger.debug("meme: 応答メッセージの編集に失敗しました", exc_info=True)
                 return
             msg = msg_task.result()
             att = _meme_image_attachment(msg)
@@ -3963,7 +3982,7 @@ class GeneralCog(commands.Cog):
             try:
                 await interaction.edit_original_response(content="memeを作成しました。", view=None)
             except discord.HTTPException:
-                pass
+                logger.debug("meme: 応答メッセージの編集に失敗しました", exc_info=True)
         except Exception:
             logger.exception("meme: 画像待ち処理に失敗しました")
         finally:
@@ -4068,10 +4087,11 @@ class GeneralCog(commands.Cog):
         try:
             return await guild.fetch_member(user_id)
         except discord.HTTPException:
-            pass
+            logger.debug("レベルアップ通知: メンバーの取得に失敗しました", exc_info=True)
         try:
             return await self.bot.fetch_user(user_id)
         except discord.HTTPException:
+            logger.debug("レベルアップ通知: ユーザーの取得に失敗しました", exc_info=True)
             return None
 
     @staticmethod

@@ -895,6 +895,7 @@ class SearchModal(discord.ui.Modal, title="YouTube 楽曲検索"):
                 await self.cog.update_panel(self.guild_id)
 
         except Exception as e:
+            logger.exception("Music search failed")
             await interaction.followup.send(embed=we(f"<:failed:1490986584676368535> 検索中にエラーが発生しました: {e}"), ephemeral=True)
 
 
@@ -1516,7 +1517,7 @@ class VoiceCog(commands.Cog):
                             content=f"プレイリスト `{label}` を読込中: {index}/{total} 件（追加 {added} / スキップ {skipped}）"
                         )
                     except discord.HTTPException:
-                        pass
+                        logger.debug("Playlist load status update failed", exc_info=True)
                 await asyncio.sleep(0)
 
             try:
@@ -1524,19 +1525,19 @@ class VoiceCog(commands.Cog):
                     content=f"プレイリスト `{label}` の読込完了: {total} 件中 {added} 件を追加、{skipped} 件をスキップしました。"
                 )
             except discord.HTTPException:
-                pass
+                logger.debug("Playlist load status update failed", exc_info=True)
         except asyncio.CancelledError:
             try:
                 await status_message.edit(content=f"プレイリスト `{label}` の読込を中止しました（追加済み: {added} 件）。")
             except discord.HTTPException:
-                pass
+                logger.debug("Playlist load status update failed", exc_info=True)
             raise
         except Exception:
             logger.exception("Playlist background load failed")
             try:
                 await status_message.edit(content=f"プレイリスト `{label}` の読込中にエラーが発生しました（追加済み: {added} 件）。")
             except discord.HTTPException:
-                pass
+                logger.debug("Playlist load status update failed", exc_info=True)
         finally:
             state['playlist_load_task'] = None
 
@@ -1574,6 +1575,7 @@ class VoiceCog(commands.Cog):
             data = json.loads(stdout)
             return float(data['format']['duration'])
         except Exception:
+            logger.debug("ffprobe duration lookup failed", exc_info=True)
             return 0
             
     async def get_attachment_info(self, b62_id: str, requesting_guild_id: int | None = None):
@@ -1629,6 +1631,7 @@ class VoiceCog(commands.Cog):
         except asyncio.TimeoutError:
             await r.send(embed=we("⏱️ タイムアウト: ボイスチャンネルへの接続応答時間が超過しました。Botの権限やネットワーク状態をご確認ください。"))
         except Exception as e:
+            logger.exception("Voice channel join failed")
             await r.send(embed=we(f"<:failed:1490986584676368535> 接続失敗: {e}"))
 
     async def _leave_impl(self, r: Responder):
@@ -1684,6 +1687,7 @@ class VoiceCog(commands.Cog):
         except FileNotFoundError:
             await ctx.send(embed=we("<:failed:1490986584676368535> システムに `ffmpeg` コマンドが見つかりません。パスが通っているか確認してください。"))
         except Exception as e:
+            logger.exception("ffversion command failed")
             await ctx.send(embed=we(f"<:failed:1490986584676368535> エラーが発生しました: {e}"))
 
     
@@ -1926,7 +1930,7 @@ class VoiceCog(commands.Cog):
             try:
                 await status_message.edit(content=f'Spotifyプレイリストの取得に失敗しました: {exc}')
             except discord.HTTPException:
-                pass
+                logger.debug("Spotify playlist load status update failed", exc_info=True)
         finally:
             state['playlist_load_task'] = None
 
@@ -1991,7 +1995,7 @@ class VoiceCog(commands.Cog):
             try:
                 await status_message.edit(content=f'YouTubeプレイリストの取得に失敗しました: {exc}')
             except discord.HTTPException:
-                pass
+                logger.debug("YouTube playlist load status update failed", exc_info=True)
         finally:
             state['playlist_load_task'] = None
 
@@ -2066,7 +2070,7 @@ class VoiceCog(commands.Cog):
             try:
                 await status_message.edit(content=f'SoundCloudセットの取得に失敗しました: {exc}')
             except discord.HTTPException:
-                pass
+                logger.debug("SoundCloud playlist load status update failed", exc_info=True)
         finally:
             state['playlist_load_task'] = None
 
@@ -2130,7 +2134,8 @@ class VoiceCog(commands.Cog):
             for item in self.children: item.disabled = True
             if self.message:
                 try: await self.message.edit(view=self)
-                except Exception: pass
+                except Exception:
+                    logger.debug("Failed to disable search view items", exc_info=True)
             self.stop()
 
     async def _search_impl(self, r: Responder, keyword: str | None):
@@ -2145,12 +2150,14 @@ class VoiceCog(commands.Cog):
                 title, tracks = await self.get_spotify_playlist_entries(keyword.strip())
                 return await self.start_playlist_load(r.source, tracks, title)
             except Exception as exc:
+                logger.exception("Spotify playlist fetch failed")
                 return await r.send(embed=we(f"Spotifyプレイリストの取得に失敗しました: {exc}"))
         if self._soundcloud_kind(keyword.strip()) == "set":
             try:
                 title, tracks = await self.get_soundcloud_playlist_entries(keyword.strip())
                 return await self.start_playlist_load(r.source, tracks, title)
             except Exception as exc:
+                logger.exception("SoundCloud set fetch failed")
                 return await r.send(embed=we(f"SoundCloudセットの取得に失敗しました: {exc}"))
         if self._soundcloud_kind(keyword.strip()) == "track":
             try:
@@ -2158,6 +2165,7 @@ class VoiceCog(commands.Cog):
                 tracks = [{'input': info['webpage_url'], 'title': info['title'], 'is_youtube': True}]
                 return await self.start_playlist_load(r.source, tracks, info['title'])
             except Exception as exc:
+                logger.exception("SoundCloud fetch failed")
                 return await r.send(embed=we(f"SoundCloudの取得に失敗しました: {exc}"))
         await r.send(f"🔎 YouTubeで「{keyword}」の上位10件を検索中...")
         search_options = YTDL_OPTIONS.copy()
@@ -2272,7 +2280,7 @@ class VoiceCog(commands.Cog):
                 url = info['stream_url']
                 state['current_yt_headers'] = info['http_headers']
             except Exception:
-                pass
+                logger.debug("YouTube stream URL refresh failed", exc_info=True)
 
         # --- 【FFmpeg基本設定】 ---
         before_options = '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5'
@@ -2533,6 +2541,7 @@ class VoiceCog(commands.Cog):
             except asyncio.TimeoutError:
                 return await interaction.followup.send("⏱️ タイムアウト: YouTube情報の解析に時間がかかりすぎたため中断しました。")
             except Exception as e:
+                logger.exception("YouTube parse failed")
                 return await interaction.followup.send(embed=we(f"<:failed:1490986584676368535> 解析失敗: {e}"))
 
         # 3.5. SoundCloud単曲URLが直接指定された場合（再生時にページURLから再解析する）
@@ -2544,6 +2553,7 @@ class VoiceCog(commands.Cog):
             except asyncio.TimeoutError:
                 return await interaction.followup.send("⏱️ タイムアウト: SoundCloud情報の解析に時間がかかりすぎたため中断しました。")
             except Exception as e:
+                logger.exception("SoundCloud parse failed")
                 return await interaction.followup.send(embed=we(f"<:failed:1490986584676368535> 解析失敗: {e}"))
 
         # 2. ファイルが添付されている場合
@@ -2560,6 +2570,7 @@ class VoiceCog(commands.Cog):
             except asyncio.TimeoutError:
                 return await interaction.followup.send("⏱️ タイムアウト: ID情報の取得に時間がかかりすぎました。")
             except Exception:
+                logger.debug("Attachment info lookup failed", exc_info=True)
                 url, filename = None, None
             
             final_id = input_str
@@ -2573,6 +2584,7 @@ class VoiceCog(commands.Cog):
                 except asyncio.TimeoutError:
                     return await interaction.followup.send("⏱️ タイムアウト: YouTube検索応答時間が超過しました。")
                 except Exception as e:
+                    logger.exception("YouTube search failed")
                     return await interaction.followup.send(embed=we(f"<:failed:1490986584676368535> 検索失敗: {e}"))
 
         # 4. 検索キーワード指定
@@ -2584,6 +2596,7 @@ class VoiceCog(commands.Cog):
             except asyncio.TimeoutError:
                 return await interaction.followup.send("⏱️ タイムアウト: YouTube検索応答時間が超過しました。")
             except Exception as e:
+                logger.exception("YouTube search failed")
                 return await interaction.followup.send(embed=we(f"<:failed:1490986584676368535> 検索失敗: {e}"))
 
         # 5. 引数が何もない場合
@@ -2621,6 +2634,7 @@ class VoiceCog(commands.Cog):
                 await interaction.followup.send(embed=we(f"<:success:1490985168100659322> キューに追加: **{filename}**"))
                 await self.update_panel(interaction.guild_id)
         except Exception as e:
+            logger.exception("Playback start failed")
             await interaction.followup.send(embed=we(f"<:failed:1490986584676368535> 再生開始処理でエラーが発生しました: `{e}`"))
             
     async def _stop_impl(self, r: Responder):
@@ -2911,6 +2925,7 @@ class VoiceCog(commands.Cog):
                 if not isinstance(tokens, list):
                     tokens = [str(tokens)]
             except Exception as e:
+                logger.debug("Server playlist JSON parse failed", exc_info=True)
                 return await r.send(embed=we(f"JSON解析エラー: {e}"))
         elif name:
             tokens = name.replace(',', ' ').split()
@@ -2921,7 +2936,7 @@ class VoiceCog(commands.Cog):
                     if res.data:
                         tokens = res.data[0]["ids"]
                 except Exception:
-                    pass
+                    logger.warning("Server playlist DB lookup failed", exc_info=True)
         else:
             return await r.send(embed=we("プレイリスト名、ID、またはJSONファイルを指定してください。"), ephemeral=True)
 
