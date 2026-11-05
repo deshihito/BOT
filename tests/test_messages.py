@@ -104,10 +104,10 @@ class UnifiedCallSitesTest(unittest.TestCase):
         import inspect
 
         from cogs.d1_test import D1TestCog
-        from cogs.judge_comment import JudgeCog
+        from cogs.judge_comment import JudgeCommentCog
 
         self.assertIn("DEFAULT_D1_ENDPOINT", inspect.getsource(D1TestCog.__init__))
-        self.assertIn("DEFAULT_D1_ENDPOINT", inspect.getsource(JudgeCog.__init__))
+        self.assertIn("DEFAULT_D1_ENDPOINT", inspect.getsource(JudgeCommentCog.__init__))
 
     def test_help_summary_comes_from_command_meta(self):
         from cogs.help import CatalogHelpCommand
