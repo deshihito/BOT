@@ -24,7 +24,7 @@ from core.panel_v2 import as_panel_v2, edit_panel_v2
 from core import action_registry, action_usage, ai_omnirush, ai_preferences, ai_provider_router, guild_settings, levelup_card, logfare, shortcuts, usage_stats
 from core.game_guides import GAME_GUIDES, GAME_ORDER
 from core import localization, translation
-from core.messages import CIRCULATION_NOT_LOADED, ITEMS_NOT_LOADED, MARKET_NOT_LOADED, WORKSHOP_NOT_LOADED
+from core.messages import CIRCULATION_NOT_LOADED, GAMBLING_NOT_LOADED, ITEMS_NOT_LOADED, MARKET_NOT_LOADED, WORKSHOP_NOT_LOADED
 from core.libretranslate import LibreTranslateClient, LibreTranslateError
 
 logger = logging.getLogger("cogs.general")  # 分割後も従来のログ名に統一する
@@ -79,6 +79,10 @@ GENERAL_ACTIONS = {
         ("宝くじ", "lottery"),
         ("宝くじを買う", "lottery_buy"),
         ("盗む", "steal"),
+        ("スロット", "slot"),
+        ("ダブルアップ", "double"),
+        ("ブラックジャック", "blackjack"),
+        ("ダイス", "dice"),
         ("コイン保有ランキング", "coin_leaderboard"),
     ],
     "rta": [

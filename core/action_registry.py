@@ -55,6 +55,7 @@ AI_BLOCKED_IDS = frozenset({
     "general:item_buy", "general:item_use", "general:box_open",
     "general:machine_buy", "general:workshop_claim", "general:craft",
     "general:mining", "general:lottery_buy", "general:steal",
+    "general:slot", "general:double", "general:blackjack", "general:dice",
     "general:fujo_register", "general:fujo_freeze", "general:fujo_panic_disable",
     "general:shortcut_manage", "general:aitools", "general:ai_default",
     "general:image_default", "general:reasoning_default",
