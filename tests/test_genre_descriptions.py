@@ -60,7 +60,9 @@ class GenreDescriptionPolicyTest(unittest.TestCase):
         self.assertEqual(GENERAL_GENRES["exp"][1], "チャット・VC・generalのEXPとレベル")
         self.assertEqual(GENERAL_GENRES["survival"][1], "メンバーの安否・不在の検知")
         self.assertEqual(GENERAL_GENRES["zeta"][1], "ロールプレイ会話")
-        self.assertEqual(GENERAL_GENRES["miq"][1], "メッセージを引用画像にする")
+        # 導線最適化 M8: MIQ はパネル側を設定だけに純化し、miq ジャンル自体を
+        # 「設定・AI」へ吸収した（作成はコンテキストメニューに一本化）
+        self.assertNotIn("miq", GENERAL_GENRES)
         self.assertEqual(GENERAL_GENRES["meme"][1], "画像に上下テキストを入れてmeme画像を作成する")
 
     def test_support_genres(self):

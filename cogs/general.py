@@ -68,6 +68,47 @@ from core.general.translation import TranslationMixin
 from core.general.shortcuts import ShortcutsMixin
 
 
+class RankingsView(discord.ui.View):
+    """ランキングの集約ビュー（導線最適化 M7）。
+
+    既存のランキング表示そのものは各 dispatch に委譲し、ここは入口だけを束ねる。
+    ゲーム別ランキングは /game の各ゲーム詳細にあるため、ここには含めない。
+    """
+
+    TARGETS = (
+        ("コイン保有", "coin_leaderboard"),
+        ("bump RTA", "bump_leaderboard"),
+        ("up RTA", "up_leaderboard"),
+        ("生存確認", "fujo_ranking"),
+        ("EXP", "exp_ranking"),
+    )
+
+    def __init__(self, cog, user_id: int):
+        super().__init__(timeout=300)
+        self.cog = cog
+        self.user_id = user_id
+        for label, value in self.TARGETS:
+            button = discord.ui.Button(label=label, style=discord.ButtonStyle.primary)
+            button.callback = self._make_callback(value)
+            self.add_item(button)
+
+    def _make_callback(self, value: str):
+        async def callback(interaction: discord.Interaction):
+            await self.cog.dispatch_general(interaction, value)
+        return callback
+
+    async def interaction_check(self, interaction) -> bool:
+        # 公開パネル化（ephemeral第2波）: 操作は本人のみ。
+        return interaction.user.id == self.user_id
+
+    def embed(self) -> discord.Embed:
+        return discord.Embed(
+            title="ランキング",
+            description="見たいランキングを選んでください。\n"
+                        "ゲーム別ランキングは /game の各ゲーム詳細にあります。",
+            color=0xFFFFFF)
+
+
 class GeneralCog(
     MiqMixin,
     MiqLineMixin,
@@ -165,29 +206,6 @@ class GeneralCog(
             view = MiqSettingsView(self, interaction.user.id)
             return await interaction.response.send_message(view=as_panel_v2(view))
 
-        if value == "miq_help":
-            embed = discord.Embed(title="引用画像 (MIQ)", color=0xFFFFFF)
-            embed.description = (
-                "**作り方**\n"
-                "・メッセージを右クリック(スマホは長押し) → アプリ → **引用画像にする**\n"
-                "・引用したいメッセージに返信して、`@BOT miq` と送信\n\n"
-                "**設定**\n"
-                "`/general` → 引用画像 (MIQ) → **MIQ設定** で、モノクロ・文字色連動・左右反転・太字・"
-                "全面レイアウト・GIF出力・フォント・配色を変更できます。設定はあなたがMIQを作る時に使われます。\n\n"
-                "**フォーマット**\n"
-                "MIQ設定で **ランダム / 引用 (従来) / 漫画風 / 音楽再生風 / LINE風 / ニュース速報風 / X投稿風 / RPG風 / 設計図風 / レトロゲーム風 / トレカ風 / ネオン風 / ダーク風 / ポップ風 / パステル風 / チケット風 / ノート風 / ペアハート風 / ゴールド縦書き風 / 和風縦書き風 / 小説風 / グラスカード風** を選べます。"
-                "未設定の既定はランダムで、生成のたびに単体フォーマットから1つ選ばれます（ランダムでLINE風・ペアハート風は選ばれません）。\n"
-                "引用 (従来) 以外は常にPNGで出力され、GIF出力やモノクロ・配色などの設定は引用 (従来) 専用です（フォント設定は全フォーマット共通）。\n"
-                "LINE風では、対象のメッセージが返信でつながっている場合、対象を含めて最大4件まで遡って会話形式にします"
-                "（対象が返信でない場合はその1件だけ）。対象の作者が右側の緑の吹き出しになります。"
-                "LINE風は画像・スタンプ・カスタム絵文字・Unicode絵文字の合成にも対応し、画像やスタンプだけのメッセージも変換できます。\n"
-                "ペアハート風では、対象のメッセージとその返信先の発言を左右に並べてハートでつなぎます"
-                "（対象が返信でない場合は1人だけのレイアウトになります）。\n\n"
-                "**引用の拒否**\n"
-                "MIQ設定の「引用を拒否」をONにすると、他の人があなたのメッセージを引用できなくなります（初期はOFF）。"
-            )
-            return await interaction.response.send_message(embed=embed)
-
         if value == "meme_create":
             # モーダルを開けない経路 (メッセージ型ショートカット) では
             # _MessageResponse.send_modal が「パネルから実行してください」と
@@ -210,6 +228,12 @@ class GeneralCog(
                 "・アバターをベースにする場合のみ、MIQの引用拒否設定が適用されます。"
             )
             return await interaction.response.send_message(embed=embed)
+
+        if value == "rankings":
+            # 導線最適化 M7: ランキング6系統のうちパネル系5件を1画面に束ねる。
+            view = RankingsView(self, interaction.user.id)
+            return await interaction.response.send_message(
+                embed=view.embed(), view=view)
 
         if value == "translation_settings":
             view = TranslationView(interaction.user.id, interaction.guild_id)
