@@ -65,10 +65,16 @@ def _items_embed(store: items_core.ItemStore, user_id: int) -> discord.Embed:
     effects = store.active_effects(uid)
     if effects:
         now = datetime.now(config.JST)
+        # 効果ID → 発動元アイテム名（定義から引く。無ければIDのまま）。
+        effect_labels = {
+            definition.get("effect"): definition["name"]
+            for definition in items_core.ITEM_DEFS.values()
+            if definition.get("effect")
+        }
         lines = []
         for effect_id, expires in effects.items():
             remaining = max(0.0, (expires - now).total_seconds() / 3600)
-            label = "手数料パス" if effect_id == items_core.FEE_DISCOUNT_EFFECT else effect_id
+            label = effect_labels.get(effect_id, effect_id)
             lines.append(f"・{label}（あと約 {remaining:.1f} 時間）")
         embed.add_field(name="発動中の効果", value="\n".join(lines), inline=False)
     embed.add_field(name="ショップ", value="\n".join(_shop_lines()), inline=False)

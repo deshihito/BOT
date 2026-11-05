@@ -167,6 +167,26 @@ class SystemStatsCog(commands.Cog):
                 inline=False
             )
 
+            # 経済プール／国庫の残高（管理側で見える形。CirculationCog が
+            # 共有ストアを持つ）。未読込・取得失敗時はフィールドごと省略。
+            get_cog = getattr(self.bot, "get_cog", None)
+            circulation = get_cog("CirculationCog") if get_cog else None
+            economy_store = getattr(circulation, "economy_store", None)
+            if economy_store is not None:
+                try:
+                    snapshot = economy_store.snapshot()
+                    embed.add_field(
+                        name="経済プール",
+                        value=(
+                            f"**採掘プール:** `{snapshot['pool']:,} AGO`\n"
+                            f"**国庫:** `{snapshot['treasury']:,} AGO`\n"
+                            f"**還流累計:** `{snapshot['total_recycled']:,} AGO`"
+                        ),
+                        inline=False
+                    )
+                except Exception:
+                    pass
+
             embed.add_field(
                 name="最新Gitコミット",
                 value=_limit_field_value(self._get_git_info()),

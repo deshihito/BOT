@@ -287,8 +287,13 @@ class WorkshopStore:
     def _max_cycles(tier: dict[str, Any]) -> int:
         return int(tier["storage_hours"]) // int(tier["cycle_hours"])
 
-    def pending_cycles(self, machine: dict[str, Any], now: datetime) -> int:
-        """貯蔵上限までに溜まっている完成サイクル数（lazy 計算、状態は変えない）。"""
+    def pending_cycles(self, machine: dict[str, Any], now: datetime,
+                       time_scale: float = 1.0) -> int:
+        """貯蔵上限までに溜まっている完成サイクル数（lazy 計算、状態は変えない）。
+
+        time_scale は経過時間の倍率（加速オイルの効果から cog が渡す）。
+        時間を速く数えても貯蔵上限（storage_hours 分）自体は変わらない。
+        """
         tier = MACHINE_TIERS[machine["tier"]]
         try:
             anchor = datetime.fromisoformat(machine["anchor"])
@@ -298,16 +303,17 @@ class WorkshopStore:
         if elapsed < 0:
             return 0
         cycle_seconds = tier["cycle_hours"] * 3600
-        accrued = min(elapsed, tier["storage_hours"] * 3600)
+        accrued = min(elapsed * float(time_scale), tier["storage_hours"] * 3600)
         cycles = min(self._max_cycles(tier), int(accrued // cycle_seconds))
         # 残り寿命を超えては生産できない（寿命が先に尽きる）。
         return min(cycles, int(machine.get("cycles_left", 0)))
 
-    def total_pending(self, user_id: str, now: datetime | None = None) -> int:
+    def total_pending(self, user_id: str, now: datetime | None = None,
+                      time_scale: float = 1.0) -> int:
         now = now or datetime.now(JST)
         with self._lock:
             return sum(
-                self.pending_cycles(m, now)
+                self.pending_cycles(m, now, time_scale)
                 for m in self._user_locked(str(user_id))["machines"]
             )
 
@@ -399,7 +405,8 @@ class WorkshopStore:
             self._mark_dirty()
 
     # ------------------------------------------------------------------ claim
-    def claim_production(self, user_id: str, now: datetime | None = None) -> dict[str, Any]:
+    def claim_production(self, user_id: str, now: datetime | None = None,
+                         time_scale: float = 1.0) -> dict[str, Any]:
         """溜まった生産分を確定し、生産アイテムの集計を返す（所持への追加は呼び出し側）。
 
         1サイクルでも生産があれば claim 日としてストリークを進め、
@@ -409,12 +416,16 @@ class WorkshopStore:
         0になった加工機は消費されて消える（戻り値の "exhausted" に
         ティアIDが入る）。ストリークのボーナス生産は追加の抽選であり、
         寿命は決済サイクル分しか減らない。
+        time_scale は経過時間の倍率（加速オイル）。速く貯まる代わりに
+        サイクル消化＝寿命の消費も同じ速さで進む（貯蔵上限は不変）。
+        アンカーの余り時間は倍率で割り戻して実時間に換算する。
         """
         now = now or datetime.now(JST)
+        scale = float(time_scale) if time_scale and time_scale > 0 else 1.0
         with self._lock:
             user = self._user_locked(str(user_id))
             plan = [
-                (machine, self.pending_cycles(machine, now))
+                (machine, self.pending_cycles(machine, now, scale))
                 for machine in user["machines"]
             ]
             total_cycles = sum(count for _m, count in plan)
@@ -448,10 +459,12 @@ class WorkshopStore:
                 except ValueError:
                     anchor = now
                 elapsed = (now - anchor).total_seconds()
-                accrued = min(max(elapsed, 0.0), tier["storage_hours"] * 3600)
+                accrued = min(max(elapsed, 0.0) * scale, tier["storage_hours"] * 3600)
                 remainder = accrued - cycles * cycle_seconds
-                machine["anchor"] = (now - timedelta(seconds=max(remainder, 0.0))
-                                     ).astimezone(JST).isoformat()
+                # 余りは倍率換算された時間なので、実時間へ割り戻す。
+                machine["anchor"] = (now - timedelta(
+                    seconds=max(remainder, 0.0) / scale)
+                ).astimezone(JST).isoformat()
                 survivors.append(machine)
             user["machines"] = survivors
             self._mark_dirty()
@@ -489,10 +502,13 @@ class WorkshopStore:
             return copy.deepcopy(job)
 
     def claim_commissions(self, item_store: ItemStore, user_id: str,
-                          now: datetime | None = None) -> list[dict[str, Any]]:
+                          now: datetime | None = None,
+                          extra_rare_boost: float = 1.0) -> list[dict[str, Any]]:
         """完了した委託を引き取り、結果を所持に加える。未完了分は残す。
 
         抽選は通常合成と同じテーブルを COMMISSION_RARE_BOOST 倍率で引く。
+        extra_rare_boost（合成触媒の効果）は委託倍率と乗算し、合計は
+        craft 側の上限（RARE_BOOST_CAP）でキャップされる。
         戻り値: [{"inputs": (a, b), "item": ID, "count": n, "rare": bool}, ...]
         """
         now = now or datetime.now(JST)
@@ -512,7 +528,9 @@ class WorkshopStore:
                 if recipe is None:
                     continue
                 item_id, count = craft_core.roll_outcome(
-                    recipe, self._rng, rare_boost=COMMISSION_RARE_BOOST)
+                    recipe, self._rng,
+                    rare_boost=craft_core.combine_rare_boost(
+                        COMMISSION_RARE_BOOST, extra_rare_boost))
                 item_store.add(str(user_id), item_id, count, now=now)
                 rare = any(
                     row_item == item_id and row_rare

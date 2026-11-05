@@ -7,11 +7,14 @@
 _change_balance と transaction_history への記録）を通す
 （cogs/workshop.py と同じ組み立て）。
 
-- 採掘: 素材が主産物、コインは副産物。新規創出は日次グローバル
-  供給キャップ＋個人上限で縛る（core/mining.py の定数を参照）
-- 宝くじ: 売上の 90% が賞金、10% は消却。抽選は毎日 JST 21:00 で、
-  期限を過ぎた回はアクセス／定期チェックのたびに lazy に確定する
-- 盗む: 同一ギルド内限定のゼロサム移転。新規創出は一切しない
+- 採掘: 原典準拠のセッション式（1〜20回、60秒クールダウン）。
+  コインは新規創出ではなく、経済系の損失が還流される共有プール
+  （core/economy_pool.py）から支払う。プールが空なら掘れない
+- 宝くじ: 売上の一部が賞金、残りは消却され、消却分は採掘プールと
+  国庫へ還流される。抽選は毎日 JST 21:00 で、期限を過ぎた回は
+  アクセス／定期チェックのたびに lazy に確定する
+- 盗む: 同一ギルド内限定のゼロサム移転。新規創出は一切しない。
+  防犯チャーム発動中の相手は自動で失敗する
 
 入口は新規スラッシュを作らず、/general パネルの action 経由
 （general:mining / general:lottery / general:lottery_buy /
@@ -28,6 +31,7 @@ import discord
 from discord.ext import commands, tasks
 
 import config
+from core import economy_pool as economy_core
 from core import items as items_core
 from core import lottery as lottery_core
 from core import mining as mining_core
@@ -58,26 +62,24 @@ def _fmt_minutes(seconds: float) -> str:
 # 採掘
 # ---------------------------------------------------------------------------
 
-def _mining_embed(cog: "CirculationCog", user_id: int) -> discord.Embed:
+def _mining_embed(cog: "CirculationCog", user_id: int,
+                  result: str | None = None) -> discord.Embed:
     status = cog.mining_store.status(str(user_id))
+    pool = cog.economy_store.pool_balance()
     embed = discord.Embed(title="採掘", color=CIRCULATION_COLOR)
-    if status["cooldown_remaining"] > 0:
-        embed.add_field(
-            name="状態", value=f"次に掘れるまで {_fmt_minutes(status['cooldown_remaining'])}",
-            inline=False)
+    if result:
+        embed.add_field(name="結果", value=result, inline=False)
+    if status["session_left"] > 0:
+        state = f"**掘れます**（このセッションはあと {status['session_left']} 回）"
+    elif status["cooldown_remaining"] > 0:
+        state = f"次に掘れるまで {_fmt_minutes(status['cooldown_remaining'])}"
     else:
-        embed.add_field(name="状態", value="**いま掘れます**", inline=False)
+        state = "**いま掘れます**"
+    embed.add_field(name="状態", value=state, inline=False)
     embed.add_field(
-        name="今日の採掘",
-        value=f"{status['today_count']} / {status['daily_limit']} 回", inline=True)
-    embed.add_field(
-        name="本日の全体の産出残り",
-        value=(f"素材 {status['global_materials_remaining']:,} 個 / "
-               f"コイン {status['global_coins_remaining']:,} AGO"),
-        inline=True)
+        name="採掘プール", value=f"**{pool:,} AGO**", inline=True)
     embed.set_footer(
-        text="掘れるのは合成素材（スクラップ・金属片、レアで回路片）が中心で、"
-             "コインは副産物として少しだけ出ます。1時間に1回まで掘れます。")
+        text="掘ったコインはプールから支払われます。プールが空になると掘れません。")
     return embed
 
 
@@ -86,6 +88,7 @@ class MiningView(discord.ui.View):
         super().__init__(timeout=180)
         self.cog = cog
         self.user_id = user_id
+        self.last_result: str | None = None
 
     async def interaction_check(self, interaction) -> bool:
         # 公開パネル化（ephemeral第2波）: 操作は本人のみ。
@@ -94,13 +97,16 @@ class MiningView(discord.ui.View):
     @discord.ui.button(label="更新", style=discord.ButtonStyle.secondary)
     async def refresh(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.edit_message(
-            embed=_mining_embed(self.cog, self.user_id), view=self)
+            embed=_mining_embed(self.cog, self.user_id, self.last_result), view=self)
 
     @discord.ui.button(label="採掘する", style=discord.ButtonStyle.success)
     async def dig(self, interaction: discord.Interaction, button: discord.ui.Button):
+        # セッション型なので新規投稿せず、同じ embed を編集して更新する。
         await interaction.response.defer()
-        message = await self.cog.execute_mining(interaction.user.id)
-        await interaction.followup.send(message)
+        self.last_result = await self.cog.execute_mining(interaction.user.id)
+        await interaction.edit_original_response(
+            embed=_mining_embed(self.cog, self.user_id, self.last_result),
+            view=self)
 
 
 # ---------------------------------------------------------------------------
@@ -136,7 +142,7 @@ def _lottery_embed(cog: "CirculationCog", user_id: int) -> discord.Embed:
     embed.set_footer(
         text=f"チケットは1枚 {lottery_core.TICKET_PRICE} AGO、1人"
              f"{lottery_core.MAX_TICKETS_PER_USER}枚まで。抽選は毎日"
-             f"{lottery_core.DRAW_HOUR}:00、売上の90%が賞金になります。")
+             f"{lottery_core.DRAW_HOUR}:00 です。")
     return embed
 
 
@@ -205,8 +211,7 @@ def _steal_embed(cog: "CirculationCog", user_id: int) -> discord.Embed:
     status = cog.steal_store.actor_status(str(user_id))
     embed = discord.Embed(title="盗む", color=CIRCULATION_COLOR)
     embed.description = (
-        f"成功率 **{steal_core.SUCCESS_RATE * 100:.0f}%**。成功すると相手の残高の"
-        f"{steal_core.STEAL_BALANCE_RATE * 100:.0f}%（最大 {steal_core.STEAL_MAX_AMOUNT:,} AGO）"
+        f"成功すると相手の残高の一部（最大 {steal_core.STEAL_MAX_AMOUNT:,} AGO）"
         "を盗めます。\n"
         f"失敗すると相手に罰金 **{steal_core.FINE_AMOUNT:,} AGO** を払います。"
         f"残高 {steal_core.TARGET_MIN_BALANCE:,} AGO 未満の相手は保護されて盗めません。")
@@ -262,7 +267,8 @@ class CirculationCog(commands.Cog):
                  lottery_store: lottery_core.LotteryStore | None = None,
                  steal_store: steal_core.StealStore | None = None,
                  item_store: items_core.ItemStore | None = None,
-                 balance_reader: Callable[[str], int] | None = None):
+                 balance_reader: Callable[[str], int] | None = None,
+                 economy_store: economy_core.EconomyPoolStore | None = None):
         self.bot = bot
         self.mining_store = (
             mining_store if mining_store is not None else mining_core.MiningStore())
@@ -270,6 +276,10 @@ class CirculationCog(commands.Cog):
             lottery_store if lottery_store is not None else lottery_core.LotteryStore())
         self.steal_store = (
             steal_store if steal_store is not None else steal_core.StealStore())
+        # 採掘プール＋国庫は経済系で共有する単一インスタンスを使う。
+        self.economy_store = (
+            economy_store if economy_store is not None
+            else economy_core.shared_store())
         self._injected_item_store = item_store
         self._balance_reader = balance_reader
 
@@ -292,6 +302,7 @@ class CirculationCog(commands.Cog):
         self.mining_store.flush()
         self.lottery_store.flush()
         self.steal_store.flush()
+        self.economy_store.flush()
 
     @tasks.loop(seconds=mining_core.FLUSH_INTERVAL_SECONDS)
     async def flush_loop(self) -> None:
@@ -299,6 +310,7 @@ class CirculationCog(commands.Cog):
             self.mining_store.maybe_flush()
             self.lottery_store.maybe_flush()
             self.steal_store.maybe_flush()
+            self.economy_store.maybe_flush()
             await self.settle_lottery()
         except Exception:
             logger.exception("circulation: 定期フラッシュ／抽選確定に失敗しました")
@@ -374,29 +386,73 @@ class CirculationCog(commands.Cog):
 
     # ------------------------------------------------------------------ 採掘の実行
     async def execute_mining(self, user_id: int, now: datetime | None = None) -> str:
+        """採掘を1回分実行する（セッションの開始もここで面倒を見る）。
+
+        産出コインは新規創出ではなく採掘プールから支払う。プールが
+        空なら掘れない。採掘ドリンク発動中は通常の抽選を追加で
+        もう1回引く（セッション回数は消費しない）。
+        """
         uid = str(user_id)
         try:
-            result = self.mining_store.dig(uid, now=now)
-            coins = int(result["coins"])
-            if coins > 0:
+            status = self.mining_store.status(uid, now=now)
+            if status["session_left"] <= 0:
+                granted = self.mining_store.start_session(uid, now=now)
+                status = self.mining_store.status(uid, now=now)
+                session_note = f"（このセッションは {granted} 回まで掘れます）"
+            else:
+                session_note = ""
+            pool = self.economy_store
+            if pool.pool_balance() <= 0:
+                return circulation_action_failed(
+                    "プールにコインがありません…（経済の損失が還流されると掘れるようになります）")
+            result = self.mining_store.dig(uid, pool.pool_balance(), now=now)
+            paid = pool.pay(int(result["coins"]))
+            total = paid
+            bonus = None
+            bonus_paid = 0
+            try:
+                boosted = self._item_store().has_effect(
+                    uid, items_core.MINING_BOOST_EFFECT)
+            except Exception:
+                boosted = False
+            if boosted:
+                bonus = self.mining_store.roll_bonus(pool.pool_balance())
+                bonus_paid = pool.pay(int(bonus["coins"]))
+                total += bonus_paid
+            credit = None
+            if total > 0:
                 credit = await self._wallet()._change_balance(
-                    uid, coins, create_with=wallet_module.NEW_USER_BALANCE)
+                    uid, total, create_with=wallet_module.NEW_USER_BALANCE)
                 if credit is None:
+                    if paid:
+                        pool.refund(paid)
+                    if bonus_paid:
+                        pool.refund(bonus_paid)
                     self.mining_store.rollback_dig(uid, result)
                     return circulation_action_failed(
                         "コインの反映に失敗しました。時間をおいて再試行してください。")
-            store = self._item_store()
-            for item_id, count in result["items"].items():
-                store.add(uid, item_id, count)
-            if coins > 0:
-                await self._record_history(MINING_ID, uid, coins, "mining_reward")
-            lines = ["⛏️ **採掘しました**"]
-            for item_id, count in sorted(result["items"].items()):
-                lines.append(f"・{_item_name(item_id)} ×{count}")
-            if coins > 0:
-                lines.append(f"・コイン（副産物） +{coins:,} AGO")
-            if not result["items"] and coins <= 0:
-                lines.append("（本日の全体の産出上限に達していたため、産出は0でした）")
+                await self._record_history(MINING_ID, uid, total, "mining_reward")
+            lines = []
+            if total > 0:
+                lines.append(f"⛏️ **{total:,} AGO を採掘しました！**")
+                if result["jackpot"]:
+                    lines.append(
+                        f"🎉 **大量採掘ボーナス！** +{int(result['extra']):,} AGO")
+                if bonus is not None and bonus_paid > 0:
+                    lines.append(
+                        f"🥤 採掘ドリンクで追加の一掘り: +{bonus_paid:,} AGO")
+            elif result["failed"]:
+                lines.append("💨 **採掘失敗…**")
+            else:
+                lines.append("💨 採掘しましたが、プールから払える分がありませんでした。")
+            lines.append(f"残りプール: {pool.pool_balance():,} AGO")
+            left = int(result["session_left"])
+            if left > 0:
+                lines.append(f"このセッションはあと {left} 回掘れます。")
+            else:
+                lines.append("このセッションは終了しました。")
+            if session_note:
+                lines.append(session_note)
             return "\n".join(lines)
         except items_core.ItemError as exc:
             return circulation_action_failed(exc)
@@ -440,6 +496,13 @@ class CirculationCog(commands.Cog):
                 logger.exception(
                     "circulation: 宝くじ賞金の支払いで例外 round=%s user=%s",
                     result["round_id"], winner["user_id"])
+        # 消却分は経済の損失として採掘プール／国庫へ還流する。
+        burned = int(result.get("burned", 0))
+        if burned > 0:
+            try:
+                self.economy_store.add_loss(burned)
+            except Exception:
+                logger.exception("circulation: 宝くじ消却分の還流に失敗しました")
         return result
 
     async def execute_lottery_buy(self, user_id: int, count: int,
@@ -500,8 +563,15 @@ class CirculationCog(commands.Cog):
                 return circulation_action_failed(
                     f"相手のコインが少ないため盗めません"
                     f"（残高 {steal_core.TARGET_MIN_BALANCE:,} AGO 未満の相手は保護されます）。")
+            # 防犯チャーム発動中の相手は自動で失敗する（対象側への
+            # 通知は増やさない。実行者の罰金・クールダウンは通常どおり）。
+            try:
+                guarded = self._item_store().has_effect(
+                    target, items_core.STEAL_GUARD_EFFECT)
+            except Exception:
+                guarded = False
             wallet = self._wallet()
-            if self.steal_store.roll_success():
+            if not guarded and self.steal_store.roll_success():
                 debit = await wallet._change_balance(
                     target, -amount, require_funds=True)
                 if debit is wallet_module.INSUFFICIENT:
@@ -540,11 +610,15 @@ class CirculationCog(commands.Cog):
                             "コインの更新に失敗しました。残高は変わっていません。")
                     await self._record_history(actor, target, fine, "steal_fine")
             self.steal_store.record_attempt(actor, target, now=now)
+            if guarded:
+                head = "🛡️ **盗みに失敗…** 相手の防犯チャームに弾かれて逃げられました。"
+            else:
+                head = "🚨 **盗みに失敗…** 警戒されて逃げられました。"
             if fine > 0:
                 return (
-                    f"🚨 **盗みに失敗…** 警戒されて逃げられました。"
+                    f"{head}"
                     f"罰金として <@{target}> に **{fine:,} AGO** を払いました。")
-            return "🚨 **盗みに失敗…** 警戒されて逃げられました（罰金はありませんでした）。"
+            return f"{head}（罰金はありませんでした）。"
         except items_core.ItemError as exc:
             return circulation_action_failed(exc)
         except Exception:

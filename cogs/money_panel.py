@@ -108,7 +108,7 @@ def status_embed(status: dict) -> discord.Embed:
         if status["streak_days"]:
             value += (
                 f"\nストリーク **{status['streak_days']} 日**"
-                f"（生産ボーナス +{status['streak_bonus'] * 100:.0f}%）")
+                "（生産ボーナスあり）")
         embed.add_field(name="工房", value=value, inline=False)
     if status.get("lottery_pool") is not None:
         embed.add_field(
@@ -117,12 +117,15 @@ def status_embed(status: dict) -> discord.Embed:
                    f"自分のチケット **{status['lottery_tickets']} 枚**"
                    f"（締切 {status['lottery_closes']}）"),
             inline=True)
-    if status.get("mining_today") is not None:
-        if status["mining_ready"]:
+    if status.get("mining_session_left") is not None:
+        if status["mining_session_left"] > 0:
+            mining_value = (
+                f"**掘れます**（セッション残り {status['mining_session_left']} 回）")
+        elif status["mining_ready"]:
             mining_value = "**いま掘れます**"
         else:
             mining_value = f"次まで {_fmt_minutes(status['mining_remaining'])}"
-        mining_value += f"／今日 {status['mining_today']} / {status['mining_limit']} 回"
+        mining_value += f"／プール {status['mining_pool']:,} AGO"
         embed.add_field(name="採掘", value=mining_value, inline=True)
     if status.get("session_kind"):
         label = _SESSION_LABELS.get(status["session_kind"], status["session_kind"])
@@ -421,11 +424,12 @@ class MoneyPanelCog(commands.Cog):
                 mining_status = circulation.mining_store.status(uid)
                 status["mining_ready"] = mining_status["cooldown_remaining"] <= 0
                 status["mining_remaining"] = float(mining_status["cooldown_remaining"])
-                status["mining_today"] = int(mining_status["today_count"])
-                status["mining_limit"] = int(mining_status["daily_limit"])
+                status["mining_session_left"] = int(mining_status["session_left"])
+                status["mining_pool"] = int(
+                    circulation.economy_store.pool_balance())
             except Exception:
                 logger.exception("money_panel: 採掘ステータスの取得に失敗 user=%s", uid)
-                status["mining_today"] = None
+                status["mining_session_left"] = None
 
         gambling_cog = self.bot.get_cog("GamblingCog")
         if gambling_cog is not None:
