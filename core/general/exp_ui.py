@@ -17,6 +17,19 @@ class ExpStatusView(discord.ui.View):
         data = await _exp_load()
         self._user_cache = _exp_ensure(data, self.guild_id, self.author_id)
 
+    async def interaction_check(self, interaction) -> bool:
+        # 自分のステータス画面。公開ボタンも含め本人だけが操作できる。
+        return interaction.user.id == self.author_id
+
+    @discord.ui.button(label="公開で出す", style=discord.ButtonStyle.primary, row=0)
+    async def share_btn(self, interaction, button):
+        # 選択式（C）: 既定は本人のみ表示のまま、本人の意思で同じ内容を公開する。
+        if interaction.channel is None:
+            return await interaction.response.send_message(
+                "公開できるチャンネルがありません。", ephemeral=True)
+        await interaction.channel.send(embed=self.embed())
+        await interaction.response.send_message("EXP状況をチャンネルに公開しました。", ephemeral=True)
+
     @staticmethod
     def _bar(cur: int, need: int, width: int = 12) -> str:
         if need <= 0:

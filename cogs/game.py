@@ -13,6 +13,7 @@ from core import action_usage, party_ranking, usage_stats
 from core.emojis import BACK
 from core.game_guides import GAME_GUIDES, GAME_ORDER, guide_for_discord
 from core.panel_v2 import as_panel_v2, edit_panel_v2
+from core.public_share import PublicShareView
 
 HUB_COLOR = 0xFFFFFF
 
@@ -371,7 +372,10 @@ class GameDetailView(discord.ui.View):
         if cog is None:
             return await interaction.response.send_message(
                 embed=discord.Embed(description="人狼 は現在利用できません。", color=HUB_COLOR), ephemeral=True)
-        await interaction.response.send_message(embed=await cog.rating_embed(interaction.user), ephemeral=True)
+        # 既定は本人のみ。結果画面の「公開で出す」でのみ任意に公開できる（選択式）。
+        embed = await cog.rating_embed(interaction.user)
+        await interaction.response.send_message(
+            embed=embed, view=PublicShareView(interaction.user.id, embed), ephemeral=True)
 
     @discord.ui.button(label="ゲームを終了", style=discord.ButtonStyle.danger, row=4, custom_id="panel:game:end")
     async def end_game(self, interaction: discord.Interaction, button: discord.ui.Button):
