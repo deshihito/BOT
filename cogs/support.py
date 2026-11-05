@@ -304,6 +304,7 @@ async def edit_auth_panel_message(interaction: discord.Interaction, panel):
             view=as_panel_v2(panel),
         )
     except discord.HTTPException:
+        logger.debug("認証パネルの編集に失敗しました（再送信で代替します）", exc_info=True)
         if interaction.response.is_done():
             await interaction.followup.send(view=as_panel_v2(panel), ephemeral=True)
         else:
@@ -1874,7 +1875,7 @@ class StickyChannelSelect(discord.ui.ChannelSelect):
                     try:
                         await (await old_channel.fetch_message(old_message_id)).delete()
                     except discord.NotFound:
-                        pass
+                        logger.debug("旧Stickyメッセージが見つかりませんでした", exc_info=True)
                     except (discord.Forbidden, discord.HTTPException):
                         logger.warning(
                             "旧Stickyパネルを削除できません (guild=%s message=%s)",
@@ -2117,7 +2118,7 @@ class HoneypotChannelSelect(discord.ui.ChannelSelect):
                     try:
                         await (await old_channel.fetch_message(old["message_id"])).delete()
                     except discord.NotFound:
-                        pass
+                        logger.debug("旧ハニーポットメッセージが見つかりませんでした", exc_info=True)
                     except (discord.Forbidden, discord.HTTPException):
                         logger.warning(
                             "旧ハニーポット警告パネルを削除できません (guild=%s)",
@@ -4931,6 +4932,7 @@ class SupportCog(commands.Cog):
                         if inspect.isawaitable(value):
                             value = await value
                     except Exception:
+                        logger.debug("Quest: 言語アクセサの呼び出しに失敗しました", exc_info=True)
                         continue
                     if isinstance(value, str) and quest_language_countries(value):
                         return value.strip(), f"LocalizationCog.{name}"
@@ -4939,6 +4941,7 @@ class SupportCog(commands.Cog):
             try:
                 raw = store.get(guild.id, section)
             except Exception:
+                logger.debug("Quest: 言語設定の読み取りに失敗しました", exc_info=True)
                 continue
             candidates = [raw] if isinstance(raw, str) else (
                 [raw.get(k) for k in QUEST_LANG_KEYS] if isinstance(raw, dict) else []
@@ -5791,7 +5794,7 @@ class SupportCog(commands.Cog):
             try:
                 await (await target.fetch_message(old_id)).delete()
             except discord.NotFound:
-                pass
+                logger.debug("旧ハニーポットメッセージが見つかりませんでした", exc_info=True)
             except (discord.Forbidden, discord.HTTPException):
                 logger.warning(
                     "ハニーポット警告パネルを削除できません (guild=%s message=%s)",
@@ -5904,7 +5907,7 @@ class SupportCog(commands.Cog):
                     old_message = await target.fetch_message(old_id)
                     await old_message.delete()
                 except discord.NotFound:
-                    pass
+                    logger.debug("旧Stickyメッセージが見つかりませんでした", exc_info=True)
                 except (discord.Forbidden, discord.HTTPException):
                     logger.warning(
                         "Stickyパネルを削除できません (guild=%s message=%s)",
@@ -6070,6 +6073,7 @@ class SupportCog(commands.Cog):
             try:
                 channel = await self.bot.fetch_channel(payload.channel_id)
             except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+                logger.debug("自動リアクション: チャンネルの取得に失敗しました", exc_info=True)
                 return
 
         try:
@@ -6139,8 +6143,10 @@ class SupportCog(commands.Cog):
                     await member.remove_roles(role, reason="/support 一括ロール剥奪")
                 affected += 1
             except (discord.Forbidden, discord.HTTPException):
+                logger.debug("一括ロール操作: メンバーへの適用に失敗しました", exc_info=True)
                 failed += 1
             except Exception:
+                logger.debug("一括ロール操作: メンバーへの適用に失敗しました", exc_info=True)
                 failed += 1
 
         return affected, skipped, failed
