@@ -92,7 +92,9 @@ class PanelMixin:
         )
 
         try:
-            await edit_message_v2(msg, build_music_panel_layout(self, guild_id, panel_text))
+            await edit_message_v2(msg, build_music_panel_layout(
+                self, guild_id, panel_text,
+                thumbnail_url=state.get('current_thumbnail_url')))
         except Exception as e:
             logging.error(f"Panel update failed: {e}")
 

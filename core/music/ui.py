@@ -289,6 +289,7 @@ class VoiceControlView(discord.ui.View):
         state = self.cog.get_state(self.guild_id)
         if vc and (has_audio_source(vc, "music") or state['is_paused']):
             state['current_track'] = None
+            state['current_thumbnail_url'] = None
             state['elapsed_offset'] = 0
             state['is_paused'] = False
             remove_audio_source(vc, "music", notify=True)
@@ -338,6 +339,7 @@ class VoiceControlView(discord.ui.View):
         state = self.cog.get_state(self.guild_id)
         if vc:
             state['current_track'] = None
+            state['current_thumbnail_url'] = None
             state['elapsed_offset'] = 0
             state['is_paused'] = False
             while not state['queue'].empty():
@@ -350,8 +352,14 @@ class VoiceControlView(discord.ui.View):
             await interaction.response.send_message(embed=we("<:failed:1490986584676368535> ボイスチャンネルに接続していません。"), ephemeral=True)
 
 
-def build_music_panel_layout(cog, guild_id: int, panel_text: str) -> discord.ui.LayoutView:
-    """操作部品とステータスをComponents V2コンテナにまとめる。"""
+def build_music_panel_layout(cog, guild_id: int, panel_text: str,
+                             thumbnail_url: str | None = None) -> discord.ui.LayoutView:
+    """操作部品とステータスをComponents V2コンテナにまとめる。
+
+    再生中トラックのサムネイルURLがある場合は、ステータスを
+    Section＋Thumbnail のネイティブ V2 構成にし、Separator で
+    操作部品と区切る。無い場合は従来の TextDisplay 構成のまま。
+    """
     controls = VoiceControlView(cog, guild_id)
     rows: dict[int, list[discord.ui.Item]] = {}
     for item in controls.children:
@@ -359,9 +367,20 @@ def build_music_panel_layout(cog, guild_id: int, panel_text: str) -> discord.ui.
         if row is None:
             row = 0 if isinstance(item, discord.ui.Select) else 3
         rows.setdefault(row, []).append(item)
+    action_rows = [discord.ui.ActionRow(*items) for _, items in sorted(rows.items())]
+    if thumbnail_url and thumbnail_url.startswith(("http://", "https://")):
+        header: list[discord.ui.Item] = [
+            discord.ui.Section(
+                discord.ui.TextDisplay(panel_text[:4000]),
+                accessory=discord.ui.Thumbnail(thumbnail_url),
+            ),
+            discord.ui.Separator(),
+        ]
+    else:
+        header = [discord.ui.TextDisplay(panel_text[:4000])]
     container = discord.ui.Container(
-        discord.ui.TextDisplay(panel_text[:4000]),
-        *[discord.ui.ActionRow(*items) for _, items in sorted(rows.items())],
+        *header,
+        *action_rows,
         accent_colour=0xFFFFFF,
     )
     layout = discord.ui.LayoutView(timeout=PANEL_TIMEOUT_SECONDS)
