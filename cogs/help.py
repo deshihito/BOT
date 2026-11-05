@@ -19,7 +19,6 @@ from core.emojis import BACK
 from core.panel_v2 import as_panel_v2, edit_panel_v2
 
 # Discord の上限
-EMBED_TOTAL = 6000
 EMBED_TITLE = 256
 EMBED_DESCRIPTION = 4096
 FIELD_VALUE = 1024

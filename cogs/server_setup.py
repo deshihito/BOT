@@ -18,7 +18,7 @@ from discord.ext import commands
 
 from core.command_catalog import permission_label
 from core.emojis import FAILED, SUCCESS
-from core.guild_settings import NATION_SECTION, NOTIFY_ALL, NOTIFY_LEVELS, NOTIFY_MAJOR, get_store, nation_settings
+from core.guild_settings import NATION_SECTION, NOTIFY_LEVELS, NOTIFY_MAJOR, get_store, nation_settings
 from core import localization
 
 logger = logging.getLogger(__name__)

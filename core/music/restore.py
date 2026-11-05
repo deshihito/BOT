@@ -6,7 +6,6 @@ import asyncio
 import time
 import types
 import logging
-import configparser
 import string
 import subprocess
 import json

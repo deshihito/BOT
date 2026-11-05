@@ -2,7 +2,6 @@ import logging
 
 import discord
 from discord.ext import commands, tasks
-from discord import app_commands
 from datetime import datetime, timedelta, timezone
 
 from core.storage import KVStore

@@ -15,7 +15,6 @@ from __future__ import annotations
 import asyncio
 import io
 import logging
-import os
 import re
 import subprocess
 import threading
@@ -120,23 +119,6 @@ def format_notes(detected: list[tuple[str, str, int]]) -> list[str]:
     return [sharp if sharp == flat else f"{sharp}/{flat}" for sharp, flat, _midi in detected]
 
 
-def synthesize_piano_chord(midi_list: list[int], duration_sec: float = 0.25) -> bytes:
-    """検出MIDIからピアノ波形(PCM 16bit stereo 48kHz)を生成"""
-    num_samples = int(48000 * duration_sec)
-    t = np.linspace(0, duration_sec, num_samples, endpoint=False)
-    mixed_signal = np.zeros(num_samples, dtype=np.float32)
-
-    for midi_num in midi_list:
-        f0 = midi_to_freq(midi_num)
-        note_wave = np.sin(2 * np.pi * f0 * t) + 0.5 * np.sin(2 * np.pi * f0 * 2 * t) + 0.25 * np.sin(2 * np.pi * f0 * 3 * t)
-        decay = np.exp(-6.0 * t) * np.minimum(t / 0.005, 1.0)
-        mixed_signal += note_wave * decay
-
-    if len(midi_list) > 0:
-        mixed_signal /= math.sqrt(len(midi_list))
-
-    audio_int16 = (mixed_signal * 12000).clip(-32768, 32767).astype(np.int16)
-    return np.column_stack((audio_int16, audio_int16)).flatten().tobytes()
 # ============================================================
 # 録音 Sink
 # ============================================================

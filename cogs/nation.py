@@ -25,7 +25,6 @@ from core.api_retry import run_with_retry
 log = logging.getLogger(__name__)
 
 MAX_HUNGER = 100
-SEARCH_RADIUS = 50  # 首都を置く空きマスを原点からこの距離まで探す（nation_found.sql と同じ）
 ROLE_NAMES = {"king": "国王", "minister": "大臣", "citizen": "国民"}
 # nation_found（SQL）が投げるエラーの目印 → 返信のタイトルと本文
 FOUND_ERRORS = {
@@ -38,18 +37,6 @@ HUNGER_PER_MESSAGE = 1
 COIN_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "Assets", "COIN.png")
 DISABLED_TEXT = "このサーバーは国づくりに参加しない設定です。"
 COLOR_OK, COLOR_INFO, COLOR_ERROR = 0x2ecc71, 0x3498db, 0xe74c3c
-
-
-def spiral_coords(radius: int):
-    """原点から近い順（チェビシェフ距離のリングごと）に座標を返す。"""
-    yield 0, 0
-    for r in range(1, radius + 1):
-        for x in range(-r, r + 1):
-            yield x, -r
-            yield x, r
-        for y in range(-r + 1, r):
-            yield -r, y
-            yield r, y
 
 
 def hunger_bar(hunger: int) -> str:

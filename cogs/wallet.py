@@ -21,17 +21,6 @@ INSUFFICIENT = object()  # 残高不足を表す目印
 COIN_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "Assets", "COIN.png")
 COIN_FILENAME = "coin.png"
 COIN_COLOR = 0xf1c40f
-LEADERBOARD_TYPES = [
-    app_commands.Choice(name="コイン", value="coin"),
-    app_commands.Choice(name="bump RTA", value="bump"),
-    app_commands.Choice(name="up RTA", value="up"),
-    app_commands.Choice(name="即抜けRTA", value="sokunuke"),
-]
-RTA_SCOPES = [
-    app_commands.Choice(name="自分のベスト", value="me"),
-    app_commands.Choice(name="このサーバー", value="local"),
-    app_commands.Choice(name="全サーバー", value="global"),
-]
 
 
 def coin_embed(title: str, description: str | None = None) -> tuple[discord.Embed, dict]:

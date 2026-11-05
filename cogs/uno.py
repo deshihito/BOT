@@ -5,11 +5,9 @@ from discord.ext import commands
 from core import autoplay, party_ranking
 
 party_ranking.register("uno")
-from discord import app_commands
 import random
 import asyncio
 import logging
-import re
 
 logger = logging.getLogger(__name__)
 

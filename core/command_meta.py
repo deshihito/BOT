@@ -128,12 +128,11 @@ CATEGORIES = [
     },
 ]
 
-CATEGORY_IDS = tuple(c["id"] for c in CATEGORIES)
 
 # このキーのコマンドは、環境によっては読み込まれない（無くてもテストで失敗にしない）
 OPTIONAL_COMMANDS = {
     "/judge": "needle3 が入っている環境（ラズパイ）でだけ読み込まれる",
-    "/game": "パーティーゲームの入口。PR #34 で追加予定",
+    "/game": "パーティーゲームの入口",
 }
 
 COMMAND_META: dict[str, dict] = {
