@@ -86,6 +86,26 @@ class LevelUpPreviewButton(discord.ui.Button):
         )
 
 
+class LevelUpCardThemeButton(discord.ui.Button):
+    """押したユーザー本人のレベルアップカードのテーマを切り替える (ユーザー別設定)。"""
+
+    def __init__(self, parent: "LevelUpNotifyPanel"):
+        self.parent_view = parent
+        super().__init__(label="自分のカードテーマ", style=discord.ButtonStyle.secondary)
+
+    async def callback(self, interaction: discord.Interaction):
+        from core import levelup_card
+
+        current = levelup_card.get_theme(interaction.user.id)
+        nxt = levelup_card.next_theme(current)
+        await levelup_card.set_theme(interaction.user.id, nxt)
+        await interaction.response.send_message(
+            f"自分のレベルアップカードのテーマを「{levelup_card.theme_label(nxt)}」にしました。"
+            "「画像プレビュー」で確認できます。",
+            ephemeral=True,
+        )
+
+
 class LevelUpNotifyPanel(discord.ui.LayoutView):
     """レベルアップ通知の設定パネル（Components V2・サーバー管理権限）。"""
 
@@ -129,7 +149,8 @@ class LevelUpNotifyPanel(discord.ui.LayoutView):
             f"状態: **{'オン' if s['enabled'] else 'オフ'}**\n"
             f"送信先: {target}\n"
             "対象: generalレベル（チャットとVCのレベルから算出）\n"
-            "内容: ユーザーのアイコン・前のレベル・上がった後のレベルの画像"
+            "内容: ユーザーのアイコン・前のレベル・上がった後のレベルの画像\n"
+            "カードの色テーマは「自分のカードテーマ」でユーザーごとに変更できます"
         )
         me = self.guild.me
         if channel is not None and me is not None:
@@ -156,6 +177,7 @@ class LevelUpNotifyPanel(discord.ui.LayoutView):
                     LevelUpToggleButton(self),
                     LevelUpResetChannelButton(self),
                     LevelUpPreviewButton(self),
+                    LevelUpCardThemeButton(self),
                 ),
                 accent_colour=0xF1C40F,
             )
