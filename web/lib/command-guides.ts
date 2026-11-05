@@ -84,13 +84,17 @@ export const COMMAND_GUIDES: CommandGuide[] = [
       {
         slug: "money",
         title: "マネー",
-        description: "AGOの状況確認、送金、市場でのアゴトークンの売買、コイン保有ランキングをまとめています。",
+        description: "AGOの状況確認、送金、市場でのアゴトークンの売買、アイテムと宝箱、コイン保有ランキングをまとめています。",
         functions: [
           { title: "プレイヤー状況", description: "自分の所持状況を確認します。" },
           { title: "コイン送金", description: "送金先のユーザーIDとAGOを入力して、ほかのユーザーへ送ります。" },
           { title: "市場", description: "アゴトークンの現在レートとチャート、市場の状況を確認します。" },
           { title: "アゴトークンを買う", description: "AGOを使ってアゴトークンを買います。" },
           { title: "アゴトークンを売る", description: "アゴトークンを売ってAGOに替えます。" },
+          { title: "アイテム", description: "所持アイテムとショップ、発動中の効果を確認します。" },
+          { title: "アイテムを買う", description: "AGOで素材や消費アイテム、宝箱を買います。" },
+          { title: "アイテムを使う", description: "手数料パスなど、使う効果のあるアイテムを発動します。" },
+          { title: "宝箱を開ける", description: "所持している宝箱をまとめて開けます。" },
           { title: "コイン保有ランキング", description: "コインの保有状況をランキングで確認します。" },
         ],
       },

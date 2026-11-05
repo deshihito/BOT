@@ -54,3 +54,20 @@ MARKET_INVALID_AMOUNT = "数量が正しくありません。半角数字で入�
 def market_trade_failed(reason: object) -> str:
     """売買が成立しなかったときの文（理由をそのまま続ける）。"""
     return f"{FAILED} {reason}"
+
+
+# ---------------------------------------------------------------- アイテム系
+
+#: アイテム cog が読み込まれていないときのエラー（/general の dispatch で共用）。
+ITEMS_NOT_LOADED = "アイテム機能が読み込まれていません。"
+
+#: アイテム操作モーダルの入力が解釈できないときのエラー。
+ITEM_INVALID_INPUT = "入力が正しくありません。アイテム名と数量（半角数字）を確認してください。"
+
+#: アイテム名が定義にないときのエラー。
+ITEM_NOT_FOUND = "そのアイテムは存在しません。アイテムパネルで名前を確認してください。"
+
+
+def item_action_failed(reason: object) -> str:
+    """アイテム操作が成立しなかったときの文（理由をそのまま続ける）。"""
+    return f"{FAILED} {reason}"

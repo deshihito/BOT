@@ -376,23 +376,30 @@ class MarketStore:
                 )
 
     # ------------------------------------------------------------------ 売買
-    def quote_buy(self, aga_amount: int) -> dict[str, Any]:
-        """aga_amount AGO で買える量の見積もり（状態は変えない）。"""
+    def quote_buy(self, aga_amount: int, fee_rate: float | None = None) -> dict[str, Any]:
+        """aga_amount AGO で買える量の見積もり（状態は変えない）。
+
+        fee_rate は手数料率の上書き（アイテム効果の割引など、Phase 2 の
+        core/items.py の受動効果から渡す）。None なら通常の FEE_RATE。
+        """
+        fee_rate = FEE_RATE if fee_rate is None else fee_rate
         with self._lock:
             rate = float(self._state["rate"])
-            fee = int(aga_amount * FEE_RATE)
+            fee = int(aga_amount * fee_rate)
             net = aga_amount - fee
             tokens = quantize_tokens(net / rate)
             return {"rate": rate, "fee": fee, "net_aga": net, "tokens": tokens}
 
-    def quote_sell(self, token_amount: float) -> dict[str, Any]:
+    def quote_sell(self, token_amount: float, fee_rate: float | None = None) -> dict[str, Any]:
+        fee_rate = FEE_RATE if fee_rate is None else fee_rate
         with self._lock:
             rate = float(self._state["rate"])
             gross = int(token_amount * rate)
-            fee = int(gross * FEE_RATE)
+            fee = int(gross * fee_rate)
             return {"rate": rate, "gross_aga": gross, "fee": fee, "net_aga": gross - fee}
 
-    def validate_buy(self, aga_amount: int, now: datetime | None = None) -> None:
+    def validate_buy(self, aga_amount: int, now: datetime | None = None,
+                     fee_rate: float | None = None) -> None:
         now = now or datetime.now(JST)
         if aga_amount < MIN_TRADE_AGA:
             raise TradeError(f"最低取引額は {MIN_TRADE_AGA} AGO です。")
@@ -401,14 +408,15 @@ class MarketStore:
             raise TradeError(reason)
         if aga_amount > self.trade_cap_aga():
             raise TradeError("1回の取引上限（市場プールの準備の1%）を超えています。金額を下げてください。")
-        quote = self.quote_buy(aga_amount)
+        quote = self.quote_buy(aga_amount, fee_rate)
         if quote["tokens"] <= 0:
             raise TradeError("購入金額が小さすぎます。")
         with self._lock:
             if quote["tokens"] > self._state["pool_token"]:
                 raise TradeError("市場プールのトークンが不足しています。")
 
-    def validate_sell(self, user_id: str, token_amount: float, now: datetime | None = None) -> None:
+    def validate_sell(self, user_id: str, token_amount: float, now: datetime | None = None,
+                      fee_rate: float | None = None) -> None:
         now = now or datetime.now(JST)
         token_amount = quantize_tokens(token_amount)
         if token_amount <= 0:
@@ -418,7 +426,7 @@ class MarketStore:
             raise TradeError(reason)
         if self.token_balance(user_id) < token_amount:
             raise TradeError(f"{TOKEN_NAME}が不足しています。")
-        quote = self.quote_sell(token_amount)
+        quote = self.quote_sell(token_amount, fee_rate)
         if quote["gross_aga"] < MIN_TRADE_AGA:
             raise TradeError(f"最低取引額は {MIN_TRADE_AGA} AGO です。")
         if quote["gross_aga"] > self.trade_cap_aga():
@@ -427,9 +435,9 @@ class MarketStore:
             if quote["net_aga"] > self._state["pool_aga"]:
                 raise TradeError("市場プールのコインが不足しています。")
 
-    def apply_buy(self, user_id: str, aga_amount: int) -> dict[str, Any]:
+    def apply_buy(self, user_id: str, aga_amount: int, fee_rate: float | None = None) -> dict[str, Any]:
         """検証済みの買いをプールとユーザ残高へ反映する（コインの実移動は呼び出し側）。"""
-        quote = self.quote_buy(aga_amount)
+        quote = self.quote_buy(aga_amount, fee_rate)
         burn = int(quote["fee"] * FEE_BURN_SHARE)
         with self._lock:
             state = self._state
@@ -444,9 +452,9 @@ class MarketStore:
             self._mark_dirty()
         return {**quote, "burned": burn, "balance": self.token_balance(user_id)}
 
-    def apply_sell(self, user_id: str, token_amount: float) -> dict[str, Any]:
+    def apply_sell(self, user_id: str, token_amount: float, fee_rate: float | None = None) -> dict[str, Any]:
         token_amount = quantize_tokens(token_amount)
-        quote = self.quote_sell(token_amount)
+        quote = self.quote_sell(token_amount, fee_rate)
         burn = int(quote["fee"] * FEE_BURN_SHARE)
         with self._lock:
             state = self._state

@@ -52,6 +52,7 @@ ALL_SURFACES = frozenset({"panel", "shortcut", "aitools", "palette"})
 # 下の AI_CONFIRM_IDS のとおり確認ビュー付きでのみ実行可とする。
 AI_BLOCKED_IDS = frozenset({
     "general:pay", "general:token_buy", "general:token_sell",
+    "general:item_buy", "general:item_use", "general:box_open",
     "general:fujo_register", "general:fujo_freeze", "general:fujo_panic_disable",
     "general:shortcut_manage", "general:aitools", "general:ai_default",
     "general:image_default", "general:reasoning_default",
