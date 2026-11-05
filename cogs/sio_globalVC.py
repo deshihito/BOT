@@ -31,7 +31,7 @@ from core.globalvc.connect import logger, ConnectMixin  # noqa: F401
 from core.globalvc.manage import logger, ManageMixin  # noqa: F401
 from core.globalvc.restore import logger, RestoreMixin  # noqa: F401
 from core.globalvc.rooms import logger, RoomConfig, ROOMS, GLOBAL_ROOMS, _room_to_dict, _room_from_dict, _persist_rooms, _load_rooms, _persist_join, _clear_join, _remove_vc_from_rooms, _prune_dead_clients, _disconnect_and_cleanup, _watchdog_interval_seconds, _WEBHOOK_BANNED_WORDS, _safe_webhook_username, _can_delete_room  # noqa: F401
-from core.globalvc.textlink import logger, TextLink, ROOM_TEXT_LINKS, CHANNEL_TO_ROOM, _remove_text_link  # noqa: F401
+from core.globalvc.textlink import logger, TextLink, ROOM_TEXT_LINKS, CHANNEL_TO_ROOM, _text_link_to_dict, _persist_text_links, _restore_text_links, _remove_text_link  # noqa: F401
 from core.globalvc.ui import logger, _RoomJoinButton, _PrivateRoomJoinModal, GlobalRoomListView  # noqa: F401
 
 logger = logging.getLogger("cogs.sio_globalVC")

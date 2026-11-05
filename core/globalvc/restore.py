@@ -27,6 +27,7 @@ except Exception:  # numpy が無い環境では純Pythonで合成する
 
 from core.globalvc.common import *  # noqa: F401,F403 - shared constants/helpers
 from core.globalvc.rooms import ROOMS, _clear_join, _load_rooms  # noqa: F401
+from core.globalvc.textlink import _restore_text_links  # noqa: F401
 
 logger = logging.getLogger("cogs.sio_globalVC")
 
@@ -41,6 +42,11 @@ class RestoreMixin:
         ルーム定義自体は cog_load で _load_rooms() が復元済みの前提。
         """
         _load_rooms()
+        # グロチャのテキスト連携は VC 参加と独立に復旧する（中継は参加が無くても成立する）
+        try:
+            await _restore_text_links(self.bot)
+        except Exception:
+            logger.exception("グローバルVC: グロチャ連携の復旧に失敗しました")
         try:
             joins = voice_restore.get_store().section("gvc_joins")
         except Exception:
