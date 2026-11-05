@@ -58,7 +58,8 @@ class AutocompleteFilterTest(unittest.TestCase):
     def test_choice_display_format_is_genre_slash_label(self):
         choices = quick.autocomplete_choices("翻訳")
         choice = next(c for c in choices if c.value == "general:translation_settings")
-        self.assertEqual(choice.name, "翻訳 / 自動翻訳を設定")
+        # 導線最適化 S7: 自動翻訳を設定は「設定・AI」ジャンルへ吸収済み
+        self.assertEqual(choice.name, "設定・AI / 自動翻訳を設定")
 
     def test_only_palette_surface_is_listed(self):
         specs = quick.palette_actions()

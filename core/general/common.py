@@ -56,10 +56,12 @@ GENERAL_GENRES = {
     "survival": ("生存確認", "メンバーの安否・不在の検知"),
     "custom": ("設定・AI", ""),
     "zeta": ("ZetaModoki", "ロールプレイ会話"),
-    "translation": ("翻訳", ""),
     "miq": ("引用画像 (MIQ)", "メッセージを引用画像にする"),
     "meme": ("meme作成", "画像に上下テキストを入れてmeme画像を作成する"),
 }
+# 旧ジャンルで保存されたショートカットを新しいジャンルへ移行する（導線最適化 S7）。
+GENERAL_GENRE_ALIASES = {"translation": "custom"}
+
 GENERAL_ACTIONS = {
     "money": [
         ("マネーパネル", "money_panel"),
@@ -107,15 +109,13 @@ GENERAL_ACTIONS = {
         ("チャットAIモデルを設定", "ai_default"),
         ("画像生成AIモデルを設定", "image_default"),
         ("AI思考強度を設定", "reasoning_default"),
+        ("自動翻訳を設定", "translation_settings"),
     ],
     "zeta": [
         ("ZetaModokiと会話", "zetamodoki"),
         ("ZetaModoki会話をリセット", "zeta_reset"),
         ("シチュエーション・キャラクターを登録", "zeta_register"),
         ("登録を管理（編集・削除）", "zeta_manage"),
-    ],
-    "translation": [
-        ("自動翻訳を設定", "translation_settings"),
     ],
     "miq": [
         ("MIQ設定（見た目・引用拒否）", "miq_settings"),

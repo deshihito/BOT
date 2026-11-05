@@ -95,7 +95,8 @@ class GeneralPanel(discord.ui.View):
         self.cog = cog
         self.owner_id = owner_id
         saved = (shortcut_item or {}).get("action", {})
-        self.genre = genre or saved.get("genre")
+        _genre = genre or saved.get("genre")
+        self.genre = GENERAL_GENRE_ALIASES.get(_genre, _genre)
         self.action = saved.get("value")
         self.shortcut_mode = shortcut_mode
         self.shortcut_item = shortcut_item
