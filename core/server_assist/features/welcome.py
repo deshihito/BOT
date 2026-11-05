@@ -1,7 +1,10 @@
 """Welcome and goodbye messages (ProBot-style join/leave notices)."""
 from __future__ import annotations
 
+import asyncio
+import io
 import logging
+from pathlib import Path
 from typing import Any
 
 import discord
@@ -26,9 +29,141 @@ FEATURE = Feature(
 
 PLACEHOLDERS = "{user} / {name} / {server} / {count} / {id}"
 
+# 画像カードのテーマ。レベルアップカードと同じ白基調の配色を基本にする。
+CARD_THEMES: dict[str, dict[str, Any]] = {
+    "white": {"label": "ホワイト", "bg": (255, 255, 255), "ink": (44, 52, 74), "mute": (150, 156, 170), "accent": (59, 91, 255), "ring": (127, 178, 201), "line": (228, 232, 240)},
+    "blue": {"label": "ブルー", "bg": (233, 240, 255), "ink": (35, 48, 84), "mute": (120, 134, 168), "accent": (37, 99, 235), "ring": (96, 165, 250), "line": (203, 219, 250)},
+    "pink": {"label": "ピンク", "bg": (255, 241, 246), "ink": (84, 40, 62), "mute": (178, 130, 152), "accent": (236, 72, 153), "ring": (249, 168, 212), "line": (251, 207, 232)},
+    "green": {"label": "グリーン", "bg": (238, 250, 242), "ink": (36, 64, 48), "mute": (128, 160, 140), "accent": (22, 163, 74), "ring": (134, 239, 172), "line": (204, 238, 216)},
+    "dark": {"label": "ダーク", "bg": (32, 36, 48), "ink": (238, 241, 248), "mute": (150, 158, 176), "accent": (129, 160, 255), "ring": (96, 118, 178), "line": (62, 70, 90)},
+}
+DEFAULT_CARD_THEME = "white"
+CARD_W, CARD_H = 1000, 360
+_CARD_SS = 2
+
+_FONT_CANDIDATES = (
+    str(Path(__file__).resolve().parents[3] / "assets" / "fonts" / "levelup.ttf"),
+    str(Path(__file__).resolve().parents[3] / "assets" / "fonts" / "levelup.otf"),
+    "/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc",
+    "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+    "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+    "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+)
+
+
+def _card_font(size: int):
+    from PIL import ImageFont
+
+    for path in _FONT_CANDIDATES:
+        try:
+            return ImageFont.truetype(path, size)
+        except Exception:
+            continue
+    try:
+        return ImageFont.load_default(size=size)
+    except TypeError:
+        return ImageFont.load_default()
+
+
+def _card_safe_name(name: str) -> str:
+    out = []
+    for ch in str(name or ""):
+        o = ord(ch)
+        if o >= 0x1F000 or 0x2190 <= o <= 0x2BFF or o in (0x200D, 0xFE0F, 0xFE0E) or o < 0x20:
+            continue
+        out.append(ch)
+    return "".join(out).strip() or "メンバー"
+
+
+def render_welcome_card(
+    avatar_bytes: bytes | None,
+    name: str,
+    guild_name: str,
+    member_count: int | None,
+    theme: str = DEFAULT_CARD_THEME,
+) -> bytes:
+    """参加メッセージ用画像カード(PNG)を生成して bytes で返す。CPU処理なので to_thread で呼ぶこと。
+
+    レベルアップカード (cogs/general.py の render_levelup_card) と同じ白基調・
+    アバター+リングのレイアウトを踏襲する。
+    """
+    from PIL import Image, ImageDraw
+
+    palette = CARD_THEMES.get(theme) or CARD_THEMES[DEFAULT_CARD_THEME]
+    S = _CARD_SS
+    W, H = CARD_W * S, CARD_H * S
+
+    def px(v: float) -> int:
+        return int(round(v * S))
+
+    bg = (*palette["bg"], 255)
+    ink = (*palette["ink"], 255)
+    mute = (*palette["mute"], 255)
+    accent = (*palette["accent"], 255)
+    ring = (*palette["ring"], 255)
+    line = (*palette["line"], 255)
+
+    img = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    d = ImageDraw.Draw(img)
+    d.rounded_rectangle([0, 0, W - 1, H - 1], radius=px(28), fill=bg, outline=line, width=px(2))
+
+    # 左: アバター (レベルアップカードと同じリング付き円形)
+    D = px(196)
+    ax, ay = px(56), (H - D) // 2
+    ring_w = px(4)
+    R = D // 2 + px(8) + ring_w
+    acx, acy = ax + D // 2, ay + D // 2
+    d.ellipse([acx - R, acy - R, acx + R, acy + R], outline=ring, width=ring_w)
+    avatar = None
+    if avatar_bytes:
+        try:
+            avatar = Image.open(io.BytesIO(avatar_bytes)).convert("RGBA").resize((D, D), Image.LANCZOS)
+        except Exception:
+            logger.debug("ウェルカムカード: アバターの取得に失敗しました", exc_info=True)
+            avatar = None
+    if avatar is None:
+        avatar = Image.new("RGBA", (D, D), (235, 238, 245, 255))
+        ad = ImageDraw.Draw(avatar)
+        ad.ellipse([D * 0.34, D * 0.20, D * 0.66, D * 0.52], fill=(255, 255, 255, 255))
+        ad.ellipse([D * 0.18, D * 0.58, D * 0.82, D * 1.15], fill=(255, 255, 255, 255))
+    amask = Image.new("L", (D, D), 0)
+    ImageDraw.Draw(amask).ellipse([0, 0, D - 1, D - 1], fill=255)
+    img.paste(avatar, (ax, ay), amask)
+
+    # 右: 見出し + 名前 + サーバー情報
+    TX = ax + D + px(52)
+    right = W - px(56)
+    shown = _card_safe_name(name)
+    guild_shown = _card_safe_name(guild_name)
+
+    head_font = _card_font(px(54))
+    head = "WELCOME"
+    while head_font.size > px(28) and d.textlength(head, font=head_font) > (right - TX) * 0.62:
+        head_font = _card_font(head_font.size - px(2))
+    d.text((TX, px(72)), head, font=head_font, fill=accent)
+
+    name_font = _card_font(px(64))
+    while name_font.size > px(30) and d.textlength(shown, font=name_font) > right - TX:
+        name_font = _card_font(name_font.size - px(2))
+    d.text((TX, px(148)), shown, font=name_font, fill=ink)
+
+    sub = f"{guild_shown} へようこそ！"
+    if isinstance(member_count, int) and member_count >= 0:
+        sub += f" • メンバー {member_count}人"
+    sub_font = _card_font(px(30))
+    while sub_font.size > px(20) and d.textlength(sub, font=sub_font) > right - TX:
+        sub_font = _card_font(sub_font.size - px(2))
+    d.text((TX, px(248)), sub, font=sub_font, fill=mute)
+
+    out = img.resize((CARD_W, CARD_H), Image.LANCZOS)
+    buf = io.BytesIO()
+    out.save(buf, format="PNG")
+    return buf.getvalue()
+
 
 def settings(guild_id: int) -> dict[str, Any]:
     raw = get_settings(guild_id, KEY)
+    theme = raw.get("welcome_image_theme")
     return {
         "welcome_enabled": bool(raw.get("welcome_enabled", False)),
         "goodbye_enabled": bool(raw.get("goodbye_enabled", False)),
@@ -36,6 +171,8 @@ def settings(guild_id: int) -> dict[str, Any]:
         "goodbye_channel_id": raw.get("goodbye_channel_id") if isinstance(raw.get("goodbye_channel_id"), int) else None,
         "welcome_message": str(raw.get("welcome_message") or DEFAULT_WELCOME)[:MAX_MESSAGE],
         "goodbye_message": str(raw.get("goodbye_message") or DEFAULT_GOODBYE)[:MAX_MESSAGE],
+        "welcome_image_enabled": bool(raw.get("welcome_image_enabled", False)),
+        "welcome_image_theme": theme if theme in CARD_THEMES else DEFAULT_CARD_THEME,
     }
 
 
@@ -169,20 +306,46 @@ class WelcomeTestButton(discord.ui.Button):
             return await interaction.response.send_message(
                 "先に参加メッセージの送信先を選んでください。", ephemeral=True,
             )
-        embed = build_embed(
-            interaction.user, interaction.guild, view.settings["welcome_message"], kind="welcome",
-        )
-        try:
-            await channel.send(
-                embed=embed,
-                allowed_mentions=discord.AllowedMentions(everyone=False, roles=False, users=True),
-            )
-        except discord.HTTPException:
-            logger.exception("参加メッセージのテスト送信に失敗しました: guild=%s", interaction.guild_id)
+        ok = await _send(interaction.guild, interaction.user, "welcome", view.settings)
+        if not ok:
             return await interaction.response.send_message(
                 "テスト送信に失敗しました。チャンネルの権限を確認してください。", ephemeral=True,
             )
         return await interaction.response.send_message("テストメッセージを送信しました。", ephemeral=True)
+
+
+class WelcomeImageToggleButton(discord.ui.Button):
+    def __init__(self):
+        super().__init__(label="画像カード", style=discord.ButtonStyle.secondary, row=3)
+
+    async def callback(self, interaction: discord.Interaction):
+        view: WelcomeSettingsView = self.view
+        if not view.can_manage(interaction):
+            return await interaction.response.send_message(
+                "この設定には「サーバーの管理」権限が必要です。", ephemeral=True,
+            )
+        value = not bool(view.settings.get("welcome_image_enabled"))
+        await update_settings(view.guild_id, KEY, welcome_image_enabled=value)
+        view.settings["welcome_image_enabled"] = value
+        await view.refresh(interaction, f"画像カードを{'オン' if value else 'オフ'}にしました。")
+
+
+class WelcomeImageThemeButton(discord.ui.Button):
+    def __init__(self):
+        super().__init__(label="画像テーマ切替", style=discord.ButtonStyle.secondary, row=3)
+
+    async def callback(self, interaction: discord.Interaction):
+        view: WelcomeSettingsView = self.view
+        if not view.can_manage(interaction):
+            return await interaction.response.send_message(
+                "この設定には「サーバーの管理」権限が必要です。", ephemeral=True,
+            )
+        keys = list(CARD_THEMES)
+        current = view.settings.get("welcome_image_theme") or DEFAULT_CARD_THEME
+        nxt = keys[(keys.index(current) + 1) % len(keys)] if current in keys else DEFAULT_CARD_THEME
+        await update_settings(view.guild_id, KEY, welcome_image_theme=nxt)
+        view.settings["welcome_image_theme"] = nxt
+        await view.refresh(interaction, f"画像テーマを「{CARD_THEMES[nxt]['label']}」にしました。")
 
 
 class WelcomeMessageModal(discord.ui.Modal):
@@ -230,6 +393,8 @@ class WelcomeSettingsView(AssistFeatureView):
         self.add_item(WelcomeMessageButton("welcome"))
         self.add_item(WelcomeMessageButton("goodbye"))
         self.add_item(WelcomeTestButton())
+        self.add_item(WelcomeImageToggleButton())
+        self.add_item(WelcomeImageThemeButton())
 
     def embed(self) -> discord.Embed:
         welcome = "オン" if self.settings["welcome_enabled"] else "オフ"
@@ -240,6 +405,8 @@ class WelcomeSettingsView(AssistFeatureView):
                 "メンバーが参加・退出したときに、設定したチャンネルへお知らせします。"
                 f"\n\n**参加メッセージ**: {welcome} / 送信先: {channel_label(self.settings['welcome_channel_id'])}"
                 f"\n**退出メッセージ**: {goodbye} / 送信先: {channel_label(self.settings['goodbye_channel_id'])}"
+                f"\n**画像カード**: {'オン' if self.settings['welcome_image_enabled'] else 'オフ'}"
+                f" / テーマ: {CARD_THEMES[self.settings['welcome_image_theme']]['label']}"
                 f"\n\n使える置き換え: {PLACEHOLDERS}"
                 + notice_line(self.notice)
             )[:4096],
@@ -258,7 +425,31 @@ class WelcomeSettingsView(AssistFeatureView):
         return embed
 
 
-async def _send(guild: Any, member: Any, kind: str, settings_value: dict[str, Any]) -> None:
+async def _welcome_image_file(member: Any, guild: Any, settings_value: dict[str, Any]) -> discord.File | None:
+    """画像カードを生成して File を返す。失敗時は None (テキストのみで送る)。"""
+    avatar_bytes = None
+    avatar = getattr(member, "display_avatar", None)
+    if avatar is not None:
+        try:
+            avatar_bytes = await avatar.replace(size=256, format="png").read()
+        except Exception:
+            logger.debug("ウェルカムカード: アバターの取得に失敗しました", exc_info=True)
+    try:
+        png = await asyncio.to_thread(
+            render_welcome_card,
+            avatar_bytes,
+            _member_name(member),
+            getattr(guild, "name", "サーバー"),
+            getattr(guild, "member_count", None),
+            settings_value.get("welcome_image_theme") or DEFAULT_CARD_THEME,
+        )
+    except Exception:
+        logger.exception("ウェルカムカードの生成に失敗しました: guild=%s", getattr(guild, "id", None))
+        return None
+    return discord.File(io.BytesIO(png), filename="welcome.png")
+
+
+async def _send(guild: Any, member: Any, kind: str, settings_value: dict[str, Any]) -> bool:
     if kind == "welcome":
         channel_id = settings_value.get("welcome_channel_id")
         template = settings_value.get("welcome_message") or DEFAULT_WELCOME
@@ -266,24 +457,35 @@ async def _send(guild: Any, member: Any, kind: str, settings_value: dict[str, An
         channel_id = settings_value.get("goodbye_channel_id") or settings_value.get("welcome_channel_id")
         template = settings_value.get("goodbye_message") or DEFAULT_GOODBYE
     if not channel_id:
-        return
+        return False
     channel = guild.get_channel(channel_id)
     if channel is None:
-        return
+        return False
     me = getattr(guild, "me", None)
     if me is not None:
         try:
             if not channel.permissions_for(me).send_messages:
-                return
+                return False
         except Exception:
             pass
+    embed = build_embed(member, guild, template, kind=kind)
+    file = None
+    if kind == "welcome" and settings_value.get("welcome_image_enabled"):
+        file = await _welcome_image_file(member, guild, settings_value)
+        if file is not None:
+            embed.set_image(url="attachment://welcome.png")
+    send_kwargs: dict[str, Any] = {
+        "embed": embed,
+        "allowed_mentions": discord.AllowedMentions(everyone=False, roles=False, users=True),
+    }
+    if file is not None:
+        send_kwargs["file"] = file
     try:
-        await channel.send(
-            embed=build_embed(member, guild, template, kind=kind),
-            allowed_mentions=discord.AllowedMentions(everyone=False, roles=False, users=True),
-        )
+        await channel.send(**send_kwargs)
     except discord.HTTPException:
         logger.exception("参加・退出メッセージを送信できませんでした: guild=%s", getattr(guild, "id", None))
+        return False
+    return True
 
 
 async def on_member_join(cog: Any, member: Any) -> None:
