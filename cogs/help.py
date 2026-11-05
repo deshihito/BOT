@@ -173,7 +173,7 @@ class CategorySelect(discord.ui.Select):
             options.append(discord.SelectOption(
                 label=clip(category["label"], OPTION_TEXT), value=category["id"],
                 description=clip(category["description"], OPTION_TEXT), default=category["id"] == current))
-        super().__init__(placeholder="カテゴリを選ぶ", options=options[:SELECT_OPTIONS], row=0)
+        super().__init__(placeholder="カテゴリを選ぶ", options=options[:SELECT_OPTIONS], custom_id="panel:help:category", row=0)
 
     async def callback(self, interaction: discord.Interaction):
         view: HelpView = self.view
@@ -192,7 +192,7 @@ class FunctionSelect(discord.ui.Select):
             options.append(discord.SelectOption(
                 label=clip(key, OPTION_TEXT), value=key[:OPTION_TEXT],
                 description=clip(entry["summary"], OPTION_TEXT)))
-        super().__init__(placeholder="機能（コマンド）を選ぶ", options=options[:SELECT_OPTIONS], row=1)
+        super().__init__(placeholder="機能（コマンド）を選ぶ", options=options[:SELECT_OPTIONS], custom_id="panel:help:function", row=1)
 
     async def callback(self, interaction: discord.Interaction):
         entry = find_command(self.catalog, self.values[0])
@@ -218,7 +218,7 @@ class GuideSelect(discord.ui.Select):
                 key = command_key(entry["kind"], entry["name"])
                 options.append(discord.SelectOption(label=clip(f"{key} のガイド", OPTION_TEXT), value=key[:OPTION_TEXT],
                                                     description=clip(entry["summary"], OPTION_TEXT)))
-        super().__init__(placeholder="ガイド（くわしい説明）を読む", options=options[:SELECT_OPTIONS], row=3)
+        super().__init__(placeholder="ガイド（くわしい説明）を読む", options=options[:SELECT_OPTIONS], custom_id="panel:help:guide", row=3)
 
     async def callback(self, interaction: discord.Interaction):
         value = self.values[0]
@@ -268,7 +268,7 @@ class HelpView(discord.ui.View):
             self.remove_item(self.back_to_top)
         if self.shortcut_mode:
             from cogs.general import ShortcutCommitButton
-            self.add_item(ShortcutCommitButton())
+            self.add_item(ShortcutCommitButton("help"))
 
     def shortcut_action(self):
         if self.category_id is None:
@@ -286,17 +286,17 @@ class HelpView(discord.ui.View):
             return await edit_panel_v2(interaction, as_panel_v2(view))
         await interaction.response.edit_message(embed=view.embed(), view=view)
 
-    @discord.ui.button(label="前へ", emoji="<:Left:1561698207757500537>", style=discord.ButtonStyle.secondary, row=2)
+    @discord.ui.button(label="前へ", emoji="<:Left:1561698207757500537>", style=discord.ButtonStyle.secondary, row=2, custom_id="panel:help:prev")
     async def previous_page(self, interaction: discord.Interaction, button: discord.ui.Button):
         await self.show(interaction, self.category_id, self.page - 1,
                         v2=hasattr(getattr(button, "view", None), "_sync"))
 
-    @discord.ui.button(label="次へ", emoji="<:Right:1561698129655373845>", style=discord.ButtonStyle.secondary, row=2)
+    @discord.ui.button(label="次へ", emoji="<:Right:1561698129655373845>", style=discord.ButtonStyle.secondary, row=2, custom_id="panel:help:next")
     async def next_page(self, interaction: discord.Interaction, button: discord.ui.Button):
         await self.show(interaction, self.category_id, self.page + 1,
                         v2=hasattr(getattr(button, "view", None), "_sync"))
 
-    @discord.ui.button(label="カテゴリ一覧", style=discord.ButtonStyle.primary, row=2)
+    @discord.ui.button(label="カテゴリ一覧", style=discord.ButtonStyle.primary, row=2, custom_id="panel:help:top")
     async def back_to_top(self, interaction: discord.Interaction, button: discord.ui.Button):
         await self.show(interaction, None, 0,
                         v2=hasattr(getattr(button, "view", None), "_sync"))
@@ -312,7 +312,7 @@ class BackView(discord.ui.View):
     def embed(self) -> discord.Embed:
         return self.content or discord.Embed(title="ヘルプ", description="カテゴリの一覧へ戻れます。", color=COLOR)
 
-    @discord.ui.button(label="一覧に戻る", emoji=BACK, style=discord.ButtonStyle.primary)
+    @discord.ui.button(label="一覧に戻る", emoji=BACK, style=discord.ButtonStyle.primary, custom_id="panel:help:back")
     async def back(self, interaction: discord.Interaction, button: discord.ui.Button):
         view = HelpView(self.catalog, self.category_id, self.page)
         self.stop()
@@ -331,14 +331,14 @@ class CommandView(discord.ui.View):
     def embed(self) -> discord.Embed:
         return command_embed(self.entry, self.catalog)
 
-    @discord.ui.button(label="ガイドを読む", emoji="<:book:1564624329889681418>", style=discord.ButtonStyle.success)
+    @discord.ui.button(label="ガイドを読む", emoji="<:book:1564624329889681418>", style=discord.ButtonStyle.success, custom_id="panel:help:read_guide")
     async def read_guide(self, interaction: discord.Interaction, button: discord.ui.Button):
         key = command_key(self.entry["kind"], self.entry["name"])
         await edit_panel_v2(interaction, as_panel_v2(BackView(
                 self.catalog, self.entry["category"], 0,
                 guide_embed(f"{key} のガイド", self.entry["guide"]))))
 
-    @discord.ui.button(label="カテゴリの一覧を見る", style=discord.ButtonStyle.primary)
+    @discord.ui.button(label="カテゴリの一覧を見る", style=discord.ButtonStyle.primary, custom_id="panel:help:open_category")
     async def open_category(self, interaction: discord.Interaction, button: discord.ui.Button):
         view = HelpView(self.catalog, self.entry["category"])
         self.stop()

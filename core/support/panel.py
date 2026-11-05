@@ -104,6 +104,7 @@ class SupportHistorySelect(discord.ui.Select):
                 discord.SelectOption(label=f"⭐ {spec.label}", value=spec.value)
                 for spec in specs
             ],
+            custom_id="panel:support:history",
             row=row,
         )
 
@@ -125,6 +126,7 @@ class SupportGenreSelect(discord.ui.Select):
                 )
                 for value, (label, _description) in SUPPORT_GENRES.items()
             ],
+            custom_id="panel:support:genre",
             row=row,
         )
 
@@ -164,6 +166,7 @@ class SupportActionSelect(discord.ui.Select):
                 discord.SelectOption(label=label, value=value)
                 for label, value in SUPPORT_ACTIONS_BY_GENRE[genre]
             ],
+            custom_id="panel:support:action",
             row=row,
         )
 
@@ -219,7 +222,7 @@ class SupportPanelView(discord.ui.View):
 
         if self.shortcut_mode:
             from cogs.general import ShortcutCommitButton
-            self.add_item(ShortcutCommitButton())
+            self.add_item(ShortcutCommitButton("support"))
 
     def shortcut_action(self):
         if not self.genre or not self.action:

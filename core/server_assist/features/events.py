@@ -3,8 +3,10 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 import time
 import uuid
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import discord
@@ -80,7 +82,86 @@ def settings(guild_id: int) -> dict[str, Any]:
     return {
         "enabled": bool(raw.get("enabled", False)),
         "channel_id": _as_int(raw.get("channel_id")),
+        "sync_scheduled": bool(raw.get("sync_scheduled", False)),
     }
+
+
+JST = timezone(timedelta(hours=9))
+SCHEDULED_DEFAULT_DURATION = timedelta(hours=2)
+_FULL_DATE_RE = re.compile(r"(\d{4})[/-](\d{1,2})[/-](\d{1,2})[ T](\d{1,2}):(\d{2})")
+_SHORT_DATE_RE = re.compile(r"(\d{1,2})/(\d{1,2})[ T](\d{1,2}):(\d{2})")
+_JP_DATE_RE = re.compile(r"(\d{1,2})月(\d{1,2})日\s*(\d{1,2}):(\d{2})")
+
+
+def parse_start_time(when_text: Any, now: datetime | None = None) -> datetime | None:
+    """自由文の日時から開始時刻 (JST) を読む。読めない・過去なら None。
+
+    対応: 2026/10/30 20:00 / 10/30 20:00 / 10月30日 20:00 (年なしは今年、
+    過ぎていれば来年として解釈する)。
+    """
+    text = str(when_text or "")
+    now = now or datetime.now(JST)
+    match = _FULL_DATE_RE.search(text)
+    if match:
+        year, month, day, hour, minute = (int(group) for group in match.groups())
+    else:
+        match = _SHORT_DATE_RE.search(text) or _JP_DATE_RE.search(text)
+        if not match:
+            return None
+        month, day, hour, minute = (int(group) for group in match.groups())
+        year = now.year
+        try:
+            candidate = datetime(year, month, day, hour, minute, tzinfo=JST)
+        except ValueError:
+            return None
+        if candidate < now - timedelta(days=1):
+            year += 1
+    try:
+        start = datetime(year, month, day, hour, minute, tzinfo=JST)
+    except ValueError:
+        return None
+    return start if start > now else None
+
+
+async def _sync_create(guild: Any, entry: dict[str, Any]) -> int | None:
+    """Discord の Scheduled Event を作って ID を返す。作れなければ None (RSVPは継続)。"""
+    if guild is None or not hasattr(guild, "create_scheduled_event"):
+        return None
+    start = parse_start_time(entry.get("when_text"))
+    if start is None:
+        return None
+    try:
+        scheduled = await guild.create_scheduled_event(
+            name=str(entry.get("title") or "イベント")[:100],
+            description=str(entry.get("description") or "")[:1000] or None,
+            start_time=start,
+            end_time=start + SCHEDULED_DEFAULT_DURATION,
+            entity_type=discord.EntityType.external,
+            location=str(entry.get("location") or "オンライン")[:100],
+            privacy_level=discord.PrivacyLevel.guild_only,
+        )
+    except (discord.Forbidden, discord.HTTPException, AttributeError, TypeError, ValueError):
+        logger.debug("Scheduled Event を作成できませんでした: guild=%s", getattr(guild, "id", None))
+        return None
+    return getattr(scheduled, "id", None)
+
+
+async def _sync_delete(guild: Any, entry: dict[str, Any]) -> None:
+    """連携済み Scheduled Event を削除する (開始済み等で消せなければキャンセル)。"""
+    scheduled_id = entry.get("scheduled_event_id")
+    if not scheduled_id or guild is None or not hasattr(guild, "fetch_scheduled_event"):
+        return
+    try:
+        scheduled = await guild.fetch_scheduled_event(scheduled_id)
+    except (discord.NotFound, discord.HTTPException, AttributeError):
+        return
+    try:
+        await scheduled.delete()
+    except (discord.Forbidden, discord.HTTPException):
+        try:
+            await scheduled.edit(status=discord.EventStatus.canceled)
+        except (discord.Forbidden, discord.HTTPException, AttributeError):
+            logger.debug("Scheduled Event を終了できませんでした: guild=%s", getattr(guild, "id", None))
 
 
 def _users(entry: dict[str, Any], field: str) -> list[int]:
@@ -122,6 +203,8 @@ def build_embed(entry: dict[str, Any]) -> discord.Embed:
     embed.add_field(name="不参加", value=str(len(_users(entry, "no"))), inline=True)
     embed.add_field(name="未定", value=str(len(_users(entry, "maybe"))), inline=True)
     embed.add_field(name="状態", value=_status_label(entry), inline=True)
+    if entry.get("scheduled_event_id"):
+        embed.add_field(name="Discordイベント", value="連携済み", inline=True)
     embed.set_footer(
         text=f"作成: {entry.get('author_name') or 'メンバー'}"[:2048]
     )
@@ -240,6 +323,15 @@ class EventCreateModal(discord.ui.Modal, title="イベントを作成"):
             logger.exception("イベントを投稿できませんでした: guild=%s", interaction.guild_id)
             return await interaction.followup.send("イベントを投稿できませんでした。", ephemeral=True)
         await _put_entry(message.id, entry)
+        if current.get("sync_scheduled"):
+            scheduled_id = await _sync_create(interaction.guild, entry)
+            if scheduled_id is not None:
+                entry["scheduled_event_id"] = scheduled_id
+                await _put_entry(message.id, entry)
+                try:
+                    await message.edit(embed=build_embed(entry), view=EventRsvpView(self.cog, entry))
+                except Exception:
+                    logger.debug("連携表示の更新に失敗しました: message=%s", message.id)
         return await interaction.followup.send("イベントを作成しました。", ephemeral=True)
 
 
@@ -327,6 +419,8 @@ async def handle_close(cog: Any, interaction: discord.Interaction) -> None:
             edited = True
         except Exception:
             logger.exception("イベントの終了表示を更新できませんでした: message=%s", message.id)
+    if changed:
+        await _sync_delete(getattr(interaction, "guild", None), entry)
     if not edited:
         return await interaction.followup.send(
             "終了は保存しましたが、表示を更新できませんでした。もう一度押してください。", ephemeral=True,
@@ -406,6 +500,22 @@ class EventToggleButton(discord.ui.Button):
         await view.refresh(interaction, f"イベントを{'オン' if value else 'オフ'}にしました。")
 
 
+class EventSyncToggleButton(discord.ui.Button):
+    def __init__(self):
+        super().__init__(label="公式イベント連携", style=discord.ButtonStyle.secondary, row=2)
+
+    async def callback(self, interaction: discord.Interaction):
+        view: EventSettingsView = self.view
+        if not view.can_manage(interaction):
+            return await interaction.response.send_message(
+                "この設定には「サーバーの管理」権限が必要です。", ephemeral=True,
+            )
+        value = not view.settings.get("sync_scheduled", False)
+        await update_settings(view.guild_id, KEY, sync_scheduled=value)
+        view.settings["sync_scheduled"] = value
+        await view.refresh(interaction, f"公式イベント連携を{'オン' if value else 'オフ'}にしました。")
+
+
 class EventPanelButton(discord.ui.Button):
     def __init__(self):
         super().__init__(label="パネルを送信", style=discord.ButtonStyle.primary, row=2)
@@ -439,6 +549,7 @@ class EventSettingsView(AssistFeatureView):
         if self.guild is not None:
             self.add_item(EventChannelSelect(self))
         self.add_item(EventToggleButton())
+        self.add_item(EventSyncToggleButton())
         self.add_item(EventPanelButton())
 
     def embed(self) -> discord.Embed:
@@ -448,7 +559,9 @@ class EventSettingsView(AssistFeatureView):
                 "イベントパネルを設置し、参加・不参加・未定を受け付けます。"
                 f"\n\n**状態**: {'オン' if self.settings['enabled'] else 'オフ'}"
                 f"\n**投稿先**: {channel_label(self.settings['channel_id'])}"
+                f"\n**公式イベント連携**: {'オン' if self.settings.get('sync_scheduled') else 'オフ'}"
                 "\n\n「パネルを送信」でイベント作成ボタン付きのパネルを投稿します。"
+                "連携オンでは、日時が読めるイベントをDiscordの予定イベントにも作成し、終了時に削除します。"
                 "終了は作成者か「サーバーの管理」権限を持つ人が操作できます。"
                 + notice_line(self.notice)
             )[:4096],

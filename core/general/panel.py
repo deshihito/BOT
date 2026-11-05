@@ -32,6 +32,7 @@ class GeneralHistorySelect(discord.ui.Select):
                 discord.SelectOption(label=f"⭐ {spec.label}", value=spec.value)
                 for spec in specs
             ],
+            custom_id="panel:general:history",
             row=row,
         )
 
@@ -47,6 +48,7 @@ class GeneralGenreSelect(discord.ui.Select):
             options=[discord.SelectOption(label=label, description=f"{len(GENERAL_ACTIONS[value])}個の機能", value=value,
                                           default=value == selected)
                      for value, (label, _description) in GENERAL_GENRES.items()],
+            custom_id="panel:general:genre",
             row=row,
         )
 
@@ -70,6 +72,7 @@ class GeneralActionSelect(discord.ui.Select):
         super().__init__(
             placeholder="機能を選択してください",
             options=[discord.SelectOption(label=label, value=value) for label, value in GENERAL_ACTIONS[genre]],
+            custom_id="panel:general:action",
             row=row,
         )
 

@@ -68,6 +68,7 @@ SUPPORT_ACTIONS = [
     app_commands.Choice(name="bump/up通知・RTA状態", value="bumprta_status"),
     app_commands.Choice(name="bump/up通知・RTAオン", value="bumprta_on"),
     app_commands.Choice(name="bump/up通知・RTAオフ", value="bumprta_off"),
+    app_commands.Choice(name="bump/up通知メンションロール", value="bumprta_role"),
     app_commands.Choice(name="絵文字便乗設定（binjou）", value="binjou"),
     app_commands.Choice(name="抽選（giveaway）", value="giveaway"),
     app_commands.Choice(name="VC入退室履歴", value="vc_log"),
@@ -127,7 +128,7 @@ SUPPORT_ACTIONS_BY_GENRE = {
     "assist": _support_actions("server_assist"),
     "event": _support_actions("giveaway"),
     "rta": _support_actions(
-        "bumprta_status", "bumprta_on", "bumprta_off", "sokunuke_status", "sokunuke_on",
+        "bumprta_status", "bumprta_on", "bumprta_off", "bumprta_role", "sokunuke_status", "sokunuke_on",
         "sokunuke_off", "sokunuke_vc_on", "sokunuke_vc_off",
     ),
 }
