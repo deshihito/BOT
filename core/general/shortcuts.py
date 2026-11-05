@@ -291,18 +291,46 @@ class ShortcutCommitButton(discord.ui.Button):
 
     async def callback(self, interaction: discord.Interaction):
         panel = getattr(self.view, "panel", self.view)
-        action = panel.shortcut_action()
-        if action is None:
-            return await interaction.response.send_message("機能を選択してから決定してください。", ephemeral=True)
-        cog = interaction.client.get_cog("GeneralCog")
-        item = getattr(panel, "shortcut_item", None)
-        spec = action_registry.default_registry().get(
-            f"{action.get('root')}:{action.get('value')}")
-        if spec is not None and spec.params:
-            # ParamSpec を持つアクションだけ、名前モーダルの前にパラメータ設定を挟む。
-            view = ShortcutParamsView(cog, action, item, spec)
-            return await interaction.response.send_message(embed=view.embed(), view=view, ephemeral=True)
-        await interaction.response.send_modal(ShortcutNameModal(cog, action, item))
+        await begin_shortcut_registration(interaction, panel)
+
+
+async def begin_shortcut_registration(interaction: discord.Interaction, panel):
+    """パネルで選択中のアクションをショートカット登録する共通入口（導線最適化 M9）。
+
+    ShortcutCommitButton（登録フロー内）と RegisterShortcutButton（通常パネル）
+    の両方から使う。ParamSpec を持つアクションだけ、名前モーダルの前に
+    パラメータ設定を挟む。
+    """
+    action = panel.shortcut_action()
+    if action is None:
+        return await interaction.response.send_message(
+            "機能を選択してから押してください。", ephemeral=True)
+    cog = interaction.client.get_cog("GeneralCog")
+    item = getattr(panel, "shortcut_item", None)
+    spec = action_registry.default_registry().get(
+        f"{action.get('root')}:{action.get('value')}")
+    if spec is not None and spec.params:
+        view = ShortcutParamsView(cog, action, item, spec)
+        return await interaction.response.send_message(embed=view.embed(), view=view, ephemeral=True)
+    await interaction.response.send_modal(ShortcutNameModal(cog, action, item))
+
+
+class RegisterShortcutButton(discord.ui.Button):
+    """通常パネルから直接ショートカット登録を始めるボタン（導線最適化 M9）。
+
+    管理画面経由（約9操作）ではなく、機能を選んだその場で押すと
+    名前モーダル（またはパラメータ設定）へ進める。
+    """
+
+    def __init__(self, root: str = "general", row: int = 4):
+        # custom_id は panel:<root>:register の固定形。パネル復旧（PR-B 不変条件）
+        # が root を見て正しいパネルを開き直せるようにするため。
+        super().__init__(label="⭐ ショートカットに登録", style=discord.ButtonStyle.secondary,
+                         row=row, custom_id=f"panel:{root}:register")
+
+    async def callback(self, interaction: discord.Interaction):
+        panel = getattr(self.view, "panel", self.view)
+        await begin_shortcut_registration(interaction, panel)
 
 
 class ShortcutManageSelect(discord.ui.Select):

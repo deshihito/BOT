@@ -442,6 +442,10 @@ class VoicePanelView(discord.ui.View):
         if self.shortcut_mode:
             from cogs.general import ShortcutCommitButton
             self.add_item(ShortcutCommitButton("vc"))
+        else:
+            # 導線最適化 M9: 選んだ機能をその場でショートカット登録できる。
+            from core.general.shortcuts import RegisterShortcutButton
+            self.add_item(RegisterShortcutButton("vc"))
 
     def shortcut_action(self):
         if not self.genre or not self.action:
