@@ -124,6 +124,11 @@ class ZetaModoki(commands.Cog):
                 username=persona.name,
                 avatar_url=persona.icon_url,
                 allowed_mentions=discord.AllowedMentions.none(),
+                # AI生成のロールプレイ本文は動的コンテンツなので、静的UI文向けの
+                # 送信時翻訳（断片置換）の対象外にする。英語設定サーバーで本文が
+                # 置換で崩れ、表示と会話履歴（原文保持）が食い違うのを防ぐ。
+                # !ai 本体（cogs/ai.py の _reply_without_localization）と同じ扱い。
+                _agobot_skip_localization=True,
                 **send_kwargs,
                 wait=True,
             )
