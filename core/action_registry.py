@@ -56,6 +56,9 @@ AI_BLOCKED_IDS = frozenset({
     # MIQ設定は個人の設定パネルで /general から ephemeral で開くもの。AI 経由だと
     # 公開送信されてしまうため対象外（PR #373 の BLOCKED_ACTIONS 追加を継承）。
     "general:miq_settings",
+    # meme作成はモーダル入力＋画像投稿待ちの対話フローで、画像生成系を
+    # AI の代理実行に広げない方針のため対象外。
+    "general:meme_create",
     "support:clear", "support:role_bulk", "support:muted", "support:ticket", "support:honeypot",
     "support:whisper", "support:binjou", "support:message_log", "support:moderation_log",
     "support:bumprta_on", "support:bumprta_off",
