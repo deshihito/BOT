@@ -52,7 +52,10 @@ class CustomReplySettingsTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn("customreplies", keys)
 
     def test_defaults(self):
-        self.assertEqual(customreplies.settings(1), {"enabled": False, "replies": []})
+        self.assertEqual(
+            customreplies.settings(1),
+            {"enabled": False, "replies": [], "min_role_id": None},
+        )
 
     def test_match_is_trimmed_and_case_insensitive(self):
         replies = [{"id": "a", "trigger": "Hello", "response": "hi"}]
