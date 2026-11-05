@@ -20,6 +20,7 @@ from discord.ext import voice_recv
 
 from core.legacy import Responder
 from core import logfare
+from core import vc_feature_restore
 from core.voice_session import VoiceBusy, get_manager
 from core.voice_recv_patch import patch_voice_recv_client
 from core.messages import voice_connection_failed
@@ -505,6 +506,49 @@ class TranscriptionCog(commands.Cog):
         else:
             await r.send(embed=we("<:Pause:1561700510447312916> 文字起こし停止中 (`/voice のパネルから文字起こし開始` で開始)"))
 
+    def _build_sender(self, guild_id: int, webhook, notice_channel):
+        """文字起こし結果を Webhook へ送るコールバック（開始時・再開時で共用）。"""
+        premium_notice_sent = False
+
+        async def send_webhook(display_name: str, avatar_url: str | None, audio_wav: bytes):
+            nonlocal premium_notice_sent
+            self.last_audio[guild_id] = (display_name, audio_wav, time.time())
+            try:
+                text = await logfare.transcribe_audio(audio_wav)
+            except logfare.LogfareHTTPError as ex:
+                logger.warning("Logfare transcription API returned HTTP %s", ex.status)
+                if ex.status == 403 and not premium_notice_sent:
+                    premium_notice_sent = True
+                    await notice_channel.send(
+                        "Logfareの文字起こしモデルが利用できません。モデルのトレーニング利用へのオプトインと、APIキーの利用権限を確認してください。"
+                    )
+                return
+            except RuntimeError as ex:
+                if "文字起こし結果がありません" in str(ex):
+                    # 雑音・息・短すぎる発話などで認識結果が空だっただけ。エラー扱いにしない
+                    logger.info("Logfare: 認識結果が空でした (user=%s)", display_name)
+                else:
+                    logger.exception("Logfare transcription request failed")
+                return
+            except Exception:
+                logger.exception("Logfare transcription request failed")
+                return
+            if not text or not text.strip():
+                return
+            async with aiohttp.ClientSession() as session:
+                wh_obj = discord.Webhook.from_url(webhook.url, session=session)
+                try:
+                    await wh_obj.send(
+                        content=text,
+                        username=display_name,
+                        avatar_url=avatar_url,
+                        _agobot_skip_localization=True,
+                    )
+                except Exception as ex:
+                    logger.error("[Webhook Send Error] %s", ex)
+
+        return send_webhook
+
     async def _start(self, r: Responder, target_channel: discord.TextChannel | None):
         async with self._start_lock:
             return await self._start_once(r, target_channel)
@@ -550,44 +594,7 @@ class TranscriptionCog(commands.Cog):
             await self.voice_sessions.release(r.guild.id, "transcribe", reason="webhook-error")
             return await r.send(embed=we(f"<:failed:1490986584676368535> Webhookの取得に失敗しました: `{e}`"))
 
-        premium_notice_sent = False
-
-        async def send_webhook(display_name: str, avatar_url: str | None, audio_wav: bytes):
-            nonlocal premium_notice_sent
-            self.last_audio[guild_id] = (display_name, audio_wav, time.time())
-            try:
-                text = await logfare.transcribe_audio(audio_wav)
-            except logfare.LogfareHTTPError as ex:
-                logger.warning("Logfare transcription API returned HTTP %s", ex.status)
-                if ex.status == 403 and not premium_notice_sent:
-                    premium_notice_sent = True
-                    await r.channel.send(
-                        "Logfareの文字起こしモデルが利用できません。モデルのトレーニング利用へのオプトインと、APIキーの利用権限を確認してください。"
-                    )
-                return
-            except RuntimeError as ex:
-                if "文字起こし結果がありません" in str(ex):
-                    # 雑音・息・短すぎる発話などで認識結果が空だっただけ。エラー扱いにしない
-                    logger.info("Logfare: 認識結果が空でした (user=%s)", display_name)
-                else:
-                    logger.exception("Logfare transcription request failed")
-                return
-            except Exception:
-                logger.exception("Logfare transcription request failed")
-                return
-            if not text or not text.strip():
-                return
-            async with aiohttp.ClientSession() as session:
-                wh_obj = discord.Webhook.from_url(webhook.url, session=session)
-                try:
-                    await wh_obj.send(
-                        content=text,
-                        username=display_name,
-                        avatar_url=avatar_url,
-                        _agobot_skip_localization=True,
-                    )
-                except Exception as ex:
-                    logger.error("[Webhook Send Error] %s", ex)
+        send_webhook = self._build_sender(guild_id, webhook, r.channel)
 
         sink = TranscriptionSink(
             bot=self.bot,
@@ -600,8 +607,10 @@ class TranscriptionCog(commands.Cog):
             "sink": sink,
             "vc": vc,
             "vc_channel_name": vc_channel.name,
+            "target_channel_id": send_channel.id,
             "target_channel_mention": send_channel.mention
         }
+        self._save_resume_snapshot(guild_id, vc_channel, r.channel, r.user, send_channel)
 
         await r.send(embed=we(
             f"🎙️ **{vc_channel.name}** で Logfare {logfare.TRANSCRIPTION_MODEL} による文字起こしを開始しました。\n"
@@ -698,12 +707,118 @@ class TranscriptionCog(commands.Cog):
     def _cleanup(self, guild_id: int):
         """VC を手放すときの後片付け（切断は VoiceSessionManager が行う）。"""
         def cleanup(reason: str) -> None:
+            vc_feature_restore.clear_feature("transcribe", guild_id)
             self.last_audio.pop(guild_id, None)
             session = self.sessions.pop(guild_id, None)
             if not session:
                 return
             remove_receive_sink(session["vc"], "transcribe")
         return cleanup
+
+    # --------------------------------------------------
+    # 再起動後の自動再開（main.py の on_ready から呼ばれる）
+    # --------------------------------------------------
+    def _save_resume_snapshot(self, guild_id: int, voice_channel, text_channel, user, target_channel) -> None:
+        """再開に必要な情報だけを保存する（発話中の音声バッファは保存しない）。"""
+        vc_feature_restore.save_feature("transcribe", guild_id, vc_feature_restore.build_entry(
+            voice_channel_id=getattr(voice_channel, "id", None),
+            text_channel_id=getattr(text_channel, "id", None),
+            user=user,
+            settings={"target_channel_id": getattr(target_channel, "id", None)},
+        ))
+
+    async def restore_after_restart(self) -> None:
+        """再起動前に文字起こし中だったギルドで、同じ送信先の新規セッションとして再開する。
+
+        発話途中の音声はプロセスと一緒に失われているため復元はしない。
+        復旧できないギルド（ギルド・チャンネル消滅、人がいない、APIキー不備）は
+        スナップショットを掃除する。
+        """
+        entries = vc_feature_restore.feature_entries("transcribe")
+        for guild_id, snapshot in entries.items():
+            try:
+                restored = await self._restore_session(guild_id, snapshot)
+            except Exception:
+                logger.exception("guild %s: 文字起こしの自動再開に失敗しました", guild_id)
+                restored = False
+            if not restored:
+                vc_feature_restore.clear_feature("transcribe", guild_id)
+        vc_feature_restore.flush_store()
+
+    async def _restore_session(self, guild_id: int, snapshot: dict) -> bool:
+        if not logfare.api_key():
+            logger.info("guild %s: LOGFARE_API_KEY が無いため文字起こしを再開しません", guild_id)
+            return False
+        guild = self.bot.get_guild(guild_id)
+        if guild is None:
+            return False
+        channel_id = snapshot.get("voice_channel_id")
+        channel = guild.get_channel(channel_id) if channel_id else None
+        if channel is None:
+            logger.info("guild %s: 復旧先の VC が見つからないため文字起こしを再開しません", guild_id)
+            return False
+        if not vc_feature_restore.has_humans(channel):
+            logger.info("guild %s: VC に人がいないため文字起こしを再開しません", guild_id)
+            return False
+        settings = snapshot.get("settings")
+        if settings is None:
+            settings = {}
+        elif not isinstance(settings, dict):
+            return False  # settings が壊れているスナップショットは復旧対象にしない
+        target_id = settings.get("target_channel_id") or snapshot.get("text_channel_id")
+        target_channel = self.bot.get_channel(target_id) if target_id else None
+        if target_channel is None:
+            logger.info("guild %s: 送信先チャンネルが見つからないため文字起こしを再開しません", guild_id)
+            return False
+        notice_channel = None
+        if snapshot.get("text_channel_id"):
+            notice_channel = self.bot.get_channel(snapshot["text_channel_id"])
+        if notice_channel is None:
+            notice_channel = target_channel
+        if guild_id in self.sessions:
+            return False
+        user = vc_feature_restore.resolve_user(guild, snapshot)
+        try:
+            vc = await self.voice_sessions.acquire(
+                guild, channel, "transcribe", user,
+                cleanup=self._cleanup(guild_id), text_channel=notice_channel, force=False, timeout=30.0,
+            )
+        except Exception:
+            logger.warning("guild %s: VC へ再接続できないため文字起こしを再開しません", guild_id, exc_info=True)
+            return False
+        try:
+            webhook = await self._get_or_create_webhook(target_channel)
+        except Exception:
+            logger.warning("guild %s: Webhook を用意できないため文字起こしを再開しません", guild_id, exc_info=True)
+            await self.voice_sessions.release(guild_id, "transcribe", reason="webhook-error")
+            return False
+
+        sink = TranscriptionSink(
+            bot=self.bot,
+            vc=vc,
+            callback_coro=self._build_sender(guild_id, webhook, notice_channel),
+        )
+        add_receive_sink(vc, "transcribe", sink)
+
+        self.sessions[guild_id] = {
+            "sink": sink,
+            "vc": vc,
+            "vc_channel_name": getattr(channel, "name", ""),
+            "target_channel_id": getattr(target_channel, "id", None),
+            "target_channel_mention": getattr(target_channel, "mention", ""),
+        }
+        self._save_resume_snapshot(guild_id, channel, notice_channel, user, target_channel)
+
+        try:
+            await notice_channel.send(embed=we(
+                f"🎙️ **{getattr(channel, 'name', '')}** で Logfare {logfare.TRANSCRIPTION_MODEL} による文字起こしを再開しました（Botの再起動による自動再開）。\n"
+                f"音声は無音区間ごとにLogfareへ送信され、結果を {getattr(target_channel, 'mention', '')} へ投稿します。\n"
+                "音楽・GVC・読み上げと同時に利用できます。利用者の音声は外部サービスで処理されます。"
+            ))
+        except Exception:
+            logger.debug("文字起こし: 再開通知の送信に失敗しました", exc_info=True)
+        logger.info("guild %s: 文字起こしを自動再開しました", guild_id)
+        return True
 
 
 async def setup(bot: commands.Bot):

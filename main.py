@@ -94,7 +94,8 @@ class MyBot(commands.Bot):
         する。on_ready をブロックせず、cog 単位で失敗を隔離する。
         """
         logger = logging.getLogger(__name__)
-        for cog_name in ("VoiceCog", "GlobalVCCog"):
+        for cog_name in ("VoiceCog", "GlobalVCCog", "TranscriptionCog",
+                         "RecordingCog", "KaraokeCog", "VoiceChangerCog"):
             cog = self.get_cog(cog_name)
             restore = getattr(cog, "restore_after_restart", None)
             if restore is None:
