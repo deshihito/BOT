@@ -132,7 +132,7 @@ class VoiceHub(commands.Cog):
     # ------------------------------------------------------------ 統合サブコマンド
     async def voice_connection(self, interaction: discord.Interaction, action: app_commands.Choice[str]):
         if action.value == "status":
-            return await Responder(interaction).send(embed=self.status_embed(interaction.guild), ephemeral=True)
+            return await Responder(interaction).send(embed=self.status_embed(interaction.guild))
         cog = await self._cog(interaction, "music")
         if cog:
             if action.value == "join":
@@ -239,7 +239,7 @@ class VoiceHub(commands.Cog):
         r = Responder(interaction)
         if value == "gvc_room_list":
             return await interaction.response.send_message(
-                view=cog.room_list_view(interaction.guild), ephemeral=True
+                view=cog.room_list_view(interaction.guild)
             )
         if value == "gvc_chat_disconnect":
             return await cog._chat_disconnect_impl(r)
@@ -263,8 +263,8 @@ class VoiceHub(commands.Cog):
 
     @app_commands.command(name="vc", description="音楽・ボイス機能の操作パネルを表示します")
     async def vc(self, interaction: discord.Interaction):
-        view = VoicePanelView(self)
-        await interaction.response.send_message(view=as_panel_v2(view), ephemeral=True)
+        view = VoicePanelView(self, owner_id=interaction.user.id)
+        await interaction.response.send_message(view=as_panel_v2(view))
 
     async def _trigger_denied_reason(self, interaction: discord.Interaction) -> str | None:
         """音声トリガーを操作できないときは理由を返す（support.py の権限設定と共通）。"""
@@ -374,9 +374,10 @@ class VoiceActionSelect(discord.ui.Select):
 
 class VoicePanelView(discord.ui.View):
     def __init__(self, hub: VoiceHub, genre: str | None = None, shortcut_mode: bool = False,
-                 shortcut_item: dict | None = None):
+                 shortcut_item: dict | None = None, owner_id: int | None = None):
         super().__init__(timeout=900)
         self.hub = hub
+        self.owner_id = owner_id
         saved = (shortcut_item or {}).get("action", {})
         self.genre = genre or saved.get("genre")
         self.action = saved.get("value")
@@ -397,6 +398,11 @@ class VoicePanelView(discord.ui.View):
         if not self.genre or not self.action:
             return None
         return {"root": "vc", "genre": self.genre, "value": self.action}
+
+    async def interaction_check(self, interaction) -> bool:
+        # 公開パネル化（ephemeral第2波）: 持ち主だけが操作できる。
+        return self.owner_id is None or interaction.user.id == self.owner_id
+
 
     def embed(self):
         return discord.Embed(title="<:vol:1563559476265488414> VC・音楽機能パネル", color=0xFFFFFF)

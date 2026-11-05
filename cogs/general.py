@@ -113,15 +113,15 @@ class GeneralCog(
         # Building the panel may touch lazily loaded settings/models.  Reserve
         # the interaction response before doing any work so Discord's 3-second
         # acknowledgement deadline cannot turn a valid command into 10062.
-        await interaction.response.defer(ephemeral=True, thinking=True)
+        await interaction.response.defer(thinking=True)
         history_specs = []
         if interaction.guild_id is not None:
             store = guild_settings.get_store()
             await store.ensure_loaded()
             history_specs = action_usage.history_panel_specs(
                 store, interaction.guild_id, interaction.user.id, "general")
-        view = GeneralPanel(self, history_specs=history_specs)
-        await interaction.followup.send(view=as_panel_v2(view), ephemeral=True)
+        view = GeneralPanel(self, history_specs=history_specs, owner_id=interaction.user.id)
+        await interaction.followup.send(view=as_panel_v2(view))
 
 
     async def _safe_respond(self, interaction: discord.Interaction, message: str, *, ephemeral: bool = True):
@@ -163,7 +163,7 @@ class GeneralCog(
 
         if value == "miq_settings":
             view = MiqSettingsView(self, interaction.user.id)
-            return await interaction.response.send_message(view=as_panel_v2(view), ephemeral=True)
+            return await interaction.response.send_message(view=as_panel_v2(view))
 
         if value == "miq_help":
             embed = discord.Embed(title="引用画像 (MIQ)", color=0xFFFFFF)
@@ -184,7 +184,7 @@ class GeneralCog(
                 "**引用の拒否**\n"
                 "MIQ設定の「引用を拒否」をONにすると、他の人があなたのメッセージを引用できなくなります（初期はOFF）。"
             )
-            return await interaction.response.send_message(embed=embed, ephemeral=True)
+            return await interaction.response.send_message(embed=embed)
 
         if value == "meme_create":
             # モーダルを開けない経路 (メッセージ型ショートカット) では
@@ -207,11 +207,11 @@ class GeneralCog(
                 "・ベース画像は最大8MBまで。生成画像は最大1200x1200に収まります。\n"
                 "・アバターをベースにする場合のみ、MIQの引用拒否設定が適用されます。"
             )
-            return await interaction.response.send_message(embed=embed, ephemeral=True)
+            return await interaction.response.send_message(embed=embed)
 
         if value == "translation_settings":
             view = TranslationView(interaction.user.id, interaction.guild_id)
-            return await interaction.response.send_message(embed=view.embed(), view=view, ephemeral=True)
+            return await interaction.response.send_message(embed=view.embed(), view=view)
 
         if value == "aitools":
             from core import ai_tools_router
@@ -225,7 +225,7 @@ class GeneralCog(
                 f"利用可能な安全ツール: `{len(available)}件`\n\n"
                 "BOTにメンションして依頼してください。個人別・機能別の設定はありません。"
             )
-            return await interaction.response.send_message(embed=embed, ephemeral=True)
+            return await interaction.response.send_message(embed=embed)
 
         if value == "reasoning_default":
             await interaction.response.defer(ephemeral=True)
@@ -263,13 +263,13 @@ class GeneralCog(
 
         if value == "shortcut_manage":
             view = ShortcutManagerView(self, interaction.guild_id, interaction.user.id)
-            return await interaction.response.send_message(view=as_panel_v2(view), ephemeral=True)
+            return await interaction.response.send_message(view=as_panel_v2(view))
 
         if value == "exp_status":
             view = ExpStatusView(interaction.user.id, interaction.guild_id)
             await view._load_latest()
             return await interaction.response.send_message(
-                view=as_panel_v2(view), ephemeral=True
+                view=as_panel_v2(view)
             )
 
         if value == "exp_ranking":

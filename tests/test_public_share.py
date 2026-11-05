@@ -66,7 +66,8 @@ class PublicShareViewTest(unittest.IsolatedAsyncioTestCase):
 
 
 class RatingShareWiringTest(unittest.IsolatedAsyncioTestCase):
-    async def test_rating_response_is_ephemeral_with_share_view(self):
+    async def test_rating_response_is_public_with_share_view(self):
+        # ephemeral第2波方針（2026-11-06）: レート表示は既定で公開する。
         from cogs.game import GameDetailView
 
         embed = discord.Embed(title="レート")
@@ -77,7 +78,7 @@ class RatingShareWiringTest(unittest.IsolatedAsyncioTestCase):
         button = next(item for item in view.children
                       if getattr(item, "custom_id", None) == "panel:game:rating")
         await button.callback(interaction)
-        self.assertEqual(sent.get("ephemeral"), True)
+        self.assertNotEqual(sent.get("ephemeral"), True)
         self.assertIsInstance(sent.get("view"), PublicShareView)
         self.assertIs(sent.get("embed"), embed)
 

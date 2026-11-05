@@ -198,7 +198,8 @@ class FunctionSelect(discord.ui.Select):
         view: HelpView = self.view
         if entry is None:
             return await interaction.response.send_message("コマンドが見つかりませんでした。", ephemeral=True)
-        await edit_panel_v2(interaction, as_panel_v2(CommandView(self.catalog, entry)))
+        await edit_panel_v2(interaction, as_panel_v2(CommandView(
+            self.catalog, entry, owner_id=getattr(view, "owner_id", None))))
 
 
 CATEGORY_GUIDE = "__category__"
@@ -230,16 +231,19 @@ class GuideSelect(discord.ui.Select):
                 discord.Embed(description="ガイドが見つかりませんでした。", color=COLOR)
         view: HelpView = self.view
         await edit_panel_v2(
-            interaction, as_panel_v2(BackView(self.catalog, self.category_id, view.page, embed)))
+            interaction, as_panel_v2(BackView(self.catalog, self.category_id, view.page, embed,
+                                              owner_id=getattr(view, "owner_id", None))))
 
 
 class HelpView(discord.ui.View):
     """カテゴリ選択・ページ送り・ガイド選択をまとめた画面。操作のたびに作り直す。"""
 
     def __init__(self, catalog: dict, category_id: str | None = None, page: int = 0,
-                 shortcut_mode: bool = False, shortcut_item: dict | None = None):
+                 shortcut_mode: bool = False, shortcut_item: dict | None = None,
+                 owner_id: int | None = None):
         super().__init__(timeout=VIEW_TIMEOUT)
         self.catalog = catalog
+        self.owner_id = owner_id
         self.category_id = category_id
         self.shortcut_mode = shortcut_mode
         self.shortcut_item = shortcut_item
@@ -274,12 +278,18 @@ class HelpView(discord.ui.View):
             return None
         return {"root": "help", "value": "overview", "options": {"category_id": self.category_id, "page": self.page}}
 
+
+    async def interaction_check(self, interaction) -> bool:
+        # 公開パネル化（ephemeral第2波）: 持ち主だけが操作できる。
+        return self.owner_id is None or interaction.user.id == self.owner_id
+
     def embed(self) -> discord.Embed:
         return self.pages[self.page] if self.category_id else overview_embed(self.catalog)
 
     async def show(self, interaction: discord.Interaction, category_id: str | None, page: int,
                    *, v2: bool = False):
-        view = HelpView(self.catalog, category_id, page, self.shortcut_mode, self.shortcut_item)
+        view = HelpView(self.catalog, category_id, page, self.shortcut_mode, self.shortcut_item,
+                        owner_id=self.owner_id)
         self.stop()
         if v2:
             return await edit_panel_v2(interaction, as_panel_v2(view))
@@ -304,16 +314,23 @@ class HelpView(discord.ui.View):
 class BackView(discord.ui.View):
     """ガイドを読んでいる画面から、カテゴリの一覧へ戻るボタン。"""
 
-    def __init__(self, catalog: dict, category_id: str | None, page: int = 0, content=None):
+    def __init__(self, catalog: dict, category_id: str | None, page: int = 0, content=None,
+                 owner_id: int | None = None):
         super().__init__(timeout=VIEW_TIMEOUT)
         self.catalog, self.category_id, self.page, self.content = catalog, category_id, page, content
+        self.owner_id = owner_id
+
+
+    async def interaction_check(self, interaction) -> bool:
+        # 公開パネル化（ephemeral第2波）: 持ち主だけが操作できる。
+        return self.owner_id is None or interaction.user.id == self.owner_id
 
     def embed(self) -> discord.Embed:
         return self.content or discord.Embed(title="ヘルプ", description="カテゴリの一覧へ戻れます。", color=COLOR)
 
     @discord.ui.button(label="一覧に戻る", emoji=BACK, style=discord.ButtonStyle.primary, custom_id="panel:help:back")
     async def back(self, interaction: discord.Interaction, button: discord.ui.Button):
-        view = HelpView(self.catalog, self.category_id, self.page)
+        view = HelpView(self.catalog, self.category_id, self.page, owner_id=self.owner_id)
         self.stop()
         await edit_panel_v2(interaction, as_panel_v2(view))
 
@@ -321,11 +338,17 @@ class BackView(discord.ui.View):
 class CommandView(discord.ui.View):
     """1 つのコマンドの説明画面。ガイドがあれば「ガイドを読む」ボタンを出す。"""
 
-    def __init__(self, catalog: dict, entry: dict):
+    def __init__(self, catalog: dict, entry: dict, owner_id: int | None = None):
         super().__init__(timeout=VIEW_TIMEOUT)
         self.catalog, self.entry = catalog, entry
+        self.owner_id = owner_id
         if not entry["guide"]:
             self.remove_item(self.read_guide)
+
+
+    async def interaction_check(self, interaction) -> bool:
+        # 公開パネル化（ephemeral第2波）: 持ち主だけが操作できる。
+        return self.owner_id is None or interaction.user.id == self.owner_id
 
     def embed(self) -> discord.Embed:
         return command_embed(self.entry, self.catalog)
@@ -335,11 +358,11 @@ class CommandView(discord.ui.View):
         key = command_key(self.entry["kind"], self.entry["name"])
         await edit_panel_v2(interaction, as_panel_v2(BackView(
                 self.catalog, self.entry["category"], 0,
-                guide_embed(f"{key} のガイド", self.entry["guide"]))))
+                guide_embed(f"{key} のガイド", self.entry["guide"]), owner_id=self.owner_id)))
 
     @discord.ui.button(label="カテゴリの一覧を見る", style=discord.ButtonStyle.primary, custom_id="panel:help:open_category")
     async def open_category(self, interaction: discord.Interaction, button: discord.ui.Button):
-        view = HelpView(self.catalog, self.entry["category"])
+        view = HelpView(self.catalog, self.entry["category"], owner_id=self.owner_id)
         self.stop()
         await edit_panel_v2(interaction, as_panel_v2(view))
 
@@ -425,10 +448,10 @@ class HelpCog(commands.Cog):
                     ephemeral=True)
                 return
             await interaction.response.send_message(embed=command_embed(entry, catalog),
-                                                    view=CommandView(catalog, entry), ephemeral=True)
+                                                    view=CommandView(catalog, entry, owner_id=interaction.user.id))
             return
-        view = HelpView(catalog)
-        await interaction.response.send_message(view=as_panel_v2(view), ephemeral=True)
+        view = HelpView(catalog, owner_id=interaction.user.id)
+        await interaction.response.send_message(view=as_panel_v2(view))
 
     @help.autocomplete("command")
     async def help_command_autocomplete(self, interaction: discord.Interaction, current: str):

@@ -141,16 +141,19 @@ class GameSelect(discord.ui.Select):
 
     async def callback(self, interaction: discord.Interaction):
         game_id = self.values[0]
-        panel = GameDetailView(self.view.cog, game_id, self.view.shortcut_mode, self.view.shortcut_item)
+        panel = GameDetailView(self.view.cog, game_id, self.view.shortcut_mode, self.view.shortcut_item,
+                               owner_id=getattr(self.view, "owner_id", None))
         if hasattr(self.view, "panel"):
             return await edit_panel_v2(interaction, as_panel_v2(panel))
         return await edit_panel_v2(interaction, as_panel_v2(panel))
 
 
 class GameHubView(discord.ui.View):
-    def __init__(self, cog, shortcut_mode: bool = False, shortcut_item: dict | None = None):
+    def __init__(self, cog, shortcut_mode: bool = False, shortcut_item: dict | None = None,
+                 owner_id: int | None = None):
         super().__init__(timeout=600)
         self.cog = cog
+        self.owner_id = owner_id
         self.shortcut_mode = shortcut_mode
         self.shortcut_item = shortcut_item
         self.genre = None
@@ -172,6 +175,11 @@ class GameHubView(discord.ui.View):
         if self.genre:
             return discord.Embed(title="パーティーゲーム", description=f"**{GAME_GENRES[self.genre][0]}** のゲームを選んでください。", color=HUB_COLOR)
         return hub_embed()
+
+    async def interaction_check(self, interaction) -> bool:
+        # 公開パネル化（ephemeral第2波）: 持ち主だけが操作できる。
+        return self.owner_id is None or interaction.user.id == self.owner_id
+
 
 
 class WordlistSelect(discord.ui.Select):
@@ -301,9 +309,11 @@ class JankenWagerSelect(discord.ui.Select):
 
 
 class GameDetailView(discord.ui.View):
-    def __init__(self, cog, game_id: str, shortcut_mode: bool = False, shortcut_item: dict | None = None):
+    def __init__(self, cog, game_id: str, shortcut_mode: bool = False, shortcut_item: dict | None = None,
+                 owner_id: int | None = None):
         super().__init__(timeout=600)
         self.cog = cog
+        self.owner_id = owner_id
         self.game_id = game_id
         self.shortcut_mode = shortcut_mode
         self.shortcut_item = shortcut_item
@@ -343,6 +353,11 @@ class GameDetailView(discord.ui.View):
     def embed(self):
         return detail_embed(self.game_id)
 
+    async def interaction_check(self, interaction) -> bool:
+        # 公開パネル化（ephemeral第2波）: 持ち主だけが操作できる。
+        return self.owner_id is None or interaction.user.id == self.owner_id
+
+
     def shortcut_action(self):
         return {"root": "game", "value": f"game:{self.game_id}",
                 "options": {"wordlist": self.wordlist, "ng_minutes": self.ng_minutes,
@@ -352,7 +367,7 @@ class GameDetailView(discord.ui.View):
 
     @discord.ui.button(label="ルール", style=discord.ButtonStyle.secondary, row=3, custom_id="panel:game:rules")
     async def rules(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.send_message(embed=rules_embed(self.game_id), ephemeral=True)
+        await interaction.response.send_message(embed=rules_embed(self.game_id))
 
     @discord.ui.button(label="募集する", style=discord.ButtonStyle.success, row=3, custom_id="panel:game:recruit")
     async def recruit(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -372,10 +387,10 @@ class GameDetailView(discord.ui.View):
         if cog is None:
             return await interaction.response.send_message(
                 embed=discord.Embed(description="人狼 は現在利用できません。", color=HUB_COLOR), ephemeral=True)
-        # 既定は本人のみ。結果画面の「公開で出す」でのみ任意に公開できる（選択式）。
+        # ephemeral第2波方針: 既定で公開する（第1波の選択式から反転）。
         embed = await cog.rating_embed(interaction.user)
         await interaction.response.send_message(
-            embed=embed, view=PublicShareView(interaction.user.id, embed), ephemeral=True)
+            embed=embed, view=PublicShareView(interaction.user.id, embed))
 
     @discord.ui.button(label="ゲームを終了", style=discord.ButtonStyle.danger, row=4, custom_id="panel:game:end")
     async def end_game(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -388,7 +403,7 @@ class GameDetailView(discord.ui.View):
 
     @discord.ui.button(label="戻る", emoji=BACK, style=discord.ButtonStyle.secondary, row=3, custom_id="panel:game:back")
     async def back(self, interaction: discord.Interaction, button: discord.ui.Button):
-        view = GameHubView(self.cog)
+        view = GameHubView(self.cog, owner_id=self.owner_id)
         if hasattr(getattr(button, "view", None), "_sync"):
             return await edit_panel_v2(interaction, as_panel_v2(view))
         await interaction.response.edit_message(embed=view.embed(), view=view)
@@ -400,8 +415,8 @@ class GameHub(commands.Cog):
 
     @app_commands.command(name="game", description="ゲームの操作パネルを表示します")
     async def game(self, interaction: discord.Interaction):
-        view = GameHubView(self)
-        await interaction.response.send_message(view=as_panel_v2(view), ephemeral=True)
+        view = GameHubView(self, owner_id=interaction.user.id)
+        await interaction.response.send_message(view=as_panel_v2(view))
 
     async def start_game(self, interaction: discord.Interaction, game_id: str, **options):
         # 利用履歴（レジストリの game アクション id は "game:game:<id>"）。

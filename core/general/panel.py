@@ -90,9 +90,10 @@ class GeneralActionSelect(discord.ui.Select):
 
 class GeneralPanel(discord.ui.View):
     def __init__(self, cog, genre: str | None = None, shortcut_mode: bool = False, shortcut_item: dict | None = None,
-                 history_specs: list | None = None):
+                 history_specs: list | None = None, owner_id: int | None = None):
         super().__init__(timeout=300)
         self.cog = cog
+        self.owner_id = owner_id
         saved = (shortcut_item or {}).get("action", {})
         self.genre = genre or saved.get("genre")
         self.action = saved.get("value")
@@ -119,6 +120,11 @@ class GeneralPanel(discord.ui.View):
         if not self.genre or not self.action:
             return None
         return {"root": "general", "genre": self.genre, "value": self.action}
+
+    async def interaction_check(self, interaction) -> bool:
+        # 公開パネル化（ephemeral第2波）: 持ち主だけが操作できる。
+        return self.owner_id is None or interaction.user.id == self.owner_id
+
 
     def embed(self):
         return discord.Embed(title="一般機能", color=0xFFFFFF)

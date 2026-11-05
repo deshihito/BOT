@@ -5,6 +5,11 @@
 - 市場チャートは公開送信（保有量を含む市場パネル本体は本人のみ維持）
 - /general の EXP ランキングは公開、EXP ステータスは本人のみ維持
 - 対局の開始通知は公開、参加ACK 等の個別応答は ephemeral 維持
+
+ephemeral第2波（2026-11-06、ユーザー方針で上書き）: 既定は公開に反転。
+EXP ステータス・参加/退出の成功ACK・ルートパネルも公開する。維持するのは
+ゲームが壊れる秘密情報（手札・役職・各自のワード等）、認証・秘密情報、
+他人の個人情報、入力/権限エラー通知、panel_recovery の開き直しだけ。
 """
 import pathlib
 import types
@@ -105,7 +110,8 @@ class GeneralRankingVisibilityTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn("view", sent)
         self.assertNotEqual(sent.get("ephemeral"), True)
 
-    async def test_exp_status_dispatch_stays_ephemeral(self):
+    async def test_exp_status_dispatch_is_public(self):
+        # ephemeral第2波方針（2026-11-06）: EXPステータスも既定で公開する。
         from cogs.general import GeneralCog
 
         cog = GeneralCog.__new__(GeneralCog)
@@ -113,7 +119,7 @@ class GeneralRankingVisibilityTest(unittest.IsolatedAsyncioTestCase):
         interaction, sent = fake_interaction()
         await cog.dispatch_general(interaction, "exp_status")
         self.assertIn("view", sent)
-        self.assertEqual(sent.get("ephemeral"), True)
+        self.assertNotEqual(sent.get("ephemeral"), True)
 
 
 class GameStartNoticeSourceTest(unittest.TestCase):
@@ -152,3 +158,4 @@ class GameStartNoticeSourceTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
