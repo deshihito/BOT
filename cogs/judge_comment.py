@@ -3,7 +3,7 @@ import discord
 from discord.ext import commands
 from core.autoplay import DEFAULT_D1_ENDPOINT
 
-class JudgeCog(commands.Cog):
+class JudgeCommentCog(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
         self.endpoint = DEFAULT_D1_ENDPOINT
@@ -119,4 +119,4 @@ class JudgeCog(commands.Cog):
             await message.reply(f"通信エラーが発生しました: {str(e)}")
 
 async def setup(bot: commands.Bot):
-    await bot.add_cog(JudgeCog(bot))
+    await bot.add_cog(JudgeCommentCog(bot))
