@@ -38,5 +38,72 @@ class LocalizationTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn("AGOBOT", cog.language_embed("ja").description)
 
 
+class LocalizationV2ViewTest(unittest.TestCase):
+    """Components V2 (LayoutView) でも _translate_view が届くことの実地検証。"""
+
+    def _layout(self):
+        import discord
+
+        view = discord.ui.LayoutView(timeout=None)
+        container = discord.ui.Container(accent_colour=0xFFFFFF)
+        text = discord.ui.TextDisplay("言語設定")
+        container.add_item(text)
+        row = discord.ui.ActionRow()
+        button = discord.ui.Button(label="戻る", custom_id="v2test:back")
+        row.add_item(button)
+        container.add_item(row)
+        view.add_item(container)
+        return view, text, button
+
+    def test_text_display_and_action_row_button_are_translated(self):
+        view, text, button = self._layout()
+        localization.localize_object(view, "en")
+        self.assertEqual(text.content, "Language Settings")
+        self.assertEqual(button.label, "Back")
+
+    def test_section_accessory_button_is_translated(self):
+        import discord
+
+        section = discord.ui.Section(
+            discord.ui.TextDisplay("言語設定"),
+            accessory=discord.ui.Button(label="閉じる", custom_id="v2test:close"),
+        )
+        view = discord.ui.LayoutView(timeout=None)
+        container = discord.ui.Container()
+        container.add_item(section)
+        view.add_item(container)
+        localization.localize_object(view, "en")
+        self.assertEqual(section.children[0].content, "Language Settings")
+        self.assertEqual(section.accessory.label, "Close")
+
+    def test_panel_v2_wrapper_text_is_translated(self):
+        import discord
+
+        from core.panel_v2 import as_panel_v2
+
+        panel = discord.ui.View(timeout=None)
+        panel.embed = lambda: discord.Embed(title="言語設定")
+        wrapped = as_panel_v2(panel)
+        localization.localize_object(wrapped, "en")
+        texts = []
+
+        def collect(item):
+            content = getattr(item, "content", None)
+            if isinstance(content, str):
+                texts.append(content)
+            for attribute in ("children", "items", "components"):
+                for child in getattr(item, attribute, None) or ():
+                    collect(child)
+
+        collect(wrapped)
+        self.assertTrue(any("Language Settings" in text for text in texts), texts)
+
+    def test_japanese_locale_leaves_v2_view_untouched(self):
+        view, text, button = self._layout()
+        localization.localize_object(view, "ja")
+        self.assertEqual(text.content, "言語設定")
+        self.assertEqual(button.label, "戻る")
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -44,16 +44,6 @@ _TRANSLATIONS = {
         "ko": "언어를 {language}(으)로 변경했습니다.", "id": "Bahasa diubah menjadi {language}.",
         "th": "เปลี่ยนภาษาเป็น {language} แล้ว", "ar": "تم تغيير اللغة إلى {language}.", "hi": "भाषा {language} में बदल दी गई है।",
     },
-    "language_support_note": {
-        "en": "Coverage: English is translated for some screens only. Other languages are not supported yet and are shown in Japanese.",
-        "ja": "※対応状況: 英語は一部の表示のみ翻訳されます。その他の言語は準備中のため、日本語で表示されます。",
-        "zh": "※支持情况：英语仅翻译部分界面。其他语言尚在准备中，将以日语显示。",
-        "ko": "※지원 현황: 영어는 일부 화면만 번역됩니다. 다른 언어는 준비 중이라 일본어로 표시됩니다.",
-        "id": "Catatan: Bahasa Inggris hanya diterjemahkan untuk sebagian layar. Bahasa lain belum didukung dan ditampilkan dalam bahasa Jepang.",
-        "th": "หมายเหตุ: ภาษาอังกฤษแปลเฉพาะบางหน้าจอ ภาษาอื่นยังไม่รองรับและจะแสดงเป็นภาษาญี่ปุ่น",
-        "ar": "ملاحظة: تُترجم الإنجليزية لبعض الشاشات فقط. اللغات الأخرى غير مدعومة بعد وتظهر باليابانية.",
-        "hi": "नोट: अंग्रेज़ी केवल कुछ स्क्रीन के लिए अनूदित है। अन्य भाषाएँ अभी समर्थित नहीं हैं और जापानी में दिखाई देंगी।",
-    },
     "welcome_language": {
         "en": "Select a language for this server by reacting below. You can change it later from `/support` → Language settings.",
         "ja": "下の国旗にリアクションして、このサーバーの言語を選択してください。後から `/support` → 言語設定で変更できます。",
@@ -177,6 +167,9 @@ def _translate_view(view: Any, locale: str) -> None:
                     pass
         for option in getattr(item, "options", ()) or ():
             visit(option)
+        accessory = getattr(item, "accessory", None)
+        if accessory is not None:
+            visit(accessory)
         for attribute in ("children", "items", "components"):
             children = getattr(item, attribute, None)
             if children:
