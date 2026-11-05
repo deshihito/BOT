@@ -13,6 +13,12 @@ transaction_history への記録）を通す（cogs/circulation.py と同じ組�
   定期ループで未完了セッションを reconcile し、ベットを返金する
 - 実行部は execute_* メソッドに分離してある（将来の統合パネルからも
   そのまま呼べる形）
+- 表示はセッション1メッセージ方式: パネルの embed をその場で編集して
+  更新し続け、スピン／GO／ヒット等のたびに新規メッセージを投稿しない
+  （結果表示の公開化でログが流れるのを防ぐ）。まとめて回す操作は
+  内部で複数回消化してから1回だけ編集する（編集レート制限対策）。
+  全額没収・超JACKPOT 等の大きなイベントも同じ embed 内で色と結果欄を
+  切り替えて目立たせ、別途の新規投稿はしない
 
 入口は新規スラッシュを作らず、/general パネルの action 経由
 （general:slot / general:double / general:blackjack / general:dice）
@@ -57,11 +63,86 @@ _SLOT_EVENT_LINES = {
 }
 
 
-def _slot_embed(cog: "GamblingCog", user_id: int) -> discord.Embed:
+#: 「まとめて回す」ボタン1回で消化するスピン数。内部でこの回数まで
+#: 回してから embed を1回だけ編集する（編集頻度を抑える単位）。
+SLOT_BULK_SPINS = 10
+
+
+def _fit(text: str, limit: int = 1024) -> str:
+    """embed のフィールド上限に収める。"""
+    return text if len(text) <= limit else text[: limit - 1] + "…"
+
+
+async def _fetch_balance(cog: "GamblingCog", user_id: int) -> int | None:
+    try:
+        return await cog._balance(str(user_id))
+    except Exception:
+        return None
+
+
+class _SessionPanel:
+    """セッションパネル共通部品: 対象メッセージと直近結果を保持し、
+    新規投稿せずに対象メッセージの embed を編集して更新する。
+
+    モーダル送信のようにコンポーネントの interaction から直接編集
+    できない場面では refresh_message() で対象メッセージを編集する。
+    """
+
+    message: discord.Message | None = None
+    last_result: str | None = None
+    cog: "GamblingCog"
+    user_id: int
+
+    def _build_embed(self, balance: int | None) -> discord.Embed:
+        raise NotImplementedError
+
+    def _sync_buttons(self) -> None:
+        raise NotImplementedError
+
+    async def refresh_message(self) -> None:
+        """対象メッセージを最新状態で編集し直す（モーダル送信後用）。"""
+        if self.message is None:
+            return
+        self._sync_buttons()
+        balance = await _fetch_balance(self.cog, self.user_id)
+        try:
+            await self.message.edit(embed=self._build_embed(balance), view=self)
+        except Exception:
+            logger.exception("gambling: パネルの更新に失敗しました")
+
+    async def render_interaction(self, interaction: discord.Interaction) -> None:
+        """ボタンの interaction に対して対象メッセージを編集で更新する。"""
+        self._sync_buttons()
+        balance = await _fetch_balance(self.cog, self.user_id)
+        await interaction.edit_original_response(
+            embed=self._build_embed(balance), view=self)
+
+    async def _disable_on_timeout(self) -> None:
+        for child in self.children:  # type: ignore[attr-defined]
+            if isinstance(child, discord.ui.Button):
+                child.disabled = True
+        if self.message is not None:
+            try:
+                await self.message.edit(view=self)  # type: ignore[arg-type]
+            except Exception:
+                pass
+
+
+def _slot_embed(cog: "GamblingCog", user_id: int, *, result: str | None = None,
+                balance: int | None = None,
+                session_pnl: int | None = None) -> discord.Embed:
     store = cog.store
     state = store.user_state(str(user_id))
     session = store.session(str(user_id))
-    embed = discord.Embed(title="スロット", color=GAMBLING_COLOR)
+    if session is not None and session["kind"] != "slot":
+        session = None
+    color = GAMBLING_COLOR
+    if result:
+        if "全額没収" in result:
+            color = 0xE74C3C
+        elif "超JACKPOT" in result:
+            color = 0xF1C40F
+    embed = discord.Embed(title="🎰 スロット", color=color)
     embed.description = (
         f"7リールスロット。1回 **{gambling_core.SLOT_BET:,} AGO** 固定で、"
         f"回数（{gambling_core.SLOT_MIN_SPINS}〜{gambling_core.SLOT_MAX_SPINS}）"
@@ -69,13 +150,27 @@ def _slot_embed(cog: "GamblingCog", user_id: int) -> discord.Embed:
         "同じ数字が揃うほど配当が伸び、7が3つ以上揃うと確変（配当3倍）に"
         "入ります。6が5つ以上揃うと所持コイン全額没収、"
         "連敗が続くと天井もあります。")
-    if session is not None and session["kind"] == "slot":
+    if result:
+        embed.add_field(name="結果", value=_fit(result), inline=False)
+    if session is not None:
         embed.add_field(
             name="セッション",
-            value=f"残り **{session['remaining']} / {session['total']}** 回",
+            value=(f"消化 **{session['total'] - session['remaining']}** 回"
+                   f"／残り **{session['remaining']} / {session['total']}** 回"),
             inline=True)
+    if session_pnl is not None:
+        embed.add_field(
+            name="セッション収支", value=f"**{session_pnl:+,} AGO**", inline=True)
+    state_lines = []
     if state["kakuhen"] > 0:
-        embed.add_field(name="確変", value=f"残り **{state['kakuhen']}** 回", inline=True)
+        state_lines.append(f"⚡ 確変残り **{state['kakuhen']}** 回")
+    if state["internal_mode"] != "NORMAL":
+        state_lines.append(f"モード: **{state['internal_mode']}**")
+    state_lines.append(f"連勝 {state['win_streak']}／連敗 {state['lose_streak']}")
+    state_lines.append(f"6カウンタ: {state['six_counter']}")
+    embed.add_field(name="内部状態", value="\n".join(state_lines), inline=False)
+    if balance is not None:
+        embed.add_field(name="残高", value=f"**{balance:,} AGO**", inline=True)
     return embed
 
 
@@ -83,9 +178,10 @@ class SlotStartModal(discord.ui.Modal, title="スロットを始める"):
     spins = discord.ui.TextInput(
         label="回数", placeholder="例: 10（半角数字）", max_length=6)
 
-    def __init__(self, cog: "GamblingCog"):
+    def __init__(self, cog: "GamblingCog", panel: "SlotView | None" = None):
         super().__init__()
         self.cog = cog
+        self.panel = panel
         self.spins.label = (
             f"回数（{gambling_core.SLOT_MIN_SPINS}〜{gambling_core.SLOT_MAX_SPINS}）")
 
@@ -98,32 +194,82 @@ class SlotStartModal(discord.ui.Modal, title="スロットを始める"):
                 GAMBLING_INVALID_AMOUNT, ephemeral=True)
         await interaction.response.defer()
         message = await self.cog.execute_slot_start(interaction.user.id, spins)
+        if self.panel is not None and self.panel.message is not None:
+            self.panel.last_result = message
+            session = self.cog.store.session(str(interaction.user.id))
+            if session is not None and session["kind"] == "slot":
+                # 先払い分をマイナスとしてセッション収支の集計を開始する。
+                self.panel.session_pnl = (
+                    -gambling_core.SLOT_BET * int(session["total"]))
+            await self.panel.refresh_message()
+            return
         await interaction.followup.send(message)
 
 
-class SlotView(discord.ui.View):
+class SlotView(_SessionPanel, discord.ui.View):
     def __init__(self, cog: "GamblingCog", user_id: int):
         super().__init__(timeout=300)
         self.cog = cog
         self.user_id = user_id
+        self.message = None
+        self.last_result = None
+        self.session_pnl: int | None = None
+        self._sync_buttons()
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         return interaction.user.id == self.user_id
 
+    async def on_timeout(self) -> None:
+        await self._disable_on_timeout()
+
+    def _session(self) -> dict | None:
+        session = self.cog.store.session(str(self.user_id))
+        return session if session is not None and session["kind"] == "slot" else None
+
+    def _sync_buttons(self) -> None:
+        active = self._session() is not None
+        for child in self.children:
+            if not isinstance(child, discord.ui.Button):
+                continue
+            if child.label == "始める":
+                child.disabled = active
+            elif child.label in ("🎰 回す", "🎰 まとめて10回"):
+                child.disabled = not active
+
+    def _build_embed(self, balance: int | None) -> discord.Embed:
+        return _slot_embed(
+            self.cog, self.user_id, result=self.last_result,
+            balance=balance, session_pnl=self.session_pnl)
+
     @discord.ui.button(label="始める", style=discord.ButtonStyle.primary)
     async def start(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.send_modal(SlotStartModal(self.cog))
+        await interaction.response.send_modal(SlotStartModal(self.cog, panel=self))
 
     @discord.ui.button(label="🎰 回す", style=discord.ButtonStyle.success)
     async def spin(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.defer()
-        message = await self.cog.execute_slot_spin(interaction.user.id)
-        await interaction.followup.send(message)
+        message, info = await self.cog._spin_slot_once(interaction.user.id)
+        self.last_result = message
+        if info is not None:
+            self.session_pnl = (self.session_pnl or 0) + info["delta"]
+        await self.render_interaction(interaction)
+
+    @discord.ui.button(label="🎰 まとめて10回", style=discord.ButtonStyle.success)
+    async def spin_bulk(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.defer()
+        message, info = await self.cog.execute_slot_spin_bulk(
+            interaction.user.id, SLOT_BULK_SPINS)
+        self.last_result = message
+        if info is not None:
+            self.session_pnl = (self.session_pnl or 0) + info["delta"]
+        await self.render_interaction(interaction)
 
     @discord.ui.button(label="更新", style=discord.ButtonStyle.secondary)
     async def refresh(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self._sync_buttons()
+        balance = await _fetch_balance(self.cog, self.user_id)
         await interaction.response.edit_message(
-            embed=_slot_embed(self.cog, self.user_id), view=self)
+            embed=self._build_embed(balance), view=self)
 
 
 # ---------------------------------------------------------------------------
@@ -136,16 +282,29 @@ def _double_status_text(cog: "GamblingCog", user_id: int) -> str:
         return "セッションはありません。ベットして始められます。"
     current = int(session["bet"] * session["multiplier"])
     return (f"BET: **{session['bet']:,} AGO**／倍率: **{session['multiplier']:.2f}**"
-            f"／現在価値: **{current:,} AGO**")
+            f"／現在価値: **{current:,} AGO**／GO成功: **{session['streak']} 回**")
 
 
-def _double_embed(cog: "GamblingCog", user_id: int) -> discord.Embed:
-    embed = discord.Embed(title="ダブルアップ", color=GAMBLING_COLOR)
+def _double_embed(cog: "GamblingCog", user_id: int, *, result: str | None = None,
+                  balance: int | None = None) -> discord.Embed:
+    embed = discord.Embed(title="🎲 ダブルアップ", color=GAMBLING_COLOR)
     embed.description = (
         "ベットして、GOで倍率を伸ばすか、CASHOUTで確定するか選ぶゲーム。"
         f"GO成功で倍率が {gambling_core.DOUBLE_MULTIPLIER_STEP} 倍ずつ伸び、"
         "失敗するとベットは失われます。成功率は内部状態で変動します。")
+    if result:
+        embed.add_field(name="結果", value=_fit(result), inline=False)
     embed.add_field(name="状態", value=_double_status_text(cog, user_id), inline=False)
+    state = cog.store.user_state(str(user_id))
+    rate = cog.store.internal_rate(str(user_id))
+    embed.add_field(
+        name="内部状態",
+        value=(f"モード: **{state['internal_mode']}**"
+               f"／次のGO成功率: **{rate * 100:.0f}%**\n"
+               f"連勝 {state['win_streak']}／連敗 {state['lose_streak']}"),
+        inline=False)
+    if balance is not None:
+        embed.add_field(name="残高", value=f"**{balance:,} AGO**", inline=True)
     return embed
 
 
@@ -153,9 +312,10 @@ class BetModal(discord.ui.Modal):
     amount = discord.ui.TextInput(
         label="ベット額（AGO）", placeholder="例: 1000（半角数字）", max_length=16)
 
-    def __init__(self, cog: "GamblingCog", game: str):
+    def __init__(self, cog: "GamblingCog", game: str, panel=None):
         self.cog = cog
         self.game = game
+        self.panel = panel
         title = "ダブルアップを始める" if game == "double" else "ブラックジャックを始める"
         super().__init__(title=title)
 
@@ -171,50 +331,83 @@ class BetModal(discord.ui.Modal):
             message = await self.cog.execute_double_start(interaction.user.id, bet)
         else:
             message = await self.cog.execute_blackjack_start(interaction.user.id, bet)
+        if self.panel is not None and self.panel.message is not None:
+            self.panel.last_result = message
+            await self.panel.refresh_message()
+            return
         await interaction.followup.send(message)
 
 
-class DoubleView(discord.ui.View):
+class DoubleView(_SessionPanel, discord.ui.View):
     def __init__(self, cog: "GamblingCog", user_id: int):
         super().__init__(timeout=300)
         self.cog = cog
         self.user_id = user_id
+        self.message = None
+        self.last_result = None
+        self._sync_buttons()
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         return interaction.user.id == self.user_id
 
+    async def on_timeout(self) -> None:
+        await self._disable_on_timeout()
+
+    def _session(self) -> dict | None:
+        session = self.cog.store.session(str(self.user_id))
+        return session if session is not None and session["kind"] == "double" else None
+
+    def _sync_buttons(self) -> None:
+        active = self._session() is not None
+        for child in self.children:
+            if not isinstance(child, discord.ui.Button):
+                continue
+            if child.label == "ベットして始める":
+                child.disabled = active
+            elif child.label in ("GO", "CASHOUT"):
+                child.disabled = not active
+
+    def _build_embed(self, balance: int | None) -> discord.Embed:
+        return _double_embed(
+            self.cog, self.user_id, result=self.last_result, balance=balance)
+
     @discord.ui.button(label="ベットして始める", style=discord.ButtonStyle.primary)
     async def start(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.send_modal(BetModal(self.cog, "double"))
+        await interaction.response.send_modal(BetModal(self.cog, "double", panel=self))
 
     @discord.ui.button(label="GO", style=discord.ButtonStyle.success)
     async def go(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.defer()
-        message = await self.cog.execute_double_go(interaction.user.id)
-        await interaction.followup.send(message)
+        self.last_result = await self.cog.execute_double_go(interaction.user.id)
+        await self.render_interaction(interaction)
 
     @discord.ui.button(label="CASHOUT", style=discord.ButtonStyle.danger)
     async def cashout(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.defer()
-        message = await self.cog.execute_double_cashout(interaction.user.id)
-        await interaction.followup.send(message)
+        self.last_result = await self.cog.execute_double_cashout(interaction.user.id)
+        await self.render_interaction(interaction)
 
     @discord.ui.button(label="更新", style=discord.ButtonStyle.secondary)
     async def refresh(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self._sync_buttons()
+        balance = await _fetch_balance(self.cog, self.user_id)
         await interaction.response.edit_message(
-            embed=_double_embed(self.cog, self.user_id), view=self)
+            embed=self._build_embed(balance), view=self)
 
 
 # ---------------------------------------------------------------------------
 # ブラックジャック
 # ---------------------------------------------------------------------------
 
-def _blackjack_embed(cog: "GamblingCog", user_id: int) -> discord.Embed:
-    embed = discord.Embed(title="ブラックジャック", color=GAMBLING_COLOR)
+def _blackjack_embed(cog: "GamblingCog", user_id: int, *, result: str | None = None,
+                     balance: int | None = None) -> discord.Embed:
+    embed = discord.Embed(title="🃏 ブラックジャック", color=GAMBLING_COLOR)
     embed.description = (
         f"ディーラーとの対戦。ベットは {gambling_core.BLACKJACK_MIN_BET} AGO から。"
         "21に近い方が勝ち、超えるとバーストで負けです。"
         "ディーラーは17未満で引き続けます。勝てばベットの2倍が戻ります。")
+    if result:
+        embed.add_field(name="結果", value=_fit(result), inline=False)
     session = cog.store.session(str(user_id))
     if session is not None and session["kind"] == "blackjack":
         total = gambling_core.calc_total(session["player"])
@@ -223,50 +416,86 @@ def _blackjack_embed(cog: "GamblingCog", user_id: int) -> discord.Embed:
             value=f"{session['player']}（{total}）", inline=True)
         embed.add_field(
             name="ディーラー", value=f"{session['dealer'][0]} ?", inline=True)
+        embed.add_field(
+            name="ベット", value=f"**{session['bet']:,} AGO**", inline=True)
+    if balance is not None:
+        embed.add_field(name="残高", value=f"**{balance:,} AGO**", inline=True)
     return embed
 
 
-class BlackjackView(discord.ui.View):
+class BlackjackView(_SessionPanel, discord.ui.View):
     def __init__(self, cog: "GamblingCog", user_id: int):
         super().__init__(timeout=300)
         self.cog = cog
         self.user_id = user_id
+        self.message = None
+        self.last_result = None
+        self._sync_buttons()
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         return interaction.user.id == self.user_id
 
+    async def on_timeout(self) -> None:
+        await self._disable_on_timeout()
+
+    def _session(self) -> dict | None:
+        session = self.cog.store.session(str(self.user_id))
+        return session if session is not None and session["kind"] == "blackjack" else None
+
+    def _sync_buttons(self) -> None:
+        active = self._session() is not None
+        for child in self.children:
+            if not isinstance(child, discord.ui.Button):
+                continue
+            if child.label == "ベットして始める":
+                child.disabled = active
+            elif child.label in ("ヒット", "スタンド"):
+                child.disabled = not active
+
+    def _build_embed(self, balance: int | None) -> discord.Embed:
+        return _blackjack_embed(
+            self.cog, self.user_id, result=self.last_result, balance=balance)
+
     @discord.ui.button(label="ベットして始める", style=discord.ButtonStyle.primary)
     async def start(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.send_modal(BetModal(self.cog, "blackjack"))
+        await interaction.response.send_modal(BetModal(self.cog, "blackjack", panel=self))
 
     @discord.ui.button(label="ヒット", style=discord.ButtonStyle.success)
     async def hit(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.defer()
         message, _finished = await self.cog.execute_blackjack_hit(interaction.user.id)
-        await interaction.followup.send(message)
+        self.last_result = message
+        await self.render_interaction(interaction)
 
     @discord.ui.button(label="スタンド", style=discord.ButtonStyle.danger)
     async def stand(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.defer()
-        message = await self.cog.execute_blackjack_stand(interaction.user.id)
-        await interaction.followup.send(message)
+        self.last_result = await self.cog.execute_blackjack_stand(interaction.user.id)
+        await self.render_interaction(interaction)
 
     @discord.ui.button(label="更新", style=discord.ButtonStyle.secondary)
     async def refresh(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self._sync_buttons()
+        balance = await _fetch_balance(self.cog, self.user_id)
         await interaction.response.edit_message(
-            embed=_blackjack_embed(self.cog, self.user_id), view=self)
+            embed=self._build_embed(balance), view=self)
 
 
 # ---------------------------------------------------------------------------
 # ダイス（数字当て）
 # ---------------------------------------------------------------------------
 
-def _dice_embed(cog: "GamblingCog", user_id: int) -> discord.Embed:
-    embed = discord.Embed(title="ダイス（数字当て）", color=GAMBLING_COLOR)
+def _dice_embed(cog: "GamblingCog", user_id: int, *, result: str | None = None,
+                balance: int | None = None) -> discord.Embed:
+    embed = discord.Embed(title="🎲 ダイス（数字当て）", color=GAMBLING_COLOR)
     embed.description = (
         f"1〜範囲（{gambling_core.DICE_MIN_MAX}〜{gambling_core.DICE_MAX_MAX}）の"
         "数字を1つ予想してベットし、出目が一致すれば ベット×範囲 が賞金です。"
         f"ベットは {gambling_core.DICE_MIN_BET} AGO から。")
+    if result:
+        embed.add_field(name="結果", value=_fit(result), inline=False)
+    if balance is not None:
+        embed.add_field(name="残高", value=f"**{balance:,} AGO**", inline=True)
     return embed
 
 
@@ -278,9 +507,10 @@ class DiceModal(discord.ui.Modal, title="ダイス（数字当て）"):
     bet = discord.ui.TextInput(
         label="ベット額（AGO）", placeholder="例: 100（半角数字）", max_length=16)
 
-    def __init__(self, cog: "GamblingCog"):
+    def __init__(self, cog: "GamblingCog", panel: "DiceView | None" = None):
         super().__init__()
         self.cog = cog
+        self.panel = panel
 
     async def on_submit(self, interaction: discord.Interaction):
         try:
@@ -293,21 +523,39 @@ class DiceModal(discord.ui.Modal, title="ダイス（数字当て）"):
         await interaction.response.defer()
         message = await self.cog.execute_dice(
             interaction.user.id, max_value, number, bet)
+        if self.panel is not None and self.panel.message is not None:
+            # 繰り返し振る前提のゲームなので、結果はパネルの embed に
+            # 残して新規メッセージは投稿しない。
+            self.panel.last_result = message
+            await self.panel.refresh_message()
+            return
         await interaction.followup.send(message)
 
 
-class DiceView(discord.ui.View):
+class DiceView(_SessionPanel, discord.ui.View):
     def __init__(self, cog: "GamblingCog", user_id: int):
         super().__init__(timeout=300)
         self.cog = cog
         self.user_id = user_id
+        self.message = None
+        self.last_result = None
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         return interaction.user.id == self.user_id
 
+    async def on_timeout(self) -> None:
+        await self._disable_on_timeout()
+
+    def _sync_buttons(self) -> None:
+        return None
+
+    def _build_embed(self, balance: int | None) -> discord.Embed:
+        return _dice_embed(
+            self.cog, self.user_id, result=self.last_result, balance=balance)
+
     @discord.ui.button(label="ダイスを振る", style=discord.ButtonStyle.primary)
     async def roll(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.send_modal(DiceModal(self.cog))
+        await interaction.response.send_modal(DiceModal(self.cog, panel=self))
 
 
 # ---------------------------------------------------------------------------
@@ -438,23 +686,31 @@ class GamblingCog(commands.Cog):
     # ------------------------------------------------------------------ 入口
     async def show_slot(self, interaction: discord.Interaction):
         view = SlotView(self, interaction.user.id)
+        balance = await _fetch_balance(self, interaction.user.id)
         await interaction.response.send_message(
-            embed=_slot_embed(self, interaction.user.id), view=view)
+            embed=_slot_embed(self, interaction.user.id, balance=balance), view=view)
+        view.message = await interaction.original_response()
 
     async def show_double(self, interaction: discord.Interaction):
         view = DoubleView(self, interaction.user.id)
+        balance = await _fetch_balance(self, interaction.user.id)
         await interaction.response.send_message(
-            embed=_double_embed(self, interaction.user.id), view=view)
+            embed=_double_embed(self, interaction.user.id, balance=balance), view=view)
+        view.message = await interaction.original_response()
 
     async def show_blackjack(self, interaction: discord.Interaction):
         view = BlackjackView(self, interaction.user.id)
+        balance = await _fetch_balance(self, interaction.user.id)
         await interaction.response.send_message(
-            embed=_blackjack_embed(self, interaction.user.id), view=view)
+            embed=_blackjack_embed(self, interaction.user.id, balance=balance), view=view)
+        view.message = await interaction.original_response()
 
     async def show_dice(self, interaction: discord.Interaction):
         view = DiceView(self, interaction.user.id)
+        balance = await _fetch_balance(self, interaction.user.id)
         await interaction.response.send_message(
-            embed=_dice_embed(self, interaction.user.id), view=view)
+            embed=_dice_embed(self, interaction.user.id, balance=balance), view=view)
+        view.message = await interaction.original_response()
 
     # ------------------------------------------------------------------ スロットの実行
     async def execute_slot_start(self, user_id: int, spins: int) -> str:
@@ -492,15 +748,26 @@ class GamblingCog(commands.Cog):
                 "開始中にエラーが発生しました。時間をおいて再試行してください。")
 
     async def execute_slot_spin(self, user_id: int) -> str:
+        message, _info = await self._spin_slot_once(user_id)
+        return message
+
+    async def _spin_slot_once(self, user_id: int) -> tuple[str, dict | None]:
+        """1スピン実行し、表示文と収支情報（delta / finished）を返す。
+
+        失敗（セッションなし等）では info は None。経済処理は従来どおりで、
+        info は表示層がセッション収支を集計するための付随情報。
+        """
         uid = str(user_id)
         try:
             result = self.store.spin_slot(uid)
             wallet = self._wallet()
+            delta = 0
             lines = [f"🎰 {''.join(map(str, result['reels']))}"]
             for event in result["events"]:
                 lines.append(_SLOT_EVENT_LINES[event])
             if result["confiscate"]:
                 taken = await self._confiscate_all(uid)
+                delta = -taken
                 if taken > 0:
                     await self._record_history(uid, GAMBLING_ID, taken, "gamble_slot")
             elif result["reward"] > 0:
@@ -511,6 +778,7 @@ class GamblingCog(commands.Cog):
                         "gambling: スロット配当の支払いに失敗しました。手動で払ってください: "
                         "user=%s reward=%s", uid, result["reward"])
                 else:
+                    delta = result["reward"]
                     await self._record_history(
                         GAMBLING_ID, uid, result["reward"], "gamble_slot")
                 if "pity" not in result["events"]:
@@ -523,6 +791,7 @@ class GamblingCog(commands.Cog):
                         "gambling: スロットペナルティの引き落としに失敗しました: "
                         "user=%s amount=%s", uid, result["reward"])
                 else:
+                    delta = result["reward"]
                     await self._record_history(
                         uid, GAMBLING_ID, -result["reward"], "gamble_slot")
                 lines.append(f"**{result['reward']:+,} AGO**")
@@ -531,13 +800,56 @@ class GamblingCog(commands.Cog):
             lines.append(f"残り回数: {result['remaining']} / {result['total']}")
             if result["finished"]:
                 lines.append("セッション終了。おつかれさまでした。")
-            return "\n".join(lines)
+            return "\n".join(lines), {
+                "delta": delta, "finished": bool(result["finished"])}
         except items_core.ItemError as exc:
-            return gambling_action_failed(exc)
+            return gambling_action_failed(exc), None
         except Exception:
             logger.exception("gambling: スロットのスピンに失敗 user=%s", uid)
             return gambling_action_failed(
-                "スピン中にエラーが発生しました。時間をおいて再試行してください。")
+                "スピン中にエラーが発生しました。時間をおいて再試行してください。"), None
+
+    async def execute_slot_spin_bulk(
+            self, user_id: int, count: int) -> tuple[str, dict | None]:
+        """最大 count 回まとめて回し、集約した1件分の表示文を返す。
+
+        呼び出し側はこの結果で embed を1回だけ編集する（スピンごとに
+        編集すると Discord の編集レート制限に当たるため）。経済処理は
+        _spin_slot_once の繰り返しで、1回分と完全に同じ。
+        """
+        uid = str(user_id)
+        spun = 0
+        delta_total = 0
+        last_reels = ""
+        event_counts: dict[str, int] = {}
+        finished = False
+        for _ in range(max(1, int(count))):
+            message, info = await self._spin_slot_once(user_id)
+            if info is None:
+                if spun == 0:
+                    return message, None
+                break
+            spun += 1
+            delta_total += info["delta"]
+            message_lines = message.split("\n")
+            last_reels = message_lines[0]
+            for line in message_lines[1:]:
+                if line in _SLOT_EVENT_LINES.values():
+                    event_counts[line] = event_counts.get(line, 0) + 1
+            finished = info["finished"]
+            if finished:
+                break
+        lines = [f"🎰 **{spun} 回まとめて回しました**", last_reels]
+        for line, times in event_counts.items():
+            lines.append(f"{line} ×{times}" if times > 1 else line)
+        lines.append(f"収支: **{delta_total:+,} AGO**")
+        session = self.store.session(uid)
+        if session is not None and session["kind"] == "slot":
+            lines.append(
+                f"残り回数: {session['remaining']} / {session['total']}")
+        if finished:
+            lines.append("セッション終了。おつかれさまでした。")
+        return "\n".join(lines), {"delta": delta_total, "finished": finished}
 
     # ------------------------------------------------------------------ ダブルアップの実行
     async def execute_double_start(self, user_id: int, bet: int) -> str:

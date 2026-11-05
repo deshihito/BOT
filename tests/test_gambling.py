@@ -16,13 +16,24 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from core import action_registry, gambling
 from core.items import ItemError
 from cogs import wallet as wallet_module
-from cogs.gambling import GamblingCog
+from cogs.gambling import (
+    BetModal,
+    BlackjackView,
+    DiceModal,
+    DiceView,
+    DoubleView,
+    GamblingCog,
+    SlotStartModal,
+    SlotView,
+    _slot_embed,
+)
 
 
 class _ScriptedRandom(random.Random):
@@ -683,6 +694,278 @@ class CogFlowTest(unittest.TestCase):
             # 二度目は返金しない。
             asyncio.run(cog._refund_orphaned())
             self.assertEqual(wallet.balances["1"], 3 * gambling.SLOT_BET)
+
+
+# ---------------------------------------------------------------------------
+# 表示層（セッション1メッセージの embed 編集方式）
+# ---------------------------------------------------------------------------
+
+class _FakeResponse:
+    def __init__(self):
+        self.deferred = False
+        self.modal = None
+        self.sent: list = []
+        self.edited = None
+
+    async def defer(self, **kwargs):
+        self.deferred = True
+
+    async def send_modal(self, modal):
+        self.modal = modal
+
+    async def send_message(self, *args, **kwargs):
+        self.sent.append((args, kwargs))
+
+    async def edit_message(self, **kwargs):
+        self.edited = kwargs
+
+
+class _FakeFollowup:
+    def __init__(self):
+        self.sent: list = []
+
+    async def send(self, *args, **kwargs):
+        self.sent.append((args, kwargs))
+
+
+class _FakePanelMessage:
+    def __init__(self):
+        self.edits: list = []
+
+    async def edit(self, **kwargs):
+        self.edits.append(kwargs)
+
+
+class _FakeInteraction:
+    def __init__(self, user_id: int = 1):
+        self.user = SimpleNamespace(id=user_id)
+        self.response = _FakeResponse()
+        self.followup = _FakeFollowup()
+        self.edited_original: list = []
+
+    async def edit_original_response(self, **kwargs):
+        self.edited_original.append(kwargs)
+
+
+def _button(view, label: str):
+    for child in view.children:
+        if getattr(child, "label", None) == label:
+            return child
+    raise AssertionError(f"ボタンがありません: {label}")
+
+
+def _field(embed, name: str) -> str:
+    for field in embed.fields:
+        if field.name == name:
+            return field.value
+    raise AssertionError(f"フィールドがありません: {name}")
+
+
+class ViewEditTest(unittest.TestCase):
+    def _cog(self, tmp: str, wallet: _FakeWallet, rng=None):
+        store = gambling.GamblingStore(
+            Path(tmp) / "gambling.json", rng=rng or random.Random(42))
+        bot = _FakeBot({"WalletCog": wallet})
+        cog = GamblingCog(
+            bot, store=store,
+            balance_reader=lambda uid: wallet.balances.get(uid, 0))
+        return cog, store
+
+    def test_slot_spin_edits_panel_instead_of_new_message(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            wallet = _FakeWallet({"1": 100000})
+            rng = _ScriptedRandom(choices_results=[[1, 1, 2, 3, 4, 5, 9]])
+            cog, store = self._cog(tmp, wallet, rng=rng)
+            asyncio.run(cog.execute_slot_start(1, 10))
+            view = SlotView(cog, 1)
+            view.message = _FakePanelMessage()
+            interaction = _FakeInteraction()
+            asyncio.run(_button(view, "🎰 回す").callback(interaction))
+            # 新規メッセージは増えず、対象メッセージの編集だけが起きる。
+            self.assertEqual(interaction.followup.sent, [])
+            self.assertEqual(len(interaction.edited_original), 1)
+            embed = interaction.edited_original[0]["embed"]
+            self.assertIn("2揃い", _field(embed, "結果"))
+            self.assertIn("9 / 10", _field(embed, "セッション"))
+            # このビューは開始後に作られたため、収支はスピン分から集計する
+            # （開始モーダル経由では先払い分が初期値に入る。別テストで確認）。
+            self.assertEqual(view.session_pnl, 1100)
+            self.assertIn(f"{view.session_pnl:+,}", _field(embed, "セッション収支"))
+            self.assertFalse(_button(view, "🎰 回す").disabled)
+
+    def test_slot_bulk_spins_edit_once(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            wallet = _FakeWallet({"1": 100000})
+            rng = _ScriptedRandom(
+                choices_results=[[1, 1, 2, 3, 4, 5, 9]] * 10)
+            cog, store = self._cog(tmp, wallet, rng=rng)
+            asyncio.run(cog.execute_slot_start(1, 10))
+            view = SlotView(cog, 1)
+            view.message = _FakePanelMessage()
+            interaction = _FakeInteraction()
+            asyncio.run(_button(view, "🎰 まとめて10回").callback(interaction))
+            self.assertEqual(interaction.followup.sent, [])
+            self.assertEqual(len(interaction.edited_original), 1)
+            embed = interaction.edited_original[0]["embed"]
+            result = _field(embed, "結果")
+            self.assertIn("10 回まとめて", result)
+            self.assertIn("セッション終了", result)
+            self.assertIsNone(store.session("1"))
+            self.assertEqual(
+                wallet.balances["1"], 100000 - 10 * gambling.SLOT_BET + 10 * 1100)
+            # 終了後はスピン系が無効化され、開始が再度有効になる。
+            self.assertTrue(_button(view, "🎰 回す").disabled)
+            self.assertTrue(_button(view, "🎰 まとめて10回").disabled)
+            self.assertFalse(_button(view, "始める").disabled)
+
+    def test_slot_confiscate_is_highlighted_in_same_embed(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            wallet = _FakeWallet({"1": 100000})
+            rng = _ScriptedRandom(choices_results=[[6, 6, 6, 6, 6, 1, 2]])
+            cog, store = self._cog(tmp, wallet, rng=rng)
+            asyncio.run(cog.execute_slot_start(1, 10))
+            view = SlotView(cog, 1)
+            view.message = _FakePanelMessage()
+            interaction = _FakeInteraction()
+            asyncio.run(_button(view, "🎰 回す").callback(interaction))
+            self.assertEqual(interaction.followup.sent, [])
+            embed = interaction.edited_original[0]["embed"]
+            self.assertIn("全額没収", _field(embed, "結果"))
+            self.assertEqual(embed.color.value, 0xE74C3C)
+            self.assertEqual(wallet.balances["1"], 0)
+
+    def test_slot_embed_shows_internal_state(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            state = {
+                "users": {"1": _user_state(kakuhen=3, six_counter=5, lose_streak=2)},
+                "sessions": {"1": _slot_session(remaining=7)},
+            }
+            store = _store(tmp, state=state)
+            bot = _FakeBot({"WalletCog": _FakeWallet({"1": 0})})
+            cog = GamblingCog(bot, store=store, balance_reader=lambda uid: 0)
+            embed = _slot_embed(cog, 1, balance=12345)
+            internal = _field(embed, "内部状態")
+            self.assertIn("確変残り **3** 回", internal)
+            self.assertIn("6カウンタ: 5", internal)
+            self.assertIn("連敗 2", internal)
+            self.assertIn("12,345", _field(embed, "残高"))
+
+    def test_double_go_and_cashout_edit_in_place(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            wallet = _FakeWallet({"1": 10000})
+            rng = _ScriptedRandom(randoms=[0.5])
+            cog, store = self._cog(tmp, wallet, rng=rng)
+            asyncio.run(cog.execute_double_start(1, 1000))
+            view = DoubleView(cog, 1)
+            view.message = _FakePanelMessage()
+            interaction = _FakeInteraction()
+            asyncio.run(_button(view, "GO").callback(interaction))
+            self.assertEqual(interaction.followup.sent, [])
+            self.assertEqual(len(interaction.edited_original), 1)
+            embed = interaction.edited_original[0]["embed"]
+            self.assertIn("成功", _field(embed, "結果"))
+            self.assertIn("1.90", _field(embed, "状態"))
+            internal = _field(embed, "内部状態")
+            self.assertIn("NORMAL", internal)
+            self.assertIn("60%", internal)
+            self.assertFalse(_button(view, "GO").disabled)
+            asyncio.run(_button(view, "CASHOUT").callback(interaction))
+            self.assertEqual(len(interaction.edited_original), 2)
+            self.assertEqual(interaction.followup.sent, [])
+            self.assertIsNone(store.session("1"))
+            self.assertEqual(wallet.balances["1"], 10000 - 1000 + 1900)
+            # 終了後は GO / CASHOUT が無効化される。
+            self.assertTrue(_button(view, "GO").disabled)
+            self.assertTrue(_button(view, "CASHOUT").disabled)
+            self.assertFalse(_button(view, "ベットして始める").disabled)
+
+    def test_double_modal_start_refreshes_panel_message(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            wallet = _FakeWallet({"1": 10000})
+            cog, store = self._cog(tmp, wallet)
+            view = DoubleView(cog, 1)
+            panel_message = _FakePanelMessage()
+            view.message = panel_message
+            modal = BetModal(cog, "double", panel=view)
+            modal.amount._value = "1000"
+            interaction = _FakeInteraction()
+            asyncio.run(modal.on_submit(interaction))
+            self.assertEqual(interaction.followup.sent, [])
+            self.assertEqual(len(panel_message.edits), 1)
+            embed = panel_message.edits[0]["embed"]
+            self.assertIn("ダブルアップ開始", _field(embed, "結果"))
+            self.assertIsNotNone(store.session("1"))
+
+    def test_blackjack_hit_edits_and_bust_disables_buttons(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            wallet = _FakeWallet({"1": 10000})
+            rng = _ScriptedRandom(choice_results=[10, 9, 10, 6, 5])
+            cog, store = self._cog(tmp, wallet, rng=rng)
+            asyncio.run(cog.execute_blackjack_start(1, 1000))
+            view = BlackjackView(cog, 1)
+            view.message = _FakePanelMessage()
+            self.assertFalse(_button(view, "ヒット").disabled)
+            interaction = _FakeInteraction()
+            asyncio.run(_button(view, "ヒット").callback(interaction))
+            self.assertEqual(interaction.followup.sent, [])
+            self.assertEqual(len(interaction.edited_original), 1)
+            embed = interaction.edited_original[0]["embed"]
+            self.assertIn("バースト", _field(embed, "結果"))
+            self.assertIsNone(store.session("1"))
+            self.assertTrue(_button(view, "ヒット").disabled)
+            self.assertTrue(_button(view, "スタンド").disabled)
+            self.assertFalse(_button(view, "ベットして始める").disabled)
+
+    def test_dice_modal_result_goes_to_panel(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            wallet = _FakeWallet({"1": 10000})
+            rng = _ScriptedRandom(randints=[7])
+            cog, store = self._cog(tmp, wallet, rng=rng)
+            view = DiceView(cog, 1)
+            panel_message = _FakePanelMessage()
+            view.message = panel_message
+            modal = DiceModal(cog, panel=view)
+            modal.max_value._value = "100"
+            modal.number._value = "7"
+            modal.bet._value = "100"
+            interaction = _FakeInteraction()
+            asyncio.run(modal.on_submit(interaction))
+            self.assertEqual(interaction.followup.sent, [])
+            self.assertEqual(len(panel_message.edits), 1)
+            embed = panel_message.edits[0]["embed"]
+            self.assertIn("当たり", _field(embed, "結果"))
+            self.assertEqual(wallet.balances["1"], 10000 - 100 + 100 * 100)
+
+    def test_slot_modal_start_refreshes_panel_and_seeds_pnl(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            wallet = _FakeWallet({"1": 100000})
+            cog, store = self._cog(tmp, wallet)
+            view = SlotView(cog, 1)
+            panel_message = _FakePanelMessage()
+            view.message = panel_message
+            modal = SlotStartModal(cog, panel=view)
+            modal.spins._value = "10"
+            interaction = _FakeInteraction()
+            asyncio.run(modal.on_submit(interaction))
+            self.assertEqual(interaction.followup.sent, [])
+            self.assertEqual(len(panel_message.edits), 1)
+            embed = panel_message.edits[0]["embed"]
+            self.assertIn("スロット開始", _field(embed, "結果"))
+            self.assertEqual(view.session_pnl, -10 * gambling.SLOT_BET)
+            self.assertFalse(_button(view, "🎰 回す").disabled)
+            self.assertTrue(_button(view, "始める").disabled)
+
+    def test_timeout_disables_all_buttons(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            wallet = _FakeWallet({"1": 10000})
+            cog, store = self._cog(tmp, wallet)
+            view = SlotView(cog, 1)
+            panel_message = _FakePanelMessage()
+            view.message = panel_message
+            asyncio.run(view.on_timeout())
+            for child in view.children:
+                self.assertTrue(child.disabled)
+            self.assertEqual(len(panel_message.edits), 1)
 
 
 # ---------------------------------------------------------------------------
