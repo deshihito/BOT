@@ -131,9 +131,8 @@ class AICandidatesTest(unittest.TestCase):
     def test_blocked_actions_are_excluded(self):
         for key in self.router.BLOCKED_ACTIONS:
             self.assertNotIn(key, self.candidates)
-        for key in ("support:clear", "general:pay", "support:bumprta_on",
-                    "vc:record_start", "vc:transcribe_start", "vc:global_start",
-                    "vc:match_start", "vc:changer_start", "general:miq_settings"):
+        for key in ("support:clear", "general:pay",
+                    "vc:record_start", "vc:transcribe_start", "general:miq_settings"):
             self.assertNotIn(key, self.candidates)
 
     def test_previously_allowed_actions_remain(self):
@@ -157,6 +156,57 @@ class AICandidatesTest(unittest.TestCase):
             self.assertEqual(set(item), {"root", "value", "label", "genre", "risk", "params"})
             self.assertEqual(key, f"{item['root']}:{item['value']}".lower())
             self.assertEqual(item["genre"], f"/{item['root']}")
+
+
+class ConfirmTierTest(unittest.TestCase):
+    """D-3 決定: 7件を risk="confirm" に格上げし、残り22件は blocked 維持。"""
+
+    CONFIRM_IDS = {
+        "support:bumprta_on", "support:bumprta_off",
+        "vc:echo_start", "vc:karaoke_start", "vc:global_start", "vc:match_start",
+        "vc:changer_start",
+    }
+    BLOCKED_IDS = {
+        "general:pay", "general:fujo_register", "general:fujo_freeze",
+        "general:fujo_panic_disable", "general:shortcut_manage", "general:aitools",
+        "general:ai_default", "general:image_default", "general:reasoning_default",
+        "general:miq_settings", "general:meme_create",
+        "support:clear", "support:role_bulk", "support:muted", "support:ticket",
+        "support:honeypot", "support:whisper", "support:binjou",
+        "support:message_log", "support:moderation_log",
+        "vc:record_start", "vc:transcribe_start",
+    }
+
+    @classmethod
+    def setUpClass(cls):
+        from core import ai_tools_router
+
+        cls.registry = action_registry.default_registry()
+        cls.candidates = ai_tools_router.action_candidates()
+
+    def test_id_sets_match_the_decision(self):
+        self.assertEqual(set(action_registry.AI_CONFIRM_IDS), self.CONFIRM_IDS)
+        self.assertEqual(set(action_registry.AI_BLOCKED_IDS), self.BLOCKED_IDS)
+        self.assertFalse(action_registry.AI_CONFIRM_IDS & action_registry.AI_BLOCKED_IDS)
+
+    def test_confirm_specs_keep_aitools_surface(self):
+        for action_id in self.CONFIRM_IDS:
+            spec = self.registry.by_id(action_id)
+            self.assertEqual(spec.risk, "confirm", action_id)
+            self.assertIn("aitools", spec.surfaces, action_id)
+
+    def test_blocked_specs_stay_blocked(self):
+        for action_id in self.BLOCKED_IDS:
+            spec = self.registry.by_id(action_id)
+            self.assertEqual(spec.risk, "blocked", action_id)
+            self.assertNotIn("aitools", spec.surfaces, action_id)
+
+    def test_candidates_include_confirm_and_exclude_blocked(self):
+        for action_id in self.CONFIRM_IDS:
+            self.assertIn(action_id, self.candidates)
+            self.assertEqual(self.candidates[action_id]["risk"], "confirm")
+        for action_id in self.BLOCKED_IDS:
+            self.assertNotIn(action_id, self.candidates)
 
 
 class SpecValidationTest(unittest.TestCase):
