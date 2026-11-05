@@ -7,6 +7,7 @@ import discord
 from discord.ext import commands
 
 import config
+from core import game_records
 
 logger = logging.getLogger(__name__)
 
@@ -123,6 +124,10 @@ class Guess(commands.Cog):
         )
         embed.add_field(name="結果", value=f"{'勝ち' if won else '負け'} | 変動 **{actual_delta:+,} ago**", inline=True)
         embed.add_field(name="残高", value=f"**{new_balance:,} ago**", inline=True)
+        # 自分の通算成績（core/game_records.py）。記録できなければ欄ごと付けない。
+        stats = game_records.record_guess_safely(user_id, bet, won, actual_delta)
+        if stats is not None:
+            embed.add_field(name="あなたの通算成績", value=game_records.format_guess_stats(stats), inline=False)
         embed.set_footer(text=f"勝利時は賭け額の{WIN_MULTIPLIER}倍、敗北時は{LOSS_MULTIPLIER}倍を反映")
         await interaction.response.send_message(embed=embed)
 
