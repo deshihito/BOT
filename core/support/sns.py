@@ -161,6 +161,7 @@ class SnsItem:
     author: str = ""
     published: str | None = None
     thumbnail: str | None = None
+    live: bool = False
 
 
 def _sns_text(value: str | None) -> str:
@@ -201,6 +202,11 @@ def parse_youtube_feed(data: bytes) -> tuple[str, list[SnsItem]]:
             continue
         link = entry.find("a:link[@rel='alternate']", _SNS_NS)
         thumb = entry.find("media:group/media:thumbnail", _SNS_NS)
+        thumb_url = (thumb.get("url") if thumb is not None else None) or ""
+        # ライブ/プレミア公開の判定 (Atomフィードには明示フラグが無いためヒューリスティクス):
+        # ライブ中はサムネイルが hqdefault_live.jpg になり、通常動画にある starRating が付かない。
+        star = entry.find("media:group/media:community/media:starRating", _SNS_NS)
+        is_live = "_live" in thumb_url or star is None
         items.append(
             SnsItem(
                 id=video_id,
@@ -208,11 +214,18 @@ def parse_youtube_feed(data: bytes) -> tuple[str, list[SnsItem]]:
                 url=(link.get("href") if link is not None else None) or f"https://www.youtube.com/watch?v={video_id}",
                 author=name,
                 published=entry.findtext("a:published", default=None, namespaces=_SNS_NS),
-                thumbnail=(thumb.get("url") if thumb is not None else None)
-                or f"https://i.ytimg.com/vi/{video_id}/hqdefault.jpg",
+                thumbnail=thumb_url or f"https://i.ytimg.com/vi/{video_id}/hqdefault.jpg",
+                live=is_live,
             )
         )
     return name, items
+
+
+def sns_youtube_kind_allowed(item: SnsItem, settings: dict) -> bool:
+    """YouTube新着をライブ/通常動画の設定で振り分ける。他プラットフォームは常に対象。"""
+    if item.live:
+        return bool(settings.get("live_enabled", True))
+    return bool(settings.get("uploads_enabled", True))
 
 
 def parse_rss_feed(data: bytes) -> tuple[str, list[SnsItem]]:
@@ -532,6 +545,9 @@ def get_sns_settings(store, guild_id: int) -> dict:
         "enabled": raw.get("enabled") if isinstance(raw.get("enabled"), bool) else False,
         "channel_id": _support_int(raw.get("channel_id")),
         "role_id": _support_int(raw.get("role_id")),
+        "live_role_id": _support_int(raw.get("live_role_id")),
+        "live_enabled": raw.get("live_enabled") if isinstance(raw.get("live_enabled"), bool) else True,
+        "uploads_enabled": raw.get("uploads_enabled") if isinstance(raw.get("uploads_enabled"), bool) else True,
         "subs": subs[:SNS_MAX_SUBS],
     }
 
@@ -547,7 +563,10 @@ class SnsNotifyMessage(discord.ui.LayoutView):
         if role_id:
             children.append(discord.ui.TextDisplay(f"<@&{role_id}>"))
 
-        header = f"### {meta['emoji']} {discord.utils.escape_markdown(sub['name'])} の新着{meta['noun']}"
+        if item.live and sub["platform"] == "youtube":
+            header = f"### 🔴 {discord.utils.escape_markdown(sub['name'])} がライブ配信を開始しました"
+        else:
+            header = f"### {meta['emoji']} {discord.utils.escape_markdown(sub['name'])} の新着{meta['noun']}"
         stamp = sns_epoch(item.published)
         if stamp:
             header += f"\n-# <t:{stamp}:R>"
@@ -618,6 +637,60 @@ class SnsRoleSelect(discord.ui.RoleSelect):
             interaction,
             "メンション先を設定しました。" if role else "メンションを解除しました。",
             role_id=role.id if role else None,
+        )
+
+
+class SnsLiveRoleSelect(discord.ui.RoleSelect):
+    def __init__(self, parent: "SnsNotifyPanel"):
+        self.parent_view = parent
+        role_id = parent.settings.get("live_role_id")
+        super().__init__(
+            placeholder="ライブ通知でメンションするロール（任意・未設定時は通常と同じ）",
+            min_values=0,
+            max_values=1,
+            default_values=(
+                [discord.SelectDefaultValue(id=role_id, type=discord.SelectDefaultValueType.role)]
+                if role_id
+                else []
+            ),
+        )
+
+    async def callback(self, interaction: discord.Interaction):
+        role = self.values[0] if self.values else None
+        if role is not None and (role.is_default() or role.managed):
+            return await interaction.response.send_message(
+                "@everyone や連携サービス用のロールは指定できません。",
+                ephemeral=True,
+            )
+        await self.parent_view.save(
+            interaction,
+            "ライブ用のメンション先を設定しました。" if role else "ライブ用のメンションを解除しました。",
+            live_role_id=role.id if role else None,
+        )
+
+
+class SnsKindToggleButton(discord.ui.Button):
+    """YouTubeのライブ/通常動画、それぞれの通知オン・オフ。"""
+
+    def __init__(self, parent: "SnsNotifyPanel", kind: str):
+        self.parent_view = parent
+        self.kind = kind  # "live" | "uploads"
+        field = "live_enabled" if kind == "live" else "uploads_enabled"
+        on = bool(parent.settings.get(field, True))
+        label = "ライブ通知" if kind == "live" else "通常動画の通知"
+        super().__init__(
+            label=f"{label}: {'オン' if on else 'オフ'}",
+            style=discord.ButtonStyle.success if on else discord.ButtonStyle.secondary,
+        )
+
+    async def callback(self, interaction: discord.Interaction):
+        field = "live_enabled" if self.kind == "live" else "uploads_enabled"
+        value = not bool(self.parent_view.settings.get(field, True))
+        label = "ライブ通知" if self.kind == "live" else "通常動画の通知"
+        await self.parent_view.save(
+            interaction,
+            f"{label}を{'オン' if value else 'オフ'}にしました。",
+            **{field: value},
         )
 
 
@@ -789,10 +862,13 @@ class SnsNotifyPanel(discord.ui.LayoutView):
         s = self.settings
         channel = f"<#{s['channel_id']}>" if s["channel_id"] else "未設定"
         role = f"<@&{s['role_id']}>" if s["role_id"] else "なし"
+        live_role = f"<@&{s['live_role_id']}>" if s.get("live_role_id") else "通常と同じ"
         return (
             f"状態: **{'オン' if s['enabled'] else 'オフ'}**\n"
             f"送信先: {channel}\n"
             f"メンション: {role}\n"
+            f"YouTube ライブ通知: {'オン' if s.get('live_enabled', True) else 'オフ'} / ライブ用メンション: {live_role}\n"
+            f"YouTube 通常動画の通知: {'オン' if s.get('uploads_enabled', True) else 'オフ'}\n"
             f"確認間隔: 約{SNS_POLL_SECONDS // 60}分ごと\n"
         )
 
@@ -830,11 +906,16 @@ class SnsNotifyPanel(discord.ui.LayoutView):
             discord.ui.Separator(),
             discord.ui.ActionRow(SnsChannelSelect(self)),
             discord.ui.ActionRow(SnsRoleSelect(self)),
+            discord.ui.ActionRow(SnsLiveRoleSelect(self)),
             discord.ui.ActionRow(
                 SnsAddButton(self, "youtube"),
                 SnsAddButton(self, "x"),
                 SnsAddButton(self, "github"),
                 SnsToggleButton(self),
+            ),
+            discord.ui.ActionRow(
+                SnsKindToggleButton(self, "live"),
+                SnsKindToggleButton(self, "uploads"),
             ),
         ]
         if any(s["platform"] == "github" for s in self.settings["subs"]):
@@ -1034,16 +1115,31 @@ class SnsSupportMixin:
             fresh.reverse()
             fresh.sort(key=lambda i: sns_epoch(i.published) or 0)
 
+            if sub["platform"] == "youtube":
+                # ライブ/通常動画の設定で振り分け。対象外は既読にして再通知しない。
+                skipped = [i for i in fresh if not sns_youtube_kind_allowed(i, settings)]
+                seen.extend(i.id for i in skipped)
+                fresh = [i for i in fresh if sns_youtube_kind_allowed(i, settings)]
+
             if len(fresh) > SNS_MAX_SEND_PER_CYCLE:
                 seen.extend(i.id for i in fresh[:-SNS_MAX_SEND_PER_CYCLE])
                 fresh = fresh[-SNS_MAX_SEND_PER_CYCLE:]
+
+            live_role_id = settings.get("live_role_id") or role_id
+            live_mentions = discord.AllowedMentions(
+                everyone=False,
+                users=False,
+                roles=[discord.Object(id=live_role_id)] if live_role_id else False,
+            )
 
             error = None
             for item in fresh:
                 try:
                     await channel.send(
-                        view=SnsNotifyMessage(sub, item, role_id),
-                        allowed_mentions=mentions,
+                        view=SnsNotifyMessage(
+                            sub, item, live_role_id if item.live else role_id,
+                        ),
+                        allowed_mentions=live_mentions if item.live else mentions,
                     )
                 except (discord.Forbidden, discord.HTTPException) as exc:
                     logger.warning("SNS通知の送信に失敗 (guild=%s %s): %s", guild.id, ident, exc)
