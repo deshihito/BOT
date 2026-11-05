@@ -3,6 +3,8 @@ import random
 import discord
 from discord.ext import commands
 
+from core import game_records
+
 
 class FlashModal(discord.ui.Modal, title="フラッシュ暗算"):
   count = discord.ui.TextInput(label="数字の個数（1〜20）", default="5", max_length=2)
@@ -84,19 +86,29 @@ class FlashMentalArithmetic(commands.Cog):
     try:
       msg = await self.bot.wait_for("message", timeout=30.0, check=check)
     except asyncio.TimeoutError:
+      line = self._record_line(interaction.user.id, count, interval, digits, False)
       await interaction.followup.send(
-          f"時間切れです。正解は **{total_sum}** でした。"
+          f"時間切れです。正解は **{total_sum}** でした。{line}"
       )
       return
 
-    if int(msg.content) == total_sum:
+    correct = int(msg.content) == total_sum
+    line = self._record_line(interaction.user.id, count, interval, digits, correct)
+    if correct:
       await interaction.followup.send(
-          f"正解です！おめでとうございます！ (答え: {total_sum})"
+          f"正解です！おめでとうございます！ (答え: {total_sum}){line}"
       )
     else:
       await interaction.followup.send(
-          f"不正解です...。正解は **{total_sum}** でした。"
+          f"不正解です...。正解は **{total_sum}** でした。{line}"
       )
+
+  def _record_line(self, user_id, count: int, interval: float, digits: int, correct: bool) -> str:
+    # 設定ごとの自己ベスト（core/game_records.py）。記録できなければ何も付けない。
+    entry = game_records.record_flash_safely(user_id, count, digits, interval, correct)
+    if entry is None:
+      return ""
+    return "\n" + game_records.format_flash_line(entry, count, digits, interval)
 
 
 async def setup(bot: commands.Bot):
