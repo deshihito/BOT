@@ -21,7 +21,7 @@ from core.panel_v2 import as_panel_v2, edit_panel_v2
 from core import action_registry, action_usage, ai_omnirush, ai_preferences, ai_provider_router, guild_settings, levelup_card, logfare, shortcuts, usage_stats
 from core.game_guides import GAME_GUIDES, GAME_ORDER
 from core import localization, translation
-from core.messages import ITEMS_NOT_LOADED, MARKET_NOT_LOADED
+from core.messages import ITEMS_NOT_LOADED, MARKET_NOT_LOADED, WORKSHOP_NOT_LOADED
 from core.libretranslate import LibreTranslateClient, LibreTranslateError
 
 logger = logging.getLogger(__name__)
@@ -68,6 +68,10 @@ GENERAL_ACTIONS = {
         ("アイテムを買う", "item_buy"),
         ("アイテムを使う", "item_use"),
         ("宝箱を開ける", "box_open"),
+        ("工房", "workshop"),
+        ("加工機を買う", "machine_buy"),
+        ("生産物を受け取る", "workshop_claim"),
+        ("合成する", "craft"),
         ("コイン保有ランキング", "coin_leaderboard"),
     ],
     "rta": [
@@ -4965,6 +4969,18 @@ class GeneralCog(commands.Cog):
             if value == "item_use":
                 return await items_cog.open_use(interaction)
             return await items_cog.open_boxes(interaction)
+
+        if value in {"workshop", "machine_buy", "workshop_claim", "craft"}:
+            workshop_cog = self.bot.get_cog("WorkshopCog")
+            if workshop_cog is None:
+                return await self._safe_respond(interaction, WORKSHOP_NOT_LOADED)
+            if value == "workshop":
+                return await workshop_cog.show_workshop(interaction)
+            if value == "machine_buy":
+                return await workshop_cog.open_buy_machine(interaction)
+            if value == "workshop_claim":
+                return await workshop_cog.open_claim(interaction)
+            return await workshop_cog.show_craft(interaction)
 
         if value in {"market", "token_buy", "token_sell"}:
             market_cog = self.bot.get_cog("MarketCog")

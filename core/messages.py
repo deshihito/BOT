@@ -71,3 +71,22 @@ ITEM_NOT_FOUND = "そのアイテムは存在しません。アイテムパネ�
 def item_action_failed(reason: object) -> str:
     """アイテム操作が成立しなかったときの文（理由をそのまま続ける）。"""
     return f"{FAILED} {reason}"
+
+
+# ---------------------------------------------------------------- 合成・工房系
+
+#: 工房 cog が読み込まれていないときのエラー（/general の dispatch で共用）。
+WORKSHOP_NOT_LOADED = "工房機能が読み込まれていません。"
+
+#: 合成パネルの素材入力が解釈できないときのエラー。
+CRAFT_INVALID_INPUT = "入力が正しくありません。素材の名前を確認してください。"
+
+
+def craft_action_failed(reason: object) -> str:
+    """合成が成立しなかったときの文（理由をそのまま続ける）。"""
+    return f"{FAILED} {reason}"
+
+
+def workshop_action_failed(reason: object) -> str:
+    """工房の操作が成立しなかったときの文（理由をそのまま続ける）。"""
+    return f"{FAILED} {reason}"

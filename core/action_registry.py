@@ -53,6 +53,7 @@ ALL_SURFACES = frozenset({"panel", "shortcut", "aitools", "palette"})
 AI_BLOCKED_IDS = frozenset({
     "general:pay", "general:token_buy", "general:token_sell",
     "general:item_buy", "general:item_use", "general:box_open",
+    "general:machine_buy", "general:workshop_claim", "general:craft",
     "general:fujo_register", "general:fujo_freeze", "general:fujo_panic_disable",
     "general:shortcut_manage", "general:aitools", "general:ai_default",
     "general:image_default", "general:reasoning_default",

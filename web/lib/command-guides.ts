@@ -84,7 +84,7 @@ export const COMMAND_GUIDES: CommandGuide[] = [
       {
         slug: "money",
         title: "マネー",
-        description: "AGOの状況確認、送金、市場でのアゴトークンの売買、アイテムと宝箱、コイン保有ランキングをまとめています。",
+        description: "AGOの状況確認、送金、市場でのアゴトークンの売買、アイテムと宝箱、合成と工房、コイン保有ランキングをまとめています。",
         functions: [
           { title: "プレイヤー状況", description: "自分の所持状況を確認します。" },
           { title: "コイン送金", description: "送金先のユーザーIDとAGOを入力して、ほかのユーザーへ送ります。" },
@@ -95,6 +95,10 @@ export const COMMAND_GUIDES: CommandGuide[] = [
           { title: "アイテムを買う", description: "AGOで素材や消費アイテム、宝箱を買います。" },
           { title: "アイテムを使う", description: "手数料パスなど、使う効果のあるアイテムを発動します。" },
           { title: "宝箱を開ける", description: "所持している宝箱をまとめて開けます。" },
+          { title: "工房", description: "所有する加工機の生産状況や連続稼働ストリーク、委託加工の進み具合を確認します。" },
+          { title: "加工機を買う", description: "AGOで加工機を買い、時間経過で合成素材が生産されるようにします。" },
+          { title: "生産物を受け取る", description: "加工機が生産した素材をまとめて受け取ります。" },
+          { title: "合成する", description: "素材を2つ組み合わせて別のアイテムを作ります。時間をかける委託加工も選べます。" },
           { title: "コイン保有ランキング", description: "コインの保有状況をランキングで確認します。" },
         ],
       },
