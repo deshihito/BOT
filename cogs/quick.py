@@ -83,11 +83,11 @@ def autocomplete_choices(
 # 実行の委譲
 # ---------------------------------------------------------------------------
 
-async def _send_ephemeral(interaction: discord.Interaction, text: str) -> None:
+async def _send_ephemeral(interaction: discord.Interaction, text: str, *, ephemeral: bool = True) -> None:
     if interaction.response.is_done():
-        await interaction.followup.send(text, ephemeral=True)
+        await interaction.followup.send(text, ephemeral=ephemeral)
     else:
-        await interaction.response.send_message(text, ephemeral=True)
+        await interaction.response.send_message(text, ephemeral=ephemeral)
 
 
 async def dispatch_action(
@@ -125,7 +125,7 @@ async def dispatch_action(
             raise QuickError("ゲーム機能が読み込まれていません。")
         return await cog.start_game(interaction, spec.value.removeprefix("game:"))
     if spec.root == "help":
-        return await _send_ephemeral(interaction, "ヘルプは `/help` で確認できます。")
+        return await _send_ephemeral(interaction, "ヘルプは `/help` で確認できます。", ephemeral=False)
     raise QuickError(f"未知のルートです: {spec.root}")
 
 
@@ -279,7 +279,7 @@ class QuickCog(commands.Cog):
                 "下のボタンから入力してください。入力がなければ実行しません。"
             )
             view = QuickParamPromptView(self, spec, missing, user_id=interaction.user.id)
-            await interaction.response.send_message(text, view=view, ephemeral=True)
+            await interaction.response.send_message(text, view=view)
             view.message = await interaction.original_response()
             return
         try:
