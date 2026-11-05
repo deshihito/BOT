@@ -115,6 +115,95 @@ class ItemAmountModal(discord.ui.Modal):
         await interaction.followup.send(message)
 
 
+class ItemQuantityModal(discord.ui.Modal):
+    """アイテム選択後に数量だけを聞くモーダル（導線最適化 M10）。"""
+
+    amount = discord.ui.TextInput(label="数量", max_length=10, default="1", required=False)
+
+    def __init__(self, cog: "ItemsCog", action: str, item_id: str):
+        self.cog = cog
+        self.action = action
+        self.item_id = item_id
+        titles = {"buy": "アイテムを買う", "sell": "アイテムを売る", "use": "アイテムを使う"}
+        super().__init__(title=f"{titles[action]}: {_item_name(item_id)}")
+        self.amount.placeholder = "使う場合は1固定です" if action == "use" else "例: 1（半角数字）"
+
+    async def on_submit(self, interaction: discord.Interaction):
+        raw = str(self.amount.value or "1").replace(",", "").strip() or "1"
+        try:
+            count = int(raw)
+        except ValueError:
+            return await interaction.response.send_message(ITEM_INVALID_INPUT, ephemeral=True)
+        if count <= 0:
+            return await interaction.response.send_message(ITEM_INVALID_INPUT, ephemeral=True)
+        await interaction.response.defer()
+        if self.action == "buy":
+            message = await self.cog.execute_buy(interaction.user.id, self.item_id, count)
+        elif self.action == "sell":
+            message = await self.cog.execute_sell(interaction.user.id, self.item_id, count)
+        else:
+            message = self.cog.execute_use(interaction.user.id, self.item_id)
+        await interaction.followup.send(message)
+
+
+def _item_pick_options(cog: "ItemsCog", user_id: int, action: str) -> list[discord.SelectOption]:
+    """買う/売る/使うの候補を、対象母集団ごとに組み立てる（M10）。"""
+    options: list[discord.SelectOption] = []
+    if action == "buy":
+        for item_id, definition in items_core.ITEM_DEFS.items():
+            if not definition["purchasable"]:
+                continue
+            options.append(discord.SelectOption(
+                label=f"{definition['name']} — {definition['price']:,} AGO", value=item_id))
+    else:
+        inventory = cog.store.inventory(str(user_id))
+        for item_id, count in sorted(inventory.items()):
+            definition = items_core.ITEM_DEFS.get(item_id) or {}
+            if action == "sell" and definition.get("sell_price") is None:
+                continue
+            suffix = f"（売却 {definition['sell_price']:,} AGO）" if action == "sell" else ""
+            options.append(discord.SelectOption(
+                label=f"{_item_name(item_id)} ×{count}{suffix}", value=item_id))
+    return options[:25]
+
+
+class ItemPickView(discord.ui.View):
+    """アイテム名の自由記述をやめ、候補から選ばせる中継ビュー（M10）。
+
+    所持品など個人情報を含むため ephemeral で出し、操作は本人のみ。
+    """
+
+    def __init__(self, cog: "ItemsCog", user_id: int, action: str,
+                 options: list[discord.SelectOption]):
+        super().__init__(timeout=180)
+        self.cog = cog
+        self.user_id = user_id
+        self.action = action
+        select = discord.ui.Select(placeholder="アイテムを選択してください", options=options)
+        select.callback = self._on_pick
+        self.add_item(select)
+
+    async def interaction_check(self, interaction) -> bool:
+        return interaction.user.id == self.user_id
+
+    async def _on_pick(self, interaction: discord.Interaction):
+        item_id = interaction.data["values"][0]
+        await interaction.response.send_modal(
+            ItemQuantityModal(self.cog, self.action, item_id))
+
+
+async def _send_item_pick(interaction: discord.Interaction, cog: "ItemsCog", action: str):
+    options = _item_pick_options(cog, interaction.user.id, action)
+    if not options:
+        return await interaction.response.send_message(
+            "対象のアイテムがありません。", ephemeral=True)
+    titles = {"buy": "買うアイテムを選択", "sell": "売るアイテムを選択", "use": "使うアイテムを選択"}
+    await interaction.response.send_message(
+        embed=discord.Embed(title=titles[action], color=ITEMS_COLOR),
+        view=ItemPickView(cog, interaction.user.id, action, options),
+        ephemeral=True)
+
+
 class ItemsView(discord.ui.View):
     def __init__(self, cog: "ItemsCog", user_id: int):
         super().__init__(timeout=180)
@@ -132,15 +221,15 @@ class ItemsView(discord.ui.View):
 
     @discord.ui.button(label="買う", style=discord.ButtonStyle.success)
     async def buy(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.send_modal(ItemAmountModal(self.cog, "buy"))
+        await _send_item_pick(interaction, self.cog, "buy")
 
     @discord.ui.button(label="売る", style=discord.ButtonStyle.primary)
     async def sell(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.send_modal(ItemAmountModal(self.cog, "sell"))
+        await _send_item_pick(interaction, self.cog, "sell")
 
     @discord.ui.button(label="使う", style=discord.ButtonStyle.secondary)
     async def use(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.send_modal(ItemAmountModal(self.cog, "use"))
+        await _send_item_pick(interaction, self.cog, "use")
 
     @discord.ui.button(label="宝箱を開ける", style=discord.ButtonStyle.danger)
     async def open_box(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -181,10 +270,10 @@ class ItemsCog(commands.Cog):
             embed=_items_embed(self.store, interaction.user.id), view=view)
 
     async def open_buy(self, interaction: discord.Interaction):
-        await interaction.response.send_modal(ItemAmountModal(self, "buy"))
+        await _send_item_pick(interaction, self, "buy")
 
     async def open_use(self, interaction: discord.Interaction):
-        await interaction.response.send_modal(ItemAmountModal(self, "use"))
+        await _send_item_pick(interaction, self, "use")
 
     async def open_boxes(self, interaction: discord.Interaction):
         await interaction.response.defer()
