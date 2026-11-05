@@ -62,9 +62,11 @@ class CandidateSchemaTest(unittest.TestCase):
         self.assertEqual(by_name["pitch"]["max_value"], 24.0)
         # 引数のないアクションは空スキーマ。
         self.assertEqual(candidates["vc:join"]["params"], [])
-        # blocked は引き続き候補に現れない。
-        self.assertNotIn("vc:echo_start", candidates)
-        self.assertNotIn("vc:changer_start", candidates)
+        # blocked（録音開始）は引き続き候補に現れない。
+        self.assertNotIn("vc:record_start", candidates)
+        # D-3 で confirm に格上げされた開始系は、risk="confirm" で候補に残る。
+        self.assertEqual(candidates["vc:echo_start"]["risk"], "confirm")
+        self.assertEqual(candidates["vc:changer_start"]["risk"], "confirm")
 
 
 class DecideActionCriteriaTest(unittest.IsolatedAsyncioTestCase):
@@ -308,6 +310,112 @@ class CogFlowTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(invoke.await_args.kwargs["params"], {"pitch": 3.0})
         summary_text = message.reply.await_args.args[0]
         self.assertIn("ピッチ（半音）: 3.0", summary_text)
+
+
+class RealConfirmFlowTest(unittest.IsolatedAsyncioTestCase):
+    """D-3 で格上げされた実在アクションが、実際の候補データで確認経路に乗ること。
+
+    合成候補ではなく ai_tools_router.action_candidates() の実データを使い、
+    decide_action と invoke_action だけをモックする。
+    """
+
+    def setUp(self):
+        self.bot_user = types.SimpleNamespace(id=123)
+        self.bot = types.SimpleNamespace(user=self.bot_user)
+        self.cog = AIToolsCog(self.bot)
+        self.sent = types.SimpleNamespace(edit=AsyncMock())
+
+    def _message(self, content):
+        return types.SimpleNamespace(
+            author=types.SimpleNamespace(bot=False, id=456),
+            guild=types.SimpleNamespace(id=67),
+            mentions=[self.bot_user],
+            reference=None,
+            interaction_metadata=None,
+            interaction=None,
+            content=content,
+            reply=AsyncMock(return_value=self.sent),
+            channel=types.SimpleNamespace(typing=lambda: _Typing()),
+        )
+
+    def _patches(self, selected, invoke):
+        return (
+            patch.dict(os.environ, {"AITOOLS_ENABLED": "true"}),
+            patch("cogs.ai_tools.logfare.api_key", return_value="configured"),
+            patch.object(ai_tools_router, "decide_action", new_callable=AsyncMock, return_value=selected),
+            patch.object(ai_tools_router, "invoke_action", invoke),
+        )
+
+    def _interaction(self):
+        return types.SimpleNamespace(
+            user=types.SimpleNamespace(id=456),
+            response=types.SimpleNamespace(
+                defer=AsyncMock(), send_message=AsyncMock(), edit_message=AsyncMock()),
+        )
+
+    async def test_real_echo_start_confirm_cancel_never_executes(self):
+        invoke = AsyncMock()
+        patches = self._patches("vc:echo_start", invoke)
+        message = self._message("<@123> やまびこ開始して")
+        with patches[0], patches[1], patches[2], patches[3]:
+            await self.cog.on_message(message)
+            invoke.assert_not_awaited()
+            view = message.reply.await_args.kwargs["view"]
+            self.assertIsInstance(view, AIToolsConfirmView)
+            # キャンセルしても実行されない。
+            await view.cancel_button.callback(self._interaction())
+            invoke.assert_not_awaited()
+
+    async def test_real_changer_start_confirm_executes_with_extracted_params(self):
+        invoke = AsyncMock()
+        patches = self._patches("vc:changer_start", invoke)
+        message = self._message("<@123> ボイスチェンジャーを開始して、ピッチを+3にして")
+        with patches[0], patches[1], patches[2], patches[3]:
+            await self.cog.on_message(message)
+            invoke.assert_not_awaited()
+            view = message.reply.await_args.kwargs["view"]
+            self.assertIsInstance(view, AIToolsConfirmView)
+            # 任意引数は抽出済みで、確認文に要約が載る。
+            self.assertIn("ピッチ（半音）: 3.0", message.reply.await_args.args[0])
+            await view.on_execute()
+            invoke.assert_awaited_once()
+            self.assertEqual(invoke.await_args.kwargs["params"], {"pitch": 3.0})
+
+    async def _karaoke_until_confirm(self, invoke):
+        """カラオケ開始を補完ビュー→確認ビューまで進め、確認ビューを返す。
+
+        呼び出し側のパッチ有効範囲の中で呼ぶこと（実行コールバックが
+        パッチ済み invoke_action を参照するため）。
+        """
+        message = self._message("<@123> カラオケ開始して")
+        await self.cog.on_message(message)
+        invoke.assert_not_awaited()
+        view = message.reply.await_args.kwargs["view"]
+        # 必須引数（歌詞）が無いので、まず補完ビューが出る（確認はまだ）。
+        self.assertIsInstance(view, AIToolsParamCompletionView)
+        await view.accept_values(self._interaction(), {"lyrics": "テスト歌詞"})
+        invoke.assert_not_awaited()
+        # 補完後は同じメッセージが確認ビューに切り替わる（二重表示にならない）。
+        confirm_view = self.sent.edit.await_args.kwargs["view"]
+        self.assertIsInstance(confirm_view, AIToolsConfirmView)
+        return confirm_view
+
+    async def test_real_karaoke_start_completion_then_confirm_executes(self):
+        invoke = AsyncMock()
+        patches = self._patches("vc:karaoke_start", invoke)
+        with patches[0], patches[1], patches[2], patches[3]:
+            confirm_view = await self._karaoke_until_confirm(invoke)
+            await confirm_view.on_execute()
+            invoke.assert_awaited_once()
+            self.assertEqual(invoke.await_args.kwargs["params"], {"lyrics": "テスト歌詞"})
+
+    async def test_real_karaoke_start_completion_then_confirm_cancel_never_executes(self):
+        invoke = AsyncMock()
+        patches = self._patches("vc:karaoke_start", invoke)
+        with patches[0], patches[1], patches[2], patches[3]:
+            confirm_view = await self._karaoke_until_confirm(invoke)
+            await confirm_view.cancel_button.callback(self._interaction())
+            invoke.assert_not_awaited()
 
 
 if __name__ == "__main__":

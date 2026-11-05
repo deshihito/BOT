@@ -16,7 +16,7 @@ AI tools の候補に自動で増えない」というズレが起きていた�
 
 risk の意味（このモジュールでの定義）:
 - "safe": AI tools の代理実行可
-- "confirm": 将来、確認を挟めば AI 実行可（現時点では未使用）
+- "confirm": AI tools の候補に入るが、実行前に確認ビューを挟む（AI_CONFIRM_IDS が対象）
 - "blocked": AI tools の代理実行対象外。パネル／ショートカットは surfaces で決まる
 
 surfaces は入口ごとの可否（"panel" / "shortcut" / "aitools" / "palette"）が正。
@@ -45,10 +45,11 @@ ROOT_LABELS = {
 ALL_SURFACES = frozenset({"panel", "shortcut", "aitools", "palette"})
 
 # AI tools の代理実行対象外（旧 core/ai_tools_router.BLOCKED_ACTIONS と同じ集合）。
-# 引数や確認モーダルを要する処理、権限操作、削除・送金系、記録開始系は明示操作に限定する。
+# 権限操作、削除・送金系、個人設定の変更、録音・文字起こし開始（プライバシー）は
+# 明示操作に限定する。
 # vc:changer_start は従来 SHORTCUT_ROOTS に無かったが、dispatch は引数なしで実行可能
-# （パネルからも直接実行される）ためショートカット候補には加える。ただし開始系の
-# ため record_start 等と同様に AI tools からは除外する。
+# （パネルからも直接実行される）ためショートカット候補には加える。AI tools からは
+# 下の AI_CONFIRM_IDS のとおり確認ビュー付きでのみ実行可とする。
 AI_BLOCKED_IDS = frozenset({
     "general:pay", "general:fujo_register", "general:fujo_freeze", "general:fujo_panic_disable",
     "general:shortcut_manage", "general:aitools", "general:ai_default",
@@ -61,9 +62,16 @@ AI_BLOCKED_IDS = frozenset({
     "general:meme_create",
     "support:clear", "support:role_bulk", "support:muted", "support:ticket", "support:honeypot",
     "support:whisper", "support:binjou", "support:message_log", "support:moderation_log",
+    "vc:record_start", "vc:transcribe_start",
+})
+
+# AI tools で「確認ビュー付きなら代理実行可」（risk="confirm"）とする集合（D-3 決定）。
+# 可逆な通知トグルと、目に見えて停止で戻せる VC 開始系だけを対象にする。
+# surfaces は落とさない（"aitools" を含んだまま候補に残り、実行前に
+# cogs/ai_tools の確認ビューを必ず経由する）。
+AI_CONFIRM_IDS = frozenset({
     "support:bumprta_on", "support:bumprta_off",
-    "vc:record_start", "vc:echo_start", "vc:transcribe_start", "vc:karaoke_start",
-    "vc:global_start", "vc:match_start",
+    "vc:echo_start", "vc:karaoke_start", "vc:global_start", "vc:match_start",
     "vc:changer_start",
 })
 
@@ -208,13 +216,19 @@ def _check_param_range(param: ParamSpec, value: float) -> None:
 
 
 def make_action(root: str, value: str, label: str, genre: str, genre_label: str, **kwargs) -> ActionSpec:
-    """id を root:value から組み立て、AI 代理実行対象外なら surfaces/risk を落とす。"""
+    """id を root:value から組み立て、AI tools 向けの risk を単一の定義から付ける。
+
+    blocked は surfaces から "aitools" も落とす。confirm は surfaces を
+    変えず risk だけを "confirm" にする（候補に残り、実行前に確認を挟む）。
+    """
     action_id = f"{root}:{value}"
     if action_id in AI_BLOCKED_IDS:
         kwargs.setdefault("risk", "blocked")
         surfaces = set(kwargs.get("surfaces", ALL_SURFACES))
         surfaces.discard("aitools")
         kwargs["surfaces"] = frozenset(surfaces)
+    elif action_id in AI_CONFIRM_IDS:
+        kwargs.setdefault("risk", "confirm")
     return ActionSpec(
         id=action_id, root=root, value=value, label=label,
         genre=genre, genre_label=genre_label, **kwargs,

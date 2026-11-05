@@ -26,10 +26,13 @@ AITOOLS_MODEL = "clef"
 AITOOLS_TIMEOUT = float(os.getenv("AITOOLS_TIMEOUT", "30"))
 AITOOLS_RETRIES = max(1, int(os.getenv("AITOOLS_RETRIES", "1")))
 
-# 引数や確認モーダルを要する処理、権限操作、削除・送金系は代理実行対象外。
+# 権限操作、削除・送金系などは代理実行対象外。
 # 実体は core/action_registry.AI_BLOCKED_IDS（risk="blocked" として定義側に保持）。
 # ここでは後方互換のため同じ集合を再エクスポートする。
 BLOCKED_ACTIONS = action_registry.AI_BLOCKED_IDS
+
+# 確認ビュー付きなら代理実行可（risk="confirm"）。実体は action_registry 側。
+CONFIRM_ACTIONS = action_registry.AI_CONFIRM_IDS
 
 
 class AIToolsDecisionError(RuntimeError):

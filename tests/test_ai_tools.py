@@ -37,8 +37,12 @@ class AIToolsTest(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(candidates)
         self.assertNotIn("support:clear", candidates)
         self.assertNotIn("general:pay", candidates)
-        self.assertNotIn("support:bumprta_on", candidates)
-        for key in ("vc:record_start", "vc:transcribe_start", "vc:global_start", "vc:match_start"):
+        # D-3 で confirm に格上げされた7件は、確認ビュー付きの候補として入る。
+        for key in ("support:bumprta_on", "support:bumprta_off", "vc:echo_start",
+                    "vc:karaoke_start", "vc:global_start", "vc:match_start", "vc:changer_start"):
+            self.assertIn(key, candidates)
+            self.assertEqual(candidates[key]["risk"], "confirm")
+        for key in ("vc:record_start", "vc:transcribe_start"):
             self.assertNotIn(key, candidates)
 
         # 後から追加されたVC操作も、フォーム入力を必要としないものはAI toolsから選べる。
