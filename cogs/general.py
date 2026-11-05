@@ -18,7 +18,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands, tasks
 from core.panel_v2 import as_panel_v2, edit_panel_v2
-from core import action_registry, action_usage, ai_omnirush, ai_preferences, ai_provider_router, guild_settings, logfare, shortcuts, usage_stats
+from core import action_registry, action_usage, ai_omnirush, ai_preferences, ai_provider_router, guild_settings, levelup_card, logfare, shortcuts, usage_stats
 from core.game_guides import GAME_GUIDES, GAME_ORDER
 from core import localization, translation
 from core.messages import ITEMS_NOT_LOADED, MARKET_NOT_LOADED
@@ -573,11 +573,13 @@ def render_levelup_card(
     seed: int = 0,
     *,
     bot_avatar_bytes: bytes | None = None,
+    theme: str = "default",
 ) -> bytes:
     """レベルアップ画像(PNG)を生成して bytes で返す。CPU処理なので to_thread で呼ぶこと。
 
     白基調・装飾最小。Bahnschrift/DIN 系コンデンスフォントにトラッキングを加えた見出し。
     矢印は軸+三角形の2段構成、レベル数字は視覚的中心でベースラインを揃える。
+    theme は core.levelup_card のテーマ名 (ユーザーごとのカードカスタマイズ)。
     """
     from PIL import Image, ImageDraw
 
@@ -588,12 +590,13 @@ def render_levelup_card(
     def px(v: float) -> int:
         return int(round(v * S))
 
-    BG = (255, 255, 255, 255)
-    INK = (44, 52, 74, 255)       # 濃紺(参考画像の文字色)
-    MUTE = (150, 156, 170, 255)
-    LINE = (228, 232, 240, 255)
-    ACCENT = (59, 91, 255, 255)
-    RING = (127, 178, 201, 255)
+    pal = levelup_card.palette(theme)
+    BG = (*pal["bg"], 255)
+    INK = (*pal["ink"], 255)
+    MUTE = (*pal["mute"], 255)
+    LINE = (*pal["line"], 255)
+    ACCENT = (*pal["accent"], 255)
+    RING = (*pal["ring"], 255)
 
     img = Image.new("RGBA", (W, H), (0, 0, 0, 0))
     d = ImageDraw.Draw(img)
@@ -5716,6 +5719,7 @@ class GeneralCog(commands.Cog):
                     render_levelup_card,
                     avatar_bytes, name, before, after, getattr(user, "id", 0),
                     bot_avatar_bytes=bot_avatar_bytes,
+                    theme=levelup_card.get_theme(getattr(user, "id", 0)),
                 )
         except ImportError:
             if not self._levelup_pillow_warned:
