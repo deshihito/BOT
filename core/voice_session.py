@@ -35,17 +35,17 @@ AUTO_LEAVE_SECONDS = 180  # 誰もいない状態がこれだけ続いたら退�
 DISCONNECT_GRACE_SECONDS = 5.0  # 外部切断を検知してから、自動再接続を待つ時間
 RECONNECT_DELAY_SECONDS = 1.0  # 切断してから入り直すまでの待ち時間（ハンドシェイクのリセット待ち）
 
-# 機能名 → (表示名, voiceパネルの終了案内)。
+# 機能名 → (表示名, /vc パネルの終了案内)。
 FEATURES: dict[str, tuple[str, str]] = {
-    "music": ("音楽再生", "/music の操作パネルから停止"),
-    "record": ("録音", "/voice のパネルから録音停止"),
-    "echo": ("やまびこ", "/voice のパネルからやまびこ停止"),
-    "transcribe": ("文字起こし", "/voice のパネルから文字起こし停止"),
+    "music": ("音楽再生", "/vc の音楽操作パネルから停止"),
+    "record": ("録音", "/vc のパネルから録音停止"),
+    "echo": ("やまびこ", "/vc のパネルからやまびこ停止"),
+    "transcribe": ("文字起こし", "/vc のパネルから文字起こし停止"),
     "tts": ("読み上げ", "/vc のパネルから読み上げ停止"),
-    "karaoke": ("カラオケ", "/voice のパネルからカラオケ停止"),
-    "changer": ("ボイスチェンジャー", "/voice のパネルからボイスチェンジャー停止"),
-    "match": ("ランダム通話", "/voice のパネルからランダム通話退出"),
-    "global": ("グローバルVC", "/voice のパネルからグローバルVC退出"),
+    "karaoke": ("カラオケ", "/vc のパネルからカラオケ停止"),
+    "changer": ("ボイスチェンジャー", "/vc のパネルからボイスチェンジャー停止"),
+    "match": ("ランダム通話", "/vc のパネルからランダム通話退出"),
+    "global": ("グローバルVC", "/vc のパネルからグローバルVC退出"),
 }
 # These features share a single voice client and the PCM/sink multiplexers in voice_media.
 SHARED_FEATURES = frozenset({"music", "global", "transcribe", "tts"})
@@ -57,7 +57,7 @@ DEFAULT_NOTICES: dict[str, Optional[str]] = {
     "idle": "ボイスチャンネルに誰もいない状態が{minutes}分続いたため、{label}を終了して退出しました。",
     "disconnected": "ボイスチャンネルから切断されたため、{label}を終了しました。",
     "takeover": "{by} さんが{by_label}を始めたため、{label}を終了しました。",
-    "leave": "{by} さんが `/voice` で退出操作を実行したため、{label}を終了しました。",
+    "leave": "{by} さんが `/vc` で退出操作を実行したため、{label}を終了しました。",
 }
 
 Cleanup = Callable[[str], Any]
@@ -68,7 +68,7 @@ def feature_label(feature: str) -> str:
 
 
 def stop_hint(feature: str) -> str:
-    return FEATURES.get(feature, ("", "/voice のパネルからVC退出"))[1]
+    return FEATURES.get(feature, ("", "/vc のパネルからVC退出"))[1]
 
 
 def _display_name(user) -> str:
@@ -189,14 +189,14 @@ class VoiceSessionManager:
         return not any(getattr(m, "id", None) in active_ids for m in members)
 
     def can_leave(self, session: VoiceSession, member) -> bool:
-        """`/voice` の退出操作で止めてよいか。音楽は今までどおり誰でも止められる。"""
+        """`/vc` の退出操作で止めてよいか。音楽は今までどおり誰でも止められる。"""
         return session.feature == "music" or self.can_override(session, member)
 
     def busy_message(self, session: VoiceSession) -> str:
         labels = [session.label, *(feature_label(name) for name in session.shared_leases)]
         return (
             f"⚠️ いまこのサーバーのボイスチャンネルは **{'、'.join(labels)}**（{session.user_name} さんが開始）で使用中です。\n"
-            f"先に `{stop_hint(session.feature)}` で終了するか、`/voice` のパネルから退出させてから実行してください。\n"
+            f"先に `{stop_hint(session.feature)}` で終了するか、`/vc` のパネルから退出させてから実行してください。\n"
             "（開始した人・管理者が実行した場合や、開始した人が VC にいない場合はそのまま切り替わります）"
         )
 

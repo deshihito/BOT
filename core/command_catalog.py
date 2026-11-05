@@ -342,7 +342,15 @@ def find_command(catalog: dict, query: str, *, include_hidden: bool = False) -> 
         if command_key(command["kind"], command["name"]) == query:
             return command
     bare = query.lstrip("/!").strip()
-    matches = [c for c in pool if c["name"] == bare]
+    # 先頭に "/" か "!" がある場合はその種別だけを探す（"!vc" でスラッシュの
+    # "/vc" がヒットするような、種別をまたいだ一致はしない）
+    if query.startswith("/"):
+        kinds = ("slash",)
+    elif query.startswith("!"):
+        kinds = ("prefix",)
+    else:
+        kinds = KINDS
+    matches = [c for c in pool if c["name"] == bare and c["kind"] in kinds]
     matches.sort(key=lambda c: KINDS.index(c["kind"]))  # 同じ名前ならスラッシュを優先
     return matches[0] if matches else None
 

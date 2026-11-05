@@ -60,6 +60,9 @@ class FakeResponse:
     def __init__(self):
         self.calls = []
 
+    def is_done(self):
+        return False
+
     async def send_message(self, content=None, **kwargs):
         self.calls.append(('send_message', content, kwargs))
 
@@ -129,7 +132,7 @@ class CommandCatalogTest(unittest.TestCase):
                 self.assertNotIn(key, command_meta.COMMAND_META)
                 self.assertIsNone(command_catalog.find_command(self.catalog, key, include_hidden=True))
         self.assertFalse([k for k in registered if k.split(' ')[0] in ('!rec', '!echo', '!stt', '!karaoke', '!vc')])
-        for key in ('/music', '/voice', '/support', '!gvc create', '!gvc chat connect', '!ffversion'):
+        for key in ('/support', '/vc', '!ffversion'):
             with self.subTest(kept=key):
                 self.assertIn(key, registered)
 
@@ -193,9 +196,17 @@ class CommandCatalogTest(unittest.TestCase):
         self.assertNotIn('other', [c['id'] for c in self.catalog['categories']], '「その他」に入ったコマンドがあります')
 
     def test_every_category_has_visible_commands(self):
+        # パネル方式への一本化で、カテゴリによっては公開コマンドを持たず
+        # 隠しコマンド（プレフィックス）だけが属するものがある（economy・fun・admin）。
+        # そういうカテゴリは「カタログに1件以上ある」ことを確かめ、公開コマンドを
+        # 持つカテゴリ（support・game・voice）だけ visible も必須とする。
+        visible_categories = {'support', 'game', 'voice'}
         for category in command_meta.CATEGORIES:
             with self.subTest(category=category['id']):
-                self.assertTrue(command_catalog.visible_commands(self.catalog, category['id']))
+                entries = [c for c in self.catalog['commands'] if c['category'] == category['id']]
+                self.assertTrue(entries, 'カテゴリに属するコマンドがありません')
+                if category['id'] in visible_categories:
+                    self.assertTrue(command_catalog.visible_commands(self.catalog, category['id']))
 
     def test_visible_commands_have_summary_and_usage(self):
         for entry in command_catalog.visible_commands(self.catalog):
@@ -230,10 +241,9 @@ class CommandCatalogTest(unittest.TestCase):
         self.assertEqual(get('/support')['options'], [])
         self.assertTrue(get('!nation found')['guild_only'])
         self.assertIn('administrator', get('!nation found')['permissions'])
-        self.assertIn('manage_channels', get('!mimic_toggle')['permissions'])
-        self.assertTrue(get('/music')['guild_only'])
-        self.assertEqual(get('/music')['options'], [])
-        self.assertEqual(get('/voice')['options'], [])
+        self.assertIn('bot_admin', get('!coin')['permissions'])
+        self.assertFalse(get('/vc')['guild_only'])
+        self.assertEqual(get('/vc')['options'], [])
         self.assertEqual(get('!all_stats')['aliases'], ['stats', 'spec'])
 
     def test_guide_key_reads_game_guides_when_available(self):
@@ -312,8 +322,8 @@ class CommandCatalogTest(unittest.TestCase):
 
     def test_long_guide_and_many_commands_are_clipped(self):
         from cogs import help as help_module
-        entry = dict(command_catalog.find_command(self.catalog, '/user_status'), guide='## 見出し\n' + 'あ' * 9000)
-        embed = help_module.guide_embed('/user_status', entry['guide'])
+        entry = dict(command_catalog.find_command(self.catalog, '/vc'), guide='## 見出し\n' + 'あ' * 9000)
+        embed = help_module.guide_embed('/vc', entry['guide'])
         self.assertLessEqual(len(embed.description), 4096)
         self.assertTrue(embed.description.startswith('**見出し**'))
         many = dict(self.catalog, commands=[dict(entry, name=f'cmd{i}', category='economy', guide=None)
@@ -326,15 +336,16 @@ class CommandCatalogTest(unittest.TestCase):
     def test_autocomplete(self):
         complete = self.cog.help_command_autocomplete
         interaction = fake_interaction(self.bot)
-        choices = self.run_async(complete(interaction, 'user'))
-        self.assertEqual(choices[0].value, '/user_status')
+        choices = self.run_async(complete(interaction, 'vc'))
+        self.assertEqual(choices[0].value, '/vc')
         everything = self.run_async(complete(interaction, ''))
-        self.assertEqual(len(everything), 25)
+        self.assertEqual(len(everything), len(command_catalog.visible_commands(self.catalog)))
+        self.assertLessEqual(len(everything), 25)
         for choice in everything:
             self.assertLessEqual(len(choice.name), 100)
             self.assertLessEqual(len(choice.value), 100)
         self.assertEqual(self.run_async(complete(interaction, '!gvc cr')), [])
-        self.assertIn('/pay', [c.value for c in self.run_async(complete(interaction, '送金'))])
+        self.assertIn('/vc', [c.value for c in self.run_async(complete(interaction, '音楽'))])
         self.assertEqual(self.run_async(complete(interaction, 'terminal')), [])
 
     def test_help_command_overview_detail_and_unknown(self):
@@ -343,11 +354,13 @@ class CommandCatalogTest(unittest.TestCase):
         self.run_async(callback(self.cog, interaction))
         name, content, kwargs = interaction.response.calls[-1]
         self.assertTrue(kwargs['ephemeral'])
-        self.assertEqual(kwargs['embed'].title, 'コマンド一覧')
+        # 概要は panel_v2（Components V2）のビューで送られる。包まれたパネルの
+        # Embed が「コマンド一覧」であることを確かめる
         self.assertIsNotNone(kwargs['view'])
+        self.assertEqual(kwargs['view'].panel.embed().title, 'コマンド一覧')
 
-        self.run_async(callback(self.cog, interaction, command='/user_status'))
-        self.assertEqual(interaction.response.calls[-1][2]['embed'].title, '/user_status')
+        self.run_async(callback(self.cog, interaction, command='/vc'))
+        self.assertEqual(interaction.response.calls[-1][2]['embed'].title, '/vc')
         self.run_async(callback(self.cog, interaction, command='gvc create'))
         self.assertIn('見つかりませんでした', interaction.response.calls[-1][1])
         self.run_async(callback(self.cog, interaction, command='存在しない'))
@@ -374,7 +387,8 @@ class CommandCatalogTest(unittest.TestCase):
             self.assertIsNotNone(guide_select, 'パーティーゲームのカテゴリ説明が選べるはず')
             guide_select._values = [help_module.CATEGORY_GUIDE]
             await guide_select.callback(interaction)
-            self.assertIn('パーティーゲーム', interaction.response.calls[-1][2]['embed'].title)
+            # ガイド画面は panel_v2 で送られる。包まれた BackView の Embed を確かめる
+            self.assertIn('パーティーゲーム', interaction.response.calls[-1][2]['view'].panel.embed().title)
         self.run_async(run())
 
     # ------------------------------------------------------------ !help
@@ -391,8 +405,8 @@ class CommandCatalogTest(unittest.TestCase):
         help_command.context = ctx
         self.run_async(help_command.send_bot_help({}))
         self.assertIn('/help', sent[-1][1]['embed'].description)
-        self.run_async(help_command.command_callback(ctx, command='user_status'))
-        self.assertEqual(sent[-1][1]['embed'].title, '/user_status')
+        self.run_async(help_command.command_callback(ctx, command='vc'))
+        self.assertEqual(sent[-1][1]['embed'].title, '/vc')
         self.assertIn('見つかりませんでした', help_command.command_not_found('xyz'))
         self.assertEqual(self.bot.get_command('help').name, 'help')
 
