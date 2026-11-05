@@ -86,21 +86,21 @@ SUPPORT_ACTIONS = [
     app_commands.Choice(name="VC自動参加オフ", value="sokunuke_vc_off"),
 ]
 
+# ジャンル説明は、ラベルや配下の機能名から読み取れない情報がある場合だけ書く。
+# 機能名の列挙は書かない（空文字 = 説明なし）。assist は単一機能の内訳（対象範囲）が
+# ラベルから読めないため、対象範囲の列挙を残している。
 SUPPORT_GENRES = {
-    "moderation": (
-        "モデレーション",
-        "Muted、匿名つぶやき、Stickyパネル、メッセージ削除、ハニーポット、チケット",
-    ),
-    "roles": ("ロール・認証", "一括ロール操作、認証パネル、ロールパネル"),
-    "language": ("言語", "サーバーで使用する言語の設定"),
-    "logs": ("履歴・ログ", "VC入退室、メッセージ編集、モデレートの履歴"),
-    "automation": ("自動化・通知", "絵文字便乗、Auto react、レベルアップ、音声トリガー、SNS・Quest通知"),
+    "moderation": ("モデレーション", ""),
+    "roles": ("ロール・認証", ""),
+    "language": ("言語", ""),
+    "logs": ("履歴・ログ", ""),
+    "automation": ("自動化・通知", ""),
     "assist": (
         "サーバーアシスト",
         "参加・退出メッセージ、自動ロール、Starboard、レベル、一時VC",
     ),
-    "event": ("イベント", "抽選の作成"),
-    "rta": ("RTA", "bump/up・即抜けの計測、通知、ランキング、VC自動参加"),
+    "event": ("イベント", ""),
+    "rta": ("RTA", ""),
 }
 
 # 旧バージョンで保存されたショートカットを新しいジャンルへ移行する。
@@ -2744,12 +2744,7 @@ class SupportPanelView(discord.ui.View):
         return {"root": "support", "genre": self.genre, "value": self.action}
 
     def embed(self):
-        description = "ジャンルを選ぶと、その中の機能を選択できます。"
-
-        if self.genre:
-            description = f"**{SUPPORT_GENRES[self.genre][0]}** の機能を選択してください。"
-
-        return discord.Embed(title="サポート操作", description=description, color=0xFFFFFF)
+        return discord.Embed(title="サポート操作", color=0xFFFFFF)
 
 
 class AutoReactChannelSelect(discord.ui.ChannelSelect):

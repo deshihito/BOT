@@ -43,14 +43,16 @@ HISTORY_FUTURE_TOLERANCE = 60
 
 EXP_STORE_KEY = "exp"
 
+# ジャンル説明は、ラベルや配下の機能名から読み取れない情報がある場合だけ書く。
+# 機能名の列挙は書かない（空文字 = 説明なし）。
 GENERAL_GENRES = {
-    "economy": ("コイン・ランキング", "所持状況、送金、コインや bump/up のランキング"),
-    "exp": ("EXP・レベル", "チャット/VC/generalのEXPとレベルを確認"),
-    "survival": ("生存確認", "追跡、アクティブ頻度、フリーズ、失踪警報"),
-    "custom": ("設定・AI", "ショートカット、AI tools、チャットAI・画像生成AIの設定"),
-    "zeta": ("ZetaModoki", "ロールプレイ会話の開始、シチュエーション・キャラクターの登録と管理"),
-    "translation": ("翻訳", "メッセージの自動翻訳と翻訳元・翻訳先の設定"),
-    "miq": ("引用画像 (MIQ)", "メッセージを引用画像にする。見た目の設定と、引用の拒否設定"),
+    "economy": ("コイン・ランキング", ""),
+    "exp": ("EXP・レベル", "チャット・VC・generalのEXPとレベル"),
+    "survival": ("生存確認", "メンバーの安否・不在の検知"),
+    "custom": ("設定・AI", ""),
+    "zeta": ("ZetaModoki", "ロールプレイ会話"),
+    "translation": ("翻訳", ""),
+    "miq": ("引用画像 (MIQ)", "メッセージを引用画像にする"),
     "meme": ("meme作成", "画像に上下テキストを入れてmeme画像を作成する"),
 }
 GENERAL_ACTIONS = {
@@ -2588,10 +2590,7 @@ class GeneralPanel(discord.ui.View):
         return {"root": "general", "genre": self.genre, "value": self.action}
 
     def embed(self):
-        description = "ジャンルを選ぶと、その中の機能を選択できます。"
-        if self.genre:
-            description = f"**{GENERAL_GENRES[self.genre][0]}** の機能を選択してください。"
-        return discord.Embed(title="一般機能", description=description, color=0xFFFFFF)
+        return discord.Embed(title="一般機能", color=0xFFFFFF)
 
 
 def shortcut_vc_params(value: str, params: dict) -> dict:
@@ -2845,9 +2844,7 @@ class ShortcutRootPanel(discord.ui.View):
         self.add_item(ShortcutRootSelect(self, self.root))
 
     def embed(self):
-        return discord.Embed(title="ショートカット登録",
-                             description="大区分を選ぶと、そのコマンドの通常パネルで機能・オプションを選択できます。",
-                             color=0xFFFFFF)
+        return discord.Embed(title="ショートカット登録", color=0xFFFFFF)
 
     async def open_existing_panel(self, interaction, root: str):
         from core.panel_v2 import as_panel_v2, edit_panel_v2

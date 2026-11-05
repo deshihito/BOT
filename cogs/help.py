@@ -63,9 +63,7 @@ def overview_embed(catalog: dict) -> discord.Embed:
     embed = discord.Embed(
         title="コマンド一覧",
         description=(
-            "下のメニューからカテゴリを選ぶと、コマンドと使い方を確認できます。\n"
             "`/help command:` にコマンド名を入れると詳しい説明が表示されます。\n\n"
-            "ゲーム・音楽・ボイス・AI・コインなどを利用できます。\n"
             "隠し機能: 会話を追うときは、チャンネルで「今北産業」と送ると直近の会話を最大3行で要約します。"
         ),
         color=COLOR,
