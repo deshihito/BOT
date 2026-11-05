@@ -518,7 +518,7 @@ class Chess(commands.Cog):
             g.players["white"] = interaction.user
             self.games[channel.id] = g
             g.phase = "playing"
-            await interaction.response.send_message(f"CPU対戦（難易度 {g.difficulty}/10）を開始します。", ephemeral=True)
+            await interaction.response.send_message(f"CPU対戦（難易度 {g.difficulty}/10）を開始します。")
             try:
                 await self.run_cpu_game(channel, g)
             finally:
@@ -527,7 +527,7 @@ class Chess(commands.Cog):
             return
         g.players[interaction.user.id] = interaction.user
         self.games[channel.id] = g
-        await interaction.response.send_message("チェスの募集を開始しました。", ephemeral=True)
+        await interaction.response.send_message("チェスの募集を開始しました。")
         try:
             await game_panels.replace(channel, "party", embed=discord.Embed(
                 title="チェス 参加者募集", description=f"{interaction.user.mention} さんが募集中です。\n{RECRUIT_SECONDS}秒以内に参加してください（2人対戦）。", color=COLOR), view=JoinView(g))

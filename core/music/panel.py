@@ -278,4 +278,4 @@ class PanelMixin:
 
 
     async def _queue_impl(self, interaction: discord.Interaction):
-        await interaction.response.send_message(embed=self.build_queue_embed(interaction.guild_id), ephemeral=True)
+        await interaction.response.send_message(embed=self.build_queue_embed(interaction.guild_id))

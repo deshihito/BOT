@@ -141,8 +141,7 @@ class Janken(commands.Cog):
         g.players[interaction.user.id] = interaction.user
         self.games[channel.id] = g
         await interaction.response.send_message(
-            embed=discord.Embed(description=f"じゃんけんの募集を開始しました（{RECRUIT_SECONDS}秒）。", color=COLOR),
-            ephemeral=True)
+            embed=discord.Embed(description=f"じゃんけんの募集を開始しました（{RECRUIT_SECONDS}秒）。", color=COLOR))
         try:
             await game_panels.replace(channel, "party", embed=discord.Embed(
                 title="じゃんけん 参加者募集",

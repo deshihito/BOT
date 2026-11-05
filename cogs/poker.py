@@ -143,7 +143,7 @@ class Poker(commands.Cog):
         g = PokerGame(channel.id, interaction.user.id)
         g.players[interaction.user.id] = interaction.user
         self.games[channel.id] = g
-        await interaction.response.send_message("ポーカーの募集を開始しました。", ephemeral=True)
+        await interaction.response.send_message("ポーカーの募集を開始しました。")
         try:
             await game_panels.replace(channel, "party", embed=discord.Embed(
                 title="ポーカー（5枚ドロー）参加者募集", description=f"{interaction.user.mention} さんが募集中です。\n{RECRUIT_SECONDS}秒以内に参加してください（2〜6人、賭け金なし）。", color=COLOR), view=JoinView(g))

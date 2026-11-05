@@ -581,7 +581,7 @@ class Shogi(commands.Cog):
             s.players[Color.SENTE] = interaction.user
             s.players[Color.GOTE] = None
             self.sessions[ch.id] = s
-            await interaction.response.send_message(f"将棋CPU対戦（難易度 {s.difficulty}/10）を開始します。", ephemeral=True)
+            await interaction.response.send_message(f"将棋CPU対戦（難易度 {s.difficulty}/10）を開始します。")
             try:
                 await self.run_game(ch, s)
             finally:
@@ -590,7 +590,7 @@ class Shogi(commands.Cog):
             return
         s.players[interaction.user.id] = interaction.user
         self.sessions[ch.id] = s
-        await interaction.response.send_message("将棋の募集を開始しました。", ephemeral=True)
+        await interaction.response.send_message("将棋の募集を開始しました。")
         try:
             msg = await game_panels.replace(ch, "party", embed=discord.Embed(
                 title="将棋 参加者募集", description=f"{interaction.user.mention} さんが募集中です。\n{RECRUIT_SECONDS}秒以内に参加してください（2人対戦）。", color=COLOR),

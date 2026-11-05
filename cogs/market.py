@@ -128,10 +128,6 @@ class TradeModal(discord.ui.Modal):
             label = f"売る {market_core.TOKEN_NAME}"
         super().__init__(title=title)
         self.amount.label = label
-        # 金額入力はミスが起きやすい場所なので、形式と例を常に見せる（監査 #7）。
-        self.amount.placeholder = (
-            "例: 1000（半角数字）" if side == "buy" else "例: 10.5（半角数字、小数可）"
-        )
 
     async def on_submit(self, interaction: discord.Interaction):
         raw = str(self.amount.value).replace(",", "").strip()
@@ -178,7 +174,7 @@ class MarketView(discord.ui.View):
             return await interaction.response.send_message(
                 "チャートはまだ準備中です。少し待ってから開いてください。", ephemeral=True)
         await interaction.response.send_message(
-            file=discord.File(str(path), filename="market_chart.png"), ephemeral=True)
+            file=discord.File(str(path), filename="market_chart.png"))
 
 
 class MarketCog(commands.Cog):
