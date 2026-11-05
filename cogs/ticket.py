@@ -166,16 +166,6 @@ class TicketViewerRoleSelect(discord.ui.RoleSelect):
         await self.parent_view.save_and_refresh(interaction, "閲覧ロールを更新しました。")
 
 
-class TicketOperatorRoleSelect(discord.ui.RoleSelect):
-    def __init__(self, parent: "TicketSettingsView"):
-        self.parent_view = parent
-        super().__init__(placeholder="ルーム操作を許可するロールを選択", min_values=0, max_values=10, row=4)
-
-    async def callback(self, interaction: discord.Interaction):
-        self.parent_view.settings["operator_role_ids"] = [role.id for role in self.values]
-        await self.parent_view.save_and_refresh(interaction, "操作ロールを更新しました。")
-
-
 class TicketAdvancedButton(discord.ui.Button):
     def __init__(self, parent: "TicketSettingsView"):
         self.parent_view = parent
