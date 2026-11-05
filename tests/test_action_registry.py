@@ -172,6 +172,7 @@ class ConfirmTierTest(unittest.TestCase):
         "general:ai_default", "general:image_default", "general:reasoning_default",
         "general:miq_settings", "general:meme_create",
         "general:token_buy", "general:token_sell",
+        "general:item_buy", "general:item_use", "general:box_open",
         "support:clear", "support:role_bulk", "support:muted", "support:ticket",
         "support:honeypot", "support:whisper", "support:binjou",
         "support:message_log", "support:moderation_log",

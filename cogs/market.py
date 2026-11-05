@@ -23,6 +23,7 @@ import discord
 from discord.ext import commands, tasks
 
 import config
+from core import items as items_core
 from core import market as market_core
 from core.messages import MARKET_INVALID_AMOUNT, market_trade_failed
 from cogs.wallet import INSUFFICIENT
@@ -228,6 +229,19 @@ class MarketCog(commands.Cog):
         await interaction.response.send_modal(TradeModal(self, "sell"))
 
     # ------------------------------------------------------------------ 売買
+    def _effective_fee_rate(self, user_id: str) -> float:
+        """手数料率を決める。手数料パス（core/items.py の受動効果）が
+        発動中なら半額にする。アイテム基盤が未読込なら通常率。"""
+        items_cog = self.bot.get_cog("ItemsCog")
+        store = getattr(items_cog, "store", None) if items_cog is not None else None
+        if store is not None:
+            try:
+                if store.has_effect(user_id, items_core.FEE_DISCOUNT_EFFECT):
+                    return market_core.FEE_RATE * items_core.FEE_DISCOUNT_MULTIPLIER
+            except Exception:
+                logger.exception("market: 手数料パスの確認に失敗 user=%s", user_id)
+        return market_core.FEE_RATE
+
     def _wallet(self):
         wallet = self.bot.get_cog("WalletCog")
         if wallet is None:
@@ -250,7 +264,8 @@ class MarketCog(commands.Cog):
     async def execute_buy(self, user_id: int, aga_amount: int) -> str:
         uid = str(user_id)
         try:
-            self.store.validate_buy(aga_amount)
+            fee_rate = self._effective_fee_rate(uid)
+            self.store.validate_buy(aga_amount, fee_rate=fee_rate)
             wallet = self._wallet()
             debit = await wallet._change_balance(uid, -aga_amount, require_funds=True)
             if debit is INSUFFICIENT:
@@ -258,7 +273,7 @@ class MarketCog(commands.Cog):
             if debit is None:
                 return market_trade_failed("コインの更新に失敗しました。時間をおいて再試行してください。")
             try:
-                result = self.store.apply_buy(uid, aga_amount)
+                result = self.store.apply_buy(uid, aga_amount, fee_rate=fee_rate)
             except market_core.TradeError as exc:
                 await wallet._change_balance(uid, aga_amount)
                 return market_trade_failed(exc)
@@ -278,9 +293,10 @@ class MarketCog(commands.Cog):
     async def execute_sell(self, user_id: int, token_amount: float) -> str:
         uid = str(user_id)
         try:
-            self.store.validate_sell(uid, token_amount)
+            fee_rate = self._effective_fee_rate(uid)
+            self.store.validate_sell(uid, token_amount, fee_rate=fee_rate)
             wallet = self._wallet()
-            result = self.store.apply_sell(uid, token_amount)
+            result = self.store.apply_sell(uid, token_amount, fee_rate=fee_rate)
             credit = await wallet._change_balance(uid, result["net_aga"], create_with=0)
             if credit is None or credit is INSUFFICIENT:
                 self.store.rollback_sell(uid, token_amount, result)
