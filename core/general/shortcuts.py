@@ -431,8 +431,13 @@ class ShortcutsMixin:
         if author_id != owner_id:
             return False
         action = item.get("action") or {}
-        source = ShortcutMessageInteraction(self.bot, message, author_id, invoker=invoker)
         root, value = action.get("root"), action.get("value")
+        # ephemeral 前提の個人向け応答はこの経路で実行しない（登録済みの
+        # ショートカットに対する実行時ガード。候補からの除外は
+        # core.action_registry.MESSAGE_SHORTCUT_BLOCKED_IDS が正）。
+        if root == "general" and f"general:{value}" in action_registry.MESSAGE_SHORTCUT_BLOCKED_IDS:
+            return False
+        source = ShortcutMessageInteraction(self.bot, message, author_id, invoker=invoker)
         # v2 のプリセット値（旧形式では action["options"]）。メッセージ経由の
         # 実行ではモーダルを出せないため、params は登録時のプリセット専用で、
         # 実行時に追加で聞くことはしない（仕様書 D-4）。

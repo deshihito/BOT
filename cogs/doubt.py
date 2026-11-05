@@ -13,9 +13,7 @@ import random
 logger = logging.getLogger(__name__)
 
 
-def we(description: str = None, title: str = None) -> discord.Embed:
-    """白色embedを生成するヘルパー"""
-    return discord.Embed(title=title, description=description, color=0xFFFFFF)
+from core.embeds import we  # noqa: F401  (共通の白 embed 工場)
 
 SUIT_ORDER = {"S": 0, "H": 1, "D": 2, "C": 3, "JK": 4}
 SELECT_LIMIT = 25  # Discord のセレクトメニューに入れられる選択肢の上限
@@ -249,7 +247,7 @@ class Doubt(commands.Cog):
         channel = interaction.channel
         if channel.id in self.games or channel.id in self.recruiting:
             return await interaction.response.send_message(embed=we("このチャンネルでは既にダウトが進行中です。"), ephemeral=True)
-        await interaction.response.send_message(embed=we("ダウトの募集を開始しました。"))
+        await interaction.response.send_message(embed=we("ダウトの募集を開始しました。"), ephemeral=True)
         await self._recruit(channel, interaction.user.id)
 
     async def _recruit(self, channel, host_id):

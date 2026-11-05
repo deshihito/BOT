@@ -14,7 +14,6 @@ from discord.ext import voice_recv
 from core.legacy import Responder
 from core.messages import VOICE_NOT_JOINED, voice_connection_failed
 from core.voice_session import VoiceBusy, get_manager
-from core.emojis import FAILED
 
 logger = logging.getLogger(__name__)
 
@@ -37,8 +36,9 @@ DEFAULT_MAX_BUFFER_MS = 40.0      # 上限バッファ量 (40msを超えたら�
 DEFAULT_FADE_MS = 5.0             # 接続時のクロスフェード長 (5ms)
 
 
-def we(description: str | None = None, title: str | None = None) -> discord.Embed:
-    return discord.Embed(title=title, description=description, color=0x3498DB)
+from functools import partial as _partial
+from core.embeds import we as _shared_we
+we = _partial(_shared_we, color=0x3498DB)
 
 
 # ============================================================
@@ -386,7 +386,7 @@ class VoiceChangerCog(commands.Cog):
 
         if action == "stop":
             if session is None:
-                return await r.send(embed=we(f"{FAILED} ボイスチェンジャーは実行されていません。"), ephemeral=True)
+                return await r.send(embed=we("⚠️ ボイスチェンジャーは実行されていません。"), ephemeral=True)
             if not await self.voice_sessions.release(guild_id, "changer", reason="stop"):
                 self._cleanup(guild_id)("stop")
             return await r.send(embed=we("🛑 ボイスチェンジャーを停止しました。"))
@@ -396,12 +396,12 @@ class VoiceChangerCog(commands.Cog):
 
         if has_options:
             if session is None:
-                return await r.send(embed=we(f"{FAILED} ボイスチェンジャーが開始されていません。"), ephemeral=True)
+                return await r.send(embed=we("⚠️ ボイスチェンジャーが開始されていません。"), ephemeral=True)
             return await self._apply(r, session, pitch, buffer_ms, max_ms)
 
         if action == "start":
             return await r.send(embed=we(
-                f"{FAILED} 既にボイスチェンジャーが実行中です。設定を変えるときは `pitch` や `buffer_ms` を付けてください。"
+                "⚠️ 既にボイスチェンジャーが実行中です。設定を変えるときは `pitch` や `buffer_ms` を付けてください。"
             ), ephemeral=True)
         await self._send_status(r, session)
 
@@ -410,10 +410,10 @@ class VoiceChangerCog(commands.Cog):
         """(目標ms, 上限ms, エラー文) を返す。"""
         target = current_target if buffer_ms is None else buffer_ms
         if target < 20:
-            return None, None, f"{FAILED} 目標バッファは20ms以上を指定してください。"
+            return None, None, "⚠️ 目標バッファは20ms以上を指定してください。"
         resolved_max = max_ms if max_ms is not None else target * 2
         if resolved_max < target:
-            return None, None, f"{FAILED} 上限バッファは目標バッファ以上にしてください。"
+            return None, None, "⚠️ 上限バッファは目標バッファ以上にしてください。"
         return target, resolved_max, None
 
     async def _apply(self, r: Responder, session: dict, pitch, buffer_ms, max_ms):

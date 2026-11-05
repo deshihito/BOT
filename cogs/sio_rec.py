@@ -36,7 +36,6 @@ from core.legacy import Responder
 from core.voice_session import VoiceBusy, get_manager
 from core.voice_recv_patch import patch_voice_recv_client
 from core.messages import VOICE_NOT_JOINED, voice_connection_failed
-from core.emojis import FAILED
 
 logger = logging.getLogger(__name__)
 
@@ -65,9 +64,7 @@ RESYNC_THRESHOLD_BYTES = 5 * BYTES_PER_SECOND
 OPUS_SILENCE = b"\xf8\xff\xfe"
 
 
-def we(description: str | None = None, title: str | None = None) -> discord.Embed:
-    """白色 embed を生成するヘルパー"""
-    return discord.Embed(title=title, description=description, color=0xFFFFFF)
+from core.embeds import we  # noqa: F401  (共通の白 embed 工場)
 
 
 # ============================================================
@@ -484,7 +481,7 @@ class RecordingCog(commands.Cog):
         """直近の音声からピアノ音階（単音/和音/声の倍音層）を解析する。"""
         session = self.sessions.get(r.guild.id)
         if not session:
-            return await r.send(embed=we(f"{FAILED} 現在録音中ではありません。`/voice のパネルから録音開始` で開始してください。"), ephemeral=True)
+            return await r.send(embed=we("⚠️ 現在録音中ではありません。`/voice のパネルから録音開始` で開始してください。"), ephemeral=True)
 
         sink: RecordingSink = session["sink"]
         audio_snapshot = sink.snapshot()
@@ -514,14 +511,14 @@ class RecordingCog(commands.Cog):
         if action == "delay":
             session = self.echo_sessions.get(guild_id)
             if not session:
-                return await r.send(embed=we(f"{FAILED} 現在やまびこは実行されていません。"), ephemeral=True)
+                return await r.send(embed=we("⚠️ 現在やまびこは実行されていません。"), ephemeral=True)
             if delay is None or delay <= 0:
-                return await r.send(embed=we(f"{FAILED} 遅延時間は 0 秒より大きく設定してください。"), ephemeral=True)
+                return await r.send(embed=we("⚠️ 遅延時間は 0 秒より大きく設定してください。"), ephemeral=True)
             session["sink"].set_echo_delay(delay)
             return await r.send(embed=we(f"⏱️ やまびこの遅延時間を `{delay}` 秒に変更しました。"))
         if action == "stop":
             if guild_id not in self.echo_sessions:
-                return await r.send(embed=we(f"{FAILED} 現在やまびこは実行されていません。"), ephemeral=True)
+                return await r.send(embed=we("⚠️ 現在やまびこは実行されていません。"), ephemeral=True)
             if not await self.voice_sessions.release(guild_id, "echo", reason="stop"):
                 self._echo_cleanup(guild_id)("stop")
             return await r.send(embed=we("🛑 やまびこを停止しました。"))
@@ -543,9 +540,9 @@ class RecordingCog(commands.Cog):
 
         guild_id = r.guild.id
         if guild_id in self.echo_sessions:
-            return await r.send(embed=we(f"{FAILED} 既にやまびこが実行中です。"), ephemeral=True)
+            return await r.send(embed=we("⚠️ 既にやまびこが実行中です。"), ephemeral=True)
         if delay <= 0:
-            return await r.send(embed=we(f"{FAILED} 遅延時間は 0 秒より大きく設定してください。"), ephemeral=True)
+            return await r.send(embed=we("⚠️ 遅延時間は 0 秒より大きく設定してください。"), ephemeral=True)
 
         target_channel = voice.channel
         await r.defer()
@@ -604,7 +601,7 @@ class RecordingCog(commands.Cog):
         guild_id = r.guild.id
         if guild_id in self.sessions:
             return await r.send(embed=we(
-                f"{FAILED} 既にこのサーバーで録音中です。`/voice のパネルから録音停止` で停止してください。"
+                "⚠️ 既にこのサーバーで録音中です。`/voice のパネルから録音停止` で停止してください。"
             ), ephemeral=True)
 
         if not discord.opus.is_loaded():
@@ -745,7 +742,7 @@ class RecordingCog(commands.Cog):
     async def stop_command(self, r: Responder):
         guild_id = r.guild.id
         if guild_id not in self.sessions:
-            return await r.send(embed=we(f"{FAILED} 現在録音は行われていません。"), ephemeral=True)
+            return await r.send(embed=we("⚠️ 現在録音は行われていません。"), ephemeral=True)
 
         await r.defer()
         if not await self.voice_sessions.release(guild_id, "record", reason="stop"):
@@ -798,7 +795,7 @@ class RecordingCog(commands.Cog):
         files, skipped = await self.build_files(audio, limit)
 
         if not files:
-            note = f"{FAILED} 送信可能な録音データがありませんでした。"
+            note = "⚠️ 送信可能な録音データがありませんでした。"
             if skipped:
                 note += "\n" + "\n".join(
                     f"・`{name}` はファイルサイズ超過 ({size / 1024 / 1024:.1f}MB) のため送信できません。"
@@ -815,7 +812,7 @@ class RecordingCog(commands.Cog):
 
         if skipped:
             await ctx.send(embed=we(
-                f"{FAILED} 以下はサイズ超過のため送信できませんでした:\n" + "\n".join(
+                "⚠️ 以下はサイズ超過のため送信できませんでした:\n" + "\n".join(
                     f"・`{name}` ({size / 1024 / 1024:.1f}MB)" for name, size in skipped
                 )
             ))
