@@ -105,7 +105,7 @@ class GameGenreSelect(discord.ui.Select):
         super().__init__(placeholder="ジャンルを選ぶ", options=[
             discord.SelectOption(label=label, description=description, value=value, default=value == selected)
             for value, (label, description) in GAME_GENRES.items()
-        ], row=0)
+        ], custom_id="panel:game:genre", row=0)
 
     async def callback(self, interaction: discord.Interaction):
         selected = self.values[0]
@@ -136,7 +136,7 @@ class GameSelect(discord.ui.Select):
             )
             for g in GAME_ORDER if genre is None or GAME_GENRE_BY_GAME[g] == genre
         ]
-        super().__init__(placeholder="ゲームを選ぶ", options=options, row=1 if genre else 0)
+        super().__init__(placeholder="ゲームを選ぶ", options=options, custom_id="panel:game:select", row=1 if genre else 0)
 
     async def callback(self, interaction: discord.Interaction):
         game_id = self.values[0]
@@ -162,7 +162,7 @@ class GameHubView(discord.ui.View):
             self.add_item(GameSelect(self.genre))
         if self.shortcut_mode:
             from cogs.general import ShortcutCommitButton
-            self.add_item(ShortcutCommitButton())
+            self.add_item(ShortcutCommitButton("game"))
 
     def shortcut_action(self):
         return None
@@ -177,7 +177,7 @@ class WordlistSelect(discord.ui.Select):
     def __init__(self, selected: str):
         options = [discord.SelectOption(label=f"お題: {name}", value=value, default=(value == selected))
                    for value, name in WORDWOLF_LISTS]
-        super().__init__(placeholder="お題のリスト", options=options, row=1)
+        super().__init__(placeholder="お題のリスト", options=options, custom_id="panel:game:wordlist", row=1)
 
     async def callback(self, interaction: discord.Interaction):
         self.view.wordlist = self.values[0]
@@ -194,7 +194,7 @@ class NGTimeSelect(discord.ui.Select):
     def __init__(self, selected: int):
         options = [discord.SelectOption(label=f"制限時間: {m}分", value=str(m), default=(m == selected))
                    for m in NG_TIME_CHOICES]
-        super().__init__(placeholder="制限時間", options=options, row=1)
+        super().__init__(placeholder="制限時間", options=options, custom_id="panel:game:ng_time", row=1)
 
     async def callback(self, interaction: discord.Interaction):
         self.view.ng_minutes = int(self.values[0])
@@ -207,7 +207,7 @@ class NGModeSelect(discord.ui.Select):
     def __init__(self, selected: str):
         options = [discord.SelectOption(label=label, value=value, default=(value == selected))
                    for value, label in NG_MODES]
-        super().__init__(placeholder="モード", options=options, row=2)
+        super().__init__(placeholder="モード", options=options, custom_id="panel:game:ng_mode", row=2)
 
     async def callback(self, interaction: discord.Interaction):
         self.view.ng_mode = self.values[0]
@@ -223,7 +223,7 @@ class WordleModeSelect(discord.ui.Select):
     def __init__(self, selected: str):
         options = [discord.SelectOption(label=label, value=value, default=(value == selected))
                    for value, label in WORDLE_MODES]
-        super().__init__(placeholder="モード", options=options, row=1)
+        super().__init__(placeholder="モード", options=options, custom_id="panel:game:wordle_mode", row=1)
 
     async def callback(self, interaction: discord.Interaction):
         self.view.wordle_mode = self.values[0]
@@ -240,7 +240,7 @@ class JinrouModeSelect(discord.ui.Select):
     def __init__(self, selected: str):
         options = [discord.SelectOption(label=label, value=value, default=(value == selected))
                    for value, label in JINROU_MODES]
-        super().__init__(placeholder="モード", options=options, row=1)
+        super().__init__(placeholder="モード", options=options, custom_id="panel:game:jinrou_mode", row=1)
 
     async def callback(self, interaction: discord.Interaction):
         self.view.jinrou_mode = self.values[0]
@@ -255,7 +255,7 @@ class ChessModeSelect(discord.ui.Select):
             discord.SelectOption(label="2人対戦", value="human", default=selected == "human"),
             discord.SelectOption(label="CPU対戦", value="cpu", default=selected == "cpu"),
         ]
-        super().__init__(placeholder="チェスの対戦モード", options=options, row=1)
+        super().__init__(placeholder="チェスの対戦モード", options=options, custom_id="panel:game:chess_mode", row=1)
 
     async def callback(self, interaction):
         self.view.chess_mode = self.values[0]
@@ -274,7 +274,7 @@ class ChessDifficultySelect(discord.ui.Select):
     def __init__(self, selected: int):
         options = [discord.SelectOption(label=f"CPU難易度 {level}/10", value=str(level), default=level == selected)
                    for level in range(1, 11)]
-        super().__init__(placeholder="CPU難易度（1〜10）", options=options, row=2)
+        super().__init__(placeholder="CPU難易度（1〜10）", options=options, custom_id="panel:game:chess_difficulty", row=2)
 
     async def callback(self, interaction):
         self.view.chess_difficulty = int(self.values[0])
@@ -287,7 +287,7 @@ JANKEN_WAGER_CHOICES = (0, 10, 50, 100, 500)
 
 class JankenWagerSelect(discord.ui.Select):
     def __init__(self, selected=0):
-        super().__init__(placeholder="勝敗で動くコイン（1人あたり）", row=1, options=[
+        super().__init__(placeholder="勝敗で動くコイン（1人あたり）", custom_id="panel:game:janken_wager", row=1, options=[
             discord.SelectOption(label="なし", value="0", default=selected == 0),
             *[discord.SelectOption(label=f"{amount} AGO", value=str(amount), default=selected == amount)
               for amount in JANKEN_WAGER_CHOICES[1:]]])
@@ -337,7 +337,7 @@ class GameDetailView(discord.ui.View):
             self.remove_item(self.ranking)
         if self.shortcut_mode:
             from cogs.general import ShortcutCommitButton
-            self.add_item(ShortcutCommitButton())
+            self.add_item(ShortcutCommitButton("game"))
 
     def embed(self):
         return detail_embed(self.game_id)
@@ -349,11 +349,11 @@ class GameDetailView(discord.ui.View):
                              "jinrou_mode": self.jinrou_mode, "wager": self.wager,
                              "chess_mode": self.chess_mode, "chess_difficulty": self.chess_difficulty}}
 
-    @discord.ui.button(label="ルール", style=discord.ButtonStyle.secondary, row=3)
+    @discord.ui.button(label="ルール", style=discord.ButtonStyle.secondary, row=3, custom_id="panel:game:rules")
     async def rules(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.send_message(embed=rules_embed(self.game_id), ephemeral=True)
 
-    @discord.ui.button(label="募集する", style=discord.ButtonStyle.success, row=3)
+    @discord.ui.button(label="募集する", style=discord.ButtonStyle.success, row=3, custom_id="panel:game:recruit")
     async def recruit(self, interaction: discord.Interaction, button: discord.ui.Button):
         await self.cog.start_game(interaction, self.game_id, wordlist=self.wordlist,
                                   ng_minutes=self.ng_minutes, ng_mode=self.ng_mode,
@@ -361,12 +361,12 @@ class GameDetailView(discord.ui.View):
                                   wager=self.wager, chess_mode=self.chess_mode,
                                   chess_difficulty=self.chess_difficulty)
 
-    @discord.ui.button(label="ランキング", style=discord.ButtonStyle.primary, row=3)
+    @discord.ui.button(label="ランキング", style=discord.ButtonStyle.primary, row=3, custom_id="panel:game:ranking")
     async def ranking(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.send_message(embed=await ranking_embed(interaction.guild_id, self.game_id),
                                                 ephemeral=True)
 
-    @discord.ui.button(label="レート", style=discord.ButtonStyle.primary, row=4)
+    @discord.ui.button(label="レート", style=discord.ButtonStyle.primary, row=4, custom_id="panel:game:rating")
     async def rating(self, interaction: discord.Interaction, button: discord.ui.Button):
         cog = self.cog.bot.get_cog(GAME_COGS["jinrou"])
         if cog is None:
@@ -374,7 +374,7 @@ class GameDetailView(discord.ui.View):
                 embed=discord.Embed(description="人狼 は現在利用できません。", color=HUB_COLOR), ephemeral=True)
         await interaction.response.send_message(embed=await cog.rating_embed(interaction.user), ephemeral=True)
 
-    @discord.ui.button(label="ゲームを終了", style=discord.ButtonStyle.danger, row=4)
+    @discord.ui.button(label="ゲームを終了", style=discord.ButtonStyle.danger, row=4, custom_id="panel:game:end")
     async def end_game(self, interaction: discord.Interaction, button: discord.ui.Button):
         cog = self.cog.bot.get_cog(GAME_COGS[self.game_id])
         if cog is None or not hasattr(cog, "force_end"):
@@ -383,7 +383,7 @@ class GameDetailView(discord.ui.View):
                 embed=discord.Embed(description=f"{name} は現在利用できません。", color=HUB_COLOR), ephemeral=True)
         await cog.force_end(interaction)
 
-    @discord.ui.button(label="戻る", emoji=BACK, style=discord.ButtonStyle.secondary, row=3)
+    @discord.ui.button(label="戻る", emoji=BACK, style=discord.ButtonStyle.secondary, row=3, custom_id="panel:game:back")
     async def back(self, interaction: discord.Interaction, button: discord.ui.Button):
         view = GameHubView(self.cog)
         if hasattr(getattr(button, "view", None), "_sync"):

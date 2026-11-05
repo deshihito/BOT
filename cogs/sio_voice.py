@@ -456,7 +456,7 @@ class VoiceGenreSelect(discord.ui.Select):
             discord.SelectOption(label=label, description=f"{len(VOICE_ACTIONS_BY_GENRE[value])}個の機能",
                                  value=value, default=value == selected)
             for value, (label, _description) in VOICE_GENRES.items()
-        ], row=0)
+        ], custom_id="panel:vc:genre", row=0)
 
     async def callback(self, interaction: discord.Interaction):
         container = self.view
@@ -476,7 +476,7 @@ class VoiceActionSelect(discord.ui.Select):
         super().__init__(placeholder="機能を選択してください", options=[
             discord.SelectOption(label=label, value=value)
             for label, value in VOICE_ACTIONS_BY_GENRE[genre]
-        ], row=1)
+        ], custom_id="panel:vc:action", row=1)
 
     async def callback(self, interaction: discord.Interaction):
         value = self.values[0]
@@ -514,7 +514,7 @@ class VoicePanelView(discord.ui.View):
             self.add_item(VoiceActionSelect(self.hub, self.genre))
         if self.shortcut_mode:
             from cogs.general import ShortcutCommitButton
-            self.add_item(ShortcutCommitButton())
+            self.add_item(ShortcutCommitButton("vc"))
 
     def shortcut_action(self):
         if not self.genre or not self.action:
