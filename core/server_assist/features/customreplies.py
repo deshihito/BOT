@@ -10,7 +10,7 @@ from typing import Any
 import discord
 
 from core.panel_v2 import as_panel_v2, edit_panel_v2
-from core.server_assist import Feature, get_settings, update_settings
+from core.server_assist import Feature, format_template, get_settings, update_settings
 from core.server_assist.ui import AssistFeatureView, notice_line
 
 logger = logging.getLogger(__name__)
@@ -34,17 +34,19 @@ def reset_cache() -> None:
     _last_sent.clear()
 
 
-def _normalize(raw: Any) -> dict[str, str] | None:
+def _normalize(raw: Any) -> dict[str, Any] | None:
     if not isinstance(raw, dict):
         return None
     trigger = str(raw.get("trigger") or "").strip()
     response = str(raw.get("response") or "").strip()
     if not trigger or not response:
         return None
+    role_id = raw.get("role_id")
     return {
         "id": str(raw.get("id") or uuid.uuid4().hex[:8]),
         "trigger": trigger[:100],
         "response": response[:1500],
+        "role_id": role_id if isinstance(role_id, int) and not isinstance(role_id, bool) else None,
     }
 
 
@@ -67,17 +69,23 @@ def settings(guild_id: int) -> dict[str, Any]:
             continue
         seen_triggers.add(trigger_key)
         replies.append(normalized)
+    min_role_id = raw.get("min_role_id")
     return {
         "enabled": bool(raw.get("enabled", False)),
         "replies": replies[:MAX_REPLIES],
+        "min_role_id": (
+            min_role_id
+            if isinstance(min_role_id, int) and not isinstance(min_role_id, bool)
+            else None
+        ),
     }
 
 
-async def _save(guild_id: int, replies: list[dict[str, str]]) -> None:
+async def _save(guild_id: int, replies: list[dict[str, Any]]) -> None:
     await update_settings(guild_id, KEY, replies=replies[:MAX_REPLIES])
 
 
-def match_reply(replies: list[dict[str, str]], content: str) -> dict[str, str] | None:
+def match_reply(replies: list[dict[str, Any]], content: str) -> dict[str, Any] | None:
     text = _trigger_key(content)
     if not text:
         return None
@@ -105,6 +113,40 @@ def choose_response(response: str) -> str:
     return random.choice(candidates) if candidates else response
 
 
+def _has_min_role(author: Any, min_role_id: int) -> bool:
+    permissions = getattr(author, "guild_permissions", None)
+    if getattr(permissions, "administrator", False) or getattr(permissions, "manage_guild", False):
+        return True
+    return any(getattr(role, "id", None) == min_role_id for role in getattr(author, "roles", []) or [])
+
+
+async def _grant_role(guild: Any, author: Any, role_id: Any) -> None:
+    """返信にロール付与アクションが設定されていれば付与する (失敗しても返信は続行)。"""
+    if not isinstance(role_id, int):
+        return
+    if any(getattr(role, "id", None) == role_id for role in getattr(author, "roles", []) or []):
+        return
+    get_role = getattr(guild, "get_role", None)
+    role = get_role(role_id) if callable(get_role) else None
+    if role is None or not hasattr(author, "add_roles"):
+        return
+    me = getattr(guild, "me", None)
+    permissions = getattr(me, "guild_permissions", None)
+    if permissions is not None and not getattr(permissions, "manage_roles", False):
+        return
+    top_role = getattr(me, "top_role", None)
+    if top_role is not None:
+        try:
+            if not role < top_role:
+                return
+        except TypeError:
+            pass
+    try:
+        await author.add_roles(role, reason="カスタム返信")
+    except (discord.Forbidden, discord.HTTPException, AttributeError):
+        logger.debug("カスタム返信のロール付与に失敗しました: guild=%s", getattr(guild, "id", None))
+
+
 async def on_message(cog: Any, message: Any) -> None:
     guild = getattr(message, "guild", None)
     author = getattr(message, "author", None)
@@ -116,6 +158,9 @@ async def on_message(cog: Any, message: Any) -> None:
     current = settings(guild.id)
     if not current["enabled"]:
         return
+    min_role_id = current.get("min_role_id")
+    if min_role_id is not None and not _has_min_role(author, min_role_id):
+        return
     reply = match_reply(current["replies"], content)
     if reply is None:
         return
@@ -124,7 +169,8 @@ async def on_message(cog: Any, message: Any) -> None:
     if now - _last_sent.get(key, 0.0) < COOLDOWN_SECONDS:
         return
     _last_sent[key] = now
-    response = choose_response(reply["response"])
+    response = format_template(choose_response(reply["response"]), author, guild)
+    await _grant_role(guild, author, reply.get("role_id"))
     try:
         await message.reply(
             response,
@@ -162,6 +208,86 @@ class CustomReplySelect(discord.ui.Select):
             return await interaction.response.send_message("返信がありません。", ephemeral=True)
         self.parent_view.selected_id = self.values[0]
         await self.parent_view.reopen(interaction, "返信を選択しました。")
+
+
+class CustomReplyRoleSelect(discord.ui.RoleSelect):
+    """選択中の返信に付与アクション (ロール) を設定する。"""
+
+    def __init__(self, parent: "CustomReplySettingsView"):
+        self.parent_view = parent
+        selected = parent.selected_reply()
+        current = (selected or {}).get("role_id")
+        super().__init__(
+            placeholder="選択中の返信で付与するロール（任意）",
+            min_values=0,
+            max_values=1,
+            default_values=(
+                [discord.SelectDefaultValue(id=current, type=discord.SelectDefaultValueType.role)]
+                if current else []
+            ),
+            row=1,
+        )
+
+    async def callback(self, interaction: discord.Interaction):
+        view = self.parent_view
+        if not view.can_manage(interaction):
+            return await interaction.response.send_message(
+                "この設定には「サーバーの管理」権限が必要です。", ephemeral=True,
+            )
+        if view.selected_id is None:
+            return await interaction.response.send_message("先に返信を選んでください。", ephemeral=True)
+        role = self.values[0] if self.values else None
+        if role is not None and (role.is_default() or role.managed):
+            return await interaction.response.send_message(
+                "@everyone や連携サービス用のロールは指定できません。", ephemeral=True,
+            )
+        replies = list(settings(view.guild_id)["replies"])
+        for item in replies:
+            if item.get("id") == view.selected_id:
+                item["role_id"] = role.id if role else None
+                break
+        else:
+            return await interaction.response.send_message("その返信は既にありません。", ephemeral=True)
+        await _save(view.guild_id, replies)
+        await view.reopen(
+            interaction,
+            f"付与ロールを {'<' + '@&' + str(role.id) + '>' if role else 'なし'} にしました。",
+        )
+
+
+class CustomReplyMinRoleSelect(discord.ui.RoleSelect):
+    """返信を発動できる最低ロール (未設定は全員)。"""
+
+    def __init__(self, parent: "CustomReplySettingsView"):
+        self.parent_view = parent
+        current = parent.settings.get("min_role_id")
+        super().__init__(
+            placeholder="返信を使えるロール（任意・未設定は全員）",
+            min_values=0,
+            max_values=1,
+            default_values=(
+                [discord.SelectDefaultValue(id=current, type=discord.SelectDefaultValueType.role)]
+                if current else []
+            ),
+            row=3,
+        )
+
+    async def callback(self, interaction: discord.Interaction):
+        view = self.parent_view
+        if not view.can_manage(interaction):
+            return await interaction.response.send_message(
+                "この設定には「サーバーの管理」権限が必要です。", ephemeral=True,
+            )
+        role = self.values[0] if self.values else None
+        if role is not None and (role.is_default() or role.managed):
+            return await interaction.response.send_message(
+                "@everyone や連携サービス用のロールは指定できません。", ephemeral=True,
+            )
+        await update_settings(view.guild_id, KEY, min_role_id=role.id if role else None)
+        await view.reopen(
+            interaction,
+            f"使えるロールを {'<' + '@&' + str(role.id) + '>' if role else '全員'} にしました。",
+        )
 
 
 class CustomReplyAddButton(discord.ui.Button):
@@ -296,6 +422,7 @@ class CustomReplyModal(discord.ui.Modal):
                 "id": selected,
                 "trigger": trigger[:100],
                 "response": response[:1500],
+                "role_id": None,
             })
         await _save(self.parent_view.guild_id, replies)
         self.parent_view.selected_id = selected
@@ -311,6 +438,8 @@ class CustomReplySettingsView(AssistFeatureView):
         self.selected_id: str | None = None
         super().__init__(cog, guild_id)
         self.add_item(CustomReplySelect(self))
+        self.add_item(CustomReplyRoleSelect(self))
+        self.add_item(CustomReplyMinRoleSelect(self))
         self.add_item(CustomReplyAddButton())
         self.add_item(CustomReplyEditButton())
         self.add_item(CustomReplyDeleteButton())
@@ -334,13 +463,17 @@ class CustomReplySettingsView(AssistFeatureView):
         lines = []
         for reply in self.settings["replies"]:
             mark = "▶ " if reply.get("id") == self.selected_id else ""
-            lines.append(f"{mark}{reply['trigger']} → {reply['response'][:60]}")
+            suffix = f"（ロール付与: <@&{reply['role_id']}>）" if reply.get("role_id") else ""
+            lines.append(f"{mark}{reply['trigger']} → {reply['response'][:60]}{suffix}")
+        min_role = self.settings.get("min_role_id")
         return discord.Embed(
             title="カスタム返信",
             description=(
                 "決まった言葉に、Botが決まった返信をします。"
+                "返信では {user} {name} {id} {server} {count} が使えます。"
                 f"\n\n**状態**: {'オン' if self.settings['enabled'] else 'オフ'}"
                 f"\n**登録数**: {len(self.settings['replies'])}/{MAX_REPLIES}"
+                f"\n**使える人**: {f'<@&{min_role}>' if min_role else '全員'}"
                 f"\n\n{chr(10).join(lines) if lines else '返信はありません。'}"
                 + notice_line(self.notice)
             )[:4096],
