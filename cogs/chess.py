@@ -9,9 +9,25 @@ import discord
 from discord.ext import commands
 from PIL import Image, ImageDraw, ImageFont
 
-from core import game_panels, game_restore
+from core import game_panels, game_restore, party_ranking
 
 logger = logging.getLogger(__name__)
+
+GAME_ID = "chess"
+party_ranking.register(GAME_ID)
+
+
+async def record_win(g, winner_side) -> None:
+    """対人戦の勝者をサーバー別ランキングに記録する（core/party_ranking.py）。
+
+    CPU戦は対人戦と混ぜないため記録しない。ステイルメイト（引き分け）は
+    どちらにも付けない。チェックメイトと時間切れの両方から呼ばれる。
+    """
+    if g.mode == "cpu":
+        return
+    winner = g.players.get(winner_side)
+    if winner is not None:
+        await party_ranking.shared().record_win(g.guild_id, winner.id, GAME_ID)
 
 COLOR = 0x6F4E37
 RECRUIT_SECONDS = 30
@@ -583,6 +599,7 @@ class Chess(commands.Cog):
                 if in_check(g.board, g.turn):
                     winner_side = "black" if g.turn == "white" else "white"
                     winner = "CPU" if (g.mode == "cpu" and winner_side == "black") else g.players[winner_side].mention
+                    await record_win(g, winner_side)
                     await channel.send(f"チェックメイト！ {winner} の勝ちです。")
                 else:
                     await channel.send("ステイルメイトです。引き分けになりました。")
@@ -603,6 +620,7 @@ class Chess(commands.Cog):
             if not g.acted:
                 winner_side = "black" if g.turn == "white" else "white"
                 winner = "CPU" if (g.mode == "cpu" and winner_side == "black") else g.players[winner_side].mention
+                await record_win(g, winner_side)
                 await channel.send(f"{g.current_user().mention} さんは時間切れです。{winner} の勝ちです。チェスを終了しました。")
                 break
         await channel.send("チェスを終了しました。")

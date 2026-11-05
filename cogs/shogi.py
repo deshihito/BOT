@@ -8,12 +8,26 @@ from pathlib import Path
 
 import discord
 from discord.ext import commands
-from core import game_panels, game_restore
+from core import game_panels, game_restore, party_ranking
 from PIL import Image, ImageDraw, ImageFont
 
 from core.shogi_engine import ShogiGame, Color, PieceType, Piece
 
 logger = logging.getLogger(__name__)
+
+GAME_ID = "shogi"
+party_ranking.register(GAME_ID)
+
+
+async def record_win(s, winner) -> None:
+    """対人戦の勝者をサーバー別ランキングに記録する（core/party_ranking.py）。
+
+    CPU戦は対人戦と混ぜないため記録しない。詰み以外の終了（合法手なし・
+    時間切れの連続）は勝者を宣言していないので、どちらにも付けない。
+    """
+    if s.mode == "cpu" or winner is None:
+        return
+    await party_ranking.shared().record_win(s.guild_id, winner.id, GAME_ID)
 
 COLOR = 0x8b4513
 RECRUIT_SECONDS = 45
@@ -692,6 +706,7 @@ class Shogi(commands.Cog):
         while s.phase == "playing":
             if s.game.is_checkmate(s.game.turn):
                 winner = s.players[Color.GOTE if s.game.turn == Color.SENTE else Color.SENTE]
+                await record_win(s, winner)
                 await channel.send(f"詰みです。{winner.mention} さんの勝利です。")
                 break
             if not s.game.has_legal_move(s.game.turn):
