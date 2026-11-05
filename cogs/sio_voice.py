@@ -47,7 +47,7 @@ except Exception:  # ImportError だけでなく共有ライブラリ不整合 (
     )
 # ---------------------------------------------------------------------------
 
-from core import action_usage
+from core import action_usage, usage_stats
 from core.legacy import Responder
 from core.voice_session import VoiceBusy, feature_label, get_manager, stop_hint
 from core.voice_media import add_audio_source, remove_audio_source
@@ -419,6 +419,8 @@ class VoiceHub(commands.Cog):
             getattr(getattr(interaction, "user", None), "id", None),
             f"vc:{value}",
         )
+        # 管理者向け総量統計も同じ入口で数える（個人履歴とは別集計）。
+        usage_stats.record_action_safely(f"vc:{value}")
         if value == "music_panel":
             cog = await self._cog(interaction, "music")
             if cog:

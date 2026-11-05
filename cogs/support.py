@@ -23,7 +23,7 @@ from discord.ext import commands, tasks
 
 from cogs.clear import MAX_CLEAR
 from cogs.auth import get_intro_webhook, sanitize_webhook_name, role_failure_reason
-from core import action_usage, guild_settings
+from core import action_usage, guild_settings, usage_stats
 from core.panel_v2 import as_embed_v2, as_panel_v2, edit_panel_v2
 
 logger = logging.getLogger(__name__)
@@ -6205,6 +6205,8 @@ class SupportCog(commands.Cog):
             getattr(getattr(interaction, "user", None), "id", None),
             f"support:{selected}",
         )
+        # 管理者向け総量統計も同じ入口で数える（個人履歴とは別集計）。
+        usage_stats.record_action_safely(f"support:{selected}")
 
         if selected == "server_assist":
             cog = self.bot.get_cog("ServerAssistCog")

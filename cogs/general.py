@@ -18,7 +18,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands, tasks
 from core.panel_v2 import as_panel_v2, edit_panel_v2
-from core import action_registry, action_usage, ai_omnirush, ai_preferences, ai_provider_router, guild_settings, logfare, shortcuts
+from core import action_registry, action_usage, ai_omnirush, ai_preferences, ai_provider_router, guild_settings, logfare, shortcuts, usage_stats
 from core.game_guides import GAME_GUIDES, GAME_ORDER
 from core import localization, translation
 from core.libretranslate import LibreTranslateClient, LibreTranslateError
@@ -3922,6 +3922,8 @@ class GeneralCog(commands.Cog):
             getattr(getattr(interaction, "user", None), "id", None),
             f"general:{value}",
         )
+        # 管理者向け総量統計も同じ入口で数える（個人履歴とは別集計）。
+        usage_stats.record_action_safely(f"general:{value}")
         if value in {"zetamodoki", "zeta_reset", "zeta_register", "zeta_manage"}:
             cog = self.bot.get_cog("ZetaModoki")
             if cog is None:
