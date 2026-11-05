@@ -35,7 +35,7 @@ class ActivityLogChannelSelect(discord.ui.ChannelSelect):
         except Exception:
             logger.exception("履歴送信先の更新に失敗しました")
             await interaction.followup.send(
-                "送信先の更新に失敗しました。Botのログを確認してください。",
+                "送信先の更新に失敗しました。時間をおいて再度お試しください。解決しない場合はBotの運営に連絡してください。",
                 ephemeral=True,
             )
 
@@ -147,7 +147,7 @@ class ActivityLogSettingsView(discord.ui.View):
         except Exception:
             logger.exception("履歴設定の更新に失敗しました (section=%s)", self.section)
             await interaction.followup.send(
-                "設定の更新に失敗しました。Botのログを確認してください。",
+                "設定の更新に失敗しました。時間をおいて再度お試しください。解決しない場合はBotの運営に連絡してください。",
                 ephemeral=True,
             )
 
@@ -176,7 +176,7 @@ class ActivityLogSettingsView(discord.ui.View):
         except Exception:
             logger.exception("個別モデレート履歴設定の更新に失敗しました (action=%s)", action)
             await interaction.followup.send(
-                "設定の更新に失敗しました。Botのログを確認してください。",
+                "設定の更新に失敗しました。時間をおいて再度お試しください。解決しない場合はBotの運営に連絡してください。",
                 ephemeral=True,
             )
 
@@ -219,7 +219,7 @@ class VCLogChannelSelect(discord.ui.ChannelSelect):
         except Exception:
             logger.exception("VC履歴送信先の更新に失敗しました")
             await interaction.followup.send(
-                "送信先の更新に失敗しました。Botのログを確認してください。",
+                "送信先の更新に失敗しました。時間をおいて再度お試しください。解決しない場合はBotの運営に連絡してください。",
                 ephemeral=True,
             )
 
@@ -288,7 +288,7 @@ class VCLogSettingsView(discord.ui.View):
         except Exception:
             logger.exception("VC履歴設定の更新に失敗しました")
             await interaction.followup.send(
-                "設定の更新に失敗しました。Botのログを確認してください。",
+                "設定の更新に失敗しました。時間をおいて再度お試しください。解決しない場合はBotの運営に連絡してください。",
                 ephemeral=True,
             )
 

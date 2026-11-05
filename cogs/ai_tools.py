@@ -397,7 +397,7 @@ class AIToolsCog(commands.Cog):
             await message.reply(f"AI toolsは実行されませんでした。理由: {exc}", mention_author=False)
         except Exception:
             logger.exception("AI tools failed: user=%s", message.author.id)
-            await message.reply("AI toolsの判定または機能実行に失敗しました。Botログを確認してください。", mention_author=False)
+            await message.reply("AI toolsの判定または機能実行に失敗しました。時間をおいて再度お試しください。解決しない場合はBotの運営に連絡してください。", mention_author=False)
 
 
 async def setup(bot: commands.Bot):

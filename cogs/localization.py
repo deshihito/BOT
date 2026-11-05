@@ -89,6 +89,7 @@ class LocalizationCog(commands.Cog):
 
     def language_embed(self, locale: str, note: str | None = None) -> discord.Embed:
         description = localization.text("language_settings_description", locale)
+        description = f"{description}\n\n{localization.text('language_support_note', locale)}"
         if note:
             description = f"{note}\n\n{description}"
         return discord.Embed(title=localization.text("language_settings_title", locale),

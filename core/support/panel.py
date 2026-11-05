@@ -150,7 +150,7 @@ class SupportGenreSelect(discord.ui.Select):
             logger.exception("サポート操作パネルのジャンル更新に失敗しました")
             try:
                 await interaction.followup.send(
-                    "ジャンルの更新に失敗しました。Botのログを確認してください。",
+                    "ジャンルの更新に失敗しました。時間をおいて再度お試しください。解決しない場合はBotの運営に連絡してください。",
                     ephemeral=True,
                 )
             except discord.HTTPException:

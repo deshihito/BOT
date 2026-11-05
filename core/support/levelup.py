@@ -202,7 +202,7 @@ class LevelUpNotifyPanel(discord.ui.LayoutView):
         except Exception:
             logger.exception("レベルアップ通知設定の更新に失敗しました")
             return await interaction.followup.send(
-                "設定の更新に失敗しました。Botのログを確認してください。",
+                "設定の更新に失敗しました。時間をおいて再度お試しください。解決しない場合はBotの運営に連絡してください。",
                 ephemeral=True,
             )
         await self.refresh(interaction, notice)

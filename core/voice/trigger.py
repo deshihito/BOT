@@ -459,7 +459,7 @@ class VoiceTriggerManageView(discord.ui.LayoutView):
                 discord.ui.Container(
                     discord.ui.TextDisplay(
                         "## ⚠️ 音声トリガー機能は利用できません\n"
-                        "`encodec` / `torch` / `soundfile` の読み込みに失敗しています。Botのログを確認してください。"
+                        "`encodec` / `torch` / `soundfile` の読み込みに失敗しています。時間をおいて再度お試しください。解決しない場合はBotの運営に連絡してください。"
                     ),
                     accent_colour=0xE74C3C,
                 )

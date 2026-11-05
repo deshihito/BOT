@@ -47,12 +47,12 @@ async def report_callback_error(interaction: discord.Interaction, context: str):
     try:
         if interaction.response.is_done():
             await interaction.followup.send(
-                "処理中にエラーが発生しました。Botのログを確認してください。",
+                "処理中にエラーが発生しました。時間をおいて再度お試しください。解決しない場合はBotの運営に連絡してください。",
                 ephemeral=True,
             )
         else:
             await interaction.response.send_message(
-                "処理中にエラーが発生しました。Botのログを確認してください。",
+                "処理中にエラーが発生しました。時間をおいて再度お試しください。解決しない場合はBotの運営に連絡してください。",
                 ephemeral=True,
             )
     except discord.HTTPException:
@@ -93,8 +93,7 @@ SUPPORT_ACTIONS = [
 ]
 
 # ジャンル説明は、ラベルや配下の機能名から読み取れない情報がある場合だけ書く。
-# 機能名の列挙は書かない（空文字 = 説明なし）。assist は単一機能の内訳（対象範囲）が
-# ラベルから読めないため、対象範囲の列挙を残している。
+# 機能名の列挙は書かない（空文字 = 説明なし）。
 SUPPORT_GENRES = {
     "moderation": ("モデレーション", ""),
     "roles": ("ロール・認証", ""),
@@ -103,7 +102,7 @@ SUPPORT_GENRES = {
     "automation": ("自動化・通知", ""),
     "assist": (
         "サーバーアシスト",
-        "参加・退出メッセージ、自動ロール、Starboard、レベル、一時VC",
+        "サーバー運営の細かな設定をまとめた入口",
     ),
     "event": ("イベント", ""),
     "rta": ("RTA", ""),

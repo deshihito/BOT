@@ -65,10 +65,10 @@ class GenreDescriptionPolicyTest(unittest.TestCase):
     def test_support_genres(self):
         for genre in ("moderation", "roles", "language", "logs", "automation", "event", "rta"):
             self.assertEqual(SUPPORT_GENRES[genre][1], "", genre)
-        # assist は単一機能の対象範囲がラベルから読めないため列挙を残す
+        # assist は HCD監査 quick fix #6 で部分列挙（5/22）をやめ、目的文に置換した
         self.assertEqual(
             SUPPORT_GENRES["assist"][1],
-            "参加・退出メッセージ、自動ロール、Starboard、レベル、一時VC",
+            "サーバー運営の細かな設定をまとめた入口",
         )
 
     def test_voice_genres(self):
@@ -98,7 +98,7 @@ class GenreDescriptionPolicyTest(unittest.TestCase):
         self.assertEqual(registry.get("general:exp_status").description, "チャット・VC・generalのEXPとレベル")
         self.assertEqual(registry.get("general:fujo_register").description, "メンバーの安否・不在の検知")
         self.assertEqual(registry.get("support:server_assist").description,
-                         "参加・退出メッセージ、自動ロール、Starboard、レベル、一時VC")
+                         "サーバー運営の細かな設定をまとめた入口")
 
 
 if __name__ == "__main__":

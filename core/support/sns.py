@@ -836,7 +836,7 @@ class SnsRemoveSelect(discord.ui.Select):
             )
         except Exception:
             logger.exception("SNS通知の登録解除に失敗しました")
-            notice = "⚠️ 解除中にエラーが発生しました。Botのログを確認してください。"
+            notice = "⚠️ 解除中にエラーが発生しました。時間をおいて再度お試しください。解決しない場合はBotの運営に連絡してください。"
         await self.parent_view.refresh(interaction, notice)
 
 
@@ -873,7 +873,7 @@ class SnsGithubKindSelect(discord.ui.Select):
             notice = f"⚠️ {exc}"
         except Exception:
             logger.exception("GitHub通知の種類変更に失敗しました")
-            notice = "⚠️ 変更中にエラーが発生しました。Botのログを確認してください。"
+            notice = "⚠️ 変更中にエラーが発生しました。時間をおいて再度お試しください。解決しない場合はBotの運営に連絡してください。"
         await self.parent_view.refresh(interaction, notice)
 
 
@@ -916,7 +916,7 @@ class SnsAddModal(discord.ui.Modal):
             notice = f"⚠️ {exc}"
         except Exception:
             logger.exception("SNS通知の追加に失敗しました")
-            notice = "⚠️ 追加中にエラーが発生しました。Botのログを確認してください。"
+            notice = "⚠️ 追加中にエラーが発生しました。時間をおいて再度お試しください。解決しない場合はBotの運営に連絡してください。"
         await self.panel.refresh(interaction, notice)
 
     async def on_error(self, interaction: discord.Interaction, error: Exception):
@@ -1030,7 +1030,7 @@ class SnsNotifyPanel(discord.ui.LayoutView):
         except Exception:
             logger.exception("SNS通知設定の更新に失敗しました")
             return await interaction.followup.send(
-                "設定の更新に失敗しました。Botのログを確認してください。",
+                "設定の更新に失敗しました。時間をおいて再度お試しください。解決しない場合はBotの運営に連絡してください。",
                 ephemeral=True,
             )
         await self.refresh(interaction, notice)
