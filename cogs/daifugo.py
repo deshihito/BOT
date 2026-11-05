@@ -229,7 +229,7 @@ class JoinView(discord.ui.View):
         if len(g.players) >= MAX_PLAYERS:
             return await interaction.response.send_message(f"定員（{MAX_PLAYERS}人）に達しました。", ephemeral=True)
         g.players[interaction.user.id] = interaction.user
-        await interaction.response.send_message(f"参加しました（{len(g.players)}人）。", ephemeral=True)
+        await interaction.response.send_message(f"参加しました（{len(g.players)}人）。")
 
     @discord.ui.button(label="抜ける", style=discord.ButtonStyle.secondary)
     async def leave(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -239,7 +239,7 @@ class JoinView(discord.ui.View):
         if interaction.user.id == g.host_id:
             return await interaction.response.send_message("募集した人は抜けられません。", ephemeral=True)
         del g.players[interaction.user.id]
-        await interaction.response.send_message("参加をやめました。", ephemeral=True)
+        await interaction.response.send_message("参加をやめました。")
 
 
 class PlaySelect(discord.ui.Select):
@@ -395,7 +395,7 @@ class Daifugo(commands.Cog):
             return await interaction.response.send_message(error, ephemeral=True)
         if not g.can_play(interaction.user.id, tuple(play)):
             return await interaction.response.send_message("その手はもう出せません。", ephemeral=True)
-        await interaction.response.send_message(f"{label(play)} を出しました。", ephemeral=True)
+        await interaction.response.send_message(f"{label(play)} を出しました。")
         await self.apply(interaction.channel, g, interaction.user.id, tuple(play))
 
     async def on_pass(self, interaction: discord.Interaction, g: DaifugoGame):
@@ -404,7 +404,7 @@ class Daifugo(commands.Cog):
             return await interaction.response.send_message(error, ephemeral=True)
         if g.table is None:
             return await interaction.response.send_message("場にカードがないので、パスはできません。", ephemeral=True)
-        await interaction.response.send_message("パスしました。", ephemeral=True)
+        await interaction.response.send_message("パスしました。")
         await self.apply(interaction.channel, g, interaction.user.id, PASS)
 
     async def show_hand(self, interaction: discord.Interaction, g: DaifugoGame):

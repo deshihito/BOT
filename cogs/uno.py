@@ -633,7 +633,7 @@ class Uno(commands.Cog):
         is_admin = bool(perms and (perms.administrator or perms.manage_guild))
         if interaction.user.id not in game.players and interaction.user.id != game.host_id and not is_admin:
             return await interaction.response.send_message("[!] UNOを終了できるのは参加者・ホスト・管理者だけです。", ephemeral=True)
-        await interaction.response.send_message("[!] UNOゲームを終了します。", ephemeral=True)
+        await interaction.response.send_message("[!] UNOゲームを終了します。")
         await self.end_game(game, reason=f"[!] <@{interaction.user.id}> さんがUNOゲームを終了しました。", channel=interaction.channel)
 
     async def end_game(self, game: UnoGame, reason: str, channel=None):

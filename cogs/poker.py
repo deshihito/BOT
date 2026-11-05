@@ -81,7 +81,7 @@ class JoinView(discord.ui.View):
         if len(g.players) >= 6:
             return await interaction.response.send_message("定員（6人）です。", ephemeral=True)
         g.players[interaction.user.id] = interaction.user
-        await interaction.response.send_message("参加しました。", ephemeral=True)
+        await interaction.response.send_message("参加しました。")
 
     @discord.ui.button(label="抜ける", style=discord.ButtonStyle.secondary)
     async def leave(self, interaction, button):
@@ -91,7 +91,7 @@ class JoinView(discord.ui.View):
         if interaction.user.id == g.host_id:
             return await interaction.response.send_message("募集主は抜けられません。", ephemeral=True)
         del g.players[interaction.user.id]
-        await interaction.response.send_message("参加を取り消しました。", ephemeral=True)
+        await interaction.response.send_message("参加を取り消しました。")
 
 
 class DiscardSelect(discord.ui.Select):
