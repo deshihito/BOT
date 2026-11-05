@@ -99,3 +99,17 @@ CIRCULATION_NOT_LOADED = "採掘・宝くじ・盗みの機能が読み込まれ
 def circulation_action_failed(reason: object) -> str:
     """採掘・宝くじ・盗みの操作が成立しなかったときの文（理由をそのまま続ける）。"""
     return f"{FAILED} {reason}"
+
+
+# ---------------------------------------------------------------- ギャンブル系
+
+#: ギャンブル cog が読み込まれていないときのエラー（/general の dispatch で共用）。
+GAMBLING_NOT_LOADED = "ギャンブル機能が読み込まれていません。時間をおいて再度お試しください。解決しない場合はBotの運営に連絡してください。"
+
+#: ギャンブルの金額入力が解釈できないときのエラー。
+GAMBLING_INVALID_AMOUNT = "入力が正しくありません。半角数字で入力してください。"
+
+
+def gambling_action_failed(reason: object) -> str:
+    """ギャンブルの操作が成立しなかったときの文（理由をそのまま続ける）。"""
+    return f"{FAILED} {reason}"

@@ -84,7 +84,7 @@ export const COMMAND_GUIDES: CommandGuide[] = [
       {
         slug: "money",
         title: "マネー",
-        description: "AGOの状況確認、送金、市場でのアゴトークンの売買、アイテムと宝箱、合成と工房、採掘と宝くじ、盗む勝負、コイン保有ランキングをまとめています。",
+        description: "AGOの状況確認、送金、市場でのアゴトークンの売買、アイテムと宝箱、合成と工房、採掘と宝くじ、盗む勝負、ギャンブル、コイン保有ランキングをまとめています。",
         functions: [
           { title: "プレイヤー状況", description: "自分の所持状況を確認します。" },
           { title: "コイン送金", description: "送金先のユーザーIDとAGOを入力して、ほかのユーザーへ送ります。" },
@@ -103,6 +103,10 @@ export const COMMAND_GUIDES: CommandGuide[] = [
           { title: "宝くじ", description: "賞金プールと締切、自分のチケットと前回の抽選結果を確認します。" },
           { title: "宝くじを買う", description: "チケットを買って毎日の抽選に参加します。売上の90%が賞金になります。" },
           { title: "盗む", description: "同じサーバーのメンバーからコインを盗む勝負をします。失敗すると罰金を払います。" },
+          { title: "スロット", description: "7リールスロットを回します。7揃いで確変に入り、6が5つ以上揃うと全額没収もあります。" },
+          { title: "ダブルアップ", description: "GOで倍率を伸ばすか、CASHOUTで確定するかを選ぶダブルアップで遊びます。" },
+          { title: "ブラックジャック", description: "ディーラーとブラックジャックで対戦します。" },
+          { title: "ダイス", description: "範囲内の数字を当てるとベット×範囲が賞金の数字当てダイスで遊びます。" },
           { title: "コイン保有ランキング", description: "コインの保有状況をランキングで確認します。" },
         ],
       },
