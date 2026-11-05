@@ -150,7 +150,7 @@ class MoneyPanelView(discord.ui.View):
     def refresh(self) -> None:
         self.clear_items()
         select = discord.ui.Select(
-            placeholder="カテゴリを選ぶ",
+            placeholder="カテゴリを選択してください",
             options=[
                 discord.SelectOption(
                     label=label, value=value, default=value == self.category)
@@ -182,7 +182,6 @@ class MoneyPanelView(discord.ui.View):
                 ("買う", success, self._dispatch("token_buy")),
                 ("売る", danger, self._dispatch("token_sell")),
                 ("市場パネル", primary, self._dispatch("market")),
-                ("更新", secondary, self._refresh),
             ]
         if category == "items":
             return [
@@ -191,7 +190,6 @@ class MoneyPanelView(discord.ui.View):
                 ("使う", primary, self._dispatch("item_use")),
                 ("宝箱を開ける", danger, self._open_boxes),
                 ("アイテムパネル", secondary, self._dispatch("items")),
-                ("更新", secondary, self._refresh),
             ]
         if category == "craft":
             return [
@@ -200,7 +198,6 @@ class MoneyPanelView(discord.ui.View):
                 ("委託を受け取る", primary, self._claim_commissions),
                 ("加工機を買う", success, self._dispatch("machine_buy")),
                 ("工房パネル", secondary, self._dispatch("workshop")),
-                ("更新", secondary, self._refresh),
             ]
         if category == "play":
             return [
@@ -211,15 +208,13 @@ class MoneyPanelView(discord.ui.View):
                 ("スロット", primary, self._dispatch("slot")),
                 ("ダブルアップ", primary, self._dispatch("double")),
                 ("ブラックジャック", primary, self._dispatch("blackjack")),
-                ("ダイス", primary, self._dispatch("dice")),
-                ("更新", secondary, self._refresh),
+                ("ダイスベット", primary, self._dispatch("dice")),
             ]
         if category == "more":
             return [
                 ("送金", primary, self._dispatch("pay")),
                 ("プレイヤー状況", secondary, self._dispatch("status")),
                 ("コイン保有ランキング", secondary, self._dispatch("coin_leaderboard")),
-                ("更新", secondary, self._refresh),
             ]
         # home: よく使う即時操作をその場で完結させる。
         return [
@@ -227,7 +222,6 @@ class MoneyPanelView(discord.ui.View):
             ("生産物を受け取る", primary, self._claim_production),
             ("委託を受け取る", primary, self._claim_commissions),
             ("宝箱を開ける", danger, self._open_boxes),
-            ("更新", secondary, self._refresh),
         ]
 
     # ------------------------------------------------------------------ 共通動作
@@ -247,10 +241,6 @@ class MoneyPanelView(discord.ui.View):
             if isinstance(child, discord.ui.Select):
                 return list(child.values)
         return []
-
-    async def _refresh(self, interaction: discord.Interaction):
-        self.refresh()
-        await interaction.response.edit_message(embed=await self.build_embed(), view=self)
 
     async def refresh_panel(self) -> None:
         """直接実行のあとにパネル本体を最新ステータスへ差し替える。"""
