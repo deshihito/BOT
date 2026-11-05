@@ -1,16 +1,19 @@
 """/game の将棋（2人対戦、セレクト・座標入力、手駒・二歩対応）。"""
 import asyncio
 import io
+import logging
 import random
 from copy import deepcopy
 from pathlib import Path
 
 import discord
 from discord.ext import commands
-from core import game_panels
+from core import game_panels, game_restore
 from PIL import Image, ImageDraw, ImageFont
 
 from core.shogi_engine import ShogiGame, Color, PieceType, Piece
+
+logger = logging.getLogger(__name__)
 
 COLOR = 0x8b4513
 RECRUIT_SECONDS = 45
@@ -260,6 +263,48 @@ class ShogiRenderer:
             if hand[pt] > 0:
                 draw.text((x, yy), f"{pt.value}×{hand[pt]}", fill="#222", font=self.font_hand)
                 yy += 22
+
+def serialize_shogi_game(game: ShogiGame) -> dict:
+    """対局状態（盤面・手駒・手番）を JSON 化できる形にする。"""
+    board = [
+        [
+            [piece.type.name, piece.color.name, bool(piece.promoted)] if piece else None
+            for piece in row
+        ]
+        for row in game.board
+    ]
+    hands = {
+        color.name: {pt.name: int(game.hands[color][pt]) for pt in PieceType}
+        for color in (Color.SENTE, Color.GOTE)
+    }
+    return {"board": board, "hands": hands, "turn": game.turn.name}
+
+
+def deserialize_shogi_game(data: dict) -> ShogiGame:
+    """serialize_shogi_game の逆変換。形が壊れていれば ValueError。"""
+    board_data = data["board"]
+    if len(board_data) != 9 or any(len(row) != 9 for row in board_data):
+        raise ValueError("shogi board must be 9x9")
+    game = ShogiGame()
+    board = []
+    for row in board_data:
+        new_row = []
+        for cell in row:
+            if cell is None:
+                new_row.append(None)
+                continue
+            type_name, color_name, promoted = cell
+            new_row.append(Piece(PieceType[type_name], Color[color_name], bool(promoted)))
+        board.append(new_row)
+    game.board = board
+    for color in (Color.SENTE, Color.GOTE):
+        hand = {pt: 0 for pt in PieceType}
+        for type_name, count in (data["hands"].get(color.name) or {}).items():
+            hand[PieceType[type_name]] = int(count)
+        game.hands[color] = hand
+    game.turn = Color[data["turn"]]
+    return game
+
 
 class ShogiSession:
     def __init__(self, channel_id, guild_id, host_id, mode="human", difficulty=5):
@@ -587,6 +632,7 @@ class Shogi(commands.Cog):
             finally:
                 s.phase = "done"
                 self.sessions.pop(ch.id, None)
+                self._clear_snapshot(ch.id)
             return
         s.players[interaction.user.id] = interaction.user
         self.sessions[ch.id] = s
@@ -600,6 +646,7 @@ class Shogi(commands.Cog):
         finally:
             s.phase = "done"
             self.sessions.pop(ch.id, None)
+            self._clear_snapshot(ch.id)
 
     async def _update_board_msg(self, s: ShogiSession, channel, description, labels=None, selected=None, page=0):
         # 盤面画像の番号ラベルは、表示中のページの候補だけに付ける。
@@ -637,6 +684,10 @@ class Shogi(commands.Cog):
             await channel.send(f"将棋CPU対戦開始！ 先手: {s.players[Color.SENTE].mention} / 後手: CPU（難易度 {s.difficulty}/10）")
         else:
             await channel.send(f"将棋開始！ 先手: {ids[0].mention} / 後手: {ids[1].mention}")
+        await self._play_loop(channel, s)
+        await channel.send("将棋を終了しました。")
+
+    async def _play_loop(self, channel, s: ShogiSession):
         idle = 0
         while s.phase == "playing":
             if s.game.is_checkmate(s.game.turn):
@@ -660,6 +711,8 @@ class Shogi(commands.Cog):
             s.selected_drop = None
             s.pending_from = None
             s.pending_to = None
+            # 手番開始時点をチェックポイントとして保存する（復旧はここから再開する）
+            self._save_snapshot(s)
             selectables = s.game.get_legal_selectable_pieces()
             labels = make_labels(selectables)
             desc = (f"{turn_user.mention} さんの番（{'先手' if s.game.turn == Color.SENTE else '後手'}）。\n"
@@ -678,7 +731,88 @@ class Shogi(commands.Cog):
                 s.game.turn = Color.GOTE if s.game.turn == Color.SENTE else Color.SENTE
             else:
                 idle = 0
-        await channel.send("将棋を終了しました。")
+
+    # ------------------------------------------------------------------
+    # 再起動復旧（core/game_restore.py）
+    # ------------------------------------------------------------------
+    def _save_snapshot(self, s: ShogiSession) -> None:
+        if s.phase != "playing":
+            return
+        sente = s.players.get(Color.SENTE)
+        gote = s.players.get(Color.GOTE)
+        state = {
+            "mode": s.mode,
+            "difficulty": s.difficulty,
+            "host_id": s.host_id,
+            "players": {
+                "sente": game_restore.member_ref(sente) if sente is not None else None,
+                "gote": game_restore.member_ref(gote) if gote is not None else None,
+            },
+            "game": serialize_shogi_game(s.game),
+            "board_message_id": getattr(s.current_msg, "id", None),
+        }
+        game_restore.save_session("shogi", s.channel_id, s.guild_id, state)
+
+    def _clear_snapshot(self, channel_id) -> None:
+        game_restore.clear_session("shogi", channel_id)
+
+    async def restore_after_restart(self) -> None:
+        """再起動前に進行中だった将棋を、手番の開始時点から再開する。"""
+        entries = game_restore.session_entries("shogi")
+        for channel_id, entry in entries.items():
+            try:
+                restored = await self._restore_session(channel_id, entry)
+            except Exception:
+                logger.exception("channel %s: 将棋の復旧に失敗しました", channel_id)
+                restored = False
+            if not restored:
+                game_restore.clear_session("shogi", channel_id)
+        game_restore.flush_store()
+
+    async def _restore_session(self, channel_id, entry) -> bool:
+        state = entry.get("state")
+        if not isinstance(state, dict) or channel_id in self.sessions:
+            return False
+        channel = self.bot.get_channel(channel_id)
+        if channel is None:
+            return False
+        guild = getattr(channel, "guild", None)
+        guild_id = entry.get("guild_id") or getattr(guild, "id", None)
+        s = ShogiSession(channel_id, guild_id, state.get("host_id"),
+                         state.get("mode") or "human", state.get("difficulty") or 5)
+        players = state.get("players") or {}
+        for key, color in (("sente", Color.SENTE), ("gote", Color.GOTE)):
+            ref = players.get(key)
+            if ref is None:
+                if s.mode == "cpu" and color == Color.GOTE:
+                    s.players[color] = None
+                    continue
+                return False
+            s.players[color] = game_restore.resolve_member(guild, ref.get("id"), ref.get("name"))
+        s.game = deserialize_shogi_game(state["game"])
+        s.phase = "playing"
+        message_id = state.get("board_message_id")
+        fetch = getattr(channel, "fetch_message", None)
+        if message_id and callable(fetch):
+            try:
+                s.current_msg = await fetch(message_id)
+            except Exception:
+                s.current_msg = None
+        self.sessions[channel_id] = s
+        asyncio.create_task(self._run_restored_session(channel, s))
+        return True
+
+    async def _run_restored_session(self, channel, s: ShogiSession):
+        try:
+            await self._play_loop(channel, s)
+            await channel.send("将棋を終了しました。")
+        except Exception:
+            logger.exception("channel %s: 復旧した将棋の進行に失敗しました", s.channel_id)
+        finally:
+            s.phase = "done"
+            if self.sessions.get(s.channel_id) is s:
+                self.sessions.pop(s.channel_id, None)
+            self._clear_snapshot(s.channel_id)
 
 
 async def setup(bot):

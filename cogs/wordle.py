@@ -11,14 +11,18 @@
 - 勝利数は core/party_ranking.py に記録する。手番の時間切れは無いので、放置対策（autoplay）はつながない。
 """
 import asyncio
+import logging
 import random
+import time
 from pathlib import Path
 
 import discord
-from core import game_panels
+from core import game_panels, game_restore
 from discord.ext import commands
 
 from core import party_ranking
+
+logger = logging.getLogger(__name__)
 
 GAME_ID = "wordle"
 party_ranking.register(GAME_ID)
@@ -81,6 +85,7 @@ class WordleGame:
         self.phase = "playing"       # playing / done
         self.message = None
         self.finished = asyncio.Event()
+        self.started_at = time.time()  # 制限時間（GAME_SECONDS）の起点。再起動復旧でも使う
 
     def can_guess(self, user_id) -> bool:
         return self.mode == "shared" or user_id == self.host.id
@@ -166,14 +171,20 @@ class Wordle(commands.Cog):
             embed=discord.Embed(description="Wordle を始めました。", color=COLOR), ephemeral=True)
         try:
             g.message = await game_panels.replace(channel, "party", embed=g.board_embed(), view=BoardView(self, g))
-            try:
-                await asyncio.wait_for(g.finished.wait(), GAME_SECONDS)
-            except asyncio.TimeoutError:
-                pass
-            await self.finish(channel, g)
+            self._save_snapshot(g)
+            await self._watch(channel, g, GAME_SECONDS)
         finally:
             g.phase = "done"
             self.games.pop(channel.id, None)
+            self._clear_snapshot(channel.id)
+
+    async def _watch(self, channel, g: WordleGame, timeout):
+        """終了イベントか制限時間を待ち、来たら finish する（開始・復旧の共通経路）。"""
+        try:
+            await asyncio.wait_for(g.finished.wait(), timeout)
+        except asyncio.TimeoutError:
+            pass
+        await self.finish(channel, g)
 
     async def submit_guess(self, interaction: discord.Interaction, g: WordleGame, word: str):
         if g.phase != "playing" or g.over:
@@ -188,14 +199,106 @@ class Wordle(commands.Cog):
         g.guesses.append((interaction.user, w, colors))
         if w == g.answer:
             g.winner = interaction.user
+        self._save_snapshot(g)
         await interaction.response.send_message(f"{''.join(colors)} `{w.upper()}`", ephemeral=True)
         if g.message is not None:
             await g.message.edit(embed=g.board_embed())
         if g.over:
             g.finished.set()
 
+    # ------------------------------------------------------------------
+    # 再起動復旧（core/game_restore.py）
+    # ------------------------------------------------------------------
+    def _save_snapshot(self, g: WordleGame) -> None:
+        if g.phase != "playing" or g.winner is not None:
+            return
+        state = {
+            "host": game_restore.member_ref(g.host),
+            "answer": g.answer,
+            "mode": g.mode,
+            "guesses": [
+                [game_restore.member_ref(u), word, list(colors)]
+                for u, word, colors in g.guesses
+            ],
+            "message_id": getattr(g.message, "id", None),
+            "started_at": g.started_at,
+        }
+        game_restore.save_session("wordle", g.channel_id, g.guild_id, state)
+
+    def _clear_snapshot(self, channel_id) -> None:
+        game_restore.clear_session("wordle", channel_id)
+
+    async def restore_after_restart(self) -> None:
+        """再起動前に進行中だった Wordle を、残り時間つきで再開する。"""
+        entries = game_restore.session_entries("wordle")
+        for channel_id, entry in entries.items():
+            try:
+                restored = await self._restore_session(channel_id, entry)
+            except Exception:
+                logger.exception("channel %s: Wordle の復旧に失敗しました", channel_id)
+                restored = False
+            if not restored:
+                game_restore.clear_session("wordle", channel_id)
+        game_restore.flush_store()
+
+    async def _restore_session(self, channel_id, entry) -> bool:
+        state = entry.get("state")
+        if not isinstance(state, dict) or channel_id in self.games:
+            return False
+        channel = self.bot.get_channel(channel_id)
+        if channel is None:
+            return False
+        guild = getattr(channel, "guild", None)
+        guild_id = entry.get("guild_id") or getattr(guild, "id", None)
+        host_ref = state.get("host") or {}
+        host = game_restore.resolve_member(guild, host_ref.get("id"), host_ref.get("name"))
+        answer = state.get("answer")
+        if not answer:
+            return False
+        g = WordleGame(channel_id, guild_id, host, answer,
+                       state.get("mode") or "shared")
+        guesses = []
+        for ref, word, colors in state.get("guesses") or []:
+            user = game_restore.resolve_member(guild, ref.get("id"), ref.get("name"))
+            guesses.append((user, word, list(colors)))
+        if len(guesses) >= MAX_GUESSES:
+            return False
+        g.guesses = guesses
+        started_at = state.get("started_at")
+        if isinstance(started_at, (int, float)):
+            g.started_at = float(started_at)
+        message_id = state.get("message_id")
+        fetch = getattr(channel, "fetch_message", None)
+        if message_id and callable(fetch):
+            try:
+                g.message = await fetch(message_id)
+            except Exception:
+                g.message = None
+        self.games[channel_id] = g
+        if g.message is not None:
+            # 既存の盤面メッセージへ新しい View を付け直して復活させる
+            await g.message.edit(embed=g.board_embed(), view=BoardView(self, g))
+        else:
+            g.message = await game_panels.replace(
+                channel, "party", embed=g.board_embed(), view=BoardView(self, g))
+        remaining = GAME_SECONDS - (time.time() - g.started_at)
+        asyncio.create_task(self._run_restored_session(channel, g, max(0.0, remaining)))
+        return True
+
+    async def _run_restored_session(self, channel, g: WordleGame, timeout):
+        try:
+            await self._watch(channel, g, timeout)
+        except Exception:
+            logger.exception("channel %s: 復旧した Wordle の進行に失敗しました", g.channel_id)
+        finally:
+            g.phase = "done"
+            if self.games.get(g.channel_id) is g:
+                self.games.pop(g.channel_id, None)
+            self._clear_snapshot(g.channel_id)
+
     async def finish(self, channel, g: WordleGame):
         g.phase = "done"
+        self._clear_snapshot(g.channel_id)
         if g.message is not None:
             await g.message.edit(embed=g.board_embed(reveal=True), view=None)
         if g.winner is not None:
