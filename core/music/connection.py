@@ -73,7 +73,7 @@ class ConnectionMixin:
             # 音楽は今までどおり誰でも止められる。録音などは開始した人・管理者（または開始した人が不在）のみ。
             if not self.voice_sessions.can_leave(session, r.user):
                 return await r.send(
-                    embed=we(f"⚠️ いまは **{session.label}**（{session.user_name} さんが開始）で使用中です。"
+                    embed=we(f"{FAILED} いまは **{session.label}**（{session.user_name} さんが開始）で使用中です。"
                               f"止められるのは開始した人か管理者だけです（`{self._stop_hint(session.feature)}`）。"),
                     ephemeral=True,
                 )

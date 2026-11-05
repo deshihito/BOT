@@ -26,6 +26,7 @@ from core.messages import recruit_join_prompt
 from discord.ext import commands
 
 from core import party_ranking
+from core.emojis import FAILED
 
 COLOR = 0xFFFFFF
 RECRUIT_SECONDS = 60
@@ -337,7 +338,7 @@ class OdaiShiritori(commands.Cog):
         word = (message.content or "").strip()
         result, reason = check_answer(g.last_word, word, g.used)
         if result == "retry":
-            await message.channel.send(embed=discord.Embed(description=f"⚠ {reason}（言い直せます）", color=COLOR))
+            await message.channel.send(embed=discord.Embed(description=f"{FAILED} {reason}（言い直せます）", color=COLOR))
             return False
         g.answer = word
         return True

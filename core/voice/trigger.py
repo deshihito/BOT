@@ -14,6 +14,7 @@ import aiohttp
 import discord
 from discord import app_commands
 from discord.ext import commands
+from core.emojis import FAILED
 try:
     import encodec
     import soundfile as sf
@@ -337,7 +338,7 @@ class VoiceTriggerPickAudioSelect(discord.ui.Select):
         except Exception as exc:
             logger.exception("音声ファイルの取得に失敗")
             return await interaction.response.send_message(
-                f"⚠️ 音声ファイルを取得できませんでした: {exc}", ephemeral=True
+                f"{FAILED} 音声ファイルを取得できませんでした: {exc}", ephemeral=True
             )
 
         await interaction.response.send_modal(VoiceTriggerWordModal(self.cog, attachment))
@@ -358,7 +359,7 @@ class VoiceTriggerWordModal(discord.ui.Modal, title="トリガー単語を入力
                 interaction.guild, self.word.value, self.attachment, interaction.user
             )
         except Exception as exc:
-            return await interaction.followup.send(f"⚠️ {exc}", ephemeral=True)
+            return await interaction.followup.send(f"{FAILED} {exc}", ephemeral=True)
         await interaction.followup.send(msg, ephemeral=True)
 
 
@@ -370,7 +371,7 @@ class VoiceTriggerRegisterView(discord.ui.LayoutView):
             self.add_item(
                 discord.ui.Container(
                     discord.ui.TextDisplay(
-                        "## ⚠️ 音声トリガー機能は利用できません\n"
+                        f"## {FAILED} 音声トリガー機能は利用できません\n"
                         "`encodec` / `torch` / `soundfile` の読み込みに失敗しています。"
                     ),
                     accent_colour=0xE74C3C,
@@ -398,7 +399,7 @@ class VoiceTriggerRegisterView(discord.ui.LayoutView):
             children.append(discord.ui.Separator())
             children.append(
                 discord.ui.TextDisplay(
-                    "⚠️ このチャンネルに音声ファイルが見つかりませんでした。\n\n"
+                    f"{FAILED} このチャンネルに音声ファイルが見つかりませんでした。\n\n"
                     "**登録方法**\n"
                     "音声ファイル（5秒以内）をこのチャンネルに送信してから、もう一度 `/vc` →「音声トリガー」→「トリガー登録」を開くと、"
                     "その音声が候補に表示されます。"
@@ -437,7 +438,7 @@ class VoiceTriggerDeleteSelect(discord.ui.Select):
         try:
             msg = await self.parent_view.cog.unregister(interaction.guild, word)
         except Exception as exc:
-            return await interaction.response.send_message(f"⚠️ {exc}", ephemeral=True)
+            return await interaction.response.send_message(f"{FAILED} {exc}", ephemeral=True)
 
         self.parent_view._build()
         await interaction.response.edit_message(view=self.parent_view)
@@ -458,7 +459,7 @@ class VoiceTriggerManageView(discord.ui.LayoutView):
             self.add_item(
                 discord.ui.Container(
                     discord.ui.TextDisplay(
-                        "## ⚠️ 音声トリガー機能は利用できません\n"
+                        f"## {FAILED} 音声トリガー機能は利用できません\n"
                         "`encodec` / `torch` / `soundfile` の読み込みに失敗しています。時間をおいて再度お試しください。解決しない場合はBotの運営に連絡してください。"
                     ),
                     accent_colour=0xE74C3C,

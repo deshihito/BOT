@@ -14,6 +14,7 @@ import aiohttp
 import discord
 from discord import app_commands
 from discord.ext import commands
+from core.emojis import FAILED
 try:
     import encodec
     import soundfile as sf
@@ -78,7 +79,7 @@ class VoiceHub(commands.Cog):
         if cog is None:
             cog = await self._try_load_cog(key)
         if cog is None:
-            await Responder(interaction).send("⚠️ この機能はいま読み込まれていません。", ephemeral=True)
+            await Responder(interaction).send(f"{FAILED} この機能はいま読み込まれていません。", ephemeral=True)
         return cog
 
     async def _try_load_cog(self, key: str):
@@ -205,7 +206,7 @@ class VoiceHub(commands.Cog):
         cog = self.bot.get_cog("VoiceTriggerCog")
         if cog is None:
             return await Responder(interaction).send(
-                "⚠️ 音声トリガー機能がいま読み込まれていません。", ephemeral=True
+                f"{FAILED} 音声トリガー機能がいま読み込まれていません。", ephemeral=True
             )
 
         # 権限チェック（support.py の設定と共通）
@@ -243,14 +244,14 @@ class VoiceHub(commands.Cog):
         if value == "gvc_chat_disconnect":
             return await cog._chat_disconnect_impl(r)
         if form is None:
-            return await r.send("⚠️ この操作は `/vc` のパネルから入力してください。", ephemeral=True)
+            return await r.send(f"{FAILED} この操作は `/vc` のパネルから入力してください。", ephemeral=True)
 
         name = form.get("name", "")
         if value == "gvc_room_create":
             try:
                 max_servers = int(form.get("max") or 0)
             except ValueError:
-                return await r.send("⚠️ 最大参加サーバー数は数字で入力してください。", ephemeral=True)
+                return await r.send(f"{FAILED} 最大参加サーバー数は数字で入力してください。", ephemeral=True)
             return await cog._room_create_impl(r, name, max_servers, form.get("password", ""), form.get("desc", ""))
         if value == "gvc_room_info":
             return await cog._room_info_impl(r, name)

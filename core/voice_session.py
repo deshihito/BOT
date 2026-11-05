@@ -28,6 +28,7 @@ import inspect
 import logging
 import time
 from typing import Any, Awaitable, Callable, Optional
+from core.emojis import FAILED
 
 logger = logging.getLogger(__name__)
 
@@ -242,7 +243,7 @@ class VoiceSessionManager:
     def busy_message(self, session: VoiceSession) -> str:
         labels = [session.label, *(feature_label(name) for name in session.shared_leases)]
         return (
-            f"⚠️ いまこのサーバーのボイスチャンネルは **{'、'.join(labels)}**（{session.user_name} さんが開始）で使用中です。\n"
+            f"{FAILED} いまこのサーバーのボイスチャンネルは **{'、'.join(labels)}**（{session.user_name} さんが開始）で使用中です。\n"
             f"先に `{stop_hint(session.feature)}` で終了するか、`/vc` のパネルから退出させてから実行してください。\n"
             "（開始した人・管理者が実行した場合や、開始した人が VC にいない場合はそのまま切り替わります）"
         )

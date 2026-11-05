@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from .common import *
 from .common import _html, _support_int
+from core.emojis import FAILED
 
 
 # ===== SNS新着通知（X / YouTube / GitHub） ======================================
@@ -836,7 +837,7 @@ class SnsRemoveSelect(discord.ui.Select):
             )
         except Exception:
             logger.exception("SNS通知の登録解除に失敗しました")
-            notice = "⚠️ 解除中にエラーが発生しました。時間をおいて再度お試しください。解決しない場合はBotの運営に連絡してください。"
+            notice = f"{FAILED} 解除中にエラーが発生しました。時間をおいて再度お試しください。解決しない場合はBotの運営に連絡してください。"
         await self.parent_view.refresh(interaction, notice)
 
 
@@ -870,10 +871,10 @@ class SnsGithubKindSelect(discord.ui.Select):
                 interaction.guild_id, key, kind
             )
         except SnsError as exc:
-            notice = f"⚠️ {exc}"
+            notice = f"{FAILED} {exc}"
         except Exception:
             logger.exception("GitHub通知の種類変更に失敗しました")
-            notice = "⚠️ 変更中にエラーが発生しました。時間をおいて再度お試しください。解決しない場合はBotの運営に連絡してください。"
+            notice = f"{FAILED} 変更中にエラーが発生しました。時間をおいて再度お試しください。解決しない場合はBotの運営に連絡してください。"
         await self.parent_view.refresh(interaction, notice)
 
 
@@ -913,10 +914,10 @@ class SnsAddModal(discord.ui.Modal):
                 interaction.guild_id, self.platform, self.account.value
             )
         except SnsError as exc:
-            notice = f"⚠️ {exc}"
+            notice = f"{FAILED} {exc}"
         except Exception:
             logger.exception("SNS通知の追加に失敗しました")
-            notice = "⚠️ 追加中にエラーが発生しました。時間をおいて再度お試しください。解決しない場合はBotの運営に連絡してください。"
+            notice = f"{FAILED} 追加中にエラーが発生しました。時間をおいて再度お試しください。解決しない場合はBotの運営に連絡してください。"
         await self.panel.refresh(interaction, notice)
 
     async def on_error(self, interaction: discord.Interaction, error: Exception):
@@ -976,7 +977,7 @@ class SnsNotifyPanel(discord.ui.LayoutView):
                 )
                 line += f"\n-# {kinds}"
             if sub["error"]:
-                line += f"\n-# ⚠️ {sub['error']}"
+                line += f"\n-# {FAILED} {sub['error']}"
             lines.append(line)
         return "\n".join(lines)
 
@@ -1105,7 +1106,7 @@ class SnsSupportMixin:
             settings = get_sns_settings(store, guild_id)
             kept = [s for s in settings["subs"] if f"{s['platform']}:{s['key']}"[:100] != value]
             if len(kept) == len(settings["subs"]):
-                return "⚠️ 対象のアカウントはすでに解除されています。"
+                return f"{FAILED} 対象のアカウントはすでに解除されています。"
             await store.update(guild_id, SNS_SECTION, subs=kept)
         return "登録を解除しました。"
 
@@ -1122,7 +1123,7 @@ class SnsSupportMixin:
                 (s for s in subs if s["platform"] == "github" and s["key"] == key), None
             )
             if target is None:
-                return "⚠️ 対象のリポジトリはすでに解除されています。"
+                return f"{FAILED} 対象のリポジトリはすでに解除されています。"
             options = normalize_github_options(target.get("options"))
             options[kind] = not options[kind]
             target["options"] = options
