@@ -105,7 +105,11 @@ class WarningTest(unittest.IsolatedAsyncioTestCase):
     def test_defaults(self):
         self.assertEqual(
             warnings.settings(1),
-            {"enabled": False, "panel_channel_id": None, "log_channel_id": None, "mod_role_id": None},
+            {
+                "enabled": False, "panel_channel_id": None, "log_channel_id": None, "mod_role_id": None,
+                "escalation_enabled": False, "escalation_threshold": 3,
+                "escalation_action": "timeout", "escalation_timeout_minutes": 60,
+            },
         )
 
     def test_can_warn(self):
