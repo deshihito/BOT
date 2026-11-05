@@ -149,7 +149,7 @@ class PlaylistsMixin:
                 if not result.data:
                     label = '共有' if scope == 'server' else '個人'
                     return await r.send(embed=we(f"{label}プレイリスト `{name}` が見つかりません。"), ephemeral=True)
-                return await r.send(embed=we(f"プレイリスト `{name}` を削除しました。"), ephemeral=True)
+                return await r.send(embed=we(f"プレイリスト `{name}` を削除しました。"))
             except Exception:
                 logger.exception("Failed to delete playlist")
                 return await r.send(embed=we("プレイリストの削除に失敗しました。"), ephemeral=True)
@@ -178,7 +178,7 @@ class PlaylistsMixin:
                     {'guild_id': r.guild.id, 'owner_user_id': r.user.id, 'name': name, 'tracks': tracks},
                     on_conflict='guild_id,owner_user_id,name',
                 ).execute()
-                return await r.send(embed=we(f"個人プレイリスト `{name}` に {len(tracks)} 曲を保存しました。"), ephemeral=True)
+                return await r.send(embed=we(f"個人プレイリスト `{name}` に {len(tracks)} 曲を保存しました。"))
             except Exception as exc:
                 logger.exception("Failed to save personal playlist")
                 detail = str(exc).lower()
@@ -197,13 +197,13 @@ class PlaylistsMixin:
                 description = '\n'.join(
                     f"• **{row['name'][len(prefix):]}** — {len(row.get('ids') or [])} 曲" for row in rows[:25]
                 ) or '登録されていません。'
-                return await r.send(embed=we(title='このサーバーの共有プレイリスト', description=description), ephemeral=True)
+                return await r.send(embed=we(title='このサーバーの共有プレイリスト', description=description))
             result = db.table('user_music_playlists').select('name,tracks,updated_at').eq(
                 'guild_id', r.guild.id
             ).eq('owner_user_id', r.user.id).order('updated_at', desc=True).execute()
             rows = result.data or []
             description = '\n'.join(f"• **{row['name']}** — {len(row.get('tracks') or [])} 曲" for row in rows[:25]) or '登録されていません。'
-            return await r.send(embed=we(title='あなたの個人プレイリスト', description=description), ephemeral=True)
+            return await r.send(embed=we(title='あなたの個人プレイリスト', description=description))
         except Exception:
             logger.exception("Failed to list playlists")
             return await r.send(embed=we("一覧取得に失敗しました。"), ephemeral=True)
