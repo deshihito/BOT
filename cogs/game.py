@@ -41,6 +41,17 @@ GAME_COGS = {
     "bingo": "Bingo",
     "majority": "Majority",
     "onenight": "OneNight",
+    "loveletter": "LoveLetter",
+    "codenames": "Codenames",
+    "twochoice": "TwoChoice",
+    "thirtyone": "ThirtyOne",
+    "koikoi": "Koikoi",
+    "gomoku": "Gomoku",
+    "connect4": "Connect4",
+    "sudoku": "Sudoku",
+    "game2048": "Game2048Cog",
+    "nonogram": "Nonogram",
+    "highlow": "HighLow",
 }
 
 RANKED_GAMES = {"ngword", "shiritori"}
@@ -54,9 +65,9 @@ GAME_GENRES = {
     "adventure": ("アドベンチャー", ""),
 }
 GAME_GENRE_BY_GAME = {
-    **{game: "party" for game in ("jinrou", "wordwolf", "uno", "doubt", "ngword", "shiritori", "janken", "babanuki", "quiz", "bingo", "majority", "onenight")},
-    **{game: "solo" for game in ("wordle", "shinkei", "guess", "flash", "minesweeper")},
-    **{game: "board" for game in ("daifugo", "othello", "poker", "shogi", "chess")},
+    **{game: "party" for game in ("jinrou", "wordwolf", "uno", "doubt", "ngword", "shiritori", "janken", "babanuki", "quiz", "bingo", "majority", "onenight", "loveletter", "codenames", "twochoice", "thirtyone")},
+    **{game: "solo" for game in ("wordle", "shinkei", "guess", "flash", "minesweeper", "sudoku", "game2048", "nonogram", "highlow")},
+    **{game: "board" for game in ("daifugo", "othello", "poker", "shogi", "chess", "koikoi", "gomoku", "connect4")},
     "dungeon": "adventure",
 }
 
@@ -148,8 +159,25 @@ class GameGenreSelect(discord.ui.Select):
         return await edit_panel_v2(interaction, as_panel_v2(view))
 
 
+SELECT_PAGE_SIZE = 25  # Discord のセレクト選択肢上限
+
+
+def game_select_pages(genre: str | None = None) -> list:
+    """対象ゲーム id をセレクト上限（25件）ごとのページに分ける。"""
+    ids = [g for g in GAME_ORDER if genre is None or GAME_GENRE_BY_GAME[g] == genre]
+    return [ids[i:i + SELECT_PAGE_SIZE] for i in range(0, len(ids), SELECT_PAGE_SIZE)] or [[]]
+
+
 class GameSelect(discord.ui.Select):
-    def __init__(self, genre: str | None = None, selected: str = None):
+    def __init__(self, genre: str | None = None, selected: str = None, page: int | None = None):
+        pages = game_select_pages(genre)
+        if page is None:
+            page = 0
+            if selected is not None:
+                for i, chunk in enumerate(pages):
+                    if selected in chunk:
+                        page = i
+                        break
         options = [
             discord.SelectOption(
                 label=GAME_GUIDES[g]["name"],
@@ -157,9 +185,13 @@ class GameSelect(discord.ui.Select):
                 description=f"{GAME_GUIDES[g]['players']}・{GAME_GUIDES[g]['duration']}"[:100],
                 default=(g == selected),
             )
-            for g in GAME_ORDER if genre is None or GAME_GENRE_BY_GAME[g] == genre
+            for g in pages[page]
         ]
-        super().__init__(placeholder="ゲームを選択してください", options=options, custom_id="panel:game:select", row=1 if genre else 0)
+        placeholder = "ゲームを選択してください"
+        if len(pages) > 1:
+            placeholder = f"ゲームを選択してください（{page + 1}/{len(pages)}）"
+        custom_id = "panel:game:select" if page == 0 else f"panel:game:select:{page + 1}"
+        super().__init__(placeholder=placeholder, options=options, custom_id=custom_id, row=1 if genre else 0)
 
     async def callback(self, interaction: discord.Interaction):
         game_id = self.values[0]
@@ -219,13 +251,17 @@ class GameHubView(discord.ui.View):
         genre_select = GameGenreSelect(self.genre)
         genre_select.row = offset
         self.add_item(genre_select)
-        # 導線最適化 M3: 既定はジャンルなし全ゲームセレクト1段（18件は上限25に収まる）。
+        # 導線最適化 M3: 既定はジャンルなし全ゲームセレクト。
         # ジャンルセレクトは廃止せず「絞り込み」として残し、選んだ場合だけ一覧を絞る。
-        game_select = GameSelect(self.genre)
-        game_select.row = offset + 1
-        self.add_item(game_select)
+        # ラウンド3で全34ゲームとなり上限25件を超えたため、全件表示は
+        # 25件ごとの複数セレクトに分割する（ジャンル絞り込み時は1段のまま）。
+        pages = game_select_pages(self.genre)
+        for i in range(len(pages)):
+            game_select = GameSelect(self.genre, page=i)
+            game_select.row = offset + 1 + i
+            self.add_item(game_select)
         monthly = discord.ui.Button(label="👑 今月のゲーム王", style=discord.ButtonStyle.primary,
-                                    custom_id="panel:game:monthly", row=offset + 2)
+                                    custom_id="panel:game:monthly", row=offset + 1 + len(pages))
         monthly.callback = self._monthly_callback
         self.add_item(monthly)
         if self.shortcut_mode:
@@ -433,7 +469,7 @@ class GameDetailView(discord.ui.View):
         if game_id == "daifugo":
             self.add_item(DaifugoRuleSelect("eight_cut", self.daifugo_eight_cut))
             self.add_item(DaifugoRuleSelect("spade3", self.daifugo_spade3))
-        if game_id in ("chess", "othello", "shogi"):
+        if game_id in ("chess", "othello", "shogi", "gomoku", "connect4", "koikoi"):
             self.add_item(ChessModeSelect(self.chess_mode) if game_id == "chess" else BoardGameModeSelect(self.chess_mode))
             self.add_item(ChessDifficultySelect(self.chess_difficulty))
         if game_id != "jinrou":
@@ -555,7 +591,7 @@ class GameHub(commands.Cog):
         if game_id == "chess":
             return await cog.start_recruit(interaction, mode=options.get("chess_mode") or "human",
                                            difficulty=options.get("chess_difficulty") or 5)
-        if game_id in ("othello", "shogi"):
+        if game_id in ("othello", "shogi", "gomoku", "connect4", "koikoi"):
             return await cog.start_recruit(interaction, mode=options.get("chess_mode") or "human",
                                            difficulty=options.get("chess_difficulty") or 5)
         if game_id == "daifugo":
