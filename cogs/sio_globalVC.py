@@ -37,7 +37,8 @@ MAX_BUFFER_FRAMES = 50  # 話者ごとの再生バッファの上限 (20ms * 50 
 JITTER_PREFILL_FRAMES = 3  # 話し始めにこの分(60ms)溜めてから流し、到着の揺れを吸収する
 TAIL_FLUSH_SECONDS = 0.08  # 溜まりきらない端数も、新しい音声がこれだけ来なければ流しきる
 TRACK_IDLE_SECONDS = 2.0   # 無音が続いた話者のバッファを破棄するまでの時間
-PLAYBACK_WATCHDOG_SECONDS = 2.0  # 再生が止まっていないか見回る間隔
+PLAYBACK_WATCHDOG_SECONDS = 2.0  # 再生が止まっていないか見回る間隔 (接続中のルームがある間)
+PLAYBACK_WATCHDOG_IDLE_SECONDS = 30.0  # 接続中のルームが無い間の見回り間隔 (見回す対象が無いので伸ばす)
 STALE_VC_GRACE_SECONDS = 15.0    # 切断されたままの接続をルーム一覧から外すまでの猶予 (再接続中は消さない)
 
 
@@ -114,6 +115,18 @@ async def _disconnect_and_cleanup(vc: voice_recv.VoiceRecvClient) -> None:
         await vc.disconnect(force=True)
     except Exception:
         logger.debug("disconnect 失敗 (無視)", exc_info=True)
+
+
+def _watchdog_interval_seconds(rooms: Optional[dict] = None) -> float:
+    """watchdog の見回り間隔を返す。接続中のクライアントがある間だけ短くする。
+
+    見回りの対象 (死んだ接続の除去・止まった再生の再開) は GLOBAL_ROOMS の中身にしか
+    存在しないので、空の間は間隔を伸ばしても挙動は変わらない。
+    """
+    rooms = GLOBAL_ROOMS if rooms is None else rooms
+    if any(rooms.values()):
+        return PLAYBACK_WATCHDOG_SECONDS
+    return PLAYBACK_WATCHDOG_IDLE_SECONDS
 
 
 _WEBHOOK_BANNED_WORDS = (("discord", "i", "і"), ("clyde", "y", "у"))  # Webhook名に使えない語は見た目が近い文字へ置換
@@ -656,6 +669,17 @@ class GlobalVCCog(commands.Cog):
     async def cog_unload(self):
         self._playback_watchdog.cancel()
 
+    def _sync_watchdog_interval(self) -> None:
+        """接続状況に合わせて watchdog の間隔を切り替える。
+
+        change_interval は実行中のスリープにも即時反映されるので、ルームへの接続が
+        来た直後から短い間隔に戻る。
+        """
+        interval = _watchdog_interval_seconds()
+        loop = self._playback_watchdog
+        if loop.seconds != interval:
+            loop.change_interval(seconds=interval)
+
     @tasks.loop(seconds=PLAYBACK_WATCHDOG_SECONDS)
     async def _playback_watchdog(self):
         """再接続や外部からの stop などで再生が止まったサーバーを、定期的に見回って再開させる。"""
@@ -663,6 +687,7 @@ class GlobalVCCog(commands.Cog):
         for clients in list(GLOBAL_ROOMS.values()):
             for vc in list(clients):
                 _ensure_playing(vc)
+        self._sync_watchdog_interval()
 
     @staticmethod
     def _cleanup(guild_id: int):
@@ -721,6 +746,7 @@ class GlobalVCCog(commands.Cog):
 
             # 参加してきたサーバー自身はもちろん、すでに接続中の他サーバーも、止まっていれば再生を始める
             _start_room_playback(room_name)
+            self._sync_watchdog_interval()
             return vc
 
     async def _leave_room(self, vc, *, reason: str = "stop", notice=None) -> None:
