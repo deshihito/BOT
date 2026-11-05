@@ -12,6 +12,7 @@ logger = logging.getLogger(__name__)
 
 __all__ = [
     "embed_text",
+    "embed_media_gallery",
     "build_rows",
     "PanelLayoutView",
     "EmbedLayoutView",
@@ -21,9 +22,16 @@ __all__ = [
     "as_panel_v2",
 ]
 
+TEXT_DISPLAY_LIMIT = 4000
+TRUNCATION_MARKER = "-# ⚠️ 表示が長いため、一部が省略されました"
+
 
 def embed_text(embed: discord.Embed | None) -> str:
-    """Embed相当の内容をComponents V2のTextDisplay用Markdownへ変換する。"""
+    """Embed相当の内容をComponents V2のTextDisplay用Markdownへ変換する。
+
+    TextDisplay の上限（4,000字）を超える場合は黙って切らず、末尾に
+    省略マーカーを付けて警告ログを残す（表示モダン化監査 §4.2-12）。
+    """
     if embed is None:
         return "(表示内容がありません)"
     parts: list[str] = []
@@ -35,7 +43,42 @@ def embed_text(embed: discord.Embed | None) -> str:
         parts.append(f"**{field.name}**\n{field.value}")
     if embed.footer and embed.footer.text:
         parts.append(f"-# {embed.footer.text}")
-    return "\n\n".join(parts)[:4000] or "(表示内容がありません)"
+    if getattr(embed, "author", None) is not None and getattr(embed.author, "name", None) \
+            or getattr(embed, "timestamp", None) is not None:
+        # author / timestamp は TextDisplay 化で保持できない（画像は
+        # embed_media_gallery が別途保持する）。欠落を黙認しないための記録。
+        logger.debug("panel_v2: embed の author/timestamp は V2 変換で保持されません (title=%r)", embed.title)
+    text = "\n\n".join(parts)
+    if len(text) > TEXT_DISPLAY_LIMIT:
+        logger.warning(
+            "panel_v2: embed_text が %d 字を超えたため省略しました (title=%r)",
+            TEXT_DISPLAY_LIMIT, embed.title,
+        )
+        text = text[: TEXT_DISPLAY_LIMIT - len(TRUNCATION_MARKER) - 2] + "\n\n" + TRUNCATION_MARKER
+    return text or "(表示内容がありません)"
+
+
+def embed_media_gallery(embed: discord.Embed | None) -> discord.ui.MediaGallery | None:
+    """Embed の画像/サムネイルを V2 の MediaGallery で保持する。
+
+    ラッパーの Markdown 化では embed の image / thumbnail が失われるため、
+    URL があれば（http(s) でも attachment:// でも）ギャラリーとして
+    Container に残す。attachment:// の実ファイルは送信側が
+    edit_panel_v2(files=...) 等で再供給する必要がある（§4.2-8）。
+    """
+    if embed is None:
+        return None
+    urls: list[str] = []
+    for holder in (getattr(embed, "image", None), getattr(embed, "thumbnail", None)):
+        url = getattr(holder, "url", None)
+        if url and url not in urls:
+            urls.append(url)
+    if not urls:
+        return None
+    gallery = discord.ui.MediaGallery()
+    for url in urls:
+        gallery.add_item(media=url)
+    return gallery
 
 
 def build_rows(items: list[discord.ui.Item]) -> list[list[discord.ui.Item]]:
@@ -134,9 +177,13 @@ class PanelLayoutView(discord.ui.LayoutView):
         source_embed = self.panel.embed()
         if source_embed is None:
             source_embed = discord.Embed()
+        items: list[discord.ui.Item] = [discord.ui.TextDisplay(embed_text(source_embed))]
+        gallery = embed_media_gallery(source_embed)
+        if gallery is not None:
+            items.append(gallery)
+        items.extend(discord.ui.ActionRow(*row) for row in rows)
         container = discord.ui.Container(
-            discord.ui.TextDisplay(embed_text(source_embed)),
-            *[discord.ui.ActionRow(*items) for items in rows],
+            *items,
             accent_colour=getattr(source_embed, "colour", None),
         )
         self.add_item(container)  # このときitem.viewがこのラッパーになる
@@ -214,9 +261,13 @@ class EmbedLayoutView(discord.ui.LayoutView):
 
     def __init__(self, embed: discord.Embed | None):
         super().__init__(timeout=None)
+        items: list[discord.ui.Item] = [discord.ui.TextDisplay(embed_text(embed))]
+        gallery = embed_media_gallery(embed)
+        if gallery is not None:
+            items.append(gallery)
         self.add_item(
             discord.ui.Container(
-                discord.ui.TextDisplay(embed_text(embed)),
+                *items,
                 accent_colour=getattr(embed, "colour", None),
             )
         )
@@ -226,25 +277,33 @@ def as_embed_v2(embed: discord.Embed | None) -> EmbedLayoutView:
     return EmbedLayoutView(embed)
 
 
-async def edit_panel_v2(interaction: discord.Interaction, view: discord.ui.LayoutView):
+async def edit_panel_v2(interaction: discord.Interaction, view: discord.ui.LayoutView,
+                        files: list[discord.File] | None = None):
     """Edit a message with a V2 view, clearing legacy message payloads.
 
     V1メッセージ(content/embed付き)をV2へ置き換える編集では、
     content / embeds / attachments を明示的にクリアしないとDiscordに拒否され、
     ユーザーには「応答しませんでした」と見える。
+
+    files を渡すと添付をクリアせず再供給する。embed の画像が
+    attachment:// 参照の場合、V2 側の MediaGallery（embed_media_gallery）
+    が参照する実ファイルはこの形で送り直す必要がある（§4.2-8）。
     """
+    attachments = list(files) if files else []
     if interaction.response.is_done():
         return await interaction.edit_original_response(
-            content=None, embed=None, attachments=[], view=view,
+            content=None, embed=None, attachments=attachments, view=view,
         )
     return await interaction.response.edit_message(
-        content=None, embed=None, attachments=[], view=view,
+        content=None, embed=None, attachments=attachments, view=view,
     )
 
 
-async def edit_message_v2(message: discord.Message, view: discord.ui.LayoutView):
+async def edit_message_v2(message: discord.Message, view: discord.ui.LayoutView,
+                          files: list[discord.File] | None = None):
     """Replace a normal message with a Components V2 view safely."""
-    return await message.edit(content=None, embed=None, attachments=[], view=view)
+    attachments = list(files) if files else []
+    return await message.edit(content=None, embed=None, attachments=attachments, view=view)
 
 
 def as_panel_v2(panel: discord.ui.View) -> PanelLayoutView:
