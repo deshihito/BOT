@@ -35,6 +35,7 @@ from discord.ext import voice_recv
 from core.legacy import Responder
 from core.voice_session import VoiceBusy, get_manager
 from core.voice_recv_patch import patch_voice_recv_client
+from core.messages import VOICE_NOT_JOINED, voice_connection_failed
 
 logger = logging.getLogger(__name__)
 
@@ -537,7 +538,7 @@ class RecordingCog(commands.Cog):
     async def _echo_start(self, r: Responder, delay: float):
         voice = getattr(r.user, "voice", None)
         if not voice or not voice.channel:
-            return await r.send(embed=we("⚠️ ボイスチャンネルに参加してから実行してください。"), ephemeral=True)
+            return await r.send(embed=we(VOICE_NOT_JOINED), ephemeral=True)
 
         guild_id = r.guild.id
         if guild_id in self.echo_sessions:
@@ -559,7 +560,7 @@ class RecordingCog(commands.Cog):
             return await r.send(embed=we(str(busy)), ephemeral=True)
         except Exception as e:
             logger.error(f"VC Connection Error: {e}", exc_info=True)
-            return await r.send(embed=we(f"<:failed:1490986584676368535> ボイス接続に失敗しました: `{e}`"))
+            return await r.send(embed=we(voice_connection_failed(e)))
 
         # 統合 RecordingSink を is_echo=True でインスタンス化
         sink = RecordingSink(bot=self.bot, vc=vc, is_echo=True, echo_delay=delay)
@@ -597,7 +598,7 @@ class RecordingCog(commands.Cog):
     async def start_command(self, r: Responder):
         voice = getattr(r.user, "voice", None)
         if not voice or not voice.channel:
-            return await r.send(embed=we("⚠️ ボイスチャンネルに参加してから実行してください。"), ephemeral=True)
+            return await r.send(embed=we(VOICE_NOT_JOINED), ephemeral=True)
 
         guild_id = r.guild.id
         if guild_id in self.sessions:
@@ -624,7 +625,7 @@ class RecordingCog(commands.Cog):
             return await r.send(embed=we(str(busy)))
         except Exception as e:
             logger.error(f"VC Connection Error: {e}", exc_info=True)
-            return await r.send(embed=we(f"<:failed:1490986584676368535> ボイス接続に失敗しました: `{e}`"))
+            return await r.send(embed=we(voice_connection_failed(e)))
 
         try:
             if vc.is_listening():

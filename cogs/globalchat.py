@@ -5,6 +5,7 @@ import json
 import os
 
 from core import globalchat_moderation as mod
+from core.emojis import FAILED
 
 class GlobalChatCog(commands.Cog):
     def __init__(self, bot):
@@ -41,7 +42,7 @@ class GlobalChatCog(commands.Cog):
         except Exception:
             pass
         try:
-            await message.add_reaction("<:failed:1490986584676368535>")
+            await message.add_reaction(FAILED)
             await message.reply(text, delete_after=10, mention_author=False)
         except Exception:
             pass
@@ -61,7 +62,7 @@ class GlobalChatCog(commands.Cog):
         if "@" in message.content:
             try:
                 # 警告としてメッセージにバツ印のリアクションを付ける
-                await message.add_reaction("<:failed:1490986584676368535>")
+                await message.add_reaction(FAILED)
             except discord.Forbidden:
                 pass
             return

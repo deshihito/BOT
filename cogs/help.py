@@ -14,6 +14,8 @@ from discord.ext import commands
 
 from core.command_catalog import (build_catalog, command_key, find_command, permission_label, registered_commands,
                                   visible_commands)
+from core.command_meta import COMMAND_META
+from core.emojis import BACK
 from core.panel_v2 import as_panel_v2, edit_panel_v2
 
 # Discord の上限
@@ -310,7 +312,7 @@ class BackView(discord.ui.View):
     def embed(self) -> discord.Embed:
         return self.content or discord.Embed(title="ヘルプ", description="カテゴリの一覧へ戻れます。", color=COLOR)
 
-    @discord.ui.button(label="一覧に戻る", emoji="<:Back:1561700549236097034>", style=discord.ButtonStyle.primary)
+    @discord.ui.button(label="一覧に戻る", emoji=BACK, style=discord.ButtonStyle.primary)
     async def back(self, interaction: discord.Interaction, button: discord.ui.Button):
         view = HelpView(self.catalog, self.category_id, self.page)
         self.stop()
@@ -349,7 +351,7 @@ class CatalogHelpCommand(commands.HelpCommand):
 
     # HelpCommand は呼ばれるたびに自分を deepcopy するので、Cog や Bot は持たずに実行時に探す。
     def __init__(self, **options):
-        options.setdefault("command_attrs", {"help": "コマンドの一覧と使い方を表示します（詳しくは /help）"})
+        options.setdefault("command_attrs", {"help": COMMAND_META["!help"]["summary"]})
         super().__init__(**options)
 
     @property

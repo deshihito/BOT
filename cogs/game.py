@@ -10,6 +10,7 @@ from discord import app_commands
 from discord.ext import commands
 
 from core import action_usage, party_ranking
+from core.emojis import BACK
 from core.game_guides import GAME_GUIDES, GAME_ORDER, guide_for_discord
 from core.panel_v2 import as_panel_v2, edit_panel_v2
 
@@ -384,7 +385,7 @@ class GameDetailView(discord.ui.View):
                 embed=discord.Embed(description=f"{name} は現在利用できません。", color=HUB_COLOR), ephemeral=True)
         await cog.force_end(interaction)
 
-    @discord.ui.button(label="戻る", emoji="<:Back:1561700549236097034>", style=discord.ButtonStyle.secondary, row=3)
+    @discord.ui.button(label="戻る", emoji=BACK, style=discord.ButtonStyle.secondary, row=3)
     async def back(self, interaction: discord.Interaction, button: discord.ui.Button):
         view = GameHubView(self.cog)
         if hasattr(getattr(button, "view", None), "_sync"):

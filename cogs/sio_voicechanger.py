@@ -12,6 +12,7 @@ from discord.ext import commands
 from discord.ext import voice_recv
 
 from core.legacy import Responder
+from core.messages import VOICE_NOT_JOINED, voice_connection_failed
 from core.voice_session import VoiceBusy, get_manager
 
 logger = logging.getLogger(__name__)
@@ -456,7 +457,7 @@ class VoiceChangerCog(commands.Cog):
     async def _start(self, r: Responder, pitch, buffer_ms, max_ms):
         voice = getattr(r.user, "voice", None)
         if not voice or not voice.channel:
-            return await r.send(embed=we("⚠️ ボイスチャンネルに参加してから実行してください。"), ephemeral=True)
+            return await r.send(embed=we(VOICE_NOT_JOINED), ephemeral=True)
         pitch = 0.0 if pitch is None else pitch
         buffer = None
         if buffer_ms is not None or max_ms is not None:
@@ -478,7 +479,7 @@ class VoiceChangerCog(commands.Cog):
         except VoiceBusy as busy:
             return await r.send(embed=we(str(busy)), ephemeral=True)
         except Exception as e:
-            return await r.send(embed=we(f"<:failed:1490986584676368535> ボイス接続に失敗しました: `{e}`"))
+            return await r.send(embed=we(voice_connection_failed(e)))
 
         sink = VoiceChangerSink(bot=self.bot, vc=vc, semitones=pitch)
         if buffer is not None:

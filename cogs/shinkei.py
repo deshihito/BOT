@@ -13,6 +13,8 @@ import random
 
 import discord
 from core import game_panels
+from core.emojis import CROCK
+from core.messages import recruit_join_prompt
 from discord.ext import commands
 
 from core import autoplay, party_ranking
@@ -178,7 +180,7 @@ class Shinkei(commands.Cog):
             await game_panels.replace(channel, "party", embed=discord.Embed(
                 title="神経衰弱 参加者募集",
                 description=(f"{interaction.user.mention} さんが募集中です。\n"
-                             f"{RECRUIT_SECONDS}秒以内に「参加」を押してください（{MIN_PLAYERS}〜{MAX_PLAYERS}人。"
+                             f"{recruit_join_prompt(RECRUIT_SECONDS)}（{MIN_PLAYERS}〜{MAX_PLAYERS}人。"
                              "ひとりでも遊べます）。"),
                 color=COLOR), view=JoinView(self, g))
             await asyncio.sleep(RECRUIT_SECONDS)
@@ -256,7 +258,7 @@ class Shinkei(commands.Cog):
                 await self.refresh(g)
                 return "timeout"
             await channel.send(embed=discord.Embed(
-                description=result.notice.lstrip("<:crock:1561710960387956757>").strip(), color=COLOR))   # 絵文字を外して自分で送る
+                description=result.notice.lstrip(CROCK).strip(), color=COLOR))   # 絵文字を外して自分で送る
             outcome = g.flip(uid, int(result.action) - 1)
             await self.refresh(g)
             if outcome == "miss":

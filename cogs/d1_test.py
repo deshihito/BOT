@@ -6,11 +6,12 @@ from discord import app_commands
 from discord.ext import commands
 
 from cogs.terminal import ALLOWED_USER_IDS
+from core.autoplay import DEFAULT_D1_ENDPOINT
 
 class D1TestCog(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
-        self.endpoint = "http://127.0.0.1:8082/v1/systemone"
+        self.endpoint = DEFAULT_D1_ENDPOINT
         self.service_name = "llama-d1-omni"
 
     async def _test_response(self) -> tuple[bool, float]:

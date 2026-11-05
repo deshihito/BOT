@@ -17,6 +17,9 @@ from typing import Any
 
 import requests
 
+#: BOT_API_BASE_URL / BOT_API_KEY が未設定で API を使えないときの文（利用側 cog と共用）。
+API_NOT_CONFIGURED_MESSAGE = "BOT_API_BASE_URL または BOT_API_KEY が設定されていません"
+
 
 @dataclass
 class APIResponse:

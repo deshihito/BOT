@@ -19,6 +19,7 @@ from discord.ext import voice_recv
 from core.legacy import Responder
 from core.voice_session import VoiceBusy, get_manager
 from core.voice_recv_patch import patch_voice_recv_client
+from core.messages import VOICE_NOT_JOINED, voice_connection_failed
 from core.voice_media import add_audio_source, add_receive_sink, remove_audio_source, remove_receive_sink
 
 try:
@@ -759,7 +760,7 @@ class GlobalVCCog(commands.Cog):
     async def _join(self, r: Responder, room_name: str | None, password: str | None):
         voice = getattr(r.user, "voice", None)
         if not voice or not voice.channel:
-            return await r.send("⚠️ ボイスチャンネルに参加してから実行してください。", ephemeral=True)
+            return await r.send(VOICE_NOT_JOINED, ephemeral=True)
         if not room_name:
             return await r.send("⚠️ 参加するルーム名を `room` に入れてください。", ephemeral=True)
 
@@ -801,7 +802,7 @@ class GlobalVCCog(commands.Cog):
             return await r.send(str(busy))
         except Exception as e:
             logger.warning("グローバルVC: ルーム %s への参加に失敗しました", room_name, exc_info=True)
-            return await r.send(f"<:failed:1490986584676368535> ボイス接続に失敗しました: `{e}`")
+            return await r.send(voice_connection_failed(e))
 
         await r.send(
             f"🌐 ルーム **{room_name}** に参加しました！\n"

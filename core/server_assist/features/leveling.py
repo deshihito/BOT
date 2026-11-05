@@ -7,6 +7,7 @@ from typing import Any
 
 import discord
 
+from core.messages import ROLE_HIERARCHY_ALREADY_SET, ROLE_HIERARCHY_CANNOT_SET
 from core.server_assist import Feature, can_assign_roles, get_settings, update_settings
 from core.server_assist.ui import AssistFeatureView, notice_line
 
@@ -127,7 +128,7 @@ class LevelingToggleButton(discord.ui.Button):
             interaction, view.guild, list(view.settings["role_rewards"].values()),
         ):
             return await interaction.response.send_message(
-                "ロールの管理権限、または自分より上のロールが設定されています。",
+                ROLE_HIERARCHY_ALREADY_SET,
                 ephemeral=True,
             )
         await update_settings(view.guild_id, KEY, enabled=value)
@@ -178,7 +179,7 @@ class LevelRewardsModal(discord.ui.Modal, title="レベル報酬"):
             interaction, interaction.guild, list(rewards.values()),
         ):
             return await interaction.response.send_message(
-                "ロールの管理権限、または自分より上のロールを設定しようとしています。",
+                ROLE_HIERARCHY_CANNOT_SET,
                 ephemeral=True,
             )
         await update_settings(self.parent_view.guild_id, KEY, role_rewards=rewards)

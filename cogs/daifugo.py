@@ -17,6 +17,7 @@ import random
 
 import discord
 from core import game_panels
+from core.messages import recruit_join_prompt
 from discord.ext import commands
 
 from core import party_ranking
@@ -294,7 +295,7 @@ class Daifugo(commands.Cog):
             await game_panels.replace(channel, "party", embed=discord.Embed(
                 title="大富豪 参加者募集",
                 description=(f"{interaction.user.mention} さんが募集中です。\n"
-                             f"{RECRUIT_SECONDS}秒以内に「参加」を押してください（{MIN_PLAYERS}〜{MAX_PLAYERS}人）。\n"
+                             f"{recruit_join_prompt(RECRUIT_SECONDS)}（{MIN_PLAYERS}〜{MAX_PLAYERS}人）。\n"
                              f"{MIN_PLAYERS}人に足りないときは Bot が入ります。"),
                 color=COLOR), view=JoinView(self, g))
             await asyncio.sleep(RECRUIT_SECONDS)

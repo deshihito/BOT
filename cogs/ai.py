@@ -154,7 +154,7 @@ class AICog(commands.Cog):
             )
             if has_images and not images_supported:
                 return await _reply_without_localization(ctx,
-                    "選択中のモデルは画像入力に対応していません。画像対応モデルを選んでください。",
+                    ai_input.IMAGE_UNSUPPORTED_MESSAGE,
                     mention_author=False,
                 )
 

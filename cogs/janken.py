@@ -15,6 +15,7 @@ import random
 import discord
 from cogs.wallet import INSUFFICIENT
 from core import game_panels
+from core.messages import recruit_join_prompt
 from discord.ext import commands
 
 from core import party_ranking
@@ -146,7 +147,7 @@ class Janken(commands.Cog):
             await game_panels.replace(channel, "party", embed=discord.Embed(
                 title="じゃんけん 参加者募集",
                 description=(f"{interaction.user.mention} さんが募集中です。\n"
-                             f"{RECRUIT_SECONDS}秒以内に「参加」を押してください（最大{MAX_PLAYERS}人）。\n"
+                             f"{recruit_join_prompt(RECRUIT_SECONDS)}（最大{MAX_PLAYERS}人）。\n"
                              + (f"勝敗コイン: 1人 {g.wager} AGO（勝者へ配分）\n" if g.wager else "")
                              + "だれも来なければ Bot が相手をします。"),
                 color=COLOR), view=JoinView(self, g))
