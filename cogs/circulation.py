@@ -87,6 +87,10 @@ class MiningView(discord.ui.View):
         self.cog = cog
         self.user_id = user_id
 
+    async def interaction_check(self, interaction) -> bool:
+        # 公開パネル化（ephemeral第2波）: 操作は本人のみ。
+        return interaction.user.id == self.user_id
+
     @discord.ui.button(label="更新", style=discord.ButtonStyle.secondary)
     async def refresh(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.edit_message(
@@ -94,9 +98,9 @@ class MiningView(discord.ui.View):
 
     @discord.ui.button(label="採掘する", style=discord.ButtonStyle.success)
     async def dig(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.defer(ephemeral=True)
+        await interaction.response.defer()
         message = await self.cog.execute_mining(interaction.user.id)
-        await interaction.followup.send(message, ephemeral=True)
+        await interaction.followup.send(message)
 
 
 # ---------------------------------------------------------------------------
@@ -141,6 +145,10 @@ class BuyLotteryView(discord.ui.View):
         super().__init__(timeout=180)
         self.cog = cog
         self.user_id = user_id
+
+    async def interaction_check(self, interaction) -> bool:
+        # 公開パネル化（ephemeral第2波）: 操作は本人のみ。
+        return interaction.user.id == self.user_id
         allowance = cog.lottery_store.remaining_allowance(str(user_id))
         counts = sorted({c for c in (1, 2, 3, 5, 10) if c <= allowance} | {allowance})
         options = [
@@ -155,9 +163,9 @@ class BuyLotteryView(discord.ui.View):
 
     async def _on_select(self, interaction: discord.Interaction):
         count = int(interaction.data["values"][0])
-        await interaction.response.defer(ephemeral=True)
+        await interaction.response.defer()
         message = await self.cog.execute_lottery_buy(interaction.user.id, count)
-        await interaction.followup.send(message, ephemeral=True)
+        await interaction.followup.send(message)
 
 
 class LotteryView(discord.ui.View):
@@ -165,6 +173,10 @@ class LotteryView(discord.ui.View):
         super().__init__(timeout=180)
         self.cog = cog
         self.user_id = user_id
+
+    async def interaction_check(self, interaction) -> bool:
+        # 公開パネル化（ephemeral第2波）: 操作は本人のみ。
+        return interaction.user.id == self.user_id
 
     @discord.ui.button(label="更新", style=discord.ButtonStyle.secondary)
     async def refresh(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -182,7 +194,7 @@ class LotteryView(discord.ui.View):
                 ephemeral=True)
         await interaction.response.send_message(
             "購入する枚数を選んでください。",
-            view=BuyLotteryView(self.cog, interaction.user.id), ephemeral=True)
+            view=BuyLotteryView(self.cog, interaction.user.id))
 
 
 # ---------------------------------------------------------------------------
@@ -219,13 +231,13 @@ class StealTargetSelect(discord.ui.UserSelect):
         target = self.values[0]
         guild = interaction.guild
         member = guild.get_member(target.id) if guild is not None else None
-        await interaction.response.defer(ephemeral=True)
+        await interaction.response.defer()
         message = await self.cog.execute_steal(
             interaction.user.id, target.id,
             in_guild=member is not None,
             target_is_bot=bool(getattr(target, "bot", False)),
         )
-        await interaction.followup.send(message, ephemeral=True)
+        await interaction.followup.send(message)
 
 
 class StealView(discord.ui.View):
@@ -233,6 +245,10 @@ class StealView(discord.ui.View):
         super().__init__(timeout=180)
         self.cog = cog
         self.user_id = user_id
+
+    async def interaction_check(self, interaction) -> bool:
+        # 公開パネル化（ephemeral第2波）: 操作は本人のみ。
+        return interaction.user.id == self.user_id
         self.add_item(StealTargetSelect(cog))
 
 
@@ -328,13 +344,13 @@ class CirculationCog(commands.Cog):
     async def show_mining(self, interaction: discord.Interaction):
         view = MiningView(self, interaction.user.id)
         await interaction.response.send_message(
-            embed=_mining_embed(self, interaction.user.id), view=view, ephemeral=True)
+            embed=_mining_embed(self, interaction.user.id), view=view)
 
     async def show_lottery(self, interaction: discord.Interaction):
         await self.settle_lottery()
         view = LotteryView(self, interaction.user.id)
         await interaction.response.send_message(
-            embed=_lottery_embed(self, interaction.user.id), view=view, ephemeral=True)
+            embed=_lottery_embed(self, interaction.user.id), view=view)
 
     async def open_lottery_buy(self, interaction: discord.Interaction):
         await self.settle_lottery()
@@ -345,7 +361,7 @@ class CirculationCog(commands.Cog):
                 ephemeral=True)
         await interaction.response.send_message(
             "購入する枚数を選んでください。",
-            view=BuyLotteryView(self, interaction.user.id), ephemeral=True)
+            view=BuyLotteryView(self, interaction.user.id))
 
     async def open_steal(self, interaction: discord.Interaction):
         if interaction.guild is None:
@@ -354,7 +370,7 @@ class CirculationCog(commands.Cog):
                 ephemeral=True)
         view = StealView(self, interaction.user.id)
         await interaction.response.send_message(
-            embed=_steal_embed(self, interaction.user.id), view=view, ephemeral=True)
+            embed=_steal_embed(self, interaction.user.id), view=view)
 
     # ------------------------------------------------------------------ 採掘の実行
     async def execute_mining(self, user_id: int, now: datetime | None = None) -> str:

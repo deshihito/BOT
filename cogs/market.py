@@ -139,14 +139,14 @@ class TradeModal(discord.ui.Modal):
             value = float(raw)
         except ValueError:
             return await interaction.response.send_message(MARKET_INVALID_AMOUNT, ephemeral=True)
-        await interaction.response.defer(ephemeral=True)
+        await interaction.response.defer()
         if self.side == "buy":
             if value != int(value):
                 return await interaction.followup.send(MARKET_INVALID_AMOUNT, ephemeral=True)
             message = await self.cog.execute_buy(interaction.user.id, int(value))
         else:
             message = await self.cog.execute_sell(interaction.user.id, value)
-        await interaction.followup.send(message, ephemeral=True)
+        await interaction.followup.send(message)
 
 
 class MarketView(discord.ui.View):
@@ -154,6 +154,10 @@ class MarketView(discord.ui.View):
         super().__init__(timeout=180)
         self.cog = cog
         self.user_id = user_id
+
+    async def interaction_check(self, interaction) -> bool:
+        # 公開パネル化（ephemeral第2波）: 操作は本人のみ。
+        return interaction.user.id == self.user_id
 
     async def _refresh(self, interaction: discord.Interaction):
         await interaction.response.edit_message(
@@ -224,7 +228,7 @@ class MarketCog(commands.Cog):
     async def show_market(self, interaction: discord.Interaction):
         view = MarketView(self, interaction.user.id)
         await interaction.response.send_message(
-            embed=_market_embed(self.store, interaction.user.id), view=view, ephemeral=True)
+            embed=_market_embed(self.store, interaction.user.id), view=view)
 
     async def open_buy(self, interaction: discord.Interaction):
         await interaction.response.send_modal(TradeModal(self, "buy"))
