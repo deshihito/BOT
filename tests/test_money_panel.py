@@ -264,7 +264,7 @@ class DispatchTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             env, view = self._view(tmp, "play")
             interaction = _FakeInteraction()
-            for label in ("スロット", "ダブルアップ", "ブラックジャック", "ダイス",
+            for label in ("スロット", "ダブルアップ", "ブラックジャック", "ダイスベット",
                           "宝くじを買う", "盗む"):
                 asyncio.run(_button(view, label).callback(interaction))
             self.assertEqual(

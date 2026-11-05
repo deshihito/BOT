@@ -84,7 +84,7 @@ GENERAL_ACTIONS = {
         ("スロット", "slot"),
         ("ダブルアップ", "double"),
         ("ブラックジャック", "blackjack"),
-        ("ダイス", "dice"),
+        ("ダイスベット", "dice"),
         ("コイン保有ランキング", "coin_leaderboard"),
     ],
     "rta": [

@@ -493,12 +493,12 @@ class BlackjackView(_SessionPanel, discord.ui.View):
 
 
 # ---------------------------------------------------------------------------
-# ダイス（数字当て）
+# ダイスベット
 # ---------------------------------------------------------------------------
 
 def _dice_embed(cog: "GamblingCog", user_id: int, *, result: str | None = None,
                 balance: int | None = None) -> discord.Embed:
-    embed = discord.Embed(title="ダイス（数字当て）", color=GAMBLING_COLOR)
+    embed = discord.Embed(title="ダイスベット", color=GAMBLING_COLOR)
     if result:
         embed.add_field(name="結果", value=_fit(result), inline=False)
     if balance is not None:
@@ -506,7 +506,7 @@ def _dice_embed(cog: "GamblingCog", user_id: int, *, result: str | None = None,
     return embed
 
 
-class DiceModal(discord.ui.Modal, title="ダイス（数字当て）"):
+class DiceModal(discord.ui.Modal, title="ダイスベット"):
     max_value = discord.ui.TextInput(
         label="範囲（最大値）", placeholder="例: 100（半角数字）", max_length=6)
     number = discord.ui.TextInput(
@@ -567,7 +567,7 @@ class DiceView(_SessionPanel, discord.ui.View):
     @discord.ui.button(label="ルール", style=discord.ButtonStyle.secondary)
     async def rules(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.send_message(
-            embed=_rules_embed("dice", "ダイス（数字当て）"), ephemeral=True)
+            embed=_rules_embed("dice", "ダイスベット"), ephemeral=True)
 
 
 # ---------------------------------------------------------------------------
