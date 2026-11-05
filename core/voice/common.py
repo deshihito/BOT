@@ -95,7 +95,7 @@ VOICE_GENRES = {
     "studio": ("録音・音声制作", ""),
     "effects": ("音声加工", "ボイスチェンジャー"),
     "trigger": ("音声トリガー", ""),
-    "community": ("通話ネットワーク", ""),
+    "community": ("ランダム通話", ""),
     "gvc_rooms": ("グローバルVCルーム", ""),
 }
 VOICE_ACTIONS_BY_GENRE = {
@@ -109,9 +109,9 @@ VOICE_ACTIONS_BY_GENRE = {
                 ("カラオケ: 開始", "karaoke_start"), ("カラオケ: 停止", "karaoke_stop"),
                 ("カラオケ: 採点", "karaoke_score")],
     "effects": [("開始", "changer_start"), ("停止", "changer_stop"), ("状態/設定", "changer_status")],
-    "community": [("ランダム通話: 開始/参加", "match_start"), ("ランダム通話: 終了/退出", "match_stop"),
-                   ("グローバルVC: 開始/参加", "global_start"), ("グローバルVC: 終了/退出", "global_stop")],
-    "gvc_rooms": [("ルーム一覧（参加ボタン付き）", "gvc_room_list"), ("ルーム作成", "gvc_room_create"),
+    "community": [("ランダム通話: 開始/参加", "match_start"), ("ランダム通話: 終了/退出", "match_stop")],
+    "gvc_rooms": [("グローバルVC: 開始/参加", "global_start"), ("グローバルVC: 終了/退出", "global_stop"),
+                  ("ルーム一覧（参加ボタン付き）", "gvc_room_list"), ("ルーム作成", "gvc_room_create"),
                   ("ルーム情報", "gvc_room_info"), ("ルーム削除", "gvc_room_delete"),
                   ("グロチャ: 接続（このチャンネル）", "gvc_chat_connect"),
                   ("グロチャ: 接続解除（このチャンネル）", "gvc_chat_disconnect")],
