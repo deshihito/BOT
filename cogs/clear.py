@@ -35,7 +35,7 @@ class ClearCog(commands.Cog):
             )
             return
 
-        await interaction.response.defer(ephemeral=True)
+        await interaction.response.defer()
 
         def check(message: discord.Message) -> bool:
             if member is None:
@@ -54,7 +54,7 @@ class ClearCog(commands.Cog):
             return
 
         target = f"{member.display_name} さんの" if member else ""
-        await interaction.followup.send(f"{target}メッセージを {len(deleted)} 件削除しました。", ephemeral=True)
+        await interaction.followup.send(f"{target}メッセージを {len(deleted)} 件削除しました。")
 
 
 async def setup(bot: commands.Bot):

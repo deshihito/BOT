@@ -150,12 +150,12 @@ class QuickCommandFlowTest(unittest.IsolatedAsyncioTestCase):
         cog = self.make_cog(VoiceHub=hub)
         interaction = fake_interaction()
         await self.run_quick(cog, interaction, "vc:karaoke_start")
-        # dispatch されず、補完ビュー付きの ephemeral 応答になる。
+        # dispatch されず、補完ビュー付きの応答になる（第2波方針で公開）。
         hub.dispatch_voice_action.assert_not_awaited()
         interaction.response.send_message.assert_awaited_once()
         kwargs = interaction.response.send_message.await_args.kwargs
         self.assertIsInstance(kwargs.get("view"), quick.QuickParamPromptView)
-        self.assertTrue(kwargs.get("ephemeral"))
+        self.assertFalse(kwargs.get("ephemeral"))
 
     async def test_missing_required_params_helper(self):
         karaoke = registry().by_id("vc:karaoke_start")

@@ -232,7 +232,7 @@ class MemeMixin:
         self._meme_waits[key] = event
         await interaction.response.send_message(
             "このチャンネルに、ベースにしたい画像を投稿してください（120秒以内）。",
-            view=MemeCancelView(self, key, interaction.user.id), ephemeral=True,
+            view=MemeCancelView(self, key, interaction.user.id),
         )
         self._spawn(self._meme_wait_for_image(interaction, key, event, top, bottom))
 
