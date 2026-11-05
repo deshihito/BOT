@@ -13,7 +13,7 @@ import logging
 
 log = logging.getLogger(__name__)
 
-KNOWN_GAMES = ("ngword", "shiritori", "wordwolf", "jinrou", "uno", "doubt", "janken", "wordle", "shinkei", "babanuki", "daifugo", "othello", "shogi", "chess")
+KNOWN_GAMES = ("ngword", "shiritori", "wordwolf", "jinrou", "uno", "doubt", "janken", "wordle", "shinkei", "babanuki", "daifugo", "othello", "shogi", "chess", "poker")
 _MISSING = object()
 
 
