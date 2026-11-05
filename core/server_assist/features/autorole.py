@@ -6,6 +6,7 @@ from typing import Any
 
 import discord
 
+from core.messages import ROLE_HIERARCHY_ALREADY_SET
 from core.server_assist import Feature, can_assign_roles, get_settings, update_settings
 from core.server_assist.ui import AssistFeatureView, notice_line
 
@@ -144,7 +145,7 @@ class AutoRoleToggleButton(discord.ui.Button):
             interaction, view.guild, view.settings["role_ids"],
         ):
             return await interaction.response.send_message(
-                "ロールの管理権限、または自分より上のロールが設定されています。",
+                ROLE_HIERARCHY_ALREADY_SET,
                 ephemeral=True,
             )
         await update_settings(view.guild_id, KEY, enabled=value)

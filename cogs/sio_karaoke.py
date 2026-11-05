@@ -21,6 +21,8 @@ from core.legacy import Responder
 from core.vosk_model import ensure_model
 from core.voice_session import VoiceBusy, get_manager
 from core.voice_recv_patch import patch_voice_recv_client
+from core.messages import VOICE_NOT_JOINED
+from core.emojis import MUSIC
 
 try:
     from vosk import Model, KaldiRecognizer
@@ -236,7 +238,7 @@ class KaraokeCog(commands.Cog):
             return await r.send(embed=we(problem), ephemeral=True)
         voice = getattr(r.user, "voice", None)
         if not voice or not voice.channel:
-            return await r.send(embed=we("⚠️ ボイスチャンネルに参加してから実行してください。"), ephemeral=True)
+            return await r.send(embed=we(VOICE_NOT_JOINED), ephemeral=True)
 
         guild_id = r.guild.id
         if guild_id in self.sessions:
@@ -262,7 +264,7 @@ class KaraokeCog(commands.Cog):
                 wh_obj = discord.Webhook.from_url(webhook.url, session=session)
                 try:
                     await wh_obj.send(
-                        content=f"<:music:1561710964238450809> {text}",
+                        content=f"{MUSIC} {text}",
                         username=f"🎤 {display_name}",
                         avatar_url=avatar_url,
                         _agobot_skip_localization=True,

@@ -21,6 +21,10 @@ TEXT_EXTENSIONS = {
 DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 
 
+#: 選択中のモデルが画像入力に未対応のときの文（cogs/ai.py の事前チェックと共用）。
+IMAGE_UNSUPPORTED_MESSAGE = "選択中のモデルは画像入力に対応していません。画像対応モデルを選んでください。"
+
+
 class AttachmentInputError(ValueError):
     """利用できない、または上限を超えた添付ファイル。"""
 
@@ -42,7 +46,7 @@ async def build_user_content(prompt: str, attachments: list[Any], *, images_supp
         raise AttachmentInputError(f"添付は一度に{MAX_ATTACHMENTS}個までです。")
     image_attachments = [item for item in attachments if attachment_mime(item).startswith("image/")]
     if image_attachments and not images_supported:
-        raise AttachmentInputError("選択中のモデルは画像入力に対応していません。画像対応モデルを選んでください。")
+        raise AttachmentInputError(IMAGE_UNSUPPORTED_MESSAGE)
 
     sections = [prompt.strip()] if prompt.strip() else []
     image_parts: list[dict[str, Any]] = []

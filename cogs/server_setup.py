@@ -17,6 +17,7 @@ import discord
 from discord.ext import commands
 
 from core.command_catalog import permission_label
+from core.emojis import FAILED, SUCCESS
 from core.guild_settings import NATION_SECTION, NOTIFY_ALL, NOTIFY_LEVELS, NOTIFY_MAJOR, get_store, nation_settings
 from core import localization
 
@@ -164,9 +165,9 @@ def format_permission_report(results: list[dict]) -> str:
             if r["missing"]:
                 parts.append("足りない権限: " + "、".join(r["missing"]))
             parts.extend(r["notes"])
-            lines.append(f"<:failed:1490986584676368535> **{r['label']}**: " + " / ".join(parts))
+            lines.append(f"{FAILED} **{r['label']}**: " + " / ".join(parts))
         else:
-            lines.append(f"<:success:1490985168100659322> **{r['label']}**: OK")
+            lines.append(f"{SUCCESS} **{r['label']}**: OK")
     return "\n".join(lines)
 
 

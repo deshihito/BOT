@@ -19,7 +19,7 @@ from discord.ext import commands
 
 from core.emojis import COIN
 from core.guild_settings import nation_settings
-from core.api_client import get_client
+from core.api_client import API_NOT_CONFIGURED_MESSAGE, get_client
 from core.api_retry import run_with_retry
 
 log = logging.getLogger(__name__)
@@ -72,7 +72,7 @@ class NationCog(commands.Cog):
 
     async def _run(self, build):
         if self.db_api is None:
-            raise RuntimeError("BOT_API_BASE_URL または BOT_API_KEY が設定されていません")
+            raise RuntimeError(API_NOT_CONFIGURED_MESSAGE)
         return (await asyncio.to_thread(
             run_with_retry, lambda: build().execute()
         )).data or []
@@ -92,7 +92,7 @@ class NationCog(commands.Cog):
     async def _found_rpc(self, guild_id: str, user_id: str):
         """建国を DB 関数 nation_found（docs/sql/nation_found.sql）で 1 トランザクションで行う。"""
         if self.db_api is None:
-            raise RuntimeError("BOT_API_BASE_URL または BOT_API_KEY が設定されていません")
+            raise RuntimeError(API_NOT_CONFIGURED_MESSAGE)
         res = await asyncio.to_thread(
             run_with_retry,
             lambda: self.db_api.rpc(

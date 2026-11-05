@@ -1,11 +1,12 @@
 import aiohttp
 import discord
 from discord.ext import commands
+from core.autoplay import DEFAULT_D1_ENDPOINT
 
 class JudgeCog(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
-        self.endpoint = "http://127.0.0.1:8082/v1/systemone"
+        self.endpoint = DEFAULT_D1_ENDPOINT
         
         # オプション（評価軸）の設定定義
         self.options = {

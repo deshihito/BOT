@@ -7,6 +7,7 @@ from typing import Any
 
 import discord
 
+from core.messages import ROLE_HIERARCHY_ALREADY_SET, ROLE_HIERARCHY_CANNOT_SET
 from core.server_assist import Feature, can_assign_roles, get_settings, update_settings
 from core.server_assist.ui import AssistFeatureView, channel_label, notice_line
 
@@ -262,7 +263,7 @@ class ReactionRoleToggleButton(discord.ui.Button):
             interaction, interaction.guild, list(view.settings["mappings"].values()),
         ):
             return await interaction.response.send_message(
-                "ロールの管理権限、または自分より上のロールが設定されています。",
+                ROLE_HIERARCHY_ALREADY_SET,
                 ephemeral=True,
             )
         value = not view.settings["enabled"]
@@ -328,7 +329,7 @@ class ReactionRoleMappingModal(discord.ui.Modal, title="絵文字とロール"):
             interaction, interaction.guild, list(mappings.values()),
         ):
             return await interaction.response.send_message(
-                "ロールの管理権限、または自分より上のロールを設定しようとしています。",
+                ROLE_HIERARCHY_CANNOT_SET,
                 ephemeral=True,
             )
         await update_settings(self.parent_view.guild_id, KEY, mappings=mappings)

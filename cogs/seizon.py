@@ -23,6 +23,7 @@ from datetime import date, datetime, timedelta, timezone
 import discord
 from discord import app_commands
 from discord.ext import commands, tasks
+from core.api_client import API_NOT_CONFIGURED_MESSAGE
 from core.api_retry import run_with_retry
 
 log = logging.getLogger(__name__)
@@ -207,7 +208,7 @@ class FujoSurvival(commands.Cog):
     async def _run(self, build):
         """``build()`` で組み立てたクエリを別スレッドで実行し、data を返す。"""
         if self.db_api is None:
-            raise RuntimeError("BOT_API_BASE_URL または BOT_API_KEY が設定されていません")
+            raise RuntimeError(API_NOT_CONFIGURED_MESSAGE)
         return (await asyncio.to_thread(
             run_with_retry, lambda: build().execute()
         )).data

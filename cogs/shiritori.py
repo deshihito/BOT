@@ -22,6 +22,7 @@ import unicodedata
 
 import discord
 from core import game_panels
+from core.messages import recruit_join_prompt
 from discord.ext import commands
 
 from core import party_ranking
@@ -241,7 +242,7 @@ class OdaiShiritori(commands.Cog):
             embed = discord.Embed(
                 title="お題しりとり 参加者募集",
                 description=(f"{interaction.user.mention} さんが募集中です。\n"
-                             f"{RECRUIT_SECONDS}秒以内に「参加」を押してください（{MIN_PLAYERS}〜{MAX_PLAYERS}人）。"),
+                             f"{recruit_join_prompt(RECRUIT_SECONDS)}（{MIN_PLAYERS}〜{MAX_PLAYERS}人）。"),
                 color=COLOR)
             await game_panels.replace(channel, "party", embed=embed, view=JoinView(self, g))
             await asyncio.sleep(RECRUIT_SECONDS)

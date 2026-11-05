@@ -8,6 +8,7 @@ logger = logging.getLogger(__name__)
 import os
 import discord
 from core import game_panels
+from core.emojis import FAILED, SUCCESS
 from core import jinrou_guide
 from discord import app_commands
 from discord.ext import commands
@@ -649,7 +650,7 @@ class JinrouCog(commands.Cog):
     async def _start_game_loop(self, game: JinrouGame, channel):
         if len(game.players) < 5:
             game.is_running = False
-            await channel.send("<:failed:1490986584676368535>参加者が5人未満のため、ゲームを中止します。")
+            await channel.send(f"{FAILED}参加者が5人未満のため、ゲームを中止します。")
             return
 
         game.alive_players = game.players.copy()
@@ -669,7 +670,7 @@ class JinrouCog(commands.Cog):
             roles_list = " / ".join(set(roles_for_display))
 
         await game_panels.replace(channel, "party",
-            f"<:success:1490985168100659322>{mentions}\nゲーム開始。今回の役職内訳: {roles_list}\n下のボタンで自分の役職確認を行ってください。",
+            f"{SUCCESS}{mentions}\nゲーム開始。今回の役職内訳: {roles_list}\n下のボタンで自分の役職確認を行ってください。",
             view=RoleCheckView(game, self)
         )
 
@@ -1231,7 +1232,7 @@ class JinrouCog(commands.Cog):
             m = game.game_channel.guild.get_member(p.id)
             name = m.display_name if m else "不明"
             role = game.roles.get(p.id, "不明")
-            status = "<:success:1490985168100659322>" if p.id in alive_ids else "💀"
+            status = SUCCESS if p.id in alive_ids else "💀"
             lines.append(f"{status} **{name}**: {role}")
         embed = discord.Embed(
             title="最終役職開示",
@@ -1989,7 +1990,7 @@ class PublicVoteView(discord.ui.View):
             return await interaction.response.send_message(embed=embed, ephemeral=True)
 
         self.game.voted_count[p_id] = self.children[0].values[0]
-        await interaction.response.send_message(f"<:success:1490985168100659322> {interaction.user.display_name} さんが投票を完了しました。")
+        await interaction.response.send_message(f"{SUCCESS} {interaction.user.display_name} さんが投票を完了しました。")
 
 
 class ChairmanVoteView(discord.ui.View):

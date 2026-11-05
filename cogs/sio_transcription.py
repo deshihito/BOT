@@ -22,6 +22,7 @@ from core.legacy import Responder
 from core import logfare
 from core.voice_session import VoiceBusy, get_manager
 from core.voice_recv_patch import patch_voice_recv_client
+from core.messages import voice_connection_failed
 from core.voice_media import add_receive_sink, remove_receive_sink
 from core.speech_vad import SpeechDetector
 
@@ -536,7 +537,7 @@ class TranscriptionCog(commands.Cog):
                 "文字起こしは、実行中のVC機能を自動停止・切り替えしません。"
             ))
         except Exception as e:
-            return await r.send(embed=we(f"<:failed:1490986584676368535> ボイス接続に失敗しました: `{e}`"))
+            return await r.send(embed=we(voice_connection_failed(e)))
 
         try:
             webhook = await self._get_or_create_webhook(send_channel)

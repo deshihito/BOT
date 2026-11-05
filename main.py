@@ -7,6 +7,7 @@ import traceback
 import config
 import defining as df
 from keep_alive import configure_coder, keep_alive
+from core.emojis import SUCCESS
 import logging
 from collections import deque
 
@@ -110,7 +111,7 @@ async def sync_application_commands(client: commands.Bot):
 async def sync(ctx):
     try:
         synced = await sync_application_commands(bot)
-        await ctx.send(f"<:success:1490985168100659322> {len(synced)} 個のスラッシュコマンドを同期しました！")
+        await ctx.send(f"{SUCCESS} {len(synced)} 個のスラッシュコマンドを同期しました！")
     except discord.HTTPException as e:
         if e.code == 50240:
             await ctx.send(

@@ -28,6 +28,7 @@ import discord.opus
 from core.voice_session import SHARED_FEATURES, VoiceBusy, get_manager
 from core.voice_media import add_audio_source, has_audio_source, remove_audio_source
 from core.legacy import Responder
+from core.emojis import FAILED, MUSIC, SUCCESS
 from core.music_activity import build_music_activity_snapshot
 
 logger = logging.getLogger(__name__)
@@ -884,7 +885,7 @@ class SearchModal(discord.ui.Modal, title="YouTube 楽曲検索"):
                     ephemeral=True,
                 )
                 return
-            await interaction.followup.send(embed=we(f"<:success:1490985168100659322> **{filename}** をキューに追加しました！"), ephemeral=True)
+            await interaction.followup.send(embed=we(f"{SUCCESS} **{filename}** をキューに追加しました！"), ephemeral=True)
 
             # バグ修正: interaction.guild から voice_client を取得するように修正
             vc = interaction.guild.voice_client if interaction.guild else None
@@ -1052,7 +1053,7 @@ class VoiceControlView(discord.ui.View):
         else:
             await interaction.response.send_message(embed=we("<:failed:1490986584676368535> 現在再生中ではないか、既に一時停止されています。"), ephemeral=True)
 
-    @discord.ui.button(label="再開", emoji="<:music:1561710964238450809>", style=discord.ButtonStyle.success, row=4)
+    @discord.ui.button(label="再開", emoji=MUSIC, style=discord.ButtonStyle.success, row=4)
     async def resume_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         vc = interaction.guild.voice_client
         state = self.cog.get_state(self.guild_id)
@@ -1199,7 +1200,7 @@ class PlaylistLibraryView(discord.ui.View):
     async def list_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         await self.cog._playlist_impl(Responder(interaction), "list", scope=self.scope)
 
-    @discord.ui.button(label="再生", emoji="<:music:1561710964238450809>", style=discord.ButtonStyle.primary)
+    @discord.ui.button(label="再生", emoji=MUSIC, style=discord.ButtonStyle.primary)
     async def play_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.send_modal(PlaylistNameModal(self.cog, "play", self.scope))
 
@@ -2391,7 +2392,7 @@ class VoiceCog(commands.Cog):
             async def report_failure_and_continue():
                 await self._send_message(
                     ctx_or_interaction,
-                    embed=we(f"<:failed:1490986584676368535> **{failed_title}** の音声デコードに失敗しました。次のキューを確認します。")
+                    embed=we(f"{FAILED} **{failed_title}** の音声デコードに失敗しました。次のキューを確認します。")
                 )
                 await self.check_queue(guild_id)
 
