@@ -5,9 +5,16 @@
 """
 import types
 import unittest
+from unittest.mock import AsyncMock, patch
 
 import discord
 
+from core.music import panel as music_panel
+from core.music import playback as music_playback
+from core.music import search as music_search
+from core.music.panel import PanelMixin
+from core.music.search import SearchMixin
+from core.music.spatial import PythonSpatialAudioSource, SpatialControlView
 from core.music.ui import build_music_panel_layout
 
 
@@ -70,6 +77,109 @@ class MusicPanelNativeV2Test(unittest.TestCase):
             fake_cog(), 1, "panel text", thumbnail_url="attachment://cover.png")
         children = container_of(layout).children
         self.assertIsInstance(children[0], discord.ui.TextDisplay)
+
+
+class MusicPanelNameResolutionTest(unittest.TestCase):
+    """分割先モジュールの名前空間で、他モジュール定義の名前が解決できること。
+
+    Mixin のメソッドは定義されたモジュールのグローバルで名前解決するため、
+    cogs/sio_music.py 側の import では届かない（2026-11-06 の NameError 再発防止）。
+    """
+
+    def test_search_and_panel_resolve_build_music_panel_layout(self):
+        self.assertIs(music_search.build_music_panel_layout, build_music_panel_layout)
+        self.assertIs(music_panel.build_music_panel_layout, build_music_panel_layout)
+
+    def test_panel_resolves_spatial_control_view(self):
+        self.assertIs(music_panel.SpatialControlView, SpatialControlView)
+
+    def test_playback_resolves_python_spatial_audio_source(self):
+        self.assertIs(music_playback.PythonSpatialAudioSource, PythonSpatialAudioSource)
+
+
+def _panel_state(**overrides):
+    state = {
+        "speed": 1.0, "volume": 0.5, "eq": "default", "custom_eq_filter": None,
+        "loop_mode": "off", "shuffle_enabled": False, "is_paused": False,
+        "current_track": None, "queue": None,
+        "panel_message": None, "current_thumbnail_url": None,
+    }
+    state.update(overrides)
+    return state
+
+
+class _FakeResponder:
+    def __init__(self, guild_id=123):
+        self.guild = types.SimpleNamespace(id=guild_id)
+        self.source = object()
+        self.sent = []
+        self.message = types.SimpleNamespace(id=999)
+
+    async def defer(self):
+        pass
+
+    async def send(self, **kwargs):
+        self.sent.append(kwargs)
+        return self.message
+
+
+class MusicPanelImplDriveTest(unittest.IsolatedAsyncioTestCase):
+    async def test_panel_impl_sends_layout_view(self):
+        state = _panel_state()
+
+        class _Cog(SearchMixin):
+            async def _ensure_music_connection(self, r):
+                return None
+
+            def get_state(self, guild_id):
+                return state
+
+            async def update_panel(self, guild_id):
+                self.updated = True
+
+            def _save_music_snapshot(self, guild_id):
+                self.saved = True
+
+        cog = _Cog()
+        responder = _FakeResponder()
+        await cog._panel_impl(responder)
+
+        self.assertEqual(len(responder.sent), 1)
+        self.assertIsInstance(responder.sent[0]["view"], discord.ui.LayoutView)
+        self.assertIs(state["panel_message"], responder.message)
+        self.assertTrue(cog.updated)
+        self.assertTrue(cog.saved)
+
+    async def test_update_panel_edits_with_layout_view(self):
+        state = _panel_state(
+            panel_message=types.SimpleNamespace(id=555),
+            queue=types.SimpleNamespace(qsize=lambda: 0),
+        )
+
+        class _Cog(PanelMixin):
+            def get_state(self, guild_id):
+                return state
+
+        edit = AsyncMock()
+        with patch.object(music_panel, "edit_message_v2", edit):
+            await _Cog().update_panel(123)
+
+        edit.assert_awaited_once()
+        self.assertIs(edit.await_args.args[0], state["panel_message"])
+        self.assertIsInstance(edit.await_args.args[1], discord.ui.LayoutView)
+
+    async def test_spatial_panel_sends_spatial_control_view(self):
+        state = _panel_state()
+
+        class _Cog(PanelMixin):
+            def get_state(self, guild_id):
+                return state
+
+        responder = _FakeResponder()
+        await _Cog()._spatial_panel(responder, 123)
+
+        self.assertEqual(len(responder.sent), 1)
+        self.assertIsInstance(responder.sent[0]["view"], SpatialControlView)
 
 
 if __name__ == "__main__":

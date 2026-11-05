@@ -33,6 +33,7 @@ from core.emojis import FAILED, MUSIC, SUCCESS
 from core.music_activity import build_music_activity_snapshot
 
 from core.music.common import *  # noqa: F401,F403 - shared helpers/constants
+from core.music.spatial import PythonSpatialAudioSource  # noqa: F401
 
 logger = logging.getLogger("cogs.sio_music")
 
