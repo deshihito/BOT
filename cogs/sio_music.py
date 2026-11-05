@@ -76,6 +76,18 @@ def soundcloud_url_kind(value: str) -> str | None:
         return None
     path = text.split("soundcloud.com", 1)[-1]
     return "set" if "/sets/" in path else "track"
+
+
+NICOVIDEO_URL_RE = re.compile(
+    r"https?://(?:www\.nicovideo\.jp/watch/|nico\.ms/)([a-z]{0,2}\d+)",
+    re.IGNORECASE,
+)
+
+
+def niconico_url_kind(value: str) -> str | None:
+    """ニコニコ動画の動画URLなら 'track' を返す (yt-dlpのniconico抽出はログイン不要)。"""
+    text = (value or "").strip()
+    return "track" if NICOVIDEO_URL_RE.match(text) else None
 MAX_TTS_CHARS = 300
 LOOP_CHOICES = [
     app_commands.Choice(name="OFF", value="off"),
@@ -867,6 +879,9 @@ class SearchModal(discord.ui.Modal, title="YouTube 楽曲検索"):
                 return
 
             if soundcloud_url_kind(keyword) == "track":
+                info = await self.cog.get_yt_info(keyword)
+                url, filename, is_yt = info['webpage_url'], info['title'], True
+            elif niconico_url_kind(keyword) == "track":
                 info = await self.cog.get_yt_info(keyword)
                 url, filename, is_yt = info['webpage_url'], info['title'], True
             elif "youtube.com" in keyword or "youtu.be" in keyword:
@@ -2167,6 +2182,14 @@ class VoiceCog(commands.Cog):
             except Exception as exc:
                 logger.exception("SoundCloud fetch failed")
                 return await r.send(embed=we(f"SoundCloudの取得に失敗しました: {exc}"))
+        if niconico_url_kind(keyword.strip()) == "track":
+            try:
+                info = await self.get_yt_info(keyword.strip())
+                tracks = [{'input': info['webpage_url'], 'title': info['title'], 'is_youtube': True}]
+                return await self.start_playlist_load(r.source, tracks, info['title'])
+            except Exception as exc:
+                logger.exception("Niconico fetch failed")
+                return await r.send(embed=we(f"ニコニコ動画の取得に失敗しました: {exc}"))
         await r.send(f"🔎 YouTubeで「{keyword}」の上位10件を検索中...")
         search_options = YTDL_OPTIONS.copy()
         search_options['default_search'] = 'ytsearch10'
@@ -2554,6 +2577,18 @@ class VoiceCog(commands.Cog):
                 return await interaction.followup.send("⏱️ タイムアウト: SoundCloud情報の解析に時間がかかりすぎたため中断しました。")
             except Exception as e:
                 logger.exception("SoundCloud parse failed")
+                return await interaction.followup.send(embed=we(f"<:failed:1490986584676368535> 解析失敗: {e}"))
+
+        # 3.6. ニコニコ動画URLが直接指定された場合
+        elif input_str and niconico_url_kind(input_str) == "track":
+            await interaction.followup.send("🎵 ニコニコ動画を解析中...")
+            try:
+                info = await asyncio.wait_for(self.get_yt_info(input_str), timeout=TIMEOUT_SECONDS)
+                url, filename, is_yt = info['webpage_url'], info['title'], True
+            except asyncio.TimeoutError:
+                return await interaction.followup.send("⏱️ タイムアウト: ニコニコ動画情報の解析に時間がかかりすぎたため中断しました。")
+            except Exception as e:
+                logger.exception("Niconico parse failed")
                 return await interaction.followup.send(embed=we(f"<:failed:1490986584676368535> 解析失敗: {e}"))
 
         # 2. ファイルが添付されている場合
