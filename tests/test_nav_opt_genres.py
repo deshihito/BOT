@@ -36,7 +36,7 @@ class GenreAbsorptionTest(unittest.TestCase):
 
 
 class VoiceTriggerLabelTest(unittest.TestCase):
-    """S6: /support の voice_trigger ラベルが実体（設定・一覧）に合っていること。"""
+    """S6→ラウンド2: /support の voice_trigger ラベルがサーバー設定であることを示すこと。"""
 
     def test_label_matches_panel(self):
         from core.action_registry import build_support_actions
@@ -44,7 +44,7 @@ class VoiceTriggerLabelTest(unittest.TestCase):
 
         specs = build_support_actions(SUPPORT_ACTIONS, SUPPORT_ACTIONS_BY_GENRE, SUPPORT_GENRES)
         spec = next(s for s in specs if s.value == "voice_trigger")
-        self.assertEqual(spec.label, "音声トリガー設定・一覧")
+        self.assertEqual(spec.label, "音声トリガーのサーバー設定")
         self.assertEqual(spec.id, "support:voice_trigger")
 
 

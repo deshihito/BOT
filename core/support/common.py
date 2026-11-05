@@ -84,7 +84,7 @@ SUPPORT_ACTIONS = [
     app_commands.Choice(name="Quest通知（Discord Orbs）", value="quest_notify"),
     app_commands.Choice(name="レベルアップ通知（EXP）", value="levelup_notify"),
     app_commands.Choice(name="サーバーアシスト設定", value="server_assist"),
-    app_commands.Choice(name="音声トリガー設定・一覧", value="voice_trigger"),
+    app_commands.Choice(name="音声トリガーのサーバー設定", value="voice_trigger"),
     app_commands.Choice(name="即抜けRTA状態", value="sokunuke_status"),
     app_commands.Choice(name="即抜けRTA計測オン", value="sokunuke_on"),
     app_commands.Choice(name="即抜けRTA計測オフ", value="sokunuke_off"),
@@ -103,7 +103,7 @@ SUPPORT_GENRES = {
         "サーバーアシスト",
         "サーバー運営の細かな設定をまとめた入口",
     ),
-    "rta": ("RTA", ""),
+    "rta": ("RTA設定", ""),
 }
 
 # 旧バージョンで保存されたショートカットを新しいジャンルへ移行する。
