@@ -124,8 +124,8 @@ class PrefixHandlerTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn("!sample <amount>", text)
 
     async def test_usage_from_command_meta(self):
-        self.assertEqual(eh.prefix_usage(types.SimpleNamespace(qualified_name="gvc create", signature="x")),
-                         "!gvc create <ルーム名> [--max 5] [--private] [--password 合言葉] [--desc 説明]")
+        self.assertEqual(eh.prefix_usage(types.SimpleNamespace(qualified_name="logs", signature="x")),
+                         "!logs [行数] [重要度]")
 
     async def test_unexpected_hides_details_and_logs_traceback(self):
         ctx = self.ctx(self.bot.get_command("sample"))

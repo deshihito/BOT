@@ -2501,7 +2501,7 @@ class VoiceCog(commands.Cog):
             return await interaction.followup.send(embed=we("開始位置は0秒以上で指定してください。"), ephemeral=True)
         can_apply_start_at = not state.get('current_track') and state['queue'].empty() and not state.get('is_processing_queue')
         if start_at is not None and not can_apply_start_at:
-            return await interaction.followup.send(embed=we("開始位置の指定は、再生中の曲と待機キューがない場合のみ使えます。再生中の曲は `/music` の操作パネルから操作してください。"), ephemeral=True)
+            return await interaction.followup.send(embed=we("開始位置の指定は、再生中の曲と待機キューがない場合のみ使えます。再生中の曲は `/vc` の音楽操作パネルから操作してください。"), ephemeral=True)
 
         is_yt = False
         url, filename, final_id = None, None, None
@@ -2688,7 +2688,7 @@ class VoiceCog(commands.Cog):
             remove_audio_source(vc, "music", notify=True)
             
             await interaction.response.send_message(
-                embed=we(f"<:Pause:1561700510447312916> 再生を一時停止しました。(`{int(state['elapsed_offset'])}秒` 時点)\nもう一度 `/music` の操作パネルから再開できます。")
+                embed=we(f"<:Pause:1561700510447312916> 再生を一時停止しました。(`{int(state['elapsed_offset'])}秒` 時点)\nもう一度 `/vc` の音楽操作パネルから再開できます。")
             )
             await self.update_panel(interaction.guild_id)
 
@@ -2740,7 +2740,7 @@ class VoiceCog(commands.Cog):
             if msg.attachments:
                 b62 = encode_full_id(r.guild.id, r.channel.id, msg.id)
                 lines.append(f"`{b62}` : **{msg.attachments[0].filename}**")
-        desc = "このサーバー内で再生可能な音声ID（`/music` の操作パネルから再生できます）\n" + "─" * 20 + "\n"
+        desc = "このサーバー内で再生可能な音声ID（`/vc` の音楽操作パネルから再生できます）\n" + "─" * 20 + "\n"
         desc += "\n".join(lines) if lines else "音声ファイルは見つかりませんでした。"
         embed.description = desc[:4000]
         await r.send(embed=embed)

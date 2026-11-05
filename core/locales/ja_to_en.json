@@ -5230,5 +5230,20 @@
   "メンバーが参加・退出したときに、設定したチャンネルへお知らせします。\n\n**参加メッセージ**: ": "Notifies the configured channel when a member joins or leaves.\n\n**Welcome message**: ",
   " / 送信先: ": " / Destination: ",
   "\n**退出メッセージ**: ": "\n**Leave message**: ",
-  "\n\n使える置き換え: ": "\n\nAvailable replacements: "
+  "\n\n使える置き換え: ": "\n\nAvailable replacements: ",
+  "開始位置の指定は、再生中の曲と待機キューがない場合のみ使えます。再生中の曲は `/vc` の音楽操作パネルから操作してください。": "You can specify a start position only when no track is playing and the queue is empty. Control the currently playing track from the `/vc` music control panel.",
+  "秒` 時点)\nもう一度 `/vc` の音楽操作パネルから再開できます。": "sec` mark)\nYou can resume from the `/vc` music control panel.",
+  "このサーバー内で再生可能な音声ID（`/vc` の音楽操作パネルから再生できます）\n": "Audio IDs playable in this server (play them from the `/vc` music control panel)\n",
+  "/vc の音楽操作パネルから停止": "Stop from the /vc music control panel",
+  "/vc のパネルから録音停止": "Stop recording from the /vc panel",
+  "/vc のパネルからやまびこ停止": "Stop echo from the /vc panel",
+  "/vc のパネルから文字起こし停止": "Stop transcription from the /vc panel",
+  "/vc のパネルからカラオケ停止": "Stop karaoke from the /vc panel",
+  "/vc のパネルからボイスチェンジャー停止": "Stop the voice changer from the /vc panel",
+  "/vc のパネルからランダム通話退出": "Leave random call from the /vc panel",
+  "/vc のパネルからグローバルVC退出": "Leave Global VC from the /vc panel",
+  "/vc のパネルからVC退出": "Leave VC from the /vc panel",
+  "{by} さんが `/vc` で退出操作を実行したため、{label}を終了しました。": "{label} was stopped because {by} used `/vc` to disconnect.",
+  "` で終了するか、`/vc` のパネルから退出させてから実行してください。\n（開始した人・管理者が実行した場合や、開始した人が VC にいない場合はそのまま切り替わります）": "` or disconnect it from the `/vc` panel, then try again.\n(It will switch directly if the person who started it or an administrator runs this, or if the person who started it is not in the VC.)",
+  "`/vc` の退出操作で止めてよいか。音楽は今までどおり誰でも止められる。": "Whether stopping via the `/vc` disconnect action is allowed. Music can still be stopped by anyone, as before."
 }
