@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from .common import *
+from core.emojis import FAILED
 
 
 # ===== 音声トリガー UI ==================================================
@@ -40,7 +41,7 @@ class VoiceTriggerDeleteSelect(discord.ui.Select):
         try:
             msg = await cog.unregister(interaction.guild, self.values[0])
         except Exception as exc:
-            return await interaction.response.send_message(f"⚠️ {exc}", ephemeral=True)
+            return await interaction.response.send_message(f"{FAILED} {exc}", ephemeral=True)
         await interaction.response.send_message(msg, ephemeral=True)
         await self.parent_view.refresh(interaction)
 

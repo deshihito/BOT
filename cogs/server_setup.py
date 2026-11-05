@@ -448,13 +448,13 @@ class SetupWizard(discord.ui.View):
     async def on_send_panel(self, interaction):
         from cogs.auth import VerifyView
         if not self.auth()["role_id"]:
-            return await self.refresh(interaction, "⚠️ 先に認証で付けるロールを選んでください。")
+            return await self.refresh(interaction, f"{FAILED} 先に認証で付けるロールを選んでください。")
         embed = discord.Embed(title="サーバー認証", description="下のボタンを押して質問に回答してください。",
                               color=discord.Color.blue())
         try:
             await self.channel.send(embed=embed, view=VerifyView(None))
         except discord.HTTPException:
-            return await self.refresh(interaction, "⚠️ このチャンネルに送れませんでした。Bot の権限を確認してください。")
+            return await self.refresh(interaction, f"{FAILED} このチャンネルに送れませんでした。Bot の権限を確認してください。")
         await self.refresh(interaction, "<:success:1490985168100659322> このチャンネルに認証パネルを送りました。")
 
     async def on_category_perms(self, interaction, select):

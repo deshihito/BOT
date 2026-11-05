@@ -24,9 +24,10 @@ class SharedMessageValuesTest(unittest.TestCase):
     """定数・整形ヘルパの値が従来のリテラルと完全一致すること。"""
 
     def test_voice_not_joined(self):
+        # HCD監査 quick fix #9 で ⚠️ から FAILED カスタム絵文字へ統一した
         self.assertEqual(
             messages.VOICE_NOT_JOINED,
-            "⚠️ ボイスチャンネルに参加してから実行してください。",
+            f"{FAILED} ボイスチャンネルに参加してから実行してください。",
         )
 
     def test_voice_connection_failed(self):

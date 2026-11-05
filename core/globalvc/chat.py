@@ -20,6 +20,7 @@ from core.voice_session import VoiceBusy, get_manager
 from core.voice_recv_patch import patch_voice_recv_client
 from core.messages import VOICE_NOT_JOINED, voice_connection_failed
 from core.voice_media import add_audio_source, add_receive_sink, remove_audio_source, remove_receive_sink
+from core.emojis import FAILED
 try:
     import numpy as np  # type: ignore
 except Exception:  # numpy が無い環境では純Pythonで合成する
@@ -37,7 +38,7 @@ class ChatMixin:
         """このチャンネルを指定ルームのグロチャ (テキスト中継) に接続する。Webhook を作って中継する。"""
         await r.defer()
         if r.guild is None:
-            return await r.send("⚠️ グロチャはサーバー内のチャンネルで接続してください。", ephemeral=True)
+            return await r.send(f"{FAILED} グロチャはサーバー内のチャンネルで接続してください。", ephemeral=True)
         channel = r.channel
         room = ROOMS.get(room_name)
         if room is None:
@@ -53,20 +54,20 @@ class ChatMixin:
         if channel.id in CHANNEL_TO_ROOM:
             current_room = CHANNEL_TO_ROOM[channel.id]
             return await r.send(
-                f"⚠️ このチャンネルはすでにルーム **{current_room}** のグロチャに接続されています。"
+                f"{FAILED} このチャンネルはすでにルーム **{current_room}** のグロチャに接続されています。"
                 "先にグロチャの接続解除をしてください。",
                 ephemeral=True,
             )
 
         if any(link.guild_id == r.guild.id for link in ROOM_TEXT_LINKS.get(room_name, [])):
             return await r.send(
-                f"⚠️ このサーバーはすでに別のチャンネルでルーム **{room_name}** のグロチャに接続済みです。",
+                f"{FAILED} このサーバーはすでに別のチャンネルでルーム **{room_name}** のグロチャに接続済みです。",
                 ephemeral=True,
             )
 
         perms = channel.permissions_for(r.guild.me)
         if not perms.manage_webhooks:
-            return await r.send("⚠️ このチャンネルで Webhook を管理する権限がボットにありません。", ephemeral=True)
+            return await r.send(f"{FAILED} このチャンネルで Webhook を管理する権限がボットにありません。", ephemeral=True)
 
         try:
             webhook = await channel.create_webhook(

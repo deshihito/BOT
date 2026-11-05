@@ -20,6 +20,7 @@ from core.voice_session import VoiceBusy, get_manager
 from core.voice_recv_patch import patch_voice_recv_client
 from core.messages import VOICE_NOT_JOINED, voice_connection_failed
 from core.voice_media import add_audio_source, add_receive_sink, remove_audio_source, remove_receive_sink
+from core.emojis import FAILED
 try:
     import numpy as np  # type: ignore
 except Exception:  # numpy が無い環境では純Pythonで合成する
@@ -45,13 +46,13 @@ class ManageMixin:
         """ルームを作成する。パスワードがあれば非公開。作成者がVCにいれば、そのVCにボットも参加する。"""
         await r.defer()
         if r.guild is None:
-            return await r.send("⚠️ ルームはサーバー内で作成してください。", ephemeral=True)
+            return await r.send(f"{FAILED} ルームはサーバー内で作成してください。", ephemeral=True)
         if not room_name:
-            return await r.send("⚠️ ルーム名を入力してください。", ephemeral=True)
+            return await r.send(f"{FAILED} ルーム名を入力してください。", ephemeral=True)
         if room_name in ROOMS:
-            return await r.send(f"⚠️ ルーム **{room_name}** はすでに存在します。", ephemeral=True)
+            return await r.send(f"{FAILED} ルーム **{room_name}** はすでに存在します。", ephemeral=True)
         if max_servers < 0:
-            return await r.send("⚠️ 最大参加サーバー数は 0 以上の値を指定してください。", ephemeral=True)
+            return await r.send(f"{FAILED} 最大参加サーバー数は 0 以上の値を指定してください。", ephemeral=True)
 
         private = bool(password)
         ROOMS[room_name] = RoomConfig(
@@ -84,10 +85,10 @@ class ManageMixin:
         try:
             await self._connect_room(r.guild, voice.channel, r.user, r.channel, room_name)
         except (_JoinRefused, VoiceBusy) as e:
-            await r.send(f"⚠️ ルームは作成しましたが、VC には参加できませんでした: {e}", ephemeral=True)
+            await r.send(f"{FAILED} ルームは作成しましたが、VC には参加できませんでした: {e}", ephemeral=True)
         except Exception as e:
             logger.warning("グローバルVC: ルーム %s 作成後の自動参加に失敗しました", room_name, exc_info=True)
-            await r.send(f"⚠️ ルームは作成しましたが、VC への参加に失敗しました: `{e}`", ephemeral=True)
+            await r.send(f"{FAILED} ルームは作成しましたが、VC への参加に失敗しました: `{e}`", ephemeral=True)
         else:
             await r.send(f"🎙️ **{voice.channel.name}** に参加し、ルーム **{room_name}** に接続しました。")
 
@@ -133,7 +134,7 @@ class ManageMixin:
 
         if not _can_delete_room(room, r.user, r.guild):
             return await r.send(
-                "⚠️ このルームを削除できるのは、作成者か、ルームを作ったサーバーで"
+                f"{FAILED} このルームを削除できるのは、作成者か、ルームを作ったサーバーで"
                 "「サーバー管理」権限を持つ人だけです。",
                 ephemeral=True,
             )
@@ -165,7 +166,7 @@ class ManageMixin:
         if not voice or not voice.channel:
             return await r.send(VOICE_NOT_JOINED, ephemeral=True)
         if not room_name:
-            return await r.send("⚠️ 参加するルーム名を `room` に入れてください。", ephemeral=True)
+            return await r.send(f"{FAILED} 参加するルーム名を `room` に入れてください。", ephemeral=True)
 
         room = ROOMS.get(room_name)
         if room is None:
@@ -180,10 +181,10 @@ class ManageMixin:
         _prune_dead_clients(room_name)
         current_members = GLOBAL_ROOMS.get(room_name, [])
         if room.max_servers and len(current_members) >= room.max_servers:
-            return await r.send(f"⚠️ ルーム **{room_name}** は満員です ({room.max_servers}サーバーまで)。")
+            return await r.send(f"{FAILED} ルーム **{room_name}** は満員です ({room.max_servers}サーバーまで)。")
 
         if any(vc.guild and vc.guild.id == r.guild.id for vc in current_members):
-            return await r.send(f"⚠️ このサーバーはすでにルーム **{room_name}** に参加しています。")
+            return await r.send(f"{FAILED} このサーバーはすでにルーム **{room_name}** に参加しています。")
 
         vc_channel = voice.channel
         await r.defer()
@@ -193,14 +194,14 @@ class ManageMixin:
             joined = next((name for name, clients in GLOBAL_ROOMS.items()
                            if any(c.guild and c.guild.id == r.guild.id for c in clients)), None)
             return await r.send(
-                f"⚠️ このサーバーはすでにルーム **{joined or '不明'}** に参加しています。"
+                f"{FAILED} このサーバーはすでにルーム **{joined or '不明'}** に参加しています。"
                 "先に `/vc のパネルからグローバルVC終了/退出` してください。"
             )
 
         try:
             await self._connect_room(r.guild, vc_channel, r.user, r.channel, room_name)
         except _JoinRefused as refused:
-            return await r.send(f"⚠️ {refused}")
+            return await r.send(f"{FAILED} {refused}")
         except VoiceBusy as busy:
             return await r.send(str(busy))
         except Exception as e:

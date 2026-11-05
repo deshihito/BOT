@@ -5,6 +5,7 @@ from __future__ import annotations
 from .common import *
 from .common import _support_int
 from .sns import SnsError, parse_rss_feed, sns_epoch
+from core.emojis import FAILED
 
 
 # ===== Discord Quest 通知 ==============================================
@@ -555,10 +556,10 @@ class QuestManualModal(discord.ui.Modal):
         try:
             notice = await self.panel.cog.quest_send_manual(interaction.guild, item)
         except QuestError as exc:
-            notice = f"⚠️ {exc}"
+            notice = f"{FAILED} {exc}"
         except Exception:
             logger.exception("Quest手動通知に失敗しました")
-            notice = "⚠️ 送信中にエラーが発生しました。時間をおいて再度お試しください。解決しない場合はBotの運営に連絡してください。"
+            notice = f"{FAILED} 送信中にエラーが発生しました。時間をおいて再度お試しください。解決しない場合はBotの運営に連絡してください。"
         await self.panel.refresh(interaction, notice)
 
     async def on_error(self, interaction: discord.Interaction, error: Exception):
@@ -605,7 +606,7 @@ class QuestNotifyPanel(discord.ui.LayoutView):
         )
         error = self.cog.quest_last_error()
         if error:
-            text += f"\n-# ⚠️ 直近の取得エラー: {error}"
+            text += f"\n-# {FAILED} 直近の取得エラー: {error}"
         return text
 
     def _build(self):

@@ -15,7 +15,7 @@ from core.emojis import FAILED
 
 #: VC に参加していない状態で VC 前提の機能を実行したときのエラー。
 #: sio_globalVC / sio_karaoke / sio_rec / sio_voicechanger で共用。
-VOICE_NOT_JOINED = "⚠️ ボイスチャンネルに参加してから実行してください。"
+VOICE_NOT_JOINED = f"{FAILED} ボイスチャンネルに参加してから実行してください。"
 
 
 def voice_connection_failed(error: object) -> str:

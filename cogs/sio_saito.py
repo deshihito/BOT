@@ -21,6 +21,7 @@ import random
 import numpy as np
 from scipy import signal
 import numpy as np
+from core.emojis import FAILED
 
 
 logger = logging.getLogger(__name__)
@@ -157,7 +158,7 @@ class SaitoRelay(commands.Cog):
             for guild_id in acquired:
                 self.peers.pop(guild_id, None)
                 await self.voice_sessions.release(guild_id, "match", reason="stop")
-            await r.send("⚠️ 相手のサーバーで別の機能が始まったため、通話できませんでした。もう一度お試しください。")
+            await r.send(f"{FAILED} 相手のサーバーで別の機能が始まったため、通話できませんでした。もう一度お試しください。")
             await self._notify(target_peer, str(busy))
         except Exception as e:
             logging.error(f"Saito Match Error: {e}")

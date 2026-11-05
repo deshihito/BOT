@@ -14,6 +14,7 @@ import aiohttp
 import discord
 from discord import app_commands
 from discord.ext import commands
+from core.emojis import FAILED
 try:
     import encodec
     import soundfile as sf
@@ -460,7 +461,7 @@ class TTSCog(commands.Cog):
     async def _say_impl(self, r: Responder, text: str):
         text = text.strip()
         if not text:
-            return await r.send("⚠️ 読み上げる文章を入力してください。", ephemeral=True)
+            return await r.send(f"{FAILED} 読み上げる文章を入力してください。", ephemeral=True)
         await r.defer()
         if error := await self._ensure_connection(r):
             return await r.send(error, ephemeral=True)
@@ -510,7 +511,7 @@ class TTSSettingsModal(discord.ui.Modal, title="読み上げ設定"):
             text = str(exc)
             if text.startswith("could not convert"):
                 text = "ピッチと話速は数値で入力してください。"
-            return await r.send(f"⚠️ {text}", ephemeral=True)
+            return await r.send(f"{FAILED} {text}", ephemeral=True)
         await r.send(message, ephemeral=True)
 
 

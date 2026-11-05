@@ -76,7 +76,7 @@ class GlobalChatCog(commands.Cog):
         own_words = mod.settings(source_guild_id)["ng_words"] if source_guild_id else []
         hit = mod.find_ng_word(message.content, list(mod.DEFAULT_NG_WORDS) + own_words)
         if hit is not None:
-            await self.notify_sender(message, "⚠️ NG ワードが含まれていたため、グローバルチャットに転送しませんでした。")
+            await self.notify_sender(message, f"{FAILED} NG ワードが含まれていたため、グローバルチャットに転送しませんでした。")
             return
 
         # 【連投制限】
