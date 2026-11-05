@@ -6,7 +6,7 @@ from typing import Any, Mapping
 from core.guild_settings import get_store
 
 LANGUAGE_SECTION = "localization"
-DEFAULT_LOCALE = "en"
+DEFAULT_LOCALE = "ja"
 SUPPORTED_LOCALES = ("en", "ja", "zh", "ko", "id", "th", "ar", "hi")
 LOCALE_LABELS = {
     "en": "English",

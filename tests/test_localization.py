@@ -7,11 +7,11 @@ from cogs.localization import LanguageView, LocalizationCog
 
 
 class LocalizationTest(unittest.IsolatedAsyncioTestCase):
-    def test_normalize_locale_uses_supported_base_language_and_english_fallback(self):
+    def test_normalize_locale_uses_supported_base_language_and_japanese_default(self):
         self.assertEqual(localization.normalize_locale("ja-JP"), "ja")
         self.assertEqual(localization.normalize_locale("ar-SA"), "ar")
-        self.assertEqual(localization.normalize_locale("fr-FR"), "en")
-        self.assertEqual(localization.guild_locale(1, types.SimpleNamespace(get=lambda *_: {})), "en")
+        self.assertEqual(localization.normalize_locale("fr-FR"), "ja")
+        self.assertEqual(localization.guild_locale(1, types.SimpleNamespace(get=lambda *_: {})), "ja")
 
     def test_all_supported_locales_have_flag_and_label(self):
         for locale in localization.SUPPORTED_LOCALES:
