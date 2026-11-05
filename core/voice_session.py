@@ -31,6 +31,11 @@ from typing import Any, Awaitable, Callable, Optional
 
 logger = logging.getLogger(__name__)
 
+try:
+    from core import voice_restore
+except Exception:  # pragma: no cover - import 失敗時も VC 管理自体は止めない
+    voice_restore = None  # type: ignore[assignment]
+
 AUTO_LEAVE_SECONDS = 180  # 誰もいない状態がこれだけ続いたら退出する（3分）
 DISCONNECT_GRACE_SECONDS = 5.0  # 外部切断を検知してから、自動再接続を待つ時間
 RECONNECT_DELAY_SECONDS = 1.0  # 切断してから入り直すまでの待ち時間（ハンドシェイクのリセット待ち）
@@ -141,6 +146,48 @@ class VoiceSessionManager:
         self._locks: dict[int, asyncio.Lock] = {}
         self._tasks: set[asyncio.Task] = set()
 
+    # ------------------------------------------------------------ 復旧用スナップショット
+    # 「切れても死なない」ための薄いフック。永続化の失敗で VC 操作自体を
+    # 止めることは決してしない（全て握ってログだけ残す）。
+    def _persist_session(self, session: VoiceSession) -> None:
+        if voice_restore is None:
+            return
+        try:
+            text_channel = session.text_channel
+            store = voice_restore.get_store()
+            store.set_entry("sessions", str(session.guild_id), {
+                "feature": session.feature,
+                "channel_id": session.channel_id,
+                "user_id": session.user_id,
+                "user_name": session.user_name,
+                "text_channel_id": getattr(text_channel, "id", None),
+                "shared_leases": sorted(session.shared_leases),
+                "started_at": session.started_at,
+            })
+            store.flush()
+        except Exception:
+            logger.debug("guild %s: セッションスナップショットの保存に失敗しました", session.guild_id, exc_info=True)
+
+    def _clear_persisted(self, guild_id: int) -> None:
+        if voice_restore is None:
+            return
+        try:
+            store = voice_restore.get_store()
+            store.set_entry("sessions", str(guild_id), None)
+            store.flush()
+        except Exception:
+            logger.debug("guild %s: セッションスナップショットの削除に失敗しました", guild_id, exc_info=True)
+
+    def persisted_sessions(self) -> dict:
+        """保存済みセッションスナップショット（復旧側が読む）。"""
+        if voice_restore is None:
+            return {}
+        try:
+            return voice_restore.get_store().section("sessions")
+        except Exception:
+            logger.debug("セッションスナップショットの読み込みに失敗しました", exc_info=True)
+            return {}
+
     # ------------------------------------------------------------ 参照
     def get(self, guild_id: int) -> Optional[VoiceSession]:
         return self._sessions.get(guild_id)
@@ -228,6 +275,7 @@ class VoiceSessionManager:
                     if text_channel is not None:
                         existing.text_channel = text_channel
                     self._evaluate_idle(existing)
+                    self._persist_session(existing)
                     return vc
                 # 記録だけ残って接続が切れていた -> 片付けてから入り直す
                 await self._release_locked(existing, reason="disconnected", disconnect=False)
@@ -247,6 +295,7 @@ class VoiceSessionManager:
                         if text_channel is not None:
                             lease.text_channel = text_channel
                     self._evaluate_idle(existing)
+                    self._persist_session(existing)
                     return vc
                 raise VoiceBusy(
                     existing,
@@ -285,6 +334,7 @@ class VoiceSessionManager:
             )
             self._sessions[guild.id] = session
             self._evaluate_idle(session)
+            self._persist_session(session)
             return vc
 
     async def release(self, guild, feature: Optional[str] = None, *, reason: str = "stop", by=None,
@@ -300,6 +350,7 @@ class VoiceSessionManager:
                 if lease is None:
                     return False
                 await self._run_cleanup(session, feature, lease.cleanup, reason)
+                self._persist_session(session)
                 return True
             if feature is not None and session.shared_leases:
                 await self._run_cleanup(session, session.feature, session.cleanup, reason)
@@ -310,6 +361,7 @@ class VoiceSessionManager:
                 session.started_at = promoted.started_at
                 session.cleanup = promoted.cleanup
                 session.text_channel = promoted.text_channel
+                self._persist_session(session)
                 return True
             await self._release_locked(session, reason=reason, by=by, notice=notice, disconnect=disconnect)
             return True
@@ -328,6 +380,7 @@ class VoiceSessionManager:
                               notice: Optional[str] = None, disconnect: bool = True) -> None:
         if self._sessions.get(session.guild_id) is session:
             del self._sessions[session.guild_id]
+        self._clear_persisted(session.guild_id)
         task, session.idle_task = session.idle_task, None
         if task is not None and task is not asyncio.current_task() and not task.done():
             task.cancel()
@@ -407,6 +460,7 @@ class VoiceSessionManager:
             else:
                 session.channel_id = after.channel.id
                 self._evaluate_idle(session)
+                self._persist_session(session)
             return
         if getattr(member, "bot", False):
             return

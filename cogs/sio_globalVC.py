@@ -9,6 +9,7 @@ import re
 import sys
 import threading
 import time
+import types
 from typing import Optional
 
 import discord
@@ -16,6 +17,7 @@ import discord.opus
 from discord.ext import commands, tasks
 from discord.ext import voice_recv
 
+from core import voice_restore
 from core.legacy import Responder
 from core.voice_session import VoiceBusy, get_manager
 from core.voice_recv_patch import patch_voice_recv_client
@@ -64,6 +66,90 @@ class RoomConfig:
 ROOMS: dict[str, RoomConfig] = {}
 # ルームごとの実際に接続中の VoiceRecvClient 一覧: { "room_name": [vc, ...] }
 GLOBAL_ROOMS: dict[str, list[voice_recv.VoiceRecvClient]] = {}
+
+
+# ============================================================
+# ルーム定義・参加状態の永続化（再起動復旧: 切れても死なない）
+# ============================================================
+def _room_to_dict(room: RoomConfig) -> dict:
+    return {
+        "name": room.name,
+        "owner_id": room.owner_id,
+        "owner_guild_id": room.owner_guild_id,
+        "max_servers": room.max_servers,
+        "private": bool(room.private),
+        "password": room.password,
+        "description": room.description,
+        "created_at": room.created_at,
+    }
+
+
+def _room_from_dict(data) -> Optional[RoomConfig]:
+    if not isinstance(data, dict):
+        return None
+    name = data.get("name")
+    if not isinstance(name, str) or not name:
+        return None
+    try:
+        return RoomConfig(
+            name=name,
+            owner_id=int(data.get("owner_id") or 0),
+            owner_guild_id=int(data.get("owner_guild_id") or 0),
+            max_servers=int(data.get("max_servers") or 0),
+            private=bool(data.get("private")),
+            password=str(data.get("password") or ""),
+            description=str(data.get("description") or ""),
+            created_at=float(data.get("created_at") or time.time()),
+        )
+    except (TypeError, ValueError):
+        return None
+
+
+def _persist_rooms() -> None:
+    """ROOMS の全定義をスナップショットへ書く。失敗してもルーム機能は止めない。"""
+    try:
+        store = voice_restore.get_store()
+        store.set_section("gvc_rooms", {name: _room_to_dict(room) for name, room in ROOMS.items()})
+        store.flush()
+    except Exception:
+        logger.debug("グローバルVC: ルーム定義の保存に失敗しました", exc_info=True)
+
+
+def _load_rooms() -> None:
+    """保存済みのルーム定義を ROOMS へ復元する（既にある名前は上書きしない）。"""
+    try:
+        saved = voice_restore.get_store().section("gvc_rooms")
+    except Exception:
+        logger.debug("グローバルVC: ルーム定義の読み込みに失敗しました", exc_info=True)
+        return
+    for name, data in saved.items():
+        room = _room_from_dict(data)
+        if room is not None and room.name not in ROOMS:
+            ROOMS[room.name] = room
+
+
+def _persist_join(guild_id: int, room_name: str, voice_channel_id, text_channel_id, user) -> None:
+    try:
+        store = voice_restore.get_store()
+        store.set_entry("gvc_joins", str(guild_id), {
+            "room_name": room_name,
+            "voice_channel_id": voice_channel_id,
+            "text_channel_id": text_channel_id,
+            "user_id": getattr(user, "id", None),
+            "user_name": str(getattr(user, "display_name", None) or getattr(user, "name", None) or ""),
+        })
+        store.flush()
+    except Exception:
+        logger.debug("グローバルVC: 参加状態の保存に失敗しました guild=%s", guild_id, exc_info=True)
+
+
+def _clear_join(guild_id: int) -> None:
+    try:
+        store = voice_restore.get_store()
+        store.set_entry("gvc_joins", str(guild_id), None)
+        store.flush()
+    except Exception:
+        logger.debug("グローバルVC: 参加状態の削除に失敗しました guild=%s", guild_id, exc_info=True)
 
 
 def _remove_vc_from_rooms(vc: voice_recv.VoiceRecvClient) -> Optional[str]:
@@ -543,6 +629,7 @@ class GlobalVCCog(commands.Cog):
         self._join_locks: dict[int, asyncio.Lock] = {}
 
     async def cog_load(self):
+        _load_rooms()
         self._playback_watchdog.start()
 
     async def cog_unload(self):
@@ -575,6 +662,7 @@ class GlobalVCCog(commands.Cog):
         外部から切断されたときもここが呼ばれるので、GLOBAL_ROOMS に古い接続が残らない。
         """
         def cleanup(reason: str) -> None:
+            _clear_join(guild_id)
             for clients in list(GLOBAL_ROOMS.values()):
                 for vc in list(clients):
                     if getattr(getattr(vc, "guild", None), "id", None) != guild_id:
@@ -622,6 +710,10 @@ class GlobalVCCog(commands.Cog):
             members = GLOBAL_ROOMS.setdefault(room_name, [])
             if vc not in members:
                 members.append(vc)
+            _persist_join(
+                guild.id, room_name, getattr(vc_channel, "id", None),
+                getattr(text_channel, "id", None), user,
+            )
 
             # 参加してきたサーバー自身はもちろん、すでに接続中の他サーバーも、止まっていれば再生を始める
             _start_room_playback(room_name)
@@ -632,6 +724,81 @@ class GlobalVCCog(commands.Cog):
         guild = getattr(vc, "guild", None)
         if guild is None or not await self.voice_sessions.release(guild.id, "global", reason=reason, notice=notice):
             await _disconnect_and_cleanup(vc)
+
+    # ------------------------------------------------------------
+    # 再起動復旧（切れても死なない）
+    # ------------------------------------------------------------
+    async def restore_after_restart(self) -> None:
+        """再起動前のルーム参加状態をスナップショットから復旧する（main.py の on_ready から呼ばれる）。
+
+        前回正常終了したかは問わない。保存済みの参加状態があれば常に
+        reconcile し、復旧できないギルド（ルーム・チャンネル消滅、人がいない、
+        再接続失敗）は参加スナップショットを掃除する。通知は送らない。
+        ルーム定義自体は cog_load で _load_rooms() が復元済みの前提。
+        """
+        _load_rooms()
+        try:
+            joins = voice_restore.get_store().section("gvc_joins")
+        except Exception:
+            logger.exception("グローバルVC: 参加状態の読み込みに失敗しました")
+            return
+        for guild_key, info in joins.items():
+            try:
+                guild_id = int(guild_key)
+            except (TypeError, ValueError):
+                continue
+            try:
+                restored = await self._restore_join(guild_id, info)
+            except Exception:
+                logger.exception("グローバルVC: guild %s の復旧に失敗しました", guild_key)
+                restored = False
+            if not restored:
+                _clear_join(guild_id)
+        try:
+            voice_restore.get_store().flush()
+        except Exception:
+            logger.debug("グローバルVC: 復旧後の保存に失敗しました", exc_info=True)
+
+    async def _restore_join(self, guild_id: int, info: dict) -> bool:
+        guild = self.bot.get_guild(guild_id)
+        if guild is None:
+            return False
+        room_name = info.get("room_name")
+        if not room_name or room_name not in ROOMS:
+            logger.info("グローバルVC: guild %s のルーム %s は存在しないため復旧しません", guild_id, room_name)
+            return False
+        channel = None
+        if info.get("voice_channel_id"):
+            channel = guild.get_channel(info["voice_channel_id"])
+        if channel is None:
+            logger.info("グローバルVC: guild %s の復旧先 VC が見つからないため復旧しません", guild_id)
+            return False
+        members = getattr(channel, "members", None) or []
+        if not any(not getattr(m, "bot", False) for m in members):
+            logger.info("グローバルVC: guild %s の VC に人がいないため復旧しません", guild_id)
+            return False
+        text_channel = None
+        if info.get("text_channel_id"):
+            text_channel = self.bot.get_channel(info["text_channel_id"])
+        user = None
+        user_id = info.get("user_id")
+        if user_id:
+            get_member = getattr(guild, "get_member", None)
+            user = get_member(user_id) if callable(get_member) else None
+        if user is None:
+            user = types.SimpleNamespace(
+                id=user_id or 0,
+                name=info.get("user_name") or "だれか",
+                display_name=info.get("user_name") or "だれか",
+            )
+        try:
+            await self._connect_room(guild, channel, user, text_channel or channel, room_name)
+        except Exception:
+            logger.warning("グローバルVC: guild %s のルーム %s へ再接続できないため復旧しません",
+                           guild_id, room_name, exc_info=True)
+            return False
+        logger.info("グローバルVC: guild %s のルーム %s 参加を復旧しました", guild_id, room_name)
+        return True
 
     # --------------------------------------------------
     # ルーム管理（/vc →「グローバルVCルーム」から呼ばれる）
@@ -663,6 +830,7 @@ class GlobalVCCog(commands.Cog):
             password=password,
             description=description,
         )
+        _persist_rooms()
 
         embed = discord.Embed(title=f"🌐 ルーム **{room_name}** を作成しました", color=0x2ECC71)
         embed.add_field(name="最大参加サーバー数", value="無制限" if max_servers == 0 else str(max_servers))
@@ -746,6 +914,7 @@ class GlobalVCCog(commands.Cog):
         GLOBAL_ROOMS.pop(room_name, None)
         ROOM_TEXT_LINKS.pop(room_name, None)
         del ROOMS[room_name]
+        _persist_rooms()
         await r.send(f"🗑️ ルーム **{room_name}** を削除しました (VC・グロチャの連携もすべて解除)。")
 
     # --------------------------------------------------
