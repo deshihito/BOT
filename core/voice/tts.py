@@ -468,7 +468,7 @@ class TTSCog(commands.Cog):
         if not await self.enqueue(r.guild, text, r.user.id):
             return await r.send("読み上げ待ちがいっぱいです。少し待ってからもう一度どうぞ。", ephemeral=True)
         cfg = self.get_settings(r.user.id)
-        await r.send(f"🗣️ 読み上げます（{await self._speaker_name(cfg.speaker)}）", ephemeral=True)
+        await r.send(f"🗣️ 読み上げます（{await self._speaker_name(cfg.speaker)}）")
 
     async def _resolve_speaker(self, value: str) -> int:
         value = value.strip()

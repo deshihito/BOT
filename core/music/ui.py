@@ -62,7 +62,7 @@ class SearchModal(discord.ui.Modal, title="YouTube 楽曲検索"):
         self.guild_id = guild_id
 
     async def on_submit(self, interaction: discord.Interaction):
-        await interaction.response.defer(ephemeral=True)
+        await interaction.response.defer()
         keyword = self.keyword_input.value.strip()
         state = self.cog.get_state(self.guild_id)
         
@@ -100,7 +100,7 @@ class SearchModal(discord.ui.Modal, title="YouTube 楽曲検索"):
                     ephemeral=True,
                 )
                 return
-            await interaction.followup.send(embed=we(f"{SUCCESS} **{filename}** をキューに追加しました！"), ephemeral=True)
+            await interaction.followup.send(embed=we(f"{SUCCESS} **{filename}** をキューに追加しました！"))
 
             # バグ修正: interaction.guild から voice_client を取得するように修正
             vc = interaction.guild.voice_client if interaction.guild else None
@@ -136,7 +136,7 @@ class CustomEQModal(discord.ui.Modal, title="カスタムEQ (FFmpegフィルタ�
         if not user_filter:
             state['eq'] = "flat"
             state['custom_eq_filter'] = None
-            await interaction.response.send_message(embed=we("<:gear:1564624326509203557> カスタムEQを解除しました（Flatに戻します）。"), ephemeral=True)
+            await interaction.response.send_message(embed=we("<:gear:1564624326509203557> カスタムEQを解除しました（Flatに戻します）。"))
         else:
             if not is_safe_custom_audio_filter(user_filter):
                 await interaction.response.send_message(
@@ -147,7 +147,7 @@ class CustomEQModal(discord.ui.Modal, title="カスタムEQ (FFmpegフィルタ�
                 return
             state['eq'] = "custom"
             state['custom_eq_filter'] = user_filter
-            await interaction.response.send_message(embed=we(f"<:gear:1564624326509203557> カスタムEQを設定しました:\n`{user_filter}`\n即時反映します。"), ephemeral=True)
+            await interaction.response.send_message(embed=we(f"<:gear:1564624326509203557> カスタムEQを設定しました:\n`{user_filter}`\n即時反映します。"))
 
         ctx = state['current_ctx'] or interaction
         await self.cog.apply_immediate_setting(ctx)
@@ -192,7 +192,7 @@ class VoiceControlView(discord.ui.View):
             state = self.cog.get_state(self.guild_id)
             previous_speed = state.get('speed', 1.0)
             state['speed'] = float(self.values[0])
-            await interaction.response.send_message(embed=we(f"<:thu:1563559478220038175> 再生速度を `{state['speed']}` 倍に設定しました（現在位置から即時反映）。"), ephemeral=True)
+            await interaction.response.send_message(embed=we(f"<:thu:1563559478220038175> 再生速度を `{state['speed']}` 倍に設定しました（現在位置から即時反映）。"))
             # ★ 古い current_ctx ではなく、いま操作した interaction を渡す
             await self.cog.apply_immediate_setting(interaction, elapsed_speed=previous_speed)
 
@@ -214,7 +214,7 @@ class VoiceControlView(discord.ui.View):
         async def callback(self, interaction: discord.Interaction):
             state = self.cog.get_state(self.guild_id)
             state['volume'] = float(self.values[0])
-            await interaction.response.send_message(embed=we(f"<:vol:1563559476265488414> 音量を `{int(state['volume']*100)}%` に設定しました（即時反映）。"), ephemeral=True)
+            await interaction.response.send_message(embed=we(f"<:vol:1563559476265488414> 音量を `{int(state['volume']*100)}%` に設定しました（即時反映）。"))
             # ★ 古い current_ctx ではなく、いま操作した interaction を渡す
             await self.cog.apply_immediate_setting(interaction)
 
@@ -241,7 +241,7 @@ class VoiceControlView(discord.ui.View):
             state = self.cog.get_state(self.guild_id)
             state['eq'] = self.values[0]
             state['custom_eq_filter'] = None
-            await interaction.response.send_message(embed=we(f"🎬 エフェクトを `{state['eq']}` に変更しました（即時反映）。"), ephemeral=True)
+            await interaction.response.send_message(embed=we(f"🎬 エフェクトを `{state['eq']}` に変更しました（即時反映）。"))
             # ★ current_ctx ではなく interaction を渡す。これが「次の曲に飛ぶ」バグの修正点。
             await self.cog.apply_immediate_setting(interaction)
 
@@ -264,7 +264,7 @@ class VoiceControlView(discord.ui.View):
             state['elapsed_offset'] += actual_played
             state['is_paused'] = True
             remove_audio_source(vc, "music", notify=True)
-            await interaction.response.send_message(embed=we(f"<:Pause:1561700510447312916> 再生を一時停止しました。(`{int(state['elapsed_offset'])}秒` 時点)"), ephemeral=True)
+            await interaction.response.send_message(embed=we(f"<:Pause:1561700510447312916> 再生を一時停止しました。(`{int(state['elapsed_offset'])}秒` 時点)"))
             await self.cog.update_panel(self.guild_id)
             self.cog._save_music_snapshot(self.guild_id)
         else:
@@ -276,7 +276,7 @@ class VoiceControlView(discord.ui.View):
         state = self.cog.get_state(self.guild_id)
         if vc and state['is_paused'] and state['current_track']:
             state['is_paused'] = False
-            await interaction.response.send_message(embed=we("▶️ 再生を再開します。"), ephemeral=True)
+            await interaction.response.send_message(embed=we("▶️ 再生を再開します。"))
             await self.cog.check_queue(self.guild_id)
             self.cog._save_music_snapshot(self.guild_id)
         else:
@@ -292,7 +292,7 @@ class VoiceControlView(discord.ui.View):
             state['elapsed_offset'] = 0
             state['is_paused'] = False
             remove_audio_source(vc, "music", notify=True)
-            await interaction.response.send_message(embed=we("<:skip_right:1564624324508262500> トラックをスキップしました。"), ephemeral=True)
+            await interaction.response.send_message(embed=we("<:skip_right:1564624324508262500> トラックをスキップしました。"))
         else:
             await interaction.response.send_message(embed=we("<:failed:1490986584676368535> 現在再生中の楽曲がありません。"), ephemeral=True)
 
@@ -301,7 +301,7 @@ class VoiceControlView(discord.ui.View):
         state = self.cog.get_state(self.guild_id)
         state['shuffle_enabled'] = not state.get('shuffle_enabled', False)
         label = 'ON' if state['shuffle_enabled'] else 'OFF'
-        await interaction.response.send_message(embed=we(f"<:shuffle:1563559485170122802> シャッフルを `{label}` に設定しました。"), ephemeral=True)
+        await interaction.response.send_message(embed=we(f"<:shuffle:1563559485170122802> シャッフルを `{label}` に設定しました。"))
         await self.cog.update_panel(self.guild_id)
         self.cog._save_music_snapshot(self.guild_id)
 
@@ -311,13 +311,13 @@ class VoiceControlView(discord.ui.View):
         next_mode = {'off': 'track', 'track': 'queue', 'queue': 'off'}[state.get('loop_mode', 'off')]
         state['loop_mode'] = next_mode
         labels = {'off': 'OFF', 'track': '1曲', 'queue': 'キュー'}
-        await interaction.response.send_message(embed=we(f"<:restart:1563559489121030184> ループを `{labels[next_mode]}` に設定しました。"), ephemeral=True)
+        await interaction.response.send_message(embed=we(f"<:restart:1563559489121030184> ループを `{labels[next_mode]}` に設定しました。"))
         await self.cog.update_panel(self.guild_id)
         self.cog._save_music_snapshot(self.guild_id)
 
     @discord.ui.button(label="📋", style=discord.ButtonStyle.secondary, row=4)
     async def queue_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.send_message(embed=self.cog.build_queue_embed(self.guild_id), ephemeral=True)
+        await interaction.response.send_message(embed=self.cog.build_queue_embed(self.guild_id))
 
     @discord.ui.button(label="📚", style=discord.ButtonStyle.secondary, row=4)
     async def library_button(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -344,7 +344,7 @@ class VoiceControlView(discord.ui.View):
             while not state['queue'].empty():
                 state['queue'].get_nowait()
             remove_audio_source(vc, "music", notify=True)
-            await interaction.response.send_message(embed=we("<:reset:1563559487351160972> 再生を完全に停止し、キューをクリアしました。"), ephemeral=True)
+            await interaction.response.send_message(embed=we("<:reset:1563559487351160972> 再生を完全に停止し、キューをクリアしました。"))
             await self.cog.update_panel(self.guild_id)
             self.cog._save_music_snapshot(self.guild_id)
         else:

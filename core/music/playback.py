@@ -493,7 +493,7 @@ class PlaybackMixin:
             await asyncio.sleep(0.05)
         state['is_changing_setting'] = False
         await self.check_queue(interaction.guild_id)
-        await interaction.response.send_message(embed=we(f"再生位置を `{int(seconds)}秒` に移動しました。"), ephemeral=True)
+        await interaction.response.send_message(embed=we(f"再生位置を `{int(seconds)}秒` に移動しました。"))
 
 
     async def _pause_impl(self, interaction: discord.Interaction):
