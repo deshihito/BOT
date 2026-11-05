@@ -70,6 +70,10 @@ class TranslationView(discord.ui.View):
         self.target_locale = settings["target_locale"]
         self.refresh()
 
+    async def interaction_check(self, interaction) -> bool:
+        # 公開パネル化（ephemeral第2波）: 操作は本人のみ。
+        return interaction.user.id == self.user_id
+
     def refresh(self):
         self.clear_items()
         self.add_item(TranslationLocaleSelect(self, source=True))

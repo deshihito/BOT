@@ -339,6 +339,10 @@ class ShortcutManagerView(discord.ui.View):
         super().__init__(timeout=300)
         self.cog, self.guild_id, self.user_id = cog, guild_id, user_id
 
+    async def interaction_check(self, interaction) -> bool:
+        # 公開パネル化（ephemeral第2波）: 操作は本人のみ。
+        return interaction.user.id == self.user_id
+
     def embed(self, notice: str | None = None):
         rows = shortcuts.for_user(guild_settings.get_store(), self.guild_id, self.user_id)
         lines = [f"`{x['trigger']}` → {x.get('action', {}).get('root')}/{x.get('action', {}).get('value')}" for x in rows]

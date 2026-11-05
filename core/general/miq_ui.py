@@ -158,6 +158,10 @@ class MiqSettingsView(discord.ui.View):
         self.fonts = _miq_available_fonts()
         self.refresh()
 
+    async def interaction_check(self, interaction) -> bool:
+        # 公開パネル化（ephemeral第2波）: 設定は本人のものなので操作は本人のみ。
+        return interaction.user.id == self.user_id
+
     def current_font_key(self) -> str:
         keys = [key for key, _label, _path in self.fonts]
         return self.prefs.get("font") if self.prefs.get("font") in keys else keys[0]
