@@ -54,14 +54,15 @@ RATE_MAX = 1000.0
 
 #: tick 間隔（秒）。レートはこの周期でのみ進む。
 TICK_SECONDS = 300
-#: 1 tick の基礎ボラティリティ（σ）。攻撃的推奨パラメータ（検証済み）。
-SIGMA = 0.008
-#: トレンドの再抽選確率と振幅（±0.3%/tick まで）。
+#: 1 tick の基礎ボラティリティ（σ）。stable チューニング（検証済み:
+#: 90日×100試行で日次変動平均 約3%・全試行 88.5〜111.5。fx_sim_v3_stable）。
+SIGMA = 0.003
+#: トレンドの再抽選確率と振幅（±0.1%/tick まで）。
 TREND_SWITCH_P = 0.005
-TREND_MAX = 0.003
-#: ニュースの発生確率と衝撃の標準偏差（±8% 級）。
-NEWS_P = 0.006
-NEWS_SD = 0.08
+TREND_MAX = 0.001
+#: ニュースの発生確率と衝撃の標準偏差（±3% 級）。
+NEWS_P = 0.003
+NEWS_SD = 0.03
 #: ニュース文（AGO 世界観で新規作成。プラス方向3種・マイナス方向3種）。
 NEWS_POSITIVE = (
     "アゴの目撃情報が急増している",
@@ -75,16 +76,16 @@ NEWS_NEGATIVE = (
 )
 
 #: 売買フローによる価格インパクト（逓減型 tanh）。次回 tick に織り込む。
-IMPACT_COEF = 0.006
+IMPACT_COEF = 0.003
 IMPACT_SCALE_AGA = 50_000.0
 
 #: バンド反発。バンド内（アンカーの 1/2〜2倍）は弱く、外では強める。
-BAND_K_BASE = 0.01
+BAND_K_BASE = 0.02
 BAND_K_EXTRA = 0.08
-#: 1 tick の変動 clamp（±3%）。
-TICK_CLAMP = 0.03
-#: 1日の変動が ±20% を超えたら反発を強める。
-DAY_SOFT_CAP_LOG = math.log(1.2)
+#: 1 tick の変動 clamp（±1.5%）。
+TICK_CLAMP = 0.015
+#: 1日の変動が ±10% を超えたら反発を強める。
+DAY_SOFT_CAP_LOG = math.log(1.1)
 DAY_PULLBACK = 0.05
 
 #: 売買手数料（売買とも 1%）。半分は消却、半分はプールへ還流する。

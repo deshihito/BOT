@@ -47,7 +47,8 @@ EXP_STORE_KEY = "exp"
 # ジャンル説明は、ラベルや配下の機能名から読み取れない情報がある場合だけ書く。
 # 機能名の列挙は書かない（空文字 = 説明なし）。
 GENERAL_GENRES = {
-    "economy": ("コイン・ランキング", ""),
+    "money": ("マネー", ""),
+    "rta": ("RTAランキング", ""),
     "exp": ("EXP・レベル", "チャット・VC・generalのEXPとレベル"),
     "survival": ("生存確認", "メンバーの安否・不在の検知"),
     "custom": ("設定・AI", ""),
@@ -57,13 +58,15 @@ GENERAL_GENRES = {
     "meme": ("meme作成", "画像に上下テキストを入れてmeme画像を作成する"),
 }
 GENERAL_ACTIONS = {
-    "economy": [
+    "money": [
         ("プレイヤー状況", "status"),
         ("コイン送金", "pay"),
         ("市場", "market"),
         ("アゴトークンを買う", "token_buy"),
         ("アゴトークンを売る", "token_sell"),
         ("コイン保有ランキング", "coin_leaderboard"),
+    ],
+    "rta": [
         ("bump RTAランキング", "bump_leaderboard"),
         ("up RTAランキング", "up_leaderboard"),
     ],
@@ -4943,7 +4946,7 @@ class GeneralCog(commands.Cog):
         wallet = self.bot.get_cog("WalletCog")
         fujo = self.bot.get_cog("FujoSurvival")
 
-        # ===== 経済系 =====
+        # ===== マネー系 =====
         if value in {"market", "token_buy", "token_sell"}:
             market_cog = self.bot.get_cog("MarketCog")
             if market_cog is None:

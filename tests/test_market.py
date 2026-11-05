@@ -48,15 +48,17 @@ class RateEngineTest(unittest.TestCase):
             for i in range(30 * 24 * 12):  # 30日分
                 rates.append(store.tick(now + timedelta(minutes=5 * i)))
             self.assertTrue(all(market.RATE_MIN <= r <= market.RATE_MAX for r in rates))
-            self.assertGreaterEqual(rates[-1], 40)
-            self.assertLessEqual(rates[-1], 250)
-            self.assertGreater(min(rates), 50)
-            self.assertLess(max(rates), 200)
+            # stable チューニング前提の範囲（90日検証で全試行 88.5〜111.5）。
+            # seed 42 の30日ラン実測は final 104.6 / min 91.2 / max 109.0。
+            self.assertGreaterEqual(rates[-1], 85)
+            self.assertLessEqual(rates[-1], 115)
+            self.assertGreater(min(rates), 85)
+            self.assertLess(max(rates), 115)
 
     def test_tick_change_is_clamped(self):
         class LoudRandom(_QuietRandom):
             def gauss(self, mu, sigma):
-                return 10.0  # 極端なノイズでも ±3% に収まること
+                return 10.0  # 極端なノイズでも clamp（±1.5%）に収まること
 
         with tempfile.TemporaryDirectory() as tmp:
             store = _store(tmp, LoudRandom())
