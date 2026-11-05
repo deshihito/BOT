@@ -126,5 +126,86 @@ class PanelV2StateTest(unittest.IsolatedAsyncioTestCase):
         self.assertIs(interaction.response.edit_message.call_args.kwargs["view"], wrapped)
 
 
+class PanelV2MediaAndTruncationTest(unittest.IsolatedAsyncioTestCase):
+    """§4.2-8/12: 画像の MediaGallery 保持、添付の再供給、切断の明示。"""
+
+    def _panel_with_embed(self, embed):
+        panel = discord.ui.View(timeout=300)
+        panel.embed = lambda: embed
+        return panel
+
+    def test_panel_layout_keeps_embed_image_as_media_gallery(self):
+        from core.panel_v2 import as_panel_v2
+
+        embed = discord.Embed(title="盤面")
+        embed.set_image(url="attachment://board.png")
+        embed.set_thumbnail(url="https://example.com/thumb.png")
+        wrapped = as_panel_v2(self._panel_with_embed(embed))
+        container = wrapped.children[0]
+        galleries = [c for c in container.children if isinstance(c, discord.ui.MediaGallery)]
+        self.assertEqual(len(galleries), 1)
+        urls = [item.media.url for item in galleries[0].items]
+        self.assertEqual(urls, ["attachment://board.png", "https://example.com/thumb.png"])
+
+    def test_embed_layout_keeps_image_and_text(self):
+        from core.panel_v2 import as_embed_v2
+
+        embed = discord.Embed(title="結果", description="本文")
+        embed.set_image(url="https://example.com/result.png")
+        view = as_embed_v2(embed)
+        container = view.children[0]
+        kinds = [type(c).__name__ for c in container.children]
+        self.assertEqual(kinds, ["TextDisplay", "MediaGallery"])
+
+    def test_no_gallery_without_images(self):
+        from core.panel_v2 import as_embed_v2
+
+        view = as_embed_v2(discord.Embed(title="題のみ"))
+        container = view.children[0]
+        self.assertEqual([type(c).__name__ for c in container.children], ["TextDisplay"])
+
+    def test_long_embed_is_truncated_with_marker_and_warning(self):
+        from core import panel_v2
+
+        embed = discord.Embed(title="長文", description="あ" * 5000)
+        with self.assertLogs(panel_v2.logger, level="WARNING"):
+            text = panel_v2.embed_text(embed)
+        self.assertLessEqual(len(text), panel_v2.TEXT_DISPLAY_LIMIT)
+        self.assertTrue(text.endswith(panel_v2.TRUNCATION_MARKER))
+
+    def test_short_embed_has_no_truncation_marker(self):
+        from core import panel_v2
+
+        text = panel_v2.embed_text(discord.Embed(title="短文", description="本文"))
+        self.assertNotIn(panel_v2.TRUNCATION_MARKER, text)
+
+    async def test_edit_panel_v2_passes_files_instead_of_clearing(self):
+        import io
+
+        from core.panel_v2 import as_panel_v2, edit_panel_v2
+
+        wrapped = as_panel_v2(self._panel_with_embed(discord.Embed(title="x")))
+        edit_message = AsyncMock()
+        interaction = types.SimpleNamespace(
+            response=types.SimpleNamespace(is_done=lambda: False, edit_message=edit_message),
+        )
+        file = discord.File(io.BytesIO(b"png"), filename="board.png")
+        await edit_panel_v2(interaction, wrapped, files=[file])
+        kwargs = edit_message.call_args.kwargs
+        self.assertEqual(kwargs["attachments"], [file])
+        self.assertIs(kwargs["view"], wrapped)
+
+    async def test_edit_message_v2_passes_files(self):
+        import io
+
+        from core.panel_v2 import edit_message_v2
+
+        message = types.SimpleNamespace(edit=AsyncMock())
+        view = discord.ui.LayoutView(timeout=None)
+        file = discord.File(io.BytesIO(b"png"), filename="board.png")
+        await edit_message_v2(message, view, files=[file])
+        self.assertEqual(message.edit.call_args.kwargs["attachments"], [file])
+
+
 if __name__ == "__main__":
     unittest.main()
