@@ -180,6 +180,8 @@ COMMAND_META: dict[str, dict] = {
                        "hidden": True},
     "!logs": {"category": "admin", "summary": "サーバー側のログを取得します", "permissions": ["bot_admin"],
               "usage": "!logs [行数] [重要度]", "hidden": True},
+    "!usage_stats": {"category": "admin", "summary": "コマンドと機能の利用統計を表示します", "permissions": ["bot_admin"],
+                     "usage": "!usage_stats [reset]", "hidden": True},
     "!sttdebug": {"category": "admin", "summary": "文字起こしのデバッグ情報を表示します", "hidden": True},
     "!check_api": {"category": "admin", "summary": "入っているライブラリの一覧を表示します", "permissions": ["bot_admin"],
                    "hidden": True},

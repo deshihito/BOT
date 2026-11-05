@@ -9,7 +9,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
-from core import action_usage, party_ranking
+from core import action_usage, party_ranking, usage_stats
 from core.emojis import BACK
 from core.game_guides import GAME_GUIDES, GAME_ORDER, guide_for_discord
 from core.panel_v2 import as_panel_v2, edit_panel_v2
@@ -407,6 +407,8 @@ class GameHub(commands.Cog):
             getattr(getattr(interaction, "user", None), "id", None),
             f"game:game:{game_id}",
         )
+        # 管理者向け総量統計も同じ入口で数える（個人履歴とは別集計）。
+        usage_stats.record_action_safely(f"game:game:{game_id}")
         cog = self.bot.get_cog(GAME_COGS[game_id])
         if cog is None or not hasattr(cog, "start_recruit"):
             name = GAME_GUIDES[game_id]["name"]
