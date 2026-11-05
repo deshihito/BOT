@@ -35,8 +35,10 @@
 対象外（理由は各 cog ではなく本フェーズの報告に集約）:
     jinrou / wordwolf（Event 駆動のフェーズ機械で途中状態を再構築できない）、
     janken（同時選択の短時間ラウンド＋賭けコインのエスクロー途中）、
-    poker（対局全体が 60 秒の交換受付 1 回）、doubt（ダウト受付の
-    リアルタイムウィンドウを含む）、ngword（手番のない会話常駐型）、
+    poker（チップ制テーブル。対局は復旧しないが、預かりチップは
+    cogs/poker.py の台帳 data/poker_chips.json で起動時に全額返金する）、
+    doubt（ダウト受付のリアルタイムウィンドウを含む）、
+    ngword（手番のない会話常駐型）、
     dungeon / seizon（大規模 RPG で別途設計対象）、guess / flash / dice
     （セッション自体が無い一発勝負）。
 """
