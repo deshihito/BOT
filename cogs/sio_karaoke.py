@@ -18,6 +18,7 @@ from discord.ext import commands
 from discord.ext import voice_recv
 
 from core.legacy import Responder
+from core import vc_feature_restore
 from core.vosk_model import ensure_model
 from core.voice_session import VoiceBusy, get_manager
 from core.voice_recv_patch import patch_voice_recv_client
@@ -260,20 +261,8 @@ class KaraokeCog(commands.Cog):
         except Exception as e:
             return await r.send(embed=we(f"<:failed:1490986584676368535> VC接続に失敗しました: `{e}`"))
 
-        async def send_lyrics_subtitle(display_name: str, avatar_url: str | None, text: str):
-            async with aiohttp.ClientSession() as session:
-                wh_obj = discord.Webhook.from_url(webhook.url, session=session)
-                try:
-                    await wh_obj.send(
-                        content=f"{MUSIC} {text}",
-                        username=f"🎤 {display_name}",
-                        avatar_url=avatar_url,
-                        _agobot_skip_localization=True,
-                    )
-                except Exception as ex:
-                    logger.error(f"[Webhook Error] {ex}")
-
-        sink = KaraokeSink(bot=self.bot, vc=vc, vosk_model=self.vosk_model, callback_coro=send_lyrics_subtitle)
+        sink = KaraokeSink(bot=self.bot, vc=vc, vosk_model=self.vosk_model,
+                           callback_coro=self._make_subtitle_sender(webhook))
         vc.listen(sink)
 
         self.sessions[guild_id] = {
@@ -282,6 +271,7 @@ class KaraokeCog(commands.Cog):
             "target_lyrics": target_lyrics,
             "start_time": time.time()
         }
+        self._save_resume_snapshot(guild_id, vc_channel, r.channel, r.user, target_lyrics)
 
         await r.send(embed=we(
             f"🎤 **{vc_channel.name}** でカラオケを開始しました！\n\n"
@@ -329,6 +319,7 @@ class KaraokeCog(commands.Cog):
     def _cleanup(self, guild_id: int):
         """VC を手放すときの後片付け（切断は VoiceSessionManager が行う）。"""
         def cleanup(reason: str) -> None:
+            vc_feature_restore.clear_feature("karaoke", guild_id)
             session = self.sessions.pop(guild_id, None)
             if not session:
                 return
@@ -338,6 +329,120 @@ class KaraokeCog(commands.Cog):
             except Exception:
                 logger.debug("カラオケ: 後片付けの受信停止に失敗しました", exc_info=True)
         return cleanup
+
+    def _make_subtitle_sender(self, webhook):
+        """歌詞字幕を Webhook へ送るコールバック（開始時・再開時で共用）。"""
+        async def send_lyrics_subtitle(display_name: str, avatar_url: str | None, text: str):
+            async with aiohttp.ClientSession() as session:
+                wh_obj = discord.Webhook.from_url(webhook.url, session=session)
+                try:
+                    await wh_obj.send(
+                        content=f"{MUSIC} {text}",
+                        username=f"🎤 {display_name}",
+                        avatar_url=avatar_url,
+                        _agobot_skip_localization=True,
+                    )
+                except Exception as ex:
+                    logger.error(f"[Webhook Error] {ex}")
+        return send_lyrics_subtitle
+
+    # --------------------------------------------------
+    # 再起動後の自動再開（main.py の on_ready から呼ばれる）
+    # --------------------------------------------------
+    def _save_resume_snapshot(self, guild_id: int, voice_channel, text_channel, user, target_lyrics: str) -> None:
+        """再開に必要な情報だけを保存する（歌唱履歴・採点は保存しない）。"""
+        vc_feature_restore.save_feature("karaoke", guild_id, vc_feature_restore.build_entry(
+            voice_channel_id=getattr(voice_channel, "id", None),
+            text_channel_id=getattr(text_channel, "id", None),
+            user=user,
+            settings={"target_lyrics": target_lyrics},
+        ))
+
+    async def restore_after_restart(self) -> None:
+        """再起動前にカラオケ中だったギルドで、同じお題の新規セッションとして再開する。
+
+        歌唱履歴（採点のもと）はプロセスと一緒に失われているため復元はしない。
+        復旧できないギルド（ギルド・チャンネル消滅、人がいない、モデル不備）は
+        スナップショットを掃除する。
+        """
+        entries = vc_feature_restore.feature_entries("karaoke")
+        for guild_id, snapshot in entries.items():
+            try:
+                restored = await self._restore_session(guild_id, snapshot)
+            except Exception:
+                logger.exception("guild %s: カラオケの自動再開に失敗しました", guild_id)
+                restored = False
+            if not restored:
+                vc_feature_restore.clear_feature("karaoke", guild_id)
+        vc_feature_restore.flush_store()
+
+    async def _restore_session(self, guild_id: int, snapshot: dict) -> bool:
+        settings = snapshot.get("settings")
+        if settings is None:
+            settings = {}
+        elif not isinstance(settings, dict):
+            return False  # settings が壊れているスナップショットは復旧対象にしない
+        target_lyrics = settings.get("target_lyrics")
+        if not target_lyrics or not str(target_lyrics).strip():
+            return False
+        guild = self.bot.get_guild(guild_id)
+        if guild is None:
+            return False
+        channel_id = snapshot.get("voice_channel_id")
+        channel = guild.get_channel(channel_id) if channel_id else None
+        if channel is None:
+            logger.info("guild %s: 復旧先の VC が見つからないためカラオケを再開しません", guild_id)
+            return False
+        if not vc_feature_restore.has_humans(channel):
+            logger.info("guild %s: VC に人がいないためカラオケを再開しません", guild_id)
+            return False
+        text_channel = None
+        if snapshot.get("text_channel_id"):
+            text_channel = self.bot.get_channel(snapshot["text_channel_id"])
+        if text_channel is None:
+            logger.info("guild %s: 字幕の送信先が見つからないためカラオケを再開しません", guild_id)
+            return False
+        if guild_id in self.sessions:
+            return False
+        # モデルが無いときは VC に入る前に断る（開始時と同じ）。
+        problem = await ensure_model(self, Model, MODEL_PATH)
+        if problem:
+            logger.info("guild %s: 音声認識モデルが使えないためカラオケを再開しません", guild_id)
+            return False
+        user = vc_feature_restore.resolve_user(guild, snapshot)
+        try:
+            webhook = await self._get_or_create_webhook(text_channel)
+            vc = await self.voice_sessions.acquire(
+                guild, channel, "karaoke", user,
+                cleanup=self._cleanup(guild_id), text_channel=text_channel, timeout=30.0,
+            )
+        except Exception:
+            logger.warning("guild %s: VC へ再接続できないためカラオケを再開しません", guild_id, exc_info=True)
+            return False
+
+        sink = KaraokeSink(bot=self.bot, vc=vc, vosk_model=self.vosk_model,
+                           callback_coro=self._make_subtitle_sender(webhook))
+        vc.listen(sink)
+
+        self.sessions[guild_id] = {
+            "sink": sink,
+            "vc": vc,
+            "target_lyrics": target_lyrics,
+            "start_time": time.time()
+        }
+        self._save_resume_snapshot(guild_id, channel, text_channel, user, target_lyrics)
+
+        try:
+            await text_channel.send(embed=we(
+                f"🎤 **{getattr(channel, 'name', '')}** でカラオケを再開しました！（Botの再起動による自動再開）\n\n"
+                f"📜 **お題の歌詞:**\n```\n{target_lyrics}\n```\n"
+                "歌った声がリアルタイムで字幕表示されます。終わったら `/voice のパネルからカラオケ採点` で採点！\n"
+                "※ 採点の履歴はリセットされています。"
+            ))
+        except Exception:
+            logger.debug("カラオケ: 再開通知の送信に失敗しました", exc_info=True)
+        logger.info("guild %s: カラオケを自動再開しました", guild_id)
+        return True
 
 
 async def setup(bot: commands.Bot):

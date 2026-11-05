@@ -23,6 +23,7 @@
       "gvc_rooms": {"<room_name>": {...}},  # グローバルVC のルーム定義
       "gvc_joins": {"<guild_id>": {...}}    # グローバルVC の参加状態
       "gvc_text_links": {"<room_name>": {"links": [...]}}  # グロチャのテキスト連携
+      "vc_features": {"<guild_id>:<feature>": {...}}  # 録音/カラオケ/文字起こし/ボイチェンの再開用設定
     }
 """
 from __future__ import annotations
@@ -40,7 +41,7 @@ logger = logging.getLogger(__name__)
 
 _DEFAULT_PATH = Path(__file__).resolve().parent.parent / "data" / "voice_restore.json"
 
-SECTIONS = ("sessions", "music", "gvc_rooms", "gvc_joins", "gvc_text_links")
+SECTIONS = ("sessions", "music", "gvc_rooms", "gvc_joins", "gvc_text_links", "vc_features")
 
 FLUSH_EVERY_EVENTS = 5
 FLUSH_INTERVAL_SECONDS = 10.0
