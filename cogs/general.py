@@ -29,7 +29,7 @@ from core.panel_v2 import as_panel_v2, edit_panel_v2
 from core import action_registry, action_usage, ai_omnirush, ai_preferences, ai_provider_router, guild_settings, levelup_card, logfare, shortcuts, usage_stats
 from core.game_guides import GAME_GUIDES, GAME_ORDER
 from core import localization, translation
-from core.messages import CIRCULATION_NOT_LOADED, GAMBLING_NOT_LOADED, ITEMS_NOT_LOADED, MARKET_NOT_LOADED, WORKSHOP_NOT_LOADED
+from core.messages import CIRCULATION_NOT_LOADED, GAMBLING_NOT_LOADED, ITEMS_NOT_LOADED, MARKET_NOT_LOADED, MONEY_PANEL_NOT_LOADED, WORKSHOP_NOT_LOADED
 from core.libretranslate import LibreTranslateClient, LibreTranslateError
 
 logger = logging.getLogger(__name__)
@@ -283,6 +283,12 @@ class GeneralCog(
         fujo = self.bot.get_cog("FujoSurvival")
 
         # ===== マネー系 =====
+        if value == "money_panel":
+            panel_cog = self.bot.get_cog("MoneyPanelCog")
+            if panel_cog is None:
+                return await self._safe_respond(interaction, MONEY_PANEL_NOT_LOADED)
+            return await panel_cog.show_panel(interaction)
+
         if value in {"items", "item_buy", "item_use", "box_open"}:
             items_cog = self.bot.get_cog("ItemsCog")
             if items_cog is None:
