@@ -95,6 +95,7 @@ class AutoModSettingsTest(unittest.IsolatedAsyncioTestCase):
                 "max_mentions": 5,
                 "caps_percent": 70,
                 "timeout_minutes": 0,
+                "spam_count": 0,
             },
         )
 
