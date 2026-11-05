@@ -44,7 +44,7 @@ def _item_name(item_id: str) -> str:
 
 def _tier_lines() -> list[str]:
     lines = []
-    for tier in workshop_core.MACHINE_TIERS.values():
+    for tier_id, tier in workshop_core.MACHINE_TIERS.items():
         materials = "・".join(
             items_core.ITEM_DEFS[item_id]["name"] for item_id, _w in tier["production"])
         line = (
@@ -54,7 +54,12 @@ def _tier_lines() -> list[str]:
         )
         if tier["rare_rate"] > 0:
             line += f"、レア素材 {tier['rare_rate'] * 100:.0f}%"
-        line += "）"
+        line += (
+            f"、寿命{tier['lifespan_cycles']}サイクル"
+            f"（満稼働で約{workshop_core.lifetime_days(tier_id):.0f}日）で"
+            f"消える使い捨て、寿命までの生産見込み"
+            f"約{workshop_core.lifetime_expected_value(tier_id):,.0f} AGO相当）"
+        )
         lines.append(line)
     return lines
 
@@ -74,7 +79,11 @@ def _workshop_embed(cog: "WorkshopCog", user_id: int) -> discord.Embed:
             state = f"生産完了 **{pending} サイクル分**"
             if pending >= max_cycles:
                 state += "（貯蔵上限で停止中）"
-            lines.append(f"・{tier['name']} — {state}")
+            if pending >= int(machine.get("cycles_left", 0)):
+                state += "（受け取ると寿命が尽きます）"
+            lines.append(
+                f"・{tier['name']} — {state}"
+                f"／残り寿命 {machine.get('cycles_left', 0)} サイクル")
         embed.add_field(name="所有加工機", value="\n".join(lines), inline=False)
     else:
         embed.add_field(name="所有加工機", value="（なし）", inline=False)
@@ -334,6 +343,8 @@ class WorkshopCog(commands.Cog):
             return (
                 f"✅ **{tier['name']}を購入しました**\n"
                 f"{price:,} AGO（{tier['cycle_hours']}時間ごとに素材を生産します）\n"
+                f"寿命は{tier['lifespan_cycles']}サイクル分"
+                f"（満稼働で約{workshop_core.lifetime_days(tier_id):.0f}日）の使い捨てです\n"
                 f"コイン残高: {debit:,} AGO"
             )
         except items_core.ItemError as exc:
@@ -354,6 +365,10 @@ class WorkshopCog(commands.Cog):
             lines = [f"✅ **生産物を {result['cycles']} サイクル分受け取りました**"]
             for item_id, count in sorted(result["items"].items()):
                 lines.append(f"・{_item_name(item_id)} ×{count}")
+            for tier_id in result.get("exhausted", []):
+                lines.append(
+                    f"・{workshop_core.MACHINE_TIERS[tier_id]['name']}"
+                    " は寿命が尽きて使えなくなりました（使い捨て）")
             if result["bonus_rate"] > 0:
                 lines.append(
                     f"連続稼働ストリーク {result['streak_days']} 日"

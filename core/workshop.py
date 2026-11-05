@@ -8,6 +8,9 @@
 形: コインで加工機を買う → 時間経過で合成素材が生産される →
 claim で受け取る（lazy 決済。ユーザー別常駐タスクも経過通知も無し）。
 生産物はコインではなく素材に限定する（コインを直接湧かせない）。
+加工機は原典の焼き釜と同じ使い捨てで、寿命（決済サイクル数）を
+使い切ると消える。価格は寿命までの総生産 EV のおよそ半分に置き、
+回し切れば元が取れて利益が残るようにしてある。
 
 保存は core/items.py と同じ流儀: 専用 JSON（既定 data/workshop.json、
 環境変数 WORKSHOP_DATA_PATH で変更可）にメモリ主体＋バッチフラッシュ
@@ -37,17 +40,21 @@ logger = logging.getLogger(__name__)
 # 経済定数（Phase 3 の暫定値。価格の絶対値は AGO のコイン分布の実測後に調整する）
 # ---------------------------------------------------------------------------
 
-#: 加工機ティア。price は暫定値で、想定価値ベースの生産 EV から
-#: 「回収期間（満稼働でも元が取れるまでの日数）が60日以上」になるよう置いた。
-#: 計算根拠は production_expected_value() と payback_days() を参照。
+#: 加工機ティア（使い捨てモデル）。lifespan_cycles が寿命で、生産サイクルが
+#: 決済されるたびに1ずつ減り、0になった加工機は消える（買い直し前提）。
+#: price は暫定値で、寿命までの総生産 EV（lifespan_cycles × 1サイクルEV）の
+#: およそ半分（40〜60%の範囲）に置いた。満稼働で回し切れば元が取れて
+#: 利益が残る計算。計算根拠は production_expected_value() と
+#: lifetime_expected_value() を参照。
 #: production はレア枠を除いた通常素材の重みテーブル、rare_rate の確率で
 #: rare_item（強化合金）が出る。max_cycles = storage_hours // cycle_hours。
 MACHINE_TIERS: dict[str, dict[str, Any]] = {
     "small": {
         "name": "小型加工機",
-        "price": 75000,
+        "price": 2800,
         "cycle_hours": 4,
         "storage_hours": 8,
+        "lifespan_cycles": 36,
         "production": (("scrap", 70), ("metal_piece", 30)),
         "rare_item": "reinforced_alloy",
         "rare_rate": 0.0,
@@ -55,9 +62,10 @@ MACHINE_TIERS: dict[str, dict[str, Any]] = {
     },
     "auto": {
         "name": "自動加工機",
-        "price": 190000,
+        "price": 10000,
         "cycle_hours": 6,
         "storage_hours": 12,
+        "lifespan_cycles": 40,
         "production": (("scrap", 55), ("metal_piece", 30), ("circuit_piece", 10)),
         "rare_item": "reinforced_alloy",
         "rare_rate": 0.05,
@@ -65,9 +73,10 @@ MACHINE_TIERS: dict[str, dict[str, Any]] = {
     },
     "large": {
         "name": "大型加工機",
-        "price": 250000,
+        "price": 19000,
         "cycle_hours": 8,
         "storage_hours": 24,
+        "lifespan_cycles": 42,
         "production": (("scrap", 45), ("metal_piece", 30), ("circuit_piece", 13)),
         "rare_item": "reinforced_alloy",
         "rare_rate": 0.12,
@@ -109,11 +118,16 @@ def production_expected_value(tier_id: str) -> float:
     return (1.0 - rare_rate) * normal_ev + rare_rate * _material_value(tier["rare_item"])
 
 
-def payback_days(tier_id: str) -> float:
-    """満稼働（24h 回し続けた場合）で購入価格を回収できるまでの日数。"""
+def lifetime_expected_value(tier_id: str) -> float:
+    """寿命（lifespan_cycles）まで回し切った場合の総生産 EV（AGO 換算）。"""
     tier = MACHINE_TIERS[tier_id]
-    daily_ev = production_expected_value(tier_id) * (24.0 / tier["cycle_hours"])
-    return tier["price"] / daily_ev
+    return production_expected_value(tier_id) * int(tier["lifespan_cycles"])
+
+
+def lifetime_days(tier_id: str) -> float:
+    """満稼働（24h 回し続けた場合）で寿命を使い切るまでの日数。"""
+    tier = MACHINE_TIERS[tier_id]
+    return int(tier["lifespan_cycles"]) * float(tier["cycle_hours"]) / 24.0
 
 
 def streak_bonus_rate(streak_days: int) -> float:
@@ -144,7 +158,19 @@ def _clean_state(raw: Any) -> dict[str, Any]:
             tier = machine.get("tier")
             anchor = machine.get("anchor")
             if tier in MACHINE_TIERS and isinstance(anchor, str):
-                machines.append({"tier": tier, "anchor": anchor})
+                lifespan = int(MACHINE_TIERS[tier]["lifespan_cycles"])
+                raw_left = machine.get("cycles_left")
+                if isinstance(raw_left, int) and not isinstance(raw_left, bool):
+                    cycles_left = min(max(raw_left, 0), lifespan)
+                else:
+                    # 恒久モデル時代の保存形式（耐久なし）は、没収せず
+                    # そのティアの満タン耐久を付与して消耗モデルへ移行する。
+                    cycles_left = lifespan
+                if cycles_left > 0:
+                    machines.append({
+                        "tier": tier, "anchor": anchor,
+                        "cycles_left": cycles_left,
+                    })
         commissions = []
         for job in entry.get("commissions") or []:
             if not isinstance(job, dict):
@@ -244,7 +270,11 @@ class WorkshopStore:
             return copy.deepcopy(self._user_locked(str(user_id))["commissions"])
 
     def commission_slots(self, user_id: str) -> int:
-        """委託加工の並行上限（所有する最上位ティアで決まる。未所有は0）。"""
+        """委託加工の並行上限（所有する最上位ティアで決まる。未所有は0）。
+
+        状態に残っている加工機はすべて寿命（cycles_left）が残っている
+        ものだけなので、「寿命の残っている加工機を所有」が条件になる。
+        """
         with self._lock:
             machines = self._user_locked(str(user_id))["machines"]
             return max(
@@ -269,7 +299,9 @@ class WorkshopStore:
             return 0
         cycle_seconds = tier["cycle_hours"] * 3600
         accrued = min(elapsed, tier["storage_hours"] * 3600)
-        return min(self._max_cycles(tier), int(accrued // cycle_seconds))
+        cycles = min(self._max_cycles(tier), int(accrued // cycle_seconds))
+        # 残り寿命を超えては生産できない（寿命が先に尽きる）。
+        return min(cycles, int(machine.get("cycles_left", 0)))
 
     def total_pending(self, user_id: str, now: datetime | None = None) -> int:
         now = now or datetime.now(JST)
@@ -347,7 +379,11 @@ class WorkshopStore:
         now = now or datetime.now(JST)
         with self._lock:
             user = self._user_locked(str(user_id))
-            machine = {"tier": tier_id, "anchor": now.astimezone(JST).isoformat()}
+            machine = {
+                "tier": tier_id,
+                "anchor": now.astimezone(JST).isoformat(),
+                "cycles_left": int(MACHINE_TIERS[tier_id]["lifespan_cycles"]),
+            }
             user["machines"].append(machine)
             self._mark_dirty()
             return copy.deepcopy(machine)
@@ -369,6 +405,10 @@ class WorkshopStore:
         1サイクルでも生産があれば claim 日としてストリークを進め、
         そのボーナス率で追加生産の抽選を行う。貯蔵上限を超えた時間は
         切り捨てる（アンカーは余り時間だけ残して進める）。
+        決済したサイクル数だけ各加工機の寿命（cycles_left）が減り、
+        0になった加工機は消費されて消える（戻り値の "exhausted" に
+        ティアIDが入る）。ストリークのボーナス生産は追加の抽選であり、
+        寿命は決済サイクル分しか減らない。
         """
         now = now or datetime.now(JST)
         with self._lock:
@@ -380,12 +420,16 @@ class WorkshopStore:
             total_cycles = sum(count for _m, count in plan)
             if total_cycles <= 0:
                 return {"items": {}, "cycles": 0, "streak_days":
-                        self._streak_days_locked(user, now.date()), "bonus_rate": 0.0}
+                        self._streak_days_locked(user, now.date()),
+                        "bonus_rate": 0.0, "exhausted": []}
             streak_days = self._advance_streak_locked(user, now)
             bonus_rate = streak_bonus_rate(streak_days)
             items: dict[str, int] = {}
+            exhausted: list[str] = []
+            survivors: list[dict[str, Any]] = []
             for machine, cycles in plan:
                 if cycles <= 0:
+                    survivors.append(machine)
                     continue
                 tier = MACHINE_TIERS[machine["tier"]]
                 for _ in range(cycles):
@@ -394,6 +438,10 @@ class WorkshopStore:
                     if bonus_rate > 0 and self._rng.random() < bonus_rate:
                         bonus_item = self._roll_production(tier)
                         items[bonus_item] = items.get(bonus_item, 0) + 1
+                machine["cycles_left"] = int(machine.get("cycles_left", 0)) - cycles
+                if machine["cycles_left"] <= 0:
+                    exhausted.append(machine["tier"])
+                    continue
                 cycle_seconds = tier["cycle_hours"] * 3600
                 try:
                     anchor = datetime.fromisoformat(machine["anchor"])
@@ -404,9 +452,12 @@ class WorkshopStore:
                 remainder = accrued - cycles * cycle_seconds
                 machine["anchor"] = (now - timedelta(seconds=max(remainder, 0.0))
                                      ).astimezone(JST).isoformat()
+                survivors.append(machine)
+            user["machines"] = survivors
             self._mark_dirty()
             return {"items": items, "cycles": total_cycles,
-                    "streak_days": streak_days, "bonus_rate": bonus_rate}
+                    "streak_days": streak_days, "bonus_rate": bonus_rate,
+                    "exhausted": exhausted}
 
     # ------------------------------------------------------------------ 委託加工
     def start_commission(self, item_store: ItemStore, user_id: str, item_a: str,
