@@ -323,7 +323,7 @@ class FujoSurvival(commands.Cog):
         try:
             await self._reply(interaction, embed, ephemeral=True)
         except discord.HTTPException:
-            pass
+            log.debug("生存確認: エラー通知の送信に失敗しました", exc_info=True)
 
     # --- 検知と連続日数 ---
 
@@ -695,7 +695,7 @@ class FujoSurvival(commands.Cog):
                         await user.send(embed=embed)
                         sent = True
                     except discord.HTTPException:
-                        pass
+                        log.debug("生存確認: 督促DMの送信に失敗しました", exc_info=True)
                 if not sent:
                     channel = await self._get_channel(u.get("panic_channel_id"))
                     if channel is not None:

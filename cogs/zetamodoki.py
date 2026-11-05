@@ -175,7 +175,7 @@ class CustomSituationStore:
                 try:
                     os.replace(self.path, self.path.with_name(self.path.name + f".broken-{int(time.time())}"))
                 except OSError:
-                    pass
+                    logger.debug("ZetaModoki: 壊れたファイルの退避に失敗しました", exc_info=True)
             self._data = data
         return self._data
 
@@ -742,7 +742,7 @@ class CharacterSelect(discord.ui.Select):
                     try:
                         await thread.delete(reason="Failed to add conversation starter")
                     except discord.HTTPException:
-                        pass
+                        logger.debug("ZetaModoki: 失敗したスレッドの削除に失敗しました", exc_info=True)
                 failed = discord.Embed(
                     title="プライベートスレッドを作成できませんでした",
                     description="Botに「プライベートスレッドの作成」「スレッドの管理」権限があるか確認してください。",

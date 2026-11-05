@@ -800,7 +800,7 @@ class TTSCog(commands.Cog):
         try:
             os.unlink(path)
         except OSError:
-            pass
+            logger.debug("読み上げ: 一時ファイルの削除に失敗しました: %s", path, exc_info=True)
 
     async def _play_file(self, vc: discord.VoiceClient, path: str, cfg: TTSSettings):
         options = "-vn -ar 48000 -ac 2"
@@ -1184,7 +1184,7 @@ class VoiceTriggerCog(commands.Cog):
                 try:
                     p.unlink()
                 except OSError:
-                    pass
+                    logger.debug("音声トリガー: 一時ファイルの削除に失敗しました", exc_info=True)
 
         current[word] = {
             "ecdc": str(ecdc),
@@ -1202,7 +1202,7 @@ class VoiceTriggerCog(commands.Cog):
         try:
             Path(meta["ecdc"]).unlink()
         except OSError:
-            pass
+            logger.debug("音声トリガー: 登録ファイルの削除に失敗しました", exc_info=True)
         self._save(guild.id)
         return f"「{word}」の登録を解除しました。"
 
@@ -1238,7 +1238,7 @@ class VoiceTriggerCog(commands.Cog):
             try:
                 wav.unlink()
             except OSError:
-                pass
+                logger.debug("音声トリガー: 再生用一時ファイルの削除に失敗しました", exc_info=True)
 
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message):

@@ -388,7 +388,7 @@ class RecordingSink(voice_recv.AudioSink):
                 self.update_callback(self.packet_count), self.bot.loop
             )
         except Exception:
-            pass
+            logger.debug("録音: ステータス更新コールバックの呼び出しに失敗しました", exc_info=True)
 
     def snapshot(self) -> dict[str, bytes]:
         with self._lock:
@@ -586,11 +586,11 @@ class RecordingCog(commands.Cog):
             try:
                 vc.stop_listening()
             except Exception:
-                pass
+                logger.debug("やまびこ: 後片付けの受信停止に失敗しました", exc_info=True)
             try:
                 vc.stop()
             except Exception:
-                pass
+                logger.debug("やまびこ: 後片付けの再生停止に失敗しました", exc_info=True)
         return cleanup
     # --------------------------------------------------
     # コマンド処理の実装
@@ -631,7 +631,7 @@ class RecordingCog(commands.Cog):
             if vc.is_listening():
                 vc.stop_listening()
         except Exception:
-            pass
+            logger.debug("録音: 既存の受信停止に失敗しました", exc_info=True)
 
         await asyncio.sleep(1.0)
 
@@ -668,7 +668,7 @@ class RecordingCog(commands.Cog):
                     f"📦 パケット数: `{count}` | 停止: `/voice のパネルから録音停止`"
                 ))
             except Exception:
-                pass
+                logger.debug("録音: ステータス表示の更新に失敗しました", exc_info=True)
 
         sink = RecordingSink(bot=self.bot, vc=vc, update_callback=on_packet_update)
 

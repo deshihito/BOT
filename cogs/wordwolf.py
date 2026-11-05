@@ -8,7 +8,10 @@ from core import party_ranking
 party_ranking.register("wordwolf")
 from discord import app_commands
 import asyncio
+import logging
 import random
+
+logger = logging.getLogger(__name__)
 
 class CustomWordWolf(commands.Cog):
     def __init__(self, bot):
@@ -213,7 +216,8 @@ class CustomWordWolf(commands.Cog):
             self.alive_players.remove(challenger)
             if role:
                 try: await challenger.add_roles(role)
-                except: pass
+                except Exception:
+                    logger.debug("ワードウルフ: 脱落ロールの付与に失敗しました", exc_info=True)
             
             if self.remaining_challenges <= 0:
                 await channel.send(embed=self._white_embed("チャレンジ回数が尽きました...", title="終了"))
@@ -249,7 +253,8 @@ class CustomWordWolf(commands.Cog):
         if role:
             for p in self.players:
                 try: await p.remove_roles(role)
-                except: pass
+                except Exception:
+                    logger.debug("ワードウルフ: ロールの回収に失敗しました", exc_info=True)
 
 class JoinView(discord.ui.View):
     def __init__(self, cog):

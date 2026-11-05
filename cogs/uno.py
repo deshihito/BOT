@@ -8,7 +8,10 @@ party_ranking.register("uno")
 from discord import app_commands
 import random
 import asyncio
+import logging
 import re
+
+logger = logging.getLogger(__name__)
 
 SELECT_LIMIT = 25          # Discord のセレクトメニューの選択肢の上限
 TURN_TIMEOUT = 180.0       # 手番の制限時間（秒）。過ぎたら自動で1枚引いてパス
@@ -557,8 +560,8 @@ class Uno(commands.Cog):
                 child.disabled = True
 
             await uno_msg.edit(view=view)
-        except:
-            pass
+        except Exception:
+            logger.debug("UNO: 宣言パネルの無効化に失敗しました", exc_info=True)
 
         if game.channel_id in self.games and len(game.hands.get(player_id, [])) == 1:
             if not game.uno_declared:
@@ -638,7 +641,7 @@ class Uno(commands.Cog):
             try:
                 await game.active_panel_message.delete()
             except discord.HTTPException:
-                pass
+                logger.debug("UNO: 終了時のパネル削除に失敗しました", exc_info=True)
         channel = channel or self.bot.get_channel(game.channel_id)
         if channel is not None:
             await channel.send(reason)

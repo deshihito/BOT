@@ -3,9 +3,12 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+import logging
 import traceback
 
 import discord
+
+logger = logging.getLogger(__name__)
 
 __all__ = [
     "embed_text",
@@ -151,7 +154,7 @@ class PanelLayoutView(discord.ui.LayoutView):
             else:
                 await interaction.response.send_message(f"⚠️ 内部エラー: {error}", ephemeral=True)
         except discord.HTTPException:
-            pass
+            logger.debug("パネル: エラー通知の送信に失敗しました", exc_info=True)
 
     def refresh(self, interaction: discord.Interaction | None = None, *args, **kwargs):
         """状態を更新する。戻り値は常に await 可能。

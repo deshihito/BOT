@@ -4072,7 +4072,7 @@ class ClefDungeonPlayer:
             try:
                 await self._edit_screen(message, view, logs, final=True)
             except Exception:
-                pass
+                logger.debug("ダンジョン: 最終画面の更新に失敗しました", exc_info=True)
 
     # ---------- 1ターンの判断 ----------
 

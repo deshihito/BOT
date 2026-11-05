@@ -1,6 +1,9 @@
 import discord
 from discord.ext import commands
 from discord import app_commands
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 class WhisperModal(discord.ui.Modal, title="匿名のつぶやき"):
@@ -33,7 +36,7 @@ class WhisperModal(discord.ui.Modal, title="匿名のつぶやき"):
                 old_message = await old_channel.fetch_message(old_message_id)
                 await old_message.delete()
             except Exception:
-                pass
+                logger.debug("Whisper: 旧パネルの削除に失敗しました", exc_info=True)
 
         panel_embed = discord.Embed(
             title="匿名のつぶやき",
@@ -75,7 +78,7 @@ class WhisperCog(commands.Cog):
                 old_message = await old_channel.fetch_message(old_message_id)
                 await old_message.delete()
             except Exception:
-                pass
+                logger.debug("Whisper: 旧パネルの削除に失敗しました", exc_info=True)
 
         embed = discord.Embed(
             title="匿名のつぶやき",

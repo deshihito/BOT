@@ -2,10 +2,13 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 import json
+import logging
 import os
 
 from core import globalchat_moderation as mod
 from core.emojis import FAILED
+
+logger = logging.getLogger(__name__)
 
 class GlobalChatCog(commands.Cog):
     def __init__(self, bot):
@@ -40,12 +43,12 @@ class GlobalChatCog(commands.Cog):
             await message.author.send(text)
             return
         except Exception:
-            pass
+            logger.debug("グローバルチャット: DM通知に失敗しました", exc_info=True)
         try:
             await message.add_reaction(FAILED)
             await message.reply(text, delete_after=10, mention_author=False)
         except Exception:
-            pass
+            logger.debug("グローバルチャット: 代替通知（リアクション・返信）に失敗しました", exc_info=True)
 
     # メッセージ送信を検知するイベントリスナー
     @commands.Cog.listener()
@@ -64,7 +67,7 @@ class GlobalChatCog(commands.Cog):
                 # 警告としてメッセージにバツ印のリアクションを付ける
                 await message.add_reaction(FAILED)
             except discord.Forbidden:
-                pass
+                logger.debug("グローバルチャット: 警告リアクションの付与に失敗しました", exc_info=True)
             return
 
         source_guild_id = message.guild.id if message.guild else 0
