@@ -1,4 +1,4 @@
-"""Unified entry point for ProBot-style server assist features."""
+"""Unified entry point for server assist features."""
 from __future__ import annotations
 
 import importlib
@@ -46,16 +46,13 @@ class ServerAssistHomeView(discord.ui.View):
     def embed(self) -> discord.Embed:
         embed = discord.Embed(
             title="サーバーアシスト",
-            description=(
-                "ProBot 互換のサーバー設定をここにまとめています。"
-                "下のメニューから機能を選んでください。"
-            ),
+            description="サーバー運営に役立つ設定をまとめた入口です。",
             color=0xFFFFFF,
         )
-        for feature in self.cog.features[:20]:
+        for feature in self.cog.features:
             embed.add_field(name=feature.label, value=feature.description, inline=False)
         if not self.cog.features:
-            embed.description = "利用できる機能がありません。Botのログを確認してください。"
+            embed.description = "利用できる機能がありません。時間をおいて再度お試しください。解決しない場合はBotの運営に連絡してください。"
         return embed
 
 
@@ -134,7 +131,7 @@ class ServerAssistCog(commands.Cog):
         except Exception:
             logger.exception("サーバーアシスト設定画面を作れませんでした: %s", key)
             return await interaction.response.send_message(
-                "設定画面の読み込みに失敗しました。Botのログを確認してください。", ephemeral=True,
+                "設定画面の読み込みに失敗しました。時間をおいて再度お試しください。解決しない場合はBotの運営に連絡してください。", ephemeral=True,
             )
         return await edit_panel_v2(interaction, as_panel_v2(view))
 

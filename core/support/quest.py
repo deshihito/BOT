@@ -558,7 +558,7 @@ class QuestManualModal(discord.ui.Modal):
             notice = f"⚠️ {exc}"
         except Exception:
             logger.exception("Quest手動通知に失敗しました")
-            notice = "⚠️ 送信中にエラーが発生しました。Botのログを確認してください。"
+            notice = "⚠️ 送信中にエラーが発生しました。時間をおいて再度お試しください。解決しない場合はBotの運営に連絡してください。"
         await self.panel.refresh(interaction, notice)
 
     async def on_error(self, interaction: discord.Interaction, error: Exception):
@@ -647,7 +647,7 @@ class QuestNotifyPanel(discord.ui.LayoutView):
         except Exception:
             logger.exception("Quest通知設定の更新に失敗しました")
             return await interaction.followup.send(
-                "設定の更新に失敗しました。Botのログを確認してください。",
+                "設定の更新に失敗しました。時間をおいて再度お試しください。解決しない場合はBotの運営に連絡してください。",
                 ephemeral=True,
             )
         await self.refresh(interaction, notice)

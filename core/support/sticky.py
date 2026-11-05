@@ -64,7 +64,7 @@ class StickyChannelSelect(discord.ui.ChannelSelect):
         except Exception:
             logger.exception("Stickyパネル設置先の更新に失敗しました")
             await interaction.followup.send(
-                "Stickyパネル設置先の更新に失敗しました。Botのログを確認してください。",
+                "Stickyパネル設置先の更新に失敗しました。時間をおいて再度お試しください。解決しない場合はBotの運営に連絡してください。",
                 ephemeral=True,
             )
 
@@ -118,7 +118,7 @@ class StickyTextModal(discord.ui.Modal, title="Stickyパネルの文言"):
             logger.exception("Stickyパネル文言の保存・送信に失敗しました")
             try:
                 await interaction.edit_original_response(
-                    content="文言の保存またはパネル送信に失敗しました。Botのログを確認してください。"
+                    content="文言の保存またはパネル送信に失敗しました。時間をおいて再度お試しください。解決しない場合はBotの運営に連絡してください。"
                 )
             except discord.HTTPException:
                 logger.exception("Sticky文言保存エラーの通知に失敗しました")
@@ -194,7 +194,7 @@ class StickySettingsView(discord.ui.View):
         except Exception:
             logger.exception("Stickyパネル有効状態の更新に失敗しました")
             await interaction.followup.send(
-                "Sticky設定の更新に失敗しました。Botのログを確認してください。",
+                "Sticky設定の更新に失敗しました。時間をおいて再度お試しください。解決しない場合はBotの運営に連絡してください。",
                 ephemeral=True,
             )
 

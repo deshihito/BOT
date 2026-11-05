@@ -97,7 +97,7 @@ class HoneypotChannelSelect(discord.ui.ChannelSelect):
         except Exception:
             logger.exception("ハニーポットの設置に失敗しました")
             await interaction.followup.send(
-                "ハニーポットの設置に失敗しました。Botのログを確認してください。",
+                "ハニーポットの設置に失敗しました。時間をおいて再度お試しください。解決しない場合はBotの運営に連絡してください。",
                 ephemeral=True,
             )
 

@@ -186,7 +186,7 @@ class PlaylistsMixin:
                 if 'row-level security' in detail or 'permission denied' in detail or '42501' in detail:
                     message = '保存権限がありません。SupabaseのRLSポリシーと、Botに設定したSupabaseキー（BOT_API_KEY / BOT_API_KEY）の権限を確認してください。'
                 else:
-                    message = f'保存に失敗しました。Botログを確認してください。({type(exc).__name__})'
+                    message = f'保存に失敗しました。時間をおいて再度お試しください。解決しない場合はBotの運営に連絡してください。({type(exc).__name__})'
                 return await r.send(embed=we(message), ephemeral=True)
 
         # 一覧
