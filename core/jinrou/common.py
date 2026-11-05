@@ -104,6 +104,15 @@ HELP_ROLES = [
 jinrou_guide.register_roles(HELP_ROLES)
 
 
+def phase_summary_embed(title: str, lines: list[str], *, color: int = 0x5865F2) -> discord.Embed:
+    """フェーズ区切りの結果を1枚の embed に集約する（表示モダン化 §4.2-9）。
+
+    実況ライン（フェーズ進行の1行通知）は従来どおりプレーンで流し、
+    夜明け結果・追放結果・勝敗確定など区切りの発表だけをここでまとめる。
+    """
+    return discord.Embed(title=title, description="\n".join(lines), color=color)
+
+
 def _is_wolf_side(game, p_id) -> bool:
     """勝敗・人数比べで人狼側として数えるか（陣営の定義は core/jinrou_guide.WOLF_SIDE の 1 か所）。
 

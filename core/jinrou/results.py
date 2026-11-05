@@ -24,6 +24,11 @@ logger = logging.getLogger("cogs.jinrou")
 
 
 class ResultsMixin:
+    async def _send_exile_summary(self, game, lines):
+        """追放結果の発表ラインを1枚の embed に集約して送る（§4.2-9）。"""
+        if lines:
+            await game.game_channel.send(embed=phase_summary_embed("追放結果", lines))
+
     async def _record_wins(self, game, user_ids):
         guild = getattr(getattr(game, "game_channel", None), "guild", None)
         if guild is None:
@@ -125,12 +130,13 @@ class ResultsMixin:
 
         actual_target_id = target_id
 
+        lines: list[str] = []
         if game.roles.get(actual_target_id) == "貴族":
             slave_id = game.kizoku_slave.get(actual_target_id)
             if slave_id:
                 slave_m = game.game_channel.guild.get_member(slave_id)
                 if slave_m and slave_id in alive_ids:
-                    await game.game_channel.send(f"貴族の処刑判定が奴隷 {slave_m.display_name} に肩代わりされました。")
+                    lines.append(f"貴族の処刑判定が奴隷 {slave_m.display_name} に肩代わりされました。")
                     actual_target_id = slave_id
 
         target_m = game.game_channel.guild.get_member(actual_target_id)
@@ -143,19 +149,20 @@ class ResultsMixin:
         # 裏役職の判明トリガーチェック（死亡時）
         await _check_and_reveal_ura_yakushoku(game, actual_target_id, "death")
 
-        await game.game_channel.send(f"{target_m.display_name} さんが追放されました。")
+        lines.append(f"{target_m.display_name} さんが追放されました。")
 
         await self._notify_reibai(game, actual_target_id)
         await self._check_mokumoku_reveal(game, actual_target_id)
 
         executed_role = game.roles.get(actual_target_id)
         if executed_role == "ハゲ":
-            await game.game_channel.send("<:f8cc0b1b5e501838:1491033609929490492>ハゲが追放された。ハゲの勝利です。")
+            lines.append("<:f8cc0b1b5e501838:1491033609929490492>ハゲが追放された。ハゲの勝利です。")
+            await self._send_exile_summary(game, lines)
             await self._record_wins(game, [actual_target_id])
             game.is_running = False
             return
         elif executed_role == "コウモリむに":
-            await game.game_channel.send("コウモリむにが追放された。しかし追放ではコウモリむには勝利できない...")
+            lines.append("コウモリむにが追放された。しかし追放ではコウモリむには勝利できない...")
 
         for pair in game.riacchu_pairs:
             if actual_target_id in pair:
@@ -163,10 +170,11 @@ class ResultsMixin:
                 if partner_id in {p.id for p in game.alive_players}:
                     partner_m = game.game_channel.guild.get_member(partner_id)
                     if partner_m:
-                        await game.game_channel.send(f"リア充のパートナー {partner_m.display_name} も道連れになりました。")
+                        lines.append(f"リア充のパートナー {partner_m.display_name} も道連れになりました。")
                         game.silenced_players.add(partner_id)
                         game.alive_players = [p for p in game.alive_players if p.id != partner_id]
                 break
+        await self._send_exile_summary(game, lines)
 
 
     async def run_voting_phase(self, game):
@@ -210,16 +218,17 @@ class ResultsMixin:
         if not target_m:
             return
 
+        lines: list[str] = []
         if game.roles.get(actual_target_id) == "貴族":
             slave_id = game.kizoku_slave.get(actual_target_id)
             if slave_id:
                 slave_m = game.game_channel.guild.get_member(slave_id)
                 if slave_m and slave_id in {p.id for p in game.alive_players}:
-                    await game.game_channel.send(f"貴族の処刑判定が奴隷 {slave_m.display_name} に肩代わりされました。")
+                    lines.append(f"貴族の処刑判定が奴隷 {slave_m.display_name} に肩代わりされました。")
                     actual_target_id = slave_id
                     target_m = slave_m
 
-        await game.game_channel.send(f"{target_m.display_name} さんが追放されました。")
+        lines.append(f"{target_m.display_name} さんが追放されました。")
         game.last_executed = actual_target_id
         game.silenced_players.add(actual_target_id)
         game.alive_players = [p for p in game.alive_players if p.id != actual_target_id]
@@ -232,12 +241,13 @@ class ResultsMixin:
 
         executed_role = game.roles.get(actual_target_id)
         if executed_role == "ハゲ":
-            await game.game_channel.send("<:f8cc0b1b5e501838:1491033609929490492>ハゲが追放された。ハゲの勝利です。")
+            lines.append("<:f8cc0b1b5e501838:1491033609929490492>ハゲが追放された。ハゲの勝利です。")
+            await self._send_exile_summary(game, lines)
             await self._record_wins(game, [actual_target_id])
             game.is_running = False
             return
         elif executed_role == "コウモリむに":
-            await game.game_channel.send("コウモリむにが追放された。しかし追放ではコウモリむには勝利できない...")
+            lines.append("コウモリむにが追放された。しかし追放ではコウモリむには勝利できない...")
 
         for pair in game.riacchu_pairs:
             if actual_target_id in pair:
@@ -245,10 +255,11 @@ class ResultsMixin:
                 if partner_id in {p.id for p in game.alive_players}:
                     partner_m = game.game_channel.guild.get_member(partner_id)
                     if partner_m:
-                        await game.game_channel.send(f"リア充のパートナー {partner_m.display_name} も道連れになりました。")
+                        lines.append(f"リア充のパートナー {partner_m.display_name} も道連れになりました。")
                         game.silenced_players.add(partner_id)
                         game.alive_players = [p for p in game.alive_players if p.id != partner_id]
                 break
+        await self._send_exile_summary(game, lines)
 
 
     async def run_chairman_vote_phase(self, game):

@@ -383,7 +383,10 @@ class GameLoopMixin:
 
         if game.alive_players:
             survivors_mention = " ".join(p.mention for p in game.alive_players)
-            await game.game_channel.send(f"夜が明けました。生存者（{len(game.alive_players)}人）: {survivors_mention}")
+            await game.game_channel.send(embed=phase_summary_embed(
+                "夜が明けました",
+                [f"生存者（{len(game.alive_players)}人）: {survivors_mention}"],
+            ))
 
 
     async def check_victory(self, game):
@@ -391,7 +394,8 @@ class GameLoopMixin:
 
         wolves_alive = [p for p in game.alive_players if game.roles.get(p.id) in ["人狼", "デカ狼"]]
         if not wolves_alive:
-            await game.game_channel.send("人狼全滅。村人陣営の勝利です。")
+            await game.game_channel.send(embed=phase_summary_embed(
+                "勝敗確定", ["人狼全滅。村人陣営の勝利です。"], color=0x2ECC71))
             await self._check_koumorimuni_win(game)
             await self._record_team_win(game, winner_is_wolf=False)
             await self._process_elo_ratings(game, winner_is_wolf=False)
@@ -405,7 +409,8 @@ class GameLoopMixin:
         non_wolves = [p for p in game.alive_players if not is_wolf_side(p.id)]
 
         if len(wolves) >= len(non_wolves):
-            await game.game_channel.send("人狼が支配した。人狼陣営の勝利です。")
+            await game.game_channel.send(embed=phase_summary_embed(
+                "勝敗確定", ["人狼が支配した。人狼陣営の勝利です。"], color=0xE74C3C))
             await self._check_koumorimuni_win(game)
             await self._record_team_win(game, winner_is_wolf=True)
             await self._process_elo_ratings(game, winner_is_wolf=True)
