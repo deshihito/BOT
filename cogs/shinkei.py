@@ -9,11 +9,14 @@
   勝利数は core/party_ranking.py に記録する（2 人以上の勝負のときだけ。ひとり遊びは数えない）。
 """
 import asyncio
+import logging
 import random
 
 import discord
-from core import game_panels
+from core import game_panels, game_restore
 from core.emojis import CROCK
+
+logger = logging.getLogger(__name__)
 from core.messages import recruit_join_prompt
 from discord.ext import commands
 
@@ -187,6 +190,7 @@ class Shinkei(commands.Cog):
         finally:
             g.phase = "done"
             self.games.pop(channel.id, None)
+            self._clear_snapshot(channel.id)
 
     def board_embed(self, g: ShinkeiGame, note: str = "") -> discord.Embed:
         if g.phase == "playing":
@@ -205,6 +209,10 @@ class Shinkei(commands.Cog):
         g.phase = "playing"
         order = " → ".join(m.display_name for m in g.players.values())
         g.message = await game_panels.replace(channel, "party", embed=self.board_embed(g, f"順番: {order}"), view=BoardView(self, g))
+        await self._play_loop(channel, g)
+        await self.finish(channel, g)
+
+    async def _play_loop(self, channel, g: ShinkeiGame):
         idle_streak = 0
         while not g.finished:
             result = await self.play_turn(channel, g)
@@ -216,10 +224,11 @@ class Shinkei(commands.Cog):
                     break
             else:
                 idle_streak = 0
-        await self.finish(channel, g)
 
     async def play_turn(self, channel, g: ShinkeiGame) -> str:
         """1 人の手番。そろえ続けるあいだは同じ人。戻り値: "miss" / "done" / "timeout" / "auto"。"""
+        # 手番開始時点をチェックポイントとして保存する（復旧はここから再開する）
+        self._save_snapshot(g)
         g.turn_done = False
         uid = g.current
         elapsed = 0
@@ -286,6 +295,8 @@ class Shinkei(commands.Cog):
             g.turn_done = True
         if g.finished:
             g.turn_done = True
+        # めくった結果（ペア成立・得点）もチェックポイントに反映する
+        self._save_snapshot(g)
         await interaction.response.edit_message(embed=self.board_embed(g, note), view=BoardView(self, g))
 
     async def finish(self, channel, g: ShinkeiGame):
@@ -305,6 +316,101 @@ class Shinkei(commands.Cog):
         embed = discord.Embed(title="神経衰弱 終了", description=text, color=COLOR)
         embed.add_field(name="結果", value=g.score_text()[:1024] or "（なし）", inline=False)
         await channel.send(embed=embed)
+
+    # ------------------------------------------------------------------
+    # 再起動復旧（core/game_restore.py）
+    # ------------------------------------------------------------------
+    def _save_snapshot(self, g: ShinkeiGame) -> None:
+        if g.phase != "playing":
+            return
+        state = {
+            "host_id": g.host_id,
+            "players": [
+                [uid, game_restore.member_ref(m) if m is not None else None]
+                for uid, m in g.players.items()
+            ],
+            "cards": list(g.cards),
+            "matched": [[idx, uid] for idx, uid in g.matched.items()],
+            "scores": [[uid, n] for uid, n in g.scores.items()],
+            "turn_index": g.turn_index,
+            "message_id": getattr(g.message, "id", None),
+        }
+        game_restore.save_session("shinkei", g.channel_id, g.guild_id, state)
+
+    def _clear_snapshot(self, channel_id) -> None:
+        game_restore.clear_session("shinkei", channel_id)
+
+    async def restore_after_restart(self) -> None:
+        """再起動前に進行中だった神経衰弱を、手番の開始時点から再開する。
+
+        手番の途中でめくっていたカード（face_up）は裏に戻して再開する。
+        """
+        entries = game_restore.session_entries("shinkei")
+        for channel_id, entry in entries.items():
+            try:
+                restored = await self._restore_session(channel_id, entry)
+            except Exception:
+                logger.exception("channel %s: 神経衰弱の復旧に失敗しました", channel_id)
+                restored = False
+            if not restored:
+                game_restore.clear_session("shinkei", channel_id)
+        game_restore.flush_store()
+
+    async def _restore_session(self, channel_id, entry) -> bool:
+        state = entry.get("state")
+        if not isinstance(state, dict) or channel_id in self.games:
+            return False
+        channel = self.bot.get_channel(channel_id)
+        if channel is None:
+            return False
+        guild = getattr(channel, "guild", None)
+        guild_id = entry.get("guild_id") or getattr(guild, "id", None)
+        cards = state.get("cards")
+        if not isinstance(cards, list) or not cards:
+            return False
+        g = ShinkeiGame(channel_id, guild_id, state.get("host_id"), cards=list(cards))
+        players = {}
+        for uid, ref in state["players"]:
+            uid = int(uid)
+            players[uid] = None if ref is None else game_restore.resolve_member(
+                guild, ref.get("id"), ref.get("name"))
+        if not players:
+            return False
+        g.players = players
+        g.matched = {int(idx): int(uid) for idx, uid in state.get("matched") or []}
+        g.scores = {int(uid): int(n) for uid, n in state.get("scores") or []}
+        g.turn_index = int(state.get("turn_index") or 0)
+        g.face_up = []
+        g.turn_done = False
+        g.phase = "playing"
+        message_id = state.get("message_id")
+        fetch = getattr(channel, "fetch_message", None)
+        if message_id and callable(fetch):
+            try:
+                g.message = await fetch(message_id)
+            except Exception:
+                g.message = None
+        self.games[channel_id] = g
+        if g.message is not None:
+            # 既存の盤面メッセージへ新しい View を付け直して復活させる
+            await self.refresh(g)
+        else:
+            g.message = await game_panels.replace(
+                channel, "party", embed=self.board_embed(g), view=BoardView(self, g))
+        asyncio.create_task(self._run_restored_session(channel, g))
+        return True
+
+    async def _run_restored_session(self, channel, g: ShinkeiGame):
+        try:
+            await self._play_loop(channel, g)
+            await self.finish(channel, g)
+        except Exception:
+            logger.exception("channel %s: 復旧した神経衰弱の進行に失敗しました", g.channel_id)
+        finally:
+            g.phase = "done"
+            if self.games.get(g.channel_id) is g:
+                self.games.pop(g.channel_id, None)
+            self._clear_snapshot(g.channel_id)
 
 
 async def setup(bot):

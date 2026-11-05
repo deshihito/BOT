@@ -1,5 +1,5 @@
 import discord
-from core import game_panels
+from core import game_panels, game_restore
 from discord.ext import commands
 
 from core import autoplay, party_ranking
@@ -177,6 +177,7 @@ class JoinView(discord.ui.View):
         self.stop()
         if self.cog.games.get(self.game.channel_id) is self.game:
             del self.cog.games[self.game.channel_id]
+            self.cog._clear_snapshot(self.game.channel_id)
 
         await interaction.response.edit_message(content="[!] ゲームの募集がキャンセルされました。", embed=None, view=None)
 
@@ -288,6 +289,13 @@ class CardSelect(discord.ui.Select):
                 content=f"<@{current_player_id}> さん、次の色を選択してください！（{int(COLOR_TIMEOUT)}秒以内）",
                 view=view
             )
+            # 色選択待ちもチェックポイントとして保存する（復旧時は色選択から再開）
+            self.cog._save_snapshot(self.game, interaction.channel, awaiting_color={
+                "player_id": current_player_id,
+                "card_type": selected_card,
+                "action_msg": action_msg,
+                "uno_penalty": uno_penalty_check,
+            })
             return
 
         # 通常カードおよびその他の特殊カード（+2など）の処理
@@ -632,6 +640,7 @@ class Uno(commands.Cog):
         """勝敗をつけずにゲームを終了し、チャンネルを空ける"""
         if self.games.get(game.channel_id) is game:
             del self.games[game.channel_id]
+            self._clear_snapshot(game.channel_id)
         if game.active_view is not None:
             game.active_view.stop()
             game.active_view = None
@@ -717,6 +726,98 @@ class Uno(commands.Cog):
         view = GameControlView(game, playable_cards, self)
         game.active_view = view
         game.active_panel_message = await game_panels.replace(channel, "party", embed=embed, view=view)
+        # 手番が確定した時点をチェックポイントとして保存する（復旧はここから再開する）
+        self._save_snapshot(game, channel)
+
+    # ------------------------------------------------------------------
+    # 再起動復旧（core/game_restore.py）
+    # ------------------------------------------------------------------
+    def _save_snapshot(self, game: UnoGame, channel=None, awaiting_color=None) -> None:
+        if not game.is_started:
+            return
+        guild = getattr(channel, "guild", None) if channel is not None else None
+        state = {
+            "host_id": game.host_id,
+            "players": [int(p) for p in game.players],
+            "hands": [[int(pid), list(cards)] for pid, cards in game.hands.items()],
+            "deck": list(game.deck),
+            "discard_pile": list(game.discard_pile),
+            "current_player_idx": game.current_player_idx,
+            "direction": game.direction,
+            "current_color": game.current_color,
+            "pending_draw_count": game.pending_draw_count,
+            "active_plus_type": game.active_plus_type,
+            "timeout_streak": game.timeout_streak,
+            "panel_message_id": getattr(game.active_panel_message, "id", None),
+            "awaiting_color": awaiting_color,
+        }
+        game_restore.save_session("uno", game.channel_id,
+                                  getattr(guild, "id", None), state)
+
+    def _clear_snapshot(self, channel_id) -> None:
+        game_restore.clear_session("uno", channel_id)
+
+    async def restore_after_restart(self) -> None:
+        """再起動前に進行中だった UNO を、現在の手番（または色選択）から再開する。"""
+        entries = game_restore.session_entries("uno")
+        for channel_id, entry in entries.items():
+            try:
+                restored = await self._restore_session(channel_id, entry)
+            except Exception:
+                logger.exception("channel %s: UNO の復旧に失敗しました", channel_id)
+                restored = False
+            if not restored:
+                game_restore.clear_session("uno", channel_id)
+        game_restore.flush_store()
+
+    async def _restore_session(self, channel_id, entry) -> bool:
+        state = entry.get("state")
+        if not isinstance(state, dict) or channel_id in self.games:
+            return False
+        channel = self.bot.get_channel(channel_id)
+        if channel is None:
+            return False
+        players = [int(p) for p in state.get("players") or []]
+        discard_pile = list(state.get("discard_pile") or [])
+        if len(players) < 2 or not discard_pile:
+            return False
+        game = UnoGame(channel_id, state.get("host_id"))
+        game.is_started = True
+        game.players = players
+        game.hands = {int(pid): list(cards) for pid, cards in state.get("hands") or []}
+        game.deck = list(state.get("deck") or [])
+        game.discard_pile = discard_pile
+        idx = int(state.get("current_player_idx") or 0)
+        game.current_player_idx = idx if 0 <= idx < len(players) else 0
+        game.direction = -1 if state.get("direction") == -1 else 1
+        game.current_color = state.get("current_color")
+        game.pending_draw_count = int(state.get("pending_draw_count") or 0)
+        game.active_plus_type = state.get("active_plus_type")
+        game.timeout_streak = int(state.get("timeout_streak") or 0)
+        game.uno_declared = False
+        game.waiting_for_uno = False
+        message_id = state.get("panel_message_id")
+        fetch = getattr(channel, "fetch_message", None)
+        if message_id and callable(fetch):
+            try:
+                game.active_panel_message = await fetch(message_id)
+            except Exception:
+                game.active_panel_message = None
+        self.games[channel_id] = game
+        awaiting = state.get("awaiting_color")
+        if isinstance(awaiting, dict) and awaiting.get("player_id") in players:
+            view = WildColorView(game, awaiting.get("card_type"), awaiting["player_id"],
+                                 self, awaiting.get("action_msg") or "",
+                                 bool(awaiting.get("uno_penalty")))
+            game.active_view = view
+            game.active_panel_message = await game_panels.replace(
+                channel, "party",
+                content=f"<@{awaiting['player_id']}> さん、次の色を選択してください！（{int(COLOR_TIMEOUT)}秒以内）",
+                view=view)
+        else:
+            await self.send_game_panel(channel, game,
+                                       info_msg="再起動から復旧しました。対局を続けます。")
+        return True
 
     def get_embed_color(self, color_name):
         colors = {
@@ -759,6 +860,7 @@ class Uno(commands.Cog):
                 except discord.NotFound:
                     pass
             del self.games[channel_id]
+            self._clear_snapshot(channel_id)
 
         await channel.send(embed=embed)
 

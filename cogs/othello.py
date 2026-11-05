@@ -1,13 +1,16 @@
 """/game のオセロ（2人対戦、標準8x8ルール）。"""
 import asyncio
 import io
+import logging
 import random
 from pathlib import Path
 
 import discord
 from discord.ext import commands
-from core import game_panels
+from core import game_panels, game_restore
 from PIL import Image, ImageDraw, ImageFont
+
+logger = logging.getLogger(__name__)
 
 COLOR = 0xFFFFFF
 RECRUIT_SECONDS = 30
@@ -260,6 +263,7 @@ class Othello(commands.Cog):
             finally:
                 g.phase = "done"
                 self.games.pop(channel.id, None)
+                self._clear_snapshot(channel.id)
             return
         g.players[interaction.user.id] = interaction.user
         self.games[channel.id] = g
@@ -272,6 +276,7 @@ class Othello(commands.Cog):
         finally:
             g.phase = "done"
             self.games.pop(channel.id, None)
+            self._clear_snapshot(channel.id)
 
     async def run_game(self, channel, g):
         if len(g.players) != 2:
@@ -284,8 +289,13 @@ class Othello(commands.Cog):
         start_embed = discord.Embed(description="オセロを開始します。黒（●）が先手です。", color=COLOR)
         start_embed.set_image(url=image_url)
         await channel.send(embed=start_embed, file=file)
+        await self._play_loop(channel, g)
+
+    async def _play_loop(self, channel, g):
         idle = 0
         while g.phase == "playing":
+            # 手番開始時点をチェックポイントとして保存する（復旧はここから再開する）
+            self._save_snapshot(g)
             moves = legal_moves(g.board, g.turn)
             if not moves:
                 g.pass_count += 1
@@ -338,6 +348,88 @@ class Othello(commands.Cog):
         result_embed = discord.Embed(title="オセロ 終了", description=f"{outcome}\n黒: {black} / 白: {white}", color=COLOR)
         result_embed.set_image(url=image_url)
         await channel.send(embed=result_embed, file=file)
+
+    # ------------------------------------------------------------------
+    # 再起動復旧（core/game_restore.py）
+    # ------------------------------------------------------------------
+    def _save_snapshot(self, g):
+        if g.phase != "playing":
+            return
+        black = g.players.get(BLACK)
+        white = g.players.get(WHITE)
+        state = {
+            "mode": g.mode,
+            "difficulty": g.difficulty,
+            "host_id": g.host_id,
+            "players": {
+                "black": game_restore.member_ref(black) if black is not None else None,
+                "white": game_restore.member_ref(white) if white is not None else None,
+            },
+            "board": ["".join(row) for row in g.board],
+            "turn": g.turn,
+            "pass_count": g.pass_count,
+        }
+        game_restore.save_session("othello", g.channel_id, g.guild_id, state)
+
+    def _clear_snapshot(self, channel_id) -> None:
+        game_restore.clear_session("othello", channel_id)
+
+    async def restore_after_restart(self) -> None:
+        """再起動前に進行中だったオセロを、手番の開始時点から再開する。"""
+        entries = game_restore.session_entries("othello")
+        for channel_id, entry in entries.items():
+            try:
+                restored = await self._restore_session(channel_id, entry)
+            except Exception:
+                logger.exception("channel %s: オセロの復旧に失敗しました", channel_id)
+                restored = False
+            if not restored:
+                game_restore.clear_session("othello", channel_id)
+        game_restore.flush_store()
+
+    async def _restore_session(self, channel_id, entry) -> bool:
+        state = entry.get("state")
+        if not isinstance(state, dict) or channel_id in self.games:
+            return False
+        channel = self.bot.get_channel(channel_id)
+        if channel is None:
+            return False
+        guild = getattr(channel, "guild", None)
+        guild_id = entry.get("guild_id") or getattr(guild, "id", None)
+        g = OthelloGame(channel_id, guild_id, state.get("host_id"),
+                        state.get("mode") or "human", state.get("difficulty") or 5)
+        players = state.get("players") or {}
+        for key, color in (("black", BLACK), ("white", WHITE)):
+            ref = players.get(key)
+            if ref is None:
+                if g.mode == "cpu":
+                    g.players[color] = None
+                    continue
+                return False
+            g.players[color] = game_restore.resolve_member(
+                guild, ref.get("id"), ref.get("name"))
+        board = state["board"]
+        if len(board) != 8 or any(len(row) != 8 for row in board):
+            return False
+        g.board = [list(row) for row in board]
+        if state.get("turn") in (BLACK, WHITE):
+            g.turn = state["turn"]
+        g.pass_count = int(state.get("pass_count") or 0)
+        g.phase = "playing"
+        self.games[channel_id] = g
+        asyncio.create_task(self._run_restored_session(channel, g))
+        return True
+
+    async def _run_restored_session(self, channel, g):
+        try:
+            await self._play_loop(channel, g)
+        except Exception:
+            logger.exception("channel %s: 復旧したオセロの進行に失敗しました", g.channel_id)
+        finally:
+            g.phase = "done"
+            if self.games.get(g.channel_id) is g:
+                self.games.pop(g.channel_id, None)
+            self._clear_snapshot(g.channel_id)
 
 
 async def setup(bot):

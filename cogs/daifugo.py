@@ -13,14 +13,17 @@
 - 結果は 大富豪・富豪・平民・貧民・大貧民。大富豪の勝利を core/party_ranking.py に記録する（人間 2 人以上のときだけ）。
 """
 import asyncio
+import logging
 import random
 
 import discord
-from core import game_panels
+from core import game_panels, game_restore
 from core.messages import recruit_join_prompt
 from discord.ext import commands
 
 from core import party_ranking
+
+logger = logging.getLogger(__name__)
 
 GAME_ID = "daifugo"
 party_ranking.register(GAME_ID)
@@ -302,6 +305,7 @@ class Daifugo(commands.Cog):
         finally:
             g.phase = "done"
             self.games.pop(channel.id, None)
+            self._clear_snapshot(channel.id)
 
     def counts_text(self, g: DaifugoGame) -> str:
         return "\n".join(f"{g.name(u)}: {len(g.hands.get(u, []))}枚" + ("（上がり）" if u in g.finished else "")
@@ -319,11 +323,16 @@ class Daifugo(commands.Cog):
                          "自分の番に「手札から出す」で出すカードを選ぶか、「パス」を押してください。\n\n"
                          + self.counts_text(g)),
             color=COLOR))
-        while g.phase == "playing":
-            await self.play_turn(channel, g, rng)
+        await self._play_loop(channel, g, rng)
         await self.finish(channel, g)
 
+    async def _play_loop(self, channel, g: DaifugoGame, rng=random):
+        while g.phase == "playing":
+            await self.play_turn(channel, g, rng)
+
     async def play_turn(self, channel, g: DaifugoGame, rng=random):
+        # 手番開始時点をチェックポイントとして保存する（復旧はここから再開する）
+        self._save_snapshot(g)
         uid = g.turn
         g.acted = False
         plays = g.legal(uid)
@@ -415,6 +424,91 @@ class Daifugo(commands.Cog):
         if len(humans) < 2:
             text += "\n（人間が2人以上いないゲームはランキングに数えません）"
         await channel.send(embed=discord.Embed(title="大富豪 終了", description=text, color=COLOR))
+
+    # ------------------------------------------------------------------
+    # 再起動復旧（core/game_restore.py）
+    # ------------------------------------------------------------------
+    def _save_snapshot(self, g: DaifugoGame) -> None:
+        if g.phase != "playing":
+            return
+        state = {
+            "host_id": g.host_id,
+            "players": [
+                [uid, game_restore.member_ref(m) if m is not None else None]
+                for uid, m in g.players.items()
+            ],
+            "hands": [[uid, list(cards)] for uid, cards in g.hands.items()],
+            "finished": list(g.finished),
+            "turn": g.turn,
+            "table": list(g.table) if g.table is not None else None,
+            "last_player": g.last_player,
+            "passed": sorted(g.passed),
+            "revolution": bool(g.revolution),
+            "cleared": bool(g.cleared),
+            "eight_cut": bool(g.eight_cut),
+        }
+        game_restore.save_session("daifugo", g.channel_id, g.guild_id, state)
+
+    def _clear_snapshot(self, channel_id) -> None:
+        game_restore.clear_session("daifugo", channel_id)
+
+    async def restore_after_restart(self) -> None:
+        """再起動前に進行中だった大富豪を、手番の開始時点から再開する。"""
+        entries = game_restore.session_entries("daifugo")
+        for channel_id, entry in entries.items():
+            try:
+                restored = await self._restore_session(channel_id, entry)
+            except Exception:
+                logger.exception("channel %s: 大富豪の復旧に失敗しました", channel_id)
+                restored = False
+            if not restored:
+                game_restore.clear_session("daifugo", channel_id)
+        game_restore.flush_store()
+
+    async def _restore_session(self, channel_id, entry) -> bool:
+        state = entry.get("state")
+        if not isinstance(state, dict) or channel_id in self.games:
+            return False
+        channel = self.bot.get_channel(channel_id)
+        if channel is None:
+            return False
+        guild = getattr(channel, "guild", None)
+        guild_id = entry.get("guild_id") or getattr(guild, "id", None)
+        g = DaifugoGame(channel_id, guild_id, state.get("host_id"))
+        players = {}
+        for uid, ref in state["players"]:
+            uid = int(uid)
+            players[uid] = None if ref is None else game_restore.resolve_member(
+                guild, ref.get("id"), ref.get("name"))
+        if len(players) < 2:
+            return False
+        g.players = players
+        g.hands = {int(uid): list(cards) for uid, cards in state["hands"]}
+        g.finished = [int(u) for u in state.get("finished") or []]
+        g.turn = state.get("turn")
+        table = state.get("table")
+        g.table = tuple(table) if table is not None else None
+        g.last_player = state.get("last_player")
+        g.passed = {int(u) for u in state.get("passed") or []}
+        g.revolution = bool(state.get("revolution"))
+        g.cleared = bool(state.get("cleared"))
+        g.eight_cut = bool(state.get("eight_cut"))
+        g.phase = "playing"
+        self.games[channel_id] = g
+        asyncio.create_task(self._run_restored_session(channel, g))
+        return True
+
+    async def _run_restored_session(self, channel, g: DaifugoGame):
+        try:
+            await self._play_loop(channel, g)
+            await self.finish(channel, g)
+        except Exception:
+            logger.exception("channel %s: 復旧した大富豪の進行に失敗しました", g.channel_id)
+        finally:
+            g.phase = "done"
+            if self.games.get(g.channel_id) is g:
+                self.games.pop(g.channel_id, None)
+            self._clear_snapshot(g.channel_id)
 
 
 async def setup(bot):

@@ -17,16 +17,19 @@
   NG が OK より多いときだけ脱落。同数・無投票はセーフ。
 """
 import asyncio
+import logging
 import random
 import unicodedata
 
 import discord
-from core import game_panels
+from core import game_panels, game_restore
 from core.messages import recruit_join_prompt
 from discord.ext import commands
 
 from core import party_ranking
 from core.emojis import FAILED
+
+logger = logging.getLogger(__name__)
 
 COLOR = 0xFFFFFF
 RECRUIT_SECONDS = 60
@@ -253,6 +256,7 @@ class OdaiShiritori(commands.Cog):
         finally:
             g.phase = "done"
             self.games.pop(channel.id, None)
+            self._clear_snapshot(channel.id)
 
     async def run_game(self, channel, g: ShiritoriGame, rng=random):
         g.topic = rng.choice(list(TOPICS))
@@ -267,11 +271,16 @@ class OdaiShiritori(commands.Cog):
                          f"自分の番になったら{TURN_SECONDS}秒以内に、ひらがなかカタカナでチャンネルに書いてください。\n"
                          "「ん」で終わる・同じ言葉・時間切れ・お題に合わない（投票）で脱落。最後の1人が勝ち！"),
             color=COLOR))
-        while len(g.alive) > 1:
-            await self.play_turn(channel, g)
+        await self._play_loop(channel, g)
         await self.finish(channel, g)
 
+    async def _play_loop(self, channel, g: ShiritoriGame):
+        while len(g.alive) > 1:
+            await self.play_turn(channel, g)
+
     async def play_turn(self, channel, g: ShiritoriGame):
+        # 手番開始時点をチェックポイントとして保存する（復旧はここから再開する）
+        self._save_snapshot(g)
         uid = g.next_player()
         g.current, g.answer = uid, None
         member = g.players[uid]
@@ -327,6 +336,88 @@ class OdaiShiritori(commands.Cog):
         embed = discord.Embed(title="お題しりとり 終了", description=f"🏆 勝者: {win_text}", color=COLOR)
         embed.add_field(name=f"つながった言葉（お題: {g.topic}）", value=chain[:1024], inline=False)
         await channel.send(embed=embed)
+
+    # ------------------------------------------------------------------
+    # 再起動復旧（core/game_restore.py）
+    # ------------------------------------------------------------------
+    def _save_snapshot(self, g: ShiritoriGame) -> None:
+        if g.phase != "playing":
+            return
+        state = {
+            "host_id": g.host_id,
+            "players": [
+                [uid, game_restore.member_ref(m) if m is not None else None]
+                for uid, m in g.players.items()
+            ],
+            "out": list(g.out),
+            "topic": g.topic,
+            "last_word": g.last_word,
+            "used": sorted(g.used),
+            "history": [[uid, word] for uid, word in g.history],
+            "turn_index": g.turn_index,
+        }
+        game_restore.save_session("shiritori", g.channel_id, g.guild_id, state)
+
+    def _clear_snapshot(self, channel_id) -> None:
+        game_restore.clear_session("shiritori", channel_id)
+
+    async def restore_after_restart(self) -> None:
+        """再起動前に進行中だったお題しりとりを、手番の開始時点から再開する。"""
+        entries = game_restore.session_entries("shiritori")
+        for channel_id, entry in entries.items():
+            try:
+                restored = await self._restore_session(channel_id, entry)
+            except Exception:
+                logger.exception("channel %s: お題しりとりの復旧に失敗しました", channel_id)
+                restored = False
+            if not restored:
+                game_restore.clear_session("shiritori", channel_id)
+        game_restore.flush_store()
+
+    async def _restore_session(self, channel_id, entry) -> bool:
+        state = entry.get("state")
+        if not isinstance(state, dict) or channel_id in self.games:
+            return False
+        channel = self.bot.get_channel(channel_id)
+        if channel is None:
+            return False
+        guild = getattr(channel, "guild", None)
+        guild_id = entry.get("guild_id") or getattr(guild, "id", None)
+        g = ShiritoriGame(channel_id, guild_id, state.get("host_id"))
+        players = {}
+        for uid, ref in state["players"]:
+            uid = int(uid)
+            players[uid] = None if ref is None else game_restore.resolve_member(
+                guild, ref.get("id"), ref.get("name"))
+        if len(players) < 2:
+            return False
+        g.players = players
+        g.out = [int(u) for u in state.get("out") or []]
+        g.topic = state.get("topic")
+        g.last_word = state.get("last_word")
+        g.used = set(state.get("used") or [])
+        g.history = [(int(uid), word) for uid, word in state.get("history") or []]
+        g.turn_index = int(state.get("turn_index") or 0)
+        g.current = None
+        g.answer = None
+        g.phase = "playing"
+        if len(g.alive) <= 1:
+            return False
+        self.games[channel_id] = g
+        asyncio.create_task(self._run_restored_session(channel, g))
+        return True
+
+    async def _run_restored_session(self, channel, g: ShiritoriGame):
+        try:
+            await self._play_loop(channel, g)
+            await self.finish(channel, g)
+        except Exception:
+            logger.exception("channel %s: 復旧したお題しりとりの進行に失敗しました", g.channel_id)
+        finally:
+            g.phase = "done"
+            if self.games.get(g.channel_id) is g:
+                self.games.pop(g.channel_id, None)
+            self._clear_snapshot(g.channel_id)
 
     async def handle_message(self, message) -> bool:
         """手番の人の発言を答えとして受け付ける。受け付けたら True。"""

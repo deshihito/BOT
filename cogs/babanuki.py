@@ -12,15 +12,18 @@
 - 最初に手札がなくなった人の勝ち。勝利数は core/party_ranking.py に記録する（人間 2 人以上のときだけ）。
 """
 import asyncio
+import logging
 import random
 
 import discord
-from core import game_panels
+from core import game_panels, game_restore
 from core.emojis import CROCK
 from core.messages import recruit_join_prompt
 from discord.ext import commands
 
 from core import autoplay, party_ranking
+
+logger = logging.getLogger(__name__)
 
 GAME_ID = "babanuki"
 party_ranking.register(GAME_ID)
@@ -224,6 +227,7 @@ class Babanuki(commands.Cog):
         finally:
             g.phase = "done"
             self.games.pop(channel.id, None)
+            self._clear_snapshot(channel.id)
 
     def counts_text(self, g: BabanukiGame) -> str:
         return "\n".join(f"{g.name(uid)}: {len(g.hands.get(uid, []))}枚"
@@ -239,11 +243,16 @@ class Babanuki(commands.Cog):
                          "自分の手札は「手札を見る」で確認できます（本人にだけ見えます）。\n\n"
                          + self.counts_text(g)),
             color=COLOR))
-        while g.phase == "playing":
-            await self.play_turn(channel, g, rng)
+        await self._play_loop(channel, g, rng)
         await self.finish(channel, g)
 
+    async def _play_loop(self, channel, g: BabanukiGame, rng=random):
+        while g.phase == "playing":
+            await self.play_turn(channel, g, rng)
+
     async def play_turn(self, channel, g: BabanukiGame, rng=random):
+        # 手番開始時点をチェックポイントとして保存する（復旧はここから再開する）
+        self._save_snapshot(g)
         uid = g.current
         target = g.target_of(uid)
         rng.shuffle(g.hands[target])
@@ -327,6 +336,81 @@ class Babanuki(commands.Cog):
         embed = discord.Embed(title="ババ抜き 終了", description=text, color=COLOR)
         embed.add_field(name="上がった順", value=order[:1024], inline=False)
         await channel.send(embed=embed)
+
+    # ------------------------------------------------------------------
+    # 再起動復旧（core/game_restore.py）
+    # ------------------------------------------------------------------
+    def _save_snapshot(self, g: BabanukiGame) -> None:
+        if g.phase != "playing":
+            return
+        state = {
+            "host_id": g.host_id,
+            "players": [
+                [uid, game_restore.member_ref(m) if m is not None else None]
+                for uid, m in g.players.items()
+            ],
+            "hands": [[uid, list(cards)] for uid, cards in g.hands.items()],
+            "finished": list(g.finished),
+            "loser": g.loser,
+            "turn_index": g.turn_index,
+        }
+        game_restore.save_session("babanuki", g.channel_id, g.guild_id, state)
+
+    def _clear_snapshot(self, channel_id) -> None:
+        game_restore.clear_session("babanuki", channel_id)
+
+    async def restore_after_restart(self) -> None:
+        """再起動前に進行中だったババ抜きを、手番の開始時点から再開する。"""
+        entries = game_restore.session_entries("babanuki")
+        for channel_id, entry in entries.items():
+            try:
+                restored = await self._restore_session(channel_id, entry)
+            except Exception:
+                logger.exception("channel %s: ババ抜きの復旧に失敗しました", channel_id)
+                restored = False
+            if not restored:
+                game_restore.clear_session("babanuki", channel_id)
+        game_restore.flush_store()
+
+    async def _restore_session(self, channel_id, entry) -> bool:
+        state = entry.get("state")
+        if not isinstance(state, dict) or channel_id in self.games:
+            return False
+        channel = self.bot.get_channel(channel_id)
+        if channel is None:
+            return False
+        guild = getattr(channel, "guild", None)
+        guild_id = entry.get("guild_id") or getattr(guild, "id", None)
+        g = BabanukiGame(channel_id, guild_id, state.get("host_id"))
+        players = {}
+        for uid, ref in state["players"]:
+            uid = int(uid)
+            players[uid] = None if ref is None else game_restore.resolve_member(
+                guild, ref.get("id"), ref.get("name"))
+        if len(players) < 2:
+            return False
+        g.players = players
+        g.hands = {int(uid): list(cards) for uid, cards in state["hands"]}
+        g.finished = [int(u) for u in state.get("finished") or []]
+        g.loser = state.get("loser")
+        g.turn_index = int(state.get("turn_index") or 0)
+        g.drawn = None
+        g.phase = "playing"
+        self.games[channel_id] = g
+        asyncio.create_task(self._run_restored_session(channel, g))
+        return True
+
+    async def _run_restored_session(self, channel, g: BabanukiGame):
+        try:
+            await self._play_loop(channel, g)
+            await self.finish(channel, g)
+        except Exception:
+            logger.exception("channel %s: 復旧したババ抜きの進行に失敗しました", g.channel_id)
+        finally:
+            g.phase = "done"
+            if self.games.get(g.channel_id) is g:
+                self.games.pop(g.channel_id, None)
+            self._clear_snapshot(g.channel_id)
 
 
 async def setup(bot):

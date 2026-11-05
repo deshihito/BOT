@@ -1,6 +1,7 @@
 """/game のチェス（2人対戦、提供されたスプライトシートを使用）。"""
 import asyncio
 import io
+import logging
 import random
 from pathlib import Path
 
@@ -8,7 +9,9 @@ import discord
 from discord.ext import commands
 from PIL import Image, ImageDraw, ImageFont
 
-from core import game_panels
+from core import game_panels, game_restore
+
+logger = logging.getLogger(__name__)
 
 COLOR = 0x6F4E37
 RECRUIT_SECONDS = 30
@@ -524,6 +527,7 @@ class Chess(commands.Cog):
             finally:
                 g.phase = "done"
                 self.games.pop(channel.id, None)
+                self._clear_snapshot(channel.id)
             return
         g.players[interaction.user.id] = interaction.user
         self.games[channel.id] = g
@@ -536,6 +540,7 @@ class Chess(commands.Cog):
         finally:
             g.phase = "done"
             self.games.pop(channel.id, None)
+            self._clear_snapshot(channel.id)
 
     async def show_turn(self, channel, g):
         moves = legal_moves(g.board, g.turn, castling=g.castling, ep=g.ep_square)
@@ -571,6 +576,8 @@ class Chess(commands.Cog):
 
     async def _play_loop(self, channel, g):
         while g.phase == "playing":
+            # 手番開始時点をチェックポイントとして保存する（復旧はここから再開する）
+            self._save_snapshot(g)
             # 手番開始時に合法手がなければ終局する（空の手選択を作らない）。
             if not legal_moves(g.board, g.turn, castling=g.castling, ep=g.ep_square):
                 if in_check(g.board, g.turn):
@@ -599,6 +606,102 @@ class Chess(commands.Cog):
                 await channel.send(f"{g.current_user().mention} さんは時間切れです。{winner} の勝ちです。チェスを終了しました。")
                 break
         await channel.send("チェスを終了しました。")
+
+    # ------------------------------------------------------------------
+    # 再起動復旧（core/game_restore.py）
+    # ------------------------------------------------------------------
+    def _save_snapshot(self, g):
+        if g.phase != "playing":
+            return
+        white = g.players.get("white")
+        black = g.players.get("black")
+        state = {
+            "mode": g.mode,
+            "difficulty": g.difficulty,
+            "host_id": g.host_id,
+            "players": {
+                "white": game_restore.member_ref(white) if white is not None else None,
+                "black": game_restore.member_ref(black) if black is not None else None,
+            },
+            "board": ["".join(row) for row in g.board],
+            "turn": g.turn,
+            "castling": sorted(g.castling),
+            "ep_square": list(g.ep_square) if g.ep_square is not None else None,
+            "board_message_id": getattr(g.current_msg, "id", None),
+        }
+        game_restore.save_session("chess", g.channel_id, g.guild_id, state)
+
+    def _clear_snapshot(self, channel_id) -> None:
+        game_restore.clear_session("chess", channel_id)
+
+    async def restore_after_restart(self) -> None:
+        """再起動前に進行中だったチェスを、手番の開始時点から再開する。"""
+        entries = game_restore.session_entries("chess")
+        for channel_id, entry in entries.items():
+            try:
+                restored = await self._restore_session(channel_id, entry)
+            except Exception:
+                logger.exception("channel %s: チェスの復旧に失敗しました", channel_id)
+                restored = False
+            if not restored:
+                game_restore.clear_session("chess", channel_id)
+        game_restore.flush_store()
+
+    async def _restore_session(self, channel_id, entry) -> bool:
+        state = entry.get("state")
+        if not isinstance(state, dict) or channel_id in self.games:
+            return False
+        channel = self.bot.get_channel(channel_id)
+        if channel is None:
+            return False
+        guild = getattr(channel, "guild", None)
+        guild_id = entry.get("guild_id") or getattr(guild, "id", None)
+        g = ChessGame(channel_id, guild_id, state.get("host_id"),
+                      state.get("mode") or "human", state.get("difficulty") or 5)
+        players = state.get("players") or {}
+        white_ref = players.get("white")
+        if white_ref is None:
+            return False
+        g.players["white"] = game_restore.resolve_member(
+            guild, white_ref.get("id"), white_ref.get("name"))
+        if g.mode == "cpu":
+            pass  # 黒は CPU（players には入れない。通常フローと同じ形）
+        else:
+            black_ref = players.get("black")
+            if black_ref is None:
+                return False
+            g.players["black"] = game_restore.resolve_member(
+                guild, black_ref.get("id"), black_ref.get("name"))
+        board = state["board"]
+        if len(board) != 8 or any(len(row) != 8 for row in board):
+            return False
+        g.board = [list(row) for row in board]
+        g.turn = state["turn"] if state.get("turn") in ("white", "black") else "white"
+        g.castling = set(state.get("castling") or [])
+        ep = state.get("ep_square")
+        g.ep_square = tuple(ep) if ep is not None else None
+        g.phase = "playing"
+        message_id = state.get("board_message_id")
+        fetch = getattr(channel, "fetch_message", None)
+        if message_id and callable(fetch):
+            try:
+                g.current_msg = await fetch(message_id)
+            except Exception:
+                g.current_msg = None
+        self.games[channel_id] = g
+        asyncio.create_task(self._run_restored_session(channel, g))
+        return True
+
+    async def _run_restored_session(self, channel, g):
+        try:
+            await self._play_loop(channel, g)
+        except Exception:
+            logger.exception("channel %s: 復旧したチェスの進行に失敗しました", g.channel_id)
+        finally:
+            g.phase = "done"
+            if self.games.get(g.channel_id) is g:
+                self.games.pop(g.channel_id, None)
+            self._clear_snapshot(g.channel_id)
 
 
 async def setup(bot):
