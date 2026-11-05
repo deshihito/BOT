@@ -1,9 +1,10 @@
 import discord
 from core.panel_v2 import edit_message_v2
 from discord import app_commands  # ← 追加
-from discord.ext import commands
+from discord.ext import commands, tasks
 import asyncio
 import time
+import types
 import logging
 import configparser
 import string
@@ -25,6 +26,7 @@ import numpy as np
 import re
 import wave
 import discord.opus
+from core import voice_restore
 from core.voice_session import SHARED_FEATURES, VoiceBusy, get_manager
 from core.voice_media import add_audio_source, has_audio_source, remove_audio_source
 from core.legacy import Responder
@@ -32,9 +34,6 @@ from core.emojis import FAILED, MUSIC, SUCCESS
 from core.music_activity import build_music_activity_snapshot
 
 from core.music.common import *  # noqa: F401,F403 - shared helpers/constants
-from core.music.common import EQ_SETTINGS, MAX_PLAYBACK_SPEED, MIN_PLAYBACK_SPEED, we  # noqa: F401
-from core.music.spatial import SpatialControlView  # noqa: F401
-from core.music.ui import build_music_panel_layout  # noqa: F401
 
 logger = logging.getLogger("cogs.sio_music")
 
@@ -132,8 +131,10 @@ class PanelMixin:
             state['is_changing_setting'] = False
             state['is_processing_queue'] = False
             await self.check_queue(guild.id)
+            self._save_music_snapshot(guild.id)
         else:
             await self.update_panel(guild.id)
+            self._save_music_snapshot(guild.id)
 
 
     async def _eq_impl(self, interaction: discord.Interaction, mode: str = "flat"):

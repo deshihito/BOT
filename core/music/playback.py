@@ -1,9 +1,10 @@
 import discord
 from core.panel_v2 import edit_message_v2
 from discord import app_commands  # ← 追加
-from discord.ext import commands
+from discord.ext import commands, tasks
 import asyncio
 import time
+import types
 import logging
 import configparser
 import string
@@ -25,6 +26,7 @@ import numpy as np
 import re
 import wave
 import discord.opus
+from core import voice_restore
 from core.voice_session import SHARED_FEATURES, VoiceBusy, get_manager
 from core.voice_media import add_audio_source, has_audio_source, remove_audio_source
 from core.legacy import Responder
@@ -32,8 +34,6 @@ from core.emojis import FAILED, MUSIC, SUCCESS
 from core.music_activity import build_music_activity_snapshot
 
 from core.music.common import *  # noqa: F401,F403 - shared helpers/constants
-from core.music.common import BASE62, FFMPEG_REALTIME_PRESETS, FFmpegPCMAudioDiagnostics, MAX_PLAYBACK_SPEED, MAX_QUEUE_SIZE, MIN_PLAYBACK_SPEED, build_atempo_filters, build_ffmpeg_headers, encode_full_id, is_safe_custom_audio_filter, niconico_url_kind, we  # noqa: F401
-from core.music.spatial import PythonSpatialAudioSource  # noqa: F401
 
 logger = logging.getLogger("cogs.sio_music")
 
@@ -72,6 +72,7 @@ class PlaybackMixin:
             if state['queue'].empty():
                 state['is_processing_queue'] = False
                 await self.update_panel(guild_id)
+                self._save_music_snapshot(guild_id)
                 return
             
             queue = state['queue']
@@ -163,6 +164,7 @@ class PlaybackMixin:
             )
             self._start_progress_task(guild_id)
             await self.update_panel(guild_id)
+            self._save_music_snapshot(guild_id)
 
             # FFmpegが少なくとも1フレームのPCMを出力するまで待つ。vc.play()直後の
             # 表示では、URLの403やデコーダー失敗でも「再生中」と誤表示されるため。
@@ -466,6 +468,7 @@ class PlaybackMixin:
         remove_audio_source(vc, "music", notify=True)
         await r.send(embed=we("完全に停止し、キューをクリアしました。"))
         await self.update_panel(r.guild.id)
+        self._save_music_snapshot(r.guild.id)
 
 
     async def _seek_impl(self, interaction: discord.Interaction, seconds: float):
@@ -508,6 +511,7 @@ class PlaybackMixin:
                 embed=we(f"<:Pause:1561700510447312916> 再生を一時停止しました。(`{int(state['elapsed_offset'])}秒` 時点)\nもう一度 `/vc` の音楽操作パネルから再開できます。")
             )
             await self.update_panel(interaction.guild_id)
+            self._save_music_snapshot(interaction.guild_id)
 
         # 2. 一時停止中の場合 -> 再生再開処理
         elif state['is_paused'] and state['current_track']:
@@ -540,6 +544,7 @@ class PlaybackMixin:
         labels = {'off': 'OFF', 'track': '1曲ループ', 'queue': 'キューループ'}
         await interaction.response.send_message(embed=we(f"ループ設定を **{labels[mode]}** に変更しました。"))
         await self.update_panel(interaction.guild_id)
+        self._save_music_snapshot(interaction.guild_id)
 
 
     async def _shuffle_impl(self, interaction: discord.Interaction):
@@ -548,6 +553,7 @@ class PlaybackMixin:
         label = 'ON' if state['shuffle_enabled'] else 'OFF'
         await interaction.response.send_message(embed=we(f"シャッフル再生を **{label}** に変更しました。"))
         await self.update_panel(interaction.guild_id)
+        self._save_music_snapshot(interaction.guild_id)
 
 
     async def _files_impl(self, r: Responder, limit: int = 20):

@@ -1,9 +1,10 @@
 import discord
 from core.panel_v2 import edit_message_v2
 from discord import app_commands  # ← 追加
-from discord.ext import commands
+from discord.ext import commands, tasks
 import asyncio
 import time
+import types
 import logging
 import configparser
 import string
@@ -25,6 +26,7 @@ import numpy as np
 import re
 import wave
 import discord.opus
+from core import voice_restore
 from core.voice_session import SHARED_FEATURES, VoiceBusy, get_manager
 from core.voice_media import add_audio_source, has_audio_source, remove_audio_source
 from core.legacy import Responder
@@ -32,7 +34,6 @@ from core.emojis import FAILED, MUSIC, SUCCESS
 from core.music_activity import build_music_activity_snapshot
 
 from core.music.common import *  # noqa: F401,F403 - shared helpers/constants
-from core.music.common import MAX_PLAYLIST_ITEMS, SPOTIFY_PLAYLIST_RE, YTDL_OPTIONS, soundcloud_url_kind  # noqa: F401
 
 logger = logging.getLogger("cogs.sio_music")
 

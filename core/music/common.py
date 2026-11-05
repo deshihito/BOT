@@ -1,9 +1,10 @@
 import discord
 from core.panel_v2 import edit_message_v2
 from discord import app_commands  # ← 追加
-from discord.ext import commands
+from discord.ext import commands, tasks
 import asyncio
 import time
+import types
 import logging
 import configparser
 import string
@@ -25,6 +26,7 @@ import numpy as np
 import re
 import wave
 import discord.opus
+from core import voice_restore
 from core.voice_session import SHARED_FEATURES, VoiceBusy, get_manager
 from core.voice_media import add_audio_source, has_audio_source, remove_audio_source
 from core.legacy import Responder
@@ -107,6 +109,7 @@ PLAYLIST_SCOPE_CHOICES = [
 MIN_PLAYBACK_SPEED = 0.5
 MAX_PLAYBACK_SPEED = 64.0
 PANEL_TIMEOUT_SECONDS = 900
+SNAPSHOT_INTERVAL_SECONDS = 30.0  # 再起動復旧用スナップショットの定期保存間隔（SIGKILL でも最大この分だけ再生位置が巻き戻る）
 SAFE_CUSTOM_AUDIO_FILTERS = {
     'acompressor', 'aecho', 'alimiter', 'apulsator', 'bass', 'dynaudnorm',
     'equalizer', 'extrastereo', 'highpass', 'lowpass', 'loudnorm', 'treble',

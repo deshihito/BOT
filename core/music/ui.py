@@ -1,9 +1,10 @@
 import discord
 from core.panel_v2 import edit_message_v2
 from discord import app_commands  # ← 追加
-from discord.ext import commands
+from discord.ext import commands, tasks
 import asyncio
 import time
+import types
 import logging
 import configparser
 import string
@@ -25,6 +26,7 @@ import numpy as np
 import re
 import wave
 import discord.opus
+from core import voice_restore
 from core.voice_session import SHARED_FEATURES, VoiceBusy, get_manager
 from core.voice_media import add_audio_source, has_audio_source, remove_audio_source
 from core.legacy import Responder
@@ -32,7 +34,6 @@ from core.emojis import FAILED, MUSIC, SUCCESS
 from core.music_activity import build_music_activity_snapshot
 
 from core.music.common import *  # noqa: F401,F403 - shared helpers/constants
-from core.music.common import MAX_QUEUE_SIZE, PANEL_TIMEOUT_SECONDS, is_safe_custom_audio_filter, niconico_url_kind, soundcloud_url_kind, we  # noqa: F401
 
 logger = logging.getLogger("cogs.sio_music")
 
@@ -266,6 +267,7 @@ class VoiceControlView(discord.ui.View):
             remove_audio_source(vc, "music", notify=True)
             await interaction.response.send_message(embed=we(f"<:Pause:1561700510447312916> 再生を一時停止しました。(`{int(state['elapsed_offset'])}秒` 時点)"), ephemeral=True)
             await self.cog.update_panel(self.guild_id)
+            self.cog._save_music_snapshot(self.guild_id)
         else:
             await interaction.response.send_message(embed=we("<:failed:1490986584676368535> 現在再生中ではないか、既に一時停止されています。"), ephemeral=True)
 
@@ -277,6 +279,7 @@ class VoiceControlView(discord.ui.View):
             state['is_paused'] = False
             await interaction.response.send_message(embed=we("▶️ 再生を再開します。"), ephemeral=True)
             await self.cog.check_queue(self.guild_id)
+            self.cog._save_music_snapshot(self.guild_id)
         else:
             await interaction.response.send_message(embed=we("<:failed:1490986584676368535> 再開できる一時停止中のトラックがありません。"), ephemeral=True)
 
@@ -300,6 +303,7 @@ class VoiceControlView(discord.ui.View):
         label = 'ON' if state['shuffle_enabled'] else 'OFF'
         await interaction.response.send_message(embed=we(f"<:shuffle:1563559485170122802> シャッフルを `{label}` に設定しました。"), ephemeral=True)
         await self.cog.update_panel(self.guild_id)
+        self.cog._save_music_snapshot(self.guild_id)
 
     @discord.ui.button(label="", emoji="<:restart:1563559489121030184>", style=discord.ButtonStyle.secondary, row=3)
     async def loop_button(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -309,6 +313,7 @@ class VoiceControlView(discord.ui.View):
         labels = {'off': 'OFF', 'track': '1曲', 'queue': 'キュー'}
         await interaction.response.send_message(embed=we(f"<:restart:1563559489121030184> ループを `{labels[next_mode]}` に設定しました。"), ephemeral=True)
         await self.cog.update_panel(self.guild_id)
+        self.cog._save_music_snapshot(self.guild_id)
 
     @discord.ui.button(label="📋", style=discord.ButtonStyle.secondary, row=4)
     async def queue_button(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -340,6 +345,7 @@ class VoiceControlView(discord.ui.View):
             remove_audio_source(vc, "music", notify=True)
             await interaction.response.send_message(embed=we("<:reset:1563559487351160972> 再生を完全に停止し、キューをクリアしました。"), ephemeral=True)
             await self.cog.update_panel(self.guild_id)
+            self.cog._save_music_snapshot(self.guild_id)
         else:
             await interaction.response.send_message(embed=we("<:failed:1490986584676368535> ボイスチャンネルに接続していません。"), ephemeral=True)
 
