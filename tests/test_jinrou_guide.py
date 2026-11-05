@@ -163,6 +163,14 @@ if __name__ == "__main__":
 
 
 class YandereTeamTest(unittest.IsolatedAsyncioTestCase):
+    def assert_victory_embed(self, game, text):
+        # 勝敗確定はフェーズ集約 embed で発表される（表示モダン化 §4.2-9）
+        for call in game.game_channel.send.await_args_list:
+            embed = call.kwargs.get("embed")
+            if embed is not None and embed.title == "勝敗確定" and text in (embed.description or ""):
+                return
+        raise AssertionError(f"勝敗確定 embed が見つかりません: {text}")
+
     def setUp(self):
         from unittest.mock import patch
         p = patch.object(jinrou, "db_api", MagicMock())
@@ -196,7 +204,7 @@ class YandereTeamTest(unittest.IsolatedAsyncioTestCase):
         game = self.game({1: "人狼", 2: "ヤンデレ", 3: "占い師", 4: "騎士"})
         cog = self.cog()
         self.assertTrue(await cog.check_victory(game))
-        game.game_channel.send.assert_any_await("人狼が支配した。人狼陣営の勝利です。")
+        self.assert_victory_embed(game, "人狼が支配した。人狼陣営の勝利です。")
         winners = cog._record_wins.await_args.args[1]
         self.assertEqual(sorted(winners), [1, 2])
 
@@ -205,5 +213,5 @@ class YandereTeamTest(unittest.IsolatedAsyncioTestCase):
         game = self.game({1: "人狼", 2: "ヤンデレ", 3: "占い師", 4: "騎士"}, alive={2, 3, 4})
         cog = self.cog()
         self.assertTrue(await cog.check_victory(game))
-        game.game_channel.send.assert_any_await("人狼全滅。村人陣営の勝利です。")
+        self.assert_victory_embed(game, "人狼全滅。村人陣営の勝利です。")
         self.assertEqual(sorted(cog._record_wins.await_args.args[1]), [3, 4])
