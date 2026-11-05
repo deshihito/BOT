@@ -298,7 +298,7 @@ class EventCreateModal(discord.ui.Modal, title="イベントを作成"):
                 "連続でイベントを作成できません。少し待ってください。", ephemeral=True,
             )
         _last_create[key] = now
-        await interaction.response.defer(ephemeral=True)
+        await interaction.response.defer()
         entry = {
             "id": uuid.uuid4().hex[:12],
             "guild_id": interaction.guild_id,
@@ -332,7 +332,7 @@ class EventCreateModal(discord.ui.Modal, title="イベントを作成"):
                     await message.edit(embed=build_embed(entry), view=EventRsvpView(self.cog, entry))
                 except Exception:
                     logger.debug("連携表示の更新に失敗しました: message=%s", message.id)
-        return await interaction.followup.send("イベントを作成しました。", ephemeral=True)
+        return await interaction.followup.send("イベントを作成しました。")
 
 
 async def handle_create(cog: Any, interaction: discord.Interaction) -> None:
@@ -426,7 +426,7 @@ async def handle_close(cog: Any, interaction: discord.Interaction) -> None:
             "終了は保存しましたが、表示を更新できませんでした。もう一度押してください。", ephemeral=True,
         )
     if changed:
-        return await interaction.followup.send("イベントを終了しました。", ephemeral=True)
+        return await interaction.followup.send("イベントを終了しました。")
 
 
 async def handle_refresh(cog: Any, interaction: discord.Interaction) -> None:
@@ -530,12 +530,12 @@ class EventPanelButton(discord.ui.Button):
         channel = interaction.guild.get_channel(channel_id) if interaction.guild and channel_id else None
         if channel is None:
             return await interaction.response.send_message("先に投稿先を選んでください。", ephemeral=True)
-        await interaction.response.defer(ephemeral=True)
+        await interaction.response.defer()
         try:
             await channel.send(embed=build_panel_embed(), view=EventPanelView(view.cog))
         except (discord.Forbidden, discord.HTTPException):
             return await interaction.followup.send("パネルを送信できませんでした。", ephemeral=True)
-        return await interaction.followup.send("イベントパネルを送信しました。", ephemeral=True)
+        return await interaction.followup.send("イベントパネルを送信しました。")
 
 
 class EventSettingsView(AssistFeatureView):
