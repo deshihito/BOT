@@ -1,9 +1,9 @@
 # -*- coding: utf-8 -*-
-"""SNS新着通知 (X / YouTube / GitHub) の取得・UI。元 cogs/support.py から分割。"""
+"""SNS新着通知 (X / YouTube / GitHub / 汎用RSS) の取得・UI。元 cogs/support.py から分割。"""
 from __future__ import annotations
 
 from .common import *
-from .common import _support_int
+from .common import _html, _support_int
 
 
 # ===== SNS新着通知（X / YouTube / GitHub） ======================================
@@ -30,6 +30,7 @@ SNS_PLATFORMS = {
     "youtube": {"label": "YouTube", "emoji": "▶️", "color": 0xFF0000, "noun": "動画", "open": "YouTubeで開く"},
     "x": {"label": "X", "emoji": "𝕏", "color": 0xFFFFFF, "noun": "ポスト", "open": "Xで開く"},
     "github": {"label": "GitHub", "emoji": "🐙", "color": 0x24292F, "noun": "更新", "open": "GitHubで開く"},
+    "rss": {"label": "RSS", "emoji": "📰", "color": 0xF26522, "noun": "記事", "open": "記事を開く"},
 }
 
 _SNS_NS = {
@@ -257,6 +258,70 @@ def parse_rss_feed(data: bytes) -> tuple[str, list[SnsItem]]:
     return channel_title, items
 
 
+def normalize_rss_url(raw: str) -> str:
+    """汎用RSSのフィードURLを検証して返す (http/https のみ)。"""
+    text = (raw or "").strip()
+    if len(text) > 500:
+        raise SnsError("URLが長すぎます。")
+    parsed = urlparse(text)
+    if parsed.scheme not in ("http", "https") or not parsed.hostname:
+        raise SnsError("フィードのURL (http/https) を入力してください。")
+    return text
+
+
+def parse_generic_feed(data: bytes) -> tuple[str, list[SnsItem]]:
+    """汎用RSS: RSS 2.0 と Atom の両形式を解析する。"""
+    try:
+        root = ET.fromstring(data)
+    except ET.ParseError as exc:
+        raise SnsError("フィードを解析できませんでした。") from exc
+
+    # Atom
+    if root.tag.endswith("}feed") or root.tag == "feed":
+        title = (root.findtext("a:title", default="", namespaces=_SNS_NS) or "").strip()
+        items: list[SnsItem] = []
+        for entry in root.findall("a:entry", _SNS_NS):
+            link_el = entry.find("a:link[@rel='alternate']", _SNS_NS)
+            if link_el is None:
+                link_el = entry.find("a:link", _SNS_NS)
+            link = (link_el.get("href") if link_el is not None else "") or ""
+            item_id = (entry.findtext("a:id", default="", namespaces=_SNS_NS) or link).strip()
+            if not item_id:
+                continue
+            items.append(
+                SnsItem(
+                    id=item_id[:300],
+                    title=_sns_text(entry.findtext("a:title", default="", namespaces=_SNS_NS))[:300]
+                    or _sns_text(entry.findtext("a:summary", default="", namespaces=_SNS_NS))[:300],
+                    url=link,
+                    author=title,
+                    published=entry.findtext("a:published", default=None, namespaces=_SNS_NS)
+                    or entry.findtext("a:updated", default=None, namespaces=_SNS_NS),
+                )
+            )
+        return title, items
+
+    # RSS 2.0
+    channel_title = _sns_text(root.findtext("channel/title"))
+    items = []
+    for node in root.iter("item"):
+        link = (node.findtext("link") or "").strip()
+        guid = (node.findtext("guid") or link).strip()
+        if not guid:
+            continue
+        item_title = _sns_text(node.findtext("title")) or _sns_text(node.findtext("description"))
+        items.append(
+            SnsItem(
+                id=guid[:300],
+                title=item_title[:300],
+                url=link,
+                author=channel_title,
+                published=node.findtext("pubDate"),
+            )
+        )
+    return channel_title, items
+
+
 def parse_x_username(raw: str) -> str:
     raw = (raw or "").strip()
     match = re.match(
@@ -474,9 +539,21 @@ class SnsFetcher:
             items += github_items_from_commits(data, full_name)
         return items
 
+    # --- 汎用RSS ---------------------------------------------------------
+    async def rss_items(self, url: str) -> tuple[str, list[SnsItem]]:
+        status, body = await self._get(url)
+        if status != 200:
+            raise SnsError(f"フィードの取得に失敗しました（HTTP {status}）。")
+        return parse_generic_feed(body)
+
     # --- 共通 ------------------------------------------------------------
     async def lookup(self, platform: str, raw: str) -> dict:
         """追加時の解決。現在の最新分も返す（既読の基準にするため）。"""
+        if platform == "rss":
+            url = normalize_rss_url(raw)
+            name, items = await self.rss_items(url)
+            return {"key": url, "name": name or urlparse(url).hostname or url, "uid": None, "items": items}
+
         if platform == "youtube":
             channel_id = await self.resolve_youtube(raw)
             name, items = await self.youtube_feed(channel_id)
@@ -504,6 +581,10 @@ class SnsFetcher:
 
         if sub["platform"] == "github":
             return await self.github_items(sub["key"], sub.get("options")), None
+
+        if sub["platform"] == "rss":
+            _, items = await self.rss_items(sub["key"])
+            return items, None
 
         username = sub["key"]
         # X通知はRSSを使用。APIの課金・トークン設定には依存しない。
@@ -572,7 +653,7 @@ class SnsNotifyMessage(discord.ui.LayoutView):
             header += f"\n-# <t:{stamp}:R>"
         children.append(discord.ui.TextDisplay(header))
 
-        if sub["platform"] in ("youtube", "github"):
+        if sub["platform"] in ("youtube", "github", "rss"):
             title = discord.utils.escape_markdown(item.title)[:200] or "(タイトルなし)"
             children.append(discord.ui.TextDisplay(f"**{title}**"))
             if item.thumbnail:
@@ -799,7 +880,12 @@ class SnsGithubKindSelect(discord.ui.Select):
 class SnsAddModal(discord.ui.Modal):
     def __init__(self, panel: "SnsNotifyPanel", platform: str):
         meta = SNS_PLATFORMS[platform]
-        modal_title = f"{meta['label']}リポジトリを追加" if platform == "github" else f"{meta['label']}アカウントを追加"
+        if platform == "github":
+            modal_title = f"{meta['label']}リポジトリを追加"
+        elif platform == "rss":
+            modal_title = "RSSフィードを追加"
+        else:
+            modal_title = f"{meta['label']}アカウントを追加"
         super().__init__(title=modal_title[:45])
         self.panel = panel
         self.platform = platform
@@ -807,6 +893,8 @@ class SnsAddModal(discord.ui.Modal):
             label, placeholder = "チャンネル", "@ハンドル / チャンネルURL / チャンネルID(UC…)"
         elif platform == "github":
             label, placeholder = "リポジトリ", "owner/repo / リポジトリURL"
+        elif platform == "rss":
+            label, placeholder = "フィードURL", "https://example.com/feed.xml"
         else:
             label, placeholder = "Xアカウント", "@ユーザー名 / プロフィールURL"
         self.account = discord.ui.TextInput(label=label, placeholder=placeholder, max_length=200)
@@ -894,7 +982,7 @@ class SnsNotifyPanel(discord.ui.LayoutView):
 
     def _build(self):
         self.clear_items()
-        head = "## 📡 SNS新着通知\nX・YouTube・GitHubの新着をチャンネルへ通知します。（管理者専用）"
+        head = "## 📡 SNS新着通知\nX・YouTube・GitHub・RSSの新着をチャンネルへ通知します。（管理者専用）"
         if self.notice:
             head = f"{self.notice}\n\n{head}"
 
@@ -911,6 +999,7 @@ class SnsNotifyPanel(discord.ui.LayoutView):
                 SnsAddButton(self, "youtube"),
                 SnsAddButton(self, "x"),
                 SnsAddButton(self, "github"),
+                SnsAddButton(self, "rss"),
                 SnsToggleButton(self),
             ),
             discord.ui.ActionRow(
