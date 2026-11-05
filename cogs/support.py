@@ -241,10 +241,12 @@ class SupportCog(
         await store.ensure_loaded()
         history_specs = action_usage.history_panel_specs(
             store, interaction.guild_id, interaction.user.id, "support")
-        view = SupportPanelView(self, history_specs=history_specs)
+        view = SupportPanelView(self, history_specs=history_specs,
+                                owner_id=interaction.user.id)
+        # 他ルートと揃えて公開で出す（導線最適化ラウンド2）。操作は
+        # SupportPanelView.interaction_check で呼び出し本人に制限する。
         await interaction.response.send_message(
             view=as_panel_v2(view),
-            ephemeral=True,
         )
 
 

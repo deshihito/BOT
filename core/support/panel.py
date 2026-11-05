@@ -199,9 +199,11 @@ class SupportPanelView(discord.ui.View):
         shortcut_mode: bool = False,
         shortcut_item: dict | None = None,
         history_specs: list | None = None,
+        owner_id: int | None = None,
     ):
         super().__init__(timeout=600)  # ルートパネル共通の寿命（導線最適化 S10）
         self.cog = cog
+        self.owner_id = owner_id
 
         saved = (shortcut_item or {}).get("action", {})
         saved_genre = saved.get("genre")
@@ -237,6 +239,10 @@ class SupportPanelView(discord.ui.View):
         if not self.genre or not self.action:
             return None
         return {"root": "support", "genre": self.genre, "value": self.action}
+
+    async def interaction_check(self, interaction) -> bool:
+        # 公開パネル化（導線最適化ラウンド2）: 持ち主だけが操作できる。
+        return self.owner_id is None or interaction.user.id == self.owner_id
 
     def embed(self):
         return discord.Embed(title="サポート操作", color=0xFFFFFF)
