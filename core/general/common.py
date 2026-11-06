@@ -104,6 +104,7 @@ GENERAL_ACTIONS = {
         ("コイン保有ランキング", "coin_leaderboard"),
         ("ロールショップ", "role_shop"),
         ("ガチャ", "gacha"),
+        ("クラン", "clan"),
     ],
     "rta": [
         ("ランキング一覧", "rankings"),

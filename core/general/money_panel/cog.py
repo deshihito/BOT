@@ -262,6 +262,7 @@ class MoneyPanelView(discord.ui.View):
                 ("プレイヤー状況", secondary, self._dispatch("status")),
                 ("コイン保有ランキング", secondary, self._dispatch("coin_leaderboard")),
                 ("日報DMを設定", secondary, self._dispatch("daily_report")),
+                ("クラン", secondary, self._dispatch("clan")),
             ]
         # home: よく使う即時操作をその場で完結させる。
         return [

@@ -21,6 +21,7 @@ from core.general.circulation.cog import (
     mining_core,
     prison_core,
     steal_core,
+    clan_core,
     circulation_action_failed,
     as_panel_v2,
     edit_panel_v2,
