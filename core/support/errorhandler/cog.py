@@ -15,7 +15,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
-from core.command_catalog import permission_label
+from core.help.command_catalog import permission_label
 from core.emojis import FAILED
 
 logger = logging.getLogger("cogs.errorhandler")
@@ -34,7 +34,7 @@ def prefix_usage(command: Optional[commands.Command], prefix: str = "!") -> Opti
     if command is None:
         return None
     try:
-        from core.command_meta import COMMAND_META
+        from core.help.command_meta import COMMAND_META
         usage = (COMMAND_META.get(f"!{command.qualified_name}") or {}).get("usage")
     except Exception:
         usage = None
