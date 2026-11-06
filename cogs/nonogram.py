@@ -3,7 +3,7 @@
 
 ヒント数字を頼りにマスを塗って絵を浮かばせる。5×5 と 8×8。
 入力は 行セレクト→列セレクト→操作ボタン（塗る／バツ／消す）。
-クリアタイムは core/game_records.py の nonogram にサイズ別で残る。
+クリアタイムは core/game/game_records.py の nonogram にサイズ別で残る。
 """
 import random
 import time
@@ -11,8 +11,8 @@ import time
 import discord
 from discord.ext import commands
 
-from core import game_records
-from core.nonogram import SIZES, NonogramBoard, NonogramPuzzle
+from core.game import game_records
+from core.game.nonogram import SIZES, NonogramBoard, NonogramPuzzle
 
 GAME_ID = "nonogram"
 CELL_LABEL = {0: "未定", 1: "塗り", 2: "バツ"}

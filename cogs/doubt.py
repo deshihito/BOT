@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 import discord
-from core import game_panels
+from core.game import game_panels
 from discord.ext import commands
 
 from core import action_usage, party_ranking

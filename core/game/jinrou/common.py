@@ -7,13 +7,14 @@ from collections import Counter
 logger = logging.getLogger("cogs.jinrou")
 import os
 import discord
-from core import game_panels
+from core.game import game_panels
 from core.emojis import FAILED, SUCCESS
-from core import jinrou_guide
+from core.game import jinrou_guide
 from discord import app_commands
 from discord.ext import commands
 
-from core import autoplay, jinrou_review
+from core import autoplay
+from core.game import jinrou_review
 
 from core import party_ranking
 

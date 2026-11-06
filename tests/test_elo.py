@@ -1,9 +1,9 @@
-"""ボード系 Elo（core/elo.py）のテスト。"""
+"""ボード系 Elo（core/game/elo.py）のテスト。"""
 import tempfile
 import unittest
 from pathlib import Path
 
-from core import elo
+from core.game import elo
 
 
 class EloMathTest(unittest.TestCase):

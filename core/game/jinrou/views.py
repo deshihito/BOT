@@ -5,12 +5,13 @@ import random
 from collections import Counter
 import os
 import discord
-from core import game_panels
+from core.game import game_panels
 from core.emojis import AGOMUNIMUNI, FAILED, LOADING, MASAI, MUSIC, REIBAI, SUCCESS, URANAI
-from core import jinrou_guide
+from core.game import jinrou_guide
 from discord import app_commands
 from discord.ext import commands
-from core import autoplay, jinrou_review
+from core import autoplay
+from core.game import jinrou_review
 from core import party_ranking
 import math
 import config

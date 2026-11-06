@@ -2,7 +2,7 @@
 """ハイ＆ロー（ソロ・ストリーク型）。
 
 今見えているカードより、次にめくるカードが高いか低いかを当て続ける。
-同点は外れ。連続正解数が記録（core/game_records.py の highlow）に残る。
+同点は外れ。連続正解数が記録（core/game/game_records.py の highlow）に残る。
 賭け要素はない。
 """
 import random
@@ -10,8 +10,8 @@ import random
 import discord
 from discord.ext import commands
 
-from core import game_records
-from core.highlow import HighLowGame, card_label
+from core.game import game_records
+from core.game.highlow import HighLowGame, card_label
 
 GAME_ID = "highlow"
 

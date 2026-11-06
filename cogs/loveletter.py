@@ -3,7 +3,7 @@
 
 手札は公開パネルでは「手札1／手札2」とだけ示し、実際のカードは
 本人の ephemeral ビューでだけ確認・プレイする（秘匿情報のため）。
-進行は core/loveletter.py の状態機械に従い、手番は60秒で自動プレイ。
+進行は core/game/loveletter.py の状態機械に従い、手番は60秒で自動プレイ。
 """
 import asyncio
 import logging
@@ -12,8 +12,9 @@ import random
 import discord
 from discord.ext import commands
 
-from core import game_panels, party_ranking
-from core.loveletter import CARD_INFO, NEEDS_TARGET, LoveLetterGame, card_name
+from core import party_ranking
+from core.game import game_panels
+from core.game.loveletter import CARD_INFO, NEEDS_TARGET, LoveLetterGame, card_name
 
 logger = logging.getLogger(__name__)
 

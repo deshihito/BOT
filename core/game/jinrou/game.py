@@ -5,12 +5,13 @@ import random
 from collections import Counter
 import os
 import discord
-from core import game_panels
+from core.game import game_panels
 from core.emojis import FAILED, SUCCESS
-from core import jinrou_guide
+from core.game import jinrou_guide
 from discord import app_commands
 from discord.ext import commands
-from core import autoplay, jinrou_review
+from core import autoplay
+from core.game import jinrou_review
 from core import party_ranking
 import math
 import config
@@ -57,7 +58,7 @@ class JinrouGame:
         self.is_global = False
         self.channels = []
         self._original_channel = None
-        self.review = []          # 振り返り表の記録（core/jinrou_review.py）
+        self.review = []          # 振り返り表の記録（core/game/jinrou_review.py）
         self.review_divines = {}  # その夜の占い結果 {占い師: (対象, 白/黒)}
         self.started = False  # 役職を配ってゲームループが動いている間 True（募集中は False）
 

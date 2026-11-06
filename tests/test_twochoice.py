@@ -1,9 +1,9 @@
-"""究極の二択（core/twochoice.py）のテスト。お題バンクと集計。"""
+"""究極の二択（core/game/twochoice.py）のテスト。お題バンクと集計。"""
 
 import random
 import unittest
 
-from core.twochoice import QUESTIONS, QUESTIONS_PER_SESSION, minority_side, pick_questions, tally
+from core.game.twochoice import QUESTIONS, QUESTIONS_PER_SESSION, minority_side, pick_questions, tally
 
 
 class BankTest(unittest.TestCase):

@@ -2,7 +2,7 @@
 import random
 import unittest
 
-from core.hanabi import COLORS, COUNTS, HanabiGame, build_deck
+from core.game.hanabi import COLORS, COUNTS, HanabiGame, build_deck
 
 
 class DeckTest(unittest.TestCase):

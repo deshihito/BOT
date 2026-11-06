@@ -2,7 +2,7 @@
 """マジョリティ連想ゲーム（みんなの答えを合わせるゲーム）。
 
 お題に全員が答えを出し、同じ答えを書いた人数が多いほど得点になる。
-進行と集計は core/majority.py。最終の最上位は party_ranking に記録。
+進行と集計は core/game/majority.py。最終の最上位は party_ranking に記録。
 """
 import asyncio
 import logging
@@ -12,7 +12,7 @@ import discord
 from discord.ext import commands
 
 from core import party_ranking
-from core.majority import TOPICS, MajoritySession
+from core.game.majority import TOPICS, MajoritySession
 
 logger = logging.getLogger(__name__)
 

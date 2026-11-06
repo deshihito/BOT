@@ -166,7 +166,7 @@ class ShinkeiFlowTest(unittest.IsolatedAsyncioTestCase):
         g.matched = {0: 1, 1: 1}
         g.face_up = [2]
         texts = [self.cog.board_embed(g, 'x').description] + [b.label for b in s.BoardView(self.cog, g).children]
-        from core.game_guides import GAME_GUIDES
+        from core.game.game_guides import GAME_GUIDES
         texts.append(str(GAME_GUIDES['shinkei']))
         self.assertFalse([t for t in texts if emoji.search(t)])
 

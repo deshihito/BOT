@@ -160,7 +160,7 @@ class CommandCatalogTest(unittest.TestCase):
 
     def test_game_hub_duplicates_are_gone(self):
         """/game で代わりになるので外したゲームの / コマンドが、登録・COMMAND_META・案内文・サイトのデータに残っていない。"""
-        from core.game_guides import GAME_GUIDES
+        from core.game.game_guides import GAME_GUIDES
         removed = ['/jinrou_help', '/wordwolf', '/uno_start', '/jinrou', '/uno_end', '/kill',
                    '/jinrou_rating', '/jinrou_ranking', '/guess', '/flash']
         registered = set(registered_commands(self.bot))
@@ -259,7 +259,7 @@ class CommandCatalogTest(unittest.TestCase):
     def test_guide_keys_exist_in_game_guides(self):
         guides = command_meta.game_guides()
         if not guides:
-            self.skipTest('core/game_guides.py がまだありません')
+            self.skipTest('core/game/game_guides.py がまだありません')
         for key, meta in command_meta.COMMAND_META.items():
             if meta.get('guide_key'):
                 with self.subTest(command=key):

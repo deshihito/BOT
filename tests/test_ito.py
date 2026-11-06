@@ -2,7 +2,7 @@
 import random
 import unittest
 
-from core.ito import THEMES, ItoSession
+from core.game.ito import THEMES, ItoSession
 
 
 class ItoBankTest(unittest.TestCase):

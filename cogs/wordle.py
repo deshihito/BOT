@@ -19,10 +19,11 @@ from pathlib import Path
 from core.emojis import B_, G_, Y_
 
 import discord
-from core import game_panels, game_restore
+from core.game import game_panels, game_restore
 from discord.ext import commands
 
-from core import game_records, party_ranking
+from core import party_ranking
+from core.game import game_records
 
 logger = logging.getLogger(__name__)
 
@@ -232,7 +233,7 @@ class Wordle(commands.Cog):
             g.finished.set()
 
     # ------------------------------------------------------------------
-    # 再起動復旧（core/game_restore.py）
+    # 再起動復旧（core/game/game_restore.py）
     # ------------------------------------------------------------------
     def _save_snapshot(self, g: WordleGame) -> None:
         if g.phase != "playing" or g.winner is not None:

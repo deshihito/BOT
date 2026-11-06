@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """採掘・宝くじ・盗む: /general のマネージャンルから使う循環モジュールの入口。
 
-本体は core/mining.py（採掘）・core/lottery.py（宝くじ）・core/steal.py
+本体は core/game/mining.py（採掘）・core/game/lottery.py（宝くじ）・core/steal.py
 （盗む）で、ここは Discord 側の表示と、AGO コイン残高の実移動だけを
 担う。コインの増減は必ず cogs/wallet.py の安全な経路（CAS 更新
 _change_balance と transaction_history への記録）を通す
@@ -34,9 +34,9 @@ from discord.ext import commands, tasks
 import config
 from core.general import economy_pool as economy_core
 from core.general import items as items_core
-from core import lottery as lottery_core
-from core import mining as mining_core
-from core import prison as prison_core
+from core.game import lottery as lottery_core
+from core.game import mining as mining_core
+from core.game import prison as prison_core
 from core import steal as steal_core
 from core.messages import circulation_action_failed
 from core.panel_v2 import as_panel_v2, edit_panel_v2

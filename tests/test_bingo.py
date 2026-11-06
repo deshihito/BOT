@@ -1,9 +1,9 @@
-"""ビンゴ（core/bingo.py）のテスト。"""
+"""ビンゴ（core/game/bingo.py）のテスト。"""
 
 import random
 import unittest
 
-from core.bingo import COLUMN_RANGES, BingoCard, BingoSession, format_card
+from core.game.bingo import COLUMN_RANGES, BingoCard, BingoSession, format_card
 
 
 class CardTest(unittest.TestCase):

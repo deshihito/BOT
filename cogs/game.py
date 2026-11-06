@@ -3,16 +3,17 @@
 
 ゲームを選ぶと、人数の目安・所要時間と「ルール」「募集する」ボタンが出る。
 募集は各ゲームの cog の ``start_recruit(interaction)`` をそのまま呼ぶので、個別のコマンド
-（!doubt）と同じ流れになる。案内文は core/game_guides.py。
+（!doubt）と同じ流れになる。案内文は core/game/game_guides.py。
 """
 import discord
 from discord import app_commands
 from discord.ext import commands
 
-from core import action_usage, elo, party_ranking
+from core import action_usage, party_ranking
+from core.game import elo
 from core.support import usage_stats
 from core.emojis import BACK
-from core.game_guides import GAME_GUIDES, GAME_ORDER, guide_for_discord
+from core.game.game_guides import GAME_GUIDES, GAME_ORDER, guide_for_discord
 from core.panel_v2 import as_panel_v2, edit_panel_v2
 from core.public_share import PublicShareView
 

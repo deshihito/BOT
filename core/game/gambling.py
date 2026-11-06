@@ -26,7 +26,7 @@
 - セッション（先払い済みスロット、先行ベット済みの double / blackjack）は
   このストアに永続化し、Bot 再起動時は未完了セッションのベットを
   ``pop_orphaned_sessions`` で返金対象として取り出す（cogs/gambling.py が
-  起動後に返金を実行する。core/game_restore.py の「スナップショットが
+  起動後に返金を実行する。core/game/game_restore.py の「スナップショットが
   あれば常に reconcile する」流儀）
 
 このモジュールが持つのは定数・内部状態・セッション・抽選と判定まで。

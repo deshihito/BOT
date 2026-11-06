@@ -1,9 +1,9 @@
-"""数独（core/sudoku.py）のテスト。生成の一意性・難易度・デイリー。"""
+"""数独（core/game/sudoku.py）のテスト。生成の一意性・難易度・デイリー。"""
 
 import random
 import unittest
 
-from core.sudoku import DIFFICULTIES, count_solutions, daily_puzzle, generate, is_complete_and_valid, solve
+from core.game.sudoku import DIFFICULTIES, count_solutions, daily_puzzle, generate, is_complete_and_valid, solve
 
 
 def givens_count(grid):

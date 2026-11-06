@@ -2,7 +2,7 @@
 """ワンナイト人狼（3〜6人・約5分）。
 
 夜フェーズ1回（役職アクション）→ 議論 → 投票 → 処刑で決着する
-本編人狼の短縮版。ロジックは core/onenight.py、勝者は party_ranking に
+本編人狼の短縮版。ロジックは core/game/onenight.py、勝者は party_ranking に
 "onenight" として記録される。本編人狼（cogs/jinrou.py）とは別ゲーム。
 """
 import asyncio
@@ -12,7 +12,7 @@ import discord
 from discord.ext import commands
 
 from core import party_ranking
-from core.onenight import (MAX_PLAYERS, MIN_PLAYERS, ROBBER, ROLE_INFO, SEER, VILLAGER, WOLF,
+from core.game.onenight import (MAX_PLAYERS, MIN_PLAYERS, ROBBER, ROLE_INFO, SEER, VILLAGER, WOLF,
                            OneNightSession)
 
 logger = logging.getLogger(__name__)

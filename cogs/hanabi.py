@@ -14,10 +14,10 @@ import logging
 import discord
 from discord.ext import commands
 
-from core import game_records
-from core.board_image import render_tiles
-from core.game_v2 import GamePanelView, text_panel
-from core.hanabi import COLOR_EMOJI, COLORS, HanabiGame
+from core.game import game_records
+from core.game.board_image import render_tiles
+from core.game.game_v2 import GamePanelView, text_panel
+from core.game.hanabi import COLOR_EMOJI, COLORS, HanabiGame
 from core.panel_v2 import edit_message_v2
 
 logger = logging.getLogger(__name__)

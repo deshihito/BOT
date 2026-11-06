@@ -9,10 +9,11 @@ from core.emojis import LEFT, RIGHT
 
 import discord
 from discord.ext import commands
-from core import elo, game_panels, game_restore, party_ranking
+from core import party_ranking
+from core.game import elo, game_panels, game_restore
 from PIL import Image, ImageDraw, ImageFont
 
-from core.shogi_engine import ShogiGame, Color, PieceType, Piece
+from core.game.shogi_engine import ShogiGame, Color, PieceType, Piece
 
 logger = logging.getLogger(__name__)
 
@@ -755,7 +756,7 @@ class Shogi(commands.Cog):
                 idle = 0
 
     # ------------------------------------------------------------------
-    # 再起動復旧（core/game_restore.py）
+    # 再起動復旧（core/game/game_restore.py）
     # ------------------------------------------------------------------
     def _save_snapshot(self, s: ShogiSession) -> None:
         if s.phase != "playing":

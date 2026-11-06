@@ -9,7 +9,7 @@ from cogs.shogi import (
     ShogiSession, _shogi_candidates, choose_ai_move as choose_shogi_move,
     make_labels, paginate_labels,
 )
-from core.shogi_engine import Color, Piece, PieceType, ShogiGame
+from core.game.shogi_engine import Color, Piece, PieceType, ShogiGame
 
 
 class BoardAiTest(unittest.TestCase):

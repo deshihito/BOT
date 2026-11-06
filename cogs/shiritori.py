@@ -22,7 +22,7 @@ import random
 import unicodedata
 
 import discord
-from core import game_panels, game_restore
+from core.game import game_panels, game_restore
 from core.messages import recruit_join_prompt
 from discord.ext import commands
 
@@ -338,7 +338,7 @@ class OdaiShiritori(commands.Cog):
         await channel.send(embed=embed)
 
     # ------------------------------------------------------------------
-    # 再起動復旧（core/game_restore.py）
+    # 再起動復旧（core/game/game_restore.py）
     # ------------------------------------------------------------------
     def _save_snapshot(self, g: ShiritoriGame) -> None:
         if g.phase != "playing":

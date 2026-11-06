@@ -30,7 +30,7 @@ from cogs import game as game_module  # noqa: E402
 from cogs import nation as nation_module  # noqa: E402
 from cogs import uno  # noqa: E402
 from cogs.help import category_pages, overview_embed  # noqa: E402
-from core.game_guides import GAME_ORDER  # noqa: E402
+from core.game.game_guides import GAME_ORDER  # noqa: E402
 
 BOOK_LEGEND = "はガイド（くわしい説明）があるコマンドです"
 

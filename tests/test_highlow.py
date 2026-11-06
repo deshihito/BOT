@@ -1,9 +1,9 @@
-"""ハイ＆ロー（core/highlow.py）のテスト。同点は外れ扱い。"""
+"""ハイ＆ロー（core/game/highlow.py）のテスト。同点は外れ扱い。"""
 
 import random
 import unittest
 
-from core.highlow import HighLowGame, card_label, new_deck, rank_label
+from core.game.highlow import HighLowGame, card_label, new_deck, rank_label
 
 
 class DeckTest(unittest.TestCase):

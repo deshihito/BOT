@@ -4,7 +4,7 @@
 問題は唯一解になるよう生成する。モードは かんたん／ふつう／むずかしい／
 デイリー（日付シードで全員同じ問題・ふつう相当）。入力は
 行セレクト→列セレクト→数字セレクト。初期マスは変更できない。
-クリアタイムは core/game_records.py の sudoku に難易度別で残る。
+クリアタイムは core/game/game_records.py の sudoku に難易度別で残る。
 """
 import asyncio
 import random
@@ -14,8 +14,8 @@ from datetime import datetime
 import discord
 from discord.ext import commands
 
-from core import game_records
-from core.sudoku import DIFFICULTIES, board_text, daily_puzzle, generate, is_complete_and_valid
+from core.game import game_records
+from core.game.sudoku import DIFFICULTIES, board_text, daily_puzzle, generate, is_complete_and_valid
 
 GAME_ID = "sudoku"
 

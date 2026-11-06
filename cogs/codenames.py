@@ -3,7 +3,7 @@
 
 リーダーはモーダルからヒント（単語＋個数）を出し、味方はセレクトで
 単語を選ぶ。キーカードはリーダーの ephemeral 表示でのみ見られる。
-進行は core/codenames.py の状態機械に従う。
+進行は core/game/codenames.py の状態機械に従う。
 """
 import asyncio
 import logging
@@ -13,8 +13,9 @@ from core.emojis import FAILED
 import discord
 from discord.ext import commands
 
-from core import game_panels, party_ranking
-from core.codenames import TEAM_LABEL, CodenamesGame, other_team
+from core import party_ranking
+from core.game import game_panels
+from core.game.codenames import TEAM_LABEL, CodenamesGame, other_team
 
 logger = logging.getLogger(__name__)
 

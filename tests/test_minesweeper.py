@@ -1,10 +1,10 @@
-"""マインスイーパー（core/minesweeper.py + game_records の sweeper）のテスト。"""
+"""マインスイーパー（core/game/minesweeper.py + game_records の sweeper）のテスト。"""
 
 import random
 import unittest
 
-from core import game_records
-from core.minesweeper import COLS, ROWS, MinesweeperBoard
+from core.game import game_records
+from core.game.minesweeper import COLS, ROWS, MinesweeperBoard
 
 
 class BoardTest(unittest.TestCase):

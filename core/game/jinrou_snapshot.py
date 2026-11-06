@@ -22,12 +22,12 @@
 - 死亡者の発言制限は silenced_players を境界時点で保存するため、
   夜開始時点の制限は再現されるが、議論中の制限変化は境界まで戻る。
 
-保存先は他の対局中ゲームと同じ core/game_restore.py のストア
+保存先は他の対局中ゲームと同じ core/game/game_restore.py のストア
 （game_id="jinrou"）。保存はすべて best-effort で、失敗しても対局は止めない。
 """
 import logging
 
-from core import game_restore
+from core.game import game_restore
 
 logger = logging.getLogger(__name__)
 

@@ -3,7 +3,7 @@
 
 勝敗のない投票ゲーム。お題は同梱バンクのみ（ユーザー投稿はモデレーション
 前提のため v1 では無し）。1 セッション 5 題、参加者の少数派回数などを
-core/game_records.py の twochoice 区分に残す。
+core/game/game_records.py の twochoice 区分に残す。
 """
 from __future__ import annotations
 

@@ -13,7 +13,7 @@ import logging
 import random
 
 import discord
-from core import game_panels, game_restore
+from core.game import game_panels, game_restore
 from core.emojis import CROCK
 
 logger = logging.getLogger(__name__)
@@ -318,7 +318,7 @@ class Shinkei(commands.Cog):
         await channel.send(embed=embed)
 
     # ------------------------------------------------------------------
-    # 再起動復旧（core/game_restore.py）
+    # 再起動復旧（core/game/game_restore.py）
     # ------------------------------------------------------------------
     def _save_snapshot(self, g: ShinkeiGame) -> None:
         if g.phase != "playing":

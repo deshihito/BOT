@@ -12,8 +12,8 @@ import discord
 from discord.ext import commands
 
 from core import party_ranking
-from core.game_v2 import GamePanelView, text_panel
-from core.insider import QUESTION_LIMIT, InsiderGame
+from core.game.game_v2 import GamePanelView, text_panel
+from core.game.insider import QUESTION_LIMIT, InsiderGame
 
 logger = logging.getLogger(__name__)
 

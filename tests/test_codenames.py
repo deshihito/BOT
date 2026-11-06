@@ -1,9 +1,9 @@
-"""コードネーム（core/codenames.py）のテスト。盤面構成・ヒント・推測・暗殺者。"""
+"""コードネーム（core/game/codenames.py）のテスト。盤面構成・ヒント・推測・暗殺者。"""
 
 import random
 import unittest
 
-from core.codenames import WORD_BANK, CodenamesGame
+from core.game.codenames import WORD_BANK, CodenamesGame
 
 
 def indices_of(game, kind):

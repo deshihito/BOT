@@ -6,7 +6,7 @@ import unittest
 class GameHubOneStepTest(unittest.TestCase):
     def test_hub_shows_all_games_without_genre(self):
         from cogs.game import GameHubView, GameSelect, GameGenreSelect, game_select_pages
-        from core.game_guides import GAME_ORDER
+        from core.game.game_guides import GAME_ORDER
 
         view = GameHubView(None)
         selects = [c for c in view.children if isinstance(c, GameSelect)]
@@ -143,7 +143,7 @@ class GameHubPagerTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_select_on_second_page_opens_detail(self):
         from cogs.game import GameDetailView, GameHubView, GameSelect
-        from core.game_guides import GAME_ORDER
+        from core.game.game_guides import GAME_ORDER
         from core.panel_v2 import PanelLayoutView
 
         view = GameHubView(None, page=1)
@@ -162,7 +162,7 @@ class GameHubPagerTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_back_opens_hub_on_games_page(self):
         from cogs.game import GameDetailView, GameHubView, GameSelect
-        from core.game_guides import GAME_ORDER
+        from core.game.game_guides import GAME_ORDER
 
         target = GAME_ORDER[-1]  # 2ページ目のゲーム
         detail = GameDetailView(None, target)

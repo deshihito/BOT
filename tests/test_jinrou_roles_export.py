@@ -18,7 +18,7 @@ class JinrouRolesExportTest(unittest.TestCase):
 
     def test_matches_bot_help_roles(self):
         from cogs import jinrou
-        from core import jinrou_guide
+        from core.game import jinrou_guide
         text = exporter.OUT_TS.read_text(encoding="utf-8")
         data = json.loads(re.search(r"JINROU_ROLES: JinrouRole\[\] = (\[.*\]);", text, re.S).group(1))
         self.assertEqual(len(data), len(jinrou.HELP_ROLES))

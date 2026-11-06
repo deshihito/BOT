@@ -3,7 +3,7 @@
 
 山札（52枚）から1枚を見せ、次のカードが「高い」か「低い」かを当て続ける。
 連続正解（ストリーク）がスコア。同点（同じ数字）は外れとして扱う
-（ガイドにも明記）。賭け要素は無く、記録は core/game_records.py の
+（ガイドにも明記）。賭け要素は無く、記録は core/game/game_records.py の
 highlow 区分に残す。
 """
 from __future__ import annotations

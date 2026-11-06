@@ -94,7 +94,7 @@ class LogicTest(unittest.TestCase):
     def test_registered(self):
         self.assertTrue(party_ranking.is_ranked('daifugo'))
         self.assertIn('daifugo', party_ranking.KNOWN_GAMES)
-        from core.game_guides import GAME_GUIDES
+        from core.game.game_guides import GAME_GUIDES
         self.assertIsNone(EMOJI.search(str(GAME_GUIDES['daifugo'])))
 
 

@@ -1,9 +1,9 @@
-"""ノノグラム（core/nonogram.py）のテスト。パターン・ヒント・完成判定。"""
+"""ノノグラム（core/game/nonogram.py）のテスト。パターン・ヒント・完成判定。"""
 
 import random
 import unittest
 
-from core.nonogram import PATTERNS, SIZES, NonogramBoard, NonogramPuzzle, clues_for
+from core.game.nonogram import PATTERNS, SIZES, NonogramBoard, NonogramPuzzle, clues_for
 
 
 class CluesTest(unittest.TestCase):

@@ -12,9 +12,9 @@ import random
 import discord
 from discord.ext import commands
 
-from core import game_records
-from core.game_v2 import GamePanelView, text_panel
-from core.justone import ROUNDS_DEFAULT, WORDS, JustOneSession
+from core.game import game_records
+from core.game.game_v2 import GamePanelView, text_panel
+from core.game.justone import ROUNDS_DEFAULT, WORDS, JustOneSession
 
 logger = logging.getLogger(__name__)
 
