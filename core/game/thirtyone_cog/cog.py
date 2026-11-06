@@ -10,7 +10,7 @@ import logging
 import discord
 from discord.ext import commands
 
-from core import party_ranking
+from core.game import party_ranking
 from core.game import game_panels
 from core.game.thirtyone import ThirtyOneGame
 
