@@ -1,6 +1,6 @@
 """グローバルチャットの荒らし対策（NG ワード・連投制限・サーバーごとのブロック）。
 
-設定は core.guild_settings（bot_kv の namespace "guild_settings"）の "globalchat" セクションに保存する:
+設定は core.support.guild_settings（bot_kv の namespace "guild_settings"）の "globalchat" セクションに保存する:
     {"ng_words": [...], "blocked_users": [user_id, ...], "blocked_guilds": [guild_id, ...]}
 /setup のグローバルチャットの画面から編集する。新しい SQL は使わない。
 """
@@ -11,7 +11,7 @@ import unicodedata
 from collections import defaultdict, deque
 from typing import Any, Iterable, Optional
 
-from core.guild_settings import get_store
+from core.support.guild_settings import get_store
 
 SECTION = "globalchat"
 MAX_WORDS = 100
