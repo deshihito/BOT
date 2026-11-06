@@ -11,7 +11,7 @@
 - 起動時の復旧は「前回正常終了したか」を前提にしない。スナップショットが
   存在すれば常に reconcile し、復旧できないものは呼び出し側が掃除する。
 - 保存先は専用 JSON（既定 data/voice_restore.json、環境変数
-  VOICE_RESTORE_DATA_PATH で変更可）。core/market.py / core/items.py と
+  VOICE_RESTORE_DATA_PATH で変更可）。core/general/market.py / core/general/items.py と
   同じ流儀で、メモリ主体＋バッチフラッシュ＋ tmp→replace の原子差し替え。
   壊れた JSON でも起動を止めない（退避して空から始める）。
 
