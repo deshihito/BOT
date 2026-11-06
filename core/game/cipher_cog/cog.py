@@ -13,7 +13,7 @@ import random
 import discord
 from discord.ext import commands
 
-from core import party_ranking
+from core.game import party_ranking
 from core.game.cipher import ALL_CODES, MAX_ROUNDS, WORDS, CipherGame, code_label
 from core.game.game_v2 import GamePanelView, text_panel
 

@@ -5,7 +5,7 @@ import unittest
 
 from game_fakes import FakeChannel, FakeGuild
 from cogs import doubt
-from core import party_ranking
+from core.game import party_ranking
 
 
 class DoubtRankingTest(unittest.IsolatedAsyncioTestCase):

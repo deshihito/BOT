@@ -3,7 +3,7 @@
 
 - スラッシュコマンドは増やさず、/game の「お題しりとり」から募集する（GameHub が start_recruit を呼ぶ）。
 - 状態はチャンネルごとに ``self.games[channel_id]`` に持ち、終わったら必ず消す。
-- 勝利数は core/party_ranking.py 経由で Supabase の party_game_record_win に送る
+- 勝利数は core/game/party_ranking.py 経由で Supabase の party_game_record_win に送る
   （関数が無いときはメモリだけで数える）。
 
 判定のしくみ（純粋関数は Discord に依存しないので単体テストできる）:
@@ -26,7 +26,7 @@ from core.game import game_panels, game_restore
 from core.messages import recruit_join_prompt
 from discord.ext import commands
 
-from core import party_ranking
+from core.game import party_ranking
 from core.emojis import CROCK, FAILED
 
 logger = logging.getLogger(__name__)

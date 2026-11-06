@@ -6,7 +6,7 @@
 - 1〜6 人。参加順に手番。そろえば得点してもう一度、外れたら少し見せてから裏に戻して次の人へ。
 - 手番の時間切れでは core/autoplay.take_idle_turn で代わりにめくる（サーバー設定でオフなら手番を飛ばす）。
 - 全部そろったら、ペアの数が一番多い人の勝ち（同点は全員勝ち）。
-  勝利数は core/party_ranking.py に記録する（2 人以上の勝負のときだけ。ひとり遊びは数えない）。
+  勝利数は core/game/party_ranking.py に記録する（2 人以上の勝負のときだけ。ひとり遊びは数えない）。
 """
 import asyncio
 import logging
@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 from core.messages import recruit_join_prompt
 from discord.ext import commands
 
-from core import autoplay, party_ranking
+from core.game import autoplay, party_ranking
 
 GAME_ID = "shinkei"
 party_ranking.register(GAME_ID)

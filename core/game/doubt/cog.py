@@ -3,7 +3,8 @@ import discord
 from core.game import game_panels
 from discord.ext import commands
 
-from core import action_usage, party_ranking
+from core import action_usage
+from core.game import party_ranking
 from core.support import usage_stats
 
 party_ranking.register("doubt")
@@ -240,7 +241,7 @@ class Doubt(commands.Cog):
         await channel.send(embed=win_embed)
         if self.games.get(channel.id) is game:
             del self.games[channel.id]
-            # サーバーごとのランキング（core/party_ranking.py）: 手札を出し切った 1 人が勝ち
+            # サーバーごとのランキング（core/game/party_ranking.py）: 手札を出し切った 1 人が勝ち
             guild = getattr(channel, "guild", None)
             if guild is not None:
                 await party_ranking.shared().record_win(guild.id, winner_id, "doubt")

@@ -1,4 +1,4 @@
-"""放置したプレイヤーの代打ち（core/autoplay.py）と、人狼・UNO への組み込みのテスト。d1 への通信はすべて差し替える。"""
+"""放置したプレイヤーの代打ち（core/game/autoplay.py）と、人狼・UNO への組み込みのテスト。d1 への通信はすべて差し替える。"""
 
 import asyncio
 import os
@@ -6,7 +6,8 @@ import tempfile
 import unittest
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from core import autoplay, guild_settings
+from core import guild_settings
+from core.game import autoplay
 from core.storage import KVStore
 from game_fakes import FakeBot, FakeChannel, FakeGuild, FakeMember, fast_time
 from cogs import jinrou, uno

@@ -8,7 +8,8 @@ from unittest.mock import AsyncMock, patch
 
 from game_fakes import FakeChannel, FakeGuild, FakeInteraction, FakeMember, fast_time, real_sleep
 from cogs import shinkei as s
-from core import autoplay, guild_settings, party_ranking
+from core import guild_settings
+from core.game import autoplay, party_ranking
 
 # 0,1 / 2,3 / ... が同じ絵になる並び
 ORDERED = [sym for sym in s.SYMBOLS for _ in range(2)]

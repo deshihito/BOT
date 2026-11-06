@@ -1,8 +1,8 @@
-"""月次シーズンランキング（core/party_ranking.py の monthly）のテスト。"""
+"""月次シーズンランキング（core/game/party_ranking.py の monthly）のテスト。"""
 
 import unittest
 
-from core import party_ranking
+from core.game import party_ranking
 
 
 class MonthlyRankingTest(unittest.IsolatedAsyncioTestCase):

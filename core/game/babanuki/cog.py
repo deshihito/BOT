@@ -9,7 +9,7 @@
 - 自分の手札は「手札を見る」で本人にだけ表示する。
 - 手番は 30 秒。時間切れは core/autoplay.take_idle_turn で代わりに引く（代打ちがオフでもゲームが止まらないよう
   ランダムに引く）。
-- 最初に手札がなくなった人の勝ち。勝利数は core/party_ranking.py に記録する（人間 2 人以上のときだけ）。
+- 最初に手札がなくなった人の勝ち。勝利数は core/game/party_ranking.py に記録する（人間 2 人以上のときだけ）。
 """
 import asyncio
 import logging
@@ -21,7 +21,7 @@ from core.emojis import CROCK
 from core.messages import recruit_join_prompt
 from discord.ext import commands
 
-from core import autoplay, party_ranking
+from core.game import autoplay, party_ranking
 
 logger = logging.getLogger(__name__)
 

@@ -10,9 +10,9 @@ from core.emojis import FAILED, HAGE, REIBAI, SUCCESS
 from core.game import jinrou_guide
 from discord import app_commands
 from discord.ext import commands
-from core import autoplay
+from core.game import autoplay
 from core.game import jinrou_review
-from core import party_ranking
+from core.game import party_ranking
 import math
 import config
 

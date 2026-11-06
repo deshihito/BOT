@@ -12,7 +12,7 @@ import logging
 import discord
 from discord.ext import commands
 
-from core import party_ranking
+from core.game import party_ranking
 from core.game.game_v2 import GamePanelView, text_panel
 from core.game.mendou import KINDS, MendouGame
 

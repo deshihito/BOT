@@ -3,7 +3,7 @@
 どのゲームからも呼べるように、ゲーム固有の知識は持たない。ゲーム側は「いまの状況（state）」と
 「選んでよい手の一覧（legal_actions）」と「どう選ぶか（instructions）」を渡すだけ。
 
-    from core import autoplay
+    from core.game import autoplay
 
     result = await autoplay.take_idle_turn(
         channel, guild_id=channel.guild.id, player_name="ひと でし",

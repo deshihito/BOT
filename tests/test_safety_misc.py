@@ -529,7 +529,7 @@ class SystemRandomTest(unittest.TestCase):
 
     def test_gacha_default_rng_is_system_random_but_injection_kept(self):
         from cogs.gacha import GachaCog
-        from core import gacha as gacha_core
+        from core.game import gacha as gacha_core
 
         with tempfile.TemporaryDirectory() as tmp:
             store = gacha_core.GachaStore(Path(tmp) / "gacha.json")
@@ -600,7 +600,7 @@ class RefundFailureTest(unittest.TestCase):
             self.assertIn("運営に連絡", message)
 
     def test_clan_create_refund_failure_is_reported(self):
-        from core import clan as clan_core
+        from core.game import clan as clan_core
         from cogs.clan import ClanCog
 
         with tempfile.TemporaryDirectory() as tmp:
@@ -625,7 +625,7 @@ class GachaCreditFailureTest(unittest.TestCase):
         from tests.test_gacha import _Bot
 
         from cogs.gacha import GachaCog
-        from core import gacha as gacha_core
+        from core.game import gacha as gacha_core
 
         return GachaCog(
             _Bot(wallet),

@@ -1,6 +1,6 @@
 """ボード系3種（オセロ・将棋・チェス）の勝敗記録（A2）のテスト。
 
-- 対人戦の勝者は core/party_ranking.py のサーバー別ランキングに記録される
+- 対人戦の勝者は core/game/party_ranking.py のサーバー別ランキングに記録される
 - CPU戦は対人戦と混ぜないため記録しない
 - 引き分け（オセロの同数・チェスのステイルメイト相当）はどちらにも付けない
 """
@@ -13,7 +13,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 import game_fakes  # noqa: F401
-from core import party_ranking
+from core.game import party_ranking
 from cogs import chess, othello, shogi
 
 

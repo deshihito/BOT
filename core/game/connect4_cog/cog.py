@@ -14,7 +14,7 @@ import discord
 from discord.ext import commands
 from PIL import Image, ImageDraw, ImageFont
 
-from core import party_ranking
+from core.game import party_ranking
 from core.game import elo, game_panels, game_restore
 from core.game.connect4 import COLS, EMPTY, RED, ROWS, YELLOW, choose_ai_move, drop, is_full, legal_moves, new_board, winner
 
