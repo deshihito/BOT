@@ -1,5 +1,4 @@
 from __future__ import annotations
-
 import asyncio
 import json
 import logging
@@ -9,13 +8,11 @@ import time
 import re
 from difflib import SequenceMatcher
 import numpy as np
-
 import aiohttp
 import discord
 import discord.opus
 from discord.ext import commands
 from discord.ext import voice_recv
-
 from core.legacy import Responder
 from core import vc_feature_restore
 from core.vosk_model import ensure_model
@@ -23,171 +20,21 @@ from core.voice_session import VoiceBusy, get_manager
 from core.voice_recv_patch import patch_voice_recv_client
 from core.messages import VOICE_NOT_JOINED
 from core.emojis import FAILED, MUSIC
-
 try:
     from vosk import Model, KaldiRecognizer
 except ImportError:
     Model = None
     KaldiRecognizer = None
+from core.voice.karaoke.common import annotations, asyncio, json, logging, os, threading, time, re, SequenceMatcher, np, aiohttp, discord, commands, voice_recv, Responder, vc_feature_restore, ensure_model, VoiceBusy, get_manager, patch_voice_recv_client, VOICE_NOT_JOINED, FAILED, MUSIC, logger, DISCORD_SAMPLE_RATE, VOSK_SAMPLE_RATE, CHANNELS, SILENCE_THRESHOLD_SEC, RMS_SILENCE_THRESHOLD, MODEL_PATH, OPUS_SILENCE, _partial, _shared_we, we  # noqa: F401
+from core.voice.karaoke.dsp import annotations, asyncio, json, logging, os, threading, time, re, SequenceMatcher, np, aiohttp, discord, commands, voice_recv, Responder, vc_feature_restore, ensure_model, VoiceBusy, get_manager, patch_voice_recv_client, VOICE_NOT_JOINED, FAILED, MUSIC, logger, resample_48k_to_16k, clean_text  # noqa: F401
+from core.voice.karaoke.restore import annotations, asyncio, json, logging, os, threading, time, re, SequenceMatcher, np, aiohttp, discord, commands, voice_recv, Responder, vc_feature_restore, ensure_model, VoiceBusy, get_manager, patch_voice_recv_client, VOICE_NOT_JOINED, FAILED, MUSIC, logger, RestoreMixin  # noqa: F401
+from core.voice.karaoke.session import annotations, asyncio, json, logging, os, threading, time, re, SequenceMatcher, np, aiohttp, discord, commands, voice_recv, Responder, vc_feature_restore, ensure_model, VoiceBusy, get_manager, patch_voice_recv_client, VOICE_NOT_JOINED, FAILED, MUSIC, logger, SessionMixin  # noqa: F401
+from core.voice.karaoke.sink import annotations, asyncio, json, logging, os, threading, time, re, SequenceMatcher, np, aiohttp, discord, commands, voice_recv, Responder, vc_feature_restore, ensure_model, VoiceBusy, get_manager, patch_voice_recv_client, VOICE_NOT_JOINED, FAILED, MUSIC, logger, KaraokeSink  # noqa: F401
 
-logger = logging.getLogger(__name__)
-
-DISCORD_SAMPLE_RATE = 48000
-VOSK_SAMPLE_RATE = 16000
-CHANNELS = 2
-
-# カラオケ用に無音判定を少し短めに設定 (0.5秒)
-SILENCE_THRESHOLD_SEC = 0.5
-RMS_SILENCE_THRESHOLD = 350
-MODEL_PATH = "model"
-OPUS_SILENCE = b"\xf8\xff\xfe"
+logger = logging.getLogger("cogs.sio_karaoke")
 
 
-from functools import partial as _partial
-from core.embeds import we as _shared_we
-# カラオケ風のピンク色を基調色として共通工場を使う
-we = _partial(_shared_we, color=0xFF69B4)
-
-
-# ============================================================
-# DAVE (Discord E2EE) 対応パッチ（本体は core.voice_recv_patch に集約）
-# ============================================================
-patch_voice_recv_client()
-
-
-def resample_48k_to_16k(pcm_data: bytes) -> bytes:
-    audio_16bit = np.frombuffer(pcm_data, dtype=np.int16)
-    if len(audio_16bit) == 0:
-        return b""
-    audio_stereo = audio_16bit.reshape(-1, CHANNELS)
-    audio_mono = audio_stereo.mean(axis=1)
-    audio_16k = audio_mono[::3].astype(np.int16)
-    return audio_16k.tobytes()
-
-
-def clean_text(text: str) -> str:
-    """比較のために記号やスペースを排除"""
-    return re.sub(r'[^\w\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FFF]', '', text)
-
-
-# ============================================================
-# カラオケ用 AudioSink
-# ============================================================
-class KaraokeSink(voice_recv.AudioSink):
-    def __init__(self, bot: commands.Bot, vc: voice_recv.VoiceRecvClient, vosk_model: Model, callback_coro):
-        super().__init__()
-        self.bot = bot
-        self.vc = vc
-        self.vosk_model = vosk_model
-        self.callback_coro = callback_coro
-        self.user_buffers: dict[int, dict] = {}
-        self.decoders: dict[int, discord.opus.Decoder] = {}
-        self._lock = threading.Lock()
-        self.opus_available = discord.opus.is_loaded()
-        self._running = True
-
-        self.monitor_thread = threading.Thread(target=self._monitor_loop, daemon=True)
-        self.monitor_thread.start()
-
-    def wants_opus(self) -> bool:
-        return True
-
-    def write(self, user, data: voice_recv.VoiceData) -> None:
-        raw_opus = getattr(data, 'opus', None)
-        if not raw_opus:
-            return
-
-        user_id = getattr(user, 'id', 0) if user else 0
-        display_name = getattr(user, 'display_name', None) or getattr(user, 'name', f"User_{user_id}")
-        avatar_url = str(user.display_avatar.url) if user and hasattr(user, 'display_avatar') else None
-
-        if user_id == 0:
-            return
-
-        pcm = self._decode_opus(user_id, bytes(raw_opus))
-        if not pcm:
-            return
-
-        with self._lock:
-            if user_id not in self.user_buffers:
-                self.user_buffers[user_id] = {
-                    "display_name": display_name,
-                    "avatar_url": avatar_url,
-                    "buffer": bytearray(),
-                    "last_speech": time.time(),
-                    "is_speaking": False,
-                    "history": []  # 認識された歌詞の履歴
-                }
-            
-            ubuf = self.user_buffers[user_id]
-            audio_np = np.frombuffer(pcm, dtype=np.int16)
-            rms = np.sqrt(np.mean(audio_np.astype(np.float32) ** 2)) if len(audio_np) > 0 else 0
-
-            if rms > RMS_SILENCE_THRESHOLD:
-                ubuf["is_speaking"] = True
-                ubuf["last_speech"] = time.time()
-                ubuf["buffer"].extend(pcm)
-            elif ubuf["is_speaking"]:
-                ubuf["buffer"].extend(pcm)
-
-    def _decode_opus(self, user_id: int, raw_opus: bytes) -> bytes | None:
-        if not self.opus_available:
-            return None
-        payload = self.vc.dave_decrypt(user_id, raw_opus) if raw_opus != OPUS_SILENCE else raw_opus
-        if not payload:
-            return None
-        decoder = self.decoders.setdefault(user_id, discord.opus.Decoder())
-        try:
-            return decoder.decode(payload, fec=False)
-        except discord.opus.OpusError:
-            return None
-
-    def _monitor_loop(self):
-        while self._running:
-            time.sleep(0.15)
-            with self._lock:
-                for user_id, ubuf in list(self.user_buffers.items()):
-                    if ubuf["is_speaking"] and (time.time() - ubuf["last_speech"] > SILENCE_THRESHOLD_SEC):
-                        if len(ubuf["buffer"]) > 0:
-                            pcm = bytes(ubuf["buffer"])
-                            ubuf["buffer"].clear()
-                            ubuf["is_speaking"] = False
-                            
-                            pcm_16k = resample_48k_to_16k(pcm)
-                            if len(pcm_16k) > VOSK_SAMPLE_RATE * 2 * 0.3:
-                                threading.Thread(
-                                    target=self._run_vosk,
-                                    args=(user_id, ubuf["display_name"], ubuf["avatar_url"], pcm_16k),
-                                    daemon=True
-                                ).start()
-
-    def _run_vosk(self, user_id: int, display_name: str, avatar_url: str | None, pcm_16k: bytes):
-        try:
-            rec = KaldiRecognizer(self.vosk_model, VOSK_SAMPLE_RATE)
-            rec.AcceptWaveform(pcm_16k)
-            result = json.loads(rec.FinalResult())
-            text = result.get("text", "").replace(" ", "").strip()
-
-            if text:
-                with self._lock:
-                    if user_id in self.user_buffers:
-                        self.user_buffers[user_id]["history"].append(text)
-
-                asyncio.run_coroutine_threadsafe(
-                    self.callback_coro(display_name, avatar_url, text),
-                    self.bot.loop
-                )
-        except Exception as e:
-            logger.error(f"[Karaoke Vosk Error] {e}")
-
-    def cleanup(self):
-        self._running = False
-
-
-# ============================================================
-# カラオケ Cog 本体
-# ============================================================
-class KaraokeCog(commands.Cog):
+class KaraokeCog(SessionMixin, RestoreMixin, commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
         self.sessions: dict[int, dict] = {}
@@ -200,35 +47,6 @@ class KaraokeCog(commands.Cog):
             logger.warning("Voskモデルが見つからないため、カラオケ機能を無効化します: %s", MODEL_PATH)
         else:
             self.vosk_model = Model(MODEL_PATH)
-
-    async def _get_or_create_webhook(self, channel: discord.TextChannel) -> discord.Webhook:
-        webhooks = await channel.webhooks()
-        for wh in webhooks:
-            if wh.token:
-                return wh
-        return await channel.create_webhook(name="Karaoke-Lyrics")
-
-    # --------------------------------------------------
-    # 実装（/voice studio）
-    # --------------------------------------------------
-    async def _karaoke_impl(self, r: Responder, action: str, target_lyrics: str | None = None):
-        """action: start / score / stop / help"""
-        if action == "start":
-            return await self._start(r, target_lyrics)
-        if action == "score":
-            return await self._score(r)
-        if action == "stop":
-            if r.guild.id not in self.sessions:
-                return await r.send(embed=we(f"{FAILED} 現在カラオケは実行されていません。"), ephemeral=True)
-            if not await self.voice_sessions.release(r.guild.id, "karaoke", reason="stop"):
-                self._cleanup(r.guild.id)("stop")
-            return await r.send(embed=we("🛑 カラオケモードを終了しました！"))
-        await r.send(embed=we(
-            "🎤 **カラオケ機能の使い方**\n"
-            "1. `/vc のパネルからカラオケ開始 lyrics:<お題の歌詞>` : 歌詞をセットして採点＆字幕開始\n"
-            "2. `/vc のパネルからカラオケ採点` : 現在の歌唱スコアを表示\n"
-            "3. `/vc のパネルからカラオケ終了` : カラオケを終了"
-        ))
 
     async def _start(self, r: Responder, target_lyrics: str | None):
         if not target_lyrics or not target_lyrics.strip():
@@ -277,103 +95,6 @@ class KaraokeCog(commands.Cog):
             f"📜 **お題の歌詞:**\n```\n{target_lyrics}\n```\n"
             "歌った声がリアルタイムで字幕表示されます。終わったら `/vc のパネルからカラオケ採点` で採点！"
         ), skip_localization=True)
-
-    async def _score(self, r: Responder):
-        session = self.sessions.get(r.guild.id)
-        if not session:
-            return await r.send(embed=we(f"{FAILED} 現在カラオケは実行されていません。"), ephemeral=True)
-
-        sink: KaraokeSink = session["sink"]
-        target = clean_text(session["target_lyrics"])
-
-        if not target:
-            return await r.send(embed=we(FAILED + ' お題の歌詞が登録されていません。'), ephemeral=True)
-
-        embed = discord.Embed(title="🏆 カラオケ採点結果", color=0xFFD700)
-
-        with sink._lock:
-            for user_id, ubuf in sink.user_buffers.items():
-                sung_text = clean_text("".join(ubuf["history"]))
-                if not sung_text:
-                    continue
-
-                # 一致率の計算 (0.0 〜 1.0)
-                matcher = SequenceMatcher(None, target, sung_text)
-                ratio = matcher.ratio()
-                score = round(ratio * 100, 1)
-
-                comment = "🥇 PERFECT!" if score >= 85 else ("🥈 GOOD!" if score >= 60 else "🥉 KEEP TRYING!")
-
-                embed.add_field(
-                    name=f"👤 {ubuf['display_name']} さんのスコア",
-                    value=f"点数: **{score} 点** / 100点\n評価: {comment}\n認識結果: `{sung_text[:30]}...`",
-                    inline=False
-                )
-
-        if not embed.fields:
-            embed.description = "まだ歌声が検知されていません！"
-
-        await r.send(embed=embed)
-
-    def _cleanup(self, guild_id: int):
-        """VC を手放すときの後片付け（切断は VoiceSessionManager が行う）。"""
-        def cleanup(reason: str) -> None:
-            vc_feature_restore.clear_feature("karaoke", guild_id)
-            session = self.sessions.pop(guild_id, None)
-            if not session:
-                return
-            session["sink"].cleanup()
-            try:
-                session["vc"].stop_listening()
-            except Exception:
-                logger.debug("カラオケ: 後片付けの受信停止に失敗しました", exc_info=True)
-        return cleanup
-
-    def _make_subtitle_sender(self, webhook):
-        """歌詞字幕を Webhook へ送るコールバック（開始時・再開時で共用）。"""
-        async def send_lyrics_subtitle(display_name: str, avatar_url: str | None, text: str):
-            async with aiohttp.ClientSession() as session:
-                wh_obj = discord.Webhook.from_url(webhook.url, session=session)
-                try:
-                    await wh_obj.send(
-                        content=f"{MUSIC} {text}",
-                        username=f"🎤 {display_name}",
-                        avatar_url=avatar_url,
-                        _agobot_skip_localization=True,
-                    )
-                except Exception as ex:
-                    logger.error(f"[Webhook Error] {ex}")
-        return send_lyrics_subtitle
-
-    # --------------------------------------------------
-    # 再起動後の自動再開（main.py の on_ready から呼ばれる）
-    # --------------------------------------------------
-    def _save_resume_snapshot(self, guild_id: int, voice_channel, text_channel, user, target_lyrics: str) -> None:
-        """再開に必要な情報だけを保存する（歌唱履歴・採点は保存しない）。"""
-        vc_feature_restore.save_feature("karaoke", guild_id, vc_feature_restore.build_entry(
-            voice_channel_id=getattr(voice_channel, "id", None),
-            text_channel_id=getattr(text_channel, "id", None),
-            user=user,
-            settings={"target_lyrics": target_lyrics},
-        ))
-
-    async def restore_after_restart(self) -> None:
-        """再起動前にカラオケ中だったギルドで、同じお題の新規セッションとして再開する。
-
-        歌唱履歴（採点のもと）はプロセスと一緒に失われているため復元はしない。
-        復旧できないギルド（ギルド・チャンネル消滅、人がいない、モデル不備）は
-        スナップショットを掃除する。
-        """
-        entries = vc_feature_restore.feature_entries("karaoke")
-        for guild_id, snapshot in entries.items():
-            try:
-                restored = await self._restore_session(guild_id, snapshot)
-            except Exception:
-                logger.exception("guild %s: カラオケの自動再開に失敗しました", guild_id)
-                restored = False
-            if not restored:
-                vc_feature_restore.clear_feature("karaoke", guild_id)
-        vc_feature_restore.flush_store()
 
     async def _restore_session(self, guild_id: int, snapshot: dict) -> bool:
         settings = snapshot.get("settings")
