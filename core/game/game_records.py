@@ -22,7 +22,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from core import data_paths
+from core.support import data_paths
 
 logger = logging.getLogger(__name__)
 

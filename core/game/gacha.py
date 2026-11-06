@@ -31,7 +31,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from core import emojis
+from core.support import emojis
 
 logger = logging.getLogger(__name__)
 

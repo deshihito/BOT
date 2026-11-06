@@ -8,7 +8,7 @@
 - 格子状にボタンを並べる場合はラベル幅を均一にする前提で設計する
   （盤面そのものは表示側＝テキスト描画/画像に分離し、操作はボタン/セレクトで行う）。
 
-``PanelLayoutView``（core/panel_v2.py）は /game ハブ等の既存 View を包むための
+``PanelLayoutView``（core/support/panel_v2.py）は /game ハブ等の既存 View を包むための
 もので、ゲーム単体のセッションパネルはこの ``GamePanelView``（ネイティブ
 LayoutView）を使う。秘匿情報の ephemeral ビューも同じ流儀で作る。
 """
