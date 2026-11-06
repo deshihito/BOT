@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """ボードゲーム（将棋・チェス・オセロ）の汎用 Elo レート。
 
-人狼のレート（core/jinrou/ratings.py の calculate_elo_change）と同じ方式:
+人狼のレート（core/game/jinrou/ratings.py の calculate_elo_change）と同じ方式:
 - 初期レート 1500、K=32（人狼の ELO_BASE_K と同じ。人狼側の陣営補正 K=48 は
   チーム戦専用なので 1 対 1 のボードゲームには使わない）
 - 期待勝率 = 1 / (1 + 10 ** ((相手 - 自分) / 400))

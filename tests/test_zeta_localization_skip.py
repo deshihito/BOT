@@ -23,7 +23,7 @@ if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
 from core.support import localization  # noqa: E402
-from core.zeta.common import BotPersona  # noqa: E402
+from core.game.zeta.common import BotPersona  # noqa: E402
 from cogs.zetamodoki import ZetaModoki  # noqa: E402
 
 

@@ -14,15 +14,15 @@ from core import autoplay, jinrou_review
 from core import party_ranking
 import math
 import config
-from core.jinrou.autoplay import logger, AutoplayMixin  # noqa: F401
-from core.jinrou.common import logger, db_api, RATINGS_TABLE, ELO_STARTING_RATING, ELO_BASE_K, ELO_WOLF_WIN_K, BLACK_ROLES_URANAI, BLACK_ROLES_REIBAI, uranai_color, reibai_color, URA_YAKUSHOKU, AHO_FAKE_CANDIDATES, HELP_ROLES, _is_wolf_side  # noqa: F401
-from core.jinrou.game import logger, JinrouGame  # noqa: F401
-from core.jinrou.gameloop import logger, GameLoopMixin, restore_jinrou_sessions  # noqa: F401
-from core.jinrou.helpers import logger, _guide_role_lookup, _get_display_role, _check_and_reveal_ura_yakushoku  # noqa: F401
-from core.jinrou.lifecycle import logger, LifecycleMixin  # noqa: F401
-from core.jinrou.ratings import logger, calculate_elo_change, can_end_game  # noqa: F401
-from core.jinrou.results import logger, ResultsMixin  # noqa: F401
-from core.jinrou.views import logger, SetupView, AdvancedSetupView, RecruitView, ReplayView, GlobalChannelProxy, GlobalJoinView, RoleCheckView, NightActionView, ActionSelectView, PublicVoteView, ChairmanVoteView  # noqa: F401
+from core.game.jinrou.autoplay import logger, AutoplayMixin  # noqa: F401
+from core.game.jinrou.common import logger, db_api, RATINGS_TABLE, ELO_STARTING_RATING, ELO_BASE_K, ELO_WOLF_WIN_K, BLACK_ROLES_URANAI, BLACK_ROLES_REIBAI, uranai_color, reibai_color, URA_YAKUSHOKU, AHO_FAKE_CANDIDATES, HELP_ROLES, _is_wolf_side  # noqa: F401
+from core.game.jinrou.game import logger, JinrouGame  # noqa: F401
+from core.game.jinrou.gameloop import logger, GameLoopMixin, restore_jinrou_sessions  # noqa: F401
+from core.game.jinrou.helpers import logger, _guide_role_lookup, _get_display_role, _check_and_reveal_ura_yakushoku  # noqa: F401
+from core.game.jinrou.lifecycle import logger, LifecycleMixin  # noqa: F401
+from core.game.jinrou.ratings import logger, calculate_elo_change, can_end_game  # noqa: F401
+from core.game.jinrou.results import logger, ResultsMixin  # noqa: F401
+from core.game.jinrou.views import logger, SetupView, AdvancedSetupView, RecruitView, ReplayView, GlobalChannelProxy, GlobalJoinView, RoleCheckView, NightActionView, ActionSelectView, PublicVoteView, ChairmanVoteView  # noqa: F401
 
 logger = logging.getLogger("cogs.jinrou")
 
