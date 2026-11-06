@@ -12,6 +12,7 @@ tick は tasks.loop で5分ごとに回し、チャートは tick のたびに�
 キャッシュ（data/market_chart.png）を全員で共有する。
 """
 from __future__ import annotations
+from core.emojis import SUCCESS
 
 import asyncio
 import io
@@ -387,7 +388,7 @@ class MarketCog(commands.Cog):
             self._recycle_fee_burn(result)
             await self._record_history(uid, "MARKET_POOL", aga_amount, "token_buy")
             return (
-                f"✅ **{market_core.TOKEN_NAME}を買いました**\n"
+                f"{SUCCESS} **{market_core.TOKEN_NAME}を買いました**\n"
                 f"{aga_amount:,} AGO → **{result['tokens']:,.2f} {market_core.TOKEN_NAME}**"
                 f"（レート {result['rate']:,.2f}、手数料 {result['fee']:,} AGO）\n"
                 f"保有量: {result['balance']:,.2f} {market_core.TOKEN_NAME} / コイン残高: {debit:,} AGO"
@@ -416,7 +417,7 @@ class MarketCog(commands.Cog):
             self._recycle_fee_burn(result)
             await self._record_history("MARKET_POOL", uid, result["net_aga"], "token_sell")
             return (
-                f"✅ **{market_core.TOKEN_NAME}を売りました**\n"
+                f"{SUCCESS} **{market_core.TOKEN_NAME}を売りました**\n"
                 f"{token_amount:,.2f} {market_core.TOKEN_NAME} → **{result['net_aga']:,} AGO**"
                 f"（レート {result['rate']:,.2f}、手数料 {result['fee']:,} AGO）\n"
                 f"保有量: {result['balance']:,.2f} {market_core.TOKEN_NAME} / コイン残高: {credit:,} AGO"
