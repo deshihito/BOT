@@ -6,10 +6,10 @@ import logging
 import config
 import os
 import traceback
-from core.api_client import APIError
-from core.api_retry import run_with_retry
+from core.support.api_client import APIError
+from core.support.api_retry import run_with_retry
 from core.game import prison as prison_core
-from core.user_names import resolve_display_names
+from core.general.user_names import resolve_display_names
 
 logger = logging.getLogger(__name__)
 
@@ -346,7 +346,7 @@ class WalletCog(commands.Cog):
 
             embed = discord.Embed(title="コイン保有ランキング（TOP 10）", color=0xf1c40f)
             # ランキングは全サーバー横断のため、メンションだと「不明のユーザー」に
-            # なる。氏名は通常表記で解決する（core/user_names.py）。
+            # なる。氏名は通常表記で解決する（core/general/user_names.py）。
             names = await resolve_display_names(
                 self.bot, [int(record["user_id"]) for record in data])
             lines = []
