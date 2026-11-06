@@ -8,9 +8,9 @@ import discord
 from game_fakes import (FakeBot, FakeChannel, FakeGuild, FakeInteraction, FakeMember, FakeMessage, choose, fast_time,
                         press, real_sleep)
 from cogs import babanuki, daifugo, doubt, flash, game, guess, janken, jinrou, ngword, shiritori, shinkei, uno, wordle, wordwolf
-from core import game_guides as guides
+from core.game import game_guides as guides
 from core import party_ranking
-from core.game_guides import GAME_GUIDES, GAME_ORDER
+from core.game.game_guides import GAME_GUIDES, GAME_ORDER
 
 
 class HubBot(FakeBot):

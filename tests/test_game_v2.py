@@ -4,9 +4,9 @@ import unittest
 
 import discord
 
-from core.board_image import render_gauge, render_tiles
-from core.game_guides import GAME_GUIDES, GAME_ORDER
-from core.game_v2 import GamePanelView, assert_within_limits, count_buttons
+from core.game.board_image import render_gauge, render_tiles
+from core.game.game_guides import GAME_GUIDES, GAME_ORDER
+from core.game.game_v2 import GamePanelView, assert_within_limits, count_buttons
 
 
 class GamePanelV2Test(unittest.TestCase):

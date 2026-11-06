@@ -61,7 +61,7 @@ class LogicTest(unittest.TestCase):
         self.assertIn('babanuki', party_ranking.KNOWN_GAMES)
 
     def test_guide_has_no_emoji(self):
-        from core.game_guides import GAME_GUIDES
+        from core.game.game_guides import GAME_GUIDES
         self.assertIsNone(EMOJI.search(str(GAME_GUIDES['babanuki'])))
 
 

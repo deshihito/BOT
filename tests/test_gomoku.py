@@ -1,8 +1,8 @@
-"""五目並べ（core/gomoku.py）のテスト。勝敗判定と脅威検出AI。"""
+"""五目並べ（core/game/gomoku.py）のテスト。勝敗判定と脅威検出AI。"""
 
 import unittest
 
-from core.gomoku import BLACK, SIZE, WHITE, choose_ai_move, is_full, is_win_at, new_board, winner
+from core.game.gomoku import BLACK, SIZE, WHITE, choose_ai_move, is_full, is_win_at, new_board, winner
 
 B, W = BLACK, WHITE
 

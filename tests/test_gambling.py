@@ -1,4 +1,4 @@
-"""ギャンブル系（core/gambling.py と GamblingCog）のテスト。
+"""ギャンブル系（core/game/gambling.py と GamblingCog）のテスト。
 
 見るもの: 原典準拠の確率・配当の境界（シード／スクリプト固定）、slot7 の
 内部状態遷移（確変突入・倍率・延長・減少・終了、sixカウンタ、天井、
@@ -20,7 +20,8 @@ from types import SimpleNamespace
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from core import action_registry, gambling
+from core import action_registry
+from core.game import gambling
 from core.general.items import ItemError
 from cogs import wallet as wallet_module
 from cogs.gambling import (
