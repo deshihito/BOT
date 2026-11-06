@@ -5,8 +5,11 @@ from __future__ import annotations
 from .common import *
 from .miq import (
     MIQ_GIF_MAX_FRAMES, MIQ_H, MIQ_NEW_H, MIQ_NEW_W, MIQ_W, _MIQ_ASSET_FONTS,
-    _miq_display_text, _miq_fit, _miq_load_font, _miq_mix, _miq_open_avatar,
-    _miq_save_png, _miq_wrap, render_miq_frames,
+    _miq_display_text, _miq_draw_centered, _miq_draw_units_line,
+    _miq_emoji_font_path, _miq_fallback_fonts, _miq_fit, _miq_fit_units,
+    _miq_load_font, _miq_mix, _miq_open_avatar, _miq_render_emoji_unit,
+    _miq_save_png, _miq_split_units, _miq_unit_bases, _miq_unit_font,
+    _miq_wrap, render_miq_frames,
 )
 
 def render_miq_gif(avatar_bytes: bytes | None, text: str, name: str, username: str, *, max_bytes: int, **opts) -> bytes:
@@ -93,14 +96,14 @@ def render_miq_manga_png(avatar_bytes: bytes | None, text: str, name: str, usern
 
     # 本文 (中央揃え)
     shown_text = _miq_display_text(text) or text
-    font, wrapped, lh, _size = _miq_fit(
+    lines, lh, _size = _miq_fit_units(
         d, shown_text, font_path, bubble[2] - bubble[0] - 130, bubble[3] - bubble[1] - 120,
         max_size=64, min_size=20,
     )
-    ty = cy - (len(wrapped) * lh) // 2
-    for line in wrapped:
+    ty = cy - (len(lines) * lh) // 2
+    for line in lines:
         if line:
-            d.text((cx, ty), line, font=font, fill=(0, 0, 0), anchor="ma")
+            _miq_draw_centered(img, d, cx, ty, "".join(u for u, _w in line), _size, (0, 0, 0), 0, font_path)
         ty += lh
 
     # 作者名の札 (右コマ左上)
@@ -160,11 +163,11 @@ def render_miq_music_png(avatar_bytes: bytes | None, text: str, name: str, usern
 
     # 本文
     shown_text = _miq_display_text(text) or text
-    font, wrapped, lh, _size = _miq_fit(d, shown_text, font_path, right_edge - rx, 210, max_size=54, min_size=20)
+    lines, lh, _size = _miq_fit_units(d, shown_text, font_path, right_edge - rx, 210, max_size=54, min_size=20)
     ty = 248
-    for line in wrapped:
+    for line in lines:
         if line:
-            d.text((rx, ty), line, font=font, fill=(255, 255, 255, 255))
+            d = _miq_draw_units_line(img, d, rx, ty, line, _size, font_path, (255, 255, 255, 255))
         ty += lh
 
     # 再生時間は本文ハッシュから決定的に決める (総 120〜240 秒、経過 52%)
@@ -240,14 +243,14 @@ def render_miq_news_png(avatar_bytes: bytes | None, text: str, name: str, userna
     d.text((36, blue_top + 22), who, font=name_font, fill=(255, 255, 255, 255), anchor="lm")
 
     d.rectangle([0, band_top, W, band_bottom], fill=(255, 255, 255, 255))
-    font, wrapped, lh, _size = _miq_fit(
+    lines, lh, _size = _miq_fit_units(
         d, shown_text, font_path, W - 72, band_bottom - band_top - 28,
         max_size=58, min_size=20,
     )
-    ty = band_top + (band_bottom - band_top - len(wrapped) * lh) // 2
-    for line in wrapped:
+    ty = band_top + (band_bottom - band_top - len(lines) * lh) // 2
+    for line in lines:
         if line:
-            d.text((36, ty), line, font=font, fill=(16, 20, 28, 255))
+            d = _miq_draw_units_line(img, d, 36, ty, line, _size, font_path, (16, 20, 28, 255))
         ty += lh
 
     # ティッカー風の細帯
@@ -297,11 +300,11 @@ def render_miq_xpost_png(avatar_bytes: bytes | None, text: str, name: str, usern
         d.text((168, 102), f"@{shown_user}", font=_miq_load_font(font_path, 26), fill=sub)
 
     # 本文 (左揃え)
-    font, wrapped, lh, _size = _miq_fit(d, shown_text, font_path, W - 96, 268, max_size=46, min_size=20)
+    lines, lh, _size = _miq_fit_units(d, shown_text, font_path, W - 96, 268, max_size=46, min_size=20)
     ty = 178
-    for line in wrapped:
+    for line in lines:
         if line:
-            d.text((48, ty), line, font=font, fill=ink)
+            d = _miq_draw_units_line(img, d, 48, ty, line, _size, font_path, ink)
         ty += lh
 
     # アクション行の数字は本文ハッシュから決定的に生成する
@@ -382,14 +385,14 @@ def render_miq_rpg_png(avatar_bytes: bytes | None, text: str, name: str, usernam
     d.text((px0 + plate_w // 2, py0 + 24), nm, font=name_font, fill=(255, 255, 255, 255), anchor="mm")
 
     # 本文 (左揃え、白)
-    font, wrapped, lh, _size = _miq_fit(
+    lines, lh, _size = _miq_fit_units(
         d, shown_text, font_path, (wx1 - wx0) - 72, (wy1 - wy0) - 84,
         max_size=42, min_size=20,
     )
     ty = wy0 + 40
-    for line in wrapped:
+    for line in lines:
         if line:
-            d.text((wx0 + 36, ty), line, font=font, fill=(255, 255, 255, 255))
+            d = _miq_draw_units_line(img, d, wx0 + 36, ty, line, _size, font_path, (255, 255, 255, 255))
         ty += lh
 
     # 右下の送り印 ▼ (図形で描く)
@@ -527,6 +530,37 @@ def _miq_glow_lines(img, lines, x, y, lh, font, core, glow, *, blur=9):
     return base.convert("RGB")
 
 
+def _miq_glow_lines_units(img, lines, x, y, lh, size, primary_path, core, glow, *, blur=9):
+    """_miq_glow_lines の単位版。文字を発光させつつ絵文字はカラーで描く。"""
+    from PIL import Image, ImageDraw, ImageFilter
+
+    base = img.convert("RGBA")
+    layer = Image.new("RGBA", base.size, (0, 0, 0, 0))
+    ld = ImageDraw.Draw(layer)
+    chain = _miq_fallback_fonts(primary_path, size)
+    emoji_path = _miq_emoji_font_path()
+    ty = y
+    for line in lines:
+        cx = float(x)
+        for unit, w in line:
+            kind, font = _miq_unit_font(unit, chain, emoji_path)
+            if kind == "font":
+                ld.text((cx, ty), _miq_unit_bases(unit) or unit, font=font, fill=glow + (255,))
+            cx += w
+        ty += lh
+    blurred = layer.filter(ImageFilter.GaussianBlur(blur))
+    base = Image.alpha_composite(base, blurred)
+    base = Image.alpha_composite(base, blurred)
+    d = ImageDraw.Draw(base)
+    core_fill = core + (255,) if len(core) == 3 else core
+    ty = y
+    for line in lines:
+        if line:
+            d = _miq_draw_units_line(base, d, x, ty, line, size, primary_path, core_fill)
+        ty += lh
+    return base.convert("RGB")
+
+
 def _miq_truncate(draw, text: str, font, max_w: float) -> str:
     """text が max_w に収まるよう末尾を切り、… を付ける。"""
     if draw.textlength(text, font=font) <= max_w:
@@ -605,11 +639,11 @@ def render_miq_blueprint_png(avatar_bytes: bytes | None, text: str, name: str, u
     d.line([(tx0 + 62, ty0), (tx0 + 62, ty0 + row_h * 3)], fill=(255, 255, 255), width=1)
 
     # 左: 本文 (白・太字・左揃え、縦中央)
-    font, wrapped, lh, _size = _miq_fit(d, shown_text, font_path, 620, 440, max_size=58, min_size=22)
-    ty = (H - len(wrapped) * lh) // 2
-    for line in wrapped:
+    lines, lh, _size = _miq_fit_units(d, shown_text, font_path, 620, 440, max_size=58, min_size=22)
+    ty = (H - len(lines) * lh) // 2
+    for line in lines:
         if line:
-            d.text((56, ty), line, font=font, fill=(255, 255, 255), stroke_width=1, stroke_fill=(255, 255, 255))
+            d = _miq_draw_units_line(img, d, 56, ty, line, _size, font_path, (255, 255, 255), stroke_width=1)
         ty += lh
     return _miq_save_png(img)
 
@@ -671,11 +705,11 @@ def render_miq_pixel_png(avatar_bytes: bytes | None, text: str, name: str, usern
 
     # 本文 (ポートレートの右、白字)
     tx = px + p_size + 28
-    font, wrapped, lh, _size = _miq_fit(d, shown_text, font_path, wx1 - tx - 30, wy1 - wy0 - 56, max_size=38, min_size=16)
+    lines, lh, _size = _miq_fit_units(d, shown_text, font_path, wx1 - tx - 30, wy1 - wy0 - 56, max_size=38, min_size=16)
     ty = wy0 + 30
-    for line in wrapped:
+    for line in lines:
         if line:
-            d.text((tx, ty), line, font=font, fill=(255, 255, 255))
+            d = _miq_draw_units_line(img, d, tx, ty, line, _size, font_path, (255, 255, 255))
         ty += lh
 
     # 右下の送り印 ▼
@@ -697,17 +731,17 @@ def _miq_vertical_columns(text: str, font, col_h: int):
     size = getattr(font, "size", 32) or 32
     adv = max(8, int(size * 1.16))
     max_chars = max(1, col_h // adv)
-    columns: list[str] = []
-    cur = ""
-    for ch in text or "":
-        if ch == "\n":
+    columns: list = []
+    cur: list = []
+    for unit in _miq_split_units(text or ""):
+        if unit == "\n":
             columns.append(cur)
-            cur = ""
+            cur = []
             continue
         if len(cur) >= max_chars:
             columns.append(cur)
-            cur = ""
-        cur += ch
+            cur = []
+        cur.append(unit)
     if cur or not columns:
         columns.append(cur)
     return columns, adv
@@ -734,16 +768,26 @@ def _miq_fit_vertical(text: str, font_path: str | None, col_h: int, max_w: int, 
         last = columns[-1]
         if len(last) >= max_chars:
             last = last[:max_chars - 1]
-        columns[-1] = last + "…"
+        columns[-1] = last + ["…"]
     return font, columns, adv_y, adv_x, size
 
 
-def _miq_draw_vertical(draw, columns, right_cx: int, top: int, adv_y: int, adv_x: int, font, fill, **kwargs):
-    """縦書きの列群を描く。right_cx は最右列の中心 x、列は右から左へ進む。"""
+def _miq_draw_vertical(img, draw, columns, right_cx: int, top: int, adv_y: int, adv_x: int, size: int, primary_path, fill, **kwargs):
+    """縦書きの列群を描く。right_cx は最右列の中心 x、列は右から左へ進む。
+
+    列は単位 (文字/絵文字) の列で、絵文字はセル内に正立でカラー合成する。
+    """
+    chain = _miq_fallback_fonts(primary_path, size)
+    emoji_path = _miq_emoji_font_path()
     for i, col in enumerate(columns):
         x = right_cx - i * adv_x
-        for j, ch in enumerate(col):
-            draw.text((x, top + j * adv_y), ch, font=font, fill=fill, anchor="ma", **kwargs)
+        for j, unit in enumerate(col):
+            kind, font = _miq_unit_font(unit, chain, emoji_path)
+            if kind == "emoji":
+                ey = top + j * adv_y + max(0, (adv_y - size) // 2)
+                _miq_render_emoji_unit(img, draw, x - size / 2, ey, unit, size, emoji_path)
+            elif kind == "font":
+                draw.text((x, top + j * adv_y), _miq_unit_bases(unit) or unit, font=font, fill=fill, anchor="ma", **kwargs)
 
 
 def render_miq_luxury_png(avatar_bytes: bytes | None, text: str, name: str, username: str, *, font_path: str | None = None) -> bytes:
@@ -788,7 +832,7 @@ def render_miq_luxury_png(avatar_bytes: bytes | None, text: str, name: str, user
     )
     block_w = len(columns) * adv_x
     right_cx = (W + block_w) // 2 - adv_x // 2
-    _miq_draw_vertical(d, columns, right_cx, body_top, adv_y, adv_x, font, gold_bright)
+    _miq_draw_vertical(img, d, columns, right_cx, body_top, adv_y, adv_x, _size, serif, gold_bright)
 
     # 下部: 区切り線付きの名前と @ID (金色)
     name_font = _miq_load_font(serif, 29)
@@ -853,7 +897,7 @@ def render_miq_tate_png(avatar_bytes: bytes | None, text: str, name: str, userna
     )
     block_w = len(columns) * adv_x
     right_cx = 470 + (680 - block_w) // 2 + block_w - adv_x // 2
-    _miq_draw_vertical(d, columns, right_cx, body_top, adv_y, adv_x, font, ink)
+    _miq_draw_vertical(img, d, columns, right_cx, body_top, adv_y, adv_x, _size, serif, ink)
     return _miq_save_png(img)
 
 
@@ -874,25 +918,14 @@ def render_miq_novel_png(avatar_bytes: bytes | None, text: str, name: str, usern
 
     # 本文: 左 約62% に上揃え、行間は広め (1.85倍)。収まらなければ縮小/省略
     body_x, body_w, body_top, body_h = 64, 668, 76, 520
-    size = 40
-    while True:
-        font = _miq_load_font(serif, size)
-        wrapped = _miq_wrap(d, shown_text, font, body_w)
-        lh = int(size * 1.85)
-        if len(wrapped) * lh <= body_h or size <= 20:
-            break
-        size -= 2
-    max_lines = max(1, body_h // lh)
-    if len(wrapped) > max_lines:
-        wrapped = wrapped[:max_lines]
-        last = wrapped[-1]
-        while last and d.textlength(last + "…", font=font) > body_w:
-            last = last[:-1]
-        wrapped[-1] = last + "…"
+    lines, lh, _size = _miq_fit_units(
+        d, shown_text, serif, body_w, body_h,
+        max_size=40, min_size=20, lh_factor=1.85,
+    )
     ty = body_top
-    for line in wrapped:
+    for line in lines:
         if line:
-            d.text((body_x, ty), line, font=font, fill=ink)
+            d = _miq_draw_units_line(img, d, body_x, ty, line, _size, serif, ink)
         ty += lh
 
     # 右: 正方形アバター (柔らかい影つき)

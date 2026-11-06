@@ -4,14 +4,15 @@ from __future__ import annotations
 
 from .common import *
 from .miq import (
-    MIQ_NEW_H, MIQ_NEW_W, _miq_display_text, _miq_emoji_font_path,
-    _miq_fallback_fonts, _miq_fit, _miq_load_font,
-    _miq_mix, _miq_open_avatar, _miq_render_emoji_unit,
+    MIQ_NEW_H, MIQ_NEW_W, _miq_display_text, _miq_draw_units_line,
+    _miq_emoji_font_path, _miq_fallback_fonts, _miq_fit, _miq_fit_units,
+    _miq_load_font, _miq_mix, _miq_open_avatar, _miq_render_emoji_unit,
     _miq_save_png, _miq_split_units, _miq_unit_bases, _miq_unit_font,
-    _miq_unit_width,
+    _miq_unit_width, _miq_wrap_units,
 )
 from .miq_styles import (
-    _miq_circle_avatar, _miq_date_str, _miq_glow_lines, _miq_hash_int,
+    _miq_circle_avatar, _miq_date_str, _miq_glow_lines,
+    _miq_glow_lines_units, _miq_hash_int,
     _miq_heart, _miq_rng, _miq_rounded_avatar, _miq_special_font_path,
     _miq_star4, _miq_star5, _miq_truncate,
 )
@@ -137,11 +138,11 @@ def render_miq_card_png(avatar_bytes: bytes | None, text: str, name: str, userna
     # 右: 本文 (明朝優先) + 署名
     serif = _miq_special_font_path("ZenOldMincho") or font_path
     tx = cx0 + cw + 46
-    font, wrapped, lh, _size = _miq_fit(d, shown_text, serif, W - tx - 50, 300, max_size=56, min_size=22)
+    lines, lh, _size = _miq_fit_units(d, shown_text, serif, W - tx - 50, 300, max_size=56, min_size=22)
     ty = 150
-    for line in wrapped:
+    for line in lines:
         if line:
-            d.text((tx, ty), line, font=font, fill=(255, 255, 255))
+            d = _miq_draw_units_line(img, d, tx, ty, line, _size, serif, (255, 255, 255))
         ty += lh
     sig_font = _miq_load_font(serif, 27)
     d.text((tx, 528), _miq_truncate(d, f"― {shown_name}", sig_font, W - tx - 50), font=sig_font, fill=(235, 230, 250))
@@ -178,15 +179,16 @@ def render_miq_neon_png(avatar_bytes: bytes | None, text: str, name: str, userna
     d.ellipse([ccx - r + 4, ccy - r + 4, ccx + r - 4, ccy + r - 4], outline=(255, 140, 245), width=3)
 
     # 左: 本文 (シアンのネオングロー)
-    font, wrapped, lh, _size = _miq_fit(d, shown_text, font_path, 540, 360, max_size=58, min_size=22)
-    ty = max(90, (470 - len(wrapped) * lh) // 2 + 40)
-    img = _miq_glow_lines(img, wrapped, 64, ty, lh, font, (196, 255, 255), (0, 224, 255))
+    lines, lh, _size = _miq_fit_units(d, shown_text, font_path, 540, 360, max_size=58, min_size=22)
+    ty = max(90, (470 - len(lines) * lh) // 2 + 40)
+    img = _miq_glow_lines_units(img, lines, 64, ty, lh, _size, font_path, (196, 255, 255), (0, 224, 255))
     d = ImageDraw.Draw(img)
 
     # 左下: 表示名 (ピンクのグロー) + @username
     name_font = _miq_load_font(font_path, 30)
     shown_name = _miq_truncate(d, shown_name, name_font, 540)
-    img = _miq_glow_lines(img, [shown_name], 64, 548, 40, name_font, (255, 190, 248), (255, 43, 214), blur=7)
+    name_lines = _miq_wrap_units(d, shown_name, font_path, 30, 540)
+    img = _miq_glow_lines_units(img, name_lines, 64, 548, 40, 30, font_path, (255, 190, 248), (255, 43, 214), blur=7)
     d = ImageDraw.Draw(img)
     if shown_user:
         d.text((64, 596), f"@{shown_user}", font=_miq_load_font(font_path, 22), fill=(168, 168, 186))
@@ -220,11 +222,11 @@ def render_miq_dark_png(avatar_bytes: bytes | None, text: str, name: str, userna
     d = ImageDraw.Draw(img)
 
     # 本文 (左下、白・太字)
-    font, wrapped, lh, _size = _miq_fit(d, shown_text, font_path, 830, 290, max_size=64, min_size=24)
-    ty = 472 - len(wrapped) * lh
-    for line in wrapped:
+    lines, lh, _size = _miq_fit_units(d, shown_text, font_path, 830, 290, max_size=64, min_size=24)
+    ty = 472 - len(lines) * lh
+    for line in lines:
         if line:
-            d.text((56, ty), line, font=font, fill=(255, 255, 255), stroke_width=2, stroke_fill=(255, 255, 255))
+            d = _miq_draw_units_line(img, d, 56, ty, line, _size, font_path, (255, 255, 255), stroke_width=2)
         ty += lh
     d.line([(56, 496), (172, 496)], fill=(255, 255, 255), width=3)
     name_font = _miq_load_font(font_path, 29)
@@ -258,11 +260,11 @@ def render_miq_pop_png(avatar_bytes: bytes | None, text: str, name: str, usernam
 
     # 本文 (DelaGothicOne があれば優先、黒の極太字)
     dela = _miq_special_font_path("DelaGothicOne") or font_path
-    font, wrapped, lh, _size = _miq_fit(d, shown_text, dela, 684, 420, max_size=54, min_size=22)
-    ty = (card[1] + card[3]) // 2 - (len(wrapped) * lh) // 2
-    for line in wrapped:
+    lines, lh, _size = _miq_fit_units(d, shown_text, dela, 684, 420, max_size=54, min_size=22)
+    ty = (card[1] + card[3]) // 2 - (len(lines) * lh) // 2
+    for line in lines:
         if line:
-            d.text((74, ty), line, font=font, fill=(10, 10, 10))
+            d = _miq_draw_units_line(img, d, 74, ty, line, _size, dela, (10, 10, 10))
         ty += lh
 
     # 右: アバター (角丸四角、黒枠+シャドウ)
@@ -342,11 +344,11 @@ def render_miq_pastel_png(avatar_bytes: bytes | None, text: str, name: str, user
         d.text((ccx, 574), f"@{shown_user}", font=_miq_load_font(font_path, 20), fill=(122, 126, 152), anchor="ma")
 
     # 左: 本文 (濃いグレー、柔らかめ)
-    font, wrapped, lh, _size = _miq_fit(d, shown_text, font_path, 576, 380, max_size=47, min_size=20)
-    ty = (H - len(wrapped) * lh) // 2
-    for line in wrapped:
+    lines, lh, _size = _miq_fit_units(d, shown_text, font_path, 576, 380, max_size=47, min_size=20)
+    ty = (H - len(lines) * lh) // 2
+    for line in lines:
         if line:
-            d.text((60, ty), line, font=font, fill=(76, 74, 98))
+            d = _miq_draw_units_line(img, d, 60, ty, line, _size, font_path, (76, 74, 98))
         ty += lh
     return _miq_save_png(img)
 
@@ -408,11 +410,11 @@ def render_miq_ticket_png(avatar_bytes: bytes | None, text: str, name: str, user
     d.text((896, 178), no_str, font=head_font, fill=(110, 104, 90), anchor="ra")
 
     # 本文 (黒・太字・左揃え)
-    font, wrapped, lh, _size = _miq_fit(d, shown_text, font_path, 786, 176, max_size=50, min_size=21)
+    lines, lh, _size = _miq_fit_units(d, shown_text, font_path, 786, 176, max_size=50, min_size=21)
     ty = 226
-    for line in wrapped:
+    for line in lines:
         if line:
-            d.text((94, ty), line, font=font, fill=ink, stroke_width=1, stroke_fill=ink)
+            d = _miq_draw_units_line(img, d, 94, ty, line, _size, font_path, ink, stroke_width=1)
         ty += lh
     d.line([(94, 448), (896, 448)], fill=(202, 198, 182), width=2)
 
@@ -468,11 +470,11 @@ def render_miq_note_png(avatar_bytes: bytes | None, text: str, name: str, userna
 
     # 本文 (手書き風フォントがあれば優先、紺色)
     hand = _miq_special_font_path("YuseiMagic") or font_path
-    font, wrapped, lh, _size = _miq_fit(d, shown_text, hand, 586, 340, max_size=46, min_size=20)
-    ty = (H - len(wrapped) * lh) // 2
-    for line in wrapped:
+    lines, lh, _size = _miq_fit_units(d, shown_text, hand, 586, 340, max_size=46, min_size=20)
+    ty = (H - len(lines) * lh) // 2
+    for line in lines:
         if line:
-            d.text((150, ty), line, font=font, fill=(40, 54, 112))
+            d = _miq_draw_units_line(img, d, 150, ty, line, _size, hand, (40, 54, 112))
         ty += lh
 
     # 右: 写真プリント風アバター (白枠、少し傾け、上部にマスキングテープ)
