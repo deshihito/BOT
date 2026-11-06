@@ -16,7 +16,7 @@ from discord import app_commands
 from discord.ext import commands
 
 from core.help.command_catalog import permission_label
-from core.emojis import FAILED
+from core.support.emojis import FAILED
 
 logger = logging.getLogger("cogs.errorhandler")
 
