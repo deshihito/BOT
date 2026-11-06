@@ -20,12 +20,42 @@ from core.game.jinrou.common import *  # noqa: F401,F403 - shared constants/help
 from core.game.jinrou.common import reibai_color, uranai_color  # noqa: F401
 from core.game.jinrou.game import JinrouGame  # noqa: F401
 from core.game.jinrou.helpers import _get_display_role  # noqa: F401
+from core.game.game_v2 import (  # noqa: F401
+    GamePanelView,
+    LOBBY_MSG_ALREADY_JOINED,
+    LOBBY_MSG_ALREADY_STARTED,
+    LOBBY_MSG_HOST_CANNOT_LEAVE,
+    LOBBY_MSG_NOT_HOST,
+    lobby_msg_full,
+    lobby_msg_not_enough,
+    refresh_panel,
+    text_panel,
+)
 
 logger = logging.getLogger("cogs.jinrou")
 
+#: 人狼の開始に必要な最低人数（ゲームループ側の下限と同じ）
+MIN_PLAYERS = 5
 
-class SetupView(discord.ui.View):
-    """起動時エフェメラル設定パネル：モード選択と必須役職選定の第一段階"""
+
+async def _ephemeral_text(interaction: discord.Interaction, text: str) -> None:
+    """拒否・結果の1行通知を ephemeral の素テキストで返す（共通ロビーの文面規格と同じ流儀）。"""
+    await interaction.response.send_message(text, ephemeral=True)
+
+
+async def _complete_setup(interaction: discord.Interaction, game, cog, channel) -> None:
+    """設定の確定処理（SetupView / AdvancedSetupView 共通）: 確定表示に切り替え、募集パネルを出す。"""
+    req_str = "、".join(game.required_roles) if game.required_roles else "なし"
+    exc_str = "、".join(game.excluded_roles) if game.excluded_roles else "なし"
+    await refresh_panel(interaction, text_panel(
+        "人狼ゲーム設定",
+        f"設定完了（モード: **{game.game_mode}**）\n必須: **{req_str}**\n除外: **{exc_str}**"))
+    view = RecruitView(game, cog)
+    await game_panels.replace(channel, "party", view=view)
+
+
+class SetupView(GamePanelView):
+    """起動時エフェメラル設定パネル：モード選択と必須役職選定の第一段階（V2）"""
     # 基本職のみを配置（アホを追加）
     BASE_ROLES = [
         "一般通過あごむに", "占い師", "騎士", "霊媒師", "パン屋", "マサイ族",
@@ -35,10 +65,13 @@ class SetupView(discord.ui.View):
     ALL_ROLES = BASE_ROLES + ["タフむに", "大霊媒師", "罠師", "ミュージシャン", "デカ狼", "狂信者", "コウモリむに", "ワンころ", "もくもく", "ネット民", "ヤンデレ"]
 
     def __init__(self, game, cog, channel):
-        super().__init__(timeout=120)
         self.game = game
         self.cog = cog
         self.channel = channel
+        super().__init__(
+            "人狼ゲーム設定 (1/2)",
+            "必須役職・除外役職を設定してください。（各最大4つ）\n設定が終わったら「次へ進む」を押してください。",
+            timeout=120)
 
         # モード選択セレクト
         mode_sel = discord.ui.Select(
@@ -47,19 +80,21 @@ class SetupView(discord.ui.View):
                 discord.SelectOption(label="ベーシック（発展職なし）", value="ベーシック"),
                 discord.SelectOption(label="プロ（従来の発展職あり）", value="プロ")
             ],
-            min_values=1, max_values=1, row=0
+            min_values=1, max_values=1
         )
         mode_sel.callback = self._mode_callback
-        self.add_item(mode_sel)
+        self.mode_select = mode_sel
+        self.add_row(mode_sel)
 
         # 必須基本職セレクト
         req_sel = discord.ui.Select(
             placeholder="必須の【基本職】を選択（最大4つ）",
             options=[discord.SelectOption(label=r, value=r) for r in self.BASE_ROLES],
-            min_values=0, max_values=4, row=1
+            min_values=0, max_values=4
         )
         req_sel.callback = self._req_callback
-        self.add_item(req_sel)
+        self.req_select = req_sel
+        self.add_row(req_sel)
 
         # 除外役職セレクト（全26役職を 25 件上限に収めるため 2 つに分割する）
         self._exc_values_a: list = []
@@ -67,17 +102,28 @@ class SetupView(discord.ui.View):
         exc_sel = discord.ui.Select(
             placeholder="除外役職を選択（1/2・合計最大4つ）",
             options=[discord.SelectOption(label=r, value=r) for r in self.ALL_ROLES[:13]],
-            min_values=0, max_values=4, row=2
+            min_values=0, max_values=4
         )
         exc_sel.callback = self._exc_callback_a
-        self.add_item(exc_sel)
+        self.exc_select_a = exc_sel
+        self.add_row(exc_sel)
         exc_sel2 = discord.ui.Select(
             placeholder="除外役職を選択（2/2・合計最大4つ）",
             options=[discord.SelectOption(label=r, value=r) for r in self.ALL_ROLES[13:]],
-            min_values=0, max_values=4, row=3
+            min_values=0, max_values=4
         )
         exc_sel2.callback = self._exc_callback_b
-        self.add_item(exc_sel2)
+        self.exc_select_b = exc_sel2
+        self.add_row(exc_sel2)
+
+        self.next_button = discord.ui.Button(label="次へ進む", style=discord.ButtonStyle.primary)
+        self.next_button.callback = self.next_step
+        self.add_row(self.next_button)
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        # 設定は短時間にセレクトを続けて操作するのが通常の流れなので、
+        # GamePanelView の連打クールダウン（公開パネルの再描画保護）は適用しない。
+        return True
 
     async def _mode_callback(self, interaction: discord.Interaction):
         self.game.game_mode = interaction.data.get("values", ["プロ"])[0]
@@ -105,8 +151,7 @@ class SetupView(discord.ui.View):
     async def _exc_callback(self, interaction: discord.Interaction):
         await self._exc_callback_a(interaction)
 
-    @discord.ui.button(label="次へ進む", style=discord.ButtonStyle.primary, row=4)
-    async def next_step(self, interaction: discord.Interaction, button: discord.ui.Button):
+    async def next_step(self, interaction: discord.Interaction):
         # ベーシックモード、または既に4枠埋まっている場合は発展職指定をスキップして確定へ
         if self.game.game_mode == "ベーシック" or len(self.game.required_roles) >= 4:
             self.stop()
@@ -115,36 +160,17 @@ class SetupView(discord.ui.View):
             # 発展職専用の選択パネルへ移行
             self.stop()
             next_view = AdvancedSetupView(self.game, self.cog, self.channel)
-            embed = discord.Embed(
-                title="人狼ゲーム設定 (2/2)",
-                description=f"現在の指定数: {len(self.game.required_roles)}/4\n残りの枠で必須とする【発展職】を選んでください。",
-                color=0xFFFFFF
-            )
-            await interaction.response.edit_message(embed=embed, view=next_view)
+            await refresh_panel(interaction, next_view)
 
     async def _finalize_setup(self, interaction: discord.Interaction):
-        req_str = "、".join(self.game.required_roles) if self.game.required_roles else "なし"
-        exc_str = "、".join(self.game.excluded_roles) if self.game.excluded_roles else "なし"
-        await interaction.response.edit_message(
-            embed=discord.Embed(
-                description=f"設定完了（モード: **{self.game.game_mode}**）\n必須: **{req_str}**\n除外: **{exc_str}**",
-                color=0xFFFFFF
-            ),
-            view=None
-        )
-        view = RecruitView(self.game, self.cog)
-        req_str2 = f" 【必須: {req_str}】" if self.game.required_roles else ""
-        await game_panels.replace(self.channel, "party",
-            f"{LOADING}人狼ゲーム募集開始！ モード:【{self.game.game_mode}】{req_str2}",
-            view=view
-        )
+        await _complete_setup(interaction, self.game, self.cog, self.channel)
 
     async def on_timeout(self):
         self.game.is_running = False
 
 
-class AdvancedSetupView(discord.ui.View):
-    """プロモード専用の必須発展職選定パネル（第二段階）"""
+class AdvancedSetupView(GamePanelView):
+    """プロモード専用の必須発展職選定パネル（第二段階）（V2）"""
     ADV_ROLES = [
         "タフむに", "大霊媒師", "罠師", "ミュージシャン", "デカ狼", "狂信者", "コウモリむに", "ワンころ", "もくもく", "ネット民", "ヤンデレ"
     ]
@@ -152,19 +178,32 @@ class AdvancedSetupView(discord.ui.View):
     def __init__(self, game, cog, channel):
         # 残り指定可能枠数を計算
         max_selectable = 4 - len(game.required_roles)
-        super().__init__(timeout=120)
         self.game = game
         self.cog = cog
         self.channel = channel
+        super().__init__(
+            "人狼ゲーム設定 (2/2)",
+            f"現在の指定数: {len(game.required_roles)}/4\n残りの枠で必須とする【発展職】を選んでください。",
+            timeout=120)
 
         if max_selectable > 0:
             adv_sel = discord.ui.Select(
                 placeholder=f"必須の【発展職】を選択（最大{max_selectable}つ）",
                 options=[discord.SelectOption(label=r, value=r) for r in self.ADV_ROLES],
-                min_values=0, max_values=max_selectable, row=0
+                min_values=0, max_values=max_selectable
             )
             adv_sel.callback = self._adv_callback
-            self.add_item(adv_sel)
+            self.adv_select = adv_sel
+            self.add_row(adv_sel)
+
+        self.confirm_button = discord.ui.Button(
+            label="確定してパネルを送信", style=discord.ButtonStyle.success)
+        self.confirm_button.callback = self.confirm
+        self.add_row(self.confirm_button)
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        # SetupView と同じ理由でクールダウンは適用しない。
+        return True
 
     async def _adv_callback(self, interaction: discord.Interaction):
         selected = list(interaction.data.get("values", []))
@@ -172,87 +211,137 @@ class AdvancedSetupView(discord.ui.View):
         self.game.required_roles.extend(selected)
         await interaction.response.defer()
 
-    @discord.ui.button(label="確定してパネルを送信", style=discord.ButtonStyle.success, row=1)
-    async def confirm(self, interaction: discord.Interaction, button: discord.ui.Button):
+    async def confirm(self, interaction: discord.Interaction):
         self.stop()
         # SetupViewの確定ロジックと共通の処理
-        req_str = "、".join(self.game.required_roles) if self.game.required_roles else "なし"
-        exc_str = "、".join(self.game.excluded_roles) if self.game.excluded_roles else "なし"
-        await interaction.response.edit_message(
-            embed=discord.Embed(
-                description=f"設定完了（モード: **{self.game.game_mode}**）\n必須: **{req_str}**\n除外: **{exc_str}**",
-                color=0xFFFFFF
-            ),
-            view=None
-        )
-        view = RecruitView(self.game, self.cog)
-        req_str2 = f" 【必須: {req_str}】" if self.game.required_roles else ""
-        await game_panels.replace(self.channel, "party",
-            f"{LOADING}人狼ゲーム募集開始！ モード:【{self.game.game_mode}】{req_str2}",
-            view=view
-        )
+        await _complete_setup(interaction, self.game, self.cog, self.channel)
 
     async def on_timeout(self):
         self.game.is_running = False
 
 
-class RecruitView(discord.ui.View):
-    def __init__(self, game, cog):
-        super().__init__(timeout=None)
+class RecruitView(GamePanelView):
+    """人狼の募集ロビー（V2、共通ロビー規格に寄せた構成）。
+
+    共通 LobbyView（core/game/game_v2.py）の規格に合わせた点:
+    - 参加者一覧（人数・必要人数つき）をパネル本文に持ち、参加/退出は
+      新規メッセージを出さずパネルをその場編集して反映する。
+    - 拒否は統一文面（LOBBY_MSG_* / lobby_msg_*）の ephemeral。
+    - 主催者は退出できない（やめる場合は募集ごと取り消す）。
+    - 開始は主催者のみで、最低人数（人狼は5人）未満は統一文面で拒否する。
+
+    共通 LobbyView そのものを使わない理由・差分:
+    - 人狼は ``game.players`` に Member オブジェクト自体を保持し、
+      ゲームループ全体がそれに依存する（LobbyView は id のリスト＋
+      members 辞書で、開始は cog 側の wait/ポーリングで受ける設計）。
+    - 人狼の開始ボタンはそのままゲームループを起動する（従来の流れを維持）。
+    - グローバルモードでは募集パネルが GlobalChannelProxy 経由で複数
+      チャンネルに配信される（開始時の置き換えは元のチャンネルのみ）。
+    """
+
+    def __init__(self, game, cog, note: str = ""):
         self.game = game
         self.cog = cog
+        self.note = note
+        self._closed = False
+        super().__init__(f"{LOADING}人狼ゲーム募集開始！", "", timeout=None)
+        self.join = discord.ui.Button(label="参加", style=discord.ButtonStyle.success)
+        self.join.callback = self._on_join
+        self.leave = discord.ui.Button(label="退出", style=discord.ButtonStyle.secondary)
+        self.leave.callback = self._on_leave
+        self.start = discord.ui.Button(label="開始する（主催者）", style=discord.ButtonStyle.primary)
+        self.start.callback = self._on_start
+        self.cancel = discord.ui.Button(label="募集をやめる（主催者）", style=discord.ButtonStyle.danger)
+        self.cancel.callback = self._on_cancel
+        self.add_row(self.join, self.leave)
+        self.add_row(self.start, self.cancel)
+        self._sync_body()
 
-    @discord.ui.button(label="参加する", style=discord.ButtonStyle.success)
-    async def join(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if interaction.user in self.game.players:
-            embed = discord.Embed(description="既に参加しています。", color=0xFFFFFF)
-            return await interaction.response.send_message(embed=embed, ephemeral=True)
-        if len(self.game.players) >= MAX_PLAYERS:
-            embed = discord.Embed(description=f"定員（{MAX_PLAYERS}人）に達しました。これ以上参加できません。", color=0xFFFFFF)
-            return await interaction.response.send_message(embed=embed, ephemeral=True)
-        self.game.players.append(interaction.user)
-        await interaction.response.send_message(
-            f"{AGOMUNIMUNI}{interaction.user.display_name} さんが参加しました。"
-        )
+    def _sync_body(self) -> None:
+        game = self.game
+        lines = []
+        if self.note:
+            lines.append(self.note)
+        req = f" 【必須: {'、'.join(game.required_roles)}】" if game.required_roles else ""
+        lines.append(f"モード:【{game.game_mode}】{req}")
+        lines.append(f"参加者（{len(game.players)}人／{MIN_PLAYERS}〜{MAX_PLAYERS}人）:")
+        for p in game.players:
+            mark = "（主催者）" if p.id == game.host_id else ""
+            lines.append(f"- <@{p.id}>{mark}")
+        self.set_content(body="\n".join(lines))
 
-    @discord.ui.button(label="キャンセル", style=discord.ButtonStyle.danger)
-    async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if interaction.user not in self.game.players:
-            embed = discord.Embed(description="参加していません。", color=0xFFFFFF)
-            return await interaction.response.send_message(embed=embed, ephemeral=True)
-        self.game.players.remove(interaction.user)
-        await interaction.response.send_message(
-            f"{interaction.user.display_name} さんが参加をキャンセルしました。"
-        )
+    def _finish_ui(self, body: str) -> None:
+        self.clear_rows()
+        self.set_content(body=body)
 
-    @discord.ui.button(label="スタート", style=discord.ButtonStyle.primary)
-    async def start(self, interaction: discord.Interaction, button: discord.ui.Button):
+    async def _on_join(self, interaction: discord.Interaction):
+        game = self.game
+        if self._closed or game.started:
+            return await _ephemeral_text(interaction, "募集は終わりました。")
+        if any(p.id == interaction.user.id for p in game.players):
+            return await _ephemeral_text(interaction, LOBBY_MSG_ALREADY_JOINED)
+        if len(game.players) >= MAX_PLAYERS:
+            return await _ephemeral_text(interaction, lobby_msg_full(MAX_PLAYERS))
+        game.players.append(interaction.user)
+        self._sync_body()
+        await refresh_panel(interaction, self)
+
+    async def _on_leave(self, interaction: discord.Interaction):
+        game = self.game
+        if self._closed or game.started:
+            return await _ephemeral_text(interaction, "募集は終わりました。")
+        if interaction.user.id == game.host_id:
+            return await _ephemeral_text(interaction, LOBBY_MSG_HOST_CANNOT_LEAVE)
+        if not any(p.id == interaction.user.id for p in game.players):
+            return await _ephemeral_text(interaction, "参加していません。")
+        game.players = [p for p in game.players if p.id != interaction.user.id]
+        self._sync_body()
+        await refresh_panel(interaction, self)
+
+    async def _on_start(self, interaction: discord.Interaction):
         if interaction.user.id != self.game.host_id:
-            embed = discord.Embed(description="スタートできるのはゲームを起動した人のみです。", color=0xFFFFFF)
-            return await interaction.response.send_message(embed=embed, ephemeral=True)
+            return await _ephemeral_text(interaction, LOBBY_MSG_NOT_HOST)
+        if self._closed or self.game.started:
+            return await _ephemeral_text(interaction, LOBBY_MSG_ALREADY_STARTED)
+        if len(self.game.players) < MIN_PLAYERS:
+            return await _ephemeral_text(
+                interaction, lobby_msg_not_enough(MIN_PLAYERS, len(self.game.players)))
+        self._closed = True
+        self._finish_ui("開始します！")
+        await refresh_panel(interaction, self)
         self.stop()
-        await interaction.response.send_message("ゲームを開始します！")
         asyncio.create_task(self.cog._start_game_loop(self.game, self.game.game_channel))
 
+    async def _on_cancel(self, interaction: discord.Interaction):
+        if interaction.user.id != self.game.host_id:
+            return await _ephemeral_text(interaction, "取り消せるのは主催者だけです。")
+        if self._closed or self.game.started:
+            return await _ephemeral_text(interaction, "募集は終わりました。")
+        self._closed = True
+        self.game.is_running = False
+        self._finish_ui("募集は取り消されました。")
+        await refresh_panel(interaction, self)
+        self.stop()
 
-class ReplayView(discord.ui.View):
-    """最終役職開示後の再戦ボタン"""
-    def __init__(self, game, cog):
-        super().__init__(timeout=300)
+
+class ReplayView(GamePanelView):
+    """最終役職開示パネル（本文は呼び出し側が渡す）と再戦ボタン（V2）"""
+    def __init__(self, game, cog, body: str = ""):
         self.game = game
         self.cog = cog
+        super().__init__("最終役職開示", body, timeout=300)
+        self.replay = discord.ui.Button(label="再戦", style=discord.ButtonStyle.primary)
+        self.replay.callback = self._on_replay
+        self.add_row(self.replay)
 
-    @discord.ui.button(label="再戦", style=discord.ButtonStyle.primary)
-    async def replay(self, interaction: discord.Interaction, button: discord.ui.Button):
+    async def _on_replay(self, interaction: discord.Interaction):
         if interaction.user.id != self.game.host_id:
-            embed = discord.Embed(description="再戦を開始できるのはゲームを起動した人のみです。", color=0xFFFFFF)
-            return await interaction.response.send_message(embed=embed, ephemeral=True)
+            return await _ephemeral_text(interaction, "再戦を開始できるのはゲームを起動した人のみです。")
 
         channel = interaction.channel
         current = self.cog.games.get(channel.id)
         if current is not None and current is not self.game and current.is_running:
-            embed = discord.Embed(description="このチャンネルでは既に別のゲームが進行中です。", color=0xFFFFFF)
-            return await interaction.response.send_message(embed=embed, ephemeral=True)
+            return await _ephemeral_text(interaction, "このチャンネルでは既に別のゲームが進行中です。")
 
         old_required = self.game.required_roles[:]
         old_excluded = self.game.excluded_roles[:]
@@ -271,10 +360,8 @@ class ReplayView(discord.ui.View):
         self.stop()
         req_str = "、".join(old_required) if old_required else "なし"
         exc_str = "、".join(old_excluded) if old_excluded else "なし"
-        await interaction.response.send_message(
-            f"{LOADING}再戦開始！ モード:【{new_game.game_mode}】 必須: {req_str} / 除外: {exc_str}",
-            view=RecruitView(new_game, self.cog)
-        )
+        note = f"{LOADING}再戦開始！ 必須: {req_str} / 除外: {exc_str}"
+        await interaction.response.send_message(view=RecruitView(new_game, self.cog, note=note))
 
 
 class GlobalChannelProxy:
@@ -303,15 +390,24 @@ class GlobalChannelProxy:
             return await self.game._original_channel.send(*args, **kwargs)
 
 
-class GlobalJoinView(discord.ui.View):
-    """グローバル人狼の合流パネル。別サーバーで募集中のゲームに、このチャンネルから参加する。"""
+class GlobalJoinView(GamePanelView):
+    """グローバル人狼の合流パネル。別サーバーで募集中のゲームに、このチャンネルから参加する。
+
+    パネル表示は V2 化したが、参加の知らせは元のサーバーを含む全チャンネルへの
+    通知が本質のため、従来どおり新規メッセージで届ける（その場編集にしない）。
+    """
     def __init__(self, cog, game):
-        super().__init__(timeout=None)
         self.cog = cog
         self.game = game
+        super().__init__(
+            "グローバル人狼ゲーム（合流）",
+            "既に他サーバーで起動中のグローバル人狼ゲームがあります。\n参加ボタンを押して合流してください。",
+            timeout=None)
+        self.join = discord.ui.Button(label="参加", style=discord.ButtonStyle.success)
+        self.join.callback = self._on_join
+        self.add_row(self.join)
 
-    @discord.ui.button(label="参加", style=discord.ButtonStyle.success)
-    async def join(self, interaction: discord.Interaction, button: discord.ui.Button):
+    async def _on_join(self, interaction: discord.Interaction):
         game = self.game
         # 合流したあとに新しいグローバルゲームへ入れ替わっていたら、そちらは別のパネルから参加してもらう
         if self.cog.games.get("global") is not game or not game.is_running:
@@ -335,17 +431,19 @@ class GlobalJoinView(discord.ui.View):
                 logger.debug("人狼: 参加通知の送信に失敗しました", exc_info=True)
 
 
-class RoleCheckView(discord.ui.View):
+class RoleCheckView(GamePanelView):
+    """役職確認ボタンを持つ公開パネル（本文は呼び出し側が set_content で入れる）（V2）"""
     def __init__(self, game, cog):
-        super().__init__(timeout=None)
         self.game, self.cog = game, cog
+        super().__init__("", "", timeout=None)
+        self.check = discord.ui.Button(label="役職確認", style=discord.ButtonStyle.primary)
+        self.check.callback = self._on_check
+        self.add_row(self.check)
 
-    @discord.ui.button(label="役職確認", style=discord.ButtonStyle.primary)
-    async def check(self, interaction: discord.Interaction, button: discord.ui.Button):
+    async def _on_check(self, interaction: discord.Interaction):
         real_role = self.game.roles.get(interaction.user.id)
         if real_role is None:
-            embed = discord.Embed(description="あなたはゲームに参加していません。", color=0xFFFFFF)
-            return await interaction.response.send_message(embed=embed, ephemeral=True)
+            return await _ephemeral_text(interaction, "あなたはゲームに参加していません。")
 
         # 表示用役職を取得（裏役職を考慮）
         display_role = _get_display_role(self.game, interaction.user.id, reveal_hidden=False)
@@ -428,13 +526,10 @@ class RoleCheckView(discord.ui.View):
             "アホ": "NOMAL.PNG"
         }
 
-        embed = discord.Embed(
-            title=f"あなたの役職は 【{display_role}】 です",
-            description=descs.get(display_role, "詳細なし"),
-            color=0xFFFFFF
-        )
         # 初心者ガイド（陣営・能力・勝利条件・今夜やること）。裏役職は表示用の役職で案内する
-        jinrou_guide.add_guide(embed, display_role)
+        panel = text_panel(
+            f"あなたの役職は 【{display_role}】 です",
+            descs.get(display_role, "詳細なし") + "\n\n" + jinrou_guide.guide_text(display_role))
 
         # 表示用役職に対応した画像ファイルを取得
         filename = role_image_map.get(display_role)
@@ -442,49 +537,62 @@ class RoleCheckView(discord.ui.View):
             file_path = f"Assets/{filename}"
             if os.path.exists(file_path):
                 file = discord.File(file_path, filename="role_img.png")
-                embed.set_image(url="attachment://role_img.png")
-                return await interaction.response.send_message(embed=embed, file=file, ephemeral=True)
+                panel.add_extra(discord.ui.MediaGallery(
+                    discord.MediaGalleryItem(media="attachment://role_img.png")))
+                return await interaction.response.send_message(view=panel, file=file, ephemeral=True)
 
-        await interaction.response.send_message(embed=embed, ephemeral=True)
+        await interaction.response.send_message(view=panel, ephemeral=True)
 
 
-class NightActionView(discord.ui.View):
+class NightActionView(GamePanelView):
+    """夜フェーズの公開パネル。「夜のアクション」ボタン＋フェーズヘルプボタン（V2）"""
     def __init__(self, game):
-        super().__init__(timeout=60)
         self.game = game
+        self._help_button = None
+        super().__init__("夜フェーズ", "アクションを選択してください", timeout=60)
+        self.action = discord.ui.Button(label="夜のアクション", style=discord.ButtonStyle.success)
+        self.action.callback = self._on_action
+        self._sync_rows()
 
-    @discord.ui.button(label="夜のアクション", style=discord.ButtonStyle.success)
-    async def action(self, interaction: discord.Interaction, button: discord.ui.Button):
+    def add_help_button(self, button) -> None:
+        """フェーズヘルプボタンをアクションと同じ行に組み込む。"""
+        self._help_button = button
+        self._sync_rows()
+
+    def _sync_rows(self) -> None:
+        self.clear_rows()
+        items = [self.action]
+        if self._help_button is not None:
+            items.append(self._help_button)
+        self.add_row(*items)
+
+    async def _on_action(self, interaction: discord.Interaction):
         p_id = interaction.user.id
         if p_id not in [p.id for p in self.game.alive_players]: return
 
         if p_id in self.game.night_actions:
-            embed = discord.Embed(description="アクションは既に完了しています。欲張らないでください。", color=0xFFFFFF)
-            return await interaction.response.send_message(embed=embed, ephemeral=True)
+            return await _ephemeral_text(interaction, "アクションは既に完了しています。欲張らないでください。")
 
         role = self.game.roles.get(p_id)
 
         if role == "あごむに破道砲" and self.game.day_count < 3:
-            embed = discord.Embed(description=f"あごむに破道砲は第3夜からしか使用できません。(現在は第{self.game.day_count}夜)", color=0xFFFFFF)
-            return await interaction.response.send_message(embed=embed, ephemeral=True)
+            return await _ephemeral_text(interaction, f"あごむに破道砲は第3夜からしか使用できません。(現在は第{self.game.day_count}夜)")
 
         if role == "大霊媒師":
             alive_ids = {p.id for p in self.game.alive_players}
             dead_players = [p for p in self.game.players if p.id not in alive_ids and p.id != p_id]
             if not dead_players:
-                embed = discord.Embed(description="調べられる死者がいません。今夜は待機です。", color=0xFFFFFF)
-                return await interaction.response.send_message(embed=embed, ephemeral=True)
+                return await _ephemeral_text(interaction, "調べられる死者がいません。今夜は待機です。")
             opts = [discord.SelectOption(label=p.display_name, value=str(p.id)) for p in dead_players]
-            embed = discord.Embed(description="調べる死者を選択してください：", color=0xFFFFFF)
-            return await interaction.response.send_message(embed=embed, view=ActionSelectView(self.game, opts, role, actor_id=p_id), ephemeral=True)
+            return await interaction.response.send_message(
+                view=ActionSelectView(self.game, opts, role, actor_id=p_id, prompt="調べる死者を選択してください："),
+                ephemeral=True)
 
         if role == "ミュージシャン":
             if self.game.musician_party_used:
-                embed = discord.Embed(description="パーティは既に開催済みです。今夜は待機してください。", color=0xFFFFFF)
-                return await interaction.response.send_message(embed=embed, ephemeral=True)
+                return await _ephemeral_text(interaction, "パーティは既に開催済みです。今夜は待機してください。")
             self.game.night_actions[p_id] = 0
-            embed = discord.Embed(description=MUSIC + ' パーティを開催します！ランダムに4人を招待します。', color=0xFFFFFF)
-            return await interaction.response.send_message(embed=embed, ephemeral=True)
+            return await _ephemeral_text(interaction, MUSIC + ' パーティを開催します！ランダムに4人を招待します。')
 
         passive_roles = [
             "一般通過あごむに", "霊媒師", "狂人", "ハゲ", "コウモリむに",
@@ -492,52 +600,50 @@ class NightActionView(discord.ui.View):
             "ビー玉ブレイカー", "もくもく", "リア充", "貴族", "奴隷", "議長", "アホ"
         ]
         if role in passive_roles:
-            embed = discord.Embed(description="お前は寝てろ。明日の朝までじっとしてなさい。", color=0xFFFFFF)
-            return await interaction.response.send_message(embed=embed, ephemeral=True)
+            return await _ephemeral_text(interaction, "お前は寝てろ。明日の朝までじっとしてなさい。")
 
         opts = [discord.SelectOption(label=p.display_name, value=str(p.id)) for p in self.game.alive_players if p.id != p_id]
         if not opts:
-            embed = discord.Embed(description="対象がいません。", color=0xFFFFFF)
-            return await interaction.response.send_message(embed=embed, ephemeral=True)
+            return await _ephemeral_text(interaction, "対象がいません。")
 
-        embed = discord.Embed(description="対象を選択してください：", color=0xFFFFFF)
-        await interaction.response.send_message(embed=embed, view=ActionSelectView(self.game, opts, role, actor_id=p_id), ephemeral=True)
+        await interaction.response.send_message(
+            view=ActionSelectView(self.game, opts, role, actor_id=p_id), ephemeral=True)
 
 
-class ActionSelectView(discord.ui.View):
-    def __init__(self, game, options, role, actor_id=None):
-        super().__init__(timeout=60)
+class ActionSelectView(GamePanelView):
+    """夜アクションの対象選択（本人の ephemeral、V2）。セレクトは ``select`` 属性。"""
+    def __init__(self, game, options, role, actor_id=None, prompt: str = "対象を選択してください："):
         self.game, self.role = game, role
         self.actor_id = actor_id
-        s = discord.ui.Select(options=options)
-        s.callback = self.callback
-        self.add_item(s)
+        super().__init__("", prompt, timeout=60)
+        self.select = discord.ui.Select(options=options)
+        self.select.callback = self.callback
+        self.add_row(self.select)
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        # 本人だけの単発セレクトなので、GamePanelView のクールダウンは適用しない。
+        return True
 
     async def callback(self, interaction: discord.Interaction):
         p_id = interaction.user.id
         # B-5: 配信方法（ephemeral）に頼らず、View 自体で実行者を検証する
         if self.actor_id is not None and p_id != self.actor_id:
-            embed = discord.Embed(description="このアクションはあなた宛ではありません。", color=0xFFFFFF)
-            return await interaction.response.send_message(embed=embed, ephemeral=True)
+            return await _ephemeral_text(interaction, "このアクションはあなた宛ではありません。")
         if p_id not in [p.id for p in self.game.alive_players]:
-            embed = discord.Embed(description="生存者だけが夜のアクションを行えます。", color=0xFFFFFF)
-            return await interaction.response.send_message(embed=embed, ephemeral=True)
+            return await _ephemeral_text(interaction, "生存者だけが夜のアクションを行えます。")
         if self.game.roles.get(p_id) != self.role:
-            embed = discord.Embed(description="あなたの役職と一致しないアクションです。", color=0xFFFFFF)
-            return await interaction.response.send_message(embed=embed, ephemeral=True)
+            return await _ephemeral_text(interaction, "あなたの役職と一致しないアクションです。")
         # 夜フェーズ判定: 明示フラグがあればそれを優先し、無い旧状態では
         # 「開始済み・議論中でない」ことを最低条件にする
         in_night = getattr(self.game, "in_night_phase", None)
         if in_night is None:
             in_night = bool(getattr(self.game, "started", False)) and not getattr(self.game, "in_discussion", False)
         if not in_night:
-            embed = discord.Embed(description="今は夜フェーズではありません。", color=0xFFFFFF)
-            return await interaction.response.send_message(embed=embed, ephemeral=True)
+            return await _ephemeral_text(interaction, "今は夜フェーズではありません。")
         if p_id in self.game.night_actions:
-            embed = discord.Embed(description="既にアクションは受理されています。", color=0xFFFFFF)
-            return await interaction.response.send_message(embed=embed, ephemeral=True)
+            return await _ephemeral_text(interaction, "既にアクションは受理されています。")
 
-        t_id = int(self.children[0].values[0])
+        t_id = int(self.select.values[0])
         self.game.night_actions[p_id] = t_id
 
         if self.role == "占い師":
@@ -551,86 +657,82 @@ class ActionSelectView(discord.ui.View):
                 if random.random() < 0.3:
                     res = "白" if res == "黒" else "黒"
             jinrou_review.note_divine(self.game, p_id, t_id, res)
-            embed = discord.Embed(description=f"{URANAI}占い結果: 【{res}】", color=0xFFFFFF)
-            await interaction.response.send_message(embed=embed, ephemeral=True)
+            await _ephemeral_text(interaction, f"{URANAI}占い結果: 【{res}】")
 
         elif self.role == "大霊媒師":
             r = self.game.roles.get(t_id)
             color = reibai_color(r)
-            embed = discord.Embed(
-                description=f"{REIBAI}大霊媒師の結果: 【{color}】 役職: 【{r}】",
-                color=0xFFFFFF
-            )
-            await interaction.response.send_message(embed=embed, ephemeral=True)
+            await _ephemeral_text(interaction, f"{REIBAI}大霊媒師の結果: 【{color}】 役職: 【{r}】")
 
         elif self.role == "マサイ族":
             r = self.game.roles.get(t_id)
             if r in ["人狼", "デカ狼"]:
                 self.game.masai_evasion[p_id] = True
-            embed = discord.Embed(description=MASAI + '対象の観察を完了しました。人狼であれば回避の準備を整える。', color=0xFFFFFF)
-            await interaction.response.send_message(embed=embed, ephemeral=True)
+            await _ephemeral_text(interaction, MASAI + '対象の観察を完了しました。人狼であれば回避の準備を整える。')
         elif self.role == "罠師":
-            embed = discord.Embed(description="対象に罠を設置しました。狼が攻撃した場合、返り討ちにします。", color=0xFFFFFF)
-            await interaction.response.send_message(embed=embed, ephemeral=True)
+            await _ephemeral_text(interaction, "対象に罠を設置しました。狼が攻撃した場合、返り討ちにします。")
         elif self.role == "ワンころ" and self.game.day_count == 1:
             master_m = self.game.game_channel.guild.get_member(t_id) if self.game.game_channel else None
             master_name = master_m.display_name if master_m else "不明"
-            embed = discord.Embed(description=f"飼い主を **{master_name}** に決めました。飼い主が生きている間はあなたも村人陣営です。", color=0xFFFFFF)
-            await interaction.response.send_message(embed=embed, ephemeral=True)
+            await _ephemeral_text(interaction, f"飼い主を **{master_name}** に決めました。飼い主が生きている間はあなたも村人陣営です。")
         elif self.role == "陽キャ":
             t_m = self.game.game_channel.guild.get_member(t_id)
             t_name = t_m.display_name if t_m else "不明"
-            embed = discord.Embed(description=f"🎉 {t_name} をℳ𝓎𝒽ℴ𝓂ℯに誘います。", color=0xFFFFFF)
-            await interaction.response.send_message(embed=embed, ephemeral=True)
+            await _ephemeral_text(interaction, f"🎉 {t_name} をℳ𝓎𝒽ℴ𝓂ℯに誘います。")
         else:
-            embed = discord.Embed(description="完了。", color=0xFFFFFF)
-            await interaction.response.send_message(embed=embed, ephemeral=True)
+            await _ephemeral_text(interaction, "完了。")
 
 
-class PublicVoteView(discord.ui.View):
+class PublicVoteView(GamePanelView):
+    """投票フェーズの公開パネル（V2）。セレクトは ``select`` 属性、ヘルプは2行目。"""
     def __init__(self, game, options):
-        super().__init__(timeout=60)
         self.game = game
-        s = discord.ui.Select(options=options)
-        s.callback = self.callback
-        self.add_item(s)
+        super().__init__("投票フェーズ", "生存者は投票してください", timeout=60)
+        self.select = discord.ui.Select(options=options)
+        self.select.callback = self.callback
+        self.add_row(self.select)
+
+    def add_help_button(self, button) -> None:
+        """フェーズヘルプボタンをセレクトの下の行に組み込む。"""
+        self.add_row(button)
 
     async def callback(self, interaction: discord.Interaction):
         p_id = interaction.user.id
         if p_id not in [p.id for p in self.game.alive_players]:
-            embed = discord.Embed(description="死人に口なし。墓場で大人しくしていなさい。", color=0xFFFFFF)
-            return await interaction.response.send_message(embed=embed, ephemeral=True)
+            return await _ephemeral_text(interaction, "死人に口なし。墓場で大人しくしていなさい。")
 
         if p_id in self.game.voted_count:
-            embed = discord.Embed(description="既に投票済みです。意志を何度も変えることはできません。", color=0xFFFFFF)
-            return await interaction.response.send_message(embed=embed, ephemeral=True)
+            return await _ephemeral_text(interaction, "既に投票済みです。意志を何度も変えることはできません。")
 
-        self.game.voted_count[p_id] = self.children[0].values[0]
+        self.game.voted_count[p_id] = self.select.values[0]
         await interaction.response.send_message(f"{SUCCESS} {interaction.user.display_name} さんが投票を完了しました。")
 
 
-class ChairmanVoteView(discord.ui.View):
+class ChairmanVoteView(GamePanelView):
+    """議長の強制投票パネル（V2）。セレクトは ``select`` 属性、ヘルプは2行目。"""
     def __init__(self, game, options):
-        super().__init__(timeout=60)
         self.game = game
         self.voted = False
-        s = discord.ui.Select(options=options, placeholder="追放する対象を選んでください")
-        s.callback = self.callback
-        self.add_item(s)
+        super().__init__("強制投票（60秒）", "**議長のみ**が投票できます。追放する対象を選んでください。", timeout=60)
+        self.select = discord.ui.Select(options=options, placeholder="追放する対象を選んでください")
+        self.select.callback = self.callback
+        self.add_row(self.select)
+
+    def add_help_button(self, button) -> None:
+        """フェーズヘルプボタンをセレクトの下の行に組み込む。"""
+        self.add_row(button)
 
     async def callback(self, interaction: discord.Interaction):
         p_id = interaction.user.id
 
         if self.game.roles.get(p_id) != "議長":
-            embed = discord.Embed(description="この投票は議長のみ行えます。", color=0xFFFFFF)
-            return await interaction.response.send_message(embed=embed, ephemeral=True)
+            return await _ephemeral_text(interaction, "この投票は議長のみ行えます。")
 
         if self.voted:
-            embed = discord.Embed(description="既に投票済みです。", color=0xFFFFFF)
-            return await interaction.response.send_message(embed=embed, ephemeral=True)
+            return await _ephemeral_text(interaction, "既に投票済みです。")
 
         self.voted = True
-        t_id = int(self.children[0].values[0])
+        t_id = int(self.select.values[0])
         self.game.chairman_ketsugu_target = t_id
 
         if self.game.chairman_vote_event:

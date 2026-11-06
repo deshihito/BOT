@@ -133,7 +133,7 @@ class SetupRolesTest(unittest.IsolatedAsyncioTestCase):
 
     def test_all_roles_reachable_in_exclude_selects(self):
         view = SetupView(self.game, cog=None, channel=self.channel)
-        selects = [c for c in view.children if isinstance(c, discord.ui.Select)]
+        selects = [c for c in view.walk_children() if isinstance(c, discord.ui.Select)]
         for sel in selects:
             self.assertLessEqual(len(sel.options), 25)
         exc_selects = [s for s in selects if "除外" in (s.placeholder or "")]
@@ -158,7 +158,7 @@ class SetupRolesTest(unittest.IsolatedAsyncioTestCase):
         self.assertLessEqual(len(AdvancedSetupView.ADV_ROLES), 25)
         self.game.required_roles = []
         view = AdvancedSetupView(self.game, cog=None, channel=self.channel)
-        selects = [c for c in view.children if isinstance(c, discord.ui.Select)]
+        selects = [c for c in view.walk_children() if isinstance(c, discord.ui.Select)]
         self.assertEqual(len(selects), 1)
         self.assertEqual([o.value for o in selects[0].options], AdvancedSetupView.ADV_ROLES)
 
@@ -188,7 +188,7 @@ class NightActionGuardTest(unittest.IsolatedAsyncioTestCase):
 
     async def act(self, game, view, user, target="2"):
         inter = FakeInteraction(user, self.channel)
-        await choose(view.children[0], target, inter)
+        await choose(view.select, target, inter)
         return inter
 
     async def test_valid_seer_action_is_recorded(self):

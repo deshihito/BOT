@@ -26,9 +26,9 @@ logger = logging.getLogger("cogs.jinrou")
 
 class ResultsMixin:
     async def _send_exile_summary(self, game, lines):
-        """追放結果の発表ラインを1枚の embed に集約して送る（§4.2-9）。"""
+        """追放結果の発表ラインを1枚の V2 パネルに集約して送る（§4.2-9）。"""
         if lines:
-            await game.game_channel.send(embed=phase_summary_embed("追放結果", lines))
+            await game.game_channel.send(view=phase_summary_view("追放結果", lines))
 
     async def _record_wins(self, game, user_ids):
         guild = getattr(getattr(game, "game_channel", None), "guild", None)
@@ -86,12 +86,7 @@ class ResultsMixin:
             role = game.roles.get(p.id, "不明")
             status = SUCCESS if p.id in alive_ids else "💀"
             lines.append(f"{status} **{name}**: {role}")
-        embed = discord.Embed(
-            title="最終役職開示",
-            description="\n".join(lines),
-            color=0xFFFFFF
-        )
-        await game_panels.replace(game.game_channel, "party", embed=embed, view=ReplayView(game, self))
+        await game_panels.replace(game.game_channel, "party", view=ReplayView(game, self, body="\n".join(lines)))
 
 
     async def _notify_reibai(self, game, executed_id):
@@ -188,8 +183,8 @@ class ResultsMixin:
         opts.append(discord.SelectOption(label="スキップ", value="skip"))
         game.voted_count = {}
         view = PublicVoteView(game, opts)
-        view.add_item(jinrou_guide.PhaseHelpButton("vote", _guide_role_lookup(game), row=1))
-        msg = await game_panels.replace(game.game_channel, "party", "生存者は投票してください", view=view)
+        view.add_help_button(jinrou_guide.PhaseHelpButton("vote", _guide_role_lookup(game)))
+        msg = await game_panels.replace(game.game_channel, "party", view=view)
         for _ in range(40):
             await asyncio.sleep(1)
             if not game.is_running: break
@@ -283,11 +278,8 @@ class ResultsMixin:
                 game.silenced_players.add(p.id)
 
         view = ChairmanVoteView(game, opts)
-        view.add_item(jinrou_guide.PhaseHelpButton("vote", _guide_role_lookup(game), row=1))
-        msg = await game_panels.replace(game.game_channel, "party",
-            "ーー 強制投票（60秒） ーー\n**議長のみ**が投票できます。追放する対象を選んでください。",
-            view=view
-        )
+        view.add_help_button(jinrou_guide.PhaseHelpButton("vote", _guide_role_lookup(game)))
+        msg = await game_panels.replace(game.game_channel, "party", view=view)
 
         t = 0
         while not game.chairman_vote_event.is_set() and t < 60:

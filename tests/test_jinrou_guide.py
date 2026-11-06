@@ -12,8 +12,16 @@ for p in (ROOT, ROOT / "tests"):
         sys.path.insert(0, str(p))
 
 import game_fakes  # noqa: E402,F401  （環境変数などの準備）
+import discord  # noqa: E402
 from cogs import jinrou  # noqa: E402
 from core.game import jinrou_guide as guide  # noqa: E402
+
+
+def view_text(view):
+    """V2 パネル内の TextDisplay 本文を集める。"""
+    return "\n".join(
+        item.content or "" for item in view.walk_children()
+        if isinstance(item, discord.ui.TextDisplay))
 
 SLUG = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 
@@ -103,9 +111,9 @@ class RoleNoticeTest(unittest.IsolatedAsyncioTestCase):
         it.response.send_message.assert_awaited_once()
         kwargs = it.response.send_message.await_args.kwargs
         self.assertTrue(kwargs["ephemeral"])
-        names = [f.name for f in kwargs["embed"].fields]
-        self.assertIn("🔰 今夜やること", names)
-        self.assertIn(guide.role_url("占い師"), [f.value for f in kwargs["embed"].fields])
+        text = view_text(kwargs["view"])
+        self.assertIn("🔰 今夜やること", text)
+        self.assertIn(guide.role_url("占い師"), text)
         self.assertTrue(guide.role_url("占い師").endswith("/seer"))
 
     async def test_hidden_role_is_not_leaked(self):
@@ -114,8 +122,7 @@ class RoleNoticeTest(unittest.IsolatedAsyncioTestCase):
         cog.get_wolves_names.return_value = "なし"
         it = interaction(1)
         await jinrou.RoleCheckView(game, cog).check.callback(it)
-        embed = it.response.send_message.await_args.kwargs["embed"]
-        text = (embed.description or "") + "".join(f.value for f in embed.fields)
+        text = view_text(it.response.send_message.await_args.kwargs["view"])
         self.assertNotIn("入狼", text)
         self.assertNotIn("nyurou", text)
         self.assertIn(guide.role_url("一般通過あごむに"), text)
@@ -132,11 +139,12 @@ class PhaseButtonTest(unittest.IsolatedAsyncioTestCase):
             await button.callback(it)
             kwargs = it.response.send_message.await_args.kwargs
             self.assertTrue(kwargs["ephemeral"])
-            self.assertEqual(kwargs["embed"].title, guide.PHASES[phase][0])
-            self.assertIn(guide.role_url("騎士"), [f.value for f in kwargs["embed"].fields])
+            text = view_text(kwargs["view"])
+            self.assertIn(guide.PHASES[phase][0], text)
+            self.assertIn(guide.role_url("騎士"), text)
         it = interaction(99)  # 参加していない人
         await guide.PhaseHelpButton("vote", jinrou._guide_role_lookup(game)).callback(it)
-        self.assertIn(guide.ROLE_GUIDE_BASE_URL, [f.value for f in it.response.send_message.await_args.kwargs["embed"].fields])
+        self.assertIn(guide.ROLE_GUIDE_BASE_URL, view_text(it.response.send_message.await_args.kwargs["view"]))
 
     async def test_phase_messages_have_help_button(self):
         game = jinrou.JinrouGame()
@@ -151,11 +159,12 @@ class PhaseButtonTest(unittest.IsolatedAsyncioTestCase):
             await cog.run_discussion(game, 2, "昼")
         finally:
             jinrou.asyncio.sleep = real
-        labels = [getattr(i, "label", None) for k in sent if k.get("view") for i in k["view"].children]
+        labels = [getattr(i, "label", None) for k in sent if k.get("view") for i in k["view"].walk_children()]
         self.assertIn("？", labels)
         night = jinrou.NightActionView(game)
-        night.add_item(guide.PhaseHelpButton("night", lambda _: None))
-        self.assertEqual([getattr(i, "label", None) for i in night.children], ["夜のアクション", "？"])
+        night.add_help_button(guide.PhaseHelpButton("night", lambda _: None))
+        button_labels = [i.label for i in night.walk_children() if isinstance(i, discord.ui.Button)]
+        self.assertEqual(button_labels, ["夜のアクション", "？"])
 
 
 if __name__ == "__main__":
@@ -164,12 +173,14 @@ if __name__ == "__main__":
 
 class YandereTeamTest(unittest.IsolatedAsyncioTestCase):
     def assert_victory_embed(self, game, text):
-        # 勝敗確定はフェーズ集約 embed で発表される（表示モダン化 §4.2-9）
+        # 勝敗確定はフェーズ集約 V2 パネルで発表される（表示モダン化 §4.2-9）
         for call in game.game_channel.send.await_args_list:
-            embed = call.kwargs.get("embed")
-            if embed is not None and embed.title == "勝敗確定" and text in (embed.description or ""):
-                return
-        raise AssertionError(f"勝敗確定 embed が見つかりません: {text}")
+            view = call.kwargs.get("view")
+            if view is not None:
+                panel = view_text(view)
+                if "勝敗確定" in panel and text in panel:
+                    return
+        raise AssertionError(f"勝敗確定パネルが見つかりません: {text}")
 
     def setUp(self):
         from unittest.mock import patch

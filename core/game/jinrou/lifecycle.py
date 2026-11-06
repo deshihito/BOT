@@ -281,11 +281,9 @@ class LifecycleMixin:
         """
         game = self.get_game(interaction.channel_id)
         if not game.is_running:
-            embed = discord.Embed(description="このチャンネルで実行中のゲームはありません。", color=0xFFFFFF)
-            return await interaction.response.send_message(embed=embed, ephemeral=True)
+            return await interaction.response.send_message("このチャンネルで実行中のゲームはありません。", ephemeral=True)
         if not can_end_game(game, interaction.user):
-            embed = discord.Embed(description="人狼を終了できるのは参加者・ホスト・管理者だけです。", color=0xFFFFFF)
-            return await interaction.response.send_message(embed=embed, ephemeral=True)
+            return await interaction.response.send_message("人狼を終了できるのは参加者・ホスト・管理者だけです。", ephemeral=True)
 
         winner_is_wolf = surrender_winner_is_wolf(game, interaction.user.id)
         is_surrender = winner_is_wolf is not None
@@ -317,16 +315,13 @@ class LifecycleMixin:
                 except Exception:
                     logger.exception("人狼: 投了時のレート記録に失敗しました")
             winner_label = "人狼陣営" if winner_is_wolf else "村人陣営"
-            embed = discord.Embed(
-                description=(
-                    f"<@{interaction.user.id}> さんが投了しました。"
-                    f"投了した方の陣営の敗北として記録し、{winner_label}の勝利とします。"
-                ),
-                color=0xFFFFFF,
+            message = (
+                f"<@{interaction.user.id}> さんが投了しました。"
+                f"投了した方の陣営の敗北として記録し、{winner_label}の勝利とします。"
             )
         else:
-            embed = discord.Embed(description=f"<@{interaction.user.id}> さんがゲームを強制終了しました。", color=0xFFFFFF)
-        await interaction.response.send_message(embed=embed)
+            message = f"<@{interaction.user.id}> さんがゲームを強制終了しました。"
+        await interaction.response.send_message(message)
 
 
     async def start_recruit(self, interaction: discord.Interaction, mode: str = "local"):
@@ -341,12 +336,7 @@ class LifecycleMixin:
             if game and game.is_running:
                 if all(c.id != interaction.channel.id for c in game.channels):
                     game.channels.append(interaction.channel)
-                embed = discord.Embed(
-                    title="グローバル人狼ゲーム（合流）",
-                    description="既に他サーバーで起動中のグローバル人狼ゲームがあります。\n参加ボタンを押して合流してください。",
-                    color=0xFFFFFF
-                )
-                await interaction.response.send_message(embed=embed, view=GlobalJoinView(self, game))
+                await interaction.response.send_message(view=GlobalJoinView(self, game))
                 return
             else:
                 game = JinrouGame()
@@ -358,8 +348,7 @@ class LifecycleMixin:
         else:
             game = self.get_game(interaction.channel_id)
             if game.is_running:
-                embed = discord.Embed(description="このチャンネルでは既にゲームが進行中です。", color=0xFFFFFF)
-                return await interaction.response.send_message(embed=embed, ephemeral=True)
+                return await interaction.response.send_message("このチャンネルでは既にゲームが進行中です。", ephemeral=True)
             game._original_channel = interaction.channel
             game.game_channel = interaction.channel
 
@@ -368,13 +357,7 @@ class LifecycleMixin:
         game.is_running = True
         game.host_id = interaction.user.id
 
-        embed = discord.Embed(
-            title="人狼ゲーム設定",
-            description="必須役職・除外役職を設定してください。（各最大4つ）\n設定後「確定してパネルを送信」を押してください。",
-            color=0xFFFFFF
-        )
         await interaction.response.send_message(
-            embed=embed,
             view=SetupView(game, self, game.game_channel),
             ephemeral=True
         )
