@@ -9,8 +9,8 @@ from typing import Any
 import discord
 
 from core.messages import ROLE_HIERARCHY_ALREADY_SET, ROLE_HIERARCHY_CANNOT_SET
-from core.server_assist import Feature, can_assign_roles, get_settings, update_settings
-from core.server_assist.ui import AssistFeatureView, channel_label, notice_line
+from core.support.server_assist import Feature, can_assign_roles, get_settings, update_settings
+from core.support.server_assist.ui import AssistFeatureView, channel_label, notice_line
 
 logger = logging.getLogger(__name__)
 

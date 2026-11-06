@@ -6,8 +6,8 @@ from typing import Any
 
 import discord
 
-from core.server_assist import Feature, get_settings, update_settings
-from core.server_assist.ui import AssistFeatureView, notice_line
+from core.support.server_assist import Feature, get_settings, update_settings
+from core.support.server_assist.ui import AssistFeatureView, notice_line
 from core.storage import KVStore
 
 logger = logging.getLogger(__name__)

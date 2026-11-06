@@ -38,7 +38,8 @@ except Exception:  # ImportError だけでなく共有ライブラリ不整合 (
         "EnCodec/torch/soundfile を読み込めなかったため、音声トリガー機能は無効になります",
         exc_info=True,
     )
-from core import action_usage, usage_stats
+from core import action_usage
+from core.support import usage_stats
 from core.legacy import Responder
 from core.vc.voice_session import VoiceBusy, feature_label, get_manager, stop_hint
 from core.vc.voice_media import add_audio_source, remove_audio_source

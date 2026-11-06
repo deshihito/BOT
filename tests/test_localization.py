@@ -2,7 +2,7 @@ import types
 import unittest
 from unittest.mock import AsyncMock, patch
 
-from core import localization
+from core.support import localization
 from cogs.localization import LanguageView, LocalizationCog
 
 

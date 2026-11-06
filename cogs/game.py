@@ -9,7 +9,8 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
-from core import action_usage, elo, party_ranking, usage_stats
+from core import action_usage, elo, party_ranking
+from core.support import usage_stats
 from core.emojis import BACK
 from core.game_guides import GAME_GUIDES, GAME_ORDER, guide_for_discord
 from core.panel_v2 import as_panel_v2, edit_panel_v2

@@ -14,8 +14,8 @@ if ROOT not in sys.path:
 
 from core import guild_settings
 from core.storage import KVStore
-from core.server_assist import discover_features, format_template
-from core.server_assist.features import welcome
+from core.support.server_assist import discover_features, format_template
+from core.support.server_assist.features import welcome
 from core.panel_v2 import as_panel_v2
 from cogs.support import (
     SUPPORT_ACTIONS,
@@ -77,7 +77,7 @@ class ServerAssistSettingsTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn("welcome", [feature.key for feature in features])
         feature = next(feature for feature in features if feature.key == "welcome")
         self.assertEqual(feature.label, "参加・退出メッセージ")
-        self.assertEqual(feature.module_name, "core.server_assist.features.welcome")
+        self.assertEqual(feature.module_name, "core.support.server_assist.features.welcome")
 
     def test_defaults_are_disabled(self):
         settings = welcome.settings(1)

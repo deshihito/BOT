@@ -11,7 +11,7 @@ class AssistRegistryTest(unittest.TestCase):
         cls.registry = action_registry.default_registry()
 
     def test_all_features_registered(self):
-        from core.server_assist import discover_features
+        from core.support.server_assist import discover_features
 
         features = discover_features()
         self.assertGreater(len(features), 20)

@@ -16,7 +16,7 @@
 - AGO コインの増減そのものはここでは行わない（cogs/wallet.py の安全な
   残高更新経路に委ねる）。ここで数えるのはプール側の残高と消却量で、
   「ユーザ残高＋プール＋消却」の保存則が常に成り立つよう売買を組み立てる。
-- 保存は core/usage_stats.py と同じ流儀: 専用 JSON（既定 data/market.json、
+- 保存は core/support/usage_stats.py と同じ流儀: 専用 JSON（既定 data/market.json、
   環境変数 MARKET_DATA_PATH で変更可）に、メモリ主体＋バッチフラッシュ。
 """
 from __future__ import annotations

@@ -4,7 +4,7 @@ import json
 import logging
 import os
 
-from core import globalchat_moderation as mod
+from core.support import globalchat_moderation as mod
 from core.emojis import CROCK, FAILED
 
 logger = logging.getLogger(__name__)

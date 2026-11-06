@@ -1,6 +1,6 @@
 """ProBot-compatible server assist features, grouped under /support.
 
-Each feature lives in ``core.server_assist.features`` and exports a
+Each feature lives in ``core.support.server_assist.features`` and exports a
 ``FEATURE`` object plus optional event hooks.  The small registry below lets
 us add a feature without adding another top-level slash command.
 """
@@ -17,7 +17,7 @@ from core import guild_settings
 logger = logging.getLogger(__name__)
 
 SECTION_PREFIX = "assist_"
-FEATURE_PACKAGE = "core.server_assist.features"
+FEATURE_PACKAGE = "core.support.server_assist.features"
 
 
 @dataclass(frozen=True)

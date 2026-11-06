@@ -4,7 +4,7 @@ from unittest.mock import patch
 
 import discord
 
-from core import localization
+from core.support import localization
 
 
 class LocalizationTransportTest(unittest.TestCase):

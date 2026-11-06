@@ -9,8 +9,8 @@ from typing import Any
 
 import discord
 
-from core.server_assist import Feature, format_template, get_settings, update_settings
-from core.server_assist.ui import AssistFeatureView, channel_label, notice_line
+from core.support.server_assist import Feature, format_template, get_settings, update_settings
+from core.support.server_assist.ui import AssistFeatureView, channel_label, notice_line
 
 logger = logging.getLogger(__name__)
 

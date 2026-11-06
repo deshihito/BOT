@@ -14,7 +14,7 @@ if ROOT not in sys.path:
 
 from core import guild_settings
 from core.storage import KVStore
-from core.server_assist.features import welcome
+from core.support.server_assist.features import welcome
 from tests.fake_kv_supabase import FakeKVSupabase
 from tests.test_server_assist import FakeChannel, FakeGuild, FakeMember
 

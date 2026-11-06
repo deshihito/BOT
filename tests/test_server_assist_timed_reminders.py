@@ -15,7 +15,7 @@ if ROOT not in sys.path:
 
 from core import guild_settings
 from core.storage import KVStore
-from core.server_assist.features import timed
+from core.support.server_assist.features import timed
 from tests.fake_kv_supabase import FakeKVSupabase
 
 NOW = datetime(2026, 10, 26, 12, 0, tzinfo=timezone.utc)

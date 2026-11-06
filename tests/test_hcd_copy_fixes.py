@@ -20,7 +20,8 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
-from core import command_meta, localization, messages  # noqa: E402
+from core import command_meta, messages
+from core.support import localization  # noqa: E402
 
 
 class LogPointerRemovalTest(unittest.TestCase):
