@@ -6,7 +6,7 @@ from collections import Counter
 import os
 import discord
 from core.game import game_panels
-from core.emojis import AGOMUNIMUNI, FAILED, LOADING, MASAI, MUSIC, REIBAI, SUCCESS, URANAI
+from core.support.emojis import AGOMUNIMUNI, FAILED, LOADING, MASAI, MUSIC, REIBAI, SUCCESS, URANAI
 from core.game import jinrou_guide
 from discord import app_commands
 from discord.ext import commands

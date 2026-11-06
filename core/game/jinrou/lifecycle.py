@@ -6,7 +6,7 @@ from collections import Counter
 import os
 import discord
 from core.game import game_panels, jinrou_snapshot
-from core.emojis import FAILED, SUCCESS
+from core.support.emojis import FAILED, SUCCESS
 from core.game import jinrou_guide
 from discord import app_commands
 from discord.ext import commands
