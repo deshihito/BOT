@@ -107,9 +107,11 @@ def _items_embed(store: items_core.ItemStore, user_id: int) -> discord.Embed:
         }
         lines = []
         for effect_id, expires in effects.items():
-            remaining = max(0.0, (expires - now).total_seconds() / 3600)
+            # 残り時間の表記は prison.format_remaining に統一する
+            # （マネーパネルの「発動中の効果」と同一形式、導線最適化ラウンド4）。
+            remaining = max(0.0, (expires - now).total_seconds())
             label = effect_labels.get(effect_id, effect_id)
-            lines.append(f"・{label}（あと約 {remaining:.1f} 時間）")
+            lines.append(f"・{label}（あと{prison_core.format_remaining(remaining)}）")
         embed.add_field(name="発動中の効果", value="\n".join(lines), inline=False)
     plain_lines, consumable_lines = _shop_lines()
     if plain_lines:
@@ -266,9 +268,8 @@ class ItemsView(discord.ui.View):
     def embed(self) -> discord.Embed:
         return _items_embed(self.cog.store, self.user_id)
 
-    @discord.ui.button(label="更新", style=discord.ButtonStyle.secondary)
-    async def refresh(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await _edit_panel(interaction, self, button=button)
+    # 導線最適化ラウンド4: 再描画だけの「更新」ボタンは置かない（S9/R2-5
+    # と同じ作法）。所持・効果の状態は自分の操作のたびに更新される。
 
     @discord.ui.button(label="買う", style=discord.ButtonStyle.success)
     async def buy(self, interaction: discord.Interaction, button: discord.ui.Button):

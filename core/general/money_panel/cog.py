@@ -94,7 +94,10 @@ def _next_step_line(status: dict) -> str | None:
     どれにも当たらなければ何も出さない。
     """
     if status.get("prison_remaining"):
-        return "🚔 逮捕中です。脱獄を試みるか、釈放を待ってください。"
+        # 逮捕中は status_embed の「状態」フィールドが残り時間つきで
+        # 担うため、ここでは出さない（同一画面の二重表示の解消、R4-2）。
+        # 逮捕中は他の「次の1手」も実行できないので None でよい。
+        return None
     if status.get("workshop_ready"):
         return "🏭 工房で受け取りができます。"
     if status.get("starter_claimed") is False:
