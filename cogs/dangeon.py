@@ -26,7 +26,7 @@ import io
 import time
 import hashlib
 import aiohttp
-from core import logfare
+from core.general import logfare
 import datetime
 import logging
 from discord.ui import View
@@ -36,8 +36,8 @@ from cogs.terminal import ALLOWED_USER_IDS
 from discord.ext.commands import Cog
 from PIL import Image, ImageDraw, ImageEnhance
 from zoneinfo import ZoneInfo
-from core.api_client import APIError
-from core.api_retry import run_with_retry
+from core.support.api_client import APIError
+from core.support.api_retry import run_with_retry
 from core.game.dungeon.actions import logger, d_use_job_skill, d_current_cell_action, d_activate_room_entry, d_execute_journey, _NoopResponse, _NoopInteraction, _CLEF_PLAYER, d_lock_callback  # noqa: F401
 from core.game.dungeon.clef import logger, CLEF_MOVE_KEYS, CLEF_PLAN_GUIDANCE, dungeon_plan_guidance, d_floor_routes, dungeon_action_candidates, dungeon_candidate_log, d_normalize_choice, dungeon_relative_label, dungeon_stairs_cell, dungeon_stairs_hint, dungeon_move_criteria, dungeon_goal_text, dungeon_best_direction, d_make_reward_choices, d_choose_reward, d_begin_run, d_end_run, d_record_action, d_record_reward  # noqa: F401
 from core.game.dungeon.clef_player import logger, ClefDungeonPlayer  # noqa: F401

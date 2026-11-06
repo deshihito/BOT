@@ -38,12 +38,12 @@ except Exception:  # ImportError だけでなく共有ライブラリ不整合 (
         "EnCodec/torch/soundfile を読み込めなかったため、音声トリガー機能は無効になります",
         exc_info=True,
     )
-from core import action_usage
+from core.general import action_usage
 from core.support import usage_stats
-from core.legacy import Responder
+from core.support.legacy import Responder
 from core.vc.voice_session import VoiceBusy, feature_label, get_manager, stop_hint
 from core.vc.voice_media import add_audio_source, remove_audio_source
-from core.panel_v2 import as_panel_v2, edit_panel_v2
+from core.support.panel_v2 import as_panel_v2, edit_panel_v2
 from core.vc.common import CONNECTION_ACTIONS, STUDIO_FEATURES, STUDIO_ACTIONS, EFFECT_ACTIONS, COMMUNITY_NETWORKS, COMMUNITY_ACTIONS, VOICE_GENRES, VOICE_ACTIONS_BY_GENRE, GVC_ROOM_FORMS, GVC_ROOM_ACTIONS, LAZY_EXTENSIONS, COGS, format_elapsed  # noqa: F401
 from core.vc.hub import logger, VoiceHub, VoiceGenreSelect, VoiceActionSelect, VoicePanelView, GlobalRoomModal, GvcRoomModal  # noqa: F401
 from core.vc.trigger import logger, VOICE_TRIGGER_DIR, VOICE_TRIGGER_MAX_SECONDS, VOICE_TRIGGER_MAX_PER_GUILD, VOICE_TRIGGER_SAMPLE_RATE, VOICE_TRIGGER_BANDWIDTH, _ENCODEC_MODEL, VoiceTriggerError, _get_encodec_model, _trim_to_wav, _encodec_compress, _encodec_decompress, VoiceTriggerCog, _AUDIO_EXTS, _scan_recent_audios, VoiceTriggerPickAudioSelect, VoiceTriggerWordModal, VoiceTriggerRegisterView, VoiceTriggerDeleteSelect, VoiceTriggerManageView  # noqa: F401
