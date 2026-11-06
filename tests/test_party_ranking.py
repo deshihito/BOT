@@ -117,8 +117,10 @@ class RankingButtonTest(unittest.IsolatedAsyncioTestCase):
         await party_ranking.shared().record_win(1, 8, "ngword")
         embed = await game.ranking_embed(1, "ngword")
         self.assertIn("NGワード", embed.title)
-        self.assertTrue(embed.description.startswith("🥇 <@7> — 2勝"))
-        self.assertIn("<@8> — 1勝", embed.description)
+        # 氏名はメンションではなく通常表記（bot 未指定時は ID フォールバック）
+        self.assertTrue(embed.description.startswith("🥇 ユーザー(…0007) — 2勝"))
+        self.assertIn("ユーザー(…0008) — 1勝", embed.description)
+        self.assertNotIn("<@", embed.description)
 
     async def test_ranking_button_in_detail_view(self):
         guild = FakeGuild()
