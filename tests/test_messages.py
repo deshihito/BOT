@@ -113,7 +113,7 @@ class UnifiedCallSitesTest(unittest.TestCase):
 
     def test_help_summary_comes_from_command_meta(self):
         from cogs.help import CatalogHelpCommand
-        from core.command_meta import COMMAND_META
+        from core.help.command_meta import COMMAND_META
 
         cmd = CatalogHelpCommand()
         self.assertEqual(

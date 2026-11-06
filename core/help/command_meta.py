@@ -1,4 +1,4 @@
-"""コマンドカタログ（core/command_catalog.py）に合わせる、人が決める情報。
+"""コマンドカタログ（core/help/command_catalog.py）に合わせる、人が決める情報。
 
 コマンドを追加したら、COMMAND_META に "/名前"（スラッシュ）か "!名前"（プレフィックス）の
 キーで 1 行足してください。足し忘れると tests/test_command_catalog.py が知らせます。
