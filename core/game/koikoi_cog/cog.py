@@ -3,7 +3,7 @@
 
 場札と取り札は公開、手札だけは本人の ephemeral ビューで見て出す。
 進行は core/game/koikoi.py の状態機械に従い、手番は120秒で自動プレイする。
-勝者は core/party_ranking.py の koikoi に記録する。
+勝者は core/game/party_ranking.py の koikoi に記録する。
 """
 import asyncio
 import logging
@@ -12,7 +12,7 @@ import random
 import discord
 from discord.ext import commands
 
-from core import party_ranking
+from core.game import party_ranking
 from core.game import game_panels
 from core.game.koikoi import CARDS, KoikoiMatch, card_label, cpu_choose_capture, cpu_choose_play, cpu_decide, evaluate
 
