@@ -13,7 +13,7 @@ import discord
 from discord.ext import commands
 
 from core import party_ranking
-from core.bingo import BingoSession, format_card
+from core.game.bingo import BingoSession, format_card
 
 logger = logging.getLogger(__name__)
 

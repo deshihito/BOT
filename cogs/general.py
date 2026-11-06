@@ -29,10 +29,10 @@ from core.panel_v2 import as_panel_v2, edit_panel_v2
 from core import action_registry, action_usage, guild_settings, levelup_card, logfare, shortcuts
 from core.support import usage_stats
 from core.general import ai_omnirush, ai_preferences, ai_provider_router
-from core.game_guides import GAME_GUIDES, GAME_ORDER
+from core.game.game_guides import GAME_GUIDES, GAME_ORDER
 from core import translation
 from core.support import localization
-from core import prison as prison_core
+from core.game import prison as prison_core
 from core.messages import CIRCULATION_NOT_LOADED, GAMBLING_NOT_LOADED, ITEMS_NOT_LOADED, MARKET_NOT_LOADED, MONEY_PANEL_NOT_LOADED, WORKSHOP_NOT_LOADED
 from core.libretranslate import LibreTranslateClient, LibreTranslateError
 
@@ -314,7 +314,7 @@ class GeneralCog(
 
         # ===== マネー系 =====
         # 逮捕中はマネージャンルの実行系アクションを入口で一元的に拒否する
-        # （core/prison.py）。表示系（マネーパネル・残高・市場/アイテム/
+        # （core/game/prison.py）。表示系（マネーパネル・残高・市場/アイテム/
         # 工房/宝くじのパネル表示・ランキング）は逮捕中でも開けるが、
         # パネル内の実行は各 cog の execute_* 側でも同じチェックをする。
         if value in MONEY_PRISON_BLOCKED_VALUES:

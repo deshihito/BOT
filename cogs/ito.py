@@ -13,9 +13,9 @@ import random
 import discord
 from discord.ext import commands
 
-from core import game_records
-from core.game_v2 import GamePanelView, text_panel
-from core.ito import ROUNDS_DEFAULT, THEMES, ItoSession
+from core.game import game_records
+from core.game.game_v2 import GamePanelView, text_panel
+from core.game.ito import ROUNDS_DEFAULT, THEMES, ItoSession
 
 logger = logging.getLogger(__name__)
 

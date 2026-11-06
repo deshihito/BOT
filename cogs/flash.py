@@ -3,7 +3,7 @@ import random
 import discord
 from discord.ext import commands
 
-from core import game_records
+from core.game import game_records
 
 
 class FlashModal(discord.ui.Modal, title="フラッシュ暗算"):
@@ -104,7 +104,7 @@ class FlashMentalArithmetic(commands.Cog):
       )
 
   def _record_line(self, user_id, count: int, interval: float, digits: int, correct: bool) -> str:
-    # 設定ごとの自己ベスト（core/game_records.py）。記録できなければ何も付けない。
+    # 設定ごとの自己ベスト（core/game/game_records.py）。記録できなければ何も付けない。
     entry = game_records.record_flash_safely(user_id, count, digits, interval, correct)
     if entry is None:
       return ""

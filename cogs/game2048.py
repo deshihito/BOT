@@ -3,13 +3,13 @@
 
 4×4 の盤を方向ボタンでスライドさせ、同じ数字を合体させる。
 2048 に到達しても続けられ、動けなくなったら終了。スコアと最大タイルは
-core/game_records.py の g2048 に残る。
+core/game/game_records.py の g2048 に残る。
 """
 import discord
 from discord.ext import commands
 
-from core import game_records
-from core.game2048 import Game2048
+from core.game import game_records
+from core.game.game2048 import Game2048
 
 GAME_ID = "game2048"
 

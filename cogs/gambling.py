@@ -2,13 +2,13 @@
 """ギャンブル系: /general のマネージャンルから使うスロット／ダブルアップ／
 ブラックジャック／ダイスの入口。
 
-本体は core/gambling.py（内部状態・セッション・抽選と判定）で、ここは
+本体は core/game/gambling.py（内部状態・セッション・抽選と判定）で、ここは
 Discord 側の表示と、AGO コイン残高の実移動だけを担う。コインの増減は
 必ず cogs/wallet.py の安全な経路（CAS 更新 _change_balance と
 transaction_history への記録）を通す（cogs/circulation.py と同じ組み立て）。
 
 - ベットは開始時に wallet から差し引いてセッションに預ける
-  （エスクロー）。セッション状態は core/gambling.py のストアに永続化
+  （エスクロー）。セッション状態は core/game/gambling.py のストアに永続化
   されるため、Bot が再起動してもベットが消えることはない: 起動後の
   定期ループで未完了セッションを reconcile し、ベットを返金する
 - 実行部は execute_* メソッドに分離してある（将来の統合パネルからも
@@ -36,9 +36,9 @@ from discord.ext import commands, tasks
 
 import config
 from core.general import economy_pool as economy_core
-from core import gambling as gambling_core
+from core.game import gambling as gambling_core
 from core.general import items as items_core
-from core import prison as prison_core
+from core.game import prison as prison_core
 from core.messages import GAMBLING_INVALID_AMOUNT, gambling_action_failed
 from core.panel_v2 import as_panel_v2, edit_message_v2, edit_panel_v2
 from cogs import wallet as wallet_module  # INSUFFICIENT は実行時に引く（テストの cog 再読込で同一性が崩れないため）
@@ -75,7 +75,7 @@ _SLOT_EVENT_LINES = {
 
 # ルール文は「ルール」ボタンの裏に隔離する（導線最適化 S9）。パネル本文は状態だけ。
 # HCD方針（2026-11-06）: 遊び方は出すが、確率・配当の詳細な数値仕様は
-# ユーザー向け文言に出さない（内部定数は core/gambling.py を参照）。
+# ユーザー向け文言に出さない（内部定数は core/game/gambling.py を参照）。
 GAMBLING_RULES = {
     "slot": (
         f"7リールスロット。1回 **{gambling_core.SLOT_BET:,} AGO** 固定で、"

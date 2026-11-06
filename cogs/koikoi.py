@@ -2,7 +2,7 @@
 """花札こいこい（2人・3局戦、対人 / CPU）。
 
 場札と取り札は公開、手札だけは本人の ephemeral ビューで見て出す。
-進行は core/koikoi.py の状態機械に従い、手番は120秒で自動プレイする。
+進行は core/game/koikoi.py の状態機械に従い、手番は120秒で自動プレイする。
 勝者は core/party_ranking.py の koikoi に記録する。
 """
 import asyncio
@@ -12,8 +12,9 @@ import random
 import discord
 from discord.ext import commands
 
-from core import game_panels, party_ranking
-from core.koikoi import CARDS, KoikoiMatch, card_label, cpu_choose_capture, cpu_choose_play, cpu_decide, evaluate
+from core import party_ranking
+from core.game import game_panels
+from core.game.koikoi import CARDS, KoikoiMatch, card_label, cpu_choose_capture, cpu_choose_play, cpu_decide, evaluate
 
 logger = logging.getLogger(__name__)
 

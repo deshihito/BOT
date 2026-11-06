@@ -2,7 +2,7 @@
 
 列を選んでコマを落とし、先に縦・横・斜めのどれかで4つ並べた方が勝ち。
 盤面は PIL の PNG。対人戦は勝数と Elo レートに記録し、対局は
-core/game_restore.py で再起動復旧する（オセロ・五目と同じ型）。
+core/game/game_restore.py で再起動復旧する（オセロ・五目と同じ型）。
 """
 import asyncio
 import io
@@ -14,8 +14,9 @@ import discord
 from discord.ext import commands
 from PIL import Image, ImageDraw, ImageFont
 
-from core import elo, game_panels, game_restore, party_ranking
-from core.connect4 import COLS, EMPTY, RED, ROWS, YELLOW, choose_ai_move, drop, is_full, legal_moves, new_board, winner
+from core import party_ranking
+from core.game import elo, game_panels, game_restore
+from core.game.connect4 import COLS, EMPTY, RED, ROWS, YELLOW, choose_ai_move, drop, is_full, legal_moves, new_board, winner
 
 logger = logging.getLogger(__name__)
 
@@ -196,7 +197,7 @@ class Connect4(commands.Cog):
                 col = await asyncio.to_thread(choose_ai_move, g.board, YELLOW, depth)
                 if col is None:
                     break
-                from core.connect4 import drop_row
+                from core.game.connect4 import drop_row
                 row = drop_row(g.board, col)
                 drop(g.board, col, YELLOW)
                 g.last_move = (row, col)
@@ -214,7 +215,7 @@ class Connect4(commands.Cog):
                 if g.acted_col is not None or g.phase != "playing":
                     break
                 await asyncio.sleep(1)
-            from core.connect4 import drop_row
+            from core.game.connect4 import drop_row
             if g.acted_col is None:
                 col = random.choice(legal_moves(g.board))
                 await channel.send(f"{user.mention} さんは時間切れのため、ランダムな列（{col+1}列目）に落としました。")

@@ -5,12 +5,13 @@ import random
 from collections import Counter
 import os
 import discord
-from core import game_panels
+from core.game import game_panels
 from core.emojis import FAILED, SUCCESS
-from core import jinrou_guide
+from core.game import jinrou_guide
 from discord import app_commands
 from discord.ext import commands
-from core import autoplay, jinrou_review
+from core import autoplay
+from core.game import jinrou_review
 from core import party_ranking
 import math
 import config
@@ -75,7 +76,7 @@ class JinrouCog(LifecycleMixin, GameLoopMixin, AutoplayMixin, ResultsMixin, comm
         self.games = {}
 
     async def restore_after_restart(self):
-        """フェーズ境界スナップショット（core/jinrou_snapshot.py）からの復旧。"""
+        """フェーズ境界スナップショット（core/game/jinrou_snapshot.py）からの復旧。"""
         await restore_jinrou_sessions(self)
 
     async def rating_embed(self, user) -> discord.Embed:
