@@ -27,11 +27,9 @@ _LEVELUP_SS = 2  # 内部は2倍解像度で描いて縮小(ジャギー防止)
 
 _LEVELUP_CJK_FONTS = (
     os.getenv("LEVELUP_FONT_PATH") or "",
-    str(_REPO_ROOT / "assets" / "fonts" / "levelup.ttf"),
-    str(_REPO_ROOT / "assets" / "fonts" / "levelup.otf"),
-    str(_REPO_ROOT / "assets" / "fonts" / "levelup.ttc"),
-    # リポジトリ同梱の日本語フォント。assets/fonts はリポジトリに存在しないため、
-    # OSフォントが無くてもここで日本語が描ける (Hachi Maru Pop)。
+    # リポジトリ同梱の日本語フォント (Hachi Maru Pop)。assets/fonts に
+    # levelup.* というファイルは存在しないため候補に含めない。
+    # OSフォントが無くてもここで日本語が描ける。
     str(_REPO_ROOT / "font.ttf"),
     "C:/Windows/Fonts/meiryob.ttc",
     "C:/Windows/Fonts/YuGothB.ttc",
@@ -58,9 +56,8 @@ _LEVELUP_LATIN_FONTS = (
 # 参考画像(Bahnschrift / DIN 系コンデンス)を優先する
 _LEVELUP_DISPLAY_FONTS = (
     os.getenv("LEVELUP_DISPLAY_FONT_PATH") or "",
-    str(_REPO_ROOT / "assets" / "fonts" / "levelup-display.ttf"),
-    str(_REPO_ROOT / "assets" / "fonts" / "levelup-display.otf"),
     # ★ 参考画像 (Bahnschrift / DIN 系コンデンス) を優先
+    # (assets/fonts に levelup-display.* は存在しないため候補に含めない)
     "/usr/share/fonts/truetype/bahnschrift/bahnschrift.ttf",
     "/usr/share/fonts/truetype/oswald/Oswald-Medium.ttf",
     "/usr/share/fonts/truetype/oswald/Oswald-SemiBold.ttf",
