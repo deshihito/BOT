@@ -6,7 +6,7 @@ from collections import Counter
 import os
 import discord
 from core import game_panels
-from core.emojis import FAILED, SUCCESS
+from core.emojis import FAILED, HAGE, REIBAI, SUCCESS
 from core import jinrou_guide
 from discord import app_commands
 from discord.ext import commands
@@ -111,11 +111,11 @@ class ResultsMixin:
             try:
                 if p_role == "霊媒師":
                     await member.send(
-                        f"<:REIBAI:1490254585413148703>霊媒結果：**{ex_name}** は【{result}】でした。"
+                        f"{REIBAI}霊媒結果：**{ex_name}** は【{result}】でした。"
                     )
                 elif p_role == "大霊媒師":
                     await member.send(
-                        f"<:REIBAI:1490254585413148703>大霊媒師の霊媒結果：**{ex_name}** は【{result}】"
+                        f"{REIBAI}大霊媒師の霊媒結果：**{ex_name}** は【{result}】"
                         f"（役職：**{role}**）でした。"
                     )
             except Exception:
@@ -156,7 +156,7 @@ class ResultsMixin:
 
         executed_role = game.roles.get(actual_target_id)
         if executed_role == "ハゲ":
-            lines.append("<:f8cc0b1b5e501838:1491033609929490492>ハゲが追放された。ハゲの勝利です。")
+            lines.append(HAGE + 'ハゲが追放された。ハゲの勝利です。')
             await self._send_exile_summary(game, lines)
             await self._record_wins(game, [actual_target_id])
             game.is_running = False
@@ -241,7 +241,7 @@ class ResultsMixin:
 
         executed_role = game.roles.get(actual_target_id)
         if executed_role == "ハゲ":
-            lines.append("<:f8cc0b1b5e501838:1491033609929490492>ハゲが追放された。ハゲの勝利です。")
+            lines.append(HAGE + 'ハゲが追放された。ハゲの勝利です。')
             await self._send_exile_summary(game, lines)
             await self._record_wins(game, [actual_target_id])
             game.is_running = False

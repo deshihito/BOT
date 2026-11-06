@@ -1,5 +1,6 @@
 """通常メッセージで使えるダイス機能。"""
 from __future__ import annotations
+from core.emojis import DICE
 
 import random
 import re
@@ -63,7 +64,7 @@ class DiceCog(commands.Cog):
         count, operator, sides, int8 = parsed
         if sides == -1 or count > MAX_DICE_COUNT:
             await message.reply(
-                f"<:dice:1561710962208280690> ダイス個数は1〜{MAX_DICE_COUNT}個、面数は1以上{MAX_SIDES_DIGITS}桁以内で指定してください。",
+                f"{DICE} ダイス個数は1〜{MAX_DICE_COUNT}個、面数は1以上{MAX_SIDES_DIGITS}桁以内で指定してください。",
                 mention_author=False,
             )
             return
@@ -77,7 +78,7 @@ class DiceCog(commands.Cog):
         detail = f"（内訳: {', '.join(map(str, rolls))}）" if count > 1 else ""
         result = oct(total) if int8 else str(total)
         modifier = " int8" if int8 else ""
-        await message.reply(f"<:dice:1561710962208280690> `{notation}{modifier}` → **{result}**{detail}", mention_author=False)
+        await message.reply(f"{DICE} `{notation}{modifier}` → **{result}**{detail}", mention_author=False)
 
 
 async def setup(bot: commands.Bot):

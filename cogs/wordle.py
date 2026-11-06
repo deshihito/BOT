@@ -16,6 +16,7 @@ import random
 import time
 from datetime import datetime
 from pathlib import Path
+from core.emojis import B_, G_, Y_
 
 import discord
 from core import game_panels, game_restore
@@ -35,7 +36,7 @@ GAME_SECONDS = 600
 MODES = (("shared", "みんなで（チャンネルの全員で推理）"), ("solo", "ひとりで（始めた人だけ）"))
 
 DATA_DIR = Path(__file__).resolve().parents[1] / "Assets" / "wordle"
-GREEN, YELLOW, GRAY = "<:g_:1563559471048032376>", "<:y_:1563559481768411257>", "<:b_:1563559473422016512>"
+GREEN, YELLOW, GRAY = G_, Y_, B_
 
 
 def _load(name: str) -> list:
