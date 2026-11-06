@@ -16,6 +16,7 @@ from core.emojis import CROCK
 import discord
 from cogs.wallet import INSUFFICIENT
 from core.game import game_panels
+from core.game import prison as prison_core
 from core.messages import recruit_join_prompt
 from discord.ext import commands
 
@@ -85,6 +86,10 @@ class JoinView(discord.ui.View):
             return await interaction.response.send_message("もう参加しています。", ephemeral=True)
         if len(g.players) >= MAX_PLAYERS:
             return await interaction.response.send_message(f"定員（{MAX_PLAYERS}人）に達しました。", ephemeral=True)
+        # 賭け金ありの対局はマネー系操作 (E-7): 逮捕中の参加は拒否する。
+        blocked = prison_core.block_message(str(interaction.user.id)) if g.wager else None
+        if blocked:
+            return await interaction.response.send_message(blocked, ephemeral=True)
         g.players[interaction.user.id] = interaction.user
         await interaction.response.send_message(f"参加しました（{len(g.players)}人）。")
 
@@ -133,6 +138,10 @@ class Janken(commands.Cog):
 
     async def start_recruit(self, interaction: discord.Interaction, wager: int = 0):
         channel = interaction.channel
+        # 賭け金ありの募集開始はマネー系操作 (E-7): 逮捕中は拒否する。
+        blocked = prison_core.block_message(str(interaction.user.id)) if wager else None
+        if blocked:
+            return await interaction.response.send_message(blocked, ephemeral=True)
         if channel.id in self.games:
             return await interaction.response.send_message(
                 embed=discord.Embed(description="このチャンネルでは既にじゃんけんが進行中です。", color=COLOR),
@@ -216,6 +225,11 @@ class Janken(commands.Cog):
         wallet = self.bot.get_cog("WalletCog") if hasattr(self.bot, "get_cog") else None
         if wallet is None:
             return False
+        # 二層防御 (E-7): 募集後に逮捕された参加者がいても、徴収前に
+        # 全員分を再チェックする (誰からも引く前に止める)。
+        for uid in g.players:
+            if uid != BOT_ID and prison_core.block_message(str(uid)):
+                return False
         debited = []
         for uid in g.players:
             if uid == BOT_ID:

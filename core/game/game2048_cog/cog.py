@@ -59,7 +59,8 @@ class Board2048View(GamePanelView):
         if interaction.user.id != self.owner.id:
             await interaction.response.send_message("これは他の人の盤面です。", ephemeral=True)
             return False
-        return True
+        # 盤面再描画の連打制限 (E-16, GamePanelView の共通クールダウン)。
+        return await super().interaction_check(interaction)
 
     def _render(self):
         game = self.game

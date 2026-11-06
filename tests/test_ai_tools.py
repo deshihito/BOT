@@ -29,6 +29,9 @@ class AIToolsTest(unittest.IsolatedAsyncioTestCase):
             spec.id.lower()
             for spec in action_registry.default_registry().all()
             if "aitools" in spec.surfaces and spec.risk != "blocked"
+            # E-9: 表示系ショートカットは AI 経由では実行時に拒否されるため
+            # 候補からも除外される（選ばれて無反応になるのを防ぐ）。
+            and spec.id not in action_registry.MESSAGE_SHORTCUT_BLOCKED_IDS
         }
         self.assertEqual(set(candidates), expected)
         # /support の新規候補のうち AI に入るのは読み取り専用の状態確認だけ。

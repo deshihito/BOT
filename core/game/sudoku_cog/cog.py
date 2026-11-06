@@ -72,7 +72,8 @@ class SudokuView(GamePanelView):
         if interaction.user.id != self.owner.id:
             await interaction.response.send_message("これは他の人の盤面です。", ephemeral=True)
             return False
-        return True
+        # 盤面再描画の連打制限 (E-16, GamePanelView の共通クールダウン)。
+        return await super().interaction_check(interaction)
 
     def _selected(self):
         if self.row is None or self.col is None:
@@ -182,7 +183,9 @@ class ModeView(GamePanelView):
         self.add_row(*buttons)
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
-        return interaction.user.id == self.owner.id
+        if interaction.user.id != self.owner.id:
+            return False
+        return await super().interaction_check(interaction)
 
     def _make_callback(self, difficulty):
         async def callback(interaction: discord.Interaction):

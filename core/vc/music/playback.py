@@ -463,6 +463,8 @@ class PlaybackMixin:
         vc = r.voice_client
         if not vc:
             return await r.send(embed=we("ボットがボイスチャンネルに入っていません。"), ephemeral=True)
+        if not is_same_voice_channel(r.user, vc):
+            return await r.send(embed=we(MUSIC_VC_REQUIRED_MESSAGE), ephemeral=True)
         state = self.get_state(r.guild.id)
         state['current_track'] = None
         state['elapsed_offset'] = 0
@@ -480,6 +482,8 @@ class PlaybackMixin:
             return await interaction.response.send_message(embed=we("移動先は0秒以上で指定してください。"), ephemeral=True)
         state = self.get_state(interaction.guild_id)
         vc = interaction.guild.voice_client
+        if vc and not is_same_voice_channel(interaction.user, vc):
+            return await interaction.response.send_message(embed=we(MUSIC_VC_REQUIRED_MESSAGE), ephemeral=True)
         if not vc or not state.get('current_track'):
             return await interaction.response.send_message(embed=we("現在再生中の曲がありません。"), ephemeral=True)
         duration = state['current_track'][2] or 0
@@ -503,6 +507,8 @@ class PlaybackMixin:
 
         if not vc:
             return await interaction.response.send_message(embed=we("ボットがボイスチャンネルに入っていません。"), ephemeral=True)
+        if not is_same_voice_channel(interaction.user, vc):
+            return await interaction.response.send_message(embed=we(MUSIC_VC_REQUIRED_MESSAGE), ephemeral=True)
 
         # 1. 再生中の場合 -> 一時停止処理
         if has_audio_source(vc, "music"):
@@ -532,6 +538,8 @@ class PlaybackMixin:
         vc = interaction.guild.voice_client
         state = self.get_state(interaction.guild_id)
 
+        if vc and not is_same_voice_channel(interaction.user, vc):
+            return await interaction.response.send_message(embed=we(MUSIC_VC_REQUIRED_MESSAGE), ephemeral=True)
         if vc and (has_audio_source(vc, "music") or state['is_paused']):
             state['current_track'] = None
             state['elapsed_offset'] = 0

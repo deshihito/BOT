@@ -216,6 +216,32 @@ class StealStore:
             return self._remaining(entry.get("last"), TARGET_COOLDOWN_SECONDS, now)
 
     # ------------------------------------------------------------------ 判定
+    def _check_locked(self, actor_id: str, target_id: str,
+                      now: datetime) -> tuple[dict[str, Any], int]:
+        """実行可否の判定（ロック保持中に呼ぶ）。不可なら ItemError。
+
+        戻り値は (actor エントリ, 今日の実行回数)。状態は変えない
+        （actor エントリの setdefault による空エントリ作成を除く）。
+        """
+        today = now.date().isoformat()
+        actor = self._actor_locked(str(actor_id))
+        remaining = self._remaining(actor["last"], ACTOR_COOLDOWN_SECONDS, now)
+        if remaining > 0:
+            minutes = int(remaining // 60) + (1 if remaining % 60 else 0)
+            raise ItemError(f"盗みは1時間に1回までです。あと約{minutes}分で実行できます。")
+        count = int(actor["count"]) if actor["day"] == today else 0
+        if count >= DAILY_ACTOR_LIMIT:
+            raise ItemError(
+                f"今日の盗みは上限（{DAILY_ACTOR_LIMIT}回）に達しています。")
+        target_entry = self._state["targets"].get(str(target_id)) or {}
+        target_remaining = self._remaining(
+            target_entry.get("last"), TARGET_COOLDOWN_SECONDS, now)
+        if target_remaining > 0:
+            hours = target_remaining / 3600
+            raise ItemError(
+                f"その相手はしばらく狙えません（保護期間中、あと約{hours:.1f}時間）。")
+        return actor, count
+
     def check(self, actor_id: str, target_id: str, now: datetime | None = None) -> None:
         """実行可否の事前判定。不可なら ItemError（状態は不変）。
 
@@ -223,22 +249,72 @@ class StealStore:
         呼び出し側が判定し、ここではクールダウンと回数だけを見る。
         """
         now = now or datetime.now(JST)
-        today = now.date().isoformat()
         with self._lock:
-            actor = self._actor_locked(str(actor_id))
-            remaining = self._remaining(actor["last"], ACTOR_COOLDOWN_SECONDS, now)
-            if remaining > 0:
-                minutes = int(remaining // 60) + (1 if remaining % 60 else 0)
-                raise ItemError(f"盗みは1時間に1回までです。あと約{minutes}分で実行できます。")
-            count = int(actor["count"]) if actor["day"] == today else 0
-            if count >= DAILY_ACTOR_LIMIT:
-                raise ItemError(
-                    f"今日の盗みは上限（{DAILY_ACTOR_LIMIT}回）に達しています。")
-            target_remaining = self.target_cooldown_remaining(target_id, now)
-            if target_remaining > 0:
-                hours = target_remaining / 3600
-                raise ItemError(
-                    f"その相手はしばらく狙えません（保護期間中、あと約{hours:.1f}時間）。")
+            self._check_locked(actor_id, target_id, now)
+
+    # ------------------------------------------------------------------ 予約
+    def reserve(self, actor_id: str, target_id: str,
+                now: datetime | None = None) -> dict[str, Any]:
+        """判定と仮記録を1つのロック操作で行う予約（E-3 対応）。
+
+        check が通れば、その場で実行者クールダウン・1日回数・対象保護を
+        仮記録する。以後の処理が await を挟んでも、同一 actor／同一対象に
+        対する2つ目の reserve は必ず弾かれる。処理が成立したら
+        commit_reservation、成立しなかったら rollback_reservation を
+        呼ぶこと（ロールバックは予約前の状態を差分として復元する）。
+        不可なら ItemError（状態は不変）。
+        """
+        now = now or datetime.now(JST)
+        today = now.date().isoformat()
+        stamp = now.astimezone(JST).isoformat()
+        actor_key = str(actor_id)
+        target_key = str(target_id)
+        with self._lock:
+            actor_before = copy.deepcopy(self._state["actors"].get(actor_key))
+            target_before = copy.deepcopy(self._state["targets"].get(target_key))
+            actor, count = self._check_locked(actor_id, target_id, now)
+            actor["last"] = stamp
+            actor["day"] = today
+            actor["count"] = count + 1
+            self._state["targets"][target_key] = {"last": stamp}
+            self._mark_dirty()
+            return {
+                "actor_id": actor_key, "target_id": target_key,
+                "actor_before": actor_before, "target_before": target_before,
+                "active": True,
+            }
+
+    def commit_reservation(self, reservation: dict[str, Any] | None) -> None:
+        """予約を確定する（仮記録がそのまま本記録になる）。冪等。"""
+        if not reservation:
+            return
+        with self._lock:
+            reservation["active"] = False
+
+    # 呼び出し側の読みやすさのための別名。
+    confirm_reservation = commit_reservation
+
+    def rollback_reservation(self, reservation: dict[str, Any] | None) -> None:
+        """予約を取り消し、予約前の actor／target 状態だけを復元する。冪等。"""
+        if not reservation:
+            return
+        with self._lock:
+            if not reservation.get("active"):
+                return
+            reservation["active"] = False
+            actor_key = str(reservation["actor_id"])
+            target_key = str(reservation["target_id"])
+            if reservation.get("actor_before") is None:
+                self._state["actors"].pop(actor_key, None)
+            else:
+                self._state["actors"][actor_key] = copy.deepcopy(
+                    reservation["actor_before"])
+            if reservation.get("target_before") is None:
+                self._state["targets"].pop(target_key, None)
+            else:
+                self._state["targets"][target_key] = copy.deepcopy(
+                    reservation["target_before"])
+            self._mark_dirty()
 
     def roll_success(self, rate_bonus: float = 0.0) -> bool:
         """成否の抽選（成功率 SUCCESS_RATE + アイテム補正、上限 0.95）。"""

@@ -192,7 +192,9 @@ class LotteryStore:
         flush_interval: float = FLUSH_INTERVAL_SECONDS,
     ):
         self._path = Path(path) if path is not None else default_path()
-        self._rng = rng if rng is not None else random.Random()
+        # 既定 RNG は SystemRandom (E-13: 賭け系の抽選は CSPRNG)。
+        # テスト等が rng を注入した場合はそのまま使う (シード固定を壊さない)。
+        self._rng = rng if rng is not None else random.SystemRandom()
         self._flush_every = max(1, int(flush_every))
         self._flush_interval = float(flush_interval)
         self._lock = threading.RLock()

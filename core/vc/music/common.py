@@ -116,6 +116,33 @@ SAFE_CUSTOM_AUDIO_FILTERS = {
 }
 
 
+#: 音楽操作 (停止・スキップ・速度/音量/EQ 等) を VC 外から拒否するときの文言。
+MUSIC_VC_REQUIRED_MESSAGE = "この操作は、Bot が接続しているボイスチャンネルに参加しているメンバーだけが行えます。"
+
+
+def is_same_voice_channel(user, voice_client) -> bool:
+    """操作者がボットの接続中 VC のメンバーかどうかを判定する純関数 (B-3)。
+
+    チャンネルのメンバー一覧が取れる場合はそれを正とし、取れない場合は
+    操作者自身の voice 状態 (参加中チャンネル) と VC のチャンネルを比べる。
+    ボット未接続・操作者不明・メンバーでない場合はすべて False。
+    """
+    if user is None or voice_client is None:
+        return False
+    channel = getattr(voice_client, "channel", None)
+    if channel is None:
+        return False
+    user_id = getattr(user, "id", None)
+    if user_id is None:
+        return False
+    members = getattr(channel, "members", None)
+    if members is not None:
+        return any(getattr(member, "id", None) == user_id for member in members)
+    voice = getattr(user, "voice", None)
+    user_channel = getattr(voice, "channel", None) if voice is not None else None
+    return user_channel is not None and getattr(user_channel, "id", None) == getattr(channel, "id", None)
+
+
 def build_atempo_filters(speed: float) -> list[str]:
     """0.5〜2.0のatempoを連結し、FFmpegで最大64倍速を表現する。"""
     remaining = max(MIN_PLAYBACK_SPEED, min(MAX_PLAYBACK_SPEED, float(speed)))

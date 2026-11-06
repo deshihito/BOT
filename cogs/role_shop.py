@@ -123,7 +123,7 @@ class RoleShopView(discord.ui.View):
             logger.exception("role_shop: パネルの更新に失敗しました")
 
     async def _open_register(self, interaction: discord.Interaction):
-        view = RegisterRoleView(self.cog, self.guild)
+        view = RegisterRoleView(self.cog, self.guild, self.user_id)
         await interaction.response.send_message(
             "登録するロールを選んでください。", view=view, ephemeral=True)
 
@@ -131,22 +131,31 @@ class RoleShopView(discord.ui.View):
         if not self.snapshot["products"]:
             return await interaction.response.send_message(
                 "登録されている商品がありません。", ephemeral=True)
-        view = DeleteProductView(self.cog, self.guild, self.snapshot["products"])
+        view = DeleteProductView(
+            self.cog, self.guild, self.snapshot["products"], self.user_id)
         await interaction.response.send_message(
             "削除する商品を選んでください。", view=view, ephemeral=True)
 
 
 class RegisterRoleView(discord.ui.View):
-    """登録するロールを選ぶ（選ぶと価格・期間のモーダルが開く）。"""
+    """登録するロールを選ぶ（選ぶと価格・期間のモーダルが開く）。
 
-    def __init__(self, cog: "RoleShopCog", guild: discord.Guild):
+    開いた管理者本人だけが操作できる (B-4 の多層防御)。
+    """
+
+    def __init__(self, cog: "RoleShopCog", guild: discord.Guild,
+                 user_id: int | None = None):
         super().__init__(timeout=180)
         self.cog = cog
         self.guild = guild
+        self.user_id = user_id
         select = discord.ui.RoleSelect(
             placeholder="登録するロールを選択", min_values=1, max_values=1)
         select.callback = self._on_select
         self.add_item(select)
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        return self.user_id is None or interaction.user.id == self.user_id
 
     async def _on_select(self, interaction: discord.Interaction):
         values = (getattr(interaction, "data", {}) or {}).get("values") or []
@@ -158,7 +167,7 @@ class RegisterRoleView(discord.ui.View):
             return await interaction.response.send_message(
                 "ロールが見つかりませんでした。", ephemeral=True)
         await interaction.response.send_modal(
-            RegisterModal(self.cog, self.guild, role))
+            RegisterModal(self.cog, self.guild, role, self.user_id))
 
 
 class RegisterModal(discord.ui.Modal, title="ロールを商品として登録"):
@@ -167,13 +176,20 @@ class RegisterModal(discord.ui.Modal, title="ロールを商品として登録")
     days = discord.ui.TextInput(
         label="期間（日数）", placeholder="例: 30", max_length=4)
 
-    def __init__(self, cog: "RoleShopCog", guild: discord.Guild, role: discord.Role):
+    def __init__(self, cog: "RoleShopCog", guild: discord.Guild, role: discord.Role,
+                 user_id: int | None = None):
         super().__init__()
         self.cog = cog
         self.guild = guild
         self.role = role
+        self.user_id = user_id
 
     async def on_submit(self, interaction: discord.Interaction):
+        # モーダルには interaction_check が無いため、開いた管理者本人か
+        # ここで検証する (B-4)。
+        if self.user_id is not None and interaction.user.id != self.user_id:
+            return await interaction.response.send_message(
+                "この登録画面を開いた管理者だけが送信できます。", ephemeral=True)
         try:
             price = int(str(self.price.value).strip())
             days = int(str(self.days.value).strip())
@@ -181,15 +197,19 @@ class RegisterModal(discord.ui.Modal, title="ロールを商品として登録")
             return await interaction.response.send_message(
                 "価格と期間は数字で入力してください。", ephemeral=True)
         message = await self.cog.register_product(
-            self.guild, self.role, price, days)
+            self.guild, self.role, price, days, operator=interaction.user)
         await interaction.response.send_message(message, ephemeral=True)
 
 
 class DeleteProductView(discord.ui.View):
-    def __init__(self, cog: "RoleShopCog", guild: discord.Guild, products: list):
+    """削除する商品を選ぶ。開いた管理者本人だけが操作できる (B-4)。"""
+
+    def __init__(self, cog: "RoleShopCog", guild: discord.Guild, products: list,
+                 user_id: int | None = None):
         super().__init__(timeout=180)
         self.cog = cog
         self.guild = guild
+        self.user_id = user_id
         select = discord.ui.Select(
             placeholder="削除する商品を選択",
             options=[
@@ -200,12 +220,16 @@ class DeleteProductView(discord.ui.View):
         select.callback = self._on_select
         self.add_item(select)
 
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        return self.user_id is None or interaction.user.id == self.user_id
+
     async def _on_select(self, interaction: discord.Interaction):
         values = (getattr(interaction, "data", {}) or {}).get("values") or []
         if not values:
             return await interaction.response.send_message(
                 "商品を取得できませんでした。", ephemeral=True)
-        message = await self.cog.unregister_product(self.guild, int(values[0]))
+        message = await self.cog.unregister_product(
+            self.guild, int(values[0]), operator=interaction.user)
         await interaction.response.send_message(message, ephemeral=True)
         self.stop()
 
@@ -289,8 +313,20 @@ class RoleShopCog(commands.Cog):
             return "そのロールはBotの最上位ロール以上のため扱えません。"
         return None
 
+    @staticmethod
+    def _operator_can_manage(operator) -> bool:
+        """操作者 (Member) がロール管理権限を持つか (B-4 のメソッド側検証)。"""
+        perms = getattr(operator, "guild_permissions", None)
+        return bool(perms and perms.manage_roles)
+
     async def register_product(self, guild: discord.Guild, role: discord.Role,
-                               price: int, days: int) -> str:
+                               price: int, days: int, operator=None) -> str:
+        # 商品の書き換えは cog メソッド側でも操作者の manage_roles を検証する
+        # (入口 View の表示分岐だけに依存しない多層防御)。operator は
+        # 対話入口から常に渡される。内部・テストからの直接呼び出し
+        # (operator=None) は従来どおり Bot 側の権限確認のみで通す。
+        if operator is not None and not self._operator_can_manage(operator):
+            return "商品を登録するにはロール管理（Manage Roles）権限が必要です。"
         problem = self._bot_can_manage(guild, role)
         if problem:
             return problem
@@ -302,7 +338,10 @@ class RoleShopCog(commands.Cog):
         await self._save_items(guild.id, new_section)
         return f"🛒 **{role.name}** を登録しました（{price:,} AGO／{days}日）。"
 
-    async def unregister_product(self, guild: discord.Guild, role_id: int) -> str:
+    async def unregister_product(self, guild: discord.Guild, role_id: int,
+                                 operator=None) -> str:
+        if operator is not None and not self._operator_can_manage(operator):
+            return "商品を削除するにはロール管理（Manage Roles）権限が必要です。"
         section = await self._section(guild.id)
         if shop_core.find_product(section, role_id) is None:
             return "その商品は登録されていません。"

@@ -20,19 +20,35 @@ class GlobalChatCog(commands.Cog):
 
     # JSONファイルから登録チャンネルを読み込む
     def load_channels(self):
+        self._load_failed = False
         if os.path.exists(self.save_file):
             try:
                 with open(self.save_file, "r", encoding="utf-8") as f:
                     return set(json.load(f))
             except Exception as e:
-                print(f"データの読み込みに失敗しました: {e}")
+                # 読み込みに失敗したのに空集合で起動すると、次の保存で
+                # 登録一覧が空で上書きされて消える。失敗を記録し、
+                # save_channels 側で上書きを止める。
+                self._load_failed = True
+                logger.error(
+                    "グローバルチャット: 登録チャンネルの読み込みに失敗しました。"
+                    "登録一覧を保護するため保存を停止します: %s", e)
         return set()
 
     # JSONファイルへ登録チャンネルを保存する
     def save_channels(self):
+        if getattr(self, "_load_failed", False):
+            logger.error(
+                "グローバルチャット: 読み込みに失敗した登録一覧を"
+                "空で上書きしないよう、保存をスキップしました")
+            return
         try:
-            with open(self.save_file, "w", encoding="utf-8") as f:
+            # tmp → replace のアトミック書き込み (書き込み途中の電源断で
+            # ファイルが壊れるのを防ぐ)。
+            tmp_file = f"{self.save_file}.tmp"
+            with open(tmp_file, "w", encoding="utf-8") as f:
                 json.dump(list(self.active_channels), f)
+            os.replace(tmp_file, self.save_file)
         except Exception as e:
             print(f"データの保存に失敗しました: {e}")
 

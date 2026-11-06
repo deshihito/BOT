@@ -374,7 +374,18 @@ class ItemsCog(commands.Cog):
             try:
                 held = self.store.add(uid, item_id, count)
             except items_core.ItemError as exc:
-                await wallet._change_balance(uid, total)
+                # E-5c: debit 後失敗時の返金は戻り値を確認する。
+                # None（CAS 枯渇等）なら返金できていないので、成功扱いで
+                # 終わらせず critical ログ＋運営への連絡を案内する。
+                refund = await wallet._change_balance(uid, total)
+                if refund is None or refund is wallet_module.INSUFFICIENT:
+                    logger.critical(
+                        "items: 購入失敗時の返金に失敗しました。手動で戻してください: "
+                        "user=%s item=%s count=%s amount=%s",
+                        uid, item_id, count, total)
+                    return item_action_failed(
+                        "購入に失敗し、コインの返金もできませんでした。"
+                        "お手数ですが運営へ連絡してください（記録は残してあります）。")
                 return item_action_failed(exc)
             await self._record_history(uid, SHOP_ID, total, "item_buy")
             return (
@@ -403,6 +414,10 @@ class ItemsCog(commands.Cog):
             total = int(definition["sell_price"]) * count
             wallet = self._wallet()
             self.store.remove(uid, item_id, count)
+            # E-1: wallet の DB 即時コミット前にストア側を flush する。
+            # クラッシュ時に「アイテム復活＋コイン保持」で再売却できる
+            # 窓を塞ぐ（claim_daily_bonus の flush が既存の手本）。
+            self.store.flush()
             credit = await wallet._change_balance(uid, total, create_with=0)
             if credit is None or credit is wallet_module.INSUFFICIENT:
                 self.store.add(uid, item_id, count)

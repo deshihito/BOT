@@ -1,8 +1,8 @@
 """Guild-scoped localization settings and small translation helpers."""
 from __future__ import annotations
 import json
-from pathlib import Path
 from typing import Any, Mapping
+from core import data_paths
 from core.guild_settings import get_store
 
 LANGUAGE_SECTION = "localization"
@@ -56,7 +56,16 @@ _TRANSLATIONS = {
     },
 }
 
-_KEY_CATALOG_DIR = Path(__file__).resolve().parent.parent / "locales"
+# カタログの実体は2か所に分かれる (生成スクリプトが正):
+# - キーカタログ {locale}.json はリポジトリ直下の locales/
+#   (scripts/sync_locales.py の出力先)
+# - ja_to_en.json は core/locales/
+#   (scripts/translate_l10n_catalog.py の出力先)
+# 以前は両パスが互い違いにずれており、全カタログが 0 件で読み込まれて
+# 英語化が黙って無効になっていた。パス解決は core/data_paths.py の
+# repo_root() (PR #525/#527 と同じ祖先探索) に揃える。
+_REPO_ROOT = data_paths.repo_root()
+_KEY_CATALOG_DIR = _REPO_ROOT / "locales"
 _KEY_CATALOGS: dict[str, dict[str, str]] = {}
 for _locale in SUPPORTED_LOCALES:
     try:
@@ -66,7 +75,7 @@ for _locale in SUPPORTED_LOCALES:
     if isinstance(_data, dict):
         _KEY_CATALOGS[_locale] = {str(k): str(v) for k, v in _data.items()}
 
-_CATALOG_PATH = Path(__file__).with_name("locales") / "ja_to_en.json"
+_CATALOG_PATH = _REPO_ROOT / "core" / "locales" / "ja_to_en.json"
 try:
     _ENGLISH_CATALOG: dict[str, str] = json.loads(_CATALOG_PATH.read_text(encoding="utf-8"))
 except (FileNotFoundError, OSError, ValueError):

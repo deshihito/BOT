@@ -379,7 +379,15 @@ class WorkshopCog(commands.Cog):
             try:
                 self.workshop_store.add_machine(uid, tier_id)
             except items_core.ItemError as exc:
-                await wallet._change_balance(uid, price)
+                refund = await wallet._change_balance(uid, price)
+                if refund is None:
+                    # 返金自体が失敗 (CAS 枯渇) したら黙って握り潰さず、
+                    # critical ログ＋運営への連絡を案内する (E-5c)。
+                    logger.critical(
+                        "workshop: 加工機購入の返金に失敗しました。"
+                        "手動で戻してください user=%s amount=%s", uid, price)
+                    return workshop_action_failed(
+                        f"{exc}\n返金に失敗しました。Botの運営に連絡してください。")
                 return workshop_action_failed(exc)
             await self._record_history(uid, WORKSHOP_ID, price, "machine_buy")
             return (

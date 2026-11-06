@@ -150,7 +150,9 @@ class AICandidatesTest(unittest.TestCase):
             self.assertNotIn(key, self.candidates)
 
     def test_previously_allowed_actions_remain(self):
-        for key in ("vc:join", "vc:leave", "general:status", "general:exp_status",
+        # E-9: general:status / general:exp_status は表示系ショートカットで
+        # AI 経由では実行できないため候補から除外された（別テストで担保）。
+        for key in ("vc:join", "vc:leave",
                     "support:bumprta_status", "support:vc_log", "support:server_assist",
                     "vc:record_status", "vc:record_pitch", "vc:echo_status",
                     "vc:karaoke_score", "vc:changer_stop", "vc:changer_status",

@@ -19,7 +19,7 @@ import config
 from core.game.jinrou.common import *  # noqa: F401,F403 - shared constants/helpers
 from core.game.jinrou.common import AHO_FAKE_CANDIDATES  # noqa: F401
 from core.game.jinrou.game import JinrouGame  # noqa: F401
-from core.game.jinrou.ratings import can_end_game  # noqa: F401
+from core.game.jinrou.ratings import can_end_game, surrender_winner_is_wolf  # noqa: F401
 from core.game.jinrou.views import GlobalChannelProxy, GlobalJoinView, SetupView  # noqa: F401
 
 logger = logging.getLogger("cogs.jinrou")
@@ -137,6 +137,9 @@ class LifecycleMixin:
 
 
     def assign_roles(self, game):
+        # E-12: 役職配布は秘密情報。モジュール global random (MT) を共有せず
+        # OS エントロピーの SystemRandom で抽選する。
+        rng = random.SystemRandom()
         num = len(game.players)
         num_wolves = max(1, num // 4)
 
@@ -158,7 +161,7 @@ class LifecycleMixin:
             # ベーシックモード時は発展職（昇格）を発生させない
             if game.game_mode == "ベーシック":
                 return role
-            if role in promotion_map and random.random() < 0.35:
+            if role in promotion_map and rng.random() < 0.35:
                 return promotion_map[role]
             return role
 
@@ -180,11 +183,11 @@ class LifecycleMixin:
             ]
             if r not in excluded and r not in required
         ]
-        random.shuffle(candidates)
+        rng.shuffle(candidates)
         ci = 0
 
         while len(pool) < num:
-            if random.random() < 0.65 and ci < len(candidates):
+            if rng.random() < 0.65 and ci < len(candidates):
                 r = candidates[ci]; ci += 1
                 pool.append(maybe_promote(r))
             else:
@@ -193,13 +196,13 @@ class LifecycleMixin:
         pool = pool[:num]
 
         # 2人役職はプロモード時（発展職が有効な設定）のみ発生させる仕様に準拠
-        if game.game_mode == "プロ" and num >= 8 and random.random() < 0.3:
-            pair_type = random.choice(["リア充", "貴族奴隷"])
+        if game.game_mode == "プロ" and num >= 8 and rng.random() < 0.3:
+            pair_type = rng.choice(["リア充", "貴族奴隷"])
             pair_roles = ["リア充", "リア充"] if pair_type == "リア充" else ["貴族", "奴隷"]
 
             replaceable = [i for i, r in enumerate(pool) if r in ["一般通過あごむに", "タフむに"]]
             if len(replaceable) >= 2:
-                idxs = random.sample(replaceable, 2)
+                idxs = rng.sample(replaceable, 2)
                 for i, idx in enumerate(idxs):
                     pool[idx] = pair_roles[i]
             elif len(replaceable) == 1:
@@ -211,12 +214,12 @@ class LifecycleMixin:
             else:
                 safe = [i for i, r in enumerate(pool) if r not in ["人狼", "デカ狼", "占い師"]]
                 if len(safe) >= 2:
-                    idxs = random.sample(safe, 2)
+                    idxs = rng.sample(safe, 2)
                     for i, idx in enumerate(idxs):
                         pool[idx] = pair_roles[i]
 
         pool = pool[:num]
-        random.shuffle(pool)
+        rng.shuffle(pool)
 
         for i, p in enumerate(game.players):
             game.roles[p.id] = pool[i]
@@ -225,13 +228,13 @@ class LifecycleMixin:
 
             # アホの場合、偽装役職をランダムに選択
             if pool[i] == "アホ":
-                game.aho_fake_role[p.id] = random.choice(AHO_FAKE_CANDIDATES)
+                game.aho_fake_role[p.id] = rng.choice(AHO_FAKE_CANDIDATES)
 
         # ヤンデレが選択された場合、生存している人狼陣営からランダムで1人対象を選ぶ
         wolves_ids = [p_id for p_id, r in game.roles.items() if r in ["人狼", "デカ狼"]]
         for p_id, r in game.roles.items():
             if r == "ヤンデレ" and wolves_ids:
-                game.yandere_targets[p_id] = random.choice(wolves_ids)
+                game.yandere_targets[p_id] = rng.choice(wolves_ids)
 
         riacchu_ids = []
         kizoku_id = dorei_id = None
@@ -268,7 +271,14 @@ class LifecycleMixin:
 
 
     async def force_end(self, interaction: discord.Interaction):
-        """/game の人狼画面の「ゲームを終了」から呼ぶ。参加者・ホスト・管理者のみ（UNO の終了ボタンと同じ）。"""
+        """/game の人狼画面の「ゲームを終了」から呼ぶ。参加者・ホスト・管理者のみ（UNO の終了ボタンと同じ）。
+
+        E-11: 開始後（役職配布後）に参加者が終了した場合は「投了」として扱い、
+        終了要求者の陣営の敗北としてレート（と勝利数）を記録する。これにより
+        負けが濃厚な参加者がレート下落を回避する目的で終了できなくなる。
+        開始前（募集中）の取消しと、参加していないホスト／管理者による終了は
+        従来どおり記録なしで終了する（管理者の緊急停止まで投了にしない）。
+        """
         game = self.get_game(interaction.channel_id)
         if not game.is_running:
             embed = discord.Embed(description="このチャンネルで実行中のゲームはありません。", color=0xFFFFFF)
@@ -277,7 +287,12 @@ class LifecycleMixin:
             embed = discord.Embed(description="人狼を終了できるのは参加者・ホスト・管理者だけです。", color=0xFFFFFF)
             return await interaction.response.send_message(embed=embed, ephemeral=True)
 
+        winner_is_wolf = surrender_winner_is_wolf(game, interaction.user.id)
+        is_surrender = winner_is_wolf is not None
+
+        # 先に終了状態にして、記録処理中の二重実行・再入を防ぐ
         game.is_running = False
+        game.in_night_phase = False
         jinrou_snapshot.clear_safely(game)
         game.silenced_players.clear()
         game.in_discussion = False
@@ -285,7 +300,32 @@ class LifecycleMixin:
             game.chairman_skip_event.set()
         if game.chairman_vote_event:
             game.chairman_vote_event.set()
-        embed = discord.Embed(description=f"<@{interaction.user.id}> さんがゲームを強制終了しました。", color=0xFFFFFF)
+
+        if is_surrender:
+            # 自然な勝敗確定（check_victory）と同経路で記録する。メソッドが
+            # 無い単体利用（テスト用の部分的な Mixin 等）では記録をスキップする。
+            record_team = getattr(self, "_record_team_win", None)
+            if callable(record_team):
+                try:
+                    await record_team(game, winner_is_wolf=winner_is_wolf)
+                except Exception:
+                    logger.exception("人狼: 投了時の勝利記録に失敗しました")
+            process_elo = getattr(self, "_process_elo_ratings", None)
+            if callable(process_elo):
+                try:
+                    await process_elo(game, winner_is_wolf=winner_is_wolf)
+                except Exception:
+                    logger.exception("人狼: 投了時のレート記録に失敗しました")
+            winner_label = "人狼陣営" if winner_is_wolf else "村人陣営"
+            embed = discord.Embed(
+                description=(
+                    f"<@{interaction.user.id}> さんが投了しました。"
+                    f"投了した方の陣営の敗北として記録し、{winner_label}の勝利とします。"
+                ),
+                color=0xFFFFFF,
+            )
+        else:
+            embed = discord.Embed(description=f"<@{interaction.user.id}> さんがゲームを強制終了しました。", color=0xFFFFFF)
         await interaction.response.send_message(embed=embed)
 
 

@@ -482,12 +482,17 @@ class CirculationCog(commands.Cog):
             except Exception:
                 store = None
             blocked = prison_core.block_message(uid, now=now, store=self.prison_store)
+            prison_blocked_message = blocked
+            prison_miner_pending = False
             if blocked and store is not None:
                 # プリズンマイナー（S6-4）: prison ブロックに対する唯一の
                 # 例外。所持していれば1枚消費してこの採掘だけ通す。
+                # E-8c: 消費はここでは行わない。セッション開始可能性と
+                # プール残高の確認が済み、実際に掘れることが確定してから
+                # 消費する（掘れない状況でアイテムだけ消えるのを防ぐ）。
                 try:
                     if store.count(uid, items_core.PRISON_MINER_ITEM) > 0:
-                        store.remove(uid, items_core.PRISON_MINER_ITEM, 1)
+                        prison_miner_pending = True
                         blocked = None
                 except Exception:
                     pass
@@ -520,6 +525,15 @@ class CirculationCog(commands.Cog):
             if pool.pool_balance() <= 0:
                 return circulation_action_failed(
                     "プールにコインがありません…（経済の損失が還流されると掘れるようになります）")
+            if prison_miner_pending:
+                # E-8c: セッション開始可能性（上の start_session）とプール
+                # 残高の確認が済んだこの時点で初めて消費する。消費できな
+                # ければ（同時消費などで消えていた場合）掘らずに弾く。
+                try:
+                    store.remove(uid, items_core.PRISON_MINER_ITEM, 1)
+                except Exception:
+                    return circulation_action_failed(
+                        prison_blocked_message or "逮捕中は採掘できません。")
             result = self.mining_store.dig(
                 uid, pool.pool_balance(), now=now, no_fail=no_fail)
             paid = pool.pay(int(result["coins"]))
@@ -551,6 +565,11 @@ class CirculationCog(commands.Cog):
                 total += party_paid
             credit = None
             if total > 0:
+                # E-1: pool.pay の控除はメモリ主体のバッチ保存なので、
+                # wallet へ credit する前に pool ストアを flush する
+                # （クラッシュ時に「プール復活＋コイン保持」で二重に
+                # 掘れる状態を作らない）。
+                pool.flush()
                 credit = await self._wallet()._change_balance(
                     uid, total, create_with=wallet_module.NEW_USER_BALANCE)
                 if credit is None:
@@ -628,6 +647,10 @@ class CirculationCog(commands.Cog):
         self._apply_treasury_outlets(now=now)
         if not result:
             return None
+        # E-1: 確定結果（と国庫ブーストの上乗せ）はメモリ主体のバッチ
+        # 保存なので、当選者へ credit する前に lottery ストアを flush
+        # する（クラッシュ後の再確定による二重支払いを防ぐ）。
+        self.lottery_store.flush()
         wallet = None
         for winner in result["winners"]:
             prize = int(winner["prize"])
@@ -687,7 +710,18 @@ class CirculationCog(commands.Cog):
             try:
                 owned = self.lottery_store.add_tickets(uid, count, now=now)
             except items_core.ItemError as exc:
-                await wallet._change_balance(uid, total)
+                # E-5c: debit 済みなので返金する。返金自体の成否（None＝
+                # CAS 枯渇）も確認し、失敗したら重大ログ＋運営連絡の
+                # 文言を出す（黙って損失を残さない）。
+                refund = await wallet._change_balance(uid, total)
+                if refund is None:
+                    logger.critical(
+                        "circulation: 宝くじ購入失敗時の返金に失敗しました。"
+                        "手動で返金してください: user=%s amount=%s",
+                        uid, total)
+                    return circulation_action_failed(
+                        f"{exc} コインの返金にも失敗しました。"
+                        "運営へ連絡してください。")
                 return circulation_action_failed(exc)
             await self._record_history(uid, LOTTERY_ID, total, "lottery_buy")
             current = self.lottery_store.current_round(now=now)
@@ -708,6 +742,28 @@ class CirculationCog(commands.Cog):
                             now: datetime | None = None) -> str:
         actor = str(actor_id)
         target = str(target_id)
+        # E-3: StealStore の予約（reserve→確定/ロールバック）。予約して
+        # から先は await を挟んでも同時実行の2件目が必ず弾かれる。
+        reservation = None
+
+        def _confirm_reservation() -> None:
+            nonlocal reservation
+            if reservation is not None:
+                try:
+                    self.steal_store.commit_reservation(reservation)
+                except Exception:
+                    logger.exception("circulation: steal 予約の確定に失敗")
+                reservation = None
+
+        def _discard_reservation() -> None:
+            nonlocal reservation
+            if reservation is not None:
+                try:
+                    self.steal_store.rollback_reservation(reservation)
+                except Exception:
+                    logger.exception("circulation: steal 予約の取消に失敗")
+                reservation = None
+
         try:
             if not in_guild:
                 return circulation_action_failed(
@@ -720,12 +776,15 @@ class CirculationCog(commands.Cog):
             blocked = prison_core.block_message(actor, now=now, store=self.prison_store)
             if blocked:
                 return circulation_action_failed(blocked)
-            self.steal_store.check(actor, target, now=now)
             target_balance = await self._balance(target)
             if steal_core.steal_amount(target_balance) <= 0:
                 return circulation_action_failed(
                     f"相手のコインが少ないため盗めません"
                     f"（残高 {steal_core.TARGET_MIN_BALANCE:,} AGO 未満の相手は保護されます）。")
+            # 残高保護の判定（同期）と予約（同期）の間に await は無い。
+            # ここでクールダウン・1日上限・対象保護を仮記録まで含めて
+            # 原子的に押さえる（ItemError は外側で失敗文言になる）。
+            reservation = self.steal_store.reserve(actor, target, now=now)
             try:
                 item_store = self._item_store()
             except Exception:
@@ -762,20 +821,24 @@ class CirculationCog(commands.Cog):
                         and self._rng.random() < items_core.BATON_REPEL_RATE):
                     repelled_by = items_core.BATON_ITEM
             if repelled_by is not None:
+                # 罰金移転が失敗した場合は警棒を消費しない（E-5c:
+                # 移転より先に消費すると、エラー時に警棒だけが消えて
+                # 逮捕も試行記録も残らないため、消費は移転成功後に行う）。
+                fine, fine_error = await self._transfer_fine(actor, target)
+                if fine_error is not None:
+                    _discard_reservation()
+                    return circulation_action_failed(fine_error)
                 try:
                     item_store.remove(target, repelled_by, 1)
                 except Exception:
                     pass
-                fine, fine_error = await self._transfer_fine(actor, target)
-                if fine_error is not None:
-                    return circulation_action_failed(fine_error)
                 minutes = (
                     prison_core.DAI_BATON_PRISON_MINUTES
                     if repelled_by == items_core.DAI_BATON_ITEM
                     else prison_core.BATON_PRISON_MINUTES)
                 self.prison_store.imprison(
                     actor, minutes=minutes, reason="baton_counter", now=now)
-                self.steal_store.record_attempt(actor, target, now=now)
+                _confirm_reservation()
                 baton_name = items_core.ITEM_DEFS[repelled_by]["name"]
                 lines = [
                     f"🚔 **{baton_name}で撃退されました！**",
@@ -809,15 +872,18 @@ class CirculationCog(commands.Cog):
                 debit = await wallet._change_balance(
                     target, -amount, require_funds=True)
                 if debit is wallet_module.INSUFFICIENT:
+                    _discard_reservation()
                     return circulation_action_failed(
                         "相手の残高が変わったため、今回は盗めませんでした。")
                 if debit is None:
+                    _discard_reservation()
                     return circulation_action_failed(
                         "コインの更新に失敗しました。残高は変わっていません。")
                 credit = await wallet._change_balance(
                     actor, amount, create_with=wallet_module.NEW_USER_BALANCE)
                 if credit is None:
                     await wallet._change_balance(target, amount)
+                    _discard_reservation()
                     return circulation_action_failed(
                         "コインの更新に失敗しました。残高は変わっていません。")
                 await self._record_history(target, actor, amount, "steal_success")
@@ -829,7 +895,7 @@ class CirculationCog(commands.Cog):
                         item_store.remove(actor, mud_item, 1)
                     except Exception:
                         pass
-                self.steal_store.record_attempt(actor, target, now=now)
+                _confirm_reservation()
                 lines = [
                     f"🎉 **盗みに成功！** <@{target}> から **{amount:,} AGO** を盗みました。",
                 ]
@@ -841,6 +907,7 @@ class CirculationCog(commands.Cog):
                 return "\n".join(lines)
             fine, fine_error = await self._transfer_fine(actor, target)
             if fine_error is not None:
+                _discard_reservation()
                 return circulation_action_failed(fine_error)
             prison_note = ""
             if mud_item is not None:
@@ -858,7 +925,7 @@ class CirculationCog(commands.Cog):
                     f"\n🚔 **{items_core.ITEM_DEFS[mud_item]['name']}を使って失敗し、"
                     f"逮捕されました**（あと{prison_core.format_remaining(minutes * 60)}"
                     "はマネー系の操作ができません）。")
-            self.steal_store.record_attempt(actor, target, now=now)
+            _confirm_reservation()
             if guarded:
                 head = "🛡️ **盗みに失敗…** 相手の防犯チャームに弾かれて逃げられました。"
             else:
@@ -870,8 +937,10 @@ class CirculationCog(commands.Cog):
                     f"{prison_note}")
             return f"{head}（罰金はありませんでした）。{prison_note}"
         except items_core.ItemError as exc:
+            _discard_reservation()
             return circulation_action_failed(exc)
         except Exception:
+            _discard_reservation()
             logger.exception(
                 "circulation: 盗みに失敗 actor=%s target=%s", actor, target)
             return circulation_action_failed(

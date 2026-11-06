@@ -37,6 +37,21 @@ from core.vc.music.common import *  # noqa: F401,F403 - shared helpers/constants
 logger = logging.getLogger("cogs.sio_music")
 
 
+async def _require_same_vc(interaction: discord.Interaction) -> bool:
+    """音楽操作の共通チェック (B-3): 操作者がボットの接続中 VC のメンバーか。
+
+    ボットが VC に接続していない場合は従来どおり各操作側の
+    「接続していません」応答に任せるため True を返す。メンバーでない
+    場合は理由を ephemeral で返して False。
+    """
+    guild = getattr(interaction, "guild", None)
+    vc = getattr(guild, "voice_client", None) if guild is not None else None
+    if vc is None or is_same_voice_channel(interaction.user, vc):
+        return True
+    await interaction.response.send_message(embed=we(MUSIC_VC_REQUIRED_MESSAGE), ephemeral=True)
+    return False
+
+
 # =====================
 # UI Panel Component
 # =====================
@@ -130,6 +145,8 @@ class CustomEQModal(discord.ui.Modal, title="カスタムEQ (FFmpegフィルタ�
         self.guild_id = guild_id
 
     async def on_submit(self, interaction: discord.Interaction):
+        if not await _require_same_vc(interaction):
+            return
         state = self.cog.get_state(self.guild_id)
         user_filter = self.filter_input.value.strip()
 
@@ -188,6 +205,8 @@ class VoiceControlView(discord.ui.View):
             super().__init__(placeholder=f"⚡ 速度変更 (現在: {state['speed']}x)", min_values=1, max_values=1, options=options, row=0)
 
         async def callback(self, interaction: discord.Interaction):
+            if not await _require_same_vc(interaction):
+                return
             state = self.cog.get_state(self.guild_id)
             previous_speed = state.get('speed', 1.0)
             state['speed'] = float(self.values[0])
@@ -211,6 +230,8 @@ class VoiceControlView(discord.ui.View):
             super().__init__(placeholder=f"{VOL} 音量変更 (現在: {int(state['volume']*100)}%)", min_values=1, max_values=1, options=options, row=1)
 
         async def callback(self, interaction: discord.Interaction):
+            if not await _require_same_vc(interaction):
+                return
             state = self.cog.get_state(self.guild_id)
             state['volume'] = float(self.values[0])
             await interaction.response.send_message(embed=we(f"{VOL} 音量を `{int(state['volume']*100)}%` に設定しました（即時反映）。"))
@@ -237,6 +258,8 @@ class VoiceControlView(discord.ui.View):
             super().__init__(placeholder=f"🎬 プリセットEQ選択 (現在: {current_eq})", min_values=1, max_values=1, options=options, row=2)
 
         async def callback(self, interaction: discord.Interaction):
+            if not await _require_same_vc(interaction):
+                return
             state = self.cog.get_state(self.guild_id)
             state['eq'] = self.values[0]
             state['custom_eq_filter'] = None
@@ -256,6 +279,8 @@ class VoiceControlView(discord.ui.View):
 
     @discord.ui.button(label="", emoji=PAUSE, style=discord.ButtonStyle.primary, row=3)
     async def pause_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not await _require_same_vc(interaction):
+            return
         vc = interaction.guild.voice_client
         state = self.cog.get_state(self.guild_id)
         if vc and has_audio_source(vc, "music"):
@@ -271,6 +296,8 @@ class VoiceControlView(discord.ui.View):
 
     @discord.ui.button(label="再開", emoji=MUSIC, style=discord.ButtonStyle.success, row=4)
     async def resume_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not await _require_same_vc(interaction):
+            return
         vc = interaction.guild.voice_client
         state = self.cog.get_state(self.guild_id)
         if vc and state['is_paused'] and state['current_track']:
@@ -283,6 +310,8 @@ class VoiceControlView(discord.ui.View):
 
     @discord.ui.button(label="", emoji=SKIP_RIGHT, style=discord.ButtonStyle.secondary, row=4)
     async def skip_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not await _require_same_vc(interaction):
+            return
         vc = interaction.guild.voice_client
         state = self.cog.get_state(self.guild_id)
         if vc and (has_audio_source(vc, "music") or state['is_paused']):
@@ -297,6 +326,8 @@ class VoiceControlView(discord.ui.View):
 
     @discord.ui.button(label="", emoji=SHUFFLE, style=discord.ButtonStyle.secondary, row=3)
     async def shuffle_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not await _require_same_vc(interaction):
+            return
         state = self.cog.get_state(self.guild_id)
         state['shuffle_enabled'] = not state.get('shuffle_enabled', False)
         label = 'ON' if state['shuffle_enabled'] else 'OFF'
@@ -306,6 +337,8 @@ class VoiceControlView(discord.ui.View):
 
     @discord.ui.button(label="", emoji=RESTART, style=discord.ButtonStyle.secondary, row=3)
     async def loop_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not await _require_same_vc(interaction):
+            return
         state = self.cog.get_state(self.guild_id)
         next_mode = {'off': 'track', 'track': 'queue', 'queue': 'off'}[state.get('loop_mode', 'off')]
         state['loop_mode'] = next_mode
@@ -333,6 +366,8 @@ class VoiceControlView(discord.ui.View):
 
     @discord.ui.button(label="", emoji=RESET, style=discord.ButtonStyle.danger, row=4)
     async def stop_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not await _require_same_vc(interaction):
+            return
         vc = interaction.guild.voice_client
         state = self.cog.get_state(self.guild_id)
         if vc:

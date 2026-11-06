@@ -389,11 +389,15 @@ class PrisonBlockTest(unittest.TestCase):
             self.assertEqual(wallet.balances["1"], 10000)
 
     def test_money_panel_status_shows_prison(self):
+        # B-2: 公開パネルには逮捕状態を出さない（S4 の線引きで逮捕は
+        # 非公開側。本人への通知は ephemeral 経路が担う）。
         embed = status_embed({
             "balance": 100, "prison_remaining": 30 * 60.0})
         fields = {field.name: field.value for field in embed.fields}
-        self.assertIn("状態", fields)
-        self.assertIn("逮捕中", fields["状態"])
+        self.assertNotIn("状態", fields)
+        for value in fields.values():
+            self.assertNotIn("逮捕中", value)
+        self.assertNotIn("逮捕中", embed.description or "")
 
 
 # ---------------------------------------------------------------------------

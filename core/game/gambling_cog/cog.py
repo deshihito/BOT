@@ -101,7 +101,8 @@ GAMBLING_RULES = {
         "プレイヤー同士のブラックジャック対決。対決を作って同じ額を"
         "ベットした相手が参加すると始まります。両者がヒット／スタンドを"
         "選び、バーストしたら負け、21に近い方が勝ちです。同点は"
-        "引き分けで双方にベットが戻ります。中断した場合は双方返金です。"
+        "引き分けで双方にベットが戻ります。対戦中の中断（タイムアウト"
+        "を含む）は中断した側の敗北になります。募集の取り消しは返金です。"
         f"ベットは {gambling_core.DUEL_MIN_BET} AGO から。"),
 }
 
@@ -704,11 +705,12 @@ class DuelView(_SessionPanel, discord.ui.View):
         return interaction.user.id == self.user_id
 
     async def on_timeout(self) -> None:
-        # タイムアウト時は対決を中断し、双方へ全額返金する（S6-3）。
+        # タイムアウト時: 募集中なら取り消して全額返金、対戦中なら
+        # タイムアウトした側の敗北として決着する（E-10）。
         try:
-            await self.cog.cancel_duel_for(self.user_id)
+            await self.cog.cancel_duel_for(self.user_id, timeout=True)
         except Exception:
-            logger.exception("gambling: 対決のタイムアウト返金に失敗しました")
+            logger.exception("gambling: 対決のタイムアウト処理に失敗しました")
         await self._disable_on_timeout()
 
     def _build_embed(self, balance: int | None) -> discord.Embed:
@@ -749,7 +751,7 @@ class DuelView(_SessionPanel, discord.ui.View):
             stand.callback = self._on_stand
             self.add_item(stand)
             abort = discord.ui.Button(
-                label="中断する（双方返金）", style=discord.ButtonStyle.danger)
+                label="中断する（中断側の敗北）", style=discord.ButtonStyle.danger)
             abort.callback = self._on_cancel
             self.add_item(abort)
         rules = discord.ui.Button(
@@ -901,6 +903,10 @@ class GamblingCog(commands.Cog):
             return
         refunds = self.store.orphaned_refunds()
         self._refunded = True
+        # セッション削除を先に永続化してからコインを動かす（E-1）。
+        # 返金 credit の後にクラッシュしても、削除済みセッションが
+        # 巻き戻って二重返金になることはない。
+        self.store.flush()
         wallet = self._wallet()
         for refund in refunds:
             uid = refund["user_id"]
@@ -978,6 +984,21 @@ class GamblingCog(commands.Cog):
         await self._record_history(GAMBLING_ID, uid, amount, "devil_reward")
         return amount
 
+    async def _refund_failed_start(self, uid: str, amount: int) -> bool:
+        """開始失敗時のベット返金（E-5c）。成功したら True。
+
+        返金は _change_balance の戻り値で確認し、失敗（None）したら
+        critical ログに残す。呼び出し側は False のときユーザーへ
+        運営連絡を促す文言を出す（配当支払い失敗経路と同形）。
+        """
+        credit = await self._wallet()._change_balance(uid, int(amount))
+        if credit is None or credit is wallet_module.INSUFFICIENT:
+            logger.critical(
+                "gambling: 開始失敗時の返金に失敗しました。"
+                "手動で返金してください: user=%s amount=%s", uid, amount)
+            return False
+        return True
+
     # ------------------------------------------------------------------ 入口
     async def show_slot(self, interaction: discord.Interaction):
         view = SlotView(self, interaction.user.id)
@@ -1035,7 +1056,9 @@ class GamblingCog(commands.Cog):
             try:
                 self.store.start_slot(uid, spins)
             except items_core.ItemError as exc:
-                await wallet._change_balance(uid, total)
+                if not await self._refund_failed_start(uid, total):
+                    return gambling_action_failed(
+                        "返金に失敗しました。Botの運営に連絡してください。")
                 return gambling_action_failed(exc)
             self._slot_rewards[uid] = 0
             await self._record_history(uid, GAMBLING_ID, total, "gamble_slot")
@@ -1143,17 +1166,29 @@ class GamblingCog(commands.Cog):
                     lines.append(
                         f"{result['max_match']}揃い！ **{result['reward']:+,} AGO**")
             elif result["reward"] < 0:
-                debit = await wallet._change_balance(uid, result["reward"])
-                if debit is None:
-                    logger.critical(
-                        "gambling: スロットペナルティの引き落としに失敗しました: "
-                        "user=%s amount=%s", uid, result["reward"])
+                # 6ペナルティは残高を割らない: require_funds=True で、
+                # 不足時は残高まででクランプする（E-5a、没収ガードの
+                # ペナルティ経路と同形）。残高が負数になることはない。
+                penalty = -int(result["reward"])
+                balance = await self._balance(uid)
+                take = min(max(balance, 0), penalty)
+                if take > 0:
+                    debit = await wallet._change_balance(
+                        uid, -take, require_funds=True)
+                    if debit is None or debit is wallet_module.INSUFFICIENT:
+                        logger.critical(
+                            "gambling: スロットペナルティの引き落としに失敗しました: "
+                            "user=%s amount=%s", uid, -take)
+                        take = 0
+                    else:
+                        delta = -take
+                        await self._record_history(
+                            uid, GAMBLING_ID, take, "gamble_slot")
+                        self._recycle(take)
+                if take > 0:
+                    lines.append(f"**{-take:+,} AGO**")
                 else:
-                    delta = result["reward"]
-                    await self._record_history(
-                        uid, GAMBLING_ID, -result["reward"], "gamble_slot")
-                    self._recycle(-result["reward"])
-                lines.append(f"**{result['reward']:+,} AGO**")
+                    lines.append("ペナルティの引き落としはありませんでした。")
             if delta > 0:
                 self._slot_rewards[uid] = self._slot_rewards.get(uid, 0) + delta
             if result["finished"]:
@@ -1242,7 +1277,9 @@ class GamblingCog(commands.Cog):
             try:
                 self.store.start_double(uid, bet)
             except items_core.ItemError as exc:
-                await wallet._change_balance(uid, bet)
+                if not await self._refund_failed_start(uid, bet):
+                    return gambling_action_failed(
+                        "返金に失敗しました。Botの運営に連絡してください。")
                 return gambling_action_failed(exc)
             await self._record_history(uid, GAMBLING_ID, bet, "gamble_double")
             return (f"{DICE} **ダブルアップ開始！** BET: {bet:,} AGO\n"
@@ -1323,7 +1360,9 @@ class GamblingCog(commands.Cog):
             try:
                 session = self.store.start_blackjack(uid, bet)
             except items_core.ItemError as exc:
-                await wallet._change_balance(uid, bet)
+                if not await self._refund_failed_start(uid, bet):
+                    return gambling_action_failed(
+                        "返金に失敗しました。Botの運営に連絡してください。")
                 return gambling_action_failed(exc)
             await self._record_history(uid, GAMBLING_ID, bet, "gamble_blackjack")
             total = gambling_core.calc_total(session["player"])
@@ -1553,11 +1592,33 @@ class GamblingCog(commands.Cog):
             return gambling_action_failed(
                 "実行中にエラーが発生しました。時間をおいて再試行してください。")
 
-    async def cancel_duel_for(self, user_id: int) -> str:
-        """対決の取り消し／中断。双方へ全額返金する（S6-3）。"""
+    async def cancel_duel_for(self, user_id: int, *, timeout: bool = False) -> str:
+        """対決の取り消し／中断。
+
+        募集中（waiting）は全額返金。対戦中（playing）の中断は中断した
+        側の敗北として決着し、ポットは勝者へ渡る（E-10）。
+        手動の取り消しは他の duel 系関数と同様に prison チェックを通す
+        （E-8b: チェックで弾く統一を優先し、逮捕中に敗北扱いで確定する
+        こともない）。ただし View の on_timeout は本人の操作ではなく
+        自動決着なので prison チェックを経ない: 逮捕を理由にタイム
+        アウト決着が宙に浮き、対決が残り続けると E-10 の抜け道になる
+        ため（timeout=True は View からのみ渡す）。
+        """
         uid = str(user_id)
         try:
+            if not timeout:
+                blocked = prison_core.block_message(uid)
+                if blocked:
+                    return gambling_action_failed(blocked)
             result = self.store.cancel_duel(uid)
+            if result.get("state") == "playing":
+                settled = await self._settle_duel(result["result"])
+                if timeout:
+                    head = ("対決がタイムアウトしました。"
+                            "タイムアウトした側の敗北として決着します。")
+                else:
+                    head = "対決を中断しました。中断した側の敗北として決着します。"
+                return f"{head}\n{settled}"
             for refund in result["refunds"]:
                 await self._duel_refund(refund["user_id"], int(refund["amount"]))
             return "対決を取り消しました。ベットは返金されました。"

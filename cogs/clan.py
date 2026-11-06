@@ -431,9 +431,16 @@ class ClanCog(commands.Cog):
         try:
             clan = self.store.create(uid, name)
         except clan_core.ClanError as exc:
-            await wallet._change_balance(
+            refund = await wallet._change_balance(
                 uid, clan_core.CREATE_COST,
                 create_with=wallet_module.NEW_USER_BALANCE)
+            if refund is None:
+                # 返金失敗を握り潰さない (E-5c): critical ログ＋運営案内。
+                logger.critical(
+                    "clan: クラン作成の返金に失敗しました。"
+                    "手動で戻してください user=%s amount=%s",
+                    uid, clan_core.CREATE_COST)
+                return f"{exc}\n返金に失敗しました。Botの運営に連絡してください。"
             return str(exc)
         await self._record_history(
             uid, "clan", clan_core.CREATE_COST, clan_core.HISTORY_REASON)
@@ -488,9 +495,15 @@ class ClanCog(commands.Cog):
         try:
             renamed = self.store.rename(uid, name)
         except clan_core.ClanError as exc:
-            await wallet._change_balance(
+            refund = await wallet._change_balance(
                 uid, clan_core.RENAME_COST,
                 create_with=wallet_module.NEW_USER_BALANCE)
+            if refund is None:
+                logger.critical(
+                    "clan: クラン改名の返金に失敗しました。"
+                    "手動で戻してください user=%s amount=%s",
+                    uid, clan_core.RENAME_COST)
+                return f"{exc}\n返金に失敗しました。Botの運営に連絡してください。"
             return str(exc)
         await self._record_history(
             uid, "clan", clan_core.RENAME_COST,

@@ -168,10 +168,15 @@ class VoiceTriggerCog(commands.Cog):
                     logger.exception("トリガー設定の読み込みに失敗 (guild=%s)", guild_id)
 
     def _save(self, guild_id: int):
-        self._meta_path(guild_id).write_text(
+        # tmp → replace のアトミック書き込み (書き込み途中の電源断で
+        # meta.json が壊れてギルド設定が落ちるのを防ぐ)。
+        path = self._meta_path(guild_id)
+        tmp = path.with_suffix(path.suffix + ".tmp")
+        tmp.write_text(
             json.dumps(self.triggers.get(guild_id, {}), ensure_ascii=False),
             encoding="utf-8",
         )
+        tmp.replace(path)
 
     async def register(self, guild: discord.Guild, word: str, attachment: discord.Attachment,
                        user: discord.abc.User) -> str:

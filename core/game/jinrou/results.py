@@ -180,6 +180,7 @@ class ResultsMixin:
 
     async def run_voting_phase(self, game):
         if not game.is_running: return
+        game.in_night_phase = False
         await game.game_channel.send("ーー 投票フェーズ（40秒） ーー")
         game.silenced_players.update(p.id for p in game.alive_players)
 

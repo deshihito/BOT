@@ -17,7 +17,7 @@ import math
 import config
 
 from core.game.jinrou.common import *  # noqa: F401,F403 - shared constants/helpers
-from core.game.jinrou.common import ELO_BASE_K, ELO_WOLF_WIN_K  # noqa: F401
+from core.game.jinrou.common import ELO_BASE_K, ELO_WOLF_WIN_K, _is_wolf_side  # noqa: F401
 
 logger = logging.getLogger("cogs.jinrou")
 
@@ -38,3 +38,23 @@ def can_end_game(game, user) -> bool:
     if perms and (perms.administrator or perms.manage_guild):
         return True
     return user.id == game.host_id or any(p.id == user.id for p in game.players)
+
+
+def is_participant(game, user) -> bool:
+    return any(p.id == user.id for p in game.players)
+
+
+def surrender_winner_is_wolf(game, user_id):
+    """投了時の勝者陣営を返す。開始前・役職未確定・非参加者なら None（記録しない）。
+
+    戻り値 True は人狼陣営の勝ち、False は村人陣営の勝ちとして
+    ``_process_elo_ratings(game, winner_is_wolf=...)`` に渡す値。
+    投了者本人は _is_wolf_side の反対側が勝者になるため、必ず敗北として記録される。
+    """
+    if not getattr(game, "started", False):
+        return None
+    if not getattr(game, "roles", None):
+        return None
+    if not any(p.id == user_id for p in game.players):
+        return None
+    return not _is_wolf_side(game, user_id)

@@ -9,6 +9,19 @@ import psutil
 
 FIELD_VALUE_LIMIT = 1024  # Discord の Embed フィールド値の上限
 
+# 管理者向けコマンド群 (!logs / !check_api / !terminal 等) と同じ許可リスト。
+# all_stats は Pi のスペック・バージョン・ファイル構成・経済プール残高まで
+# 出すため、hidden (ヘルプ非表示) だけでは足りず実行自体をゲートする (B-1)。
+ALLOWED_USER_IDS = {
+    1320705325686587408,
+    1000302102473613373,
+}
+
+
+async def is_all_stats_allowed(ctx: commands.Context) -> bool:
+    """ALLOWED_USER_IDS に含まれているユーザーのみ許可するチェック (!logs と同型)。"""
+    return ctx.author.id in ALLOWED_USER_IDS
+
 
 def _limit_field_value(value: str, limit: int = FIELD_VALUE_LIMIT) -> str:
     """Embed フィールド値が上限文字数に収まるよう切り詰める。"""
@@ -75,6 +88,7 @@ class SystemStatsCog(commands.Cog):
         return f"```\n{tree_text}\n```" if tree_text else "`.py` ファイルが見つかりません"
 
     @commands.command(name="all_stats", aliases=["stats", "spec"])
+    @commands.check(is_all_stats_allowed)
     async def all_stats(self, ctx: commands.Context):
         async with ctx.typing():
             now = datetime.datetime.now(datetime.timezone.utc)
@@ -204,6 +218,20 @@ class SystemStatsCog(commands.Cog):
             embed.set_footer(text=f"Requested by {ctx.author}", icon_url=ctx.author.display_avatar.url)
 
             await ctx.send(embed=embed)
+
+    @all_stats.error
+    async def all_stats_error(self, ctx: commands.Context, error: commands.CommandError):
+        """権限外の実行にはその旨だけ返す (!logs のエラーハンドラと同型)。"""
+        if isinstance(error, commands.CheckFailure):
+            try:
+                await ctx.send("❌ このコマンドは許可されたユーザーのみ使用できます。")
+            except Exception:
+                pass
+            return
+        try:
+            await ctx.send("❌ ステータス取得中にエラーが発生しました。")
+        except Exception:
+            pass
 
 async def setup(bot: commands.Bot):
     await bot.add_cog(SystemStatsCog(bot))

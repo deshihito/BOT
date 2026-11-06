@@ -305,7 +305,9 @@ class GamblingStore:
         flush_interval: float = FLUSH_INTERVAL_SECONDS,
     ):
         self._path = Path(path) if path is not None else default_path()
-        self._rng = rng if rng is not None else random.Random()
+        # 金銭が賭かる抽選なので既定は OS エントロピー源の SystemRandom
+        # （E-13）。テスト等で差し替える場合だけ rng を明示的に渡す。
+        self._rng = rng if rng is not None else random.SystemRandom()
         self._flush_every = max(1, int(flush_every))
         self._flush_interval = float(flush_interval)
         self._lock = threading.RLock()
@@ -822,26 +824,37 @@ class GamblingStore:
             return snapshot
 
     def cancel_duel(self, user_id: str) -> dict[str, Any]:
-        """対決を取り消し、返金対象を返す。
+        """対決を取り消し／中断し、結果を返す。
 
-        募集中は作成者だけが取り消せる。対戦中の中断（タイムアウト等）
-        は参加者どちらからでも可で、双方へ全額返金する（S6-3）。
+        募集中（waiting）は作成者だけが取り消せ、ベットは全額返金する
+        （``refunds`` に返金対象が入る）。対戦中（playing）の中断は
+        中断した側の敗北として即決着する（E-10: 負け側が一方的な
+        全額返金で対決を無効化できないように）。その場合 ``refunds``
+        は空で、勝者・ポット等の決着情報は ``result``（_finish_duel
+        と同形式＋ ``forfeited_by``）に入るので、支払いは呼び出し側が
+        通常の決着経路で行う。
         """
         uid = str(user_id)
         with self._lock:
             for key, duel in list(self._state["duels"].items()):
                 if duel["creator"] != uid and duel.get("challenger") != uid:
                     continue
-                if duel["state"] == "waiting" and duel["creator"] != uid:
-                    raise ItemError("取り消せるのは作成者だけです。")
-                bet = int(duel["bet"])
-                refunds = [{"user_id": duel["creator"], "amount": bet}]
-                if duel.get("challenger"):
-                    refunds.append(
-                        {"user_id": duel["challenger"], "amount": bet})
-                del self._state["duels"][key]
-                self._mark_dirty()
-                return {"cancelled": True, "refunds": refunds}
+                if duel["state"] == "waiting":
+                    if duel["creator"] != uid:
+                        raise ItemError("取り消せるのは作成者だけです。")
+                    bet = int(duel["bet"])
+                    refunds = [{"user_id": duel["creator"], "amount": bet}]
+                    del self._state["duels"][key]
+                    self._mark_dirty()
+                    return {"cancelled": True, "state": "waiting",
+                            "refunds": refunds}
+                opponent = (duel["challenger"] if uid == duel["creator"]
+                            else duel["creator"])
+                result = self._finish_duel_locked(key, duel, opponent)
+                result["forfeited_by"] = uid
+                return {"cancelled": True, "state": "playing",
+                        "refunds": [], "forfeited_by": uid,
+                        "result": result}
         raise ItemError("参加中の対決がありません。")
 
     # ------------------------------------------------------------------ dice

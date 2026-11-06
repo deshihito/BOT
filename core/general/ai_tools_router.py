@@ -69,6 +69,11 @@ def action_candidates() -> dict[str, dict[str, Any]]:
     for spec in action_registry.default_registry().all():
         if "aitools" not in spec.surfaces or spec.risk == "blocked":
             continue
+        if spec.id in action_registry.MESSAGE_SHORTCUT_BLOCKED_IDS:
+            # 表示系 (status / items / money_panel 等) は実行経路の
+            # execute_shortcut が ephemeral 前提の応答を守るため拒否し、
+            # 選ばれても何も起きない (E-9 付随)。候補側から除外する。
+            continue
         key = spec.id.lower()
         candidates[key] = {
             "root": spec.root,
@@ -475,6 +480,15 @@ async def invoke_action(
     execute_shortcut 経由で dispatch に渡す（PR #375 の受け渡し形式）。
     実際に渡した検証済み params を返す。
     """
+    # 実行直前の再検証 (E-9): 候補経由でなく直接呼ばれても、レジストリで
+    # risk="blocked" の操作と、メッセージ経由で実行できない表示系
+    # (MESSAGE_SHORTCUT_BLOCKED) は拒否する。
+    action_id = f"{item['root']}:{item['value']}"
+    spec = action_registry.default_registry().get(action_id)
+    if spec is not None and spec.risk == "blocked":
+        raise AIToolsDecisionError("この操作はAI toolsから実行できません。")
+    if action_id in action_registry.MESSAGE_SHORTCUT_BLOCKED_IDS:
+        raise AIToolsDecisionError("この操作はAI toolsから実行できません。")
     if item["root"] in {"support", "general"} and item["value"] in {"pay", "clear"}:
         raise AIToolsDecisionError("この操作はAI toolsから実行できません。")
     if item["root"] == "general" and item["value"] == "miq_settings":

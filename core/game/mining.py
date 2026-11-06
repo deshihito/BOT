@@ -35,7 +35,7 @@ import os
 import random
 import threading
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -50,6 +50,13 @@ logger = logging.getLogger(__name__)
 
 #: セッション開始のクールダウン（秒）。原典 MINING_COOLDOWN = 60。
 COOLDOWN_SECONDS = 60
+
+#: 掘り同士の最小間隔（秒、E-15 の最小手当て）。セッション内の掘りは
+#: 原典どおり即座に実行できる（1掘りごとの確率・回数・産出は不変）が、
+#: この間隔より速く掘った分は「間隔の不足分」がセッション終了後の
+#: クールダウンへ加算される。速射するほど次セッションまでの待ちが
+#: 伸びるため、連続即掘りの持続速度だけが下がる。
+MIN_DIG_INTERVAL_SECONDS = 3.0
 
 #: 1セッションで掘れる回数の抽選範囲（原典 random.randint(1, 20)）。
 SESSION_MIN_DIGS = 1
@@ -95,12 +102,22 @@ def _clean_state(raw: Any) -> dict[str, Any]:
                 continue
             last = entry.get("last")
             left = entry.get("session_left")
+            last_dig = entry.get("last_dig")
+            ready_at = entry.get("ready_at")
+            debt = entry.get("session_debt")
             state["users"][str(uid)] = {
                 # 旧仕様の保存（last/day/count）からは last だけ引き継ぐ。
                 "last": last if isinstance(last, str) else None,
                 "session_left": (
                     int(left) if isinstance(left, int) and left > 0 else 0),
                 "direct": bool(entry.get("direct")),
+                # E-15: 掘り間隔の不足分の加算（下記 dig 参照）。旧保存には
+                # 無いので既定値で補う。
+                "last_dig": last_dig if isinstance(last_dig, str) else None,
+                "session_debt": (
+                    float(debt) if isinstance(debt, (int, float))
+                    and not isinstance(debt, bool) and debt > 0 else 0.0),
+                "ready_at": ready_at if isinstance(ready_at, str) else None,
             }
     return state
 
@@ -177,16 +194,29 @@ class MiningStore:
     # ------------------------------------------------------------------ 状態参照
     def _user_locked(self, user_id: str) -> dict[str, Any]:
         return self._state["users"].setdefault(
-            str(user_id), {"last": None, "session_left": 0, "direct": False})
+            str(user_id), {"last": None, "session_left": 0, "direct": False,
+                           "last_dig": None, "session_debt": 0.0,
+                           "ready_at": None})
 
     def _cooldown_remaining_locked(self, user: dict[str, Any], now: datetime) -> float:
-        if not user["last"]:
-            return 0.0
-        try:
-            last = datetime.fromisoformat(user["last"])
-        except ValueError:
-            return 0.0
-        return max(0.0, COOLDOWN_SECONDS - (now - last).total_seconds())
+        remaining = 0.0
+        if user.get("last"):
+            try:
+                last = datetime.fromisoformat(user["last"])
+                remaining = max(
+                    0.0, COOLDOWN_SECONDS - (now - last).total_seconds())
+            except ValueError:
+                remaining = 0.0
+        # E-15: 掘り切り時点に確定した解禁時刻（開始起点クールダウン＋
+        # 間隔不足分の加算）も残り時間に反映する。どちらか遅い方が勝つ。
+        ready_at = user.get("ready_at")
+        if ready_at:
+            try:
+                ready = datetime.fromisoformat(ready_at)
+                remaining = max(remaining, (ready - now).total_seconds(), 0.0)
+            except ValueError:
+                pass
+        return remaining
 
     def status(self, user_id: str, now: datetime | None = None) -> dict[str, Any]:
         """表示用: クールダウン残りと、進行中セッションの残り回数。"""
@@ -224,6 +254,11 @@ class MiningStore:
             user["last"] = now.astimezone(JST).isoformat()
             user["session_left"] = digs
             user["direct"] = bool(direct)
+            # E-15: 間隔の計測はセッション単位で始める（前セッションの
+            # 最終掘りとの間隔はクールダウンが既に担保している）。
+            user["last_dig"] = None
+            user["session_debt"] = 0.0
+            user["ready_at"] = None
             self._mark_dirty()
             return digs
 
@@ -282,13 +317,43 @@ class MiningStore:
                 raise ItemError("採掘セッションが始まっていません。")
             user_before = copy.deepcopy(user)
             direct = bool(user.get("direct"))
+            # E-15: 前の掘りからの間隔が MIN_DIG_INTERVAL_SECONDS 未満なら
+            # 不足分を記録する（この掘り自体は原典どおり即座に成立する）。
+            interval_debt = 0.0
+            last_dig_raw = user.get("last_dig")
+            if last_dig_raw:
+                try:
+                    last_dig = datetime.fromisoformat(last_dig_raw)
+                    elapsed = max(0.0, (now - last_dig).total_seconds())
+                    interval_debt = max(
+                        0.0, MIN_DIG_INTERVAL_SECONDS - elapsed)
+                except ValueError:
+                    interval_debt = 0.0
+            user["session_debt"] = (
+                float(user.get("session_debt") or 0.0) + interval_debt)
+            stamp = now.astimezone(JST).isoformat()
+            user["last_dig"] = stamp
             user["session_left"] = int(user["session_left"]) - 1
             if int(user["session_left"]) <= 0:
                 user["direct"] = False
+                # 掘り切り: 解禁時刻は「開始＋60秒」と「開始＋60秒＋間隔
+                # 不足分の合計」の遅い方（実質は後者）。間隔を守って掘れば
+                # 不足分は0で、従来どおり開始起点60秒のまま。
+                base = now
+                if user.get("last"):
+                    try:
+                        base = datetime.fromisoformat(user["last"])
+                    except ValueError:
+                        base = now
+                ready = base + timedelta(
+                    seconds=COOLDOWN_SECONDS + float(user["session_debt"]))
+                user["ready_at"] = ready.astimezone(JST).isoformat()
             self._mark_dirty()
             result = self._roll(pool_balance, no_fail=no_fail, direct=direct)
             result["session_left"] = int(user["session_left"])
             result["user_before"] = user_before
+            result["interval_debt"] = interval_debt
+            result["last_dig_after"] = stamp
             return result
 
     def roll_bonus(self, pool_balance: int, *,
@@ -301,7 +366,31 @@ class MiningStore:
         return self._roll(pool_balance, no_fail=no_fail)
 
     def rollback_dig(self, user_id: str, result: dict[str, Any]) -> None:
-        """dig の巻き戻し（プールの支払いやコイン反映に失敗したとき用）。"""
+        """dig の巻き戻し（プールの支払いやコイン反映に失敗したとき用）。
+
+        E-4 対応の差分方式: スナップショットでユーザー状態を丸ごと
+        上書きせず、この dig が変えた分だけを戻す。await の間に同一
+        ユーザーの別の dig が完了していても、その消費は巻き戻らない。
+        """
+        before = result.get("user_before") or {}
         with self._lock:
-            self._state["users"][str(user_id)] = copy.deepcopy(result["user_before"])
+            user = self._user_locked(str(user_id))
+            # 消費した1回分だけを戻す（同時 dig の消費は保持される）。
+            user["session_left"] = int(user.get("session_left") or 0) + 1
+            # この dig が加えた間隔不足分だけを差し引く（E-15）。
+            debt = float(result.get("interval_debt") or 0.0)
+            if debt:
+                user["session_debt"] = max(
+                    0.0, float(user.get("session_debt") or 0.0) - debt)
+            # last_dig は、後続の dig に上書きされていない場合だけ戻す。
+            if (result.get("last_dig_after") is not None
+                    and user.get("last_dig") == result.get("last_dig_after")):
+                user["last_dig"] = before.get("last_dig")
+            # この dig がセッションを掘り切っていた場合だけ、掘り切りで
+            # 落とした直下掘りフラグと解禁時刻を戻す（再開したセッション
+            # の状態であり、別セッションのものではないことが回数から分かる）。
+            if (int(before.get("session_left") or 0) == 1
+                    and int(user["session_left"]) == 1):
+                user["direct"] = bool(before.get("direct"))
+                user["ready_at"] = None
             self._mark_dirty()

@@ -85,16 +85,20 @@ def build_state(game, boundary: str) -> dict | None:
 
 
 def save_boundary_safely(game, boundary: str) -> bool:
-    """境界スナップショットを保存する。失敗しても対局は止めない。"""
+    """境界スナップショットを保存する。失敗しても対局は止めないが、成否は返す。"""
     try:
         state = build_state(game, boundary)
         if state is None:
             return False
-        game_restore.save_session(GAME_ID, state["channel_id"], state["guild_id"], state)
-        game_restore.flush_store()
+        if not game_restore.save_session(GAME_ID, state["channel_id"], state["guild_id"], state):
+            logger.warning("人狼: スナップショットの保存に失敗しました (boundary=%s)", boundary)
+            return False
+        if not game_restore.flush_store():
+            logger.warning("人狼: スナップショットの書き出しに失敗しました (boundary=%s)", boundary)
+            return False
         return True
     except Exception:
-        logger.debug("人狼: スナップショットの保存に失敗しました", exc_info=True)
+        logger.warning("人狼: スナップショットの保存に失敗しました", exc_info=True)
         return False
 
 

@@ -141,6 +141,9 @@ class PanelMixin:
 
 
     async def _eq_impl(self, interaction: discord.Interaction, mode: str = "flat"):
+        vc = interaction.guild.voice_client if interaction.guild else None
+        if vc and not is_same_voice_channel(interaction.user, vc):
+            return await interaction.response.send_message(embed=we(MUSIC_VC_REQUIRED_MESSAGE), ephemeral=True)
         state = self.get_state(interaction.guild_id)
         
         if mode in EQ_SETTINGS:
@@ -173,6 +176,8 @@ class PanelMixin:
     async def _volume_impl(self, r: Responder, value: float):
         if not 0.1 <= value <= 2.0:
             return await r.send(embed=we("音量は 0.1 から 2.0 の間で指定してください。"), ephemeral=True)
+        if r.voice_client and not is_same_voice_channel(r.user, r.voice_client):
+            return await r.send(embed=we(MUSIC_VC_REQUIRED_MESSAGE), ephemeral=True)
         state = self.get_state(r.guild.id)
         state['volume'] = value
         await r.send(embed=we(f"{VOL} 音量を `{value}` に設定しました。"))
@@ -182,6 +187,8 @@ class PanelMixin:
     async def _speed_impl(self, r: Responder, value: float):
         if not MIN_PLAYBACK_SPEED <= value <= MAX_PLAYBACK_SPEED:
             return await r.send(embed=we(f"速度は {MIN_PLAYBACK_SPEED} から {MAX_PLAYBACK_SPEED:g} の間で指定してください。"), ephemeral=True)
+        if r.voice_client and not is_same_voice_channel(r.user, r.voice_client):
+            return await r.send(embed=we(MUSIC_VC_REQUIRED_MESSAGE), ephemeral=True)
         state = self.get_state(r.guild.id)
         previous_speed = state.get('speed', 1.0)
         state['speed'] = value
