@@ -8,7 +8,7 @@ import io
 import time
 import hashlib
 import aiohttp
-from core import logfare
+from core.general import logfare
 import datetime
 import logging
 from discord.ui import View
@@ -18,9 +18,9 @@ from cogs.terminal import ALLOWED_USER_IDS
 from discord.ext.commands import Cog
 from PIL import Image, ImageDraw, ImageEnhance
 from zoneinfo import ZoneInfo
-from core.api_client import APIError
-from core.api_retry import run_with_retry
-from core.emojis import FAILED
+from core.support.api_client import APIError
+from core.support.api_retry import run_with_retry
+from core.support.emojis import FAILED
 
 from core.game.dungeon.common import *  # noqa: F401,F403 - shared constants/state
 from core.game.dungeon.common import ASSET_CONFIG, D2_MAP_H, D2_MAP_W, DUNGEON_IMG_CHANNEL_ID, D_BASE, D_CHEST, D_EVENT, D_FLOOR, D_MINE, D_REST, D_SHOP, D_SHRINE, D_SIGHT_R, D_STAIRS, D_TRAP, D_VIEW_R, D_WALL, TILE, TILE_COLORS  # noqa: F401
