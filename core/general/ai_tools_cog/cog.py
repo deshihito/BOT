@@ -14,6 +14,14 @@ from core.general import ai_tools_router
 
 logger = logging.getLogger(__name__)
 
+# インフラ系の失敗（判定APIの障害・タイムアウト・運用環境の問題）と、予期せぬ
+# 例外のときに利用者へ返す汎用文。詳細（APIキーの確認指示など運用者向けの
+# 内容や生の例外文）は利用者に見せず、サーバーログにのみ残す。
+GENERIC_FAILURE_MESSAGE = (
+    "AI toolsの判定または機能実行に失敗しました。時間をおいて再度お試しください。"
+    "解決しない場合はBotの運営に連絡してください。"
+)
+
 
 def _enabled() -> bool:
     return os.getenv("AITOOLS_ENABLED", "true").strip().lower() in {"1", "true", "yes", "on"}
@@ -393,12 +401,21 @@ class AIToolsCog(commands.Cog):
                 await ai_tools_router.invoke_action(self.bot, message, item, invoker=invoker, params=params)
         except ai_tools_router.AIToolsNoAction as exc:
             logger.info("AI tools skipped: %s", exc)
+        except ai_tools_router.AIToolsUnavailable as exc:
+            # 判定API・運用環境側の失敗。詳細は例外型名と原因チェーンつきで
+            # ログに残し、利用者には汎用文だけを返す（APIキーの確認指示など
+            # 運用者向けの文面や、str が空の例外による未完文を晒さない）。
+            logger.warning(
+                "AI tools unavailable: %s: %r (cause=%r) user=%s",
+                type(exc).__name__, exc, exc.__cause__, message.author.id,
+            )
+            await message.reply(GENERIC_FAILURE_MESSAGE, mention_author=False)
         except ai_tools_router.AIToolsDecisionError as exc:
             logger.info("AI tools stopped: %s", exc)
             await message.reply(f"AI toolsは実行されませんでした。理由: {exc}", mention_author=False)
         except Exception:
             logger.exception("AI tools failed: user=%s", message.author.id)
-            await message.reply("AI toolsの判定または機能実行に失敗しました。時間をおいて再度お試しください。解決しない場合はBotの運営に連絡してください。", mention_author=False)
+            await message.reply(GENERIC_FAILURE_MESSAGE, mention_author=False)
 
 
 async def setup(bot: commands.Bot):
