@@ -32,8 +32,8 @@ import discord
 from discord.ext import commands, tasks
 
 import config
-from core import clan as clan_core
-from core import gacha as gacha_core
+from core.game import clan as clan_core
+from core.game import gacha as gacha_core
 from core.general import economy_pool as economy_core
 from core.general import items as items_core
 from core.game import lottery as lottery_core
