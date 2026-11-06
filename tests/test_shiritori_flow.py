@@ -7,7 +7,7 @@ import unittest
 
 from game_fakes import FakeChannel, FakeGuild, FakeInteraction, FakeMember, fast_time, press, real_sleep
 from cogs import shiritori as s
-from core import party_ranking
+from core.game import party_ranking
 
 
 def msg(author, channel, content):

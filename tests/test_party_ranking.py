@@ -1,11 +1,11 @@
-"""core/party_ranking.py と /game のランキング表示のテスト。偽の Supabase で動かし、通信はしない。"""
+"""core/game/party_ranking.py と /game のランキング表示のテスト。偽の Supabase で動かし、通信はしない。"""
 
 import types
 import unittest
 
 import game_fakes  # noqa: F401  (sys.path と環境変数の準備)
 from game_fakes import FakeChannel, FakeGuild, FakeInteraction, FakeMember
-from core import party_ranking
+from core.game import party_ranking
 from cogs import game
 
 
@@ -80,7 +80,7 @@ class PartyRankingTest(unittest.IsolatedAsyncioTestCase):
     async def test_missing_function_falls_back_to_memory(self):
         client = FakeRPCClient(missing=True)
         r = party_ranking.PartyRanking(client=client)
-        with self.assertLogs("core.party_ranking", level="WARNING"):
+        with self.assertLogs("core.game.party_ranking", level="WARNING"):
             await r.record_win(1, 10, "ngword")
         self.assertTrue(r.remote_disabled)
         await r.record_win(1, 10, "ngword")

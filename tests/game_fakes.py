@@ -25,7 +25,7 @@ for _name, _value in {'BOT_API_BASE_URL': 'http://127.0.0.1:8787', 'BOT_API_KEY'
 
 import discord  # noqa: E402
 
-from core import party_ranking  # noqa: E402
+from core.game import party_ranking  # noqa: E402
 
 # テストでは Supabase に接続しない（勝利数はメモリだけ）
 party_ranking._shared = party_ranking.PartyRanking(client=None)

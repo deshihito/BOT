@@ -99,7 +99,7 @@ class UnifiedCallSitesTest(unittest.TestCase):
         )
 
     def test_d1_endpoint_default(self):
-        from core.autoplay import DEFAULT_D1_ENDPOINT
+        from core.game.autoplay import DEFAULT_D1_ENDPOINT
 
         self.assertEqual(DEFAULT_D1_ENDPOINT, "http://127.0.0.1:8082/v1/systemone")
         # 利用側 cog も同じ既定値を指すこと（生成には bot が要るためソースで確認）

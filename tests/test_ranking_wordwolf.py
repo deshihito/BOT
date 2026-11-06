@@ -5,7 +5,7 @@ import unittest
 
 from game_fakes import FakeChannel, FakeGuild, FakeMember
 from cogs import wordwolf
-from core import party_ranking
+from core.game import party_ranking
 
 
 class WordWolfRankingTest(unittest.IsolatedAsyncioTestCase):

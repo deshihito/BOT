@@ -16,7 +16,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from core import clan as clan_core
+from core.game import clan as clan_core
 
 
 class StoreTest(unittest.TestCase):
