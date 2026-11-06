@@ -24,7 +24,7 @@ import discord
 from discord.ext import commands
 
 from cogs.terminal import ALLOWED_USER_IDS
-from core import action_registry
+from core.general import action_registry
 from core.support import usage_stats
 
 logger = logging.getLogger(__name__)
