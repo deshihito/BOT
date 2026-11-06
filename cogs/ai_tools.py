@@ -15,6 +15,7 @@ from core.general.ai_tools_cog.cog import (
     logfare,
     ai_tools_router,
     logger,
+    GENERIC_FAILURE_MESSAGE,
     _enabled,
     _is_miq_trigger,
     _resolve_invoker,

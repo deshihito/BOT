@@ -1,3 +1,4 @@
+import asyncio
 import json
 import os
 import types
@@ -6,7 +7,7 @@ from unittest.mock import AsyncMock, patch
 
 import aiohttp
 
-from cogs.ai_tools import AIToolsCog, _enabled, _resolve_invoker
+from cogs.ai_tools import GENERIC_FAILURE_MESSAGE, AIToolsCog, _enabled, _resolve_invoker
 from cogs.general import ShortcutMessageInteraction
 from core import logfare
 from core.general import ai_tools_router
@@ -291,6 +292,128 @@ class AIToolsTest(unittest.IsolatedAsyncioTestCase):
             with self.assertRaisesRegex(RuntimeError, "LOGFARE_API_KEY"):
                 await logfare.decision("clef", "state", {"action": {"type": "choice"}})
         session.assert_not_called()
+
+
+class AIToolsUnavailableTest(unittest.IsolatedAsyncioTestCase):
+    """インフラ系失敗（AIToolsUnavailable）と利用者向け理由の切り分け。
+
+    実機バグ: タイムアウト時に asyncio.TimeoutError の str() が空で、
+    「AI toolsは実行されませんでした。理由: Clefの判定に失敗しました: 」と
+    理由が空の公開返信になった。インフラ系は汎用文だけを返し、詳細は
+    ログ専用とする。利用者向けの DecisionError は理由表示を維持する。
+    """
+
+    def setUp(self):
+        self.candidates = {
+            "vc:join": {"root": "vc", "value": "join", "label": "VC参加", "genre": "VC"},
+            "general:status": {"root": "general", "value": "status", "label": "状態", "genre": "一般"},
+        }
+
+    def _mention_message(self):
+        bot_user = types.SimpleNamespace(id=123)
+        return bot_user, types.SimpleNamespace(
+            author=types.SimpleNamespace(bot=False, id=456),
+            guild=types.SimpleNamespace(id=67),
+            mentions=[bot_user],
+            reference=None,
+            content="<@123> VCに入って",
+            reply=AsyncMock(),
+            channel=types.SimpleNamespace(typing=AsyncMock()),
+        )
+
+    # --- router 側の分類 -------------------------------------------------
+
+    async def test_timeout_exhaustion_is_unavailable_with_nonempty_detail(self):
+        decision = AsyncMock(side_effect=asyncio.TimeoutError())
+        with patch("core.general.ai_tools_router.logfare.decision", decision):
+            with self.assertRaises(ai_tools_router.AIToolsUnavailable) as ctx:
+                await ai_tools_router.decide_action("VCに参加して", self.candidates)
+        # 後方互換: DecisionError としても捕捉できる。
+        self.assertIsInstance(ctx.exception, ai_tools_router.AIToolsDecisionError)
+        # str が空の例外でも理由が空にならず、型名で追跡できる。
+        self.assertIn("TimeoutError", str(ctx.exception))
+        self.assertFalse(str(ctx.exception).rstrip().endswith(":"))
+        self.assertFalse(str(ctx.exception).rstrip().endswith(":"))
+
+    async def test_unauthorized_is_unavailable_keeping_ops_detail_for_logs(self):
+        decision = AsyncMock(side_effect=logfare.LogfareHTTPError(401))
+        with patch("core.general.ai_tools_router.logfare.decision", decision):
+            with self.assertRaises(ai_tools_router.AIToolsUnavailable) as ctx:
+                await ai_tools_router.decide_action("VCに参加して", self.candidates)
+        # 詳細（運用者向けの確認指示）は例外＝ログ側には残る。
+        self.assertIn("LOGFARE_API_KEY", str(ctx.exception))
+        decision.assert_awaited_once()
+
+    async def test_retryable_http_error_exhaustion_is_unavailable(self):
+        decision = AsyncMock(side_effect=logfare.LogfareHTTPError(503))
+        with patch("core.general.ai_tools_router.logfare.decision", decision):
+            with self.assertRaises(ai_tools_router.AIToolsUnavailable) as ctx:
+                await ai_tools_router.decide_action("VCに参加して", self.candidates)
+        self.assertIn("503", str(ctx.exception))
+
+    async def test_failed_envelope_is_unavailable(self):
+        decision = AsyncMock(return_value={"success": False, "errors": [{"message": "no access"}]})
+        with patch("core.general.ai_tools_router.logfare.decision", decision):
+            with self.assertRaises(ai_tools_router.AIToolsUnavailable):
+                await ai_tools_router.decide_action("依頼", self.candidates)
+
+    async def test_blocked_action_error_stays_user_facing(self):
+        bot = types.SimpleNamespace(get_cog=lambda name: None)
+        message = types.SimpleNamespace(author=types.SimpleNamespace(id=45))
+        item = {"root": "general", "value": "miq_settings"}
+        with self.assertRaises(ai_tools_router.AIToolsDecisionError) as ctx:
+            await ai_tools_router.invoke_action(bot, message, item)
+        self.assertNotIsInstance(ctx.exception, ai_tools_router.AIToolsUnavailable)
+        self.assertIn("実行できません", str(ctx.exception))
+
+    # --- cog 側の表示 ----------------------------------------------------
+
+    async def test_timeout_failure_replies_generic_message_only(self):
+        bot_user, message = self._mention_message()
+        cog = AIToolsCog(types.SimpleNamespace(user=bot_user))
+        decision = AsyncMock(side_effect=asyncio.TimeoutError())
+        with patch.dict(os.environ, {"AITOOLS_ENABLED": "true"}), patch(
+            "cogs.ai_tools.logfare.api_key", return_value="configured"
+        ), patch("core.general.ai_tools_router.logfare.decision", decision):
+            await cog.on_message(message)
+        message.reply.assert_awaited_once()
+        text = message.reply.await_args.args[0]
+        self.assertEqual(text, GENERIC_FAILURE_MESSAGE)
+        self.assertNotIn("理由", text)
+        self.assertNotIn("失敗しました: ", text)
+        self.assertNotIn("LOGFARE_API_KEY", text)
+
+    async def test_auth_failure_replies_generic_without_internal_instructions(self):
+        bot_user, message = self._mention_message()
+        cog = AIToolsCog(types.SimpleNamespace(user=bot_user))
+        decision = AsyncMock(side_effect=logfare.LogfareHTTPError(401))
+        with patch.dict(os.environ, {"AITOOLS_ENABLED": "true"}), patch(
+            "cogs.ai_tools.logfare.api_key", return_value="configured"
+        ), patch("core.general.ai_tools_router.logfare.decision", decision):
+            await cog.on_message(message)
+        message.reply.assert_awaited_once()
+        text = message.reply.await_args.args[0]
+        self.assertEqual(text, GENERIC_FAILURE_MESSAGE)
+        self.assertNotIn("APIキー", text)
+        self.assertNotIn("LOGFARE_API_KEY", text)
+
+    async def test_user_facing_decision_error_still_shows_reason(self):
+        bot_user, message = self._mention_message()
+        cog = AIToolsCog(types.SimpleNamespace(user=bot_user))
+        with patch.dict(os.environ, {"AITOOLS_ENABLED": "true"}), patch(
+            "cogs.ai_tools.logfare.api_key", return_value="configured"
+        ), patch(
+            "cogs.ai_tools.ai_tools_router.decide_action",
+            new_callable=AsyncMock,
+            side_effect=ai_tools_router.AIToolsDecisionError(
+                "MIQ設定はAI toolsから実行できません。/general から開いてください。"
+            ),
+        ):
+            await cog.on_message(message)
+        message.reply.assert_awaited_once()
+        text = message.reply.await_args.args[0]
+        self.assertIn("AI toolsは実行されませんでした。理由: ", text)
+        self.assertIn("MIQ設定はAI toolsから実行できません。/general から開いてください。", text)
 
 
 if __name__ == "__main__":

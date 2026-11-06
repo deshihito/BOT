@@ -24,6 +24,11 @@ from core import action_registry, logfare
 
 AITOOLS_MODEL = "clef"
 AITOOLS_TIMEOUT = float(os.getenv("AITOOLS_TIMEOUT", "30"))
+# リトライ既定は1（単発）のまま: 1回のタイムアウトで最大30秒待たせる設計で、
+# 自動リトライを増やすと過渡失敗時の待ちが倍化（最大60秒超）し、メンション
+# への応答としては「無反応」に見える。過渡失敗は利用者が再メンションすれば
+# 再試行できるため、既定では増やさない。運用で自動リトライしたい場合は
+# 環境変数 AITOOLS_RETRIES で増やせる。
 AITOOLS_RETRIES = max(1, int(os.getenv("AITOOLS_RETRIES", "1")))
 
 # 権限操作、削除・送金系などは代理実行対象外。
@@ -36,7 +41,17 @@ CONFIRM_ACTIONS = action_registry.AI_CONFIRM_IDS
 
 
 class AIToolsDecisionError(RuntimeError):
-    pass
+    """利用者に理由を示せる判定・実行エラー（理由文はそのまま返信してよい）。"""
+
+
+class AIToolsUnavailable(AIToolsDecisionError):
+    """判定API側・運用環境側の失敗（インフラ系）。
+
+    タイムアウトや接続エラー、APIキーの無効・権限不足、API のエンベロープ
+    失敗など、利用者の次の行動に繋がらない失敗に使う。メッセージには
+    運用者向けの詳細（APIキーの確認指示など）が含まれ得るため、呼び出し側は
+    利用者へそのまま見せず、汎用の失敗文だけを返して詳細はログに残すこと。
+    """
 
 
 class AIToolsNoAction(AIToolsDecisionError):
@@ -87,15 +102,17 @@ def action_candidates() -> dict[str, dict[str, Any]]:
 
 
 def _extract_choice(data: dict[str, Any], key: str) -> str:
+    # 応答エンベロープの失敗・形式不正は API 側の問題なのでインフラ系として扱う
+    # （理由文はログ専用。利用者には汎用文が返る）。
     if data.get("success") is False or data.get("errors"):
-        raise AIToolsDecisionError("Logfare decision APIが判定に失敗しました。")
+        raise AIToolsUnavailable("Logfare decision APIが判定に失敗しました。")
     # Workers AIの互換応答は {result: {model, answers}, success, errors, messages}。
     result = data.get("result")
     if isinstance(result, dict):
         data = result
     answers = data.get("answers")
     if not isinstance(answers, dict):
-        raise AIToolsDecisionError("Clef応答にanswersオブジェクトがありません。")
+        raise AIToolsUnavailable("Clef応答にanswersオブジェクトがありません。")
     answer = answers.get(key)
     if isinstance(answer, str):
         value = answer
@@ -104,7 +121,7 @@ def _extract_choice(data: dict[str, Any], key: str) -> str:
     else:
         value = data.get("choice")
     if not isinstance(value, str) or not value.strip():
-        raise AIToolsDecisionError("Clef応答にchoiceがありません。")
+        raise AIToolsUnavailable("Clef応答にchoiceがありません。")
     return value.strip().lower()
 
 
@@ -125,14 +142,17 @@ async def _request_decision(state: str, questions: dict[str, Any]) -> dict[str, 
         except asyncio.CancelledError:
             raise
         except logfare.LogfareHTTPError as exc:
+            # 401/403 やリトライ対象外の HTTP ステータスは運用環境側の問題。
+            # 確認指示などの詳細はこの例外メッセージ（＝ログ）にだけ残し、
+            # 利用者には汎用文が返るようインフラ系として送出する。
             if exc.status == 401:
-                raise AIToolsDecisionError("Logfare APIキーが無効です。運用環境のLOGFARE_API_KEYを確認してください。") from exc
+                raise AIToolsUnavailable("Logfare APIキーが無効です。運用環境のLOGFARE_API_KEYを確認してください。") from exc
             if exc.status == 403:
-                raise AIToolsDecisionError(
+                raise AIToolsUnavailable(
                     "LogfareがClef利用を拒否しました。APIキーの利用権限とClefのトレーニング利用オプトインを確認してください。"
                 ) from exc
             if exc.status not in {429, 500, 502, 503, 504}:
-                raise AIToolsDecisionError(f"Logfare decision APIがHTTP {exc.status}を返しました。") from exc
+                raise AIToolsUnavailable(f"Logfare decision APIがHTTP {exc.status}を返しました。") from exc
             last_error = exc
             if attempt + 1 < AITOOLS_RETRIES:
                 await asyncio.sleep(0.5)
@@ -140,7 +160,10 @@ async def _request_decision(state: str, questions: dict[str, Any]) -> dict[str, 
             last_error = exc
             if attempt + 1 < AITOOLS_RETRIES:
                 await asyncio.sleep(0.5)
-    raise AIToolsDecisionError(f"Clefの判定に失敗しました: {last_error}")
+    # last_error は repr で埋める: asyncio.TimeoutError は str() が空文字列で、
+    # そのままだと「…失敗しました: 」のように理由が空になる（実機で発生）。
+    detail = repr(last_error) if last_error is not None else "不明なエラー"
+    raise AIToolsUnavailable(f"Clefの判定に失敗しました: {detail}") from last_error
 
 
 async def decide_action(prompt: str, candidates: dict[str, dict[str, Any]]) -> str:
@@ -345,10 +368,11 @@ def _local_numeric_params(prompt: str, specs: list[action_registry.ParamSpec]) -
 def _answer_text(data: dict[str, Any], key: str) -> str | None:
     """decision 応答から key の回答文字列を取り出す（無い・不正なら None）。
 
-    エンベロープ自体が失敗を示している場合は AIToolsDecisionError にする。
+    エンベロープ自体が失敗を示している場合は、API 側の問題として
+    AIToolsUnavailable（インフラ系）にする。
     """
     if data.get("success") is False or data.get("errors"):
-        raise AIToolsDecisionError("Logfare decision APIが判定に失敗しました。")
+        raise AIToolsUnavailable("Logfare decision APIが判定に失敗しました。")
     result = data.get("result")
     if isinstance(result, dict):
         data = result
@@ -495,7 +519,9 @@ async def invoke_action(
         raise AIToolsDecisionError("MIQ設定はAI toolsから実行できません。/general から開いてください。")
     general = bot.get_cog("GeneralCog")
     if general is None:
-        raise AIToolsDecisionError("機能ディスパッチャーが読み込まれていません。")
+        # Bot 側の読み込み・構成の問題で、利用者にできることはないため
+        # インフラ系として扱い、利用者には汎用文を返す（詳細はログのみ）。
+        raise AIToolsUnavailable("機能ディスパッチャーが読み込まれていません。")
     cleaned: dict[str, Any] = {}
     if params:
         spec = action_registry.default_registry().get(f"{item['root']}:{item['value']}")
