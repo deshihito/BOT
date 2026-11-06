@@ -16,7 +16,7 @@ from types import SimpleNamespace
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from core import starter as starter_core
+from core.general import starter as starter_core
 from cogs import wallet as wallet_module
 
 
