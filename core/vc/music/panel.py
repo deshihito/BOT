@@ -40,6 +40,29 @@ logger = logging.getLogger("cogs.sio_music")
 
 
 class PanelMixin:
+    async def _delete_superseded_panel(self, message) -> None:
+        """新しいパネルに切り替わった旧パネルメッセージを消す。
+
+        消すのは Bot 自身のパネルだけ（state には Bot が投稿したパネルしか
+        入らないが、投稿者が確認できて自分でなければ念のため触らない）。
+        既に消えている・権限がない等の失敗は握って継続する（再生処理を
+        止めない）。呼び出し側は、スナップショットを新しいパネルの ID へ
+        更新してから呼ぶこと。
+        """
+        if message is None:
+            return
+        delete = getattr(message, "delete", None)
+        if not callable(delete):
+            return
+        author = getattr(message, "author", None)
+        bot_user = getattr(getattr(self, "bot", None), "user", None)
+        if author is not None and bot_user is not None and getattr(author, "id", None) != getattr(bot_user, "id", None):
+            return
+        try:
+            await delete()
+        except Exception:
+            logger.debug("旧音楽パネルの削除に失敗しました", exc_info=True)
+
     async def update_panel(self, guild_id: int):
         """現在の内部ステータスを読み取り、コントロールパネルをリアルタイム更新する"""
         state = self.get_state(guild_id)

@@ -161,6 +161,11 @@ class SearchMixin:
         state = self.get_state(r.guild.id)
         state['current_ctx'] = r.source
         view = build_music_panel_layout(self, r.guild.id, '# ' + MUSIC + ' ボイスコントロールパネル\nステータスを同期中...')
+        old_panel = state.get('panel_message')
         state['panel_message'] = await r.send(view=view, want_message=True)
-        await self.update_panel(r.guild.id)
+        # 先にスナップショットを新しいパネルへ付け替えてから旧パネルを消す
+        # （付け替え前に消すと、復旧参照が消えたメッセージを指してしまう）。
         self._save_music_snapshot(r.guild.id)
+        if old_panel is not None and old_panel is not state['panel_message']:
+            await self._delete_superseded_panel(old_panel)
+        await self.update_panel(r.guild.id)
