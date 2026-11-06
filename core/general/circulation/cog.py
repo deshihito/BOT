@@ -430,18 +430,23 @@ class CirculationCog(commands.Cog):
         await interaction.response.send_message(view=_wrap(view))
 
     async def show_lottery(self, interaction: discord.Interaction):
+        # 先にACKする: settle_lottery は締切到来時に当選者への送金（DB更新）
+        # を伴い、応答前に行うと panel_recovery に誤判定される。
+        await interaction.response.defer()
         await self.settle_lottery()
         view = LotteryView(self, interaction.user.id)
-        await interaction.response.send_message(view=_wrap(view))
+        await interaction.followup.send(view=_wrap(view))
 
     async def open_lottery_buy(self, interaction: discord.Interaction):
+        # 先にACKする（show_lottery と同じ理由）。
+        await interaction.response.defer()
         await self.settle_lottery()
         if self.lottery_store.remaining_allowance(str(interaction.user.id)) <= 0:
-            return await interaction.response.send_message(
+            return await interaction.followup.send(
                 circulation_action_failed(
                     f"チケットは1人{lottery_core.MAX_TICKETS_PER_USER}枚までです。"),
                 ephemeral=True)
-        await interaction.response.send_message(
+        await interaction.followup.send(
             view=_wrap(BuyLotteryView(self, interaction.user.id)))
 
     async def open_steal(self, interaction: discord.Interaction):

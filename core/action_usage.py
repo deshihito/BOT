@@ -14,6 +14,7 @@
 """
 from __future__ import annotations
 
+import asyncio
 import copy
 import logging
 from typing import Any, Iterable
@@ -131,3 +132,33 @@ async def record_safely(
         await record(store, int(guild_id), int(user_id), action_id)
     except Exception:
         logger.debug("action usage record failed: %s", action_id, exc_info=True)
+
+
+# 応答を待たせない記録タスクの保持場所（GC で消えないよう強参照で持つ）。
+_background_tasks: set[asyncio.Task] = set()
+
+
+def record_safely_in_background(
+    guild_id: int | None,
+    user_id: int | None,
+    action_id: str,
+    *,
+    store: Any = None,
+) -> asyncio.Task | None:
+    """``record_safely`` をバックグラウンドで実行し、呼び出し側を待たせない。
+
+    guild_settings の保存は KVStore 経由で自前APIへの書き込み（HTTP）を
+    伴うため、dispatch の入口で await すると Raspberry Pi では
+    panel_recovery の生存判定（RECOVERY_WAIT_SECONDS）を圧迫し、生存中の
+    パネルが「死んだパネル」と誤判定される。記録の成否は応答に影響しない
+    ので、パネル系 dispatch からはこちらを使う。実行中ループが無い場合は
+    何もせず None を返す。
+    """
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        return None
+    task = loop.create_task(record_safely(guild_id, user_id, action_id, store=store))
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
+    return task
