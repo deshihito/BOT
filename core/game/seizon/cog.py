@@ -8,6 +8,9 @@
 - 検知はユーザーごとに ``RECORD_INTERVAL`` に 1 回までに間引く（オンライン状態の変化は
   サーバーごとに何度も届くため）。
 - 登録者は起動後にまとめて読み込み、メモリに持つ。未登録者の発言では DB を触らない。
+- 「アクティブ頻度」の表示は回数ではなく「現在の高度」で表す。各検知が高度を
+  押し上げ（ブースト）、その寄与は時間とともに指数減衰する（``compute_altitude``）。
+  既存の検知ログから遅延計算するので DB スキーマ変更は不要。
 - 見回りタスクはエラーが出ても止まらない。
 - HTTP接続が瞬間的に切断される（``h2.ConnectionTerminated`` 等）ことがあるため、
   検知ログの INSERT は「一時エラー判定 + 指数バックオフ + ジッター + 直列化」で行う
@@ -17,6 +20,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import math
 import random
 from datetime import date, datetime, timedelta, timezone
 
@@ -137,6 +141,91 @@ def _today() -> date:
     return datetime.now(JST).date()
 
 
+# --- 高度モデル ---
+# 高度は「検知ブーストの指数減衰インパルス」で決まる単一の生きた指標。
+# 各検知イベントが高度を押し上げ、その寄与は半減期 ALTITUDE_HALF_LIFE_HOURS で
+# 半分になっていく: 高度(now) = Σ boost(signal) × 0.5 ** ((now - t_i) / 半減期)。
+# fujo_activities の既存ログから遅延計算するので DB スキーマ変更は不要で、
+# 過去ログを持つ既存ユーザーにもそのまま高度が付く。
+#
+# キャリブレーション（シミュレーションで検証、2026-11-06）:
+# 検知は 5 分に 1 回まで間引かれる前提で、半減期 30 時間・下記ブーストだと
+#   - 1日 ~32 回検知のヘビーユーザー: 約 4,400〜5,200 m（成層圏）
+#   - 1日 ~10 回検知の通常ユーザー:   約 1,300〜1,600 m（巡航高度）
+#   - 1日 ~3 回検知のライトユーザー:  約 330〜480 m（低空飛行）
+#   - PRESENCE のみ 2 回/日:          約 100 m（降下中）
+# 通常ユーザーが完全沈黙すると約 13 日で墜落（<1m）し、5 日で 100 m を切る。
+ALTITUDE_HALF_LIFE_HOURS = 30.0
+ALTITUDE_WINDOW_DAYS = 14  # これより古い寄与は最大でも 0.05 m 程度で無視できる
+ALTITUDE_BOOSTS = {"VOICE": 120.0, "MESSAGE": 90.0, "PRESENCE": 30.0}
+ALTITUDE_DEFAULT_BOOST = 60.0  # COMMAND など上記以外のシグナル
+ALTITUDE_CRASH_FLOOR = 1.0  # これ未満は「墜落」
+
+# (下限高度, 状態ラベル, embed の色) 高い順
+ALTITUDE_BANDS = (
+    (3000.0, "成層圏", 0x3498db),
+    (1000.0, "巡航高度", 0x2ecc71),
+    (300.0, "低空飛行", 0xf1c40f),
+    (50.0, "降下中", 0xe67e22),
+    (ALTITUDE_CRASH_FLOOR, "墜落寸前", 0xe74c3c),
+    (0.0, "墜落", 0x34495e),
+)
+
+
+def altitude_boost(signal_type) -> float:
+    """シグナル種別ごとのブースト量 (m)。VOICE > MESSAGE > PRESENCE。
+
+    VOICE は能動性が高く滞在も長い、MESSAGE は能動的な発信、PRESENCE は
+    オンライン化だけの受動的なシグナルなので小さくしている。
+    """
+    return ALTITUDE_BOOSTS.get(str(signal_type or "").upper(), ALTITUDE_DEFAULT_BOOST)
+
+
+def _record_dt(record: dict) -> datetime | None:
+    raw = record.get("detected_at")
+    if isinstance(raw, str):
+        return _parse_ts(raw)
+    if isinstance(raw, datetime):
+        return raw if raw.tzinfo else raw.replace(tzinfo=timezone.utc)
+    return None
+
+
+def compute_altitude(records, now: datetime) -> float:
+    """検知ログから ``now`` 時点の高度 (m) を計算する純関数。
+
+    ``records`` は ``detected_at`` と ``signal_type`` を持つ dict の列。
+    ``now`` より未来の記録と、計算窓（直近 ``ALTITUDE_WINDOW_DAYS`` 日）より
+    古い記録は無視する。時刻を引数で受け取るので単体テストしやすい。
+    """
+    total = 0.0
+    window_start = now - timedelta(days=ALTITUDE_WINDOW_DAYS)
+    for record in records:
+        dt = _record_dt(record)
+        if dt is None or dt > now or dt < window_start:
+            continue
+        age_hours = (now - dt).total_seconds() / 3600.0
+        total += altitude_boost(record.get("signal_type")) * 0.5 ** (age_hours / ALTITUDE_HALF_LIFE_HOURS)
+    return total
+
+
+def altitude_band(altitude: float) -> tuple[str, int]:
+    """高度帯の (状態ラベル, embed の色) を返す。"""
+    for floor, label, color in ALTITUDE_BANDS:
+        if altitude >= floor:
+            return label, color
+    return ALTITUDE_BANDS[-1][1], ALTITUDE_BANDS[-1][2]
+
+
+def hours_until_crash(altitude: float) -> float | None:
+    """このまま活動が無い場合に墜落（高度 <1m）するまでの時間。
+
+    既に墜落している場合は None。
+    """
+    if altitude < ALTITUDE_CRASH_FLOOR:
+        return None
+    return ALTITUDE_HALF_LIFE_HOURS * math.log2(altitude / ALTITUDE_CRASH_FLOOR)
+
+
 class FujoSurvival(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
@@ -168,7 +257,7 @@ class FujoSurvival(commands.Cog):
 
     FUJO_ACTIONS = [
         app_commands.Choice(name="追跡登録・解除", value="register"),
-        app_commands.Choice(name="アクティブ頻度", value="hindo"),
+        app_commands.Choice(name="現在の高度", value="hindo"),
         app_commands.Choice(name="ランキング", value="ranking"),
         app_commands.Choice(name="ストリークフリーズ", value="freeze"),
         app_commands.Choice(name="失踪警報を設定", value="panic_set"),
@@ -529,24 +618,50 @@ class FujoSurvival(commands.Cog):
         if not await self._require_registered(interaction, target.id, target.id == interaction.user.id):
             return
         now = datetime.now(timezone.utc)
-        records = await self._activities_since(now - timedelta(days=30), target.id)
-        if not records:
-            await self._reply(interaction, self.create_simple_embed("データなし", f"{target.mention} の過去 30 日の記録はありません。", 0x95a5a6), ephemeral=True)
-            return
-        ages = [(now - _parse_ts(r["detected_at"])).total_seconds() / 3600 for r in records]
-        count_24h = sum(a <= 24 for a in ages)
-        count_7d = sum(a <= 24 * 7 for a in ages)
-        count_30d = len(records)
-        active_days = len({_parse_ts(r["detected_at"]).astimezone(JST).date() for r in records})
+        records = await self._activities_since(
+            now - timedelta(days=ALTITUDE_WINDOW_DAYS), target.id, "detected_at, signal_type"
+        )
+        if records:
+            latest_rec = max(records, key=lambda r: _record_dt(r) or now)
+            latest_dt = _record_dt(latest_rec)
+            latest_signal = latest_rec.get("signal_type")
+        else:
+            latest = await self._latest_activity(target.id)
+            if not latest:
+                await self._reply(interaction, self.create_simple_embed("データなし", f"{target.mention} の記録はまだありません。活動が検知されると離陸します。", 0x95a5a6), ephemeral=True)
+                return
+            latest_dt = _parse_ts(latest["detected_at"])
+            latest_signal = latest.get("signal_type")
 
-        embed = discord.Embed(title=f"アクティブ頻度 - {target.display_name}", color=0x3498db)
+        altitude = compute_altitude(records, now)
+        altitude_24h_ago = compute_altitude(records, now - timedelta(hours=24))
+        label, color = altitude_band(altitude)
+
+        embed = discord.Embed(title=f"現在の高度 - {target.display_name}", color=color)
         embed.set_thumbnail(url=target.display_avatar.url)
-        embed.add_field(name="直近 24 時間", value=f"{count_24h} 回", inline=True)
-        embed.add_field(name="直近 7 日", value=f"{count_7d} 回", inline=True)
-        embed.add_field(name="直近 30 日", value=f"{count_30d} 回", inline=True)
-        embed.add_field(name="30 日のうち姿を見せた日", value=f"{active_days} 日", inline=True)
-        embed.add_field(name="1 日平均", value=f"約 {count_30d / 30:.1f} 回", inline=True)
-        embed.set_footer(text=f"{FOOTER}（検知は 5 分に 1 回まで数えます）")
+        embed.add_field(name="現在の高度", value=f"**{altitude:,.0f} m**", inline=True)
+        embed.add_field(name="状態", value=label, inline=True)
+        diff = altitude - altitude_24h_ago
+        if altitude_24h_ago <= 0 < altitude:
+            trend = "離陸しました 🛫"
+        elif diff > 1:
+            trend = f"上昇中 📈（24 時間で +{diff:,.0f} m）"
+        elif diff < -1:
+            trend = f"下降中 📉（24 時間で {diff:,.0f} m）"
+        else:
+            trend = "ほぼ水平飛行"
+        embed.add_field(name="高度の動き（24 時間）", value=trend, inline=True)
+        until = hours_until_crash(altitude)
+        if until is None:
+            fall_text = "墜落しています。何か活動が検知されれば再浮上できます。"
+        elif until >= 48:
+            fall_text = f"このまま活動がなくても、墜落まで約 {until / 24:.1f} 日あります。"
+        else:
+            fall_text = f"このまま活動がないと、約 {until:.0f} 時間で墜落します。"
+        embed.add_field(name="墜落まで", value=fall_text, inline=False)
+        unix_ts = int(latest_dt.timestamp())
+        embed.add_field(name="最終検知", value=f"<t:{unix_ts}:R>（{latest_signal or '-'}）", inline=False)
+        embed.set_footer(text=f"{FOOTER}（高度は検知のたびに上がり、時間とともに下がります）")
         await self._reply(interaction, embed)
 
     async def ranking(self, interaction: discord.Interaction, mode: str = "active"):
@@ -568,17 +683,22 @@ class FujoSurvival(commands.Cog):
             lines = [f"{i}. **{self._name(uid)}**: 最終検知 <t:{int(dt.timestamp())}:R>" for i, (uid, dt) in enumerate(pairs[:5], 1)]
             embed = discord.Embed(title="化石ランキング TOP5", color=0x34495e, description="\n".join(lines) or "まだ記録がありません。")
         else:
+            now = datetime.now(timezone.utc)
             rows = await self._fetch_all(
-                lambda: self.db_api.table("fujo_activities").select("user_id")
-                .gte("detected_at", (datetime.now(timezone.utc) - timedelta(days=30)).isoformat())
+                lambda: self.db_api.table("fujo_activities").select("user_id, detected_at, signal_type")
+                .gte("detected_at", (now - timedelta(days=ALTITUDE_WINDOW_DAYS)).isoformat())
                 .in_("user_id", list(ids))
             )
-            counts: dict[int, int] = {}
+            by_user: dict[int, list[dict]] = {}
             for r in rows:
-                counts[int(r["user_id"])] = counts.get(int(r["user_id"]), 0) + 1
-            top = sorted(counts.items(), key=lambda x: x[1], reverse=True)[:5]
-            lines = [f"{i}. **{self._name(uid)}**: {n} 回" for i, (uid, n) in enumerate(top, 1)]
-            embed = discord.Embed(title="アクティブランキング TOP5（30 日）", color=0x2ecc71, description="\n".join(lines) or "過去 30 日の記録がありません。")
+                by_user.setdefault(int(r["user_id"]), []).append(r)
+            scored = [(uid, compute_altitude(recs, now)) for uid, recs in by_user.items()]
+            scored.sort(key=lambda x: x[1], reverse=True)
+            lines = []
+            for i, (uid, alt) in enumerate(scored[:5], 1):
+                band_label, _ = altitude_band(alt)
+                lines.append(f"{i}. **{self._name(uid)}**: {alt:,.0f} m（{band_label}）")
+            embed = discord.Embed(title="高度ランキング TOP5", color=0x2ecc71, description="\n".join(lines) or "まだ誰も離陸していません。")
         embed.set_footer(text=FOOTER)
         await self._reply(interaction, embed)
 

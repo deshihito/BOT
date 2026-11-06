@@ -122,11 +122,11 @@ export const COMMAND_GUIDES: CommandGuide[] = [
       {
         slug: "survival",
         title: "生存確認",
-        description: "追跡・アクティブ頻度・失踪警報に関する機能です。",
+        description: "追跡・現在の高度・失踪警報に関する機能です。",
         functions: [
           { title: "追跡登録・解除", description: "生存確認の追跡対象を登録または解除します。" },
-          { title: "アクティブ頻度", description: "対象ユーザーの活動頻度を確認します。" },
-          { title: "生存確認ランキング", description: "生存確認の記録をランキングで見ます。" },
+          { title: "現在の高度", description: "対象ユーザーの現在の高度を確認します。高度は活動が検知されるたびに上がり、時間とともに下がります。" },
+          { title: "生存確認ランキング", description: "高度ランキングと化石ランキングを見ます。" },
           { title: "フリーズ・失踪警報解除", description: "追跡状態の停止や失踪警報の解除を操作します。" },
         ],
       },

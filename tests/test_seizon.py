@@ -10,7 +10,16 @@ from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock
 
 import cogs.seizon as seizon
-from cogs.seizon import FujoSurvival, _is_gateway_html_error, _is_transient_error, _parse_ts
+from cogs.seizon import (
+    FujoSurvival,
+    _is_gateway_html_error,
+    _is_transient_error,
+    _parse_ts,
+    altitude_band,
+    altitude_boost,
+    compute_altitude,
+    hours_until_crash,
+)
 
 JST = seizon.JST
 
@@ -229,6 +238,132 @@ class StatusEmbedTests(unittest.IsolatedAsyncioTestCase):
                                        display_avatar=types.SimpleNamespace(url=""))
         embed = await cog.status_embed_for(target)
         self.assertEqual(embed.title, "データなし")
+
+
+class AltitudeModelTests(unittest.TestCase):
+    """高度モデル（指数減衰インパルス）の純関数テスト。時刻を注入して固定する。"""
+
+    def setUp(self):
+        self.now = datetime(2026, 1, 15, 12, 0, tzinfo=timezone.utc)
+
+    def test_single_detection_gives_full_boost(self):
+        # 検知した瞬間はブースト量そのものが高度になる
+        self.assertAlmostEqual(compute_altitude([_record(self.now, "MESSAGE")], self.now), 90.0)
+        self.assertAlmostEqual(compute_altitude([_record(self.now, "VOICE")], self.now), 120.0)
+        self.assertAlmostEqual(compute_altitude([_record(self.now, "PRESENCE")], self.now), 30.0)
+
+    def test_signal_weights_order(self):
+        self.assertGreater(altitude_boost("VOICE"), altitude_boost("MESSAGE"))
+        self.assertGreater(altitude_boost("MESSAGE"), altitude_boost("PRESENCE"))
+        # 未知シグナルはデフォルトブースト
+        self.assertEqual(altitude_boost("COMMAND"), seizon.ALTITUDE_DEFAULT_BOOST)
+        self.assertEqual(altitude_boost(None), seizon.ALTITUDE_DEFAULT_BOOST)
+
+    def test_decays_with_half_life(self):
+        rec = [_record(self.now - timedelta(hours=seizon.ALTITUDE_HALF_LIFE_HOURS), "VOICE")]
+        self.assertAlmostEqual(compute_altitude(rec, self.now), 60.0)
+        rec2 = [_record(self.now - timedelta(hours=seizon.ALTITUDE_HALF_LIFE_HOURS * 2), "VOICE")]
+        self.assertAlmostEqual(compute_altitude(rec2, self.now), 30.0)
+
+    def test_long_inactivity_approaches_zero(self):
+        rec = [_record(self.now - timedelta(days=13), "MESSAGE")]
+        self.assertLess(compute_altitude(rec, self.now), 1.0)
+        # 計算窓（14日）より古い記録は数えない
+        old = [_record(self.now - timedelta(days=30), "MESSAGE")]
+        self.assertEqual(compute_altitude(old, self.now), 0.0)
+
+    def test_future_records_ignored(self):
+        rec = [_record(self.now + timedelta(hours=1), "MESSAGE")]
+        self.assertEqual(compute_altitude(rec, self.now), 0.0)
+
+    def test_accumulates_multiple_events(self):
+        recs = [_record(self.now, "MESSAGE"), _record(self.now, "VOICE")]
+        self.assertAlmostEqual(compute_altitude(recs, self.now), 210.0)
+
+    def test_band_labels(self):
+        self.assertEqual(altitude_band(5000)[0], "成層圏")
+        self.assertEqual(altitude_band(1500)[0], "巡航高度")
+        self.assertEqual(altitude_band(400)[0], "低空飛行")
+        self.assertEqual(altitude_band(100)[0], "降下中")
+        self.assertEqual(altitude_band(10)[0], "墜落寸前")
+        self.assertEqual(altitude_band(0.5)[0], "墜落")
+        self.assertEqual(altitude_band(0)[0], "墜落")
+
+    def test_hours_until_crash(self):
+        self.assertIsNone(hours_until_crash(0.5))
+        # 高度 2^(n) m なら墜落まで 半減期 × n 時間
+        hl = seizon.ALTITUDE_HALF_LIFE_HOURS
+        self.assertAlmostEqual(hours_until_crash(1024.0), hl * 10)
+        self.assertAlmostEqual(hours_until_crash(1.0), 0.0)
+
+
+class HindoAltitudeDisplayTests(unittest.IsolatedAsyncioTestCase):
+    async def _run_hindo(self, records):
+        cog = _cog(users={7: {"streak_count": 1, "is_frozen": False}})
+        cog._activities_since = AsyncMock(return_value=records)
+        cog._latest_activity = AsyncMock(return_value=None)
+        replies = []
+
+        async def fake_reply(interaction, embed, ephemeral=False):
+            replies.append(embed)
+
+        cog._reply = fake_reply
+        target = types.SimpleNamespace(
+            id=7, display_name="誰か", mention="<@7>",
+            display_avatar=types.SimpleNamespace(url="https://example.com/a.png"),
+        )
+        interaction = types.SimpleNamespace(user=target)
+        await cog.hindo(interaction, target)
+        return replies
+
+    async def test_shows_altitude_not_counts(self):
+        now = datetime.now(timezone.utc)
+        records = [_record(now, "VOICE"), _record(now, "MESSAGE")]
+        replies = await self._run_hindo(records)
+        self.assertEqual(len(replies), 1)
+        embed = replies[0]
+        self.assertEqual(embed.title, "現在の高度 - 誰か")
+        fields = {f.name: f.value for f in embed.fields}
+        self.assertIn("現在の高度", fields)
+        self.assertIn("210 m", fields["現在の高度"])
+        self.assertEqual(fields["状態"], "降下中")
+        # 回数の生表示は出さない
+        self.assertNotIn("直近 24 時間", fields)
+        self.assertNotIn("直近 7 日", fields)
+        self.assertNotIn("直近 30 日", fields)
+
+    async def test_no_records_is_data_none(self):
+        replies = await self._run_hindo([])
+        self.assertEqual(replies[0].title, "データなし")
+
+
+class RankingAltitudeTests(unittest.IsolatedAsyncioTestCase):
+    async def test_active_ranking_uses_altitude(self):
+        cog = _cog(users={7: {}, 8: {}})
+        now = datetime.now(timezone.utc)
+        rows = [
+            {"user_id": 7, "detected_at": now.isoformat(), "signal_type": "VOICE"},
+            {"user_id": 8, "detected_at": now.isoformat(), "signal_type": "PRESENCE"},
+        ]
+        cog._fetch_all = AsyncMock(return_value=rows)
+        replies = []
+
+        async def fake_reply(interaction, embed, ephemeral=False):
+            replies.append(embed)
+
+        cog._reply = fake_reply
+        interaction = types.SimpleNamespace(
+            guild=None,
+            response=types.SimpleNamespace(defer=AsyncMock()),
+        )
+        await cog.ranking(interaction, "active")
+        embed = replies[0]
+        self.assertEqual(embed.title, "高度ランキング TOP5")
+        self.assertIn("120 m", embed.description)
+        self.assertIn("30 m", embed.description)
+        # VOICE の方が上位
+        self.assertLess(embed.description.index("120 m"), embed.description.index("30 m"))
+        self.assertNotIn("回", embed.description)
 
 
 class SimpleEmbedTests(unittest.TestCase):
