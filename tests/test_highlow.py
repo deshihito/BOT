@@ -1,4 +1,4 @@
-"""ハイ＆ロー（core/game/highlow.py）のテスト。同点は外れ扱い。"""
+"""ハイ＆ロー（core/game/highlow.py）のテスト。同点は引き分け扱い（2026-11-07 仕様変更）。"""
 
 import random
 import unittest
@@ -44,13 +44,28 @@ class GuessTest(unittest.TestCase):
         self.assertFalse(game.cleared)
         self.assertEqual(game.streak, 0)
 
-    def test_tie_is_a_miss(self):
-        game = self.make(7, [7])
+    def test_tie_is_a_draw_not_a_miss(self):
+        # 仕様変更 (2026-11-07): 同点は外れではなく引き分け。その札を
+        # 今のカードにして、ストリークを維持したまま続けられる。
+        game = self.make(7, [7, 9])
         self.assertFalse(game.guess("high"))
-        self.assertTrue(game.finished)
-        game2 = self.make(7, [7])
-        self.assertFalse(game2.guess("low"))
-        self.assertTrue(game2.finished)
+        self.assertEqual(game.last_outcome, "tie")
+        self.assertFalse(game.finished)
+        self.assertEqual(game.streak, 0)
+        self.assertEqual(game.current[0], 7)
+        # 同点の札から続けて当てればストリークが伸びる
+        self.assertTrue(game.guess("high"))
+        self.assertEqual(game.streak, 1)
+        self.assertEqual(game.last_outcome, "correct")
+
+    def test_tie_on_last_card_finishes_with_streak_kept(self):
+        game = self.make(5, [9, 9])
+        self.assertTrue(game.guess("high"))     # 9 を当てて streak 1、残り1枚
+        self.assertFalse(game.guess("high"))    # 最後の1枚が同点 9
+        self.assertEqual(game.last_outcome, "tie")
+        self.assertTrue(game.finished)          # 山札が尽きたので終了
+        self.assertFalse(game.cleared)
+        self.assertEqual(game.streak, 1)
 
     def test_clearing_the_deck(self):
         game = self.make(5, [9])

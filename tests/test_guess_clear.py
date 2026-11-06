@@ -27,6 +27,18 @@ def run(coro):
     return asyncio.run(coro)
 
 
+def sent_text(entry):
+    """送信内容（content と V2 パネルのテキスト）をまとめた文字列。"""
+    parts = [entry.get('content') or '']
+    view = entry.get('view')
+    if view is not None:
+        for item in view.walk_children():
+            text = getattr(item, 'content', None)
+            if text:
+                parts.append(text)
+    return "\n".join(parts)
+
+
 def make_interaction(bot):
     interaction, recorder, objects = fake_interaction(bot)
     sent = []
@@ -34,7 +46,8 @@ def make_interaction(bot):
     def capture(original):
         async def call(*args, **kwargs):
             sent.append({'content': kwargs.get('content', args[0] if args else None),
-                         'embed': kwargs.get('embed'), 'ephemeral': kwargs.get('ephemeral', False)})
+                         'embed': kwargs.get('embed'), 'view': kwargs.get('view'),
+                         'ephemeral': kwargs.get('ephemeral', False)})
             return await original(*args, **kwargs)
         return call
 
@@ -87,7 +100,7 @@ class GuessTest(unittest.TestCase):
         sent, played = self.play(10, choice=1, answer=2)
         self.assertTrue(played)
         self.assertEqual(self.balance(), 85)
-        self.assertIn('-15', sent[0]['embed'].fields[0].value)
+        self.assertIn('-15', sent_text(sent[0]))
         self.assertEqual(self.history()[-1]['reason'], 'guess_loss')
         self.assertEqual(self.history()[-1]['amount'], 15)
 
@@ -96,7 +109,7 @@ class GuessTest(unittest.TestCase):
         sent, played = self.play(10, choice=3, answer=3)
         self.assertTrue(played)
         self.assertEqual(self.balance(), 128)
-        self.assertIn('+28', sent[0]['embed'].fields[0].value)
+        self.assertIn('+28', sent_text(sent[0]))
         self.assertEqual(self.history()[-1]['reason'], 'guess_win')
 
     def test_bet_above_balance_is_rejected(self):
@@ -137,7 +150,7 @@ class GuessTest(unittest.TestCase):
         self.cog._apply_delta = spend_first
         sent, played = self.play(60, choice=1, answer=2)
         self.assertEqual(self.balance(), 0)
-        self.assertIn('-5', sent[0]['embed'].fields[0].value)
+        self.assertIn('-5', sent_text(sent[0]))
 
     def test_update_failure_is_reported_not_silent(self):
         self.set_balance(100)

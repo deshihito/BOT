@@ -27,7 +27,7 @@ from core.support.ngword.cog import (
     contains_ng_char,
     contains_ng,
     NGGame,
-    JoinView,
+    PlayPanel,
     PlayView,
     NGWord,
     setup,

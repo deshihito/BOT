@@ -1,5 +1,6 @@
 import discord
 from core.game import game_panels, game_restore
+from core.game.game_v2 import GamePanelView, LobbyView, text_panel
 from discord.ext import commands
 
 from core.game import autoplay, party_ranking
@@ -133,53 +134,38 @@ class UnoGame:
 # 2. UI コンポーネント (ボタン・セレクトメニュー)
 # ==========================================
 
-class JoinView(discord.ui.View):
-    """参加受付用のビューパネル"""
-    def __init__(self, game: UnoGame, cog):
-        super().__init__(timeout=60.0)
+class JoinView(LobbyView):
+    """参加受付用のロビー（共通ロビー規格）。
+
+    従来の JoinView の名前と役割（参加・即時スタート・キャンセル）を
+    保ちつつ、実体は共通ロビーに寄せた。開始/キャンセルの反映は
+    start_recruit 側のポーリングと、キャンセル時の即時片付けで行う。
+    旧 custom_id（uno_join_btn 等）は募集パネルが一過性のため廃止した。
+    """
+
+    def __init__(self, game: UnoGame, cog, host=None):
         self.game = game
         self.cog = cog
+        super().__init__(
+            title="[-] UNO 対戦ルーム", host=host or _host_ref(game.host_id),
+            min_players=2, max_players=99,
+            note="ゲームを開始するには2人以上のプレイヤーが必要です。\n1分後に自動的にゲームが開始されます。",
+            timeout=90.0)
+        # ラベルの言い回しだけ従来に寄せる
+        self.start.label = "即時スタート"
+        self.cancel.label = "ゲームをキャンセル"
+        self._sync_body()
 
-    @discord.ui.button(label="参加する", style=discord.ButtonStyle.green, custom_id="uno_join_btn")
-    async def join(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if self.game.is_started:
-            return await interaction.response.send_message("既にゲームは開始されています。", ephemeral=True)
-        if interaction.user.id in self.game.players:
-            return await interaction.response.send_message("既に参加しています！", ephemeral=True)
-
-        self.game.players.append(interaction.user.id)
-        self.game.hands[interaction.user.id] = []
-
-        embed = interaction.message.embeds[0]
-        players_text = "\n".join([f"* <@{p_id}>" for p_id in self.game.players])
-        embed.set_field_at(0, name=f"参加者 ({len(self.game.players)}人)", value=players_text, inline=False)
-
-        await interaction.response.edit_message(embed=embed, view=self)
-
-    @discord.ui.button(label="即時スタート", style=discord.ButtonStyle.blurple, custom_id="uno_force_start_btn")
-    async def force_start(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if interaction.user.id != self.game.host_id:
-            return await interaction.response.send_message("ホスト（部屋を建てた人）だけが即時スタートできます。", ephemeral=True)
-        if self.game.is_started or self.cog.games.get(self.game.channel_id) is not self.game:
-            return await interaction.response.send_message("この募集は既に開始または終了しています。", ephemeral=True)
-        if len(self.game.players) < 2:
-            return await interaction.response.send_message("開始するには最低2人のプレイヤーが必要です！", ephemeral=True)
-
-        self.stop()
-        await interaction.response.defer()
-        await self.cog.start_uno_game(interaction.channel, self.game)
-
-    @discord.ui.button(label="ゲームをキャンセル", style=discord.ButtonStyle.red, custom_id="uno_cancel_btn")
-    async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if interaction.user.id != self.game.host_id:
-            return await interaction.response.send_message("ホスト（部屋を建てた人）だけがキャンセルできます。", ephemeral=True)
-
-        self.stop()
-        if self.cog.games.get(self.game.channel_id) is self.game:
+    async def _on_cancel(self, interaction: discord.Interaction):
+        await super()._on_cancel(interaction)
+        if self.cancelled and self.cog.games.get(self.game.channel_id) is self.game:
             del self.cog.games[self.game.channel_id]
             self.cog._clear_snapshot(self.game.channel_id)
 
-        await interaction.response.edit_message(content="[!] ゲームの募集がキャンセルされました。", embed=None, view=None)
+
+def _host_ref(host_id):
+    from types import SimpleNamespace
+    return SimpleNamespace(id=host_id, display_name="", mention=f"<@{host_id}>")
 
 
 class CardSelect(discord.ui.Select):
@@ -275,18 +261,12 @@ class CardSelect(discord.ui.Select):
                 self.game.pending_draw_count += 4
                 self.game.active_plus_type = "Wild+4"
 
-            view = WildColorView(self.game, selected_card, current_player_id, self.cog, action_msg, uno_penalty_check)
-            if self.game.active_panel_message:
-                try:
-                    await self.game.active_panel_message.delete()
-                except discord.NotFound:
-                    pass
-
+            view = WildColorView(self.game, selected_card, current_player_id, self.cog, action_msg, uno_penalty_check,
+                                 body=f"<@{current_player_id}> さん、次の色を選択してください！（{int(COLOR_TIMEOUT)}秒以内）")
             if self.game.active_view is not None:
                 self.game.active_view.stop()
             self.game.active_view = view
             self.game.active_panel_message = await game_panels.replace(interaction.channel, "party",
-                content=f"<@{current_player_id}> さん、次の色を選択してください！（{int(COLOR_TIMEOUT)}秒以内）",
                 view=view
             )
             # 色選択待ちもチェックポイントとして保存する（復旧時は色選択から再開）
@@ -340,10 +320,12 @@ class CardSelect(discord.ui.Select):
         await self.cog.send_game_panel(self.cog.bot.get_channel(self.game.channel_id), self.game, info_msg=combined_msg)
 
 
-class WildColorView(discord.ui.View):
-    """ワイルドカード使用時に色を選ぶボタン群"""
-    def __init__(self, game: UnoGame, card_type: str, player_id: int, cog, action_msg: str, uno_penalty: bool):
-        super().__init__(timeout=COLOR_TIMEOUT)
+class WildColorView(GamePanelView):
+    """ワイルドカード使用時に色を選ぶパネル（V2）。ボタンは色名の属性。"""
+
+    def __init__(self, game: UnoGame, card_type: str, player_id: int, cog, action_msg: str, uno_penalty: bool,
+                 body: str = ""):
+        super().__init__("", body, timeout=COLOR_TIMEOUT)
         self.chosen = False
         self.game = game
         self.card_type = card_type
@@ -351,6 +333,15 @@ class WildColorView(discord.ui.View):
         self.cog = cog
         self.action_msg = action_msg
         self.uno_penalty = uno_penalty
+        self.red = discord.ui.Button(label="赤", style=discord.ButtonStyle.danger)
+        self.red.callback = self._red
+        self.blue = discord.ui.Button(label="青", style=discord.ButtonStyle.primary)
+        self.blue.callback = self._blue
+        self.yellow = discord.ui.Button(label="黄", style=discord.ButtonStyle.success)
+        self.yellow.callback = self._yellow
+        self.green = discord.ui.Button(label="緑", style=discord.ButtonStyle.secondary)
+        self.green.callback = self._green
+        self.add_row(self.red, self.blue, self.yellow, self.green)
 
     async def handle_color_choice(self, interaction: discord.Interaction, color: str):
         if interaction.user.id != self.player_id:
@@ -393,27 +384,27 @@ class WildColorView(discord.ui.View):
         channel = self.cog.bot.get_channel(self.game.channel_id)
         await self.apply_color(channel, color, note="（時間切れのため自動で選択）")
 
-    @discord.ui.button(label="赤", style=discord.ButtonStyle.danger, custom_id="color_red")
-    async def red(self, interaction: discord.Interaction, button: discord.ui.Button):
+    async def _red(self, interaction: discord.Interaction):
         await self.handle_color_choice(interaction, "赤")
 
-    @discord.ui.button(label="青", style=discord.ButtonStyle.primary, custom_id="color_blue")
-    async def blue(self, interaction: discord.Interaction, button: discord.ui.Button):
+    async def _blue(self, interaction: discord.Interaction):
         await self.handle_color_choice(interaction, "青")
 
-    @discord.ui.button(label="黄", style=discord.ButtonStyle.success, custom_id="color_yellow")
-    async def yellow(self, interaction: discord.Interaction, button: discord.ui.Button):
+    async def _yellow(self, interaction: discord.Interaction):
         await self.handle_color_choice(interaction, "黄")
 
-    @discord.ui.button(label="緑", style=discord.ButtonStyle.secondary, custom_id="color_green")
-    async def green(self, interaction: discord.Interaction, button: discord.ui.Button):
+    async def _green(self, interaction: discord.Interaction):
         await self.handle_color_choice(interaction, "緑")
 
 
-class GameControlView(discord.ui.View):
-    """メインゲーム進行中、手番プレイヤーが使用する操作ビュー"""
-    def __init__(self, game: UnoGame, playable_cards: list, cog):
-        super().__init__(timeout=TURN_TIMEOUT)
+class GameControlView(GamePanelView):
+    """メインゲーム進行中、手番プレイヤーが使用する操作パネル（V2）。
+
+    セレクトは self.selects、手札確認ボタンは self.check_hand。
+    """
+
+    def __init__(self, game: UnoGame, playable_cards: list, cog, body: str = ""):
+        super().__init__("[-] UNO プレイ中", body, timeout=TURN_TIMEOUT)
         self.game = game
         self.cog = cog
         self.player_id = game.players[game.current_player_idx]
@@ -426,8 +417,14 @@ class GameControlView(discord.ui.View):
             chunks.append(rest[:SELECT_LIMIT])
             rest = rest[SELECT_LIMIT:]
         chunks = chunks[:4]  # 手札確認ボタンの行を残す（カードは最大54種類なので4行で足りる）
+        self.selects = []
         for i, chunk in enumerate(chunks):
-            self.add_item(CardSelect(game, chunk, cog, include_draw=(i == 0), page=i + 1, pages=len(chunks), row=i))
+            select = CardSelect(game, chunk, cog, include_draw=(i == 0), page=i + 1, pages=len(chunks))
+            self.selects.append(select)
+            self.add_row(select)
+        self.check_hand = discord.ui.Button(label="手札を確認", style=discord.ButtonStyle.secondary)
+        self.check_hand.callback = self._check_hand
+        self.add_row(self.check_hand)
 
     async def on_timeout(self):
         """手番のプレイヤーが時間内に操作しなかったら、自動で引いてパスする。全員分続いたら放置とみなして終了。"""
@@ -455,8 +452,7 @@ class GameControlView(discord.ui.View):
         game.advance_turn()
         await self.cog.send_game_panel(channel, game, info_msg=msg)
 
-    @discord.ui.button(label="手札を確認", style=discord.ButtonStyle.secondary, custom_id="uno_check_hand_btn", row=4)
-    async def check_hand(self, interaction: discord.Interaction, button: discord.ui.Button):
+    async def _check_hand(self, interaction: discord.Interaction):
         """自分にだけ見えるメッセージで全手札の一覧を表示する"""
         user_hand = self.game.hands.get(interaction.user.id, [])
         if not user_hand:
@@ -471,14 +467,18 @@ class GameControlView(discord.ui.View):
     # ==========================================
     # 4. UNO宣言システム (チャットイベント検知)
     # ==========================================
-class UnoDeclareView(discord.ui.View):
-    def __init__(self, game: UnoGame, player_id: int):
-        super().__init__(timeout=5.0)
+class UnoDeclareView(GamePanelView):
+    """UNO宣言パネル（V2）。宣言ボタンは属性 declare_uno。"""
+
+    def __init__(self, game: UnoGame, player_id: int, body: str = ""):
+        super().__init__("[-] UNO 宣言", body, timeout=5.0)
         self.game = game
         self.player_id = player_id
+        self.declare_uno = discord.ui.Button(label="UNO!", style=discord.ButtonStyle.danger)
+        self.declare_uno.callback = self._declare_uno
+        self.add_row(self.declare_uno)
 
-    @discord.ui.button(label="UNO!", style=discord.ButtonStyle.red)
-    async def declare_uno(self, interaction: discord.Interaction, button: discord.ui.Button):
+    async def _declare_uno(self, interaction: discord.Interaction):
         if interaction.user.id != self.player_id:
             return await interaction.response.send_message(
                 "あなたのUNOボタンではありません。",
@@ -487,7 +487,7 @@ class UnoDeclareView(discord.ui.View):
 
         self.game.uno_declared = True
 
-        button.disabled = True
+        self.clear_rows()
         await interaction.response.edit_message(view=self)
 
         await interaction.followup.send(
@@ -553,17 +553,14 @@ class Uno(commands.Cog):
         return True
 
     async def uno_declaration_timer(self, channel, game: UnoGame, player_id: int):
-        view = UnoDeclareView(game, player_id)
-        uno_msg = await game_panels.replace(channel, "party",
-            f"<@{player_id}> さん、5秒以内にUNOを宣言してください！",
-            view=view
-        )
+        view = UnoDeclareView(game, player_id,
+                              body=f"<@{player_id}> さん、5秒以内にUNOを宣言してください！")
+        uno_msg = await game_panels.replace(channel, "party", view=view)
 
         await asyncio.sleep(5.0)
 
         try:
-            for child in view.children:
-                child.disabled = True
+            view.clear_rows()
 
             await uno_msg.edit(view=view)
         except Exception:
@@ -599,30 +596,32 @@ class Uno(commands.Cog):
         game.hands[interaction.user.id] = []
         self.games[channel_id] = game
 
-        embed = discord.Embed(
-            title="[-] UNO 対戦ルーム",
-            description="ゲームを開始するには2人以上のプレイヤーが必要です。\n1分後に自動的にゲームが開始されます。",
-            color=discord.Color.gold()
-        )
-        embed.add_field(name=f"参加者 (1人)", value=f"* <@{interaction.user.id}>", inline=False)
-
-        view = JoinView(game, self)
+        view = JoinView(game, self, host=interaction.user)
         await interaction.response.send_message("[+] UNOゲームの募集を開始しました！")
-        game.active_panel_message = await game_panels.replace(interaction.channel, "party", embed=embed, view=view)
+        game.active_panel_message = await game_panels.replace(interaction.channel, "party", view=view)
 
-        await asyncio.sleep(60)
+        # 募集は60秒。即時スタート/キャンセルはポーリングで拾う
+        for _ in range(120):
+            await asyncio.sleep(0.5)
+            if view.cancelled or view.started:
+                break
+            if self.games.get(channel_id) is not game:
+                return
         view.stop()
 
         # キャンセル・終了後に同じチャンネルで新しく募集が建っていても、それは別のゲームなので触らない
         if self.games.get(channel_id) is game and not game.is_started:
+            if view.cancelled:
+                return  # 片付けは JoinView._on_cancel で済ませた
+            game.players = list(view.players)
+            game.hands = {pid: [] for pid in game.players}
             if len(game.players) >= 2:
                 await self.start_uno_game(interaction.channel, game)
             else:
                 del self.games[channel_id]
-                try:
-                    await game.active_panel_message.edit(content="[!] 参加人数が足りなかったため（最低2人）、ゲームの募集を終了しました。", embed=None, view=None)
-                except discord.NotFound:
-                    pass
+                await game_panels.clear(interaction.channel, "party")
+                await interaction.channel.send(
+                    view=text_panel("", "[!] 参加人数が足りなかったため（最低2人）、ゲームの募集を終了しました。"))
 
     async def force_end(self, interaction: discord.Interaction):
         """/game の UNO 画面の「ゲームを終了」から呼ぶ。参加者・ホスト・管理者のみ（旧 /uno_end と同じ）。"""
@@ -651,7 +650,7 @@ class Uno(commands.Cog):
                 logger.debug("UNO: 終了時のパネル削除に失敗しました", exc_info=True)
         channel = channel or self.bot.get_channel(game.channel_id)
         if channel is not None:
-            await channel.send(reason)
+            await channel.send(view=text_panel("", reason))
 
     async def start_uno_game(self, channel, game: UnoGame):
         game.is_started = True
@@ -675,13 +674,7 @@ class Uno(commands.Cog):
         await self.send_game_panel(channel, game, info_msg=start_msg)
 
     async def send_game_panel(self, channel, game: UnoGame, info_msg: str = ""):
-        """ターン進行用の総合ゲームパネルを送信する"""
-        if game.active_panel_message:
-            try:
-                await game.active_panel_message.delete()
-            except discord.NotFound:
-                pass
-
+        """ターン進行用の総合ゲームパネルを送信する（旧パネルは引き継ぎ削除）"""
         current_player_id = game.players[game.current_player_idx]
         playable_cards = game.get_playable_cards(current_player_id)
 
@@ -700,17 +693,16 @@ class Uno(commands.Cog):
                     active_color = card.split("の")[0]
                     break
 
-        embed = discord.Embed(
-            title="[-] UNO プレイ中",
-            description=info_msg if info_msg else "各自カードを選択してゲームを進めてください。",
-            color=self.get_embed_color(active_color)
-        )
-        embed.add_field(name="現在の場のカード", value=f"-> **[{current_top}]**", inline=True)
-        embed.add_field(name="指定された色", value=f"Color: **[{active_color}]**", inline=True)
+        body = [info_msg if info_msg else "各自カードを選択してゲームを進めてください。", ""]
+        body.append("## 現在の場のカード")
+        body.append(f"-> **[{current_top}]**")
+        body.append("## 指定された色")
+        body.append(f"Color: **[{active_color}]**")
 
-        # 累積がある場合は警告として埋め込みに表示
+        # 累積がある場合は警告として表示
         if game.pending_draw_count > 0:
-            embed.add_field(name="[警告] ドロー累積中", value=f"⚠️ 次の手番は **{game.pending_draw_count}枚** 累積しています！", inline=False)
+            body.append("## [警告] ドロー累積中")
+            body.append(f"⚠️ 次の手番は **{game.pending_draw_count}枚** 累積しています！")
 
         order_list = []
         for idx, p_id in enumerate(game.players):
@@ -718,14 +710,15 @@ class Uno(commands.Cog):
             marker = ">> " if idx == game.current_player_idx else "* "
             order_list.append(f"{marker}<@{p_id}>: 手札 {hand_count}枚")
 
-        embed.add_field(name="プレイヤー順", value="\n".join(order_list), inline=False)
-        embed.set_footer(text=f"手番プレイヤーは下のセレクトメニューからカードを選択してください（{int(TURN_TIMEOUT // 60)}分以内。過ぎると自動で1枚引いてパス）。/game の UNO 画面の「ゲームを終了」で終了できます。")
+        body.append("## プレイヤー順")
+        body.append("\n".join(order_list))
+        body.append(f"-# 手番プレイヤーは下のセレクトメニューからカードを選択してください（{int(TURN_TIMEOUT // 60)}分以内。過ぎると自動で1枚引いてパス）。/game の UNO 画面の「ゲームを終了」で終了できます。")
 
         if game.active_view is not None:
             game.active_view.stop()
-        view = GameControlView(game, playable_cards, self)
+        view = GameControlView(game, playable_cards, self, body="\n".join(body))
         game.active_view = view
-        game.active_panel_message = await game_panels.replace(channel, "party", embed=embed, view=view)
+        game.active_panel_message = await game_panels.replace(channel, "party", view=view)
         # 手番が確定した時点をチェックポイントとして保存する（復旧はここから再開する）
         self._save_snapshot(game, channel)
 
@@ -808,12 +801,11 @@ class Uno(commands.Cog):
         if isinstance(awaiting, dict) and awaiting.get("player_id") in players:
             view = WildColorView(game, awaiting.get("card_type"), awaiting["player_id"],
                                  self, awaiting.get("action_msg") or "",
-                                 bool(awaiting.get("uno_penalty")))
+                                 bool(awaiting.get("uno_penalty")),
+                                 body=f"<@{awaiting['player_id']}> さん、次の色を選択してください！（{int(COLOR_TIMEOUT)}秒以内）")
             game.active_view = view
             game.active_panel_message = await game_panels.replace(
-                channel, "party",
-                content=f"<@{awaiting['player_id']}> さん、次の色を選択してください！（{int(COLOR_TIMEOUT)}秒以内）",
-                view=view)
+                channel, "party", view=view)
         else:
             await self.send_game_panel(channel, game,
                                        info_msg="再起動から復旧しました。対局を続けます。")
@@ -835,11 +827,7 @@ class Uno(commands.Cog):
         if channel_id in self.games and guild is not None:
             await party_ranking.shared().record_win(guild.id, winner_id, "uno")
 
-        embed = discord.Embed(
-            title="[!] UNO ゲーム決着！",
-            description=f"*** <@{winner_id}> さんが手札をすべて使い切り、見事勝利しました！ ***",
-            color=discord.Color.brand_green()
-        )
+        body = f"*** <@{winner_id}> さんが手札をすべて使い切り、見事勝利しました！ ***"
 
         if channel_id in self.games:
             game = self.games[channel_id]
@@ -849,7 +837,7 @@ class Uno(commands.Cog):
                     cards_str = ", ".join(game.hands[p_id])
                     remains.append(f"<@{p_id}>: {cards_str} ({len(game.hands[p_id])}枚)")
             if remains:
-                embed.add_field(name="他のプレイヤーの残り手札", value="\n".join(remains), inline=False)
+                body += "\n\n## 他のプレイヤーの残り手札\n" + "\n".join(remains)
 
             if game.active_view is not None:
                 game.active_view.stop()
@@ -862,7 +850,7 @@ class Uno(commands.Cog):
             del self.games[channel_id]
             self._clear_snapshot(channel_id)
 
-        await channel.send(embed=embed)
+        await channel.send(view=text_panel("[!] UNO ゲーム決着！", body))
 
 
 

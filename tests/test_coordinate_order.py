@@ -88,11 +88,11 @@ class GomokuOrderTest(unittest.TestCase):
         from core.game.gomoku_cog.cog import GomokuGame, MoveView
 
         view = MoveView(MagicMock(), GomokuGame(1, 1, 1))
-        selects = [c for c in view.children if isinstance(c, discord.ui.Select)]
+        # V2 化で children はコンテナになったため walk_children で列挙する。
+        # 行番号の代わりに「X のセレクトが Y より先に並ぶ」順序で担保する。
+        selects = [c for c in view.walk_children() if isinstance(c, discord.ui.Select)]
         self.assertEqual(len(selects), 2)
-        self.assertEqual(selects[0].row, 0)
         self.assertTrue(selects[0].placeholder.startswith("X"), selects[0].placeholder)
-        self.assertEqual(selects[1].row, 1)
         self.assertTrue(selects[1].placeholder.startswith("Y"), selects[1].placeholder)
         self.assertTrue(all(o.label.startswith("X=") for o in selects[0].options))
         self.assertTrue(all(o.label.startswith("Y=") for o in selects[1].options))
@@ -103,7 +103,7 @@ class Connect4NotationTest(unittest.TestCase):
         from core.game.connect4_cog.cog import Connect4Game, MoveView
 
         view = MoveView(MagicMock(), Connect4Game(1, 1, 1))
-        selects = [c for c in view.children if isinstance(c, discord.ui.Select)]
+        selects = [c for c in view.walk_children() if isinstance(c, discord.ui.Select)]
         self.assertEqual(len(selects), 1)
         self.assertIn("X", selects[0].placeholder)
         self.assertTrue(all(o.label.startswith("X=") for o in selects[0].options))

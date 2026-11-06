@@ -30,7 +30,7 @@ class UnoFlowTest(unittest.IsolatedAsyncioTestCase):
 
     async def select(self, game, member, value):
         view = game.active_view
-        select = next(s for s in view.children if isinstance(s, discord.ui.Select)
+        select = next(s for s in view.walk_children() if isinstance(s, discord.ui.Select)
                       and any(o.value == value for o in s.options))
         inter = FakeInteraction(member, self.channel)
         await choose(select, value, inter)
@@ -162,19 +162,20 @@ class UnoFlowTest(unittest.IsolatedAsyncioTestCase):
         many += ['Wild', 'Wild+4']
         game = self.new_game([many + many[:10], ['赤の3'], ['青の1']])
         view = uno.GameControlView(game, many + many[:10], self.cog)  # 重複込み 64 枚
-        selects = [c for c in view.children if isinstance(c, discord.ui.Select)]
+        selects = [c for c in view.walk_children() if isinstance(c, discord.ui.Select)]
         self.assertGreater(len(selects), 1)
         self.assertTrue(all(1 <= len(s.options) <= 25 for s in selects))
         values = [o.value for s in selects for o in s.options]
         self.assertEqual(sorted(values), sorted(many + ['DRAW_PASS']))
         self.assertEqual(len(values), len(set(values)))
-        rows = [c.row for c in view.children]
-        self.assertTrue(all(r is not None and r <= 4 for r in rows))
+        # V2: 行はセレクト数＋手札確認ボタンの1行で、5行以内に収まる
+        rows = [c for c in view.walk_children() if isinstance(c, discord.ui.ActionRow)]
+        self.assertLessEqual(len(rows), 5)
 
     async def test_duplicate_cards_are_merged(self):
         game = self.new_game([['赤の1'] * 30, ['赤の3'], ['青の1']])
         await self.cog.send_game_panel(self.channel, game)
-        selects = [c for c in game.active_view.children if isinstance(c, discord.ui.Select)]
+        selects = [c for c in game.active_view.walk_children() if isinstance(c, discord.ui.Select)]
         self.assertEqual([o.value for o in selects[0].options], ['赤の1', 'DRAW_PASS'])
         await self.select(game, self.players[0], '赤の1')
         self.assertEqual(len(game.hands[1]), 29)
@@ -182,7 +183,7 @@ class UnoFlowTest(unittest.IsolatedAsyncioTestCase):
     async def test_stale_card_selection_is_rejected(self):
         game = self.new_game([['赤の1', '青の2'], ['赤の3'], ['青の1']])
         view = uno.GameControlView(game, ['赤の1', '青の2'], self.cog)
-        select = next(c for c in view.children if isinstance(c, discord.ui.Select))
+        select = next(c for c in view.walk_children() if isinstance(c, discord.ui.Select))
         inter = FakeInteraction(self.players[0], self.channel)
         await choose(select, '青の2', inter)  # 場は赤の5なので出せない
         self.assertIn('出せません', inter.texts()[0])

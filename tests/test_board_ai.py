@@ -263,7 +263,7 @@ class ShogiPaginationTest(unittest.TestCase):
 
         session = SimpleNamespace(state="select_drop_dest")
         view = ShogiMoveView(None, session, labels)
-        options = view.children[0].options
+        options = view.select.options
         self.assertEqual(len(options), 25)
         self.assertIn(PAGE_NEXT_VALUE, [option.value for option in options])
 

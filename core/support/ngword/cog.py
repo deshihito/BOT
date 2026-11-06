@@ -11,6 +11,7 @@ import random
 
 import discord
 from core.game import game_panels
+from core.game.game_v2 import GamePanelView, LobbyView, safe_delete, text_panel
 from core.messages import recruit_join_prompt
 from discord.ext import commands
 
@@ -88,39 +89,17 @@ class NGGame:
         self.words = dict(zip(self.players, picked))
 
 
-class JoinView(discord.ui.View):
-    def __init__(self, cog, game: NGGame):
-        super().__init__(timeout=RECRUIT_SECONDS + 30)
+class PlayPanel(GamePanelView):
+    """進行パネル（V2）。NGワード一覧は本人向け ephemeral で返す。"""
+
+    def __init__(self, cog, game: NGGame, body: str = ""):
+        super().__init__("NGワード スタート！", body, timeout=game.seconds + 30)
         self.cog, self.game = cog, game
+        self.peek = discord.ui.Button(label="みんなのNGワードを見る", style=discord.ButtonStyle.primary)
+        self.peek.callback = self._peek
+        self.add_row(self.peek)
 
-    @discord.ui.button(label="参加", style=discord.ButtonStyle.success)
-    async def join(self, interaction: discord.Interaction, button: discord.ui.Button):
-        g = self.game
-        if g.phase != "recruit":
-            return await interaction.response.send_message("募集は終わりました。", ephemeral=True)
-        if interaction.user.id in g.players:
-            return await interaction.response.send_message("もう参加しています。", ephemeral=True)
-        if len(g.players) >= MAX_PLAYERS:
-            return await interaction.response.send_message(f"定員（{MAX_PLAYERS}人）に達しました。", ephemeral=True)
-        g.players[interaction.user.id] = interaction.user
-        await interaction.response.send_message(f"参加しました（{len(g.players)}人）。")
-
-    @discord.ui.button(label="抜ける", style=discord.ButtonStyle.secondary)
-    async def leave(self, interaction: discord.Interaction, button: discord.ui.Button):
-        g = self.game
-        if g.phase != "recruit" or interaction.user.id not in g.players:
-            return await interaction.response.send_message("抜けられる募集がありません。", ephemeral=True)
-        del g.players[interaction.user.id]
-        await interaction.response.send_message("参加をやめました。")
-
-
-class PlayView(discord.ui.View):
-    def __init__(self, cog, game: NGGame):
-        super().__init__(timeout=game.seconds + 30)
-        self.cog, self.game = cog, game
-
-    @discord.ui.button(label="みんなのNGワードを見る", style=discord.ButtonStyle.primary)
-    async def peek(self, interaction: discord.Interaction, button: discord.ui.Button):
+    async def _peek(self, interaction: discord.Interaction):
         g = self.game
         if interaction.user.id not in g.players:
             return await interaction.response.send_message("参加者だけが見られます。", ephemeral=True)
@@ -134,6 +113,9 @@ class PlayView(discord.ui.View):
         embed = discord.Embed(title="みんなのNGワード", description="\n".join(lines), color=COLOR)
         embed.set_footer(text="自分のNGワードは見えません。相手に言わせるよう会話を誘導しましょう。")
         await interaction.response.send_message(embed=embed, ephemeral=True)
+
+
+PlayView = PlayPanel  # 互換名
 
 
 class NGWord(commands.Cog):
@@ -153,16 +135,25 @@ class NGWord(commands.Cog):
         await interaction.response.send_message(
             embed=discord.Embed(description=f"NGワードの募集を開始しました（{RECRUIT_SECONDS}秒）。", color=COLOR))
         try:
-            embed = discord.Embed(
-                title="NGワード 参加者募集",
-                description=(f"{interaction.user.mention} さんが募集中です。（{MODES[g.mode]}・{g.minutes}分）\n"
-                             f"{recruit_join_prompt(RECRUIT_SECONDS)}（{MIN_PLAYERS}〜{MAX_PLAYERS}人）。"),
-                color=COLOR)
-            await game_panels.replace(channel, "party", embed=embed, view=JoinView(self, g))
-            await asyncio.sleep(RECRUIT_SECONDS)
+            lobby = LobbyView(
+                title="NGワード 参加者募集", host=interaction.user,
+                min_players=MIN_PLAYERS, max_players=MAX_PLAYERS,
+                note=(f"{interaction.user.mention} さんが募集中です。（{MODES[g.mode]}・{g.minutes}分）\n"
+                      f"{recruit_join_prompt(RECRUIT_SECONDS)}"),
+                timeout=RECRUIT_SECONDS + 30)
+            await game_panels.replace(channel, "party", view=lobby)
+            for _ in range(RECRUIT_SECONDS * 2):
+                if lobby.started or lobby.cancelled:
+                    break
+                await asyncio.sleep(0.5)
+            lobby.stop()
+            if lobby.cancelled:
+                return
+            g.players = dict(lobby.members)
             if len(g.players) < MIN_PLAYERS:
-                return await channel.send(embed=discord.Embed(
-                    description=f"人数不足のため中止しました（{len(g.players)}人／{MIN_PLAYERS}人以上必要）。", color=COLOR))
+                await game_panels.clear(channel, "party")
+                return await channel.send(view=text_panel(
+                    "", f"人数不足のため中止しました（{len(g.players)}人／{MIN_PLAYERS}人以上必要）。"))
             await self.run_game(channel, g)
         finally:
             g.phase = "done"
@@ -172,23 +163,24 @@ class NGWord(commands.Cog):
         g.deal()
         g.phase = "playing"
         names = "、".join(m.display_name for m in g.players.values())
-        embed = discord.Embed(
-            title="NGワード スタート！",
-            description=(f"参加者: {names}\n\n"
-                         + ("一文字モード: NGは **ひらがな1文字** です。カタカナ・小さい文字（ゃ・っ）も同じ文字として数えます。\n"
-                            if g.mode == "char" else "") +
-                         "一人ひとりに、本人だけが知らないNGワードが付きました。\n"
-                         "ボタンで **自分以外の** NGワードを確認し、会話の中で相手に言わせましょう。\n"
-                         f"自分のNGワードを発言したら脱落です。制限時間は{g.minutes}分、最後まで残った人の勝ち！"),
-            color=COLOR)
-        await game_panels.replace(channel, "party", embed=embed, view=PlayView(self, g))
+        body = (f"参加者: {names}\n\n"
+                + ("一文字モード: NGは **ひらがな1文字** です。カタカナ・小さい文字（ゃ・っ）も同じ文字として数えます。\n"
+                   if g.mode == "char" else "") +
+                "一人ひとりに、本人だけが知らないNGワードが付きました。\n"
+                "ボタンで **自分以外の** NGワードを確認し、会話の中で相手に言わせましょう。\n"
+                f"自分のNGワードを発言したら脱落です。制限時間は{g.minutes}分、最後まで残った人の勝ち！")
+        await game_panels.replace(channel, "party", view=PlayPanel(self, g, body=body))
         elapsed = 0
         while elapsed < g.seconds and len(g.alive) > 1:
             await asyncio.sleep(1)
             elapsed += 1
             if elapsed % 60 == 0 and elapsed < g.seconds and len(g.alive) > 1:
-                await channel.send(embed=discord.Embed(
-                    description=f"残り{(g.seconds - elapsed) // 60}分（生存 {len(g.alive)}人）", color=COLOR))
+                # 経過表示は次の表示で役割を終えるため、常に最新1通だけ残す。
+                old = getattr(g, "last_notice", None)
+                if old is not None:
+                    await safe_delete(old)
+                g.last_notice = await channel.send(view=text_panel(
+                    "", f"残り{(g.seconds - elapsed) // 60}分（生存 {len(g.alive)}人）"))
         await self.finish(channel, g)
 
     async def finish(self, channel, g: NGGame):
@@ -201,9 +193,15 @@ class NGWord(commands.Cog):
         reveal = "\n".join(f"{m.display_name}: {g.words.get(uid, '-')}" + ("（脱落）" if uid in g.out else "")
                            for uid, m in g.players.items())
         win_text = "、".join(g.players[uid].mention for uid in winners) or "なし"
-        embed = discord.Embed(title="NGワード 終了", description=f"🏆 勝者: {win_text}", color=COLOR)
-        embed.add_field(name="NGワードの答え合わせ", value=reveal[:1024], inline=False)
-        await channel.send(embed=embed)
+        # 進行パネルと経過/脱落表示を片付け、結果だけを残す。
+        await game_panels.clear(channel, "party")
+        old = getattr(g, "last_notice", None)
+        if old is not None:
+            g.last_notice = None
+            await safe_delete(old)
+        await channel.send(view=text_panel(
+            "NGワード 終了",
+            f"🏆 勝者: {win_text}\n\nNGワードの答え合わせ\n{reveal[:1024]}"))
 
     async def handle_message(self, message) -> bool:
         """進行中のゲームで、発言者が自分の NG ワードを言ったら脱落させる。脱落させたら True。"""
@@ -217,10 +215,14 @@ class NGWord(commands.Cog):
         if not g.hits(uid, message.content):
             return False
         g.out.append(uid)
-        await message.channel.send(embed=discord.Embed(
-            description=f"💥 {message.author.mention} さんがNGワード「**{word}**」を言ってしまいました！ 脱落です。"
-                        f"（残り {len(g.alive)}人）",
-            color=COLOR))
+        # 脱落表示も経過表示と同じ枠で管理し、最新の1通だけを残す。
+        old = getattr(g, "last_notice", None)
+        if old is not None:
+            await safe_delete(old)
+        g.last_notice = await message.channel.send(view=text_panel(
+            "",
+            f"💥 {message.author.mention} さんがNGワード「**{word}**」を言ってしまいました！ 脱落です。"
+            f"（残り {len(g.alive)}人）"))
         return True
 
     @commands.Cog.listener()

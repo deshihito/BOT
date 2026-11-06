@@ -173,10 +173,11 @@ class GameStartNoticeSourceTest(unittest.TestCase):
                     )
 
     def test_join_acks_are_public(self):
-        # ephemeral第2波方針（2026-11-06）: 参加・退出の成功ACKも公開する。
+        # 参加規格統一（2026-11-07）: 参加/退出は共通ロビーのその場編集で反映し、
+        # 新規メッセージは出さない（旧「参加ACKを公開」方針はこの規格に置き換え）。
         text = (ROOT / "core/game/chess/cog.py").read_text(encoding="utf-8")
-        self.assertIn('send_message("参加しました。")', text)
-        self.assertNotIn('send_message("参加しました。", ephemeral=True)', text)
+        self.assertIn("LobbyView", text)
+        self.assertNotIn('send_message("参加しました', text)
 
 
 if __name__ == "__main__":

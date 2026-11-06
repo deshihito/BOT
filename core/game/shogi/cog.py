@@ -11,6 +11,7 @@ import discord
 from discord.ext import commands
 from core.game import party_ranking
 from core.game import elo, game_panels, game_restore
+from core.game.game_v2 import GamePanelView, LobbyView, safe_delete
 from PIL import Image, ImageDraw, ImageFont
 
 from core.game.shogi_engine import ShogiGame, Color, PieceType, Piece
@@ -373,33 +374,17 @@ class ShogiSession:
         self.acted = False
         self.renderer = ShogiRenderer()
         self.current_msg = None
+        self.pending_notice = None
         self.mode = mode
         self.difficulty = max(1, min(10, int(difficulty)))
 
-class JoinView(discord.ui.View):
-    def __init__(self, session):
-        super().__init__(timeout=RECRUIT_SECONDS + 30)
-        self.session = session
-
-    @discord.ui.button(label="参加（先手/後手）", style=discord.ButtonStyle.success)
-    async def join(self, interaction, button):
-        s = self.session
-        if s.phase != "recruit":
-            return await interaction.response.send_message("募集終了", ephemeral=True)
-        if interaction.user.id in s.players:
-            return await interaction.response.send_message("既に参加中", ephemeral=True)
-        if len(s.players) >= 2:
-            return await interaction.response.send_message("定員", ephemeral=True)
-        s.players[interaction.user.id] = interaction.user
-        await interaction.response.send_message("参加しました")
-
-    @discord.ui.button(label="抜ける", style=discord.ButtonStyle.secondary)
-    async def leave(self, interaction, button):
-        s = self.session
-        if s.phase != "recruit" or interaction.user.id not in s.players or interaction.user.id == s.host_id:
-            return await interaction.response.send_message("抜けられません", ephemeral=True)
-        del s.players[interaction.user.id]
-        await interaction.response.send_message("参加を取り消しました")
+def _board_panel(body: str, timeout=TURN_SECONDS) -> GamePanelView:
+    """盤面画像つきパネルの土台（操作部品は呼び出し側が足す）。"""
+    panel = GamePanelView("", body, timeout=timeout)
+    gallery = discord.ui.MediaGallery()
+    gallery.add_item(media="attachment://shogi.png")
+    panel.add_extra(gallery)
+    return panel
 
 
 class ShogiMoveSelect(discord.ui.Select):
@@ -427,38 +412,64 @@ class ShogiMoveSelect(discord.ui.Select):
                                      self.values[0], page=self.page)
 
 
-class ShogiMoveView(discord.ui.View):
-    def __init__(self, cog, session, labels, page=0):
-        super().__init__(timeout=TURN_SECONDS)
+class ShogiMovePanel(GamePanelView):
+    """盤面＋番号セレクト＋状態別ボタンの手番パネル（V2）。
+
+    セレクトは self.select、ボタン類は self.buttons に保持する。
+    """
+
+    def __init__(self, cog, session, labels, page=0, body: str = ""):
+        super().__init__("", body, timeout=TURN_SECONDS)
+        gallery = discord.ui.MediaGallery()
+        gallery.add_item(media="attachment://shogi.png")
+        self.add_extra(gallery)
+        self.cog, self.session = cog, session
+        self.select = None
+        self.buttons = []
         state = getattr(session, "state", "select_piece")
         if labels:
-            self.add_item(ShogiMoveSelect(cog, session, labels, page))
+            self.select = ShogiMoveSelect(cog, session, labels, page)
+            self.add_row(self.select)
         if state == "select_piece":
-            self.add_item(ShogiHandButton(cog, session))
+            self.buttons.append(ShogiHandButton(cog, session))
         elif state in ("select_dest", "select_hand", "select_drop_dest"):
-            self.add_item(ShogiCancelButton(cog, session))
+            self.buttons.append(ShogiCancelButton(cog, session))
         if state in ("select_piece", "select_dest", "select_drop_dest"):
-            self.add_item(ShogiCoordinateButton(cog, session))
+            self.buttons.append(ShogiCoordinateButton(cog, session))
+        if self.buttons:
+            self.add_row(*self.buttons)
 
 
-class ShogiPromoteView(discord.ui.View):
-    """「成る / 成らない」の2ボタンで任意成りを選ばせるビュー。
+ShogiMoveView = ShogiMovePanel  # 互換名
+
+
+class ShogiPromotePanel(GamePanelView):
+    """「成る / 成らない」の2ボタンで任意成りを選ばせるパネル（V2）。
 
     選択されるまで手は実行されない。タイムアウトした場合は何も実行されず、
     手番タイマー側で時間切れとして扱われる。
     """
 
-    def __init__(self, cog, session):
-        super().__init__(timeout=TURN_SECONDS)
+    def __init__(self, cog, session, body: str = ""):
+        super().__init__("", body, timeout=TURN_SECONDS)
+        gallery = discord.ui.MediaGallery()
+        gallery.add_item(media="attachment://shogi.png")
+        self.add_extra(gallery)
         self.cog, self.session = cog, session
+        self.promote = discord.ui.Button(label="成る", style=discord.ButtonStyle.success)
+        self.promote.callback = self._promote
+        self.not_promote = discord.ui.Button(label="成らない", style=discord.ButtonStyle.secondary)
+        self.not_promote.callback = self._not_promote
+        self.add_row(self.promote, self.not_promote)
 
-    @discord.ui.button(label="成る", style=discord.ButtonStyle.success)
-    async def promote(self, interaction, button):
+    async def _promote(self, interaction):
         await self.cog.handle_promote_choice(interaction, self.session, True)
 
-    @discord.ui.button(label="成らない", style=discord.ButtonStyle.secondary)
-    async def not_promote(self, interaction, button):
+    async def _not_promote(self, interaction):
         await self.cog.handle_promote_choice(interaction, self.session, False)
+
+
+ShogiPromoteView = ShogiPromotePanel  # 互換名
 
 
 class ShogiHandButton(discord.ui.Button):
@@ -691,10 +702,20 @@ class Shogi(commands.Cog):
         self.sessions[ch.id] = s
         await interaction.response.send_message("将棋の募集を開始しました。")
         try:
-            msg = await game_panels.replace(ch, "party", embed=discord.Embed(
-                title="将棋 参加者募集", description=f"{interaction.user.mention} さんが募集中です。\n{RECRUIT_SECONDS}秒以内に参加してください（2人対戦）。", color=COLOR),
-                view=JoinView(s))
-            await asyncio.sleep(RECRUIT_SECONDS)
+            lobby = LobbyView(
+                title="将棋 参加者募集", host=interaction.user,
+                min_players=2, max_players=2,
+                note=f"{interaction.user.mention} さんが募集中です。\n{RECRUIT_SECONDS}秒以内に参加してください（2人対戦）。",
+                timeout=RECRUIT_SECONDS + 30)
+            await game_panels.replace(ch, "party", view=lobby)
+            for _ in range(RECRUIT_SECONDS * 2):
+                if lobby.started or lobby.cancelled:
+                    break
+                await asyncio.sleep(0.5)
+            lobby.stop()
+            if lobby.cancelled:
+                return
+            s.players = dict(lobby.members)
             await self.run_game(ch, s)
         finally:
             s.phase = "done"
@@ -702,31 +723,35 @@ class Shogi(commands.Cog):
             self._clear_snapshot(ch.id)
 
     async def _update_board_msg(self, s: ShogiSession, channel, description, labels=None, selected=None, page=0):
+        # 前ターンの時間切れ通知は、次の盤面表示が出た時点で役割を終える。
+        notice = getattr(s, "pending_notice", None)
+        if notice is not None:
+            s.pending_notice = None
+            await safe_delete(notice)
         # 盤面画像の番号ラベルは、表示中のページの候補だけに付ける。
         render_labels = paginate_labels(labels, page)[0] if labels else labels
         buf = s.renderer.render(s.game, labels=render_labels, selected=selected)
         file = discord.File(buf, "shogi.png")
-        embed = discord.Embed(description=description, color=COLOR)
-        embed.set_image(url="attachment://shogi.png")
         if labels:
-            select_view = ShogiMoveView(self, s, labels, page=page)
+            select_view = ShogiMovePanel(self, s, labels, page=page, body=description)
         elif getattr(s, "state", None) == "select_promote":
-            select_view = ShogiPromoteView(self, s)
+            select_view = ShogiPromotePanel(self, s, body=description)
         else:
-            select_view = None
+            select_view = _board_panel(description, timeout=None)
         if s.current_msg is None:
-            s.current_msg = await game_panels.replace(channel, "party", embed=embed, file=file,
+            s.current_msg = await game_panels.replace(channel, "party", file=file,
                                                       view=select_view)
         else:
             try:
-                await s.current_msg.edit(embed=embed, attachments=[file], view=select_view)
+                await s.current_msg.edit(attachments=[file], view=select_view)
             except Exception:
                 # Fallback if edit fails
-                s.current_msg = await game_panels.replace(channel, "party", embed=embed, file=file,
+                s.current_msg = await game_panels.replace(channel, "party", file=file,
                                                           view=select_view)
 
     async def run_game(self, channel, s: ShogiSession):
         if len(s.players) != 2:
+            await game_panels.clear(channel, "party")
             await channel.send("参加者が2人集まらなかったため開始できませんでした。")
             return
         s.phase = "playing"
@@ -780,12 +805,22 @@ class Shogi(commands.Cog):
                 await asyncio.sleep(1)
             if not s.acted:
                 idle += 1
-                await channel.send(f"{turn_user.mention} さんは時間切れのためパスしました。")
+                # 通知は次の盤面表示で削除される（_update_board_msg 参照）。
+                s.pending_notice = await channel.send(f"{turn_user.mention} さんは時間切れのためパスしました。")
                 if idle >= 2:
                     break
                 s.game.turn = Color.GOTE if s.game.turn == Color.SENTE else Color.SENTE
             else:
                 idle = 0
+        # 対局終了: 盤面パネルと残っている通知を片付け、結果の文だけを残す。
+        await game_panels.clear(channel, "party")
+        if s.current_msg is not None:
+            await safe_delete(s.current_msg)
+            s.current_msg = None
+        notice = getattr(s, "pending_notice", None)
+        if notice is not None:
+            s.pending_notice = None
+            await safe_delete(notice)
 
     # ------------------------------------------------------------------
     # 再起動復旧（core/game/game_restore.py）

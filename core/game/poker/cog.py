@@ -40,6 +40,7 @@ from core.game import party_ranking
 from core.game import board_image
 from core.game.board_image import render_cached, render_card_hand, render_card_rows
 from core.game import game_panels
+from core.game.game_v2 import GamePanelView, LobbyView, text_panel
 from core.game import prison as prison_core
 
 logger = logging.getLogger(__name__)
@@ -345,32 +346,10 @@ class PokerTable:
         self.phase = "recruit"
 
 
-class JoinView(discord.ui.View):
-    def __init__(self, table):
-        super().__init__(timeout=RECRUIT_SECONDS + 30)
-        self.table = table
-
-    @discord.ui.button(label="参加", style=discord.ButtonStyle.success)
-    async def join(self, interaction, button):
-        t = self.table
-        if t.phase != "recruit":
-            return await interaction.response.send_message("募集は終了しました。", ephemeral=True)
-        if interaction.user.id in t.players:
-            return await interaction.response.send_message("すでに参加しています。", ephemeral=True)
-        if len(t.players) >= MAX_PLAYERS:
-            return await interaction.response.send_message("定員（6人）です。", ephemeral=True)
-        t.players[interaction.user.id] = interaction.user
-        await interaction.response.send_message("参加しました。")
-
-    @discord.ui.button(label="抜ける", style=discord.ButtonStyle.secondary)
-    async def leave(self, interaction, button):
-        t = self.table
-        if t.phase != "recruit" or interaction.user.id not in t.players:
-            return await interaction.response.send_message("参加中の募集がありません。", ephemeral=True)
-        if interaction.user.id == t.host_id:
-            return await interaction.response.send_message("募集主は抜けられません。", ephemeral=True)
-        del t.players[interaction.user.id]
-        await interaction.response.send_message("参加を取り消しました。")
+def _panel_button(label, style, callback):
+    button = discord.ui.Button(label=label, style=style)
+    button.callback = callback
+    return button
 
 
 class BuyInSelect(discord.ui.Select):
@@ -388,14 +367,18 @@ class BuyInSelect(discord.ui.Select):
         await interaction.response.send_message(message, ephemeral=True)
 
 
-class BuyInView(discord.ui.View):
-    def __init__(self, cog, table):
-        super().__init__(timeout=BUYIN_SECONDS + 30)
-        self.cog, self.table = cog, table
-        self.add_item(BuyInSelect(cog, table))
+class BuyInPanel(GamePanelView):
+    """バイイン額セレクト＋募集主の開始ボタンのパネル（V2）。"""
 
-    @discord.ui.button(label="開始する（募集主）", style=discord.ButtonStyle.success, row=1)
-    async def start(self, interaction, button):
+    def __init__(self, cog, table, body: str = ""):
+        super().__init__("ポーカー：バイイン", body, timeout=BUYIN_SECONDS + 30)
+        self.cog, self.table = cog, table
+        self.buyin_select = BuyInSelect(cog, table)
+        self.add_row(self.buyin_select)
+        self.start = _panel_button("開始する（募集主）", discord.ButtonStyle.success, self._start)
+        self.add_row(self.start)
+
+    async def _start(self, interaction):
         t = self.table
         if interaction.user.id != t.host_id:
             return await interaction.response.send_message("開始できるのは募集主だけです。", ephemeral=True)
@@ -405,10 +388,25 @@ class BuyInView(discord.ui.View):
         await interaction.response.send_message("テーブルを開始します。")
 
 
-class BettingView(discord.ui.View):
-    def __init__(self, cog, table, round_):
-        super().__init__(timeout=BET_SECONDS + 30)
+BuyInView = BuyInPanel  # 互換名
+
+
+class BettingPanel(GamePanelView):
+    """ベット操作パネル（V2）。"""
+
+    def __init__(self, cog, table, round_, body: str = ""):
+        super().__init__("ポーカー：ベット", body, timeout=BET_SECONDS + 30)
         self.cog, self.table, self.round = cog, table, round_
+        self.call = _panel_button("コール／チェック", discord.ButtonStyle.primary,
+                                  lambda i: self._act(i, "call"))
+        self.raise_ = _panel_button("レイズ（+20）", discord.ButtonStyle.success,
+                                    lambda i: self._act(i, "raise"))
+        self.fold = _panel_button("フォールド", discord.ButtonStyle.danger,
+                                  lambda i: self._act(i, "fold"))
+        self.add_row(self.call, self.raise_, self.fold)
+        self.show_hand = _panel_button("手札を見る", discord.ButtonStyle.secondary, self._show_hand)
+        self.leave = _panel_button("退出（フォールドして離脱）", discord.ButtonStyle.secondary, self._leave)
+        self.add_row(self.show_hand, self.leave)
 
     async def _act(self, interaction, action):
         t, r = self.table, self.round
@@ -421,20 +419,7 @@ class BettingView(discord.ui.View):
         t.pending_action = (interaction.user.id, action)
         await interaction.response.send_message(f"{action_label(action, r)}しました。", ephemeral=True)
 
-    @discord.ui.button(label="コール／チェック", style=discord.ButtonStyle.primary)
-    async def call(self, interaction, button):
-        await self._act(interaction, "call")
-
-    @discord.ui.button(label="レイズ（+20）", style=discord.ButtonStyle.success)
-    async def raise_(self, interaction, button):
-        await self._act(interaction, "raise")
-
-    @discord.ui.button(label="フォールド", style=discord.ButtonStyle.danger)
-    async def fold(self, interaction, button):
-        await self._act(interaction, "fold")
-
-    @discord.ui.button(label="手札を見る", style=discord.ButtonStyle.secondary)
-    async def show_hand(self, interaction, button):
+    async def _show_hand(self, interaction):
         t = self.table
         if interaction.user.id not in t.hands:
             return await interaction.response.send_message("参加者だけが操作できます。", ephemeral=True)
@@ -443,8 +428,7 @@ class BettingView(discord.ui.View):
             f"あなたの手札（相手には見えません）: {' '.join(label_card(c) for c in hand)}",
             ephemeral=True, file=hand_file(hand))
 
-    @discord.ui.button(label="退出（フォールドして離脱）", style=discord.ButtonStyle.secondary)
-    async def leave(self, interaction, button):
+    async def _leave(self, interaction):
         t, r = self.table, self.round
         if interaction.user.id not in t.players or interaction.user.id in r.folded:
             return await interaction.response.send_message("参加者だけが操作できます。", ephemeral=True)
@@ -452,6 +436,9 @@ class BettingView(discord.ui.View):
         if r.current_player() == interaction.user.id:
             r.act(interaction.user.id, "fold")
         await interaction.response.send_message("このハンドで退出します（残チップはハンド終了時に精算されます）。", ephemeral=True)
+
+
+BettingView = BettingPanel  # 互換名
 
 
 def action_label(action, round_=None):
@@ -481,13 +468,17 @@ class DiscardSelect(discord.ui.Select):
             ephemeral=True, file=hand_file(t.hands[self.uid]))
 
 
-class DrawView(discord.ui.View):
-    def __init__(self, cog, table):
-        super().__init__(timeout=DRAW_SECONDS)
-        self.cog, self.table = cog, table
+class DrawPanel(GamePanelView):
+    """カード交換フェーズのパネル（V2）。交換セレクト自体は ephemeral。"""
 
-    @discord.ui.button(label="手札を確認して交換", style=discord.ButtonStyle.primary)
-    async def exchange(self, interaction, button):
+    def __init__(self, cog, table, body: str = ""):
+        super().__init__("ポーカー：カード交換", body, timeout=DRAW_SECONDS)
+        self.cog, self.table = cog, table
+        self.exchange = _panel_button("手札を確認して交換", discord.ButtonStyle.primary, self._exchange)
+        self.leave = _panel_button("このハンドで退出", discord.ButtonStyle.secondary, self._leave)
+        self.add_row(self.exchange, self.leave)
+
+    async def _exchange(self, interaction):
         t = self.table
         if t.phase != "draw" or interaction.user.id not in t.players or interaction.user.id not in t.hands:
             return await interaction.response.send_message("進行中の参加者だけが操作できます。", ephemeral=True)
@@ -499,8 +490,7 @@ class DrawView(discord.ui.View):
             "あなたの手札（相手には見えません）。交換したいカードを選択してください。",
             ephemeral=True, view=view, file=hand_file(t.hands[interaction.user.id]))
 
-    @discord.ui.button(label="このハンドで退出", style=discord.ButtonStyle.secondary)
-    async def leave(self, interaction, button):
+    async def _leave(self, interaction):
         t = self.table
         if interaction.user.id not in t.players:
             return await interaction.response.send_message("参加者だけが操作できます。", ephemeral=True)
@@ -508,14 +498,23 @@ class DrawView(discord.ui.View):
         await interaction.response.send_message("このハンドで退出します（残チップはハンド終了時に精算されます）。", ephemeral=True)
 
 
-class ContinueView(discord.ui.View):
-    def __init__(self, cog, table):
-        super().__init__(timeout=CONTINUE_SECONDS + 30)
-        self.cog, self.table = cog, table
-        self.add_item(BuyInSelect(cog, table))
+DrawView = DrawPanel  # 互換名
 
-    @discord.ui.button(label="次のハンドへ", style=discord.ButtonStyle.success, row=1)
-    async def next_hand(self, interaction, button):
+
+class ContinuePanel(GamePanelView):
+    """ハンド間の継続確認パネル（V2）。リバイイン用セレクトつき。"""
+
+    def __init__(self, cog, table, body: str = ""):
+        super().__init__("ポーカー：次のハンド", body, timeout=CONTINUE_SECONDS + 30)
+        self.cog, self.table = cog, table
+        self.buyin_select = BuyInSelect(cog, table)
+        self.add_row(self.buyin_select)
+        self.next_hand = _panel_button("次のハンドへ", discord.ButtonStyle.success, self._next_hand)
+        self.leave_table = _panel_button("退出（チップをコインに精算）", discord.ButtonStyle.danger, self._leave_table)
+        self.close_table_btn = _panel_button("テーブルを閉じる（募集主）", discord.ButtonStyle.secondary, self._close_table)
+        self.add_row(self.next_hand, self.leave_table, self.close_table_btn)
+
+    async def _next_hand(self, interaction):
         t = self.table
         if interaction.user.id not in t.players:
             return await interaction.response.send_message("参加者だけが操作できます。", ephemeral=True)
@@ -524,8 +523,7 @@ class ContinueView(discord.ui.View):
         t.ready.add(interaction.user.id)
         await interaction.response.send_message("次のハンドに参加します。")
 
-    @discord.ui.button(label="退出（チップをコインに精算）", style=discord.ButtonStyle.danger, row=1)
-    async def leave_table(self, interaction, button):
+    async def _leave_table(self, interaction):
         t = self.table
         if interaction.user.id not in t.players:
             return await interaction.response.send_message("参加者だけが操作できます。", ephemeral=True)
@@ -536,13 +534,15 @@ class ContinueView(discord.ui.View):
         t.ready.discard(interaction.user.id)
         await interaction.response.send_message("チップをコインに精算して退出しました。")
 
-    @discord.ui.button(label="テーブルを閉じる（募集主）", style=discord.ButtonStyle.secondary, row=1)
-    async def close_table(self, interaction, button):
+    async def _close_table(self, interaction):
         t = self.table
         if interaction.user.id != t.host_id:
             return await interaction.response.send_message("閉じられるのは募集主だけです。", ephemeral=True)
         t.close_requested = True
         await interaction.response.send_message("テーブルを閉じます。全員のチップを精算します。")
+
+
+ContinueView = ContinuePanel  # 互換名
 
 
 def _round_signature(r):
@@ -669,13 +669,22 @@ class Poker(commands.Cog):
         self.games[channel.id] = t
         await interaction.response.send_message("ポーカーの募集を開始しました。")
         try:
-            await game_panels.replace(channel, "party", embed=discord.Embed(
-                title="ポーカー（チップ制・5枚ドロー）参加者募集",
-                description=(f"{interaction.user.mention} さんが募集中です。\n"
-                             f"{RECRUIT_SECONDS}秒以内に参加してください（2〜{MAX_PLAYERS}人）。\n"
-                             f"参加後にバイイン（{'/'.join(f'{a:,}' for a in BUYIN_OPTIONS)} AGO→チップ）が必要です。"),
-                color=COLOR), view=JoinView(t))
-            await asyncio.sleep(RECRUIT_SECONDS)
+            lobby = LobbyView(
+                title="ポーカー（チップ制・5枚ドロー）参加者募集", host=interaction.user,
+                min_players=2, max_players=MAX_PLAYERS,
+                note=(f"{interaction.user.mention} さんが募集中です。\n"
+                      f"{RECRUIT_SECONDS}秒以内に参加してください。\n"
+                      f"参加後にバイイン（{'/'.join(f'{a:,}' for a in BUYIN_OPTIONS)} AGO→チップ）が必要です。"),
+                timeout=RECRUIT_SECONDS + 30)
+            await game_panels.replace(channel, "party", view=lobby)
+            for _ in range(RECRUIT_SECONDS * 2):
+                if lobby.started or lobby.cancelled:
+                    break
+                await asyncio.sleep(0.5)
+            lobby.stop()
+            if lobby.cancelled:
+                return
+            t.players = dict(lobby.members)
             await self.run_table(channel, t)
         finally:
             t.phase = "done"
@@ -683,14 +692,14 @@ class Poker(commands.Cog):
 
     async def run_table(self, channel, t):
         if len(t.players) < 2:
+            await game_panels.clear(channel, "party")
             await channel.send("参加者が2人集まらなかったため、ポーカーを開始できませんでした。")
             return
         t.phase = "buyin"
-        await game_panels.replace(channel, "party", embed=discord.Embed(
-            title="ポーカー：バイイン",
-            description=(f"{BUYIN_SECONDS}秒以内にバイイン額を選んでください（チップ=コイン等価）。\n"
-                         "バイインした人だけで始めます。募集主は2人以上バイインしたら「開始する」を押せます。"),
-            color=COLOR), view=BuyInView(self, t))
+        await game_panels.replace(channel, "party", view=BuyInPanel(
+            self, t,
+            body=(f"{BUYIN_SECONDS}秒以内にバイイン額を選んでください（チップ=コイン等価）。\n"
+                  "バイインした人だけで始めます。募集主は2人以上バイインしたら「開始する」を押せます。")))
         elapsed = 0
         while elapsed < BUYIN_SECONDS and t.phase == "buyin":
             if t.start_requested and len(t.stacks) >= 2:
@@ -705,12 +714,12 @@ class Poker(commands.Cog):
         if len(t.players) < 2:
             for uid in list(t.stacks):
                 await self.cash_out(t, uid)
+            await game_panels.clear(channel, "party")
             await channel.send("バイインした人が2人集まらなかったため、ポーカーを開始できませんでした（チップは精算済みです）。")
             return
-        await channel.send(embed=discord.Embed(
-            title="ポーカー開始",
-            description="\n".join(f"{t.players[uid].mention}: {t.stacks[uid]:,} チップ（アンティ {ANTE}）" for uid in t.players),
-            color=COLOR))
+        await channel.send(view=text_panel(
+            "ポーカー開始",
+            "\n".join(f"{t.players[uid].mention}: {t.stacks[uid]:,} チップ（アンティ {ANTE}）" for uid in t.players)))
         while len(t.players) >= 2:
             seated = [uid for uid in t.players if t.stacks.get(uid, 0) >= ANTE]
             if len(seated) < 2:
@@ -734,12 +743,11 @@ class Poker(commands.Cog):
         t.ready = set()
         t.close_requested = False
         stacks_line = " / ".join(f"{t.players[uid].mention}: {t.stacks.get(uid, 0):,}" for uid in t.players)
-        await game_panels.replace(channel, "party", embed=discord.Embed(
-            title="ポーカー：次のハンド",
-            description=(f"現在のスタック: {stacks_line}\n"
-                         f"{CONTINUE_SECONDS}秒以内に「次のハンドへ」を押してください。"
-                         f"スタック {REBUY_MAX_STACK} 未満の人はリバイイン（上の選択）もできます。"),
-            color=COLOR), view=ContinueView(self, t))
+        await game_panels.replace(channel, "party", view=ContinuePanel(
+            self, t,
+            body=(f"現在のスタック: {stacks_line}\n"
+                  f"{CONTINUE_SECONDS}秒以内に「次のハンドへ」を押してください。"
+                  f"スタック {REBUY_MAX_STACK} 未満の人はリバイイン（上の選択）もできます。")))
         elapsed = 0
         while elapsed < CONTINUE_SECONDS and t.phase == "continue":
             if t.close_requested:
@@ -764,7 +772,9 @@ class Poker(commands.Cog):
         description = f"{t.hands_played} ハンドで終了しました。"
         if lines:
             description += "\n" + "\n".join(lines)
-        await channel.send(embed=discord.Embed(title="ポーカー 終了", description=description, color=COLOR))
+        # 役割を終えた進行パネル（継続確認など）を片付け、結果だけを残す。
+        await game_panels.clear(channel, "party")
+        await channel.send(view=text_panel("ポーカー 終了", description))
 
     # ------------------------------------------------------------------
     # ハンドの進行
@@ -782,11 +792,10 @@ class Poker(commands.Cog):
             t.stacks[uid] -= pay
             contributions[uid] = pay
         round_ = BettingRound(seated, t.stacks)
-        await channel.send(embed=discord.Embed(
-            title=f"ポーカー：ハンド {t.hands_played + 1}",
-            description=(f"アンティ {ANTE} を全員が出しました（ポット {sum(contributions.values()):,}）。\n"
-                         "ベットは「コール／チェック」「レイズ（+20）」「フォールド」で順番に行います。"),
-            color=COLOR))
+        await channel.send(view=text_panel(
+            f"ポーカー：ハンド {t.hands_played + 1}",
+            f"アンティ {ANTE} を全員が出しました（ポット {sum(contributions.values()):,}）。\n"
+            "ベットは「コール／チェック」「レイズ（+20）」「フォールド」で順番に行います。"))
         while not round_.is_complete():
             uid = round_.current_player()
             if uid is None:
@@ -797,12 +806,11 @@ class Poker(commands.Cog):
             signature = _round_signature(round_)
             to_call = round_.to_call(uid)
             bet_line = f"現在のベット {round_.current_bet:,}（コールには {to_call:,}）" if round_.current_bet else "まだベットはありません（チェック可）"
-            await game_panels.replace(channel, "party", embed=discord.Embed(
-                title="ポーカー：ベット",
-                description=(f"{t.players[uid].mention} さんの番です。{bet_line}。\n"
-                             f"ポット {sum(contributions.values()) + sum(round_.contributions.values()):,} / あなたのスタック {t.stacks[uid]:,}\n"
-                             f"（{BET_SECONDS}秒で自動フォールド、コール不要なら自動チェック）"),
-                color=COLOR), view=BettingView(self, t, round_))
+            await game_panels.replace(channel, "party", view=BettingPanel(
+                self, t, round_,
+                body=(f"{t.players[uid].mention} さんの番です。{bet_line}。\n"
+                      f"ポット {sum(contributions.values()) + sum(round_.contributions.values()):,} / あなたのスタック {t.stacks[uid]:,}\n"
+                      f"（{BET_SECONDS}秒で自動フォールド、コール不要なら自動チェック）")))
             elapsed = 0
             while elapsed < BET_SECONDS and _round_signature(round_) == signature and t.phase == "betting":
                 await asyncio.sleep(1)
@@ -819,10 +827,9 @@ class Poker(commands.Cog):
         live = [uid for uid in seated if uid not in folded]
         if len(live) > 1:
             t.phase = "draw"
-            await game_panels.replace(channel, "party", embed=discord.Embed(
-                title="ポーカー：カード交換",
-                description=f"残った人だけ、{DRAW_SECONDS}秒以内に手札を確認し、交換するカードを最大3枚選んでください。",
-                color=COLOR), view=DrawView(self, t))
+            await game_panels.replace(channel, "party", view=DrawPanel(
+                self, t,
+                body=f"残った人だけ、{DRAW_SECONDS}秒以内に手札を確認し、交換するカードを最大3枚選んでください。"))
             elapsed = 0
             while len(t.submitted) < len(live) and elapsed < DRAW_SECONDS and t.phase == "draw":
                 await asyncio.sleep(1)
@@ -864,9 +871,11 @@ class Poker(commands.Cog):
             ("poker-showdown", tuple((label, specs) for label, specs in rows)),
             lambda: render_card_rows([(label, list(specs)) for label, specs in rows],
                                      title="ショーダウン"))
-        embed = discord.Embed(title="ポーカー：ショーダウン", description="\n".join(lines), color=COLOR)
-        embed.set_image(url="attachment://poker_showdown.png")
-        await channel.send(embed=embed, file=discord.File(io.BytesIO(data), filename="poker_showdown.png"))
+        panel = GamePanelView("ポーカー：ショーダウン", "\n".join(lines), timeout=None)
+        gallery = discord.ui.MediaGallery()
+        gallery.add_item(media="attachment://poker_showdown.png")
+        panel.add_extra(gallery)
+        await channel.send(view=panel, file=discord.File(io.BytesIO(data), filename="poker_showdown.png"))
 
 
 async def setup(bot):

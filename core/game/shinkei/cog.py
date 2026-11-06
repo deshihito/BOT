@@ -14,6 +14,7 @@ import random
 
 import discord
 from core.game import game_panels, game_restore
+from core.game.game_v2 import GamePanelView, LobbyView, safe_delete, text_panel
 from core.emojis import CROCK
 
 logger = logging.getLogger(__name__)
@@ -64,6 +65,7 @@ class ShinkeiGame:
         self.phase = "recruit"             # recruit / playing / done
         self.turn_done = False             # この手番が終わった（外れ・時間切れ）
         self.message = None
+        self.last_notice = None            # 進行通知（常に最新1通だけ残す）
 
     @property
     def order(self) -> list:
@@ -119,7 +121,7 @@ class CardButton(discord.ui.Button):
             label, style, disabled = game.cards[index], discord.ButtonStyle.primary, True
         else:
             label, style, disabled = BACK, discord.ButtonStyle.secondary, game.phase != "playing"
-        super().__init__(label=label, style=style, disabled=disabled, row=row_of(index),
+        super().__init__(label=label, style=style, disabled=disabled,
                          custom_id=f"shinkei:{game.channel_id}:{index}")
         self.cog, self.game, self.index = cog, game, index
 
@@ -127,39 +129,50 @@ class CardButton(discord.ui.Button):
         await self.cog.on_flip(interaction, self.game, self.index)
 
 
-class BoardView(discord.ui.View):
-    def __init__(self, cog, game: ShinkeiGame):
-        super().__init__(timeout=None)
-        for i in range(len(game.cards)):
-            self.add_item(CardButton(cog, game, i))
+class BoardView(GamePanelView):
+    """神経衰弱の盤面パネル（V2）。
 
+    24枚のカードボタンは盤面そのものが操作対象なのでボタン形式を維持し、
+    ROW_SIZES の行分けで ActionRow に載せる。custom_id は従来どおり維持。
+    """
 
-class JoinView(discord.ui.View):
-    def __init__(self, cog, game: ShinkeiGame):
-        super().__init__(timeout=RECRUIT_SECONDS + 30)
+    def __init__(self, cog, game: ShinkeiGame, body: str = ""):
+        super().__init__("神経衰弱", body, timeout=None)
         self.cog, self.game = cog, game
+        self.card_buttons = []
+        index = 0
+        for size in ROW_SIZES:
+            row = []
+            for _ in range(size):
+                button = CardButton(cog, game, index)
+                self.card_buttons.append(button)
+                row.append(button)
+                index += 1
+            self.add_row(*row)
 
-    @discord.ui.button(label="参加", style=discord.ButtonStyle.success)
-    async def join(self, interaction: discord.Interaction, button: discord.ui.Button):
-        g = self.game
-        if g.phase != "recruit":
-            return await interaction.response.send_message("募集は終わりました。", ephemeral=True)
-        if interaction.user.id in g.players:
-            return await interaction.response.send_message("もう参加しています。", ephemeral=True)
-        if len(g.players) >= MAX_PLAYERS:
-            return await interaction.response.send_message(f"定員（{MAX_PLAYERS}人）に達しました。", ephemeral=True)
-        g.players[interaction.user.id] = interaction.user
-        await interaction.response.send_message(f"参加しました（{len(g.players)}人）。")
 
-    @discord.ui.button(label="抜ける", style=discord.ButtonStyle.secondary)
-    async def leave(self, interaction: discord.Interaction, button: discord.ui.Button):
-        g = self.game
-        if g.phase != "recruit" or interaction.user.id not in g.players:
-            return await interaction.response.send_message("抜けられる募集がありません。", ephemeral=True)
-        if interaction.user.id == g.host_id:
-            return await interaction.response.send_message("募集した人は抜けられません。", ephemeral=True)
-        del g.players[interaction.user.id]
-        await interaction.response.send_message("参加をやめました。")
+class JoinView(LobbyView):
+    """共通ロビー。参加/退出は game.players（id→member）にも同期する。"""
+
+    def __init__(self, cog, game: ShinkeiGame):
+        self.cog, self.game = cog, game
+        host = game.players.get(game.host_id)
+        super().__init__(
+            title="神経衰弱 参加者募集", host=host,
+            min_players=MIN_PLAYERS, max_players=MAX_PLAYERS,
+            note=(f"{host.mention if host else ''} さんが募集中です。\n"
+                  f"{recruit_join_prompt(RECRUIT_SECONDS)}（ひとりでも遊べます）。"),
+            timeout=RECRUIT_SECONDS + 30)
+
+    async def _on_join(self, interaction: discord.Interaction):
+        await super()._on_join(interaction)
+        if interaction.user.id in self.players:
+            self.game.players[interaction.user.id] = interaction.user
+
+    async def _on_leave(self, interaction: discord.Interaction):
+        await super()._on_leave(interaction)
+        if interaction.user.id not in self.players:
+            self.game.players.pop(interaction.user.id, None)
 
 
 class Shinkei(commands.Cog):
@@ -177,38 +190,45 @@ class Shinkei(commands.Cog):
         g.players[interaction.user.id] = interaction.user
         self.games[channel.id] = g
         await interaction.response.send_message(
-            embed=discord.Embed(description=f"神経衰弱の募集を開始しました（{RECRUIT_SECONDS}秒）。", color=COLOR))
+            view=text_panel("", f"神経衰弱の募集を開始しました（{RECRUIT_SECONDS}秒）。"))
         try:
-            await game_panels.replace(channel, "party", embed=discord.Embed(
-                title="神経衰弱 参加者募集",
-                description=(f"{interaction.user.mention} さんが募集中です。\n"
-                             f"{recruit_join_prompt(RECRUIT_SECONDS)}（{MIN_PLAYERS}〜{MAX_PLAYERS}人。"
-                             "ひとりでも遊べます）。"),
-                color=COLOR), view=JoinView(self, g))
-            await asyncio.sleep(RECRUIT_SECONDS)
+            lobby = JoinView(self, g)
+            await game_panels.replace(channel, "party", view=lobby)
+            for _ in range(RECRUIT_SECONDS * 2):
+                await asyncio.sleep(0.5)
+                if lobby.started or lobby.cancelled:
+                    break
+            if lobby.cancelled:
+                return
             await self.run_game(channel, g)
         finally:
             g.phase = "done"
             self.games.pop(channel.id, None)
             self._clear_snapshot(channel.id)
 
-    def board_embed(self, g: ShinkeiGame, note: str = "") -> discord.Embed:
+    def board_text(self, g: ShinkeiGame, note: str = "") -> str:
         if g.phase == "playing":
             head = f"{g.players[g.current].mention} さんの番です（{TURN_SECONDS}秒）。? のカードを2枚めくってください。"
         else:
             head = "ゲーム終了"
-        embed = discord.Embed(title="神経衰弱", description=f"{head}\n{note}".strip(), color=COLOR)
-        embed.add_field(name=f"ペア（残り {PAIRS - len(g.matched) // 2}）", value=g.score_text()[:1024], inline=False)
-        return embed
+        body = f"{head}\n{note}".strip()
+        body += f"\n\n## ペア（残り {PAIRS - len(g.matched) // 2}）\n{g.score_text()[:1024]}"
+        return body
 
     async def refresh(self, g: ShinkeiGame, note: str = ""):
         if g.message is not None:
-            await g.message.edit(embed=self.board_embed(g, note), view=BoardView(self, g))
+            await g.message.edit(view=BoardView(self, g, body=self.board_text(g, note)))
+
+    async def _notice(self, channel, g: ShinkeiGame, body: str):
+        """進行通知は常に最新1通だけ残す。"""
+        if g.last_notice is not None:
+            await safe_delete(g.last_notice)
+        g.last_notice = await channel.send(view=text_panel("", body))
 
     async def run_game(self, channel, g: ShinkeiGame):
         g.phase = "playing"
         order = " → ".join(m.display_name for m in g.players.values())
-        g.message = await game_panels.replace(channel, "party", embed=self.board_embed(g, f"順番: {order}"), view=BoardView(self, g))
+        g.message = await game_panels.replace(channel, "party", view=BoardView(self, g, body=self.board_text(g, f"順番: {order}")))
         await self._play_loop(channel, g)
         await self.finish(channel, g)
 
@@ -219,8 +239,7 @@ class Shinkei(commands.Cog):
             if result == "timeout":
                 idle_streak += 1
                 if idle_streak >= 2 * len(g.players):
-                    await channel.send(embed=discord.Embed(
-                        description="だれもめくらない状態が続いたので終了します。", color=COLOR))
+                    await self._notice(channel, g, "だれもめくらない状態が続いたので終了します。")
                     break
             else:
                 idle_streak = 0
@@ -261,12 +280,10 @@ class Shinkei(commands.Cog):
                 describe=lambda a: f"{a}番のカードをめく")
             if result is None or result.action is None:
                 g.next_turn()
-                await channel.send(embed=discord.Embed(
-                    description=f"{member.mention} さんは時間切れのため、手番を飛ばします。", color=COLOR))
+                await self._notice(channel, g, f"{member.mention} さんは時間切れのため、手番を飛ばします。")
                 await self.refresh(g)
                 return "timeout"
-            await channel.send(embed=discord.Embed(
-                description=result.notice.lstrip(CROCK).strip(), color=COLOR))   # 絵文字を外して自分で送る
+            await self._notice(channel, g, result.notice.lstrip(CROCK).strip())   # 絵文字を外して自分で送る
             outcome = g.flip(uid, int(result.action) - 1)
             await self.refresh(g)
             if outcome == "miss":
@@ -297,7 +314,7 @@ class Shinkei(commands.Cog):
             g.turn_done = True
         # めくった結果（ペア成立・得点）もチェックポイントに反映する
         self._save_snapshot(g)
-        await interaction.response.edit_message(embed=self.board_embed(g, note), view=BoardView(self, g))
+        await interaction.response.edit_message(view=BoardView(self, g, body=self.board_text(g, note)))
 
     async def finish(self, channel, g: ShinkeiGame):
         g.phase = "done"
@@ -306,16 +323,26 @@ class Shinkei(commands.Cog):
         if len(g.players) >= 2:
             for uid in winners:
                 await party_ranking.shared().record_win(g.guild_id, uid, GAME_ID)
-        await self.refresh(g)
+        # 盤面パネルは全カードを開示した表示専用にして残す（ボタンは残さない）
+        grid_lines = []
+        index = 0
+        for size in ROW_SIZES:
+            grid_lines.append(" ".join(g.cards[index + j] for j in range(size)))
+            index += size
+        if g.message is not None:
+            await g.message.edit(view=text_panel(
+                "神経衰弱", self.board_text(g) + "\n\n" + "\n".join(grid_lines)))
         if winners:
             text = "勝者: " + "、".join(g.players[u].mention for u in winners)
             if len(g.players) < 2:
                 text = "全部そろいました！（ひとり遊びはランキングに数えません）"
         else:
             text = "勝者なし"
-        embed = discord.Embed(title="神経衰弱 終了", description=text, color=COLOR)
-        embed.add_field(name="結果", value=g.score_text()[:1024] or "（なし）", inline=False)
-        await channel.send(embed=embed)
+        if g.last_notice is not None:
+            await safe_delete(g.last_notice)
+            g.last_notice = None
+        await channel.send(view=text_panel(
+            "神経衰弱 終了", text + f"\n\n## 結果\n{g.score_text()[:1024] or '（なし）'}"))
 
     # ------------------------------------------------------------------
     # 再起動復旧（core/game/game_restore.py）
@@ -392,11 +419,11 @@ class Shinkei(commands.Cog):
                 g.message = None
         self.games[channel_id] = g
         if g.message is not None:
-            # 既存の盤面メッセージへ新しい View を付け直して復活させる
+            # 既存の盤面メッセージへ新しいパネルを付け直して復活させる
             await self.refresh(g)
         else:
             g.message = await game_panels.replace(
-                channel, "party", embed=self.board_embed(g), view=BoardView(self, g))
+                channel, "party", view=BoardView(self, g, body=self.board_text(g)))
         asyncio.create_task(self._run_restored_session(channel, g))
         return True
 

@@ -112,10 +112,9 @@ class CogConnectionTest(unittest.IsolatedAsyncioTestCase):
         cog._apply_delta = fake_apply
         inter = FakeInteraction(self.member, self.channel)
         await cog.play(inter, 100, 2)
-        embed = inter.response.sent[0].embed
-        fields = {f.name: f.value for f in embed.fields}
-        self.assertIn("あなたの通算成績", fields)
-        self.assertIn("1回中", fields["あなたの通算成績"])
+        text = inter.response.sent[0].text()
+        self.assertIn("あなたの通算成績", text)
+        self.assertIn("1回中", text)
         stats = game_records.shared().get_guess("42")
         self.assertEqual(stats["plays"], 1)
         self.assertEqual(stats["total_bet"], 100)

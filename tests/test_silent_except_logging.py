@@ -181,10 +181,13 @@ class DoubtPanelDeleteLoggingTests(unittest.IsolatedAsyncioTestCase):
     """前回パネルの削除失敗（元 bare except）が debug ログになり処理が続くこと。"""
 
     async def test_delete_failure_logs_debug_and_continues(self):
+        # 前回パネルの削除は共通基盤 game_panels.replace が担う（削除失敗は
+        # 基盤側で debug ログに残り、処理は続く）ことを send_main_screen 経由で確かめる
         cog = object.__new__(doubt_module.Doubt)
         old_msg = types.SimpleNamespace(
             delete=AsyncMock(side_effect=RuntimeError("already gone"))
         )
+        new_msg = types.SimpleNamespace(id=100)
         game = types.SimpleNamespace(
             last_panel_msg=old_msg,
             current_player_id=1,
@@ -193,13 +196,16 @@ class DoubtPanelDeleteLoggingTests(unittest.IsolatedAsyncioTestCase):
             hands={},
             players=[],
         )
-        channel = types.SimpleNamespace(id=99)
-        with patch.object(
-            doubt_module.game_panels, "replace", new=AsyncMock(return_value=old_msg)
-        ), patch.object(doubt_module, "GameControlView", MagicMock()):
-            with self.assertLogs("cogs.doubt", level="DEBUG") as logs:
-                await cog.send_main_screen(channel, game)
-        self.assertTrue(any("前回パネルの削除" in line for line in logs.output))
+        channel = types.SimpleNamespace(id=99, send=AsyncMock(return_value=new_msg))
+        doubt_module.game_panels._active[(99, "party")] = old_msg
+        try:
+            with patch.object(doubt_module, "GameControlView", MagicMock()):
+                with self.assertLogs("core.game.game_panels", level="DEBUG") as logs:
+                    await cog.send_main_screen(channel, game)
+        finally:
+            doubt_module.game_panels._active.pop((99, "party"), None)
+        self.assertTrue(any("deletion failed" in line for line in logs.output))
+        self.assertIs(game.last_panel_msg, new_msg)
 
 
 class MutedSyncLoggingTests(unittest.IsolatedAsyncioTestCase):

@@ -21,7 +21,8 @@ import random
 import discord
 from core.game import board_image, game_panels, game_restore
 from core.game.board_image import render_cached, render_card_hand
-from core.messages import recruit_join_prompt
+from core.game.game_v2 import GamePanelView, LobbyView, safe_delete, text_panel
+from core.messages import recruit_join_prompt  # noqa: F401  cogs.daifugo シムの再輸出用に残す
 from discord.ext import commands
 
 from core.game import party_ranking
@@ -130,6 +131,11 @@ class DaifugoGame:
         self.eight_cut = False
         self.rule_eight_cut = True   # ルールオプション: 8切り（既定 ON = 従来どおり）
         self.rule_spade3 = False     # ルールオプション: スペ3返し（既定 OFF）
+        # 終了ガード（2026-11-07）: Bot を除く人間全員が連続でパスし続けると
+        # 対局が終わらないため、人間の連続パス回数を数える。Bot のプレイ/
+        # パスではリセットされず、人間がカードを出すとその人だけリセット。
+        self.human_pass_streak: dict = {}
+        self.auto_ended = False      # 終了ガードで終わった対局か
 
     def is_bot(self, uid) -> bool:
         return uid in BOT_IDS
@@ -193,12 +199,18 @@ class DaifugoGame:
         if not self.hands[uid]:
             self.finished.append(uid)
         self.eight_cut = bool(self.rule_eight_cut) and any(rank(c) == "8" for c in cards)
+        if not self.is_bot(uid):
+            self.human_pass_streak[uid] = 0   # 人間が出したらその人の連続パスはリセット
         if self.eight_cut and self.phase == "playing":
             self.table, self.passed = None, set()
-            self.turn = self.next_active(uid)
+            # 8切りは場を流して「出した本人が続けてリードする」のが本来の動き。
+            # 上がってしまった場合だけ次の人へ回す（バグ修正 2026-11-07:
+            # 以前は常時次の人へ回っていて、本人の手番が戻らなかった）。
+            self.turn = uid if self.hands.get(uid) else self.next_active(uid)
             self.cleared = True
         else:
             self._advance(uid)
+        self._maybe_auto_end()
         return result
 
     def pass_turn(self, uid) -> bool:
@@ -206,7 +218,36 @@ class DaifugoGame:
             return False
         self.passed.add(uid)
         self._advance(uid)
+        if not self.is_bot(uid):
+            self.human_pass_streak[uid] = self.human_pass_streak.get(uid, 0) + 1
+        self._maybe_auto_end()
         return True
+
+    #: 人間全員がこの回数だけ連続でパスしたら自動終了する（ユーザー指定: 2回）
+    AUTO_END_HUMAN_PASSES = 2
+
+    def _maybe_auto_end(self) -> None:
+        """終了ガード: Bot を除く人間の全員が2回連続でパスしたら対局を打ち切る。
+
+        Bot のプレイ/パスは人間の連続パスをリセットしない（Bot が出し
+        続けるせいで「全員パスなのに終わらない」状態を断つため）。
+        打ち切り時の順位は、既に上がった人の後ろに、残っている全員を
+        残り手札の少ない順（同数なら参加順）で付ける。
+        """
+        if self.phase != "playing" or self.auto_ended:
+            return
+        active = self.active
+        humans = [u for u in active if not self.is_bot(u)]
+        if not humans:
+            return
+        if not all(self.human_pass_streak.get(u, 0) >= self.AUTO_END_HUMAN_PASSES for u in humans):
+            return
+        order = list(self.players)
+        rest = sorted(active, key=lambda u: (len(self.hands.get(u, [])), order.index(u)))
+        self.finished.extend(rest)
+        self.auto_ended = True
+        self.phase = "done"
+        self.turn = None
 
     def _advance(self, uid):
         """次の手番を決める。ほかの全員がパスしたら場を流す。"""
@@ -265,32 +306,7 @@ def hand_file(cards, filename="daifugo_hand.png"):
     return discord.File(io.BytesIO(data), filename=filename)
 
 
-class JoinView(discord.ui.View):
-    def __init__(self, cog, game: DaifugoGame):
-        super().__init__(timeout=RECRUIT_SECONDS + 30)
-        self.cog, self.game = cog, game
 
-    @discord.ui.button(label="参加", style=discord.ButtonStyle.success)
-    async def join(self, interaction: discord.Interaction, button: discord.ui.Button):
-        g = self.game
-        if g.phase != "recruit":
-            return await interaction.response.send_message("募集は終わりました。", ephemeral=True)
-        if interaction.user.id in g.players:
-            return await interaction.response.send_message("もう参加しています。", ephemeral=True)
-        if len(g.players) >= MAX_PLAYERS:
-            return await interaction.response.send_message(f"定員（{MAX_PLAYERS}人）に達しました。", ephemeral=True)
-        g.players[interaction.user.id] = interaction.user
-        await interaction.response.send_message(f"参加しました（{len(g.players)}人）。")
-
-    @discord.ui.button(label="抜ける", style=discord.ButtonStyle.secondary)
-    async def leave(self, interaction: discord.Interaction, button: discord.ui.Button):
-        g = self.game
-        if g.phase != "recruit" or interaction.user.id not in g.players:
-            return await interaction.response.send_message("抜けられる募集がありません。", ephemeral=True)
-        if interaction.user.id == g.host_id:
-            return await interaction.response.send_message("募集した人は抜けられません。", ephemeral=True)
-        del g.players[interaction.user.id]
-        await interaction.response.send_message("参加をやめました。")
 
 
 class PlaySelect(discord.ui.Select):
@@ -310,51 +326,74 @@ class PlayView(discord.ui.View):
         self.add_item(PlaySelect(cog, game, plays))
 
 
-class TurnView(discord.ui.View):
-    def __init__(self, cog, game: DaifugoGame):
-        super().__init__(timeout=TURN_SECONDS + 30)
-        self.cog, self.game = cog, game
+class TurnPanel(GamePanelView):
+    """手番パネル（Components V2）。ボタンは属性としても公開する。"""
 
-    @discord.ui.button(label="手札から出す", style=discord.ButtonStyle.success)
-    async def open_hand(self, interaction: discord.Interaction, button: discord.ui.Button):
+    def __init__(self, cog, game: DaifugoGame, body: str, table_file=None):
+        super().__init__("", body, timeout=TURN_SECONDS + 30)
+        self.cog, self.game = cog, game
+        if table_file is not None:
+            gallery = discord.ui.MediaGallery()
+            gallery.add_item(media="attachment://daifugo_table.png")
+            self.add_extra(gallery)
+        self.open_hand = discord.ui.Button(label="手札から出す", style=discord.ButtonStyle.success)
+        self.open_hand.callback = self._open_hand
+        self.pass_button = discord.ui.Button(label="パス", style=discord.ButtonStyle.secondary)
+        self.pass_button.callback = self._pass_button
+        self.show = discord.ui.Button(label="手札を見る", style=discord.ButtonStyle.secondary)
+        self.show.callback = self._show
+        self.add_row(self.open_hand, self.pass_button, self.show)
+
+    async def _open_hand(self, interaction: discord.Interaction):
         await self.cog.open_hand(interaction, self.game)
 
-    @discord.ui.button(label="パス", style=discord.ButtonStyle.secondary)
-    async def pass_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+    async def _pass_button(self, interaction: discord.Interaction):
         await self.cog.on_pass(interaction, self.game)
 
-    @discord.ui.button(label="手札を見る", style=discord.ButtonStyle.secondary)
-    async def show(self, interaction: discord.Interaction, button: discord.ui.Button):
+    async def _show(self, interaction: discord.Interaction):
         await self.cog.show_hand(interaction, self.game)
+
+
+TurnView = TurnPanel  # 互換名（テスト・外部参照用）
 
 
 class Daifugo(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
         self.games: dict = {}   # channel_id -> DaifugoGame
+        self._logs: dict = {}   # channel_id -> 直近の行動ログメッセージ（残留対策で前回分を消す）
 
     async def start_recruit(self, interaction: discord.Interaction, eight_cut: bool = True, spade3: bool = False):
         channel = interaction.channel
         if channel.id in self.games:
             return await interaction.response.send_message(
-                embed=discord.Embed(description="このチャンネルでは既に大富豪が進行中です。", color=COLOR),
-                ephemeral=True)
+                "このチャンネルでは既に大富豪が進行中です。", ephemeral=True)
         g = DaifugoGame(channel.id, interaction.guild_id, interaction.user.id)
         g.rule_eight_cut = bool(eight_cut)
         g.rule_spade3 = bool(spade3)
         g.players[interaction.user.id] = interaction.user
         self.games[channel.id] = g
-        await interaction.response.send_message(
-            embed=discord.Embed(description=f"大富豪の募集を開始しました（{RECRUIT_SECONDS}秒）。", color=COLOR))
+        await interaction.response.send_message(f"大富豪の募集を開始しました（{RECRUIT_SECONDS}秒）。")
         try:
-            await game_panels.replace(channel, "party", embed=discord.Embed(
+            lobby = LobbyView(
                 title="大富豪 参加者募集",
-                description=(f"{interaction.user.mention} さんが募集中です。\n"
-                             f"{recruit_join_prompt(RECRUIT_SECONDS)}（{MIN_PLAYERS}〜{MAX_PLAYERS}人）。\n"
-                             f"{MIN_PLAYERS}人に足りないときは Bot が入ります。\n"
-                             f"ルール: 8切り {'ON' if g.rule_eight_cut else 'OFF'} / スペ3返し {'ON' if g.rule_spade3 else 'OFF'}"),
-                color=COLOR), view=JoinView(self, g))
-            await asyncio.sleep(RECRUIT_SECONDS)
+                host=interaction.user,
+                min_players=1,   # 人数が足りない分は Bot が入るため、主催者だけでも開始できる
+                max_players=MAX_PLAYERS,
+                note=(f"{interaction.user.mention} さんが募集中です。\n"
+                      f"{RECRUIT_SECONDS}秒で自動開始します（{MIN_PLAYERS}〜{MAX_PLAYERS}人、"
+                      f"足りないときは Bot が入ります）。\n"
+                      f"ルール: 8切り {'ON' if g.rule_eight_cut else 'OFF'} / スペ3返し {'ON' if g.rule_spade3 else 'OFF'}"),
+                timeout=RECRUIT_SECONDS + 30)
+            await game_panels.replace(channel, "party", view=lobby)
+            for _ in range(RECRUIT_SECONDS * 2):
+                if lobby.started or lobby.cancelled:
+                    break
+                await asyncio.sleep(0.5)
+            lobby.stop()
+            if lobby.cancelled:
+                return
+            g.players = dict(lobby.members)
             await self.run_game(channel, g)
         finally:
             g.phase = "done"
@@ -371,12 +410,11 @@ class Daifugo(commands.Cog):
                 break
             g.players[bot_id] = None
         g.start(rng)
-        await channel.send(embed=discord.Embed(
-            title="大富豪 スタート！",
-            description=("カードを配りました。ダイヤの3を持っている人からです。\n"
-                         "自分の番に「手札から出す」で出すカードを選ぶか、「パス」を押してください。\n\n"
-                         + self.counts_text(g)),
-            color=COLOR))
+        await channel.send(view=text_panel(
+            "大富豪 スタート！",
+            "カードを配りました。ダイヤの3を持っている人からです。\n"
+            "自分の番に「手札から出す」で出すカードを選ぶか、「パス」を押してください。\n\n"
+            + self.counts_text(g)))
         await self._play_loop(channel, g, rng)
         await self.finish(channel, g)
 
@@ -390,15 +428,13 @@ class Daifugo(commands.Cog):
         uid = g.turn
         g.acted = False
         plays = g.legal(uid)
-        embed = discord.Embed(
-            description=(f"{g.name(uid)} さんの番です（{TURN_SECONDS}秒）。\n{table_text(g)}\n\n{self.counts_text(g)}"),
-            color=COLOR)
+        body = f"{g.name(uid)} さんの番です（{TURN_SECONDS}秒）。\n{table_text(g)}\n\n{self.counts_text(g)}"
         kwargs = {}
         data = table_image(g)
         if data is not None:
-            embed.set_image(url="attachment://daifugo_table.png")
             kwargs["file"] = discord.File(io.BytesIO(data), filename="daifugo_table.png")
-        await game_panels.replace(channel, "party", embed=embed, view=TurnView(self, g), **kwargs)
+        panel = TurnPanel(self, g, body, table_file=kwargs.get("file"))
+        await game_panels.replace(channel, "party", view=panel, **kwargs)
         if g.is_bot(uid):
             await asyncio.sleep(BOT_SECONDS)
             return await self.apply(channel, g, uid, plays[0] if plays else PASS)
@@ -408,27 +444,37 @@ class Daifugo(commands.Cog):
             elapsed += 1
         if not g.acted and g.phase == "playing":
             action = PASS if g.table is not None else plays[0]
-            await channel.send(embed=discord.Embed(
-                description=f"{g.name(uid)} さんは時間切れのため自動で{('パス' if action == PASS else label(action) + ' を出しました')}。", color=COLOR))
-            await self.apply(channel, g, uid, action)
+            note = f"{g.name(uid)} さんは時間切れのため自動で{('パス' if action == PASS else label(action) + ' を出しました')}。"
+            await self.apply(channel, g, uid, action, note=note)
 
-    async def apply(self, channel, g: DaifugoGame, uid, play):
+    async def _send_log(self, channel, text: str) -> None:
+        """行動ログは1通だけ残す（前回分は役割を終えたので削除する）。"""
+        old = self._logs.pop(channel.id, None)
+        await safe_delete(old)
+        self._logs[channel.id] = await channel.send(view=text_panel("", text))
+
+    async def apply(self, channel, g: DaifugoGame, uid, play, note: str | None = None):
         g.acted = True
+        lines = [note] if note else []
         if play == PASS:
             g.pass_turn(uid)
-            lines = [f"{g.name(uid)} さんはパス。"]
+            if not note:
+                lines.append(f"{g.name(uid)} さんはパス。")
+            if getattr(g, "cleared", False) and g.phase == "playing":
+                lines.append(f"全員パスしたので場を流します。次は {g.name(g.turn)} さんから。")
         else:
             result = g.play(uid, play)
-            lines = [f"{g.name(uid)} さんが {label(play)} を出しました。"]
+            if not note:
+                lines.append(f"{g.name(uid)} さんが {label(play)} を出しました。")
             if result == "revolution":
                 lines.append("革命！ 数字の強さが逆になります。" if g.revolution else "革命返し！ 強さが元に戻ります。")
             if g.eight_cut:
-                lines.append("8切り！ 場を流します。")
+                lines.append(f"8切り！ 場を流します。続けて {g.name(uid)} さんから出せます。")
             if uid in g.finished:
                 lines.append(f"{g.name(uid)} さんが上がりました（{g.finished.index(uid) + 1}番目）。")
-        if getattr(g, "cleared", False) and g.phase == "playing":
-            lines.append(f"全員パスしたので場を流します。次は {g.name(g.turn)} さんから。")
-        await channel.send(embed=discord.Embed(description="\n".join(lines), color=COLOR))
+        if getattr(g, "auto_ended", False):
+            lines.append("Bot を除く全員が2回連続でパスしたため、対局を自動終了します。")
+        await self._send_log(channel, "\n".join(lines))
 
     def _check_turn(self, interaction, g: DaifugoGame):
         if g.phase != "playing":
@@ -488,9 +534,15 @@ class Daifugo(commands.Cog):
         if results and len(humans) >= 2 and not g.is_bot(results[0][0]):
             await party_ranking.shared().record_win(g.guild_id, results[0][0], GAME_ID)
         text = "\n".join(f"{t}: {g.name(u)}" for u, t in results) or "（なし）"
+        if getattr(g, "auto_ended", False):
+            text = ("Bot を除く全員が2回連続でパスしたため、対局を自動終了しました。"
+                    "残り手札の少ない順に順位を付けています。\n" + text)
         if len(humans) < 2:
             text += "\n（人間が2人以上いないゲームはランキングに数えません）"
-        await channel.send(embed=discord.Embed(title="大富豪 終了", description=text, color=COLOR))
+        # 役割を終えた進行パネルと行動ログを片付け、結果だけを残す。
+        await game_panels.clear(channel, "party")
+        await safe_delete(self._logs.pop(channel.id, None))
+        await channel.send(view=text_panel("大富豪 終了", text))
 
     # ------------------------------------------------------------------
     # 再起動復旧（core/game/game_restore.py）
@@ -515,6 +567,8 @@ class Daifugo(commands.Cog):
             "eight_cut": bool(g.eight_cut),
             "rule_eight_cut": bool(g.rule_eight_cut),
             "rule_spade3": bool(g.rule_spade3),
+            "human_pass_streak": [[uid, n] for uid, n in g.human_pass_streak.items()],
+            "auto_ended": bool(g.auto_ended),
         }
         game_restore.save_session("daifugo", g.channel_id, g.guild_id, state)
 
@@ -564,6 +618,8 @@ class Daifugo(commands.Cog):
         g.eight_cut = bool(state.get("eight_cut"))
         g.rule_eight_cut = bool(state.get("rule_eight_cut", True))
         g.rule_spade3 = bool(state.get("rule_spade3", False))
+        g.human_pass_streak = {int(uid): int(n) for uid, n in state.get("human_pass_streak") or []}
+        g.auto_ended = bool(state.get("auto_ended", False))
         g.phase = "playing"
         self.games[channel_id] = g
         asyncio.create_task(self._run_restored_session(channel, g))

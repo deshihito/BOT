@@ -350,7 +350,7 @@ class UnoRestoreTest(StoreTestCase, unittest.IsolatedAsyncioTestCase):
         self.assertIsInstance(restored.active_view, uno_mod.GameControlView)
 
         # 続きをプレイできる: 手番プレイヤーが出せるカードを出す
-        select = next(c for c in restored.active_view.children
+        select = next(c for c in restored.active_view.walk_children()
                       if isinstance(c, uno_mod.CardSelect))
         interaction = FakeInteraction(members2[101], channel2)
         await choose(select, "赤の7", interaction)

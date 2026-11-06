@@ -60,6 +60,7 @@ class FakeMessage:
         parts = [self.content or '']
         for e in self.embeds:
             parts += [e.title or '', e.description or ''] + [f'{f.name} {f.value}' for f in e.fields]
+        parts += _view_texts(self.view)
         return ' '.join(p for p in parts if p)
 
     async def delete(self, *args, **kwargs):
@@ -74,6 +75,20 @@ class FakeMessage:
         if 'embed' in kwargs:
             self.embeds = [kwargs['embed']] if kwargs['embed'] else []
         return self
+
+
+def _view_texts(view):
+    """Components V2 ビュー内の TextDisplay の本文を集める（実クライアントでの見え方に合わせる）。"""
+    if view is None:
+        return []
+    texts = []
+    try:
+        for item in view.walk_children():
+            if isinstance(item, discord.ui.TextDisplay):
+                texts.append(item.content or '')
+    except Exception:
+        return []
+    return texts
 
 
 class FakeRole:

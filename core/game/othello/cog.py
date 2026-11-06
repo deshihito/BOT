@@ -9,6 +9,7 @@ import discord
 from discord.ext import commands
 from core.game import party_ranking
 from core.game import elo, game_panels, game_restore
+from core.game.game_v2 import GamePanelView, LobbyView, text_panel
 from PIL import Image, ImageDraw, ImageFont
 
 logger = logging.getLogger(__name__)
@@ -214,32 +215,13 @@ class OthelloGame:
         return sum(cell == BLACK for row in self.board for cell in row), sum(cell == WHITE for row in self.board for cell in row)
 
 
-class JoinView(discord.ui.View):
-    def __init__(self, game):
-        super().__init__(timeout=RECRUIT_SECONDS + 30)
-        self.game = game
-
-    @discord.ui.button(label="参加（最大2人）", style=discord.ButtonStyle.success)
-    async def join(self, interaction, button):
-        g = self.game
-        if g.phase != "recruit":
-            return await interaction.response.send_message("募集は終了しました。", ephemeral=True)
-        if interaction.user.id in g.players:
-            return await interaction.response.send_message("すでに参加しています。", ephemeral=True)
-        if len(g.players) >= 2:
-            return await interaction.response.send_message("定員です。", ephemeral=True)
-        g.players[interaction.user.id] = interaction.user
-        await interaction.response.send_message("参加しました。")
-
-    @discord.ui.button(label="抜ける", style=discord.ButtonStyle.secondary)
-    async def leave(self, interaction, button):
-        g = self.game
-        if g.phase != "recruit" or interaction.user.id not in g.players:
-            return await interaction.response.send_message("参加中の募集がありません。", ephemeral=True)
-        if interaction.user.id == g.host_id:
-            return await interaction.response.send_message("募集主は抜けられません。", ephemeral=True)
-        del g.players[interaction.user.id]
-        await interaction.response.send_message("参加を取り消しました。")
+def board_panel(title: str, body: str, filename: str = "othello_board.png") -> GamePanelView:
+    """盤面画像つきの表示専用パネル（開始・通知・終了表示用）。"""
+    panel = GamePanelView(title, body, timeout=None)
+    gallery = discord.ui.MediaGallery()
+    gallery.add_item(media=f"attachment://{filename}")
+    panel.add_extra(gallery)
+    return panel
 
 
 class OthelloMoveSelect(discord.ui.Select):
@@ -263,11 +245,22 @@ class OthelloMoveSelect(discord.ui.Select):
             self.game.acted = play_move(self.game.board, self.game.turn, *move)
 
 
-class OthelloMoveView(discord.ui.View):
-    def __init__(self, cog, game, moves):
-        super().__init__(timeout=TURN_SECONDS)
+class OthelloMovePanel(GamePanelView):
+    """番号セレクトつきの手番パネル（V2）。合法手が多いときはセレクトを分ける。"""
+
+    def __init__(self, cog, game, moves, body: str = ""):
+        super().__init__("", body, timeout=TURN_SECONDS)
+        gallery = discord.ui.MediaGallery()
+        gallery.add_item(media="attachment://othello_board.png")
+        self.add_extra(gallery)
+        self.selects = []
         for start in range(0, len(moves), SELECT_PAGE_SIZE):
-            self.add_item(OthelloMoveSelect(cog, game, moves[start:start + SELECT_PAGE_SIZE]))
+            select = OthelloMoveSelect(cog, game, moves[start:start + SELECT_PAGE_SIZE])
+            self.selects.append(select)
+            self.add_row(select)
+
+
+OthelloMoveView = OthelloMovePanel  # 互換名
 
 
 class Othello(commands.Cog):
@@ -301,9 +294,20 @@ class Othello(commands.Cog):
         self.games[channel.id] = g
         await interaction.response.send_message("オセロの募集を開始しました。")
         try:
-            await game_panels.replace(channel, "party", embed=discord.Embed(
-                title="オセロ 参加者募集", description=f"{interaction.user.mention} さんが募集中です。\n{RECRUIT_SECONDS}秒以内に参加してください（2人対戦）。", color=COLOR), view=JoinView(g))
-            await asyncio.sleep(RECRUIT_SECONDS)
+            lobby = LobbyView(
+                title="オセロ 参加者募集", host=interaction.user,
+                min_players=2, max_players=2,
+                note=f"{interaction.user.mention} さんが募集中です。\n{RECRUIT_SECONDS}秒以内に参加してください（2人対戦）。",
+                timeout=RECRUIT_SECONDS + 30)
+            await game_panels.replace(channel, "party", view=lobby)
+            for _ in range(RECRUIT_SECONDS * 2):
+                if lobby.started or lobby.cancelled:
+                    break
+                await asyncio.sleep(0.5)
+            lobby.stop()
+            if lobby.cancelled:
+                return
+            g.players = dict(lobby.members)
             await self.run_game(channel, g)
         finally:
             g.phase = "done"
@@ -318,9 +322,7 @@ class Othello(commands.Cog):
         if g.mode != "cpu":
             g.players[BLACK], g.players[WHITE] = list(g.players.values())
         file, image_url = board_attachment(g.board)
-        start_embed = discord.Embed(description="オセロを開始します。黒（●）が先手です。", color=COLOR)
-        start_embed.set_image(url=image_url)
-        await channel.send(embed=start_embed, file=file)
+        await channel.send(view=board_panel("", "オセロを開始します。黒（●）が先手です。"), file=file)
         await self._play_loop(channel, g)
 
     async def _play_loop(self, channel, g):
@@ -336,12 +338,11 @@ class Othello(commands.Cog):
                 g.turn = WHITE if g.turn == BLACK else BLACK
                 file, image_url = board_attachment(g.board)
                 passed_color = BLACK if g.turn == WHITE else WHITE
-                pass_embed = discord.Embed(
-                    description=f"{self.player_label(g, passed_color)} さんは置ける場所がないためパス。",
-                    color=COLOR,
-                )
-                pass_embed.set_image(url=image_url)
-                await channel.send(embed=pass_embed, file=file)
+                # パス通知は次の手番パネルに置き換わるまでの暫定表示として
+                # 追跡パネルに出す（次の replace / 終了時の clear で消える）。
+                await game_panels.replace(
+                    channel, "party", file=file,
+                    view=board_panel("", f"{self.player_label(g, passed_color)} さんは置ける場所がないためパス。"))
                 continue
             if g.mode == "cpu" and g.turn == WHITE:
                 move = await asyncio.to_thread(choose_ai_move, g.board, WHITE, g.difficulty)
@@ -353,12 +354,10 @@ class Othello(commands.Cog):
             color, uid = g.turn, g.current_user().id
             labelled_moves(moves)
             file, image_url = board_attachment(g.board, moves)
-            turn_embed = discord.Embed(
-                description=(f"{g.players[color].mention} さんの番（{ '黒 ●' if color == BLACK else '白 ○'}）。\n"
-                             "盤面画像の番号をセレクトメニューから選んでください。"), color=COLOR)
-            turn_embed.set_image(url=image_url)
-            turn_message = await game_panels.replace(channel, "party", embed=turn_embed, file=file,
-                                                     view=OthelloMoveView(self, g, moves))
+            body = (f"{g.players[color].mention} さんの番（{ '黒 ●' if color == BLACK else '白 ○'}）。\n"
+                    "盤面画像の番号をセレクトメニューから選んでください。")
+            turn_message = await game_panels.replace(channel, "party", file=file,
+                                                     view=OthelloMovePanel(self, g, moves, body))
             for _ in range(TURN_SECONDS):
                 if g.acted or g.phase != "playing": break
                 await asyncio.sleep(1)
@@ -368,7 +367,10 @@ class Othello(commands.Cog):
                 g.turn = WHITE if color == BLACK else BLACK
             else:
                 idle += 1
-                await channel.send(f"{self.player_label(g, color)} さんは時間切れのためパスしました。")
+                # 時間切れパスも暫定表示として追跡パネルへ（次で置き換わる）。
+                await game_panels.replace(
+                    channel, "party",
+                    view=text_panel("", f"{self.player_label(g, color)} さんは時間切れのためパスしました。"))
                 g.pass_count += 1
                 g.turn = WHITE if color == BLACK else BLACK
                 if idle >= 2: break
@@ -382,9 +384,9 @@ class Othello(commands.Cog):
         if g.mode == "cpu":
             outcome += "\n（CPU戦はランキングに記録されません）"
         file, image_url = board_attachment(g.board)
-        result_embed = discord.Embed(title="オセロ 終了", description=f"{outcome}\n黒: {black} / 白: {white}", color=COLOR)
-        result_embed.set_image(url=image_url)
-        await channel.send(embed=result_embed, file=file)
+        # 役割を終えた手番パネルを片付け、結果（盤面つき）だけを残す。
+        await game_panels.clear(channel, "party")
+        await channel.send(view=board_panel("オセロ 終了", f"{outcome}\n黒: {black} / 白: {white}"), file=file)
 
     # ------------------------------------------------------------------
     # 再起動復旧（core/game/game_restore.py）

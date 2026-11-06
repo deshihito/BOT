@@ -17,6 +17,7 @@ from PIL import Image, ImageDraw, ImageFont
 
 from core.game import party_ranking
 from core.game import elo, game_panels, game_restore
+from core.game.game_v2 import GamePanelView, LobbyView
 from core.game.gomoku import BLACK, EMPTY, SIZE, WHITE, choose_ai_move, is_full, is_win_at, legal_moves, new_board, winner
 
 logger = logging.getLogger(__name__)
@@ -151,59 +152,42 @@ class GomokuGame:
         return self.players.get(self.turn)
 
 
-class JoinView(discord.ui.View):
-    def __init__(self, game):
-        super().__init__(timeout=RECRUIT_SECONDS + 30)
-        self.game = game
+class MovePanel(GamePanelView):
+    """X（横）→Y（縦）の2段セレクト。両方選ぶと着手する（V2）。"""
 
-    @discord.ui.button(label="参加（最大2人）", style=discord.ButtonStyle.success)
-    async def join(self, interaction, button):
-        g = self.game
-        if g.phase != "recruit":
-            return await interaction.response.send_message("募集は終了しました。", ephemeral=True)
-        if interaction.user.id in g.players:
-            return await interaction.response.send_message("すでに参加しています。", ephemeral=True)
-        if len(g.players) >= 2:
-            return await interaction.response.send_message("定員です。", ephemeral=True)
-        g.players[interaction.user.id] = interaction.user
-        await interaction.response.send_message("参加しました。")
-
-
-class MoveView(discord.ui.View):
-    """X（横）→Y（縦）の2段セレクト。両方選ぶと着手する。"""
-
-    def __init__(self, cog, game):
-        super().__init__(timeout=TURN_SECONDS)
+    def __init__(self, cog, game, body: str = ""):
+        super().__init__("", body, timeout=TURN_SECONDS)
         self.cog = cog
         self.game = game
         self.row = None
         self.col = None
-        col_select = discord.ui.Select(
-            placeholder="X（横）: 列（1〜15）", row=0,
+        gallery = discord.ui.MediaGallery()
+        gallery.add_item(media="attachment://gomoku_board.png")
+        self.add_extra(gallery)
+        self.col_select = discord.ui.Select(
+            placeholder="X（横）: 列（1〜15）",
             options=[discord.SelectOption(label=f"X={i+1}", value=str(i)) for i in range(SIZE)])
-        col_select.callback = self._col_callback
-        self.add_item(col_select)
-        row_select = discord.ui.Select(
-            placeholder="Y（縦）: 行（1〜15）", row=1,
+        self.col_select.callback = self._col_callback
+        self.add_row(self.col_select)
+        self.row_select = discord.ui.Select(
+            placeholder="Y（縦）: 行（1〜15）",
             options=[discord.SelectOption(label=f"Y={i+1}", value=str(i)) for i in range(SIZE)])
-        row_select.callback = self._row_callback
-        self.add_item(row_select)
+        self.row_select.callback = self._row_callback
+        self.add_row(self.row_select)
 
     async def _col_callback(self, interaction):
         if not self._check_turn(interaction):
             return await interaction.response.send_message("現在の手番のプレイヤーだけが選択できます。", ephemeral=True)
-        for item in self.children:
-            if isinstance(item, discord.ui.Select) and item.row == 0 and item.values:
-                self.col = int(item.values[0])
+        if self.col_select.values:
+            self.col = int(self.col_select.values[0])
         await interaction.response.defer()
         await self._try_apply(interaction)
 
     async def _row_callback(self, interaction):
         if not self._check_turn(interaction):
             return await interaction.response.send_message("現在の手番のプレイヤーだけが選択できます。", ephemeral=True)
-        for item in self.children:
-            if isinstance(item, discord.ui.Select) and item.row == 1 and item.values:
-                self.row = int(item.values[0])
+        if self.row_select.values:
+            self.row = int(self.row_select.values[0])
         await interaction.response.defer()
         await self._try_apply(interaction)
 
@@ -222,6 +206,18 @@ class MoveView(discord.ui.View):
         g.board[self.row][self.col] = g.turn
         g.last_move = (self.row, self.col)
         g.acted = True
+
+
+MoveView = MovePanel  # 互換名
+
+
+def board_panel(title: str, body: str) -> GamePanelView:
+    """盤面画像つきの表示専用パネル（開始・終了表示用）。"""
+    panel = GamePanelView(title, body, timeout=None)
+    gallery = discord.ui.MediaGallery()
+    gallery.add_item(media="attachment://gomoku_board.png")
+    panel.add_extra(gallery)
+    return panel
 
 
 class Gomoku(commands.Cog):
@@ -251,11 +247,20 @@ class Gomoku(commands.Cog):
         g.players[interaction.user.id] = interaction.user
         await interaction.response.send_message("五目並べの募集を開始しました。")
         try:
-            await game_panels.replace(channel, "party", embed=discord.Embed(
-                title="五目並べ 参加者募集",
-                description=f"{interaction.user.mention} さんが募集中です。\n{RECRUIT_SECONDS}秒以内に参加してください（2人対戦）。",
-                color=COLOR), view=JoinView(g))
-            await asyncio.sleep(RECRUIT_SECONDS)
+            lobby = LobbyView(
+                title="五目並べ 参加者募集", host=interaction.user,
+                min_players=2, max_players=2,
+                note=f"{interaction.user.mention} さんが募集中です。\n{RECRUIT_SECONDS}秒以内に参加してください（2人対戦）。",
+                timeout=RECRUIT_SECONDS + 30)
+            await game_panels.replace(channel, "party", view=lobby)
+            for _ in range(RECRUIT_SECONDS * 2):
+                if lobby.started or lobby.cancelled:
+                    break
+                await asyncio.sleep(0.5)
+            lobby.stop()
+            if lobby.cancelled:
+                return
+            g.players = dict(lobby.members)
             await self.run_game(channel, g)
         finally:
             self._teardown(channel.id, g)
@@ -274,9 +279,8 @@ class Gomoku(commands.Cog):
         if g.mode != "cpu":
             g.players[BLACK], g.players[WHITE] = list(g.players.values())
         file, url = board_attachment(g.board)
-        embed = discord.Embed(description="五目並べを開始します。黒（●）が先手です。先に5つ並べた方が勝ちです。", color=COLOR)
-        embed.set_image(url=url)
-        await channel.send(embed=embed, file=file)
+        await channel.send(view=board_panel(
+            "", "五目並べを開始します。黒（●）が先手です。先に5つ並べた方が勝ちです。"), file=file)
         await self._play_loop(channel, g)
 
     def _cpu_move(self, g):
@@ -301,11 +305,9 @@ class Gomoku(commands.Cog):
             g.acted = False
             user = g.current_user()
             file, url = board_attachment(g.board, g.last_move)
-            embed = discord.Embed(
-                description=(f"{user.mention} さんの番（{'黒 ●' if g.turn == BLACK else '白 ○'}）。\n"
-                             "X（横）→Y（縦）の順にセレクトで選んでください。"), color=COLOR)
-            embed.set_image(url=url)
-            await game_panels.replace(channel, "party", embed=embed, file=file, view=MoveView(self, g))
+            body = (f"{user.mention} さんの番（{'黒 ●' if g.turn == BLACK else '白 ○'}）。\n"
+                    "X（横）→Y（縦）の順にセレクトで選んでください。")
+            await game_panels.replace(channel, "party", file=file, view=MovePanel(self, g, body))
             for _ in range(TURN_SECONDS):
                 if g.acted or g.phase != "playing":
                     break
@@ -328,9 +330,9 @@ class Gomoku(commands.Cog):
         if g.mode == "cpu":
             outcome += "\n（CPU戦はランキングに記録されません）"
         file, url = board_attachment(g.board, g.last_move)
-        embed = discord.Embed(title="五目並べ 終了", description=outcome, color=COLOR)
-        embed.set_image(url=url)
-        await channel.send(embed=embed, file=file)
+        # 役割を終えた手番パネルを片付け、結果（盤面つき）だけを残す。
+        await game_panels.clear(channel, "party")
+        await channel.send(view=board_panel("五目並べ 終了", outcome), file=file)
 
     # ------------------------------------------------------------------ 復旧
     def _save_snapshot(self, g):

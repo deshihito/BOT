@@ -15,6 +15,7 @@ from discord.ext import commands
 
 from core.game import party_ranking
 from core.game import game_panels
+from core.game.game_v2 import GamePanelView, refresh_panel, text_panel
 from core.game.codenames import TEAM_LABEL, CodenamesGame, other_team
 
 logger = logging.getLogger(__name__)
@@ -86,17 +87,28 @@ class HintModal(discord.ui.Modal, title="ヒントを出す"):
                                       note=f"{TEAM_LABEL[team]} のリーダーがヒント「{self.word.value}」{count}個を出しました。")
 
 
-class ControlView(discord.ui.View):
-    def __init__(self, cog, session):
-        super().__init__(timeout=None)
+class ControlPanel(GamePanelView):
+    """盤面＋単語セレクト＋操作ボタンのパネル（V2）。"""
+
+    def __init__(self, cog, session, body: str = "", guess_select=None):
+        super().__init__("🕵 コードネーム", body, timeout=None)
         self.cog = cog
         self.session = session
+        self.guess_select = guess_select
+        if guess_select is not None:
+            self.add_row(guess_select)
+        self.show_key = discord.ui.Button(label="キーを見る（リーダー専用）", style=discord.ButtonStyle.secondary)
+        self.show_key.callback = self._show_key
+        self.hint = discord.ui.Button(label="ヒントを出す（リーダー）", style=discord.ButtonStyle.primary)
+        self.hint.callback = self._hint
+        self.pass_button = discord.ui.Button(label="パス", style=discord.ButtonStyle.secondary)
+        self.pass_button.callback = self._pass
+        self.add_row(self.show_key, self.hint, self.pass_button)
 
     def _team(self, interaction):
         return self.session["team_of"].get(interaction.user.id)
 
-    @discord.ui.button(label="キーを見る（リーダー専用）", style=discord.ButtonStyle.secondary, row=1)
-    async def show_key(self, interaction: discord.Interaction, button: discord.ui.Button):
+    async def _show_key(self, interaction: discord.Interaction):
         session = self.session
         leaders = {m.id for m in session["leaders"].values()}
         if interaction.user.id not in leaders:
@@ -106,8 +118,7 @@ class ControlView(discord.ui.View):
             f"キーカード（あなたは {TEAM_LABEL[self._team(interaction)]} のリーダー）:\n```\n{board_text(game, reveal_key=True)}\n```",
             ephemeral=True)
 
-    @discord.ui.button(label="ヒントを出す（リーダー）", style=discord.ButtonStyle.primary, row=1)
-    async def hint(self, interaction: discord.Interaction, button: discord.ui.Button):
+    async def _hint(self, interaction: discord.Interaction):
         session = self.session
         game: CodenamesGame = session["game"]
         team = self._team(interaction)
@@ -117,8 +128,7 @@ class ControlView(discord.ui.View):
             return await interaction.response.send_message("今はあなたのチームのヒントの番ではありません。", ephemeral=True)
         await interaction.response.send_modal(HintModal(self.cog, session))
 
-    @discord.ui.button(label="パス", style=discord.ButtonStyle.secondary, row=1)
-    async def pass_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+    async def _pass(self, interaction: discord.Interaction):
         session = self.session
         game: CodenamesGame = session["game"]
         team = self._team(interaction)
@@ -129,6 +139,9 @@ class ControlView(discord.ui.View):
         await self.cog.refresh_board(session, note=f"{TEAM_LABEL[team]} がパスしました。")
 
 
+ControlView = ControlPanel  # 互換名
+
+
 class GuessSelect(discord.ui.Select):
     def __init__(self, cog, session):
         self.cog = cog
@@ -136,7 +149,7 @@ class GuessSelect(discord.ui.Select):
         game: CodenamesGame = session["game"]
         options = [discord.SelectOption(label=game.words[i], value=str(i))
                    for i in range(25) if not game.revealed[i]]
-        super().__init__(placeholder="当てる単語を選んでください（味方のエージェント専用）", options=options, row=0)
+        super().__init__(placeholder="当てる単語を選んでください（味方のエージェント専用）", options=options)
 
     async def callback(self, interaction: discord.Interaction):
         session = self.session
@@ -161,17 +174,39 @@ class GuessSelect(discord.ui.Select):
         await self.cog.refresh_board(session, note=note)
 
 
-class TeamJoinView(discord.ui.View):
-    def __init__(self, session):
-        super().__init__(timeout=RECRUIT_SECONDS + 30)
-        self.session = session
+class TeamJoinPanel(GamePanelView):
+    """チーム選択型ロビー（V2）。
 
-    @discord.ui.button(label="🔴 赤チームで参加", style=discord.ButtonStyle.danger)
-    async def join_red(self, interaction: discord.Interaction, button: discord.ui.Button):
+    共通ロビー（LobbyView）は単一参加者プール前提のため使えないが、
+    規格は揃える: 参加は新規メッセージを出さずパネルをその場編集して
+    チーム別参加者一覧を更新し、エラーだけ ephemeral で返す。
+    開始はホスト操作ではなく制限時間で締め切る（従来どおり）。
+    """
+
+    def __init__(self, session):
+        super().__init__("🕵 コードネーム 参加者募集", "", timeout=RECRUIT_SECONDS + 30)
+        self.session = session
+        self.join_red = discord.ui.Button(label="🔴 赤チームで参加", style=discord.ButtonStyle.danger)
+        self.join_red.callback = self._join_red
+        self.join_blue = discord.ui.Button(label="🔵 青チームで参加", style=discord.ButtonStyle.primary)
+        self.join_blue.callback = self._join_blue
+        self.add_row(self.join_red, self.join_blue)
+        self._sync_body()
+
+    def _sync_body(self) -> None:
+        session = self.session
+        lines = ["チームを選んで参加してください（各チーム2人以上）。",
+                 f"{RECRUIT_SECONDS}秒で締め切ります。各チームの最初の参加者がリーダーになります。"]
+        for team in ("red", "blue"):
+            members = session["teams"][team]
+            names = "、".join(m.display_name for m in members) or "（まだいません）"
+            lines.append(f"{TEAM_LABEL[team]}（{len(members)}人）: {names}")
+        self.set_content(body="\n".join(lines))
+
+    async def _join_red(self, interaction: discord.Interaction):
         await self._join(interaction, "red")
 
-    @discord.ui.button(label="🔵 青チームで参加", style=discord.ButtonStyle.primary)
-    async def join_blue(self, interaction: discord.Interaction, button: discord.ui.Button):
+    async def _join_blue(self, interaction: discord.Interaction):
         await self._join(interaction, "blue")
 
     async def _join(self, interaction: discord.Interaction, team: str):
@@ -180,7 +215,11 @@ class TeamJoinView(discord.ui.View):
             return await interaction.response.send_message("すでに参加しています（チーム変更はできません）。", ephemeral=True)
         session["teams"][team].append(interaction.user)
         session["team_of"][interaction.user.id] = team
-        await interaction.response.send_message(f"{TEAM_LABEL[team]} に参加しました。")
+        self._sync_body()
+        await refresh_panel(interaction, self)
+
+
+TeamJoinView = TeamJoinPanel  # 互換名
 
 
 class Codenames(commands.Cog):
@@ -197,13 +236,12 @@ class Codenames(commands.Cog):
         self.sessions[channel.id] = session
         await interaction.response.send_message("コードネームの募集を開始しました。")
         try:
-            await game_panels.replace(channel, "party", embed=discord.Embed(
-                title="🕵 コードネーム 参加者募集",
-                description=(f"チームを選んで参加してください（各チーム2人以上）。\n"
-                             f"{RECRUIT_SECONDS}秒で締め切ります。各チームの最初の参加者がリーダーになります。"),
-                color=COLOR), view=TeamJoinView(session))
+            lobby = TeamJoinPanel(session)
+            await game_panels.replace(channel, "party", view=lobby)
             await asyncio.sleep(RECRUIT_SECONDS)
+            lobby.stop()
             if len(session["teams"]["red"]) < 2 or len(session["teams"]["blue"]) < 2:
+                await game_panels.clear(channel, "party")
                 await channel.send("各チーム2人以上そろわなかったため、開始できませんでした。")
                 return
             session["leaders"] = {"red": session["teams"]["red"][0], "blue": session["teams"]["blue"][0]}
@@ -226,14 +264,14 @@ class Codenames(commands.Cog):
                 winners = session["teams"][game.winner]
                 for member in winners:
                     await party_ranking.shared().record_win(session["guild_id"], member.id, GAME_ID)
-            await game_panels.replace(channel, "party", embed=discord.Embed(
-                title="🕵 コードネーム 終了", description=status_text(game, session, note), color=COLOR))
+            # 盤面パネルを片付け、結果だけを残す。
+            await game_panels.clear(channel, "party")
+            await channel.send(view=text_panel("🕵 コードネーム 終了", status_text(game, session, note)))
             self.sessions.pop(channel.id, None)
             return
-        view = ControlView(self, session)
-        view.add_item(GuessSelect(self, session))
-        await game_panels.replace(channel, "party", embed=discord.Embed(
-            title="🕵 コードネーム", description=status_text(game, session, note), color=COLOR), view=view)
+        view = ControlPanel(self, session, body=status_text(game, session, note),
+                            guess_select=GuessSelect(self, session))
+        await game_panels.replace(channel, "party", view=view)
 
 
 async def setup(bot):

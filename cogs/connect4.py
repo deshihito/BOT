@@ -40,7 +40,7 @@ from core.game.connect4_cog.cog import (
     board_attachment,
     record_result,
     Connect4Game,
-    JoinView,
+    MovePanel,
     MoveView,
     Connect4,
     setup,

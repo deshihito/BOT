@@ -14,6 +14,7 @@ from discord.ext import commands
 
 from core.game import party_ranking
 from core.game import game_panels
+from core.game.game_v2 import GamePanelView, LobbyView, safe_delete, text_panel
 from core.game.loveletter import CARD_INFO, NEEDS_TARGET, LoveLetterGame, card_name
 
 logger = logging.getLogger(__name__)
@@ -99,14 +100,25 @@ class PlayConfirmView(discord.ui.View):
         self.stop()
 
 
-class TurnView(discord.ui.View):
-    def __init__(self, cog, session):
-        super().__init__(timeout=TURN_SECONDS + 30)
+class TurnPanel(GamePanelView):
+    """手番パネル（V2）。手札・通知は ephemeral、出す操作は確認ビューへ。"""
+
+    def __init__(self, cog, session, body: str = ""):
+        super().__init__("💌 アゴ姫への手紙", body, timeout=TURN_SECONDS + 30)
         self.cog = cog
         self.session = session
+        self.show_hand = discord.ui.Button(label="手札を見る", style=discord.ButtonStyle.secondary)
+        self.show_hand.callback = self._show_hand
+        self.play_first = discord.ui.Button(label="カードを出す（1枚目）", style=discord.ButtonStyle.primary)
+        self.play_first.callback = self._play_first
+        self.play_second = discord.ui.Button(label="カードを出す（2枚目）", style=discord.ButtonStyle.primary)
+        self.play_second.callback = self._play_second
+        self.inbox = discord.ui.Button(label="通知を見る", style=discord.ButtonStyle.secondary)
+        self.inbox.callback = self._inbox
+        self.add_row(self.play_first, self.play_second)
+        self.add_row(self.show_hand, self.inbox)
 
-    @discord.ui.button(label="手札を見る", style=discord.ButtonStyle.secondary)
-    async def show_hand(self, interaction: discord.Interaction, button: discord.ui.Button):
+    async def _show_hand(self, interaction: discord.Interaction):
         game: LoveLetterGame = self.session["game"]
         pid = interaction.user.id
         if pid not in game.players or pid not in game.alive:
@@ -120,16 +132,13 @@ class TurnView(discord.ui.View):
             text += "\n出せるのは: " + "／".join(f"{r} {card_name(r)}" for r in legal)
         await interaction.response.send_message(text, ephemeral=True)
 
-    @discord.ui.button(label="カードを出す（1枚目）", style=discord.ButtonStyle.primary)
-    async def play_first(self, interaction: discord.Interaction, button: discord.ui.Button):
+    async def _play_first(self, interaction: discord.Interaction):
         await self._open_play(interaction, 0)
 
-    @discord.ui.button(label="カードを出す（2枚目）", style=discord.ButtonStyle.primary)
-    async def play_second(self, interaction: discord.Interaction, button: discord.ui.Button):
+    async def _play_second(self, interaction: discord.Interaction):
         await self._open_play(interaction, 1)
 
-    @discord.ui.button(label="通知を見る", style=discord.ButtonStyle.secondary)
-    async def inbox(self, interaction: discord.Interaction, button: discord.ui.Button):
+    async def _inbox(self, interaction: discord.Interaction):
         notes = self.session["inbox"].pop(interaction.user.id, [])
         text = "\n".join(notes) if notes else "新しい通知はありません。"
         await interaction.response.send_message(text, ephemeral=True)
@@ -151,20 +160,7 @@ class TurnView(discord.ui.View):
             view=PlayConfirmView(self.cog, self.session, rank), ephemeral=True)
 
 
-class JoinView(discord.ui.View):
-    def __init__(self, session):
-        super().__init__(timeout=RECRUIT_SECONDS + 30)
-        self.session = session
-
-    @discord.ui.button(label="参加", style=discord.ButtonStyle.success)
-    async def join(self, interaction: discord.Interaction, button: discord.ui.Button):
-        members = self.session["members"]
-        if interaction.user.id in members:
-            return await interaction.response.send_message("すでに参加しています。", ephemeral=True)
-        if len(members) >= MAX_PLAYERS:
-            return await interaction.response.send_message("定員です。", ephemeral=True)
-        members[interaction.user.id] = interaction.user
-        await interaction.response.send_message("参加しました。")
+TurnView = TurnPanel  # 互換名
 
 
 class LoveLetter(commands.Cog):
@@ -183,12 +179,22 @@ class LoveLetter(commands.Cog):
         self.sessions[channel.id] = session
         await interaction.response.send_message("アゴ姫への手紙の募集を開始しました。")
         try:
-            await game_panels.replace(channel, "party", embed=discord.Embed(
-                title="💌 アゴ姫への手紙 参加者募集",
-                description=f"{interaction.user.mention} さんが募集中です。\n{RECRUIT_SECONDS}秒以内に参加してください（2〜{MAX_PLAYERS}人）。",
-                color=COLOR), view=JoinView(session))
-            await asyncio.sleep(RECRUIT_SECONDS)
+            lobby = LobbyView(
+                title="💌 アゴ姫への手紙 参加者募集", host=interaction.user,
+                min_players=2, max_players=MAX_PLAYERS,
+                note=f"{interaction.user.mention} さんが募集中です。\n{RECRUIT_SECONDS}秒以内に参加してください。",
+                timeout=RECRUIT_SECONDS + 30)
+            await game_panels.replace(channel, "party", view=lobby)
+            for _ in range(RECRUIT_SECONDS * 2):
+                if lobby.started or lobby.cancelled:
+                    break
+                await asyncio.sleep(0.5)
+            lobby.stop()
+            if lobby.cancelled:
+                return
+            session["members"] = dict(lobby.members)
             if len(session["members"]) < 2:
+                await game_panels.clear(channel, "party")
                 await channel.send("参加者が2人集まらなかったため、開始できませんでした。")
                 return
             game = LoveLetterGame(list(session["members"].keys()), rng=random.Random())
@@ -202,24 +208,26 @@ class LoveLetter(commands.Cog):
         game: LoveLetterGame = session["game"]
         members = session["members"]
         while game.game_winner is None:
-            await channel.send(embed=discord.Embed(
-                title=f"💌 ラウンド {game.round_no} 開始",
-                description=public_state_text(game, members), color=COLOR))
+            # ラウンド開始の告知は、そのラウンドの終了表示が出たら片付ける。
+            round_msg = await channel.send(view=text_panel(
+                f"💌 ラウンド {game.round_no} 開始", public_state_text(game, members)))
             while not game.round_over:
                 await self._run_turn(session)
             winners = "、".join(members[pid].mention for pid in game.round_winners)
-            await channel.send(embed=discord.Embed(
-                title=f"💌 ラウンド {game.round_no} 終了",
-                description=f"このラウンドの勝者: {winners}（手紙+1）\n" + public_state_text(game, members),
-                color=COLOR))
+            await safe_delete(round_msg)
+            await channel.send(view=text_panel(
+                f"💌 ラウンド {game.round_no} 終了",
+                f"このラウンドの勝者: {winners}（手紙+1）\n" + public_state_text(game, members)))
             if game.game_winner is None:
                 game.start_round()
                 await asyncio.sleep(3)
         winner = members[game.game_winner]
         await party_ranking.shared().record_win(session["guild_id"], game.game_winner, GAME_ID)
-        await channel.send(embed=discord.Embed(
-            title="💌 アゴ姫への手紙 終了",
-            description=f"🏆 勝者: {winner.mention}\n" + public_state_text(game, members), color=COLOR))
+        # 手番パネルを片付け、結果だけを残す（ラウンド終了表示は記録として残す）。
+        await game_panels.clear(channel, "party")
+        await channel.send(view=text_panel(
+            "💌 アゴ姫への手紙 終了",
+            f"🏆 勝者: {winner.mention}\n" + public_state_text(game, members)))
 
     async def _run_turn(self, session):
         channel = session["channel"]
@@ -229,20 +237,18 @@ class LoveLetter(commands.Cog):
         session["turn_no"] += 1
         session["acted"].clear()
         session["pending_play"] = None
-        embed = discord.Embed(
-            title="💌 アゴ姫への手紙",
-            description=public_state_text(game, members) +
-                        f"\n\n{members[actor].mention} さんの番です。「手札を見る」で確認し、「カードを出す」からプレイしてください。",
-            color=COLOR)
-        await game_panels.replace(channel, "party", embed=embed, view=TurnView(self, session))
+        body = (public_state_text(game, members) +
+                f"\n\n{members[actor].mention} さんの番です。「手札を見る」で確認し、「カードを出す」からプレイしてください。")
+        await game_panels.replace(channel, "party", view=TurnPanel(self, session, body=body))
+        prefix = ""
         try:
             await asyncio.wait_for(session["acted"].wait(), timeout=TURN_SECONDS)
             rank, target, guess = session["pending_play"]
         except asyncio.TimeoutError:
             rank, target, guess = self._auto_play(game)
-            await channel.send(f"{members[actor].mention} さんは時間切れのため、自動でプレイしました。")
+            prefix = f"{members[actor].mention} さんは時間切れのため、自動でプレイしました。"
         event = game.play(rank, target=target, guess=guess)
-        await self._announce(session, event)
+        await self._announce(session, event, prefix=prefix)
 
     def _auto_play(self, game: LoveLetterGame):
         legal = game.legal_cards()
@@ -252,12 +258,13 @@ class LoveLetter(commands.Cog):
         guess = random.choice([r for r in range(2, 9)]) if rank == 1 else None
         return rank, target, guess
 
-    async def _announce(self, session, event):
+    async def _announce(self, session, event, prefix: str = ""):
         channel = session["channel"]
         members = session["members"]
         actor = members[event["actor"]]
         rank = event["rank"]
-        parts = [f"{actor.mention} さんが **{rank} {card_name(rank)}** を出しました。"]
+        parts = ([prefix] if prefix else []) + \
+            [f"{actor.mention} さんが **{rank} {card_name(rank)}** を出しました。"]
         target = event.get("target")
         if event.get("note") == "no_target":
             parts.append("全員が侍女に守られていて、効果はありませんでした。")

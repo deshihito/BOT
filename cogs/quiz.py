@@ -19,8 +19,8 @@ from core.game.quiz.cog import (
     QUESTION_SECONDS,
     RECRUIT_SECONDS,
     standings_text,
+    AnswerPanel,
     AnswerView,
-    RecruitView,
     Quiz,
     setup,
 )

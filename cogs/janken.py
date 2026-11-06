@@ -28,6 +28,7 @@ from core.game.janken.cog import (
     auto_hand,
     JankenGame,
     JoinView,
+    HandPanel,
     HandView,
     Janken,
     setup,

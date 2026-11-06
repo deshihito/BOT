@@ -20,6 +20,7 @@ import random
 import discord
 from core.game import board_image, game_panels, game_restore
 from core.game.board_image import render_cached, render_card_hand
+from core.game.game_v2 import GamePanelView, LobbyView, safe_delete, text_panel
 from core.emojis import CROCK
 from core.messages import recruit_join_prompt
 from discord.ext import commands
@@ -111,6 +112,7 @@ class BabanukiGame:
         self.phase = "recruit"       # recruit / playing / done
         self.turn_index = 0
         self.drawn = None            # この手番で引いたカード（受付後）
+        self.last_notice = None      # 直近の結果表示（常に最新1通だけ残す）
 
     def name(self, uid) -> str:
         return "Bot" if uid == BOT_ID else self.players[uid].mention
@@ -169,37 +171,34 @@ class BabanukiGame:
             self.phase = "done"
 
 
-class JoinView(discord.ui.View):
+class JoinView(LobbyView):
+    """共通ロビー。参加/退出は game.players（id→member）にも同期する。"""
+
     def __init__(self, cog, game: BabanukiGame):
-        super().__init__(timeout=RECRUIT_SECONDS + 30)
         self.cog, self.game = cog, game
+        host = game.players.get(game.host_id)
+        super().__init__(
+            title="ババ抜き 参加者募集", host=host,
+            min_players=MIN_PLAYERS, max_players=MAX_PLAYERS,
+            note=(f"{host.mention if host else ''} さんが募集中です。\n"
+                  f"{recruit_join_prompt(RECRUIT_SECONDS)}\n"
+                  "だれも来なければ Bot が相手をします。"),
+            timeout=RECRUIT_SECONDS + 30)
 
-    @discord.ui.button(label="参加", style=discord.ButtonStyle.success)
-    async def join(self, interaction: discord.Interaction, button: discord.ui.Button):
-        g = self.game
-        if g.phase != "recruit":
-            return await interaction.response.send_message("募集は終わりました。", ephemeral=True)
-        if interaction.user.id in g.players:
-            return await interaction.response.send_message("もう参加しています。", ephemeral=True)
-        if len(g.players) >= MAX_PLAYERS:
-            return await interaction.response.send_message(f"定員（{MAX_PLAYERS}人）に達しました。", ephemeral=True)
-        g.players[interaction.user.id] = interaction.user
-        await interaction.response.send_message(f"参加しました（{len(g.players)}人）。")
+    async def _on_join(self, interaction: discord.Interaction):
+        await super()._on_join(interaction)
+        if interaction.user.id in self.players:
+            self.game.players[interaction.user.id] = interaction.user
 
-    @discord.ui.button(label="抜ける", style=discord.ButtonStyle.secondary)
-    async def leave(self, interaction: discord.Interaction, button: discord.ui.Button):
-        g = self.game
-        if g.phase != "recruit" or interaction.user.id not in g.players:
-            return await interaction.response.send_message("抜けられる募集がありません。", ephemeral=True)
-        if interaction.user.id == g.host_id:
-            return await interaction.response.send_message("募集した人は抜けられません。", ephemeral=True)
-        del g.players[interaction.user.id]
-        await interaction.response.send_message("参加をやめました。")
+    async def _on_leave(self, interaction: discord.Interaction):
+        await super()._on_leave(interaction)
+        if interaction.user.id not in self.players:
+            self.game.players.pop(interaction.user.id, None)
 
 
 class PickButton(discord.ui.Button):
     def __init__(self, cog, game, position: int):
-        super().__init__(label=str(position + 1), style=discord.ButtonStyle.primary, row=position // 5)
+        super().__init__(label=str(position + 1), style=discord.ButtonStyle.primary)
         self.cog, self.game, self.position = cog, game, position
 
     async def callback(self, interaction: discord.Interaction):
@@ -207,21 +206,40 @@ class PickButton(discord.ui.Button):
 
 
 class HandButton(discord.ui.Button):
-    def __init__(self, cog, game, row: int):
-        super().__init__(label="手札を見る", style=discord.ButtonStyle.secondary, row=row)
+    def __init__(self, cog, game):
+        super().__init__(label="手札を見る", style=discord.ButtonStyle.secondary)
         self.cog, self.game = cog, game
 
     async def callback(self, interaction: discord.Interaction):
         await self.cog.show_hand(interaction, self.game)
 
 
-class TurnView(discord.ui.View):
-    """相手の手札の位置ボタン（最大 14 枚）と「手札を見る」。"""
-    def __init__(self, cog, game: BabanukiGame, count: int):
-        super().__init__(timeout=TURN_SECONDS + 30)
+class TurnView(GamePanelView):
+    """相手の手札の位置ボタン（最大 14 枚）と「手札を見る」（V2）。
+
+    位置ボタンは裏面画像の並びと対応する操作なのでボタン形式を維持する
+    （ラベルは数字のみで幅のばらつきが小さい）。 picks / hand_button 属性。
+    """
+
+    def __init__(self, cog, game: BabanukiGame, count: int, body: str = "", backs=None):
+        super().__init__("ババ抜き", body, timeout=TURN_SECONDS + 30)
+        self.picks = []
+        row = []
         for i in range(count):
-            self.add_item(PickButton(cog, game, i))
-        self.add_item(HandButton(cog, game, row=min(4, (count + 4) // 5)))
+            button = PickButton(cog, game, i)
+            self.picks.append(button)
+            row.append(button)
+            if len(row) == 5:
+                self.add_row(*row)
+                row = []
+        self.hand_button = HandButton(cog, game)
+        row.append(self.hand_button)
+        if row:
+            self.add_row(*row)
+        if backs is not None:
+            gallery = discord.ui.MediaGallery()
+            gallery.add_item(media=backs)
+            self.add_extra(gallery)
 
 
 class Babanuki(commands.Cog):
@@ -239,15 +257,16 @@ class Babanuki(commands.Cog):
         g.players[interaction.user.id] = interaction.user
         self.games[channel.id] = g
         await interaction.response.send_message(
-            embed=discord.Embed(description=f"ババ抜きの募集を開始しました（{RECRUIT_SECONDS}秒）。", color=COLOR))
+            view=text_panel("", f"ババ抜きの募集を開始しました（{RECRUIT_SECONDS}秒）。"))
         try:
-            await game_panels.replace(channel, "party", embed=discord.Embed(
-                title="ババ抜き 参加者募集",
-                description=(f"{interaction.user.mention} さんが募集中です。\n"
-                             f"{recruit_join_prompt(RECRUIT_SECONDS)}（{MIN_PLAYERS}〜{MAX_PLAYERS}人）。\n"
-                             "だれも来なければ Bot が相手をします。"),
-                color=COLOR), view=JoinView(self, g))
-            await asyncio.sleep(RECRUIT_SECONDS)
+            lobby = JoinView(self, g)
+            await game_panels.replace(channel, "party", view=lobby)
+            for _ in range(RECRUIT_SECONDS * 2):
+                await asyncio.sleep(0.5)
+                if lobby.started or lobby.cancelled:
+                    break
+            if lobby.cancelled:
+                return
             await self.run_game(channel, g)
         finally:
             g.phase = "done"
@@ -262,12 +281,11 @@ class Babanuki(commands.Cog):
         if len(g.players) < MIN_PLAYERS:
             g.players[BOT_ID] = None
         g.start(rng)
-        await channel.send(embed=discord.Embed(
-            title="ババ抜き スタート！",
-            description=("カードを配り、そろっているペアを捨てました。\n"
-                         "自分の手札は「手札を見る」で確認できます（本人にだけ見えます）。\n\n"
-                         + self.counts_text(g)),
-            color=COLOR))
+        await channel.send(view=text_panel(
+            "ババ抜き スタート！",
+            "カードを配り、そろっているペアを捨てました。\n"
+            "自分の手札は「手札を見る」で確認できます（本人にだけ見えます）。\n\n"
+            + self.counts_text(g)))
         await self._play_loop(channel, g, rng)
         await self.finish(channel, g)
 
@@ -283,13 +301,12 @@ class Babanuki(commands.Cog):
         rng.shuffle(g.hands[target])
         g.drawn = None
         count = len(g.hands[target])
-        embed = discord.Embed(
-            description=(f"{g.name(uid)} さんの番です。{g.name(target)} さんの手札（{count}枚）から"
-                         f"1枚選んでください（{TURN_SECONDS}秒）。\n\n{self.counts_text(g)}"),
-            color=COLOR)
-        embed.set_image(url="attachment://babanuki_backs.png")
-        await game_panels.replace(channel, "party", embed=embed,
-                                  view=TurnView(self, g, count), file=backs_file(count))
+        body = (f"{g.name(uid)} さんの番です。{g.name(target)} さんの手札（{count}枚）から"
+                f"1枚選んでください（{TURN_SECONDS}秒）。\n\n{self.counts_text(g)}")
+        file = backs_file(count)
+        await game_panels.replace(channel, "party",
+                                  view=TurnView(self, g, count, body=body, backs=file),
+                                  file=file)
         if uid == BOT_ID:
             await asyncio.sleep(BOT_SECONDS)
             return await self.apply_draw(channel, g, uid, rng.randrange(count), rng)
@@ -315,20 +332,23 @@ class Babanuki(commands.Cog):
         else:
             position = rng.randrange(count)
             notice = f"{member.display_name}さんが時間切れのため、ランダムに{position + 1}番目のカードを引きました"
-        await channel.send(embed=discord.Embed(description=notice, color=COLOR))
-        await self.apply_draw(channel, g, uid, position, rng)
+        await self.apply_draw(channel, g, uid, position, rng, note=notice)
 
-    async def apply_draw(self, channel, g: BabanukiGame, uid, position: int, rng=random):
+    async def apply_draw(self, channel, g: BabanukiGame, uid, position: int, rng=random, note: str = ""):
         target = g.target_of(uid)
         card, pairs = g.draw(uid, position, rng)
         g.drawn = card
-        lines = [f"{g.name(uid)} さんが {g.name(target)} さんから1枚引きました。"]
+        lines = [note] if note else []
+        lines.append(f"{g.name(uid)} さんが {g.name(target)} さんから1枚引きました。")
         if pairs:
             lines.append("ペアがそろって捨てました: " + "、".join(f"{a} {b}" for a, b in pairs))
         for p in (target, uid):
             if p in g.finished and not g.hands.get(p):
                 lines.append(f"{g.name(p)} さんが上がりました（{g.finished.index(p) + 1}番目）。")
-        await channel.send(embed=discord.Embed(description="\n".join(lines), color=COLOR))
+        # 結果表示は常に最新1通だけ残す（前回分を削除）
+        if g.last_notice is not None:
+            await safe_delete(g.last_notice)
+        g.last_notice = await channel.send(view=text_panel("", "\n".join(lines)))
 
     async def on_pick(self, interaction: discord.Interaction, g: BabanukiGame, position: int):
         if g.phase != "playing":
@@ -371,9 +391,12 @@ class Babanuki(commands.Cog):
             text += f"\n最後にジョーカーを持っていたのは {g.name(g.loser)} さんでした。"
         if BOT_ID in g.players:
             text += "\n（Bot戦はランキングに数えません）"
-        embed = discord.Embed(title="ババ抜き 終了", description=text, color=COLOR)
-        embed.add_field(name="上がった順", value=order[:1024], inline=False)
-        await channel.send(embed=embed)
+        await game_panels.clear(channel, "party")
+        if g.last_notice is not None:
+            await safe_delete(g.last_notice)
+            g.last_notice = None
+        await channel.send(view=text_panel(
+            "ババ抜き 終了", text + f"\n\n## 上がった順\n{order[:1024]}"))
 
     # ------------------------------------------------------------------
     # 再起動復旧（core/game/game_restore.py）

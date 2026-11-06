@@ -20,6 +20,7 @@ from core.emojis import B_, G_, Y_
 
 import discord
 from core.game import game_panels, game_restore
+from core.game.game_v2 import GamePanelView, original_response_or_none, safe_delete, text_panel
 from discord.ext import commands
 
 from core.game import party_ranking
@@ -101,6 +102,7 @@ class WordleGame:
         self.winner = None
         self.phase = "playing"       # playing / done
         self.message = None
+        self.last_notice = None      # 直近の推理表示（常に最新1通だけ残す）
         self.finished = asyncio.Event()
         self.started_at = time.time()  # 制限時間（GAME_SECONDS）の起点。再起動復旧でも使う
 
@@ -120,21 +122,23 @@ class WordleGame:
                     status[c] = col
         return status
 
-    def board_embed(self, reveal: bool = False) -> discord.Embed:
+    def board_title(self) -> str:
         mode = "みんなで" if self.mode == "shared" else f"ひとりで（{self.host.display_name}）"
         if self.daily:
             mode += f"・デイリー（{self.date_key}）"
+        return f"Wordle（{mode}）"
+
+    def board_body(self, reveal: bool = False) -> str:
         lines = [f"{''.join(cols)}　`{w.upper()}`　{getattr(u, 'display_name', '')}" for u, w, cols in self.guesses]
         lines += ["⬜⬜⬜⬜⬜"] * (MAX_GUESSES - len(self.guesses))
-        embed = discord.Embed(title=f"Wordle（{mode}）", description="\n".join(lines), color=COLOR)
         st = self.letter_status()
         used = " ".join(f"{c.upper()}{st[c]}" for c in sorted(st)) or "まだありません"
-        embed.add_field(name="使った文字", value=used[:1024], inline=False)
+        lines.append(f"\n## 使った文字\n{used[:1024]}")
         if reveal:
-            embed.add_field(name="答え", value=f"**{self.answer.upper()}**", inline=False)
+            lines.append(f"\n## 答え\n**{self.answer.upper()}**")
         else:
-            embed.set_footer(text=f"「推理する」で英単語5文字を入力（残り {MAX_GUESSES - len(self.guesses)} 回）")
-        return embed
+            lines.append(f"\n-# 「推理する」で英単語5文字を入力（残り {MAX_GUESSES - len(self.guesses)} 回）")
+        return "\n".join(lines)
 
 
 class GuessModal(discord.ui.Modal, title="Wordle: 5文字の英単語"):
@@ -148,13 +152,19 @@ class GuessModal(discord.ui.Modal, title="Wordle: 5文字の英単語"):
         await self.cog.submit_guess(interaction, self.game, self.word.value)
 
 
-class BoardView(discord.ui.View):
-    def __init__(self, cog, game: WordleGame):
-        super().__init__(timeout=GAME_SECONDS + 60)
-        self.cog, self.game = cog, game
+class BoardView(GamePanelView):
+    """Wordle の盤面パネル（V2）。ボタンは属性 guess / give_up。"""
 
-    @discord.ui.button(label="推理する", style=discord.ButtonStyle.success)
-    async def guess(self, interaction: discord.Interaction, button: discord.ui.Button):
+    def __init__(self, cog, game: WordleGame):
+        super().__init__(game.board_title(), game.board_body(), timeout=GAME_SECONDS + 60)
+        self.cog, self.game = cog, game
+        self.guess = discord.ui.Button(label="推理する", style=discord.ButtonStyle.success)
+        self.guess.callback = self._guess
+        self.give_up = discord.ui.Button(label="ギブアップ", style=discord.ButtonStyle.secondary)
+        self.give_up.callback = self._give_up
+        self.add_row(self.guess, self.give_up)
+
+    async def _guess(self, interaction: discord.Interaction):
         g = self.game
         if g.phase != "playing":
             return await interaction.response.send_message("このゲームは終わりました。", ephemeral=True)
@@ -163,8 +173,7 @@ class BoardView(discord.ui.View):
                                                            ephemeral=True)
         await interaction.response.send_modal(GuessModal(self.cog, g))
 
-    @discord.ui.button(label="ギブアップ", style=discord.ButtonStyle.secondary)
-    async def give_up(self, interaction: discord.Interaction, button: discord.ui.Button):
+    async def _give_up(self, interaction: discord.Interaction):
         g = self.game
         if g.phase != "playing" or interaction.user.id != g.host.id:
             return await interaction.response.send_message("ギブアップできるのは始めた人だけです。", ephemeral=True)
@@ -193,10 +202,9 @@ class Wordle(commands.Cog):
         else:
             g = WordleGame(channel.id, interaction.guild_id, interaction.user, rng.choice(ANSWERS), mode)
         self.games[channel.id] = g
-        await interaction.response.send_message(
-            embed=discord.Embed(description="Wordle を始めました。", color=COLOR))
+        await interaction.response.send_message(view=text_panel("", "Wordle を始めました。"))
         try:
-            g.message = await game_panels.replace(channel, "party", embed=g.board_embed(), view=BoardView(self, g))
+            g.message = await game_panels.replace(channel, "party", view=BoardView(self, g))
             self._save_snapshot(g)
             await self._watch(channel, g, GAME_SECONDS)
         finally:
@@ -226,9 +234,16 @@ class Wordle(commands.Cog):
         if w == g.answer:
             g.winner = interaction.user
         self._save_snapshot(g)
+        # 推理表示は盤面と重複するので、常に最新1通だけ残す
+        if g.last_notice is not None:
+            await safe_delete(g.last_notice)
         await interaction.response.send_message(f"{''.join(colors)} `{w.upper()}`")
+        g.last_notice = await original_response_or_none(interaction)
         if g.message is not None:
-            await g.message.edit(embed=g.board_embed())
+            panel = g.message.view
+            if isinstance(panel, BoardView):
+                panel.set_content(g.board_title(), g.board_body())
+            await g.message.edit(view=panel)
         if g.over:
             g.finished.set()
 
@@ -306,11 +321,11 @@ class Wordle(commands.Cog):
                 g.message = None
         self.games[channel_id] = g
         if g.message is not None:
-            # 既存の盤面メッセージへ新しい View を付け直して復活させる
-            await g.message.edit(embed=g.board_embed(), view=BoardView(self, g))
+            # 既存の盤面メッセージへ新しいパネルを付け直して復活させる
+            await g.message.edit(view=BoardView(self, g))
         else:
             g.message = await game_panels.replace(
-                channel, "party", embed=g.board_embed(), view=BoardView(self, g))
+                channel, "party", view=BoardView(self, g))
         remaining = GAME_SECONDS - (time.time() - g.started_at)
         asyncio.create_task(self._run_restored_session(channel, g, max(0.0, remaining)))
         return True
@@ -330,7 +345,11 @@ class Wordle(commands.Cog):
         g.phase = "done"
         self._clear_snapshot(g.channel_id)
         if g.message is not None:
-            await g.message.edit(embed=g.board_embed(reveal=True), view=None)
+            # 盤面は答えを開示した表示専用パネルに差し替えて残す
+            await g.message.edit(view=text_panel(g.board_title(), g.board_body(reveal=True)))
+        if g.last_notice is not None:
+            await safe_delete(g.last_notice)
+            g.last_notice = None
         if g.winner is not None:
             await party_ranking.shared().record_win(g.guild_id, g.winner.id, GAME_ID)
             text = f"🏆 {g.winner.mention} さんが {len(g.guesses)}/{MAX_GUESSES} で正解！"
@@ -338,8 +357,8 @@ class Wordle(commands.Cog):
             text = "正解できませんでした。"
         if g.daily and g.date_key:
             text += "\n" + self._record_daily(g)
-        await channel.send(embed=discord.Embed(
-            title="Wordle 終了", description=f"{text}\n答え: **{g.answer.upper()}**", color=COLOR))
+        await channel.send(view=text_panel(
+            "Wordle 終了", f"{text}\n答え: **{g.answer.upper()}**"))
 
 
     def _record_daily(self, g: WordleGame) -> str:

@@ -130,17 +130,24 @@ class DrawCycleTest(unittest.IsolatedAsyncioTestCase):
             number, _winners, _reach = await cog._draw_once(channel, session)
 
         self.assertEqual(sleeps, [TEASE_SECONDS, DRAW_INTERVAL - TEASE_SECONDS])
-        # 送信は1通だけ（ローディング）で、開示はその編集で完結する
+        # 送信は1通だけ（ローディング）で、開示はその編集で完結する。
+        # V2 化で本文はパネルの TextDisplay に移ったため、ビュー側を読む。
+        def panel_text(view):
+            return "\n".join(
+                getattr(child, "content", "") or ""
+                for child in view.walk_children()
+                if child.__class__.__name__ == "TextDisplay")
+
         self.assertEqual(len(channel.sent), 1)
-        msg, _kwargs = channel.sent[0]
-        self.assertIn("抽選中", msg.initial_content)
+        msg, send_kwargs = channel.sent[0]
+        self.assertIn("抽選中", panel_text(send_kwargs["view"]))
         self.assertEqual(len(msg.edits), 1)
         edit = msg.edits[0]
-        self.assertIn(f"**{number}**", edit["content"])
-        self.assertIn("これまで:", edit["content"])
+        self.assertIn(f"**{number}**", panel_text(edit["view"]))
+        self.assertIn("これまで:", panel_text(edit["view"]))
         # 開示メッセージには「手札を確認」ボタンが付く
         view = edit["view"]
-        labels = [getattr(child, "label", None) for child in view.children]
+        labels = [getattr(child, "label", None) for child in view.walk_children()]
         self.assertIn("手札を確認", labels)
 
     async def test_card_check_sends_png_ephemerally(self):
@@ -148,7 +155,7 @@ class DrawCycleTest(unittest.IsolatedAsyncioTestCase):
 
         session = BingoSession([1, 2], rng=random.Random(0))
         view = CardCheckView(MagicMock(), session)
-        button = next(c for c in view.children if getattr(c, "label", None) == "手札を確認")
+        button = view.check
         interaction = MagicMock()
         interaction.user.id = 1
         interaction.response.send_message = AsyncMock()

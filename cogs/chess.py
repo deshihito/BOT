@@ -63,7 +63,7 @@ from core.game.chess.cog import (
     build_sprites,
     render_board,
     ChessGame,
-    JoinView,
+    ChessMovePanel,
     ChessMoveSelect,
     ChessMoveView,
     Chess,

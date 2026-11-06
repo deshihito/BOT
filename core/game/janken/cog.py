@@ -17,6 +17,7 @@ import discord
 from cogs.wallet import INSUFFICIENT
 from core.game import game_panels
 from core.game import prison as prison_core
+from core.game.game_v2 import GamePanelView, LobbyView, safe_delete, text_panel
 from core.messages import recruit_join_prompt
 from discord.ext import commands
 
@@ -63,6 +64,7 @@ class JankenGame:
         self.log: list = []         # 各回の結果テキスト
         self.wager = 0
         self.escrow = []
+        self.last_reveal = None     # 最新の「ぽん！」表示（次で消す）
 
     @property
     def vs_bot(self) -> bool:
@@ -72,43 +74,54 @@ class JankenGame:
         return "Bot" if uid == BOT_ID else self.players[uid].mention
 
 
-class JoinView(discord.ui.View):
+class JoinView(LobbyView):
+    """じゃんけんのロビー（共通規格）。参加は game.players にも同期する。"""
+
     def __init__(self, cog, game: JankenGame):
-        super().__init__(timeout=RECRUIT_SECONDS + 30)
         self.cog, self.game = cog, game
+        host = game.players.get(game.host_id)
+        super().__init__(
+            title="じゃんけん 参加者募集", host=host,
+            min_players=1, max_players=MAX_PLAYERS,
+            note=(f"{host.mention if host else ''} さんが募集中です。\n"
+                  f"{recruit_join_prompt(RECRUIT_SECONDS)}\n"
+                  + (f"勝敗コイン: 1人 {game.wager} AGO（勝者へ配分）\n" if game.wager else "")
+                  + "だれも来なければ Bot が相手をします。"),
+            timeout=RECRUIT_SECONDS + 30, join_hook=_janken_join_hook(game))
 
-    @discord.ui.button(label="参加", style=discord.ButtonStyle.success)
-    async def join(self, interaction: discord.Interaction, button: discord.ui.Button):
-        g = self.game
-        if g.phase != "recruit":
-            return await interaction.response.send_message("募集は終わりました。", ephemeral=True)
-        if interaction.user.id in g.players:
-            return await interaction.response.send_message("もう参加しています。", ephemeral=True)
-        if len(g.players) >= MAX_PLAYERS:
-            return await interaction.response.send_message(f"定員（{MAX_PLAYERS}人）に達しました。", ephemeral=True)
-        # 賭け金ありの対局はマネー系操作 (E-7): 逮捕中の参加は拒否する。
-        blocked = prison_core.block_message(str(interaction.user.id)) if g.wager else None
-        if blocked:
-            return await interaction.response.send_message(blocked, ephemeral=True)
-        g.players[interaction.user.id] = interaction.user
-        await interaction.response.send_message(f"参加しました（{len(g.players)}人）。")
+    async def _on_join(self, interaction: discord.Interaction):
+        await super()._on_join(interaction)
+        if interaction.user.id in self.players:
+            self.game.players[interaction.user.id] = interaction.user
 
-    @discord.ui.button(label="抜ける", style=discord.ButtonStyle.secondary)
-    async def leave(self, interaction: discord.Interaction, button: discord.ui.Button):
-        g = self.game
-        if g.phase != "recruit" or interaction.user.id not in g.players:
-            return await interaction.response.send_message("抜けられる募集がありません。", ephemeral=True)
-        if interaction.user.id == g.host_id:
-            return await interaction.response.send_message("募集した人は抜けられません。", ephemeral=True)
-        del g.players[interaction.user.id]
-        await interaction.response.send_message("参加をやめました。")
+    async def _on_leave(self, interaction: discord.Interaction):
+        await super()._on_leave(interaction)
+        if interaction.user.id not in self.players:
+            self.game.players.pop(interaction.user.id, None)
 
 
-class HandView(discord.ui.View):
-    """手を選ぶボタン。押した手は本人にだけ見える。公開までは何度でも変えられる。"""
-    def __init__(self, game: JankenGame):
-        super().__init__(timeout=HAND_SECONDS + 30)
+def _janken_join_hook(game: JankenGame):
+    """賭け金ありの対局はマネー系操作 (E-7): 逮捕中の参加を拒否する。"""
+    def hook(user):
+        if game.wager:
+            return prison_core.block_message(str(user.id))
+        return None
+    return hook
+
+
+class HandPanel(GamePanelView):
+    """手を選ぶパネル（V2）。押した手は本人にだけ見える。公開までは何度でも変えられる。"""
+
+    def __init__(self, game: JankenGame, title: str = "", body: str = ""):
+        super().__init__(title, body, timeout=HAND_SECONDS + 30)
         self.game = game
+        self.rock = discord.ui.Button(label="✊ グー", style=discord.ButtonStyle.primary)
+        self.rock.callback = self._rock
+        self.scissors = discord.ui.Button(label="✌ チョキ", style=discord.ButtonStyle.primary)
+        self.scissors.callback = self._scissors
+        self.paper = discord.ui.Button(label="✋ パー", style=discord.ButtonStyle.primary)
+        self.paper.callback = self._paper
+        self.add_row(self.rock, self.scissors, self.paper)
 
     async def _choose(self, interaction, hand: str):
         g = self.game
@@ -118,17 +131,17 @@ class HandView(discord.ui.View):
         await interaction.response.send_message(f"{HAND_LABELS[hand]} を出しました（公開まで変えられます）。",
                                                 ephemeral=True)
 
-    @discord.ui.button(label="✊ グー", style=discord.ButtonStyle.primary)
-    async def rock(self, interaction: discord.Interaction, button: discord.ui.Button):
+    async def _rock(self, interaction: discord.Interaction):
         await self._choose(interaction, "rock")
 
-    @discord.ui.button(label="✌ チョキ", style=discord.ButtonStyle.primary)
-    async def scissors(self, interaction: discord.Interaction, button: discord.ui.Button):
+    async def _scissors(self, interaction: discord.Interaction):
         await self._choose(interaction, "scissors")
 
-    @discord.ui.button(label="✋ パー", style=discord.ButtonStyle.primary)
-    async def paper(self, interaction: discord.Interaction, button: discord.ui.Button):
+    async def _paper(self, interaction: discord.Interaction):
         await self._choose(interaction, "paper")
+
+
+HandView = HandPanel  # 互換名
 
 
 class Janken(commands.Cog):
@@ -153,14 +166,16 @@ class Janken(commands.Cog):
         await interaction.response.send_message(
             embed=discord.Embed(description=f"じゃんけんの募集を開始しました（{RECRUIT_SECONDS}秒）。", color=COLOR))
         try:
-            await game_panels.replace(channel, "party", embed=discord.Embed(
-                title="じゃんけん 参加者募集",
-                description=(f"{interaction.user.mention} さんが募集中です。\n"
-                             f"{recruit_join_prompt(RECRUIT_SECONDS)}（最大{MAX_PLAYERS}人）。\n"
-                             + (f"勝敗コイン: 1人 {g.wager} AGO（勝者へ配分）\n" if g.wager else "")
-                             + "だれも来なければ Bot が相手をします。"),
-                color=COLOR), view=JoinView(self, g))
-            await asyncio.sleep(RECRUIT_SECONDS)
+            lobby = JoinView(self, g)
+            await game_panels.replace(channel, "party", view=lobby)
+            for _ in range(RECRUIT_SECONDS * 2):
+                if lobby.started or lobby.cancelled:
+                    break
+                await asyncio.sleep(0.5)
+            lobby.stop()
+            if lobby.cancelled:
+                return
+            g.players = dict(lobby.members)
             await self.run_game(channel, g)
         finally:
             g.phase = "done"
@@ -170,12 +185,12 @@ class Janken(commands.Cog):
         if len(g.players) < 2:
             g.players[BOT_ID] = None
         if g.wager and not await self._collect_wagers(g):
+            await game_panels.clear(channel, "party")
             await channel.send("コインを賭けたじゃんけんを開始できませんでした（残高不足または更新エラー）。賭けコインは全額返金しました。")
             return
         g.alive = list(g.players)
         names = "、".join(g.name(uid) for uid in g.alive)
-        await channel.send(embed=discord.Embed(title="じゃんけん スタート！",
-                                               description=f"参加者: {names}", color=COLOR))
+        await channel.send(view=text_panel("じゃんけん スタート！", f"参加者: {names}"))
         winners = []
         while len(g.alive) > 1 and g.round < MAX_ROUNDS:
             await self.play_round(channel, g, rng)
@@ -190,11 +205,11 @@ class Janken(commands.Cog):
             g.choices[BOT_ID] = auto_hand(rng)
         g.phase = "choosing"
         humans = [uid for uid in g.alive if uid != BOT_ID]
-        await game_panels.replace(channel, "party", embed=discord.Embed(
+        await game_panels.replace(channel, "party", view=HandPanel(
+            g,
             title=f"第{g.round}回 じゃん けん…",
-            description=(f"{'、'.join(g.name(u) for u in g.alive)}\n"
-                         f"{HAND_SECONDS}秒以内に下のボタンで手を選んでください（ほかの人には見えません）。"),
-            color=COLOR), view=HandView(g))
+            body=(f"{'、'.join(g.name(u) for u in g.alive)}\n"
+                  f"{HAND_SECONDS}秒以内に下のボタンで手を選んでください（ほかの人には見えません）。")))
         elapsed = 0
         while elapsed < HAND_SECONDS and any(u not in g.choices for u in humans):
             await asyncio.sleep(1)
@@ -219,7 +234,12 @@ class Janken(commands.Cog):
                 g.alive = list(g.choices)
                 result = "あいこ！ もう一度。" if not missing else "あいこ！ 出した人でもう一度。"
         g.log.append(f"第{g.round}回: {result}")
-        await channel.send(embed=discord.Embed(title="ぽん！", description=f"{shown}\n\n**{result}**", color=COLOR))
+        # 公開表示は次の回（または終了表示）が出たら役割を終えるので、
+        # 前回の分を消してから新しい分を出す（常に最新の1通だけ残る）。
+        old_reveal = getattr(g, "last_reveal", None)
+        if old_reveal is not None:
+            await safe_delete(old_reveal)
+        g.last_reveal = await channel.send(view=text_panel("ぽん！", f"{shown}\n\n**{result}**"))
 
     async def _collect_wagers(self, g):
         wallet = self.bot.get_cog("WalletCog") if hasattr(self.bot, "get_cog") else None
@@ -271,11 +291,16 @@ class Janken(commands.Cog):
                 text += "（Bot 戦はランキングに数えません）"
         else:
             text = "勝者なし" if g.round < MAX_ROUNDS or not g.alive else f"{MAX_ROUNDS}回あいこが続いたので引き分けです。"
-        embed = discord.Embed(title="じゃんけん 終了", description=text, color=COLOR)
-        embed.add_field(name="経過", value="\n".join(g.log)[-1024:] or "（なし）", inline=False)
+        lines = [text, "", "経過:", "\n".join(g.log)[-1024:] or "（なし）"]
         if g.wager:
-            embed.add_field(name="勝敗コイン", value=(f"各人 {g.wager} AGO を預かり、勝者へ配分しました。" if winners else "勝者がいないため、預かり分は参加者へ返金しました。"), inline=False)
-        await channel.send(embed=embed)
+            lines += ["", "勝敗コイン: " + (f"各人 {g.wager} AGO を預かり、勝者へ配分しました。" if winners else "勝者がいないため、預かり分は参加者へ返金しました。")]
+        # 手選択パネルと最後の公開表示を片付け、結果だけを残す。
+        await game_panels.clear(channel, "party")
+        old_reveal = getattr(g, "last_reveal", None)
+        if old_reveal is not None:
+            g.last_reveal = None
+            await safe_delete(old_reveal)
+        await channel.send(view=text_panel("じゃんけん 終了", "\n".join(lines)))
 
 
 async def setup(bot):

@@ -60,7 +60,7 @@ class OthelloSelectTest(unittest.IsolatedAsyncioTestCase):
 
         interaction = SimpleNamespace(user=black, response=Response())
         view = OthelloMoveView(None, game, moves)
-        select = view.children[0]
+        select = view.selects[0]
         select._values = ["1"]
         await select.callback(interaction)
 
@@ -88,7 +88,7 @@ class OthelloSelectTest(unittest.IsolatedAsyncioTestCase):
         response = Response()
         interaction = SimpleNamespace(user=white, response=response)
         view = OthelloMoveView(None, game, moves)
-        select = view.children[0]
+        select = view.selects[0]
         select._values = ["1"]
         await select.callback(interaction)
 
@@ -116,7 +116,7 @@ class OthelloSelectTest(unittest.IsolatedAsyncioTestCase):
         response = Response()
         interaction = SimpleNamespace(user=black, response=response)
         view = OthelloMoveView(None, game, moves)
-        select = view.children[0]
+        select = view.selects[0]
         select._values = ["1"]
         game.turn = WHITE
 

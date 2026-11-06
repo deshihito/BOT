@@ -6,6 +6,8 @@ import types
 import unittest
 from unittest.mock import AsyncMock, patch
 
+import discord
+
 from game_fakes import FakeChannel, FakeGuild, FakeInteraction, FakeMember, fast_time, real_sleep
 from cogs import shinkei as s
 from core import guild_settings
@@ -59,7 +61,8 @@ class LogicTest(unittest.TestCase):
     def test_board_view_has_24_buttons(self):
         g = self.game()
         view = s.BoardView(None, g)
-        self.assertEqual(len(view.children), 24)
+        buttons = [c for c in view.walk_children() if isinstance(c, discord.ui.Button)]
+        self.assertEqual(len(buttons), 24)
 
     def test_registered(self):
         self.assertTrue(party_ranking.is_ranked('shinkei'))
@@ -103,7 +106,7 @@ class ShinkeiFlowTest(unittest.IsolatedAsyncioTestCase):
             self.assertIn('あなたの番ではありません', bad.response.sent[0].text())
             await self.flip(self.m1, g, 0)
             await self.flip(self.m1, g, 2)                  # 外れ
-            self.assertIn('そろいませんでした', g.message.embed.description)
+            self.assertIn('そろいませんでした', g.message.text())
             await self.wait_current(g, 2)
             await self.flip(self.m2, g, 0)
             await self.flip(self.m2, g, 1)                  # そろう → もう一度
@@ -166,7 +169,8 @@ class ShinkeiFlowTest(unittest.IsolatedAsyncioTestCase):
         g.phase = 'playing'
         g.matched = {0: 1, 1: 1}
         g.face_up = [2]
-        texts = [self.cog.board_embed(g, 'x').description] + [b.label for b in s.BoardView(self.cog, g).children]
+        texts = [self.cog.board_text(g, 'x')] + [b.label for b in s.BoardView(self.cog, g).walk_children()
+                                                 if isinstance(b, discord.ui.Button)]
         from core.game.game_guides import GAME_GUIDES
         texts.append(str(GAME_GUIDES['shinkei']))
         self.assertFalse([t for t in texts if emoji.search(t)])

@@ -23,6 +23,7 @@ import unicodedata
 
 import discord
 from core.game import game_panels, game_restore
+from core.game.game_v2 import GamePanelView, LobbyView, safe_delete, text_panel
 from core.messages import recruit_join_prompt
 from discord.ext import commands
 
@@ -130,6 +131,7 @@ class ShiritoriGame:
         self.turn_index = 0
         self.current = None          # 手番の user_id
         self.answer = None           # 手番の人が出した言葉（受付後）
+        self.last_notice = None      # 進行表示（常に最新1通だけ残す）
 
     @property
     def alive(self):
@@ -166,40 +168,41 @@ def topic_verdict(ok_votes: int, ng_votes: int) -> bool:
     return ng_votes <= ok_votes
 
 
-class JoinView(discord.ui.View):
+class JoinView(LobbyView):
+    """共通ロビー。参加/退出は game.players（id→member）にも同期する。"""
+
     def __init__(self, cog, game: ShiritoriGame):
-        super().__init__(timeout=RECRUIT_SECONDS + 30)
         self.cog, self.game = cog, game
+        host = game.players.get(game.host_id)
+        super().__init__(
+            title="お題しりとり 参加者募集", host=host,
+            min_players=MIN_PLAYERS, max_players=MAX_PLAYERS,
+            note=f"{host.mention if host else ''} さんが募集中です。\n{recruit_join_prompt(RECRUIT_SECONDS)}",
+            timeout=RECRUIT_SECONDS + 30)
 
-    @discord.ui.button(label="参加", style=discord.ButtonStyle.success)
-    async def join(self, interaction: discord.Interaction, button: discord.ui.Button):
-        g = self.game
-        if g.phase != "recruit":
-            return await interaction.response.send_message("募集は終わりました。", ephemeral=True)
-        if interaction.user.id in g.players:
-            return await interaction.response.send_message("もう参加しています。", ephemeral=True)
-        if len(g.players) >= MAX_PLAYERS:
-            return await interaction.response.send_message(f"定員（{MAX_PLAYERS}人）に達しました。", ephemeral=True)
-        g.players[interaction.user.id] = interaction.user
-        await interaction.response.send_message(f"参加しました（{len(g.players)}人）。")
+    async def _on_join(self, interaction: discord.Interaction):
+        await super()._on_join(interaction)
+        if interaction.user.id in self.players:
+            self.game.players[interaction.user.id] = interaction.user
 
-    @discord.ui.button(label="抜ける", style=discord.ButtonStyle.secondary)
-    async def leave(self, interaction: discord.Interaction, button: discord.ui.Button):
-        g = self.game
-        if g.phase != "recruit" or interaction.user.id not in g.players:
-            return await interaction.response.send_message("抜けられる募集がありません。", ephemeral=True)
-        if interaction.user.id == g.host_id:
-            return await interaction.response.send_message("募集した人は抜けられません。", ephemeral=True)
-        del g.players[interaction.user.id]
-        await interaction.response.send_message("参加をやめました。")
+    async def _on_leave(self, interaction: discord.Interaction):
+        await super()._on_leave(interaction)
+        if interaction.user.id not in self.players:
+            self.game.players.pop(interaction.user.id, None)
 
 
-class VoteView(discord.ui.View):
-    """お題に合っているかの投票。答えた本人と脱落者は投票できない。"""
-    def __init__(self, game: ShiritoriGame, answerer: int):
-        super().__init__(timeout=VOTE_SECONDS + 30)
+class VoteView(GamePanelView):
+    """お題に合っているかの投票パネル（V2）。答えた本人と脱落者は投票できない。"""
+
+    def __init__(self, game: ShiritoriGame, answerer: int, body: str = ""):
+        super().__init__("お題しりとり 投票", body, timeout=VOTE_SECONDS + 30)
         self.game, self.answerer = game, answerer
         self.votes: dict = {}   # user_id -> True(OK)/False(NG)
+        self.vote_ok = discord.ui.Button(label="OK", style=discord.ButtonStyle.success)
+        self.vote_ok.callback = self._vote_ok
+        self.vote_ng = discord.ui.Button(label="NG（お題に合わない）", style=discord.ButtonStyle.danger)
+        self.vote_ng.callback = self._vote_ng
+        self.add_row(self.vote_ok, self.vote_ng)
 
     @property
     def voters(self):
@@ -213,14 +216,12 @@ class VoteView(discord.ui.View):
         if interaction.user.id not in self.voters:
             return await interaction.response.send_message("投票できるのは、答えた人以外の生存者だけです。", ephemeral=True)
         self.votes[interaction.user.id] = value
-        await interaction.response.send_message("投票しました（変更もできます）。")
+        await interaction.response.send_message("投票しました（変更もできます）。", ephemeral=True)
 
-    @discord.ui.button(label="OK", style=discord.ButtonStyle.success)
-    async def vote_ok(self, interaction: discord.Interaction, button: discord.ui.Button):
+    async def _vote_ok(self, interaction: discord.Interaction):
         await self._vote(interaction, True)
 
-    @discord.ui.button(label="NG（お題に合わない）", style=discord.ButtonStyle.danger)
-    async def vote_ng(self, interaction: discord.Interaction, button: discord.ui.Button):
+    async def _vote_ng(self, interaction: discord.Interaction):
         await self._vote(interaction, False)
 
 
@@ -240,23 +241,32 @@ class OdaiShiritori(commands.Cog):
         g.players[interaction.user.id] = interaction.user
         self.games[channel.id] = g
         await interaction.response.send_message(
-            embed=discord.Embed(description=f"お題しりとりの募集を開始しました（{RECRUIT_SECONDS}秒）。", color=COLOR))
+            view=text_panel("", f"お題しりとりの募集を開始しました（{RECRUIT_SECONDS}秒）。"))
         try:
-            embed = discord.Embed(
-                title="お題しりとり 参加者募集",
-                description=(f"{interaction.user.mention} さんが募集中です。\n"
-                             f"{recruit_join_prompt(RECRUIT_SECONDS)}（{MIN_PLAYERS}〜{MAX_PLAYERS}人）。"),
-                color=COLOR)
-            await game_panels.replace(channel, "party", embed=embed, view=JoinView(self, g))
-            await asyncio.sleep(RECRUIT_SECONDS)
+            lobby = JoinView(self, g)
+            await game_panels.replace(channel, "party", view=lobby)
+            # 募集時間いっぱい待つ。主催者の早期開始・取消にも追随する
+            for _ in range(RECRUIT_SECONDS * 2):
+                await asyncio.sleep(0.5)
+                if lobby.started or lobby.cancelled:
+                    break
+            if lobby.cancelled:
+                return
             if len(g.players) < MIN_PLAYERS:
-                return await channel.send(embed=discord.Embed(
-                    description=f"人数不足のため中止しました（{len(g.players)}人／{MIN_PLAYERS}人以上必要）。", color=COLOR))
+                await game_panels.clear(channel, "party")
+                return await channel.send(view=text_panel(
+                    "", f"人数不足のため中止しました（{len(g.players)}人／{MIN_PLAYERS}人以上必要）。"))
             await self.run_game(channel, g)
         finally:
             g.phase = "done"
             self.games.pop(channel.id, None)
             self._clear_snapshot(channel.id)
+
+    async def _notice(self, channel, g: ShiritoriGame, body: str):
+        """進行表示は常に最新1通だけ残す（前回分を削除してから出す）。"""
+        if g.last_notice is not None:
+            await safe_delete(g.last_notice)
+        g.last_notice = await channel.send(view=text_panel("", body))
 
     async def run_game(self, channel, g: ShiritoriGame, rng=random):
         g.topic = rng.choice(list(TOPICS))
@@ -264,13 +274,12 @@ class OdaiShiritori(commands.Cog):
         g.used.add(normalize(g.last_word))
         g.phase = "playing"
         order = " → ".join(m.display_name for m in g.players.values())
-        await channel.send(embed=discord.Embed(
-            title="お題しりとり スタート！",
-            description=(f"お題: **{g.topic}**\n順番: {order}\n\n"
-                         f"最初の言葉は「**{g.last_word}**」。次の人は「**{last_kana(g.last_word)}**」から！\n"
-                         f"自分の番になったら{TURN_SECONDS}秒以内に、ひらがなかカタカナでチャンネルに書いてください。\n"
-                         "「ん」で終わる・同じ言葉・時間切れ・お題に合わない（投票）で脱落。最後の1人が勝ち！"),
-            color=COLOR))
+        await channel.send(view=text_panel(
+            "お題しりとり スタート！",
+            f"お題: **{g.topic}**\n順番: {order}\n\n"
+            f"最初の言葉は「**{g.last_word}**」。次の人は「**{last_kana(g.last_word)}**」から！\n"
+            f"自分の番になったら{TURN_SECONDS}秒以内に、ひらがなかカタカナでチャンネルに書いてください。\n"
+            "「ん」で終わる・同じ言葉・時間切れ・お題に合わない（投票）で脱落。最後の1人が勝ち！"))
         await self._play_loop(channel, g)
         await self.finish(channel, g)
 
@@ -284,9 +293,8 @@ class OdaiShiritori(commands.Cog):
         uid = g.next_player()
         g.current, g.answer = uid, None
         member = g.players[uid]
-        await channel.send(embed=discord.Embed(
-            description=f"▶ {member.mention} さんの番です。「**{last_kana(g.last_word)}**」から（{TURN_SECONDS}秒）",
-            color=COLOR))
+        await self._notice(channel, g,
+                           f"▶ {member.mention} さんの番です。「**{last_kana(g.last_word)}**」から（{TURN_SECONDS}秒）")
         elapsed = 0
         while g.answer is None and elapsed < TURN_SECONDS and g.phase == "playing":
             await asyncio.sleep(1)
@@ -294,29 +302,26 @@ class OdaiShiritori(commands.Cog):
         g.current = None
         if g.answer is None:
             g.eliminate(uid)
-            return await channel.send(embed=discord.Embed(
-                description=f"{CROCK} {member.mention} さんは時間切れで脱落です。（残り {len(g.alive)}人）", color=COLOR))
+            return await self._notice(channel, g,
+                                      f"{CROCK} {member.mention} さんは時間切れで脱落です。（残り {len(g.alive)}人）")
         word = g.answer
         result, reason = check_answer(g.last_word, word, g.used)
         if result == "out":
             g.eliminate(uid)
-            return await channel.send(embed=discord.Embed(
-                description=f"💥 {member.mention} さんの「{word}」は{reason}。脱落です。（残り {len(g.alive)}人）",
-                color=COLOR))
+            return await self._notice(channel, g,
+                                      f"💥 {member.mention} さんの「{word}」は{reason}。脱落です。（残り {len(g.alive)}人）")
         if not await self.topic_vote(channel, g, uid, word):
             g.eliminate(uid)
-            return await channel.send(embed=discord.Embed(
-                description=f"🙅 「{word}」はお題「{g.topic}」に合わないと判定されました。{member.mention} さんは脱落です。"
-                            f"（残り {len(g.alive)}人）",
-                color=COLOR))
+            return await self._notice(channel, g,
+                                      f"🙅 「{word}」はお題「{g.topic}」に合わないと判定されました。{member.mention} さんは脱落です。"
+                                      f"（残り {len(g.alive)}人）")
         g.accept(uid, word)
 
     async def topic_vote(self, channel, g: ShiritoriGame, uid: int, word: str) -> bool:
-        view = VoteView(g, uid)
-        await game_panels.replace(channel, "party", embed=discord.Embed(
-            description=(f"「**{word}**」はお題「{g.topic}」に合っていますか？\n"
-                         f"答えた人以外が{VOTE_SECONDS}秒以内に投票（NG が OK より多いと脱落。同数・無投票はセーフ）"),
-            color=COLOR), view=view)
+        view = VoteView(g, uid, body=(
+            f"「**{word}**」はお題「{g.topic}」に合っていますか？\n"
+            f"答えた人以外が{VOTE_SECONDS}秒以内に投票（NG が OK より多いと脱落。同数・無投票はセーフ）"))
+        await game_panels.replace(channel, "party", view=view)
         elapsed = 0
         while elapsed < VOTE_SECONDS and len(view.votes) < len(view.voters):
             await asyncio.sleep(1)
@@ -333,9 +338,13 @@ class OdaiShiritori(commands.Cog):
             await party_ranking.shared().record_win(g.guild_id, uid, "shiritori")
         chain = " → ".join(w for _, w in g.history) or "（なし）"
         win_text = "、".join(g.players[uid].mention for uid in winners) or "なし"
-        embed = discord.Embed(title="お題しりとり 終了", description=f"🏆 勝者: {win_text}", color=COLOR)
-        embed.add_field(name=f"つながった言葉（お題: {g.topic}）", value=chain[:1024], inline=False)
-        await channel.send(embed=embed)
+        await game_panels.clear(channel, "party")
+        if g.last_notice is not None:
+            await safe_delete(g.last_notice)
+            g.last_notice = None
+        await channel.send(view=text_panel(
+            "お題しりとり 終了",
+            f"🏆 勝者: {win_text}\n\n## つながった言葉（お題: {g.topic}）\n{chain[:1024]}"))
 
     # ------------------------------------------------------------------
     # 再起動復旧（core/game/game_restore.py）
@@ -429,7 +438,7 @@ class OdaiShiritori(commands.Cog):
         word = (message.content or "").strip()
         result, reason = check_answer(g.last_word, word, g.used)
         if result == "retry":
-            await message.channel.send(embed=discord.Embed(description=f"{FAILED} {reason}（言い直せます）", color=COLOR))
+            await self._notice(message.channel, g, f"{FAILED} {reason}（言い直せます）")
             return False
         g.answer = word
         return True

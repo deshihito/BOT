@@ -11,7 +11,8 @@ import logging
 import discord
 from discord.ext import commands
 
-from core.game import party_ranking
+from core.game import game_panels, party_ranking
+from core.game.game_v2 import GamePanelView, LobbyView, original_response_or_none, safe_delete, text_panel
 from core.game.onenight import (MAX_PLAYERS, MIN_PLAYERS, ROBBER, ROLE_INFO, SEER, VILLAGER, WOLF,
                            OneNightSession)
 
@@ -79,13 +80,17 @@ class RobberSelect(discord.ui.Select):
             "（勝敗はこの役職で決まります）。", ephemeral=True)
 
 
-class NightView(discord.ui.View):
-    def __init__(self, cog, runtime: Runtime):
-        super().__init__(timeout=NIGHT_SECONDS + 30)
-        self.cog, self.runtime = cog, runtime
+class NightPanel(GamePanelView):
+    """夜フェーズのパネル（V2）。役職・行動の詳細は ephemeral で返す。"""
 
-    @discord.ui.button(label="役職確認と夜の行動", style=discord.ButtonStyle.primary)
-    async def act(self, interaction: discord.Interaction, button: discord.ui.Button):
+    def __init__(self, cog, runtime: Runtime, body: str = ""):
+        super().__init__("🌙 夜になりました", body, timeout=NIGHT_SECONDS + 30)
+        self.cog, self.runtime = cog, runtime
+        self.act = discord.ui.Button(label="役職確認と夜の行動", style=discord.ButtonStyle.primary)
+        self.act.callback = self._act
+        self.add_row(self.act)
+
+    async def _act(self, interaction: discord.Interaction):
         session = self.runtime.session
         uid = interaction.user.id
         if uid not in session.players:
@@ -111,44 +116,37 @@ class NightView(discord.ui.View):
         await interaction.response.send_message(base, view=view, ephemeral=True)
 
 
-class RecruitView(discord.ui.View):
-    def __init__(self, host_id):
-        super().__init__(timeout=RECRUIT_SECONDS + 10)
-        self.host_id = host_id
-        self.players = [host_id]
-        self.started = False
-
-    @discord.ui.button(label="参加する", style=discord.ButtonStyle.success)
-    async def join(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if interaction.user.id in self.players:
-            return await interaction.response.send_message("すでに参加しています。", ephemeral=True)
-        if len(self.players) >= MAX_PLAYERS:
-            return await interaction.response.send_message(f"満員です（{MAX_PLAYERS}人まで）。", ephemeral=True)
-        self.players.append(interaction.user.id)
-        await interaction.response.send_message(f"参加しました（現在 {len(self.players)}名）。")
-
-    @discord.ui.button(label="開始する（ホスト）", style=discord.ButtonStyle.primary)
-    async def start(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if interaction.user.id != self.host_id:
-            return await interaction.response.send_message("開始できるのはホストだけです。", ephemeral=True)
-        if self.started:
-            return await interaction.response.send_message("すでに開始しています。", ephemeral=True)
-        self.started = True
-        await interaction.response.send_message("ワンナイト人狼を開始します！")
-        self.stop()
+NightView = NightPanel  # 互換名
 
 
-class SkipView(discord.ui.View):
-    def __init__(self, runtime: Runtime, host_id):
-        super().__init__(timeout=DISCUSS_SECONDS + 10)
+class SkipPanel(GamePanelView):
+    """議論フェーズのパネル（V2）。ホストだけが議論を終えられる。"""
+
+    def __init__(self, runtime: Runtime, host_id, body: str = ""):
+        super().__init__("☀️ 朝になりました", body, timeout=DISCUSS_SECONDS + 10)
         self.runtime, self.host_id = runtime, host_id
+        self.skip = discord.ui.Button(label="議論を終える（ホスト）", style=discord.ButtonStyle.secondary)
+        self.skip.callback = self._skip
+        self.add_row(self.skip)
 
-    @discord.ui.button(label="議論を終える（ホスト）", style=discord.ButtonStyle.secondary)
-    async def skip(self, interaction: discord.Interaction, button: discord.ui.Button):
+    async def _skip(self, interaction: discord.Interaction):
         if interaction.user.id != self.host_id:
             return await interaction.response.send_message("ホストだけが使えます。", ephemeral=True)
         self.runtime.skip.set()
         await interaction.response.send_message("議論を終えて投票に進みます。")
+
+
+SkipView = SkipPanel  # 互換名
+
+
+class VotePanel(GamePanelView):
+    """投票フェーズのパネル（V2）。セレクトは self.select。"""
+
+    def __init__(self, cog, runtime: Runtime, guild, body: str = ""):
+        super().__init__("🗳️ 投票", body, timeout=VOTE_SECONDS + 10)
+        self.cog, self.runtime = cog, runtime
+        self.select = VoteSelect(cog, runtime, guild)
+        self.add_row(self.select)
 
 
 class VoteSelect(discord.ui.Select):
@@ -176,59 +174,56 @@ class OneNight(commands.Cog):
         if channel.id in self.channels:
             return await interaction.response.send_message("このチャンネルではすでにワンナイト人狼が開催中です。", ephemeral=True)
         self.channels.add(channel.id)
-        view = RecruitView(interaction.user.id)
-        embed = discord.Embed(
-            title="🌙 ワンナイト人狼 参加者募集",
-            description=(f"{MIN_PLAYERS}〜{MAX_PLAYERS}人・約5分で終わる短縮版人狼です。"
-                         f"ホストが「開始する」を押すか、{RECRUIT_SECONDS}秒たつと開始します。"),
-            color=0xFFFFFF,
-        )
-        await interaction.response.send_message(embed=embed, view=view)
-        asyncio.create_task(self._run(channel, view, interaction.user.id))
+        view = LobbyView(
+            title="🌙 ワンナイト人狼 参加者募集", host=interaction.user,
+            min_players=MIN_PLAYERS, max_players=MAX_PLAYERS,
+            note=(f"約5分で終わる短縮版人狼です。"
+                  f"ホストが「開始する」を押すか、{RECRUIT_SECONDS}秒たつと開始します。"),
+            timeout=RECRUIT_SECONDS + 10)
+        await interaction.response.send_message(view=view)
+        lobby_msg = await original_response_or_none(interaction)
+        asyncio.create_task(self._run(channel, view, interaction.user.id, lobby_msg))
 
-    async def _run(self, channel, view: RecruitView, host_id):
+    async def _run(self, channel, view: LobbyView, host_id, lobby_msg=None):
         try:
             for _ in range(RECRUIT_SECONDS * 2):
-                if view.started:
+                if view.started or view.cancelled:
                     break
                 await asyncio.sleep(0.5)
-            if not view.started:
-                view.started = True
-                view.stop()
+            view.stop()
+            # 募集パネルは開始（または不成立）時点で役割を終える。
+            await safe_delete(lobby_msg)
+            if view.cancelled:
+                return
             players = list(dict.fromkeys(view.players))
             if not MIN_PLAYERS <= len(players) <= MAX_PLAYERS:
-                await channel.send(embed=discord.Embed(
-                    description=f"人数不足（{MIN_PLAYERS}人以上必要）のため、開始できませんでした。", color=0xFFFFFF))
+                await channel.send(view=text_panel(
+                    "", f"人数不足（{MIN_PLAYERS}人以上必要）のため、開始できませんでした。"))
                 return
             session = OneNightSession(players)
             runtime = Runtime(session)
-            await channel.send(
-                embed=discord.Embed(
-                    title="🌙 夜になりました",
-                    description=("全員「役職確認と夜の行動」ボタンを押してください。"
-                                 f"全員の行動が終わるか、{NIGHT_SECONDS}秒で朝になります。"),
-                    color=0xFFFFFF),
-                view=NightView(self, runtime))
+            # フェーズパネルは game_panels の追跡枠で引き継ぐ（前フェーズは消える）。
+            await game_panels.replace(channel, "party", view=NightPanel(
+                self, runtime,
+                body=("全員「役職確認と夜の行動」ボタンを押してください。"
+                      f"全員の行動が終わるか、{NIGHT_SECONDS}秒で朝になります。")))
             for _ in range(NIGHT_SECONDS * 2):
                 if len(runtime.acted) >= len(players):
                     break
                 await asyncio.sleep(0.5)
             session.resolve_night()
-            await channel.send(embed=discord.Embed(
-                title="☀️ 朝になりました",
-                description=f"死者はいませんでした。これから{DISCUSS_SECONDS}秒の議論です。"
-                            "怪盗にカードを交換された人は、最終的な役職が入れ替わっています。",
-                color=0xFFFFFF), view=SkipView(runtime, host_id))
+            await game_panels.replace(channel, "party", view=SkipPanel(
+                runtime, host_id,
+                body=f"死者はいませんでした。これから{DISCUSS_SECONDS}秒の議論です。"
+                     "怪盗にカードを交換された人は、最終的な役職が入れ替わっています。"))
             try:
                 await asyncio.wait_for(runtime.skip.wait(), timeout=DISCUSS_SECONDS)
             except asyncio.TimeoutError:
                 pass
-            vote_view = discord.ui.View(timeout=VOTE_SECONDS + 10)
-            vote_view.add_item(VoteSelect(self, runtime, channel.guild))
-            await channel.send(embed=discord.Embed(
-                title="🗳️ 投票",
-                description=f"処刑したい人を選んでください（{VOTE_SECONDS}秒）。最多票の人が処刑されます（同票は全員）。",
-                color=0xFFFFFF), view=vote_view)
+            vote_view = VotePanel(
+                self, runtime, channel.guild,
+                body=f"処刑したい人を選んでください（{VOTE_SECONDS}秒）。最多票の人が処刑されます（同票は全員）。")
+            await game_panels.replace(channel, "party", view=vote_view)
             for _ in range(VOTE_SECONDS * 2):
                 if len(session.votes) >= len(players):
                     break
@@ -253,8 +248,9 @@ class OneNight(commands.Cog):
             verdict = "人狼を処刑できました。**村人陣営の勝ち**です。"
         else:
             verdict = "人狼は生き残りました。**人狼陣営の勝ち**です。"
-        embed = discord.Embed(title="🌙 ワンナイト人狼 結果", description="\n".join(lines) + f"\n\n{verdict}", color=0xFFFFFF)
-        await channel.send(embed=embed)
+        # 投票パネルを片付け、結果だけを残す。
+        await game_panels.clear(channel, "party")
+        await channel.send(view=text_panel("🌙 ワンナイト人狼 結果", "\n".join(lines) + f"\n\n{verdict}"))
         if guild is not None:
             for uid in result["winners"]:
                 await party_ranking.shared().record_win(guild.id, uid, GAME_ID)
