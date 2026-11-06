@@ -14,6 +14,7 @@ if str(ROOT) not in sys.path:
 from tests.test_nation import NationFakeDBAPI, NationTest  # noqa: E402
 
 from cogs import nation as nation_module  # noqa: E402
+from core.game.nation import cog as nation_impl  # noqa: E402
 
 
 class AdjustFake(NationFakeDBAPI):
@@ -72,13 +73,13 @@ class HungerTest(unittest.TestCase):
 
     def test_bots_and_disabled_servers_skip(self):
         asyncio.run(self.cog.on_message(msg(bot=True)))
-        with mock.patch.object(nation_module, "nation_settings", return_value={"enabled": False}):
+        with mock.patch.object(nation_impl, "nation_settings", return_value={"enabled": False}):
             asyncio.run(self.cog.on_message(msg()))
         self.assertEqual(self.hunger(), 2)
         self.assertEqual(self.db.rpc_calls, [])
 
     def test_disabled_server_refuses_found_and_join(self):
-        with mock.patch.object(nation_module, "nation_settings", return_value={"enabled": False}):
+        with mock.patch.object(nation_impl, "nation_settings", return_value={"enabled": False}):
             for name in ("found", "join"):
                 sent = self.call(name)
                 self.assertIn("参加しない設定", sent[0]["embed"].description)
