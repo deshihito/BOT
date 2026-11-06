@@ -14,6 +14,8 @@ from core.game.clan_cog.cog import (
     config,
     clan_core,
     prison_core,
+    cached_display_name,
+    resolve_display_names,
     as_panel_v2,
     edit_panel_v2,
     wallet_module,
