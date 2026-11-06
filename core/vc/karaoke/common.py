@@ -16,13 +16,13 @@ import discord.opus
 from discord.ext import commands
 from discord.ext import voice_recv
 
-from core.legacy import Responder
+from core.support.legacy import Responder
 from core.vc import vc_feature_restore
 from core.vc.vosk_model import ensure_model
 from core.vc.voice_session import VoiceBusy, get_manager
 from core.vc.voice_recv_patch import patch_voice_recv_client
-from core.messages import VOICE_NOT_JOINED
-from core.emojis import FAILED, MUSIC
+from core.support.messages import VOICE_NOT_JOINED
+from core.support.emojis import FAILED, MUSIC
 
 try:
     from vosk import Model, KaldiRecognizer
@@ -44,6 +44,6 @@ OPUS_SILENCE = b"\xf8\xff\xfe"
 
 
 from functools import partial as _partial
-from core.embeds import we as _shared_we
+from core.support.embeds import we as _shared_we
 # カラオケ風のピンク色を基調色として共通工場を使う
 we = _partial(_shared_we, color=0xFF69B4)

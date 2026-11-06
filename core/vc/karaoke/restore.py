@@ -13,13 +13,13 @@ import discord
 import discord.opus
 from discord.ext import commands
 from discord.ext import voice_recv
-from core.legacy import Responder
+from core.support.legacy import Responder
 from core.vc import vc_feature_restore
 from core.vc.vosk_model import ensure_model
 from core.vc.voice_session import VoiceBusy, get_manager
 from core.vc.voice_recv_patch import patch_voice_recv_client
-from core.messages import VOICE_NOT_JOINED
-from core.emojis import FAILED, MUSIC
+from core.support.messages import VOICE_NOT_JOINED
+from core.support.emojis import FAILED, MUSIC
 try:
     from vosk import Model, KaldiRecognizer
 except ImportError:
