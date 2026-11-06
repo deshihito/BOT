@@ -1,5 +1,5 @@
 import discord
-from core.panel_v2 import edit_message_v2
+from core.support.panel_v2 import edit_message_v2
 from discord import app_commands  # ← 追加
 from discord.ext import commands, tasks
 import asyncio
@@ -28,8 +28,8 @@ import discord.opus
 from core.vc import voice_restore
 from core.vc.voice_session import SHARED_FEATURES, VoiceBusy, get_manager
 from core.vc.voice_media import add_audio_source, has_audio_source, remove_audio_source
-from core.legacy import Responder
-from core.emojis import FAILED, LOUPE, MUSIC, SUCCESS
+from core.support.legacy import Responder
+from core.support.emojis import FAILED, LOUPE, MUSIC, SUCCESS
 from core.vc.music_activity import build_music_activity_snapshot
 
 from core.vc.music.common import *  # noqa: F401,F403 - shared helpers/constants
