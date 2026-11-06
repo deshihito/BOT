@@ -5,13 +5,13 @@
   dict だけを持つ。以前は Cog の単一フィールド（self.game_running 等）だったため、
   Bot 全体で同時に 1 ゲームしか開けなかった。
 - 募集の 60 秒待ちと本編タイマー（1 分ごとの経過報告）はセッション側が担う。
-- ルール・お題・勝利数記録（core/party_ranking.py）の挙動は従来どおり。
+- ルール・お題・勝利数記録（core/game/party_ranking.py）の挙動は従来どおり。
 """
 import discord
 from core.game import game_panels
 from discord.ext import commands
 
-from core import party_ranking
+from core.game import party_ranking
 
 party_ranking.register("wordwolf")
 import asyncio
@@ -282,7 +282,7 @@ class CustomWordWolf(commands.Cog):
             return
         session.game_running = False
         self._discard(session)
-        # サーバーごとのランキング（core/party_ranking.py）: チーム戦なので勝った側の全員に 1 勝。
+        # サーバーごとのランキング（core/game/party_ranking.py）: チーム戦なので勝った側の全員に 1 勝。
         # 村人の勝ち → ウルフ以外の参加者全員（脱落した人も含む）、ウルフの勝ち → ウルフ 1 人
         guild = getattr(channel, "guild", None)
         if guild is not None:
