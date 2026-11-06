@@ -96,6 +96,7 @@ SUPPORT_ACTIONS = [
     app_commands.Choice(name="レベルアップ通知（EXP）", value="levelup_notify"),
     app_commands.Choice(name="サーバーアシスト設定", value="server_assist"),
     app_commands.Choice(name="音声トリガーのサーバー設定", value="voice_trigger"),
+    app_commands.Choice(name="VC参加時の自動開始", value="vc_auto_start"),
     app_commands.Choice(name="即抜けRTA状態", value="sokunuke_status"),
     app_commands.Choice(name="即抜けRTA計測オン", value="sokunuke_on"),
     app_commands.Choice(name="即抜けRTA計測オフ", value="sokunuke_off"),
@@ -131,7 +132,7 @@ SUPPORT_ACTIONS_BY_GENRE = {
     "moderation": _support_actions("muted", "whisper", "sticky", "clear", "honeypot", "ticket", "giveaway"),
     "roles": _support_actions("role_bulk", "auth_panel", "role_panel"),
     "logs": _support_actions("vc_log", "message_log", "moderation_log"),
-    "automation": _support_actions("binjou", "auto_react", "levelup_notify", "voice_trigger", "sns_notify", "quest_notify", "language", "globalchat"),
+    "automation": _support_actions("binjou", "auto_react", "levelup_notify", "voice_trigger", "sns_notify", "quest_notify", "language", "globalchat", "vc_auto_start"),
     "assist": _support_actions("server_assist"),
     "rta": _support_actions(
         "bumprta_status", "bumprta_on", "bumprta_off", "bumprta_role", "sokunuke_status", "sokunuke_on",

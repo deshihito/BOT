@@ -125,18 +125,23 @@ class MyBot(commands.Bot):
         on_ready をブロックせず、cog 単位で失敗を隔離する。
         """
         logger = logging.getLogger(__name__)
-        for cog_name in ("VoiceCog", "GlobalVCCog", "TranscriptionCog",
-                         "RecordingCog", "KaraokeCog", "VoiceChangerCog",
-                         "Shogi", "Chess", "Othello", "Daifugo", "Babanuki",
-                         "Shinkei", "OdaiShiritori", "Uno", "Wordle", "JinrouCog"):
-            cog = self.get_cog(cog_name)
-            restore = getattr(cog, "restore_after_restart", None)
-            if restore is None:
-                continue
-            try:
-                await restore()
-            except Exception:
-                logger.exception("%s の再起動復旧に失敗しました", cog_name)
+        # 復旧で作られる VC セッションでは「VC参加時の自動開始」を発動しない
+        # （復旧は既存仕様が優先。core/vc/auto_start 側の抑止フラグ）。
+        from core.vc.auto_start import restore_suppression
+
+        with restore_suppression():
+            for cog_name in ("VoiceCog", "GlobalVCCog", "TranscriptionCog",
+                             "RecordingCog", "KaraokeCog", "VoiceChangerCog",
+                             "Shogi", "Chess", "Othello", "Daifugo", "Babanuki",
+                             "Shinkei", "OdaiShiritori", "Uno", "Wordle", "JinrouCog"):
+                cog = self.get_cog(cog_name)
+                restore = getattr(cog, "restore_after_restart", None)
+                if restore is None:
+                    continue
+                try:
+                    await restore()
+                except Exception:
+                    logger.exception("%s の再起動復旧に失敗しました", cog_name)
 
 bot = MyBot()
 bot.db_api = db_api
