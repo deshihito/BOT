@@ -31,19 +31,19 @@ from core.voice_media import add_audio_source, has_audio_source, remove_audio_so
 from core.legacy import Responder
 from core.emojis import FAILED, MUSIC, SUCCESS
 from core.music_activity import build_music_activity_snapshot
-from core.music.common import logger, YTDL_OPTIONS, YTDL_COOKIE_FILE, BASE62, MAX_QUEUE_SIZE, MAX_PLAYLIST_ITEMS, SPOTIFY_PLAYLIST_RE, SOUNDCLOUD_URL_RE, soundcloud_url_kind, NICOVIDEO_URL_RE, niconico_url_kind, MAX_TTS_CHARS, LOOP_CHOICES, PLAYLIST_ACTION_CHOICES, PLAYLIST_SCOPE_CHOICES, MIN_PLAYBACK_SPEED, MAX_PLAYBACK_SPEED, PANEL_TIMEOUT_SECONDS, SNAPSHOT_INTERVAL_SECONDS, SAFE_CUSTOM_AUDIO_FILTERS, build_atempo_filters, is_safe_custom_audio_filter, EQ_SETTINGS, FFMPEG_REALTIME_PRESETS, build_ffmpeg_headers, FFmpegPCMAudioDiagnostics, encode_full_id, decode_full_id, we  # noqa: F401
-from core.music.connection import logger, ConnectionMixin  # noqa: F401
-from core.music.loader import logger, LoaderMixin  # noqa: F401
-from core.music.panel import logger, PanelMixin  # noqa: F401
-from core.music.playback import logger, PlaybackMixin  # noqa: F401
-from core.music.playlists import logger, PlaylistsMixin  # noqa: F401
-from core.music.restore import logger, RestoreMixin  # noqa: F401
-from core.music.search import logger, SearchMixin  # noqa: F401
-from core.music.sink import logger, RECORDING_ENABLED, BYTES_PER_SECOND, FRAME_SIZE, MAX_GAP_SECONDS, AudioSink  # noqa: F401
-from core.music.sources import logger, SourcesMixin  # noqa: F401
-from core.music.spatial import logger, PythonSpatialAudioSource, SpatialControlView  # noqa: F401
-from core.music.state import logger, StateMixin  # noqa: F401
-from core.music.ui import logger, SearchModal, CustomEQModal, VoiceControlView, build_music_panel_layout, PlaylistNameModal, PlaylistLibraryView  # noqa: F401
+from core.voice.music.common import logger, YTDL_OPTIONS, YTDL_COOKIE_FILE, BASE62, MAX_QUEUE_SIZE, MAX_PLAYLIST_ITEMS, SPOTIFY_PLAYLIST_RE, SOUNDCLOUD_URL_RE, soundcloud_url_kind, NICOVIDEO_URL_RE, niconico_url_kind, MAX_TTS_CHARS, LOOP_CHOICES, PLAYLIST_ACTION_CHOICES, PLAYLIST_SCOPE_CHOICES, MIN_PLAYBACK_SPEED, MAX_PLAYBACK_SPEED, PANEL_TIMEOUT_SECONDS, SNAPSHOT_INTERVAL_SECONDS, SAFE_CUSTOM_AUDIO_FILTERS, build_atempo_filters, is_safe_custom_audio_filter, EQ_SETTINGS, FFMPEG_REALTIME_PRESETS, build_ffmpeg_headers, FFmpegPCMAudioDiagnostics, encode_full_id, decode_full_id, we  # noqa: F401
+from core.voice.music.connection import logger, ConnectionMixin  # noqa: F401
+from core.voice.music.loader import logger, LoaderMixin  # noqa: F401
+from core.voice.music.panel import logger, PanelMixin  # noqa: F401
+from core.voice.music.playback import logger, PlaybackMixin  # noqa: F401
+from core.voice.music.playlists import logger, PlaylistsMixin  # noqa: F401
+from core.voice.music.restore import logger, RestoreMixin  # noqa: F401
+from core.voice.music.search import logger, SearchMixin  # noqa: F401
+from core.voice.music.sink import logger, RECORDING_ENABLED, BYTES_PER_SECOND, FRAME_SIZE, MAX_GAP_SECONDS, AudioSink  # noqa: F401
+from core.voice.music.sources import logger, SourcesMixin  # noqa: F401
+from core.voice.music.spatial import logger, PythonSpatialAudioSource, SpatialControlView  # noqa: F401
+from core.voice.music.state import logger, StateMixin  # noqa: F401
+from core.voice.music.ui import logger, SearchModal, CustomEQModal, VoiceControlView, build_music_panel_layout, PlaylistNameModal, PlaylistLibraryView  # noqa: F401
 
 logger = logging.getLogger("cogs.sio_music")
 
