@@ -304,7 +304,7 @@ class HindoAltitudeDisplayTests(unittest.IsolatedAsyncioTestCase):
         cog._latest_activity = AsyncMock(return_value=None)
         replies = []
 
-        async def fake_reply(interaction, embed, ephemeral=False):
+        async def fake_reply(interaction, embed, ephemeral=False, view=None):
             replies.append(embed)
 
         cog._reply = fake_reply
@@ -364,6 +364,135 @@ class RankingAltitudeTests(unittest.IsolatedAsyncioTestCase):
         # VOICE の方が上位
         self.assertLess(embed.description.index("120 m"), embed.description.index("30 m"))
         self.assertNotIn("回", embed.description)
+
+
+class HourlyProfileTests(unittest.TestCase):
+    """fujo分析の集計（日単位統計→1日平均）の純関数テスト。"""
+
+    def setUp(self):
+        from core.game.seizon import analysis
+
+        self.analysis = analysis
+        # 2026-11-07 12:00 JST を「今」とする（窓は 10/8〜11/6 の完了日）
+        self.now = datetime(2026, 11, 7, 12, 0, tzinfo=JST).astimezone(timezone.utc)
+
+    def _rec(self, jst_dt: datetime):
+        return {"detected_at": jst_dt.astimezone(timezone.utc).isoformat()}
+
+    def test_averages_from_daily_counts(self):
+        a = self.analysis
+        records = []
+        # 11/6: 21時に3回、11/5: 21時に1回、11/4: 9時に2回
+        for _ in range(3):
+            records.append(self._rec(datetime(2026, 11, 6, 21, 30, tzinfo=JST)))
+        records.append(self._rec(datetime(2026, 11, 5, 21, 5, tzinfo=JST)))
+        for _ in range(2):
+            records.append(self._rec(datetime(2026, 11, 4, 9, 15, tzinfo=JST)))
+        profile = a.average_hourly_profile(records, self.now)
+        self.assertIsNotNone(profile)
+        self.assertEqual(profile.days, 3)
+        self.assertEqual(profile.total, 6)
+        self.assertEqual(len(profile.averages), 24)
+        self.assertAlmostEqual(profile.averages[21], 4 / 3)
+        self.assertAlmostEqual(profile.averages[9], 2 / 3)
+        self.assertAlmostEqual(profile.averages[0], 0.0)
+        self.assertEqual(profile.peak_hour, 21)
+        self.assertEqual(profile.window_end.isoformat(), "2026-11-06")
+        self.assertEqual(profile.window_start.isoformat(), "2026-10-08")
+
+    def test_today_is_excluded_as_partial_day(self):
+        a = self.analysis
+        records = [self._rec(datetime(2026, 11, 7, 10, 0, tzinfo=JST)) for _ in range(5)]
+        records += [self._rec(datetime(2026, 11, 6, 10, 0, tzinfo=JST)) for _ in range(2)]
+        records += [self._rec(datetime(2026, 11, 5, 10, 0, tzinfo=JST))]
+        records += [self._rec(datetime(2026, 11, 4, 10, 0, tzinfo=JST))]
+        profile = a.average_hourly_profile(records, self.now)
+        self.assertEqual(profile.days, 3)
+        self.assertEqual(profile.total, 4)  # 今日の5件は数えない
+        self.assertAlmostEqual(profile.averages[10], 4 / 3)
+
+    def test_utc_records_convert_to_jst_hours(self):
+        a = self.analysis
+        records = []
+        # UTC 16:00 = JST 翌日 1:00。JST の暦日で 11/6 扱いになる記録
+        for day in (3, 4, 5):
+            records.append({"detected_at": datetime(2026, 11, day, 16, 0, tzinfo=timezone.utc).isoformat()})
+        profile = a.average_hourly_profile(records, self.now)
+        self.assertIsNotNone(profile)
+        self.assertEqual(profile.days, 3)
+        self.assertAlmostEqual(profile.averages[1], 1.0)
+        self.assertEqual(profile.peak_hour, 1)
+
+    def test_old_and_future_records_ignored(self):
+        a = self.analysis
+        records = [self._rec(datetime(2026, 9, 1, 12, 0, tzinfo=JST)) for _ in range(3)]
+        records += [self._rec(datetime(2026, 12, 1, 12, 0, tzinfo=JST)) for _ in range(3)]
+        self.assertIsNone(a.average_hourly_profile(records, self.now))
+
+    def test_insufficient_days_returns_none(self):
+        a = self.analysis
+        records = [self._rec(datetime(2026, 11, 6, 12, 0, tzinfo=JST)) for _ in range(10)]
+        records += [self._rec(datetime(2026, 11, 5, 12, 0, tzinfo=JST)) for _ in range(10)]
+        self.assertIsNone(a.average_hourly_profile(records, self.now))
+        self.assertIsNone(a.average_hourly_profile([], self.now))
+
+    def test_chart_renders_png(self):
+        a = self.analysis
+        records = []
+        for day in (4, 5, 6):
+            for _ in range(2):
+                records.append(self._rec(datetime(2026, 11, day, 22, 45, tzinfo=JST)))
+        profile = a.average_hourly_profile(records, self.now)
+        png = a.render_hourly_chart(profile, title="fujo分析 - テスト")
+        self.assertTrue(png.startswith(b"\x89PNG"))
+        self.assertGreater(len(png), 1000)
+
+
+class AnalysisActionTests(unittest.IsolatedAsyncioTestCase):
+    async def test_insufficient_data_branch(self):
+        cog = _cog(users={7: {"streak_count": 1, "is_frozen": False}})
+        cog._activities_since = AsyncMock(return_value=[])
+        replies = []
+
+        async def fake_reply(interaction, embed, ephemeral=False, view=None):
+            replies.append((embed, ephemeral))
+
+        cog._reply = fake_reply
+        user = types.SimpleNamespace(id=7, display_name="誰か", mention="<@7>")
+        interaction = types.SimpleNamespace(
+            user=user,
+            response=types.SimpleNamespace(is_done=lambda: True),
+        )
+        await cog.analysis(interaction)
+        self.assertEqual(len(replies), 1)
+        embed, ephemeral = replies[0]
+        self.assertEqual(embed.title, "fujo分析")
+        self.assertIn("まだデータが少ない", embed.description)
+        self.assertTrue(ephemeral)
+
+    async def test_chart_branch_sends_view_and_file(self):
+        cog = _cog(users={7: {"streak_count": 1, "is_frozen": False}})
+        now = datetime.now(timezone.utc)
+        records = []
+        for days_ago in (1, 2, 3):
+            ts = now - timedelta(days=days_ago)
+            records.append({"detected_at": ts.isoformat(), "signal_type": "MESSAGE"})
+        cog._activities_since = AsyncMock(return_value=records)
+        sent = {}
+
+        async def fake_reply_view(interaction, view, file):
+            sent["view"] = view
+            sent["file"] = file
+
+        cog._reply_view = fake_reply_view
+        user = types.SimpleNamespace(id=7, display_name="誰か", mention="<@7>")
+        interaction = types.SimpleNamespace(
+            user=user,
+            response=types.SimpleNamespace(is_done=lambda: True),
+        )
+        await cog.analysis(interaction)
+        self.assertIn("view", sent)
+        self.assertEqual(sent["file"].filename, "fujo_analysis.png")
 
 
 class SimpleEmbedTests(unittest.TestCase):
