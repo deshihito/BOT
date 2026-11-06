@@ -3,6 +3,7 @@
 - 設定の保存/読込と既定（未設定では何もしない）
 - 判定ロジック（許可チャンネル外／レート窓／許可チャンネル空のエントリは成立しない）
 - 執行の分離（AGO自身・Webhook・人間・DM は対象外、削除失敗でも例外を出さない）
+- リスナー配線（執行リスナーが on_message イベントに登録されていること）
 Discord には接続しない。
 """
 import os
@@ -113,6 +114,17 @@ class PlanTest(unittest.TestCase):
         self.assertEqual(plan(self.settings, now=120.0, **kw), "rate")
         self.assertIsNone(plan(self.settings, now=161.0, **kw))
 
+    def test_rate_limit_one_per_minute(self):
+        # 実機検証で使われた設定そのもの: 上限1件/1分なら窓内の2件目が削除対象。
+        settings = {str(TARGET_ID): {"allowed_channel_ids": [10],
+                                     "rate": {"count": 1, "window_seconds": 60}}}
+        counter = RateCounter(clock=lambda: 0.0)
+        kw = dict(guild_id=1, bot_id=TARGET_ID, channel_id=10, counter=counter)
+        self.assertIsNone(plan(settings, now=100.0, **kw))
+        self.assertEqual(plan(settings, now=110.0, **kw), "rate")
+        self.assertEqual(plan(settings, now=159.0, **kw), "rate")
+        self.assertIsNone(plan(settings, now=160.0, **kw))
+
     def test_channel_violation_does_not_consume_rate(self):
         counter = RateCounter(clock=lambda: 0.0)
         for t in (0.0, 1.0, 2.0):
@@ -175,6 +187,20 @@ class EnforceTest(unittest.IsolatedAsyncioTestCase):
         message = FakeMessage(guild_id=None, channel_id=99)
         self.assertFalse(await enforce_message(SELF_ID, message, store=self.store))
 
+    async def test_rate_limit_one_per_minute_deletes_second(self):
+        # レート 1件/1分: 許可チャンネル内でも2件目の発言が削除される。
+        await self.store.update(42, BOT_CONTROL_SECTION, **{
+            str(TARGET_ID): {"allowed_channel_ids": [10],
+                             "rate": {"count": 1, "window_seconds": 60}},
+        })
+        bot_control._counter.reset()
+        first = FakeMessage(channel_id=10)
+        self.assertFalse(await enforce_message(SELF_ID, first, store=self.store))
+        self.assertFalse(first.deleted)
+        second = FakeMessage(channel_id=10)
+        self.assertTrue(await enforce_message(SELF_ID, second, store=self.store))
+        self.assertTrue(second.deleted)
+
     async def test_delete_failure_does_not_raise(self):
         message = FakeMessage(channel_id=99, fail_delete=True)
         self.assertFalse(await enforce_message(SELF_ID, message, store=self.store))
@@ -183,6 +209,29 @@ class EnforceTest(unittest.IsolatedAsyncioTestCase):
         message = FakeMessage(guild_id=777, channel_id=99)
         self.assertFalse(await enforce_message(SELF_ID, message, store=self.store))
         self.assertFalse(message.deleted)
+
+
+class ListenerWiringTest(unittest.TestCase):
+    """執行リスナーの配線（イベント名の紐付け）を検証する。
+
+    @commands.Cog.listener() にイベント名を渡し忘れると、メソッド名が
+    そのままイベント名として登録され、存在しないイベントのリスナーに
+    なって永遠に発火しない（PR #558 で他ボット制限が全く効かなかった
+    実バグ）。デコレータの引数を戻したらこのテストが落ちること。
+    """
+
+    def test_bot_control_listener_is_bound_to_on_message(self):
+        from cogs.support import SupportCog
+        from core.support.bot_fixer import BotFixerSupportMixin
+
+        listeners = SupportCog.__cog_listeners__
+        self.assertIn(("on_message", "on_message_bot_control"), listeners)
+        self.assertNotIn(
+            ("on_message_bot_control", "on_message_bot_control"), listeners)
+        names = getattr(
+            BotFixerSupportMixin.on_message_bot_control,
+            "__cog_listener_names__", [])
+        self.assertEqual(names, ["on_message"])
 
 
 class PanelTest(unittest.TestCase):
