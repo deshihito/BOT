@@ -24,15 +24,15 @@ try:
     import numpy as np  # type: ignore
 except Exception:  # numpy が無い環境では純Pythonで合成する
     np = None  # type: ignore[assignment]
-from core.globalvc.audio import logger, GlobalAudioSink, _SILENCE, mix_pcm_frames, _Track, GlobalAudioSource, _log_play_end, _ensure_playing, _start_room_playback, _request_playback, _JoinRefused  # noqa: F401
-from core.globalvc.chat import logger, ChatMixin  # noqa: F401
-from core.globalvc.common import logger, DISCORD_SAMPLE_RATE, CHANNELS, SAMPLE_WIDTH, FRAME_SIZE, FRAME_DURATION, FRAME_BYTE_SIZE, MAX_BUFFER_FRAMES, JITTER_PREFILL_FRAMES, TAIL_FLUSH_SECONDS, TRACK_IDLE_SECONDS, PLAYBACK_WATCHDOG_SECONDS, PLAYBACK_WATCHDOG_IDLE_SECONDS, STALE_VC_GRACE_SECONDS  # noqa: F401
-from core.globalvc.connect import logger, ConnectMixin  # noqa: F401
-from core.globalvc.manage import logger, ManageMixin  # noqa: F401
-from core.globalvc.restore import logger, RestoreMixin  # noqa: F401
-from core.globalvc.rooms import logger, RoomConfig, ROOMS, GLOBAL_ROOMS, _room_to_dict, _room_from_dict, _persist_rooms, _load_rooms, _persist_join, _clear_join, _remove_vc_from_rooms, _prune_dead_clients, _disconnect_and_cleanup, _watchdog_interval_seconds, _WEBHOOK_BANNED_WORDS, _safe_webhook_username, _can_delete_room  # noqa: F401
-from core.globalvc.textlink import logger, TextLink, ROOM_TEXT_LINKS, CHANNEL_TO_ROOM, _text_link_to_dict, _persist_text_links, _restore_text_links, _remove_text_link  # noqa: F401
-from core.globalvc.ui import logger, _RoomJoinButton, _PrivateRoomJoinModal, GlobalRoomListView  # noqa: F401
+from core.voice.globalvc.audio import logger, GlobalAudioSink, _SILENCE, mix_pcm_frames, _Track, GlobalAudioSource, _log_play_end, _ensure_playing, _start_room_playback, _request_playback, _JoinRefused  # noqa: F401
+from core.voice.globalvc.chat import logger, ChatMixin  # noqa: F401
+from core.voice.globalvc.common import logger, DISCORD_SAMPLE_RATE, CHANNELS, SAMPLE_WIDTH, FRAME_SIZE, FRAME_DURATION, FRAME_BYTE_SIZE, MAX_BUFFER_FRAMES, JITTER_PREFILL_FRAMES, TAIL_FLUSH_SECONDS, TRACK_IDLE_SECONDS, PLAYBACK_WATCHDOG_SECONDS, PLAYBACK_WATCHDOG_IDLE_SECONDS, STALE_VC_GRACE_SECONDS  # noqa: F401
+from core.voice.globalvc.connect import logger, ConnectMixin  # noqa: F401
+from core.voice.globalvc.manage import logger, ManageMixin  # noqa: F401
+from core.voice.globalvc.restore import logger, RestoreMixin  # noqa: F401
+from core.voice.globalvc.rooms import logger, RoomConfig, ROOMS, GLOBAL_ROOMS, _room_to_dict, _room_from_dict, _persist_rooms, _load_rooms, _persist_join, _clear_join, _remove_vc_from_rooms, _prune_dead_clients, _disconnect_and_cleanup, _watchdog_interval_seconds, _WEBHOOK_BANNED_WORDS, _safe_webhook_username, _can_delete_room  # noqa: F401
+from core.voice.globalvc.textlink import logger, TextLink, ROOM_TEXT_LINKS, CHANNEL_TO_ROOM, _text_link_to_dict, _persist_text_links, _restore_text_links, _remove_text_link  # noqa: F401
+from core.voice.globalvc.ui import logger, _RoomJoinButton, _PrivateRoomJoinModal, GlobalRoomListView  # noqa: F401
 
 logger = logging.getLogger("cogs.sio_globalVC")
 
