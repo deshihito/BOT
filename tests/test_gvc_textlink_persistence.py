@@ -1,6 +1,6 @@
 """グローバルVC グロチャ（テキスト連携）の永続化テスト。Discord には接続しない。
 
-- core/globalvc/textlink.py: 連携の保存（作成/削除の節目）→ 再読み込みで状態が一致
+- core/voice/globalvc/textlink.py: 連携の保存（作成/削除の節目）→ 再読み込みで状態が一致
 - 復旧時、消えたチャンネル/ルームへのリンクが掃除され、掃除後の状態が保存し直される
 - ストアが壊れていても復旧処理が例外なく終わり、機能が起動できる
 """
@@ -24,7 +24,7 @@ import discord  # noqa: E402
 
 from core import voice_restore  # noqa: E402
 from cogs import sio_globalVC as gvc  # noqa: E402
-from core.globalvc import textlink  # noqa: E402
+from core.voice.globalvc import textlink  # noqa: E402
 
 
 WEBHOOK_URL = "https://discord.com/api/webhooks/999/token-abc"
