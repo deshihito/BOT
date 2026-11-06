@@ -10,6 +10,8 @@
 - ``render_card`` / ``render_card_hand`` / ``render_card_rows`` /
   ``render_card_pile``: 共通トランプ描画（標準52枚＋ジョーカー、裏面）。
   スートは同梱フォントに ♠♦♣ のグリフが無いためベクタ描画する。
+- ``render_hanafuda`` / ``render_hanafuda_hand`` / ``render_hanafuda_rows``:
+  花札描画（48枚＋裏面）。月モチーフを幾何図形で手続き描画する。
 どちらも PNG の bytes を返す純関数で、単体テストで検証できる。
 """
 import io
@@ -772,6 +774,662 @@ def render_yotsuba(words, hints=None, *, title: str | None = None) -> bytes:
         w = bbox[2] - bbox[0] + 20
         draw.rounded_rectangle([x - w / 2, y - 18, x + w / 2, y + 18], radius=10, fill=(255, 193, 7))
         _centered(draw, x, y, text, hint_font, (20, 20, 20))
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    return buf.getvalue()
+
+
+# --- 花札（こいこい画像化タスク 2026-11-06） --------------------------------
+# 札は core/game/koikoi.py の CARDS（id 0..47、month/kind/tag）で引く。
+# 構図は全札共通で「上部の月モチーフ帯＋下部の余白」に統一し、モチーフは
+# 幾何図形の組み合わせで手続き描画する（トランプのベクタスートと同じ発想で、
+# 同梱フォントのグリフには依存しない）。月ごとに色と形を大きく変え、
+# Discord の添付表示でも月が識別できることを優先する（様式化された
+# アイコン的表現で、写実性は狙わない）。
+# 種別の見分け:
+#   光    = 赤帯（松・芒・桐）や幕（桜）など大きな赤の要素＋金の内枠で強調
+#   種    = 動物・盃などのアイコンを植物モチーフに重ねる
+#   短冊  = 左端に短冊帯（赤短=赤、青短=青紫、無地=生成り。tag で切替）
+#   カス  = モチーフを上部に小さく淡く描き、大半を余白にする
+# 裏面は1種（濃赤地＋金の内枠）。render_hanafuda(None) で描く。
+import math as _math
+
+from core.game.koikoi import CARDS as _HANAFUDA_CARDS
+
+HANA_W = 88
+HANA_H = 140
+HANA_FACE = (248, 244, 231)
+HANA_EDGE = (96, 74, 52)
+HANA_GOLD = (206, 156, 44)
+HANA_BAND = (197, 48, 49)
+HANA_BACK_BG = (146, 38, 34)
+HANA_BACK_EDGE = (70, 22, 20)
+HANA_BACK_INNER = (110, 26, 24)
+HANA_TAN_COLORS = {"redtan": (203, 44, 44), "bluetan": (72, 82, 178)}
+HANA_TAN_PLAIN = (238, 228, 196)
+
+
+def _hana_fade(color, f):
+    """色を地色（生成り）に寄せる。カス札の淡色化に使う。"""
+    return tuple(int(a + (b - a) * f) for a, b in zip(color, HANA_FACE))
+
+
+def _hana_lens(draw, cx, cy, length, width, ang_deg, fill):
+    """両端の尖った楕円（葉・花弁・翼の形）を角度つきで描く。"""
+    a = _math.radians(ang_deg)
+    ca, sa = _math.cos(a), _math.sin(a)
+    pts = []
+    n = 10
+    for i in range(n + 1):
+        t = i / n
+        off = _math.sin(_math.pi * t) * width / 2
+        pts.append((cx + (t - 0.5) * length * ca - off * sa,
+                    cy + (t - 0.5) * length * sa + off * ca))
+    for i in range(n, -1, -1):
+        t = i / n
+        off = _math.sin(_math.pi * t) * width / 2
+        pts.append((cx + (t - 0.5) * length * ca + off * sa,
+                    cy + (t - 0.5) * length * sa - off * ca))
+    draw.polygon(pts, fill=fill)
+
+
+def _hana_blossom(draw, cx, cy, r, petal, center=(252, 220, 110)):
+    """5弁の花（梅・桜用）。"""
+    for k in range(5):
+        ang = -_math.pi / 2 + k * 2 * _math.pi / 5
+        px, py = cx + r * 0.60 * _math.cos(ang), cy + r * 0.60 * _math.sin(ang)
+        draw.ellipse([px - r * 0.52, py - r * 0.52, px + r * 0.52, py + r * 0.52],
+                     fill=petal)
+    draw.ellipse([cx - r * 0.22, cy - r * 0.22, cx + r * 0.22, cy + r * 0.22],
+                 fill=center)
+
+
+def _hana_bird(draw, cx, cy, s, body):
+    """横向きの簡略な小鳥（鶯・郭公・燕の土台）。s は体長。"""
+    draw.polygon([(cx - s * 0.30, cy - s * 0.02), (cx - s * 0.66, cy - s * 0.30),
+                  (cx - s * 0.60, cy + s * 0.12)], fill=body)
+    draw.ellipse([cx - s * 0.40, cy - s * 0.24, cx + s * 0.28, cy + s * 0.26],
+                 fill=body)
+    draw.ellipse([cx + s * 0.14, cy - s * 0.44, cx + s * 0.46, cy - s * 0.12],
+                 fill=body)
+    draw.polygon([(cx + s * 0.46, cy - s * 0.32), (cx + s * 0.64, cy - s * 0.25),
+                  (cx + s * 0.46, cy - s * 0.18)], fill=(243, 183, 66))
+    draw.ellipse([cx + s * 0.27, cy - s * 0.34, cx + s * 0.34, cy - s * 0.27],
+                 fill=(24, 24, 24))
+    lw = max(1, int(s * 0.05))
+    draw.line([(cx - s * 0.06, cy + s * 0.26), (cx - s * 0.06, cy + s * 0.42)],
+              fill=body, width=lw)
+    draw.line([(cx + s * 0.12, cy + s * 0.26), (cx + s * 0.12, cy + s * 0.42)],
+              fill=body, width=lw)
+
+
+# --- 月モチーフ -------------------------------------------------------------
+# 各関数は (draw, card, x, y, w, h, fade) を受け、(x, y, w, h) の帯に描く。
+# tane の場合は植物に加えてアイコン（鳥・蝶・猪・盃・鹿・燕・橋・雁）も描く。
+
+def _motif_pine(d, c, x, y, w, h, f):
+    trunk = _hana_fade((122, 84, 50), f)
+    d.line([(x + w * 0.26, y + h * 1.02), (x + w * 0.42, y + h * 0.42)],
+           fill=trunk, width=max(2, int(w * 0.08)))
+    d.line([(x + w * 0.42, y + h * 0.42), (x + w * 0.78, y + h * 0.24)],
+           fill=trunk, width=max(2, int(w * 0.05)))
+    greens = [(34, 92, 42), (54, 128, 58), (92, 164, 88)]
+    clusters = [(0.24, 0.34, 0.30), (0.52, 0.16, 0.36), (0.78, 0.32, 0.28),
+                (0.40, 0.50, 0.27)]
+    for i, (rx, ry, rr) in enumerate(clusters):
+        cx, cy, r = x + w * rx, y + h * ry, w * rr
+        col = _hana_fade(greens[i % 3], f)
+        d.ellipse([cx - r * 0.66, cy - r * 0.42, cx + r * 0.66, cy + r * 0.42],
+                  fill=col)
+        dark = _hana_fade(greens[(i + 1) % 3], f)
+        for k in range(11):
+            ang = _math.radians(125 + 23 * k)
+            d.line([(cx, cy), (cx + r * 1.30 * _math.cos(ang),
+                               cy - r * 0.72 * _math.sin(ang))],
+                   fill=dark, width=max(1, int(w * 0.026)))
+    if c["kind"] == "hikari":  # 鶴: 白い体＋長い首＋赤い冠＋黒い尾
+        bx, by, s = x + w * 0.62, y + h * 0.82, w * 0.62
+        white = _hana_fade((252, 252, 250), f)
+        d.line([(bx - s * 0.10, by + s * 0.16), (bx - s * 0.10, by + s * 0.46)],
+               fill=(70, 70, 70), width=max(1, int(w * 0.02)))
+        d.line([(bx + s * 0.10, by + s * 0.16), (bx + s * 0.10, by + s * 0.46)],
+               fill=(70, 70, 70), width=max(1, int(w * 0.02)))
+        d.ellipse([bx - s * 0.34, by - s * 0.10, bx + s * 0.30, by + s * 0.20],
+                  fill=white)
+        for k in range(3):
+            d.line([(bx - s * 0.30, by), (bx - s * (0.52 + 0.05 * k),
+                                          by - s * (0.10 + 0.10 * k))],
+                   fill=(40, 40, 44), width=max(1, int(w * 0.03)))
+        d.line([(bx + s * 0.26, by - s * 0.04), (bx + s * 0.40, by - s * 0.38)],
+               fill=white, width=max(2, int(w * 0.07)))
+        d.ellipse([bx + s * 0.32, by - s * 0.52, bx + s * 0.50, by - s * 0.34],
+                  fill=white)
+        d.ellipse([bx + s * 0.36, by - s * 0.52, bx + s * 0.46, by - s * 0.43],
+                  fill=_hana_fade((214, 40, 44), f))
+        d.polygon([(bx + s * 0.50, by - s * 0.42), (bx + s * 0.64, by - s * 0.38),
+                   (bx + s * 0.50, by - s * 0.34)], fill=(243, 183, 66))
+
+
+def _motif_plum(d, c, x, y, w, h, f):
+    branch = _hana_fade((74, 52, 44), f)
+    d.line([(x + w * 0.06, y + h * 0.92), (x + w * 0.40, y + h * 0.55),
+            (x + w * 0.52, y + h * 0.30), (x + w * 0.86, y + h * 0.16)],
+           fill=branch, width=max(2, int(w * 0.06)))
+    d.line([(x + w * 0.40, y + h * 0.55), (x + w * 0.72, y + h * 0.52)],
+           fill=branch, width=max(2, int(w * 0.04)))
+    petal = _hana_fade((233, 116, 148), f)
+    for rx, ry, rr in [(0.34, 0.42, 0.17), (0.62, 0.24, 0.20), (0.84, 0.44, 0.15),
+                       (0.22, 0.70, 0.14), (0.70, 0.66, 0.13)]:
+        _hana_blossom(d, x + w * rx, y + h * ry, w * rr,
+                      _hana_fade(petal, f * 0.5))
+    if c["kind"] == "tane":  # 鶯
+        _hana_bird(d, x + w * 0.52, y + h * 0.86, w * 0.42,
+                   _hana_fade((122, 140, 62), f))
+
+
+def _motif_cherry(d, c, x, y, w, h, f):
+    petal = _hana_fade((247, 183, 197), f)
+    deep = _hana_fade((240, 140, 168), f)
+    if c["kind"] == "hikari":  # 幕: 赤い横帯＋房
+        band_h = h * 0.40
+        d.rectangle([x, y, x + w, y + band_h], fill=_hana_fade(HANA_BAND, f))
+        for k in range(1, 5):
+            d.line([(x + w * k / 5, y), (x + w * k / 5, y + band_h)],
+                   fill=_hana_fade((150, 30, 32), f), width=max(1, int(w * 0.02)))
+        for k in range(6):
+            fx = x + w * (k + 0.5) / 6
+            d.polygon([(fx - w * 0.045, y + band_h), (fx + w * 0.045, y + band_h),
+                       (fx, y + band_h + h * 0.09)], fill=_hana_fade(HANA_GOLD, f))
+        for rx, ry, rr in [(0.26, 0.68, 0.15), (0.58, 0.80, 0.18),
+                           (0.82, 0.62, 0.13)]:
+            _hana_blossom(d, x + w * rx, y + h * ry, w * rr, petal)
+        return
+    for rx, ry, rr in [(0.28, 0.24, 0.17), (0.62, 0.16, 0.20), (0.84, 0.38, 0.15),
+                       (0.20, 0.52, 0.14), (0.50, 0.46, 0.16), (0.76, 0.66, 0.14),
+                       (0.36, 0.78, 0.13)]:
+        _hana_blossom(d, x + w * rx, y + h * ry, w * rr,
+                      petal if (rx + ry) % 0.3 < 0.15 else deep)
+    for rx, ry in [(0.44, 0.30), (0.68, 0.52), (0.16, 0.36), (0.90, 0.80)]:
+        d.ellipse([x + w * rx - w * 0.035, y + h * ry - w * 0.035,
+                   x + w * rx + w * 0.035, y + h * ry + w * 0.035], fill=deep)
+
+
+def _motif_wisteria(d, c, x, y, w, h, f):
+    d.line([(x + w * 0.04, y + h * 0.06), (x + w * 0.96, y + h * 0.02)],
+           fill=_hana_fade((96, 72, 50), f), width=max(2, int(w * 0.05)))
+    shades = [(126, 96, 196), (150, 122, 214), (172, 150, 226)]
+    for ci, (rx, ln) in enumerate([(0.24, 0.52), (0.50, 0.72), (0.76, 0.58)]):
+        cx = x + w * rx
+        rows = int(ln / 0.09)
+        for k in range(rows):
+            r = w * (0.085 - 0.028 * k / max(1, rows - 1))
+            cy = y + h * (0.10 + 0.085 * k)
+            col = _hana_fade(shades[(k + ci) % 3], f)
+            d.ellipse([cx - r, cy - r * 0.8, cx + r, cy + r * 0.8], fill=col)
+    leaf = _hana_fade((86, 148, 84), f)
+    for rx, ry, ang in [(0.10, 0.16, -30), (0.90, 0.12, 30), (0.64, 0.08, 10)]:
+        _hana_lens(d, x + w * rx, y + h * ry, w * 0.20, w * 0.08, ang, leaf)
+    if c["kind"] == "tane":  # 郭公: 濃い小鳥
+        _hana_bird(d, x + w * 0.56, y + h * 0.92, w * 0.40,
+                   _hana_fade((92, 84, 76), f))
+
+
+def _motif_iris(d, c, x, y, w, h, f):
+    green = _hana_fade((52, 122, 66), f)
+    for rx, ln, ang in [(0.22, 0.88, -8), (0.38, 0.98, -3), (0.55, 0.92, 2),
+                        (0.70, 1.0, 5), (0.84, 0.86, 10)]:
+        _hana_lens(d, x + w * rx, y + h * (1.0 - ln / 2), h * ln, w * 0.075,
+                   -90 + ang, green)
+    purple = _hana_fade((116, 78, 186), f)
+    light = _hana_fade((168, 140, 226), f)
+    for rx, ry in [(0.38, 0.14), (0.70, 0.10)]:
+        cx, cy = x + w * rx, y + h * ry
+        for ang in (-38, 0, 38):
+            _hana_lens(d, cx, cy, w * 0.20, w * 0.10, 90 + ang, purple)
+        _hana_lens(d, cx - w * 0.07, cy + w * 0.06, w * 0.13, w * 0.07, 150, light)
+        _hana_lens(d, cx + w * 0.07, cy + w * 0.06, w * 0.13, w * 0.07, 30, light)
+        d.ellipse([cx - w * 0.03, cy - w * 0.03, cx + w * 0.03, cy + w * 0.03],
+                  fill=_hana_fade((250, 208, 84), f))
+    if c["kind"] == "tane":  # 八橋: ジグザグの板橋
+        plank = _hana_fade((150, 104, 58), f)
+        edge = _hana_fade((104, 70, 36), f)
+        for k in range(4):
+            px = x + w * (0.10 + 0.20 * k)
+            py = y + h * (0.60 + (0.10 if k % 2 else 0.0))
+            d.rectangle([px, py, px + w * 0.24, py + h * 0.055], fill=plank,
+                        outline=edge, width=max(1, int(w * 0.015)))
+            d.line([(px + w * 0.04, py + h * 0.055), (px + w * 0.04, py + h * 0.13)],
+                   fill=edge, width=max(1, int(w * 0.025)))
+            d.line([(px + w * 0.20, py + h * 0.055), (px + w * 0.20, py + h * 0.13)],
+                   fill=edge, width=max(1, int(w * 0.025)))
+
+
+def _motif_peony(d, c, x, y, w, h, f):
+    leaf = _hana_fade((62, 138, 74), f)
+    for rx, ry, ang in [(0.24, 0.82, -24), (0.52, 0.90, 0), (0.78, 0.82, 24)]:
+        _hana_lens(d, x + w * rx, y + h * ry, w * 0.34, w * 0.17, ang, leaf)
+    cx, cy = x + w * 0.50, y + h * 0.40
+    outer = _hana_fade((226, 92, 120), f)
+    inner = _hana_fade((240, 140, 160), f)
+    for k in range(8):
+        ang = k * 45
+        _hana_lens(d, cx + w * 0.13 * _math.cos(_math.radians(ang)),
+                   cy + w * 0.13 * _math.sin(_math.radians(ang)),
+                   w * 0.26, w * 0.20, ang, outer)
+    for k in range(6):
+        ang = 30 + k * 60
+        _hana_lens(d, cx + w * 0.06 * _math.cos(_math.radians(ang)),
+                   cy + w * 0.06 * _math.sin(_math.radians(ang)),
+                   w * 0.15, w * 0.12, ang, inner)
+    d.ellipse([cx - w * 0.055, cy - w * 0.055, cx + w * 0.055, cy + w * 0.055],
+              fill=_hana_fade((250, 208, 84), f))
+    if c["kind"] == "tane":  # 蝶
+        bx, by = x + w * 0.74, y + h * 0.15
+        wing = _hana_fade((240, 148, 52), f)
+        edge = _hana_fade((60, 52, 48), f)
+        for dx, ang in [(-1, -32), (1, 32)]:
+            _hana_lens(d, bx + dx * w * 0.105, by, w * 0.21, w * 0.13, ang, wing)
+            _hana_lens(d, bx + dx * w * 0.085, by + w * 0.09, w * 0.15, w * 0.10,
+                       -ang, wing)
+        d.line([(bx, by - w * 0.05), (bx, by + w * 0.10)], fill=edge,
+               width=max(1, int(w * 0.025)))
+
+
+def _motif_hagi(d, c, x, y, w, h, f):
+    stem = _hana_fade((86, 128, 70), f)
+    for rx in (0.26, 0.50, 0.74):
+        d.line([(x + w * rx, y + h * 0.98), (x + w * (rx - 0.05), y + h * 0.30)],
+               fill=stem, width=max(1, int(w * 0.025)))
+        for k in range(4):
+            lx = x + w * (rx - 0.05) + (k % 2) * w * 0.07 - w * 0.035
+            ly = y + h * (0.42 + 0.13 * k)
+            _hana_lens(d, lx, ly, w * 0.13, w * 0.055, -18 if k % 2 else 18, stem)
+    bloom = _hana_fade((206, 92, 158), f)
+    bud = _hana_fade((232, 150, 196), f)
+    for rx, ry in [(0.21, 0.22), (0.45, 0.16), (0.69, 0.24), (0.30, 0.34),
+                   (0.58, 0.30)]:
+        for dx, dy, rr in [(0, 0, 0.052), (-0.05, 0.05, 0.042), (0.05, 0.05, 0.042)]:
+            d.ellipse([x + w * (rx + dx) - w * rr, y + h * (ry + dy) - w * rr,
+                       x + w * (rx + dx) + w * rr, y + h * (ry + dy) + w * rr],
+                      fill=bloom if rr > 0.045 else bud)
+    if c["kind"] == "tane":  # 猪: 茶色のシルエット＋牙
+        bx, by = x + w * 0.50, y + h * 0.76
+        body = _hana_fade((104, 74, 48), f)
+        d.ellipse([bx - w * 0.26, by - w * 0.13, bx + w * 0.20, by + w * 0.15],
+                  fill=body)
+        d.ellipse([bx + w * 0.12, by - w * 0.07, bx + w * 0.34, by + w * 0.13],
+                  fill=body)
+        d.polygon([(bx + w * 0.16, by - w * 0.07), (bx + w * 0.22, by - w * 0.17),
+                   (bx + w * 0.26, by - w * 0.05)], fill=body)
+        d.polygon([(bx + w * 0.30, by + w * 0.05), (bx + w * 0.40, by + w * 0.09),
+                   (bx + w * 0.30, by + w * 0.11)], fill=body)
+        d.arc([bx + w * 0.24, by + w * 0.02, bx + w * 0.38, by + w * 0.16],
+              start=200, end=320, fill=_hana_fade((250, 246, 230), f),
+              width=max(1, int(w * 0.03)))
+        for lx in (-0.18, -0.02, 0.10):
+            d.line([(bx + w * lx, by + w * 0.13), (bx + w * lx, by + w * 0.26)],
+                   fill=body, width=max(2, int(w * 0.035)))
+        d.ellipse([bx + w * 0.24, by - w * 0.01, bx + w * 0.28, by + w * 0.03],
+                  fill=_hana_fade((30, 26, 24), f))
+
+
+def _motif_susuki(d, c, x, y, w, h, f):
+    if c["kind"] == "hikari":  # 満月
+        cx, cy, r = x + w * 0.68, y + h * 0.24, w * 0.27
+        d.ellipse([cx - r * 1.18, cy - r * 1.18, cx + r * 1.18, cy + r * 1.18],
+                  outline=_hana_fade((250, 226, 150), f), width=max(1, int(w * 0.02)))
+        d.ellipse([cx - r, cy - r, cx + r, cy + r],
+                  fill=_hana_fade((248, 208, 92), f))
+    stem = _hana_fade((150, 138, 92), f)
+    plume = _hana_fade((206, 182, 128), f)
+    light = _hana_fade((232, 214, 168), f)
+    for i, (rx, lean) in enumerate([(0.24, -0.10), (0.42, -0.03), (0.58, 0.04),
+                                    (0.76, 0.12)]):
+        bx = x + w * rx
+        tx = bx + w * lean
+        midx = (bx + tx) / 2
+        pts = [(bx, y + h * 1.0), (midx, y + h * 0.62), (tx, y + h * 0.30)]
+        d.line(pts, fill=stem, width=max(1, int(w * 0.025)))
+        for k in range(5):
+            t = k / 5
+            px = midx + (tx - midx) * t
+            py = y + h * (0.62 - 0.30 * t)
+            d.line([(px, py), (px + w * 0.05, py - h * 0.10)],
+                   fill=plume if k % 2 else light, width=max(1, int(w * 0.03)))
+    blade = _hana_fade((140, 150, 88), f)
+    for rx in (0.10, 0.30, 0.52, 0.72, 0.90):
+        _hana_lens(d, x + w * rx, y + h * 0.95, h * 0.16, w * 0.05,
+                   -70 + rx * 40, blade)
+    if c["kind"] == "tane":  # 雁: 空をいく小さな雁影
+        ink = _hana_fade((70, 70, 78), f)
+        for rx, ry, s in [(0.24, 0.16, 0.10), (0.40, 0.24, 0.13), (0.58, 0.33, 0.10)]:
+            cx, cy = x + w * rx, y + h * ry
+            d.line([(cx - w * s, cy), (cx, cy - w * s * 0.45)], fill=ink,
+                   width=max(1, int(w * 0.025)))
+            d.line([(cx, cy - w * s * 0.45), (cx + w * s, cy)], fill=ink,
+                   width=max(1, int(w * 0.025)))
+
+
+def _motif_chrysanth(d, c, x, y, w, h, f):
+    leaf = _hana_fade((70, 138, 78), f)
+    for rx, ry, ang in [(0.26, 0.86, -20), (0.52, 0.92, 0), (0.76, 0.86, 20)]:
+        _hana_lens(d, x + w * rx, y + h * ry, w * 0.30, w * 0.15, ang, leaf)
+
+    def flower(cx, cy, r):
+        gold = _hana_fade((236, 182, 52), f)
+        pink = _hana_fade((236, 156, 168), f)
+        for k in range(16):
+            ang = k * 22.5
+            _hana_lens(d, cx + r * 0.52 * _math.cos(_math.radians(ang)),
+                       cy + r * 0.52 * _math.sin(_math.radians(ang)),
+                       r * 1.05, r * 0.30, ang, gold if k % 2 else pink)
+        d.ellipse([cx - r * 0.20, cy - r * 0.20, cx + r * 0.20, cy + r * 0.20],
+                  fill=_hana_fade((240, 140, 52), f))
+
+    flower(x + w * 0.50, y + h * 0.34, w * 0.30)
+    flower(x + w * 0.22, y + h * 0.62, w * 0.17)
+    if c["kind"] == "tane":  # 盃: 金縁の盃＋台
+        cx, cy = x + w * 0.68, y + h * 0.68
+        gold = _hana_fade(HANA_GOLD, f)
+        d.polygon([(cx - w * 0.07, cy + w * 0.15), (cx + w * 0.07, cy + w * 0.15),
+                   (cx + w * 0.03, cy + w * 0.08), (cx - w * 0.03, cy + w * 0.08)],
+                  fill=_hana_fade((90, 70, 40), f))
+        d.polygon([(cx - w * 0.17, cy - w * 0.10), (cx + w * 0.17, cy - w * 0.10),
+                   (cx + w * 0.08, cy + w * 0.09), (cx - w * 0.08, cy + w * 0.09)],
+                  fill=_hana_fade((250, 248, 240), f), outline=gold)
+        d.line([(cx - w * 0.17, cy - w * 0.10), (cx + w * 0.17, cy - w * 0.10)],
+               fill=gold, width=max(2, int(w * 0.03)))
+        d.ellipse([cx - w * 0.045, cy - w * 0.01, cx + w * 0.045, cy + w * 0.08],
+                  fill=_hana_fade((208, 60, 54), f))
+
+
+def _motif_maple(d, c, x, y, w, h, f):
+    def leaf(cx, cy, r, color):
+        pts = []
+        for i in range(14):
+            ang = -_math.pi / 2 + i * _math.pi / 7
+            rad = r if i % 2 == 0 else r * 0.52
+            pts.append((cx + rad * _math.cos(ang), cy + rad * _math.sin(ang)))
+        d.polygon(pts, fill=_hana_fade(color, f))
+        d.line([(cx, cy + r * 0.4), (cx - r * 0.12, cy + r * 1.05)],
+               fill=_hana_fade((120, 70, 40), f), width=max(1, int(w * 0.02)))
+
+    leaf(x + w * 0.34, y + h * 0.26, w * 0.21, (208, 64, 40))
+    leaf(x + w * 0.70, y + h * 0.16, w * 0.16, (232, 120, 44))
+    leaf(x + w * 0.60, y + h * 0.46, w * 0.18, (196, 52, 44))
+    leaf(x + w * 0.20, y + h * 0.52, w * 0.13, (226, 96, 38))
+    if c["kind"] == "tane":  # 鹿: 茶色のシルエット＋角
+        bx, by = x + w * 0.48, y + h * 0.78
+        body = _hana_fade((150, 100, 58), f)
+        d.ellipse([bx - w * 0.25, by - w * 0.12, bx + w * 0.18, by + w * 0.13],
+                  fill=body)
+        d.line([(bx - w * 0.18, by - w * 0.06), (bx - w * 0.30, by - w * 0.30)],
+               fill=body, width=max(2, int(w * 0.07)))
+        d.ellipse([bx - w * 0.40, by - w * 0.40, bx - w * 0.24, by - w * 0.24],
+                  fill=body)
+        antler = _hana_fade((110, 76, 44), f)
+        for sgn in (-1, 1):
+            ax = bx - w * 0.34 + sgn * w * 0.03
+            d.line([(ax, by - w * 0.38), (ax + sgn * w * 0.02, by - w * 0.58)],
+                   fill=antler, width=max(1, int(w * 0.022)))
+            d.line([(ax, by - w * 0.48), (ax + sgn * w * 0.09, by - w * 0.56)],
+                   fill=antler, width=max(1, int(w * 0.022)))
+        for lx in (-0.16, -0.04, 0.08):
+            d.line([(bx + w * lx, by + w * 0.11), (bx + w * lx, by + w * 0.27)],
+                   fill=body, width=max(2, int(w * 0.032)))
+        d.polygon([(bx + w * 0.18, by - w * 0.10), (bx + w * 0.27, by - w * 0.02),
+                   (bx + w * 0.17, by + w * 0.02)], fill=body)
+        d.ellipse([bx - w * 0.35, by - w * 0.35, bx - w * 0.31, by - w * 0.31],
+                  fill=_hana_fade((30, 26, 24), f))
+
+
+def _motif_rain(d, c, x, y, w, h, f):
+    rain = _hana_fade((122, 146, 168), f)
+    for k in range(9):
+        rx = 0.06 + 0.11 * k
+        d.line([(x + w * rx, y + h * 0.02), (x + w * (rx - 0.07), y + h * 0.34)],
+               fill=rain, width=max(1, int(w * 0.018)))
+    green = _hana_fade((88, 146, 82), f)
+    deep = _hana_fade((58, 118, 60), f)
+    for i, rx in enumerate((0.30, 0.48, 0.66, 0.84)):
+        top = y + h * 0.04
+        bot = y + h * (0.78 - 0.10 * (i % 2))
+        pts = []
+        for k in range(9):
+            t = k / 8
+            pts.append((x + w * rx + w * 0.03 * _math.sin(t * 5 + i),
+                        top + (bot - top) * t))
+        d.line(pts, fill=green if i % 2 else deep, width=max(2, int(w * 0.035)))
+    if c["kind"] == "hikari":  # 小野道風: 人型の簡略シルエット＋赤い帯
+        cx, cy = x + w * 0.32, y + h * 0.52
+        d.polygon([(cx - w * 0.055, cy - w * 0.46), (cx + w * 0.055, cy - w * 0.46),
+                   (cx + w * 0.085, cy - w * 0.13), (cx - w * 0.085, cy - w * 0.13)],
+                  fill=_hana_fade((38, 36, 40), f))
+        d.ellipse([cx - w * 0.095, cy - w * 0.15, cx + w * 0.095, cy + w * 0.04],
+                  fill=_hana_fade((242, 206, 168), f))
+        d.polygon([(cx - w * 0.20, cy + w * 0.03), (cx + w * 0.20, cy + w * 0.03),
+                   (cx + w * 0.27, cy + w * 0.46), (cx - w * 0.27, cy + w * 0.46)],
+                  fill=_hana_fade((52, 84, 110), f))
+        d.rectangle([cx - w * 0.225, cy + w * 0.13, cx + w * 0.225, cy + w * 0.22],
+                    fill=_hana_fade(HANA_BAND, f))
+    if c["kind"] == "tane":  # 燕: 黒い鳥＋燕尾
+        bx, by = x + w * 0.42, y + h * 0.52
+        ink = _hana_fade((34, 34, 42), f)
+        _hana_lens(d, bx, by, w * 0.30, w * 0.09, -18, ink)
+        _hana_lens(d, bx - w * 0.10, by - w * 0.07, w * 0.24, w * 0.07, -52, ink)
+        _hana_lens(d, bx + w * 0.02, by + w * 0.08, w * 0.22, w * 0.06, 48, ink)
+        d.polygon([(bx + w * 0.14, by + w * 0.02), (bx + w * 0.28, by - w * 0.05),
+                   (bx + w * 0.24, by + w * 0.05)], fill=ink)
+        d.polygon([(bx + w * 0.14, by + w * 0.02), (bx + w * 0.27, by + w * 0.12),
+                   (bx + w * 0.17, by + w * 0.10)], fill=ink)
+
+
+def _motif_paulownia(d, c, x, y, w, h, f):
+    leaf = _hana_fade((74, 132, 74), f)
+    deep = _hana_fade((52, 108, 58), f)
+    for rx, ry in [(0.30, 0.22), (0.66, 0.16), (0.48, 0.36)]:
+        cx, cy = x + w * rx, y + h * ry
+        for dx, dy in [(-0.10, 0.03), (0.10, 0.03), (0, -0.06)]:
+            d.ellipse([cx + w * dx - w * 0.115, cy + w * dy - w * 0.115,
+                       cx + w * dx + w * 0.115, cy + w * dy + w * 0.115],
+                      fill=leaf if dy < 0 else deep)
+    bud = _hana_fade((146, 112, 192), f)
+    for rx, ry in [(0.22, 0.55), (0.78, 0.48), (0.60, 0.62)]:
+        for k in range(3):
+            d.ellipse([x + w * rx - w * 0.045 + k * w * 0.045,
+                       y + h * ry + k * w * 0.05,
+                       x + w * rx + w * 0.045 + k * w * 0.045,
+                       y + h * ry + w * 0.11 + k * w * 0.05], fill=bud)
+    if c["kind"] == "hikari":  # 鳳凰: 体＋冠＋長い尾羽（曲線3本）
+        bx, by = x + w * 0.52, y + h * 0.56
+        gold = _hana_fade((226, 164, 52), f)
+        _hana_lens(d, bx, by, w * 0.46, w * 0.24, -24, gold)  # 体
+        _hana_lens(d, bx - w * 0.02, by - w * 0.02, w * 0.30, w * 0.13, -52,
+                   _hana_fade((38, 150, 136), f))  # 翼
+        d.ellipse([bx + w * 0.15, by - w * 0.26, bx + w * 0.31, by - w * 0.10],
+                  fill=gold)  # 頭
+        for k in range(3):
+            d.line([(bx + w * 0.22, by - w * 0.24),
+                    (bx + w * (0.24 + 0.05 * k), by - w * (0.38 + 0.04 * k))],
+                   fill=_hana_fade((208, 84, 60), f), width=max(1, int(w * 0.024)))
+        d.polygon([(bx + w * 0.31, by - w * 0.20), (bx + w * 0.42, by - w * 0.15),
+                   (bx + w * 0.30, by - w * 0.12)], fill=(243, 183, 66))
+        d.ellipse([bx + w * 0.23, by - w * 0.21, bx + w * 0.27, by - w * 0.17],
+                  fill=_hana_fade((30, 26, 24), f))
+        tail = [_hana_fade((38, 150, 136), f), _hana_fade((208, 84, 60), f),
+                _hana_fade((226, 164, 52), f)]
+        for k, col in enumerate(tail):
+            pts = []
+            for s in range(10):
+                t = s / 9
+                pts.append((bx - w * 0.14 - w * 0.30 * t,
+                            by + w * 0.04 + h * (0.16 + 0.10 * k) * t
+                            + w * 0.12 * _math.sin(t * 2.4 + k * 0.9)))
+            d.line(pts, fill=col, width=max(2, int(w * 0.042)))
+            ex, ey = pts[-1]
+            d.ellipse([ex - w * 0.042, ey - w * 0.042, ex + w * 0.042,
+                       ey + w * 0.042], fill=col)
+
+
+_HANA_MOTIFS = {1: _motif_pine, 2: _motif_plum, 3: _motif_cherry,
+                4: _motif_wisteria, 5: _motif_iris, 6: _motif_peony,
+                7: _motif_hagi, 8: _motif_susuki, 9: _motif_chrysanth,
+                10: _motif_maple, 11: _motif_rain, 12: _motif_paulownia}
+
+
+def _paint_hanafuda(canvas, x, y, w, h, card_id):
+    """canvas の (x, y) に w×h の花札を1枚描く。card_id=None は裏面。"""
+    draw = ImageDraw.Draw(canvas)
+    radius = max(4, int(w * 0.06))
+    if card_id is None:
+        draw.rounded_rectangle([x, y, x + w, y + h], radius=radius,
+                               fill=HANA_BACK_BG)
+        m = max(3, int(w * 0.09))
+        draw.rounded_rectangle([x + m, y + m, x + w - m, y + h - m],
+                               radius=max(2, radius - 2), outline=HANA_GOLD,
+                               width=max(1, w // 40))
+        draw.rounded_rectangle([x, y, x + w, y + h], radius=radius,
+                               outline=HANA_BACK_EDGE, width=2)
+        return
+    card = _HANAFUDA_CARDS[card_id]
+    kind = card["kind"]
+    draw.rounded_rectangle([x, y, x + w, y + h], radius=radius, fill=HANA_FACE)
+    band_h = 0.0
+    if kind == "hikari":
+        draw.rounded_rectangle([x + 4, y + 4, x + w - 4, y + h - 4],
+                               radius=radius, outline=HANA_GOLD,
+                               width=max(1, w // 36))
+        if card["month"] in (1, 8, 12):  # 赤帯＋金線で光を強調
+            band_h = h * 0.085
+            draw.rectangle([x + 2, y + 2, x + w - 2, y + band_h], fill=HANA_BAND)
+            draw.line([(x + 2, y + band_h), (x + w - 2, y + band_h)],
+                      fill=HANA_GOLD, width=max(1, w // 36))
+    if kind == "tanzaku":  # 左端の短冊帯
+        color = HANA_TAN_COLORS.get(card["tag"], HANA_TAN_PLAIN)
+        sx0, sx1 = x + w * 0.055, x + w * 0.195
+        sy0, sy1 = y + h * 0.05, y + h * 0.60
+        draw.rectangle([sx0, sy0, sx1, sy1], fill=color,
+                       outline=(120, 100, 70), width=max(1, w // 44))
+        tick = (90, 70, 50) if card["tag"] is None else (250, 240, 220)
+        for k in range(3):
+            ty = sy0 + (sy1 - sy0) * (0.22 + 0.18 * k)
+            draw.line([(sx0 + w * 0.03, ty), (sx1 - w * 0.03, ty)],
+                      fill=tick, width=max(1, w // 44))
+    # モチーフ帯: カスは上部に小さく淡く、それ以外は全面寄りに大きく
+    if kind == "kasu":
+        mx, my, mw, mh, fade = x + w * 0.17, y + h * 0.08, w * 0.66, h * 0.34, 0.52
+    elif kind == "tanzaku":
+        mx, my, mw, mh, fade = x + w * 0.25, y + h * 0.05, w * 0.69, h * 0.88, 0.0
+    elif kind == "hikari":
+        mx, my, mw, mh, fade = (x + w * 0.05, y + band_h + h * 0.03,
+                                w * 0.90, h * 0.90 - band_h, 0.0)
+    else:
+        mx, my, mw, mh, fade = x + w * 0.06, y + h * 0.05, w * 0.88, h * 0.88, 0.0
+    draw = ImageDraw.Draw(canvas)
+    _HANA_MOTIFS[card["month"]](draw, card, mx, my, mw, mh, fade)
+    draw = ImageDraw.Draw(canvas)
+    draw.rounded_rectangle([x, y, x + w, y + h], radius=radius,
+                           outline=HANA_EDGE, width=2)
+
+
+def hanafuda_size(card_w: int) -> tuple[int, int]:
+    """花札1枚の (幅, 高さ)。花札比の細長（88×140 が基準）。"""
+    return card_w, int(card_w * HANA_H / HANA_W)
+
+
+def render_hanafuda(card_id, *, card_w: int = HANA_W) -> bytes:
+    """花札1枚の画像。card_id は 0..47、None は裏面。"""
+    if card_id is not None and card_id not in _HANAFUDA_CARDS:
+        raise ValueError(f"不正な花札 id: {card_id!r}")
+    w, h = hanafuda_size(card_w)
+    img = Image.new("RGB", (w + PAD * 2, h + PAD * 2), BG)
+    _paint_hanafuda(img, PAD, PAD, w, h, card_id)
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    return buf.getvalue()
+
+
+def render_hanafuda_hand(cards, *, title: str | None = None,
+                         card_w: int = HANA_W, max_width: int = 1024,
+                         highlight=frozenset()) -> bytes:
+    """花札の並びを描く（手札・場札用）。cards は id の列（None は裏面）。
+
+    highlight は位置インデックスの集合で、該当札に金の枠を付ける
+    （手札ビューで「場と合う札」を示す用途）。枚数が多いときは重ねて描き、
+    それでも収まらなければ複数行に折り返す。
+    """
+    cards = list(cards)
+    w, h = hanafuda_size(card_w)
+    title_h = 30 if title else 0
+    min_step = max(20, int(w * 0.52))
+    per_row = max(1, (max_width - PAD * 2 - w) // min_step + 1)
+    rows = [cards[i:i + per_row] for i in range(0, len(cards), per_row)] or [[]]
+    width = max_width if len(cards) > 1 else PAD * 2 + w
+    height = PAD + title_h + len(rows) * h + (len(rows) - 1) * GAP + PAD
+    img = Image.new("RGB", (max(width, 120), max(height, 80)), BG)
+    draw = ImageDraw.Draw(img)
+    if title:
+        draw.text((PAD, PAD), title, fill=FG, font=_font(20))
+    y = PAD + title_h
+    base = 0
+    for row in rows:
+        n = len(row)
+        if n <= 1:
+            step = w + GAP
+        else:
+            step = max(min_step, min(w + GAP, (max_width - PAD * 2 - w) // (n - 1)))
+        row_w = w + step * (n - 1) if n else 0
+        x = PAD + max(0, (max_width - PAD * 2 - row_w) // 2) if n > 1 else PAD
+        for j, cid in enumerate(row):
+            _paint_hanafuda(img, x, y, w, h, cid)
+            if base + j in highlight:
+                draw = ImageDraw.Draw(img)
+                draw.rounded_rectangle([x + 1, y + 1, x + w - 1, y + h - 1],
+                                       radius=max(4, int(w * 0.06)),
+                                       outline=(250, 204, 21), width=3)
+            x += step
+        base += n
+        y += h + GAP
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    return buf.getvalue()
+
+
+def render_hanafuda_rows(rows, *, title: str | None = None,
+                         card_w: int = 60, max_width: int = 1024) -> bytes:
+    """(ラベル, 札の列) の組を縦に並べる（こいこいの場＋取り札表示用）。
+
+    rows は [(label, [id, ...]), ...]。札は重ねずに並べ、横幅に収まらない
+    行は折り返す。ここに渡す札は全て公開情報である前提（秘匿は呼び出し側
+    の責務で、cog 側は場札と取り札だけを渡す）。
+    """
+    w, h = hanafuda_size(card_w)
+    label_h = 26
+    title_h = 32 if title else 0
+    per_row = max(1, (max_width - PAD * 2 + GAP) // (w + GAP))
+    chunks = []
+    height = PAD + title_h + PAD
+    for label, cards in rows:
+        cards = list(cards)
+        n_chunks = max(1, -(-len(cards) // per_row))
+        chunks.append((label, cards, n_chunks))
+        height += label_h + n_chunks * h + (n_chunks - 1) * GAP + GAP
+    height -= GAP
+    img = Image.new("RGB", (max(max_width, 200), max(height, 100)), BG)
+    draw = ImageDraw.Draw(img)
+    if title:
+        draw.text((PAD, PAD), title, fill=FG, font=_font(21))
+    label_font = _font(19)
+    y = PAD + title_h
+    for label, cards, n_chunks in chunks:
+        draw.text((PAD, y), str(label), fill=FG, font=label_font)
+        y += label_h
+        for ci in range(n_chunks):
+            x = PAD
+            for cid in cards[ci * per_row:(ci + 1) * per_row]:
+                _paint_hanafuda(img, x, y, w, h, cid)
+                x += w + GAP
+            y += h + GAP
     buf = io.BytesIO()
     img.save(buf, format="PNG")
     return buf.getvalue()

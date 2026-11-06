@@ -1,19 +1,22 @@
 # -*- coding: utf-8 -*-
 """花札こいこい（2人・3局戦、対人 / CPU）。
 
-場札と取り札は公開、手札だけは本人の ephemeral ビューで見て出す。
+場札と取り札は公開パネルに札の画像で表示し、手札だけは本人の
+ephemeral ビューで画像＋セレクトで見て出す。
 進行は core/game/koikoi.py の状態機械に従い、手番は120秒で自動プレイする。
 勝者は core/game/party_ranking.py の koikoi に記録する。
 """
 import asyncio
+import io
 import logging
 import random
 
 import discord
 from discord.ext import commands
 
-from core.game import party_ranking
+from core.game import board_image, party_ranking
 from core.game import game_panels
+from core.game.board_image import render_cached
 from core.game.koikoi import CARDS, KoikoiMatch, card_label, cpu_choose_capture, cpu_choose_play, cpu_decide, evaluate
 
 logger = logging.getLogger(__name__)
@@ -26,9 +29,66 @@ RECRUIT_SECONDS = 30
 TURN_SECONDS = 120
 CPU_ID = 0
 
+BOARD_IMAGE_NAME = "koikoi_board.png"
+HAND_IMAGE_NAME = "koikoi_hand.png"
+_KIND_ORDER = ("hikari", "tane", "tanzaku", "kasu")
+_KIND_LABELS = {"hikari": "光", "tane": "種", "tanzaku": "短冊", "kasu": "カス"}
+
 
 def _cards_text(cards) -> str:
     return "、".join(card_label(c) for c in cards) or "なし"
+
+
+# --- 札の画像（花札描画基盤） -------------------------------------------------
+def public_board_rows(match: KoikoiMatch, members: dict) -> list:
+    """公開画像の行構成 [(ラベル, [札id...]), ...] を返す。
+
+    場札と取り札（種別ごとにグループ化）だけから作り、手札は一切含めない
+    （秘匿の担保。テストで構造的に検証する）。
+    """
+    rows = []
+    if match.field:
+        rows.append(("場の札", list(match.field)))
+    for pid in match.players:
+        name = members[pid].display_name
+        for kind in _KIND_ORDER:
+            group = sorted((c for c in match.captured[pid]
+                            if CARDS[c]["kind"] == kind),
+                           key=lambda c: (CARDS[c]["month"], c))
+            if group:
+                rows.append((f"{name} の{_KIND_LABELS[kind]}（{len(group)}枚）",
+                             group))
+    return rows
+
+
+def public_board_file(match: KoikoiMatch, members: dict):
+    """公開パネル用の盤面画像ファイル。表示する札が無ければ None。"""
+    rows = public_board_rows(match, members)
+    if not rows:
+        return None
+    key = ("koikoi-board", tuple(match.field),
+           tuple(sorted(match.captured[match.players[0]])),
+           tuple(sorted(match.captured[match.players[1]])))
+    data = render_cached(key, lambda: board_image.render_hanafuda_rows(rows))
+    return discord.File(io.BytesIO(data), filename=BOARD_IMAGE_NAME)
+
+
+def hand_image_data(hand, field_months) -> bytes:
+    """自分の手札だけから手札画像を作る（場と合う札は金の枠で示す）。"""
+    hand = list(hand)
+    months = set(field_months)
+    highlight = frozenset(i for i, c in enumerate(hand)
+                          if CARDS[c]["month"] in months)
+    key = ("koikoi-hand", tuple(hand), tuple(sorted(months)))
+    return render_cached(key, lambda: board_image.render_hanafuda_hand(
+        hand, title="あなたの手札", highlight=highlight))
+
+
+def hand_file(match: KoikoiMatch, pid):
+    """本人の ephemeral ビューに付ける手札画像ファイル。"""
+    field_months = {CARDS[c]["month"] for c in match.field}
+    data = hand_image_data(match.hands[pid], field_months)
+    return discord.File(io.BytesIO(data), filename=HAND_IMAGE_NAME)
 
 
 def public_state_text(match: KoikoiMatch, members: dict, note: str = "") -> str:
@@ -151,8 +211,10 @@ class PanelView(discord.ui.View):
         match: KoikoiMatch = self.session["match"]
         if match.phase != "play" or match.current != interaction.user.id:
             return await interaction.response.send_message("今はあなたの番ではありません。", ephemeral=True)
-        await interaction.response.send_message("出す札を選んでください。",
-                                                view=HandView(self.cog, self.session), ephemeral=True)
+        await interaction.response.send_message(
+            "出す札を選んでください。（金の枠は場と合う札です）",
+            view=HandView(self.cog, self.session), ephemeral=True,
+            file=hand_file(match, interaction.user.id))
 
     def _make_decide_callback(self, koikoi: bool):
         async def callback(interaction: discord.Interaction):
@@ -284,9 +346,15 @@ class Koikoi(commands.Cog):
                 turn_note = (turn_note + "\n" if turn_note else "") + \
                     f"{members[current].mention} さんの番です。「手札を見て出す」から札を選んでください。"
             session["acted"].clear()
-            await game_panels.replace(channel, "party", embed=discord.Embed(
-                title="🎴 こいこい", description=public_state_text(match, members, turn_note), color=COLOR),
-                view=PanelView(self, session))
+            embed = discord.Embed(
+                title="🎴 こいこい", description=public_state_text(match, members, turn_note), color=COLOR)
+            panel_kwargs = {}
+            board = public_board_file(match, members)
+            if board is not None:
+                embed.set_image(url=f"attachment://{BOARD_IMAGE_NAME}")
+                panel_kwargs["file"] = board
+            await game_panels.replace(channel, "party", embed=embed,
+                                      view=PanelView(self, session), **panel_kwargs)
             try:
                 await asyncio.wait_for(session["acted"].wait(), timeout=TURN_SECONDS)
             except asyncio.TimeoutError:
