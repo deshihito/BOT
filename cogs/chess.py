@@ -4,6 +4,7 @@ import io
 import logging
 import random
 from pathlib import Path
+from core.emojis import LEFT, RIGHT
 
 import discord
 from discord.ext import commands
@@ -102,9 +103,9 @@ def page_options(page_labels, page, total_pages):
     options = [discord.SelectOption(label=f"{label}番", value=label) for label, _ in page_labels]
     if total_pages > 1:
         if page > 0:
-            options.append(discord.SelectOption(label="◀ 前のページ", value=PAGE_PREV_VALUE))
+            options.append(discord.SelectOption(label=f"{LEFT} 前のページ", value=PAGE_PREV_VALUE))
         if page < total_pages - 1:
-            options.append(discord.SelectOption(label="次のページ ▶", value=PAGE_NEXT_VALUE))
+            options.append(discord.SelectOption(label=f"次のページ {RIGHT}", value=PAGE_NEXT_VALUE))
     return options
 
 

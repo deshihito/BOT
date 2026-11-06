@@ -5,6 +5,7 @@ import logging
 import random
 from copy import deepcopy
 from pathlib import Path
+from core.emojis import LEFT, RIGHT
 
 import discord
 from discord.ext import commands
@@ -385,9 +386,9 @@ class ShogiMoveSelect(discord.ui.Select):
         ]
         if total_pages > 1:
             if self.page > 0:
-                options.append(discord.SelectOption(label="◀ 前のページ", value=PAGE_PREV_VALUE))
+                options.append(discord.SelectOption(label=f"{LEFT} 前のページ", value=PAGE_PREV_VALUE))
             if self.page < total_pages - 1:
-                options.append(discord.SelectOption(label="次のページ ▶", value=PAGE_NEXT_VALUE))
+                options.append(discord.SelectOption(label=f"次のページ {RIGHT}", value=PAGE_NEXT_VALUE))
         super().__init__(placeholder="番号を選んでください", options=options)
 
     async def callback(self, interaction):

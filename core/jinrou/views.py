@@ -6,7 +6,7 @@ from collections import Counter
 import os
 import discord
 from core import game_panels
-from core.emojis import FAILED, SUCCESS
+from core.emojis import AGOMUNIMUNI, FAILED, LOADING, MASAI, MUSIC, REIBAI, SUCCESS, URANAI
 from core import jinrou_guide
 from discord import app_commands
 from discord.ext import commands
@@ -111,7 +111,7 @@ class SetupView(discord.ui.View):
         view = RecruitView(self.game, self.cog)
         req_str2 = f" 【必須: {req_str}】" if self.game.required_roles else ""
         await game_panels.replace(self.channel, "party",
-            f"<a:POYOPOYO:1490724627805110392>人狼ゲーム募集開始！ モード:【{self.game.game_mode}】{req_str2}",
+            f"{LOADING}人狼ゲーム募集開始！ モード:【{self.game.game_mode}】{req_str2}",
             view=view
         )
 
@@ -164,7 +164,7 @@ class AdvancedSetupView(discord.ui.View):
         view = RecruitView(self.game, self.cog)
         req_str2 = f" 【必須: {req_str}】" if self.game.required_roles else ""
         await game_panels.replace(self.channel, "party",
-            f"<a:POYOPOYO:1490724627805110392>人狼ゲーム募集開始！ モード:【{self.game.game_mode}】{req_str2}",
+            f"{LOADING}人狼ゲーム募集開始！ モード:【{self.game.game_mode}】{req_str2}",
             view=view
         )
 
@@ -185,7 +185,7 @@ class RecruitView(discord.ui.View):
             return await interaction.response.send_message(embed=embed, ephemeral=True)
         self.game.players.append(interaction.user)
         await interaction.response.send_message(
-            f"<a:AGOMUNIMUNI:1490255555632037909>{interaction.user.display_name} さんが参加しました。"
+            f"{AGOMUNIMUNI}{interaction.user.display_name} さんが参加しました。"
         )
 
     @discord.ui.button(label="キャンセル", style=discord.ButtonStyle.danger)
@@ -245,7 +245,7 @@ class ReplayView(discord.ui.View):
         req_str = "、".join(old_required) if old_required else "なし"
         exc_str = "、".join(old_excluded) if old_excluded else "なし"
         await interaction.response.send_message(
-            f"<a:POYOPOYO:1490724627805110392>再戦開始！ モード:【{new_game.game_mode}】 必須: {req_str} / 除外: {exc_str}",
+            f"{LOADING}再戦開始！ モード:【{new_game.game_mode}】 必須: {req_str} / 除外: {exc_str}",
             view=RecruitView(new_game, self.cog)
         )
 
@@ -300,7 +300,7 @@ class GlobalJoinView(discord.ui.View):
         await interaction.response.send_message(f"{interaction.user.display_name} さんが参加しました。")
         for chan in [c for c in game.channels if interaction.channel is None or c.id != interaction.channel.id]:
             try:
-                await chan.send(f"<a:AGOMUNIMUNI:1490255555632037909>{interaction.user.display_name} さんが別のサーバーから参加しました。",
+                await chan.send(f"{AGOMUNIMUNI}{interaction.user.display_name} さんが別のサーバーから参加しました。",
                                 allowed_mentions=discord.AllowedMentions.none())
             except discord.HTTPException:
                 logger.debug("人狼: 参加通知の送信に失敗しました", exc_info=True)
@@ -454,7 +454,7 @@ class NightActionView(discord.ui.View):
                 embed = discord.Embed(description="パーティは既に開催済みです。今夜は待機してください。", color=0xFFFFFF)
                 return await interaction.response.send_message(embed=embed, ephemeral=True)
             self.game.night_actions[p_id] = 0
-            embed = discord.Embed(description="<:music:1561710964238450809> パーティを開催します！ランダムに4人を招待します。", color=0xFFFFFF)
+            embed = discord.Embed(description=MUSIC + ' パーティを開催します！ランダムに4人を招待します。', color=0xFFFFFF)
             return await interaction.response.send_message(embed=embed, ephemeral=True)
 
         passive_roles = [
@@ -503,14 +503,14 @@ class ActionSelectView(discord.ui.View):
                 if random.random() < 0.3:
                     res = "白" if res == "黒" else "黒"
             jinrou_review.note_divine(self.game, p_id, t_id, res)
-            embed = discord.Embed(description=f"<:URANAI:1490255412837093568>占い結果: 【{res}】", color=0xFFFFFF)
+            embed = discord.Embed(description=f"{URANAI}占い結果: 【{res}】", color=0xFFFFFF)
             await interaction.response.send_message(embed=embed, ephemeral=True)
 
         elif self.role == "大霊媒師":
             r = self.game.roles.get(t_id)
             color = reibai_color(r)
             embed = discord.Embed(
-                description=f"<:REIBAI:1490254585413148703>大霊媒師の結果: 【{color}】 役職: 【{r}】",
+                description=f"{REIBAI}大霊媒師の結果: 【{color}】 役職: 【{r}】",
                 color=0xFFFFFF
             )
             await interaction.response.send_message(embed=embed, ephemeral=True)
@@ -519,7 +519,7 @@ class ActionSelectView(discord.ui.View):
             r = self.game.roles.get(t_id)
             if r in ["人狼", "デカ狼"]:
                 self.game.masai_evasion[p_id] = True
-            embed = discord.Embed(description="<:MASAI:1490254590757572758>対象の観察を完了しました。人狼であれば回避の準備を整える。", color=0xFFFFFF)
+            embed = discord.Embed(description=MASAI + '対象の観察を完了しました。人狼であれば回避の準備を整える。', color=0xFFFFFF)
             await interaction.response.send_message(embed=embed, ephemeral=True)
         elif self.role == "罠師":
             embed = discord.Embed(description="対象に罠を設置しました。狼が攻撃した場合、返り討ちにします。", color=0xFFFFFF)

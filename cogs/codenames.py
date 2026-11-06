@@ -8,6 +8,7 @@
 import asyncio
 import logging
 import random
+from core.emojis import FAILED
 
 import discord
 from discord.ext import commands
@@ -155,7 +156,7 @@ class GuessSelect(discord.ui.Select):
         elif kind == "neutral":
             note = f"△ {interaction.user.mention} が「{event['word']}」を選んだけど中立でした。"
         else:
-            note = f"❌ {interaction.user.mention} が「{event['word']}」を選んだけど相手チームの単語でした。"
+            note = f"{FAILED} {interaction.user.mention} が「{event['word']}」を選んだけど相手チームの単語でした。"
         await self.cog.refresh_board(session, note=note)
 
 

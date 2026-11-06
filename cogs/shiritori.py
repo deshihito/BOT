@@ -27,7 +27,7 @@ from core.messages import recruit_join_prompt
 from discord.ext import commands
 
 from core import party_ranking
-from core.emojis import FAILED
+from core.emojis import CROCK, FAILED
 
 logger = logging.getLogger(__name__)
 
@@ -295,7 +295,7 @@ class OdaiShiritori(commands.Cog):
         if g.answer is None:
             g.eliminate(uid)
             return await channel.send(embed=discord.Embed(
-                description=f"<:crock:1561710960387956757> {member.mention} さんは時間切れで脱落です。（残り {len(g.alive)}人）", color=COLOR))
+                description=f"{CROCK} {member.mention} さんは時間切れで脱落です。（残り {len(g.alive)}人）", color=COLOR))
         word = g.answer
         result, reason = check_answer(g.last_word, word, g.used)
         if result == "out":

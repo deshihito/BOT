@@ -6,7 +6,7 @@ from collections import Counter
 import os
 import discord
 from core import game_panels
-from core.emojis import FAILED, SUCCESS
+from core.emojis import FAILED, KISHI, MASAI, MENHERA, MUSIC, PANYA, RESTART, SUCCESS
 from core import jinrou_guide
 from discord import app_commands
 from discord.ext import commands
@@ -136,7 +136,7 @@ class GameLoopMixin:
         await game_panels.replace(game.game_channel, "party", f"ーー {title}（{minutes_str}） ーー",
                                      view=jinrou_guide.PhaseHelpView("day", _guide_role_lookup(game), timeout=seconds + 30))
         if any(game.roles.get(p.id) == "パン屋" for p in game.alive_players):
-            await game.game_channel.send("<:PANYA:1490254577558093944>パン屋がパンを焼きました")
+            await game.game_channel.send(PANYA + 'パン屋がパンを焼きました')
 
         for _ in range(seconds):
             if game.chairman_skip_event.is_set():
@@ -257,7 +257,7 @@ class GameLoopMixin:
                             dead_ids.add(victim_id)
                             victim_m = game.game_channel.guild.get_member(victim_id)
                             if victim_m:
-                                await send_log(f"<:music:1561710964238450809> パーティに人狼が紛れ込んでいた！ {victim_m.display_name} が犠牲になりました...")
+                                await send_log(f"{MUSIC} パーティに人狼が紛れ込んでいた！ {victim_m.display_name} が犠牲になりました...")
                 break
 
         # 陽キャのアクション処理
@@ -312,7 +312,7 @@ class GameLoopMixin:
                 game.wan_owner[p_id] = t_id
 
         if menhera_triggered:
-            await send_log("<:MENHERA:1490254584739008522>誰かがメンヘラ（またはヤンデレの呪い）に返り討ちにされました。")
+            await send_log(MENHERA + '誰かがメンヘラ（またはヤンデレの呪い）に返り討ちにされました。')
 
         # 人狼の襲撃処理
         for wolf_id, target_id in wolf_attacks.items():
@@ -330,7 +330,7 @@ class GameLoopMixin:
             if game.roles.get(target_id) == "マサイ族" and game.masai_evasion.get(target_id):
                 if random.random() < 0.5:
                     attack_results[wolf_id] = (target_id, "evaded")
-                    await send_log("<:MASAI:1490254590757572758>マサイ族は襲撃を回避しました。")
+                    await send_log(MASAI + 'マサイ族は襲撃を回避しました。')
                     continue
             attack_results[wolf_id] = (target_id, "success")
             dead_ids.add(target_id)
@@ -376,7 +376,7 @@ class GameLoopMixin:
                     game.alive_players = [p for p in game.alive_players if p.id != d_id]
                     await self._check_mokumoku_reveal(game, d_id)
         else:
-            await send_log("<:KISHI:1490254592800456794>夜の結果: 昨晩の犠牲者はいないようです。")
+            await send_log(KISHI + '夜の結果: 昨晩の犠牲者はいないようです。')
 
         alive_after = {p.id for p in game.alive_players}
         jinrou_review.record_night(game, game.day_count, actions_snapshot, cancelled_ids, attack_results,
@@ -527,7 +527,7 @@ async def _restore_jinrou_session(cog, channel_id, entry) -> bool:
     label = _BOUNDARY_LABELS.get(boundary, boundary)
     mentions = " ".join(p.mention for p in game.players)
     await channel.send(
-        f"{mentions}\n🔁 再起動前に進行中だった人狼を、{label}（第{game.day_count}日）から再開します。\n"
+        f"{mentions}\n{RESTART} 再起動前に進行中だった人狼を、{label}（第{game.day_count}日）から再開します。\n"
         "※ フェーズの途中経過（その夜のアクションや発言）は失われ、直近の境界まで巻き戻っています。"
         "役職は「役職確認」ボタンで確認し直してください。",
         view=RoleCheckView(game, cog),
