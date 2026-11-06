@@ -2,8 +2,8 @@
 from __future__ import annotations
 import json
 from typing import Any, Mapping
-from core import data_paths
-from core.guild_settings import get_store
+from core.support import data_paths
+from core.support.guild_settings import get_store
 
 LANGUAGE_SECTION = "localization"
 DEFAULT_LOCALE = "ja"
@@ -62,7 +62,7 @@ _TRANSLATIONS = {
 # - ja_to_en.json は core/locales/
 #   (scripts/translate_l10n_catalog.py の出力先)
 # 以前は両パスが互い違いにずれており、全カタログが 0 件で読み込まれて
-# 英語化が黙って無効になっていた。パス解決は core/data_paths.py の
+# 英語化が黙って無効になっていた。パス解決は core/support/data_paths.py の
 # repo_root() (PR #525/#527 と同じ祖先探索) に揃える。
 _REPO_ROOT = data_paths.repo_root()
 _KEY_CATALOG_DIR = _REPO_ROOT / "locales"
