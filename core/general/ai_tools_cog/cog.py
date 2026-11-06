@@ -9,7 +9,7 @@ from typing import Any
 import discord
 from discord.ext import commands
 
-from core import logfare
+from core.general import logfare
 from core.general import ai_tools_router
 
 logger = logging.getLogger(__name__)
