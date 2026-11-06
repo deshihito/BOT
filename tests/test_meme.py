@@ -166,7 +166,7 @@ class MemeRegistryTest(unittest.TestCase):
         self.assertIn("general:meme_help", general_ids)
 
     def test_meme_create_not_in_ai_candidates(self):
-        from core import ai_tools_router
+        from core.general import ai_tools_router
 
         candidates = ai_tools_router.action_candidates()
         ids = {

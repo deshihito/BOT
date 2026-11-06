@@ -137,7 +137,7 @@ class ShortcutRootsGenerationTest(unittest.TestCase):
 class AICandidatesTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        from core import ai_tools_router
+        from core.general import ai_tools_router
 
         cls.router = ai_tools_router
         cls.candidates = ai_tools_router.action_candidates()
@@ -199,7 +199,7 @@ class ConfirmTierTest(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        from core import ai_tools_router
+        from core.general import ai_tools_router
 
         cls.registry = action_registry.default_registry()
         cls.candidates = ai_tools_router.action_candidates()

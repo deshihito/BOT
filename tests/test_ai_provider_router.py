@@ -8,7 +8,7 @@ from unittest.mock import patch
 
 from aiohttp import web
 
-from core import ai_provider_router as router
+from core.general import ai_provider_router as router
 
 
 class AiProviderRouterTest(unittest.IsolatedAsyncioTestCase):

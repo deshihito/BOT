@@ -24,7 +24,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from core import action_registry, economy_pool, items, lottery, mining, steal
+from core import action_registry, lottery, mining, steal
+from core.general import economy_pool, items
 from cogs import wallet as wallet_module
 from cogs.circulation import CirculationCog
 

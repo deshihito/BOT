@@ -1,4 +1,4 @@
-"""core/market.py（アゴトークン市場）と /general への登録のテスト。
+"""core/general/market.py（アゴトークン市場）と /general への登録のテスト。
 
 見るもの: レートエンジンが暴走しないこと（決定論的シード）、clamp／バンド／
 サーキットブレーカー、手数料と取引上限、プールの保存則
@@ -16,7 +16,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from core import action_registry, market
+from core import action_registry
+from core.general import market
 
 
 class _QuietRandom(random.Random):
