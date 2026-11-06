@@ -27,9 +27,9 @@ from datetime import date, datetime, timedelta, timezone
 import discord
 from discord import app_commands
 from discord.ext import commands, tasks
-from core.api_client import API_NOT_CONFIGURED_MESSAGE
-from core.api_retry import run_with_retry
-from core.user_names import cached_display_name
+from core.support.api_client import API_NOT_CONFIGURED_MESSAGE
+from core.support.api_retry import run_with_retry
+from core.general.user_names import cached_display_name
 
 log = logging.getLogger(__name__)
 
@@ -231,7 +231,7 @@ class FujoSurvival(commands.Cog):
         self.bot = bot
         self.db_api = getattr(bot, "db_api", None)
         if self.db_api is None:
-            from core.api_client import get_client
+            from core.support.api_client import get_client
             self.db_api = get_client()
         # user_id -> fujo_users の行（メモリ上の写し）
         self.users: dict[int, dict] = {}
