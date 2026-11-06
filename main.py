@@ -33,6 +33,7 @@ class MyBot(commands.Bot):
         super().__init__(command_prefix=config.PREFIX, intents=intents)
         self.updated_notified = False
         self._restore_started = False
+        self._registry_synced = False
 
     async def close(self):
         # 終了前にAPIへ送れていない設定を送っておく（送れなくても次回起動時に再送する）。
@@ -90,6 +91,31 @@ class MyBot(commands.Bot):
         if not self._restore_started:
             self._restore_started = True
             asyncio.create_task(self._restore_voice_sessions())
+        if not self._registry_synced:
+            self._registry_synced = True
+            asyncio.create_task(self._sync_guild_registry())
+
+    async def _sync_guild_registry(self):
+        """参加中サーバーの一覧を Web ダッシュボード用に保存する（失敗しても起動は止めない）。"""
+        try:
+            from core.guild_registry import get_registry
+            await get_registry().sync_all(list(self.guilds))
+        except Exception:
+            logging.getLogger(__name__).exception("サーバー一覧の保存に失敗しました")
+
+    async def on_guild_join(self, guild):
+        try:
+            from core.guild_registry import get_registry
+            await get_registry().record(guild)
+        except Exception:
+            logging.getLogger(__name__).exception("サーバー一覧への登録に失敗しました")
+
+    async def on_guild_remove(self, guild):
+        try:
+            from core.guild_registry import get_registry
+            await get_registry().remove(guild.id)
+        except Exception:
+            logging.getLogger(__name__).exception("サーバー一覧からの削除に失敗しました")
 
     async def _restore_voice_sessions(self):
         """再起動（デプロイ・クラッシュ等）で失われたセッションを復旧する。

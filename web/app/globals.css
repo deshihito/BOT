@@ -115,3 +115,17 @@ body:has([data-activity-root]) > main { max-width:none; min-height:100svh; margi
   .activity-content { gap:10px; }
   .activity-track-title { white-space:normal; }
 }
+.guild-card { display:flex; align-items:center; justify-content:space-between; gap:12px; }
+.guild-card-disabled { color:var(--muted); }
+.dashboard-subheading { margin-top:36px; }
+.settings-form { padding:22px 0 26px; border-bottom:1px solid var(--line); }
+.settings-field { display:grid; gap:6px; margin-top:14px; max-width:640px; }
+.settings-field label { font-size:14px; font-weight:700; }
+.settings-field input[type="text"],.settings-field input[type="number"],.settings-field select,.settings-field textarea { width:100%; padding:9px 11px; border:1px solid var(--line); border-radius:8px; background:#fff; color:var(--text); font:inherit; outline-color:var(--accent); }
+.settings-check { display:flex; align-items:center; gap:9px; font-size:14px; font-weight:700; cursor:pointer; }
+.settings-check input { width:17px; height:17px; accent-color:var(--accent); }
+.settings-note { color:var(--muted); font-size:12px; }
+.settings-actions { display:flex; align-items:center; gap:14px; margin-top:20px; }
+.settings-actions button { padding:8px 15px; border:1px solid var(--accent); border-radius:7px; background:var(--accent); color:#fff; cursor:pointer; font:inherit; font-weight:700; }
+.settings-actions button:disabled { cursor:not-allowed; opacity:.45; }
+.settings-saved { color:var(--accent); font-size:13px; }

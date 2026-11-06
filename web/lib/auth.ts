@@ -10,9 +10,13 @@ type SessionPayload = {
   id: string;
   username: string;
   expiresAt: number;
+  // サーバー側セッションレコード（lib/dashboard.ts）のキー。ダッシュボード用ログインでのみ付く。
+  sid?: string;
 };
 
 export type DiscordUser = Pick<SessionPayload, "id" | "username">;
+
+export type SessionInfo = DiscordUser & { sid?: string };
 
 function sessionSecret() {
   return process.env.DISCORD_SESSION_SECRET || process.env.DISCORD_CLIENT_SECRET || "";
@@ -34,11 +38,12 @@ export function isDiscordConfigured() {
   return Boolean(process.env.DISCORD_CLIENT_ID && process.env.DISCORD_CLIENT_SECRET && process.env.DISCORD_REDIRECT_URI);
 }
 
-export function createSession(user: DiscordUser) {
+export function createSession(user: DiscordUser, sid?: string) {
   const payload: SessionPayload = {
     id: user.id,
     username: user.username.slice(0, 80),
     expiresAt: Date.now() + SESSION_MAX_AGE * 1000,
+    ...(sid ? { sid } : {}),
   };
   const encoded = Buffer.from(JSON.stringify(payload)).toString("base64url");
   const signature = sign(encoded);
@@ -47,6 +52,11 @@ export function createSession(user: DiscordUser) {
 }
 
 export function readSession(value?: string): DiscordUser | null {
+  const info = readSessionInfo(value);
+  return info ? { id: info.id, username: info.username } : null;
+}
+
+export function readSessionInfo(value?: string): SessionInfo | null {
   if (!value) return null;
   const [encoded, signature, ...rest] = value.split(".");
   if (!encoded || !signature || rest.length > 0 || !safelyEqual(signature, sign(encoded))) return null;
@@ -56,7 +66,8 @@ export function readSession(value?: string): DiscordUser | null {
     if (typeof payload.id !== "string" || !/^\d+$/.test(payload.id)) return null;
     if (typeof payload.username !== "string" || !payload.username.trim()) return null;
     if (typeof payload.expiresAt !== "number" || payload.expiresAt <= Date.now()) return null;
-    return { id: payload.id, username: payload.username };
+    const sid = typeof payload.sid === "string" && /^[0-9a-f]{64}$/.test(payload.sid) ? payload.sid : undefined;
+    return { id: payload.id, username: payload.username, ...(sid ? { sid } : {}) };
   } catch {
     return null;
   }
@@ -74,6 +85,15 @@ export function getRequestUser(request: Request) {
 export async function getCurrentUser() {
   const cookieStore = await cookies();
   return readSession(cookieStore.get(SESSION_COOKIE)?.value);
+}
+
+export async function getCurrentSession() {
+  const cookieStore = await cookies();
+  return readSessionInfo(cookieStore.get(SESSION_COOKIE)?.value);
+}
+
+export function getRequestSession(request: Request) {
+  return readSessionInfo(readCookie(request, SESSION_COOKIE));
 }
 
 function isSecureRequest(request: Request) {
