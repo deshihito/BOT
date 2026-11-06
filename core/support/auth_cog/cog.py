@@ -2,11 +2,11 @@ import logging
 import re
 
 import discord
-from core.emojis import SUCCESS, FAILED
+from core.support.emojis import SUCCESS, FAILED
 from discord import app_commands
 from discord.ext import commands
 
-from core.guild_settings import get_store
+from core.support.guild_settings import get_store
 
 logger = logging.getLogger(__name__)
 
