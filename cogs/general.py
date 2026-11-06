@@ -187,8 +187,10 @@ class GeneralCog(
 
     async def dispatch_general(self, interaction: discord.Interaction, value: str):
         # 利用履歴（よく使う／最近）は入口ここで記録する。記録の失敗で
-        # dispatch を壊さないよう record_safely 側で例外は握る。
-        await action_usage.record_safely(
+        # dispatch を壊さないよう record_safely 側で例外は握る。保存には
+        # 自前APIへの書き込みが伴い応答を遅らせるため、応答を待たせない
+        # バックグラウンド記録を使う（panel_recovery の誤判定防止）。
+        action_usage.record_safely_in_background(
             getattr(interaction, "guild_id", None),
             getattr(getattr(interaction, "user", None), "id", None),
             f"general:{value}",
@@ -297,16 +299,22 @@ class GeneralCog(
             return await interaction.response.send_message(view=as_panel_v2(view))
 
         if value == "exp_status":
+            # 先にACKする: _load_latest はEXPデータ読み込みを伴い、応答前に
+            # 行うと panel_recovery に死んだパネルと誤判定される。
+            await interaction.response.defer()
             view = ExpStatusView(interaction.user.id, interaction.guild_id)
             await view._load_latest()
-            return await interaction.response.send_message(
+            return await interaction.followup.send(
                 view=as_panel_v2(view)
             )
 
         if value == "exp_ranking":
+            # 先にACKする: _load_latest は表示名解決で fetch_user を最大20件
+            # 逐次実行し、応答前に行うと数秒かかることがある（同上）。
+            await interaction.response.defer()
             view = ExpRankingView(interaction.guild_id, bot=self.bot)
             await view._load_latest()
-            return await interaction.response.send_message(
+            return await interaction.followup.send(
                 view=as_panel_v2(view)
             )
 
