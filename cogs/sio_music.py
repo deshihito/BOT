@@ -32,6 +32,7 @@ from core.legacy import Responder
 from core.emojis import FAILED, MUSIC, SUCCESS
 from core.vc.music_activity import build_music_activity_snapshot
 from core.vc.music.common import logger, YTDL_OPTIONS, YTDL_COOKIE_FILE, BASE62, MAX_QUEUE_SIZE, MAX_PLAYLIST_ITEMS, SPOTIFY_PLAYLIST_RE, SOUNDCLOUD_URL_RE, soundcloud_url_kind, NICOVIDEO_URL_RE, niconico_url_kind, MAX_TTS_CHARS, LOOP_CHOICES, PLAYLIST_ACTION_CHOICES, PLAYLIST_SCOPE_CHOICES, MIN_PLAYBACK_SPEED, MAX_PLAYBACK_SPEED, PANEL_TIMEOUT_SECONDS, SNAPSHOT_INTERVAL_SECONDS, SAFE_CUSTOM_AUDIO_FILTERS, build_atempo_filters, is_safe_custom_audio_filter, EQ_SETTINGS, FFMPEG_REALTIME_PRESETS, build_ffmpeg_headers, FFmpegPCMAudioDiagnostics, encode_full_id, decode_full_id, we  # noqa: F401
+from core.vc.music.autoplay import logger, AutoplayMixin  # noqa: F401
 from core.vc.music.connection import logger, ConnectionMixin  # noqa: F401
 from core.vc.music.loader import logger, LoaderMixin  # noqa: F401
 from core.vc.music.panel import logger, PanelMixin  # noqa: F401
@@ -43,12 +44,12 @@ from core.vc.music.sink import logger, RECORDING_ENABLED, BYTES_PER_SECOND, FRAM
 from core.vc.music.sources import logger, SourcesMixin  # noqa: F401
 from core.vc.music.spatial import logger, PythonSpatialAudioSource, SpatialControlView  # noqa: F401
 from core.vc.music.state import logger, StateMixin  # noqa: F401
-from core.vc.music.ui import logger, SearchModal, CustomEQModal, VoiceControlView, build_music_panel_layout, PlaylistNameModal, PlaylistLibraryView  # noqa: F401
+from core.vc.music.ui import logger, SearchModal, CustomEQModal, VoiceControlView, AutoplayToggleButton, build_music_panel_layout, PlaylistNameModal, PlaylistLibraryView  # noqa: F401
 
 logger = logging.getLogger("cogs.sio_music")
 
 
-class VoiceCog(StateMixin, LoaderMixin, ConnectionMixin, PanelMixin, SourcesMixin, SearchMixin, PlaybackMixin, PlaylistsMixin, RestoreMixin, commands.Cog):
+class VoiceCog(StateMixin, LoaderMixin, ConnectionMixin, PanelMixin, SourcesMixin, SearchMixin, PlaybackMixin, PlaylistsMixin, RestoreMixin, AutoplayMixin, commands.Cog):
     def __init__(self, bot):
         self.bot = bot
         self.reaction_enabled = {}

@@ -109,7 +109,8 @@ class SearchModal(discord.ui.Modal, title="YouTube 楽曲検索"):
                 url, filename, is_yt = info['webpage_url'], info['title'], True
 
             state['current_ctx'] = interaction
-            if not await self.cog.enqueue_track(self.guild_id, (url, filename, None, is_yt)):
+            if not await self.cog.enqueue_track(self.guild_id, (url, filename, None, is_yt),
+                                                requester_id=interaction.user.id):
                 await interaction.followup.send(
                     embed=we(f"{FAILED} キューの上限（{MAX_QUEUE_SIZE}件）に達しています。"),
                     ephemeral=True,
@@ -317,6 +318,7 @@ class VoiceControlView(discord.ui.View):
         vc = interaction.guild.voice_client
         state = self.cog.get_state(self.guild_id)
         if vc and (has_audio_source(vc, "music") or state['is_paused']):
+            self.cog._note_track_finished(self.guild_id, completed=False)
             state['current_track'] = None
             state['current_thumbnail_url'] = None
             state['elapsed_offset'] = 0
@@ -377,14 +379,43 @@ class VoiceControlView(discord.ui.View):
             state['current_thumbnail_url'] = None
             state['elapsed_offset'] = 0
             state['is_paused'] = False
+            # 停止は人の意思なので、自動再生が即座に再開しないよう抑止する。
+            state['autoplay_stopped'] = True
             while not state['queue'].empty():
                 state['queue'].get_nowait()
+            state['queue_requesters'] = []
             remove_audio_source(vc, "music", notify=True)
             await interaction.response.send_message(embed=we(RESET + ' 再生を完全に停止し、キューをクリアしました。'))
             await self.cog.update_panel(self.guild_id)
             self.cog._save_music_snapshot(self.guild_id)
         else:
             await interaction.response.send_message(embed=we(FAILED + ' ボイスチャンネルに接続していません。'), ephemeral=True)
+
+
+class AutoplayToggleButton(discord.ui.Button):
+    """自動再生 v1 の ON/OFF トグル。
+
+    VoiceControlView 側のボタン行は満杯のため、パネル末尾の独立した
+    ActionRow として配置する（build_music_panel_layout が組み立てる）。
+    """
+
+    def __init__(self, cog, guild_id: int):
+        self.cog = cog
+        self.guild_id = guild_id
+        try:
+            enabled = bool(cog.get_state(guild_id).get('autoplay_enabled', False))
+        except Exception:
+            enabled = False
+        super().__init__(
+            label=f"自動再生: {'ON' if enabled else 'OFF'}",
+            emoji=RESTART,
+            style=discord.ButtonStyle.success if enabled else discord.ButtonStyle.secondary,
+        )
+
+    async def callback(self, interaction: discord.Interaction):
+        if not await _require_same_vc(interaction):
+            return
+        await self.cog._autoplay_toggle_impl(interaction)
 
 
 def build_music_panel_layout(cog, guild_id: int, panel_text: str,
@@ -430,6 +461,7 @@ def build_music_panel_layout(cog, guild_id: int, panel_text: str,
     container = discord.ui.Container(
         *header,
         *action_rows,
+        discord.ui.ActionRow(AutoplayToggleButton(cog, guild_id)),
         accent_colour=0xFFFFFF,
     )
     layout = discord.ui.LayoutView(timeout=PANEL_TIMEOUT_SECONDS)
@@ -494,3 +526,7 @@ class PlaylistLibraryView(discord.ui.View):
     @discord.ui.button(label="削除", style=discord.ButtonStyle.danger)
     async def delete_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.send_modal(PlaylistNameModal(self.cog, "delete", self.scope))
+
+    @discord.ui.button(label="履歴を消す", style=discord.ButtonStyle.secondary)
+    async def clear_history_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self.cog._history_clear_impl(interaction)

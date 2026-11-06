@@ -77,7 +77,9 @@ class SourcesMixin:
             'webpage_url': webpage_url,  # YouTube動画ページのURL
             'http_headers': data.get('http_headers') or {},
             'title': data.get('title', 'Unknown Title'),
-            'duration': data.get('duration', 0)
+            'duration': data.get('duration', 0),
+            'thumbnail': data.get('thumbnail'),
+            'uploader': data.get('uploader') or data.get('channel'),
         }
 
 

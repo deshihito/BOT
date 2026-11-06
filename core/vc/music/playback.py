@@ -67,23 +67,35 @@ class PlaybackMixin:
         # yt-dlp取得などのawaitより前にフラグを確保する。
         # これにより同時に到達したcheck_queue()が同じ曲でvc.play()を呼ばない。
         state['is_processing_queue'] = True
+        track_artist = None
 
         if state.get('current_track') is None:
             if state['queue'].empty():
+                # 自動再生が有効なら、尽きたキューへ1曲補充して再生を続ける。
                 state['is_processing_queue'] = False
+                if await self.maybe_autoplay_refill(guild_id):
+                    return await self.check_queue(guild_id)
                 await self.update_panel(guild_id)
                 self._save_music_snapshot(guild_id)
                 return
-            
+
             queue = state['queue']
+            requesters = state.setdefault('queue_requesters', [])
             if state.get('shuffle_enabled') and queue.qsize() > 1:
                 queue_items = queue._queue
                 selected_index = random.randrange(len(queue_items))
-                target_input, filename, b62_id, is_yt = queue_items[selected_index]
+                entry = queue_items[selected_index]
+                target_input, filename, b62_id, is_yt = entry
                 del queue_items[selected_index]
+                meta = requesters.pop(selected_index) if selected_index < len(requesters) else None
             else:
-                target_input, filename, b62_id, is_yt = await queue.get()
-            
+                entry = await queue.get()
+                target_input, filename, b62_id, is_yt = entry
+                meta = requesters.pop(0) if requesters else None
+            state['current_queue_entry'] = entry
+            state['current_entry_meta'] = meta if isinstance(meta, dict) else {'user_id': None, 'auto': None}
+            track_artist = None
+
             if is_yt:
                 try:
                     info = await self.get_yt_info(target_input)
@@ -91,6 +103,7 @@ class PlaybackMixin:
                     # ストリームURLを再解析すると、汎用エクストラクタのファイル名
                     # （例: "videoplayback"）になる場合があるため、保存済みのタイトルを優先する。
                     video_title = filename or info['title']
+                    track_artist = info.get('uploader')
                     state['current_yt_page_url'] = info['webpage_url']
                     state['current_thumbnail_url'] = info.get('thumbnail') or None
                     state['current_yt_headers'] = info['http_headers']
@@ -176,6 +189,24 @@ class PlaybackMixin:
                 if not has_audio_source(vc, "music"):
                     break
                 await asyncio.sleep(0.1)
+
+            if source.has_output and has_audio_source(vc, "music"):
+                # 再生が実際に始まった曲だけを履歴へ記録する（再開・シークでは
+                # 同じキュー要素が再入するため、要素の同一性で二重記録を防ぐ）。
+                entry = state.get('current_queue_entry')
+                if entry is not None and state.get('history_counted_entry') is not entry:
+                    state['history_counted_entry'] = entry
+                    meta = state.get('current_entry_meta') or {}
+                    self._note_track_started(
+                        guild_id, entry, meta.get('user_id'), meta.get('auto'),
+                        title=filename, source_input=entry[0], is_yt=is_yt,
+                        b62_id=b62_id, artist=track_artist,
+                    )
+                # 再生中が最後の1曲なら、自動再生の先読み補充を予約する。
+                if (state.get('autoplay_enabled') and not state.get('autoplay_stopped')
+                        and state.get('loop_mode', 'off') == 'off'
+                        and state['queue'].qsize() == 0):
+                    asyncio.create_task(self._autoplay_prefetch(guild_id))
 
             if source.has_output and has_audio_source(vc, "music") and state.get('elapsed_offset', 0) < 1:
                 current_eq_mode = state.get('eq', 'flat')
@@ -273,12 +304,21 @@ class PlaybackMixin:
             asyncio.run_coroutine_threadsafe(self.check_queue(guild_id), loop)
             return
 
+        # 最後まで再生し切った場合だけ「完了」を履歴へ残す（中断・デコード
+        # 失敗は学習材料として数えない。スキップはスキップ操作側で記録する）。
+        if track and not is_interrupted:
+            self._note_track_finished(guild_id, completed=True)
+
         loop_track = self._make_loop_track(state)
         loop_mode = state.get('loop_mode', 'off')
         if loop_track and loop_mode == 'track':
             state['queue']._queue.appendleft(loop_track)
+            requesters = state.setdefault('queue_requesters', [])
+            requesters.insert(0, state.get('current_entry_meta') or {'user_id': None, 'auto': None})
         elif loop_track and loop_mode == 'queue':
             state['queue']._queue.append(loop_track)
+            requesters = state.setdefault('queue_requesters', [])
+            requesters.append(state.get('current_entry_meta') or {'user_id': None, 'auto': None})
 
         state['current_track'] = None
         state['current_yt_page_url'] = None
@@ -433,7 +473,8 @@ class PlaybackMixin:
         # キューに追加（ギルド単位の上限を超える場合は受け付けない）
         if start_at is not None:
             state['elapsed_offset'] = start_at
-        if not await self.enqueue_track(interaction.guild_id, (url, filename, final_id, is_yt)):
+        if not await self.enqueue_track(interaction.guild_id, (url, filename, final_id, is_yt),
+                                       requester_id=interaction.user.id):
             return await interaction.followup.send(
                 embed=we(f"{FAILED} キューの上限（{MAX_QUEUE_SIZE}件）に達しています。再生完了または停止後に追加してください。"),
                 ephemeral=True,
@@ -469,8 +510,12 @@ class PlaybackMixin:
         state['current_track'] = None
         state['elapsed_offset'] = 0
         state['is_paused'] = False
-        while not state['queue'].empty(): 
+        # 停止は人の意思なので、自動再生が即座に再開しないよう抑止する
+        # （次の手動リクエストか自動再生の入れ直しで解除される）。
+        state['autoplay_stopped'] = True
+        while not state['queue'].empty():
             state['queue'].get_nowait()
+        state['queue_requesters'] = []
         remove_audio_source(vc, "music", notify=True)
         await r.send(embed=we("完全に停止し、キューをクリアしました。"))
         await self.update_panel(r.guild.id)
@@ -541,6 +586,7 @@ class PlaybackMixin:
         if vc and not is_same_voice_channel(interaction.user, vc):
             return await interaction.response.send_message(embed=we(MUSIC_VC_REQUIRED_MESSAGE), ephemeral=True)
         if vc and (has_audio_source(vc, "music") or state['is_paused']):
+            self._note_track_finished(interaction.guild_id, completed=False)
             state['current_track'] = None
             state['elapsed_offset'] = 0
             state['is_paused'] = False
