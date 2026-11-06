@@ -41,9 +41,25 @@ DEFAULT_CARD_THEME = "white"
 CARD_W, CARD_H = 1000, 360
 _CARD_SS = 2
 
+def _repo_root() -> Path:
+    """リポジトリルートを返す (font.ttf と assets/fonts のある最下位の祖先)。
+
+    モジュールをサブパッケージへ移しても __file__ 起点の相対パスが
+    ずれないようにするための解決。見つからなければ現在の配置
+    (core/support/server_assist/features/ から4つ上) を前提にする。
+    """
+    here = Path(__file__).resolve()
+    for anc in here.parents:
+        if (anc / "font.ttf").is_file() and (anc / "assets" / "fonts").is_dir():
+            return anc
+    return here.parents[4]
+
+
+_REPO_ROOT = _repo_root()
+
 _FONT_CANDIDATES = (
-    str(Path(__file__).resolve().parents[3] / "assets" / "fonts" / "levelup.ttf"),
-    str(Path(__file__).resolve().parents[3] / "assets" / "fonts" / "levelup.otf"),
+    str(_REPO_ROOT / "assets" / "fonts" / "levelup.ttf"),
+    str(_REPO_ROOT / "assets" / "fonts" / "levelup.otf"),
     "/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc",
     "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
     "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",

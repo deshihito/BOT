@@ -4,8 +4,10 @@
 - VC tick: 付与ゼロの周期では _exp_save を呼ばない / 付与があれば呼ぶ
 - VC 入退室: 付与も計測フラグの変化も無い退室では保存しない
 """
+import json
 import os
 import tempfile
+from pathlib import Path
 import time
 import types
 import unittest
@@ -235,6 +237,51 @@ class StoreFetchCompatTests(unittest.TestCase):
 
     def test_store_without_get_returns_none(self):
         self.assertIsNone(general_module._store_fetch(object(), "exp"))
+
+
+class ExpFilePathTests(unittest.TestCase):
+    """EXP_FILE のパス解決と、パスずれ期間の保存先からの引き継ぎ。
+
+    EXP が core/general/exp/ サブパッケージへ移された際、__file__ 起点の
+    相対パスが1階層ずれて保存先が core/data/exp.json になっていた。
+    既定の保存先は <リポジトリ直下>/data/exp.json で固定し、ずれ期間に
+    core/data 側へ書かれた分は最大値マージで引き継ぐ。
+    """
+
+    def test_exp_file_default_is_repo_data_dir(self):
+        import core.general.exp.exp as exp_mod
+
+        if os.getenv("EXP_DATA_PATH"):
+            self.skipTest("EXP_DATA_PATH 指定時は既定パスの対象外")
+        root = Path(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        self.assertEqual(exp_mod.EXP_FILE, root / "data" / "exp.json")
+
+    def test_exp_root_merges_stray_file(self):
+        import core.general.exp.exp as exp_mod
+
+        with tempfile.TemporaryDirectory() as tmp:
+            main = Path(tmp) / "exp.json"
+            stray = Path(tmp) / "stray.json"
+            main.write_text(
+                json.dumps({"9101": {"42": _user(chat_exp=100)}}), encoding="utf-8",
+            )
+            stray.write_text(
+                json.dumps({
+                    "9101": {"42": _user(chat_exp=250, vc_exp=30)},
+                    "9102": {"7": _user(chat_exp=5)},
+                }),
+                encoding="utf-8",
+            )
+            with patch.object(exp_mod, "EXP_FILE", main), \
+                    patch.object(exp_mod, "_EXP_STRAY_FILE", stray), \
+                    patch.object(exp_mod, "_EXP_DATA", None), \
+                    patch.dict(os.environ, {}, clear=False):
+                os.environ.pop("EXP_DATA_PATH", None)
+                data = exp_mod._exp_root()
+        # 大きい方 (stray 側) が残り、stray にしか無いギルドも引き継がれる
+        self.assertEqual(data["9101"]["42"]["chat_exp"], 250)
+        self.assertEqual(data["9101"]["42"]["vc_exp"], 30)
+        self.assertEqual(data["9102"]["7"]["chat_exp"], 5)
 
 
 if __name__ == "__main__":
