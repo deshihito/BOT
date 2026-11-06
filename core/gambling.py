@@ -49,7 +49,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from core.items import ItemError
+from core.general.items import ItemError
 
 logger = logging.getLogger(__name__)
 

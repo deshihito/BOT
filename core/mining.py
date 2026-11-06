@@ -9,7 +9,7 @@
   1〜20 回の抽選で決まる。セッション開始のクールダウンは60秒
 - 1掘りの産出はコイン 10〜500（基本額の抽選）。20% で失敗して0
 - 10% で「大量採掘」が発動し、プール残高の 1〜10% が上乗せされる
-- コインは新規創出ではなく共有プール（core/economy_pool.py）から
+- コインは新規創出ではなく共有プール（core/general/economy_pool.py）から
   支払われ、プールにある分までしか出ない。プールは経済系の損失の
   還流でチャージされる（還流の発生源は economy_pool 側を参照）
 
@@ -39,7 +39,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from core.items import JST, ItemError
+from core.general.items import JST, ItemError
 
 logger = logging.getLogger(__name__)
 

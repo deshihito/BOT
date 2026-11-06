@@ -3,7 +3,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from core import ai_preferences, ai_provider_router, logfare
+from core import logfare
+from core.general import ai_preferences, ai_provider_router
 
 SYSTEM_PROMPT = (
     "あなたはAGO Coderです。コードと設計に関する質問へ、日本語で簡潔に回答してください。"
