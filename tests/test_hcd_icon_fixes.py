@@ -20,7 +20,7 @@ from core.emojis import FAILED  # noqa: E402
 
 #: ⚠️ を FAILED 化したファイル（失敗・拒否メッセージの接頭辞があったもの）
 CONVERTED_FILES = [
-    "cogs/globalchat.py",
+    "core/support/globalchat/cog.py",
     "cogs/server_setup.py",
     "cogs/shiritori.py",
     "cogs/sio_karaoke.py",

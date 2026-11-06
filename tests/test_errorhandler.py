@@ -156,7 +156,7 @@ class PrefixHandlerTest(unittest.IsolatedAsyncioTestCase):
     async def test_only_one_command_error_listener(self):
         import ast
         count = 0
-        for path in list((ROOT / "cogs").glob("*.py")) + [ROOT / "main.py"]:
+        for path in list((ROOT / "cogs").glob("*.py")) + [ROOT / "main.py", ROOT / "core/support/errorhandler/cog.py"]:
             tree = ast.parse(path.read_text(encoding="utf-8"))
             count += sum(1 for node in ast.walk(tree)
                          if isinstance(node, (ast.AsyncFunctionDef, ast.FunctionDef)) and node.name == "on_command_error")
