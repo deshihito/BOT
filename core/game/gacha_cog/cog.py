@@ -23,7 +23,7 @@ import config
 from core.game import clan as clan_core
 from core.game import gacha as gacha_core
 from core.game import prison as prison_core
-from core.panel_v2 import as_panel_v2, edit_panel_v2
+from core.support.panel_v2 import as_panel_v2, edit_panel_v2
 from cogs import wallet as wallet_module
 
 logger = logging.getLogger("cogs.gacha")
