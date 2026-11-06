@@ -16,6 +16,7 @@ from core.api_retry import run_with_retry
 
 from core.game.rta.common import *  # noqa: F401,F403 - shared constants/helpers
 from core.game.rta.helpers import _white_embed  # noqa: F401
+from core.user_names import resolve_display_names
 from core.game.rta.views import BumpRtaRoleView  # noqa: F401
 
 logger = logging.getLogger("cogs.disboard_rta")
@@ -91,21 +92,26 @@ class SettingsMixin:
                 global_text = f"{global_best.data[0]['elapsed_ms'] / 1000:.2f}秒" if global_best.data else "記録なし"
                 return await interaction.followup.send(
                     embed=_white_embed(
-                        f"<@{uid}> の**{event_type}自己ベスト**\nこのサーバー: **{local_text}**\n全サーバー: **{global_text}**"),
+                        f"{interaction.user.display_name} の**{event_type}自己ベスト**\nこのサーバー: **{local_text}**\n全サーバー: **{global_text}**"),
                     allowed_mentions=discord.AllowedMentions.none(),
                 )
+            # ランキングの氏名はメンションではなく通常表記にする（特に全サーバー
+            # ランキングはサーバー外ユーザーのメンションが「不明のユーザー」になる）。
+            bot = getattr(self, "bot", None)
             if scope == "global":
                 rows = await self._call(lambda: self.db.rpc("get_bump_rta_global_ranking", {
                     "p_event_type": event_type, "p_limit": 10}).execute())
                 data = rows.data or []
-                lines = [f"**{i}.** <@{r['user_id']}> — **{r['elapsed_ms'] / 1000:.2f}秒**（{r['attempts']}回）" for i, r in enumerate(data, 1)]
+                names = await resolve_display_names(bot, [r["user_id"] for r in data])
+                lines = [f"**{i}.** {names.get(int(r['user_id']), '')} — **{r['elapsed_ms'] / 1000:.2f}秒**（{r['attempts']}回）" for i, r in enumerate(data, 1)]
                 title = f"全サーバー {event_type} RTAランキング"
             else:
                 rows = await self._call(lambda: self.db.table("bump_rta_records").select(
                     "user_id,elapsed_ms,completed_at").eq("guild_id", str(interaction.guild_id)).eq(
                     "event_type", event_type).order("elapsed_ms").limit(10).execute())
                 data = rows.data or []
-                lines = [f"**{i}.** <@{r['user_id']}> — **{r['elapsed_ms'] / 1000:.2f}秒**" for i, r in enumerate(data, 1)]
+                names = await resolve_display_names(bot, [r["user_id"] for r in data])
+                lines = [f"**{i}.** {names.get(int(r['user_id']), '')} — **{r['elapsed_ms'] / 1000:.2f}秒**" for i, r in enumerate(data, 1)]
                 title = f"このサーバー {event_type} RTAランキング"
             return await interaction.followup.send(
                 embed=_white_embed(f"**{title}**\n" + ("\n".join(lines) if lines else "まだ記録がありません。")),

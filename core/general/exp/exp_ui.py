@@ -6,6 +6,7 @@ from ..common import *
 from .exp import (
     _as_int, _exp_ensure, _exp_load, _exp_root, general_level, level_from_exp,
 )
+from core.user_names import cached_display_name, resolve_display_names
 
 class ExpStatusView(discord.ui.View):
     def __init__(self, author_id: int, guild_id: int):
@@ -57,13 +58,27 @@ class ExpStatusView(discord.ui.View):
 
 
 class ExpRankingView(discord.ui.View):
-    def __init__(self, guild_id: int):
+    def __init__(self, guild_id: int, bot=None):
         super().__init__(timeout=300)
         self.guild_id = guild_id
+        self.bot = bot
         self._data_cache = _exp_root()
+        self._names: dict[int, str] = {}
 
     async def _load_latest(self):
         self._data_cache = await _exp_load()
+        # ランキングの氏名はメンションではなく通常表記にする（サーバー外・
+        # 退室済みユーザーのメンションは「不明のユーザー」になるため）。
+        # embed() は同期なので、名前はここで事前に解決しておく。
+        guild = self._data_cache.get(str(self.guild_id), {})
+        rows = []
+        for uid, u in guild.items():
+            chat_exp = _as_int(u.get("chat_exp"))
+            vc_exp = _as_int(u.get("vc_exp"))
+            rows.append((general_level(chat_exp, vc_exp), chat_exp + vc_exp, uid))
+        rows.sort(key=lambda x: (x[0], x[1]), reverse=True)
+        self._names = await resolve_display_names(
+            self.bot, [uid for _gl, _tot, uid in rows[:20]])
 
     def embed(self) -> discord.Embed:
         guild = self._data_cache.get(str(self.guild_id), {})
@@ -76,7 +91,13 @@ class ExpRankingView(discord.ui.View):
         rows.sort(key=lambda x: (x[0], x[1] + x[2]), reverse=True)
         lines = []
         for i, (gl, ce, ve, uid) in enumerate(rows[:20], start=1):
-            lines.append(f"`{i:>2}.` <@{uid}> — general Lv.{gl}（chat {ce} / vc {ve}）")
+            try:
+                uid_int = int(uid)
+            except (TypeError, ValueError):
+                uid_int = None
+            name = (self._names.get(uid_int) if uid_int is not None else None) \
+                or cached_display_name(self.bot, uid)
+            lines.append(f"`{i:>2}.` {name} — general Lv.{gl}（chat {ce} / vc {ve}）")
         return discord.Embed(
             title="EXPランキング（general順）",
             description="\n".join(lines) or "まだEXPデータがありません。",
