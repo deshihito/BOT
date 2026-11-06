@@ -43,22 +43,25 @@ class BoardImageTest(unittest.TestCase):
 
 class Round4RegistrationTest(unittest.TestCase):
     NEW = ["justone", "ito", "insider", "gauge", "ruins", "hanabi", "hoshi", "liequiz"]
+    NEW_R5 = ["cipher", "wirecut", "liardice", "mendou", "yotsuba"]
 
-    def test_total_42_games(self):
-        self.assertEqual(len(GAME_ORDER), 42)
-        for game in self.NEW:
+    def test_total_47_games(self):
+        self.assertEqual(len(GAME_ORDER), 47)
+        for game in self.NEW + self.NEW_R5:
             self.assertIn(game, GAME_ORDER)
             self.assertIn(game, GAME_GUIDES)
 
-    def test_party_genre_fits_one_select_page(self):
+    def test_party_genre_paginates(self):
+        # ラウンド5で party が25件を超えたため、ジャンル絞り込み時も
+        # ページ分割される（ハブのページング一般化）。
         from cogs.game import GAME_GENRE_BY_GAME, game_select_pages
         party = [g for g in GAME_ORDER if GAME_GENRE_BY_GAME[g] == "party"]
-        self.assertEqual(len(party), 24)
-        self.assertLessEqual(len(party), 25)
+        self.assertEqual(len(party), 29)
         pages = game_select_pages()
-        self.assertEqual(sum(len(p) for p in pages), 42)
+        self.assertEqual(sum(len(p) for p in pages), 47)
         self.assertTrue(all(len(p) <= 25 for p in pages))
-        self.assertEqual(len(game_select_pages("party")), 1)
+        party_pages = game_select_pages("party")
+        self.assertEqual([len(p) for p in party_pages], [25, 4])
 
     def test_ranked_games_known(self):
         from core import party_ranking

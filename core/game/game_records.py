@@ -214,7 +214,7 @@ class GameRecordsStore:
     def _load(self) -> dict[str, Any]:
         empty = {"flash": {}, "guess": {}, "sweeper": {}, "wordle_daily": {},
                  "highlow": {}, "g2048": {}, "sudoku": {}, "nonogram": {}, "twochoice": {},
-                 "justone": {}, "ito": {}, "hanabi": {}}
+                 "justone": {}, "ito": {}, "hanabi": {}, "wirecut": {}, "yotsuba": {}}
         raw = self._read_raw()
         if not isinstance(raw, dict):
             return empty
@@ -228,7 +228,9 @@ class GameRecordsStore:
                 "twochoice": _clean_twochoice(raw.get("twochoice")),
                 "justone": _clean_coop(raw.get("justone"), ("plays", "best_successes", "total_successes")),
                 "ito": _clean_coop(raw.get("ito"), ("plays", "clears")),
-                "hanabi": _clean_coop(raw.get("hanabi"), ("plays", "best_score", "total_score"))}
+                "hanabi": _clean_coop(raw.get("hanabi"), ("plays", "best_score", "total_score")),
+                "wirecut": _clean_coop(raw.get("wirecut"), ("plays", "clears")),
+                "yotsuba": _clean_coop(raw.get("yotsuba"), ("plays", "best_score", "total_score"))}
 
     def _read_raw(self) -> Any:
         # 既定パスのときだけ、旧保存先 (パスずれ期間の core/data/) から
@@ -526,6 +528,44 @@ class GameRecordsStore:
             entry = self._data["hanabi"].get(str(user_id))
             return dict(entry) if entry is not None else None
 
+    # ------------------------------------------------------------------ ラウンド5協力系
+    def record_wirecut(self, user_id, cleared: bool) -> dict[str, Any]:
+        """爆弾処理班: 挑戦回数とクリア回数を記録（チーム全員に同じ結果）。"""
+        with self._lock:
+            entry = self._data["wirecut"].setdefault(str(user_id), {"plays": 0, "clears": 0})
+            entry["plays"] += 1
+            if cleared:
+                entry["clears"] += 1
+            self._dirty += 1
+            result = dict(entry)
+        self._maybe_flush()
+        return result
+
+    def get_wirecut(self, user_id) -> dict[str, int] | None:
+        with self._lock:
+            entry = self._data["wirecut"].get(str(user_id))
+            return dict(entry) if entry is not None else None
+
+    def record_yotsuba(self, user_id, score: int) -> dict[str, Any]:
+        """よつば合わせ: チームスコアを記録（チーム全員に同じ結果）。"""
+        with self._lock:
+            entry = self._data["yotsuba"].setdefault(
+                str(user_id), {"plays": 0, "best_score": 0, "total_score": 0})
+            entry["plays"] += 1
+            entry["total_score"] += int(score)
+            best_updated = int(score) > entry["best_score"]
+            if best_updated:
+                entry["best_score"] = int(score)
+            self._dirty += 1
+            result = dict(entry, best_updated=best_updated)
+        self._maybe_flush()
+        return result
+
+    def get_yotsuba(self, user_id) -> dict[str, int] | None:
+        with self._lock:
+            entry = self._data["yotsuba"].get(str(user_id))
+            return dict(entry) if entry is not None else None
+
 
 # ---------------------------------------------------------------------- 表示ヘルパ
 def format_flash_line(entry: dict[str, Any], count: int, digits: int, interval: float) -> str:
@@ -696,6 +736,22 @@ def record_hanabi_safely(user_id, score: int) -> dict[str, Any] | None:
         return shared().record_hanabi(user_id, score)
     except Exception:
         logger.debug("hanabi record failed", exc_info=True)
+        return None
+
+
+def record_wirecut_safely(user_id, cleared: bool) -> dict[str, Any] | None:
+    try:
+        return shared().record_wirecut(user_id, cleared)
+    except Exception:
+        logger.debug("wirecut record failed", exc_info=True)
+        return None
+
+
+def record_yotsuba_safely(user_id, score: int) -> dict[str, Any] | None:
+    try:
+        return shared().record_yotsuba(user_id, score)
+    except Exception:
+        logger.debug("yotsuba record failed", exc_info=True)
         return None
 
 

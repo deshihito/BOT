@@ -63,6 +63,11 @@ GAME_COGS = {
     "hanabi": "Hanabi",
     "hoshi": "Hoshi",
     "liequiz": "LieQuiz",
+    "cipher": "Cipher",
+    "wirecut": "WireCut",
+    "liardice": "LiarDice",
+    "mendou": "Mendou",
+    "yotsuba": "Yotsuba",
 }
 
 RANKED_GAMES = {"ngword", "shiritori"}
@@ -77,7 +82,7 @@ GAME_GENRES = {
 # 導線最適化ラウンド3: 1件ジャンル「アドベンチャー」（ダンジョンのみ）は器を畳み、
 # ダンジョン（1人・自由にプレイ）を solo へ寄せた。分類だけの変更で機能には触らない。
 GAME_GENRE_BY_GAME = {
-    **{game: "party" for game in ("jinrou", "wordwolf", "uno", "doubt", "ngword", "shiritori", "janken", "babanuki", "quiz", "bingo", "majority", "onenight", "loveletter", "codenames", "twochoice", "thirtyone", "justone", "ito", "insider", "gauge", "ruins", "hanabi", "hoshi", "liequiz")},
+    **{game: "party" for game in ("jinrou", "wordwolf", "uno", "doubt", "ngword", "shiritori", "janken", "babanuki", "quiz", "bingo", "majority", "onenight", "loveletter", "codenames", "twochoice", "thirtyone", "justone", "ito", "insider", "gauge", "ruins", "hanabi", "hoshi", "liequiz", "cipher", "wirecut", "liardice", "mendou", "yotsuba")},
     **{game: "solo" for game in ("wordle", "shinkei", "guess", "flash", "minesweeper", "sudoku", "game2048", "nonogram", "highlow", "dungeon")},
     **{game: "board" for game in ("daifugo", "othello", "poker", "shogi", "chess", "koikoi", "gomoku", "connect4")},
 }
@@ -224,8 +229,8 @@ class GamePageButton(discord.ui.Button):
     """ゲームセレクトのページめくりボタン（前へ/次へ）。
 
     ページ状態は GameHubView.page が保持し、押すとその場でメッセージを
-    編集してセレクトの中身とページ表示を切り替える。ジャンル絞り込み時は
-    全ジャンルとも1ページに収まるため、ボタン自体を出さない。
+    編集してセレクトの中身とページ表示を切り替える。対象（全ゲーム or
+    ジャンル絞り込み）が1ページに収まる場合はボタン自体を出さない。
     """
 
     def __init__(self, delta: int, page: int, total_pages: int, row: int):
@@ -305,8 +310,8 @@ class GameHubView(discord.ui.View):
         # 導線最適化 M3: 既定はジャンルなし全ゲームセレクト。
         # ジャンルセレクトは廃止せず「絞り込み」として残し、選んだ場合だけ一覧を絞る。
         # ラウンド3で全34ゲームとなり上限25件を超えたため、セレクトは1つに固定し、
-        # 25件ごとのページをボタンでめくる（ジャンル絞り込み時は全ジャンルとも
-        # 1ページに収まるのでページめくりは出ない）。
+        # 25件ごとのページをボタンでめくる。ラウンド5で party が25件を超えたため、
+        # ページめくりはジャンル絞り込み時にも（pages が複数なら）そのまま出す。
         pages = game_select_pages(self.genre)
         self.page = min(max(self.page, 0), len(pages) - 1)
         game_select = GameSelect(self.genre, page=self.page)
