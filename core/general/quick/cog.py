@@ -23,7 +23,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
-from core import action_registry
+from core.general import action_registry
 
 logger = logging.getLogger(__name__)
 
@@ -126,7 +126,7 @@ async def dispatch_action(
         return await cog.start_game(interaction, spec.value.removeprefix("game:"))
     if spec.root == "help":
         # BOT fixer のコマンド制限（管理者は対象外）。
-        from core import command_control
+        from core.support import command_control
 
         if not await command_control.guard(interaction, "help:overview"):
             return None
