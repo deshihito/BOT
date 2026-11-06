@@ -74,6 +74,10 @@ class VoiceHub(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
         self.voice_sessions = get_manager(bot)
+        # VC参加時の自動開始（/support の自動化設定）を新規セッションへ配線する。
+        from core.vc import auto_start
+
+        self.voice_sessions.fresh_session_hook = auto_start.on_fresh_session
 
     async def _cog(self, interaction: discord.Interaction, key: str):
         cog = self.bot.get_cog(COGS[key])

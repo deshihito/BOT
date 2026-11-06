@@ -155,6 +155,12 @@ class SearchMixin:
 
     async def _panel_impl(self, r: Responder):
         """操作パネルを出す。Bot が VC にいなければ、実行した人の VC に入る。"""
+        # この操作で新規接続した場合はパネルをここで出すので、VC参加時の
+        # 自動開始（ミュージックパネル）が二重に投稿しないよう控えを残す。
+        if r.guild is not None:
+            from core.vc.auto_start import note_self_started
+
+            note_self_started(r.guild.id, "music_panel")
         await r.defer()
         if error := await self._ensure_music_connection(r):
             return await r.send(embed=we(error), ephemeral=True)

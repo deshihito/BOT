@@ -111,7 +111,7 @@ AI_CONFIRM_IDS = frozenset({
 # 読み取り専用の状態確認である sokunuke_status のみ AI tools 候補にも入れる。
 SUPPORT_AI_EXCLUDED_VALUES = frozenset({
     "sticky", "giveaway", "auth_panel", "role_panel", "language", "auto_react",
-    "sns_notify", "quest_notify", "levelup_notify", "voice_trigger", "globalchat",
+    "sns_notify", "quest_notify", "levelup_notify", "voice_trigger", "vc_auto_start", "globalchat",
     "sokunuke_on", "sokunuke_off", "sokunuke_vc_on", "sokunuke_vc_off",
 })
 

@@ -38,6 +38,8 @@ from core.support.binjou import BinjouSupportMixin
 from core.support.sns import SnsSupportMixin
 from core.support.quest import QuestSupportMixin
 from core.support.levelup import LevelUpSupportMixin
+from core.support.vc_auto_start import *  # noqa: F401,F403
+from core.support.vc_auto_start import VcAutoStartSupportMixin
 from core.support.globalchat_panel import GlobalChatSupportMixin
 
 # 分割前の cogs.support が持っていた内部ヘルパーも互換のため再エクスポートする
@@ -95,6 +97,7 @@ class SupportCog(
     StickySupportMixin,
     HoneypotSupportMixin,
     BinjouSupportMixin,
+    VcAutoStartSupportMixin,
     GlobalChatSupportMixin,
     commands.Cog,
 ):
@@ -118,6 +121,7 @@ class SupportCog(
         "sns_notify": "administrator",
         "quest_notify": "administrator",
         "levelup_notify": "manage_guild",
+        "vc_auto_start": "manage_guild",
         "globalchat": "manage_guild",
         "server_assist": "manage_guild",
         "sokunuke_status": "manage_guild",
@@ -300,6 +304,9 @@ class SupportCog(
 
         if selected == "levelup_notify":
             return await self.show_levelup_notify_settings(interaction)
+
+        if selected == "vc_auto_start":
+            return await self.show_vc_auto_start_settings(interaction)
 
         if selected == "globalchat":
             return await self.show_globalchat_settings(interaction)

@@ -146,6 +146,9 @@ class VoiceSessionManager:
         self._sessions: dict[int, VoiceSession] = {}
         self._locks: dict[int, asyncio.Lock] = {}
         self._tasks: set[asyncio.Task] = set()
+        # 新規セッション確立時に呼ばれる任意フック（VC参加時の自動開始）。
+        # VoiceHub が core/vc/auto_start.on_fresh_session を差し込む。
+        self.fresh_session_hook = None
 
     # ------------------------------------------------------------ 復旧用スナップショット
     # 「切れても死なない」ための薄いフック。永続化の失敗で VC 操作自体を
@@ -336,6 +339,13 @@ class VoiceSessionManager:
             self._sessions[guild.id] = session
             self._evaluate_idle(session)
             self._persist_session(session)
+            # 新規参加のときだけ自動開始フックを呼ぶ（共有リース追加や移動では呼ばない）。
+            # フック側の失敗で参加自体を落とさないよう、タスク化して隔離する。
+            if self.fresh_session_hook is not None:
+                try:
+                    self._spawn(self.fresh_session_hook(self.bot, session, user, text_channel))
+                except Exception:
+                    logger.exception("VC自動開始フックの起動に失敗しました (guild=%s)", guild.id)
             return vc
 
     async def release(self, guild, feature: Optional[str] = None, *, reason: str = "stop", by=None,
