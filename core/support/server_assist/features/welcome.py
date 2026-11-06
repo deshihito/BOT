@@ -58,23 +58,94 @@ def _repo_root() -> Path:
 _REPO_ROOT = _repo_root()
 
 _FONT_CANDIDATES = (
-    str(_REPO_ROOT / "assets" / "fonts" / "levelup.ttf"),
-    str(_REPO_ROOT / "assets" / "fonts" / "levelup.otf"),
+    # リポジトリ同梱の日本語フォントを最優先にする。OS フォントに頼ると、
+    # 日本語フォントの無い環境 (Raspberry Pi 等) で日本語が □ になる。
+    # 白基調・丸みのある太字のカードなので M PLUS Rounded 1c を第一候補にし、
+    # 駄目なら同じく同梱の Hachi Maru Pop (assets/fonts とリポジトリ直下) を使う。
+    str(_REPO_ROOT / "assets" / "fonts" / "MPLUSRounded1c-Regular.ttf"),
+    str(_REPO_ROOT / "assets" / "fonts" / "HachiMaruPop-Regular.ttf"),
+    str(_REPO_ROOT / "font.ttf"),
     "/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc",
     "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
     "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
     "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
 )
 
+# カードに必ず出る日本語 (固定文 + 代表的なかな/漢字)。フォント採用前に
+# これらが cmap にあるかを確認し、日本語を描けないフォントは採らない。
+_JP_PROBE = "あア漢字かなカナ、。ーへようこそメンバー人！・"
+
+
+def _font_covers_japanese(path: str) -> bool:
+    """フォントが日本語の基本字形を持つか (MIQ の _font_covers_japanese と同じ判定)。
+
+    Pillow で読み込めるだけでは日本語が □ になるため、cmap で実在を確認する。
+    fontTools が無い環境では判定できないため True を返し、従来動作を保つ。
+    """
+    try:
+        from fontTools.ttLib import TTFont
+    except Exception:
+        return True
+    try:
+        try:
+            cmap = TTFont(path).getBestCmap()
+        except Exception:
+            from fontTools.ttLib import TTCollection
+
+            cmap = TTCollection(path).fonts[0].getBestCmap()
+        return all(ord(ch) in cmap for ch in _JP_PROBE)
+    except Exception:
+        return False
+
+
+_CARD_FONT_PATH: str | None | bool = False  # False = 未探索
+
+
+def _pick_card_font_path() -> str | None:
+    """カード用フォントのパスを1回だけ探索して返す。
+
+    日本語を描ける候補を優先し、無ければ (欧文だけでも描けるよう)
+    読み込める最初の候補にフォールバックする。
+    """
+    global _CARD_FONT_PATH
+    if _CARD_FONT_PATH is not False:
+        return _CARD_FONT_PATH  # type: ignore[return-value]
+    from PIL import ImageFont
+
+    chosen: str | None = None
+    fallback: str | None = None
+    for path in _FONT_CANDIDATES:
+        if not path or not Path(path).is_file():
+            continue
+        try:
+            ImageFont.truetype(path, 20)
+        except Exception:
+            continue
+        if fallback is None:
+            fallback = path
+        if _font_covers_japanese(path):
+            chosen = path
+            break
+    if chosen is None:
+        chosen = fallback
+        if chosen is not None:
+            logger.warning(
+                "ウェルカムカード: 日本語を描けるフォントが見つかりませんでした (%s を使用)",
+                chosen,
+            )
+    _CARD_FONT_PATH = chosen
+    return chosen
+
 
 def _card_font(size: int):
     from PIL import ImageFont
 
-    for path in _FONT_CANDIDATES:
+    path = _pick_card_font_path()
+    if path:
         try:
             return ImageFont.truetype(path, size)
         except Exception:
-            continue
+            logger.debug("ウェルカムカード: フォントの読み込みに失敗しました", exc_info=True)
     try:
         return ImageFont.load_default(size=size)
     except TypeError:
@@ -244,23 +315,30 @@ class WelcomeChannelSelect(discord.ui.ChannelSelect):
             return await interaction.response.send_message(
                 "この設定には「サーバーの管理」権限が必要です。", ephemeral=True,
             )
-        channel = self.values[0] if self.values else None
-        if channel is not None:
-            me = getattr(self.parent_view.guild, "me", None)
-            if me is not None and not getattr(channel.permissions_for(me), "send_messages", False):
-                return await interaction.response.send_message(
-                    "そのチャンネルにはBotがメッセージを送信できません。", ephemeral=True,
-                )
-        if channel is None and self.kind == "welcome":
-            return await interaction.response.send_message(
-                "Botがメッセージを送信できるテキストチャンネルがありません。", ephemeral=True,
-            )
-        channel_id = getattr(channel, "id", None)
+        selected = self.values[0] if self.values else None
+        channel_id = getattr(selected, "id", None)
+        if channel_id is not None:
+            # values は AppCommandChannel (部分オブジェクト) で permissions_for を
+            # 持たないため、ギルドの実チャンネルに解決してから送信権限を確認する。
+            guild = self.parent_view.guild
+            channel = guild.get_channel(channel_id) if guild is not None else None
+            me = getattr(guild, "me", None)
+            if channel is not None and me is not None:
+                try:
+                    if not channel.permissions_for(me).send_messages:
+                        return await interaction.response.send_message(
+                            "そのチャンネルにはBotがメッセージを送信できません。", ephemeral=True,
+                        )
+                except Exception:
+                    pass
         field = "welcome_channel_id" if self.kind == "welcome" else "goodbye_channel_id"
         await update_settings(self.parent_view.guild_id, KEY, **{field: channel_id})
         self.parent_view.settings[field] = channel_id
         label = "参加" if self.kind == "welcome" else "退出"
-        await self.parent_view.refresh(interaction, f"{label}メッセージの送信先を設定しました。")
+        if channel_id is None:
+            await self.parent_view.refresh(interaction, f"{label}メッセージの送信先を未設定に戻しました。")
+        else:
+            await self.parent_view.refresh(interaction, f"{label}メッセージの送信先を設定しました。")
 
 
 class WelcomeToggleButton(discord.ui.Button):
@@ -476,11 +554,21 @@ async def _send(guild: Any, member: Any, kind: str, settings_value: dict[str, An
         return False
     channel = guild.get_channel(channel_id)
     if channel is None:
+        # 設定済みのチャンネルが削除されている等。黙って終わると
+        # 「設定したのに来ない」が追えないため、理由をログに残す。
+        logger.warning(
+            "参加・退出メッセージの送信先チャンネルが見つかりません: guild=%s channel=%s kind=%s",
+            getattr(guild, "id", None), channel_id, kind,
+        )
         return False
     me = getattr(guild, "me", None)
     if me is not None:
         try:
             if not channel.permissions_for(me).send_messages:
+                logger.warning(
+                    "参加・退出メッセージの送信権限がありません: guild=%s channel=%s kind=%s",
+                    getattr(guild, "id", None), channel_id, kind,
+                )
                 return False
         except Exception:
             pass
@@ -498,7 +586,9 @@ async def _send(guild: Any, member: Any, kind: str, settings_value: dict[str, An
         send_kwargs["file"] = file
     try:
         await channel.send(**send_kwargs)
-    except discord.HTTPException:
+    except Exception:
+        # 参加・退出フック側に例外を伝播させない (送信先がフォーラム化している
+        # 等の AttributeError も含め、ここで記録して終わる)。
         logger.exception("参加・退出メッセージを送信できませんでした: guild=%s", getattr(guild, "id", None))
         return False
     return True
