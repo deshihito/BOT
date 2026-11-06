@@ -2,7 +2,7 @@
 """日報（オプトインDM）の送信と ON/OFF 切り替え。
 
 原典の日報は特定個人への無条件DMだったため、AGO では同意モデルに
-作り替えた（core/daily_report.py）。ユーザーが自分で ON にしたとき
+作り替えた（core/support/daily_report.py）。ユーザーが自分で ON にしたとき
 だけ、JST 21:00 以降にその日の経済サマリを DM で送る。
 
 送信チェックは毎分ループ1本だけ（既存の flush ループ群と同じ作法）。
@@ -22,7 +22,7 @@ import discord
 from discord.ext import commands, tasks
 
 import config
-from core import daily_report as report_core
+from core.support.daily_report import store as report_core
 from cogs import wallet as wallet_module
 
 logger = logging.getLogger(__name__)
