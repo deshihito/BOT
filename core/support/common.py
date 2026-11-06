@@ -42,8 +42,17 @@ async def edit_interaction_message(interaction: discord.Interaction, **kwargs):
     return await interaction.response.edit_message(**kwargs)
 
 
-async def report_callback_error(interaction: discord.Interaction, context: str):
-    """コールバック例外をログに残し、可能ならユーザーにも通知する。"""
+async def report_callback_error(interaction: discord.Interaction, context: str,
+                                error: Exception | None = None):
+    """コールバック例外をログに残し、可能ならユーザーにも通知する。
+
+    ``error`` が ``InteractionResponded`` のときは通知しない。その時点で
+    panel_recovery か callback 自身の先行処理が既に応答を届けており、
+    追加のエラー通知は誤報になる（core/panel_v2.py の on_error と同じ扱い）。
+    """
+    if isinstance(error, discord.InteractionResponded):
+        logger.debug("%s: 応答済みのためエラーを握ります", context)
+        return
     logger.exception("%s", context)
     try:
         if interaction.response.is_done():

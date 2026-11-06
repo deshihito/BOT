@@ -303,7 +303,8 @@ class VoiceHub(commands.Cog):
                     name: str | None = None, max_servers: int | None = None,
                     desc: str | None = None):
         # 利用履歴（よく使う／最近）は入口ここで記録する（失敗しても壊さない）。
-        await action_usage.record_safely(
+        # 保存の書き込みで応答を遅らせないようバックグラウンド記録を使う。
+        action_usage.record_safely_in_background(
             getattr(interaction, "guild_id", None),
             getattr(getattr(interaction, "user", None), "id", None),
             f"vc:{value}",

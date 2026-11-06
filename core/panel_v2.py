@@ -193,7 +193,17 @@ class PanelLayoutView(discord.ui.LayoutView):
         return await self.panel.interaction_check(interaction)
 
     async def on_error(self, interaction: discord.Interaction, error: Exception, item=None) -> None:
-        """例外を必ずACKして可視化する（無応答エラーの防止と原因特定用）。"""
+        """例外を必ずACKして可視化する（無応答エラーの防止と原因特定用）。
+
+        ただし ``InteractionResponded`` は可視化しない。その時点で
+        panel_recovery か callback 自身の先行処理が既に応答を届けており、
+        利用者への追加通知は誤報でしかない（生存中 callback が応答に
+        遅れて recovery と競合した場合に「内部エラー: 40060」が利用者に
+        見えてしまう事故の再発防止）。
+        """
+        if isinstance(error, discord.InteractionResponded):
+            logger.debug("パネル: 応答済みのためエラーを握ります (%s)", error)
+            return
         traceback.print_exception(type(error), error, error.__traceback__)
         try:
             if interaction.response.is_done():

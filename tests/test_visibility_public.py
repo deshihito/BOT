@@ -112,15 +112,23 @@ class MarketChartVisibilityTest(unittest.IsolatedAsyncioTestCase):
 
 
 class GeneralRankingVisibilityTest(unittest.IsolatedAsyncioTestCase):
+    # EXP系は「先に defer してから followup で結果を送る」形になった
+    # （応答前に表示名解決などの重い処理をしないため）。公開（ephemeral
+    # でない）という契約自体は不変なので、followup 側で検証する。
+    def followup_kwargs(self, interaction):
+        self.assertTrue(interaction.followup.send.await_count)
+        return interaction.followup.send.call_args.kwargs
+
     async def test_exp_ranking_dispatch_posts_publicly(self):
         from cogs.general import GeneralCog
 
         cog = GeneralCog.__new__(GeneralCog)
         cog.bot = types.SimpleNamespace(get_cog=lambda _name: None)
-        interaction, sent = fake_interaction()
+        interaction, _sent = fake_interaction()
         await cog.dispatch_general(interaction, "exp_ranking")
-        self.assertIn("view", sent)
-        self.assertNotEqual(sent.get("ephemeral"), True)
+        kwargs = self.followup_kwargs(interaction)
+        self.assertIn("view", kwargs)
+        self.assertNotEqual(kwargs.get("ephemeral"), True)
 
     async def test_exp_status_dispatch_is_public(self):
         # ephemeral第2波方針（2026-11-06）: EXPステータスも既定で公開する。
@@ -128,10 +136,11 @@ class GeneralRankingVisibilityTest(unittest.IsolatedAsyncioTestCase):
 
         cog = GeneralCog.__new__(GeneralCog)
         cog.bot = types.SimpleNamespace(get_cog=lambda _name: None)
-        interaction, sent = fake_interaction()
+        interaction, _sent = fake_interaction()
         await cog.dispatch_general(interaction, "exp_status")
-        self.assertIn("view", sent)
-        self.assertNotEqual(sent.get("ephemeral"), True)
+        kwargs = self.followup_kwargs(interaction)
+        self.assertIn("view", kwargs)
+        self.assertNotEqual(kwargs.get("ephemeral"), True)
 
 
 class GameStartNoticeSourceTest(unittest.TestCase):
