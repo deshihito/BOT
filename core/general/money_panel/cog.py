@@ -14,7 +14,7 @@
 - その場で完結する系（採掘・受け取り・宝箱）は各 cog の execute_* を
   呼び、結果表示後にパネルを最新ステータスへ更新する
 
-パネルは他の経済系パネルと同様、core/panel_v2.py の PanelLayoutView
+パネルは他の経済系パネルと同様、core/support/panel_v2.py の PanelLayoutView
 で包んでコンポーネントV2表示にする（embed は非同期に集約するため、
 ビルド結果をキャッシュして embed() から返す）。賭け金エスクロー等の
 資産保全は各 cog 側の仕組みに任せるため、
@@ -44,7 +44,7 @@ from core.general import items as items_core
 from core.general import market as market_core
 from core.game import prison as prison_core
 from core.general import starter as starter_core
-from core.panel_v2 import as_panel_v2, edit_message_v2, edit_panel_v2
+from core.support.panel_v2 import as_panel_v2, edit_message_v2, edit_panel_v2
 from cogs import wallet as wallet_module  # 定数は実行時に引く（テストの cog 再読込対策）
 
 logger = logging.getLogger(__name__)
