@@ -17,7 +17,7 @@
   コール / レイズ / フォールド）→ 交換1回 → ショーダウン。
   ポットはサイドポット方式で分配し、レーキとして各勝者の受取から
   5%（切り捨て）を消却する（インフレ対策）。
-- ハンドの勝者（ポットを獲得した全員）は core/party_ranking.py に
+- ハンドの勝者（ポットを獲得した全員）は core/game/party_ranking.py に
   ハンド勝利数として記録する。
 - AI tools からの起動（game:poker）: 起動自体はコインを動かさず、
   バイインは参加者本人のボタン操作でのみ行うため、数字当て・
@@ -35,7 +35,7 @@ import discord
 from discord.ext import commands
 import config
 from cogs.wallet import INSUFFICIENT, NEW_USER_BALANCE
-from core import party_ranking
+from core.game import party_ranking
 from core.game import game_panels
 from core.game import prison as prison_core
 
