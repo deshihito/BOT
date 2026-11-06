@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from .common import *
-from .miq import (
+from .miq.miq import (
     _MIQ_ASSET_FONTS, _miq_available_fonts, _miq_clean_text, _miq_load_font,
     _miq_save_png, _miq_wrap, miq_get_prefs, miq_is_refusing,
 )
