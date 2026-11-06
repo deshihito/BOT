@@ -15,7 +15,7 @@ class SharedEmbedFactoryTest(unittest.TestCase):
         self.assertEqual(embed.color.value, 0xFFFFFF)
 
     def test_each_cog_we_matches_its_base_color(self):
-        from core.voice.music.common import we as music_we
+        from core.vc.music.common import we as music_we
         from cogs.doubt import we as doubt_we
         from cogs.sio_karaoke import we as karaoke_we
         from cogs.sio_rec import we as rec_we
@@ -33,7 +33,7 @@ class SharedEmbedFactoryTest(unittest.TestCase):
         import pathlib
 
         root = pathlib.Path(__file__).resolve().parents[1]
-        for rel in ("core/voice/music/common.py", "cogs/doubt.py", "cogs/sio_karaoke.py",
+        for rel in ("core/vc/music/common.py", "cogs/doubt.py", "cogs/sio_karaoke.py",
                     "cogs/sio_rec.py", "cogs/sio_transcription.py", "cogs/sio_voicechanger.py"):
             text = (root / rel).read_text(encoding="utf-8")
             self.assertNotIn("def we(", text, rel)

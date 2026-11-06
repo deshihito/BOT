@@ -76,7 +76,7 @@ class GameRankingVisibilityTest(unittest.IsolatedAsyncioTestCase):
 
 class MusicQueueVisibilityTest(unittest.IsolatedAsyncioTestCase):
     async def test_queue_impl_posts_publicly(self):
-        from core.voice.music.panel import PanelMixin
+        from core.vc.music.panel import PanelMixin
 
         mixin = PanelMixin.__new__(PanelMixin)
         mixin.build_queue_embed = lambda guild_id: discord.Embed(title="queue")
@@ -184,14 +184,14 @@ class Wave2PublicSourceTest(unittest.TestCase):
         self.assertNotIn("defer(ephemeral=True, thinking=True)", self.read("cogs/general.py"))
         # 導線最適化 M5: /game・/vc は履歴セレクトの読み込みのため defer→followup に
         # 変わったが、defer は ephemeral=False（公開）が既定で公開方針は不変。
-        for rel in ("cogs/game.py", "core/voice/hub.py"):
+        for rel in ("cogs/game.py", "core/vc/hub.py"):
             src = self.read(rel)
             # ルートコマンドの defer は公開（ephemeral 指定なし）であること
             self.assertIn("await interaction.response.defer(thinking=True)", src, rel)
             self.assertIn("await interaction.followup.send(view=as_panel_v2(view))", src, rel)
 
     def test_panels_have_owner_checks(self):
-        for rel in ("core/general/panel.py", "core/voice/hub.py", "cogs/game.py", "cogs/help.py"):
+        for rel in ("core/general/panel.py", "core/vc/hub.py", "cogs/game.py", "cogs/help.py"):
             self.assertIn("interaction_check", self.read(rel), rel)
 
     def test_economy_panels_public_with_owner_check(self):

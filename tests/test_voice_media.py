@@ -1,7 +1,7 @@
 import array
 import unittest
 
-from core.voice.voice_media import (
+from core.vc.voice_media import (
     FRAME_BYTES, SharedAudioSource, SharedReceiveSink, _mix_frames,
     add_audio_source, remove_audio_source,
 )

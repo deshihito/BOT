@@ -9,7 +9,7 @@ class GlobalVcGenreTest(unittest.TestCase):
     """R2-1: グローバルVCの開始/終了はルーム管理と同じジャンルに置く。"""
 
     def test_global_actions_moved_to_gvc_rooms(self):
-        from core.voice.common import VOICE_ACTIONS_BY_GENRE, VOICE_GENRES
+        from core.vc.common import VOICE_ACTIONS_BY_GENRE, VOICE_GENRES
 
         community = [v for _l, v in VOICE_ACTIONS_BY_GENRE["community"]]
         rooms = [v for _l, v in VOICE_ACTIONS_BY_GENRE["gvc_rooms"]]

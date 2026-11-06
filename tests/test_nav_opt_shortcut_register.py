@@ -7,7 +7,7 @@ class RegisterButtonTest(unittest.TestCase):
     def _panels(self):
         from core.general.panel import GeneralPanel
         from core.support.panel import SupportPanelView
-        from core.voice.hub import VoicePanelView
+        from core.vc.hub import VoicePanelView
 
         return GeneralPanel(None), SupportPanelView(None), VoicePanelView(None)
 
