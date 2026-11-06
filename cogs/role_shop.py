@@ -25,7 +25,8 @@ import discord
 from discord.ext import commands, tasks
 
 import config
-from core import guild_settings, prison as prison_core
+from core import guild_settings
+from core.game import prison as prison_core
 from core import role_shop as shop_core
 from core.panel_v2 import as_panel_v2, edit_panel_v2
 from cogs import wallet as wallet_module
