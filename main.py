@@ -7,7 +7,7 @@ import traceback
 import config
 import defining as df
 from keep_alive import configure_coder, keep_alive
-from core.emojis import AGOMUNIMUNI, FAILED, SUCCESS
+from core.support.emojis import AGOMUNIMUNI, FAILED, SUCCESS
 import logging
 from collections import deque
 
@@ -38,7 +38,7 @@ class MyBot(commands.Bot):
     async def close(self):
         # 終了前にAPIへ送れていない設定を送っておく（送れなくても次回起動時に再送する）。
         try:
-            from core.storage import flush_all
+            from core.support.storage import flush_all
             await flush_all(timeout=5.0)
         except Exception:
             logging.getLogger(__name__).exception("未送信の設定を保存できませんでした")
@@ -98,21 +98,21 @@ class MyBot(commands.Bot):
     async def _sync_guild_registry(self):
         """参加中サーバーの一覧を Web ダッシュボード用に保存する（失敗しても起動は止めない）。"""
         try:
-            from core.guild_registry import get_registry
+            from core.support.guild_registry import get_registry
             await get_registry().sync_all(list(self.guilds))
         except Exception:
             logging.getLogger(__name__).exception("サーバー一覧の保存に失敗しました")
 
     async def on_guild_join(self, guild):
         try:
-            from core.guild_registry import get_registry
+            from core.support.guild_registry import get_registry
             await get_registry().record(guild)
         except Exception:
             logging.getLogger(__name__).exception("サーバー一覧への登録に失敗しました")
 
     async def on_guild_remove(self, guild):
         try:
-            from core.guild_registry import get_registry
+            from core.support.guild_registry import get_registry
             await get_registry().remove(guild.id)
         except Exception:
             logging.getLogger(__name__).exception("サーバー一覧からの削除に失敗しました")
