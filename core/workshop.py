@@ -51,7 +51,7 @@ logger = logging.getLogger(__name__)
 MACHINE_TIERS: dict[str, dict[str, Any]] = {
     "small": {
         "name": "小型加工機",
-        "price": 2800,
+        "price": 1400,
         "cycle_hours": 4,
         "storage_hours": 8,
         "lifespan_cycles": 36,
@@ -62,7 +62,7 @@ MACHINE_TIERS: dict[str, dict[str, Any]] = {
     },
     "auto": {
         "name": "自動加工機",
-        "price": 10000,
+        "price": 5200,
         "cycle_hours": 6,
         "storage_hours": 12,
         "lifespan_cycles": 40,
@@ -73,7 +73,7 @@ MACHINE_TIERS: dict[str, dict[str, Any]] = {
     },
     "large": {
         "name": "大型加工機",
-        "price": 19000,
+        "price": 9400,
         "cycle_hours": 8,
         "storage_hours": 24,
         "lifespan_cycles": 42,
@@ -101,9 +101,12 @@ FLUSH_INTERVAL_SECONDS = 60.0
 
 
 def _material_value(item_id: str) -> float:
+    # 生産物の実現価値は売却額（全アイテム共通で購入価格の半分）で測る。
+    # 全アイテム売却が可能になった 2026-11-06 以前は、売却できない素材を
+    # 購入価格で評価していたため EV が実態より大きく出ていた。売却額
+    # ベースに直した結果、加工機価格も総 EV の約半分になるよう調整した。
     definition = ITEM_DEFS[item_id]
-    return float(definition["sell_price"] if definition["sell_price"] is not None
-                 else definition["price"])
+    return float(definition["sell_price"])
 
 
 def production_expected_value(tier_id: str) -> float:

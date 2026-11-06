@@ -21,7 +21,9 @@ from discord.ext import commands, tasks
 
 import config
 from core import items as items_core
+from core import prison as prison_core
 from core.messages import ITEM_INVALID_INPUT, ITEM_NOT_FOUND, item_action_failed
+from core.panel_v2 import as_panel_v2, edit_panel_v2
 from cogs import wallet as wallet_module  # INSUFFICIENT は実行時に引く（テストの cog 再読込で同一性が崩れないため）
 
 logger = logging.getLogger(__name__)
@@ -31,21 +33,54 @@ SHOP_ID = "ITEM_SHOP"
 BOX_ID = "TREASURE_BOX"
 
 
+# ---------------------------------------------------------------------------
+# コンポーネントV2 統一（core/panel_v2.py の流儀）
+# ---------------------------------------------------------------------------
+
+def _wrap(view):
+    """View を PanelLayoutView で包み、再描画用に view._v2 へ保持する。"""
+    view._v2 = as_panel_v2(view)
+    return view._v2
+
+
+async def _edit_panel(interaction: discord.Interaction, view, *, button=None) -> None:
+    """パネルをその場で再描画する（V2 で包まれていれば V2 の編集経路）。"""
+    container = getattr(button, "view", None)
+    if container is None or not hasattr(container, "_sync"):
+        container = getattr(view, "_v2", None) or view
+    if hasattr(container, "_sync"):
+        container._sync()
+        await edit_panel_v2(interaction, container)
+    elif interaction.response.is_done():
+        await interaction.edit_original_response(embed=view.embed(), view=view)
+    else:
+        await interaction.response.edit_message(embed=view.embed(), view=view)
+
+
 def _item_name(item_id: str) -> str:
     definition = items_core.ITEM_DEFS.get(item_id)
     return definition["name"] if definition else item_id
 
 
-def _shop_lines() -> list[str]:
-    lines = []
+def _shop_lines() -> tuple[list[str], list[str]]:
+    """ショップ表示行を（素材・その他, 効果・消費）の2群で返す。
+
+    全アイテム売却可能（売却額は購入価格の半分）なので売却額は常に併記し、
+    効果・消費アイテムには短い効果説明を付ける。
+    """
+    plain: list[str] = []
+    consumables: list[str] = []
     for item_id, definition in items_core.ITEM_DEFS.items():
         if not definition["purchasable"]:
             continue
-        line = f"・{definition['name']} — **{definition['price']:,} AGO**"
-        if definition["sell_price"] is not None:
-            line += f"（売却 {definition['sell_price']:,} AGO）"
-        lines.append(line)
-    return lines
+        line = (f"・{definition['name']} — **{definition['price']:,} AGO**"
+                f"（売却 {definition['sell_price']:,} AGO）")
+        if definition["kind"] == "consumable":
+            line += f"／{definition['desc']}"
+            consumables.append(line)
+        else:
+            plain.append(line)
+    return plain, consumables
 
 
 def _items_embed(store: items_core.ItemStore, user_id: int) -> discord.Embed:
@@ -60,8 +95,6 @@ def _items_embed(store: items_core.ItemStore, user_id: int) -> discord.Embed:
         embed.add_field(name="所持アイテム", value="\n".join(lines), inline=False)
     else:
         embed.add_field(name="所持アイテム", value="（なし）", inline=False)
-    embed.add_field(
-        name="宝箱", value=f"**{inventory.get('treasure_box', 0)} 個**", inline=True)
     effects = store.active_effects(uid)
     if effects:
         now = datetime.now(config.JST)
@@ -77,7 +110,14 @@ def _items_embed(store: items_core.ItemStore, user_id: int) -> discord.Embed:
             label = effect_labels.get(effect_id, effect_id)
             lines.append(f"・{label}（あと約 {remaining:.1f} 時間）")
         embed.add_field(name="発動中の効果", value="\n".join(lines), inline=False)
-    embed.add_field(name="ショップ", value="\n".join(_shop_lines()), inline=False)
+    plain_lines, consumable_lines = _shop_lines()
+    if plain_lines:
+        embed.add_field(
+            name="ショップ（素材ほか）", value="\n".join(plain_lines), inline=False)
+    if consumable_lines:
+        embed.add_field(
+            name="ショップ（効果・消費）", value="\n".join(consumable_lines),
+            inline=False)
     embed.set_footer(text="買えない素材は合成や宝箱で手に入ります。")
     return embed
 
@@ -165,8 +205,6 @@ def _item_pick_options(cog: "ItemsCog", user_id: int, action: str) -> list[disco
         inventory = cog.store.inventory(str(user_id))
         for item_id, count in sorted(inventory.items()):
             definition = items_core.ITEM_DEFS.get(item_id) or {}
-            if action == "sell" and definition.get("sell_price") is None:
-                continue
             suffix = f"（売却 {definition['sell_price']:,} AGO）" if action == "sell" else ""
             options.append(discord.SelectOption(
                 label=f"{_item_name(item_id)} ×{count}{suffix}", value=item_id))
@@ -185,12 +223,18 @@ class ItemPickView(discord.ui.View):
         self.cog = cog
         self.user_id = user_id
         self.action = action
+        titles = {"buy": "買うアイテムを選択", "sell": "売るアイテムを選択",
+                  "use": "使うアイテムを選択"}
+        self.title = titles[action]
         select = discord.ui.Select(placeholder="アイテムを選択してください", options=options)
         select.callback = self._on_pick
         self.add_item(select)
 
     async def interaction_check(self, interaction) -> bool:
         return interaction.user.id == self.user_id
+
+    def embed(self) -> discord.Embed:
+        return discord.Embed(title=self.title, color=ITEMS_COLOR)
 
     async def _on_pick(self, interaction: discord.Interaction):
         item_id = interaction.data["values"][0]
@@ -203,10 +247,8 @@ async def _send_item_pick(interaction: discord.Interaction, cog: "ItemsCog", act
     if not options:
         return await interaction.response.send_message(
             "対象のアイテムがありません。", ephemeral=True)
-    titles = {"buy": "買うアイテムを選択", "sell": "売るアイテムを選択", "use": "使うアイテムを選択"}
     await interaction.response.send_message(
-        embed=discord.Embed(title=titles[action], color=ITEMS_COLOR),
-        view=ItemPickView(cog, interaction.user.id, action, options),
+        view=_wrap(ItemPickView(cog, interaction.user.id, action, options)),
         ephemeral=True)
 
 
@@ -220,10 +262,12 @@ class ItemsView(discord.ui.View):
         # 公開パネル化（ephemeral第2波）: 操作は本人のみ。
         return interaction.user.id == self.user_id
 
+    def embed(self) -> discord.Embed:
+        return _items_embed(self.cog.store, self.user_id)
+
     @discord.ui.button(label="更新", style=discord.ButtonStyle.secondary)
     async def refresh(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.edit_message(
-            embed=_items_embed(self.cog.store, self.user_id), view=self)
+        await _edit_panel(interaction, self, button=button)
 
     @discord.ui.button(label="買う", style=discord.ButtonStyle.success)
     async def buy(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -272,8 +316,7 @@ class ItemsCog(commands.Cog):
     # ------------------------------------------------------------------ 入口
     async def show_items(self, interaction: discord.Interaction):
         view = ItemsView(self, interaction.user.id)
-        await interaction.response.send_message(
-            embed=_items_embed(self.store, interaction.user.id), view=view)
+        await interaction.response.send_message(view=_wrap(view))
 
     async def open_buy(self, interaction: discord.Interaction):
         await _send_item_pick(interaction, self, "buy")
@@ -309,6 +352,9 @@ class ItemsCog(commands.Cog):
     async def execute_buy(self, user_id: int, item_id: str, count: int) -> str:
         uid = str(user_id)
         try:
+            blocked = prison_core.block_message(uid)
+            if blocked:
+                return item_action_failed(blocked)
             definition = items_core.ITEM_DEFS.get(item_id)
             if definition is None:
                 return item_action_failed("そのアイテムは存在しません。")
@@ -343,11 +389,13 @@ class ItemsCog(commands.Cog):
     async def execute_sell(self, user_id: int, item_id: str, count: int) -> str:
         uid = str(user_id)
         try:
+            blocked = prison_core.block_message(uid)
+            if blocked:
+                return item_action_failed(blocked)
             definition = items_core.ITEM_DEFS.get(item_id)
             if definition is None:
                 return item_action_failed("そのアイテムは存在しません。")
-            if definition["sell_price"] is None:
-                return item_action_failed(f"{definition['name']}は売却できません。")
+            # 売却額は全アイテム共通で購入価格の半分（core/items.py で設定）。
             if count <= 0:
                 return item_action_failed("数量を正しく入力してください。")
             total = int(definition["sell_price"]) * count
@@ -372,6 +420,9 @@ class ItemsCog(commands.Cog):
 
     def execute_use(self, user_id: int, item_id: str) -> str:
         try:
+            blocked = prison_core.block_message(str(user_id))
+            if blocked:
+                return item_action_failed(blocked)
             return "✅ " + self.store.use_item(str(user_id), item_id)
         except items_core.ItemError as exc:
             return item_action_failed(exc)
@@ -382,6 +433,9 @@ class ItemsCog(commands.Cog):
     async def execute_open_boxes(self, user_id: int) -> str:
         uid = str(user_id)
         try:
+            blocked = prison_core.block_message(uid)
+            if blocked:
+                return item_action_failed(blocked)
             result = self.store.open_boxes(uid)
             coins = int(result["coins"])
             balance = None

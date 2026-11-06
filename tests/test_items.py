@@ -200,11 +200,15 @@ class ShopFlowTest(unittest.TestCase):
             self.assertIn("売りました", message)
             self.assertEqual(wallet.balances["1"], items.ITEM_DEFS["gold_scrap"]["sell_price"])
             self.assertEqual(store.count("1", "gold_scrap"), 1)
-            # 売却できないアイテムは弾く。
+            # 素材も含めて全アイテムが売却できる（売却額は購入価格の半分）。
             store.add("1", "scrap", 1)
+            before = wallet.balances["1"]
             message = asyncio.run(cog.execute_sell(1, "scrap", 1))
-            self.assertIn("売却できません", message)
-            self.assertEqual(store.count("1", "scrap"), 1)
+            self.assertIn("売りました", message)
+            self.assertEqual(
+                wallet.balances["1"] - before,
+                items.ITEM_DEFS["scrap"]["price"] // 2)
+            self.assertEqual(store.count("1", "scrap"), 0)
 
 
 class FeePassMarketTest(unittest.TestCase):
