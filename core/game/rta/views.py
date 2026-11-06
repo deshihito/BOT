@@ -12,7 +12,7 @@ from statistics import median
 import discord
 from discord import app_commands
 from discord.ext import commands, tasks
-from core.api_retry import run_with_retry
+from core.support.api_retry import run_with_retry
 
 from core.game.rta.common import *  # noqa: F401,F403 - shared constants/helpers
 from core.game.rta.helpers import _white_embed  # noqa: F401
