@@ -3,7 +3,7 @@
 
 - スラッシュコマンドは増やさず、/game の「NGワード」から募集する（GameHub が start_recruit を呼ぶ）。
 - 状態はチャンネルごとに ``self.games[channel_id]`` に持ち、終わったら必ず消す。
-- 勝利数は core/party_ranking.py 経由で Supabase の party_game_record_win に送る。
+- 勝利数は core/game/party_ranking.py 経由で Supabase の party_game_record_win に送る。
   関数がまだ無いときはメモリだけで数える（Bot を再起動すると消える）。
 """
 import asyncio
@@ -14,7 +14,7 @@ from core.game import game_panels
 from core.messages import recruit_join_prompt
 from discord.ext import commands
 
-from core import party_ranking
+from core.game import party_ranking
 
 COLOR = 0xFFFFFF
 RECRUIT_SECONDS = 60
