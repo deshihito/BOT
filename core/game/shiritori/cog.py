@@ -23,11 +23,11 @@ import unicodedata
 
 import discord
 from core.game import game_panels, game_restore
-from core.messages import recruit_join_prompt
+from core.support.messages import recruit_join_prompt
 from discord.ext import commands
 
 from core.game import party_ranking
-from core.emojis import CROCK, FAILED
+from core.support.emojis import CROCK, FAILED
 
 logger = logging.getLogger(__name__)
 
