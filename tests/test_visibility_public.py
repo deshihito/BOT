@@ -139,17 +139,17 @@ class GameStartNoticeSourceTest(unittest.TestCase):
 
     START_FILES = {
         "core/game/chess/cog.py": ("チェスの募集を開始しました", "CPU対戦"),
-        "cogs/othello.py": ("オセロの募集を開始しました", "オセロCPU対戦"),
-        "cogs/shogi.py": ("将棋の募集を開始しました", "将棋CPU対戦"),
-        "cogs/poker.py": ("ポーカーの募集を開始しました",),
-        "cogs/uno.py": ("UNOゲームの募集を開始しました",),
+        "core/game/othello/cog.py": ("オセロの募集を開始しました", "オセロCPU対戦"),
+        "core/game/shogi/cog.py": ("将棋の募集を開始しました", "将棋CPU対戦"),
+        "core/game/poker/cog.py": ("ポーカーの募集を開始しました",),
+        "core/game/uno/cog.py": ("UNOゲームの募集を開始しました",),
         "core/game/doubt/cog.py": ("ダウトの募集を開始しました",),
         "core/game/babanuki/cog.py": ("ババ抜きの募集を開始しました",),
         "core/game/daifugo/cog.py": ("大富豪の募集を開始しました",),
         "core/game/janken/cog.py": ("じゃんけんの募集を開始しました",),
         "core/support/ngword/cog.py": ("NGワードの募集を開始しました",),
-        "cogs/shinkei.py": ("神経衰弱の募集を開始しました",),
-        "cogs/shiritori.py": ("お題しりとりの募集を開始しました",),
+        "core/game/shinkei/cog.py": ("神経衰弱の募集を開始しました",),
+        "core/game/shiritori/cog.py": ("お題しりとりの募集を開始しました",),
     }
 
     def test_start_notices_are_not_ephemeral(self):
@@ -200,10 +200,10 @@ class Wave2PublicSourceTest(unittest.TestCase):
 
     def test_exceptions_stay_ephemeral(self):
         # 手札表示（poker の交換後手札・daifugo の手札パネル）は維持
-        self.assertIn("交換後の手札", self.read("cogs/poker.py"))
+        self.assertIn("交換後の手札", self.read("core/game/poker/cog.py"))
         self.assertIn("あなたの手札: {hand}", self.read("core/game/daifugo/cog.py"))
         # wordwolf の自分のワード確認は維持
-        self.assertIn("あなたのワードは", self.read("cogs/wordwolf.py"))
+        self.assertIn("あなたのワードは", self.read("core/game/wordwolf/cog.py"))
         # panel_recovery の開き直しは維持
         self.assertIn("ephemeral=True", self.read("core/support/panel_recovery/cog.py"))
         # auth（認証・秘密情報）は維持

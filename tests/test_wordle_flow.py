@@ -8,6 +8,7 @@ from unittest.mock import patch
 
 from game_fakes import FakeChannel, FakeGuild, FakeInteraction, FakeMember, press, real_sleep
 from cogs import wordle as w
+from core.game.wordle import cog as wordle_impl
 from core import party_ranking
 
 G, Y, X = w.GREEN, w.YELLOW, w.GRAY
@@ -105,7 +106,7 @@ class WordleFlowTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn('CRANE', self.channel.texts()[-1])
 
     async def test_timeout_ends(self):
-        with patch.object(w, 'GAME_SECONDS', 0.05):
+        with patch.object(wordle_impl, 'GAME_SECONDS', 0.05):
             g, task = await self.start()
             await asyncio.wait_for(task, 5)
         self.assertIn('正解できませんでした', self.channel.texts()[-1])

@@ -22,7 +22,7 @@ from core.emojis import FAILED  # noqa: E402
 CONVERTED_FILES = [
     "core/support/globalchat/cog.py",
     "core/support/server_setup/cog.py",
-    "cogs/shiritori.py",
+    "core/game/shiritori/cog.py",
     "cogs/sio_karaoke.py",
     "cogs/sio_rec.py",
     "cogs/sio_saito.py",
