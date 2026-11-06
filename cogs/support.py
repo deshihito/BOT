@@ -256,7 +256,8 @@ class SupportCog(
             return
 
         # 利用履歴（よく使う／最近）は権限チェックを通った実行だけを記録する。
-        await action_usage.record_safely(
+        # 保存の書き込みで応答を遅らせないようバックグラウンド記録を使う。
+        action_usage.record_safely_in_background(
             getattr(interaction, "guild_id", None),
             getattr(getattr(interaction, "user", None), "id", None),
             f"support:{selected}",

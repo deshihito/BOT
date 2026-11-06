@@ -563,7 +563,7 @@ class QuestManualModal(discord.ui.Modal):
         await self.panel.refresh(interaction, notice)
 
     async def on_error(self, interaction: discord.Interaction, error: Exception):
-        await report_callback_error(interaction, "Quest手動通知モーダルでエラー")
+        await report_callback_error(interaction, "Quest手動通知モーダルでエラー", error=error)
 
 
 class QuestNotifyPanel(discord.ui.LayoutView):
@@ -588,7 +588,7 @@ class QuestNotifyPanel(discord.ui.LayoutView):
 
     async def on_error(self, interaction: discord.Interaction, error: Exception, item: discord.ui.Item):
         logger.error("Quest通知パネルでエラー", exc_info=error)
-        await report_callback_error(interaction, "Quest通知パネルでエラー")
+        await report_callback_error(interaction, "Quest通知パネルでエラー", error=error)
 
     def _status_text(self) -> str:
         s = self.settings

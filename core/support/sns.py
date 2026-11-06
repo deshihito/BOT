@@ -921,7 +921,7 @@ class SnsAddModal(discord.ui.Modal):
         await self.panel.refresh(interaction, notice)
 
     async def on_error(self, interaction: discord.Interaction, error: Exception):
-        await report_callback_error(interaction, "SNS通知の追加モーダルでエラー")
+        await report_callback_error(interaction, "SNS通知の追加モーダルでエラー", error=error)
 
 
 class SnsNotifyPanel(discord.ui.LayoutView):
@@ -945,7 +945,7 @@ class SnsNotifyPanel(discord.ui.LayoutView):
 
     async def on_error(self, interaction: discord.Interaction, error: Exception, item: discord.ui.Item):
         logger.error("SNS通知パネルでエラー", exc_info=error)
-        await report_callback_error(interaction, "SNS通知パネルでエラー")
+        await report_callback_error(interaction, "SNS通知パネルでエラー", error=error)
 
     def _status_text(self) -> str:
         s = self.settings

@@ -129,7 +129,7 @@ class LevelUpNotifyPanel(discord.ui.LayoutView):
 
     async def on_error(self, interaction: discord.Interaction, error: Exception, item: discord.ui.Item):
         logger.error("レベルアップ通知パネルでエラー", exc_info=error)
-        await report_callback_error(interaction, "レベルアップ通知パネルでエラー")
+        await report_callback_error(interaction, "レベルアップ通知パネルでエラー", error=error)
 
     def channel(self):
         """指定済みで実在するチャンネル。無ければ None。"""
