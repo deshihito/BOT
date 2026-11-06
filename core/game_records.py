@@ -162,6 +162,17 @@ def _clean_twochoice(raw: Any) -> dict[str, dict[str, int]]:
     return out
 
 
+def _clean_coop(raw: Any, fields: tuple[str, ...]) -> dict[str, dict[str, int]]:
+    """協力ゲーム（ラウンド4）共通の単純な記録クリーナ。"""
+    if not isinstance(raw, dict):
+        return {}
+    out: dict[str, dict[str, int]] = {}
+    for user_id, entry in raw.items():
+        if isinstance(entry, dict):
+            out[str(user_id)] = {f: int(entry.get(f) or 0) for f in fields}
+    return out
+
+
 def _clean_guess(raw: Any) -> dict[str, dict[str, int]]:
     if not isinstance(raw, dict):
         return {}
@@ -197,7 +208,8 @@ class GameRecordsStore:
 
     def _load(self) -> dict[str, Any]:
         empty = {"flash": {}, "guess": {}, "sweeper": {}, "wordle_daily": {},
-                 "highlow": {}, "g2048": {}, "sudoku": {}, "nonogram": {}, "twochoice": {}}
+                 "highlow": {}, "g2048": {}, "sudoku": {}, "nonogram": {}, "twochoice": {},
+                 "justone": {}, "ito": {}, "hanabi": {}}
         try:
             raw = json.loads(self._path.read_text(encoding="utf-8"))
         except Exception:
@@ -211,7 +223,10 @@ class GameRecordsStore:
                 "g2048": _clean_g2048(raw.get("g2048")),
                 "sudoku": _clean_sudoku(raw.get("sudoku")),
                 "nonogram": _clean_sudoku(raw.get("nonogram")),
-                "twochoice": _clean_twochoice(raw.get("twochoice"))}
+                "twochoice": _clean_twochoice(raw.get("twochoice")),
+                "justone": _clean_coop(raw.get("justone"), ("plays", "best_successes", "total_successes")),
+                "ito": _clean_coop(raw.get("ito"), ("plays", "clears")),
+                "hanabi": _clean_coop(raw.get("hanabi"), ("plays", "best_score", "total_score"))}
 
     def flush(self) -> None:
         """現在の記録を JSON に書き出す（tmp 経由で原子的に差し替える）。"""
@@ -442,6 +457,63 @@ class GameRecordsStore:
             entry = self._data["guess"].get(str(user_id))
             return dict(entry) if entry is not None else None
 
+    # ------------------------------------------------------------------ ラウンド4協力系
+    def record_justone(self, user_id, successes: int) -> dict[str, Any]:
+        """ひとことヒント: 1セッションの成功数を記録（チーム全員に同じ結果）。"""
+        with self._lock:
+            entry = self._data["justone"].setdefault(
+                str(user_id), {"plays": 0, "best_successes": 0, "total_successes": 0})
+            entry["plays"] += 1
+            entry["total_successes"] += int(successes)
+            best_updated = int(successes) > entry["best_successes"]
+            if best_updated:
+                entry["best_successes"] = int(successes)
+            self._dirty += 1
+            result = dict(entry, best_updated=best_updated)
+        self._maybe_flush()
+        return result
+
+    def get_justone(self, user_id) -> dict[str, int] | None:
+        with self._lock:
+            entry = self._data["justone"].get(str(user_id))
+            return dict(entry) if entry is not None else None
+
+    def record_ito(self, user_id, clears: int, rounds: int) -> dict[str, Any]:
+        """たとえナンバー: テーマ成功数（clears/rounds）を記録。"""
+        with self._lock:
+            entry = self._data["ito"].setdefault(str(user_id), {"plays": 0, "clears": 0})
+            entry["plays"] += 1
+            entry["clears"] += int(clears)
+            self._dirty += 1
+            result = dict(entry)
+        self._maybe_flush()
+        return result
+
+    def get_ito(self, user_id) -> dict[str, int] | None:
+        with self._lock:
+            entry = self._data["ito"].get(str(user_id))
+            return dict(entry) if entry is not None else None
+
+    def record_hanabi(self, user_id, score: int) -> dict[str, Any]:
+        """花火大会: 完成スコアを記録（チーム全員に同じ結果）。"""
+        with self._lock:
+            entry = self._data["hanabi"].setdefault(
+                str(user_id), {"plays": 0, "best_score": 0, "total_score": 0})
+            entry["plays"] += 1
+            entry["total_score"] += int(score)
+            best_updated = int(score) > entry["best_score"]
+            if best_updated:
+                entry["best_score"] = int(score)
+            self._dirty += 1
+            result = dict(entry, best_updated=best_updated)
+        self._maybe_flush()
+        return result
+
+    def get_hanabi(self, user_id) -> dict[str, int] | None:
+        with self._lock:
+            entry = self._data["hanabi"].get(str(user_id))
+            return dict(entry) if entry is not None else None
+
 
 # ---------------------------------------------------------------------- 表示ヘルパ
 def format_flash_line(entry: dict[str, Any], count: int, digits: int, interval: float) -> str:
@@ -588,6 +660,30 @@ def record_twochoice_safely(user_id, votes: int, minority: int) -> dict[str, int
         return shared().record_twochoice(user_id, votes, minority)
     except Exception:
         logger.debug("twochoice record failed", exc_info=True)
+        return None
+
+
+def record_justone_safely(user_id, successes: int) -> dict[str, Any] | None:
+    try:
+        return shared().record_justone(user_id, successes)
+    except Exception:
+        logger.debug("justone record failed", exc_info=True)
+        return None
+
+
+def record_ito_safely(user_id, clears: int, rounds: int) -> dict[str, Any] | None:
+    try:
+        return shared().record_ito(user_id, clears, rounds)
+    except Exception:
+        logger.debug("ito record failed", exc_info=True)
+        return None
+
+
+def record_hanabi_safely(user_id, score: int) -> dict[str, Any] | None:
+    try:
+        return shared().record_hanabi(user_id, score)
+    except Exception:
+        logger.debug("hanabi record failed", exc_info=True)
         return None
 
 
