@@ -3,7 +3,8 @@ import discord
 from core import game_panels
 from discord.ext import commands
 
-from core import action_usage, party_ranking, usage_stats
+from core import action_usage, party_ranking
+from core.support import usage_stats
 
 party_ranking.register("doubt")
 import asyncio

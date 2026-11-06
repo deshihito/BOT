@@ -26,10 +26,12 @@ import discord
 from discord import app_commands
 from discord.ext import commands, tasks
 from core.panel_v2 import as_panel_v2, edit_panel_v2
-from core import action_registry, action_usage, guild_settings, levelup_card, logfare, shortcuts, usage_stats
+from core import action_registry, action_usage, guild_settings, levelup_card, logfare, shortcuts
+from core.support import usage_stats
 from core.general import ai_omnirush, ai_preferences, ai_provider_router
 from core.game_guides import GAME_GUIDES, GAME_ORDER
-from core import localization, translation
+from core import translation
+from core.support import localization
 from core import prison as prison_core
 from core.messages import CIRCULATION_NOT_LOADED, GAMBLING_NOT_LOADED, ITEMS_NOT_LOADED, MARKET_NOT_LOADED, MONEY_PANEL_NOT_LOADED, WORKSHOP_NOT_LOADED
 from core.libretranslate import LibreTranslateClient, LibreTranslateError

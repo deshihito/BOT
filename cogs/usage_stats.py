@@ -2,7 +2,7 @@
 
 ``!logs`` や ``!all_stats`` と同じ admin 区分のコマンドで、Bot 全体の
 リクエスト総数とコマンド／アクションの使用率を表示する。集計そのものは
-core/usage_stats.py の総量カウンタ（ユーザ単位の内訳は持たない）が担い、
+core/support/usage_stats.py の総量カウンタ（ユーザ単位の内訳は持たない）が担い、
 この cog は「数える入口」と表示だけを持つ:
 
 - プレフィックスコマンド: ``on_command_completion``（正常完了したもの）
@@ -24,7 +24,8 @@ import discord
 from discord.ext import commands
 
 from cogs.terminal import ALLOWED_USER_IDS
-from core import action_registry, usage_stats
+from core import action_registry
+from core.support import usage_stats
 
 logger = logging.getLogger(__name__)
 
