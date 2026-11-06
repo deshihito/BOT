@@ -14,8 +14,8 @@ if ROOT not in sys.path:
 
 import discord
 
-from core import guild_settings
-from core.panel_v2 import as_panel_v2
+from core.support import guild_settings
+from core.support.panel_v2 import as_panel_v2
 from core.support.server_assist.features import (
     automod,
     autorole,
@@ -31,7 +31,7 @@ from core.support.server_assist.features import (
     timed,
     welcome,
 )
-from core.storage import KVStore
+from core.support.storage import KVStore
 from tests.fake_kv_supabase import FakeKVSupabase
 
 

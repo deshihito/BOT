@@ -5,8 +5,8 @@ from cogs.general import (GENERAL_ACTIONS, GENERAL_GENRES, GeneralPanel,
                            GeneralCog, ShortcutManagerView, ShortcutRootPanel,
                            ShortcutMessageInteraction)
 from cogs.game import GameDetailView, GameHubView
-from core import shortcuts
-from core.panel_v2 import as_panel_v2
+from core.general import shortcut_settings as shortcuts
+from core.support.panel_v2 import as_panel_v2
 
 
 class MemoryStore:

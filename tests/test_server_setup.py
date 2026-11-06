@@ -14,8 +14,8 @@ if str(ROOT) not in sys.path:
 
 import discord  # noqa: E402
 
-from core import guild_settings  # noqa: E402
-from core.storage import KVStore  # noqa: E402
+from core.support import guild_settings  # noqa: E402
+from core.support.storage import KVStore  # noqa: E402
 from tests.fake_kv_supabase import FakeKVSupabase  # noqa: E402
 from cogs import auth, server_setup  # noqa: E402
 
@@ -289,7 +289,7 @@ class SettingsStorageTest(Base):
     async def test_missing_table_falls_back_to_local_file(self):
         from tests.fake_kv_supabase import missing_table_error
         self.db.error = missing_table_error()
-        with self.assertLogs("core.storage", level="WARNING"):
+        with self.assertLogs("core.support.storage", level="WARNING"):
             await guild_settings.get_store().update(self.guild.id, "auth", role_id=501)
         restarted = self.new_store()  # Supabase が使えなくても、ローカルの控えから戻る
         self.assertEqual(restarted.get(self.guild.id, "auth"), {"role_id": 501})
