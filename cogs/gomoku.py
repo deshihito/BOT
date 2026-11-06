@@ -40,7 +40,7 @@ from core.game.gomoku_cog.cog import (
     board_attachment,
     record_result,
     GomokuGame,
-    JoinView,
+    MovePanel,
     MoveView,
     Gomoku,
     setup,

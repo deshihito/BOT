@@ -8,6 +8,7 @@ from discord.ext import commands
 
 import config
 from core.game import game_records
+from core.game.game_v2 import text_panel
 
 logger = logging.getLogger("cogs.guess")
 
@@ -113,23 +114,20 @@ class Guess(commands.Cog):
             return
         actual_delta, new_balance = applied
 
-        embed = discord.Embed(
-            title="数字当て | 結果",
-            description=(
-                f"選択した数字: **{choice}**\n"
-                f"正解の数字: **{answer}**\n\n"
-                f"{'正解です。' if won else '不正解です。'}"
-            ),
-            color=0xFFFFFF,
-        )
-        embed.add_field(name="結果", value=f"{'勝ち' if won else '負け'} | 変動 **{actual_delta:+,} ago**", inline=True)
-        embed.add_field(name="残高", value=f"**{new_balance:,} ago**", inline=True)
+        lines = [
+            f"選択した数字: **{choice}**",
+            f"正解の数字: **{answer}**",
+            "",
+            f"{'正解です。' if won else '不正解です。'}",
+            f"結果: {'勝ち' if won else '負け'} | 変動 **{actual_delta:+,} ago**",
+            f"残高: **{new_balance:,} ago**",
+        ]
         # 自分の通算成績（core/game/game_records.py）。記録できなければ欄ごと付けない。
         stats = game_records.record_guess_safely(user_id, bet, won, actual_delta)
         if stats is not None:
-            embed.add_field(name="あなたの通算成績", value=game_records.format_guess_stats(stats), inline=False)
-        embed.set_footer(text=f"勝利時は賭け額の{WIN_MULTIPLIER}倍、敗北時は{LOSS_MULTIPLIER}倍を反映")
-        await interaction.response.send_message(embed=embed)
+            lines += ["", "あなたの通算成績:", game_records.format_guess_stats(stats)]
+        lines.append(f"（勝利時は賭け額の{WIN_MULTIPLIER}倍、敗北時は{LOSS_MULTIPLIER}倍を反映）")
+        await interaction.response.send_message(view=text_panel("数字当て | 結果", "\n".join(lines)))
 
     async def _get_profile(self, user_id: str) -> dict:
         result = await asyncio.to_thread(

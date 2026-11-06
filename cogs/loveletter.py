@@ -24,8 +24,8 @@ from core.game.loveletter_cog.cog import (
     MAX_PLAYERS,
     public_state_text,
     PlayConfirmView,
+    TurnPanel,
     TurnView,
-    JoinView,
     LoveLetter,
     setup,
 )

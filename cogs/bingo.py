@@ -17,8 +17,8 @@ from core.game.bingo_cog.cog import (
     RECRUIT_SECONDS,
     DRAW_INTERVAL,
     MIN_PLAYERS,
+    CardCheckPanel,
     CardCheckView,
-    RecruitView,
     Bingo,
     setup,
 )

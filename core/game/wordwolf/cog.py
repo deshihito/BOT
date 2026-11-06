@@ -9,6 +9,7 @@
 """
 import discord
 from core.game import game_panels
+from core.game.game_v2 import GamePanelView, LobbyView, original_response_or_none, safe_delete, text_panel
 from discord.ext import commands
 
 from core.game import party_ranking
@@ -43,18 +44,36 @@ class WordWolfSession:
         self.wolf = None
         self.player_words = {}
         self.remaining_challenges = 3
+        self.last_notice = None  # 最新の経過/判定表示（次で消す）
 
     @property
     def list_name(self) -> str:
         return LIST_NAMES.get(self.wordlist, "標準")
 
-    async def finish_recruitment(self, join_view):
+    async def notice(self, title: str, body: str):
+        """経過・判定の表示。前の表示は役割を終えたので消し、常に最新1通だけ残す。"""
+        old = self.last_notice
+        if old is not None:
+            self.last_notice = None
+            await safe_delete(old)
+        self.last_notice = await self.channel.send(view=text_panel(title, body))
+
+    async def finish_recruitment(self, lobby, lobby_msg=None):
         """募集を締め切り、人数が揃えば本編を始める。足りなければ中止を告知して片付ける。"""
-        await asyncio.sleep(RECRUIT_SECONDS)
-        join_view.stop()
+        for _ in range(RECRUIT_SECONDS * 2):
+            if lobby.started or lobby.cancelled:
+                break
+            await asyncio.sleep(0.5)
+        lobby.stop()
+        # 募集パネルは締切時点で役割を終える。
+        await safe_delete(lobby_msg)
+        if lobby.cancelled:
+            self.cog._discard(self)
+            return
+        self.players = [lobby.members[uid] for uid in lobby.players]
 
         if len(self.players) < 3:
-            await self.channel.send(embed=self.cog._white_embed("人数不足（3人以上必要）のため中止します。"))
+            await self.channel.send(view=text_panel("", "人数不足（3人以上必要）のため中止します。"))
             self.cog._discard(self)
             return
 
@@ -70,14 +89,14 @@ class WordWolfSession:
         for p in self.players:
             self.player_words[p.id] = wolf_word if p == self.wolf else common_word
 
-        check_view = CheckWordView(self)
-        embed = self.cog._white_embed(
+        check_view = CheckWordPanel(self)
+        body = (
             f"参加者: {', '.join([p.display_name for p in self.players])}\n"
             f"リスト: **{self.list_name}** / 各自ボタンでワードを確認してください。\n"
-            f"**【ルール】メンションで判定（全体で残り {self.remaining_challenges} 回まで）**",
-            title="ゲーム開始！"
+            f"**【ルール】メンションで判定（全体で残り {self.remaining_challenges} 回まで）**"
         )
-        await game_panels.replace(self.channel, "party", embed=embed, view=check_view)
+        check_view.set_content(title="ゲーム開始！", body=body)
+        await game_panels.replace(self.channel, "party", view=check_view)
 
         self.game_running = True
         asyncio.create_task(self.game_timer())
@@ -88,12 +107,10 @@ class WordWolfSession:
             if not self.game_running:
                 return
             alive_names = [p.display_name for p in self.alive_players]
-            embed = self.cog._white_embed(
+            await self.notice(
+                "経過報告",
                 f"**残り {i} 分** / **チャレンジ残り: {self.remaining_challenges}回**\n"
-                f"生存者: {', '.join(alive_names)}",
-                title="経過報告"
-            )
-            await self.channel.send(embed=embed)
+                f"生存者: {', '.join(alive_names)}")
 
         await asyncio.sleep(60)
         if self.game_running:
@@ -105,29 +122,18 @@ class WordWolfSession:
         role = discord.utils.get(channel.guild.roles, name="muted")
 
         if challenger == self.wolf:
-            embed = self.cog._white_embed(
-                f"**ウルフの自爆！** {challenger.mention} はウルフでしたが、村人 {target.mention} を指名したため敗北しました。",
-                title="判定"
-            )
-            await channel.send(embed=embed)
+            await self.notice(
+                "判定",
+                f"**ウルフの自爆！** {challenger.mention} はウルフでしたが、村人 {target.mention} を指名したため敗北しました。")
             await self.cog.end_game(channel, "villager_win", session=self)
             return
 
         if target == self.wolf:
-            embed = self.cog._white_embed(
-                f"**チャレンジ成功！** {target.mention} はウルフでした！村人の勝利です。",
-                title="判定"
-            )
-            await channel.send(embed=embed)
+            await self.notice(
+                "判定",
+                f"**チャレンジ成功！** {target.mention} はウルフでした！村人の勝利です。")
             await self.cog.end_game(channel, "villager_win", session=self)
         else:
-            embed = self.cog._white_embed(
-                f"**チャレンジ失敗！** {challenger.mention} は脱落。\n"
-                f"**チャレンジ残り回数: {self.remaining_challenges}回**",
-                title="判定"
-            )
-            await channel.send(embed=embed)
-
             self.alive_players.remove(challenger)
             if role:
                 try:
@@ -136,13 +142,24 @@ class WordWolfSession:
                     logger.debug("ワードウルフ: 脱落ロールの付与に失敗しました", exc_info=True)
 
             if self.remaining_challenges <= 0:
-                await channel.send(embed=self.cog._white_embed("チャレンジ回数が尽きました...", title="終了"))
+                await self.notice(
+                    "判定",
+                    f"**チャレンジ失敗！** {challenger.mention} は脱落。\n"
+                    "チャレンジ回数が尽きました...")
                 await self.cog.end_game(channel, "wolf_win", session=self)
             elif len(self.alive_players) <= 2:
+                await self.notice(
+                    "判定",
+                    f"**チャレンジ失敗！** {challenger.mention} は脱落。\n"
+                    f"**チャレンジ残り回数: {self.remaining_challenges}回**")
                 await self.cog.end_game(channel, "wolf_win", session=self)
             else:
                 alive_names = [p.display_name for p in self.alive_players]
-                await channel.send(embed=self.cog._white_embed(f"生存プレイヤー: {', '.join(alive_names)}"))
+                await self.notice(
+                    "判定",
+                    f"**チャレンジ失敗！** {challenger.mention} は脱落。\n"
+                    f"**チャレンジ残り回数: {self.remaining_challenges}回**\n"
+                    f"生存プレイヤー: {', '.join(alive_names)}")
 
 
 class CustomWordWolf(commands.Cog):
@@ -243,14 +260,15 @@ class CustomWordWolf(commands.Cog):
         session = WordWolfSession(self, channel, wordlist)
         self.sessions[channel.id] = session
 
-        join_view = JoinView(session)
-        embed = self._white_embed(
-            f"**ワードウルフ参加者募集中！** (リスト: **{session.list_name}**)\n1分以内に【参加】ボタンを押してください。",
-            title="ワードウルフ"
-        )
-        await interaction.response.send_message(embed=embed, view=join_view)
+        lobby = LobbyView(
+            title="ワードウルフ 参加者募集", host=interaction.user,
+            min_players=3, max_players=99,
+            note=f"リスト: **{session.list_name}**\n{RECRUIT_SECONDS}秒以内に参加してください。",
+            timeout=RECRUIT_SECONDS + 30)
+        await interaction.response.send_message(view=lobby)
+        lobby_msg = await original_response_or_none(interaction)
 
-        await session.finish_recruitment(join_view)
+        await session.finish_recruitment(lobby, lobby_msg)
 
     async def begin_game(self, channel, wordlist: str):
         session = self.sessions.get(channel.id)
@@ -261,7 +279,7 @@ class CustomWordWolf(commands.Cog):
         await asyncio.sleep(RECRUIT_SECONDS)
 
         if len(session.players) < 3:
-            await channel.send(embed=self._white_embed("人数不足（3人以上必要）のため中止します。"))
+            await channel.send(view=text_panel("", "人数不足（3人以上必要）のため中止します。"))
             self._discard(session)
             return
 
@@ -302,8 +320,12 @@ class CustomWordWolf(commands.Cog):
         else:
             msg = f"**ウルフの勝利です！**\n正解は {session.wolf.mention} でした。"
 
-        embed = self._white_embed(msg, title="ゲーム終了")
-        await channel.send(embed=embed)
+        # ワード確認パネルと最後の経過/判定表示を片付け、結果だけを残す。
+        await game_panels.clear(channel, "party")
+        if session.last_notice is not None:
+            notice, session.last_notice = session.last_notice, None
+            await safe_delete(notice)
+        await channel.send(view=text_panel("ゲーム終了", msg))
 
         role = discord.utils.get(channel.guild.roles, name="muted")
         if role:
@@ -314,30 +336,19 @@ class CustomWordWolf(commands.Cog):
                     logger.debug("ワードウルフ: ロールの回収に失敗しました", exc_info=True)
 
 
-class JoinView(discord.ui.View):
+class CheckWordPanel(GamePanelView):
+    """自分のワードを本人だけに確認させるパネル（V2）。"""
+
     def __init__(self, session: WordWolfSession):
-        super().__init__(timeout=60)
+        super().__init__("", "", timeout=None)
         self.session = session
         # 互換: View から cog を辿れるようにしておく
         self.cog = session.cog
+        self.check = discord.ui.Button(label="自分のワードを確認", style=discord.ButtonStyle.secondary)
+        self.check.callback = self._check
+        self.add_row(self.check)
 
-    @discord.ui.button(label="参加", style=discord.ButtonStyle.green)
-    async def join(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if interaction.user not in self.session.players:
-            self.session.players.append(interaction.user)
-            await interaction.response.send_message(embed=self.session.cog._white_embed("参加完了。"))
-        else:
-            await interaction.response.send_message(embed=self.session.cog._white_embed("参加済みです。"), ephemeral=True)
-
-
-class CheckWordView(discord.ui.View):
-    def __init__(self, session: WordWolfSession):
-        super().__init__(timeout=None)
-        self.session = session
-        self.cog = session.cog
-
-    @discord.ui.button(label="自分のワードを確認", style=discord.ButtonStyle.secondary)
-    async def check(self, interaction: discord.Interaction, button: discord.ui.Button):
+    async def _check(self, interaction: discord.Interaction):
         word = self.session.player_words.get(interaction.user.id)
         if word:
             await interaction.response.send_message(
@@ -347,6 +358,9 @@ class CheckWordView(discord.ui.View):
             )
         else:
             await interaction.response.send_message(embed=self.session.cog._white_embed("プレイヤーではありません。"), ephemeral=True)
+
+
+CheckWordView = CheckWordPanel  # 互換名
 
 
 async def setup(bot):

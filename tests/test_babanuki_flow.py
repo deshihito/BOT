@@ -105,14 +105,14 @@ class BabanukiFlowTest(unittest.IsolatedAsyncioTestCase):
                 user = self.m1 if g.current == 1 else self.m2
                 # 手札を見る（本人にだけ）
                 hand = FakeInteraction(user, self.channel)
-                await msg.view.children[-1].callback(hand)
+                await msg.view.hand_button.callback(hand)
                 self.assertIn('あなたの手札', hand.response.sent[0].text())
                 other = self.m2 if user is self.m1 else self.m1
                 wrong = FakeInteraction(other, self.channel)
-                await msg.view.children[0].callback(wrong)
+                await msg.view.picks[0].callback(wrong)
                 self.assertIn('あなたの番ではありません', wrong.response.sent[0].text())
                 pick = FakeInteraction(user, self.channel)
-                await msg.view.children[0].callback(pick)
+                await msg.view.picks[0].callback(pick)
                 self.assertIn('を引きました', pick.response.sent[0].text())
             await task
         texts = self.channel.texts()

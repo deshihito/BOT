@@ -19,8 +19,8 @@ from core.game.thirtyone_cog.cog import (
     TURN_SECONDS,
     MAX_PLAYERS,
     state_text,
+    CountPanel,
     CountView,
-    JoinView,
     ThirtyOne,
     setup,
 )

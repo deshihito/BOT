@@ -20,9 +20,10 @@ import discord
 from discord.ext import commands
 
 from core.emojis import POYOPOYO
-from core.game import party_ranking
+from core.game import game_panels, party_ranking
 from core.game.bingo import BingoSession, format_card  # noqa: F401  format_card は cogs.bingo シムの再輸出用
 from core.game.board_image import render_bingo_card, render_cached
+from core.game.game_v2 import GamePanelView, LobbyView, original_response_or_none, safe_delete, text_panel
 
 logger = logging.getLogger(__name__)
 
@@ -33,6 +34,7 @@ RECRUIT_SECONDS = 60
 DRAW_INTERVAL = 10
 TEASE_SECONDS = 7  # サイクル開始からローディング表示を出すまでの秒数
 MIN_PLAYERS = 2
+MAX_PLAYERS = 99  # 実質無制限（共通ロビーの表示・定員チェック用）
 
 
 def card_png(card) -> bytes:
@@ -43,14 +45,22 @@ def card_png(card) -> bytes:
     return render_cached(key, lambda: render_bingo_card(card.grid, card.marked))
 
 
-class CardCheckView(discord.ui.View):
-    def __init__(self, cog, session: BingoSession):
-        super().__init__(timeout=3600)
+class CardCheckPanel(GamePanelView):
+    """進行表示＋「手札を確認」ボタンのパネル（V2）。
+
+    開始アナウンスと各抽選の開示メッセージに付く。カード自体は
+    本人にだけ見える ephemeral で返す（従来どおり）。
+    """
+
+    def __init__(self, cog, session: BingoSession, body: str = ""):
+        super().__init__("", body, timeout=3600)
         self.cog = cog
         self.session = session
+        self.check = discord.ui.Button(label="手札を確認", style=discord.ButtonStyle.secondary)
+        self.check.callback = self._check
+        self.add_row(self.check)
 
-    @discord.ui.button(label="手札を確認", style=discord.ButtonStyle.secondary)
-    async def check(self, interaction: discord.Interaction, button: discord.ui.Button):
+    async def _check(self, interaction: discord.Interaction):
         card = self.session.cards.get(interaction.user.id)
         if card is None:
             return await interaction.response.send_message("あなたは参加していません。", ephemeral=True)
@@ -68,29 +78,7 @@ class CardCheckView(discord.ui.View):
         await interaction.response.send_message(embed=embed, file=file, ephemeral=True)
 
 
-class RecruitView(discord.ui.View):
-    def __init__(self, host_id):
-        super().__init__(timeout=RECRUIT_SECONDS + 10)
-        self.host_id = host_id
-        self.players = [host_id]
-        self.started = False
-
-    @discord.ui.button(label="参加する", style=discord.ButtonStyle.success)
-    async def join(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if interaction.user.id in self.players:
-            return await interaction.response.send_message("すでに参加しています。", ephemeral=True)
-        self.players.append(interaction.user.id)
-        await interaction.response.send_message(f"参加しました（現在 {len(self.players)}名）。")
-
-    @discord.ui.button(label="開始する（ホスト）", style=discord.ButtonStyle.primary)
-    async def start(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if interaction.user.id != self.host_id:
-            return await interaction.response.send_message("開始できるのはホストだけです。", ephemeral=True)
-        if self.started:
-            return await interaction.response.send_message("すでに開始しています。", ephemeral=True)
-        self.started = True
-        await interaction.response.send_message("ビンゴを開始します！")
-        self.stop()
+CardCheckView = CardCheckPanel  # 互換名
 
 
 class Bingo(commands.Cog):
@@ -104,37 +92,38 @@ class Bingo(commands.Cog):
         if channel.id in self.channels:
             return await interaction.response.send_message("このチャンネルではすでにビンゴが開催中です。", ephemeral=True)
         self.channels.add(channel.id)
-        view = RecruitView(interaction.user.id)
-        embed = discord.Embed(
-            title="🎱 ビンゴ大会 参加者募集",
-            description=(f"参加ボタンを押してください（{MIN_PLAYERS}名以上で開始）。"
-                         f"ホストが「開始する」を押すか、{RECRUIT_SECONDS}秒たつと開始します。"),
-            color=0xFFFFFF,
-        )
-        await interaction.response.send_message(embed=embed, view=view)
-        asyncio.create_task(self._run(channel, view))
+        view = LobbyView(
+            title="🎱 ビンゴ大会 参加者募集", host=interaction.user,
+            min_players=MIN_PLAYERS, max_players=MAX_PLAYERS,
+            note=(f"ホストが「開始する」を押すか、{RECRUIT_SECONDS}秒たつと開始します。"),
+            timeout=RECRUIT_SECONDS + 10)
+        await interaction.response.send_message(view=view)
+        lobby_msg = await original_response_or_none(interaction)
+        asyncio.create_task(self._run(channel, view, lobby_msg))
 
-    async def _run(self, channel, view: RecruitView):
+    async def _run(self, channel, view: LobbyView, lobby_msg=None):
         try:
             for _ in range(RECRUIT_SECONDS * 2):
-                if view.started:
+                if view.started or view.cancelled:
                     break
                 await asyncio.sleep(0.5)
-            if not view.started:
-                view.started = True
-                view.stop()
+            view.stop()
+            # 募集パネルは開始（または不成立）時点で役割を終える。
+            await safe_delete(lobby_msg)
+            if view.cancelled:
+                return
             players = list(dict.fromkeys(view.players))
             if len(players) < MIN_PLAYERS:
-                await channel.send(embed=discord.Embed(
-                    description=f"人数不足（{MIN_PLAYERS}名以上必要）のため、ビンゴを開始できませんでした。", color=0xFFFFFF))
+                await channel.send(view=text_panel(
+                    "", f"人数不足（{MIN_PLAYERS}名以上必要）のため、ビンゴを開始できませんでした。"))
                 return
             session = BingoSession(players)
             mentions = " ".join(f"<@{uid}>" for uid in players)
-            await channel.send(
-                content=f"{mentions}\nビンゴを開始します！カードは「手札を確認」ボタンで見られます。"
-                        f"抽選は{DRAW_INTERVAL}秒ごとに自動で進みます。",
-                view=CardCheckView(self, session),
-            )
+            # 開始アナウンスは最初の開示が出た時点で消える（last_draw_msg 経由）。
+            session.last_draw_msg = await channel.send(view=CardCheckPanel(
+                self, session,
+                body=f"{mentions}\nビンゴを開始します！カードは「手札を確認」ボタンで見られます。"
+                     f"抽選は{DRAW_INTERVAL}秒ごとに自動で進みます。"))
             await self._draw_loop(channel, session)
         except Exception:  # noqa: BLE001
             logger.exception("Bingo: 進行中にエラーが発生しました")
@@ -149,18 +138,23 @@ class Bingo(commands.Cog):
         Returns: (引いた番号, 勝者, 新規リーチ者)。球切れなら番号は None。
         """
         await asyncio.sleep(TEASE_SECONDS)
-        tease = await channel.send(
-            f"{POYOPOYO} 抽選中… 次の番号は…？（{len(session.drawn) + 1}球目）")
+        tease = await channel.send(view=text_panel(
+            "", f"{POYOPOYO} 抽選中… 次の番号は…？（{len(session.drawn) + 1}球目）"))
         await asyncio.sleep(DRAW_INTERVAL - TEASE_SECONDS)
         number, winners, reach = session.draw_next()
         if number is None:
-            await tease.edit(content="抽選できる番号がなくなりました。")
+            await tease.edit(view=text_panel("", "抽選できる番号がなくなりました。"))
             return None, [], []
         lines = [f"🎱 **{number}** が出ました。（{len(session.drawn)}球目）"]
         for uid in reach:
             lines.append(f"<@{uid}> さんが **リーチ** です！")
         lines.append("これまで: " + " ".join(str(n) for n in session.drawn))
-        await tease.edit(content="\n".join(lines), view=CardCheckView(self, session))
+        await tease.edit(view=CardCheckPanel(self, session, body="\n".join(lines)))
+        # 前回の開示（または開始アナウンス）は新しい開示で役割を終える。
+        previous = getattr(session, "last_draw_msg", None)
+        if previous is not None and previous is not tease:
+            await safe_delete(previous)
+        session.last_draw_msg = tease
         return number, winners, reach
 
     async def _draw_loop(self, channel, session: BingoSession):
@@ -170,8 +164,13 @@ class Bingo(commands.Cog):
                 break
             if winners:
                 names = " ".join(f"<@{uid}>" for uid in winners)
-                await channel.send(embed=discord.Embed(
-                    title="🎉 ビンゴ！", description=f"{names} さんが最初にラインを揃えました！", color=0xFFFFFF))
+                # 最後の開示パネルを片付け、結果だけを残す。
+                last = getattr(session, "last_draw_msg", None)
+                if last is not None:
+                    session.last_draw_msg = None
+                    await safe_delete(last)
+                await channel.send(view=text_panel(
+                    "🎉 ビンゴ！", f"{names} さんが最初にラインを揃えました！"))
                 guild = getattr(channel, "guild", None)
                 if guild is not None:
                     for uid in winners:

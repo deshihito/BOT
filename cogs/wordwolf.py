@@ -18,7 +18,7 @@ from core.game.wordwolf.cog import (
     LIST_NAMES,
     WordWolfSession,
     CustomWordWolf,
-    JoinView,
+    CheckWordPanel,
     CheckWordView,
     setup,
 )

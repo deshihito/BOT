@@ -1,9 +1,11 @@
 # -*- coding: utf-8 -*-
 import io
+from types import SimpleNamespace
 
 import discord
 from core.game import board_image, game_panels
 from core.game.board_image import render_cached, render_card, render_card_hand, render_card_pile
+from core.game.game_v2 import GamePanelView, LobbyView, safe_delete, text_panel
 from discord.ext import commands
 
 from core import action_usage
@@ -135,8 +137,9 @@ class CardSelect(discord.ui.Select):
             game.pass_count = 0 
             
             await interaction.response.send_message(embed=we(f"**{selected_card}** を「**{claimed_num}**」として出しました。"), ephemeral=True)
-            await interaction.channel.send(embed=we(f"<@{user_id}> が「**{claimed_num}**」を宣言してカードを置きました。5秒間ダウト受付中。"))
             
+            game.last_announce = await interaction.channel.send(view=text_panel(
+                "", f"<@{user_id}> が「**{claimed_num}**」を宣言してカードを置きました。5秒間ダウト受付中。"))
             game.next_required_num = 1 if claimed_num == 13 else claimed_num + 1
             
             game.is_accepting_doubt = True
@@ -162,14 +165,27 @@ class CardSelectView(discord.ui.View):
         for page, chunk in enumerate(chunks[:5], start=1):  # 1つのメッセージに置けるのは5行まで（125枚）
             self.add_item(CardSelect(chunk, game_engine, cog, page=page, pages=len(chunks)))
 
-class GameControlView(discord.ui.View):
-    def __init__(self, game_engine, cog):
-        super().__init__(timeout=None)
+class GameControlView(GamePanelView):
+    """メイン画面のパネル（V2）。場の山は画像、操作はボタン。"""
+
+    def __init__(self, game_engine, cog, body: str = ""):
+        super().__init__("Doubt Game", body, timeout=None)
         self.game_engine = game_engine
         self.cog = cog
+        gallery = discord.ui.MediaGallery()
+        gallery.add_item(media="attachment://doubt_field.png")
+        self.add_extra(gallery)
+        self.doubt = discord.ui.Button(label="ダウト！", style=discord.ButtonStyle.danger)
+        self.doubt.callback = self._doubt
+        self.pass_turn = discord.ui.Button(label="パス", style=discord.ButtonStyle.secondary)
+        self.pass_turn.callback = self._pass_turn
+        self.check_hand = discord.ui.Button(label="手札確認", style=discord.ButtonStyle.grey)
+        self.check_hand.callback = self._check_hand
+        self.play = discord.ui.Button(label="カードを置く", style=discord.ButtonStyle.red)
+        self.play.callback = self._play
+        self.add_row(self.doubt, self.pass_turn, self.check_hand, self.play)
 
-    @discord.ui.button(label="ダウト！", style=discord.ButtonStyle.danger)
-    async def doubt(self, interaction: discord.Interaction, button: discord.ui.Button):
+    async def _doubt(self, interaction: discord.Interaction):
         game = self.game_engine
         if interaction.user.id not in game.hands:
             return await interaction.response.send_message(embed=we("あなたはゲームに参加していません。"), ephemeral=True)
@@ -178,8 +194,7 @@ class GameControlView(discord.ui.View):
         await interaction.response.send_message(embed=we("ダウトを宣言しました。"), ephemeral=True)
         await self.cog.apply_doubt(interaction.channel, game, interaction.user.id)
 
-    @discord.ui.button(label="パス", style=discord.ButtonStyle.secondary)
-    async def pass_turn(self, interaction: discord.Interaction, button: discord.ui.Button):
+    async def _pass_turn(self, interaction: discord.Interaction):
         game = self.game_engine
         if interaction.user.id not in game.hands:
             return await interaction.response.send_message(embed=we("あなたはゲームに参加していません。"), ephemeral=True)
@@ -190,8 +205,7 @@ class GameControlView(discord.ui.View):
         await interaction.response.send_message(embed=we("パスしました。"), ephemeral=True)
         await self.cog.apply_pass(interaction.channel, game, interaction.user.id)
 
-    @discord.ui.button(label="手札確認", style=discord.ButtonStyle.grey)
-    async def check_hand(self, interaction: discord.Interaction, button: discord.ui.Button):
+    async def _check_hand(self, interaction: discord.Interaction):
         if interaction.user.id not in self.game_engine.hands:
             return await interaction.response.send_message(embed=we("あなたはゲームに参加していません。"), ephemeral=True)
             
@@ -204,8 +218,7 @@ class GameControlView(discord.ui.View):
         else:
             await interaction.response.send_message(embed=embed, ephemeral=True)
 
-    @discord.ui.button(label="カードを置く", style=discord.ButtonStyle.red)
-    async def play(self, interaction: discord.Interaction, button: discord.ui.Button):
+    async def _play(self, interaction: discord.Interaction):
         if interaction.user.id not in self.game_engine.hands:
             return await interaction.response.send_message(embed=we("あなたはゲームに参加していません。"), ephemeral=True)
             
@@ -220,18 +233,32 @@ class GameControlView(discord.ui.View):
         view = CardSelectView(hand, self.game_engine, self.cog)
         await interaction.response.send_message(embed=we(f"どのカードを「{self.game_engine.next_required_num}」として出しますか？"), view=view, ephemeral=True)
 
-class DoubtJoinView(discord.ui.View):
+class DoubtJoinView(LobbyView):
+    """ダウトの募集ロビー（共通ロビー規格）。
+
+    従来の DoubtJoinView の名前と close() の締切処理を保ちつつ、
+    実体は共通ロビー（参加/退出はその場編集、文面統一）に寄せた。
+    開始判定は従来どおり start_from_hub 側のタイマー/開始ボタン待ち。
+    """
+
     def __init__(self, host_id):
-        super().__init__(timeout=65) 
-        self.players = [host_id]
+        host = SimpleNamespace(id=host_id, display_name="", mention=f"<@{host_id}>")
+        super().__init__(
+            title="ダウト参加者募集", host=host, min_players=3, max_players=99,
+            note="ボタンを押して参加してください\n**3名以上で開始します**（募集時間: 60秒）",
+            timeout=65)
         self.closed = False
         self.message = None
+
+    async def _on_join(self, interaction: discord.Interaction):
+        if self.closed:
+            return await interaction.response.send_message("募集は締め切られました。", ephemeral=True)
+        await super()._on_join(interaction)
 
     async def close(self):
         """募集を締め切る。以降の参加ボタンは受け付けず、ボタンも押せなくする。"""
         self.closed = True
-        for child in self.children:
-            child.disabled = True
+        self._finish_ui("募集は締め切られました。")
         self.stop()
         if self.message is not None:
             try:
@@ -239,47 +266,42 @@ class DoubtJoinView(discord.ui.View):
             except Exception:
                 logger.debug("Doubt: 募集パネルのボタン無効化に失敗しました", exc_info=True)
 
-    @discord.ui.button(label="参加", style=discord.ButtonStyle.green)
-    async def join(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if self.closed:
-            await interaction.response.send_message(embed=we("募集は締め切られました。"), ephemeral=True)
-        elif interaction.user.id not in self.players:
-            self.players.append(interaction.user.id)
-            await interaction.response.send_message(embed=we(f"参加しました (現在: {len(self.players)}名)"))
-        else:
-            await interaction.response.send_message(embed=we("既に参加しています"), ephemeral=True)
-
 class Doubt(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
         self.games = {}
         self.recruiting = set()  # 募集中のチャンネル（同じチャンネルで募集が重ならないように）
 
-    async def send_main_screen(self, channel, game):
-        if game.last_panel_msg:
-            try:
-                await game.last_panel_msg.delete()
-            except Exception:
-                logger.debug("Doubt: 前回パネルの削除に失敗しました", exc_info=True)
-
-        embed = discord.Embed(title="Doubt Game", color=0xFFFFFF)
-        embed.add_field(name="現在の手番", value=f"<@{game.current_player_id}>", inline=False)
-        embed.add_field(name="出すべき数字", value=f"**{game.next_required_num}**", inline=True)
-        embed.add_field(name="場の状況", value=f"合計: {len(game.field)}枚", inline=True)
-        
+    async def send_main_screen(self, channel, game, note: str = ""):
+        # 前のパネルと宣言アナウンスは、game_panels の差し替えとここで片付く。
+        announce = getattr(game, "last_announce", None)
+        if announce is not None:
+            game.last_announce = None
+            await safe_delete(announce)
         status_list = [f"<@{p_id}>: 残り {len(game.hands.get(p_id, []))}枚" for p_id in game.players]
-        embed.add_field(name="プレイヤー", value="\n".join(status_list), inline=False)
-        embed.set_image(url="attachment://doubt_field.png")
-
-        view = GameControlView(game, self)
-        content = f"次の方、カードを選んでください: <@{game.current_player_id}>"
+        lines = []
+        if note:
+            lines.append(note)
+        lines += [
+            f"次の方、カードを選んでください: <@{game.current_player_id}>",
+            f"現在の手番: <@{game.current_player_id}>",
+            f"出すべき数字: **{game.next_required_num}**",
+            f"場の状況: 合計 {len(game.field)}枚",
+            "プレイヤー:",
+            *status_list,
+        ]
+        view = GameControlView(game, self, body="\n".join(lines))
         game.last_panel_msg = await game_panels.replace(
-            channel, "party", content=content, embed=embed, view=view,
-            file=field_file(len(game.field)))
+            channel, "party", view=view, file=field_file(len(game.field)))
 
     async def declare_winner(self, channel, game, winner_id):
-        win_embed = discord.Embed(title="Game Set!", description=f"勝者: <@{winner_id}>", color=0xFFFFFF)
-        await channel.send(embed=win_embed)
+        # メインパネルと宣言アナウンスを片付け、結果だけを残す。
+        await game_panels.clear(channel, "party")
+        announce = getattr(game, "last_announce", None)
+        if announce is not None:
+            game.last_announce = None
+            await safe_delete(announce)
+        await channel.send(view=text_panel("Game Set!", f"勝者: <@{winner_id}>"))
         if self.games.get(channel.id) is game:
             del self.games[channel.id]
             # サーバーごとのランキング（core/game/party_ranking.py）: 手札を出し切った 1 人が勝ち
@@ -288,17 +310,30 @@ class Doubt(commands.Cog):
                 await party_ranking.shared().record_win(guild.id, winner_id, "doubt")
 
     async def start_from_hub(self, channel, player_ids, join_view=None):
-        await asyncio.sleep(60)
         if join_view is not None:
+            # 60秒の募集タイマー。主催者が「開始する」を押したら早めに締める。
+            for _ in range(60 * 2):
+                if join_view.started or join_view.cancelled:
+                    break
+                await asyncio.sleep(0.5)
+            if join_view.cancelled:
+                await safe_delete(join_view.message)
+                return
+            player_ids = list(join_view.players)
             await join_view.close()
+        else:
+            await asyncio.sleep(60)
         player_ids = list(player_ids)  # 開始時点の参加者で固定
-        
+
         if len(player_ids) < 3:
-            return await channel.send(embed=we("人数不足（3名以上必要）のため、ダウトを開始できませんでした。"))
-        
+            if join_view is not None:
+                await safe_delete(join_view.message)
+            return await channel.send(view=text_panel(
+                "", "人数不足（3名以上必要）のため、ダウトを開始できませんでした。"))
+
         engine = DoubtEngine(player_ids)
         self.games[channel.id] = engine
-        await channel.send(embed=we("3名以上の参加を確認。カードを配り、ゲームを開始します！"))
+        await channel.send(view=text_panel("", "3名以上の参加を確認。カードを配り、ゲームを開始します！"))
         await self.send_main_screen(channel, engine)
 
     @commands.command(name="doubt")
@@ -321,14 +356,9 @@ class Doubt(commands.Cog):
 
     async def _recruit(self, channel, host_id):
         view = DoubtJoinView(host_id)
-        embed = discord.Embed(
-            title="ダウト参加者募集", 
-            description="ボタンを押して参加してください\n**3名以上で開始します**（募集時間: 60秒）", 
-            color=0xFFFFFF
-        )
         self.recruiting.add(channel.id)
         try:
-            view.message = await game_panels.replace(channel, "party", embed=embed, view=view)
+            view.message = await game_panels.replace(channel, "party", view=view)
             await self.start_from_hub(channel, view.players, join_view=view)
         finally:
             self.recruiting.discard(channel.id)
@@ -338,12 +368,13 @@ class Doubt(commands.Cog):
         if user_id != game.current_player_id or game.is_accepting_doubt:
             return False
         game.pass_count += 1
+        note = ""
         if game.pass_count >= len(game.players):
             game.next_required_num = 1
             game.pass_count = 0
-            await channel.send(embed=we("全員がパスしたため、数字が1に戻ります。"))
+            note = "全員がパスしたため、数字が1に戻ります。"
         game.next_turn()
-        await self.send_main_screen(channel, game)
+        await self.send_main_screen(channel, game, note=note)
         return True
 
     async def apply_doubt(self, channel, game, user_id):
@@ -362,15 +393,11 @@ class Doubt(commands.Cog):
                 actual_num = 0
             is_lie = (actual_num != game.last_claimed_num)
 
-        embed = discord.Embed(title="審議結果", color=0xFFFFFF)
-        embed.add_field(name="宣言された数字", value=f"{game.last_claimed_num}")
-        embed.add_field(name="実際のカード", value=f"{actual_card}")
-
         if is_lie:
-            embed.description = f"**嘘でした！**（ダウト成功）\n出した人 <@{last_player}> は場のカードをすべて回収します。"
+            verdict = f"**嘘でした！**（ダウト成功）\n出した人 <@{last_player}> は場のカードをすべて回収します。"
             penalty_user = last_player
         else:
-            embed.description = f"**本当でした！**（ダウト失敗）\nダウトと言った <@{user_id}> がすべて回収します。"
+            verdict = f"**本当でした！**（ダウト失敗）\nダウトと言った <@{user_id}> がすべて回収します。"
             penalty_user = user_id
 
         for _, c in game.field:
@@ -378,11 +405,19 @@ class Doubt(commands.Cog):
         sort_hand(game.hands[penalty_user])
         game.field.clear()
 
-        # 開示された実際のカードは公開情報なので、画像でも見せる
+        # 開示された実際のカードは公開情報なので、画像でも見せる。
+        # 審議結果は対局の記録として残す（ボタンなしの表示専用パネル）。
         reveal = render_cached(("doubt-reveal", actual_card),
                                lambda: render_card(card_spec_of(actual_card)))
-        embed.set_image(url="attachment://doubt_reveal.png")
-        await channel.send(embed=embed, file=discord.File(io.BytesIO(reveal), filename="doubt_reveal.png"))
+        panel = GamePanelView("審議結果", "\n".join([
+            verdict,
+            f"宣言された数字: {game.last_claimed_num}",
+            f"実際のカード: {actual_card}",
+        ]), timeout=None)
+        gallery = discord.ui.MediaGallery()
+        gallery.add_item(media="attachment://doubt_reveal.png")
+        panel.add_extra(gallery)
+        await channel.send(view=panel, file=discord.File(io.BytesIO(reveal), filename="doubt_reveal.png"))
 
         for p_id in game.players:
             if len(game.hands.get(p_id, [])) == 0:

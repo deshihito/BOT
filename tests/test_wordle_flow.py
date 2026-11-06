@@ -72,12 +72,12 @@ class WordleFlowTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn('単語リストにありません', await self.guess(self.m1, 'zzzzz', g))
         self.assertEqual(g.guesses, [])
         await self.guess(self.m1, 'react', g)
-        self.assertIn('REACT', g.message.embed.description)
+        self.assertIn('REACT', g.message.text())
         await self.guess(self.m2, 'crane', g)
         await asyncio.wait_for(task, 2)
         self.assertIn('<@2>', self.channel.texts()[-1])
         self.assertIn('2/6', self.channel.texts()[-1])
-        self.assertIn('CRANE', self.channel.sent[0].embed.fields[-1].value)   # 盤面に答えを出す
+        self.assertIn('CRANE', self.channel.sent[0].text())   # 盤面に答えを出す
         self.assertEqual(party_ranking.shared().memory[(88, 'wordle')][2], before + 1)
         self.assertEqual(self.cog.games, {})
 

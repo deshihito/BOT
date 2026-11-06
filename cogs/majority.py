@@ -20,8 +20,8 @@ from core.game.majority_cog.cog import (
     RECRUIT_SECONDS,
     MIN_PLAYERS,
     AnswerModal,
+    AnswerPanel,
     AnswerView,
-    RecruitView,
     Majority,
     setup,
 )

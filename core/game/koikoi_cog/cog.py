@@ -17,6 +17,7 @@ from discord.ext import commands
 from core.game import board_image, party_ranking
 from core.game import game_panels
 from core.game.board_image import render_cached
+from core.game.game_v2 import GamePanelView, LobbyView, safe_delete, text_panel
 from core.game.koikoi import CARDS, KoikoiMatch, card_label, cpu_choose_capture, cpu_choose_play, cpu_decide, evaluate
 
 logger = logging.getLogger(__name__)
@@ -187,25 +188,29 @@ class HandView(discord.ui.View):
         self.stop()
 
 
-class PanelView(discord.ui.View):
-    """公開パネル: 手札ボタンと、判断フェーズの こいこい／勝負。"""
+class KoikoiPanel(GamePanelView):
+    """公開パネル（V2）: 盤面画像＋手札ボタン、判断フェーズでは こいこい／勝負。"""
 
-    def __init__(self, cog, session):
-        super().__init__(timeout=TURN_SECONDS + 30)
+    def __init__(self, cog, session, body: str = "", board_file=None):
+        super().__init__("🎴 こいこい", body, timeout=TURN_SECONDS + 30)
         self.cog = cog
         self.session = session
+        if board_file is not None:
+            gallery = discord.ui.MediaGallery()
+            gallery.add_item(media=f"attachment://{BOARD_IMAGE_NAME}")
+            self.add_extra(gallery)
         match: KoikoiMatch = session["match"]
+        self.koikoi = self.shoubu = self.hand_button = None
         if match.phase == "decision":
-            koikoi = discord.ui.Button(label="こいこい（続行）", style=discord.ButtonStyle.primary)
-            koikoi.callback = self._make_decide_callback(True)
-            self.add_item(koikoi)
-            shoubu = discord.ui.Button(label="勝負（ここで確定）", style=discord.ButtonStyle.success)
-            shoubu.callback = self._make_decide_callback(False)
-            self.add_item(shoubu)
+            self.koikoi = discord.ui.Button(label="こいこい（続行）", style=discord.ButtonStyle.primary)
+            self.koikoi.callback = self._make_decide_callback(True)
+            self.shoubu = discord.ui.Button(label="勝負（ここで確定）", style=discord.ButtonStyle.success)
+            self.shoubu.callback = self._make_decide_callback(False)
+            self.add_row(self.koikoi, self.shoubu)
         else:
-            hand = discord.ui.Button(label="手札を見て出す", style=discord.ButtonStyle.primary)
-            hand.callback = self._hand_callback
-            self.add_item(hand)
+            self.hand_button = discord.ui.Button(label="手札を見て出す", style=discord.ButtonStyle.primary)
+            self.hand_button.callback = self._hand_callback
+            self.add_row(self.hand_button)
 
     async def _hand_callback(self, interaction: discord.Interaction):
         match: KoikoiMatch = self.session["match"]
@@ -229,20 +234,7 @@ class PanelView(discord.ui.View):
         return callback
 
 
-class JoinView(discord.ui.View):
-    def __init__(self, session):
-        super().__init__(timeout=RECRUIT_SECONDS + 30)
-        self.session = session
-
-    @discord.ui.button(label="参加（最大2人）", style=discord.ButtonStyle.success)
-    async def join(self, interaction: discord.Interaction, button: discord.ui.Button):
-        members = self.session["members"]
-        if interaction.user.id in members:
-            return await interaction.response.send_message("すでに参加しています。", ephemeral=True)
-        if len(members) >= 2:
-            return await interaction.response.send_message("定員です。", ephemeral=True)
-        members[interaction.user.id] = interaction.user
-        await interaction.response.send_message("参加しました。")
+PanelView = KoikoiPanel  # 互換名
 
 
 class Koikoi(commands.Cog):
@@ -266,12 +258,22 @@ class Koikoi(commands.Cog):
                 return
             session["members"] = {interaction.user.id: interaction.user}
             await interaction.response.send_message("こいこいの募集を開始しました。")
-            await game_panels.replace(channel, "party", embed=discord.Embed(
-                title="🎴 こいこい 参加者募集",
-                description=f"{interaction.user.mention} さんが募集中です。\n{RECRUIT_SECONDS}秒以内に参加してください（2人対戦・3局戦）。",
-                color=COLOR), view=JoinView(session))
-            await asyncio.sleep(RECRUIT_SECONDS)
+            lobby = LobbyView(
+                title="🎴 こいこい 参加者募集", host=interaction.user,
+                min_players=2, max_players=2,
+                note=f"{interaction.user.mention} さんが募集中です。\n{RECRUIT_SECONDS}秒以内に参加してください（2人対戦・3局戦）。",
+                timeout=RECRUIT_SECONDS + 30)
+            await game_panels.replace(channel, "party", view=lobby)
+            for _ in range(RECRUIT_SECONDS * 2):
+                if lobby.started or lobby.cancelled:
+                    break
+                await asyncio.sleep(0.5)
+            lobby.stop()
+            if lobby.cancelled:
+                return
+            session["members"] = dict(lobby.members)
             if len(session["members"]) < 2:
+                await game_panels.clear(channel, "party")
                 await channel.send("参加者が2人集まらなかったため、開始できませんでした。")
                 return
             session["match"] = KoikoiMatch(list(session["members"].keys()), rng=random.Random())
@@ -302,12 +304,16 @@ class Koikoi(commands.Cog):
                 else:
                     text = (f"第{match.round_no}局: {members[result['winner']].mention} が "
                             f"{result['base_points']}点×{result['multiplier']}＝{result['gained']}点を取りました。")
-                await channel.send(embed=discord.Embed(title="🎴 局終了", description=text, color=COLOR))
+                await channel.send(view=text_panel("🎴 局終了", text))
                 await asyncio.sleep(3)
                 match.start_round()
                 continue
             await self._run_turn(session)
-        # 対局終了
+        # 対局終了: 進行パネルと残っている通知を片付け、結果だけを残す。
+        await game_panels.clear(channel, "party")
+        notice = session.pop("last_notice", None)
+        if notice is not None:
+            await safe_delete(notice)
         scores = "・".join(f"{members[pid].mention} {match.scores[pid]}点" for pid in match.players)
         if match.match_winner is None:
             text = f"引き分けです。\n{scores}"
@@ -317,7 +323,7 @@ class Koikoi(commands.Cog):
                 await party_ranking.shared().record_win(session["guild_id"], match.match_winner, GAME_ID)
         if session["mode"] == "cpu":
             text += "\n（CPU戦はランキングに記録されません）"
-        await channel.send(embed=discord.Embed(title="🎴 こいこい 終了", description=text, color=COLOR))
+        await channel.send(view=text_panel("🎴 こいこい 終了", text))
 
     async def _run_turn(self, session):
         channel = session["channel"]
@@ -346,19 +352,25 @@ class Koikoi(commands.Cog):
                 turn_note = (turn_note + "\n" if turn_note else "") + \
                     f"{members[current].mention} さんの番です。「手札を見て出す」から札を選んでください。"
             session["acted"].clear()
-            embed = discord.Embed(
-                title="🎴 こいこい", description=public_state_text(match, members, turn_note), color=COLOR)
-            panel_kwargs = {}
+            # 前ターンの時間切れ通知は、新しい手番パネルが出た時点で片付ける。
+            old_notice = session.pop("last_notice", None)
+            if old_notice is not None:
+                await safe_delete(old_notice)
             board = public_board_file(match, members)
+            panel_kwargs = {}
             if board is not None:
-                embed.set_image(url=f"attachment://{BOARD_IMAGE_NAME}")
                 panel_kwargs["file"] = board
-            await game_panels.replace(channel, "party", embed=embed,
-                                      view=PanelView(self, session), **panel_kwargs)
+            await game_panels.replace(
+                channel, "party",
+                view=KoikoiPanel(self, session,
+                                 body=public_state_text(match, members, turn_note),
+                                 board_file=board),
+                **panel_kwargs)
             try:
                 await asyncio.wait_for(session["acted"].wait(), timeout=TURN_SECONDS)
             except asyncio.TimeoutError:
-                await channel.send(f"{members[current].mention} さんは時間切れのため、自動でプレイしました。")
+                session["last_notice"] = await channel.send(
+                    f"{members[current].mention} さんは時間切れのため、自動でプレイしました。")
                 self._auto_action(session)
             if match.phase == "decision":
                 note = ""

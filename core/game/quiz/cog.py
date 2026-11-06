@@ -12,7 +12,8 @@ import time
 import discord
 from discord.ext import commands
 
-from core.game import party_ranking
+from core.game import game_panels, party_ranking
+from core.game.game_v2 import GamePanelView, LobbyView, original_response_or_none, safe_delete, text_panel
 from core.game.quiz_bank import default_source
 from core.game.quiz_game import QuizSession
 
@@ -24,6 +25,7 @@ GAME_ID = "quiz"
 QUESTION_COUNT = 10
 QUESTION_SECONDS = 20
 RECRUIT_SECONDS = 60
+MAX_PLAYERS = 99  # 実質無制限（共通ロビーの表示・定員チェック用）
 
 
 def standings_text(session: QuizSession, limit: int = 10) -> str:
@@ -37,16 +39,27 @@ def standings_text(session: QuizSession, limit: int = 10) -> str:
     return "\n".join(lines)
 
 
-class AnswerView(discord.ui.View):
-    def __init__(self, cog, session: QuizSession, question, deadline: float):
-        super().__init__(timeout=QUESTION_SECONDS + 5)
+class AnswerPanel(GamePanelView):
+    """4択の回答パネル（V2）。選択肢ボタンは choice_buttons に並ぶ。"""
+
+    def __init__(self, cog, session: QuizSession, question, deadline: float,
+                 title: str = "", body: str = ""):
+        super().__init__(title, body, timeout=QUESTION_SECONDS + 5)
         self.cog = cog
         self.session = session
         self.deadline = deadline
+        self.choice_buttons = []
+        row = []
         for i, choice in enumerate(question["choices"]):
-            btn = discord.ui.Button(label=str(choice)[:80], style=discord.ButtonStyle.primary, row=i // 2)
+            btn = discord.ui.Button(label=str(choice)[:80], style=discord.ButtonStyle.primary)
             btn.callback = self._make_callback(i)
-            self.add_item(btn)
+            self.choice_buttons.append(btn)
+            row.append(btn)
+            if len(row) == 2:
+                self.add_row(*row)
+                row = []
+        if row:
+            self.add_row(*row)
 
     def _make_callback(self, idx):
         async def callback(interaction: discord.Interaction):
@@ -59,30 +72,7 @@ class AnswerView(discord.ui.View):
         return callback
 
 
-class RecruitView(discord.ui.View):
-    def __init__(self, cog, host_id):
-        super().__init__(timeout=RECRUIT_SECONDS + 10)
-        self.cog = cog
-        self.host_id = host_id
-        self.players = [host_id]
-        self.started = False
-
-    @discord.ui.button(label="参加する", style=discord.ButtonStyle.success)
-    async def join(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if interaction.user.id in self.players:
-            return await interaction.response.send_message("すでに参加しています。", ephemeral=True)
-        self.players.append(interaction.user.id)
-        await interaction.response.send_message(f"参加しました（現在 {len(self.players)}名）。")
-
-    @discord.ui.button(label="開始する（ホスト）", style=discord.ButtonStyle.primary)
-    async def start(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if interaction.user.id != self.host_id:
-            return await interaction.response.send_message("開始できるのはホストだけです。", ephemeral=True)
-        if self.started:
-            return await interaction.response.send_message("すでに開始しています。", ephemeral=True)
-        self.started = True
-        await interaction.response.send_message("クイズ大会を開始します！")
-        self.stop()
+AnswerView = AnswerPanel  # 互換名
 
 
 class Quiz(commands.Cog):
@@ -96,25 +86,27 @@ class Quiz(commands.Cog):
         if channel.id in self.channels:
             return await interaction.response.send_message("このチャンネルではすでにクイズ大会が開催中です。", ephemeral=True)
         self.channels.add(channel.id)
-        view = RecruitView(self, interaction.user.id)
-        embed = discord.Embed(
-            title="🧠 クイズ大会 参加者募集",
-            description=(f"{QUESTION_COUNT}問の4択クイズで競います。参加ボタンを押してください。\n"
-                         f"ホストが「開始する」を押すか、{RECRUIT_SECONDS}秒たつと開始します（途中参加もできます）。"),
-            color=0xFFFFFF,
-        )
-        await interaction.response.send_message(embed=embed, view=view)
-        asyncio.create_task(self._run(channel, view))
+        view = LobbyView(
+            title="🧠 クイズ大会 参加者募集", host=interaction.user,
+            min_players=1, max_players=MAX_PLAYERS,
+            note=(f"{QUESTION_COUNT}問の4択クイズで競います。\n"
+                  f"ホストが「開始する」を押すか、{RECRUIT_SECONDS}秒たつと開始します（途中参加もできます）。"),
+            timeout=RECRUIT_SECONDS + 10)
+        await interaction.response.send_message(view=view)
+        lobby_msg = await original_response_or_none(interaction)
+        asyncio.create_task(self._run(channel, view, lobby_msg))
 
-    async def _run(self, channel, view: RecruitView):
+    async def _run(self, channel, view: LobbyView, lobby_msg=None):
         try:
             for _ in range(RECRUIT_SECONDS * 2):
-                if view.started:
+                if view.started or view.cancelled:
                     break
                 await asyncio.sleep(0.5)
-            if not view.started:
-                view.started = True
-                view.stop()
+            view.stop()
+            # 募集パネルは開始（または取消）時点で役割を終える。
+            await safe_delete(lobby_msg)
+            if view.cancelled:
+                return
             session = QuizSession(default_source().get_questions(QUESTION_COUNT))
             for uid in view.players:
                 session.add_player(uid)
@@ -131,14 +123,12 @@ class Quiz(commands.Cog):
             if q is None:
                 break
             number = session.index + 1
-            embed = discord.Embed(
-                title=f"第{number}問 / {total}問（{q['category']}）",
-                description=f"**{q['q']}**\n制限時間: {QUESTION_SECONDS}秒",
-                color=0xFFFFFF,
-            )
             deadline = time.monotonic() + QUESTION_SECONDS
-            view = AnswerView(self, session, q, deadline)
-            await channel.send(embed=embed, view=view)
+            view = AnswerPanel(
+                self, session, q, deadline,
+                title=f"第{number}問 / {total}問（{q['category']}）",
+                body=f"**{q['q']}**\n制限時間: {QUESTION_SECONDS}秒")
+            await game_panels.replace(channel, "party", view=view)
             for _ in range(QUESTION_SECONDS * 2):
                 if session.all_answered():
                     break
@@ -150,10 +140,11 @@ class Quiz(commands.Cog):
             desc = f"正解は **{correct_label}** でした。"
             if best[0] is not None and best[1] > 0:
                 desc += f"\n最高得点: <@{best[0]}>（+{best[1]}点）"
-            await channel.send(embed=discord.Embed(title=f"第{number}問の答え", description=desc, color=0xFFFFFF))
+            # 答え合わせは次の問題パネルに置き換わるまでの表示（ボタンなし）。
+            await game_panels.replace(channel, "party", view=text_panel(f"第{number}問の答え", desc))
             await asyncio.sleep(3)
-        embed = discord.Embed(title="🏆 クイズ大会 結果発表", description=standings_text(session), color=0xFFFFFF)
-        await channel.send(embed=embed)
+        await game_panels.clear(channel, "party")
+        await channel.send(view=text_panel("🏆 クイズ大会 結果発表", standings_text(session)))
         guild = getattr(channel, "guild", None)
         if guild is not None:
             for uid in session.winners():

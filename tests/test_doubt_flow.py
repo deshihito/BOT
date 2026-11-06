@@ -52,7 +52,10 @@ class DoubtFlowTest(unittest.IsolatedAsyncioTestCase):
             self.assertIn('締め切', inter.texts()[0])
             self.assertEqual(game.players, [1, 2, 3])
             self.assertNotIn(44, game.hands)
-            self.assertTrue(all(child.disabled for child in join_view.children))
+            # V2 化で締切時はボタン行そのものが取り除かれる（無効化より強い）
+            import discord as _discord
+            self.assertFalse([c for c in join_view.walk_children()
+                              if isinstance(c, _discord.ui.Button)])
             # 開始時の参加リストと共有していない
             join_view.players.append(45)
             self.assertEqual(game.players, [1, 2, 3])

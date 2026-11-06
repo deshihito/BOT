@@ -112,6 +112,7 @@ class NationStatusTest(unittest.TestCase):
 
 class UnoLobbyFooterTest(unittest.IsolatedAsyncioTestCase):
     async def test_recruit_embed_has_no_footer(self):
+        # 募集パネルは共通ロビー（V2）に移行し、embed 自体を持たない（footer も無い）
         guild = FakeGuild()
         channel = FakeChannel(200, guild)
         host = FakeMember(1, guild)
@@ -120,8 +121,8 @@ class UnoLobbyFooterTest(unittest.IsolatedAsyncioTestCase):
             task = asyncio.create_task(cog.start_recruit(FakeInteraction(host, channel)))
             await real_sleep(0.05)
             panel = channel.sent[-1]
-            self.assertIsNotNone(panel.embed)
-            self.assertIsNone(panel.embed.footer.text)
+            self.assertIsNone(panel.embed)
+            self.assertIsInstance(panel.view, uno.JoinView)
             await press(panel.view, "cancel", FakeInteraction(host, channel, message=panel))
             await task
 

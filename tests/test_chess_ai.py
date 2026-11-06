@@ -247,7 +247,7 @@ class ChessPageTurnTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(g.selected, (4, 3))
         interaction.message.edit.assert_awaited_once()
         view = interaction.message.edit.call_args.kwargs["view"]
-        select = view.children[0]
+        select = view.select
         self.assertEqual(select.page, 1)
         page_labels, _, _ = paginate_labels(labels, 1)
         self.assertEqual(select.labels, dict(page_labels))

@@ -89,7 +89,15 @@ class LogicTest(unittest.TestCase):
         g = game({1: ['S8', 'H8', 'D8', 'C8', 'S3'], 2: ['S4', 'H4', 'D4', 'C4', 'SK'], 3: ['H2']})
         self.assertEqual(g.play(1, ('S8', 'H8', 'D8', 'C8')), 'revolution')
         self.assertTrue(g.revolution)
-        self.assertEqual(g.play(2, ('S4', 'H4', 'D4', 'C4')), 'revolution')   # 革命中は 4 が 8 より強い
+        # 8切りも同時に発動する: 場は流れ、出した本人が続けてリードする
+        # （2026-11-07 の 8切り仕様修正に合わせて手順を追随）。
+        self.assertIsNone(g.table)
+        self.assertEqual(g.turn, 1)
+        self.assertEqual(g.play(1, ('S3',)), 'ok')          # 革命中は 3 が強い。1 はこれで上がり
+        self.assertTrue(g.pass_turn(2))
+        self.assertTrue(g.pass_turn(3))                     # 全員パスで場が流れ、2 から
+        self.assertEqual(g.turn, 2)
+        self.assertEqual(g.play(2, ('S4', 'H4', 'D4', 'C4')), 'revolution')   # 革命返し
         self.assertFalse(g.revolution)
 
     def test_registered(self):
@@ -177,6 +185,22 @@ class DaifugoFlowTest(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(any('時間切れのため' in t for t in texts))
         self.assertIn('大富豪 終了', texts[-1])
         self.assert_no_emoji()
+
+    async def test_finish_auto_ended_message_and_cleanup(self):
+        # 終了ガードで終わった対局: 結果に自動終了の旨が出て、行動ログが消える。
+        g = game({1: ['S3'], -1: ['H2'], -2: ['D4']})
+        g.players[1] = self.members[1]
+        g.auto_ended = True
+        g.finished = [-1, 1, -2]
+        g.phase = 'done'
+        log_msg = await self.channel.send('行動ログ')
+        self.cog._logs[self.channel.id] = log_msg
+        await self.cog.finish(self.channel, g)
+        self.assertTrue(log_msg.deleted)
+        last = self.channel.texts()[-1]
+        self.assertIn('大富豪 終了', last)
+        self.assertIn('自動終了', last)
+        self.assertIn('残り手札の少ない順', last)
 
     async def test_duplicate_recruit_refused(self):
         with fast_time():

@@ -11,7 +11,8 @@ import random
 import discord
 from discord.ext import commands
 
-from core.game import party_ranking
+from core.game import game_panels, party_ranking
+from core.game.game_v2 import GamePanelView, LobbyView, original_response_or_none, safe_delete, text_panel
 from core.game.majority import TOPICS, MajoritySession
 
 logger = logging.getLogger(__name__)
@@ -23,6 +24,7 @@ ROUNDS = 5
 ANSWER_SECONDS = 45
 RECRUIT_SECONDS = 60
 MIN_PLAYERS = 3
+MAX_PLAYERS = 99  # 実質無制限（共通ロビーの表示・定員チェック用に大きな値）
 
 
 class AnswerModal(discord.ui.Modal, title="答えを出す"):
@@ -40,42 +42,24 @@ class AnswerModal(discord.ui.Modal, title="答えを出す"):
             await interaction.response.send_message("すでに答え済みか、受付が終わっています。", ephemeral=True)
 
 
-class AnswerView(discord.ui.View):
-    def __init__(self, cog, session: MajoritySession):
-        super().__init__(timeout=ANSWER_SECONDS + 10)
+class AnswerPanel(GamePanelView):
+    """お題への回答ボタン（モーダル起動）のパネル（V2）。"""
+
+    def __init__(self, cog, session: MajoritySession, title: str, body: str):
+        super().__init__(title, body, timeout=ANSWER_SECONDS + 10)
         self.cog = cog
         self.session = session
+        self.answer = discord.ui.Button(label="答えを出す", style=discord.ButtonStyle.primary)
+        self.answer.callback = self._answer
+        self.add_row(self.answer)
 
-    @discord.ui.button(label="答えを出す", style=discord.ButtonStyle.primary)
-    async def answer(self, interaction: discord.Interaction, button: discord.ui.Button):
+    async def _answer(self, interaction: discord.Interaction):
         if interaction.user.id in self.session.answers:
             return await interaction.response.send_message("すでに答え済みです。", ephemeral=True)
         await interaction.response.send_modal(AnswerModal(self.cog, self.session))
 
 
-class RecruitView(discord.ui.View):
-    def __init__(self, host_id):
-        super().__init__(timeout=RECRUIT_SECONDS + 10)
-        self.host_id = host_id
-        self.players = [host_id]
-        self.started = False
-
-    @discord.ui.button(label="参加する", style=discord.ButtonStyle.success)
-    async def join(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if interaction.user.id in self.players:
-            return await interaction.response.send_message("すでに参加しています。", ephemeral=True)
-        self.players.append(interaction.user.id)
-        await interaction.response.send_message(f"参加しました（現在 {len(self.players)}名）。")
-
-    @discord.ui.button(label="開始する（ホスト）", style=discord.ButtonStyle.primary)
-    async def start(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if interaction.user.id != self.host_id:
-            return await interaction.response.send_message("開始できるのはホストだけです。", ephemeral=True)
-        if self.started:
-            return await interaction.response.send_message("すでに開始しています。", ephemeral=True)
-        self.started = True
-        await interaction.response.send_message("マジョリティ連想を開始します！")
-        self.stop()
+AnswerView = AnswerPanel  # 互換名
 
 
 class Majority(commands.Cog):
@@ -89,29 +73,31 @@ class Majority(commands.Cog):
         if channel.id in self.channels:
             return await interaction.response.send_message("このチャンネルではすでにマジョリティ連想が開催中です。", ephemeral=True)
         self.channels.add(channel.id)
-        view = RecruitView(interaction.user.id)
-        embed = discord.Embed(
-            title="👥 マジョリティ連想 参加者募集",
-            description=(f"お題に「みんなが書きそうな答え」を出すゲームです（{MIN_PLAYERS}名以上で開始）。"
-                         f"ホストが「開始する」を押すか、{RECRUIT_SECONDS}秒たつと開始します。"),
-            color=0xFFFFFF,
-        )
-        await interaction.response.send_message(embed=embed, view=view)
-        asyncio.create_task(self._run(channel, view))
+        view = LobbyView(
+            title="👥 マジョリティ連想 参加者募集", host=interaction.user,
+            min_players=MIN_PLAYERS, max_players=MAX_PLAYERS,
+            note=(f"お題に「みんなが書きそうな答え」を出すゲームです。"
+                  f"ホストが「開始する」を押すか、{RECRUIT_SECONDS}秒たつと開始します。"),
+            timeout=RECRUIT_SECONDS + 10)
+        await interaction.response.send_message(view=view)
+        lobby_msg = await original_response_or_none(interaction)
+        asyncio.create_task(self._run(channel, view, lobby_msg))
 
-    async def _run(self, channel, view: RecruitView):
+    async def _run(self, channel, view: LobbyView, lobby_msg=None):
         try:
             for _ in range(RECRUIT_SECONDS * 2):
-                if view.started:
+                if view.started or view.cancelled:
                     break
                 await asyncio.sleep(0.5)
-            if not view.started:
-                view.started = True
-                view.stop()
+            view.stop()
+            # 募集パネルは開始（または不成立）時点で役割を終える。
+            await safe_delete(lobby_msg)
+            if view.cancelled:
+                return
             players = list(dict.fromkeys(view.players))
             if len(players) < MIN_PLAYERS:
-                await channel.send(embed=discord.Embed(
-                    description=f"人数不足（{MIN_PLAYERS}名以上必要）のため、開始できませんでした。", color=0xFFFFFF))
+                await channel.send(view=text_panel(
+                    "", f"人数不足（{MIN_PLAYERS}名以上必要）のため、開始できませんでした。"))
                 return
             topics = random.sample(TOPICS, ROUNDS)
             session = MajoritySession(topics)
@@ -129,13 +115,11 @@ class Majority(commands.Cog):
             if topic is None:
                 break
             number = session.index + 1
-            embed = discord.Embed(
+            view = AnswerPanel(
+                self, session,
                 title=f"第{number}ラウンド / {ROUNDS}",
-                description=f"お題: **{topic}**\n「答えを出す」ボタンから、みんなが書きそうな答えを1つ出してください（{ANSWER_SECONDS}秒）。",
-                color=0xFFFFFF,
-            )
-            view = AnswerView(self, session)
-            await channel.send(embed=embed, view=view)
+                body=f"お題: **{topic}**\n「答えを出す」ボタンから、みんなが書きそうな答えを1つ出してください（{ANSWER_SECONDS}秒）。")
+            await game_panels.replace(channel, "party", view=view)
             for _ in range(ANSWER_SECONDS * 2):
                 if session.all_answered():
                     break
@@ -149,13 +133,15 @@ class Majority(commands.Cog):
                 lines.append(f"「{answer}」× {len(uids)}人（+{pts}点）: {names}")
             if not lines:
                 lines.append("回答がありませんでした。")
-            await channel.send(embed=discord.Embed(
-                title=f"第{number}ラウンドの結果", description="\n".join(lines)[:4000], color=0xFFFFFF))
+            # 結果は次のお題パネルに置き換わるまでの表示（ボタンなし）。
+            await game_panels.replace(channel, "party", view=text_panel(
+                f"第{number}ラウンドの結果", "\n".join(lines)[:4000]))
             await asyncio.sleep(3)
         rows = session.standings()
         medals = {1: "🥇", 2: "🥈", 3: "🥉"}
         text = "\n".join(f"{medals.get(i, f'{i}.')} <@{uid}> — {score}点" for i, (uid, score) in enumerate(rows, 1)) or "参加者がいませんでした。"
-        await channel.send(embed=discord.Embed(title="🏆 マジョリティ連想 最終結果", description=text, color=0xFFFFFF))
+        await game_panels.clear(channel, "party")
+        await channel.send(view=text_panel("🏆 マジョリティ連想 最終結果", text))
         guild = getattr(channel, "guild", None)
         if guild is not None:
             for uid in session.winners():

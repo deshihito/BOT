@@ -4,6 +4,7 @@ import discord
 from discord.ext import commands
 
 from core.game import game_records
+from core.game.game_v2 import text_panel
 
 
 class FlashModal(discord.ui.Modal, title="フラッシュ暗算"):
@@ -56,15 +57,15 @@ class FlashMentalArithmetic(commands.Cog):
     numbers = [random.randint(min_val, min_val + val_range - 1) for _ in range(count)]
     total_sum = sum(numbers)
 
-    await interaction.response.send_message(
-        f"フラッシュ暗算を開始します。\n数字の個数: {count}個 / 表示間隔: {interval}秒 / 桁数: {digits}桁\nまもなく開始します..."
-    )
+    await interaction.response.send_message(view=text_panel(
+        "",
+        f"フラッシュ暗算を開始します。\n数字の個数: {count}個 / 表示間隔: {interval}秒 / 桁数: {digits}桁\nまもなく開始します..."))
 
     await asyncio.sleep(2)
 
     for num in numbers:
       try:
-        await interaction.edit_original_response(content=f"# {num}")
+        await interaction.edit_original_response(view=text_panel("", f"# {num}"))
       except discord.HTTPException as e:
         if e.status == 429:
           # 万が一レートリミットに達した場合は、指定された秒数待機するか安全に離脱
@@ -74,7 +75,7 @@ class FlashMentalArithmetic(commands.Cog):
           raise e
       await asyncio.sleep(interval)
 
-    await interaction.edit_original_response(content="終了！答えをチャットに送信してください。")
+    await interaction.edit_original_response(view=text_panel("", "終了！答えをチャットに送信してください。"))
 
     def check(m: discord.Message):
       return (
@@ -87,21 +88,18 @@ class FlashMentalArithmetic(commands.Cog):
       msg = await self.bot.wait_for("message", timeout=30.0, check=check)
     except asyncio.TimeoutError:
       line = self._record_line(interaction.user.id, count, interval, digits, False)
-      await interaction.followup.send(
-          f"時間切れです。正解は **{total_sum}** でした。{line}"
-      )
+      await interaction.followup.send(view=text_panel(
+          "", f"時間切れです。正解は **{total_sum}** でした。{line}"))
       return
 
     correct = int(msg.content) == total_sum
     line = self._record_line(interaction.user.id, count, interval, digits, correct)
     if correct:
-      await interaction.followup.send(
-          f"正解です！おめでとうございます！ (答え: {total_sum}){line}"
-      )
+      await interaction.followup.send(view=text_panel(
+          "", f"正解です！おめでとうございます！ (答え: {total_sum}){line}"))
     else:
-      await interaction.followup.send(
-          f"不正解です...。正解は **{total_sum}** でした。{line}"
-      )
+      await interaction.followup.send(view=text_panel(
+          "", f"不正解です...。正解は **{total_sum}** でした。{line}"))
 
   def _record_line(self, user_id, count: int, interval: float, digits: int, correct: bool) -> str:
     # 設定ごとの自己ベスト（core/game/game_records.py）。記録できなければ何も付けない。

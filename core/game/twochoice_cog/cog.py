@@ -12,6 +12,7 @@ import discord
 from discord.ext import commands
 
 from core.game import game_panels, game_records
+from core.game.game_v2 import GamePanelView, text_panel
 from core.game.twochoice import QUESTIONS_PER_SESSION, minority_side, pick_questions, tally
 
 GAME_ID = "twochoice"
@@ -19,18 +20,23 @@ VOTE_SECONDS = 20
 COLOR = 0xFFFFFF
 
 
-class VoteView(discord.ui.View):
-    def __init__(self, cog, session):
-        super().__init__(timeout=VOTE_SECONDS + 30)
+class VotePanel(GamePanelView):
+    """A/B 投票パネル（V2）。全員同時参加型のためロビーは持たない。"""
+
+    def __init__(self, cog, session, title: str, body: str):
+        super().__init__(title, body, timeout=VOTE_SECONDS + 30)
         self.cog = cog
         self.session = session
+        self.vote_a = discord.ui.Button(label="A", style=discord.ButtonStyle.primary)
+        self.vote_a.callback = self._vote_a
+        self.vote_b = discord.ui.Button(label="B", style=discord.ButtonStyle.primary)
+        self.vote_b.callback = self._vote_b
+        self.add_row(self.vote_a, self.vote_b)
 
-    @discord.ui.button(label="A", style=discord.ButtonStyle.primary)
-    async def vote_a(self, interaction: discord.Interaction, button: discord.ui.Button):
+    async def _vote_a(self, interaction: discord.Interaction):
         await self._vote(interaction, "A")
 
-    @discord.ui.button(label="B", style=discord.ButtonStyle.primary)
-    async def vote_b(self, interaction: discord.Interaction, button: discord.ui.Button):
+    async def _vote_b(self, interaction: discord.Interaction):
         await self._vote(interaction, "B")
 
     async def _vote(self, interaction: discord.Interaction, side: str):
@@ -38,6 +44,9 @@ class VoteView(discord.ui.View):
         votes[interaction.user.id] = side
         await interaction.response.send_message(
             f"{side} に投票しました（現在 {len(votes)} 票）。締め切りまでに変更もできます。", ephemeral=True)
+
+
+VoteView = VotePanel  # 互換名
 
 
 class TwoChoice(commands.Cog):
@@ -63,11 +72,10 @@ class TwoChoice(commands.Cog):
         per_user_minority: dict = {}
         for idx, (opt_a, opt_b) in enumerate(questions, 1):
             session = {"votes": {}}
-            embed = discord.Embed(
+            await game_panels.replace(channel, "party", view=VotePanel(
+                self, session,
                 title=f"⚖ 究極の二択（{idx}/{len(questions)}）",
-                description=f"**A: {opt_a}**\n**B: {opt_b}**\n\n{VOTE_SECONDS}秒で締め切ります。どちらか押してください。",
-                color=COLOR)
-            await game_panels.replace(channel, "party", embed=embed, view=VoteView(self, session))
+                body=f"**A: {opt_a}**\n**B: {opt_b}**\n\n{VOTE_SECONDS}秒で締め切ります。どちらか押してください。"))
             await asyncio.sleep(VOTE_SECONDS)
             votes = session["votes"]
             a, b = tally(votes)
@@ -88,15 +96,16 @@ class TwoChoice(commands.Cog):
                     per_user_votes[uid] = per_user_votes.get(uid, 0) + 1
                     if minority and side == minority:
                         per_user_minority[uid] = per_user_minority.get(uid, 0) + 1
-            await game_panels.replace(channel, "party", embed=discord.Embed(
-                title=f"⚖ 結果（{idx}/{len(questions)}）", description=result, color=COLOR))
+            await game_panels.replace(channel, "party", view=text_panel(
+                f"⚖ 結果（{idx}/{len(questions)}）", result))
             await asyncio.sleep(3)
         for uid, count in per_user_votes.items():
             game_records.record_twochoice_safely(uid, count, per_user_minority.get(uid, 0))
-        await channel.send(embed=discord.Embed(
-            title="⚖ 究極の二択 終了",
-            description=f"{len(questions)}題が終わりました。参加してくれた {len(per_user_votes)} 人、ありがとうございました。",
-            color=COLOR))
+        # 最後の結果パネルを片付け、終了の1通だけを残す。
+        await game_panels.clear(channel, "party")
+        await channel.send(view=text_panel(
+            "⚖ 究極の二択 終了",
+            f"{len(questions)}題が終わりました。参加してくれた {len(per_user_votes)} 人、ありがとうございました。"))
 
 
 async def setup(bot):

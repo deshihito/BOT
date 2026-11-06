@@ -29,8 +29,8 @@ from core.game.koikoi_cog.cog import (
     public_state_text,
     CaptureSelectView,
     HandView,
+    KoikoiPanel,
     PanelView,
-    JoinView,
     Koikoi,
     setup,
 )

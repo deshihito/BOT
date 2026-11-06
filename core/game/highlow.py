@@ -2,9 +2,10 @@
 """ハイ＆ロー（ソロ・ストリーク型）の純粋ロジック。
 
 山札（52枚）から1枚を見せ、次のカードが「高い」か「低い」かを当て続ける。
-連続正解（ストリーク）がスコア。同点（同じ数字）は外れとして扱う
-（ガイドにも明記）。賭け要素は無く、記録は core/game/game_records.py の
-highlow 区分に残す。
+連続正解（ストリーク）がスコア。同点（同じ数字）は外れにせず、その札を
+今のカードにして「続ける／ここでやめる」を選べる引き分け扱いにする
+（2026-11-07 仕様変更。以前は同点=外れだった）。賭け要素は無く、記録は
+core/game/game_records.py の highlow 区分に残す。
 """
 from __future__ import annotations
 
@@ -40,24 +41,36 @@ class HighLowGame:
         self.finished = False
         self.cleared = False  # 山札を最後まで当て切った
         self.last_drawn = None
+        self.last_outcome = None  # "correct" / "wrong" / "tie" / None
 
     @property
     def remaining(self) -> int:
         return len(self.deck)
 
     def guess(self, direction: str) -> bool:
-        """次のカードをめくり、正解なら True。外れたらゲーム終了。"""
+        """次のカードをめくり、正解なら True。
+
+        同点は引き分け: 外れにせず、その札を今のカードにしてゲームは
+        続く（``last_outcome == "tie"``。戻り値は従来互換で False）。
+        続けるかやめるかは表示側がボタンで選ばせる。ただし同点の札が
+        山札の最後の1枚だった場合は、そこで終了する（ストリークは保持）。
+        """
         if self.finished or not self.deck:
             return False
         nxt = self.deck.pop()
         self.last_drawn = nxt
         if nxt[0] == self.current[0]:
-            correct = False  # 同点は外れ（ガイド明記）
-        elif direction == "high":
+            self.last_outcome = "tie"
+            self.current = nxt
+            if not self.deck:
+                self.finished = True
+            return False
+        if direction == "high":
             correct = nxt[0] > self.current[0]
         else:
             correct = nxt[0] < self.current[0]
         self.current = nxt
+        self.last_outcome = "correct" if correct else "wrong"
         if correct:
             self.streak += 1
             if not self.deck:

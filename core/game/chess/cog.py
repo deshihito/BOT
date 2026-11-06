@@ -12,6 +12,7 @@ from PIL import Image, ImageDraw, ImageFont
 
 from core.game import party_ranking
 from core.game import elo, game_panels, game_restore
+from core.game.game_v2 import GamePanelView, LobbyView, safe_delete
 
 logger = logging.getLogger(__name__)
 
@@ -457,32 +458,13 @@ class ChessGame:
         return self.players[self.turn]
 
 
-class JoinView(discord.ui.View):
-    def __init__(self, game):
-        super().__init__(timeout=RECRUIT_SECONDS + 30)
-        self.game = game
-
-    @discord.ui.button(label="参加（最大2人）", style=discord.ButtonStyle.success)
-    async def join(self, interaction, button):
-        g = self.game
-        if g.phase != "recruit":
-            return await interaction.response.send_message("募集は終了しました。", ephemeral=True)
-        if interaction.user.id in g.players:
-            return await interaction.response.send_message("すでに参加しています。", ephemeral=True)
-        if len(g.players) >= 2:
-            return await interaction.response.send_message("定員です。", ephemeral=True)
-        g.players[interaction.user.id] = interaction.user
-        await interaction.response.send_message("参加しました。")
-
-    @discord.ui.button(label="抜ける", style=discord.ButtonStyle.secondary)
-    async def leave(self, interaction, button):
-        g = self.game
-        if g.phase != "recruit" or interaction.user.id not in g.players:
-            return await interaction.response.send_message("参加中の募集がありません。", ephemeral=True)
-        if interaction.user.id == g.host_id:
-            return await interaction.response.send_message("募集主は抜けられません。", ephemeral=True)
-        del g.players[interaction.user.id]
-        await interaction.response.send_message("参加を取り消しました。")
+def _board_panel(body: str, timeout=TURN_SECONDS) -> GamePanelView:
+    """盤面画像つきパネルの土台（操作部品は呼び出し側が足す）。"""
+    panel = GamePanelView("", body, timeout=timeout)
+    gallery = discord.ui.MediaGallery()
+    gallery.add_item(media="attachment://chess_board.png")
+    panel.add_extra(gallery)
+    return panel
 
 
 class ChessMoveSelect(discord.ui.Select):
@@ -499,10 +481,19 @@ class ChessMoveSelect(discord.ui.Select):
                                      self.values[0], page=self.page)
 
 
-class ChessMoveView(discord.ui.View):
-    def __init__(self, cog, game, labels, stage, page=0):
-        super().__init__(timeout=TURN_SECONDS)
-        self.add_item(ChessMoveSelect(cog, game, labels, stage, page))
+class ChessMovePanel(GamePanelView):
+    """盤面＋番号セレクトの手番パネル（V2）。セレクトは self.select。"""
+
+    def __init__(self, cog, game, labels, stage, page=0, body: str = ""):
+        super().__init__("", body, timeout=TURN_SECONDS)
+        gallery = discord.ui.MediaGallery()
+        gallery.add_item(media="attachment://chess_board.png")
+        self.add_extra(gallery)
+        self.select = ChessMoveSelect(cog, game, labels, stage, page)
+        self.add_row(self.select)
+
+
+ChessMoveView = ChessMovePanel  # 互換名
 
 
 class Chess(commands.Cog):
@@ -517,10 +508,8 @@ class Chess(commands.Cog):
         else:
             desc, selected = "移動先の番号を選んでください。", g.selected
         file = discord.File(render_board(g.board, page_labels, selected), filename="chess_board.png")
-        embed = discord.Embed(description=desc, color=COLOR)
-        embed.set_image(url="attachment://chess_board.png")
-        await interaction.message.edit(embed=embed, attachments=[file],
-                                       view=ChessMoveView(self, g, labels, stage, page))
+        await interaction.message.edit(attachments=[file],
+                                       view=ChessMovePanel(self, g, labels, stage, page, body=desc))
 
     async def handle_select(self, interaction, g, labels, stage, value, page=0):
         await interaction.response.defer()
@@ -542,10 +531,9 @@ class Chess(commands.Cog):
             move_labels = [(move_label(i), dest) for i, dest in enumerate(destinations)]
             first_page, _, _ = paginate_labels(move_labels, 0)
             file = discord.File(render_board(g.board, first_page, chosen), filename="chess_board.png")
-            embed = discord.Embed(description="移動先の番号を選んでください。", color=COLOR)
-            embed.set_image(url="attachment://chess_board.png")
-            await interaction.message.edit(embed=embed, attachments=[file],
-                                           view=ChessMoveView(self, g, move_labels, "destination"))
+            await interaction.message.edit(attachments=[file],
+                                           view=ChessMovePanel(self, g, move_labels, "destination",
+                                                               body="移動先の番号を選んでください。"))
             return
         source = g.selected
         if source is not None and (source, chosen) in legal_moves(g.board, g.turn, castling=g.castling, ep=g.ep_square):
@@ -573,9 +561,20 @@ class Chess(commands.Cog):
         self.games[channel.id] = g
         await interaction.response.send_message("チェスの募集を開始しました。")
         try:
-            await game_panels.replace(channel, "party", embed=discord.Embed(
-                title="チェス 参加者募集", description=f"{interaction.user.mention} さんが募集中です。\n{RECRUIT_SECONDS}秒以内に参加してください（2人対戦）。", color=COLOR), view=JoinView(g))
-            await asyncio.sleep(RECRUIT_SECONDS)
+            lobby = LobbyView(
+                title="チェス 参加者募集", host=interaction.user,
+                min_players=2, max_players=2,
+                note=f"{interaction.user.mention} さんが募集中です。\n{RECRUIT_SECONDS}秒以内に参加してください（2人対戦）。",
+                timeout=RECRUIT_SECONDS + 30)
+            await game_panels.replace(channel, "party", view=lobby)
+            for _ in range(RECRUIT_SECONDS * 2):
+                if lobby.started or lobby.cancelled:
+                    break
+                await asyncio.sleep(0.5)
+            lobby.stop()
+            if lobby.cancelled:
+                return
+            g.players = dict(lobby.members)
             await self.run_game(channel, g)
         finally:
             g.phase = "done"
@@ -591,17 +590,15 @@ class Chess(commands.Cog):
         labels = [(move_label(i), pos) for i, pos in enumerate(sources[:len(MOVE_LABELS)])]
         first_page, _, _ = paginate_labels(labels, 0)
         file = discord.File(render_board(g.board, first_page, g.selected), filename="chess_board.png")
-        embed = discord.Embed(description=turn_description(g), color=COLOR)
-        embed.set_image(url="attachment://chess_board.png")
+        panel = ChessMovePanel(self, g, labels, "source", body=turn_description(g))
         if g.current_msg is None:
-            g.current_msg = await game_panels.replace(channel, "party", embed=embed, file=file,
-                                                      view=ChessMoveView(self, g, labels, "source"))
+            g.current_msg = await game_panels.replace(channel, "party", file=file, view=panel)
         else:
-            await g.current_msg.edit(embed=embed, attachments=[file],
-                                     view=ChessMoveView(self, g, labels, "source"))
+            await g.current_msg.edit(attachments=[file], view=panel)
 
     async def run_game(self, channel, g):
         if len(g.players) != 2:
+            await game_panels.clear(channel, "party")
             await channel.send("参加者が2人集まらなかったため開始できませんでした。")
             return
         ids = list(g.players.values())
@@ -651,6 +648,11 @@ class Chess(commands.Cog):
                 suffix = f"\n{rating_line}" if rating_line else ""
                 await channel.send(f"{g.current_user().mention} さんは時間切れです。{winner} の勝ちです。チェスを終了しました。{suffix}")
                 break
+        # 対局終了: 盤面パネルを片付け、結果の文だけを残す。
+        await game_panels.clear(channel, "party")
+        if g.current_msg is not None:
+            await safe_delete(g.current_msg)
+            g.current_msg = None
         await channel.send("チェスを終了しました。")
 
     # ------------------------------------------------------------------
