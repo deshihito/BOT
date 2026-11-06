@@ -29,7 +29,7 @@ from core import voice_restore
 from core.voice_session import SHARED_FEATURES, VoiceBusy, get_manager
 from core.voice_media import add_audio_source, has_audio_source, remove_audio_source
 from core.legacy import Responder
-from core.emojis import FAILED, MUSIC, SUCCESS
+from core.emojis import FAILED, LOUPE, MUSIC, SUCCESS
 from core.music_activity import build_music_activity_snapshot
 
 from core.music.common import *  # noqa: F401,F403 - shared helpers/constants
@@ -60,23 +60,23 @@ class SearchMixin:
 
         async def select_callback(self, interaction: discord.Interaction):
             owner = Responder(self.ctx).user
-            if interaction.user.id != getattr(owner, 'id', None): return await interaction.response.send_message(embed=we("<:failed:1490986584676368535> この検索結果は他のユーザーのものです。"), ephemeral=True)
+            if interaction.user.id != getattr(owner, 'id', None): return await interaction.response.send_message(embed=we(FAILED + ' この検索結果は他のユーザーのものです。'), ephemeral=True)
             idx = int(self.select_menu.values[0])
             selected_track = self.tracks[idx]
             state = self.cog.get_state(self.guild_id)
             state['current_ctx'] = self.ctx
             if not await self.cog.enqueue_track(self.guild_id, (selected_track['url'], selected_track['title'], None, True)):
                 return await interaction.response.send_message(
-                    embed=we(f"<:failed:1490986584676368535> キューの上限（{MAX_QUEUE_SIZE}件）に達しています。"),
+                    embed=we(f"{FAILED} キューの上限（{MAX_QUEUE_SIZE}件）に達しています。"),
                     ephemeral=True,
                 )
 
             vc = Responder(self.ctx).voice_client
             if vc and not has_audio_source(vc, "music") and not state['is_processing_queue'] and not state['is_paused']:
                 await self.cog.check_queue(self.guild_id)
-                await interaction.response.send_message(embed=we(f"<:music:1561710964238450809> **{selected_track['title']}** を再生します！"))
+                await interaction.response.send_message(embed=we(f"{MUSIC} **{selected_track['title']}** を再生します！"))
             else:
-                await interaction.response.send_message(embed=we(f"<:success:1490985168100659322> キューに追加しました: **{selected_track['title']}**"))
+                await interaction.response.send_message(embed=we(f"{SUCCESS} キューに追加しました: **{selected_track['title']}**"))
                 await self.cog.update_panel(self.guild_id)
             await self.disable_all_items()
 
@@ -127,14 +127,14 @@ class SearchMixin:
             except Exception as exc:
                 logger.exception("Niconico fetch failed")
                 return await r.send(embed=we(f"ニコニコ動画の取得に失敗しました: {exc}"))
-        await r.send(f"🔎 YouTubeで「{keyword}」の上位10件を検索中...")
+        await r.send(f"{LOUPE} YouTubeで「{keyword}」の上位10件を検索中...")
         search_options = YTDL_OPTIONS.copy()
         search_options['default_search'] = 'ytsearch10'
         loop = asyncio.get_event_loop()
         try:
             with yt_dlp.YoutubeDL(search_options) as ydl:
                 data = await loop.run_in_executor(None, lambda: ydl.extract_info(keyword, download=False))
-                if 'entries' not in data or not data['entries']: return await r.send(embed=we("<:failed:1490986584676368535> 検索結果が見つかりませんでした。"))
+                if 'entries' not in data or not data['entries']: return await r.send(embed=we(FAILED + ' 検索結果が見つかりませんでした。'))
                 tracks, description_lines = [], []
                 for idx, entry in enumerate(data['entries'][:10]):
                     title = entry.get('title', '不明なタイトル')
@@ -149,7 +149,7 @@ class SearchMixin:
                 view.message = await r.send(embed=embed, view=view, want_message=True)
         except Exception as e:
             logging.error(f"Search command error: {e}")
-            await r.send(embed=we(f"<:failed:1490986584676368535> 検索中にエラーが発生しました: {e}"))
+            await r.send(embed=we(f"{FAILED} 検索中にエラーが発生しました: {e}"))
 
 
     async def _panel_impl(self, r: Responder):
@@ -159,7 +159,7 @@ class SearchMixin:
             return await r.send(embed=we(error), ephemeral=True)
         state = self.get_state(r.guild.id)
         state['current_ctx'] = r.source
-        view = build_music_panel_layout(self, r.guild.id, "# <:music:1561710964238450809> ボイスコントロールパネル\nステータスを同期中...")
+        view = build_music_panel_layout(self, r.guild.id, '# ' + MUSIC + ' ボイスコントロールパネル\nステータスを同期中...')
         state['panel_message'] = await r.send(view=view, want_message=True)
         await self.update_panel(r.guild.id)
         self._save_music_snapshot(r.guild.id)

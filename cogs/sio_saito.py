@@ -7,7 +7,7 @@ from discord.ext import commands
 import asyncio
 import logging
 from discord.ext import voice_recv
-from core.emojis import FAILED
+from core.emojis import FAILED, LOUPE
 
 
 logger = logging.getLogger(__name__)
@@ -108,7 +108,7 @@ class SaitoRelay(commands.Cog):
 
         if not target_peer:
             self.matching_queue.append(r)
-            return await r.send(f"🔎 相手を探しています... ({r.guild.name})")
+            return await r.send(f"{LOUPE} 相手を探しています... ({r.guild.name})")
 
         await r.send(f"🤝 **{target_peer.guild.name}** と接続中...")
         await self._notify(target_peer, f"🤝 **{r.guild.name}** と接続中...")
@@ -151,7 +151,7 @@ class SaitoRelay(commands.Cog):
             for guild_id in acquired:
                 self.peers.pop(guild_id, None)
                 await self.voice_sessions.release(guild_id, "match", reason="stop")
-            await r.send("<:failed:1490986584676368535> 通話の接続に失敗しました。")
+            await r.send(FAILED + ' 通話の接続に失敗しました。')
 
     async def _stop(self, r: Responder):
         if await self.voice_sessions.release(r.guild.id, "match", reason="stop"):

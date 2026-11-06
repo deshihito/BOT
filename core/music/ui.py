@@ -29,7 +29,7 @@ from core import voice_restore
 from core.voice_session import SHARED_FEATURES, VoiceBusy, get_manager
 from core.voice_media import add_audio_source, has_audio_source, remove_audio_source
 from core.legacy import Responder
-from core.emojis import FAILED, MUSIC, SUCCESS
+from core.emojis import BOOK, FAILED, GEAR, LOUPE, MUSIC, PAUSE, RESET, RESTART, SHUFFLE, SKIP_RIGHT, SUCCESS, THU, VOL
 from core.music_activity import build_music_activity_snapshot
 
 from core.music.common import *  # noqa: F401,F403 - shared helpers/constants
@@ -96,7 +96,7 @@ class SearchModal(discord.ui.Modal, title="YouTube 楽曲検索"):
             state['current_ctx'] = interaction
             if not await self.cog.enqueue_track(self.guild_id, (url, filename, None, is_yt)):
                 await interaction.followup.send(
-                    embed=we(f"<:failed:1490986584676368535> キューの上限（{MAX_QUEUE_SIZE}件）に達しています。"),
+                    embed=we(f"{FAILED} キューの上限（{MAX_QUEUE_SIZE}件）に達しています。"),
                     ephemeral=True,
                 )
                 return
@@ -111,7 +111,7 @@ class SearchModal(discord.ui.Modal, title="YouTube 楽曲検索"):
 
         except Exception as e:
             logger.exception("Music search failed")
-            await interaction.followup.send(embed=we(f"<:failed:1490986584676368535> 検索中にエラーが発生しました: {e}"), ephemeral=True)
+            await interaction.followup.send(embed=we(f"{FAILED} 検索中にエラーが発生しました: {e}"), ephemeral=True)
 
 
 class CustomEQModal(discord.ui.Modal, title="カスタムEQ (FFmpegフィルター入力)"):
@@ -136,18 +136,17 @@ class CustomEQModal(discord.ui.Modal, title="カスタムEQ (FFmpegフィルタ�
         if not user_filter:
             state['eq'] = "flat"
             state['custom_eq_filter'] = None
-            await interaction.response.send_message(embed=we("<:gear:1564624326509203557> カスタムEQを解除しました（Flatに戻します）。"))
+            await interaction.response.send_message(embed=we(GEAR + ' カスタムEQを解除しました（Flatに戻します）。'))
         else:
             if not is_safe_custom_audio_filter(user_filter):
                 await interaction.response.send_message(
-                    embed=we("<:failed:1490986584676368535> 使用できないフィルターです。equalizer、bass、treble、volume、vibrato、tremoloなどの"
-                              "音声フィルターだけをカンマ区切りで指定してください。"),
+                    embed=we(FAILED + ' 使用できないフィルターです。equalizer、bass、treble、volume、vibrato、tremoloなどの音声フィルターだけをカンマ区切りで指定してください。'),
                     ephemeral=True,
                 )
                 return
             state['eq'] = "custom"
             state['custom_eq_filter'] = user_filter
-            await interaction.response.send_message(embed=we(f"<:gear:1564624326509203557> カスタムEQを設定しました:\n`{user_filter}`\n即時反映します。"))
+            await interaction.response.send_message(embed=we(f"{GEAR} カスタムEQを設定しました:\n`{user_filter}`\n即時反映します。"))
 
         ctx = state['current_ctx'] or interaction
         await self.cog.apply_immediate_setting(ctx)
@@ -192,7 +191,7 @@ class VoiceControlView(discord.ui.View):
             state = self.cog.get_state(self.guild_id)
             previous_speed = state.get('speed', 1.0)
             state['speed'] = float(self.values[0])
-            await interaction.response.send_message(embed=we(f"<:thu:1563559478220038175> 再生速度を `{state['speed']}` 倍に設定しました（現在位置から即時反映）。"))
+            await interaction.response.send_message(embed=we(f"{THU} 再生速度を `{state['speed']}` 倍に設定しました（現在位置から即時反映）。"))
             # ★ 古い current_ctx ではなく、いま操作した interaction を渡す
             await self.cog.apply_immediate_setting(interaction, elapsed_speed=previous_speed)
 
@@ -209,12 +208,12 @@ class VoiceControlView(discord.ui.View):
                 discord.SelectOption(label="150%", value="1.5"),
                 discord.SelectOption(label="200% (最大)", value="2.0"),
             ]
-            super().__init__(placeholder=f"🔊 音量変更 (現在: {int(state['volume']*100)}%)", min_values=1, max_values=1, options=options, row=1)
+            super().__init__(placeholder=f"{VOL} 音量変更 (現在: {int(state['volume']*100)}%)", min_values=1, max_values=1, options=options, row=1)
 
         async def callback(self, interaction: discord.Interaction):
             state = self.cog.get_state(self.guild_id)
             state['volume'] = float(self.values[0])
-            await interaction.response.send_message(embed=we(f"<:vol:1563559476265488414> 音量を `{int(state['volume']*100)}%` に設定しました（即時反映）。"))
+            await interaction.response.send_message(embed=we(f"{VOL} 音量を `{int(state['volume']*100)}%` に設定しました（即時反映）。"))
             # ★ 古い current_ctx ではなく、いま操作した interaction を渡す
             await self.cog.apply_immediate_setting(interaction)
 
@@ -245,17 +244,17 @@ class VoiceControlView(discord.ui.View):
             # ★ current_ctx ではなく interaction を渡す。これが「次の曲に飛ぶ」バグの修正点。
             await self.cog.apply_immediate_setting(interaction)
 
-    @discord.ui.button(label="🔎", style=discord.ButtonStyle.success, row=3)
+    @discord.ui.button(label=LOUPE, style=discord.ButtonStyle.success, row=3)
     async def search_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         modal = SearchModal(self.cog, self.guild_id)
         await interaction.response.send_modal(modal)
 
-    @discord.ui.button(label="", emoji="<:gear:1564624326509203557>", style=discord.ButtonStyle.secondary, row=3)
+    @discord.ui.button(label="", emoji=GEAR, style=discord.ButtonStyle.secondary, row=3)
     async def custom_eq_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         modal = CustomEQModal(self.cog, self.guild_id)
         await interaction.response.send_modal(modal)
 
-    @discord.ui.button(label="", emoji="<:Pause:1561700510447312916>", style=discord.ButtonStyle.primary, row=3)
+    @discord.ui.button(label="", emoji=PAUSE, style=discord.ButtonStyle.primary, row=3)
     async def pause_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         vc = interaction.guild.voice_client
         state = self.cog.get_state(self.guild_id)
@@ -264,11 +263,11 @@ class VoiceControlView(discord.ui.View):
             state['elapsed_offset'] += actual_played
             state['is_paused'] = True
             remove_audio_source(vc, "music", notify=True)
-            await interaction.response.send_message(embed=we(f"<:Pause:1561700510447312916> 再生を一時停止しました。(`{int(state['elapsed_offset'])}秒` 時点)"))
+            await interaction.response.send_message(embed=we(f"{PAUSE} 再生を一時停止しました。(`{int(state['elapsed_offset'])}秒` 時点)"))
             await self.cog.update_panel(self.guild_id)
             self.cog._save_music_snapshot(self.guild_id)
         else:
-            await interaction.response.send_message(embed=we("<:failed:1490986584676368535> 現在再生中ではないか、既に一時停止されています。"), ephemeral=True)
+            await interaction.response.send_message(embed=we(FAILED + ' 現在再生中ではないか、既に一時停止されています。'), ephemeral=True)
 
     @discord.ui.button(label="再開", emoji=MUSIC, style=discord.ButtonStyle.success, row=4)
     async def resume_button(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -280,9 +279,9 @@ class VoiceControlView(discord.ui.View):
             await self.cog.check_queue(self.guild_id)
             self.cog._save_music_snapshot(self.guild_id)
         else:
-            await interaction.response.send_message(embed=we("<:failed:1490986584676368535> 再開できる一時停止中のトラックがありません。"), ephemeral=True)
+            await interaction.response.send_message(embed=we(FAILED + ' 再開できる一時停止中のトラックがありません。'), ephemeral=True)
 
-    @discord.ui.button(label="", emoji="<:skip_right:1564624324508262500>", style=discord.ButtonStyle.secondary, row=4)
+    @discord.ui.button(label="", emoji=SKIP_RIGHT, style=discord.ButtonStyle.secondary, row=4)
     async def skip_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         vc = interaction.guild.voice_client
         state = self.cog.get_state(self.guild_id)
@@ -292,26 +291,26 @@ class VoiceControlView(discord.ui.View):
             state['elapsed_offset'] = 0
             state['is_paused'] = False
             remove_audio_source(vc, "music", notify=True)
-            await interaction.response.send_message(embed=we("<:skip_right:1564624324508262500> トラックをスキップしました。"))
+            await interaction.response.send_message(embed=we(SKIP_RIGHT + ' トラックをスキップしました。'))
         else:
-            await interaction.response.send_message(embed=we("<:failed:1490986584676368535> 現在再生中の楽曲がありません。"), ephemeral=True)
+            await interaction.response.send_message(embed=we(FAILED + ' 現在再生中の楽曲がありません。'), ephemeral=True)
 
-    @discord.ui.button(label="", emoji="<:shuffle:1563559485170122802>", style=discord.ButtonStyle.secondary, row=3)
+    @discord.ui.button(label="", emoji=SHUFFLE, style=discord.ButtonStyle.secondary, row=3)
     async def shuffle_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         state = self.cog.get_state(self.guild_id)
         state['shuffle_enabled'] = not state.get('shuffle_enabled', False)
         label = 'ON' if state['shuffle_enabled'] else 'OFF'
-        await interaction.response.send_message(embed=we(f"<:shuffle:1563559485170122802> シャッフルを `{label}` に設定しました。"))
+        await interaction.response.send_message(embed=we(f"{SHUFFLE} シャッフルを `{label}` に設定しました。"))
         await self.cog.update_panel(self.guild_id)
         self.cog._save_music_snapshot(self.guild_id)
 
-    @discord.ui.button(label="", emoji="<:restart:1563559489121030184>", style=discord.ButtonStyle.secondary, row=3)
+    @discord.ui.button(label="", emoji=RESTART, style=discord.ButtonStyle.secondary, row=3)
     async def loop_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         state = self.cog.get_state(self.guild_id)
         next_mode = {'off': 'track', 'track': 'queue', 'queue': 'off'}[state.get('loop_mode', 'off')]
         state['loop_mode'] = next_mode
         labels = {'off': 'OFF', 'track': '1曲', 'queue': 'キュー'}
-        await interaction.response.send_message(embed=we(f"<:restart:1563559489121030184> ループを `{labels[next_mode]}` に設定しました。"))
+        await interaction.response.send_message(embed=we(f"{RESTART} ループを `{labels[next_mode]}` に設定しました。"))
         await self.cog.update_panel(self.guild_id)
         self.cog._save_music_snapshot(self.guild_id)
 
@@ -319,10 +318,10 @@ class VoiceControlView(discord.ui.View):
     async def queue_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.send_message(embed=self.cog.build_queue_embed(self.guild_id))
 
-    @discord.ui.button(label="📚", style=discord.ButtonStyle.secondary, row=4)
+    @discord.ui.button(label=BOOK, style=discord.ButtonStyle.secondary, row=4)
     async def library_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         embed = discord.Embed(
-            title="📚 ライブラリ",
+            title=f"{BOOK} ライブラリ",
             description="プレイリストを保存・一覧表示・再生できます。対象範囲を選択してください。",
             color=0x9B59B6,
         )
@@ -332,7 +331,7 @@ class VoiceControlView(discord.ui.View):
             ephemeral=True,
         )
 
-    @discord.ui.button(label="", emoji="<:reset:1563559487351160972>", style=discord.ButtonStyle.danger, row=4)
+    @discord.ui.button(label="", emoji=RESET, style=discord.ButtonStyle.danger, row=4)
     async def stop_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         vc = interaction.guild.voice_client
         state = self.cog.get_state(self.guild_id)
@@ -344,11 +343,11 @@ class VoiceControlView(discord.ui.View):
             while not state['queue'].empty():
                 state['queue'].get_nowait()
             remove_audio_source(vc, "music", notify=True)
-            await interaction.response.send_message(embed=we("<:reset:1563559487351160972> 再生を完全に停止し、キューをクリアしました。"))
+            await interaction.response.send_message(embed=we(RESET + ' 再生を完全に停止し、キューをクリアしました。'))
             await self.cog.update_panel(self.guild_id)
             self.cog._save_music_snapshot(self.guild_id)
         else:
-            await interaction.response.send_message(embed=we("<:failed:1490986584676368535> ボイスチャンネルに接続していません。"), ephemeral=True)
+            await interaction.response.send_message(embed=we(FAILED + ' ボイスチャンネルに接続していません。'), ephemeral=True)
 
 
 def build_music_panel_layout(cog, guild_id: int, panel_text: str,

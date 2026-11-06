@@ -29,7 +29,7 @@ from core import voice_restore
 from core.voice_session import SHARED_FEATURES, VoiceBusy, get_manager
 from core.voice_media import add_audio_source, has_audio_source, remove_audio_source
 from core.legacy import Responder
-from core.emojis import FAILED, MUSIC, SUCCESS
+from core.emojis import CLOCK, CROCK, FAILED, LOUPE, MUSIC, PAUSE, SUCCESS
 from core.music_activity import build_music_activity_snapshot
 
 from core.music.common import *  # noqa: F401,F403 - shared helpers/constants
@@ -98,7 +98,7 @@ class PlaybackMixin:
                 except Exception as e:
                     logging.error(f"YouTube解析失敗: {e}")
                     # 💡 安全なメッセージ送信ハンドラ
-                    await self._send_message(ctx_or_interaction, embed=we(f"<:failed:1490986584676368535> 解析失敗: {e}"))
+                    await self._send_message(ctx_or_interaction, embed=we(f"{FAILED} 解析失敗: {e}"))
                     state['is_processing_queue'] = False
                     return await self.check_queue(guild_id)
             else:
@@ -181,7 +181,7 @@ class PlaybackMixin:
                 current_eq_mode = state.get('eq', 'flat')
                 eq_label = "custom" if current_eq_mode == "custom" else current_eq_mode
                 status = f"Speed: {state.get('speed', 1.0)}x / Vol: {state.get('volume', 1.0)} / EQ: {eq_label}"
-                await self._send_message(ctx_or_interaction, embed=we(f"<:music:1561710964238450809> 再生中: **{filename}**\n`{status}`"))
+                await self._send_message(ctx_or_interaction, embed=we(f"{MUSIC} 再生中: **{filename}**\n`{status}`"))
         
         except Exception as e:
             logging.error(f"Playback error: {e}")
@@ -340,41 +340,41 @@ class PlaybackMixin:
 
         # 3. YouTube単曲URLが直接指定された場合
         if input_str and yt_pattern.search(input_str):
-            await interaction.followup.send("<:crock:1561710960387956757> YouTubeを解析中...")
+            await interaction.followup.send(CROCK + ' YouTubeを解析中...')
             try:
                 # ⏱️ タイムアウト付きで解析実行
                 info = await asyncio.wait_for(self.get_yt_info(input_str), timeout=TIMEOUT_SECONDS)
                 # キューには一時ストリームURLではなく動画ページURLを保存する。
                 url, filename, is_yt = info['webpage_url'], info['title'], True
             except asyncio.TimeoutError:
-                return await interaction.followup.send("⏱️ タイムアウト: YouTube情報の解析に時間がかかりすぎたため中断しました。")
+                return await interaction.followup.send(f"{CLOCK} タイムアウト: YouTube情報の解析に時間がかかりすぎたため中断しました。")
             except Exception as e:
                 logger.exception("YouTube parse failed")
-                return await interaction.followup.send(embed=we(f"<:failed:1490986584676368535> 解析失敗: {e}"))
+                return await interaction.followup.send(embed=we(f"{FAILED} 解析失敗: {e}"))
 
         # 3.5. SoundCloud単曲URLが直接指定された場合（再生時にページURLから再解析する）
         elif input_str and self._soundcloud_kind(input_str) == "track":
-            await interaction.followup.send("🎵 SoundCloudを解析中...")
+            await interaction.followup.send(f"{MUSIC} SoundCloudを解析中...")
             try:
                 info = await asyncio.wait_for(self.get_yt_info(input_str), timeout=TIMEOUT_SECONDS)
                 url, filename, is_yt = info['webpage_url'], info['title'], True
             except asyncio.TimeoutError:
-                return await interaction.followup.send("⏱️ タイムアウト: SoundCloud情報の解析に時間がかかりすぎたため中断しました。")
+                return await interaction.followup.send(f"{CLOCK} タイムアウト: SoundCloud情報の解析に時間がかかりすぎたため中断しました。")
             except Exception as e:
                 logger.exception("SoundCloud parse failed")
-                return await interaction.followup.send(embed=we(f"<:failed:1490986584676368535> 解析失敗: {e}"))
+                return await interaction.followup.send(embed=we(f"{FAILED} 解析失敗: {e}"))
 
         # 3.6. ニコニコ動画URLが直接指定された場合
         elif input_str and niconico_url_kind(input_str) == "track":
-            await interaction.followup.send("🎵 ニコニコ動画を解析中...")
+            await interaction.followup.send(f"{MUSIC} ニコニコ動画を解析中...")
             try:
                 info = await asyncio.wait_for(self.get_yt_info(input_str), timeout=TIMEOUT_SECONDS)
                 url, filename, is_yt = info['webpage_url'], info['title'], True
             except asyncio.TimeoutError:
-                return await interaction.followup.send("⏱️ タイムアウト: ニコニコ動画情報の解析に時間がかかりすぎたため中断しました。")
+                return await interaction.followup.send(f"{CLOCK} タイムアウト: ニコニコ動画情報の解析に時間がかかりすぎたため中断しました。")
             except Exception as e:
                 logger.exception("Niconico parse failed")
-                return await interaction.followup.send(embed=we(f"<:failed:1490986584676368535> 解析失敗: {e}"))
+                return await interaction.followup.send(embed=we(f"{FAILED} 解析失敗: {e}"))
 
         # 2. ファイルが添付されている場合
         elif file:
@@ -388,7 +388,7 @@ class PlaybackMixin:
             try:
                 url, filename = await asyncio.wait_for(self.get_attachment_info(input_str, interaction.guild_id), timeout=TIMEOUT_SECONDS)
             except asyncio.TimeoutError:
-                return await interaction.followup.send("⏱️ タイムアウト: ID情報の取得に時間がかかりすぎました。")
+                return await interaction.followup.send(f"{CLOCK} タイムアウト: ID情報の取得に時間がかかりすぎました。")
             except Exception:
                 logger.debug("Attachment info lookup failed", exc_info=True)
                 url, filename = None, None
@@ -396,28 +396,28 @@ class PlaybackMixin:
             final_id = input_str
             
             if not url:
-                await interaction.followup.send(f"🔎 YouTubeで「{input_str}」を検索中...")
+                await interaction.followup.send(f"{LOUPE} YouTubeで「{input_str}」を検索中...")
                 try:
                     info = await asyncio.wait_for(self.get_yt_info(f"ytsearch:{input_str}"), timeout=TIMEOUT_SECONDS)
                     url, filename, is_yt = info['webpage_url'], info['title'], True
                     final_id = None
                 except asyncio.TimeoutError:
-                    return await interaction.followup.send("⏱️ タイムアウト: YouTube検索応答時間が超過しました。")
+                    return await interaction.followup.send(f"{CLOCK} タイムアウト: YouTube検索応答時間が超過しました。")
                 except Exception as e:
                     logger.exception("YouTube search failed")
-                    return await interaction.followup.send(embed=we(f"<:failed:1490986584676368535> 検索失敗: {e}"))
+                    return await interaction.followup.send(embed=we(f"{FAILED} 検索失敗: {e}"))
 
         # 4. 検索キーワード指定
         elif input_str:
-            await interaction.followup.send(f"🔎 YouTubeで「{input_str}」を検索中...")
+            await interaction.followup.send(f"{LOUPE} YouTubeで「{input_str}」を検索中...")
             try:
                 info = await asyncio.wait_for(self.get_yt_info(f"ytsearch:{input_str}"), timeout=TIMEOUT_SECONDS)
                 url, filename, is_yt = info['webpage_url'], info['title'], True
             except asyncio.TimeoutError:
-                return await interaction.followup.send("⏱️ タイムアウト: YouTube検索応答時間が超過しました。")
+                return await interaction.followup.send(f"{CLOCK} タイムアウト: YouTube検索応答時間が超過しました。")
             except Exception as e:
                 logger.exception("YouTube search failed")
-                return await interaction.followup.send(embed=we(f"<:failed:1490986584676368535> 検索失敗: {e}"))
+                return await interaction.followup.send(embed=we(f"{FAILED} 検索失敗: {e}"))
 
         # 5. 引数が何もない場合
         else:
@@ -435,7 +435,7 @@ class PlaybackMixin:
             state['elapsed_offset'] = start_at
         if not await self.enqueue_track(interaction.guild_id, (url, filename, final_id, is_yt)):
             return await interaction.followup.send(
-                embed=we(f"<:failed:1490986584676368535> キューの上限（{MAX_QUEUE_SIZE}件）に達しています。再生完了または停止後に追加してください。"),
+                embed=we(f"{FAILED} キューの上限（{MAX_QUEUE_SIZE}件）に達しています。再生完了または停止後に追加してください。"),
                 ephemeral=True,
             )
 
@@ -451,11 +451,11 @@ class PlaybackMixin:
                 await interaction.followup.send(embed=we(f"▶️ 再生を開始します: **{filename}**"))
                 await self.check_queue(interaction.guild_id)
             else:
-                await interaction.followup.send(embed=we(f"<:success:1490985168100659322> キューに追加: **{filename}**"))
+                await interaction.followup.send(embed=we(f"{SUCCESS} キューに追加: **{filename}**"))
                 await self.update_panel(interaction.guild_id)
         except Exception as e:
             logger.exception("Playback start failed")
-            await interaction.followup.send(embed=we(f"<:failed:1490986584676368535> 再生開始処理でエラーが発生しました: `{e}`"))
+            await interaction.followup.send(embed=we(f"{FAILED} 再生開始処理でエラーが発生しました: `{e}`"))
 
 
     async def _stop_impl(self, r: Responder):
@@ -512,7 +512,7 @@ class PlaybackMixin:
             remove_audio_source(vc, "music", notify=True)
             
             await interaction.response.send_message(
-                embed=we(f"<:Pause:1561700510447312916> 再生を一時停止しました。(`{int(state['elapsed_offset'])}秒` 時点)\nもう一度 `/vc` の音楽操作パネルから再開できます。")
+                embed=we(f"{PAUSE} 再生を一時停止しました。(`{int(state['elapsed_offset'])}秒` 時点)\nもう一度 `/vc` の音楽操作パネルから再開できます。")
             )
             await self.update_panel(interaction.guild_id)
             self._save_music_snapshot(interaction.guild_id)

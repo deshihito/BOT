@@ -29,7 +29,7 @@ from core import voice_restore
 from core.voice_session import SHARED_FEATURES, VoiceBusy, get_manager
 from core.voice_media import add_audio_source, has_audio_source, remove_audio_source
 from core.legacy import Responder
-from core.emojis import FAILED, MUSIC, SUCCESS
+from core.emojis import FAILED, MUSIC, PAUSE, RESTART, SUCCESS, VOL
 from core.music_activity import build_music_activity_snapshot
 
 from core.music.common import *  # noqa: F401,F403 - shared helpers/constants
@@ -499,7 +499,7 @@ class SpatialControlView(discord.ui.View):
         # 💡 [修正点] 参照するボタン名を実際のメソッド名 (toggle_rot_mode または toggle_rotate) に合わせます
         rot_mode = state.get('spatial_rot_mode', 'standard')
         rot_labels = {
-            'off': '<:Pause:1561700510447312916> 回転: OFF',
+            'off': PAUSE + ' 回転: OFF',
             'standard': '🌀 回転: 通常',
             '3d': '🪐 回転: 3D'
         }
@@ -509,10 +509,10 @@ class SpatialControlView(discord.ui.View):
         # もし toggle_rotate のまま使用している場合：
         elif hasattr(self, 'toggle_rotate'):
             is_rotating = state.get('is_rotating', True)
-            self.toggle_rotate.label = "🌀 回転: ON" if is_rotating else "<:Pause:1561700510447312916> 回転: OFF"
+            self.toggle_rotate.label = "🌀 回転: ON" if is_rotating else PAUSE + ' 回転: OFF'
 
     # 💡 ボタンの定義（デコレータで定義されたメソッド）
-    @discord.ui.button(label="🔄 回転モード切替", style=discord.ButtonStyle.primary, row=0)
+    @discord.ui.button(label=f"{RESTART} 回転モード切替", style=discord.ButtonStyle.primary, row=0)
     async def toggle_rot_mode(self, interaction: discord.Interaction, button: discord.ui.Button):
         state = self.cog.get_state(self.guild_id)
         current = state.get('spatial_rot_mode', 'standard')
@@ -537,7 +537,7 @@ class SpatialControlView(discord.ui.View):
         speaker_names = {
             'studio': '🎙️ スタジオモニター (高解像度・フラット)',
             'theater': '🎬 シアター (重低音・サラウンド)',
-            'pa': '<:vol:1563559476265488414> PAスピーカー (高音圧・指向性強)',
+            'pa': VOL + ' PAスピーカー (高音圧・指向性強)',
             'small': '📻 小型スピーカー (コンパクト)'
         }
 
@@ -585,7 +585,7 @@ class SpatialControlView(discord.ui.View):
 
     # 4. 音量引き上げ幅 (AGC) 選択メニュー
     @discord.ui.select(
-        placeholder="<:vol:1563559476265488414> 自動音量引き上げ幅 (AGC) を選択...",
+        placeholder=VOL + ' 自動音量引き上げ幅 (AGC) を選択...',
         options=[
             discord.SelectOption(label="引き上げなし (1.0x / 0dB)", value="1.0"),
             discord.SelectOption(label="控えめ (2.0x / +6dB)", value="2.0"),

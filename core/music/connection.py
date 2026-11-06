@@ -29,7 +29,7 @@ from core import voice_restore
 from core.voice_session import SHARED_FEATURES, VoiceBusy, get_manager
 from core.voice_media import add_audio_source, has_audio_source, remove_audio_source
 from core.legacy import Responder
-from core.emojis import FAILED, MUSIC, SUCCESS
+from core.emojis import CLOCK, FAILED, MUSIC, SUCCESS, VOL
 from core.music_activity import build_music_activity_snapshot
 
 from core.music.common import *  # noqa: F401,F403 - shared helpers/constants
@@ -54,14 +54,14 @@ class ConnectionMixin:
                 self._acquire_music(r.guild, channel, r.user, r.channel),
                 timeout=TIMEOUT_SECONDS,
             )
-            await r.send(embed=we(f"<:vol:1563559476265488414> **{channel.name}** に参加しました。"))
+            await r.send(embed=we(f"{VOL} **{channel.name}** に参加しました。"))
         except VoiceBusy as busy:
             await r.send(embed=we(str(busy)), ephemeral=True)
         except asyncio.TimeoutError:
-            await r.send(embed=we("⏱️ タイムアウト: ボイスチャンネルへの接続応答時間が超過しました。Botの権限やネットワーク状態をご確認ください。"))
+            await r.send(embed=we(f"{CLOCK} タイムアウト: ボイスチャンネルへの接続応答時間が超過しました。Botの権限やネットワーク状態をご確認ください。"))
         except Exception as e:
             logger.exception("Voice channel join failed")
-            await r.send(embed=we(f"<:failed:1490986584676368535> 接続失敗: {e}"))
+            await r.send(embed=we(f"{FAILED} 接続失敗: {e}"))
 
 
     async def _leave_impl(self, r: Responder):
@@ -113,13 +113,13 @@ class ConnectionMixin:
                 first_line = stdout.decode('utf-8', errors='ignore').split('\n')[0]
                 await ctx.send(embed=we(title="FFmpeg Version Info", description=f"```\n{first_line}\n```"))
             else:
-                await ctx.send(embed=we("<:failed:1490986584676368535> FFmpegのバージョン情報を取得できませんでした。"))
+                await ctx.send(embed=we(FAILED + ' FFmpegのバージョン情報を取得できませんでした。'))
                 
         except FileNotFoundError:
-            await ctx.send(embed=we("<:failed:1490986584676368535> システムに `ffmpeg` コマンドが見つかりません。パスが通っているか確認してください。"))
+            await ctx.send(embed=we(FAILED + ' システムに `ffmpeg` コマンドが見つかりません。パスが通っているか確認してください。'))
         except Exception as e:
             logger.exception("ffversion command failed")
-            await ctx.send(embed=we(f"<:failed:1490986584676368535> エラーが発生しました: {e}"))
+            await ctx.send(embed=we(f"{FAILED} エラーが発生しました: {e}"))
 
 
     async def _ensure_music_connection(self, r: Responder) -> str | None:
@@ -154,7 +154,7 @@ class ConnectionMixin:
         except VoiceBusy as busy:
             return str(busy)
         except asyncio.TimeoutError:
-            return "⏱️ タイムアウト: ボイスチャンネルへの接続応答時間が超過しました。Botの権限やネットワーク状態をご確認ください。"
+            return f"{CLOCK} タイムアウト: ボイスチャンネルへの接続応答時間が超過しました。Botの権限やネットワーク状態をご確認ください。"
         except Exception as exc:
             logger.exception("Failed to connect for music")
             return f"ボイスチャンネルへ接続できませんでした: {exc}"

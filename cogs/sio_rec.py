@@ -36,7 +36,7 @@ from core import vc_feature_restore
 from core.voice_session import VoiceBusy, get_manager
 from core.voice_recv_patch import patch_voice_recv_client
 from core.messages import VOICE_NOT_JOINED, voice_connection_failed
-from core.emojis import FAILED
+from core.emojis import CLOCK, FAILED, MUSIC, PAUSE
 
 logger = logging.getLogger(__name__)
 
@@ -470,7 +470,7 @@ class RecordingCog(commands.Cog):
         sink: RecordingSink = session["sink"]
         audio_snapshot = sink.snapshot()
         if not audio_snapshot:
-            return await r.send(embed=we("<:music:1561710964238450809> 音声データがまだ蓄積されていません。話してから実行してください。"), ephemeral=True)
+            return await r.send(embed=we(MUSIC + ' 音声データがまだ蓄積されていません。話してから実行してください。'), ephemeral=True)
 
         embed = discord.Embed(title="🎹 リアルタイム音階解析 (Pitch Detection)", color=0x3498DB)
         found_any = False
@@ -499,7 +499,7 @@ class RecordingCog(commands.Cog):
             if delay is None or delay <= 0:
                 return await r.send(embed=we(f"{FAILED} 遅延時間は 0 秒より大きく設定してください。"), ephemeral=True)
             session["sink"].set_echo_delay(delay)
-            return await r.send(embed=we(f"⏱️ やまびこの遅延時間を `{delay}` 秒に変更しました。"))
+            return await r.send(embed=we(f"{CLOCK} やまびこの遅延時間を `{delay}` 秒に変更しました。"))
         if action == "stop":
             if guild_id not in self.echo_sessions:
                 return await r.send(embed=we(f"{FAILED} 現在やまびこは実行されていません。"), ephemeral=True)
@@ -510,12 +510,12 @@ class RecordingCog(commands.Cog):
         if session:
             await r.send(embed=we(
                 f"🗣️ **やまびこ動作中**\n"
-                f"⏱️ 遅延時間: `{session['sink'].echo_delay}`秒\n"
+                f"{CLOCK} 遅延時間: `{session['sink'].echo_delay}`秒\n"
                 f"遅延変更: `/vc のパネルからやまびこ遅延変更 delay:<秒数>`\n"
                 f"停止: `/vc のパネルからやまびこ停止`"
             ))
         else:
-            await r.send(embed=we("<:Pause:1561700510447312916> やまびこ停止中 (`/vc のパネルからやまびこ開始` で開始)"))
+            await r.send(embed=we(PAUSE + ' やまびこ停止中 (`/vc のパネルからやまびこ開始` で開始)'))
 
     async def _echo_start(self, r: Responder, delay: float):
         voice = getattr(r.user, "voice", None)
@@ -553,7 +553,7 @@ class RecordingCog(commands.Cog):
         }
         await r.send(embed=we(
             f"🗣️ **{target_channel.name}** でやまびこを開始しました！\n"
-            f"⏱️ 遅延時間: `{delay}`秒\n"
+            f"{CLOCK} 遅延時間: `{delay}`秒\n"
             f"遅延変更: `/vc のパネルからやまびこ遅延変更 delay:3.0` | 停止: `/vc のパネルからやまびこ停止`"
         ))
 
@@ -590,7 +590,7 @@ class RecordingCog(commands.Cog):
 
         if not discord.opus.is_loaded():
             return await r.send(embed=we(
-                "<:failed:1490986584676368535> Opus ライブラリがロードされていません。サーバーに libopus をインストールしてください。"
+                FAILED + ' Opus ライブラリがロードされていません。サーバーに libopus をインストールしてください。'
             ))
 
         target_channel = voice.channel
@@ -630,7 +630,7 @@ class RecordingCog(commands.Cog):
             f"🎙️ **{target_channel.name}** で録音を開始しました。\n"
             f"🔐 暗号化: `{negotiated_mode}` / DAVE(E2EE): `{dave_text}`\n"
             f"📦 受信パケット数: `0` 個\n"
-            f"⏱️ 録音は最長 {RECORD_LIMIT_SECONDS // 60} 分です。超えると自動で停止してファイルを送ります。\n"
+            f"{CLOCK} 録音は最長 {RECORD_LIMIT_SECONDS // 60} 分です。超えると自動で停止してファイルを送ります。\n"
             f"停止するには `/vc のパネルから録音停止` を実行してください。"
         ), want_message=True)
 
@@ -658,7 +658,7 @@ class RecordingCog(commands.Cog):
             vc.listen(sink)
         except Exception as e:
             await self.voice_sessions.release(guild_id, "record", reason="stop")
-            return await r.send(embed=we(f"<:failed:1490986584676368535> 録音の開始に失敗しました: `{e}`"))
+            return await r.send(embed=we(f"{FAILED} 録音の開始に失敗しました: `{e}`"))
 
         self.sessions[guild_id] = {
             "sink": sink,
@@ -840,7 +840,7 @@ class RecordingCog(commands.Cog):
 
     STOP_REASONS = {
         "stop": "💾 録音を停止しました",
-        "time_limit": f"⏱️ 録音が上限の {RECORD_LIMIT_SECONDS // 60} 分に達したため自動で停止しました",
+        "time_limit": f"{CLOCK} 録音が上限の {RECORD_LIMIT_SECONDS // 60} 分に達したため自動で停止しました",
         "takeover": "💾 別の機能に切り替わったため録音を停止しました",
         "leave": "💾 /vc のパネルからVC退出 で退出したため録音を停止しました",
         "idle": "💾 ボイスチャンネルに誰もいなくなったため録音を停止しました",
@@ -871,7 +871,7 @@ class RecordingCog(commands.Cog):
 
         if not audio:
             return await ctx.send(embed=we(
-                "<:failed:1490986584676368535> 音声バッファが空でした。（発言が検知されなかったか、パケットが届いていません）"
+                FAILED + ' 音声バッファが空でした。（発言が検知されなかったか、パケットが届いていません）'
             ))
 
         limit = getattr(guild, "filesize_limit", 8 * 1024 * 1024)
@@ -891,7 +891,7 @@ class RecordingCog(commands.Cog):
         for i in range(0, len(files), 10):
             chunk = files[i:i + 10]
             await ctx.send(
-                content=f"<:music:1561710964238450809> **録音データ出力 ({i + 1}〜{i + len(chunk)}件 / 全{len(files)}件)**",
+                content=f"{MUSIC} **録音データ出力 ({i + 1}〜{i + len(chunk)}件 / 全{len(files)}件)**",
                 files=chunk,
             )
 
@@ -920,7 +920,7 @@ class RecordingCog(commands.Cog):
             )
         else:
             embed = discord.Embed(
-                title="<:Pause:1561700510447312916> 待機中",
+                title=PAUSE + ' 待機中',
                 description=(
                     "現在このサーバーで録音は行われていません。\n"
                     "`/vc のパネルから録音開始` で開始できます。"
