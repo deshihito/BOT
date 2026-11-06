@@ -21,7 +21,7 @@ import random
 import discord
 from core.game import board_image, game_panels, game_restore
 from core.game.board_image import render_cached, render_card_hand
-from core.messages import recruit_join_prompt
+from core.support.messages import recruit_join_prompt
 from discord.ext import commands
 
 from core.game import party_ranking
