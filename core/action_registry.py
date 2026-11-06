@@ -471,7 +471,7 @@ def build_assist_actions() -> list[ActionSpec]:
     出さない（surfaces から aitools を除外。リスクは show_feature 側の
     サーバー管理権限チェックが担う）。
     """
-    from core.server_assist import discover_features
+    from core.support.server_assist import discover_features
 
     specs: list[ActionSpec] = []
     for feature in discover_features():
