@@ -147,7 +147,7 @@ class GameStartNoticeSourceTest(unittest.TestCase):
         "cogs/babanuki.py": ("ババ抜きの募集を開始しました",),
         "cogs/daifugo.py": ("大富豪の募集を開始しました",),
         "cogs/janken.py": ("じゃんけんの募集を開始しました",),
-        "cogs/ngword.py": ("NGワードの募集を開始しました",),
+        "core/support/ngword/cog.py": ("NGワードの募集を開始しました",),
         "cogs/shinkei.py": ("神経衰弱の募集を開始しました",),
         "cogs/shiritori.py": ("お題しりとりの募集を開始しました",),
     }
@@ -205,6 +205,6 @@ class Wave2PublicSourceTest(unittest.TestCase):
         # wordwolf の自分のワード確認は維持
         self.assertIn("あなたのワードは", self.read("cogs/wordwolf.py"))
         # panel_recovery の開き直しは維持
-        self.assertIn("ephemeral=True", self.read("cogs/panel_recovery.py"))
+        self.assertIn("ephemeral=True", self.read("core/support/panel_recovery/cog.py"))
         # auth（認証・秘密情報）は維持
         self.assertIn("ephemeral=True", self.read("core/support/auth.py"))
