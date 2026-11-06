@@ -499,20 +499,23 @@ class SpatialControlView(discord.ui.View):
         # 💡 [修正点] 参照するボタン名を実際のメソッド名 (toggle_rot_mode または toggle_rotate) に合わせます
         rot_mode = state.get('spatial_rot_mode', 'standard')
         rot_labels = {
-            'off': PAUSE + ' 回転: OFF',
+            'off': '回転: OFF',
             'standard': '🌀 回転: 通常',
             '3d': '🪐 回転: 3D'
         }
-        # toggle_rot_mode ボタンのラベルを更新する場合：
+        # ボタンの label 文字列内ではカスタム絵文字 markup が描画されないため、
+        # OFF 時の一時停止アイコンは emoji 引数側で持たせる。
         if hasattr(self, 'toggle_rot_mode'):
             self.toggle_rot_mode.label = rot_labels.get(rot_mode, '🌀 回転')
+            self.toggle_rot_mode.emoji = PAUSE if rot_mode == 'off' else None
         # もし toggle_rotate のまま使用している場合：
         elif hasattr(self, 'toggle_rotate'):
             is_rotating = state.get('is_rotating', True)
-            self.toggle_rotate.label = "🌀 回転: ON" if is_rotating else PAUSE + ' 回転: OFF'
+            self.toggle_rotate.label = "🌀 回転: ON" if is_rotating else '回転: OFF'
+            self.toggle_rotate.emoji = None if is_rotating else PAUSE
 
     # 💡 ボタンの定義（デコレータで定義されたメソッド）
-    @discord.ui.button(label=f"{RESTART} 回転モード切替", style=discord.ButtonStyle.primary, row=0)
+    @discord.ui.button(label="回転モード切替", style=discord.ButtonStyle.primary, row=0)
     async def toggle_rot_mode(self, interaction: discord.Interaction, button: discord.ui.Button):
         state = self.cog.get_state(self.guild_id)
         current = state.get('spatial_rot_mode', 'standard')
@@ -585,12 +588,13 @@ class SpatialControlView(discord.ui.View):
 
     # 4. 音量引き上げ幅 (AGC) 選択メニュー
     @discord.ui.select(
-        placeholder=VOL + ' 自動音量引き上げ幅 (AGC) を選択...',
+        # placeholder 内ではアプリ絵文字 markup が描画されないため、絵文字は各選択肢の emoji 引数側で持たせる。
+        placeholder='自動音量引き上げ幅 (AGC) を選択...',
         options=[
-            discord.SelectOption(label="引き上げなし (1.0x / 0dB)", value="1.0"),
-            discord.SelectOption(label="控えめ (2.0x / +6dB)", value="2.0"),
-            discord.SelectOption(label="標準 (4.0x / +12dB)", value="4.0", default=True),
-            discord.SelectOption(label="強力 (6.0x / +15.5dB)", value="6.0"),
+            discord.SelectOption(label="引き上げなし (1.0x / 0dB)", value="1.0", emoji=VOL),
+            discord.SelectOption(label="控えめ (2.0x / +6dB)", value="2.0", emoji=VOL),
+            discord.SelectOption(label="標準 (4.0x / +12dB)", value="4.0", default=True, emoji=VOL),
+            discord.SelectOption(label="強力 (6.0x / +15.5dB)", value="6.0", emoji=VOL),
         ],
         row=2
     )

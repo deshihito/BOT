@@ -182,5 +182,90 @@ class MusicPanelImplDriveTest(unittest.IsolatedAsyncioTestCase):
         self.assertIsInstance(responder.sent[0]["view"], SpatialControlView)
 
 
+class MusicPanelHeadingEmojiTest(unittest.IsolatedAsyncioTestCase):
+    """見出しの {MUSIC} がアプリ絵文字 markup に展開されること。
+
+    ロールアウト時に先頭セグメントだけ f 接頭辞が付かず、波括弧ごと
+    表示されるバグがあった (2026-11-06 スクショ報告)。
+    """
+
+    async def test_heading_renders_music_emoji_markup(self):
+        state = _panel_state(
+            panel_message=types.SimpleNamespace(id=555),
+            queue=types.SimpleNamespace(qsize=lambda: 0),
+        )
+
+        class _Cog(PanelMixin):
+            def get_state(self, guild_id):
+                return state
+
+        edit = AsyncMock()
+        with patch.object(music_panel, "edit_message_v2", edit):
+            await _Cog().update_panel(123)
+
+        layout = edit.await_args.args[1]
+        container = container_of(layout)
+        header = container.children[0]
+        self.assertIsInstance(header, discord.ui.TextDisplay)
+        self.assertTrue(
+            header.content.startswith(
+                "# <:music:1561710964238450809> ボイスコントロールパネル"),
+            header.content[:60],
+        )
+        self.assertNotIn("{MUSIC}", header.content)
+
+
+class VoiceControlViewEmojiTest(unittest.TestCase):
+    """コンポーネントの label / placeholder にアプリ絵文字 markup を埋めないこと。
+
+    Discord は label / placeholder 内のカスタム絵文字 markup を描画せず
+    生文字列で表示するため、絵文字は emoji= 引数側で持たせる。
+    """
+
+    def _view(self):
+        from core.vc.music.ui import VoiceControlView
+        return VoiceControlView(fake_cog(), 1)
+
+    def test_no_markup_in_any_label_or_placeholder(self):
+        for child in self._view().children:
+            label = getattr(child, "label", None)
+            if isinstance(label, str):
+                self.assertNotIn("<:", label)
+            placeholder = getattr(child, "placeholder", None)
+            if isinstance(placeholder, str):
+                self.assertNotIn("<:", placeholder)
+
+    def test_search_and_library_buttons_use_emoji_arg(self):
+        by_emoji = {}
+        for child in self._view().children:
+            emoji = getattr(child, "emoji", None)
+            if emoji is not None:
+                by_emoji[emoji.name] = child
+        for name in ("loupe", "book"):
+            self.assertIn(name, by_emoji)
+            self.assertIn(by_emoji[name].label, ("", None))
+
+    def test_volume_select_placeholder_is_text_only(self):
+        from core.vc.music.ui import VoiceControlView
+        select = next(
+            child for child in self._view().children
+            if isinstance(child, VoiceControlView.VolumeSelect))
+        self.assertEqual(select.placeholder, "音量を選択")
+
+    def test_layout_inserts_volume_caption_before_volume_row(self):
+        from core.emojis import VOL
+        from core.vc.music.ui import VoiceControlView
+        layout = build_music_panel_layout(fake_cog(), 1, "panel text")
+        children = container_of(layout).children
+        caption = f"{VOL} 音量変更 (現在: 50%)"
+        idx = next(
+            i for i, child in enumerate(children)
+            if isinstance(child, discord.ui.TextDisplay) and child.content == caption)
+        row = children[idx + 1]
+        self.assertIsInstance(row, discord.ui.ActionRow)
+        self.assertTrue(any(
+            isinstance(item, VoiceControlView.VolumeSelect) for item in row.children))
+
+
 if __name__ == "__main__":
     unittest.main()
