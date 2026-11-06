@@ -3,16 +3,16 @@
 
 盤面は 5列×4行のボタン式で、開いたマス・地雷・クリアをサーバー側で
 完全に判定する（スポイラー式の自己申告ではない）。最初のクリックは
-必ず安全。クリアタイムのベストは core/game_records.py に残る。
+必ず安全。クリアタイムのベストは core/game/game_records.py に残る。
 """
 import time
 
 import discord
 from discord.ext import commands
 
-from core import game_records
-from core.game_guides import GAME_GUIDES  # noqa: F401  (ガイド登録の確認用に参照される)
-from core.minesweeper import COLS, ROWS, DIFFICULTIES, MinesweeperBoard
+from core.game import game_records
+from core.game.game_guides import GAME_GUIDES  # noqa: F401  (ガイド登録の確認用に参照される)
+from core.game.minesweeper import COLS, ROWS, DIFFICULTIES, MinesweeperBoard
 
 GAME_ID = "minesweeper"
 NUMBER_LABELS = {0: "·", 1: "1", 2: "2", 3: "3", 4: "4", 5: "5", 6: "6", 7: "7", 8: "8"}

@@ -1,5 +1,5 @@
 import discord
-from core import game_panels, game_restore
+from core.game import game_panels, game_restore
 from discord.ext import commands
 
 from core import autoplay, party_ranking
@@ -730,7 +730,7 @@ class Uno(commands.Cog):
         self._save_snapshot(game, channel)
 
     # ------------------------------------------------------------------
-    # 再起動復旧（core/game_restore.py）
+    # 再起動復旧（core/game/game_restore.py）
     # ------------------------------------------------------------------
     def _save_snapshot(self, game: UnoGame, channel=None, awaiting_color=None) -> None:
         if not game.is_started:

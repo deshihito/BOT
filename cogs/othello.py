@@ -7,7 +7,8 @@ from pathlib import Path
 
 import discord
 from discord.ext import commands
-from core import elo, game_panels, game_restore, party_ranking
+from core import party_ranking
+from core.game import elo, game_panels, game_restore
 from PIL import Image, ImageDraw, ImageFont
 
 logger = logging.getLogger(__name__)
@@ -111,7 +112,7 @@ async def record_result(g) -> str:
     """対人戦の結果をランキングと Elo レートに記録し、レート表示の1行を返す。
 
     CPU戦は対人戦と混ぜないため記録しない。勝敗は party_ranking の勝数と
-    core/elo.py のレートの両方へ。引き分けは勝数を付けないが、レートは
+    core/game/elo.py のレートの両方へ。引き分けは勝数を付けないが、レートは
     標準どおり 0.5 同士で計算する。時間切れの連続で途中終了した場合も、
     その時点の石数で勝敗が付く以上は通常の決着と同じく記録する。
     """
@@ -386,7 +387,7 @@ class Othello(commands.Cog):
         await channel.send(embed=result_embed, file=file)
 
     # ------------------------------------------------------------------
-    # 再起動復旧（core/game_restore.py）
+    # 再起動復旧（core/game/game_restore.py）
     # ------------------------------------------------------------------
     def _save_snapshot(self, g):
         if g.phase != "playing":

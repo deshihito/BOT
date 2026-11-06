@@ -8,7 +8,7 @@
   （reason: poker_buyin / poker_cashout）を必ず通す。チップの精算は
   ハンド単位で完結し、持ち越しはテーブル（セッション）内のみ。
   退出・テーブル終了時は残チップを必ずコインに戻す。
-- 再起動対策: 対局そのものは復旧しない（core/game_restore.py の対象外）が、
+- 再起動対策: 対局そのものは復旧しない（core/game/game_restore.py の対象外）が、
   預かっているチップは data/poker_chips.json の台帳に都度記録し、
   起動時に未精算分を全額返金する（cogs/gambling.py の未完了セッション
   返金と同じ考え方）。台帳の1人あたり金額は「スタック＋ハンド中の
@@ -35,7 +35,8 @@ import discord
 from discord.ext import commands
 import config
 from cogs.wallet import INSUFFICIENT, NEW_USER_BALANCE
-from core import game_panels, party_ranking
+from core import party_ranking
+from core.game import game_panels
 
 logger = logging.getLogger(__name__)
 

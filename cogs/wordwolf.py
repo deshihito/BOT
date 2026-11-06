@@ -8,7 +8,7 @@
 - ルール・お題・勝利数記録（core/party_ranking.py）の挙動は従来どおり。
 """
 import discord
-from core import game_panels
+from core.game import game_panels
 from discord.ext import commands
 
 from core import party_ranking
