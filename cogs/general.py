@@ -316,10 +316,11 @@ class GeneralCog(
             # 先にACKする: _load_latest はEXPデータ読み込みを伴い、応答前に
             # 行うと panel_recovery に死んだパネルと誤判定される。
             await interaction.response.defer()
-            view = ExpStatusView(interaction.user.id, interaction.guild_id)
+            view = ExpStatusView(interaction.user.id, interaction.guild_id,
+                                 bot=self.bot)
             await view._load_latest()
             return await interaction.followup.send(
-                view=as_panel_v2(view)
+                view=as_panel_v2(view), files=[view.card_file()]
             )
 
         if value == "exp_ranking":
@@ -328,6 +329,16 @@ class GeneralCog(
             await interaction.response.defer()
             view = ExpRankingView(interaction.guild_id, bot=self.bot)
             await view._load_latest()
+            return await interaction.followup.send(
+                view=as_panel_v2(view), files=[view.board_file()]
+            )
+
+        if value == "activity_board":
+            # 各軸の集計（DB取得を含む）を伴うため exp 系と同じく先にACKする。
+            await interaction.response.defer()
+            view = ActivityBoardView(interaction.guild_id, bot=self.bot,
+                                     guild=interaction.guild)
+            await view.refresh_data()
             return await interaction.followup.send(
                 view=as_panel_v2(view)
             )

@@ -786,6 +786,36 @@ class FujoSurvival(commands.Cog):
         embed.set_footer(text=FOOTER)
         await self._reply(interaction, embed)
 
+    async def altitude_top(self, guild) -> tuple[int, float] | None:
+        """現在の高度1位を (user_id, 高度m) で返す（活動ボード用）。
+
+        ranking() の active 集計と同じ母集団（登録者 ∩ ギルドメンバー）と
+        同じ計算（compute_altitude）で先頭だけを返す。登録者や記録が
+        無ければ None。
+        """
+        await self._ensure_users()
+        ids = set(self.users)
+        if guild is not None and getattr(guild, "members", None):
+            members = {m.id for m in guild.members}
+            if members:
+                ids &= members
+        if not ids:
+            return None
+        now = datetime.now(timezone.utc)
+        rows = await self._fetch_all(
+            lambda: self.db_api.table("fujo_activities").select("user_id, detected_at, signal_type")
+            .gte("detected_at", (now - timedelta(days=ALTITUDE_WINDOW_DAYS)).isoformat())
+            .in_("user_id", list(ids))
+        )
+        by_user: dict[int, list[dict]] = {}
+        for r in rows:
+            by_user.setdefault(int(r["user_id"]), []).append(r)
+        scored = [(uid, compute_altitude(recs, now)) for uid, recs in by_user.items()]
+        if not scored:
+            return None
+        scored.sort(key=lambda x: x[1], reverse=True)
+        return scored[0]
+
     async def freeze(self, interaction: discord.Interaction):
         user_id = interaction.user.id
         if not await self._require_registered(interaction, user_id, True):

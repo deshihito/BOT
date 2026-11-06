@@ -126,6 +126,7 @@ GENERAL_ACTIONS = {
     "exp": [
         ("自分のEXP状況", "exp_status"),
         ("EXPランキング", "exp_ranking"),
+        ("サーバー活動ボード", "activity_board"),
     ],
     "custom": [
         ("ショートカットを管理", "shortcut_manage"),
