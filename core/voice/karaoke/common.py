@@ -17,10 +17,10 @@ from discord.ext import commands
 from discord.ext import voice_recv
 
 from core.legacy import Responder
-from core import vc_feature_restore
-from core.vosk_model import ensure_model
-from core.voice_session import VoiceBusy, get_manager
-from core.voice_recv_patch import patch_voice_recv_client
+from core.voice import vc_feature_restore
+from core.voice.vosk_model import ensure_model
+from core.voice.voice_session import VoiceBusy, get_manager
+from core.voice.voice_recv_patch import patch_voice_recv_client
 from core.messages import VOICE_NOT_JOINED
 from core.emojis import FAILED, MUSIC
 
