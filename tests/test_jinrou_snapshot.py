@@ -1,9 +1,9 @@
-"""人狼フェーズ境界スナップショット（core/jinrou_snapshot.py）のテスト。"""
+"""人狼フェーズ境界スナップショット（core/game/jinrou_snapshot.py）のテスト。"""
 import types
 import unittest
 
 from core.game.jinrou.game import JinrouGame
-from core import jinrou_snapshot
+from core.game import jinrou_snapshot
 
 
 def member(uid, name=None):

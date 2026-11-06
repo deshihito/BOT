@@ -1,4 +1,4 @@
-"""人狼の初心者ガイド（core/jinrou_guide.py）と役職 ID のテスト。通信はしない。"""
+"""人狼の初心者ガイド（core/game/jinrou_guide.py）と役職 ID のテスト。通信はしない。"""
 import re
 import sys
 import types
@@ -13,7 +13,7 @@ for p in (ROOT, ROOT / "tests"):
 
 import game_fakes  # noqa: E402,F401  （環境変数などの準備）
 from cogs import jinrou  # noqa: E402
-from core import jinrou_guide as guide  # noqa: E402
+from core.game import jinrou_guide as guide  # noqa: E402
 
 SLUG = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 

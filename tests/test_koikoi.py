@@ -1,9 +1,9 @@
-"""こいこい（core/koikoi.py）のテスト。役の得点計算と対局進行を固める。"""
+"""こいこい（core/game/koikoi.py）のテスト。役の得点計算と対局進行を固める。"""
 
 import random
 import unittest
 
-from core.koikoi import (CARDS, TOTAL_ROUNDS, KoikoiMatch, cpu_choose_capture,
+from core.game.koikoi import (CARDS, TOTAL_ROUNDS, KoikoiMatch, cpu_choose_capture,
                          cpu_choose_play, cpu_decide, evaluate)
 
 

@@ -1,10 +1,10 @@
-"""クイズ大会（core/quiz_bank.py / core/quiz_game.py）のテスト。"""
+"""クイズ大会（core/game/quiz_bank.py / core/game/quiz_game.py）のテスト。"""
 
 import random
 import unittest
 
-from core.quiz_bank import QUESTIONS, BankQuizSource
-from core.quiz_game import QuizSession, points_for
+from core.game.quiz_bank import QUESTIONS, BankQuizSource
+from core.game.quiz_game import QuizSession, points_for
 
 
 class BankTest(unittest.TestCase):

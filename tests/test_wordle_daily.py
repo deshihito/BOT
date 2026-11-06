@@ -4,7 +4,7 @@ import unittest
 from pathlib import Path
 
 from cogs.wordle import ANSWERS, daily_answer, daily_key
-from core import game_records
+from core.game import game_records
 
 
 class DailyAnswerTest(unittest.TestCase):

@@ -2,7 +2,7 @@
 import random
 import unittest
 
-from core.liequiz import QUESTIONS, LieQuizSession
+from core.game.liequiz import QUESTIONS, LieQuizSession
 
 
 class LieQuizBankTest(unittest.TestCase):

@@ -2,7 +2,7 @@
 import random
 import unittest
 
-from core.ruins import ARTIFACT_VALUES, HAZARDS, TREASURES, RuinsGame, build_deck
+from core.game.ruins import ARTIFACT_VALUES, HAZARDS, TREASURES, RuinsGame, build_deck
 
 
 class DeckTest(unittest.TestCase):
