@@ -33,6 +33,7 @@ from discord.ext import commands, tasks
 
 import config
 from core.game import clan as clan_core
+from core.user_names import cached_display_name
 from core.game import gacha as gacha_core
 from core.general import economy_pool as economy_core
 from core.general import items as items_core
@@ -159,8 +160,9 @@ def _lottery_embed(cog: "CirculationCog", user_id: int) -> discord.Embed:
     last = store.last_result()
     if last is not None:
         if last["winners"]:
+            # 当選者は全サーバー横断の抽選結果なので、氏名は通常表記にする
             lines = [
-                f"・<@{w['user_id']}> — **{w['prize']:,} AGO**（{w['tickets']}枚）"
+                f"・{cached_display_name(cog.bot, w['user_id'])} — **{w['prize']:,} AGO**（{w['tickets']}枚）"
                 for w in last["winners"]
             ]
             value = "\n".join(lines)
