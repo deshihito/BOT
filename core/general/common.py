@@ -101,6 +101,7 @@ GENERAL_ACTIONS = {
         ("ブラックジャック", "blackjack"),
         ("ダイスベット", "dice"),
         ("コイン保有ランキング", "coin_leaderboard"),
+        ("ロールショップ", "role_shop"),
     ],
     "rta": [
         ("ランキング一覧", "rankings"),

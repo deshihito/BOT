@@ -334,6 +334,12 @@ class GeneralCog(
                 return await self._safe_respond(interaction, "日報機能は現在利用できません。")
             return await report_cog.toggle(interaction)
 
+        if value == "role_shop":
+            shop_cog = self.bot.get_cog("RoleShopCog")
+            if shop_cog is None:
+                return await self._safe_respond(interaction, "ロールショップは現在利用できません。")
+            return await shop_cog.show_shop(interaction)
+
         if value in {"items", "item_buy", "item_use", "box_open"}:
             items_cog = self.bot.get_cog("ItemsCog")
             if items_cog is None:

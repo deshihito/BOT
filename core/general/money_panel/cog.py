@@ -223,6 +223,7 @@ class MoneyPanelView(discord.ui.View):
                 ("使う", primary, self._dispatch("item_use")),
                 ("宝箱を開ける", danger, self._open_boxes),
                 ("アイテムパネル", secondary, self._dispatch("items")),
+                ("ロールショップ", secondary, self._dispatch("role_shop")),
             ]
         if category == "craft":
             return [
