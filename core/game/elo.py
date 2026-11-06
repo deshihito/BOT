@@ -23,13 +23,18 @@ import threading
 from pathlib import Path
 from typing import Any
 
+from core import data_paths
+
 logger = logging.getLogger(__name__)
 
 STARTING_RATING = 1500.0
 K_FACTOR = 32
 GAMES = ("othello", "shogi", "chess", "gomoku", "connect4")
 
-_DEFAULT_PATH = Path(__file__).resolve().parent.parent / "data" / "elo_ratings.json"
+_DEFAULT_PATH = data_paths.data_path("elo_ratings.json")
+# 再編成でモジュールが1階層深くなった際に保存先がずれていた期間の旧保存先
+# (core/data/elo_ratings.json)。移行読み取り専用で、書き込みは行わない。
+_STRAY_PATH = data_paths.stray_path(__file__, "elo_ratings.json")
 
 
 def default_path() -> Path:
@@ -73,13 +78,18 @@ class EloStore:
         self._data = self._load()
 
     def _load(self) -> dict[str, dict[str, Any]]:
-        try:
-            raw = json.loads(self._path.read_text(encoding="utf-8"))
-        except Exception:
-            return {}
+        raw = self._read_raw()
         if not isinstance(raw, dict):
             return {}
         return {str(k): _clean_entry(v) for k, v in raw.items()}
+
+    def _read_raw(self) -> Any:
+        # 既定パスのときだけ、旧保存先 (パスずれ期間の core/data/) から
+        # 移行読み取りする (旧パス主・正規パスはキー単位で補完)。
+        # 環境変数や明示パスで保存先が指定されている場合は移行しない。
+        if self._path == _DEFAULT_PATH:
+            return data_paths.load_migrated(self._path, _STRAY_PATH, fill=True)
+        return data_paths.read_json(self._path)
 
     def _flush(self) -> None:
         self._path.parent.mkdir(parents=True, exist_ok=True)

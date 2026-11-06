@@ -37,9 +37,14 @@ import time
 from pathlib import Path
 from typing import Any
 
+from core import data_paths
+
 logger = logging.getLogger(__name__)
 
-_DEFAULT_PATH = Path(__file__).resolve().parent.parent / "data" / "voice_restore.json"
+_DEFAULT_PATH = data_paths.data_path("voice_restore.json")
+# 再編成でモジュールが1階層深くなった際に保存先がずれていた期間の旧保存先
+# (core/data/voice_restore.json)。移行読み取り専用で、書き込みは行わない。
+_STRAY_PATH = data_paths.stray_path(__file__, "voice_restore.json")
 
 SECTIONS = ("sessions", "music", "gvc_rooms", "gvc_joins", "gvc_text_links", "vc_features")
 
@@ -75,6 +80,32 @@ class VoiceRestoreStore:
 
     # ------------------------------------------------------------------ 保存
     def _load(self) -> dict[str, dict[str, Any]]:
+        # 既定パスのときだけ、旧保存先 (パスずれ期間の core/data/) から
+        # 移行読み取りする。復旧スナップショットは時点の状態なので旧パス
+        # のファイル全体を正とし、再編前の古いスナップショットを復活
+        # させる補完はしない (死んだセッションの蘇生を防ぐ)。どちらにも
+        # 読めるデータが無い場合のみ従来経路 (壊れたファイルの退避
+        # など) に落とす。環境変数や明示パスで保存先が指定されている
+        # 場合は移行しない。
+        if self._path == _DEFAULT_PATH:
+            raw = data_paths.load_migrated(self._path, _STRAY_PATH, fill=False)
+            if isinstance(raw, dict):
+                return self._clean_sections(raw)
+            if raw is not None:
+                return _empty_data()
+        return self._load_own()
+
+    @staticmethod
+    def _clean_sections(raw: dict) -> dict[str, dict[str, Any]]:
+        data = _empty_data()
+        for name in SECTIONS:
+            section = raw.get(name)
+            if isinstance(section, dict):
+                data[name] = {str(key): value for key, value in section.items()
+                              if isinstance(value, dict)}
+        return data
+
+    def _load_own(self) -> dict[str, dict[str, Any]]:
         try:
             raw = json.loads(self._path.read_text(encoding="utf-8"))
         except FileNotFoundError:
@@ -94,13 +125,7 @@ class VoiceRestoreStore:
             return _empty_data()
         if not isinstance(raw, dict):
             return _empty_data()
-        data = _empty_data()
-        for name in SECTIONS:
-            section = raw.get(name)
-            if isinstance(section, dict):
-                data[name] = {str(key): value for key, value in section.items()
-                              if isinstance(value, dict)}
-        return data
+        return self._clean_sections(raw)
 
     def flush(self) -> None:
         with self._lock:

@@ -54,9 +54,14 @@ import types
 from pathlib import Path
 from typing import Any
 
+from core import data_paths
+
 logger = logging.getLogger(__name__)
 
-_DEFAULT_PATH = Path(__file__).resolve().parent.parent / "data" / "game_restore.json"
+_DEFAULT_PATH = data_paths.data_path("game_restore.json")
+# 再編成でモジュールが1階層深くなった際に保存先がずれていた期間の旧保存先
+# (core/data/game_restore.json)。移行読み取り専用で、書き込みは行わない。
+_STRAY_PATH = data_paths.stray_path(__file__, "game_restore.json")
 
 GAME_IDS = (
     "shogi", "chess", "othello", "daifugo", "babanuki",
@@ -96,6 +101,31 @@ class GameRestoreStore:
 
     # ------------------------------------------------------------------ 保存
     def _load(self) -> dict[str, dict[str, Any]]:
+        # 既定パスのときだけ、旧保存先 (パスずれ期間の core/data/) から
+        # 移行読み取りする。セッションスナップショットは時点の状態なので
+        # 旧パスのファイル全体を正とし、再編前の古いスナップショットを
+        # 復活させる補完はしない。どちらにも読めるデータが無い場合のみ
+        # 従来経路 (壊れたファイルの退避など) に落とす。環境変数や明示
+        # パスで保存先が指定されている場合は移行しない。
+        if self._path == _DEFAULT_PATH:
+            raw = data_paths.load_migrated(self._path, _STRAY_PATH, fill=False)
+            if isinstance(raw, dict):
+                return self._clean_sections(raw)
+            if raw is not None:
+                return _empty_data()
+        return self._load_own()
+
+    @staticmethod
+    def _clean_sections(raw: dict) -> dict[str, dict[str, Any]]:
+        data = _empty_data()
+        for name in GAME_IDS:
+            section = raw.get(name)
+            if isinstance(section, dict):
+                data[name] = {str(key): value for key, value in section.items()
+                              if isinstance(value, dict)}
+        return data
+
+    def _load_own(self) -> dict[str, dict[str, Any]]:
         try:
             raw = json.loads(self._path.read_text(encoding="utf-8"))
         except FileNotFoundError:
@@ -115,13 +145,7 @@ class GameRestoreStore:
             return _empty_data()
         if not isinstance(raw, dict):
             return _empty_data()
-        data = _empty_data()
-        for name in GAME_IDS:
-            section = raw.get(name)
-            if isinstance(section, dict):
-                data[name] = {str(key): value for key, value in section.items()
-                              if isinstance(value, dict)}
-        return data
+        return self._clean_sections(raw)
 
     def flush(self) -> None:
         with self._lock:
