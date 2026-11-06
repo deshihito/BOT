@@ -4,7 +4,7 @@ import io
 import logging
 import random
 from pathlib import Path
-from core.emojis import LEFT, RIGHT
+from core.support.emojis import LEFT, RIGHT
 
 import discord
 from discord.ext import commands
