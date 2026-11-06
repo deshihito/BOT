@@ -4,7 +4,13 @@
 ヒント数字を頼りにマスを塗って絵を浮かばせる。5×5 と 8×8。
 入力は 行セレクト→列セレクト→操作ボタン（塗る／バツ／消す）。
 クリアタイムは core/game/game_records.py の nonogram にサイズ別で残る。
+
+盤面画像化タスク（2026-11-06）: 盤面＋行列ヒントの表示をテキストから
+PIL 画像（core/game/board_image.render_nonogram）に差し替え、パネルは
+Components V2（GamePanelView + MediaGallery）にした。操作方式・
+ロジック・記録は不変。選択中の行・列ヒントとマスは画像上で強調される。
 """
+import io
 import random
 import time
 
@@ -12,13 +18,17 @@ import discord
 from discord.ext import commands
 
 from core.game import game_records
+from core.game.board_image import render_cached, render_nonogram
+from core.game.game_v2 import GamePanelView
 from core.game.nonogram import SIZES, NonogramBoard, NonogramPuzzle
+from core.panel_v2 import edit_panel_v2
 
 GAME_ID = "nonogram"
 CELL_LABEL = {0: "未定", 1: "塗り", 2: "バツ"}
 
 
 def board_embed(board: NonogramBoard, user, status: str = "") -> discord.Embed:
+    """互換用に残す旧 embed 生成（現在の表示は V2 パネル＋画像）。"""
     embed = discord.Embed(title=f"🧩 ノノグラム（{board.puzzle.size_key}）", color=0xFFFFFF)
     desc = f"<@{user.id}> の盤面です。\n```\n{board.text()}\n```"
     desc += "行→列を選んでから、塗る／バツ／消すを押します。"
@@ -28,7 +38,19 @@ def board_embed(board: NonogramBoard, user, status: str = "") -> discord.Embed:
     return embed
 
 
-class NonogramView(discord.ui.View):
+def board_png(board: NonogramBoard, selected=None) -> bytes:
+    puzzle = board.puzzle
+    key = ("nonogram", puzzle.size_key, puzzle.name,
+           tuple(tuple(r) for r in board.grid), selected)
+    return render_cached(key, lambda: render_nonogram(
+        puzzle.row_clues, puzzle.col_clues, board.grid, selected=selected))
+
+
+def board_file(board: NonogramBoard, selected=None) -> discord.File:
+    return discord.File(io.BytesIO(board_png(board, selected)), "board.png")
+
+
+class NonogramView(GamePanelView):
     def __init__(self, cog, owner, puzzle: NonogramPuzzle):
         super().__init__(timeout=1800)
         self.cog = cog
@@ -39,6 +61,8 @@ class NonogramView(discord.ui.View):
         self.col = None
         self.started_at = time.monotonic()
         self.finished = False
+        self.status = ""
+        self.add_extra(discord.ui.MediaGallery(discord.MediaGalleryItem("attachment://board.png")))
         self._render()
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
@@ -47,42 +71,60 @@ class NonogramView(discord.ui.View):
             return False
         return True
 
+    def _selected(self):
+        if self.row is None or self.col is None:
+            return None
+        return (self.row, self.col)
+
     def _render(self):
-        self.clear_items()
+        body = f"<@{self.owner.id}> の盤面です。行→列を選んでから、塗る／バツ／消すを押します。"
+        sel = self._selected()
+        if sel is not None:
+            body += (f"\n選択中: **{sel[0] + 1}行目・{sel[1] + 1}列目**"
+                     f"（現在: {CELL_LABEL[self.board.grid[sel[0]][sel[1]]] }）")
+        if self.status:
+            body += f"\n{self.status}"
+        self.set_content(f"🧩 ノノグラム（{self.puzzle.size_key}）", body)
+        self.clear_rows()
+        if self.finished:
+            return
         n = self.puzzle.n
         row_select = discord.ui.Select(
-            placeholder="行", row=0,
-            options=[discord.SelectOption(label=f"{i+1}行目", value=str(i), default=(i == self.row)) for i in range(n)])
-        row_select.callback = self._make_select_callback("row")
-        self.add_item(row_select)
-        col_select = discord.ui.Select(
-            placeholder="列", row=1,
-            options=[discord.SelectOption(label=f"{i+1}列目", value=str(i), default=(i == self.col)) for i in range(n)])
-        col_select.callback = self._make_select_callback("col")
-        self.add_item(col_select)
-        for label, value in (("■ 塗る", 1), ("× バツ", 2), ("消す", 0)):
-            btn = discord.ui.Button(label=label, style=discord.ButtonStyle.primary, row=2)
-            btn.callback = self._make_action_callback(value)
-            self.add_item(btn)
-        check = discord.ui.Button(label="完成判定", style=discord.ButtonStyle.success, row=3)
-        check.callback = self._check_callback
-        self.add_item(check)
-        give = discord.ui.Button(label="あきらめる", style=discord.ButtonStyle.danger, row=3)
-        give.callback = self._giveup_callback
-        self.add_item(give)
+            placeholder="行",
+            options=[discord.SelectOption(label=f"{i + 1}行目", value=str(i), default=(i == self.row)) for i in range(n)])
 
-    def _make_select_callback(self, kind):
-        async def callback(interaction: discord.Interaction):
-            row_idx = 0 if kind == "row" else 1
-            for item in self.children:
-                if isinstance(item, discord.ui.Select) and item.row == row_idx and item.values:
-                    if kind == "row":
-                        self.row = int(item.values[0])
-                    else:
-                        self.col = int(item.values[0])
-            self._render()
-            await interaction.response.edit_message(embed=board_embed(self.board, self.owner), view=self)
-        return callback
+        async def on_row(inter: discord.Interaction, sel=row_select):
+            self.row = int(sel.values[0])
+            await self._refresh(inter)
+
+        row_select.callback = on_row
+        self.add_row(row_select)
+        col_select = discord.ui.Select(
+            placeholder="列",
+            options=[discord.SelectOption(label=f"{i + 1}列目", value=str(i), default=(i == self.col)) for i in range(n)])
+
+        async def on_col(inter: discord.Interaction, sel=col_select):
+            self.col = int(sel.values[0])
+            await self._refresh(inter)
+
+        col_select.callback = on_col
+        self.add_row(col_select)
+        action_btns = []
+        for label, value in (("■ 塗る", 1), ("× バツ", 2), ("消す", 0)):
+            btn = discord.ui.Button(label=label, style=discord.ButtonStyle.primary)
+            btn.callback = self._make_action_callback(value)
+            action_btns.append(btn)
+        self.add_row(*action_btns)
+        check = discord.ui.Button(label="完成判定", style=discord.ButtonStyle.success)
+        check.callback = self._check_callback
+        give = discord.ui.Button(label="あきらめる", style=discord.ButtonStyle.danger)
+        give.callback = self._giveup_callback
+        self.add_row(check, give)
+
+    async def _refresh(self, interaction: discord.Interaction):
+        self._render()
+        await edit_panel_v2(interaction, self,
+                            files=[board_file(self.board, self._selected())])
 
     def _make_action_callback(self, value):
         async def callback(interaction: discord.Interaction):
@@ -91,17 +133,15 @@ class NonogramView(discord.ui.View):
             self.board.set_cell(self.row, self.col, value)
             if self.board.cleared():
                 return await self._finish(interaction, cleared=True)
-            self._render()
-            await interaction.response.edit_message(embed=board_embed(self.board, self.owner), view=self)
+            await self._refresh(interaction)
         return callback
 
     async def _check_callback(self, interaction: discord.Interaction):
         wrong = self.board.wrong_filled()
         filled = sum(1 for row in self.board.grid for v in row if v == 1)
         answer = sum(sum(row) for row in self.puzzle.solution)
-        status = f"判定: 塗ったマス {filled}/{answer}、間違って塗ったマスは {wrong} 個です。"
-        self._render()
-        await interaction.response.edit_message(embed=board_embed(self.board, self.owner, status), view=self)
+        self.status = f"判定: 塗ったマス {filled}/{answer}、間違って塗ったマスは {wrong} 個です。"
+        await self._refresh(interaction)
 
     async def _giveup_callback(self, interaction: discord.Interaction):
         await self._finish(interaction, cleared=False)
@@ -110,32 +150,36 @@ class NonogramView(discord.ui.View):
         self.finished = True
         seconds = time.monotonic() - self.started_at
         if cleared:
-            status = f"🎉 クリア！絵は「{self.puzzle.name}」でした。タイム: **{seconds:.1f}秒**"
+            self.status = f"🎉 クリア！絵は「{self.puzzle.name}」でした。タイム: **{seconds:.1f}秒**"
         else:
             # 答えを表示する（正解マスを全部塗った状態にする）
             for r in range(self.puzzle.n):
                 for c in range(self.puzzle.n):
                     self.board.grid[r][c] = self.puzzle.solution[r][c]
-            status = f"🏳️ あきらめました。絵は「{self.puzzle.name}」でした。"
+            self.status = f"🏳️ あきらめました。絵は「{self.puzzle.name}」でした。"
         entry = game_records.record_nonogram_safely(
             self.owner.id, self.puzzle.size_key, cleared, seconds if cleared else None)
         if cleared and entry is not None:
-            status += "\n" + game_records.format_timed_line(entry, self.puzzle.size_key)
-        for child in self.children:
-            child.disabled = True
-        await interaction.response.edit_message(embed=board_embed(self.board, self.owner, status), view=self)
+            self.status += "\n" + game_records.format_timed_line(entry, self.puzzle.size_key)
+        self._render()
+        await edit_panel_v2(interaction, self,
+                            files=[board_file(self.board, None)])
         self.stop()
 
 
-class SizeView(discord.ui.View):
+class SizeView(GamePanelView):
     def __init__(self, cog, owner):
-        super().__init__(timeout=120)
+        super().__init__("🧩 ノノグラム",
+                         "サイズを選んでください。お題の絵はランダムです。",
+                         timeout=120)
         self.cog = cog
         self.owner = owner
+        buttons = []
         for key in SIZES:
             btn = discord.ui.Button(label=key, style=discord.ButtonStyle.primary)
             btn.callback = self._make_callback(key)
-            self.add_item(btn)
+            buttons.append(btn)
+        self.add_row(*buttons)
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         return interaction.user.id == self.owner.id
@@ -144,7 +188,7 @@ class SizeView(discord.ui.View):
         async def callback(interaction: discord.Interaction):
             puzzle = NonogramPuzzle.pick(size_key, rng=random.Random())
             view = NonogramView(self.cog, self.owner, puzzle)
-            await interaction.response.edit_message(embed=board_embed(view.board, self.owner), view=view)
+            await edit_panel_v2(interaction, view, files=[board_file(view.board, None)])
             self.stop()
         return callback
 
@@ -155,11 +199,7 @@ class Nonogram(commands.Cog):
 
     async def start_recruit(self, interaction: discord.Interaction):
         """/game のハブから呼ぶ。サイズを選ぶと盤面が始まる。"""
-        embed = discord.Embed(
-            title="🧩 ノノグラム",
-            description="サイズを選んでください。お題の絵はランダムです。",
-            color=0xFFFFFF)
-        await interaction.response.send_message(embed=embed, view=SizeView(self, interaction.user))
+        await interaction.response.send_message(view=SizeView(self, interaction.user))
 
 
 async def setup(bot):
