@@ -2,7 +2,7 @@
 import types
 import unittest
 
-from core.jinrou.game import JinrouGame
+from core.game.jinrou.game import JinrouGame
 from core import jinrou_snapshot
 
 

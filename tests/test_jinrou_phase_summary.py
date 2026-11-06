@@ -10,9 +10,9 @@ from unittest.mock import AsyncMock, patch
 
 import discord
 
-from core.jinrou.common import phase_summary_embed
-from core.jinrou.gameloop import GameLoopMixin
-from core.jinrou.results import ResultsMixin
+from core.game.jinrou.common import phase_summary_embed
+from core.game.jinrou.gameloop import GameLoopMixin
+from core.game.jinrou.results import ResultsMixin
 
 
 def member(uid, name):
@@ -64,7 +64,7 @@ class ExileSummaryTest(unittest.IsolatedAsyncioTestCase):
         mixin._notify_reibai = AsyncMock()
         mixin._check_mokumoku_reveal = AsyncMock()
         mixin._record_wins = AsyncMock()
-        with patch("core.jinrou.results._check_and_reveal_ura_yakushoku", new=AsyncMock()):
+        with patch("core.game.jinrou.results._check_and_reveal_ura_yakushoku", new=AsyncMock()):
             await mixin.apply_forced_execution(game, target_id)
         return game, channel
 
@@ -86,7 +86,7 @@ class ExileSummaryTest(unittest.IsolatedAsyncioTestCase):
         mixin._notify_reibai = AsyncMock()
         mixin._check_mokumoku_reveal = AsyncMock()
         mixin._record_wins = AsyncMock()
-        with patch("core.jinrou.results._check_and_reveal_ura_yakushoku", new=AsyncMock()):
+        with patch("core.game.jinrou.results._check_and_reveal_ura_yakushoku", new=AsyncMock()):
             await mixin.apply_forced_execution(game, 1)
         self.assertEqual(len(channel.embeds()), 1)
         description = channel.embeds()[0].description
