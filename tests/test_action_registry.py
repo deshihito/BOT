@@ -190,7 +190,7 @@ class ConfirmTierTest(unittest.TestCase):
         "general:machine_buy", "general:workshop_claim", "general:craft",
         "general:mining", "general:lottery_buy", "general:steal",
         "general:slot", "general:double", "general:blackjack", "general:dice",
-        "general:daily_report",
+        "general:daily_report", "general:gacha",
         "support:clear", "support:role_bulk", "support:muted", "support:ticket",
         "support:honeypot", "support:whisper", "support:binjou",
         "support:message_log", "support:moderation_log",

@@ -58,6 +58,8 @@ AI_BLOCKED_IDS = frozenset({
     "general:slot", "general:double", "general:blackjack", "general:dice",
     # 日報DMの購読切り替えは個人設定の変更なので明示操作に限定する。
     "general:daily_report",
+    # ガチャはコインを消費する状態変更なので明示操作に限定する。
+    "general:gacha",
     "general:fujo_register", "general:fujo_freeze", "general:fujo_panic_disable",
     "general:shortcut_manage", "general:aitools", "general:ai_default",
     "general:image_default", "general:reasoning_default",

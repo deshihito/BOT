@@ -340,6 +340,12 @@ class GeneralCog(
                 return await self._safe_respond(interaction, "ロールショップは現在利用できません。")
             return await shop_cog.show_shop(interaction)
 
+        if value == "gacha":
+            gacha_cog = self.bot.get_cog("GachaCog")
+            if gacha_cog is None:
+                return await self._safe_respond(interaction, "ガチャは現在利用できません。")
+            return await gacha_cog.show_gacha(interaction)
+
         if value in {"items", "item_buy", "item_use", "box_open"}:
             items_cog = self.bot.get_cog("ItemsCog")
             if items_cog is None:

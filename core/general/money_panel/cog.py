@@ -254,6 +254,7 @@ class MoneyPanelView(discord.ui.View):
                 ("ダブルアップ", primary, self._dispatch("double")),
                 ("ブラックジャック", primary, self._dispatch("blackjack")),
                 ("ダイスベット", primary, self._dispatch("dice")),
+                ("ガチャ", primary, self._dispatch("gacha")),
             ]
         if category == "more":
             return [

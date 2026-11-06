@@ -73,6 +73,7 @@ MONEY_PRISON_BLOCKED_VALUES = frozenset({
     "machine_buy", "workshop_claim", "craft",
     "mining", "lottery_buy", "steal",
     "slot", "double", "blackjack", "dice",
+    "gacha",
 })
 
 GENERAL_ACTIONS = {
@@ -102,6 +103,7 @@ GENERAL_ACTIONS = {
         ("ダイスベット", "dice"),
         ("コイン保有ランキング", "coin_leaderboard"),
         ("ロールショップ", "role_shop"),
+        ("ガチャ", "gacha"),
     ],
     "rta": [
         ("ランキング一覧", "rankings"),
