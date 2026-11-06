@@ -29,7 +29,7 @@ from core import voice_restore
 from core.voice_session import SHARED_FEATURES, VoiceBusy, get_manager
 from core.voice_media import add_audio_source, has_audio_source, remove_audio_source
 from core.legacy import Responder
-from core.emojis import FAILED, MUSIC, SUCCESS
+from core.emojis import CROCK, FAILED, GEAR, MUSIC, PAUSE, RESET, SUCCESS, THU, VOL
 from core.music_activity import build_music_activity_snapshot
 
 from core.music.common import *  # noqa: F401,F403 - shared helpers/constants
@@ -46,9 +46,9 @@ class PanelMixin:
         msg = state['panel_message']
         if not msg: return
 
-        if state['is_paused']: status_icon = "<:Pause:1561700510447312916> 一時停止中"
+        if state['is_paused']: status_icon = PAUSE + ' 一時停止中'
         elif state['current_track']: status_icon = "▶️ 再生中"
-        else: status_icon = "<:reset:1563559487351160972> 停止中"
+        else: status_icon = RESET + ' 停止中'
 
         if state['current_track']:
             _, filename, duration, _, _ = state['current_track']
@@ -78,9 +78,9 @@ class PanelMixin:
         eq_label = f"Custom (`{state['custom_eq_filter']}`)" if current_eq == "custom" else current_eq.capitalize()
 
         panel_text = (
-            "# <:music:1561710964238450809> ボイスコントロールパネル\n"
+            "# {MUSIC} ボイスコントロールパネル\n"
             f"**状態:** {status_icon}\n"
-            f"**オーディオ:** <:vol:1563559476265488414> `{int(state['volume']*100)}%`　<:thu:1563559478220038175> `{state['speed']}x`　🎬 `{eq_label}`\n"
+            f"**オーディオ:** {VOL} `{int(state['volume']*100)}%`　{THU} `{state['speed']}x`　🎬 `{eq_label}`\n"
             f"**再生中:** {track_info}\n"
             f"**進捗:** {progress_info}\n"
         )
@@ -150,7 +150,7 @@ class PanelMixin:
         else:
             state['eq'] = "custom"
             state['custom_eq_filter'] = mode
-            msg = f"<:gear:1564624326509203557> カスタムEQフィルターを設定しました:\n`{mode}`"
+            msg = f"{GEAR} カスタムEQフィルターを設定しました:\n`{mode}`"
 
         await interaction.response.send_message(embed=we(msg))
         # 曲を止めずにパネルだけ更新
@@ -175,7 +175,7 @@ class PanelMixin:
             return await r.send(embed=we("音量は 0.1 から 2.0 の間で指定してください。"), ephemeral=True)
         state = self.get_state(r.guild.id)
         state['volume'] = value
-        await r.send(embed=we(f"<:vol:1563559476265488414> 音量を `{value}` に設定しました。"))
+        await r.send(embed=we(f"{VOL} 音量を `{value}` に設定しました。"))
         await self.apply_immediate_setting(r.source)
 
 
@@ -185,7 +185,7 @@ class PanelMixin:
         state = self.get_state(r.guild.id)
         previous_speed = state.get('speed', 1.0)
         state['speed'] = value
-        await r.send(embed=we(f"<:thu:1563559478220038175> 再生速度を `{value}` 倍に設定しました（現在位置から反映）。"))
+        await r.send(embed=we(f"{THU} 再生速度を `{value}` 倍に設定しました（現在位置から反映）。"))
         await self.apply_immediate_setting(r.source, elapsed_speed=previous_speed)
 
 
@@ -206,14 +206,14 @@ class PanelMixin:
         lines = []
         if feedback is not None:
             state['fdn_feedback'] = feedback
-            lines.append(f"<:crock:1561710960387956757> リバーブのフィードバック（長さ）を `{feedback}` に設定しました。")
+            lines.append(f"{CROCK} リバーブのフィードバック（長さ）を `{feedback}` に設定しました。")
         if wet is not None:
             state['fdn_wet'] = wet
             lines.append(f"💧 残響のミックス（ウェット量）を `{wet}` に設定しました。")
         if resolution is not None:
             state['fdn_resolution'] = resolution
             mode_str = "8次元ハウスホルダー（高密度・シルキー）" if resolution == 8 else "4次元ハウスホルダー（軽量・クリア）"
-            lines.append(f"<:gear:1564624326509203557> リバーブ解像度を `{resolution}` に切り替えました。\n現在のモード: **{mode_str}**")
+            lines.append(f"{GEAR} リバーブ解像度を `{resolution}` に切り替えました。\n現在のモード: **{mode_str}**")
         await r.send(embed=we("\n".join(lines)))
         # コントロールパネルの表示を更新
         await self.update_panel(guild_id)
@@ -230,7 +230,7 @@ class PanelMixin:
         # 💡 モード判定（3軸回転 / 通常回転 / 回転OFF）
         rot_mode = state.get('spatial_rot_mode', 'standard')  # 'off', 'standard', '3d'
         rot_labels = {
-            'off': '<:Pause:1561700510447312916> 静止 (OFF)',
+            'off': PAUSE + ' 静止 (OFF)',
             'standard': '🌀 通常水平回転 (Azimuth)',
             '3d': '🪐 3軸立体回転 (3D Pitch/Yaw/Roll)'
         }
@@ -238,7 +238,7 @@ class PanelMixin:
         speaker_names = {
             'studio': '🎙️ スタジオモニター',
             'theater': '🎬 シアター',
-            'pa': '<:vol:1563559476265488414> PAスピーカー',
+            'pa': VOL + ' PAスピーカー',
             'small': '📻 小型スピーカー'
         }
 
@@ -264,7 +264,7 @@ class PanelMixin:
         state = self.get_state(guild_id)
         current_track = state.get('current_track')
         queue_items = list(state['queue']._queue)
-        embed = discord.Embed(title="<:music:1561710964238450809> 再生キュー", color=0xFFFFFF)
+        embed = discord.Embed(title=MUSIC + ' 再生キュー', color=0xFFFFFF)
         embed.add_field(
             name="再生中",
             value=f"**{current_track[1]}**" if current_track else "なし",

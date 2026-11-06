@@ -26,7 +26,7 @@ from core.voice_recv_patch import patch_voice_recv_client
 from core.messages import voice_connection_failed
 from core.voice_media import add_receive_sink, remove_receive_sink
 from core.speech_vad import SpeechDetector
-from core.emojis import FAILED
+from core.emojis import FAILED, LOADING, LOUPE, PAUSE
 
 try:  # あれば高品質なポリフェーズ・リサンプラーを使う（無くても numpy だけで動く）
     from scipy.signal import resample_poly  # type: ignore
@@ -504,7 +504,7 @@ class TranscriptionCog(commands.Cog):
                 f"停止コマンド: `/vc のパネルから文字起こし停止`"
             ))
         else:
-            await r.send(embed=we("<:Pause:1561700510447312916> 文字起こし停止中 (`/vc のパネルから文字起こし開始` で開始)"))
+            await r.send(embed=we(PAUSE + ' 文字起こし停止中 (`/vc のパネルから文字起こし開始` で開始)'))
 
     def _build_sender(self, guild_id: int, webhook, notice_channel):
         """文字起こし結果を Webhook へ送るコールバック（開始時・再開時で共用）。"""
@@ -556,7 +556,7 @@ class TranscriptionCog(commands.Cog):
     async def _start_once(self, r: Responder, target_channel: discord.TextChannel | None):
         if not logfare.api_key():
             return await r.send(embed=we(
-                "<:failed:1490986584676368535> `LOGFARE_API_KEY` が設定されていないため、文字起こしを開始できません。"
+                FAILED + ' `LOGFARE_API_KEY` が設定されていないため、文字起こしを開始できません。'
             ), ephemeral=True)
         voice = getattr(r.user, "voice", None)
         if not voice or not voice.channel:
@@ -589,10 +589,10 @@ class TranscriptionCog(commands.Cog):
             webhook = await self._get_or_create_webhook(send_channel)
         except discord.Forbidden:
             await self.voice_sessions.release(r.guild.id, "transcribe", reason="webhook-error")
-            return await r.send(embed=we(f"<:failed:1490986584676368535> Botに {send_channel.mention} の `ウェブフックの管理 (Manage Webhooks)` 権限がありません。"))
+            return await r.send(embed=we(f"{FAILED} Botに {send_channel.mention} の `ウェブフックの管理 (Manage Webhooks)` 権限がありません。"))
         except Exception as e:
             await self.voice_sessions.release(r.guild.id, "transcribe", reason="webhook-error")
-            return await r.send(embed=we(f"<:failed:1490986584676368535> Webhookの取得に失敗しました: `{e}`"))
+            return await r.send(embed=we(f"{FAILED} Webhookの取得に失敗しました: `{e}`"))
 
         send_webhook = self._build_sender(guild_id, webhook, r.channel)
 
@@ -667,7 +667,7 @@ class TranscriptionCog(commands.Cog):
                 results = await logfare.probe_transcription_languages(audio, used_model)
             except Exception as e:
                 logger.exception("sttdebug failed")
-                return await ctx.send(embed=we(f"<:failed:1490986584676368535> 実行に失敗しました: `{e}`"))
+                return await ctx.send(embed=we(f"{FAILED} 実行に失敗しました: `{e}`"))
             try:
                 available = await logfare.fetch_transcription_models()
             except Exception:
@@ -680,7 +680,7 @@ class TranscriptionCog(commands.Cog):
             if available else "Logfareの音声認識モデル候補を取得できませんでした"
         )
         text = (
-            f"<:loupe:1563559480069853245> **文字起こし言語指定テスト** — {used_model}\n"
+            f"{LOUPE} **文字起こし言語指定テスト** — {used_model}\n"
             f"音声: {source}（{stats}）\n\n" + "\n".join(lines) + f"\n\n{models_line}"
         )
         try:
@@ -693,7 +693,7 @@ class TranscriptionCog(commands.Cog):
     async def stt_debug_error(self, ctx: commands.Context, error: commands.CommandError):
         """失敗しても必ず何か返す（以前は無言になるだけだった）。"""
         if isinstance(error, commands.CommandOnCooldown):
-            message = f"⏳ `!sttdebug` は続けて実行できません。{error.retry_after:.0f}秒後にもう一度お試しください。"
+            message = f"{LOADING} `!sttdebug` は続けて実行できません。{error.retry_after:.0f}秒後にもう一度お試しください。"
         elif isinstance(error, commands.NoPrivateMessage):
             message = f"{FAILED} `!sttdebug` はサーバーのテキストチャンネルで実行してください。"
         else:

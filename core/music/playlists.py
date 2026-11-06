@@ -166,7 +166,7 @@ class PlaylistsMixin:
                     return await r.send(embed=we("保存できる曲がありません（サーバー共有に保存できるのは、アップロードした音声だけです）。"), ephemeral=True)
                 try:
                     db.table("playlists").upsert({"name": self._server_playlist_key(r.guild.id, name), "ids": ids}).execute()
-                    return await r.send(embed=we(f"<:success:1490985168100659322> このサーバー内のキューを `{name}` として保存しました（{len(ids)} 曲・サーバー共有）。"))
+                    return await r.send(embed=we(f"{SUCCESS} このサーバー内のキューを `{name}` として保存しました（{len(ids)} 曲・サーバー共有）。"))
                 except Exception as exc:
                     logger.exception("Failed to save server playlist")
                     return await r.send(embed=we(f"保存に失敗しました。({type(exc).__name__})"), ephemeral=True)
