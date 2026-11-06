@@ -131,7 +131,7 @@ def nation_should_notify(guild_id: int, *, major: bool) -> Optional[int]:
     return s["channel_id"]
 
 
-# ---------------------------------------------------------------- 放置したプレイヤーの代打ち（core/autoplay.py）
+# ---------------------------------------------------------------- 放置したプレイヤーの代打ち（core/game/autoplay.py）
 AUTOPLAY_SECTION = "autoplay"
 AUTOPLAY_DEFAULTS = {"enabled": True}
 
