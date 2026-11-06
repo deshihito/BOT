@@ -1713,6 +1713,46 @@ GAME_GUIDES["yotsuba"] = {
 GAME_ORDER = ["jinrou", "wordwolf", "uno", "doubt", "ngword", "shiritori", "janken", "wordle", "shinkei", "babanuki", "guess", "flash", "minesweeper", "daifugo", "othello", "poker", "shogi", "chess", "dungeon", "quiz", "bingo", "majority", "onenight", "loveletter", "codenames", "twochoice", "thirtyone", "koikoi", "gomoku", "connect4", "sudoku", "game2048", "nonogram", "highlow", "justone", "ito", "insider", "gauge", "ruins", "hanabi", "hoshi", "liequiz", "cipher", "wirecut", "liardice", "mendou", "yotsuba"]
 
 
+# ----------------------------------------------------------------------
+# 開発先行公開フラグ（ユーザー指示 2026-11-07）
+#
+# 仕様や中身を詰め切れていないゲームに付ける「先行公開」の印。
+# **単一の真実源はこの PREVIEW_GAMES だけ**で、付け外しはここの編集で
+# 完結する（各ゲームのコードにフラグを散らさない）。ハブの一覧・詳細、
+# 起動時の通知、ゲーム内パネル、ガイドの注意文はすべてここを参照する。
+# フラグは表示だけに影響し、開始可否・記録・ランキングには影響しない。
+# ----------------------------------------------------------------------
+
+#: バッジ/ラベルの文言（ユーザーの文言をそのまま使う）
+PREVIEW_LABEL = "開発先行公開"
+#: 注意文（ユーザーの文言をそのまま使う）
+PREVIEW_NOTICE = "予期せぬバグが発生することがあります、実装中の機能です"
+
+#: 開発先行公開フラグを付けたゲーム id の集合。
+#: 根拠はいずれも各タスクの実装ログ（game-*-impl-log-2026-11-06.md）:
+#: - wirecut（爆弾処理班）: 原典のシナリオ/ミッション制・装備カードが
+#:   v1 スコープ外で標準構成1本のみ。情報トークンも簡略化（ラウンド5ログ）。
+#: - liardice（ライアーズダイス）: パリフィコ/カルサを v1 で省略（ラウンド5ログ）。
+#: - ito（たとえナンバー）: 原典の複数枚配布・ライフ制を入れない
+#:   v1 簡略化（ラウンド4ログ）。
+#: - hanabi（花火大会）: ヒントの否定情報を保持しない v1 簡略化（ラウンド4ログ）。
+#: - hoshi（星か爆弾か）: 失敗時の喪失ディスクが原典の選択式でなく
+#:   ランダムになる v1 簡略化（ラウンド4ログ）。
+PREVIEW_GAMES = frozenset({"wirecut", "liardice", "ito", "hanabi", "hoshi"})
+
+
+def is_preview_game(game_id: str) -> bool:
+    """開発先行公開フラグが付いているか。"""
+    return game_id in PREVIEW_GAMES
+
+
+def preview_notice_line(game_id: str) -> str | None:
+    """パネル等に差し込む注意文の1行（フラグ無しなら None）。"""
+    if not is_preview_game(game_id):
+        return None
+    return f"⚠ **{PREVIEW_LABEL}**: {PREVIEW_NOTICE}"
+
+
 def guide_for_discord(game_id: str, limit: int = DISCORD_DESCRIPTION_LIMIT) -> str:
     """guide の Markdown を Discord の埋め込み向けにする。
 
@@ -1737,6 +1777,10 @@ def guide_for_discord(game_id: str, limit: int = DISCORD_DESCRIPTION_LIMIT) -> s
             continue
         body = "\n".join(lines).strip()
         parts.append(f"**{title}**\n{body}" if title else body)
+
+    # 開発先行公開フラグ付きは、ガイド本文を編集せずここで注意文を自動付加する。
+    if is_preview_game(game_id):
+        parts.insert(0, f"⚠ **{PREVIEW_LABEL}**\n{PREVIEW_NOTICE}")
 
     more = "\n\n…（続きは各ゲームのヘルプをご覧ください）"
     text = ""

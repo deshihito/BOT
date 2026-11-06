@@ -14,7 +14,7 @@ import discord
 from discord.ext import commands
 
 from core.game import party_ranking
-from core.game.game_v2 import GamePanelView, text_panel
+from core.game.game_v2 import GamePanelView, preview_notice_line, text_panel
 from core.game.hoshi import BOMB, FLOWER, HoshiGame
 
 logger = logging.getLogger(__name__)
@@ -51,7 +51,8 @@ class Hoshi(commands.Cog):
         state = {"started": False}
         panel = GamePanelView("⭐ 星か爆弾か 参加者募集",
                               f"伏せたディスクをめくるブラフ＆競りゲームです（{MIN_PLAYERS}〜{MAX_PLAYERS}名）。\n"
-                              f"ホストが「開始する」を押すか、{RECRUIT_SECONDS}秒たつと開始します。\n参加者: <@{players[0]}>")
+                              f"ホストが「開始する」を押すか、{RECRUIT_SECONDS}秒たつと開始します。\n参加者: <@{players[0]}>",
+                              notice=preview_notice_line(GAME_ID))
 
         async def on_join(inter: discord.Interaction):
             if inter.user.id in players:
@@ -110,7 +111,8 @@ class Hoshi(commands.Cog):
             panel = GamePanelView(
                 "⭐ 星か爆弾か 配置フェーズ",
                 status_text(game) + f"\n\n手番は <@{game.current}> です。「星を置く/爆弾を置く」か、"
-                "自分の山が1枚以上あれば「挑戦する」で競りを開始できます。中身は他の人には分かりません。")
+                "自分の山が1枚以上あれば「挑戦する」で競りを開始できます。中身は他の人には分かりません。",
+                notice=preview_notice_line(GAME_ID))
 
             async def on_place_star(inter: discord.Interaction):
                 await self._do_place(inter, game, FLOWER)
@@ -149,7 +151,8 @@ class Hoshi(commands.Cog):
             panel = GamePanelView(
                 "🔨 競り",
                 status_text(game) + f"\n\n現在の宣言は **{game.bid_amount}枚**（<@{game.challenger}>）。"
-                f"手番は <@{game.current}> です。「+1で競る」か「パス」を選んでください。")
+                f"手番は <@{game.current}> です。「+1で競る」か「パス」を選んでください。",
+                notice=preview_notice_line(GAME_ID))
 
             async def on_raise(inter: discord.Interaction):
                 if game.raise_bid(inter.user.id, game.bid_amount + 1):
@@ -176,7 +179,8 @@ class Hoshi(commands.Cog):
                 "🎲 めくり",
                 status_text(game) + f"\n\n<@{game.challenger}> が {game.bid_amount}枚に挑戦中。"
                 f"めくったもの: {flipped or 'なし'}\n"
-                "まず自分の山から、無くなったら「めくる相手を選ぶ」で他人の山をめくります。")
+                "まず自分の山から、無くなったら「めくる相手を選ぶ」で他人の山をめくります。",
+                notice=preview_notice_line(GAME_ID))
 
             async def on_flip_own(inter: discord.Interaction):
                 await self._do_flip(inter, game, inter.user.id)

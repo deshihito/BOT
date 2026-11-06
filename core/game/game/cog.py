@@ -5,6 +5,9 @@
 募集は各ゲームの cog の ``start_recruit(interaction)`` をそのまま呼ぶので、個別のコマンド
 （!doubt）と同じ流れになる。案内文は core/game/game_guides.py。
 """
+import asyncio
+import logging
+
 import discord
 from discord import app_commands
 from discord.ext import commands
@@ -14,10 +17,19 @@ from core.game import party_ranking
 from core.game import elo
 from core.support import usage_stats
 from core.emojis import BACK
-from core.game.game_guides import GAME_GUIDES, GAME_ORDER, guide_for_discord
+from core.game.game_guides import (
+    GAME_GUIDES,
+    GAME_ORDER,
+    PREVIEW_LABEL,
+    PREVIEW_NOTICE,
+    guide_for_discord,
+    is_preview_game,
+)
 from core.panel_v2 import as_panel_v2, edit_panel_v2
 from core.public_share import PublicShareView
 from core.user_names import resolve_display_names
+
+logger = logging.getLogger(__name__)
 
 HUB_COLOR = 0xFFFFFF
 
@@ -89,6 +101,43 @@ GAME_GENRE_BY_GAME = {
 }
 
 
+def select_label(game_id: str) -> str:
+    """セレクトに出すゲーム名。開発先行公開フラグ付きは末尾に明示する。
+
+    セレクトのラベル上限（100字）に対してゲーム名は十分短いので、
+    付け足しても上限には触れない。
+    """
+    name = GAME_GUIDES[game_id]["name"]
+    return f"{name}（{PREVIEW_LABEL}）" if is_preview_game(game_id) else name
+
+
+async def _send_preview_notice(interaction: discord.Interaction, game_id: str) -> None:
+    """開発先行公開ゲームの開始時に、開始者へ注意文を ephemeral で1回送る。
+
+    応答そのものは各ゲームの start_recruit が担うので、ここでは応答の
+    完了を待って followup で送る。失敗してもゲーム開始は妨げない。
+    """
+    try:
+        followup = getattr(interaction, "followup", None)
+        response = getattr(interaction, "response", None)
+        if followup is None or response is None:
+            return
+        for _ in range(120):  # 最大約30秒だけ待つ
+            try:
+                if response.is_done():
+                    break
+            except Exception:
+                return
+            await asyncio.sleep(0.25)
+        else:
+            return
+        await followup.send(
+            f"⚠ **{PREVIEW_LABEL}**（{GAME_GUIDES[game_id]['name']}）\n{PREVIEW_NOTICE}",
+            ephemeral=True)
+    except Exception:
+        logger.debug("game: 開発先行公開の開始通知を送れませんでした", exc_info=True)
+
+
 def hub_embed() -> discord.Embed:
     # 初画面はタイトル＋1行だけ（導線最適化 S2）。ゲーム名・人数・所要時間は
     # ゲームセレクトの label/description と詳細画面が担い、一覧テキストは出さない。
@@ -102,6 +151,8 @@ def hub_embed() -> discord.Embed:
 def detail_embed(game_id: str) -> discord.Embed:
     guide = GAME_GUIDES[game_id]
     embed = discord.Embed(title=guide["name"], description=guide["summary"], color=HUB_COLOR)
+    if is_preview_game(game_id):
+        embed.add_field(name=f"⚠ {PREVIEW_LABEL}", value=PREVIEW_NOTICE, inline=False)
     embed.add_field(name="人数の目安", value=guide["players"], inline=True)
     embed.add_field(name="所要時間", value=guide["duration"], inline=True)
     return embed
@@ -205,7 +256,7 @@ class GameSelect(discord.ui.Select):
         # （履歴セレクト・/quick 経由では詳細が唯一の表示になる点も詳細を残す理由）。
         options = [
             discord.SelectOption(
-                label=GAME_GUIDES[g]["name"],
+                label=select_label(g),
                 value=g,
                 default=(g == selected),
             )
@@ -270,7 +321,7 @@ class GameHistorySelect(discord.ui.Select):
             game_id = spec.value.removeprefix("game:")
             if game_id in GAME_GUIDES:
                 options.append(discord.SelectOption(
-                    label=f"⭐ {GAME_GUIDES[game_id]['name']}", value=game_id))
+                    label=f"⭐ {select_label(game_id)}", value=game_id))
         super().__init__(placeholder="よく使う／最近遊んだゲーム",
                          options=options, custom_id="panel:game:history", row=row)
 
@@ -651,6 +702,10 @@ class GameHub(commands.Cog):
             name = GAME_GUIDES[game_id]["name"]
             return await interaction.response.send_message(
                 embed=discord.Embed(description=f"{name} は現在利用できません。", color=HUB_COLOR), ephemeral=True)
+        if is_preview_game(game_id):
+            # 開発先行公開: 開始者への注意文は応答完了後に followup で送る
+            # （応答は各ゲームの start_recruit が担うため、ここでは投げっぱなし）。
+            asyncio.create_task(_send_preview_notice(interaction, game_id))
         if game_id == "ngword":
             return await cog.start_recruit(interaction, minutes=options.get("ng_minutes") or 3,
                                            mode=options.get("ng_mode") or "word")

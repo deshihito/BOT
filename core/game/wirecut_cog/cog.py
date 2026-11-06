@@ -20,7 +20,7 @@ from discord.ext import commands
 
 from core.game import game_records
 from core.game.board_image import render_cached, render_wirecut_board
-from core.game.game_v2 import GamePanelView, text_panel
+from core.game.game_v2 import GamePanelView, preview_notice_line, text_panel
 from core.game.wirecut import MAX_MISS, WireCutGame
 from core.panel_v2 import edit_message_v2
 
@@ -165,7 +165,8 @@ class WireCut(commands.Cog):
 
         panel = GamePanelView("💣 爆弾処理班 参加者募集",
                               f"数字ワイヤーを推理でカットしていく協力ゲームです（{MIN_PLAYERS}〜{MAX_PLAYERS}名）。\n"
-                              f"ホストが「開始する」を押すか、{RECRUIT_SECONDS}秒たつと開始します。\n参加者: <@{players[0]}>")
+                              f"ホストが「開始する」を押すか、{RECRUIT_SECONDS}秒たつと開始します。\n参加者: <@{players[0]}>",
+                              notice=preview_notice_line(GAME_ID))
 
         async def on_join(inter: discord.Interaction):
             if inter.user.id in players:
@@ -224,7 +225,8 @@ class WireCut(commands.Cog):
 
     # ------------------------------------------------------------------ パネル
     def _panel(self, game: WireCutGame) -> GamePanelView:
-        panel = GamePanelView("💣 爆弾処理班", status_text(game) + "\n\n「自分のタイル」で自分のタイルを確認できます。")
+        panel = GamePanelView("💣 爆弾処理班", status_text(game) + "\n\n「自分のタイル」で自分のタイルを確認できます。",
+                              notice=preview_notice_line(GAME_ID))
         panel.add_extra(discord.ui.MediaGallery(discord.MediaGalleryItem("attachment://board.png")))
 
         async def on_mine(inter: discord.Interaction):
