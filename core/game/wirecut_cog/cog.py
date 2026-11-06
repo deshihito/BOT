@@ -22,7 +22,7 @@ from core.game import game_records
 from core.game.board_image import render_cached, render_wirecut_board
 from core.game.game_v2 import GamePanelView, text_panel
 from core.game.wirecut import MAX_MISS, WireCutGame
-from core.panel_v2 import edit_message_v2
+from core.support.panel_v2 import edit_message_v2
 
 logger = logging.getLogger(__name__)
 
