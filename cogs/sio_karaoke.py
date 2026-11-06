@@ -14,10 +14,10 @@ import discord.opus
 from discord.ext import commands
 from discord.ext import voice_recv
 from core.legacy import Responder
-from core.voice import vc_feature_restore
-from core.voice.vosk_model import ensure_model
-from core.voice.voice_session import VoiceBusy, get_manager
-from core.voice.voice_recv_patch import patch_voice_recv_client
+from core.vc import vc_feature_restore
+from core.vc.vosk_model import ensure_model
+from core.vc.voice_session import VoiceBusy, get_manager
+from core.vc.voice_recv_patch import patch_voice_recv_client
 from core.messages import VOICE_NOT_JOINED
 from core.emojis import FAILED, MUSIC
 try:
@@ -25,11 +25,11 @@ try:
 except ImportError:
     Model = None
     KaldiRecognizer = None
-from core.voice.karaoke.common import annotations, asyncio, json, logging, os, threading, time, re, SequenceMatcher, np, aiohttp, discord, commands, voice_recv, Responder, vc_feature_restore, ensure_model, VoiceBusy, get_manager, patch_voice_recv_client, VOICE_NOT_JOINED, FAILED, MUSIC, logger, DISCORD_SAMPLE_RATE, VOSK_SAMPLE_RATE, CHANNELS, SILENCE_THRESHOLD_SEC, RMS_SILENCE_THRESHOLD, MODEL_PATH, OPUS_SILENCE, _partial, _shared_we, we  # noqa: F401
-from core.voice.karaoke.dsp import annotations, asyncio, json, logging, os, threading, time, re, SequenceMatcher, np, aiohttp, discord, commands, voice_recv, Responder, vc_feature_restore, ensure_model, VoiceBusy, get_manager, patch_voice_recv_client, VOICE_NOT_JOINED, FAILED, MUSIC, logger, resample_48k_to_16k, clean_text  # noqa: F401
-from core.voice.karaoke.restore import annotations, asyncio, json, logging, os, threading, time, re, SequenceMatcher, np, aiohttp, discord, commands, voice_recv, Responder, vc_feature_restore, ensure_model, VoiceBusy, get_manager, patch_voice_recv_client, VOICE_NOT_JOINED, FAILED, MUSIC, logger, RestoreMixin  # noqa: F401
-from core.voice.karaoke.session import annotations, asyncio, json, logging, os, threading, time, re, SequenceMatcher, np, aiohttp, discord, commands, voice_recv, Responder, vc_feature_restore, ensure_model, VoiceBusy, get_manager, patch_voice_recv_client, VOICE_NOT_JOINED, FAILED, MUSIC, logger, SessionMixin  # noqa: F401
-from core.voice.karaoke.sink import annotations, asyncio, json, logging, os, threading, time, re, SequenceMatcher, np, aiohttp, discord, commands, voice_recv, Responder, vc_feature_restore, ensure_model, VoiceBusy, get_manager, patch_voice_recv_client, VOICE_NOT_JOINED, FAILED, MUSIC, logger, KaraokeSink  # noqa: F401
+from core.vc.karaoke.common import annotations, asyncio, json, logging, os, threading, time, re, SequenceMatcher, np, aiohttp, discord, commands, voice_recv, Responder, vc_feature_restore, ensure_model, VoiceBusy, get_manager, patch_voice_recv_client, VOICE_NOT_JOINED, FAILED, MUSIC, logger, DISCORD_SAMPLE_RATE, VOSK_SAMPLE_RATE, CHANNELS, SILENCE_THRESHOLD_SEC, RMS_SILENCE_THRESHOLD, MODEL_PATH, OPUS_SILENCE, _partial, _shared_we, we  # noqa: F401
+from core.vc.karaoke.dsp import annotations, asyncio, json, logging, os, threading, time, re, SequenceMatcher, np, aiohttp, discord, commands, voice_recv, Responder, vc_feature_restore, ensure_model, VoiceBusy, get_manager, patch_voice_recv_client, VOICE_NOT_JOINED, FAILED, MUSIC, logger, resample_48k_to_16k, clean_text  # noqa: F401
+from core.vc.karaoke.restore import annotations, asyncio, json, logging, os, threading, time, re, SequenceMatcher, np, aiohttp, discord, commands, voice_recv, Responder, vc_feature_restore, ensure_model, VoiceBusy, get_manager, patch_voice_recv_client, VOICE_NOT_JOINED, FAILED, MUSIC, logger, RestoreMixin  # noqa: F401
+from core.vc.karaoke.session import annotations, asyncio, json, logging, os, threading, time, re, SequenceMatcher, np, aiohttp, discord, commands, voice_recv, Responder, vc_feature_restore, ensure_model, VoiceBusy, get_manager, patch_voice_recv_client, VOICE_NOT_JOINED, FAILED, MUSIC, logger, SessionMixin  # noqa: F401
+from core.vc.karaoke.sink import annotations, asyncio, json, logging, os, threading, time, re, SequenceMatcher, np, aiohttp, discord, commands, voice_recv, Responder, vc_feature_restore, ensure_model, VoiceBusy, get_manager, patch_voice_recv_client, VOICE_NOT_JOINED, FAILED, MUSIC, logger, KaraokeSink  # noqa: F401
 
 logger = logging.getLogger("cogs.sio_karaoke")
 
