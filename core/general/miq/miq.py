@@ -1075,6 +1075,63 @@ class MiqMixin:
             return None
 
 
+    def _miq_output_view(self, *, requester_id: int, target, current_format: str):
+        """生成メッセージに付ける操作View (削除+フォーマット変更) を作る。"""
+        from .miq_ui import MiqOutputView
+
+        channel = getattr(target, "channel", None)
+        return MiqOutputView(
+            self,
+            requester_id=requester_id,
+            target_author_id=getattr(getattr(target, "author", None), "id", None),
+            channel_id=getattr(channel, "id", None),
+            target_message_id=getattr(target, "id", None),
+            current_format=current_format,
+        )
+
+
+    async def _miq_regenerate_file(
+        self, target, requester_id: int, selected_format: str, size_limit,
+    ) -> tuple:
+        """フォーマット変更セレクト用の再生成ディスパッチ。
+
+        対象メッセージ target を、requester の現在の保存設定 (フォント等) を
+        読み直した上で、フォーマットだけ selected_format に差し替えて作り直す。
+        line / pair は対象の返信チェーンを再取得して生成し直す。
+        戻り値 (file, resolved_format, error)。error はユーザー向けの失敗理由で、
+        None でない場合は生成しておらず、元のメッセージは変更されない。
+        """
+        author_id = getattr(getattr(target, "author", None), "id", None)
+        if author_id is not None and author_id != requester_id and miq_is_refusing(author_id):
+            return None, None, "このユーザーは引用画像(MIQ)を拒否しています。"
+        prefs = miq_get_prefs(requester_id)
+        fmt = miq_resolve_format(selected_format)
+        text = _miq_clean_text(getattr(target, "clean_content", "") or "")
+        if fmt == "line":
+            # LINE風は画像/スタンプ/絵文字だけのメッセージでも再生成できる
+            if not text and not _miq_line_message_has_media(target):
+                return None, None, "文字・画像・スタンプのあるメッセージではないため、LINE風では再生成できません。"
+        elif not text:
+            return None, None, "文字のあるメッセージではないため、このフォーマットでは再生成できません。"
+        eff_prefs = dict(prefs)
+        eff_prefs["format"] = fmt
+        refused = False
+        if fmt == "line":
+            file, refused = await self._miq_line_file_for(target, requester_id, eff_prefs, size_limit)
+        elif fmt == "pair":
+            file, refused = await self._miq_pair_file_for(target, requester_id, eff_prefs, size_limit)
+        else:
+            file = await self._miq_build_file(
+                target.author, text, eff_prefs, size_limit,
+                created_at=getattr(target, "created_at", None),
+            )
+        if refused:
+            return None, None, "このユーザーは引用画像(MIQ)を拒否しています。"
+        if file is None:
+            return None, None, "引用画像を作れませんでした。時間をおいて再試行してください。"
+        return file, fmt, None
+
+
     async def miq_context(self, interaction: discord.Interaction, message: discord.Message):
         """メッセージの右クリックメニュー「引用画像にする」。"""
         author_id = getattr(message.author, "id", None)
@@ -1118,7 +1175,8 @@ class MiqMixin:
             )
         if file is None:
             return await interaction.followup.send("引用画像を作れませんでした。")
-        await interaction.followup.send(file=file)
+        view = self._miq_output_view(requester_id=interaction.user.id, target=message, current_format=fmt)
+        await interaction.followup.send(file=file, view=view)
 
 
     async def _miq_from_reply(self, message: discord.Message):
@@ -1180,7 +1238,8 @@ class MiqMixin:
                     )
             if file is None:
                 return
-            await message.reply(file=file, mention_author=False)
+            view = self._miq_output_view(requester_id=message.author.id, target=target, current_format=fmt)
+            await message.reply(file=file, view=view, mention_author=False)
         except discord.HTTPException:
             logger.debug("MIQ: 返信での引用生成に失敗しました", exc_info=True)
         except Exception:

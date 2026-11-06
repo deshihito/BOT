@@ -933,5 +933,302 @@ class MiqBundledOnlyRenderTest(unittest.TestCase):
         self.assertEqual(img.format, "PNG")
 
 
+from types import SimpleNamespace as _SimpleNamespace
+
+
+class _FakeCogForRegen(g.MiqMixin):
+    """_miq_regenerate_file のディスパッチ確認用スタブ。
+
+    実際のビルダ群を記録するフェイクに差し替え、どのビルダが
+    どの prefs で呼ばれたかだけを見る。
+    """
+
+    def __init__(self):
+        self.calls = []
+        self.bot = None
+        self.line_refused = False
+
+    async def _miq_build_file(self, author, text, prefs, size_limit, *, created_at=None):
+        self.calls.append(("build", dict(prefs)))
+        return object()
+
+    async def _miq_line_file_for(self, target, requester_id, prefs, size_limit):
+        self.calls.append(("line", dict(prefs)))
+        return (None, True) if self.line_refused else (object(), False)
+
+    async def _miq_pair_file_for(self, target, requester_id, prefs, size_limit):
+        self.calls.append(("pair", dict(prefs)))
+        return object(), False
+
+
+class MiqRegenerateDispatchTest(unittest.TestCase):
+    def setUp(self):
+        self._orig_file = _miq_mod.MIQ_FILE
+        self._orig_data = _miq_mod._MIQ_DATA
+        self._tmp = tempfile.TemporaryDirectory()
+        _miq_mod.MIQ_FILE = Path(self._tmp.name) / "miq.json"
+        _miq_mod._MIQ_DATA = None
+        self.cog = _FakeCogForRegen()
+
+    def tearDown(self):
+        _miq_mod.MIQ_FILE = self._orig_file
+        _miq_mod._MIQ_DATA = self._orig_data
+        self._tmp.cleanup()
+
+    def _target(self, author_id=42, text="引用したい本文です"):
+        # _FakeMessage は message_id を著者IDにも使うフェイク
+        return _FakeMessage(author_id, text)
+
+    def _regen(self, target, requester_id, selected):
+        return asyncio.run(self.cog._miq_regenerate_file(target, requester_id, selected, None))
+
+    def test_single_format_dispatches_to_build_file(self):
+        file, resolved, error = self._regen(self._target(), 999, "manga")
+        self.assertIsNone(error)
+        self.assertIsNotNone(file)
+        self.assertEqual(resolved, "manga")
+        self.assertEqual([(kind, p["format"]) for kind, p in self.cog.calls], [("build", "manga")])
+
+    def test_line_dispatches_to_chain_builder(self):
+        file, resolved, error = self._regen(self._target(), 999, "line")
+        self.assertIsNone(error)
+        self.assertEqual(resolved, "line")
+        self.assertEqual([(kind, p["format"]) for kind, p in self.cog.calls], [("line", "line")])
+
+    def test_pair_dispatches_to_chain_builder(self):
+        file, resolved, error = self._regen(self._target(), 999, "pair")
+        self.assertIsNone(error)
+        self.assertEqual(resolved, "pair")
+        self.assertEqual([(kind, p["format"]) for kind, p in self.cog.calls], [("pair", "pair")])
+
+    def test_random_resolves_into_pool_each_time(self):
+        file, resolved, error = self._regen(self._target(), 999, "random")
+        self.assertIsNone(error)
+        self.assertIn(resolved, g.MIQ_RANDOM_POOL)
+        self.assertNotIn(resolved, ("line", "pair", "random"))
+        # プールは単体フォーマットだけなので必ず _miq_build_file に届く
+        self.assertEqual([(kind, p["format"]) for kind, p in self.cog.calls], [("build", resolved)])
+
+    def test_regenerate_rereads_requester_prefs(self):
+        # 生成後に保存設定 (フォント) が変わったら、再生成は新しい設定を使う
+        prefs = _miq_mod.miq_get_prefs(999)
+        prefs["font"] = "gothic"
+        asyncio.run(_miq_mod.miq_save_prefs(999, prefs))
+        file, resolved, error = self._regen(self._target(), 999, "manga")
+        self.assertIsNone(error)
+        self.assertEqual(self.cog.calls[0][1]["font"], "gothic")
+        self.assertEqual(self.cog.calls[0][1]["format"], "manga")
+
+    def test_refusing_author_blocks_regeneration(self):
+        prefs = _miq_mod.miq_get_prefs(42)
+        prefs["refuse"] = True
+        asyncio.run(_miq_mod.miq_save_prefs(42, prefs))
+        file, resolved, error = self._regen(self._target(), 999, "manga")
+        self.assertIsNone(file)
+        self.assertIsNotNone(error)
+        self.assertEqual(self.cog.calls, [])
+
+    def test_own_message_allowed_even_when_refusing(self):
+        prefs = _miq_mod.miq_get_prefs(42)
+        prefs["refuse"] = True
+        asyncio.run(_miq_mod.miq_save_prefs(42, prefs))
+        file, resolved, error = self._regen(self._target(), 42, "manga")
+        self.assertIsNone(error)
+        self.assertEqual([(kind, p["format"]) for kind, p in self.cog.calls], [("build", "manga")])
+
+    def test_chain_refusal_blocks_regeneration(self):
+        self.cog.line_refused = True
+        file, resolved, error = self._regen(self._target(), 999, "line")
+        self.assertIsNone(file)
+        self.assertIsNotNone(error)
+        self.assertEqual([(kind, p["format"]) for kind, p in self.cog.calls], [("line", "line")])
+
+    def test_textless_target_rejected_for_single_format(self):
+        file, resolved, error = self._regen(self._target(text=""), 999, "manga")
+        self.assertIsNone(file)
+        self.assertIsNotNone(error)
+        self.assertEqual(self.cog.calls, [])
+
+
+class _FakeViewMessage:
+    def __init__(self):
+        self.edits = []
+        self.delete_calls = 0
+
+    async def edit(self, **kwargs):
+        self.edits.append(kwargs)
+
+    async def delete(self):
+        self.delete_calls += 1
+
+
+class _FakeInteractionResponse:
+    def __init__(self):
+        self.messages = []
+        self.deferred = False
+
+    async def send_message(self, content=None, **kwargs):
+        self.messages.append((content, kwargs))
+
+    async def defer(self, **kwargs):
+        self.deferred = True
+
+
+class _FakeInteractionFollowup:
+    def __init__(self):
+        self.messages = []
+
+    async def send(self, content=None, **kwargs):
+        self.messages.append((content, kwargs))
+
+
+class _FakeInteraction:
+    def __init__(self, user_id, *, message=None):
+        self.user = _SimpleNamespace(id=user_id)
+        self.message = message
+        self.guild = None
+        self.response = _FakeInteractionResponse()
+        self.followup = _FakeInteractionFollowup()
+
+
+class _FakeChannel:
+    def __init__(self, target=None, error=None):
+        self._target = target
+        self._error = error
+
+    async def fetch_message(self, message_id):
+        if self._error is not None:
+            raise self._error
+        return self._target
+
+
+class _FakeBotForOutput:
+    def __init__(self, channel):
+        self._channel = channel
+
+    def get_channel(self, channel_id):
+        return self._channel
+
+
+class _FakeCogForOutputView:
+    """MiqOutputView のハンドラ確認用スタブ。"""
+
+    def __init__(self, channel=None, regen_result=None):
+        self.bot = _FakeBotForOutput(channel)
+        self.regen_result = regen_result if regen_result is not None else (object(), "neon", None)
+        self.regen_calls = []
+
+    async def _miq_regenerate_file(self, target, requester_id, selected, size_limit):
+        self.regen_calls.append((target, requester_id, selected))
+        return self.regen_result
+
+
+class MiqOutputViewTest(unittest.TestCase):
+    def _view(self, cog=None, **over):
+        kwargs = dict(
+            requester_id=100, target_author_id=200,
+            channel_id=555, target_message_id=777, current_format="quote",
+        )
+        kwargs.update(over)
+        return g.MiqOutputView(cog, **kwargs)
+
+    def _select_of(self, view):
+        return next(item for item in view.children if isinstance(item, g.MiqOutputFormatSelect))
+
+    def test_can_manage_helper(self):
+        self.assertTrue(g.miq_output_can_manage(100, 100, 200))   # MIQした人
+        self.assertTrue(g.miq_output_can_manage(200, 100, 200))   # MIQされた人
+        self.assertFalse(g.miq_output_can_manage(300, 100, 200))  # 第三者
+        self.assertTrue(g.miq_output_can_manage(100, 100, 100))   # 自分の引用
+        self.assertFalse(g.miq_output_can_manage(None, 100, 200))
+
+    def test_select_options_cover_all_formats_within_limit(self):
+        view = self._view()
+        select = self._select_of(view)
+        self.assertEqual([o.value for o in select.options], list(g.MIQ_FORMATS))
+        self.assertEqual(len(select.options), 22)
+        self.assertLessEqual(len(select.options), 25)
+        self.assertEqual([o.value for o in select.options if o.default], ["quote"])
+
+    def test_delete_by_requester(self):
+        view = self._view()
+        msg = _FakeViewMessage()
+        asyncio.run(view.handle_delete(_FakeInteraction(100, message=msg)))
+        self.assertEqual(msg.delete_calls, 1)
+
+    def test_delete_by_target_author(self):
+        view = self._view()
+        msg = _FakeViewMessage()
+        asyncio.run(view.handle_delete(_FakeInteraction(200, message=msg)))
+        self.assertEqual(msg.delete_calls, 1)
+
+    def test_delete_denied_for_third_party(self):
+        view = self._view()
+        msg = _FakeViewMessage()
+        inter = _FakeInteraction(300, message=msg)
+        asyncio.run(view.handle_delete(inter))
+        self.assertEqual(msg.delete_calls, 0)
+        self.assertEqual(len(inter.response.messages), 1)
+        self.assertTrue(inter.response.messages[0][1].get("ephemeral"))
+
+    def test_format_change_edits_message_with_new_file(self):
+        sentinel = object()
+        cog = _FakeCogForOutputView(
+            channel=_FakeChannel(target=_FakeMessage(200, "本文です")),
+            regen_result=(sentinel, "neon", None),
+        )
+        view = self._view(cog=cog)
+        msg = _FakeViewMessage()
+        asyncio.run(view.handle_format(_FakeInteraction(200, message=msg), "neon"))
+        self.assertEqual(len(cog.regen_calls), 1)
+        self.assertEqual(cog.regen_calls[0][1], 100)  # requester の設定で再生成する
+        self.assertEqual(cog.regen_calls[0][2], "neon")
+        self.assertEqual(len(msg.edits), 1)
+        # 新しい添付が明示的に渡され、View も新しい現在値で付け直される
+        self.assertEqual(msg.edits[0]["attachments"], [sentinel])
+        self.assertIs(msg.edits[0]["view"], view)
+        self.assertEqual(view.current_format, "neon")
+        self.assertEqual([o.value for o in self._select_of(view).options if o.default], ["neon"])
+
+    def test_format_change_failure_keeps_message(self):
+        cog = _FakeCogForOutputView(
+            channel=_FakeChannel(target=_FakeMessage(200, "本文です")),
+            regen_result=(None, None, "作れませんでした理由"),
+        )
+        view = self._view(cog=cog)
+        msg = _FakeViewMessage()
+        inter = _FakeInteraction(100, message=msg)
+        asyncio.run(view.handle_format(inter, "neon"))
+        self.assertEqual(msg.edits, [])
+        self.assertEqual(view.current_format, "quote")
+        self.assertEqual(len(inter.followup.messages), 1)
+        self.assertTrue(inter.followup.messages[0][1].get("ephemeral"))
+
+    def test_format_change_missing_target_keeps_message(self):
+        class _Resp:
+            status = 404
+            reason = "Not Found"
+
+        error = g.discord.NotFound(response=_Resp(), message="unknown message")
+        cog = _FakeCogForOutputView(channel=_FakeChannel(error=error))
+        view = self._view(cog=cog)
+        msg = _FakeViewMessage()
+        inter = _FakeInteraction(100, message=msg)
+        asyncio.run(view.handle_format(inter, "neon"))
+        self.assertEqual(cog.regen_calls, [])
+        self.assertEqual(msg.edits, [])
+        self.assertEqual(len(inter.followup.messages), 1)
+
+    def test_format_change_denied_for_third_party(self):
+        cog = _FakeCogForOutputView(channel=_FakeChannel(target=_FakeMessage(200, "本文です")))
+        view = self._view(cog=cog)
+        msg = _FakeViewMessage()
+        inter = _FakeInteraction(300, message=msg)
+        asyncio.run(view.handle_format(inter, "neon"))
+        self.assertEqual(cog.regen_calls, [])
+        self.assertEqual(msg.edits, [])
+        self.assertTrue(inter.response.messages[0][1].get("ephemeral"))
+
+
 if __name__ == "__main__":
     unittest.main()
