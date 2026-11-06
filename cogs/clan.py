@@ -22,6 +22,7 @@ from discord.ext import commands, tasks
 import config
 from core import clan as clan_core
 from core.game import prison as prison_core
+from core.user_names import cached_display_name, resolve_display_names
 from core.panel_v2 import as_panel_v2, edit_panel_v2
 from cogs import wallet as wallet_module
 
@@ -87,8 +88,10 @@ def clan_embed(cog: "ClanCog", user_id: int) -> discord.Embed:
     lines = []
     for rank, member in enumerate(members[:10], start=1):
         mark = "👑 " if member["user_id"] == clan["leader"] else ""
+        # クランはサーバー横断の所属なので、氏名はメンションではなく通常表記
+        name = cached_display_name(cog.bot, member["user_id"])
         lines.append(
-            f"{rank}. {mark}<@{member['user_id']}> — {member['points']:,} pt")
+            f"{rank}. {mark}{name} — {member['points']:,} pt")
     if lines:
         embed.add_field(
             name="クラン内ランキング", value="\n".join(lines), inline=False)
@@ -180,9 +183,11 @@ class ClanView(discord.ui.View):
             return await interaction.response.send_message(
                 "クランに所属していません。", ephemeral=True)
         members = self.cog.store.members(clan["id"])
+        names = await resolve_display_names(
+            self.cog.bot, [m["user_id"] for m in members])
         lines = [
             f"{rank}. {'👑 ' if m['user_id'] == clan['leader'] else ''}"
-            f"<@{m['user_id']}> — {m['points']:,} pt"
+            f"{names.get(int(m['user_id']), '')} — {m['points']:,} pt"
             for rank, m in enumerate(members, start=1)
         ]
         embed = discord.Embed(

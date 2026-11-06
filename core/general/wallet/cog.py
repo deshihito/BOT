@@ -8,6 +8,7 @@ import os
 import traceback
 from core.api_client import APIError
 from core.api_retry import run_with_retry
+from core.user_names import resolve_display_names
 
 logger = logging.getLogger(__name__)
 
@@ -336,16 +337,14 @@ class WalletCog(commands.Cog):
                 return
 
             embed = discord.Embed(title="コイン保有ランキング（TOP 10）", color=0xf1c40f)
+            # ランキングは全サーバー横断のため、メンションだと「不明のユーザー」に
+            # なる。氏名は通常表記で解決する（core/user_names.py）。
+            names = await resolve_display_names(
+                self.bot, [int(record["user_id"]) for record in data])
             lines = []
             for index, record in enumerate(data, start=1):
                 user_id = int(record["user_id"])
-                user = self.bot.get_user(user_id)
-                if user is None:
-                    try:
-                        user = await self.bot.fetch_user(user_id)
-                    except discord.HTTPException:
-                        user = None
-                name = user.display_name if user else f"<@{user_id}>"
+                name = names.get(user_id, "")
                 lines.append(f"**{index}位** {name}：{int(record.get('balance') or 0):,} AGO")
             embed.description = "\n".join(lines)
             await interaction.followup.send(embed=embed)
@@ -387,16 +386,12 @@ class WalletCog(commands.Cog):
                 await interaction.followup.send("まだランキングに載っている人がいません。")
                 return
             embed = discord.Embed(title="総合資産ランキング（TOP 10）", color=0xf1c40f)
+            names = await resolve_display_names(
+                self.bot, [int(row["user_id"]) for row in ranking])
             lines = []
             for index, row in enumerate(ranking, start=1):
                 user_id = int(row["user_id"])
-                user = self.bot.get_user(user_id)
-                if user is None:
-                    try:
-                        user = await self.bot.fetch_user(user_id)
-                    except discord.HTTPException:
-                        user = None
-                name = user.display_name if user else f"<@{user_id}>"
+                name = names.get(user_id, "")
                 lines.append(
                     f"**{index}位** {name}：{row['total']:,} AGO"
                     f"（コイン {row['balance']:,}＋トークン {row['token_value']:,}）")

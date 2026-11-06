@@ -25,6 +25,7 @@ from discord import app_commands
 from discord.ext import commands, tasks
 from core.api_client import API_NOT_CONFIGURED_MESSAGE
 from core.api_retry import run_with_retry
+from core.user_names import cached_display_name
 
 log = logging.getLogger(__name__)
 
@@ -294,8 +295,9 @@ class FujoSurvival(commands.Cog):
         return await self._fetch_all(build)
 
     def _name(self, user_id: int) -> str:
-        user = self.bot.get_user(user_id)
-        return user.display_name if user else f"<@{user_id}>"
+        # ランキング等で使う氏名は通常表記にする（メンションはサーバー外で
+        # 「不明のユーザー」になる）。解決できない場合は ID ベースの表記。
+        return cached_display_name(self.bot, user_id)
 
     @staticmethod
     def create_simple_embed(title: str, description: str, color: int = 0x2b2d31) -> discord.Embed:

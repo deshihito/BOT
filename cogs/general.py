@@ -304,7 +304,7 @@ class GeneralCog(
             )
 
         if value == "exp_ranking":
-            view = ExpRankingView(interaction.guild_id)
+            view = ExpRankingView(interaction.guild_id, bot=self.bot)
             await view._load_latest()
             return await interaction.response.send_message(
                 view=as_panel_v2(view)

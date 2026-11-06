@@ -10,6 +10,7 @@ from discord import app_commands
 from discord.ext import commands
 
 from core import guild_settings
+from core.user_names import resolve_display_names
 
 logger = logging.getLogger(__name__)
 SECTION = "sokunuke_rta"
@@ -131,7 +132,10 @@ class SokuNukeRta(commands.Cog):
         if scope == "me":
             records = [row for row in records if str(row.get("user_id")) == str(interaction.user.id)]
         records.sort(key=lambda row: float(row.get("elapsed", 0)))
-        lines = [f"**{i}.** <@{row['user_id']}> — **{_duration(row['elapsed'])}**" for i, row in enumerate(records[:10], 1)]
+        # 氏名はメンションではなく通常表記（サーバー外だと「不明のユーザー」になる）
+        names = await resolve_display_names(
+            self.bot, [row["user_id"] for row in records[:10]])
+        lines = [f"**{i}.** {names.get(int(row['user_id']), '')} — **{_duration(row['elapsed'])}**" for i, row in enumerate(records[:10], 1)]
         embed = discord.Embed(title=f"即抜けRTAランキング（{'自分' if scope == 'me' else 'このサーバー'}）", description="\n".join(lines) if lines else "まだ記録がありません。", color=0xFFFFFF)
         await interaction.followup.send(embed=embed, allowed_mentions=discord.AllowedMentions.none())
 
