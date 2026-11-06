@@ -192,9 +192,9 @@ class StealItemsTest(unittest.TestCase):
             self.assertEqual(
                 wallet.balances, {"1": 1000 - steal.FINE_AMOUNT,
                                   "2": 10000 + steal.FINE_AMOUNT})
-            # 大警棒の逮捕は30分。
+            # 大警棒の逮捕は60分。
             remaining = cog.prison_store.remaining_seconds("1", T0)
-            self.assertAlmostEqual(remaining, 30 * 60, delta=1)
+            self.assertAlmostEqual(remaining, 60 * 60, delta=1)
             self.assertEqual(cog.steal_store.actor_status("1", T0)["today_count"], 1)
 
     def test_baton_repels_at_scripted_roll(self):
@@ -207,7 +207,7 @@ class StealItemsTest(unittest.TestCase):
             self.assertIn("警棒で撃退", message)
             self.assertEqual(store.count("2", items.BATON_ITEM), 0)
             self.assertAlmostEqual(
-                cog.prison_store.remaining_seconds("1", T0), 5 * 60, delta=1)
+                cog.prison_store.remaining_seconds("1", T0), 30 * 60, delta=1)
 
     def test_baton_not_consumed_when_repel_roll_misses(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -248,7 +248,7 @@ class StealItemsTest(unittest.TestCase):
             self.assertEqual(store.count("1", items.MUD_HAT_ITEM), 0)
             self.assertFalse(cog.prison_store.is_imprisoned("1", T0))
 
-    def test_mud_hat_failure_imprisons_six_hours(self):
+    def test_mud_hat_failure_imprisons_thirty_minutes(self):
         with tempfile.TemporaryDirectory() as tmp:
             wallet = _FakeWallet({"1": 1000, "2": 10000})
             cog, store = _circulation(tmp, wallet, steal_rng=_ScriptedRandom([0.99]))
@@ -258,16 +258,16 @@ class StealItemsTest(unittest.TestCase):
             self.assertIn("逮捕されました", message)
             self.assertEqual(store.count("1", items.MUD_HAT_ITEM), 0)
             self.assertAlmostEqual(
-                cog.prison_store.remaining_seconds("1", T0), 6 * 3600, delta=1)
+                cog.prison_store.remaining_seconds("1", T0), 30 * 60, delta=1)
 
-    def test_dai_mud_hat_failure_imprisons_twelve_hours(self):
+    def test_dai_mud_hat_failure_imprisons_sixty_minutes(self):
         with tempfile.TemporaryDirectory() as tmp:
             wallet = _FakeWallet({"1": 1000, "2": 10000})
             cog, store = _circulation(tmp, wallet, steal_rng=_ScriptedRandom([0.99]))
             store.add("1", items.DAI_MUD_HAT_ITEM, 1)
             asyncio.run(cog.execute_steal(1, 2, in_guild=True, now=T0))
             self.assertAlmostEqual(
-                cog.prison_store.remaining_seconds("1", T0), 12 * 3600, delta=1)
+                cog.prison_store.remaining_seconds("1", T0), 60 * 60, delta=1)
 
     def test_master_thief_effect_boosts_rate_and_amount(self):
         with tempfile.TemporaryDirectory() as tmp:

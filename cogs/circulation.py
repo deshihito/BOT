@@ -735,15 +735,16 @@ class CirculationCog(commands.Cog):
                     item_store.remove(actor, mud_item, 1)
                 except Exception:
                     pass
-                hours = (
-                    prison_core.DAI_MUD_HAT_PRISON_HOURS
+                minutes = (
+                    prison_core.DAI_MUD_HAT_PRISON_MINUTES
                     if mud_item == items_core.DAI_MUD_HAT_ITEM
-                    else prison_core.MUD_HAT_PRISON_HOURS)
+                    else prison_core.MUD_HAT_PRISON_MINUTES)
                 self.prison_store.imprison(
-                    actor, hours=hours, reason="mud_hat_failure", now=now)
+                    actor, minutes=minutes, reason="mud_hat_failure", now=now)
                 prison_note = (
                     f"\n🚔 **{items_core.ITEM_DEFS[mud_item]['name']}を使って失敗し、"
-                    f"逮捕されました**（あと約{hours}時間はマネー系の操作ができません）。")
+                    f"逮捕されました**（あと{prison_core.format_remaining(minutes * 60)}"
+                    "はマネー系の操作ができません）。")
             self.steal_store.record_attempt(actor, target, now=now)
             if guarded:
                 head = "🛡️ **盗みに失敗…** 相手の防犯チャームに弾かれて逃げられました。"
