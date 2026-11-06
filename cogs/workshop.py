@@ -24,7 +24,7 @@ from discord.ext import commands, tasks
 
 import config
 from core import craft as craft_core
-from core import items as items_core
+from core.general import items as items_core
 from core import prison as prison_core
 from core import workshop as workshop_core
 from core.messages import (

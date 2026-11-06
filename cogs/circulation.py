@@ -9,7 +9,7 @@ _change_balance と transaction_history への記録）を通す
 
 - 採掘: 原典準拠のセッション式（1〜20回、60秒クールダウン）。
   コインは新規創出ではなく、経済系の損失が還流される共有プール
-  （core/economy_pool.py）から支払う。プールが空なら掘れない
+  （core/general/economy_pool.py）から支払う。プールが空なら掘れない
 - 宝くじ: 売上の一部が賞金、残りは消却され、消却分は採掘プールと
   国庫へ還流される。抽選は毎日 JST 21:00 で、期限を過ぎた回は
   アクセス／定期チェックのたびに lazy に確定する
@@ -32,8 +32,8 @@ import discord
 from discord.ext import commands, tasks
 
 import config
-from core import economy_pool as economy_core
-from core import items as items_core
+from core.general import economy_pool as economy_core
+from core.general import items as items_core
 from core import lottery as lottery_core
 from core import mining as mining_core
 from core import prison as prison_core
