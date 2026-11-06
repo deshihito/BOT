@@ -96,6 +96,8 @@ class AutoModSettingsTest(unittest.IsolatedAsyncioTestCase):
                 "caps_percent": 70,
                 "timeout_minutes": 0,
                 "spam_count": 0,
+                "cross_count": 0,
+                "raid_users": 0,
             },
         )
 
@@ -163,11 +165,15 @@ class AutoModSettingsTest(unittest.IsolatedAsyncioTestCase):
         view = automod.build_view(cog, guild.id)
         selects = [item for item in view.children if isinstance(item, discord.ui.Select)]
         buttons = [item for item in view.children if isinstance(item, discord.ui.Button)]
-        self.assertEqual(len(selects), 4)
+        self.assertEqual(len(selects), 2)
         labels = {item.label for item in buttons}
         self.assertIn("AutoMod", labels)
         self.assertIn("招待リンク", labels)
         self.assertIn("外部リンク", labels)
+        self.assertIn("連投検知", labels)
+        self.assertIn("横断連投", labels)
+        self.assertIn("コピペ荒らし", labels)
+        self.assertIn("タイムアウト", labels)
         self.assertIn("サーバーアシストへ戻る", labels)
 
 

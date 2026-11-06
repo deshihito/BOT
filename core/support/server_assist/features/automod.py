@@ -20,7 +20,7 @@ KEY = "automod"
 FEATURE = Feature(
     key=KEY,
     label="AutoMod",
-    description="招待リンク・外部リンク・メンションスパム・大文字スパム・連投を自動削除します。",
+    description="招待リンク・外部リンク・メンションスパム・大文字スパム・連投・チャンネル横断のコピペ荒らしを自動削除します。",
     order=70,
     module_name=__name__,
 )
@@ -32,6 +32,16 @@ SPAM_DUP_WINDOW_SECONDS = 60.0
 SPAM_DUP_COUNT = 3
 SPAM_COUNT_CHOICES = (0, 3, 5, 8)
 _spam_events: dict[tuple[int, int], deque] = {}
+
+# 横断検知: 複数チャンネル・複数ユーザーを跨ぐ状態判定 (Discord純正AutoModや
+# 単一メッセージ判定では再現できない)。状態はメモリ内のみで、(ギルド, 正規化
+# 本文) ごとに直近の (時刻, ユーザー, チャンネル) だけを持つ。
+# 短すぎる本文 (相づち等) は誤検知しやすいので対象にしない。
+CROSS_WINDOW_SECONDS = 60.0
+CROSS_MIN_TEXT_LENGTH = 5
+CROSS_COUNT_CHOICES = (0, 3, 5)
+RAID_USER_CHOICES = (0, 3, 5, 10)
+_cross_events: dict[tuple[int, str], deque] = {}
 
 INVITE_RE = re.compile(r"(?:discord(?:app)?\.(?:gg|com/invite)/[A-Za-z0-9-]+)", re.I)
 LINK_RE = re.compile(r"(?:https?://|www\.)\S+", re.I)
@@ -55,6 +65,14 @@ def settings(guild_id: int) -> dict[str, Any]:
         spam_count = int(raw.get("spam_count", 0))
     except (TypeError, ValueError):
         spam_count = 0
+    try:
+        cross_count = int(raw.get("cross_count", 0))
+    except (TypeError, ValueError):
+        cross_count = 0
+    try:
+        raid_users = int(raw.get("raid_users", 0))
+    except (TypeError, ValueError):
+        raid_users = 0
     return {
         "enabled": bool(raw.get("enabled", False)),
         "log_channel_id": raw.get("log_channel_id") if isinstance(raw.get("log_channel_id"), int) else None,
@@ -64,6 +82,8 @@ def settings(guild_id: int) -> dict[str, Any]:
         "caps_percent": max(0, min(100, caps_percent)),
         "timeout_minutes": max(0, min(1440, timeout_minutes)),
         "spam_count": spam_count if spam_count in SPAM_COUNT_CHOICES else 0,
+        "cross_count": cross_count if cross_count in CROSS_COUNT_CHOICES else 0,
+        "raid_users": raid_users if raid_users in RAID_USER_CHOICES else 0,
     }
 
 
@@ -93,6 +113,48 @@ def detect_spam(
         )
         if duplicates >= SPAM_DUP_COUNT:
             return f"重複メッセージ（同一内容{duplicates}回）"
+    return None
+
+
+def detect_cross_spam(
+    content: str, current: dict[str, Any], guild_id: int, user_id: int,
+    channel_id: int, now: float | None = None,
+) -> str | None:
+    """チャンネル横断の同一文連投と、複数ユーザーによるコピペ荒らしを検知する。
+
+    どちらも複数メッセージを跨いだ状態比較でしか判定できない。状態はメモリ
+    内のみ。発火したらその本文の記録はクリアし、同じ荒らしでログが流れ続
+    けないようにする (次の一連の投稿で再び判定する)。
+    """
+    cross_limit = int(current.get("cross_count") or 0)
+    raid_limit = int(current.get("raid_users") or 0)
+    if not cross_limit and not raid_limit:
+        return None
+    normalized = " ".join((content or "").split()).lower()
+    if len(normalized) < CROSS_MIN_TEXT_LENGTH:
+        return None
+    now = time.monotonic() if now is None else now
+    if len(_cross_events) > 5000:
+        for key in [k for k, events in _cross_events.items()
+                    if not events or now - events[-1][0] > CROSS_WINDOW_SECONDS]:
+            _cross_events.pop(key, None)
+    events = _cross_events.setdefault((guild_id, normalized), deque(maxlen=64))
+    while events and now - events[0][0] > CROSS_WINDOW_SECONDS:
+        events.popleft()
+    events.append((now, user_id, channel_id))
+    if cross_limit:
+        mine = [(stamp, ch) for stamp, uid, ch in events if uid == user_id]
+        channels = {ch for _, ch in mine}
+        if len(mine) >= cross_limit and len(channels) >= 2:
+            _cross_events.pop((guild_id, normalized), None)
+            return (
+                f"横断連投（{len(channels)}チャンネルに同一内容{len(mine)}件）"
+            )
+    if raid_limit:
+        users = {uid for _, uid, _ in events}
+        if len(users) >= raid_limit:
+            _cross_events.pop((guild_id, normalized), None)
+            return f"コピペ荒らし（同一内容を{len(users)}人が投稿）"
     return None
 
 
@@ -169,6 +231,14 @@ async def on_message(cog: Any, message: Any) -> None:
         len(getattr(message, "mentions", []) or []),
         current,
     )
+    if reason is None:
+        reason = detect_cross_spam(
+            getattr(message, "content", "") or "",
+            current,
+            getattr(message.guild, "id", 0),
+            getattr(message.author, "id", 0),
+            getattr(getattr(message, "channel", None), "id", 0),
+        )
     if reason is None:
         reason = detect_spam(
             getattr(message, "content", "") or "",
@@ -270,26 +340,70 @@ class AutoModCapsSelect(discord.ui.Select):
         await self.parent_view.refresh(interaction, "大文字チェックを保存しました。")
 
 
-class AutoModTimeoutSelect(discord.ui.Select):
-    def __init__(self, parent: "AutoModSettingsView"):
-        self.parent_view = parent
-        current = parent.settings["timeout_minutes"]
-        options = [discord.SelectOption(label="タイムアウトなし", value="0", default=current == 0)]
-        options += [
-            discord.SelectOption(label=f"{value} 分", value=str(value), default=current == value)
-            for value in (1, 5, 10, 60)
-        ]
-        super().__init__(placeholder="違反時のタイムアウト", options=options, row=3)
+TIMEOUT_CHOICES = (0, 1, 5, 10, 60)
+
+
+class AutoModTimeoutButton(discord.ui.Button):
+    """違反時のタイムアウトを切り替える (なし → 1 → 5 → 10 → 60 分)。"""
+
+    def __init__(self):
+        super().__init__(label="タイムアウト", style=discord.ButtonStyle.secondary, row=3)
 
     async def callback(self, interaction: discord.Interaction):
-        if not self.parent_view.can_manage(interaction):
+        view: AutoModSettingsView = self.view
+        if not view.can_manage(interaction):
             return await interaction.response.send_message(
                 "この設定には「サーバーの管理」権限が必要です。", ephemeral=True,
             )
-        value = int(self.values[0])
-        await update_settings(self.parent_view.guild_id, KEY, timeout_minutes=value)
-        self.parent_view.settings["timeout_minutes"] = value
-        await self.parent_view.refresh(interaction, "タイムアウト設定を保存しました。")
+        current = int(view.settings.get("timeout_minutes") or 0)
+        index = TIMEOUT_CHOICES.index(current) if current in TIMEOUT_CHOICES else 0
+        value = TIMEOUT_CHOICES[(index + 1) % len(TIMEOUT_CHOICES)]
+        await update_settings(view.guild_id, KEY, timeout_minutes=value)
+        view.settings["timeout_minutes"] = value
+        label = f"{value}分" if value else "なし"
+        await view.refresh(interaction, f"タイムアウトを{label}にしました。")
+
+
+class AutoModCrossSpamButton(discord.ui.Button):
+    """横断連投検知のしきい値を切り替える (オフ → 3 → 5 件/60秒・複数チャンネル)。"""
+
+    def __init__(self):
+        super().__init__(label="横断連投", style=discord.ButtonStyle.secondary, row=3)
+
+    async def callback(self, interaction: discord.Interaction):
+        view: AutoModSettingsView = self.view
+        if not view.can_manage(interaction):
+            return await interaction.response.send_message(
+                "この設定には「サーバーの管理」権限が必要です。", ephemeral=True,
+            )
+        current = int(view.settings.get("cross_count") or 0)
+        index = CROSS_COUNT_CHOICES.index(current) if current in CROSS_COUNT_CHOICES else 0
+        value = CROSS_COUNT_CHOICES[(index + 1) % len(CROSS_COUNT_CHOICES)]
+        await update_settings(view.guild_id, KEY, cross_count=value)
+        view.settings["cross_count"] = value
+        label = f"{int(CROSS_WINDOW_SECONDS)}秒間に同一内容{value}件（複数チャンネル）" if value else "オフ"
+        await view.refresh(interaction, f"横断連投検知を{label}にしました。")
+
+
+class AutoModRaidButton(discord.ui.Button):
+    """コピペ荒らし検知の人数しきい値を切り替える (オフ → 3 → 5 → 10 人/60秒)。"""
+
+    def __init__(self):
+        super().__init__(label="コピペ荒らし", style=discord.ButtonStyle.secondary, row=3)
+
+    async def callback(self, interaction: discord.Interaction):
+        view: AutoModSettingsView = self.view
+        if not view.can_manage(interaction):
+            return await interaction.response.send_message(
+                "この設定には「サーバーの管理」権限が必要です。", ephemeral=True,
+            )
+        current = int(view.settings.get("raid_users") or 0)
+        index = RAID_USER_CHOICES.index(current) if current in RAID_USER_CHOICES else 0
+        value = RAID_USER_CHOICES[(index + 1) % len(RAID_USER_CHOICES)]
+        await update_settings(view.guild_id, KEY, raid_users=value)
+        view.settings["raid_users"] = value
+        label = f"同一内容を{value}人以上" if value else "オフ"
+        await view.refresh(interaction, f"コピペ荒らし検知を{label}にしました。")
 
 
 class AutoModToggleButton(discord.ui.Button):
@@ -373,7 +487,9 @@ class AutoModSettingsView(AssistFeatureView):
             self.add_item(AutoModLogChannelSelect(self))
         self.add_item(AutoModMentionSelect(self))
         self.add_item(AutoModCapsSelect(self))
-        self.add_item(AutoModTimeoutSelect(self))
+        self.add_item(AutoModTimeoutButton())
+        self.add_item(AutoModCrossSpamButton())
+        self.add_item(AutoModRaidButton())
         self.add_item(AutoModToggleButton())
         self.add_item(AutoModInvitesButton())
         self.add_item(AutoModLinksButton())
@@ -384,6 +500,14 @@ class AutoModSettingsView(AssistFeatureView):
         spam_text = (
             f"{int(SPAM_WINDOW_SECONDS)}秒間に{spam_count}件以上 / 同一内容{SPAM_DUP_COUNT}回"
             if spam_count else "オフ"
+        )
+        cross_text = (
+            f"{int(CROSS_WINDOW_SECONDS)}秒間に同一内容{self.settings['cross_count']}件（複数チャンネル）"
+            if self.settings["cross_count"] else "オフ"
+        )
+        raid_text = (
+            f"同一内容を{self.settings['raid_users']}人以上"
+            if self.settings["raid_users"] else "オフ"
         )
         return discord.Embed(
             title="AutoMod",
@@ -396,6 +520,8 @@ class AutoModSettingsView(AssistFeatureView):
                 f"\n**メンション**: {self.settings['max_mentions'] or '制限なし'}"
                 f"\n**大文字**: {self.settings['caps_percent'] or 'チェックなし'}"
                 f"\n**連投検知**: {spam_text}"
+                f"\n**横断連投**: {cross_text}"
+                f"\n**コピペ荒らし**: {raid_text}"
                 f"\n**タイムアウト**: {self.settings['timeout_minutes'] or 'なし'}"
                 + notice_line(self.notice)
             )[:4096],
