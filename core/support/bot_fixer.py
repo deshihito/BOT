@@ -486,7 +486,7 @@ class BotFixerSupportMixin:
             ephemeral=True,
         )
 
-    @commands.Cog.listener()
+    @commands.Cog.listener("on_message")
     async def on_message_bot_control(self, message: discord.Message):
         # BOT fixer の他ボット制限: 対象ボットの許可チャンネル外／レート超過の
         # 発言を削除する。失敗しても他の on_message 処理は止めない
