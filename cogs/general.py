@@ -37,14 +37,14 @@ from core.libretranslate import LibreTranslateClient, LibreTranslateError
 logger = logging.getLogger(__name__)
 
 from core.general.common import *
-from core.general.exp import *
-from core.general.levelup import *
-from core.general.miq import *
-from core.general.miq_styles import *
-from core.general.miq_cards import *
-from core.general.miq_line import *
+from core.general.exp.exp import *
+from core.general.exp.levelup import *
+from core.general.miq.miq import *
+from core.general.miq.miq_styles import *
+from core.general.miq.miq_cards import *
+from core.general.miq.miq_line import *
 from core.general.meme import *
-from core.general.miq_ui import *
+from core.general.miq.miq_ui import *
 # アクション定義の単一の真実は core/action_registry。SHORTCUT_ROOTS は
 # レジストリからの生成物（名前・形状・import 互換は従来どおり維持する）。
 SHORTCUT_ROOTS = action_registry.build_shortcut_roots()
@@ -52,19 +52,19 @@ SHORTCUT_ROOTS = action_registry.build_shortcut_roots()
 from core.general.shortcuts import *
 from core.general.panel import *
 from core.general.translation import *
-from core.general.exp_ui import *
+from core.general.exp.exp_ui import *
 from core.general.ai_ui import *
-from core.general.exp import _EXP_DATA, _EXP_LOCK, _as_float, _as_int, _exp_ensure, _exp_load, _exp_lock, _exp_root, _exp_save, _grant_chat_exp, _grant_vc_exp, _iter_voice_user_channels, _iter_voice_user_ids, _merge_exp, _read_exp_file, _store_fetch, _user_general_level, _write_exp_file
-from core.general.levelup import _LEVELUP_CJK_FONTS, _LEVELUP_DISPLAY_FONTS, _LEVELUP_DISPLAY_PICK, _LEVELUP_FONT_PICK, _LEVELUP_LATIN_FONTS, _LEVELUP_SS, _levelup_display_font, _levelup_draw_tracked, _levelup_font, _levelup_pick_display_font, _levelup_pick_font, _levelup_safe_name
-from core.general.miq import _MIQ_ASSET_FONTS, _MIQ_CUSTOM_EMOJI, _MIQ_CUSTOM_EMOJI_TOKEN, _MIQ_DATA, _MIQ_EMOJI_PATHS, _MIQ_EMOJI_PATH_CACHE, _MIQ_EMOJI_SIZE, _MIQ_FONTS_CACHE, _MIQ_FONT_CMAP_CACHE, _MIQ_FONT_DEFS, _MIQ_FONT_OBJ_CACHE, _MIQ_JP_PROBE, _MIQ_LOCK, _MIQ_NO_LINE_START, _MIQ_REPO_FONT, _MIQ_SYMBOL_PATHS, _font_covers_japanese, _miq_af, _miq_available_fonts, _miq_clean_text, _miq_contrast, _miq_discover_asset_fonts, _miq_display_text, _miq_draw_centered, _miq_emoji_font_path, _miq_emoji_width, _miq_fallback_fonts, _miq_fit, _miq_font_cmap, _miq_font_has_char, _miq_is_emoji_unit, _miq_is_image_attachment, _miq_line_message_has_media, _miq_load_font, _miq_lock, _miq_lum, _miq_mix, _miq_open_avatar, _miq_read_file, _miq_render_emoji_unit, _miq_root, _miq_save_png, _miq_split_units, _miq_sticker_renderable, _miq_unit_bases, _miq_unit_font, _miq_unit_width, _miq_wrap, _miq_write_file
-from core.general.miq_styles import _miq_circle_avatar, _miq_date_str, _miq_draw_vertical, _miq_fit_vertical, _miq_glow_lines, _miq_hash_int, _miq_heart, _miq_rng, _miq_rounded_avatar, _miq_special_font_path, _miq_star4, _miq_star5, _miq_truncate, _miq_vertical_columns
-from core.general.miq_cards import _MIQ_CARD_FRAME_STOPS, _MIQ_CARD_RARITIES, _MIQ_TICKET_PALETTES, _miq_pick_card_rarity, _miq_pick_ticket_palette
-from core.general.miq_line import _MIQ_AGO_CACHE, _MIQ_AGO_DIR, _MIQ_CUSTOM_EMOJI_TOKEN, _MIQ_DATED_FORMATS, _MIQ_FORMAT_RENDERERS, _MIQ_UNICODE_EMOJI_SUPPORTED, _miq_ago_images, _miq_line_atom_width, _miq_line_avatar_image, _miq_line_draw_atoms, _miq_line_entry_atoms, _miq_line_field, _miq_line_fit_media, _miq_line_media_image, _miq_line_split_segments, _miq_line_time_str, _miq_line_wrap_atoms, _miq_unicode_emoji_supported
+from core.general.exp.exp import _EXP_DATA, _EXP_LOCK, _as_float, _as_int, _exp_ensure, _exp_load, _exp_lock, _exp_root, _exp_save, _grant_chat_exp, _grant_vc_exp, _iter_voice_user_channels, _iter_voice_user_ids, _merge_exp, _read_exp_file, _store_fetch, _user_general_level, _write_exp_file
+from core.general.exp.levelup import _LEVELUP_CJK_FONTS, _LEVELUP_DISPLAY_FONTS, _LEVELUP_DISPLAY_PICK, _LEVELUP_FONT_PICK, _LEVELUP_LATIN_FONTS, _LEVELUP_SS, _levelup_display_font, _levelup_draw_tracked, _levelup_font, _levelup_pick_display_font, _levelup_pick_font, _levelup_safe_name
+from core.general.miq.miq import _MIQ_ASSET_FONTS, _MIQ_CUSTOM_EMOJI, _MIQ_CUSTOM_EMOJI_TOKEN, _MIQ_DATA, _MIQ_EMOJI_PATHS, _MIQ_EMOJI_PATH_CACHE, _MIQ_EMOJI_SIZE, _MIQ_FONTS_CACHE, _MIQ_FONT_CMAP_CACHE, _MIQ_FONT_DEFS, _MIQ_FONT_OBJ_CACHE, _MIQ_JP_PROBE, _MIQ_LOCK, _MIQ_NO_LINE_START, _MIQ_REPO_FONT, _MIQ_SYMBOL_PATHS, _font_covers_japanese, _miq_af, _miq_available_fonts, _miq_clean_text, _miq_contrast, _miq_discover_asset_fonts, _miq_display_text, _miq_draw_centered, _miq_emoji_font_path, _miq_emoji_width, _miq_fallback_fonts, _miq_fit, _miq_font_cmap, _miq_font_has_char, _miq_is_emoji_unit, _miq_is_image_attachment, _miq_line_message_has_media, _miq_load_font, _miq_lock, _miq_lum, _miq_mix, _miq_open_avatar, _miq_read_file, _miq_render_emoji_unit, _miq_root, _miq_save_png, _miq_split_units, _miq_sticker_renderable, _miq_unit_bases, _miq_unit_font, _miq_unit_width, _miq_wrap, _miq_write_file
+from core.general.miq.miq_styles import _miq_circle_avatar, _miq_date_str, _miq_draw_vertical, _miq_fit_vertical, _miq_glow_lines, _miq_hash_int, _miq_heart, _miq_rng, _miq_rounded_avatar, _miq_special_font_path, _miq_star4, _miq_star5, _miq_truncate, _miq_vertical_columns
+from core.general.miq.miq_cards import _MIQ_CARD_FRAME_STOPS, _MIQ_CARD_RARITIES, _MIQ_TICKET_PALETTES, _miq_pick_card_rarity, _miq_pick_ticket_palette
+from core.general.miq.miq_line import _MIQ_AGO_CACHE, _MIQ_AGO_DIR, _MIQ_CUSTOM_EMOJI_TOKEN, _MIQ_DATED_FORMATS, _MIQ_FORMAT_RENDERERS, _MIQ_UNICODE_EMOJI_SUPPORTED, _miq_ago_images, _miq_line_atom_width, _miq_line_avatar_image, _miq_line_draw_atoms, _miq_line_entry_atoms, _miq_line_field, _miq_line_fit_media, _miq_line_media_image, _miq_line_split_segments, _miq_line_time_str, _miq_line_wrap_atoms, _miq_unicode_emoji_supported
 from core.general.meme import _meme_fit, _meme_font_path, _meme_image_attachment
 from core.general.shortcuts import _MessageFollowup, _MessageResponse
-from core.general.levelup import LevelUpMixin
-from core.general.miq import MiqMixin
-from core.general.miq_line import MiqLineMixin
+from core.general.exp.levelup import LevelUpMixin
+from core.general.miq.miq import MiqMixin
+from core.general.miq.miq_line import MiqLineMixin
 from core.general.meme import MemeMixin
 from core.general.translation import TranslationMixin
 from core.general.shortcuts import ShortcutsMixin
