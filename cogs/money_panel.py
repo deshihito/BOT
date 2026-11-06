@@ -162,6 +162,8 @@ class MoneyPanelView(discord.ui.View):
         self.message: discord.Message | None = None
         self._v2 = None
         self._cached_embed: discord.Embed | None = None
+        # 逮捕中だけ概要に脱獄ボタンを出す（build_embed で状態が入る）。
+        self._prison = False
         self.refresh()
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
@@ -190,6 +192,9 @@ class MoneyPanelView(discord.ui.View):
         self.add_item(select)
         for label, style, handler in self._buttons_for(self.category):
             self._add_button(label, style, handler)
+        if self.category == "home" and getattr(self, "_prison", False):
+            self._add_button(
+                "脱獄を試みる", discord.ButtonStyle.danger, self._jailbreak)
 
     def _add_button(self, label: str, style: discord.ButtonStyle, handler) -> None:
         # ボタンは最大5個で自動的に次の行へ回す（Select が row 0 を使う）。
@@ -255,14 +260,15 @@ class MoneyPanelView(discord.ui.View):
     # ------------------------------------------------------------------ 共通動作
     async def build_embed(self) -> discord.Embed:
         status = await self.cog.collect_status(self.user_id)
+        self._prison = bool(status.get("prison_remaining"))
         return status_embed(status)
 
     async def _on_category(self, interaction: discord.Interaction):
         values = getattr(interaction, "data", {}).get("values") or self._select_values()
         if values:
             self.category = values[0]
-        self.refresh()
         self._cached_embed = await self.build_embed()
+        self.refresh()
         container = getattr(self, "_v2", None)
         if container is not None:
             container._sync()
@@ -281,8 +287,8 @@ class MoneyPanelView(discord.ui.View):
         """直接実行のあとにパネル本体を最新ステータスへ差し替える。"""
         if self.message is None:
             return
-        self.refresh()
         self._cached_embed = await self.build_embed()
+        self.refresh()
         container = getattr(self, "_v2", None)
         try:
             if container is not None:
@@ -323,6 +329,12 @@ class MoneyPanelView(discord.ui.View):
         await self.refresh_panel()
 
     # ------------------------------------------------------------------ 直接実行
+    async def _jailbreak(self, interaction: discord.Interaction):
+        # 脱獄は逮捕中の本人だけ（interaction_check で本人に限定済み、
+        # ストア側でも逮捕中でなければ何も起きない）。
+        await self._run_direct(
+            interaction, lambda: self.cog.attempt_jailbreak(interaction.user.id))
+
     async def _dig(self, interaction: discord.Interaction):
         circulation = self.cog.bot.get_cog("CirculationCog")
         if circulation is None:
@@ -479,10 +491,7 @@ class MoneyPanelCog(commands.Cog):
                 status["session_kind"] = None
 
         try:
-            prison_store = (
-                getattr(circulation, "prison_store", None)
-                or prison_core.shared_store())
-            pstatus = prison_store.status(uid, now)
+            pstatus = self._prison_store().status(uid, now)
             status["prison_remaining"] = (
                 float(pstatus["remaining"]) if pstatus["imprisoned"] else None)
         except Exception:
@@ -491,10 +500,34 @@ class MoneyPanelCog(commands.Cog):
 
         return status
 
+    # ------------------------------------------------------------------ 逮捕・脱獄
+    def _prison_store(self) -> prison_core.PrisonStore:
+        """逮捕ストア（circulation の保持分を優先し、無ければ共有ストア）。"""
+        circulation = self.bot.get_cog("CirculationCog")
+        store = getattr(circulation, "prison_store", None)
+        return store if store is not None else prison_core.shared_store()
+
+    async def attempt_jailbreak(self, user_id: int) -> str:
+        """脱獄を試み、結果文を返す（成否の抽選と状態更新はストア側）。"""
+        result = self._prison_store().attempt_jailbreak(str(user_id))
+        outcome = result.get("outcome")
+        if outcome == "success":
+            return "🔓 **脱獄成功！** 釈放されました。"
+        if outcome == "failure":
+            return (
+                "🔒 脱獄に失敗しました…"
+                f"（釈放まであと{prison_core.format_remaining(result['remaining'])}）")
+        if outcome == "cooldown":
+            return (
+                "まだ脱獄を試みられません"
+                f"（あと{prison_core.format_remaining(result['wait_seconds'])}）。")
+        return "逮捕されていません。"
+
     # ------------------------------------------------------------------ 入口
     async def show_panel(self, interaction: discord.Interaction):
         view = MoneyPanelView(self, interaction.user.id)
         view._cached_embed = await view.build_embed()
+        view.refresh()
         await interaction.response.send_message(view=_wrap(view))
         try:
             view.message = await interaction.original_response()
