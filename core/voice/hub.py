@@ -14,7 +14,7 @@ import aiohttp
 import discord
 from discord import app_commands
 from discord.ext import commands
-from core.emojis import FAILED
+from core.emojis import FAILED, VOL
 try:
     import encodec
     import soundfile as sf
@@ -106,7 +106,7 @@ class VoiceHub(commands.Cog):
         if session is not None:
             channel = guild.get_channel(session.channel_id) if session.channel_id else None
             channel_text = getattr(channel, "mention", None) or getattr(channel, "name", None) or "不明"
-            embed = discord.Embed(title="<:vol:1563559476265488414> ボイスチャンネルの使用状況", color=0x2ECC71)
+            embed = discord.Embed(title=VOL + ' ボイスチャンネルの使用状況', color=0x2ECC71)
             active = [session.feature, *session.shared_leases.keys()]
             embed.add_field(name="機能", value="、".join(feature_label(feature) for feature in active), inline=True)
             embed.add_field(name="開始した人", value=session.user_name, inline=True)
@@ -458,7 +458,7 @@ class VoicePanelView(discord.ui.View):
 
 
     def embed(self):
-        return discord.Embed(title="<:vol:1563559476265488414> VC・音楽機能パネル", color=0xFFFFFF)
+        return discord.Embed(title=VOL + ' VC・音楽機能パネル', color=0xFFFFFF)
 
 
 class GlobalRoomModal(discord.ui.Modal, title="グローバルVCに参加"):

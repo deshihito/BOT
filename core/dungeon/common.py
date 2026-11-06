@@ -39,6 +39,7 @@ from PIL import Image, ImageDraw, ImageEnhance
 from zoneinfo import ZoneInfo
 from core.api_client import APIError
 from core.api_retry import run_with_retry
+from core.emojis import B_, G_, Y_
 
 # ============================================================
 #  タイムゾーン
@@ -93,10 +94,10 @@ I_SLOT = "i_slot"
 
 # バイオーム定義 (フロア範囲, 名前, 壁emoji, 床emoji, 霧emoji, 色)
 D_BIOMES = [
-    (range(1,  10),  "洞窟",     "⬜", "<:b_:1563559473422016512>", "🌫️", 0x5C4033),
-    (range(10,  20),  "森",       "🟫", "<:g_:1563559471048032376>", "🌫️", 0x2D5A1B),
+    (range(1,  10),  "洞窟",     "⬜", B_, "🌫️", 0x5C4033),
+    (range(10,  20),  "森",       "🟫", G_, "🌫️", 0x2D5A1B),
     (range(20,  30),  "氷雪地帯", "⬜", "🔹", "🌫️", 0x5B9BD5),
-    (range(30, 41),  "砂漠地帯", "🟧", "<:y_:1563559481768411257>", "🌫️", 0xC8600A),
+    (range(30, 41),  "砂漠地帯", "🟧", Y_, "🌫️", 0xC8600A),
 ]
 
 # 歩行時のバイオーム率エンカウントは Phase 1-D で廃止した。戦闘は部屋の

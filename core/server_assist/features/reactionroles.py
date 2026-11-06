@@ -1,5 +1,6 @@
 """Reaction roles: map emoji reactions on a message to roles."""
 from __future__ import annotations
+from core.emojis import BOOK, GAME
 
 import logging
 import re
@@ -312,7 +313,7 @@ class ReactionRoleMappingModal(discord.ui.Modal, title="絵文字とロール"):
             default=current[:1500],
             max_length=1500,
             required=True,
-            placeholder="例:\n<:game:1564624331663745034>=123456789012345678\n📚=123456789012345679",
+            placeholder='例:\n' + GAME + '=123456789012345678\n' + BOOK + '=123456789012345679',
         )
         self.add_item(self.text)
 

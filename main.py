@@ -7,7 +7,7 @@ import traceback
 import config
 import defining as df
 from keep_alive import configure_coder, keep_alive
-from core.emojis import SUCCESS
+from core.emojis import AGOMUNIMUNI, FAILED, SUCCESS
 import logging
 from collections import deque
 
@@ -78,7 +78,7 @@ class MyBot(commands.Bot):
             channel = self.get_channel(NOTIFY_CHANNEL_ID)
             if channel:
                 try:
-                    await channel.send("<a:AGOMUNIMUNI:1490255555632037909>システムを更新しました。")
+                    await channel.send(AGOMUNIMUNI + 'システムを更新しました。')
                 except Exception as e:
                     print(df.format_log(f"Notification error: {e}"))
             self.updated_notified = True
@@ -139,12 +139,12 @@ async def sync(ctx):
     except discord.HTTPException as e:
         if e.code == 50240:
             await ctx.send(
-                "<:failed:1490986584676368535> 同期できませんでした。DiscordのEntry Pointコマンドを保持したまま再同期してください。"
+                FAILED + ' 同期できませんでした。DiscordのEntry Pointコマンドを保持したまま再同期してください。'
             )
         else:
-            await ctx.send(f"<:failed:1490986584676368535> 同期失敗: {e}")
+            await ctx.send(f"{FAILED} 同期失敗: {e}")
     except Exception as e:
-        await ctx.send(f"<:failed:1490986584676368535> 同期失敗: {e}")
+        await ctx.send(f"{FAILED} 同期失敗: {e}")
 
 log_buffer = LogBuffer(maxlen=100)
 log_buffer.setFormatter(logging.Formatter(

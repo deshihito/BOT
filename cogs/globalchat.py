@@ -5,7 +5,7 @@ import logging
 import os
 
 from core import globalchat_moderation as mod
-from core.emojis import FAILED
+from core.emojis import CROCK, FAILED
 
 logger = logging.getLogger(__name__)
 
@@ -82,7 +82,7 @@ class GlobalChatCog(commands.Cog):
         allowed, wait, first = self.rate_limiter.check(message.author.id)
         if not allowed:
             if first:
-                await self.notify_sender(message, f"<:crock:1561710960387956757> 連投が多いため、約 {int(wait)} 秒間グローバルチャットに転送しません。")
+                await self.notify_sender(message, f"{CROCK} 連投が多いため、約 {int(wait)} 秒間グローバルチャットに転送しません。")
             return
 
         # 自分以外の、登録されているすべてのチャンネルIDを抽出

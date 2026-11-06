@@ -15,7 +15,7 @@ from discord.ext import commands
 from core.command_catalog import (build_catalog, command_key, find_command, permission_label, registered_commands,
                                   visible_commands)
 from core.command_meta import COMMAND_META
-from core.emojis import BACK
+from core.emojis import BACK, BOOK, LEFT, RIGHT
 from core.panel_v2 import as_panel_v2, edit_panel_v2
 
 # Discord の上限
@@ -55,7 +55,7 @@ def _permission_note(entry: dict) -> str:
 
 
 def entry_line(entry: dict) -> str:
-    guide = " <:book:1564624329889681418>" if entry["guide"] else ""
+    guide = ' ' + BOOK if entry["guide"] else ""
     return f"`{clip(entry['usage'], 150)}`{guide}\n{clip(entry['summary'], 200)}{_permission_note(entry)}"
 
 
@@ -109,10 +109,7 @@ def overview_embed(catalog: dict) -> discord.Embed:
     embed = discord.Embed(
         title="コマンド一覧",
         description=(
-            "`/help command:` にコマンド名を入れると詳しい説明が表示されます。\n"
-            "パネル機能は `/quick` で名前から検索して直接実行できます。\n"
-            "<:book:1564624329889681418> はガイド（くわしい説明）があるコマンドです\n\n"
-            "隠し機能: 会話を追うときは、チャンネルで「今北産業」と送ると直近の会話を最大3行で要約します。"
+            '`/help command:` にコマンド名を入れると詳しい説明が表示されます。\nパネル機能は `/quick` で名前から検索して直接実行できます。\n' + BOOK + ' はガイド（くわしい説明）があるコマンドです\n\n隠し機能: 会話を追うときは、チャンネルで「今北産業」と送ると直近の会話を最大3行で要約します。'
         ),
         color=COLOR,
     )
@@ -178,7 +175,7 @@ def command_embed(entry: dict, catalog: dict | None = None) -> discord.Embed:
     if catalog is not None:
         category = _category(catalog, entry["category"])
         if category:
-            embed.set_footer(text=f"カテゴリ: {category['label']}" + ("　<:book:1564624329889681418> ガイドあり" if entry["guide"] else ""))
+            embed.set_footer(text=f"カテゴリ: {category['label']}" + ('\u3000' + BOOK + ' ガイドあり' if entry["guide"] else ""))
     return embed
 
 
@@ -346,12 +343,12 @@ class HelpView(discord.ui.View):
             return await edit_panel_v2(interaction, as_panel_v2(view))
         await interaction.response.edit_message(embed=view.embed(), view=view)
 
-    @discord.ui.button(label="前へ", emoji="<:Left:1561698207757500537>", style=discord.ButtonStyle.secondary, row=2, custom_id="panel:help:prev")
+    @discord.ui.button(label="前へ", emoji=LEFT, style=discord.ButtonStyle.secondary, row=2, custom_id="panel:help:prev")
     async def previous_page(self, interaction: discord.Interaction, button: discord.ui.Button):
         await self.show(interaction, self.category_id, self.page - 1,
                         v2=hasattr(getattr(button, "view", None), "_sync"))
 
-    @discord.ui.button(label="次へ", emoji="<:Right:1561698129655373845>", style=discord.ButtonStyle.secondary, row=2, custom_id="panel:help:next")
+    @discord.ui.button(label="次へ", emoji=RIGHT, style=discord.ButtonStyle.secondary, row=2, custom_id="panel:help:next")
     async def next_page(self, interaction: discord.Interaction, button: discord.ui.Button):
         await self.show(interaction, self.category_id, self.page + 1,
                         v2=hasattr(getattr(button, "view", None), "_sync"))
@@ -404,7 +401,7 @@ class CommandView(discord.ui.View):
     def embed(self) -> discord.Embed:
         return command_embed(self.entry, self.catalog)
 
-    @discord.ui.button(label="ガイドを読む", emoji="<:book:1564624329889681418>", style=discord.ButtonStyle.success, custom_id="panel:help:read_guide")
+    @discord.ui.button(label="ガイドを読む", emoji=BOOK, style=discord.ButtonStyle.success, custom_id="panel:help:read_guide")
     async def read_guide(self, interaction: discord.Interaction, button: discord.ui.Button):
         key = command_key(self.entry["kind"], self.entry["name"])
         await edit_panel_v2(interaction, as_panel_v2(BackView(

@@ -98,7 +98,7 @@ class ManageMixin:
         room = ROOMS.get(room_name)
         if room is None:
             return await r.send(
-                f"<:failed:1490986584676368535> ルーム **{room_name}** は存在しません。", ephemeral=True
+                f"{FAILED} ルーム **{room_name}** は存在しません。", ephemeral=True
             )
 
         clients = GLOBAL_ROOMS.get(room_name, [])
@@ -129,7 +129,7 @@ class ManageMixin:
         room = ROOMS.get(room_name)
         if room is None:
             return await r.send(
-                f"<:failed:1490986584676368535> ルーム **{room_name}** は存在しません。", ephemeral=True
+                f"{FAILED} ルーム **{room_name}** は存在しません。", ephemeral=True
             )
 
         if not _can_delete_room(room, r.user, r.guild):
@@ -171,7 +171,7 @@ class ManageMixin:
         room = ROOMS.get(room_name)
         if room is None:
             return await r.send(
-                f"<:failed:1490986584676368535> ルーム **{room_name}** は存在しません。"
+                f"{FAILED} ルーム **{room_name}** は存在しません。"
                 f"先に `/vc` →「グローバルVCルーム」→「ルーム作成」で作成してください。"
             )
 

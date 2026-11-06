@@ -20,6 +20,7 @@ from PIL import Image, ImageDraw, ImageEnhance
 from zoneinfo import ZoneInfo
 from core.api_client import APIError
 from core.api_retry import run_with_retry
+from core.emojis import FAILED
 
 from core.dungeon.common import *  # noqa: F401,F403 - shared constants/state
 from core.dungeon.common import SEASON_ID, _PLAYER_SAVE_DIGESTS, dg_bases, dg_players  # noqa: F401
@@ -94,7 +95,7 @@ async def dg_load_all(db_api):
             d_migrate_player_v2(row["user_id"])
         print(f"✓ ダンジョンプレイヤー読み込み完了: {len(dg_players)}人")
     except Exception as e:
-        print(f"<:failed:1490986584676368535> ダンジョンプレイヤー読み込み失敗: {e}")
+        print(f"{FAILED} ダンジョンプレイヤー読み込み失敗: {e}")
 
 async def dg_save_player(uid, db_api):
     """プレイヤーのダンジョンデータを自前DB APIに保存"""
