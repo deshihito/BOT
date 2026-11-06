@@ -4,7 +4,7 @@ import aiohttp
 from discord.ext import commands
 
 from cogs.terminal import ALLOWED_USER_IDS
-from core.autoplay import DEFAULT_D1_ENDPOINT
+from core.game.autoplay import DEFAULT_D1_ENDPOINT
 
 class D1TestCog(commands.Cog):
     def __init__(self, bot: commands.Bot):
