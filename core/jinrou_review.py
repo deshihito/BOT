@@ -7,7 +7,7 @@
   ゲームのチャンネルのサーバーにいない人の名前が出せる。
 """
 import discord
-from core.emojis import SUCCESS
+from core.emojis import JINROU, LOUPE, MUSIC, SUCCESS
 
 COLOR = 0xFFFFFF
 WOLF_ROLES = ("人狼", "デカ狼")
@@ -68,15 +68,15 @@ def record_night(game, night: int, actions: dict, cancelled: set, attacks: dict,
         cancel = "（取り消し）" if uid in cancelled else ""
         if role == "占い師" and uid in divines:
             t, res = divines[uid]
-            lines.append(f"<:loupe:1563559480069853245> {name_of(game, uid)} が {name_of(game, t)} を占い →【{res}】{cancel}")
+            lines.append(f"{LOUPE} {name_of(game, uid)} が {name_of(game, t)} を占い →【{res}】{cancel}")
         elif role == "ミュージシャン" and tid == 0:
-            lines.append(f"🎵 {name_of(game, uid)} がパーティを開催{cancel}")
+            lines.append(f"{MUSIC} {name_of(game, uid)} がパーティを開催{cancel}")
         elif role in ACTION_TEXT and tid:
             lines.append(ACTION_TEXT[role].format(a=name_of(game, uid), t=name_of(game, tid)) + cancel)
         elif role in WOLF_ROLES and tid and uid in cancelled:
-            lines.append(f"🐺 {name_of(game, uid)} が {name_of(game, tid)} を襲撃（取り消し）")
+            lines.append(f"{JINROU} {name_of(game, uid)} が {name_of(game, tid)} を襲撃（取り消し）")
     for wid, (tid, outcome) in attacks.items():
-        lines.append(f"🐺 {name_of(game, wid)} が {name_of(game, tid)} を襲撃 → {ATTACK_TEXT.get(outcome, outcome)}")
+        lines.append(f"{JINROU} {name_of(game, wid)} が {name_of(game, tid)} を襲撃 → {ATTACK_TEXT.get(outcome, outcome)}")
     if died:
         lines.append("💀 犠牲: " + "、".join(name_of(game, d) for d in died))
     else:
