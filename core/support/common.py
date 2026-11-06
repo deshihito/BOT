@@ -28,7 +28,8 @@ from discord.ext import commands, tasks
 
 from cogs.clear import MAX_CLEAR
 from cogs.auth import get_intro_webhook, sanitize_webhook_name, role_failure_reason
-from core import action_usage, guild_settings, usage_stats
+from core import action_usage, guild_settings
+from core.support import usage_stats
 from core.panel_v2 import as_embed_v2, as_panel_v2, edit_panel_v2
 
 logger = logging.getLogger("cogs.support")  # 分割後も従来のログ名に統一する
