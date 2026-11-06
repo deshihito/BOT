@@ -115,6 +115,12 @@ CARD_VALUES = (1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 10, 10, 10)
 #: ディーラーがヒットを続ける上限（原典: 合計17未満で引く）。
 DEALER_STAND_TOTAL = 17
 
+# --- bj_duel（次期仕様 S6-3） ---
+#: ブラックジャック対決の最低ベット（AGO、暫定。原典はチップ建て）。
+DUEL_MIN_BET = 500
+#: transaction_history の理由コード（勝者の受け取り）。
+DUEL_HISTORY_REASON = "gamble_bj_duel"
+
 # --- dice ---
 #: ダイスの最低ベット（AGO）。原典は10チップ。
 DICE_MIN_BET = 10
@@ -144,9 +150,16 @@ def calc_total(hand: list[int]) -> int:
     return total
 
 
-def _reel_weights(kakuhen: bool) -> list[int]:
-    """数字0〜9のリール重み（原典 wl）。"""
+def _reel_weights(kakuhen: bool, six_suppressed: bool = False,
+                   six_multiplier: float = 0.5) -> list[int]:
+    """数字0〜9のリール重み（原典 wl）。
+
+    six_suppressed（お祓い棒 S6-4）が真なら「6」の重みを倍率で下げる
+    （最小1）。倍率は items 側の定数を呼び出し側が渡す。
+    """
     six = SLOT_WEIGHT_SIX_KAKUHEN if kakuhen else SLOT_WEIGHT_SIX_NORMAL
+    if six_suppressed:
+        six = max(1, int(six * six_multiplier))
     return [SLOT_WEIGHT_OTHER] * 6 + [six, SLOT_WEIGHT_SEVEN] + [SLOT_WEIGHT_OTHER] * 2
 
 
@@ -209,8 +222,36 @@ def _clean_session(raw: Any) -> dict[str, Any] | None:
     return None
 
 
+def _clean_duel(raw: Any) -> dict[str, Any] | None:
+    if not isinstance(raw, dict):
+        return None
+    bet = raw.get("bet")
+    creator = raw.get("creator")
+    if not (isinstance(bet, int) and bet > 0 and creator):
+        return None
+    challenger = raw.get("challenger")
+    hands_raw = raw.get("hands")
+    hands: dict[str, list[int]] = {}
+    if isinstance(hands_raw, dict):
+        for uid, cards in hands_raw.items():
+            if isinstance(cards, list) and all(isinstance(c, int) for c in cards):
+                hands[str(uid)] = list(cards)
+    stood_raw = raw.get("stood")
+    stood = [str(u) for u in stood_raw] if isinstance(stood_raw, list) else []
+    created = raw.get("created_at")
+    return {
+        "bet": int(bet),
+        "creator": str(creator),
+        "challenger": str(challenger) if challenger else None,
+        "hands": hands,
+        "stood": stood,
+        "state": "playing" if challenger else "waiting",
+        "created_at": float(created) if isinstance(created, (int, float)) else 0.0,
+    }
+
+
 def _empty_state() -> dict[str, Any]:
-    return {"users": {}, "sessions": {}}
+    return {"users": {}, "sessions": {}, "duels": {}}
 
 
 def _clean_state(raw: Any) -> dict[str, Any]:
@@ -227,6 +268,12 @@ def _clean_state(raw: Any) -> dict[str, Any]:
             cleaned = _clean_session(entry)
             if cleaned is not None:
                 state["sessions"][str(uid)] = cleaned
+    duels = raw.get("duels")
+    if isinstance(duels, dict):
+        for key, entry in duels.items():
+            cleaned = _clean_duel(entry)
+            if cleaned is not None:
+                state["duels"][str(key)] = cleaned
     return state
 
 
@@ -333,6 +380,17 @@ class GamblingStore:
                     refunds.append({
                         "user_id": uid, "kind": session["kind"], "amount": amount})
                 del self._state["sessions"][uid]
+            # bj_duel（S6-3）: 募集中は作成者へ、対戦中は双方へ全額返金。
+            for key, duel in list(self._state["duels"].items()):
+                bet = int(duel["bet"])
+                refunds.append({
+                    "user_id": duel["creator"], "kind": "bj_duel",
+                    "amount": bet})
+                if duel.get("challenger"):
+                    refunds.append({
+                        "user_id": duel["challenger"], "kind": "bj_duel",
+                        "amount": bet})
+                del self._state["duels"][key]
             if refunds:
                 self._mark_dirty()
         return refunds
@@ -352,12 +410,14 @@ class GamblingStore:
             self._mark_dirty()
             return dict(session)
 
-    def spin_slot(self, user_id: str) -> dict[str, Any]:
+    def spin_slot(self, user_id: str, *, six_suppressed: bool = False,
+                  six_multiplier: float = 0.5) -> dict[str, Any]:
         """1スピン回して結果を返す。原典 Slot7View.spin の状態遷移を再現する。
 
         返り値の ``reward`` はこのスピンで確定したコイン増減（負数あり）。
         ``confiscate`` が真のときは 66666 イベントで、呼び出し側が
-        残高を全額没収する（reward は0）。
+        残高を全額没収する（reward は0）。six_suppressed はお祓い棒
+        （S6-4）の効果で、cog が items の効果状態を引いて渡す。
         """
         uid = str(user_id)
         with self._lock:
@@ -375,7 +435,7 @@ class GamblingStore:
                 if self._rng.random() < counter * SIX_COUNTER_RATE:
                     st["six_counter"] = 0
                     force_six = self._rng.random() < FORCE_SIX_PROBABILITY
-            weights = _reel_weights(kakuhen_active)
+            weights = _reel_weights(kakuhen_active, six_suppressed, six_multiplier)
             if force_six:
                 reels = [6] * 5 + self._rng.choices(range(10), k=2)
             else:
@@ -595,6 +655,181 @@ class GamblingStore:
                 "bet": bet,
                 "payout": payout,
             }
+
+    # ------------------------------------------------------------------ bj_duel（S6-3）
+    def _duel_snapshot(self, key: str, duel: dict[str, Any]) -> dict[str, Any]:
+        snapshot = copy.deepcopy(duel)
+        snapshot["id"] = key
+        snapshot["totals"] = {
+            uid: calc_total(hand) for uid, hand in duel["hands"].items()}
+        return snapshot
+
+    def duel_of(self, user_id: str) -> dict[str, Any] | None:
+        """ユーザーが参加している対決（募集中の作成分を含む）を返す。"""
+        uid = str(user_id)
+        with self._lock:
+            for key, duel in self._state["duels"].items():
+                if duel["creator"] == uid or duel.get("challenger") == uid:
+                    return self._duel_snapshot(key, duel)
+            return None
+
+    def open_duels(self) -> list[dict[str, Any]]:
+        """参加者を募集中の対決一覧。"""
+        with self._lock:
+            return [
+                self._duel_snapshot(key, duel)
+                for key, duel in self._state["duels"].items()
+                if duel["state"] == "waiting"
+            ]
+
+    def create_duel(self, user_id: str, bet: int) -> dict[str, Any]:
+        """対決を作成する（ベットは呼び出し側がエスクロー済み）。
+
+        対決は個人セッションとは別枠だが、同時に対決は1つまで。
+        """
+        if int(bet) < DUEL_MIN_BET:
+            raise ItemError(f"ベットは{DUEL_MIN_BET} AGO以上で指定してください。")
+        uid = str(user_id)
+        with self._lock:
+            if self.duel_of(uid) is not None:
+                raise ItemError("すでに参加中の対決があります。")
+            duel = {
+                "bet": int(bet), "creator": uid, "challenger": None,
+                "hands": {}, "stood": [], "state": "waiting",
+                "created_at": time.time(),
+            }
+            self._state["duels"][uid] = duel
+            self._mark_dirty()
+            return self._duel_snapshot(uid, duel)
+
+    def join_duel(self, creator_id: str, challenger_id: str) -> dict[str, Any]:
+        """対決に参加する（ベットは呼び出し側がエスクロー済み）。
+
+        参加が確定した時点で両者へ2枚ずつ配る。
+        """
+        creator = str(creator_id)
+        challenger = str(challenger_id)
+        with self._lock:
+            duel = self._state["duels"].get(creator)
+            if duel is None or duel["state"] != "waiting":
+                raise ItemError("その対決はもう始まっています。")
+            if challenger == creator:
+                raise ItemError("自分の対決には参加できません。")
+            if self.duel_of(challenger) is not None:
+                raise ItemError("すでに参加中の対決があります。")
+            duel["challenger"] = challenger
+            duel["state"] = "playing"
+            duel["hands"] = {
+                creator: [self._draw_card(), self._draw_card()],
+                challenger: [self._draw_card(), self._draw_card()],
+            }
+            self._mark_dirty()
+            return self._duel_snapshot(creator, duel)
+
+    def _finish_duel_locked(self, key: str, duel: dict[str, Any],
+                            winner: str | None) -> dict[str, Any]:
+        totals = {uid: calc_total(hand) for uid, hand in duel["hands"].items()}
+        result = {
+            "finished": True,
+            "winner": winner,
+            "draw": winner is None,
+            "bet": int(duel["bet"]),
+            "creator": duel["creator"],
+            "challenger": duel.get("challenger"),
+            "hands": copy.deepcopy(duel["hands"]),
+            "totals": totals,
+        }
+        del self._state["duels"][key]
+        self._mark_dirty()
+        return result
+
+    def _duel_for_action_locked(self, user_id: str) -> tuple[str, dict[str, Any]]:
+        uid = str(user_id)
+        for key, duel in self._state["duels"].items():
+            if duel["creator"] == uid or duel.get("challenger") == uid:
+                if duel["state"] != "playing":
+                    raise ItemError("対決はまだ始まっていません。")
+                return key, duel
+        raise ItemError("参加中の対決がありません。")
+
+    def _settle_if_both_stood_locked(self, key: str,
+                                     duel: dict[str, Any]) -> dict[str, Any] | None:
+        players = [duel["creator"], duel.get("challenger")]
+        if not all(p in duel["stood"] for p in players if p):
+            return None
+        totals = {uid: calc_total(hand) for uid, hand in duel["hands"].items()}
+        creator_total = totals[duel["creator"]]
+        challenger_total = totals[duel["challenger"]]
+        if creator_total == challenger_total:
+            winner = None
+        elif creator_total > challenger_total:
+            winner = duel["creator"]
+        else:
+            winner = duel["challenger"]
+        return self._finish_duel_locked(key, duel, winner)
+
+    def duel_hit(self, user_id: str) -> dict[str, Any]:
+        """ヒット。バーストしたら相手の勝ちで即決着。21 は自動スタンド。"""
+        uid = str(user_id)
+        with self._lock:
+            key, duel = self._duel_for_action_locked(uid)
+            if uid in duel["stood"]:
+                raise ItemError("すでにスタンドしています。")
+            duel["hands"][uid].append(self._draw_card())
+            total = calc_total(duel["hands"][uid])
+            if total > 21:
+                opponent = (duel["challenger"] if uid == duel["creator"]
+                            else duel["creator"])
+                result = self._finish_duel_locked(key, duel, opponent)
+                result["bust"] = uid
+                return result
+            if total == 21 and uid not in duel["stood"]:
+                duel["stood"].append(uid)
+            self._mark_dirty()
+            settled = self._settle_if_both_stood_locked(key, duel)
+            if settled is not None:
+                return settled
+            snapshot = self._duel_snapshot(key, duel)
+            snapshot["finished"] = False
+            return snapshot
+
+    def duel_stand(self, user_id: str) -> dict[str, Any]:
+        """スタンド。両者がスタンドしたら合計の大きい方の勝ち。"""
+        uid = str(user_id)
+        with self._lock:
+            key, duel = self._duel_for_action_locked(uid)
+            if uid not in duel["stood"]:
+                duel["stood"].append(uid)
+            self._mark_dirty()
+            settled = self._settle_if_both_stood_locked(key, duel)
+            if settled is not None:
+                return settled
+            snapshot = self._duel_snapshot(key, duel)
+            snapshot["finished"] = False
+            return snapshot
+
+    def cancel_duel(self, user_id: str) -> dict[str, Any]:
+        """対決を取り消し、返金対象を返す。
+
+        募集中は作成者だけが取り消せる。対戦中の中断（タイムアウト等）
+        は参加者どちらからでも可で、双方へ全額返金する（S6-3）。
+        """
+        uid = str(user_id)
+        with self._lock:
+            for key, duel in list(self._state["duels"].items()):
+                if duel["creator"] != uid and duel.get("challenger") != uid:
+                    continue
+                if duel["state"] == "waiting" and duel["creator"] != uid:
+                    raise ItemError("取り消せるのは作成者だけです。")
+                bet = int(duel["bet"])
+                refunds = [{"user_id": duel["creator"], "amount": bet}]
+                if duel.get("challenger"):
+                    refunds.append(
+                        {"user_id": duel["challenger"], "amount": bet})
+                del self._state["duels"][key]
+                self._mark_dirty()
+                return {"cancelled": True, "refunds": refunds}
+        raise ItemError("参加中の対決がありません。")
 
     # ------------------------------------------------------------------ dice
     def play_dice(self, max_value: int, number: int) -> dict[str, Any]:

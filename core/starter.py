@@ -27,7 +27,8 @@ from core.general.items import JST
 
 logger = logging.getLogger(__name__)
 
-#: スターターのコイン量（暫定）。
+#: スターターのコイン量（暫定）。確定式（仕様 S0）: 小型加工機の価格
+#: ＋3,000 が目安。実測（tools/coin_distribution.py）後に確定する。
 STARTER_COINS = 3000
 
 #: スターターのスクラップ個数（暫定）。

@@ -39,7 +39,8 @@ logger = logging.getLogger(__name__)
 # 価格・変換（暫定値。コイン分布の実測後に調整する）
 # ---------------------------------------------------------------------------
 
-#: 単発の価格（AGO）。
+#: 単発の価格（AGO）。確定式（仕様 S0）: 中央値ユーザーの1日の想定
+#: 獲得の0.5〜1日分。実測（tools/coin_distribution.py）後に確定する。
 SINGLE_PRICE = 500
 
 #: 10連の価格（AGO）。
@@ -55,6 +56,15 @@ DUPLICATE_COINS = {"N": 50, "R": 150, "SR": 500, "SSR": 2000}
 #: レアリティ段階の抽選重み（段階内は一様）。
 RARITY_WEIGHTS = {"N": 50, "R": 35, "SR": 12, "SSR": 3}
 RARITY_ORDER = ("N", "R", "SR", "SSR")
+
+#: 編成ボーナス（次期仕様 S3）: レアリティ点。編成中の合計 P に対して
+#: P × PARTY_BONUS_RATE_PER_POINT の確率で採掘に追加抽選が付く。
+RARITY_POINTS = {"N": 1, "R": 2, "SR": 3, "SSR": 4}
+PARTY_BONUS_RATE_PER_POINT = 0.02
+
+#: 天井（次期仕様 S6-2）: SSR が出ていない累計回数がこの回数に届いた
+#: 抽選は SSR が確定する。カウンタは SSR 排出で 0 に戻る。
+PITY_LIMIT = 90
 
 #: transaction_history の理由コード。
 HISTORY_REASON = "gacha"
@@ -138,19 +148,60 @@ _BY_RARITY: dict[str, list[dict[str, Any]]] = {
 }
 
 
-def roll_characters(rng: random.Random, count: int) -> list[dict[str, Any]]:
-    """count 体を抽選する。10連（TEN_COUNT）のときは R 以上を1体保証する。"""
+def _roll_one(rng: random.Random) -> dict[str, Any]:
     rarities = list(RARITY_WEIGHTS)
     weights = [RARITY_WEIGHTS[r] for r in rarities]
-    results: list[dict[str, Any]] = []
-    for _ in range(max(0, int(count))):
-        rarity = rng.choices(rarities, weights=weights, k=1)[0]
-        results.append(rng.choice(_BY_RARITY[rarity]))
+    rarity = rng.choices(rarities, weights=weights, k=1)[0]
+    return rng.choice(_BY_RARITY[rarity])
+
+
+def roll_characters(rng: random.Random, count: int) -> list[dict[str, Any]]:
+    """count 体を抽選する。10連（TEN_COUNT）のときは R 以上を1体保証する。"""
+    results = [_roll_one(rng) for _ in range(max(0, int(count)))]
     if count == TEN_COUNT and results and all(
             c["rarity"] == "N" for c in results):
         pool = _BY_RARITY["R"] + _BY_RARITY["SR"] + _BY_RARITY["SSR"]
         results[-1] = rng.choice(pool)
     return results
+
+
+def roll_pulls(rng: random.Random, count: int,
+               pity: int) -> tuple[list[dict[str, Any]], int]:
+    """天井つきで count 体を抽選し、(結果, 新しい天井カウンタ) を返す。
+
+    カウンタは「SSR が出ていない累計回数」。次の抽選でカウンタが
+    PITY_LIMIT に届く場合はその抽選が SSR 確定になり、カウンタは
+    0 に戻る。通常抽選で SSR が出た場合も 0 に戻る。10連の R 以上
+    保証（全て N のとき最後を差し替え）が SSR になった場合も同様に
+    リセットする（差し替えは最後の1枠なので、それ以降の枠は無い）。
+    """
+    pity = max(0, int(pity))
+    results: list[dict[str, Any]] = []
+    for _ in range(max(0, int(count))):
+        if pity + 1 >= PITY_LIMIT:
+            results.append(rng.choice(_BY_RARITY["SSR"]))
+            pity = 0
+            continue
+        character = _roll_one(rng)
+        results.append(character)
+        pity = 0 if character["rarity"] == "SSR" else pity + 1
+    if count == TEN_COUNT and results and all(
+            c["rarity"] == "N" for c in results):
+        pool = _BY_RARITY["R"] + _BY_RARITY["SR"] + _BY_RARITY["SSR"]
+        results[-1] = rng.choice(pool)
+        if results[-1]["rarity"] == "SSR":
+            pity = 0
+    return results, pity
+
+
+def party_power_of(party_ids: list[str]) -> int:
+    """編成中キャラのレアリティ点合計（編成ボーナス S3 の P）。"""
+    total = 0
+    for char_id in party_ids:
+        character = CHARACTER_BY_ID.get(str(char_id))
+        if character is not None:
+            total += RARITY_POINTS.get(character["rarity"], 0)
+    return total
 
 
 def character_line(character: dict[str, Any]) -> str:
@@ -188,10 +239,12 @@ def _clean_state(raw: Any) -> dict[str, Any]:
                 if isinstance(party_raw, list) and str(char_id) in owned
             ][:PARTY_MAX] if isinstance(party_raw, list) else []
             pulls = entry.get("total_pulls")
+            pity = entry.get("pity")
             state["users"][str(uid)] = {
                 "owned": owned,
                 "party": party,
                 "total_pulls": int(pulls) if isinstance(pulls, int) and pulls > 0 else 0,
+                "pity": int(pity) if isinstance(pity, int) and pity > 0 else 0,
             }
     return state
 
@@ -256,7 +309,7 @@ class GachaStore:
     # ------------------------------------------------------------------ 状態
     def _entry_locked(self, user_id: str) -> dict[str, Any]:
         return self._state["users"].setdefault(
-            str(user_id), {"owned": {}, "party": [], "total_pulls": 0})
+            str(user_id), {"owned": {}, "party": [], "total_pulls": 0, "pity": 0})
 
     def owned(self, user_id: str) -> dict[str, int]:
         with self._lock:
@@ -287,6 +340,24 @@ class GachaStore:
         with self._lock:
             entry = self._state["users"].get(str(user_id)) or {}
             return int(entry.get("total_pulls") or 0)
+
+    # ------------------------------------------------------------------ 天井（S6-2）
+    def pity(self, user_id: str) -> int:
+        """SSR が出ていない累計回数。"""
+        with self._lock:
+            entry = self._state["users"].get(str(user_id)) or {}
+            return int(entry.get("pity") or 0)
+
+    def set_pity(self, user_id: str, value: int) -> None:
+        with self._lock:
+            entry = self._entry_locked(user_id)
+            entry["pity"] = max(0, int(value))
+            self._mark_dirty()
+
+    # ------------------------------------------------------------------ 編成ボーナス（S3）
+    def party_power(self, user_id: str) -> int:
+        """編成中キャラのレアリティ点合計 P（編成ボーナス用）。"""
+        return party_power_of(self.party(user_id))
 
     def party(self, user_id: str) -> list[str]:
         with self._lock:

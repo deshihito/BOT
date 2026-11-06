@@ -60,9 +60,13 @@ def summary_embed(cog: "GachaCog", user_id: int) -> discord.Embed:
 def collection_embed(cog: "GachaCog", user_id: int) -> discord.Embed:
     owned = cog.store.owned(str(user_id))
     embed = discord.Embed(title="コレクション", color=GACHA_COLOR)
+    # 天井までの残り（自分の状態表示としてのみ出す。S6-2）。
+    remaining = gacha_core.PITY_LIMIT - cog.store.pity(str(user_id))
+    pity_line = f"天井まで あと{remaining}回"
     if not owned:
-        embed.description = "まだキャラを持っていません。"
+        embed.description = f"まだキャラを持っていません。\n{pity_line}"
         return embed
+    embed.set_footer(text=pity_line)
     for rarity in reversed(gacha_core.RARITY_ORDER):
         chars = [
             gacha_core.CHARACTER_BY_ID[char_id]
@@ -255,10 +259,14 @@ class GachaCog(commands.Cog):
         if debit is None:
             return "コインの更新に失敗しました。残高は変わっていません。"
         await self._record_history(uid, "gacha", price, gacha_core.HISTORY_REASON)
-        rolls = gacha_core.roll_characters(self._rng, count)
+        # 天井（S6-2）: SSR が出ていない累計が上限に届く抽選は SSR 確定。
+        rolls, new_pity = gacha_core.roll_pulls(
+            self._rng, count, self.store.pity(uid))
+        self.store.set_pity(uid, new_pity)
         self.store.record_pulls(uid, count)
         # クラン貢献フック（所属中のみ・失敗してもガチャに影響させない）。
-        clan_core.award_points(uid, clan_core.POINTS_GACHA_PER_PULL * count)
+        for _ in range(count):
+            clan_core.award_points(uid, clan_core.POINTS_GACHA_PER_PULL, "gacha")
         lines = ["🎰 **ガチャ結果**"]
         dup_coins = 0
         for character in rolls:

@@ -73,6 +73,27 @@ THIEF_EFFECT = "master_thief"
 THIEF_RATE_BONUS = 0.30
 THIEF_AMOUNT_MULTIPLIER = 2.0
 
+#: 効果アイテム第2弾（次期仕様 S6-4）の効果IDと倍率。
+#: お祓い棒: 有効期間中、スロットで「6」の出目が出にくくなる
+#: （core/game/gambling.py の spin_slot が重み倍率で受ける）。
+SIX_SUPPRESS_EFFECT = "six_suppress"
+SIX_SUPPRESS_MULTIPLIER = 0.5
+#: 落盤対策: 有効期間中、採掘の空振り（失敗）が無効になる
+#: （core/game/mining.py の dig が no_fail で受ける）。
+MINING_NO_FAIL_EFFECT = "mining_no_fail"
+#: 直下掘り: 使うと、次の採掘セッション1回だけ特殊ダイスになる
+#: 窓が開く（消費側の circulation が開始時に効果を読み、セッションへ
+#: フラグを立てて効果を消費する）。duration はその保持ウィンドウ。
+DIRECT_DIG_EFFECT = "direct_dig"
+#: 悪魔的な報酬／プリズンマイナー（所持で効く特殊アイテム群。効果の
+#: 実体は gambling cog の没収処理と circulation の採掘入口）。
+DEVIL_REWARD_ITEM = "devil_reward"
+PRISON_MINER_ITEM = "prison_miner"
+#: 悪魔的な報酬: 全額没収が発生したときに限ってこの確率で没収額の
+#: この倍率が戻る（1回で消滅。没収ガードが先に発動した場合は不発）。
+DEVIL_REWARD_RATE = 0.25
+DEVIL_REWARD_MULTIPLIER = 2
+
 #: steal 攻防アイテムのアイテムID（所持で効く／steal 時に消費される
 #: 特殊アイテム群。効果の実体は cogs/circulation.py の steal 判定）。
 MUD_HAT_ITEM = "mud_hat"
@@ -383,6 +404,56 @@ ITEM_DEFS: dict[str, dict[str, Any]] = {
         "effect": THIEF_EFFECT,
         "box_drop": False,
     },
+    "oharai_bou": {
+        "name": "お祓い棒",
+        "desc": "使うと1時間、スロットで不穏な数字が出にくくなる。",
+        "price": 2000,
+        "duration_hours": 1,
+        "kind": "consumable",
+        "purchasable": True,
+        "effect": SIX_SUPPRESS_EFFECT,
+        "box_drop": True,
+    },
+    "devil_reward": {
+        "name": "悪魔的な報酬",
+        "desc": "持っていると、全額没収のときに一度だけ思いがけない見返りがあるかもしれない。",
+        "price": 5000,
+        "duration_hours": None,
+        "kind": "consumable",
+        "purchasable": True,
+        "effect": None,
+        "box_drop": False,
+    },
+    "anti_cavein": {
+        "name": "落盤対策",
+        "desc": "使うと1時間、採掘で空振りしなくなる。",
+        "price": 1500,
+        "duration_hours": 1,
+        "kind": "consumable",
+        "purchasable": True,
+        "effect": MINING_NO_FAIL_EFFECT,
+        "box_drop": True,
+    },
+    "direct_dig": {
+        "name": "直下掘り",
+        "desc": "次の採掘1回だけ真下へ一気に掘る。大きく当たるか、大きく外すか。",
+        "price": 2000,
+        "duration_hours": 24,
+        "kind": "consumable",
+        "purchasable": True,
+        "effect": DIRECT_DIG_EFFECT,
+        "box_drop": False,
+    },
+    "prison_miner": {
+        "name": "プリズンマイナー",
+        "desc": "逮捕中でも採掘だけはできる不思議な許可証。採掘1回ごとに1枚使う。",
+        "price": 3000,
+        "duration_hours": None,
+        "kind": "consumable",
+        "purchasable": True,
+        "effect": None,
+        "box_drop": False,
+    },
     "treasure_box": {
         "name": "宝箱",
         "desc": "開けるとコインや素材が出る。",
@@ -433,6 +504,8 @@ BOX_DROPS: tuple[dict[str, Any], ...] = (
     {"kind": "item", "item": "workshop_oil", "chance": 0.01, "min": 1, "max": 1},
     {"kind": "item", "item": "baton", "chance": 0.01, "min": 1, "max": 1},
     {"kind": "item", "item": "mud_hat", "chance": 0.005, "min": 1, "max": 1},
+    {"kind": "item", "item": "oharai_bou", "chance": 0.01, "min": 1, "max": 1},
+    {"kind": "item", "item": "anti_cavein", "chance": 0.01, "min": 1, "max": 1},
 )
 
 
@@ -567,6 +640,12 @@ register_effect(TRADE_VIP_EFFECT)(
     _timed_effect_handler("市場で一度に取引できる上限が広がります"))
 register_effect(THIEF_EFFECT)(
     _timed_effect_handler("盗みの成功率と奪える額が上がります"))
+register_effect(SIX_SUPPRESS_EFFECT)(
+    _timed_effect_handler("スロットで不穏な数字が出にくくなります"))
+register_effect(MINING_NO_FAIL_EFFECT)(
+    _timed_effect_handler("採掘で空振りしなくなります"))
+register_effect(DIRECT_DIG_EFFECT)(
+    _timed_effect_handler("次の採掘1回だけ真下へ一気に掘れます"))
 
 
 class ItemStore:

@@ -20,8 +20,13 @@ blackjack の損失で 30% プール / 70% 国庫だった（ダイスは 30% �
 - 市場の手数料の消却分（cogs/market.py）
 - 宝くじの消却分（cogs/circulation.py の抽選確定）
 
-国庫は v1 では蓄積と残高保持のみ（使い道は将来用）。残高は
-管理コマンド（!all_stats）から参照できる。
+国庫は v1 では蓄積と残高保持のみだったが、次期仕様（S1）で出口を
+持たせた: 週次で残高の 20% を採掘プールへ自動還流する（還流バッファ化）
+ほか、残高が閾値を超えた分の一部を次回の宝くじ払戻へ上乗せする
+（lottery_boost_amount / take_lottery_boost）。判定は常駐ループを持たず、
+宝くじの lazy 決済の入口（cogs/circulation.py の settle_lottery）から
+maybe_weekly_release / lottery_boost_amount を呼ぶ。残高は管理コマンド
+（!all_stats）から参照できる。
 
 保存は core/general/items.py と同じ流儀: 専用 JSON（既定 data/economy_pool.json、
 環境変数 ECONOMY_POOL_DATA_PATH で変更可）にメモリ主体＋
@@ -36,31 +41,63 @@ import logging
 import os
 import threading
 import time
+from datetime import date, datetime
 from pathlib import Path
 from typing import Any
+
+from core.general.items import JST
 
 logger = logging.getLogger(__name__)
 
 #: 還流の内訳: 損失のうち採掘プールへ行く割合（残りは国庫）。
 #: ユーザー指示（2026-11-06）の 70/30。端数は国庫側に寄せる。
+#: 次期仕様 S5-1 でこの配分を確定とした（原典コードは 30/70 だった）。
 POOL_SHARE = 0.7
+
+# ---------------------------------------------------------------------------
+# 国庫の出口（次期仕様 S1）: 還流バッファ化
+# ---------------------------------------------------------------------------
+
+#: 週次還流で国庫から採掘プールへ移す割合。
+TREASURY_RELEASE_RATE = 0.20
+
+#: 週次還流の間隔（日）。前回還流日からこの日数が経過したら還流する。
+TREASURY_RELEASE_INTERVAL_DAYS = 7
+
+#: 宝くじブーストが発動する国庫残高の閾値（暫定。S0 の実測で確定する）。
+TREASURY_BOOST_THRESHOLD = 500_000
+
+#: 閾値の超過分のうち宝くじへ回す割合。
+TREASURY_BOOST_RATE = 0.50
 
 FLUSH_EVERY_EVENTS = 20
 FLUSH_INTERVAL_SECONDS = 60.0
 
+_INT_KEYS = (
+    "pool", "treasury", "total_recycled", "total_paid",
+    "total_released", "total_boosted", "lottery_boost_pending",
+)
+
 
 def _empty_state() -> dict[str, Any]:
-    return {"pool": 0, "treasury": 0, "total_recycled": 0, "total_paid": 0}
+    return {
+        "pool": 0, "treasury": 0, "total_recycled": 0, "total_paid": 0,
+        "total_released": 0, "total_boosted": 0, "lottery_boost_pending": 0,
+        "last_release_date": None,
+    }
 
 
 def _clean_state(raw: Any) -> dict[str, Any]:
     state = _empty_state()
     if not isinstance(raw, dict):
         return state
-    for key in state:
+    for key in _INT_KEYS:
         value = raw.get(key)
         if isinstance(value, int) and not isinstance(value, bool) and value > 0:
             state[key] = value
+    last = raw.get("last_release_date")
+    if isinstance(last, str):
+        state["last_release_date"] = last
     return state
 
 
@@ -130,9 +167,12 @@ class EconomyPoolStore:
         with self._lock:
             return int(self._state["treasury"])
 
-    def snapshot(self) -> dict[str, int]:
+    def snapshot(self) -> dict[str, Any]:
         with self._lock:
-            return {key: int(value) for key, value in self._state.items()}
+            result: dict[str, Any] = {
+                key: int(self._state[key]) for key in _INT_KEYS}
+            result["last_release_date"] = self._state.get("last_release_date")
+            return result
 
     # ------------------------------------------------------------------ 還流
     def add_loss(self, amount: int) -> dict[str, int]:
@@ -178,6 +218,73 @@ class EconomyPoolStore:
             self._state["total_paid"] = max(
                 0, int(self._state["total_paid"]) - amount)
             self._mark_dirty()
+
+    # ------------------------------------------------------------------ 国庫の出口（S1）
+    def maybe_weekly_release(self, now: datetime | None = None) -> int:
+        """週次還流: 前回から間隔が空いていれば国庫の 20% をプールへ移す。
+
+        戻り値は実際に移した額。初回呼び出しでは基準日だけを記録して
+        還流しない（配備直後にまとめて動くのを防ぐ）。基準日は状態に
+        永続化するので、再起動を跨いでも同じ週に2回は走らない。
+        移動は国庫→プールのゼロサムで、双方とも負にならない。
+        """
+        now = now or datetime.now(JST)
+        today = now.astimezone(JST).date()
+        with self._lock:
+            last_raw = self._state.get("last_release_date")
+            last: date | None = None
+            if isinstance(last_raw, str):
+                try:
+                    last = date.fromisoformat(last_raw)
+                except ValueError:
+                    last = None
+            if last is None:
+                self._state["last_release_date"] = today.isoformat()
+                self._mark_dirty()
+                return 0
+            if (today - last).days < TREASURY_RELEASE_INTERVAL_DAYS:
+                return 0
+            treasury = int(self._state["treasury"])
+            amount = int(treasury * TREASURY_RELEASE_RATE)
+            self._state["last_release_date"] = today.isoformat()
+            if amount > 0:
+                self._state["treasury"] = treasury - amount
+                self._state["pool"] = int(self._state["pool"]) + amount
+                self._state["total_released"] = (
+                    int(self._state["total_released"]) + amount)
+            self._mark_dirty()
+            return amount
+
+    def lottery_boost_amount(self, now: datetime | None = None) -> int:
+        """宝くじブースト: 国庫が閾値を超えたら超過分の 50% を確保する。
+
+        確保した分は国庫から差し引いて lottery_boost_pending に積み、
+        take_lottery_boost で宝くじ側へ渡す。閾値未満なら何もしない。
+        """
+        with self._lock:
+            treasury = int(self._state["treasury"])
+            excess = treasury - TREASURY_BOOST_THRESHOLD
+            if excess <= 0:
+                return 0
+            amount = int(excess * TREASURY_BOOST_RATE)
+            if amount <= 0:
+                return 0
+            self._state["treasury"] = treasury - amount
+            self._state["lottery_boost_pending"] = (
+                int(self._state["lottery_boost_pending"]) + amount)
+            self._state["total_boosted"] = (
+                int(self._state["total_boosted"]) + amount)
+            self._mark_dirty()
+            return amount
+
+    def take_lottery_boost(self) -> int:
+        """確保済みの宝くじブーストを取り出す（取り出した分は消える）。"""
+        with self._lock:
+            amount = int(self._state["lottery_boost_pending"])
+            if amount > 0:
+                self._state["lottery_boost_pending"] = 0
+                self._mark_dirty()
+            return amount
 
 
 _shared_store: EconomyPoolStore | None = None
