@@ -8,6 +8,7 @@
 """
 import discord
 from core.emojis import JINROU, LOUPE, MUSIC, SUCCESS
+from core.game.game_v2 import text_panel
 
 COLOR = 0xFFFFFF
 WOLF_ROLES = ("人狼", "デカ狼")
@@ -94,23 +95,31 @@ def record_day(game, day: int, executed: list) -> None:
     _log(game).append(("day", day, [text]))
 
 
-def build_embed(game) -> discord.Embed:
-    """振り返り表の埋め込み。夜・昼ごとに 1 欄、最後に全員の役職。"""
-    embed = discord.Embed(title="振り返り表", color=COLOR)
+def build_view(game):
+    """振り返り表の V2 パネル（旧 build_embed の V2 版）。夜・昼ごとに 1 節、最後に全員の役職。
+
+    旧 embed は「欄 25 個・全体 6000 字」で抑えていたが、V2 の TextDisplay は
+    1 件 4000 字が上限なので、節の数を 24 件までに絞ったうえで本文が
+    3900 字を超える場合は古い節から落とす。
+    """
     entries = list(_log(game))
-    # 欄は最大 25 個。役職の欄に 1 つ残す
+    trimmed = False
     if len(entries) > 24:
         entries = entries[-24:]
-        embed.description = "（長いので最後の 24 件だけ表示しています）"
+        trimmed = True
+    sections = []
     for kind, n, lines in entries:
         title = f"第{n}夜" if kind == "night" else f"第{n}日 投票"
-        embed.add_field(name=title, value="\n".join(lines)[:1024] or "-", inline=False)
+        sections.append(f"**{title}**\n" + ("\n".join(lines) or "-"))
     alive = {p.id for p in getattr(game, "alive_players", [])}
     roles = [f"{SUCCESS if p.id in alive else '💀'} {name_of(game, p.id)}: {game.roles.get(p.id, '不明')}"
              for p in game.players]
-    embed.add_field(name="役職", value="\n".join(roles)[:1024] or "-", inline=False)
-    if len(embed) > 6000:
-        while len(embed) > 6000 and len(embed.fields) > 1:
-            embed.remove_field(0)
-        embed.description = "（長いので古い記録を省いています）"
-    return embed
+    sections.append("**役職**\n" + ("\n".join(roles) or "-"))
+    body = "\n\n".join(sections)
+    while len(body) > 3900 and len(sections) > 1:
+        sections.pop(0)
+        trimmed = True
+        body = "\n\n".join(sections)
+    if trimmed:
+        body = "（長いので一部の記録を省いています）\n\n" + body
+    return text_panel("振り返り表", body)

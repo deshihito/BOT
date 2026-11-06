@@ -10,6 +10,8 @@ from urllib.parse import quote
 
 import discord
 
+from core.game.game_v2 import text_panel
+
 # 役職ガイドのページ（TYPETA が作成中）。URL はここだけで管理する。
 ROLE_GUIDE_BASE_URL = "https://bot-deshihito.vercel.app/jinrou/roles"
 
@@ -125,6 +127,23 @@ def add_guide(embed: discord.Embed, role: str) -> discord.Embed:
     return embed
 
 
+def guide_text(role: str) -> str:
+    """役職ガイドを V2 パネル用のテキスト（1 行 1 項目）で返す。"""
+    return "\n".join(f"🔰 {name}: {value[:1024]}" for name, value in guide_fields(role))
+
+
+def phase_text(phase: str, role: Optional[str]) -> tuple[str, str]:
+    """フェーズヘルプの (タイトル, 本文) をテキストで返す（phase_embed の V2 版）。"""
+    title, body = PHASES.get(phase, ("❓ このフェーズ", "画面の案内に従ってください。"))
+    lines = [body]
+    if role:
+        heading = f"あなた（{role}）の今夜やること" if phase == "night" else f"あなたの役職: {role}"
+        lines.append(f"**{heading}**")
+        lines.append(night_todo(role) if phase == "night" else win_condition(role))
+    lines.append(f"役職ガイド: {role_url(role)}")
+    return title, "\n".join(lines)
+
+
 def phase_embed(phase: str, role: Optional[str]) -> discord.Embed:
     title, body = PHASES.get(phase, ("❓ このフェーズ", "画面の案内に従ってください。"))
     embed = discord.Embed(title=title, description=body, color=0xFFFFFF)
@@ -144,10 +163,17 @@ class PhaseHelpButton(discord.ui.Button):
 
     async def callback(self, interaction: discord.Interaction):
         role = self.role_lookup(interaction.user.id)
-        await interaction.response.send_message(embed=phase_embed(self.phase, role), ephemeral=True)
+        title, body = phase_text(self.phase, role)
+        await interaction.response.send_message(view=text_panel(title, body), ephemeral=True)
 
 
 class PhaseHelpView(discord.ui.View):
+    """旧来のヘルプボタン単体 View（互換のため残置）。
+
+    フェーズのパネル本体は GamePanelView 化され、ボタンはそちらの行に
+    直接組み込まれるようになったため、進行コードからは使われていない。
+    """
+
     def __init__(self, phase: str, role_lookup, timeout: Optional[float] = None):
         super().__init__(timeout=timeout)
         self.add_item(PhaseHelpButton(phase, role_lookup))

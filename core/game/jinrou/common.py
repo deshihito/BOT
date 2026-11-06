@@ -110,13 +110,17 @@ HELP_ROLES = [
 jinrou_guide.register_roles(HELP_ROLES)
 
 
-def phase_summary_embed(title: str, lines: list[str], *, color: int = 0x5865F2) -> discord.Embed:
-    """フェーズ区切りの結果を1枚の embed に集約する（表示モダン化 §4.2-9）。
+def phase_summary_view(title: str, lines: list[str], *, color: int | None = None):
+    """フェーズ区切りの結果を V2 パネル1枚に集約する（旧 phase_summary_embed の V2 版）。
 
     実況ライン（フェーズ進行の1行通知）は従来どおりプレーンで流し、
     夜明け結果・追放結果・勝敗確定など区切りの発表だけをここでまとめる。
+    ``color`` は旧 embed の色分け用引数で、V2 パネルには色の概念がないため
+    互換のために受け取るだけで使わない。
     """
-    return discord.Embed(title=title, description="\n".join(lines), color=color)
+    from core.game.game_v2 import text_panel
+
+    return text_panel(title, "\n".join(lines))
 
 
 def _is_wolf_side(game, p_id) -> bool:

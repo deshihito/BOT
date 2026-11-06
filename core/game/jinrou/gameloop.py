@@ -21,6 +21,7 @@ from core.game.jinrou.common import _is_wolf_side  # noqa: F401
 from core.game.jinrou.game import JinrouGame  # noqa: F401
 from core.game.jinrou.helpers import _check_and_reveal_ura_yakushoku, _get_display_role, _guide_role_lookup  # noqa: F401
 from core.game.jinrou.views import NightActionView, RoleCheckView  # noqa: F401
+from core.game.game_v2 import GamePanelView  # noqa: F401
 
 logger = logging.getLogger("cogs.jinrou")
 
@@ -49,10 +50,11 @@ class GameLoopMixin:
                 roles_for_display.append(display_r)
             roles_list = " / ".join(set(roles_for_display))
 
-        await game_panels.replace(channel, "party",
-            f"{SUCCESS}{mentions}\nゲーム開始。今回の役職内訳: {roles_list}\n下のボタンで自分の役職確認を行ってください。",
-            view=RoleCheckView(game, self)
-        )
+        role_check_view = RoleCheckView(game, self)
+        role_check_view.set_content(
+            "ゲーム開始",
+            f"{SUCCESS}{mentions}\n今回の役職内訳: {roles_list}\n下のボタンで自分の役職確認を行ってください。")
+        await game_panels.replace(channel, "party", view=role_check_view)
 
         for p in game.players:
             role = game.roles[p.id]
@@ -120,9 +122,9 @@ class GameLoopMixin:
                 except Exception:
                     logger.debug("人狼: 最終役職の発表に失敗しました", exc_info=True)
                 if game.review:
-                    try: await game.game_channel.send(embed=jinrou_review.build_embed(game))
+                    try: await game.game_channel.send(view=jinrou_review.build_view(game))
                     except Exception:
-                        logger.debug("人狼: 振り返りEmbedの送信に失敗しました", exc_info=True)
+                        logger.debug("人狼: 振り返りパネルの送信に失敗しました", exc_info=True)
             game.is_running = False
             jinrou_snapshot.clear_safely(game)
 
@@ -136,8 +138,9 @@ class GameLoopMixin:
         game.silenced_players.clear()
 
         minutes_str = f"{seconds // 60}分{seconds % 60}秒" if seconds % 60 else f"{seconds // 60}分"
-        await game_panels.replace(game.game_channel, "party", f"ーー {title}（{minutes_str}） ーー",
-                                     view=jinrou_guide.PhaseHelpView("day", _guide_role_lookup(game), timeout=seconds + 30))
+        panel = GamePanelView(f"{title}（{minutes_str}）", "", timeout=seconds + 30)
+        panel.add_row(jinrou_guide.PhaseHelpButton("day", _guide_role_lookup(game)))
+        await game_panels.replace(game.game_channel, "party", view=panel)
         if any(game.roles.get(p.id) == "パン屋" for p in game.alive_players):
             await game.game_channel.send(PANYA + 'パン屋がパンを焼きました')
 
@@ -165,8 +168,8 @@ class GameLoopMixin:
 
         game.night_actions = {}
         view = NightActionView(game)
-        view.add_item(jinrou_guide.PhaseHelpButton("night", _guide_role_lookup(game)))
-        msg = await game_panels.replace(game.game_channel, "party", "アクションを選択してください", view=view)
+        view.add_help_button(jinrou_guide.PhaseHelpButton("night", _guide_role_lookup(game)))
+        msg = await game_panels.replace(game.game_channel, "party", view=view)
 
         req_roles_single = ["占い師", "騎士", "罠師", "あごむに破道砲", "マサイ族", "陽キャ"]
         if game.day_count == 1: req_roles_single.append("ワンころ")
@@ -393,7 +396,7 @@ class GameLoopMixin:
 
         if game.alive_players:
             survivors_mention = " ".join(p.mention for p in game.alive_players)
-            await game.game_channel.send(embed=phase_summary_embed(
+            await game.game_channel.send(view=phase_summary_view(
                 "夜が明けました",
                 [f"生存者（{len(game.alive_players)}人）: {survivors_mention}"],
             ))
@@ -404,7 +407,7 @@ class GameLoopMixin:
 
         wolves_alive = [p for p in game.alive_players if game.roles.get(p.id) in ["人狼", "デカ狼"]]
         if not wolves_alive:
-            await game.game_channel.send(embed=phase_summary_embed(
+            await game.game_channel.send(view=phase_summary_view(
                 "勝敗確定", ["人狼全滅。村人陣営の勝利です。"], color=0x2ECC71))
             await self._check_koumorimuni_win(game)
             await self._record_team_win(game, winner_is_wolf=False)
@@ -419,7 +422,7 @@ class GameLoopMixin:
         non_wolves = [p for p in game.alive_players if not is_wolf_side(p.id)]
 
         if len(wolves) >= len(non_wolves):
-            await game.game_channel.send(embed=phase_summary_embed(
+            await game.game_channel.send(view=phase_summary_view(
                 "勝敗確定", ["人狼が支配した。人狼陣営の勝利です。"], color=0xE74C3C))
             await self._check_koumorimuni_win(game)
             await self._record_team_win(game, winner_is_wolf=True)
@@ -486,7 +489,7 @@ async def resume_game_loop(cog, game, channel, boundary):
                 logger.debug("人狼: 最終役職の発表に失敗しました", exc_info=True)
             if game.review:
                 try:
-                    await game.game_channel.send(embed=jinrou_review.build_embed(game))
+                    await game.game_channel.send(view=jinrou_review.build_view(game))
                 except Exception:
                     logger.debug("人狼: 振り返りEmbedの送信に失敗しました", exc_info=True)
         game.is_running = False
@@ -532,11 +535,12 @@ async def _restore_jinrou_session(cog, channel_id, entry) -> bool:
     game._original_channel = channel
     label = _BOUNDARY_LABELS.get(boundary, boundary)
     mentions = " ".join(p.mention for p in game.players)
-    await channel.send(
+    role_check_view = RoleCheckView(game, cog)
+    role_check_view.set_content(
+        "人狼を再開します",
         f"{mentions}\n{RESTART} 再起動前に進行中だった人狼を、{label}（第{game.day_count}日）から再開します。\n"
         "※ フェーズの途中経過（その夜のアクションや発言）は失われ、直近の境界まで巻き戻っています。"
-        "役職は「役職確認」ボタンで確認し直してください。",
-        view=RoleCheckView(game, cog),
-    )
+        "役職は「役職確認」ボタンで確認し直してください。")
+    await channel.send(view=role_check_view)
     asyncio.create_task(resume_game_loop(cog, game, channel, boundary))
     return True
