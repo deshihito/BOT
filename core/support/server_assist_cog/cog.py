@@ -9,8 +9,8 @@ from typing import Any
 import discord
 from discord.ext import commands
 
-from core import guild_settings
-from core.panel_v2 import as_panel_v2, edit_panel_v2
+from core.support import guild_settings
+from core.support.panel_v2 import as_panel_v2, edit_panel_v2
 from core.support.server_assist import discover_features, has_manage_permission
 
 logger = logging.getLogger(__name__)
