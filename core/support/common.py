@@ -28,9 +28,10 @@ from discord.ext import commands, tasks
 
 from cogs.clear import MAX_CLEAR
 from cogs.auth import get_intro_webhook, sanitize_webhook_name, role_failure_reason
-from core import action_usage, guild_settings
+from core.support import guild_settings
+from core.general import action_usage
 from core.support import usage_stats
-from core.panel_v2 import as_embed_v2, as_panel_v2, edit_panel_v2
+from core.support.panel_v2 import as_embed_v2, as_panel_v2, edit_panel_v2
 
 logger = logging.getLogger("cogs.support")  # 分割後も従来のログ名に統一する
 
@@ -48,7 +49,7 @@ async def report_callback_error(interaction: discord.Interaction, context: str,
 
     ``error`` が ``InteractionResponded`` のときは通知しない。その時点で
     panel_recovery か callback 自身の先行処理が既に応答を届けており、
-    追加のエラー通知は誤報になる（core/panel_v2.py の on_error と同じ扱い）。
+    追加のエラー通知は誤報になる（core/support/panel_v2.py の on_error と同じ扱い）。
     """
     if isinstance(error, discord.InteractionResponded):
         logger.debug("%s: 応答済みのためエラーを握ります", context)

@@ -2,15 +2,16 @@
 """BOT fixer の設定パネル。元は /support「モデレーション」から開く。
 
 パネル内に2つの設定エリアを持つ:
-- ①AGOコマンド制限（core/command_control.py）
-- ②他ボット制限（core/bot_control.py）
+- ①AGOコマンド制限（core/support/command_control.py）
+- ②他ボット制限（core/support/bot_control.py）
 """
 from __future__ import annotations
 
 from .common import *
-from core import action_registry, bot_control, command_control
-from core.bot_control import BOT_CONTROL_SECTION
-from core.command_control import (
+from core.support import bot_control, command_control
+from core.general import action_registry
+from core.support.bot_control import BOT_CONTROL_SECTION
+from core.support.command_control import (
     COMMAND_CONTROL_SECTION,
     MODE_ALLOW,
     MODE_DENY,
