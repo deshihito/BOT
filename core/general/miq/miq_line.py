@@ -2,7 +2,7 @@
 """MIQ の LINE 風レンダラ・アゴ合成・フォーマット登録表。元 cogs/general.py から分割。"""
 from __future__ import annotations
 
-from .common import *
+from ..common import *
 from .miq import (
     MIQ_LINE_MAX_IMAGES, MIQ_LINE_MAX_MESSAGES, MIQ_NEW_H, MIQ_NEW_W,
     _MIQ_CUSTOM_EMOJI_TOKEN, _MIQ_EMOJI_SIZE,
@@ -14,7 +14,7 @@ from .miq import (
     _miq_unit_font, _miq_unit_width, _miq_wrap, miq_is_refusing,
     miq_render_options, miq_resolve_format, render_miq_png,
 )
-from .meme import MEME_MAX_IMAGE_BYTES
+from ..meme import MEME_MAX_IMAGE_BYTES
 from .miq_styles import (
     _miq_date_str, _miq_heart, _miq_rng, _miq_truncate,
     render_miq_blueprint_png, render_miq_gif, render_miq_luxury_png,

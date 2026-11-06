@@ -2,7 +2,7 @@
 """MIQ のスタイル別レンダラ（GIF・漫画・音楽・ニュース・X・RPG・設計図・ピクセル）。元 cogs/general.py から分割。"""
 from __future__ import annotations
 
-from .common import *
+from ..common import *
 from .miq import (
     MIQ_GIF_MAX_FRAMES, MIQ_H, MIQ_NEW_H, MIQ_NEW_W, MIQ_W, _MIQ_ASSET_FONTS,
     _miq_display_text, _miq_draw_centered, _miq_draw_units_line,

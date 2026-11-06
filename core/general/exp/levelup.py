@@ -2,7 +2,7 @@
 """レベルアップカードの描画と通知。元 cogs/general.py から分割。"""
 from __future__ import annotations
 
-from .common import *
+from ..common import *
 
 LEVELUP_SECTION = "levelup_notify"
 

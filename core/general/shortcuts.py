@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from .common import *
-from .miq import is_miq_trigger
+from .miq.miq import is_miq_trigger
 
 def shortcut_vc_params(value: str, params: dict) -> dict:
     """vc ショートカットの params を ParamSpec で検証し、定義済みキーだけを返す。

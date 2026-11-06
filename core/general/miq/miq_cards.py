@@ -2,7 +2,7 @@
 """MIQ のスタイル別レンダラ（トレカ・ネオン・ダーク・ポップ・パステル・チケット・ノート）。元 cogs/general.py から分割。"""
 from __future__ import annotations
 
-from .common import *
+from ..common import *
 from .miq import (
     MIQ_NEW_H, MIQ_NEW_W, _miq_display_text, _miq_draw_units_line,
     _miq_emoji_font_path, _miq_fallback_fonts, _miq_fit, _miq_fit_units,

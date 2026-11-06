@@ -2,12 +2,12 @@
 """MIQ 設定パネルの UI。元 cogs/general.py から分割。"""
 from __future__ import annotations
 
-from .common import *
+from ..common import *
 from .miq import (
     MIQ_DEFAULT_PREFS, MIQ_FORMATS, MIQ_THEMES, _miq_available_fonts, miq_get_prefs,
     miq_resolve_format, miq_save_prefs,
 )
-from .meme import MEME_MAX_TEXT
+from ..meme import MEME_MAX_TEXT
 
 MIQ_TOGGLES = (
     ("grayscale", "モノクロ"),

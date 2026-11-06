@@ -3,8 +3,8 @@
 from __future__ import annotations
 from core.emojis import AGO_TICKET, BOOK, DICE, GAME, MUSIC
 
-from .common import *
-from .levelup import _levelup_font, _levelup_pick_font, _levelup_safe_name
+from ..common import *
+from ..exp.levelup import _levelup_font, _levelup_pick_font, _levelup_safe_name
 
 MIQ_W, MIQ_H = 1200, 630
 MIQ_NEW_W, MIQ_NEW_H = 1200, 675  # 新フォーマット(漫画風/音楽再生風/LINE風)のサイズ

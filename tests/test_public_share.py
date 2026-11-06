@@ -85,7 +85,7 @@ class RatingShareWiringTest(unittest.IsolatedAsyncioTestCase):
 
 class ExpStatusShareTest(unittest.IsolatedAsyncioTestCase):
     def make_view(self):
-        from core.general.exp_ui import ExpStatusView
+        from core.general.exp.exp_ui import ExpStatusView
 
         return ExpStatusView(456, 123)
 
@@ -109,7 +109,7 @@ class ExpStatusShareTest(unittest.IsolatedAsyncioTestCase):
 
 class PublicRankingRefreshTest(unittest.IsolatedAsyncioTestCase):
     async def test_any_user_can_refresh_public_exp_ranking(self):
-        from core.general.exp_ui import ExpRankingView
+        from core.general.exp.exp_ui import ExpRankingView
 
         view = ExpRankingView(123)
         interaction, _sent, _channel_sent = fake_interaction(user_id=999)

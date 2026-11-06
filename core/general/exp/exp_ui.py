@@ -2,7 +2,7 @@
 """EXP ステータス/ランキングの UI。元 cogs/general.py から分割。"""
 from __future__ import annotations
 
-from .common import *
+from ..common import *
 from .exp import (
     _as_int, _exp_ensure, _exp_load, _exp_root, general_level, level_from_exp,
 )

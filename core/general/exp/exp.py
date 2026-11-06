@@ -2,7 +2,7 @@
 """EXP・レベルの計算と永続化。元 cogs/general.py から分割。"""
 from __future__ import annotations
 
-from .common import *
+from ..common import *
 
 def exp_for_next(level: int, base: int, ratio: float) -> int:
     if level < 1:
