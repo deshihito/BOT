@@ -50,6 +50,8 @@ from core.game.shogi.cog import (
     _shogi_candidates,
     _shogi_eval,
     choose_ai_move,
+    _SHOGI_BG_CACHE,
+    _shogi_background,
     ShogiRenderer,
     serialize_shogi_game,
     deserialize_shogi_game,
