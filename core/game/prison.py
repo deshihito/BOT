@@ -17,7 +17,7 @@
 
 原典の prison_state はメモリ上の辞書で再起動で消えたが、AGO では
 再起動耐性の方針（「切れても死なない」）に合わせ JSON に永続化する。
-保存は core/steal.py と同じ流儀: 専用 JSON（既定 data/prison.json、
+保存は core/general/steal.py と同じ流儀: 専用 JSON（既定 data/prison.json、
 環境変数 PRISON_DATA_PATH で変更可）にメモリ主体＋バッチフラッシュ
 ＋原子差し替え。期限切れは読み取り時に lazy に解除する。
 

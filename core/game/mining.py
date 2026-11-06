@@ -22,7 +22,7 @@
 このモジュールが持つのはセッション状態・クールダウン・産出の抽選
 まで。プールの支払いと wallet への反映は呼び出し側
 （cogs/circulation.py）が economy_pool と wallet の経路で行い、
-失敗したら巻き戻す。保存は core/workshop.py と同じ流儀: 専用 JSON
+失敗したら巻き戻す。保存は core/general/workshop.py と同じ流儀: 専用 JSON
 （既定 data/mining.json、環境変数 MINING_DATA_PATH で変更可）に
 メモリ主体＋バッチフラッシュ＋原子差し替え。
 """
