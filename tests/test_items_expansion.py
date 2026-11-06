@@ -20,7 +20,7 @@ from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from core import craft, workshop
+from core.general import craft, workshop
 from core.game import gambling, mining
 from core.general import economy_pool, items, market
 from cogs import wallet as wallet_module
@@ -394,7 +394,7 @@ class CraftCatalystTest(unittest.TestCase):
 class StealGuardTest(unittest.TestCase):
     def _cog(self, tmp, wallet, item_store):
         from core.game import lottery as lottery_core
-        from core import steal as steal_core
+        from core.general import steal as steal_core
         bot = _FakeBot({"WalletCog": wallet})
         return CirculationCog(
             bot,

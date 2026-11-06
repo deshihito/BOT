@@ -59,7 +59,7 @@ def _clean_state(raw: Any) -> dict[str, Any]:
     return state
 
 
-_DEFAULT_PATH = Path(__file__).resolve().parent.parent / "data" / "daily_report.json"
+_DEFAULT_PATH = Path(__file__).resolve().parent.parent.parent / "data" / "daily_report.json"
 
 
 def default_path() -> Path:

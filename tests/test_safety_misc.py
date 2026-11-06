@@ -574,7 +574,7 @@ class _CreditFailWallet:
 
 class RefundFailureTest(unittest.TestCase):
     def test_workshop_buy_machine_refund_failure_is_reported(self):
-        from core import workshop as workshop_core
+        from core.general import workshop as workshop_core
         from core.general import items as items_core
         from cogs.workshop import WorkshopCog
 

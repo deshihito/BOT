@@ -17,7 +17,7 @@
 コインの実移動は呼び出し側が wallet の原子的な経路
 （_change_balance の CAS）で行い、transaction_history に
 steal_success / steal_fine の理由コードを残す。保存は
-core/workshop.py と同じ流儀: 専用 JSON（既定 data/steal.json、
+core/general/workshop.py と同じ流儀: 専用 JSON（既定 data/steal.json、
 環境変数 STEAL_DATA_PATH で変更可）にメモリ主体＋バッチフラッシュ
 ＋原子差し替え。
 """

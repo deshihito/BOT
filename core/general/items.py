@@ -57,7 +57,7 @@ FEE_DISCOUNT_MULTIPLIER = 0.5
 #: 採掘ドリンク: 採掘1回ごとに通常テーブルを追加でもう1回引ける。
 MINING_BOOST_EFFECT = "mining_boost"
 #: 合成触媒: 合成・委託のレア結果の重み倍率（委託の倍率と乗算し、
-#: 合計は core/craft.py の RARE_BOOST_CAP でキャップ）。
+#: 合計は core/general/craft.py の RARE_BOOST_CAP でキャップ）。
 CRAFT_CATALYST_EFFECT = "craft_catalyst"
 CRAFT_CATALYST_MULTIPLIER = 1.5
 #: 防犯チャーム: 自分を対象とする steal が自動で失敗する。

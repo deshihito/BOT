@@ -26,7 +26,7 @@ import discord
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from core.game import gambling as gambling_core
-from core import steal
+from core.general import steal
 from core.game import prison as prison_core
 from core.general import items, market as market_core
 from core.general.common import GENERAL_ACTIONS, MONEY_PRISON_BLOCKED_VALUES
@@ -41,7 +41,7 @@ from cogs.money_panel import status_embed
 from cogs.workshop import BuyMachineView, CraftView, WorkshopCog
 from core.game import lottery, mining
 from core.general import economy_pool
-from core import workshop as workshop_core
+from core.general import workshop as workshop_core
 
 T0 = datetime(2026, 1, 1, 9, 0, tzinfo=items.JST)
 

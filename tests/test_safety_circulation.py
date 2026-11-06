@@ -20,7 +20,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from core import steal
+from core.general import steal
 from core.game import lottery, mining, prison as prison_core
 from core.general import economy_pool, items
 from cogs import wallet as wallet_module
