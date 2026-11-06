@@ -15,8 +15,8 @@ from unittest.mock import AsyncMock, patch
 
 import cogs.general as general_module
 from cogs.general import GeneralCog
-from core import guild_settings
-from core.storage import KVStore
+from core.support import guild_settings
+from core.support.storage import KVStore
 
 
 def _user(**overrides):

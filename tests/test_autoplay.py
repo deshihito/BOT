@@ -6,9 +6,9 @@ import tempfile
 import unittest
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from core import guild_settings
+from core.support import guild_settings
 from core.game import autoplay
-from core.storage import KVStore
+from core.support.storage import KVStore
 from game_fakes import FakeBot, FakeChannel, FakeGuild, FakeMember, fast_time
 from cogs import jinrou, uno
 

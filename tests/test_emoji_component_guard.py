@@ -3,7 +3,7 @@
 Discord はコンポーネントの label / placeholder 文字列内ではカスタム絵文字
 markup を描画しない (本文/TextDisplay/Embed では描画される)。そのため:
 
-- label= / placeholder= 引数に core.emojis の定数や "<:" markup を埋めない
+- label= / placeholder= 引数に core.support.emojis の定数や "<:" markup を埋めない
   (絵文字は emoji= 引数側で持たせる)。
 - 通常文字列 (f文字列でないセグメント) に {MUSIC} のような定数名
   プレースホルダを残さない (暗黙の文字列連結で f文字列に混ざると
@@ -36,9 +36,9 @@ def _emoji_names(tree):
         if isinstance(node, ast.ImportFrom) and node.module and node.module.endswith("emojis"):
             for alias in node.names:
                 if alias.name == "*":
-                    # star import: core.emojis の全定数名を対象にする
+                    # star import: core.support.emojis の全定数名を対象にする
                     emojis_tree = ast.parse(
-                        (REPO_ROOT / "core/emojis.py").read_text(encoding="utf-8"))
+                        (REPO_ROOT / "core/support/emojis.py").read_text(encoding="utf-8"))
                     for top in emojis_tree.body:
                         if isinstance(top, ast.Assign):
                             for target in top.targets:

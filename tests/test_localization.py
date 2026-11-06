@@ -79,7 +79,7 @@ class LocalizationV2ViewTest(unittest.TestCase):
     def test_panel_v2_wrapper_text_is_translated(self):
         import discord
 
-        from core.panel_v2 import as_panel_v2
+        from core.support.panel_v2 import as_panel_v2
 
         panel = discord.ui.View(timeout=None)
         panel.embed = lambda: discord.Embed(title="言語設定")
