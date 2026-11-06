@@ -5,7 +5,7 @@
 - 取得した内容は「外部データ」として括弧付きで渡し、命令としては扱わせない
 """
 from __future__ import annotations
-from core.emojis import SUCCESS
+from core.support.emojis import SUCCESS
 
 import asyncio
 import ipaddress
