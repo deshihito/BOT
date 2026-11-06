@@ -9,15 +9,15 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
-from core import action_usage
+from core.general import action_usage
 from core.game import party_ranking
 from core.game import elo
 from core.support import usage_stats
-from core.emojis import BACK
+from core.support.emojis import BACK
 from core.game.game_guides import GAME_GUIDES, GAME_ORDER, guide_for_discord
-from core.panel_v2 import as_panel_v2, edit_panel_v2
-from core.public_share import PublicShareView
-from core.user_names import resolve_display_names
+from core.support.panel_v2 import as_panel_v2, edit_panel_v2
+from core.support.public_share import PublicShareView
+from core.general.user_names import resolve_display_names
 
 HUB_COLOR = 0xFFFFFF
 
@@ -622,7 +622,8 @@ class GameHub(commands.Cog):
         await interaction.response.defer(thinking=True)
         history_specs = []
         if interaction.guild_id is not None:
-            from core import action_usage, guild_settings
+            from core.support import guild_settings
+            from core.general import action_usage
             store = guild_settings.get_store()
             await store.ensure_loaded()
             history_specs = action_usage.history_panel_specs(
