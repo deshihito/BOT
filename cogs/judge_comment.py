@@ -1,7 +1,7 @@
 import aiohttp
 import discord
 from discord.ext import commands
-from core.autoplay import DEFAULT_D1_ENDPOINT
+from core.game.autoplay import DEFAULT_D1_ENDPOINT
 
 class JudgeCommentCog(commands.Cog):
     def __init__(self, bot: commands.Bot):

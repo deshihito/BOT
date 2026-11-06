@@ -23,7 +23,7 @@ import discord
 from discord.ext import commands, tasks
 
 import config
-from core import clan as clan_core
+from core.game import clan as clan_core
 from core import craft as craft_core
 from core.general import items as items_core
 from core.game import prison as prison_core
