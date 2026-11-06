@@ -12,7 +12,7 @@ import random
 import discord
 from discord.ext import commands
 
-from core import party_ranking
+from core.game import party_ranking
 from core.game import game_panels
 from core.game.loveletter import CARD_INFO, NEEDS_TARGET, LoveLetterGame, card_name
 
