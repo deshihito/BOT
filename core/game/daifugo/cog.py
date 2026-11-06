@@ -10,7 +10,7 @@
 - 4 枚出しで革命（数字の強さが逆になる。ジョーカーはいつでも最強）。もう一度 4 枚出しで戻る。
 - 出すカードは「手札から出す」で本人にだけ見えるメニューから選ぶ。
 - 手番は 30 秒。時間切れはパス（場が空で自分が親のときは一番弱いカードを出す）。
-- 結果は 大富豪・富豪・平民・貧民・大貧民。大富豪の勝利を core/party_ranking.py に記録する（人間 2 人以上のときだけ）。
+- 結果は 大富豪・富豪・平民・貧民・大貧民。大富豪の勝利を core/game/party_ranking.py に記録する（人間 2 人以上のときだけ）。
 """
 import asyncio
 import logging
@@ -21,7 +21,7 @@ from core.game import game_panels, game_restore
 from core.messages import recruit_join_prompt
 from discord.ext import commands
 
-from core import party_ranking
+from core.game import party_ranking
 
 logger = logging.getLogger(__name__)
 
