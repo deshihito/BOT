@@ -175,11 +175,26 @@ class LoaderMixin:
         return None, None
 
 
-    async def enqueue_track(self, guild_id: int, track: tuple) -> bool:
-        """ギルドごとのキュー上限を守ってトラックを追加する。"""
-        queue = self.get_state(guild_id)['queue']
+    async def enqueue_track(self, guild_id: int, track: tuple, *,
+                            requester_id: int | None = None,
+                            auto: dict | None = None) -> bool:
+        """ギルドごとのキュー上限を守ってトラックを追加する。
+
+        requester_id / auto は再生履歴と自動再生のための帰属メモで、キュー
+        要素の4タプル形式は変えず ``state['queue_requesters']`` に並行保持
+        する。人によるリクエスト（auto でない追加）は、自動補充の連続
+        カウンタと停止抑止を解除する。
+        """
+        state = self.get_state(guild_id)
+        queue = state['queue']
         if queue.full():
             return False
         await queue.put(track)
+        requesters = state.setdefault('queue_requesters', [])
+        requesters.append({'user_id': requester_id, 'auto': auto})
+        if requester_id is not None and auto is None:
+            state['autoplay_auto_count'] = 0
+            state['autoplay_notice_sent'] = False
+            state['autoplay_stopped'] = False
         self._save_music_snapshot(guild_id)
         return True

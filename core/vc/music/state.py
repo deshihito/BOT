@@ -77,6 +77,24 @@ class StateMixin:
                 'shuffle_enabled': False,
                 'playlist_load_task': None,
                 'progress_task': None,
+                # --- 自動再生 v1 ---
+                'autoplay_enabled': False,
+                # 停止操作で立て、自動補充を抑止する（手動リクエストで解除）。
+                'autoplay_stopped': False,
+                'autoplay_auto_count': 0,
+                'autoplay_notice_sent': False,
+                'autoplay_last_user_id': None,
+                # キュー要素（4タプル）と並行する帰属メモ {user_id, auto} のリスト。
+                'queue_requesters': [],
+                'current_queue_entry': None,
+                'current_entry_meta': None,
+                'current_requester_id': None,
+                'current_auto': None,
+                'current_history_key': None,
+                'history_counted_entry': None,
+                'last_seed': None,
+                'related_cache': {},
+                'session_recent_keys': [],
             }
         return self.states[guild_id]
 
@@ -97,6 +115,13 @@ class StateMixin:
                 task.cancel()
         while not state['queue'].empty():
             state['queue'].get_nowait()
+        state['queue_requesters'] = []
+        state['current_queue_entry'] = None
+        state['current_entry_meta'] = None
+        state['current_requester_id'] = None
+        state['current_auto'] = None
+        state['current_history_key'] = None
+        state['history_counted_entry'] = None
         state['current_track'] = None
         state['current_thumbnail_url'] = None
         state['current_yt_page_url'] = None

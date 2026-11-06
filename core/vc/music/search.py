@@ -65,7 +65,8 @@ class SearchMixin:
             selected_track = self.tracks[idx]
             state = self.cog.get_state(self.guild_id)
             state['current_ctx'] = self.ctx
-            if not await self.cog.enqueue_track(self.guild_id, (selected_track['url'], selected_track['title'], None, True)):
+            if not await self.cog.enqueue_track(self.guild_id, (selected_track['url'], selected_track['title'], None, True),
+                                                requester_id=interaction.user.id):
                 return await interaction.response.send_message(
                     embed=we(f"{FAILED} キューの上限（{MAX_QUEUE_SIZE}件）に達しています。"),
                     ephemeral=True,

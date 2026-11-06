@@ -67,6 +67,8 @@ class PanelMixin:
             else:
                 progress_info = f"`{elapsed_m}:{elapsed_s:02d}` 再生位置を取得中"
             track_info = f"**{filename}** `[{duration_str}]`"
+            if state.get('current_auto'):
+                track_info += f"（自動再生: {state['current_auto'].get('label', '')}）"
         else:
             track_info = "*楽曲が再生されていません*"
             progress_info = "*進捗は再生開始後に表示されます*"
@@ -86,11 +88,17 @@ class PanelMixin:
         )
         loop_label = {'off': 'OFF', 'track': '1曲', 'queue': 'キュー'}.get(state.get('loop_mode'), 'OFF')
         shuffle_label = 'ON' if state.get('shuffle_enabled') else 'OFF'
+        autoplay_label = 'ON' if state.get('autoplay_enabled') else 'OFF'
         panel_text += (
-            f"**再生モード:** ループ `{loop_label}` / シャッフル `{shuffle_label}`\n"
+            f"**再生モード:** ループ `{loop_label}` / シャッフル `{shuffle_label}` / 自動再生 `{autoplay_label}`\n"
             f"**予約キュー:** {queue_info}\n\n"
             "速度・音量・EQの選択と再生操作は、このパネル内の各コントロールから行えます。"
         )
+        if state.get('autoplay_enabled'):
+            panel_text += (
+                "\n自動再生は、VCにいる人のリクエスト履歴をもとに選曲します"
+                "（履歴は自動再生のために保存されます）。"
+            )
 
         try:
             await edit_message_v2(msg, build_music_panel_layout(
@@ -278,7 +286,16 @@ class PanelMixin:
             inline=False,
         )
         if queue_items:
-            q_desc = "\n".join(f"{i + 1}. {item[1]}" for i, item in enumerate(queue_items[:10]))
+            requesters = state.get('queue_requesters') or []
+
+            def _queue_line(i, item):
+                line = f"{i + 1}. {item[1]}"
+                meta = requesters[i] if i < len(requesters) else None
+                if isinstance(meta, dict) and meta.get('auto'):
+                    line += f"（自動再生: {meta['auto'].get('label', '')}）"
+                return line
+
+            q_desc = "\n".join(_queue_line(i, item) for i, item in enumerate(queue_items[:10]))
             if len(queue_items) > 10:
                 q_desc += f"\n…ほか {len(queue_items) - 10} 曲"
             embed.add_field(name="待機中", value=q_desc, inline=False)

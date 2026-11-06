@@ -100,7 +100,7 @@ class RestoreMixin:
                     "stream_url": None if is_yt else stream_url,
                     "elapsed": max(0.0, elapsed),
                 }
-        if current is None and not queue_items:
+        if current is None and not queue_items and not state.get('autoplay_enabled'):
             return None
         session = self.voice_sessions.get(guild_id)
         panel = state.get('panel_message')
@@ -124,6 +124,7 @@ class RestoreMixin:
             "custom_eq_filter": state.get('custom_eq_filter'),
             "loop_mode": state.get('loop_mode', 'off'),
             "shuffle_enabled": bool(state.get('shuffle_enabled')),
+            "autoplay_enabled": bool(state.get('autoplay_enabled')),
             "panel": panel_ref,
             "saved_at": time.time(),
         }
@@ -212,6 +213,7 @@ class RestoreMixin:
             return False
 
         state = self.get_state(guild_id)
+        state['autoplay_enabled'] = bool(snapshot.get('autoplay_enabled'))
         # check_queue の送信先ゲート（current_ctx / current_interaction）を復旧先で満たす。
         state['current_ctx'] = text_channel or channel
         for key in ('volume', 'speed', 'eq', 'custom_eq_filter', 'loop_mode'):
@@ -246,6 +248,9 @@ class RestoreMixin:
             ):
                 return False
         elif not state['queue'].empty():
+            await self.check_queue(guild_id)
+        elif state.get('autoplay_enabled'):
+            # 再生予定が無くても自動再生が ON なら補充から再開する。
             await self.check_queue(guild_id)
         else:
             await self.update_panel(guild_id)
