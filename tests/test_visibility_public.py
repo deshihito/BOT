@@ -87,16 +87,28 @@ class MusicQueueVisibilityTest(unittest.IsolatedAsyncioTestCase):
 
 
 class MarketChartVisibilityTest(unittest.IsolatedAsyncioTestCase):
-    async def test_chart_button_posts_publicly(self):
-        from cogs.market import MarketView
+    async def test_market_panel_posts_chart_file_publicly(self):
+        # チャートボタンによる遷移は廃止し、市場パネルを開いた時点で
+        # チャート画像を添付して embed 内にデフォルト表示する（公開）。
+        import random
+        import tempfile
 
-        cog = types.SimpleNamespace(chart_path=lambda: __file__)
-        view = MarketView(cog, 456)
-        interaction, sent = fake_interaction()
-        button = find_button(view, label="チャート")
-        await button.callback(interaction)
-        self.assertIn("file", sent)
-        self.assertNotEqual(sent.get("ephemeral"), True)
+        import cogs.market as market_module
+        from core import market as market_core
+        from cogs.market import MarketCog
+
+        with tempfile.TemporaryDirectory() as tmp:
+            store = market_core.MarketStore(
+                pathlib.Path(tmp) / "market.json", rng=random.Random(42))
+            cog = MarketCog(
+                types.SimpleNamespace(get_cog=lambda _name: None), store=store)
+            interaction, sent = fake_interaction()
+            with patch.object(
+                    market_module, "CHART_PATH", pathlib.Path(__file__)):
+                await cog.show_market(interaction)
+            self.assertIn("view", sent)
+            self.assertIn("files", sent)
+            self.assertNotEqual(sent.get("ephemeral"), True)
 
 
 class GeneralRankingVisibilityTest(unittest.IsolatedAsyncioTestCase):

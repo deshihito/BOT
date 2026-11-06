@@ -29,6 +29,7 @@ from core.panel_v2 import as_panel_v2, edit_panel_v2
 from core import action_registry, action_usage, ai_omnirush, ai_preferences, ai_provider_router, guild_settings, levelup_card, logfare, shortcuts, usage_stats
 from core.game_guides import GAME_GUIDES, GAME_ORDER
 from core import localization, translation
+from core import prison as prison_core
 from core.messages import CIRCULATION_NOT_LOADED, GAMBLING_NOT_LOADED, ITEMS_NOT_LOADED, MARKET_NOT_LOADED, MONEY_PANEL_NOT_LOADED, WORKSHOP_NOT_LOADED
 from core.libretranslate import LibreTranslateClient, LibreTranslateError
 
@@ -309,6 +310,15 @@ class GeneralCog(
         fujo = self.bot.get_cog("FujoSurvival")
 
         # ===== マネー系 =====
+        # 逮捕中はマネージャンルの実行系アクションを入口で一元的に拒否する
+        # （core/prison.py）。表示系（マネーパネル・残高・市場/アイテム/
+        # 工房/宝くじのパネル表示・ランキング）は逮捕中でも開けるが、
+        # パネル内の実行は各 cog の execute_* 側でも同じチェックをする。
+        if value in MONEY_PRISON_BLOCKED_VALUES:
+            blocked_message = prison_core.block_message(
+                str(interaction.user.id))
+            if blocked_message:
+                return await self._safe_respond(interaction, blocked_message)
         if value == "money_panel":
             panel_cog = self.bot.get_cog("MoneyPanelCog")
             if panel_cog is None:

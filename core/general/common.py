@@ -61,6 +61,17 @@ GENERAL_GENRES = {
 # 旧ジャンルで保存されたショートカットを新しいジャンルへ移行する（導線最適化 S7）。
 GENERAL_GENRE_ALIASES = {"translation": "custom", "miq": "custom"}
 
+# 逮捕中（core/prison.py）に実行を拒否するマネージャンルのアクション値。
+# 表示系（money_panel / status / coin_leaderboard / market / items /
+# workshop / lottery のパネル表示）は含めない（開くことはできる）。
+MONEY_PRISON_BLOCKED_VALUES = frozenset({
+    "pay", "token_buy", "token_sell",
+    "item_buy", "item_use", "box_open",
+    "machine_buy", "workshop_claim", "craft",
+    "mining", "lottery_buy", "steal",
+    "slot", "double", "blackjack", "dice",
+})
+
 GENERAL_ACTIONS = {
     "money": [
         ("マネーパネル", "money_panel"),

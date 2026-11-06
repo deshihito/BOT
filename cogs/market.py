@@ -27,20 +27,53 @@ import config
 from core import economy_pool as economy_core
 from core import items as items_core
 from core import market as market_core
+from core import prison as prison_core
 from core.messages import MARKET_INVALID_AMOUNT, market_trade_failed
+from core.panel_v2 import as_panel_v2, edit_panel_v2
 from cogs.wallet import INSUFFICIENT
 
 logger = logging.getLogger(__name__)
 
 CHART_PATH = Path(__file__).resolve().parent.parent / "data" / "market_chart.png"
+CHART_FILENAME = "market_chart.png"
 MARKET_COLOR = 0x2ECC71
+#: チャート描画に使う同梱の日本語フォント（matplotlib 既定には日本語が
+#: 無く、タイトル等が豆腐化するため font_manager へ登録して使う）。
+CHART_FONT_PATH = (Path(__file__).resolve().parent.parent
+                   / "assets" / "fonts" / "MPLUSRounded1c-Regular.ttf")
+
+
+# ---------------------------------------------------------------------------
+# コンポーネントV2 統一（core/panel_v2.py の流儀）
+# ---------------------------------------------------------------------------
+
+def _wrap(view):
+    """View を PanelLayoutView で包み、再描画用に view._v2 へ保持する。"""
+    view._v2 = as_panel_v2(view)
+    return view._v2
+
+
+async def _edit_panel(interaction: discord.Interaction, view, *, button=None) -> None:
+    """パネルをその場で再描画する（V2 で包まれていれば V2 の編集経路）。"""
+    container = getattr(button, "view", None)
+    if container is None or not hasattr(container, "_sync"):
+        container = getattr(view, "_v2", None) or view
+    if hasattr(container, "_sync"):
+        container._sync()
+        files = view.panel_files() if hasattr(view, "panel_files") else None
+        await edit_panel_v2(interaction, container, files=files)
+    elif interaction.response.is_done():
+        await interaction.edit_original_response(embed=view.embed(), view=view)
+    else:
+        await interaction.response.edit_message(embed=view.embed(), view=view)
 
 
 def _fmt_tokens(amount: float) -> str:
     return f"{amount:,.2f}"
 
 
-def _market_embed(store: market_core.MarketStore, user_id: int) -> discord.Embed:
+def _market_embed(store: market_core.MarketStore, user_id: int,
+                  *, with_chart: bool = False) -> discord.Embed:
     state = store.snapshot()
     now = datetime.now(config.JST)
     rate = float(state["rate"])
@@ -61,19 +94,51 @@ def _market_embed(store: market_core.MarketStore, user_id: int) -> discord.Embed
     embed.add_field(name="変動（1時間）", value=f"{change_1h:+.2%}", inline=True)
     embed.add_field(name="変動（本日）", value=f"{change_day:+.2%}", inline=True)
     embed.add_field(name="あなたの保有量", value=f"{_fmt_tokens(store.token_balance(str(user_id)))} {market_core.TOKEN_NAME}", inline=True)
-    embed.add_field(name="市場プール（コイン）", value=f"{int(state['pool_aga']):,} AGO", inline=True)
-    embed.add_field(name="市場プール（トークン）", value=f"{_fmt_tokens(float(state['pool_token']))}", inline=True)
+    # プール額はユーザー向けに出さない（取引可否の判定は内部で従来どおり）。
     embed.add_field(name="1回の取引上限", value=f"{store.trade_cap_aga():,} AGO", inline=True)
     if state.get("last_news"):
         embed.add_field(name="最近のニュース", value=str(state["last_news"]), inline=False)
     if halted:
         embed.add_field(name="⚠️ 取引停止中", value=reason, inline=False)
+    if with_chart:
+        # チャートは遷移させず、パネルを開いた時点で embed 内に出す。
+        embed.set_image(url=f"attachment://{CHART_FILENAME}")
     embed.set_footer(text="レートは5分ごとに更新されます。売買には手数料がかかります。")
     return embed
 
 
+_chart_font_ready = False
+
+
+def _ensure_chart_font() -> None:
+    """同梱の日本語フォントを matplotlib に登録する（初回のみ）。
+
+    matplotlib の既定フォント（DejaVu）には日本語グリフが無く、タイトル
+    等が豆腐（□）になるため、リポジトリ同梱フォントを使う。
+    """
+    global _chart_font_ready
+    if _chart_font_ready:
+        return
+    _chart_font_ready = True
+    try:
+        import matplotlib
+        from matplotlib import font_manager
+        if CHART_FONT_PATH.exists():
+            font_manager.fontManager.addfont(str(CHART_FONT_PATH))
+            family = font_manager.FontProperties(
+                fname=str(CHART_FONT_PATH)).get_name()
+            matplotlib.rcParams["font.family"] = family
+        matplotlib.rcParams["axes.unicode_minus"] = False
+    except Exception:
+        logger.exception("market: チャート用フォントの登録に失敗しました")
+
+
 def _render_chart(history: list[dict]) -> bytes | None:
-    """過去5時間の OHLC チャートを描く（matplotlib は遅延 import、呼び出しは to_thread 前提）。"""
+    """過去5時間の価格チャート（OHLC＋20期間移動平均）を描く。
+
+    出来高の下段グラフは廃止し、価格チャートだけにした（ユーザー指示）。
+    matplotlib は遅延 import、呼び出しは to_thread 前提。
+    """
     try:
         import matplotlib
         matplotlib.use("Agg")
@@ -81,15 +146,14 @@ def _render_chart(history: list[dict]) -> bytes | None:
     except Exception:
         logger.exception("market: matplotlib を読み込めませんでした")
         return None
+    _ensure_chart_font()
     buckets = market_core.ohlc_buckets(history, hours=5)
     if not buckets:
         return None
     closes = [b["close"] for b in buckets]
     ma = market_core.moving_average(closes, window=20)
-    fig, (ax, ax2) = plt.subplots(
-        2, 1, figsize=(9, 5), gridspec_kw={"height_ratios": [4, 1]}, facecolor="#2b2d31")
+    fig, ax = plt.subplots(figsize=(9, 4), facecolor="#2b2d31")
     ax.set_facecolor("#2b2d31")
-    ax2.set_facecolor("#2b2d31")
     for i, b in enumerate(buckets):
         color = "#00ff88" if b["close"] >= b["open"] else "#ff4444"
         ax.plot([i, i], [b["low"], b["high"]], color=color)
@@ -97,13 +161,11 @@ def _render_chart(history: list[dict]) -> bytes | None:
                                    max(abs(b["close"] - b["open"]), 0.01), color=color))
     ma_x = [i for i, v in enumerate(ma) if v is not None]
     ax.plot(ma_x, [ma[i] for i in ma_x], color="#ffaa00", linewidth=2)
-    ax2.bar(range(len(buckets)), [b["volume"] for b in buckets], color="#888888")
     labels = [b["t"].strftime("%H:%M") for b in buckets]
     step = max(1, len(labels) // 10)
     ax.set_xticks(range(0, len(labels), step))
     ax.set_xticklabels(labels[::step], rotation=45, color="white")
     ax.tick_params(colors="white")
-    ax2.tick_params(colors="white")
     ax.set_title(f"{market_core.TOKEN_NAME}市場（過去5時間）", color="white")
     buf = io.BytesIO()
     try:
@@ -161,13 +223,20 @@ class MarketView(discord.ui.View):
         # 公開パネル化（ephemeral第2波）: 操作は本人のみ。
         return interaction.user.id == self.user_id
 
-    async def _refresh(self, interaction: discord.Interaction):
-        await interaction.response.edit_message(
-            embed=_market_embed(self.cog.store, self.user_id), view=self)
+    def embed(self) -> discord.Embed:
+        return _market_embed(
+            self.cog.store, self.user_id,
+            with_chart=self.cog.chart_path() is not None)
+
+    def panel_files(self) -> list[discord.File] | None:
+        path = self.cog.chart_path()
+        if path is None:
+            return None
+        return [discord.File(str(path), filename=CHART_FILENAME)]
 
     @discord.ui.button(label="更新", style=discord.ButtonStyle.secondary)
     async def refresh(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await self._refresh(interaction)
+        await _edit_panel(interaction, self, button=button)
 
     @discord.ui.button(label="買う", style=discord.ButtonStyle.success)
     async def buy(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -176,15 +245,6 @@ class MarketView(discord.ui.View):
     @discord.ui.button(label="売る", style=discord.ButtonStyle.danger)
     async def sell(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.send_modal(TradeModal(self.cog, "sell"))
-
-    @discord.ui.button(label="チャート", style=discord.ButtonStyle.primary)
-    async def chart(self, interaction: discord.Interaction, button: discord.ui.Button):
-        path = self.cog.chart_path()
-        if path is None:
-            return await interaction.response.send_message(
-                "チャートはまだ準備中です。少し待ってから開いてください。", ephemeral=True)
-        await interaction.response.send_message(
-            file=discord.File(str(path), filename="market_chart.png"))
 
 
 class MarketCog(commands.Cog):
@@ -245,8 +305,12 @@ class MarketCog(commands.Cog):
     # ------------------------------------------------------------------ 入口
     async def show_market(self, interaction: discord.Interaction):
         view = MarketView(self, interaction.user.id)
-        await interaction.response.send_message(
-            embed=_market_embed(self.store, interaction.user.id), view=view)
+        wrapped = _wrap(view)
+        files = view.panel_files()
+        if files:
+            await interaction.response.send_message(view=wrapped, files=files)
+        else:
+            await interaction.response.send_message(view=wrapped)
 
     async def open_buy(self, interaction: discord.Interaction):
         await interaction.response.send_modal(TradeModal(self, "buy"))
@@ -304,6 +368,9 @@ class MarketCog(commands.Cog):
     async def execute_buy(self, user_id: int, aga_amount: int) -> str:
         uid = str(user_id)
         try:
+            blocked = prison_core.block_message(uid)
+            if blocked:
+                return market_trade_failed(blocked)
             fee_rate = self._effective_fee_rate(uid)
             cap_ratio = self._effective_cap_ratio(uid)
             self.store.validate_buy(aga_amount, fee_rate=fee_rate, cap_ratio=cap_ratio)
@@ -335,6 +402,9 @@ class MarketCog(commands.Cog):
     async def execute_sell(self, user_id: int, token_amount: float) -> str:
         uid = str(user_id)
         try:
+            blocked = prison_core.block_message(uid)
+            if blocked:
+                return market_trade_failed(blocked)
             fee_rate = self._effective_fee_rate(uid)
             cap_ratio = self._effective_cap_ratio(uid)
             self.store.validate_sell(uid, token_amount, fee_rate=fee_rate, cap_ratio=cap_ratio)

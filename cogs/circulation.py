@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import random
 from datetime import datetime
 from typing import Callable
 
@@ -35,8 +36,10 @@ from core import economy_pool as economy_core
 from core import items as items_core
 from core import lottery as lottery_core
 from core import mining as mining_core
+from core import prison as prison_core
 from core import steal as steal_core
 from core.messages import circulation_action_failed
+from core.panel_v2 import as_panel_v2, edit_panel_v2
 from cogs import wallet as wallet_module  # INSUFFICIENT は実行時に引く（テストの cog 再読込で同一性が崩れないため）
 
 logger = logging.getLogger(__name__)
@@ -56,6 +59,30 @@ def _fmt_minutes(seconds: float) -> str:
     if minutes >= 60:
         return f"約{minutes / 60:.1f}時間"
     return f"約{minutes}分"
+
+
+# ---------------------------------------------------------------------------
+# コンポーネントV2 統一（core/panel_v2.py の流儀）
+# ---------------------------------------------------------------------------
+
+def _wrap(view):
+    """View を PanelLayoutView で包み、再描画用に view._v2 へ保持する。"""
+    view._v2 = as_panel_v2(view)
+    return view._v2
+
+
+async def _edit_panel(interaction: discord.Interaction, view, *, button=None) -> None:
+    """パネルをその場で再描画する（V2 で包まれていれば V2 の編集経路）。"""
+    container = getattr(button, "view", None)
+    if container is None or not hasattr(container, "_sync"):
+        container = getattr(view, "_v2", None) or view
+    if hasattr(container, "_sync"):
+        container._sync()
+        await edit_panel_v2(interaction, container)
+    elif interaction.response.is_done():
+        await interaction.edit_original_response(embed=view.embed(), view=view)
+    else:
+        await interaction.response.edit_message(embed=view.embed(), view=view)
 
 
 # ---------------------------------------------------------------------------
@@ -94,19 +121,19 @@ class MiningView(discord.ui.View):
         # 公開パネル化（ephemeral第2波）: 操作は本人のみ。
         return interaction.user.id == self.user_id
 
+    def embed(self) -> discord.Embed:
+        return _mining_embed(self.cog, self.user_id, self.last_result)
+
     @discord.ui.button(label="更新", style=discord.ButtonStyle.secondary)
     async def refresh(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.edit_message(
-            embed=_mining_embed(self.cog, self.user_id, self.last_result), view=self)
+        await _edit_panel(interaction, self, button=button)
 
     @discord.ui.button(label="採掘する", style=discord.ButtonStyle.success)
     async def dig(self, interaction: discord.Interaction, button: discord.ui.Button):
-        # セッション型なので新規投稿せず、同じ embed を編集して更新する。
+        # セッション型なので新規投稿せず、同じメッセージを編集して更新する。
         await interaction.response.defer()
         self.last_result = await self.cog.execute_mining(interaction.user.id)
-        await interaction.edit_original_response(
-            embed=_mining_embed(self.cog, self.user_id, self.last_result),
-            view=self)
+        await _edit_panel(interaction, self, button=button)
 
 
 # ---------------------------------------------------------------------------
@@ -151,10 +178,6 @@ class BuyLotteryView(discord.ui.View):
         super().__init__(timeout=180)
         self.cog = cog
         self.user_id = user_id
-
-    async def interaction_check(self, interaction) -> bool:
-        # 公開パネル化（ephemeral第2波）: 操作は本人のみ。
-        return interaction.user.id == self.user_id
         allowance = cog.lottery_store.remaining_allowance(str(user_id))
         counts = sorted({c for c in (1, 2, 3, 5, 10) if c <= allowance} | {allowance})
         options = [
@@ -166,6 +189,15 @@ class BuyLotteryView(discord.ui.View):
         select = discord.ui.Select(placeholder="購入する枚数を選ぶ", options=options)
         select.callback = self._on_select
         self.add_item(select)
+
+    async def interaction_check(self, interaction) -> bool:
+        # 公開パネル化（ephemeral第2波）: 操作は本人のみ。
+        return interaction.user.id == self.user_id
+
+    def embed(self) -> discord.Embed:
+        return discord.Embed(
+            title="宝くじを買う", description="購入する枚数を選んでください。",
+            color=CIRCULATION_COLOR)
 
     async def _on_select(self, interaction: discord.Interaction):
         count = int(interaction.data["values"][0])
@@ -184,11 +216,13 @@ class LotteryView(discord.ui.View):
         # 公開パネル化（ephemeral第2波）: 操作は本人のみ。
         return interaction.user.id == self.user_id
 
+    def embed(self) -> discord.Embed:
+        return _lottery_embed(self.cog, self.user_id)
+
     @discord.ui.button(label="更新", style=discord.ButtonStyle.secondary)
     async def refresh(self, interaction: discord.Interaction, button: discord.ui.Button):
         await self.cog.settle_lottery()
-        await interaction.response.edit_message(
-            embed=_lottery_embed(self.cog, self.user_id), view=self)
+        await _edit_panel(interaction, self, button=button)
 
     @discord.ui.button(label="宝くじを買う", style=discord.ButtonStyle.success)
     async def buy(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -199,8 +233,7 @@ class LotteryView(discord.ui.View):
                     f"チケットは1人{lottery_core.MAX_TICKETS_PER_USER}枚までです。"),
                 ephemeral=True)
         await interaction.response.send_message(
-            "購入する枚数を選んでください。",
-            view=BuyLotteryView(self.cog, interaction.user.id))
+            view=_wrap(BuyLotteryView(self.cog, interaction.user.id)))
 
 
 # ---------------------------------------------------------------------------
@@ -250,11 +283,14 @@ class StealView(discord.ui.View):
         super().__init__(timeout=180)
         self.cog = cog
         self.user_id = user_id
+        self.add_item(StealTargetSelect(cog))
 
     async def interaction_check(self, interaction) -> bool:
         # 公開パネル化（ephemeral第2波）: 操作は本人のみ。
         return interaction.user.id == self.user_id
-        self.add_item(StealTargetSelect(cog))
+
+    def embed(self) -> discord.Embed:
+        return _steal_embed(self.cog, self.user_id)
 
 
 # ---------------------------------------------------------------------------
@@ -268,7 +304,8 @@ class CirculationCog(commands.Cog):
                  steal_store: steal_core.StealStore | None = None,
                  item_store: items_core.ItemStore | None = None,
                  balance_reader: Callable[[str], int] | None = None,
-                 economy_store: economy_core.EconomyPoolStore | None = None):
+                 economy_store: economy_core.EconomyPoolStore | None = None,
+                 prison_store: prison_core.PrisonStore | None = None):
         self.bot = bot
         self.mining_store = (
             mining_store if mining_store is not None else mining_core.MiningStore())
@@ -280,8 +317,14 @@ class CirculationCog(commands.Cog):
         self.economy_store = (
             economy_store if economy_store is not None
             else economy_core.shared_store())
+        # 逮捕状態も経済系で共有する単一インスタンスを使う。
+        self.prison_store = (
+            prison_store if prison_store is not None
+            else prison_core.shared_store())
         self._injected_item_store = item_store
         self._balance_reader = balance_reader
+        # 警棒の撃退抽選・泥帽の上乗せ率の抽選用（テストで差し替え可能）。
+        self._rng = random.Random()
 
     def _item_store(self) -> items_core.ItemStore:
         """ItemStore は ItemsCog のものを共有する（二重化すると所持が割れる）。"""
@@ -303,6 +346,7 @@ class CirculationCog(commands.Cog):
         self.lottery_store.flush()
         self.steal_store.flush()
         self.economy_store.flush()
+        self.prison_store.flush()
 
     @tasks.loop(seconds=mining_core.FLUSH_INTERVAL_SECONDS)
     async def flush_loop(self) -> None:
@@ -311,6 +355,7 @@ class CirculationCog(commands.Cog):
             self.lottery_store.maybe_flush()
             self.steal_store.maybe_flush()
             self.economy_store.maybe_flush()
+            self.prison_store.maybe_flush()
             await self.settle_lottery()
         except Exception:
             logger.exception("circulation: 定期フラッシュ／抽選確定に失敗しました")
@@ -355,14 +400,12 @@ class CirculationCog(commands.Cog):
     # ------------------------------------------------------------------ 入口
     async def show_mining(self, interaction: discord.Interaction):
         view = MiningView(self, interaction.user.id)
-        await interaction.response.send_message(
-            embed=_mining_embed(self, interaction.user.id), view=view)
+        await interaction.response.send_message(view=_wrap(view))
 
     async def show_lottery(self, interaction: discord.Interaction):
         await self.settle_lottery()
         view = LotteryView(self, interaction.user.id)
-        await interaction.response.send_message(
-            embed=_lottery_embed(self, interaction.user.id), view=view)
+        await interaction.response.send_message(view=_wrap(view))
 
     async def open_lottery_buy(self, interaction: discord.Interaction):
         await self.settle_lottery()
@@ -372,8 +415,7 @@ class CirculationCog(commands.Cog):
                     f"チケットは1人{lottery_core.MAX_TICKETS_PER_USER}枚までです。"),
                 ephemeral=True)
         await interaction.response.send_message(
-            "購入する枚数を選んでください。",
-            view=BuyLotteryView(self, interaction.user.id))
+            view=_wrap(BuyLotteryView(self, interaction.user.id)))
 
     async def open_steal(self, interaction: discord.Interaction):
         if interaction.guild is None:
@@ -381,8 +423,7 @@ class CirculationCog(commands.Cog):
                 circulation_action_failed("盗むはサーバーの中でのみ使えます。"),
                 ephemeral=True)
         view = StealView(self, interaction.user.id)
-        await interaction.response.send_message(
-            embed=_steal_embed(self, interaction.user.id), view=view)
+        await interaction.response.send_message(view=_wrap(view))
 
     # ------------------------------------------------------------------ 採掘の実行
     async def execute_mining(self, user_id: int, now: datetime | None = None) -> str:
@@ -394,6 +435,9 @@ class CirculationCog(commands.Cog):
         """
         uid = str(user_id)
         try:
+            blocked = prison_core.block_message(uid, now=now, store=self.prison_store)
+            if blocked:
+                return circulation_action_failed(blocked)
             status = self.mining_store.status(uid, now=now)
             if status["session_left"] <= 0:
                 granted = self.mining_store.start_session(uid, now=now)
@@ -509,6 +553,9 @@ class CirculationCog(commands.Cog):
                                   now: datetime | None = None) -> str:
         uid = str(user_id)
         try:
+            blocked = prison_core.block_message(uid, now=now, store=self.prison_store)
+            if blocked:
+                return circulation_action_failed(blocked)
             await self.settle_lottery(now=now)
             if count <= 0:
                 return circulation_action_failed("購入枚数は1枚以上で指定してください。")
@@ -556,22 +603,96 @@ class CirculationCog(commands.Cog):
                 return circulation_action_failed("自分からは盗めません。")
             if target_is_bot:
                 return circulation_action_failed("Botからは盗めません。")
+            # 逮捕中のユーザーはマネー系の操作自体ができない。
+            blocked = prison_core.block_message(actor, now=now, store=self.prison_store)
+            if blocked:
+                return circulation_action_failed(blocked)
             self.steal_store.check(actor, target, now=now)
             target_balance = await self._balance(target)
-            amount = steal_core.steal_amount(target_balance)
-            if amount <= 0:
+            if steal_core.steal_amount(target_balance) <= 0:
                 return circulation_action_failed(
                     f"相手のコインが少ないため盗めません"
                     f"（残高 {steal_core.TARGET_MIN_BALANCE:,} AGO 未満の相手は保護されます）。")
+            try:
+                item_store = self._item_store()
+            except Exception:
+                item_store = None
+
+            def _count(user_id: str, item_id: str) -> int:
+                if item_store is None:
+                    return 0
+                try:
+                    return item_store.count(user_id, item_id)
+                except Exception:
+                    return 0
+
+            def _has_effect(user_id: str, effect_id: str) -> bool:
+                if item_store is None:
+                    return False
+                try:
+                    return item_store.has_effect(user_id, effect_id)
+                except Exception:
+                    return False
+
+            wallet = self._wallet()
             # 防犯チャーム発動中の相手は自動で失敗する（対象側への
             # 通知は増やさない。実行者の罰金・クールダウンは通常どおり）。
-            try:
-                guarded = self._item_store().has_effect(
-                    target, items_core.STEAL_GUARD_EFFECT)
-            except Exception:
-                guarded = False
-            wallet = self._wallet()
-            if not guarded and self.steal_store.roll_success():
+            # チャームが先に弾くため、その場合は警棒も発動しない。
+            guarded = _has_effect(target, items_core.STEAL_GUARD_EFFECT)
+            # 警棒系（対象の所持で受動発動）: 大警棒は常時、警棒は確率で
+            # 撃退し、発動した1個が消滅して実行者は逮捕される。
+            repelled_by: str | None = None
+            if not guarded:
+                if _count(target, items_core.DAI_BATON_ITEM) > 0:
+                    repelled_by = items_core.DAI_BATON_ITEM
+                elif (_count(target, items_core.BATON_ITEM) > 0
+                        and self._rng.random() < items_core.BATON_REPEL_RATE):
+                    repelled_by = items_core.BATON_ITEM
+            if repelled_by is not None:
+                try:
+                    item_store.remove(target, repelled_by, 1)
+                except Exception:
+                    pass
+                fine, fine_error = await self._transfer_fine(actor, target)
+                if fine_error is not None:
+                    return circulation_action_failed(fine_error)
+                minutes = (
+                    prison_core.DAI_BATON_PRISON_MINUTES
+                    if repelled_by == items_core.DAI_BATON_ITEM
+                    else prison_core.BATON_PRISON_MINUTES)
+                self.prison_store.imprison(
+                    actor, minutes=minutes, reason="baton_counter", now=now)
+                self.steal_store.record_attempt(actor, target, now=now)
+                baton_name = items_core.ITEM_DEFS[repelled_by]["name"]
+                lines = [
+                    f"🚔 **{baton_name}で撃退されました！**",
+                    f"逮捕されました（あと{prison_core.format_remaining(minutes * 60)}"
+                    "はマネー系の操作ができません）。",
+                ]
+                if fine > 0:
+                    lines.append(
+                        f"罰金として <@{target}> に **{fine:,} AGO** を払いました。")
+                return "\n".join(lines)
+            # 泥帽系（実行者の所持）: 大泥帽を優先して1個使い、成功時は
+            # 上乗せ、失敗時は逮捕。成功・失敗どちらでも消滅する。
+            mud_item: str | None = None
+            if _count(actor, items_core.DAI_MUD_HAT_ITEM) > 0:
+                mud_item = items_core.DAI_MUD_HAT_ITEM
+            elif _count(actor, items_core.MUD_HAT_ITEM) > 0:
+                mud_item = items_core.MUD_HAT_ITEM
+            rate_bonus = (
+                items_core.DAI_MUD_HAT_RATE_BONUS
+                if mud_item == items_core.DAI_MUD_HAT_ITEM else 0.0)
+            amount_multiplier = 1.0
+            # 大怪盗（期間効果）: 成功率と奪える額が上がる。
+            if _has_effect(actor, items_core.THIEF_EFFECT):
+                rate_bonus += items_core.THIEF_RATE_BONUS
+                amount_multiplier = items_core.THIEF_AMOUNT_MULTIPLIER
+            amount = steal_core.steal_amount(
+                target_balance,
+                rate_multiplier=amount_multiplier,
+                cap_multiplier=amount_multiplier)
+            if not guarded and self.steal_store.roll_success(rate_bonus):
                 debit = await wallet._change_balance(
                     target, -amount, require_funds=True)
                 if debit is wallet_module.INSUFFICIENT:
@@ -587,28 +708,42 @@ class CirculationCog(commands.Cog):
                     return circulation_action_failed(
                         "コインの更新に失敗しました。残高は変わっていません。")
                 await self._record_history(target, actor, amount, "steal_success")
+                bonus = 0
+                if mud_item is not None:
+                    bonus = await self._steal_bonus(
+                        wallet, actor, target, target_balance, mud_item)
+                    try:
+                        item_store.remove(actor, mud_item, 1)
+                    except Exception:
+                        pass
                 self.steal_store.record_attempt(actor, target, now=now)
-                return (
-                    f"🎉 **盗みに成功！** <@{target}> から **{amount:,} AGO** を盗みました。\n"
-                    f"あなたの残高: {credit:,} AGO")
-            actor_balance = await self._balance(actor)
-            fine = steal_core.fine_amount(actor_balance)
-            if fine > 0:
-                debit = await wallet._change_balance(
-                    actor, -fine, require_funds=True)
-                if debit is wallet_module.INSUFFICIENT:
-                    fine = 0
-                elif debit is None:
-                    return circulation_action_failed(
-                        "コインの更新に失敗しました。残高は変わっていません。")
-                else:
-                    credit = await wallet._change_balance(
-                        target, fine, create_with=wallet_module.NEW_USER_BALANCE)
-                    if credit is None:
-                        await wallet._change_balance(actor, fine)
-                        return circulation_action_failed(
-                            "コインの更新に失敗しました。残高は変わっていません。")
-                    await self._record_history(actor, target, fine, "steal_fine")
+                lines = [
+                    f"🎉 **盗みに成功！** <@{target}> から **{amount:,} AGO** を盗みました。",
+                ]
+                if bonus > 0:
+                    lines.append(
+                        f"🎩 **{items_core.ITEM_DEFS[mud_item]['name']}の上乗せ！** "
+                        f"追加で **{bonus:,} AGO** を奪いました。")
+                lines.append(f"あなたの残高: {credit + bonus:,} AGO")
+                return "\n".join(lines)
+            fine, fine_error = await self._transfer_fine(actor, target)
+            if fine_error is not None:
+                return circulation_action_failed(fine_error)
+            prison_note = ""
+            if mud_item is not None:
+                try:
+                    item_store.remove(actor, mud_item, 1)
+                except Exception:
+                    pass
+                hours = (
+                    prison_core.DAI_MUD_HAT_PRISON_HOURS
+                    if mud_item == items_core.DAI_MUD_HAT_ITEM
+                    else prison_core.MUD_HAT_PRISON_HOURS)
+                self.prison_store.imprison(
+                    actor, hours=hours, reason="mud_hat_failure", now=now)
+                prison_note = (
+                    f"\n🚔 **{items_core.ITEM_DEFS[mud_item]['name']}を使って失敗し、"
+                    f"逮捕されました**（あと約{hours}時間はマネー系の操作ができません）。")
             self.steal_store.record_attempt(actor, target, now=now)
             if guarded:
                 head = "🛡️ **盗みに失敗…** 相手の防犯チャームに弾かれて逃げられました。"
@@ -617,8 +752,9 @@ class CirculationCog(commands.Cog):
             if fine > 0:
                 return (
                     f"{head}"
-                    f"罰金として <@{target}> に **{fine:,} AGO** を払いました。")
-            return f"{head}（罰金はありませんでした）。"
+                    f"罰金として <@{target}> に **{fine:,} AGO** を払いました。"
+                    f"{prison_note}")
+            return f"{head}（罰金はありませんでした）。{prison_note}"
         except items_core.ItemError as exc:
             return circulation_action_failed(exc)
         except Exception:
@@ -626,6 +762,62 @@ class CirculationCog(commands.Cog):
                 "circulation: 盗みに失敗 actor=%s target=%s", actor, target)
             return circulation_action_failed(
                 "実行中にエラーが発生しました。時間をおいて再試行してください。")
+
+    async def _transfer_fine(self, actor: str, target: str) -> tuple[int, str | None]:
+        """失敗時の罰金を actor から target へ移す。(支払額, エラー文) を返す。"""
+        wallet = self._wallet()
+        actor_balance = await self._balance(actor)
+        fine = steal_core.fine_amount(actor_balance)
+        if fine <= 0:
+            return 0, None
+        debit = await wallet._change_balance(actor, -fine, require_funds=True)
+        if debit is wallet_module.INSUFFICIENT:
+            return 0, None
+        if debit is None:
+            return 0, "コインの更新に失敗しました。残高は変わっていません。"
+        credit = await wallet._change_balance(
+            target, fine, create_with=wallet_module.NEW_USER_BALANCE)
+        if credit is None:
+            await wallet._change_balance(actor, fine)
+            return 0, "コインの更新に失敗しました。残高は変わっていません。"
+        await self._record_history(actor, target, fine, "steal_fine")
+        return fine, None
+
+    async def _steal_bonus(self, wallet, actor: str, target: str,
+                           target_balance: int, mud_item: str) -> int:
+        """泥帽系の成功時上乗せを対象から実行者へ移し、移せた額を返す。
+
+        上乗せ率は実行前の対象残高に対する一様乱数（原典の文法）。
+        対象の残高が基本分の引き落としで減っているため、残りから
+        払える分までが上限になる（ゼロサムは維持する）。
+        """
+        if mud_item == items_core.DAI_MUD_HAT_ITEM:
+            low, high = (items_core.DAI_MUD_HAT_BONUS_MIN_RATE,
+                         items_core.DAI_MUD_HAT_BONUS_MAX_RATE)
+        else:
+            low, high = (items_core.MUD_HAT_BONUS_MIN_RATE,
+                         items_core.MUD_HAT_BONUS_MAX_RATE)
+        wanted = int(target_balance * self._rng.uniform(low, high))
+        if wanted <= 0:
+            return 0
+        debit = await wallet._change_balance(target, -wanted, require_funds=True)
+        if debit is wallet_module.INSUFFICIENT:
+            wanted = max(0, await self._balance(target))
+            if wanted <= 0:
+                return 0
+            debit = await wallet._change_balance(target, -wanted, require_funds=True)
+        if debit is None or debit is wallet_module.INSUFFICIENT:
+            return 0
+        credit = await wallet._change_balance(
+            actor, wanted, create_with=wallet_module.NEW_USER_BALANCE)
+        if credit is None:
+            await wallet._change_balance(target, wanted)
+            logger.critical(
+                "circulation: 泥帽の上乗せの支払いに失敗しました actor=%s target=%s amount=%s",
+                actor, target, wanted)
+            return 0
+        await self._record_history(target, actor, wanted, "steal_success")
+        return wanted
 
 
 async def setup(bot: commands.Bot):

@@ -225,7 +225,8 @@ class NewItemDefinitionTest(unittest.TestCase):
             self.assertTrue(items.ITEM_DEFS[item_id]["box_drop"], item_id)
         ev = items.box_expected_value()
         self.assertLess(ev, items.ITEM_DEFS["treasure_box"]["price"])
-        self.assertGreater(ev, 600)
+        # 評価は売却価格（購入価格の半分、全アイテム統一）ベース。
+        self.assertGreater(ev, 400)
 
     def test_chain_extension_recipes(self):
         recipe = craft.find_recipe("circuit_board", "precision_parts")

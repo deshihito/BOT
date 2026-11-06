@@ -72,12 +72,19 @@ FLUSH_EVERY_EVENTS = 20
 FLUSH_INTERVAL_SECONDS = 60.0
 
 
-def steal_amount(target_balance: int) -> int:
-    """対象残高から盗める額。閾値未満の対象は保護され0を返す。"""
+def steal_amount(target_balance: int, *, rate_multiplier: float = 1.0,
+                 cap_multiplier: float = 1.0) -> int:
+    """対象残高から盗める額。閾値未満の対象は保護され0を返す。
+
+    rate_multiplier / cap_multiplier はアイテム効果（大怪盗など）で
+    割合と上限を引き上げるための補正で、既定は無補正（従来どおり）。
+    """
     balance = int(target_balance)
     if balance < TARGET_MIN_BALANCE:
         return 0
-    return max(1, min(int(balance * STEAL_BALANCE_RATE), STEAL_MAX_AMOUNT))
+    amount = int(balance * STEAL_BALANCE_RATE * max(0.0, float(rate_multiplier)))
+    cap = int(STEAL_MAX_AMOUNT * max(0.0, float(cap_multiplier)))
+    return max(1, min(amount, cap))
 
 
 def fine_amount(actor_balance: int) -> int:
@@ -233,9 +240,10 @@ class StealStore:
                 raise ItemError(
                     f"その相手はしばらく狙えません（保護期間中、あと約{hours:.1f}時間）。")
 
-    def roll_success(self) -> bool:
-        """成否の抽選（成功率 SUCCESS_RATE）。"""
-        return self._rng.random() < SUCCESS_RATE
+    def roll_success(self, rate_bonus: float = 0.0) -> bool:
+        """成否の抽選（成功率 SUCCESS_RATE + アイテム補正、上限 0.95）。"""
+        rate = min(0.95, SUCCESS_RATE + max(0.0, float(rate_bonus)))
+        return self._rng.random() < rate
 
     def record_attempt(self, actor_id: str, target_id: str,
                        now: datetime | None = None) -> None:
