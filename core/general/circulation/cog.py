@@ -33,6 +33,7 @@ from discord.ext import commands, tasks
 
 import config
 from core import clan as clan_core
+from core import gacha as gacha_core
 from core.general import economy_pool as economy_core
 from core.general import items as items_core
 from core.game import lottery as lottery_core
@@ -165,6 +166,9 @@ def _lottery_embed(cog: "CirculationCog", user_id: int) -> discord.Embed:
             value = "\n".join(lines)
         else:
             value = "購入がなかったため、プールは次回へ繰り越しました。"
+        if int(last.get("boost") or 0) > 0:
+            # 国庫放出の発生だけを伝える（内訳の数値は出さない）。
+            value += "\n🪙 国庫からの放出で賞金が上乗せされました。"
         embed.add_field(name=f"前回（第{last['round_id']}回）の結果",
                         value=value, inline=False)
     embed.set_footer(
@@ -270,13 +274,16 @@ class StealTargetSelect(discord.ui.UserSelect):
         target = self.values[0]
         guild = interaction.guild
         member = guild.get_member(target.id) if guild is not None else None
-        await interaction.response.defer()
+        # 結果は本人だけに返す（S4-2）ため ephemeral で defer する。
+        await interaction.response.defer(ephemeral=True)
         message = await self.cog.execute_steal(
             interaction.user.id, target.id,
             in_guild=member is not None,
             target_is_bot=bool(getattr(target, "bot", False)),
         )
-        await interaction.followup.send(message)
+        # 公開ポリシー（S4-2）: 逮捕の発生を含む結果は本人だけに返す
+        # （公開投稿は新規に増やさない）。
+        await interaction.followup.send(message, ephemeral=True)
 
 
 class StealView(discord.ui.View):
@@ -427,21 +434,65 @@ class CirculationCog(commands.Cog):
         await interaction.response.send_message(view=_wrap(view))
 
     # ------------------------------------------------------------------ 採掘の実行
+    def _party_power(self, uid: str) -> int:
+        """編成ボーナス（S3）の編成レアリティ点合計。取得失敗時は0。
+
+        core は gacha ストアを持たない。cog が gacha cog のストアを
+        引いて渡す流儀（手数料パスと同じ）に倣い、ここで解決する。
+        """
+        try:
+            gacha_cog = self.bot.get_cog("GachaCog")
+            if gacha_cog is not None:
+                return int(gacha_cog.store.party_power(uid))
+        except Exception:
+            pass
+        return 0
+
     async def execute_mining(self, user_id: int, now: datetime | None = None) -> str:
         """採掘を1回分実行する（セッションの開始もここで面倒を見る）。
 
         産出コインは新規創出ではなく採掘プールから支払う。プールが
         空なら掘れない。採掘ドリンク発動中は通常の抽選を追加で
-        もう1回引く（セッション回数は消費しない）。
+        もう1回引く（セッション回数は消費しない）。ガチャ編成が
+        あれば編成ボーナスの追加抽選が付くことがある（S3）。
         """
         uid = str(user_id)
         try:
+            try:
+                store = self._item_store()
+            except Exception:
+                store = None
             blocked = prison_core.block_message(uid, now=now, store=self.prison_store)
+            if blocked and store is not None:
+                # プリズンマイナー（S6-4）: prison ブロックに対する唯一の
+                # 例外。所持していれば1枚消費してこの採掘だけ通す。
+                try:
+                    if store.count(uid, items_core.PRISON_MINER_ITEM) > 0:
+                        store.remove(uid, items_core.PRISON_MINER_ITEM, 1)
+                        blocked = None
+                except Exception:
+                    pass
             if blocked:
                 return circulation_action_failed(blocked)
+            try:
+                no_fail = bool(store is not None and store.has_effect(
+                    uid, items_core.MINING_NO_FAIL_EFFECT))
+            except Exception:
+                no_fail = False
             status = self.mining_store.status(uid, now=now)
             if status["session_left"] <= 0:
-                granted = self.mining_store.start_session(uid, now=now)
+                # 直下掘り（S6-4）: 効果が残っていれば消費してこの
+                # セッションを特殊ダイスで開始する。
+                direct = False
+                try:
+                    if store is not None and store.has_effect(
+                            uid, items_core.DIRECT_DIG_EFFECT):
+                        store.consume_effect(uid, items_core.DIRECT_DIG_EFFECT)
+                        direct = True
+                except Exception:
+                    direct = False
+                granted = self.mining_store.start_session(
+                    uid, now=now, direct=direct)
                 status = self.mining_store.status(uid, now=now)
                 session_note = f"（このセッションは {granted} 回まで掘れます）"
             else:
@@ -450,20 +501,35 @@ class CirculationCog(commands.Cog):
             if pool.pool_balance() <= 0:
                 return circulation_action_failed(
                     "プールにコインがありません…（経済の損失が還流されると掘れるようになります）")
-            result = self.mining_store.dig(uid, pool.pool_balance(), now=now)
+            result = self.mining_store.dig(
+                uid, pool.pool_balance(), now=now, no_fail=no_fail)
             paid = pool.pay(int(result["coins"]))
             total = paid
             bonus = None
             bonus_paid = 0
             try:
-                boosted = self._item_store().has_effect(
-                    uid, items_core.MINING_BOOST_EFFECT)
+                boosted = bool(store is not None and store.has_effect(
+                    uid, items_core.MINING_BOOST_EFFECT))
             except Exception:
                 boosted = False
             if boosted:
-                bonus = self.mining_store.roll_bonus(pool.pool_balance())
+                bonus = self.mining_store.roll_bonus(
+                    pool.pool_balance(), no_fail=no_fail)
                 bonus_paid = pool.pay(int(bonus["coins"]))
                 total += bonus_paid
+            # 編成ボーナス（S3）: 編成のレアリティ点合計に応じた確率で
+            # 追加抽選1回。編成が空（power=0）なら従来動作と完全一致
+            # （rng も消費しない）。
+            party_bonus = None
+            party_paid = 0
+            power = self._party_power(uid)
+            if power > 0 and (
+                    self._rng.random()
+                    < power * gacha_core.PARTY_BONUS_RATE_PER_POINT):
+                party_bonus = self.mining_store.roll_bonus(
+                    pool.pool_balance(), no_fail=no_fail)
+                party_paid = pool.pay(int(party_bonus["coins"]))
+                total += party_paid
             credit = None
             if total > 0:
                 credit = await self._wallet()._change_balance(
@@ -473,6 +539,8 @@ class CirculationCog(commands.Cog):
                         pool.refund(paid)
                     if bonus_paid:
                         pool.refund(bonus_paid)
+                    if party_paid:
+                        pool.refund(party_paid)
                     self.mining_store.rollback_dig(uid, result)
                     return circulation_action_failed(
                         "コインの反映に失敗しました。時間をおいて再試行してください。")
@@ -480,12 +548,17 @@ class CirculationCog(commands.Cog):
             lines = []
             if total > 0:
                 lines.append(f"⛏️ **{total:,} AGO を採掘しました！**")
+                if result.get("direct"):
+                    lines.append("🕳️ 直下掘りで一気に掘った！")
                 if result["jackpot"]:
                     lines.append(
                         f"🎉 **大量採掘ボーナス！** +{int(result['extra']):,} AGO")
                 if bonus is not None and bonus_paid > 0:
                     lines.append(
                         f"🥤 採掘ドリンクで追加の一掘り: +{bonus_paid:,} AGO")
+                if party_bonus is not None:
+                    lines.append(
+                        f"⭐ 編成ボーナスで追加でもう1回掘れた！ +{party_paid:,} AGO")
             elif result["failed"]:
                 lines.append("💨 **採掘失敗…**")
             else:
@@ -499,7 +572,7 @@ class CirculationCog(commands.Cog):
             if session_note:
                 lines.append(session_note)
             # クラン貢献フック（所属中のみ・失敗しても採掘に影響させない）。
-            clan_core.award_points(uid, clan_core.POINTS_MINING)
+            clan_core.award_points(uid, clan_core.POINTS_MINING, "mining")
             return "\n".join(lines)
         except items_core.ItemError as exc:
             return circulation_action_failed(exc)
@@ -509,6 +582,21 @@ class CirculationCog(commands.Cog):
                 "採掘中にエラーが発生しました。時間をおいて再試行してください。")
 
     # ------------------------------------------------------------------ 宝くじの実行
+    def _apply_treasury_outlets(self, now: datetime | None = None) -> None:
+        """国庫の出口（仕様 S1）を lazy に適用する。
+
+        週次還流（国庫→採掘プール）と、閾値超過分の宝くじブースト確保→
+        現行ラウンドへの上乗せ。失敗しても宝くじ本体は止めない。
+        """
+        try:
+            self.economy_store.maybe_weekly_release(now=now)
+            self.economy_store.lottery_boost_amount(now=now)
+            boost = self.economy_store.take_lottery_boost()
+            if boost > 0:
+                self.lottery_store.add_to_pool(boost, now=now)
+        except Exception:
+            logger.exception("circulation: 国庫の出口の適用に失敗しました")
+
     async def settle_lottery(self, now: datetime | None = None) -> dict | None:
         """締切を過ぎた回があれば確定し、当選者へ賞金を払う。"""
         try:
@@ -516,6 +604,9 @@ class CirculationCog(commands.Cog):
         except Exception:
             logger.exception("circulation: 宝くじの抽選確定に失敗しました")
             return None
+        # 確定の有無に関わらず、国庫の出口はこの入口で lazy に進める
+        # （新ラウンドが始まった直後なら、そのラウンドへ上乗せされる）。
+        self._apply_treasury_outlets(now=now)
         if not result:
             return None
         wallet = None

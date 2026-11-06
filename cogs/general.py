@@ -81,6 +81,7 @@ class RankingsView(discord.ui.View):
 
     TARGETS = (
         ("コイン保有", "coin_leaderboard"),
+        ("総合資産", "asset_leaderboard"),
         ("bump RTA", "bump_leaderboard"),
         ("up RTA", "up_leaderboard"),
         ("生存確認", "fujo_ranking"),
@@ -320,6 +321,17 @@ class GeneralCog(
         if value in MONEY_PRISON_BLOCKED_VALUES:
             blocked_message = prison_core.block_message(
                 str(interaction.user.id))
+            if blocked_message and value == "mining":
+                # プリズンマイナー（S6-4）: prison ブロックに対する唯一の
+                # 例外。採掘だけは所持していれば入口を素通しする
+                # （1枚の消費は circulation 側の実行時に行う）。
+                items_cog = self.bot.get_cog("ItemsCog")
+                try:
+                    if items_cog is not None and items_cog.store.count(
+                            str(interaction.user.id), "prison_miner") > 0:
+                        blocked_message = None
+                except Exception:
+                    pass
             if blocked_message:
                 return await self._safe_respond(interaction, blocked_message)
         if value == "money_panel":
@@ -388,7 +400,7 @@ class GeneralCog(
                 return await circulation_cog.open_lottery_buy(interaction)
             return await circulation_cog.open_steal(interaction)
 
-        if value in {"slot", "double", "blackjack", "dice"}:
+        if value in {"slot", "double", "blackjack", "dice", "bj_duel"}:
             gambling_cog = self.bot.get_cog("GamblingCog")
             if gambling_cog is None:
                 return await self._safe_respond(interaction, GAMBLING_NOT_LOADED)
@@ -398,6 +410,8 @@ class GeneralCog(
                 return await gambling_cog.show_double(interaction)
             if value == "blackjack":
                 return await gambling_cog.show_blackjack(interaction)
+            if value == "bj_duel":
+                return await gambling_cog.show_duel(interaction)
             return await gambling_cog.show_dice(interaction)
 
         if value in {"market", "token_buy", "token_sell"}:
@@ -410,7 +424,7 @@ class GeneralCog(
                 return await market_cog.open_buy(interaction)
             return await market_cog.open_sell(interaction)
 
-        if value in {"pay", "status", "coin_leaderboard", "bump_leaderboard", "up_leaderboard"}:
+        if value in {"pay", "status", "coin_leaderboard", "asset_leaderboard", "bump_leaderboard", "up_leaderboard"}:
             if wallet is None:
                 return await self._safe_respond(interaction, "WalletCogが読み込まれていません。")
             if value == "pay":
@@ -419,6 +433,9 @@ class GeneralCog(
                 return await wallet.user_status(interaction)
             if value == "coin_leaderboard":
                 return await wallet.leaderboard(interaction)
+            if value == "asset_leaderboard":
+                return await wallet.leaderboard(
+                    interaction, app_commands.Choice(name="asset", value="asset"))
             event_type = value.removesuffix("_leaderboard")
             return await wallet.leaderboard(
                 interaction, app_commands.Choice(name=event_type, value=event_type)

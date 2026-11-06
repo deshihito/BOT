@@ -31,6 +31,7 @@ from __future__ import annotations
 import asyncio
 import inspect
 import logging
+import random
 from datetime import datetime
 from typing import Callable
 
@@ -38,6 +39,8 @@ import discord
 from discord.ext import commands
 
 import config
+from core import daily_bonus as daily_core
+from core.general import items as items_core
 from core.general import market as market_core
 from core.game import prison as prison_core
 from core import starter as starter_core
@@ -58,9 +61,9 @@ def _wrap(view):
 #: 操作はカテゴリごとにページングする。
 CATEGORIES: tuple[tuple[str, str], ...] = (
     ("home", "概要"),
-    ("market", "市場"),
+    ("market", "市場（交換）"),
     ("items", "アイテム"),
-    ("craft", "合成・工房"),
+    ("craft", "合成・工房（生産）"),
     ("play", "あそぶ"),
     ("more", "その他"),
 )
@@ -79,19 +82,38 @@ def _fmt_tokens(amount: float) -> str:
 
 
 def _fmt_minutes(seconds: float) -> str:
-    minutes = int(seconds // 60) + (1 if seconds % 60 else 0)
-    if minutes >= 60:
-        return f"約{minutes / 60:.1f}時間"
-    return f"約{minutes}分"
+    """残り時間の表記は prison の format_remaining に統一する（S4-1）。"""
+    return prison_core.format_remaining(seconds)
+
+
+def _next_step_line(status: dict) -> str | None:
+    """「次の1手」を最大1行で返す（S4-1、優先順位つき）。
+
+    逮捕中 → 工房の受け取り可 → スターター未受取 → デイリーボーナス
+    未受取 → 残高が少ない の順で、最初に当たったものだけを出す。
+    どれにも当たらなければ何も出さない。
+    """
+    if status.get("prison_remaining"):
+        return "🚔 逮捕中です。脱獄を試みるか、釈放を待ってください。"
+    if status.get("workshop_ready"):
+        return "🏭 工房で受け取りができます。"
+    if status.get("starter_claimed") is False:
+        return "🎁 スターターを受け取れます。"
+    if status.get("daily_claimed") is False:
+        return "🎁 今日のボーナスを受け取れます。"
+    if (status.get("balance") is not None
+            and status["balance"] < starter_core.GUIDE_BALANCE_THRESHOLD):
+        # 残高が少ないユーザー向けの導線は1行だけ（チュートリアルは作らない）。
+        return "まずは採掘と宝くじから始めてみてください。"
+    return None
 
 
 def status_embed(status: dict) -> discord.Embed:
     """collect_status の結果をパネル上部のステータス表示にする。"""
     embed = discord.Embed(title="マネーパネル", color=MONEY_PANEL_COLOR)
-    if (status.get("balance") is not None
-            and status["balance"] < starter_core.GUIDE_BALANCE_THRESHOLD):
-        # 残高が少ないユーザー向けの導線は1行だけ（チュートリアルは作らない）。
-        embed.description = "まずは採掘と宝くじから始めてみてください。"
+    next_step = _next_step_line(status)
+    if next_step is not None:
+        embed.description = next_step
     if status.get("prison_remaining"):
         embed.add_field(
             name="状態",
@@ -153,6 +175,16 @@ def status_embed(status: dict) -> discord.Embed:
         label = _SESSION_LABELS.get(status["session_kind"], status["session_kind"])
         embed.add_field(
             name="ギャンブル", value=f"{label} のセッション進行中", inline=True)
+    if status.get("active_effect_details"):
+        lines = [
+            f"・{detail['name']}（あと{_fmt_minutes(detail['remaining'])}）"
+            for detail in status["active_effect_details"]
+        ]
+        embed.add_field(
+            name="発動中の効果", value="\n".join(lines), inline=False)
+    if status.get("party_count") is not None:
+        embed.add_field(
+            name="編成", value=f"**{status['party_count']} 体**", inline=True)
     return embed
 
 
@@ -171,6 +203,8 @@ class MoneyPanelView(discord.ui.View):
         self._prison = False
         # 未受け取りの間だけ概要にスターターボタンを出す（同上）。
         self._starter = False
+        # デイリーボーナスも未受取の間だけ概要に出す（S6-1、同上）。
+        self._daily = False
         self.refresh()
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
@@ -203,6 +237,10 @@ class MoneyPanelView(discord.ui.View):
             self._add_button(
                 "スターターを受け取る", discord.ButtonStyle.success,
                 self._claim_starter)
+        if self.category == "home" and getattr(self, "_daily", False):
+            self._add_button(
+                "今日のボーナスを受け取る", discord.ButtonStyle.success,
+                self._claim_daily)
         if self.category == "home" and getattr(self, "_prison", False):
             self._add_button(
                 "脱獄を試みる", discord.ButtonStyle.danger, self._jailbreak)
@@ -253,6 +291,7 @@ class MoneyPanelView(discord.ui.View):
                 ("スロット", primary, self._dispatch("slot")),
                 ("ダブルアップ", primary, self._dispatch("double")),
                 ("ブラックジャック", primary, self._dispatch("blackjack")),
+                ("ブラックジャック対決", primary, self._dispatch("bj_duel")),
                 ("ダイスベット", primary, self._dispatch("dice")),
                 ("ガチャ", primary, self._dispatch("gacha")),
             ]
@@ -277,6 +316,7 @@ class MoneyPanelView(discord.ui.View):
         status = await self.cog.collect_status(self.user_id)
         self._prison = bool(status.get("prison_remaining"))
         self._starter = status.get("starter_claimed") is False
+        self._daily = status.get("daily_claimed") is False
         return status_embed(status)
 
     async def _on_category(self, interaction: discord.Interaction):
@@ -331,9 +371,10 @@ class MoneyPanelView(discord.ui.View):
 
         return callback
 
-    async def _run_direct(self, interaction: discord.Interaction, factory) -> None:
+    async def _run_direct(self, interaction: discord.Interaction, factory,
+                          *, ephemeral: bool = False) -> None:
         """その場で完結する実行部を呼び、結果表示後にパネルを更新する。"""
-        await interaction.response.defer()
+        await interaction.response.defer(ephemeral=ephemeral)
         try:
             result = factory()
             if inspect.isawaitable(result):
@@ -341,7 +382,7 @@ class MoneyPanelView(discord.ui.View):
         except Exception:
             logger.exception("money_panel: 直接実行に失敗しました")
             result = "実行中にエラーが発生しました。時間をおいて再試行してください。"
-        await interaction.followup.send(result)
+        await interaction.followup.send(result, ephemeral=ephemeral)
         await self.refresh_panel()
 
     # ------------------------------------------------------------------ 直接実行
@@ -349,11 +390,17 @@ class MoneyPanelView(discord.ui.View):
         await self._run_direct(
             interaction, lambda: self.cog.claim_starter(interaction.user.id))
 
+    async def _claim_daily(self, interaction: discord.Interaction):
+        await self._run_direct(
+            interaction, lambda: self.cog.claim_daily_bonus(interaction.user.id))
+
     async def _jailbreak(self, interaction: discord.Interaction):
         # 脱獄は逮捕中の本人だけ（interaction_check で本人に限定済み、
-        # ストア側でも逮捕中でなければ何も起きない）。
+        # ストア側でも逮捕中でなければ何も起きない）。結果は公開
+        # ポリシー（S4-2）で本人だけに返す。
         await self._run_direct(
-            interaction, lambda: self.cog.attempt_jailbreak(interaction.user.id))
+            interaction, lambda: self.cog.attempt_jailbreak(interaction.user.id),
+            ephemeral=True)
 
     async def _dig(self, interaction: discord.Interaction):
         circulation = self.cog.bot.get_cog("CirculationCog")
@@ -401,12 +448,18 @@ class MoneyPanelView(discord.ui.View):
 class MoneyPanelCog(commands.Cog):
     def __init__(self, bot: commands.Bot,
                  balance_reader: Callable[[str], int] | None = None,
-                 starter_store: starter_core.StarterStore | None = None):
+                 starter_store: starter_core.StarterStore | None = None,
+                 daily_store: daily_core.DailyBonusStore | None = None,
+                 rng: random.Random | None = None):
         self.bot = bot
         self._balance_reader = balance_reader
         self.starter_store = (
             starter_store if starter_store is not None
             else starter_core.StarterStore())
+        self.daily_store = (
+            daily_store if daily_store is not None
+            else daily_core.shared_store())
+        self._rng = rng if rng is not None else random.Random()
 
     # ------------------------------------------------------------------ 残高
     async def _balance(self, user_id: str) -> int:
@@ -455,7 +508,23 @@ class MoneyPanelCog(commands.Cog):
                 status["items_total"] = sum(inventory.values())
                 status["items_kinds"] = len(inventory)
                 status["boxes"] = int(inventory.get("treasure_box", 0))
-                status["effects"] = len(store.active_effects(uid))
+                active = store.active_effects(uid)
+                status["effects"] = len(active)
+                # 状態行の統一表記（S4-1）: 効果名＋残り時間まで出す。
+                effect_names = {
+                    definition["effect"]: definition["name"]
+                    for definition in items_core.ITEM_DEFS.values()
+                    if definition.get("effect")
+                }
+                status["active_effect_details"] = [
+                    {
+                        "name": effect_names.get(effect_id, effect_id),
+                        "remaining": max(
+                            0.0, (expires - now).total_seconds()),
+                    }
+                    for effect_id, expires in sorted(
+                        active.items(), key=lambda pair: pair[1])
+                ]
             except Exception:
                 logger.exception("money_panel: アイテムステータスの取得に失敗 user=%s", uid)
                 status["items_total"] = None
@@ -478,6 +547,10 @@ class MoneyPanelCog(commands.Cog):
                 status["commissions_ready"] = sum(
                     1 for job in jobs
                     if datetime.fromisoformat(job["ready_at"]) <= now)
+                # 「次の1手」用: 受け取れるものがあるかだけを見る（S4-1）。
+                status["workshop_ready"] = bool(
+                    status["pending_cycles"] > 0
+                    or status["commissions_ready"] > 0)
             except Exception:
                 logger.exception("money_panel: 工房ステータスの取得に失敗 user=%s", uid)
                 status["machines"] = None
@@ -528,6 +601,20 @@ class MoneyPanelCog(commands.Cog):
             logger.exception("money_panel: スターター状態の取得に失敗 user=%s", uid)
             status["starter_claimed"] = None
 
+        try:
+            status["daily_claimed"] = self.daily_store.claimed_today(uid, now)
+        except Exception:
+            logger.exception("money_panel: デイリーボーナス状態の取得に失敗 user=%s", uid)
+            status["daily_claimed"] = None
+
+        gacha_cog = self.bot.get_cog("GachaCog")
+        if gacha_cog is not None:
+            try:
+                status["party_count"] = len(gacha_cog.store.party(uid))
+            except Exception:
+                logger.exception("money_panel: 編成ステータスの取得に失敗 user=%s", uid)
+                status["party_count"] = None
+
         return status
 
     # ------------------------------------------------------------------ スターター
@@ -567,6 +654,51 @@ class MoneyPanelCog(commands.Cog):
             f"🎁 **スターターを受け取りました！** "
             f"{starter_core.STARTER_COINS:,} AGO と "
             f"スクラップ×{starter_core.STARTER_SCRAPS} を付与しました。")
+
+    # ------------------------------------------------------------------ デイリーボーナス（S6-1）
+    async def claim_daily_bonus(self, user_id: int) -> str:
+        """デイリーボーナスを1日1回（JST日次）だけ付与する。"""
+        uid = str(user_id)
+        blocked = prison_core.block_message(uid, store=self._prison_store())
+        if blocked:
+            return blocked
+        if not self.daily_store.try_claim(uid):
+            return "今日のボーナスは受け取り済みです。"
+        wallet = self.bot.get_cog("WalletCog")
+        items_cog = self.bot.get_cog("ItemsCog")
+        box = False
+        try:
+            if wallet is not None:
+                result = await wallet._change_balance(
+                    uid, daily_core.DAILY_BONUS_COINS,
+                    create_with=wallet_module.NEW_USER_BALANCE)
+                if result is None:
+                    raise RuntimeError("balance update failed")
+            if items_cog is not None and (
+                    self._rng.random() < daily_core.BOX_CHANCE):
+                items_cog.store.add(uid, daily_core.BOX_ITEM_ID, 1)
+                box = True
+        except Exception:
+            logger.exception("money_panel: デイリーボーナス付与に失敗 user=%s", uid)
+            self.daily_store.unclaim(uid)
+            return "受け取りに失敗しました。時間をおいて再試行してください。"
+        self.daily_store.flush()
+        try:
+            await asyncio.to_thread(lambda: config.db_api.table(
+                "transaction_history").insert({
+                    "sender_id": "daily_bonus",
+                    "receiver_id": uid,
+                    "amount": daily_core.DAILY_BONUS_COINS,
+                    "reason": daily_core.HISTORY_REASON,
+                }).execute())
+        except Exception:
+            logger.exception("money_panel: デイリーボーナスの履歴記録に失敗 user=%s", uid)
+        message = (
+            f"🎁 **デイリーボーナスを受け取りました！** "
+            f"{daily_core.DAILY_BONUS_COINS:,} AGO")
+        if box:
+            message += "＋宝箱×1"
+        return message
 
     # ------------------------------------------------------------------ 逮捕・脱獄
     def _prison_store(self) -> prison_core.PrisonStore:

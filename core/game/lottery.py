@@ -99,8 +99,10 @@ def _clean_round(raw: Any) -> dict[str, Any] | None:
     for uid, count in tickets_raw.items():
         if isinstance(count, int) and count > 0:
             tickets[str(uid)] = int(count)
+    boost = raw.get("boost")
     return {"id": round_id, "pool": max(0, pool), "tickets": tickets,
-            "closes_at": closes_at}
+            "closes_at": closes_at,
+            "boost": int(boost) if isinstance(boost, int) and boost > 0 else 0}
 
 
 def _clean_history(raw: Any) -> list[dict[str, Any]]:
@@ -126,6 +128,7 @@ def _clean_history(raw: Any) -> list[dict[str, Any]]:
             "payout": int(entry.get("payout") or 0),
             "burned": int(entry.get("burned") or 0),
             "carryover": int(entry.get("carryover") or 0),
+            "boost": int(entry.get("boost") or 0),
             "winners": winners,
         })
     return history[-HISTORY_LIMIT:]
@@ -204,11 +207,28 @@ class LotteryStore:
         current = self._state["round"]
         if current is None:
             current = {
-                "id": 1, "pool": 0, "tickets": {},
+                "id": 1, "pool": 0, "tickets": {}, "boost": 0,
                 "closes_at": next_draw_time(now).isoformat(),
             }
             self._state["round"] = current
         return current
+
+    def add_to_pool(self, amount: int, now: datetime | None = None) -> int:
+        """現行ラウンドのプールへ外部から上乗せする（国庫ブースト用）。
+
+        チケット売上ではないため口数は増えない。上乗せ後のプール残高
+        を返す。0 以下は無視する。
+        """
+        amount = int(amount)
+        if amount <= 0:
+            return 0
+        now = now or datetime.now(JST)
+        with self._lock:
+            current = self._round_locked(now)
+            current["pool"] = int(current["pool"]) + amount
+            current["boost"] = int(current.get("boost") or 0) + amount
+            self._mark_dirty()
+            return int(current["pool"])
 
     def current_round(self, now: datetime | None = None) -> dict[str, Any]:
         now = now or datetime.now(JST)
@@ -307,7 +327,8 @@ class LotteryStore:
                 result = {
                     "round_id": int(current["id"]), "drawn_at": now.astimezone(JST).isoformat(),
                     "pool": pool, "payout": 0, "burned": 0,
-                    "carryover": pool, "winners": [],
+                    "carryover": pool, "boost": int(current.get("boost") or 0),
+                    "winners": [],
                 }
             else:
                 payout_total = int(pool * PAYOUT_RATE)
@@ -325,14 +346,16 @@ class LotteryStore:
                 result = {
                     "round_id": int(current["id"]), "drawn_at": now.astimezone(JST).isoformat(),
                     "pool": pool, "payout": paid, "burned": burned,
-                    "carryover": payout_total - paid, "winners": winners,
+                    "carryover": payout_total - paid,
+                    "boost": int(current.get("boost") or 0),
+                    "winners": winners,
                 }
             self._state["history"] = (
                 self._state["history"] + [result])[-HISTORY_LIMIT:]
             self._state["round"] = {
                 "id": int(current["id"]) + 1,
                 "pool": int(result["carryover"]),
-                "tickets": {},
+                "tickets": {}, "boost": 0,
                 "closes_at": next_draw_time(now).isoformat(),
             }
             self._mark_dirty()

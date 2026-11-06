@@ -72,7 +72,7 @@ MONEY_PRISON_BLOCKED_VALUES = frozenset({
     "item_buy", "item_use", "box_open",
     "machine_buy", "workshop_claim", "craft",
     "mining", "lottery_buy", "steal",
-    "slot", "double", "blackjack", "dice",
+    "slot", "double", "blackjack", "dice", "bj_duel",
     "gacha",
 })
 
@@ -100,6 +100,7 @@ GENERAL_ACTIONS = {
         ("スロット", "slot"),
         ("ダブルアップ", "double"),
         ("ブラックジャック", "blackjack"),
+        ("ブラックジャック対決", "bj_duel"),
         ("ダイスベット", "dice"),
         ("コイン保有ランキング", "coin_leaderboard"),
         ("ロールショップ", "role_shop"),
@@ -108,6 +109,7 @@ GENERAL_ACTIONS = {
     ],
     "rta": [
         ("ランキング一覧", "rankings"),
+        ("総合資産ランキング", "asset_leaderboard"),
         ("bump RTAランキング", "bump_leaderboard"),
         ("up RTAランキング", "up_leaderboard"),
     ],

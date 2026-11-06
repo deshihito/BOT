@@ -29,6 +29,7 @@ from core.emojis import COIN, DICE, SUCCESS
 
 import asyncio
 import logging
+import random
 from typing import Callable
 
 import discord
@@ -96,6 +97,12 @@ GAMBLING_RULES = {
         f"1〜範囲（{gambling_core.DICE_MIN_MAX}〜{gambling_core.DICE_MAX_MAX}）の"
         "数字を1つ予想してベットし、出目が一致すれば賞金です。"
         f"ベットは {gambling_core.DICE_MIN_BET} AGO から。"),
+    "bj_duel": (
+        "プレイヤー同士のブラックジャック対決。対決を作って同じ額を"
+        "ベットした相手が参加すると始まります。両者がヒット／スタンドを"
+        "選び、バーストしたら負け、21に近い方が勝ちです。同点は"
+        "引き分けで双方にベットが戻ります。中断した場合は双方返金です。"
+        f"ベットは {gambling_core.DUEL_MIN_BET} AGO から。"),
 }
 
 _SLOT_RISK_LINE = "⚠️ 6が5つ以上揃うと所持コイン全額没収"
@@ -608,6 +615,180 @@ class DiceView(_SessionPanel, discord.ui.View):
 # Cog
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# ブラックジャック対決（bj_duel、次期仕様 S6-3）
+# ---------------------------------------------------------------------------
+
+def _duel_embed(cog: "GamblingCog", user_id: int, *, result: str | None = None,
+                balance: int | None = None) -> discord.Embed:
+    store = cog.store
+    embed = discord.Embed(title="ブラックジャック対決", color=GAMBLING_COLOR)
+    own = store.duel_of(str(user_id))
+    lines: list[str] = []
+    if own is None:
+        opens = store.open_duels()
+        if opens:
+            lines.append("**募集中の対決**")
+            for duel in opens:
+                lines.append(
+                    f"・<@{duel['creator']}> — ベット **{duel['bet']:,} AGO**")
+            lines.append("参加ボタンから同じ額をベットして対決できます。")
+        else:
+            lines.append("募集中の対決はありません。")
+        lines.append("「対決を作る」から自分で募集もできます。")
+    elif own["state"] == "waiting":
+        lines.append(
+            f"対決を募集中です（ベット **{own['bet']:,} AGO**）。"
+            "相手が参加すると始まります。")
+    else:
+        for uid in (own["creator"], own["challenger"]):
+            if uid is None:
+                continue
+            hand = own["hands"].get(uid, [])
+            total = own["totals"].get(uid, 0)
+            stood = "（スタンド）" if uid in own["stood"] else ""
+            lines.append(
+                f"<@{uid}>: {' '.join(map(str, hand))} = **{total}**{stood}")
+        lines.append("21に近い方が勝ちです。バーストすると負けです。")
+    embed.description = "\n".join(lines)
+    if result:
+        embed.add_field(name="結果", value=_fit(result), inline=False)
+    if balance is not None:
+        embed.set_footer(text=f"コイン残高: {balance:,} AGO")
+    return embed
+
+
+class DuelBetModal(discord.ui.Modal, title="対決を作る"):
+    amount = discord.ui.TextInput(
+        label="ベット額（AGO）", placeholder="例: 1000（半角数字）", max_length=16)
+
+    def __init__(self, cog: "GamblingCog", panel: "DuelView | None" = None):
+        super().__init__()
+        self.cog = cog
+        self.panel = panel
+        self.amount.label = (
+            f"ベット額（AGO、{gambling_core.DUEL_MIN_BET:,}以上）")
+
+    async def on_submit(self, interaction: discord.Interaction):
+        raw = str(self.amount.value).replace(",", "").strip()
+        try:
+            bet = int(raw)
+        except ValueError:
+            return await interaction.response.send_message(
+                GAMBLING_INVALID_AMOUNT, ephemeral=True)
+        await interaction.response.defer()
+        message = await self.cog.execute_duel_create(interaction.user.id, bet)
+        if self.panel is not None and self.panel.message is not None:
+            self.panel.last_result = message
+            await self.panel.refresh_message()
+            return
+        await interaction.followup.send(message)
+
+
+class DuelView(_SessionPanel, discord.ui.View):
+    """対決パネル。自分の対決の操作と、募集中の対決への参加を持つ。
+
+    パネルは開いた本人のもの（interaction_check は本人のみ）で、
+    参加は「自分のパネルから相手の募集に参加する」形にする。
+    """
+
+    def __init__(self, cog: "GamblingCog", user_id: int):
+        super().__init__(timeout=300)
+        self.cog = cog
+        self.user_id = user_id
+        self.message = None
+        self.last_result = None
+        self._sync_buttons()
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        return interaction.user.id == self.user_id
+
+    async def on_timeout(self) -> None:
+        # タイムアウト時は対決を中断し、双方へ全額返金する（S6-3）。
+        try:
+            await self.cog.cancel_duel_for(self.user_id)
+        except Exception:
+            logger.exception("gambling: 対決のタイムアウト返金に失敗しました")
+        await self._disable_on_timeout()
+
+    def _build_embed(self, balance: int | None) -> discord.Embed:
+        return _duel_embed(
+            self.cog, self.user_id, result=self.last_result, balance=balance)
+
+    def _sync_buttons(self) -> None:
+        self.clear_items()
+        uid = str(self.user_id)
+        own = self.cog.store.duel_of(uid)
+        if own is None:
+            create = discord.ui.Button(
+                label="対決を作る", style=discord.ButtonStyle.primary)
+            create.callback = self._on_create
+            self.add_item(create)
+            for duel in self.cog.store.open_duels():
+                join = discord.ui.Button(
+                    label=f"参加する（{duel['bet']:,} AGO）",
+                    style=discord.ButtonStyle.success)
+                join.callback = self._make_join_callback(duel["creator"])
+                self.add_item(join)
+        elif own["state"] == "waiting":
+            cancel = discord.ui.Button(
+                label="募集を取り消す", style=discord.ButtonStyle.danger)
+            cancel.callback = self._on_cancel
+            self.add_item(cancel)
+        else:
+            stood = uid in own["stood"]
+            total = own["totals"].get(uid, 0)
+            hit = discord.ui.Button(
+                label="ヒット", style=discord.ButtonStyle.success,
+                disabled=stood or total >= 21)
+            hit.callback = self._on_hit
+            self.add_item(hit)
+            stand = discord.ui.Button(
+                label="スタンド", style=discord.ButtonStyle.primary,
+                disabled=stood)
+            stand.callback = self._on_stand
+            self.add_item(stand)
+            abort = discord.ui.Button(
+                label="中断する（双方返金）", style=discord.ButtonStyle.danger)
+            abort.callback = self._on_cancel
+            self.add_item(abort)
+        rules = discord.ui.Button(
+            label="ルール", style=discord.ButtonStyle.secondary)
+        rules.callback = self._on_rules
+        self.add_item(rules)
+
+    async def _on_create(self, interaction: discord.Interaction):
+        await interaction.response.send_modal(DuelBetModal(self.cog, panel=self))
+
+    def _make_join_callback(self, creator_id: str):
+        async def _join(interaction: discord.Interaction):
+            await interaction.response.defer()
+            self.last_result = await self.cog.execute_duel_join(
+                interaction.user.id, creator_id)
+            await self.render_interaction(interaction)
+        return _join
+
+    async def _on_hit(self, interaction: discord.Interaction):
+        await interaction.response.defer()
+        self.last_result = await self.cog.execute_duel_hit(interaction.user.id)
+        await self.render_interaction(interaction)
+
+    async def _on_stand(self, interaction: discord.Interaction):
+        await interaction.response.defer()
+        self.last_result = await self.cog.execute_duel_stand(interaction.user.id)
+        await self.render_interaction(interaction)
+
+    async def _on_cancel(self, interaction: discord.Interaction):
+        await interaction.response.defer()
+        self.last_result = await self.cog.cancel_duel_for(interaction.user.id)
+        await self.render_interaction(interaction)
+
+    async def _on_rules(self, interaction: discord.Interaction):
+        await interaction.response.send_message(
+            embed=_rules_embed("bj_duel", "ブラックジャック対決"),
+            ephemeral=True)
+
+
 class GamblingCog(commands.Cog):
     def __init__(self, bot: commands.Bot,
                  store: gambling_core.GamblingStore | None = None,
@@ -625,6 +806,8 @@ class GamblingCog(commands.Cog):
         self._refunded = False
         # スロットのセッション内配当累計（終了時に純損失を還流するため）。
         self._slot_rewards: dict[str, int] = {}
+        # 悪魔的な報酬（S6-4）の発動抽選用。
+        self._rng = random.Random()
 
     # ------------------------------------------------------------------ 共有ストア
     def _item_store(self) -> items_core.ItemStore:
@@ -734,6 +917,7 @@ class GamblingCog(commands.Cog):
                 reason = {
                     "slot": "gamble_slot", "double": "gamble_double",
                     "blackjack": "gamble_blackjack",
+                    "bj_duel": gambling_core.DUEL_HISTORY_REASON,
                 }[refund["kind"]]
                 await self._record_history(GAMBLING_ID, uid, amount, reason)
                 logger.info(
@@ -764,6 +948,36 @@ class GamblingCog(commands.Cog):
             return balance
         return max(0, first - await self._balance(uid))
 
+    async def _try_devil_reward(self, uid: str, taken: int) -> int:
+        """悪魔的な報酬（S6-4）の判定と支払い。戻り値は戻ってきた額。
+
+        全額没収が発生したときに限る。没収ガードが先に発動した場合は
+        この経路自体が呼ばれないため不発で残る。発動したら1個消費する。
+        """
+        try:
+            item_store = self._item_store()
+            if item_store.count(uid, items_core.DEVIL_REWARD_ITEM) <= 0:
+                return 0
+            if self._rng.random() >= items_core.DEVIL_REWARD_RATE:
+                return 0
+            # remove は残数を返す（0で正常）ため、成否は例外で判定する。
+            item_store.remove(uid, items_core.DEVIL_REWARD_ITEM, 1)
+        except Exception:
+            return 0
+        amount = int(taken) * items_core.DEVIL_REWARD_MULTIPLIER
+        if amount <= 0:
+            return 0
+        wallet = self._wallet()
+        credit = await wallet._change_balance(
+            uid, amount, create_with=wallet_module.NEW_USER_BALANCE)
+        if credit is None:
+            logger.critical(
+                "gambling: 悪魔的な報酬の支払いに失敗しました。"
+                "手動で払ってください: user=%s amount=%s", uid, amount)
+            return 0
+        await self._record_history(GAMBLING_ID, uid, amount, "devil_reward")
+        return amount
+
     # ------------------------------------------------------------------ 入口
     async def show_slot(self, interaction: discord.Interaction):
         view = SlotView(self, interaction.user.id)
@@ -785,6 +999,12 @@ class GamblingCog(commands.Cog):
 
     async def show_dice(self, interaction: discord.Interaction):
         view = DiceView(self, interaction.user.id)
+        view._last_balance = await _fetch_balance(self, interaction.user.id)
+        await interaction.response.send_message(view=_wrap(view))
+        view.message = await interaction.original_response()
+
+    async def show_duel(self, interaction: discord.Interaction):
+        view = DuelView(self, interaction.user.id)
         view._last_balance = await _fetch_balance(self, interaction.user.id)
         await interaction.response.send_message(view=_wrap(view))
         view.message = await interaction.original_response()
@@ -843,7 +1063,16 @@ class GamblingCog(commands.Cog):
             blocked = prison_core.block_message(uid)
             if blocked:
                 return gambling_action_failed(blocked), None
-            result = self.store.spin_slot(uid)
+            # お祓い棒（S6-4）: 発動中は「6」の重みを下げて回す。
+            six_suppressed = False
+            try:
+                six_suppressed = self._item_store().has_effect(
+                    uid, items_core.SIX_SUPPRESS_EFFECT)
+            except Exception:
+                six_suppressed = False
+            result = self.store.spin_slot(
+                uid, six_suppressed=six_suppressed,
+                six_multiplier=items_core.SIX_SUPPRESS_MULTIPLIER)
             wallet = self._wallet()
             delta = 0
             lines = [f"🎰 {''.join(map(str, result['reels']))}"]
@@ -892,6 +1121,13 @@ class GamblingCog(commands.Cog):
                         await self._record_history(
                             uid, GAMBLING_ID, taken, "gamble_slot")
                         self._recycle(taken)
+                        # 悪魔的な報酬（S6-4）: 没収が発生したときに限り、
+                        # 所持していれば確率で見返りがある（1回で消滅）。
+                        devil = await self._try_devil_reward(uid, taken)
+                        if devil > 0:
+                            delta += devil
+                            lines.append(
+                                f"😈 **悪魔的な報酬！** {devil:,} AGO が戻ってきた…")
             elif result["reward"] > 0:
                 credit = await wallet._change_balance(
                     uid, result["reward"], create_with=wallet_module.NEW_USER_BALANCE)
@@ -1160,6 +1396,177 @@ class GamblingCog(commands.Cog):
             logger.exception("gambling: ブラックジャックのスタンドに失敗 user=%s", uid)
             return gambling_action_failed(
                 "実行中にエラーが発生しました。時間をおいて再試行してください。")
+
+    # ------------------------------------------------------------------ bj_duel の実行（S6-3）
+    async def _duel_debit(self, uid: str, bet: int) -> str | None:
+        """対決ベットをエスクローする。失敗時は表示文を返す。"""
+        wallet = self._wallet()
+        debit = await wallet._change_balance(uid, -bet, require_funds=True)
+        if debit is wallet_module.INSUFFICIENT:
+            return gambling_action_failed("コインが不足しています。")
+        if debit is None:
+            return gambling_action_failed(
+                "コインの更新に失敗しました。時間をおいて再試行してください。")
+        await self._record_history(
+            uid, GAMBLING_ID, bet, gambling_core.DUEL_HISTORY_REASON)
+        return None
+
+    async def _duel_refund(self, uid: str, amount: int) -> None:
+        wallet = self._wallet()
+        credit = await wallet._change_balance(
+            uid, amount, create_with=wallet_module.NEW_USER_BALANCE)
+        if credit is None:
+            logger.critical(
+                "gambling: 対決ベットの返金に失敗しました。"
+                "手動で返金してください: user=%s amount=%s", uid, amount)
+            return
+        await self._record_history(
+            GAMBLING_ID, uid, amount, gambling_core.DUEL_HISTORY_REASON)
+
+    async def execute_duel_create(self, user_id: int, bet: int) -> str:
+        uid = str(user_id)
+        try:
+            blocked = prison_core.block_message(uid)
+            if blocked:
+                return gambling_action_failed(blocked)
+            if bet < gambling_core.DUEL_MIN_BET:
+                return gambling_action_failed(
+                    f"ベットは{gambling_core.DUEL_MIN_BET:,} AGO以上で指定してください。")
+            error = await self._duel_debit(uid, bet)
+            if error is not None:
+                return error
+            try:
+                self.store.create_duel(uid, bet)
+            except items_core.ItemError as exc:
+                await self._duel_refund(uid, bet)
+                return gambling_action_failed(exc)
+            return (f"⚔️ **対決を作成しました！** ベット: {bet:,} AGO\n"
+                    "相手が参加すると始まります。")
+        except items_core.ItemError as exc:
+            return gambling_action_failed(exc)
+        except Exception:
+            logger.exception("gambling: 対決の作成に失敗 user=%s", uid)
+            return gambling_action_failed(
+                "作成中にエラーが発生しました。時間をおいて再試行してください。")
+
+    async def execute_duel_join(self, user_id: int, creator_id: str) -> str:
+        uid = str(user_id)
+        try:
+            blocked = prison_core.block_message(uid)
+            if blocked:
+                return gambling_action_failed(blocked)
+            opens = {d["creator"]: d for d in self.store.open_duels()}
+            duel = opens.get(str(creator_id))
+            if duel is None:
+                return gambling_action_failed("その対決はもう始まっています。")
+            bet = int(duel["bet"])
+            error = await self._duel_debit(uid, bet)
+            if error is not None:
+                return error
+            try:
+                snapshot = self.store.join_duel(str(creator_id), uid)
+            except items_core.ItemError as exc:
+                await self._duel_refund(uid, bet)
+                return gambling_action_failed(exc)
+            return self._duel_status_line(snapshot, uid)
+        except items_core.ItemError as exc:
+            return gambling_action_failed(exc)
+        except Exception:
+            logger.exception("gambling: 対決への参加に失敗 user=%s", uid)
+            return gambling_action_failed(
+                "参加中にエラーが発生しました。時間をおいて再試行してください。")
+
+    def _duel_status_line(self, snapshot: dict, uid: str) -> str:
+        hand = snapshot["hands"].get(uid, [])
+        total = snapshot["totals"].get(uid, 0)
+        opponent = (snapshot["challenger"] if uid == snapshot["creator"]
+                    else snapshot["creator"])
+        opp_total = snapshot["totals"].get(opponent, 0)
+        return (f"⚔️ **対決開始！** あなた: {hand}（{total}）／"
+                f"相手: {opp_total}\nヒットかスタンドを選んでください。")
+
+    async def _settle_duel(self, result: dict) -> str:
+        """決着済みの対決結果に対して支払い／返金を行い、表示文を返す。"""
+        bet = int(result["bet"])
+        hands = result["hands"]
+        totals = result["totals"]
+        detail = "／".join(
+            f"<@{uid}>: {hands[uid]}（{totals[uid]}）"
+            for uid in (result["creator"], result["challenger"]) if uid)
+        if result["draw"]:
+            for uid in (result["creator"], result["challenger"]):
+                if uid:
+                    await self._duel_refund(uid, bet)
+            return f"🤝 **引き分け**（双方にベットが戻りました）\n{detail}"
+        winner = result["winner"]
+        loser = (result["challenger"] if winner == result["creator"]
+                 else result["creator"])
+        pot = bet * 2
+        wallet = self._wallet()
+        credit = await wallet._change_balance(
+            winner, pot, create_with=wallet_module.NEW_USER_BALANCE)
+        if credit is None:
+            logger.critical(
+                "gambling: 対決の賞金の支払いに失敗しました。"
+                "手動で払ってください: user=%s amount=%s", winner, pot)
+            return gambling_action_failed(
+                "賞金の支払いに失敗しました。Botの運営に連絡してください。")
+        await self._record_history(
+            GAMBLING_ID, winner, pot, gambling_core.DUEL_HISTORY_REASON)
+        bust_line = ""
+        if result.get("bust"):
+            bust_line = f"\n💥 <@{result['bust']}> がバースト！"
+        return (f"🏆 <@{winner}> の勝ち！ **+{bet:,} AGO**（賞金 {pot:,} AGO）"
+                f"{bust_line}\n{detail}\n<@{loser}> は -{bet:,} AGO")
+
+    async def execute_duel_hit(self, user_id: int) -> str:
+        uid = str(user_id)
+        try:
+            blocked = prison_core.block_message(uid)
+            if blocked:
+                return gambling_action_failed(blocked)
+            result = self.store.duel_hit(uid)
+            if result.get("finished"):
+                return await self._settle_duel(result)
+            return self._duel_status_line(result, uid)
+        except items_core.ItemError as exc:
+            return gambling_action_failed(exc)
+        except Exception:
+            logger.exception("gambling: 対決のヒットに失敗 user=%s", uid)
+            return gambling_action_failed(
+                "実行中にエラーが発生しました。時間をおいて再試行してください。")
+
+    async def execute_duel_stand(self, user_id: int) -> str:
+        uid = str(user_id)
+        try:
+            blocked = prison_core.block_message(uid)
+            if blocked:
+                return gambling_action_failed(blocked)
+            result = self.store.duel_stand(uid)
+            if result.get("finished"):
+                return await self._settle_duel(result)
+            return "スタンドしました。相手の番です。"
+        except items_core.ItemError as exc:
+            return gambling_action_failed(exc)
+        except Exception:
+            logger.exception("gambling: 対決のスタンドに失敗 user=%s", uid)
+            return gambling_action_failed(
+                "実行中にエラーが発生しました。時間をおいて再試行してください。")
+
+    async def cancel_duel_for(self, user_id: int) -> str:
+        """対決の取り消し／中断。双方へ全額返金する（S6-3）。"""
+        uid = str(user_id)
+        try:
+            result = self.store.cancel_duel(uid)
+            for refund in result["refunds"]:
+                await self._duel_refund(refund["user_id"], int(refund["amount"]))
+            return "対決を取り消しました。ベットは返金されました。"
+        except items_core.ItemError as exc:
+            return gambling_action_failed(exc)
+        except Exception:
+            logger.exception("gambling: 対決の取り消しに失敗 user=%s", uid)
+            return gambling_action_failed(
+                "取り消し中にエラーが発生しました。時間をおいて再試行してください。")
 
     # ------------------------------------------------------------------ ダイスの実行
     async def execute_dice(self, user_id: int, max_value: int, number: int, bet: int) -> str:

@@ -453,7 +453,7 @@ class WorkshopCog(commands.Cog):
             names = f"{_item_name(item_a)} ＋ {_item_name(item_b)}"
             outcome = f"{_item_name(result['item'])} ×{result['count']}"
             # クラン貢献フック（所属中のみ・失敗しても合成に影響させない）。
-            clan_core.award_points(uid, clan_core.POINTS_CRAFT)
+            clan_core.award_points(uid, clan_core.POINTS_CRAFT, "craft")
             if result["rare"]:
                 return f"✨ **大成功！** {names} → **{outcome}**"
             return f"{SUCCESS} **合成しました** {names} → **{outcome}**"
