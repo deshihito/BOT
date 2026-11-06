@@ -16,6 +16,7 @@ from core.general.money_panel.cog import (
     config,
     market_core,
     prison_core,
+    starter_core,
     as_panel_v2,
     edit_message_v2,
     edit_panel_v2,
