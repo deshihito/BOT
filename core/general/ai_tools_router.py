@@ -20,7 +20,7 @@ from typing import Any
 
 import aiohttp
 
-from core import action_registry, logfare
+from core.general import action_registry, logfare
 
 AITOOLS_MODEL = "clef"
 AITOOLS_TIMEOUT = float(os.getenv("AITOOLS_TIMEOUT", "30"))
