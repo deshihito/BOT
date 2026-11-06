@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 import asyncio
+import io
 import logging
 import math
 import random
@@ -29,6 +30,11 @@ from discord import app_commands
 from discord.ext import commands, tasks
 from core.api_client import API_NOT_CONFIGURED_MESSAGE
 from core.api_retry import run_with_retry
+from core.game.seizon.analysis import (
+    ANALYSIS_WINDOW_DAYS,
+    average_hourly_profile,
+    render_hourly_chart,
+)
 from core.user_names import cached_display_name
 
 log = logging.getLogger(__name__)
@@ -226,6 +232,23 @@ def hours_until_crash(altitude: float) -> float | None:
     return ALTITUDE_HALF_LIFE_HOURS * math.log2(altitude / ALTITUDE_CRASH_FLOOR)
 
 
+class FujoAnalysisView(discord.ui.View):
+    """「現在の高度」表示から本人の fujo分析へ進むボタン（1回限り表示用）。
+
+    永続 View ではなく MIQ の出力コントロールと同じ作法で、タイムアウトや
+    再起動でボタンは失効する（分析自体は /general の「fujo分析」から
+    いつでも開ける）。対象は押した本人に固定する（分析は本人の記録専用）。
+    """
+
+    def __init__(self, cog: "FujoSurvival"):
+        super().__init__(timeout=3600)
+        self.cog = cog
+
+    @discord.ui.button(label="fujo分析", style=discord.ButtonStyle.secondary, custom_id="fujo:analysis")
+    async def open_analysis(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self.cog.analysis(interaction)
+
+
 class FujoSurvival(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
@@ -258,6 +281,7 @@ class FujoSurvival(commands.Cog):
     FUJO_ACTIONS = [
         app_commands.Choice(name="追跡登録・解除", value="register"),
         app_commands.Choice(name="現在の高度", value="hindo"),
+        app_commands.Choice(name="fujo分析", value="analysis"),
         app_commands.Choice(name="ランキング", value="ranking"),
         app_commands.Choice(name="ストリークフリーズ", value="freeze"),
         app_commands.Choice(name="失踪警報を設定", value="panic_set"),
@@ -277,6 +301,8 @@ class FujoSurvival(commands.Cog):
             return await self.register(interaction)
         if action == "hindo":
             return await self.hindo(interaction, target)
+        if action == "analysis":
+            return await self.analysis(interaction)
         if action == "ranking":
             return await self.ranking(interaction, mode)
         if action == "freeze":
@@ -394,11 +420,24 @@ class FujoSurvival(commands.Cog):
         embed.set_footer(text=FOOTER)
         return embed
 
-    async def _reply(self, interaction: discord.Interaction, embed: discord.Embed, ephemeral: bool = False):
+    async def _reply(self, interaction: discord.Interaction, embed: discord.Embed, ephemeral: bool = False, view: discord.ui.View | None = None):
+        if view is None:
+            if interaction.response.is_done():
+                await interaction.followup.send(embed=embed, ephemeral=ephemeral)
+            else:
+                await interaction.response.send_message(embed=embed, ephemeral=ephemeral)
+            return
         if interaction.response.is_done():
-            await interaction.followup.send(embed=embed, ephemeral=ephemeral)
+            await interaction.followup.send(embed=embed, ephemeral=ephemeral, view=view)
         else:
-            await interaction.response.send_message(embed=embed, ephemeral=ephemeral)
+            await interaction.response.send_message(embed=embed, ephemeral=ephemeral, view=view)
+
+    async def _reply_view(self, interaction: discord.Interaction, view: discord.ui.LayoutView, file: discord.File):
+        """Components V2 のレイアウト（グラフ画像つき）を公開で返す。"""
+        if interaction.response.is_done():
+            await interaction.followup.send(view=view, file=file)
+        else:
+            await interaction.response.send_message(view=view, file=file)
 
     async def _require_registered(self, interaction: discord.Interaction, user_id: int, self_check: bool) -> bool:
         await self._ensure_users()
@@ -662,7 +701,52 @@ class FujoSurvival(commands.Cog):
         unix_ts = int(latest_dt.timestamp())
         embed.add_field(name="最終検知", value=f"<t:{unix_ts}:R>（{latest_signal or '-'}）", inline=False)
         embed.set_footer(text=f"{FOOTER}（高度は検知のたびに上がり、時間とともに下がります）")
-        await self._reply(interaction, embed)
+        await self._reply(interaction, embed, view=FujoAnalysisView(self))
+
+    async def analysis(self, interaction: discord.Interaction):
+        """本人の検知ログから時間帯別の1日平均を棒グラフで見せる（読み取り専用）。"""
+        user = interaction.user
+        if not await self._require_registered(interaction, user.id, True):
+            return
+        if not interaction.response.is_done():
+            await interaction.response.defer()
+        now = datetime.now(timezone.utc)
+        # 窓の開始日（JST）の 0 時 = UTC では前日 15 時。少し広めに取って
+        # 集計側（JST 暦日）で正確に切り分ける。
+        since = now - timedelta(days=ANALYSIS_WINDOW_DAYS + 1)
+        records = await self._activities_since(since, user.id, "detected_at")
+        profile = average_hourly_profile(records, now)
+        if profile is None:
+            await self._reply(
+                interaction,
+                self.create_simple_embed(
+                    "fujo分析",
+                    "まだデータが少ないため、時間帯の傾向は出せません。検知が数日分たまると、"
+                    "どの時間帯によく検知されるかを1日平均のグラフで見られるようになります。",
+                    0x95a5a6,
+                ),
+                ephemeral=True,
+            )
+            return
+        png = await asyncio.to_thread(
+            render_hourly_chart, profile, title=f"fujo分析 - {user.display_name}"
+        )
+        peak_avg = profile.averages[profile.peak_hour]
+        body = (
+            f"## fujo分析 - {user.display_name}\n"
+            f"直近{ANALYSIS_WINDOW_DAYS}日のうち検知のあった{profile.days}日分の、"
+            "時間帯ごとの1日あたり平均検知回数です（今日の分は集計途中なので含みません）。\n"
+            f"最も活動的な時間帯は **{profile.peak_hour}時台**（1日平均 {peak_avg:.1f} 回）です。"
+        )
+        view = discord.ui.LayoutView(timeout=None)
+        container = discord.ui.Container(accent_colour=discord.Color(0x2ecc71))
+        container.add_item(discord.ui.TextDisplay(body))
+        container.add_item(
+            discord.ui.MediaGallery(discord.MediaGalleryItem("attachment://fujo_analysis.png"))
+        )
+        view.add_item(container)
+        file = discord.File(io.BytesIO(png), filename="fujo_analysis.png")
+        await self._reply_view(interaction, view, file)
 
     async def ranking(self, interaction: discord.Interaction, mode: str = "active"):
         await interaction.response.defer()

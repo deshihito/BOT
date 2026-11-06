@@ -118,6 +118,7 @@ GENERAL_ACTIONS = {
     "survival": [
         ("追跡登録・解除", "fujo_register"),
         ("現在の高度", "fujo_hindo"),
+        ("fujo分析", "fujo_analysis"),
         ("生存確認ランキング", "fujo_ranking"),
         ("フリーズ", "fujo_freeze"),
         ("失踪警報解除", "fujo_panic_disable"),
