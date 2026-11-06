@@ -10,7 +10,7 @@ import asyncio
 import random
 
 import discord
-from core import game_panels
+from core.game import game_panels
 from core.messages import recruit_join_prompt
 from discord.ext import commands
 
