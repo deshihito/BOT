@@ -126,8 +126,9 @@ def _workshop_embed(cog: "WorkshopCog", user_id: int) -> discord.Embed:
             if ready_at <= now:
                 lines.append(f"・{names} — **受け取り可能**")
             else:
-                hours = (ready_at - now).total_seconds() / 3600
-                lines.append(f"・{names} — 完了まで約 {hours:.1f} 時間")
+                # 残り時間の表記は prison.format_remaining に統一する（導線最適化ラウンド4）。
+                seconds = (ready_at - now).total_seconds()
+                lines.append(f"・{names} — 完了まで{prison_core.format_remaining(seconds)}")
         embed.add_field(name="委託加工", value="\n".join(lines), inline=False)
     embed.add_field(name="加工機（購入）", value="\n".join(_tier_lines()), inline=False)
     embed.set_footer(text="生産物は「生産物を受け取る」でまとめて受け取れます。")
@@ -198,9 +199,8 @@ class WorkshopView(discord.ui.View):
     def embed(self) -> discord.Embed:
         return _workshop_embed(self.cog, self.user_id)
 
-    @discord.ui.button(label="更新", style=discord.ButtonStyle.secondary)
-    async def refresh(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await _edit_panel(interaction, self, button=button)
+    # 導線最適化ラウンド4: 再描画だけの「更新」ボタンは置かない（S9/R2-5
+    # と同じ作法）。受け取り・購入のたびにパネルは更新される。
 
     @discord.ui.button(label="加工機を買う", style=discord.ButtonStyle.success)
     async def buy(self, interaction: discord.Interaction, button: discord.ui.Button):

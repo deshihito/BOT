@@ -9,11 +9,11 @@ from discord.ext import commands
 from typing import Dict, List, Optional
 import re
 import os
-from core import logfare
+from core import data_paths, logfare
 from core.panel_v2 import as_panel_v2, edit_panel_v2
 
 from core.game.zeta.common import *  # noqa: F401,F403 - shared constants/helpers
-from core.game.zeta.common import BotPersona, CUSTOM_FILE, DEFAULT_ICON_URL, MAX_CUSTOM_PER_USER  # noqa: F401
+from core.game.zeta.common import BotPersona, CUSTOM_FILE, DEFAULT_ICON_URL, MAX_CUSTOM_PER_USER, STRAY_CUSTOM_FILE  # noqa: F401
 
 logger = logging.getLogger("cogs.zetamodoki")
 
@@ -33,22 +33,36 @@ class CustomSituationStore:
 
     def _root(self) -> dict:
         if self._data is None:
-            data: dict = {}
-            try:
-                with self.path.open("r", encoding="utf-8") as f:
-                    loaded = json.load(f)
-                if isinstance(loaded, dict):
-                    data = loaded
-            except FileNotFoundError:
-                pass
-            except Exception:
-                logger.exception("ZetaModoki: %s の読み込みに失敗しました。壊れたファイルを退避します", self.path)
-                try:
-                    os.replace(self.path, self.path.with_name(self.path.name + f".broken-{int(time.time())}"))
-                except OSError:
-                    logger.debug("ZetaModoki: 壊れたファイルの退避に失敗しました", exc_info=True)
-            self._data = data
+            self._data = self._load()
         return self._data
+
+    def _load(self) -> dict:
+        # 既定パスのときだけ、旧保存先 (パスずれ期間の core/game/data/)
+        # から移行読み取りする (旧パス主・正規パスはユーザー単位で補完)。
+        # 環境変数や明示パスで保存先が指定されている場合は移行しない。
+        if self.path == CUSTOM_FILE and not os.getenv("ZETAMODOKI_CUSTOM_PATH"):
+            raw = data_paths.load_migrated(self.path, STRAY_CUSTOM_FILE, fill=True)
+            if isinstance(raw, dict):
+                return raw
+            if raw is not None:
+                return {}
+            # どちらにも読めるデータが無い場合のみ従来経路に落とす
+            # (壊れたファイルの退避などの従来動作を保つため)。
+        data: dict = {}
+        try:
+            with self.path.open("r", encoding="utf-8") as f:
+                loaded = json.load(f)
+            if isinstance(loaded, dict):
+                data = loaded
+        except FileNotFoundError:
+            pass
+        except Exception:
+            logger.exception("ZetaModoki: %s の読み込みに失敗しました。壊れたファイルを退避します", self.path)
+            try:
+                os.replace(self.path, self.path.with_name(self.path.name + f".broken-{int(time.time())}"))
+            except OSError:
+                logger.debug("ZetaModoki: 壊れたファイルの退避に失敗しました", exc_info=True)
+        return data
 
     def _write(self, payload: str) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)

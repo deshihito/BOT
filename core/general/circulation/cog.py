@@ -107,8 +107,8 @@ def _mining_embed(cog: "CirculationCog", user_id: int,
     embed.add_field(name="状態", value=state, inline=False)
     embed.add_field(
         name="採掘プール", value=f"**{pool:,} AGO**", inline=True)
-    embed.set_footer(
-        text="掘ったコインはプールから支払われます。プールが空になると掘れません。")
+    # 導線最適化ラウンド4: プールの仕組み説明（フッター）は常時表示をやめた。
+    # 残高は上のフィールドで分かり、空の場合は実行結果が明示する。
     return embed
 
 
@@ -126,9 +126,9 @@ class MiningView(discord.ui.View):
     def embed(self) -> discord.Embed:
         return _mining_embed(self.cog, self.user_id, self.last_result)
 
-    @discord.ui.button(label="更新", style=discord.ButtonStyle.secondary)
-    async def refresh(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await _edit_panel(interaction, self, button=button)
+    # 導線最適化ラウンド4: 再描画だけの「更新」ボタンは置かない（S9/R2-5
+    # と同じ作法）。クールダウン中でも「採掘する」を押せば状態が更新され、
+    # 残り時間つきの結果が返るため、更新専用ボタンは不要。
 
     @discord.ui.button(label="採掘する", style=discord.ButtonStyle.success)
     async def dig(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -245,14 +245,24 @@ class LotteryView(discord.ui.View):
 # 盗む
 # ---------------------------------------------------------------------------
 
+# ルール文は「ルール」ボタンの裏に隔離する（導線最適化 S9 と同じ方式、
+# ラウンド4で盗むにも適用）。パネル本文は状態だけにする。
+STEAL_RULES = (
+    f"成功すると相手の残高の一部（最大 {steal_core.STEAL_MAX_AMOUNT:,} AGO）"
+    "を盗めます。\n"
+    f"失敗すると相手に罰金 **{steal_core.FINE_AMOUNT:,} AGO** を払います。"
+    f"残高 {steal_core.TARGET_MIN_BALANCE:,} AGO 未満の相手は保護されて盗めません。\n"
+    "狙えるのは同じサーバーのメンバーだけです。狙われた相手はしばらく保護されます。")
+
+
+def _steal_rules_embed() -> discord.Embed:
+    return discord.Embed(
+        title="盗む のルール", description=STEAL_RULES, color=CIRCULATION_COLOR)
+
+
 def _steal_embed(cog: "CirculationCog", user_id: int) -> discord.Embed:
     status = cog.steal_store.actor_status(str(user_id))
     embed = discord.Embed(title="盗む", color=CIRCULATION_COLOR)
-    embed.description = (
-        f"成功すると相手の残高の一部（最大 {steal_core.STEAL_MAX_AMOUNT:,} AGO）"
-        "を盗めます。\n"
-        f"失敗すると相手に罰金 **{steal_core.FINE_AMOUNT:,} AGO** を払います。"
-        f"残高 {steal_core.TARGET_MIN_BALANCE:,} AGO 未満の相手は保護されて盗めません。")
     if status["cooldown_remaining"] > 0:
         state = f"次に実行できるまで {_fmt_minutes(status['cooldown_remaining'])}"
     else:
@@ -261,7 +271,6 @@ def _steal_embed(cog: "CirculationCog", user_id: int) -> discord.Embed:
     embed.add_field(
         name="今日の実行",
         value=f"{status['today_count']} / {status['daily_limit']} 回", inline=True)
-    embed.set_footer(text="狙えるのは同じサーバーのメンバーだけです。狙われた相手はしばらく保護されます。")
     return embed
 
 
@@ -292,6 +301,14 @@ class StealView(discord.ui.View):
         self.cog = cog
         self.user_id = user_id
         self.add_item(StealTargetSelect(cog))
+        rules = discord.ui.Button(
+            label="ルール", style=discord.ButtonStyle.secondary, row=1)
+        rules.callback = self._rules
+        self.add_item(rules)
+
+    async def _rules(self, interaction: discord.Interaction):
+        await interaction.response.send_message(
+            embed=_steal_rules_embed(), ephemeral=True)
 
     async def interaction_check(self, interaction) -> bool:
         # 公開パネル化（ephemeral第2波）: 操作は本人のみ。

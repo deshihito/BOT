@@ -166,9 +166,13 @@ class PartyView(discord.ui.View):
         self.user_id = user_id
         owned = cog.store.owned(str(user_id))
         chars = [gacha_core.CHARACTER_BY_ID[c] for c in owned]
-        chars.sort(key=lambda c: (
-            -gacha_core.RARITY_ORDER.index(c["rarity"]), c["name"]))
         party = set(cog.store.party(str(user_id)))
+        # 導線最適化ラウンド4: セレクト上限25件で切り捨てる際も、編成中の
+        # キャラが必ず枠内に入るよう編成中を先頭に寄せる（現在編成は常に
+        # 編集できることを保証する）。
+        chars.sort(key=lambda c: (
+            c["id"] not in party,
+            -gacha_core.RARITY_ORDER.index(c["rarity"]), c["name"]))
         select = discord.ui.Select(
             placeholder="編成するキャラ（最大3体）",
             min_values=0, max_values=gacha_core.PARTY_MAX,

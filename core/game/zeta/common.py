@@ -9,7 +9,7 @@ from discord.ext import commands
 from typing import Dict, List, Optional
 import re
 import os
-from core import logfare
+from core import data_paths, logfare
 from core.panel_v2 import as_panel_v2, edit_panel_v2
 
 logger = logging.getLogger("cogs.zetamodoki")
@@ -108,8 +108,12 @@ DEFAULT_ICON_URL = "https://cdn.discordapp.com/attachments/1320716634582683649/1
 # 保存先は環境変数 ZETAMODOKI_CUSTOM_PATH で変更可能。既定は <プロジェクト直下>/data/zetamodoki_custom.json
 CUSTOM_FILE = Path(
     os.getenv("ZETAMODOKI_CUSTOM_PATH")
-    or (Path(__file__).resolve().parent.parent / "data" / "zetamodoki_custom.json")
+    or data_paths.data_path("zetamodoki_custom.json")
 )
+# 再編成でモジュールが1階層深くなった際に保存先がずれていた期間の旧保存先
+# (core/game/data/zetamodoki_custom.json)。移行読み取り専用で、書き込みは
+# 行わない (読み取りは core/game/zeta/store.py 側で行う)。
+STRAY_CUSTOM_FILE = data_paths.stray_path(__file__, "zetamodoki_custom.json")
 _FORBIDDEN_NAME_WORDS = ("discord", "clyde")  # Webhook名に使えない語
 
 

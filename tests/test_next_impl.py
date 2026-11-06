@@ -805,10 +805,14 @@ class MoneyPanelNextStepTest(unittest.TestCase):
         self.assertEqual(labels["craft"], "合成・工房（生産）")
 
     def test_next_step_priority(self):
+        # 導線最適化ラウンド4: 逮捕中は「状態」フィールドが残り時間つきで
+        # 担うため、「次の1手」行（description）は出さない（二重表示の解消）。
         embed = status_embed(self._status(
             prison_remaining=600.0, workshop_ready=True,
             starter_claimed=False, daily_claimed=False))
-        self.assertIn("逮捕中", embed.description)
+        self.assertIsNone(embed.description)
+        fields = {field.name: field.value for field in embed.fields}
+        self.assertIn("逮捕中", fields["状態"])
         embed = status_embed(self._status(
             workshop_ready=True, starter_claimed=False,
             daily_claimed=False))

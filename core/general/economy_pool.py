@@ -45,6 +45,7 @@ from datetime import date, datetime
 from pathlib import Path
 from typing import Any
 
+from core import data_paths
 from core.general.items import JST
 
 logger = logging.getLogger(__name__)
@@ -101,7 +102,10 @@ def _clean_state(raw: Any) -> dict[str, Any]:
     return state
 
 
-_DEFAULT_PATH = Path(__file__).resolve().parent.parent / "data" / "economy_pool.json"
+_DEFAULT_PATH = data_paths.data_path("economy_pool.json")
+# 再編成でモジュールが1階層深くなった際に保存先がずれていた期間の旧保存先
+# (core/data/economy_pool.json)。移行読み取り専用で、書き込みは行わない。
+_STRAY_PATH = data_paths.stray_path(__file__, "economy_pool.json")
 
 
 def default_path() -> Path:
@@ -128,11 +132,19 @@ class EconomyPoolStore:
 
     # ------------------------------------------------------------------ 保存
     def _load(self) -> dict[str, Any]:
-        try:
-            raw = json.loads(self._path.read_text(encoding="utf-8"))
-        except Exception:
+        raw = self._read_raw()
+        if raw is None:
             return _empty_state()
         return _clean_state(raw)
+
+    def _read_raw(self) -> Any:
+        # 既定パスのときだけ、旧保存先 (パスずれ期間の core/data/) から
+        # 移行読み取りする。プール・国庫残高は単一の現在値なので、旧パス
+        # のファイル全体 (最新) を正とする。環境変数や明示パスで保存先が
+        # 指定されている場合は移行しない。
+        if self._path == _DEFAULT_PATH:
+            return data_paths.load_migrated(self._path, _STRAY_PATH, fill=False)
+        return data_paths.read_json(self._path)
 
     def flush(self) -> None:
         with self._lock:
