@@ -40,6 +40,7 @@ from discord.ext import commands
 import config
 from core.general import market as market_core
 from core.game import prison as prison_core
+from core import starter as starter_core
 from core.panel_v2 import as_panel_v2, edit_message_v2, edit_panel_v2
 from cogs import wallet as wallet_module  # 定数は実行時に引く（テストの cog 再読込対策）
 
@@ -87,6 +88,10 @@ def _fmt_minutes(seconds: float) -> str:
 def status_embed(status: dict) -> discord.Embed:
     """collect_status の結果をパネル上部のステータス表示にする。"""
     embed = discord.Embed(title="マネーパネル", color=MONEY_PANEL_COLOR)
+    if (status.get("balance") is not None
+            and status["balance"] < starter_core.GUIDE_BALANCE_THRESHOLD):
+        # 残高が少ないユーザー向けの導線は1行だけ（チュートリアルは作らない）。
+        embed.description = "まずは採掘と宝くじから始めてみてください。"
     if status.get("prison_remaining"):
         embed.add_field(
             name="状態",
@@ -164,6 +169,8 @@ class MoneyPanelView(discord.ui.View):
         self._cached_embed: discord.Embed | None = None
         # 逮捕中だけ概要に脱獄ボタンを出す（build_embed で状態が入る）。
         self._prison = False
+        # 未受け取りの間だけ概要にスターターボタンを出す（同上）。
+        self._starter = False
         self.refresh()
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
@@ -192,6 +199,10 @@ class MoneyPanelView(discord.ui.View):
         self.add_item(select)
         for label, style, handler in self._buttons_for(self.category):
             self._add_button(label, style, handler)
+        if self.category == "home" and getattr(self, "_starter", False):
+            self._add_button(
+                "スターターを受け取る", discord.ButtonStyle.success,
+                self._claim_starter)
         if self.category == "home" and getattr(self, "_prison", False):
             self._add_button(
                 "脱獄を試みる", discord.ButtonStyle.danger, self._jailbreak)
@@ -263,6 +274,7 @@ class MoneyPanelView(discord.ui.View):
     async def build_embed(self) -> discord.Embed:
         status = await self.cog.collect_status(self.user_id)
         self._prison = bool(status.get("prison_remaining"))
+        self._starter = status.get("starter_claimed") is False
         return status_embed(status)
 
     async def _on_category(self, interaction: discord.Interaction):
@@ -331,6 +343,10 @@ class MoneyPanelView(discord.ui.View):
         await self.refresh_panel()
 
     # ------------------------------------------------------------------ 直接実行
+    async def _claim_starter(self, interaction: discord.Interaction):
+        await self._run_direct(
+            interaction, lambda: self.cog.claim_starter(interaction.user.id))
+
     async def _jailbreak(self, interaction: discord.Interaction):
         # 脱獄は逮捕中の本人だけ（interaction_check で本人に限定済み、
         # ストア側でも逮捕中でなければ何も起きない）。
@@ -382,9 +398,13 @@ class MoneyPanelView(discord.ui.View):
 
 class MoneyPanelCog(commands.Cog):
     def __init__(self, bot: commands.Bot,
-                 balance_reader: Callable[[str], int] | None = None):
+                 balance_reader: Callable[[str], int] | None = None,
+                 starter_store: starter_core.StarterStore | None = None):
         self.bot = bot
         self._balance_reader = balance_reader
+        self.starter_store = (
+            starter_store if starter_store is not None
+            else starter_core.StarterStore())
 
     # ------------------------------------------------------------------ 残高
     async def _balance(self, user_id: str) -> int:
@@ -500,7 +520,51 @@ class MoneyPanelCog(commands.Cog):
             logger.exception("money_panel: 逮捕ステータスの取得に失敗 user=%s", uid)
             status["prison_remaining"] = None
 
+        try:
+            status["starter_claimed"] = self.starter_store.has_claimed(uid)
+        except Exception:
+            logger.exception("money_panel: スターター状態の取得に失敗 user=%s", uid)
+            status["starter_claimed"] = None
+
         return status
+
+    # ------------------------------------------------------------------ スターター
+    async def claim_starter(self, user_id: int) -> str:
+        """スターター一式を1回だけ付与する（受け取り判定はストアで原子的に）。"""
+        uid = str(user_id)
+        if not self.starter_store.try_claim(uid):
+            return "スターターは受け取り済みです。"
+        wallet = self.bot.get_cog("WalletCog")
+        items_cog = self.bot.get_cog("ItemsCog")
+        try:
+            if wallet is not None:
+                result = await wallet._change_balance(
+                    uid, starter_core.STARTER_COINS,
+                    create_with=wallet_module.NEW_USER_BALANCE)
+                if result is None:
+                    raise RuntimeError("balance update failed")
+            if items_cog is not None:
+                items_cog.store.add(
+                    uid, starter_core.STARTER_SCRAP_ITEM,
+                    starter_core.STARTER_SCRAPS)
+        except Exception:
+            logger.exception("money_panel: スターター付与に失敗 user=%s", uid)
+            self.starter_store.unclaim(uid)
+            return "受け取りに失敗しました。時間をおいて再試行してください。"
+        try:
+            await asyncio.to_thread(lambda: config.db_api.table(
+                "transaction_history").insert({
+                    "sender_id": "starter",
+                    "receiver_id": uid,
+                    "amount": starter_core.STARTER_COINS,
+                    "reason": "starter_grant",
+                }).execute())
+        except Exception:
+            logger.exception("money_panel: スターターの履歴記録に失敗 user=%s", uid)
+        return (
+            f"🎁 **スターターを受け取りました！** "
+            f"{starter_core.STARTER_COINS:,} AGO と "
+            f"スクラップ×{starter_core.STARTER_SCRAPS} を付与しました。")
 
     # ------------------------------------------------------------------ 逮捕・脱獄
     def _prison_store(self) -> prison_core.PrisonStore:
