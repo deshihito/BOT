@@ -22,8 +22,8 @@ from discord.ext import commands, tasks
 import config
 from core.game import clan as clan_core
 from core.game import prison as prison_core
-from core.user_names import cached_display_name, resolve_display_names
-from core.panel_v2 import as_panel_v2, edit_panel_v2
+from core.general.user_names import cached_display_name, resolve_display_names
+from core.support.panel_v2 import as_panel_v2, edit_panel_v2
 from cogs import wallet as wallet_module
 
 logger = logging.getLogger("cogs.clan")
