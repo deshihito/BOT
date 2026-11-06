@@ -13,7 +13,7 @@ from core.emojis import FAILED
 import discord
 from discord.ext import commands
 
-from core import party_ranking
+from core.game import party_ranking
 from core.game import game_panels
 from core.game.codenames import TEAM_LABEL, CodenamesGame, other_team
 
