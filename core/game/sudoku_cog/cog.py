@@ -3,7 +3,8 @@
 
 問題は唯一解になるよう生成する。モードは かんたん／ふつう／むずかしい／
 デイリー（日付シードで全員同じ問題・ふつう相当）。入力は
-行セレクト→列セレクト→数字セレクト。初期マスは変更できない。
+X（横）セレクト→Y（縦）セレクト→数字セレクト（座標表記は X/Y 統一、
+レビュー対応 2026-11-06）。初期マスは変更できない。
 クリアタイムは core/game/game_records.py の sudoku に難易度別で残る。
 
 盤面画像化タスク（2026-11-06）: 盤面表示をテキストから PIL 画像
@@ -33,7 +34,7 @@ def sudoku_embed(board, givens, user, label: str, status: str = "") -> discord.E
     """互換用に残す旧 embed 生成（現在の表示は V2 パネル＋画像）。"""
     embed = discord.Embed(title=f"🔢 数独（{label}）", color=0xFFFFFF)
     desc = f"<@{user.id}> の盤面です。\n```\n{board_text(board, givens)}\n```"
-    desc += "行→列→数字の順に選んで入力します（0で消えます）。[ ] は最初から埋まっているマスです。"
+    desc += "X→Y→数字の順に選んで入力します（0で消えます）。[ ] は最初から埋まっているマスです。"
     if status:
         desc += f"\n{status}"
     embed.description = desc
@@ -82,30 +83,21 @@ class SudokuView(GamePanelView):
 
     def _render(self):
         body = (f"<@{self.owner.id}> の盤面です。"
-                "行→列→数字の順に選んで入力します（0で消えます）。"
+                "X（横）→Y（縦）→数字の順に選んで入力します（0で消えます）。"
                 "濃い数字は最初から埋まっているマスで、変更できません。")
         sel = self._selected()
         if sel is not None:
-            body += f"\n選択中: **{sel[0] + 1}行目・{sel[1] + 1}列目**"
+            body += f"\n選択中: **X={sel[1] + 1}, Y={sel[0] + 1}**"
         if self.status:
             body += f"\n{self.status}"
         self.set_content(f"🔢 数独（{self.label}）", body)
         self.clear_rows()
         if self.finished:
             return
-        row_select = discord.ui.Select(
-            placeholder="行（1〜9）",
-            options=[discord.SelectOption(label=f"{i + 1}行目", value=str(i), default=(i == self.row)) for i in range(9)])
-
-        async def on_row(inter: discord.Interaction, sel=row_select):
-            self.row = int(sel.values[0])
-            await self._refresh(inter)
-
-        row_select.callback = on_row
-        self.add_row(row_select)
+        # 座標は X（横）→Y（縦）の順に選ぶ（上のセレクトが X、下が Y）
         col_select = discord.ui.Select(
-            placeholder="列（1〜9）",
-            options=[discord.SelectOption(label=f"{i + 1}列目", value=str(i), default=(i == self.col)) for i in range(9)])
+            placeholder="X（横）: 列（1〜9）",
+            options=[discord.SelectOption(label=f"X={i + 1}", value=str(i), default=(i == self.col)) for i in range(9)])
 
         async def on_col(inter: discord.Interaction, sel=col_select):
             self.col = int(sel.values[0])
@@ -113,6 +105,16 @@ class SudokuView(GamePanelView):
 
         col_select.callback = on_col
         self.add_row(col_select)
+        row_select = discord.ui.Select(
+            placeholder="Y（縦）: 行（1〜9）",
+            options=[discord.SelectOption(label=f"Y={i + 1}", value=str(i), default=(i == self.row)) for i in range(9)])
+
+        async def on_row(inter: discord.Interaction, sel=row_select):
+            self.row = int(sel.values[0])
+            await self._refresh(inter)
+
+        row_select.callback = on_row
+        self.add_row(row_select)
         num_select = discord.ui.Select(
             placeholder="数字（0で消す）",
             options=[discord.SelectOption(label="消す", value="0")] +
@@ -136,7 +138,7 @@ class SudokuView(GamePanelView):
 
     async def _num_chosen(self, interaction: discord.Interaction, value: int):
         if self.row is None or self.col is None:
-            return await interaction.response.send_message("先に行と列を選んでください。", ephemeral=True)
+            return await interaction.response.send_message("先にXとYを選んでください。", ephemeral=True)
         if self.givens[self.row][self.col]:
             return await interaction.response.send_message("そのマスは最初から埋まっていて変更できません。", ephemeral=True)
         self.board[self.row][self.col] = value

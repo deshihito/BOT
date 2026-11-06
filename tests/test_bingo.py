@@ -2,6 +2,7 @@
 
 import random
 import unittest
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from core.game.bingo import COLUMN_RANGES, BingoCard, BingoSession, format_card
 
@@ -46,6 +47,18 @@ class CardTest(unittest.TestCase):
         self.assertIn("★", text)
         self.assertEqual(len(text.splitlines()), 5)
 
+    def test_marks_needed(self):
+        grid = [[c * 10 + r + 1 for c in range(5)] for r in range(5)]
+        grid[2][2] = None
+        card = BingoCard(grid)
+        # フリーのみマーク済み → 中央を通るラインが最短で残り4個
+        self.assertEqual(card.marks_needed(), 4)
+        for c in range(4):
+            card.mark(grid[0][c])
+        self.assertEqual(card.marks_needed(), 1)  # リーチ
+        card.mark(grid[0][4])
+        self.assertEqual(card.marks_needed(), 0)  # ビンゴ成立
+
 
 class SessionTest(unittest.TestCase):
     def test_game_finishes_with_winner_within_75_draws(self):
@@ -70,6 +83,81 @@ class SessionTest(unittest.TestCase):
             seen.append(number)
         self.assertEqual(len(seen), len(set(seen)))
         self.assertTrue(all(1 <= n <= 75 for n in seen))
+
+
+class FakeMessage:
+    def __init__(self, content):
+        self.content = content
+        self.initial_content = content
+        self.edits = []
+
+    async def edit(self, **kwargs):
+        self.edits.append(kwargs)
+        if "content" in kwargs:
+            self.content = kwargs["content"]
+        return self
+
+
+class FakeChannel:
+    def __init__(self):
+        self.sent = []
+        self.guild = None
+
+    async def send(self, content=None, **kwargs):
+        msg = FakeMessage(content)
+        self.sent.append((msg, kwargs))
+        return msg
+
+
+class DrawCycleTest(unittest.IsolatedAsyncioTestCase):
+    """抽選サイクル（2026-11-06）: 10秒間隔、7秒でローディング送信→編集で開示。"""
+
+    async def test_draw_once_is_single_message_tease_then_reveal(self):
+        from core.game.bingo_cog.cog import DRAW_INTERVAL, TEASE_SECONDS, Bingo
+
+        self.assertEqual(DRAW_INTERVAL, 10)
+        self.assertEqual(TEASE_SECONDS, 7)
+
+        cog = Bingo(MagicMock())
+        session = BingoSession([1, 2], rng=random.Random(0))
+        channel = FakeChannel()
+        sleeps = []
+
+        async def fake_sleep(seconds):
+            sleeps.append(seconds)
+
+        with patch("asyncio.sleep", fake_sleep):
+            number, _winners, _reach = await cog._draw_once(channel, session)
+
+        self.assertEqual(sleeps, [TEASE_SECONDS, DRAW_INTERVAL - TEASE_SECONDS])
+        # 送信は1通だけ（ローディング）で、開示はその編集で完結する
+        self.assertEqual(len(channel.sent), 1)
+        msg, _kwargs = channel.sent[0]
+        self.assertIn("抽選中", msg.initial_content)
+        self.assertEqual(len(msg.edits), 1)
+        edit = msg.edits[0]
+        self.assertIn(f"**{number}**", edit["content"])
+        self.assertIn("これまで:", edit["content"])
+        # 開示メッセージには「手札を確認」ボタンが付く
+        view = edit["view"]
+        labels = [getattr(child, "label", None) for child in view.children]
+        self.assertIn("手札を確認", labels)
+
+    async def test_card_check_sends_png_ephemerally(self):
+        from core.game.bingo_cog.cog import CardCheckView
+
+        session = BingoSession([1, 2], rng=random.Random(0))
+        view = CardCheckView(MagicMock(), session)
+        button = next(c for c in view.children if getattr(c, "label", None) == "手札を確認")
+        interaction = MagicMock()
+        interaction.user.id = 1
+        interaction.response.send_message = AsyncMock()
+        await button.callback(interaction)
+        _args, kwargs = interaction.response.send_message.call_args
+        self.assertTrue(kwargs["ephemeral"])
+        self.assertEqual(kwargs["file"].filename, "bingo_card.png")
+        self.assertEqual(kwargs["embed"].image.url, "attachment://bingo_card.png")
+        self.assertIn("あと", kwargs["embed"].description)
 
 
 if __name__ == "__main__":

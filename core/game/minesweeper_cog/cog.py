@@ -3,9 +3,12 @@
 
 盤面画像化タスク（2026-11-06）で再設計した:
 - 盤面はボタン格子ではなく PIL 画像（core/game/board_image.render_minesweeper）
-  で表示し、操作は「行セレクト→列セレクト→開くボタン」に分離した。
+  で表示し、操作は「列セレクト→行セレクト→開くボタン」に分離した。
   マス数に依存しないため、大きな盤面（9×9 / 16×12）も同じ操作で成立する。
-- 選択中のマスは画像上で黄色枠ハイライトし、座標（列は A〜、行は 1〜）を
+- 座標表記は X（横）→Y（縦）の順に統一（レビュー対応 2026-11-06）。
+  列が X（見出しは A〜）、行が Y（見出しは 1〜）で、盤面画像の隅にも
+  X/Y 軸ラベルを描く。
+- 選択中のマスは画像上で黄色枠ハイライトし、座標（X=…, Y=…）を
   本文にも併記して押し間違いを防ぐ。代償として1マスの操作は現行の
   1タップから最大3ステップに増える（設計判断としてガイド・ログに明記）。
 - パネルは Components V2（core/game/game_v2.GamePanelView）。
@@ -38,7 +41,8 @@ def tile_for(cols: int) -> int:
 
 
 def coord(col: int, row: int) -> str:
-    return f"{chr(ord('A') + col)}{row + 1}"
+    """座標の読み出し表記（X=横の列、Y=縦の行）。"""
+    return f"X={chr(ord('A') + col)}, Y={row + 1}"
 
 
 def board_states(board: MinesweeperBoard, *, reveal: bool = False):
@@ -109,7 +113,7 @@ class BoardPanel(GamePanelView):
             lines.append(f"選択中: **{coord(sel[1], sel[0])}**"
                          + ("（旗モード）" if self.flag_mode else ""))
         else:
-            lines.append("行と列を選んでから「開く」を押してください。")
+            lines.append("X（横）とY（縦）を選んでから「開く」を押してください。")
         if self.status:
             lines.append(self.status)
         return "\n".join(lines)
@@ -121,21 +125,10 @@ class BoardPanel(GamePanelView):
         self.clear_rows()
         if self.finished:
             return
-        row_select = discord.ui.Select(
-            placeholder="行（1〜%d）" % board.rows,
-            options=[discord.SelectOption(label=f"{i + 1}行目", value=str(i),
-                                          default=(i == self.sel_row))
-                     for i in range(board.rows)])
-
-        async def on_row(inter: discord.Interaction, sel=row_select):
-            self.sel_row = int(sel.values[0])
-            await self._refresh(inter)
-
-        row_select.callback = on_row
-        self.add_row(row_select)
+        # 座標は X（横）→Y（縦）の順に選ぶ（上のセレクトが X、下が Y）
         col_select = discord.ui.Select(
-            placeholder="列（A〜%s）" % chr(ord("A") + board.cols - 1),
-            options=[discord.SelectOption(label=f"{chr(ord('A') + i)}列", value=str(i),
+            placeholder="X（横）: 列（A〜%s）" % chr(ord("A") + board.cols - 1),
+            options=[discord.SelectOption(label=f"X={chr(ord('A') + i)}", value=str(i),
                                           default=(i == self.sel_col))
                      for i in range(board.cols)])
 
@@ -145,6 +138,18 @@ class BoardPanel(GamePanelView):
 
         col_select.callback = on_col
         self.add_row(col_select)
+        row_select = discord.ui.Select(
+            placeholder="Y（縦）: 行（1〜%d）" % board.rows,
+            options=[discord.SelectOption(label=f"Y={i + 1}", value=str(i),
+                                          default=(i == self.sel_row))
+                     for i in range(board.rows)])
+
+        async def on_row(inter: discord.Interaction, sel=row_select):
+            self.sel_row = int(sel.values[0])
+            await self._refresh(inter)
+
+        row_select.callback = on_row
+        self.add_row(row_select)
         act = discord.ui.Button(
             label="🚩 旗を立てる/外す" if self.flag_mode else "⛏ 開く",
             style=discord.ButtonStyle.success)
@@ -167,7 +172,7 @@ class BoardPanel(GamePanelView):
         sel = self._selected()
         if sel is None:
             return await interaction.response.send_message(
-                "先に行と列を選んでください。", ephemeral=True)
+                "先にXとYを選んでください。", ephemeral=True)
         board = self.board
         if self.flag_mode:
             board.toggle_flag(sel)

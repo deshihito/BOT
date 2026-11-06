@@ -82,6 +82,47 @@ class WireCutGameTest(unittest.TestCase):
             for mark in game.public_rack(uid):
                 self.assertEqual(mark, "?")
 
+    def test_board_slots_never_leak_hidden_values(self):
+        """共有盤面データ（board_slots）に未カットタイルの数字が含まれないこと。
+
+        盤面画像化（2026-11-06）の秘匿担保: レンダラーへ渡るのは
+        ("cut", 公知の数字) と ("hidden", 偶奇 or None, ≠メモ) だけ。
+        """
+        from core.game.wirecut_cog.cog import board_slots
+
+        game = WireCutGame([1, 2, 3])
+        # 公開情報を少し作る: 情報トークンで偶奇を公開し、ミスで≠メモを付ける
+        actor = game.current
+        target = next(u for u in game.players if u != actor)
+        game.use_info(actor, target, 0)
+        actor = game.current
+        target = next(u for u in game.players if u != actor)
+        pos = next(i for i, t in enumerate(game.rack(target)) if t != RED)
+        wrong = next(n for n in range(1, 13) if n != game.rack(target)[pos])
+        game.declare(actor, target, pos, wrong)
+
+        for uid in game.players:
+            slots = board_slots(game, uid)
+            self.assertEqual(len(slots), len(game.rack(uid)))
+            for i, slot in enumerate(slots):
+                actual = game.rack(uid)[i]
+                if game.is_cut(uid, i):
+                    self.assertEqual(slot, ("cut", actual))  # カット済みは公知
+                    continue
+                self.assertEqual(slot[0], "hidden")
+                self.assertEqual(len(slot), 3)
+                # 偶奇は公開情報として整合していること（それ以外の数字情報は無い）
+                if slot[1] == "even":
+                    self.assertEqual(actual % 2, 0)
+                elif slot[1] == "odd":
+                    self.assertEqual(actual % 2, 1)
+                elif slot[1] == "red":
+                    self.assertEqual(actual, RED)
+                else:
+                    self.assertIsNone(slot[1])
+                # ≠メモに本当の数字が入ることは決してない
+                self.assertNotIn(actual, slot[2])
+
     def test_full_clear_simulation(self):
         game = WireCutGame([1, 2])
         guard = 0

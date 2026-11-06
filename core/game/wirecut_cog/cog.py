@@ -1,21 +1,28 @@
 # -*- coding: utf-8 -*-
 """「爆弾処理班」（Bomb Busters 系の協力推理ゲーム）。
 
-盤面表現: ラックは「位置＋公開メモ（偶奇・≠情報・カット済み）」の一次元リストで、
-情報の注釈が本体のため V2 構造化テキストで表示する（画像化すると注釈が
-埋もれる。判断は実装ログ参照）。自分のタイルは ephemeral でのみ表示する。
+盤面表現: ラウンド5では「位置＋公開メモの列挙が本質」として V2 構造化
+テキストを選んだが、実プレイで「画像がないと何もわからん」と判定された
+ため方針転換（レビュー対応 2026-11-06）: 共有の進行表示は PIL 盤面画像
+（core/game/board_image.render_wirecut_board）にし、各ラックを位置番号
+つきスロットで描く。未カットタイルの数字そのものは画像にも共有テキスト
+にも出さず、公開済み情報（偶奇ヒント・≠メモ）だけをタイル上に併記する。
+自分のタイルは ephemeral でのみ表示する。
 操作は対象セレクト（ephemeral）→モーダルで位置と数字を入力する分離方式で、
 ラックが長くてもセレクト上限に触れない。
 """
 import asyncio
+import io
 import logging
 
 import discord
 from discord.ext import commands
 
 from core.game import game_records
+from core.game.board_image import render_cached, render_wirecut_board
 from core.game.game_v2 import GamePanelView, text_panel
 from core.game.wirecut import MAX_MISS, WireCutGame
+from core.panel_v2 import edit_message_v2
 
 logger = logging.getLogger(__name__)
 
@@ -29,12 +36,46 @@ def player_labels(game: WireCutGame) -> dict[int, str]:
     return {uid: f"プレイヤー{i + 1}" for i, uid in enumerate(game.players)}
 
 
+def board_slots(game: WireCutGame, uid: int) -> list[tuple]:
+    """共有盤面用のスロット列。公開情報だけを含み、未カットタイルの数字は渡さない。
+
+    カット済みタイルの数字は宣言で公知になっているため渡してよい。
+    """
+    slots = []
+    for i in range(len(game.rack(uid))):
+        if game.is_cut(uid, i):
+            slots.append(("cut", game.rack(uid)[i]))
+        else:
+            note = game.notes.get((uid, i), {})
+            slots.append(("hidden", note.get("parity"),
+                          tuple(sorted(note.get("not", ())))))
+    return slots
+
+
+def board_png(game: WireCutGame) -> bytes:
+    labels = player_labels(game)
+    players = [{"label": f"{labels[uid]}（情報トークン {game.info_left[uid]}）",
+                "slots": board_slots(game, uid)} for uid in game.players]
+    fuse_left = game.max_miss - game.misses
+    key = ("wirecut",
+           tuple((p["label"], tuple(p["slots"])) for p in players),
+           game.remaining_numbers(), fuse_left, game.max_miss)
+    return render_cached(key, lambda: render_wirecut_board(
+        players, remaining=game.remaining_numbers(),
+        fuse_left=fuse_left, fuse_max=game.max_miss))
+
+
+def board_file(game: WireCutGame) -> discord.File:
+    return discord.File(io.BytesIO(board_png(game)), "board.png")
+
+
 def status_text(game: WireCutGame) -> str:
     labels = player_labels(game)
     lines = [f"残り数字ワイヤー: **{game.remaining_numbers()}本**／ヒューズ: **{game.max_miss - game.misses}/{game.max_miss}**"]
     for uid in game.players:
-        marks = " ".join(f"{i + 1}:{m}" for i, m in enumerate(game.public_rack(uid)))
-        lines.append(f"{labels[uid]} <@{uid}>（情報 {game.info_left[uid]}）: {marks}")
+        cut_count = sum(1 for i in range(len(game.rack(uid))) if game.is_cut(uid, i))
+        lines.append(f"{labels[uid]} <@{uid}>（情報 {game.info_left[uid]}／カット済み {cut_count}枚）")
+    lines.append("各タイルの状態は盤面画像を見てください（数字は左から小さい順、赤の位置だけ不明）。")
     if not game.finished:
         lines.append(f"\n手番は {labels[game.current]} <@{game.current}> です。")
     return "\n".join(lines)
@@ -184,6 +225,7 @@ class WireCut(commands.Cog):
     # ------------------------------------------------------------------ パネル
     def _panel(self, game: WireCutGame) -> GamePanelView:
         panel = GamePanelView("💣 爆弾処理班", status_text(game) + "\n\n「自分のタイル」で自分のタイルを確認できます。")
+        panel.add_extra(discord.ui.MediaGallery(discord.MediaGalleryItem("attachment://board.png")))
 
         async def on_mine(inter: discord.Interaction):
             uid = inter.user.id
@@ -222,13 +264,14 @@ class WireCut(commands.Cog):
         return panel
 
     async def _send_panel(self, channel, game: WireCutGame):
-        self.messages[channel.id] = await channel.send(view=self._panel(game))
+        self.messages[channel.id] = await channel.send(file=board_file(game), view=self._panel(game))
 
     async def _refresh_panel(self, channel, game: WireCutGame):
         msg = self.messages.get(channel.id)
         if msg is not None:
             try:
-                await msg.edit(view=self._panel(game))
+                # 画像つきパネルは添付し直して編集する（花火大会の前例）
+                await edit_message_v2(msg, self._panel(game), files=[board_file(game)])
             except Exception:  # noqa: BLE001
                 logger.debug("WireCut: パネル更新に失敗", exc_info=True)
 

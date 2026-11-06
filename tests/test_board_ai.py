@@ -191,7 +191,8 @@ class ShogiMoveFlowTest(unittest.IsolatedAsyncioTestCase):
 
         await cog.handle_coordinate_input(interaction, session, "44")
         self.assertEqual(session.state, "select_dest")
-        await cog.handle_coordinate_input(interaction, session, "34")
+        # 座標入力は X（横）→Y（縦）の順（修正4, 2026-11-06）: 移動先 (row2, col3) は "43"
+        await cog.handle_coordinate_input(interaction, session, "43")
         self.assertEqual(session.state, "select_promote")
         self.assertFalse(session.acted)
 

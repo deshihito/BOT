@@ -59,6 +59,11 @@ class BingoCard:
     def marked_count(self) -> int:
         return sum(1 for r in range(SIZE) for c in range(SIZE) if self.marked[r][c])
 
+    def marks_needed(self) -> int:
+        """ビンゴ成立まで最短であと何個のマークが必要か（成立済みは0）。"""
+        return min(sum(1 for r, c in line if not self.marked[r][c])
+                   for line in self._lines())
+
 
 class BingoSession:
     def __init__(self, player_ids, *, rng: random.Random = None):
