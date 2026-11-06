@@ -14,7 +14,7 @@ import aiohttp
 import discord
 from discord import app_commands
 from discord.ext import commands
-from core.emojis import FAILED, VOL
+from core.support.emojis import FAILED, VOL
 try:
     import encodec
     import soundfile as sf
@@ -33,12 +33,12 @@ except Exception:  # ImportError だけでなく共有ライブラリ不整合 (
         "EnCodec/torch/soundfile を読み込めなかったため、音声トリガー機能は無効になります",
         exc_info=True,
     )
-from core import action_usage
+from core.general import action_usage
 from core.support import usage_stats
-from core.legacy import Responder
+from core.support.legacy import Responder
 from core.vc.voice_session import VoiceBusy, feature_label, get_manager, stop_hint
 from core.vc.voice_media import add_audio_source, remove_audio_source
-from core.panel_v2 import as_panel_v2, edit_panel_v2
+from core.support.panel_v2 import as_panel_v2, edit_panel_v2
 
 from core.vc.common import *  # noqa: F401,F403 - shared constants
 from core.vc.common import COGS, GVC_ROOM_ACTIONS, GVC_ROOM_FORMS, LAZY_EXTENSIONS, VOICE_ACTIONS_BY_GENRE, VOICE_GENRES, format_elapsed  # noqa: F401
@@ -267,7 +267,7 @@ class VoiceHub(commands.Cog):
         await interaction.response.defer(thinking=True)
         history_specs = []
         if interaction.guild_id is not None:
-            from core import guild_settings
+            from core.support import guild_settings
             store = guild_settings.get_store()
             await store.ensure_loaded()
             history_specs = action_usage.history_panel_specs(
@@ -280,7 +280,7 @@ class VoiceHub(commands.Cog):
         """音声トリガーを操作できないときは理由を返す（support.py の権限設定と共通）。"""
         try:
             from cogs.support import get_voice_trigger_settings
-            from core import guild_settings
+            from core.support import guild_settings
 
             store = guild_settings.get_store()
             await store.ensure_loaded()
