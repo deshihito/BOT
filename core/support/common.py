@@ -89,6 +89,7 @@ SUPPORT_ACTIONS = [
     app_commands.Choice(name="認証パネル作成", value="auth_panel"),
     app_commands.Choice(name="ロールパネル作成", value="role_panel"),
     app_commands.Choice(name="言語設定", value="language"),
+    app_commands.Choice(name="グローバルチャット", value="globalchat"),
     app_commands.Choice(name="Auto react設定", value="auto_react"),
     app_commands.Choice(name="SNS新着通知（X・YouTube・GitHub）", value="sns_notify"),
     app_commands.Choice(name="Quest通知（Discord Orbs）", value="quest_notify"),
@@ -130,7 +131,7 @@ SUPPORT_ACTIONS_BY_GENRE = {
     "moderation": _support_actions("muted", "whisper", "sticky", "clear", "honeypot", "ticket", "giveaway"),
     "roles": _support_actions("role_bulk", "auth_panel", "role_panel"),
     "logs": _support_actions("vc_log", "message_log", "moderation_log"),
-    "automation": _support_actions("binjou", "auto_react", "levelup_notify", "voice_trigger", "sns_notify", "quest_notify", "language"),
+    "automation": _support_actions("binjou", "auto_react", "levelup_notify", "voice_trigger", "sns_notify", "quest_notify", "language", "globalchat"),
     "assist": _support_actions("server_assist"),
     "rta": _support_actions(
         "bumprta_status", "bumprta_on", "bumprta_off", "bumprta_role", "sokunuke_status", "sokunuke_on",

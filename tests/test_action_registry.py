@@ -50,7 +50,7 @@ class RegistryConsistencyTest(unittest.TestCase):
         # 導線最適化 M2: サーバーアシスト機能が assist_<key> として加わる
         expected |= {f"assist_{feature.key}" for feature in discover_features()}
         self.assertEqual(registered, expected)
-        self.assertEqual(len(registered), 30 + len(discover_features()))
+        self.assertEqual(len(registered), 31 + len(discover_features()))
 
     def test_general_registration_matches_general_actions(self):
         from cogs.general import GENERAL_ACTIONS
@@ -92,12 +92,12 @@ class ShortcutRootsGenerationTest(unittest.TestCase):
                 self.assertIsInstance(item_label, str)
                 self.assertIsInstance(value, str)
 
-    def test_support_candidates_cover_all_30_including_missing_15(self):
+    def test_support_candidates_cover_all_31_including_missing_15(self):
         from core.support.server_assist import discover_features
 
         values = {value for _label, value in self.roots["support"][1]}
-        # 導線最適化 M2: 従来30件＋アシスト機能（assist_<key>）が候補に入る
-        self.assertEqual(len(values), 30 + len(discover_features()))
+        # 導線最適化 M2: 従来30件＋グローバルチャット追加で31件＋アシスト機能（assist_<key>）が候補に入る
+        self.assertEqual(len(values), 31 + len(discover_features()))
         self.assertTrue(MISSING_SUPPORT_VALUES <= values)
         self.assertTrue(
             {f"assist_{feature.key}" for feature in discover_features()} <= values)
