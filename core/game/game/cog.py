@@ -17,6 +17,7 @@ from core.emojis import BACK
 from core.game.game_guides import GAME_GUIDES, GAME_ORDER, guide_for_discord
 from core.panel_v2 import as_panel_v2, edit_panel_v2
 from core.public_share import PublicShareView
+from core.user_names import resolve_display_names
 
 HUB_COLOR = 0xFFFFFF
 
@@ -110,13 +111,15 @@ def rules_embed(game_id: str) -> discord.Embed:
     return embed
 
 
-async def monthly_embed(guild_id) -> discord.Embed:
+async def monthly_embed(guild_id, bot=None) -> discord.Embed:
     """今月のゲーム王: その月の全ゲーム合計勝利数の上位（月次シーズン）。"""
     month = party_ranking.current_month()
     rows = await party_ranking.shared().monthly_top(guild_id, limit=10) if guild_id else []
     if rows:
         medals = {1: "👑", 2: "🥈", 3: "🥉"}
-        lines = [f"{medals.get(i, f'{i}.')} <@{uid}> — {wins}勝" for i, (uid, wins) in enumerate(rows, 1)]
+        # 氏名はメンションではなく通常表記（サーバー外・退室済みだと unknown になるため）
+        names = await resolve_display_names(bot, [uid for uid, _wins in rows])
+        lines = [f"{medals.get(i, f'{i}.')} {names.get(int(uid), '')} — {wins}勝" for i, (uid, wins) in enumerate(rows, 1)]
         text = "\n".join(lines)
     else:
         text = "今月はまだ記録がありません。ゲームに勝って最初のゲーム王を目指しましょう。"
@@ -126,12 +129,13 @@ async def monthly_embed(guild_id) -> discord.Embed:
     return embed
 
 
-async def ranking_embed(guild_id, game_id: str) -> discord.Embed:
+async def ranking_embed(guild_id, game_id: str, bot=None) -> discord.Embed:
     guide = GAME_GUIDES[game_id]
     rows = await party_ranking.shared().top(guild_id, game_id, limit=10) if guild_id else []
     if rows:
         medals = {1: "🥇", 2: "🥈", 3: "🥉"}
-        lines = [f"{medals.get(i, f'{i}.')} <@{uid}> — {wins}勝" for i, (uid, wins) in enumerate(rows, 1)]
+        names = await resolve_display_names(bot, [uid for uid, _wins in rows])
+        lines = [f"{medals.get(i, f'{i}.')} {names.get(int(uid), '')} — {wins}勝" for i, (uid, wins) in enumerate(rows, 1)]
         text = "\n".join(lines)
     else:
         text = "まだ記録がありません。"
@@ -139,7 +143,8 @@ async def ranking_embed(guild_id, game_id: str) -> discord.Embed:
     if game_id in elo.GAMES and guild_id:
         rows = elo.shared().top(guild_id, game_id, limit=10)
         if rows:
-            lines = [f"{i}. <@{uid}> — レート {rating:.0f}（{wins}勝{losses}敗{draws}分）"
+            names = await resolve_display_names(bot, [uid for uid, *_rest in rows])
+            lines = [f"{i}. {names.get(int(uid), '')} — レート {rating:.0f}（{wins}勝{losses}敗{draws}分）"
                      for i, (uid, rating, wins, losses, draws) in enumerate(rows, 1)]
             embed.add_field(name="📈 レート上位（対人戦）", value="\n".join(lines)[:1024], inline=False)
     return embed
@@ -325,7 +330,7 @@ class GameHubView(discord.ui.View):
             self.add_item(ShortcutCommitButton("game"))
 
     async def _monthly_callback(self, interaction: discord.Interaction):
-        await interaction.response.send_message(embed=await monthly_embed(interaction.guild_id))
+        await interaction.response.send_message(embed=await monthly_embed(interaction.guild_id, bot=getattr(self.cog, "bot", None)))
 
     def shortcut_action(self):
         return None
@@ -571,7 +576,7 @@ class GameDetailView(discord.ui.View):
 
     @discord.ui.button(label="ランキング", style=discord.ButtonStyle.primary, row=3, custom_id="panel:game:ranking")
     async def ranking(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.send_message(embed=await ranking_embed(interaction.guild_id, self.game_id))
+        await interaction.response.send_message(embed=await ranking_embed(interaction.guild_id, self.game_id, bot=getattr(self.cog, "bot", None)))
 
     @discord.ui.button(label="レート", style=discord.ButtonStyle.primary, row=4, custom_id="panel:game:rating")
     async def rating(self, interaction: discord.Interaction, button: discord.ui.Button):
