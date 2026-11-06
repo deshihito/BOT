@@ -15,12 +15,12 @@ import discord.opus
 from discord.ext import commands, tasks
 from discord.ext import voice_recv
 from core.vc import voice_restore
-from core.legacy import Responder
+from core.support.legacy import Responder
 from core.vc.voice_session import VoiceBusy, get_manager
 from core.vc.voice_recv_patch import patch_voice_recv_client
-from core.messages import VOICE_NOT_JOINED, voice_connection_failed
+from core.support.messages import VOICE_NOT_JOINED, voice_connection_failed
 from core.vc.voice_media import add_audio_source, add_receive_sink, remove_audio_source, remove_receive_sink
-from core.emojis import FAILED
+from core.support.emojis import FAILED
 try:
     import numpy as np  # type: ignore
 except Exception:  # numpy が無い環境では純Pythonで合成する
