@@ -10,7 +10,7 @@ import discord
 from discord.ext import commands
 from PIL import Image, ImageDraw, ImageFont
 
-from core import party_ranking
+from core.game import party_ranking
 from core.game import elo, game_panels, game_restore
 
 logger = logging.getLogger(__name__)
