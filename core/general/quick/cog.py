@@ -23,7 +23,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
-from core import action_registry
+from core.general import action_registry
 
 logger = logging.getLogger(__name__)
 
