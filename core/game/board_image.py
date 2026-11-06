@@ -7,6 +7,9 @@
 
 - ``render_tiles``: (ラベル, 背景色) のタイルを行列で描く汎用描画。
 - ``render_gauge``: 価値観ゲージの目盛り帯（中心帯・予想マーカー付き）。
+- ``render_card`` / ``render_card_hand`` / ``render_card_rows`` /
+  ``render_card_pile``: 共通トランプ描画（標準52枚＋ジョーカー、裏面）。
+  スートは同梱フォントに ♠♦♣ のグリフが無いためベクタ描画する。
 どちらも PNG の bytes を返す純関数で、単体テストで検証できる。
 """
 import io
@@ -463,6 +466,274 @@ def render_bingo_card(grid, marked, *, tile: int = 56) -> bytes:
                 color, label = BINGO_UNMARKED, str(value)
             draw.rounded_rectangle([x, y, x + tile, y + tile], radius=10, fill=color)
             _centered(draw, x + tile // 2, y + tile // 2, label, num_font, (20, 20, 20))
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    return buf.getvalue()
+
+
+# --- トランプ（共通カード描画基盤、カード画像化タスク 2026-11-06） -----------
+# カードの正規形（spec）は (ランク, スート) のタプル:
+#   ランク: "A","2",...,"10","J","Q","K" ／ スート: "S","H","D","C"
+#   ジョーカーは CARD_JOKER、裏面は None。
+# スートはベクタ描画する。同梱の主フォント（font.ttf）には ♥ と ★ しか
+# トランプ記号が無く（♠♦♣ はグリフ無しを確認済み）、フォントに頼ると
+# スートが豆腐/欠落になるため、図形で描く（地雷・旗と同じ方針）。
+CARD_RANKS = ("A", "2", "3", "4", "5", "6", "7", "8", "9", "10", "J", "Q", "K")
+CARD_SUITS = ("S", "H", "D", "C")
+CARD_JOKER = ("JOKER", "")
+CARD_RED = (198, 34, 44)
+CARD_BLACK = (28, 30, 38)
+CARD_FACE_BG = (250, 249, 245)
+CARD_FACE_EDGE = (110, 114, 128)
+CARD_BACK_BG = (33, 47, 112)
+CARD_BACK_INNER = (55, 75, 148)
+CARD_BACK_LINE = (205, 216, 245)
+CARD_W = 104
+CARD_H = 146
+
+
+def card_spec(rank, suit):
+    """(ランク, スート) を検証して正規形タプルで返す。スートは "SHDC"。"""
+    rank = str(rank)
+    suit = str(suit).upper()
+    if rank not in CARD_RANKS or suit not in CARD_SUITS:
+        raise ValueError(f"不正なカード: rank={rank!r} suit={suit!r}")
+    return (rank, suit)
+
+
+def _draw_suit(draw, suit, cx, cy, size, color):
+    """スートをベクタ描画する。size はスート全体の高さ（px）。中心は (cx, cy)。"""
+    h = size / 2.0
+    if suit == "D":
+        draw.polygon([(cx, cy - h), (cx + h * 0.68, cy), (cx, cy + h), (cx - h * 0.68, cy)],
+                     fill=color)
+        return
+    if suit in ("H", "S"):
+        # ハートは「2円＋下向き三角」、スペードはその上下反転＋茎。
+        flip = 1 if suit == "H" else -1
+        r = size * 0.235
+        dy = -flip * size * 0.13
+        draw.ellipse([cx - size * 0.235 - r, cy + dy - r, cx - size * 0.235 + r, cy + dy + r],
+                     fill=color)
+        draw.ellipse([cx + size * 0.235 - r, cy + dy - r, cx + size * 0.235 + r, cy + dy + r],
+                     fill=color)
+        draw.polygon([(cx - size * 0.46, cy - flip * size * 0.02),
+                      (cx + size * 0.46, cy - flip * size * 0.02),
+                      (cx, cy + flip * h)], fill=color)
+        if suit == "S":
+            _card_stem(draw, cx, cy, size, color)
+        return
+    if suit == "C":
+        r = size * 0.225
+        for dx, dy in ((0, -size * 0.21), (-size * 0.225, size * 0.075),
+                       (size * 0.225, size * 0.075)):
+            draw.ellipse([cx + dx - r, cy + dy - r, cx + dx + r, cy + dy + r], fill=color)
+        _card_stem(draw, cx, cy, size, color)
+        return
+    raise ValueError(f"未知のスート: {suit!r}")
+
+
+def _card_stem(draw, cx, cy, size, color):
+    """スペード/クラブの茎（下部の台形）。"""
+    top = cy + size * 0.08
+    bottom = cy + size * 0.5
+    draw.polygon([(cx, top), (cx - size * 0.07, bottom), (cx - size * 0.19, bottom),
+                  (cx - size * 0.05, top)], fill=color)
+    draw.polygon([(cx, top), (cx + size * 0.05, top), (cx + size * 0.19, bottom),
+                  (cx + size * 0.07, bottom)], fill=color)
+
+
+def _draw_star(draw, cx, cy, r, color):
+    """5芒星をベクタ描画する（ジョーカー用。★ グリフに依存しない）。"""
+    import math
+    pts = []
+    for i in range(10):
+        ang = -math.pi / 2 + i * math.pi / 5
+        rad = r if i % 2 == 0 else r * 0.45
+        pts.append((cx + rad * math.cos(ang), cy + rad * math.sin(ang)))
+    draw.polygon(pts, fill=color)
+
+
+def _card_corner(spec, w, h):
+    """カード左上の隅表示（ランク＋小スート）を RGBA 小画像で作る。
+
+    右下の隅はこれを 180° 回転させて使い、実物のカードらしくする。
+    """
+    rank, suit = spec
+    color = CARD_RED if suit in ("H", "D") else CARD_BLACK
+    cw = int(w * 0.34)
+    ch = int(h * 0.36)
+    img = Image.new("RGBA", (cw, ch), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(img)
+    font = _font(int(w * (0.20 if len(rank) > 1 else 0.24)))
+    bbox = draw.textbbox((0, 0), rank, font=font)
+    draw.text(((cw - (bbox[2] - bbox[0])) / 2 - bbox[0], -bbox[1] + 1),
+              rank, fill=color + (255,), font=font)
+    _draw_suit(draw, suit, cw / 2, ch * 0.68, w * 0.17, color)
+    return img
+
+
+def _paint_card(canvas, x, y, w, h, spec):
+    """canvas の (x, y) に w×h のカードを1枚描く。spec=None は裏面。"""
+    draw = ImageDraw.Draw(canvas)
+    radius = max(6, int(w * 0.09))
+    if spec is None:
+        draw.rounded_rectangle([x, y, x + w, y + h], radius=radius, fill=CARD_BACK_BG)
+        m = max(4, int(w * 0.07))
+        draw.rounded_rectangle([x + m, y + m, x + w - m, y + h - m], radius=radius - 2,
+                               outline=CARD_BACK_LINE, width=max(2, w // 36))
+        # 菱形の格子模様（手続き描画のパターン）
+        step = max(12, w // 5)
+        lattice = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+        ld = ImageDraw.Draw(lattice)
+        for gy in range(-h, h * 2, step):
+            ld.line([(0, gy), (w, gy + w)], fill=CARD_BACK_INNER + (255,), width=2)
+            ld.line([(0, gy), (w, gy - w)], fill=CARD_BACK_INNER + (255,), width=2)
+        mask = Image.new("L", (w, h), 0)
+        ImageDraw.Draw(mask).rounded_rectangle(
+            [m + 2, m + 2, w - m - 2, h - m - 2], radius=radius - 2, fill=255)
+        canvas.paste(Image.alpha_composite(
+            Image.new("RGBA", (w, h), (0, 0, 0, 0)), lattice).crop((0, 0, w, h)),
+            (x, y), mask)
+        draw = ImageDraw.Draw(canvas)
+        ring = w * 0.20
+        draw.ellipse([x + w / 2 - ring, y + h / 2 - ring, x + w / 2 + ring, y + h / 2 + ring],
+                     outline=(245, 197, 66), width=max(2, w // 30))
+        _draw_star(draw, x + w / 2, y + h / 2, w * 0.10, (245, 197, 66))
+        draw.rounded_rectangle([x, y, x + w, y + h], radius=radius,
+                               outline=CARD_FACE_EDGE, width=2)
+        return
+    rank, suit = spec
+    draw.rounded_rectangle([x, y, x + w, y + h], radius=radius, fill=CARD_FACE_BG)
+    draw.rounded_rectangle([x, y, x + w, y + h], radius=radius,
+                           outline=CARD_FACE_EDGE, width=2)
+    if spec == CARD_JOKER:
+        _draw_star(draw, x + w / 2, y + h * 0.13, w * 0.11, CARD_RED)
+        font = _font(int(w * 0.19))
+        for i, ch in enumerate("JOKER"):
+            _centered(draw, x + w / 2, y + h * (0.315 + i * 0.118), ch, font,
+                      CARD_RED if i % 2 == 0 else CARD_BLACK)
+        _draw_star(draw, x + w / 2, y + h * 0.93, w * 0.08, CARD_BLACK)
+        return
+    color = CARD_RED if suit in ("H", "D") else CARD_BLACK
+    corner = _card_corner(spec, w, h)
+    canvas.paste(corner, (int(x + w * 0.045), int(y + h * 0.03)), corner)
+    flipped = corner.rotate(180)
+    canvas.paste(flipped, (int(x + w - corner.width - w * 0.045),
+                           int(y + h - corner.height - h * 0.03)), flipped)
+    draw = ImageDraw.Draw(canvas)
+    _draw_suit(draw, suit, x + w / 2, y + h / 2, w * 0.52, color)
+
+
+def render_card(spec, *, card_w: int = 168) -> bytes:
+    """カード1枚だけの画像（ダウトの開示、ハイ＆ローの単体表示など）。"""
+    w = card_w
+    h = int(w * CARD_H / CARD_W)
+    img = Image.new("RGB", (w + PAD * 2, h + PAD * 2), BG)
+    _paint_card(img, PAD, PAD, w, h, spec)
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    return buf.getvalue()
+
+
+def render_card_hand(cards, *, title: str | None = None,
+                     card_w: int = CARD_W, max_width: int = 1024) -> bytes:
+    """カードの並びを描く。cards の各要素は spec（None は裏面）。
+
+    枚数が多いときは左上隅が見える幅で重ね（扇形）、それでも横幅に
+    収まらない場合は複数行に折り返す。手札・場のカード列の共用。
+    """
+    cards = list(cards)
+    w = card_w
+    h = int(w * CARD_H / CARD_W)
+    title_h = 30 if title else 0
+    # 1行に入る最大枚数（重ねても隅表示が読める最小ステップ 34px を確保）
+    min_step = 34
+    per_row = max(1, (max_width - PAD * 2 - w) // min_step + 1)
+    rows = [cards[i:i + per_row] for i in range(0, len(cards), per_row)] or [[]]
+    width = max_width if len(cards) > 1 else PAD * 2 + w
+    height = PAD + title_h + len(rows) * h + (len(rows) - 1) * GAP + PAD
+    img = Image.new("RGB", (max(width, 120), max(height, 80)), BG)
+    draw = ImageDraw.Draw(img)
+    if title:
+        draw.text((PAD, PAD), title, fill=FG, font=_font(20))
+    y = PAD + title_h
+    for row in rows:
+        n = len(row)
+        if n <= 1:
+            step = w + GAP
+        else:
+            step = min(w + GAP, (max_width - PAD * 2 - w) // (n - 1))
+            step = max(min_step, step)
+        row_w = w + step * (n - 1)
+        x = PAD + max(0, (max_width - PAD * 2 - row_w) // 2) if n > 1 else PAD
+        for spec in row:
+            _paint_card(img, x, y, w, h, spec)
+            x += step
+        y += h + GAP
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    return buf.getvalue()
+
+
+def render_card_rows(rows, *, title: str | None = None,
+                     card_w: int = 96, max_width: int = 1024) -> bytes:
+    """(ラベル, カード列) の組を縦に並べる（ポーカーのショーダウン等）。
+
+    rows は [(label, [spec, ...]), ...]。ラベルは各行の上に描く。
+    ここに渡すカードは全て公開情報である前提（秘匿は呼び出し側の責務）。
+    """
+    w = card_w
+    h = int(w * CARD_H / CARD_W)
+    label_h = 26
+    title_h = 32 if title else 0
+    min_step = 32
+    height = PAD + title_h + len(rows) * (label_h + h) \
+        + max(0, len(rows) - 1) * GAP + PAD
+    img = Image.new("RGB", (max(max_width, 200), max(height, 100)), BG)
+    draw = ImageDraw.Draw(img)
+    if title:
+        draw.text((PAD, PAD), title, fill=FG, font=_font(21))
+    label_font = _font(19)
+    y = PAD + title_h
+    for label, cards in rows:
+        draw.text((PAD, y), str(label), fill=FG, font=label_font)
+        y += label_h
+        n = len(cards)
+        if n <= 1:
+            step = w + GAP
+        else:
+            step = max(min_step, min(w + GAP, (max_width - PAD * 2 - w) // (n - 1)))
+        x = PAD
+        for spec in cards:
+            _paint_card(img, x, y, w, h, spec)
+            x += step
+        y += h + GAP
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    return buf.getvalue()
+
+
+def render_card_pile(count: int, *, label: str | None = None,
+                     card_w: int = CARD_W) -> bytes:
+    """伏せたカードの山を描く（ダウトの場など、中身は公開しない表示）。
+
+    受けるのは枚数だけ。カードの中身は引数に存在しないので、共有画像に
+    秘匿情報が混入する余地が構造的に無い。
+    """
+    w = card_w
+    h = int(w * CARD_H / CARD_W)
+    fan = 14
+    width = w + fan * 2 + 190 + PAD * 2
+    height = h + fan + PAD * 2
+    img = Image.new("RGB", (width, max(height, 120)), BG)
+    for i in range(3):
+        _paint_card(img, PAD + i * fan, PAD + (2 - i) * (fan // 2), w, h, None)
+    draw = ImageDraw.Draw(img)
+    tx = PAD + w + fan * 2 + 22
+    _centered(draw, tx + 80, PAD + h // 2 - 18, f"{count}枚", _font(40), FG)
+    if label:
+        _centered(draw, tx + 80, PAD + h // 2 + 26, label, _font(19), (170, 178, 195))
     buf = io.BytesIO()
     img.save(buf, format="PNG")
     return buf.getvalue()

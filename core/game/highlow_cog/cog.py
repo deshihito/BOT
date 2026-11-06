@@ -5,15 +5,36 @@
 同点は外れ。連続正解数が記録（core/game/game_records.py の highlow）に残る。
 賭け要素はない。
 """
+import io
 import random
 
 import discord
 from discord.ext import commands
 
-from core.game import game_records
-from core.game.highlow import HighLowGame, card_label
+from core.game import board_image, game_records
+from core.game.board_image import render_cached, render_card_hand
+from core.game.highlow import HighLowGame, card_label, rank_label
 
 GAME_ID = "highlow"
+
+_SUIT_TO_LETTER = {"♠": "S", "♥": "H", "♦": "D", "♣": "C"}
+IMAGE_NAME = "highlow_cards.png"
+
+
+def card_spec_of(card):
+    """(ランク数値, スート記号) を描画基盤の正規形に変換する。"""
+    rank, suit = card
+    return board_image.card_spec(rank_label(rank), _SUIT_TO_LETTER[suit])
+
+
+def state_file(game: HighLowGame, prev=None):
+    """表示用カード画像の File。今のカード単体、結果表示時は 前→今 の2枚。"""
+    specs = [card_spec_of(game.current)]
+    if prev is not None and prev != game.current:
+        specs = [card_spec_of(prev), card_spec_of(game.current)]
+    key = ("highlow-cards", tuple(specs))
+    data = render_cached(key, lambda: render_card_hand(specs, card_w=132))
+    return discord.File(io.BytesIO(data), filename=IMAGE_NAME)
 
 
 def game_embed(game: HighLowGame, user, status: str = "") -> discord.Embed:
@@ -24,6 +45,7 @@ def game_embed(game: HighLowGame, user, status: str = "") -> discord.Embed:
     if status:
         desc += f"\n{status}"
     embed.description = desc
+    embed.set_image(url=f"attachment://{IMAGE_NAME}")
     return embed
 
 
@@ -65,24 +87,28 @@ class HighLowView(discord.ui.View):
         drawn = card_label(game.last_drawn)
         if game.cleared:
             status = f"{card_label(prev)} → **{drawn}** … 正解！\n🎉 山札を全部当て切りました！"
-            return await self._finish(interaction, status)
+            return await self._finish(interaction, status, prev=prev)
         if not correct:
             status = f"{card_label(prev)} → **{drawn}** … 外れ。"
             if game.last_drawn and prev[0] == game.last_drawn[0]:
                 status += "（同点は外れです）"
             status += f"\n連続正解 **{game.streak}回** で終了です。"
-            return await self._finish(interaction, status)
+            return await self._finish(interaction, status, prev=prev)
         status = f"{card_label(prev)} → **{drawn}** … 正解！連続 **{game.streak}回**。次はこのカードより高い？低い？"
-        await interaction.response.edit_message(embed=game_embed(game, self.owner, status), view=self)
+        await interaction.response.edit_message(
+            embed=game_embed(game, self.owner, status), view=self,
+            attachments=[state_file(game, prev)])
 
-    async def _finish(self, interaction: discord.Interaction, status: str):
+    async def _finish(self, interaction: discord.Interaction, status: str, prev=None):
         self.finished = True
         for child in self.children:
             child.disabled = True
         entry = game_records.record_highlow_safely(self.owner.id, self.game.streak)
         if entry is not None:
             status += "\n" + game_records.format_highlow_line(entry, self.game.streak)
-        await interaction.response.edit_message(embed=game_embed(self.game, self.owner, status), view=self)
+        await interaction.response.edit_message(
+            embed=game_embed(self.game, self.owner, status), view=self,
+            attachments=[state_file(self.game, prev)])
         self.stop()
 
 
@@ -94,7 +120,9 @@ class HighLow(commands.Cog):
         """/game のハブから呼ぶ。その場で1プレイ始まる。"""
         game = HighLowGame(rng=random.Random())
         embed = game_embed(game, interaction.user, "次のカードはこのカードより高い？低い？")
-        await interaction.response.send_message(embed=embed, view=HighLowView(self, interaction.user, game))
+        await interaction.response.send_message(
+            embed=embed, view=HighLowView(self, interaction.user, game),
+            file=state_file(game))
 
 
 async def setup(bot):

@@ -24,6 +24,7 @@
   じゃんけん（賭け金は既定0）と同じく AI_BLOCKED には入れない。
 """
 import asyncio
+import io
 import json
 import logging
 import os
@@ -36,6 +37,8 @@ from discord.ext import commands
 import config
 from cogs.wallet import INSUFFICIENT, NEW_USER_BALANCE
 from core.game import party_ranking
+from core.game import board_image
+from core.game.board_image import render_cached, render_card_hand, render_card_rows
 from core.game import game_panels
 from core.game import prison as prison_core
 
@@ -106,6 +109,31 @@ def evaluate(hand):
 
 def label_card(card):
     return f"{card[0]}{card[1]}"
+
+
+# --- カード画像（core/game/board_image.py の共通トランプ基盤） ----------------
+_SUIT_TO_LETTER = {"♠": "S", "♥": "H", "♦": "D", "♣": "C"}
+
+
+def card_spec_of(card):
+    """内部表記（"A♠" / "T♥"）を描画基盤の正規形 (ランク, スート) に変換する。"""
+    rank = "10" if card[0] == "T" else card[0]
+    return board_image.card_spec(rank, _SUIT_TO_LETTER[card[1]])
+
+
+def hand_specs(hand):
+    return tuple(card_spec_of(c) for c in hand)
+
+
+def hand_image(hand) -> bytes:
+    """手札5枚の画像。並びは手札リストの順（交換セレクトの番号と一致させる）。"""
+    specs = hand_specs(hand)
+    return render_cached(("poker-hand", specs),
+                         lambda: render_card_hand(list(specs), title="あなたの手札"))
+
+
+def hand_file(hand, filename="poker_hand.png"):
+    return discord.File(io.BytesIO(hand_image(hand)), filename=filename)
 
 
 # ---------------------------------------------------------------------------
@@ -405,6 +433,16 @@ class BettingView(discord.ui.View):
     async def fold(self, interaction, button):
         await self._act(interaction, "fold")
 
+    @discord.ui.button(label="手札を見る", style=discord.ButtonStyle.secondary)
+    async def show_hand(self, interaction, button):
+        t = self.table
+        if interaction.user.id not in t.hands:
+            return await interaction.response.send_message("参加者だけが操作できます。", ephemeral=True)
+        hand = t.hands[interaction.user.id]
+        await interaction.response.send_message(
+            f"あなたの手札（相手には見えません）: {' '.join(label_card(c) for c in hand)}",
+            ephemeral=True, file=hand_file(hand))
+
     @discord.ui.button(label="退出（フォールドして離脱）", style=discord.ButtonStyle.secondary)
     async def leave(self, interaction, button):
         t, r = self.table, self.round
@@ -438,7 +476,9 @@ class DiscardSelect(discord.ui.Select):
         replacements = [t.deck.pop() for _ in discarded]
         t.hands[self.uid] = kept + replacements
         t.submitted.add(self.uid)
-        await interaction.response.send_message(f"{len(discarded)}枚を交換しました。交換後の手札: {' '.join(label_card(c) for c in t.hands[self.uid])}", ephemeral=True)
+        await interaction.response.send_message(
+            f"{len(discarded)}枚を交換しました。交換後の手札: {' '.join(label_card(c) for c in t.hands[self.uid])}",
+            ephemeral=True, file=hand_file(t.hands[self.uid]))
 
 
 class DrawView(discord.ui.View):
@@ -455,7 +495,9 @@ class DrawView(discord.ui.View):
             return await interaction.response.send_message("すでに交換を確定しています。", ephemeral=True)
         view = discord.ui.View(timeout=DRAW_SECONDS)
         view.add_item(DiscardSelect(self.cog, t, interaction.user.id))
-        await interaction.response.send_message("あなたの手札（相手には見えません）。交換したいカードを選択してください。", ephemeral=True, view=view)
+        await interaction.response.send_message(
+            "あなたの手札（相手には見えません）。交換したいカードを選択してください。",
+            ephemeral=True, view=view, file=hand_file(t.hands[interaction.user.id]))
 
     @discord.ui.button(label="このハンドで退出", style=discord.ButtonStyle.secondary)
     async def leave(self, interaction, button):
@@ -810,7 +852,21 @@ class Poker(commands.Cog):
                 gain = payouts.get(uid, 0)
                 lines.append(f"{t.players[uid].mention}: **{labels[uid]}** — {hand}（+{gain:,}）")
         lines.append("スタック: " + " / ".join(f"{t.players[uid].mention} {t.stacks.get(uid, 0):,}" for uid in t.players))
-        await channel.send(embed=discord.Embed(title="ポーカー：ショーダウン", description="\n".join(lines), color=COLOR))
+        # ショーダウンでは全手札が公開される（上のテキストと同じ情報範囲）ので、
+        # 共有画像として各プレイヤーの手札を行で描く。本ゲームは5枚ドローで
+        # コミュニティカードは存在しないため、共有画像はこの開示が担う。
+        rows = []
+        for uid in contributions:
+            name = getattr(t.players[uid], "display_name", str(uid))
+            tag = "フォールド" if uid in folded else labels[uid]
+            rows.append((f"{name}（{tag}）", hand_specs(t.hands[uid])))
+        data = render_cached(
+            ("poker-showdown", tuple((label, specs) for label, specs in rows)),
+            lambda: render_card_rows([(label, list(specs)) for label, specs in rows],
+                                     title="ショーダウン"))
+        embed = discord.Embed(title="ポーカー：ショーダウン", description="\n".join(lines), color=COLOR)
+        embed.set_image(url="attachment://poker_showdown.png")
+        await channel.send(embed=embed, file=discord.File(io.BytesIO(data), filename="poker_showdown.png"))
 
 
 async def setup(bot):
