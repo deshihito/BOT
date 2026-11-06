@@ -15,7 +15,7 @@ from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from core import command_meta
+from core.help import command_meta
 from core.support import usage_stats
 
 

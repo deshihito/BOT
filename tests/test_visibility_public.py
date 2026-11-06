@@ -191,7 +191,7 @@ class Wave2PublicSourceTest(unittest.TestCase):
             self.assertIn("await interaction.followup.send(view=as_panel_v2(view))", src, rel)
 
     def test_panels_have_owner_checks(self):
-        for rel in ("core/general/panel.py", "core/vc/hub.py", "core/game/game/cog.py", "cogs/help.py"):
+        for rel in ("core/general/panel.py", "core/vc/hub.py", "core/game/game/cog.py", "core/help/help/cog.py"):
             self.assertIn("interaction_check", self.read(rel), rel)
 
     def test_economy_panels_public_with_owner_check(self):
