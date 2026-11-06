@@ -7,13 +7,13 @@ from discord.ext import commands
 import asyncio
 import logging
 from discord.ext import voice_recv
-from core.emojis import FAILED, LOUPE
+from core.support.emojis import FAILED, LOUPE
 
 
 logger = logging.getLogger("cogs.sio_saito")
 
 
-from core.legacy import Responder
+from core.support.legacy import Responder
 from core.vc.voice_session import VoiceBusy, get_manager
 
 

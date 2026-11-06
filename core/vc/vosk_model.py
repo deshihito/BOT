@@ -3,7 +3,7 @@
 モデル（`model` フォルダ）が無いときは、VC に入る前にわかりやすく断るために使う。
 """
 from __future__ import annotations
-from core.emojis import FAILED
+from core.support.emojis import FAILED
 
 import asyncio
 import logging
