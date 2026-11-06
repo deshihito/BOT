@@ -131,7 +131,7 @@ class FakePanel(discord.ui.View):
         return discord.Embed(title="panel")
 
 
-def fake_interaction(guild_id=77, custom_id="welcome:game", values=None, admin=False):
+def fake_interaction(guild_id=77, custom_id="welcome:game", values=None, admin=False, guild=None, channel=None):
     permissions = types.SimpleNamespace(administrator=admin, manage_guild=False)
     user = types.SimpleNamespace(id=42, guild_permissions=permissions)
     response = types.SimpleNamespace(
@@ -139,9 +139,55 @@ def fake_interaction(guild_id=77, custom_id="welcome:game", values=None, admin=F
     return types.SimpleNamespace(
         type=discord.InteractionType.component,
         data={"custom_id": custom_id, "values": values or []},
-        guild_id=guild_id, guild=None, channel=None, user=user,
+        guild_id=guild_id, guild=guild, channel=channel, user=user,
         response=response, followup=types.SimpleNamespace(send=AsyncMock()),
     )
+
+
+def fake_guild(guild_perms, channel_perms=None):
+    channel = types.SimpleNamespace(
+        permissions_for=lambda me: channel_perms if channel_perms is not None else guild_perms)
+    guild = types.SimpleNamespace(
+        id=77, me=types.SimpleNamespace(guild_permissions=guild_perms))
+    return guild, channel
+
+
+class OnboardingPermissionsTest(unittest.TestCase):
+    def test_all_permissions_ok(self):
+        guild, channel = fake_guild(discord.Permissions.all())
+        results = setup_cog.check_onboarding_permissions(guild, channel)
+        self.assertFalse(setup_cog.has_missing_permissions(results))
+        report = setup_cog.format_onboarding_report(results)
+        self.assertIn("OK", report)
+        self.assertIn("サーバー設定 → ロール", report)
+
+    def test_missing_permissions_use_japanese_labels(self):
+        guild, channel = fake_guild(discord.Permissions(view_channel=True, send_messages=True))
+        results = setup_cog.check_onboarding_permissions(guild, channel)
+        self.assertTrue(setup_cog.has_missing_permissions(results))
+        by_label = {r["label"]: r["missing"] for r in results}
+        self.assertEqual(by_label["基本（このチャンネル）"], [])
+        self.assertIn("ロールの管理", by_label["ロールの管理（認証・ミュート・ロールショップ）"])
+        self.assertIn("ウェブフックの管理", by_label["ウェブフックの管理（グローバルチャット・自動翻訳）"])
+        report = setup_cog.format_onboarding_report(results)
+        self.assertIn("足りない権限: ロールの管理", report)
+
+    def test_status_line_and_button_follow_flags(self):
+        view = setup_cog.build_welcome_view("AGOBOT", "ja", guild_id=1,
+                                             permissions_button=True, missing_permissions=True)
+        joined = "\n".join(view_texts(view))
+        self.assertIn("不足している権限があります", joined)
+        custom_ids = set()
+
+        def walk(item):
+            if getattr(item, "custom_id", None):
+                custom_ids.add(item.custom_id)
+            for child in getattr(item, "children", []) or []:
+                walk(child)
+
+        for top in view.children:
+            walk(top)
+        self.assertIn("welcome:permissions", custom_ids)
 
 
 class WelcomeListenerTest(unittest.IsolatedAsyncioTestCase):
@@ -220,6 +266,23 @@ class WelcomeListenerTest(unittest.IsolatedAsyncioTestCase):
         interaction.response.edit_message.assert_not_awaited()
         note = interaction.response.send_message.await_args.args[0]
         self.assertIn("语言已更改为", note)  # language_saved はカタログ内蔵文で返る
+
+    async def test_permissions_button_reports_for_admin(self):
+        guild, channel = fake_guild(discord.Permissions(view_channel=True, send_messages=True))
+        interaction = fake_interaction(custom_id="welcome:permissions", admin=True,
+                                        guild=guild, channel=channel)
+        await self.cog.on_interaction(interaction)
+        message = interaction.response.send_message.await_args.args[0]
+        self.assertIn("足りない権限: ロールの管理", message)
+        self.assertTrue(interaction.response.send_message.await_args.kwargs["ephemeral"])
+
+    async def test_permissions_button_rejects_non_admin(self):
+        guild, channel = fake_guild(discord.Permissions.all())
+        interaction = fake_interaction(custom_id="welcome:permissions", admin=False,
+                                        guild=guild, channel=channel)
+        await self.cog.on_interaction(interaction)
+        message = interaction.response.send_message.await_args.args[0]
+        self.assertIn("管理者だけ", message)
 
     async def test_unrelated_custom_id_is_ignored(self):
         interaction = fake_interaction(custom_id="panel:game:select")
