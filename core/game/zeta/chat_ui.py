@@ -9,9 +9,9 @@ from discord.ext import commands
 from typing import Dict, List, Optional
 import re
 import os
-from core import logfare
-from core.panel_v2 import as_panel_v2, edit_panel_v2
-from core.emojis import BACK, BOOK
+from core.general import logfare
+from core.support.panel_v2 import as_panel_v2, edit_panel_v2
+from core.support.emojis import BACK, BOOK
 
 from core.game.zeta.common import *  # noqa: F401,F403 - shared constants/helpers
 from core.game.zeta.common import PRESETS, _clip  # noqa: F401
