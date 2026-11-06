@@ -195,7 +195,7 @@ class Wave2PublicSourceTest(unittest.TestCase):
             self.assertIn("interaction_check", self.read(rel), rel)
 
     def test_economy_panels_public_with_owner_check(self):
-        for rel in ("cogs/items.py", "cogs/workshop.py", "cogs/circulation.py", "cogs/market.py"):
+        for rel in ("core/general/items_cog/cog.py", "cogs/workshop.py", "cogs/circulation.py", "cogs/market.py"):
             self.assertIn("interaction_check", self.read(rel), rel)
 
     def test_exceptions_stay_ephemeral(self):
