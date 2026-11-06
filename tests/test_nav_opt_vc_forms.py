@@ -5,7 +5,7 @@ import unittest
 
 class VcFormRegistryTest(unittest.TestCase):
     def setUp(self):
-        from core.action_registry import build_vc_actions
+        from core.general.action_registry import build_vc_actions
 
         self.specs = {spec.value: spec for spec in build_vc_actions()}
 

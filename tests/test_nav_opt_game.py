@@ -111,7 +111,7 @@ class GameHubPagerTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_next_button_switches_select_options(self):
         from cogs.game import GameHubView, GameSelect, game_select_pages
-        from core.panel_v2 import PanelLayoutView
+        from core.support.panel_v2 import PanelLayoutView
 
         view = GameHubView(None)
         pages = game_select_pages()
@@ -144,7 +144,7 @@ class GameHubPagerTest(unittest.IsolatedAsyncioTestCase):
     async def test_select_on_second_page_opens_detail(self):
         from cogs.game import GameDetailView, GameHubView, GameSelect
         from core.game.game_guides import GAME_ORDER
-        from core.panel_v2 import PanelLayoutView
+        from core.support.panel_v2 import PanelLayoutView
 
         view = GameHubView(None, page=1)
         select = next(c for c in view.children if isinstance(c, GameSelect))

@@ -17,7 +17,7 @@ if str(ROOT) not in sys.path:
 import discord  # noqa: E402
 
 from cogs import muted  # noqa: E402
-from core.storage import KVStore  # noqa: E402
+from core.support.storage import KVStore  # noqa: E402
 from tests.fake_kv_supabase import FakeKVSupabase, missing_table_error  # noqa: E402
 
 NOW = datetime(2026, 10, 12, 3, 0, tzinfo=timezone.utc)
@@ -208,7 +208,7 @@ class PersistenceTest(Base):
     async def test_missing_table_falls_back_to_local_file(self):
         self.db.error = missing_table_error()
         cog = self.cog()
-        with self.assertLogs("core.storage", level="WARNING"):
+        with self.assertLogs("core.support.storage", level="WARNING"):
             await self.mute_via_command(cog)
             await cog.load_remote()
         self.assertIn((1, 10), cog.mute_tasks)

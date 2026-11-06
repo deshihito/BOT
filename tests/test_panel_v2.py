@@ -8,7 +8,7 @@ from discord.interactions import interaction_message_response_params
 from cogs.game import GameDetailView
 from cogs.sio_voice import VoicePanelView
 from cogs.support import SupportPanelView
-from core.panel_v2 import as_panel_v2, edit_message_v2
+from core.support.panel_v2 import as_panel_v2, edit_message_v2
 
 
 class PanelV2StateTest(unittest.IsolatedAsyncioTestCase):
@@ -135,7 +135,7 @@ class PanelV2MediaAndTruncationTest(unittest.IsolatedAsyncioTestCase):
         return panel
 
     def test_panel_layout_keeps_embed_image_as_media_gallery(self):
-        from core.panel_v2 import as_panel_v2
+        from core.support.panel_v2 import as_panel_v2
 
         embed = discord.Embed(title="盤面")
         embed.set_image(url="attachment://board.png")
@@ -148,7 +148,7 @@ class PanelV2MediaAndTruncationTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(urls, ["attachment://board.png", "https://example.com/thumb.png"])
 
     def test_embed_layout_keeps_image_and_text(self):
-        from core.panel_v2 import as_embed_v2
+        from core.support.panel_v2 import as_embed_v2
 
         embed = discord.Embed(title="結果", description="本文")
         embed.set_image(url="https://example.com/result.png")
@@ -158,14 +158,14 @@ class PanelV2MediaAndTruncationTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(kinds, ["TextDisplay", "MediaGallery"])
 
     def test_no_gallery_without_images(self):
-        from core.panel_v2 import as_embed_v2
+        from core.support.panel_v2 import as_embed_v2
 
         view = as_embed_v2(discord.Embed(title="題のみ"))
         container = view.children[0]
         self.assertEqual([type(c).__name__ for c in container.children], ["TextDisplay"])
 
     def test_long_embed_is_truncated_with_marker_and_warning(self):
-        from core import panel_v2
+        from core.support import panel_v2
 
         embed = discord.Embed(title="長文", description="あ" * 5000)
         with self.assertLogs(panel_v2.logger, level="WARNING"):
@@ -174,7 +174,7 @@ class PanelV2MediaAndTruncationTest(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(text.endswith(panel_v2.TRUNCATION_MARKER))
 
     def test_short_embed_has_no_truncation_marker(self):
-        from core import panel_v2
+        from core.support import panel_v2
 
         text = panel_v2.embed_text(discord.Embed(title="短文", description="本文"))
         self.assertNotIn(panel_v2.TRUNCATION_MARKER, text)
@@ -182,7 +182,7 @@ class PanelV2MediaAndTruncationTest(unittest.IsolatedAsyncioTestCase):
     async def test_edit_panel_v2_passes_files_instead_of_clearing(self):
         import io
 
-        from core.panel_v2 import as_panel_v2, edit_panel_v2
+        from core.support.panel_v2 import as_panel_v2, edit_panel_v2
 
         wrapped = as_panel_v2(self._panel_with_embed(discord.Embed(title="x")))
         edit_message = AsyncMock()
@@ -198,7 +198,7 @@ class PanelV2MediaAndTruncationTest(unittest.IsolatedAsyncioTestCase):
     async def test_edit_message_v2_passes_files(self):
         import io
 
-        from core.panel_v2 import edit_message_v2
+        from core.support.panel_v2 import edit_message_v2
 
         message = types.SimpleNamespace(edit=AsyncMock())
         view = discord.ui.LayoutView(timeout=None)

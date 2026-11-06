@@ -6,7 +6,7 @@ import unittest
 class HelpActionIntegrationTest(unittest.TestCase):
     def test_every_action_mapped_exactly_once(self):
         from cogs.help import ACTION_CATEGORY_MAP, panel_action_lines
-        from core import action_registry
+        from core.general import action_registry
 
         total = sum(len(panel_action_lines(cat)) for cat in ACTION_CATEGORY_MAP)
         expected = len([s for s in action_registry.default_registry().all()

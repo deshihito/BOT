@@ -34,7 +34,7 @@ from cogs.items import ItemsCog  # noqa: E402
 from cogs.market import MarketCog, TradeModal  # noqa: E402
 from cogs.money_panel import MoneyPanelCog, status_embed  # noqa: E402
 from core.general.panel import PayConfirmView, PayModal  # noqa: E402
-from core.messages import MARKET_INVALID_AMOUNT  # noqa: E402
+from core.support.messages import MARKET_INVALID_AMOUNT  # noqa: E402
 
 
 # ---------------------------------------------------------------------------

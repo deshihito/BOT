@@ -12,11 +12,11 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
-from core import guild_settings
-from core.storage import KVStore
+from core.support import guild_settings
+from core.support.storage import KVStore
 from core.support.server_assist import discover_features, format_template
 from core.support.server_assist.features import welcome
-from core.panel_v2 import as_panel_v2
+from core.support.panel_v2 import as_panel_v2
 from cogs.support import (
     SUPPORT_ACTIONS,
     SUPPORT_ACTIONS_BY_GENRE,
@@ -197,7 +197,7 @@ class ServerAssistPanelTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(view.embed().fields, [])
 
     def test_views_fit_components_v2_action_row_limits(self):
-        from core.panel_v2 import as_panel_v2
+        from core.support.panel_v2 import as_panel_v2
         guild = FakeGuild()
         cog = types.SimpleNamespace(bot=types.SimpleNamespace(get_guild=lambda _id: guild))
         for view in (welcome.build_view(cog, guild.id),):

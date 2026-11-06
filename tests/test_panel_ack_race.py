@@ -22,8 +22,8 @@ from unittest.mock import AsyncMock, patch
 
 import discord
 
-from core import action_usage
-from core.panel_v2 import PanelLayoutView
+from core.general import action_usage
+from core.support.panel_v2 import PanelLayoutView
 
 
 # ---------------------------------------------------------------------------
