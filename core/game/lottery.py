@@ -19,7 +19,7 @@
 次回アクセス／定期チェックで確定する。賞金のコイン実移動は呼び出し側
 （cogs/circulation.py）が wallet の安全な経路で行う。
 
-保存は core/workshop.py と同じ流儀: 専用 JSON（既定 data/lottery.json、
+保存は core/general/workshop.py と同じ流儀: 専用 JSON（既定 data/lottery.json、
 環境変数 LOTTERY_DATA_PATH で変更可）にメモリ主体＋バッチフラッシュ
 ＋原子差し替え。
 """
