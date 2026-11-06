@@ -41,6 +41,7 @@ from core.support.levelup import LevelUpSupportMixin
 from core.support.vc_auto_start import *  # noqa: F401,F403
 from core.support.vc_auto_start import VcAutoStartSupportMixin
 from core.support.globalchat_panel import GlobalChatSupportMixin
+from core.support.bot_fixer import BotFixerSupportMixin
 
 # 分割前の cogs.support が持っていた内部ヘルパーも互換のため再エクスポートする
 import html as _html
@@ -99,6 +100,7 @@ class SupportCog(
     BinjouSupportMixin,
     VcAutoStartSupportMixin,
     GlobalChatSupportMixin,
+    BotFixerSupportMixin,
     commands.Cog,
 ):
     SUPPORT_REQUIRED_PERMISSIONS = {
@@ -122,6 +124,7 @@ class SupportCog(
         "quest_notify": "administrator",
         "levelup_notify": "manage_guild",
         "vc_auto_start": "manage_guild",
+        "bot_fixer": "manage_guild",
         "globalchat": "manage_guild",
         "server_assist": "manage_guild",
         "sokunuke_status": "manage_guild",
@@ -262,6 +265,12 @@ class SupportCog(
         if not await self.check_support_permission(interaction, selected):
             return
 
+        # BOT fixer のコマンド制限（support:bot_fixer 自身と管理者は対象外）。
+        from core import command_control
+
+        if not await command_control.guard(interaction, f"support:{selected}"):
+            return
+
         # 利用履歴（よく使う／最近）は権限チェックを通った実行だけを記録する。
         # 保存の書き込みで応答を遅らせないようバックグラウンド記録を使う。
         action_usage.record_safely_in_background(
@@ -307,6 +316,9 @@ class SupportCog(
 
         if selected == "vc_auto_start":
             return await self.show_vc_auto_start_settings(interaction)
+
+        if selected == "bot_fixer":
+            return await self.show_bot_fixer_settings(interaction)
 
         if selected == "globalchat":
             return await self.show_globalchat_settings(interaction)

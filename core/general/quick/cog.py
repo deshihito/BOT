@@ -125,6 +125,11 @@ async def dispatch_action(
             raise QuickError("ゲーム機能が読み込まれていません。")
         return await cog.start_game(interaction, spec.value.removeprefix("game:"))
     if spec.root == "help":
+        # BOT fixer のコマンド制限（管理者は対象外）。
+        from core import command_control
+
+        if not await command_control.guard(interaction, "help:overview"):
+            return None
         return await _send_ephemeral(interaction, "ヘルプは `/help` で確認できます。", ephemeral=False)
     raise QuickError(f"未知のルートです: {spec.root}")
 
