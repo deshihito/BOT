@@ -259,7 +259,7 @@ class ShortcutRootPanel(discord.ui.View):
         return discord.Embed(title="ショートカット登録", color=0xFFFFFF)
 
     async def open_existing_panel(self, interaction, root: str):
-        from core.panel_v2 import as_panel_v2, edit_panel_v2
+        from core.support.panel_v2 import as_panel_v2, edit_panel_v2
         bot = interaction.client
         if root == "general":
             panel = GeneralPanel(bot.get_cog("GeneralCog"), shortcut_mode=True, shortcut_item=self.item)
@@ -466,7 +466,7 @@ class ShortcutsMixin:
         root, value = action.get("root"), action.get("value")
         # ephemeral 前提の個人向け応答はこの経路で実行しない（登録済みの
         # ショートカットに対する実行時ガード。候補からの除外は
-        # core.action_registry.MESSAGE_SHORTCUT_BLOCKED_IDS が正）。
+        # core.general.action_registry.MESSAGE_SHORTCUT_BLOCKED_IDS が正）。
         if root == "general" and f"general:{value}" in action_registry.MESSAGE_SHORTCUT_BLOCKED_IDS:
             return False
         source = ShortcutMessageInteraction(self.bot, message, author_id, invoker=invoker)

@@ -34,7 +34,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable
 
-from core import data_paths
+from core.support import data_paths
 
 logger = logging.getLogger(__name__)
 
