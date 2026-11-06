@@ -28,7 +28,7 @@ import logging
 import discord
 from discord.ext import commands
 
-from core.panel_v2 import as_panel_v2
+from core.support.panel_v2 import as_panel_v2
 
 logger = logging.getLogger(__name__)
 
