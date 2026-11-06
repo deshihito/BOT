@@ -57,7 +57,7 @@ class GameRankingVisibilityTest(unittest.IsolatedAsyncioTestCase):
         view = GameDetailView(types.SimpleNamespace(), "ngword")
         interaction, sent = fake_interaction()
         embed = discord.Embed(title="ranking")
-        with patch("cogs.game.ranking_embed", new=AsyncMock(return_value=embed)):
+        with patch("core.game.game.cog.ranking_embed", new=AsyncMock(return_value=embed)):
             button = find_button(view, custom_id="panel:game:ranking")
             await button.callback(interaction)
         self.assertIs(sent.get("embed"), embed)
@@ -138,14 +138,14 @@ class GameStartNoticeSourceTest(unittest.TestCase):
     """開始通知の入口だけ ephemeral な箇所が残っていないこと（個別ACKは維持）。"""
 
     START_FILES = {
-        "cogs/chess.py": ("チェスの募集を開始しました", "CPU対戦"),
+        "core/game/chess/cog.py": ("チェスの募集を開始しました", "CPU対戦"),
         "cogs/othello.py": ("オセロの募集を開始しました", "オセロCPU対戦"),
         "cogs/shogi.py": ("将棋の募集を開始しました", "将棋CPU対戦"),
         "cogs/poker.py": ("ポーカーの募集を開始しました",),
         "cogs/uno.py": ("UNOゲームの募集を開始しました",),
-        "cogs/doubt.py": ("ダウトの募集を開始しました",),
-        "cogs/babanuki.py": ("ババ抜きの募集を開始しました",),
-        "cogs/daifugo.py": ("大富豪の募集を開始しました",),
+        "core/game/doubt/cog.py": ("ダウトの募集を開始しました",),
+        "core/game/babanuki/cog.py": ("ババ抜きの募集を開始しました",),
+        "core/game/daifugo/cog.py": ("大富豪の募集を開始しました",),
         "cogs/janken.py": ("じゃんけんの募集を開始しました",),
         "core/support/ngword/cog.py": ("NGワードの募集を開始しました",),
         "cogs/shinkei.py": ("神経衰弱の募集を開始しました",),
@@ -165,7 +165,7 @@ class GameStartNoticeSourceTest(unittest.TestCase):
 
     def test_join_acks_are_public(self):
         # ephemeral第2波方針（2026-11-06）: 参加・退出の成功ACKも公開する。
-        text = (ROOT / "cogs/chess.py").read_text(encoding="utf-8")
+        text = (ROOT / "core/game/chess/cog.py").read_text(encoding="utf-8")
         self.assertIn('send_message("参加しました。")', text)
         self.assertNotIn('send_message("参加しました。", ephemeral=True)', text)
 
@@ -184,14 +184,14 @@ class Wave2PublicSourceTest(unittest.TestCase):
         self.assertNotIn("defer(ephemeral=True, thinking=True)", self.read("cogs/general.py"))
         # 導線最適化 M5: /game・/vc は履歴セレクトの読み込みのため defer→followup に
         # 変わったが、defer は ephemeral=False（公開）が既定で公開方針は不変。
-        for rel in ("cogs/game.py", "core/vc/hub.py"):
+        for rel in ("core/game/game/cog.py", "core/vc/hub.py"):
             src = self.read(rel)
             # ルートコマンドの defer は公開（ephemeral 指定なし）であること
             self.assertIn("await interaction.response.defer(thinking=True)", src, rel)
             self.assertIn("await interaction.followup.send(view=as_panel_v2(view))", src, rel)
 
     def test_panels_have_owner_checks(self):
-        for rel in ("core/general/panel.py", "core/vc/hub.py", "cogs/game.py", "cogs/help.py"):
+        for rel in ("core/general/panel.py", "core/vc/hub.py", "core/game/game/cog.py", "cogs/help.py"):
             self.assertIn("interaction_check", self.read(rel), rel)
 
     def test_economy_panels_public_with_owner_check(self):
@@ -201,7 +201,7 @@ class Wave2PublicSourceTest(unittest.TestCase):
     def test_exceptions_stay_ephemeral(self):
         # 手札表示（poker の交換後手札・daifugo の手札パネル）は維持
         self.assertIn("交換後の手札", self.read("cogs/poker.py"))
-        self.assertIn("あなたの手札: {hand}", self.read("cogs/daifugo.py"))
+        self.assertIn("あなたの手札: {hand}", self.read("core/game/daifugo/cog.py"))
         # wordwolf の自分のワード確認は維持
         self.assertIn("あなたのワードは", self.read("cogs/wordwolf.py"))
         # panel_recovery の開き直しは維持
