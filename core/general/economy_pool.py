@@ -23,7 +23,7 @@ blackjack の損失で 30% プール / 70% 国庫だった（ダイスは 30% �
 国庫は v1 では蓄積と残高保持のみ（使い道は将来用）。残高は
 管理コマンド（!all_stats）から参照できる。
 
-保存は core/items.py と同じ流儀: 専用 JSON（既定 data/economy_pool.json、
+保存は core/general/items.py と同じ流儀: 専用 JSON（既定 data/economy_pool.json、
 環境変数 ECONOMY_POOL_DATA_PATH で変更可）にメモリ主体＋
 バッチフラッシュ＋原子差し替え。複数 cog が同じ状態を触るため、
 プロセス内で共有する単一インスタンスを shared_store() で返す。

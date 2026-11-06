@@ -20,7 +20,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from core import action_registry, items, workshop
+from core import action_registry, workshop
+from core.general import items
 from cogs import wallet as wallet_module
 from cogs.workshop import WorkshopCog
 

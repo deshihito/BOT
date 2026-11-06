@@ -16,7 +16,8 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from core import ai_input, api_client, messages  # noqa: E402
+from core import api_client, messages  # noqa: E402
+from core.general import ai_input
 from core.emojis import BACK, CROCK, FAILED, MUSIC, SUCCESS, TICKET  # noqa: E402
 
 

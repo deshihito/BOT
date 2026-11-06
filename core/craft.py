@@ -34,7 +34,7 @@ import random
 from datetime import datetime
 from typing import Any
 
-from core.items import ITEM_DEFS, ItemError, ItemStore
+from core.general.items import ITEM_DEFS, ItemError, ItemStore
 
 # ---------------------------------------------------------------------------
 # レシピ定義（宣言的テーブル）

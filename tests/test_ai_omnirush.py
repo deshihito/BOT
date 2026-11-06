@@ -5,7 +5,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from core import ai_omnirush
+from core.general import ai_omnirush
 
 
 class OmniRushCliTest(unittest.IsolatedAsyncioTestCase):

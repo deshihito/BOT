@@ -8,7 +8,8 @@ import aiohttp
 
 from cogs.ai_tools import AIToolsCog, _enabled, _resolve_invoker
 from cogs.general import ShortcutMessageInteraction
-from core import ai_tools_router, logfare
+from core import logfare
+from core.general import ai_tools_router
 
 
 class AIToolsTest(unittest.IsolatedAsyncioTestCase):
@@ -182,7 +183,7 @@ class AIToolsTest(unittest.IsolatedAsyncioTestCase):
             "errors": [],
             "messages": [],
         })
-        with patch("core.ai_tools_router.logfare.decision", decision):
+        with patch("core.general.ai_tools_router.logfare.decision", decision):
             selected = await ai_tools_router.decide_action("VCに参加して", self.candidates)
         self.assertEqual(selected, "vc:join")
         args, kwargs = decision.await_args
@@ -196,7 +197,7 @@ class AIToolsTest(unittest.IsolatedAsyncioTestCase):
     async def test_rejects_none_or_unavailable_action_without_retry(self):
         for selected in ("none", "support:clear"):
             decision = AsyncMock(return_value={"answers": {"action": {"choice": selected}}})
-            with self.subTest(selected=selected), patch("core.ai_tools_router.logfare.decision", decision):
+            with self.subTest(selected=selected), patch("core.general.ai_tools_router.logfare.decision", decision):
                 with self.assertRaises(ai_tools_router.AIToolsDecisionError):
                     await ai_tools_router.decide_action("依頼", self.candidates)
             decision.assert_awaited_once()
@@ -229,14 +230,14 @@ class AIToolsTest(unittest.IsolatedAsyncioTestCase):
             {"result": {"answers": {"action": {"probabilities": {"vc:join": 1.0}}}}},
         ):
             with self.subTest(result=result), patch(
-                "core.ai_tools_router.logfare.decision", AsyncMock(return_value=result)
+                "core.general.ai_tools_router.logfare.decision", AsyncMock(return_value=result)
             ):
                 with self.assertRaises(ai_tools_router.AIToolsDecisionError):
                     await ai_tools_router.decide_action("依頼", self.candidates)
 
     async def test_logfare_forbidden_error_is_descriptive_and_not_retried(self):
         decision = AsyncMock(side_effect=logfare.LogfareHTTPError(403))
-        with patch("core.ai_tools_router.logfare.decision", decision):
+        with patch("core.general.ai_tools_router.logfare.decision", decision):
             with self.assertRaisesRegex(ai_tools_router.AIToolsDecisionError, "トレーニング利用オプトイン"):
                 await ai_tools_router.decide_action("VCに参加して", self.candidates)
         decision.assert_awaited_once()

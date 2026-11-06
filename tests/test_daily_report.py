@@ -21,7 +21,7 @@ import discord
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from core import daily_report as report_core
-from core.items import JST
+from core.general.items import JST
 
 T_2100 = datetime(2026, 11, 6, 21, 0, tzinfo=JST)
 T_2059 = datetime(2026, 11, 6, 20, 59, tzinfo=JST)

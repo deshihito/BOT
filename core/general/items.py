@@ -7,7 +7,7 @@
 作らない（原典で説明が「実装中」のままだった11種の轍を踏まない）。
 
 設計の要点:
-- 所持はユーザー単位・全ギルド共通。保存は core/market.py と同じ流儀:
+- 所持はユーザー単位・全ギルド共通。保存は core/general/market.py と同じ流儀:
   専用 JSON（既定 data/items.json、環境変数 ITEMS_DATA_PATH で変更可）に、
   メモリ主体＋バッチフラッシュ＋原子差し替え。市場とはファイルを分ける。
 - AGO コインの増減そのものはここでは行わない（cogs/wallet.py の安全な
@@ -574,7 +574,7 @@ class ItemStore:
 
     コインの実移動は行わない。購入／売却／宝箱コインの受け渡しは
     呼び出し側（cogs/items.py）が wallet の安全な経路で行い、失敗したら
-    rollback_* でこちらの変更を巻き戻す（core/market.py と同じ組み立て）。
+    rollback_* でこちらの変更を巻き戻す（core/general/market.py と同じ組み立て）。
     """
 
     def __init__(

@@ -26,7 +26,8 @@ import discord
 from discord import app_commands
 from discord.ext import commands, tasks
 from core.panel_v2 import as_panel_v2, edit_panel_v2
-from core import action_registry, action_usage, ai_omnirush, ai_preferences, ai_provider_router, guild_settings, levelup_card, logfare, shortcuts, usage_stats
+from core import action_registry, action_usage, guild_settings, levelup_card, logfare, shortcuts, usage_stats
+from core.general import ai_omnirush, ai_preferences, ai_provider_router
 from core.game_guides import GAME_GUIDES, GAME_ORDER
 from core import localization, translation
 from core import prison as prison_core
@@ -241,7 +242,7 @@ class GeneralCog(
             return await interaction.response.send_message(embed=view.embed(), view=view)
 
         if value == "aitools":
-            from core import ai_tools_router
+            from core.general import ai_tools_router
             from cogs.ai_tools import _enabled as ai_tools_enabled
             available = ai_tools_router.action_candidates()
             key_status = "設定済み" if logfare.api_key() else "未設定"

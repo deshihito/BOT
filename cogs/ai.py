@@ -11,7 +11,8 @@ import re
 import discord
 from discord.ext import commands
 
-from core import ai_context, ai_input, ai_latex, ai_omnirush, ai_preferences, ai_provider_router, ai_tools, logfare
+from core import logfare
+from core.general import ai_context, ai_input, ai_latex, ai_omnirush, ai_preferences, ai_provider_router, ai_tools
 
 logger = logging.getLogger(__name__)
 

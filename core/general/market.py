@@ -384,7 +384,7 @@ class MarketStore:
         """aga_amount AGO で買える量の見積もり（状態は変えない）。
 
         fee_rate は手数料率の上書き（アイテム効果の割引など、Phase 2 の
-        core/items.py の受動効果から渡す）。None なら通常の FEE_RATE。
+        core/general/items.py の受動効果から渡す）。None なら通常の FEE_RATE。
         """
         fee_rate = FEE_RATE if fee_rate is None else fee_rate
         with self._lock:

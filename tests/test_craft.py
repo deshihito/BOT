@@ -16,7 +16,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from core import craft, items
+from core import craft
+from core.general import items
 
 
 def _store(tmp: str, rng=None) -> items.ItemStore:

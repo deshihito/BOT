@@ -1,7 +1,8 @@
 import asyncio
 from unittest.mock import AsyncMock, patch
 
-from core import ai_provider_router, coder_service
+from core import coder_service
+from core.general import ai_provider_router
 
 
 def test_coder_uses_bot_provider_router_for_auto_selection():

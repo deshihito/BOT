@@ -21,7 +21,7 @@ from types import SimpleNamespace
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from core import action_registry, gambling
-from core.items import ItemError
+from core.general.items import ItemError
 from cogs import wallet as wallet_module
 from cogs.gambling import (
     BetModal,

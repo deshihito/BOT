@@ -6,7 +6,7 @@ import unittest
 
 def _cog_with_inventory():
     from cogs.items import ItemsCog
-    from core import items as items_core
+    from core.general import items as items_core
 
     cog = ItemsCog(types.SimpleNamespace())
     cog.store = items_core.ItemStore()
@@ -16,7 +16,7 @@ def _cog_with_inventory():
 class ItemPickOptionsTest(unittest.TestCase):
     def test_buy_options_are_purchasable_only(self):
         from cogs.items import _item_pick_options
-        from core import items as items_core
+        from core.general import items as items_core
 
         cog = _cog_with_inventory()
         options = _item_pick_options(cog, 1, "buy")
@@ -28,7 +28,7 @@ class ItemPickOptionsTest(unittest.TestCase):
         # 全アイテム売却可能（売却額は購入価格の半分）になったため、
         # 売却候補は所持している全アイテムになる。
         from cogs.items import _item_pick_options
-        from core import items as items_core
+        from core.general import items as items_core
 
         cog = _cog_with_inventory()
         first, second = list(items_core.ITEM_DEFS)[:2]
@@ -42,7 +42,7 @@ class ItemPickOptionsTest(unittest.TestCase):
 
     def test_use_options_are_inventory(self):
         from cogs.items import _item_pick_options
-        from core import items as items_core
+        from core.general import items as items_core
 
         cog = _cog_with_inventory()
         item_id = next(iter(items_core.ITEM_DEFS))
