@@ -12,7 +12,10 @@
 
 安全策:
 - AGO BOT 自身は絶対に対象にしない
-- Webhook 経由のメッセージは対象外（自動翻訳の再投稿などを壊さない）
+- 任意の Webhook 経由の投稿は対象外（自動翻訳の再投稿などを壊さない）。
+  ただし対象ボット自身のアプリ応答（スラッシュコマンド応答など、
+  application_id がそのボットのユーザーID と一致するもの）は、その
+  ボットの発言として執行対象に含める（下記 enforce_message の判定参照）
 - DM は対象外。内容ベースの判定はしない（著者・チャンネル・件数だけ）ので
   Message Content Intent には依存しない
 - 許可チャンネルが1件も無いエントリは成立しない（全チャンネルで消える事故防止）
@@ -120,13 +123,27 @@ async def enforce_message(self_bot_id: Optional[int], message, store=None) -> bo
         guild = getattr(message, "guild", None)
         if guild is None:
             return False
-        if getattr(message, "webhook_id", None):
-            return False
         author = getattr(message, "author", None)
         if author is None or not getattr(author, "bot", False):
             return False
-        if self_bot_id is not None and getattr(author, "id", None) == self_bot_id:
+        author_id = getattr(author, "id", None)
+        if self_bot_id is not None and author_id == self_bot_id:
             return False
+        if getattr(message, "webhook_id", None):
+            # webhook_id が付いていても、対象ボット自身のアプリ応答は執行対象。
+            # スラッシュコマンド応答はボット自身のアプリ Webhook で投稿され、
+            # webhook_id / application_id にそのボットのアプリID（＝ボットの
+            # ユーザーID）が入る（bump/up 検知 core/game/rta/detect.py でも
+            # author_id / application_id / webhook_id を同一視して照合して
+            # いる）。これを無条件に除外すると、昨今のボットの発言の大半が
+            # webhook_id 付きであるため制限がほぼ効かなくなる。
+            # 一方 application_id が投稿者名義（author.id）と一致しない投稿は、
+            # 名義が実在ボットでない任意 Webhook の投稿として対象外のままに
+            # する（自動翻訳の再投稿など。そちらの投稿者名義は AGO の Webhook
+            # で対象ボットではなく、application_id も付かない）。
+            application_id = getattr(message, "application_id", None)
+            if application_id is None or application_id != author_id:
+                return False
         if store is None:
             from core import guild_settings
 
