@@ -489,6 +489,11 @@ class HelpCog(commands.Cog):
     @app_commands.command(name="help", description="コマンドの一覧と使い方を表示します")
     @app_commands.describe(command="使い方を見たいコマンド（入力すると候補が出ます）")
     async def help(self, interaction: discord.Interaction, command: str | None = None):
+        # BOT fixer のコマンド制限（管理者は対象外）。
+        from core import command_control
+
+        if not await command_control.guard(interaction, "help:overview"):
+            return
         catalog = self.catalog()
         if command:
             entry = find_command(catalog, command)

@@ -632,6 +632,11 @@ class GameHub(commands.Cog):
         await interaction.followup.send(view=as_panel_v2(view))
 
     async def start_game(self, interaction: discord.Interaction, game_id: str, **options):
+        # BOT fixer のコマンド制限（管理者は対象外）。
+        from core import command_control
+
+        if not await command_control.guard(interaction, f"game:game:{game_id}"):
+            return
         # 利用履歴（レジストリの game アクション id は "game:game:<id>"）。
         # 保存の書き込みで応答を遅らせないようバックグラウンド記録を使う。
         action_usage.record_safely_in_background(

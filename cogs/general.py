@@ -188,6 +188,11 @@ class GeneralCog(
 
 
     async def dispatch_general(self, interaction: discord.Interaction, value: str):
+        # BOT fixer のコマンド制限（管理者は対象外）。
+        from core import command_control
+
+        if not await command_control.guard(interaction, f"general:{value}"):
+            return
         # 利用履歴（よく使う／最近）は入口ここで記録する。記録の失敗で
         # dispatch を壊さないよう record_safely 側で例外は握る。保存には
         # 自前APIへの書き込みが伴い応答を遅らせるため、応答を待たせない

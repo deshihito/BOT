@@ -306,6 +306,11 @@ class VoiceHub(commands.Cog):
                     room: str | None = None, password: str | None = None,
                     name: str | None = None, max_servers: int | None = None,
                     desc: str | None = None):
+        # BOT fixer のコマンド制限（管理者は対象外）。
+        from core import command_control
+
+        if not await command_control.guard(interaction, f"vc:{value}"):
+            return
         # 利用履歴（よく使う／最近）は入口ここで記録する（失敗しても壊さない）。
         # 保存の書き込みで応答を遅らせないようバックグラウンド記録を使う。
         action_usage.record_safely_in_background(

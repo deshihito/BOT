@@ -24,7 +24,7 @@ class GenreAbsorptionTest(unittest.TestCase):
         self.assertIn("language", automation)
         self.assertIn("giveaway", moderation)
         total = sum(len(items) for items in SUPPORT_ACTIONS_BY_GENRE.values())
-        self.assertEqual(total, 32)  # グローバルチャット＋vc_auto_start 追加後の総数。機能は減らない
+        self.assertEqual(total, 33)  # グローバルチャット＋vc_auto_start＋bot_fixer 追加後の総数。機能は減らない
 
     def test_genre_aliases_cover_absorbed_genres(self):
         from cogs.general import GENERAL_GENRE_ALIASES
