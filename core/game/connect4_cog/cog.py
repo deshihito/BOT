@@ -138,8 +138,8 @@ class MoveView(discord.ui.View):
         super().__init__(timeout=TURN_SECONDS)
         self.cog = cog
         self.game = game
-        options = [discord.SelectOption(label=f"{c+1}列目", value=str(c)) for c in legal_moves(game.board)]
-        select = discord.ui.Select(placeholder="落とす列を選んでください", options=options)
+        options = [discord.SelectOption(label=f"X={c+1}", value=str(c)) for c in legal_moves(game.board)]
+        select = discord.ui.Select(placeholder="落とす列 X を選んでください", options=options)
         select.callback = self._callback
         self.add_item(select)
 
@@ -230,7 +230,7 @@ class Connect4(commands.Cog):
             file, url = board_attachment(g.board, g.last_move)
             embed = discord.Embed(
                 description=(f"{user.mention} さんの番（{'赤 🔴' if g.turn == RED else '黄 🟡'}）。\n"
-                             "落とす列をセレクトで選んでください。"), color=COLOR)
+                             "落とす列 X をセレクトで選んでください。"), color=COLOR)
             embed.set_image(url=url)
             await game_panels.replace(channel, "party", embed=embed, file=file, view=MoveView(self, g))
             for _ in range(TURN_SECONDS):
@@ -240,7 +240,7 @@ class Connect4(commands.Cog):
             from core.game.connect4 import drop_row
             if g.acted_col is None:
                 col = random.choice(legal_moves(g.board))
-                await channel.send(f"{user.mention} さんは時間切れのため、ランダムな列（{col+1}列目）に落としました。")
+                await channel.send(f"{user.mention} さんは時間切れのため、ランダムな列（X={col+1}）に落としました。")
             else:
                 col = g.acted_col
             row = drop_row(g.board, col)

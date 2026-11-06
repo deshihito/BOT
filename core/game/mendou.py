@@ -2,7 +2,9 @@
 """「めんどうパス」（Cockroach Poker 系の押し付け合いブラフゲーム）の純ロジック。
 
 ルール（AGO版）: 害虫カードを「めんどうな用事」カードに読み替えた。
-- 用事カード8種×各4枚を全員に配り切る。
+- 用事カード8種×各4枚の山から、1人5枚ずつだけ配る（残りは使わない）。
+  配り切る旧仕様だと1ゲームが長くなりすぎたための短縮（レビュー対応
+  2026-11-06）。負け条件（同じ用事4枚）・種×4枚の構造は維持する。
 - 手番の人は手札1枚を裏向きで相手に渡し、「これは『○○』だ」と宣言する
   （宣言は嘘でもよい）。
 - 渡された人は次のどれかを選ぶ:
@@ -19,6 +21,7 @@ from collections import Counter
 KINDS = ["宿題", "残業", "掃除当番", "ゴミ出し", "買い出し", "プレゼン", "修理", "洗濯"]
 COPIES = 4
 LOSE_COUNT = 4
+DEAL_PER_PLAYER = 5  # 1人に配る枚数（山は8種×4枚=32枚、残りは除外）
 
 
 class MendouGame:
@@ -29,8 +32,12 @@ class MendouGame:
         self.rng = rng if rng is not None else random
         deck = [k for k in KINDS for _ in range(COPIES)]
         self.rng.shuffle(deck)
+        # 短縮のため配るのは1人 DEAL_PER_PLAYER 枚まで。残りはゲームから除外
+        # し、山に戻したり再配布したりはしない。
+        self.dealt_total = min(len(deck), DEAL_PER_PLAYER * len(self.players))
+        self.excluded_total = len(deck) - self.dealt_total
         self.hands: dict[int, Counter] = {uid: Counter() for uid in self.players}
-        for i, kind in enumerate(deck):
+        for i, kind in enumerate(deck[:self.dealt_total]):
             self.hands[self.players[i % len(self.players)]][kind] += 1
         self.fronts: dict[int, Counter] = {uid: Counter() for uid in self.players}
         # チェーン状態
@@ -41,6 +48,7 @@ class MendouGame:
         self.visited: set[int] = set()        # このチェーンで既に持った人
         self.starter: int = self.players[0]   # 次チェーンの開始者
         self.loser: int | None = None
+        self.last_result: dict | None = None  # 直近の accept 判定結果（表示用）
 
     # ------------------------------------------------------------------ 状態
     @property
@@ -127,6 +135,7 @@ class MendouGame:
         self.fronts[taker][card] += 1
         result = {"card": card, "declaration": self.declaration, "truth": truth,
                   "guessed_right": guessed_right, "taker": taker}
+        self.last_result = result
         self.card = None
         self.passer = None
         self.holder = None

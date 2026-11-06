@@ -5,6 +5,9 @@ AGO読み替え: 害虫カードを「めんどうな用事」カード（宿題
 盤面表現: 状態は「各人の手札枚数・場のカード・いま回っている宣言」だけで
 空間性がないため V2 構造化テキスト（判断は実装ログ参照）。手札と回ってきた
 カードの中身は ephemeral でのみ表示する。
+進行はセッションメッセージ1通を編集し続ける方式（レビュー対応 2026-11-06:
+判定結果もパネル内の「直近の判定」に集約し、ゲーム中の新規投稿はしない）。
+配布は1人5枚に絞って短縮した（山の残りは使わない）。
 """
 import asyncio
 import logging
@@ -36,6 +39,12 @@ def status_text(game: MendouGame) -> str:
     for uid in game.players:
         front = "、".join(f"{k}×{n}" for k, n in game.fronts[uid].items() if n > 0)
         lines.append(f"{names[uid]} <@{uid}>: 手札{game.hand_size(uid)}枚／場: {front or 'なし'}")
+    if game.last_result is not None:
+        r = game.last_result
+        truth_text = "本当" if r["truth"] else "嘘"
+        guess_text = "見抜きました！" if r["guessed_right"] else "騙されました…"
+        lines.append(f"\n直近の判定: カードは『{r['card']}』、宣言は{truth_text}でした。{guess_text}"
+                     f"{names[r['taker']]} <@{r['taker']}> が引き取りました。")
     if game.chain_active:
         lines.append(f"\n{names[game.passer]} <@{game.passer}> が {names[game.holder]} <@{game.holder}> に"
                      f"「これは『{game.declaration}』だ」と言ってカードを渡しました。")
@@ -169,9 +178,12 @@ class Mendou(commands.Cog):
                 await asyncio.sleep(1.0)
             await self._refresh(channel, game)
             winners = " ".join(f"<@{p}>" for p in game.winners)
+            reason = ""
+            if game.loser is not None and max(game.fronts[game.loser].values(), default=0) < 4:
+                reason = "（手札が無くなったため）"
             await channel.send(view=text_panel(
                 "🏆 めんどうパス 結果",
-                f"<@{game.loser}> の負けです。勝者: {winners}\n" + status_text(game)))
+                f"<@{game.loser}> の負けです{reason}。勝者: {winners}\n" + status_text(game)))
             guild = getattr(channel, "guild", None)
             if guild is not None:
                 for uid in game.winners:
@@ -270,18 +282,13 @@ class Mendou(commands.Cog):
         if result is None:
             return await interaction.response.send_message("いま引き取れるのは渡された人だけです。", ephemeral=True)
         await interaction.response.send_message("判定します！", ephemeral=True)
-        names = labels(game)
-        truth_text = "本当" if result["truth"] else "嘘"
-        guess_text = "見抜きました！" if result["guessed_right"] else "騙されました…"
-        body = (f"カードは『{result['card']}』、宣言は{truth_text}でした。{guess_text}\n"
-                f"{names[result['taker']]} <@{result['taker']}> が引き取りました。")
-        await interaction.channel.send(view=text_panel("📨 判定結果", body))
+        # ログ流れ対策（レビュー対応 2026-11-06）: 判定結果は新規メッセージを
+        # 投稿せず、セッションメッセージ（status_text の「直近の判定」）の
+        # 編集だけで伝える。開始者が手札なしで負ける場合も同様で、
+        # 終了通知は _run 側の結果メッセージが担う。
         if not game.finished:
             # 次の開始者が手札を持っていなければ、その人の負けで終了する
             game.check_starter_can_play()
-            if game.finished:
-                await interaction.channel.send(view=text_panel(
-                    "📨 めんどうパス", f"次の開始者 <@{game.starter}> は手札が無いため負けです。"))
         await self._refresh(interaction.channel, game)
 
 

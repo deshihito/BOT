@@ -190,6 +190,10 @@ def render_minesweeper(states, *, selected=None, tile: int = 40) -> bytes:
                   chr(ord("A") + c) if c < 26 else str(c + 1), head_font, (170, 178, 195))
     for r in range(rows):
         _centered(draw, head // 2, head + r * tile + tile // 2, str(r + 1), head_font, (170, 178, 195))
+    # 軸ラベル（左上の隅に X=横 / Y=縦 を対角配置。座標表記の X/Y 統一対応）
+    axis_font = _font(max(11, tile // 3))
+    _centered(draw, int(head * 0.68), int(head * 0.30), "X", axis_font, (250, 204, 21))
+    _centered(draw, int(head * 0.32), int(head * 0.70), "Y", axis_font, (250, 204, 21))
     for r in range(rows):
         for c in range(cols):
             kind, value = states[r][c]
@@ -267,6 +271,10 @@ def render_sudoku(board, givens, *, selected=None, tile: int = 52) -> bytes:
     for i in range(9):
         _centered(draw, head + i * tile + tile // 2, head // 2, str(i + 1), head_font, (170, 178, 195))
         _centered(draw, head // 2, head + i * tile + tile // 2, str(i + 1), head_font, (170, 178, 195))
+    # 軸ラベル（左上の隅に X=横 / Y=縦 を対角配置。座標表記の X/Y 統一対応）
+    axis_font = _font(13)
+    _centered(draw, int(head * 0.68), int(head * 0.30), "X", axis_font, (37, 99, 235))
+    _centered(draw, int(head * 0.32), int(head * 0.70), "Y", axis_font, (37, 99, 235))
     sel = tuple(selected) if selected is not None else None
     for r in range(9):
         for c in range(9):
@@ -349,6 +357,112 @@ def render_nonogram(row_clues, col_clues, grid, *, selected=None, cell: int = 44
                                outline=(37, 99, 235), width=3)
     draw.rectangle([left, top, left + n * cell - 1, top + n * cell - 1],
                    outline=(71, 85, 105), width=3)
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    return buf.getvalue()
+
+
+# --- 爆弾処理班 -------------------------------------------------------------
+# slots の各タイルは公開情報だけを表すタプル:
+#   ("cut", number)                      カット済み（数字は公開済み）
+#   ("hidden", parity, not_numbers)      未カット。parity は None/"even"/"odd"/"red"、
+#                                        not_numbers は「その数字ではない」と判明した数字の組。
+# 未カットタイルの本当の数字はこの関数に渡らない（秘匿の担保は呼び出し側の
+# データ構築とテストで検証する）。
+WIRE_HIDDEN = (96, 110, 130)
+WIRE_CUT = (129, 199, 132)
+WIRE_RED = (183, 28, 28)
+
+
+def render_wirecut_board(players, *, remaining: int, fuse_left: int, fuse_max: int) -> bytes:
+    """爆弾処理班の共有盤面。各プレイヤーのラックを位置番号つきスロットで描く。
+
+    players は [{"label": 表示名（情報トークン数など）, "slots": [slot, ...]}]。
+    """
+    max_tiles = max((len(p["slots"]) for p in players), default=0)
+    tile = 56 if max_tiles <= 12 else 46 if max_tiles <= 18 else 38
+    label_h = 28
+    row_gap = 16
+    title_h = 38
+    width = PAD * 2 + max_tiles * tile + max(0, max_tiles - 1) * GAP
+    height = PAD + title_h + len(players) * (label_h + tile) \
+        + max(0, len(players) - 1) * row_gap + PAD
+    img = Image.new("RGB", (max(width, 200), max(height, 120)), BG)
+    draw = ImageDraw.Draw(img)
+    title_font = _font(21)
+    draw.text((PAD, PAD), f"残り数字ワイヤー {remaining}本 ／ ヒューズ {fuse_left}/{fuse_max}",
+              fill=FG, font=title_font)
+    label_font = _font(19)
+    pos_font = _font(max(11, tile // 4))
+    main_font = _font(int(tile * 0.44))
+    sub_font = _font(max(11, tile // 4))
+    y = PAD + title_h
+    for player in players:
+        draw.text((PAD, y), str(player["label"]), fill=FG, font=label_font)
+        y += label_h
+        x = PAD
+        for i, slot in enumerate(player["slots"]):
+            if slot[0] == "cut":
+                color, main, main_fill = WIRE_CUT, str(slot[1]), (20, 20, 20)
+            else:
+                parity = slot[1] if len(slot) > 1 else None
+                if parity == "red":
+                    color, main, main_fill = WIRE_RED, "赤", (255, 255, 255)
+                elif parity == "even":
+                    color, main, main_fill = WIRE_HIDDEN, "偶", FG
+                elif parity == "odd":
+                    color, main, main_fill = WIRE_HIDDEN, "奇", FG
+                else:
+                    color, main, main_fill = WIRE_HIDDEN, "？", FG
+            draw.rounded_rectangle([x, y, x + tile, y + tile], radius=8, fill=color)
+            draw.text((x + 4, y + 2), str(i + 1), fill=(215, 220, 230), font=pos_font)
+            _centered(draw, x + tile // 2, y + tile // 2 + 3, main, main_font, main_fill)
+            if slot[0] == "hidden" and len(slot) > 2 and slot[2]:
+                note = "≠" + ",".join(str(n) for n in slot[2])
+                _centered(draw, x + tile // 2, y + tile - 9, note, sub_font, (255, 213, 79))
+            x += tile + GAP
+        y += tile + row_gap
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    return buf.getvalue()
+
+
+# --- ビンゴカード -----------------------------------------------------------
+BINGO_LETTERS = "BINGO"
+BINGO_MARKED = (255, 152, 0)
+BINGO_FREE = (255, 193, 7)
+BINGO_UNMARKED = (236, 239, 241)
+
+
+def render_bingo_card(grid, marked, *, tile: int = 56) -> bytes:
+    """ビンゴカード（5×5）を描く。当選マスは橙、中央フリーは黄＋★。
+
+    列見出しは古典的な B/I/N/G/O。数字そのものが座標ではないため
+    X/Y 軸ラベルは付けない（座標系ゲームではない）。
+    """
+    head = 30
+    width = PAD * 2 + 5 * tile + 4 * GAP
+    height = PAD + head + 5 * tile + 4 * GAP + PAD
+    img = Image.new("RGB", (width, height), BG)
+    draw = ImageDraw.Draw(img)
+    head_font = _font(20)
+    num_font = _font(24)
+    for c in range(5):
+        x = PAD + c * (tile + GAP)
+        _centered(draw, x + tile // 2, PAD + head // 2, BINGO_LETTERS[c], head_font, (170, 178, 195))
+    for r in range(5):
+        for c in range(5):
+            x = PAD + c * (tile + GAP)
+            y = PAD + head + r * (tile + GAP)
+            value = grid[r][c]
+            if value is None:
+                color, label = BINGO_FREE, "★"
+            elif marked[r][c]:
+                color, label = BINGO_MARKED, str(value)
+            else:
+                color, label = BINGO_UNMARKED, str(value)
+            draw.rounded_rectangle([x, y, x + tile, y + tile], radius=10, fill=color)
+            _centered(draw, x + tile // 2, y + tile // 2, label, num_font, (20, 20, 20))
     buf = io.BytesIO()
     img.save(buf, format="PNG")
     return buf.getvalue()

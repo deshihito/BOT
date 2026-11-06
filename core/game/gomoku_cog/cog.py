@@ -1,6 +1,7 @@
 """/game の五目並べ（2人対戦 / CPU、15×15）。
 
-盤面は PIL で描く PNG、移動は行→列のセレクト。対人戦は
+盤面は PIL で描く PNG、移動はX（横）→Y（縦）のセレクト（座標表記は
+X/Y 統一、レビュー対応 2026-11-06）。対人戦は
 core/game/party_ranking.py の勝数と core/game/elo.py のレートに記録し、
 対局は core/game/game_restore.py で再起動復旧する（オセロと同じ型）。
 """
@@ -79,6 +80,9 @@ def render_board_image(board, last=None):
     for i in range(SIZE):
         draw.text((MARGIN + i * step, 12), str(i + 1), font=font, fill=(60, 40, 10), anchor="mm")
         draw.text((12, MARGIN + i * step), str(i + 1), font=font, fill=(60, 40, 10), anchor="mm")
+    # 軸ラベル（上端= X（横）、左端= Y（縦）。座標表記の X/Y 統一対応）
+    draw.text((IMG_SIZE - 14, 12), "X", font=font, fill=(60, 40, 10), anchor="mm")
+    draw.text((12, IMG_SIZE - 14), "Y", font=font, fill=(60, 40, 10), anchor="mm")
     radius = step * 0.42
     for r in range(SIZE):
         for c in range(SIZE):
@@ -166,7 +170,7 @@ class JoinView(discord.ui.View):
 
 
 class MoveView(discord.ui.View):
-    """行→列の2段セレクト。両方選ぶと着手する。"""
+    """X（横）→Y（縦）の2段セレクト。両方選ぶと着手する。"""
 
     def __init__(self, cog, game):
         super().__init__(timeout=TURN_SECONDS)
@@ -174,49 +178,49 @@ class MoveView(discord.ui.View):
         self.game = game
         self.row = None
         self.col = None
-        row_select = discord.ui.Select(
-            placeholder="行（1〜15）", row=0,
-            options=[discord.SelectOption(label=f"{i+1}行", value=str(i)) for i in range(SIZE)])
-        row_select.callback = self._row_callback
-        self.add_item(row_select)
         col_select = discord.ui.Select(
-            placeholder="列（1〜15）", row=1,
-            options=[discord.SelectOption(label=f"{i+1}列", value=str(i)) for i in range(SIZE)])
+            placeholder="X（横）: 列（1〜15）", row=0,
+            options=[discord.SelectOption(label=f"X={i+1}", value=str(i)) for i in range(SIZE)])
         col_select.callback = self._col_callback
         self.add_item(col_select)
-
-    async def _row_callback(self, interaction):
-        if not self._check_turn(interaction):
-            return await interaction.response.send_message("現在の手番のプレイヤーだけが選択できます。", ephemeral=True)
-        for item in self.children:
-            if isinstance(item, discord.ui.Select) and item.row == 0 and item.values:
-                self.row = int(item.values[0])
-        await interaction.response.defer()
-        await self._try_apply(interaction)
+        row_select = discord.ui.Select(
+            placeholder="Y（縦）: 行（1〜15）", row=1,
+            options=[discord.SelectOption(label=f"Y={i+1}", value=str(i)) for i in range(SIZE)])
+        row_select.callback = self._row_callback
+        self.add_item(row_select)
 
     async def _col_callback(self, interaction):
         if not self._check_turn(interaction):
             return await interaction.response.send_message("現在の手番のプレイヤーだけが選択できます。", ephemeral=True)
         for item in self.children:
-            if isinstance(item, discord.ui.Select) and item.row == 1 and item.values:
+            if isinstance(item, discord.ui.Select) and item.row == 0 and item.values:
                 self.col = int(item.values[0])
         await interaction.response.defer()
-        await self._try_apply(interaction, col=self.col)
+        await self._try_apply(interaction)
+
+    async def _row_callback(self, interaction):
+        if not self._check_turn(interaction):
+            return await interaction.response.send_message("現在の手番のプレイヤーだけが選択できます。", ephemeral=True)
+        for item in self.children:
+            if isinstance(item, discord.ui.Select) and item.row == 1 and item.values:
+                self.row = int(item.values[0])
+        await interaction.response.defer()
+        await self._try_apply(interaction)
 
     def _check_turn(self, interaction) -> bool:
         g = self.game
         user = g.current_user()
         return g.phase == "playing" and not g.acted and user is not None and user.id == interaction.user.id
 
-    async def _try_apply(self, interaction, col=None):
+    async def _try_apply(self, interaction):
         g = self.game
-        if self.row is None or col is None:
+        if self.row is None or self.col is None:
             return
-        if g.board[self.row][col] != EMPTY:
-            await interaction.followup.send("そのマスには既に石があります。別の列を選んでください。", ephemeral=True)
+        if g.board[self.row][self.col] != EMPTY:
+            await interaction.followup.send("そのマスには既に石があります。別のマスを選んでください。", ephemeral=True)
             return
-        g.board[self.row][col] = g.turn
-        g.last_move = (self.row, col)
+        g.board[self.row][self.col] = g.turn
+        g.last_move = (self.row, self.col)
         g.acted = True
 
 
@@ -299,7 +303,7 @@ class Gomoku(commands.Cog):
             file, url = board_attachment(g.board, g.last_move)
             embed = discord.Embed(
                 description=(f"{user.mention} さんの番（{'黒 ●' if g.turn == BLACK else '白 ○'}）。\n"
-                             "行→列の順にセレクトで選んでください。"), color=COLOR)
+                             "X（横）→Y（縦）の順にセレクトで選んでください。"), color=COLOR)
             embed.set_image(url=url)
             await game_panels.replace(channel, "party", embed=embed, file=file, view=MoveView(self, g))
             for _ in range(TURN_SECONDS):
@@ -310,7 +314,7 @@ class Gomoku(commands.Cog):
                 move = random.choice(legal_moves(g.board))
                 g.board[move[0]][move[1]] = g.turn
                 g.last_move = move
-                await channel.send(f"{user.mention} さんは時間切れのため、ランダムなマス（{move[0]+1}行{move[1]+1}列）に置きました。")
+                await channel.send(f"{user.mention} さんは時間切れのため、ランダムなマス（X={move[1]+1}, Y={move[0]+1}）に置きました。")
             g.turn = WHITE if g.turn == BLACK else BLACK
         g.phase = "done"
         win = winner(g.board)

@@ -480,9 +480,11 @@ class ShogiCancelButton(discord.ui.Button):
 
 
 class ShogiCoordinateModal(discord.ui.Modal, title="盤面の座標を入力"):
+    # 座標表記は X/Y 統一（レビュー対応 2026-11-06）: 1桁目が X（横・左から）、
+    # 2桁目が Y（縦・上から）。盤面アート自体の筋・段は従来どおり。
     coordinate = discord.ui.TextInput(
-        label="行・列（例: 44 / 18）",
-        placeholder="1〜9の数字を2桁で入力",
+        label="座標 X・Y（横・縦）（例: 44 / 18）",
+        placeholder="X（左から）→Y（上から）の順に1〜9の数字を2桁で入力",
         min_length=2,
         max_length=2,
     )
@@ -620,7 +622,7 @@ class Shogi(commands.Cog):
         await interaction.response.defer()
         if s.phase != "playing" or s.acted or len(text) != 2 or not text.isdigit():
             return
-        row, col = (int(value) - 1 for value in text)
+        col, row = (int(value) - 1 for value in text)  # 入力順は X（横）→Y（縦）
         if not (0 <= row < 9 and 0 <= col < 9):
             return await interaction.followup.send("座標は11〜99の範囲で入力してください。", ephemeral=True)
         pos = (row, col)

@@ -13,8 +13,8 @@ from PIL import Image
 
 from core.game import board_image
 from core.game.board_image import (
-    FONT_PATH, render_2048, render_cached, render_minesweeper,
-    render_nonogram, render_sudoku,
+    FONT_PATH, render_2048, render_bingo_card, render_cached, render_minesweeper,
+    render_nonogram, render_sudoku, render_wirecut_board,
 )
 
 
@@ -115,6 +115,56 @@ class NonogramRenderTest(unittest.TestCase):
                          render_nonogram(row_clues, col_clues, grid))
         self.assertNotEqual(render_nonogram(row_clues, col_clues, grid),
                             render_nonogram(row_clues, col_clues, grid, selected=(1, 1)))
+
+
+class BingoCardRenderTest(unittest.TestCase):
+    def make(self):
+        grid = [[c * 15 + r + 1 for c in range(5)] for r in range(5)]
+        grid[2][2] = None
+        marked = [[False] * 5 for _ in range(5)]
+        marked[2][2] = True
+        return grid, marked
+
+    def test_size_and_determinism(self):
+        grid, marked = self.make()
+        data = render_bingo_card(grid, marked)
+        # PAD12*2 + 5*56 + GAP6*4 = 328 / PAD12 + head30 + 5*56 + 6*4 + PAD12 = 358
+        self.assertEqual(png_size(data), (328, 358))
+        self.assertEqual(data, render_bingo_card(grid, marked))
+
+    def test_marked_cell_changes_output(self):
+        grid, marked = self.make()
+        before = render_bingo_card(grid, marked)
+        marked[0][0] = True
+        self.assertNotEqual(before, render_bingo_card(grid, marked))
+
+
+class WirecutRenderTest(unittest.TestCase):
+    def players(self, n_slots=8):
+        slots1 = [("cut", 3), ("hidden", "even", ()), ("hidden", None, (5,)),
+                  ("hidden", "red", ()), ("cut", 7), ("hidden", None, ()),
+                  ("hidden", "odd", (2, 4)), ("hidden", None, ())][:n_slots]
+        slots2 = [("hidden", None, ()), ("hidden", "odd", ()), ("cut", 3),
+                  ("hidden", None, (1,)), ("hidden", None, ()), ("hidden", "even", ()),
+                  ("hidden", None, ()), ("cut", 7)][:n_slots]
+        return [{"label": "プレイヤー1（情報トークン 1）", "slots": slots1},
+                {"label": "プレイヤー2（情報トークン 2）", "slots": slots2}]
+
+    def test_size_and_determinism(self):
+        data = render_wirecut_board(self.players(), remaining=40, fuse_left=3, fuse_max=4)
+        # tile=56: 幅 PAD12*2 + 8*56 + 6*7 = 514
+        # 高さ PAD12 + title38 + 2*(label28+56) + gap16 + PAD12 = 246
+        self.assertEqual(png_size(data), (514, 246))
+        self.assertEqual(data, render_wirecut_board(self.players(), remaining=40,
+                                                    fuse_left=3, fuse_max=4))
+
+    def test_large_racks_use_smaller_tiles(self):
+        players = [{"label": f"プレイヤー{i + 1}", "slots": [("hidden", None, ())] * 25}
+                   for i in range(2)]
+        data = render_wirecut_board(players, remaining=3, fuse_left=1, fuse_max=4)
+        w, _h = png_size(data)
+        self.assertEqual(w, 1118)  # tile=38: PAD24 + 25*38 + GAP6*24
+        self.assertTrue(data.startswith(b"\x89PNG"))
 
 
 class VersusRenderTest(unittest.TestCase):
