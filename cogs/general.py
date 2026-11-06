@@ -325,6 +325,12 @@ class GeneralCog(
                 return await self._safe_respond(interaction, MONEY_PANEL_NOT_LOADED)
             return await panel_cog.show_panel(interaction)
 
+        if value == "daily_report":
+            report_cog = self.bot.get_cog("DailyReportCog")
+            if report_cog is None:
+                return await self._safe_respond(interaction, "日報機能は現在利用できません。")
+            return await report_cog.toggle(interaction)
+
         if value in {"items", "item_buy", "item_use", "box_open"}:
             items_cog = self.bot.get_cog("ItemsCog")
             if items_cog is None:

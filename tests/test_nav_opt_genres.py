@@ -12,7 +12,7 @@ class GenreAbsorptionTest(unittest.TestCase):
         values = [value for _label, value in GENERAL_ACTIONS["custom"]]
         self.assertIn("translation_settings", values)
         total = sum(len(items) for items in GENERAL_ACTIONS.values())
-        self.assertEqual(total, 46)  # money_panel 追加後の総数。機能は減らない
+        self.assertEqual(total, 47)  # money_panel・daily_report 追加後の総数。機能は減らない
 
     def test_support_single_action_genres_absorbed(self):
         from cogs.support import SUPPORT_ACTIONS_BY_GENRE, SUPPORT_GENRES

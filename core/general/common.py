@@ -75,6 +75,7 @@ MONEY_PRISON_BLOCKED_VALUES = frozenset({
 GENERAL_ACTIONS = {
     "money": [
         ("マネーパネル", "money_panel"),
+        ("日報DM", "daily_report"),
         ("プレイヤー状況", "status"),
         ("コイン送金", "pay"),
         ("市場", "market"),
