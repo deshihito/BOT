@@ -39,6 +39,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
+from core import data_paths
 from core.general.items import JST
 
 logger = logging.getLogger(__name__)
@@ -107,7 +108,10 @@ def _clean_state(raw: Any) -> dict[str, Any]:
     return state
 
 
-_DEFAULT_PATH = Path(__file__).resolve().parent.parent / "data" / "prison.json"
+_DEFAULT_PATH = data_paths.data_path("prison.json")
+# 再編成でモジュールが1階層深くなった際に保存先がずれていた期間の旧保存先
+# (core/data/prison.json)。移行読み取り専用で、書き込みは行わない。
+_STRAY_PATH = data_paths.stray_path(__file__, "prison.json")
 
 
 def default_path() -> Path:
@@ -136,11 +140,19 @@ class PrisonStore:
 
     # ------------------------------------------------------------------ 保存
     def _load(self) -> dict[str, Any]:
-        try:
-            raw = json.loads(self._path.read_text(encoding="utf-8"))
-        except Exception:
+        raw = self._read_raw()
+        if raw is None:
             return _empty_state()
         return _clean_state(raw)
+
+    def _read_raw(self) -> Any:
+        # 既定パスのときだけ、旧保存先 (パスずれ期間の core/data/) から
+        # 移行読み取りする (旧パス主・正規パスはユーザー単位で補完。
+        # 期限切れの逮捕記録は従来どおり lazy に掃除される)。環境変数や
+        # 明示パスで保存先が指定されている場合は移行しない。
+        if self._path == _DEFAULT_PATH:
+            return data_paths.load_migrated(self._path, _STRAY_PATH, fill=True)
+        return data_paths.read_json(self._path)
 
     def flush(self) -> None:
         with self._lock:

@@ -36,6 +36,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
+from core import data_paths
 from core.general.items import JST, ItemError
 
 logger = logging.getLogger(__name__)
@@ -143,7 +144,36 @@ def _clean_state(raw: Any) -> dict[str, Any]:
     return state
 
 
-_DEFAULT_PATH = Path(__file__).resolve().parent.parent / "data" / "lottery.json"
+_DEFAULT_PATH = data_paths.data_path("lottery.json")
+# 再編成でモジュールが1階層深くなった際に保存先がずれていた期間の旧保存先
+# (core/data/lottery.json)。移行読み取り専用で、書き込みは行わない。
+_STRAY_PATH = data_paths.stray_path(__file__, "lottery.json")
+
+
+def _merge_migrated(canonical: Any, stray: Any) -> Any:
+    """パスずれ移行時のマージ (宝くじ専用)。
+
+    現行ラウンドは旧パス (最新) のものを丸ごと正とする (チケット・
+    プールは時点の状態で、混ぜると二重計上になる)。抽選履歴は両時代で
+    重ならない記録なので、(round_id, drawn_at) で重複を取り除いて
+    drawn_at 昇順に統合する (round_id は旧パス側で 1 から振り直されて
+    いるため、id 単独では重複判定できない)。
+    """
+    if not isinstance(stray, dict):
+        return stray
+    if not isinstance(canonical, dict):
+        return stray
+    merged = dict(stray)
+
+    def _entries(raw: Any) -> list:
+        return [e for e in raw if isinstance(e, dict)] if isinstance(raw, list) else []
+
+    by_key: dict[tuple, dict] = {}
+    for entry in _entries(canonical.get("history")) + _entries(stray.get("history")):
+        by_key[(entry.get("round_id"), entry.get("drawn_at"))] = entry
+    merged["history"] = sorted(
+        by_key.values(), key=lambda e: str(e.get("drawn_at") or ""))
+    return merged
 
 
 def default_path() -> Path:
@@ -172,11 +202,24 @@ class LotteryStore:
 
     # ------------------------------------------------------------------ 保存
     def _load(self) -> dict[str, Any]:
-        try:
-            raw = json.loads(self._path.read_text(encoding="utf-8"))
-        except Exception:
+        raw = self._read_raw()
+        if raw is None:
             return _empty_state()
         return _clean_state(raw)
+
+    def _read_raw(self) -> Any:
+        # 既定パスのときだけ、旧保存先 (パスずれ期間の core/data/) から
+        # 移行読み取りする (_merge_migrated 参照)。環境変数や明示パスで
+        # 保存先が指定されている場合は移行しない。
+        if self._path != _DEFAULT_PATH:
+            return data_paths.read_json(self._path)
+        stray_raw = data_paths.read_json(_STRAY_PATH)
+        if stray_raw is None:
+            return data_paths.read_json(self._path)
+        canonical_raw = data_paths.read_json(self._path)
+        if canonical_raw is None:
+            return stray_raw
+        return _merge_migrated(canonical_raw, stray_raw)
 
     def flush(self) -> None:
         with self._lock:

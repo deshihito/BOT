@@ -28,6 +28,8 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
+from core import data_paths
+
 logger = logging.getLogger(__name__)
 
 JST = timezone(timedelta(hours=9))
@@ -35,7 +37,50 @@ DAILY_KEEP_DAYS = 7
 FLUSH_EVERY_EVENTS = 100
 FLUSH_INTERVAL_SECONDS = 300.0
 
-_DEFAULT_PATH = Path(__file__).resolve().parent.parent / "data" / "usage_stats.json"
+_DEFAULT_PATH = data_paths.data_path("usage_stats.json")
+# 再編成でモジュールが1階層深くなった際に保存先がずれていた期間の旧保存先
+# (core/data/usage_stats.json)。移行読み取り専用で、書き込みは行わない。
+_STRAY_PATH = data_paths.stray_path(__file__, "usage_stats.json")
+
+
+def _max_counts(canonical: Any, stray: Any) -> dict:
+    """カウンタ同士のマージ: キーごとに大きい方を採る (EXP の移行と同じ)。"""
+    merged: dict = {}
+    if isinstance(canonical, dict):
+        merged.update(canonical)
+    if isinstance(stray, dict):
+        for key, value in stray.items():
+            current = merged.get(key)
+            if isinstance(value, (int, float)) and isinstance(current, (int, float)):
+                merged[key] = max(current, value)
+            else:
+                merged[key] = value
+    return merged
+
+
+def _merge_migrated(canonical: Any, stray: Any) -> Any:
+    """パスずれ移行時のマージ (利用統計専用)。
+
+    総量カウンタは2ファイル間で合算すると、移行の境界で同じ期間を
+    二重に数える危険があるため合算しない。キーごとに大きい方を採る
+    (EXP の最大値マージと同じ考え方で、二重計上だけは確実に避ける)。
+    daily も日×種別ごとに最大値を採る。started_at などのスカラーは
+    旧パス (最新ファイル) 側を正とする。
+    """
+    if not isinstance(stray, dict):
+        return stray
+    if not isinstance(canonical, dict):
+        return stray
+    merged = dict(stray)
+    merged["commands"] = _max_counts(canonical.get("commands"), stray.get("commands"))
+    merged["actions"] = _max_counts(canonical.get("actions"), stray.get("actions"))
+    daily: dict = {}
+    canon_daily = canonical.get("daily") if isinstance(canonical.get("daily"), dict) else {}
+    stray_daily = stray.get("daily") if isinstance(stray.get("daily"), dict) else {}
+    for day in set(canon_daily) | set(stray_daily):
+        daily[day] = _max_counts(canon_daily.get(day), stray_daily.get(day))
+    merged["daily"] = daily
+    return merged
 
 
 def default_path() -> Path:
@@ -97,11 +142,22 @@ class UsageStatsStore:
         self._data = self._load()
 
     # ------------------------------------------------------------------ 読み書き
+    def _read_raw(self) -> Any:
+        # 既定パスのときだけ、旧保存先 (パスずれ期間の core/data/) から
+        # 移行読み取りする (_merge_migrated 参照)。環境変数や明示パスで
+        # 保存先が指定されている場合は移行しない。
+        if self._path != _DEFAULT_PATH:
+            return data_paths.read_json(self._path)
+        stray_raw = data_paths.read_json(_STRAY_PATH)
+        if stray_raw is None:
+            return data_paths.read_json(self._path)
+        canonical_raw = data_paths.read_json(self._path)
+        if canonical_raw is None:
+            return stray_raw
+        return _merge_migrated(canonical_raw, stray_raw)
+
     def _load(self) -> dict[str, Any]:
-        try:
-            raw = json.loads(self._path.read_text(encoding="utf-8"))
-        except Exception:
-            return _empty_data(datetime.now(JST))
+        raw = self._read_raw()
         if not isinstance(raw, dict):
             return _empty_data(datetime.now(JST))
         data = _empty_data(datetime.now(JST))

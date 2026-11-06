@@ -22,12 +22,17 @@ import time
 from pathlib import Path
 from typing import Any
 
+from core import data_paths
+
 logger = logging.getLogger(__name__)
 
 FLUSH_EVERY_EVENTS = 20
 FLUSH_INTERVAL_SECONDS = 60.0
 
-_DEFAULT_PATH = Path(__file__).resolve().parent.parent / "data" / "game_records.json"
+_DEFAULT_PATH = data_paths.data_path("game_records.json")
+# 再編成でモジュールが1階層深くなった際に保存先がずれていた期間の旧保存先
+# (core/data/game_records.json)。移行読み取り専用で、書き込みは行わない。
+_STRAY_PATH = data_paths.stray_path(__file__, "game_records.json")
 
 
 def default_path() -> Path:
@@ -210,10 +215,7 @@ class GameRecordsStore:
         empty = {"flash": {}, "guess": {}, "sweeper": {}, "wordle_daily": {},
                  "highlow": {}, "g2048": {}, "sudoku": {}, "nonogram": {}, "twochoice": {},
                  "justone": {}, "ito": {}, "hanabi": {}}
-        try:
-            raw = json.loads(self._path.read_text(encoding="utf-8"))
-        except Exception:
-            return empty
+        raw = self._read_raw()
         if not isinstance(raw, dict):
             return empty
         return {"flash": _clean_flash(raw.get("flash")), "guess": _clean_guess(raw.get("guess")),
@@ -227,6 +229,16 @@ class GameRecordsStore:
                 "justone": _clean_coop(raw.get("justone"), ("plays", "best_successes", "total_successes")),
                 "ito": _clean_coop(raw.get("ito"), ("plays", "clears")),
                 "hanabi": _clean_coop(raw.get("hanabi"), ("plays", "best_score", "total_score"))}
+
+    def _read_raw(self) -> Any:
+        # 既定パスのときだけ、旧保存先 (パスずれ期間の core/data/) から
+        # 移行読み取りする (旧パス主・正規パスはセクション×ユーザー単位
+        # で補完。ユーザー単位の記録は旧パス側が新しい完全な記録なので
+        # 丸ごと採用し、カウンタの合算はしない)。環境変数や明示パスで
+        # 保存先が指定されている場合は移行しない。
+        if self._path == _DEFAULT_PATH:
+            return data_paths.load_migrated(self._path, _STRAY_PATH, fill=True)
+        return data_paths.read_json(self._path)
 
     def flush(self) -> None:
         """現在の記録を JSON に書き出す（tmp 経由で原子的に差し替える）。"""
