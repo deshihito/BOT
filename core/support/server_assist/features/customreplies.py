@@ -22,7 +22,7 @@ COOLDOWN_SECONDS = 3
 FEATURE = Feature(
     key=KEY,
     label="カスタム返信",
-    description="決まった言葉に、Botが決まった返信をします。",
+    description="言葉に反応して、Botが返信・リアクション・ロール付与をします。",
     order=140,
     module_name=__name__,
 )
@@ -42,11 +42,16 @@ def _normalize(raw: Any) -> dict[str, Any] | None:
     if not trigger or not response:
         return None
     role_id = raw.get("role_id")
+    reaction = str(raw.get("reaction") or "").strip()
     return {
         "id": str(raw.get("id") or uuid.uuid4().hex[:8]),
         "trigger": trigger[:100],
         "response": response[:1500],
         "role_id": role_id if isinstance(role_id, int) and not isinstance(role_id, bool) else None,
+        # マッチ方式: "exact"（完全一致・既定）か "contains"（部分一致）。
+        "match": "contains" if raw.get("match") == "contains" else "exact",
+        # 任意のリアクション絵文字。形式の検証は Discord 側の反応成否に委ねる。
+        "reaction": reaction[:32] or None,
     }
 
 
@@ -57,7 +62,7 @@ def _trigger_key(value: str) -> str:
 def settings(guild_id: int) -> dict[str, Any]:
     raw = get_settings(guild_id, KEY)
     replies = []
-    seen_triggers: set[str] = set()
+    seen_triggers: set[tuple[str, str]] = set()
     for item in raw.get("replies") or []:
         normalized = _normalize(item)
         if normalized is None:
@@ -65,9 +70,12 @@ def settings(guild_id: int) -> dict[str, Any]:
         trigger_key = _trigger_key(normalized["trigger"])
         # 旧データや同時保存の競合で同じトリガーが残っていても、最初の
         # 1件だけを有効にして、どの返信が選ばれるか不定にならないようにする。
-        if trigger_key in seen_triggers:
+        # 重複判定は (トリガー, マッチ方式) 単位: 同じ言葉でも完全一致と
+        # 部分一致は別のルールとして共存できる。
+        dedupe_key = (trigger_key, normalized["match"])
+        if dedupe_key in seen_triggers:
             continue
-        seen_triggers.add(trigger_key)
+        seen_triggers.add(dedupe_key)
         replies.append(normalized)
     min_role_id = raw.get("min_role_id")
     return {
@@ -85,14 +93,37 @@ async def _save(guild_id: int, replies: list[dict[str, Any]]) -> None:
     await update_settings(guild_id, KEY, replies=replies[:MAX_REPLIES])
 
 
+# 部分一致のトリガーとして有効な最短の長さ（正規化後）。1文字の部分一致は
+# あらゆる発言に反応してしまうため対象にしない。
+MIN_CONTAINS_TRIGGER_LENGTH = 2
+
+
 def match_reply(replies: list[dict[str, Any]], content: str) -> dict[str, Any] | None:
     text = _trigger_key(content)
     if not text:
         return None
-    return next(
-        (reply for reply in replies if _trigger_key(reply["trigger"]) == text),
+    # 完全一致を先に評価し、無ければ部分一致（長いトリガー優先）で評価する。
+    exact = next(
+        (
+            reply
+            for reply in replies
+            if reply.get("match", "exact") == "exact"
+            and _trigger_key(reply["trigger"]) == text
+        ),
         None,
     )
+    if exact is not None:
+        return exact
+    contains = [
+        reply
+        for reply in replies
+        if reply.get("match") == "contains"
+        and len(_trigger_key(reply["trigger"])) >= MIN_CONTAINS_TRIGGER_LENGTH
+        and _trigger_key(reply["trigger"]) in text
+    ]
+    if not contains:
+        return None
+    return max(contains, key=lambda reply: len(_trigger_key(reply["trigger"])))
 
 
 def choose_response(response: str) -> str:
@@ -147,6 +178,22 @@ async def _grant_role(guild: Any, author: Any, role_id: Any) -> None:
         logger.debug("カスタム返信のロール付与に失敗しました: guild=%s", getattr(guild, "id", None))
 
 
+async def _add_reaction(message: Any, reaction: Any) -> None:
+    """ルールにリアクションが設定されていれば付与する (失敗しても返信は続行)。"""
+    if not reaction:
+        return
+    add_reaction = getattr(message, "add_reaction", None)
+    if not callable(add_reaction):
+        return
+    try:
+        await add_reaction(reaction)
+    except (discord.Forbidden, discord.HTTPException, AttributeError):
+        logger.debug(
+            "カスタム返信のリアクション付与に失敗しました: guild=%s",
+            getattr(getattr(message, "guild", None), "id", None),
+        )
+
+
 async def on_message(cog: Any, message: Any) -> None:
     guild = getattr(message, "guild", None)
     author = getattr(message, "author", None)
@@ -171,6 +218,7 @@ async def on_message(cog: Any, message: Any) -> None:
     _last_sent[key] = now
     response = format_template(choose_response(reply["response"]), author, guild)
     await _grant_role(guild, author, reply.get("role_id"))
+    await _add_reaction(message, reply.get("reaction"))
     try:
         await message.reply(
             response,
@@ -359,13 +407,97 @@ class CustomReplyToggleButton(discord.ui.Button):
         await view.reopen(interaction, f"カスタム返信を{'オン' if value else 'オフ'}にしました。")
 
 
+class CustomReplyMatchButton(discord.ui.Button):
+    """選択中の返信のマッチ方式（完全一致／部分一致）を切り替える。"""
+
+    def __init__(self):
+        super().__init__(label="マッチ切替", style=discord.ButtonStyle.secondary, row=4)
+
+    async def callback(self, interaction: discord.Interaction):
+        view: CustomReplySettingsView = self.view
+        if not view.can_manage(interaction):
+            return await interaction.response.send_message(
+                "この設定には「サーバーの管理」権限が必要です。", ephemeral=True,
+            )
+        reply = view.selected_reply()
+        if reply is None:
+            return await interaction.response.send_message("先に返信を選んでください。", ephemeral=True)
+        new_match = "exact" if reply.get("match") == "contains" else "contains"
+        replies = list(settings(view.guild_id)["replies"])
+        for item in replies:
+            if item.get("id") == view.selected_id:
+                item["match"] = new_match
+                break
+        else:
+            return await interaction.response.send_message("その返信は既にありません。", ephemeral=True)
+        await _save(view.guild_id, replies)
+        await view.reopen(
+            interaction,
+            f"マッチ方式を{'部分一致（含む）' if new_match == 'contains' else '完全一致'}にしました。",
+        )
+
+
+class CustomReplyReactionButton(discord.ui.Button):
+    """選択中の返信のリアクションを設定するモーダルを開く。"""
+
+    def __init__(self):
+        super().__init__(label="リアクション", style=discord.ButtonStyle.secondary, row=4)
+
+    async def callback(self, interaction: discord.Interaction):
+        view: CustomReplySettingsView = self.view
+        if not view.can_manage(interaction):
+            return await interaction.response.send_message(
+                "この設定には「サーバーの管理」権限が必要です。", ephemeral=True,
+            )
+        reply = view.selected_reply()
+        if reply is None:
+            return await interaction.response.send_message("先に返信を選んでください。", ephemeral=True)
+        return await interaction.response.send_modal(CustomReplyReactionModal(view, reply))
+
+
+class CustomReplyReactionModal(discord.ui.Modal):
+    def __init__(self, parent: "CustomReplySettingsView", reply: dict[str, Any]):
+        super().__init__(title="リアクションを設定")
+        self.parent_view = parent
+        self.reply = reply
+        self.reaction_input = discord.ui.TextInput(
+            label="付けるリアクション（絵文字・空欄で解除）",
+            default=str(reply.get("reaction") or ""),
+            max_length=32,
+            required=False,
+        )
+        self.add_item(self.reaction_input)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        if not self.parent_view.can_manage(interaction):
+            return await interaction.response.send_message(
+                "この設定には「サーバーの管理」権限が必要です。", ephemeral=True,
+            )
+        reaction = str(self.reaction_input.value or "").strip()[:32] or None
+        replies = list(settings(self.parent_view.guild_id)["replies"])
+        for item in replies:
+            if item.get("id") == self.reply.get("id"):
+                item["reaction"] = reaction
+                break
+        else:
+            return await interaction.response.send_message(
+                "この返信はすでに削除されています。", ephemeral=True,
+            )
+        await _save(self.parent_view.guild_id, replies)
+        self.parent_view.selected_id = self.reply.get("id")
+        await self.parent_view.reopen(
+            interaction,
+            f"リアクションを {reaction} にしました。" if reaction else "リアクションを解除しました。",
+        )
+
+
 class CustomReplyModal(discord.ui.Modal):
     def __init__(self, parent: "CustomReplySettingsView", reply: dict[str, str] | None = None):
         super().__init__(title="カスタム返信を編集" if reply else "カスタム返信を追加")
         self.parent_view = parent
         self.reply = reply
         self.trigger_input = discord.ui.TextInput(
-            label="反応する言葉（完全一致）",
+            label="反応する言葉",
             default=str((reply or {}).get("trigger") or "")[:100],
             max_length=100,
             required=True,
@@ -391,11 +523,15 @@ class CustomReplyModal(discord.ui.Modal):
             return await interaction.response.send_message("言葉と返信内容を入力してください。", ephemeral=True)
         replies = list(settings(self.parent_view.guild_id)["replies"])
         trigger_key = _trigger_key(trigger)
+        # 重複は (トリガー, マッチ方式) 単位。編集時は既存の方式を、追加時は
+        # 既定の完全一致を引き継ぐ。
+        own_match = (self.reply or {}).get("match", "exact")
         duplicate = next(
             (
                 item for item in replies
                 if item.get("id") != (self.reply or {}).get("id")
                 and _trigger_key(item.get("trigger", "")) == trigger_key
+                and item.get("match", "exact") == own_match
             ),
             None,
         )
@@ -423,6 +559,8 @@ class CustomReplyModal(discord.ui.Modal):
                 "trigger": trigger[:100],
                 "response": response[:1500],
                 "role_id": None,
+                "match": "exact",
+                "reaction": None,
             })
         await _save(self.parent_view.guild_id, replies)
         self.parent_view.selected_id = selected
@@ -444,6 +582,8 @@ class CustomReplySettingsView(AssistFeatureView):
         self.add_item(CustomReplyEditButton())
         self.add_item(CustomReplyDeleteButton())
         self.add_item(CustomReplyToggleButton())
+        self.add_item(CustomReplyMatchButton())
+        self.add_item(CustomReplyReactionButton())
 
     def selected_reply(self) -> dict[str, str] | None:
         if self.selected_id is None:
@@ -464,6 +604,10 @@ class CustomReplySettingsView(AssistFeatureView):
         for reply in self.settings["replies"]:
             mark = "▶ " if reply.get("id") == self.selected_id else ""
             suffix = f"（ロール付与: <@&{reply['role_id']}>）" if reply.get("role_id") else ""
+            if reply.get("match") == "contains":
+                suffix += "（部分一致）"
+            if reply.get("reaction"):
+                suffix += f"（リアクション: {reply['reaction']}）"
             lines.append(f"{mark}{reply['trigger']} → {reply['response'][:60]}{suffix}")
         min_role = self.settings.get("min_role_id")
         return discord.Embed(
