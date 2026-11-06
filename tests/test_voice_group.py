@@ -26,7 +26,7 @@ for _name, _value in {'BOT_API_BASE_URL': 'http://127.0.0.1:8787', 'BOT_API_KEY'
 import discord  # noqa: E402
 import numpy as np  # noqa: E402
 
-from core.voice import vosk_model  # noqa: E402
+from core.vc import vosk_model  # noqa: E402
 from core.legacy import Responder  # noqa: E402
 from cogs import (  # noqa: E402
     sio_globalVC, sio_karaoke, sio_music, sio_rec, sio_saito, sio_transcription, sio_voice, sio_voicechanger,

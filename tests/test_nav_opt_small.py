@@ -20,7 +20,7 @@ class VoiceGuidanceTest(unittest.TestCase):
             ("cogs", "sio_voicechanger.py"),
             ("cogs", "sio_karaoke.py"),
             ("cogs", "sio_transcription.py"),
-            ("core", "voice", "hub.py"),
+            ("core", "vc", "hub.py"),
         ):
             src = read(*path)
             self.assertNotIn("/voice のパネルから", src, path)
@@ -66,7 +66,7 @@ class RootPanelTimeoutTest(unittest.TestCase):
     def test_timeouts_unified(self):
         self.assertIn("timeout=600", read("core", "general", "panel.py"))
         self.assertIn("timeout=600", read("core", "support", "panel.py"))
-        self.assertIn("timeout=600", read("core", "voice", "hub.py"))
+        self.assertIn("timeout=600", read("core", "vc", "hub.py"))
 
 
 class ContextMenuNameTest(unittest.TestCase):

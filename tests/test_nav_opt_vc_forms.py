@@ -51,7 +51,7 @@ class VcFormRegistryTest(unittest.TestCase):
 
 class HistoryExpansionTest(unittest.TestCase):
     def test_voice_panel_with_history(self):
-        from core.voice.hub import VoiceHistorySelect, VoicePanelView
+        from core.vc.hub import VoiceHistorySelect, VoicePanelView
 
         specs = [type("S", (), {"label": "VC参加", "value": "join"})()]
         view = VoicePanelView(None, history_specs=specs)
@@ -60,7 +60,7 @@ class HistoryExpansionTest(unittest.TestCase):
         self.assertEqual(history[0].custom_id, "panel:vc:history")
 
     def test_voice_panel_without_history_unchanged(self):
-        from core.voice.hub import VoiceHistorySelect, VoicePanelView
+        from core.vc.hub import VoiceHistorySelect, VoicePanelView
 
         view = VoicePanelView(None)
         self.assertFalse(any(isinstance(c, VoiceHistorySelect) for c in view.children))

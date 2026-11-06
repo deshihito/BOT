@@ -2,7 +2,7 @@
 ボイスチェンジャー・ランダム通話・グローバルVC・VOICEVOX読み上げ・音声トリガー）の入口。
 
 それぞれの処理は各機能の cog にある実装関数（``_xxx_impl``）を呼ぶだけ。
-VC を誰が使っているかは core/voice/voice_session.py が持つ。
+VC を誰が使っているかは core/vc/voice_session.py が持つ。
 """
 from __future__ import annotations
 import asyncio
@@ -40,13 +40,13 @@ except Exception:  # ImportError だけでなく共有ライブラリ不整合 (
     )
 from core import action_usage, usage_stats
 from core.legacy import Responder
-from core.voice.voice_session import VoiceBusy, feature_label, get_manager, stop_hint
-from core.voice.voice_media import add_audio_source, remove_audio_source
+from core.vc.voice_session import VoiceBusy, feature_label, get_manager, stop_hint
+from core.vc.voice_media import add_audio_source, remove_audio_source
 from core.panel_v2 import as_panel_v2, edit_panel_v2
-from core.voice.common import CONNECTION_ACTIONS, STUDIO_FEATURES, STUDIO_ACTIONS, EFFECT_ACTIONS, COMMUNITY_NETWORKS, COMMUNITY_ACTIONS, VOICE_GENRES, VOICE_ACTIONS_BY_GENRE, GVC_ROOM_FORMS, GVC_ROOM_ACTIONS, LAZY_EXTENSIONS, COGS, format_elapsed  # noqa: F401
-from core.voice.hub import logger, VoiceHub, VoiceGenreSelect, VoiceActionSelect, VoicePanelView, GlobalRoomModal, GvcRoomModal  # noqa: F401
-from core.voice.trigger import logger, VOICE_TRIGGER_DIR, VOICE_TRIGGER_MAX_SECONDS, VOICE_TRIGGER_MAX_PER_GUILD, VOICE_TRIGGER_SAMPLE_RATE, VOICE_TRIGGER_BANDWIDTH, _ENCODEC_MODEL, VoiceTriggerError, _get_encodec_model, _trim_to_wav, _encodec_compress, _encodec_decompress, VoiceTriggerCog, _AUDIO_EXTS, _scan_recent_audios, VoiceTriggerPickAudioSelect, VoiceTriggerWordModal, VoiceTriggerRegisterView, VoiceTriggerDeleteSelect, VoiceTriggerManageView  # noqa: F401
-from core.voice.tts import logger, logger, TTS_API_BASE, TTS_API_KEY, TTS_DEFAULT_SPEAKER, TTS_MAX_CHARS, TTS_CHUNK_CHARS, TTS_QUEUE_MAX, TTS_PITCH_RANGE, TTS_SPEED_RANGE, TTS_IGNORE_PREFIXES, TTS_SETTINGS_PATH, TTSError, TTSSettings, _tempo_filters, build_tts_filters, split_tts_text, clean_message_text, TTSCog, TTSSettingsModal, TTSSayModal  # noqa: F401
+from core.vc.common import CONNECTION_ACTIONS, STUDIO_FEATURES, STUDIO_ACTIONS, EFFECT_ACTIONS, COMMUNITY_NETWORKS, COMMUNITY_ACTIONS, VOICE_GENRES, VOICE_ACTIONS_BY_GENRE, GVC_ROOM_FORMS, GVC_ROOM_ACTIONS, LAZY_EXTENSIONS, COGS, format_elapsed  # noqa: F401
+from core.vc.hub import logger, VoiceHub, VoiceGenreSelect, VoiceActionSelect, VoicePanelView, GlobalRoomModal, GvcRoomModal  # noqa: F401
+from core.vc.trigger import logger, VOICE_TRIGGER_DIR, VOICE_TRIGGER_MAX_SECONDS, VOICE_TRIGGER_MAX_PER_GUILD, VOICE_TRIGGER_SAMPLE_RATE, VOICE_TRIGGER_BANDWIDTH, _ENCODEC_MODEL, VoiceTriggerError, _get_encodec_model, _trim_to_wav, _encodec_compress, _encodec_decompress, VoiceTriggerCog, _AUDIO_EXTS, _scan_recent_audios, VoiceTriggerPickAudioSelect, VoiceTriggerWordModal, VoiceTriggerRegisterView, VoiceTriggerDeleteSelect, VoiceTriggerManageView  # noqa: F401
+from core.vc.tts import logger, logger, TTS_API_BASE, TTS_API_KEY, TTS_DEFAULT_SPEAKER, TTS_MAX_CHARS, TTS_CHUNK_CHARS, TTS_QUEUE_MAX, TTS_PITCH_RANGE, TTS_SPEED_RANGE, TTS_IGNORE_PREFIXES, TTS_SETTINGS_PATH, TTSError, TTSSettings, _tempo_filters, build_tts_filters, split_tts_text, clean_message_text, TTSCog, TTSSettingsModal, TTSSayModal  # noqa: F401
 
 logger = logging.getLogger("cogs.sio_voice")
 

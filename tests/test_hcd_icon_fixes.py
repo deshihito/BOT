@@ -29,16 +29,16 @@ CONVERTED_FILES = [
     "cogs/sio_transcription.py",
     "cogs/sio_voicechanger.py",
     "core/messages.py",
-    "core/voice/music/connection.py",
-    "core/voice/globalvc/chat.py",
-    "core/voice/globalvc/manage.py",
+    "core/vc/music/connection.py",
+    "core/vc/globalvc/chat.py",
+    "core/vc/globalvc/manage.py",
     "core/support/quest.py",
     "core/support/sns.py",
     "core/support/voice_trigger.py",
-    "core/voice/hub.py",
-    "core/voice/trigger.py",
-    "core/voice/tts.py",
-    "core/voice/voice_session.py",
+    "core/vc/hub.py",
+    "core/vc/trigger.py",
+    "core/vc/tts.py",
+    "core/vc/voice_session.py",
 ]
 
 #: 変換後も ⚠️ が残ってよい行（行内のキーワードで判定）

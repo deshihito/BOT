@@ -1,4 +1,4 @@
-"""VC の持ち主管理（core/voice/voice_session.py）と、各ボイス機能の乗り換えのテスト。Discord には接続しない。
+"""VC の持ち主管理（core/vc/voice_session.py）と、各ボイス機能の乗り換えのテスト。Discord には接続しない。
 
 偽の VoiceClient / ボイスチャンネル / サーバーを使って、
 - 別の機能が使用中なら追い出さずに断ること（バグ10）
@@ -26,7 +26,7 @@ for _name, _value in {'BOT_API_BASE_URL': 'http://127.0.0.1:8787', 'BOT_API_KEY'
 
 import discord  # noqa: E402
 
-from core.voice import voice_session as vs  # noqa: E402
+from core.vc import voice_session as vs  # noqa: E402
 from core.legacy import Responder  # noqa: E402
 from cogs import sio_globalVC as gvc  # noqa: E402
 from cogs import sio_rec as rec  # noqa: E402
@@ -302,7 +302,7 @@ class ManagerTest(unittest.IsolatedAsyncioTestCase):
         def broken(reason):
             raise RuntimeError('boom')
         vc = await self.manager.acquire(w.guild, w.voice, 'changer', w.alice, cleanup=broken)
-        with self.assertLogs('core.voice.voice_session', level='ERROR'):
+        with self.assertLogs('core.vc.voice_session', level='ERROR'):
             await self.manager.release(w.guild.id)
         self.assertFalse(vc.is_connected())
 
