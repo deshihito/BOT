@@ -1,14 +1,15 @@
 # -*- coding: utf-8 -*-
 """BOT fixer の設定パネル。元は /support「モデレーション」から開く。
 
-パネル内に設定エリアを持つ構成で、PR-A では ①AGOコマンド制限
-（core/command_control.py）のエリアだけを置く。他ボット制限のエリアは
-PR-B でこのパネルに追加する。
+パネル内に2つの設定エリアを持つ:
+- ①AGOコマンド制限（core/command_control.py）
+- ②他ボット制限（core/bot_control.py）
 """
 from __future__ import annotations
 
 from .common import *
-from core import action_registry, command_control
+from core import action_registry, bot_control, command_control
+from core.bot_control import BOT_CONTROL_SECTION
 from core.command_control import (
     COMMAND_CONTROL_SECTION,
     MODE_ALLOW,
@@ -160,13 +161,135 @@ class _RateModal(discord.ui.Modal, title="レート制限"):
         await parent.save(interaction, f"{self.action_label} にレート制限（{count}回／{minutes}分）を設定しました。")
 
 
+class _AreaButton(discord.ui.Button):
+    def __init__(self, parent: "BotFixerPanel", area: str, label: str):
+        self.parent_view = parent
+        active = parent.area == area
+        super().__init__(
+            label=f"{label}{'（現在）' if active else ''}",
+            style=discord.ButtonStyle.primary if active else discord.ButtonStyle.secondary,
+            disabled=active,
+        )
+        self.area = area
+
+    async def callback(self, interaction: discord.Interaction):
+        self.parent_view.area = self.area
+        await self.parent_view.rebuild(interaction)
+
+
+class _BotUserSelect(discord.ui.UserSelect):
+    def __init__(self, parent: "BotFixerPanel"):
+        self.parent_view = parent
+        super().__init__(placeholder="制限するボットを選択", min_values=1, max_values=1)
+
+    async def callback(self, interaction: discord.Interaction):
+        parent = self.parent_view
+        user = self.values[0]
+        if not getattr(user, "bot", False):
+            return await parent.fail(interaction, "ボットのアカウントを選択してください。")
+        self_bot = getattr(interaction.client, "user", None)
+        if self_bot is not None and user.id == self_bot.id:
+            return await parent.fail(interaction, "AGO BOT 自身は対象にできません。")
+        parent.bot_target = user.id
+        await parent.rebuild(interaction)
+
+
+class _BotChannelSelect(discord.ui.ChannelSelect):
+    def __init__(self, parent: "BotFixerPanel"):
+        self.parent_view = parent
+        entry = parent.bot_settings.get(str(parent.bot_target)) or {}
+        defaults = [
+            discord.Object(id=channel_id)
+            for channel_id in entry.get("allowed_channel_ids", [])
+        ]
+        super().__init__(
+            placeholder="発言を許可するチャンネル（1件以上）",
+            channel_types=[discord.ChannelType.text],
+            min_values=1, max_values=25, default_values=defaults,
+        )
+
+    async def callback(self, interaction: discord.Interaction):
+        parent = self.parent_view
+        channel_ids = [channel.id for channel in self.values]
+        entry = dict(parent.bot_settings.get(str(parent.bot_target)) or {})
+        entry["allowed_channel_ids"] = channel_ids
+        entry.setdefault("rate", None)
+        parent.bot_settings[str(parent.bot_target)] = entry
+        await parent.save_bot(interaction, "許可チャンネルを設定しました。", parent.bot_target, entry)
+
+
+class _BotRateButton(discord.ui.Button):
+    def __init__(self, parent: "BotFixerPanel"):
+        self.parent_view = parent
+        super().__init__(label="レート制限を設定", style=discord.ButtonStyle.secondary)
+
+    async def callback(self, interaction: discord.Interaction):
+        parent = self.parent_view
+        if str(parent.bot_target) not in parent.bot_settings:
+            return await parent.fail(interaction, "先に許可チャンネルを設定してください。")
+        await interaction.response.send_modal(_BotRateModal(parent))
+
+
+class _BotRemoveButton(discord.ui.Button):
+    def __init__(self, parent: "BotFixerPanel"):
+        self.parent_view = parent
+        super().__init__(label="対象から外す", style=discord.ButtonStyle.danger)
+
+    async def callback(self, interaction: discord.Interaction):
+        parent = self.parent_view
+        target = parent.bot_target
+        parent.bot_settings.pop(str(target), None)
+        parent.bot_target = None
+        await parent.save_bot(interaction, "ボット制限の対象から外しました。", target, None)
+
+
+class _BotRateModal(discord.ui.Modal, title="ボットのレート制限"):
+    count = discord.ui.TextInput(label="回数（空欄で解除）", required=False, max_length=5)
+    minutes = discord.ui.TextInput(label="期間（分）", required=False, max_length=6)
+
+    def __init__(self, parent: "BotFixerPanel"):
+        super().__init__()
+        self.parent_view = parent
+        entry = parent.bot_settings.get(str(parent.bot_target)) or {}
+        rule = entry.get("rate")
+        if rule:
+            self.count.default = str(rule["count"])
+            self.minutes.default = str(max(1, rule["window_seconds"] // 60))
+
+    async def on_submit(self, interaction: discord.Interaction):
+        parent = self.parent_view
+        entry = dict(parent.bot_settings.get(str(parent.bot_target)) or {})
+        raw_count = (self.count.value or "").strip()
+        raw_minutes = (self.minutes.value or "").strip()
+        if not raw_count and not raw_minutes:
+            entry["rate"] = None
+            parent.bot_settings[str(parent.bot_target)] = entry
+            return await parent.save_bot(interaction, "レート制限を解除しました。", parent.bot_target, entry)
+        try:
+            count = int(raw_count)
+            minutes = int(raw_minutes)
+        except ValueError:
+            return await parent.fail(interaction, "回数と期間（分）は数字で入力してください。")
+        window = minutes * 60
+        if not (1 <= count <= command_control.RATE_MAX_COUNT) or not (60 <= window <= command_control.RATE_MAX_WINDOW_SECONDS):
+            return await parent.fail(interaction, "回数は1〜1000、期間は1〜10080分で入力してください。")
+        entry["rate"] = {"count": count, "window_seconds": window}
+        parent.bot_settings[str(parent.bot_target)] = entry
+        await parent.save_bot(
+            interaction, f"レート制限（{count}回／{minutes}分）を設定しました。",
+            parent.bot_target, entry)
+
+
 class BotFixerPanel(discord.ui.LayoutView):
     """BOT fixer の設定パネル（Components V2・サーバー管理権限）。"""
 
-    def __init__(self, cog: "SupportCog", settings: dict, notice: str | None = None):
+    def __init__(self, cog: "SupportCog", settings: dict, bot_settings: dict | None = None,
+                 notice: str | None = None):
         super().__init__(timeout=300)
         self.cog = cog
         self.settings = settings
+        self.bot_settings = bot_settings or {}
+        self.bot_target: int | None = None
         self.notice = notice
         self.area = "command"
         self.root = "general"
@@ -215,13 +338,26 @@ class BotFixerPanel(discord.ui.LayoutView):
         self.page = min(self.page, pages - 1)
         return specs[self.page * PAGE_SIZE:(self.page + 1) * PAGE_SIZE], pages
 
+    def _area_row(self) -> discord.ui.ActionRow:
+        return discord.ui.ActionRow(
+            _AreaButton(self, "command", "コマンド制限"),
+            _AreaButton(self, "bot", "他ボット制限"),
+        )
+
     def _build(self):
+        if self.area == "bot":
+            self._build_bot()
+        else:
+            self._build_command()
+
+    def _build_command(self):
         self.clear_items()
         head = "## BOT fixer\n### コマンド制限"
         if self.notice:
             head = f"{self.notice}\n\n{head}"
         page_specs, pages = self._page_specs()
         rows: list[discord.ui.ActionRow] = [
+            self._area_row(),
             discord.ui.ActionRow(*[_ModeButton(self, mode) for mode in MODES]),
             discord.ui.ActionRow(_RootSelect(self)),
             discord.ui.ActionRow(_ActionSelect(self, page_specs)),
@@ -240,6 +376,67 @@ class BotFixerPanel(discord.ui.LayoutView):
                 accent_colour=0xE74C3C,
             )
         )
+
+    def _bot_status_text(self) -> str:
+        if not self.bot_settings:
+            lines = ["対象のボットは登録されていません。"]
+        else:
+            lines = []
+            bot = getattr(self.cog, "bot", None) if self.cog else None
+            for bot_id, entry in self.bot_settings.items():
+                user = bot.get_user(int(bot_id)) if bot is not None else None
+                name = getattr(user, "name", None) or f"ID: {bot_id}"
+                channels = "、".join(f"<#{cid}>" for cid in entry["allowed_channel_ids"])
+                rate = entry.get("rate")
+                rate_text = f"{rate['count']}回/{rate['window_seconds'] // 60}分" if rate else "なし"
+                lines.append(f"**{name}** 許可: {channels}／レート: {rate_text}")
+        if self.bot_target is not None:
+            lines.append(f"\n編集中: <@{self.bot_target}>")
+        else:
+            lines.append("\n下のセレクトでボットを選ぶと、そのボットの許可チャンネルとレート制限を編集できます。")
+        return "\n".join(lines)
+
+    def _build_bot(self):
+        self.clear_items()
+        head = "## BOT fixer\n### 他ボット制限"
+        if self.notice:
+            head = f"{self.notice}\n\n{head}"
+        rows: list[discord.ui.ActionRow] = [
+            self._area_row(),
+            discord.ui.ActionRow(_BotUserSelect(self)),
+        ]
+        if self.bot_target is not None:
+            rows.append(discord.ui.ActionRow(_BotChannelSelect(self)))
+            buttons = [_BotRateButton(self)]
+            if str(self.bot_target) in self.bot_settings:
+                buttons.append(_BotRemoveButton(self))
+            rows.append(discord.ui.ActionRow(*buttons))
+        self.add_item(
+            discord.ui.Container(
+                discord.ui.TextDisplay(head),
+                discord.ui.TextDisplay(self._bot_status_text()),
+                discord.ui.Separator(),
+                *rows,
+                accent_colour=0xE74C3C,
+            )
+        )
+
+    async def save_bot(self, interaction: discord.Interaction, notice: str,
+                       bot_id: int, entry: dict | None):
+        await interaction.response.defer()
+        try:
+            await guild_settings.get_store().update(
+                interaction.guild_id, BOT_CONTROL_SECTION, **{str(bot_id): entry})
+        except Exception:
+            logger.exception("BOT fixer（ボット制限）設定の更新に失敗しました")
+            return await interaction.followup.send(
+                "設定の更新に失敗しました。時間をおいて再度お試しください。解決しない場合はBotの運営に連絡してください。",
+                ephemeral=True,
+            )
+        store = guild_settings.get_store()
+        await store.ensure_loaded()
+        self.bot_settings = bot_control.get_settings(store, interaction.guild_id)
+        await self.rebuild(interaction, notice)
 
     async def rebuild(self, interaction: discord.Interaction, notice: str | None = None):
         if notice is not None:
@@ -283,7 +480,16 @@ class BotFixerSupportMixin:
         store = guild_settings.get_store()
         await store.ensure_loaded()
         settings = command_control.get_settings(store, interaction.guild_id)
+        bot_settings = bot_control.get_settings(store, interaction.guild_id)
         await interaction.response.send_message(
-            view=BotFixerPanel(self, settings),
+            view=BotFixerPanel(self, settings, bot_settings),
             ephemeral=True,
         )
+
+    @commands.Cog.listener()
+    async def on_message_bot_control(self, message: discord.Message):
+        # BOT fixer の他ボット制限: 対象ボットの許可チャンネル外／レート超過の
+        # 発言を削除する。失敗しても他の on_message 処理は止めない
+        # （enforce_message 側で例外を握る）。
+        self_bot = getattr(self.bot, "user", None)
+        await bot_control.enforce_message(getattr(self_bot, "id", None), message)
