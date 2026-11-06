@@ -25,7 +25,7 @@ class MiqPurificationTest(unittest.TestCase):
     def test_settings_embed_explains_creation(self):
         import types
 
-        from core.general.miq_ui import MiqSettingsView
+        from core.general.miq.miq_ui import MiqSettingsView
 
         view = MiqSettingsView(types.SimpleNamespace(), 123)
         embed = view.embed()
