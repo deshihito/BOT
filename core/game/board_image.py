@@ -352,3 +352,41 @@ def render_nonogram(row_clues, col_clues, grid, *, selected=None, cell: int = 44
     buf = io.BytesIO()
     img.save(buf, format="PNG")
     return buf.getvalue()
+
+
+def render_yotsuba(words, hints=None, *, title: str | None = None) -> bytes:
+    """よつば合わせのヒント盤を描く。
+
+    words は辺の順（上/右/下/左）の4単語（None は未配置で「？」）。
+    hints は角の順（右上/右下/左下/左上）の4ヒント（None は空欄）。
+    中央の緑の盤の四辺に単語、四隅にヒントチップを置く。
+    """
+    size = 480
+    title_h = 36 if title else 0
+    img = Image.new("RGB", (size, size + title_h), BG)
+    draw = ImageDraw.Draw(img)
+    if title:
+        draw.text((PAD, 6), title, fill=FG, font=_font(20))
+    oy = title_h
+    # 盤本体
+    draw.rounded_rectangle([88, oy + 88, 392, oy + 392], radius=28, fill=(46, 125, 50))
+    draw.rounded_rectangle([88, oy + 88, 392, oy + 392], radius=28, outline=(129, 199, 132), width=3)
+    cx, cy = 240, oy + 240
+    draw.ellipse([cx - 30, cy - 30, cx + 30, cy + 30], fill=(27, 94, 32))
+    word_font = _font(27)
+    positions = [(240, oy + 118), (352, oy + 240), (240, oy + 362), (128, oy + 240)]
+    for (x, y), word in zip(positions, words):
+        _centered(draw, x, y, str(word) if word else "？", word_font, (255, 255, 255))
+    hint_font = _font(20)
+    corners = [(398, oy + 42), (398, oy + 438), (82, oy + 438), (82, oy + 42)]
+    pair_labels = ["右上", "右下", "左下", "左上"]
+    for i, (x, y) in enumerate(corners):
+        hint = (hints[i] if hints and i < len(hints) else None)
+        text = f"{pair_labels[i]}: {hint}" if hint else f"{pair_labels[i]}: ─"
+        bbox = draw.textbbox((0, 0), text, font=hint_font)
+        w = bbox[2] - bbox[0] + 20
+        draw.rounded_rectangle([x - w / 2, y - 18, x + w / 2, y + 18], radius=10, fill=(255, 193, 7))
+        _centered(draw, x, y, text, hint_font, (20, 20, 20))
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    return buf.getvalue()
