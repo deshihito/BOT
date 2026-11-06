@@ -2,7 +2,8 @@
 
 - 設定の保存/読込と既定（未設定では何もしない）
 - 判定ロジック（許可チャンネル外／レート窓／許可チャンネル空のエントリは成立しない）
-- 執行の分離（AGO自身・Webhook・人間・DM は対象外、削除失敗でも例外を出さない）
+- 執行の分離（AGO自身・任意Webhook・人間・DM は対象外、削除失敗でも例外を出さない）
+- スラッシュコマンド応答（対象ボット自身のアプリ Webhook 投稿）は執行対象
 - リスナー配線（執行リスナーが on_message イベントに登録されていること）
 Discord には接続しない。
 """
@@ -136,11 +137,13 @@ class PlanTest(unittest.TestCase):
 
 class FakeMessage:
     def __init__(self, *, guild_id=42, channel_id=99, author_id=TARGET_ID,
-                 author_bot=True, webhook_id=None, fail_delete=False):
+                 author_bot=True, webhook_id=None, application_id=None,
+                 fail_delete=False):
         self.guild = types.SimpleNamespace(id=guild_id) if guild_id is not None else None
         self.channel = types.SimpleNamespace(id=channel_id)
         self.author = types.SimpleNamespace(id=author_id, bot=author_bot)
         self.webhook_id = webhook_id
+        self.application_id = application_id
         self.fail_delete = fail_delete
         self.deleted = False
 
@@ -176,8 +179,62 @@ class EnforceTest(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(message.deleted)
 
     async def test_webhook_excluded(self):
+        # application_id の無い Webhook 投稿（チャンネル Webhook 等）は対象外。
         message = FakeMessage(channel_id=99, webhook_id=555)
         self.assertFalse(await enforce_message(SELF_ID, message, store=self.store))
+
+    async def test_slash_response_deleted_outside_allowed_channel(self):
+        # スラッシュコマンド応答を模したメッセージ: author=対象ボット、
+        # webhook_id / application_id にそのボットのアプリIDが付く。
+        # webhook_id 付きでも対象ボット自身の発言として執行対象になる。
+        message = FakeMessage(channel_id=99, webhook_id=TARGET_ID,
+                              application_id=TARGET_ID)
+        self.assertTrue(await enforce_message(SELF_ID, message, store=self.store))
+        self.assertTrue(message.deleted)
+
+    async def test_slash_response_kept_inside_allowed_channel(self):
+        message = FakeMessage(channel_id=10, webhook_id=TARGET_ID,
+                              application_id=TARGET_ID)
+        self.assertFalse(await enforce_message(SELF_ID, message, store=self.store))
+        self.assertFalse(message.deleted)
+
+    async def test_slash_response_rate_limit_one_per_minute(self):
+        # レート 1件/1分はスラッシュ応答にも効く: 2件目が削除される。
+        await self.store.update(42, BOT_CONTROL_SECTION, **{
+            str(TARGET_ID): {"allowed_channel_ids": [10],
+                             "rate": {"count": 1, "window_seconds": 60}},
+        })
+        bot_control._counter.reset()
+        first = FakeMessage(channel_id=10, webhook_id=TARGET_ID,
+                            application_id=TARGET_ID)
+        self.assertFalse(await enforce_message(SELF_ID, first, store=self.store))
+        self.assertFalse(first.deleted)
+        second = FakeMessage(channel_id=10, webhook_id=TARGET_ID,
+                             application_id=TARGET_ID)
+        self.assertTrue(await enforce_message(SELF_ID, second, store=self.store))
+        self.assertTrue(second.deleted)
+
+    async def test_webhook_nominee_not_matching_application_excluded(self):
+        # 投稿者名義と application_id が一致しない Webhook 投稿は、たとえ
+        # 名義の ID が設定に登録されていても対象外（任意 Webhook の投稿）。
+        hook_id = 5555
+        await self.store.update(42, BOT_CONTROL_SECTION, **{
+            str(hook_id): {"allowed_channel_ids": [10], "rate": None},
+        })
+        message = FakeMessage(author_id=hook_id, channel_id=99,
+                              webhook_id=hook_id, application_id=None)
+        self.assertFalse(await enforce_message(SELF_ID, message, store=self.store))
+        self.assertFalse(message.deleted)
+
+    async def test_self_slash_response_never_targeted(self):
+        # AGO 自身のスラッシュ応答（application_id 付き）も常に対象外。
+        await self.store.update(42, BOT_CONTROL_SECTION, **{
+            str(SELF_ID): {"allowed_channel_ids": [10], "rate": None},
+        })
+        message = FakeMessage(author_id=SELF_ID, channel_id=99,
+                              webhook_id=SELF_ID, application_id=SELF_ID)
+        self.assertFalse(await enforce_message(SELF_ID, message, store=self.store))
+        self.assertFalse(message.deleted)
 
     async def test_human_author_excluded(self):
         message = FakeMessage(channel_id=99, author_bot=False)
