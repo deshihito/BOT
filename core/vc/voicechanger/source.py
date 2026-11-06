@@ -7,11 +7,11 @@ import discord
 import discord.opus
 from discord.ext import commands
 from discord.ext import voice_recv
-from core.legacy import Responder
+from core.support.legacy import Responder
 from core.vc import vc_feature_restore
-from core.messages import VOICE_NOT_JOINED, voice_connection_failed
+from core.support.messages import VOICE_NOT_JOINED, voice_connection_failed
 from core.vc.voice_session import VoiceBusy, get_manager
-from core.emojis import CLOCK, FAILED, MUSIC, PAUSE, THU
+from core.support.emojis import CLOCK, FAILED, MUSIC, PAUSE, THU
 from functools import partial as _partial
 
 from core.vc.voicechanger.common import *  # noqa: F401,F403 - shared constants/helpers
