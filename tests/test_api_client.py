@@ -2,7 +2,7 @@ import json
 import unittest
 from unittest.mock import Mock, patch
 
-from core.api_client import APIClient, APIError, create_client_from_env
+from core.support.api_client import APIClient, APIError, create_client_from_env
 
 
 class APIClientTest(unittest.TestCase):
@@ -11,7 +11,7 @@ class APIClientTest(unittest.TestCase):
         self.response = Mock(ok=True, status_code=200)
         self.response.json.return_value = {"data": [{"balance": 10}]}
 
-    @patch("core.api_client.requests.post")
+    @patch("core.support.api_client.requests.post")
     def test_select_filters_and_range(self, post):
         post.return_value = self.response
         result = self.client.table("users").select("balance").eq("user_id", "123").range(10, 19).execute()
@@ -26,7 +26,7 @@ class APIClientTest(unittest.TestCase):
         self.assertEqual((body["offset"], body["limit"]), (10, 10))
         self.assertEqual(kwargs["timeout"], 3)
 
-    @patch("core.api_client.requests.post")
+    @patch("core.support.api_client.requests.post")
     def test_select_after_mutation_preserves_mutation_action(self, post):
         post.return_value = self.response
         self.client.table("users").update({"balance": 15}).eq("user_id", "123").select("balance").execute()
@@ -34,7 +34,7 @@ class APIClientTest(unittest.TestCase):
         self.assertEqual(body["action"], "update")
         self.assertEqual(body["columns"], "balance")
 
-    @patch("core.api_client.requests.post")
+    @patch("core.support.api_client.requests.post")
     def test_upsert_and_rpc(self, post):
         post.return_value = self.response
         self.client.table("bot_kv").upsert(
@@ -50,7 +50,7 @@ class APIClientTest(unittest.TestCase):
         self.assertEqual(post.call_args.args[0], "http://127.0.0.1:8787/v1/rpc")
         self.assertEqual(json.loads(post.call_args.kwargs["data"])["name"], "transfer_coins")
 
-    @patch("core.api_client.requests.post")
+    @patch("core.support.api_client.requests.post")
     def test_rpc_scalar_is_preserved(self, post):
         response = Mock(ok=True, status_code=200)
         response.json.return_value = {"data": False}
@@ -58,7 +58,7 @@ class APIClientTest(unittest.TestCase):
         result = self.client.rpc("dungeon_apply_coins", {"p_user_id": "1", "p_delta": -1}).execute()
         self.assertIs(result.data, False)
 
-    @patch("core.api_client.requests.post")
+    @patch("core.support.api_client.requests.post")
     def test_server_error_becomes_api_error_without_leaking_key(self, post):
         post.return_value = Mock(ok=False, status_code=401)
         post.return_value.json.return_value = {"detail": {"code": "UNAUTHORIZED", "message": "Invalid API credentials"}}
