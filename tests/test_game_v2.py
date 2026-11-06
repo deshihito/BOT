@@ -61,7 +61,7 @@ class Round4RegistrationTest(unittest.TestCase):
         self.assertEqual(len(game_select_pages("party")), 1)
 
     def test_ranked_games_known(self):
-        from core import party_ranking
+        from core.game import party_ranking
         for game in ("insider", "hoshi", "liequiz", "gauge", "ruins"):
             self.assertIn(game, party_ranking.KNOWN_GAMES)
 
