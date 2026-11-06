@@ -43,7 +43,7 @@ class ChatMixin:
         room = ROOMS.get(room_name)
         if room is None:
             return await r.send(
-                f"<:failed:1490986584676368535> ルーム **{room_name}** は存在しません。"
+                f"{FAILED} ルーム **{room_name}** は存在しません。"
                 "先に `/vc` →「グローバルVCルーム」→「ルーム作成」で作成してください。",
                 ephemeral=True,
             )
@@ -75,7 +75,7 @@ class ChatMixin:
             )
         except Exception as e:
             return await r.send(
-                f"<:failed:1490986584676368535> Webhook の作成に失敗しました: `{e}`", ephemeral=True
+                f"{FAILED} Webhook の作成に失敗しました: `{e}`", ephemeral=True
             )
 
         link = TextLink(guild_id=r.guild.id, channel_id=channel.id, webhook=webhook)

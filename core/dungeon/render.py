@@ -20,6 +20,7 @@ from PIL import Image, ImageDraw, ImageEnhance
 from zoneinfo import ZoneInfo
 from core.api_client import APIError
 from core.api_retry import run_with_retry
+from core.emojis import FAILED
 
 from core.dungeon.common import *  # noqa: F401,F403 - shared constants/state
 from core.dungeon.common import ASSET_CONFIG, D2_MAP_H, D2_MAP_W, DUNGEON_IMG_CHANNEL_ID, D_BASE, D_CHEST, D_EVENT, D_FLOOR, D_MINE, D_REST, D_SHOP, D_SHRINE, D_SIGHT_R, D_STAIRS, D_TRAP, D_VIEW_R, D_WALL, TILE, TILE_COLORS  # noqa: F401
@@ -45,7 +46,7 @@ def load_all_assets():
                 _ASSET_CACHE[(biome, tid)] = img
                 print(f"✓ {fname} を読み込みました")
             except Exception as e:
-                print(f"<:failed:1490986584676368535> {fname} ロード失敗: {e}")
+                print(f"{FAILED} {fname} ロード失敗: {e}")
 
 def _draw_tile(draw, img, x, y, cell, biome, is_player=False, is_fog=False):
     """タイルを描画"""

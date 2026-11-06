@@ -20,6 +20,7 @@ from PIL import Image, ImageDraw, ImageEnhance
 from zoneinfo import ZoneInfo
 from core.api_client import APIError
 from core.api_retry import run_with_retry
+from core.emojis import B_
 
 from core.dungeon.common import *  # noqa: F401,F403 - shared constants/state
 from core.dungeon.common import CLEF_PLANS, D2_MAP_H, D2_MAP_W, D_BIOMES, D_FLOOR, D_ROOM_ROLE_NAMES, D_WALK_MAX_STEPS, D_WALK_SPECIAL_CELLS, D_WALL, JST, _DIRECTIONS, _DIRECTION_LABELS, d_encode_visited, dg_instances, dg_players  # noqa: F401
@@ -38,7 +39,7 @@ def d_get_biome(floor):
     for r, name, wall_e, floor_e, fog_e, color in D_BIOMES:
         if floor in r:
             return name, wall_e, floor_e, fog_e, color
-    return "洞窟", "⬜", "<:b_:1563559473422016512>", "🌫️", 0x5C4033
+    return "洞窟", "⬜", B_, "🌫️", 0x5C4033
 
 
 

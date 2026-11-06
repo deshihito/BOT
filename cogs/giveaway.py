@@ -19,7 +19,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
-from core.emojis import TICKET
+from core.emojis import RESTART, TICKET
 from core.storage import KVStore
 from cogs.wallet import INSUFFICIENT, coin_embed
 
@@ -327,7 +327,7 @@ class GiveawayCog(commands.Cog):
             g["winner_ids"] = new
             await self.save(key)
         await self.refresh_message(key)
-        await self.announce(g, f"<:restart:1563559489121030184> **{g['prize']}** を再抽選しました。当選: " + " ".join(f"<@{u}>" for u in new), key)
+        await self.announce(g, f"{RESTART} **{g['prize']}** を再抽選しました。当選: " + " ".join(f"<@{u}>" for u in new), key)
         await self.dm_winners(g, new)
         return new
 
