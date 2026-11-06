@@ -19,7 +19,8 @@ from types import SimpleNamespace
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from core import guild_settings, prison as prison_core
+from core import guild_settings
+from core.game import prison as prison_core
 from core import role_shop as shop_core
 from core.general.items import JST
 from core.storage import KVStore
