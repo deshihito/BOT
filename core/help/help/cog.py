@@ -73,7 +73,7 @@ ACTION_CATEGORY_MAP: dict[str, list[tuple[str, str | None]]] = {
     # 導線最適化ラウンド4: M8 で廃止された miq ジャンル（custom へ吸収済み）
     # の対応が死にエントリとして残っていたため削除した。
     "fun": [("general", "custom"), ("general", "zeta"),
-            ("general", "meme"), ("general", "exp")],
+            ("general", "make_image"), ("general", "exp")],
     "admin": [("support", "moderation"), ("support", "roles"), ("support", "logs"),
               ("support", "assist"), ("support", "rta")],
 }

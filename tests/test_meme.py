@@ -153,9 +153,12 @@ class MemeAttachmentTest(unittest.TestCase):
 
 class MemeRegistryTest(unittest.TestCase):
     def test_genre_and_actions_registered(self):
-        self.assertIn("meme", g.GENERAL_GENRES)
-        values = {value for _label, value in g.GENERAL_ACTIONS["meme"]}
-        self.assertEqual(values, {"meme_create", "meme_help"})
+        # meme は「画像作成」(make_image) ジャンルへ移行し、meme ジャンルは廃止
+        self.assertNotIn("meme", g.GENERAL_GENRES)
+        self.assertNotIn("meme", g.GENERAL_ACTIONS)
+        self.assertIn("make_image", g.GENERAL_GENRES)
+        values = {value for _label, value in g.GENERAL_ACTIONS["make_image"]}
+        self.assertTrue({"meme_create", "meme_help"} <= values)
 
     def test_registry_contains_meme_actions(self):
         from core import action_registry

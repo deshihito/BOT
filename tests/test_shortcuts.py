@@ -36,8 +36,7 @@ class ShortcutTest(unittest.IsolatedAsyncioTestCase):
                 ("AI思考強度を設定", "reasoning_default"),
                 # 導線最適化 S7: 1件ジャンル「翻訳」から吸収
                 ("自動翻訳を設定", "translation_settings"),
-                # 導線最適化 M8: MIQ はパネル側を設定だけに純化し吸収
-                ("MIQ設定（見た目・引用拒否）", "miq_settings"),
+                # MIQ設定は「画像作成」(make_image) ジャンルへ移行した
             ],
         )
         view = ShortcutRootPanel()

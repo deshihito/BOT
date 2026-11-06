@@ -63,7 +63,11 @@ class GenreDescriptionPolicyTest(unittest.TestCase):
         # 導線最適化 M8: MIQ はパネル側を設定だけに純化し、miq ジャンル自体を
         # 「設定・AI」へ吸収した（作成はコンテキストメニューに一本化）
         self.assertNotIn("miq", GENERAL_GENRES)
-        self.assertEqual(GENERAL_GENRES["meme"][1], "画像に上下テキストを入れてmeme画像を作成する")
+        # 画像作成 (make_image) への統合: meme ジャンルは廃止し、ラベルから
+        # 読み取れる内容なので説明は空にする（列挙も書かない）。
+        self.assertNotIn("meme", GENERAL_GENRES)
+        self.assertEqual(GENERAL_GENRES["make_image"][0], "画像作成")
+        self.assertEqual(GENERAL_GENRES["make_image"][1], "")
 
     def test_support_genres(self):
         for genre in ("moderation", "roles", "logs", "automation", "rta"):
