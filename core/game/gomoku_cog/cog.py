@@ -1,7 +1,7 @@
 """/game の五目並べ（2人対戦 / CPU、15×15）。
 
 盤面は PIL で描く PNG、移動は行→列のセレクト。対人戦は
-core/party_ranking.py の勝数と core/game/elo.py のレートに記録し、
+core/game/party_ranking.py の勝数と core/game/elo.py のレートに記録し、
 対局は core/game/game_restore.py で再起動復旧する（オセロと同じ型）。
 """
 import asyncio
@@ -14,7 +14,7 @@ import discord
 from discord.ext import commands
 from PIL import Image, ImageDraw, ImageFont
 
-from core import party_ranking
+from core.game import party_ranking
 from core.game import elo, game_panels, game_restore
 from core.game.gomoku import BLACK, EMPTY, SIZE, WHITE, choose_ai_move, is_full, is_win_at, legal_moves, new_board, winner
 
