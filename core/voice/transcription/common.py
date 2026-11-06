@@ -20,12 +20,12 @@ from discord.ext import voice_recv
 
 from core.legacy import Responder
 from core import logfare
-from core import vc_feature_restore
-from core.voice_session import VoiceBusy, get_manager
-from core.voice_recv_patch import patch_voice_recv_client
+from core.voice import vc_feature_restore
+from core.voice.voice_session import VoiceBusy, get_manager
+from core.voice.voice_recv_patch import patch_voice_recv_client
 from core.messages import voice_connection_failed
-from core.voice_media import add_receive_sink, remove_receive_sink
-from core.speech_vad import SpeechDetector
+from core.voice.voice_media import add_receive_sink, remove_receive_sink
+from core.voice.speech_vad import SpeechDetector
 from core.emojis import FAILED, LOADING, LOUPE, PAUSE
 
 try:  # あれば高品質なポリフェーズ・リサンプラーを使う（無くても numpy だけで動く）
