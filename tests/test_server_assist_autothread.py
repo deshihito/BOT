@@ -17,8 +17,8 @@ import discord
 
 from core import guild_settings
 from core.storage import KVStore
-from core.server_assist import discover_features
-from core.server_assist.features import autothread
+from core.support.server_assist import discover_features
+from core.support.server_assist.features import autothread
 from tests.fake_kv_supabase import FakeKVSupabase
 
 
@@ -133,7 +133,7 @@ class AutoThreadTest(unittest.IsolatedAsyncioTestCase):
         await autothread.update_settings(1, autothread.KEY, enabled=True, channel_id=100)
         message = FakeMessage(FakeGuild())
         message.create_thread.side_effect = RuntimeError("boom")
-        with self.assertLogs("core.server_assist.features.autothread", level="ERROR"):
+        with self.assertLogs("core.support.server_assist.features.autothread", level="ERROR"):
             await autothread.on_message(None, message)
             await autothread.drain()
 

@@ -1,7 +1,7 @@
 import unittest
 from unittest.mock import patch
 
-from core import localization
+from core.support import localization
 
 
 class LocaleCatalogTest(unittest.TestCase):

@@ -16,8 +16,8 @@ import discord
 
 from core import guild_settings
 from core.storage import KVStore
-from core.server_assist import discover_features
-from core.server_assist.features import autorole
+from core.support.server_assist import discover_features
+from core.support.server_assist.features import autorole
 from tests.fake_kv_supabase import FakeKVSupabase
 
 
@@ -128,7 +128,7 @@ class AutoRoleSettingsTest(unittest.IsolatedAsyncioTestCase):
         member.add_roles.side_effect = discord.Forbidden(
             types.SimpleNamespace(status=403, reason="Forbidden"), "missing permissions"
         )
-        with self.assertLogs("core.server_assist.features.autorole", level="WARNING"):
+        with self.assertLogs("core.support.server_assist.features.autorole", level="WARNING"):
             await autorole.on_member_join(None, member)
 
     def test_settings_view_lists_only_assignable_roles(self):

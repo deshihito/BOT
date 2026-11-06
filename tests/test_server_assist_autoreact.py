@@ -17,8 +17,8 @@ import discord
 
 from core import guild_settings
 from core.storage import KVStore
-from core.server_assist import discover_features
-from core.server_assist.features import autoreact
+from core.support.server_assist import discover_features
+from core.support.server_assist.features import autoreact
 from cogs.server_assist import ServerAssistCog
 from tests.fake_kv_supabase import FakeKVSupabase
 
@@ -132,7 +132,7 @@ class AutoReactTest(unittest.IsolatedAsyncioTestCase):
         )
         message = FakeMessage(FakeGuild())
         message.add_reaction.side_effect = RuntimeError("boom")
-        with self.assertLogs("core.server_assist.features.autoreact", level="ERROR"):
+        with self.assertLogs("core.support.server_assist.features.autoreact", level="ERROR"):
             await autoreact.on_message(None, message)
             await autoreact.drain()
 

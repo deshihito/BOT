@@ -16,7 +16,7 @@ import discord
 
 from core import guild_settings
 from core.storage import KVStore
-from core.server_assist.features import customreplies
+from core.support.server_assist.features import customreplies
 from tests.fake_kv_supabase import FakeKVSupabase
 
 

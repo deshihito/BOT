@@ -43,7 +43,7 @@ class RegistryConsistencyTest(unittest.TestCase):
 
     def test_support_registration_matches_support_actions(self):
         from cogs.support import SUPPORT_ACTIONS
-        from core.server_assist import discover_features
+        from core.support.server_assist import discover_features
 
         registered = {spec.value for spec in self.registry.by_root("support")}
         expected = {choice.value for choice in SUPPORT_ACTIONS}
@@ -93,7 +93,7 @@ class ShortcutRootsGenerationTest(unittest.TestCase):
                 self.assertIsInstance(value, str)
 
     def test_support_candidates_cover_all_30_including_missing_15(self):
-        from core.server_assist import discover_features
+        from core.support.server_assist import discover_features
 
         values = {value for _label, value in self.roots["support"][1]}
         # 導線最適化 M2: 従来30件＋アシスト機能（assist_<key>）が候補に入る

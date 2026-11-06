@@ -12,7 +12,7 @@ if ROOT not in sys.path:
 
 from core import guild_settings
 from core.storage import KVStore
-from core.server_assist.features import embedbuilder
+from core.support.server_assist.features import embedbuilder
 from tests.fake_kv_supabase import FakeKVSupabase
 
 
