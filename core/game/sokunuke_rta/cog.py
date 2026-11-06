@@ -9,8 +9,8 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
-from core import guild_settings
-from core.user_names import resolve_display_names
+from core.support import guild_settings
+from core.general.user_names import resolve_display_names
 
 logger = logging.getLogger(__name__)
 SECTION = "sokunuke_rta"
