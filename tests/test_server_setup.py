@@ -362,15 +362,70 @@ class WelcomeTest(Base):
         for channel in self.guild.channels.values():
             channel.send.assert_not_awaited()
 
+    async def test_v2_picker_allows_channel_without_embed_links(self):
+        self.guild.general.perms = discord.Permissions(view_channel=True, send_messages=True)  # 埋め込み不可
+        self.assertIs(server_setup.pick_welcome_channel_v2(self.guild), self.guild.general)
+
     async def test_on_guild_join_posts_welcome(self):
+        self.guild.general.send.return_value = types.SimpleNamespace(id=424242)
         await self.cog.on_guild_join(self.guild)
-        self.assertEqual(self.guild.general.send.await_count, 2)
-        embed = self.guild.general.send.await_args_list[0].kwargs["embed"]
-        for text in ("5つ", "100以上", "/support", "フロンティアモデル", "/help", "今北産業"):
-            self.assertIn(text, embed.description)
-        self.assertNotIn("/setup", embed.description)
-        panel = self.guild.general.send.await_args_list[1].kwargs["embed"]
-        self.assertIn("language", panel.description)
+        # V2 の1通だけが送られ、リアクションは付けない。
+        self.assertEqual(self.guild.general.send.await_count, 1)
+        kwargs = self.guild.general.send.await_args.kwargs
+        self.assertNotIn("embed", kwargs)
+        view = kwargs["view"]
+        texts, custom_ids, urls = [], set(), set()
+
+        def walk(item):
+            if isinstance(item, discord.ui.TextDisplay):
+                texts.append(item.content)
+            cid = getattr(item, "custom_id", None)
+            if cid:
+                custom_ids.add(cid)
+            url = getattr(item, "url", None)
+            if url:
+                urls.add(url)
+            for child in getattr(item, "children", []) or []:
+                walk(child)
+
+        for top in view.children:
+            walk(top)
+        joined = "\n".join(texts)
+        stats = server_setup.welcome_stats()
+        for key in ("commands", "actions", "games"):
+            self.assertIn(str(stats[key]), joined)
+        # 旧文面・個別機能の数字・単一機能の紹介は残っていない。
+        for stale in ("5つ", "100以上", "フロンティアモデル", "今北産業", "引用画像"):
+            self.assertNotIn(stale, joined)
+        self.assertEqual(custom_ids, {"welcome:game", "welcome:money", "welcome:music",
+                                      "welcome:help", "welcome:support", "welcome:language"})
+        self.assertIn("https://bot-deshihito.vercel.app/dashboard/77", urls)
+        self.assertIn("https://discord.gg/dCAQzJUaa9", urls)
+        # 保存: onboarding に記録し、言語変更の検証対象を新メッセージへ移す。locale は書かない。
+        onboarding = self.reload("onboarding")
+        self.assertEqual(onboarding["welcome_message_id"], 424242)
+        self.assertEqual(onboarding["channel_id"], 601)
+        self.assertEqual(onboarding["version"], 2)
+        localization_section = self.reload("localization")
+        self.assertEqual(localization_section["panel_message_id"], 424242)
+        self.assertNotIn("locale", localization_section)
+
+    async def test_on_guild_join_keeps_saved_locale(self):
+        await guild_settings.get_store().update(self.guild.id, "localization", locale="en")
+        self.guild.general.send.return_value = types.SimpleNamespace(id=515151)
+        await self.cog.on_guild_join(self.guild)
+        self.assertEqual(self.reload("localization")["locale"], "en")
+        view = self.guild.general.send.await_args.kwargs["view"]
+        contents = [item.content for item in view.children[0].children
+                    if isinstance(item, discord.ui.TextDisplay)]
+        self.assertIn("Thanks for adding", contents[0])
+
+    async def test_on_guild_join_skips_when_recently_welcomed(self):
+        from datetime import datetime, timezone
+        await guild_settings.get_store().update(
+            self.guild.id, "onboarding", welcomed_at=datetime.now(timezone.utc).isoformat(), version=2)
+        await self.cog.on_guild_join(self.guild)
+        self.guild.general.send.assert_not_awaited()
 
 
 class AuthTest(Base):

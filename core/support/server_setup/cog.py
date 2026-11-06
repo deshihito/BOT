@@ -11,15 +11,18 @@ Slash の /setup コマンド登録は廃止済み。
 from __future__ import annotations
 
 import logging
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 import discord
 from discord.ext import commands
 
 from core.help.command_catalog import permission_label
-from core.emojis import FAILED, SUCCESS
+from core.emojis import BOOK, COIN, FAILED, GAME, GEAR, MUSIC, SUCCESS
 from core.guild_settings import NATION_SECTION, NOTIFY_LEVELS, NOTIFY_MAJOR, get_store, nation_settings
+from core.panel_v2 import as_panel_v2
 from core.support import localization
+from core.support.panel_recovery.cog import build_panel
 
 logger = logging.getLogger(__name__)
 
@@ -74,36 +77,210 @@ def pick_welcome_channel(guild):
     return None
 
 
-def welcome_embed(bot_name: str = "AGOBOT", locale: str = localization.DEFAULT_LOCALE) -> discord.Embed:
-    if localization.normalize_locale(locale) == "en":
-        title = f"👋 Thanks for adding {bot_name}!"
-        description = (
-            "Five commands (5つのコマンド) unlock more than 100 features (100以上の機能).\n"
-            "Server tools are available from `/support`, including frontier AI models (フロンティアモデル).\n"
-            "Use `/help` to browse the command guide.\n\n"
-            "Tip: send `今北産業` in a channel to summarize the latest conversation in three lines."
-        )
-    else:
-        title = f"👋 {bot_name} を追加してくれてありがとう！"
-        description = (
-            "コマンドはたった5つ。それだけで100以上の機能が使えます。\n"
-            "サポート機能は `/support` に集約。主要AIフロンティアモデルも使い放題です。\n"
-            "機能一覧と使い方は `/help` から。\n\n"
-            "*おまけ：チャンネルで「今北産業」と送ると、直近の会話を3行で要約します。*"
-        )
-    embed = discord.Embed(
-        title=title,
-        description=description,
-        color=EMBED_COLOR,
-    )
-    return embed
+def can_post_v2(channel, me) -> bool:
+    """導入メッセージ（Components V2）専用の書き込み条件。Embed ではないため埋め込み権限は不要。"""
+    if channel is None or me is None:
+        return False
+    perms = channel.permissions_for(me)
+    return bool(perms.view_channel and perms.send_messages)
 
-def language_panel_embed() -> discord.Embed:
-    return discord.Embed(
-        title="🌐 Choose a server language / サーバーの言語を選択",
-        description=localization.text("welcome_language", localization.DEFAULT_LOCALE),
-        color=EMBED_COLOR,
-    )
+
+def pick_welcome_channel_v2(guild):
+    """pick_welcome_channel と同じ決定順で、V2 導入メッセージが送れる最初のチャンネル。なければ None。"""
+    me = getattr(guild, "me", None)
+    system = getattr(guild, "system_channel", None)
+    if can_post_v2(system, me):
+        return system
+    for channel in sorted(getattr(guild, "text_channels", []), key=lambda c: (getattr(c, "position", 0), c.id)):
+        if can_post_v2(channel, me):
+            return channel
+    return None
+
+
+# ---------------------------------------------------------------- 導入メッセージ (v2)
+#: 導入メッセージの保存先セクション（guild_settings）。
+ONBOARDING_SECTION = "onboarding"
+#: 導入メッセージの版。文面・構成を改訂したら上げる（自動再送には使わない）。
+WELCOME_VERSION = 2
+#: 同一参加イベントの二重発火・再送ループを防ぐガード幅。
+WELCOME_RESEND_GUARD = timedelta(minutes=10)
+
+SITE_URL = "https://bot-deshihito.vercel.app"
+SUPPORT_SERVER_URL = "https://discord.gg/dCAQzJUaa9"
+
+#: welcome:* ボタンのうち、ルートパネルを開くもの（ボタン名 -> (root, 案内用コマンド名)）。
+_WELCOME_PANELS = {
+    "game": ("game", "/game"),
+    "music": ("vc", "/vc"),
+    "help": ("help", "/help"),
+    "support": ("support", "/support"),
+}
+
+
+def welcome_stats() -> Optional[dict]:
+    """見出しの数字を単一の真実（レジストリ等）から算出する。失敗時は None（数字の節ごと省略する）。
+
+    導入メッセージで示すのは総量だけ（コマンド数・機能総数・ゲーム数）。
+    個別機能の数字は出さない（文面方針 2026-11-07）。
+    """
+    try:
+        from core.action_registry import ROOT_ORDER, default_registry
+        from core.game.game_guides import GAME_ORDER
+
+        return {
+            "commands": len(ROOT_ORDER) + 1,  # 5ルート + /quick
+            "actions": len(default_registry()),
+            "games": len(GAME_ORDER),
+        }
+    except Exception:
+        logger.warning("導入メッセージの数字生成に失敗しました（数字なしで送信します）", exc_info=True)
+        return None
+
+
+def _welcome_texts(locale: str) -> dict:
+    """導入メッセージの確定文（ja / en の2版のみ。他ロケールは ja 版で送る）。"""
+    if localization.normalize_locale(locale) == "en":
+        return {
+            "title": "## 👋 Thanks for adding {bot_name}!",
+            "catchphrase": "One bot for everything you want to do.",
+            "stats": "-# {commands} commands · {actions} features · {games} games",
+            "body": (
+                "Just pick from buttons and panels — no setup required to start.\n"
+                "Reach your favorite features instantly with /quick, and manage server settings from the web dashboard too."
+            ),
+            "missing_permissions": f'-# {FAILED} Some permissions are missing. See "Check permissions" for details.',
+            "footer": f"-# [Terms]({SITE_URL}/terms) ・ [Privacy]({SITE_URL}/privacy) ・ Run /help if you get stuck",
+            "labels": {
+                "game": "Games", "money": "Money", "music": "Music", "help": "How to use",
+                "support": "Server settings", "permissions": "Check permissions",
+                "site": "Official site", "dashboard": "Web dashboard", "support_server": "Support server",
+            },
+            "placeholder": "🌐 Language / 言語",
+            "locale_descriptions": {"ja": "Default (Japanese)", "en": "Some screens in English", "other": "Coming soon (shown in Japanese)"},
+        }
+    return {
+        "title": "## 👋 {bot_name} を追加してくれてありがとう！",
+        "catchphrase": "使いたいこと、全部このボットでいい。",
+        "stats": "-# コマンド{commands}つ ・ 機能{actions} ・ ゲーム{games}種",
+        "body": (
+            "操作はボタンとパネルで選ぶだけ。設定なしでも使い始められます。\n"
+            "よく使う機能は /quick からすぐ呼び出せて、サーバーの設定は Webダッシュボードからもできます。"
+        ),
+        "missing_permissions": f"-# {FAILED} 不足している権限があります。「権限チェック」で詳細が見られます",
+        "footer": f"-# [利用規約]({SITE_URL}/terms) ・ [プライバシーポリシー]({SITE_URL}/privacy) ・ 困ったときは /help",
+        "labels": {
+            "game": "ゲーム", "money": "マネー", "music": "音楽", "help": "使い方",
+            "support": "サーバー設定", "permissions": "権限チェック",
+            "site": "公式サイト", "dashboard": "Webで設定", "support_server": "サポートサーバー",
+        },
+        "placeholder": "🌐 言語 / Language",
+        "locale_descriptions": {"ja": "標準", "en": "一部の表示が英語になります", "other": "準備中（表示は日本語）"},
+    }
+
+
+def _app_emoji(markup: str):
+    try:
+        return discord.PartialEmoji.from_str(markup)
+    except Exception:
+        return None
+
+
+class WelcomeView(discord.ui.LayoutView):
+    """導入メッセージ本体（Components V2・単一 Container）。
+
+    状態を持たない見た目だけの器。ボタン／セレクトの実処理は ServerSetup の
+    on_interaction リスナーが固定 custom_id ``welcome:*`` で受けるため、
+    Bot が再起動しても押せる（認証パネルと同じ方式）。
+    """
+
+    def __init__(self, bot_name: str = "AGOBOT", locale: str = localization.DEFAULT_LOCALE, *,
+                 guild_id: Optional[int] = None, stats: Optional[dict] = None,
+                 permissions_button: bool = False, missing_permissions: bool = False):
+        super().__init__(timeout=None)
+        locale = localization.normalize_locale(locale)
+        texts = _welcome_texts(locale)
+        labels = texts["labels"]
+        if stats is None:
+            stats = welcome_stats()
+
+        heading = [texts["title"].format(bot_name=bot_name), texts["catchphrase"]]
+        if stats:
+            heading.append(texts["stats"].format(**stats))
+        items: list = [discord.ui.TextDisplay("\n".join(heading)), discord.ui.Separator()]
+
+        body = texts["body"]
+        if missing_permissions:
+            body = f"{body}\n{texts['missing_permissions']}"
+        items.append(discord.ui.TextDisplay(body))
+        if locale not in ("ja", "en"):
+            # 選べるが表示は日本語のままであることを、その場で正直に出す。
+            items.append(discord.ui.TextDisplay(f"-# {localization.text('language_support_note', 'ja')}"))
+
+        items.append(discord.ui.ActionRow(
+            discord.ui.Button(label=labels["game"], style=discord.ButtonStyle.primary,
+                              custom_id="welcome:game", emoji=_app_emoji(GAME)),
+            discord.ui.Button(label=labels["money"], style=discord.ButtonStyle.primary,
+                              custom_id="welcome:money", emoji=_app_emoji(COIN)),
+            discord.ui.Button(label=labels["music"], style=discord.ButtonStyle.primary,
+                              custom_id="welcome:music", emoji=_app_emoji(MUSIC)),
+            discord.ui.Button(label=labels["help"], style=discord.ButtonStyle.primary,
+                              custom_id="welcome:help", emoji=_app_emoji(BOOK)),
+        ))
+        admin_row = [
+            discord.ui.Button(label=labels["support"], style=discord.ButtonStyle.secondary,
+                              custom_id="welcome:support", emoji=_app_emoji(GEAR)),
+        ]
+        if permissions_button:
+            admin_row.append(
+                discord.ui.Button(label=labels["permissions"], style=discord.ButtonStyle.secondary,
+                                  custom_id="welcome:permissions", emoji=_app_emoji(SUCCESS)))
+        items.append(discord.ui.ActionRow(*admin_row))
+
+        descriptions = texts["locale_descriptions"]
+        select = discord.ui.Select(
+            custom_id="welcome:language",
+            placeholder=texts["placeholder"],
+            options=[
+                discord.SelectOption(
+                    label=localization.LOCALE_LABELS[loc],
+                    value=loc,
+                    emoji=localization.LOCALE_FLAGS[loc],
+                    description=descriptions.get(loc, descriptions["other"]),
+                    default=loc == locale,
+                )
+                for loc in localization.SUPPORTED_LOCALES
+            ],
+            min_values=1, max_values=1,
+        )
+        items.append(discord.ui.ActionRow(select))
+        items.append(discord.ui.Separator())
+
+        dashboard_url = f"{SITE_URL}/dashboard/{guild_id}" if guild_id else f"{SITE_URL}/dashboard"
+        items.append(discord.ui.ActionRow(
+            discord.ui.Button(label=labels["site"], style=discord.ButtonStyle.link, url=SITE_URL),
+            discord.ui.Button(label=labels["dashboard"], style=discord.ButtonStyle.link, url=dashboard_url),
+            discord.ui.Button(label=labels["support_server"], style=discord.ButtonStyle.link, url=SUPPORT_SERVER_URL),
+        ))
+        items.append(discord.ui.TextDisplay(texts["footer"]))
+        self.add_item(discord.ui.Container(*items, accent_colour=EMBED_COLOR))
+
+
+def build_welcome_view(bot_name: str = "AGOBOT", locale: str = localization.DEFAULT_LOCALE, **kwargs) -> WelcomeView:
+    return WelcomeView(bot_name, locale, **kwargs)
+
+
+def _welcomed_recently(onboarding: dict, now: Optional[datetime] = None) -> bool:
+    """直近（WELCOME_RESEND_GUARD 以内）に送っていれば True（再送ガード）。"""
+    raw = (onboarding or {}).get("welcomed_at")
+    if not isinstance(raw, str):
+        return False
+    try:
+        welcomed_at = datetime.fromisoformat(raw)
+    except ValueError:
+        return False
+    if welcomed_at.tzinfo is None:
+        welcomed_at = welcomed_at.replace(tzinfo=timezone.utc)
+    return (now or datetime.now(timezone.utc)) - welcomed_at < WELCOME_RESEND_GUARD
 
 
 # ---------------------------------------------------------------- 権限チェック
@@ -555,27 +732,145 @@ class ServerSetup(commands.Cog):
         cog = self.bot.get_cog("Muted")
         return cog if cog is not None and hasattr(cog, "admin_roles") and callable(getattr(cog, "save", None)) else None
 
+    # ---------------------------------------------------------------- 導入メッセージ
+    def _saved_locale(self, guild_id: int) -> str:
+        """保存済みロケール。未保存なら既定 ja（再参加時に上書きしないための読み取り）。"""
+        try:
+            raw = get_store().get(guild_id, localization.LANGUAGE_SECTION)
+        except Exception:
+            raw = None
+        if isinstance(raw, dict) and raw.get("locale"):
+            return localization.normalize_locale(raw["locale"])
+        return localization.DEFAULT_LOCALE
+
     @commands.Cog.listener()
     async def on_guild_join(self, guild: discord.Guild):
-        channel = pick_welcome_channel(guild)
+        store = get_store()
+        try:
+            await store.ensure_loaded()
+        except Exception:
+            logger.debug("guild_settings の読み込みに失敗しました（導入メッセージは続行します）", exc_info=True)
+        try:
+            onboarding = store.get(guild.id, ONBOARDING_SECTION) or {}
+        except Exception:
+            onboarding = {}
+        if _welcomed_recently(onboarding):
+            logger.info("導入メッセージは直近に送信済みのためスキップします: guild=%s", guild.id)
+            return
+        channel = pick_welcome_channel_v2(guild)
         if channel is None:
             logger.info("あいさつを送れるチャンネルがありません: guild=%s", guild.id)
             return
+        locale = self._saved_locale(guild.id)
+        bot_name = getattr(self.bot.user, "name", None) or "AGOBOT"
+        view = build_welcome_view(bot_name, locale, guild_id=guild.id)
         try:
-            await channel.send(embed=welcome_embed(getattr(self.bot.user, "name", None) or "AGOBOT"))
-            panel = await channel.send(embed=language_panel_embed())
-            for locale in localization.SUPPORTED_LOCALES:
-                await panel.add_reaction(localization.LOCALE_FLAGS[locale])
-            panel_id = getattr(panel, "id", None)
-            if isinstance(panel_id, int) and not isinstance(panel_id, bool):
-                await get_store().update(
-                    guild.id,
-                    localization.LANGUAGE_SECTION,
-                    locale=localization.DEFAULT_LOCALE,
-                    panel_message_id=panel_id,
-                )
+            message = await channel.send(view=view)
         except discord.HTTPException:
             logger.warning("あいさつを送れませんでした: guild=%s", guild.id, exc_info=True)
+            return
+        message_id = getattr(message, "id", None)
+        try:
+            await store.update(
+                guild.id,
+                ONBOARDING_SECTION,
+                welcome_message_id=message_id if isinstance(message_id, int) and not isinstance(message_id, bool) else None,
+                channel_id=channel.id,
+                welcomed_at=datetime.now(timezone.utc).isoformat(),
+                version=WELCOME_VERSION,
+            )
+            if isinstance(message_id, int) and not isinstance(message_id, bool):
+                # 言語変更の検証対象を新しい導入メッセージへ移す（locale 自体は触らない）。
+                await store.update(guild.id, localization.LANGUAGE_SECTION, panel_message_id=message_id)
+        except Exception:
+            # 保存は冗長情報。失敗してもボタン・セレクトはメッセージIDに依存せず動作する。
+            logger.warning("導入メッセージの保存に失敗しました: guild=%s", guild.id, exc_info=True)
+
+    # ---------------------------------------------------------------- 導入メッセージの受け口
+    @commands.Cog.listener()
+    async def on_interaction(self, interaction: discord.Interaction):
+        if interaction.type != discord.InteractionType.component:
+            return
+        data = interaction.data or {}
+        custom_id = data.get("custom_id") or ""
+        if not custom_id.startswith("welcome:"):
+            return
+        action = custom_id[len("welcome:"):]
+        try:
+            if action in _WELCOME_PANELS:
+                root, command = _WELCOME_PANELS[action]
+                await self._open_welcome_panel(interaction, root, command)
+            elif action == "money":
+                await self._open_welcome_money(interaction)
+            elif action == "language":
+                await self._handle_welcome_language(interaction, data)
+        except discord.InteractionResponded:
+            logger.debug("welcome: 応答済みのため処理を中止しました (%s)", custom_id)
+        except Exception:
+            logger.exception("welcome: 処理に失敗しました (%s)", custom_id)
+            try:
+                if not interaction.response.is_done():
+                    await interaction.response.send_message(
+                        "処理に失敗しました。お手数ですが、コマンドから開き直してください。", ephemeral=True)
+            except Exception:
+                logger.debug("welcome: 失敗通知の送信にも失敗しました", exc_info=True)
+
+    async def _open_welcome_panel(self, interaction: discord.Interaction, root: str, command: str):
+        panel = build_panel(self.bot, root)
+        if panel is None:
+            await interaction.response.send_message(
+                f"パネルを再表示できませんでした。お手数ですが、{command} コマンドを実行してください。",
+                ephemeral=True)
+            return
+        await interaction.response.send_message(view=as_panel_v2(panel), ephemeral=True)
+
+    async def _open_welcome_money(self, interaction: discord.Interaction):
+        cog = self.bot.get_cog("GeneralCog")
+        if cog is None:
+            await interaction.response.send_message(
+                "パネルを再表示できませんでした。お手数ですが、/general コマンドを実行してください。",
+                ephemeral=True)
+            return
+        from core.general.panel import GeneralPanel
+
+        panel = GeneralPanel(cog, genre="money", owner_id=interaction.user.id)
+        await interaction.response.send_message(view=as_panel_v2(panel), ephemeral=True)
+
+    async def _handle_welcome_language(self, interaction: discord.Interaction, data: dict):
+        guild_id = interaction.guild_id
+        if guild_id is None:
+            return
+        permissions = getattr(interaction.user, "guild_permissions", None)
+        if not (getattr(permissions, "administrator", False) or getattr(permissions, "manage_guild", False)):
+            message = ("You need the Manage Server permission to change the language."
+                       if self._saved_locale(guild_id) == "en"
+                       else "言語の変更にはサーバー管理権限が必要です。")
+            await interaction.response.send_message(message, ephemeral=True)
+            return
+        values = data.get("values") or []
+        if not values:
+            return
+        locale = localization.normalize_locale(values[0])
+        cog = self.bot.get_cog("LocalizationCog")
+        if cog is not None and hasattr(cog, "set_locale"):
+            await cog.set_locale(guild_id, locale)
+        else:
+            await get_store().update(guild_id, localization.LANGUAGE_SECTION, locale=locale)
+        note = localization.text("language_saved", locale, language=localization.LOCALE_LABELS[locale])
+        if locale not in ("ja", "en"):
+            note = f"{note}\n{localization.text('language_support_note', 'ja')}"
+            await interaction.response.send_message(note, ephemeral=True)
+            return
+        # ja / en は本体の文面も切り替える。
+        bot_name = getattr(self.bot.user, "name", None) or "AGOBOT"
+        view = build_welcome_view(bot_name, locale, guild_id=guild_id)
+        try:
+            await interaction.response.edit_message(view=view)
+        except discord.HTTPException:
+            logger.info("導入メッセージの言語切り替え編集に失敗しました", exc_info=True)
+            await interaction.response.send_message(note, ephemeral=True)
+            return
+        await interaction.followup.send(note, ephemeral=True)
 
 async def setup(bot: commands.Bot):
     await bot.add_cog(ServerSetup(bot))
