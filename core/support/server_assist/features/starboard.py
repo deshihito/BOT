@@ -9,7 +9,7 @@ import discord
 
 from core.support.server_assist import Feature, get_settings, update_settings
 from core.support.server_assist.ui import AssistFeatureView, channel_label, notice_line
-from core.storage import KVStore
+from core.support.storage import KVStore
 
 logger = logging.getLogger(__name__)
 
