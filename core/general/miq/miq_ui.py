@@ -164,6 +164,148 @@ class MiqResetButton(discord.ui.Button):
         await parent.commit(interaction)
 
 
+# ------------------------------------------------------------
+# MIQ 生成メッセージに付く操作 View (削除 + フォーマット変更で再生成)
+# ------------------------------------------------------------
+
+# 生成メッセージの操作が有効な時間。設定パネル (300秒) より長めに取り、
+# ゲーム系の長めの View (3600秒) に揃える。状態はインメモリのみで、
+# timeout 経過後や BOT 再起動後は操作できなくなる (画像自体は残る)。
+MIQ_OUTPUT_TIMEOUT = 3600
+
+
+def miq_output_can_manage(user_id, requester_id, target_author_id) -> bool:
+    """MIQメッセージを操作できるのは、MIQした人 (requester) と
+    MIQされた人 (対象メッセージの著者) だけ。"""
+    return user_id is not None and (user_id == requester_id or user_id == target_author_id)
+
+
+class MiqOutputFormatSelect(discord.ui.Select):
+    def __init__(self, parent: "MiqOutputView"):
+        self.parent_view = parent
+        current = parent.current_format
+        super().__init__(
+            placeholder="フォーマットを変更して再生成",
+            custom_id="miq_output:format",
+            options=[discord.SelectOption(label=label, value=key, emoji=emoji, default=key == current)
+                     for key, (label, emoji) in MIQ_FORMATS.items()],
+            row=0,
+        )
+
+    async def callback(self, interaction: discord.Interaction):
+        await self.parent_view.handle_format(interaction, self.values[0])
+
+
+class MiqOutputDeleteButton(discord.ui.Button):
+    def __init__(self, parent: "MiqOutputView"):
+        self.parent_view = parent
+        super().__init__(
+            label="削除", emoji="🗑️", style=discord.ButtonStyle.danger,
+            custom_id="miq_output:delete", row=1,
+        )
+
+    async def callback(self, interaction: discord.Interaction):
+        await self.parent_view.handle_delete(interaction)
+
+
+class MiqOutputView(discord.ui.View):
+    """MIQで生成した画像メッセージに付ける操作View。
+
+    削除ボタンと、フォーマットを変えてその場で再生成するセレクトを持つ。
+    再生成に必要な情報 (対象メッセージの所在・requester・対象著者・現在の
+    フォーマット) はこの View が保持する。設定プレビューやミームには付けない。
+    """
+
+    def __init__(self, cog, *, requester_id: int, target_author_id, channel_id,
+                 target_message_id, current_format: str):
+        super().__init__(timeout=MIQ_OUTPUT_TIMEOUT)
+        self.cog = cog
+        self.requester_id = requester_id
+        self.target_author_id = target_author_id
+        self.channel_id = channel_id
+        self.target_message_id = target_message_id
+        self.current_format = current_format if current_format in MIQ_FORMATS else "quote"
+        self.refresh()
+
+    def refresh(self):
+        self.clear_items()
+        self.add_item(MiqOutputFormatSelect(self))
+        self.add_item(MiqOutputDeleteButton(self))
+
+    async def _check_actor(self, interaction: discord.Interaction, action: str) -> bool:
+        if miq_output_can_manage(interaction.user.id, self.requester_id, self.target_author_id):
+            return True
+        await interaction.response.send_message(
+            f"MIQした人か、MIQされた人だけが{action}できます。", ephemeral=True,
+        )
+        return False
+
+    async def handle_delete(self, interaction: discord.Interaction):
+        if not await self._check_actor(interaction, "削除"):
+            return
+        try:
+            await interaction.response.defer()
+        except discord.HTTPException:
+            pass
+        message = interaction.message
+        if message is not None:
+            try:
+                await message.delete()
+            except discord.HTTPException:
+                # 既に削除されている等の競合は静かに流す
+                logger.debug("MIQ: 生成メッセージの削除に失敗しました", exc_info=True)
+        self.stop()
+
+    async def handle_format(self, interaction: discord.Interaction, selected: str):
+        if not await self._check_actor(interaction, "フォーマット変更"):
+            return
+        await interaction.response.defer()
+        target = await self._fetch_target()
+        if target is None:
+            return await interaction.followup.send(
+                "対象のメッセージが見つかりませんでした。", ephemeral=True,
+            )
+        size_limit = getattr(interaction.guild, "filesize_limit", None)
+        file, resolved, error = await self.cog._miq_regenerate_file(
+            target, self.requester_id, selected, size_limit,
+        )
+        if error is not None or file is None:
+            return await interaction.followup.send(
+                error or "引用画像を作れませんでした。", ephemeral=True,
+            )
+        self.current_format = resolved
+        self.refresh()
+        message = interaction.message
+        if message is None:
+            return
+        try:
+            # 新しい添付を明示的に渡して差し替える (渡さないと編集で添付が落ちる)
+            await message.edit(attachments=[file], view=self)
+        except discord.HTTPException:
+            logger.debug("MIQ: フォーマット変更の編集に失敗しました", exc_info=True)
+            await interaction.followup.send("画像の差し替えに失敗しました。", ephemeral=True)
+
+    async def _fetch_target(self):
+        """対象メッセージを取り直す。削除済み等で取れなければ None。"""
+        channel = None
+        bot = getattr(self.cog, "bot", None)
+        if bot is not None and self.channel_id is not None:
+            channel = bot.get_channel(self.channel_id)
+            if channel is None:
+                try:
+                    channel = await bot.fetch_channel(self.channel_id)
+                except discord.HTTPException:
+                    logger.debug("MIQ: 再生成の対象チャンネル取得に失敗しました", exc_info=True)
+                    return None
+        if channel is None:
+            return None
+        try:
+            return await channel.fetch_message(self.target_message_id)
+        except discord.HTTPException:
+            logger.debug("MIQ: 再生成の対象メッセージ取得に失敗しました", exc_info=True)
+            return None
+
+
 class MiqSettingsView(discord.ui.View):
     """MIQの見た目と引用拒否の設定パネル。設定はユーザーごとに保存され、MIQを作る時に使われる。"""
 
