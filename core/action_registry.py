@@ -56,6 +56,8 @@ AI_BLOCKED_IDS = frozenset({
     "general:machine_buy", "general:workshop_claim", "general:craft",
     "general:mining", "general:lottery_buy", "general:steal",
     "general:slot", "general:double", "general:blackjack", "general:dice",
+    # 日報DMの購読切り替えは個人設定の変更なので明示操作に限定する。
+    "general:daily_report",
     "general:fujo_register", "general:fujo_freeze", "general:fujo_panic_disable",
     "general:shortcut_manage", "general:aitools", "general:ai_default",
     "general:image_default", "general:reasoning_default",
@@ -83,6 +85,8 @@ MESSAGE_SHORTCUT_BLOCKED_IDS = frozenset({
     "general:translation_settings",
     "general:exp_status", "general:status",
     "general:items", "general:workshop", "general:money_panel",
+    # 日報DMの切り替え結果は本人の購読状態（個人設定）なので公開に反転させない。
+    "general:daily_report",
 })
 
 # AI tools で「確認ビュー付きなら代理実行可」（risk="confirm"）とする集合（D-3 決定）。
