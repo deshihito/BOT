@@ -46,6 +46,7 @@ class JinrouGame:
         self.chairman_forced_vote = False
         self.chairman_vote_event = None
         self.in_discussion = False
+        self.in_night_phase = False  # 夜フェーズ（夜アクション収集中）の間だけ True
         self.riacchu_pairs = []
         self.kizoku_slave = {}
         self.musician_party_used = False

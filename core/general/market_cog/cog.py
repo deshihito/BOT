@@ -17,6 +17,7 @@ from core.emojis import SUCCESS
 import asyncio
 import io
 import logging
+import math
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -210,6 +211,10 @@ class TradeModal(discord.ui.Modal):
         try:
             value = float(raw)
         except ValueError:
+            return await interaction.response.send_message(MARKET_INVALID_AMOUNT, ephemeral=True)
+        # E-5b: NaN/inf は float() を通過し、後段の int() 変換で
+        # 未捕捉例外になるため、状態変更なしでここで弾く。
+        if not math.isfinite(value):
             return await interaction.response.send_message(MARKET_INVALID_AMOUNT, ephemeral=True)
         await interaction.response.defer()
         if self.side == "buy":
@@ -418,6 +423,10 @@ class MarketCog(commands.Cog):
             self.store.validate_sell(uid, token_amount, fee_rate=fee_rate, cap_ratio=cap_ratio)
             wallet = self._wallet()
             result = self.store.apply_sell(uid, token_amount, fee_rate=fee_rate)
+            # E-1: wallet の DB 即時コミット前に市場ストアを flush する。
+            # クラッシュ時に「トークン復活＋コイン保持」で再売却できる
+            # 窓を塞ぐ（アイテム売却と同型）。
+            self.store.flush()
             credit = await wallet._change_balance(uid, result["net_aga"], create_with=0)
             if credit is None or credit is INSUFFICIENT:
                 self.store.rollback_sell(uid, token_amount, result)

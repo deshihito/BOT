@@ -113,6 +113,7 @@ class GameLoopMixin:
             # 終了時は発言制限をすべて解除する（死亡者の制限も解く）
             game.silenced_players.clear()
             game.in_discussion = False
+            game.in_night_phase = False
             game.started = False
             if game.roles:
                 try: await self._announce_final_roles(game)
@@ -128,6 +129,7 @@ class GameLoopMixin:
 
     async def run_discussion(self, game, seconds, title):
         if not game.is_running: return
+        game.in_night_phase = False
         game.chairman_skip_event = asyncio.Event()
         game.in_discussion = True
 
@@ -153,6 +155,7 @@ class GameLoopMixin:
 
     async def run_night_phase(self, game):
         if not game.is_running: return
+        game.in_night_phase = True
         jinrou_snapshot.save_boundary_safely(game, "night_start")
         game.day_count += 1
         await game.game_channel.send(f"ーー 第{game.day_count}夜（1分） ーー")
@@ -191,6 +194,7 @@ class GameLoopMixin:
 
         if game.is_running:
             await self._autoplay_night(game)
+        game.in_night_phase = False
         game.silenced_players.clear()
         await self.process_night_results(game)
 
@@ -473,6 +477,7 @@ async def resume_game_loop(cog, game, channel, boundary):
     finally:
         game.silenced_players.clear()
         game.in_discussion = False
+        game.in_night_phase = False
         game.started = False
         if game.roles:
             try:

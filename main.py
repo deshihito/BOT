@@ -60,8 +60,13 @@ class MyBot(commands.Bot):
                     except Exception:
                         err_detail = traceback.format_exc()
                         print(df.format_log(f"FAILED: {filename}\n{err_detail}"))
+                        # print だけだと起動ログ以外に残らないため、Cog 単位の
+                        # 機能消失を logger.error (traceback 付き) でも残す。
+                        logging.getLogger(__name__).error(
+                            "Cog の読み込みに失敗しました: %s", ext_name, exc_info=True)
         else:
             print(df.format_log("ERROR: './cogs' directory not found."))
+            logging.getLogger(__name__).error("'./cogs' directory not found.")
         
         try:
             synced = await sync_application_commands(self)

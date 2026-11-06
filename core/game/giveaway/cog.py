@@ -76,16 +76,35 @@ def build_view(message_id: int, g: dict[str, Any]) -> discord.ui.View:
 
 
 class ManageView(discord.ui.View):
-    """主催者にだけ見える管理ボタン。"""
+    """主催者にだけ見える管理ボタン。
 
-    def __init__(self, cog: "GiveawayCog", message_id: int, status: str):
+    入口リスナー (on_interaction) でも can_manage を検証しているが、
+    View 自体にも host_id を持たせて interaction_check で二重に守る (B-6)。
+    主催者本人とサーバー管理権限 (manage_guild) のある人だけが操作できる。
+    """
+
+    def __init__(self, cog: "GiveawayCog", message_id: int, status: str,
+                 host_id: int | None = None):
         super().__init__(timeout=300)
         self.cog, self.message_id = cog, message_id
+        self.host_id = host_id
         if status == RUNNING:
             self._add("今すぐ抽選して終了", discord.ButtonStyle.primary, self.on_end)
             self._add("中止（参加費は返金）", discord.ButtonStyle.danger, self.on_cancel)
         else:
             self._add("再抽選", discord.ButtonStyle.primary, self.on_reroll)
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if self.host_id is None:
+            return True
+        if interaction.user.id == self.host_id:
+            return True
+        perms = getattr(interaction.user, "guild_permissions", None)
+        if perms and perms.manage_guild:
+            return True
+        await interaction.response.send_message(
+            "管理できるのは主催者とサーバー管理者だけです。", ephemeral=True)
+        return False
 
     def _add(self, label, style, handler):
         b = discord.ui.Button(label=label, style=style)
@@ -369,7 +388,7 @@ class GiveawayCog(commands.Cog):
                 return await interaction.response.send_message("この抽選のデータが見つかりません。", ephemeral=True)
             if not self.can_manage(g, interaction.user):
                 return await interaction.response.send_message("管理できるのは主催者とサーバー管理者だけです。", ephemeral=True)
-            await interaction.response.send_message("この抽選の操作を選んでください。", view=ManageView(self, mid, g["status"]),
+            await interaction.response.send_message("この抽選の操作を選んでください。", view=ManageView(self, mid, g["status"], host_id=g["host_id"]),
                                                     ephemeral=True)
 
     async def giveaway(self, interaction: discord.Interaction, prize: app_commands.Range[str, 1, 200],

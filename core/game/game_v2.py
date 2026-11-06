@@ -12,10 +12,46 @@
 もので、ゲーム単体のセッションパネルはこの ``GamePanelView``（ネイティブ
 LayoutView）を使う。秘匿情報の ephemeral ビューも同じ流儀で作る。
 """
+import time
+
 import discord
 
 MAX_ROWS = 5          # Discord の ActionRow 上限
 MAX_BUTTONS_PER_ROW = 5
+
+#: ゲームパネルのユーザー単位クールダウン (E-16 の部分実施)。
+#: 盤面の PIL 再描画を伴う操作の連打で Pi の応答性が落ちるのを防ぐ。
+#: 対象は GamePanelView 系パネル (ボードゲーム・ラウンド4以降のゲーム)。
+#: panel_v2 側の汎用パネル全体への一律適用は、対象 View の種類が広く
+#: 影響を切り分けられないため見送り (GamePanelView に限定する)。
+PANEL_COOLDOWN_SECONDS = 1.0
+
+
+class InteractionCooldown:
+    """ユーザー単位の短いクールダウン判定 (純粋な時刻計算のみ)。
+
+    ``check`` が True のときだけ通し、その時刻を記録する。通らなかった
+    呼び出しは記録を更新しない (連打し続けても待ち時間が延びない)。
+    """
+
+    def __init__(self, window: float = PANEL_COOLDOWN_SECONDS):
+        self.window = float(window)
+        self._last: dict[int, float] = {}
+
+    def check(self, user_id: int, now: float | None = None) -> bool:
+        now = time.monotonic() if now is None else float(now)
+        last = self._last.get(user_id)
+        if last is not None and now - last < self.window:
+            return False
+        self._last[user_id] = now
+        return True
+
+    def remaining(self, user_id: int, now: float | None = None) -> float:
+        now = time.monotonic() if now is None else float(now)
+        last = self._last.get(user_id)
+        if last is None:
+            return 0.0
+        return max(0.0, self.window - (now - last))
 
 
 def count_buttons(view) -> int:
@@ -54,7 +90,24 @@ class GamePanelView(discord.ui.LayoutView):
         self._body = body
         self._rows: list[discord.ui.ActionRow] = []
         self._extra: list[discord.ui.Item] = []
+        # パネル単位×ユーザー単位のクールダウン (E-16)。所有者チェック等を
+        # 上書きしているサブクラスは、最後に super().interaction_check を
+        # 呼ぶことでこの制限も受ける。
+        self._cooldown = InteractionCooldown()
         self._rebuild()
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        user = getattr(interaction, "user", None)
+        user_id = getattr(user, "id", None)
+        if user_id is None or self._cooldown.check(user_id):
+            return True
+        try:
+            await interaction.response.send_message(
+                "操作が速すぎます。少し待ってからもう一度押してください。",
+                ephemeral=True)
+        except Exception:
+            pass
+        return False
 
     def _rebuild(self) -> None:
         self.clear_items()

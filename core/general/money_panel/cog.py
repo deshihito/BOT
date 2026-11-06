@@ -94,9 +94,9 @@ def _next_step_line(status: dict) -> str | None:
     どれにも当たらなければ何も出さない。
     """
     if status.get("prison_remaining"):
-        # 逮捕中は status_embed の「状態」フィールドが残り時間つきで
-        # 担うため、ここでは出さない（同一画面の二重表示の解消、R4-2）。
-        # 逮捕中は他の「次の1手」も実行できないので None でよい。
+        # 逮捕状態は公開パネルに出さない（B-2）。本人への通知は
+        # show_panel の ephemeral フォローアップが担うため、ここでは
+        # 出さない。逮捕中は他の「次の1手」も実行できないので None でよい。
         return None
     if status.get("workshop_ready"):
         return "🏭 工房で受け取りができます。"
@@ -117,13 +117,10 @@ def status_embed(status: dict) -> discord.Embed:
     next_step = _next_step_line(status)
     if next_step is not None:
         embed.description = next_step
-    if status.get("prison_remaining"):
-        embed.add_field(
-            name="状態",
-            value=(f"🚔 **逮捕中**（釈放まであと"
-                   f"{_fmt_minutes(status['prison_remaining'])}）。"
-                   "マネー系の操作はできません。"),
-            inline=False)
+    # B-2: 逮捕状態（逮捕中であること・残り時間）は公開パネルに出さない。
+    # S4 の線引き（逮捕・没収・脱獄の結果は ephemeral）に合わせ、状態も
+    # 本人にだけ ephemeral で知らせる（show_panel 参照）。残高等の表示は
+    # 公開原則どおり維持する。
     embed.add_field(
         name="AGOコイン", value=f"**{status['balance']:,} AGO**", inline=True)
     if status.get("rate") is not None:
@@ -620,10 +617,23 @@ class MoneyPanelCog(commands.Cog):
 
         return status
 
+    async def cog_unload(self) -> None:
+        # E-2: 通常再起動でも受け取り記録が消えないよう、終了時に
+        # スターター／デイリー両ストアを明示的に flush する
+        # （claim_daily_bonus の成功後 flush と同じ永続化方針）。
+        self.starter_store.flush()
+        self.daily_store.flush()
+
     # ------------------------------------------------------------------ スターター
     async def claim_starter(self, user_id: int) -> str:
         """スターター一式を1回だけ付与する（受け取り判定はストアで原子的に）。"""
         uid = str(user_id)
+        # E-6: claim_daily_bonus と同型に、try_claim の前に prison
+        # チェックを入れる（チェック→claim の順序。逮捕中に受け取り
+        # 済みにしてしまうと、釈放後に再受取できなくなるため）。
+        blocked = prison_core.block_message(uid, store=self._prison_store())
+        if blocked:
+            return blocked
         if not self.starter_store.try_claim(uid):
             return "スターターは受け取り済みです。"
         wallet = self.bot.get_cog("WalletCog")
@@ -643,6 +653,10 @@ class MoneyPanelCog(commands.Cog):
             logger.exception("money_panel: スターター付与に失敗 user=%s", uid)
             self.starter_store.unclaim(uid)
             return "受け取りに失敗しました。時間をおいて再試行してください。"
+        # E-2: コインは DB へ即時コミットされるため、受け取り記録も
+        # 成功直後に flush して永続化する（claim_daily_bonus と同型）。
+        # これが無いと通常再起動で記録が巻き戻り再受取できてしまう。
+        self.starter_store.flush()
         try:
             await asyncio.to_thread(lambda: config.db_api.table(
                 "transaction_history").insert({
@@ -736,6 +750,19 @@ class MoneyPanelCog(commands.Cog):
             view.message = await interaction.original_response()
         except Exception:
             logger.exception("money_panel: パネルのメッセージ取得に失敗しました")
+        # B-2: 逮捕状態は公開パネルに出さない代わりに、本人にだけ
+        # ephemeral で知らせる（最小の本人確認経路。脱獄試行の結果も
+        # 従来どおり ephemeral で返るため、そちらとも整合する）。
+        try:
+            pstatus = self._prison_store().status(str(interaction.user.id))
+            if pstatus.get("imprisoned"):
+                await interaction.followup.send(
+                    f"🚔 **逮捕中**（釈放まであと"
+                    f"{_fmt_minutes(pstatus['remaining'])}）。"
+                    "マネー系の操作はできません。",
+                    ephemeral=True)
+        except Exception:
+            logger.exception("money_panel: 逮捕状態の ephemeral 通知に失敗しました")
 
 
 async def setup(bot: commands.Bot):

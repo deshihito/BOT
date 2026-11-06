@@ -4,6 +4,71 @@ from __future__ import annotations
 
 from .common import *
 
+class PayConfirmView(discord.ui.View):
+    """送金の確認ビュー（B-8）。
+
+    PayModal 送信直後は送金せず、宛先の表示名＋金額を見せて本人にだけ
+    確認させる。確認ボタンで初めて WalletCog.pay を実行し、
+    キャンセル／タイムアウトでは送金しない。ephemeral で出し、
+    押せるのは送金者本人のみ（interaction_check）。
+    """
+
+    def __init__(self, cog, sender_id: int, receiver, amount: int):
+        super().__init__(timeout=180)
+        self.cog = cog
+        self.sender_id = sender_id
+        self.receiver = receiver
+        self.amount = amount
+        self.message = None
+        self.finished = False
+
+    def confirm_text(self) -> str:
+        name = getattr(self.receiver, "display_name", None) or str(self.receiver)
+        mention = getattr(self.receiver, "mention", None) or name
+        return (
+            f"{name} さん（{mention}）へ **{self.amount:,} AGO** を送りますか？\n"
+            "送金は取り消せません。宛先と金額を確認してください。")
+
+    async def interaction_check(self, interaction) -> bool:
+        return interaction.user.id == self.sender_id
+
+    def _disable_all(self) -> None:
+        for child in self.children:
+            child.disabled = True
+
+    @discord.ui.button(label="送金する", style=discord.ButtonStyle.primary)
+    async def confirm_button(self, interaction, button):
+        # pay はこの interaction の response を使うため、ここでは
+        # response を消費せずにそのまま渡す（pay 側で prison の
+        # 再チェックも行われる、E-8a）。
+        self.finished = True
+        self._disable_all()
+        self.stop()
+        wallet = self.cog.bot.get_cog("WalletCog")
+        if wallet is None:
+            return await interaction.response.send_message(
+                "WalletCogが読み込まれていません。", ephemeral=True)
+        await wallet.pay(interaction, self.receiver, self.amount)
+
+    @discord.ui.button(label="キャンセル", style=discord.ButtonStyle.secondary)
+    async def cancel_button(self, interaction, button):
+        self.finished = True
+        self._disable_all()
+        await interaction.response.edit_message(
+            content="送金をキャンセルしました。", view=self)
+        self.stop()
+
+    async def on_timeout(self) -> None:
+        if self.finished or self.message is None:
+            return
+        self._disable_all()
+        try:
+            await self.message.edit(
+                content="時間切れのため送金しませんでした。", view=self)
+        except Exception:
+            pass
+
+
 class PayModal(discord.ui.Modal, title="コインを送金"):
     receiver_id = discord.ui.TextInput(label="送金先のユーザーID", max_length=20)
     amount = discord.ui.TextInput(label="送金するAGO", max_length=9)
@@ -18,7 +83,22 @@ class PayModal(discord.ui.Modal, title="コインを送金"):
             amount = int(self.amount.value)
         except (ValueError, discord.HTTPException):
             return await interaction.response.send_message("ユーザーIDまたは数量が正しくありません。", ephemeral=True)
-        await self.cog.bot.get_cog("WalletCog").pay(interaction, receiver, amount)
+        # B-8: 即送金せず、明らかに無効なものだけ先に弾いてから
+        # 宛先＋金額の確認ビュー（ephemeral・本人のみ）を挟む。
+        # 最終判定（残高・prison 再チェック含む）は確認後の pay 側で行う。
+        if amount <= 0:
+            return await interaction.response.send_message("1コイン以上を指定してください。", ephemeral=True)
+        if receiver.id == interaction.user.id:
+            return await interaction.response.send_message("自分自身に送金することはできません。", ephemeral=True)
+        if receiver.bot:
+            return await interaction.response.send_message("Bot には送金できません。", ephemeral=True)
+        view = PayConfirmView(self.cog, interaction.user.id, receiver, amount)
+        await interaction.response.send_message(
+            view.confirm_text(), view=view, ephemeral=True)
+        try:
+            view.message = await interaction.original_response()
+        except Exception:
+            view.message = None
 
 
 class GeneralHistorySelect(discord.ui.Select):

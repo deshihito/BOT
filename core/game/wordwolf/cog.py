@@ -20,6 +20,10 @@ import random
 
 logger = logging.getLogger(__name__)
 
+#: お題・ウルフ抽選専用の CSPRNG (E-12)。グローバル random (MT) の状態を
+#: 他機能と共有しないため SystemRandom を使う。
+_RNG = random.SystemRandom()
+
 RECRUIT_SECONDS = 60
 CHAT_MINUTES = 5  # 本編の長さ（分）。タイマーが 1 分ごとに経過報告を出す
 LIST_NAMES = {"standard": "標準", "starail": "崩壊：スターレイル", "genshin": "原神"}
@@ -58,9 +62,9 @@ class WordWolfSession:
 
     async def begin(self):
         pool = self.cog.word_pools.get(self.wordlist, self.cog.word_pools["standard"])
-        selected_words = random.sample(pool, 2)
+        selected_words = _RNG.sample(pool, 2)
         common_word, wolf_word = selected_words
-        self.wolf = random.choice(self.players)
+        self.wolf = _RNG.choice(self.players)
         self.alive_players = self.players.copy()
 
         for p in self.players:

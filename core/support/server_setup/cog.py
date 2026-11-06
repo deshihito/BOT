@@ -25,6 +25,34 @@ logger = logging.getLogger(__name__)
 
 EMBED_COLOR = 0x5865F2
 
+#: Discord の Embed フィールド値の上限。
+FIELD_VALUE_LIMIT = 1024
+
+
+def channel_list_text(channel_ids, limit: int = FIELD_VALUE_LIMIT) -> str:
+    """チャンネルメンションの列挙をフィールド上限に収まる形で返す。
+
+    全件を並べると 1024 字を超えて Embed 送信自体が失敗するため、
+    収まる分だけ並べて残りは「…他N件」で示す。1件も収まらない場合は
+    件数だけの表示にフォールバックする。
+    """
+    ids = list(channel_ids)
+    if not ids:
+        return "なし"
+    shown: list[str] = []
+    best = None
+    for cid in ids:
+        shown.append(cid)
+        remaining = len(ids) - len(shown)
+        suffix = f" …他{remaining}件" if remaining else ""
+        candidate = " ".join(f"<#{c}>" for c in shown) + suffix
+        if len(candidate) > limit:
+            break
+        best = candidate
+    if best is not None:
+        return best
+    return f"{len(ids)}件のチャンネル"
+
 
 # ---------------------------------------------------------------- あいさつ
 def can_post(channel, me) -> bool:
@@ -294,7 +322,7 @@ class SetupWizard(discord.ui.View):
                     f"サーバー {len(m['blocked_guilds'])} 件／連投: 10 秒に 5 件まで"), inline=False)
                 others = [cid for cid in self.global_channel_ids() if cid != self.channel.id]
                 if others:
-                    embed.add_field(name="このサーバーのほかのチャンネル", value=" ".join(f"<#{cid}>" for cid in others))
+                    embed.add_field(name="このサーバーのほかのチャンネル", value=channel_list_text(others))
         elif self.step == "mute":
             cog = self.cog.mute_cog()
             embed = discord.Embed(title=f"🛠️ 初期設定 {number}: ミュート管理ロール", color=EMBED_COLOR, description=(
@@ -317,7 +345,7 @@ class SetupWizard(discord.ui.View):
                 f"自己紹介: {self._channel_text(a['intro_channel_id'])}"
             ), inline=False)
             ids = self.global_channel_ids()
-            embed.add_field(name="グローバルチャット", value=" ".join(f"<#{cid}>" for cid in ids) or "なし", inline=False)
+            embed.add_field(name="グローバルチャット", value=channel_list_text(ids), inline=False)
             mute = self.cog.mute_cog()
             if mute is not None:
                 embed.add_field(name="ミュート管理ロール", value=self._role_text(mute.admin_roles.get(self.guild.id)), inline=False)

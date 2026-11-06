@@ -8,7 +8,12 @@ import unittest
 
 
 class MoneyPanelPrisonDedupTest(unittest.TestCase):
-    """R4-2: 逮捕時は「次の1手」行と「状態」フィールドの二重表示を解消。"""
+    """R4-2 改訂 (B-2): 逮捕情報は公開パネルに出さない。
+
+    旧仕様は「状態」フィールドのみで二重表示を解消したが、セーフティ監査
+    B-2 と S4 の線引き（逮捕は非公開側）に合わせ、公開 embed からは
+    逮捕中であることも残り時間も出さない。本人への通知は ephemeral 経路。
+    """
 
     def test_prison_shows_state_field_only(self):
         from cogs.money_panel import status_embed
@@ -16,8 +21,9 @@ class MoneyPanelPrisonDedupTest(unittest.TestCase):
         embed = status_embed({"balance": 100, "prison_remaining": 600.0})
         self.assertIsNone(embed.description)
         fields = {f.name: f.value for f in embed.fields}
-        self.assertIn("逮捕中", fields["状態"])
-        self.assertIn("約10分", fields["状態"])
+        self.assertNotIn("状態", fields)
+        for value in fields.values():
+            self.assertNotIn("逮捕中", value)
 
     def test_next_step_still_shows_for_starter(self):
         from cogs.money_panel import status_embed

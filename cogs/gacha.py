@@ -202,7 +202,9 @@ class GachaCog(commands.Cog):
                  rng: random.Random | None = None):
         self.bot = bot
         self.store = store if store is not None else gacha_core.GachaStore()
-        self._rng = rng if rng is not None else random.Random()
+        # 既定 RNG は SystemRandom (E-13: ガチャ抽選は CSPRNG)。
+        # テスト等が rng を注入した場合はそのまま使う (シード固定を壊さない)。
+        self._rng = rng if rng is not None else random.SystemRandom()
 
     async def cog_load(self) -> None:
         if not self.flush_loop.is_running():
@@ -263,34 +265,55 @@ class GachaCog(commands.Cog):
         if debit is None:
             return "コインの更新に失敗しました。残高は変わっていません。"
         await self._record_history(uid, "gacha", price, gacha_core.HISTORY_REASON)
-        # 天井（S6-2）: SSR が出ていない累計が上限に届く抽選は SSR 確定。
-        rolls, new_pity = gacha_core.roll_pulls(
-            self._rng, count, self.store.pity(uid))
-        self.store.set_pity(uid, new_pity)
-        self.store.record_pulls(uid, count)
-        # クラン貢献フック（所属中のみ・失敗してもガチャに影響させない）。
-        for _ in range(count):
-            clan_core.award_points(uid, clan_core.POINTS_GACHA_PER_PULL, "gacha")
-        lines = ["🎰 **ガチャ結果**"]
-        dup_coins = 0
-        for character in rolls:
-            if self.store.count_of(uid, character["id"]) > 0:
-                coins = gacha_core.DUPLICATE_COINS[character["rarity"]]
-                dup_coins += coins
-                lines.append(
-                    f"{gacha_core.character_line(character)}"
-                    f" — かぶり（{coins:,} AGOに変換）")
-            else:
-                self.store.add(uid, character["id"])
-                lines.append(f"{gacha_core.character_line(character)} — **NEW!**")
+        try:
+            # 天井（S6-2）: SSR が出ていない累計が上限に届く抽選は SSR 確定。
+            rolls, new_pity = gacha_core.roll_pulls(
+                self._rng, count, self.store.pity(uid))
+            self.store.set_pity(uid, new_pity)
+            self.store.record_pulls(uid, count)
+            # クラン貢献フック（所属中のみ・失敗してもガチャに影響させない）。
+            for _ in range(count):
+                clan_core.award_points(uid, clan_core.POINTS_GACHA_PER_PULL, "gacha")
+            lines = ["🎰 **ガチャ結果**"]
+            dup_coins = 0
+            for character in rolls:
+                if self.store.count_of(uid, character["id"]) > 0:
+                    coins = gacha_core.DUPLICATE_COINS[character["rarity"]]
+                    dup_coins += coins
+                    lines.append(
+                        f"{gacha_core.character_line(character)}"
+                        f" — かぶり（{coins:,} AGOに変換）")
+                else:
+                    self.store.add(uid, character["id"])
+                    lines.append(f"{gacha_core.character_line(character)} — **NEW!**")
+        except Exception:
+            # debit 後の例外で支払いだけが残らないよう、返金を試みる (E-5c)。
+            logger.exception("gacha: 抽選の反映に失敗 user=%s count=%s", uid, count)
+            refund = await wallet._change_balance(
+                uid, price, create_with=wallet_module.NEW_USER_BALANCE)
+            if refund is None or refund is wallet_module.INSUFFICIENT:
+                logger.critical(
+                    "gacha: 抽選失敗時の返金に失敗しました。"
+                    "手動で戻してください user=%s amount=%s", uid, price)
+                return ("ガチャの処理に失敗しました。返金も完了していません。"
+                        "Botの運営に連絡してください。")
+            return "ガチャの処理に失敗しました。支払ったコインは返金しました。"
         balance = debit
         if dup_coins:
             credit = await wallet._change_balance(
                 uid, dup_coins, create_with=wallet_module.NEW_USER_BALANCE)
-            if credit is not None:
+            if credit is not None and credit is not wallet_module.INSUFFICIENT:
                 balance = credit
                 await self._record_history(
                     "gacha", uid, dup_coins, gacha_core.HISTORY_REASON_DUP)
+            else:
+                # 変換コインの付与失敗を握り潰して成功表示にしない (E-5c)。
+                logger.critical(
+                    "gacha: かぶり変換コインの付与に失敗しました。"
+                    "手動で戻してください user=%s amount=%s", uid, dup_coins)
+                lines.append(
+                    "⚠️ かぶり変換コインの付与に失敗しました。"
+                    "Botの運営に連絡してください。")
         lines.append(f"残高: {balance:,} AGO")
         return "\n".join(lines)
 

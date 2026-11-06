@@ -597,8 +597,9 @@ class CogFlowTest(unittest.TestCase):
             self.assertIn("全額没収", message)
             self.assertEqual(wallet.balances["1"], 0)
 
-    def test_slot_spin_penalty_can_take_balance_negative(self):
-        # 原典どおり 6ペナルティは残高を割って引き落とされる。
+    def test_slot_spin_penalty_never_takes_balance_negative(self):
+        # E-5a: 6ペナルティは残高の範囲でクランプされ、残高は負にならない
+        # （旧仕様は -9,000 まで割っていたが「残高は負にならない」不変条件を優先）。
         with tempfile.TemporaryDirectory() as tmp:
             wallet = _FakeWallet({"1": 10000})
             rng = _ScriptedRandom(choices_results=[[6, 6, 1, 2, 3, 4, 5]])
@@ -606,7 +607,7 @@ class CogFlowTest(unittest.TestCase):
             asyncio.run(cog.execute_slot_start(1, 10))
             self.assertEqual(wallet.balances["1"], 0)
             asyncio.run(cog.execute_slot_spin(1))
-            self.assertEqual(wallet.balances["1"], -9000)
+            self.assertEqual(wallet.balances["1"], 0)
 
     def test_double_flow_win_and_cashout(self):
         with tempfile.TemporaryDirectory() as tmp:

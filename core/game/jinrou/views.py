@@ -61,14 +61,23 @@ class SetupView(discord.ui.View):
         req_sel.callback = self._req_callback
         self.add_item(req_sel)
 
-        # 除外役職セレクト
+        # 除外役職セレクト（全26役職を 25 件上限に収めるため 2 つに分割する）
+        self._exc_values_a: list = []
+        self._exc_values_b: list = []
         exc_sel = discord.ui.Select(
-            placeholder="除外役職を選択（最大4つ）",
-            options=[discord.SelectOption(label=r, value=r) for r in self.ALL_ROLES[:25]],
+            placeholder="除外役職を選択（1/2・合計最大4つ）",
+            options=[discord.SelectOption(label=r, value=r) for r in self.ALL_ROLES[:13]],
             min_values=0, max_values=4, row=2
         )
-        exc_sel.callback = self._exc_callback
+        exc_sel.callback = self._exc_callback_a
         self.add_item(exc_sel)
+        exc_sel2 = discord.ui.Select(
+            placeholder="除外役職を選択（2/2・合計最大4つ）",
+            options=[discord.SelectOption(label=r, value=r) for r in self.ALL_ROLES[13:]],
+            min_values=0, max_values=4, row=3
+        )
+        exc_sel2.callback = self._exc_callback_b
+        self.add_item(exc_sel2)
 
     async def _mode_callback(self, interaction: discord.Interaction):
         self.game.game_mode = interaction.data.get("values", ["プロ"])[0]
@@ -78,11 +87,25 @@ class SetupView(discord.ui.View):
         self.game.required_roles = list(interaction.data.get("values", []))
         await interaction.response.defer()
 
-    async def _exc_callback(self, interaction: discord.Interaction):
-        self.game.excluded_roles = list(interaction.data.get("values", []))
+    def _sync_excluded_roles(self):
+        merged = list(self._exc_values_a) + [r for r in self._exc_values_b if r not in self._exc_values_a]
+        self.game.excluded_roles = merged[:4]
+
+    async def _exc_callback_a(self, interaction: discord.Interaction):
+        self._exc_values_a = list(interaction.data.get("values", []))
+        self._sync_excluded_roles()
         await interaction.response.defer()
 
-    @discord.ui.button(label="次へ進む", style=discord.ButtonStyle.primary, row=3)
+    async def _exc_callback_b(self, interaction: discord.Interaction):
+        self._exc_values_b = list(interaction.data.get("values", []))
+        self._sync_excluded_roles()
+        await interaction.response.defer()
+
+    # 後方互換: 単一セレクト時代の名前で呼ばれた場合は A 側として扱う
+    async def _exc_callback(self, interaction: discord.Interaction):
+        await self._exc_callback_a(interaction)
+
+    @discord.ui.button(label="次へ進む", style=discord.ButtonStyle.primary, row=4)
     async def next_step(self, interaction: discord.Interaction, button: discord.ui.Button):
         # ベーシックモード、または既に4枠埋まっている場合は発展職指定をスキップして確定へ
         if self.game.game_mode == "ベーシック" or len(self.game.required_roles) >= 4:
@@ -123,7 +146,7 @@ class SetupView(discord.ui.View):
 class AdvancedSetupView(discord.ui.View):
     """プロモード専用の必須発展職選定パネル（第二段階）"""
     ADV_ROLES = [
-        "タフむに", "大霊媒師", "罠師", "ミュージシャン", "デカ狼", "狂信者", "コウモリむに", "ワンころ", "もくもく", "ヤンデレ"
+        "タフむに", "大霊媒師", "罠師", "ミュージシャン", "デカ狼", "狂信者", "コウモリむに", "ワンころ", "もくもく", "ネット民", "ヤンデレ"
     ]
 
     def __init__(self, game, cog, channel):
@@ -183,6 +206,9 @@ class RecruitView(discord.ui.View):
     async def join(self, interaction: discord.Interaction, button: discord.ui.Button):
         if interaction.user in self.game.players:
             embed = discord.Embed(description="既に参加しています。", color=0xFFFFFF)
+            return await interaction.response.send_message(embed=embed, ephemeral=True)
+        if len(self.game.players) >= MAX_PLAYERS:
+            embed = discord.Embed(description=f"定員（{MAX_PLAYERS}人）に達しました。これ以上参加できません。", color=0xFFFFFF)
             return await interaction.response.send_message(embed=embed, ephemeral=True)
         self.game.players.append(interaction.user)
         await interaction.response.send_message(
@@ -294,6 +320,8 @@ class GlobalJoinView(discord.ui.View):
             return await interaction.response.send_message("ゲームが既に進行中のため、途中参加できません。", ephemeral=True)
         if any(p.id == interaction.user.id for p in game.players):
             return await interaction.response.send_message("既にゲームに参加しています。", ephemeral=True)
+        if len(game.players) >= MAX_PLAYERS:
+            return await interaction.response.send_message(f"定員（{MAX_PLAYERS}人）に達しました。これ以上参加できません。", ephemeral=True)
         if interaction.channel is not None and all(c.id != interaction.channel.id for c in game.channels):
             game.channels.append(interaction.channel)
         game.players.append(interaction.user)
@@ -448,7 +476,7 @@ class NightActionView(discord.ui.View):
                 return await interaction.response.send_message(embed=embed, ephemeral=True)
             opts = [discord.SelectOption(label=p.display_name, value=str(p.id)) for p in dead_players]
             embed = discord.Embed(description="調べる死者を選択してください：", color=0xFFFFFF)
-            return await interaction.response.send_message(embed=embed, view=ActionSelectView(self.game, opts, role), ephemeral=True)
+            return await interaction.response.send_message(embed=embed, view=ActionSelectView(self.game, opts, role, actor_id=p_id), ephemeral=True)
 
         if role == "ミュージシャン":
             if self.game.musician_party_used:
@@ -473,19 +501,38 @@ class NightActionView(discord.ui.View):
             return await interaction.response.send_message(embed=embed, ephemeral=True)
 
         embed = discord.Embed(description="対象を選択してください：", color=0xFFFFFF)
-        await interaction.response.send_message(embed=embed, view=ActionSelectView(self.game, opts, role), ephemeral=True)
+        await interaction.response.send_message(embed=embed, view=ActionSelectView(self.game, opts, role, actor_id=p_id), ephemeral=True)
 
 
 class ActionSelectView(discord.ui.View):
-    def __init__(self, game, options, role):
+    def __init__(self, game, options, role, actor_id=None):
         super().__init__(timeout=60)
         self.game, self.role = game, role
+        self.actor_id = actor_id
         s = discord.ui.Select(options=options)
         s.callback = self.callback
         self.add_item(s)
 
     async def callback(self, interaction: discord.Interaction):
         p_id = interaction.user.id
+        # B-5: 配信方法（ephemeral）に頼らず、View 自体で実行者を検証する
+        if self.actor_id is not None and p_id != self.actor_id:
+            embed = discord.Embed(description="このアクションはあなた宛ではありません。", color=0xFFFFFF)
+            return await interaction.response.send_message(embed=embed, ephemeral=True)
+        if p_id not in [p.id for p in self.game.alive_players]:
+            embed = discord.Embed(description="生存者だけが夜のアクションを行えます。", color=0xFFFFFF)
+            return await interaction.response.send_message(embed=embed, ephemeral=True)
+        if self.game.roles.get(p_id) != self.role:
+            embed = discord.Embed(description="あなたの役職と一致しないアクションです。", color=0xFFFFFF)
+            return await interaction.response.send_message(embed=embed, ephemeral=True)
+        # 夜フェーズ判定: 明示フラグがあればそれを優先し、無い旧状態では
+        # 「開始済み・議論中でない」ことを最低条件にする
+        in_night = getattr(self.game, "in_night_phase", None)
+        if in_night is None:
+            in_night = bool(getattr(self.game, "started", False)) and not getattr(self.game, "in_discussion", False)
+        if not in_night:
+            embed = discord.Embed(description="今は夜フェーズではありません。", color=0xFFFFFF)
+            return await interaction.response.send_message(embed=embed, ephemeral=True)
         if p_id in self.game.night_actions:
             embed = discord.Embed(description="既にアクションは受理されています。", color=0xFFFFFF)
             return await interaction.response.send_message(embed=embed, ephemeral=True)

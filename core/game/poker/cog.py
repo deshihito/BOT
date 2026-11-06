@@ -37,8 +37,13 @@ import config
 from cogs.wallet import INSUFFICIENT, NEW_USER_BALANCE
 from core import party_ranking
 from core.game import game_panels
+from core.game import prison as prison_core
 
 logger = logging.getLogger(__name__)
+
+#: 配札シャッフル専用の CSPRNG (E-12)。グローバル random (MT) の状態を
+#: 他機能と共有しないため SystemRandom を使う。
+_SHUFFLE_RNG = random.SystemRandom()
 
 COLOR = 0xFFFFFF
 GAME_ID = "poker"
@@ -527,6 +532,11 @@ class Poker(commands.Cog):
 
     async def buy_in(self, t, user, amount):
         """コイン→チップ。(成功可否, メッセージ) を返す。"""
+        # 逮捕中はマネー系全面禁止 (E-7)。マネージャンルの execute_* と同型に
+        # prison の一元チェックで入口を拒否する。
+        blocked = prison_core.block_message(str(user.id))
+        if blocked:
+            return False, blocked
         if user.id not in t.players:
             return False, "このテーブルに参加していません。"
         if amount not in BUYIN_OPTIONS:
@@ -552,6 +562,12 @@ class Poker(commands.Cog):
 
     async def cash_out(self, t, uid):
         """残チップ→コイン。成功したら True。失敗時は台帳を残して False。"""
+        # 逮捕中はマネー系全面禁止 (E-7)。拒否時はチップを台帳に残したまま
+        # False を返し、釈放後の精算・再起動時の自動返金で戻る経路を残す
+        # (起動時の未精算返金 _refund_orphaned はユーザー操作ではないため
+        # ここを通らず従来どおり返金される)。
+        if prison_core.block_message(str(uid)):
+            return False
         amount = t.stacks.get(uid, 0)
         if amount <= 0:
             t.stacks.pop(uid, None)
@@ -714,7 +730,7 @@ class Poker(commands.Cog):
     async def run_hand(self, channel, t, seated):
         t.phase = "betting"
         t.deck = deck()
-        random.shuffle(t.deck)
+        _SHUFFLE_RNG.shuffle(t.deck)
         t.hands = {uid: [t.deck.pop() for _ in range(5)] for uid in seated}
         t.submitted = set()
         # アンティ（スタック→ポット。台帳上の預かり総額は変わらない）

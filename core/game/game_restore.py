@@ -32,8 +32,11 @@
 対象ゲーム（ターン制で状態が素直に JSON 化できるもの）:
     shogi / chess / othello / daifugo / babanuki / shinkei / shiritori /
     uno / wordle / gomoku / connect4
+    jinrou（フェーズ境界スナップショット方式。core/game/jinrou_snapshot.py が
+    入力が集まりきった境界でのみ保存し、gameloop.restore_jinrou_sessions が
+    境界から再構築する。フェーズ途中経過は復旧対象外）
 対象外（理由は各 cog ではなく本フェーズの報告に集約）:
-    jinrou / wordwolf（Event 駆動のフェーズ機械で途中状態を再構築できない）、
+    wordwolf（Event 駆動のフェーズ機械で途中状態を再構築できない）、
     janken（同時選択の短時間ラウンド＋賭けコインのエスクロー途中）、
     poker（チップ制テーブル。対局は復旧しないが、預かりチップは
     cogs/poker.py の台帳 data/poker_chips.json で起動時に全額返金する）、
@@ -66,7 +69,7 @@ _STRAY_PATH = data_paths.stray_path(__file__, "game_restore.json")
 GAME_IDS = (
     "shogi", "chess", "othello", "daifugo", "babanuki",
     "shinkei", "shiritori", "uno", "wordle",
-    "gomoku", "connect4",
+    "gomoku", "connect4", "jinrou",
 )
 
 FLUSH_EVERY_EVENTS = 5
@@ -147,7 +150,7 @@ class GameRestoreStore:
             return _empty_data()
         return self._clean_sections(raw)
 
-    def flush(self) -> None:
+    def flush(self) -> bool:
         with self._lock:
             payload = copy.deepcopy(self._data)
             self._dirty = 0
@@ -157,8 +160,10 @@ class GameRestoreStore:
             tmp = self._path.with_suffix(self._path.suffix + ".tmp")
             tmp.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
             tmp.replace(self._path)
+            return True
         except Exception:
             logger.exception("game_restore: 状態の保存に失敗しました path=%s", self._path)
+            return False
 
     def _mark_dirty(self) -> None:
         self._dirty += 1
@@ -223,8 +228,8 @@ def reset_store(path: Path | str | None = None) -> GameRestoreStore:
 # ----------------------------------------------------------------------
 
 def save_session(game_id: str, channel_id: int, guild_id: int | None,
-                 state: dict[str, Any]) -> None:
-    """対局のチェックポイントを保存する。"""
+                 state: dict[str, Any]) -> bool:
+    """対局のチェックポイントを保存する。成否を返す（失敗は握るが warning で残す）。"""
     try:
         entry = {
             "game": game_id,
@@ -236,20 +241,24 @@ def save_session(game_id: str, channel_id: int, guild_id: int | None,
         store = get_store()
         store.set_entry(game_id, int(channel_id), entry)
         store.maybe_flush()
+        return True
     except Exception:
-        logger.debug("game_restore: %s (channel %s) のスナップショット保存に失敗しました",
-                     game_id, channel_id, exc_info=True)
+        logger.warning("game_restore: %s (channel %s) のスナップショット保存に失敗しました",
+                       game_id, channel_id, exc_info=True)
+        return False
 
 
-def clear_session(game_id: str, channel_id: int) -> None:
-    """対局終了時・復旧できなかったときの掃除。"""
+def clear_session(game_id: str, channel_id: int) -> bool:
+    """対局終了時・復旧できなかったときの掃除。成否を返す。"""
     try:
         store = get_store()
         store.set_entry(game_id, int(channel_id), None)
         store.maybe_flush()
+        return True
     except Exception:
-        logger.debug("game_restore: %s (channel %s) のスナップショット削除に失敗しました",
-                     game_id, channel_id, exc_info=True)
+        logger.warning("game_restore: %s (channel %s) のスナップショット削除に失敗しました",
+                       game_id, channel_id, exc_info=True)
+        return False
 
 
 def session_entries(game_id: str) -> dict[int, dict[str, Any]]:
@@ -272,11 +281,12 @@ def session_entries(game_id: str) -> dict[int, dict[str, Any]]:
     return entries
 
 
-def flush_store() -> None:
+def flush_store() -> bool:
     try:
-        get_store().flush()
+        return bool(get_store().flush())
     except Exception:
-        logger.debug("game_restore: スナップショットの保存に失敗しました", exc_info=True)
+        logger.warning("game_restore: スナップショットの保存に失敗しました", exc_info=True)
+        return False
 
 
 def member_ref(member) -> dict[str, Any]:

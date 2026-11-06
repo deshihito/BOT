@@ -128,8 +128,6 @@ class RecordingSink(voice_recv.AudioSink):
         self._running = False
         self.packet_queue.clear()
 
-    def snapshot(self) -> dict[str, bytes]:
-        return {k: bytes(v) for k, v in self.buffers.items()}
     def _write_inner(self, user, data) -> None:
         self.write_call_count += 1
         key, label, user_id = self._identify(user, data)

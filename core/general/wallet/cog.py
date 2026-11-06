@@ -8,6 +8,7 @@ import os
 import traceback
 from core.api_client import APIError
 from core.api_retry import run_with_retry
+from core.game import prison as prison_core
 from core.user_names import resolve_display_names
 
 logger = logging.getLogger(__name__)
@@ -136,6 +137,13 @@ class WalletCog(commands.Cog):
             await interaction.followup.send(f"データの取得中にエラーが発生しました。\nエラー内容: `{type(e).__name__}`", ephemeral=True)
 
     async def pay(self, interaction: discord.Interaction, receiver: discord.User, amount: int):
+        # E-8a: モーダルを開いた時点の dispatch チェックだけでは
+        # TOCTOU（開いた後に逮捕される）を通すため、実行直前に
+        # prison を再チェックする（他の execute_* と同型の二層防御）。
+        blocked = prison_core.block_message(str(interaction.user.id))
+        if blocked:
+            await interaction.response.send_message(blocked, ephemeral=True)
+            return
         if amount <= 0:
             await interaction.response.send_message("1コイン以上を指定してください。", ephemeral=True)
             return
