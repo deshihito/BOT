@@ -6,7 +6,7 @@
   ログを 1 回だけ出して、以後はメモリだけで続ける（ゲームは止めない）。
 - ``top`` はビュー ``party_game_ranking`` を読み、読めなければメモリの表を返す。
 - 自前API クライアントの取り出しは ``_default_client`` の 1 か所だけ。
-  共通の接続モジュール core/api_client.py（#59）があればそれを、無ければ config.db_api を使う。
+  共通の接続モジュール core/support/api_client.py（#59）があればそれを、無ければ config.db_api を使う。
 """
 import asyncio
 import logging
@@ -25,7 +25,7 @@ _MISSING = object()
 
 def _default_client():
     try:  # #59 の共通モジュールがあればそれを使う
-        from core import api_client
+        from core.support import api_client
         return api_client.get_client()
     except ImportError:
         pass
