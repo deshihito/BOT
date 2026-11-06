@@ -10,11 +10,15 @@
 どちらも PNG の bytes を返す純関数で、単体テストで検証できる。
 """
 import io
+from collections import OrderedDict
 from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFont
 
-FONT_PATH = Path(__file__).resolve().parent.parent / "font.ttf"
+# このファイルは core/game/ 配下にあるため、リポジトリ直下の font.ttf は parents[2]。
+# （core/ 直下にあった時代の parent.parent のままだと core/font.ttf を指して
+#  存在せず、全描画が PIL 既定フォントに silently フォールバックしていた。）
+FONT_PATH = Path(__file__).resolve().parents[2] / "font.ttf"
 TILE = 64
 GAP = 6
 PAD = 12
@@ -27,6 +31,34 @@ def _font(size: int):
         return ImageFont.truetype(str(FONT_PATH), size)
     except Exception:
         return ImageFont.load_default()
+
+
+# ---------------------------------------------------------------------------
+# 盤面画像キャッシュ（盤面画像化タスク 2026-11-06）
+#
+# 1手ごとの再描画は Pi 負荷になるため、同一状態の盤面は再生成しない。
+# 状態をキー化できる呼び出し側が render_cached 経由で描く。プロセス全体で
+# 最大 _CACHE_MAX 件の LRU（盤面は大きくても数百KBなので 32 件でも安全）。
+_CACHE_MAX = 32
+_render_cache: "OrderedDict[object, bytes]" = OrderedDict()
+
+
+def render_cached(key, producer) -> bytes:
+    """key がキャッシュにあればそれを返し、無ければ producer() で生成して保持する。"""
+    if key in _render_cache:
+        _render_cache.move_to_end(key)
+        return _render_cache[key]
+    data = producer()
+    _render_cache[key] = data
+    while len(_render_cache) > _CACHE_MAX:
+        _render_cache.popitem(last=False)
+    return data
+
+
+def _centered(draw, cx, cy, text, font, fill):
+    bbox = draw.textbbox((0, 0), text, font=font)
+    draw.text((cx - (bbox[2] - bbox[0]) / 2 - bbox[0], cy - (bbox[3] - bbox[1]) / 2 - bbox[1]),
+              text, fill=fill, font=font)
 
 
 def render_tiles(rows: list[list[tuple[str, tuple[int, int, int]]]],
@@ -94,6 +126,229 @@ def render_gauge(center: int | None, guess: int | None = None, *,
     if right:
         bbox = draw.textbbox((0, 0), f"{right} ▶", font=font)
         draw.text((width - PAD - (bbox[2] - bbox[0]), 4), f"{right} ▶", fill=FG, font=font)
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    return buf.getvalue()
+
+
+# ---------------------------------------------------------------------------
+# 個別ゲームの盤面描画（盤面画像化タスク 2026-11-06）
+#
+# 盤面は画像、操作はボタン/セレクトに分離する。ここにあるのは描画だけの
+# 純関数で、状態の持ち方・進行ロジックは各 core/game/<game>.py と cog 側。
+# 座標ラベル（行・列の見出し）は全て画像側に含める。
+
+# --- マインスイーパー -------------------------------------------------------
+# states の各マスは (kind, value):
+#   ("hidden", None) 未開 / ("flag", None) 旗 / ("open", n) 開封（周辺地雷数 n）
+#   ("mine", None) 地雷（終了時の公開用） / ("exploded", None) 踏んだ地雷
+MS_NUMBER_COLORS = {
+    1: (37, 99, 235), 2: (22, 163, 74), 3: (220, 38, 38), 4: (30, 58, 138),
+    5: (154, 52, 18), 6: (13, 148, 136), 7: (30, 30, 30), 8: (107, 114, 128),
+}
+MS_HIDDEN = (172, 182, 198)
+MS_HIDDEN_LIGHT = (226, 232, 240)
+MS_HIDDEN_DARK = (100, 110, 128)
+MS_OPEN_BG = (224, 227, 232)
+
+
+def _ms_flag(draw, x, y, tile):
+    """旗をベクタ描画する（絵文字フォントに依存しない）。"""
+    cx = x + tile // 2
+    top = y + tile // 5
+    bottom = y + tile - tile // 6
+    draw.line([(cx, top), (cx, bottom)], fill=(60, 60, 60), width=max(2, tile // 16))
+    draw.polygon([(cx, top), (cx + tile // 3, top + tile // 5), (cx, top + tile // 3)],
+                 fill=(220, 38, 38))
+    draw.line([(cx - tile // 4, bottom), (cx + tile // 4, bottom)],
+              fill=(60, 60, 60), width=max(2, tile // 16))
+
+
+def _ms_mine(draw, x, y, tile):
+    cx, cy = x + tile // 2, y + tile // 2
+    r = tile // 4
+    for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1), (1, 1), (1, -1), (-1, 1), (-1, -1)):
+        draw.line([(cx, cy), (cx + dx * (r + tile // 8), cy + dy * (r + tile // 8))],
+                  fill=(25, 25, 25), width=max(2, tile // 14))
+    draw.ellipse([cx - r, cy - r, cx + r, cy + r], fill=(25, 25, 25))
+    draw.ellipse([cx - r // 2, cy - r // 2, cx - r // 4, cy - r // 4], fill=(200, 200, 200))
+
+
+def render_minesweeper(states, *, selected=None, tile: int = 40) -> bytes:
+    """マインスイーパー盤面。列見出しは A,B,C...、行見出しは 1,2,...。"""
+    rows = len(states)
+    cols = max((len(r) for r in states), default=0)
+    head = tile  # 見出しの帯（上・左）
+    width = head + cols * tile + PAD
+    height = head + rows * tile + PAD
+    img = Image.new("RGB", (width, height), BG)
+    draw = ImageDraw.Draw(img)
+    head_font = _font(max(13, tile // 3))
+    num_font = _font(int(tile * 0.52))
+    for c in range(cols):
+        _centered(draw, head + c * tile + tile // 2, head // 2,
+                  chr(ord("A") + c) if c < 26 else str(c + 1), head_font, (170, 178, 195))
+    for r in range(rows):
+        _centered(draw, head // 2, head + r * tile + tile // 2, str(r + 1), head_font, (170, 178, 195))
+    for r in range(rows):
+        for c in range(cols):
+            kind, value = states[r][c]
+            x, y = head + c * tile, head + r * tile
+            if kind == "open":
+                draw.rectangle([x, y, x + tile - 1, y + tile - 1], fill=MS_OPEN_BG)
+                draw.rectangle([x, y, x + tile - 1, y + tile - 1], outline=(178, 182, 190))
+                if value:
+                    _centered(draw, x + tile // 2, y + tile // 2, str(value),
+                              num_font, MS_NUMBER_COLORS.get(value, (30, 30, 30)))
+            elif kind in ("mine", "exploded"):
+                bg = (248, 113, 113) if kind == "exploded" else MS_OPEN_BG
+                draw.rectangle([x, y, x + tile - 1, y + tile - 1], fill=bg)
+                draw.rectangle([x, y, x + tile - 1, y + tile - 1], outline=(178, 182, 190))
+                _ms_mine(draw, x, y, tile)
+            else:  # hidden / flag: 浮き出たタイル（ベベル）
+                draw.rectangle([x, y, x + tile - 1, y + tile - 1], fill=MS_HIDDEN)
+                draw.line([(x, y), (x + tile - 1, y)], fill=MS_HIDDEN_LIGHT, width=3)
+                draw.line([(x, y), (x, y + tile - 1)], fill=MS_HIDDEN_LIGHT, width=3)
+                draw.line([(x, y + tile - 1), (x + tile - 1, y + tile - 1)], fill=MS_HIDDEN_DARK, width=3)
+                draw.line([(x + tile - 1, y), (x + tile - 1, y + tile - 1)], fill=MS_HIDDEN_DARK, width=3)
+                if kind == "flag":
+                    _ms_flag(draw, x, y, tile)
+            if selected is not None and tuple(selected) == (r, c):
+                draw.rectangle([x + 1, y + 1, x + tile - 2, y + tile - 2],
+                               outline=(250, 204, 21), width=3)
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    return buf.getvalue()
+
+
+# --- 2048 -------------------------------------------------------------------
+TILE2048_COLORS = {
+    0: (205, 193, 180), 2: (238, 228, 218), 4: (237, 224, 200),
+    8: (242, 177, 121), 16: (245, 149, 99), 32: (246, 124, 95),
+    64: (246, 94, 59), 128: (237, 207, 114), 256: (237, 204, 97),
+    512: (237, 200, 80), 1024: (237, 197, 63), 2048: (237, 194, 46),
+}
+TILE2048_SUPER = (62, 58, 50)
+
+
+def render_2048(board, *, tile: int = 96, gap: int = 10, pad: int = 10) -> bytes:
+    """2048 の 4x4 盤面。値ごとの色分けと角丸タイルで描く。"""
+    n = len(board)
+    size = pad * 2 + n * tile + (n - 1) * gap
+    img = Image.new("RGB", (size, size), (187, 173, 160))
+    draw = ImageDraw.Draw(img)
+    draw.rounded_rectangle([0, 0, size - 1, size - 1], radius=12, fill=(187, 173, 160))
+    for r in range(n):
+        for c in range(n):
+            v = board[r][c]
+            x, y = pad + c * (tile + gap), pad + r * (tile + gap)
+            color = TILE2048_COLORS.get(v, TILE2048_SUPER)
+            draw.rounded_rectangle([x, y, x + tile, y + tile], radius=8, fill=color)
+            if v:
+                digits = len(str(v))
+                font = _font(44 if digits <= 2 else 36 if digits == 3 else 29 if digits == 4 else 24)
+                fill = (119, 110, 101) if v <= 4 else (249, 246, 242)
+                _centered(draw, x + tile // 2, y + tile // 2, str(v), font, fill)
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    return buf.getvalue()
+
+
+# --- 数独 -------------------------------------------------------------------
+def render_sudoku(board, givens, *, selected=None, tile: int = 52) -> bytes:
+    """数独 9x9。初期数字は濃色、入力数字は青。3x3 ブロックは太線。"""
+    head = 30
+    size = head + 9 * tile + PAD
+    img = Image.new("RGB", (size, size), BG)
+    draw = ImageDraw.Draw(img)
+    head_font = _font(15)
+    given_font = _font(30)
+    user_font = _font(30)
+    for i in range(9):
+        _centered(draw, head + i * tile + tile // 2, head // 2, str(i + 1), head_font, (170, 178, 195))
+        _centered(draw, head // 2, head + i * tile + tile // 2, str(i + 1), head_font, (170, 178, 195))
+    sel = tuple(selected) if selected is not None else None
+    for r in range(9):
+        for c in range(9):
+            x, y = head + c * tile, head + r * tile
+            bg = (250, 250, 247)
+            if sel is not None and (r == sel[0] or c == sel[1]
+                                    or (r // 3, c // 3) == (sel[0] // 3, sel[1] // 3)):
+                bg = (254, 243, 199)
+            if sel == (r, c):
+                bg = (253, 224, 71)
+            draw.rectangle([x, y, x + tile - 1, y + tile - 1], fill=bg)
+            v = board[r][c]
+            if v:
+                if givens[r][c]:
+                    _centered(draw, x + tile // 2, y + tile // 2, str(v), given_font, (31, 41, 55))
+                else:
+                    _centered(draw, x + tile // 2, y + tile // 2, str(v), user_font, (37, 99, 235))
+    for i in range(10):
+        w = 4 if i % 3 == 0 else 1
+        color = (51, 65, 85) if i % 3 == 0 else (203, 213, 225)
+        p = head + i * tile
+        draw.line([(p, head), (p, head + 9 * tile)], fill=color, width=w)
+        draw.line([(head, p), (head + 9 * tile, p)], fill=color, width=w)
+    if sel is not None:
+        x, y = head + sel[1] * tile, head + sel[0] * tile
+        draw.rectangle([x + 1, y + 1, x + tile - 2, y + tile - 2], outline=(37, 99, 235), width=3)
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    return buf.getvalue()
+
+
+# --- ノノグラム ---------------------------------------------------------------
+def render_nonogram(row_clues, col_clues, grid, *, selected=None, cell: int = 44) -> bytes:
+    """ノノグラム盤面。行列ヒントを画像側に描き、塗り/バツ/未定を描き分ける。"""
+    n = len(grid)
+    max_row = max((len(c) for c in row_clues), default=1)
+    max_col = max((len(c) for c in col_clues), default=1)
+    clue_w = 24
+    clue_h = 22
+    left = max_row * clue_w + 10
+    top = max_col * clue_h + 10
+    width = left + n * cell + PAD
+    height = top + n * cell + PAD
+    img = Image.new("RGB", (width, height), BG)
+    draw = ImageDraw.Draw(img)
+    clue_font = _font(16)
+    sel = tuple(selected) if selected is not None else None
+    # 列ヒント（下詰め）
+    for c in range(n):
+        clues = col_clues[c]
+        for i, v in enumerate(clues):
+            y = top - (len(clues) - i) * clue_h - clue_h // 2 - 4
+            fill = (250, 204, 21) if sel is not None and sel[1] == c else (203, 213, 225)
+            _centered(draw, left + c * cell + cell // 2, y, str(v), clue_font, fill)
+    # 行ヒント（右詰め）
+    for r in range(n):
+        clues = row_clues[r]
+        for i, v in enumerate(clues):
+            x = left - (len(clues) - i) * clue_w - clue_w // 2 - 4
+            fill = (250, 204, 21) if sel is not None and sel[0] == r else (203, 213, 225)
+            _centered(draw, x, top + r * cell + cell // 2, str(v), clue_font, fill)
+    for r in range(n):
+        for c in range(n):
+            x, y = left + c * cell, top + r * cell
+            v = grid[r][c]
+            if v == 1:
+                draw.rounded_rectangle([x + 2, y + 2, x + cell - 2, y + cell - 2],
+                                       radius=6, fill=(51, 65, 85))
+            else:
+                draw.rectangle([x, y, x + cell - 1, y + cell - 1], fill=(241, 245, 249))
+                if v == 2:
+                    m = cell // 4
+                    draw.line([(x + m, y + m), (x + cell - m, y + cell - m)],
+                              fill=(220, 38, 38), width=3)
+                    draw.line([(x + cell - m, y + m), (x + m, y + cell - m)],
+                              fill=(220, 38, 38), width=3)
+            draw.rectangle([x, y, x + cell - 1, y + cell - 1], outline=(148, 163, 184))
+            if sel == (r, c):
+                draw.rectangle([x + 1, y + 1, x + cell - 2, y + cell - 2],
+                               outline=(37, 99, 235), width=3)
+    draw.rectangle([left, top, left + n * cell - 1, top + n * cell - 1],
+                   outline=(71, 85, 105), width=3)
     buf = io.BytesIO()
     img.save(buf, format="PNG")
     return buf.getvalue()

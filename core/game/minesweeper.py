@@ -1,20 +1,34 @@
 # -*- coding: utf-8 -*-
 """マインスイーパーの盤面ロジック（Discord 非依存）。
 
-ボタン式で完全判定できる小さな盤面（5列×4行=20マス）を前提にする。
 地雷は最初のマスを開いた時点で、そのマスと周囲を避けて配置する
 （初回クリックで即爆発しない古典的な仕様）。
+
+盤面画像化タスク（2026-11-06）でサイズを難易度ごとに可変にした。
+従来の3難易度（easy/normal/hard = 5列×4行）はベストタイム記録の
+キー互換のためサイズ・地雷数を一切変えず、大盤面は新キー
+（wide/expert）として追加している。COLS/ROWS は従来サイズの定数として
+互換のために残す。
 """
 import random
 
 COLS = 5
 ROWS = 4
 
+# key: (表示名, 地雷数, 行数, 列数)
 DIFFICULTIES = {
-    "easy": ("かんたん", 4),
-    "normal": ("ふつう", 6),
-    "hard": ("むずかしい", 8),
+    "easy": ("かんたん", 4, ROWS, COLS),
+    "normal": ("ふつう", 6, ROWS, COLS),
+    "hard": ("むずかしい", 8, ROWS, COLS),
+    "wide": ("ひろびろ", 10, 9, 9),
+    "expert": ("エキスパート", 35, 12, 16),
 }
+
+
+def difficulty_size(difficulty: str) -> tuple[int, int]:
+    """(行数, 列数) を返す。"""
+    _, _, rows, cols = DIFFICULTIES[difficulty]
+    return rows, cols
 
 
 class MinesweeperBoard:
@@ -22,7 +36,7 @@ class MinesweeperBoard:
         if difficulty not in DIFFICULTIES:
             raise ValueError(f"unknown difficulty: {difficulty}")
         self.difficulty = difficulty
-        self.mine_total = DIFFICULTIES[difficulty][1]
+        _, self.mine_total, self.rows, self.cols = DIFFICULTIES[difficulty]
         self.rng = rng or random.Random()
         self.mines: set = set()
         self.opened: set = set()
@@ -32,15 +46,14 @@ class MinesweeperBoard:
         self.cleared = False
 
     # ------------------------------------------------------------------ 座標
-    @staticmethod
-    def neighbors(cell):
+    def neighbors(self, cell):
         r, c = cell
         for dr in (-1, 0, 1):
             for dc in (-1, 0, 1):
                 if dr == 0 and dc == 0:
                     continue
                 nr, nc = r + dr, c + dc
-                if 0 <= nr < ROWS and 0 <= nc < COLS:
+                if 0 <= nr < self.rows and 0 <= nc < self.cols:
                     yield (nr, nc)
 
     def count_around(self, cell) -> int:
@@ -49,7 +62,7 @@ class MinesweeperBoard:
     # ------------------------------------------------------------------ 進行
     def _place_mines(self, safe_cell):
         safe = {safe_cell} | set(self.neighbors(safe_cell))
-        candidates = [(r, c) for r in range(ROWS) for c in range(COLS) if (r, c) not in safe]
+        candidates = [(r, c) for r in range(self.rows) for c in range(self.cols) if (r, c) not in safe]
         self.rng.shuffle(candidates)
         self.mines = set(candidates[: self.mine_total])
         self.started = True
@@ -75,7 +88,7 @@ class MinesweeperBoard:
             newly.add(cur)
             if self.count_around(cur) == 0:
                 stack.extend(n for n in self.neighbors(cur) if n not in self.opened)
-        if len(self.opened) == ROWS * COLS - self.mine_total:
+        if len(self.opened) == self.rows * self.cols - self.mine_total:
             self.cleared = True
         return newly
 

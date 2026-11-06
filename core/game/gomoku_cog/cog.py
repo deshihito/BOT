@@ -30,14 +30,48 @@ IMG_SIZE = 640
 MARGIN = 40
 
 
-def render_board_image(board, last=None):
+_BASE_CACHE = None
+
+
+def _wood_base():
+    """木目風の盤背景（決定的に生成し、プロセス内で1回だけ作って使い回す）。
+
+    盤面画像化タスク（2026-11-06）のリッチ化: ベタ塗りだった盤に
+    横木目＋板の継ぎ目を与え、碁石には影とハイライトで立体感を出す。
+    座標系・出力サイズは従来どおり（復旧や操作に影響しない）。
+    """
+    global _BASE_CACHE
+    if _BASE_CACHE is not None:
+        return _BASE_CACHE.copy()
     img = Image.new("RGB", (IMG_SIZE, IMG_SIZE), (238, 198, 130))
+    overlay = Image.new("RGBA", (IMG_SIZE, IMG_SIZE), (0, 0, 0, 0))
+    odraw = ImageDraw.Draw(overlay)
+    rng = random.Random(20261106)
+    import math
+    for y in range(IMG_SIZE):
+        alpha = int(7 + 5 * math.sin(y / 23.0) + rng.randint(0, 4))
+        odraw.line([(0, y), (IMG_SIZE, y)], fill=(122, 82, 30, alpha))
+    for seam in range(160, IMG_SIZE, 160):
+        odraw.line([(0, seam), (IMG_SIZE, seam)], fill=(110, 72, 24, 60), width=2)
+    img = Image.alpha_composite(img.convert("RGBA"), overlay).convert("RGB")
+    draw = ImageDraw.Draw(img)
+    draw.rectangle([4, 4, IMG_SIZE - 5, IMG_SIZE - 5], outline=(96, 62, 20), width=3)
+    _BASE_CACHE = img
+    return img.copy()
+
+
+def render_board_image(board, last=None):
+    img = _wood_base()
     draw = ImageDraw.Draw(img)
     step = (IMG_SIZE - MARGIN * 2) / (SIZE - 1)
     for i in range(SIZE):
         p = MARGIN + i * step
         draw.line([(MARGIN, p), (IMG_SIZE - MARGIN, p)], fill=(90, 60, 20), width=1)
         draw.line([(p, MARGIN), (p, IMG_SIZE - MARGIN)], fill=(90, 60, 20), width=1)
+    # 星（ほし）の位置に小点を打つ（15x15 の定位置）
+    for hr, hc in ((3, 3), (3, 11), (11, 3), (11, 11), (7, 7)):
+        cx, cy = MARGIN + hc * step, MARGIN + hr * step
+        draw.ellipse([cx - 3.5, cy - 3.5, cx + 3.5, cy + 3.5], fill=(90, 60, 20))
     try:
         font = ImageFont.truetype(str(Path(__file__).resolve().parents[3] / "font.ttf"), 16)
     except Exception:
@@ -52,8 +86,19 @@ def render_board_image(board, last=None):
             if v == EMPTY:
                 continue
             cx, cy = MARGIN + c * step, MARGIN + r * step
-            fill = (20, 20, 20) if v == BLACK else (245, 245, 245)
-            draw.ellipse([cx - radius, cy - radius, cx + radius, cy + radius], fill=fill, outline=(60, 60, 60))
+            # 影 → 本体 → ハイライトの3層で碁石の立体感を出す
+            draw.ellipse([cx - radius + 2, cy - radius + 3, cx + radius + 2, cy + radius + 3],
+                         fill=(150, 108, 55))
+            if v == BLACK:
+                draw.ellipse([cx - radius, cy - radius, cx + radius, cy + radius],
+                             fill=(24, 24, 28), outline=(8, 8, 10))
+                draw.ellipse([cx - radius * 0.55, cy - radius * 0.62,
+                              cx - radius * 0.08, cy - radius * 0.18], fill=(96, 96, 110))
+            else:
+                draw.ellipse([cx - radius, cy - radius, cx + radius, cy + radius],
+                             fill=(248, 248, 246), outline=(120, 120, 120))
+                draw.ellipse([cx - radius * 0.55, cy - radius * 0.62,
+                              cx - radius * 0.08, cy - radius * 0.18], fill=(255, 255, 255))
             if last == (r, c):
                 draw.ellipse([cx - 4, cy - 4, cx + 4, cy + 4], fill=(230, 50, 50))
     out = io.BytesIO()

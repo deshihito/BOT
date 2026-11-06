@@ -52,6 +52,37 @@ class BoardTest(unittest.TestCase):
         self.assertIsNone(board.exploded)
 
 
+class BigBoardTest(unittest.TestCase):
+    """盤面画像化タスクで追加した大盤面（新キー wide/expert）。"""
+
+    def test_sizes_and_mine_counts(self):
+        from core.game.minesweeper import DIFFICULTIES
+        self.assertEqual(DIFFICULTIES["wide"][1:], (10, 9, 9))
+        self.assertEqual(DIFFICULTIES["expert"][1:], (35, 12, 16))
+        # 従来キーは記録互換のため不変
+        self.assertEqual(DIFFICULTIES["easy"][1:], (4, 4, 5))
+        self.assertEqual(DIFFICULTIES["normal"][1:], (6, 4, 5))
+        self.assertEqual(DIFFICULTIES["hard"][1:], (8, 4, 5))
+
+    def test_first_open_safe_on_big_boards(self):
+        for key in ("wide", "expert"):
+            for seed in range(10):
+                board = MinesweeperBoard(key, rng=random.Random(seed))
+                board.open((5, 5))
+                self.assertIsNone(board.exploded)
+                self.assertEqual(len(board.mines), board.mine_total)
+                self.assertNotIn((5, 5), board.mines)
+
+    def test_clear_on_wide(self):
+        board = MinesweeperBoard("wide", rng=random.Random(3))
+        board.open((0, 0))
+        for r in range(board.rows):
+            for c in range(board.cols):
+                if (r, c) not in board.mines:
+                    board.open((r, c))
+        self.assertTrue(board.cleared)
+
+
 class SweeperRecordTest(unittest.TestCase):
     def setUp(self):
         import tempfile
