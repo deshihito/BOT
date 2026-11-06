@@ -25,9 +25,9 @@ try:
 except Exception:  # numpy が無い環境では純Pythonで合成する
     np = None  # type: ignore[assignment]
 
-from core.globalvc.common import *  # noqa: F401,F403 - shared constants/helpers
-from core.globalvc.rooms import ROOMS, _clear_join, _load_rooms  # noqa: F401
-from core.globalvc.textlink import _restore_text_links  # noqa: F401
+from core.voice.globalvc.common import *  # noqa: F401,F403 - shared constants/helpers
+from core.voice.globalvc.rooms import ROOMS, _clear_join, _load_rooms  # noqa: F401
+from core.voice.globalvc.textlink import _restore_text_links  # noqa: F401
 
 logger = logging.getLogger("cogs.sio_globalVC")
 

@@ -26,11 +26,11 @@ try:
 except Exception:  # numpy が無い環境では純Pythonで合成する
     np = None  # type: ignore[assignment]
 
-from core.globalvc.common import *  # noqa: F401,F403 - shared constants/helpers
-from core.globalvc.audio import _JoinRefused  # noqa: F401
-from core.globalvc.rooms import GLOBAL_ROOMS, ROOMS, RoomConfig, _can_delete_room, _disconnect_and_cleanup, _persist_rooms, _prune_dead_clients  # noqa: F401
-from core.globalvc.textlink import ROOM_TEXT_LINKS, _remove_text_link  # noqa: F401
-from core.globalvc.ui import GlobalRoomListView  # noqa: F401
+from core.voice.globalvc.common import *  # noqa: F401,F403 - shared constants/helpers
+from core.voice.globalvc.audio import _JoinRefused  # noqa: F401
+from core.voice.globalvc.rooms import GLOBAL_ROOMS, ROOMS, RoomConfig, _can_delete_room, _disconnect_and_cleanup, _persist_rooms, _prune_dead_clients  # noqa: F401
+from core.voice.globalvc.textlink import ROOM_TEXT_LINKS, _remove_text_link  # noqa: F401
+from core.voice.globalvc.ui import GlobalRoomListView  # noqa: F401
 
 logger = logging.getLogger("cogs.sio_globalVC")
 

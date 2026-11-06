@@ -26,9 +26,9 @@ try:
 except Exception:  # numpy が無い環境では純Pythonで合成する
     np = None  # type: ignore[assignment]
 
-from core.globalvc.common import *  # noqa: F401,F403 - shared constants/helpers
-from core.globalvc.rooms import ROOMS, _safe_webhook_username  # noqa: F401
-from core.globalvc.textlink import CHANNEL_TO_ROOM, ROOM_TEXT_LINKS, TextLink, _persist_text_links, _remove_text_link  # noqa: F401
+from core.voice.globalvc.common import *  # noqa: F401,F403 - shared constants/helpers
+from core.voice.globalvc.rooms import ROOMS, _safe_webhook_username  # noqa: F401
+from core.voice.globalvc.textlink import CHANNEL_TO_ROOM, ROOM_TEXT_LINKS, TextLink, _persist_text_links, _remove_text_link  # noqa: F401
 
 logger = logging.getLogger("cogs.sio_globalVC")
 

@@ -25,8 +25,8 @@ try:
 except Exception:  # numpy が無い環境では純Pythonで合成する
     np = None  # type: ignore[assignment]
 
-from core.globalvc.common import *  # noqa: F401,F403 - shared constants/helpers
-from core.globalvc.common import PLAYBACK_WATCHDOG_IDLE_SECONDS, PLAYBACK_WATCHDOG_SECONDS, STALE_VC_GRACE_SECONDS  # noqa: F401
+from core.voice.globalvc.common import *  # noqa: F401,F403 - shared constants/helpers
+from core.voice.globalvc.common import PLAYBACK_WATCHDOG_IDLE_SECONDS, PLAYBACK_WATCHDOG_SECONDS, STALE_VC_GRACE_SECONDS  # noqa: F401
 
 logger = logging.getLogger("cogs.sio_globalVC")
 
