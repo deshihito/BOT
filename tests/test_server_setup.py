@@ -398,7 +398,10 @@ class WelcomeTest(Base):
         for stale in ("5つ", "100以上", "フロンティアモデル", "今北産業", "引用画像"):
             self.assertNotIn(stale, joined)
         self.assertEqual(custom_ids, {"welcome:game", "welcome:money", "welcome:music",
-                                      "welcome:help", "welcome:support", "welcome:language"})
+                                      "welcome:help", "welcome:support", "welcome:permissions",
+                                      "welcome:language"})
+        # 権限が揃っているサーバーでは状態行を出さない。
+        self.assertNotIn("不足している権限があります", joined)
         self.assertIn("https://bot-deshihito.vercel.app/dashboard/77", urls)
         self.assertIn("https://discord.gg/dCAQzJUaa9", urls)
         # 保存: onboarding に記録し、言語変更の検証対象を新メッセージへ移す。locale は書かない。
@@ -419,6 +422,17 @@ class WelcomeTest(Base):
         contents = [item.content for item in view.children[0].children
                     if isinstance(item, discord.ui.TextDisplay)]
         self.assertIn("Thanks for adding", contents[0])
+
+    async def test_on_guild_join_shows_status_line_only_when_permissions_missing(self):
+        self.guild.me = types.SimpleNamespace(
+            guild_permissions=discord.Permissions(view_channel=True, send_messages=True),
+            top_role=self.guild.top)
+        self.guild.general.send.return_value = types.SimpleNamespace(id=434343)
+        await self.cog.on_guild_join(self.guild)
+        view = self.guild.general.send.await_args.kwargs["view"]
+        contents = [item.content for item in view.children[0].children
+                    if isinstance(item, discord.ui.TextDisplay)]
+        self.assertTrue(any("不足している権限があります" in c for c in contents))
 
     async def test_on_guild_join_skips_when_recently_welcomed(self):
         from datetime import datetime, timezone

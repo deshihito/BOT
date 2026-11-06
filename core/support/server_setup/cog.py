@@ -376,6 +376,45 @@ def format_permission_report(results: list[dict]) -> str:
     return "\n".join(lines)
 
 
+# ---------------------------------------------------------------- 導入時の権限チェック
+def check_onboarding_permissions(guild, channel) -> list[dict]:
+    """導入時点専用の軽量権限チェック。「入れた直後に効くかどうか」の範囲だけを見る。
+
+    check_permissions() は旧ウィザード専用の引数（認証設定・接続チャンネル等）を
+    要求し、参加直後は未設定だらけになるため流用しない。部品（_missing /
+    permission_label / 整形作法）だけを再利用する。
+    戻り値は check_permissions と同じ形（skipped は常に False）。
+    """
+    me = guild.me
+    guild_perms = me.guild_permissions
+    results = []
+
+    def add(label, missing=()):
+        results.append({
+            "label": label,
+            "missing": [permission_label(name) for name in missing],
+            "notes": [],
+            "skipped": False,
+        })
+
+    add("基本（このチャンネル）", _missing(channel.permissions_for(me), ["view_channel", "send_messages"]))
+    add("メッセージの管理（削除ログ・自動翻訳）", _missing(guild_perms, ["manage_messages"]))
+    add("ウェブフックの管理（グローバルチャット・自動翻訳）", _missing(guild_perms, ["manage_webhooks"]))
+    add("ロールの管理（認証・ミュート・ロールショップ）", _missing(guild_perms, ["manage_roles"]))
+    add("チャンネルの管理", _missing(guild_perms, ["manage_channels"]))
+    add("ボイス・音楽", _missing(guild_perms, ["connect", "speak"]))
+    return results
+
+
+def has_missing_permissions(results: list[dict]) -> bool:
+    return any(r["missing"] for r in results)
+
+
+def format_onboarding_report(results: list[dict]) -> str:
+    return (format_permission_report(results)
+            + "\n\n足りない権限は「サーバー設定 → ロール」で Bot のロールに付けてください")
+
+
 # ---------------------------------------------------------------- ウィザード
 class ModerationModal(discord.ui.Modal, title="グローバルチャットの荒らし対策"):
     """このサーバーで足す NG ワードと、このサーバーに届かせないユーザー・サーバー。"""
@@ -763,7 +802,13 @@ class ServerSetup(commands.Cog):
             return
         locale = self._saved_locale(guild.id)
         bot_name = getattr(self.bot.user, "name", None) or "AGOBOT"
-        view = build_welcome_view(bot_name, locale, guild_id=guild.id)
+        try:
+            missing = has_missing_permissions(check_onboarding_permissions(guild, channel))
+        except Exception:
+            logger.debug("導入時の権限チェックに失敗しました（状態行なしで続行します）", exc_info=True)
+            missing = False
+        view = build_welcome_view(bot_name, locale, guild_id=guild.id,
+                                  permissions_button=True, missing_permissions=missing)
         try:
             message = await channel.send(view=view)
         except discord.HTTPException:
@@ -802,6 +847,8 @@ class ServerSetup(commands.Cog):
                 await self._open_welcome_panel(interaction, root, command)
             elif action == "money":
                 await self._open_welcome_money(interaction)
+            elif action == "permissions":
+                await self._handle_welcome_permissions(interaction)
             elif action == "language":
                 await self._handle_welcome_language(interaction, data)
         except discord.InteractionResponded:
@@ -836,6 +883,20 @@ class ServerSetup(commands.Cog):
         panel = GeneralPanel(cog, genre="money", owner_id=interaction.user.id)
         await interaction.response.send_message(view=as_panel_v2(panel), ephemeral=True)
 
+    async def _handle_welcome_permissions(self, interaction: discord.Interaction):
+        guild = interaction.guild
+        if guild is None:
+            return
+        permissions = getattr(interaction.user, "guild_permissions", None)
+        if not (getattr(permissions, "administrator", False) or getattr(permissions, "manage_guild", False)):
+            message = ("Only server admins can run the permission check."
+                       if self._saved_locale(guild.id) == "en"
+                       else "権限チェックはサーバーの管理者だけが使えます。")
+            await interaction.response.send_message(message, ephemeral=True)
+            return
+        results = check_onboarding_permissions(guild, interaction.channel)
+        await interaction.response.send_message(format_onboarding_report(results), ephemeral=True)
+
     async def _handle_welcome_language(self, interaction: discord.Interaction, data: dict):
         guild_id = interaction.guild_id
         if guild_id is None:
@@ -863,7 +924,15 @@ class ServerSetup(commands.Cog):
             return
         # ja / en は本体の文面も切り替える。
         bot_name = getattr(self.bot.user, "name", None) or "AGOBOT"
-        view = build_welcome_view(bot_name, locale, guild_id=guild_id)
+        missing = False
+        if interaction.guild is not None and interaction.channel is not None:
+            try:
+                missing = has_missing_permissions(
+                    check_onboarding_permissions(interaction.guild, interaction.channel))
+            except Exception:
+                logger.debug("言語切り替え時の権限チェックに失敗しました", exc_info=True)
+        view = build_welcome_view(bot_name, locale, guild_id=guild_id,
+                                  permissions_button=True, missing_permissions=missing)
         try:
             await interaction.response.edit_message(view=view)
         except discord.HTTPException:
