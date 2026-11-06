@@ -183,7 +183,7 @@ async def take_idle_turn(channel: Any, *, guild_id: Optional[int], player_name: 
     channel=None なら送らず、result.notice を自分のメッセージに入れて使う。
     """
     try:
-        from core.guild_settings import autoplay_enabled
+        from core.support.guild_settings import autoplay_enabled
         if not autoplay_enabled(guild_id):
             return None
     except Exception:
