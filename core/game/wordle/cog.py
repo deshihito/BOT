@@ -16,7 +16,7 @@ import random
 import time
 from datetime import datetime
 from pathlib import Path
-from core.emojis import B_, G_, Y_
+from core.support.emojis import B_, G_, Y_
 
 import discord
 from core.game import game_panels, game_restore
