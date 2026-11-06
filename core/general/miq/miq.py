@@ -67,7 +67,23 @@ def miq_resolve_format(prefs_or_format) -> str:
         return fmt
     return "quote"
 
-_MIQ_ASSET_FONTS = Path(__file__).resolve().parent.parent.parent / "assets" / "fonts"
+def _miq_repo_root() -> Path:
+    """リポジトリルートを返す。
+
+    同梱フォント (font.ttf) と assets/fonts/ の両方を持つ最下位の祖先を
+    ルートとみなす。モジュールをサブパッケージへ移しても __file__ 起点の
+    相対パスがずれないようにするための解決で、見つからなければ現在の
+    配置 (core/general/miq/ から3つ上) を前提にフォールバックする。
+    """
+    here = Path(__file__).resolve()
+    for anc in here.parents:
+        if (anc / "font.ttf").is_file() and (anc / "assets" / "fonts").is_dir():
+            return anc
+    return here.parents[3]
+
+
+_MIQ_REPO_ROOT = _miq_repo_root()
+_MIQ_ASSET_FONTS = _MIQ_REPO_ROOT / "assets" / "fonts"
 
 
 def _miq_af(name: str) -> str:
@@ -82,7 +98,7 @@ def _miq_af(name: str) -> str:
 # リポジトリ同梱の font.ttf (Hachi Maru Pop、日本語対応) を最後の選択肢
 # として必ず探索する。これにより、OSに日本語フォントが無くても MIQ が
 # 欧文フォントにフォールバックして日本語が □ になることがなくなる。
-_MIQ_REPO_FONT = str(Path(__file__).resolve().parent.parent.parent / "font.ttf")
+_MIQ_REPO_FONT = str(_MIQ_REPO_ROOT / "font.ttf")
 _MIQ_FONT_DEFS = (
     ("mplus", "M PLUS Rounded 1c", (
         os.getenv("MIQ_FONT_MPLUS") or "",
@@ -288,7 +304,7 @@ def _miq_emoji_font_path() -> str | None:
     if _MIQ_EMOJI_PATH_CACHE is not None:
         return _MIQ_EMOJI_PATH_CACHE
     _MIQ_EMOJI_PATH_CACHE = ""
-    root = Path(__file__).parent.parent.parent
+    root = _MIQ_REPO_ROOT
     for cand in _MIQ_EMOJI_PATHS:
         p = str(root / cand) if not cand.startswith("/") else cand
         if os.path.exists(p):
@@ -869,8 +885,13 @@ def _miq_line_message_has_media(message) -> bool:
 
 MIQ_FILE = Path(
     os.getenv("MIQ_DATA_PATH")
-    or (Path(__file__).resolve().parent.parent.parent / "data" / "miq.json")
+    or (_MIQ_REPO_ROOT / "data" / "miq.json")
 )
+
+# サブパッケージ化 (core/general/miq/) の際に保存先がずれていた期間の
+# 保存先 (core/data/miq.json)。既定パスにファイルが無い場合の読み取りに
+# だけ使い、書き込みは常に MIQ_FILE へ行う (読み取れた時点で移行される)。
+_MIQ_STRAY_FILE = Path(__file__).resolve().parents[2] / "data" / "miq.json"
 
 # refuse: True にすると、他の人があなたのメッセージを引用できなくなる(自分の引用は可)。既定はオフ。
 MIQ_DEFAULT_PREFS: dict = {
@@ -903,6 +924,16 @@ def _miq_read_file() -> dict:
             data = json.load(f)
         return data if isinstance(data, dict) else {}
     except FileNotFoundError:
+        # 旧保存先 (パスずれ期間の core/data/miq.json) にだけデータが
+        # 残っている場合はそちらを拾う。環境変数で保存先を指定している
+        # ときはその指定を優先し、旧保存先は見ない。
+        if not os.getenv("MIQ_DATA_PATH") and _MIQ_STRAY_FILE.is_file():
+            try:
+                with _MIQ_STRAY_FILE.open("r", encoding="utf-8") as f:
+                    data = json.load(f)
+                return data if isinstance(data, dict) else {}
+            except Exception:
+                logger.debug("MIQ: 旧保存先の読み込みに失敗しました", exc_info=True)
         return {}
     except Exception:
         logger.exception("MIQ: %s の読み込みに失敗しました。壊れたファイルを退避して続行します", MIQ_FILE)

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from ..common import *
+from .exp import _REPO_ROOT
 
 LEVELUP_SECTION = "levelup_notify"
 
@@ -26,12 +27,12 @@ _LEVELUP_SS = 2  # 内部は2倍解像度で描いて縮小(ジャギー防止)
 
 _LEVELUP_CJK_FONTS = (
     os.getenv("LEVELUP_FONT_PATH") or "",
-    str(Path(__file__).resolve().parent.parent.parent / "assets" / "fonts" / "levelup.ttf"),
-    str(Path(__file__).resolve().parent.parent.parent / "assets" / "fonts" / "levelup.otf"),
-    str(Path(__file__).resolve().parent.parent.parent / "assets" / "fonts" / "levelup.ttc"),
+    str(_REPO_ROOT / "assets" / "fonts" / "levelup.ttf"),
+    str(_REPO_ROOT / "assets" / "fonts" / "levelup.otf"),
+    str(_REPO_ROOT / "assets" / "fonts" / "levelup.ttc"),
     # リポジトリ同梱の日本語フォント。assets/fonts はリポジトリに存在しないため、
     # OSフォントが無くてもここで日本語が描ける (Hachi Maru Pop)。
-    str(Path(__file__).resolve().parent.parent.parent / "font.ttf"),
+    str(_REPO_ROOT / "font.ttf"),
     "C:/Windows/Fonts/meiryob.ttc",
     "C:/Windows/Fonts/YuGothB.ttc",
     "C:/Windows/Fonts/msgothic.ttc",
@@ -57,8 +58,8 @@ _LEVELUP_LATIN_FONTS = (
 # 参考画像(Bahnschrift / DIN 系コンデンス)を優先する
 _LEVELUP_DISPLAY_FONTS = (
     os.getenv("LEVELUP_DISPLAY_FONT_PATH") or "",
-    str(Path(__file__).resolve().parent.parent.parent / "assets" / "fonts" / "levelup-display.ttf"),
-    str(Path(__file__).resolve().parent.parent.parent / "assets" / "fonts" / "levelup-display.otf"),
+    str(_REPO_ROOT / "assets" / "fonts" / "levelup-display.ttf"),
+    str(_REPO_ROOT / "assets" / "fonts" / "levelup-display.otf"),
     # ★ 参考画像 (Bahnschrift / DIN 系コンデンス) を優先
     "/usr/share/fonts/truetype/bahnschrift/bahnschrift.ttf",
     "/usr/share/fonts/truetype/oswald/Oswald-Medium.ttf",

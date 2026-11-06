@@ -35,7 +35,7 @@ def load_all_assets():
     """Assetsフォルダから画像を読み込みキャッシュする"""
     global _ASSET_CACHE
     base_dir = os.path.dirname(os.path.abspath(__file__))
-    assets_dir = os.path.join(base_dir, "..", "..", "Assets")
+    assets_dir = os.path.join(base_dir, "..", "..", "..", "Assets")
     
     _ASSET_CACHE = {}
     for (biome, tid), fname in ASSET_CONFIG.items():

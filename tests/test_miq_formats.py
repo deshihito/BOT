@@ -795,5 +795,143 @@ class MiqLineChainTest(unittest.TestCase):
         self.assertEqual([m.id for m in chain], [5])
 
 
+from unittest import mock as _mock
+
+import core.general.miq.miq as _miq_mod
+import core.general.miq.miq_line as _miq_line_mod
+import core.general.miq.miq_styles as _miq_styles_mod
+
+
+class MiqFontPathRegressionTest(unittest.TestCase):
+    """同梱フォント/アセットのパス解決の回帰テスト。
+
+    MIQ が core/general/miq/ サブパッケージへ移された際、__file__ 起点の
+    相対パスが1階層ずれて同梱フォントに辿り着けなくなった。OS に日本語
+    フォントがある環境では症状が出ず、無い環境 (Pi) でのみ本文が
+    描かれなくなり名前が □ になったため、パス自体をここで固定する。
+    """
+
+    def test_asset_fonts_dir_is_bundled_dir(self):
+        self.assertTrue(_miq_mod._MIQ_ASSET_FONTS.is_dir())
+        self.assertTrue((_miq_mod._MIQ_ASSET_FONTS / "DelaGothicOne-Regular.ttf").is_file())
+        self.assertEqual(_miq_mod._MIQ_ASSET_FONTS, Path(ROOT) / "assets" / "fonts")
+
+    def test_repo_font_points_at_existing_file(self):
+        self.assertTrue(Path(_miq_mod._MIQ_REPO_FONT).is_file())
+        self.assertEqual(Path(_miq_mod._MIQ_REPO_FONT), Path(ROOT) / "font.ttf")
+
+    def test_special_font_path_finds_bundled_dela(self):
+        found = _miq_styles_mod._miq_special_font_path("DelaGothicOne")
+        self.assertIsNotNone(found)
+        self.assertTrue(Path(found).is_file())
+        self.assertTrue(g._font_covers_japanese(found))
+
+    def test_emoji_font_path_prefers_bundled(self):
+        orig = _miq_mod._MIQ_EMOJI_PATH_CACHE
+        _miq_mod._MIQ_EMOJI_PATH_CACHE = None
+        try:
+            found = _miq_mod._miq_emoji_font_path()
+        finally:
+            _miq_mod._MIQ_EMOJI_PATH_CACHE = orig
+        self.assertEqual(found, str(Path(ROOT) / "assets" / "fonts" / "NotoColorEmoji.ttf"))
+
+    def test_ago_dir_resolves_under_repo_assets(self):
+        self.assertEqual(_miq_line_mod._MIQ_AGO_DIR, Path(ROOT) / "assets" / "miq_ago")
+        if _miq_line_mod._MIQ_AGO_DIR.is_dir():
+            self.assertEqual(len(list(_miq_line_mod._MIQ_AGO_DIR.glob("ago_*.png"))), 5)
+
+    def test_miq_file_default_is_repo_data_dir(self):
+        if os.getenv("MIQ_DATA_PATH"):
+            self.skipTest("MIQ_DATA_PATH 指定時は既定パスの対象外")
+        self.assertEqual(_miq_mod.MIQ_FILE, Path(ROOT) / "data" / "miq.json")
+
+    def test_read_file_falls_back_to_stray(self):
+        # パスずれ期間の保存先 (core/data/miq.json) にだけ残った設定を拾う
+        with tempfile.TemporaryDirectory() as tmp:
+            main = Path(tmp) / "miq.json"
+            stray = Path(tmp) / "stray.json"
+            stray.write_text(json.dumps({"users": {"42": {"format": "pop"}}}), encoding="utf-8")
+            with _mock.patch.object(_miq_mod, "MIQ_FILE", main), \
+                    _mock.patch.object(_miq_mod, "_MIQ_STRAY_FILE", stray), \
+                    _mock.patch.dict(os.environ, {}, clear=False):
+                os.environ.pop("MIQ_DATA_PATH", None)
+                self.assertEqual(_miq_mod._miq_read_file()["users"]["42"]["format"], "pop")
+                # 既定パスにファイルがあればそちらが優先される
+                main.write_text(json.dumps({"users": {"42": {"format": "dark"}}}), encoding="utf-8")
+                self.assertEqual(_miq_mod._miq_read_file()["users"]["42"]["format"], "dark")
+
+
+class MiqBundledOnlyRenderTest(unittest.TestCase):
+    """OS フォント候補を無効化し、同梱フォントだけで描く再現テスト (Pi 相当)。
+
+    ユーザー報告の再現条件: 本文「アミノともうします」・名前「アミノ」を
+    pop 形式で描き、本文エリアにインクがあり、名前ピルのフォントが
+    日本語をカバーする (□ にならない) ことを確認する。
+    """
+
+    def setUp(self):
+        self._orig_defs = _miq_mod._MIQ_FONT_DEFS
+        self._orig_symbols = _miq_mod._MIQ_SYMBOL_PATHS
+        root = Path(ROOT)
+
+        def _bundled(paths):
+            return tuple(p for p in paths if p and Path(p).is_relative_to(root))
+
+        _miq_mod._MIQ_FONT_DEFS = tuple(
+            (key, label, _bundled(paths)) for key, label, paths in self._orig_defs
+        )
+        _miq_mod._MIQ_SYMBOL_PATHS = ()
+        _miq_mod._MIQ_FONTS_CACHE = None
+        self.addCleanup(self._restore)
+
+    def _restore(self):
+        _miq_mod._MIQ_FONT_DEFS = self._orig_defs
+        _miq_mod._MIQ_SYMBOL_PATHS = self._orig_symbols
+        _miq_mod._MIQ_FONTS_CACHE = None
+
+    def _dark_pixels(self, img, box):
+        crop = img.crop(box)
+        return sum(1 for px in crop.getdata() if sum(px) < 300)
+
+    def test_available_fonts_are_bundled_and_cover_japanese(self):
+        fonts = _miq_mod._miq_available_fonts()
+        self.assertTrue(fonts)
+        for _key, _label, path in fonts:
+            if path:
+                self.assertTrue(Path(path).is_relative_to(Path(ROOT)))
+        self.assertTrue(g._font_covers_japanese(fonts[0][2]))
+
+    def test_unit_chain_covers_japanese_text(self):
+        font_path = _miq_mod._miq_available_fonts()[0][2]
+        chain = _miq_mod._miq_fallback_fonts(font_path, 40)
+        emoji_path = _miq_mod._miq_emoji_font_path()
+        for unit in _miq_mod._miq_split_units("アミノともうします"):
+            kind, _font = _miq_mod._miq_unit_font(unit, chain, emoji_path)
+            self.assertEqual(kind, "font", f"単位 {unit!r} を描けるフォントが無い")
+
+    def test_pop_renders_body_and_name(self):
+        font_path = _miq_mod._miq_available_fonts()[0][2]
+        data = g.render_miq_pop_png(
+            _avatar_bytes(), "アミノともうします", "アミノ", "amino", font_path=font_path,
+        )
+        img = Image.open(io.BytesIO(data)).convert("RGB")
+        self.assertEqual(img.size, (1200, 675))
+        # 本文: 白カード (36,64,800,610) 内側の暗色ピクセル = 文字のインク
+        self.assertGreater(self._dark_pixels(img, (60, 110, 760, 590)), 300)
+        # 名前ピル (848,420,1140,484) 内の暗色ピクセル = 名前のインク
+        self.assertGreater(self._dark_pixels(img, (860, 428, 1128, 476)), 50)
+        # ピルは font_path で直接描かれるため、そのフォントが日本語を
+        # カバーしていれば □ にはならない
+        self.assertTrue(g._font_covers_japanese(font_path))
+
+    def test_quote_renders_japanese(self):
+        font_path = _miq_mod._miq_available_fonts()[0][2]
+        data = g.render_miq_png(
+            _avatar_bytes(), "アミノともうします", "アミノ", "amino", font_path=font_path,
+        )
+        img = Image.open(io.BytesIO(data))
+        self.assertEqual(img.format, "PNG")
+
+
 if __name__ == "__main__":
     unittest.main()

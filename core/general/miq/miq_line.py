@@ -5,7 +5,7 @@ from __future__ import annotations
 from ..common import *
 from .miq import (
     MIQ_LINE_MAX_IMAGES, MIQ_LINE_MAX_MESSAGES, MIQ_NEW_H, MIQ_NEW_W,
-    _MIQ_CUSTOM_EMOJI_TOKEN, _MIQ_EMOJI_SIZE,
+    _MIQ_CUSTOM_EMOJI_TOKEN, _MIQ_EMOJI_SIZE, _MIQ_REPO_ROOT,
     _miq_clean_text, _miq_display_text, _miq_draw_centered,
     _miq_emoji_font_path, _miq_emoji_width,
     _miq_fallback_fonts, _miq_fit, _miq_fit_units, _miq_is_emoji_unit, _miq_is_image_attachment,
@@ -57,7 +57,7 @@ _MIQ_DATED_FORMATS = frozenset({"blueprint", "card", "ticket"})
 # MIQ 隠し要素: アゴのひょっこり合成 (開発者向け。利用者向け文言には出さない)
 # ------------------------------------------------------------
 MIQ_AGO_RARE_RATE = 0.02
-_MIQ_AGO_DIR = Path(__file__).resolve().parent.parent.parent / "assets" / "miq_ago"
+_MIQ_AGO_DIR = _MIQ_REPO_ROOT / "assets" / "miq_ago"
 _MIQ_AGO_CACHE: list | None = None
 
 

@@ -59,10 +59,30 @@ def _as_int(value, default: int = 0) -> int:
 # (登録の4方式すべて失敗)、EXPが永続化されなかった。そのためEXPは
 # このcog専用のJSONファイルへ保存する(一時ファイル→置換のアトミック書き込み)。
 # 保存先は環境変数 EXP_DATA_PATH で変更可能。既定は <プロジェクト直下>/data/exp.json
+def _repo_root() -> Path:
+    """リポジトリルートを返す。
+
+    同梱フォント (font.ttf) と assets/fonts/ の両方を持つ最下位の祖先を
+    ルートとみなす。モジュールをサブパッケージへ移しても __file__ 起点の
+    相対パスがずれないようにするための解決で、見つからなければ現在の
+    配置 (core/general/exp/ から3つ上) を前提にフォールバックする。
+    """
+    here = Path(__file__).resolve()
+    for anc in here.parents:
+        if (anc / "font.ttf").is_file() and (anc / "assets" / "fonts").is_dir():
+            return anc
+    return here.parents[3]
+
+
+_REPO_ROOT = _repo_root()
 EXP_FILE = Path(
     os.getenv("EXP_DATA_PATH")
-    or (Path(__file__).resolve().parent.parent.parent / "data" / "exp.json")
+    or (_REPO_ROOT / "data" / "exp.json")
 )
+
+# サブパッケージ化 (core/general/exp/) の際に保存先がずれていた期間の
+# 保存先 (core/data/exp.json)。初回読み込み時に最大値でマージして引き継ぐ。
+_EXP_STRAY_FILE = Path(__file__).resolve().parents[2] / "data" / "exp.json"
 
 _EXP_DATA: dict | None = None
 _EXP_LOCK: asyncio.Lock | None = None
@@ -148,6 +168,15 @@ def _exp_root() -> dict:
     global _EXP_DATA
     if _EXP_DATA is None:
         data = _read_exp_file()
+        # パスずれ期間の保存先 (core/data/exp.json) に残った分も最大値で引き継ぐ
+        if not os.getenv("EXP_DATA_PATH") and _EXP_STRAY_FILE.is_file():
+            try:
+                with _EXP_STRAY_FILE.open("r", encoding="utf-8") as f:
+                    stray = json.load(f)
+                if isinstance(stray, dict) and stray:
+                    _merge_exp(data, stray)
+            except Exception:
+                logger.debug("EXP: 旧保存先の読み込みに失敗しました", exc_info=True)
         try:
             legacy = _store_fetch(guild_settings.get_store(), EXP_STORE_KEY)
             if isinstance(legacy, dict) and legacy:
