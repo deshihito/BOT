@@ -32,9 +32,9 @@ from core.legacy import Responder
 from core.emojis import CROCK, FAILED, GEAR, MUSIC, PAUSE, RESET, SUCCESS, THU, VOL
 from core.music_activity import build_music_activity_snapshot
 
-from core.music.common import *  # noqa: F401,F403 - shared helpers/constants
-from core.music.spatial import SpatialControlView  # noqa: F401
-from core.music.ui import build_music_panel_layout  # noqa: F401
+from core.voice.music.common import *  # noqa: F401,F403 - shared helpers/constants
+from core.voice.music.spatial import SpatialControlView  # noqa: F401
+from core.voice.music.ui import build_music_panel_layout  # noqa: F401
 
 logger = logging.getLogger("cogs.sio_music")
 

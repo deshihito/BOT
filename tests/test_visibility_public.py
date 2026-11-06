@@ -76,7 +76,7 @@ class GameRankingVisibilityTest(unittest.IsolatedAsyncioTestCase):
 
 class MusicQueueVisibilityTest(unittest.IsolatedAsyncioTestCase):
     async def test_queue_impl_posts_publicly(self):
-        from core.music.panel import PanelMixin
+        from core.voice.music.panel import PanelMixin
 
         mixin = PanelMixin.__new__(PanelMixin)
         mixin.build_queue_embed = lambda guild_id: discord.Embed(title="queue")

@@ -9,13 +9,13 @@ from unittest.mock import AsyncMock, patch
 
 import discord
 
-from core.music import panel as music_panel
-from core.music import playback as music_playback
-from core.music import search as music_search
-from core.music.panel import PanelMixin
-from core.music.search import SearchMixin
-from core.music.spatial import PythonSpatialAudioSource, SpatialControlView
-from core.music.ui import build_music_panel_layout
+from core.voice.music import panel as music_panel
+from core.voice.music import playback as music_playback
+from core.voice.music import search as music_search
+from core.voice.music.panel import PanelMixin
+from core.voice.music.search import SearchMixin
+from core.voice.music.spatial import PythonSpatialAudioSource, SpatialControlView
+from core.voice.music.ui import build_music_panel_layout
 
 
 def fake_cog():

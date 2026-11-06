@@ -32,8 +32,8 @@ from core.legacy import Responder
 from core.emojis import CLOCK, CROCK, FAILED, LOUPE, MUSIC, PAUSE, SUCCESS
 from core.music_activity import build_music_activity_snapshot
 
-from core.music.common import *  # noqa: F401,F403 - shared helpers/constants
-from core.music.spatial import PythonSpatialAudioSource  # noqa: F401
+from core.voice.music.common import *  # noqa: F401,F403 - shared helpers/constants
+from core.voice.music.spatial import PythonSpatialAudioSource  # noqa: F401
 
 logger = logging.getLogger("cogs.sio_music")
 

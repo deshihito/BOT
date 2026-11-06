@@ -32,7 +32,7 @@ from core.legacy import Responder
 from core.emojis import FAILED, MUSIC, PAUSE, RESTART, SUCCESS, VOL
 from core.music_activity import build_music_activity_snapshot
 
-from core.music.common import *  # noqa: F401,F403 - shared helpers/constants
+from core.voice.music.common import *  # noqa: F401,F403 - shared helpers/constants
 
 logger = logging.getLogger("cogs.sio_music")
 
