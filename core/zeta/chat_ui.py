@@ -11,6 +11,7 @@ import re
 import os
 from core import logfare
 from core.panel_v2 import as_panel_v2, edit_panel_v2
+from core.emojis import BACK, BOOK
 
 from core.zeta.common import *  # noqa: F401,F403 - shared constants/helpers
 from core.zeta.common import PRESETS, _clip  # noqa: F401
@@ -186,7 +187,7 @@ class ModeButton(discord.ui.Button):
 class ModeBackButton(discord.ui.Button):
     def __init__(self, parent_view: "CharacterSelectView"):
         self.parent_view = parent_view
-        super().__init__(label="会話モードを選び直す", emoji="↩️", style=discord.ButtonStyle.secondary, row=2)
+        super().__init__(label="会話モードを選び直す", emoji=BACK, style=discord.ButtonStyle.secondary, row=2)
 
     async def callback(self, interaction: discord.Interaction):
         view = self.parent_view
@@ -212,7 +213,7 @@ class CharacterSelect(discord.ui.Select):
                 label="アリス（雨宿りの図書室）",
                 value="alice",
                 description="放課後の図書室で二人きりの雨宿りシチュ",
-                emoji="📚"
+                emoji=BOOK
             ),
             discord.SelectOption(
                 label="エマ（崩壊したシェルター）",

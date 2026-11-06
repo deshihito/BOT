@@ -11,6 +11,7 @@ transaction_history への記録）を通し、この cog 独自の残高更新�
 （general:items / general:item_buy / general:item_use / general:box_open）だけ。
 """
 from __future__ import annotations
+from core.emojis import SUCCESS
 
 import asyncio
 import logging
@@ -330,7 +331,7 @@ class ItemsCog(commands.Cog):
                 return item_action_failed(exc)
             await self._record_history(uid, SHOP_ID, total, "item_buy")
             return (
-                f"✅ **{definition['name']}を買いました**\n"
+                f"{SUCCESS} **{definition['name']}を買いました**\n"
                 f"{total:,} AGO で {count} 個（所持: {held} 個）\n"
                 f"コイン残高: {debit:,} AGO"
             )
@@ -360,7 +361,7 @@ class ItemsCog(commands.Cog):
             await self._record_history(SHOP_ID, uid, total, "item_sell")
             held = self.store.count(uid, item_id)
             return (
-                f"✅ **{definition['name']}を売りました**\n"
+                f"{SUCCESS} **{definition['name']}を売りました**\n"
                 f"{count} 個 → **{total:,} AGO**（所持: {held} 個）\n"
                 f"コイン残高: {credit:,} AGO"
             )
@@ -372,7 +373,7 @@ class ItemsCog(commands.Cog):
 
     def execute_use(self, user_id: int, item_id: str) -> str:
         try:
-            return "✅ " + self.store.use_item(str(user_id), item_id)
+            return SUCCESS + " " + self.store.use_item(str(user_id), item_id)
         except items_core.ItemError as exc:
             return item_action_failed(exc)
         except Exception:

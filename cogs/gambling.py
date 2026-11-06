@@ -25,6 +25,7 @@ transaction_history への記録）を通す（cogs/circulation.py と同じ組�
 だけ。いずれも AI tools の代理実行対象外（AI_BLOCKED_IDS）。
 """
 from __future__ import annotations
+from core.emojis import COIN, DICE, SUCCESS
 
 import asyncio
 import logging
@@ -972,7 +973,7 @@ class GamblingCog(commands.Cog):
                 await wallet._change_balance(uid, bet)
                 return gambling_action_failed(exc)
             await self._record_history(uid, GAMBLING_ID, bet, "gamble_double")
-            return (f"🎲 **ダブルアップ開始！** BET: {bet:,} AGO\n"
+            return (f"{DICE} **ダブルアップ開始！** BET: {bet:,} AGO\n"
                     "GOで倍率を伸ばすか、CASHOUTで確定してください。")
         except items_core.ItemError as exc:
             return gambling_action_failed(exc)
@@ -986,7 +987,7 @@ class GamblingCog(commands.Cog):
         try:
             result = self.store.double_go(uid)
             if result["win"]:
-                return (f"✅ **成功！** 倍率 {result['multiplier']:.2f} 倍"
+                return (f"{SUCCESS} **成功！** 倍率 {result['multiplier']:.2f} 倍"
                         f"（現在価値 {result['current_value']:,} AGO）\n"
                         "GOで続けるか、CASHOUTで確定してください。")
             self._recycle(result["bet"])
@@ -1012,7 +1013,7 @@ class GamblingCog(commands.Cog):
                 return gambling_action_failed(
                     "配当の支払いに失敗しました。Botの運営に連絡してください。")
             await self._record_history(GAMBLING_ID, uid, result["payout"], "gamble_double")
-            return (f"💰 **確定！ {result['payout']:,} AGO 獲得！**\n"
+            return (f"{COIN} **確定！ {result['payout']:,} AGO 獲得！**\n"
                     f"コイン残高: {credit:,} AGO")
         except items_core.ItemError as exc:
             return gambling_action_failed(exc)
@@ -1142,11 +1143,11 @@ class GamblingCog(commands.Cog):
                     return gambling_action_failed(
                         "賞金の支払いに失敗しました。Botの運営に連絡してください。")
                 await self._record_history(GAMBLING_ID, uid, prize, "gamble_dice")
-                return (f"🎲 予想: {number}／結果: **{result['rolled']}**\n"
+                return (f"{DICE} 予想: {number}／結果: **{result['rolled']}**\n"
                         f"🎉 **当たり！ {prize:,} AGO 獲得！**\n"
                         f"コイン残高: {credit:,} AGO")
             self._recycle(bet)
-            return (f"🎲 予想: {number}／結果: **{result['rolled']}**\n"
+            return (f"{DICE} 予想: {number}／結果: **{result['rolled']}**\n"
                     "はずれ…ベットは失われました。")
         except items_core.ItemError as exc:
             return gambling_action_failed(exc)

@@ -13,6 +13,7 @@ transaction_history への記録）を通す（cogs/items.py と同じ組み立�
 general:craft）だけ。
 """
 from __future__ import annotations
+from core.emojis import SUCCESS
 
 import asyncio
 import logging
@@ -345,7 +346,7 @@ class WorkshopCog(commands.Cog):
                 return workshop_action_failed(exc)
             await self._record_history(uid, WORKSHOP_ID, price, "machine_buy")
             return (
-                f"✅ **{tier['name']}を購入しました**\n"
+                f"{SUCCESS} **{tier['name']}を購入しました**\n"
                 f"{price:,} AGO（{tier['cycle_hours']}時間ごとに素材を生産します）\n"
                 f"寿命は{tier['lifespan_cycles']}サイクル分"
                 f"（満稼働で約{workshop_core.lifetime_days(tier_id):.0f}日）の使い捨てです\n"
@@ -375,7 +376,7 @@ class WorkshopCog(commands.Cog):
             store = self._item_store()
             for item_id, count in result["items"].items():
                 store.add(uid, item_id, count)
-            lines = [f"✅ **生産物を {result['cycles']} サイクル分受け取りました**"]
+            lines = [f"{SUCCESS} **生産物を {result['cycles']} サイクル分受け取りました**"]
             for item_id, count in sorted(result["items"].items()):
                 lines.append(f"・{_item_name(item_id)} ×{count}")
             for tier_id in result.get("exhausted", []):
@@ -410,7 +411,7 @@ class WorkshopCog(commands.Cog):
             outcome = f"{_item_name(result['item'])} ×{result['count']}"
             if result["rare"]:
                 return f"✨ **大成功！** {names} → **{outcome}**"
-            return f"✅ **合成しました** {names} → **{outcome}**"
+            return f"{SUCCESS} **合成しました** {names} → **{outcome}**"
         except items_core.ItemError as exc:
             return craft_action_failed(exc)
         except Exception:
@@ -424,7 +425,7 @@ class WorkshopCog(commands.Cog):
                 self._item_store(), uid, item_a, item_b)
             names = f"{_item_name(item_a)} ＋ {_item_name(item_b)}"
             return (
-                f"✅ **委託加工を開始しました** {names}\n"
+                f"{SUCCESS} **委託加工を開始しました** {names}\n"
                 f"約{workshop_core.COMMISSION_HOURS:.0f}時間後に工房から受け取れます。"
                 "通常の合成よりレアな結果が出やすくなります。"
             )
@@ -452,7 +453,7 @@ class WorkshopCog(commands.Cog):
                 self._item_store(), uid, extra_rare_boost=extra_boost)
             if not results:
                 return workshop_action_failed("まだ完了した委託加工がありません。")
-            lines = [f"✅ **委託加工を {len(results)} 件受け取りました**"]
+            lines = [f"{SUCCESS} **委託加工を {len(results)} 件受け取りました**"]
             for result in results:
                 a, b = result["inputs"]
                 names = f"{_item_name(a)} ＋ {_item_name(b)}"

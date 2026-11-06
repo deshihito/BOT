@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 """MIQ（引用画像）の中核：フォント解決・絵文字フォールバック・基本描画・設定保存。元 cogs/general.py から分割。"""
 from __future__ import annotations
+from core.emojis import AGO_TICKET, BOOK, DICE, GAME, MUSIC
 
 from .common import *
 from .levelup import _levelup_font, _levelup_pick_font, _levelup_safe_name
@@ -19,14 +20,14 @@ MIQ_LINE_MAX_IMAGES = 2
 # random は保存値としての仮想フォーマットで、生成ごとに MIQ_RANDOM_POOL から
 # 実フォーマットを1つ選ぶ。未設定ユーザーの既定も random。
 MIQ_FORMATS = {
-    "random": ("ランダム", "🎲"),
+    "random": ("ランダム", DICE),
     "quote": ("引用 (従来)", "🖼️"),
     "manga": ("漫画風", "💥"),
-    "music": ("音楽再生風", "🎵"),
+    "music": ("音楽再生風", MUSIC),
     "line": ("LINE風", "💬"),
     "news": ("ニュース速報風", "📺"),
     "xpost": ("X投稿風", "🐦"),
-    "rpg": ("RPG風", "🎮"),
+    "rpg": ("RPG風", GAME),
     "blueprint": ("設計図風", "📐"),
     "pixel": ("レトロゲーム風", "👾"),
     "card": ("トレカ風", "🎴"),
@@ -34,12 +35,12 @@ MIQ_FORMATS = {
     "dark": ("ダーク風", "🎬"),
     "pop": ("ポップ風", "💛"),
     "pastel": ("パステル風", "🌸"),
-    "ticket": ("チケット風", "🎫"),
+    "ticket": ("チケット風", AGO_TICKET),
     "note": ("ノート風", "📓"),
     "pair": ("ペアハート風", "💞"),
     "luxury": ("ゴールド縦書き風", "👑"),
     "tate": ("和風縦書き風", "🎋"),
-    "novel": ("小説風", "📖"),
+    "novel": ("小説風", BOOK),
     "glass": ("グラスカード風", "💠"),
 }
 

@@ -3,6 +3,7 @@ import logging
 from datetime import datetime
 import discord
 from discord.ext import commands
+from core.emojis import FAILED
 
 logger = logging.getLogger(__name__)
 
@@ -39,7 +40,7 @@ class LogViewer(commands.Cog):
         buffer = getattr(self.bot, "log_buffer", None)
         if buffer is None:
             await ctx.send(
-                "❌ `bot.log_buffer` が見つかりません。\n"
+                f"{FAILED} `bot.log_buffer` が見つかりません。\n"
                 "`main.py` で `bot.log_buffer = log_buffer` が実行されているか確認してください。"
             )
             return
@@ -51,7 +52,7 @@ class LogViewer(commands.Cog):
             return
 
         if line_count <= 0:
-            await ctx.send("❌ 行数は 1 以上で指定してください。")
+            await ctx.send(f"{FAILED} 行数は 1 以上で指定してください。")
             return
 
         # --- 重要度フィルタリング処理 ---
@@ -60,7 +61,7 @@ class LogViewer(commands.Cog):
             filter_level = level.upper()
             if filter_level not in VALID_LEVELS:
                 await ctx.send(
-                    f"❌ 無効な重要度です: `{level}`\n"
+                    f"{FAILED} 無効な重要度です: `{level}`\n"
                     f"使用可能な重要度: `DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL`"
                 )
                 return
@@ -134,7 +135,7 @@ class LogViewer(commands.Cog):
         # 許可されていないユーザーが使用した場合
         if isinstance(error, commands.CheckFailure):
             try:
-                await ctx.send("❌ このコマンドは許可されたユーザーのみ使用できます。")
+                await ctx.send(f"{FAILED} このコマンドは許可されたユーザーのみ使用できます。")
             except Exception:
                 logger.debug("権限エラーの通知送信に失敗しました", exc_info=True)
             return
@@ -142,14 +143,14 @@ class LogViewer(commands.Cog):
         # 引数の数字が不正な場合
         if isinstance(error, commands.BadArgument):
             try:
-                await ctx.send("❌ 行数は数字で指定してください。例: `!logs 50 ERROR`")
+                await ctx.send(f"{FAILED} 行数は数字で指定してください。例: `!logs 50 ERROR`")
             except Exception:
                 logger.debug("引数エラーの通知送信に失敗しました", exc_info=True)
             return
 
         # その他のエラー
         try:
-            await ctx.send("❌ ログ取得中にエラーが発生しました。")
+            await ctx.send(f"{FAILED} ログ取得中にエラーが発生しました。")
         except Exception:
             logger.debug("エラー通知の送信に失敗しました", exc_info=True)
         print(f"[LogViewer] logs command error: {error}")

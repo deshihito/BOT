@@ -11,6 +11,7 @@ import re
 import os
 from core import logfare
 from core.panel_v2 import as_panel_v2, edit_panel_v2
+from core.emojis import SUCCESS
 
 from core.zeta.common import *  # noqa: F401,F403 - shared constants/helpers
 from core.zeta.common import MAX_CUSTOM_PER_USER, _clip, validate_custom_fields  # noqa: F401
@@ -128,7 +129,7 @@ class CustomManageView(discord.ui.View):
         # Components V2 へ変換される前提で、本文(description)のみで構成する
         lines = []
         if self.notice:
-            lines += [f"✅ {self.notice}", ""]
+            lines += [f"{SUCCESS} {self.notice}", ""]
         if not self.entries:
             lines.append("まだ登録がありません。「新規登録」からキャラクターとシチュエーションを作成できます。")
         for e in self.entries:

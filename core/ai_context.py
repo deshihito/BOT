@@ -5,6 +5,7 @@
 - 取得した内容は「外部データ」として括弧付きで渡し、命令としては扱わせない
 """
 from __future__ import annotations
+from core.emojis import SUCCESS
 
 import asyncio
 import ipaddress
@@ -92,7 +93,7 @@ class ContextResult:
         for link in self.links:
             host = urlsplit(link.final_url or link.url).netloc
             label = (link.title or host)[:60]
-            lines.append(f"✅ {label}（{host}）" if not link.error else f"⚠️ {host}: {link.error}")
+            lines.append(f"{SUCCESS} {label}（{host}）" if not link.error else f"⚠️ {host}: {link.error}")
         if self.history_count:
             lines.append(f"💬 直近{self.history_count}件の会話")
         if self.reply_included:
