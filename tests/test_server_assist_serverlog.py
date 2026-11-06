@@ -17,8 +17,8 @@ import discord
 
 from core import guild_settings
 from core.storage import KVStore
-from core.server_assist import discover_features
-from core.server_assist.features import serverlog
+from core.support.server_assist import discover_features
+from core.support.server_assist.features import serverlog
 from tests.fake_kv_supabase import FakeKVSupabase
 
 

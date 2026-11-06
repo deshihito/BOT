@@ -16,7 +16,7 @@ import discord
 
 from core import guild_settings
 from core.panel_v2 import as_panel_v2
-from core.server_assist.features import (
+from core.support.server_assist.features import (
     automod,
     autorole,
     invites,

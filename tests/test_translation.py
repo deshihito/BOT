@@ -2,7 +2,8 @@ import types
 import unittest
 from unittest.mock import AsyncMock, patch
 
-from core import localization, translation
+from core import translation
+from core.support import localization
 
 
 class TranslationTest(unittest.IsolatedAsyncioTestCase):
