@@ -14,6 +14,7 @@ import aiohttp
 import discord
 from discord import app_commands
 from discord.ext import commands
+from core.embeds import we
 from core.emojis import FAILED
 try:
     import encodec
@@ -433,10 +434,11 @@ class TTSCog(commands.Cog):
         target = channel or r.channel
         self.read_channels[r.guild.id] = target.id
         cfg = self.get_settings(r.user.id)
-        await r.send(
+        await r.send(embed=we(
             f"<#{target.id}>の発言を読み上げます（VC にいる人だけ）。\n"
-            f"話者: **{await self._speaker_name(cfg.speaker)}** / ピッチ {cfg.pitch:+g} / 話速 {cfg.speed:g}倍\n"
-        )
+            f"話者: **{await self._speaker_name(cfg.speaker)}** / ピッチ {cfg.pitch:+g} / 話速 {cfg.speed:g}倍",
+            title="🗣️ 読み上げを開始しました",
+        ))
 
     async def _stop_impl(self, r: Responder):
         guild_id = r.guild.id
@@ -455,7 +457,7 @@ class TTSCog(commands.Cog):
             remove_audio_source(vc, "tts")
         await self.voice_sessions.release(guild_id, "tts", reason="stop")
         if was_active:
-            await r.send("🔇 読み上げを停止しました。VC には残っています（退出は `/vc` →「VC接続」の退出）。")
+            await r.send(embed=we("🔇 読み上げを停止しました。VC には残っています（退出は `/vc` →「VC接続」の退出）。"))
         else:
             await r.send("読み上げは開始されていません。", ephemeral=True)
 
@@ -469,7 +471,7 @@ class TTSCog(commands.Cog):
         if not await self.enqueue(r.guild, text, r.user.id):
             return await r.send("読み上げ待ちがいっぱいです。少し待ってからもう一度どうぞ。", ephemeral=True)
         cfg = self.get_settings(r.user.id)
-        await r.send(f"🗣️ 読み上げます（{await self._speaker_name(cfg.speaker)}）")
+        await r.send(embed=we(f"🗣️ 読み上げます（{await self._speaker_name(cfg.speaker)}）"))
 
     async def _resolve_speaker(self, value: str) -> int:
         value = value.strip()
@@ -513,7 +515,7 @@ class TTSSettingsModal(discord.ui.Modal, title="読み上げ設定"):
             if text.startswith("could not convert"):
                 text = "ピッチと話速は数値で入力してください。"
             return await r.send(f"{FAILED} {text}", ephemeral=True)
-        await r.send(message, ephemeral=True)
+        await r.send(embed=we(message), ephemeral=True)
 
 
 class TTSSayModal(discord.ui.Modal, title="1回だけ読み上げ"):
