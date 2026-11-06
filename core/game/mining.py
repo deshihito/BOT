@@ -1,0 +1,263 @@
+# -*- coding: utf-8 -*-
+"""採掘（mining）の単一の置き場。
+
+パンBot 資産移植 Phase 4 で AGO 流に組み直したものを、2026-11-06 の
+ユーザー指示（「軸足は本家に合わせて」＋「マイニングの核は損失還流
+プール」）で原典準拠に再仕様した。原典（main.py の MiningView）の形:
+
+- パネル（セッション）を開くと、そのセッションで掘れる回数が
+  1〜20 回の抽選で決まる。セッション開始のクールダウンは60秒
+- 1掘りの産出はコイン 10〜500（基本額の抽選）。20% で失敗して0
+- 10% で「大量採掘」が発動し、プール残高の 1〜10% が上乗せされる
+- コインは新規創出ではなく共有プール（core/general/economy_pool.py）から
+  支払われ、プールにある分までしか出ない。プールは経済系の損失の
+  還流でチャージされる（還流の発生源は economy_pool 側を参照）
+
+旧 AGO 仕様（素材中心・コインEV約4・個人10回/日・日次グローバル
+供給キャップ）は原典の手触りと別物だったため廃止した。素材の供給は
+ショップ・宝箱・工房が担う。安全弁として残したのは「支払いは
+プール残高の範囲内」という原典自身の制約だけで、日次キャップ類は
+置かない（プールが枯れれば掘れなくなるのが原典の調整弁）。
+
+このモジュールが持つのはセッション状態・クールダウン・産出の抽選
+まで。プールの支払いと wallet への反映は呼び出し側
+（cogs/circulation.py）が economy_pool と wallet の経路で行い、
+失敗したら巻き戻す。保存は core/workshop.py と同じ流儀: 専用 JSON
+（既定 data/mining.json、環境変数 MINING_DATA_PATH で変更可）に
+メモリ主体＋バッチフラッシュ＋原子差し替え。
+"""
+from __future__ import annotations
+
+import copy
+import json
+import logging
+import os
+import random
+import threading
+import time
+from datetime import datetime
+from pathlib import Path
+from typing import Any
+
+from core.general.items import JST, ItemError
+
+logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# 経済定数（原典準拠の値。絶対額は AGO のコイン分布の実測後に調整する）
+# ---------------------------------------------------------------------------
+
+#: セッション開始のクールダウン（秒）。原典 MINING_COOLDOWN = 60。
+COOLDOWN_SECONDS = 60
+
+#: 1セッションで掘れる回数の抽選範囲（原典 random.randint(1, 20)）。
+SESSION_MIN_DIGS = 1
+SESSION_MAX_DIGS = 20
+
+#: 1掘りの基本産出（コイン、原典 random.randint(10, 500)）。
+BASE_MIN_COINS = 10
+BASE_MAX_COINS = 500
+
+#: 失敗率（原典: 0.8 の確率で成功＝20% で産出0）。
+FAIL_RATE = 0.20
+
+#: 大量採掘の発動率（原典 lc = 0.1）。
+JACKPOT_RATE = 0.10
+
+#: 大量採掘の上乗せ（プール残高に対する割合、原典 uniform(0.01, 0.1)）。
+JACKPOT_POOL_MIN_RATE = 0.01
+JACKPOT_POOL_MAX_RATE = 0.10
+
+FLUSH_EVERY_EVENTS = 20
+FLUSH_INTERVAL_SECONDS = 60.0
+
+
+def _empty_state() -> dict[str, Any]:
+    return {"users": {}}
+
+
+def _clean_state(raw: Any) -> dict[str, Any]:
+    state = _empty_state()
+    if not isinstance(raw, dict):
+        return state
+    users = raw.get("users")
+    if isinstance(users, dict):
+        for uid, entry in users.items():
+            if not isinstance(entry, dict):
+                continue
+            last = entry.get("last")
+            left = entry.get("session_left")
+            state["users"][str(uid)] = {
+                # 旧仕様の保存（last/day/count）からは last だけ引き継ぐ。
+                "last": last if isinstance(last, str) else None,
+                "session_left": (
+                    int(left) if isinstance(left, int) and left > 0 else 0),
+            }
+    return state
+
+
+_DEFAULT_PATH = Path(__file__).resolve().parent.parent / "data" / "mining.json"
+
+
+def default_path() -> Path:
+    return Path(os.environ.get("MINING_DATA_PATH") or _DEFAULT_PATH)
+
+
+class MiningStore:
+    """採掘セッション（残り回数）・クールダウンの状態と JSON 保存、産出抽選。"""
+
+    def __init__(
+        self,
+        path: Path | str | None = None,
+        *,
+        rng: random.Random | None = None,
+        flush_every: int = FLUSH_EVERY_EVENTS,
+        flush_interval: float = FLUSH_INTERVAL_SECONDS,
+    ):
+        self._path = Path(path) if path is not None else default_path()
+        self._rng = rng if rng is not None else random.Random()
+        self._flush_every = max(1, int(flush_every))
+        self._flush_interval = float(flush_interval)
+        self._lock = threading.RLock()
+        self._dirty = 0
+        self._last_flush = time.monotonic()
+        self._state = self._load()
+
+    # ------------------------------------------------------------------ 保存
+    def _load(self) -> dict[str, Any]:
+        try:
+            raw = json.loads(self._path.read_text(encoding="utf-8"))
+        except Exception:
+            return _empty_state()
+        return _clean_state(raw)
+
+    def flush(self) -> None:
+        with self._lock:
+            payload = copy.deepcopy(self._state)
+            self._dirty = 0
+            self._last_flush = time.monotonic()
+        try:
+            self._path.parent.mkdir(parents=True, exist_ok=True)
+            tmp = self._path.with_suffix(self._path.suffix + ".tmp")
+            tmp.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+            tmp.replace(self._path)
+        except Exception:
+            logger.exception("mining: 状態の保存に失敗しました path=%s", self._path)
+
+    def _mark_dirty(self) -> None:
+        self._dirty += 1
+        if self._dirty >= self._flush_every or (
+            time.monotonic() - self._last_flush >= self._flush_interval
+        ):
+            self.flush()
+
+    def maybe_flush(self) -> None:
+        if self._dirty and time.monotonic() - self._last_flush >= self._flush_interval:
+            self.flush()
+
+    # ------------------------------------------------------------------ 状態参照
+    def _user_locked(self, user_id: str) -> dict[str, Any]:
+        return self._state["users"].setdefault(
+            str(user_id), {"last": None, "session_left": 0})
+
+    def _cooldown_remaining_locked(self, user: dict[str, Any], now: datetime) -> float:
+        if not user["last"]:
+            return 0.0
+        try:
+            last = datetime.fromisoformat(user["last"])
+        except ValueError:
+            return 0.0
+        return max(0.0, COOLDOWN_SECONDS - (now - last).total_seconds())
+
+    def status(self, user_id: str, now: datetime | None = None) -> dict[str, Any]:
+        """表示用: クールダウン残りと、進行中セッションの残り回数。"""
+        now = now or datetime.now(JST)
+        with self._lock:
+            user = self._user_locked(str(user_id))
+            return {
+                "cooldown_remaining": self._cooldown_remaining_locked(user, now),
+                "session_left": int(user["session_left"]),
+                "session_max": SESSION_MAX_DIGS,
+            }
+
+    # ------------------------------------------------------------------ セッション
+    def start_session(self, user_id: str, now: datetime | None = None) -> int:
+        """セッションを開始し、掘れる回数を返す。
+
+        既にセッションが残っていれば、その残り回数をそのまま返す
+        （振り直さない）。クールダウン中は ItemError（状態は不変）。
+        """
+        now = now or datetime.now(JST)
+        uid = str(user_id)
+        with self._lock:
+            user = self._user_locked(uid)
+            if int(user["session_left"]) > 0:
+                return int(user["session_left"])
+            remaining = self._cooldown_remaining_locked(user, now)
+            if remaining > 0:
+                seconds = int(remaining) + (1 if remaining % 1 else 0)
+                raise ItemError(
+                    f"クールタイム中です。あと約{seconds}秒で掘れます。")
+            digs = self._rng.randint(SESSION_MIN_DIGS, SESSION_MAX_DIGS)
+            user["last"] = now.astimezone(JST).isoformat()
+            user["session_left"] = digs
+            self._mark_dirty()
+            return digs
+
+    # ------------------------------------------------------------------ 産出抽選
+    def _roll(self, pool_balance: int) -> dict[str, Any]:
+        """1掘り分の産出を抽選する（状態は変えない）。
+
+        原典の順序どおり: 基本額を抽選し、失敗なら基本額は0。
+        大量採掘は独立に抽選し、発動すればプール残高の割合が
+        基本額とは別に上乗せされる（失敗した掘りでも発動する）。
+        支払い要求額はプール残高で clamp する（ある分まで）。
+        """
+        base = self._rng.randint(BASE_MIN_COINS, BASE_MAX_COINS)
+        failed = self._rng.random() < FAIL_RATE
+        base_amount = 0 if failed else base
+        jackpot = self._rng.random() < JACKPOT_RATE
+        extra = 0
+        if jackpot:
+            rate = self._rng.uniform(JACKPOT_POOL_MIN_RATE, JACKPOT_POOL_MAX_RATE)
+            extra = max(1, int(pool_balance * rate)) if pool_balance > 0 else 0
+        requested = base_amount + extra
+        return {
+            "coins": max(0, min(requested, max(0, int(pool_balance)))),
+            "requested": requested,
+            "base": base_amount,
+            "failed": failed,
+            "jackpot": jackpot and extra > 0,
+            "extra": extra,
+        }
+
+    def dig(self, user_id: str, pool_balance: int,
+            now: datetime | None = None) -> dict[str, Any]:
+        """セッションの1回分を消費して産出を確定する。
+
+        セッションが無い場合は ItemError（状態は不変）。戻り値の
+        "user_before" は、支払いに失敗したときの rollback_dig 用。
+        """
+        now = now or datetime.now(JST)
+        uid = str(user_id)
+        with self._lock:
+            user = self._user_locked(uid)
+            if int(user["session_left"]) <= 0:
+                raise ItemError("採掘セッションが始まっていません。")
+            user_before = copy.deepcopy(user)
+            user["session_left"] = int(user["session_left"]) - 1
+            self._mark_dirty()
+            result = self._roll(pool_balance)
+            result["session_left"] = int(user["session_left"])
+            result["user_before"] = user_before
+            return result
+
+    def roll_bonus(self, pool_balance: int) -> dict[str, Any]:
+        """追加の1掘り分の抽選（採掘ドリンク用。セッションは消費しない）。"""
+        return self._roll(pool_balance)
+
+    def rollback_dig(self, user_id: str, result: dict[str, Any]) -> None:
+        """dig の巻き戻し（プールの支払いやコイン反映に失敗したとき用）。"""
+        with self._lock:
+            self._state["users"][str(user_id)] = copy.deepcopy(result["user_before"])
+            self._mark_dirty()
