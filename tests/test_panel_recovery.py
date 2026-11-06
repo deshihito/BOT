@@ -74,14 +74,17 @@ class CustomIdTest(unittest.TestCase):
     def test_game_hub(self):
         # 導線最適化 M3: 初期表示から全ゲームセレクト（panel:game:select）も出す。
         # ラウンド2 R5: 月次ランキングボタン（panel:game:monthly）も追加。
-        # ラウンド3: 全34ゲームが上限25件を超えたため、2ページ目のセレクト
-        # （panel:game:select:2）が増える。1ページ目の固定 id は不変。
+        # ページめくり化: セレクトは1つに固定し、代わりにページめくりボタン
+        # （page_prev / page_indicator / page_next）を出す（select:2 は廃止）。
         self.assertEqual(child_ids(GameHubView(None)),
-                         {"panel:game:genre", "panel:game:select", "panel:game:select:2", "panel:game:monthly"})
+                         {"panel:game:genre", "panel:game:select", "panel:game:page_prev",
+                          "panel:game:page_indicator", "panel:game:page_next", "panel:game:monthly"})
         view = GameHubView(None)
         view.genre = "party"
         view.refresh()
         self.assertIn("panel:game:select", child_ids(view))
+        # ジャンル絞り込み時は1ページに収まるのでページめくりは出ない。
+        self.assertNotIn("panel:game:page_next", child_ids(view))
         self.assertIn("panel:game:commit", child_ids(GameHubView(None, shortcut_mode=True)))
 
     def test_game_detail(self):

@@ -152,6 +152,7 @@ class GameGenreSelect(discord.ui.Select):
             await interaction.response.edit_message(embed=detail_embed(selected), view=panel)
             return
         view.genre = selected
+        view.page = 0
         view.refresh()
         if hasattr(container, "_sync"):
             container._sync()
@@ -192,8 +193,8 @@ class GameSelect(discord.ui.Select):
         placeholder = "ゲームを選択してください"
         if len(pages) > 1:
             placeholder = f"ゲームを選択してください（{page + 1}/{len(pages)}）"
-        custom_id = "panel:game:select" if page == 0 else f"panel:game:select:{page + 1}"
-        super().__init__(placeholder=placeholder, options=options, custom_id=custom_id, row=1 if genre else 0)
+        # ページが変わってもセレクトは1つだけ。custom_id は常に固定。
+        super().__init__(placeholder=placeholder, options=options, custom_id="panel:game:select", row=1 if genre else 0)
 
     async def callback(self, interaction: discord.Interaction):
         game_id = self.values[0]
@@ -202,6 +203,37 @@ class GameSelect(discord.ui.Select):
         if hasattr(self.view, "panel"):
             return await edit_panel_v2(interaction, as_panel_v2(panel))
         return await edit_panel_v2(interaction, as_panel_v2(panel))
+
+
+class GamePageButton(discord.ui.Button):
+    """ゲームセレクトのページめくりボタン（前へ/次へ）。
+
+    ページ状態は GameHubView.page が保持し、押すとその場でメッセージを
+    編集してセレクトの中身とページ表示を切り替える。ジャンル絞り込み時は
+    全ジャンルとも1ページに収まるため、ボタン自体を出さない。
+    """
+
+    def __init__(self, delta: int, page: int, total_pages: int, row: int):
+        if delta < 0:
+            label, custom_id = "◀ 前へ", "panel:game:page_prev"
+            disabled = page <= 0
+        else:
+            label, custom_id = "次へ ▶", "panel:game:page_next"
+            disabled = page >= total_pages - 1
+        super().__init__(label=label, style=discord.ButtonStyle.secondary,
+                         custom_id=custom_id, row=row, disabled=disabled)
+        self.delta = delta
+
+    async def callback(self, interaction: discord.Interaction):
+        container = self.view
+        view = getattr(container, "panel", container)
+        pages = game_select_pages(getattr(view, "genre", None))
+        view.page = min(max(getattr(view, "page", 0) + self.delta, 0), len(pages) - 1)
+        view.refresh()
+        if hasattr(container, "_sync"):
+            container._sync()
+            return await edit_panel_v2(interaction, container)
+        return await edit_panel_v2(interaction, as_panel_v2(view))
 
 
 class GameHistorySelect(discord.ui.Select):
@@ -231,7 +263,8 @@ class GameHistorySelect(discord.ui.Select):
 
 class GameHubView(discord.ui.View):
     def __init__(self, cog, shortcut_mode: bool = False, shortcut_item: dict | None = None,
-                 owner_id: int | None = None, history_specs: list | None = None):
+                 owner_id: int | None = None, history_specs: list | None = None,
+                 page: int = 0):
         super().__init__(timeout=600)
         self.cog = cog
         self.owner_id = owner_id
@@ -239,6 +272,7 @@ class GameHubView(discord.ui.View):
         self.shortcut_item = shortcut_item
         self.history_specs = list(history_specs or [])
         self.genre = None
+        self.page = page
         self.refresh()
 
     def refresh(self):
@@ -255,15 +289,24 @@ class GameHubView(discord.ui.View):
         self.add_item(genre_select)
         # 導線最適化 M3: 既定はジャンルなし全ゲームセレクト。
         # ジャンルセレクトは廃止せず「絞り込み」として残し、選んだ場合だけ一覧を絞る。
-        # ラウンド3で全34ゲームとなり上限25件を超えたため、全件表示は
-        # 25件ごとの複数セレクトに分割する（ジャンル絞り込み時は1段のまま）。
+        # ラウンド3で全34ゲームとなり上限25件を超えたため、セレクトは1つに固定し、
+        # 25件ごとのページをボタンでめくる（ジャンル絞り込み時は全ジャンルとも
+        # 1ページに収まるのでページめくりは出ない）。
         pages = game_select_pages(self.genre)
-        for i in range(len(pages)):
-            game_select = GameSelect(self.genre, page=i)
-            game_select.row = offset + 1 + i
-            self.add_item(game_select)
+        self.page = min(max(self.page, 0), len(pages) - 1)
+        game_select = GameSelect(self.genre, page=self.page)
+        game_select.row = offset + 1
+        self.add_item(game_select)
+        next_row = offset + 2
+        if len(pages) > 1:
+            self.add_item(GamePageButton(-1, self.page, len(pages), row=next_row))
+            self.add_item(discord.ui.Button(
+                label=f"{self.page + 1} / {len(pages)}ページ", style=discord.ButtonStyle.secondary,
+                custom_id="panel:game:page_indicator", row=next_row, disabled=True))
+            self.add_item(GamePageButton(1, self.page, len(pages), row=next_row))
+            next_row += 1
         monthly = discord.ui.Button(label="👑 今月のゲーム王", style=discord.ButtonStyle.primary,
-                                    custom_id="panel:game:monthly", row=offset + 1 + len(pages))
+                                    custom_id="panel:game:monthly", row=next_row)
         monthly.callback = self._monthly_callback
         self.add_item(monthly)
         if self.shortcut_mode:
@@ -541,7 +584,9 @@ class GameDetailView(discord.ui.View):
 
     @discord.ui.button(label="戻る", emoji=BACK, style=discord.ButtonStyle.secondary, row=3, custom_id="panel:game:back")
     async def back(self, interaction: discord.Interaction, button: discord.ui.Button):
-        view = GameHubView(self.cog, owner_id=self.owner_id)
+        # 戻り先のハブは、見ていたゲームが載っているページで開き直す。
+        page = next((i for i, chunk in enumerate(game_select_pages()) if self.game_id in chunk), 0)
+        view = GameHubView(self.cog, owner_id=self.owner_id, page=page)
         if hasattr(getattr(button, "view", None), "_sync"):
             return await edit_panel_v2(interaction, as_panel_v2(view))
         await interaction.response.edit_message(embed=view.embed(), view=view)
