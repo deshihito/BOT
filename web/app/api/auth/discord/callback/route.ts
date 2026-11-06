@@ -8,6 +8,7 @@ import {
   sessionCookieOptions,
   stateCookieOptions,
 } from "@/lib/auth";
+import { createWebSession } from "@/lib/dashboard";
 
 export const runtime = "nodejs";
 
@@ -54,10 +55,14 @@ export async function GET(request: Request) {
     const user = await userResponse.json() as { id?: string; username?: string; global_name?: string };
     if (!user.id) throw new Error("missing Discord user id");
 
+    const sessionUser = { id: user.id, username: user.global_name || user.username || "Discord" };
+    // ダッシュボード用にサーバー側セッションレコードを作る（失敗しても通常ログインは成立させる）
+    const sid = await createWebSession(sessionUser, token.access_token);
+
     const response = NextResponse.redirect(new URL("/dashboard", request.url));
     response.cookies.set(
       SESSION_COOKIE,
-      createSession({ id: user.id, username: user.global_name || user.username || "Discord" }),
+      createSession(sessionUser, sid ?? undefined),
       sessionCookieOptions(request),
     );
     response.cookies.set(OAUTH_STATE_COOKIE, "", stateCookieOptions(request, 0));

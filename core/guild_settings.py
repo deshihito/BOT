@@ -3,8 +3,9 @@
 core/storage.py（Supabase の bot_kv、namespace "guild_settings"）に、サーバーごとに 1 件
 ``{"<section>": {...}}`` の形で保存する。Supabase が使えないときはローカルの bot_kv.json に保存される。
 
-読むときはメモリ上の写しから同期的に読む（``get``）。Supabase からの読み直しは、最初に必要になったとき
-必要な処理から ``await ensure_loaded()`` で 1 回だけ読み込む。
+読むときはメモリ上の写しから同期的に読む（``get``）。保存先からの読み直しは、最初に必要になったときと、
+前回の読み直しから ``RELOAD_INTERVAL`` 秒が過ぎたときに ``await ensure_loaded()`` で行う。
+Web ダッシュボードから書き換えた設定も、この再読込で遅くとも間隔分だけ遅れて届く。
 
     store = get_store()
     await store.ensure_loaded()
@@ -16,6 +17,7 @@ from __future__ import annotations
 import asyncio
 import copy
 import logging
+import time
 from typing import Any, Optional
 
 from core.storage import KVStore
@@ -24,32 +26,48 @@ logger = logging.getLogger(__name__)
 
 NAMESPACE = "guild_settings"
 
+# Web ダッシュボードなど Bot の外から書き換えた設定を取り込む間隔（秒）。
+RELOAD_INTERVAL = 60.0
+
 
 class GuildSettings:
     def __init__(self, kv: Optional[KVStore] = None):
         self.kv = kv or KVStore(NAMESPACE)
         self._data: dict[str, dict[str, dict[str, Any]]] = self._clean(self.kv.load_local())
         self._loaded = False
+        self._loaded_at: Optional[float] = None
         self._lock: Optional[asyncio.Lock] = None
+        self.reload_interval = RELOAD_INTERVAL
 
     @staticmethod
     def _clean(data: dict) -> dict:
         return {str(k): v for k, v in (data or {}).items() if isinstance(v, dict)}
 
+    def _is_fresh(self) -> bool:
+        if not self._loaded or self._loaded_at is None:
+            return False
+        return (time.monotonic() - self._loaded_at) < self.reload_interval
+
     async def ensure_loaded(self) -> None:
-        """Supabase から 1 回だけ読み直す（失敗したらローカルの控えのまま続ける）。"""
-        if self._loaded:
+        """保存先から読み直す（失敗したら手元の控えのまま続ける）。
+
+        初回と、前回の読み直しから ``reload_interval`` 秒が過ぎたときだけ読み直す。
+        KVStore.load_all() は未送信のローカル変更を遠隔値より優先して返すため、
+        再読込で自分の書き込み途中の値を打ち消すことはない。
+        """
+        if self._is_fresh():
             return
         if self._lock is None:
             self._lock = asyncio.Lock()
         async with self._lock:
-            if self._loaded:
+            if self._is_fresh():
                 return
             try:
                 self._data = self._clean(await self.kv.load_all())
             except Exception:
                 logger.exception("サーバー設定を読み直せませんでした（ローカルの控えで続けます）")
             self._loaded = True
+            self._loaded_at = time.monotonic()
 
     def get(self, guild_id: int, section: str) -> dict[str, Any]:
         """設定の写しを返す（未設定なら空の dict）。"""

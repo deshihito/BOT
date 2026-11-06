@@ -16,7 +16,7 @@ export function GET(request: Request) {
   url.searchParams.set("client_id", clientId);
   url.searchParams.set("redirect_uri", redirectUri);
   url.searchParams.set("response_type", "code");
-  url.searchParams.set("scope", "identify");
+  url.searchParams.set("scope", "identify guilds");
   url.searchParams.set("state", state);
 
   const response = NextResponse.redirect(url);
