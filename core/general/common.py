@@ -59,10 +59,12 @@ GENERAL_GENRES = {
     "survival": ("生存確認", "メンバーの安否・不在の検知"),
     "custom": ("設定・AI", ""),
     "zeta": ("ZetaModoki", "ロールプレイ会話"),
-    "meme": ("meme作成", "画像に上下テキストを入れてmeme画像を作成する"),
+    "make_image": ("画像作成", ""),
 }
 # 旧ジャンルで保存されたショートカットを新しいジャンルへ移行する（導線最適化 S7）。
-GENERAL_GENRE_ALIASES = {"translation": "custom", "miq": "custom"}
+# miq / meme は「画像作成」(make_image) へ統合したため、旧 miq・meme の
+# ショートカットは make_image を開く（MIQ設定・meme の移動先）。
+GENERAL_GENRE_ALIASES = {"translation": "custom", "miq": "make_image", "meme": "make_image"}
 
 # 逮捕中（core/game/prison.py）に実行を拒否するマネージャンルのアクション値。
 # 表示系（money_panel / status / coin_leaderboard / market / items /
@@ -131,7 +133,6 @@ GENERAL_ACTIONS = {
         ("画像生成AIモデルを設定", "image_default"),
         ("AI思考強度を設定", "reasoning_default"),
         ("自動翻訳を設定", "translation_settings"),
-        ("MIQ設定（見た目・引用拒否）", "miq_settings"),
     ],
     "zeta": [
         ("ZetaModokiと会話", "zetamodoki"),
@@ -139,9 +140,11 @@ GENERAL_ACTIONS = {
         ("シチュエーション・キャラクターを登録", "zeta_register"),
         ("登録を管理（編集・削除）", "zeta_manage"),
     ],
-    "meme": [
+    "make_image": [
+        ("54字の物語", "story54"),
         ("memeを作成", "meme_create"),
         ("使い方", "meme_help"),
+        ("MIQ設定（見た目・引用拒否）", "miq_settings"),
     ],
 }
 

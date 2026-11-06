@@ -71,6 +71,8 @@ AI_BLOCKED_IDS = frozenset({
     # meme作成はモーダル入力＋画像投稿待ちの対話フローで、画像生成系を
     # AI の代理実行に広げない方針のため対象外。
     "general:meme_create",
+    # 54字の物語もモーダル入力の対話フローなので meme_create と同様に対象外。
+    "general:story54",
     "support:clear", "support:role_bulk", "support:muted", "support:ticket", "support:honeypot",
     "support:whisper", "support:binjou", "support:message_log", "support:moderation_log",
     "vc:record_start", "vc:transcribe_start",

@@ -10,17 +10,20 @@ class MiqPurificationTest(unittest.TestCase):
 
         self.assertNotIn("miq", GENERAL_GENRES)
         self.assertNotIn("miq", GENERAL_ACTIONS)
+        # MIQ設定は「画像作成」(make_image) へ移行し、custom からは外れた
         custom_values = [v for _label, v in GENERAL_ACTIONS["custom"]]
-        self.assertIn("miq_settings", custom_values)
+        self.assertNotIn("miq_settings", custom_values)
+        make_image_values = [v for _label, v in GENERAL_ACTIONS["make_image"]]
+        self.assertIn("miq_settings", make_image_values)
         registry = action_registry.default_registry()
         self.assertIsNone(registry.get("general:miq_help"))
         spec = registry.get("general:miq_settings")
-        self.assertEqual(spec.genre, "custom")
+        self.assertEqual(spec.genre, "make_image")
 
     def test_genre_alias_for_saved_shortcuts(self):
         from cogs.general import GENERAL_GENRE_ALIASES
 
-        self.assertEqual(GENERAL_GENRE_ALIASES["miq"], "custom")
+        self.assertEqual(GENERAL_GENRE_ALIASES["miq"], "make_image")
 
     def test_settings_embed_explains_creation(self):
         import types

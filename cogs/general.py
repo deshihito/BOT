@@ -46,6 +46,7 @@ from core.general.miq.miq_styles import *
 from core.general.miq.miq_cards import *
 from core.general.miq.miq_line import *
 from core.general.meme import *
+from core.general.story54 import *
 from core.general.miq.miq_ui import *
 # アクション定義の単一の真実は core/action_registry。SHORTCUT_ROOTS は
 # レジストリからの生成物（名前・形状・import 互換は従来どおり維持する）。
@@ -118,6 +119,7 @@ class GeneralCog(
     MiqMixin,
     MiqLineMixin,
     MemeMixin,
+    Story54Mixin,
     LevelUpMixin,
     TranslationMixin,
     ShortcutsMixin,
@@ -220,11 +222,18 @@ class GeneralCog(
             modal = MemeTextModal(self._meme_panel_texts_done)
             return await interaction.response.send_modal(modal)
 
+        if value == "story54":
+            # モーダルを開けない経路 (メッセージ型ショートカット) では
+            # _MessageResponse.send_modal が「パネルから実行してください」と
+            # 案内する (meme_create 等の既存モーダル系と同じ扱い)。
+            modal = Story54Modal(self._story54_text_done)
+            return await interaction.response.send_modal(modal)
+
         if value == "meme_help":
             embed = discord.Embed(title="meme作成", color=0xFFFFFF)
             embed.description = (
                 "**作り方**\n"
-                "・`/general` → meme作成 → **memeを作成**：上/下テキストを入力したあと、"
+                "・`/general` → 画像作成 → **memeを作成**：上/下テキストを入力したあと、"
                 "同じチャンネルにベースにしたい画像を投稿してください（120秒以内）。\n"
                 "・画像のあるメッセージを右クリック(スマホは長押し) → アプリ → **meme画像にする**："
                 "その画像（無ければ投稿者のアバター）がベースになります。\n\n"
