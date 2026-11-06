@@ -1,7 +1,7 @@
 """再起動復旧（切れても死なない）のテスト。Discord には接続しない。
 
-- core/voice_restore.py: スナップショットの serialize/deserialize 往復、壊れた JSON の吸収
-- core/voice_session.py: acquire/release に連動したセッションスナップショットの保存・削除
+- core/voice/voice_restore.py: スナップショットの serialize/deserialize 往復、壊れた JSON の吸収
+- core/voice/voice_session.py: acquire/release に連動したセッションスナップショットの保存・削除
 - cogs/sio_music.py: 再生状態のシリアライズ、復旧可否判定（人がいる/いない・チャンネル欠落）、
   再生再開と一時停止のままの復旧、音楽パネルの取り直し
 - cogs/sio_globalVC.py: ROOMS（ルーム定義）の永続化往復、参加状態の復旧可否判定
@@ -27,8 +27,8 @@ for _name, _value in {'BOT_API_BASE_URL': 'http://127.0.0.1:8787', 'BOT_API_KEY'
 
 import discord  # noqa: E402
 
-from core import voice_restore  # noqa: E402
-from core import voice_session as vs  # noqa: E402
+from core.voice import voice_restore  # noqa: E402
+from core.voice import voice_session as vs  # noqa: E402
 from cogs import sio_globalVC as gvc  # noqa: E402
 from cogs import sio_music as music  # noqa: E402
 

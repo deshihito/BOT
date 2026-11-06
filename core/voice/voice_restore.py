@@ -4,7 +4,7 @@
 設計原則は「切れても死なない」:
 
 - スナップショットは終了時に保存するものではなく、使用中に継続保存する
-  ものとして扱う。呼び出し側（core/voice_session.py、cogs/sio_music.py、
+  ものとして扱う。呼び出し側（core/voice/voice_session.py、cogs/sio_music.py、
   cogs/sio_globalVC.py）がキー遷移時と定期保存で set_entry / set_section
   を呼び続ける。再起動が優雅でも、クラッシュ・OOM・SIGKILL でも、
   直近のスナップショットから復旧できる。

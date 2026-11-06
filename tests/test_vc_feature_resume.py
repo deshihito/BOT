@@ -2,7 +2,7 @@
 
 Discord には接続しない。
 
-- core/vc_feature_restore.py: 再開用エントリの保存・読み出し・掃除
+- core/voice/vc_feature_restore.py: 再開用エントリの保存・読み出し・掃除
 - 各 cog の restore_after_restart: 保存→復旧で再開に必要な情報が揃うこと、
   人がいない／チャンネルが消えた場合は再開せず掃除されること、
   壊れたスナップショットでも起動が止まらないこと
@@ -29,7 +29,7 @@ for _name, _value in {'BOT_API_BASE_URL': 'http://127.0.0.1:8787', 'BOT_API_KEY'
 
 import discord  # noqa: E402
 
-from core import vc_feature_restore, voice_restore  # noqa: E402
+from core.voice import vc_feature_restore, voice_restore  # noqa: E402
 from cogs import sio_karaoke as karaoke  # noqa: E402
 from cogs import sio_rec as rec  # noqa: E402
 from cogs import sio_transcription as transcription  # noqa: E402

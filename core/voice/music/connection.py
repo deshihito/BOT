@@ -25,12 +25,12 @@ import numpy as np
 import re
 import wave
 import discord.opus
-from core import voice_restore
-from core.voice_session import SHARED_FEATURES, VoiceBusy, get_manager
-from core.voice_media import add_audio_source, has_audio_source, remove_audio_source
+from core.voice import voice_restore
+from core.voice.voice_session import SHARED_FEATURES, VoiceBusy, get_manager
+from core.voice.voice_media import add_audio_source, has_audio_source, remove_audio_source
 from core.legacy import Responder
 from core.emojis import CLOCK, FAILED, MUSIC, SUCCESS, VOL
-from core.music_activity import build_music_activity_snapshot
+from core.voice.music_activity import build_music_activity_snapshot
 
 from core.voice.music.common import *  # noqa: F401,F403 - shared helpers/constants
 
@@ -92,7 +92,7 @@ class ConnectionMixin:
 
     @staticmethod
     def _stop_hint(feature: str) -> str:
-        from core.voice_session import stop_hint
+        from core.voice.voice_session import stop_hint
         return stop_hint(feature)
 
 

@@ -8,8 +8,8 @@
 cleanup で消す。再起動後は各 cog の ``restore_after_restart()`` がエントリを
 読み、人が VC に残っている場合に限り、同じ設定で新規セッションとして再開する。
 
-保存先は core/voice_restore.py の ``vc_features`` セクション
-（キー ``"<guild_id>:<feature>"``、feature は core/voice_session.py の機能名）。
+保存先は core/voice/voice_restore.py の ``vc_features`` セクション
+（キー ``"<guild_id>:<feature>"``、feature は core/voice/voice_session.py の機能名）。
 音楽スナップショットと同じく、永続化の失敗で機能自体を止めることはしない
 （全て握ってログだけ残す）。
 """
@@ -21,7 +21,7 @@ import types
 from typing import Any
 
 try:
-    from core import voice_restore
+    from core.voice import voice_restore
 except Exception:  # pragma: no cover - import 失敗時も各機能自体は止めない
     voice_restore = None  # type: ignore[assignment]
 

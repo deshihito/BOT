@@ -5,7 +5,7 @@ Bot はサーバーごとに 1 つしか VC に入れない。以前は録音・
 別の機能を使っている人を黙って追い出していた（バグ10）。
 
 音楽・GVC・読み上げ・文字起こしは、1つの VoiceClient を共有する複数リースとして記録する。
-PCM再生と受信Sinkは ``core.voice_media`` が合成・多重化し、各機能の停止は自分のリースだけを解放する。
+PCM再生と受信Sinkは ``core.voice.voice_media`` が合成・多重化し、各機能の停止は自分のリースだけを解放する。
 それ以外の機能は従来どおり排他的に接続を所有する。
 
 - ``acquire()``: 同じVCチャンネルの共有対象機能は同じ接続に追加する。非対応機能は ``VoiceBusy``。
@@ -33,7 +33,7 @@ from core.emojis import FAILED
 logger = logging.getLogger(__name__)
 
 try:
-    from core import voice_restore
+    from core.voice import voice_restore
 except Exception:  # pragma: no cover - import 失敗時も VC 管理自体は止めない
     voice_restore = None  # type: ignore[assignment]
 

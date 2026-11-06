@@ -2,7 +2,7 @@ import unittest
 
 import numpy as np
 
-from core.speech_vad import FRAME_BYTES, SpeechDetector
+from core.voice.speech_vad import FRAME_BYTES, SpeechDetector
 
 
 class SpeechDetectorTest(unittest.TestCase):

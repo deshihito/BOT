@@ -8,9 +8,9 @@ import discord.opus
 from discord.ext import commands
 from discord.ext import voice_recv
 from core.legacy import Responder
-from core import vc_feature_restore
+from core.voice import vc_feature_restore
 from core.messages import VOICE_NOT_JOINED, voice_connection_failed
-from core.voice_session import VoiceBusy, get_manager
+from core.voice.voice_session import VoiceBusy, get_manager
 from core.emojis import CLOCK, FAILED, MUSIC, PAUSE, THU
 from functools import partial as _partial
 
