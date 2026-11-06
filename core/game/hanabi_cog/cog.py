@@ -16,7 +16,7 @@ from discord.ext import commands
 
 from core.game import game_records
 from core.game.board_image import render_tiles
-from core.game.game_v2 import GamePanelView, text_panel
+from core.game.game_v2 import GamePanelView, preview_notice_line, text_panel
 from core.game.hanabi import COLOR_EMOJI, COLORS, HanabiGame
 from core.panel_v2 import edit_message_v2
 
@@ -129,7 +129,8 @@ class Hanabi(commands.Cog):
         state = {"started": False}
         panel = GamePanelView("🎆 花火大会 参加者募集",
                               f"自分の手札だけ見えない協力カードゲームです（{MIN_PLAYERS}〜{MAX_PLAYERS}名）。\n"
-                              f"ホストが「開始する」を押すか、{RECRUIT_SECONDS}秒たつと開始します。\n参加者: <@{players[0]}>")
+                              f"ホストが「開始する」を押すか、{RECRUIT_SECONDS}秒たつと開始します。\n参加者: <@{players[0]}>",
+                              notice=preview_notice_line(GAME_ID))
 
         async def on_join(inter: discord.Interaction):
             if inter.user.id in players:
@@ -201,7 +202,8 @@ class Hanabi(commands.Cog):
             await self._send_board(channel, game, edit=True)
 
     def _panel(self, channel_id: int, game: HanabiGame) -> GamePanelView:
-        panel = GamePanelView("🎆 花火大会", board_text(game))
+        panel = GamePanelView("🎆 花火大会", board_text(game),
+                              notice=preview_notice_line(GAME_ID))
         panel.add_extra(discord.ui.MediaGallery(discord.MediaGalleryItem("attachment://board.png")))
 
         async def on_view(inter: discord.Interaction):

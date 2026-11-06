@@ -14,7 +14,7 @@ import discord
 from discord.ext import commands
 
 from core.game import game_records
-from core.game.game_v2 import GamePanelView, text_panel
+from core.game.game_v2 import GamePanelView, preview_notice_line, text_panel
 from core.game.ito import ROUNDS_DEFAULT, THEMES, ItoSession
 
 logger = logging.getLogger(__name__)
@@ -41,7 +41,8 @@ class Ito(commands.Cog):
         state = {"started": False}
         panel = GamePanelView("🔢 たとえナンバー 参加者募集",
                               f"数字を言葉で例え合い、小さい順に出す協力ゲームです（{MIN_PLAYERS}〜{MAX_PLAYERS}名）。\n"
-                              f"ホストが「開始する」を押すか、{RECRUIT_SECONDS}秒たつと開始します。\n参加者: <@{players[0]}>")
+                              f"ホストが「開始する」を押すか、{RECRUIT_SECONDS}秒たつと開始します。\n参加者: <@{players[0]}>",
+                              notice=preview_notice_line(GAME_ID))
 
         async def on_join(inter: discord.Interaction):
             if inter.user.id in players:
@@ -120,7 +121,8 @@ class Ito(commands.Cog):
             "「数字を見る」で自分の数字を本人だけ確認してください。\n"
             "数字そのものは言わず、テーマに沿って大きさを例えて話し合い、"
             f"小さいと思う人から「カードを出す」を押してください（話し合い {ROUND_SECONDS // 60}分）。\n"
-            "出されたカードは数字つきで公開されます。")
+            "出されたカードは数字つきで公開されます。",
+            notice=preview_notice_line(GAME_ID))
 
         async def on_show(inter: discord.Interaction):
             if inter.user.id not in session.numbers:
@@ -154,7 +156,8 @@ class Ito(commands.Cog):
             f"テーマ{session.round_index + 1}「{session.theme}」",
             f"出されたカード: {tiles}\n"
             f"出した人: " + ("、".join(f"<@{uid}>" for uid, _ in revealed) or "なし") + "\n"
-            f"残り: " + ("、".join(f"<@{uid}>" for uid in remaining) or "なし"))
+            f"残り: " + ("、".join(f"<@{uid}>" for uid in remaining) or "なし"),
+            notice=preview_notice_line(GAME_ID))
         # 操作ボタンは元のパネルと同じものを付け直す
         async def on_show(inter: discord.Interaction):
             if inter.user.id not in session.numbers:

@@ -12,7 +12,7 @@ import discord
 from discord.ext import commands
 
 from core.game import party_ranking
-from core.game.game_v2 import GamePanelView, text_panel
+from core.game.game_v2 import GamePanelView, preview_notice_line, text_panel
 from core.game.liardice import LiarDiceGame, is_legal_raise
 
 logger = logging.getLogger(__name__)
@@ -105,7 +105,8 @@ class LiarDice(commands.Cog):
 
         panel = GamePanelView("🎲 ライアーズダイス 参加者募集",
                               f"場全体の出目を読み合うブラフゲームです（{MIN_PLAYERS}〜{MAX_PLAYERS}名）。\n"
-                              f"ホストが「開始する」を押すか、{RECRUIT_SECONDS}秒たつと開始します。\n参加者: <@{players[0]}>")
+                              f"ホストが「開始する」を押すか、{RECRUIT_SECONDS}秒たつと開始します。\n参加者: <@{players[0]}>",
+                              notice=preview_notice_line(GAME_ID))
 
         async def on_join(inter: discord.Interaction):
             if inter.user.id in players:
@@ -161,7 +162,8 @@ class LiarDice(commands.Cog):
 
     # ------------------------------------------------------------------ パネル
     def _panel(self, game: LiarDiceGame) -> GamePanelView:
-        panel = GamePanelView("🎲 ライアーズダイス", status_text(game))
+        panel = GamePanelView("🎲 ライアーズダイス", status_text(game),
+                              notice=preview_notice_line(GAME_ID))
 
         async def on_mine(inter: discord.Interaction):
             uid = inter.user.id

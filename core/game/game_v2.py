@@ -17,6 +17,15 @@ import time
 
 import discord
 
+from core.game.game_guides import preview_notice_line
+
+__all__ = [
+    "GamePanelView",
+    "LobbyView",
+    "preview_notice_line",
+    "text_panel",
+]
+
 logger = logging.getLogger(__name__)
 
 MAX_ROWS = 5          # Discord の ActionRow 上限
@@ -87,10 +96,14 @@ class GamePanelView(discord.ui.LayoutView):
     または ``edit_message_v2`` を使う（旧ペイロードのクリアはそちらが担う）。
     """
 
-    def __init__(self, title: str = "", body: str = "", *, timeout: float | None = 600):
+    def __init__(self, title: str = "", body: str = "", *, timeout: float | None = 600,
+                 notice: str | None = None):
         super().__init__(timeout=timeout)
         self._title = title
         self._body = body
+        # タイトル直下に常時出す注意行（開発先行公開の注意文など）。
+        # set_content で本文を差し替えても残る。None なら従来どおりの表示。
+        self._notice = notice
         self._rows: list[discord.ui.ActionRow] = []
         self._extra: list[discord.ui.Item] = []
         # パネル単位×ユーザー単位のクールダウン (E-16)。所有者チェック等を
@@ -114,7 +127,11 @@ class GamePanelView(discord.ui.LayoutView):
 
     def _rebuild(self) -> None:
         self.clear_items()
-        text = f"## {self._title}\n{self._body}" if self._title else self._body
+        if self._notice:
+            text = (f"## {self._title}\n{self._notice}\n{self._body}" if self._title
+                    else f"{self._notice}\n{self._body}")
+        else:
+            text = f"## {self._title}\n{self._body}" if self._title else self._body
         container = discord.ui.Container(discord.ui.TextDisplay(text or "​"))
         for extra in self._extra:
             container.add_item(extra)
@@ -127,6 +144,11 @@ class GamePanelView(discord.ui.LayoutView):
             self._title = title
         if body is not None:
             self._body = body
+        self._rebuild()
+
+    def set_notice(self, notice: str | None) -> None:
+        """タイトル直下の注意行を差し替える（None で消す）。"""
+        self._notice = notice
         self._rebuild()
 
     def add_row(self, *items: discord.ui.Item) -> discord.ui.ActionRow:
@@ -227,6 +249,8 @@ class LobbyView(GamePanelView):
       反映する。本人へのエラー通知だけ ephemeral。
     - 人数不足の開始は統一文面で ephemeral 拒否する。
     - 主催者は退出できない（やめる場合は募集ごと取り消す）。
+    - 開発先行公開ゲームは ``notice=preview_notice_line(game_id)`` を渡すと
+      タイトル直下に注意行が常時出る（フラグの真実源は game_guides）。
 
     進行側 (cog) は ``started`` / ``cancelled`` をポーリングするか、
     ``wait()`` で待ち、``players``（参加順の user id リスト）と
@@ -234,7 +258,8 @@ class LobbyView(GamePanelView):
     """
 
     def __init__(self, *, title: str, host, min_players: int, max_players: int,
-                 note: str = "", timeout: float | None = 600, join_hook=None):
+                 note: str = "", timeout: float | None = 600, join_hook=None,
+                 notice: str | None = None):
         self.host_id = host.id
         self.min_players = int(min_players)
         self.max_players = int(max_players)
@@ -247,7 +272,7 @@ class LobbyView(GamePanelView):
         self.started = False
         self.cancelled = False
         self._event = None  # asyncio.Event（wait() を使ったときだけ作る）
-        super().__init__(title, "", timeout=timeout)
+        super().__init__(title, "", timeout=timeout, notice=notice)
         self.join = discord.ui.Button(label="参加", style=discord.ButtonStyle.success)
         self.join.callback = self._on_join
         self.leave = discord.ui.Button(label="退出", style=discord.ButtonStyle.secondary)
