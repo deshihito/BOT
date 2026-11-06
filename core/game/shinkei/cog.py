@@ -15,10 +15,10 @@ import random
 import discord
 from core.game import game_panels, game_restore
 from core.game.game_v2 import GamePanelView, LobbyView, safe_delete, text_panel
-from core.emojis import CROCK
+from core.support.emojis import CROCK
 
 logger = logging.getLogger(__name__)
-from core.messages import recruit_join_prompt
+from core.support.messages import recruit_join_prompt
 from discord.ext import commands
 
 from core.game import autoplay, party_ranking
