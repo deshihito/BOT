@@ -27,7 +27,7 @@ from core.game.board_image import render_cached, render_minesweeper
 from core.game.game_guides import GAME_GUIDES  # noqa: F401  (ガイド登録の確認用に参照される)
 from core.game.game_v2 import GamePanelView
 from core.game.minesweeper import COLS, ROWS, DIFFICULTIES, MinesweeperBoard
-from core.panel_v2 import edit_panel_v2
+from core.support.panel_v2 import edit_panel_v2
 
 GAME_ID = "minesweeper"
 
