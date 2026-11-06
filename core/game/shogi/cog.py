@@ -9,7 +9,7 @@ from core.emojis import LEFT, RIGHT
 
 import discord
 from discord.ext import commands
-from core import party_ranking
+from core.game import party_ranking
 from core.game import elo, game_panels, game_restore
 from PIL import Image, ImageDraw, ImageFont
 
