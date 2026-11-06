@@ -11,7 +11,7 @@ import random
 
 import discord
 from core.game import game_panels
-from core.messages import recruit_join_prompt
+from core.support.messages import recruit_join_prompt
 from discord.ext import commands
 
 from core.game import party_ranking
