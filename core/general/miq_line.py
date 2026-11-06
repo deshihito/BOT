@@ -6,8 +6,9 @@ from .common import *
 from .miq import (
     MIQ_LINE_MAX_IMAGES, MIQ_LINE_MAX_MESSAGES, MIQ_NEW_H, MIQ_NEW_W,
     _MIQ_CUSTOM_EMOJI_TOKEN, _MIQ_EMOJI_SIZE,
-    _miq_clean_text, _miq_display_text, _miq_emoji_font_path, _miq_emoji_width,
-    _miq_fallback_fonts, _miq_fit, _miq_is_emoji_unit, _miq_is_image_attachment,
+    _miq_clean_text, _miq_display_text, _miq_draw_centered,
+    _miq_emoji_font_path, _miq_emoji_width,
+    _miq_fallback_fonts, _miq_fit, _miq_fit_units, _miq_is_emoji_unit, _miq_is_image_attachment,
     _miq_load_font, _miq_mix, _miq_open_avatar, _miq_render_emoji_unit,
     _miq_save_png, _miq_split_units, _miq_sticker_renderable, _miq_unit_bases,
     _miq_unit_font, _miq_unit_width, _miq_wrap, miq_is_refusing,
@@ -628,15 +629,15 @@ def render_miq_pair_png(entries, *, font_path: str | None = None) -> bytes:
         if not text.strip():
             return
         d.rounded_rectangle(box, radius=44, fill=(255, 255, 255))
-        font, wrapped, lh, _size = _miq_fit(
+        lines, lh, _size = _miq_fit_units(
             d, text, font_path, box[2] - box[0] - 76, box[3] - box[1] - 30,
             max_size=34, min_size=16,
         )
         cx = (box[0] + box[2]) // 2
-        ty = (box[1] + box[3]) // 2 - (len(wrapped) * lh) // 2
-        for line in wrapped:
+        ty = (box[1] + box[3]) // 2 - (len(lines) * lh) // 2
+        for line in lines:
             if line:
-                d.text((cx, ty), line, font=font, fill=ink, anchor="ma")
+                _miq_draw_centered(img, d, cx, ty, "".join(u for u, _w in line), _size, ink, 0, font_path)
             ty += lh
 
     if len(items) >= 2:

@@ -511,6 +511,78 @@ def _miq_draw_centered(layer, draw, cx: float, y: float, text: str, size: int, f
         # kind is None: 描けない文字は落とす（□を出さない）
 
 
+def _miq_wrap_units(draw, text, primary_path, size: int, max_w: float):
+    """本文を単位 (文字/絵文字) ごとに測って max_w で折り返す。
+
+    戻り値は [[(unit, width), ...], ...]。描けない単位 (幅0) は落とす。
+    単一フォントで測る _miq_wrap では絵文字の幅を正しく測れないため、
+    スタイル別レンダラの本文はこちらを使う。
+    """
+    chain = _miq_fallback_fonts(primary_path, size)
+    emoji_path = _miq_emoji_font_path()
+    lines = []
+    for para in (text or "").split("\n"):
+        line: list = []
+        line_w = 0.0
+        for unit in _miq_split_units(para):
+            w = _miq_unit_width(unit, draw, chain, size, emoji_path)
+            if w <= 0:
+                continue
+            if line and line_w + w > max_w:
+                lines.append(line)
+                line, line_w = [], 0.0
+            if not line and unit == " ":
+                continue
+            line.append((unit, w))
+            line_w += w
+        lines.append(line)
+    return [ln for ln in lines if ln]
+
+
+def _miq_fit_units(draw, text, primary_path, max_w: float, max_h: float, *, max_size: int = 72, min_size: int = 22, lh_factor: float = 1.34):
+    """_miq_fit の単位版。(lines, lh, size) を返す。lines は _miq_wrap_units の行列。"""
+    size = max_size
+    while True:
+        lines = _miq_wrap_units(draw, text, primary_path, size, max_w)
+        lh = int(size * lh_factor)
+        if len(lines) * lh <= max_h or size <= min_size:
+            break
+        size -= 2
+    max_lines = max(1, int(max_h // lh))
+    if len(lines) > max_lines:
+        lines = lines[:max_lines]
+        chain = _miq_fallback_fonts(primary_path, size)
+        emoji_path = _miq_emoji_font_path()
+        ew = _miq_unit_width("…", draw, chain, size, emoji_path)
+        last = lines[-1]
+        while last and sum(w for _, w in last) + ew > max_w:
+            last.pop()
+        if ew > 0:
+            last.append(("…", ew))
+    return lines, lh, size
+
+
+def _miq_draw_units_line(layer, draw, x: float, y: float, line, size: int, primary_path, fill, *, stroke_width: int = 0):
+    """折り返し済みの1行 (単位列) を左揃えで描く。絵文字はカラーで合成する。"""
+    chain = _miq_fallback_fonts(primary_path, size)
+    emoji_path = _miq_emoji_font_path()
+    cx = float(x)
+    for unit, w in line:
+        kind, font = _miq_unit_font(unit, chain, emoji_path)
+        if kind == "emoji":
+            used = _miq_render_emoji_unit(layer, draw, cx, y, unit, size, emoji_path)
+            cx += used if used else w
+        elif kind == "font":
+            draw.text(
+                (cx, y), _miq_unit_bases(unit) or unit, font=font, fill=fill,
+                anchor="la", stroke_width=stroke_width, stroke_fill=fill,
+            )
+            cx += w
+        else:
+            cx += w
+    return draw
+
+
 def _miq_display_text(text: str | None) -> str:
     """名前・ユーザー名用：制御文字と改行だけ落とし、絵文字・記号は残す。"""
     if not text:
