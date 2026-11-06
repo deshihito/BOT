@@ -33,7 +33,7 @@ from discord.ext import commands, tasks
 
 import config
 from core.game import clan as clan_core
-from core.user_names import cached_display_name
+from core.general.user_names import cached_display_name
 from core.game import gacha as gacha_core
 from core.general import economy_pool as economy_core
 from core.general import items as items_core
@@ -41,8 +41,8 @@ from core.game import lottery as lottery_core
 from core.game import mining as mining_core
 from core.game import prison as prison_core
 from core.general import steal as steal_core
-from core.messages import circulation_action_failed
-from core.panel_v2 import as_panel_v2, edit_panel_v2
+from core.support.messages import circulation_action_failed
+from core.support.panel_v2 import as_panel_v2, edit_panel_v2
 from cogs import wallet as wallet_module  # INSUFFICIENT は実行時に引く（テストの cog 再読込で同一性が崩れないため）
 
 logger = logging.getLogger(__name__)
@@ -65,7 +65,7 @@ def _fmt_minutes(seconds: float) -> str:
 
 
 # ---------------------------------------------------------------------------
-# コンポーネントV2 統一（core/panel_v2.py の流儀）
+# コンポーネントV2 統一（core/support/panel_v2.py の流儀）
 # ---------------------------------------------------------------------------
 
 def _wrap(view):
