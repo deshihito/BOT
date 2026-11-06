@@ -1,6 +1,9 @@
 # -*- coding: utf-8 -*-
+import io
+
 import discord
-from core.game import game_panels
+from core.game import board_image, game_panels
+from core.game.board_image import render_cached, render_card, render_card_hand, render_card_pile
 from discord.ext import commands
 
 from core import action_usage
@@ -36,6 +39,37 @@ def card_sort_key(card: str):
 def sort_hand(hand):
     hand.sort(key=card_sort_key)
     return hand
+
+
+# --- カード画像（共通トランプ基盤） -------------------------------------------
+_RANK_LABELS = {1: "A", 11: "J", 12: "Q", 13: "K"}
+
+
+def card_spec_of(card: str):
+    """内部表記（"[S-10]" / "[JK-1]"）を描画基盤の正規形に変換する。"""
+    suit, _, rank = card.strip("[]").partition("-")
+    if suit == "JK":
+        return board_image.CARD_JOKER
+    n = int(rank)
+    return board_image.card_spec(_RANK_LABELS.get(n, str(n)), suit)
+
+
+def hand_file(hand, filename="doubt_hand.png"):
+    specs = tuple(card_spec_of(c) for c in hand)
+    data = render_cached(("doubt-hand", specs),
+                         lambda: render_card_hand(list(specs), title="あなたの手札"))
+    return discord.File(io.BytesIO(data), filename=filename)
+
+
+def field_file(count: int, filename="doubt_field.png"):
+    """場の山の画像。受けるのは枚数だけで、中身は構造的に渡らない。
+
+    ダウトの場札は伏せ札なので、共有表示は裏面の山＋枚数だけを描く
+    （実際のカードはダウト成立時の開示でのみ公開される）。
+    """
+    data = render_cached(("doubt-pile", count),
+                         lambda: render_card_pile(count, label="場のカード"))
+    return discord.File(io.BytesIO(data), filename=filename)
 
 class DoubtEngine:
     def __init__(self, player_ids):
@@ -164,7 +198,11 @@ class GameControlView(discord.ui.View):
         hand = self.game_engine.hands.get(interaction.user.id, [])
         hand_str = " ".join(hand) if hand else "手札がありません"
         embed = discord.Embed(title="あなたの手札", description=hand_str, color=0xFFFFFF)
-        await interaction.response.send_message(embed=embed, ephemeral=True)
+        if hand:
+            embed.set_image(url="attachment://doubt_hand.png")
+            await interaction.response.send_message(embed=embed, ephemeral=True, file=hand_file(hand))
+        else:
+            await interaction.response.send_message(embed=embed, ephemeral=True)
 
     @discord.ui.button(label="カードを置く", style=discord.ButtonStyle.red)
     async def play(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -231,10 +269,13 @@ class Doubt(commands.Cog):
         
         status_list = [f"<@{p_id}>: 残り {len(game.hands.get(p_id, []))}枚" for p_id in game.players]
         embed.add_field(name="プレイヤー", value="\n".join(status_list), inline=False)
-        
+        embed.set_image(url="attachment://doubt_field.png")
+
         view = GameControlView(game, self)
         content = f"次の方、カードを選んでください: <@{game.current_player_id}>"
-        game.last_panel_msg = await game_panels.replace(channel, "party", content=content, embed=embed, view=view)
+        game.last_panel_msg = await game_panels.replace(
+            channel, "party", content=content, embed=embed, view=view,
+            file=field_file(len(game.field)))
 
     async def declare_winner(self, channel, game, winner_id):
         win_embed = discord.Embed(title="Game Set!", description=f"勝者: <@{winner_id}>", color=0xFFFFFF)
@@ -337,7 +378,11 @@ class Doubt(commands.Cog):
         sort_hand(game.hands[penalty_user])
         game.field.clear()
 
-        await channel.send(embed=embed)
+        # 開示された実際のカードは公開情報なので、画像でも見せる
+        reveal = render_cached(("doubt-reveal", actual_card),
+                               lambda: render_card(card_spec_of(actual_card)))
+        embed.set_image(url="attachment://doubt_reveal.png")
+        await channel.send(embed=embed, file=discord.File(io.BytesIO(reveal), filename="doubt_reveal.png"))
 
         for p_id in game.players:
             if len(game.hands.get(p_id, [])) == 0:

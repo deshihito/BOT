@@ -6,17 +6,20 @@
   （S=スペード H=ハート D=ダイヤ C=クラブ）。
 - 配ったらペアを自動で捨てる。手番の人は、次の人（手札が残っている人）の手札から位置のボタンで 1 枚引く。
   引く前に相手の手札は混ぜるので、ボタンは位置だけで中身は分からない。そろったら自動で捨てる。
-- 自分の手札は「手札を見る」で本人にだけ表示する。
+- 自分の手札は「手札を見る」で本人にだけ表示する。手札と、引く相手の手札
+  （裏面の並びだけ）は共通基盤（core/game/board_image.py）のカード画像でも表示する。
 - 手番は 30 秒。時間切れは core/autoplay.take_idle_turn で代わりに引く（代打ちがオフでもゲームが止まらないよう
   ランダムに引く）。
 - 最初に手札がなくなった人の勝ち。勝利数は core/game/party_ranking.py に記録する（人間 2 人以上のときだけ）。
 """
 import asyncio
+import io
 import logging
 import random
 
 import discord
-from core.game import game_panels, game_restore
+from core.game import board_image, game_panels, game_restore
+from core.game.board_image import render_cached, render_card_hand
 from core.emojis import CROCK
 from core.messages import recruit_join_prompt
 from discord.ext import commands
@@ -46,6 +49,28 @@ def make_deck() -> list:
 
 def rank(card: str) -> str:
     return JOKER if card == JOKER else card[1:]
+
+
+# --- カード画像（共通トランプ基盤） -------------------------------------------
+def card_spec_of(card: str):
+    """内部表記（"S5" / "HK" / "JOKER"）を描画基盤の正規形に変換する。"""
+    if card == JOKER:
+        return board_image.CARD_JOKER
+    return board_image.card_spec(card[1:], card[0])
+
+
+def hand_file(cards, filename="babanuki_hand.png"):
+    specs = tuple(card_spec_of(c) for c in cards)
+    data = render_cached(("babanuki-hand", specs),
+                         lambda: render_card_hand(list(specs), title="あなたの手札"))
+    return discord.File(io.BytesIO(data), filename=filename)
+
+
+def backs_file(count: int, filename="babanuki_backs.png"):
+    """引く相手の手札を裏面の並びで描く。受けるのは枚数だけで中身は渡らない。"""
+    data = render_cached(("babanuki-backs", count),
+                         lambda: render_card_hand([None] * count, title="相手の手札"))
+    return discord.File(io.BytesIO(data), filename=filename)
 
 
 def discard_pairs(hand: list) -> tuple:
@@ -258,10 +283,13 @@ class Babanuki(commands.Cog):
         rng.shuffle(g.hands[target])
         g.drawn = None
         count = len(g.hands[target])
-        await game_panels.replace(channel, "party", embed=discord.Embed(
+        embed = discord.Embed(
             description=(f"{g.name(uid)} さんの番です。{g.name(target)} さんの手札（{count}枚）から"
                          f"1枚選んでください（{TURN_SECONDS}秒）。\n\n{self.counts_text(g)}"),
-            color=COLOR), view=TurnView(self, g, count))
+            color=COLOR)
+        embed.set_image(url="attachment://babanuki_backs.png")
+        await game_panels.replace(channel, "party", embed=embed,
+                                  view=TurnView(self, g, count), file=backs_file(count))
         if uid == BOT_ID:
             await asyncio.sleep(BOT_SECONDS)
             return await self.apply_draw(channel, g, uid, rng.randrange(count), rng)
@@ -311,15 +339,25 @@ class Babanuki(commands.Cog):
         if not 0 <= position < len(g.hands[target]):
             return await interaction.response.send_message("そのカードは引けません。", ephemeral=True)
         await self.apply_draw(interaction.channel, g, interaction.user.id, position)
-        hand = " ".join(g.hands[interaction.user.id]) or "なし"
-        await interaction.response.send_message(f"{g.drawn} を引きました。手札: {hand}", ephemeral=True)
+        hand_cards = list(g.hands[interaction.user.id])
+        hand = " ".join(hand_cards) or "なし"
+        if hand_cards:
+            await interaction.response.send_message(
+                f"{g.drawn} を引きました。手札: {hand}", ephemeral=True,
+                file=hand_file(hand_cards))
+        else:
+            await interaction.response.send_message(f"{g.drawn} を引きました。手札: {hand}", ephemeral=True)
 
     async def show_hand(self, interaction: discord.Interaction, g: BabanukiGame):
         uid = interaction.user.id
         if uid not in g.players:
             return await interaction.response.send_message("このゲームに参加していません。", ephemeral=True)
-        hand = " ".join(sorted(g.hands.get(uid, []), key=lambda c: (rank(c) == JOKER, rank(c), c))) or "なし（上がり）"
-        await interaction.response.send_message(f"あなたの手札: {hand}", ephemeral=True)
+        hand_cards = sorted(g.hands.get(uid, []), key=lambda c: (rank(c) == JOKER, rank(c), c))
+        hand = " ".join(hand_cards) or "なし（上がり）"
+        if not hand_cards:
+            return await interaction.response.send_message(f"あなたの手札: {hand}", ephemeral=True)
+        await interaction.response.send_message(f"あなたの手札: {hand}", ephemeral=True,
+                                                file=hand_file(hand_cards))
 
     async def finish(self, channel, g: BabanukiGame):
         g.phase = "done"

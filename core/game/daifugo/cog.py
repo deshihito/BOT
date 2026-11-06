@@ -3,7 +3,8 @@
 
 - スラッシュコマンドは増やさず、/game の「大富豪」から募集する（GameHub が start_recruit を呼ぶ）。
 - 3〜6 人。足りないときは Bot が入る。絵文字は使わず、カードは "S5"・"HK"・"JOKER" のような文字で表す
-  （S=スペード H=ハート D=ダイヤ C=クラブ）。
+  （S=スペード H=ハート D=ダイヤ C=クラブ）。場のカードと自分の手札は、共通基盤
+  （core/game/board_image.py）のカード画像でも表示する（テキスト表示は併記）。
 - 基本ルールだけ: 1 枚・2 枚（ペア）・3 枚・4 枚を同じ数字でそろえて出す。場と同じ枚数で、より強い数字だけ出せる。
   強さは 3 が最弱、2 が最強、ジョーカーはさらに強い（ジョーカーは 1 枚出しだけ）。
   ほかの全員がパスしたら場を流し、最後に出した人から（上がっていれば次の人から）。
@@ -13,11 +14,13 @@
 - 結果は 大富豪・富豪・平民・貧民・大貧民。大富豪の勝利を core/game/party_ranking.py に記録する（人間 2 人以上のときだけ）。
 """
 import asyncio
+import io
 import logging
 import random
 
 import discord
-from core.game import game_panels, game_restore
+from core.game import board_image, game_panels, game_restore
+from core.game.board_image import render_cached, render_card_hand
 from core.messages import recruit_join_prompt
 from discord.ext import commands
 
@@ -234,6 +237,34 @@ def table_text(g: DaifugoGame) -> str:
     return f"場: {table}" + ("　【革命中】" if g.revolution else "")
 
 
+# --- カード画像（共通トランプ基盤） -------------------------------------------
+def card_spec_of(card: str):
+    """内部表記（"S5" / "HK" / "JOKER"）を描画基盤の正規形に変換する。"""
+    if card == JOKER:
+        return board_image.CARD_JOKER
+    return board_image.card_spec(card[1:], card[0])
+
+
+def cards_specs(cards) -> tuple:
+    return tuple(card_spec_of(c) for c in cards)
+
+
+def table_image(g: DaifugoGame):
+    """場のカードの画像 (bytes)。場が空なら None。"""
+    if not g.table:
+        return None
+    specs = cards_specs(g.table)
+    return render_cached(("daifugo-table", specs),
+                         lambda: render_card_hand(list(specs), title="場のカード"))
+
+
+def hand_file(cards, filename="daifugo_hand.png"):
+    specs = cards_specs(cards)
+    data = render_cached(("daifugo-hand", specs),
+                         lambda: render_card_hand(list(specs), title="あなたの手札"))
+    return discord.File(io.BytesIO(data), filename=filename)
+
+
 class JoinView(discord.ui.View):
     def __init__(self, cog, game: DaifugoGame):
         super().__init__(timeout=RECRUIT_SECONDS + 30)
@@ -359,9 +390,15 @@ class Daifugo(commands.Cog):
         uid = g.turn
         g.acted = False
         plays = g.legal(uid)
-        await game_panels.replace(channel, "party", embed=discord.Embed(
+        embed = discord.Embed(
             description=(f"{g.name(uid)} さんの番です（{TURN_SECONDS}秒）。\n{table_text(g)}\n\n{self.counts_text(g)}"),
-            color=COLOR), view=TurnView(self, g))
+            color=COLOR)
+        kwargs = {}
+        data = table_image(g)
+        if data is not None:
+            embed.set_image(url="attachment://daifugo_table.png")
+            kwargs["file"] = discord.File(io.BytesIO(data), filename="daifugo_table.png")
+        await game_panels.replace(channel, "party", embed=embed, view=TurnView(self, g), **kwargs)
         if g.is_bot(uid):
             await asyncio.sleep(BOT_SECONDS)
             return await self.apply(channel, g, uid, plays[0] if plays else PASS)
@@ -405,12 +442,15 @@ class Daifugo(commands.Cog):
         if error:
             return await interaction.response.send_message(error, ephemeral=True)
         plays = g.legal(interaction.user.id)
-        hand = " ".join(g.hands[interaction.user.id])
+        hand_cards = list(g.hands[interaction.user.id])
+        hand = " ".join(hand_cards)
         if not plays:
             return await interaction.response.send_message(
-                f"出せるカードがありません。パスしてください。\nあなたの手札: {hand}", ephemeral=True)
+                f"出せるカードがありません。パスしてください。\nあなたの手札: {hand}",
+                ephemeral=True, file=hand_file(hand_cards))
         await interaction.response.send_message(f"{table_text(g)}\nあなたの手札: {hand}",
-                                                view=PlayView(self, g, plays), ephemeral=True)
+                                                view=PlayView(self, g, plays), ephemeral=True,
+                                                file=hand_file(hand_cards))
 
     async def on_play(self, interaction: discord.Interaction, g: DaifugoGame, play):
         error = self._check_turn(interaction, g)
@@ -434,8 +474,12 @@ class Daifugo(commands.Cog):
         uid = interaction.user.id
         if uid not in g.players:
             return await interaction.response.send_message("このゲームに参加していません。", ephemeral=True)
-        hand = " ".join(sort_hand(g.hands.get(uid, []))) or "なし（上がり）"
-        await interaction.response.send_message(f"あなたの手札: {hand}", ephemeral=True)
+        hand_cards = sort_hand(list(g.hands.get(uid, [])))
+        hand = " ".join(hand_cards) or "なし（上がり）"
+        if not hand_cards:
+            return await interaction.response.send_message(f"あなたの手札: {hand}", ephemeral=True)
+        await interaction.response.send_message(f"あなたの手札: {hand}", ephemeral=True,
+                                                file=hand_file(hand_cards))
 
     async def finish(self, channel, g: DaifugoGame):
         g.phase = "done"
