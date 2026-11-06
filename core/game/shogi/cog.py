@@ -171,6 +171,36 @@ def choose_ai_move(game, difficulty=5):
         return random.choice(candidates)
     return max(scored, key=lambda item: item[0])[1]
 
+_SHOGI_BG_CACHE = None
+
+
+def _shogi_background() -> Image.Image:
+    """盤面画像化タスク（2026-11-06）のリッチ化: ベタ塗りだった背景を
+    木目風の縦グラデーション＋盤まわりの縁取りにする。座標系（MARGIN /
+    SQUARE_SIZE）・駒素材・持駒表示は従来どおりで、背景だけを差し替える。
+    生成は決定的で、プロセス内で1回だけ作ってコピーを返す。"""
+    global _SHOGI_BG_CACHE
+    if _SHOGI_BG_CACHE is None:
+        top = (250, 236, 205)
+        bottom = (238, 214, 160)
+        strip = Image.new("RGB", (1, IMG_H))
+        for y in range(IMG_H):
+            t = y / max(1, IMG_H - 1)
+            strip.putpixel((0, y), tuple(int(top[i] + (bottom[i] - top[i]) * t) for i in range(3)))
+        img = strip.resize((IMG_W, IMG_H))
+        draw = ImageDraw.Draw(img, "RGBA")
+        rng = random.Random(20261106)
+        import math
+        for y in range(0, IMG_H, 3):
+            alpha = int(5 + 4 * math.sin(y / 29.0) + rng.randint(0, 3))
+            draw.line([(0, y), (IMG_W, y)], fill=(150, 108, 48, alpha))
+        # 盤の外周に縁取り（盤の内側の座標は変えない）
+        draw.rectangle([MARGIN - 6, MARGIN - 6, MARGIN + BOARD_SIZE + 5, MARGIN + BOARD_SIZE + 5],
+                       outline=(101, 67, 33), width=3)
+        _SHOGI_BG_CACHE = img
+    return _SHOGI_BG_CACHE.copy()
+
+
 class ShogiRenderer:
     def __init__(self):
         self.font_label = ImageFont.truetype(str(ASSET_DIR.parent.parent / "font.ttf"), 16)
@@ -239,7 +269,7 @@ class ShogiRenderer:
         return self.cache[ck]
 
     def render(self, game: ShogiGame, labels=None, selected=None) -> io.BytesIO:
-        img = Image.new("RGB", (IMG_W, IMG_H), "#f4e4c1")
+        img = _shogi_background()
         draw = ImageDraw.Draw(img)
         # Hands
         draw.rectangle([8, 8, MARGIN - 8, IMG_H // 2 - 8], fill="#edd9b0", outline="#654321", width=2)
