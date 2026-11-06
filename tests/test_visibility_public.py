@@ -146,7 +146,7 @@ class GameStartNoticeSourceTest(unittest.TestCase):
         "core/game/doubt/cog.py": ("ダウトの募集を開始しました",),
         "core/game/babanuki/cog.py": ("ババ抜きの募集を開始しました",),
         "core/game/daifugo/cog.py": ("大富豪の募集を開始しました",),
-        "cogs/janken.py": ("じゃんけんの募集を開始しました",),
+        "core/game/janken/cog.py": ("じゃんけんの募集を開始しました",),
         "core/support/ngword/cog.py": ("NGワードの募集を開始しました",),
         "cogs/shinkei.py": ("神経衰弱の募集を開始しました",),
         "cogs/shiritori.py": ("お題しりとりの募集を開始しました",),
