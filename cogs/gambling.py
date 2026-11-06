@@ -38,13 +38,21 @@ import config
 from core import economy_pool as economy_core
 from core import gambling as gambling_core
 from core import items as items_core
+from core import prison as prison_core
 from core.messages import GAMBLING_INVALID_AMOUNT, gambling_action_failed
+from core.panel_v2 import as_panel_v2, edit_message_v2, edit_panel_v2
 from cogs import wallet as wallet_module  # INSUFFICIENT は実行時に引く（テストの cog 再読込で同一性が崩れないため）
 
 logger = logging.getLogger(__name__)
 
 GAMBLING_COLOR = 0x9B59B6
 GAMBLING_ID = "GAMBLING"
+
+
+def _wrap(view):
+    """View を PanelLayoutView で包み、再描画用に view._v2 へ保持する。"""
+    view._v2 = as_panel_v2(view)
+    return view._v2
 
 
 # ---------------------------------------------------------------------------
@@ -127,6 +135,9 @@ class _SessionPanel:
     last_result: str | None = None
     cog: "GamblingCog"
     user_id: int
+    #: V2 ラッパー（送信時に _wrap が設定）と、embed() 用の直近残高。
+    _v2 = None
+    _last_balance: int | None = None
 
     def _build_embed(self, balance: int | None) -> discord.Embed:
         raise NotImplementedError
@@ -134,14 +145,23 @@ class _SessionPanel:
     def _sync_buttons(self) -> None:
         raise NotImplementedError
 
+    def embed(self) -> discord.Embed:
+        return self._build_embed(self._last_balance)
+
     async def refresh_message(self) -> None:
         """対象メッセージを最新状態で編集し直す（モーダル送信後用）。"""
         if self.message is None:
             return
         self._sync_buttons()
         balance = await _fetch_balance(self.cog, self.user_id)
+        self._last_balance = balance
+        container = getattr(self, "_v2", None)
         try:
-            await self.message.edit(embed=self._build_embed(balance), view=self)
+            if container is not None:
+                container._sync()
+                await edit_message_v2(self.message, container)
+            else:
+                await self.message.edit(embed=self._build_embed(balance), view=self)
         except Exception:
             logger.exception("gambling: パネルの更新に失敗しました")
 
@@ -149,16 +169,27 @@ class _SessionPanel:
         """ボタンの interaction に対して対象メッセージを編集で更新する。"""
         self._sync_buttons()
         balance = await _fetch_balance(self.cog, self.user_id)
-        await interaction.edit_original_response(
-            embed=self._build_embed(balance), view=self)
+        self._last_balance = balance
+        container = getattr(self, "_v2", None)
+        if container is not None:
+            container._sync()
+            await edit_panel_v2(interaction, container)
+        else:
+            await interaction.edit_original_response(
+                embed=self._build_embed(balance), view=self)
 
     async def _disable_on_timeout(self) -> None:
         for child in self.children:  # type: ignore[attr-defined]
             if isinstance(child, discord.ui.Button):
                 child.disabled = True
         if self.message is not None:
+            container = getattr(self, "_v2", None)
             try:
-                await self.message.edit(view=self)  # type: ignore[arg-type]
+                if container is not None:
+                    container._sync()
+                    await edit_message_v2(self.message, container)
+                else:
+                    await self.message.edit(view=self)  # type: ignore[arg-type]
             except Exception:
                 pass
 
@@ -736,36 +767,35 @@ class GamblingCog(commands.Cog):
     # ------------------------------------------------------------------ 入口
     async def show_slot(self, interaction: discord.Interaction):
         view = SlotView(self, interaction.user.id)
-        balance = await _fetch_balance(self, interaction.user.id)
-        await interaction.response.send_message(
-            embed=_slot_embed(self, interaction.user.id, balance=balance), view=view)
+        view._last_balance = await _fetch_balance(self, interaction.user.id)
+        await interaction.response.send_message(view=_wrap(view))
         view.message = await interaction.original_response()
 
     async def show_double(self, interaction: discord.Interaction):
         view = DoubleView(self, interaction.user.id)
-        balance = await _fetch_balance(self, interaction.user.id)
-        await interaction.response.send_message(
-            embed=_double_embed(self, interaction.user.id, balance=balance), view=view)
+        view._last_balance = await _fetch_balance(self, interaction.user.id)
+        await interaction.response.send_message(view=_wrap(view))
         view.message = await interaction.original_response()
 
     async def show_blackjack(self, interaction: discord.Interaction):
         view = BlackjackView(self, interaction.user.id)
-        balance = await _fetch_balance(self, interaction.user.id)
-        await interaction.response.send_message(
-            embed=_blackjack_embed(self, interaction.user.id, balance=balance), view=view)
+        view._last_balance = await _fetch_balance(self, interaction.user.id)
+        await interaction.response.send_message(view=_wrap(view))
         view.message = await interaction.original_response()
 
     async def show_dice(self, interaction: discord.Interaction):
         view = DiceView(self, interaction.user.id)
-        balance = await _fetch_balance(self, interaction.user.id)
-        await interaction.response.send_message(
-            embed=_dice_embed(self, interaction.user.id, balance=balance), view=view)
+        view._last_balance = await _fetch_balance(self, interaction.user.id)
+        await interaction.response.send_message(view=_wrap(view))
         view.message = await interaction.original_response()
 
     # ------------------------------------------------------------------ スロットの実行
     async def execute_slot_start(self, user_id: int, spins: int) -> str:
         uid = str(user_id)
         try:
+            blocked = prison_core.block_message(uid)
+            if blocked:
+                return gambling_action_failed(blocked)
             if not gambling_core.SLOT_MIN_SPINS <= spins <= gambling_core.SLOT_MAX_SPINS:
                 return gambling_action_failed(
                     f"回数は{gambling_core.SLOT_MIN_SPINS}〜"
@@ -810,6 +840,9 @@ class GamblingCog(commands.Cog):
         """
         uid = str(user_id)
         try:
+            blocked = prison_core.block_message(uid)
+            if blocked:
+                return gambling_action_failed(blocked), None
             result = self.store.spin_slot(uid)
             wallet = self._wallet()
             delta = 0
@@ -954,6 +987,9 @@ class GamblingCog(commands.Cog):
     async def execute_double_start(self, user_id: int, bet: int) -> str:
         uid = str(user_id)
         try:
+            blocked = prison_core.block_message(uid)
+            if blocked:
+                return gambling_action_failed(blocked)
             if bet < gambling_core.DOUBLE_MIN_BET:
                 return gambling_action_failed(
                     f"ベットは{gambling_core.DOUBLE_MIN_BET} AGO以上で指定してください。")
@@ -985,6 +1021,9 @@ class GamblingCog(commands.Cog):
     async def execute_double_go(self, user_id: int) -> str:
         uid = str(user_id)
         try:
+            blocked = prison_core.block_message(uid)
+            if blocked:
+                return gambling_action_failed(blocked)
             result = self.store.double_go(uid)
             if result["win"]:
                 return (f"{SUCCESS} **成功！** 倍率 {result['multiplier']:.2f} 倍"
@@ -1002,6 +1041,9 @@ class GamblingCog(commands.Cog):
     async def execute_double_cashout(self, user_id: int) -> str:
         uid = str(user_id)
         try:
+            blocked = prison_core.block_message(uid)
+            if blocked:
+                return gambling_action_failed(blocked)
             result = self.store.double_cashout(uid)
             wallet = self._wallet()
             credit = await wallet._change_balance(
@@ -1026,6 +1068,9 @@ class GamblingCog(commands.Cog):
     async def execute_blackjack_start(self, user_id: int, bet: int) -> str:
         uid = str(user_id)
         try:
+            blocked = prison_core.block_message(uid)
+            if blocked:
+                return gambling_action_failed(blocked)
             if bet < gambling_core.BLACKJACK_MIN_BET:
                 return gambling_action_failed(
                     f"ベットは{gambling_core.BLACKJACK_MIN_BET} AGO以上で指定してください。")
@@ -1060,6 +1105,9 @@ class GamblingCog(commands.Cog):
     async def execute_blackjack_hit(self, user_id: int) -> tuple[str, bool]:
         uid = str(user_id)
         try:
+            blocked = prison_core.block_message(uid)
+            if blocked:
+                return gambling_action_failed(blocked), False
             result = self.store.blackjack_hit(uid)
             if result["bust"]:
                 self._recycle(result["bet"])
@@ -1079,6 +1127,9 @@ class GamblingCog(commands.Cog):
     async def execute_blackjack_stand(self, user_id: int) -> str:
         uid = str(user_id)
         try:
+            blocked = prison_core.block_message(uid)
+            if blocked:
+                return gambling_action_failed(blocked)
             result = self.store.blackjack_stand(uid)
             if result["payout"] > 0:
                 wallet = self._wallet()
@@ -1114,6 +1165,9 @@ class GamblingCog(commands.Cog):
     async def execute_dice(self, user_id: int, max_value: int, number: int, bet: int) -> str:
         uid = str(user_id)
         try:
+            blocked = prison_core.block_message(uid)
+            if blocked:
+                return gambling_action_failed(blocked)
             if bet < gambling_core.DICE_MIN_BET:
                 return gambling_action_failed(
                     f"ベットは{gambling_core.DICE_MIN_BET} AGO以上で指定してください。")

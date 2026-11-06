@@ -24,19 +24,21 @@ class ItemPickOptionsTest(unittest.TestCase):
         self.assertEqual([o.value for o in options], expected)
         self.assertTrue(all("AGO" in o.label for o in options))
 
-    def test_sell_options_require_sell_price_and_ownership(self):
+    def test_sell_options_include_all_owned_items(self):
+        # 全アイテム売却可能（売却額は購入価格の半分）になったため、
+        # 売却候補は所持している全アイテムになる。
         from cogs.items import _item_pick_options
         from core import items as items_core
 
         cog = _cog_with_inventory()
-        sellable = next(i for i, d in items_core.ITEM_DEFS.items()
-                        if d["sell_price"] is not None)
-        unsellable = next(i for i, d in items_core.ITEM_DEFS.items()
-                          if d["sell_price"] is None)
-        cog.store.add("1", sellable, 2)
-        cog.store.add("1", unsellable, 3)
+        first, second = list(items_core.ITEM_DEFS)[:2]
+        cog.store.add("1", first, 2)
+        cog.store.add("1", second, 3)
         options = _item_pick_options(cog, 1, "sell")
-        self.assertEqual([o.value for o in options], [sellable])
+        self.assertEqual(
+            [o.value for o in options], sorted([first, second]))
+        # 他人の所持は候補に出ない。
+        self.assertEqual(_item_pick_options(cog, 2, "sell"), [])
 
     def test_use_options_are_inventory(self):
         from cogs.items import _item_pick_options

@@ -25,17 +25,43 @@ from discord.ext import commands, tasks
 import config
 from core import craft as craft_core
 from core import items as items_core
+from core import prison as prison_core
 from core import workshop as workshop_core
 from core.messages import (
     craft_action_failed,
     workshop_action_failed,
 )
+from core.panel_v2 import as_panel_v2, edit_panel_v2
 from cogs import wallet as wallet_module  # INSUFFICIENT は実行時に引く（テストの cog 再読込で同一性が崩れないため）
 
 logger = logging.getLogger(__name__)
 
 WORKSHOP_COLOR = 0x95A5A6
 WORKSHOP_ID = "WORKSHOP"
+
+
+# ---------------------------------------------------------------------------
+# コンポーネントV2 統一（core/panel_v2.py の流儀）
+# ---------------------------------------------------------------------------
+
+def _wrap(view):
+    """View を PanelLayoutView で包み、再描画用に view._v2 へ保持する。"""
+    view._v2 = as_panel_v2(view)
+    return view._v2
+
+
+async def _edit_panel(interaction: discord.Interaction, view, *, button=None) -> None:
+    """パネルをその場で再描画する（V2 で包まれていれば V2 の編集経路）。"""
+    container = getattr(button, "view", None)
+    if container is None or not hasattr(container, "_sync"):
+        container = getattr(view, "_v2", None) or view
+    if hasattr(container, "_sync"):
+        container._sync()
+        await edit_panel_v2(interaction, container)
+    elif interaction.response.is_done():
+        await interaction.edit_original_response(embed=view.embed(), view=view)
+    else:
+        await interaction.response.edit_message(embed=view.embed(), view=view)
 
 
 def _item_name(item_id: str) -> str:
@@ -132,10 +158,6 @@ class BuyMachineView(discord.ui.View):
         super().__init__(timeout=180)
         self.cog = cog
         self.user_id = user_id
-
-    async def interaction_check(self, interaction) -> bool:
-        # 公開パネル化（ephemeral第2波）: 操作は本人のみ。
-        return interaction.user.id == self.user_id
         for tier_id, tier in workshop_core.MACHINE_TIERS.items():
             button = discord.ui.Button(
                 label=f"{tier['name']}（{tier['price']:,} AGO）",
@@ -143,6 +165,15 @@ class BuyMachineView(discord.ui.View):
             )
             button.callback = self._make_callback(tier_id)
             self.add_item(button)
+
+    async def interaction_check(self, interaction) -> bool:
+        # 公開パネル化（ephemeral第2波）: 操作は本人のみ。
+        return interaction.user.id == self.user_id
+
+    def embed(self) -> discord.Embed:
+        return discord.Embed(
+            title="加工機を買う", description="購入する加工機を選んでください。",
+            color=WORKSHOP_COLOR)
 
     def _make_callback(self, tier_id: str):
         async def callback(interaction: discord.Interaction):
@@ -163,16 +194,17 @@ class WorkshopView(discord.ui.View):
         # 公開パネル化（ephemeral第2波）: 操作は本人のみ。
         return interaction.user.id == self.user_id
 
+    def embed(self) -> discord.Embed:
+        return _workshop_embed(self.cog, self.user_id)
+
     @discord.ui.button(label="更新", style=discord.ButtonStyle.secondary)
     async def refresh(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.edit_message(
-            embed=_workshop_embed(self.cog, self.user_id), view=self)
+        await _edit_panel(interaction, self, button=button)
 
     @discord.ui.button(label="加工機を買う", style=discord.ButtonStyle.success)
     async def buy(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.send_message(
-            "購入する加工機を選んでください。",
-            view=BuyMachineView(self.cog, interaction.user.id))
+            view=_wrap(BuyMachineView(self.cog, interaction.user.id)))
 
     @discord.ui.button(label="生産物を受け取る", style=discord.ButtonStyle.primary)
     async def claim(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -192,10 +224,6 @@ class CraftView(discord.ui.View):
         super().__init__(timeout=180)
         self.cog = cog
         self.user_id = user_id
-
-    async def interaction_check(self, interaction) -> bool:
-        # 公開パネル化（ephemeral第2波）: 操作は本人のみ。
-        return interaction.user.id == self.user_id
         self.first: str | None = None
         self.second: str | None = None
         inventory = cog._item_store().inventory(str(user_id))
@@ -215,6 +243,13 @@ class CraftView(discord.ui.View):
         second_select.callback = self._make_select_callback("second")
         self.add_item(first_select)
         self.add_item(second_select)
+
+    async def interaction_check(self, interaction) -> bool:
+        # 公開パネル化（ephemeral第2波）: 操作は本人のみ。
+        return interaction.user.id == self.user_id
+
+    def embed(self) -> discord.Embed:
+        return _craft_embed(self.cog, self.user_id)
 
     def _make_select_callback(self, slot: str):
         async def callback(interaction: discord.Interaction):
@@ -285,13 +320,11 @@ class WorkshopCog(commands.Cog):
     # ------------------------------------------------------------------ 入口
     async def show_workshop(self, interaction: discord.Interaction):
         view = WorkshopView(self, interaction.user.id)
-        await interaction.response.send_message(
-            embed=_workshop_embed(self, interaction.user.id), view=view)
+        await interaction.response.send_message(view=_wrap(view))
 
     async def open_buy_machine(self, interaction: discord.Interaction):
         await interaction.response.send_message(
-            "購入する加工機を選んでください。",
-            view=BuyMachineView(self, interaction.user.id))
+            view=_wrap(BuyMachineView(self, interaction.user.id)))
 
     async def open_claim(self, interaction: discord.Interaction):
         await interaction.response.defer()
@@ -305,7 +338,7 @@ class WorkshopCog(commands.Cog):
             return await interaction.response.send_message(
                 workshop_action_failed(exc), ephemeral=True)
         view = CraftView(self, interaction.user.id)
-        await interaction.response.send_message(embed=embed, view=view)
+        await interaction.response.send_message(view=_wrap(view))
 
     # ------------------------------------------------------------------ 実行
     def _wallet(self):
@@ -329,6 +362,9 @@ class WorkshopCog(commands.Cog):
     async def execute_buy_machine(self, user_id: int, tier_id: str) -> str:
         uid = str(user_id)
         try:
+            blocked = prison_core.block_message(uid)
+            if blocked:
+                return workshop_action_failed(blocked)
             tier = workshop_core.MACHINE_TIERS.get(tier_id)
             if tier is None:
                 return workshop_action_failed("その加工機は存在しません。")
@@ -361,6 +397,9 @@ class WorkshopCog(commands.Cog):
     def execute_claim(self, user_id: int) -> str:
         uid = str(user_id)
         try:
+            blocked = prison_core.block_message(uid)
+            if blocked:
+                return workshop_action_failed(blocked)
             # 加速オイル発動中は経過時間を2倍として数える（早く貯まる
             # 代わりにサイクル消化＝寿命の消費も速い。貯蔵上限は不変）。
             time_scale = 1.0
@@ -397,6 +436,9 @@ class WorkshopCog(commands.Cog):
     def execute_craft(self, user_id: int, item_a: str, item_b: str) -> str:
         uid = str(user_id)
         try:
+            blocked = prison_core.block_message(uid)
+            if blocked:
+                return craft_action_failed(blocked)
             # 合成触媒発動中はレア結果の重みを上げる。
             rare_boost = 1.0
             try:
@@ -421,6 +463,9 @@ class WorkshopCog(commands.Cog):
     def execute_commission(self, user_id: int, item_a: str, item_b: str) -> str:
         uid = str(user_id)
         try:
+            blocked = prison_core.block_message(uid)
+            if blocked:
+                return craft_action_failed(blocked)
             self.workshop_store.start_commission(
                 self._item_store(), uid, item_a, item_b)
             names = f"{_item_name(item_a)} ＋ {_item_name(item_b)}"
@@ -438,6 +483,9 @@ class WorkshopCog(commands.Cog):
     def execute_claim_commissions(self, user_id: int) -> str:
         uid = str(user_id)
         try:
+            blocked = prison_core.block_message(uid)
+            if blocked:
+                return workshop_action_failed(blocked)
             jobs = self.workshop_store.commissions(uid)
             if not jobs:
                 return workshop_action_failed("委託加工中の品目がありません。")

@@ -14,8 +14,10 @@
 - その場で完結する系（採掘・受け取り・宝箱）は各 cog の execute_* を
   呼び、結果表示後にパネルを最新ステータスへ更新する
 
-パネル自体は通常の View（タイムアウトで失効する既知の全体課題は別途
-対応中）。賭け金エスクロー等の資産保全は各 cog 側の仕組みに任せるため、
+パネルは他の経済系パネルと同様、core/panel_v2.py の PanelLayoutView
+で包んでコンポーネントV2表示にする（embed は非同期に集約するため、
+ビルド結果をキャッシュして embed() から返す）。賭け金エスクロー等の
+資産保全は各 cog 側の仕組みに任せるため、
 パネルが死んでも資産は消えない。入口は新規スラッシュを作らず、
 /general の action 経由（general:money_panel）だけ。表示は他のマネー系
 パネルと同じく公開で、操作は interaction_check で本人のみに制限する。
@@ -37,11 +39,19 @@ from discord.ext import commands
 
 import config
 from core import market as market_core
+from core import prison as prison_core
+from core.panel_v2 import as_panel_v2, edit_message_v2, edit_panel_v2
 from cogs import wallet as wallet_module  # 定数は実行時に引く（テストの cog 再読込対策）
 
 logger = logging.getLogger(__name__)
 
 MONEY_PANEL_COLOR = 0xF39C12
+
+
+def _wrap(view):
+    """View を PanelLayoutView で包み、再描画用に view._v2 へ保持する。"""
+    view._v2 = as_panel_v2(view)
+    return view._v2
 
 #: カテゴリ定義（value, ラベル）。コンポーネント上限（25）の関係で
 #: 操作はカテゴリごとにページングする。
@@ -77,6 +87,13 @@ def _fmt_minutes(seconds: float) -> str:
 def status_embed(status: dict) -> discord.Embed:
     """collect_status の結果をパネル上部のステータス表示にする。"""
     embed = discord.Embed(title="マネーパネル", color=MONEY_PANEL_COLOR)
+    if status.get("prison_remaining"):
+        embed.add_field(
+            name="状態",
+            value=(f"🚔 **逮捕中**（釈放まであと"
+                   f"{_fmt_minutes(status['prison_remaining'])}）。"
+                   "マネー系の操作はできません。"),
+            inline=False)
     embed.add_field(
         name="AGOコイン", value=f"**{status['balance']:,} AGO**", inline=True)
     if status.get("rate") is not None:
@@ -143,11 +160,19 @@ class MoneyPanelView(discord.ui.View):
         self.user_id = user_id
         self.category = "home"
         self.message: discord.Message | None = None
+        self._v2 = None
+        self._cached_embed: discord.Embed | None = None
         self.refresh()
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         # 公開パネル化（ephemeral第2波）: 操作は本人のみ。
         return interaction.user.id == self.user_id
+
+    def embed(self) -> discord.Embed:
+        """V2 ラッパー用の同期的 embed（実体は非同期ビルドのキャッシュ）。"""
+        if self._cached_embed is not None:
+            return self._cached_embed
+        return discord.Embed(title="マネーパネル", color=MONEY_PANEL_COLOR)
 
     # ------------------------------------------------------------------ 構築
     def refresh(self) -> None:
@@ -237,7 +262,14 @@ class MoneyPanelView(discord.ui.View):
         if values:
             self.category = values[0]
         self.refresh()
-        await interaction.response.edit_message(embed=await self.build_embed(), view=self)
+        self._cached_embed = await self.build_embed()
+        container = getattr(self, "_v2", None)
+        if container is not None:
+            container._sync()
+            await edit_panel_v2(interaction, container)
+        else:
+            await interaction.response.edit_message(
+                embed=self._cached_embed, view=self)
 
     def _select_values(self) -> list:
         for child in self.children:
@@ -250,8 +282,14 @@ class MoneyPanelView(discord.ui.View):
         if self.message is None:
             return
         self.refresh()
+        self._cached_embed = await self.build_embed()
+        container = getattr(self, "_v2", None)
         try:
-            await self.message.edit(embed=await self.build_embed(), view=self)
+            if container is not None:
+                container._sync()
+                await edit_message_v2(self.message, container)
+            else:
+                await self.message.edit(embed=self._cached_embed, view=self)
         except Exception:
             logger.exception("money_panel: パネルの更新に失敗しました")
 
@@ -440,13 +478,24 @@ class MoneyPanelCog(commands.Cog):
                 logger.exception("money_panel: ギャンブルステータスの取得に失敗 user=%s", uid)
                 status["session_kind"] = None
 
+        try:
+            prison_store = (
+                getattr(circulation, "prison_store", None)
+                or prison_core.shared_store())
+            pstatus = prison_store.status(uid, now)
+            status["prison_remaining"] = (
+                float(pstatus["remaining"]) if pstatus["imprisoned"] else None)
+        except Exception:
+            logger.exception("money_panel: 逮捕ステータスの取得に失敗 user=%s", uid)
+            status["prison_remaining"] = None
+
         return status
 
     # ------------------------------------------------------------------ 入口
     async def show_panel(self, interaction: discord.Interaction):
         view = MoneyPanelView(self, interaction.user.id)
-        await interaction.response.send_message(
-            embed=await view.build_embed(), view=view)
+        view._cached_embed = await view.build_embed()
+        await interaction.response.send_message(view=_wrap(view))
         try:
             view.message = await interaction.original_response()
         except Exception:

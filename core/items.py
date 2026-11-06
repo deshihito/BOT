@@ -68,6 +68,27 @@ WORKSHOP_HASTE_MULTIPLIER = 2.0
 #: 優待パス: 市場の1回取引上限のプール比（手数料パスとは別効果）。
 TRADE_VIP_EFFECT = "trade_vip"
 TRADE_VIP_CAP_RATIO = 0.02
+#: 大怪盗: 使うと期間中、steal の成功率と奪える額が上がる。
+THIEF_EFFECT = "master_thief"
+THIEF_RATE_BONUS = 0.30
+THIEF_AMOUNT_MULTIPLIER = 2.0
+
+#: steal 攻防アイテムのアイテムID（所持で効く／steal 時に消費される
+#: 特殊アイテム群。効果の実体は cogs/circulation.py の steal 判定）。
+MUD_HAT_ITEM = "mud_hat"
+DAI_MUD_HAT_ITEM = "dai_mud_hat"
+BATON_ITEM = "baton"
+DAI_BATON_ITEM = "dai_baton"
+MASTER_THIEF_ITEM = "master_thief"
+
+#: 泥帽系の成功時上乗せ率（対象残高に対する一様乱数の範囲）と成功率補正。
+MUD_HAT_BONUS_MIN_RATE = 0.10
+MUD_HAT_BONUS_MAX_RATE = 1.00
+DAI_MUD_HAT_BONUS_MIN_RATE = 0.30
+DAI_MUD_HAT_BONUS_MAX_RATE = 1.50
+DAI_MUD_HAT_RATE_BONUS = 0.20
+#: 警棒の撃退率（大警棒は常時撃退）。
+BATON_REPEL_RATE = 0.50
 
 #: 宝箱1個の価格（ショップ購入）。
 BOX_PRICE = 1000
@@ -85,7 +106,8 @@ FLUSH_INTERVAL_SECONDS = 60.0
 # - kind: material（素材）/ collectible（換金コレクション）/
 #   consumable（消費）/ box（宝箱）
 # - purchasable: ショップで買えるか（上位素材・レアは False = 合成・宝箱でのみ）
-# - sell_price: ショップが買い戻す固定価格。None は売却不可
+# - sell_price: 売却額。全アイテム共通で price の 1/2（切り捨て）。
+#   個別設定はせず、ITEM_DEFS の直後で一律に代入する
 # - effect: 能動効果の効果ID（EFFECT_HANDLERS に実体があるものだけ）
 # - box_drop: 宝箱の抽選候補に入れてよいか（BOX_NEVER_DROP と二重に守る）
 # ---------------------------------------------------------------------------
@@ -93,232 +115,211 @@ FLUSH_INTERVAL_SECONDS = 60.0
 ITEM_DEFS: dict[str, dict[str, Any]] = {
     "scrap": {
         "name": "スクラップ",
-        "desc": "あらゆる加工の出発点になる最下位の素材。合成で上位の素材に化ける。",
+        "desc": "最下位の素材。合成の材料。",
         "price": 50,
         "duration_hours": None,
         "kind": "material",
         "purchasable": True,
-        "sell_price": None,
         "effect": None,
         "box_drop": True,
     },
     "metal_piece": {
         "name": "金属片",
-        "desc": "基本的な加工素材。合成の材料として幅広く使う。",
+        "desc": "合成の材料になる金属素材。",
         "price": 400,
         "duration_hours": None,
         "kind": "material",
         "purchasable": True,
-        "sell_price": None,
         "effect": None,
         "box_drop": True,
     },
     "circuit_piece": {
         "name": "回路片",
-        "desc": "精密な加工に使う素材。金属片より一段上の材料。",
+        "desc": "合成の材料になる電子部品。",
         "price": 1200,
         "duration_hours": None,
         "kind": "material",
         "purchasable": True,
-        "sell_price": None,
         "effect": None,
         "box_drop": True,
     },
     "reinforced_alloy": {
         "name": "強化合金",
-        "desc": "合成でしか作れない上位素材。ショップでは買えない。",
+        "desc": "上位素材。合成でのみ作れる。",
         "price": 5000,
         "duration_hours": None,
         "kind": "material",
         "purchasable": False,
-        "sell_price": None,
         "effect": None,
         "box_drop": True,
     },
     "mystery_crystal": {
         "name": "謎の結晶",
-        "desc": "素性の知れないレア素材。宝箱からごく稀に出る。",
+        "desc": "レア素材。宝箱や合成で手に入る。",
         "price": 20000,
         "duration_hours": None,
         "kind": "material",
         "purchasable": False,
-        "sell_price": None,
         "effect": None,
         "box_drop": True,
     },
     "alloy_plate": {
         "name": "合金プレート",
-        "desc": "金属片を合成して作る中間素材。丈夫な部品の土台になる。",
+        "desc": "中間素材。合成で作る。",
         "price": 2500,
         "duration_hours": None,
         "kind": "material",
         "purchasable": False,
-        "sell_price": None,
         "effect": None,
         "box_drop": False,
     },
     "circuit_board": {
         "name": "電子基板",
-        "desc": "回路片を組み上げた中間素材。精密部品の材料になる。",
+        "desc": "中間素材。合成で作る。",
         "price": 3500,
         "duration_hours": None,
         "kind": "material",
         "purchasable": False,
-        "sell_price": None,
         "effect": None,
         "box_drop": False,
     },
     "precision_parts": {
         "name": "精密部品",
-        "desc": "誤差の少ない上位素材。最終工程の合成に欠かせない。",
+        "desc": "上位素材。合成で作る。",
         "price": 6000,
         "duration_hours": None,
         "kind": "material",
         "purchasable": False,
-        "sell_price": None,
         "effect": None,
         "box_drop": False,
     },
     "reinforced_frame": {
         "name": "強化フレーム",
-        "desc": "強化合金を組んだ骨格材。アゴコア合成の直前に位置する素材。",
+        "desc": "上位素材。合成で作る。",
         "price": 9000,
         "duration_hours": None,
         "kind": "material",
         "purchasable": False,
-        "sell_price": None,
         "effect": None,
         "box_drop": False,
     },
     "ago_core": {
         "name": "アゴコア",
-        "desc": "合成チェーンの最終到達点。コレクションとして持ち続けるもよし、ショップに高額で売るもよし。",
+        "desc": "合成チェーンの最終素材。売却額が高い。",
         "price": 100000,
         "duration_hours": None,
         "kind": "collectible",
         "purchasable": False,
-        "sell_price": 50000,
         "effect": None,
         "box_drop": False,
     },
     "gold_scrap": {
         "name": "金のスクラップ",
-        "desc": "金色に光る換金用コレクション。ショップに固定価格で売却できる。",
+        "desc": "換金用コレクション。",
         "price": 10000,
         "duration_hours": None,
         "kind": "collectible",
         "purchasable": True,
-        "sell_price": 5000,
         "effect": None,
         "box_drop": True,
     },
     "silver_scrap": {
         "name": "銀のスクラップ",
-        "desc": "銀色に光る換金用コレクション。金のスクラップより手軽な一段下の換金先。",
+        "desc": "換金用コレクション。",
         "price": 2000,
         "duration_hours": None,
         "kind": "collectible",
         "purchasable": False,
-        "sell_price": 1000,
         "effect": None,
         "box_drop": True,
     },
     "platinum_scrap": {
         "name": "プラチナスクラップ",
-        "desc": "滅多に出ない最上位の換金用コレクション。ショップに高額で売却できる。",
+        "desc": "換金用コレクション。滅多に出ない。",
         "price": 50000,
         "duration_hours": None,
         "kind": "collectible",
         "purchasable": False,
-        "sell_price": 25000,
         "effect": None,
         "box_drop": True,
     },
     "computing_unit": {
         "name": "演算ユニット",
-        "desc": "電子基板と精密部品を組み上げた上位素材。さらに上の合成に使う。",
+        "desc": "上位素材。合成で作る。",
         "price": 12000,
         "duration_hours": None,
         "kind": "material",
         "purchasable": False,
-        "sell_price": None,
         "effect": None,
         "box_drop": False,
     },
     "enhanced_ago_core": {
         "name": "強化アゴコア",
-        "desc": "アゴコアをさらに研ぎ上げた最上位のコレクション。ショップに最高額で売却できる。",
+        "desc": "アゴコアの上位。売却額が最も高い。",
         "price": 300000,
         "duration_hours": None,
         "kind": "collectible",
         "purchasable": False,
-        "sell_price": 150000,
         "effect": None,
         "box_drop": False,
     },
     "mining_drink": {
         "name": "採掘ドリンク",
-        "desc": "使うとしばらくの間、採掘で追加でもう一掘りできるようになる。",
+        "desc": "使うと1時間、採掘で追加でもう1回掘れる。",
         "price": 500,
         "duration_hours": 1,
         "kind": "consumable",
         "purchasable": True,
-        "sell_price": None,
         "effect": MINING_BOOST_EFFECT,
         "box_drop": True,
     },
     "craft_catalyst": {
         "name": "合成触媒",
-        "desc": "使うとしばらくの間、合成でレアな結果が出やすくなる。",
+        "desc": "使うと2時間、合成でレアな結果が出やすくなる。",
         "price": 1500,
         "duration_hours": 2,
         "kind": "consumable",
         "purchasable": True,
-        "sell_price": None,
         "effect": CRAFT_CATALYST_EFFECT,
         "box_drop": True,
     },
     "steal_charm": {
         "name": "防犯チャーム",
-        "desc": "使うとしばらくの間、盗みから自分のコインを守れる。",
+        "desc": "使うと24時間、自分への盗みが自動で失敗する。",
         "price": 2000,
         "duration_hours": 24,
         "kind": "consumable",
         "purchasable": True,
-        "sell_price": None,
         "effect": STEAL_GUARD_EFFECT,
         "box_drop": False,
     },
     "confiscation_guard": {
         "name": "没収ガード",
-        "desc": "使うとしばらくの間、スロットの全額没収を1回だけ防げる。",
+        "desc": "使うと24時間、スロットの全額没収を1回だけ防ぐ。",
         "price": 5000,
         "duration_hours": 24,
         "kind": "consumable",
         "purchasable": True,
-        "sell_price": None,
         "effect": CONFISCATION_GUARD_EFFECT,
         "box_drop": False,
     },
     "workshop_oil": {
         "name": "加速オイル",
-        "desc": "使うとしばらくの間、工房の加工機の生産が速く進む。",
+        "desc": "使うと4時間、工房の生産が速く貯まる。",
         "price": 2000,
         "duration_hours": 4,
         "kind": "consumable",
         "purchasable": True,
-        "sell_price": None,
         "effect": WORKSHOP_HASTE_EFFECT,
         "box_drop": True,
     },
     "trade_vip": {
         "name": "優待パス",
-        "desc": "使うとしばらくの間、市場で一度に取引できる上限が広がる。",
+        "desc": "使うと24時間、市場の取引上限が広がる。",
         "price": 4000,
         "duration_hours": 24,
         "kind": "consumable",
         "purchasable": True,
-        "sell_price": None,
         "effect": TRADE_VIP_EFFECT,
         "box_drop": False,
     },
@@ -329,22 +330,77 @@ ITEM_DEFS: dict[str, dict[str, Any]] = {
         "duration_hours": 24,
         "kind": "consumable",
         "purchasable": True,
-        "sell_price": None,
         "effect": FEE_DISCOUNT_EFFECT,
         "box_drop": True,
     },
+    "mud_hat": {
+        "name": "泥帽",
+        "desc": "持って盗むと成功時に大きく上乗せして奪える。失敗すると逮捕される。盗み1回で消滅。",
+        "price": 8000,
+        "duration_hours": None,
+        "kind": "consumable",
+        "purchasable": True,
+        "effect": None,
+        "box_drop": True,
+    },
+    "dai_mud_hat": {
+        "name": "大泥帽",
+        "desc": "泥帽の上位。成功時の上乗せと成功率がさらに上がる。失敗時の逮捕も長い。盗み1回で消滅。",
+        "price": 80000,
+        "duration_hours": None,
+        "kind": "consumable",
+        "purchasable": True,
+        "effect": None,
+        "box_drop": False,
+    },
+    "baton": {
+        "name": "警棒",
+        "desc": "持っていると、盗みに来た相手を撃退して逮捕できることがある。発動で消滅。",
+        "price": 5000,
+        "duration_hours": None,
+        "kind": "consumable",
+        "purchasable": True,
+        "effect": None,
+        "box_drop": True,
+    },
+    "dai_baton": {
+        "name": "大警棒",
+        "desc": "警棒の上位。盗みに来た相手を必ず撃退し、長く逮捕する。発動で消滅。",
+        "price": 100000,
+        "duration_hours": None,
+        "kind": "consumable",
+        "purchasable": True,
+        "effect": None,
+        "box_drop": False,
+    },
+    "master_thief": {
+        "name": "大怪盗",
+        "desc": "使うと12時間、盗みの成功率と奪える額が上がる。",
+        "price": 50000,
+        "duration_hours": 12,
+        "kind": "consumable",
+        "purchasable": True,
+        "effect": THIEF_EFFECT,
+        "box_drop": False,
+    },
     "treasure_box": {
         "name": "宝箱",
-        "desc": "開けるとコインや素材が出る。まとめて開封できる。",
+        "desc": "開けるとコインや素材が出る。",
         "price": BOX_PRICE,
         "duration_hours": None,
         "kind": "box",
         "purchasable": True,
-        "sell_price": None,
         "effect": None,
         "box_drop": False,
     },
 }
+
+# 売却額は全アイテム共通で購入価格の 1/2（切り捨て）に統一する
+# （2026-11-06 ユーザー指示「基本買う額の二分の一で良い」）。
+# 従来コレクション系だけにあった個別 buyback は廃止した。
+for _definition in ITEM_DEFS.values():
+    _definition["sell_price"] = int(_definition["price"]) // 2
+del _definition
 
 # ---------------------------------------------------------------------------
 # 宝箱ドロップ（宣言的テーブル。原典 BOX_DROP_RATES / BOX_NEVER_DROP の分離を採用）
@@ -375,6 +431,8 @@ BOX_DROPS: tuple[dict[str, Any], ...] = (
     {"kind": "item", "item": "mining_drink", "chance": 0.02, "min": 1, "max": 1},
     {"kind": "item", "item": "craft_catalyst", "chance": 0.015, "min": 1, "max": 1},
     {"kind": "item", "item": "workshop_oil", "chance": 0.01, "min": 1, "max": 1},
+    {"kind": "item", "item": "baton", "chance": 0.01, "min": 1, "max": 1},
+    {"kind": "item", "item": "mud_hat", "chance": 0.005, "min": 1, "max": 1},
 )
 
 
@@ -507,6 +565,8 @@ register_effect(WORKSHOP_HASTE_EFFECT)(
     _timed_effect_handler("工房の加工機の生産が速く進みます"))
 register_effect(TRADE_VIP_EFFECT)(
     _timed_effect_handler("市場で一度に取引できる上限が広がります"))
+register_effect(THIEF_EFFECT)(
+    _timed_effect_handler("盗みの成功率と奪える額が上がります"))
 
 
 class ItemStore:
