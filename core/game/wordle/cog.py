@@ -8,7 +8,7 @@
 - 判定: <:g_:1563559471048032376> 位置も文字も合う／<:y_:1563559481768411257> 文字はあるが位置が違う／<:b_:1563559473422016512> 無い。
   同じ文字が複数あるときは、まず <:g_:1563559471048032376> を確定させ、残りの数だけ左から <:y_:1563559481768411257> にする（本家と同じ）。
 - 単語リストは Assets/wordle/answers.txt（答え）と allowed.txt（答え以外に推理で使える言葉）。
-- 勝利数は core/party_ranking.py に記録する。手番の時間切れは無いので、放置対策（autoplay）はつながない。
+- 勝利数は core/game/party_ranking.py に記録する。手番の時間切れは無いので、放置対策（autoplay）はつながない。
 """
 import asyncio
 import logging
@@ -22,7 +22,7 @@ import discord
 from core.game import game_panels, game_restore
 from discord.ext import commands
 
-from core import party_ranking
+from core.game import party_ranking
 from core.game import game_records
 
 logger = logging.getLogger(__name__)
