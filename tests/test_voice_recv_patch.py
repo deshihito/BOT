@@ -1,7 +1,7 @@
 """voice_recv の DAVE パッチ集約（監査 #6）のテスト。Discord には接続しない。
 
 以前は同じパッチが sio 系4ファイルに重複定義され、最初に import された版だけが
-効いていた（読込順依存）。core.voice_recv_patch への集約で、
+効いていた（読込順依存）。core.voice.voice_recv_patch への集約で、
 
 - どの cog を import しても同じ（core 由来の）メソッドが付くこと
 - 何回適用しても二重適用されない（メソッドが差し替わらない）こと
@@ -26,7 +26,7 @@ for _name, _value in {'BOT_API_BASE_URL': 'http://127.0.0.1:8787', 'BOT_API_KEY'
 
 from discord.ext import voice_recv  # noqa: E402
 
-from core import voice_recv_patch as vrp  # noqa: E402
+from core.voice import voice_recv_patch as vrp  # noqa: E402
 
 VC_CLS = voice_recv.VoiceRecvClient
 SIO_COGS = ('cogs.sio_globalVC', 'cogs.sio_karaoke', 'cogs.sio_rec', 'cogs.sio_transcription')
@@ -65,7 +65,7 @@ class PatchApplicationTest(unittest.TestCase):
         self.assertTrue(getattr(VC_CLS, '_dave_patch_applied', False))
         for name in ('dave_is_active', 'dave_is_ready', 'dave_decrypt'):
             self.assertTrue(hasattr(VC_CLS, name), name)
-            self.assertEqual(getattr(VC_CLS, name).__module__, 'core.voice_recv_patch')
+            self.assertEqual(getattr(VC_CLS, name).__module__, 'core.voice.voice_recv_patch')
 
     def test_patch_is_idempotent(self):
         vrp.patch_voice_recv_client()
@@ -81,7 +81,7 @@ class PatchApplicationTest(unittest.TestCase):
         for name in SIO_COGS:
             importlib.import_module(name)
             self.assertIs(VC_CLS.dave_decrypt, before, name)
-            self.assertEqual(VC_CLS.dave_decrypt.__module__, 'core.voice_recv_patch')
+            self.assertEqual(VC_CLS.dave_decrypt.__module__, 'core.voice.voice_recv_patch')
         # 旧 sio_rec 版だけにあったメソッドが、どの cog 経由でも使える
         self.assertTrue(hasattr(VC_CLS, 'dave_is_ready'))
 

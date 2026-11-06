@@ -1,6 +1,6 @@
 import unittest
 
-from core.music_activity import build_music_activity_snapshot, extract_youtube_video_id
+from core.voice.music_activity import build_music_activity_snapshot, extract_youtube_video_id
 
 VIDEO_ID = "dQw4w9WgXcQ"
 

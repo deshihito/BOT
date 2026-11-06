@@ -38,7 +38,7 @@ CONVERTED_FILES = [
     "core/voice/hub.py",
     "core/voice/trigger.py",
     "core/voice/tts.py",
-    "core/voice_session.py",
+    "core/voice/voice_session.py",
 ]
 
 #: 変換後も ⚠️ が残ってよい行（行内のキーワードで判定）
