@@ -78,7 +78,7 @@ class PanelMixin:
         eq_label = f"Custom (`{state['custom_eq_filter']}`)" if current_eq == "custom" else current_eq.capitalize()
 
         panel_text = (
-            "# {MUSIC} ボイスコントロールパネル\n"
+            f"# {MUSIC} ボイスコントロールパネル\n"
             f"**状態:** {status_icon}\n"
             f"**オーディオ:** {VOL} `{int(state['volume']*100)}%`　{THU} `{state['speed']}x`　🎬 `{eq_label}`\n"
             f"**再生中:** {track_info}\n"

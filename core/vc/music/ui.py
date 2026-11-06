@@ -208,7 +208,9 @@ class VoiceControlView(discord.ui.View):
                 discord.SelectOption(label="150%", value="1.5"),
                 discord.SelectOption(label="200% (最大)", value="2.0"),
             ]
-            super().__init__(placeholder=f"{VOL} 音量変更 (現在: {int(state['volume']*100)}%)", min_values=1, max_values=1, options=options, row=1)
+            # placeholder 内ではアプリ絵文字 markup が描画されないため絵文字は載せない。
+            # {VOL} 付きの見出し行は build_music_panel_layout が TextDisplay として直前に差し込む。
+            super().__init__(placeholder="音量を選択", min_values=1, max_values=1, options=options, row=1)
 
         async def callback(self, interaction: discord.Interaction):
             state = self.cog.get_state(self.guild_id)
@@ -244,7 +246,7 @@ class VoiceControlView(discord.ui.View):
             # ★ current_ctx ではなく interaction を渡す。これが「次の曲に飛ぶ」バグの修正点。
             await self.cog.apply_immediate_setting(interaction)
 
-    @discord.ui.button(label=LOUPE, style=discord.ButtonStyle.success, row=3)
+    @discord.ui.button(label="", emoji=LOUPE, style=discord.ButtonStyle.success, row=3)
     async def search_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         modal = SearchModal(self.cog, self.guild_id)
         await interaction.response.send_modal(modal)
@@ -318,7 +320,7 @@ class VoiceControlView(discord.ui.View):
     async def queue_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.send_message(embed=self.cog.build_queue_embed(self.guild_id))
 
-    @discord.ui.button(label=BOOK, style=discord.ButtonStyle.secondary, row=4)
+    @discord.ui.button(label="", emoji=BOOK, style=discord.ButtonStyle.secondary, row=4)
     async def library_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         embed = discord.Embed(
             title=f"{BOOK} ライブラリ",
@@ -365,7 +367,21 @@ def build_music_panel_layout(cog, guild_id: int, panel_text: str,
         if row is None:
             row = 0 if isinstance(item, discord.ui.Select) else 3
         rows.setdefault(row, []).append(item)
-    action_rows = [discord.ui.ActionRow(*items) for _, items in sorted(rows.items())]
+    # 音量セレクトの placeholder にはアプリ絵文字を載せられないため、
+    # {VOL} 付きの見出し行を TextDisplay として音量セレクトの直前に差し込む
+    # (TextDisplay 内では markup が描画される)。
+    volume_caption: discord.ui.TextDisplay | None = None
+    try:
+        volume = cog.get_state(guild_id).get("volume", 1.0)
+        volume_caption = discord.ui.TextDisplay(f"{VOL} 音量変更 (現在: {int(volume * 100)}%)")
+    except Exception:
+        volume_caption = None
+    action_rows: list[discord.ui.Item] = []
+    for _, items in sorted(rows.items()):
+        if volume_caption is not None and any(
+                isinstance(item, VoiceControlView.VolumeSelect) for item in items):
+            action_rows.append(volume_caption)
+        action_rows.append(discord.ui.ActionRow(*items))
     if thumbnail_url and thumbnail_url.startswith(("http://", "https://")):
         header: list[discord.ui.Item] = [
             discord.ui.Section(

@@ -108,11 +108,11 @@ class EmojiBinjouView(discord.ui.View):
                 ephemeral=True,
             )
 
-    @discord.ui.button(label=THINKING + ' オン', style=discord.ButtonStyle.success, row=0)
+    @discord.ui.button(label='オン', emoji=THINKING, style=discord.ButtonStyle.success, row=0)
     async def thinking_on(self, interaction: discord.Interaction, button: discord.ui.Button):
         await self.set_enabled(interaction, "thinking", True)
 
-    @discord.ui.button(label=THINKING + ' オフ', style=discord.ButtonStyle.secondary, row=0)
+    @discord.ui.button(label='オフ', emoji=THINKING, style=discord.ButtonStyle.secondary, row=0)
     async def thinking_off(self, interaction: discord.Interaction, button: discord.ui.Button):
         await self.set_enabled(interaction, "thinking", False)
 
