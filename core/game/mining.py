@@ -68,6 +68,13 @@ JACKPOT_RATE = 0.10
 JACKPOT_POOL_MIN_RATE = 0.01
 JACKPOT_POOL_MAX_RATE = 0.10
 
+#: 直下掘り（次期仕様 S6-4）の特殊ダイス。セッション開始時に立てた
+#: フラグが残っている間だけ有効で、大量採掘の確率と量が上がる代わり
+#: に失敗率が大きく上がる（原典: 大量採掘 +50% / 失敗 90%）。
+DIRECT_FAIL_RATE = 0.90
+DIRECT_JACKPOT_RATE = 0.15
+DIRECT_JACKPOT_MULTIPLIER = 1.5
+
 FLUSH_EVERY_EVENTS = 20
 FLUSH_INTERVAL_SECONDS = 60.0
 
@@ -92,6 +99,7 @@ def _clean_state(raw: Any) -> dict[str, Any]:
                 "last": last if isinstance(last, str) else None,
                 "session_left": (
                     int(left) if isinstance(left, int) and left > 0 else 0),
+                "direct": bool(entry.get("direct")),
             }
     return state
 
@@ -158,7 +166,7 @@ class MiningStore:
     # ------------------------------------------------------------------ 状態参照
     def _user_locked(self, user_id: str) -> dict[str, Any]:
         return self._state["users"].setdefault(
-            str(user_id), {"last": None, "session_left": 0})
+            str(user_id), {"last": None, "session_left": 0, "direct": False})
 
     def _cooldown_remaining_locked(self, user: dict[str, Any], now: datetime) -> float:
         if not user["last"]:
@@ -178,14 +186,17 @@ class MiningStore:
                 "cooldown_remaining": self._cooldown_remaining_locked(user, now),
                 "session_left": int(user["session_left"]),
                 "session_max": SESSION_MAX_DIGS,
+                "direct": bool(user.get("direct")),
             }
 
     # ------------------------------------------------------------------ セッション
-    def start_session(self, user_id: str, now: datetime | None = None) -> int:
+    def start_session(self, user_id: str, now: datetime | None = None,
+                      *, direct: bool = False) -> int:
         """セッションを開始し、掘れる回数を返す。
 
         既にセッションが残っていれば、その残り回数をそのまま返す
         （振り直さない）。クールダウン中は ItemError（状態は不変）。
+        direct=True のときはこのセッションを直下掘りとして開始する。
         """
         now = now or datetime.now(JST)
         uid = str(user_id)
@@ -201,25 +212,36 @@ class MiningStore:
             digs = self._rng.randint(SESSION_MIN_DIGS, SESSION_MAX_DIGS)
             user["last"] = now.astimezone(JST).isoformat()
             user["session_left"] = digs
+            user["direct"] = bool(direct)
             self._mark_dirty()
             return digs
 
     # ------------------------------------------------------------------ 産出抽選
-    def _roll(self, pool_balance: int) -> dict[str, Any]:
+    def _roll(self, pool_balance: int, *, no_fail: bool = False,
+              direct: bool = False) -> dict[str, Any]:
         """1掘り分の産出を抽選する（状態は変えない）。
 
         原典の順序どおり: 基本額を抽選し、失敗なら基本額は0。
         大量採掘は独立に抽選し、発動すればプール残高の割合が
         基本額とは別に上乗せされる（失敗した掘りでも発動する）。
         支払い要求額はプール残高で clamp する（ある分まで）。
+
+        no_fail（落盤対策）: 失敗抽選を成功扱いに読み替える。
+        direct（直下掘り）: 失敗率と大量採掘の確率・量を特殊ダイスにする。
         """
         base = self._rng.randint(BASE_MIN_COINS, BASE_MAX_COINS)
-        failed = self._rng.random() < FAIL_RATE
+        fail_rate = DIRECT_FAIL_RATE if direct else FAIL_RATE
+        failed = self._rng.random() < fail_rate
+        if no_fail:
+            failed = False
         base_amount = 0 if failed else base
-        jackpot = self._rng.random() < JACKPOT_RATE
+        jackpot_rate = DIRECT_JACKPOT_RATE if direct else JACKPOT_RATE
+        jackpot = self._rng.random() < jackpot_rate
         extra = 0
         if jackpot:
             rate = self._rng.uniform(JACKPOT_POOL_MIN_RATE, JACKPOT_POOL_MAX_RATE)
+            if direct:
+                rate *= DIRECT_JACKPOT_MULTIPLIER
             extra = max(1, int(pool_balance * rate)) if pool_balance > 0 else 0
         requested = base_amount + extra
         return {
@@ -229,14 +251,17 @@ class MiningStore:
             "failed": failed,
             "jackpot": jackpot and extra > 0,
             "extra": extra,
+            "direct": bool(direct),
         }
 
     def dig(self, user_id: str, pool_balance: int,
-            now: datetime | None = None) -> dict[str, Any]:
+            now: datetime | None = None, *,
+            no_fail: bool = False) -> dict[str, Any]:
         """セッションの1回分を消費して産出を確定する。
 
         セッションが無い場合は ItemError（状態は不変）。戻り値の
         "user_before" は、支払いに失敗したときの rollback_dig 用。
+        直下掘りフラグはセッション終了（残り0）で自動的に落ちる。
         """
         now = now or datetime.now(JST)
         uid = str(user_id)
@@ -245,16 +270,24 @@ class MiningStore:
             if int(user["session_left"]) <= 0:
                 raise ItemError("採掘セッションが始まっていません。")
             user_before = copy.deepcopy(user)
+            direct = bool(user.get("direct"))
             user["session_left"] = int(user["session_left"]) - 1
+            if int(user["session_left"]) <= 0:
+                user["direct"] = False
             self._mark_dirty()
-            result = self._roll(pool_balance)
+            result = self._roll(pool_balance, no_fail=no_fail, direct=direct)
             result["session_left"] = int(user["session_left"])
             result["user_before"] = user_before
             return result
 
-    def roll_bonus(self, pool_balance: int) -> dict[str, Any]:
-        """追加の1掘り分の抽選（採掘ドリンク用。セッションは消費しない）。"""
-        return self._roll(pool_balance)
+    def roll_bonus(self, pool_balance: int, *,
+                   no_fail: bool = False) -> dict[str, Any]:
+        """追加の1掘り分の抽選（採掘ドリンク／編成ボーナス用）。
+
+        セッションは消費しない。通常ダイス（直下掘りの特殊ダイスには
+        しない）。
+        """
+        return self._roll(pool_balance, no_fail=no_fail)
 
     def rollback_dig(self, user_id: str, result: dict[str, Any]) -> None:
         """dig の巻き戻し（プールの支払いやコイン反映に失敗したとき用）。"""

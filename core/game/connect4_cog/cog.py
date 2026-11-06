@@ -31,8 +31,17 @@ WIDTH, HEIGHT = CELL * COLS + 20, CELL * ROWS + 50
 
 
 def render_board_image(board, last=None):
-    img = Image.new("RGB", (WIDTH, HEIGHT), (40, 80, 180))
-    draw = ImageDraw.Draw(img)
+    # 盤面画像化タスク（2026-11-06）のリッチ化: 背景は縦グラデーション、
+    # 空きマスは「穴」（暗色＋内側の影）、コマはハイライト付きで立体感を出す。
+    # 座標系・出力サイズは従来どおり（復旧や操作に影響しない）。
+    strip = Image.new("RGB", (1, HEIGHT))
+    for y in range(HEIGHT):
+        t = y / max(1, HEIGHT - 1)
+        strip.putpixel((0, y), (int(52 - 20 * t), int(102 - 34 * t), int(205 - 45 * t)))
+    img = strip.resize((WIDTH, HEIGHT))
+    draw = ImageDraw.Draw(img, "RGBA")
+    draw.rounded_rectangle([3, 3, WIDTH - 4, HEIGHT - 4], radius=14,
+                           outline=(14, 34, 88), width=4)
     try:
         font = ImageFont.truetype(str(Path(__file__).resolve().parents[3] / "font.ttf"), 20)
     except Exception:
@@ -43,12 +52,25 @@ def render_board_image(board, last=None):
         for c in range(COLS):
             cx, cy = 20 + c * CELL + CELL // 2, 40 + r * CELL + CELL // 2
             v = board[r][c]
-            fill = (240, 240, 240) if v == EMPTY else (230, 60, 60) if v == RED else (250, 210, 60)
-            draw.ellipse([cx - 26, cy - 26, cx + 26, cy + 26], fill=fill, outline=(20, 40, 100), width=2)
+            if v == EMPTY:
+                # 穴: 暗い円＋上側に落ちる影で奥行きを出す
+                draw.ellipse([cx - 26, cy - 26, cx + 26, cy + 26], fill=(19, 38, 92),
+                             outline=(16, 34, 84), width=2)
+                draw.arc([cx - 26, cy - 26, cx + 26, cy + 26], start=180, end=360,
+                         fill=(120, 160, 235), width=3)
+            else:
+                base = (228, 52, 52) if v == RED else (250, 205, 55)
+                dark = (150, 26, 26) if v == RED else (176, 138, 20)
+                draw.ellipse([cx - 26, cy - 24, cx + 26, cy + 28], fill=dark)
+                draw.ellipse([cx - 26, cy - 26, cx + 26, cy + 26], fill=base,
+                             outline=dark, width=2)
+                draw.ellipse([cx - 15, cy - 18, cx - 2, cy - 6], fill=(255, 255, 255, 110))
             if last == (r, c):
-                draw.ellipse([cx - 6, cy - 6, cx + 6, cy + 6], fill=(30, 30, 30))
+                draw.ellipse([cx - 29, cy - 29, cx + 29, cy + 29],
+                             outline=(255, 255, 255), width=3)
+                draw.ellipse([cx - 5, cy - 5, cx + 5, cy + 5], fill=(30, 30, 30))
     out = io.BytesIO()
-    img.save(out, format="PNG", optimize=True)
+    img.convert("RGB").save(out, format="PNG", optimize=True)
     out.seek(0)
     return out
 

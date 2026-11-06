@@ -2,7 +2,11 @@
 
 The implementation lives in core.game.minesweeper_cog.cog; this module only
 re-exports its names so existing imports and patch targets on
-cogs.minesweeper keep working."
+cogs.minesweeper keep working.
+
+盤面画像化タスク（2026-11-06）で実装側は画像盤面＋V2 パネルに再設計され、
+旧 BoardView / DifficultyView / board_embed / NUMBER_LABELS は
+BoardPanel / DifficultyPanel / board_png 等に置き換わった。
 """
 from core.game.minesweeper_cog.cog import (
     time,
@@ -15,10 +19,13 @@ from core.game.minesweeper_cog.cog import (
     DIFFICULTIES,
     MinesweeperBoard,
     GAME_ID,
-    NUMBER_LABELS,
-    board_embed,
-    BoardView,
-    DifficultyView,
+    tile_for,
+    coord,
+    board_states,
+    board_png,
+    board_file,
+    BoardPanel,
+    DifficultyPanel,
     Minesweeper,
     setup,
 )

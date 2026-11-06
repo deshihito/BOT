@@ -180,7 +180,9 @@ class SystemStatsCog(commands.Cog):
                         value=(
                             f"**採掘プール:** `{snapshot['pool']:,} AGO`\n"
                             f"**国庫:** `{snapshot['treasury']:,} AGO`\n"
-                            f"**還流累計:** `{snapshot['total_recycled']:,} AGO`"
+                            f"**還流累計:** `{snapshot['total_recycled']:,} AGO`\n"
+                            f"**国庫からの還流累計:** "
+                            f"`{snapshot.get('total_released', 0):,} AGO`"
                         ),
                         inline=False
                     )

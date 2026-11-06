@@ -56,6 +56,8 @@ AI_BLOCKED_IDS = frozenset({
     "general:machine_buy", "general:workshop_claim", "general:craft",
     "general:mining", "general:lottery_buy", "general:steal",
     "general:slot", "general:double", "general:blackjack", "general:dice",
+    # ブラックジャック対決はコインを賭ける状態変更なので明示操作に限定する。
+    "general:bj_duel",
     # 日報DMの購読切り替えは個人設定の変更なので明示操作に限定する。
     "general:daily_report",
     # ガチャはコインを消費する状態変更なので明示操作に限定する。

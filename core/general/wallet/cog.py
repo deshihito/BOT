@@ -23,6 +23,30 @@ COIN_FILENAME = "coin.png"
 COIN_COLOR = 0xf1c40f
 
 
+def compute_asset_ranking(balances: dict, token_balances: dict,
+                          rate: float, limit: int = 10) -> list[dict]:
+    """総合資産ランキング（S6-6）: 残高＋トークン時価の合算で並べる。
+
+    balances: {user_id: AGO残高}、token_balances: {user_id: 保有AGA数}、
+    rate: 現在レート（1 AGA = rate AGO）。トークン時価は小数切り捨て。
+    アイテムの売却額は含めない（仕様どおり）。
+    """
+    user_ids = set(balances) | set(token_balances)
+    rows = []
+    for uid in user_ids:
+        balance = int(balances.get(uid) or 0)
+        tokens = float(token_balances.get(uid) or 0.0)
+        token_value = int(tokens * float(rate))
+        rows.append({
+            "user_id": str(uid),
+            "balance": balance,
+            "token_value": token_value,
+            "total": balance + token_value,
+        })
+    rows.sort(key=lambda row: (-row["total"], row["user_id"]))
+    return rows[: max(0, int(limit))]
+
+
 def coin_embed(title: str, description: str | None = None) -> tuple[discord.Embed, dict]:
     """コインのサムネイル付きの埋め込みと、send に渡す追加の引数（file）を返す。
 
@@ -285,6 +309,9 @@ class WalletCog(commands.Cog):
                           scope: app_commands.Choice[str] | None = None):
         await interaction.response.defer()
         selected = category.value if category else "coin"
+        if selected == "asset":
+            await self._asset_leaderboard(interaction)
+            return
         if selected in {"bump", "up"}:
             rta = self.bot.get_cog("BumpRta")
             if rta is None:
@@ -320,6 +347,59 @@ class WalletCog(commands.Cog):
                         user = None
                 name = user.display_name if user else f"<@{user_id}>"
                 lines.append(f"**{index}位** {name}：{int(record.get('balance') or 0):,} AGO")
+            embed.description = "\n".join(lines)
+            await interaction.followup.send(embed=embed)
+        except Exception:
+            traceback.print_exc()
+            await interaction.followup.send("ランキングの取得中にエラーが発生しました。", ephemeral=True)
+
+    async def _asset_leaderboard(self, interaction: discord.Interaction):
+        """総合資産ランキング（S6-6）: 残高＋トークン時価（保有数×現在レート）。"""
+        try:
+            def _fetch_balances() -> dict:
+                balances: dict[str, int] = {}
+                offset = 0
+                while True:
+                    response = (config.db_api.table("users")
+                                .select("user_id, balance")
+                                .range(offset, offset + 999).execute())
+                    rows = response.data or []
+                    for row in rows:
+                        balances[str(row["user_id"])] = int(
+                            row.get("balance") or 0)
+                    if len(rows) < 1000:
+                        return balances
+                    offset += 1000
+
+            balances = await asyncio.to_thread(_fetch_balances)
+            token_balances: dict[str, float] = {}
+            rate = 0.0
+            market_cog = self.bot.get_cog("MarketCog")
+            if market_cog is not None:
+                snapshot = market_cog.store.snapshot()
+                rate = float(snapshot.get("rate") or 0.0)
+                token_balances = {
+                    str(uid): float(amount)
+                    for uid, amount in (snapshot.get("balances") or {}).items()
+                }
+            ranking = compute_asset_ranking(balances, token_balances, rate)
+            if not ranking:
+                await interaction.followup.send("まだランキングに載っている人がいません。")
+                return
+            embed = discord.Embed(title="総合資産ランキング（TOP 10）", color=0xf1c40f)
+            lines = []
+            for index, row in enumerate(ranking, start=1):
+                user_id = int(row["user_id"])
+                user = self.bot.get_user(user_id)
+                if user is None:
+                    try:
+                        user = await self.bot.fetch_user(user_id)
+                    except discord.HTTPException:
+                        user = None
+                name = user.display_name if user else f"<@{user_id}>"
+                lines.append(
+                    f"**{index}位** {name}：{row['total']:,} AGO"
+                    f"（コイン {row['balance']:,}＋トークン {row['token_value']:,}）")
             embed.description = "\n".join(lines)
             await interaction.followup.send(embed=embed)
         except Exception:
