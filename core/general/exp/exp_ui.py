@@ -6,7 +6,7 @@ from ..common import *
 from .exp import (
     _as_int, _exp_ensure, _exp_load, _exp_root, general_level, level_from_exp,
 )
-from core.user_names import cached_display_name, resolve_display_names
+from core.general.user_names import cached_display_name, resolve_display_names
 
 class ExpStatusView(discord.ui.View):
     def __init__(self, author_id: int, guild_id: int):
