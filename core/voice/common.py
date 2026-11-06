@@ -2,7 +2,7 @@
 ボイスチェンジャー・ランダム通話・グローバルVC・VOICEVOX読み上げ・音声トリガー）の入口。
 
 それぞれの処理は各機能の cog にある実装関数（``_xxx_impl``）を呼ぶだけ。
-VC を誰が使っているかは core/voice_session.py が持つ。
+VC を誰が使っているかは core/voice/voice_session.py が持つ。
 """
 from __future__ import annotations
 
@@ -49,8 +49,8 @@ except Exception:  # ImportError だけでなく共有ライブラリ不整合 (
 
 from core import action_usage, usage_stats
 from core.legacy import Responder
-from core.voice_session import VoiceBusy, feature_label, get_manager, stop_hint
-from core.voice_media import add_audio_source, remove_audio_source
+from core.voice.voice_session import VoiceBusy, feature_label, get_manager, stop_hint
+from core.voice.voice_media import add_audio_source, remove_audio_source
 from core.panel_v2 import as_panel_v2, edit_panel_v2
 
 CONNECTION_ACTIONS = [
