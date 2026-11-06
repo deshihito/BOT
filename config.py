@@ -12,7 +12,7 @@ PREFIX = "!"
 
 # --- 自前PostgreSQL API設定 ---
 BOT_API_BASE_URL = os.getenv('BOT_API_BASE_URL', '').rstrip('/')
-from core import api_client as _api_client
+from core.support import api_client as _api_client
 
 db_api = _api_client.get_client()
 if db_api is None:
