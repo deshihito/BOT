@@ -12,7 +12,7 @@ import time
 import discord
 from discord.ext import commands
 
-from core import party_ranking
+from core.game import party_ranking
 from core.game.quiz_bank import default_source
 from core.game.quiz_game import QuizSession
 
