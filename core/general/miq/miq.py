@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """MIQ（引用画像）の中核：フォント解決・絵文字フォールバック・基本描画・設定保存。元 cogs/general.py から分割。"""
 from __future__ import annotations
-from core.emojis import AGO_TICKET, BOOK, DICE, GAME, MUSIC
+from core.support.emojis import AGO_TICKET, BOOK, DICE, GAME, MUSIC
 
 from ..common import *
 from ..exp.levelup import _levelup_font, _levelup_pick_font, _levelup_safe_name
