@@ -20,6 +20,7 @@ import discord
 from discord.ext import commands, tasks
 
 import config
+from core import clan as clan_core
 from core import gacha as gacha_core
 from core.game import prison as prison_core
 from core.panel_v2 import as_panel_v2, edit_panel_v2
@@ -256,6 +257,8 @@ class GachaCog(commands.Cog):
         await self._record_history(uid, "gacha", price, gacha_core.HISTORY_REASON)
         rolls = gacha_core.roll_characters(self._rng, count)
         self.store.record_pulls(uid, count)
+        # クラン貢献フック（所属中のみ・失敗してもガチャに影響させない）。
+        clan_core.award_points(uid, clan_core.POINTS_GACHA_PER_PULL * count)
         lines = ["🎰 **ガチャ結果**"]
         dup_coins = 0
         for character in rolls:

@@ -346,6 +346,12 @@ class GeneralCog(
                 return await self._safe_respond(interaction, "ガチャは現在利用できません。")
             return await gacha_cog.show_gacha(interaction)
 
+        if value == "clan":
+            clan_cog = self.bot.get_cog("ClanCog")
+            if clan_cog is None:
+                return await self._safe_respond(interaction, "クラン機能は現在利用できません。")
+            return await clan_cog.show_clan(interaction)
+
         if value in {"items", "item_buy", "item_use", "box_open"}:
             items_cog = self.bot.get_cog("ItemsCog")
             if items_cog is None:

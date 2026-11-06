@@ -32,6 +32,7 @@ import discord
 from discord.ext import commands, tasks
 
 import config
+from core import clan as clan_core
 from core.general import economy_pool as economy_core
 from core.general import items as items_core
 from core.game import lottery as lottery_core
@@ -497,6 +498,8 @@ class CirculationCog(commands.Cog):
                 lines.append("このセッションは終了しました。")
             if session_note:
                 lines.append(session_note)
+            # クラン貢献フック（所属中のみ・失敗しても採掘に影響させない）。
+            clan_core.award_points(uid, clan_core.POINTS_MINING)
             return "\n".join(lines)
         except items_core.ItemError as exc:
             return circulation_action_failed(exc)
