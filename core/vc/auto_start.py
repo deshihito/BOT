@@ -25,7 +25,7 @@ import logging
 import time
 from typing import Any, Optional
 
-from core.legacy import Responder
+from core.support.legacy import Responder
 
 logger = logging.getLogger(__name__)
 
@@ -251,7 +251,7 @@ async def on_fresh_session(bot, session, user, text_channel) -> None:
         if not any(not getattr(m, "bot", False) for m in members):
             return  # VC に人がいない
 
-        from core import guild_settings
+        from core.support import guild_settings
 
         store = guild_settings.get_store()
         await store.ensure_loaded()
