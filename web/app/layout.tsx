@@ -2,11 +2,31 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import "./globals.css";
 import { InviteButton } from "./InviteCta";
-import { SUPPORT_SERVER_URL } from "@/lib/site";
+import { SITE_URL, SUPPORT_SERVER_URL } from "@/lib/site";
+
+const SITE_TITLE = "AGOBOT | 使いたいこと、全部このボットでいい。";
+const SITE_DESCRIPTION =
+  "AGOBOTは、ゲーム47種・音楽とVC・コイン経済・サーバー運営・AIまで、195の機能を6つのスラッシュコマンドに集約した多機能Discordボットです。";
 
 export const metadata: Metadata = {
-  title: "AGOBOT サポート",
-  description: "AGOBOTのコマンド案内",
+  metadataBase: new URL(SITE_URL),
+  title: SITE_TITLE,
+  description: SITE_DESCRIPTION,
+  openGraph: {
+    type: "website",
+    locale: "ja_JP",
+    url: SITE_URL,
+    siteName: "AGOBOT",
+    title: SITE_TITLE,
+    description: SITE_DESCRIPTION,
+    images: ["/img/nomal.png"],
+  },
+  twitter: {
+    card: "summary",
+    title: SITE_TITLE,
+    description: SITE_DESCRIPTION,
+    images: ["/img/nomal.png"],
+  },
   icons: { icon: "/img/nomal.png" },
 };
 

@@ -1,8 +1,13 @@
+import type { Metadata } from "next";
 import Link from "next/link";
 import { COMMAND_GUIDES } from "@/lib/command-guides";
 import { isBotApiConfigured, kvList } from "@/lib/bot-api";
 import { GUILD_REGISTRY_NAMESPACE } from "@/lib/dashboard";
 import { InviteButton } from "./InviteCta";
+
+export const metadata: Metadata = {
+  alternates: { canonical: "/" },
+};
 
 export const dynamic = "force-dynamic";
 

@@ -5,7 +5,7 @@ import { SETTING_SECTIONS } from "@/lib/dashboard-core";
 import { getDashboardContext, loadGuildRegistry, loadGuildSettings } from "@/lib/dashboard";
 import SettingsForm from "./SettingsForm";
 
-export const metadata = { title: "サーバー設定 | AGOBOT" };
+export const metadata = { title: "サーバー設定 | AGOBOT", robots: { index: false, follow: false } };
 export const dynamic = "force-dynamic";
 
 type PageProps = {

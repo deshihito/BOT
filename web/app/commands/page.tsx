@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { COMMAND_GUIDES } from "@/lib/command-guides";
 
-export const metadata = { title: "コマンド | AGOBOT" };
+export const metadata = { title: "コマンド | AGOBOT", alternates: { canonical: "/commands" } };
 
 export default function CommandsPage() {
   return (
