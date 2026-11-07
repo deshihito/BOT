@@ -28,9 +28,11 @@ from discord.ext import commands, tasks
 from core.support.panel_v2 import as_panel_v2, edit_panel_v2
 from core.general import shortcut_settings as shortcuts
 from core.support import guild_settings
-from core.general import action_registry, action_usage, levelup_card, logfare
+from core.general import action_registry, action_usage
+from core.general.exp import levelup_card
+from core.general.ai import logfare
 from core.support import usage_stats
-from core.general import ai_omnirush, ai_preferences, ai_provider_router
+from core.general.ai import ai_omnirush, ai_preferences, ai_provider_router
 from core.game.game.game_guides import GAME_GUIDES, GAME_ORDER
 from core.general import translation_settings as translation
 from core.support import localization
@@ -263,7 +265,7 @@ class GeneralCog(
             return await interaction.response.send_message(embed=view.embed(), view=view)
 
         if value == "aitools":
-            from core.general import ai_tools_router
+            from core.general.ai_tools import ai_tools_router
             from cogs.ai_tools import _enabled as ai_tools_enabled
             available = ai_tools_router.action_candidates()
             key_status = "設定済み" if logfare.api_key() else "未設定"

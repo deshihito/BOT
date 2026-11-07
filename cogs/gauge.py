@@ -1,10 +1,10 @@
 """Slim entry point for the gauge cog.
 
-The implementation lives in core.general.gauge_cog.cog; this module only
+The implementation lives in core.general.gauge.cog; this module only
 re-exports its names so existing imports and patch targets on
 cogs.gauge keep working."
 """
-from core.general.gauge_cog.cog import (
+from core.general.gauge.cog import (
     asyncio,
     io,
     logging,

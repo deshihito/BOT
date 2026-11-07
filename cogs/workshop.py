@@ -1,10 +1,10 @@
 """Slim entry point for the workshop cog.
 
-The implementation lives in core.general.workshop_cog.cog; this module only
+The implementation lives in core.general.workshop.cog; this module only
 re-exports its names so existing imports and patch targets on
 cogs.workshop keep working."
 """
-from core.general.workshop_cog.cog import (
+from core.general.workshop.cog import (
     annotations,
     SUCCESS,
     asyncio,

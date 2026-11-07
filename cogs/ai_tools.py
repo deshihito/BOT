@@ -1,10 +1,10 @@
 """Slim entry point for the ai_tools cog.
 
-The implementation lives in core.general.ai_tools_cog.cog; this module only
+The implementation lives in core.general.ai_tools.cog; this module only
 re-exports its names so existing imports and patch targets on
 cogs.ai_tools keep working."
 """
-from core.general.ai_tools_cog.cog import (
+from core.general.ai_tools.cog import (
     annotations,
     logging,
     os,

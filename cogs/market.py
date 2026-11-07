@@ -1,6 +1,6 @@
 """Slim entry point for the market cog.
 
-The implementation lives in core.general.market_cog.cog; this module only
+The implementation lives in core.general.market.cog; this module only
 re-exports its names so existing imports and patch targets on
 cogs.market keep working."
 """
@@ -13,7 +13,7 @@ from pathlib import Path as _Path
 CHART_PATH = _Path(__file__).resolve().parent.parent / "data" / "market_chart.png"
 CHART_FONT_PATH = (_Path(__file__).resolve().parent.parent
                    / "assets" / "fonts" / "MPLUSRounded1c-Regular.ttf")
-from core.general.market_cog.cog import (
+from core.general.market.cog import (
     annotations,
     SUCCESS,
     asyncio,
