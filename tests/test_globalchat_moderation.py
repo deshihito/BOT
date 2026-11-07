@@ -11,7 +11,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from core.support import globalchat_moderation as mod  # noqa: E402
+from core.support.globalchat import globalchat_moderation as mod  # noqa: E402
 from core.support import guild_settings  # noqa: E402
 from core.support.storage import KVStore  # noqa: E402
 from cogs import globalchat  # noqa: E402
