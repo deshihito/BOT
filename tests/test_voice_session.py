@@ -28,9 +28,9 @@ import discord  # noqa: E402
 
 from core.vc import voice_session as vs  # noqa: E402
 from core.support.legacy import Responder  # noqa: E402
-from cogs import sio_globalVC as gvc  # noqa: E402
-from cogs import sio_rec as rec  # noqa: E402
-from cogs import sio_saito as saito  # noqa: E402
+from core.vc.globalvc import entry as gvc  # noqa: E402
+from core.vc.rec import entry as rec  # noqa: E402
+from core.vc import saito  # noqa: E402
 
 BOT_ID = 1
 
@@ -549,7 +549,7 @@ class CogTest(unittest.IsolatedAsyncioTestCase):
 
 class MusicTest(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
-        from cogs import sio_music
+        from core.vc.music import entry as sio_music
         self.bot, self.manager = make_bot()
         self.bot.db_api = None
         self.w = make_world()
@@ -622,7 +622,7 @@ class MusicTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn('/vc のパネルからVC退出 で退出したため録音を停止しました', self.w.text.text())
 
     async def test_join_hints_point_to_slash_join(self):
-        source = (ROOT / 'cogs' / 'sio_music.py').read_text(encoding='utf-8')
+        source = (ROOT / 'core' / 'vc' / 'music' / 'entry.py').read_text(encoding='utf-8')
         self.assertNotIn('!join', source)
 
 
