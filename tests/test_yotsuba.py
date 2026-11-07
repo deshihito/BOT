@@ -2,7 +2,7 @@
 import random
 import unittest
 
-from core.game.yotsuba import WORDS, YotsubaGame, placed_words
+from core.game.yotsuba.yotsuba import WORDS, YotsubaGame, placed_words
 
 BOARDS = {1: ("あ", "い", "う", "え"), 2: ("か", "き", "く", "け"), 3: ("さ", "し", "す", "せ")}
 DUMMY = ("た", "ち", "つ", "て")
