@@ -4,6 +4,7 @@ import {
   SESSION_COOKIE,
   createSession,
   isDiscordConfigured,
+  publicOrigin,
   readCookie,
   sessionCookieOptions,
   stateCookieOptions,
@@ -20,14 +21,14 @@ export async function GET(request: Request) {
   const error = url.searchParams.get("error");
 
   if (error || !code || !state || !expectedState || state !== expectedState) {
-    return NextResponse.redirect(new URL("/login?error=discord_denied", request.url));
+    return NextResponse.redirect(new URL("/login?error=discord_denied", publicOrigin(request)));
   }
 
   const clientId = process.env.DISCORD_CLIENT_ID;
   const clientSecret = process.env.DISCORD_CLIENT_SECRET;
   const redirectUri = process.env.DISCORD_REDIRECT_URI;
   if (!clientId || !clientSecret || !redirectUri || !isDiscordConfigured()) {
-    return NextResponse.redirect(new URL("/login?error=discord_not_configured", request.url));
+    return NextResponse.redirect(new URL("/login?error=discord_not_configured", publicOrigin(request)));
   }
 
   try {
@@ -59,7 +60,7 @@ export async function GET(request: Request) {
     // ダッシュボード用にサーバー側セッションレコードを作る（失敗しても通常ログインは成立させる）
     const sid = await createWebSession(sessionUser, token.access_token);
 
-    const response = NextResponse.redirect(new URL("/dashboard", request.url));
+    const response = NextResponse.redirect(new URL("/dashboard", publicOrigin(request)));
     response.cookies.set(
       SESSION_COOKIE,
       createSession(sessionUser, sid ?? undefined),
@@ -68,6 +69,6 @@ export async function GET(request: Request) {
     response.cookies.set(OAUTH_STATE_COOKIE, "", stateCookieOptions(request, 0));
     return response;
   } catch {
-    return NextResponse.redirect(new URL("/login?error=discord_callback_failed", request.url));
+    return NextResponse.redirect(new URL("/login?error=discord_callback_failed", publicOrigin(request)));
   }
 }

@@ -403,7 +403,7 @@ class WelcomeTest(Base):
                                       "welcome:language"})
         # 権限が揃っているサーバーでは状態行を出さない。
         self.assertNotIn("不足している権限があります", joined)
-        self.assertIn("https://bot-deshihito.vercel.app/dashboard/77", urls)
+        self.assertIn("https://agobot.app/dashboard/77", urls)
         self.assertIn("https://discord.gg/dCAQzJUaa9", urls)
         # 保存: onboarding に記録し、言語変更の検証対象を新メッセージへ移す。locale は書かない。
         onboarding = self.reload("onboarding")

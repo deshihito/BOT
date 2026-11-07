@@ -105,7 +105,7 @@ WELCOME_VERSION = 2
 #: 同一参加イベントの二重発火・再送ループを防ぐガード幅。
 WELCOME_RESEND_GUARD = timedelta(minutes=10)
 
-SITE_URL = "https://bot-deshihito.vercel.app"
+SITE_URL = "https://agobot.app"
 SUPPORT_SERVER_URL = "https://discord.gg/dCAQzJUaa9"
 
 #: welcome:* ボタンのうち、ルートパネルを開くもの（ボタン名 -> (root, 案内用コマンド名)）。

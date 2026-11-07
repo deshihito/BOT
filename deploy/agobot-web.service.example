@@ -1,0 +1,22 @@
+[Unit]
+Description=AGOBOT Web (Next.js standalone)
+After=network.target
+
+[Service]
+Type=simple
+User=luna
+Group=luna
+WorkingDirectory=/srv/supabase-data/agobot-web/current
+EnvironmentFile=/etc/agobot-web.env
+Environment=PORT=3000
+Environment=HOSTNAME=127.0.0.1
+ExecStart=/usr/bin/node server.js
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=/srv/supabase-data/agobot-web
+
+[Install]
+WantedBy=multi-user.target
