@@ -44,7 +44,7 @@ def settings(guild_id: int) -> dict[str, Any]:
 
 
 def sanitize_username(name: str | None) -> str | None:
-    """Webhook の表示名に使えない文字列を避ける (cogs/auth.py と同じ方針)。"""
+    """Webhook の表示名に使えない文字列を避ける (auth 機能と同じ方針)。"""
     text = (name or "").strip()
     if not text:
         return None
