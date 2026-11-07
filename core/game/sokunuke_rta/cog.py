@@ -80,10 +80,13 @@ class SokuNukeRta(commands.Cog):
     async def on_member_join(self, member: discord.Member):
         if member.bot:
             return
-        settings = await self._get_settings(member.guild.id)
-        joins = dict(settings.get("joins") or {})
-        joins[str(member.id)] = discord.utils.utcnow().isoformat()
-        await self._save(member.guild.id, joins=joins)
+        # joins は「読み取り→丸ごと書き戻し」のため、退出側と同じギルドロックを
+        # 取らないと、同時参加した別メンバーの記録を古い写しで上書きして落とす。
+        async with self._lock(member.guild.id):
+            settings = await self._get_settings(member.guild.id)
+            joins = dict(settings.get("joins") or {})
+            joins[str(member.id)] = discord.utils.utcnow().isoformat()
+            await self._save(member.guild.id, joins=joins)
 
     @commands.Cog.listener()
     async def on_member_remove(self, member: discord.Member):

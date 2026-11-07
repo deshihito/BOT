@@ -74,6 +74,7 @@ class KVStore:
         self.max_retry_delay = max_retry_delay
         self._remote_disabled = False   # テーブルが無いときは、再起動まで 自前API を使わない
         self._warned = False
+        self._remote_down = False       # 直近の 自前API 操作が失敗しているか（失敗/復旧の遷移をログに残す）
         # key -> {"value": ...} または {"deleted": True}。まだ 自前API に届いていない最新の変更。
         self._pending: dict[str, dict[str, Any]] = self._load_pending()
         self._locks: dict[str, asyncio.Lock] = {}
@@ -95,16 +96,25 @@ class KVStore:
     def _remote_failed(self, action: str, error: Exception) -> None:
         if is_missing_table(error):
             self._remote_disabled = True
-        if not self._warned:
+        if not self._remote_down:
+            # 失敗の始まりは必ず WARNING で残す。asyncio.TimeoutError のように
+            # str() が空の例外でも原因が追えるよう、repr で記録する。
+            self._remote_down = True
             self._warned = True
             logger.warning(
-                "自前API の %s を %s できませんでした。ローカルのファイル（%s）を使います%s: %s",
+                "自前API の %s を %s できませんでした。ローカルのファイル（%s）を使います%s: %r",
                 TABLE, action, self.path,
                 "（テーブルがありません。docs/sql/bot_kv.sql を実行してください）" if self._remote_disabled else "",
                 error,
             )
         else:
-            logger.debug("自前API の %s を %s できませんでした: %s", TABLE, action, error)
+            logger.debug("自前API の %s を %s できませんでした: %r", TABLE, action, error)
+
+    def _remote_recovered(self, action: str) -> None:
+        """自前API 操作が成功したときに呼ぶ。失敗状態からの復旧を 1 回だけ記録する。"""
+        if self._remote_down:
+            self._remote_down = False
+            logger.info("自前API の %s への接続が復旧しました（%s）", TABLE, action)
 
     async def _wait_for_thread(self, future: asyncio.Future) -> bool:
         """to_thread の処理が終わるまで待つ。待っている間にキャンセルされたら True。
@@ -198,7 +208,12 @@ class KVStore:
                     return False
                 if self._pending.get(key) is pending:
                     self._pending.pop(key, None)
+                    # ジャーナルの後片付けはタスク内で同期的に行う。スレッドへ
+                    # 逃がすと、呼び出し側の終了処理（ループ停止中）でも書き込みが
+                    # 進んでしまい、ファイルの所有側と競合する。ここは 1 回分の
+                    # 書き込みで、ループを長時間塞ぐ一括処理にはならない。
                     self._persist_pending()
+                    self._remote_recovered("削除" if deleted else "保存")
                     return True
 
     async def _write_in_background(self, key: str) -> None:
@@ -320,13 +335,35 @@ class KVStore:
                 data.pop(PENDING_SECTION, None)
             self._write_file(data)
 
-    def _record_pending(self, key: str, item: dict[str, Any]) -> None:
+    def _record_pending(self, key: str, item: dict[str, Any]) -> bool:
+        """未送信ジャーナルに記録する（メモリ上のみ）。永続化は呼び出し側が
+        ``_persist_pending_async`` で行う。記録したら True。"""
         # リモートが設定されていないときは、送る先が無いのでジャーナルを作らない。
         # ただし前回の未送信が残っているなら、その最新値として更新する。
         if self.client is None and not self._pending:
-            return
+            return False
         self._pending[key] = item
-        self._persist_pending()
+        return True
+
+    async def _persist_pending_async(self) -> None:
+        """ファイル書き込みをイベントループ外（別スレッド）で行う。
+
+        bot_kv.json は全 namespace の合本で、ギルド数に比例して大きくなる。
+        ループ上で同期書き込みすると guild_registry.sync_all のような一括処理で
+        ハートビートが止まる（本番で 10 秒超のブロックを確認済み）ため、
+        非同期経路からは必ずこちらを使う。
+        """
+        await asyncio.to_thread(self._persist_pending)
+
+    async def _update_local_async(self, change: Callable[[dict], None]) -> None:
+        await asyncio.to_thread(self._update_local, change)
+
+    def _write_local_state(self, change: Callable[[dict], None], *, persist: bool) -> None:
+        """ジャーナルの永続化とローカル写しの更新を 1 回のファイル処理にまとめる
+        （別スレッドから呼ぶ）。"""
+        if persist:
+            self._persist_pending()
+        self._update_local(change)
 
     def _bump(self, key: str) -> None:
         self._local_versions[key] = self._local_versions.get(key, 0) + 1
@@ -363,7 +400,7 @@ class KVStore:
                         else:
                             merged[key] = item.get("value")
                 # 読んでいる間に保存されたキーは、いまのローカルの値が最新。
-                local_now = self.load_local()
+                local_now = await asyncio.to_thread(self.load_local)
                 for key, version in self._local_versions.items():
                     if versions.get(key, 0) == version:
                         continue
@@ -371,19 +408,27 @@ class KVStore:
                         merged[key] = local_now[key]
                     else:
                         merged.pop(key, None)
-                self._update_local(lambda section: (section.clear(), section.update(merged)))
+                # ローカルの写しと同一なら書き直さない（読み直しのたびに
+                # ファイルを触ると、呼び出し側の後片付けや他処理と競合する）。
+                if merged != local_now:
+                    await self._update_local_async(lambda section: (section.clear(), section.update(merged)))
+                self._remote_recovered("読み込み")
                 if self._pending:
                     self._schedule_retry()
                 return merged
         if self._pending:
             self._schedule_retry()
-        return self.load_local()
+        return await asyncio.to_thread(self.load_local)
 
     async def set(self, key: str, value: Any, *, wait: bool = True) -> None:
         key = str(key)
         self._bump(key)
-        self._record_pending(key, {"value": value})
-        self._update_local(lambda section: section.__setitem__(key, value))
+        recorded = self._record_pending(key, {"value": value})
+        await asyncio.to_thread(
+            self._write_local_state,
+            lambda section: section.__setitem__(key, value),
+            persist=recorded,
+        )
         if not self.remote_enabled:
             return
         if wait:
@@ -395,8 +440,12 @@ class KVStore:
     async def delete(self, key: str, *, wait: bool = True) -> None:
         key = str(key)
         self._bump(key)
-        self._record_pending(key, {"deleted": True})
-        self._update_local(lambda section: section.pop(key, None))
+        recorded = self._record_pending(key, {"deleted": True})
+        await asyncio.to_thread(
+            self._write_local_state,
+            lambda section: section.pop(key, None),
+            persist=recorded,
+        )
         if not self.remote_enabled:
             return
         if wait:

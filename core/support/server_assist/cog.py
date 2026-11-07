@@ -245,6 +245,15 @@ class ServerAssistCog(commands.Cog):
         return await module.handle_refresh(self, interaction)
 
     async def _dispatch(self, hook: str, *args: Any):
+        # イベント駆動の機能（参加・退出メッセージ等）はここを通る。設定の
+        # メモリ写しは ensure_loaded を呼ぶ経路（パネル操作等）でしか更新されない
+        # ため、起動直後の読み込みが API 障害でローカルの控えに落ちた場合、
+        # 誰かがパネルを開くまで古い（空の）設定のまま静かに動かなくなる。
+        # dispatch の入口で読み直しを試みる（鮮度内なら時刻チェックだけで戻る）。
+        try:
+            await guild_settings.get_store().ensure_loaded()
+        except Exception:
+            logger.exception("サーバーアシスト設定の読み直しに失敗しました")
         for key, module in self.modules.items():
             callback = getattr(module, hook, None)
             if callback is None:
