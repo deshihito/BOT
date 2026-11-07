@@ -1,10 +1,9 @@
 import discord
-from core.game import game_panels, game_restore
-from core.game.game_v2 import GamePanelView, LobbyView, text_panel
+from core.game.game import game_panels, game_restore
+from core.game.game.game_v2 import GamePanelView, LobbyView, text_panel
 from discord.ext import commands
 
-from core.game import autoplay, party_ranking
-
+from core.game.game import autoplay, party_ranking
 party_ranking.register("uno")
 import random
 import asyncio
@@ -723,7 +722,7 @@ class Uno(commands.Cog):
         self._save_snapshot(game, channel)
 
     # ------------------------------------------------------------------
-    # 再起動復旧（core/game/game_restore.py）
+    # 再起動復旧（core/game/game/game_restore.py）
     # ------------------------------------------------------------------
     def _save_snapshot(self, game: UnoGame, channel=None, awaiting_color=None) -> None:
         if not game.is_started:
@@ -822,7 +821,7 @@ class Uno(commands.Cog):
 
     async def finish_game(self, channel_id: int, winner_id: int):
         channel = self.bot.get_channel(channel_id)
-        # サーバーごとのランキング（core/game/party_ranking.py）: 手札を出し切った 1 人が勝ち
+        # サーバーごとのランキング（core/game/game/party_ranking.py）: 手札を出し切った 1 人が勝ち
         guild = getattr(channel, "guild", None)
         if channel_id in self.games and guild is not None:
             await party_ranking.shared().record_win(guild.id, winner_id, "uno")
