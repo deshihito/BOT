@@ -3,7 +3,7 @@
 
 ゲームを選ぶと、人数の目安・所要時間と「ルール」「募集する」ボタンが出る。
 募集は各ゲームの cog の ``start_recruit(interaction)`` をそのまま呼ぶので、個別のコマンド
-（!doubt）と同じ流れになる。案内文は core/game/game_guides.py。
+（!doubt）と同じ流れになる。案内文は core/game/game/game_guides.py。
 """
 import asyncio
 import logging
@@ -13,11 +13,11 @@ from discord import app_commands
 from discord.ext import commands
 
 from core.general import action_usage
-from core.game import party_ranking
-from core.game import elo
+from core.game.game import party_ranking
+from core.game.game import elo
 from core.support import usage_stats
 from core.support.emojis import BACK
-from core.game.game_guides import (
+from core.game.game.game_guides import (
     GAME_GUIDES,
     GAME_ORDER,
     PREVIEW_LABEL,
