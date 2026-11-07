@@ -4,9 +4,7 @@ import unittest
 
 from game_fakes import FakeBot, FakeChannel, FakeGuild, FakeMember
 from cogs import uno
-from core.game import party_ranking
-
-
+from core.game.game import party_ranking
 class UnoRankingTest(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.saved = party_ranking._shared

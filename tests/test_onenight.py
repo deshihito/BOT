@@ -1,9 +1,9 @@
-"""ワンナイト人狼（core/game/onenight.py）のテスト。"""
+"""ワンナイト人狼（core/game/onenight/onenight.py）のテスト。"""
 
 import random
 import unittest
 
-from core.game.onenight import ROBBER, SEER, VILLAGER, WOLF, OneNightSession, build_deck
+from core.game.onenight.onenight import ROBBER, SEER, VILLAGER, WOLF, OneNightSession, build_deck
 
 
 def session_with(roles, center=(VILLAGER, VILLAGER)):

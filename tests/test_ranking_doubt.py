@@ -5,9 +5,7 @@ import unittest
 
 from game_fakes import FakeChannel, FakeGuild
 from cogs import doubt
-from core.game import party_ranking
-
-
+from core.game.game import party_ranking
 class DoubtRankingTest(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.saved = party_ranking._shared

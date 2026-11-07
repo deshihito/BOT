@@ -200,7 +200,7 @@ class DoubtPanelDeleteLoggingTests(unittest.IsolatedAsyncioTestCase):
         doubt_module.game_panels._active[(99, "party")] = old_msg
         try:
             with patch.object(doubt_module, "GameControlView", MagicMock()):
-                with self.assertLogs("core.game.game_panels", level="DEBUG") as logs:
+                with self.assertLogs("core.game.game.game_panels", level="DEBUG") as logs:
                     await cog.send_main_screen(channel, game)
         finally:
             doubt_module.game_panels._active.pop((99, "party"), None)

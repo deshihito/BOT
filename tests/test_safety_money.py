@@ -26,7 +26,7 @@ import discord  # noqa: E402
 
 from core.general import daily_bonus as daily_core  # noqa: E402
 from core.general import starter as starter_core  # noqa: E402
-from core.game import prison as prison_core  # noqa: E402
+from core.game.game import prison as prison_core  # noqa: E402
 from core.general import items as items_core  # noqa: E402
 from core.general import market as market_core  # noqa: E402
 from cogs import wallet as wallet_module  # noqa: E402

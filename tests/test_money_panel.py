@@ -23,7 +23,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from core.general import action_registry
 from core.general import steal, workshop
-from core.game import gambling, lottery, mining
+from core.game import lottery, mining
+from core.game.gambling import gambling
 from core.general import economy_pool, items, market
 from cogs import wallet as wallet_module
 from cogs.circulation import CirculationCog

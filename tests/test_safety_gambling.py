@@ -24,7 +24,7 @@ from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from core.game import gambling
+from core.game.gambling import gambling
 from core.general import economy_pool as economy_core
 from core.general.items import ItemError
 from cogs import wallet as wallet_module
@@ -302,7 +302,7 @@ class StartRefundCheckTest(unittest.TestCase):
                 wallet = _RefundFailWallet({"1": 100_000})
                 cog, store = _cog(tmp, wallet)
                 setattr(store, store_name, _raise_item_error)
-                with self.assertLogs("core.game.gambling_cog.cog",
+                with self.assertLogs("core.game.gambling.cog",
                                      level="CRITICAL"):
                     message = asyncio.run(
                         getattr(cog, execute_name)(1, *args))

@@ -387,8 +387,7 @@ class PokerPrisonTest(unittest.IsolatedAsyncioTestCase):
         return cog, wallet, table, user
 
     async def test_buy_in_and_cash_out_blocked_while_imprisoned(self):
-        from core.game import prison as prison_core
-
+        from core.game.game import prison as prison_core
         with tempfile.TemporaryDirectory() as tmp:
             cog, wallet, table, user = self._make(tmp)
             with patch.object(prison_core, "block_message", _block_only(1)):
@@ -415,7 +414,7 @@ class JankenPrisonTest(unittest.IsolatedAsyncioTestCase):
     async def test_start_recruit_with_wager_blocked(self):
         from game_fakes import FakeChannel, FakeGuild, FakeInteraction, FakeMember
 
-        from core.game import prison as prison_core
+        from core.game.game import prison as prison_core
         from cogs import janken as j
 
         guild = FakeGuild(77)
@@ -431,7 +430,7 @@ class JankenPrisonTest(unittest.IsolatedAsyncioTestCase):
     async def test_join_with_wager_blocked(self):
         from game_fakes import FakeChannel, FakeGuild, FakeInteraction, FakeMember
 
-        from core.game import prison as prison_core
+        from core.game.game import prison as prison_core
         from cogs import janken as j
 
         guild = FakeGuild(77)
@@ -451,7 +450,7 @@ class JankenPrisonTest(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn(2, game.players)
 
     async def test_collect_wagers_precheck_blocks_all_debits(self):
-        from core.game import prison as prison_core
+        from core.game.game import prison as prison_core
         from cogs import janken as j
 
         wallet = types.SimpleNamespace(
@@ -529,8 +528,7 @@ class SystemRandomTest(unittest.TestCase):
 
     def test_gacha_default_rng_is_system_random_but_injection_kept(self):
         from cogs.gacha import GachaCog
-        from core.game import gacha as gacha_core
-
+        from core.game.gacha import gacha as gacha_core
         with tempfile.TemporaryDirectory() as tmp:
             store = gacha_core.GachaStore(Path(tmp) / "gacha.json")
             bot = types.SimpleNamespace(get_cog=lambda name: None)
@@ -600,7 +598,7 @@ class RefundFailureTest(unittest.TestCase):
             self.assertIn("運営に連絡", message)
 
     def test_clan_create_refund_failure_is_reported(self):
-        from core.game import clan as clan_core
+        from core.game.clan import clan as clan_core
         from cogs.clan import ClanCog
 
         with tempfile.TemporaryDirectory() as tmp:
@@ -625,8 +623,7 @@ class GachaCreditFailureTest(unittest.TestCase):
         from tests.test_gacha import _Bot
 
         from cogs.gacha import GachaCog
-        from core.game import gacha as gacha_core
-
+        from core.game.gacha import gacha as gacha_core
         return GachaCog(
             _Bot(wallet),
             store=gacha_core.GachaStore(Path(tmp) / "gacha.json"),
@@ -674,7 +671,7 @@ class GachaCreditFailureTest(unittest.TestCase):
 # ---------------------------------------------------------------------------
 class PanelCooldownTest(unittest.IsolatedAsyncioTestCase):
     def test_pure_cooldown_helper(self):
-        from core.game.game_v2 import InteractionCooldown
+        from core.game.game.game_v2 import InteractionCooldown
 
         cooldown = InteractionCooldown(window=1.0)
         self.assertTrue(cooldown.check(1, now=100.0))
@@ -684,7 +681,7 @@ class PanelCooldownTest(unittest.IsolatedAsyncioTestCase):
         self.assertAlmostEqual(cooldown.remaining(1, now=101.5), 0.5)
 
     async def test_game_panel_view_enforces_cooldown(self):
-        from core.game.game_v2 import GamePanelView
+        from core.game.game.game_v2 import GamePanelView
 
         panel = GamePanelView("t", "b")
 
@@ -698,7 +695,7 @@ class PanelCooldownTest(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(await panel.interaction_check(interaction(2)))
 
     async def test_board_entry_panel_chains_super_check(self):
-        from core.game.minesweeper_cog.cog import DifficultyPanel
+        from core.game.minesweeper.cog import DifficultyPanel
 
         owner = types.SimpleNamespace(id=1)
         panel = DifficultyPanel(None, owner)
