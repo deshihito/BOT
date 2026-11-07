@@ -1,438 +1,347 @@
 # -*- coding: utf-8 -*-
-"""サポート系機能を /support に統合する入口。
+"""サポート系の集約入口（cogs/ 6ファイル化）。
 
-実装は core/support/ パッケージに機能ごとに分割されている。
-このモジュールは、それらを合成した SupportCog と、従来どおり
-`cogs.support` から import できる名前の再エクスポートを担う。
+このファイルは「目次＋登録表」に徹し、実装はすべて core/support/ 配下にある。
+旧入口ファイル（cogs/auth.py など19本）はこのファイルに統合された。
+
+対応表（機能 → 実装モジュール → Cog）:
+    support本体    core/support/entry.py                        SupportCog
+    allstats       core/support/allstats/cog.py                 SystemStatsCog
+    auth           core/support/auth/cog.py                     VerificationCog
+    clear          core/support/clear/cog.py                    ClearCog
+    daily_report   core/support/daily_report/cog.py             DailyReportCog
+    errorhandler   core/support/errorhandler/cog.py             ErrorHandler
+    globalchat     core/support/globalchat/cog.py               GlobalChatCog
+    localization   core/support/localization/cog.py             LocalizationCog
+    log_viewer     core/support/log_viewer/cog.py               LogViewer
+    muted          core/support/muted/cog.py                    Muted
+    ngword         core/support/ngword/cog.py                   NGWord
+    panel_recovery core/support/panel_recovery/cog.py           PanelRecoveryCog
+    server_assist  core/support/server_assist/cog.py            ServerAssistCog
+    server_setup   core/support/server_setup/cog.py             ServerSetup
+    stat           core/support/stat/cog.py                     SystemInfoCog
+    status_updater core/support/status_updater/cog.py           StatusUpdater
+    terminal       core/support/terminal/cog.py                 TerminalCog
+    ticket         core/support/ticket/cog.py                   TicketCog
+    usage_stats    core/support/usage_stats/cog.py              UsageStatsCog
+
+互換メモ:
+- 旧 cogs.support / 旧各入口から import できた名前は、このファイルから
+  再エクスポートする（テストのパッチ先・他モジュールからの参照を維持）。
+- RECOVERY_WAIT_SECONDS はこのファイルで定義する。実装
+  （core/support/panel_recovery/cog.py）は実行時にここから読み直す。
+- ALLOWED_USER_IDS は terminal のものを代表として再エクスポートする
+  （log_viewer にも同値の別リストがあるが、そちらは実装モジュール側に残る）。
+- 並び順の制約: core/support/common.py など実装モジュールの一部は
+  モジュール読み込み時に `from cogs.support import ...` で定数を引くため、
+  それらの名前（auth / clear / terminal 由来）は SupportCog 本体
+  （core/support/entry.py）を取り込む前にここで確定させる。
 """
 from __future__ import annotations
 
+import importlib
 import logging
 
-import discord
-from discord import app_commands
 from discord.ext import commands
 
-from core.support import guild_settings
-from core.general import action_usage
-from core.support.usage_stats import usage_stats
-from core.support.panel_v2 import as_embed_v2, as_panel_v2, edit_panel_v2
-from core.support.common import *
-from core.support.auth_panel import *
-from core.support.roles import *
-from core.support.logs import *
-from core.support.sticky import *
-from core.support.honeypot import *
-from core.support.binjou import *
-from core.support.panel import *
-from core.support.autoreact import *
-from core.support.voice_trigger import *
-from core.support.sns import *
-from core.support.quest import *
-from core.support.levelup import *
-from core.support.auth_panel import AuthSupportMixin
-from core.support.roles import RoleSupportMixin
-from core.support.logs import LogSupportMixin
-from core.support.sticky import StickySupportMixin
-from core.support.honeypot import HoneypotSupportMixin
-from core.support.binjou import BinjouSupportMixin
-from core.support.sns import SnsSupportMixin
-from core.support.quest import QuestSupportMixin
-from core.support.levelup import LevelUpSupportMixin
-from core.support.vc_auto_start import *  # noqa: F401,F403
-from core.support.vc_auto_start import VcAutoStartSupportMixin
-from core.support.globalchat.globalchat_panel import GlobalChatSupportMixin
-from core.support.bot_fixer import BotFixerSupportMixin
+logger = logging.getLogger("cogs.support")
 
-# 分割前の cogs.support が持っていた内部ヘルパーも互換のため再エクスポートする
-import html as _html
+# =====================================================================
+# 基盤の名前（循環回避のため最初に確定させる）
+# =====================================================================
+from core.support import guild_settings  # noqa: F401  (patch("cogs.support.guild_settings.get_store") の解決先)
+from core.support.guild_settings import get_store  # noqa: F401  (旧 auth/localization/server_setup 入口が再エクスポートしていた共通関数)
 
-from core.support.common import _SUPPORT_ACTION_BY_VALUE, _support_actions, _support_int
-from core.support.quest import (
-    _ORBS_RE,
-    _QUEST_LANG_RE,
-    _quest_country,
-    _quest_feed_url,
-    _quest_from_discord,
-    _quest_http_url,
-)
-from core.support.sns import (
-    _GH_OWNER_RE,
-    _GH_REPO_RE,
-    _SNS_NS,
-    _X_USER_RE,
-    _YT_ID_RE,
-    _sns_env_int,
-    _sns_github_token,
-    _sns_text,
-    _sns_x_rss_template,
-    _sns_x_token,
+# auth — 実装: core/support/auth/cog.py
+from core.support.auth.cog import (  # noqa: F401
+    SUCCESS,
+    FAILED,
+    INTRO_CHANNEL_ID,
+    WEBHOOK_NAME,
+    PANEL_SETTINGS_ID,
+    auth_settings,
+    sanitize_webhook_name,
+    get_intro_webhook,
+    role_failure_reason,
+    QuestionModal,
+    VerifyView,
+    VerificationCog,
+    sync_category_perms,
 )
 
-logger = logging.getLogger(__name__)
-
-
-async def edit_auth_panel_message(interaction: discord.Interaction, panel):
-    """Modal後などでも設定パネルを再描画するための補助。"""
-    try:
-        await interaction.response.edit_message(
-            content=None,
-            embed=None,
-            attachments=[],
-            view=as_panel_v2(panel),
-        )
-    except discord.HTTPException:
-        logger.debug("認証パネルの編集に失敗しました（再送信で代替します）", exc_info=True)
-        if interaction.response.is_done():
-            await interaction.followup.send(view=as_panel_v2(panel), ephemeral=True)
-        else:
-            await interaction.response.send_message(view=as_panel_v2(panel), ephemeral=True)
-
-
-class SupportCog(
-    SnsSupportMixin,
-    QuestSupportMixin,
-    LevelUpSupportMixin,
-    AuthSupportMixin,
-    RoleSupportMixin,
-    LogSupportMixin,
-    StickySupportMixin,
-    HoneypotSupportMixin,
-    BinjouSupportMixin,
-    VcAutoStartSupportMixin,
-    GlobalChatSupportMixin,
-    BotFixerSupportMixin,
-    commands.Cog,
-):
-    SUPPORT_REQUIRED_PERMISSIONS = {
-        "muted": "manage_roles",
-        "whisper": "manage_channels",
-        "sticky": "manage_guild",
-        "clear": "manage_messages",
-        "role_bulk": "manage_roles",
-        "binjou": "manage_guild",
-        "auto_react": "manage_guild",
-        "giveaway": "manage_guild",
-        "vc_log": "manage_guild",
-        "message_log": "manage_guild",
-        "moderation_log": "manage_guild",
-        "honeypot": "manage_guild",
-        "ticket": "manage_guild",
-        "auth_panel": "administrator",
-        "role_panel": "administrator",
-        "language": "manage_guild",
-        "sns_notify": "administrator",
-        "quest_notify": "administrator",
-        "levelup_notify": "manage_guild",
-        "vc_auto_start": "manage_guild",
-        "bot_fixer": "manage_guild",
-        "globalchat": "manage_guild",
-        "server_assist": "manage_guild",
-        "sokunuke_status": "manage_guild",
-        "sokunuke_on": "manage_guild",
-        "sokunuke_off": "manage_guild",
-        "sokunuke_vc_on": "manage_guild",
-        "sokunuke_vc_off": "manage_guild",
-    }
-
-    def __init__(self, bot: commands.Bot):
-        self.bot = bot
-        self._sticky_locks: dict[int, asyncio.Lock] = {}
-        self._panel_pending: set[int] = set()
-        self._sns_locks: dict[int, asyncio.Lock] = {}
-        self._http: aiohttp.ClientSession | None = None
-        self._sns: SnsFetcher | None = None
-        self._quest_locks: dict[int, asyncio.Lock] = {}
-        self._quest: QuestFetcher | None = None
-
-
-    @staticmethod
-    def has_support_permission(interaction: discord.Interaction, permission: str) -> bool:
-        permissions = getattr(interaction.user, "guild_permissions", None)
-        return bool(
-            getattr(permissions, "administrator", False)
-            or getattr(permissions, permission, False)
-        )
-
-
-    async def check_support_permission(self, interaction: discord.Interaction, selected: str) -> bool:
-        permission = self.SUPPORT_REQUIRED_PERMISSIONS.get(selected)
-
-        if permission is None or self.has_support_permission(interaction, permission):
-            return True
-
-        labels = {
-            "manage_guild": "サーバーの管理",
-            "manage_roles": "ロールの管理",
-            "manage_channels": "チャンネルの管理",
-            "manage_messages": "メッセージの管理",
-            "administrator": "管理者",
-        }
-
-        await interaction.response.send_message(
-            f"この機能を使うには「{labels.get(permission, permission)}」権限が必要です。",
-            ephemeral=True,
-        )
-        return False
-
-
-    async def cog_load(self):
-        self._http = aiohttp.ClientSession(
-            timeout=aiohttp.ClientTimeout(total=20),
-            headers={"User-Agent": SNS_USER_AGENT},
-        )
-        self._sns = SnsFetcher(self._http)
-        self.sns_poll.start()
-        self._quest = QuestFetcher(self._http)
-        self.quest_poll.start()
-
-
-    async def cog_unload(self):
-        self.sns_poll.cancel()
-        self.quest_poll.cancel()
-        if self._http is not None and not self._http.closed:
-            await self._http.close()
-
-
-    @commands.Cog.listener()
-    async def on_interaction(self, interaction: discord.Interaction):
-        if interaction.type != discord.InteractionType.component:
-            return
-
-        custom_id = interaction.data.get("custom_id", "")
-
-        if custom_id == "auth_panel:start":
-            await self.handle_auth_start(interaction)
-            return
-
-        if custom_id == "role_panel:assign":
-            values = interaction.data.get("values") or []
-            if not values:
-                return
-
-            try:
-                role_id = int(values[0])
-            except (TypeError, ValueError):
-                return
-
-            await self.handle_role_panel_assign(interaction, role_id)
-
-
-    @commands.Cog.listener()
-    async def on_message(self, message: discord.Message):
-        if message.guild is None or getattr(message.author, "bot", False):
-            return
-
-        if await self._handle_honeypot_message(message):
-            return
-
-        store = guild_settings.get_store()
-        await store.ensure_loaded()
-        auto_react = store.get(message.guild.id, AUTO_REACT_SECTION).get("channels", {})
-        emojis = auto_react.get(str(message.channel.id), []) if isinstance(auto_react, dict) else []
-        for emoji_value in emojis if isinstance(emojis, list) else []:
-            try:
-                await message.add_reaction(normalize_binjou_emoji(emoji_value))
-            except (ValueError, discord.Forbidden, discord.HTTPException):
-                logger.warning(
-                    "Auto reactを追加できません (guild=%s channel=%s emoji=%s)",
-                    message.guild.id,
-                    message.channel.id,
-                    emoji_value,
-                )
-        settings = get_sticky_settings(store, message.guild.id)
-
-        if settings["enabled"] and settings["channel_id"] == message.channel.id:
-            await self.send_sticky_panel(message.guild)
-
-
-    @app_commands.command(name="support", description="サポート機能の操作パネルを表示します")
-    @app_commands.guild_only()
-    async def support(self, interaction: discord.Interaction):
-        store = guild_settings.get_store()
-        await store.ensure_loaded()
-        history_specs = action_usage.history_panel_specs(
-            store, interaction.guild_id, interaction.user.id, "support")
-        view = SupportPanelView(self, history_specs=history_specs,
-                                owner_id=interaction.user.id)
-        # 他ルートと揃えて公開で出す（導線最適化ラウンド2）。操作は
-        # SupportPanelView.interaction_check で呼び出し本人に制限する。
-        await interaction.response.send_message(
-            view=as_panel_v2(view),
-        )
-
-
-    async def dispatch(self, interaction: discord.Interaction, selected: str):
-        if not await self.check_support_permission(interaction, selected):
-            return
-
-        # BOT fixer のコマンド制限（support:bot_fixer 自身と管理者は対象外）。
-        from core.support import command_control
-
-        if not await command_control.guard(interaction, f"support:{selected}"):
-            return
-
-        # 利用履歴（よく使う／最近）は権限チェックを通った実行だけを記録する。
-        # 保存の書き込みで応答を遅らせないようバックグラウンド記録を使う。
-        action_usage.record_safely_in_background(
-            getattr(interaction, "guild_id", None),
-            getattr(getattr(interaction, "user", None), "id", None),
-            f"support:{selected}",
-        )
-        # 管理者向け総量統計も同じ入口で数える（個人履歴とは別集計）。
-        usage_stats.record_action_safely(f"support:{selected}")
-
-        if selected.startswith("assist_"):
-            # 導線最適化 M2: /quick・ショートカットから個別機能を直接開く。
-            cog = self.bot.get_cog("ServerAssistCog")
-            if cog is None:
-                return await self._missing(interaction, "サーバーアシスト")
-            return await cog.show_feature(interaction, selected.removeprefix("assist_"))
-
-        if selected == "server_assist":
-            cog = self.bot.get_cog("ServerAssistCog")
-            if cog is None:
-                return await self._missing(interaction, "サーバーアシスト")
-            return await cog.show_home(interaction)
-
-        if selected == "auth_panel":
-            return await self.show_auth_settings(interaction)
-
-        if selected == "role_panel":
-            return await self.show_role_panel_settings(interaction)
-        if selected == "language":
-            cog = self.bot.get_cog("LocalizationCog")
-            if cog is None:
-                return await self._missing(interaction, "言語設定")
-            return await cog.show_language_settings(interaction)
-
-        if selected == "sns_notify":
-            return await self.show_sns_notify_settings(interaction)
-
-        if selected == "quest_notify":
-            return await self.show_quest_notify_settings(interaction)
-
-        if selected == "levelup_notify":
-            return await self.show_levelup_notify_settings(interaction)
-
-        if selected == "vc_auto_start":
-            return await self.show_vc_auto_start_settings(interaction)
-
-        if selected == "bot_fixer":
-            return await self.show_bot_fixer_settings(interaction)
-
-        if selected == "globalchat":
-            return await self.show_globalchat_settings(interaction)
-
-        if selected == "sticky":
-            return await self.show_sticky_settings(interaction)
-
-        if selected == "honeypot":
-            return await self.show_honeypot_settings(interaction)
-
-        if selected == "ticket":
-            cog = self.bot.get_cog("TicketCog")
-            if cog is None:
-                return await self._missing(interaction, "チケット")
-            return await cog.show_settings(interaction)
-
-        if selected == "giveaway":
-            return await interaction.response.send_modal(GiveawayModal(self))
-
-        if selected == "vc_log":
-            return await self.show_vc_log_settings(interaction)
-
-        if selected == "message_log":
-            return await self.show_activity_log_settings(
-                interaction,
-                MESSAGE_LOG_SECTION,
-                "メッセージ編集履歴の設定",
-                "オンにすると、ユーザーのメッセージ編集前後をEmbedで記録します。",
-            )
-
-        if selected == "moderation_log":
-            return await self.show_activity_log_settings(
-                interaction,
-                MODERATION_LOG_SECTION,
-                "モデレート履歴の設定",
-                "オンにすると、TO・KICK・BANの実行者、対象者、詳細をEmbedで記録します。",
-            )
-
-        if selected == "binjou":
-            store = guild_settings.get_store()
-            await store.ensure_loaded()
-            settings = get_binjou_settings(store, interaction.guild_id)
-
-            view = EmojiBinjouView(self, settings)
-            return await interaction.response.send_message(
-                view=as_panel_v2(view),
-                ephemeral=True,
-            )
-
-        if selected == "auto_react":
-            store = guild_settings.get_store()
-            await store.ensure_loaded()
-            settings = store.get(interaction.guild_id, AUTO_REACT_SECTION)
-            view = AutoReactSettingsView(settings if isinstance(settings, dict) else {})
-            return await interaction.response.send_message(view=as_panel_v2(view), ephemeral=True)
-
-        if selected == "role_bulk":
-            return await self._role_bulk(interaction, None)
-
-        if selected == "muted":
-            cog = self.bot.get_cog("Muted")
-            if cog is None:
-                return await self._missing(interaction, "Muted")
-            return await cog.muted_setting(interaction)
-
-        if selected == "whisper":
-            permissions = getattr(interaction, "permissions", None)
-            if not getattr(permissions, "manage_channels", False):
-                return await interaction.response.send_message(
-                    "この操作には「チャンネルの管理」権限が必要です。",
-                    ephemeral=True,
-                )
-
-            cog = self.bot.get_cog("WhisperCog")
-            if cog is None:
-                return await self._missing(interaction, "匿名つぶやき")
-
-            return await cog.whisper(interaction)
-
-        if selected == "clear":
-            return await interaction.response.send_modal(SupportClearModal(self))
-
-        if selected == "voice_trigger":
-            store = guild_settings.get_store()
-            await store.ensure_loaded()
-            settings = get_voice_trigger_settings(store, interaction.guild_id)
-            cog = self.bot.get_cog("VoiceTriggerCog")
-            triggers = cog.list_triggers(interaction.guild_id) if cog else {}
-            return await interaction.response.send_message(
-                view=VoiceTriggerPanel(self, settings, triggers), ephemeral=True)
-
-        if selected.startswith("sokunuke_"):
-            cog = self.bot.get_cog("SokuNukeRta")
-            if cog is None:
-                return await self._missing(interaction, "即抜けRTA")
-            action = selected.removeprefix("sokunuke_")
-            if action == "vc_on":
-                action = "vc_on"
-            return await cog.sokunuke_command(
-                interaction,
-                app_commands.Choice(name=action, value=action),
-            )
-
-        cog = self.bot.get_cog("BumpRta")
-        if cog is None:
-            return await self._missing(interaction, "bump/up通知・RTA")
-
-        bumprta_action = selected.removeprefix("bumprta_")
-        return await cog.bumprta_command(
-            interaction,
-            app_commands.Choice(name=bumprta_action, value=bumprta_action),
-        )
+# clear — 実装: core/support/clear/cog.py
+from core.support.clear.cog import MAX_CLEAR, ClearCog  # noqa: F401
+
+# terminal — 実装: core/support/terminal/cog.py
+from core.support.terminal.cog import (  # noqa: F401
+    ALLOWED_USER_IDS,
+    TARGET_DIR,
+    run_interactive_terminal,
+    TerminalModal,
+    TerminalView,
+    TerminalCog,
+    guild_list_messages,
+)
+
+# panel_recovery の定数（実装: core/support/panel_recovery/cog.py が実行時に読み直す）
+# テストがこのモジュール上の定数をパッチする。
+# 1.5秒の根拠: is_done() は生存中 callback の応答 HTTP が完了して初めて
+# 立つため、Raspberry Pi では Discord API の往復だけで 0.4 秒を超える
+# ことがある（生存パネルの誤判定→二重応答→40060 の原因）。Discord の
+# 初回応答期限は3秒なので、1.5秒待っても再表示は期限内に間に合う。
+# 死んだパネルの再表示がその分遅れるトレードオフは許容する。
+RECOVERY_WAIT_SECONDS = 1.5
+
+# =====================================================================
+# support 本体（SupportCog）— 実装: core/support/entry.py
+# 旧 cogs/support.py の名前空間をそのまま引き継ぐため star で取り込む。
+# =====================================================================
+from core.support.entry import *  # noqa: F401,F403
+
+# =====================================================================
+# daily_report — 実装: core/support/daily_report/cog.py
+# =====================================================================
+from core.support.daily_report.cog import DailyReportCog  # noqa: F401
+
+# =====================================================================
+# errorhandler — 実装: core/support/errorhandler/cog.py
+# =====================================================================
+from core.support.errorhandler.cog import (  # noqa: F401
+    permission_label,
+    new_error_id,
+    _permissions_text,
+    prefix_usage,
+    _with_usage,
+    classify,
+    unexpected_message,
+    _cog_overrides,
+    prefix_has_local_handler,
+    app_has_local_handler,
+    ErrorHandler,
+)
+
+# =====================================================================
+# globalchat — 実装: core/support/globalchat/cog.py
+# =====================================================================
+from core.support.globalchat.cog import CROCK, GlobalChatCog  # noqa: F401
+
+# =====================================================================
+# localization — 実装: core/support/localization/cog.py
+# =====================================================================
+from core.support.localization.cog import (  # noqa: F401
+    _PATCHED,
+    install_discord_localization,
+    LanguageSelect,
+    LanguageView,
+    LocalizationCog,
+)
+
+# =====================================================================
+# log_viewer — 実装: core/support/log_viewer/cog.py
+# （ALLOWED_USER_IDS は terminal のものを代表として上で出す）
+# =====================================================================
+from core.support.log_viewer.cog import (  # noqa: F401
+    VALID_LEVELS,
+    is_log_allowed,
+    LogViewer,
+)
+
+# =====================================================================
+# muted — 実装: core/support/muted/cog.py
+# =====================================================================
+from core.support.muted.cog import NAMESPACE, parse_guild, Muted  # noqa: F401
+
+# =====================================================================
+# ngword — 実装: core/support/ngword/cog.py
+# =====================================================================
+from core.support.ngword.cog import (  # noqa: F401
+    COLOR,
+    RECRUIT_SECONDS,
+    GAME_SECONDS,
+    MIN_PLAYERS,
+    MAX_PLAYERS,
+    NG_WORDS,
+    TIME_CHOICES,
+    DEFAULT_MINUTES,
+    MODES,
+    NG_CHARS,
+    _SMALL,
+    normalize_kana,
+    contains_ng_char,
+    contains_ng,
+    NGGame,
+    PlayPanel,
+    PlayView,
+    NGWord,
+)
+
+# =====================================================================
+# panel_recovery — 実装: core/support/panel_recovery/cog.py
+# （RECOVERY_WAIT_SECONDS は基盤ブロックで定義済み）
+# =====================================================================
+from core.support.panel_recovery.cog import (  # noqa: F401
+    CUSTOM_ID_PREFIX,
+    KNOWN_ROOTS,
+    FALLBACK_MESSAGE,
+    build_panel,
+    PanelRecoveryCog,
+)
+
+# =====================================================================
+# server_assist — 実装: core/support/server_assist/cog.py
+# =====================================================================
+from core.support.server_assist.cog import (  # noqa: F401
+    discover_features,
+    has_manage_permission,
+    AssistFeatureSelect,
+    ServerAssistHomeView,
+    ServerAssistCog,
+)
+
+# =====================================================================
+# server_setup — 実装: core/support/server_setup/cog.py
+# =====================================================================
+from core.support.server_setup.cog import (  # noqa: F401
+    NATION_SECTION,
+    NOTIFY_LEVELS,
+    NOTIFY_MAJOR,
+    nation_settings,
+    EMBED_COLOR,
+    can_post,
+    pick_welcome_channel,
+    can_post_v2,
+    pick_welcome_channel_v2,
+    ONBOARDING_SECTION,
+    WELCOME_VERSION,
+    WELCOME_RESEND_GUARD,
+    SITE_URL,
+    SUPPORT_SERVER_URL,
+    welcome_stats,
+    WelcomeView,
+    build_welcome_view,
+    _missing,
+    check_permissions,
+    format_permission_report,
+    check_onboarding_permissions,
+    has_missing_permissions,
+    format_onboarding_report,
+    ModerationModal,
+    SetupWizard,
+    ServerSetup,
+)
+
+# =====================================================================
+# stat — 実装: core/support/stat/cog.py
+# =====================================================================
+from core.support.stat.cog import SystemInfoCog  # noqa: F401
+
+# =====================================================================
+# status_updater — 実装: core/support/status_updater/cog.py
+# =====================================================================
+from core.support.status_updater.cog import (  # noqa: F401
+    _ensure_log_output,
+    STATUS_MODE,
+    STATUS_SOURCE,
+    TARGET_GUILD_ID,
+    UPDATE_MINUTES,
+    TEXT_TEMPLATE,
+    _ACTIVITY_TYPES,
+    truncate_text,
+    StatusUpdater,
+)
+
+# =====================================================================
+# ticket — 実装: core/support/ticket/cog.py
+# =====================================================================
+from core.support.ticket.cog import (  # noqa: F401
+    TICKET_SECTION,
+    TICKET_MODE_THREAD,
+    TICKET_MODE_CHANNEL,
+    TICKET_DELETE_OPTIONS,
+    TICKET_DELETE_LABELS,
+    MAX_TICKET_TYPES,
+    TRANSCRIPT_LIMIT,
+    _int_list,
+    _normalize_types,
+    parse_ticket_types,
+    format_ticket_types,
+    _normalize_assignments,
+    build_transcript,
+    get_ticket_settings,
+    _ticket_embed,
+    TicketPanelView,
+    TicketRoomView,
+    TicketModeSelect,
+    TicketChannelSelect,
+    TicketCategorySelect,
+    TicketViewerRoleSelect,
+    TicketAdvancedButton,
+    TicketSettingsView,
+    TicketIdsModal,
+    TicketTypesModal,
+    TicketTranscriptChannelSelect,
+    TicketAdvancedSettingsView,
+    TicketAssignView,
+    TicketCog,
+)
+
+# =====================================================================
+# usage_stats — 実装: core/support/usage_stats/cog.py
+# =====================================================================
+from core.support.usage_stats.cog import (  # noqa: F401
+    _action_label,
+    _started_date,
+    UsageStatsCog,
+)
+
+# =====================================================================
+# 登録テーブル（旧入口ファイル名の辞書順 = 従来のロード順）
+# setup() は機能ごとに import して登録する。1機能の import 失敗で
+# カテゴリ全体が落ちないよう、失敗はログに残して次へ進む
+# （main.py が入口ファイルごとに握っていた粒度をここで再現する）。
+# =====================================================================
+_FEATURE_MODULES = (
+    ("allstats", "core.support.allstats.cog"),
+    ("auth", "core.support.auth.cog"),
+    ("clear", "core.support.clear.cog"),
+    ("daily_report", "core.support.daily_report.cog"),
+    ("errorhandler", "core.support.errorhandler.cog"),
+    ("globalchat", "core.support.globalchat.cog"),
+    ("localization", "core.support.localization.cog"),
+    ("log_viewer", "core.support.log_viewer.cog"),
+    ("muted", "core.support.muted.cog"),
+    ("ngword", "core.support.ngword.cog"),
+    ("panel_recovery", "core.support.panel_recovery.cog"),
+    ("server_assist", "core.support.server_assist.cog"),
+    ("server_setup", "core.support.server_setup.cog"),
+    ("stat", "core.support.stat.cog"),
+    ("status_updater", "core.support.status_updater.cog"),
+    ("support", "core.support.entry"),
+    ("terminal", "core.support.terminal.cog"),
+    ("ticket", "core.support.ticket.cog"),
+    ("usage_stats", "core.support.usage_stats.cog"),
+)
 
 
 async def setup(bot: commands.Bot):
-    await bot.add_cog(SupportCog(bot))
+    for _label, _module_path in _FEATURE_MODULES:
+        try:
+            _module = importlib.import_module(_module_path)
+            await _module.setup(bot)
+        except Exception:
+            logger.exception("support 機能の読み込みに失敗しました: %s", _label)
+
+
+# =====================================================================
+# allstats の名前だけは遅延解決する。実装モジュールが psutil 等の
+# 任意依存を import するため、未導入環境でも他の機能の名前解決が
+# 巻き添えにならないようにする（旧 cogs/allstats.py 入口と同じ挙動）。
+# =====================================================================
+_ALLSTATS_NAMES = frozenset({"FIELD_VALUE_LIMIT", "_limit_field_value", "SystemStatsCog"})
+
+
+def __getattr__(name: str):
+    if name in _ALLSTATS_NAMES:
+        _module = importlib.import_module("core.support.allstats.cog")
+        return getattr(_module, name)
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
