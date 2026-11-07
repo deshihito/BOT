@@ -7,10 +7,10 @@
 - 配ったらペアを自動で捨てる。手番の人は、次の人（手札が残っている人）の手札から位置のボタンで 1 枚引く。
   引く前に相手の手札は混ぜるので、ボタンは位置だけで中身は分からない。そろったら自動で捨てる。
 - 自分の手札は「手札を見る」で本人にだけ表示する。手札と、引く相手の手札
-  （裏面の並びだけ）は共通基盤（core/game/board_image.py）のカード画像でも表示する。
+  （裏面の並びだけ）は共通基盤（core/game/game/board_image.py）のカード画像でも表示する。
 - 手番は 30 秒。時間切れは core/autoplay.take_idle_turn で代わりに引く（代打ちがオフでもゲームが止まらないよう
   ランダムに引く）。
-- 最初に手札がなくなった人の勝ち。勝利数は core/game/party_ranking.py に記録する（人間 2 人以上のときだけ）。
+- 最初に手札がなくなった人の勝ち。勝利数は core/game/game/party_ranking.py に記録する（人間 2 人以上のときだけ）。
 """
 import asyncio
 import io
@@ -18,15 +18,14 @@ import logging
 import random
 
 import discord
-from core.game import board_image, game_panels, game_restore
-from core.game.board_image import render_cached, render_card_hand
-from core.game.game_v2 import GamePanelView, LobbyView, safe_delete, text_panel
+from core.game.game import board_image, game_panels, game_restore
+from core.game.game.board_image import render_cached, render_card_hand
+from core.game.game.game_v2 import GamePanelView, LobbyView, safe_delete, text_panel
 from core.support.emojis import CROCK
 from core.support.messages import recruit_join_prompt
 from discord.ext import commands
 
-from core.game import autoplay, party_ranking
-
+from core.game.game import autoplay, party_ranking
 logger = logging.getLogger(__name__)
 
 GAME_ID = "babanuki"
@@ -399,7 +398,7 @@ class Babanuki(commands.Cog):
             "ババ抜き 終了", text + f"\n\n## 上がった順\n{order[:1024]}"))
 
     # ------------------------------------------------------------------
-    # 再起動復旧（core/game/game_restore.py）
+    # 再起動復旧（core/game/game/game_restore.py）
     # ------------------------------------------------------------------
     def _save_snapshot(self, g: BabanukiGame) -> None:
         if g.phase != "playing":
