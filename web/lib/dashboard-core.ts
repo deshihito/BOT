@@ -1294,3 +1294,100 @@ export function applySectionValues(
   }
   return Object.keys(guild).length > 0 ? guild : null;
 }
+
+// ==== サイドバー構成（/support のジャンル分けに合わせたカテゴリ） ====
+
+export interface SectionCategory {
+  id: string;
+  label: string;
+  sections: string[];
+}
+
+export const SECTION_CATEGORIES: SectionCategory[] = [
+  {
+    id: "assist",
+    label: "サーバーアシスト",
+    sections: [
+      "assist_welcome", "assist_autorole", "assist_starboard", "assist_leveling",
+      "assist_suggestions", "assist_polls", "assist_autothread", "assist_serverlog",
+      "assist_invites", "assist_events", "assist_reactionroles", "assist_stickyroles",
+      "assist_customreplies", "assist_applications", "assist_autoreact", "assist_tempvoice",
+    ],
+  },
+  {
+    id: "moderation",
+    label: "モデレーション",
+    sections: ["assist_automod", "assist_warnings", "globalchat", "command_control", "bot_control"],
+  },
+  {
+    id: "automation",
+    label: "自動化・通知",
+    sections: ["assist_timed", "vc_auto_start", "bump_rta", "assist_stats"],
+  },
+  {
+    id: "tools",
+    label: "ツール",
+    sections: ["assist_embed", "assist_webhook", "ticket"],
+  },
+];
+
+export function categoryOf(section: string): SectionCategory | undefined {
+  return SECTION_CATEGORIES.find((category) => category.sections.includes(section));
+}
+
+/** モジュールの主トグル（ヘッダーに大きく出す bool フィールド）。無ければ null。 */
+export function primaryToggleField(spec: SectionSpec): FieldSpec | null {
+  return (
+    spec.fields.find(
+      (field) =>
+        field.type === "bool" &&
+        (field.name === "enabled" || field.name === "notifications_enabled" || field.name === "welcome_enabled"),
+    ) ?? null
+  );
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function sentinelCount(value: unknown): number {
+  return Array.isArray(value) ? value.length : 0;
+}
+
+/**
+ * 概要ページ用の「有効なモジュール」判定。
+ * 主トグルがあるモジュールはその値、無いモジュールは設定済みかどうかで判定する。
+ */
+export function moduleEnabled(spec: SectionSpec, raw: unknown): boolean {
+  const values: Record<string, unknown> = isRecord(raw) ? raw : {};
+  if (spec.external === "bump_rta") return values.notifications_enabled !== false;
+  const toggle = primaryToggleField(spec);
+  if (toggle) {
+    if (spec.section === "assist_welcome") {
+      return values.welcome_enabled === true || values.goodbye_enabled === true;
+    }
+    return values[toggle.name] === true;
+  }
+  switch (spec.section) {
+    case "vc_auto_start":
+      return ["tts", "transcription", "music", "global_vc"].some((key) => values[key] === true);
+    case "globalchat":
+      return (
+        sentinelCount(values.ng_words) > 0 ||
+        sentinelCount(values.blocked_users) > 0 ||
+        sentinelCount(values.blocked_guilds) > 0
+      );
+    case "command_control":
+      return typeof values.mode === "string" && values.mode !== "off";
+    case "bot_control":
+      return Object.keys(values).length > 0;
+    default:
+      return spec.fields.some((field) => {
+        const value = values[field.name];
+        if (value === undefined || value === null || value === "" || value === false) return false;
+        if (Array.isArray(value)) return value.length > 0;
+        if (isRecord(value)) return Object.keys(value).length > 0;
+        return true;
+      });
+  }
+}
