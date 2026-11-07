@@ -30,10 +30,10 @@ for _name, _value in {'BOT_API_BASE_URL': 'http://127.0.0.1:8787', 'BOT_API_KEY'
 import discord  # noqa: E402
 
 from core.vc import vc_feature_restore, voice_restore  # noqa: E402
-from cogs import sio_karaoke as karaoke  # noqa: E402
-from cogs import sio_rec as rec  # noqa: E402
-from cogs import sio_transcription as transcription  # noqa: E402
-from cogs import sio_voicechanger as changer  # noqa: E402
+from core.vc.karaoke import entry as karaoke  # noqa: E402
+from core.vc.rec import entry as rec  # noqa: E402
+from core.vc.transcription import entry as transcription  # noqa: E402
+from core.vc.voicechanger import entry as changer  # noqa: E402
 
 
 # ---------------------------------------------------------------- 偽の Discord

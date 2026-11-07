@@ -177,7 +177,7 @@ class VcParamSpecConsistencyTest(unittest.TestCase):
                              f"vc:{spec.value}")
 
     def test_param_names_exist_in_dispatch_signature(self):
-        from cogs.sio_voice import VoiceHub
+        from cogs.vc import VoiceHub
 
         signature = inspect.signature(VoiceHub.dispatch_voice_action)
         dispatch_params = set(signature.parameters)

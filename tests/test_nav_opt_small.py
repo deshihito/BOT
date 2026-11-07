@@ -16,10 +16,10 @@ class VoiceGuidanceTest(unittest.TestCase):
 
     def test_no_voice_panel_guidance(self):
         for path in (
-            ("cogs", "sio_rec.py"),
-            ("cogs", "sio_voicechanger.py"),
-            ("cogs", "sio_karaoke.py"),
-            ("cogs", "sio_transcription.py"),
+            ("core", "vc", "rec", "entry.py"),
+            ("core", "vc", "voicechanger", "entry.py"),
+            ("core", "vc", "karaoke", "entry.py"),
+            ("core", "vc", "transcription", "entry.py"),
             ("core", "vc", "hub.py"),
         ):
             src = read(*path)

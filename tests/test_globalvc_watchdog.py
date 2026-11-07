@@ -19,7 +19,7 @@ if str(ROOT) not in sys.path:
 for _name, _value in {'BOT_API_BASE_URL': 'http://127.0.0.1:8787', 'BOT_API_KEY': 'dummy-key'}.items():
     os.environ.setdefault(_name, _value)
 
-from cogs import sio_globalVC as gvc  # noqa: E402
+from core.vc.globalvc import entry as gvc  # noqa: E402
 from tests.test_voice_session import make_bot  # noqa: E402
 
 

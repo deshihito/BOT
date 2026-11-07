@@ -264,7 +264,7 @@ class ShortcutRootPanel(discord.ui.View):
         if root == "general":
             panel = GeneralPanel(bot.get_cog("GeneralCog"), shortcut_mode=True, shortcut_item=self.item)
         elif root == "vc":
-            from cogs.sio_voice import VoicePanelView
+            from cogs.vc import VoicePanelView
             panel = VoicePanelView(bot.get_cog("VoiceHub"), shortcut_mode=True, shortcut_item=self.item)
         elif root == "game":
             from cogs.game import GameHubView

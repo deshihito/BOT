@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""cogs/sio_voicechanger.py のテスト（監査 #9）。
+"""ボイスチェンジャー（core/vc/voicechanger/entry.py）のテスト（監査 #9）。
 
 実音声／Discord 接続なしで検証できる部分:
 WSOLA ピッチシフターの入出力形状、待機バッファの状態遷移、
@@ -12,7 +12,7 @@ from unittest.mock import AsyncMock
 
 import numpy as np
 
-from cogs.sio_voicechanger import (
+from cogs.vc import (
     CHUNK_BYTES,
     FRAME_SIZE,
     AdaptiveWSOLAPitchShifter,

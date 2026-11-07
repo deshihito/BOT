@@ -61,7 +61,7 @@ def build_panel(bot, root: str):
         hub = bot.get_cog("VoiceHub")
         if hub is None:
             return None
-        from cogs.sio_voice import VoicePanelView
+        from cogs.vc import VoicePanelView
 
         return VoicePanelView(hub)
     if root == "support":

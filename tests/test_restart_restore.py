@@ -2,9 +2,9 @@
 
 - core/vc/voice_restore.py: スナップショットの serialize/deserialize 往復、壊れた JSON の吸収
 - core/vc/voice_session.py: acquire/release に連動したセッションスナップショットの保存・削除
-- cogs/sio_music.py: 再生状態のシリアライズ、復旧可否判定（人がいる/いない・チャンネル欠落）、
+- core/vc/music/entry.py: 再生状態のシリアライズ、復旧可否判定（人がいる/いない・チャンネル欠落）、
   再生再開と一時停止のままの復旧、音楽パネルの取り直し
-- cogs/sio_globalVC.py: ROOMS（ルーム定義）の永続化往復、参加状態の復旧可否判定
+- core/vc/globalvc/entry.py: ROOMS（ルーム定義）の永続化往復、参加状態の復旧可否判定
 """
 
 import asyncio
@@ -29,8 +29,8 @@ import discord  # noqa: E402
 
 from core.vc import voice_restore  # noqa: E402
 from core.vc import voice_session as vs  # noqa: E402
-from cogs import sio_globalVC as gvc  # noqa: E402
-from cogs import sio_music as music  # noqa: E402
+from core.vc.globalvc import entry as gvc  # noqa: E402
+from core.vc.music import entry as music  # noqa: E402
 
 
 # ---------------------------------------------------------------- 偽の Discord

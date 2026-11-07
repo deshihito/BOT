@@ -23,7 +23,7 @@ for _name, _value in {'BOT_API_BASE_URL': 'http://127.0.0.1:8787', 'BOT_API_KEY'
 import discord  # noqa: E402
 
 from core.vc import voice_restore  # noqa: E402
-from cogs import sio_globalVC as gvc  # noqa: E402
+from core.vc.globalvc import entry as gvc  # noqa: E402
 from core.vc.globalvc import textlink  # noqa: E402
 
 

@@ -150,7 +150,7 @@ class PrefixHandlerTest(unittest.IsolatedAsyncioTestCase):
             ctx.send.assert_not_awaited()
 
     async def test_music_listener_is_gone(self):
-        from cogs import sio_music
+        from core.vc.music import entry as sio_music
         self.assertNotIn("on_command_error", [name for name, _ in sio_music.VoiceCog.__cog_listeners__])
 
     async def test_only_one_command_error_listener(self):

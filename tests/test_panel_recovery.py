@@ -16,7 +16,7 @@ import discord
 from cogs import panel_recovery
 from cogs.game import GameDetailView, GameHubView
 from cogs.help import BackView, CommandView, HelpView
-from cogs.sio_voice import VoicePanelView
+from cogs.vc import VoicePanelView
 from core.general.panel import GeneralPanel
 from core.general.shortcuts import ShortcutCommitButton
 from core.support.panel_v2 import PanelLayoutView
@@ -210,8 +210,8 @@ class FallbackTest(unittest.IsolatedAsyncioTestCase):
         cases = [
             ("panel:general:genre", "core.general.panel", "GeneralPanel"),
             ("panel:general:action", "core.general.panel", "GeneralPanel"),
-            ("panel:vc:genre", "cogs.sio_voice", "VoicePanelView"),
-            ("panel:vc:commit", "cogs.sio_voice", "VoicePanelView"),
+            ("panel:vc:genre", "cogs.vc", "VoicePanelView"),
+            ("panel:vc:commit", "cogs.vc", "VoicePanelView"),
             ("panel:support:action", "core.support.panel", "SupportPanelView"),
             ("panel:game:back", "cogs.game", "GameHubView"),
             ("panel:help:next", "cogs.help", "HelpView"),

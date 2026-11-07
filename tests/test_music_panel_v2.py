@@ -83,7 +83,7 @@ class MusicPanelNameResolutionTest(unittest.TestCase):
     """分割先モジュールの名前空間で、他モジュール定義の名前が解決できること。
 
     Mixin のメソッドは定義されたモジュールのグローバルで名前解決するため、
-    cogs/sio_music.py 側の import では届かない（2026-11-06 の NameError 再発防止）。
+    core/vc/music/entry.py 側の import では届かない（2026-11-06 の NameError 再発防止）。
     """
 
     def test_search_and_panel_resolve_build_music_panel_layout(self):

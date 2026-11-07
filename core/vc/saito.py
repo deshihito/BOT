@@ -161,3 +161,7 @@ class SaitoRelay(commands.Cog):
         if len(self.matching_queue) != before:
             return await r.send("相手探しを取り消しました。")
         await r.send("通話も相手探しもしていません。", ephemeral=True)
+
+
+async def setup(bot):
+    await bot.add_cog(SaitoRelay(bot))

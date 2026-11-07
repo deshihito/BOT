@@ -18,9 +18,9 @@ import cogs.jinrou as jinrou_module
 import cogs.log_viewer as log_viewer_module
 import cogs.muted as muted_module
 import cogs.nation as nation_module
-import cogs.sio_music as music_module
-import cogs.sio_rec as rec_module
-import cogs.sio_voice as voice_module
+import core.vc.music.entry as music_module
+import core.vc.rec.entry as rec_module
+import core.vc.voice_entry as voice_module
 import cogs.support as support_module
 import cogs.uno as uno_module
 import cogs.zetamodoki as zeta_module

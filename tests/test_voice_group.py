@@ -28,9 +28,14 @@ import numpy as np  # noqa: E402
 
 from core.vc import vosk_model  # noqa: E402
 from core.support.legacy import Responder  # noqa: E402
-from cogs import (  # noqa: E402
-    sio_globalVC, sio_karaoke, sio_music, sio_rec, sio_saito, sio_transcription, sio_voice, sio_voicechanger,
-)
+from core.vc import saito as sio_saito  # noqa: E402
+from core.vc import voice_entry as sio_voice  # noqa: E402
+from core.vc.globalvc import entry as sio_globalVC  # noqa: E402
+from core.vc.karaoke import entry as sio_karaoke  # noqa: E402
+from core.vc.music import entry as sio_music  # noqa: E402
+from core.vc.rec import entry as sio_rec  # noqa: E402
+from core.vc.transcription import entry as sio_transcription  # noqa: E402
+from core.vc.voicechanger import entry as sio_voicechanger  # noqa: E402
 from tests.test_all_commands import FakeDBAPI  # noqa: E402
 from tests.test_music_group import FakeCtx, FakeInteraction, choice  # noqa: E402
 from tests.test_voice_session import make_bot, make_world  # noqa: E402
