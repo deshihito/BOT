@@ -3,7 +3,7 @@ from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
 import discord
-from cogs.disboard_rta import SABACHA_BOT_ID, TAKASUMI_BOT_ID, COOLDOWN, _sabacha_next_time, detect_event
+from cogs.game import SABACHA_BOT_ID, TAKASUMI_BOT_ID, COOLDOWN, _sabacha_next_time, detect_event
 
 EVENT_AT = datetime(2026, 10, 13, 8, 0, 1, tzinfo=timezone.utc)
 MESSAGE_ID = (int(EVENT_AT.timestamp() * 1000) - 1420070400000) << 22  # snowflake at EVENT_AT

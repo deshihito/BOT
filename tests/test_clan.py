@@ -79,7 +79,7 @@ class _Wallet:
 
     async def _change_balance(self, user_id, delta, *, require_funds=False,
                               create_with=None):
-        insufficient = sys.modules["cogs.clan"].wallet_module.INSUFFICIENT
+        insufficient = sys.modules["core.game.clan.cog"].wallet_module.INSUFFICIENT
         uid = str(user_id)
         current = self.balances.get(uid)
         if current is None:
@@ -105,7 +105,7 @@ class _Bot:
 
 class CogTest(unittest.TestCase):
     def _cog(self, tmp, wallet):
-        from cogs.clan import ClanCog
+        from cogs.game import ClanCog
 
         return ClanCog(
             _Bot(wallet),

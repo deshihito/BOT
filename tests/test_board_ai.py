@@ -3,12 +3,9 @@ from copy import deepcopy
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
-from cogs.othello import BLACK, WHITE, choose_ai_move as choose_othello_move, legal_moves as othello_moves, new_board
-from cogs.shogi import (
-    PAGE_NEXT_VALUE, PAGE_PREV_VALUE, Shogi, ShogiMoveView, ShogiRenderer,
-    ShogiSession, _shogi_candidates, choose_ai_move as choose_shogi_move,
-    make_labels, paginate_labels,
-)
+from core.game.othello.cog import BLACK, WHITE, choose_ai_move as choose_othello_move, legal_moves as othello_moves, new_board
+from cogs.game import Shogi, ShogiMoveView, ShogiRenderer, ShogiSession, _shogi_candidates, make_labels
+from core.game.shogi.cog import PAGE_NEXT_VALUE, PAGE_PREV_VALUE, choose_ai_move as choose_shogi_move, paginate_labels
 from core.game.shogi.shogi_engine import Color, Piece, PieceType, ShogiGame
 
 

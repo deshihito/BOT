@@ -5,13 +5,9 @@ from unittest.mock import AsyncMock
 import discord
 from PIL import Image
 
-import cogs.chess as chess_module
-from cogs.chess import (
-    ASSET, PAGE_NEXT_VALUE, PAGE_PREV_VALUE, START_BOARD, Chess, ChessGame,
-    ChessMoveSelect, apply_move, build_sprites, choose_ai_move, in_check,
-    legal_moves, move_label, next_ep_square, paginate_labels, render_board,
-    updated_castling,
-)
+import core.game.chess.cog as chess_module
+from cogs.game import ASSET, START_BOARD, Chess, ChessGame, ChessMoveSelect, apply_move, build_sprites, in_check, move_label, next_ep_square, render_board, updated_castling
+from core.game.chess.cog import PAGE_NEXT_VALUE, PAGE_PREV_VALUE, choose_ai_move, legal_moves, paginate_labels
 from cogs.game import ChessDifficultySelect, ChessModeSelect, GameDetailView
 
 

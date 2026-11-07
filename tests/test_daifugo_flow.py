@@ -8,7 +8,7 @@ import unittest
 from unittest.mock import patch
 
 from game_fakes import FakeChannel, FakeGuild, FakeInteraction, FakeMember, fast_time, real_sleep
-from cogs import daifugo as d
+import core.game.daifugo.cog as d
 from core.support import guild_settings
 from core.game.game import autoplay, party_ranking
 EMOJI = re.compile('[\U0001F000-\U0001FFFF\u2600-\u27BF\u2B00-\u2BFF\u23E9-\u23FA]')

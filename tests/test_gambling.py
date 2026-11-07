@@ -24,17 +24,7 @@ from core.general import action_registry
 from core.game.gambling import gambling
 from core.general.items.items import ItemError
 from cogs import general as wallet_module
-from cogs.gambling import (
-    BetModal,
-    BlackjackView,
-    DiceModal,
-    DiceView,
-    DoubleView,
-    GamblingCog,
-    SlotStartModal,
-    SlotView,
-    _slot_embed,
-)
+from cogs.game import BetModal, BlackjackView, DiceModal, DiceView, DoubleView, GamblingCog, SlotStartModal, SlotView, _slot_embed
 
 
 class _ScriptedRandom(random.Random):

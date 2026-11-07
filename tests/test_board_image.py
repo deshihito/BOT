@@ -193,7 +193,7 @@ class VersusRenderTest(unittest.TestCase):
         self.assertEqual(Image.open(first).size, (WIDTH, HEIGHT))
 
     def test_shogi_render_keeps_geometry(self):
-        from cogs.shogi import IMG_H, IMG_W, ShogiGame, ShogiRenderer
+        from cogs.game import IMG_H, IMG_W, ShogiGame, ShogiRenderer
         out = ShogiRenderer().render(ShogiGame())
         self.assertEqual(Image.open(out).size, (IMG_W, IMG_H))
 
@@ -207,7 +207,7 @@ class PanelConstructionTest(unittest.TestCase):
         return user
 
     def test_minesweeper_panels(self):
-        import cogs.minesweeper as cog
+        import core.game.minesweeper.cog as cog
         from core.game.game.game_v2 import assert_within_limits, count_buttons
         from core.game.minesweeper.minesweeper import MinesweeperBoard
         for key in ("easy", "wide", "expert"):
@@ -220,7 +220,7 @@ class PanelConstructionTest(unittest.TestCase):
         self.assertEqual(count_buttons(diff), 5)
 
     def test_sudoku_panels(self):
-        import cogs.sudoku as cog
+        import core.game.sudoku.cog as cog
         from core.game.game.game_v2 import assert_within_limits
         from core.game.sudoku.sudoku import generate
         puzzle, solution = generate(random.Random(1), "easy")
@@ -229,7 +229,7 @@ class PanelConstructionTest(unittest.TestCase):
         assert_within_limits(cog.ModeView(MagicMock(), self.owner()))
 
     def test_nonogram_panels(self):
-        import cogs.nonogram as cog
+        import core.game.nonogram.cog as cog
         from core.game.game.game_v2 import assert_within_limits
         from core.game.nonogram.nonogram import NonogramPuzzle
         puzzle = NonogramPuzzle.pick("8x8", rng=random.Random(0))
