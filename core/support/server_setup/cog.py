@@ -21,7 +21,7 @@ from core.help.command_catalog import permission_label
 from core.support.emojis import BOOK, COIN, FAILED, GAME, GEAR, MUSIC, SUCCESS
 from core.support.guild_settings import NATION_SECTION, NOTIFY_LEVELS, NOTIFY_MAJOR, get_store, nation_settings
 from core.support.panel_v2 import as_panel_v2
-from core.support import localization
+from core.support.localization import localization
 from core.support.panel_recovery.cog import build_panel
 
 logger = logging.getLogger(__name__)
@@ -421,7 +421,7 @@ class ModerationModal(discord.ui.Modal, title="グローバルチャットの荒
 
     def __init__(self, wizard: "SetupWizard"):
         super().__init__()
-        from core.support import globalchat_moderation as mod
+        from core.support.globalchat import globalchat_moderation as mod
         self.wizard = wizard
         s = mod.settings(wizard.guild.id)
         self.ng_words = discord.ui.TextInput(label="NG ワード（改行かカンマ区切り。既定の一覧に追加）", required=False,
@@ -531,7 +531,7 @@ class SetupWizard(discord.ui.View):
                 embed.add_field(name="状態", value="グローバルチャットの機能が読み込まれていません")
             else:
                 embed.add_field(name=f"#{getattr(self.channel, 'name', 'このチャンネル')}", value="つないでいます" if connected else "つないでいません")
-                from core.support import globalchat_moderation as mod
+                from core.support.globalchat import globalchat_moderation as mod
                 m = mod.settings(self.guild.id)
                 embed.add_field(name="荒らし対策", value=(
                     f"NG ワード: 既定 + {len(m['ng_words'])} 件／ブロック: ユーザー {len(m['blocked_users'])} 人・"
@@ -729,7 +729,7 @@ class SetupWizard(discord.ui.View):
         await interaction.response.send_modal(ModerationModal(self))
 
     async def save_moderation(self, interaction, ng_text: str, users_text: str, guilds_text: str):
-        from core.support import globalchat_moderation as mod
+        from core.support.globalchat import globalchat_moderation as mod
         words, users, guilds = mod.parse_words(ng_text), mod.parse_ids(users_text), mod.parse_ids(guilds_text)
         guilds = [g for g in guilds if g != self.guild.id]
         await mod.save(self.guild.id, ng_words=words, blocked_users=users, blocked_guilds=guilds)
