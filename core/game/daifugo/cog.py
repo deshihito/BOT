@@ -4,14 +4,14 @@
 - スラッシュコマンドは増やさず、/game の「大富豪」から募集する（GameHub が start_recruit を呼ぶ）。
 - 3〜6 人。足りないときは Bot が入る。絵文字は使わず、カードは "S5"・"HK"・"JOKER" のような文字で表す
   （S=スペード H=ハート D=ダイヤ C=クラブ）。場のカードと自分の手札は、共通基盤
-  （core/game/board_image.py）のカード画像でも表示する（テキスト表示は併記）。
+  （core/game/game/board_image.py）のカード画像でも表示する（テキスト表示は併記）。
 - 基本ルールだけ: 1 枚・2 枚（ペア）・3 枚・4 枚を同じ数字でそろえて出す。場と同じ枚数で、より強い数字だけ出せる。
   強さは 3 が最弱、2 が最強、ジョーカーはさらに強い（ジョーカーは 1 枚出しだけ）。
   ほかの全員がパスしたら場を流し、最後に出した人から（上がっていれば次の人から）。
 - 4 枚出しで革命（数字の強さが逆になる。ジョーカーはいつでも最強）。もう一度 4 枚出しで戻る。
 - 出すカードは「手札から出す」で本人にだけ見えるメニューから選ぶ。
 - 手番は 30 秒。時間切れはパス（場が空で自分が親のときは一番弱いカードを出す）。
-- 結果は 大富豪・富豪・平民・貧民・大貧民。大富豪の勝利を core/game/party_ranking.py に記録する（人間 2 人以上のときだけ）。
+- 結果は 大富豪・富豪・平民・貧民・大貧民。大富豪の勝利を core/game/game/party_ranking.py に記録する（人間 2 人以上のときだけ）。
 """
 import asyncio
 import io
@@ -19,14 +19,13 @@ import logging
 import random
 
 import discord
-from core.game import board_image, game_panels, game_restore
-from core.game.board_image import render_cached, render_card_hand
-from core.game.game_v2 import GamePanelView, LobbyView, safe_delete, text_panel
+from core.game.game import board_image, game_panels, game_restore
+from core.game.game.board_image import render_cached, render_card_hand
+from core.game.game.game_v2 import GamePanelView, LobbyView, safe_delete, text_panel
 from core.support.messages import recruit_join_prompt  # noqa: F401  cogs.daifugo シムの再輸出用に残す
 from discord.ext import commands
 
-from core.game import party_ranking
-
+from core.game.game import party_ranking
 logger = logging.getLogger(__name__)
 
 GAME_ID = "daifugo"
@@ -545,7 +544,7 @@ class Daifugo(commands.Cog):
         await channel.send(view=text_panel("大富豪 終了", text))
 
     # ------------------------------------------------------------------
-    # 再起動復旧（core/game/game_restore.py）
+    # 再起動復旧（core/game/game/game_restore.py）
     # ------------------------------------------------------------------
     def _save_snapshot(self, g: DaifugoGame) -> None:
         if g.phase != "playing":
