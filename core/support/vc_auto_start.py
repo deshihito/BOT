@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from .common import *
+from core.support.messages import SETTINGS_UPDATE_FAILED
 from core.vc.auto_start import (
     AUTO_START_FEATURES,
     VC_AUTO_START_SECTION,
@@ -131,7 +132,7 @@ class VcAutoStartPanel(discord.ui.LayoutView):
         except Exception:
             logger.exception("VC自動開始設定の更新に失敗しました")
             return await interaction.followup.send(
-                "設定の更新に失敗しました。時間をおいて再度お試しください。解決しない場合はBotの運営に連絡してください。",
+                SETTINGS_UPDATE_FAILED,
                 ephemeral=True,
             )
         await self.refresh(interaction, notice)

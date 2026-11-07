@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from .common import *
+from core.support.messages import SETTINGS_UPDATE_FAILED
 
 
 class ActivityLogChannelSelect(discord.ui.ChannelSelect):
@@ -147,7 +148,7 @@ class ActivityLogSettingsView(discord.ui.View):
         except Exception:
             logger.exception("履歴設定の更新に失敗しました (section=%s)", self.section)
             await interaction.followup.send(
-                "設定の更新に失敗しました。時間をおいて再度お試しください。解決しない場合はBotの運営に連絡してください。",
+                SETTINGS_UPDATE_FAILED,
                 ephemeral=True,
             )
 
@@ -176,7 +177,7 @@ class ActivityLogSettingsView(discord.ui.View):
         except Exception:
             logger.exception("個別モデレート履歴設定の更新に失敗しました (action=%s)", action)
             await interaction.followup.send(
-                "設定の更新に失敗しました。時間をおいて再度お試しください。解決しない場合はBotの運営に連絡してください。",
+                SETTINGS_UPDATE_FAILED,
                 ephemeral=True,
             )
 
@@ -288,7 +289,7 @@ class VCLogSettingsView(discord.ui.View):
         except Exception:
             logger.exception("VC履歴設定の更新に失敗しました")
             await interaction.followup.send(
-                "設定の更新に失敗しました。時間をおいて再度お試しください。解決しない場合はBotの運営に連絡してください。",
+                SETTINGS_UPDATE_FAILED,
                 ephemeral=True,
             )
 

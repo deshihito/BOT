@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from .common import *
+from core.support.messages import SETTINGS_UPDATE_FAILED
 
 
 class LevelUpChannelSelect(discord.ui.ChannelSelect):
@@ -201,7 +202,7 @@ class LevelUpNotifyPanel(discord.ui.LayoutView):
         except Exception:
             logger.exception("レベルアップ通知設定の更新に失敗しました")
             return await interaction.followup.send(
-                "設定の更新に失敗しました。時間をおいて再度お試しください。解決しない場合はBotの運営に連絡してください。",
+                SETTINGS_UPDATE_FAILED,
                 ephemeral=True,
             )
         await self.refresh(interaction, notice)

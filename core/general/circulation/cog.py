@@ -41,7 +41,13 @@ from core.game import lottery as lottery_core
 from core.game import mining as mining_core
 from core.game.game import prison as prison_core
 from core.general.circulation import steal as steal_core
-from core.support.messages import circulation_action_failed
+from core.support.messages import (
+    ACTION_FAILED_RETRY,
+    COIN_UPDATE_FAILED_RETRY,
+    COIN_UPDATE_FAILED_UNCHANGED,
+    PURCHASE_FAILED_RETRY,
+    circulation_action_failed,
+)
 from core.support.panel_v2 import as_panel_v2, edit_panel_v2
 from cogs import general as wallet_module  # INSUFFICIENT は実行時に引く（テストの cog 再読込で同一性が崩れないため）
 
@@ -711,7 +717,7 @@ class CirculationCog(commands.Cog):
                 return circulation_action_failed("コインが不足しています。")
             if debit is None:
                 return circulation_action_failed(
-                    "コインの更新に失敗しました。時間をおいて再試行してください。")
+                    COIN_UPDATE_FAILED_RETRY)
             try:
                 owned = self.lottery_store.add_tickets(uid, count, now=now)
             except items_core.ItemError as exc:
@@ -739,7 +745,7 @@ class CirculationCog(commands.Cog):
         except Exception:
             logger.exception("circulation: 宝くじの購入に失敗 user=%s count=%s", uid, count)
             return circulation_action_failed(
-                "購入中にエラーが発生しました。時間をおいて再試行してください。")
+                PURCHASE_FAILED_RETRY)
 
     # ------------------------------------------------------------------ 盗むの実行
     async def execute_steal(self, actor_id: int, target_id: int, *,
@@ -883,14 +889,14 @@ class CirculationCog(commands.Cog):
                 if debit is None:
                     _discard_reservation()
                     return circulation_action_failed(
-                        "コインの更新に失敗しました。残高は変わっていません。")
+                        COIN_UPDATE_FAILED_UNCHANGED)
                 credit = await wallet._change_balance(
                     actor, amount, create_with=wallet_module.NEW_USER_BALANCE)
                 if credit is None:
                     await wallet._change_balance(target, amount)
                     _discard_reservation()
                     return circulation_action_failed(
-                        "コインの更新に失敗しました。残高は変わっていません。")
+                        COIN_UPDATE_FAILED_UNCHANGED)
                 await self._record_history(target, actor, amount, "steal_success")
                 bonus = 0
                 if mud_item is not None:
@@ -949,7 +955,7 @@ class CirculationCog(commands.Cog):
             logger.exception(
                 "circulation: 盗みに失敗 actor=%s target=%s", actor, target)
             return circulation_action_failed(
-                "実行中にエラーが発生しました。時間をおいて再試行してください。")
+                ACTION_FAILED_RETRY)
 
     async def _transfer_fine(self, actor: str, target: str) -> tuple[int, str | None]:
         """失敗時の罰金を actor から target へ移す。(支払額, エラー文) を返す。"""
@@ -962,12 +968,12 @@ class CirculationCog(commands.Cog):
         if debit is wallet_module.INSUFFICIENT:
             return 0, None
         if debit is None:
-            return 0, "コインの更新に失敗しました。残高は変わっていません。"
+            return 0, COIN_UPDATE_FAILED_UNCHANGED
         credit = await wallet._change_balance(
             target, fine, create_with=wallet_module.NEW_USER_BALANCE)
         if credit is None:
             await wallet._change_balance(actor, fine)
-            return 0, "コインの更新に失敗しました。残高は変わっていません。"
+            return 0, COIN_UPDATE_FAILED_UNCHANGED
         await self._record_history(actor, target, fine, "steal_fine")
         return fine, None
 

@@ -23,7 +23,13 @@ from discord.ext import commands, tasks
 import config
 from core.general.items import items as items_core
 from core.game.game import prison as prison_core
-from core.support.messages import ITEM_INVALID_INPUT, ITEM_NOT_FOUND, item_action_failed
+from core.support.messages import (
+    COIN_UPDATE_FAILED_RETRY,
+    ITEM_INVALID_INPUT,
+    ITEM_NOT_FOUND,
+    PURCHASE_FAILED_RETRY,
+    item_action_failed,
+)
 from core.support.panel_v2 import as_panel_v2, edit_panel_v2
 from cogs import general as wallet_module  # INSUFFICIENT は実行時に引く（テストの cog 再読込で同一性が崩れないため）
 
@@ -370,7 +376,7 @@ class ItemsCog(commands.Cog):
             if debit is wallet_module.INSUFFICIENT:
                 return item_action_failed("コインが不足しています。")
             if debit is None:
-                return item_action_failed("コインの更新に失敗しました。時間をおいて再試行してください。")
+                return item_action_failed(COIN_UPDATE_FAILED_RETRY)
             try:
                 held = self.store.add(uid, item_id, count)
             except items_core.ItemError as exc:
@@ -397,7 +403,7 @@ class ItemsCog(commands.Cog):
             return item_action_failed(exc)
         except Exception:
             logger.exception("items: 購入処理に失敗 user=%s item=%s count=%s", uid, item_id, count)
-            return item_action_failed("購入中にエラーが発生しました。時間をおいて再試行してください。")
+            return item_action_failed(PURCHASE_FAILED_RETRY)
 
     async def execute_sell(self, user_id: int, item_id: str, count: int) -> str:
         uid = str(user_id)

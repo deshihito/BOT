@@ -23,6 +23,7 @@ import config
 from core.game.clan import clan as clan_core
 from core.game.gacha import gacha as gacha_core
 from core.game.game import prison as prison_core
+from core.support.messages import COIN_UPDATE_FAILED_UNCHANGED
 from core.support.panel_v2 import as_panel_v2, edit_panel_v2
 from cogs import general as wallet_module
 
@@ -263,7 +264,7 @@ class GachaCog(commands.Cog):
         if debit is wallet_module.INSUFFICIENT:
             return f"コインが足りません（{price:,} AGO 必要です）。"
         if debit is None:
-            return "コインの更新に失敗しました。残高は変わっていません。"
+            return COIN_UPDATE_FAILED_UNCHANGED
         await self._record_history(uid, "gacha", price, gacha_core.HISTORY_REASON)
         try:
             # 天井（S6-2）: SSR が出ていない累計が上限に届く抽選は SSR 確定。

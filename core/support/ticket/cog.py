@@ -562,7 +562,7 @@ class TicketCog(commands.Cog):
             await room.send(
                 embed=discord.Embed(
                     title="チケットルーム",
-                    description="お問い合わせ内容を送信してください。下の操作パネルからルームを閉じる・再開する・削除することができます。" + type_line,
+                    description="お問い合わせ内容を送信してください。下のパネルでルームを閉じる・再開・削除できます。" + type_line,
                     color=0xFFFFFF,
                 ),
                 view=TicketRoomView(room.id, assignable=True),

@@ -92,8 +92,7 @@ def build_panel_embed() -> discord.Embed:
     return discord.Embed(
         title="投票",
         description=(
-            "下の「投票を作成」ボタンから、質問と選択肢を入力して投票を作れます。"
-            "\n作成した投票には、その場で投票できます。"
+            "作成した投票には、その場で投票できます。"
             "\n締め切りは作成者か「サーバーの管理」権限を持つ人が操作できます。"
         ),
         color=0xFFFFFF,

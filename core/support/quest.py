@@ -6,6 +6,7 @@ from .common import *
 from .common import _support_int
 from .sns import SnsError, parse_rss_feed, sns_epoch
 from core.support.emojis import FAILED
+from core.support.messages import SETTINGS_UPDATE_FAILED
 
 
 # ===== Discord Quest 通知 ==============================================
@@ -648,7 +649,7 @@ class QuestNotifyPanel(discord.ui.LayoutView):
         except Exception:
             logger.exception("Quest通知設定の更新に失敗しました")
             return await interaction.followup.send(
-                "設定の更新に失敗しました。時間をおいて再度お試しください。解決しない場合はBotの運営に連絡してください。",
+                SETTINGS_UPDATE_FAILED,
                 ephemeral=True,
             )
         await self.refresh(interaction, notice)
