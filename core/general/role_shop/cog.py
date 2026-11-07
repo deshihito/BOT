@@ -29,7 +29,7 @@ from core.support import guild_settings
 from core.game.game import prison as prison_core
 from core.general.role_shop import role_shop as shop_core
 from core.support.panel_v2 import as_panel_v2, edit_panel_v2
-from cogs import wallet as wallet_module
+from cogs import general as wallet_module
 
 logger = logging.getLogger(__name__)
 
