@@ -17,10 +17,14 @@ EmbedSource = Union[discord.Embed, Callable[[], discord.Embed]]
 class PublicShareView(discord.ui.View):
     """ephemeral な結果表示に付ける「公開で出す」ボタン。"""
 
-    def __init__(self, owner_id: int, embed_source: EmbedSource, *, timeout: float = 300):
+    def __init__(self, owner_id: int, embed_source: EmbedSource, *, timeout: float = 300,
+                 file_factory=None):
         super().__init__(timeout=timeout)
         self.owner_id = owner_id
         self._embed_source = embed_source
+        # 画像つき表示では、公開時にも同じ画像を添付し直すための工場を持つ
+        # （discord.File は送信ごとに使い回せないため、呼ぶたびに作る）。
+        self._file_factory = file_factory
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         return interaction.user.id == self.owner_id
@@ -34,5 +38,9 @@ class PublicShareView(discord.ui.View):
         if interaction.channel is None:
             return await interaction.response.send_message(
                 "公開できるチャンネルがありません。", ephemeral=True)
-        await interaction.channel.send(embed=self._embed())
+        if self._file_factory is not None:
+            await interaction.channel.send(embed=self._embed(),
+                                           file=self._file_factory())
+        else:
+            await interaction.channel.send(embed=self._embed())
         await interaction.response.send_message("チャンネルに公開しました。", ephemeral=True)

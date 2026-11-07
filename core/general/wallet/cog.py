@@ -2,6 +2,7 @@ import discord
 from discord.ext import commands
 from discord import app_commands
 import asyncio
+import io
 import logging
 import config
 import os
@@ -10,6 +11,14 @@ from core.support.api_client import APIError
 from core.support.api_retry import run_with_retry
 from core.game.game import prison as prison_core
 from core.general.user_names import resolve_display_names
+from core.leaderboard_image import (
+    BoardRow, fetch_avatar_bytes, fmt_int, render_leaderboard_png,
+)
+
+COIN_BOARD_FILENAME = "coin_leaderboard.png"
+ASSET_BOARD_FILENAME = "asset_leaderboard.png"
+COIN_ACCENT = (217, 164, 32)
+ASSET_ACCENT = (13, 148, 136)
 
 logger = logging.getLogger(__name__)
 
@@ -364,18 +373,29 @@ class WalletCog(commands.Cog):
                 await interaction.followup.send("まだランキングに載っている人がいません。")
                 return
 
-            embed = discord.Embed(title="コイン保有ランキング（TOP 10）", color=0xf1c40f)
             # ランキングは全サーバー横断のため、メンションだと「不明のユーザー」に
             # なる。氏名は通常表記で解決する（core/general/user_names.py）。
             names = await resolve_display_names(
                 self.bot, [int(record["user_id"]) for record in data])
-            lines = []
-            for index, record in enumerate(data, start=1):
+            rows = []
+            for record in data:
                 user_id = int(record["user_id"])
-                name = names.get(user_id, "")
-                lines.append(f"**{index}位** {name}：{int(record.get('balance') or 0):,} AGO")
-            embed.description = "\n".join(lines)
-            await interaction.followup.send(embed=embed)
+                rows.append(BoardRow(
+                    user_id=user_id,
+                    name=names.get(user_id, ""),
+                    value=f"{fmt_int(record.get('balance') or 0)} AGO"))
+            avatars = await fetch_avatar_bytes(
+                self.bot, [row.user_id for row in rows])
+            png = await asyncio.to_thread(
+                render_leaderboard_png,
+                title="コイン保有ランキング", sections=[(None, rows)],
+                accent=COIN_ACCENT, avatars=avatars,
+                cache_namespace="coin-leaderboard")
+            embed = discord.Embed(title="コイン保有ランキング（TOP 10）", color=0xf1c40f)
+            embed.set_image(url=f"attachment://{COIN_BOARD_FILENAME}")
+            await interaction.followup.send(
+                embed=embed,
+                file=discord.File(io.BytesIO(png), filename=COIN_BOARD_FILENAME))
         except Exception:
             traceback.print_exc()
             await interaction.followup.send("ランキングの取得中にエラーが発生しました。", ephemeral=True)
@@ -413,18 +433,29 @@ class WalletCog(commands.Cog):
             if not ranking:
                 await interaction.followup.send("まだランキングに載っている人がいません。")
                 return
-            embed = discord.Embed(title="総合資産ランキング（TOP 10）", color=0xf1c40f)
             names = await resolve_display_names(
                 self.bot, [int(row["user_id"]) for row in ranking])
-            lines = []
-            for index, row in enumerate(ranking, start=1):
+            rows = []
+            for row in ranking:
                 user_id = int(row["user_id"])
-                name = names.get(user_id, "")
-                lines.append(
-                    f"**{index}位** {name}：{row['total']:,} AGO"
-                    f"（コイン {row['balance']:,}＋トークン {row['token_value']:,}）")
-            embed.description = "\n".join(lines)
-            await interaction.followup.send(embed=embed)
+                rows.append(BoardRow(
+                    user_id=user_id,
+                    name=names.get(user_id, ""),
+                    value=f"{fmt_int(row['total'])} AGO",
+                    sub=(f"コイン {fmt_int(row['balance'])}"
+                         f"＋トークン {fmt_int(row['token_value'])}")))
+            avatars = await fetch_avatar_bytes(
+                self.bot, [row.user_id for row in rows])
+            png = await asyncio.to_thread(
+                render_leaderboard_png,
+                title="総合資産ランキング", sections=[(None, rows)],
+                accent=ASSET_ACCENT, avatars=avatars,
+                cache_namespace="asset-leaderboard")
+            embed = discord.Embed(title="総合資産ランキング（TOP 10）", color=0xf1c40f)
+            embed.set_image(url=f"attachment://{ASSET_BOARD_FILENAME}")
+            await interaction.followup.send(
+                embed=embed,
+                file=discord.File(io.BytesIO(png), filename=ASSET_BOARD_FILENAME))
         except Exception:
             traceback.print_exc()
             await interaction.followup.send("ランキングの取得中にエラーが発生しました。", ephemeral=True)

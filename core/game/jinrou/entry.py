@@ -25,6 +25,11 @@ from core.game.jinrou.lifecycle import logger, LifecycleMixin  # noqa: F401
 from core.game.jinrou.ratings import logger, calculate_elo_change, can_end_game  # noqa: F401
 from core.game.jinrou.results import logger, ResultsMixin  # noqa: F401
 from core.game.jinrou.views import logger, SetupView, AdvancedSetupView, RecruitView, ReplayView, GlobalChannelProxy, GlobalJoinView, RoleCheckView, NightActionView, ActionSelectView, PublicVoteView, ChairmanVoteView  # noqa: F401
+from core.leaderboard_image import (
+    BoardRow, fetch_avatar_bytes, render_leaderboard_png,
+)
+
+JINROU_ACCENT = (185, 28, 28)
 
 logger = logging.getLogger("cogs.jinrou")
 
@@ -100,6 +105,46 @@ class JinrouCog(LifecycleMixin, GameLoopMixin, AutoplayMixin, ResultsMixin, comm
             description=f"**{user.display_name}** さんのレート: {rating:.0f} pts\n\n**レート上位10人**\n{ranking_text}",
             color=0xFFFFFF,
         )
+
+    async def rating_board(self, user):
+        """/game の人狼画面の「レート」用: (embed, PNG bytes or None)。
+
+        自分のレートは embed 本文に残し、上位10人は白基調の画像で出す。
+        ランキングデータが無いときは従来のテキスト embed（PNG は None）。
+        """
+        rating = await get_player_rating(user.id)
+        rankings = await get_top_ratings(10)
+        entries = list(rankings or [])
+        if not entries:
+            embed = await self.rating_embed(user)
+            return embed, None
+        names = await resolve_display_names(
+            self.bot, [entry["player_id"] for entry in entries])
+        rows = []
+        for entry in entries:
+            player_id = entry["player_id"]
+            try:
+                uid = int(player_id)
+                name = names.get(uid) or fallback_name(player_id)
+            except (TypeError, ValueError):
+                uid = None
+                name = fallback_name(player_id)
+            rows.append(BoardRow(user_id=uid, name=name,
+                                 value=f"{entry['rating']:.0f} pts"))
+        avatars = await fetch_avatar_bytes(
+            self.bot, [row.user_id for row in rows if row.user_id is not None])
+        png = await asyncio.to_thread(
+            render_leaderboard_png,
+            title="人狼レーティング", subtitle="レート上位10人",
+            sections=[(None, rows)], accent=JINROU_ACCENT, avatars=avatars,
+            cache_namespace="jinrou-rating")
+        embed = discord.Embed(
+            title="人狼レーティング",
+            description=f"**{user.display_name}** さんのレート: {rating:.0f} pts",
+            color=0xFFFFFF,
+        )
+        embed.set_image(url="attachment://jinrou_rating.png")
+        return embed, png
 
     async def _process_elo_ratings(self, game, winner_is_wolf: bool):
         """ゲーム結果をもとにEloレーティングを更新"""

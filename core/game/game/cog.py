@@ -6,6 +6,7 @@
 （!doubt）と同じ流れになる。案内文は core/game/game/game_guides.py。
 """
 import asyncio
+import io
 import logging
 
 import discord
@@ -28,6 +29,9 @@ from core.game.game.game_guides import (
 from core.support.panel_v2 import as_panel_v2, edit_panel_v2
 from core.support.public_share import PublicShareView
 from core.general.user_names import resolve_display_names
+from core.leaderboard_image import (
+    BoardRow, fetch_avatar_bytes, render_leaderboard_png,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -167,42 +171,97 @@ def rules_embed(game_id: str) -> discord.Embed:
     return embed
 
 
-async def monthly_embed(guild_id, bot=None) -> discord.Embed:
-    """今月のゲーム王: その月の全ゲーム合計勝利数の上位（月次シーズン）。"""
+KING_BOARD_FILENAME = "game_king.png"
+RANKING_BOARD_FILENAME = "game_ranking.png"
+GAME_ACCENT = (88, 101, 242)
+KING_ACCENT = (217, 164, 32)
+
+
+async def monthly_board(guild_id, bot=None):
+    """今月のゲーム王ボード: (embed, PNG bytes or None) を返す。
+
+    記録があるときは順位表を白基調の画像にして embed に添付する形にし、
+    無いときは従来どおり案内文の embed（PNG は None）。
+    """
     month = party_ranking.current_month()
     rows = await party_ranking.shared().monthly_top(guild_id, limit=10) if guild_id else []
+    year, mon = month.split("-")
+    title = f"今月のゲーム王（{int(year)}年{int(mon)}月）"
+    png = None
     if rows:
-        medals = {1: "👑", 2: "🥈", 3: "🥉"}
         # 氏名はメンションではなく通常表記（サーバー外・退室済みだと unknown になるため）
         names = await resolve_display_names(bot, [uid for uid, _wins in rows])
-        lines = [f"{medals.get(i, f'{i}.')} {names.get(int(uid), '')} — {wins}勝" for i, (uid, wins) in enumerate(rows, 1)]
-        text = "\n".join(lines)
+        board_rows = [BoardRow(user_id=int(uid), name=names.get(int(uid), ""),
+                               value=f"{wins}勝")
+                      for uid, wins in rows]
+        avatars = await fetch_avatar_bytes(bot, [r.user_id for r in board_rows])
+        png = await asyncio.to_thread(
+            render_leaderboard_png,
+            title="今月のゲーム王", subtitle=f"{int(year)}年{int(mon)}月",
+            sections=[(None, board_rows)], accent=KING_ACCENT,
+            avatars=avatars, cache_namespace="game-king")
+        embed = discord.Embed(title=title, color=HUB_COLOR)
+        embed.set_image(url=f"attachment://{KING_BOARD_FILENAME}")
     else:
-        text = "今月はまだ記録がありません。ゲームに勝って最初のゲーム王を目指しましょう。"
-    year, mon = month.split("-")
-    embed = discord.Embed(title=f"今月のゲーム王（{int(year)}年{int(mon)}月）", description=text, color=HUB_COLOR)
+        embed = discord.Embed(
+            title=title, color=HUB_COLOR,
+            description="今月はまだ記録がありません。ゲームに勝って最初のゲーム王を目指しましょう。")
     embed.set_footer(text="月が変わると集計はリセットされます（累積のランキングは各ゲームの画面で見られます）。")
+    return embed, png
+
+
+async def monthly_embed(guild_id, bot=None) -> discord.Embed:
+    """今月のゲーム王: その月の全ゲーム合計勝利数の上位（月次シーズン）。"""
+    embed, _png = await monthly_board(guild_id, bot=bot)
     return embed
 
 
-async def ranking_embed(guild_id, game_id: str, bot=None) -> discord.Embed:
+async def ranking_board(guild_id, game_id: str, bot=None):
+    """ゲーム別サーバーランキングボード: (embed, PNG bytes or None)。
+
+    勝利数ランキングと（対象ゲームでは）Elo レート上位を1枚の画像にし、
+    記録が無いときは従来どおり「まだ記録がありません。」の embed。
+    """
     guide = GAME_GUIDES[game_id]
     rows = await party_ranking.shared().top(guild_id, game_id, limit=10) if guild_id else []
-    if rows:
-        medals = {1: "🥇", 2: "🥈", 3: "🥉"}
-        names = await resolve_display_names(bot, [uid for uid, _wins in rows])
-        lines = [f"{medals.get(i, f'{i}.')} {names.get(int(uid), '')} — {wins}勝" for i, (uid, wins) in enumerate(rows, 1)]
-        text = "\n".join(lines)
-    else:
-        text = "まだ記録がありません。"
-    embed = discord.Embed(title=f"{guide['name']} のサーバーランキング", description=text, color=HUB_COLOR)
+    elo_rows = []
     if game_id in elo.GAMES and guild_id:
-        rows = elo.shared().top(guild_id, game_id, limit=10)
-        if rows:
-            names = await resolve_display_names(bot, [uid for uid, *_rest in rows])
-            lines = [f"{i}. {names.get(int(uid), '')} — レート {rating:.0f}（{wins}勝{losses}敗{draws}分）"
-                     for i, (uid, rating, wins, losses, draws) in enumerate(rows, 1)]
-            embed.add_field(name="📈 レート上位（対人戦）", value="\n".join(lines)[:1024], inline=False)
+        elo_rows = elo.shared().top(guild_id, game_id, limit=10)
+    embed = discord.Embed(title=f"{guide['name']} のサーバーランキング", color=HUB_COLOR)
+    if not rows and not elo_rows:
+        embed.description = "まだ記録がありません。"
+        return embed, None
+    sections = []
+    avatars: dict = {}
+    if rows:
+        names = await resolve_display_names(bot, [uid for uid, _wins in rows])
+        win_rows = [BoardRow(user_id=int(uid), name=names.get(int(uid), ""),
+                             value=f"{wins}勝")
+                    for uid, wins in rows]
+        sections.append((None, win_rows))
+        avatars.update(await fetch_avatar_bytes(
+            bot, [r.user_id for r in win_rows]))
+    if elo_rows:
+        names = await resolve_display_names(bot, [uid for uid, *_rest in elo_rows])
+        rate_rows = [
+            BoardRow(user_id=int(uid), name=names.get(int(uid), ""),
+                     value=f"レート {rating:.0f}",
+                     sub=f"{wins}勝{losses}敗{draws}分")
+            for uid, rating, wins, losses, draws in elo_rows]
+        sections.append(("レート上位（対人戦）", rate_rows))
+        avatars.update(await fetch_avatar_bytes(
+            bot, [r.user_id for r in rate_rows]))
+    png = await asyncio.to_thread(
+        render_leaderboard_png,
+        title=f"{guide['name']} のサーバーランキング",
+        sections=sections, accent=GAME_ACCENT, avatars=avatars,
+        podium=bool(rows), cache_namespace=f"game-ranking-{game_id}")
+    embed.set_image(url=f"attachment://{RANKING_BOARD_FILENAME}")
+    return embed, png
+
+
+async def ranking_embed(guild_id, game_id: str, bot=None) -> discord.Embed:
+    embed, _png = await ranking_board(guild_id, game_id, bot=bot)
     return embed
 
 
@@ -386,7 +445,13 @@ class GameHubView(discord.ui.View):
             self.add_item(ShortcutCommitButton("game"))
 
     async def _monthly_callback(self, interaction: discord.Interaction):
-        await interaction.response.send_message(embed=await monthly_embed(interaction.guild_id, bot=getattr(self.cog, "bot", None)))
+        embed, png = await monthly_board(interaction.guild_id, bot=getattr(self.cog, "bot", None))
+        if png is not None:
+            await interaction.response.send_message(
+                embed=embed,
+                file=discord.File(io.BytesIO(png), filename=KING_BOARD_FILENAME))
+        else:
+            await interaction.response.send_message(embed=embed)
 
     def shortcut_action(self):
         return None
@@ -632,7 +697,13 @@ class GameDetailView(discord.ui.View):
 
     @discord.ui.button(label="ランキング", style=discord.ButtonStyle.primary, row=3, custom_id="panel:game:ranking")
     async def ranking(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.send_message(embed=await ranking_embed(interaction.guild_id, self.game_id, bot=getattr(self.cog, "bot", None)))
+        embed, png = await ranking_board(interaction.guild_id, self.game_id, bot=getattr(self.cog, "bot", None))
+        if png is not None:
+            await interaction.response.send_message(
+                embed=embed,
+                file=discord.File(io.BytesIO(png), filename=RANKING_BOARD_FILENAME))
+        else:
+            await interaction.response.send_message(embed=embed)
 
     @discord.ui.button(label="レート", style=discord.ButtonStyle.primary, row=4, custom_id="panel:game:rating")
     async def rating(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -641,6 +712,22 @@ class GameDetailView(discord.ui.View):
             return await interaction.response.send_message(
                 embed=discord.Embed(description="人狼 は現在利用できません。", color=HUB_COLOR), ephemeral=True)
         # ephemeral第2波方針: 既定で公開する（第1波の選択式から反転）。
+        board_fn = getattr(cog, "rating_board", None)
+        if board_fn is not None:
+            embed, png = await board_fn(interaction.user)
+            file_factory = None
+            if png is not None:
+                def file_factory(png=png):
+                    return discord.File(io.BytesIO(png),
+                                        filename="jinrou_rating.png")
+            view = PublicShareView(interaction.user.id, embed,
+                                   file_factory=file_factory)
+            if file_factory is not None:
+                await interaction.response.send_message(
+                    embed=embed, view=view, file=file_factory())
+            else:
+                await interaction.response.send_message(embed=embed, view=view)
+            return
         embed = await cog.rating_embed(interaction.user)
         await interaction.response.send_message(
             embed=embed, view=PublicShareView(interaction.user.id, embed))

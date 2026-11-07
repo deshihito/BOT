@@ -1,4 +1,5 @@
 import asyncio
+import io
 import logging
 import re
 import socket
@@ -18,6 +19,11 @@ from core.game.rta.common import *  # noqa: F401,F403 - shared constants/helpers
 from core.game.rta.helpers import _white_embed  # noqa: F401
 from core.general.user_names import resolve_display_names
 from core.game.rta.views import BumpRtaRoleView  # noqa: F401
+from core.leaderboard_image import (
+    BoardRow, fetch_avatar_bytes, render_leaderboard_png,
+)
+
+RTA_BOARD_FILENAME = "rta_leaderboard.png"
 
 logger = logging.getLogger("cogs.disboard_rta")
 
@@ -142,8 +148,6 @@ class SettingsMixin:
                 rows = await self._call(lambda: self.db.rpc(rpc_name, {
                     "p_event_type": event_type, "p_limit": 10}).execute())
                 data = rows.data or []
-                names = await resolve_display_names(bot, [r["user_id"] for r in data])
-                lines = [f"**{i}.** {names.get(int(r['user_id']), '')} — **{r['elapsed_ms'] / 1000:.2f}秒**（{r['attempts']}回）" for i, r in enumerate(data, 1)]
                 title = f"全サーバー {event_type} {'最遅ランキング' if slowest else 'RTAランキング'}"
             else:
                 record_table = "bump_rta_worst_records" if slowest else "bump_rta_records"
@@ -151,11 +155,34 @@ class SettingsMixin:
                     "user_id,elapsed_ms,completed_at").eq("guild_id", str(interaction.guild_id)).eq(
                     "event_type", event_type).order("elapsed_ms", desc=slowest).limit(10).execute())
                 data = rows.data or []
-                names = await resolve_display_names(bot, [r["user_id"] for r in data])
-                lines = [f"**{i}.** {names.get(int(r['user_id']), '')} — **{r['elapsed_ms'] / 1000:.2f}秒**" for i, r in enumerate(data, 1)]
                 title = f"このサーバー {event_type} {'最遅ランキング' if slowest else 'RTAランキング'}"
+            if not data:
+                return await interaction.followup.send(
+                    embed=_white_embed(f"**{title}**\nまだ記録がありません。"),
+                    allowed_mentions=discord.AllowedMentions.none(),
+                )
+            names = await resolve_display_names(bot, [r["user_id"] for r in data])
+            board_rows = []
+            for r in data:
+                board_rows.append(BoardRow(
+                    user_id=int(r["user_id"]),
+                    name=names.get(int(r["user_id"]), ""),
+                    value=f"{r['elapsed_ms'] / 1000:.2f}秒",
+                    sub=(f"{r['attempts']}回" if scope == "global"
+                         and r.get("attempts") is not None else "")))
+            avatars = await fetch_avatar_bytes(
+                bot, [row.user_id for row in board_rows])
+            accent = (37, 99, 235) if event_type == "bump" else (147, 51, 234)
+            png = await asyncio.to_thread(
+                render_leaderboard_png,
+                title=title, sections=[(None, board_rows)], accent=accent,
+                avatars=avatars,
+                cache_namespace=f"rta-{event_type}-{scope}")
+            embed = discord.Embed(title=title, color=0xFFFFFF)
+            embed.set_image(url=f"attachment://{RTA_BOARD_FILENAME}")
             return await interaction.followup.send(
-                embed=_white_embed(f"**{title}**\n" + ("\n".join(lines) if lines else "まだ記録がありません。")),
+                embed=embed,
+                file=discord.File(io.BytesIO(png), filename=RTA_BOARD_FILENAME),
                 allowed_mentions=discord.AllowedMentions.none(),
             )
         except Exception as e:

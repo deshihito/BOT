@@ -115,12 +115,19 @@ class RankingButtonTest(unittest.IsolatedAsyncioTestCase):
         await party_ranking.shared().record_win(1, 7, "ngword")
         await party_ranking.shared().record_win(1, 7, "ngword")
         await party_ranking.shared().record_win(1, 8, "ngword")
-        embed = await game.ranking_embed(1, "ngword")
+        embed, png = await game.ranking_board(1, "ngword")
         self.assertIn("NGワード", embed.title)
-        # 氏名はメンションではなく通常表記（bot 未指定時は ID フォールバック）
-        self.assertTrue(embed.description.startswith("🥇 ユーザー(…0007) — 2勝"))
-        self.assertIn("ユーザー(…0008) — 1勝", embed.description)
-        self.assertNotIn("<@", embed.description)
+        # 記録があるときは順位表を画像で出し、embed は添付を指す
+        self.assertIsNotNone(png)
+        self.assertTrue(png.startswith(b"\x89PNG"))
+        self.assertEqual(embed.image.url, "attachment://game_ranking.png")
+        # 集計そのものは従来どおり（勝利数の多い順）
+        rows = await party_ranking.shared().top(1, "ngword", limit=10)
+        self.assertEqual(rows, [(7, 2), (8, 1)])
+        # ranking_embed は embed だけを返す互換ラッパ
+        embed_only = await game.ranking_embed(1, "ngword")
+        self.assertEqual(embed_only.title, embed.title)
+        self.assertNotIn("<@", embed_only.title)
 
     async def test_ranking_button_in_detail_view(self):
         guild = FakeGuild()
