@@ -461,7 +461,7 @@ class GeneralCog(
                 return await market_cog.open_buy(interaction)
             return await market_cog.open_sell(interaction)
 
-        if value in {"pay", "status", "coin_leaderboard", "asset_leaderboard", "bump_leaderboard", "up_leaderboard"}:
+        if value in {"pay", "status", "coin_leaderboard", "asset_leaderboard", "bump_leaderboard", "up_leaderboard", "bump_slowest", "up_slowest"}:
             if wallet is None:
                 return await self._safe_respond(interaction, "WalletCogが読み込まれていません。")
             if value == "pay":
@@ -473,6 +473,11 @@ class GeneralCog(
             if value == "asset_leaderboard":
                 return await wallet.leaderboard(
                     interaction, app_commands.Choice(name="asset", value="asset"))
+            if value.endswith("_slowest"):
+                event_type = value.removesuffix("_slowest")
+                return await wallet.leaderboard(
+                    interaction, app_commands.Choice(name=event_type, value=event_type),
+                    slowest=True)
             event_type = value.removesuffix("_leaderboard")
             return await wallet.leaderboard(
                 interaction, app_commands.Choice(name=event_type, value=event_type)

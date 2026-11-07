@@ -106,44 +106,54 @@ class SettingsMixin:
             on_conflict="guild_id").execute())
 
 
-    async def leaderboard(self, interaction: discord.Interaction, event_type: str = "bump", scope: str = "local"):
-        """/leaderboard から呼び出す bump/up RTA ランキング。"""
+    async def leaderboard(self, interaction: discord.Interaction, event_type: str = "bump", scope: str = "local", slowest: bool = False):
+        """/leaderboard から呼び出す bump/up RTA ランキング。
+
+        slowest=True のときは同じ指標（実行可能になってから実際に実行する
+        までの経過時間）を降順に並べた「最遅ランキング」を出す。最速側の
+        記録（bump_rta_records）とは別テーブル bump_rta_worst_records を
+        読み、最速ボードの意味は変えない。
+        """
         if self.db is None:
             return await interaction.followup.send(
                 embed=_white_embed("Supabase未接続のため順位を取得できません。"), ephemeral=True)
         try:
             if scope == "me":
                 uid, gid = str(interaction.user.id), str(interaction.guild_id)
-                local = await self._call(lambda: self.db.table("bump_rta_records").select(
+                record_table = "bump_rta_worst_records" if slowest else "bump_rta_records"
+                local = await self._call(lambda: self.db.table(record_table).select(
                     "elapsed_ms,completed_at").eq("guild_id", gid).eq("user_id", uid).eq("event_type", event_type).order(
-                        "elapsed_ms").limit(1).execute())
+                        "elapsed_ms", desc=slowest).limit(1).execute())
                 global_best = await self._call(lambda: self.db.table("bump_rta_events").select(
-                    "elapsed_ms,completed_at").eq("user_id", uid).eq("event_type", event_type).order("elapsed_ms").limit(1).execute())
+                    "elapsed_ms,completed_at").eq("user_id", uid).eq("event_type", event_type).order("elapsed_ms", desc=slowest).limit(1).execute())
                 local_text = f"{local.data[0]['elapsed_ms'] / 1000:.2f}秒" if local.data else "記録なし"
                 global_text = f"{global_best.data[0]['elapsed_ms'] / 1000:.2f}秒" if global_best.data else "記録なし"
+                label = "最遅記録" if slowest else "自己ベスト"
                 return await interaction.followup.send(
                     embed=_white_embed(
-                        f"{interaction.user.display_name} の**{event_type}自己ベスト**\nこのサーバー: **{local_text}**\n全サーバー: **{global_text}**"),
+                        f"{interaction.user.display_name} の**{event_type}{label}**\nこのサーバー: **{local_text}**\n全サーバー: **{global_text}**"),
                     allowed_mentions=discord.AllowedMentions.none(),
                 )
             # ランキングの氏名はメンションではなく通常表記にする（特に全サーバー
             # ランキングはサーバー外ユーザーのメンションが「不明のユーザー」になる）。
             bot = getattr(self, "bot", None)
             if scope == "global":
-                rows = await self._call(lambda: self.db.rpc("get_bump_rta_global_ranking", {
+                rpc_name = "get_bump_rta_global_slowest_ranking" if slowest else "get_bump_rta_global_ranking"
+                rows = await self._call(lambda: self.db.rpc(rpc_name, {
                     "p_event_type": event_type, "p_limit": 10}).execute())
                 data = rows.data or []
                 names = await resolve_display_names(bot, [r["user_id"] for r in data])
                 lines = [f"**{i}.** {names.get(int(r['user_id']), '')} — **{r['elapsed_ms'] / 1000:.2f}秒**（{r['attempts']}回）" for i, r in enumerate(data, 1)]
-                title = f"全サーバー {event_type} RTAランキング"
+                title = f"全サーバー {event_type} {'最遅ランキング' if slowest else 'RTAランキング'}"
             else:
-                rows = await self._call(lambda: self.db.table("bump_rta_records").select(
+                record_table = "bump_rta_worst_records" if slowest else "bump_rta_records"
+                rows = await self._call(lambda: self.db.table(record_table).select(
                     "user_id,elapsed_ms,completed_at").eq("guild_id", str(interaction.guild_id)).eq(
-                    "event_type", event_type).order("elapsed_ms").limit(10).execute())
+                    "event_type", event_type).order("elapsed_ms", desc=slowest).limit(10).execute())
                 data = rows.data or []
                 names = await resolve_display_names(bot, [r["user_id"] for r in data])
                 lines = [f"**{i}.** {names.get(int(r['user_id']), '')} — **{r['elapsed_ms'] / 1000:.2f}秒**" for i, r in enumerate(data, 1)]
-                title = f"このサーバー {event_type} RTAランキング"
+                title = f"このサーバー {event_type} {'最遅ランキング' if slowest else 'RTAランキング'}"
             return await interaction.followup.send(
                 embed=_white_embed(f"**{title}**\n" + ("\n".join(lines) if lines else "まだ記録がありません。")),
                 allowed_mentions=discord.AllowedMentions.none(),
