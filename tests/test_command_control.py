@@ -1,4 +1,4 @@
-"""BOT fixer ①: AGOコマンド制限（core/command_control.py）のテスト。
+"""BOT fixer ①: AGOコマンド制限（core/support/command_control.py）のテスト。
 
 - 設定の保存/読込と既定（未設定では制限なし）
 - 判定ロジック（deny / allow / 管理者バイパス / 設定アクション自身の除外 / レート窓）
@@ -18,8 +18,9 @@ if str(ROOT) not in sys.path:
 for _name, _value in {"BOT_API_BASE_URL": "http://127.0.0.1:8787", "BOT_API_KEY": "dummy-key"}.items():
     os.environ.setdefault(_name, _value)
 
-from core import command_control, guild_settings  # noqa: E402
-from core.command_control import (  # noqa: E402
+from core.support import command_control
+from core.support import guild_settings  # noqa: E402
+from core.support.command_control import (  # noqa: E402
     COMMAND_CONTROL_SECTION,
     RateCounter,
     check,
@@ -228,7 +229,7 @@ class PanelTest(unittest.TestCase):
 
 class RegistryTest(unittest.TestCase):
     def test_bot_fixer_registered_in_moderation_and_ai_excluded(self):
-        from core import action_registry
+        from core.general import action_registry
 
         registry = action_registry.default_registry()
         spec = registry.get("support:bot_fixer")

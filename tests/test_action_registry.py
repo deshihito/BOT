@@ -17,8 +17,8 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from core import action_registry  # noqa: E402
-from core.action_registry import ActionRegistry, ActionSpec, ParamSpec  # noqa: E402
+from core.general import action_registry  # noqa: E402
+from core.general.action_registry import ActionRegistry, ActionSpec, ParamSpec  # noqa: E402
 
 # 従来 SHORTCUT_ROOTS の support に無かった15件（仕様書 §2.2）。
 MISSING_SUPPORT_VALUES = {

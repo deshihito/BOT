@@ -24,7 +24,7 @@ class LocaleCatalogTest(unittest.TestCase):
 
     def test_libretranslate_url_is_configurable(self):
         with patch.dict("os.environ", {"LIBRETRANSLATE_URL": "http://translate.internal:5000"}):
-            from core.libretranslate import LibreTranslateClient
+            from core.general.libretranslate import LibreTranslateClient
             client = LibreTranslateClient()
         self.assertEqual(client.base_url, "http://translate.internal:5000")
 

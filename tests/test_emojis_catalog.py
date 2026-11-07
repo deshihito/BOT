@@ -1,7 +1,7 @@
 import re
 import unittest
 
-from core import emojis
+from core.support import emojis
 
 PORTAL = {
     "game": "1564624331663745034", "book": "1564624329889681418",

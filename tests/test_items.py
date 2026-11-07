@@ -17,7 +17,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from core import action_registry
+from core.general import action_registry
 from core.general import items, market
 from cogs import wallet as wallet_module
 # cog は冒頭で import する: 他テストの cog 再読込後だと wallet の

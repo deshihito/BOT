@@ -6,7 +6,7 @@ import time
 from unittest.mock import patch
 
 import keep_alive
-from core.coder_service import CoderReply
+from core.general.coder_service import CoderReply
 
 
 class ReadyBot:

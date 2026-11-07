@@ -1,4 +1,4 @@
-"""BOT fixer ②: 他ボット発言制限（core/bot_control.py）のテスト。
+"""BOT fixer ②: 他ボット発言制限（core/support/bot_control.py）のテスト。
 
 - 設定の保存/読込と既定（未設定では何もしない）
 - 判定ロジック（許可チャンネル外／レート窓／許可チャンネル空のエントリは成立しない）
@@ -20,15 +20,16 @@ if str(ROOT) not in sys.path:
 for _name, _value in {"BOT_API_BASE_URL": "http://127.0.0.1:8787", "BOT_API_KEY": "dummy-key"}.items():
     os.environ.setdefault(_name, _value)
 
-from core import bot_control, guild_settings  # noqa: E402
-from core.bot_control import (  # noqa: E402
+from core.support import bot_control
+from core.support import guild_settings  # noqa: E402
+from core.support.bot_control import (  # noqa: E402
     BOT_CONTROL_SECTION,
     enforce_message,
     get_settings,
     normalize_settings,
     plan,
 )
-from core.command_control import RateCounter  # noqa: E402
+from core.support.command_control import RateCounter  # noqa: E402
 
 SELF_ID = 1111
 TARGET_ID = 2222

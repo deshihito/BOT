@@ -6,7 +6,7 @@
 import copy
 import unittest
 
-from core import action_registry, action_usage
+from core.general import action_registry, action_usage
 
 
 class MemoryStore:

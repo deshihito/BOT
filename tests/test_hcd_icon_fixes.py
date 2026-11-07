@@ -15,8 +15,8 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
-from core import messages  # noqa: E402
-from core.emojis import FAILED  # noqa: E402
+from core.support import messages  # noqa: E402
+from core.support.emojis import FAILED  # noqa: E402
 
 #: ⚠️ を FAILED 化したファイル（失敗・拒否メッセージの接頭辞があったもの）
 CONVERTED_FILES = [
@@ -28,7 +28,7 @@ CONVERTED_FILES = [
     "cogs/sio_saito.py",
     "cogs/sio_transcription.py",
     "cogs/sio_voicechanger.py",
-    "core/messages.py",
+    "core/support/messages.py",
     "core/vc/music/connection.py",
     "core/vc/globalvc/chat.py",
     "core/vc/globalvc/manage.py",

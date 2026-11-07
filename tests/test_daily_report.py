@@ -163,7 +163,7 @@ class SendTest(unittest.TestCase):
 
 class RegistryTest(unittest.TestCase):
     def test_daily_report_action_registered_and_blocked_for_ai(self):
-        from core.action_registry import default_registry
+        from core.general.action_registry import default_registry
 
         spec = default_registry().by_id("general:daily_report")
         self.assertEqual(spec.genre, "money")
