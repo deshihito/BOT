@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, patch
 
 import aiohttp
 
-from cogs.ai_tools import GENERIC_FAILURE_MESSAGE, AIToolsCog, _enabled, _resolve_invoker
+from cogs.general import GENERIC_FAILURE_MESSAGE, AIToolsCog, _enabled, _resolve_invoker
 from cogs.general import ShortcutMessageInteraction
 from core.general.ai import logfare
 from core.general.ai_tools import ai_tools_router
@@ -129,7 +129,7 @@ class AIToolsTest(unittest.IsolatedAsyncioTestCase):
             reply=AsyncMock(),
         )
         with patch.dict(os.environ, {"AITOOLS_ENABLED": "true"}), patch(
-            "cogs.ai_tools.logfare.api_key", return_value=None
+            "cogs.general.logfare.api_key", return_value=None
         ):
             await cog.on_message(message)
         message.reply.assert_awaited_once()
@@ -149,8 +149,8 @@ class AIToolsTest(unittest.IsolatedAsyncioTestCase):
             reply=AsyncMock(),
         )
         with patch.dict(os.environ, {"AITOOLS_ENABLED": "true"}), patch(
-            "cogs.ai_tools.logfare.api_key", return_value="configured"
-        ), patch("cogs.ai_tools.ai_tools_router.decide_action", new_callable=AsyncMock) as decide:
+            "cogs.general.logfare.api_key", return_value="configured"
+        ), patch("cogs.general.ai_tools_router.decide_action", new_callable=AsyncMock) as decide:
             await cog.on_message(message)
         message.reply.assert_awaited_once()
         self.assertIn("人間を特定できません", message.reply.await_args.args[0])
@@ -217,9 +217,9 @@ class AIToolsTest(unittest.IsolatedAsyncioTestCase):
             channel=types.SimpleNamespace(typing=AsyncMock()),
         )
         with patch.dict(os.environ, {"AITOOLS_ENABLED": "true"}), patch(
-            "cogs.ai_tools.logfare.api_key", return_value="configured"
+            "cogs.general.logfare.api_key", return_value="configured"
         ), patch(
-            "cogs.ai_tools.ai_tools_router.decide_action",
+            "cogs.general.ai_tools_router.decide_action",
             new_callable=AsyncMock,
             side_effect=ai_tools_router.AIToolsNoAction("不要"),
         ):
@@ -371,7 +371,7 @@ class AIToolsUnavailableTest(unittest.IsolatedAsyncioTestCase):
         cog = AIToolsCog(types.SimpleNamespace(user=bot_user))
         decision = AsyncMock(side_effect=asyncio.TimeoutError())
         with patch.dict(os.environ, {"AITOOLS_ENABLED": "true"}), patch(
-            "cogs.ai_tools.logfare.api_key", return_value="configured"
+            "cogs.general.logfare.api_key", return_value="configured"
         ), patch("core.general.ai_tools.ai_tools_router.logfare.decision", decision):
             await cog.on_message(message)
         message.reply.assert_awaited_once()
@@ -386,7 +386,7 @@ class AIToolsUnavailableTest(unittest.IsolatedAsyncioTestCase):
         cog = AIToolsCog(types.SimpleNamespace(user=bot_user))
         decision = AsyncMock(side_effect=logfare.LogfareHTTPError(401))
         with patch.dict(os.environ, {"AITOOLS_ENABLED": "true"}), patch(
-            "cogs.ai_tools.logfare.api_key", return_value="configured"
+            "cogs.general.logfare.api_key", return_value="configured"
         ), patch("core.general.ai_tools.ai_tools_router.logfare.decision", decision):
             await cog.on_message(message)
         message.reply.assert_awaited_once()
@@ -399,9 +399,9 @@ class AIToolsUnavailableTest(unittest.IsolatedAsyncioTestCase):
         bot_user, message = self._mention_message()
         cog = AIToolsCog(types.SimpleNamespace(user=bot_user))
         with patch.dict(os.environ, {"AITOOLS_ENABLED": "true"}), patch(
-            "cogs.ai_tools.logfare.api_key", return_value="configured"
+            "cogs.general.logfare.api_key", return_value="configured"
         ), patch(
-            "cogs.ai_tools.ai_tools_router.decide_action",
+            "cogs.general.ai_tools_router.decide_action",
             new_callable=AsyncMock,
             side_effect=ai_tools_router.AIToolsDecisionError(
                 "MIQ設定はAI toolsから実行できません。/general から開いてください。"

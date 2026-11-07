@@ -11,7 +11,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from cogs import d1_test  # noqa: E402
+from core.general.d1_test import cog as d1_test  # noqa: E402
 from core.support.stat import cog as stat  # noqa: E402
 from cogs.support import ALLOWED_USER_IDS  # noqa: E402
 

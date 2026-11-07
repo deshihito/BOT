@@ -13,7 +13,7 @@ import types
 import unittest
 from unittest.mock import AsyncMock, patch
 
-import cogs.general as general_module
+import core.general.entry as general_module
 from cogs.general import GeneralCog
 from core.support import guild_settings
 from core.support.storage import KVStore

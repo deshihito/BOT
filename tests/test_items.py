@@ -20,11 +20,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from core.general import action_registry
 from core.general.items import items
 from core.general.market import market
-from cogs import wallet as wallet_module
+from cogs import general as wallet_module
 # cog は冒頭で import する: 他テストの cog 再読込後だと wallet の
 # INSUFFICIENT と同一性が崩れるため（test_giveaway と同じ流儀）。
-from cogs.items import ItemsCog
-from cogs.market import MarketCog
+from cogs.general import ItemsCog
+from cogs.general import MarketCog
 
 
 def _store(tmp: str, rng=None) -> items.ItemStore:
