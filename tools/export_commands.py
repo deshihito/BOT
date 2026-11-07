@@ -4,7 +4,7 @@
     python -m tools.export_commands -o commands.json
 
 cogs/ の拡張をすべて、テストと同じようにオフラインで読み込み（ダミーのキー、ネットワークと
-外部コマンドの起動は禁止、作業フォルダは一時フォルダ）、core.command_catalog で JSON にする。
+外部コマンドの起動は禁止、作業フォルダは一時フォルダ）、core.help.help.command_catalog で JSON にする。
 読み込み中に cog が出すログは標準エラーへ回すので、標準出力には JSON だけが出る。
 """
 
@@ -130,7 +130,7 @@ async def load_offline_bot():
 
 
 def export_catalog() -> dict:
-    from core.command_catalog import build_catalog
+    from core.help.help.command_catalog import build_catalog
 
     async def run():
         bot, _ = await load_offline_bot()
