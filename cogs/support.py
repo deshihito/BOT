@@ -46,6 +46,10 @@ from discord.ext import commands
 
 logger = logging.getLogger("cogs.support")
 
+#: setup() で読み込みに失敗した機能 {ラベル: エラー文字列}。
+#: 起動前検査（tests/test_cog_loading.py）が参照する。
+FAILED_FEATURES: dict[str, str] = {}
+
 # =====================================================================
 # 基盤の名前（循環回避のため最初に確定させる）
 # =====================================================================
@@ -328,7 +332,8 @@ async def setup(bot: commands.Bot):
         try:
             _module = importlib.import_module(_module_path)
             await _module.setup(bot)
-        except Exception:
+        except Exception as _exc:  # noqa: BLE001 - 機能単位で分離する
+            FAILED_FEATURES[_label] = f"{type(_exc).__name__}: {_exc}"
             logger.exception("support 機能の読み込みに失敗しました: %s", _label)
 
 

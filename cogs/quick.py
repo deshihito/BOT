@@ -1,4 +1,7 @@
-"""Slim entry point for the quick cog.
+"""クイックコマンドの入口（cogs/ 6ファイル化で独立の入口を持つ）。
+
+対応表（機能 → 実装モジュール → Cog）:
+    quick   core/general/quick/cog.py   QuickCog
 
 The implementation lives in core.general.quick.cog; this module only
 re-exports its names so existing imports and patch targets on
