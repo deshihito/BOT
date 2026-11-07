@@ -28,7 +28,7 @@ import config
 from core.general import economy_pool as economy_core
 from core.general import items as items_core
 from core.general import market as market_core
-from core.game import prison as prison_core
+from core.game.game import prison as prison_core
 from core.support.messages import MARKET_INVALID_AMOUNT, market_trade_failed
 from core.support.panel_v2 import as_panel_v2, edit_panel_v2
 from cogs.wallet import INSUFFICIENT
