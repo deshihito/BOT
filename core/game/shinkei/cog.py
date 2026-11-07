@@ -6,23 +6,22 @@
 - 1〜6 人。参加順に手番。そろえば得点してもう一度、外れたら少し見せてから裏に戻して次の人へ。
 - 手番の時間切れでは core/autoplay.take_idle_turn で代わりにめくる（サーバー設定でオフなら手番を飛ばす）。
 - 全部そろったら、ペアの数が一番多い人の勝ち（同点は全員勝ち）。
-  勝利数は core/game/party_ranking.py に記録する（2 人以上の勝負のときだけ。ひとり遊びは数えない）。
+  勝利数は core/game/game/party_ranking.py に記録する（2 人以上の勝負のときだけ。ひとり遊びは数えない）。
 """
 import asyncio
 import logging
 import random
 
 import discord
-from core.game import game_panels, game_restore
-from core.game.game_v2 import GamePanelView, LobbyView, safe_delete, text_panel
+from core.game.game import game_panels, game_restore
+from core.game.game.game_v2 import GamePanelView, LobbyView, safe_delete, text_panel
 from core.support.emojis import CROCK
 
 logger = logging.getLogger(__name__)
 from core.support.messages import recruit_join_prompt
 from discord.ext import commands
 
-from core.game import autoplay, party_ranking
-
+from core.game.game import autoplay, party_ranking
 GAME_ID = "shinkei"
 party_ranking.register(GAME_ID)
 
@@ -345,7 +344,7 @@ class Shinkei(commands.Cog):
             "神経衰弱 終了", text + f"\n\n## 結果\n{g.score_text()[:1024] or '（なし）'}"))
 
     # ------------------------------------------------------------------
-    # 再起動復旧（core/game/game_restore.py）
+    # 再起動復旧（core/game/game/game_restore.py）
     # ------------------------------------------------------------------
     def _save_snapshot(self, g: ShinkeiGame) -> None:
         if g.phase != "playing":
