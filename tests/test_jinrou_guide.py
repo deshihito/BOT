@@ -48,10 +48,10 @@ class RoleIdTest(unittest.TestCase):
         self.assertTrue(guide.ROLE_URL_USE_SLUG)
         with patch.object(guide, "ROLE_URL_USE_SLUG", False):
             # False のときは encodeURIComponent(日本語の役職名)
-            self.assertEqual(guide.role_url("人狼"), "https://bot-deshihito.vercel.app/jinrou/roles/%E4%BA%BA%E7%8B%BC")
+            self.assertEqual(guide.role_url("人狼"), "https://agobot.app/jinrou/roles/%E4%BA%BA%E7%8B%BC")
         if True:
             self.assertEqual(guide.role_url("ハゲ"), f"{guide.ROLE_GUIDE_BASE_URL}/hage")
-            self.assertEqual(guide.role_url("人狼"), "https://bot-deshihito.vercel.app/jinrou/roles/werewolf")
+            self.assertEqual(guide.role_url("人狼"), "https://agobot.app/jinrou/roles/werewolf")
 
     def test_links_match_site_ids(self):
         import json, re

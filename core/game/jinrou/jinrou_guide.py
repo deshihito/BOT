@@ -13,7 +13,7 @@ import discord
 from core.game.game.game_v2 import text_panel
 
 # 役職ガイドのページ（TYPETA が作成中）。URL はここだけで管理する。
-ROLE_GUIDE_BASE_URL = "https://bot-deshihito.vercel.app/jinrou/roles"
+ROLE_GUIDE_BASE_URL = "https://agobot.app/jinrou/roles"
 
 # 役職ページの URL に ASCII の id を使うか（True: /jinrou/roles/werewolf など）。False にすると
 # 日本語の役職名を URL エンコードしたもの（encodeURIComponent 相当）を使う。
