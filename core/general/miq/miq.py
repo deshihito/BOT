@@ -599,6 +599,93 @@ def _miq_draw_units_line(layer, draw, x: float, y: float, line, size: int, prima
     return draw
 
 
+def _miq_units_width(draw, text, primary_path, size: int) -> float:
+    """単位幅の合計。絵文字が無ければ単一フォントの textlength と同一になるよう
+    そのまま測る（レイアウト幅が従来と変わらない）。"""
+    if not text:
+        return 0.0
+    chain = _miq_fallback_fonts(primary_path, size)
+    emoji_path = _miq_emoji_font_path()
+    units = _miq_split_units(text)
+    if not any(_miq_is_emoji_unit(u, emoji_path) for u in units):
+        try:
+            return float(draw.textlength(text, font=_miq_load_font(primary_path, size)))
+        except Exception:
+            logger.debug("MIQ: 名前幅の計測に失敗しました", exc_info=True)
+    return sum(_miq_unit_width(u, draw, chain, size, emoji_path) for u in units)
+
+
+def _miq_truncate_units(draw, text, primary_path, size: int, max_w: float, *, ellipsis: bool = True) -> str:
+    """_miq_truncate の単位版。絵文字の幅を正しく測り、単位単位で切る。
+    絵文字が無ければ単一フォント版と同一の結果になる。"""
+    if not text:
+        return text
+    chain = _miq_fallback_fonts(primary_path, size)
+    emoji_path = _miq_emoji_font_path()
+    units = _miq_split_units(text)
+    if not any(_miq_is_emoji_unit(u, emoji_path) for u in units):
+        font = _miq_load_font(primary_path, size)
+        if draw.textlength(text, font=font) <= max_w:
+            return text
+        while text and draw.textlength(text + ("…" if ellipsis else ""), font=font) > max_w:
+            text = text[:-1]
+        return text + ("…" if ellipsis else "")
+    ew = _miq_unit_width("…", draw, chain, size, emoji_path) if ellipsis else 0.0
+    total = sum(_miq_unit_width(u, draw, chain, size, emoji_path) for u in units)
+    if total <= max_w:
+        return text
+    out = []
+    w = 0.0
+    for unit in units:
+        uw = _miq_unit_width(unit, draw, chain, size, emoji_path)
+        if w + uw + ew > max_w:
+            break
+        out.append(unit)
+        w += uw
+    return "".join(out) + ("…" if ellipsis else "")
+
+
+def _miq_draw_name_units(layer, draw, x: float, y: float, text: str, size: int, primary_path, fill, *, anchor="la", stroke_width=0):
+    """表示名を単位ベースで描く。anchor は la/ma/mm/lm/ra。
+
+    絵文字が無ければ単一フォント描画と同一になるよう、従来の d.text を
+    そのまま使う。絵文字がある場合のみ単位ごとに描く（カラー絵文字を合成）。
+    垂直 "m" はフォントボックス (ascent+descent) の中央に合わせる。
+    戻り値は draw（_miq_draw_units_line と同じ流儀）。"""
+    if not text:
+        return draw
+    chain = _miq_fallback_fonts(primary_path, size)
+    emoji_path = _miq_emoji_font_path()
+    units = _miq_split_units(text)
+    if not any(_miq_is_emoji_unit(u, emoji_path) for u in units):
+        font = _miq_load_font(primary_path, size)
+        draw.text((x, y), text, font=font, fill=fill, anchor=anchor,
+                  stroke_width=stroke_width, stroke_fill=fill)
+        return draw
+    widths = [_miq_unit_width(u, draw, chain, size, emoji_path) for u in units]
+    total = sum(widths)
+    h = anchor[0]
+    x0 = x - total if h == "r" else x - total / 2 if h == "m" else x
+    if len(anchor) > 1 and anchor[1] == "m":
+        asc, desc = _miq_load_font(primary_path, size).getmetrics()
+        y_top = y - (asc + desc) // 2
+    else:
+        y_top = y
+    cx = float(x0)
+    for unit, w in zip(units, widths):
+        if w <= 0:
+            continue
+        kind, font = _miq_unit_font(unit, chain, emoji_path)
+        if kind == "emoji":
+            used = _miq_render_emoji_unit(layer, draw, cx, y_top, unit, size, emoji_path)
+            cx += used if used else w
+        elif kind == "font":
+            draw.text((cx, y_top), _miq_unit_bases(unit) or unit, font=font, fill=fill,
+                      anchor="la", stroke_width=stroke_width, stroke_fill=fill)
+            cx += w
+    return draw
+
+
 def _miq_display_text(text: str | None) -> str:
     """名前・ユーザー名用：制御文字と改行だけ落とし、絵文字・記号は残す。"""
     if not text:
@@ -766,7 +853,7 @@ def render_miq_frames(
     font, lines, lh, size = _miq_fit(d, text, font_path, text_w, 350)
     name_size = 34
     name_font = _miq_load_font(font_path, name_size)
-    while name_size > 18 and d.textlength(f"- {shown_name}", font=name_font) > text_w:
+    while name_size > 18 and _miq_units_width(d, f"- {shown_name}", font_path, name_size) > text_w:
         name_size -= 2
         name_font = _miq_load_font(font_path, name_size)
     user_font = _miq_load_font(font_path, 22)

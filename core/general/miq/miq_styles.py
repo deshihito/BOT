@@ -5,10 +5,11 @@ from __future__ import annotations
 from ..common import *
 from .miq import (
     MIQ_GIF_MAX_FRAMES, MIQ_H, MIQ_NEW_H, MIQ_NEW_W, MIQ_W, _MIQ_ASSET_FONTS,
-    _miq_display_text, _miq_draw_centered, _miq_draw_units_line,
-    _miq_emoji_font_path, _miq_fallback_fonts, _miq_fit, _miq_fit_units,
-    _miq_load_font, _miq_mix, _miq_open_avatar, _miq_render_emoji_unit,
-    _miq_save_png, _miq_split_units, _miq_unit_bases, _miq_unit_font,
+    _miq_display_text, _miq_draw_centered, _miq_draw_name_units,
+    _miq_draw_units_line, _miq_emoji_font_path, _miq_fallback_fonts,
+    _miq_fit, _miq_fit_units, _miq_load_font, _miq_mix, _miq_open_avatar,
+    _miq_render_emoji_unit, _miq_save_png, _miq_split_units,
+    _miq_truncate_units, _miq_unit_bases, _miq_unit_font, _miq_units_width,
     _miq_wrap, render_miq_frames,
 )
 
@@ -109,10 +110,10 @@ def render_miq_manga_png(avatar_bytes: bytes | None, text: str, name: str, usern
     # 作者名の札 (右コマ左上)
     shown_name = _miq_display_text(name) or _miq_display_text(username) or "unknown"
     name_font = _miq_load_font(font_path, 26)
-    name_w = d.textlength(shown_name, font=name_font)
+    name_w = _miq_units_width(d, shown_name, font_path, 26)
     tag = [left_w + 26, 24, left_w + 26 + int(name_w) + 24, 24 + 44]
     d.rectangle(tag, fill=(255, 255, 255), outline=(0, 0, 0), width=3)
-    d.text((tag[0] + 12, tag[1] + 8), shown_name, font=name_font, fill=(0, 0, 0))
+    _miq_draw_name_units(img, d, tag[0] + 12, tag[1] + 8, shown_name, 26, font_path, (0, 0, 0))
 
     # コマ枠
     d.rectangle([5, 5, W - 6, H - 6], outline=(0, 0, 0), width=10)
@@ -153,13 +154,13 @@ def render_miq_music_png(avatar_bytes: bytes | None, text: str, name: str, usern
     shown_name = _miq_display_text(name) or _miq_display_text(username) or "unknown"
     name_size = 46
     name_font = _miq_load_font(font_path, name_size)
-    while name_size > 22 and d.textlength(shown_name, font=name_font) > right_edge - rx:
+    while name_size > 22 and _miq_units_width(d, shown_name, font_path, name_size) > right_edge - rx:
         name_size -= 2
         name_font = _miq_load_font(font_path, name_size)
-    d.text((rx, 98), shown_name, font=name_font, fill=(255, 255, 255, 255))
+    _miq_draw_name_units(img, d, rx, 98, shown_name, name_size, font_path, (255, 255, 255, 255))
     shown_user = _miq_display_text(username)
     if shown_user:
-        d.text((rx, 158), f"@{shown_user}", font=_miq_load_font(font_path, 26), fill=(235, 235, 235, 170))
+        _miq_draw_name_units(img, d, rx, 158, f"@{shown_user}", 26, font_path, (235, 235, 235, 170))
 
     # 本文
     shown_text = _miq_display_text(text) or text
@@ -235,12 +236,8 @@ def render_miq_news_png(avatar_bytes: bytes | None, text: str, name: str, userna
     blue_top = band_top - 44
     d.rectangle([0, blue_top, W, band_top], fill=(18, 56, 132, 255))
     who = shown_name + (f"  @{shown_user}" if shown_user and shown_user != shown_name else "")
-    name_font = _miq_load_font(font_path, 25)
-    nw = d.textlength(who, font=name_font)
-    while nw > W - 72 and who:
-        who = who[:-1]
-        nw = d.textlength(who, font=name_font)
-    d.text((36, blue_top + 22), who, font=name_font, fill=(255, 255, 255, 255), anchor="lm")
+    who = _miq_truncate_units(d, who, font_path, 25, W - 72, ellipsis=False)
+    _miq_draw_name_units(img, d, 36, blue_top + 22, who, 25, font_path, (255, 255, 255, 255), anchor="lm")
 
     d.rectangle([0, band_top, W, band_bottom], fill=(255, 255, 255, 255))
     lines, lh, _size = _miq_fit_units(
@@ -255,13 +252,9 @@ def render_miq_news_png(avatar_bytes: bytes | None, text: str, name: str, userna
 
     # ティッカー風の細帯
     d.rectangle([0, band_bottom, W, H], fill=(6, 10, 24, 255))
-    tick_font = _miq_load_font(font_path, 21)
     ticker = f"◆ {shown_name} さんの投稿を速報でお伝えしています ◆ MIQ NEWS"
-    tw = d.textlength(ticker, font=tick_font)
-    while tw > W - 72 and len(ticker) > 4:
-        ticker = ticker[:-1]
-        tw = d.textlength(ticker, font=tick_font)
-    d.text((36, band_bottom + ticker_h // 2), ticker, font=tick_font, fill=(210, 222, 245, 255), anchor="lm")
+    ticker = _miq_truncate_units(d, ticker, font_path, 21, W - 72, ellipsis=False)
+    _miq_draw_name_units(img, d, 36, band_bottom + ticker_h // 2, ticker, 21, font_path, (210, 222, 245, 255), anchor="lm")
     return _miq_save_png(img)
 
 
@@ -292,12 +285,10 @@ def render_miq_xpost_png(avatar_bytes: bytes | None, text: str, name: str, usern
 
     # 表示名 (太字気味に二度描き) + @username
     name_font = _miq_load_font(font_path, 34)
-    nm = shown_name
-    while nm and d.textlength(nm, font=name_font) > W - 200:
-        nm = nm[:-1]
-    d.text((168, 56), nm, font=name_font, fill=ink, stroke_width=1, stroke_fill=ink)
+    nm = _miq_truncate_units(d, shown_name, font_path, 34, W - 200, ellipsis=False)
+    _miq_draw_name_units(img, d, 168, 56, nm, 34, font_path, ink, stroke_width=1)
     if shown_user:
-        d.text((168, 102), f"@{shown_user}", font=_miq_load_font(font_path, 26), fill=sub)
+        _miq_draw_name_units(img, d, 168, 102, f"@{shown_user}", 26, font_path, sub)
 
     # 本文 (左揃え)
     lines, lh, _size = _miq_fit_units(d, shown_text, font_path, W - 96, 268, max_size=46, min_size=20)
@@ -376,13 +367,11 @@ def render_miq_rpg_png(avatar_bytes: bytes | None, text: str, name: str, usernam
 
     # 名前プレート (ウィンドウ左上に重ねる)
     name_font = _miq_load_font(font_path, 28)
-    nm = shown_name
-    while nm and d.textlength(nm, font=name_font) > 380:
-        nm = nm[:-1]
-    plate_w = int(d.textlength(nm, font=name_font)) + 40
+    nm = _miq_truncate_units(d, shown_name, font_path, 28, 380, ellipsis=False)
+    plate_w = int(_miq_units_width(d, nm, font_path, 28)) + 40
     px0, py0 = wx0 + 24, wy0 - 24
     d.rounded_rectangle([px0, py0, px0 + plate_w, py0 + 48], radius=8, fill=(10, 16, 44, 255), outline=(255, 255, 255, 255), width=3)
-    d.text((px0 + plate_w // 2, py0 + 24), nm, font=name_font, fill=(255, 255, 255, 255), anchor="mm")
+    _miq_draw_name_units(img, d, px0 + plate_w // 2, py0 + 24, nm, 28, font_path, (255, 255, 255, 255), anchor="mm")
 
     # 本文 (左揃え、白)
     lines, lh, _size = _miq_fit_units(
@@ -634,8 +623,8 @@ def render_miq_blueprint_png(avatar_bytes: bytes | None, text: str, name: str, u
         if i:
             d.line([(tx0, ry), (tx1, ry)], fill=(255, 255, 255), width=1)
         d.text((tx0 + 10, ry + row_h // 2), label, font=label_font, fill=(210, 228, 255), anchor="lm")
-        value = _miq_truncate(d, value, value_font, (tx1 - tx0) - 84)
-        d.text((tx0 + 72, ry + row_h // 2), value, font=value_font, fill=(255, 255, 255), anchor="lm")
+        value = _miq_truncate_units(d, value, font_path, 21, (tx1 - tx0) - 84)
+        _miq_draw_name_units(img, d, tx0 + 72, ry + row_h // 2, value, 21, font_path, (255, 255, 255), anchor="lm")
     d.line([(tx0 + 62, ty0), (tx0 + 62, ty0 + row_h * 3)], fill=(255, 255, 255), width=1)
 
     # 左: 本文 (白・太字・左揃え、縦中央)
@@ -688,11 +677,11 @@ def render_miq_pixel_png(avatar_bytes: bytes | None, text: str, name: str, usern
 
     # 名前タブ (ウィンドウ左上に重なる小箱)
     name_font = _miq_load_font(font_path, 22)
-    tab_name = _miq_truncate(d, shown_name, name_font, 320)
-    tab_w = int(d.textlength(tab_name, font=name_font)) + 28
+    tab_name = _miq_truncate_units(d, shown_name, font_path, 22, 320)
+    tab_w = int(_miq_units_width(d, tab_name, font_path, 22)) + 28
     tab = [wx0 + 14, wy0 - 38, wx0 + 14 + tab_w, wy0 + 4]
     d.rectangle(tab, fill=(8, 10, 36), outline=(255, 255, 255), width=3)
-    d.text(((tab[0] + tab[2]) // 2, (tab[1] + tab[3]) // 2), tab_name, font=name_font, fill=(255, 255, 255), anchor="mm")
+    _miq_draw_name_units(img, d, (tab[0] + tab[2]) // 2, (tab[1] + tab[3]) // 2, tab_name, 22, font_path, (255, 255, 255), anchor="mm")
 
     # ポートレート (ドット絵化したアバター)
     p_size = 148
@@ -836,8 +825,8 @@ def render_miq_luxury_png(avatar_bytes: bytes | None, text: str, name: str, user
 
     # 下部: 区切り線付きの名前と @ID (金色)
     name_font = _miq_load_font(serif, 29)
-    disp_name = _miq_truncate(d, shown_name, name_font, 560)
-    nw = d.textlength(disp_name, font=name_font)
+    disp_name = _miq_truncate_units(d, shown_name, serif, 29, 560)
+    nw = _miq_units_width(d, disp_name, serif, 29)
     name_y = 540
     line_len = 64
     gap = 26
@@ -845,9 +834,9 @@ def render_miq_luxury_png(avatar_bytes: bytes | None, text: str, name: str, user
     lx = (W - total_w) / 2
     d.line([(lx, name_y + 18), (lx + line_len, name_y + 18)], fill=gold, width=2)
     d.line([(lx + line_len + gap + nw + gap, name_y + 18), (lx + total_w, name_y + 18)], fill=gold, width=2)
-    d.text((lx + line_len + gap, name_y), disp_name, font=name_font, fill=gold_bright)
+    _miq_draw_name_units(img, d, lx + line_len + gap, name_y, disp_name, 29, serif, gold_bright)
     if shown_user:
-        d.text((W // 2, name_y + 52), f"@{shown_user}", font=_miq_load_font(font_path, 21), fill=gold, anchor="ma")
+        _miq_draw_name_units(img, d, W // 2, name_y + 52, f"@{shown_user}", 21, font_path, gold, anchor="ma")
     return _miq_save_png(img)
 
 
@@ -875,12 +864,12 @@ def render_miq_tate_png(avatar_bytes: bytes | None, text: str, name: str, userna
 
     # 名前 (小さな装飾つき) と @ID
     name_font = _miq_load_font(font_path, 27)
-    disp_name = _miq_truncate(d, shown_name, name_font, 300)
-    nw = d.textlength(disp_name, font=name_font)
-    d.text((62, 408), disp_name, font=name_font, fill=ink)
+    disp_name = _miq_truncate_units(d, shown_name, font_path, 27, 300)
+    nw = _miq_units_width(d, disp_name, font_path, 27)
+    _miq_draw_name_units(img, d, 62, 408, disp_name, 27, font_path, ink)
     _miq_heart(d, 62 + nw + 22, 424, 16, (196, 80, 90))
     if shown_user:
-        d.text((62, 448), f"@{shown_user}", font=_miq_load_font(font_path, 21), fill=sub)
+        _miq_draw_name_units(img, d, 62, 448, f"@{shown_user}", 21, font_path, sub)
 
     # 赤い角丸四角 + 白ハートのスタンプ
     stamp = [56, 512, 128, 584]
@@ -941,7 +930,7 @@ def render_miq_novel_png(avatar_bytes: bytes | None, text: str, name: str, usern
 
     # アバターの下: 名前と @ID (グレー)
     name_font = _miq_load_font(font_path, 28)
-    d.text((ax, ay + av_size + 26), _miq_truncate(d, shown_name, name_font, 320), font=name_font, fill=ink)
+    _miq_draw_name_units(img, d, ax, ay + av_size + 26, _miq_truncate_units(d, shown_name, font_path, 28, 320), 28, font_path, ink)
     if shown_user:
-        d.text((ax, ay + av_size + 68), f"@{shown_user}", font=_miq_load_font(font_path, 22), fill=sub)
+        _miq_draw_name_units(img, d, ax, ay + av_size + 68, f"@{shown_user}", 22, font_path, sub)
     return _miq_save_png(img)
