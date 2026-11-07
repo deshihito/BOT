@@ -121,7 +121,7 @@ class MyBot(commands.Bot):
         """再起動（デプロイ・クラッシュ等）で失われたセッションを復旧する。
 
         スナップショット（VC は core/voice_restore.py、対局中ゲームは
-        core/game/game_restore.py）が存在すれば常に reconcile する。
+        core/game/game/game_restore.py）が存在すれば常に reconcile する。
         on_ready をブロックせず、cog 単位で失敗を隔離する。
         """
         logger = logging.getLogger(__name__)
