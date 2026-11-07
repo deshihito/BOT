@@ -21,7 +21,7 @@ if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
 from core.support import messages
-from core.help import command_meta
+from core.help.help import command_meta
 from core.support.localization import localization  # noqa: E402
 
 
