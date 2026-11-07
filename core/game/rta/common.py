@@ -39,6 +39,9 @@ DISBOARD_BOT_ID = 302050872383242240
 DISOKU_BOT_ID = 761562078095867916
 SABACHA_BOT_ID = 1233072112139501608   # 鯖ちゃんねる (discord.sabach.jp)
 TAKASUMI_BOT_ID = 981314695543783484   # TakasumiBOT
+DICOALL_BOT_ID = 903541413298450462    # Dicoall (SharkBot等の公開実装でも同IDで検知)
+DCAFE_BOT_ID = 850493201064132659      # Discord Cafe (DCafe)
+SHARKBOT_BOT_ID = 1322100616369147924  # SharkBot (公式招待リンク/Discordアプリディレクトリ)
 
 # Time between the service's success message and the moment the command can be
 # used again.  (Dis速's /up interval may differ from Disboard's; change it here.)
@@ -47,6 +50,9 @@ COOLDOWN = {
     "up": timedelta(hours=2),
     "vote": timedelta(hours=2),       # 鯖ちゃんねる /vote (次回時刻が埋め込みにあればそちら優先)
     "takasumi": timedelta(hours=1),   # TakasumiBOT up (応答本文「1時間後に通知します」)
+    "dicoall": timedelta(hours=1),    # Dicoall /up (「次回の更新可能時間」フィールドがあればそちら優先)
+    "dcafe": timedelta(hours=2),      # Discord Cafe /up (次回情報なし・固定)
+    "sharkbot": timedelta(hours=2),   # SharkBot /up (応答本文「2時間後に再度Upできます」)
 }
 # Which timestamp the cooldown is counted from:
 #   "latest"      - message Snowflake, or the edit time if the service answered
@@ -79,6 +85,9 @@ EVENT_TYPE_CHOICES = [
     app_commands.Choice(name="up", value="up"),
     app_commands.Choice(name="vote", value="vote"),
     app_commands.Choice(name="takasumi", value="takasumi"),
+    app_commands.Choice(name="dicoall", value="dicoall"),
+    app_commands.Choice(name="dcafe", value="dcafe"),
+    app_commands.Choice(name="sharkbot", value="sharkbot"),
 ]
 LEADERBOARD_SCOPE_CHOICES = [
     app_commands.Choice(name="自分のベスト", value="me"),

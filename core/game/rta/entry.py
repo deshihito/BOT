@@ -14,8 +14,8 @@ from discord import app_commands
 from discord.ext import commands, tasks
 from core.support.api_retry import run_with_retry
 from core.game.rta.clock import logger, _BoundedSet, DiscordClock, _NTP_EPOCH_OFFSET, _unix_to_ntp_bytes, _ntp_bytes_to_unix, _ntp_offset_and_delay, _query_ntp_once, _query_ntp_offset  # noqa: F401
-from core.game.rta.common import logger, DISBOARD_BOT_ID, DISOKU_BOT_ID, SABACHA_BOT_ID, TAKASUMI_BOT_ID, COOLDOWN, REMINDER_ANCHOR, PREP_LEAD, SEND_MARGIN, DEFAULT_SEND_LEAD, STALE_SECONDS, MAX_SEND_ATTEMPTS, PERMANENT_HTTP_STATUS, RECONCILE_SECONDS, CLOCK_WINDOW, CLOCK_MIN_SAMPLES, CLOCK_STALE_AFTER, NTP_REFRESH_SECONDS, NTP_FRESH_SECONDS, DISCORD_EPOCH_MS, ACTION_CHOICES, EVENT_TYPE_CHOICES, LEADERBOARD_SCOPE_CHOICES, ALLOWED_CHANNEL_TYPES  # noqa: F401
-from core.game.rta.detect import logger, _JST, _sabacha_next_time, detect_event  # noqa: F401
+from core.game.rta.common import logger, DISBOARD_BOT_ID, DISOKU_BOT_ID, SABACHA_BOT_ID, TAKASUMI_BOT_ID, DICOALL_BOT_ID, DCAFE_BOT_ID, SHARKBOT_BOT_ID, COOLDOWN, REMINDER_ANCHOR, PREP_LEAD, SEND_MARGIN, DEFAULT_SEND_LEAD, STALE_SECONDS, MAX_SEND_ATTEMPTS, PERMANENT_HTTP_STATUS, RECONCILE_SECONDS, CLOCK_WINDOW, CLOCK_MIN_SAMPLES, CLOCK_STALE_AFTER, NTP_REFRESH_SECONDS, NTP_FRESH_SECONDS, DISCORD_EPOCH_MS, ACTION_CHOICES, EVENT_TYPE_CHOICES, LEADERBOARD_SCOPE_CHOICES, ALLOWED_CHANNEL_TYPES  # noqa: F401
+from core.game.rta.detect import logger, _JST, _named_field_next_time, _sabacha_next_time, detect_event  # noqa: F401
 from core.game.rta.events import logger, EventsMixin  # noqa: F401
 from core.game.rta.helpers import logger, _collect_embed_text, _white_embed, _snowflake_ts, _snowflake_datetime, _parse_dt, _interaction_id, _event_time, _timing_summary  # noqa: F401
 from core.game.rta.reminder import logger, ReminderMixin  # noqa: F401
