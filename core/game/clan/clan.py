@@ -32,7 +32,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
-from core.general.items import JST
+from core.general.items.items import JST
 
 logger = logging.getLogger(__name__)
 

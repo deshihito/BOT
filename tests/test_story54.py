@@ -125,8 +125,7 @@ class RegistryTest(unittest.TestCase):
 
     def test_story54_blocked_for_ai(self):
         from core.general import action_registry
-        from core.general import ai_tools_router
-
+        from core.general.ai_tools import ai_tools_router
         self.assertIn("general:story54", action_registry.AI_BLOCKED_IDS)
         self.assertNotIn("general:story54", ai_tools_router.action_candidates())
 

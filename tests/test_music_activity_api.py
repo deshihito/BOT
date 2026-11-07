@@ -16,19 +16,19 @@ from unittest.mock import patch
 
 # keep_alive imports the unrelated AI service at module load; stub only that
 # boundary so these route tests do not need credentials or an LLM dependency.
-_previous_coder_service = sys.modules.get("core.general.coder_service")
+_previous_coder_service = sys.modules.get("core.general.ai.coder_service")
 if _previous_coder_service is None:
-    coder_service_stub = types.ModuleType("core.general.coder_service")
+    coder_service_stub = types.ModuleType("core.general.ai.coder_service")
     async def _unused_reply(*_args, **_kwargs):
         raise AssertionError("Activity state requests must never call the AI service")
     coder_service_stub.reply = _unused_reply
-    sys.modules["core.general.coder_service"] = coder_service_stub
+    sys.modules["core.general.ai.coder_service"] = coder_service_stub
 
 try:
     keep_alive = importlib.import_module("keep_alive")
 finally:
     if _previous_coder_service is None:
-        sys.modules.pop("core.general.coder_service", None)
+        sys.modules.pop("core.general.ai.coder_service", None)
 
 
 class FakeCog:

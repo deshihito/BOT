@@ -1,4 +1,4 @@
-"""core/general/workshop.py（加工機・委託加工・ストリーク）と WorkshopCog のテスト。
+"""core/general/workshop/workshop.py（加工機・委託加工・ストリーク）と WorkshopCog のテスト。
 
 見るもの: ティア定義と使い捨てモデルの価格（寿命まで回し切れば総生産 EV
 が価格を上回る）、耐久の消費と寿命での消滅、恒久モデルからの移行、
@@ -21,8 +21,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from core.general import action_registry
-from core.general import workshop
-from core.general import items
+from core.general.workshop import workshop
+from core.general.items import items
 from cogs import wallet as wallet_module
 from cogs.workshop import WorkshopCog
 

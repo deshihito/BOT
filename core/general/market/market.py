@@ -120,7 +120,7 @@ FLUSH_INTERVAL_SECONDS = 60.0
 _DEFAULT_PATH = data_paths.data_path("market.json")
 # 再編成でモジュールが1階層深くなった際に保存先がずれていた期間の旧保存先
 # (core/data/market.json)。移行読み取り専用で、書き込みは行わない。
-_STRAY_PATH = data_paths.stray_path(__file__, "market.json")
+_STRAY_PATH = data_paths.stray_path(Path(__file__).resolve().parent.parent / "market.py", "market.json")  # 旧保存先は収納前の深さ基準のため1階層上を渡す
 
 
 def default_path() -> Path:
@@ -400,7 +400,7 @@ class MarketStore:
         """aga_amount AGO で買える量の見積もり（状態は変えない）。
 
         fee_rate は手数料率の上書き（アイテム効果の割引など、Phase 2 の
-        core/general/items.py の受動効果から渡す）。None なら通常の FEE_RATE。
+        core/general/items/items.py の受動効果から渡す）。None なら通常の FEE_RATE。
         """
         fee_rate = FEE_RATE if fee_rate is None else fee_rate
         with self._lock:

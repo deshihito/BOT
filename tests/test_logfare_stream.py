@@ -2,9 +2,7 @@ import os
 import unittest
 from unittest.mock import patch
 
-from core.general import logfare
-
-
+from core.general.ai import logfare
 class FakeLines:
     def __init__(self, lines):
         self.lines = lines
@@ -54,7 +52,7 @@ class LogfareStreamTests(unittest.IsolatedAsyncioTestCase):
         ]
         session = FakeSession(FakeResponse(events))
         with patch.dict(os.environ, {"LOGFARE_API_KEY": "test-key"}), patch(
-            "core.general.logfare.aiohttp.ClientSession", return_value=session
+            "core.general.ai.logfare.aiohttp.ClientSession", return_value=session
         ):
             result = [
                 text async for text in logfare.chat_stream(

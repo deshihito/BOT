@@ -7,7 +7,7 @@
 作らない（原典で説明が「実装中」のままだった11種の轍を踏まない）。
 
 設計の要点:
-- 所持はユーザー単位・全ギルド共通。保存は core/general/market.py と同じ流儀:
+- 所持はユーザー単位・全ギルド共通。保存は core/general/market/market.py と同じ流儀:
   専用 JSON（既定 data/items.json、環境変数 ITEMS_DATA_PATH で変更可）に、
   メモリ主体＋バッチフラッシュ＋原子差し替え。市場とはファイルを分ける。
 - AGO コインの増減そのものはここでは行わない（cogs/wallet.py の安全な
@@ -57,7 +57,7 @@ FEE_DISCOUNT_MULTIPLIER = 0.5
 #: 採掘ドリンク: 採掘1回ごとに通常テーブルを追加でもう1回引ける。
 MINING_BOOST_EFFECT = "mining_boost"
 #: 合成触媒: 合成・委託のレア結果の重み倍率（委託の倍率と乗算し、
-#: 合計は core/general/craft.py の RARE_BOOST_CAP でキャップ）。
+#: 合計は core/general/workshop/craft.py の RARE_BOOST_CAP でキャップ）。
 CRAFT_CATALYST_EFFECT = "craft_catalyst"
 CRAFT_CATALYST_MULTIPLIER = 1.5
 #: 防犯チャーム: 自分を対象とする steal が自動で失敗する。
@@ -546,7 +546,7 @@ class ItemError(Exception):
 _DEFAULT_PATH = data_paths.data_path("items.json")
 # 再編成でモジュールが1階層深くなった際に保存先がずれていた期間の旧保存先
 # (core/data/items.json)。移行読み取り専用で、書き込みは行わない。
-_STRAY_PATH = data_paths.stray_path(__file__, "items.json")
+_STRAY_PATH = data_paths.stray_path(Path(__file__).resolve().parent.parent / "items.py", "items.json")  # 旧保存先は収納前の深さ基準のため1階層上を渡す
 
 
 def default_path() -> Path:
@@ -658,7 +658,7 @@ class ItemStore:
 
     コインの実移動は行わない。購入／売却／宝箱コインの受け渡しは
     呼び出し側（cogs/items.py）が wallet の安全な経路で行い、失敗したら
-    rollback_* でこちらの変更を巻き戻す（core/general/market.py と同じ組み立て）。
+    rollback_* でこちらの変更を巻き戻す（core/general/market/market.py と同じ組み立て）。
     """
 
     def __init__(

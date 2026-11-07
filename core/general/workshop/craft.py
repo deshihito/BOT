@@ -25,7 +25,7 @@
 - コイン手数料は v1 では取らない。素材の消費自体がシンクになる。
 - レシピはユーザーに一切見せない（原典も対応表を出さなかった。
   発見するのが仕様）。hidden=True は内部分類としてだけ残す。
-- 委託加工（core/general/workshop.py）は同じテーブルを rare 重み倍率つきで
+- 委託加工（core/general/workshop/workshop.py）は同じテーブルを rare 重み倍率つきで
   引く。rare=True の結果行が「レア結果」で、倍率の対象になる。
 """
 from __future__ import annotations
@@ -34,7 +34,7 @@ import random
 from datetime import datetime
 from typing import Any
 
-from core.general.items import ITEM_DEFS, ItemError, ItemStore
+from core.general.items.items import ITEM_DEFS, ItemError, ItemStore
 
 # ---------------------------------------------------------------------------
 # レシピ定義（宣言的テーブル）

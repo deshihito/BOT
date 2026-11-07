@@ -33,7 +33,7 @@
 コインの実移動は呼び出し側が wallet の安全な経路（_change_balance の
 CAS）で行い、transaction_history に gamble_slot / gamble_double /
 gamble_blackjack / gamble_dice の理由コードを残す。保存は
-core/general/steal.py と同じ流儀: 専用 JSON（既定 data/gambling.json、
+core/general/circulation/steal.py と同じ流儀: 専用 JSON（既定 data/gambling.json、
 環境変数 GAMBLING_DATA_PATH で変更可）にメモリ主体＋バッチフラッシュ
 ＋原子差し替え。
 """
@@ -50,7 +50,7 @@ from pathlib import Path
 from typing import Any
 
 from core.support import data_paths
-from core.general.items import ItemError
+from core.general.items.items import ItemError
 
 logger = logging.getLogger(__name__)
 

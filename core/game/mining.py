@@ -9,7 +9,7 @@
   1〜20 回の抽選で決まる。セッション開始のクールダウンは60秒
 - 1掘りの産出はコイン 10〜500（基本額の抽選）。20% で失敗して0
 - 10% で「大量採掘」が発動し、プール残高の 1〜10% が上乗せされる
-- コインは新規創出ではなく共有プール（core/general/economy_pool.py）から
+- コインは新規創出ではなく共有プール（core/general/circulation/economy_pool.py）から
   支払われ、プールにある分までしか出ない。プールは経済系の損失の
   還流でチャージされる（還流の発生源は economy_pool 側を参照）
 
@@ -22,7 +22,7 @@
 このモジュールが持つのはセッション状態・クールダウン・産出の抽選
 まで。プールの支払いと wallet への反映は呼び出し側
 （cogs/circulation.py）が economy_pool と wallet の経路で行い、
-失敗したら巻き戻す。保存は core/general/workshop.py と同じ流儀: 専用 JSON
+失敗したら巻き戻す。保存は core/general/workshop/workshop.py と同じ流儀: 専用 JSON
 （既定 data/mining.json、環境変数 MINING_DATA_PATH で変更可）に
 メモリ主体＋バッチフラッシュ＋原子差し替え。
 """
@@ -40,7 +40,7 @@ from pathlib import Path
 from typing import Any
 
 from core.support import data_paths
-from core.general.items import JST, ItemError
+from core.general.items.items import JST, ItemError
 
 logger = logging.getLogger(__name__)
 

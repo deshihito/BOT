@@ -9,7 +9,7 @@ from discord.ext import commands
 from typing import Dict, List, Optional
 import re
 import os
-from core.general import logfare
+from core.general.ai import logfare
 from core.support.panel_v2 import as_panel_v2, edit_panel_v2
 from core.support.emojis import SUCCESS
 

@@ -9,9 +9,8 @@ from typing import Any
 import discord
 from discord.ext import commands
 
-from core.general import logfare
-from core.general import ai_tools_router
-
+from core.general.ai import logfare
+from core.general.ai_tools import ai_tools_router
 logger = logging.getLogger(__name__)
 
 # インフラ系の失敗（判定APIの障害・タイムアウト・運用環境の問題）と、予期せぬ

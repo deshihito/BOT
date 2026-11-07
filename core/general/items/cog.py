@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """アイテム: /general のマネージャンルから使う所持・ショップ・宝箱の入口。
 
-定義・所持・効果・抽選の本体は core/general/items.py（ItemStore）。ここは Discord
+定義・所持・効果・抽選の本体は core/general/items/items.py（ItemStore）。ここは Discord
 側の表示と、AGO コイン残高の実移動だけを担う。コインの増減は必ず
 cogs/wallet.py の安全な経路（CAS 更新 _change_balance と
 transaction_history への記録）を通し、この cog 独自の残高更新は作らない
@@ -21,7 +21,7 @@ import discord
 from discord.ext import commands, tasks
 
 import config
-from core.general import items as items_core
+from core.general.items import items as items_core
 from core.game.game import prison as prison_core
 from core.support.messages import ITEM_INVALID_INPUT, ITEM_NOT_FOUND, item_action_failed
 from core.support.panel_v2 import as_panel_v2, edit_panel_v2
@@ -408,7 +408,7 @@ class ItemsCog(commands.Cog):
             definition = items_core.ITEM_DEFS.get(item_id)
             if definition is None:
                 return item_action_failed("そのアイテムは存在しません。")
-            # 売却額は全アイテム共通で購入価格の半分（core/general/items.py で設定）。
+            # 売却額は全アイテム共通で購入価格の半分（core/general/items/items.py で設定）。
             if count <= 0:
                 return item_action_failed("数量を正しく入力してください。")
             total = int(definition["sell_price"]) * count

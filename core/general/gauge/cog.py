@@ -17,7 +17,7 @@ from discord.ext import commands
 from core.game.game import party_ranking
 from core.game.game.board_image import render_gauge
 from core.game.game.game_v2 import GamePanelView, text_panel
-from core.general.gauge import SCALE, TARGET_SCORE, GaugeGame
+from core.general.gauge.gauge import SCALE, TARGET_SCORE, GaugeGame
 
 logger = logging.getLogger(__name__)
 

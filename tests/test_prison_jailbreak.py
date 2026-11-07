@@ -19,7 +19,7 @@ from types import SimpleNamespace
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from core.game.game import prison as prison_core
-from core.general.items import JST
+from core.general.items.items import JST
 
 T0 = datetime(2026, 11, 6, 12, 0, tzinfo=JST)
 

@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """採掘・宝くじ・盗む: /general のマネージャンルから使う循環モジュールの入口。
 
-本体は core/game/mining.py（採掘）・core/game/lottery.py（宝くじ）・core/general/steal.py
+本体は core/game/mining.py（採掘）・core/game/lottery.py（宝くじ）・core/general/circulation/steal.py
 （盗む）で、ここは Discord 側の表示と、AGO コイン残高の実移動だけを
 担う。コインの増減は必ず cogs/wallet.py の安全な経路（CAS 更新
 _change_balance と transaction_history への記録）を通す
@@ -9,7 +9,7 @@ _change_balance と transaction_history への記録）を通す
 
 - 採掘: 原典準拠のセッション式（1〜20回、60秒クールダウン）。
   コインは新規創出ではなく、経済系の損失が還流される共有プール
-  （core/general/economy_pool.py）から支払う。プールが空なら掘れない
+  （core/general/circulation/economy_pool.py）から支払う。プールが空なら掘れない
 - 宝くじ: 売上の一部が賞金、残りは消却され、消却分は採掘プールと
   国庫へ還流される。抽選は毎日 JST 21:00 で、期限を過ぎた回は
   アクセス／定期チェックのたびに lazy に確定する
@@ -35,12 +35,12 @@ import config
 from core.game.clan import clan as clan_core
 from core.general.user_names import cached_display_name
 from core.game.gacha import gacha as gacha_core
-from core.general import economy_pool as economy_core
-from core.general import items as items_core
+from core.general.circulation import economy_pool as economy_core
+from core.general.items import items as items_core
 from core.game import lottery as lottery_core
 from core.game import mining as mining_core
 from core.game.game import prison as prison_core
-from core.general import steal as steal_core
+from core.general.circulation import steal as steal_core
 from core.support.messages import circulation_action_failed
 from core.support.panel_v2 import as_panel_v2, edit_panel_v2
 from cogs import wallet as wallet_module  # INSUFFICIENT は実行時に引く（テストの cog 再読込で同一性が崩れないため）

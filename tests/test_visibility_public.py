@@ -94,7 +94,7 @@ class MarketChartVisibilityTest(unittest.IsolatedAsyncioTestCase):
         import tempfile
 
         import cogs.market as market_module
-        from core.general import market as market_core
+        from core.general.market import market as market_core
         from cogs.market import MarketCog
 
         with tempfile.TemporaryDirectory() as tmp:
@@ -205,7 +205,7 @@ class Wave2PublicSourceTest(unittest.TestCase):
             self.assertIn("interaction_check", self.read(rel), rel)
 
     def test_economy_panels_public_with_owner_check(self):
-        for rel in ("core/general/items_cog/cog.py", "core/general/workshop_cog/cog.py", "core/general/circulation/cog.py", "core/general/market_cog/cog.py"):
+        for rel in ("core/general/items/cog.py", "core/general/workshop/cog.py", "core/general/circulation/cog.py", "core/general/market/cog.py"):
             self.assertIn("interaction_check", self.read(rel), rel)
 
     def test_exceptions_stay_ephemeral(self):

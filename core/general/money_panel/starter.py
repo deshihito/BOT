@@ -23,7 +23,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from core.general.items import JST
+from core.general.items.items import JST
 
 logger = logging.getLogger(__name__)
 
@@ -58,7 +58,7 @@ def _clean_state(raw: Any) -> dict[str, Any]:
     return state
 
 
-_DEFAULT_PATH = Path(__file__).resolve().parent.parent / "data" / "starter.json"
+_DEFAULT_PATH = Path(__file__).resolve().parent.parent.parent / "data" / "starter.json"
 
 
 def default_path() -> Path:

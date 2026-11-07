@@ -20,7 +20,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from core.general.items import JST
+from core.general.items.items import JST
 
 logger = logging.getLogger(__name__)
 
@@ -60,7 +60,7 @@ def _default_path() -> Path:
     override = os.environ.get("DAILY_BONUS_DATA_PATH")
     if override:
         return Path(override)
-    return Path(__file__).resolve().parent.parent / "data" / "daily_bonus.json"
+    return Path(__file__).resolve().parent.parent.parent / "data" / "daily_bonus.json"
 
 
 class DailyBonusStore:

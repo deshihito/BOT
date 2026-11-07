@@ -4,8 +4,8 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from core.general import logfare, web_search
-
+from core.general import web_search
+from core.general.ai import logfare
 WEB_SEARCH_TOOL: dict[str, Any] = {
     "type": "function",
     "function": {

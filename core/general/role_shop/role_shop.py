@@ -26,7 +26,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
-from core.general.items import JST
+from core.general.items.items import JST
 
 logger = logging.getLogger(__name__)
 
@@ -142,7 +142,7 @@ def _clean_state(raw: Any) -> dict[str, Any]:
     return state
 
 
-_DEFAULT_PATH = Path(__file__).resolve().parent.parent / "data" / "role_shop.json"
+_DEFAULT_PATH = Path(__file__).resolve().parent.parent.parent / "data" / "role_shop.json"
 
 
 def default_path() -> Path:

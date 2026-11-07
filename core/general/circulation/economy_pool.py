@@ -28,7 +28,7 @@ blackjack の損失で 30% プール / 70% 国庫だった（ダイスは 30% �
 maybe_weekly_release / lottery_boost_amount を呼ぶ。残高は管理コマンド
 （!all_stats）から参照できる。
 
-保存は core/general/items.py と同じ流儀: 専用 JSON（既定 data/economy_pool.json、
+保存は core/general/items/items.py と同じ流儀: 専用 JSON（既定 data/economy_pool.json、
 環境変数 ECONOMY_POOL_DATA_PATH で変更可）にメモリ主体＋
 バッチフラッシュ＋原子差し替え。複数 cog が同じ状態を触るため、
 プロセス内で共有する単一インスタンスを shared_store() で返す。
@@ -46,7 +46,7 @@ from pathlib import Path
 from typing import Any
 
 from core.support import data_paths
-from core.general.items import JST
+from core.general.items.items import JST
 
 logger = logging.getLogger(__name__)
 
@@ -105,7 +105,7 @@ def _clean_state(raw: Any) -> dict[str, Any]:
 _DEFAULT_PATH = data_paths.data_path("economy_pool.json")
 # 再編成でモジュールが1階層深くなった際に保存先がずれていた期間の旧保存先
 # (core/data/economy_pool.json)。移行読み取り専用で、書き込みは行わない。
-_STRAY_PATH = data_paths.stray_path(__file__, "economy_pool.json")
+_STRAY_PATH = data_paths.stray_path(Path(__file__).resolve().parent.parent / "economy_pool.py", "economy_pool.json")  # 旧保存先は収納前の深さ基準のため1階層上を渡す
 
 
 def default_path() -> Path:

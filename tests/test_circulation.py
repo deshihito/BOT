@@ -1,4 +1,4 @@
-"""Phase 4 循環モジュール（core/game/mining.py・core/game/lottery.py・core/general/steal.py と
+"""Phase 4 循環モジュール（core/game/mining.py・core/game/lottery.py・core/general/circulation/steal.py と
 CirculationCog）のテスト。
 
 見るもの: 各モジュールの保存則（失敗時に残高・所持・状態が不変）、
@@ -25,9 +25,10 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from core.general import action_registry
-from core.general import steal
+from core.general.circulation import steal
 from core.game import lottery, mining
-from core.general import economy_pool, items
+from core.general.circulation import economy_pool
+from core.general.items import items
 from cogs import wallet as wallet_module
 from cogs.circulation import CirculationCog
 

@@ -10,7 +10,7 @@ from typing import Dict, List, Optional
 import re
 import os
 from core.support import data_paths
-from core.general import logfare
+from core.general.ai import logfare
 from core.support.panel_v2 import as_panel_v2, edit_panel_v2
 
 from core.game.zeta.common import *  # noqa: F401,F403 - shared constants/helpers

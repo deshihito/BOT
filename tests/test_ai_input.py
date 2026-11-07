@@ -2,8 +2,8 @@ import unittest
 from io import BytesIO
 import zipfile
 
-from core.general.ai_input import AttachmentInputError, build_user_content, has_image_attachment
-from core.general.ai_provider_router import supports_images
+from core.general.ai.ai_input import AttachmentInputError, build_user_content, has_image_attachment
+from core.general.ai.ai_provider_router import supports_images
 
 
 class FakeAttachment:

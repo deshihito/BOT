@@ -20,8 +20,8 @@ from typing import Any
 
 import aiohttp
 
-from core.general import action_registry, logfare
-
+from core.general import action_registry
+from core.general.ai import logfare
 AITOOLS_MODEL = "clef"
 AITOOLS_TIMEOUT = float(os.getenv("AITOOLS_TIMEOUT", "30"))
 # リトライ既定は1（単発）のまま: 1回のタイムアウトで最大30秒待たせる設計で、

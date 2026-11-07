@@ -11,8 +11,7 @@ from typing import Any
 
 import aiohttp
 
-from core.general import logfare
-
+from core.general.ai import logfare
 logger = logging.getLogger(__name__)
 
 AUTO_MODEL = "ai/auto"

@@ -1,10 +1,10 @@
 """Slim entry point for the items cog.
 
-The implementation lives in core.general.items_cog.cog; this module only
+The implementation lives in core.general.items.cog; this module only
 re-exports its names so existing imports and patch targets on
 cogs.items keep working."
 """
-from core.general.items_cog.cog import (
+from core.general.items.cog import (
     annotations,
     SUCCESS,
     asyncio,

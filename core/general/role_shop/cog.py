@@ -2,7 +2,7 @@
 """有期限ロールショップ（ギルド管理者設定型）。
 
 ロールはギルド固有のため、商品棚はギルドごとに管理者が自ギルドの
-ロールを登録する形にした（core/general/role_shop.py）:
+ロールを登録する形にした（core/general/role_shop/role_shop.py）:
 
 - 管理者（Manage Roles）がロール・価格・期間（日数）を登録（上限あり）
 - メンバーが購入すると即時付与され、期限切れで自動剥奪される
@@ -27,7 +27,7 @@ from discord.ext import commands, tasks
 import config
 from core.support import guild_settings
 from core.game.game import prison as prison_core
-from core.general import role_shop as shop_core
+from core.general.role_shop import role_shop as shop_core
 from core.support.panel_v2 import as_panel_v2, edit_panel_v2
 from cogs import wallet as wallet_module
 

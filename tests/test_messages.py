@@ -17,7 +17,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from core.support import api_client, messages  # noqa: E402
-from core.general import ai_input
+from core.general.ai import ai_input
 from core.support.emojis import BACK, CROCK, FAILED, MUSIC, SUCCESS, TICKET  # noqa: E402
 
 

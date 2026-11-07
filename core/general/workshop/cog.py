@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
 """工房: /general のマネージャンルから使う加工機・合成・委託加工の入口。
 
-本体は core/general/workshop.py（WorkshopStore: 加工機・委託・ストリーク）と
-core/general/craft.py（レシピ・合成）。ここは Discord 側の表示と、AGO コイン
+本体は core/general/workshop/workshop.py（WorkshopStore: 加工機・委託・ストリーク）と
+core/general/workshop/craft.py（レシピ・合成）。ここは Discord 側の表示と、AGO コイン
 残高の実移動（加工機の購入）だけを担う。コインの増減は必ず
 cogs/wallet.py の安全な経路（CAS 更新 _change_balance と
 transaction_history への記録）を通す（cogs/items.py と同じ組み立て）。
@@ -24,10 +24,10 @@ from discord.ext import commands, tasks
 
 import config
 from core.game.clan import clan as clan_core
-from core.general import craft as craft_core
-from core.general import items as items_core
+from core.general.workshop import craft as craft_core
+from core.general.items import items as items_core
 from core.game.game import prison as prison_core
-from core.general import workshop as workshop_core
+from core.general.workshop import workshop as workshop_core
 from core.support.messages import (
     craft_action_failed,
     workshop_action_failed,

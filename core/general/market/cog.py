@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """アゴトークン市場: /general の通貨系パネルから使う市場・売買の入口。
 
-レート生成・プール・売買計算の本体は core/general/market.py（MarketStore）。
+レート生成・プール・売買計算の本体は core/general/market/market.py（MarketStore）。
 ここは Discord 側の表示と、AGO コイン残高の実移動だけを担う。コインの
 増減は必ず cogs/wallet.py の安全な経路（CAS 更新 _change_balance と
 transaction_history への記録）を通し、この cog 独自の残高更新は作らない。
@@ -25,9 +25,9 @@ import discord
 from discord.ext import commands, tasks
 
 import config
-from core.general import economy_pool as economy_core
-from core.general import items as items_core
-from core.general import market as market_core
+from core.general.circulation import economy_pool as economy_core
+from core.general.items import items as items_core
+from core.general.market import market as market_core
 from core.game.game import prison as prison_core
 from core.support.messages import MARKET_INVALID_AMOUNT, market_trade_failed
 from core.support.panel_v2 import as_panel_v2, edit_panel_v2
@@ -333,7 +333,7 @@ class MarketCog(commands.Cog):
 
     # ------------------------------------------------------------------ 売買
     def _effective_fee_rate(self, user_id: str) -> float:
-        """手数料率を決める。手数料パス（core/general/items.py の受動効果）が
+        """手数料率を決める。手数料パス（core/general/items/items.py の受動効果）が
         発動中なら半額にする。アイテム基盤が未読込なら通常率。"""
         items_cog = self.bot.get_cog("ItemsCog")
         store = getattr(items_cog, "store", None) if items_cog is not None else None
@@ -346,7 +346,7 @@ class MarketCog(commands.Cog):
         return market_core.FEE_RATE
 
     def _effective_cap_ratio(self, user_id: str) -> float:
-        """1回取引上限の比率を決める。優待パス（core/general/items.py の
+        """1回取引上限の比率を決める。優待パス（core/general/items/items.py の
         受動効果）が発動中なら上限を引き上げる。fee_rate と同じ流儀。
         アイテム基盤が未読込なら通常の比率。"""
         items_cog = self.bot.get_cog("ItemsCog")

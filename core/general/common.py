@@ -23,9 +23,11 @@ from discord.ext import commands, tasks
 from core.support.panel_v2 import as_panel_v2, edit_panel_v2
 from core.general import shortcut_settings as shortcuts
 from core.support import guild_settings
-from core.general import action_registry, action_usage, levelup_card, logfare
+from core.general import action_registry, action_usage
+from core.general.exp import levelup_card
+from core.general.ai import logfare
 from core.support import usage_stats
-from core.general import ai_omnirush, ai_preferences, ai_provider_router
+from core.general.ai import ai_omnirush, ai_preferences, ai_provider_router
 from core.game.game.game_guides import GAME_GUIDES, GAME_ORDER
 from core.general import translation_settings as translation
 from core.support import localization

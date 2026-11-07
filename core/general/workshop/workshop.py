@@ -12,7 +12,7 @@ claim で受け取る（lazy 決済。ユーザー別常駐タスクも経過通
 使い切ると消える。価格は寿命までの総生産 EV のおよそ半分に置き、
 回し切れば元が取れて利益が残るようにしてある。
 
-保存は core/general/items.py と同じ流儀: 専用 JSON（既定 data/workshop.json、
+保存は core/general/items/items.py と同じ流儀: 専用 JSON（既定 data/workshop.json、
 環境変数 WORKSHOP_DATA_PATH で変更可）にメモリ主体＋バッチフラッシュ
 ＋原子差し替え。アイテムの実増減は ItemStore 経由でのみ行う。
 コインの実移動（加工機の購入）は呼び出し側（cogs/workshop.py）が
@@ -31,8 +31,8 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
-from core.general import craft as craft_core
-from core.general.items import ITEM_DEFS, JST, ItemError, ItemStore
+from core.general.workshop import craft as craft_core
+from core.general.items.items import ITEM_DEFS, JST, ItemError, ItemStore
 
 logger = logging.getLogger(__name__)
 
@@ -198,7 +198,7 @@ def _clean_state(raw: Any) -> dict[str, Any]:
     return state
 
 
-_DEFAULT_PATH = Path(__file__).resolve().parent.parent / "data" / "workshop.json"
+_DEFAULT_PATH = Path(__file__).resolve().parent.parent.parent / "data" / "workshop.json"
 
 
 def default_path() -> Path:

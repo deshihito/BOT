@@ -36,9 +36,9 @@ import discord
 from discord.ext import commands, tasks
 
 import config
-from core.general import economy_pool as economy_core
+from core.general.circulation import economy_pool as economy_core
 from core.game.gambling import gambling as gambling_core
-from core.general import items as items_core
+from core.general.items import items as items_core
 from core.game.game import prison as prison_core
 from core.support.messages import GAMBLING_INVALID_AMOUNT, gambling_action_failed
 from core.support.panel_v2 import as_panel_v2, edit_message_v2, edit_panel_v2

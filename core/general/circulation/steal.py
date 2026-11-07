@@ -17,7 +17,7 @@
 コインの実移動は呼び出し側が wallet の原子的な経路
 （_change_balance の CAS）で行い、transaction_history に
 steal_success / steal_fine の理由コードを残す。保存は
-core/general/workshop.py と同じ流儀: 専用 JSON（既定 data/steal.json、
+core/general/workshop/workshop.py と同じ流儀: 専用 JSON（既定 data/steal.json、
 環境変数 STEAL_DATA_PATH で変更可）にメモリ主体＋バッチフラッシュ
 ＋原子差し替え。
 """
@@ -34,7 +34,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from core.general.items import JST, ItemError
+from core.general.items.items import JST, ItemError
 
 logger = logging.getLogger(__name__)
 
@@ -121,7 +121,7 @@ def _clean_state(raw: Any) -> dict[str, Any]:
     return state
 
 
-_DEFAULT_PATH = Path(__file__).resolve().parent.parent / "data" / "steal.json"
+_DEFAULT_PATH = Path(__file__).resolve().parent.parent.parent / "data" / "steal.json"
 
 
 def default_path() -> Path:

@@ -20,9 +20,7 @@ from cogs.ai_tools import (
     AIToolsParamModal,
     _parse_param_input,
 )
-from core.general import ai_tools_router
-
-
+from core.general.ai_tools import ai_tools_router
 def _param(name, label, ptype, **kwargs):
     base = {
         "name": name, "label": label, "type": ptype, "required": False,
@@ -75,7 +73,7 @@ class DecideActionCriteriaTest(unittest.IsolatedAsyncioTestCase):
         plain = _candidate(value="join", label="VC参加")
         candidates = {"vc:changer_status": with_params, "vc:join": plain}
         decision = AsyncMock(return_value={"answers": {"action": {"choice": "vc:join"}}})
-        with patch("core.general.ai_tools_router.logfare.decision", decision):
+        with patch("core.general.ai_tools.ai_tools_router.logfare.decision", decision):
             selected = await ai_tools_router.decide_action("依頼", candidates)
         self.assertEqual(selected, "vc:join")
         criteria = decision.await_args.args[2]["action"]["criteria"]
@@ -90,7 +88,7 @@ class ExtractParamsTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_no_param_spec_makes_no_decision_call(self):
         decision = AsyncMock()
-        with patch("core.general.ai_tools_router.logfare.decision", decision):
+        with patch("core.general.ai_tools.ai_tools_router.logfare.decision", decision):
             self.assertEqual(await ai_tools_router.extract_params("VCに入って", _candidate(value="join", params=[])), {})
             item = {"root": "vc", "value": "join", "label": "VC参加", "genre": "/vc"}
             self.assertEqual(await ai_tools_router.extract_params("VCに入って", item), {})
@@ -98,7 +96,7 @@ class ExtractParamsTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_numeric_params_extracted_by_keyword_without_api_call(self):
         decision = AsyncMock()
-        with patch("core.general.ai_tools_router.logfare.decision", decision):
+        with patch("core.general.ai_tools.ai_tools_router.logfare.decision", decision):
             self.assertEqual(
                 await ai_tools_router.extract_params("ボイスチェンジャーの音程を+3にして", self.changer),
                 {"pitch": 3.0},
@@ -134,7 +132,7 @@ class ExtractParamsTest(unittest.IsolatedAsyncioTestCase):
                    choices=[["低", "low"], ["高", "high"]]),
         ])
         decision = AsyncMock(return_value={"answers": {"mode": {"choice": "high"}}})
-        with patch("core.general.ai_tools_router.logfare.decision", decision):
+        with patch("core.general.ai_tools.ai_tools_router.logfare.decision", decision):
             self.assertEqual(await ai_tools_router.extract_params("モードを高くして", item), {"mode": "high"})
         decision.assert_awaited_once()
         questions = decision.await_args.args[2]
@@ -148,14 +146,14 @@ class ExtractParamsTest(unittest.IsolatedAsyncioTestCase):
         ])
         for answer in ("none", "bogus"):
             decision = AsyncMock(return_value={"answers": {"mode": {"choice": answer}}})
-            with self.subTest(answer=answer), patch("core.general.ai_tools_router.logfare.decision", decision):
+            with self.subTest(answer=answer), patch("core.general.ai_tools.ai_tools_router.logfare.decision", decision):
                 self.assertEqual(await ai_tools_router.extract_params("依頼", item), {})
 
     async def test_bool_param_extracted_via_decision_question(self):
         item = _candidate(params=[_param("enabled", "有効化", "bool")])
         for answer, expected in (("true", True), ("false", False)):
             decision = AsyncMock(return_value={"answers": {"enabled": {"choice": answer}}})
-            with self.subTest(answer=answer), patch("core.general.ai_tools_router.logfare.decision", decision):
+            with self.subTest(answer=answer), patch("core.general.ai_tools.ai_tools_router.logfare.decision", decision):
                 self.assertEqual(
                     await ai_tools_router.extract_params("依頼", item), {"enabled": expected})
 

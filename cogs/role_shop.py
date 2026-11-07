@@ -1,10 +1,10 @@
 """Slim entry point for the role_shop cog.
 
-The implementation lives in core.general.role_shop_cog.cog; this module only
+The implementation lives in core.general.role_shop.cog; this module only
 re-exports its names so existing imports and patch targets on
 cogs.role_shop keep working."
 """
-from core.general.role_shop_cog.cog import (
+from core.general.role_shop.cog import (
     annotations,
     asyncio,
     logging,

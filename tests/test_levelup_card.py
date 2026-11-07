@@ -10,7 +10,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
-from core.general import levelup_card
+from core.general.exp import levelup_card
 from core.support.storage import KVStore
 from tests.fake_kv_supabase import FakeKVSupabase
 
