@@ -27,8 +27,10 @@ _LEVELUP_SS = 2  # 内部は2倍解像度で描いて縮小(ジャギー防止)
 
 _LEVELUP_CJK_FONTS = (
     os.getenv("LEVELUP_FONT_PATH") or "",
-    # リポジトリ同梱の日本語フォント (Hachi Maru Pop)。assets/fonts に
-    # levelup.* というファイルは存在しないため候補に含めない。
+    # リポジトリ同梱の M PLUS Rounded 1c (名前などの本文用)。
+    # OS フォントの有無で見た目が変わらないよう同梱フォントを優先する。
+    str(_REPO_ROOT / "assets" / "fonts" / "MPLUSRounded1c-Regular.ttf"),
+    # リポジトリ同梱の日本語フォント (Hachi Maru Pop)。
     # OSフォントが無くてもここで日本語が描ける。
     str(_REPO_ROOT / "font.ttf"),
     "C:/Windows/Fonts/meiryob.ttc",
@@ -56,8 +58,11 @@ _LEVELUP_LATIN_FONTS = (
 # 参考画像(Bahnschrift / DIN 系コンデンス)を優先する
 _LEVELUP_DISPLAY_FONTS = (
     os.getenv("LEVELUP_DISPLAY_FONT_PATH") or "",
-    # ★ 参考画像 (Bahnschrift / DIN 系コンデンス) を優先
-    # (assets/fonts に levelup-display.* は存在しないため候補に含めない)
+    # リポジトリ同梱の極太ディスプレイフォント (Dela Gothic One)。
+    # ホストの OS フォントに左右されず見出しの見た目が揃うため、
+    # OS 側の候補より優先する (環境変数での上書きは従来どおり可能)。
+    str(_REPO_ROOT / "assets" / "fonts" / "DelaGothicOne-Regular.ttf"),
+    # ★ 参考画像 (Bahnschrift / DIN 系コンデンス)
     "/usr/share/fonts/truetype/bahnschrift/bahnschrift.ttf",
     "/usr/share/fonts/truetype/oswald/Oswald-Medium.ttf",
     "/usr/share/fonts/truetype/oswald/Oswald-SemiBold.ttf",
@@ -318,17 +323,12 @@ def render_levelup_card(
         up_font = _levelup_display_font(up_size)
 
     up_tracking = px(3)  # 参考画像の広めの字間
-    up_w, up_bbox_h = _levelup_draw_tracked(
-        d, (TX, 0), up_text, up_font, INK, up_tracking, anchor="ls"
-    )
+    # 幅だけ測る。以前は y=0 へ実際に描いて測っていたため、カード上端に
+    # 見出しの欠片がゴーストとして残っていた。
+    up_w = sum(d.textlength(ch, font=up_font) for ch in up_text) + up_tracking * (len(up_text) - 1)
 
     # --- レベル変化「9 → 10」 ---
     prev_text, new_text = str(before), str(after)
-    pfont = _levelup_display_font(px(42))
-    nfont = _levelup_display_font(px(72))
-
-    p_w = d.textlength(prev_text, font=pfont)
-    n_w = d.textlength(new_text, font=nfont)
 
     # 矢印の寸法
     arrow_w = px(56)
@@ -338,31 +338,50 @@ def render_levelup_card(
     # 全体幅 = 前 + gap + 矢印 + gap + 後
     gap_before = px(20)
     gap_after = px(16)
-    group_w = p_w + gap_before + arrow_w + gap_after + n_w
 
-    # 見出し + 余白 + レベル群 が右端に収まるよう配置
-    group_x = TX + up_w + px(56)
+    # 見出しの右にレベル群が収まるよう、必要なら数字を縮める。
+    # (太いフォントや3桁以上のレベルでは、固定サイズだと右端からはみ出す)
+    p_size, n_size = px(42), px(72)
+    while True:
+        pfont = _levelup_display_font(p_size)
+        nfont = _levelup_display_font(n_size)
+        p_w = d.textlength(prev_text, font=pfont)
+        n_w = d.textlength(new_text, font=nfont)
+        group_w = p_w + gap_before + arrow_w + gap_after + n_w
+        group_x = TX + up_w + px(56)
+        if group_x + group_w <= right or n_size <= px(40):
+            break
+        p_size -= px(2)
+        n_size -= px(2)
     if group_x + group_w > right:
-        group_x = max(TX + up_w + px(24), right - group_w)
+        group_x = max(TX, right - group_w)
 
     # --- ベースラインの計算 ---
-    # 見出しの視覚的な中心を、カードの中央よりやや上に置く
-    heading_cy = center_y - px(22)
+    # 見出しの視覚的な中心はカード中央 (= アバターの中心軸) に合わせる。
+    # 以前は中央より上に置いていたため、本文全体が上寄りに見えていた。
+    heading_cy = center_y
 
-    # 「LEVEL UP」のベースライン: bbox のアセント分を補正
-    up_bbox = up_font.getbbox(up_text)
-    up_top = heading_cy - (up_bbox[3] - up_bbox[1]) / 2 - up_bbox[1]
+    def centered_baseline(text, font):
+        """インク範囲の中心が heading_cy に来るベースラインを返す。
+
+        font.getbbox() はアセンダー原点の座標を返すため、そのまま
+        ベースライン原点 (anchor="ls") の描画位置に流用すると、
+        フォントごとに数十px上へずれる。textbbox で anchor="ls" の
+        実際のインク範囲を測って補正する。
+        """
+        _, ink_top, _, ink_bottom = d.textbbox((0, 0), text, font=font, anchor="ls")
+        return heading_cy - (ink_top + ink_bottom) / 2
+
+    # 「LEVEL UP」のベースライン
+    up_top = centered_baseline(up_text, up_font)
     _levelup_draw_tracked(
         d, (TX, up_top), up_text, up_font, INK, up_tracking, anchor="ls"
     )
 
     # --- レベル変化のベースライン ---
     # 見出しと同じ視覚的中心 heading_cy に揃える
-    p_bbox = pfont.getbbox(prev_text)
-    n_bbox = nfont.getbbox(new_text)
-
-    p_top = heading_cy - (p_bbox[3] - p_bbox[1]) / 2 - p_bbox[1]
-    n_top = heading_cy - (n_bbox[3] - n_bbox[1]) / 2 - n_bbox[1]
+    p_top = centered_baseline(prev_text, pfont)
+    n_top = centered_baseline(new_text, nfont)
 
     d.text((group_x, p_top), prev_text, font=pfont, fill=MUTE, anchor="ls")
 
