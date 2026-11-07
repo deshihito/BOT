@@ -1,10 +1,10 @@
 """Slim entry point for the thirtyone cog.
 
-The implementation lives in core.game.thirtyone_cog.cog; this module only
+The implementation lives in core.game.thirtyone.cog; this module only
 re-exports its names so existing imports and patch targets on
 cogs.thirtyone keep working."
 """
-from core.game.thirtyone_cog.cog import (
+from core.game.thirtyone.cog import (
     asyncio,
     logging,
     discord,

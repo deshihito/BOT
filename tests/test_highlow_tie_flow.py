@@ -4,8 +4,8 @@ import types
 import unittest
 
 from game_fakes import FakeChannel, FakeGuild, FakeInteraction, FakeMember, FakeMessage
-from core.game.highlow import HighLowGame
-from core.game.highlow_cog.cog import HighLow, HighLowPanel
+from core.game.highlow.highlow import HighLowGame
+from core.game.highlow.cog import HighLow, HighLowPanel
 
 
 def make_game():

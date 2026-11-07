@@ -1,10 +1,10 @@
 """Slim entry point for the nonogram cog.
 
-The implementation lives in core.game.nonogram_cog.cog; this module only
+The implementation lives in core.game.nonogram.cog; this module only
 re-exports its names so existing imports and patch targets on
 cogs.nonogram keep working."
 """
-from core.game.nonogram_cog.cog import (
+from core.game.nonogram.cog import (
     random,
     time,
     discord,

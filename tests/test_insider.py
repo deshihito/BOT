@@ -2,7 +2,7 @@
 import random
 import unittest
 
-from core.game.insider import TOPICS, InsiderGame
+from core.game.insider.insider import TOPICS, InsiderGame
 
 
 def make_game(seed=1):

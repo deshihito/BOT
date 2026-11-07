@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 import unittest
 
-from core.game.justone import WORDS, JustOneSession, eliminate_duplicates, normalize
+from core.game.justone.justone import WORDS, JustOneSession, eliminate_duplicates, normalize
 
 
 class JustOneBankTest(unittest.TestCase):

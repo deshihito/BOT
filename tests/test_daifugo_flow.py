@@ -10,8 +10,7 @@ from unittest.mock import patch
 from game_fakes import FakeChannel, FakeGuild, FakeInteraction, FakeMember, fast_time, real_sleep
 from cogs import daifugo as d
 from core.support import guild_settings
-from core.game import autoplay, party_ranking
-
+from core.game.game import autoplay, party_ranking
 EMOJI = re.compile('[\U0001F000-\U0001FFFF\u2600-\u27BF\u2B00-\u2BFF\u23E9-\u23FA]')
 
 
@@ -103,7 +102,7 @@ class LogicTest(unittest.TestCase):
     def test_registered(self):
         self.assertTrue(party_ranking.is_ranked('daifugo'))
         self.assertIn('daifugo', party_ranking.KNOWN_GAMES)
-        from core.game.game_guides import GAME_GUIDES
+        from core.game.game.game_guides import GAME_GUIDES
         self.assertIsNone(EMOJI.search(str(GAME_GUIDES['daifugo'])))
 
 

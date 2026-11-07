@@ -1,10 +1,10 @@
 """Slim entry point for the majority cog.
 
-The implementation lives in core.game.majority_cog.cog; this module only
+The implementation lives in core.game.majority.cog; this module only
 re-exports its names so existing imports and patch targets on
 cogs.majority keep working."
 """
-from core.game.majority_cog.cog import (
+from core.game.majority.cog import (
     asyncio,
     logging,
     random,

@@ -77,7 +77,7 @@ THIEF_AMOUNT_MULTIPLIER = 2.0
 
 #: 効果アイテム第2弾（次期仕様 S6-4）の効果IDと倍率。
 #: お祓い棒: 有効期間中、スロットで「6」の出目が出にくくなる
-#: （core/game/gambling.py の spin_slot が重み倍率で受ける）。
+#: （core/game/gambling/gambling.py の spin_slot が重み倍率で受ける）。
 SIX_SUPPRESS_EFFECT = "six_suppress"
 SIX_SUPPRESS_MULTIPLIER = 0.5
 #: 落盤対策: 有効期間中、採掘の空振り（失敗）が無効になる

@@ -1,4 +1,4 @@
-"""盤面画像（core/game/board_image.py と各 cog のレンダラー）のテスト。
+"""盤面画像（core/game/game/board_image.py と各 cog のレンダラー）のテスト。
 
 盤面画像化タスク（2026-11-06）: 描画は純関数なので、サイズ・決定性・
 主要状態の描画成功を検証する。実画像の見た目は目視確認に委ねる。
@@ -11,8 +11,8 @@ from unittest.mock import MagicMock
 
 from PIL import Image
 
-from core.game import board_image
-from core.game.board_image import (
+from core.game.game import board_image
+from core.game.game.board_image import (
     FONT_PATH, render_2048, render_bingo_card, render_cached, render_minesweeper,
     render_nonogram, render_sudoku, render_wirecut_board,
 )
@@ -169,8 +169,8 @@ class WirecutRenderTest(unittest.TestCase):
 
 class VersusRenderTest(unittest.TestCase):
     def test_gomoku_render_deterministic(self):
-        from core.game.gomoku import BLACK, new_board
-        from core.game.gomoku_cog.cog import render_board_image
+        from core.game.gomoku.gomoku import BLACK, new_board
+        from core.game.gomoku.cog import render_board_image
         board = new_board()
         board[7][7] = BLACK
         first = render_board_image(board, last=(7, 7))
@@ -181,8 +181,8 @@ class VersusRenderTest(unittest.TestCase):
         self.assertEqual(Image.open(first).size, (640, 640))
 
     def test_connect4_render_deterministic(self):
-        from core.game.connect4 import RED, new_board
-        from core.game.connect4_cog.cog import HEIGHT, WIDTH, render_board_image
+        from core.game.connect4.connect4 import RED, new_board
+        from core.game.connect4.cog import HEIGHT, WIDTH, render_board_image
         board = new_board()
         board[5][0] = RED
         first = render_board_image(board, last=(5, 0))
@@ -208,8 +208,8 @@ class PanelConstructionTest(unittest.TestCase):
 
     def test_minesweeper_panels(self):
         import cogs.minesweeper as cog
-        from core.game.game_v2 import assert_within_limits, count_buttons
-        from core.game.minesweeper import MinesweeperBoard
+        from core.game.game.game_v2 import assert_within_limits, count_buttons
+        from core.game.minesweeper.minesweeper import MinesweeperBoard
         for key in ("easy", "wide", "expert"):
             panel = cog.BoardPanel(MagicMock(), self.owner(),
                                    MinesweeperBoard(key, rng=random.Random(0)))
@@ -221,8 +221,8 @@ class PanelConstructionTest(unittest.TestCase):
 
     def test_sudoku_panels(self):
         import cogs.sudoku as cog
-        from core.game.game_v2 import assert_within_limits
-        from core.game.sudoku import generate
+        from core.game.game.game_v2 import assert_within_limits
+        from core.game.sudoku.sudoku import generate
         puzzle, solution = generate(random.Random(1), "easy")
         view = cog.SudokuView(MagicMock(), self.owner(), puzzle, solution, "easy")
         assert_within_limits(view)
@@ -230,16 +230,16 @@ class PanelConstructionTest(unittest.TestCase):
 
     def test_nonogram_panels(self):
         import cogs.nonogram as cog
-        from core.game.game_v2 import assert_within_limits
-        from core.game.nonogram import NonogramPuzzle
+        from core.game.game.game_v2 import assert_within_limits
+        from core.game.nonogram.nonogram import NonogramPuzzle
         puzzle = NonogramPuzzle.pick("8x8", rng=random.Random(0))
         view = cog.NonogramView(MagicMock(), self.owner(), puzzle)
         assert_within_limits(view)
         assert_within_limits(cog.SizeView(MagicMock(), self.owner()))
 
     def test_2048_panel(self):
-        from core.game.game2048_cog.cog import Board2048View
-        from core.game.game_v2 import assert_within_limits, count_buttons
+        from core.game.game2048.cog import Board2048View
+        from core.game.game.game_v2 import assert_within_limits, count_buttons
         view = Board2048View(MagicMock(), self.owner())
         assert_within_limits(view)
         self.assertEqual(count_buttons(view), 5)

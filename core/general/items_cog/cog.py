@@ -22,7 +22,7 @@ from discord.ext import commands, tasks
 
 import config
 from core.general import items as items_core
-from core.game import prison as prison_core
+from core.game.game import prison as prison_core
 from core.support.messages import ITEM_INVALID_INPUT, ITEM_NOT_FOUND, item_action_failed
 from core.support.panel_v2 import as_panel_v2, edit_panel_v2
 from cogs import wallet as wallet_module  # INSUFFICIENT は実行時に引く（テストの cog 再読込で同一性が崩れないため）

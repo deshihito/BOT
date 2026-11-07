@@ -1,8 +1,8 @@
-"""マジョリティ連想（core/game/majority.py）のテスト。"""
+"""マジョリティ連想（core/game/majority/majority.py）のテスト。"""
 
 import unittest
 
-from core.game.majority import TOPICS, MajoritySession, normalize_answer
+from core.game.majority.majority import TOPICS, MajoritySession, normalize_answer
 
 
 class NormalizeTest(unittest.TestCase):

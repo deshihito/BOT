@@ -1,11 +1,9 @@
-"""人狼フェーズ境界スナップショット（core/game/jinrou_snapshot.py）のテスト。"""
+"""人狼フェーズ境界スナップショット（core/game/jinrou/jinrou_snapshot.py）のテスト。"""
 import types
 import unittest
 
 from core.game.jinrou.game import JinrouGame
-from core.game import jinrou_snapshot
-
-
+from core.game.jinrou import jinrou_snapshot
 def member(uid, name=None):
     return types.SimpleNamespace(id=uid, display_name=name or f"user{uid}",
                                  name=name or f"user{uid}", mention=f"<@{uid}>", bot=False)

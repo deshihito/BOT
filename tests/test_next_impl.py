@@ -30,10 +30,13 @@ from types import SimpleNamespace
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from core.general import action_registry
-from core.game import clan as clan_core, gacha as gacha_core
+from core.game.clan import clan as clan_core
+from core.game.gacha import gacha as gacha_core
 from core.general import daily_bonus as daily_core, starter as starter_core
-from core.game import gambling as gambling_core, lottery as lottery_core
-from core.game import mining as mining_core, prison as prison_core
+from core.game import lottery as lottery_core
+from core.game.gambling import gambling as gambling_core
+from core.game import mining as mining_core
+from core.game.game import prison as prison_core
 from core.general import economy_pool as economy_core
 from core.general import items as items_core
 from core.general.wallet.cog import compute_asset_ranking

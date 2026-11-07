@@ -1,9 +1,9 @@
-"""ハイ＆ロー（core/game/highlow.py）のテスト。同点は引き分け扱い（2026-11-07 仕様変更）。"""
+"""ハイ＆ロー（core/game/highlow/highlow.py）のテスト。同点は引き分け扱い（2026-11-07 仕様変更）。"""
 
 import random
 import unittest
 
-from core.game.highlow import HighLowGame, card_label, new_deck, rank_label
+from core.game.highlow.highlow import HighLowGame, card_label, new_deck, rank_label
 
 
 class DeckTest(unittest.TestCase):

@@ -1,12 +1,10 @@
-"""ラウンド3のソロ記録（core/game/game_records.py 追加分）のテスト。"""
+"""ラウンド3のソロ記録（core/game/game/game_records.py 追加分）のテスト。"""
 
 import tempfile
 import unittest
 from pathlib import Path
 
-from core.game import game_records
-
-
+from core.game.game import game_records
 class Round3RecordsTest(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()

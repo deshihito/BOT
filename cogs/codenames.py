@@ -1,10 +1,10 @@
 """Slim entry point for the codenames cog.
 
-The implementation lives in core.game.codenames_cog.cog; this module only
+The implementation lives in core.game.codenames.cog; this module only
 re-exports its names so existing imports and patch targets on
 cogs.codenames keep working."
 """
-from core.game.codenames_cog.cog import (
+from core.game.codenames.cog import (
     asyncio,
     logging,
     random,

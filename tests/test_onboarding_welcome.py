@@ -53,7 +53,7 @@ def find_select(view):
 class WelcomeStatsTest(unittest.TestCase):
     def test_stats_come_from_single_sources_of_truth(self):
         from core.general.action_registry import ROOT_ORDER, default_registry
-        from core.game.game_guides import GAME_ORDER
+        from core.game.game.game_guides import GAME_ORDER
 
         stats = setup_cog.welcome_stats()
         self.assertEqual(stats["commands"], len(ROOT_ORDER) + 1)
@@ -67,7 +67,7 @@ class WelcomeStatsTest(unittest.TestCase):
 
     def test_stats_follow_registry_changes(self):
         import core.general.action_registry as registry_module
-        import core.game.game_guides as guides_module
+        import core.game.game.game_guides as guides_module
 
         class FakeRegistry:
             def __len__(self):

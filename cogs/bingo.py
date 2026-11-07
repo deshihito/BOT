@@ -1,10 +1,10 @@
 """Slim entry point for the bingo cog.
 
-The implementation lives in core.game.bingo_cog.cog; this module only
+The implementation lives in core.game.bingo.cog; this module only
 re-exports its names so existing imports and patch targets on
 cogs.bingo keep working."
 """
-from core.game.bingo_cog.cog import (
+from core.game.bingo.cog import (
     asyncio,
     logging,
     discord,

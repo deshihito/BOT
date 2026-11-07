@@ -32,14 +32,14 @@ import discord
 from discord.ext import commands, tasks
 
 import config
-from core.game import clan as clan_core
+from core.game.clan import clan as clan_core
 from core.general.user_names import cached_display_name
-from core.game import gacha as gacha_core
+from core.game.gacha import gacha as gacha_core
 from core.general import economy_pool as economy_core
 from core.general import items as items_core
 from core.game import lottery as lottery_core
 from core.game import mining as mining_core
-from core.game import prison as prison_core
+from core.game.game import prison as prison_core
 from core.general import steal as steal_core
 from core.support.messages import circulation_action_failed
 from core.support.panel_v2 import as_panel_v2, edit_panel_v2

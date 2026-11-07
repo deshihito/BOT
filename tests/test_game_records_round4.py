@@ -3,7 +3,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from core.game.game_records import GameRecordsStore
+from core.game.game.game_records import GameRecordsStore
 
 
 class Round4RecordsTest(unittest.TestCase):

@@ -3,7 +3,7 @@
 
 - スラッシュコマンドは増やさず、/game の「お題しりとり」から募集する（GameHub が start_recruit を呼ぶ）。
 - 状態はチャンネルごとに ``self.games[channel_id]`` に持ち、終わったら必ず消す。
-- 勝利数は core/game/party_ranking.py 経由で Supabase の party_game_record_win に送る
+- 勝利数は core/game/game/party_ranking.py 経由で Supabase の party_game_record_win に送る
   （関数が無いときはメモリだけで数える）。
 
 判定のしくみ（純粋関数は Discord に依存しないので単体テストできる）:
@@ -22,12 +22,12 @@ import random
 import unicodedata
 
 import discord
-from core.game import game_panels, game_restore
-from core.game.game_v2 import GamePanelView, LobbyView, safe_delete, text_panel
+from core.game.game import game_panels, game_restore
+from core.game.game.game_v2 import GamePanelView, LobbyView, safe_delete, text_panel
 from core.support.messages import recruit_join_prompt
 from discord.ext import commands
 
-from core.game import party_ranking
+from core.game.game import party_ranking
 from core.support.emojis import CROCK, FAILED
 
 logger = logging.getLogger(__name__)
@@ -347,7 +347,7 @@ class OdaiShiritori(commands.Cog):
             f"🏆 勝者: {win_text}\n\n## つながった言葉（お題: {g.topic}）\n{chain[:1024]}"))
 
     # ------------------------------------------------------------------
-    # 再起動復旧（core/game/game_restore.py）
+    # 再起動復旧（core/game/game/game_restore.py）
     # ------------------------------------------------------------------
     def _save_snapshot(self, g: ShiritoriGame) -> None:
         if g.phase != "playing":

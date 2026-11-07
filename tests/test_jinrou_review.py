@@ -1,4 +1,4 @@
-"""人狼の振り返り表（core/game/jinrou_review.py と cogs/jinrou.py の記録）のテスト。通信はしない。"""
+"""人狼の振り返り表（core/game/jinrou/jinrou_review.py と cogs/jinrou.py の記録）のテスト。通信はしない。"""
 
 import unittest
 from unittest.mock import MagicMock, patch
@@ -7,9 +7,7 @@ import discord
 
 from game_fakes import FakeBot, FakeChannel, FakeGuild, FakeMember
 from cogs import jinrou
-from core.game import jinrou_review as review
-
-
+from core.game.jinrou import jinrou_review as review
 def view_text(view):
     return "\n".join(
         item.content or "" for item in view.walk_children()

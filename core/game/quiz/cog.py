@@ -1,9 +1,9 @@
 # -*- coding: utf-8 -*-
 """クイズ大会（4択ボタン・全員同時回答）。
 
-問題は core/game/quiz_bank.py の同梱バンクから供給する（供給インターフェース
+問題は core/game/quiz/quiz_bank.py の同梱バンクから供給する（供給インターフェース
 越しなので、将来 AI 生成に差し替え可能）。進行と採点は
-core/game/quiz_game.py。優勝者は party_ranking に記録される。
+core/game/quiz/quiz_game.py。優勝者は party_ranking に記録される。
 """
 import asyncio
 import logging
@@ -12,10 +12,10 @@ import time
 import discord
 from discord.ext import commands
 
-from core.game import game_panels, party_ranking
-from core.game.game_v2 import GamePanelView, LobbyView, original_response_or_none, safe_delete, text_panel
-from core.game.quiz_bank import default_source
-from core.game.quiz_game import QuizSession
+from core.game.game import game_panels, party_ranking
+from core.game.game.game_v2 import GamePanelView, LobbyView, original_response_or_none, safe_delete, text_panel
+from core.game.quiz.quiz_bank import default_source
+from core.game.quiz.quiz_game import QuizSession
 
 logger = logging.getLogger(__name__)
 

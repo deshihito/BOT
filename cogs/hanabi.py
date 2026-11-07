@@ -1,10 +1,10 @@
 """Slim entry point for the hanabi cog.
 
-The implementation lives in core.game.hanabi_cog.cog; this module only
+The implementation lives in core.game.hanabi.cog; this module only
 re-exports its names so existing imports and patch targets on
 cogs.hanabi keep working."
 """
-from core.game.hanabi_cog.cog import (
+from core.game.hanabi.cog import (
     asyncio,
     io,
     logging,

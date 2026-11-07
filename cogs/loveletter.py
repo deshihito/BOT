@@ -1,10 +1,10 @@
 """Slim entry point for the loveletter cog.
 
-The implementation lives in core.game.loveletter_cog.cog; this module only
+The implementation lives in core.game.loveletter.cog; this module only
 re-exports its names so existing imports and patch targets on
 cogs.loveletter keep working."
 """
-from core.game.loveletter_cog.cog import (
+from core.game.loveletter.cog import (
     asyncio,
     logging,
     random,

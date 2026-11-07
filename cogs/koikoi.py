@@ -1,10 +1,10 @@
 """Slim entry point for the koikoi cog.
 
-The implementation lives in core.game.koikoi_cog.cog; this module only
+The implementation lives in core.game.koikoi.cog; this module only
 re-exports its names so existing imports and patch targets on
 cogs.koikoi keep working."
 """
-from core.game.koikoi_cog.cog import (
+from core.game.koikoi.cog import (
     asyncio,
     logging,
     random,

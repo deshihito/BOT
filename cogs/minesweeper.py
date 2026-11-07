@@ -1,6 +1,6 @@
 """Slim entry point for the minesweeper cog.
 
-The implementation lives in core.game.minesweeper_cog.cog; this module only
+The implementation lives in core.game.minesweeper.cog; this module only
 re-exports its names so existing imports and patch targets on
 cogs.minesweeper keep working.
 
@@ -8,7 +8,7 @@ cogs.minesweeper keep working.
 旧 BoardView / DifficultyView / board_embed / NUMBER_LABELS は
 BoardPanel / DifficultyPanel / board_png 等に置き換わった。
 """
-from core.game.minesweeper_cog.cog import (
+from core.game.minesweeper.cog import (
     time,
     discord,
     commands,

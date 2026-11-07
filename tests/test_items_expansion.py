@@ -21,7 +21,8 @@ from unittest import mock
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from core.general import craft, workshop
-from core.game import gambling, mining
+from core.game import mining
+from core.game.gambling import gambling
 from core.general import economy_pool, items, market
 from cogs import wallet as wallet_module
 from cogs.circulation import CirculationCog

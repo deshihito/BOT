@@ -9,7 +9,7 @@ DM を送るものだった。AGO はグローバルBotなので同意モデル�
 送信対象の判定、レポート文の組み立てまで。実際の DM 送信と
 ステータス集約は cogs/daily_report.py が担う。
 
-保存は core/game/prison.py と同じ流儀: 専用 JSON（既定 data/daily_report.json、
+保存は core/game/game/prison.py と同じ流儀: 専用 JSON（既定 data/daily_report.json、
 環境変数 DAILY_REPORT_DATA_PATH で変更可）にメモリ主体＋バッチ
 フラッシュ＋原子差し替え。
 """
@@ -26,7 +26,7 @@ from pathlib import Path
 from typing import Any
 
 from core.general.items import JST
-from core.game.prison import format_remaining
+from core.game.game.prison import format_remaining
 
 logger = logging.getLogger(__name__)
 

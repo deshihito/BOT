@@ -26,7 +26,7 @@ from core.support import guild_settings
 from core.general import action_registry, action_usage, levelup_card, logfare
 from core.support import usage_stats
 from core.general import ai_omnirush, ai_preferences, ai_provider_router
-from core.game.game_guides import GAME_GUIDES, GAME_ORDER
+from core.game.game.game_guides import GAME_GUIDES, GAME_ORDER
 from core.general import translation_settings as translation
 from core.support import localization
 from core.support.messages import CIRCULATION_NOT_LOADED, GAMBLING_NOT_LOADED, ITEMS_NOT_LOADED, MARKET_NOT_LOADED, WORKSHOP_NOT_LOADED
@@ -68,7 +68,7 @@ GENERAL_GENRES = {
 # ショートカットは make_image を開く（MIQ設定・meme の移動先）。
 GENERAL_GENRE_ALIASES = {"translation": "custom", "miq": "make_image", "meme": "make_image"}
 
-# 逮捕中（core/game/prison.py）に実行を拒否するマネージャンルのアクション値。
+# 逮捕中（core/game/game/prison.py）に実行を拒否するマネージャンルのアクション値。
 # 表示系（money_panel / status / coin_leaderboard / market / items /
 # workshop / lottery のパネル表示）は含めない（開くことはできる）。
 MONEY_PRISON_BLOCKED_VALUES = frozenset({

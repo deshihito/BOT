@@ -1,10 +1,10 @@
-"""アゴ姫への手紙（core/game/loveletter.py）のテスト。AGOオリジナル役職の効果を固める。"""
+"""アゴ姫への手紙（core/game/loveletter/loveletter.py）のテスト。AGOオリジナル役職の効果を固める。"""
 
 import random
 import unittest
 from collections import Counter
 
-from core.game.loveletter import TARGET_TOKENS, LoveLetterGame, build_deck
+from core.game.loveletter.loveletter import TARGET_TOKENS, LoveLetterGame, build_deck
 
 
 def make_game(hands, deck, players=(1, 2, 3), turn=0):

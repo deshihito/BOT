@@ -1,10 +1,10 @@
 """Slim entry point for the game2048 cog.
 
-The implementation lives in core.game.game2048_cog.cog; this module only
+The implementation lives in core.game.game2048.cog; this module only
 re-exports its names so existing imports and patch targets on
 cogs.game2048 keep working."
 """
-from core.game.game2048_cog.cog import (
+from core.game.game2048.cog import (
     discord,
     commands,
     game_records,

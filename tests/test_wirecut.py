@@ -2,7 +2,7 @@
 import unittest
 from collections import Counter
 
-from core.game.wirecut import RED, WireCutGame
+from core.game.wirecut.wirecut import RED, WireCutGame
 
 
 class WireCutGameTest(unittest.TestCase):
@@ -88,7 +88,7 @@ class WireCutGameTest(unittest.TestCase):
         盤面画像化（2026-11-06）の秘匿担保: レンダラーへ渡るのは
         ("cut", 公知の数字) と ("hidden", 偶奇 or None, ≠メモ) だけ。
         """
-        from core.game.wirecut_cog.cog import board_slots
+        from core.game.wirecut.cog import board_slots
 
         game = WireCutGame([1, 2, 3])
         # 公開情報を少し作る: 情報トークンで偶奇を公開し、ミスで≠メモを付ける

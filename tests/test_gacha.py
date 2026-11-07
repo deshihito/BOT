@@ -17,8 +17,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from core.game import gacha as gacha_core
-from core.game import prison as prison_core
+from core.game.gacha import gacha as gacha_core
+from core.game.game import prison as prison_core
 from cogs import wallet as wallet_module
 
 

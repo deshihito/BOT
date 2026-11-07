@@ -5,14 +5,14 @@ import random
 from collections import Counter
 import os
 import discord
-from core.game import game_panels
+from core.game.game import game_panels
 from core.support.emojis import AGOMUNIMUNI, FAILED, LOADING, MASAI, MUSIC, REIBAI, SUCCESS, URANAI
-from core.game import jinrou_guide
+from core.game.jinrou import jinrou_guide
 from discord import app_commands
 from discord.ext import commands
-from core.game import autoplay
-from core.game import jinrou_review
-from core.game import party_ranking
+from core.game.game import autoplay
+from core.game.jinrou import jinrou_review
+from core.game.game import party_ranking
 import math
 import config
 
@@ -20,7 +20,7 @@ from core.game.jinrou.common import *  # noqa: F401,F403 - shared constants/help
 from core.game.jinrou.common import reibai_color, uranai_color  # noqa: F401
 from core.game.jinrou.game import JinrouGame  # noqa: F401
 from core.game.jinrou.helpers import _get_display_role  # noqa: F401
-from core.game.game_v2 import (  # noqa: F401
+from core.game.game.game_v2 import (  # noqa: F401
     GamePanelView,
     LOBBY_MSG_ALREADY_JOINED,
     LOBBY_MSG_ALREADY_STARTED,
@@ -223,7 +223,7 @@ class AdvancedSetupView(GamePanelView):
 class RecruitView(GamePanelView):
     """人狼の募集ロビー（V2、共通ロビー規格に寄せた構成）。
 
-    共通 LobbyView（core/game/game_v2.py）の規格に合わせた点:
+    共通 LobbyView（core/game/game/game_v2.py）の規格に合わせた点:
     - 参加者一覧（人数・必要人数つき）をパネル本文に持ち、参加/退出は
       新規メッセージを出さずパネルをその場編集して反映する。
     - 拒否は統一文面（LOBBY_MSG_* / lobby_msg_*）の ephemeral。

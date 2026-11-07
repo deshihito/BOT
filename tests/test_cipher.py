@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 import unittest
 
-from core.game.cipher import ALL_CODES, MAX_ROUNDS, WORDS, CipherGame
+from core.game.cipher.cipher import ALL_CODES, MAX_ROUNDS, WORDS, CipherGame
 
 KEYWORDS = {0: ["あ", "い", "う", "え"], 1: ["か", "き", "く", "け"]}
 

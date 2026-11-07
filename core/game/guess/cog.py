@@ -7,8 +7,8 @@ import discord
 from discord.ext import commands
 
 import config
-from core.game import game_records
-from core.game.game_v2 import text_panel
+from core.game.game import game_records
+from core.game.game.game_v2 import text_panel
 
 logger = logging.getLogger("cogs.guess")
 
@@ -122,7 +122,7 @@ class Guess(commands.Cog):
             f"結果: {'勝ち' if won else '負け'} | 変動 **{actual_delta:+,} ago**",
             f"残高: **{new_balance:,} ago**",
         ]
-        # 自分の通算成績（core/game/game_records.py）。記録できなければ欄ごと付けない。
+        # 自分の通算成績（core/game/game/game_records.py）。記録できなければ欄ごと付けない。
         stats = game_records.record_guess_safely(user_id, bet, won, actual_delta)
         if stats is not None:
             lines += ["", "あなたの通算成績:", game_records.format_guess_stats(stats)]

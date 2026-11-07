@@ -8,7 +8,7 @@ import os
 import traceback
 from core.support.api_client import APIError
 from core.support.api_retry import run_with_retry
-from core.game import prison as prison_core
+from core.game.game import prison as prison_core
 from core.general.user_names import resolve_display_names
 
 logger = logging.getLogger(__name__)

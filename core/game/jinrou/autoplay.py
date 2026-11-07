@@ -5,14 +5,14 @@ import random
 from collections import Counter
 import os
 import discord
-from core.game import game_panels
+from core.game.game import game_panels
 from core.support.emojis import FAILED, SUCCESS
-from core.game import jinrou_guide
+from core.game.jinrou import jinrou_guide
 from discord import app_commands
 from discord.ext import commands
-from core.game import autoplay
-from core.game import jinrou_review
-from core.game import party_ranking
+from core.game.game import autoplay
+from core.game.jinrou import jinrou_review
+from core.game.game import party_ranking
 import math
 import config
 

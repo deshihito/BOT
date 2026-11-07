@@ -42,7 +42,7 @@ def owner(uid=4242):
 class MinesweeperOrderTest(unittest.TestCase):
     def test_x_select_above_y_select(self):
         import cogs.minesweeper as cog
-        from core.game.minesweeper import MinesweeperBoard
+        from core.game.minesweeper.minesweeper import MinesweeperBoard
 
         panel = cog.BoardPanel(MagicMock(), owner(), MinesweeperBoard("easy", rng=random.Random(0)))
         placeholders = select_placeholders(panel)
@@ -53,7 +53,7 @@ class MinesweeperOrderTest(unittest.TestCase):
         self.assertTrue(all(label.startswith("Y=") for label in options[1]))
 
     def test_coord_readout_is_xy(self):
-        from core.game.minesweeper_cog.cog import coord
+        from core.game.minesweeper.cog import coord
         self.assertEqual(coord(2, 4), "X=C, Y=5")
         self.assertEqual(coord(0, 0), "X=A, Y=1")
 
@@ -61,7 +61,7 @@ class MinesweeperOrderTest(unittest.TestCase):
 class SudokuOrderTest(unittest.TestCase):
     def test_x_then_y_then_number(self):
         import cogs.sudoku as cog
-        from core.game.sudoku import generate
+        from core.game.sudoku.sudoku import generate
 
         puzzle, solution = generate(random.Random(1), "easy")
         view = cog.SudokuView(MagicMock(), owner(), puzzle, solution, "easy")
@@ -74,7 +74,7 @@ class SudokuOrderTest(unittest.TestCase):
 class NonogramOrderTest(unittest.TestCase):
     def test_x_select_above_y_select(self):
         import cogs.nonogram as cog
-        from core.game.nonogram import NonogramPuzzle
+        from core.game.nonogram.nonogram import NonogramPuzzle
 
         puzzle = NonogramPuzzle.pick("5x5", rng=random.Random(0))
         view = cog.NonogramView(MagicMock(), owner(), puzzle)
@@ -85,7 +85,7 @@ class NonogramOrderTest(unittest.TestCase):
 
 class GomokuOrderTest(unittest.TestCase):
     def test_x_select_row0_y_select_row1(self):
-        from core.game.gomoku_cog.cog import GomokuGame, MoveView
+        from core.game.gomoku.cog import GomokuGame, MoveView
 
         view = MoveView(MagicMock(), GomokuGame(1, 1, 1))
         # V2 化で children はコンテナになったため walk_children で列挙する。
@@ -100,7 +100,7 @@ class GomokuOrderTest(unittest.TestCase):
 
 class Connect4NotationTest(unittest.TestCase):
     def test_single_axis_is_x(self):
-        from core.game.connect4_cog.cog import Connect4Game, MoveView
+        from core.game.connect4.cog import Connect4Game, MoveView
 
         view = MoveView(MagicMock(), Connect4Game(1, 1, 1))
         selects = [c for c in view.walk_children() if isinstance(c, discord.ui.Select)]

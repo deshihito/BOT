@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""共通トランプ描画基盤（core/game/board_image.py）と各ゲームへの適用のテスト。
+"""共通トランプ描画基盤（core/game/game/board_image.py）と各ゲームへの適用のテスト。
 
 カード画像化タスク（2026-11-06）:
 - 標準52枚＋ジョーカーが全て描ける・決定的・スートが描き分けられる。
@@ -14,8 +14,8 @@ import unittest
 
 from PIL import Image
 
-from core.game import board_image
-from core.game.board_image import (
+from core.game.game import board_image
+from core.game.game.board_image import (
     CARD_JOKER, card_spec, render_card, render_card_hand, render_card_pile,
     render_card_rows,
 )
@@ -23,8 +23,8 @@ from core.game.poker import cog as poker_cog
 from core.game.daifugo import cog as daifugo_cog
 from core.game.doubt import cog as doubt_cog
 from core.game.babanuki import cog as babanuki_cog
-from core.game.highlow_cog import cog as highlow_cog
-from core.game.highlow import new_deck
+from core.game.highlow import cog as highlow_cog
+from core.game.highlow.highlow import new_deck
 import random
 
 

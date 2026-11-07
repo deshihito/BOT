@@ -2,7 +2,7 @@
 import random
 import unittest
 
-from core.game.hoshi import BOMB, FLOWER, HoshiGame
+from core.game.hoshi.hoshi import BOMB, FLOWER, HoshiGame
 
 
 def place_all(game: HoshiGame, kinds: dict[int, str]):

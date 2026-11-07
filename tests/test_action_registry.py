@@ -64,7 +64,7 @@ class RegistryConsistencyTest(unittest.TestCase):
         self.assertEqual(registered, expected)
 
     def test_game_registration_matches_game_order(self):
-        from core.game.game_guides import GAME_ORDER
+        from core.game.game.game_guides import GAME_ORDER
 
         registered = {spec.value for spec in self.registry.by_root("game")}
         self.assertEqual(registered, {f"game:{game}" for game in GAME_ORDER})
@@ -120,7 +120,7 @@ class ShortcutRootsGenerationTest(unittest.TestCase):
         self.assertEqual(values, expected)
 
     def test_game_and_help_candidates_unchanged(self):
-        from core.game.game_guides import GAME_ORDER
+        from core.game.game.game_guides import GAME_ORDER
 
         game_values = [value for _label, value in self.roots["game"][1]]
         self.assertEqual(game_values, [f"game:{game}" for game in GAME_ORDER])

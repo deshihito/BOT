@@ -5,14 +5,15 @@ import random
 from collections import Counter
 import os
 import discord
-from core.game import game_panels
+from core.game.game import game_panels
 from core.support.emojis import FAILED, KISHI, MASAI, MENHERA, MUSIC, PANYA, RESTART, SUCCESS
-from core.game import jinrou_guide
+from core.game.jinrou import jinrou_guide
 from discord import app_commands
 from discord.ext import commands
-from core.game import autoplay
-from core.game import game_restore, jinrou_review, jinrou_snapshot
-from core.game import party_ranking
+from core.game.game import autoplay
+from core.game.game import game_restore
+from core.game.jinrou import jinrou_review, jinrou_snapshot
+from core.game.game import party_ranking
 import math
 import config
 
@@ -21,7 +22,7 @@ from core.game.jinrou.common import _is_wolf_side  # noqa: F401
 from core.game.jinrou.game import JinrouGame  # noqa: F401
 from core.game.jinrou.helpers import _check_and_reveal_ura_yakushoku, _get_display_role, _guide_role_lookup  # noqa: F401
 from core.game.jinrou.views import NightActionView, RoleCheckView  # noqa: F401
-from core.game.game_v2 import GamePanelView  # noqa: F401
+from core.game.game.game_v2 import GamePanelView  # noqa: F401
 
 logger = logging.getLogger("cogs.jinrou")
 

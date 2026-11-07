@@ -1,8 +1,8 @@
-"""31ゲーム（core/game/thirtyone.py）のテスト。31を言った人が脱落し0から再開。"""
+"""31ゲーム（core/game/thirtyone/thirtyone.py）のテスト。31を言った人が脱落し0から再開。"""
 
 import unittest
 
-from core.game.thirtyone import ThirtyOneGame
+from core.game.thirtyone.thirtyone import ThirtyOneGame
 
 
 class BasicTest(unittest.TestCase):

@@ -3,13 +3,13 @@ import io
 from types import SimpleNamespace
 
 import discord
-from core.game import board_image, game_panels
-from core.game.board_image import render_cached, render_card, render_card_hand, render_card_pile
-from core.game.game_v2 import GamePanelView, LobbyView, safe_delete, text_panel
+from core.game.game import board_image, game_panels
+from core.game.game.board_image import render_cached, render_card, render_card_hand, render_card_pile
+from core.game.game.game_v2 import GamePanelView, LobbyView, safe_delete, text_panel
 from discord.ext import commands
 
 from core.general import action_usage
-from core.game import party_ranking
+from core.game.game import party_ranking
 from core.support import usage_stats
 
 party_ranking.register("doubt")
@@ -304,7 +304,7 @@ class Doubt(commands.Cog):
         await channel.send(view=text_panel("Game Set!", f"勝者: <@{winner_id}>"))
         if self.games.get(channel.id) is game:
             del self.games[channel.id]
-            # サーバーごとのランキング（core/game/party_ranking.py）: 手札を出し切った 1 人が勝ち
+            # サーバーごとのランキング（core/game/game/party_ranking.py）: 手札を出し切った 1 人が勝ち
             guild = getattr(channel, "guild", None)
             if guild is not None:
                 await party_ranking.shared().record_win(guild.id, winner_id, "doubt")

@@ -16,9 +16,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from core.game import clan as clan_core
-
-
+from core.game.clan import clan as clan_core
 class StoreTest(unittest.TestCase):
     def _store(self, tmp):
         return clan_core.ClanStore(Path(tmp) / "clans.json")

@@ -3,7 +3,7 @@ import unittest
 from collections import Counter
 from unittest.mock import AsyncMock, MagicMock
 
-from core.game.mendou import COPIES, DEAL_PER_PLAYER, KINDS, MendouGame
+from core.game.mendou.mendou import COPIES, DEAL_PER_PLAYER, KINDS, MendouGame
 
 DECK_SIZE = len(KINDS) * COPIES
 
@@ -129,7 +129,7 @@ class MendouPanelTest(unittest.IsolatedAsyncioTestCase):
     """進行の単一メッセージ集約（2026-11-06）: 判定で新規投稿しないこと。"""
 
     async def test_apply_accept_edits_session_message_only(self):
-        from core.game.mendou_cog.cog import Mendou, status_text
+        from core.game.mendou.cog import Mendou, status_text
 
         cog = Mendou(MagicMock())
         game = MendouGame([1, 2, 3])
