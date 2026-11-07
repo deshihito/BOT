@@ -26,8 +26,8 @@ import discord
 from discord import app_commands
 from discord.ext import commands, tasks
 
-from cogs.clear import MAX_CLEAR
-from cogs.auth import get_intro_webhook, sanitize_webhook_name, role_failure_reason
+from cogs.support import MAX_CLEAR
+from cogs.support import get_intro_webhook, sanitize_webhook_name, role_failure_reason
 from core.support import guild_settings
 from core.general import action_usage
 from core.support.usage_stats import usage_stats
