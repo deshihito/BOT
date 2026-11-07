@@ -4,9 +4,9 @@ Slash の /setup コマンド登録は廃止済み。
   1. 認証: 付けるロール・自己紹介チャンネル・フォームの有効/無効（cogs/auth.py が使う）
   2. グローバルチャット: このチャンネルをつなぐ / 外す（cogs/globalchat.py の保存先をそのまま使う）
   3. ミュート管理ロール: muted.py が設定を保存できる場合だけ表示する
-  4. 国づくり: 参加する/しない・お知らせチャンネル・通知の量（core.guild_settings.nation_settings で読める）
+  4. 国づくり: 参加する/しない・お知らせチャンネル・通知の量（core.support.guild_settings.nation_settings で読める）
   5. まとめ: 設定内容と、機能ごとに Bot に足りない権限
-設定は core/guild_settings.py（Supabase の bot_kv。使えないときはローカルの JSON）に保存する。
+設定は core/support/guild_settings.py（Supabase の bot_kv。使えないときはローカルの JSON）に保存する。
 """
 from __future__ import annotations
 
@@ -18,9 +18,9 @@ import discord
 from discord.ext import commands
 
 from core.help.command_catalog import permission_label
-from core.emojis import BOOK, COIN, FAILED, GAME, GEAR, MUSIC, SUCCESS
-from core.guild_settings import NATION_SECTION, NOTIFY_LEVELS, NOTIFY_MAJOR, get_store, nation_settings
-from core.panel_v2 import as_panel_v2
+from core.support.emojis import BOOK, COIN, FAILED, GAME, GEAR, MUSIC, SUCCESS
+from core.support.guild_settings import NATION_SECTION, NOTIFY_LEVELS, NOTIFY_MAJOR, get_store, nation_settings
+from core.support.panel_v2 import as_panel_v2
 from core.support import localization
 from core.support.panel_recovery.cog import build_panel
 
@@ -124,7 +124,7 @@ def welcome_stats() -> Optional[dict]:
     個別機能の数字は出さない（文面方針 2026-11-07）。
     """
     try:
-        from core.action_registry import ROOT_ORDER, default_registry
+        from core.general.action_registry import ROOT_ORDER, default_registry
         from core.game.game_guides import GAME_ORDER
 
         return {
