@@ -6,7 +6,7 @@
 - 参加者が 1 人だけなら Bot が相手になる。
 - 3 種類の手がそろう／全員同じ手のときは「あいこ」で、同じ人でもう一度。
   勝った手の人だけが残り、最後の 1 人が勝ち。時間内に出さなかった人は負け。
-- 勝利数は core/game/party_ranking.py に記録する（人間 2 人以上の勝負のときだけ。Bot 戦は数えない）。
+- 勝利数は core/game/game/party_ranking.py に記録する（人間 2 人以上の勝負のときだけ。Bot 戦は数えない）。
 - 放置した人の手を代わりに出す共通の仕組み（Lunancy さん担当）ができたら ``auto_hand`` を差し替えて使える。
 """
 import asyncio
@@ -15,14 +15,13 @@ from core.support.emojis import CROCK
 
 import discord
 from cogs.wallet import INSUFFICIENT
-from core.game import game_panels
-from core.game import prison as prison_core
-from core.game.game_v2 import GamePanelView, LobbyView, safe_delete, text_panel
+from core.game.game import game_panels
+from core.game.game import prison as prison_core
+from core.game.game.game_v2 import GamePanelView, LobbyView, safe_delete, text_panel
 from core.support.messages import recruit_join_prompt
 from discord.ext import commands
 
-from core.game import party_ranking
-
+from core.game.game import party_ranking
 GAME_ID = "janken"
 party_ranking.register(GAME_ID)
 
