@@ -8,7 +8,7 @@
   （reason: poker_buyin / poker_cashout）を必ず通す。チップの精算は
   ハンド単位で完結し、持ち越しはテーブル（セッション）内のみ。
   退出・テーブル終了時は残チップを必ずコインに戻す。
-- 再起動対策: 対局そのものは復旧しない（core/game/game_restore.py の対象外）が、
+- 再起動対策: 対局そのものは復旧しない（core/game/game/game_restore.py の対象外）が、
   預かっているチップは data/poker_chips.json の台帳に都度記録し、
   起動時に未精算分を全額返金する（cogs/gambling.py の未完了セッション
   返金と同じ考え方）。台帳の1人あたり金額は「スタック＋ハンド中の
@@ -17,7 +17,7 @@
   コール / レイズ / フォールド）→ 交換1回 → ショーダウン。
   ポットはサイドポット方式で分配し、レーキとして各勝者の受取から
   5%（切り捨て）を消却する（インフレ対策）。
-- ハンドの勝者（ポットを獲得した全員）は core/game/party_ranking.py に
+- ハンドの勝者（ポットを獲得した全員）は core/game/game/party_ranking.py に
   ハンド勝利数として記録する。
 - AI tools からの起動（game:poker）: 起動自体はコインを動かさず、
   バイインは参加者本人のボタン操作でのみ行うため、数字当て・
@@ -36,13 +36,12 @@ import discord
 from discord.ext import commands
 import config
 from cogs.wallet import INSUFFICIENT, NEW_USER_BALANCE
-from core.game import party_ranking
-from core.game import board_image
-from core.game.board_image import render_cached, render_card_hand, render_card_rows
-from core.game import game_panels
-from core.game.game_v2 import GamePanelView, LobbyView, text_panel
-from core.game import prison as prison_core
-
+from core.game.game import party_ranking
+from core.game.game import board_image
+from core.game.game.board_image import render_cached, render_card_hand, render_card_rows
+from core.game.game import game_panels
+from core.game.game.game_v2 import GamePanelView, LobbyView, text_panel
+from core.game.game import prison as prison_core
 logger = logging.getLogger(__name__)
 
 #: 配札シャッフル専用の CSPRNG (E-12)。グローバル random (MT) の状態を
@@ -112,7 +111,7 @@ def label_card(card):
     return f"{card[0]}{card[1]}"
 
 
-# --- カード画像（core/game/board_image.py の共通トランプ基盤） ----------------
+# --- カード画像（core/game/game/board_image.py の共通トランプ基盤） ----------------
 _SUIT_TO_LETTER = {"♠": "S", "♥": "H", "♦": "D", "♣": "C"}
 
 
