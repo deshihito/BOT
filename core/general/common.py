@@ -61,6 +61,7 @@ GENERAL_GENRES = {
     "rta": ("ランキング", ""),
     "exp": ("EXP・レベル", "チャット・VC・generalのEXPとレベル"),
     "survival": ("生存確認", "メンバーの安否・不在の検知"),
+    "garden": ("栽培", ""),
     "custom": ("設定・AI", ""),
     "zeta": ("ZetaModoki", "ロールプレイ会話"),
     "make_image": ("画像作成", ""),
@@ -128,6 +129,9 @@ GENERAL_ACTIONS = {
         ("生存確認ランキング", "fujo_ranking"),
         ("フリーズ", "fujo_freeze"),
         ("失踪警報解除", "fujo_panic_disable"),
+    ],
+    "garden": [
+        ("植物栽培", "garden"),
     ],
     "exp": [
         ("自分のEXP状況", "exp_status"),
