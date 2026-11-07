@@ -33,7 +33,7 @@ import logging
 from discord.ui import View
 from discord import app_commands, Interaction
 from discord.ext import commands, tasks
-from cogs.terminal import ALLOWED_USER_IDS
+from cogs.support import ALLOWED_USER_IDS
 from discord.ext.commands import Cog
 from PIL import Image, ImageDraw, ImageEnhance
 from zoneinfo import ZoneInfo
