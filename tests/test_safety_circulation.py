@@ -20,10 +20,11 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from core.general import steal
+from core.general.circulation import steal
 from core.game import lottery, mining
 from core.game.game import prison as prison_core
-from core.general import economy_pool, items
+from core.general.circulation import economy_pool
+from core.general.items import items
 from cogs import wallet as wallet_module
 from cogs.circulation import CirculationCog
 

@@ -473,16 +473,14 @@ class JankenPrisonTest(unittest.IsolatedAsyncioTestCase):
 class AIToolsRiskTest(unittest.IsolatedAsyncioTestCase):
     def test_candidates_exclude_message_shortcut_blocked(self):
         from core.general import action_registry
-        from core.general import ai_tools_router
-
+        from core.general.ai_tools import ai_tools_router
         candidates = ai_tools_router.action_candidates()
         for action_id in action_registry.MESSAGE_SHORTCUT_BLOCKED_IDS:
             self.assertNotIn(action_id, candidates)
         self.assertIn("vc:join", candidates)
 
     async def test_invoke_action_rejects_blocked_and_display_actions(self):
-        from core.general import ai_tools_router
-
+        from core.general.ai_tools import ai_tools_router
         bot = types.SimpleNamespace(get_cog=lambda name: None)
         message = types.SimpleNamespace(
             author=types.SimpleNamespace(id=45))
@@ -493,8 +491,7 @@ class AIToolsRiskTest(unittest.IsolatedAsyncioTestCase):
                 await ai_tools_router.invoke_action(bot, message, item)
 
     async def test_invoke_action_still_passes_safe_actions(self):
-        from core.general import ai_tools_router
-
+        from core.general.ai_tools import ai_tools_router
         dispatcher = types.SimpleNamespace(execute_shortcut=AsyncMock())
         bot = types.SimpleNamespace(get_cog=lambda name: dispatcher)
         message = types.SimpleNamespace(
@@ -572,8 +569,8 @@ class _CreditFailWallet:
 
 class RefundFailureTest(unittest.TestCase):
     def test_workshop_buy_machine_refund_failure_is_reported(self):
-        from core.general import workshop as workshop_core
-        from core.general import items as items_core
+        from core.general.workshop import workshop as workshop_core
+        from core.general.items import items as items_core
         from cogs.workshop import WorkshopCog
 
         with tempfile.TemporaryDirectory() as tmp:

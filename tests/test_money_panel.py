@@ -22,10 +22,13 @@ import discord
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from core.general import action_registry
-from core.general import steal, workshop
+from core.general.circulation import steal
+from core.general.workshop import workshop
 from core.game import lottery, mining
 from core.game.gambling import gambling
-from core.general import economy_pool, items, market
+from core.general.circulation import economy_pool
+from core.general.items import items
+from core.general.market import market
 from cogs import wallet as wallet_module
 from cogs.circulation import CirculationCog
 from cogs.gambling import GamblingCog

@@ -24,11 +24,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import discord  # noqa: E402
 
-from core.general import daily_bonus as daily_core  # noqa: E402
-from core.general import starter as starter_core  # noqa: E402
+from core.general.money_panel import daily_bonus as daily_core  # noqa: E402
+from core.general.money_panel import starter as starter_core  # noqa: E402
 from core.game.game import prison as prison_core  # noqa: E402
-from core.general import items as items_core  # noqa: E402
-from core.general import market as market_core  # noqa: E402
+from core.general.items import items as items_core  # noqa: E402
+from core.general.market import market as market_core  # noqa: E402
 from cogs import wallet as wallet_module  # noqa: E402
 from cogs.items import ItemsCog  # noqa: E402
 from cogs.market import MarketCog, TradeModal  # noqa: E402

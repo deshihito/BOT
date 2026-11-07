@@ -78,7 +78,7 @@ class EconomyPanelTrimTest(unittest.TestCase):
 
     def test_items_and_workshop_views_have_no_refresh(self):
         from cogs.workshop import WorkshopView
-        from core.general.items_cog.cog import ItemsView
+        from core.general.items.cog import ItemsView
 
         for view in (ItemsView(None, 1), WorkshopView(None, 1)):
             labels = [getattr(c, "label", None) for c in view.children]
@@ -89,7 +89,7 @@ class EconomyPanelTrimTest(unittest.TestCase):
         from datetime import datetime, timedelta
 
         import config
-        from core.general.items_cog.cog import _items_embed
+        from core.general.items.cog import _items_embed
 
         now = datetime.now(config.JST)
         store = types.SimpleNamespace(

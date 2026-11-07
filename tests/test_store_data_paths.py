@@ -31,7 +31,9 @@ from core.game import lottery, mining
 from core.game.game import elo, game_records, game_restore, prison
 from core.game.gambling import gambling
 from core.game.zeta import store as zeta_store
-from core.general import economy_pool, items, market
+from core.general.circulation import economy_pool
+from core.general.items import items
+from core.general.market import market
 from core.support import usage_stats
 from core.vc import voice_restore
 
