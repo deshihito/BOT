@@ -370,7 +370,7 @@ class PokerPrisonTest(unittest.IsolatedAsyncioTestCase):
     def _make(self, tmp):
         from tests.test_poker_table import FakeWallet, user
 
-        from cogs import poker
+        import core.game.poker.cog as poker
 
         wallet = FakeWallet({1: 1000, 2: 1000})
         bot = types.SimpleNamespace(
@@ -412,7 +412,7 @@ class JankenPrisonTest(unittest.IsolatedAsyncioTestCase):
         from game_fakes import FakeChannel, FakeGuild, FakeInteraction, FakeMember
 
         from core.game.game import prison as prison_core
-        from cogs import janken as j
+        import core.game.janken.cog as j
 
         guild = FakeGuild(77)
         channel = FakeChannel(700, guild)
@@ -428,7 +428,7 @@ class JankenPrisonTest(unittest.IsolatedAsyncioTestCase):
         from game_fakes import FakeChannel, FakeGuild, FakeInteraction, FakeMember
 
         from core.game.game import prison as prison_core
-        from cogs import janken as j
+        import core.game.janken.cog as j
 
         guild = FakeGuild(77)
         channel = FakeChannel(700, guild)
@@ -448,7 +448,7 @@ class JankenPrisonTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_collect_wagers_precheck_blocks_all_debits(self):
         from core.game.game import prison as prison_core
-        from cogs import janken as j
+        import core.game.janken.cog as j
 
         wallet = types.SimpleNamespace(
             _change_balance=AsyncMock(return_value=1000))
@@ -521,7 +521,7 @@ class SystemRandomTest(unittest.TestCase):
             self.assertIs(LotteryStore(path, rng=injected)._rng, injected)
 
     def test_gacha_default_rng_is_system_random_but_injection_kept(self):
-        from cogs.gacha import GachaCog
+        from cogs.game import GachaCog
         from core.game.gacha import gacha as gacha_core
         with tempfile.TemporaryDirectory() as tmp:
             store = gacha_core.GachaStore(Path(tmp) / "gacha.json")
@@ -593,7 +593,7 @@ class RefundFailureTest(unittest.TestCase):
 
     def test_clan_create_refund_failure_is_reported(self):
         from core.game.clan import clan as clan_core
-        from cogs.clan import ClanCog
+        from cogs.game import ClanCog
 
         with tempfile.TemporaryDirectory() as tmp:
             wallet = _CreditFailWallet({"1": 20000})
@@ -616,7 +616,7 @@ class GachaCreditFailureTest(unittest.TestCase):
     def _cog(self, tmp, wallet, rng):
         from tests.test_gacha import _Bot
 
-        from cogs.gacha import GachaCog
+        from cogs.game import GachaCog
         from core.game.gacha import gacha as gacha_core
         return GachaCog(
             _Bot(wallet),

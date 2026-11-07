@@ -6,7 +6,7 @@ import types
 import unittest
 
 from game_fakes import FakeChannel, FakeGuild, FakeInteraction, FakeMember, fast_time, press, real_sleep
-from cogs import janken as j
+import core.game.janken.cog as j
 from core.game.game import party_ranking
 class JudgeTest(unittest.TestCase):
     def test_two_players(self):

@@ -42,9 +42,9 @@ from core.general.items import items as items_core
 from core.general.wallet.cog import compute_asset_ranking
 from cogs import general as wallet_module
 from cogs.general import CirculationCog
-from cogs.clan import ClanCog
-from cogs.gacha import collection_embed
-from cogs.gambling import GamblingCog
+from cogs.game import ClanCog
+from cogs.game import collection_embed
+from cogs.game import GamblingCog
 from cogs.general import CATEGORIES, MoneyPanelCog, status_embed
 from tools import coin_distribution
 

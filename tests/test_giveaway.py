@@ -15,7 +15,7 @@ for p in (ROOT, ROOT / "tests"):
         sys.path.insert(0, str(p))
 
 import game_fakes  # noqa: E402,F401
-from cogs import giveaway as gw  # noqa: E402
+import core.game.giveaway.cog as gw
 from cogs.general import INSUFFICIENT  # noqa: E402
 from core.support.storage import KVStore  # noqa: E402
 

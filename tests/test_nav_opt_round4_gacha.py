@@ -16,7 +16,7 @@ class GachaPartySelectTest(unittest.TestCase):
 
         import discord
 
-        from cogs.gacha import PartyView
+        from cogs.game import PartyView
         from core.game.gacha import gacha as gacha_core
         with tempfile.TemporaryDirectory() as tmp:
             store = gacha_core.GachaStore(path=Path(tmp) / "gacha.json")

@@ -10,7 +10,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from cogs import jinrou as J  # noqa: E402
+import core.game.jinrou.entry as J
 
 
 class Chan:

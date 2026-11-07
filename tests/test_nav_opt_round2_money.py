@@ -15,7 +15,7 @@ class DiceNamingTest(unittest.TestCase):
         self.assertEqual(labels["dice"], "ダイスベット")
 
     def test_gambling_titles(self):
-        from cogs.gambling import DiceModal, _dice_embed
+        from cogs.game import DiceModal, _dice_embed
 
         self.assertEqual(_dice_embed(None, 1).title, "ダイスベット")
         import inspect

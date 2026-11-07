@@ -6,7 +6,7 @@ import unittest
 import game_fakes  # noqa: F401  (sys.path と環境変数の準備)
 from game_fakes import FakeChannel, FakeGuild, FakeInteraction, FakeMember
 from core.game.game import party_ranking
-from cogs import game
+import core.game.game.cog as game
 
 
 class _Res:

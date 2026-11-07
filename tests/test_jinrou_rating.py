@@ -11,7 +11,7 @@ for p in (ROOT, ROOT / "tests"):
         sys.path.insert(0, str(p))
 
 import game_fakes  # noqa: E402,F401
-from cogs import jinrou  # noqa: E402
+import core.game.jinrou.entry as jinrou
 
 
 class FakeQuery:

@@ -28,7 +28,7 @@ from core.general.items import items
 from core.general.market import market
 from cogs import general as wallet_module
 from cogs.general import CirculationCog
-from cogs.gambling import GamblingCog
+from cogs.game import GamblingCog
 from cogs.general import ItemsCog
 from cogs.general import MarketCog
 from cogs.general import WorkshopCog

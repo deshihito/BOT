@@ -13,7 +13,7 @@ if str(ROOT) not in sys.path:
 
 from tests.test_nation import NationFakeDBAPI, NationTest  # noqa: E402
 
-from cogs import nation as nation_module  # noqa: E402
+import core.game.nation.cog as nation_module
 from core.game.nation import cog as nation_impl  # noqa: E402
 
 

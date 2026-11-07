@@ -8,11 +8,9 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 import game_fakes  # noqa: F401
-from cogs.othello import (
-    BLACK, WHITE, OthelloGame, OthelloMoveView, labelled_moves, legal_moves, new_board,
-    play_move, render_board_image,
-)
-from cogs.poker import evaluate
+from cogs.game import OthelloGame, OthelloMoveView, labelled_moves, play_move
+from core.game.othello.cog import BLACK, WHITE, legal_moves, new_board, render_board_image
+from core.game.poker.cog import evaluate
 from PIL import Image, ImageChops
 
 
