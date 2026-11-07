@@ -65,7 +65,7 @@ class ServerAssistHomeTest(unittest.TestCase):
     def test_home_embed_lists_every_feature(self):
         # 導線最適化 S3 で仕様変更: 機能一覧は AssistFeatureSelect の option が担い、
         # ホーム embed はタイトル＋説明だけ（同一画面の二重表示をしない）。
-        from cogs.server_assist import ServerAssistHomeView, ServerAssistCog
+        from cogs.support import ServerAssistHomeView, ServerAssistCog
 
         cog = ServerAssistCog(types.SimpleNamespace())
         self.assertGreater(len(cog.features), 20)
@@ -101,7 +101,7 @@ class LanguageNoteTest(unittest.TestCase):
         self.assertIn("some screens", localization.text("language_support_note", "en"))
 
     def test_language_embed_shows_support_note(self):
-        from cogs.localization import LocalizationCog
+        from cogs.support import LocalizationCog
 
         embed = LocalizationCog(None).language_embed("ja")
         self.assertIn("対応状況", embed.description)

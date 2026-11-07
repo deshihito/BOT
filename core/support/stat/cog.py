@@ -1,7 +1,7 @@
 import discord
 from discord.ext import commands
 
-from cogs.terminal import ALLOWED_USER_IDS
+from cogs.support import ALLOWED_USER_IDS
 import sys
 import importlib.metadata
 import io

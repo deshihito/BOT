@@ -1,4 +1,4 @@
-"""cogs/muted.py のテスト（ミュート解除ループと、再起動しても残る保存）。Supabase は偽物、ファイルは一時フォルダにだけ書く。"""
+"""ミュート（core/support/muted/cog.py）のテスト（ミュート解除ループと、再起動しても残る保存）。Supabase は偽物、ファイルは一時フォルダにだけ書く。"""
 
 import asyncio
 import os
@@ -16,7 +16,7 @@ if str(ROOT) not in sys.path:
 
 import discord  # noqa: E402
 
-from cogs import muted  # noqa: E402
+from core.support.muted import cog as muted  # noqa: E402
 from core.support.storage import KVStore  # noqa: E402
 from tests.fake_kv_supabase import FakeKVSupabase, missing_table_error  # noqa: E402
 

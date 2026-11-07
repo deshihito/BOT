@@ -3,7 +3,7 @@ import unittest
 from unittest.mock import AsyncMock, patch
 
 from core.support.localization import localization
-from cogs.localization import LanguageView, LocalizationCog
+from cogs.support import LanguageView, LocalizationCog
 
 
 class LocalizationTest(unittest.IsolatedAsyncioTestCase):
@@ -32,7 +32,7 @@ class LocalizationTest(unittest.IsolatedAsyncioTestCase):
             get=lambda *_: {},
         )
         cog = LocalizationCog(None)
-        with patch("cogs.localization.get_store", return_value=store):
+        with patch("cogs.support.get_store", return_value=store):
             await cog.set_locale(42, "ja")
         store.update.assert_awaited_once_with(42, localization.LANGUAGE_SECTION, locale="ja")
         self.assertIn("AGOBOT", cog.language_embed("ja").description)

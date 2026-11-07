@@ -3,7 +3,7 @@ import asyncio
 import aiohttp
 from discord.ext import commands
 
-from cogs.terminal import ALLOWED_USER_IDS
+from cogs.support import ALLOWED_USER_IDS
 from core.game.game.autoplay import DEFAULT_D1_ENDPOINT
 
 class D1TestCog(commands.Cog):

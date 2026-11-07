@@ -1,4 +1,4 @@
-"""NGワード（cogs/ngword.py）の流れのテスト。偽の Discord 部品で動かし、通信はしない。"""
+"""NGワード（core/support/ngword/cog.py）の流れのテスト。偽の Discord 部品で動かし、通信はしない。"""
 
 import asyncio
 import random
@@ -6,7 +6,7 @@ import types
 import unittest
 
 from game_fakes import FakeChannel, FakeGuild, FakeInteraction, FakeMember, fast_time, press, real_sleep
-from cogs import ngword
+from core.support.ngword import cog as ngword
 
 
 def msg(author, channel, content):

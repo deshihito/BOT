@@ -455,7 +455,7 @@ class SetupWizard(discord.ui.View):
 
     # ---- 状態
     def auth(self) -> dict:
-        from cogs.auth import auth_settings
+        from cogs.support import auth_settings
         return auth_settings(self.guild.id)
 
     def global_channel_ids(self) -> list[int]:
@@ -690,7 +690,7 @@ class SetupWizard(discord.ui.View):
         await self.refresh(interaction, SUCCESS + ' 認証フォームを有効にしました。' if enabled else SUCCESS + ' 認証フォームを停止しました。')
 
     async def on_send_panel(self, interaction):
-        from cogs.auth import VerifyView
+        from cogs.support import VerifyView
         if not self.auth()["role_id"]:
             return await self.refresh(interaction, f"{FAILED} 先に認証で付けるロールを選んでください。")
         embed = discord.Embed(title="サーバー認証", description="下のボタンを押して質問に回答してください。",
@@ -703,7 +703,7 @@ class SetupWizard(discord.ui.View):
 
     async def on_category_perms(self, interaction, select):
         """もとの /sync_category_perms。カテゴリを認証ロールの人だけに見せ、中のチャンネルを同期する。"""
-        from cogs.auth import sync_category_perms
+        from cogs.support import sync_category_perms
         role = self.guild.get_role(self.auth()["role_id"]) if self.auth()["role_id"] else None
         if role is None:
             return await self.refresh(interaction, "先に認証で付けるロールを選んでください。")

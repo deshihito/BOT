@@ -121,7 +121,7 @@ class _FakeBot:
 
 class SendTest(unittest.TestCase):
     def _cog(self, tmp, users):
-        from cogs.daily_report import DailyReportCog
+        from cogs.support import DailyReportCog
 
         store = report_core.DailyReportStore(Path(tmp) / "daily_report.json")
         cog = DailyReportCog(

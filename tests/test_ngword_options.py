@@ -1,4 +1,4 @@
-"""NGワードの制限時間・一文字モード（cogs/ngword.py と /game の設定）のテスト。通信はしない。"""
+"""NGワードの制限時間・一文字モード（core/support/ngword/cog.py と /game の設定）のテスト。通信はしない。"""
 
 import asyncio
 import random
@@ -6,7 +6,8 @@ import types
 import unittest
 
 from game_fakes import FakeChannel, FakeGuild, FakeInteraction, FakeMember, FakeMessage, choose, fast_time, press, real_sleep
-from cogs import game, ngword
+from cogs import game
+from core.support.ngword import cog as ngword
 
 
 def msg(author, channel, content):

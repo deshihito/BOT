@@ -34,8 +34,8 @@ logger = logging.getLogger(__name__)
 
 
 def _recovery_wait_seconds():
-    """RECOVERY_WAIT_SECONDS is held by the cogs.panel_recovery entry (tests patch it there)."""
-    from cogs.panel_recovery import RECOVERY_WAIT_SECONDS
+    """RECOVERY_WAIT_SECONDS is held by the cogs.support entry (tests patch it there)."""
+    from cogs.support import RECOVERY_WAIT_SECONDS
     return RECOVERY_WAIT_SECONDS
 
 CUSTOM_ID_PREFIX = "panel:"

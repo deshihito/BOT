@@ -17,7 +17,8 @@ import discord  # noqa: E402
 from core.support import guild_settings  # noqa: E402
 from core.support.storage import KVStore  # noqa: E402
 from tests.fake_kv_supabase import FakeKVSupabase  # noqa: E402
-from cogs import auth, server_setup  # noqa: E402
+from core.support.auth import cog as auth  # noqa: E402
+from core.support.server_setup import cog as server_setup  # noqa: E402
 
 ALL = discord.Permissions.all()
 NONE = discord.Permissions.none()
@@ -301,7 +302,7 @@ class SettingsStorageTest(Base):
         self.assertIsNone(self.db.value("guild_settings", str(self.guild.id)))
 
     async def test_mute_step_with_real_muted_cog(self):
-        from cogs import muted
+        from core.support.muted import cog as muted
         cog = muted.Muted(types.SimpleNamespace(get_guild=lambda gid: None, is_ready=lambda: False),
                           store=KVStore("muted", client=self.db, path=self.path))
         self.addCleanup(cog.cog_unload)

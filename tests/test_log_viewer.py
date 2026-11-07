@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""cogs/log_viewer.py（!logs）のテスト（監査 #9）。
+"""ログビューア（core/support/log_viewer/cog.py、!logs）のテスト（監査 #9）。
 
 bot.log_buffer のフェイクで、行数指定・重要度フィルタ・エラー分岐を固定する。
 """
@@ -7,7 +7,7 @@ import types
 import unittest
 from unittest.mock import AsyncMock
 
-from cogs.log_viewer import LogViewer
+from cogs.support import LogViewer
 
 LOGS = [
     "[INFO] 起動しました",

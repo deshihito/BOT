@@ -266,7 +266,7 @@ class FakeFollowup:
 class SlowCallbackRaceTest(unittest.IsolatedAsyncioTestCase):
     async def test_slow_exp_ranking_beats_recovery_without_error(self):
         import cogs.general as general_module
-        from cogs import panel_recovery
+        import cogs.support as panel_recovery
         from cogs.general import GeneralCog
 
         interaction = types.SimpleNamespace(
@@ -321,7 +321,7 @@ class SlowCallbackRaceTest(unittest.IsolatedAsyncioTestCase):
 
 class RecoveryWaitTest(unittest.TestCase):
     def test_wait_seconds_covers_api_round_trip(self):
-        from cogs import panel_recovery
+        import cogs.support as panel_recovery
 
         # 0.4秒では Pi からの応答 HTTP 往復だけで誤判定し得る。Discord の
         # 初回応答期限（3秒）内に再表示が間に合う 1.5 秒を既定とする。

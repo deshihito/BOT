@@ -13,7 +13,7 @@ from unittest.mock import patch
 
 import discord
 
-from cogs import panel_recovery
+import cogs.support as panel_recovery
 from cogs.game import GameDetailView, GameHubView
 from cogs.help import BackView, CommandView, HelpView
 from cogs.vc import VoicePanelView

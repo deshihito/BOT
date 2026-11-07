@@ -23,7 +23,7 @@ from datetime import datetime
 import discord
 from discord.ext import commands
 
-from cogs.terminal import ALLOWED_USER_IDS
+from cogs.support import ALLOWED_USER_IDS
 from core.general import action_registry
 from core.support.usage_stats import usage_stats
 logger = logging.getLogger(__name__)

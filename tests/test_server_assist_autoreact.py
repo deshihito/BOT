@@ -19,7 +19,7 @@ from core.support import guild_settings
 from core.support.storage import KVStore
 from core.support.server_assist import discover_features
 from core.support.server_assist.features import autoreact
-from cogs.server_assist import ServerAssistCog
+from cogs.support import ServerAssistCog
 from tests.fake_kv_supabase import FakeKVSupabase
 
 

@@ -187,7 +187,7 @@ class ServerAssistPanelTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn("サーバーアシストへ戻る", labels)
 
     def test_home_view_lists_discovered_features(self):
-        from cogs.server_assist import AssistFeatureSelect, ServerAssistCog, ServerAssistHomeView
+        from cogs.support import AssistFeatureSelect, ServerAssistCog, ServerAssistHomeView
         cog = ServerAssistCog(types.SimpleNamespace())
         view = ServerAssistHomeView(cog)
         self.assertIn("welcome", [feature.key for feature in cog.features])
