@@ -4,6 +4,10 @@ import "./globals.css";
 import { InviteButton } from "./InviteCta";
 import { SITE_URL, SUPPORT_SERVER_URL } from "@/lib/site";
 
+// Google AdSense の審査・所有権確認コード（自動広告もこのスクリプトで配信される）
+const ADSENSE_SCRIPT_SRC =
+  "https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-8881841779482492";
+
 const SITE_TITLE = "AGOBOT | 使いたいこと、全部このボットでいい。";
 const SITE_DESCRIPTION =
   "AGOBOTは、ゲーム47種・音楽とVC・コイン経済・サーバー運営・AIまで、195の機能を6つのスラッシュコマンドに集約した多機能Discordボットです。";
@@ -33,6 +37,8 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="ja">
+      {/* React 19 が async script を <head> へ hoist するため、静的HTMLの head 内に実在する */}
+      <script async src={ADSENSE_SCRIPT_SRC} crossOrigin="anonymous" />
       <body>
         <header>
           <nav aria-label="メインメニュー">
