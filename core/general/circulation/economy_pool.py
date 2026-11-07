@@ -45,6 +45,7 @@ from datetime import date, datetime
 from pathlib import Path
 from typing import Any
 
+from core.store_flush import DirtyFlushMixin
 from core.support import data_paths
 from core.general.items.items import JST
 
@@ -112,7 +113,7 @@ def default_path() -> Path:
     return Path(os.environ.get("ECONOMY_POOL_DATA_PATH") or _DEFAULT_PATH)
 
 
-class EconomyPoolStore:
+class EconomyPoolStore(DirtyFlushMixin):
     """採掘プールと国庫の残高（同期 API、メモリ主体＋バッチフラッシュ）。"""
 
     def __init__(
@@ -159,16 +160,6 @@ class EconomyPoolStore:
         except Exception:
             logger.exception("economy_pool: 状態の保存に失敗しました path=%s", self._path)
 
-    def _mark_dirty(self) -> None:
-        self._dirty += 1
-        if self._dirty >= self._flush_every or (
-            time.monotonic() - self._last_flush >= self._flush_interval
-        ):
-            self.flush()
-
-    def maybe_flush(self) -> None:
-        if self._dirty and time.monotonic() - self._last_flush >= self._flush_interval:
-            self.flush()
 
     # ------------------------------------------------------------------ 残高
     def pool_balance(self) -> int:

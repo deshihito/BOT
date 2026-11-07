@@ -34,6 +34,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable
 
+from core.store_flush import DirtyFlushMixin
 from core.support import data_paths
 
 logger = logging.getLogger(__name__)
@@ -653,7 +654,7 @@ register_effect(DIRECT_DIG_EFFECT)(
     _timed_effect_handler("次の採掘1回だけ真下へ一気に掘れます"))
 
 
-class ItemStore:
+class ItemStore(DirtyFlushMixin):
     """所持・効果・宝箱抽選と JSON 保存（同期 API、メモリ主体）。
 
     コインの実移動は行わない。購入／売却／宝箱コインの受け渡しは
@@ -706,16 +707,6 @@ class ItemStore:
         except Exception:
             logger.exception("items: 状態の保存に失敗しました path=%s", self._path)
 
-    def _mark_dirty(self) -> None:
-        self._dirty += 1
-        if self._dirty >= self._flush_every or (
-            time.monotonic() - self._last_flush >= self._flush_interval
-        ):
-            self.flush()
-
-    def maybe_flush(self) -> None:
-        if self._dirty and time.monotonic() - self._last_flush >= self._flush_interval:
-            self.flush()
 
     # ------------------------------------------------------------------ 所持
     def _purge_user_locked(self, user_id: str, now: datetime) -> None:

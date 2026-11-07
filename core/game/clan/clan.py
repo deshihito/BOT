@@ -33,6 +33,7 @@ from pathlib import Path
 from typing import Any
 
 from core.general.items.items import JST
+from core.store_flush import DirtyFlushMixin
 
 logger = logging.getLogger(__name__)
 
@@ -208,7 +209,7 @@ def default_path() -> Path:
     return Path(os.environ.get("CLAN_DATA_PATH") or _DEFAULT_PATH)
 
 
-class ClanStore:
+class ClanStore(DirtyFlushMixin):
     """クランと所属・貢献ポイントの状態と JSON 保存。"""
 
     def __init__(
@@ -247,16 +248,6 @@ class ClanStore:
         except Exception:
             logger.exception("clan: 状態の保存に失敗しました path=%s", self._path)
 
-    def _mark_dirty(self) -> None:
-        self._dirty += 1
-        if self._dirty >= self._flush_every or (
-            time.monotonic() - self._last_flush >= self._flush_interval
-        ):
-            self.flush()
-
-    def maybe_flush(self) -> None:
-        if self._dirty and time.monotonic() - self._last_flush >= self._flush_interval:
-            self.flush()
 
     # ------------------------------------------------------------------ 参照
     def clan_of(self, user_id: str) -> dict[str, Any] | None:

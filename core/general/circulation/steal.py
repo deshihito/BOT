@@ -35,6 +35,7 @@ from pathlib import Path
 from typing import Any
 
 from core.general.items.items import JST, ItemError
+from core.store_flush import DirtyFlushMixin
 
 logger = logging.getLogger(__name__)
 
@@ -128,7 +129,7 @@ def default_path() -> Path:
     return Path(os.environ.get("STEAL_DATA_PATH") or _DEFAULT_PATH)
 
 
-class StealStore:
+class StealStore(DirtyFlushMixin):
     """盗みのクールダウン・1日回数の状態と JSON 保存、成否の抽選。"""
 
     def __init__(
@@ -169,16 +170,6 @@ class StealStore:
         except Exception:
             logger.exception("steal: 状態の保存に失敗しました path=%s", self._path)
 
-    def _mark_dirty(self) -> None:
-        self._dirty += 1
-        if self._dirty >= self._flush_every or (
-            time.monotonic() - self._last_flush >= self._flush_interval
-        ):
-            self.flush()
-
-    def maybe_flush(self) -> None:
-        if self._dirty and time.monotonic() - self._last_flush >= self._flush_interval:
-            self.flush()
 
     # ------------------------------------------------------------------ 状態参照
     def _actor_locked(self, user_id: str) -> dict[str, Any]:

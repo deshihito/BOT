@@ -57,6 +57,7 @@ import types
 from pathlib import Path
 from typing import Any
 
+from core.store_flush import DirtyFlushMixin
 from core.support import data_paths
 
 logger = logging.getLogger(__name__)
@@ -84,7 +85,7 @@ def _empty_data() -> dict[str, dict[str, Any]]:
     return {name: {} for name in GAME_IDS}
 
 
-class GameRestoreStore:
+class GameRestoreStore(DirtyFlushMixin):
     """スナップショット全体をメモリに持ち、変更をバッチで JSON へ書く（同期 API）。"""
 
     def __init__(
@@ -165,16 +166,6 @@ class GameRestoreStore:
             logger.exception("game_restore: 状態の保存に失敗しました path=%s", self._path)
             return False
 
-    def _mark_dirty(self) -> None:
-        self._dirty += 1
-        if self._dirty >= self._flush_every or (
-            time.monotonic() - self._last_flush >= self._flush_interval
-        ):
-            self.flush()
-
-    def maybe_flush(self) -> None:
-        if self._dirty and time.monotonic() - self._last_flush >= self._flush_interval:
-            self.flush()
 
     # ------------------------------------------------------------------ 参照
     def section(self, game_id: str) -> dict[str, Any]:

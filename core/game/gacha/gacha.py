@@ -31,6 +31,7 @@ import time
 from pathlib import Path
 from typing import Any
 
+from core.store_flush import DirtyFlushMixin
 from core.support import emojis
 
 logger = logging.getLogger(__name__)
@@ -256,7 +257,7 @@ def default_path() -> Path:
     return Path(os.environ.get("GACHA_DATA_PATH") or _DEFAULT_PATH)
 
 
-class GachaStore:
+class GachaStore(DirtyFlushMixin):
     """コレクション（所持数・編成・累計回数）と JSON 保存。"""
 
     def __init__(
@@ -295,16 +296,6 @@ class GachaStore:
         except Exception:
             logger.exception("gacha: 状態の保存に失敗しました path=%s", self._path)
 
-    def _mark_dirty(self) -> None:
-        self._dirty += 1
-        if self._dirty >= self._flush_every or (
-            time.monotonic() - self._last_flush >= self._flush_interval
-        ):
-            self.flush()
-
-    def maybe_flush(self) -> None:
-        if self._dirty and time.monotonic() - self._last_flush >= self._flush_interval:
-            self.flush()
 
     # ------------------------------------------------------------------ 状態
     def _entry_locked(self, user_id: str) -> dict[str, Any]:

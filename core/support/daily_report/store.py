@@ -27,6 +27,7 @@ from typing import Any
 
 from core.general.items.items import JST
 from core.game.game.prison import format_remaining
+from core.store_flush import DirtyFlushMixin
 
 logger = logging.getLogger(__name__)
 
@@ -66,7 +67,7 @@ def default_path() -> Path:
     return Path(os.environ.get("DAILY_REPORT_DATA_PATH") or _DEFAULT_PATH)
 
 
-class DailyReportStore:
+class DailyReportStore(DirtyFlushMixin):
     """日報の購読状態（ON/OFF・最終送信日）と JSON 保存。"""
 
     def __init__(
@@ -105,16 +106,6 @@ class DailyReportStore:
         except Exception:
             logger.exception("daily_report: 状態の保存に失敗しました path=%s", self._path)
 
-    def _mark_dirty(self) -> None:
-        self._dirty += 1
-        if self._dirty >= self._flush_every or (
-            time.monotonic() - self._last_flush >= self._flush_interval
-        ):
-            self.flush()
-
-    def maybe_flush(self) -> None:
-        if self._dirty and time.monotonic() - self._last_flush >= self._flush_interval:
-            self.flush()
 
     # ------------------------------------------------------------------ 購読状態
     def _entry_locked(self, user_id: str) -> dict[str, Any]:

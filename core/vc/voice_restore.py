@@ -37,6 +37,7 @@ import time
 from pathlib import Path
 from typing import Any
 
+from core.store_flush import DirtyFlushMixin
 from core.support import data_paths
 
 logger = logging.getLogger(__name__)
@@ -60,7 +61,7 @@ def _empty_data() -> dict[str, dict[str, Any]]:
     return {name: {} for name in SECTIONS}
 
 
-class VoiceRestoreStore:
+class VoiceRestoreStore(DirtyFlushMixin):
     """スナップショット全体をメモリに持ち、変更をバッチで JSON へ書く（同期 API）。"""
 
     def __init__(
@@ -140,16 +141,6 @@ class VoiceRestoreStore:
         except Exception:
             logger.exception("voice_restore: 状態の保存に失敗しました path=%s", self._path)
 
-    def _mark_dirty(self) -> None:
-        self._dirty += 1
-        if self._dirty >= self._flush_every or (
-            time.monotonic() - self._last_flush >= self._flush_interval
-        ):
-            self.flush()
-
-    def maybe_flush(self) -> None:
-        if self._dirty and time.monotonic() - self._last_flush >= self._flush_interval:
-            self.flush()
 
     # ------------------------------------------------------------------ 参照
     def section(self, name: str) -> dict[str, Any]:

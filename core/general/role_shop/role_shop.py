@@ -27,6 +27,7 @@ from pathlib import Path
 from typing import Any
 
 from core.general.items.items import JST
+from core.store_flush import DirtyFlushMixin
 
 logger = logging.getLogger(__name__)
 
@@ -149,7 +150,7 @@ def default_path() -> Path:
     return Path(os.environ.get("ROLE_SHOP_DATA_PATH") or _DEFAULT_PATH)
 
 
-class RoleShopStore:
+class RoleShopStore(DirtyFlushMixin):
     """ショップで付与したロールの期限（ギルド×ユーザー×ロール）と保存。"""
 
     def __init__(
@@ -188,16 +189,6 @@ class RoleShopStore:
         except Exception:
             logger.exception("role_shop: 状態の保存に失敗しました path=%s", self._path)
 
-    def _mark_dirty(self) -> None:
-        self._dirty += 1
-        if self._dirty >= self._flush_every or (
-            time.monotonic() - self._last_flush >= self._flush_interval
-        ):
-            self.flush()
-
-    def maybe_flush(self) -> None:
-        if self._dirty and time.monotonic() - self._last_flush >= self._flush_interval:
-            self.flush()
 
     # ------------------------------------------------------------------ 期限
     def grant(self, guild_id: int, user_id: int, role_id: int, days: int,
