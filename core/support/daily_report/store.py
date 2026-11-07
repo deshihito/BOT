@@ -25,7 +25,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from core.general.items import JST
+from core.general.items.items import JST
 from core.game.game.prison import format_remaining
 
 logger = logging.getLogger(__name__)
