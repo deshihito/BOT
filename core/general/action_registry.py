@@ -90,6 +90,8 @@ MESSAGE_SHORTCUT_BLOCKED_IDS = frozenset({
     "general:ai_default", "general:image_default", "general:reasoning_default",
     "general:translation_settings",
     "general:exp_status", "general:status",
+    # 植物栽培は本人の庭（個人の育成記録）の表示なので公開に反転させない。
+    "general:garden",
     "general:items", "general:workshop", "general:money_panel",
     # 日報DMの切り替え結果は本人の購読状態（個人設定）なので公開に反転させない。
     "general:daily_report",

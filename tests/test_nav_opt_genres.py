@@ -12,7 +12,7 @@ class GenreAbsorptionTest(unittest.TestCase):
         values = [value for _label, value in GENERAL_ACTIONS["custom"]]
         self.assertIn("translation_settings", values)
         total = sum(len(items) for items in GENERAL_ACTIONS.values())
-        self.assertEqual(total, 57)  # bump/up 最遅ランキング2件 追加後の総数（従来の期待値54は実総数55からドリフトしていた）。ジャンル移行では機能は減らない
+        self.assertEqual(total, 58)  # bump/up 最遅ランキング2件＋植物栽培 追加後の総数。ジャンル移行では機能は減らない
 
     def test_support_single_action_genres_absorbed(self):
         from cogs.support import SUPPORT_ACTIONS_BY_GENRE, SUPPORT_GENRES

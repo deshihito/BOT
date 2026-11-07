@@ -483,6 +483,12 @@ class GeneralCog(
                 interaction, app_commands.Choice(name=event_type, value=event_type)
             )
 
+        if value == "garden":
+            garden_cog = self.bot.get_cog("GardenCog")
+            if garden_cog is None:
+                return await self._safe_respond(interaction, "植物栽培は現在利用できません。")
+            return await garden_cog.show_garden(interaction)
+
         # ===== fujo（生存確認）系 =====
         if value.startswith("fujo_"):
             if fujo is None:

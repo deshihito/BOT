@@ -12,6 +12,7 @@
     circulation   core/general/circulation/cog.py          CirculationCog
     d1_test       core/general/d1_test/cog.py              D1TestCog
     gauge         core/general/gauge/cog.py                Gauge
+    garden        core/general/garden/cog.py               GardenCog
     ggrks         core/general/ggrks/cog.py                GoogleSearch
     imakita       core/general/imakita/cog.py              ImakitaSummaryCog
     items         core/general/items/cog.py                ItemsCog
@@ -93,6 +94,7 @@ _FEATURE_MODULES = (
     ("circulation", "core.general.circulation.cog"),
     ("d1_test", "core.general.d1_test.cog"),
     ("gauge", "core.general.gauge.cog"),
+    ("garden", "core.general.garden.cog"),
     ("general", "core.general.entry"),
     ("ggrks", "core.general.ggrks.cog"),
     ("imakita", "core.general.imakita.cog"),
@@ -154,6 +156,7 @@ _LAZY_FEATURE_MODULES = {
     "GENERIC_FAILURE_MESSAGE": "core.general.ai_tools.cog",
     "GUESS_SECONDS": "core.general.gauge.cog",
     "GamePanelView": "core.general.gauge.cog",
+    "GardenCog": "core.general.garden.cog",
     "Gauge": "core.general.gauge.cog",
     "GaugeGame": "core.general.gauge.cog",
     "GoogleSearch": "core.general.ggrks.cog",
