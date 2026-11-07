@@ -21,7 +21,7 @@ from core.vc.voice_session import VoiceBusy, get_manager
 from core.vc.voice_recv_patch import patch_voice_recv_client
 from core.support.messages import voice_connection_failed
 from core.vc.voice_media import add_receive_sink, remove_receive_sink
-from core.vc.speech_vad import SpeechDetector
+from core.vc.transcription.speech_vad import SpeechDetector
 from core.support.emojis import FAILED, LOADING, LOUPE, PAUSE
 try:  # あれば高品質なポリフェーズ・リサンプラーを使う（無くても numpy だけで動く）
     from scipy.signal import resample_poly  # type: ignore
