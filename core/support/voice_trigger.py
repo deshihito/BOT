@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from .common import *
-from core.emojis import FAILED
+from core.support.emojis import FAILED
 
 
 # ===== 音声トリガー UI ==================================================
