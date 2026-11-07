@@ -6,7 +6,7 @@ from unittest.mock import MagicMock, patch
 import discord
 
 from game_fakes import FakeBot, FakeChannel, FakeGuild, FakeMember
-from cogs import jinrou
+import core.game.jinrou.entry as jinrou
 from core.game.jinrou import jinrou_review as review
 def view_text(view):
     return "\n".join(

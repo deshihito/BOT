@@ -7,7 +7,8 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 import game_fakes  # noqa: F401
-from cogs.daifugo import DaifugoGame, JOKER, card_label, label
+from cogs.game import DaifugoGame, label
+from core.game.daifugo.cog import JOKER, card_label
 
 
 class DaifugoRulesTest(unittest.TestCase):

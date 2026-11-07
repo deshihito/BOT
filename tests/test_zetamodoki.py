@@ -1,13 +1,7 @@
 import unittest
 from unittest.mock import AsyncMock, patch
 
-from cogs.zetamodoki import (
-    ChatButtonView,
-    CharacterSelectView,
-    PRESETS,
-    SessionModeSelect,
-    ZetaModoki,
-)
+from cogs.game import ChatButtonView, CharacterSelectView, PRESETS, SessionModeSelect, ZetaModoki
 
 
 class ZetaModokiLogfareTests(unittest.IsolatedAsyncioTestCase):
@@ -26,7 +20,7 @@ class ZetaModokiLogfareTests(unittest.IsolatedAsyncioTestCase):
         async def collect_delta(delta):
             sent_deltas.append(delta)
 
-        with patch("cogs.zetamodoki.logfare.chat_stream", new=fake_stream):
+        with patch("cogs.game.logfare.chat_stream", new=fake_stream):
             result = await cog._generate_response(
                 123, "本が好き？", on_delta=collect_delta, requester_id=7
             )
@@ -67,7 +61,7 @@ class ZetaModokiLogfareTests(unittest.IsolatedAsyncioTestCase):
             if False:
                 yield ""
 
-        with patch("cogs.zetamodoki.logfare.chat_stream", new=empty_stream):
+        with patch("cogs.game.logfare.chat_stream", new=empty_stream):
             result = await cog._generate_response(123, "こんにちは", requester_id=7)
 
         self.assertIn("AIから返答がありませんでした", result)
@@ -83,7 +77,7 @@ class ZetaModokiLogfareTests(unittest.IsolatedAsyncioTestCase):
             raise RuntimeError("temporary error")
             yield ""
 
-        with patch("cogs.zetamodoki.logfare.chat_stream", new=failing_stream):
+        with patch("cogs.game.logfare.chat_stream", new=failing_stream):
             result = await cog._generate_response(123, "もう一度", requester_id=99)
 
         self.assertIn("temporary error", result)

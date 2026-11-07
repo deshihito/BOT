@@ -13,7 +13,7 @@ for p in (ROOT, ROOT / "tests"):
 
 import game_fakes  # noqa: E402,F401  （環境変数などの準備）
 import discord  # noqa: E402
-from cogs import jinrou  # noqa: E402
+import core.game.jinrou.entry as jinrou
 from core.game.jinrou import jinrou_guide as guide  # noqa: E402
 
 

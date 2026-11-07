@@ -4,7 +4,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import discord
-from cogs.disboard_rta import BumpRta, DISBOARD_BOT_ID, DISOKU_BOT_ID, detect_event
+from cogs.game import BumpRta, DISBOARD_BOT_ID, DISOKU_BOT_ID, detect_event
 from cogs.support import SupportCog
 
 

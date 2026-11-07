@@ -3,7 +3,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from cogs.wordle import ANSWERS, daily_answer, daily_key
+from cogs.game import ANSWERS, daily_answer, daily_key
 from core.game.game import game_records
 class DailyAnswerTest(unittest.TestCase):
     def test_same_date_same_answer(self):

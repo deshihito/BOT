@@ -28,8 +28,8 @@ from core.game.gambling import gambling
 from core.general.circulation import economy_pool as economy_core
 from core.general.items.items import ItemError
 from cogs import general as wallet_module
-from cogs import gambling as gambling_pkg
-from cogs.gambling import GamblingCog
+import core.game.gambling.cog as gambling_pkg
+from cogs.game import GamblingCog
 
 
 class _ScriptedRandom(random.Random):

@@ -3,14 +3,7 @@ import types
 import unittest
 from unittest.mock import AsyncMock
 
-from cogs.dice import (
-    DiceCog,
-    MAX_DICE_COUNT,
-    MAX_SIDES,
-    MAX_SIDES_DIGITS,
-    parse_dice_message,
-    roll_dice,
-)
+from cogs.game import DiceCog, MAX_DICE_COUNT, MAX_SIDES, MAX_SIDES_DIGITS, parse_dice_message, roll_dice
 
 
 class DiceParsingTest(unittest.TestCase):

@@ -94,7 +94,7 @@ class _Wallet:
 
     async def _change_balance(self, user_id, delta, *, require_funds=False,
                               create_with=None):
-        insufficient = sys.modules["cogs.gacha"].wallet_module.INSUFFICIENT
+        insufficient = sys.modules["core.game.gacha.cog"].wallet_module.INSUFFICIENT
         uid = str(user_id)
         current = self.balances.get(uid)
         if current is None:
@@ -134,7 +134,7 @@ class _FixedRandom(random.Random):
 
 class PullTest(unittest.TestCase):
     def _cog(self, tmp, wallet, rng):
-        from cogs.gacha import GachaCog
+        from cogs.game import GachaCog
 
         return GachaCog(
             _Bot(wallet),

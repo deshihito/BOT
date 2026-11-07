@@ -14,7 +14,9 @@ sys.path.insert(0, str(ROOT))
 
 import game_fakes  # noqa: F401
 from core.game.game import party_ranking
-from cogs import chess, othello, shogi
+import core.game.chess.cog as chess
+import core.game.othello.cog as othello
+import core.game.shogi.cog as shogi
 
 
 def fresh_ranking():

@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock
 
 import discord
 
-from cogs.sokunuke_rta import SokuNukeRta
+from cogs.game import SokuNukeRta
 from cogs.support import RolePanelSendButton, RolePanelUserView
 
 
@@ -50,7 +50,7 @@ class FakeGuild:
 
 class SokuNukeRtaFixTest(unittest.IsolatedAsyncioTestCase):
     async def test_disconnected_voice_client_does_not_block_auto_join(self):
-        import cogs.sokunuke_rta as module
+        import core.game.sokunuke_rta.cog as module
 
         store = FakeSettingsStore()
         old_store = module.guild_settings.get_store
@@ -73,7 +73,7 @@ class SokuNukeRtaFixTest(unittest.IsolatedAsyncioTestCase):
         guild.channel.connect.assert_awaited_once_with(self_deaf=True)
 
     async def test_leaderboard_disables_mentions(self):
-        import cogs.sokunuke_rta as module
+        import core.game.sokunuke_rta.cog as module
 
         store = FakeSettingsStore({"records": [{"user_id": "2", "elapsed": 1.5}]})
         old_store = module.guild_settings.get_store

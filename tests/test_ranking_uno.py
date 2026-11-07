@@ -3,7 +3,7 @@
 import unittest
 
 from game_fakes import FakeBot, FakeChannel, FakeGuild, FakeMember
-from cogs import uno
+import core.game.uno.cog as uno
 from core.game.game import party_ranking
 class UnoRankingTest(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):

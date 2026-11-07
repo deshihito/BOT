@@ -9,7 +9,7 @@ from unittest.mock import MagicMock, patch
 
 from game_fakes import (FakeBot, FakeChannel, FakeChatMessage, FakeGuild, FakeInteraction, FakeMember,
                         fast_time, press, real_sleep)
-from cogs import jinrou
+import core.game.jinrou.entry as jinrou
 
 
 class JinrouFlowTest(unittest.IsolatedAsyncioTestCase):

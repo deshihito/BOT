@@ -15,7 +15,7 @@ from tests.test_all_commands import USER_ID, FakeDBAPI, fake_interaction  # noqa
 import discord  # noqa: E402
 from discord.ext import commands  # noqa: E402
 
-from cogs import nation as nation_module  # noqa: E402
+import core.game.nation.cog as nation_module
 
 
 class NationFakeDBAPI(FakeDBAPI):

@@ -10,7 +10,8 @@ from core.support import guild_settings
 from core.game.game import autoplay
 from core.support.storage import KVStore
 from game_fakes import FakeBot, FakeChannel, FakeGuild, FakeMember, fast_time
-from cogs import jinrou, uno
+import core.game.jinrou.entry as jinrou
+import core.game.uno.cog as uno
 
 LEGAL = ["グー", "チョキ", "パー"]
 

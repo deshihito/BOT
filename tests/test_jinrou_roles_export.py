@@ -17,7 +17,7 @@ class JinrouRolesExportTest(unittest.TestCase):
                          "web/lib/jinrou-roles.ts が古いです。python scripts/export_jinrou_roles.py を実行してください。")
 
     def test_matches_bot_help_roles(self):
-        from cogs import jinrou
+        import core.game.jinrou.entry as jinrou
         from core.game.jinrou import jinrou_guide
         text = exporter.OUT_TS.read_text(encoding="utf-8")
         data = json.loads(re.search(r"JINROU_ROLES: JinrouRole\[\] = (\[.*\]);", text, re.S).group(1))

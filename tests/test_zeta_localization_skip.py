@@ -24,7 +24,7 @@ if ROOT not in sys.path:
 
 from core.support.localization import localization  # noqa: E402
 from core.game.zeta.common import BotPersona  # noqa: E402
-from cogs.zetamodoki import ZetaModoki  # noqa: E402
+from cogs.game import ZetaModoki
 
 
 def _persona() -> BotPersona:
@@ -66,7 +66,7 @@ class ZetaHistoryOriginalTest(unittest.IsolatedAsyncioTestCase):
             yield original[:10]
             yield original[10:]
 
-        with patch("cogs.zetamodoki.logfare.chat_stream", side_effect=lambda *a, **k: fake_stream()):
+        with patch("cogs.game.logfare.chat_stream", side_effect=lambda *a, **k: fake_stream()):
             reply = await cog._generate_response(777, "おはよう", requester_id=42)
         self.assertEqual(reply, original)
         history = cog.chat_histories[777]

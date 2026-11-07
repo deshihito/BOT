@@ -6,7 +6,7 @@ import types
 import unittest
 
 from game_fakes import FakeChannel, FakeGuild, FakeInteraction, FakeMember, FakeMessage, choose, fast_time, press, real_sleep
-from cogs import game
+import core.game.game.cog as game
 from core.support.ngword import cog as ngword
 
 

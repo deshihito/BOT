@@ -14,7 +14,7 @@ except Exception:  # tests をパッケージとして解決できない実行�
 
 _install_dependency_stubs()
 
-from cogs import dangeon  # noqa: E402
+import core.game.dungeon.entry as dangeon
 from core.general.ai import logfare  # noqa: E402
 
 

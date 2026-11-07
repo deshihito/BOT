@@ -35,7 +35,7 @@ from core.support.panel_v2 import PanelLayoutView, as_panel_v2
 from cogs import general as wallet_module
 from cogs.general import (
     BuyLotteryView, CirculationCog, MiningView, StealView)
-from cogs.gambling import GamblingCog, SlotView
+from cogs.game import GamblingCog, SlotView
 from cogs.general import ItemsCog
 from cogs.general import MarketCog, MarketView, _market_embed, _render_chart
 from cogs.general import status_embed

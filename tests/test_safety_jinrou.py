@@ -24,7 +24,7 @@ import game_fakes  # noqa: E402,F401
 from game_fakes import FakeBot, FakeChannel, FakeGuild, FakeInteraction, FakeMember, choose, press  # noqa: E402
 
 import discord  # noqa: E402
-from cogs import jinrou  # noqa: E402
+import core.game.jinrou.entry as jinrou
 from core.game.game import game_restore  # noqa: E402
 from core.game.jinrou import jinrou_snapshot
 from core.game.jinrou.game import JinrouGame  # noqa: E402

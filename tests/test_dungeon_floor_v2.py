@@ -313,7 +313,7 @@ def _install_dependency_stubs():
 
 _install_dependency_stubs()
 
-from cogs import dangeon  # noqa: E402
+import core.game.dungeon.entry as dangeon
 
 
 FLOORS = (1, 3, 5, 10, 40)

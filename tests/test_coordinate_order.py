@@ -41,7 +41,7 @@ def owner(uid=4242):
 
 class MinesweeperOrderTest(unittest.TestCase):
     def test_x_select_above_y_select(self):
-        import cogs.minesweeper as cog
+        import core.game.minesweeper.cog as cog
         from core.game.minesweeper.minesweeper import MinesweeperBoard
 
         panel = cog.BoardPanel(MagicMock(), owner(), MinesweeperBoard("easy", rng=random.Random(0)))
@@ -60,7 +60,7 @@ class MinesweeperOrderTest(unittest.TestCase):
 
 class SudokuOrderTest(unittest.TestCase):
     def test_x_then_y_then_number(self):
-        import cogs.sudoku as cog
+        import core.game.sudoku.cog as cog
         from core.game.sudoku.sudoku import generate
 
         puzzle, solution = generate(random.Random(1), "easy")
@@ -73,7 +73,7 @@ class SudokuOrderTest(unittest.TestCase):
 
 class NonogramOrderTest(unittest.TestCase):
     def test_x_select_above_y_select(self):
-        import cogs.nonogram as cog
+        import core.game.nonogram.cog as cog
         from core.game.nonogram.nonogram import NonogramPuzzle
 
         puzzle = NonogramPuzzle.pick("5x5", rng=random.Random(0))

@@ -126,7 +126,7 @@ class JinrouCog(LifecycleMixin, GameLoopMixin, AutoplayMixin, ResultsMixin, comm
                 await update_player_rating(p_id, new_rating, won=won)
         except Exception:
             # レートの失敗でゲームの終了処理（最終役職の開示など）を止めない
-            logging.getLogger(__name__).exception("人狼のレート更新に失敗しました")
+            logger.exception("人狼のレート更新に失敗しました")
 
 
 async def setup(bot):

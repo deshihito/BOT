@@ -19,15 +19,15 @@ from game_fakes import (FakeBot, FakeChannel, FakeGuild, FakeInteraction,
 
 from core.game.game import game_restore
 from core.game.shogi.shogi_engine import Color as ShogiColor
-from cogs import babanuki as babanuki_mod
-from cogs import chess as chess_mod
-from cogs import daifugo as daifugo_mod
-from cogs import othello as othello_mod
-from cogs import shinkei as shinkei_mod
-from cogs import shiritori as shiritori_mod
-from cogs import shogi as shogi_mod
-from cogs import uno as uno_mod
-from cogs import wordle as wordle_mod
+import core.game.babanuki.cog as babanuki_mod
+import core.game.chess.cog as chess_mod
+import core.game.daifugo.cog as daifugo_mod
+import core.game.othello.cog as othello_mod
+import core.game.shinkei.cog as shinkei_mod
+import core.game.shiritori.cog as shiritori_mod
+import core.game.shogi.cog as shogi_mod
+import core.game.uno.cog as uno_mod
+import core.game.wordle.cog as wordle_mod
 
 
 class FetchChannel(FakeChannel):

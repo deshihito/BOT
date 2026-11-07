@@ -26,9 +26,9 @@ from game_fakes import FakeBot, FakeChannel, FakeGuild, FakeInteraction, FakeMem
 from tests.test_all_commands import USER_ID, fake_interaction  # noqa: E402
 from tests.test_nation import NationFakeDBAPI, run  # noqa: E402
 
-from cogs import game as game_module  # noqa: E402
-from cogs import nation as nation_module  # noqa: E402
-from cogs import uno  # noqa: E402
+import core.game.game.cog as game_module
+import core.game.nation.cog as nation_module
+import core.game.uno.cog as uno
 from cogs.help import category_pages, overview_embed  # noqa: E402
 from core.game.game.game_guides import GAME_ORDER  # noqa: E402
 

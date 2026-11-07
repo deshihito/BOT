@@ -4,7 +4,7 @@ import types
 import unittest
 
 from game_fakes import FakeChannel, FakeGuild
-from cogs import doubt
+import core.game.doubt.cog as doubt
 from core.game.game import party_ranking
 class DoubtRankingTest(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):

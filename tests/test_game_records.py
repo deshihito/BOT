@@ -18,8 +18,8 @@ if str(Path(__file__).resolve().parent) not in sys.path:
 
 from game_fakes import FakeChannel, FakeGuild, FakeInteraction, FakeMember  # noqa: E402
 
-from cogs import flash as flash_module  # noqa: E402
-from cogs import guess as guess_module  # noqa: E402
+import core.game.flash.cog as flash_module
+import core.game.guess.cog as guess_module
 from core.game.game import game_records  # noqa: E402
 
 

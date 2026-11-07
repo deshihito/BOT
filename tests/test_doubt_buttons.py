@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 from game_fakes import (FakeBot, FakeChannel, FakeGuild, FakeInteraction, FakeMember,
                         fast_time, press, choose, real_sleep)
-from cogs import doubt
+import core.game.doubt.cog as doubt
 
 
 class DoubtButtonTest(unittest.IsolatedAsyncioTestCase):

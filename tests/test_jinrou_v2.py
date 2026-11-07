@@ -21,7 +21,7 @@ import discord  # noqa: E402
 
 import game_fakes  # noqa: E402,F401  （環境変数などの準備）
 from game_fakes import FakeBot, FakeChannel, FakeGuild, FakeMember, fast_time  # noqa: E402
-from cogs import jinrou  # noqa: E402
+import core.game.jinrou.entry as jinrou
 from core.game.jinrou import jinrou_review, jinrou_snapshot  # noqa: E402
 from core.game.game.game_v2 import assert_within_limits  # noqa: E402
 from core.game.jinrou import gameloop  # noqa: E402

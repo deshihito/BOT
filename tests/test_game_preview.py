@@ -142,21 +142,21 @@ class PanelNoticeTest(unittest.TestCase):
 
 class CogPanelTest(unittest.TestCase):
     def test_wirecut_main_panel(self):
-        from cogs.wirecut import WireCut
+        from cogs.game import WireCut
         from core.game.wirecut.wirecut import WireCutGame
         cog = WireCut(FakeBot())
         panel = cog._panel(WireCutGame([1, 2]))
         self.assertIn(preview_notice_line("wirecut"), panel_text(panel))
 
     def test_liardice_main_panel(self):
-        from cogs.liardice import LiarDice
+        from cogs.game import LiarDice
         from core.game.liardice.liardice import LiarDiceGame
         cog = LiarDice(FakeBot())
         panel = cog._panel(LiarDiceGame([1, 2]))
         self.assertIn(preview_notice_line("liardice"), panel_text(panel))
 
     def test_hanabi_main_panel(self):
-        from cogs.hanabi import Hanabi
+        from cogs.game import Hanabi
         from core.game.hanabi.hanabi import HanabiGame
         cog = Hanabi(FakeBot())
         panel = cog._panel(123, HanabiGame([1, 2]))
@@ -165,7 +165,7 @@ class CogPanelTest(unittest.TestCase):
 
 class CogPanelAsyncTest(unittest.IsolatedAsyncioTestCase):
     async def test_wirecut_recruit_panel(self):
-        from cogs.wirecut import WireCut
+        from cogs.game import WireCut
         guild = FakeGuild()
         channel = FakeChannel(777, guild)
         host = FakeMember(1, guild)
@@ -178,7 +178,7 @@ class CogPanelAsyncTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn(preview_notice_line("wirecut"), panel_text(view))
 
     async def test_ito_round_panel(self):
-        from cogs.ito import Ito
+        from cogs.game import Ito
         from core.game.ito.ito import ItoSession
         guild = FakeGuild()
         channel = FakeChannel(778, guild)
@@ -189,7 +189,7 @@ class CogPanelAsyncTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn(preview_notice_line("ito"), panel_text(channel.sent[0].view))
 
     async def test_hoshi_phase_panel(self):
-        from cogs.hoshi import Hoshi
+        from cogs.game import Hoshi
         from core.game.hoshi.hoshi import HoshiGame
         guild = FakeGuild()
         channel = FakeChannel(779, guild)
