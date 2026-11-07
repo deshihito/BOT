@@ -438,7 +438,7 @@ def build_vc_actions() -> list[ActionSpec]:
 
 
 def build_game_actions(game_order: list, game_guides: dict) -> list[ActionSpec]:
-    """core/game/game_guides.py の GAME_ORDER / GAME_GUIDES から導出する（従来方式の踏襲）。"""
+    """core/game/game/game_guides.py の GAME_ORDER / GAME_GUIDES から導出する（従来方式の踏襲）。"""
     return [
         make_action(
             "game", f"game:{game}", "ゲーム開始: " + game_guides[game]["name"],
@@ -506,7 +506,7 @@ def default_action_specs() -> list[ActionSpec]:
     """
     from cogs.general import GENERAL_ACTIONS, GENERAL_GENRES
     from cogs.support import SUPPORT_ACTIONS, SUPPORT_ACTIONS_BY_GENRE, SUPPORT_GENRES
-    from core.game.game_guides import GAME_GUIDES, GAME_ORDER
+    from core.game.game.game_guides import GAME_GUIDES, GAME_ORDER
 
     specs: list[ActionSpec] = []
     specs += build_general_actions(GENERAL_ACTIONS, GENERAL_GENRES)
