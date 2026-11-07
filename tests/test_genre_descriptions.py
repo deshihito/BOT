@@ -8,7 +8,7 @@ import unittest
 
 from cogs.general import GENERAL_ACTIONS, GENERAL_GENRES, GeneralPanel, ShortcutRootPanel
 from cogs.help import overview_embed
-from cogs.sio_voice import VOICE_ACTIONS_BY_GENRE, VOICE_GENRES, VoicePanelView
+from cogs.vc import VOICE_ACTIONS_BY_GENRE, VOICE_GENRES, VoicePanelView
 from cogs.support import SUPPORT_ACTIONS_BY_GENRE, SUPPORT_GENRES, SupportPanelView
 from core.general import action_registry
 from core.support.panel_v2 import embed_text

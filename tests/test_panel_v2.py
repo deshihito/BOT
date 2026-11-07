@@ -6,7 +6,7 @@ import discord
 
 from discord.interactions import interaction_message_response_params
 from cogs.game import GameDetailView
-from cogs.sio_voice import VoicePanelView
+from cogs.vc import VoicePanelView
 from cogs.support import SupportPanelView
 from core.support.panel_v2 import as_panel_v2, edit_message_v2
 

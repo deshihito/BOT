@@ -23,7 +23,7 @@ from discord.ext import commands  # noqa: E402
 
 import config  # noqa: E402
 from core.support.api_client import APIError  # noqa: E402
-from cogs import sio_globalVC as gvc  # noqa: E402
+from core.vc.globalvc import entry as gvc  # noqa: E402
 from cogs import wallet as wallet_module  # noqa: E402
 
 SENDER, RECEIVER, THIRD = str(USER_ID), str(USER_ID + 1), str(USER_ID + 2)

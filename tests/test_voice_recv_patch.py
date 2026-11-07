@@ -29,7 +29,7 @@ from discord.ext import voice_recv  # noqa: E402
 from core.vc import voice_recv_patch as vrp  # noqa: E402
 
 VC_CLS = voice_recv.VoiceRecvClient
-SIO_COGS = ('cogs.sio_globalVC', 'cogs.sio_karaoke', 'cogs.sio_rec', 'cogs.sio_transcription')
+SIO_COGS = ('core.vc.globalvc.entry', 'core.vc.karaoke.entry', 'core.vc.rec.entry', 'core.vc.transcription.entry')
 
 
 def _make_client(session=None, connection_attrs=None):

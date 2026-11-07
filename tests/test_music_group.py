@@ -25,7 +25,7 @@ for _name, _value in {'BOT_API_BASE_URL': 'http://127.0.0.1:8787', 'BOT_API_KEY'
 from discord import app_commands  # noqa: E402
 
 from core.support import legacy as legacy_module  # noqa: E402
-from cogs import sio_music  # noqa: E402
+from core.vc.music import entry as sio_music  # noqa: E402
 from tests.test_all_commands import FakeDBAPI  # noqa: E402
 from tests.test_voice_session import make_bot, make_world  # noqa: E402
 

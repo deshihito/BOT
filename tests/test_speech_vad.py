@@ -39,7 +39,7 @@ class SpeechDetectorTest(unittest.TestCase):
         self.assertFalse(detector.has_speech(frame[:100]))
 
     def test_user_buffer_does_not_start_on_silence(self):
-        from cogs.sio_transcription import UserAudioBuffer
+        from cogs.vc import UserAudioBuffer
 
         buffer = UserAudioBuffer(1, "speaker")
         silence = self.pcm_frame(0)
@@ -49,7 +49,7 @@ class SpeechDetectorTest(unittest.TestCase):
         self.assertIsNone(buffer.pop_audio())
 
     def test_user_buffer_accepts_voice_without_text_based_rejection(self):
-        from cogs.sio_transcription import UserAudioBuffer
+        from cogs.vc import UserAudioBuffer
 
         buffer = UserAudioBuffer(1, "speaker")
         voice = self.pcm_frame(700)

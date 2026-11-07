@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""cogs/sio_karaoke.py のテスト（監査 #9）。
+"""カラオケ（core/vc/karaoke/entry.py）のテスト（監査 #9）。
 
 Vosk／opus／Discord 接続なしで検証できる部分:
 48k→16k リサンプル、歌詞の正規化（clean_text）、採点計算、_karaoke_impl の振り分け。
@@ -11,7 +11,7 @@ from unittest.mock import AsyncMock
 
 import numpy as np
 
-from cogs.sio_karaoke import KaraokeCog, clean_text, resample_48k_to_16k
+from cogs.vc import KaraokeCog, clean_text, resample_48k_to_16k
 
 
 class ResampleTests(unittest.TestCase):
