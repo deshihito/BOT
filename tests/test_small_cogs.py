@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
 """小型の未テスト cog の純ロジックのテスト（監査 #9）。
 
-- cogs/status_updater.py: truncate_text（Activity 名の長さ制限）
-- cogs/allstats.py: _get_py_file_tree（.py ファイルツリー生成）
+- status_updater: truncate_text（Activity 名の長さ制限）
+- allstats: _get_py_file_tree（.py ファイルツリー生成）
 - cogs/ggrks.py: 検索キーワードの URL エンコード
 """
 import tempfile
@@ -11,9 +11,9 @@ import unittest
 from pathlib import Path
 from unittest.mock import AsyncMock
 
-from cogs.allstats import FIELD_VALUE_LIMIT, SystemStatsCog, _limit_field_value
+from cogs.support import FIELD_VALUE_LIMIT, SystemStatsCog, _limit_field_value
 from cogs.ggrks import GoogleSearch
-from cogs.status_updater import truncate_text
+from cogs.support import truncate_text
 
 
 class TruncateTextTests(unittest.TestCase):

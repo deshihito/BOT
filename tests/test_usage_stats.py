@@ -149,7 +149,7 @@ class UsageStatsRegistrationTest(unittest.TestCase):
         # cog を Bot に載せると usage_stats / ustats がプレフィックスコマンドとして登録される。
         from discord.ext import commands as ext_commands
 
-        from cogs.usage_stats import UsageStatsCog
+        from cogs.support import UsageStatsCog
 
         async def build():
             bot = ext_commands.Bot(command_prefix="!", intents=__import__("discord").Intents.none())

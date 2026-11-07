@@ -12,16 +12,16 @@ import discord
 
 import cogs.doubt as doubt_module
 import cogs.general as general_module
-import cogs.globalchat as globalchat_module
+import core.support.globalchat.cog as globalchat_module
 import cogs.guess as guess_module
 import cogs.jinrou as jinrou_module
-import cogs.log_viewer as log_viewer_module
-import cogs.muted as muted_module
+import core.support.log_viewer.cog as log_viewer_module
+import core.support.muted.cog as muted_module
 import cogs.nation as nation_module
 import core.vc.music.entry as music_module
 import core.vc.rec.entry as rec_module
 import core.vc.voice_entry as voice_module
-import cogs.support as support_module
+import core.support.entry as support_module
 import cogs.uno as uno_module
 import cogs.zetamodoki as zeta_module
 import core.support.panel_v2 as panel_v2_module

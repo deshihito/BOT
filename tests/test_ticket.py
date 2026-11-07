@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""cogs/ticket.py の中核ロジックのテスト（監査 #9）。
+"""チケット（core/support/ticket/cog.py）の中核ロジックのテスト（監査 #9）。
 
 Discord には接続せず、設定の正規化・権限判定・custom_id の振り分けなど
 「壊れると静かにチケットが作れない／権限が漏れる」部分を固定する。
@@ -10,7 +10,7 @@ from unittest.mock import AsyncMock
 
 import discord
 
-from cogs.ticket import (
+from cogs.support import (
     TICKET_DELETE_OPTIONS,
     TicketCog,
     TicketPanelView,

@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock
 
 import discord
 
-from cogs.ticket import (
+from cogs.support import (
     TicketCog,
     TicketPanelView,
     TicketRoomView,
