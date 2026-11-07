@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation";
 import { getCurrentUser, isDiscordConfigured } from "@/lib/auth";
 
-export const metadata = { title: "ログイン | AGOBOT" };
+export const metadata = { title: "ログイン | AGOBOT", robots: { index: false, follow: false } };
 
 type LoginPageProps = {
   searchParams: Promise<{ error?: string }>;

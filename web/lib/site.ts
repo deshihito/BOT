@@ -3,6 +3,9 @@
 // 招待URLはポータルの Install Link として設定済みのものが唯一の正。
 // パラメータ（permissions 等）を推測で変えず、ここ1か所だけに置く。
 
+/** サイトの公開オリジン（metadataBase・canonical・sitemap 等の唯一の正）。 */
+export const SITE_URL = "https://agobot.app";
+
 export const BOT_INVITE_URL =
   "https://discord.com/oauth2/authorize?client_id=1476636487784337428&permissions=4544817123422033&integration_type=0&scope=bot%20applications.commands";
 

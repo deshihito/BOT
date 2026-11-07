@@ -8,7 +8,7 @@ import {
 } from "@/lib/site";
 import { InviteCtaBlock } from "../InviteCta";
 
-export const metadata = { title: "リーダーボード | AGOBOT" };
+export const metadata = { title: "リーダーボード | AGOBOT", alternates: { canonical: "/ranking" } };
 export const dynamic = "force-dynamic";
 
 type PageProps = {

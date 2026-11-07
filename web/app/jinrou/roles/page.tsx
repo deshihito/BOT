@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { JINROU_ROLES, type JinrouTeam } from "@/lib/jinrou-roles";
 
-export const metadata = { title: "人狼 役職図鑑 | AGOBOT" };
+export const metadata = { title: "人狼 役職図鑑 | AGOBOT", alternates: { canonical: "/jinrou/roles" } };
 
 const TEAMS: { team: JinrouTeam; label: string; note: string }[] = [
   { team: "village", label: "村人陣営", note: "人狼をすべて追放すれば勝ち。" },

@@ -3,7 +3,7 @@ import { redirect } from "next/navigation";
 import { getCurrentSession } from "@/lib/auth";
 import { getDashboardContext, loadGuildRegistry } from "@/lib/dashboard";
 
-export const metadata = { title: "ダッシュボード | AGOBOT" };
+export const metadata = { title: "ダッシュボード | AGOBOT", robots: { index: false, follow: false } };
 export const dynamic = "force-dynamic";
 
 export default async function DashboardPage() {
