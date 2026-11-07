@@ -23,10 +23,10 @@ import discord
 from discord.ext import commands, tasks
 
 import config
-from core.game import clan as clan_core
+from core.game.clan import clan as clan_core
 from core.general import craft as craft_core
 from core.general import items as items_core
-from core.game import prison as prison_core
+from core.game.game import prison as prison_core
 from core.general import workshop as workshop_core
 from core.support.messages import (
     craft_action_failed,
