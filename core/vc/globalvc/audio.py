@@ -348,8 +348,3 @@ class TeeSource(discord.AudioSource):
             setattr(self.inner, attr, value)
 
 
-def wrap_for_global(vc, name: str, source):
-    """voice_media.add_audio_source から呼ぶ。グローバルVC自身の Source 以外を TeeSource で包む。"""
-    if name == "gvc" or isinstance(source, TeeSource):
-        return source  # gvc は他サーバーから受けた音なので、再中継するとループする
-    return TeeSource(source, vc, name)

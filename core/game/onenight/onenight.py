@@ -78,9 +78,6 @@ class OneNightSession:
             target = self.robber_target
             self.final[robber], self.final[target] = self.final[target], self.final[robber]
 
-    def robber_new_role(self, user_id):
-        return self.final.get(user_id)
-
     # ------------------------------------------------------------------ 投票と勝敗
     def vote(self, user_id, target_id) -> bool:
         if user_id not in self.players or target_id not in self.players:

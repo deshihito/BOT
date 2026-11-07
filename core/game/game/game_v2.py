@@ -146,11 +146,6 @@ class GamePanelView(discord.ui.LayoutView):
             self._body = body
         self._rebuild()
 
-    def set_notice(self, notice: str | None) -> None:
-        """タイトル直下の注意行を差し替える（None で消す）。"""
-        self._notice = notice
-        self._rebuild()
-
     def add_row(self, *items: discord.ui.Item) -> discord.ui.ActionRow:
         row = discord.ui.ActionRow(*items)
         self._rows.append(row)

@@ -548,9 +548,6 @@ class ClanStore(DirtyFlushMixin):
                 self._mark_dirty()
 
     # ------------------------------------------------------------------ クランボーナス（S6-5）
-    def bonus_claimed_on(self, user_id: str, day: str) -> bool:
-        with self._lock:
-            return self._state["bonus_claims"].get(str(user_id)) == day
 
     def try_claim_bonus(self, user_id: str, now: datetime | None = None) -> bool:
         """今日分を未受取なら受け取り済みにして True（JST日次）。"""

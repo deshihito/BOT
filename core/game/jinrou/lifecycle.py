@@ -364,11 +364,3 @@ class LifecycleMixin:
         )
 
 
-    async def run_from_hub(self, game: JinrouGame, channel, host_id: int = None):
-        """play.py から create_task で呼ぶ。60秒待機してゲームループを開始する。"""
-        if host_id:
-            game.host_id = host_id
-        await asyncio.sleep(60)
-        if not game.is_running:
-            return
-        await self._start_game_loop(game, channel)

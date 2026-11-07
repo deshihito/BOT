@@ -484,8 +484,6 @@ class GameControlView(GamePanelView):
         await interaction.response.send_message(f"あなたの現在の手札 ({len(user_hand)}枚):\n{hand_text}", ephemeral=True)
 
 
-
-
     # ==========================================
     # 4. UNO宣言システム (チャットイベント検知)
     # ==========================================
@@ -515,8 +513,6 @@ class UnoDeclareView(GamePanelView):
         await interaction.followup.send(
             f"[!] <@{self.player_id}> さんの「UNO！」宣言が確認されました！"
         )
-
-
 
 
 # ==========================================
@@ -903,15 +899,6 @@ class Uno(commands.Cog):
                                        info_msg="再起動から復旧しました。対局を続けます。")
         return True
 
-    def get_embed_color(self, color_name):
-        colors = {
-            '赤': discord.Color.red(),
-            '青': discord.Color.blue(),
-            '黄': discord.Color.gold(),
-            '緑': discord.Color.green()
-        }
-        return colors.get(color_name, discord.Color.dark_grey())
-
     async def finish_game(self, channel_id: int, winner_id: int):
         channel = self.bot.get_channel(channel_id)
         # サーバーごとのランキング（core/game/game/party_ranking.py）: 手札を出し切った 1 人が勝ち
@@ -943,7 +930,6 @@ class Uno(commands.Cog):
             self._clear_snapshot(channel_id)
 
         await channel.send(view=text_panel("[!] UNO ゲーム決着！", body))
-
 
 
 async def setup(bot):

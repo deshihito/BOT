@@ -40,10 +40,6 @@ def can_end_game(game, user) -> bool:
     return user.id == game.host_id or any(p.id == user.id for p in game.players)
 
 
-def is_participant(game, user) -> bool:
-    return any(p.id == user.id for p in game.players)
-
-
 def surrender_winner_is_wolf(game, user_id):
     """投了時の勝者陣営を返す。開始前・役職未確定・非参加者なら None（記録しない）。
 

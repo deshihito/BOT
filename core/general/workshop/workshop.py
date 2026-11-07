@@ -388,16 +388,6 @@ class WorkshopStore(DirtyFlushMixin):
             self._mark_dirty()
             return copy.deepcopy(machine)
 
-    def rollback_machine(self, user_id: str, machine: dict[str, Any]) -> None:
-        """add_machine の巻き戻し（コイン控除に失敗したとき用）。"""
-        with self._lock:
-            machines = self._user_locked(str(user_id))["machines"]
-            for index, existing in enumerate(machines):
-                if existing == machine:
-                    del machines[index]
-                    break
-            self._mark_dirty()
-
     # ------------------------------------------------------------------ claim
     def claim_production(self, user_id: str, now: datetime | None = None,
                          time_scale: float = 1.0) -> dict[str, Any]:

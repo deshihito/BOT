@@ -25,12 +25,6 @@ DIFFICULTIES = {
 }
 
 
-def difficulty_size(difficulty: str) -> tuple[int, int]:
-    """(行数, 列数) を返す。"""
-    _, _, rows, cols = DIFFICULTIES[difficulty]
-    return rows, cols
-
-
 class MinesweeperBoard:
     def __init__(self, difficulty: str = "normal", *, rng: random.Random = None):
         if difficulty not in DIFFICULTIES:

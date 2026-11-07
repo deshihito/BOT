@@ -27,7 +27,7 @@ import dataclasses
 import inspect
 import logging
 import time
-from typing import Any, Awaitable, Callable, Optional
+from typing import Any, Callable, Optional
 from core.support.emojis import FAILED
 
 logger = logging.getLogger(__name__)
@@ -182,16 +182,6 @@ class VoiceSessionManager:
         except Exception:
             logger.debug("guild %s: セッションスナップショットの削除に失敗しました", guild_id, exc_info=True)
 
-    def persisted_sessions(self) -> dict:
-        """保存済みセッションスナップショット（復旧側が読む）。"""
-        if voice_restore is None:
-            return {}
-        try:
-            return voice_restore.get_store().section("sessions")
-        except Exception:
-            logger.debug("セッションスナップショットの読み込みに失敗しました", exc_info=True)
-            return {}
-
     # ------------------------------------------------------------ 参照
     def get(self, guild_id: int) -> Optional[VoiceSession]:
         return self._sessions.get(guild_id)
@@ -219,11 +209,6 @@ class VoiceSessionManager:
             getter = getattr(session.guild, "get_channel", None)
             channel = getter(session.channel_id) if getter else None
         return channel
-
-    def _starter_present(self, session: VoiceSession) -> bool:
-        channel = self._current_channel(session)
-        members = getattr(channel, "members", None) or []
-        return any(getattr(m, "id", None) == session.user_id for m in members)
 
     def can_override(self, session: VoiceSession, member) -> bool:
         """別機能への切り替え（force）や停止をしてよい人か。
