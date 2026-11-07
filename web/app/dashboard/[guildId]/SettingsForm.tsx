@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { unwrapId, type SectionSpec } from "@/lib/dashboard-core";
+import { primaryToggleField, unwrapId, type SectionSpec } from "@/lib/dashboard-core";
 import type { GuildStructure } from "@/lib/dashboard";
 
 type Props = {
@@ -202,13 +202,29 @@ export default function SettingsForm({ guildId, spec, initial, structure }: Prop
     }
   }
 
+  const toggle = primaryToggleField(spec);
+  const toggleOn = toggle ? values[toggle.name] === true : true;
+
   return (
     <form className="settings-form" onSubmit={onSubmit}>
-      <div className="page-heading compact-heading">
-        <h2>{spec.label}</h2>
-        <p className="muted">{spec.description}</p>
+      <div className="page-heading compact-heading settings-head">
+        <div>
+          <h2>{spec.label}</h2>
+          <p className="muted">{spec.description}</p>
+        </div>
+        {toggle ? (
+          <label className="module-toggle">
+            <input
+              type="checkbox"
+              checked={toggleOn}
+              onChange={(event) => set(toggle.name, event.target.checked)}
+            />
+            <span>{toggleOn ? "有効" : "無効"}</span>
+          </label>
+        ) : null}
       </div>
-      {spec.fields.map((field) => {
+      <div className={toggle && !toggleOn ? "settings-fields module-off" : "settings-fields"}>
+      {spec.fields.filter((field) => !toggle || field.name !== toggle.name).map((field) => {
         const value = values[field.name];
         const selectChannels =
           field.type === "channel" && structure ? channelOptions(structure, field.channelKind) : null;
@@ -313,6 +329,7 @@ export default function SettingsForm({ guildId, spec, initial, structure }: Prop
           </div>
         );
       })}
+      </div>
       <div className="settings-actions">
         <button type="submit" disabled={status === "saving"}>{status === "saving" ? "保存中…" : "保存する"}</button>
         {status === "saved" ? <span className="settings-saved" role="status">保存しました。Botへの反映には1分ほどかかります。</span> : null}

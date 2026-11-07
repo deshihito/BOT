@@ -73,7 +73,7 @@ export default async function DashboardPage() {
       ) : context.guilds.length === 0 ? (
         <p className="muted">管理できるサーバーがありません。</p>
       ) : (
-        <nav className="dashboard-list" aria-label="サーバー">
+        <nav className="dashboard-list guild-grid" aria-label="サーバー">
           {context.guilds.map((guild) => {
             const entry = registry.get(guild.id);
             const installed = entry !== undefined;

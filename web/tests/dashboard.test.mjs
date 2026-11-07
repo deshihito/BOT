@@ -254,3 +254,39 @@ test("ticket と bump_rta セクションが定義され、bump_rta は external
   assert.equal(ok.ok, true);
   assert.equal(ok.values.role_id, "#int:123456789012345678");
 });
+
+test("SECTION_CATEGORIES は全セクションをちょうど1回ずつ分類する", () => {
+  const all = m.SECTION_CATEGORIES.flatMap((category) => category.sections);
+  assert.equal(all.length, m.SETTING_SECTIONS.length);
+  assert.equal(new Set(all).size, all.length);
+  for (const spec of m.SETTING_SECTIONS) assert.ok(all.includes(spec.section), spec.section);
+});
+
+test("moduleEnabled は主トグルと設定済み判定を使い分ける", () => {
+  const automod = m.sectionSpec("assist_automod");
+  assert.equal(m.moduleEnabled(automod, { enabled: true }), true);
+  assert.equal(m.moduleEnabled(automod, { enabled: false }), false);
+  const bump = m.sectionSpec("bump_rta");
+  assert.equal(m.moduleEnabled(bump, {}), true);
+  assert.equal(m.moduleEnabled(bump, { notifications_enabled: false }), false);
+  const vc = m.sectionSpec("vc_auto_start");
+  assert.equal(m.moduleEnabled(vc, { music: true }), true);
+  assert.equal(m.moduleEnabled(vc, {}), false);
+  const cc = m.sectionSpec("command_control");
+  assert.equal(m.moduleEnabled(cc, { mode: "off" }), false);
+  assert.equal(m.moduleEnabled(cc, { mode: "deny" }), true);
+  const gc = m.sectionSpec("globalchat");
+  assert.equal(m.moduleEnabled(gc, { ng_words: ["#str:悪口"] }), true);
+  assert.equal(m.moduleEnabled(gc, {}), false);
+  const welcome = m.sectionSpec("assist_welcome");
+  assert.equal(m.moduleEnabled(welcome, { goodbye_enabled: true }), true);
+  assert.equal(m.moduleEnabled(welcome, {}), false);
+});
+
+test("primaryToggleField は enabled 系だけを拾う", () => {
+  assert.equal(m.primaryToggleField(m.sectionSpec("assist_automod")).name, "enabled");
+  assert.equal(m.primaryToggleField(m.sectionSpec("bump_rta")).name, "notifications_enabled");
+  assert.equal(m.primaryToggleField(m.sectionSpec("vc_auto_start")), null);
+  assert.equal(m.primaryToggleField(m.sectionSpec("assist_embed")).name, "enabled");
+  assert.equal(m.primaryToggleField(m.sectionSpec("globalchat")), null);
+});

@@ -1,111 +1,108 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { getCurrentSession } from "@/lib/auth";
-import { SETTING_SECTIONS, guildIconUrl, userAvatarUrl } from "@/lib/dashboard-core";
-import { getDashboardContext, loadBumpRtaSettings, loadGuildRegistry, loadGuildSettings, loadGuildStructure, type GuildRegistryEntry } from "@/lib/dashboard";
-import SettingsForm from "./SettingsForm";
+import { SECTION_CATEGORIES, SETTING_SECTIONS, moduleEnabled } from "@/lib/dashboard-core";
+import { getDashboardContext, loadBumpRtaSettings, loadGuildRegistry, loadGuildSettings, loadGuildStructure } from "@/lib/dashboard";
 
-export const metadata = { title: "サーバー設定 | AGOBOT", robots: { index: false, follow: false } };
+export const metadata = { title: "サーバー概要 | AGOBOT", robots: { index: false, follow: false } };
 export const dynamic = "force-dynamic";
 
 type PageProps = {
   params: Promise<{ guildId: string }>;
 };
 
-export default async function GuildSettingsPage({ params }: PageProps) {
+const SHORTCUTS = ["assist_automod", "assist_welcome", "assist_leveling", "assist_reactionroles", "ticket", "bump_rta"];
+
+export default async function GuildOverviewPage({ params }: PageProps) {
   const { guildId } = await params;
   const session = await getCurrentSession();
   if (!session) redirect("/login");
   if (!session.sid) redirect("/dashboard");
   if (!/^\d{17,20}$/.test(guildId)) redirect("/dashboard");
-
   const context = await getDashboardContext(session);
   if (!context) redirect("/dashboard");
-
   const guild = context.guilds.find((item) => item.id === guildId);
-  if (!guild) {
-    return (
-      <section className="dashboard-page">
-        <div className="simple-panel">
-          <h1>このサーバーの設定は表示できません</h1>
-          <p>サーバーの管理権限（管理者 または サーバーの管理）が必要です。</p>
-          <p><Link href="/dashboard">ダッシュボードへ戻る</Link></p>
-        </div>
-      </section>
-    );
-  }
-
-  let registryEntry: GuildRegistryEntry | undefined;
-  try {
-    registryEntry = (await loadGuildRegistry()).get(guildId);
-  } catch {
-    registryEntry = undefined;
-  }
-  const installed = registryEntry !== undefined;
-  if (!installed) {
-    return (
-      <section className="dashboard-page">
-        <div className="simple-panel">
-          <h1>{guild.name}</h1>
-          <p>このサーバーにはAGOBOTがまだ導入されていません。導入後に設定できるようになります。</p>
-          <p><Link href="/dashboard">ダッシュボードへ戻る</Link></p>
-        </div>
-      </section>
-    );
-  }
+  if (!guild) redirect("/dashboard");
 
   const settings = await loadGuildSettings(guildId);
-  let structure: Awaited<ReturnType<typeof loadGuildStructure>> = null;
-  try {
-    structure = await loadGuildStructure(guildId);
-  } catch {
-    structure = null;
-  }
-  let bumpInitial: Record<string, unknown> = { notifications_enabled: true, role_id: null };
+  let bumpRaw: Record<string, unknown> = { notifications_enabled: true, role_id: null };
   try {
     const bump = await loadBumpRtaSettings(guildId);
-    bumpInitial = { notifications_enabled: bump.notifications_enabled, role_id: bump.role_id };
+    bumpRaw = { notifications_enabled: bump.notifications_enabled, role_id: bump.role_id };
   } catch {
-    bumpInitial = { notifications_enabled: true, role_id: null };
+    bumpRaw = { notifications_enabled: true, role_id: null };
   }
-  const guildIcon = guildIconUrl(guildId, registryEntry?.icon ?? guild.icon);
-  const structureNote = structure?.updated_at
-    ? `チャンネル・ロール一覧は ${new Date(structure.updated_at).toLocaleString("ja-JP")} 時点の情報です（1時間ごとに更新）。`
-    : null;
+  let memberCount: number | null = null;
+  try {
+    memberCount = (await loadGuildRegistry()).get(guildId)?.member_count ?? null;
+  } catch {
+    memberCount = null;
+  }
+  let structureUpdated: string | null = null;
+  try {
+    const structure = await loadGuildStructure(guildId);
+    structureUpdated = structure?.updated_at ?? null;
+  } catch {
+    structureUpdated = null;
+  }
+
+  const rawFor = (spec: (typeof SETTING_SECTIONS)[number]): unknown =>
+    spec.external === "bump_rta" ? bumpRaw : settings[spec.section];
+  const enabledCount = SETTING_SECTIONS.filter((spec) => moduleEnabled(spec, rawFor(spec))).length;
 
   return (
-    <section className="dashboard-page">
-      <p className="breadcrumbs"><Link href="/dashboard">ダッシュボード</Link> / サーバー設定</p>
-      <div className="dashboard-header">
-        <h1 className="guild-title">
-          {guildIcon ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img className="guild-icon" src={guildIcon} alt="" width={36} height={36} />
-          ) : (
-            <span className="guild-icon guild-icon-fallback" aria-hidden="true">{guild.name.slice(0, 1)}</span>
-          )}
-          {guild.name}
-        </h1>
-        <span className="user-chip">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img className="user-avatar" src={userAvatarUrl(session.id, session.avatar)} alt="" width={28} height={28} />
-          {session.username}
-        </span>
-        <form action="/api/auth/logout" method="post"><button type="submit">ログアウト</button></form>
+    <div className="overview">
+      <div className="summary-grid">
+        <div className="summary-card">
+          <p className="summary-label">メンバー数</p>
+          <p className="summary-value">{memberCount !== null ? memberCount.toLocaleString("ja-JP") : "—"}</p>
+        </div>
+        <div className="summary-card">
+          <p className="summary-label">有効なモジュール</p>
+          <p className="summary-value">{enabledCount} / {SETTING_SECTIONS.length}</p>
+        </div>
+        <div className="summary-card">
+          <p className="summary-label">チャンネル・ロール一覧</p>
+          <p className="summary-value summary-value-small">
+            {structureUpdated ? `${new Date(structureUpdated).toLocaleString("ja-JP")} 時点` : "未取得（ID入力で設定できます）"}
+          </p>
+        </div>
       </div>
-      {structureNote ? <p className="muted">{structureNote}</p> : null}
-      {SETTING_SECTIONS.map((spec) => {
-        if (spec.external === "bump_rta") {
-          return <SettingsForm key={spec.section} guildId={guildId} spec={spec} initial={bumpInitial} structure={structure} />;
-        }
-        const sectionValue = settings[spec.section];
-        const initial =
-          typeof sectionValue === "object" && sectionValue !== null && !Array.isArray(sectionValue)
-            ? (sectionValue as Record<string, unknown>)
-            : {};
-        return <SettingsForm key={spec.section} guildId={guildId} spec={spec} initial={initial} structure={structure} />;
-      })}
-      <p className="back-link"><Link href="/dashboard">← ダッシュボードへ戻る</Link></p>
-    </section>
+      <p className="muted">設定の保存は約60秒でBotに反映されます。左のメニューからモジュールごとに設定できます。</p>
+
+      <h2 className="overview-heading">よく使う設定</h2>
+      <div className="shortcut-grid">
+        {SHORTCUTS.map((name) => {
+          const spec = SETTING_SECTIONS.find((item) => item.section === name);
+          if (!spec) return null;
+          const on = moduleEnabled(spec, rawFor(spec));
+          return (
+            <Link key={name} href={`/dashboard/${guildId}/${name}`} className="shortcut-card">
+              <span>{spec.label}</span>
+              <span className={on ? "badge badge-on" : "badge"}>{on ? "有効" : "無効"}</span>
+            </Link>
+          );
+        })}
+      </div>
+
+      {SECTION_CATEGORIES.map((category) => (
+        <div key={category.id}>
+          <h2 className="overview-heading">{category.label}</h2>
+          <ul className="module-status-list">
+            {category.sections.map((name) => {
+              const spec = SETTING_SECTIONS.find((item) => item.section === name);
+              if (!spec) return null;
+              const on = moduleEnabled(spec, rawFor(spec));
+              return (
+                <li key={name}>
+                  <Link href={`/dashboard/${guildId}/${name}`}>{spec.label}</Link>
+                  <span className={on ? "badge badge-on" : "badge"}>{on ? "有効" : "無効"}</span>
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      ))}
+    </div>
   );
 }
