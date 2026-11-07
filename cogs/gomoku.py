@@ -1,10 +1,10 @@
 """Slim entry point for the gomoku cog.
 
-The implementation lives in core.game.gomoku_cog.cog; this module only
+The implementation lives in core.game.gomoku.cog; this module only
 re-exports its names so existing imports and patch targets on
 cogs.gomoku keep working."
 """
-from core.game.gomoku_cog.cog import (
+from core.game.gomoku.cog import (
     asyncio,
     io,
     logging,

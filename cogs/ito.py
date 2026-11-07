@@ -1,10 +1,10 @@
 """Slim entry point for the ito cog.
 
-The implementation lives in core.game.ito_cog.cog; this module only
+The implementation lives in core.game.ito.cog; this module only
 re-exports its names so existing imports and patch targets on
 cogs.ito keep working."
 """
-from core.game.ito_cog.cog import (
+from core.game.ito.cog import (
     asyncio,
     logging,
     random,

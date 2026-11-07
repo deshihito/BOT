@@ -1,10 +1,10 @@
 """Slim entry point for the sudoku cog.
 
-The implementation lives in core.game.sudoku_cog.cog; this module only
+The implementation lives in core.game.sudoku.cog; this module only
 re-exports its names so existing imports and patch targets on
 cogs.sudoku keep working."
 """
-from core.game.sudoku_cog.cog import (
+from core.game.sudoku.cog import (
     asyncio,
     io,
     random,

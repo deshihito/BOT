@@ -1,10 +1,10 @@
 """Slim entry point for the liequiz cog.
 
-The implementation lives in core.game.liequiz_cog.cog; this module only
+The implementation lives in core.game.liequiz.cog; this module only
 re-exports its names so existing imports and patch targets on
 cogs.liequiz keep working."
 """
-from core.game.liequiz_cog.cog import (
+from core.game.liequiz.cog import (
     asyncio,
     logging,
     random,

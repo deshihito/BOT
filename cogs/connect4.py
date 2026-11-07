@@ -1,10 +1,10 @@
 """Slim entry point for the connect4 cog.
 
-The implementation lives in core.game.connect4_cog.cog; this module only
+The implementation lives in core.game.connect4.cog; this module only
 re-exports its names so existing imports and patch targets on
 cogs.connect4 keep working."
 """
-from core.game.connect4_cog.cog import (
+from core.game.connect4.cog import (
     asyncio,
     io,
     logging,

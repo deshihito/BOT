@@ -1,10 +1,10 @@
 """Slim entry point for the clan cog.
 
-The implementation lives in core.game.clan_cog.cog; this module only
+The implementation lives in core.game.clan.cog; this module only
 re-exports its names so existing imports and patch targets on
 cogs.clan keep working."
 """
-from core.game.clan_cog.cog import (
+from core.game.clan.cog import (
     annotations,
     asyncio,
     logging,

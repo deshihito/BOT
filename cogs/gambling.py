@@ -1,10 +1,10 @@
 """Slim entry point for the gambling cog.
 
-The implementation lives in core.game.gambling_cog.cog; this module only
+The implementation lives in core.game.gambling.cog; this module only
 re-exports its names so existing imports and patch targets on
 cogs.gambling keep working."
 """
-from core.game.gambling_cog.cog import (
+from core.game.gambling.cog import (
     annotations,
     COIN,
     DICE,

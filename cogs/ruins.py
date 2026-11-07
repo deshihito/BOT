@@ -1,10 +1,10 @@
 """Slim entry point for the ruins cog.
 
-The implementation lives in core.game.ruins_cog.cog; this module only
+The implementation lives in core.game.ruins.cog; this module only
 re-exports its names so existing imports and patch targets on
 cogs.ruins keep working."
 """
-from core.game.ruins_cog.cog import (
+from core.game.ruins.cog import (
     asyncio,
     io,
     logging,

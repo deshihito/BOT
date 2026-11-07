@@ -1,10 +1,10 @@
 """Slim entry point for the onenight cog.
 
-The implementation lives in core.game.onenight_cog.cog; this module only
+The implementation lives in core.game.onenight.cog; this module only
 re-exports its names so existing imports and patch targets on
 cogs.onenight keep working."
 """
-from core.game.onenight_cog.cog import (
+from core.game.onenight.cog import (
     asyncio,
     logging,
     discord,

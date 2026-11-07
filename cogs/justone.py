@@ -1,10 +1,10 @@
 """Slim entry point for the justone cog.
 
-The implementation lives in core.game.justone_cog.cog; this module only
+The implementation lives in core.game.justone.cog; this module only
 re-exports its names so existing imports and patch targets on
 cogs.justone keep working."
 """
-from core.game.justone_cog.cog import (
+from core.game.justone.cog import (
     asyncio,
     logging,
     random,

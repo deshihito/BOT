@@ -1,10 +1,10 @@
 """Slim entry point for the gacha cog.
 
-The implementation lives in core.game.gacha_cog.cog; this module only
+The implementation lives in core.game.gacha.cog; this module only
 re-exports its names so existing imports and patch targets on
 cogs.gacha keep working."
 """
-from core.game.gacha_cog.cog import (
+from core.game.gacha.cog import (
     annotations,
     asyncio,
     logging,

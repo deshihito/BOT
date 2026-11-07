@@ -1,10 +1,10 @@
 """Slim entry point for the twochoice cog.
 
-The implementation lives in core.game.twochoice_cog.cog; this module only
+The implementation lives in core.game.twochoice.cog; this module only
 re-exports its names so existing imports and patch targets on
 cogs.twochoice keep working."
 """
-from core.game.twochoice_cog.cog import (
+from core.game.twochoice.cog import (
     asyncio,
     random,
     discord,
