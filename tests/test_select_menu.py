@@ -1,9 +1,10 @@
 import unittest
 from types import SimpleNamespace
 
-from cogs.chess import ChessMoveView
-from cogs.othello import OthelloMoveView, WHITE, legal_moves, new_board
-from cogs.shogi import ShogiMoveView
+from cogs.game import ChessMoveView
+from cogs.game import OthelloMoveView
+from core.game.othello.cog import WHITE, legal_moves, new_board
+from cogs.game import ShogiMoveView
 
 
 class SelectMenuTest(unittest.TestCase):

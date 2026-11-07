@@ -2,7 +2,7 @@ import asyncio
 import unittest
 
 from core.support.api_client import APIError, APIResponse
-from cogs.dangeon import d_apply_economy
+from cogs.game import d_apply_economy
 
 
 class _FailingRPC:

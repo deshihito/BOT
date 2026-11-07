@@ -9,17 +9,8 @@ import unittest
 from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock
 
-import cogs.seizon as seizon
-from cogs.seizon import (
-    FujoSurvival,
-    _is_gateway_html_error,
-    _is_transient_error,
-    _parse_ts,
-    altitude_band,
-    altitude_boost,
-    compute_altitude,
-    hours_until_crash,
-)
+import core.game.seizon.cog as seizon
+from cogs.game import FujoSurvival, _is_gateway_html_error, _is_transient_error, _parse_ts, altitude_band, altitude_boost, compute_altitude, hours_until_crash
 
 JST = seizon.JST
 

@@ -6,7 +6,7 @@ import unittest
 import discord
 
 from game_fakes import FakeBot, FakeChannel, FakeGuild, FakeInteraction, FakeMember, choose, fast_time, press, real_sleep
-from cogs import uno
+import core.game.uno.cog as uno
 
 
 class UnoFlowTest(unittest.IsolatedAsyncioTestCase):
