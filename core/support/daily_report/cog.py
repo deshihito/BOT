@@ -70,20 +70,9 @@ class DailyReportCog(commands.Cog):
         return {"balance": await self._balance(str(user_id))}
 
     async def _balance(self, user_id: str) -> int:
-        if self._balance_reader is not None:
-            return int(self._balance_reader(str(user_id)))
-
-        def _read() -> int | None:
-            response = config.db_api.table("users").select("balance") \
-                .eq("user_id", str(user_id)).execute()
-            if not response.data:
-                return None
-            return int(response.data[0].get("balance") or 0)
-
-        balance = await asyncio.to_thread(_read)
-        if balance is None:
-            return int(wallet_module.NEW_USER_BALANCE)
-        return balance
+        return await wallet_module.read_user_balance(
+            user_id, self._balance_reader,
+            missing_balance=wallet_module.NEW_USER_BALANCE)
 
     async def send_due_reports(self, now: datetime | None = None) -> int:
         """送信対象へ日報DMを送り、送信（試行）した人数を返す。"""

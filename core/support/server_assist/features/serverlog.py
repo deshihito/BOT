@@ -6,7 +6,7 @@ from typing import Any
 
 import discord
 
-from core.support.server_assist import Feature, get_settings, update_settings
+from core.support.server_assist import Feature, get_settings, update_settings, usable_text_channels as _channels
 from core.support.server_assist.ui import AssistFeatureView, channel_label, notice_line
 
 logger = logging.getLogger(__name__)
@@ -33,21 +33,6 @@ def settings(guild_id: int) -> dict[str, Any]:
         "log_roles": bool(raw.get("log_roles", True)),
         "log_channels": bool(raw.get("log_channels", True)),
     }
-
-
-def _channels(guild: Any) -> list[Any]:
-    me = getattr(guild, "me", None)
-    channels = list(getattr(guild, "text_channels", []) or [])
-    usable: list[Any] = []
-    for channel in channels:
-        if me is not None:
-            try:
-                if not channel.permissions_for(me).send_messages:
-                    continue
-            except Exception:
-                pass
-        usable.append(channel)
-    return usable[:25]
 
 
 async def _send(guild: Any, current: dict[str, Any], embed: discord.Embed) -> None:

@@ -10,7 +10,7 @@ from typing import Any
 
 import discord
 
-from core.support.server_assist import Feature, get_settings, update_settings
+from core.support.server_assist import Feature, get_settings, update_settings, usable_text_channels as _channels
 from core.support.server_assist.ui import AssistFeatureView, channel_label, notice_line
 
 logger = logging.getLogger(__name__)
@@ -174,21 +174,6 @@ def detect_violation(content: str, mention_count: int, current: dict[str, Any]) 
         if uppercase * 100 / len(letters) >= caps_percent:
             return f"大文字スパム（{uppercase * 100 // len(letters)}%）"
     return None
-
-
-def _channels(guild: Any) -> list[Any]:
-    me = getattr(guild, "me", None)
-    channels = list(getattr(guild, "text_channels", []) or [])
-    usable: list[Any] = []
-    for channel in channels:
-        if me is not None:
-            try:
-                if not channel.permissions_for(me).send_messages:
-                    continue
-            except Exception:
-                pass
-        usable.append(channel)
-    return usable[:25]
 
 
 def _exempt(message: Any) -> bool:

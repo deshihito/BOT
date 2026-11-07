@@ -9,7 +9,7 @@ from typing import Any
 import discord
 
 from core.support.messages import ROLE_HIERARCHY_ALREADY_SET, ROLE_HIERARCHY_CANNOT_SET
-from core.support.server_assist import Feature, can_assign_roles, get_settings, update_settings
+from core.support.server_assist import Feature, can_assign_roles, get_settings, update_settings, usable_text_channels as _channels
 from core.support.server_assist.ui import AssistFeatureView, channel_label, notice_line
 
 logger = logging.getLogger(__name__)
@@ -45,21 +45,6 @@ def settings(guild_id: int) -> dict[str, Any]:
         "message_id": raw.get("message_id") if isinstance(raw.get("message_id"), int) else None,
         "mappings": dict(list(mappings.items())[:MAX_MAPPINGS]),
     }
-
-
-def _channels(guild: Any) -> list[Any]:
-    me = getattr(guild, "me", None)
-    channels = list(getattr(guild, "text_channels", []) or [])
-    usable: list[Any] = []
-    for channel in channels:
-        if me is not None:
-            try:
-                if not channel.permissions_for(me).send_messages:
-                    continue
-            except Exception:
-                pass
-        usable.append(channel)
-    return usable[:25]
 
 
 def parse_mappings(value: str) -> dict[str, int]:

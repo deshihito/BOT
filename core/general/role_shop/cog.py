@@ -29,17 +29,12 @@ from core.support import guild_settings
 from core.game.game import prison as prison_core
 from core.general.role_shop import role_shop as shop_core
 from core.support.messages import COIN_UPDATE_FAILED_UNCHANGED
-from core.support.panel_v2 import as_panel_v2, edit_panel_v2
+from core.support.panel_v2 import as_panel_v2, edit_panel_v2, wrap_panel_view as _wrap
 from cogs import general as wallet_module
 
 logger = logging.getLogger(__name__)
 
 SHOP_COLOR = 0x9B59B6
-
-
-def _wrap(view):
-    view._v2 = as_panel_v2(view)
-    return view._v2
 
 
 def shop_embed(snapshot: dict) -> discord.Embed:

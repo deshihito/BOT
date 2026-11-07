@@ -48,7 +48,7 @@ from core.support.messages import (
     PURCHASE_FAILED_RETRY,
     circulation_action_failed,
 )
-from core.support.panel_v2 import as_panel_v2, edit_panel_v2
+from core.support.panel_v2 import as_panel_v2, edit_panel_v2, edit_panel_view as _edit_panel, wrap_panel_view as _wrap
 from cogs import general as wallet_module  # INSUFFICIENT は実行時に引く（テストの cog 再読込で同一性が崩れないため）
 
 logger = logging.getLogger(__name__)
@@ -73,25 +73,6 @@ def _fmt_minutes(seconds: float) -> str:
 # ---------------------------------------------------------------------------
 # コンポーネントV2 統一（core/support/panel_v2.py の流儀）
 # ---------------------------------------------------------------------------
-
-def _wrap(view):
-    """View を PanelLayoutView で包み、再描画用に view._v2 へ保持する。"""
-    view._v2 = as_panel_v2(view)
-    return view._v2
-
-
-async def _edit_panel(interaction: discord.Interaction, view, *, button=None) -> None:
-    """パネルをその場で再描画する（V2 で包まれていれば V2 の編集経路）。"""
-    container = getattr(button, "view", None)
-    if container is None or not hasattr(container, "_sync"):
-        container = getattr(view, "_v2", None) or view
-    if hasattr(container, "_sync"):
-        container._sync()
-        await edit_panel_v2(interaction, container)
-    elif interaction.response.is_done():
-        await interaction.edit_original_response(embed=view.embed(), view=view)
-    else:
-        await interaction.response.edit_message(embed=view.embed(), view=view)
 
 
 # ---------------------------------------------------------------------------
@@ -418,17 +399,8 @@ class CirculationCog(commands.Cog):
 
     async def _balance(self, user_id: str) -> int:
         """残高の読み取り（行が無いユーザーは0。行は作らない）。"""
-        if self._balance_reader is not None:
-            return int(self._balance_reader(str(user_id)))
-
-        def _read() -> int:
-            response = config.db_api.table("users").select("balance") \
-                .eq("user_id", str(user_id)).execute()
-            if not response.data:
-                return 0
-            return int(response.data[0].get("balance") or 0)
-
-        return await asyncio.to_thread(_read)
+        return await wallet_module.read_user_balance(
+            user_id, self._balance_reader, missing_balance=0)
 
     # ------------------------------------------------------------------ 入口
     async def show_mining(self, interaction: discord.Interaction):

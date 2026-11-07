@@ -35,7 +35,7 @@ from core.support.messages import (
     craft_action_failed,
     workshop_action_failed,
 )
-from core.support.panel_v2 import as_panel_v2, edit_panel_v2
+from core.support.panel_v2 import as_panel_v2, edit_panel_v2, edit_panel_view as _edit_panel, wrap_panel_view as _wrap
 from cogs import general as wallet_module  # INSUFFICIENT は実行時に引く（テストの cog 再読込で同一性が崩れないため）
 
 logger = logging.getLogger("cogs.workshop")
@@ -47,25 +47,6 @@ WORKSHOP_ID = "WORKSHOP"
 # ---------------------------------------------------------------------------
 # コンポーネントV2 統一（core/support/panel_v2.py の流儀）
 # ---------------------------------------------------------------------------
-
-def _wrap(view):
-    """View を PanelLayoutView で包み、再描画用に view._v2 へ保持する。"""
-    view._v2 = as_panel_v2(view)
-    return view._v2
-
-
-async def _edit_panel(interaction: discord.Interaction, view, *, button=None) -> None:
-    """パネルをその場で再描画する（V2 で包まれていれば V2 の編集経路）。"""
-    container = getattr(button, "view", None)
-    if container is None or not hasattr(container, "_sync"):
-        container = getattr(view, "_v2", None) or view
-    if hasattr(container, "_sync"):
-        container._sync()
-        await edit_panel_v2(interaction, container)
-    elif interaction.response.is_done():
-        await interaction.edit_original_response(embed=view.embed(), view=view)
-    else:
-        await interaction.response.edit_message(embed=view.embed(), view=view)
 
 
 def _item_name(item_id: str) -> str:

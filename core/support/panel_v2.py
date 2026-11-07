@@ -318,3 +318,23 @@ async def edit_message_v2(message: discord.Message, view: discord.ui.LayoutView,
 
 def as_panel_v2(panel: discord.ui.View) -> PanelLayoutView:
     return PanelLayoutView(panel)
+
+
+def wrap_panel_view(view):
+    """View を PanelLayoutView で包み、再描画用に view._v2 へ保持する。"""
+    view._v2 = as_panel_v2(view)
+    return view._v2
+
+
+async def edit_panel_view(interaction: discord.Interaction, view, *, button=None) -> None:
+    """パネルをその場で再描画する（V2 で包まれていれば V2 の編集経路）。"""
+    container = getattr(button, "view", None)
+    if container is None or not hasattr(container, "_sync"):
+        container = getattr(view, "_v2", None) or view
+    if hasattr(container, "_sync"):
+        container._sync()
+        await edit_panel_v2(interaction, container)
+    elif interaction.response.is_done():
+        await interaction.edit_original_response(embed=view.embed(), view=view)
+    else:
+        await interaction.response.edit_message(embed=view.embed(), view=view)

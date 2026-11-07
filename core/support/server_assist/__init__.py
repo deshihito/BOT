@@ -60,6 +60,22 @@ def has_manage_permission(interaction: Any) -> bool:
     )
 
 
+def usable_text_channels(guild: Any) -> list[Any]:
+    """Bot が送信できるテキストチャンネルの一覧（セレクトの上限に合わせて25件まで）。"""
+    me = getattr(guild, "me", None)
+    channels = list(getattr(guild, "text_channels", []) or [])
+    usable: list[Any] = []
+    for channel in channels:
+        if me is not None:
+            try:
+                if not channel.permissions_for(me).send_messages:
+                    continue
+            except Exception:
+                pass
+        usable.append(channel)
+    return usable[:25]
+
+
 def can_assign_roles(interaction: Any, guild: Any, role_ids: list[int]) -> bool:
     """Check that the actor can actually manage the configured roles."""
     permissions = getattr(getattr(interaction, "user", None), "guild_permissions", None)

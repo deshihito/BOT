@@ -13,7 +13,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 import discord
 
 from core.support.panel_v2 import as_panel_v2, edit_panel_v2
-from core.support.server_assist import Feature, get_settings, update_settings
+from core.support.server_assist import Feature, get_settings, update_settings, usable_text_channels as _channels
 from core.support.server_assist.ui import AssistFeatureView, channel_label, notice_line
 
 logger = logging.getLogger(__name__)
@@ -141,21 +141,6 @@ async def _save(guild_id: int, schedules: list[dict[str, Any]]) -> None:
 
 async def _save_reminders(guild_id: int, reminders: list[dict[str, Any]]) -> None:
     await update_settings(guild_id, KEY, reminders=reminders[:MAX_REMINDERS])
-
-
-def _channels(guild: Any) -> list[Any]:
-    me = getattr(guild, "me", None)
-    channels = list(getattr(guild, "text_channels", []) or [])
-    usable: list[Any] = []
-    for channel in channels:
-        if me is not None:
-            try:
-                if not channel.permissions_for(me).send_messages:
-                    continue
-            except Exception:
-                pass
-        usable.append(channel)
-    return usable[:25]
 
 
 def due_schedules(current: dict[str, Any], now: datetime) -> list[dict[str, Any]]:

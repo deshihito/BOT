@@ -68,6 +68,7 @@ FAILED_FEATURES: dict[str, str] = {}
 from core.general.wallet.cog import (  # noqa: F401
     COIN_SETTER_USER_ID,
     NEW_USER_BALANCE,
+    read_user_balance,
     BALANCE_UPDATE_ATTEMPTS,
     INSUFFICIENT,
     COIN_PATH,

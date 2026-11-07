@@ -8,7 +8,7 @@ from typing import Any
 
 import discord
 
-from core.support.server_assist import Feature, get_settings, update_settings
+from core.support.server_assist import Feature, get_settings, update_settings, has_manage_permission as _can_manage
 from core.support.server_assist.ui import AssistFeatureView, channel_label, notice_line
 
 logger = logging.getLogger(__name__)
@@ -144,14 +144,6 @@ def build_embed_from_spec(spec: dict[str, Any]) -> discord.Embed:
     if len(embed) > 6000:
         raise ValueError(f"Embedの合計が6000文字を超えています（{len(embed)}文字）。")
     return embed
-
-
-def _can_manage(interaction: discord.Interaction) -> bool:
-    permissions = getattr(getattr(interaction, "user", None), "guild_permissions", None)
-    return bool(
-        getattr(permissions, "administrator", False)
-        or getattr(permissions, "manage_guild", False)
-    )
 
 
 def parse_color(value: Any) -> int | None:

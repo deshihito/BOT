@@ -12,7 +12,7 @@ from PIL import Image, ImageDraw, ImageFont
 
 from core.game.game import party_ranking
 from core.game.game import elo, game_panels, game_restore
-from core.game.game.game_v2 import GamePanelView, LobbyView, safe_delete
+from core.game.game.game_v2 import GamePanelView, LobbyView, safe_delete, paginate_labels
 
 logger = logging.getLogger(__name__)
 
@@ -61,7 +61,6 @@ ASSET = Path(__file__).resolve().parents[3] / "Assets" / "chess" / "IMG_4904.png
 MOVE_LABELS = tuple("123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz")
 # Discord の Select は最大25択。候補は1ページ24件までとし、残りの枠を
 # ページ移動用の疑似選択肢に使う（前後両方の移動が要る中間ページは23件）。
-SELECT_PAGE_SIZE = 24
 PAGE_NEXT_VALUE = "__next_page__"
 PAGE_PREV_VALUE = "__prev_page__"
 
@@ -75,29 +74,6 @@ DIRECTIONS = {
     "R": ((1, 0), (-1, 0), (0, 1), (0, -1)),
     "Q": ((1, 1), (1, -1), (-1, 1), (-1, -1), (1, 0), (-1, 0), (0, 1), (0, -1)),
 }
-
-
-def _page_starts(total):
-    """ページ先頭インデックスの列。
-
-    先頭ページは「次のページ」用に1枠、中間ページは前後2枠をページ移動に
-    空けるため、1ページの候補数は 24 件（中間ページは 23 件）になる。
-    """
-    starts = [0]
-    while total - starts[-1] > SELECT_PAGE_SIZE:
-        capacity = SELECT_PAGE_SIZE if len(starts) == 1 else SELECT_PAGE_SIZE - 1
-        starts.append(starts[-1] + capacity)
-    return starts
-
-
-def paginate_labels(labels, page=0):
-    """(そのページの (label, pos) 列, ページ番号, 総ページ数) を返す。"""
-    labels = list(labels)
-    starts = _page_starts(len(labels))
-    page = max(0, min(page, len(starts) - 1))
-    start = starts[page]
-    end = starts[page + 1] if page + 1 < len(starts) else len(labels)
-    return labels[start:end], page, len(starts)
 
 
 def page_options(page_labels, page, total_pages):
