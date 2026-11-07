@@ -10,9 +10,9 @@ import discord
 from discord.ext import commands
 from PIL import Image, ImageDraw, ImageFont
 
-from core.game import party_ranking
-from core.game import elo, game_panels, game_restore
-from core.game.game_v2 import GamePanelView, LobbyView, safe_delete
+from core.game.game import party_ranking
+from core.game.game import elo, game_panels, game_restore
+from core.game.game.game_v2 import GamePanelView, LobbyView, safe_delete
 
 logger = logging.getLogger(__name__)
 
@@ -656,7 +656,7 @@ class Chess(commands.Cog):
         await channel.send("チェスを終了しました。")
 
     # ------------------------------------------------------------------
-    # 再起動復旧（core/game/game_restore.py）
+    # 再起動復旧（core/game/game/game_restore.py）
     # ------------------------------------------------------------------
     def _save_snapshot(self, g):
         if g.phase != "playing":
