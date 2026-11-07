@@ -7,6 +7,7 @@ import io
 import json
 import logging
 import re
+from typing import Any
 
 import discord
 from discord.ext import commands
@@ -31,30 +32,99 @@ async def _reply_without_localization(ctx: commands.Context, *args, **kwargs):
 
 
 HISTORY_AUTO_DEFAULT = 10
-HISTORY_AUTO_MAX = 20
+HISTORY_AUTO_MAX = 50
 HISTORY_JUDGE_PROMPT = (
     "あなたはDiscord Botの前処理です。ユーザーの依頼に答えるために、"
     "このチャンネルの直近の会話履歴が必要かだけを判定してください。\n"
     "必要な例: 「さっきの」「これ」「上の」「この会話」「要約して」「続き」「他の人の発言への返答」など、"
     "依頼文だけでは内容が特定できない場合。\n"
     "不要な例: 一般知識の質問、依頼文だけで完結する翻訳・計算・文章作成など。\n"
-    '出力はJSONのみ: {"history": true または false, "count": 5〜20の整数}'
+    '出力は次の形式のJSONのみ（説明文やコードフェンスは付けない）: '
+    '{"history": true, "count": 5〜50の整数} または {"history": false}'
 )
+
+_HISTORY_TRUE_RE = re.compile(r'"history"\s*:\s*(?:"true"|true|1)(?![\w.])', re.IGNORECASE)
+_HISTORY_COUNT_RE = re.compile(r'"count"\s*:\s*"?(\d{1,3})')
+
+
+def _first_json_object(text: str) -> dict | None:
+    """テキスト中の最初の完結した {...} を JSON として読む。読めなければ None。
+
+    前置きの文章やコードフェンスが混ざっていても拾えるよう、波括弧の対応を
+    数えて切り出す（従来の「最初の { から最後の } まで」だと、後続の文章に
+    } があるだけで壊れる）。
+    """
+    start = text.find("{")
+    while start >= 0:
+        depth = 0
+        in_string = False
+        escaped = False
+        end = -1
+        for index in range(start, len(text)):
+            char = text[index]
+            if in_string:
+                if escaped:
+                    escaped = False
+                elif char == "\\":
+                    escaped = True
+                elif char == '"':
+                    in_string = False
+                continue
+            if char == '"':
+                in_string = True
+            elif char == "{":
+                depth += 1
+            elif char == "}":
+                depth -= 1
+                if depth == 0:
+                    end = index
+                    break
+        if end < 0:
+            return None
+        try:
+            data = json.loads(text[start:end + 1])
+        except ValueError:
+            start = text.find("{", start + 1)
+            continue
+        return data if isinstance(data, dict) else None
+    return None
+
+
+def _as_bool(value: Any) -> bool | None:
+    """JSONの真偽値に加え、"true" のような文字列表記も受理する。"""
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        lowered = value.strip().lower()
+        if lowered in {"true", "yes", "on", "1"}:
+            return True
+        if lowered in {"false", "no", "off", "0"}:
+            return False
+        return None
+    if isinstance(value, (int, float)):
+        return bool(value)
+    return None
 
 
 def _parse_history_decision(text: str) -> int:
-    """判定JSONから読み込み件数を返す。不要・解析失敗は0。"""
-    match = re.search(r"\{.*\}", text or "", re.S)
-    if not match:
-        return 0
+    """判定JSONから読み込み件数を返す。不要・解析失敗は0。
+
+    Gemma系などJSONの形式が緩いモデルでも拾えるよう、厳密なパースに
+    失敗したらキーと値だけを正規表現で救済する。
+    """
+    raw = text or ""
+    data = _first_json_object(raw)
+    if data is not None:
+        if _as_bool(data.get("history")) is not True:
+            return 0
+        count_value = data.get("count", HISTORY_AUTO_DEFAULT)
+    else:
+        if not _HISTORY_TRUE_RE.search(raw):
+            return 0
+        count_match = _HISTORY_COUNT_RE.search(raw)
+        count_value = int(count_match.group(1)) if count_match else HISTORY_AUTO_DEFAULT
     try:
-        data = json.loads(match.group())
-    except ValueError:
-        return 0
-    if not isinstance(data, dict) or data.get("history") is not True:
-        return 0
-    try:
-        count = int(data.get("count", HISTORY_AUTO_DEFAULT))
+        count = int(count_value)
     except (TypeError, ValueError):
         count = HISTORY_AUTO_DEFAULT
     return max(1, min(count, HISTORY_AUTO_MAX))
