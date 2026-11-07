@@ -150,7 +150,7 @@ class _FakeBot:
 
 class JailbreakPanelTest(unittest.TestCase):
     def _cog(self, tmp, rng):
-        from cogs.money_panel import MoneyPanelCog
+        from cogs.general import MoneyPanelCog
 
         store = _store(tmp, rng)
         circulation = SimpleNamespace(prison_store=store)
@@ -159,7 +159,7 @@ class JailbreakPanelTest(unittest.TestCase):
         return cog, store
 
     def test_button_only_when_imprisoned(self):
-        from cogs.money_panel import MoneyPanelView
+        from cogs.general import MoneyPanelView
 
         with tempfile.TemporaryDirectory() as tmp:
             cog, store = self._cog(tmp, _ScriptedRandom([]))

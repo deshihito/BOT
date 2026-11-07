@@ -25,8 +25,8 @@ from core.game import lottery, mining
 from core.game.game import prison as prison_core
 from core.general.circulation import economy_pool
 from core.general.items import items
-from cogs import wallet as wallet_module
-from cogs.circulation import CirculationCog
+from cogs import general as wallet_module
+from cogs.general import CirculationCog
 
 T0 = datetime(2026, 1, 1, 9, 0, tzinfo=items.JST)
 

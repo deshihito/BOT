@@ -40,12 +40,12 @@ from core.game.game import prison as prison_core
 from core.general.circulation import economy_pool as economy_core
 from core.general.items import items as items_core
 from core.general.wallet.cog import compute_asset_ranking
-from cogs import wallet as wallet_module
-from cogs.circulation import CirculationCog
+from cogs import general as wallet_module
+from cogs.general import CirculationCog
 from cogs.clan import ClanCog
 from cogs.gacha import collection_embed
 from cogs.gambling import GamblingCog
-from cogs.money_panel import CATEGORIES, MoneyPanelCog, status_embed
+from cogs.general import CATEGORIES, MoneyPanelCog, status_embed
 from tools import coin_distribution
 
 T0 = datetime(2026, 1, 1, 9, 0, tzinfo=items_core.JST)

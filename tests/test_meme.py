@@ -16,7 +16,7 @@ if ROOT not in sys.path:
 
 from PIL import Image, ImageDraw
 
-import cogs.general as g
+import core.general.entry as g
 
 
 def _image_bytes(size=(800, 600), color=(70, 130, 200)) -> bytes:

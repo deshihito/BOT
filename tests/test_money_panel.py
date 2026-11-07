@@ -1,4 +1,4 @@
-"""マネーパネル（cogs/money_panel.py の統合パネル）のテスト。
+"""マネーパネル（core/general/money_panel/cog.py の統合パネル）のテスト。
 
 見るもの: ステータス集約が各ストアの値と一致すること、カテゴリごとの
 ビュー構築が Discord のコンポーネント上限に収まること、ボタンから
@@ -29,13 +29,13 @@ from core.game.gambling import gambling
 from core.general.circulation import economy_pool
 from core.general.items import items
 from core.general.market import market
-from cogs import wallet as wallet_module
-from cogs.circulation import CirculationCog
+from cogs import general as wallet_module
+from cogs.general import CirculationCog
 from cogs.gambling import GamblingCog
-from cogs.items import ItemsCog
-from cogs.market import MarketCog
-from cogs.money_panel import CATEGORIES, MoneyPanelCog, MoneyPanelView, status_embed
-from cogs.workshop import WorkshopCog
+from cogs.general import ItemsCog
+from cogs.general import MarketCog
+from cogs.general import CATEGORIES, MoneyPanelCog, MoneyPanelView, status_embed
+from cogs.general import WorkshopCog
 
 
 class _FakeWallet:

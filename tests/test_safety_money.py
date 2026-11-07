@@ -29,10 +29,10 @@ from core.general.money_panel import starter as starter_core  # noqa: E402
 from core.game.game import prison as prison_core  # noqa: E402
 from core.general.items import items as items_core  # noqa: E402
 from core.general.market import market as market_core  # noqa: E402
-from cogs import wallet as wallet_module  # noqa: E402
-from cogs.items import ItemsCog  # noqa: E402
-from cogs.market import MarketCog, TradeModal  # noqa: E402
-from cogs.money_panel import MoneyPanelCog, status_embed  # noqa: E402
+from cogs import general as wallet_module  # noqa: E402
+from cogs.general import ItemsCog  # noqa: E402
+from cogs.general import MarketCog, TradeModal  # noqa: E402
+from cogs.general import MoneyPanelCog, status_embed  # noqa: E402
 from core.general.panel import PayConfirmView, PayModal  # noqa: E402
 from core.support.messages import MARKET_INVALID_AMOUNT  # noqa: E402
 

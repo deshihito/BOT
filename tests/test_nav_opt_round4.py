@@ -16,7 +16,7 @@ class MoneyPanelPrisonDedupTest(unittest.TestCase):
     """
 
     def test_prison_shows_state_field_only(self):
-        from cogs.money_panel import status_embed
+        from cogs.general import status_embed
 
         embed = status_embed({"balance": 100, "prison_remaining": 600.0})
         self.assertIsNone(embed.description)
@@ -26,7 +26,7 @@ class MoneyPanelPrisonDedupTest(unittest.TestCase):
             self.assertNotIn("逮捕中", value)
 
     def test_next_step_still_shows_for_starter(self):
-        from cogs.money_panel import status_embed
+        from cogs.general import status_embed
 
         embed = status_embed({"balance": 100, "starter_claimed": False})
         self.assertIn("スターター", embed.description)
@@ -77,7 +77,7 @@ class EconomyPanelTrimTest(unittest.TestCase):
         self.assertIn("ルール", labels)
 
     def test_items_and_workshop_views_have_no_refresh(self):
-        from cogs.workshop import WorkshopView
+        from cogs.general import WorkshopView
         from core.general.items.cog import ItemsView
 
         for view in (ItemsView(None, 1), WorkshopView(None, 1)):

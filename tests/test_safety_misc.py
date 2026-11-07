@@ -309,7 +309,7 @@ class RoleShopDefenseTest(unittest.IsolatedAsyncioTestCase):
             self.assertIn("削除しました", message)
 
     async def test_sub_views_restrict_to_opener(self):
-        from cogs.role_shop import DeleteProductView, RegisterRoleView
+        from cogs.general import DeleteProductView, RegisterRoleView
 
         with tempfile.TemporaryDirectory() as tmp:
             cog, guild, role = self._setup_cog(tmp)
@@ -545,7 +545,7 @@ class _CreditFailWallet:
 
     async def _change_balance(self, user_id, delta, *, require_funds=False,
                               create_with=None):
-        from cogs import wallet as wallet_module
+        from cogs import general as wallet_module
 
         uid = str(user_id)
         if delta > 0 and self.fail_credit:
@@ -568,7 +568,7 @@ class RefundFailureTest(unittest.TestCase):
     def test_workshop_buy_machine_refund_failure_is_reported(self):
         from core.general.workshop import workshop as workshop_core
         from core.general.items import items as items_core
-        from cogs.workshop import WorkshopCog
+        from cogs.general import WorkshopCog
 
         with tempfile.TemporaryDirectory() as tmp:
             price = workshop_core.MACHINE_TIERS["small"]["price"]

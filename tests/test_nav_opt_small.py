@@ -73,7 +73,7 @@ class ContextMenuNameTest(unittest.TestCase):
     """S11: コンテキストメニュー名が日本語化されていること。"""
 
     def test_japanese_names(self):
-        src = read("cogs", "general.py")
+        src = read("core", "general", "entry.py")
         self.assertIn('name="引用画像にする"', src)
         self.assertIn('name="meme画像にする"', src)
         self.assertNotIn("Make it a Quote", src)

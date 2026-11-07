@@ -11,7 +11,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import discord
 
 import cogs.doubt as doubt_module
-import cogs.general as general_module
+import core.general.entry as general_module
 import core.support.globalchat.cog as globalchat_module
 import cogs.guess as guess_module
 import cogs.jinrou as jinrou_module
