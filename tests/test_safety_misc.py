@@ -26,10 +26,7 @@ from unittest.mock import AsyncMock, patch
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent))  # game_fakes 等のテスト用部品
 
-from core.support import localization
-
-
-# ---------------------------------------------------------------------------
+from core.support.localization import localization  # ---------------------------------------------------------------------------
 # A-2: ローカライズカタログが実際に読み込まれること
 # ---------------------------------------------------------------------------
 class LocalizationCatalogTest(unittest.TestCase):

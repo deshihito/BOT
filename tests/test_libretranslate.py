@@ -1,9 +1,7 @@
 import unittest
 from unittest.mock import patch
 
-from core.support import localization
-
-
+from core.support.localization import localization
 class LocaleCatalogTest(unittest.TestCase):
     def test_tr_reads_checked_in_catalog(self):
         self.assertEqual(localization.tr("language_settings_title", locale="en"), "Language settings")
