@@ -19,7 +19,7 @@ from discord.ext import commands
 from discord.ext import voice_recv
 
 from core.support.legacy import Responder
-from core.general import logfare
+from core.general.ai import logfare
 from core.vc import vc_feature_restore
 from core.vc.voice_session import VoiceBusy, get_manager
 from core.vc.voice_recv_patch import patch_voice_recv_client
