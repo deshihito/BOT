@@ -24,17 +24,12 @@ from core.game.clan import clan as clan_core
 from core.game.gacha import gacha as gacha_core
 from core.game.game import prison as prison_core
 from core.support.messages import COIN_UPDATE_FAILED_UNCHANGED
-from core.support.panel_v2 import as_panel_v2, edit_panel_v2
+from core.support.panel_v2 import as_panel_v2, edit_panel_v2, wrap_panel_view as _wrap
 from cogs import general as wallet_module
 
 logger = logging.getLogger("cogs.gacha")
 
 GACHA_COLOR = 0xE67E22
-
-
-def _wrap(view):
-    view._v2 = as_panel_v2(view)
-    return view._v2
 
 
 def summary_embed(cog: "GachaCog", user_id: int) -> discord.Embed:

@@ -7,7 +7,7 @@ from typing import Any
 
 import discord
 
-from core.support.server_assist import Feature, get_settings, update_settings
+from core.support.server_assist import Feature, get_settings, update_settings, usable_text_channels as _channels
 from core.support.server_assist.ui import AssistFeatureView, channel_label, notice_line
 
 logger = logging.getLogger(__name__)
@@ -41,21 +41,6 @@ def settings(guild_id: int) -> dict[str, Any]:
         "enabled": bool(raw.get("enabled", False)),
         "channel_id": raw.get("channel_id") if isinstance(raw.get("channel_id"), int) else None,
     }
-
-
-def _channels(guild: Any) -> list[Any]:
-    me = getattr(guild, "me", None)
-    channels = list(getattr(guild, "text_channels", []) or [])
-    usable: list[Any] = []
-    for channel in channels:
-        if me is not None:
-            try:
-                if not channel.permissions_for(me).send_messages:
-                    continue
-            except Exception:
-                pass
-        usable.append(channel)
-    return usable[:25]
 
 
 def _remember(invites: list[Any]) -> None:

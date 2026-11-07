@@ -9,7 +9,7 @@ from typing import Any
 
 import discord
 
-from core.support.server_assist import Feature, get_settings, update_settings
+from core.support.server_assist import Feature, get_settings, update_settings, has_manage_permission as _can_manage
 from core.support.server_assist.ui import AssistFeatureView, channel_label, notice_line
 
 logger = logging.getLogger(__name__)
@@ -62,14 +62,6 @@ def parse_emojis(value: Any) -> list[str]:
         if token and token not in result:
             result.append(token[:100])
     return result[:MAX_EMOJIS]
-
-
-def _can_manage(interaction: discord.Interaction) -> bool:
-    permissions = getattr(getattr(interaction, "user", None), "guild_permissions", None)
-    return bool(
-        getattr(permissions, "administrator", False)
-        or getattr(permissions, "manage_guild", False)
-    )
 
 
 def _remember(message_id: int) -> bool:

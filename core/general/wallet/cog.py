@@ -60,6 +60,25 @@ def coin_embed(title: str, description: str | None = None) -> tuple[discord.Embe
     embed.set_thumbnail(url=f"attachment://{COIN_FILENAME}")
     return embed, {"file": discord.File(COIN_PATH, filename=COIN_FILENAME)}
 
+
+async def read_user_balance(user_id, balance_reader, *, missing_balance: int) -> int:
+    """残高の読み取り（行が無いユーザーは missing_balance。行は作らない）。
+
+    balance_reader が注入されていればそちらを優先する（テスト・集約用）。
+    """
+    if balance_reader is not None:
+        return int(balance_reader(str(user_id)))
+
+    def _read() -> int | None:
+        response = config.db_api.table("users").select("balance") \
+            .eq("user_id", str(user_id)).execute()
+        if not response.data:
+            return None
+        return int(response.data[0].get("balance") or 0)
+
+    balance = await asyncio.to_thread(_read)
+    return int(missing_balance) if balance is None else balance
+
 class WalletCog(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot

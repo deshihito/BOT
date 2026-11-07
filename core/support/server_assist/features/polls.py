@@ -8,7 +8,7 @@ from typing import Any
 
 import discord
 
-from core.support.server_assist import Feature, get_settings, update_settings
+from core.support.server_assist import Feature, get_settings, update_settings, has_manage_permission as _can_manage
 from core.support.server_assist.ui import AssistFeatureView, channel_label, notice_line
 from core.support.storage import KVStore
 
@@ -376,14 +376,6 @@ async def handle_vote(cog: Any, interaction: discord.Interaction, values: list[s
                 "投票は保存しましたが、表示を更新できませんでした。「表示を更新」を押してください。",
                 ephemeral=True,
             )
-
-
-def _can_manage(interaction: discord.Interaction) -> bool:
-    permissions = getattr(getattr(interaction, "user", None), "guild_permissions", None)
-    return bool(
-        getattr(permissions, "administrator", False)
-        or getattr(permissions, "manage_guild", False)
-    )
 
 
 async def handle_close(cog: Any, interaction: discord.Interaction) -> None:

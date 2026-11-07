@@ -47,19 +47,13 @@ from core.support.messages import (
     REFUND_FAILED_CONTACT,
     gambling_action_failed,
 )
-from core.support.panel_v2 import as_panel_v2, edit_message_v2, edit_panel_v2
+from core.support.panel_v2 import as_panel_v2, edit_message_v2, edit_panel_v2, wrap_panel_view as _wrap
 from cogs import general as wallet_module  # INSUFFICIENT は実行時に引く（テストの cog 再読込で同一性が崩れないため）
 
 logger = logging.getLogger(__name__)
 
 GAMBLING_COLOR = 0x9B59B6
 GAMBLING_ID = "GAMBLING"
-
-
-def _wrap(view):
-    """View を PanelLayoutView で包み、再描画用に view._v2 へ保持する。"""
-    view._v2 = as_panel_v2(view)
-    return view._v2
 
 
 # ---------------------------------------------------------------------------
@@ -884,17 +878,8 @@ class GamblingCog(commands.Cog):
 
     async def _balance(self, user_id: str) -> int:
         """残高の読み取り（行が無いユーザーは0。行は作らない）。"""
-        if self._balance_reader is not None:
-            return int(self._balance_reader(str(user_id)))
-
-        def _read() -> int:
-            response = config.db_api.table("users").select("balance") \
-                .eq("user_id", str(user_id)).execute()
-            if not response.data:
-                return 0
-            return int(response.data[0].get("balance") or 0)
-
-        return await asyncio.to_thread(_read)
+        return await wallet_module.read_user_balance(
+            user_id, self._balance_reader, missing_balance=0)
 
     async def _refund_orphaned(self) -> None:
         """再起動で失われた未完了セッションのベットを返金する（初回のみ）。

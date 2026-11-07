@@ -373,3 +373,30 @@ class LobbyView(GamePanelView):
         self._wake()
         await refresh_panel(interaction, self)
         self.stop()
+
+
+#: セレクト1ページの候補数（ページ移動ボタンと合わせて25枠に収める）。
+SELECT_PAGE_SIZE = 24
+
+
+def _page_starts(total: int) -> list[int]:
+    """ページ先頭インデックスの列。
+
+    先頭ページは「次のページ」用に1枠、中間ページは前後2枠をページ移動に
+    空けるため、1ページの候補数は 24 件（中間ページは 23 件）になる。
+    """
+    starts = [0]
+    while total - starts[-1] > SELECT_PAGE_SIZE:
+        capacity = SELECT_PAGE_SIZE if len(starts) == 1 else SELECT_PAGE_SIZE - 1
+        starts.append(starts[-1] + capacity)
+    return starts
+
+
+def paginate_labels(labels, page=0):
+    """(そのページの (label, pos) 列, ページ番号, 総ページ数) を返す。"""
+    labels = list(labels)
+    starts = _page_starts(len(labels))
+    page = max(0, min(page, len(starts) - 1))
+    start = starts[page]
+    end = starts[page + 1] if page + 1 < len(starts) else len(labels)
+    return labels[start:end], page, len(starts)

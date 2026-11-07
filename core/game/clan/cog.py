@@ -29,17 +29,12 @@ from core.support.messages import (
     COIN_UPDATE_FAILED_UNCHANGED,
     REFUND_FAILED_CONTACT,
 )
-from core.support.panel_v2 import as_panel_v2, edit_panel_v2
+from core.support.panel_v2 import as_panel_v2, edit_panel_v2, wrap_panel_view as _wrap
 from cogs import general as wallet_module
 
 logger = logging.getLogger("cogs.clan")
 
 CLAN_COLOR = 0x3498DB
-
-
-def _wrap(view):
-    view._v2 = as_panel_v2(view)
-    return view._v2
 
 
 def clan_embed(cog: "ClanCog", user_id: int) -> discord.Embed:
