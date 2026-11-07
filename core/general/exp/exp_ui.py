@@ -376,7 +376,7 @@ class ActivityBoardView(discord.ui.View):
 
     async def _game_king(self):
         try:
-            from core.game import party_ranking
+            from core.game.game import party_ranking
             rows = await party_ranking.shared().monthly_top(
                 self.guild_id, limit=1) if self.guild_id else []
             if not rows:
@@ -472,7 +472,7 @@ class ActivityBoardView(discord.ui.View):
 
     def _clan_top(self):
         try:
-            from core.game import clan as clan_core
+            from core.game.clan import clan as clan_core
             best = top_clan(clan_core.shared_store().list_clans())
             if not best:
                 return None

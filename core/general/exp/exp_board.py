@@ -4,7 +4,7 @@
 集計（軸別ソート・全体合算・ページング・ライバル計算）は純関数として
 切り出し、描画は PIL の純関数（アバター欠落時はプレースホルダで代替）。
 盤面は「タイル/格子をテキストで再現すると安っぽくなる」ため画像化し、
-再描画は core.game.board_image.render_cached の LRU で抑える（Pi 負荷対策）。
+再描画は core.game.game.board_image.render_cached の LRU で抑える（Pi 負荷対策）。
 """
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ import io
 
 from PIL import Image, ImageDraw, ImageFont
 
-from core.game.board_image import FONT_PATH, render_cached
+from core.game.game.board_image import FONT_PATH, render_cached
 
 from ..common import CHAT_EXP_BASE, CHAT_EXP_RATIO, VC_EXP_BASE, VC_EXP_RATIO
 from .exp import _as_int, general_level, level_from_exp
