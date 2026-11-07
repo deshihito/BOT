@@ -15,7 +15,7 @@ from discord.ext import commands, tasks
 from core.support.api_retry import run_with_retry
 
 from core.game.rta.common import *  # noqa: F401,F403 - shared constants/helpers
-from core.game.rta.common import ALLOWED_CHANNEL_TYPES, DISBOARD_BOT_ID, DISOKU_BOT_ID, SABACHA_BOT_ID, TAKASUMI_BOT_ID  # noqa: F401
+from core.game.rta.common import ALLOWED_CHANNEL_TYPES, DCAFE_BOT_ID, DICOALL_BOT_ID, DISBOARD_BOT_ID, DISOKU_BOT_ID, SABACHA_BOT_ID, SHARKBOT_BOT_ID, TAKASUMI_BOT_ID  # noqa: F401
 from core.game.rta.helpers import _collect_embed_text, _event_time, _parse_dt  # noqa: F401
 
 logger = logging.getLogger("cogs.disboard_rta")
@@ -24,42 +24,58 @@ logger = logging.getLogger("cogs.disboard_rta")
 _JST = timezone(timedelta(hours=9))
 
 
-def _sabacha_next_time(embeds, event_at):
-    """鯖ちゃんねるの成功Embedの第1フィールドから次回可能時刻を読む。読めなければNone。
+def _next_time_from_text(text, event_at):
+    """テキストから次回可能時刻を読む。読めなければNone。
 
     対応形式: Discordタイムスタンプ <t:...> / ISO8601 / YYYY/MM/DD HH:MM (JSTとして解釈)。
     イベント時刻より後・24時間以内だけを採用する (外れた値は壊れたデータとして無視)。
     """
+    candidate = None
+    match = re.search(r"<t:(\d+)", text)
+    if match:
+        candidate = datetime.fromtimestamp(int(match.group(1)), tz=timezone.utc)
+    else:
+        match = re.search(r"\d{4}[-/]\d{1,2}[-/]\d{1,2}[ T]\d{1,2}:\d{2}(?::\d{2})?", text)
+        if match:
+            raw = match.group(0)
+            parsed = _parse_dt(raw)
+            if parsed is not None:
+                candidate = parsed
+            else:
+                try:
+                    naive = datetime.strptime(raw.replace("/", "-").replace("T", " "), "%Y-%m-%d %H:%M:%S")
+                except ValueError:
+                    try:
+                        naive = datetime.strptime(raw.replace("/", "-").replace("T", " "), "%Y-%m-%d %H:%M")
+                    except ValueError:
+                        naive = None
+                if naive is not None:
+                    candidate = naive.replace(tzinfo=_JST)
+    if candidate is not None and event_at < candidate <= event_at + timedelta(hours=24):
+        return candidate
+    return None
+
+
+def _sabacha_next_time(embeds, event_at):
+    """鯖ちゃんねるの成功Embedの第1フィールドから次回可能時刻を読む。読めなければNone。"""
     for embed in embeds or ():
         fields = getattr(embed, "fields", ()) or ()
         if not fields:
             continue
         field = fields[0]
         text = " ".join(str(getattr(field, attr, "") or "") for attr in ("name", "value"))
-        candidate = None
-        match = re.search(r"<t:(\d+)", text)
-        if match:
-            candidate = datetime.fromtimestamp(int(match.group(1)), tz=timezone.utc)
-        else:
-            match = re.search(r"\d{4}[-/]\d{1,2}[-/]\d{1,2}[ T]\d{1,2}:\d{2}(?::\d{2})?", text)
-            if match:
-                raw = match.group(0)
-                parsed = _parse_dt(raw)
-                if parsed is not None:
-                    candidate = parsed
-                else:
-                    try:
-                        naive = datetime.strptime(raw.replace("/", "-").replace("T", " "), "%Y-%m-%d %H:%M:%S")
-                    except ValueError:
-                        try:
-                            naive = datetime.strptime(raw.replace("/", "-").replace("T", " "), "%Y-%m-%d %H:%M")
-                        except ValueError:
-                            naive = None
-                    if naive is not None:
-                        candidate = naive.replace(tzinfo=_JST)
-        if candidate is not None and event_at < candidate <= event_at + timedelta(hours=24):
-            return candidate
-        return None
+        return _next_time_from_text(text, event_at)
+    return None
+
+
+def _named_field_next_time(embeds, event_at, name_part):
+    """名前が name_part を含むフィールドから次回可能時刻を読む (Dicoallの「次回の更新可能時間」用)。"""
+    for embed in embeds or ():
+        for field in getattr(embed, "fields", ()) or ():
+            if name_part not in str(getattr(field, "name", "") or ""):
+                continue
+            text = " ".join(str(getattr(field, attr, "") or "") for attr in ("name", "value"))
+            return _next_time_from_text(text, event_at)
     return None
 
 
@@ -68,8 +84,8 @@ def detect_event(message):
 
     The event time is the Snowflake timestamp of the message (or of its edit for
     deferred responses); see ``REMINDER_ANCHOR``.  ``due_at`` is set only when
-    the service itself states the next available time (鯖ちゃんねる); otherwise
-    None and the caller adds ``COOLDOWN[kind]``.
+    the service itself states the next available time (鯖ちゃんねる / Dicoall);
+    otherwise None and the caller adds ``COOLDOWN[kind]``.
     """
     if not getattr(message, "guild", None):
         return None
@@ -119,7 +135,26 @@ def detect_event(message):
         and "表示順位が更新されました" in (getattr(embed, "description", "") or "")
         for embed in embeds
     )
-    if not (is_disboard or is_disoku or is_sabacha or is_takasumi):
+    # Dicoall: 送信者Bot ID + Embed本文の成功文2フレーズ (実地観測 2026-10-29)
+    is_dicoall = DICOALL_BOT_ID in app_id_set and any(
+        "サーバーがリストの最上段に更新されました" in (getattr(embed, "description", "") or "")
+        and "サーバーリストのトップに正常に表示されています" in (getattr(embed, "description", "") or "")
+        for embed in embeds
+    )
+    # Discord Cafe: 送信者Bot ID + Embedタイトル + 本文の成功文 (実地観測 2026-10-29)
+    is_dcafe = DCAFE_BOT_ID in app_id_set and any(
+        getattr(embed, "title", "") == "Discord Cafe | Discord掲示板"
+        and "サーバーの表示順位を上げました" in (getattr(embed, "description", "") or "")
+        for embed in embeds
+    )
+    # SharkBot: 送信者Bot ID + Embed本文の成功文 (実地観測 2026-10-29)
+    is_sharkbot = SHARKBOT_BOT_ID in app_id_set and any(
+        "サーバーをUpしました" in (getattr(embed, "description", "") or "")
+        and "2時間後に再度Upできます" in (getattr(embed, "description", "") or "")
+        for embed in embeds
+    )
+    if not (is_disboard or is_disoku or is_sabacha or is_takasumi
+            or is_dicoall or is_dcafe or is_sharkbot):
         return None
 
 
@@ -127,6 +162,12 @@ def detect_event(message):
         kind = "vote"
     elif is_takasumi:
         kind = "takasumi"
+    elif is_dicoall:
+        kind = "dicoall"
+    elif is_dcafe:
+        kind = "dcafe"
+    elif is_sharkbot:
+        kind = "sharkbot"
     elif is_disboard:
         if "表示順をアップしたよ" not in text and "bump done" not in folded:
             return None
@@ -160,5 +201,10 @@ def detect_event(message):
     except (TypeError, ValueError, OverflowError):
         logger.exception("Could not decode message Snowflake timestamp: %s", getattr(message, "id", None))
         return None
-    due_at = _sabacha_next_time(embeds, event_at) if kind == "vote" else None
+    if kind == "vote":
+        due_at = _sabacha_next_time(embeds, event_at)
+    elif kind == "dicoall":
+        due_at = _named_field_next_time(embeds, event_at, "次回の更新可能時間")
+    else:
+        due_at = None
     return kind, int(user_id) if user_id is not None else None, event_at, due_at
