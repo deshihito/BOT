@@ -3,7 +3,7 @@ import logging
 from datetime import datetime
 import discord
 from discord.ext import commands
-from core.emojis import FAILED
+from core.support.emojis import FAILED
 
 logger = logging.getLogger("cogs.log_viewer")
 
