@@ -36,6 +36,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
+from core.store_flush import DirtyFlushMixin
 from core.support import data_paths
 from core.general.items.items import JST, ItemError
 
@@ -180,7 +181,7 @@ def default_path() -> Path:
     return Path(os.environ.get("LOTTERY_DATA_PATH") or _DEFAULT_PATH)
 
 
-class LotteryStore:
+class LotteryStore(DirtyFlushMixin):
     """宝くじの現行ラウンド・チケット・抽選履歴と JSON 保存。"""
 
     def __init__(
@@ -236,16 +237,6 @@ class LotteryStore:
         except Exception:
             logger.exception("lottery: 状態の保存に失敗しました path=%s", self._path)
 
-    def _mark_dirty(self) -> None:
-        self._dirty += 1
-        if self._dirty >= self._flush_every or (
-            time.monotonic() - self._last_flush >= self._flush_interval
-        ):
-            self.flush()
-
-    def maybe_flush(self) -> None:
-        if self._dirty and time.monotonic() - self._last_flush >= self._flush_interval:
-            self.flush()
 
     # ------------------------------------------------------------------ ラウンド
     def _round_locked(self, now: datetime) -> dict[str, Any]:

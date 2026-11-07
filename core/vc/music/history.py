@@ -24,6 +24,7 @@ import time
 from pathlib import Path
 from typing import Any
 
+from core.store_flush import DirtyFlushMixin
 from core.support import data_paths
 
 logger = logging.getLogger("cogs.sio_music")
@@ -78,7 +79,7 @@ def source_kind(source_input: str | None, b62_id: str | None, is_yt: bool) -> st
     return "youtube" if is_yt else "other"
 
 
-class MusicHistoryStore:
+class MusicHistoryStore(DirtyFlushMixin):
     """ユーザーごとの再生履歴をメモリに持ち、変更をバッチで JSON へ書く。"""
 
     def __init__(
@@ -145,16 +146,6 @@ class MusicHistoryStore:
         except Exception:
             logger.exception("music_history: 状態の保存に失敗しました path=%s", self._path)
 
-    def _mark_dirty(self) -> None:
-        self._dirty += 1
-        if self._dirty >= self._flush_every or (
-            time.monotonic() - self._last_flush >= self._flush_interval
-        ):
-            self.flush()
-
-    def maybe_flush(self) -> None:
-        if self._dirty and time.monotonic() - self._last_flush >= self._flush_interval:
-            self.flush()
 
     # ------------------------------------------------------------------ 記録
     def record_play(

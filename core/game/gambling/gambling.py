@@ -49,6 +49,7 @@ import time
 from pathlib import Path
 from typing import Any
 
+from core.store_flush import DirtyFlushMixin
 from core.support import data_paths
 from core.general.items.items import ItemError
 
@@ -288,7 +289,7 @@ def default_path() -> Path:
     return Path(os.environ.get("GAMBLING_DATA_PATH") or _DEFAULT_PATH)
 
 
-class GamblingStore:
+class GamblingStore(DirtyFlushMixin):
     """ギャンブルの内部状態・セッションと JSON 保存、抽選と判定。
 
     セッションはユーザーごとに1つまで（slot / double / blackjack の
@@ -345,16 +346,6 @@ class GamblingStore:
         except Exception:
             logger.exception("gambling: 状態の保存に失敗しました path=%s", self._path)
 
-    def _mark_dirty(self) -> None:
-        self._dirty += 1
-        if self._dirty >= self._flush_every or (
-            time.monotonic() - self._last_flush >= self._flush_interval
-        ):
-            self.flush()
-
-    def maybe_flush(self) -> None:
-        if self._dirty and time.monotonic() - self._last_flush >= self._flush_interval:
-            self.flush()
 
     # ------------------------------------------------------------------ 状態参照
     def _user_locked(self, user_id: str) -> dict[str, Any]:

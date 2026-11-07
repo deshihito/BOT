@@ -33,6 +33,7 @@ from typing import Any
 
 from core.general.workshop import craft as craft_core
 from core.general.items.items import ITEM_DEFS, JST, ItemError, ItemStore
+from core.store_flush import DirtyFlushMixin
 
 logger = logging.getLogger(__name__)
 
@@ -205,7 +206,7 @@ def default_path() -> Path:
     return Path(os.environ.get("WORKSHOP_DATA_PATH") or _DEFAULT_PATH)
 
 
-class WorkshopStore:
+class WorkshopStore(DirtyFlushMixin):
     """加工機・委託・ストリークの状態と JSON 保存（同期 API、メモリ主体）。"""
 
     def __init__(
@@ -246,16 +247,6 @@ class WorkshopStore:
         except Exception:
             logger.exception("workshop: 状態の保存に失敗しました path=%s", self._path)
 
-    def _mark_dirty(self) -> None:
-        self._dirty += 1
-        if self._dirty >= self._flush_every or (
-            time.monotonic() - self._last_flush >= self._flush_interval
-        ):
-            self.flush()
-
-    def maybe_flush(self) -> None:
-        if self._dirty and time.monotonic() - self._last_flush >= self._flush_interval:
-            self.flush()
 
     # ------------------------------------------------------------------ 状態参照
     def _user_locked(self, user_id: str) -> dict[str, Any]:

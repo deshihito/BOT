@@ -39,6 +39,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
+from core.store_flush import DirtyFlushMixin
 from core.support import data_paths
 from core.general.items.items import JST, ItemError
 
@@ -132,7 +133,7 @@ def default_path() -> Path:
     return Path(os.environ.get("MINING_DATA_PATH") or _DEFAULT_PATH)
 
 
-class MiningStore:
+class MiningStore(DirtyFlushMixin):
     """採掘セッション（残り回数）・クールダウンの状態と JSON 保存、産出抽選。"""
 
     def __init__(
@@ -180,16 +181,6 @@ class MiningStore:
         except Exception:
             logger.exception("mining: 状態の保存に失敗しました path=%s", self._path)
 
-    def _mark_dirty(self) -> None:
-        self._dirty += 1
-        if self._dirty >= self._flush_every or (
-            time.monotonic() - self._last_flush >= self._flush_interval
-        ):
-            self.flush()
-
-    def maybe_flush(self) -> None:
-        if self._dirty and time.monotonic() - self._last_flush >= self._flush_interval:
-            self.flush()
 
     # ------------------------------------------------------------------ 状態参照
     def _user_locked(self, user_id: str) -> dict[str, Any]:

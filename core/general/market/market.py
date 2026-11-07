@@ -33,6 +33,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
+from core.store_flush import DirtyFlushMixin
 from core.support import data_paths
 
 logger = logging.getLogger(__name__)
@@ -198,7 +199,7 @@ def _clean_state(raw: Any, now: datetime) -> dict[str, Any]:
     return state
 
 
-class MarketStore:
+class MarketStore(DirtyFlushMixin):
     """市場状態の保持・レート生成・売買計算と JSON 保存（同期 API、メモリ主体）。
 
     売買の計算（quote / apply）はこのクラスで完結させ、AGO コインの実残高の
@@ -253,16 +254,6 @@ class MarketStore:
         except Exception:
             logger.exception("market: 状態の保存に失敗しました path=%s", self._path)
 
-    def _mark_dirty(self) -> None:
-        self._dirty += 1
-        if self._dirty >= self._flush_every or (
-            time.monotonic() - self._last_flush >= self._flush_interval
-        ):
-            self.flush()
-
-    def maybe_flush(self) -> None:
-        if self._dirty and time.monotonic() - self._last_flush >= self._flush_interval:
-            self.flush()
 
     # ------------------------------------------------------------------ 参照
     def snapshot(self) -> dict[str, Any]:
