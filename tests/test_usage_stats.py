@@ -1,4 +1,4 @@
-"""core/support/usage_stats.py（管理者向け総量カウンタ）と !usage_stats の登録テスト。
+"""core/support/usage_stats/usage_stats.py（管理者向け総量カウンタ）と !usage_stats の登録テスト。
 
 個人単位の履歴（action_usage）とは別集計で、ここで見るのは総量だけ:
 加算・割合・トップN・日別ローテーション・保存/読み戻し・リセット。
@@ -16,9 +16,7 @@ from unittest import mock
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from core.help import command_meta
-from core.support import usage_stats
-
-
+from core.support.usage_stats import usage_stats
 def make_store(tmpdir, **kwargs):
     return usage_stats.UsageStatsStore(Path(tmpdir) / "usage_stats.json", **kwargs)
 

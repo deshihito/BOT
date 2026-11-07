@@ -1,10 +1,10 @@
 """Slim entry point for the auth cog.
 
-The implementation lives in core.support.auth_cog.cog; this module only
+The implementation lives in core.support.auth.cog; this module only
 re-exports its names so existing imports and patch targets on
 cogs.auth keep working."
 """
-from core.support.auth_cog.cog import (
+from core.support.auth.cog import (
     logging,
     re,
     discord,

@@ -4,9 +4,7 @@ from unittest.mock import patch
 
 import discord
 
-from core.support import localization
-
-
+from core.support.localization import localization
 class LocalizationTransportTest(unittest.TestCase):
     def test_localize_kwargs_translates_content_embed_and_view(self):
         embed = discord.Embed(title="日本語タイトル", description="日本語本文")

@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 import discord
 from discord.ext import commands
-from core.support import localization
+from core.support.localization import localization
 from core.support.guild_settings import get_store  # noqa: F401  (re-exported via the entry; internal calls go through _get_store)
 
 logger = logging.getLogger(__name__)
@@ -40,7 +40,7 @@ def install_discord_localization() -> None:
         if original is None or getattr(original, "_agobot_localized", False):
             continue
         async def localized(self, *args, __original=original, **kwargs):
-            from core.support.localization import localize_kwargs, localize_object, guild_id_for_sender, guild_locale, translate_text
+            from core.support.localization.localization import localize_kwargs, localize_object, guild_id_for_sender, guild_locale, translate_text
             skip_localization = kwargs.pop("_agobot_skip_localization", False)
             args = list(args)
             try:

@@ -9,7 +9,7 @@ import time
 import discord
 from discord.ext import commands
 from groq import APIStatusError, AsyncGroq, RateLimitError
-from core.support.localization import guild_locale
+from core.support.localization.localization import guild_locale
 
 logger = logging.getLogger("cogs.imakita")
 TRIGGER_PHRASE = "今北産業"

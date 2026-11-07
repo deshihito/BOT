@@ -20,7 +20,7 @@ if str(ROOT) not in sys.path:
 from core.support import guild_settings
 from core.general import action_registry  # noqa: E402
 from core.support.storage import KVStore  # noqa: E402
-from core.support import globalchat_panel as gp  # noqa: E402
+from core.support.globalchat import globalchat_panel as gp  # noqa: E402
 from core.support.common import SUPPORT_ACTIONS_BY_GENRE  # noqa: E402
 from cogs.support import SUPPORT_ACTIONS, SupportCog  # noqa: E402
 
@@ -153,7 +153,7 @@ class ModalSaveTest(_StoreTestCase):
             guild_id=10,
         )
         await modal.on_submit(interaction)
-        from core.support import globalchat_moderation as mod
+        from core.support.globalchat import globalchat_moderation as mod
         saved = mod.settings(10)
         self.assertEqual(saved["ng_words"], ["あらし", "spam"])
         self.assertEqual(saved["blocked_users"], [123])

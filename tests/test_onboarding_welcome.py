@@ -17,7 +17,7 @@ import discord  # noqa: E402
 
 from core.support import guild_settings  # noqa: E402
 from core.support.storage import KVStore  # noqa: E402
-from core.support import localization  # noqa: E402
+from core.support.localization import localization  # noqa: E402
 from core.support.server_setup import cog as setup_cog  # noqa: E402
 from tests.fake_kv_supabase import FakeKVSupabase  # noqa: E402
 

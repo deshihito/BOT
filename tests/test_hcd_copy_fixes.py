@@ -22,7 +22,7 @@ if ROOT not in sys.path:
 
 from core.support import messages
 from core.help import command_meta
-from core.support import localization  # noqa: E402
+from core.support.localization import localization  # noqa: E402
 
 
 class LogPointerRemovalTest(unittest.TestCase):

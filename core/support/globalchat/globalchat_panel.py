@@ -17,7 +17,7 @@ import discord
 from core.support.embeds import we
 from core.support.emojis import FAILED, SUCCESS
 from core.support.panel_v2 import as_panel_v2, edit_panel_v2
-from core.support import globalchat_moderation as mod
+from core.support.globalchat import globalchat_moderation as mod
 from core.support.server_setup.cog import channel_list_text
 
 logger = logging.getLogger("cogs.support")

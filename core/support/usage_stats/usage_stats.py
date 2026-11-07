@@ -40,7 +40,7 @@ FLUSH_INTERVAL_SECONDS = 300.0
 _DEFAULT_PATH = data_paths.data_path("usage_stats.json")
 # 再編成でモジュールが1階層深くなった際に保存先がずれていた期間の旧保存先
 # (core/data/usage_stats.json)。移行読み取り専用で、書き込みは行わない。
-_STRAY_PATH = data_paths.stray_path(__file__, "usage_stats.json")
+_STRAY_PATH = data_paths.stray_path(Path(__file__).resolve().parent.parent / "usage_stats.py", "usage_stats.json")  # 旧保存先は収納前の深さ基準のため1階層上を渡す
 
 
 def _max_counts(canonical: Any, stray: Any) -> dict:

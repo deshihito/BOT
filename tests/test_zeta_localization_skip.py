@@ -1,6 +1,6 @@
 """ZetaModoki（AIロールプレイ）の本文が送信時翻訳で書き換わらないことの固定テスト。
 
-背景: 送信時翻訳（core/support/localization.py の断片置換）は静的UI文向けの仕組みで、
+背景: 送信時翻訳（core/support/localization/localization.py の断片置換）は静的UI文向けの仕組みで、
 AI生成の動的本文にかけると英語設定サーバーで文章が崩れ、表示と会話履歴が
 食い違う。!ai 本体は _reply_without_localization で対象外になっており、
 ZetaModoki の Webhook 送信も同じ扱いにする。
@@ -22,7 +22,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
-from core.support import localization  # noqa: E402
+from core.support.localization import localization  # noqa: E402
 from core.game.zeta.common import BotPersona  # noqa: E402
 from cogs.zetamodoki import ZetaModoki  # noqa: E402
 

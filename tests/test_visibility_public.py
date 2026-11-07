@@ -217,4 +217,4 @@ class Wave2PublicSourceTest(unittest.TestCase):
         # panel_recovery の開き直しは維持
         self.assertIn("ephemeral=True", self.read("core/support/panel_recovery/cog.py"))
         # auth（認証・秘密情報）は維持
-        self.assertIn("ephemeral=True", self.read("core/support/auth.py"))
+        self.assertIn("ephemeral=True", self.read("core/support/auth_panel.py"))

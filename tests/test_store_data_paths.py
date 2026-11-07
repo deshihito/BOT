@@ -34,7 +34,7 @@ from core.game.zeta import store as zeta_store
 from core.general.circulation import economy_pool
 from core.general.items import items
 from core.general.market import market
-from core.support import usage_stats
+from core.support.usage_stats import usage_stats
 from core.vc import voice_restore
 
 REPO_ROOT = Path(__file__).resolve().parents[1]

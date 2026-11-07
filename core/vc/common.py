@@ -48,7 +48,7 @@ except Exception:  # ImportError だけでなく共有ライブラリ不整合 (
 # ---------------------------------------------------------------------------
 
 from core.general import action_usage
-from core.support import usage_stats
+from core.support.usage_stats import usage_stats
 from core.support.legacy import Responder
 from core.vc.voice_session import VoiceBusy, feature_label, get_manager, stop_hint
 from core.vc.voice_media import add_audio_source, remove_audio_source

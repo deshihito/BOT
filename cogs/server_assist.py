@@ -1,10 +1,10 @@
 """Slim entry point for the server_assist cog.
 
-The implementation lives in core.support.server_assist_cog.cog; this module only
+The implementation lives in core.support.server_assist.cog; this module only
 re-exports its names so existing imports and patch targets on
 cogs.server_assist keep working."
 """
-from core.support.server_assist_cog.cog import (
+from core.support.server_assist.cog import (
     annotations,
     importlib,
     inspect,

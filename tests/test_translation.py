@@ -3,9 +3,7 @@ import unittest
 from unittest.mock import AsyncMock, patch
 
 from core.general import translation_settings as translation
-from core.support import localization
-
-
+from core.support.localization import localization
 class TranslationTest(unittest.IsolatedAsyncioTestCase):
     def test_settings_are_scoped_to_user_and_use_guild_locale_as_default(self):
         user_store = types.SimpleNamespace(
