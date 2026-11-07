@@ -497,4 +497,4 @@ class ShortcutsMixin:
             await message.channel.send("ショートカットの実行中にエラーが発生しました。")
 
 from .panel import GeneralPanel  # 相互参照のため末尾で import
-from cogs.general import SHORTCUT_ROOTS  # cogs/general.py 側で算出済みのものを読む
+from core.general.entry import SHORTCUT_ROOTS  # GeneralCog 本体（core/general/entry.py）側で算出済みのものを読む
