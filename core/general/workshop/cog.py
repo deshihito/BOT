@@ -33,7 +33,7 @@ from core.support.messages import (
     workshop_action_failed,
 )
 from core.support.panel_v2 import as_panel_v2, edit_panel_v2
-from cogs import wallet as wallet_module  # INSUFFICIENT は実行時に引く（テストの cog 再読込で同一性が崩れないため）
+from cogs import general as wallet_module  # INSUFFICIENT は実行時に引く（テストの cog 再読込で同一性が崩れないため）
 
 logger = logging.getLogger("cogs.workshop")
 
