@@ -1,4 +1,4 @@
-"""cogs/errorhandler.py のテスト（Discord には接続しない）。"""
+"""エラーハンドラ（core/support/errorhandler/cog.py）のテスト（Discord には接続しない）。"""
 
 import logging
 import os
@@ -16,7 +16,7 @@ import discord  # noqa: E402
 from discord import app_commands  # noqa: E402
 from discord.ext import commands  # noqa: E402
 
-from cogs import errorhandler as eh  # noqa: E402
+from core.support.errorhandler import cog as eh  # noqa: E402
 
 
 def make_bot():

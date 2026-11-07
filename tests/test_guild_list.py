@@ -12,7 +12,7 @@ if str(ROOT) not in sys.path:
 import asyncio  # noqa: E402
 from unittest.mock import AsyncMock  # noqa: E402
 
-from cogs.terminal import ALLOWED_USER_IDS, TerminalCog as Terminal, guild_list_messages  # noqa: E402
+from cogs.support import ALLOWED_USER_IDS, TerminalCog as Terminal, guild_list_messages  # noqa: E402
 
 
 def g(i, name, n):

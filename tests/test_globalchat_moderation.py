@@ -14,7 +14,7 @@ if str(ROOT) not in sys.path:
 from core.support.globalchat import globalchat_moderation as mod  # noqa: E402
 from core.support import guild_settings  # noqa: E402
 from core.support.storage import KVStore  # noqa: E402
-from cogs import globalchat  # noqa: E402
+from core.support.globalchat import cog as globalchat  # noqa: E402
 
 
 class NormalizeTest(unittest.TestCase):

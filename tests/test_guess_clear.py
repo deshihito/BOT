@@ -20,7 +20,7 @@ from discord.ext import commands  # noqa: E402
 
 import config  # noqa: E402
 from cogs import guess as guess_module  # noqa: E402
-from cogs.clear import MAX_CLEAR, ClearCog  # noqa: E402
+from cogs.support import MAX_CLEAR, ClearCog  # noqa: E402
 
 
 def run(coro):
