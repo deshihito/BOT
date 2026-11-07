@@ -15,8 +15,8 @@ if ROOT not in sys.path:
 
 import discord
 
-from core import guild_settings
-from core.storage import KVStore
+from core.support import guild_settings
+from core.support.storage import KVStore
 from core.support.server_assist import discover_features
 from core.support.server_assist.features import autoreact
 from cogs.server_assist import ServerAssistCog

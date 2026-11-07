@@ -12,8 +12,8 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
-from core import guild_settings
-from core.storage import KVStore
+from core.support import guild_settings
+from core.support.storage import KVStore
 from core.support.server_assist import discover_features
 from core.support.server_assist.features import shiritori_resident as resident
 from tests.fake_kv_supabase import FakeKVSupabase

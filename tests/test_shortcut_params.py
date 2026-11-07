@@ -19,8 +19,9 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from cogs.general import GeneralCog  # noqa: E402
-from core import action_registry, shortcuts  # noqa: E402
-from core.action_registry import ParamSpec  # noqa: E402
+from core.general import shortcut_settings as shortcuts
+from core.general import action_registry  # noqa: E402
+from core.general.action_registry import ParamSpec  # noqa: E402
 
 
 class MemoryStore:
