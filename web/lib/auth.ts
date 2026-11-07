@@ -96,6 +96,24 @@ export function getRequestSession(request: Request) {
   return readSessionInfo(readCookie(request, SESSION_COOKIE));
 }
 
+/**
+ * リダイレクト先URLの基点になる公開オリジン。
+ * Cloudflare Tunnel 等のプロキシ配下では request.url のホストが内部向け
+ * （localhost:3000）になり、そのまま使うと利用者を localhost へ飛ばしてしまう。
+ * Discord に登録した redirect_uri（=公開URL）から取得するのが確実。
+ */
+export function publicOrigin(request: Request): string {
+  const redirectUri = process.env.DISCORD_REDIRECT_URI;
+  if (redirectUri) {
+    try {
+      return new URL(redirectUri).origin;
+    } catch {
+      // 設定がURLとして不正なら request.url にフォールバックする
+    }
+  }
+  return new URL(request.url).origin;
+}
+
 function isSecureRequest(request: Request) {
   const forwardedProto = request.headers.get("x-forwarded-proto")?.split(",")[0]?.trim();
   return forwardedProto === "https" || new URL(request.url).protocol === "https:";

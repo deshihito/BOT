@@ -1,6 +1,6 @@
 import crypto from "node:crypto";
 import { NextResponse } from "next/server";
-import { OAUTH_STATE_COOKIE, isDiscordConfigured, stateCookieOptions } from "@/lib/auth";
+import { OAUTH_STATE_COOKIE, isDiscordConfigured, publicOrigin, stateCookieOptions } from "@/lib/auth";
 
 export const runtime = "nodejs";
 
@@ -8,7 +8,7 @@ export function GET(request: Request) {
   const clientId = process.env.DISCORD_CLIENT_ID;
   const redirectUri = process.env.DISCORD_REDIRECT_URI;
   if (!clientId || !redirectUri || !isDiscordConfigured()) {
-    return NextResponse.redirect(new URL("/login?error=discord_not_configured", request.url));
+    return NextResponse.redirect(new URL("/login?error=discord_not_configured", publicOrigin(request)));
   }
 
   const state = crypto.randomBytes(24).toString("hex");
