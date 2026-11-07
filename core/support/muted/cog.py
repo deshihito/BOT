@@ -4,7 +4,7 @@ import discord
 from discord.ext import commands, tasks
 from datetime import datetime, timedelta, timezone
 
-from core.storage import KVStore
+from core.support.storage import KVStore
 
 logger = logging.getLogger("cogs.muted")
 
@@ -33,7 +33,7 @@ def parse_guild(value) -> tuple[dict[int, datetime], int | None]:
 
 
 class Muted(commands.Cog):
-    """ミュートの期限と管理ロールは core/storage.py（Supabase の bot_kv、namespace "muted"）に、
+    """ミュートの期限と管理ロールは core/support/storage.py（Supabase の bot_kv、namespace "muted"）に、
     サーバーごとに 1 件 {"mutes": {user_id: 期限}, "admin_role_id": ロールID} で保存する。"""
 
     def __init__(self, bot, store: KVStore | None = None):
