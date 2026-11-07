@@ -43,7 +43,7 @@ class QuickDeadEndTest(unittest.TestCase):
     """S5: help:overview が /quick の palette 対象から外れていること。"""
 
     def test_help_overview_not_in_palette(self):
-        from core.action_registry import build_help_actions
+        from core.general.action_registry import build_help_actions
 
         (spec,) = build_help_actions()
         self.assertNotIn("palette", spec.surfaces)

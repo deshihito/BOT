@@ -30,7 +30,7 @@ from core.general import steal
 from core.game import prison as prison_core
 from core.general import items, market as market_core
 from core.general.common import GENERAL_ACTIONS, MONEY_PRISON_BLOCKED_VALUES
-from core.panel_v2 import PanelLayoutView, as_panel_v2
+from core.support.panel_v2 import PanelLayoutView, as_panel_v2
 from cogs import wallet as wallet_module
 from cogs.circulation import (
     BuyLotteryView, CirculationCog, MiningView, StealView)

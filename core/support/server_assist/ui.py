@@ -5,7 +5,7 @@ from typing import Any
 
 import discord
 
-from core.panel_v2 import as_panel_v2
+from core.support.panel_v2 import as_panel_v2
 
 
 class BackToAssistButton(discord.ui.Button):

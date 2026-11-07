@@ -12,7 +12,7 @@ tick は tasks.loop で5分ごとに回し、チャートは tick のたびに�
 キャッシュ（data/market_chart.png）を全員で共有する。
 """
 from __future__ import annotations
-from core.emojis import SUCCESS
+from core.support.emojis import SUCCESS
 
 import asyncio
 import io
@@ -29,8 +29,8 @@ from core.general import economy_pool as economy_core
 from core.general import items as items_core
 from core.general import market as market_core
 from core.game import prison as prison_core
-from core.messages import MARKET_INVALID_AMOUNT, market_trade_failed
-from core.panel_v2 import as_panel_v2, edit_panel_v2
+from core.support.messages import MARKET_INVALID_AMOUNT, market_trade_failed
+from core.support.panel_v2 import as_panel_v2, edit_panel_v2
 from cogs.wallet import INSUFFICIENT
 
 logger = logging.getLogger(__name__)
@@ -53,7 +53,7 @@ def _chart_font_path():
 
 
 # ---------------------------------------------------------------------------
-# コンポーネントV2 統一（core/panel_v2.py の流儀）
+# コンポーネントV2 統一（core/support/panel_v2.py の流儀）
 # ---------------------------------------------------------------------------
 
 def _wrap(view):

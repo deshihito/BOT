@@ -1,6 +1,6 @@
 """Bot が参加しているサーバーの一覧（Web ダッシュボードの導入判定用）。
 
-core/storage.py（自前API の bot_kv、namespace "guild_registry"）に、サーバーごとに
+core/support/storage.py（自前API の bot_kv、namespace "guild_registry"）に、サーバーごとに
 ``{"name": ..., "member_count": ..., "icon": ..., "updated_at": ...}`` を保存する。
 Web ダッシュボードはこの一覧を「Bot が導入されているサーバー」の正として読む
 （設定の有無では判定できないため）。
@@ -14,7 +14,7 @@ import datetime
 import logging
 from typing import Any, Optional
 
-from core.storage import KVStore
+from core.support.storage import KVStore
 
 logger = logging.getLogger(__name__)
 

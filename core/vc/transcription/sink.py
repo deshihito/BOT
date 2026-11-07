@@ -14,15 +14,15 @@ import discord
 import discord.opus
 from discord.ext import commands
 from discord.ext import voice_recv
-from core.legacy import Responder
-from core import logfare
+from core.support.legacy import Responder
+from core.general import logfare
 from core.vc import vc_feature_restore
 from core.vc.voice_session import VoiceBusy, get_manager
 from core.vc.voice_recv_patch import patch_voice_recv_client
-from core.messages import voice_connection_failed
+from core.support.messages import voice_connection_failed
 from core.vc.voice_media import add_receive_sink, remove_receive_sink
 from core.vc.speech_vad import SpeechDetector
-from core.emojis import FAILED, LOADING, LOUPE, PAUSE
+from core.support.emojis import FAILED, LOADING, LOUPE, PAUSE
 try:  # あれば高品質なポリフェーズ・リサンプラーを使う（無くても numpy だけで動く）
     from scipy.signal import resample_poly  # type: ignore
 except Exception:  # pragma: no cover

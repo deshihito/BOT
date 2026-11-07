@@ -47,12 +47,12 @@ except Exception:  # ImportError だけでなく共有ライブラリ不整合 (
     )
 # ---------------------------------------------------------------------------
 
-from core import action_usage
+from core.general import action_usage
 from core.support import usage_stats
-from core.legacy import Responder
+from core.support.legacy import Responder
 from core.vc.voice_session import VoiceBusy, feature_label, get_manager, stop_hint
 from core.vc.voice_media import add_audio_source, remove_audio_source
-from core.panel_v2 import as_panel_v2, edit_panel_v2
+from core.support.panel_v2 import as_panel_v2, edit_panel_v2
 
 CONNECTION_ACTIONS = [
     app_commands.Choice(name="参加", value="join"),

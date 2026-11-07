@@ -1,6 +1,6 @@
 """通常メッセージで使えるダイス機能。"""
 from __future__ import annotations
-from core.emojis import DICE
+from core.support.emojis import DICE
 
 import random
 import re

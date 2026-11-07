@@ -4,9 +4,9 @@ from __future__ import annotations
 from typing import Any
 
 from core.support import localization
-from core.guild_settings import get_store as get_guild_store
-from core.libretranslate import LibreTranslateClient
-from core.storage import KVStore
+from core.support.guild_settings import get_store as get_guild_store
+from core.general.libretranslate import LibreTranslateClient
+from core.support.storage import KVStore
 
 TRANSLATION_NAMESPACE = "translation_preferences"
 SOURCE_LOCALES = ("auto",) + localization.SUPPORTED_LOCALES

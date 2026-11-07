@@ -19,7 +19,7 @@ import copy
 import logging
 from typing import Any, Iterable
 
-from core import action_registry
+from core.general import action_registry
 
 logger = logging.getLogger(__name__)
 
@@ -126,7 +126,7 @@ async def record_safely(
         if guild_id is None or user_id is None:
             return
         if store is None:
-            from core import guild_settings
+            from core.support import guild_settings
 
             store = guild_settings.get_store()
         await record(store, int(guild_id), int(user_id), action_id)

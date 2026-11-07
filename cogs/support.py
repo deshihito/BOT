@@ -13,9 +13,10 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
-from core import action_usage, guild_settings
+from core.support import guild_settings
+from core.general import action_usage
 from core.support import usage_stats
-from core.panel_v2 import as_embed_v2, as_panel_v2, edit_panel_v2
+from core.support.panel_v2 import as_embed_v2, as_panel_v2, edit_panel_v2
 from core.support.common import *
 from core.support.auth import *
 from core.support.roles import *
@@ -266,7 +267,7 @@ class SupportCog(
             return
 
         # BOT fixer のコマンド制限（support:bot_fixer 自身と管理者は対象外）。
-        from core import command_control
+        from core.support import command_control
 
         if not await command_control.guard(interaction, f"support:{selected}"):
             return

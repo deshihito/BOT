@@ -28,7 +28,7 @@ import inspect
 import logging
 import time
 from typing import Any, Awaitable, Callable, Optional
-from core.emojis import FAILED
+from core.support.emojis import FAILED
 
 logger = logging.getLogger(__name__)
 

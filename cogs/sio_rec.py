@@ -16,12 +16,12 @@ import discord
 import discord.opus
 from discord.ext import commands
 from discord.ext import voice_recv
-from core.legacy import Responder
+from core.support.legacy import Responder
 from core.vc import vc_feature_restore
 from core.vc.voice_session import VoiceBusy, get_manager
 from core.vc.voice_recv_patch import patch_voice_recv_client
-from core.messages import VOICE_NOT_JOINED, voice_connection_failed
-from core.emojis import CLOCK, FAILED, MUSIC, PAUSE
+from core.support.messages import VOICE_NOT_JOINED, voice_connection_failed
+from core.support.emojis import CLOCK, FAILED, MUSIC, PAUSE
 from core.vc.rec.common import annotations, asyncio, io, logging, re, subprocess, threading, time, wave, ctypes, math, np, find_peaks, collections, discord, commands, voice_recv, Responder, vc_feature_restore, VoiceBusy, get_manager, patch_voice_recv_client, VOICE_NOT_JOINED, voice_connection_failed, CLOCK, FAILED, MUSIC, PAUSE, logger, SAMPLE_RATE, CHANNELS, SAMPLE_WIDTH, FRAME_SIZE, BYTES_PER_SECOND, MIN_SAVE_BYTES, STATUS_UPDATE_INTERVAL, RECORD_LIMIT_SECONDS, RESYNC_THRESHOLD_BYTES, OPUS_SILENCE, we, NOTE_NAMES_SHARP, NOTE_NAMES_FLAT  # noqa: F401
 from core.vc.rec.deliver import annotations, asyncio, io, logging, re, subprocess, threading, time, wave, ctypes, math, np, find_peaks, collections, discord, commands, voice_recv, Responder, vc_feature_restore, VoiceBusy, get_manager, patch_voice_recv_client, VOICE_NOT_JOINED, voice_connection_failed, CLOCK, FAILED, MUSIC, PAUSE, logger, _pcm_to_wav, DeliverMixin  # noqa: F401
 from core.vc.rec.echo import annotations, asyncio, io, logging, re, subprocess, threading, time, wave, ctypes, math, np, find_peaks, collections, discord, commands, voice_recv, Responder, vc_feature_restore, VoiceBusy, get_manager, patch_voice_recv_client, VOICE_NOT_JOINED, voice_connection_failed, CLOCK, FAILED, MUSIC, PAUSE, logger, EchoMixin  # noqa: F401

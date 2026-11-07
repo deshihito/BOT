@@ -11,7 +11,7 @@ from typing import Any
 
 import aiohttp
 
-from core import logfare
+from core.general import logfare
 
 logger = logging.getLogger(__name__)
 

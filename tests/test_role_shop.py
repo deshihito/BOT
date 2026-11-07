@@ -19,11 +19,11 @@ from types import SimpleNamespace
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from core import guild_settings
+from core.support import guild_settings
 from core.game import prison as prison_core
 from core.general import role_shop as shop_core
 from core.general.items import JST
-from core.storage import KVStore
+from core.support.storage import KVStore
 from cogs import wallet as wallet_module
 
 T0 = datetime(2026, 11, 6, 12, 0, tzinfo=JST)

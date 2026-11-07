@@ -3,8 +3,8 @@
 import unittest
 from types import SimpleNamespace
 
-from core import user_names
-from core.user_names import (
+from core.general import user_names
+from core.general.user_names import (
     cached_display_name, display_name, fallback_name, resolve_display_names,
 )
 

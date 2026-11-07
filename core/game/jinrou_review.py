@@ -7,7 +7,7 @@
   ゲームのチャンネルのサーバーにいない人の名前が出せる。
 """
 import discord
-from core.emojis import JINROU, LOUPE, MUSIC, SUCCESS
+from core.support.emojis import JINROU, LOUPE, MUSIC, SUCCESS
 from core.game.game_v2 import text_panel
 
 COLOR = 0xFFFFFF

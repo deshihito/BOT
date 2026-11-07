@@ -9,7 +9,7 @@ import aiohttp
 
 from cogs.ai_tools import GENERIC_FAILURE_MESSAGE, AIToolsCog, _enabled, _resolve_invoker
 from cogs.general import ShortcutMessageInteraction
-from core import logfare
+from core.general import logfare
 from core.general import ai_tools_router
 
 
@@ -21,7 +21,7 @@ class AIToolsTest(unittest.IsolatedAsyncioTestCase):
         }
 
     async def test_default_candidates_include_all_safe_and_exclude_sensitive_tools(self):
-        from core import action_registry
+        from core.general import action_registry
 
         candidates = ai_tools_router.action_candidates()
         # 候補はアクションレジストリから生成される（surfaces に aitools を含み
@@ -276,8 +276,8 @@ class AIToolsTest(unittest.IsolatedAsyncioTestCase):
 
         session = FakeSession()
         question = {"action": {"type": "choice", "criteria": {"vc:join": "VC参加", "none": "なし"}}}
-        with patch("core.logfare.api_key", return_value="test-key"), patch(
-            "core.logfare.aiohttp.ClientSession", return_value=session
+        with patch("core.general.logfare.api_key", return_value="test-key"), patch(
+            "core.general.logfare.aiohttp.ClientSession", return_value=session
         ):
             response = await logfare.decision("clef", "state", question, timeout=aiohttp.ClientTimeout(total=2))
         self.assertIn("/v1/decisions", session.request[0])
@@ -286,8 +286,8 @@ class AIToolsTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response["result"]["answers"]["action"]["choice"], "vc:join")
 
     async def test_missing_logfare_key_fails_before_network(self):
-        with patch("core.logfare.api_key", return_value=None), patch(
-            "core.logfare.aiohttp.ClientSession"
+        with patch("core.general.logfare.api_key", return_value=None), patch(
+            "core.general.logfare.aiohttp.ClientSession"
         ) as session:
             with self.assertRaisesRegex(RuntimeError, "LOGFARE_API_KEY"):
                 await logfare.decision("clef", "state", {"action": {"type": "choice"}})

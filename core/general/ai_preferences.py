@@ -1,7 +1,7 @@
 """ユーザーごとのAIモデル設定。"""
 from __future__ import annotations
 
-from core.storage import KVStore
+from core.support.storage import KVStore
 
 _store = KVStore("ai_preferences")
 _image_store = KVStore("image_preferences")

@@ -1,5 +1,5 @@
 import discord
-from core.panel_v2 import edit_message_v2
+from core.support.panel_v2 import edit_message_v2
 from discord import app_commands  # ← 追加
 from discord.ext import commands, tasks
 import asyncio
@@ -28,8 +28,8 @@ import discord.opus
 from core.vc import voice_restore
 from core.vc.voice_session import SHARED_FEATURES, VoiceBusy, get_manager
 from core.vc.voice_media import add_audio_source, has_audio_source, remove_audio_source
-from core.legacy import Responder
-from core.emojis import FAILED, MUSIC, SUCCESS
+from core.support.legacy import Responder
+from core.support.emojis import FAILED, MUSIC, SUCCESS
 from core.vc.music_activity import build_music_activity_snapshot
 from core.vc.music.common import logger, YTDL_OPTIONS, YTDL_COOKIE_FILE, BASE62, MAX_QUEUE_SIZE, MAX_PLAYLIST_ITEMS, SPOTIFY_PLAYLIST_RE, SOUNDCLOUD_URL_RE, soundcloud_url_kind, NICOVIDEO_URL_RE, niconico_url_kind, MAX_TTS_CHARS, LOOP_CHOICES, PLAYLIST_ACTION_CHOICES, PLAYLIST_SCOPE_CHOICES, MIN_PLAYBACK_SPEED, MAX_PLAYBACK_SPEED, PANEL_TIMEOUT_SECONDS, SNAPSHOT_INTERVAL_SECONDS, SAFE_CUSTOM_AUDIO_FILTERS, build_atempo_filters, is_safe_custom_audio_filter, EQ_SETTINGS, FFMPEG_REALTIME_PRESETS, build_ffmpeg_headers, FFmpegPCMAudioDiagnostics, encode_full_id, decode_full_id, we  # noqa: F401
 from core.vc.music.autoplay import logger, AutoplayMixin  # noqa: F401

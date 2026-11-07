@@ -94,7 +94,7 @@ class LevelUpCardThemeButton(discord.ui.Button):
         super().__init__(label="自分のカードテーマ", style=discord.ButtonStyle.secondary)
 
     async def callback(self, interaction: discord.Interaction):
-        from core import levelup_card
+        from core.general import levelup_card
 
         current = levelup_card.get_theme(interaction.user.id)
         nxt = levelup_card.next_theme(current)

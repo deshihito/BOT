@@ -25,7 +25,7 @@ from core.game import game_records
 from core.game.board_image import render_cached, render_sudoku
 from core.game.game_v2 import GamePanelView
 from core.game.sudoku import DIFFICULTIES, board_text, daily_puzzle, generate, is_complete_and_valid
-from core.panel_v2 import edit_panel_v2
+from core.support.panel_v2 import edit_panel_v2
 
 GAME_ID = "sudoku"
 

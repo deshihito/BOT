@@ -8,7 +8,7 @@ logger = logging.getLogger("cogs.jinrou")
 import os
 import discord
 from core.game import game_panels
-from core.emojis import FAILED, SUCCESS
+from core.support.emojis import FAILED, SUCCESS
 from core.game import jinrou_guide
 from discord import app_commands
 from discord.ext import commands

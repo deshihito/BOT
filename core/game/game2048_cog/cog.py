@@ -19,7 +19,7 @@ from core.game import game_records
 from core.game.board_image import render_2048, render_cached
 from core.game.game2048 import Game2048
 from core.game.game_v2 import GamePanelView
-from core.panel_v2 import edit_panel_v2
+from core.support.panel_v2 import edit_panel_v2
 
 GAME_ID = "game2048"
 

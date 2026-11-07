@@ -9,7 +9,7 @@
 
 from __future__ import annotations
 
-from core.emojis import FAILED
+from core.support.emojis import FAILED
 
 # ---------------------------------------------------------------- VC 系
 

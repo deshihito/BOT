@@ -1,6 +1,6 @@
 """管理者向けの利用統計（総量カウンタ）。
 
-ユーザ個人単位の利用履歴（core/action_usage.py、仕様書 D-2）とは別物で、
+ユーザ個人単位の利用履歴（core/general/action_usage.py、仕様書 D-2）とは別物で、
 こちらは「Bot 全体で何がどれだけ使われたか」の総量だけを持つ。
 ユーザ単位の内訳は保持しない・表示しない。
 
@@ -28,7 +28,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
-from core import data_paths
+from core.support import data_paths
 
 logger = logging.getLogger(__name__)
 

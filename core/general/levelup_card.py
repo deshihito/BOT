@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from core.storage import KVStore
+from core.support.storage import KVStore
 
 _store = KVStore("levelup_card_prefs")
 

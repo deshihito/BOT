@@ -23,7 +23,7 @@ import yt_dlp
 import requests
 from flask import Flask, Response, jsonify, request, send_file
 
-from core import coder_service
+from core.general import coder_service
 
 app = Flask("")
 app.config["MAX_CONTENT_LENGTH"] = 16 * 1024

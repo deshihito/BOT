@@ -15,8 +15,8 @@ from discord.ext import commands
 from core.help.command_catalog import (build_catalog, command_key, find_command, permission_label, registered_commands,
                                   visible_commands)
 from core.help.command_meta import COMMAND_META
-from core.emojis import BACK, BOOK, LEFT, RIGHT
-from core.panel_v2 import as_panel_v2, edit_panel_v2
+from core.support.emojis import BACK, BOOK, LEFT, RIGHT
+from core.support.panel_v2 import as_panel_v2, edit_panel_v2
 
 # Discord の上限
 EMBED_TITLE = 256
@@ -85,7 +85,7 @@ def panel_action_lines(category_id: str) -> list[str]:
     レジストリの読み込みに失敗しても /help 自体は壊さない（空リストを返す）。
     """
     try:
-        from core import action_registry
+        from core.general import action_registry
 
         specs = action_registry.default_registry().all()
     except Exception:
@@ -490,7 +490,7 @@ class HelpCog(commands.Cog):
     @app_commands.describe(command="使い方を見たいコマンド（入力すると候補が出ます）")
     async def help(self, interaction: discord.Interaction, command: str | None = None):
         # BOT fixer のコマンド制限（管理者は対象外）。
-        from core import command_control
+        from core.support import command_control
 
         if not await command_control.guard(interaction, "help:overview"):
             return

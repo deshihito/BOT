@@ -253,7 +253,7 @@ class VoiceControlViewEmojiTest(unittest.TestCase):
         self.assertEqual(select.placeholder, "音量を選択")
 
     def test_layout_inserts_volume_caption_before_volume_row(self):
-        from core.emojis import VOL
+        from core.support.emojis import VOL
         from core.vc.music.ui import VoiceControlView
         layout = build_music_panel_layout(fake_cog(), 1, "panel text")
         children = container_of(layout).children

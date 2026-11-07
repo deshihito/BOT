@@ -21,8 +21,8 @@ from .exp_board import (
     AXIS_LABELS, PAGE_SIZE, build_rows, find_rank, paginate, render_board_png,
     render_card_png, rival_info, top_clan,
 )
-from core import emojis
-from core.user_names import cached_display_name, resolve_display_names
+from core.support import emojis
+from core.general.user_names import cached_display_name, resolve_display_names
 
 logger = logging.getLogger(__name__)
 

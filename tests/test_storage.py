@@ -1,4 +1,4 @@
-"""core/storage.py（Supabase の bot_kv と、ローカル JSON への切り替え）のテスト。ファイルは一時フォルダにだけ書く。"""
+"""core/support/storage.py（Supabase の bot_kv と、ローカル JSON への切り替え）のテスト。ファイルは一時フォルダにだけ書く。"""
 
 import json
 import os
@@ -12,7 +12,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from core.storage import KVStore, is_missing_table  # noqa: E402
+from core.support.storage import KVStore, is_missing_table  # noqa: E402
 from tests.fake_kv_supabase import APIError, FakeKVSupabase, missing_table_error  # noqa: E402
 
 
@@ -87,7 +87,7 @@ class RemoteTest(Base):
         db = FakeKVSupabase(rows=[{"namespace": "ns", "key": "k", "value": False}])
         db.error = APIError("temporary unavailable")
         store = self.store(db)
-        with self.assertLogs("core.storage", level="WARNING"):
+        with self.assertLogs("core.support.storage", level="WARNING"):
             await store.set("k", True)
         self.assertEqual(self.local()["ns"], {"k": True})
 
@@ -104,7 +104,7 @@ class RemoteTest(Base):
         db = FakeKVSupabase()
         db.error = APIError("temporary unavailable")
         store = self.store(db)
-        with self.assertLogs("core.storage", level="WARNING"):
+        with self.assertLogs("core.support.storage", level="WARNING"):
             await store.set("k", 1)
         self.assertTrue(store.has_pending)
         db.error = None
@@ -117,7 +117,7 @@ class RemoteTest(Base):
         store = self.store(db)
         store.retry_delay = 0.05
         store.max_retry_delay = 0.05
-        with self.assertLogs("core.storage", level="WARNING"):
+        with self.assertLogs("core.support.storage", level="WARNING"):
             await store.set("k", 1, wait=False)
             await asyncio.sleep(0.15)
         self.assertTrue(store.has_pending)
@@ -190,7 +190,7 @@ class FallbackTest(Base):
     async def test_missing_table_falls_back_and_logs_once(self):
         db = FakeKVSupabase(error=missing_table_error())
         store = self.store(db)
-        with self.assertLogs("core.storage", level="WARNING") as logs:
+        with self.assertLogs("core.support.storage", level="WARNING") as logs:
             await store.set("k", 1)
             await store.set("k2", 2)
             data = await store.load_all()
@@ -204,7 +204,7 @@ class FallbackTest(Base):
     async def test_other_errors_fall_back_but_keep_trying(self):
         db = FakeKVSupabase(error=APIError("connection reset"))
         store = self.store(db)
-        with self.assertLogs("core.storage", level="WARNING"):
+        with self.assertLogs("core.support.storage", level="WARNING"):
             await store.set("k", 1)
         self.assertTrue(store.remote_enabled)
         db.error = None
@@ -214,7 +214,7 @@ class FallbackTest(Base):
     async def test_broken_local_file_is_ignored(self):
         with open(self.path, "w", encoding="utf-8") as f:
             f.write("{oops")
-        with self.assertLogs("core.storage", level="ERROR"):
+        with self.assertLogs("core.support.storage", level="ERROR"):
             self.assertEqual(self.store(None).load_local(), {})
 
     def test_is_missing_table(self):

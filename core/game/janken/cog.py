@@ -11,14 +11,14 @@
 """
 import asyncio
 import random
-from core.emojis import CROCK
+from core.support.emojis import CROCK
 
 import discord
 from cogs.wallet import INSUFFICIENT
 from core.game import game_panels
 from core.game import prison as prison_core
 from core.game.game_v2 import GamePanelView, LobbyView, safe_delete, text_panel
-from core.messages import recruit_join_prompt
+from core.support.messages import recruit_join_prompt
 from discord.ext import commands
 
 from core.game import party_ranking

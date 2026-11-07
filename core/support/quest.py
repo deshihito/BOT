@@ -5,7 +5,7 @@ from __future__ import annotations
 from .common import *
 from .common import _support_int
 from .sns import SnsError, parse_rss_feed, sns_epoch
-from core.emojis import FAILED
+from core.support.emojis import FAILED
 
 
 # ===== Discord Quest 通知 ==============================================

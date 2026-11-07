@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from core import logfare
+from core.general import logfare
 from core.general import ai_preferences, ai_provider_router
 
 SYSTEM_PROMPT = (

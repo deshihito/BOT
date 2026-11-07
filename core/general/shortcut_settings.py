@@ -5,7 +5,7 @@ import copy
 import re
 from typing import Any
 
-from core import guild_settings
+from core.support import guild_settings
 
 SECTION = "message_shortcuts"
 MAX_SHORTCUTS = 10
@@ -49,7 +49,7 @@ def _validate_params(action: dict[str, Any], params: dict[str, Any]) -> dict[str
     """
     if not params or action.get("root") != "vc":
         return params
-    from core import action_registry
+    from core.general import action_registry
 
     spec = action_registry.default_registry().get(f"vc:{action.get('value')}")
     if spec is None:

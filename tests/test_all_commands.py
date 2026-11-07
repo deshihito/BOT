@@ -454,7 +454,7 @@ class AllCommandsTest(unittest.TestCase):
         os.chdir(work)
         cls.db_api = FakeDBAPI()
         import config
-        from core import api_client
+        from core.support import api_client
         cls.patches = [
             patch.object(api_client, 'get_client', lambda: cls.db_api),
             patch.object(config, 'db_api', cls.db_api),

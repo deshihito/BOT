@@ -4,7 +4,7 @@
 - 参加はボタン。もう一度押すと参加を取り消す（参加費は返金）。
 - 時間になると自動で抽選。主催者（またはサーバー管理権限のある人）は「管理」ボタンから
   今すぐ終了・再抽選・中止ができる（中止すると参加費は全員に返金）。
-- 状態は core/storage.py の KVStore（bot_kv、namespace "giveaway"）に保存し、再起動後はタイマーを再開する。
+- 状態は core/support/storage.py の KVStore（bot_kv、namespace "giveaway"）に保存し、再起動後はタイマーを再開する。
 - 参加費は /pay と同じ残高更新（WalletCog._change_balance、残高を読み直して食い違いなら再試行）で引く。
 """
 from __future__ import annotations
@@ -19,8 +19,8 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
-from core.emojis import RESTART, TICKET
-from core.storage import KVStore
+from core.support.emojis import RESTART, TICKET
+from core.support.storage import KVStore
 from cogs.wallet import INSUFFICIENT, coin_embed
 
 log = logging.getLogger(__name__)

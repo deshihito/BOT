@@ -19,7 +19,7 @@ import logging
 import discord
 from discord.ext import commands
 
-from core.emojis import POYOPOYO
+from core.support.emojis import POYOPOYO
 from core.game import game_panels, party_ranking
 from core.game.bingo import BingoSession, format_card  # noqa: F401  format_card は cogs.bingo シムの再輸出用
 from core.game.board_image import render_bingo_card, render_cached

@@ -1,4 +1,4 @@
-"""core/storage.py のテスト用の、bot_kv テーブルだけを持つ偽の Supabase クライアント。"""
+"""core/support/storage.py のテスト用の、bot_kv テーブルだけを持つ偽の Supabase クライアント。"""
 
 import threading
 

@@ -9,7 +9,7 @@ from typing import Any
 
 import discord
 
-from core.panel_v2 import as_panel_v2, edit_panel_v2
+from core.support.panel_v2 import as_panel_v2, edit_panel_v2
 from core.support.server_assist import Feature, format_template, get_settings, update_settings
 from core.support.server_assist.ui import AssistFeatureView, notice_line
 

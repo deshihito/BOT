@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """便乗 (binjou) の UI と設定取得。元 cogs/support.py から分割。"""
 from __future__ import annotations
-from core.emojis import THINKING
+from core.support.emojis import THINKING
 
 from .common import *
 

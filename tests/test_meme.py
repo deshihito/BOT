@@ -161,7 +161,7 @@ class MemeRegistryTest(unittest.TestCase):
         self.assertTrue({"meme_create", "meme_help"} <= values)
 
     def test_registry_contains_meme_actions(self):
-        from core import action_registry
+        from core.general import action_registry
 
         registry = action_registry.default_registry()
         general_ids = {spec.id for spec in registry.by_root("general")}

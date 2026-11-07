@@ -20,7 +20,7 @@ from types import SimpleNamespace
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from core import action_registry
+from core.general import action_registry
 from core.game import gambling
 from core.general.items import ItemError
 from cogs import wallet as wallet_module

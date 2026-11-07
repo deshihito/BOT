@@ -24,7 +24,7 @@ import cogs.sio_voice as voice_module
 import cogs.support as support_module
 import cogs.uno as uno_module
 import cogs.zetamodoki as zeta_module
-import core.panel_v2 as panel_v2_module
+import core.support.panel_v2 as panel_v2_module
 
 
 def _http_exception():
@@ -362,7 +362,7 @@ class PanelV2OnErrorLoggingTests(unittest.IsolatedAsyncioTestCase):
                 send=AsyncMock(side_effect=_http_exception())
             ),
         )
-        with self.assertLogs("core.panel_v2", level="DEBUG") as logs:
+        with self.assertLogs("core.support.panel_v2", level="DEBUG") as logs:
             await view.on_error(interaction, RuntimeError("boom"))
         self.assertTrue(any("エラー通知の送信" in line for line in logs.output))
 

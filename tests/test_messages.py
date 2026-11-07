@@ -1,6 +1,6 @@
 """共通文の単一化（監査 #8）のテスト。
 
-- core/messages.py 等の定数が、従来各 cog にコピペされていたリテラルと
+- core/support/messages.py 等の定数が、従来各 cog にコピペされていたリテラルと
   1文字も違わず一致すること
 - 置換した使用箇所が、従来どおりの文字列を組み立てること
 を固定する。文言の内容は core/locales の翻訳キーそのものなので、
@@ -16,9 +16,9 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from core import api_client, messages  # noqa: E402
+from core.support import api_client, messages  # noqa: E402
 from core.general import ai_input
-from core.emojis import BACK, CROCK, FAILED, MUSIC, SUCCESS, TICKET  # noqa: E402
+from core.support.emojis import BACK, CROCK, FAILED, MUSIC, SUCCESS, TICKET  # noqa: E402
 
 
 class SharedMessageValuesTest(unittest.TestCase):

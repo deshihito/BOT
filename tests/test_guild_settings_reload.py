@@ -9,7 +9,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
-from core.guild_settings import GuildSettings
+from core.support.guild_settings import GuildSettings
 
 
 class FakeKV:

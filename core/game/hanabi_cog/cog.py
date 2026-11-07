@@ -18,7 +18,7 @@ from core.game import game_records
 from core.game.board_image import render_tiles
 from core.game.game_v2 import GamePanelView, preview_notice_line, text_panel
 from core.game.hanabi import COLOR_EMOJI, COLORS, HanabiGame
-from core.panel_v2 import edit_message_v2
+from core.support.panel_v2 import edit_message_v2
 
 logger = logging.getLogger(__name__)
 

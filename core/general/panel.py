@@ -242,7 +242,7 @@ class GeneralPanel(discord.ui.View):
                     break
         self.shortcut_mode = shortcut_mode
         self.shortcut_item = shortcut_item
-        # 「よく使う／最近」の対象（core.action_usage.history_panel_specs の結果）。
+        # 「よく使う／最近」の対象（core.general.action_usage.history_panel_specs の結果）。
         # 空ならセクション自体を出さず、従来の見た目と完全同一に保つ。
         self.history_specs = list(history_specs or [])
         self.refresh()

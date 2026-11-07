@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """embed 構築の共通ヘルパー。
 
-文言の単一置き場である core/messages.py とは役割を分け、こちらは
+文言の単一置き場である core/support/messages.py とは役割を分け、こちらは
 embed の様式（色などの構造）だけを持つ。各機能で複製されていた
 白基調の embed 工場 `we()` をここに集約した。
 """

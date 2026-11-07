@@ -8,7 +8,7 @@
 import asyncio
 import logging
 import random
-from core.emojis import FAILED
+from core.support.emojis import FAILED
 
 import discord
 from discord.ext import commands

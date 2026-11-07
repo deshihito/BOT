@@ -2,7 +2,7 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
-from core.legacy import Responder
+from core.support.legacy import Responder
 
 
 class ResponderTest(unittest.IsolatedAsyncioTestCase):

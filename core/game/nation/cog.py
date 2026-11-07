@@ -17,10 +17,10 @@ import time
 import discord
 from discord.ext import commands
 
-from core.emojis import COIN
-from core.guild_settings import nation_settings
-from core.api_client import API_NOT_CONFIGURED_MESSAGE, get_client
-from core.api_retry import run_with_retry
+from core.support.emojis import COIN
+from core.support.guild_settings import nation_settings
+from core.support.api_client import API_NOT_CONFIGURED_MESSAGE, get_client
+from core.support.api_retry import run_with_retry
 
 log = logging.getLogger("cogs.nation")
 

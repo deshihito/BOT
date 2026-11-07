@@ -25,7 +25,7 @@ transaction_history への記録）を通す（cogs/circulation.py と同じ組�
 だけ。いずれも AI tools の代理実行対象外（AI_BLOCKED_IDS）。
 """
 from __future__ import annotations
-from core.emojis import COIN, DICE, SUCCESS
+from core.support.emojis import COIN, DICE, SUCCESS
 
 import asyncio
 import logging
@@ -40,8 +40,8 @@ from core.general import economy_pool as economy_core
 from core.game import gambling as gambling_core
 from core.general import items as items_core
 from core.game import prison as prison_core
-from core.messages import GAMBLING_INVALID_AMOUNT, gambling_action_failed
-from core.panel_v2 import as_panel_v2, edit_message_v2, edit_panel_v2
+from core.support.messages import GAMBLING_INVALID_AMOUNT, gambling_action_failed
+from core.support.panel_v2 import as_panel_v2, edit_message_v2, edit_panel_v2
 from cogs import wallet as wallet_module  # INSUFFICIENT は実行時に引く（テストの cog 再読込で同一性が崩れないため）
 
 logger = logging.getLogger(__name__)

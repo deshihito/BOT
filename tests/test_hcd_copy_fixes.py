@@ -20,7 +20,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
-from core import messages
+from core.support import messages
 from core.help import command_meta
 from core.support import localization  # noqa: E402
 

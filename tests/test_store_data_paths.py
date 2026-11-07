@@ -26,7 +26,7 @@ from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from core import data_paths
+from core.support import data_paths
 from core.game import elo, gambling, game_records, game_restore, lottery, mining, prison
 from core.game.zeta import store as zeta_store
 from core.general import economy_pool, items, market

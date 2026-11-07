@@ -32,7 +32,7 @@ from statistics import median
 import discord
 from discord import app_commands
 from discord.ext import commands, tasks
-from core.api_retry import run_with_retry
+from core.support.api_retry import run_with_retry
 
 logger = logging.getLogger("cogs.disboard_rta")
 DISBOARD_BOT_ID = 302050872383242240

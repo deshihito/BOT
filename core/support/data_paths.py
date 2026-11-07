@@ -34,13 +34,13 @@ def repo_root() -> Path:
 
     同梱フォント (font.ttf) と assets/fonts/ の両方を持つ最下位の祖先を
     ルートとみなす (core/general/exp/exp.py の _repo_root と同じ解決)。
-    見つからなければこのファイルの配置 (core/ 直下) を前提に返す。
+    見つからなければこのファイルの配置 (core/support/ 直下) を前提に返す。
     """
     here = Path(__file__).resolve()
     for anc in here.parents:
         if (anc / "font.ttf").is_file() and (anc / "assets" / "fonts").is_dir():
             return anc
-    return here.parents[1]
+    return here.parents[2]
 
 
 _REPO_ROOT = repo_root()

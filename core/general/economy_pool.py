@@ -45,7 +45,7 @@ from datetime import date, datetime
 from pathlib import Path
 from typing import Any
 
-from core import data_paths
+from core.support import data_paths
 from core.general.items import JST
 
 logger = logging.getLogger(__name__)

@@ -250,7 +250,7 @@ class MusicImplGateTest(unittest.IsolatedAsyncioTestCase):
     async def test_stop_denied_for_non_member(self):
         import queue as queue_module
 
-        from core.legacy import Responder
+        from core.support.legacy import Responder
 
         state = {"current_track": ("u", "t", 10, None, False),
                  "elapsed_offset": 0, "is_paused": False,
@@ -473,7 +473,7 @@ class JankenPrisonTest(unittest.IsolatedAsyncioTestCase):
 # ---------------------------------------------------------------------------
 class AIToolsRiskTest(unittest.IsolatedAsyncioTestCase):
     def test_candidates_exclude_message_shortcut_blocked(self):
-        from core import action_registry
+        from core.general import action_registry
         from core.general import ai_tools_router
 
         candidates = ai_tools_router.action_candidates()

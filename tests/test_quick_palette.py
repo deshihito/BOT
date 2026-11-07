@@ -8,7 +8,7 @@ import unittest
 from unittest.mock import AsyncMock
 
 from cogs import quick
-from core import action_registry
+from core.general import action_registry
 
 
 def registry():

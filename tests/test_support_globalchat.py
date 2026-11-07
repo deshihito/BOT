@@ -17,8 +17,9 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from core import action_registry, guild_settings  # noqa: E402
-from core.storage import KVStore  # noqa: E402
+from core.support import guild_settings
+from core.general import action_registry  # noqa: E402
+from core.support.storage import KVStore  # noqa: E402
 from core.support import globalchat_panel as gp  # noqa: E402
 from core.support.common import SUPPORT_ACTIONS_BY_GENRE  # noqa: E402
 from cogs.support import SUPPORT_ACTIONS, SupportCog  # noqa: E402

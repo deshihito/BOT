@@ -3,8 +3,8 @@ import types
 import unittest
 from unittest.mock import AsyncMock
 
-from core import action_registry
-from core.embeds import we as shared_we
+from core.general import action_registry
+from core.support.embeds import we as shared_we
 
 
 class SharedEmbedFactoryTest(unittest.TestCase):

@@ -9,8 +9,8 @@ from discord.ext import commands
 from typing import Dict, List, Optional
 import re
 import os
-from core import logfare
-from core.panel_v2 import as_panel_v2, edit_panel_v2
+from core.general import logfare
+from core.support.panel_v2 import as_panel_v2, edit_panel_v2
 from core.game.zeta.chat_ui import logger, ResponseModal, ChatButtonView, DeleteThreadConfirmView, ModeButton, ModeBackButton, CharacterSelect, CharacterSelectView  # noqa: F401
 from core.game.zeta.common import logger, BotPersona, PRESETS, MAX_CUSTOM_PER_USER, DEFAULT_ICON_URL, CUSTOM_FILE, _FORBIDDEN_NAME_WORDS, _clip, validate_custom_fields  # noqa: F401
 from core.game.zeta.custom_ui import logger, CustomPersonaModal, CustomEntrySelect, CustomManageView, CustomDeleteConfirmView, ZetaInfoView  # noqa: F401

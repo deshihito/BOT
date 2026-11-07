@@ -5,7 +5,7 @@ import unittest
 
 class RankingsBundleTest(unittest.TestCase):
     def test_rankings_action_registered_in_rta_genre(self):
-        from core import action_registry
+        from core.general import action_registry
         from core.general.common import GENERAL_GENRES
 
         self.assertEqual(GENERAL_GENRES["rta"][0], "ランキング")
@@ -15,7 +15,7 @@ class RankingsBundleTest(unittest.TestCase):
 
     def test_rankings_view_targets_existing_actions(self):
         from cogs.general import RankingsView
-        from core import action_registry
+        from core.general import action_registry
 
         registry = action_registry.default_registry()
         self.assertEqual(len(RankingsView.TARGETS), 6)

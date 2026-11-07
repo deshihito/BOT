@@ -11,7 +11,7 @@ from unittest.mock import AsyncMock, patch
 
 import discord
 
-from core.public_share import PublicShareView
+from core.support.public_share import PublicShareView
 
 
 def fake_interaction(user_id=456, with_channel=True):

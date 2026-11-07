@@ -185,7 +185,7 @@ async def guard(interaction, action_id: str) -> bool:
     if is_manager(user):
         return True
     try:
-        from core import guild_settings
+        from core.support import guild_settings
 
         store = guild_settings.get_store()
         await store.ensure_loaded()

@@ -8,7 +8,7 @@ from core.game.board_image import render_cached, render_card, render_card_hand, 
 from core.game.game_v2 import GamePanelView, LobbyView, safe_delete, text_panel
 from discord.ext import commands
 
-from core import action_usage
+from core.general import action_usage
 from core.game import party_ranking
 from core.support import usage_stats
 
@@ -20,7 +20,7 @@ import random
 logger = logging.getLogger("cogs.doubt")
 
 
-from core.embeds import we  # noqa: F401  (共通の白 embed 工場)
+from core.support.embeds import we  # noqa: F401  (共通の白 embed 工場)
 
 SUIT_ORDER = {"S": 0, "H": 1, "D": 2, "C": 3, "JK": 4}
 SELECT_LIMIT = 25  # Discord のセレクトメニューに入れられる選択肢の上限

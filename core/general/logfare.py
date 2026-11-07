@@ -412,7 +412,7 @@ async def generate_image(model: str, prompt: str, *, size: str = "1024x1024") ->
 
 # ============================================================
 # 動作確認用: どの指定なら日本語として認識されるかを調べる
-#   python -m core.logfare 日本語を話したWAV.wav     (BOT のフォルダで実行)
+#   python -m core.general.logfare 日本語を話したWAV.wav     (BOT のフォルダで実行)
 #   LOGFARE_API_KEY が必要。Discord からは cogs/sio_transcription.py の !sttdebug でも呼べる。
 # ============================================================
 _PROBE_PATTERNS: list[tuple[str, dict[str, str], dict[str, str]]] = [
@@ -500,7 +500,7 @@ if __name__ == "__main__":
     import sys
 
     if len(sys.argv) != 2:
-        raise SystemExit("使い方: python -m core.logfare 日本語を話したWAV.wav")
+        raise SystemExit("使い方: python -m core.general.logfare 日本語を話したWAV.wav")
     try:
         asyncio.run(probe_transcription(sys.argv[1]))
     except RuntimeError as exc:

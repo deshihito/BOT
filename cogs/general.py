@@ -25,16 +25,18 @@ from pathlib import Path
 import discord
 from discord import app_commands
 from discord.ext import commands, tasks
-from core.panel_v2 import as_panel_v2, edit_panel_v2
-from core import action_registry, action_usage, guild_settings, levelup_card, logfare, shortcuts
+from core.support.panel_v2 import as_panel_v2, edit_panel_v2
+from core.general import shortcut_settings as shortcuts
+from core.support import guild_settings
+from core.general import action_registry, action_usage, levelup_card, logfare
 from core.support import usage_stats
 from core.general import ai_omnirush, ai_preferences, ai_provider_router
 from core.game.game_guides import GAME_GUIDES, GAME_ORDER
-from core import translation
+from core.general import translation_settings as translation
 from core.support import localization
 from core.game import prison as prison_core
-from core.messages import CIRCULATION_NOT_LOADED, GAMBLING_NOT_LOADED, ITEMS_NOT_LOADED, MARKET_NOT_LOADED, MONEY_PANEL_NOT_LOADED, WORKSHOP_NOT_LOADED
-from core.libretranslate import LibreTranslateClient, LibreTranslateError
+from core.support.messages import CIRCULATION_NOT_LOADED, GAMBLING_NOT_LOADED, ITEMS_NOT_LOADED, MARKET_NOT_LOADED, MONEY_PANEL_NOT_LOADED, WORKSHOP_NOT_LOADED
+from core.general.libretranslate import LibreTranslateClient, LibreTranslateError
 
 logger = logging.getLogger(__name__)
 
@@ -189,7 +191,7 @@ class GeneralCog(
 
     async def dispatch_general(self, interaction: discord.Interaction, value: str):
         # BOT fixer のコマンド制限（管理者は対象外）。
-        from core import command_control
+        from core.support import command_control
 
         if not await command_control.guard(interaction, f"general:{value}"):
             return

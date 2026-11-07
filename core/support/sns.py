@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from .common import *
 from .common import _html, _support_int
-from core.emojis import FAILED
+from core.support.emojis import FAILED
 
 
 # ===== SNS新着通知（X / YouTube / GitHub） ======================================

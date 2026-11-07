@@ -1,7 +1,7 @@
 import asyncio
 import unittest
 
-from core.api_client import APIError, APIResponse
+from core.support.api_client import APIError, APIResponse
 from cogs.dangeon import d_apply_economy
 
 

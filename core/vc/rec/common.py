@@ -31,12 +31,12 @@ import discord.opus
 from discord.ext import commands
 from discord.ext import voice_recv
 
-from core.legacy import Responder
+from core.support.legacy import Responder
 from core.vc import vc_feature_restore
 from core.vc.voice_session import VoiceBusy, get_manager
 from core.vc.voice_recv_patch import patch_voice_recv_client
-from core.messages import VOICE_NOT_JOINED, voice_connection_failed
-from core.emojis import CLOCK, FAILED, MUSIC, PAUSE
+from core.support.messages import VOICE_NOT_JOINED, voice_connection_failed
+from core.support.emojis import CLOCK, FAILED, MUSIC, PAUSE
 
 logger = logging.getLogger("cogs.sio_rec")
 
@@ -65,7 +65,7 @@ RESYNC_THRESHOLD_BYTES = 5 * BYTES_PER_SECOND
 OPUS_SILENCE = b"\xf8\xff\xfe"
 
 
-from core.embeds import we  # noqa: F401  (共通の白 embed 工場)
+from core.support.embeds import we  # noqa: F401  (共通の白 embed 工場)
 
 
 # ============================================================

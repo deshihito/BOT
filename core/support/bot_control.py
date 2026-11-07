@@ -28,7 +28,7 @@ from __future__ import annotations
 import logging
 from typing import Any, Optional
 
-from core.command_control import RATE_MAX_COUNT, RATE_MAX_WINDOW_SECONDS, RateCounter
+from core.support.command_control import RATE_MAX_COUNT, RATE_MAX_WINDOW_SECONDS, RateCounter
 
 logger = logging.getLogger(__name__)
 
@@ -145,7 +145,7 @@ async def enforce_message(self_bot_id: Optional[int], message, store=None) -> bo
             if application_id is None or application_id != author_id:
                 return False
         if store is None:
-            from core import guild_settings
+            from core.support import guild_settings
 
             store = guild_settings.get_store()
         await store.ensure_loaded()

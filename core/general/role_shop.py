@@ -5,7 +5,7 @@
 ギルド固有のため AGO では「ギルド管理者が自ギルドのロールを商品と
 して登録する」形にした:
 
-- 商品（ロール・価格・期間）の保存はギルド単位で core/guild_settings.py
+- 商品（ロール・価格・期間）の保存はギルド単位で core/support/guild_settings.py
   の section "role_shop" に置く（このモジュールはその dict の読み書き
   ヘルパーだけを持つ）
 - 購入で付与したロールの期限はこのモジュールの RoleShopStore が

@@ -22,7 +22,7 @@ from core.game import game_records
 from core.game.board_image import render_cached, render_nonogram
 from core.game.game_v2 import GamePanelView
 from core.game.nonogram import SIZES, NonogramBoard, NonogramPuzzle
-from core.panel_v2 import edit_panel_v2
+from core.support.panel_v2 import edit_panel_v2
 
 GAME_ID = "nonogram"
 CELL_LABEL = {0: "未定", 1: "塗り", 2: "バツ"}

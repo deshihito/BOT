@@ -77,7 +77,7 @@ def offline_environment():
             if (ROOT / name).exists():
                 (Path(work) / name).symlink_to(ROOT / name, target_is_directory=(ROOT / name).is_dir())
         import config
-        from core import api_client
+        from core.support import api_client
         stack.enter_context(patch.object(api_client, "get_client", lambda: offline))
         stack.enter_context(patch.object(config, "db_api", offline))
         for target, name, value in (

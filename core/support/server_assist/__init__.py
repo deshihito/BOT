@@ -12,7 +12,7 @@ import pkgutil
 from dataclasses import dataclass, replace
 from typing import Any
 
-from core import guild_settings
+from core.support import guild_settings
 
 logger = logging.getLogger(__name__)
 

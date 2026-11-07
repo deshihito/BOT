@@ -1,6 +1,6 @@
 """サーバーごとの保存済み設定（以前は /setup で決めていたもの）。
 
-core/storage.py（Supabase の bot_kv、namespace "guild_settings"）に、サーバーごとに 1 件
+core/support/storage.py（Supabase の bot_kv、namespace "guild_settings"）に、サーバーごとに 1 件
 ``{"<section>": {...}}`` の形で保存する。Supabase が使えないときはローカルの bot_kv.json に保存される。
 
 読むときはメモリ上の写しから同期的に読む（``get``）。保存先からの読み直しは、最初に必要になったときと、
@@ -20,7 +20,7 @@ import logging
 import time
 from typing import Any, Optional
 
-from core.storage import KVStore
+from core.support.storage import KVStore
 
 logger = logging.getLogger(__name__)
 

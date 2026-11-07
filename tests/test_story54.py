@@ -107,7 +107,7 @@ class GenreReorgTest(unittest.TestCase):
 
 class RegistryTest(unittest.TestCase):
     def test_story54_registered_under_make_image(self):
-        from core import action_registry
+        from core.general import action_registry
 
         registry = action_registry.default_registry()
         spec = registry.get("general:story54")
@@ -115,7 +115,7 @@ class RegistryTest(unittest.TestCase):
         self.assertEqual(spec.genre, "make_image")
 
     def test_moved_actions_keep_ids_and_genre(self):
-        from core import action_registry
+        from core.general import action_registry
 
         registry = action_registry.default_registry()
         for value in ("meme_create", "meme_help", "miq_settings"):
@@ -124,7 +124,7 @@ class RegistryTest(unittest.TestCase):
             self.assertEqual(spec.genre, "make_image", value)
 
     def test_story54_blocked_for_ai(self):
-        from core import action_registry
+        from core.general import action_registry
         from core.general import ai_tools_router
 
         self.assertIn("general:story54", action_registry.AI_BLOCKED_IDS)

@@ -1,10 +1,10 @@
-"""core/web_search.py の SSRF 防御（IP/ポート/リダイレクト/サイズ）のテスト。"""
+"""core/general/web_search.py の SSRF 防御（IP/ポート/リダイレクト/サイズ）のテスト。"""
 
 import socket
 import unittest
 from unittest.mock import patch
 
-from core import web_search
+from core.general import web_search
 
 
 def _dns(*addresses):
@@ -86,7 +86,7 @@ class UrlValidationTest(unittest.TestCase):
         ]
         for url, address in cases:
             with self.subTest(url=url), patch(
-                "core.web_search.socket.getaddrinfo",
+                "core.general.web_search.socket.getaddrinfo",
                 return_value=_dns(address),
             ):
                 self.assertFalse(web_search._is_public_url(url))
@@ -94,7 +94,7 @@ class UrlValidationTest(unittest.TestCase):
     def test_allows_public_http_and_https_on_default_ports(self):
         for url in ("http://example.com/", "https://example.com/", "https://example.com:443/"):
             with self.subTest(url=url), patch(
-                "core.web_search.socket.getaddrinfo",
+                "core.general.web_search.socket.getaddrinfo",
                 return_value=_dns("93.184.216.34"),
             ):
                 self.assertTrue(web_search._is_public_url(url))
@@ -117,7 +117,7 @@ class RedirectTest(unittest.IsolatedAsyncioTestCase):
                 url="https://example.com/",
             ),
         ])
-        with patch("core.web_search.socket.getaddrinfo", side_effect=self._resolver):
+        with patch("core.general.web_search.socket.getaddrinfo", side_effect=self._resolver):
             with self.assertRaises(web_search.WebSearchError):
                 await web_search._fetch_html(session, "https://example.com/")
         self.assertEqual(len(session.requested), 1)
@@ -137,7 +137,7 @@ class RedirectTest(unittest.IsolatedAsyncioTestCase):
                 body=b"<html><body>ok</body></html>",
             ),
         ])
-        with patch("core.web_search.socket.getaddrinfo", side_effect=self._resolver):
+        with patch("core.general.web_search.socket.getaddrinfo", side_effect=self._resolver):
             final_url, html = await web_search._fetch_html(session, "https://example.com/")
         self.assertEqual(final_url, "https://example.com/next")
         self.assertIn("ok", html)
@@ -155,7 +155,7 @@ class RedirectTest(unittest.IsolatedAsyncioTestCase):
                 content_length=web_search.MAX_BODY_BYTES + 1,
             ),
         ])
-        with patch("core.web_search.socket.getaddrinfo", side_effect=self._resolver):
+        with patch("core.general.web_search.socket.getaddrinfo", side_effect=self._resolver):
             with self.assertRaises(web_search.WebSearchError):
                 await web_search._fetch_html(session, "https://example.com/")
     async def test_partial_chunks_are_read_to_eof(self):
@@ -168,7 +168,7 @@ class RedirectTest(unittest.IsolatedAsyncioTestCase):
                 content_length=None,
             ),
         ])
-        with patch("core.web_search.socket.getaddrinfo", side_effect=self._resolver):
+        with patch("core.general.web_search.socket.getaddrinfo", side_effect=self._resolver):
             final_url, html = await web_search._fetch_html(session, "https://example.com/")
         self.assertEqual(final_url, "https://example.com/")
         self.assertEqual(html, "<html><body>ok</body></html>")
@@ -184,7 +184,7 @@ class RedirectTest(unittest.IsolatedAsyncioTestCase):
                 content_length=None,
             ),
         ])
-        with patch("core.web_search.socket.getaddrinfo", side_effect=self._resolver):
+        with patch("core.general.web_search.socket.getaddrinfo", side_effect=self._resolver):
             with self.assertRaises(web_search.WebSearchError):
                 await web_search._fetch_html(session, "https://example.com/")
 

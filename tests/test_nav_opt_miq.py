@@ -6,7 +6,7 @@ import unittest
 class MiqPurificationTest(unittest.TestCase):
     def test_miq_genre_absorbed_and_help_action_gone(self):
         from cogs.general import GENERAL_ACTIONS, GENERAL_GENRES
-        from core import action_registry
+        from core.general import action_registry
 
         self.assertNotIn("miq", GENERAL_GENRES)
         self.assertNotIn("miq", GENERAL_ACTIONS)

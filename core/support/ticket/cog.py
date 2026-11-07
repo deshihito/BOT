@@ -11,8 +11,8 @@ from typing import Any
 import discord
 from discord.ext import commands
 
-from core import guild_settings
-from core.panel_v2 import as_panel_v2, edit_panel_v2
+from core.support import guild_settings
+from core.support.panel_v2 import as_panel_v2, edit_panel_v2
 
 logger = logging.getLogger(__name__)
 
