@@ -7,7 +7,7 @@ DM を送るものだった。AGO はグローバルBotなので同意モデル�
 
 このモジュールが持つのは購読状態（ユーザー単位・永続化）と、
 送信対象の判定、レポート文の組み立てまで。実際の DM 送信と
-ステータス集約は cogs/daily_report.py が担う。
+ステータス集約は daily_report の Cog（入口は cogs/support.py）が担う。
 
 保存は core/game/game/prison.py と同じ流儀: 専用 JSON（既定 data/daily_report.json、
 環境変数 DAILY_REPORT_DATA_PATH で変更可）にメモリ主体＋バッチ
@@ -31,7 +31,7 @@ from core.game.game.prison import format_remaining
 logger = logging.getLogger(__name__)
 
 #: 日報を送る時刻（JST の時）。この時刻を過ぎてから、その日まだ
-#: 送っていない購読者へ送る（cogs/daily_report.py の毎分チェック）。
+#: 送っていない購読者へ送る（daily_report の毎分チェック）。
 SEND_HOUR_JST = 21
 
 FLUSH_EVERY_EVENTS = 20
