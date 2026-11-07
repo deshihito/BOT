@@ -1,6 +1,6 @@
 """Reaction roles: map emoji reactions on a message to roles."""
 from __future__ import annotations
-from core.emojis import BOOK, GAME
+from core.support.emojis import BOOK, GAME
 
 import logging
 import re
@@ -8,7 +8,7 @@ from typing import Any
 
 import discord
 
-from core.messages import ROLE_HIERARCHY_ALREADY_SET, ROLE_HIERARCHY_CANNOT_SET
+from core.support.messages import ROLE_HIERARCHY_ALREADY_SET, ROLE_HIERARCHY_CANNOT_SET
 from core.support.server_assist import Feature, can_assign_roles, get_settings, update_settings
 from core.support.server_assist.ui import AssistFeatureView, channel_label, notice_line
 

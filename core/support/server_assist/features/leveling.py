@@ -7,7 +7,7 @@ from typing import Any
 
 import discord
 
-from core.messages import ROLE_HIERARCHY_ALREADY_SET, ROLE_HIERARCHY_CANNOT_SET
+from core.support.messages import ROLE_HIERARCHY_ALREADY_SET, ROLE_HIERARCHY_CANNOT_SET
 from core.support.server_assist import Feature, can_assign_roles, get_settings, update_settings
 from core.support.server_assist.ui import AssistFeatureView, notice_line
 
