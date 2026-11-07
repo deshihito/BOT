@@ -12,7 +12,7 @@ import logging
 import discord
 from discord.ext import commands
 
-from core.help.command_meta import NATION_TUTORIAL
+from core.help.help.command_meta import NATION_TUTORIAL
 from core.support.storage import KVStore
 
 log = logging.getLogger(__name__)
