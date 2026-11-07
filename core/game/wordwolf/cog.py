@@ -269,21 +269,6 @@ class CustomWordWolf(commands.Cog):
 
         await session.finish_recruitment(lobby, lobby_msg)
 
-    async def begin_game(self, channel, wordlist: str):
-        session = self.sessions.get(channel.id)
-        if session is None:
-            session = WordWolfSession(self, channel, wordlist)
-            self.sessions[channel.id] = session
-
-        await asyncio.sleep(RECRUIT_SECONDS)
-
-        if len(session.players) < 3:
-            await channel.send(view=text_panel("", "人数不足（3人以上必要）のため中止します。"))
-            self._discard(session)
-            return
-
-        await session.begin()
-
     @commands.Cog.listener()
     async def on_message(self, message):
         if message.author.bot:

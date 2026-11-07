@@ -37,7 +37,6 @@ AITOOLS_RETRIES = max(1, int(os.getenv("AITOOLS_RETRIES", "1")))
 BLOCKED_ACTIONS = action_registry.AI_BLOCKED_IDS
 
 # 確認ビュー付きなら代理実行可（risk="confirm"）。実体は action_registry 側。
-CONFIRM_ACTIONS = action_registry.AI_CONFIRM_IDS
 
 
 class AIToolsDecisionError(RuntimeError):

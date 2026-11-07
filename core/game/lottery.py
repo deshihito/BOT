@@ -276,11 +276,6 @@ class LotteryStore(DirtyFlushMixin):
         with self._lock:
             return int(self._round_locked(now)["tickets"].get(str(user_id), 0))
 
-    def total_tickets(self, now: datetime | None = None) -> int:
-        now = now or datetime.now(JST)
-        with self._lock:
-            return sum(self._round_locked(now)["tickets"].values())
-
     def remaining_allowance(self, user_id: str, now: datetime | None = None) -> int:
         return max(0, MAX_TICKETS_PER_USER - self.tickets_of(user_id, now))
 

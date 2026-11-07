@@ -874,10 +874,6 @@ class ItemStore(DirtyFlushMixin):
             self._mark_dirty()
             return message
 
-    def rollback_use(self, user_id: str, item_id: str, now: datetime | None = None) -> None:
-        """use_item の巻き戻し（効果の期限は元に戻さず、アイテムだけ返す簡易版）。"""
-        self.add(user_id, item_id, 1, now=now)
-
     # ------------------------------------------------------------------ 宝箱
     def roll_box(self, rng: random.Random | None = None) -> dict[str, Any]:
         """宝箱1個の抽選結果 {"coins": int, "items": {item_id: count}}（状態は変えない）。"""

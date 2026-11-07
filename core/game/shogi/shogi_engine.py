@@ -3,7 +3,7 @@ Shogi Game Engine
 Supports basic rules including drops, promotion, nifu (two pawns), and simple check detection.
 """
 from dataclasses import dataclass, field
-from typing import List, Optional, Tuple, Dict, Set
+from typing import List, Optional, Tuple, Dict
 from copy import deepcopy
 import enum
 
@@ -101,14 +101,6 @@ class ShogiGame:
         # Gote pawns rank 2 (index 2)
         for f in range(9):
             self.board[2][f] = Piece(PieceType.PAWN, Color.GOTE)
-
-    def get_piece_moves(self, rank: int, file: int) -> List[Tuple[int, int]]:
-        """Return list of (to_rank, to_file) pseudo-legal moves for the piece
-        at the position. Ignores check; use legal_destinations for legal moves."""
-        piece = self.board[rank][file]
-        if not piece or piece.color != self.turn:
-            return []
-        return self._generate_moves(rank, file)
 
     def _generate_moves(self, rank: int, file: int) -> List[Tuple[int, int]]:
         piece = self.board[rank][file]

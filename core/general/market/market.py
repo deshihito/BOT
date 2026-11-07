@@ -484,20 +484,6 @@ class MarketStore(DirtyFlushMixin):
             self._mark_dirty()
         return {**quote, "burned": burn, "balance": self.token_balance(user_id)}
 
-    def rollback_buy(self, user_id: str, aga_amount: int, result: dict[str, Any]) -> None:
-        """コイン側の反映に失敗したときの巻き戻し（apply_buy の逆操作）。"""
-        with self._lock:
-            state = self._state
-            key = str(user_id)
-            state["balances"][key] = state["balances"].get(key, 0.0) - result["tokens"]
-            if state["balances"][key] <= 0:
-                state["balances"].pop(key, None)
-            state["pool_token"] += result["tokens"]
-            state["pool_aga"] -= aga_amount - result["burned"]
-            state["burned_aga"] -= result["burned"]
-            state["net_flow_aga"] -= result["net_aga"]
-            self._mark_dirty()
-
     def rollback_sell(self, user_id: str, token_amount: float, result: dict[str, Any]) -> None:
         token_amount = quantize_tokens(token_amount)
         with self._lock:

@@ -67,13 +67,6 @@ class WireCutGame:
     def is_cut(self, user_id: int, pos: int) -> bool:
         return (user_id, pos) in self.cut
 
-    def uncut_positions(self, user_id: int) -> list[int]:
-        return [i for i in range(len(self.racks[user_id])) if not self.is_cut(user_id, i)]
-
-    def holds_number(self, user_id: int, number: int) -> bool:
-        return any(self.racks[user_id][i] == number and not self.is_cut(user_id, i)
-                   for i in range(len(self.racks[user_id])))
-
     def remaining_numbers(self) -> int:
         total = 0
         for uid in self.players:

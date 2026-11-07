@@ -120,13 +120,6 @@ def guide_fields(role: str) -> list[tuple[str, str]]:
     ]
 
 
-def add_guide(embed: discord.Embed, role: str) -> discord.Embed:
-    """既存の役職通知の埋め込みに、初心者ガイドを足す。"""
-    for name, value in guide_fields(role):
-        embed.add_field(name=f"🔰 {name}", value=value[:1024], inline=name == "陣営")
-    return embed
-
-
 def guide_text(role: str) -> str:
     """役職ガイドを V2 パネル用のテキスト（1 行 1 項目）で返す。"""
     return "\n".join(f"🔰 {name}: {value[:1024]}" for name, value in guide_fields(role))

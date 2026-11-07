@@ -36,10 +36,6 @@ PATTERNS = {
 SIZES = ("5x5", "8x8")
 
 
-def size_of(key: str) -> int:
-    return int(key.split("x")[0])
-
-
 def clues_for(line) -> list:
     """1 行（'0'/'1' の列）から連続する 1 の長さのリストを作る。"""
     clues, run = [], 0
