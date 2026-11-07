@@ -23,30 +23,12 @@ from .exp_board import (
 )
 from core.support import emojis
 from core.general.user_names import cached_display_name, resolve_display_names
+from core.leaderboard_image import fetch_avatar_bytes as _fetch_avatar_bytes
 
 logger = logging.getLogger(__name__)
 
 BOARD_FILENAME = "exp_board.png"
 CARD_FILENAME = "exp_card.png"
-
-
-async def _fetch_avatar_bytes(bot, user_ids) -> dict:
-    """表示名解決と同じ方針でアバター画像を取得する（失敗は None=代替表示）。"""
-    result: dict[int, bytes | None] = {}
-    if bot is None:
-        return {uid: None for uid in user_ids}
-    for uid in user_ids:
-        data = None
-        try:
-            user = bot.get_user(uid)
-            if user is None and hasattr(bot, "fetch_user"):
-                user = await bot.fetch_user(uid)
-            if user is not None:
-                data = await user.display_avatar.replace(size=128, format="png").read()
-        except Exception:
-            data = None
-        result[uid] = data
-    return result
 
 
 class ExpStatusView(discord.ui.View):

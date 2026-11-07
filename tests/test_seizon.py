@@ -339,22 +339,37 @@ class RankingAltitudeTests(unittest.IsolatedAsyncioTestCase):
         cog._fetch_all = AsyncMock(return_value=rows)
         replies = []
 
-        async def fake_reply(interaction, embed, ephemeral=False):
-            replies.append(embed)
+        async def fake_reply(interaction, embed, ephemeral=False, file=None):
+            replies.append((embed, file))
 
         cog._reply = fake_reply
+        # 画像へ渡る行データ（順位・値）を捕捉して従来表示と同一か確かめる
+        import core.game.seizon.cog as seizon_cog
+        captured = {}
+        real_render = seizon_cog.render_leaderboard_png
+
+        def spy_render(**kwargs):
+            captured.update(kwargs)
+            return real_render(**kwargs)
+
+        self.addCleanup(setattr, seizon_cog, "render_leaderboard_png", real_render)
+        seizon_cog.render_leaderboard_png = spy_render
         interaction = types.SimpleNamespace(
             guild=None,
             response=types.SimpleNamespace(defer=AsyncMock()),
         )
         await cog.ranking(interaction, "active")
-        embed = replies[0]
+        embed, file = replies[0]
         self.assertEqual(embed.title, "高度ランキング TOP5")
-        self.assertIn("120 m", embed.description)
-        self.assertIn("30 m", embed.description)
-        # VOICE の方が上位
-        self.assertLess(embed.description.index("120 m"), embed.description.index("30 m"))
-        self.assertNotIn("回", embed.description)
+        # 順位表は画像で出す（embed は添付を指し、ファイルが一緒に送られる）
+        self.assertEqual(embed.image.url, "attachment://fujo_leaderboard.png")
+        self.assertIsNotNone(file)
+        board_rows = captured["sections"][0][1]
+        values = [row.value for row in board_rows]
+        self.assertEqual(values, ["120 m", "30 m"])
+        # VOICE の方が上位、値は回数ではなく高度
+        self.assertEqual([row.user_id for row in board_rows], [7, 8])
+        self.assertNotIn("回", " ".join(values))
 
 
 class HourlyProfileTests(unittest.TestCase):

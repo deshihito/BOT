@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 from datetime import datetime, timedelta, timezone
+import io
 import logging
 
 import discord
@@ -11,6 +12,12 @@ from discord.ext import commands
 
 from core.support import guild_settings
 from core.general.user_names import resolve_display_names
+from core.leaderboard_image import (
+    BoardRow, fetch_avatar_bytes, render_leaderboard_png,
+)
+
+SOKUNUKE_BOARD_FILENAME = "sokunuke_leaderboard.png"
+SOKUNUKE_ACCENT = (234, 88, 12)
 
 logger = logging.getLogger(__name__)
 SECTION = "sokunuke_rta"
@@ -130,14 +137,40 @@ class SokuNukeRta(commands.Cog):
         settings = await self._get_settings(interaction.guild_id)
         records = list(settings.get("records") or [])
         if scope == "me":
+            # 自分の記録一覧は個人の履歴表示なので、従来どおりテキストで出す。
             records = [row for row in records if str(row.get("user_id")) == str(interaction.user.id)]
+            records.sort(key=lambda row: float(row.get("elapsed", 0)))
+            names = await resolve_display_names(
+                self.bot, [row["user_id"] for row in records[:10]])
+            lines = [f"**{i}.** {names.get(int(row['user_id']), '')} — **{_duration(row['elapsed'])}**" for i, row in enumerate(records[:10], 1)]
+            embed = discord.Embed(title="即抜けRTAランキング（自分）", description="\n".join(lines) if lines else "まだ記録がありません。", color=0xFFFFFF)
+            await interaction.followup.send(embed=embed, allowed_mentions=discord.AllowedMentions.none())
+            return
         records.sort(key=lambda row: float(row.get("elapsed", 0)))
         # 氏名はメンションではなく通常表記（サーバー外だと「不明のユーザー」になる）
         names = await resolve_display_names(
             self.bot, [row["user_id"] for row in records[:10]])
-        lines = [f"**{i}.** {names.get(int(row['user_id']), '')} — **{_duration(row['elapsed'])}**" for i, row in enumerate(records[:10], 1)]
-        embed = discord.Embed(title=f"即抜けRTAランキング（{'自分' if scope == 'me' else 'このサーバー'}）", description="\n".join(lines) if lines else "まだ記録がありません。", color=0xFFFFFF)
-        await interaction.followup.send(embed=embed, allowed_mentions=discord.AllowedMentions.none())
+        rows = [BoardRow(user_id=int(row["user_id"]),
+                         name=names.get(int(row["user_id"]), ""),
+                         value=_duration(row["elapsed"]))
+                for row in records[:10]]
+        if not rows:
+            embed = discord.Embed(title="即抜けRTAランキング（このサーバー）", description="まだ記録がありません。", color=0xFFFFFF)
+            await interaction.followup.send(embed=embed, allowed_mentions=discord.AllowedMentions.none())
+            return
+        avatars = await fetch_avatar_bytes(
+            self.bot, [row.user_id for row in rows])
+        png = await asyncio.to_thread(
+            render_leaderboard_png,
+            title="即抜けRTAランキング", sections=[(None, rows)],
+            accent=SOKUNUKE_ACCENT, subtitle="このサーバー", avatars=avatars,
+            cache_namespace="sokunuke-leaderboard")
+        embed = discord.Embed(title="即抜けRTAランキング（このサーバー）", color=0xFFFFFF)
+        embed.set_image(url=f"attachment://{SOKUNUKE_BOARD_FILENAME}")
+        await interaction.followup.send(
+            embed=embed,
+            file=discord.File(io.BytesIO(png), filename=SOKUNUKE_BOARD_FILENAME),
+            allowed_mentions=discord.AllowedMentions.none())
 
     async def sokunuke_command(self, interaction: discord.Interaction, action: app_commands.Choice[str]):
         if interaction.guild_id is None:

@@ -57,7 +57,7 @@ class GameRankingVisibilityTest(unittest.IsolatedAsyncioTestCase):
         view = GameDetailView(types.SimpleNamespace(), "ngword")
         interaction, sent = fake_interaction()
         embed = discord.Embed(title="ranking")
-        with patch("core.game.game.cog.ranking_embed", new=AsyncMock(return_value=embed)):
+        with patch("core.game.game.cog.ranking_board", new=AsyncMock(return_value=(embed, None))):
             button = find_button(view, custom_id="panel:game:ranking")
             await button.callback(interaction)
         self.assertIs(sent.get("embed"), embed)

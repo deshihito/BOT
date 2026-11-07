@@ -36,6 +36,24 @@ from core.game.seizon.analysis import (
     render_hourly_chart,
 )
 from core.general.user_names import cached_display_name
+from core.leaderboard_image import (
+    BoardRow, fetch_avatar_bytes, render_leaderboard_png,
+)
+
+FUJO_BOARD_FILENAME = "fujo_leaderboard.png"
+ALTITUDE_ACCENT = (22, 163, 74)
+FOSSIL_ACCENT = (100, 116, 139)
+
+
+def _fossil_age(dt: datetime, now: datetime) -> str:
+    """最終検知からの経過を「N日前」等にする（化石ランキングの画像用）。"""
+    seconds = max(0, int((now - dt).total_seconds()))
+    if seconds < 3600:
+        return f"{max(1, seconds // 60)}分前"
+    if seconds < 86400:
+        return f"{seconds // 3600}時間前"
+    return f"{seconds // 86400}日前"
+
 
 log = logging.getLogger(__name__)
 
@@ -420,17 +438,16 @@ class FujoSurvival(commands.Cog):
         embed.set_footer(text=FOOTER)
         return embed
 
-    async def _reply(self, interaction: discord.Interaction, embed: discord.Embed, ephemeral: bool = False, view: discord.ui.View | None = None):
-        if view is None:
-            if interaction.response.is_done():
-                await interaction.followup.send(embed=embed, ephemeral=ephemeral)
-            else:
-                await interaction.response.send_message(embed=embed, ephemeral=ephemeral)
-            return
+    async def _reply(self, interaction: discord.Interaction, embed: discord.Embed, ephemeral: bool = False, view: discord.ui.View | None = None, file: discord.File | None = None):
+        extra = {}
+        if view is not None:
+            extra["view"] = view
+        if file is not None:
+            extra["file"] = file
         if interaction.response.is_done():
-            await interaction.followup.send(embed=embed, ephemeral=ephemeral, view=view)
+            await interaction.followup.send(embed=embed, ephemeral=ephemeral, **extra)
         else:
-            await interaction.response.send_message(embed=embed, ephemeral=ephemeral, view=view)
+            await interaction.response.send_message(embed=embed, ephemeral=ephemeral, **extra)
 
     async def _reply_view(self, interaction: discord.Interaction, view: discord.ui.LayoutView, file: discord.File):
         """Components V2 のレイアウト（グラフ画像つき）を公開で返す。"""
@@ -760,12 +777,33 @@ class FujoSurvival(commands.Cog):
             await self._reply(interaction, self.create_simple_embed("登録者なし", "このサーバーに追跡登録している人がいません。", 0x95a5a6))
             return
 
+        file = None
         if mode == "fossil":
             latest = await asyncio.gather(*(self._latest_activity(uid) for uid in ids))
             pairs = [(uid, _parse_ts(row["detected_at"])) for uid, row in zip(ids, latest) if row]
             pairs.sort(key=lambda p: p[1])
-            lines = [f"{i}. **{self._name(uid)}**: 最終検知 <t:{int(dt.timestamp())}:R>" for i, (uid, dt) in enumerate(pairs[:5], 1)]
-            embed = discord.Embed(title="化石ランキング TOP5", color=0x34495e, description="\n".join(lines) or "まだ記録がありません。")
+            if pairs:
+                now = datetime.now(timezone.utc)
+                board_rows = [
+                    BoardRow(
+                        user_id=int(uid), name=self._name(uid),
+                        value=(dt.astimezone(JST).strftime("%Y/%m/%d %H:%M")
+                               if dt.tzinfo is not None
+                               else dt.strftime("%Y/%m/%d %H:%M")),
+                        sub=_fossil_age(dt, now))
+                    for uid, dt in pairs[:5]]
+                avatars = await fetch_avatar_bytes(
+                    self.bot, [row.user_id for row in board_rows])
+                png = await asyncio.to_thread(
+                    render_leaderboard_png,
+                    title="化石ランキング", subtitle="TOP5",
+                    sections=[(None, board_rows)], accent=FOSSIL_ACCENT,
+                    avatars=avatars, cache_namespace="fujo-fossil")
+                embed = discord.Embed(title="化石ランキング TOP5", color=0x34495e)
+                embed.set_image(url=f"attachment://{FUJO_BOARD_FILENAME}")
+                file = discord.File(io.BytesIO(png), filename=FUJO_BOARD_FILENAME)
+            else:
+                embed = discord.Embed(title="化石ランキング TOP5", color=0x34495e, description="まだ記録がありません。")
         else:
             now = datetime.now(timezone.utc)
             rows = await self._fetch_all(
@@ -778,13 +816,27 @@ class FujoSurvival(commands.Cog):
                 by_user.setdefault(int(r["user_id"]), []).append(r)
             scored = [(uid, compute_altitude(recs, now)) for uid, recs in by_user.items()]
             scored.sort(key=lambda x: x[1], reverse=True)
-            lines = []
-            for i, (uid, alt) in enumerate(scored[:5], 1):
-                band_label, _ = altitude_band(alt)
-                lines.append(f"{i}. **{self._name(uid)}**: {alt:,.0f} m（{band_label}）")
-            embed = discord.Embed(title="高度ランキング TOP5", color=0x2ecc71, description="\n".join(lines) or "まだ誰も離陸していません。")
+            if scored:
+                board_rows = []
+                for uid, alt in scored[:5]:
+                    band_label, _ = altitude_band(alt)
+                    board_rows.append(BoardRow(
+                        user_id=int(uid), name=self._name(uid),
+                        value=f"{alt:,.0f} m", sub=band_label))
+                avatars = await fetch_avatar_bytes(
+                    self.bot, [row.user_id for row in board_rows])
+                png = await asyncio.to_thread(
+                    render_leaderboard_png,
+                    title="高度ランキング", subtitle="TOP5",
+                    sections=[(None, board_rows)], accent=ALTITUDE_ACCENT,
+                    avatars=avatars, cache_namespace="fujo-altitude")
+                embed = discord.Embed(title="高度ランキング TOP5", color=0x2ecc71)
+                embed.set_image(url=f"attachment://{FUJO_BOARD_FILENAME}")
+                file = discord.File(io.BytesIO(png), filename=FUJO_BOARD_FILENAME)
+            else:
+                embed = discord.Embed(title="高度ランキング TOP5", color=0x2ecc71, description="まだ誰も離陸していません。")
         embed.set_footer(text=FOOTER)
-        await self._reply(interaction, embed)
+        await self._reply(interaction, embed, file=file)
 
     async def altitude_top(self, guild) -> tuple[int, float] | None:
         """現在の高度1位を (user_id, 高度m) で返す（活動ボード用）。
