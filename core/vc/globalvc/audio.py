@@ -27,7 +27,8 @@ except Exception:  # numpy が無い環境では純Pythonで合成する
 
 from core.vc.globalvc.common import *  # noqa: F401,F403 - shared constants/helpers
 from core.vc.globalvc.common import FRAME_BYTE_SIZE, FRAME_SIZE, JITTER_PREFILL_FRAMES, MAX_BUFFER_FRAMES, TAIL_FLUSH_SECONDS, TRACK_IDLE_SECONDS  # noqa: F401
-from core.vc.globalvc.rooms import GLOBAL_ROOMS  # noqa: F401
+from core.vc.globalvc.rooms import GLOBAL_ROOMS, ROOMS  # noqa: F401
+from core.vc.globalvc.common import GLOBAL_MUSIC_SOURCE_NAMES  # noqa: F401
 
 logger = logging.getLogger("cogs.sio_globalVC")
 
@@ -262,3 +263,93 @@ def _request_playback(vc) -> None:
 
 class _JoinRefused(Exception):
     """満員・重複参加など、利用者に理由をそのまま伝えられる参加拒否。"""
+
+
+# ---------------------------------------------------------------------------
+# bot 自身が再生する音声 (読み上げ・音楽) をルームの他サーバーへ中継する
+# ---------------------------------------------------------------------------
+
+def _room_name_of(vc) -> Optional[str]:
+    for room_name, clients in GLOBAL_ROOMS.items():
+        if vc in clients:
+            return room_name
+    return None
+
+
+def _relay_pcm(origin_vc, name: str, pcm: bytes) -> None:
+    """origin_vc で再生された PCM を、同じルームの他サーバーの再生ソースへ流す。
+
+    - 音楽 (GLOBAL_MUSIC_SOURCE_NAMES): ルームのオーナーのサーバーで流れているものだけ中継する。
+    - それ以外 (読み上げなど): どのサーバーのものでも自由に中継する。
+    音声は「サーバー × 種類」ごとの別トラックとして積むので、人の声・読み上げ・音楽は互いに邪魔せず重なって流れる。
+    """
+    if not pcm or getattr(origin_vc, "global_source", None) is None:
+        return  # グローバルVCに参加していないサーバーでは何もしない
+    room_name = _room_name_of(origin_vc)
+    if room_name is None:
+        return
+    guild = getattr(origin_vc, "guild", None)
+    guild_id = getattr(guild, "id", 0)
+    if name in GLOBAL_MUSIC_SOURCE_NAMES:
+        room = ROOMS.get(room_name)
+        if room is None or guild_id != room.owner_guild_id:
+            return
+    track_id = f"tee:{guild_id}:{name}"
+    for vc in list(GLOBAL_ROOMS.get(room_name, ())):
+        if vc is origin_vc or not vc.is_connected():
+            continue
+        source = getattr(vc, "global_source", None)
+        if source is None:
+            continue
+        source.write_pcm(pcm, track_id)
+        if not vc.is_playing():
+            _request_playback(vc)
+
+
+class TeeSource(discord.AudioSource):
+    """元の Source をそのまま再生しつつ、読み出した音声のコピーをルームの他サーバーへ流すラッパー。"""
+
+    _OWN = frozenset({"inner", "vc", "name", "_decoder"})
+
+    def __init__(self, inner: discord.AudioSource, vc, name: str):
+        object.__setattr__(self, "inner", inner)
+        object.__setattr__(self, "vc", vc)
+        object.__setattr__(self, "name", name)
+        object.__setattr__(self, "_decoder", None)
+
+    def read(self) -> bytes:
+        data = self.inner.read()
+        if data:
+            try:
+                pcm = data
+                if self.inner.is_opus():
+                    if self._decoder is None:
+                        object.__setattr__(self, "_decoder", discord.opus.Decoder())
+                    pcm = self._decoder.decode(data, fec=False)
+                _relay_pcm(self.vc, self.name, pcm)
+            except Exception:
+                logger.debug("グローバルVC: 再生音声の中継に失敗しました (name=%s)", self.name, exc_info=True)
+        return data
+
+    def is_opus(self) -> bool:
+        return self.inner.is_opus()
+
+    def cleanup(self) -> None:
+        self.inner.cleanup()
+
+    # volume など、元の Source の属性をそのまま読み書きできるようにする
+    def __getattr__(self, attr):
+        return getattr(self.inner, attr)
+
+    def __setattr__(self, attr, value):
+        if attr in self._OWN:
+            object.__setattr__(self, attr, value)
+        else:
+            setattr(self.inner, attr, value)
+
+
+def wrap_for_global(vc, name: str, source):
+    """voice_media.add_audio_source から呼ぶ。グローバルVC自身の Source 以外を TeeSource で包む。"""
+    if name == "gvc" or isinstance(source, TeeSource):
+        return source  # gvc は他サーバーから受けた音なので、再中継するとループする
+    return TeeSource(source, vc, name)
