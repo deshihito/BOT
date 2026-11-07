@@ -1,10 +1,13 @@
 import discord
 from core.game.game import game_panels, game_restore
+from core.game.game.board_image import render_cached
 from core.game.game.game_v2 import GamePanelView, LobbyView, text_panel
+from core.game.uno import board as uno_board
 from discord.ext import commands
 
 from core.game.game import autoplay, party_ranking
 party_ranking.register("uno")
+import io
 import random
 import asyncio
 import logging
@@ -260,14 +263,21 @@ class CardSelect(discord.ui.Select):
                 self.game.pending_draw_count += 4
                 self.game.active_plus_type = "Wild+4"
 
+            board_file = self.cog._board_file(interaction.channel, self.game)
             view = WildColorView(self.game, selected_card, current_player_id, self.cog, action_msg, uno_penalty_check,
-                                 body=f"<@{current_player_id}> さん、次の色を選択してください！（{int(COLOR_TIMEOUT)}秒以内）")
+                                 body=f"<@{current_player_id}> さん、次の色を選択してください！（{int(COLOR_TIMEOUT)}秒以内）",
+                                 board_file=board_file)
             if self.game.active_view is not None:
                 self.game.active_view.stop()
             self.game.active_view = view
-            self.game.active_panel_message = await game_panels.replace(interaction.channel, "party",
-                view=view
-            )
+            if board_file is not None:
+                self.game.active_panel_message = await game_panels.replace(interaction.channel, "party",
+                    view=view, file=board_file
+                )
+            else:
+                self.game.active_panel_message = await game_panels.replace(interaction.channel, "party",
+                    view=view
+                )
             # 色選択待ちもチェックポイントとして保存する（復旧時は色選択から再開）
             self.cog._save_snapshot(self.game, interaction.channel, awaiting_color={
                 "player_id": current_player_id,
@@ -323,7 +333,7 @@ class WildColorView(GamePanelView):
     """ワイルドカード使用時に色を選ぶパネル（V2）。ボタンは色名の属性。"""
 
     def __init__(self, game: UnoGame, card_type: str, player_id: int, cog, action_msg: str, uno_penalty: bool,
-                 body: str = ""):
+                 body: str = "", board_file=None):
         super().__init__("", body, timeout=COLOR_TIMEOUT)
         self.chosen = False
         self.game = game
@@ -332,6 +342,10 @@ class WildColorView(GamePanelView):
         self.cog = cog
         self.action_msg = action_msg
         self.uno_penalty = uno_penalty
+        if board_file is not None:
+            gallery = discord.ui.MediaGallery()
+            gallery.add_item(media=f"attachment://{uno_board.BOARD_FILENAME}")
+            self.add_extra(gallery)
         self.red = discord.ui.Button(label="赤", style=discord.ButtonStyle.danger)
         self.red.callback = self._red
         self.blue = discord.ui.Button(label="青", style=discord.ButtonStyle.primary)
@@ -402,11 +416,15 @@ class GameControlView(GamePanelView):
     セレクトは self.selects、手札確認ボタンは self.check_hand。
     """
 
-    def __init__(self, game: UnoGame, playable_cards: list, cog, body: str = ""):
+    def __init__(self, game: UnoGame, playable_cards: list, cog, body: str = "", board_file=None):
         super().__init__("[-] UNO プレイ中", body, timeout=TURN_TIMEOUT)
         self.game = game
         self.cog = cog
         self.player_id = game.players[game.current_player_idx]
+        if board_file is not None:
+            gallery = discord.ui.MediaGallery()
+            gallery.add_item(media=f"attachment://{uno_board.BOARD_FILENAME}")
+            self.add_extra(gallery)
 
         # 同じカードは1つにまとめ、25件を超える場合はメニューを分ける（1つ目のメニューに「引く」を入れる）
         unique = list(dict.fromkeys(playable_cards))
@@ -458,6 +476,11 @@ class GameControlView(GamePanelView):
             return await interaction.response.send_message("あなたはゲームに参加していないか、手札がありません。", ephemeral=True)
 
         hand_text = " / ".join([f"[{card}]" for card in user_hand])
+        hand_file = self.cog._hand_file(self.game, interaction.user.id)
+        if hand_file is not None:
+            return await interaction.response.send_message(
+                f"あなたの現在の手札 ({len(user_hand)}枚):\n{hand_text}",
+                ephemeral=True, file=hand_file)
         await interaction.response.send_message(f"あなたの現在の手札 ({len(user_hand)}枚):\n{hand_text}", ephemeral=True)
 
 
@@ -672,6 +695,66 @@ class Uno(commands.Cog):
         start_msg = f"[!] UNOゲームがスタートしました！\n最初の場カードは [{first_card}] です。"
         await self.send_game_panel(channel, game, info_msg=start_msg)
 
+    # ------------------------------------------------------------------
+    # 盤面・手札の画像化 (core/game/uno/board.py)
+    # ------------------------------------------------------------------
+    def _player_name(self, channel, player_id) -> str:
+        guild = getattr(channel, "guild", None) if channel is not None else None
+        member = None
+        if guild is not None:
+            get_member = getattr(guild, "get_member", None)
+            if callable(get_member):
+                try:
+                    member = get_member(player_id)
+                except Exception:
+                    member = None
+        return getattr(member, "display_name", None) or f"プレイヤー{player_id}"
+
+    def _board_file(self, channel, game: UnoGame):
+        """盤面画像の添付ファイルを返す。生成に失敗したら None (テキストのみで続行)。"""
+        try:
+            top = game.discard_pile[-1]
+            if game.current_color:
+                active = game.current_color
+            elif "の" in top:
+                active = top.split("の")[0]
+            else:
+                active = None
+                for card in reversed(game.discard_pile[:-1]):
+                    if "の" in card:
+                        active = card.split("の")[0]
+                        break
+            players = [
+                {"name": self._player_name(channel, pid), "count": len(game.hands.get(pid, []))}
+                for pid in game.players
+            ]
+            key = (
+                "uno", top, active,
+                tuple(p["name"] for p in players), tuple(p["count"] for p in players),
+                game.current_player_idx, game.direction,
+                len(game.deck), game.pending_draw_count,
+            )
+            data = render_cached(key, lambda: uno_board.render_board(
+                top_card=top, active_color=active, players=players,
+                current_idx=game.current_player_idx, direction=game.direction,
+                deck_count=len(game.deck), pending_draw=game.pending_draw_count,
+            ))
+            return discord.File(io.BytesIO(data), filename=uno_board.BOARD_FILENAME)
+        except Exception:
+            logger.exception("UNO: 盤面画像の生成に失敗しました")
+            return None
+
+    def _hand_file(self, game: UnoGame, player_id):
+        """手札画像の添付ファイルを返す。生成に失敗したら None。"""
+        try:
+            hand = list(game.hands.get(player_id, []))
+            playable = set(game.get_playable_cards(player_id))
+            data = uno_board.render_hand(hand, playable)
+            return discord.File(io.BytesIO(data), filename=uno_board.HAND_FILENAME)
+        except Exception:
+            logger.exception("UNO: 手札画像の生成に失敗しました")
+            return None
+
     async def send_game_panel(self, channel, game: UnoGame, info_msg: str = ""):
         """ターン進行用の総合ゲームパネルを送信する（旧パネルは引き継ぎ削除）"""
         current_player_id = game.players[game.current_player_idx]
@@ -715,9 +798,13 @@ class Uno(commands.Cog):
 
         if game.active_view is not None:
             game.active_view.stop()
-        view = GameControlView(game, playable_cards, self, body="\n".join(body))
+        board_file = self._board_file(channel, game)
+        view = GameControlView(game, playable_cards, self, body="\n".join(body), board_file=board_file)
         game.active_view = view
-        game.active_panel_message = await game_panels.replace(channel, "party", view=view)
+        if board_file is not None:
+            game.active_panel_message = await game_panels.replace(channel, "party", view=view, file=board_file)
+        else:
+            game.active_panel_message = await game_panels.replace(channel, "party", view=view)
         # 手番が確定した時点をチェックポイントとして保存する（復旧はここから再開する）
         self._save_snapshot(game, channel)
 
@@ -798,13 +885,19 @@ class Uno(commands.Cog):
         self.games[channel_id] = game
         awaiting = state.get("awaiting_color")
         if isinstance(awaiting, dict) and awaiting.get("player_id") in players:
+            board_file = self._board_file(channel, game)
             view = WildColorView(game, awaiting.get("card_type"), awaiting["player_id"],
                                  self, awaiting.get("action_msg") or "",
                                  bool(awaiting.get("uno_penalty")),
-                                 body=f"<@{awaiting['player_id']}> さん、次の色を選択してください！（{int(COLOR_TIMEOUT)}秒以内）")
+                                 body=f"<@{awaiting['player_id']}> さん、次の色を選択してください！（{int(COLOR_TIMEOUT)}秒以内）",
+                                 board_file=board_file)
             game.active_view = view
-            game.active_panel_message = await game_panels.replace(
-                channel, "party", view=view)
+            if board_file is not None:
+                game.active_panel_message = await game_panels.replace(
+                    channel, "party", view=view, file=board_file)
+            else:
+                game.active_panel_message = await game_panels.replace(
+                    channel, "party", view=view)
         else:
             await self.send_game_panel(channel, game,
                                        info_msg="再起動から復旧しました。対局を続けます。")
