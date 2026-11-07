@@ -334,7 +334,8 @@ class WalletCog(commands.Cog):
 
     async def leaderboard(self, interaction: discord.Interaction,
                           category: app_commands.Choice[str] | None = None,
-                          scope: app_commands.Choice[str] | None = None):
+                          scope: app_commands.Choice[str] | None = None,
+                          *, slowest: bool = False):
         await interaction.response.defer()
         selected = category.value if category else "coin"
         if selected == "asset":
@@ -345,7 +346,7 @@ class WalletCog(commands.Cog):
             if rta is None:
                 await interaction.followup.send("RTAランキング機能は現在利用できません。", ephemeral=True)
                 return
-            await rta.leaderboard(interaction, selected, scope.value if scope else "local")
+            await rta.leaderboard(interaction, selected, scope.value if scope else "local", slowest=slowest)
             return
         if selected == "sokunuke":
             rta = self.bot.get_cog("SokuNukeRta")

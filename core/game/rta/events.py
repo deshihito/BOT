@@ -128,6 +128,17 @@ class EventsMixin:
             "p_guild_id": gid, "p_user_id": record_user_id, "p_event_type": kind,
             "p_elapsed_ms": elapsed, "p_completed_at": completed_at,
         }).execute())
+        try:
+            await self._call(lambda: self.db.rpc("record_bump_rta_worst", {
+                "p_guild_id": gid, "p_user_id": record_user_id, "p_event_type": kind,
+                "p_elapsed_ms": elapsed, "p_completed_at": completed_at,
+            }).execute())
+        except Exception:
+            # 最遅記録は付随情報。SQL マイグレーション未適用などで失敗しても
+            # 最速記録と pending の消化は通常どおり進める。
+            logger.warning(
+                "bump_rta worst record failed: guild=%s user=%s type=%s",
+                gid, record_user_id, kind, exc_info=True)
         await self._call(lambda: self.db.table("bump_rta_pending").delete().eq("guild_id", gid).eq(
             "event_type", kind).execute())
         embed = discord.Embed(

@@ -118,6 +118,8 @@ GENERAL_ACTIONS = {
         ("総合資産ランキング", "asset_leaderboard"),
         ("bump RTAランキング", "bump_leaderboard"),
         ("up RTAランキング", "up_leaderboard"),
+        ("bump 最遅ランキング", "bump_slowest"),
+        ("up 最遅ランキング", "up_slowest"),
     ],
     "survival": [
         ("追跡登録・解除", "fujo_register"),

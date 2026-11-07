@@ -23,7 +23,7 @@ TABLES = frozenset({
     "bot_kv", "users", "transaction_history",
     "dungeon_maps", "dungeon_players", "dungeon_bases",
     "nation_guilds", "nation_tiles", "nation_players",
-    "bump_rta_settings", "bump_rta_records", "bump_rta_events",
+    "bump_rta_settings", "bump_rta_records", "bump_rta_worst_records", "bump_rta_events",
     "bump_rta_pending", "bump_rta_reminders", "jinrou_ratings",
     "fujo_users", "fujo_activities", "playlists", "user_music_playlists",
     "party_game_ranking",
@@ -36,7 +36,9 @@ RPC_ARGUMENTS = {
     "nation_found": frozenset({"p_guild_id", "p_user_id"}),
     "nation_adjust": frozenset({"p_user_id", "p_coins_delta", "p_hunger_delta"}),
     "record_bump_rta_best": frozenset({"p_guild_id", "p_user_id", "p_event_type", "p_elapsed_ms", "p_completed_at"}),
+    "record_bump_rta_worst": frozenset({"p_guild_id", "p_user_id", "p_event_type", "p_elapsed_ms", "p_completed_at"}),
     "get_bump_rta_global_ranking": frozenset({"p_event_type", "p_limit"}),
+    "get_bump_rta_global_slowest_ranking": frozenset({"p_event_type", "p_limit"}),
     "party_game_record_win": frozenset({"p_guild_id", "p_user_id", "p_game"}),
 }
 RPC_SCALAR_RESULTS = frozenset({"transfer_coins", "dungeon_apply_coins", "nation_adjust", "party_game_record_win"})
