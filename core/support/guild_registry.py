@@ -19,6 +19,34 @@ from core.support.storage import KVStore
 logger = logging.getLogger(__name__)
 
 NAMESPACE = "guild_registry"
+HISTORY_NAMESPACE = "guild_history"
+
+
+def _now_iso() -> str:
+    return datetime.datetime.now(datetime.timezone.utc).isoformat()
+
+
+def count_recent_joins(events: Any, *, now: datetime.datetime, days: int) -> int:
+    """履歴イベントの一覧から、直近 days 日以内の joined 件数を数える（純粋関数）。"""
+    if not isinstance(events, (list, tuple)):
+        return 0
+    cutoff = now - datetime.timedelta(days=days)
+    total = 0
+    for event in events:
+        if not isinstance(event, dict) or event.get("event") != "joined":
+            continue
+        at = event.get("at")
+        if not isinstance(at, str):
+            continue
+        try:
+            when = datetime.datetime.fromisoformat(at)
+        except ValueError:
+            continue
+        if when.tzinfo is None:
+            when = when.replace(tzinfo=datetime.timezone.utc)
+        if when >= cutoff:
+            total += 1
+    return total
 
 
 def _guild_value(guild: Any) -> dict[str, Any]:
@@ -33,14 +61,46 @@ def _guild_value(guild: Any) -> dict[str, Any]:
 
 
 class GuildRegistry:
-    def __init__(self, kv: Optional[KVStore] = None):
+    def __init__(self, kv: Optional[KVStore] = None, history_kv: Optional[KVStore] = None):
         self.kv = kv or KVStore(NAMESPACE)
+        self.history_kv = history_kv or KVStore(HISTORY_NAMESPACE)
 
     async def record(self, guild: Any) -> None:
         try:
             await self.kv.set(str(int(guild.id)), _guild_value(guild), wait=False)
         except Exception:
             logger.exception("サーバー一覧への登録に失敗しました: guild=%s", getattr(guild, "id", "?"))
+
+    async def record_event(self, guild: Any, event: str) -> None:
+        """導入履歴にイベントを追記する（スナップショットとは別 namespace）。
+
+        履歴はこの機能のデプロイ時点から始まる。on_guild_remove でも消さない
+        （導入数と継続数の両方を見るため）。event は "joined" / "removed"。
+        """
+        if event not in ("joined", "removed"):
+            return
+        try:
+            at = _now_iso()
+            guild_id = str(int(guild.id))
+            value = _guild_value(guild)
+            key = f"{at}:{guild_id}:{event}"
+            await self.history_kv.set(key, {
+                "guild_id": guild_id,
+                "name": value["name"],
+                "member_count": value["member_count"],
+                "event": event,
+                "at": at,
+            }, wait=False)
+        except Exception:
+            logger.exception("導入履歴への記録に失敗しました: guild=%s event=%s", getattr(guild, "id", "?"), event)
+
+    async def load_history(self) -> list[dict[str, Any]]:
+        try:
+            rows = await self.history_kv.load_all()
+        except Exception:
+            logger.exception("導入履歴を読み込めませんでした")
+            return []
+        return [value for value in rows.values() if isinstance(value, dict)]
 
     async def remove(self, guild_id: int) -> None:
         try:

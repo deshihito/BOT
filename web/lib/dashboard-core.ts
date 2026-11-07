@@ -173,7 +173,7 @@ export function isSnowflake(value: string): boolean {
 
 export type FieldType =
   | "bool" | "channel" | "role" | "role_list" | "text" | "number" | "enum"
-  | "enum_number" | "text_list" | "preset";
+  | "enum_number" | "text_list" | "preset" | "id_list" | "rate_map" | "bot_rule_map";
 
 export type FieldSpec = {
   name: string;
@@ -190,6 +190,12 @@ export type FieldSpec = {
   options?: { value: string | number; label: string }[];
   /** type="preset" のとき: プリセット名 → 実際に保存する複数フィールドの値 */
   presetValues?: Record<string, Record<string, unknown>>;
+  /** type="text_list" のとき: 1件あたりの最大文字数（既定100） */
+  itemMaxLength?: number;
+  /** type="text_list" のとき: 各要素が満たすべき正規表現（文字列） */
+  itemPattern?: string;
+  /** type="text_list" のとき: 保存時に黙って除く値（Bot側 normalize と同じ扱いのもの） */
+  excludeValues?: string[];
 };
 
 export type SectionGuard = {
@@ -208,6 +214,8 @@ export type SectionSpec = {
   description: string;
   fields: FieldSpec[];
   guards?: SectionGuard[];
+  /** true のとき: セクション全体が1つの対応表（bot_control 等）。単一フィールドの解析結果でセクションを置き換える */
+  mapSection?: boolean;
 };
 
 /** v1 で編集できるセクション（Bot 側の検証規則に合わせる）。 */
@@ -540,6 +548,55 @@ export const SETTING_SECTIONS: SectionSpec[] = [
       { flag: "enabled", needs: ["review_channel_id"], message: "応募フォームを有効にするには、レビュー先チャンネルが必要です" },
     ],
   },
+  {
+    section: "vc_auto_start",
+    label: "VC参加時の自動開始",
+    description: "誰かがボイスチャンネルに参加したとき、選んだ機能を自動で始めます。グローバルVCはルーム名が未設定だと開始されません。",
+    fields: [
+      { name: "tts", label: "読み上げ", type: "bool" },
+      { name: "transcribe", label: "文字起こし", type: "bool" },
+      { name: "music_panel", label: "ミュージックパネル", type: "bool" },
+      { name: "global", label: "グローバルVC", type: "bool" },
+      { name: "global_room", label: "グローバルVCのルーム名", type: "text", maxLength: 100, description: "グローバルVCを自動開始するにはルーム名が必要です" },
+      { name: "global_password", label: "グローバルVCのパスワード（任意）", type: "text", maxLength: 100 },
+    ],
+  },
+  {
+    section: "globalchat",
+    label: "グローバルチャット（荒らし対策）",
+    description: "NGワードとブロックの指定だけを編集します。参加チャンネルの登録・解除はDiscordの /support パネルで行ってください（チャンネル登録はWebでは扱いません）。",
+    fields: [
+      { name: "ng_words", label: "NGワード（1行に1つ、最大100件）", type: "text_list", maxItems: 100, itemMaxLength: 50, multiline: true },
+      { name: "blocked_users", label: "ブロックするユーザーID（1行に1つ、最大100件）", type: "id_list", maxItems: 100 },
+      { name: "blocked_guilds", label: "ブロックするサーバーID（1行に1つ、最大100件）", type: "id_list", maxItems: 100 },
+    ],
+  },
+  {
+    section: "command_control",
+    label: "BOT fixer（コマンド制限）",
+    description: "AGO BOTの機能をサーバー単位で制限します。設定用の機能（BOT fixer）自体は常に対象外で、サーバー管理者は制限の対象になりません。レート制限は1行に「アクションID 回数 期間（秒）」の形で書きます（例: general:money_panel 10 3600）。期間は60〜604800秒、回数は1〜1000です。",
+    fields: [
+      {
+        name: "mode", label: "制限モード", type: "enum", default: "off",
+        options: [
+          { value: "off", label: "制限なし" },
+          { value: "deny", label: "禁止リスト（下のアクションを使えない）" },
+          { value: "allow", label: "許可リストのみ（下のアクションだけ使える）" },
+        ],
+      },
+      { name: "actions", label: "対象アクションID（1行に1つ）", type: "text_list", maxItems: 300, itemPattern: "^[a-z0-9_]+:[a-z0-9_]+(:[a-z0-9_]+)?$", excludeValues: ["support:bot_fixer"], multiline: true, description: "アクションIDは general:money_panel のような形です。BOT fixer 自体は自動で除かれます" },
+      { name: "rates", label: "レート制限（1行に1件）", type: "rate_map", multiline: true, description: "空欄にするとレート制限なし。書式: アクションID 回数 期間（秒）" },
+    ],
+  },
+  {
+    section: "bot_control",
+    label: "BOT fixer（他ボット制限）",
+    description: "他のボットの発言を、許可したチャンネルだけに制限します。1行に「ボットID 許可チャンネルID（カンマ区切り） [回数 期間（秒）]」の形で書きます（例: 123456789012345678 234567890123456789,345678901234567890 20 3600）。許可チャンネルが1つも無い行は保存できません。AGO BOT 自身は対象にできません。",
+    fields: [
+      { name: "rules", label: "制限するボット（1行に1件、最大50件）", type: "bot_rule_map", multiline: true },
+    ],
+    mapSection: true,
+  },
 ];
 
 export function sectionSpec(section: string): SectionSpec | undefined {
@@ -549,6 +606,133 @@ export function sectionSpec(section: string): SectionSpec | undefined {
 export type SanitizeResult =
   | { ok: true; values: Record<string, unknown> }
   | { ok: false; errors: string[] };
+
+// BOT fixer のレート検証範囲（Bot側 core/support/command_control.py と
+// パネルのモーダル検証に一致させる: 回数 1〜1000、期間 60〜604800 秒）
+const RATE_MAX_COUNT = 1000;
+const RATE_MIN_WINDOW_SECONDS = 60;
+const RATE_MAX_WINDOW_SECONDS = 604800;
+const ACTION_ID_PATTERN = /^[a-z0-9_]+:[a-z0-9_]+(:[a-z0-9_]+)?$/;
+const COMMAND_CONTROL_SELF_ACTION = "support:bot_fixer";
+/** AGO BOT 自身のアプリケーションID（他ボット制限の対象にできない） */
+const OWN_BOT_ID = "1476636487784337428";
+const BOT_RULE_MAX_ENTRIES = 50;
+
+type ParseResult<T> = { ok: true; value: T } | { ok: false; errors: string[] };
+
+function parseRateParts(countRaw: string, windowRaw: string): { count: number; window_seconds: number } | null {
+  const count = Number(countRaw);
+  const window = Number(windowRaw);
+  if (!Number.isInteger(count) || !Number.isInteger(window)) return null;
+  if (count < 1 || count > RATE_MAX_COUNT) return null;
+  if (window < RATE_MIN_WINDOW_SECONDS || window > RATE_MAX_WINDOW_SECONDS) return null;
+  return { count, window_seconds: window };
+}
+
+/**
+ * レート制限の対応表を検証・変換する。
+ * 入力は「アクションID 回数 期間（秒）」を1行に1件書いた文字列、
+ * または既に {action: {count, window_seconds}} の形のオブジェクト。
+ * 空なら null（= レート制限なし）。BOT fixer 自体は Bot 側 normalize と同じく黙って除く。
+ */
+export function parseRateMap(raw: unknown): ParseResult<Record<string, { count: number; window_seconds: number }> | null> {
+  const result: Record<string, { count: number; window_seconds: number }> = {};
+  const errors: string[] = [];
+  if (typeof raw === "string") {
+    for (const line of raw.split(/\n+/)) {
+      const trimmed = line.trim();
+      if (!trimmed) continue;
+      const parts = trimmed.split(/[\s,]+/).filter(Boolean);
+      if (parts.length !== 3) { errors.push(`書式が正しくありません（アクションID 回数 期間（秒））: ${trimmed}`); continue; }
+      const [actionId, countRaw, windowRaw] = parts;
+      if (!ACTION_ID_PATTERN.test(actionId)) { errors.push(`アクションIDの形式が正しくありません: ${actionId}`); continue; }
+      if (actionId === COMMAND_CONTROL_SELF_ACTION) continue;
+      const rate = parseRateParts(countRaw, windowRaw);
+      if (!rate) { errors.push(`回数は1〜${RATE_MAX_COUNT}、期間は${RATE_MIN_WINDOW_SECONDS}〜${RATE_MAX_WINDOW_SECONDS}秒で入力してください: ${actionId}`); continue; }
+      result[actionId] = rate;
+    }
+  } else if (typeof raw === "object" && raw !== null && !Array.isArray(raw)) {
+    for (const [actionId, rule] of Object.entries(raw as Record<string, unknown>)) {
+      if (!ACTION_ID_PATTERN.test(actionId)) { errors.push(`アクションIDの形式が正しくありません: ${actionId}`); continue; }
+      if (actionId === COMMAND_CONTROL_SELF_ACTION) continue;
+      if (typeof rule !== "object" || rule === null) { errors.push(`レートの形式が正しくありません: ${actionId}`); continue; }
+      const r = rule as Record<string, unknown>;
+      const rate = parseRateParts(String(r.count), String(r.window_seconds));
+      if (!rate) { errors.push(`回数・期間の範囲が正しくありません: ${actionId}`); continue; }
+      result[actionId] = rate;
+    }
+  } else if (raw !== null && raw !== undefined) {
+    return { ok: false, errors: ["形式が正しくありません"] };
+  }
+  if (errors.length > 0) return { ok: false, errors };
+  return { ok: true, value: Object.keys(result).length > 0 ? result : null };
+}
+
+/**
+ * 他ボット制限（bot_control セクション全体）の対応表を検証・変換する。
+ * 入力は1行に「ボットID 許可チャンネルID（カンマ区切り） [回数 期間（秒）]」と書いた文字列、
+ * または既に {bot_id: {allowed_channel_ids, rate}} の形のオブジェクト。
+ * 許可チャンネルが無いエントリは Bot 側 normalize と同じく成立しないためエラーにする
+ * （Web では黙って落とすと事故に気付けないため）。空なら null（= セクション削除）。
+ */
+export function parseBotRuleMap(raw: unknown): ParseResult<Record<string, { allowed_channel_ids: string[]; rate: { count: number; window_seconds: number } | null }> | null> {
+  type Entry = { allowed_channel_ids: string[]; rate: { count: number; window_seconds: number } | null };
+  const result: Record<string, Entry> = {};
+  const errors: string[] = [];
+
+  function addEntry(botId: string, channelIds: string[], rate: { count: number; window_seconds: number } | null) {
+    if (!isSnowflake(botId)) { errors.push(`ボットIDの形式が正しくありません: ${botId}`); return; }
+    if (botId === OWN_BOT_ID) { errors.push("AGO BOT 自身は対象にできません"); return; }
+    if (botId in result) { errors.push(`ボットIDが重複しています: ${botId}`); return; }
+    const channels: string[] = [];
+    for (const channelId of channelIds) {
+      if (!isSnowflake(channelId)) { errors.push(`チャンネルIDの形式が正しくありません: ${channelId}`); return; }
+      if (!channels.includes(channelId)) channels.push(channelId);
+    }
+    if (channels.length === 0) { errors.push(`許可チャンネルが1つ以上必要です: ${botId}`); return; }
+    result[botId] = { allowed_channel_ids: channels.map(intToken), rate };
+  }
+
+  if (typeof raw === "string") {
+    for (const line of raw.split(/\n+/)) {
+      const trimmed = line.trim();
+      if (!trimmed) continue;
+      const parts = trimmed.split(/\s+/).filter(Boolean);
+      if (parts.length !== 2 && parts.length !== 4) {
+        errors.push(`書式が正しくありません（ボットID 許可チャンネルID [回数 期間（秒）]）: ${trimmed}`);
+        continue;
+      }
+      let rate: { count: number; window_seconds: number } | null = null;
+      if (parts.length === 4) {
+        rate = parseRateParts(parts[2], parts[3]);
+        if (!rate) { errors.push(`回数は1〜${RATE_MAX_COUNT}、期間は${RATE_MIN_WINDOW_SECONDS}〜${RATE_MAX_WINDOW_SECONDS}秒で入力してください: ${parts[0]}`); continue; }
+      }
+      addEntry(parts[0], parts[1].split(","), rate);
+    }
+  } else if (typeof raw === "object" && raw !== null && !Array.isArray(raw)) {
+    for (const [botId, entry] of Object.entries(raw as Record<string, unknown>)) {
+      if (typeof entry !== "object" || entry === null) { errors.push(`形式が正しくありません: ${botId}`); continue; }
+      const e = entry as Record<string, unknown>;
+      const rawChannels = Array.isArray(e.allowed_channel_ids) ? e.allowed_channel_ids : [];
+      const channelIds = rawChannels.map((c) => unwrapId(c)).filter(Boolean);
+      let rate: { count: number; window_seconds: number } | null = null;
+      if (e.rate !== null && e.rate !== undefined) {
+        if (typeof e.rate !== "object") { errors.push(`レートの形式が正しくありません: ${botId}`); continue; }
+        const r = e.rate as Record<string, unknown>;
+        rate = parseRateParts(String(r.count), String(r.window_seconds));
+        if (!rate) { errors.push(`回数・期間の範囲が正しくありません: ${botId}`); continue; }
+      }
+      addEntry(botId, channelIds, rate);
+    }
+  } else if (raw !== null && raw !== undefined) {
+    return { ok: false, errors: ["形式が正しくありません"] };
+  }
+  if (errors.length > 0) return { ok: false, errors };
+  if (Object.keys(result).length > BOT_RULE_MAX_ENTRIES) {
+    return { ok: false, errors: [`最大 ${BOT_RULE_MAX_ENTRIES} 件までです`] };
+  }
+  return { ok: true, value: Object.keys(result).length > 0 ? result : null };
+}
 
 /**
  * クライアントから来た1セクション分の入力を、Bot の保存形式へ検証・変換する。
@@ -640,19 +824,53 @@ export function sanitizeSectionInput(spec: SectionSpec, input: unknown): Sanitiz
       case "text_list": {
         const items = Array.isArray(raw) ? raw : typeof raw === "string" ? raw.split(/[\s,、]+/) : null;
         if (!items) { errors.push(`${field.label}: 一覧が必要です`); break; }
+        const itemMax = field.itemMaxLength ?? 100;
+        const pattern = field.itemPattern ? new RegExp(field.itemPattern) : null;
+        const excluded = new Set(field.excludeValues ?? []);
         const cleaned: string[] = [];
         for (const item of items) {
           if (typeof item !== "string") { errors.push(`${field.label}: 文字列で入力してください`); break; }
           const trimmed = item.trim();
           if (!trimmed) continue;
-          if (trimmed.length > 100) { errors.push(`${field.label}: 1件は100文字までです`); break; }
+          if (excluded.has(trimmed)) continue;
+          if (trimmed.length > itemMax) { errors.push(`${field.label}: 1件は${itemMax}文字までです`); break; }
           if (trimmed.includes(INT_TOKEN_PREFIX)) { errors.push(`${field.label}: 使えない文字列が含まれています`); break; }
+          if (pattern && !pattern.test(trimmed)) { errors.push(`${field.label}: 形式が正しくありません: ${trimmed}`); break; }
           if (!cleaned.includes(trimmed)) cleaned.push(trimmed);
         }
         if (errors.length) break;
         const maxItems = field.maxItems ?? 10;
         if (cleaned.length > maxItems) { errors.push(`${field.label}: 最大 ${maxItems} 件までです`); break; }
         values[field.name] = cleaned.length > 0 ? cleaned : null;
+        break;
+      }
+      case "id_list": {
+        const items = Array.isArray(raw) ? raw : typeof raw === "string" ? raw.split(/[\s,]+/) : null;
+        if (!items) { errors.push(`${field.label}: IDの一覧が必要です`); break; }
+        const ids: string[] = [];
+        for (const item of items) {
+          if (typeof item !== "string") { errors.push(`${field.label}: IDは文字列で入力してください`); break; }
+          const trimmed = item.trim();
+          if (!trimmed) continue;
+          if (!isSnowflake(trimmed)) { errors.push(`${field.label}: DiscordのID（17〜20桁の数字）で入力してください: ${trimmed}`); break; }
+          if (!ids.includes(trimmed)) ids.push(trimmed);
+        }
+        if (errors.length) break;
+        const maxItems = field.maxItems ?? 25;
+        if (ids.length > maxItems) { errors.push(`${field.label}: 最大 ${maxItems} 件までです`); break; }
+        values[field.name] = ids.length > 0 ? ids.map(intToken) : null;
+        break;
+      }
+      case "rate_map": {
+        const parsed = parseRateMap(raw);
+        if (!parsed.ok) { errors.push(...parsed.errors.map((e) => `${field.label}: ${e}`)); break; }
+        values[field.name] = parsed.value;
+        break;
+      }
+      case "bot_rule_map": {
+        const parsed = parseBotRuleMap(raw);
+        if (!parsed.ok) { errors.push(...parsed.errors.map((e) => `${field.label}: ${e}`)); break; }
+        values[field.name] = parsed.value;
         break;
       }
       case "preset": {
@@ -715,5 +933,31 @@ export function mergeGuildSettings(
   }
   if (Object.keys(merged).length > 0) guild[section] = merged;
   else delete guild[section];
+  return Object.keys(guild).length > 0 ? guild : null;
+}
+
+/**
+ * 検証済みの入力をギルド設定全体へ反映する。
+ * 通常セクションは mergeGuildSettings と同じキー単位マージ、
+ * mapSection（bot_control のような対応表セクション）は解析結果で置き換える。
+ */
+export function applySectionValues(
+  current: unknown,
+  spec: SectionSpec,
+  values: Record<string, unknown>,
+): Record<string, unknown> | null {
+  if (!spec.mapSection) return mergeGuildSettings(current, spec.section, values);
+  const guild: Record<string, unknown> =
+    typeof current === "object" && current !== null && !Array.isArray(current)
+      ? { ...(current as Record<string, unknown>) }
+      : {};
+  const fieldName = spec.fields[0]?.name;
+  const parsed = fieldName ? values[fieldName] : null;
+  if (parsed === null || parsed === undefined ||
+      (typeof parsed === "object" && Object.keys(parsed as Record<string, unknown>).length === 0)) {
+    delete guild[spec.section];
+  } else {
+    guild[spec.section] = parsed;
+  }
   return Object.keys(guild).length > 0 ? guild : null;
 }

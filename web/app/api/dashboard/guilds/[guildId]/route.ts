@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { getRequestSession } from "@/lib/auth";
-import { isSnowflake, mergeGuildSettings, sanitizeSectionInput, sectionSpec, validateSectionGuards, SETTING_SECTIONS } from "@/lib/dashboard-core";
+import { applySectionValues, isSnowflake, sanitizeSectionInput, sectionSpec, validateSectionGuards, SETTING_SECTIONS } from "@/lib/dashboard-core";
 import { getDashboardContext, loadGuildRegistry, loadGuildSettings, saveGuildSettingsObject } from "@/lib/dashboard";
 
 export const runtime = "nodejs";
@@ -70,7 +70,7 @@ export async function PUT(request: Request, { params }: { params: Promise<{ guil
       return NextResponse.json({ error: "このサーバーにはAGOBOTが導入されていません" }, { status: 404 });
     }
     const current = await loadGuildSettings(guildId);
-    const merged = mergeGuildSettings(current, spec.section, sanitized.values);
+    const merged = applySectionValues(current, spec, sanitized.values);
     const guardErrors = validateSectionGuards(spec, merged?.[spec.section]);
     if (guardErrors.length > 0) {
       return NextResponse.json({ errors: guardErrors }, { status: 400 });
