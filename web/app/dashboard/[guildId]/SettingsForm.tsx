@@ -2,12 +2,23 @@
 
 import { useState } from "react";
 import { unwrapId, type SectionSpec } from "@/lib/dashboard-core";
+import type { GuildStructure } from "@/lib/dashboard";
 
 type Props = {
   guildId: string;
   spec: SectionSpec;
   initial: Record<string, unknown>;
+  structure?: GuildStructure | null;
 };
+
+const TEXT_CHANNEL_TYPES = new Set([0, 5, 15, 16]);
+const VOICE_CHANNEL_TYPES = new Set([2, 13]);
+const CATEGORY_CHANNEL_TYPES = new Set([4]);
+
+function channelOptions(structure: GuildStructure, kind: string | undefined) {
+  const types = kind === "voice" ? VOICE_CHANNEL_TYPES : kind === "category" ? CATEGORY_CHANNEL_TYPES : TEXT_CHANNEL_TYPES;
+  return structure.channels.filter((channel) => types.has(channel.type));
+}
 
 function initialText(value: unknown): string {
   if (value === null || value === undefined) return "";
@@ -27,6 +38,36 @@ function initialRateMap(value: unknown): string {
     const r = rule as Record<string, unknown>;
     if (typeof r.count === "number" && typeof r.window_seconds === "number") {
       lines.push(`${actionId} ${r.count} ${r.window_seconds}`);
+    }
+  }
+  return lines.join("\n");
+}
+
+function initialEmojiRoleMap(value: unknown): string {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return "";
+  return Object.entries(value as Record<string, unknown>)
+    .map(([emoji, roleId]) => `${emoji}=${unwrapId(roleId)}`)
+    .filter((line) => !line.endsWith("="))
+    .join("\n");
+}
+
+function initialLevelRoleMap(value: unknown): string {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return "";
+  return Object.entries(value as Record<string, unknown>)
+    .sort(([a], [b]) => Number(a) - Number(b))
+    .map(([level, roleId]) => `${level}=${unwrapId(roleId)}`)
+    .filter((line) => !line.endsWith("="))
+    .join("\n");
+}
+
+function initialScheduleList(value: unknown): string {
+  if (!Array.isArray(value)) return "";
+  const lines: string[] = [];
+  for (const item of value) {
+    if (typeof item !== "object" || item === null) continue;
+    const entry = item as Record<string, unknown>;
+    if (typeof entry.time === "string" && typeof entry.message === "string") {
+      lines.push(`${entry.time} ${entry.message}`);
     }
   }
   return lines.join("\n");
@@ -53,7 +94,7 @@ function initialBotRuleMap(sectionValue: Record<string, unknown>): string {
   return lines.join("\n");
 }
 
-export default function SettingsForm({ guildId, spec, initial }: Props) {
+export default function SettingsForm({ guildId, spec, initial, structure }: Props) {
   const [values, setValues] = useState<Record<string, string | boolean>>(() => {
     const state: Record<string, string | boolean> = {};
     for (const field of spec.fields) {
@@ -68,6 +109,15 @@ export default function SettingsForm({ guildId, spec, initial }: Props) {
           break;
         case "rate_map":
           state[field.name] = initialRateMap(raw);
+          break;
+        case "emoji_role_map":
+          state[field.name] = initialEmojiRoleMap(raw);
+          break;
+        case "level_role_map":
+          state[field.name] = initialLevelRoleMap(raw);
+          break;
+        case "schedule_list":
+          state[field.name] = initialScheduleList(raw);
           break;
         case "bot_rule_map":
           state[field.name] = initialBotRuleMap(initial);
@@ -160,6 +210,13 @@ export default function SettingsForm({ guildId, spec, initial }: Props) {
       </div>
       {spec.fields.map((field) => {
         const value = values[field.name];
+        const selectChannels =
+          field.type === "channel" && structure ? channelOptions(structure, field.channelKind) : null;
+        const selectRoles =
+          (field.type === "role" || field.type === "role_list") && structure
+            ? structure.roles.filter((role) => role.id !== guildId)
+            : null;
+        const currentText = typeof value === "string" ? value : "";
         return (
           <div className="settings-field" key={field.name}>
             {field.type === "bool" ? (
@@ -174,32 +231,80 @@ export default function SettingsForm({ guildId, spec, initial }: Props) {
             ) : (
               <>
                 <label htmlFor={`${spec.section}-${field.name}`}>{field.label}</label>
+                {field.type === "bot_rule_map" && structure && structure.bots.length > 0 ? (
+                  <p className="settings-note">
+                    サーバー内のBot: {structure.bots.map((bot) => `${bot.name}（${bot.id}）`).join("、")}
+                  </p>
+                ) : null}
                 {field.type === "enum" || field.type === "enum_number" || field.type === "preset" ? (
                   <select
                     id={`${spec.section}-${field.name}`}
-                    value={typeof value === "string" ? value : ""}
+                    value={currentText}
                     onChange={(event) => set(field.name, event.target.value)}
                   >
                     {(field.options ?? []).map((option) => (
                       <option key={String(option.value)} value={String(option.value)}>{option.label}</option>
                     ))}
                   </select>
-                ) : field.type === "role_list" || field.type === "id_list" || field.type === "text_list" || field.type === "rate_map" || field.type === "bot_rule_map" || field.multiline ? (
+                ) : field.type === "channel" && selectChannels && selectChannels.length > 0 ? (
+                  <select
+                    id={`${spec.section}-${field.name}`}
+                    value={currentText}
+                    onChange={(event) => set(field.name, event.target.value)}
+                  >
+                    <option value="">未設定</option>
+                    {selectChannels.map((channel) => (
+                      <option key={channel.id} value={channel.id}>#{channel.name}</option>
+                    ))}
+                    {currentText && !selectChannels.some((channel) => channel.id === currentText) ? (
+                      <option value={currentText}>（一覧にないID: {currentText}）</option>
+                    ) : null}
+                  </select>
+                ) : field.type === "role" && selectRoles && selectRoles.length > 0 ? (
+                  <select
+                    id={`${spec.section}-${field.name}`}
+                    value={currentText}
+                    onChange={(event) => set(field.name, event.target.value)}
+                  >
+                    <option value="">未設定</option>
+                    {selectRoles.map((role) => (
+                      <option key={role.id} value={role.id}>{role.name}</option>
+                    ))}
+                    {currentText && !selectRoles.some((role) => role.id === currentText) ? (
+                      <option value={currentText}>（一覧にないID: {currentText}）</option>
+                    ) : null}
+                  </select>
+                ) : field.type === "role_list" && selectRoles && selectRoles.length > 0 ? (
+                  <select
+                    id={`${spec.section}-${field.name}`}
+                    multiple
+                    size={Math.min(8, Math.max(3, selectRoles.length))}
+                    value={currentText.split(/[\s,]+/).filter(Boolean)}
+                    onChange={(event) => {
+                      const picked = Array.from(event.target.selectedOptions).map((option) => option.value);
+                      set(field.name, picked.join("\n"));
+                    }}
+                  >
+                    {selectRoles.map((role) => (
+                      <option key={role.id} value={role.id}>{role.name}</option>
+                    ))}
+                  </select>
+                ) : field.type === "role_list" || field.type === "id_list" || field.type === "text_list" || field.type === "rate_map" || field.type === "bot_rule_map" || field.type === "emoji_role_map" || field.type === "level_role_map" || field.type === "schedule_list" || field.multiline ? (
                   <textarea
                     id={`${spec.section}-${field.name}`}
-                    value={typeof value === "string" ? value : ""}
+                    value={currentText}
                     onChange={(event) => set(field.name, event.target.value)}
-                    rows={field.type === "role_list" || field.type === "id_list" || field.type === "rate_map" || field.type === "bot_rule_map" ? 4 : 3}
+                    rows={field.type === "role_list" || field.type === "id_list" || field.type === "rate_map" || field.type === "bot_rule_map" || field.type === "emoji_role_map" || field.type === "level_role_map" || field.type === "schedule_list" ? 4 : 3}
                     placeholder={field.type === "role_list" ? "ロールIDを1行に1つずつ" : field.type === "id_list" ? "IDを1行に1つずつ" : undefined}
                   />
                 ) : (
                   <input
                     id={`${spec.section}-${field.name}`}
                     type={field.type === "number" ? "number" : "text"}
-                    inputMode={field.type === "channel" || field.type === "role" ? "numeric" : undefined}
-                    value={typeof value === "string" ? value : ""}
+                    inputMode={field.type === "channel" || field.type === "role" || field.type === "message" ? "numeric" : undefined}
+                    value={currentText}
                     onChange={(event) => set(field.name, event.target.value)}
-                    placeholder={field.type === "channel" ? "チャンネルID（空欄で未設定）" : field.type === "role" ? "ロールID（空欄で未設定）" : undefined}
+                    placeholder={field.type === "channel" ? "チャンネルID（空欄で未設定）" : field.type === "role" ? "ロールID（空欄で未設定）" : field.type === "message" ? "メッセージID（空欄で未設定）" : undefined}
                   />
                 )}
               </>

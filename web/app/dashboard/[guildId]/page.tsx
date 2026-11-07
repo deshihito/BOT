@@ -1,8 +1,8 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { getCurrentSession } from "@/lib/auth";
-import { SETTING_SECTIONS } from "@/lib/dashboard-core";
-import { getDashboardContext, loadGuildRegistry, loadGuildSettings } from "@/lib/dashboard";
+import { SETTING_SECTIONS, guildIconUrl, userAvatarUrl } from "@/lib/dashboard-core";
+import { getDashboardContext, loadBumpRtaSettings, loadGuildRegistry, loadGuildSettings, loadGuildStructure, type GuildRegistryEntry } from "@/lib/dashboard";
 import SettingsForm from "./SettingsForm";
 
 export const metadata = { title: "サーバー設定 | AGOBOT", robots: { index: false, follow: false } };
@@ -35,12 +35,13 @@ export default async function GuildSettingsPage({ params }: PageProps) {
     );
   }
 
-  let installed = false;
+  let registryEntry: GuildRegistryEntry | undefined;
   try {
-    installed = (await loadGuildRegistry()).has(guildId);
+    registryEntry = (await loadGuildRegistry()).get(guildId);
   } catch {
-    installed = false;
+    registryEntry = undefined;
   }
+  const installed = registryEntry !== undefined;
   if (!installed) {
     return (
       <section className="dashboard-page">
@@ -54,21 +55,55 @@ export default async function GuildSettingsPage({ params }: PageProps) {
   }
 
   const settings = await loadGuildSettings(guildId);
+  let structure: Awaited<ReturnType<typeof loadGuildStructure>> = null;
+  try {
+    structure = await loadGuildStructure(guildId);
+  } catch {
+    structure = null;
+  }
+  let bumpInitial: Record<string, unknown> = { notifications_enabled: true, role_id: null };
+  try {
+    const bump = await loadBumpRtaSettings(guildId);
+    bumpInitial = { notifications_enabled: bump.notifications_enabled, role_id: bump.role_id };
+  } catch {
+    bumpInitial = { notifications_enabled: true, role_id: null };
+  }
+  const guildIcon = guildIconUrl(guildId, registryEntry?.icon ?? guild.icon);
+  const structureNote = structure?.updated_at
+    ? `チャンネル・ロール一覧は ${new Date(structure.updated_at).toLocaleString("ja-JP")} 時点の情報です（1時間ごとに更新）。`
+    : null;
 
   return (
     <section className="dashboard-page">
       <p className="breadcrumbs"><Link href="/dashboard">ダッシュボード</Link> / サーバー設定</p>
       <div className="dashboard-header">
-        <h1>{guild.name}</h1>
+        <h1 className="guild-title">
+          {guildIcon ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img className="guild-icon" src={guildIcon} alt="" width={36} height={36} />
+          ) : (
+            <span className="guild-icon guild-icon-fallback" aria-hidden="true">{guild.name.slice(0, 1)}</span>
+          )}
+          {guild.name}
+        </h1>
+        <span className="user-chip">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img className="user-avatar" src={userAvatarUrl(session.id, session.avatar)} alt="" width={28} height={28} />
+          {session.username}
+        </span>
         <form action="/api/auth/logout" method="post"><button type="submit">ログアウト</button></form>
       </div>
+      {structureNote ? <p className="muted">{structureNote}</p> : null}
       {SETTING_SECTIONS.map((spec) => {
+        if (spec.external === "bump_rta") {
+          return <SettingsForm key={spec.section} guildId={guildId} spec={spec} initial={bumpInitial} structure={structure} />;
+        }
         const sectionValue = settings[spec.section];
         const initial =
           typeof sectionValue === "object" && sectionValue !== null && !Array.isArray(sectionValue)
             ? (sectionValue as Record<string, unknown>)
             : {};
-        return <SettingsForm key={spec.section} guildId={guildId} spec={spec} initial={initial} />;
+        return <SettingsForm key={spec.section} guildId={guildId} spec={spec} initial={initial} structure={structure} />;
       })}
       <p className="back-link"><Link href="/dashboard">← ダッシュボードへ戻る</Link></p>
     </section>

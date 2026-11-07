@@ -50,6 +50,14 @@ class PublicRankingCog(commands.Cog):
             await snapshot.write_snapshot(self.bot)
         except Exception:
             logger.exception("公開ランキングのスナップショット書き出しに失敗しました")
+        # Web 連携データの定期更新を兼ねる: ダッシュボードのセレクタ用に
+        # guild_registry のサーバー構造スナップショットも1時間ごとに同期する。
+        try:
+            from core.support.guild_registry import get_registry
+
+            await get_registry().sync_all(list(self.bot.guilds))
+        except Exception:
+            logger.exception("サーバー構造スナップショットの定期同期に失敗しました")
 
     @publish_loop.before_loop
     async def _before_publish_loop(self) -> None:

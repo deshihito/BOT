@@ -143,3 +143,14 @@ body:has([data-activity-root]) > main { max-width:none; min-height:100svh; margi
 .settings-actions button { padding:8px 15px; border:1px solid var(--accent); border-radius:7px; background:var(--accent); color:#fff; cursor:pointer; font:inherit; font-weight:700; }
 .settings-actions button:disabled { cursor:not-allowed; opacity:.45; }
 .settings-saved { color:var(--accent); font-size:13px; }
+
+/* 連携緊密化: アバター/ギルドアイコン表示 */
+.user-chip { display:inline-flex; align-items:center; gap:8px; color:var(--text, inherit); }
+.user-avatar { border-radius:50%; flex:none; }
+.guild-title { display:flex; align-items:center; gap:10px; }
+.guild-icon { border-radius:12px; flex:none; object-fit:cover; }
+.guild-icon-fallback { display:inline-flex; align-items:center; justify-content:center; width:40px; height:40px; background:var(--panel-2, #2a2f3a); color:var(--muted); font-weight:700; font-size:18px; }
+.guild-title .guild-icon-fallback { width:36px; height:36px; }
+.guild-card-main { display:flex; flex-direction:column; gap:2px; margin-right:auto; }
+.guild-card-meta { color:var(--muted); font-size:12px; }
+.settings-field select[multiple] { min-width:260px; }
