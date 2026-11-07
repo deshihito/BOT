@@ -21,7 +21,7 @@ import discord
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from core import action_registry
+from core.general import action_registry
 from core.general import steal, workshop
 from core.game import gambling, lottery, mining
 from core.general import economy_pool, items, market

@@ -15,8 +15,8 @@ if str(ROOT) not in sys.path:
 
 import discord  # noqa: E402
 
-from core import guild_settings  # noqa: E402
-from core.storage import KVStore  # noqa: E402
+from core.support import guild_settings  # noqa: E402
+from core.support.storage import KVStore  # noqa: E402
 from core.support import localization  # noqa: E402
 from core.support.server_setup import cog as setup_cog  # noqa: E402
 from tests.fake_kv_supabase import FakeKVSupabase  # noqa: E402
@@ -52,7 +52,7 @@ def find_select(view):
 
 class WelcomeStatsTest(unittest.TestCase):
     def test_stats_come_from_single_sources_of_truth(self):
-        from core.action_registry import ROOT_ORDER, default_registry
+        from core.general.action_registry import ROOT_ORDER, default_registry
         from core.game.game_guides import GAME_ORDER
 
         stats = setup_cog.welcome_stats()
@@ -66,7 +66,7 @@ class WelcomeStatsTest(unittest.TestCase):
         self.assertEqual(setup_cog.welcome_stats()["commands"], 6)
 
     def test_stats_follow_registry_changes(self):
-        import core.action_registry as registry_module
+        import core.general.action_registry as registry_module
         import core.game.game_guides as guides_module
 
         class FakeRegistry:
@@ -80,7 +80,7 @@ class WelcomeStatsTest(unittest.TestCase):
         self.assertEqual(stats["games"], 3)
 
     def test_stats_failure_returns_none(self):
-        import core.action_registry as registry_module
+        import core.general.action_registry as registry_module
 
         with patch.object(registry_module, "default_registry", side_effect=RuntimeError("boom")):
             self.assertIsNone(setup_cog.welcome_stats())
@@ -212,7 +212,7 @@ class WelcomeListenerTest(unittest.IsolatedAsyncioTestCase):
         build.assert_called_once_with(self.bot, "game")
         kwargs = interaction.response.send_message.await_args.kwargs
         self.assertTrue(kwargs["ephemeral"])
-        from core.panel_v2 import PanelLayoutView
+        from core.support.panel_v2 import PanelLayoutView
         self.assertIsInstance(kwargs["view"], PanelLayoutView)
 
     async def test_panel_button_fallback_names_the_command(self):

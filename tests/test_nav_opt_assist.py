@@ -6,7 +6,7 @@ import unittest
 class AssistRegistryTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        from core import action_registry
+        from core.general import action_registry
 
         cls.registry = action_registry.default_registry()
 

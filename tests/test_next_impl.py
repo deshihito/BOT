@@ -29,7 +29,7 @@ from types import SimpleNamespace
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from core import action_registry
+from core.general import action_registry
 from core.game import clan as clan_core, gacha as gacha_core
 from core.general import daily_bonus as daily_core, starter as starter_core
 from core.game import gambling as gambling_core, lottery as lottery_core

@@ -19,7 +19,7 @@ from cogs.help import BackView, CommandView, HelpView
 from cogs.sio_voice import VoicePanelView
 from core.general.panel import GeneralPanel
 from core.general.shortcuts import ShortcutCommitButton
-from core.panel_v2 import PanelLayoutView
+from core.support.panel_v2 import PanelLayoutView
 from core.support.panel import SUPPORT_GENRES, SupportPanelView
 
 

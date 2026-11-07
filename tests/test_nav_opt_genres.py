@@ -39,7 +39,7 @@ class VoiceTriggerLabelTest(unittest.TestCase):
     """S6→ラウンド2: /support の voice_trigger ラベルがサーバー設定であることを示すこと。"""
 
     def test_label_matches_panel(self):
-        from core.action_registry import build_support_actions
+        from core.general.action_registry import build_support_actions
         from cogs.support import SUPPORT_ACTIONS, SUPPORT_ACTIONS_BY_GENRE, SUPPORT_GENRES
 
         specs = build_support_actions(SUPPORT_ACTIONS, SUPPORT_ACTIONS_BY_GENRE, SUPPORT_GENRES)
