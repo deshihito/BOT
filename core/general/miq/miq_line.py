@@ -7,16 +7,17 @@ from .miq import (
     MIQ_LINE_MAX_IMAGES, MIQ_LINE_MAX_MESSAGES, MIQ_NEW_H, MIQ_NEW_W,
     _MIQ_CUSTOM_EMOJI_TOKEN, _MIQ_EMOJI_SIZE, _MIQ_REPO_ROOT,
     _miq_clean_text, _miq_display_text, _miq_draw_centered,
-    _miq_emoji_font_path, _miq_emoji_width,
+    _miq_draw_name_units, _miq_emoji_font_path, _miq_emoji_width,
     _miq_fallback_fonts, _miq_fit, _miq_fit_units, _miq_is_emoji_unit, _miq_is_image_attachment,
     _miq_load_font, _miq_mix, _miq_open_avatar, _miq_render_emoji_unit,
     _miq_save_png, _miq_split_units, _miq_sticker_renderable, _miq_unit_bases,
-    _miq_unit_font, _miq_unit_width, _miq_wrap, miq_is_refusing,
+    _miq_truncate_units, _miq_unit_font, _miq_unit_width, _miq_units_width,
+    _miq_wrap, miq_is_refusing,
     miq_render_options, miq_resolve_format, render_miq_png,
 )
 from ..meme import MEME_MAX_IMAGE_BYTES
 from .miq_styles import (
-    _miq_date_str, _miq_heart, _miq_rng, _miq_truncate,
+    _miq_date_str, _miq_heart, _miq_rng,
     render_miq_blueprint_png, render_miq_gif, render_miq_luxury_png,
     render_miq_manga_png, render_miq_music_png,
     render_miq_news_png, render_miq_novel_png, render_miq_pixel_png,
@@ -494,11 +495,11 @@ def render_miq_line_png(entries, *, font_path: str | None = None) -> bytes:
         if item["right"]:
             av_x = W - 36 - avatar_size
             content_right = av_x - 16
-            d.text((content_right, y), item["name"], font=name_font, fill=sub, anchor="ra")
+            _miq_draw_name_units(img, d, content_right, y, item["name"], 22, font_path, sub, anchor="ra")
         else:
             av_x = 36
             content_left = av_x + avatar_size + 16
-            d.text((content_left, y), item["name"], font=name_font, fill=sub)
+            _miq_draw_name_units(img, d, content_left, y, item["name"], 22, font_path, sub)
         # 円形アバター (最初のブロックの上端に合わせる)
         av = ImageOps.fit(item["avatar"].convert("RGB"), (avatar_size, avatar_size), Image.LANCZOS)
         circle = Image.new("L", (avatar_size, avatar_size), 0)
@@ -603,12 +604,11 @@ def render_miq_pair_png(entries, *, font_path: str | None = None) -> bytes:
         img.paste(av, (cx - size // 2, cy - size // 2), circle)
         name_font = _miq_load_font(font_path, 30)
         shown = _miq_display_text(_miq_line_field(entry, "name") or "") or "unknown"
-        shown = _miq_truncate(d, shown, name_font, 330)
-        d.text((cx, cy + size // 2 + 18), shown, font=name_font, fill=pink, anchor="ma",
-               stroke_width=1, stroke_fill=pink)
+        shown = _miq_truncate_units(d, shown, font_path, 30, 330)
+        _miq_draw_name_units(img, d, cx, cy + size // 2 + 18, shown, 30, font_path, pink, anchor="ma", stroke_width=1)
         user = _miq_display_text(_miq_line_field(entry, "username") or "")
         if user:
-            d.text((cx, cy + size // 2 + 58), f"@{user}", font=_miq_load_font(font_path, 21), fill=sub, anchor="ma")
+            _miq_draw_name_units(img, d, cx, cy + size // 2 + 58, f"@{user}", 21, font_path, sub, anchor="ma")
 
     def draw_heart(cx: int, cy: int, size: int):
         """大きなピンクハート (白ハート内包+白いグロー) を描く。"""
