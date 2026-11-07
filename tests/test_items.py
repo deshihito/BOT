@@ -1,4 +1,4 @@
-"""core/general/items.py（アイテム基盤・ショップ・宝箱）と市場の手数料フックのテスト。
+"""core/general/items/items.py（アイテム基盤・ショップ・宝箱）と市場の手数料フックのテスト。
 
 見るもの: 定義の整合（説明・価格があり「実装中」がない）、所持の増減と
 期限切れの lazy 削除、購入／売却の保存則（コインと所持の対応、残高不足で
@@ -18,7 +18,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from core.general import action_registry
-from core.general import items, market
+from core.general.items import items
+from core.general.market import market
 from cogs import wallet as wallet_module
 # cog は冒頭で import する: 他テストの cog 再読込後だと wallet の
 # INSUFFICIENT と同一性が崩れるため（test_giveaway と同じ流儀）。

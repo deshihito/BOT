@@ -1,4 +1,4 @@
-"""core/general/craft.py（合成レシピ・即時合成）と委託加工の重み付けのテスト。
+"""core/general/workshop/craft.py（合成レシピ・即時合成）と委託加工の重み付けのテスト。
 
 見るもの: レシピ定義の整合（参照アイテムが全て実在、重みが正、入力ペアの
 重複なし）、隠しレシピが一覧に出ず合成はできること、チェーンの最終
@@ -16,10 +16,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from core.general import craft
-from core.general import items
-
-
+from core.general.workshop import craft
+from core.general.items import items
 def _store(tmp: str, rng=None) -> items.ItemStore:
     return items.ItemStore(Path(tmp) / "items.json", rng=rng or random.Random(42))
 

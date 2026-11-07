@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """アイテム拡充（2026-11-06）のテスト。
 
-見るもの: 損失還流プール/国庫（core/general/economy_pool.py）の70/30分割と
+見るもの: 損失還流プール/国庫（core/general/circulation/economy_pool.py）の70/30分割と
 保存則、新規アイテムの定義整合と入手経路、効果アイテム6種が実際に
 数値へ効くこと（採掘ドリンク/合成触媒/防犯チャーム/没収ガード/
 加速オイル/優待パス）、還流フック（ギャンブル損失・市場手数料の
@@ -20,10 +20,12 @@ from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from core.general import craft, workshop
+from core.general.workshop import craft, workshop
 from core.game import mining
 from core.game.gambling import gambling
-from core.general import economy_pool, items, market
+from core.general.circulation import economy_pool
+from core.general.items import items
+from core.general.market import market
 from cogs import wallet as wallet_module
 from cogs.circulation import CirculationCog
 from cogs.gambling import GamblingCog
@@ -395,7 +397,7 @@ class CraftCatalystTest(unittest.TestCase):
 class StealGuardTest(unittest.TestCase):
     def _cog(self, tmp, wallet, item_store):
         from core.game import lottery as lottery_core
-        from core.general import steal as steal_core
+        from core.general.circulation import steal as steal_core
         bot = _FakeBot({"WalletCog": wallet})
         return CirculationCog(
             bot,

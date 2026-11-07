@@ -2,7 +2,7 @@
 import random
 import unittest
 
-from core.general.gauge import AXES, GaugeGame, points_for
+from core.general.gauge.gauge import AXES, GaugeGame, points_for
 
 
 class GaugeBankTest(unittest.TestCase):

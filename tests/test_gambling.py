@@ -22,7 +22,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from core.general import action_registry
 from core.game.gambling import gambling
-from core.general.items import ItemError
+from core.general.items.items import ItemError
 from cogs import wallet as wallet_module
 from cogs.gambling import (
     BetModal,

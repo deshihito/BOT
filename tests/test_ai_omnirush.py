@@ -5,9 +5,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from core.general import ai_omnirush
-
-
+from core.general.ai import ai_omnirush
 class OmniRushCliTest(unittest.IsolatedAsyncioTestCase):
     def make_cli(self, source):
         temp = tempfile.TemporaryDirectory()

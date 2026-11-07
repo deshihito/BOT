@@ -9,10 +9,8 @@ import aiohttp
 
 from cogs.ai_tools import GENERIC_FAILURE_MESSAGE, AIToolsCog, _enabled, _resolve_invoker
 from cogs.general import ShortcutMessageInteraction
-from core.general import logfare
-from core.general import ai_tools_router
-
-
+from core.general.ai import logfare
+from core.general.ai_tools import ai_tools_router
 class AIToolsTest(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         self.candidates = {
@@ -187,7 +185,7 @@ class AIToolsTest(unittest.IsolatedAsyncioTestCase):
             "errors": [],
             "messages": [],
         })
-        with patch("core.general.ai_tools_router.logfare.decision", decision):
+        with patch("core.general.ai_tools.ai_tools_router.logfare.decision", decision):
             selected = await ai_tools_router.decide_action("VCに参加して", self.candidates)
         self.assertEqual(selected, "vc:join")
         args, kwargs = decision.await_args
@@ -201,7 +199,7 @@ class AIToolsTest(unittest.IsolatedAsyncioTestCase):
     async def test_rejects_none_or_unavailable_action_without_retry(self):
         for selected in ("none", "support:clear"):
             decision = AsyncMock(return_value={"answers": {"action": {"choice": selected}}})
-            with self.subTest(selected=selected), patch("core.general.ai_tools_router.logfare.decision", decision):
+            with self.subTest(selected=selected), patch("core.general.ai_tools.ai_tools_router.logfare.decision", decision):
                 with self.assertRaises(ai_tools_router.AIToolsDecisionError):
                     await ai_tools_router.decide_action("依頼", self.candidates)
             decision.assert_awaited_once()
@@ -234,14 +232,14 @@ class AIToolsTest(unittest.IsolatedAsyncioTestCase):
             {"result": {"answers": {"action": {"probabilities": {"vc:join": 1.0}}}}},
         ):
             with self.subTest(result=result), patch(
-                "core.general.ai_tools_router.logfare.decision", AsyncMock(return_value=result)
+                "core.general.ai_tools.ai_tools_router.logfare.decision", AsyncMock(return_value=result)
             ):
                 with self.assertRaises(ai_tools_router.AIToolsDecisionError):
                     await ai_tools_router.decide_action("依頼", self.candidates)
 
     async def test_logfare_forbidden_error_is_descriptive_and_not_retried(self):
         decision = AsyncMock(side_effect=logfare.LogfareHTTPError(403))
-        with patch("core.general.ai_tools_router.logfare.decision", decision):
+        with patch("core.general.ai_tools.ai_tools_router.logfare.decision", decision):
             with self.assertRaisesRegex(ai_tools_router.AIToolsDecisionError, "トレーニング利用オプトイン"):
                 await ai_tools_router.decide_action("VCに参加して", self.candidates)
         decision.assert_awaited_once()
@@ -276,8 +274,8 @@ class AIToolsTest(unittest.IsolatedAsyncioTestCase):
 
         session = FakeSession()
         question = {"action": {"type": "choice", "criteria": {"vc:join": "VC参加", "none": "なし"}}}
-        with patch("core.general.logfare.api_key", return_value="test-key"), patch(
-            "core.general.logfare.aiohttp.ClientSession", return_value=session
+        with patch("core.general.ai.logfare.api_key", return_value="test-key"), patch(
+            "core.general.ai.logfare.aiohttp.ClientSession", return_value=session
         ):
             response = await logfare.decision("clef", "state", question, timeout=aiohttp.ClientTimeout(total=2))
         self.assertIn("/v1/decisions", session.request[0])
@@ -286,8 +284,8 @@ class AIToolsTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response["result"]["answers"]["action"]["choice"], "vc:join")
 
     async def test_missing_logfare_key_fails_before_network(self):
-        with patch("core.general.logfare.api_key", return_value=None), patch(
-            "core.general.logfare.aiohttp.ClientSession"
+        with patch("core.general.ai.logfare.api_key", return_value=None), patch(
+            "core.general.ai.logfare.aiohttp.ClientSession"
         ) as session:
             with self.assertRaisesRegex(RuntimeError, "LOGFARE_API_KEY"):
                 await logfare.decision("clef", "state", {"action": {"type": "choice"}})
@@ -325,7 +323,7 @@ class AIToolsUnavailableTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_timeout_exhaustion_is_unavailable_with_nonempty_detail(self):
         decision = AsyncMock(side_effect=asyncio.TimeoutError())
-        with patch("core.general.ai_tools_router.logfare.decision", decision):
+        with patch("core.general.ai_tools.ai_tools_router.logfare.decision", decision):
             with self.assertRaises(ai_tools_router.AIToolsUnavailable) as ctx:
                 await ai_tools_router.decide_action("VCに参加して", self.candidates)
         # 後方互換: DecisionError としても捕捉できる。
@@ -337,7 +335,7 @@ class AIToolsUnavailableTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_unauthorized_is_unavailable_keeping_ops_detail_for_logs(self):
         decision = AsyncMock(side_effect=logfare.LogfareHTTPError(401))
-        with patch("core.general.ai_tools_router.logfare.decision", decision):
+        with patch("core.general.ai_tools.ai_tools_router.logfare.decision", decision):
             with self.assertRaises(ai_tools_router.AIToolsUnavailable) as ctx:
                 await ai_tools_router.decide_action("VCに参加して", self.candidates)
         # 詳細（運用者向けの確認指示）は例外＝ログ側には残る。
@@ -346,14 +344,14 @@ class AIToolsUnavailableTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_retryable_http_error_exhaustion_is_unavailable(self):
         decision = AsyncMock(side_effect=logfare.LogfareHTTPError(503))
-        with patch("core.general.ai_tools_router.logfare.decision", decision):
+        with patch("core.general.ai_tools.ai_tools_router.logfare.decision", decision):
             with self.assertRaises(ai_tools_router.AIToolsUnavailable) as ctx:
                 await ai_tools_router.decide_action("VCに参加して", self.candidates)
         self.assertIn("503", str(ctx.exception))
 
     async def test_failed_envelope_is_unavailable(self):
         decision = AsyncMock(return_value={"success": False, "errors": [{"message": "no access"}]})
-        with patch("core.general.ai_tools_router.logfare.decision", decision):
+        with patch("core.general.ai_tools.ai_tools_router.logfare.decision", decision):
             with self.assertRaises(ai_tools_router.AIToolsUnavailable):
                 await ai_tools_router.decide_action("依頼", self.candidates)
 
@@ -374,7 +372,7 @@ class AIToolsUnavailableTest(unittest.IsolatedAsyncioTestCase):
         decision = AsyncMock(side_effect=asyncio.TimeoutError())
         with patch.dict(os.environ, {"AITOOLS_ENABLED": "true"}), patch(
             "cogs.ai_tools.logfare.api_key", return_value="configured"
-        ), patch("core.general.ai_tools_router.logfare.decision", decision):
+        ), patch("core.general.ai_tools.ai_tools_router.logfare.decision", decision):
             await cog.on_message(message)
         message.reply.assert_awaited_once()
         text = message.reply.await_args.args[0]
@@ -389,7 +387,7 @@ class AIToolsUnavailableTest(unittest.IsolatedAsyncioTestCase):
         decision = AsyncMock(side_effect=logfare.LogfareHTTPError(401))
         with patch.dict(os.environ, {"AITOOLS_ENABLED": "true"}), patch(
             "cogs.ai_tools.logfare.api_key", return_value="configured"
-        ), patch("core.general.ai_tools_router.logfare.decision", decision):
+        ), patch("core.general.ai_tools.ai_tools_router.logfare.decision", decision):
             await cog.on_message(message)
         message.reply.assert_awaited_once()
         text = message.reply.await_args.args[0]
