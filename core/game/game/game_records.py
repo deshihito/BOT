@@ -6,7 +6,7 @@
 - フラッシュ暗算: 設定（個数・桁数・間隔）ごとに プレイ数 / 正解数 / 連続正解ベスト
 - 数字当て: プレイ数 / 勝利数 / 総賭け額 / 総収支（残高への実際の増減の合計）
 
-保存は core/support/usage_stats.py と同じ流儀の専用 JSON（既定 ``data/game_records.json``、
+保存は core/support/usage_stats/usage_stats.py と同じ流儀の専用 JSON（既定 ``data/game_records.json``、
 環境変数 ``GAME_RECORDS_PATH`` で変更可）。毎回は書かず、一定件数ごと／一定時間
 ごとにまとめて書き出す。記録の失敗でゲーム本体を壊さないよう、呼び出し側では
 ``*_safely`` 系を使う。

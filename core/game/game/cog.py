@@ -15,7 +15,7 @@ from discord.ext import commands
 from core.general import action_usage
 from core.game.game import party_ranking
 from core.game.game import elo
-from core.support import usage_stats
+from core.support.usage_stats import usage_stats
 from core.support.emojis import BACK
 from core.game.game.game_guides import (
     GAME_GUIDES,
