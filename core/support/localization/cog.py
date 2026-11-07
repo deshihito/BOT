@@ -10,8 +10,8 @@ logger = logging.getLogger(__name__)
 
 
 def _get_store():
-    """get_store is resolved through the cogs.localization entry (tests patch it there)."""
-    from cogs.localization import get_store
+    """get_store is resolved through the cogs.support entry (tests patch it there)."""
+    from cogs.support import get_store
     return get_store
 _PATCHED = False
 
