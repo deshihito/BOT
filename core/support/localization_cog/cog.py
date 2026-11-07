@@ -4,7 +4,7 @@ import logging
 import discord
 from discord.ext import commands
 from core.support import localization
-from core.guild_settings import get_store  # noqa: F401  (re-exported via the entry; internal calls go through _get_store)
+from core.support.guild_settings import get_store  # noqa: F401  (re-exported via the entry; internal calls go through _get_store)
 
 logger = logging.getLogger(__name__)
 
