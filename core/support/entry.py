@@ -65,8 +65,6 @@ from core.support.sns import (
     _sns_env_int,
     _sns_github_token,
     _sns_text,
-    _sns_x_rss_template,
-    _sns_x_token,
 )
 
 logger = logging.getLogger("cogs.support")  # 集約後も従来のロガー名を維持（テストの assertLogs 互換）

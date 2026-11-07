@@ -232,7 +232,7 @@ def sns_youtube_kind_allowed(item: SnsItem, settings: dict) -> bool:
 
 
 def parse_rss_feed(data: bytes) -> tuple[str, list[SnsItem]]:
-    """RSS 2.0（RSSHub・Nitter等のX用フィード）を解析する。"""
+    """RSS 2.0フィードを解析する（クエスト等のRSS取得で共用）。"""
     try:
         root = ET.fromstring(data)
     except ET.ParseError as exc:
@@ -342,13 +342,71 @@ def sns_x_since_id(seen: list[str]) -> str | None:
     return max(ids, key=int) if ids else None
 
 
-def _sns_x_token() -> str:
-    return (os.getenv("X_BEARER_TOKEN") or "").strip()
+def _sns_fx_base() -> str:
+    # Xの取得は FxTwitter (FxEmbed) API を使う。必要なら環境変数で自前ホストへ上書きできる。
+    return (os.getenv("FXTWITTER_API_BASE") or "https://api.fxtwitter.com").strip().rstrip("/")
 
 
-def _sns_x_rss_template() -> str:
-    # ローカルRSSサービスを既定値として使用。必要なら環境変数で上書きできる。
-    return (os.getenv("X_RSS_URL") or "http://192.168.11.15:1200/x/user/{username}").strip()
+def parse_fx_profile(payload, username: str) -> tuple[str, str]:
+    """FxTwitter のプロフィール応答を (ユーザーID, 表示名) に変換する。"""
+    if not isinstance(payload, dict) or payload.get("code") != 200:
+        raise SnsError("Xのアカウント情報を取得できませんでした。")
+    user = payload.get("user")
+    if not isinstance(user, dict):
+        raise SnsError(f"@{username} が見つかりませんでした。")
+    if user.get("protected"):
+        raise SnsError(f"@{username} は鍵アカウントのため、ポストを取得できません。")
+    uid = str(user.get("id") or "")
+    name = str(user.get("name") or "").strip() or f"@{username}"
+    return uid, name
+
+
+def parse_fx_statuses(payload, username: str) -> list[SnsItem]:
+    """FxTwitter の statuses 応答を、本人のポストのみに絞って SnsItem 化する。
+
+    絞り込み（旧公式APIの exclude=replies,retweets に相当する通知セマンティクス）:
+    - reposted_by があるポストは除外する。他人のポストのリポストに加え、
+      自己リポストも ID が元ポストと同一で元ポスト投稿時に通知済みのため除外する。
+    - replying_to が他人宛の返信は除外する。自分宛（スレッドの続き）の返信は含める。
+    - 引用ポストは本人の投稿として含める。
+    """
+    if not isinstance(payload, dict) or payload.get("code") != 200:
+        raise SnsError("Xのポスト一覧を取得できませんでした。")
+    owner = username.lower()
+    items: list[SnsItem] = []
+    for row in payload.get("results") or []:
+        if not isinstance(row, dict):
+            continue
+        author = row.get("author") if isinstance(row.get("author"), dict) else {}
+        screen = str(author.get("screen_name") or "")
+        if screen.lower() != owner:
+            continue
+        if row.get("reposted_by"):
+            continue
+        replying_to = row.get("replying_to")
+        if isinstance(replying_to, dict):
+            target = str(replying_to.get("screen_name") or "")
+            if target and target.lower() != owner:
+                continue
+        post_id = str(row.get("id") or "")
+        if not post_id:
+            continue
+        published = None
+        stamp = row.get("created_timestamp")
+        if isinstance(stamp, (int, float)) and not isinstance(stamp, bool):
+            published = datetime.fromtimestamp(stamp, tz=timezone.utc).isoformat()
+        elif isinstance(row.get("created_at"), str):
+            published = row["created_at"]
+        items.append(
+            SnsItem(
+                id=post_id,
+                title=str(row.get("text") or ""),
+                url=str(row.get("url") or f"https://x.com/{username}/status/{post_id}"),
+                author=screen,
+                published=published,
+            )
+        )
+    return items
 
 
 class SnsFetcher:
@@ -423,71 +481,31 @@ class SnsFetcher:
             raise SnsError(f"YouTubeフィードの取得に失敗しました（HTTP {status}）。")
         return parse_youtube_feed(body)
 
-    # --- X ---------------------------------------------------------------
-    async def _x_api(self, path: str, params=None) -> dict:
-        status, body = await self._get(
-            f"https://api.x.com/2/{path}",
-            params=params,
-            headers={"Authorization": f"Bearer {_sns_x_token()}"},
-        )
-        if status != 200:
-            messages = {
-                401: "X APIの認証に失敗しました（X_BEARER_TOKENを確認してください）。",
-                402: "X APIのクレジットが不足しています。",
-                403: "X APIへのアクセスが拒否されました（プランや権限を確認してください）。",
-                429: "X APIのレート制限に達しました。しばらく待つと再開します。",
-            }
-            raise SnsError(messages.get(status, f"X APIがHTTP {status}を返しました。"))
+    # --- X（FxTwitter / FxEmbed API） -------------------------------------
+    async def _fx_get_json(self, path: str) -> dict:
+        status, body = await self._get(f"{_sns_fx_base()}{path}")
         try:
-            return json.loads(body)
-        except ValueError as exc:
-            raise SnsError("X APIの応答を解析できませんでした。") from exc
+            payload = json.loads(body)
+        except ValueError:
+            payload = None
+        code = payload.get("code") if isinstance(payload, dict) else None
+        effective = code if isinstance(code, int) and not isinstance(code, bool) else status
+        # FxTwitter は HTTP ステータスと JSON の code の両方に結果を返すため両方を見る。
+        if status == 404 or effective == 404:
+            raise SnsError("Xのアカウントが見つかりませんでした。")
+        if status == 429 or effective == 429:
+            raise SnsError("FxTwitter APIのレート制限に達しました。しばらく待つと再開します。")
+        if status != 200 or effective != 200:
+            raise SnsError(f"Xの取得に失敗しました（FxTwitter API: HTTP {status}）。")
+        return payload
 
-    async def x_lookup_user(self, username: str) -> tuple[str, str]:
-        payload = await self._x_api(f"users/by/username/{username}")
-        data = payload.get("data")
-        if not data:
-            raise SnsError(f"@{username} が見つかりませんでした。")
-        return str(data["id"]), str(data.get("name") or username)
+    async def x_fx_lookup_user(self, username: str) -> tuple[str, str]:
+        payload = await self._fx_get_json(f"/2/profile/{quote(username)}")
+        return parse_fx_profile(payload, username)
 
-    async def x_api_posts(self, uid: str, username: str, since_id: str | None) -> list[SnsItem]:
-        # 課金は「返ったポスト数」単位なので、since_idで新着だけを取得する
-        params = {
-            "max_results": "10" if since_id else "5",
-            "exclude": "replies,retweets",
-            "tweet.fields": "created_at",
-        }
-        if since_id:
-            params["since_id"] = since_id
-        payload = await self._x_api(f"users/{uid}/tweets", params)
-        return [
-            SnsItem(
-                id=str(tweet["id"]),
-                title=str(tweet.get("text") or ""),
-                url=f"https://x.com/{username}/status/{tweet['id']}",
-                author=username,
-                published=tweet.get("created_at"),
-            )
-            for tweet in payload.get("data") or []
-        ]
-
-    async def x_rss_posts(self, username: str) -> list[SnsItem]:
-        template = _sns_x_rss_template()
-        if not template:
-            raise SnsError(
-                "X RSSの取得に失敗しました。RSSサービスと X_RSS_URL の設定を確認してください。"
-            )
-        # URL内でプレースホルダーが %7Busername%7D とURLエンコードされていても対応する。
-        url = re.sub(r"%7Busername%7D", quote(username), template, flags=re.I)
-        url = url.replace("{username}", quote(username))
-        status, body = await self._get(url)
-        if status != 200:
-            raise SnsError(f"XのRSS取得に失敗しました（HTTP {status}）。")
-        _, items = parse_rss_feed(body)
-        for item in items:
-            if re.fullmatch(r"\d+", item.id):
-                item.url = f"https://x.com/{username}/status/{item.id}"
-        return items
+    async def x_fx_posts(self, username: str) -> list[SnsItem]:
+        payload = await self._fx_get_json(f"/2/profile/{quote(username)}/statuses")
+        return parse_fx_statuses(payload, username)
 
     # --- GitHub ------------------------------------------------------------
     def _github_headers(self) -> dict:
@@ -567,13 +585,10 @@ class SnsFetcher:
             return {"key": full_name, "name": full_name, "uid": None, "items": items}
 
         username = parse_x_username(raw)
-        # Xは無料のRSS経由に統一し、X APIトークンが設定されていても使用しない。
-        if _sns_x_rss_template():
-            items = await self.x_rss_posts(username)
-            return {"key": username.lower(), "name": f"@{username}", "uid": None, "items": items}
-        raise SnsError(
-            "X RSSの取得に失敗しました。RSSサービスと X_RSS_URL の設定を確認してください。"
-        )
+        # Xは FxTwitter (FxEmbed) API 経由で取得する（認証・追加設定は不要）。
+        uid, name = await self.x_fx_lookup_user(username)
+        items = await self.x_fx_posts(username)
+        return {"key": username.lower(), "name": name, "uid": uid or None, "items": items}
 
     async def poll(self, sub: dict) -> tuple[list[SnsItem], str | None]:
         """巡回用。戻り値は (取得したアイテム, 判明したX user id)。"""
@@ -589,10 +604,8 @@ class SnsFetcher:
             return items, None
 
         username = sub["key"]
-        # X通知はRSSを使用。APIの課金・トークン設定には依存しない。
-        if _sns_x_rss_template():
-            return await self.x_rss_posts(username), None
-        raise SnsError("X RSSの取得先が設定されていません。RSSサービスと X_RSS_URL の設定を確認してください。")
+        # X通知は FxTwitter (FxEmbed) API を使用。課金・トークン設定には依存しない。
+        return await self.x_fx_posts(username), None
 
 
 def get_sns_settings(store, guild_id: int) -> dict:
