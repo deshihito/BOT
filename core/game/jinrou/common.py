@@ -7,17 +7,15 @@ from collections import Counter
 logger = logging.getLogger("cogs.jinrou")
 import os
 import discord
-from core.game import game_panels
+from core.game.game import game_panels
 from core.support.emojis import FAILED, SUCCESS
-from core.game import jinrou_guide
+from core.game.jinrou import jinrou_guide
 from discord import app_commands
 from discord.ext import commands
 
-from core.game import autoplay
-from core.game import jinrou_review
-
-from core.game import party_ranking
-
+from core.game.game import autoplay
+from core.game.jinrou import jinrou_review
+from core.game.game import party_ranking
 party_ranking.register("jinrou")
 import math
 
@@ -118,7 +116,7 @@ def phase_summary_view(title: str, lines: list[str], *, color: int | None = None
     ``color`` は旧 embed の色分け用引数で、V2 パネルには色の概念がないため
     互換のために受け取るだけで使わない。
     """
-    from core.game.game_v2 import text_panel
+    from core.game.game.game_v2 import text_panel
 
     return text_panel(title, "\n".join(lines))
 
