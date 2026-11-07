@@ -82,7 +82,6 @@ def build_panel_embed() -> discord.Embed:
         title="提案箱",
         description=(
             "サーバーへの提案を募集しています。"
-            "\n下の「提案する」ボタンから、タイトルと内容を送ってください。"
             "\n投稿された提案には、誰でも賛成・反対を投票できます。"
         ),
         color=0xFFFFFF,

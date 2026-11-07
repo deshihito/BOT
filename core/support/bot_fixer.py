@@ -11,6 +11,7 @@ from .common import *
 from core.support import bot_control, command_control
 from core.general import action_registry
 from core.support.bot_control import BOT_CONTROL_SECTION
+from core.support.messages import SETTINGS_UPDATE_FAILED
 from core.support.command_control import (
     COMMAND_CONTROL_SECTION,
     MODE_ALLOW,
@@ -431,7 +432,7 @@ class BotFixerPanel(discord.ui.LayoutView):
         except Exception:
             logger.exception("BOT fixer（ボット制限）設定の更新に失敗しました")
             return await interaction.followup.send(
-                "設定の更新に失敗しました。時間をおいて再度お試しください。解決しない場合はBotの運営に連絡してください。",
+                SETTINGS_UPDATE_FAILED,
                 ephemeral=True,
             )
         store = guild_settings.get_store()
@@ -460,7 +461,7 @@ class BotFixerPanel(discord.ui.LayoutView):
         except Exception:
             logger.exception("BOT fixer（コマンド制限）設定の更新に失敗しました")
             return await interaction.followup.send(
-                "設定の更新に失敗しました。時間をおいて再度お試しください。解決しない場合はBotの運営に連絡してください。",
+                SETTINGS_UPDATE_FAILED,
                 ephemeral=True,
             )
         store = guild_settings.get_store()

@@ -23,6 +23,12 @@ import config
 from core.game.clan import clan as clan_core
 from core.game.game import prison as prison_core
 from core.general.user_names import cached_display_name, resolve_display_names
+from core.support.messages import (
+    ACTION_FAILED_RETRY,
+    CLAIM_FAILED_RETRY,
+    COIN_UPDATE_FAILED_UNCHANGED,
+    REFUND_FAILED_CONTACT,
+)
 from core.support.panel_v2 import as_panel_v2, edit_panel_v2
 from cogs import general as wallet_module
 
@@ -161,7 +167,7 @@ class ClanView(discord.ui.View):
             message = await coro
         except Exception:
             logger.exception("clan: 実行に失敗しました")
-            message = "実行中にエラーが発生しました。時間をおいて再試行してください。"
+            message = ACTION_FAILED_RETRY
         await interaction.followup.send(message)
         await self._refresh_panel(interaction)
 
@@ -427,7 +433,7 @@ class ClanCog(commands.Cog):
         if debit is wallet_module.INSUFFICIENT:
             return f"コインが足りません（{clan_core.CREATE_COST:,} AGO 必要です）。"
         if debit is None:
-            return "コインの更新に失敗しました。残高は変わっていません。"
+            return COIN_UPDATE_FAILED_UNCHANGED
         try:
             clan = self.store.create(uid, name)
         except clan_core.ClanError as exc:
@@ -440,7 +446,7 @@ class ClanCog(commands.Cog):
                     "clan: クラン作成の返金に失敗しました。"
                     "手動で戻してください user=%s amount=%s",
                     uid, clan_core.CREATE_COST)
-                return f"{exc}\n返金に失敗しました。Botの運営に連絡してください。"
+                return f"{exc}\n{REFUND_FAILED_CONTACT}"
             return str(exc)
         await self._record_history(
             uid, "clan", clan_core.CREATE_COST, clan_core.HISTORY_REASON)
@@ -491,7 +497,7 @@ class ClanCog(commands.Cog):
         if debit is wallet_module.INSUFFICIENT:
             return f"コインが足りません（{clan_core.RENAME_COST:,} AGO 必要です）。"
         if debit is None:
-            return "コインの更新に失敗しました。残高は変わっていません。"
+            return COIN_UPDATE_FAILED_UNCHANGED
         try:
             renamed = self.store.rename(uid, name)
         except clan_core.ClanError as exc:
@@ -503,7 +509,7 @@ class ClanCog(commands.Cog):
                     "clan: クラン改名の返金に失敗しました。"
                     "手動で戻してください user=%s amount=%s",
                     uid, clan_core.RENAME_COST)
-                return f"{exc}\n返金に失敗しました。Botの運営に連絡してください。"
+                return f"{exc}\n{REFUND_FAILED_CONTACT}"
             return str(exc)
         await self._record_history(
             uid, "clan", clan_core.RENAME_COST,
@@ -535,7 +541,7 @@ class ClanCog(commands.Cog):
         except Exception:
             logger.exception("clan: クランボーナスの付与に失敗 user=%s", uid)
             self.store.unclaim_bonus(uid)
-            return "受け取りに失敗しました。時間をおいて再試行してください。"
+            return CLAIM_FAILED_RETRY
         return "🎁 **クランボーナスを受け取りました！** 宝箱×1"
 
     async def disband_clan(self, user_id: int) -> str:

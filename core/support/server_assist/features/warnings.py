@@ -157,8 +157,7 @@ def build_panel_embed() -> discord.Embed:
     return discord.Embed(
         title="警告",
         description=(
-            "下のメニューから警告するメンバーを選んでください。"
-            "\n警告の理由を入力すると、記録・ログ・DM通知を行います。"
+            "警告の理由を入力すると、記録・ログ・DM通知を行います。"
             "\n操作できるのは「サーバーの管理」権限か、設定したモデレーターロールを持つ人だけです。"
         ),
         color=0xFFFFFF,

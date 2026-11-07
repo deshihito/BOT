@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 """便乗 (binjou) の UI と設定取得。元 cogs/support.py から分割。"""
 from __future__ import annotations
+from core.support.messages import SETTINGS_UPDATE_FAILED
 from core.support.emojis import THINKING
 
 from .common import *
@@ -104,7 +105,7 @@ class EmojiBinjouView(discord.ui.View):
         except Exception:
             logger.exception("binjou設定の更新に失敗しました (key=%s)", key)
             await interaction.followup.send(
-                "設定の更新に失敗しました。時間をおいて再度お試しください。解決しない場合はBotの運営に連絡してください。",
+                SETTINGS_UPDATE_FAILED,
                 ephemeral=True,
             )
 

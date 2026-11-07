@@ -29,6 +29,9 @@ from core.general.items import items as items_core
 from core.game.game import prison as prison_core
 from core.general.workshop import workshop as workshop_core
 from core.support.messages import (
+    COIN_UPDATE_FAILED_RETRY,
+    PURCHASE_FAILED_RETRY,
+    REFUND_FAILED_CONTACT,
     craft_action_failed,
     workshop_action_failed,
 )
@@ -375,7 +378,7 @@ class WorkshopCog(commands.Cog):
             if debit is wallet_module.INSUFFICIENT:
                 return workshop_action_failed("コインが不足しています。")
             if debit is None:
-                return workshop_action_failed("コインの更新に失敗しました。時間をおいて再試行してください。")
+                return workshop_action_failed(COIN_UPDATE_FAILED_RETRY)
             try:
                 self.workshop_store.add_machine(uid, tier_id)
             except items_core.ItemError as exc:
@@ -387,7 +390,7 @@ class WorkshopCog(commands.Cog):
                         "workshop: 加工機購入の返金に失敗しました。"
                         "手動で戻してください user=%s amount=%s", uid, price)
                     return workshop_action_failed(
-                        f"{exc}\n返金に失敗しました。Botの運営に連絡してください。")
+                        f"{exc}\n{REFUND_FAILED_CONTACT}")
                 return workshop_action_failed(exc)
             await self._record_history(uid, WORKSHOP_ID, price, "machine_buy")
             return (
@@ -401,7 +404,7 @@ class WorkshopCog(commands.Cog):
             return workshop_action_failed(exc)
         except Exception:
             logger.exception("workshop: 加工機の購入に失敗 user=%s tier=%s", uid, tier_id)
-            return workshop_action_failed("購入中にエラーが発生しました。時間をおいて再試行してください。")
+            return workshop_action_failed(PURCHASE_FAILED_RETRY)
 
     def execute_claim(self, user_id: int) -> str:
         uid = str(user_id)

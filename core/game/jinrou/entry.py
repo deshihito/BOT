@@ -6,6 +6,7 @@ from collections import Counter
 import os
 import discord
 from core.game.game import game_panels
+from core.general.user_names import fallback_name, resolve_display_names
 from core.support.emojis import FAILED, SUCCESS
 from core.game.jinrou import jinrou_guide
 from discord import app_commands
@@ -83,15 +84,15 @@ class JinrouCog(LifecycleMixin, GameLoopMixin, AutoplayMixin, ResultsMixin, comm
         """/game の人狼画面の「レート」から呼ぶ。自分のレートと、レート上位10人。"""
         rating = await get_player_rating(user.id)
         rankings = await get_top_ratings(10)
+        names = await resolve_display_names(
+            self.bot, [entry["player_id"] for entry in rankings or []])
         lines = []
         for i, entry in enumerate(rankings or [], 1):
             player_id = entry["player_id"]
             try:
-                fetched = await self.bot.fetch_user(player_id)
-                name = fetched.display_name if fetched else f"ID: {player_id}"
-            except Exception:
-                logger.debug("人狼: プレイヤー名の解決に失敗しました", exc_info=True)
-                name = f"ID: {player_id}"
+                name = names.get(int(player_id)) or fallback_name(player_id)
+            except (TypeError, ValueError):
+                name = fallback_name(player_id)
             lines.append(f"{i}. **{name}**: {entry['rating']:.0f} pts")
         ranking_text = "\n".join(lines) if lines else "ランキングデータがまだありません。"
         return discord.Embed(

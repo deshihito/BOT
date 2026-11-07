@@ -100,7 +100,6 @@ def build_panel_embed(channel: Any, owner_id: int) -> discord.Embed:
         title="一時VC",
         description=(
             f"作成者: <@{owner_id}>"
-            "\n\n下のボタンから、名前変更・人数制限・ロック・削除ができます。"
             "\n退出して誰もいなくなると、自動で削除されます。"
         ),
         color=0xFFFFFF,

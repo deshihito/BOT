@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from .common import *
+from core.support.messages import SETTINGS_UPDATE_FAILED
 
 
 class StickyChannelSelect(discord.ui.ChannelSelect):
@@ -194,7 +195,7 @@ class StickySettingsView(discord.ui.View):
         except Exception:
             logger.exception("Stickyパネル有効状態の更新に失敗しました")
             await interaction.followup.send(
-                "Sticky設定の更新に失敗しました。時間をおいて再度お試しください。解決しない場合はBotの運営に連絡してください。",
+                f"Sticky{SETTINGS_UPDATE_FAILED}",
                 ephemeral=True,
             )
 

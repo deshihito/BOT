@@ -40,7 +40,13 @@ from core.general.circulation import economy_pool as economy_core
 from core.game.gambling import gambling as gambling_core
 from core.general.items import items as items_core
 from core.game.game import prison as prison_core
-from core.support.messages import GAMBLING_INVALID_AMOUNT, gambling_action_failed
+from core.support.messages import (
+    ACTION_FAILED_RETRY,
+    COIN_UPDATE_FAILED_RETRY,
+    GAMBLING_INVALID_AMOUNT,
+    REFUND_FAILED_CONTACT,
+    gambling_action_failed,
+)
 from core.support.panel_v2 import as_panel_v2, edit_message_v2, edit_panel_v2
 from cogs import general as wallet_module  # INSUFFICIENT は実行時に引く（テストの cog 再読込で同一性が崩れないため）
 
@@ -1052,13 +1058,13 @@ class GamblingCog(commands.Cog):
                     f"コインが不足しています（必要: {total:,} AGO）。")
             if debit is None:
                 return gambling_action_failed(
-                    "コインの更新に失敗しました。時間をおいて再試行してください。")
+                    COIN_UPDATE_FAILED_RETRY)
             try:
                 self.store.start_slot(uid, spins)
             except items_core.ItemError as exc:
                 if not await self._refund_failed_start(uid, total):
                     return gambling_action_failed(
-                        "返金に失敗しました。Botの運営に連絡してください。")
+                        REFUND_FAILED_CONTACT)
                 return gambling_action_failed(exc)
             self._slot_rewards[uid] = 0
             await self._record_history(uid, GAMBLING_ID, total, "gamble_slot")
@@ -1273,13 +1279,13 @@ class GamblingCog(commands.Cog):
                 return gambling_action_failed("コインが不足しています。")
             if debit is None:
                 return gambling_action_failed(
-                    "コインの更新に失敗しました。時間をおいて再試行してください。")
+                    COIN_UPDATE_FAILED_RETRY)
             try:
                 self.store.start_double(uid, bet)
             except items_core.ItemError as exc:
                 if not await self._refund_failed_start(uid, bet):
                     return gambling_action_failed(
-                        "返金に失敗しました。Botの運営に連絡してください。")
+                        REFUND_FAILED_CONTACT)
                 return gambling_action_failed(exc)
             await self._record_history(uid, GAMBLING_ID, bet, "gamble_double")
             return (f"{DICE} **ダブルアップ開始！** BET: {bet:,} AGO\n"
@@ -1309,7 +1315,7 @@ class GamblingCog(commands.Cog):
         except Exception:
             logger.exception("gambling: ダブルアップのGOに失敗 user=%s", uid)
             return gambling_action_failed(
-                "実行中にエラーが発生しました。時間をおいて再試行してください。")
+                ACTION_FAILED_RETRY)
 
     async def execute_double_cashout(self, user_id: int) -> str:
         uid = str(user_id)
@@ -1335,7 +1341,7 @@ class GamblingCog(commands.Cog):
         except Exception:
             logger.exception("gambling: ダブルアップの確定に失敗 user=%s", uid)
             return gambling_action_failed(
-                "実行中にエラーが発生しました。時間をおいて再試行してください。")
+                ACTION_FAILED_RETRY)
 
     # ------------------------------------------------------------------ ブラックジャックの実行
     async def execute_blackjack_start(self, user_id: int, bet: int) -> str:
@@ -1356,13 +1362,13 @@ class GamblingCog(commands.Cog):
                 return gambling_action_failed("コインが不足しています。")
             if debit is None:
                 return gambling_action_failed(
-                    "コインの更新に失敗しました。時間をおいて再試行してください。")
+                    COIN_UPDATE_FAILED_RETRY)
             try:
                 session = self.store.start_blackjack(uid, bet)
             except items_core.ItemError as exc:
                 if not await self._refund_failed_start(uid, bet):
                     return gambling_action_failed(
-                        "返金に失敗しました。Botの運営に連絡してください。")
+                        REFUND_FAILED_CONTACT)
                 return gambling_action_failed(exc)
             await self._record_history(uid, GAMBLING_ID, bet, "gamble_blackjack")
             total = gambling_core.calc_total(session["player"])
@@ -1397,7 +1403,7 @@ class GamblingCog(commands.Cog):
         except Exception:
             logger.exception("gambling: ブラックジャックのヒットに失敗 user=%s", uid)
             return gambling_action_failed(
-                "実行中にエラーが発生しました。時間をおいて再試行してください。"), True
+                ACTION_FAILED_RETRY), True
 
     async def execute_blackjack_stand(self, user_id: int) -> str:
         uid = str(user_id)
@@ -1434,7 +1440,7 @@ class GamblingCog(commands.Cog):
         except Exception:
             logger.exception("gambling: ブラックジャックのスタンドに失敗 user=%s", uid)
             return gambling_action_failed(
-                "実行中にエラーが発生しました。時間をおいて再試行してください。")
+                ACTION_FAILED_RETRY)
 
     # ------------------------------------------------------------------ bj_duel の実行（S6-3）
     async def _duel_debit(self, uid: str, bet: int) -> str | None:
@@ -1445,7 +1451,7 @@ class GamblingCog(commands.Cog):
             return gambling_action_failed("コインが不足しています。")
         if debit is None:
             return gambling_action_failed(
-                "コインの更新に失敗しました。時間をおいて再試行してください。")
+                COIN_UPDATE_FAILED_RETRY)
         await self._record_history(
             uid, GAMBLING_ID, bet, gambling_core.DUEL_HISTORY_REASON)
         return None
@@ -1573,7 +1579,7 @@ class GamblingCog(commands.Cog):
         except Exception:
             logger.exception("gambling: 対決のヒットに失敗 user=%s", uid)
             return gambling_action_failed(
-                "実行中にエラーが発生しました。時間をおいて再試行してください。")
+                ACTION_FAILED_RETRY)
 
     async def execute_duel_stand(self, user_id: int) -> str:
         uid = str(user_id)
@@ -1590,7 +1596,7 @@ class GamblingCog(commands.Cog):
         except Exception:
             logger.exception("gambling: 対決のスタンドに失敗 user=%s", uid)
             return gambling_action_failed(
-                "実行中にエラーが発生しました。時間をおいて再試行してください。")
+                ACTION_FAILED_RETRY)
 
     async def cancel_duel_for(self, user_id: int, *, timeout: bool = False) -> str:
         """対決の取り消し／中断。
@@ -1651,7 +1657,7 @@ class GamblingCog(commands.Cog):
                 return gambling_action_failed("コインが不足しています。")
             if debit is None:
                 return gambling_action_failed(
-                    "コインの更新に失敗しました。時間をおいて再試行してください。")
+                    COIN_UPDATE_FAILED_RETRY)
             await self._record_history(uid, GAMBLING_ID, bet, "gamble_dice")
             result = self.store.play_dice(max_value, number)
             if result["hit"]:
@@ -1676,7 +1682,7 @@ class GamblingCog(commands.Cog):
         except Exception:
             logger.exception("gambling: ダイスに失敗 user=%s", uid)
             return gambling_action_failed(
-                "実行中にエラーが発生しました。時間をおいて再試行してください。")
+                ACTION_FAILED_RETRY)
 
 
 async def setup(bot: commands.Bot):

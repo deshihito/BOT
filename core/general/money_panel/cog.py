@@ -44,6 +44,7 @@ from core.general.items import items as items_core
 from core.general.market import market as market_core
 from core.game.game import prison as prison_core
 from core.general.money_panel import starter as starter_core
+from core.support.messages import ACTION_FAILED_RETRY, CLAIM_FAILED_RETRY
 from core.support.panel_v2 import as_panel_v2, edit_message_v2, edit_panel_v2
 from cogs import general as wallet_module  # 定数は実行時に引く（テストの cog 再読込対策）
 
@@ -381,7 +382,7 @@ class MoneyPanelView(discord.ui.View):
                 result = await result
         except Exception:
             logger.exception("money_panel: 直接実行に失敗しました")
-            result = "実行中にエラーが発生しました。時間をおいて再試行してください。"
+            result = ACTION_FAILED_RETRY
         await interaction.followup.send(result, ephemeral=ephemeral)
         await self.refresh_panel()
 
@@ -652,7 +653,7 @@ class MoneyPanelCog(commands.Cog):
         except Exception:
             logger.exception("money_panel: スターター付与に失敗 user=%s", uid)
             self.starter_store.unclaim(uid)
-            return "受け取りに失敗しました。時間をおいて再試行してください。"
+            return CLAIM_FAILED_RETRY
         # E-2: コインは DB へ即時コミットされるため、受け取り記録も
         # 成功直後に flush して永続化する（claim_daily_bonus と同型）。
         # これが無いと通常再起動で記録が巻き戻り再受取できてしまう。
@@ -698,7 +699,7 @@ class MoneyPanelCog(commands.Cog):
         except Exception:
             logger.exception("money_panel: デイリーボーナス付与に失敗 user=%s", uid)
             self.daily_store.unclaim(uid)
-            return "受け取りに失敗しました。時間をおいて再試行してください。"
+            return CLAIM_FAILED_RETRY
         self.daily_store.flush()
         try:
             await asyncio.to_thread(lambda: config.db_api.table(
