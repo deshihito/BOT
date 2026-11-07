@@ -1,0 +1,8 @@
+[Unit]
+Description=AGOBOT Web autodeploy check (rebuild when the BOT checkout has advanced)
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=luna
+ExecStart=/usr/bin/bash /home/luna/BOT/deploy/web-autodeploy.sh
