@@ -1,4 +1,4 @@
-"""コマンドカタログ（core/help/command_catalog.py・core/help/command_meta.py）と /help・!help のテスト。
+"""コマンドカタログ（core/help/help/command_catalog.py・core/help/help/command_meta.py）と /help・!help のテスト。
 
 全 cog を tools/export_commands.py と同じ方法でオフラインに読み込み（Discord・Supabase には接続しない）、
 - 登録されているコマンドすべてに command_meta のカテゴリがあること
@@ -27,8 +27,8 @@ from tools import export_commands  # noqa: E402
 import discord  # noqa: E402
 from discord.ext import commands  # noqa: E402
 
-from core.help import command_catalog, command_meta  # noqa: E402
-from core.help.command_catalog import build_catalog, command_key, registered_commands, validate_catalog  # noqa: E402
+from core.help.help import command_catalog, command_meta  # noqa: E402
+from core.help.help.command_catalog import build_catalog, command_key, registered_commands, validate_catalog  # noqa: E402
 
 LIMITS = {'title': 256, 'description': 4096, 'field_name': 256, 'field_value': 1024, 'fields': 25, 'total': 6000,
           'footer': 2048}
@@ -104,7 +104,7 @@ class CommandCatalogTest(unittest.TestCase):
     # ------------------------------------------------------------ メタデータ
     def test_every_registered_command_has_metadata(self):
         missing = sorted(set(registered_commands(self.bot)) - set(command_meta.COMMAND_META))
-        self.assertEqual(missing, [], 'core/help/command_meta.py の COMMAND_META に、これらのコマンドの '
+        self.assertEqual(missing, [], 'core/help/help/command_meta.py の COMMAND_META に、これらのコマンドの '
                                       'category（と必要なら summary・hidden など）を追加してください')
 
     def test_metadata_refers_to_existing_commands(self):

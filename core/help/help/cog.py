@@ -12,9 +12,9 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
-from core.help.command_catalog import (build_catalog, command_key, find_command, permission_label, registered_commands,
+from core.help.help.command_catalog import (build_catalog, command_key, find_command, permission_label, registered_commands,
                                   visible_commands)
-from core.help.command_meta import COMMAND_META
+from core.help.help.command_meta import COMMAND_META
 from core.support.emojis import BACK, BOOK, LEFT, RIGHT
 from core.support.panel_v2 import as_panel_v2, edit_panel_v2
 

@@ -30,7 +30,7 @@ from core.vc.voice_session import SHARED_FEATURES, VoiceBusy, get_manager
 from core.vc.voice_media import add_audio_source, has_audio_source, remove_audio_source
 from core.support.legacy import Responder
 from core.support.emojis import CLOCK, FAILED, MUSIC, SUCCESS, VOL
-from core.vc.music_activity import build_music_activity_snapshot
+from core.vc.music.music_activity import build_music_activity_snapshot
 
 from core.vc.music.common import *  # noqa: F401,F403 - shared helpers/constants
 

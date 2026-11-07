@@ -15,7 +15,7 @@ from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from core.help import command_meta
+from core.help.help import command_meta
 from core.support.usage_stats import usage_stats
 def make_store(tmpdir, **kwargs):
     return usage_stats.UsageStatsStore(Path(tmpdir) / "usage_stats.json", **kwargs)

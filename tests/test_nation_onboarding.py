@@ -16,7 +16,7 @@ import discord  # noqa: E402
 from discord.ext import commands  # noqa: E402
 
 from cogs import nation_onboarding as onboarding  # noqa: E402
-from core.help import command_meta  # noqa: E402
+from core.help.help import command_meta  # noqa: E402
 from core.support.storage import KVStore  # noqa: E402
 
 

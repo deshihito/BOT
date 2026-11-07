@@ -2,7 +2,7 @@
 
 カタログは /help と、Web サイト向けの書き出し（tools/export_commands.py）の両方で使う。
 コマンド名・種類・説明・オプション・権限・サーバー限定かどうか・別名は Bot から自動で読み取り、
-カテゴリ・使い方・非表示・ガイドなど人が決める情報は core/help/command_meta.py から合わせる。
+カテゴリ・使い方・非表示・ガイドなど人が決める情報は core/help/help/command_meta.py から合わせる。
 
 形式（TYPETA の Web サイトと合意したもの）::
 
@@ -32,8 +32,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
-from core.help import command_meta
-
+from core.help.help import command_meta
 KINDS = ("slash", "prefix")
 PREFIX = "!"
 OTHER_CATEGORY = {

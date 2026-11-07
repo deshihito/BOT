@@ -17,7 +17,7 @@ from typing import Optional
 import discord
 from discord.ext import commands
 
-from core.help.command_catalog import permission_label
+from core.help.help.command_catalog import permission_label
 from core.support.emojis import BOOK, COIN, FAILED, GAME, GEAR, MUSIC, SUCCESS
 from core.support.guild_settings import NATION_SECTION, NOTIFY_LEVELS, NOTIFY_MAJOR, get_store, nation_settings
 from core.support.panel_v2 import as_panel_v2
