@@ -3,16 +3,25 @@
 
 - 勝ったら ``record_win`` を呼ぶ。メモリの表には必ず足し、自前API の関数
   ``party_game_record_win`` にも送る。関数がまだ無い・通信に失敗したときは
-  ログを 1 回だけ出して、以後はメモリだけで続ける（ゲームは止めない）。
+  ログを出してメモリだけで続ける（ゲームは止めない）。関数・ビュー不在で
+  リモートを無効化した場合も ``DISABLED_RETRY_SECONDS`` 後に再試行するので、
+  SQL を後から適用すれば再起動なしで復旧する。
 - ``top`` はビュー ``party_game_ranking`` を読み、読めなければメモリの表を返す。
+  ``monthly_top`` の月次ビュー読み込み失敗も WARNING に残す（debug だと
+  「今月のゲーム王」が静かにメモリ集計だけになるのが追えないため）。
 - 自前API クライアントの取り出しは ``_default_client`` の 1 か所だけ。
   共通の接続モジュール core/support/api_client.py（#59）があればそれを、無ければ config.db_api を使う。
 """
 import asyncio
 import logging
+import time
 from datetime import datetime
 
 log = logging.getLogger(__name__)
+
+# 関数・ビューが無いと分かったときのリモート無効化は恒久にしない。
+# SQL を後から適用すれば、再起動なしでこの間隔の後に自動で使いに戻る。
+DISABLED_RETRY_SECONDS = 300.0
 
 
 def current_month() -> str:
@@ -45,11 +54,26 @@ class PartyRanking:
         self.memory: dict = {}          # (guild_id, game) -> {user_id: 勝利数}
         self.monthly_memory: dict = {}  # (guild_id, "YYYY-MM") -> {user_id: 全ゲーム合計勝利数}
         self.remote_disabled = False
+        self._disabled_at: float | None = None
         self._warned = False
+        self._monthly_warned = False
 
     @property
     def remote_enabled(self) -> bool:
-        return self.client is not None and not self.remote_disabled
+        if self.client is None:
+            return False
+        if self.remote_disabled:
+            # 無効化から一定時間が経ったら 1 回だけ再試行を許可する
+            # （SQL の後追い適用や API 側の復旧を、再起動なしで拾うため）。
+            if self._disabled_at is not None and (
+                time.monotonic() - self._disabled_at >= DISABLED_RETRY_SECONDS
+            ):
+                self.remote_disabled = False
+                self._disabled_at = None
+                log.info("party ranking: リモートへの再接続を試みます")
+            else:
+                return False
+        return True
 
     def _failed(self, action, error):
         text = f"{getattr(error, 'code', '')} {getattr(error, 'message', '')} {error}"
@@ -58,10 +82,19 @@ class PartyRanking:
             "PGRST202", "PGRST205", "42883", "42P01", "does not exist", "Could not find",
         )
         if any(s in text for s in missing):
-            self.remote_disabled = True   # 関数・ビューがまだ無い。再起動までメモリだけ
-        if not self._warned:
+            if not self.remote_disabled:
+                # 無効化への遷移は、初回でなくても必ず WARNING に残す。
+                log.warning(
+                    "party ranking: %s に失敗したのでメモリだけで続けます"
+                    "（関数・ビューが無い可能性。%s 秒後に再試行します）: %r",
+                    action, int(DISABLED_RETRY_SECONDS), error,
+                )
+            self.remote_disabled = True   # 関数・ビューがまだ無い。当面はメモリだけ
+            self._disabled_at = time.monotonic()
             self._warned = True
-            log.warning("party ranking: %s に失敗したのでメモリだけで続けます: %s", action, error)
+        elif not self._warned:
+            self._warned = True
+            log.warning("party ranking: %s に失敗したのでメモリだけで続けます: %r", action, error)
 
     async def _run(self, fn):
         return await asyncio.wait_for(asyncio.to_thread(fn), self.timeout)
@@ -106,16 +139,26 @@ class PartyRanking:
         には触らない。
         """
         month = month or current_month()
-        if self.client is not None and not self.remote_disabled:
+        if self.remote_enabled:
             try:
                 res = await self._run(lambda: self.client.table("party_game_monthly_ranking").select("user_id, wins")
                                       .eq("guild_id", int(guild_id)).eq("month", month)
                                       .order("wins", desc=True).limit(limit).execute())
                 rows = [(int(r["user_id"]), int(r["wins"])) for r in (res.data or [])]
+                self._monthly_warned = False
                 if rows:
                     return rows
-            except Exception:  # noqa: BLE001
-                log.debug("party ranking: 月次ビューの読み込みに失敗したのでメモリを使います", exc_info=True)
+            except Exception as e:  # noqa: BLE001
+                # 月次ビューが読めないと「今月のゲーム王」は再起動時点のメモリ
+                # 集計しか出ず、実質死んだように見える。debug では本番で追えない
+                # ため、初回は WARNING に残す（成功したら次回失敗でまた残す）。
+                if not self._monthly_warned:
+                    self._monthly_warned = True
+                    log.warning(
+                        "party ranking: 月次ビュー party_game_monthly_ranking を読めないので"
+                        "メモリの月次集計を使います（docs/sql/party_game_monthly_ranking.sql の"
+                        "適用と API の許可テーブルを確認してください）: %r", e,
+                    )
         board = self.monthly_memory.get((int(guild_id), month), {})
         return sorted(board.items(), key=lambda kv: (-kv[1], kv[0]))[:limit]
 
