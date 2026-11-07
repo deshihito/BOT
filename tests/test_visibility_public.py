@@ -93,9 +93,9 @@ class MarketChartVisibilityTest(unittest.IsolatedAsyncioTestCase):
         import random
         import tempfile
 
-        import cogs.market as market_module
+        from core.general.market import cog as market_module
         from core.general.market import market as market_core
-        from cogs.market import MarketCog
+        from cogs.general import MarketCog
 
         with tempfile.TemporaryDirectory() as tmp:
             store = market_core.MarketStore(

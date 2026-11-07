@@ -23,7 +23,7 @@ from discord.ext import commands, tasks
 
 import config
 from core.support.daily_report import store as report_core
-from cogs import wallet as wallet_module
+from cogs import general as wallet_module
 
 logger = logging.getLogger(__name__)
 

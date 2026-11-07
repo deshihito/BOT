@@ -16,8 +16,8 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
-from cogs.items import ItemAmountModal  # noqa: E402
-from cogs.market import TradeModal  # noqa: E402
+from cogs.general import ItemAmountModal  # noqa: E402
+from cogs.general import TradeModal  # noqa: E402
 
 
 class TradeModalPlaceholderTest(unittest.TestCase):

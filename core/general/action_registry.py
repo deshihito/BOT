@@ -501,10 +501,11 @@ def default_action_specs() -> list[ActionSpec]:
     """全ルート分の ActionSpec を既存の正リストから組み立てる。
 
     cog モジュールへの import は循環回避のため関数内（遅延）で行う。
-    cogs.general のモジュール初期化中に呼ばれる場合でも、GENERAL_ACTIONS 等は
-    SHORTCUT_ROOTS の定義より前に定義されているため参照できる。
+    GeneralCog 本体（core/general/entry.py）の初期化中に呼ばれる場合でも、
+    GENERAL_ACTIONS 等は SHORTCUT_ROOTS の定義より前に定義されているため
+    参照できる。
     """
-    from cogs.general import GENERAL_ACTIONS, GENERAL_GENRES
+    from core.general.entry import GENERAL_ACTIONS, GENERAL_GENRES
     from cogs.support import SUPPORT_ACTIONS, SUPPORT_ACTIONS_BY_GENRE, SUPPORT_GENRES
     from core.game.game.game_guides import GAME_GUIDES, GAME_ORDER
 

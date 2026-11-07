@@ -3,7 +3,7 @@
 
 - status_updater: truncate_text（Activity 名の長さ制限）
 - allstats: _get_py_file_tree（.py ファイルツリー生成）
-- cogs/ggrks.py: 検索キーワードの URL エンコード
+- ggrks: 検索キーワードの URL エンコード
 """
 import tempfile
 import types
@@ -12,7 +12,7 @@ from pathlib import Path
 from unittest.mock import AsyncMock
 
 from cogs.support import FIELD_VALUE_LIMIT, SystemStatsCog, _limit_field_value
-from cogs.ggrks import GoogleSearch
+from cogs.general import GoogleSearch
 from cogs.support import truncate_text
 
 

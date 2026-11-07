@@ -1,4 +1,7 @@
-"""Slim entry point for the help cog.
+"""ヘルプの入口（cogs/ 6ファイルの1つ）。
+
+対応表（機能 → 実装モジュール → Cog）:
+    help    core/help/help/cog.py   HelpCog
 
 The implementation lives in core.help.help.cog; this module only
 re-exports its names so existing imports and patch targets on

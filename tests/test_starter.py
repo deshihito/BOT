@@ -17,7 +17,7 @@ from types import SimpleNamespace
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from core.general.money_panel import starter as starter_core
-from cogs import wallet as wallet_module
+from cogs import general as wallet_module
 
 
 class StoreTest(unittest.TestCase):
@@ -81,7 +81,7 @@ class _Bot:
 
 class ClaimTest(unittest.TestCase):
     def _cog(self, tmp, wallet):
-        from cogs.money_panel import MoneyPanelCog
+        from cogs.general import MoneyPanelCog
 
         items_cog = SimpleNamespace(store=_ItemStore())
         cog = MoneyPanelCog(
@@ -123,7 +123,7 @@ class ClaimTest(unittest.TestCase):
 
 class PanelTest(unittest.TestCase):
     def test_button_only_when_unclaimed(self):
-        from cogs.money_panel import MoneyPanelView
+        from cogs.general import MoneyPanelView
 
         view = MoneyPanelView(SimpleNamespace(), 1)
         labels = [getattr(c, "label", None) for c in view.children]
@@ -134,7 +134,7 @@ class PanelTest(unittest.TestCase):
         self.assertIn("スターターを受け取る", labels)
 
     def test_guide_line_only_for_low_balance(self):
-        from cogs.money_panel import status_embed
+        from cogs.general import status_embed
 
         embed = status_embed({"balance": 10})
         self.assertIn("採掘と宝くじ", embed.description or "")

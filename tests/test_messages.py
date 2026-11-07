@@ -105,8 +105,8 @@ class UnifiedCallSitesTest(unittest.TestCase):
         # 利用側 cog も同じ既定値を指すこと（生成には bot が要るためソースで確認）
         import inspect
 
-        from cogs.d1_test import D1TestCog
-        from cogs.judge_comment import JudgeCommentCog
+        from cogs.general import D1TestCog
+        from cogs.general import JudgeCommentCog
 
         self.assertIn("DEFAULT_D1_ENDPOINT", inspect.getsource(D1TestCog.__init__))
         self.assertIn("DEFAULT_D1_ENDPOINT", inspect.getsource(JudgeCommentCog.__init__))

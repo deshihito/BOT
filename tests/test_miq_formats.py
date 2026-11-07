@@ -25,7 +25,7 @@ if ROOT not in sys.path:
 
 from PIL import Image, ImageDraw
 
-import cogs.general as g
+import core.general.entry as g
 
 
 def _avatar_bytes(color=(200, 80, 120)) -> bytes:

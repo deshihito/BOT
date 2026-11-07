@@ -35,7 +35,7 @@ from pathlib import Path
 import discord
 from discord.ext import commands
 import config
-from cogs.wallet import INSUFFICIENT, NEW_USER_BALANCE
+from cogs.general import INSUFFICIENT, NEW_USER_BALANCE
 from core.game.game import party_ranking
 from core.game.game import board_image
 from core.game.game.board_image import render_cached, render_card_hand, render_card_rows

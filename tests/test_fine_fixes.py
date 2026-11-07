@@ -32,14 +32,14 @@ from core.general.items import items
 from core.general.market import market as market_core
 from core.general.common import GENERAL_ACTIONS, MONEY_PRISON_BLOCKED_VALUES
 from core.support.panel_v2 import PanelLayoutView, as_panel_v2
-from cogs import wallet as wallet_module
-from cogs.circulation import (
+from cogs import general as wallet_module
+from cogs.general import (
     BuyLotteryView, CirculationCog, MiningView, StealView)
 from cogs.gambling import GamblingCog, SlotView
-from cogs.items import ItemsCog
-from cogs.market import MarketCog, MarketView, _market_embed, _render_chart
-from cogs.money_panel import status_embed
-from cogs.workshop import BuyMachineView, CraftView, WorkshopCog
+from cogs.general import ItemsCog
+from cogs.general import MarketCog, MarketView, _market_embed, _render_chart
+from cogs.general import status_embed
+from cogs.general import BuyMachineView, CraftView, WorkshopCog
 from core.game import lottery, mining
 from core.general.circulation import economy_pool
 from core.general.workshop import workshop as workshop_core
@@ -467,7 +467,7 @@ class MarketChartTest(unittest.TestCase):
         self.assertIsNotNone(data)
         import matplotlib
         from matplotlib import font_manager
-        from cogs.market import CHART_FONT_PATH
+        from cogs.general import CHART_FONT_PATH
         expected = font_manager.FontProperties(
             fname=str(CHART_FONT_PATH)).get_name()
         family = matplotlib.rcParams["font.family"]

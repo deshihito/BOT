@@ -13,7 +13,7 @@ import types
 import unittest
 from unittest.mock import AsyncMock, patch
 
-from cogs.ai_tools import (
+from cogs.general import (
     AIToolsCog,
     AIToolsConfirmView,
     AIToolsParamCompletionView,
@@ -248,7 +248,7 @@ class CogFlowTest(unittest.IsolatedAsyncioTestCase):
     def _patches(self, candidates, selected, invoke):
         return (
             patch.dict(os.environ, {"AITOOLS_ENABLED": "true"}),
-            patch("cogs.ai_tools.logfare.api_key", return_value="configured"),
+            patch("cogs.general.logfare.api_key", return_value="configured"),
             patch.object(ai_tools_router, "action_candidates", return_value=candidates),
             patch.object(ai_tools_router, "decide_action", new_callable=AsyncMock, return_value=selected),
             patch.object(ai_tools_router, "invoke_action", invoke),
@@ -339,7 +339,7 @@ class RealConfirmFlowTest(unittest.IsolatedAsyncioTestCase):
     def _patches(self, selected, invoke):
         return (
             patch.dict(os.environ, {"AITOOLS_ENABLED": "true"}),
-            patch("cogs.ai_tools.logfare.api_key", return_value="configured"),
+            patch("cogs.general.logfare.api_key", return_value="configured"),
             patch.object(ai_tools_router, "decide_action", new_callable=AsyncMock, return_value=selected),
             patch.object(ai_tools_router, "invoke_action", invoke),
         )

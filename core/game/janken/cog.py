@@ -14,7 +14,7 @@ import random
 from core.support.emojis import CROCK
 
 import discord
-from cogs.wallet import INSUFFICIENT
+from cogs.general import INSUFFICIENT
 from core.game.game import game_panels
 from core.game.game import prison as prison_core
 from core.game.game.game_v2 import GamePanelView, LobbyView, safe_delete, text_panel

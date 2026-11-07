@@ -31,7 +31,7 @@ from core.general.market import market as market_core
 from core.game.game import prison as prison_core
 from core.support.messages import MARKET_INVALID_AMOUNT, market_trade_failed
 from core.support.panel_v2 import as_panel_v2, edit_panel_v2
-from cogs.wallet import INSUFFICIENT
+from cogs.general import INSUFFICIENT
 
 logger = logging.getLogger(__name__)
 
@@ -39,14 +39,22 @@ CHART_FILENAME = "market_chart.png"
 MARKET_COLOR = 0x2ECC71
 
 
+#: チャート画像の保存先と同梱フォント。定義はこの実装モジュールが持ち、
+#: 集約入口 cogs/general.py からは遅延再エクスポートされる。旧 cogs/market.py
+#: 入口に定義があった頃は入口へのパッチで差し替えられたが、集約後は
+#: discord.py の拡張ローダが集約モジュールのインスタンスを二重化し、
+#: 入口側のパッチが実装に届かない場合があるため、実装側の所有に統一した
+#: （nation / wordle と同じ流儀。テストもこちらをパッチする）。
+CHART_PATH = Path(__file__).resolve().parents[3] / "data" / "market_chart.png"
+CHART_FONT_PATH = (Path(__file__).resolve().parents[3]
+                   / "assets" / "fonts" / "MPLUSRounded1c-Regular.ttf")
+
+
 def _chart_path():
-    """CHART_PATH is held by the cogs.market entry (tests patch it there)."""
-    from cogs.market import CHART_PATH
     return CHART_PATH
 
 
 def _chart_font_path():
-    from cogs.market import CHART_FONT_PATH
     return CHART_FONT_PATH
 #: チャート描画に使う同梱の日本語フォント（matplotlib 既定には日本語が
 #: 無く、タイトル等が豆腐化するため font_manager へ登録して使う）。

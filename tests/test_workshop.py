@@ -23,8 +23,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from core.general import action_registry
 from core.general.workshop import workshop
 from core.general.items import items
-from cogs import wallet as wallet_module
-from cogs.workshop import WorkshopCog
+from cogs import general as wallet_module
+from cogs.general import WorkshopCog
 
 T0 = datetime(2026, 1, 1, 9, 0, tzinfo=items.JST)
 

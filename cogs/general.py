@@ -1,654 +1,270 @@
 # -*- coding: utf-8 -*-
-"""汎用機能（/general）の入口。
+"""汎用系の集約入口（cogs/ 6ファイル化）。
 
-実装は core/general/ パッケージに機能ごとに分割されている。
-このモジュールは、それらを合成した GeneralCog と、従来どおり
-`cogs.general` から import できる名前の再エクスポートを担う。
-EXP 系の名前を差し替えるテスト互換のため、EXP の保存系を呼ぶ
-リスナー/タスク (on_message 等) はこのファイルに残している。
+このファイルは「目次＋登録表」に徹し、実装はすべて core/general/ 配下にある。
+旧入口ファイル（cogs/ai.py など18本）はこのファイルに統合された。
+（quick だけは独立の入口 cogs/quick.py を持つ。）
+
+対応表（機能 → 実装モジュール → Cog）:
+    general本体   core/general/entry.py                    GeneralCog
+    ai            core/general/ai/cog.py                   AICog
+    ai_tools      core/general/ai_tools/cog.py             AIToolsCog
+    circulation   core/general/circulation/cog.py          CirculationCog
+    d1_test       core/general/d1_test/cog.py              D1TestCog
+    gauge         core/general/gauge/cog.py                Gauge
+    ggrks         core/general/ggrks/cog.py                GoogleSearch
+    imakita       core/general/imakita/cog.py              ImakitaSummaryCog
+    items         core/general/items/cog.py                ItemsCog
+    judge_comment core/general/judge_comment/cog.py        JudgeCommentCog
+    judgement     core/general/judgement/cog.py            JudgeCog
+    market        core/general/market/cog.py               MarketCog
+    money_panel   core/general/money_panel/cog.py          MoneyPanelCog
+    mood          core/general/mood/cog.py                 MoodAnalysis
+    role_shop     core/general/role_shop/cog.py            RoleShopCog
+    wallet        core/general/wallet/cog.py               WalletCog
+    whisper       core/general/whisper/cog.py              WhisperCog
+    workshop      core/general/workshop/cog.py             WorkshopCog
+
+互換メモ:
+- 旧 cogs.general / 旧各入口から import できた名前は、このファイルから
+  再エクスポートする（テストのパッチ先・他モジュールからの参照を維持）。
+  機能間で同名の私的ヘルパー（_wrap 等）は代表の1つだけを出し、残りは
+  実装モジュール側に残る。
+- CHART_PATH / CHART_FONT_PATH の定義は market の実装モジュール
+  （core/general/market/cog.py）が持つ。集約後は discord.py の拡張ローダが
+  集約モジュールのインスタンスを二重化し、入口で定義して入口へパッチする
+  旧来の配置では実装に届かない場合があるため、実装側の所有に統一した
+  （このファイルからは遅延再エクスポートする）。
+- 各機能の名前は遅延解決（モジュール __getattr__）。理由は2つ:
+  (1) ai / imakita / judgement / mood の実装は bs4 / groq / pydantic 等の
+      任意依存を import するため、未導入環境でも他の機能の名前解決が
+      巻き添えにならない（旧入口でも未導入環境ではその機能だけが落ちていた）。
+  (2) カテゴリをまたぐ循環の回避。実装モジュール同士は cogs.general /
+      cogs.support を経由して参照し合うため、集約入口のトップレベルで
+      機能モジュールを一括 import すると循環 import になる。
+- setup() は機能ごとに import して登録する。失敗した機能は FAILED_FEATURES
+  に記録し、ログに残して次へ進む（main.py が入口ファイルごとに握っていた
+  障害分離の再現。tests/test_cog_loading.py が FAILED_FEATURES を検査する）。
+- 並び順の制約: market の実装が読み込み時に `from cogs.general import
+  INSUFFICIENT` と引くため、wallet の名前は本体取り込みより前に確定させる。
 """
 from __future__ import annotations
 
-import asyncio
-import hashlib
-import io
-import json
+import importlib
 import logging
-import math
-import os
-import random
-import re
-import time
-from datetime import datetime, timedelta, timezone
-from pathlib import Path
 
-import discord
-from discord import app_commands
-from discord.ext import commands, tasks
-from core.support.panel_v2 import as_panel_v2, edit_panel_v2
-from core.general import shortcut_settings as shortcuts
-from core.support import guild_settings
-from core.general import action_registry, action_usage
-from core.general.exp import levelup_card
-from core.general.ai import logfare
-from core.support.usage_stats import usage_stats
-from core.general.ai import ai_omnirush, ai_preferences, ai_provider_router
-from core.game.game.game_guides import GAME_GUIDES, GAME_ORDER
-from core.general import translation_settings as translation
-from core.support.localization import localization
-from core.game.game import prison as prison_core
-from core.support.messages import CIRCULATION_NOT_LOADED, GAMBLING_NOT_LOADED, ITEMS_NOT_LOADED, MARKET_NOT_LOADED, MONEY_PANEL_NOT_LOADED, WORKSHOP_NOT_LOADED
-from core.general.libretranslate import LibreTranslateClient, LibreTranslateError
+from discord.ext import commands
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("cogs.general")
 
-from core.general.common import *
-from core.general.exp.exp import *
-from core.general.exp.levelup import *
-from core.general.miq.miq import *
-from core.general.miq.miq_styles import *
-from core.general.miq.miq_cards import *
-from core.general.miq.miq_line import *
-from core.general.meme import *
-from core.general.story54 import *
-from core.general.miq.miq_ui import *
-# アクション定義の単一の真実は core/action_registry。SHORTCUT_ROOTS は
-# レジストリからの生成物（名前・形状・import 互換は従来どおり維持する）。
-SHORTCUT_ROOTS = action_registry.build_shortcut_roots()
+#: setup() で読み込みに失敗した機能 {ラベル: エラー文字列}。
+#: 起動前検査（tests/test_cog_loading.py）が参照する。
+FAILED_FEATURES: dict[str, str] = {}
 
-from core.general.shortcuts import *
-from core.general.panel import *
-from core.general.translation import *
-from core.general.exp.exp_ui import *
-from core.general.ai_ui import *
-from core.general.exp.exp import _EXP_DATA, _EXP_LOCK, _as_float, _as_int, _exp_ensure, _exp_load, _exp_lock, _exp_root, _exp_save, _grant_chat_exp, _grant_vc_exp, _iter_voice_user_channels, _iter_voice_user_ids, _merge_exp, _read_exp_file, _store_fetch, _user_general_level, _write_exp_file
-from core.general.exp.levelup import _LEVELUP_CJK_FONTS, _LEVELUP_DISPLAY_FONTS, _LEVELUP_DISPLAY_PICK, _LEVELUP_FONT_PICK, _LEVELUP_LATIN_FONTS, _LEVELUP_SS, _levelup_display_font, _levelup_draw_tracked, _levelup_font, _levelup_pick_display_font, _levelup_pick_font, _levelup_safe_name
-from core.general.miq.miq import _MIQ_ASSET_FONTS, _MIQ_CUSTOM_EMOJI, _MIQ_CUSTOM_EMOJI_TOKEN, _MIQ_DATA, _MIQ_EMOJI_PATHS, _MIQ_EMOJI_PATH_CACHE, _MIQ_EMOJI_SIZE, _MIQ_FONTS_CACHE, _MIQ_FONT_CMAP_CACHE, _MIQ_FONT_DEFS, _MIQ_FONT_OBJ_CACHE, _MIQ_JP_PROBE, _MIQ_LOCK, _MIQ_NO_LINE_START, _MIQ_REPO_FONT, _MIQ_SYMBOL_PATHS, _font_covers_japanese, _miq_af, _miq_available_fonts, _miq_clean_text, _miq_contrast, _miq_discover_asset_fonts, _miq_display_text, _miq_draw_centered, _miq_emoji_font_path, _miq_emoji_width, _miq_fallback_fonts, _miq_fit, _miq_font_cmap, _miq_font_has_char, _miq_is_emoji_unit, _miq_is_image_attachment, _miq_line_message_has_media, _miq_load_font, _miq_lock, _miq_lum, _miq_mix, _miq_open_avatar, _miq_read_file, _miq_render_emoji_unit, _miq_root, _miq_save_png, _miq_split_units, _miq_sticker_renderable, _miq_unit_bases, _miq_unit_font, _miq_unit_width, _miq_wrap, _miq_write_file
-from core.general.miq.miq_styles import _miq_circle_avatar, _miq_date_str, _miq_draw_vertical, _miq_fit_vertical, _miq_glow_lines, _miq_hash_int, _miq_heart, _miq_rng, _miq_rounded_avatar, _miq_special_font_path, _miq_star4, _miq_star5, _miq_truncate, _miq_vertical_columns
-from core.general.miq.miq_cards import _MIQ_CARD_FRAME_STOPS, _MIQ_CARD_RARITIES, _MIQ_TICKET_PALETTES, _miq_pick_card_rarity, _miq_pick_ticket_palette
-from core.general.miq.miq_line import _MIQ_AGO_CACHE, _MIQ_AGO_DIR, _MIQ_CUSTOM_EMOJI_TOKEN, _MIQ_DATED_FORMATS, _MIQ_FORMAT_RENDERERS, _MIQ_UNICODE_EMOJI_SUPPORTED, _miq_ago_images, _miq_line_atom_width, _miq_line_avatar_image, _miq_line_draw_atoms, _miq_line_entry_atoms, _miq_line_field, _miq_line_fit_media, _miq_line_media_image, _miq_line_split_segments, _miq_line_time_str, _miq_line_wrap_atoms, _miq_unicode_emoji_supported
-from core.general.meme import _meme_fit, _meme_font_path, _meme_image_attachment
-from core.general.shortcuts import _MessageFollowup, _MessageResponse
-from core.general.exp.levelup import LevelUpMixin
-from core.general.miq.miq import MiqMixin
-from core.general.miq.miq_line import MiqLineMixin
-from core.general.meme import MemeMixin
-from core.general.translation import TranslationMixin
-from core.general.shortcuts import ShortcutsMixin
+# =====================================================================
+# 基盤の名前（循環回避のため最初に確定させる）
+# wallet — 実装: core/general/wallet/cog.py
+# =====================================================================
+from core.general.wallet.cog import (  # noqa: F401
+    COIN_SETTER_USER_ID,
+    NEW_USER_BALANCE,
+    BALANCE_UPDATE_ATTEMPTS,
+    INSUFFICIENT,
+    COIN_PATH,
+    COIN_FILENAME,
+    COIN_COLOR,
+    coin_embed,
+    WalletCog,
+)
+
+# =====================================================================
+# general 本体（GeneralCog）— 実装: core/general/entry.py
+# 旧 cogs/general.py の名前空間をそのまま引き継ぐため star で取り込む。
+# =====================================================================
+from core.general.entry import *  # noqa: F401,F403
+
+# =====================================================================
+# 登録テーブル（旧入口ファイル名の辞書順 = 従来のロード順）
+# =====================================================================
+_FEATURE_MODULES = (
+    ("ai", "core.general.ai.cog"),
+    ("ai_tools", "core.general.ai_tools.cog"),
+    ("circulation", "core.general.circulation.cog"),
+    ("d1_test", "core.general.d1_test.cog"),
+    ("gauge", "core.general.gauge.cog"),
+    ("general", "core.general.entry"),
+    ("ggrks", "core.general.ggrks.cog"),
+    ("imakita", "core.general.imakita.cog"),
+    ("items", "core.general.items.cog"),
+    ("judge_comment", "core.general.judge_comment.cog"),
+    ("judgement", "core.general.judgement.cog"),
+    ("market", "core.general.market.cog"),
+    ("money_panel", "core.general.money_panel.cog"),
+    ("mood", "core.general.mood.cog"),
+    ("role_shop", "core.general.role_shop.cog"),
+    ("wallet", "core.general.wallet.cog"),
+    ("whisper", "core.general.whisper.cog"),
+    ("workshop", "core.general.workshop.cog"),
+)
 
 
-class RankingsView(discord.ui.View):
-    """ランキングの集約ビュー（導線最適化 M7）。
-
-    既存のランキング表示そのものは各 dispatch に委譲し、ここは入口だけを束ねる。
-    ゲーム別ランキングは /game の各ゲーム詳細にあるため、ここには含めない。
-    """
-
-    TARGETS = (
-        ("コイン保有", "coin_leaderboard"),
-        ("総合資産", "asset_leaderboard"),
-        ("bump RTA", "bump_leaderboard"),
-        ("up RTA", "up_leaderboard"),
-        ("生存確認", "fujo_ranking"),
-        ("EXP", "exp_ranking"),
-    )
-
-    def __init__(self, cog, user_id: int):
-        super().__init__(timeout=300)
-        self.cog = cog
-        self.user_id = user_id
-        for label, value in self.TARGETS:
-            button = discord.ui.Button(label=label, style=discord.ButtonStyle.primary)
-            button.callback = self._make_callback(value)
-            self.add_item(button)
-
-    def _make_callback(self, value: str):
-        async def callback(interaction: discord.Interaction):
-            await self.cog.dispatch_general(interaction, value)
-        return callback
-
-    async def interaction_check(self, interaction) -> bool:
-        # 公開パネル化（ephemeral第2波）: 操作は本人のみ。
-        return interaction.user.id == self.user_id
-
-    def embed(self) -> discord.Embed:
-        return discord.Embed(
-            title="ランキング",
-            description="見たいランキングを選んでください。\n"
-                        "ゲーム別ランキングは /game の各ゲーム詳細にあります。",
-            color=0xFFFFFF)
-
-
-class GeneralCog(
-    MiqMixin,
-    MiqLineMixin,
-    MemeMixin,
-    Story54Mixin,
-    LevelUpMixin,
-    TranslationMixin,
-    ShortcutsMixin,
-    commands.Cog,
-):
-    def __init__(self, bot):
-        self.bot = bot
-        self._bg_tasks: set[asyncio.Task] = set()
-        self._levelup_sem = asyncio.Semaphore(2)  # 画像生成の同時実行数(低スペック機での詰まり防止)
-        self._levelup_pillow_warned = False
-        self._miq_last: dict[int, float] = {}
-        self._translation_client = LibreTranslateClient()
-        self._translation_webhooks: dict[int, discord.Webhook] = {}
-        # メッセージの右クリックメニュー(アプリ → 引用画像にする)
-        self.miq_menu = app_commands.ContextMenu(name="引用画像にする", callback=self.miq_context)
-        # メッセージの右クリックメニュー(アプリ → meme画像にする)
-        self.meme_menu = app_commands.ContextMenu(name="meme画像にする", callback=self.meme_context)
-        # meme作成のパネル経由フローで画像待ち中のセッション {(channel_id, user_id): Event}
-        self._meme_waits: dict[tuple[int, int], asyncio.Event] = {}
-
-
-    async def cog_load(self):
-        await translation.ensure_loaded()
-        self.exp_vc_tick.start()
-        self.bot.tree.add_command(self.miq_menu, override=True)
-        self.bot.tree.add_command(self.meme_menu, override=True)
-
-
-    def cog_unload(self):
-        self.exp_vc_tick.cancel()
-        self.bot.tree.remove_command(self.miq_menu.name, type=self.miq_menu.type)
-        self.bot.tree.remove_command(self.meme_menu.name, type=self.meme_menu.type)
-        for task in list(self._bg_tasks):
-            task.cancel()
-
-
-    @app_commands.command(name="general", description="一般機能の操作パネルを表示します")
-    async def general(self, interaction: discord.Interaction):
-        # Building the panel may touch lazily loaded settings/models.  Reserve
-        # the interaction response before doing any work so Discord's 3-second
-        # acknowledgement deadline cannot turn a valid command into 10062.
-        await interaction.response.defer(thinking=True)
-        history_specs = []
-        if interaction.guild_id is not None:
-            store = guild_settings.get_store()
-            await store.ensure_loaded()
-            history_specs = action_usage.history_panel_specs(
-                store, interaction.guild_id, interaction.user.id, "general")
-        view = GeneralPanel(self, history_specs=history_specs, owner_id=interaction.user.id)
-        await interaction.followup.send(view=as_panel_v2(view))
-
-
-    async def _safe_respond(self, interaction: discord.Interaction, message: str, *, ephemeral: bool = True):
-        """interaction の応答状態に応じて安全にメッセージを返す。
-
-        通常の Interaction でも ShortcutMessageInteraction（メッセージアダプタ）でも
-        同じように動作する。既に応答済みなら followup に切り替える。
-        """
+async def setup(bot: commands.Bot):
+    for _label, _module_path in _FEATURE_MODULES:
         try:
-            if interaction.response.is_done():
-                return await interaction.followup.send(message, ephemeral=ephemeral)
-            return await interaction.response.send_message(message, ephemeral=ephemeral)
-        except discord.HTTPException:
-            logger.warning("dispatch_general: error response failed", exc_info=True)
-        return None
+            _module = importlib.import_module(_module_path)
+            await _module.setup(bot)
+        except Exception as _exc:  # noqa: BLE001 - 機能単位で分離する
+            FAILED_FEATURES[_label] = f"{type(_exc).__name__}: {_exc}"
+            logger.exception("general 機能の読み込みに失敗しました: %s", _label)
 
 
-    async def dispatch_general(self, interaction: discord.Interaction, value: str):
-        # BOT fixer のコマンド制限（管理者は対象外）。
-        from core.support import command_control
-
-        if not await command_control.guard(interaction, f"general:{value}"):
-            return
-        # 利用履歴（よく使う／最近）は入口ここで記録する。記録の失敗で
-        # dispatch を壊さないよう record_safely 側で例外は握る。保存には
-        # 自前APIへの書き込みが伴い応答を遅らせるため、応答を待たせない
-        # バックグラウンド記録を使う（panel_recovery の誤判定防止）。
-        action_usage.record_safely_in_background(
-            getattr(interaction, "guild_id", None),
-            getattr(getattr(interaction, "user", None), "id", None),
-            f"general:{value}",
-        )
-        # 管理者向け総量統計も同じ入口で数える（個人履歴とは別集計）。
-        usage_stats.record_action_safely(f"general:{value}")
-        if value in {"zetamodoki", "zeta_reset", "zeta_register", "zeta_manage"}:
-            cog = self.bot.get_cog("ZetaModoki")
-            if cog is None:
-                return await self._safe_respond(interaction, "ZetaModokiが読み込まれていません。")
-            if value == "zetamodoki":
-                return await cog.start(interaction)
-            if value == "zeta_register":
-                return await cog.register(interaction)
-            if value == "zeta_manage":
-                return await cog.manage(interaction)
-            return await cog.reset(interaction)
-
-        if value == "miq_settings":
-            view = MiqSettingsView(self, interaction.user.id)
-            return await interaction.response.send_message(view=as_panel_v2(view))
-
-        if value == "meme_create":
-            # モーダルを開けない経路 (メッセージ型ショートカット) では
-            # _MessageResponse.send_modal が「パネルから実行してください」と
-            # 案内する (pay 等の既存モーダル系と同じ扱い)。
-            modal = MemeTextModal(self._meme_panel_texts_done)
-            return await interaction.response.send_modal(modal)
-
-        if value == "story54":
-            # モーダルを開けない経路 (メッセージ型ショートカット) では
-            # _MessageResponse.send_modal が「パネルから実行してください」と
-            # 案内する (meme_create 等の既存モーダル系と同じ扱い)。
-            modal = Story54Modal(self._story54_text_done)
-            return await interaction.response.send_modal(modal)
-
-        if value == "meme_help":
-            embed = discord.Embed(title="meme作成", color=0xFFFFFF)
-            embed.description = (
-                "**作り方**\n"
-                "・`/general` → 画像作成 → **memeを作成**：上/下テキストを入力したあと、"
-                "同じチャンネルにベースにしたい画像を投稿してください（120秒以内）。\n"
-                "・画像のあるメッセージを右クリック(スマホは長押し) → アプリ → **meme画像にする**："
-                "その画像（無ければ投稿者のアバター）がベースになります。\n\n"
-                "**仕様**\n"
-                "・上テキスト/下テキストは各100文字まで。どちらか一方だけでも作れます。\n"
-                "・GIFアニメは1フレーム目を使った静止画になります。出力は常にPNGです。\n"
-                "・ベース画像は最大8MBまで。生成画像は最大1200x1200に収まります。\n"
-                "・アバターをベースにする場合のみ、MIQの引用拒否設定が適用されます。"
-            )
-            return await interaction.response.send_message(embed=embed)
-
-        if value == "rankings":
-            # 導線最適化 M7: ランキング6系統のうちパネル系5件を1画面に束ねる。
-            view = RankingsView(self, interaction.user.id)
-            return await interaction.response.send_message(
-                embed=view.embed(), view=view)
-
-        if value == "translation_settings":
-            view = TranslationView(interaction.user.id, interaction.guild_id)
-            return await interaction.response.send_message(embed=view.embed(), view=view)
-
-        if value == "aitools":
-            from core.general.ai_tools import ai_tools_router
-            from cogs.ai_tools import _enabled as ai_tools_enabled
-            available = ai_tools_router.action_candidates()
-            key_status = "設定済み" if logfare.api_key() else "未設定"
-            embed = discord.Embed(title="AI tools", color=0x5865F2)
-            embed.description = (
-                f"全体有効: `{ai_tools_enabled()}`\n"
-                f"Logfare APIキー: `{key_status}`\n"
-                f"利用可能な安全ツール: `{len(available)}件`\n\n"
-                "BOTにメンションして依頼してください。個人別・機能別の設定はありません。"
-            )
-            return await interaction.response.send_message(embed=embed)
-
-        if value == "reasoning_default":
-            await interaction.response.defer(ephemeral=True)
-            try:
-                view, error = await ReasoningView.create(interaction.user.id)
-            except Exception as exc:
-                logger.exception("reasoning model metadata unavailable: user=%s", interaction.user.id)
-                status = getattr(exc, "status", None)
-                detail = f"（HTTP {status}）" if status else ""
-                return await interaction.followup.send(
-                    f"思考強度の対応状況を取得できませんでした{detail}。時間をおいて再試行してください。",
-                    ephemeral=True,
-                )
-            if error:
-                return await interaction.followup.send(error, ephemeral=True)
-            return await interaction.followup.send(embed=view.embed(), view=view, ephemeral=True)
-
-        if value in {"ai_default", "image_default"}:
-            await interaction.response.defer(ephemeral=True)
-            kind = "chat" if value == "ai_default" else "image"
-            view = await AIDefaultView.create(interaction.user.id, kind)
-            if view.load_error or not view.models:
-                logger.error(
-                    "Logfare model catalog unavailable: kind=%s user=%s",
-                    kind, interaction.user.id, exc_info=view.load_error,
-                )
-                status = getattr(view.load_error, "status", None)
-                detail = f"（HTTP {status}）" if status else ""
-                return await interaction.followup.send(
-                    f"Logfareのモデル一覧を取得できませんでした{detail}。"
-                    "時間をおいて再試行し、`.env` とAPI接続を確認してください。",
-                    ephemeral=True,
-                )
-            return await interaction.followup.send(embed=view.embed(), view=view, ephemeral=True)
-
-        if value == "shortcut_manage":
-            view = ShortcutManagerView(self, interaction.guild_id, interaction.user.id)
-            return await interaction.response.send_message(view=as_panel_v2(view))
-
-        if value == "exp_status":
-            # 先にACKする: _load_latest はEXPデータ読み込みを伴い、応答前に
-            # 行うと panel_recovery に死んだパネルと誤判定される。
-            await interaction.response.defer()
-            view = ExpStatusView(interaction.user.id, interaction.guild_id,
-                                 bot=self.bot)
-            await view._load_latest()
-            return await interaction.followup.send(
-                view=as_panel_v2(view), files=[view.card_file()]
-            )
-
-        if value == "exp_ranking":
-            # 先にACKする: _load_latest は表示名解決で fetch_user を最大20件
-            # 逐次実行し、応答前に行うと数秒かかることがある（同上）。
-            await interaction.response.defer()
-            view = ExpRankingView(interaction.guild_id, bot=self.bot)
-            await view._load_latest()
-            return await interaction.followup.send(
-                view=as_panel_v2(view), files=[view.board_file()]
-            )
-
-        if value == "activity_board":
-            # 各軸の集計（DB取得を含む）を伴うため exp 系と同じく先にACKする。
-            await interaction.response.defer()
-            view = ActivityBoardView(interaction.guild_id, bot=self.bot,
-                                     guild=interaction.guild)
-            await view.refresh_data()
-            return await interaction.followup.send(
-                view=as_panel_v2(view)
-            )
-
-        wallet = self.bot.get_cog("WalletCog")
-        fujo = self.bot.get_cog("FujoSurvival")
-
-        # ===== マネー系 =====
-        # 逮捕中はマネージャンルの実行系アクションを入口で一元的に拒否する
-        # （core/game/game/prison.py）。表示系（マネーパネル・残高・市場/アイテム/
-        # 工房/宝くじのパネル表示・ランキング）は逮捕中でも開けるが、
-        # パネル内の実行は各 cog の execute_* 側でも同じチェックをする。
-        if value in MONEY_PRISON_BLOCKED_VALUES:
-            blocked_message = prison_core.block_message(
-                str(interaction.user.id))
-            if blocked_message and value == "mining":
-                # プリズンマイナー（S6-4）: prison ブロックに対する唯一の
-                # 例外。採掘だけは所持していれば入口を素通しする
-                # （1枚の消費は circulation 側の実行時に行う）。
-                items_cog = self.bot.get_cog("ItemsCog")
-                try:
-                    if items_cog is not None and items_cog.store.count(
-                            str(interaction.user.id), "prison_miner") > 0:
-                        blocked_message = None
-                except Exception:
-                    pass
-            if blocked_message:
-                return await self._safe_respond(interaction, blocked_message)
-        if value == "money_panel":
-            panel_cog = self.bot.get_cog("MoneyPanelCog")
-            if panel_cog is None:
-                return await self._safe_respond(interaction, MONEY_PANEL_NOT_LOADED)
-            return await panel_cog.show_panel(interaction)
-
-        if value == "daily_report":
-            report_cog = self.bot.get_cog("DailyReportCog")
-            if report_cog is None:
-                return await self._safe_respond(interaction, "日報機能は現在利用できません。")
-            return await report_cog.toggle(interaction)
-
-        if value == "role_shop":
-            shop_cog = self.bot.get_cog("RoleShopCog")
-            if shop_cog is None:
-                return await self._safe_respond(interaction, "ロールショップは現在利用できません。")
-            return await shop_cog.show_shop(interaction)
-
-        if value == "gacha":
-            gacha_cog = self.bot.get_cog("GachaCog")
-            if gacha_cog is None:
-                return await self._safe_respond(interaction, "ガチャは現在利用できません。")
-            return await gacha_cog.show_gacha(interaction)
-
-        if value == "clan":
-            clan_cog = self.bot.get_cog("ClanCog")
-            if clan_cog is None:
-                return await self._safe_respond(interaction, "クラン機能は現在利用できません。")
-            return await clan_cog.show_clan(interaction)
-
-        if value in {"items", "item_buy", "item_use", "box_open"}:
-            items_cog = self.bot.get_cog("ItemsCog")
-            if items_cog is None:
-                return await self._safe_respond(interaction, ITEMS_NOT_LOADED)
-            if value == "items":
-                return await items_cog.show_items(interaction)
-            if value == "item_buy":
-                return await items_cog.open_buy(interaction)
-            if value == "item_use":
-                return await items_cog.open_use(interaction)
-            return await items_cog.open_boxes(interaction)
-
-        if value in {"workshop", "machine_buy", "workshop_claim", "craft"}:
-            workshop_cog = self.bot.get_cog("WorkshopCog")
-            if workshop_cog is None:
-                return await self._safe_respond(interaction, WORKSHOP_NOT_LOADED)
-            if value == "workshop":
-                return await workshop_cog.show_workshop(interaction)
-            if value == "machine_buy":
-                return await workshop_cog.open_buy_machine(interaction)
-            if value == "workshop_claim":
-                return await workshop_cog.open_claim(interaction)
-            return await workshop_cog.show_craft(interaction)
-
-        if value in {"mining", "lottery", "lottery_buy", "steal"}:
-            circulation_cog = self.bot.get_cog("CirculationCog")
-            if circulation_cog is None:
-                return await self._safe_respond(interaction, CIRCULATION_NOT_LOADED)
-            if value == "mining":
-                return await circulation_cog.show_mining(interaction)
-            if value == "lottery":
-                return await circulation_cog.show_lottery(interaction)
-            if value == "lottery_buy":
-                return await circulation_cog.open_lottery_buy(interaction)
-            return await circulation_cog.open_steal(interaction)
-
-        if value in {"slot", "double", "blackjack", "dice", "bj_duel"}:
-            gambling_cog = self.bot.get_cog("GamblingCog")
-            if gambling_cog is None:
-                return await self._safe_respond(interaction, GAMBLING_NOT_LOADED)
-            if value == "slot":
-                return await gambling_cog.show_slot(interaction)
-            if value == "double":
-                return await gambling_cog.show_double(interaction)
-            if value == "blackjack":
-                return await gambling_cog.show_blackjack(interaction)
-            if value == "bj_duel":
-                return await gambling_cog.show_duel(interaction)
-            return await gambling_cog.show_dice(interaction)
-
-        if value in {"market", "token_buy", "token_sell"}:
-            market_cog = self.bot.get_cog("MarketCog")
-            if market_cog is None:
-                return await self._safe_respond(interaction, MARKET_NOT_LOADED)
-            if value == "market":
-                return await market_cog.show_market(interaction)
-            if value == "token_buy":
-                return await market_cog.open_buy(interaction)
-            return await market_cog.open_sell(interaction)
-
-        if value in {"pay", "status", "coin_leaderboard", "asset_leaderboard", "bump_leaderboard", "up_leaderboard"}:
-            if wallet is None:
-                return await self._safe_respond(interaction, "WalletCogが読み込まれていません。")
-            if value == "pay":
-                return await interaction.response.send_modal(PayModal(self))
-            if value == "status":
-                return await wallet.user_status(interaction)
-            if value == "coin_leaderboard":
-                return await wallet.leaderboard(interaction)
-            if value == "asset_leaderboard":
-                return await wallet.leaderboard(
-                    interaction, app_commands.Choice(name="asset", value="asset"))
-            event_type = value.removesuffix("_leaderboard")
-            return await wallet.leaderboard(
-                interaction, app_commands.Choice(name=event_type, value=event_type)
-            )
-
-        # ===== fujo（生存確認）系 =====
-        if value.startswith("fujo_"):
-            if fujo is None:
-                return await self._safe_respond(interaction, "FujoSurvivalが読み込まれていません。")
-            action = value.removeprefix("fujo_")
-            try:
-                return await fujo.fujo(interaction, action, None, "active", None, None)
-            except Exception:
-                logger.exception(
-                    "fujo dispatch failed: action=%s user=%s guild=%s",
-                    action, interaction.user.id,
-                    getattr(interaction, "guild_id", None),
-                )
-                return await self._safe_respond(
-                    interaction,
-                    "生存確認機能の処理中にエラーが発生しました。時間をおいて再試行してください。",
-                )
-
-        logger.warning("dispatch_general: unknown action %r", value)
-        return await self._safe_respond(interaction, "この機能は現在利用できません。")
+# =====================================================================
+# 遅延解決する名前（基盤 wallet と本体以外の全機能）
+# =====================================================================
+_LAZY_FEATURE_MODULES = {
+    "AICog": "core.general.ai.cog",
+    "AIToolsCog": "core.general.ai_tools.cog",
+    "AIToolsConfirmView": "core.general.ai_tools.cog",
+    "AIToolsParamCompletionView": "core.general.ai_tools.cog",
+    "AIToolsParamModal": "core.general.ai_tools.cog",
+    "BALANCE_UPDATE_ATTEMPTS": "core.general.wallet.cog",
+    "BOX_ID": "core.general.items.cog",
+    "BuyLotteryView": "core.general.circulation.cog",
+    "BuyMachineView": "core.general.workshop.cog",
+    "CATEGORIES": "core.general.money_panel.cog",
+    "CHART_FONT_PATH": "core.general.market.cog",
+    "CHART_PATH": "core.general.market.cog",
+    "CATEGORY_LABELS": "core.general.money_panel.cog",
+    "CHART_FILENAME": "core.general.market.cog",
+    "CIRCULATION_COLOR": "core.general.circulation.cog",
+    "COIN_COLOR": "core.general.wallet.cog",
+    "COIN_FILENAME": "core.general.wallet.cog",
+    "COIN_PATH": "core.general.wallet.cog",
+    "COIN_SETTER_USER_ID": "core.general.wallet.cog",
+    "COOLDOWN_SECONDS": "core.general.imakita.cog",
+    "COUNTER_SECONDS": "core.general.gauge.cog",
+    "CirculationCog": "core.general.circulation.cog",
+    "CraftView": "core.general.workshop.cog",
+    "D1TestCog": "core.general.d1_test.cog",
+    "DEFAULT_D1_ENDPOINT": "core.general.d1_test.cog",
+    "DeleteProductView": "core.general.role_shop.cog",
+    "FAILURE_MESSAGE": "core.general.imakita.cog",
+    "GAME_ID": "core.general.gauge.cog",
+    "GENERIC_FAILURE_MESSAGE": "core.general.ai_tools.cog",
+    "GUESS_SECONDS": "core.general.gauge.cog",
+    "GamePanelView": "core.general.gauge.cog",
+    "Gauge": "core.general.gauge.cog",
+    "GaugeGame": "core.general.gauge.cog",
+    "GoogleSearch": "core.general.ggrks.cog",
+    "HINT_SECONDS": "core.general.gauge.cog",
+    "HISTORY_AUTO_DEFAULT": "core.general.ai.cog",
+    "HISTORY_AUTO_MAX": "core.general.ai.cog",
+    "HISTORY_JUDGE_PROMPT": "core.general.ai.cog",
+    "HISTORY_LIMIT": "core.general.imakita.cog",
+    "HintModal": "core.general.gauge.cog",
+    "INSUFFICIENT": "core.general.wallet.cog",
+    "ITEMS_COLOR": "core.general.items.cog",
+    "ITEM_INVALID_INPUT": "core.general.items.cog",
+    "ITEM_NOT_FOUND": "core.general.items.cog",
+    "ImakitaSummaryCog": "core.general.imakita.cog",
+    "ItemAmountModal": "core.general.items.cog",
+    "ItemPickView": "core.general.items.cog",
+    "ItemQuantityModal": "core.general.items.cog",
+    "ItemsCog": "core.general.items.cog",
+    "ItemsView": "core.general.items.cog",
+    "JUDGE_TYPES": "core.general.judgement.cog",
+    "JudgeCog": "core.general.judgement.cog",
+    "JudgeCommentCog": "core.general.judge_comment.cog",
+    "LEVELS": "core.general.judgement.cog",
+    "LEVEL_SCORES": "core.general.judgement.cog",
+    "LOTTERY_ID": "core.general.circulation.cog",
+    "LotteryView": "core.general.circulation.cog",
+    "MARKET_COLOR": "core.general.market.cog",
+    "MARKET_INVALID_AMOUNT": "core.general.market.cog",
+    "MAX_HISTORY_CHARS": "core.general.imakita.cog",
+    "MAX_HISTORY_MESSAGES": "core.general.imakita.cog",
+    "MAX_PLAYERS": "core.general.gauge.cog",
+    "MINING_ID": "core.general.circulation.cog",
+    "MIN_PLAYERS": "core.general.gauge.cog",
+    "MODEL": "core.general.imakita.cog",
+    "MONEY_PANEL_COLOR": "core.general.money_panel.cog",
+    "MarketCog": "core.general.market.cog",
+    "MarketView": "core.general.market.cog",
+    "MiningView": "core.general.circulation.cog",
+    "MoneyPanelCog": "core.general.money_panel.cog",
+    "MoneyPanelView": "core.general.money_panel.cog",
+    "MoodAnalysis": "core.general.mood.cog",
+    "NEW_USER_BALANCE": "core.general.wallet.cog",
+    "RECRUIT_SECONDS": "core.general.gauge.cog",
+    "RegisterModal": "core.general.role_shop.cog",
+    "RegisterRoleView": "core.general.role_shop.cog",
+    "RoleShopCog": "core.general.role_shop.cog",
+    "RoleShopView": "core.general.role_shop.cog",
+    "SCALE": "core.general.gauge.cog",
+    "SHOP_COLOR": "core.general.role_shop.cog",
+    "SHOP_ID": "core.general.items.cog",
+    "StealTargetSelect": "core.general.circulation.cog",
+    "StealView": "core.general.circulation.cog",
+    "TARGET_SCORE": "core.general.gauge.cog",
+    "TRIGGER_PHRASE": "core.general.imakita.cog",
+    "TradeModal": "core.general.market.cog",
+    "WORKSHOP_COLOR": "core.general.workshop.cog",
+    "WORKSHOP_ID": "core.general.workshop.cog",
+    "WhisperCog": "core.general.whisper.cog",
+    "WhisperModal": "core.general.whisper.cog",
+    "WhisperView": "core.general.whisper.cog",
+    "WorkshopCog": "core.general.workshop.cog",
+    "WorkshopView": "core.general.workshop.cog",
+    "_SESSION_LABELS": "core.general.money_panel.cog",
+    "_build_rating_model": "core.general.judgement.cog",
+    "_chart_font_ready": "core.general.market.cog",
+    "_craft_embed": "core.general.workshop.cog",
+    "_enabled": "core.general.ai_tools.cog",
+    "_ensure_chart_font": "core.general.market.cog",
+    "_fmt_minutes": "core.general.circulation.cog",
+    "_fmt_tokens": "core.general.market.cog",
+    "_is_miq_trigger": "core.general.ai_tools.cog",
+    "_item_name": "core.general.circulation.cog",
+    "_item_pick_options": "core.general.items.cog",
+    "_items_embed": "core.general.items.cog",
+    "_judge_history": "core.general.ai.cog",
+    "_lottery_embed": "core.general.circulation.cog",
+    "_market_embed": "core.general.market.cog",
+    "_mining_embed": "core.general.circulation.cog",
+    "_parse_history_decision": "core.general.ai.cog",
+    "_parse_param_input": "core.general.ai_tools.cog",
+    "_render_chart": "core.general.market.cog",
+    "_reply_without_localization": "core.general.ai.cog",
+    "_resolve_invoker": "core.general.ai_tools.cog",
+    "_send_item_pick": "core.general.items.cog",
+    "_shop_lines": "core.general.items.cog",
+    "_steal_embed": "core.general.circulation.cog",
+    "_tier_lines": "core.general.workshop.cog",
+    "_with_history": "core.general.ai.cog",
+    "_workshop_embed": "core.general.workshop.cog",
+    "ai_tools_router": "core.general.ai_tools.cog",
+    "as_panel_v2": "core.general.circulation.cog",
+    "circulation_action_failed": "core.general.circulation.cog",
+    "coin_embed": "core.general.wallet.cog",
+    "craft_action_failed": "core.general.workshop.cog",
+    "edit_message_v2": "core.general.money_panel.cog",
+    "edit_panel_v2": "core.general.circulation.cog",
+    "gauge_panel": "core.general.gauge.cog",
+    "guild_locale": "core.general.imakita.cog",
+    "item_action_failed": "core.general.items.cog",
+    "logfare": "core.general.ai_tools.cog",
+    "market_trade_failed": "core.general.market.cog",
+    "render_gauge": "core.general.gauge.cog",
+    "shop_embed": "core.general.role_shop.cog",
+    "status_embed": "core.general.money_panel.cog",
+    "text_panel": "core.general.gauge.cog",
+    "workshop_action_failed": "core.general.workshop.cog",
+}
 
 
-    def _spawn(self, coro) -> None:
-        """通知は EXP の保存や他の処理を待たせないよう、バックグラウンドで送る。"""
-        task = asyncio.create_task(coro)
-        self._bg_tasks.add(task)
-        task.add_done_callback(self._bg_tasks.discard)
-
-
-    @commands.Cog.listener()
-    async def on_message(self, message: discord.Message):
-        if message.author.bot or message.guild is None:
-            return
-
-        try:
-            data = await _exp_load()
-            user = _exp_ensure(data, message.guild.id, message.author.id)
-            level_before = _user_general_level(user)
-            if _grant_chat_exp(user, time.time()):
-                level_after = _user_general_level(user)  # 保存のawaitを挟む前に確定させる
-                await _exp_save()
-                if level_after > level_before:
-                    self._spawn(self._notify_levelup(
-                        message.guild, message.author, level_before, level_after,
-                        fallback_channel=message.channel,
-                    ))
-                    await self._notify_level_rewards(
-                        message.guild, message.author, level_before, level_after,
-                    )
-        except Exception:
-            logger.exception("EXP: チャットEXPの付与に失敗しました")
-
-        # MIQ: 引用したいメッセージに返信して「@BOT miq」と送ると発動
-        # MIQ として処理した場合は、以降のショートカット処理へ進ませない
-        # (トリガー「miq」のショートカットが誤爆して設定パネル等が出るのを防ぐ)。
-        if is_miq_trigger(message, self.bot.user if self.bot is not None else None):
-            self._spawn(self._miq_from_reply(message))
-            return
-
-        store = guild_settings.get_store()
-        await store.ensure_loaded()
-        for item in shortcuts.matching(
-            store, message.guild.id, message.content.strip(), user_id=message.author.id
-        ):
-            await self.execute_shortcut(message, item)
-
-
-    @commands.Cog.listener()
-    async def on_voice_state_update(self, member, before, after):
-        if member.bot or member.guild is None:
-            return
-        try:
-            data = await _exp_load()
-            user = _exp_ensure(data, member.guild.id, member.id)
-            now = time.time()
-            was_in = before.channel is not None
-            now_in = after.channel is not None
-            levelup = None
-            tick_before = _as_float(user.get("vc_last_tick"))
-            changed = False
-            if not was_in and now_in:
-                user["vc_last_tick"] = now
-                changed = tick_before != now
-            elif was_in and not now_in:
-                level_before = _user_general_level(user)
-                granted = _grant_vc_exp(user, now)
-                level_after = _user_general_level(user)
-                if level_after > level_before:
-                    levelup = (level_before, level_after)
-                user["vc_last_tick"] = 0.0
-                # 付与があったか、計測中フラグが実際に下りたときだけ保存する
-                changed = granted or tick_before != 0.0
-            else:
-                return
-            if changed:
-                await _exp_save()
-            if levelup:
-                self._spawn(self._notify_levelup(
-                    member.guild, member, levelup[0], levelup[1], fallback_channel=before.channel,
-                ))
-                await self._notify_level_rewards(
-                    member.guild, member, levelup[0], levelup[1],
-                )
-        except Exception:
-            logger.exception("EXP: VC入退室の処理に失敗しました")
-
-
-    @tasks.loop(minutes=1)
-    async def exp_vc_tick(self):
-        try:
-            data = await _exp_load()
-            now = time.time()
-            touched = False
-            active: set[tuple[str, str]] = set()
-            levelups: list[tuple[discord.Guild, int, int, int, object]] = []
-            for guild in list(self.bot.guilds):
-                for uid, voice_channel in _iter_voice_user_channels(guild):
-                    active.add((str(guild.id), str(uid)))
-                    user = _exp_ensure(data, guild.id, uid)
-                    level_before = _user_general_level(user)
-                    # 保存するのは実際にEXPが付与されたときだけにする。
-                    # vc_accum_sec / vc_last_tick の進行はメモリ上で保持され、
-                    # 次回の付与時 (または入退室時) の保存でまとめて永続化される。
-                    if _grant_vc_exp(user, now):
-                        touched = True
-                    level_after = _user_general_level(user)
-                    if level_after > level_before:
-                        levelups.append((guild, uid, level_before, level_after, voice_channel))
-            # VCにいないのに計測中のままの人(退室イベント取りこぼし等)は計測を止める
-            for gid, users in data.items():
-                if not isinstance(users, dict):
-                    continue
-                for uid, u in users.items():
-                    if (gid, uid) in active or not isinstance(u, dict):
-                        continue
-                    if _as_float(u.get("vc_last_tick")) > 0.0:
-                        u["vc_last_tick"] = 0.0
-                        touched = True
-            if touched:
-                await _exp_save()
-            for guild, uid, level_before, level_after, voice_channel in levelups:
-                member = guild.get_member(uid)
-                if member is not None:
-                    await self._notify_level_rewards(
-                        guild, member, level_before, level_after,
-                    )
-                self._spawn(self._notify_levelup(
-                    guild, uid, level_before, level_after, fallback_channel=voice_channel,
-                ))
-        except Exception:
-            logger.exception("EXP: VC tick に失敗しました (次の周期で再試行します)")
-
-
-    @exp_vc_tick.before_loop
-    async def before_exp_vc_tick(self):
-        await self.bot.wait_until_ready()
-        try:
-            data = await _exp_load()
-            now = time.time()
-            touched = False
-            for guild in list(self.bot.guilds):
-                for uid in _iter_voice_user_ids(guild):
-                    user = _exp_ensure(data, guild.id, uid)
-                    if _as_float(user.get("vc_last_tick")) != now:
-                        user["vc_last_tick"] = now
-                        touched = True
-            if touched:
-                await _exp_save()
-        except Exception:
-            logger.exception("EXP: 起動時のVC計測の初期化に失敗しました")
-
-
-async def setup(bot):
-    await bot.add_cog(GeneralCog(bot))
+def __getattr__(name: str):
+    _module_path = _LAZY_FEATURE_MODULES.get(name)
+    if _module_path is not None:
+        _module = importlib.import_module(_module_path)
+        return getattr(_module, name)
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

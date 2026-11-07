@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock, patch
 
 import httpx
 from groq import NotFoundError, RateLimitError
-from cogs.imakita import FAILURE_MESSAGE, MODEL, ImakitaSummaryCog
+from cogs.general import FAILURE_MESSAGE, MODEL, ImakitaSummaryCog
 
 
 class FakeChannel:
@@ -122,7 +122,7 @@ class ImakitaSummaryTest(unittest.IsolatedAsyncioTestCase):
         client, create = self.make_client(self.completion("should not be used"))
         cog = ImakitaSummaryCog(types.SimpleNamespace(command_prefix="!"), client=client, clock=lambda: 100)
 
-        with patch("cogs.imakita.guild_locale", return_value="en"):
+        with patch("core.general.imakita.cog.guild_locale", return_value="en"):
             await cog.on_message(trigger)
 
         create.assert_not_awaited()

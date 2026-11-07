@@ -25,11 +25,10 @@ for name, value in {
 import discord
 from discord.ext import commands
 
-# ラズパイにだけ入っている（PyPI にない）ライブラリを使う cog。
-# ライブラリが無い環境では読み込みチェックを飛ばす。
-OPTIONAL_MODULES = {
-    "cogs.judgement": "needle",  # needle3（軽量の意思決定モデル）
-}
+# 集約入口（cogs/general.py / cogs/support.py）は機能単位で読み込みを分離し、
+# 失敗した機能をモジュールの FAILED_FEATURES に記録する。拡張自体の読み込み
+# 成功だけでなく、FAILED_FEATURES が空であることも「全機能が読み込めた」
+# 条件として検査する（旧・入口ファイル単位の検査と同じ粒度）。
 
 
 def _cog_modules():
@@ -51,15 +50,15 @@ class CogLoadingTest(unittest.TestCase):
         async def run():
             bot = commands.Bot(command_prefix="!", intents=discord.Intents.all())
             for ext in _cog_modules():
-                module = OPTIONAL_MODULES.get(ext)
-                if module and importlib.util.find_spec(module) is None:
-                    cls.skipped.append(ext)
-                    continue
                 try:
                     await bot.load_extension(ext)
                 except Exception as exc:  # noqa: BLE001 - collect every failure
                     cause = exc.__cause__ or exc
                     cls.failures[ext] = f"{type(cause).__name__}: {cause}"
+                    continue
+                module = sys.modules.get(ext)
+                for label, error in getattr(module, "FAILED_FEATURES", {}).items():
+                    cls.failures[f"{ext}:{label}"] = error
             cls.slash_names = [c.qualified_name for c in bot.tree.get_commands()]
             # バックグラウンドタスクを止めるため全拡張をアンロードする
             for ext in list(bot.extensions):

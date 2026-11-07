@@ -27,7 +27,7 @@ class MoneyPanelCleanupTest(unittest.TestCase):
     """R2-5: マネーパネルに再描画だけの「更新」ボタンを置かない。"""
 
     def _labels(self, category):
-        from cogs.money_panel import MoneyPanelView
+        from cogs.general import MoneyPanelView
 
         view = MoneyPanelView.__new__(MoneyPanelView)
         view.category = category
@@ -43,7 +43,7 @@ class MoneyPanelCleanupTest(unittest.TestCase):
             self.assertNotIn("更新", self._labels(category), category)
 
     def test_placeholder_style(self):
-        from cogs.money_panel import MoneyPanelView
+        from cogs.general import MoneyPanelView
         import discord
 
         view = MoneyPanelView.__new__(MoneyPanelView)

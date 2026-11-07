@@ -24,7 +24,7 @@ from core.game.game import prison as prison_core
 from core.general.role_shop import role_shop as shop_core
 from core.general.items.items import JST
 from core.support.storage import KVStore
-from cogs import wallet as wallet_module
+from cogs import general as wallet_module
 
 T0 = datetime(2026, 11, 6, 12, 0, tzinfo=JST)
 GID = 555
@@ -91,9 +91,9 @@ class _Wallet:
 
     async def _change_balance(self, user_id, delta, *, require_funds=False,
                               create_with=None):
-        # cog ロード経路によって cogs.wallet のモジュール同一性が崩れる
+        # cog ロード経路によって wallet のモジュール同一性が崩れる
         # ことがあるため、センチネルは role_shop が見ている実体から引く。
-        insufficient = sys.modules["cogs.role_shop"].wallet_module.INSUFFICIENT
+        insufficient = sys.modules["core.general.role_shop.cog"].wallet_module.INSUFFICIENT
         uid = str(user_id)
         current = self.balances.get(uid)
         if current is None:
@@ -128,7 +128,7 @@ def _settings(tmp):
 
 
 def _cog(tmp, wallet, guild):
-    from cogs.role_shop import RoleShopCog
+    from cogs.general import RoleShopCog
 
     return RoleShopCog(
         _Bot(wallet, guild),
