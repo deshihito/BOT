@@ -219,7 +219,7 @@ def render_levelup_card(
 
     白基調・装飾最小。Bahnschrift/DIN 系コンデンスフォントにトラッキングを加えた見出し。
     矢印は軸+三角形の2段構成、レベル数字は視覚的中心でベースラインを揃える。
-    theme は core.general.levelup_card のテーマ名 (ユーザーごとのカードカスタマイズ)。
+    theme は core.general.exp.levelup_card のテーマ名 (ユーザーごとのカードカスタマイズ)。
     """
     from PIL import Image, ImageDraw
 
