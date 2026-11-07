@@ -38,6 +38,21 @@ async function query<T>(body: QueryBody): Promise<T[]> {
   return Array.isArray(result.data) ? result.data : [];
 }
 
+/** 許可テーブルへの汎用 select（Bot 本体が db_api 経由で使うのと同じ経路）。 */
+export async function tableSelect<T>(
+  table: string,
+  columns: string,
+  filters: { column: string; op: string; value: unknown }[],
+  limit = 1,
+): Promise<T[]> {
+  return query<T>({ table, action: "select", columns, filters, limit });
+}
+
+/** 許可テーブルへの汎用 upsert。 */
+export async function tableUpsert(table: string, values: unknown, onConflict: string): Promise<void> {
+  await query({ table, action: "upsert", values, on_conflict: onConflict });
+}
+
 type KvRow = { key: string; value: unknown };
 
 const KV_TABLE = "bot_kv";

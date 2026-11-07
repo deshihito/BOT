@@ -12,9 +12,11 @@ type SessionPayload = {
   expiresAt: number;
   // サーバー側セッションレコード（lib/dashboard.ts）のキー。ダッシュボード用ログインでのみ付く。
   sid?: string;
+  // Discord のアバターハッシュ（無い/未取得なら null。旧セッションには含まれない）
+  avatar?: string | null;
 };
 
-export type DiscordUser = Pick<SessionPayload, "id" | "username">;
+export type DiscordUser = Pick<SessionPayload, "id" | "username"> & { avatar?: string | null };
 
 export type SessionInfo = DiscordUser & { sid?: string };
 
@@ -44,6 +46,7 @@ export function createSession(user: DiscordUser, sid?: string) {
     username: user.username.slice(0, 80),
     expiresAt: Date.now() + SESSION_MAX_AGE * 1000,
     ...(sid ? { sid } : {}),
+    ...(user.avatar !== undefined ? { avatar: user.avatar } : {}),
   };
   const encoded = Buffer.from(JSON.stringify(payload)).toString("base64url");
   const signature = sign(encoded);
@@ -53,7 +56,7 @@ export function createSession(user: DiscordUser, sid?: string) {
 
 export function readSession(value?: string): DiscordUser | null {
   const info = readSessionInfo(value);
-  return info ? { id: info.id, username: info.username } : null;
+  return info ? { id: info.id, username: info.username, avatar: info.avatar ?? null } : null;
 }
 
 export function readSessionInfo(value?: string): SessionInfo | null {
@@ -67,7 +70,8 @@ export function readSessionInfo(value?: string): SessionInfo | null {
     if (typeof payload.username !== "string" || !payload.username.trim()) return null;
     if (typeof payload.expiresAt !== "number" || payload.expiresAt <= Date.now()) return null;
     const sid = typeof payload.sid === "string" && /^[0-9a-f]{64}$/.test(payload.sid) ? payload.sid : undefined;
-    return { id: payload.id, username: payload.username, ...(sid ? { sid } : {}) };
+    const avatar = typeof payload.avatar === "string" && payload.avatar ? payload.avatar : null;
+    return { id: payload.id, username: payload.username, avatar, ...(sid ? { sid } : {}) };
   } catch {
     return null;
   }

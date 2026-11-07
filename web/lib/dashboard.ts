@@ -2,7 +2,7 @@
 // アクセストークンは bot_kv の web_sessions 名前空間（Pi上のDB）だけに置き、クライアントへ出さない。
 import crypto from "node:crypto";
 import type { SessionInfo } from "./auth";
-import { isBotApiConfigured, kvDelete, kvGet, kvList, kvSet } from "./bot-api";
+import { isBotApiConfigured, kvDelete, kvGet, kvList, kvSet, tableSelect, tableUpsert } from "./bot-api";
 import {
   manageableGuilds,
   mergeGuildSettings,
@@ -21,10 +21,11 @@ type WebSessionRecord = {
   username: string;
   access_token: string;
   expires_at: number;
+  avatar?: string | null;
 };
 
 export async function createWebSession(
-  user: { id: string; username: string },
+  user: { id: string; username: string; avatar?: string | null },
   accessToken: string,
 ): Promise<string | null> {
   if (!isBotApiConfigured()) return null;
@@ -34,6 +35,7 @@ export async function createWebSession(
     username: user.username,
     access_token: accessToken,
     expires_at: Date.now() + SESSION_TTL_MS,
+    avatar: user.avatar ?? null,
   };
   try {
     await kvSet(WEB_SESSIONS_NAMESPACE, sid, record);
@@ -106,7 +108,7 @@ export async function fetchDiscordGuilds(accessToken: string): Promise<OAuthGuil
 }
 
 export type DashboardContext = {
-  user: { id: string; username: string };
+  user: { id: string; username: string; avatar: string | null };
   /** ログイン中ユーザーが管理できるギルド（Discordから再取得した最新状態） */
   guilds: OAuthGuild[];
 };
@@ -117,20 +119,27 @@ export async function getDashboardContext(session: SessionInfo): Promise<Dashboa
   const record = await loadWebSession(session.sid);
   if (!record || record.user_id !== session.id) return null;
 
+  const user = {
+    id: session.id,
+    username: session.username,
+    avatar: session.avatar ?? record.avatar ?? null,
+  };
   const cached = guildCache.get(session.sid);
   if (cached && Date.now() - cached.at < GUILD_CACHE_MS) {
-    return { user: { id: session.id, username: session.username }, guilds: cached.guilds };
+    return { user, guilds: cached.guilds };
   }
   const all = await fetchDiscordGuilds(record.access_token);
   if (!all) return null;
   const guilds = manageableGuilds(all);
   guildCache.set(session.sid, { at: Date.now(), guilds });
-  return { user: { id: session.id, username: session.username }, guilds };
+  return { user, guilds };
 }
 
 export type GuildRegistryEntry = {
   name: string;
   member_count: number;
+  icon: string | null;
+  updated_at: string | null;
 };
 
 export async function loadGuildRegistry(): Promise<Map<string, GuildRegistryEntry>> {
@@ -142,9 +151,88 @@ export async function loadGuildRegistry(): Promise<Map<string, GuildRegistryEntr
     registry.set(guildId, {
       name: typeof entry.name === "string" ? entry.name : "",
       member_count: typeof entry.member_count === "number" ? entry.member_count : 0,
+      icon: typeof entry.icon === "string" ? entry.icon : null,
+      updated_at: typeof entry.updated_at === "string" ? entry.updated_at : null,
     });
   }
   return registry;
+}
+
+export type GuildStructureChannel = { id: string; name: string; type: number };
+export type GuildStructureRole = { id: string; name: string };
+export type GuildStructureBot = { id: string; name: string };
+
+export type GuildStructure = {
+  channels: GuildStructureChannel[];
+  roles: GuildStructureRole[];
+  bots: GuildStructureBot[];
+  updated_at: string | null;
+};
+
+function stringList(value: unknown): Record<string, unknown>[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter(
+    (item): item is Record<string, unknown> => typeof item === "object" && item !== null,
+  );
+}
+
+/** Bot が guild_registry に記録したサーバー構造スナップショット（セレクタ用）。 */
+export async function loadGuildStructure(guildId: string): Promise<GuildStructure | null> {
+  const raw = await kvGet(GUILD_REGISTRY_NAMESPACE, guildId);
+  if (typeof raw !== "object" || raw === null) return null;
+  const entry = raw as Record<string, unknown>;
+  const channels = stringList(entry.channels)
+    .filter((c) => typeof c.id === "string" && typeof c.name === "string")
+    .map((c) => ({ id: c.id as string, name: c.name as string, type: typeof c.type === "number" ? c.type : 0 }));
+  const roles = stringList(entry.roles)
+    .filter((r) => typeof r.id === "string" && typeof r.name === "string")
+    .map((r) => ({ id: r.id as string, name: r.name as string }));
+  const bots = stringList(entry.bots)
+    .filter((b) => typeof b.id === "string" && typeof b.name === "string")
+    .map((b) => ({ id: b.id as string, name: b.name as string }));
+  if (channels.length === 0 && roles.length === 0) return null;
+  return {
+    channels,
+    roles,
+    bots,
+    updated_at: typeof entry.updated_at === "string" ? entry.updated_at : null,
+  };
+}
+
+export type BumpRtaSettings = {
+  notifications_enabled: boolean;
+  role_id: string | null;
+};
+
+const BUMP_RTA_TABLE = "bump_rta_settings";
+
+/** bump/up RTA 通知設定（Bot 本体と同じテーブルを Bot API 経由で読み書きする）。 */
+export async function loadBumpRtaSettings(guildId: string): Promise<BumpRtaSettings> {
+  const rows = await tableSelect<Record<string, unknown>>(
+    BUMP_RTA_TABLE,
+    "notifications_enabled,role_id",
+    [{ column: "guild_id", op: "eq", value: guildId }],
+    1,
+  );
+  const row = rows[0];
+  if (!row) return { notifications_enabled: true, role_id: null };
+  const roleRaw = row.role_id;
+  return {
+    notifications_enabled: row.notifications_enabled !== false,
+    role_id: typeof roleRaw === "string" && /^\d+$/.test(roleRaw) ? roleRaw : null,
+  };
+}
+
+export async function saveBumpRtaSettings(guildId: string, settings: BumpRtaSettings): Promise<void> {
+  await tableUpsert(
+    BUMP_RTA_TABLE,
+    {
+      guild_id: guildId,
+      notifications_enabled: settings.notifications_enabled,
+      role_id: settings.role_id,
+    },
+    "guild_id",
+  );
 }
 
 export async function loadGuildSettings(guildId: string): Promise<Record<string, unknown>> {

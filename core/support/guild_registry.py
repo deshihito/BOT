@@ -5,7 +5,12 @@ core/support/storage.py（自前API の bot_kv、namespace "guild_registry"）�
 Web ダッシュボードはこの一覧を「Bot が導入されているサーバー」の正として読む
 （設定の有無では判定できないため）。
 
+加えて、ダッシュボードのチャンネル/ロール選択UIのために、サーバー構造の
+スナップショット（channels / roles / bots / bot: ID・名前・種別・並び順のみ。
+メッセージ内容や一般メンバーの個人情報は載せない）も同じ値に含める。
+
 起動時（on_ready）に全件を書き直し、参加・退出のたびに 1 件だけ更新する。
+構造の定期更新は公開ランキング Cog の1時間ループが sync_all を兼ねる。
 書き込みはすべて background（失敗しても Bot の動作は止めない。次回起動時に直る）。
 """
 from __future__ import annotations
@@ -49,6 +54,64 @@ def count_recent_joins(events: Any, *, now: datetime.datetime, days: int) -> int
     return total
 
 
+def _structure(guild: Any) -> dict[str, Any]:
+    """ダッシュボードのセレクタ用に、サーバー構造の最小スナップショットを作る。
+
+    載せるのは ID・名前・種別・並び順のみ（チャンネル種別は discord.py の
+    ChannelType の数値）。bots はメンバーキャッシュに居る bot アカウントの
+    ベストエフォート（キャッシュが不完全な環境では欠けることがある）。
+    """
+    channels: list[dict[str, Any]] = []
+    for channel in getattr(guild, "channels", None) or []:
+        channel_id = getattr(channel, "id", None)
+        if not isinstance(channel_id, int) or isinstance(channel_id, bool):
+            continue
+        ctype = getattr(channel, "type", None)
+        channels.append({
+            "id": str(channel_id),
+            "name": str(getattr(channel, "name", "") or ""),
+            "type": int(getattr(ctype, "value", 0) or 0),
+            "position": int(getattr(channel, "position", 0) or 0),
+        })
+    channels.sort(key=lambda item: (item["position"], int(item["id"])))
+
+    roles: list[dict[str, Any]] = []
+    for role in getattr(guild, "roles", None) or []:
+        role_id = getattr(role, "id", None)
+        if not isinstance(role_id, int) or isinstance(role_id, bool):
+            continue
+        roles.append({
+            "id": str(role_id),
+            "name": str(getattr(role, "name", "") or ""),
+            "position": int(getattr(role, "position", 0) or 0),
+        })
+    roles.sort(key=lambda item: (-item["position"], int(item["id"])))
+
+    bots: list[dict[str, str]] = []
+    for member in getattr(guild, "members", None) or []:
+        member_id = getattr(member, "id", None)
+        if not getattr(member, "bot", False):
+            continue
+        if not isinstance(member_id, int) or isinstance(member_id, bool):
+            continue
+        bots.append({
+            "id": str(member_id),
+            "name": str(getattr(member, "display_name", None) or getattr(member, "name", "") or ""),
+        })
+    bots.sort(key=lambda item: int(item["id"]))
+
+    me = getattr(guild, "me", None)
+    me_id = getattr(me, "id", None) if me is not None else None
+    bot_info = None
+    if isinstance(me_id, int) and not isinstance(me_id, bool):
+        bot_info = {
+            "id": str(me_id),
+            "name": str(getattr(me, "display_name", None) or getattr(me, "name", "") or ""),
+        }
+
+    return {"channels": channels, "roles": roles, "bots": bots, "bot": bot_info}
+
+
 def _guild_value(guild: Any) -> dict[str, Any]:
     icon = getattr(guild, "icon", None)
     icon_key = getattr(icon, "key", None) if icon is not None else None
@@ -57,6 +120,7 @@ def _guild_value(guild: Any) -> dict[str, Any]:
         "member_count": int(getattr(guild, "member_count", 0) or 0),
         "icon": icon_key if isinstance(icon_key, str) else None,
         "updated_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        **_structure(guild),
     }
 
 

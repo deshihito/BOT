@@ -23,23 +23,53 @@ logger = logging.getLogger("cogs.disboard_rta")
 
 
 class SettingsMixin:
+    # Web ダッシュボードからも bump_rta_settings を書き換えるため、キャッシュは
+    # 60秒で失効させて再読込する（GuildSettings の TTL と同じ考え方）。
+    SETTINGS_CACHE_TTL_SECONDS = 60.0
+
     async def _call(self, fn):
         return await asyncio.get_running_loop().run_in_executor(
             self._executor, lambda: run_with_retry(fn)
         )
 
 
+    def _cache_get(self, cache, gid):
+        """(ヒットしたか, 値)。キャッシュ値は (値, time.monotonic()) のタプル。"""
+        entry = cache.get(gid)
+        if entry is None:
+            return False, None
+        if not (isinstance(entry, tuple) and len(entry) == 2):
+            return True, entry  # 旧形式（生の値）が直接書かれていた場合はそのまま使う
+        value, stored_at = entry
+        if time.monotonic() - stored_at > self.SETTINGS_CACHE_TTL_SECONDS:
+            return False, None
+        return True, value
+
+    def _cache_put(self, cache, gid, value):
+        cache[gid] = (value, time.monotonic())
+
+    def _enabled_cached(self, guild_id):
+        """送信直前チェック用の同期読み（I/O なし）。最後に知った値を返し、
+        未取得なら既定の有効(True)。TTL 失効は非同期側の再読込に任せる。"""
+        entry = self._enabled_cache.get(str(guild_id))
+        if entry is None:
+            return True
+        if isinstance(entry, tuple) and len(entry) == 2:
+            return bool(entry[0])
+        return bool(entry)
+
     async def _is_enabled(self, guild_id):
         gid = str(guild_id)
-        if gid in self._enabled_cache:
-            return self._enabled_cache[gid]
+        hit, cached = self._cache_get(self._enabled_cache, gid)
+        if hit:
+            return cached
         if self.db is None:
             return True
         try:
             result = await self._call(lambda: self.db.table("bump_rta_settings").select(
                 "notifications_enabled").eq("guild_id", gid).limit(1).execute())
             enabled = bool(result.data[0]["notifications_enabled"]) if result.data else True
-            self._enabled_cache[gid] = enabled
+            self._cache_put(self._enabled_cache, gid, enabled)
             return enabled
         except Exception:
             logger.exception("bump_rta_settings read failed; using default enabled state: guild=%s", gid)
@@ -49,8 +79,9 @@ class SettingsMixin:
     async def _role_id(self, guild_id):
         """通知時にメンションするロールID (任意設定・未設定/取得失敗時は None)。"""
         gid = str(guild_id)
-        if gid in self._role_cache:
-            return self._role_cache[gid]
+        hit, cached = self._cache_get(self._role_cache, gid)
+        if hit:
+            return cached
         if self.db is None:
             return None
         try:
@@ -58,7 +89,7 @@ class SettingsMixin:
                 "role_id").eq("guild_id", gid).limit(1).execute())
             raw = result.data[0].get("role_id") if result.data else None
             role_id = int(raw) if raw is not None and str(raw).isdigit() else None
-            self._role_cache[gid] = role_id
+            self._cache_put(self._role_cache, gid, role_id)
             return role_id
         except Exception:
             logger.debug("bump_rta_settings role read failed: guild=%s", gid, exc_info=True)
@@ -67,7 +98,7 @@ class SettingsMixin:
 
     async def _set_role_id(self, guild_id, role_id):
         gid = str(guild_id)
-        self._role_cache[gid] = role_id
+        self._cache_put(self._role_cache, gid, role_id)
         if self.db is None:
             return
         await self._call(lambda: self.db.table("bump_rta_settings").upsert(
@@ -172,7 +203,7 @@ class SettingsMixin:
                     return await interaction.followup.send(
                         embed=_white_embed("設定の保存に失敗しました。時間をおいて再度お試しください。"),
                         ephemeral=True)
-            self._enabled_cache[gid] = enabled
+            self._cache_put(self._enabled_cache, gid, enabled)
             if not enabled:
                 self._cancel_guild(interaction.guild_id)
             return await interaction.followup.send(

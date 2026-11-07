@@ -163,6 +163,30 @@ export function manageableGuilds(guilds: OAuthGuild[]): OAuthGuild[] {
   return guilds.filter((guild) => guild.owner || hasManageGuild(guild.permissions));
 }
 
+// ---------------------------------------------------------------- Discord CDN
+
+/** ユーザーアバターのURL。ハッシュが無ければ ID から決まるデフォルトアバター。 */
+export function userAvatarUrl(userId: string, avatarHash: string | null | undefined): string {
+  if (avatarHash) {
+    const ext = avatarHash.startsWith("a_") ? "gif" : "png";
+    return `https://cdn.discordapp.com/avatars/${userId}/${avatarHash}.${ext}?size=64`;
+  }
+  let index = 0;
+  try {
+    index = Number((BigInt(userId) >> 22n) % 6n);
+  } catch {
+    index = 0;
+  }
+  return `https://cdn.discordapp.com/embed/avatars/${index}.png`;
+}
+
+/** ギルドアイコンのURL。ハッシュが無ければ null（呼び出し側で頭文字表示にする）。 */
+export function guildIconUrl(guildId: string, iconHash: string | null | undefined): string | null {
+  if (!iconHash) return null;
+  const ext = iconHash.startsWith("a_") ? "gif" : "png";
+  return `https://cdn.discordapp.com/icons/${guildId}/${iconHash}.${ext}?size=64`;
+}
+
 // ---------------------------------------------------------------- 検証
 
 const SNOWFLAKE = /^\d{17,20}$/;
@@ -173,7 +197,8 @@ export function isSnowflake(value: string): boolean {
 
 export type FieldType =
   | "bool" | "channel" | "role" | "role_list" | "text" | "number" | "enum"
-  | "enum_number" | "text_list" | "preset" | "id_list" | "rate_map" | "bot_rule_map";
+  | "enum_number" | "text_list" | "preset" | "id_list" | "rate_map" | "bot_rule_map"
+  | "message" | "emoji_role_map" | "level_role_map" | "schedule_list";
 
 export type FieldSpec = {
   name: string;
@@ -196,6 +221,8 @@ export type FieldSpec = {
   itemPattern?: string;
   /** type="text_list" のとき: 保存時に黙って除く値（Bot側 normalize と同じ扱いのもの） */
   excludeValues?: string[];
+  /** type="channel" のとき: セレクタ表示で候補にするチャンネル種別（既定はテキスト系） */
+  channelKind?: "text" | "voice" | "category";
 };
 
 export type SectionGuard = {
@@ -216,6 +243,8 @@ export type SectionSpec = {
   guards?: SectionGuard[];
   /** true のとき: セクション全体が1つの対応表（bot_control 等）。単一フィールドの解析結果でセクションを置き換える */
   mapSection?: boolean;
+  /** guild_settings 以外の保存先（Bot 本体と同じテーブルを Bot API 経由で読み書きする） */
+  external?: "bump_rta";
 };
 
 /** v1 で編集できるセクション（Bot 側の検証規則に合わせる）。 */
@@ -276,9 +305,10 @@ export const SETTING_SECTIONS: SectionSpec[] = [
   {
     section: "assist_leveling",
     label: "レベル報酬",
-    description: "既存EXPのレベルに応じて、ロールを自動付与します。レベルとロールの対応表の編集は、Discordの /support パネルで行ってください。",
+    description: "既存EXPのレベルに応じて、ロールを自動付与します。到達レベル以下で最も高い報酬が1つ付与されます。",
     fields: [
       { name: "enabled", label: "レベル報酬", type: "bool" },
+      { name: "role_rewards", label: "レベルとロールの対応表（1行に1件、最大10件）", type: "level_role_map", multiline: true, description: "書式: レベル=ロールID（レベルは2〜1000）。空欄にすると対応表を消します" },
     ],
   },
   {
@@ -287,7 +317,7 @@ export const SETTING_SECTIONS: SectionSpec[] = [
     description: "参加すると専用のボイスチャンネルを自動作成し、名前変更やロックができます。",
     fields: [
       { name: "enabled", label: "一時VC", type: "bool" },
-      { name: "join_channel_id", label: "作成用VC（ボイスチャンネルのID）", type: "channel" },
+      { name: "join_channel_id", label: "作成用VC（ボイスチャンネル）", type: "channel", channelKind: "voice" },
       { name: "name_template", label: "名前テンプレート", type: "text", maxLength: 100, description: "{user} {name} {id} が使えます。空欄にすると既定の「{user}のVC」になります" },
       { name: "user_limit", label: "既定の人数上限（0で無制限）", type: "number", min: 0, max: 99, default: 0 },
     ],
@@ -310,7 +340,7 @@ export const SETTING_SECTIONS: SectionSpec[] = [
   {
     section: "assist_automod",
     label: "AutoMod",
-    description: "招待リンク・外部リンク・メンションスパム・大文字スパム・連投を自動削除します。管理者と「メッセージの管理」権限者は対象外です。",
+    description: "招待リンク・外部リンク・メンションスパム・大文字スパム・連投・横断連投・コピペ荒らしを自動削除します。管理者と「メッセージの管理」権限者は対象外です。",
     fields: [
       { name: "enabled", label: "AutoMod", type: "bool" },
       { name: "log_channel_id", label: "ログ送信先", type: "channel" },
@@ -342,6 +372,20 @@ export const SETTING_SECTIONS: SectionSpec[] = [
         options: [
           { value: 0, label: "オフ" }, { value: 3, label: "3 件以上" },
           { value: 5, label: "5 件以上" }, { value: 8, label: "8 件以上" },
+        ],
+      },
+      {
+        name: "cross_count", label: "横断連投検知（60秒間・複数チャンネル）", type: "enum_number", default: 0,
+        options: [
+          { value: 0, label: "オフ" }, { value: 3, label: "同一内容 3 件以上" },
+          { value: 5, label: "同一内容 5 件以上" },
+        ],
+      },
+      {
+        name: "raid_users", label: "コピペ荒らし検知（60秒間）", type: "enum_number", default: 0,
+        options: [
+          { value: 0, label: "オフ" }, { value: 3, label: "同一内容を 3 人以上" },
+          { value: 5, label: "同一内容を 5 人以上" }, { value: 10, label: "同一内容を 10 人以上" },
         ],
       },
     ],
@@ -410,12 +454,12 @@ export const SETTING_SECTIONS: SectionSpec[] = [
   {
     section: "assist_stats",
     label: "サーバースタッツ",
-    description: "メンバー数・オンライン数・ブースト数をVC名に反映します。表示先はボイスチャンネルのIDを指定してください。",
+    description: "メンバー数・オンライン数・ブースト数をVC名に反映します。",
     fields: [
       { name: "enabled", label: "サーバースタッツ", type: "bool" },
-      { name: "member_channel_id", label: "メンバー数を表示するVC", type: "channel" },
-      { name: "online_channel_id", label: "オンライン数を表示するVC", type: "channel" },
-      { name: "boost_channel_id", label: "ブースト数を表示するVC", type: "channel" },
+      { name: "member_channel_id", label: "メンバー数を表示するVC", type: "channel", channelKind: "voice" },
+      { name: "online_channel_id", label: "オンライン数を表示するVC", type: "channel", channelKind: "voice" },
+      { name: "boost_channel_id", label: "ブースト数を表示するVC", type: "channel", channelKind: "voice" },
     ],
     guards: [
       { flag: "enabled", needsAny: ["member_channel_id", "online_channel_id", "boost_channel_id"], message: "サーバースタッツを有効にするには、表示先のVCが最低1つ必要です" },
@@ -436,10 +480,11 @@ export const SETTING_SECTIONS: SectionSpec[] = [
   {
     section: "assist_timed",
     label: "タイマー告知",
-    description: "毎日決まった時刻の告知と、一回限りのリマインダーを投稿します。告知スケジュールの追加・編集は、Discordの /support パネルで行ってください。",
+    description: "毎日決まった時刻の告知と、一回限りのリマインダーを投稿します。スケジュールを編集しても、その日の送信済み記録は引き継がれます（時刻と本文を変えると新しい告知として扱われます）。一回限りのリマインダーは利用者自身の登録のため、ここでは扱いません。",
     fields: [
       { name: "enabled", label: "タイマー告知", type: "bool" },
       { name: "channel_id", label: "送信先", type: "channel" },
+      { name: "schedules", label: "告知スケジュール（1行に1件、最大10件）", type: "schedule_list", multiline: true, description: "書式: HH:MM メッセージ（例: 21:00 定例会のお知らせ）。空欄にすると全て消します" },
     ],
     guards: [
       { flag: "enabled", needs: ["channel_id"], message: "タイマー告知を有効にするには、送信先チャンネルが必要です" },
@@ -518,6 +563,20 @@ export const SETTING_SECTIONS: SectionSpec[] = [
     ],
   },
   {
+    section: "assist_reactionroles",
+    label: "リアクションロール",
+    description: "対象メッセージの絵文字リアクションでロールを付与・解除します。チャンネルを変えると対象メッセージと対応表はリセットされ、メッセージを変えると対応表がリセットされます（Discordのパネルと同じ動作）。保存後にDiscordで対象メッセージへ「リアクションを反映」すると、Botが絵文字を付けます。",
+    fields: [
+      { name: "enabled", label: "リアクションロール", type: "bool" },
+      { name: "channel_id", label: "対象メッセージのチャンネル", type: "channel" },
+      { name: "message_id", label: "対象メッセージのID", type: "message" },
+      { name: "mappings", label: "絵文字とロールの対応表（1行に1件、最大25件）", type: "emoji_role_map", multiline: true, description: "書式: 絵文字=ロールID（例: ⭐=123456789012345678）。空欄にすると対応表を消します" },
+    ],
+    guards: [
+      { flag: "enabled", needs: ["channel_id", "message_id", "mappings"], message: "リアクションロールを有効にするには、対象チャンネル・対象メッセージ・対応表が必要です" },
+    ],
+  },
+  {
     section: "assist_stickyroles",
     label: "ロール復元",
     description: "退出したメンバーのロールを保存し、再参加時に戻します。",
@@ -546,6 +605,38 @@ export const SETTING_SECTIONS: SectionSpec[] = [
     ],
     guards: [
       { flag: "enabled", needs: ["review_channel_id"], message: "応募フォームを有効にするには、レビュー先チャンネルが必要です" },
+    ],
+  },
+  {
+    section: "ticket",
+    label: "チケットツール",
+    description: "問い合わせチケットの受付パネルと作成ルームの設定です。チケットの種別と担当者の割り当ては、Discordの /support パネルで行ってください。",
+    fields: [
+      { name: "enabled", label: "チケットツール", type: "bool" },
+      { name: "panel_channel_id", label: "パネル設置先", type: "channel" },
+      {
+        name: "mode", label: "作成タイプ", type: "enum", default: "thread",
+        options: [
+          { value: "thread", label: "プライベートスレッド" },
+          { value: "channel", label: "専用チャンネル" },
+        ],
+      },
+      { name: "category_id", label: "専用チャンネルのカテゴリ（作成タイプが専用チャンネルのとき）", type: "channel", channelKind: "category" },
+      { name: "viewer_role_ids", label: "閲覧ロール（最大25個）", type: "role_list", maxItems: 25 },
+      { name: "operator_role_ids", label: "操作ロール（最大25個）", type: "role_list", maxItems: 25 },
+      {
+        name: "delete_after", label: "クローズ後の自動削除", type: "enum_number", default: 0,
+        options: [
+          { value: 0, label: "無効" }, { value: 3600, label: "1時間" },
+          { value: 86400, label: "1日" }, { value: 259200, label: "3日" },
+          { value: 604800, label: "7日" },
+        ],
+      },
+      { name: "user_manage", label: "作成者にルーム操作（名前変更など）を許可", type: "bool" },
+      { name: "transcript_channel_id", label: "記録（トランスクリプト）の保存先", type: "channel" },
+    ],
+    guards: [
+      { flag: "enabled", needs: ["panel_channel_id"], message: "チケットツールを有効にするには、パネル設置先チャンネルが必要です" },
     ],
   },
   {
@@ -596,6 +687,16 @@ export const SETTING_SECTIONS: SectionSpec[] = [
       { name: "rules", label: "制限するボット（1行に1件、最大50件）", type: "bot_rule_map", multiline: true },
     ],
     mapSection: true,
+  },
+  {
+    section: "bump_rta",
+    label: "bump/up RTA通知",
+    description: "DISBOARDのbumpや各種upの通知と、次に可能になる時刻のリマインダー・RTA計測の設定です。保存はBotに1分ほどで反映されます。",
+    fields: [
+      { name: "notifications_enabled", label: "bump/up通知とRTA計測", type: "bool", default: true },
+      { name: "role_id", label: "通知時にメンションするロール（任意）", type: "role" },
+    ],
+    external: "bump_rta",
   },
 ];
 
@@ -734,6 +835,219 @@ export function parseBotRuleMap(raw: unknown): ParseResult<Record<string, { allo
   return { ok: true, value: Object.keys(result).length > 0 ? result : null };
 }
 
+
+const EMOJI_ROLE_MAX = 25;
+const LEVEL_ROLE_MAX = 10;
+const SCHEDULE_MAX = 10;
+const SCHEDULE_TIME = /^([01]?\d|2[0-3]):([0-5]\d)$/;
+
+/**
+ * リアクションロールの対応表（絵文字→ロールID）を検証・変換する。
+ * 入力は「絵文字=ロールID」を1行に1件書いた文字列（Bot のモーダルと同じく
+ * 区切りは改行/カンマ、= が無ければ : でもよい）、または保存済みオブジェクト。
+ */
+export function parseEmojiRoleMap(raw: unknown): ParseResult<Record<string, string> | null> {
+  const result: Record<string, string> = {};
+  const errors: string[] = [];
+  function add(emojiRaw: string, roleRaw: string) {
+    const emoji = emojiRaw.trim();
+    const roleId = roleRaw.trim();
+    if (!emoji) { errors.push("絵文字が空です"); return; }
+    if (emoji.length > 100 || emoji.includes(INT_TOKEN_PREFIX)) { errors.push(`絵文字が不正です: ${emoji}`); return; }
+    if (!isSnowflake(roleId)) { errors.push(`ロールIDの形式が正しくありません: ${roleId}`); return; }
+    result[emoji] = intToken(roleId);
+  }
+  if (typeof raw === "string") {
+    for (const token of raw.split(/[\n,]+/)) {
+      const trimmed = token.trim();
+      if (!trimmed) continue;
+      const sep = trimmed.includes("=") ? "=" : trimmed.includes(":") ? ":" : null;
+      if (!sep) { errors.push(`「絵文字=ロールID」の形式で入力してください: ${trimmed}`); continue; }
+      const at = trimmed.indexOf(sep);
+      add(trimmed.slice(0, at), trimmed.slice(at + 1));
+    }
+  } else if (typeof raw === "object" && raw !== null && !Array.isArray(raw)) {
+    for (const [emoji, roleId] of Object.entries(raw as Record<string, unknown>)) {
+      add(emoji, unwrapId(roleId));
+    }
+  } else if (raw !== null && raw !== undefined) {
+    return { ok: false, errors: ["形式が正しくありません"] };
+  }
+  if (errors.length > 0) return { ok: false, errors };
+  if (Object.keys(result).length > EMOJI_ROLE_MAX) {
+    return { ok: false, errors: [`最大 ${EMOJI_ROLE_MAX} 件までです`] };
+  }
+  return { ok: true, value: Object.keys(result).length > 0 ? result : null };
+}
+
+/**
+ * レベル報酬の対応表（レベル→ロールID）を検証・変換する。
+ * 入力は「レベル=ロールID」を1行に1件書いた文字列（Bot のモーダルと同じ形式）。
+ * レベルは 2〜1000、最大10件。キーはレベル文字列（Bot の保存形式と同じ）。
+ */
+export function parseLevelRoleMap(raw: unknown): ParseResult<Record<string, string> | null> {
+  const result: Record<string, string> = {};
+  const errors: string[] = [];
+  function add(levelRaw: string, roleRaw: string) {
+    const level = Number(levelRaw.trim());
+    const roleId = roleRaw.trim();
+    if (!Number.isInteger(level) || level < 2 || level > 1000) {
+      errors.push(`レベルは2〜1000の整数で入力してください: ${levelRaw}`);
+      return;
+    }
+    if (!isSnowflake(roleId)) { errors.push(`ロールIDの形式が正しくありません: ${roleId}`); return; }
+    result[String(level)] = intToken(roleId);
+  }
+  if (typeof raw === "string") {
+    for (const token of raw.split(/[\n,]+/)) {
+      const trimmed = token.trim();
+      if (!trimmed) continue;
+      const sep = trimmed.includes("=") ? "=" : trimmed.includes(":") ? ":" : null;
+      if (!sep) { errors.push(`「レベル=ロールID」の形式で入力してください: ${trimmed}`); continue; }
+      const at = trimmed.indexOf(sep);
+      add(trimmed.slice(0, at), trimmed.slice(at + 1));
+    }
+  } else if (typeof raw === "object" && raw !== null && !Array.isArray(raw)) {
+    for (const [level, roleId] of Object.entries(raw as Record<string, unknown>)) {
+      add(level, unwrapId(roleId));
+    }
+  } else if (raw !== null && raw !== undefined) {
+    return { ok: false, errors: ["形式が正しくありません"] };
+  }
+  if (errors.length > 0) return { ok: false, errors };
+  const keys = Object.keys(result).sort((a, b) => Number(a) - Number(b));
+  if (keys.length > LEVEL_ROLE_MAX) {
+    return { ok: false, errors: [`最大 ${LEVEL_ROLE_MAX} 件までです`] };
+  }
+  const sorted: Record<string, string> = {};
+  for (const key of keys) sorted[key] = result[key];
+  return { ok: true, value: keys.length > 0 ? sorted : null };
+}
+
+export type ScheduleEntry = { time: string; message: string };
+
+/**
+ * タイマー告知スケジュール（時刻＋本文）を検証・変換する。
+ * 入力は「HH:MM メッセージ」を1行に1件書いた文字列、または保存済み相当の配列。
+ * id / last_sent はここでは付けない（reconcileSchedules で既存分を引き継ぐ）。
+ */
+export function parseScheduleList(raw: unknown): ParseResult<ScheduleEntry[] | null> {
+  const result: ScheduleEntry[] = [];
+  const errors: string[] = [];
+  function add(timeRaw: string, messageRaw: string) {
+    const match = SCHEDULE_TIME.exec(timeRaw.trim());
+    if (!match) { errors.push(`時刻は HH:MM で入力してください: ${timeRaw}`); return; }
+    const time = `${match[1].padStart(2, "0")}:${match[2]}`;
+    const message = messageRaw.trim();
+    if (!message) { errors.push(`メッセージが空です: ${timeRaw}`); return; }
+    if (message.length > 1500) { errors.push(`メッセージは1500文字までです: ${timeRaw}`); return; }
+    if (message.includes(INT_TOKEN_PREFIX)) { errors.push(`使えない文字列が含まれています: ${timeRaw}`); return; }
+    result.push({ time, message });
+  }
+  if (typeof raw === "string") {
+    for (const line of raw.split(/\n+/)) {
+      const trimmed = line.trim();
+      if (!trimmed) continue;
+      const at = trimmed.search(/\s/);
+      if (at < 0) { errors.push(`「HH:MM メッセージ」の形式で入力してください: ${trimmed}`); continue; }
+      add(trimmed.slice(0, at), trimmed.slice(at + 1));
+    }
+  } else if (Array.isArray(raw)) {
+    for (const item of raw) {
+      if (typeof item !== "object" || item === null) { errors.push("形式が正しくありません"); continue; }
+      const entry = item as Record<string, unknown>;
+      add(typeof entry.time === "string" ? entry.time : "", typeof entry.message === "string" ? entry.message : "");
+    }
+  } else if (raw !== null && raw !== undefined) {
+    return { ok: false, errors: ["形式が正しくありません"] };
+  }
+  if (errors.length > 0) return { ok: false, errors };
+  if (result.length > SCHEDULE_MAX) {
+    return { ok: false, errors: [`最大 ${SCHEDULE_MAX} 件までです`] };
+  }
+  return { ok: true, value: result.length > 0 ? result : null };
+}
+
+/**
+ * 新しいスケジュール一覧に、既存エントリの id / last_sent を引き継ぐ。
+ * (time, message) が一致する既存エントリがあればその id を再利用し、
+ * 二重送信防止（last_sent）を壊さない。一致しないものは新規 id を採番する。
+ */
+export function reconcileSchedules(
+  entries: ScheduleEntry[],
+  existingRaw: unknown,
+  genId: () => string,
+): Record<string, unknown>[] {
+  const existing = Array.isArray(existingRaw) ? existingRaw : [];
+  const pool: Record<string, unknown>[] = [];
+  for (const item of existing) {
+    if (typeof item !== "object" || item === null) continue;
+    const entry = item as Record<string, unknown>;
+    if (typeof entry.time === "string" && typeof entry.message === "string" && typeof entry.id === "string") {
+      pool.push(entry);
+    }
+  }
+  const used = new Set<number>();
+  return entries.map((entry) => {
+    const at = pool.findIndex(
+      (old, index) => !used.has(index) && old.time === entry.time && old.message === entry.message,
+    );
+    if (at >= 0) {
+      used.add(at);
+      const old = pool[at];
+      return {
+        id: old.id as string,
+        time: entry.time,
+        message: entry.message,
+        ...(typeof old.last_sent === "string" && old.last_sent ? { last_sent: old.last_sent } : {}),
+      };
+    }
+    return { id: genId(), time: entry.time, message: entry.message };
+  });
+}
+
+function normalizedMappings(value: unknown): [string, string][] {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return [];
+  return Object.entries(value as Record<string, unknown>)
+    .map(([emoji, roleId]) => [emoji, unwrapId(roleId)] as [string, string])
+    .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+}
+
+/**
+ * リアクションロールの連動リセットを Discord パネルと同じ意味で適用する。
+ * チャンネル変更時は対象メッセージと対応表をリセットし、メッセージ変更時は
+ * 対応表をリセットする。ただし今回の送信で新しい値が明示されている項目は
+ * そのまま使う（Web はセクション全体を一括送信するため、保存値との比較で
+ * 「変更されたかどうか」を判定する）。
+ */
+export function applyReactionRolesCoupling(
+  values: Record<string, unknown>,
+  existingSection: unknown,
+): Record<string, unknown> {
+  const stored =
+    typeof existingSection === "object" && existingSection !== null && !Array.isArray(existingSection)
+      ? (existingSection as Record<string, unknown>)
+      : {};
+  const result = { ...values };
+  const channelChanged =
+    "channel_id" in result && unwrapId(result.channel_id) !== unwrapId(stored.channel_id);
+  if (channelChanged) {
+    if (unwrapId(result.message_id) === unwrapId(stored.message_id)) {
+      result.message_id = null;
+      result.mappings = null;
+    }
+    return result;
+  }
+  const messageChanged =
+    "message_id" in result && unwrapId(result.message_id) !== unwrapId(stored.message_id);
+  if (messageChanged) {
+    const sameMappings =
+      JSON.stringify(normalizedMappings(result.mappings)) === JSON.stringify(normalizedMappings(stored.mappings));
+    if (sameMappings) result.mappings = null;
+  }
+  return result;
+}
+
 /**
  * クライアントから来た1セクション分の入力を、Bot の保存形式へ検証・変換する。
  * 値が null のキーは「その項目を消す」（Bot の GuildSettings.update と同じ意味）。
@@ -761,7 +1075,8 @@ export function sanitizeSectionInput(spec: SectionSpec, input: unknown): Sanitiz
         break;
       }
       case "channel":
-      case "role": {
+      case "role":
+      case "message": {
         if (typeof raw !== "string") { errors.push(`${field.label}: IDは文字列で入力してください`); break; }
         const trimmed = raw.trim();
         if (trimmed === "") { values[field.name] = null; break; }
@@ -869,6 +1184,24 @@ export function sanitizeSectionInput(spec: SectionSpec, input: unknown): Sanitiz
       }
       case "bot_rule_map": {
         const parsed = parseBotRuleMap(raw);
+        if (!parsed.ok) { errors.push(...parsed.errors.map((e) => `${field.label}: ${e}`)); break; }
+        values[field.name] = parsed.value;
+        break;
+      }
+      case "emoji_role_map": {
+        const parsed = parseEmojiRoleMap(raw);
+        if (!parsed.ok) { errors.push(...parsed.errors.map((e) => `${field.label}: ${e}`)); break; }
+        values[field.name] = parsed.value;
+        break;
+      }
+      case "level_role_map": {
+        const parsed = parseLevelRoleMap(raw);
+        if (!parsed.ok) { errors.push(...parsed.errors.map((e) => `${field.label}: ${e}`)); break; }
+        values[field.name] = parsed.value;
+        break;
+      }
+      case "schedule_list": {
+        const parsed = parseScheduleList(raw);
         if (!parsed.ok) { errors.push(...parsed.errors.map((e) => `${field.label}: ${e}`)); break; }
         values[field.name] = parsed.value;
         break;

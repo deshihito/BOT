@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { getCurrentSession } from "@/lib/auth";
+import { guildIconUrl, userAvatarUrl } from "@/lib/dashboard-core";
 import { getDashboardContext, loadGuildRegistry } from "@/lib/dashboard";
 
 export const metadata = { title: "ダッシュボード | AGOBOT", robots: { index: false, follow: false } };
@@ -13,7 +14,11 @@ export default async function DashboardPage() {
   const header = (
     <div className="dashboard-header">
       <h1>ダッシュボード</h1>
-      <span>{session.username}</span>
+      <span className="user-chip">
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img className="user-avatar" src={userAvatarUrl(session.id, session.avatar)} alt="" width={28} height={28} />
+        {session.username}
+      </span>
       <form action="/api/auth/logout" method="post"><button type="submit">ログアウト</button></form>
     </div>
   );
@@ -70,16 +75,31 @@ export default async function DashboardPage() {
       ) : (
         <nav className="dashboard-list" aria-label="サーバー">
           {context.guilds.map((guild) => {
-            const installed = registry.has(guild.id);
+            const entry = registry.get(guild.id);
+            const installed = entry !== undefined;
+            const icon = guildIconUrl(guild.id, guild.icon ?? entry?.icon);
+            const card = (
+              <>
+                {icon ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img className="guild-icon" src={icon} alt="" width={40} height={40} />
+                ) : (
+                  <span className="guild-icon guild-icon-fallback" aria-hidden="true">{guild.name.slice(0, 1)}</span>
+                )}
+                <span className="guild-card-main">
+                  <span>{guild.name}</span>
+                  {entry ? <span className="guild-card-meta">{entry.member_count.toLocaleString("ja-JP")} 人</span> : null}
+                </span>
+                <span className="badge">{installed ? "設定できます" : "未導入"}</span>
+              </>
+            );
             return installed ? (
               <Link key={guild.id} href={`/dashboard/${guild.id}`} className="dashboard-card guild-card">
-                <span>{guild.name}</span>
-                <span className="badge">設定できます</span>
+                {card}
               </Link>
             ) : (
               <div key={guild.id} className="dashboard-card guild-card guild-card-disabled" aria-disabled="true">
-                <span>{guild.name}</span>
-                <span className="badge">未導入</span>
+                {card}
               </div>
             );
           })}

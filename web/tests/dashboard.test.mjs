@@ -92,7 +92,7 @@ test("mergeGuildSettings はBotのupdateと同じ意味（nullで削除、空で
 test("SETTING_SECTIONS のセクション名は重複しない", () => {
   const names = m.SETTING_SECTIONS.map((spec) => spec.section);
   assert.equal(new Set(names).size, names.length);
-  const nonAssist = new Set(["vc_auto_start", "globalchat", "command_control", "bot_control"]);
+  const nonAssist = new Set(["vc_auto_start", "globalchat", "command_control", "bot_control", "ticket", "bump_rta"]);
   for (const name of names) assert.ok(name.startsWith("assist_") || nonAssist.has(name), name);
 });
 
@@ -158,4 +158,99 @@ test("id_list はIDを番兵化し不正なIDを弾く", () => {
   assert.equal(ok.ok, true);
   assert.deepEqual(ok.values.blocked_users, ["#int:123456789012345678"]);
   assert.equal(m.sanitizeSectionInput(spec, { blocked_users: ["abc"] }).ok, false);
+});
+
+test("userAvatarUrl / guildIconUrl は CDN 形式で、アニメーションは gif、無ければデフォルト/ null", () => {
+  assert.equal(
+    m.userAvatarUrl("123456789012345678", "abc123"),
+    "https://cdn.discordapp.com/avatars/123456789012345678/abc123.png?size=64",
+  );
+  assert.equal(
+    m.userAvatarUrl("123456789012345678", "a_xyz"),
+    "https://cdn.discordapp.com/avatars/123456789012345678/a_xyz.gif?size=64",
+  );
+  const fallback = m.userAvatarUrl("80351110224678912", null);
+  assert.match(fallback, /^https:\/\/cdn\.discordapp\.com\/embed\/avatars\/[0-5]\.png$/);
+  assert.equal(m.guildIconUrl("123", null), null);
+  assert.equal(
+    m.guildIconUrl("123", "deadbeef"),
+    "https://cdn.discordapp.com/icons/123/deadbeef.png?size=64",
+  );
+});
+
+test("automod には横断連投とコピペ荒らしの離散選択肢がある", () => {
+  const spec = m.sectionSpec("assist_automod");
+  const cross = spec.fields.find((f) => f.name === "cross_count");
+  const raid = spec.fields.find((f) => f.name === "raid_users");
+  assert.deepEqual(cross.options.map((o) => o.value), [0, 3, 5]);
+  assert.deepEqual(raid.options.map((o) => o.value), [0, 3, 5, 10]);
+  const ok = m.sanitizeSectionInput(spec, { cross_count: 3, raid_users: 10 });
+  assert.equal(ok.ok, true);
+  assert.equal(m.sanitizeSectionInput(spec, { cross_count: 4 }).ok, false);
+});
+
+test("parseEmojiRoleMap はモーダルと同じ形式を受け、不正なロールIDを弾く", () => {
+  const ok = m.parseEmojiRoleMap("⭐=123456789012345678\n👍:234567890123456789");
+  assert.equal(ok.ok, true);
+  assert.deepEqual(ok.value, { "⭐": "#int:123456789012345678", "👍": "#int:234567890123456789" });
+  assert.equal(m.parseEmojiRoleMap("⭐=abc").ok, false);
+  assert.deepEqual(m.parseEmojiRoleMap("").value, null);
+});
+
+test("reactionroles の連動リセット: チャンネル変更でメッセージと対応表が消え、明示した新メッセージは残る", () => {
+  const stored = {
+    channel_id: "#int:111111111111111111",
+    message_id: "#int:222222222222222222",
+    mappings: { "⭐": "#int:333333333333333333" },
+  };
+  const changedChannel = m.applyReactionRolesCoupling(
+    { channel_id: "#int:444444444444444444", message_id: "#int:222222222222222222", mappings: { "⭐": "#int:333333333333333333" } },
+    stored,
+  );
+  assert.equal(changedChannel.message_id, null);
+  assert.equal(changedChannel.mappings, null);
+  const changedMessage = m.applyReactionRolesCoupling(
+    { channel_id: "#int:111111111111111111", message_id: "#int:555555555555555555", mappings: { "⭐": "#int:333333333333333333" } },
+    stored,
+  );
+  assert.equal(changedMessage.mappings, null);
+  const rewritten = m.applyReactionRolesCoupling(
+    { channel_id: "#int:111111111111111111", message_id: "#int:555555555555555555", mappings: { "👍": "#int:666666666666666666" } },
+    stored,
+  );
+  assert.deepEqual(rewritten.mappings, { "👍": "#int:666666666666666666" });
+});
+
+test("parseLevelRoleMap はレベル範囲と件数を検証する", () => {
+  const ok = m.parseLevelRoleMap("10=123456789012345678\n2:234567890123456789");
+  assert.equal(ok.ok, true);
+  assert.deepEqual(Object.keys(ok.value), ["2", "10"]);
+  assert.equal(m.parseLevelRoleMap("1=123456789012345678").ok, false);
+  assert.equal(m.parseLevelRoleMap("1001=123456789012345678").ok, false);
+});
+
+test("parseScheduleList は時刻をゼロ埋めし、reconcileSchedules は id と last_sent を引き継ぐ", () => {
+  const parsed = m.parseScheduleList("9:05 おはよう\n21:00 定例");
+  assert.equal(parsed.ok, true);
+  assert.deepEqual(parsed.value[0], { time: "09:05", message: "おはよう" });
+  assert.equal(m.parseScheduleList("25:00 x").ok, false);
+  const existing = [
+    { id: "abcd1234", time: "09:05", message: "おはよう", last_sent: "2026-11-07" },
+    { id: "eeee2222", time: "20:00", message: "旧告知", last_sent: "2026-11-06" },
+  ];
+  let n = 0;
+  const reconciled = m.reconcileSchedules(parsed.value, existing, () => `new${++n}`);
+  assert.deepEqual(reconciled[0], { id: "abcd1234", time: "09:05", message: "おはよう", last_sent: "2026-11-07" });
+  assert.equal(reconciled[1].id, "new1");
+  assert.equal("last_sent" in reconciled[1], false);
+});
+
+test("ticket と bump_rta セクションが定義され、bump_rta は external である", () => {
+  const ticket = m.sectionSpec("ticket");
+  assert.ok(ticket.fields.some((f) => f.name === "delete_after"));
+  const bump = m.sectionSpec("bump_rta");
+  assert.equal(bump.external, "bump_rta");
+  const ok = m.sanitizeSectionInput(bump, { notifications_enabled: false, role_id: "123456789012345678" });
+  assert.equal(ok.ok, true);
+  assert.equal(ok.values.role_id, "#int:123456789012345678");
 });

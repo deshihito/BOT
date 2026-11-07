@@ -233,7 +233,7 @@ class ReminderMixin:
         mid = rem.message_id
         if mid in self._done:
             return
-        if not self._enabled_cache.get(str(rem.guild_id), True):
+        if not self._enabled_cached(rem.guild_id):
             await self._finish(rem, "notifications disabled before send")
             return
         start_delay = self.clock.now() - self._fire_target(rem)

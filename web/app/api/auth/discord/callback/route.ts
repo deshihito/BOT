@@ -53,10 +53,15 @@ export async function GET(request: Request) {
     });
     if (!userResponse.ok) throw new Error("user lookup failed");
 
-    const user = await userResponse.json() as { id?: string; username?: string; global_name?: string };
+    const user = await userResponse.json() as { id?: string; username?: string; global_name?: string; avatar?: string | null };
     if (!user.id) throw new Error("missing Discord user id");
 
-    const sessionUser = { id: user.id, username: user.global_name || user.username || "Discord" };
+    // avatar は identify スコープの範囲で取れる（追加の許可は不要）
+    const sessionUser = {
+      id: user.id,
+      username: user.global_name || user.username || "Discord",
+      avatar: typeof user.avatar === "string" && user.avatar ? user.avatar : null,
+    };
     // ダッシュボード用にサーバー側セッションレコードを作る（失敗しても通常ログインは成立させる）
     const sid = await createWebSession(sessionUser, token.access_token);
 
