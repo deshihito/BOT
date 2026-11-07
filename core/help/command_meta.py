@@ -11,7 +11,7 @@
 - permissions: 自動で読み取れない権限（コマンドの中で確かめている場合など）
 - hidden: True にすると /help や Web の一覧に出さない（デバッグ用・持ち主専用など）
 - guide: 詳しい説明（Markdown）
-- guide_key: core/game/game_guides.py の GAME_GUIDES のキー。そのゲームのルール説明を guide として使う
+- guide_key: core/game/game/game_guides.py の GAME_GUIDES のキー。そのゲームのルール説明を guide として使う
 """
 
 from __future__ import annotations
@@ -199,16 +199,16 @@ COMMAND_META: dict[str, dict] = {
 
 
 def game_guides() -> dict:
-    """core/game/game_guides.py があれば、そのルール説明を返す（無い環境では空）。"""
+    """core/game/game/game_guides.py があれば、そのルール説明を返す（無い環境では空）。"""
     try:
-        from core.game import game_guides as module
+        from core.game.game import game_guides as module
     except ImportError:
         return {}
     return getattr(module, "GAME_GUIDES", {}) or {}
 
 
 def resolve_guide(meta: dict) -> str | None:
-    """guide（直接書いたもの）か guide_key（core/game/game_guides.py の項目）からガイドを返す。"""
+    """guide（直接書いたもの）か guide_key（core/game/game/game_guides.py の項目）からガイドを返す。"""
     if meta.get("guide"):
         return meta["guide"]
     key = meta.get("guide_key")
