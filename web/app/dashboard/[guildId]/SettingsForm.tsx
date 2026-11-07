@@ -19,6 +19,40 @@ function initialList(value: unknown): string {
   return value.map((item) => unwrapId(item)).filter(Boolean).join("\n");
 }
 
+function initialRateMap(value: unknown): string {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return "";
+  const lines: string[] = [];
+  for (const [actionId, rule] of Object.entries(value as Record<string, unknown>)) {
+    if (typeof rule !== "object" || rule === null) continue;
+    const r = rule as Record<string, unknown>;
+    if (typeof r.count === "number" && typeof r.window_seconds === "number") {
+      lines.push(`${actionId} ${r.count} ${r.window_seconds}`);
+    }
+  }
+  return lines.join("\n");
+}
+
+function initialBotRuleMap(sectionValue: Record<string, unknown>): string {
+  const lines: string[] = [];
+  for (const [botId, entry] of Object.entries(sectionValue)) {
+    if (typeof entry !== "object" || entry === null) continue;
+    const e = entry as Record<string, unknown>;
+    const channels = Array.isArray(e.allowed_channel_ids)
+      ? e.allowed_channel_ids.map((c) => unwrapId(c)).filter(Boolean)
+      : [];
+    if (channels.length === 0) continue;
+    let line = `${unwrapId(botId) || botId} ${channels.join(",")}`;
+    if (typeof e.rate === "object" && e.rate !== null) {
+      const r = e.rate as Record<string, unknown>;
+      if (typeof r.count === "number" && typeof r.window_seconds === "number") {
+        line += ` ${r.count} ${r.window_seconds}`;
+      }
+    }
+    lines.push(line);
+  }
+  return lines.join("\n");
+}
+
 export default function SettingsForm({ guildId, spec, initial }: Props) {
   const [values, setValues] = useState<Record<string, string | boolean>>(() => {
     const state: Record<string, string | boolean> = {};
@@ -29,7 +63,14 @@ export default function SettingsForm({ guildId, spec, initial }: Props) {
           state[field.name] = typeof raw === "boolean" ? raw : field.default === true;
           break;
         case "role_list":
+        case "id_list":
           state[field.name] = initialList(raw);
+          break;
+        case "rate_map":
+          state[field.name] = initialRateMap(raw);
+          break;
+        case "bot_rule_map":
+          state[field.name] = initialBotRuleMap(initial);
           break;
         case "text_list":
           state[field.name] = Array.isArray(raw) ? raw.filter((item) => typeof item === "string").join("\n") : "";
@@ -78,6 +119,7 @@ export default function SettingsForm({ guildId, spec, initial }: Props) {
           payload[field.name] = value === true;
           break;
         case "role_list":
+        case "id_list":
           payload[field.name] = typeof value === "string" ? value.split(/[\s,]+/).filter(Boolean) : [];
           break;
         case "text_list":
@@ -142,13 +184,13 @@ export default function SettingsForm({ guildId, spec, initial }: Props) {
                       <option key={String(option.value)} value={String(option.value)}>{option.label}</option>
                     ))}
                   </select>
-                ) : field.type === "role_list" || field.type === "text_list" || field.multiline ? (
+                ) : field.type === "role_list" || field.type === "id_list" || field.type === "text_list" || field.type === "rate_map" || field.type === "bot_rule_map" || field.multiline ? (
                   <textarea
                     id={`${spec.section}-${field.name}`}
                     value={typeof value === "string" ? value : ""}
                     onChange={(event) => set(field.name, event.target.value)}
-                    rows={field.type === "role_list" ? 4 : 3}
-                    placeholder={field.type === "role_list" ? "ロールIDを1行に1つずつ" : undefined}
+                    rows={field.type === "role_list" || field.type === "id_list" || field.type === "rate_map" || field.type === "bot_rule_map" ? 4 : 3}
+                    placeholder={field.type === "role_list" ? "ロールIDを1行に1つずつ" : field.type === "id_list" ? "IDを1行に1つずつ" : undefined}
                   />
                 ) : (
                   <input

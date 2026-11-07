@@ -9,6 +9,8 @@ type Translation = [string, string, string];
 // 固定UI文言だけを置換し、Botから生成されるコマンドデータはそのまま表示する。
 const TRANSLATIONS: Translation[] = [
   ["AGOBOT サポート", "AGOBOT Support", "AGOBOT 支持"],
+  ["Discordに追加", "Add to Discord", "添加到Discord"],
+  ["サポートサーバー", "Support server", "支持服务器"],
   ["コマンド一覧", "Commands", "命令列表"],
   ["利用規約", "Terms of Service", "服务条款"],
   ["プライバシーポリシー", "Privacy Policy", "隐私政策"],

@@ -106,14 +106,18 @@ class MyBot(commands.Bot):
     async def on_guild_join(self, guild):
         try:
             from core.support.guild_registry import get_registry
-            await get_registry().record(guild)
+            registry = get_registry()
+            await registry.record(guild)
+            await registry.record_event(guild, "joined")
         except Exception:
             logging.getLogger(__name__).exception("サーバー一覧への登録に失敗しました")
 
     async def on_guild_remove(self, guild):
         try:
             from core.support.guild_registry import get_registry
-            await get_registry().remove(guild.id)
+            registry = get_registry()
+            await registry.remove(guild.id)
+            await registry.record_event(guild, "removed")
         except Exception:
             logging.getLogger(__name__).exception("サーバー一覧からの削除に失敗しました")
 

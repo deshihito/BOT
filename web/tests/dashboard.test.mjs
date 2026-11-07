@@ -89,8 +89,73 @@ test("mergeGuildSettings はBotのupdateと同じ意味（nullで削除、空で
   assert.equal(emptied, null);
 });
 
-test("SETTING_SECTIONS のセクション名は assist_ で始まり重複しない", () => {
+test("SETTING_SECTIONS のセクション名は重複しない", () => {
   const names = m.SETTING_SECTIONS.map((spec) => spec.section);
   assert.equal(new Set(names).size, names.length);
-  for (const name of names) assert.ok(name.startsWith("assist_"), name);
+  const nonAssist = new Set(["vc_auto_start", "globalchat", "command_control", "bot_control"]);
+  for (const name of names) assert.ok(name.startsWith("assist_") || nonAssist.has(name), name);
+});
+
+const commandControlSpec = {
+  section: "command_control",
+  label: "cc",
+  description: "",
+  fields: [
+    { name: "mode", label: "モード", type: "enum", options: [{ value: "off" }, { value: "deny" }, { value: "allow" }] },
+    { name: "actions", label: "アクション", type: "text_list", maxItems: 300, itemPattern: "^[a-z0-9_]+:[a-z0-9_]+(:[a-z0-9_]+)?$", excludeValues: ["support:bot_fixer"] },
+    { name: "rates", label: "レート", type: "rate_map" },
+  ],
+};
+
+test("command_control: bot_fixer 自体は黙って除かれ、レートが対応表になる", () => {
+  const result = m.sanitizeSectionInput(commandControlSpec, {
+    mode: "deny",
+    actions: ["general:money_panel", "support:bot_fixer"],
+    rates: "general:money_panel 10 3600\nsupport:bot_fixer 5 600",
+  });
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.values.actions, ["general:money_panel"]);
+  assert.deepEqual(result.values.rates, { "general:money_panel": { count: 10, window_seconds: 3600 } });
+});
+
+test("command_control: 不正なアクションIDと範囲外レートを弾く", () => {
+  assert.equal(m.sanitizeSectionInput(commandControlSpec, { actions: ["BAD ID"] }).ok, false);
+  assert.equal(m.sanitizeSectionInput(commandControlSpec, { rates: "general:x 0 3600" }).ok, false);
+  assert.equal(m.sanitizeSectionInput(commandControlSpec, { rates: "general:x 10 30" }).ok, false);
+  assert.equal(m.sanitizeSectionInput(commandControlSpec, { rates: "" }).ok, true);
+});
+
+const botControlSpec = {
+  section: "bot_control",
+  label: "bc",
+  description: "",
+  mapSection: true,
+  fields: [{ name: "rules", label: "ルール", type: "bot_rule_map" }],
+};
+
+test("bot_control: 行形式を対応表へ変換し、applySectionValues がセクションを置き換える", () => {
+  const result = m.sanitizeSectionInput(botControlSpec, {
+    rules: "123456789012345678 234567890123456789,345678901234567890 20 3600",
+  });
+  assert.equal(result.ok, true);
+  const applied = m.applySectionValues({ other: { x: 1 } }, botControlSpec, result.values);
+  assert.deepEqual(applied.other, { x: 1 });
+  assert.deepEqual(applied.bot_control["123456789012345678"].allowed_channel_ids, ["#int:234567890123456789", "#int:345678901234567890"]);
+  assert.deepEqual(applied.bot_control["123456789012345678"].rate, { count: 20, window_seconds: 3600 });
+  const cleared = m.applySectionValues(applied, botControlSpec, { rules: null });
+  assert.equal("bot_control" in cleared, false);
+});
+
+test("bot_control: 許可チャンネルなし・AGO自身・重複を弾く", () => {
+  assert.equal(m.sanitizeSectionInput(botControlSpec, { rules: "123456789012345678 " }).ok, false);
+  assert.equal(m.sanitizeSectionInput(botControlSpec, { rules: "1476636487784337428 234567890123456789" }).ok, false);
+  assert.equal(m.sanitizeSectionInput(botControlSpec, { rules: "123456789012345678 234567890123456789\n123456789012345678 234567890123456789" }).ok, false);
+});
+
+test("id_list はIDを番兵化し不正なIDを弾く", () => {
+  const spec = { section: "globalchat", label: "g", description: "", fields: [{ name: "blocked_users", label: "ブロック", type: "id_list", maxItems: 100 }] };
+  const ok = m.sanitizeSectionInput(spec, { blocked_users: ["123456789012345678"] });
+  assert.equal(ok.ok, true);
+  assert.deepEqual(ok.values.blocked_users, ["#int:123456789012345678"]);
+  assert.equal(m.sanitizeSectionInput(spec, { blocked_users: ["abc"] }).ok, false);
 });

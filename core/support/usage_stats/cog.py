@@ -49,6 +49,30 @@ class UsageStatsCog(commands.Cog):
         # 終了時に未保存分を書き出す（定期フラッシュとの二重化）。
         usage_stats.flush_safely()
 
+    async def _guild_growth_field(self) -> str | None:
+        """導入履歴（guild_history）から直近の新規導入数と総サーバー数を返す。
+
+        履歴は記録開始（本機能のデプロイ）以降分のみ。取得に失敗したら
+        統計表示自体は落とさず、この欄だけ出さない。
+        """
+        try:
+            from datetime import datetime, timezone
+
+            from core.support.guild_registry import count_recent_joins, get_registry
+
+            events = await get_registry().load_history()
+            now = datetime.now(timezone.utc)
+            joins_7d = count_recent_joins(events, now=now, days=7)
+            joins_30d = count_recent_joins(events, now=now, days=30)
+            total = len(self.bot.guilds)
+            return (
+                f"**現在の総サーバー数:** {total} 件\n"
+                f"**新規導入:** 直近7日 {joins_7d} 件 / 直近30日 {joins_30d} 件"
+                "（導入履歴の記録開始以降）"
+            )
+        except Exception:
+            return None
+
     # ------------------------------------------------------------------ 計数
     @commands.Cog.listener()
     async def on_command_completion(self, ctx: commands.Context):
@@ -108,6 +132,9 @@ class UsageStatsCog(commands.Cog):
             ),
             inline=False,
         )
+        guild_field = await self._guild_growth_field()
+        if guild_field is not None:
+            embed.add_field(name="導入", value=guild_field, inline=False)
         embed.add_field(
             name="コマンド使用率トップ10",
             value=usage_stats.format_top_lines(commands_count),

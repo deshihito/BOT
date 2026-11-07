@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import "./globals.css";
+import { InviteButton } from "./InviteCta";
+import { SUPPORT_SERVER_URL } from "@/lib/site";
 
 export const metadata: Metadata = {
   title: "AGOBOT サポート",
@@ -18,12 +20,14 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             <div className="main-nav-links">
               <Link href="/commands">コマンド</Link>
               <Link href="/dashboard">ダッシュボード</Link>
+              <InviteButton />
             </div>
           </nav>
         </header>
         <main>{children}</main>
         <footer>
           <nav className="footer-links" aria-label="ポリシー">
+            <a href={SUPPORT_SERVER_URL} target="_blank" rel="noreferrer">サポートサーバー</a>
             <Link href="/terms">利用規約</Link>
             <Link href="/privacy">プライバシーポリシー</Link>
           </nav>

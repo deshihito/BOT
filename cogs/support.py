@@ -316,6 +316,7 @@ _FEATURE_MODULES = (
     ("muted", "core.support.muted.cog"),
     ("ngword", "core.support.ngword.cog"),
     ("panel_recovery", "core.support.panel_recovery.cog"),
+    ("public_ranking", "core.support.public_ranking.cog"),
     ("server_assist", "core.support.server_assist.cog"),
     ("server_setup", "core.support.server_setup.cog"),
     ("stat", "core.support.stat.cog"),
