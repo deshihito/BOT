@@ -21,7 +21,7 @@ from discord.ext import commands
 
 from core.support.emojis import RESTART, TICKET
 from core.support.storage import KVStore
-from cogs.wallet import INSUFFICIENT, coin_embed
+from cogs.general import INSUFFICIENT, coin_embed
 
 log = logging.getLogger(__name__)
 
