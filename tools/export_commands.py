@@ -120,6 +120,12 @@ async def load_offline_bot():
             continue
         with contextlib.redirect_stdout(sys.stderr):
             await bot.load_extension(f"cogs.{module}")
+        # 集約入口は機能単位で読み込みを分離するため、拡張の読み込み成功
+        # だけでは全機能が揃ったことにならない。欠けた機能がある状態で
+        # カタログを書き出すとコマンドが silently 欠落するので、ここで落とす。
+        failed = getattr(sys.modules.get(f"cogs.{module}"), "FAILED_FEATURES", None)
+        if failed:
+            raise RuntimeError(f"cogs.{module}: 読み込めなかった機能があります: {failed}")
     return bot, skipped
 
 
