@@ -66,6 +66,49 @@ class ParseHistoryDecisionTest(unittest.TestCase):
         self.assertEqual(self.parse("履歴は不要です。"), 0)
         self.assertEqual(self.parse(""), 0)
 
+    def test_prose_affirmative_is_salvaged(self):
+        # JSON でなく日本語の散文で肯定が返っても拾う (件数はデフォルト)。
+        self.assertEqual(self.parse("履歴が必要です。"), ai_cog.HISTORY_AUTO_DEFAULT)
+        self.assertEqual(self.parse("この会話の履歴は必要です"), ai_cog.HISTORY_AUTO_DEFAULT)
+
+    def test_prose_negative_returns_zero(self):
+        self.assertEqual(self.parse("必要ありません。"), 0)
+        self.assertEqual(self.parse("履歴はいりません"), 0)
+        self.assertEqual(self.parse("履歴は必要ないです"), 0)
+
+
+class JudgeHistoryTest(unittest.IsolatedAsyncioTestCase):
+    async def test_keyword_hint_skips_model(self):
+        # 典型的な言い回しはモデルへ聞かずに即決する。
+        async def ask(messages):
+            raise AssertionError("モデルを呼んではいけない")
+
+        count = await ai_cog._judge_history(ask, "さっきの話の続きを教えて")
+        self.assertEqual(count, ai_cog.HISTORY_AUTO_DEFAULT)
+        count = await ai_cog._judge_history(ask, "このチャンネルの会話を要約して")
+        self.assertEqual(count, ai_cog.HISTORY_AUTO_DEFAULT)
+
+    async def test_model_json_decision(self):
+        async def ask(messages):
+            return '{"history": true, "count": 20}'
+
+        count = await ai_cog._judge_history(ask, "日本の首都はどこですか？")
+        self.assertEqual(count, 20)
+
+    async def test_model_prose_decision(self):
+        async def ask(messages):
+            return "履歴が必要です"
+
+        count = await ai_cog._judge_history(ask, "日本の首都はどこですか？")
+        self.assertEqual(count, ai_cog.HISTORY_AUTO_DEFAULT)
+
+    async def test_model_failure_returns_zero(self):
+        async def ask(messages):
+            raise TimeoutError("too slow")
+
+        count = await ai_cog._judge_history(ask, "日本の首都はどこですか？")
+        self.assertEqual(count, 0)
+
 
 def _message(index: int, text: str = "こんにちは"):
     return SimpleNamespace(

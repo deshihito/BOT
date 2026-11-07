@@ -46,6 +46,20 @@ HISTORY_JUDGE_PROMPT = (
 _HISTORY_TRUE_RE = re.compile(r'"history"\s*:\s*(?:"true"|true|1)(?![\w.])', re.IGNORECASE)
 _HISTORY_COUNT_RE = re.compile(r'"count"\s*:\s*"?(\d{1,3})')
 
+HISTORY_JUDGE_TIMEOUT = 30
+
+# 履歴が必要な依頼に典型的な言い回し。依頼文にこれらが含まれていれば、
+# モデルへ判定を聞かずに履歴を読む。判定モデルの応答形式に左右されない
+# 決定的な経路を用意し、JSON 指示に従わないモデル (Gemma 等) でも
+# 自動読み込みが効くようにするための保険。
+_HISTORY_HINT_RE = re.compile(
+    r"さっき|先ほど|この会話|このチャンネル|会話履歴|チャット履歴"
+    r"|続き|要約|まとめ|振り返|これまでの|今までの|他の人の発言"
+)
+# 判定モデルが JSON でなく日本語の散文で返した場合の救済用。
+_JUDGE_NEGATIVE_RE = re.compile(r"不要|必要ありません|必要ない|必要ではあり?ません|いりません")
+_JUDGE_POSITIVE_RE = re.compile(r"必要")
+
 
 def _first_json_object(text: str) -> dict | None:
     """テキスト中の最初の完結した {...} を JSON として読む。読めなければ None。
@@ -118,11 +132,16 @@ def _parse_history_decision(text: str) -> int:
         if _as_bool(data.get("history")) is not True:
             return 0
         count_value = data.get("count", HISTORY_AUTO_DEFAULT)
-    else:
-        if not _HISTORY_TRUE_RE.search(raw):
-            return 0
+    elif _HISTORY_TRUE_RE.search(raw):
         count_match = _HISTORY_COUNT_RE.search(raw)
         count_value = int(count_match.group(1)) if count_match else HISTORY_AUTO_DEFAULT
+    elif _JUDGE_NEGATIVE_RE.search(raw):
+        return 0
+    elif _JUDGE_POSITIVE_RE.search(raw):
+        # 「履歴が必要です」のような散文の肯定も拾う (件数はデフォルト)。
+        count_value = HISTORY_AUTO_DEFAULT
+    else:
+        return 0
     try:
         count = int(count_value)
     except (TypeError, ValueError):
@@ -131,16 +150,27 @@ def _parse_history_decision(text: str) -> int:
 
 
 async def _judge_history(ask, prompt: str) -> int:
+    # 典型的な言い回しはモデル判定を待たずに即決する (モデルの応答形式や
+    # 応答速度に左右されず、確実に履歴が読まれるように)。
+    if _HISTORY_HINT_RE.search(prompt or ""):
+        logger.info(
+            "history judge: keyword hint matched; loading %d messages",
+            HISTORY_AUTO_DEFAULT,
+        )
+        return HISTORY_AUTO_DEFAULT
     messages = [
         {"role": "system", "content": HISTORY_JUDGE_PROMPT},
         {"role": "user", "content": prompt[:1500]},
     ]
     try:
-        text = await asyncio.wait_for(ask(messages), timeout=15)
+        text = await asyncio.wait_for(ask(messages), timeout=HISTORY_JUDGE_TIMEOUT)
     except Exception:
         logger.warning("history judge failed; continuing without history", exc_info=True)
         return 0
-    return _parse_history_decision(text)
+    count = _parse_history_decision(text)
+    # !logs で後から追えるよう、判定結果と応答の冒頭を残す。
+    logger.info("history judge: count=%d reply=%r", count, (text or "").strip()[:120])
+    return count
 
 
 def _with_history(options, count: int):
