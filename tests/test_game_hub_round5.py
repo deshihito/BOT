@@ -3,8 +3,8 @@ import unittest
 from pathlib import Path
 
 from core.game.game.cog import GAME_COGS, game_select_pages
-from core.game.game_guides import GAME_ORDER
-from core.game.party_ranking import KNOWN_GAMES
+from core.game.game.game_guides import GAME_ORDER
+from core.game.game.party_ranking import KNOWN_GAMES
 
 ROUND5_GAMES = ("cipher", "wirecut", "liardice", "mendou", "yotsuba")
 RANKING_GAMES = ("cipher", "liardice", "mendou")

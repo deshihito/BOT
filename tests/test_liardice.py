@@ -2,7 +2,7 @@
 import random
 import unittest
 
-from core.game.liardice import LiarDiceGame, count_matching, is_legal_raise
+from core.game.liardice.liardice import LiarDiceGame, count_matching, is_legal_raise
 
 
 class RaiseRuleTest(unittest.TestCase):

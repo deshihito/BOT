@@ -1,10 +1,10 @@
-"""マインスイーパー（core/game/minesweeper.py + game_records の sweeper）のテスト。"""
+"""マインスイーパー（core/game/minesweeper/minesweeper.py + game_records の sweeper）のテスト。"""
 
 import random
 import unittest
 
-from core.game import game_records
-from core.game.minesweeper import COLS, ROWS, MinesweeperBoard
+from core.game.game import game_records
+from core.game.minesweeper.minesweeper import COLS, ROWS, MinesweeperBoard
 
 
 class BoardTest(unittest.TestCase):
@@ -56,7 +56,7 @@ class BigBoardTest(unittest.TestCase):
     """盤面画像化タスクで追加した大盤面（新キー wide/expert）。"""
 
     def test_sizes_and_mine_counts(self):
-        from core.game.minesweeper import DIFFICULTIES
+        from core.game.minesweeper.minesweeper import DIFFICULTIES
         self.assertEqual(DIFFICULTIES["wide"][1:], (10, 9, 9))
         self.assertEqual(DIFFICULTIES["expert"][1:], (35, 12, 16))
         # 従来キーは記録互換のため不変

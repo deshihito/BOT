@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""開発先行公開フラグ（core/game/game_guides.py の PREVIEW_GAMES）のテスト。
+"""開発先行公開フラグ（core/game/game/game_guides.py の PREVIEW_GAMES）のテスト。
 
 フラグの単一の真実源・ハブ表示（セレクト/詳細/ガイド）・起動時通知・
 ゲーム内パネルの注意行が、フラグの付け外しで切り替わることを確認する。
@@ -16,12 +16,12 @@ from game_fakes import (
     FakeBot, FakeChannel, FakeGuild, FakeInteraction, FakeMember,
     fast_time, real_sleep,
 )
-from core.game import game_guides
-from core.game.game_guides import (
+from core.game.game import game_guides
+from core.game.game.game_guides import (
     GAME_GUIDES, GAME_ORDER, PREVIEW_GAMES, PREVIEW_LABEL, PREVIEW_NOTICE,
     guide_for_discord, is_preview_game, preview_notice_line,
 )
-from core.game.game_v2 import GamePanelView, LobbyView
+from core.game.game.game_v2 import GamePanelView, LobbyView
 from core.game.game.cog import GAME_COGS, GameHub, GameSelect, detail_embed, game_select_pages, select_label
 
 EXPECTED_PREVIEW = {"wirecut", "liardice", "ito", "hanabi", "hoshi"}
@@ -143,21 +143,21 @@ class PanelNoticeTest(unittest.TestCase):
 class CogPanelTest(unittest.TestCase):
     def test_wirecut_main_panel(self):
         from cogs.wirecut import WireCut
-        from core.game.wirecut import WireCutGame
+        from core.game.wirecut.wirecut import WireCutGame
         cog = WireCut(FakeBot())
         panel = cog._panel(WireCutGame([1, 2]))
         self.assertIn(preview_notice_line("wirecut"), panel_text(panel))
 
     def test_liardice_main_panel(self):
         from cogs.liardice import LiarDice
-        from core.game.liardice import LiarDiceGame
+        from core.game.liardice.liardice import LiarDiceGame
         cog = LiarDice(FakeBot())
         panel = cog._panel(LiarDiceGame([1, 2]))
         self.assertIn(preview_notice_line("liardice"), panel_text(panel))
 
     def test_hanabi_main_panel(self):
         from cogs.hanabi import Hanabi
-        from core.game.hanabi import HanabiGame
+        from core.game.hanabi.hanabi import HanabiGame
         cog = Hanabi(FakeBot())
         panel = cog._panel(123, HanabiGame([1, 2]))
         self.assertIn(preview_notice_line("hanabi"), panel_text(panel))
@@ -179,7 +179,7 @@ class CogPanelAsyncTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_ito_round_panel(self):
         from cogs.ito import Ito
-        from core.game.ito import ItoSession
+        from core.game.ito.ito import ItoSession
         guild = FakeGuild()
         channel = FakeChannel(778, guild)
         cog = Ito(FakeBot(channel))
@@ -190,7 +190,7 @@ class CogPanelAsyncTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_hoshi_phase_panel(self):
         from cogs.hoshi import Hoshi
-        from core.game.hoshi import HoshiGame
+        from core.game.hoshi.hoshi import HoshiGame
         guild = FakeGuild()
         channel = FakeChannel(779, guild)
         cog = Hoshi(FakeBot(channel))

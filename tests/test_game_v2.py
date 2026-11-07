@@ -4,9 +4,9 @@ import unittest
 
 import discord
 
-from core.game.board_image import render_gauge, render_tiles
-from core.game.game_guides import GAME_GUIDES, GAME_ORDER
-from core.game.game_v2 import GamePanelView, assert_within_limits, count_buttons
+from core.game.game.board_image import render_gauge, render_tiles
+from core.game.game.game_guides import GAME_GUIDES, GAME_ORDER
+from core.game.game.game_v2 import GamePanelView, assert_within_limits, count_buttons
 
 
 class GamePanelV2Test(unittest.TestCase):
@@ -64,7 +64,7 @@ class Round4RegistrationTest(unittest.TestCase):
         self.assertEqual([len(p) for p in party_pages], [25, 4])
 
     def test_ranked_games_known(self):
-        from core.game import party_ranking
+        from core.game.game import party_ranking
         for game in ("insider", "hoshi", "liequiz", "gauge", "ruins"):
             self.assertIn(game, party_ranking.KNOWN_GAMES)
 

@@ -1,9 +1,9 @@
-"""2048（core/game/game2048.py）のテスト。合体・スポーン・ゲームオーバー判定。"""
+"""2048（core/game/game2048/game2048.py）のテスト。合体・スポーン・ゲームオーバー判定。"""
 
 import random
 import unittest
 
-from core.game.game2048 import Game2048, _merge_line
+from core.game.game2048.game2048 import Game2048, _merge_line
 
 
 class MergeLineTest(unittest.TestCase):

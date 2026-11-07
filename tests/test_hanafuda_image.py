@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""花札描画基盤（core/game/board_image.py の render_hanafuda 系）と
+"""花札描画基盤（core/game/game/board_image.py の render_hanafuda 系）と
 こいこい cog への適用のテスト。
 
 こいこい画像化タスク（2026-11-06）:
@@ -16,10 +16,10 @@ import unittest
 
 from PIL import Image
 
-from core.game import board_image
-from core.game.board_image import PAD, render_hanafuda, render_hanafuda_hand, render_hanafuda_rows
-from core.game.koikoi import CARDS, KoikoiMatch
-from core.game.koikoi_cog import cog as koikoi_cog
+from core.game.game import board_image
+from core.game.game.board_image import PAD, render_hanafuda, render_hanafuda_hand, render_hanafuda_rows
+from core.game.koikoi.koikoi import CARDS, KoikoiMatch
+from core.game.koikoi import cog as koikoi_cog
 
 
 def png(data: bytes):
