@@ -45,7 +45,7 @@ from core.general.market import market as market_core
 from core.game.game import prison as prison_core
 from core.general.money_panel import starter as starter_core
 from core.support.panel_v2 import as_panel_v2, edit_message_v2, edit_panel_v2
-from cogs import wallet as wallet_module  # 定数は実行時に引く（テストの cog 再読込対策）
+from cogs import general as wallet_module  # 定数は実行時に引く（テストの cog 再読込対策）
 
 logger = logging.getLogger(__name__)
 
@@ -416,7 +416,7 @@ class MoneyPanelView(discord.ui.View):
         if items_cog is None:
             return await interaction.response.send_message(
                 "アイテム機能が読み込まれていません。", ephemeral=True)
-        from cogs.items import ItemAmountModal
+        from cogs.general import ItemAmountModal
 
         await interaction.response.send_modal(ItemAmountModal(items_cog, "sell"))
 
