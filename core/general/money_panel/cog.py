@@ -39,11 +39,11 @@ import discord
 from discord.ext import commands
 
 import config
-from core.general import daily_bonus as daily_core
-from core.general import items as items_core
-from core.general import market as market_core
+from core.general.money_panel import daily_bonus as daily_core
+from core.general.items import items as items_core
+from core.general.market import market as market_core
 from core.game.game import prison as prison_core
-from core.general import starter as starter_core
+from core.general.money_panel import starter as starter_core
 from core.support.panel_v2 import as_panel_v2, edit_message_v2, edit_panel_v2
 from cogs import wallet as wallet_module  # 定数は実行時に引く（テストの cog 再読込対策）
 
