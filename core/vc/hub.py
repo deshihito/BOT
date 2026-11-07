@@ -92,8 +92,7 @@ class VoiceHub(commands.Cog):
         module_name = LAZY_EXTENSIONS.get(key)
         if not module_name:
             return None
-        package = __name__.rpartition(".")[0]
-        extension = f"{package}.{module_name}" if package else module_name
+        extension = f"cogs.{module_name}"
         try:
             await self.bot.load_extension(extension)
         except commands.ExtensionAlreadyLoaded:

@@ -145,7 +145,7 @@ GVC_ROOM_ACTIONS = {"gvc_room_list", "gvc_chat_disconnect", *GVC_ROOM_FORMS}
 
 # 起動時のロード一覧に漏れていても、初回利用時に読み込み直せる拡張（機能キー -> モジュール名）
 LAZY_EXTENSIONS = {
-    "transcribe": "sio_transcription",
+    "transcribe": "vc",  # cogs/vc.py（VC統合入口）
 }
 
 COGS = {
