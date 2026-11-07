@@ -3,8 +3,8 @@ import random
 import discord
 from discord.ext import commands
 
-from core.game import game_records
-from core.game.game_v2 import text_panel
+from core.game.game import game_records
+from core.game.game.game_v2 import text_panel
 
 
 class FlashModal(discord.ui.Modal, title="フラッシュ暗算"):
@@ -102,7 +102,7 @@ class FlashMentalArithmetic(commands.Cog):
           "", f"不正解です...。正解は **{total_sum}** でした。{line}"))
 
   def _record_line(self, user_id, count: int, interval: float, digits: int, correct: bool) -> str:
-    # 設定ごとの自己ベスト（core/game/game_records.py）。記録できなければ何も付けない。
+    # 設定ごとの自己ベスト（core/game/game/game_records.py）。記録できなければ何も付けない。
     entry = game_records.record_flash_safely(user_id, count, digits, interval, correct)
     if entry is None:
       return ""
