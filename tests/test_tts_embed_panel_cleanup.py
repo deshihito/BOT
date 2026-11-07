@@ -11,7 +11,7 @@ from unittest.mock import AsyncMock
 
 import discord
 
-from core.legacy import Responder
+from core.support.legacy import Responder
 from core.vc.tts import TTSCog, TTSSettings
 from core.vc.music.panel import PanelMixin
 from core.vc.music.search import SearchMixin

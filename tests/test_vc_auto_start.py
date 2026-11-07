@@ -19,7 +19,7 @@ if str(ROOT) not in sys.path:
 for _name, _value in {"BOT_API_BASE_URL": "http://127.0.0.1:8787", "BOT_API_KEY": "dummy-key"}.items():
     os.environ.setdefault(_name, _value)
 
-from core import guild_settings  # noqa: E402
+from core.support import guild_settings  # noqa: E402
 from core.vc import auto_start  # noqa: E402
 from core.vc.auto_start import (  # noqa: E402
     VC_AUTO_START_SECTION,

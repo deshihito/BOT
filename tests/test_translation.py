@@ -2,7 +2,7 @@ import types
 import unittest
 from unittest.mock import AsyncMock, patch
 
-from core import translation
+from core.general import translation_settings as translation
 from core.support import localization
 
 
@@ -12,7 +12,7 @@ class TranslationTest(unittest.IsolatedAsyncioTestCase):
             get=lambda key, default=None: {"enabled": True} if key == "42" else default
         )
         guild_store = types.SimpleNamespace(get=lambda *_: {"locale": "ja"})
-        with patch("core.translation.get_guild_store", return_value=guild_store):
+        with patch("core.general.translation_settings.get_guild_store", return_value=guild_store):
             settings = translation.translation_settings(42, 99, user_store)
         self.assertEqual(
             settings,
