@@ -1,10 +1,10 @@
-"""ビンゴ（core/game/bingo.py）のテスト。"""
+"""ビンゴ（core/game/bingo/bingo.py）のテスト。"""
 
 import random
 import unittest
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from core.game.bingo import COLUMN_RANGES, BingoCard, BingoSession, format_card
+from core.game.bingo.bingo import COLUMN_RANGES, BingoCard, BingoSession, format_card
 
 
 class CardTest(unittest.TestCase):
@@ -113,7 +113,7 @@ class DrawCycleTest(unittest.IsolatedAsyncioTestCase):
     """抽選サイクル（2026-11-06）: 10秒間隔、7秒でローディング送信→編集で開示。"""
 
     async def test_draw_once_is_single_message_tease_then_reveal(self):
-        from core.game.bingo_cog.cog import DRAW_INTERVAL, TEASE_SECONDS, Bingo
+        from core.game.bingo.cog import DRAW_INTERVAL, TEASE_SECONDS, Bingo
 
         self.assertEqual(DRAW_INTERVAL, 10)
         self.assertEqual(TEASE_SECONDS, 7)
@@ -151,7 +151,7 @@ class DrawCycleTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn("手札を確認", labels)
 
     async def test_card_check_sends_png_ephemerally(self):
-        from core.game.bingo_cog.cog import CardCheckView
+        from core.game.bingo.cog import CardCheckView
 
         session = BingoSession([1, 2], rng=random.Random(0))
         view = CardCheckView(MagicMock(), session)

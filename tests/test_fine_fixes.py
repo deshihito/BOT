@@ -25,9 +25,9 @@ import discord
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from core.game import gambling as gambling_core
+from core.game.gambling import gambling as gambling_core
 from core.general import steal
-from core.game import prison as prison_core
+from core.game.game import prison as prison_core
 from core.general import items, market as market_core
 from core.general.common import GENERAL_ACTIONS, MONEY_PRISON_BLOCKED_VALUES
 from core.support.panel_v2 import PanelLayoutView, as_panel_v2

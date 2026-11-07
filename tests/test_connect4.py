@@ -1,8 +1,8 @@
-"""四目並べ（core/game/connect4.py）のテスト。落下・勝敗判定・脅威検出AI。"""
+"""四目並べ（core/game/connect4/connect4.py）のテスト。落下・勝敗判定・脅威検出AI。"""
 
 import unittest
 
-from core.game.connect4 import RED, YELLOW, choose_ai_move, drop, is_full, legal_moves, new_board, winner
+from core.game.connect4.connect4 import RED, YELLOW, choose_ai_move, drop, is_full, legal_moves, new_board, winner
 
 R, Y = RED, YELLOW
 

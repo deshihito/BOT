@@ -1,11 +1,9 @@
-"""ボード系 Elo（core/game/elo.py）のテスト。"""
+"""ボード系 Elo（core/game/game/elo.py）のテスト。"""
 import tempfile
 import unittest
 from pathlib import Path
 
-from core.game import elo
-
-
+from core.game.game import elo
 class EloMathTest(unittest.TestCase):
     def test_equal_ratings_change_by_half_k(self):
         dw, dl = elo.match_changes(1500.0, 1500.0)
