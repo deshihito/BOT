@@ -15,10 +15,10 @@ from discord.ext import commands
 
 from core.support import guild_settings
 from core.general import action_usage
-from core.support import usage_stats
+from core.support.usage_stats import usage_stats
 from core.support.panel_v2 import as_embed_v2, as_panel_v2, edit_panel_v2
 from core.support.common import *
-from core.support.auth import *
+from core.support.auth_panel import *
 from core.support.roles import *
 from core.support.logs import *
 from core.support.sticky import *
@@ -30,7 +30,7 @@ from core.support.voice_trigger import *
 from core.support.sns import *
 from core.support.quest import *
 from core.support.levelup import *
-from core.support.auth import AuthSupportMixin
+from core.support.auth_panel import AuthSupportMixin
 from core.support.roles import RoleSupportMixin
 from core.support.logs import LogSupportMixin
 from core.support.sticky import StickySupportMixin
@@ -41,7 +41,7 @@ from core.support.quest import QuestSupportMixin
 from core.support.levelup import LevelUpSupportMixin
 from core.support.vc_auto_start import *  # noqa: F401,F403
 from core.support.vc_auto_start import VcAutoStartSupportMixin
-from core.support.globalchat_panel import GlobalChatSupportMixin
+from core.support.globalchat.globalchat_panel import GlobalChatSupportMixin
 from core.support.bot_fixer import BotFixerSupportMixin
 
 # 分割前の cogs.support が持っていた内部ヘルパーも互換のため再エクスポートする
