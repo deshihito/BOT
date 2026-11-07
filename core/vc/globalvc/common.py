@@ -44,3 +44,8 @@ TRACK_IDLE_SECONDS = 2.0   # 無音が続いた話者のバッファを破棄す
 PLAYBACK_WATCHDOG_SECONDS = 2.0  # 再生が止まっていないか見回る間隔 (接続中のルームがある間)
 PLAYBACK_WATCHDOG_IDLE_SECONDS = 30.0  # 接続中のルームが無い間の見回り間隔 (見回す対象が無いので伸ばす)
 STALE_VC_GRACE_SECONDS = 15.0    # 切断されたままの接続をルーム一覧から外すまでの猶予 (再接続中は消さない)
+
+# bot が再生する音声のうち「音楽」として扱う add_audio_source の name。
+# ここに入っていない name (読み上げなど) は「読み上げ系」として、どのサーバーからでも自由に中継する。
+# 音楽は、ルームのオーナーのサーバー (RoomConfig.owner_guild_id) で流れているものだけを中継する。
+GLOBAL_MUSIC_SOURCE_NAMES = frozenset({"music"})
