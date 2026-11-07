@@ -8,7 +8,7 @@ import io
 import time
 import hashlib
 import aiohttp
-from core.general import logfare
+from core.general.ai import logfare
 import datetime
 import logging
 from discord.ui import View
