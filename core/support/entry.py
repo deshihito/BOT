@@ -432,7 +432,7 @@ class SupportCog(
 
         cog = self.bot.get_cog("BumpRta")
         if cog is None:
-            return await self._missing(interaction, "bump/up通知・RTA")
+            return await self._missing(interaction, "boardNotify")
 
         bumprta_action = selected.removeprefix("bumprta_")
         return await cog.bumprta_command(

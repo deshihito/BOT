@@ -78,7 +78,7 @@ class GardenView(discord.ui.View):
 
     def embed(self) -> discord.Embed:
         now = _now()
-        embed = discord.Embed(title="🌱 植物栽培", color=GARDEN_COLOR)
+        embed = discord.Embed(title="🌱 grass simulator", color=GARDEN_COLOR)
         lines = [
             _pot_line(index, plant, now)
             for index, plant in enumerate(self.snapshot["pots"])

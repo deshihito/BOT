@@ -106,7 +106,7 @@ class Muted(commands.Cog):
         if allowed_role_id and any(role.id == allowed_role_id for role in interaction.user.roles):
             return True
         
-        embed = discord.Embed(description="管理ロールが設定されていないか、権限がありません。管理者による `/support` のパネルから「Muted設定」 の設定が必要です。", color=self.embed_color)
+        embed = discord.Embed(description="管理ロールが設定されていないか、権限がありません。管理者による `/support` のパネルから「Muted」 の設定が必要です。", color=self.embed_color)
         await interaction.response.send_message(embed=embed, ephemeral=True)
         return False
 

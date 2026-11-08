@@ -265,7 +265,7 @@ class RegistrationTest(unittest.TestCase):
     def test_genre_and_action(self):
         from cogs.general import GENERAL_ACTIONS, GENERAL_GENRES
         self.assertIn("garden", GENERAL_GENRES)
-        self.assertIn(("植物栽培", "garden"), GENERAL_ACTIONS["garden"])
+        self.assertIn(("grass simulator", "garden"), GENERAL_ACTIONS["garden"])
 
     def test_registry_spec(self):
         from core.general import action_registry

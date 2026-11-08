@@ -509,13 +509,13 @@ async def invoke_action(
     action_id = f"{item['root']}:{item['value']}"
     spec = action_registry.default_registry().get(action_id)
     if spec is not None and spec.risk == "blocked":
-        raise AIToolsDecisionError("この操作はAI toolsから実行できません。")
+        raise AIToolsDecisionError("この操作はfastoolerから実行できません。")
     if action_id in action_registry.MESSAGE_SHORTCUT_BLOCKED_IDS:
-        raise AIToolsDecisionError("この操作はAI toolsから実行できません。")
+        raise AIToolsDecisionError("この操作はfastoolerから実行できません。")
     if item["root"] in {"support", "general"} and item["value"] in {"pay", "clear"}:
-        raise AIToolsDecisionError("この操作はAI toolsから実行できません。")
+        raise AIToolsDecisionError("この操作はfastoolerから実行できません。")
     if item["root"] == "general" and item["value"] == "miq_settings":
-        raise AIToolsDecisionError("MIQ設定はAI toolsから実行できません。/general から開いてください。")
+        raise AIToolsDecisionError("MIQ設定はfastoolerから実行できません。/general から開いてください。")
     general = bot.get_cog("GeneralCog")
     if general is None:
         # Bot 側の読み込み・構成の問題で、利用者にできることはないため

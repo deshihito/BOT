@@ -206,7 +206,7 @@ class SettingsMixin:
             role_text = f"<@&{role_id}>" if role_id else "なし"
             return await interaction.response.send_message(
                 embed=_white_embed(
-                    f"bump/up通知とRTA計測: **{'オン' if enabled else 'オフ'}**（初期状態: オン）"
+                    f"boardNotify: **{'オン' if enabled else 'オフ'}**（初期状態: オン）"
                     f"\n通知メンションロール: {role_text}"),
                 ephemeral=True)
         if selected_action == "role":
@@ -245,7 +245,7 @@ class SettingsMixin:
                 self._cancel_guild(interaction.guild_id)
             return await interaction.followup.send(
                 embed=_white_embed(
-                    f"bump/up通知とRTA計測を **{'オン' if enabled else 'オフ'}** にしました。"),
+                    f"boardNotifyを **{'オン' if enabled else 'オフ'}** にしました。"),
                 ephemeral=True)
         return await interaction.response.send_message(
             embed=_white_embed("ランキングは `/leaderboard` から確認してください。"), ephemeral=True)
