@@ -91,23 +91,10 @@ class SessionMixin:
         if session is None:
             return await r.send(embed=we(PAUSE + ' ボイスチェンジャー停止中 (`/vc のパネルからボイスチェンジャー開始` で開始)'))
         sink: VoiceChangerSink = session["sink"]
-        src = sink.audio_source
-
-        proc_ms = sink.last_proc_time_ms
-        avg_ms = sink.avg_proc_time_ms
-        buf_ms = src.buffered_ms
-        total_est_delay = avg_ms + src.target_buffer_ms + 20.0
 
         await r.send(embed=we(
-            f"🎙️ **ボイスチェンジャー動作中 (20ms低遅延・無音待機再同期モード)**\n"
+            f"🎙️ **ボイスチェンジャー動作中**\n"
             f"{MUSIC} 設定ピッチ: `{sink.semitones:+.1f}` 半音\n\n"
-            f"📊 **遅延ステータス (数値)**\n"
-            f"├ {THU} 変換処理時間: `{proc_ms:.2f} ms` (平均: `{avg_ms:.2f} ms`)\n"
-            f"├ 📦 バッファ滞留量: `{buf_ms:.1f} ms`\n"
-            f"├ 🎯 目標プリバッファ: `{src.target_buffer_ms:.0f} ms` / 上限: `{src.max_buffer_ms:.0f} ms`\n"
-            f"├ ⚠️ アンダーラン(待機発生)回数: `{src.underrun_count}` 回\n"
-            f"├ 🩹 パケットロス補完(PLC): `{sink.concealed_count}` 回 (ロスト検出: `{sink.lost_packet_count}` 回)\n"
-            f"└ {CLOCK} **推定トータル遅延**: `~{total_est_delay:.1f} ms`\n\n"
             f"・設定変更: `/vc のパネルからボイスチェンジャー状態 pitch:<半音数> buffer_ms:<目標ms> max_ms:<上限ms>`\n"
             f"・停止: `/vc のパネルからボイスチェンジャー停止`"
         ))
@@ -150,8 +137,7 @@ class SessionMixin:
         await r.send(embed=we(
             f"🎙️ **{target_channel.name}** でボイスチェンジャーを開始しました！\n"
             f"{MUSIC} ピッチ: `{pitch:+.1f}` 半音\n"
-            f"📦 プリバッファ: `{(buffer[0] if buffer else DEFAULT_TARGET_BUFFER_MS):.0f} ms` (超低遅延モード)\n"
-            f"📊 `/vc のパネルからボイスチェンジャー状態` で遅延数値を確認できます。"
+            f"📊 `/vc のパネルからボイスチェンジャー状態` で状態を確認できます。"
         ))
 
 

@@ -109,8 +109,7 @@ class RestoreMixin:
                 await text_channel.send(embed=we(
                     f"🎙️ **{getattr(channel, 'name', '')}** でボイスチェンジャーを再開しました（Botの再起動による自動再開）。\n"
                     f"{MUSIC} ピッチ: `{pitch:+.1f}` 半音\n"
-                    f"📦 プリバッファ: `{(buffer[0] if buffer else DEFAULT_TARGET_BUFFER_MS):.0f} ms` (超低遅延モード)\n"
-                    f"📊 `/vc のパネルからボイスチェンジャー状態` で遅延数値を確認できます。"
+                    f"📊 `/vc のパネルからボイスチェンジャー状態` で状態を確認できます。"
                 ))
             except Exception:
                 logger.debug("ボイスチェンジャー: 再開通知の送信に失敗しました", exc_info=True)
