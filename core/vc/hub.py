@@ -251,12 +251,14 @@ class VoiceHub(commands.Cog):
             return await r.send(f"{FAILED} この操作は `/vc` のパネルから入力してください。", ephemeral=True)
 
         name = form.get("name", "")
-        if value == "gvc_room_create":
+        if value in ("gvc_room_create", "gvc_room_create_perm"):
             try:
                 max_servers = int(form.get("max") or 0)
             except ValueError:
                 return await r.send(f"{FAILED} 最大参加サーバー数は数字で入力してください。", ephemeral=True)
-            return await cog._room_create_impl(r, name, max_servers, form.get("password", ""), form.get("desc", ""))
+            return await cog._room_create_impl(
+                r, name, max_servers, form.get("password", ""), form.get("desc", ""),
+                theme=form.get("theme", ""), permanent=value == "gvc_room_create_perm")
         if value == "gvc_room_info":
             return await cog._room_info_impl(r, name)
         if value == "gvc_room_delete":
@@ -304,7 +306,7 @@ class VoiceHub(commands.Cog):
                     max_ms: app_commands.Range[float, 20.0, 4000.0] | None = None,
                     room: str | None = None, password: str | None = None,
                     name: str | None = None, max_servers: int | None = None,
-                    desc: str | None = None):
+                    desc: str | None = None, theme: str | None = None):
         # BOT fixer のコマンド制限（管理者は対象外）。
         from core.support import command_control
 
@@ -329,7 +331,8 @@ class VoiceHub(commands.Cog):
                 # /quick・ショートカット経由（導線最適化 M4）: ParamSpec で集めた
                 # 入力を、パネルのモーダルと同じ form 形式に変換して実行する。
                 form = {"name": name, "max": max_servers,
-                        "password": password or "", "desc": desc or ""}
+                        "password": password or "", "desc": desc or "",
+                        "theme": theme or ""}
                 return await self.voice_global_rooms(interaction, value, form)
             return await self.voice_global_rooms(interaction, value)
         if value in {"join", "leave", "status"}:
