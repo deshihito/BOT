@@ -18,6 +18,32 @@ if db_api is None:
 
 NOTIFY_CHANNEL_ID = 1513038883787505764
 
+# 復旧対象のゲーム cog 名 → game_restore の game_id（復旧件数のログ用）。
+# ディスパッチ一覧（_restore_voice_sessions）との対応の完全性は
+# tests/test_restore_wiring.py が検証する。
+GAME_RESTORE_COG_IDS = {
+    "Shogi": "shogi",
+    "Chess": "chess",
+    "Othello": "othello",
+    "Daifugo": "daifugo",
+    "Babanuki": "babanuki",
+    "Shinkei": "shinkei",
+    "OdaiShiritori": "shiritori",
+    "Uno": "uno",
+    "Wordle": "wordle",
+    "Gomoku": "gomoku",
+    "Connect4": "connect4",
+    "JinrouCog": "jinrou",
+}
+
+# vc_features セクションを使う復旧対象 cog 名 → 機能名（同上）
+VC_FEATURE_COG_NAMES = {
+    "TranscriptionCog": "transcribe",
+    "RecordingCog": "record",
+    "KaraokeCog": "karaoke",
+    "VoiceChangerCog": "changer",
+}
+
 class LogBuffer(logging.Handler):
     def __init__(self, maxlen=100):
         logging.Handler.__init__(self)
@@ -132,20 +158,53 @@ class MyBot(commands.Bot):
         # 復旧で作られる VC セッションでは「VC参加時の自動開始」を発動しない
         # （復旧は既存仕様が優先。core/vc/auto_start 側の抑止フラグ）。
         from core.vc.auto_start import restore_suppression
+        from core.game.game import game_restore
+        from core.vc import vc_feature_restore, voice_restore
+
+        def snapshot_count(cog_name):
+            """その cog が復旧対象とするスナップショットの件数（数えられない場合は None）。"""
+            try:
+                game_id = GAME_RESTORE_COG_IDS.get(cog_name)
+                if game_id is not None:
+                    return len(game_restore.session_entries(game_id))
+                if cog_name == "VoiceCog":
+                    return len(voice_restore.get_store().section("music"))
+                if cog_name == "GlobalVCCog":
+                    return len(voice_restore.get_store().section("gvc_joins"))
+                feature = VC_FEATURE_COG_NAMES.get(cog_name)
+                if feature is not None:
+                    return len(vc_feature_restore.feature_entries(feature))
+            except Exception:
+                logger.debug("%s のスナップショット件数を取得できませんでした", cog_name,
+                             exc_info=True)
+            return None
 
         with restore_suppression():
             for cog_name in ("VoiceCog", "GlobalVCCog", "TranscriptionCog",
                              "RecordingCog", "KaraokeCog", "VoiceChangerCog",
                              "Shogi", "Chess", "Othello", "Daifugo", "Babanuki",
-                             "Shinkei", "OdaiShiritori", "Uno", "Wordle", "JinrouCog"):
+                             "Shinkei", "OdaiShiritori", "Uno", "Wordle",
+                             "Gomoku", "Connect4", "JinrouCog"):
                 cog = self.get_cog(cog_name)
                 restore = getattr(cog, "restore_after_restart", None)
                 if restore is None:
                     continue
+                # 復旧の前後でスナップショット件数を数えて結果を INFO で残す
+                # （成功時も記録が無いと、実機で「復旧が動いたか」を追えない。
+                # 復旧できなかったエントリは各 cog が掃除するため、
+                # 復旧後の件数 = 復旧できた件数として読める）
+                before = snapshot_count(cog_name)
                 try:
                     await restore()
                 except Exception:
                     logger.exception("%s の再起動復旧に失敗しました", cog_name)
+                    continue
+                after = snapshot_count(cog_name)
+                if before is not None and after is not None:
+                    logger.info(
+                        "%s の再起動復旧: スナップショット %d 件中 %d 件を復旧しました"
+                        "（%d 件は復旧できず掃除しました）",
+                        cog_name, before, after, before - after)
 
 bot = MyBot()
 bot.db_api = db_api
@@ -194,6 +253,9 @@ log_buffer.setFormatter(logging.Formatter(
 logger = logging.getLogger()
 logger.setLevel(logging.WARNING)
 logger.addHandler(log_buffer)
+# 再起動復旧の結果（INFO）は常時見えるようにする。root は WARNING のままで、
+# main 自身のロガーだけ INFO を通す（復旧が無音だと実機で追えないため）。
+logging.getLogger(__name__).setLevel(logging.INFO)
 bot.log_buffer = log_buffer
 
 if __name__ == "__main__":
