@@ -12,6 +12,7 @@ from statistics import median
 import discord
 from discord import app_commands
 from discord.ext import commands, tasks
+from core.support.api_client import is_connection_error
 from core.support.api_retry import run_with_retry
 
 from core.game.rta.common import *  # noqa: F401,F403 - shared constants/helpers
@@ -30,8 +31,15 @@ class WorkerMixin:
             await self._sync_ntp_if_due()
             await self._reconcile()
             self._log_clock_if_due()
-        except Exception:
-            logger.exception("bump/up reminder reconcile failed")
+        except Exception as exc:
+            if is_connection_error(exc):
+                # API 再起動中などの接続不可は想定内で自己回復する
+                # （次周期に再試行される）ので、traceback なしの1行で残す。
+                logger.warning(
+                    "bump/up reminder reconcile skipped: DB API に接続できませんでした"
+                    "（次周期で再試行します）")
+            else:
+                logger.exception("bump/up reminder reconcile failed")
 
 
     @reminder_worker.before_loop

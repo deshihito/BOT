@@ -12,6 +12,7 @@ import logging
 
 from discord.ext import commands, tasks
 
+from core.support.api_client import is_connection_error
 from core.support.public_ranking import snapshot
 
 logger = logging.getLogger(__name__)
@@ -41,15 +42,27 @@ class PublicRankingCog(commands.Cog):
             await snapshot.write_snapshot(self.bot)
         except asyncio.CancelledError:
             raise
-        except Exception:
-            logger.exception("公開ランキングの初回スナップショット書き出しに失敗しました")
+        except Exception as exc:
+            if is_connection_error(exc):
+                # API 再起動中などの接続不可は想定内で、定期周期で再試行される。
+                logger.warning(
+                    "公開ランキングの初回スナップショット書き出しをスキップしました"
+                    "（DB APIに接続できません。定期周期で再試行します）")
+            else:
+                logger.exception("公開ランキングの初回スナップショット書き出しに失敗しました")
 
     @tasks.loop(hours=1)
     async def publish_loop(self) -> None:
         try:
             await snapshot.write_snapshot(self.bot)
-        except Exception:
-            logger.exception("公開ランキングのスナップショット書き出しに失敗しました")
+        except Exception as exc:
+            if is_connection_error(exc):
+                # API 再起動中などの接続不可は想定内で、次回周期で再試行される。
+                logger.warning(
+                    "公開ランキングのスナップショット書き出しをスキップしました"
+                    "（DB APIに接続できません。次回周期で再試行します）")
+            else:
+                logger.exception("公開ランキングのスナップショット書き出しに失敗しました")
         # Web 連携データの定期更新を兼ねる: ダッシュボードのセレクタ用に
         # guild_registry のサーバー構造スナップショットも1時間ごとに同期する。
         try:
