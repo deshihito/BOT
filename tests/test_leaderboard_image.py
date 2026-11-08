@@ -137,8 +137,10 @@ class SokunukeBoardTest(unittest.IsolatedAsyncioTestCase):
             guild_id=1, user=types.SimpleNamespace(id=2), followup=followup)
         await SokuNukeRta(types.SimpleNamespace()).leaderboard(interaction)
         kwargs = followup.send.await_args.kwargs
-        self.assertIn("file", kwargs)
-        self.assertEqual(kwargs["embed"].image.url,
+        # ボードは切替View（V2）＋files で送る（boardNotify RTA と同方式）。
+        self.assertEqual([f.filename for f in kwargs["files"]],
+                         ["sokunuke_leaderboard.png"])
+        self.assertEqual(kwargs["view"].panel.embed().image.url,
                          "attachment://sokunuke_leaderboard.png")
         self.assertFalse(kwargs["allowed_mentions"].users)
 

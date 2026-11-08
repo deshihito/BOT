@@ -125,6 +125,7 @@ GENERAL_ACTIONS = {
     "rta": [
         ("ランキング一覧", "rankings"),
         ("総合資産ランキング", "asset_leaderboard"),
+        ("即抜けRTAランキング", "sokunuke_board"),
     ],
     # bump/up 等の RTA は統合ボード1件に集約（サービス×最速/最遅×スコープは
     # ボード内で切り替える）。旧個別ボード8件の ID は dispatch 側の互換
