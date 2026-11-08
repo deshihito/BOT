@@ -37,6 +37,7 @@ from core.vc.globalvc.ui import GlobalRoomListView, _TextChatToggleView  # noqa:
 from core.vc.globalvc.lang import GVC_SETTINGS_SECTION, LANG_OVERRIDE_KEY, LOCALE_LABELS, effective_filter_lang, locale_label, server_locale  # noqa: F401
 from core.support import guild_settings  # noqa: F401
 from core.leaderboard_image import BoardRow, board_safe_name, fetch_avatar_bytes, render_leaderboard_png  # noqa: F401
+from core.support.panel_v2 import as_embed_v2
 
 logger = logging.getLogger("cogs.sio_globalVC")
 
@@ -127,7 +128,7 @@ class ManageMixin:
                         value="OFF（ONにすると、VC参加時にそのテキストチャンネルもグロチャへ自動接続します）")
         if description:
             embed.add_field(name="説明", value=description, inline=False)
-        await r.send(embed=embed, view=_TextChatToggleView(self, room_name, r.user.id))
+        await r.send(view=_TextChatToggleView(self, room_name, r.user.id, embed))
 
         # 作成者がボイスチャンネルにいるなら、そのままボットも参加させる
         voice = getattr(r.user, "voice", None)
@@ -200,7 +201,7 @@ class ManageMixin:
         embed.add_field(name="グロチャ自動接続", value="ON" if room.text_chat else "OFF", inline=False)
         embed.set_footer(
             text="ON にすると、VC参加時にそのテキストチャンネルもグロチャへ自動接続します")
-        await r.send(embed=embed, view=_TextChatToggleView(self, room_name, room.owner_id))
+        await r.send(view=_TextChatToggleView(self, room_name, room.owner_id, embed))
 
     async def _room_info_impl(self, r: Responder, room_name: str):
         await r.defer()
@@ -242,7 +243,7 @@ class ManageMixin:
         if room.description:
             embed.add_field(name="説明", value=room.description, inline=False)
         embed.add_field(name="作成日時", value=f"<t:{int(room.created_at)}:R>", inline=False)
-        await r.send(embed=embed)
+        await r.send(view=as_embed_v2(embed))
 
 
     async def _lang_setting_impl(self, r: Responder, raw: str):
@@ -333,7 +334,7 @@ class ManageMixin:
         if total > len(shown):
             embed.description = f"人数が多いため先頭 {len(shown)} 人まで表示しています。"
         embed.set_image(url="attachment://gvc_members.png")
-        await r.send(embed=embed, file=discord.File(io.BytesIO(png), filename="gvc_members.png"))
+        await r.send(view=as_embed_v2(embed), file=discord.File(io.BytesIO(png), filename="gvc_members.png"))
 
 
     async def _room_delete_impl(self, r: Responder, room_name: str):

@@ -16,6 +16,7 @@ from discord.ext import commands, tasks
 from discord.ext import voice_recv
 from core.vc import voice_restore
 from core.support.legacy import Responder
+from core.support.panel_v2 import embed_text
 from core.vc.voice_session import VoiceBusy, get_manager
 from core.vc.voice_recv_patch import patch_voice_recv_client
 from core.support.messages import VOICE_NOT_JOINED, voice_connection_failed, room_not_found
@@ -51,22 +52,28 @@ class _RoomJoinButton(discord.ui.Button):
         await self.view.join(interaction, self.room_name)
 
 
-class _TextChatToggleView(discord.ui.View):
+class _TextChatToggleView(discord.ui.LayoutView):
     """ルーム作成直後に「グロチャ自動接続」を切り替えるボタン（作成者だけ操作可）。
 
     ON にした時点でこのサーバーがすでにルームへ接続中なら、そのチャンネルも
     その場でグロチャへ自動接続する。以後の VC 参加では _connect_room が連動する。
     """
 
-    def __init__(self, cog: "GlobalVCCog", room_name: str, user_id: int):
+    def __init__(self, cog: "GlobalVCCog", room_name: str, user_id: int,
+                 embed: discord.Embed | None = None):
         super().__init__(timeout=300)
         self.cog = cog
         self.room_name = room_name
         self.user_id = user_id
         self.button = discord.ui.Button()
         self.button.callback = self._toggle
-        self.add_item(self.button)
         self._sync()
+        items: list[discord.ui.Item] = []
+        if embed is not None:
+            items.append(discord.ui.TextDisplay(embed_text(embed)))
+        items.append(discord.ui.ActionRow(self.button))
+        self.add_item(discord.ui.Container(
+            *items, accent_colour=getattr(embed, "colour", None)))
 
     def _sync(self):
         room = ROOMS.get(self.room_name)
