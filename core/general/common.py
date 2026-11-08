@@ -2,8 +2,6 @@
 """汎用機能の共通基盤（定数・ジャンル定義）。元 cogs/general.py の冒頭部。"""
 from __future__ import annotations
 
-from __future__ import annotations
-
 import asyncio
 import hashlib
 import io

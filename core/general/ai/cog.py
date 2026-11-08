@@ -207,7 +207,7 @@ class AICog(commands.Cog):
         if auto and not ai_provider_router.enabled():
             return await _reply_without_localization(ctx, "AIの自動切替が未設定です。", mention_author=False)
         if not auto and not kios_model and not apinex_model and not omnirush_model and not logfare.api_key():
-            return await _reply_without_localization(ctx, "Logfareが未設定です。`.env` に `LOGFARE_API_KEY` を設定してください。", mention_author=False)
+            return await _reply_without_localization(ctx, "AI機能は現在利用できません。", mention_author=False)
 
         sources = []
         context = ai_context.ContextResult()
@@ -321,18 +321,15 @@ class AICog(commands.Cog):
                     answer = await logfare.chat(model, messages, reasoning_effort=reasoning_effort)
         except (ai_input.AttachmentInputError, ai_context.ContextError) as exc:
             return await _reply_without_localization(ctx, str(exc), mention_author=False)
-        except ai_omnirush.OmniRushLoginRequired:
+        except (ai_omnirush.OmniRushLoginRequired, ai_omnirush.OmniRushUnavailable):
+            logger.warning("!ai: OmniRush unavailable", exc_info=True)
             return await _reply_without_localization(ctx,
-                "OmniRushが未ログインです。Botと同じLinuxユーザーで `omnirush login` を実行してください。",
+                "AI機能は現在利用できません。",
                 mention_author=False,
             )
-        except ai_omnirush.OmniRushUnavailable:
-            return await _reply_without_localization(ctx,
-                "OmniRush CLIが見つかりません。Botの実行ユーザーから利用可能か確認してください。",
-                mention_author=False,
-            )
-        except ai_omnirush.OmniRushError as exc:
-            return await _reply_without_localization(ctx, str(exc), mention_author=False)
+        except ai_omnirush.OmniRushError:
+            logger.warning("!ai: OmniRush error", exc_info=True)
+            return await _reply_without_localization(ctx, "AIへの問い合わせに失敗しました。しばらくしてから再試行してください。", mention_author=False)
         except Exception:
             logger.exception("!ai request failed: user=%s model=%s", ctx.author.id, preferred)
             return await _reply_without_localization(ctx, "AIへの問い合わせに失敗しました。しばらくしてから再試行してください。", mention_author=False)
@@ -388,7 +385,7 @@ class AICog(commands.Cog):
         if not prompt:
             return await ctx.reply("使い方: `!generate 画像のプロンプト`", mention_author=False)
         if not logfare.api_key():
-            return await ctx.reply("Logfareが未設定です。`.env` に `LOGFARE_API_KEY` を設定してください。", mention_author=False)
+            return await ctx.reply("AI機能は現在利用できません。", mention_author=False)
 
         preferred = ai_preferences.get_image_model(ctx.author.id)
         try:

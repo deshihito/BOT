@@ -156,9 +156,9 @@ class AIDefaultView(discord.ui.View):
             description=(
                 f"`{'!ai' if self.kind == 'chat' else '!generate'}` で使うデフォルトAIを選択してください。\n"
                 f"現在: `{current}`\n\n"
-                f"{'Logfare・KiosAPI・APInex Free・OmniRush CLIのチャット' if self.kind == 'chat' else 'Logfareの画像生成'}モデルを選べます。"
+                f"{'チャット' if self.kind == 'chat' else '画像生成'}モデルを選べます。"
                 f"{'自動切替を選ぶと設定済みのAPIを順に使います。' if self.kind == 'chat' else ''}"
-                f"{'画像入力は対応モデルのみ利用できます。APInexはFreeモデルのみ表示します。OmniRushはBot実行ユーザーのログインと共有日次枠を使い、質問を同サービスへ送信します（[プライバシー](https://omnirush.ai/privacy)）。Logfareの一部モデルはトレーニング利用への同意が必要です。' if self.kind == 'chat' else ''}\n"
+                f"{'画像入力は対応モデルのみ利用できます。OmniRushは質問を同サービスへ送信します（[プライバシー](https://omnirush.ai/privacy)）。Logfareの一部モデルはトレーニング利用への同意が必要です。' if self.kind == 'chat' else ''}\n"
                 f"モデル一覧 {self.page + 1}/{self.page_count}ページ（全{len(self.models)}件）"
             ),
             color=0xFFFFFF,

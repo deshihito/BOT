@@ -62,7 +62,7 @@ async def translation_settings_update(
 
 class TranslationView(discord.ui.View):
     def __init__(self, user_id: int, guild_id: int):
-        super().__init__(timeout=600)
+        super().__init__(timeout=300)
         self.user_id, self.guild_id = user_id, guild_id
         settings = translation.translation_settings(user_id, guild_id)
         self.enabled = settings["enabled"]

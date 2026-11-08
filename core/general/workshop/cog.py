@@ -264,7 +264,7 @@ class BuyMachineView(discord.ui.View):
 
     def embed(self) -> discord.Embed:
         return discord.Embed(
-            title="加工機を買う", description="購入する加工機を選んでください。",
+            title="加工機を買う",
             color=WORKSHOP_COLOR)
 
     def _make_callback(self, tier_id: str):

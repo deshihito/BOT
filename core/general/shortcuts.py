@@ -218,9 +218,7 @@ class ShortcutParamsView(discord.ui.View):
         return discord.Embed(
             title=f"パラメータ設定: {self.spec.label}",
             description=(
-                "ショートカットに保存する値（プリセット）を設定してください。\n"
-                "未設定の項目は実行時の既定値が使われます。パラメータは登録時の設定専用で、"
-                "メッセージで実行するときに追加で聞かれることはありません。\n\n"
+                "未設定の項目は実行時の既定値が使われます。\n\n"
                 + "\n".join(lines)
             ),
             color=0xFFFFFF,

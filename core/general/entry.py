@@ -25,7 +25,7 @@ from pathlib import Path
 import discord
 from discord import app_commands
 from discord.ext import commands, tasks
-from core.support.panel_v2 import as_panel_v2, edit_panel_v2
+from core.support.panel_v2 import as_embed_v2, as_panel_v2, edit_panel_v2
 from core.general import shortcut_settings as shortcuts
 from core.support import guild_settings
 from core.general import action_registry, action_usage
@@ -37,7 +37,7 @@ from core.game.game.game_guides import GAME_GUIDES, GAME_ORDER
 from core.general import translation_settings as translation
 from core.support.localization import localization
 from core.game.game import prison as prison_core
-from core.support.messages import CIRCULATION_NOT_LOADED, GAMBLING_NOT_LOADED, ITEMS_NOT_LOADED, MARKET_NOT_LOADED, MONEY_PANEL_NOT_LOADED, WORKSHOP_NOT_LOADED
+from core.support.messages import CIRCULATION_NOT_LOADED, GAMBLING_NOT_LOADED, ITEMS_NOT_LOADED, MARKET_NOT_LOADED, MONEY_PANEL_NOT_LOADED, WORKSHOP_NOT_LOADED, feature_not_loaded
 from core.general.libretranslate import LibreTranslateClient, LibreTranslateError
 
 logger = logging.getLogger("cogs.general")  # 集約後も従来のロガー名を維持（テストの assertLogs 互換）
@@ -220,7 +220,7 @@ class GeneralCog(
         if value in {"zetamodoki", "zeta_reset", "zeta_register", "zeta_manage"}:
             cog = self.bot.get_cog("ZetaModoki")
             if cog is None:
-                return await self._safe_respond(interaction, "ZetaModokiが読み込まれていません。")
+                return await self._safe_respond(interaction, feature_not_loaded("ZetaModoki"))
             if value == "zetamodoki":
                 return await cog.start(interaction)
             if value == "zeta_register":
@@ -231,7 +231,7 @@ class GeneralCog(
 
         if value == "miq_settings":
             view = MiqSettingsView(self, interaction.user.id)
-            return await interaction.response.send_message(view=as_panel_v2(view))
+            return await interaction.response.send_message(view=as_panel_v2(view), ephemeral=True)
 
         if value == "meme_create":
             # モーダルを開けない経路 (メッセージ型ショートカット) では
@@ -265,17 +265,16 @@ class GeneralCog(
                 "・ベース画像は最大8MBまで。生成画像は最大1200x1200に収まります。\n"
                 "・アバターをベースにする場合のみ、MIQの引用拒否設定が適用されます。"
             )
-            return await interaction.response.send_message(embed=embed)
+            return await interaction.response.send_message(view=as_embed_v2(embed))
 
         if value == "rankings":
             # 導線最適化 M7: ランキング6系統のうちパネル系5件を1画面に束ねる。
             view = RankingsView(self, interaction.user.id)
-            return await interaction.response.send_message(
-                embed=view.embed(), view=view)
+            return await interaction.response.send_message(view=as_panel_v2(view))
 
         if value == "translation_settings":
             view = TranslationView(interaction.user.id, interaction.guild_id)
-            return await interaction.response.send_message(embed=view.embed(), view=view)
+            return await interaction.response.send_message(view=as_panel_v2(view))
 
         if value == "aitools":
             from core.general.ai_tools import ai_tools_router
@@ -289,7 +288,7 @@ class GeneralCog(
                 f"利用可能な安全ツール: `{len(available)}件`\n\n"
                 "BOTにメンションして依頼してください。個人別・機能別の設定はありません。"
             )
-            return await interaction.response.send_message(embed=embed)
+            return await interaction.response.send_message(view=as_embed_v2(embed))
 
         if value == "reasoning_default":
             await interaction.response.defer(ephemeral=True)
@@ -297,10 +296,8 @@ class GeneralCog(
                 view, error = await ReasoningView.create(interaction.user.id)
             except Exception as exc:
                 logger.exception("reasoning model metadata unavailable: user=%s", interaction.user.id)
-                status = getattr(exc, "status", None)
-                detail = f"（HTTP {status}）" if status else ""
                 return await interaction.followup.send(
-                    f"思考強度の対応状況を取得できませんでした{detail}。時間をおいて再試行してください。",
+                    "思考強度の対応状況を取得できませんでした。時間をおいて再試行してください。",
                     ephemeral=True,
                 )
             if error:
@@ -316,11 +313,8 @@ class GeneralCog(
                     "Logfare model catalog unavailable: kind=%s user=%s",
                     kind, interaction.user.id, exc_info=view.load_error,
                 )
-                status = getattr(view.load_error, "status", None)
-                detail = f"（HTTP {status}）" if status else ""
                 return await interaction.followup.send(
-                    f"Logfareのモデル一覧を取得できませんでした{detail}。"
-                    "時間をおいて再試行し、`.env` とAPI接続を確認してください。",
+                    "モデル一覧を取得できませんでした。時間をおいて再試行してください。",
                     ephemeral=True,
                 )
             return await interaction.followup.send(embed=view.embed(), view=view, ephemeral=True)
@@ -393,25 +387,25 @@ class GeneralCog(
         if value == "daily_report":
             report_cog = self.bot.get_cog("DailyReportCog")
             if report_cog is None:
-                return await self._safe_respond(interaction, "日報機能は現在利用できません。")
+                return await self._safe_respond(interaction, feature_not_loaded("日報機能"))
             return await report_cog.toggle(interaction)
 
         if value == "role_shop":
             shop_cog = self.bot.get_cog("RoleShopCog")
             if shop_cog is None:
-                return await self._safe_respond(interaction, "ロールショップは現在利用できません。")
+                return await self._safe_respond(interaction, feature_not_loaded("ロールショップ"))
             return await shop_cog.show_shop(interaction)
 
         if value == "gacha":
             gacha_cog = self.bot.get_cog("GachaCog")
             if gacha_cog is None:
-                return await self._safe_respond(interaction, "ガチャは現在利用できません。")
+                return await self._safe_respond(interaction, feature_not_loaded("ガチャ"))
             return await gacha_cog.show_gacha(interaction)
 
         if value == "clan":
             clan_cog = self.bot.get_cog("ClanCog")
             if clan_cog is None:
-                return await self._safe_respond(interaction, "クラン機能は現在利用できません。")
+                return await self._safe_respond(interaction, feature_not_loaded("クラン機能"))
             return await clan_cog.show_clan(interaction)
 
         if value in {"items", "item_buy", "item_use", "box_open"}:
@@ -479,7 +473,7 @@ class GeneralCog(
                      "bump_global_leaderboard", "up_global_leaderboard",
                      "bump_global_slowest", "up_global_slowest"}:
             if wallet is None:
-                return await self._safe_respond(interaction, "WalletCogが読み込まれていません。")
+                return await self._safe_respond(interaction, feature_not_loaded("WalletCog"))
             if value == "pay":
                 return await interaction.response.send_modal(PayModal(self))
             if value == "status":
@@ -500,13 +494,13 @@ class GeneralCog(
         if value == "garden":
             garden_cog = self.bot.get_cog("GardenCog")
             if garden_cog is None:
-                return await self._safe_respond(interaction, "grass simulatorは現在利用できません。")
+                return await self._safe_respond(interaction, feature_not_loaded("grass simulator"))
             return await garden_cog.show_garden(interaction)
 
         # ===== fujo（生存確認）系 =====
         if value.startswith("fujo_"):
             if fujo is None:
-                return await self._safe_respond(interaction, "fujo statusが読み込まれていません。")
+                return await self._safe_respond(interaction, feature_not_loaded("fujo status"))
             action = value.removeprefix("fujo_")
             try:
                 return await fujo.fujo(interaction, action, None, "active", None, None)

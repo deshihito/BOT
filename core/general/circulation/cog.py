@@ -49,6 +49,8 @@ from core.support.messages import (
     COIN_UPDATE_FAILED_UNCHANGED,
     PURCHASE_FAILED_RETRY,
     circulation_action_failed,
+    ITEMS_NOT_LOADED,
+    feature_not_loaded,
 )
 from core.support.panel_v2 import as_panel_v2, edit_panel_v2, wrap_panel_view as _wrap
 from cogs import general as wallet_module  # INSUFFICIENT は実行時に引く（テストの cog 再読込で同一性が崩れないため）
@@ -262,7 +264,7 @@ class BuyLotteryView(discord.ui.View):
 
     def embed(self) -> discord.Embed:
         return discord.Embed(
-            title="宝くじを買う", description="購入する枚数を選んでください。",
+            title="宝くじを買う",
             color=CIRCULATION_COLOR)
 
     async def _on_select(self, interaction: discord.Interaction):
@@ -437,7 +439,7 @@ class CirculationCog(commands.Cog):
             return self._injected_item_store
         items_cog = self.bot.get_cog("ItemsCog")
         if items_cog is None:
-            raise items_core.ItemError("アイテム機能が読み込まれていません。")
+            raise items_core.ItemError(ITEMS_NOT_LOADED)
         return items_cog.store
 
     async def cog_load(self) -> None:
@@ -473,7 +475,7 @@ class CirculationCog(commands.Cog):
     def _wallet(self):
         wallet = self.bot.get_cog("WalletCog")
         if wallet is None:
-            raise items_core.ItemError("コイン機能が読み込まれていません。")
+            raise items_core.ItemError(feature_not_loaded("コイン機能"))
         return wallet
 
     async def _record_history(self, sender_id: str, receiver_id: str, amount: int, reason: str) -> None:
