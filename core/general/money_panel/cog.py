@@ -30,8 +30,10 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+import io
 import logging
 import random
+import re
 from datetime import datetime
 from typing import Callable
 
@@ -39,11 +41,14 @@ import discord
 from discord.ext import commands
 
 import config
+from core.economy_image import PanelHero, PanelRow, render_panel_png
 from core.general.money_panel import daily_bonus as daily_core
 from core.general.items import items as items_core
 from core.general.market import market as market_core
+from core.general.user_names import resolve_display_names
 from core.game.game import prison as prison_core
 from core.general.money_panel import starter as starter_core
+from core.leaderboard_image import fetch_avatar_bytes
 from core.support.messages import ACTION_FAILED_RETRY, CLAIM_FAILED_RETRY
 from core.support.panel_v2 import as_panel_v2, edit_message_v2, edit_panel_v2, wrap_panel_view as _wrap
 from cogs import general as wallet_module  # 定数は実行時に引く（テストの cog 再読込対策）
@@ -51,6 +56,8 @@ from cogs import general as wallet_module  # 定数は実行時に引く（テ�
 logger = logging.getLogger(__name__)
 
 MONEY_PANEL_COLOR = 0xF39C12
+STATUS_FILENAME = "money_status.png"
+MONEY_ACCENT = (217, 164, 32)
 
 
 #: カテゴリ定義（value, ラベル）。コンポーネント上限（25）の関係で
@@ -107,9 +114,18 @@ def _next_step_line(status: dict) -> str | None:
     return None
 
 
-def status_embed(status: dict) -> discord.Embed:
-    """collect_status の結果をパネル上部のステータス表示にする。"""
+def status_embed(status: dict, *, image: bool = False) -> discord.Embed:
+    """collect_status の結果をパネル上部のステータス表示にする。
+
+    image=True のときは数値表示をステータスカード画像（status_panel_png）
+    に寄せ、embed はタイトルと画像参照だけを持つ（V2 変換で画像は
+    MediaGallery に残り、本文の二重表示を避ける）。「次の1手」も
+    画像内のバナーに移るため description には入れない。
+    """
     embed = discord.Embed(title="マネーパネル", color=MONEY_PANEL_COLOR)
+    if image:
+        embed.set_image(url=f"attachment://{STATUS_FILENAME}")
+        return embed
     next_step = _next_step_line(status)
     if next_step is not None:
         embed.description = next_step
@@ -124,6 +140,10 @@ def status_embed(status: dict) -> discord.Embed:
             name=market_core.TOKEN_NAME,
             value=(f"**{_fmt_tokens(status['tokens'])}**"
                    f"（レート {status['rate']:,.2f} AGO）"),
+            inline=True)
+    if status.get("total_assets") is not None:
+        embed.add_field(
+            name="総資産", value=f"**{status['total_assets']:,} AGO**",
             inline=True)
     if status.get("items_total") is not None:
         effects = status["effects"]
@@ -184,6 +204,100 @@ def status_embed(status: dict) -> discord.Embed:
     return embed
 
 
+# 画像内バナーではカラー絵文字が同梱フォントに無く豆腐化するため、
+# 先頭の絵文字だけ落として文字情報だけを残す（embed 側の文言は不変）。
+_BANNER_EMOJI_RE = re.compile(
+    r"^[\U0001F000-\U0001FAFF☀-➿️]+\s*")
+
+
+def status_panel_content(status: dict, *, user_id: int | None = None,
+                         name: str = ""):
+    """ステータスカード画像の (hero, banner, sections) を組み立てる。
+
+    行の内容は status_embed のフィールドと同一の値・並びにする
+    （表示層の置き換えであり、数値の意味は変えない）。
+    """
+    next_step = _next_step_line(status)
+    banner = _BANNER_EMOJI_RE.sub("", next_step) if next_step else ""
+    hero = PanelHero(
+        label="AGOコイン",
+        value=f"{status['balance']:,} AGO",
+        sub=(f"総資産 {status['total_assets']:,} AGO"
+             if status.get("total_assets") is not None else ""),
+        user_id=user_id, name=name)
+    rows: list[PanelRow] = []
+    if status.get("rate") is not None:
+        rows.append(PanelRow(
+            market_core.TOKEN_NAME, _fmt_tokens(status["tokens"]),
+            sub=f"レート {status['rate']:,.2f} AGO"))
+    if status.get("items_total") is not None:
+        sub = f"宝箱 {status['boxes']} 個"
+        if status["effects"]:
+            sub += f"／効果発動中 {status['effects']} 件"
+        rows.append(PanelRow(
+            "アイテム",
+            f"全 {status['items_total']} 個（{status['items_kinds']} 種）",
+            sub=sub))
+    if status.get("machines") is not None:
+        if status["machines"]:
+            sub = f"受け取り待ち {status['pending_cycles']} サイクル分"
+            if status["min_cycles_left"] is not None:
+                sub += f"／最短の残り寿命 {status['min_cycles_left']} サイクル"
+            if status["commissions_total"]:
+                sub += (f"／委託 {status['commissions_total']} 件"
+                        f"（受け取り可能 {status['commissions_ready']} 件）")
+            value = f"{status['machines']} 台"
+        else:
+            sub = ""
+            value = "加工機なし"
+        if status["streak_days"]:
+            sub += (f"{'／' if sub else ''}ストリーク "
+                    f"{status['streak_days']} 日（生産ボーナスあり）")
+        rows.append(PanelRow("工房", value, sub=sub))
+    if status.get("lottery_pool") is not None:
+        rows.append(PanelRow(
+            "宝くじ", f"プール {status['lottery_pool']:,} AGO",
+            sub=(f"自分のチケット {status['lottery_tickets']} 枚"
+                 f"（締切 {status['lottery_closes']}）")))
+    if status.get("mining_session_left") is not None:
+        if status["mining_session_left"] > 0:
+            state = f"掘れます（セッション残り {status['mining_session_left']} 回）"
+        elif status["mining_ready"]:
+            state = "いま掘れます"
+        else:
+            state = f"次まで {_fmt_minutes(status['mining_remaining'])}"
+        rows.append(PanelRow(
+            "採掘", state, sub=f"プール {status['mining_pool']:,} AGO"))
+    if status.get("session_kind"):
+        label = _SESSION_LABELS.get(
+            status["session_kind"], status["session_kind"])
+        rows.append(PanelRow("ギャンブル", f"{label} のセッション進行中"))
+    if status.get("party_count") is not None:
+        rows.append(PanelRow("編成", f"{status['party_count']} 体"))
+    sections: list = [(None, rows)]
+    if status.get("active_effect_details"):
+        effect_rows = [
+            PanelRow(detail["name"],
+                     f"あと{_fmt_minutes(detail['remaining'])}")
+            for detail in status["active_effect_details"]
+        ]
+        sections.append(("発動中の効果", effect_rows))
+    return hero, banner, sections
+
+
+def status_panel_png(status: dict, *, user_id: int | None = None,
+                     name: str = "", avatar_bytes: bytes | None = None
+                     ) -> bytes:
+    """ステータス dict から白基調のステータスカード画像を描く。"""
+    hero, banner, sections = status_panel_content(
+        status, user_id=user_id, name=name)
+    avatars = {user_id: avatar_bytes} if user_id is not None else {}
+    return render_panel_png(
+        title="マネーパネル", accent=MONEY_ACCENT, banner=banner,
+        hero=hero, sections=sections, avatars=avatars,
+        cache_namespace="money-status")
+
+
 class MoneyPanelView(discord.ui.View):
     """カテゴリ切替つきの統合パネル。ボタンは既存の実行部へ委譲する。"""
 
@@ -195,6 +309,7 @@ class MoneyPanelView(discord.ui.View):
         self.message: discord.Message | None = None
         self._v2 = None
         self._cached_embed: discord.Embed | None = None
+        self._status_png: bytes | None = None
         # 逮捕中だけ概要に脱獄ボタンを出す（build_embed で状態が入る）。
         self._prison = False
         # 未受け取りの間だけ概要にスターターボタンを出す（同上）。
@@ -313,7 +428,28 @@ class MoneyPanelView(discord.ui.View):
         self._prison = bool(status.get("prison_remaining"))
         self._starter = status.get("starter_claimed") is False
         self._daily = status.get("daily_claimed") is False
-        return status_embed(status)
+        # 概要の数値表示は白基調のステータスカード画像に寄せる。描画に
+        # 失敗したら従来のフィールド表示へ落とす（パネル自体は落とさない）。
+        self._status_png = None
+        try:
+            names = await resolve_display_names(
+                self.cog.bot, [self.user_id])
+            avatars = await fetch_avatar_bytes(
+                self.cog.bot, [self.user_id])
+            self._status_png = await asyncio.to_thread(
+                status_panel_png, status, user_id=self.user_id,
+                name=names.get(self.user_id, ""),
+                avatar_bytes=avatars.get(self.user_id))
+        except Exception:
+            logger.exception("money_panel: ステータス画像の生成に失敗しました")
+            self._status_png = None
+        return status_embed(status, image=self._status_png is not None)
+
+    def panel_files(self) -> list[discord.File] | None:
+        if self._status_png is None:
+            return None
+        return [discord.File(io.BytesIO(self._status_png),
+                             filename=STATUS_FILENAME)]
 
     async def _on_category(self, interaction: discord.Interaction):
         values = getattr(interaction, "data", {}).get("values") or self._select_values()
@@ -324,7 +460,8 @@ class MoneyPanelView(discord.ui.View):
         container = getattr(self, "_v2", None)
         if container is not None:
             container._sync()
-            await edit_panel_v2(interaction, container)
+            await edit_panel_v2(interaction, container,
+                                files=self.panel_files())
         else:
             await interaction.response.edit_message(
                 embed=self._cached_embed, view=self)
@@ -345,7 +482,8 @@ class MoneyPanelView(discord.ui.View):
         try:
             if container is not None:
                 container._sync()
-                await edit_message_v2(self.message, container)
+                await edit_message_v2(self.message, container,
+                                      files=self.panel_files())
             else:
                 await self.message.edit(embed=self._cached_embed, view=self)
         except Exception:
@@ -484,6 +622,15 @@ class MoneyPanelCog(commands.Cog):
             except Exception:
                 logger.exception("money_panel: 市場ステータスの取得に失敗 user=%s", uid)
                 status["rate"] = None
+        # 総資産は総合資産ランキング（wallet.compute_asset_ranking）と
+        # 同じ定義（残高＋トークン時価、時価は小数切り捨て）の表示用導出。
+        # 既に取得済みの値からの計算のみで、経済ロジックは変えない。
+        if status.get("rate") is not None:
+            status["total_assets"] = (
+                int(status["balance"])
+                + int(float(status["tokens"]) * float(status["rate"])))
+        else:
+            status["total_assets"] = None
 
         items_cog = self.bot.get_cog("ItemsCog")
         if items_cog is not None:
@@ -730,7 +877,12 @@ class MoneyPanelCog(commands.Cog):
         view = MoneyPanelView(self, interaction.user.id)
         view._cached_embed = await view.build_embed()
         view.refresh()
-        await interaction.response.send_message(view=_wrap(view))
+        files = view.panel_files()
+        if files:
+            await interaction.response.send_message(
+                view=_wrap(view), files=files)
+        else:
+            await interaction.response.send_message(view=_wrap(view))
         try:
             view.message = await interaction.original_response()
         except Exception:
