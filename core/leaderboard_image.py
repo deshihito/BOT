@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import hashlib
 import io
+import unicodedata
 from dataclasses import dataclass
 
 from PIL import Image, ImageDraw, ImageFont
@@ -80,6 +81,31 @@ def _font(size: int):
 def _text_w(draw: ImageDraw.ImageDraw, text: str, font) -> int:
     bbox = draw.textbbox((0, 0), text, font=font)
     return bbox[2] - bbox[0]
+
+
+def _has_ink(text: str) -> bool:
+    """同梱フォントで描いて実際にインクが乗るか（字形が無い文字は空白になる）。"""
+    font = _font(32)
+    probe = ImageDraw.Draw(Image.new("L", (8, 8), 0))
+    bbox = probe.textbbox((0, 0), text, font=font)
+    canvas = Image.new("L", (max(1, bbox[2] - bbox[0]) + 4,
+                             max(1, bbox[3] - bbox[1]) + 4), 0)
+    ImageDraw.Draw(canvas).text((2 - bbox[0], 2 - bbox[1]), text,
+                                font=font, fill=255)
+    return canvas.getextrema()[1] > 0
+
+
+def board_safe_name(name, fallback: str = "") -> str:
+    """表示名を盤面で読める形にする。装飾文字は通常文字へ、無理なら fallback。
+
+    Discord の表示名でよく使われる装飾英数字（𝐀𝐛𝐜・𝕥𝕒𝕕𝕒 等）は同梱フォントに
+    字形が無く、描いても空白になってしまう。NFKC 正規化で通常の英数字へ
+    戻し、それでも何も描けない名前は fallback（ユーザー名など）に替える。
+    """
+    folded = unicodedata.normalize("NFKC", str(name or "")).strip()
+    if folded and _has_ink(folded):
+        return folded
+    return str(fallback or "")
 
 
 def fit_text(draw: ImageDraw.ImageDraw, text: str, font, max_w: int) -> str:
