@@ -10,7 +10,7 @@ class VcFormRegistryTest(unittest.TestCase):
         self.specs = {spec.value: spec for spec in build_vc_actions()}
 
     def test_form_actions_registered(self):
-        for value in ("gvc_room_create", "gvc_room_info", "gvc_room_delete",
+        for value in ("gvc_room_create", "gvc_room_create_perm", "gvc_room_info", "gvc_room_delete",
                       "gvc_chat_connect", "tts_start", "tts_say", "tts_config",
                       "trigger_register", "echo_delay"):
             self.assertIn(value, self.specs, value)
@@ -25,7 +25,7 @@ class VcFormRegistryTest(unittest.TestCase):
         self.assertIn("trigger_register", self.specs)
 
     def test_form_actions_not_for_ai(self):
-        for value in ("gvc_room_create", "gvc_room_delete", "tts_start",
+        for value in ("gvc_room_create", "gvc_room_create_perm", "gvc_room_delete", "tts_start",
                       "trigger_register", "echo_delay"):
             spec = self.specs[value]
             self.assertNotIn("aitools", spec.surfaces, value)
@@ -39,6 +39,9 @@ class VcFormRegistryTest(unittest.TestCase):
         self.assertIn("max_servers", names)
         self.assertIn("password", names)
         self.assertIn("desc", names)
+        self.assertIn("theme", names)
+        perm = {p.name for p in self.specs["gvc_room_create_perm"].params}
+        self.assertEqual(perm, {"name", "max_servers", "password", "desc", "theme"})
         delay = self.specs["echo_delay"].params
         self.assertEqual([p.name for p in delay], ["delay"])
         self.assertTrue(delay[0].required)
@@ -46,7 +49,7 @@ class VcFormRegistryTest(unittest.TestCase):
         self.assertEqual(connect, {"name", "password"})
 
     def test_total_vc_actions(self):
-        self.assertEqual(len(self.specs), 36)  # 27 + M4の9件
+        self.assertEqual(len(self.specs), 37)  # 27 + M4の9件 + 常設ルーム作成
 
 
 class HistoryExpansionTest(unittest.TestCase):

@@ -27,6 +27,7 @@ except Exception:  # numpy が無い環境では純Pythonで合成する
 
 from core.vc.globalvc.common import *  # noqa: F401,F403 - shared constants/helpers
 from core.vc.globalvc.common import PLAYBACK_WATCHDOG_IDLE_SECONDS, PLAYBACK_WATCHDOG_SECONDS, STALE_VC_GRACE_SECONDS  # noqa: F401
+from core.vc.globalvc.themes import theme_day, theme_for  # noqa: F401
 
 logger = logging.getLogger("cogs.sio_globalVC")
 
@@ -42,6 +43,9 @@ class RoomConfig:
     password: str = ""
     description: str = ""
     created_at: float = dataclasses.field(default_factory=time.time)
+    permanent: bool = False       # 常設ルーム（一覧の上部に固定表示される）
+    theme: str = ""               # テーマ（話の話題）。"" = テーマなし
+    theme_auto: bool = False      # 常設ルームの自動テーマ（毎日 theme_for で回す）
 
 
 ROOMS: dict[str, RoomConfig] = {}
@@ -60,6 +64,9 @@ def _room_to_dict(room: RoomConfig) -> dict:
         "password": room.password,
         "description": room.description,
         "created_at": room.created_at,
+        "permanent": bool(room.permanent),
+        "theme": room.theme,
+        "theme_auto": bool(room.theme_auto),
     }
 
 
@@ -79,9 +86,33 @@ def _room_from_dict(data) -> Optional[RoomConfig]:
             password=str(data.get("password") or ""),
             description=str(data.get("description") or ""),
             created_at=float(data.get("created_at") or time.time()),
+            # 旧形式の保存データには無いキーなので、既定値（通常ルーム・テーマなし）で読む
+            permanent=bool(data.get("permanent")),
+            theme=str(data.get("theme") or ""),
+            theme_auto=bool(data.get("theme_auto")),
         )
     except (TypeError, ValueError):
         return None
+
+
+def rotate_room_themes(now=None) -> list[str]:
+    """自動テーマの常設ルームに、その日のテーマを割り当てる。
+
+    JST の日付が変わっていればテーマが次の候補へ進む。変わったルームが
+    あればまとめて保存する。テーマが変わったルーム名の一覧を返す。
+    """
+    day = theme_day(now)
+    changed: list[str] = []
+    for room in ROOMS.values():
+        if not room.permanent or not room.theme_auto:
+            continue
+        theme = theme_for(room.name, day)
+        if theme and theme != room.theme:
+            room.theme = theme
+            changed.append(room.name)
+    if changed:
+        _persist_rooms()
+    return changed
 
 
 def _persist_rooms() -> None:

@@ -352,6 +352,7 @@ VC_SHORTCUT_ACTIONS: tuple[tuple[str, str], ...] = (
     # QuickParamModal / ショートカットのプリセットが吸収する。AI tools には
     # 出さない（フォーム/モーダル前提の操作と削除系は明示操作に限る）。
     ("グローバルVCルーム作成", "gvc_room_create"),
+    ("グローバルVC常設ルーム作成", "gvc_room_create_perm"),
     ("グローバルVCルーム情報", "gvc_room_info"),
     ("グローバルVCルーム削除", "gvc_room_delete"),
     ("グロチャ接続", "gvc_chat_connect"),
@@ -362,7 +363,7 @@ VC_SHORTCUT_ACTIONS: tuple[tuple[str, str], ...] = (
 
 # M4 で登録したフォーム系アクション（AI tools 対象外にする集合）。
 VC_FORM_ACTION_VALUES = frozenset({
-    "gvc_room_create", "gvc_room_info", "gvc_room_delete", "gvc_chat_connect",
+    "gvc_room_create", "gvc_room_create_perm", "gvc_room_info", "gvc_room_delete", "gvc_chat_connect",
     "tts_start", "tts_say", "tts_config", "trigger_register", "echo_delay",
 })
 
@@ -407,6 +408,19 @@ VC_ACTION_PARAMS: dict[str, tuple[ParamSpec, ...]] = {
         ParamSpec(name="password", label="パスワード", type="text",
                   help="入力すると非公開ルーム"),
         ParamSpec(name="desc", label="説明", type="text"),
+        ParamSpec(name="theme", label="テーマ", type="text",
+                  help="話の話題（空欄でテーマなし）"),
+    ),
+    # 常設ルーム作成: 通常作成と同じ項目。テーマが空欄なら自動で毎日変わる。
+    "gvc_room_create_perm": (
+        ParamSpec(name="name", label="ルーム名", type="text", required=True),
+        ParamSpec(name="max_servers", label="最大参加サーバー数（0=無制限）", type="int",
+                  min_value=0, max_value=9999),
+        ParamSpec(name="password", label="パスワード", type="text",
+                  help="入力すると非公開ルーム"),
+        ParamSpec(name="desc", label="説明", type="text"),
+        ParamSpec(name="theme", label="テーマ", type="text",
+                  help="話の話題（空欄なら自動で毎日変更、入力すれば固定）"),
     ),
     "gvc_room_info": (
         ParamSpec(name="name", label="ルーム名", type="text", required=True),

@@ -29,6 +29,7 @@ except Exception:  # numpy が無い環境では純Pythonで合成する
 from core.vc.globalvc.common import *  # noqa: F401,F403 - shared constants/helpers
 from core.vc.globalvc.audio import _JoinRefused  # noqa: F401
 from core.vc.globalvc.rooms import GLOBAL_ROOMS, ROOMS, RoomConfig, _can_delete_room, _disconnect_and_cleanup, _persist_rooms, _prune_dead_clients  # noqa: F401
+from core.vc.globalvc.themes import theme_day, theme_for  # noqa: F401
 from core.vc.globalvc.textlink import ROOM_TEXT_LINKS, _remove_text_link  # noqa: F401
 from core.vc.globalvc.ui import GlobalRoomListView  # noqa: F401
 
@@ -42,8 +43,13 @@ class ManageMixin:
 
 
     async def _room_create_impl(self, r: Responder, room_name: str, max_servers: int,
-                                password: str, description: str):
-        """ルームを作成する。パスワードがあれば非公開。作成者がVCにいれば、そのVCにボットも参加する。"""
+                                password: str, description: str,
+                                theme: str = "", permanent: bool = False):
+        """ルームを作成する。パスワードがあれば非公開。作成者がVCにいれば、そのVCにボットも参加する。
+
+        theme は話の話題（空欄ならテーマなし）。常設ルーム（permanent）で
+        テーマが空欄の場合は自動テーマになり、毎日プールから回っていく。
+        """
         await r.defer()
         if r.guild is None:
             return await r.send(f"{FAILED} ルームはサーバー内で作成してください。", ephemeral=True)
@@ -55,6 +61,10 @@ class ManageMixin:
             return await r.send(f"{FAILED} 最大参加サーバー数は 0 以上の値を指定してください。", ephemeral=True)
 
         private = bool(password)
+        theme = (theme or "").strip()
+        theme_auto = bool(permanent and not theme)
+        if theme_auto:
+            theme = theme_for(room_name, theme_day())
         ROOMS[room_name] = RoomConfig(
             name=room_name,
             owner_id=r.user.id,
@@ -63,12 +73,21 @@ class ManageMixin:
             private=private,
             password=password,
             description=description,
+            permanent=permanent,
+            theme=theme,
+            theme_auto=theme_auto,
         )
         _persist_rooms()
 
         embed = discord.Embed(title=f"🌐 ルーム **{room_name}** を作成しました", color=0x2ECC71)
         embed.add_field(name="最大参加サーバー数", value="無制限" if max_servers == 0 else str(max_servers))
         embed.add_field(name="公開設定", value="🔒 非公開" if private else "🌍 公開")
+        if permanent:
+            embed.add_field(name="種類", value="📌 常設ルーム")
+        if theme_auto:
+            embed.add_field(name="テーマ", value=f"🎯 {theme}（自動で毎日変更）", inline=False)
+        elif theme:
+            embed.add_field(name="テーマ", value=f"🎯 {theme}", inline=False)
         if description:
             embed.add_field(name="説明", value=description, inline=False)
         embed.set_footer(text="/vc →「グローバルVCルーム」→「ルーム一覧」の参加ボタンから参加できます")
@@ -111,7 +130,14 @@ class ManageMixin:
 
         embed = discord.Embed(title=f"🌐 ルーム情報: {room_name}", color=0x3498DB)
         embed.add_field(name="公開設定", value="🔒 非公開" if room.private else "🌍 公開")
+        embed.add_field(name="種類", value="📌 常設ルーム" if room.permanent else "通常ルーム")
         embed.add_field(name="最大参加サーバー数", value="無制限" if room.max_servers == 0 else str(room.max_servers))
+        if room.theme_auto:
+            embed.add_field(name="テーマ", value=f"🎯 {room.theme}（自動で毎日変更）", inline=False)
+        elif room.theme:
+            embed.add_field(name="テーマ", value=f"🎯 {room.theme}", inline=False)
+        else:
+            embed.add_field(name="テーマ", value="なし", inline=False)
         embed.add_field(name="現在の参加サーバー数(VC)", value=str(len(servers)))
         if servers:
             embed.add_field(name="接続中のサーバー(VC)", value=", ".join(servers), inline=False)

@@ -89,7 +89,8 @@ class GlobalRoomListView(discord.ui.LayoutView):
             for clients in GLOBAL_ROOMS.values() for c in clients
         )
 
-        names = list(ROOMS)[: self.MAX_ROOMS]
+        # 常設ルームは一覧の上部に固定表示する（同種内は作成順を保つ）
+        names = sorted(ROOMS, key=lambda n: not ROOMS[n].permanent)[: self.MAX_ROOMS]
         lines: list[str] = []
         buttons: list[_RoomJoinButton] = []
         for index, name in enumerate(names):
@@ -98,11 +99,17 @@ class GlobalRoomListView(discord.ui.LayoutView):
             full = bool(room.max_servers) and len(servers) >= room.max_servers
             cap = "無制限" if room.max_servers == 0 else f"{len(servers)}/{room.max_servers}"
             lock = "🔒" if room.private else "🌍"
-            line = f"{lock} **{name}** ・ VC参加 {cap} ・ グロチャ {len(ROOM_TEXT_LINKS.get(name, []))}"
+            pin = "📌 " if room.permanent else ""
+            line = f"{pin}{lock} **{name}** ・ VC参加 {cap} ・ グロチャ {len(ROOM_TEXT_LINKS.get(name, []))}"
             if full:
                 line += " ・ 満員"
             if room.description:
                 line += "\n-# " + room.description.replace("\n", " ")[:30]
+            if room.theme:
+                theme_line = room.theme.replace("\n", " ")[:30]
+                if room.theme_auto:
+                    theme_line += "（毎日変更）"
+                line += "\n-# 🎯 テーマ: " + theme_line
             lines.append(line)
             buttons.append(_RoomJoinButton(index, name, room.private, disabled=joined_here or full))
 
