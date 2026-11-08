@@ -31,6 +31,7 @@ except Exception:  # pragma: no cover
 from core.vc.transcription.common import *  # noqa: F401,F403 - shared constants/helpers
 from core.vc.transcription.common import we  # noqa: F401
 from core.vc.transcription.sink import TranscriptionSink  # noqa: F401
+from core.support.panel_v2 import as_embed_v2
 
 logger = logging.getLogger("cogs.sio_transcription")
 
@@ -51,19 +52,19 @@ class SessionMixin:
             return await self._start(r, target_channel)
         if action == "stop":
             if r.guild.id not in self.sessions:
-                return await r.send(embed=we(f"{FAILED} " + not_running("文字起こし")), ephemeral=True)
+                return await r.send(view=as_embed_v2(we(f"{FAILED} " + not_running("文字起こし"))), ephemeral=True)
             if not await self.voice_sessions.release(r.guild.id, "transcribe", reason="stop"):
                 self._cleanup(r.guild.id)("stop")
-            return await r.send(embed=we("🛑 文字起こしを停止しました。"))
+            return await r.send(view=as_embed_v2(we("🛑 文字起こしを停止しました。")))
         session = self.sessions.get(r.guild.id)
         if session:
-            await r.send(embed=we(
+            await r.send(view=as_embed_v2(we(
                 f"🎙️ **Logfare {logfare.TRANSCRIPTION_MODEL} 文字起こし実行中**\n"
                 f"ボイスチャンネル: **{session['vc_channel_name']}**\n"
                 f"送信先チャンネル: {session['target_channel_mention']}"
-            ))
+            )))
         else:
-            await r.send(embed=we(PAUSE + ' 文字起こし停止中'))
+            await r.send(view=as_embed_v2(we(PAUSE + ' 文字起こし停止中')))
 
 
     def _build_sender(self, guild_id: int, webhook, notice_channel):
@@ -117,16 +118,16 @@ class SessionMixin:
 
     async def _start_once(self, r: Responder, target_channel: discord.TextChannel | None):
         if not logfare.api_key():
-            return await r.send(embed=we(
+            return await r.send(view=as_embed_v2(we(
                 FAILED + ' ' + FEATURE_UNAVAILABLE_CONTACT
-            ), ephemeral=True)
+            )), ephemeral=True)
         voice = getattr(r.user, "voice", None)
         if not voice or not voice.channel:
-            return await r.send(embed=we(f"{FAILED} 先にボイスチャンネルに参加してから実行してください。"), ephemeral=True)
+            return await r.send(view=as_embed_v2(we(f"{FAILED} 先にボイスチャンネルに参加してから実行してください。")), ephemeral=True)
 
         guild_id = r.guild.id
         if guild_id in self.sessions:
-            return await r.send(embed=we(f"{FAILED} 既に文字起こしが実行中です。"), ephemeral=True)
+            return await r.send(view=as_embed_v2(we(f"{FAILED} 既に文字起こしが実行中です。")), ephemeral=True)
 
         vc_channel = voice.channel
         await r.defer()
@@ -140,21 +141,21 @@ class SessionMixin:
                 cleanup=self._cleanup(guild_id), text_channel=r.channel, force=False, timeout=30.0,
             )
         except VoiceBusy as busy:
-            return await r.send(embed=we(
+            return await r.send(view=as_embed_v2(we(
                 f"{FAILED} いまVCは **{busy.session.label}** が使用中です。先にその機能を停止してから文字起こしを開始してください。\n"
                 "文字起こしは、実行中のVC機能を自動停止・切り替えしません。"
-            ))
+            )))
         except Exception as e:
-            return await r.send(embed=we(voice_connection_failed(e)))
+            return await r.send(view=as_embed_v2(we(voice_connection_failed(e))))
 
         try:
             webhook = await self._get_or_create_webhook(send_channel)
         except discord.Forbidden:
             await self.voice_sessions.release(r.guild.id, "transcribe", reason="webhook-error")
-            return await r.send(embed=we(f"{FAILED} Botに {send_channel.mention} の `ウェブフックの管理 (Manage Webhooks)` 権限がありません。"))
+            return await r.send(view=as_embed_v2(we(f"{FAILED} Botに {send_channel.mention} の `ウェブフックの管理 (Manage Webhooks)` 権限がありません。")))
         except Exception as e:
             await self.voice_sessions.release(r.guild.id, "transcribe", reason="webhook-error")
-            return await r.send(embed=we(f"{FAILED} Webhookの取得に失敗しました: `{e}`"))
+            return await r.send(view=as_embed_v2(we(f"{FAILED} Webhookの取得に失敗しました: `{e}`")))
 
         send_webhook = self._build_sender(guild_id, webhook, r.channel)
 
@@ -174,11 +175,11 @@ class SessionMixin:
         }
         self._save_resume_snapshot(guild_id, vc_channel, r.channel, r.user, send_channel)
 
-        await r.send(embed=we(
+        await r.send(view=as_embed_v2(we(
             f"🎙️ **{vc_channel.name}** で Logfare {logfare.TRANSCRIPTION_MODEL} による文字起こしを開始しました。\n"
             f"音声は無音区間ごとにLogfareへ送信され、結果を {send_channel.mention} へ投稿します。\n"
             "音楽・GVC・読み上げと同時に利用できます。利用者の音声は外部サービスで処理されます。"
-        ))
+        )))
 
 
     def _cleanup(self, guild_id: int):

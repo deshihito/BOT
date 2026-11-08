@@ -30,6 +30,7 @@ except Exception:  # pragma: no cover
 
 from core.vc.transcription.common import *  # noqa: F401,F403 - shared constants/helpers
 from core.vc.transcription.common import we  # noqa: F401
+from core.support.panel_v2 import as_embed_v2
 
 logger = logging.getLogger("cogs.sio_transcription")
 
@@ -53,10 +54,10 @@ class DebugMixin:
                 name, audio, ts = last
                 source = f"**{name}** の直近の発話（{int(time.time() - ts)}秒前）"
         if audio is None:
-            return await ctx.send(embed=we(
+            return await ctx.send(view=as_embed_v2(we(
                 f"{FAILED} 調べる音声がありません。文字起こし中のVCで話してからもう一度実行するか、"
                 "WAVファイル(5MBまで)を添付して `!sttdebug` を実行してください。"
-            ))
+            )))
 
         try:
             with wave.open(io.BytesIO(audio), "rb") as wav:
@@ -80,7 +81,7 @@ class DebugMixin:
                 results = await logfare.probe_transcription_languages(audio, used_model)
             except Exception as e:
                 logger.exception("sttdebug failed")
-                return await ctx.send(embed=we(f"{FAILED} 実行に失敗しました: `{e}`"))
+                return await ctx.send(view=as_embed_v2(we(f"{FAILED} 実行に失敗しました: `{e}`")))
             try:
                 available = await logfare.fetch_transcription_models()
             except Exception:
@@ -97,7 +98,7 @@ class DebugMixin:
             f"音声: {source}（{stats}）\n\n" + "\n".join(lines) + f"\n\n{models_line}"
         )
         try:
-            await ctx.send(embed=we(text))
+            await ctx.send(view=as_embed_v2(we(text)))
         except (discord.Forbidden, discord.HTTPException):
             # 「埋め込みリンク」権限が無いチャンネルでは埋め込みが表示されないので、普通のテキストで送り直す
             await ctx.send(text[:1900])
