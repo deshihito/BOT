@@ -122,6 +122,7 @@ VOICE_ACTIONS_BY_GENRE = {
                   ("ルーム作成", "gvc_room_create"),
                   ("常設ルームのテーマ変更", "gvc_room_theme"),
                   ("ルーム情報", "gvc_room_info"), ("ルーム削除", "gvc_room_delete"),
+                  ("言語設定", "gvc_lang_setting"),
                   ("グロチャ: 接続（このチャンネル）", "gvc_chat_connect"),
                   ("グロチャ: 接続解除（このチャンネル）", "gvc_chat_disconnect"),
                   ("グロチャ自動接続設定", "gvc_auto_connect")],
@@ -150,6 +151,9 @@ GVC_ROOM_FORMS = {
     ]),
     "gvc_room_info": ("ルーム情報を表示", [("name", "ルーム名", 100, True, "")]),
     "gvc_room_delete": ("ルームを削除", [("name", "ルーム名", 100, True, "")]),
+    "gvc_lang_setting": ("GVCの表示言語", [
+        ("lang", "表示言語", 10, False, ""),
+    ]),
     "gvc_chat_connect": ("グロチャに接続（このチャンネル）", [
         ("name", "ルーム名", 100, True, ""),
         ("password", "パスワード（非公開ルームのみ）", 100, False, ""),
