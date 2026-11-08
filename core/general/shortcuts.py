@@ -351,11 +351,13 @@ class ShortcutManageSelect(discord.ui.Select):
             return await interaction.response.send_message("ショートカットが見つかりません。", ephemeral=True)
         if self.mode == "delete":
             await shortcuts.remove(guild_settings.get_store(), interaction.guild_id, interaction.user.id, item["id"])
-            wrapper = getattr(self.view, "panel", None)
-            if wrapper is not None:
-                wrapper._sync()
-                return await edit_panel_v2(interaction, self.view)
-            return await edit_panel_v2(interaction, as_panel_v2(self.parent_view))
+            # 削除後の選択肢は作り直さないと残り続けるため、管理画面の
+            # 「削除」ボタンと同じく View ごと新規に作って表示し直す。
+            # （旧実装は内側 View への _sync() 呼び出しで例外になっていた。）
+            view = ShortcutManagerView(
+                self.parent_view.cog, self.parent_view.guild_id, self.parent_view.user_id)
+            view.add_item(ShortcutManageSelect(view, "delete"))
+            return await edit_panel_v2(interaction, as_panel_v2(view))
         view = ShortcutRootPanel(item)
         await edit_panel_v2(interaction, as_panel_v2(view))
 
