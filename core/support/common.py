@@ -163,6 +163,7 @@ SUPPORT_ACTIONS = [
     app_commands.Choice(name="即抜けRTA計測オフ", value="sokunuke_off"),
     app_commands.Choice(name="VC自動参加オン", value="sokunuke_vc_on"),
     app_commands.Choice(name="VC自動参加オフ", value="sokunuke_vc_off"),
+    app_commands.Choice(name="人物分析", value="person_analysis"),
 ]
 
 # ジャンル説明は、ラベルや配下の機能名から読み取れない情報がある場合だけ書く。
@@ -175,6 +176,7 @@ SUPPORT_GENRES = {
     "rta": ("RTA設定", ""),
     "boardnotify": ("boardNotify", ""),
     "sns": ("SNS通知", ""),
+    "analysis": ("分析", ""),
 }
 
 # 旧バージョンで保存されたショートカットを新しいジャンルへ移行する。
@@ -229,6 +231,9 @@ SUPPORT_ACTIONS_BY_GENRE = {
     ),
     "sns": _support_actions(
         "sns_youtube", "sns_x", "sns_github", "sns_rss", "sns_youtube_live",
+    ),
+    "analysis": _support_actions(
+        "person_analysis",
     ),
 }
 

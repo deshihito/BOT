@@ -145,6 +145,8 @@ SUPPORT_AI_EXCLUDED_VALUES = frozenset({
     "sticky", "giveaway", "auth_panel", "role_panel", "language", "auto_react",
     "sns_notify", "quest_notify", "levelup_notify", "voice_trigger", "vc_auto_start", "globalchat", "bot_fixer",
     "sokunuke_on", "sokunuke_off", "sokunuke_vc_on", "sokunuke_vc_off",
+    # 人物分析は他者の交流グラフを表示するパネルのため、明示操作に限定する。
+    "person_analysis",
     # 機能数再編で独立化した設定系の入口も、元の集約先と同じ方針で
     # AI tools の代理実行範囲には広げない（明示操作に限定する）。
     "bumprta_settings",
