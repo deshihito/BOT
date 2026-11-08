@@ -30,14 +30,14 @@ RECRUIT_SECONDS = 60
 MAX_PLAYERS = 99  # 実質無制限（共通ロビーの表示・定員チェック用）
 
 
-def standings_text(session: QuizSession, limit: int = 10) -> str:
+def standings_text(session: QuizSession, names: dict | None = None, limit: int = 10) -> str:
     rows = session.standings()[:limit]
     if not rows:
         return "参加者がいませんでした。"
     medals = {1: "🥇", 2: "🥈", 3: "🥉"}
     lines = []
     for i, (uid, score, correct, answered) in enumerate(rows, 1):
-        lines.append(f"{medals.get(i, f'{i}.')} <@{uid}> — {score}点（正解 {correct}/{answered}）")
+        lines.append(f"{medals.get(i, f'{i}.')} {(names or {}).get(uid, f'プレイヤー{uid}')} — {score}点（正解 {correct}/{answered}）")
     return "\n".join(lines)
 
 
@@ -144,7 +144,7 @@ class Quiz(commands.Cog):
             best = max(gained.items(), key=lambda kv: kv[1]) if gained else (None, 0)
             desc = f"正解は **{correct_label}** でした。"
             if best[0] is not None and best[1] > 0:
-                desc += f"\n最高得点: <@{best[0]}>（+{best[1]}点）"
+                desc += f"\n最高得点: {names.get(best[0], f'プレイヤー{best[0]}')}（+{best[1]}点）"
             # 答え合わせは次の問題パネルに置き換わるまでの表示（ボタンなし）。
             await game_panels.replace(channel, "party", view=text_panel(f"第{number}問の答え", desc))
             await asyncio.sleep(3)
@@ -157,7 +157,7 @@ class Quiz(commands.Cog):
             key = ("quiz-final-bars", tuple(bar_rows))
             data = render_cached(key, lambda: render_bars(bar_rows))
             final_file = discord.File(io.BytesIO(data), "quiz_final.png")
-        await channel.send(view=text_panel("🏆 クイズ大会 結果発表", standings_text(session)),
+        await channel.send(view=text_panel("🏆 クイズ大会 結果発表", standings_text(session, names)),
                            file=final_file)
         guild = getattr(channel, "guild", None)
         if guild is not None:

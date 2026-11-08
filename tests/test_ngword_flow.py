@@ -75,7 +75,7 @@ class NGWordTest(unittest.IsolatedAsyncioTestCase):
             await task
         last = self.channel.sent[-1].text()
         self.assertIn('NGワード 終了', last)
-        self.assertIn('<@3>', last)
+        self.assertIn('P3', last)
         self.assertEqual(self.cog.wins[self.guild.id], {3: 1})
         self.assertEqual(self.cog.games, {})
 

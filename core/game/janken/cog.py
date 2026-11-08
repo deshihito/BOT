@@ -436,7 +436,7 @@ class Janken(commands.Cog):
                 text += "（Bot 戦はランキングに数えません）"
         else:
             text = "勝者なし" if g.round < MAX_ROUNDS or not g.alive else f"{MAX_ROUNDS}回あいこが続いたので引き分けです。"
-        lines = [text, "", "経過:", "\n".join(g.log)[-1024:] or "（なし）"]
+        lines = [text, "", "経過:", "\n".join(g.log)[-3900:] or "（なし）"]
         if g.wager:
             lines += ["", "勝敗コイン: " + (f"各人 {g.wager} AGO を預かり、勝者へ配分しました。" if winners else "勝者がいないため、預かり分は参加者へ返金しました。")]
         # 手選択パネルと最後の公開表示を片付け、結果だけを残す。

@@ -245,7 +245,7 @@ class RecruitView(GamePanelView):
         self.note = note
         self._closed = False
         super().__init__(f"{LOADING}人狼ゲーム募集開始！", "", timeout=None)
-        self.join = discord.ui.Button(label="参加", style=discord.ButtonStyle.success)
+        self.join = discord.ui.Button(label="参加する", style=discord.ButtonStyle.success)
         self.join.callback = self._on_join
         self.leave = discord.ui.Button(label="退出", style=discord.ButtonStyle.secondary)
         self.leave.callback = self._on_leave
@@ -403,7 +403,7 @@ class GlobalJoinView(GamePanelView):
             "グローバル人狼ゲーム（合流）",
             "既に他サーバーで起動中のグローバル人狼ゲームがあります。\n参加ボタンを押して合流してください。",
             timeout=None)
-        self.join = discord.ui.Button(label="参加", style=discord.ButtonStyle.success)
+        self.join = discord.ui.Button(label="参加する", style=discord.ButtonStyle.success)
         self.join.callback = self._on_join
         self.add_row(self.join)
 
@@ -571,7 +571,7 @@ class NightActionView(GamePanelView):
         if p_id not in [p.id for p in self.game.alive_players]: return
 
         if p_id in self.game.night_actions:
-            return await _ephemeral_text(interaction, "アクションは既に完了しています。欲張らないでください。")
+            return await _ephemeral_text(interaction, "アクションは既に完了しています。")
 
         role = self.game.roles.get(p_id)
 
@@ -600,7 +600,7 @@ class NightActionView(GamePanelView):
             "ビー玉ブレイカー", "もくもく", "リア充", "貴族", "奴隷", "議長", "アホ"
         ]
         if role in passive_roles:
-            return await _ephemeral_text(interaction, "お前は寝てろ。明日の朝までじっとしてなさい。")
+            return await _ephemeral_text(interaction, "この役職に夜のアクションはありません。")
 
         opts = [discord.SelectOption(label=p.display_name, value=str(p.id)) for p in self.game.alive_players if p.id != p_id]
         if not opts:
@@ -699,13 +699,13 @@ class PublicVoteView(GamePanelView):
     async def callback(self, interaction: discord.Interaction):
         p_id = interaction.user.id
         if p_id not in [p.id for p in self.game.alive_players]:
-            return await _ephemeral_text(interaction, "死人に口なし。墓場で大人しくしていなさい。")
+            return await _ephemeral_text(interaction, "死亡しているため投票できません。")
 
         if p_id in self.game.voted_count:
-            return await _ephemeral_text(interaction, "既に投票済みです。意志を何度も変えることはできません。")
+            return await _ephemeral_text(interaction, "既に投票済みです。")
 
         self.game.voted_count[p_id] = self.select.values[0]
-        await interaction.response.send_message(f"{SUCCESS} {interaction.user.display_name} さんが投票を完了しました。")
+        await interaction.response.send_message(f"{SUCCESS} {interaction.user.display_name} さんが投票を完了しました。", ephemeral=True)
 
 
 class ChairmanVoteView(GamePanelView):

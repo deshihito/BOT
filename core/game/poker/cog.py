@@ -384,7 +384,7 @@ class BuyInPanel(GamePanelView):
         if len(t.stacks) < 2:
             return await interaction.response.send_message("バイイン済みの人が2人必要です。", ephemeral=True)
         t.start_requested = True
-        await interaction.response.send_message("テーブルを開始します。")
+        await interaction.response.send_message("テーブルを開始します。", ephemeral=True)
 
 
 BuyInView = BuyInPanel  # 互換名
@@ -520,7 +520,7 @@ class ContinuePanel(GamePanelView):
         if t.stacks.get(interaction.user.id, 0) < ANTE:
             return await interaction.response.send_message("チップがアンティ未満です。リバイインするか退出してください。", ephemeral=True)
         t.ready.add(interaction.user.id)
-        await interaction.response.send_message("次のハンドに参加します。")
+        await interaction.response.send_message("次のハンドに参加します。", ephemeral=True)
 
     async def _leave_table(self, interaction):
         t = self.table
@@ -531,14 +531,14 @@ class ContinuePanel(GamePanelView):
             return await interaction.response.send_message("精算に失敗しました。チップは台帳に残り、Bot再起動時に自動で返金されます。", ephemeral=True)
         t.players.pop(interaction.user.id, None)
         t.ready.discard(interaction.user.id)
-        await interaction.response.send_message("チップをコインに精算して退出しました。")
+        await interaction.response.send_message("チップをコインに精算して退出しました。", ephemeral=True)
 
     async def _close_table(self, interaction):
         t = self.table
         if interaction.user.id != t.host_id:
             return await interaction.response.send_message("閉じられるのは募集主だけです。", ephemeral=True)
         t.close_requested = True
-        await interaction.response.send_message("テーブルを閉じます。全員のチップを精算します。")
+        await interaction.response.send_message("テーブルを閉じます。全員のチップを精算します。", ephemeral=True)
 
 
 ContinueView = ContinuePanel  # 互換名
@@ -692,7 +692,7 @@ class Poker(commands.Cog):
     async def run_table(self, channel, t):
         if len(t.players) < 2:
             await game_panels.clear(channel, "party")
-            await channel.send("参加者が2人集まらなかったため、ポーカーを開始できませんでした。")
+            await channel.send(view=text_panel("", "参加者が2人集まらなかったため、ポーカーを開始できませんでした。"))
             return
         t.phase = "buyin"
         await game_panels.replace(channel, "party", view=BuyInPanel(
@@ -714,7 +714,7 @@ class Poker(commands.Cog):
             for uid in list(t.stacks):
                 await self.cash_out(t, uid)
             await game_panels.clear(channel, "party")
-            await channel.send("バイインした人が2人集まらなかったため、ポーカーを開始できませんでした（チップは精算済みです）。")
+            await channel.send(view=text_panel("", "バイインした人が2人集まらなかったため、ポーカーを開始できませんでした（チップは精算済みです）。"))
             return
         await channel.send(view=text_panel(
             "ポーカー開始",
@@ -851,21 +851,24 @@ class Poker(commands.Cog):
                 await party_ranking.shared().record_win(t.guild_id, uid, GAME_ID)
         lines = [f"ポット {pot:,}（レーキ {rake:,} を差し引き）"]
         for uid in contributions:
-            hand = " ".join(label_card(c) for c in t.hands[uid])
+            name = getattr(t.players[uid], "display_name", str(uid))
             if uid in folded:
-                lines.append(f"{t.players[uid].mention}: フォールド — {hand}")
+                # フォールドした手札は公開しない（sweep2 GA-27）。
+                lines.append(f"{name}: フォールド")
             else:
+                hand = " ".join(label_card(c) for c in t.hands[uid])
                 gain = payouts.get(uid, 0)
-                lines.append(f"{t.players[uid].mention}: **{labels[uid]}** — {hand}（+{gain:,}）")
-        lines.append("スタック: " + " / ".join(f"{t.players[uid].mention} {t.stacks.get(uid, 0):,}" for uid in t.players))
-        # ショーダウンでは全手札が公開される（上のテキストと同じ情報範囲）ので、
+                lines.append(f"{name}: **{labels[uid]}** — {hand}（+{gain:,}）")
+        lines.append("スタック: " + " / ".join(f"{getattr(t.players[uid], 'display_name', str(uid))} {t.stacks.get(uid, 0):,}" for uid in t.players))
+        # ショーダウンに残った手札だけを公開する（フォールド分はテキスト・画像ともに出さない）。
         # 共有画像として各プレイヤーの手札を行で描く。本ゲームは5枚ドローで
         # コミュニティカードは存在しないため、共有画像はこの開示が担う。
         rows = []
         for uid in contributions:
+            if uid in folded:
+                continue
             name = getattr(t.players[uid], "display_name", str(uid))
-            tag = "フォールド" if uid in folded else labels[uid]
-            rows.append((f"{name}（{tag}）", hand_specs(t.hands[uid])))
+            rows.append((f"{name}（{labels[uid]}）", hand_specs(t.hands[uid])))
         data = render_cached(
             ("poker-showdown", tuple((label, specs) for label, specs in rows)),
             lambda: render_card_rows([(label, list(specs)) for label, specs in rows],

@@ -395,7 +395,7 @@ class Babanuki(commands.Cog):
             await safe_delete(g.last_notice)
             g.last_notice = None
         await channel.send(view=text_panel(
-            "ババ抜き 終了", text + f"\n\n## 上がった順\n{order[:1024]}"))
+            "ババ抜き 終了", text + f"\n\n## 上がった順\n{order[:3900]}"))
 
     # ------------------------------------------------------------------
     # 再起動復旧（core/game/game/game_restore.py）

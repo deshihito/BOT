@@ -98,11 +98,11 @@ class JinrouCog(LifecycleMixin, GameLoopMixin, AutoplayMixin, ResultsMixin, comm
                 name = names.get(int(player_id)) or fallback_name(player_id)
             except (TypeError, ValueError):
                 name = fallback_name(player_id)
-            lines.append(f"{i}. **{name}**: {entry['rating']:.0f} pts")
+            lines.append(f"{i}. **{name}**: {entry['rating']:,.0f} pts")
         ranking_text = "\n".join(lines) if lines else "ランキングデータがまだありません。"
         return discord.Embed(
             title="人狼レーティング",
-            description=f"**{user.display_name}** さんのレート: {rating:.0f} pts\n\n**レート上位10人**\n{ranking_text}",
+            description=f"**{user.display_name}** さんのレート: {rating:,.0f} pts\n\n**レート上位10人**\n{ranking_text}",
             color=0xFFFFFF,
         )
 
@@ -130,7 +130,7 @@ class JinrouCog(LifecycleMixin, GameLoopMixin, AutoplayMixin, ResultsMixin, comm
                 uid = None
                 name = fallback_name(player_id)
             rows.append(BoardRow(user_id=uid, name=name,
-                                 value=f"{entry['rating']:.0f} pts"))
+                                 value=f"{entry['rating']:,.0f} pts"))
         avatars = await fetch_avatar_bytes(
             self.bot, [row.user_id for row in rows if row.user_id is not None])
         png = await asyncio.to_thread(
@@ -140,7 +140,7 @@ class JinrouCog(LifecycleMixin, GameLoopMixin, AutoplayMixin, ResultsMixin, comm
             cache_namespace="jinrou-rating")
         embed = discord.Embed(
             title="人狼レーティング",
-            description=f"**{user.display_name}** さんのレート: {rating:.0f} pts",
+            description=f"**{user.display_name}** さんのレート: {rating:,.0f} pts",
             color=0xFFFFFF,
         )
         embed.set_image(url="attachment://jinrou_rating.png")

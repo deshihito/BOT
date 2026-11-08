@@ -225,6 +225,14 @@ LOBBY_MSG_HOST_CANNOT_LEAVE = "主催者は退出できません。募集をや�
 LOBBY_MSG_NOT_HOST = "開始できるのは主催者だけです。"
 LOBBY_MSG_ALREADY_STARTED = "すでに開始しています。"
 
+#: 対局中の拒否文の統一形（sweep2 GA-25）。
+GAME_MSG_NOT_YOUR_TURN = "あなたの番ではありません。"
+GAME_MSG_NOT_JOINED = "このゲームに参加していません。"
+
+
+def game_msg_already_running(game_name: str) -> str:
+    return f"このチャンネルでは既に{game_name}が進行中です。"
+
 
 def lobby_msg_full(max_players: int) -> str:
     return f"定員（{max_players}人）に達しました。"
@@ -235,6 +243,10 @@ def lobby_msg_not_enough(min_players: int, current: int) -> str:
 
 
 class LobbyView(GamePanelView):
+    """timeout の規格（sweep2 GA-26）: 待機系 View は制限時間+30 を既定とし、
+    タイマー駆動系（View の on_timeout が進行を兼ねるもの）は制限時間そのままでよい。
+    フェーズ系で +5/+10 のような中途の余裕幅は使わない。
+    """
     """全ゲーム共通の募集ロビー。
 
     規格:
@@ -268,7 +280,7 @@ class LobbyView(GamePanelView):
         self.cancelled = False
         self._event = None  # asyncio.Event（wait() を使ったときだけ作る）
         super().__init__(title, "", timeout=timeout, notice=notice)
-        self.join = discord.ui.Button(label="参加", style=discord.ButtonStyle.success)
+        self.join = discord.ui.Button(label="参加する", style=discord.ButtonStyle.success)
         self.join.callback = self._on_join
         self.leave = discord.ui.Button(label="退出", style=discord.ButtonStyle.secondary)
         self.leave.callback = self._on_leave

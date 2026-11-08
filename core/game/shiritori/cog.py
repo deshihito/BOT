@@ -337,14 +337,14 @@ class OdaiShiritori(commands.Cog):
             board[uid] = board.get(uid, 0) + 1
             await party_ranking.shared().record_win(g.guild_id, uid, "shiritori")
         chain = " → ".join(w for _, w in g.history) or "（なし）"
-        win_text = "、".join(g.players[uid].mention for uid in winners) or "なし"
+        win_text = "、".join(g.players[uid].display_name for uid in winners) or "なし"
         await game_panels.clear(channel, "party")
         if g.last_notice is not None:
             await safe_delete(g.last_notice)
             g.last_notice = None
         await channel.send(view=text_panel(
             "お題しりとり 終了",
-            f"🏆 勝者: {win_text}\n\n## つながった言葉（お題: {g.topic}）\n{chain[:1024]}"))
+            f"🏆 勝者: {win_text}\n\n## つながった言葉（お題: {g.topic}）\n{chain[:3900]}"))
 
     # ------------------------------------------------------------------
     # 再起動復旧（core/game/game/game_restore.py）
@@ -438,7 +438,7 @@ class OdaiShiritori(commands.Cog):
         word = (message.content or "").strip()
         result, reason = check_answer(g.last_word, word, g.used)
         if result == "retry":
-            await self._notice(message.channel, g, f"{FAILED} {reason}（言い直せます）")
+            await self._notice(message.channel, g, f"{FAILED} {reason}（言い直せます）\n▶ {message.author.mention} さんの番: 「**{last_kana(g.last_word)}**」から")
             return False
         g.answer = word
         return True

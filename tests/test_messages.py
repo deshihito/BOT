@@ -40,12 +40,12 @@ class SharedMessageValuesTest(unittest.TestCase):
     def test_recruit_join_prompt(self):
         self.assertEqual(
             messages.recruit_join_prompt(30),
-            "30秒以内に「参加」を押してください",
+            "募集時間: 30秒",
         )
-        # 募集文の組み立て全体が従来どおりになること（括弧書きが続く形）
+        # 募集文の組み立て全体（括弧書きが続く形）
         self.assertEqual(
             f"{messages.recruit_join_prompt(30)}（2〜5人）。",
-            "30秒以内に「参加」を押してください（2〜5人）。",
+            "募集時間: 30秒（2〜5人）。",
         )
 
     def test_role_hierarchy_messages(self):

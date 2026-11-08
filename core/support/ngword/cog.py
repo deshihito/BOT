@@ -109,9 +109,7 @@ class PlayPanel(GamePanelView):
             else:
                 mark = "（脱落）" if uid in g.out else ""
                 lines.append(f"{member.display_name}{mark}: **{g.words[uid]}**")
-        embed = discord.Embed(title="みんなのNGワード", description="\n".join(lines), color=COLOR)
-        embed.set_footer(text="自分のNGワードは見えません。相手に言わせるよう会話を誘導しましょう。")
-        await interaction.response.send_message(embed=embed, ephemeral=True)
+        await interaction.response.send_message(view=text_panel("みんなのNGワード", "\n".join(lines)), ephemeral=True)
 
 
 PlayView = PlayPanel  # 互換名
@@ -191,7 +189,7 @@ class NGWord(commands.Cog):
             await party_ranking.shared().record_win(g.guild_id, uid, "ngword")
         reveal = "\n".join(f"{m.display_name}: {g.words.get(uid, '-')}" + ("（脱落）" if uid in g.out else "")
                            for uid, m in g.players.items())
-        win_text = "、".join(g.players[uid].mention for uid in winners) or "なし"
+        win_text = "、".join(g.players[uid].display_name for uid in winners) or "なし"
         # 進行パネルと経過/脱落表示を片付け、結果だけを残す。
         await game_panels.clear(channel, "party")
         old = getattr(g, "last_notice", None)
@@ -200,7 +198,7 @@ class NGWord(commands.Cog):
             await safe_delete(old)
         await channel.send(view=text_panel(
             "NGワード 終了",
-            f"🏆 勝者: {win_text}\n\nNGワードの答え合わせ\n{reveal[:1024]}"))
+            f"🏆 勝者: {win_text}\n\nNGワードの答え合わせ\n{reveal[:3900]}"))
 
     async def handle_message(self, message) -> bool:
         """進行中のゲームで、発言者が自分の NG ワードを言ったら脱落させる。脱落させたら True。"""

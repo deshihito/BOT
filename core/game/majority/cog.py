@@ -138,9 +138,9 @@ class Majority(commands.Cog):
             result = session.tally()
             lines = []
             for answer, uids in sorted(result["groups"].items(), key=lambda kv: -len(kv[1])):
-                names = " ".join(f"<@{u}>" for u in uids)
+                group_names = " ".join(names.get(u, f"プレイヤー{u}") for u in uids)
                 pts = len(uids) if len(uids) >= 2 else 0
-                lines.append(f"「{answer}」× {len(uids)}人（+{pts}点）: {names}")
+                lines.append(f"「{answer}」× {len(uids)}人（+{pts}点）: {group_names}")
             if not lines:
                 lines.append("回答がありませんでした。")
             # 結果は次のお題パネルに置き換わるまでの表示（ボタンなし）。
@@ -153,7 +153,7 @@ class Majority(commands.Cog):
             await asyncio.sleep(3)
         rows = session.standings()
         medals = {1: "🥇", 2: "🥈", 3: "🥉"}
-        text = "\n".join(f"{medals.get(i, f'{i}.')} <@{uid}> — {score}点" for i, (uid, score) in enumerate(rows, 1)) or "参加者がいませんでした。"
+        text = "\n".join(f"{medals.get(i, f'{i}.')} {names.get(uid, f'プレイヤー{uid}')} — {score}点" for i, (uid, score) in enumerate(rows, 1)) or "参加者がいませんでした。"
         await game_panels.clear(channel, "party")
         final_file = None
         if rows:

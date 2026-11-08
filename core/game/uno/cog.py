@@ -1,7 +1,8 @@
 import discord
+from core.general.user_names import cached_display_name
 from core.game.game import game_panels, game_restore
 from core.game.game.board_image import render_cached
-from core.game.game.game_v2 import GamePanelView, LobbyView, text_panel
+from core.game.game.game_v2 import GamePanelView, LobbyView, text_panel, GAME_MSG_NOT_YOUR_TURN
 from core.game.uno import board as uno_board
 from discord.ext import commands
 
@@ -197,7 +198,7 @@ class CardSelect(discord.ui.Select):
     async def callback(self, interaction: discord.Interaction):
         current_player_id = self.game.players[self.game.current_player_idx]
         if interaction.user.id != current_player_id:
-            return await interaction.response.send_message("あなたの番ではありません！", ephemeral=True)
+            return await interaction.response.send_message(GAME_MSG_NOT_YOUR_TURN, ephemeral=True)
 
         selected_card = self.values[0]
         if self.cog.games.get(self.game.channel_id) is not self.game:
@@ -790,7 +791,7 @@ class Uno(commands.Cog):
 
         body.append("## プレイヤー順")
         body.append("\n".join(order_list))
-        body.append(f"-# 手番プレイヤーは下のセレクトメニューからカードを選択してください（{int(TURN_TIMEOUT // 60)}分以内。過ぎると自動で1枚引いてパス）。/game の UNO 画面の「ゲームを終了」で終了できます。")
+        body.append(f"-# 手番は{int(TURN_TIMEOUT // 60)}分以内（過ぎると自動で1枚引いてパス）")
 
         if game.active_view is not None:
             game.active_view.stop()
@@ -906,7 +907,7 @@ class Uno(commands.Cog):
         if channel_id in self.games and guild is not None:
             await party_ranking.shared().record_win(guild.id, winner_id, "uno")
 
-        body = f"*** <@{winner_id}> さんが手札をすべて使い切り、見事勝利しました！ ***"
+        body = f"*** {cached_display_name(self.bot, winner_id)} さんが手札をすべて使い切り、見事勝利しました！ ***"
 
         if channel_id in self.games:
             game = self.games[channel_id]

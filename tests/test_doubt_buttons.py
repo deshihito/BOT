@@ -67,7 +67,7 @@ class DoubtButtonTest(unittest.IsolatedAsyncioTestCase):
         panel = doubt.GameControlView(game, self.cog)
         inter = FakeInteraction(self.players[1], self.channel)
         await press(panel, 'pass_turn', inter)
-        self.assertIn('ターンではありません', inter.texts()[0])
+        self.assertIn('番ではありません', inter.texts()[0])
         self.assertEqual(game.current_player_id, 1)
 
     async def test_prefix_start_records_usage(self):
