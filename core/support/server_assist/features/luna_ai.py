@@ -57,7 +57,7 @@ CUSTOM_ICON_URL_MAX_CHARS = 500
 # Webhook 名に使えない語（core.game.zeta.common の検証流儀に合わせる）。
 FORBIDDEN_NAME_WORDS = ("discord", "clyde")
 
-DEFAULT_MODEL = "glm-5.3-flash"
+DEFAULT_MODEL = "deepseek-v4.1-flash-1017"
 DEBOUNCE_SECONDS = 3.0
 COOLDOWN_SECONDS = 8.0
 MAX_REPLIES_PER_HOUR = 120
@@ -124,9 +124,9 @@ def model_name() -> str:
     return os.getenv("LUNA_AI_MODEL", DEFAULT_MODEL).strip() or DEFAULT_MODEL
 
 
-# 思考強度は最小にする。glm-5.3-flash はカタログ上 reasoning が必須
-# (supported_efforts: max/high/low) で "none" を選べないため、下限の low。
-REASONING_EFFORT = "low"
+# 思考はオフにする。deepseek-v4.1-flash-1017 はカタログ上 "none" に
+# 対応している (supported_efforts: max/high/low/none)。
+REASONING_EFFORT = "none"
 
 
 async def _chat_text(messages: list[dict[str, Any]], *, max_tokens: int) -> str:
