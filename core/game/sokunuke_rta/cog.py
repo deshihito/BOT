@@ -39,6 +39,33 @@ def _duration(seconds: float) -> str:
     return f"{total // 3600}時間{(total % 3600) // 60}分{total % 60}秒"
 
 
+def _global_best_records(all_settings: dict) -> list[dict]:
+    """全サーバー分の設定 {guild_id: sokunuke設定} から、ユーザーごとの最速記録を集める。
+
+    各サーバーの records は実行ごとの記録なので、全サーバー横断では
+    ユーザーごとに一番速い1件だけを残し、速い順に並べて返す。
+    """
+    best: dict[str, dict] = {}
+    for settings in (all_settings or {}).values():
+        if not isinstance(settings, dict):
+            continue
+        for row in settings.get("records") or []:
+            if not isinstance(row, dict):
+                continue
+            user_id = row.get("user_id")
+            try:
+                elapsed = float(row.get("elapsed"))
+            except (TypeError, ValueError):
+                continue
+            if user_id is None:
+                continue
+            key = str(user_id)
+            current = best.get(key)
+            if current is None or elapsed < float(current["elapsed"]):
+                best[key] = {"user_id": key, "elapsed": elapsed}
+    return sorted(best.values(), key=lambda row: float(row["elapsed"]))
+
+
 def _human_voice_states(guild) -> list[object]:
     """Return human voice states across voice/stage channels.
 
@@ -149,7 +176,18 @@ class SokuNukeRta(commands.Cog):
             embed = discord.Embed(title="即抜けRTAランキング（自分）", description="\n".join(lines) if lines else "まだ記録がありません。", color=0xFFFFFF)
             await interaction.followup.send(embed=embed, allowed_mentions=discord.AllowedMentions.none())
             return
-        records.sort(key=lambda row: float(row.get("elapsed", 0)))
+        if scope == "global":
+            # 全サーバー: 各サーバーの記録を横断し、ユーザーごとの最速で並べる
+            store = guild_settings.get_store()
+            all_sections = getattr(store, "all_sections", None)
+            all_settings = all_sections(SECTION) if callable(all_sections) else {}
+            records = _global_best_records(all_settings)
+            scope_label = "全サーバー"
+            cache_namespace = "sokunuke-leaderboard-global"
+        else:
+            records.sort(key=lambda row: float(row.get("elapsed", 0)))
+            scope_label = "このサーバー"
+            cache_namespace = "sokunuke-leaderboard"
         # 氏名はメンションではなく通常表記（サーバー外だと「不明のユーザー」になる）
         names = await resolve_display_names(
             self.bot, [row["user_id"] for row in records[:10]])
@@ -158,7 +196,7 @@ class SokuNukeRta(commands.Cog):
                          value=_duration(row["elapsed"]))
                 for row in records[:10]]
         if not rows:
-            embed = discord.Embed(title="即抜けRTAランキング（このサーバー）", description="まだ記録がありません。", color=0xFFFFFF)
+            embed = discord.Embed(title=f"即抜けRTAランキング（{scope_label}）", description="まだ記録がありません。", color=0xFFFFFF)
             await interaction.followup.send(embed=embed, allowed_mentions=discord.AllowedMentions.none())
             return
         avatars = await fetch_avatar_bytes(
@@ -166,9 +204,9 @@ class SokuNukeRta(commands.Cog):
         png = await asyncio.to_thread(
             render_leaderboard_png,
             title="即抜けRTAランキング", sections=[(None, rows)],
-            accent=SOKUNUKE_ACCENT, subtitle="このサーバー", avatars=avatars,
-            cache_namespace="sokunuke-leaderboard")
-        embed = discord.Embed(title="即抜けRTAランキング（このサーバー）", color=0xFFFFFF)
+            accent=SOKUNUKE_ACCENT, subtitle=scope_label, avatars=avatars,
+            cache_namespace=cache_namespace)
+        embed = discord.Embed(title=f"即抜けRTAランキング（{scope_label}）", color=0xFFFFFF)
         embed.set_image(url=f"attachment://{SOKUNUKE_BOARD_FILENAME}")
         await interaction.followup.send(
             embed=embed,
