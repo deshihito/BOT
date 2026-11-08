@@ -34,6 +34,24 @@ class APIError(RuntimeError):
         self.status_code = status_code
 
 
+#: APIError.code used when the self-hosted DB API could not be reached at all
+#: (connection refused, DNS failure, timeout, ...), as opposed to the API
+#: answering with an error.
+API_CONNECTION_ERROR_CODE = "API_CONNECTION_ERROR"
+
+
+def is_connection_error(exc: BaseException) -> bool:
+    """True when *exc* means the DB API was unreachable.
+
+    The API service is restarted by the deploy automation whenever ``api/``
+    changes, so a brief connection failure is expected and self-healing:
+    periodic workers log it as a one-line warning (no traceback) and simply
+    retry on their next cycle, while every other failure keeps the usual
+    error log with a traceback.
+    """
+    return isinstance(exc, APIError) and exc.code == API_CONNECTION_ERROR_CODE
+
+
 def _json_default(value: Any) -> Any:
     if isinstance(value, (_datetime.datetime, _datetime.date, _datetime.time)):
         return value.isoformat()
@@ -163,7 +181,7 @@ class APIClient:
         except requests.RequestException as exc:
             # A timeout may occur after PostgreSQL committed, so never mark an
             # ambiguous transport failure as safe for automatic write retries.
-            raise APIError("自前DB APIに接続できません", code="API_CONNECTION_ERROR") from exc
+            raise APIError("自前DB APIに接続できません", code=API_CONNECTION_ERROR_CODE) from exc
 
         try:
             body = response.json()

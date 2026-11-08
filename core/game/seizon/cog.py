@@ -28,7 +28,7 @@ from datetime import date, datetime, timedelta, timezone
 import discord
 from discord import app_commands
 from discord.ext import commands, tasks
-from core.support.api_client import API_NOT_CONFIGURED_MESSAGE
+from core.support.api_client import API_NOT_CONFIGURED_MESSAGE, is_connection_error
 from core.support.panel_v2 import as_embed_v2, wrap_panel_view
 from core.support.api_retry import run_with_retry
 from core.game.seizon.analysis import (
@@ -958,8 +958,12 @@ class FujoSurvival(commands.Cog):
                 embed.set_footer(text=f"{FOOTER} - Emergency Alert")
                 await channel.send(content=f"<@{uid}>", embed=embed, allowed_mentions=discord.AllowedMentions(users=True))
                 await self._update_user(uid, {"last_panic_at": now.isoformat()})
-        except Exception:
-            log.exception("fujo: panic check failed")
+        except Exception as exc:
+            if is_connection_error(exc):
+                # API 再起動中などの接続不可は想定内で、次周期に再試行される。
+                log.warning("fujo: panic check skipped: DB API に接続できませんでした（次周期で再試行します）")
+            else:
+                log.exception("fujo: panic check failed")
 
     @tasks.loop(hours=1)
     async def check_duo_pester(self):
@@ -1001,8 +1005,12 @@ class FujoSurvival(commands.Cog):
                     if channel is not None:
                         await channel.send(content=f"<@{uid}>", embed=embed)
                 await self._update_user(uid, {"last_pester_level": level})
-        except Exception:
-            log.exception("fujo: pester check failed")
+        except Exception as exc:
+            if is_connection_error(exc):
+                # API 再起動中などの接続不可は想定内で、次周期に再試行される。
+                log.warning("fujo: pester check skipped: DB API に接続できませんでした（次周期で再試行します）")
+            else:
+                log.exception("fujo: pester check failed")
 
     @check_panic_alerts.before_loop
     @check_duo_pester.before_loop
