@@ -251,14 +251,14 @@ class VoiceHub(commands.Cog):
             return await r.send(f"{FAILED} この操作は `/vc` のパネルから入力してください。", ephemeral=True)
 
         name = form.get("name", "")
-        if value in ("gvc_room_create", "gvc_room_create_perm"):
+        if value == "gvc_room_create":
             try:
                 max_servers = int(form.get("max") or 0)
             except ValueError:
                 return await r.send(f"{FAILED} 最大参加サーバー数は数字で入力してください。", ephemeral=True)
             return await cog._room_create_impl(
                 r, name, max_servers, form.get("password", ""), form.get("desc", ""),
-                theme=form.get("theme", ""), permanent=value == "gvc_room_create_perm")
+                theme=form.get("theme", ""))
         if value == "gvc_room_theme":
             return await cog._room_theme_impl(r, name, form.get("theme", ""))
         if value == "gvc_room_info":

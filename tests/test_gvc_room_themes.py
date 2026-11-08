@@ -224,5 +224,61 @@ class AdminGateTest(unittest.IsolatedAsyncioTestCase):
         await self.mixin._room_theme_impl(r, "存在しない", "テーマ")
 
 
+class GvcPermCommandTest(unittest.IsolatedAsyncioTestCase):
+    """常設ルーム作成は !gvcperm コマンドからだけ行う（ジャンルには置かない）。"""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.store = voice_restore.reset_store(Path(self.tmp.name) / "voice_restore.json")
+        rooms_mod.ROOMS.clear()
+
+    def tearDown(self):
+        rooms_mod.ROOMS.clear()
+        self.tmp.cleanup()
+
+    def make_ctx(self, user_id):
+        from unittest.mock import AsyncMock
+
+        return types.SimpleNamespace(
+            guild=types.SimpleNamespace(id=10),
+            author=types.SimpleNamespace(id=user_id, voice=None),
+            channel=None,
+            send=AsyncMock(),
+        )
+
+    async def run_command(self, user_id, room_name="常設コマンド", theme=""):
+        from core.vc.globalvc.entry import GlobalVCCog
+
+        cog = GlobalVCCog.__new__(GlobalVCCog)
+        cog.bot = FakeBot({ADMIN_ID})
+        ctx = self.make_ctx(user_id)
+        await GlobalVCCog.gvcperm.callback(cog, ctx, room_name, theme=theme)
+        return ctx
+
+    async def test_admin_creates_permanent_room_via_command(self):
+        await self.run_command(ADMIN_ID)
+        room = rooms_mod.ROOMS["常設コマンド"]
+        self.assertTrue(room.permanent)
+        self.assertTrue(room.theme_auto)  # テーマ省略時は自動（日替わり）
+
+    async def test_admin_creates_with_fixed_theme(self):
+        await self.run_command(ADMIN_ID, theme="映画の話")
+        room = rooms_mod.ROOMS["常設コマンド"]
+        self.assertEqual((room.theme, room.theme_auto), ("映画の話", False))
+
+    async def test_normal_user_rejected_via_command(self):
+        await self.run_command(111)
+        self.assertNotIn("常設コマンド", rooms_mod.ROOMS)
+
+    def test_not_in_genre_or_registry(self):
+        from core.general.action_registry import build_vc_actions
+        from core.vc.common import GVC_ROOM_FORMS, VOICE_ACTIONS_BY_GENRE
+
+        genre_values = [v for items in VOICE_ACTIONS_BY_GENRE.values() for _l, v in items]
+        self.assertNotIn("gvc_room_create_perm", genre_values)
+        self.assertNotIn("gvc_room_create_perm", GVC_ROOM_FORMS)
+        self.assertNotIn("gvc_room_create_perm", {s.value for s in build_vc_actions()})
+
+
 if __name__ == "__main__":
     unittest.main()
