@@ -232,10 +232,13 @@ class SupportActionPageButton(discord.ui.Button):
         panel = getattr(container, "panel", container)
         pages = support_action_pages(panel.genre)
         panel.action_page = min(max(panel.action_page + self.delta, 0), len(pages) - 1)
+        # 状態を変えたら必ず panel.refresh() で子部品を作り直してから
+        # _sync() すること。_sync() だけだと旧ページの子部品が再利用され、
+        # ページが切り替わらない（game の GamePageButton と同じ順序）。
+        panel.refresh()
         if hasattr(container, "_sync"):
             container._sync()
             return await edit_panel_v2(interaction, container)
-        panel.refresh()
         return await edit_panel_v2(interaction, as_panel_v2(panel))
 
 
