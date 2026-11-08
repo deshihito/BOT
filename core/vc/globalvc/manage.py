@@ -30,10 +30,11 @@ import config  # noqa: F401
 
 from core.vc.globalvc.common import *  # noqa: F401,F403 - shared constants/helpers
 from core.vc.globalvc.audio import _JoinRefused  # noqa: F401
-from core.vc.globalvc.rooms import GLOBAL_ROOMS, ROOMS, RoomConfig, _can_delete_room, _disconnect_and_cleanup, _persist_rooms, _prune_dead_clients  # noqa: F401
+from core.vc.globalvc.rooms import GLOBAL_ROOMS, ROOMS, RoomConfig, _can_delete_room, _disconnect_and_cleanup, _persist_rooms, _prune_dead_clients, _room_members  # noqa: F401
 from core.vc.globalvc.themes import theme_day, theme_for  # noqa: F401
 from core.vc.globalvc.textlink import ROOM_TEXT_LINKS, _remove_text_link  # noqa: F401
-from core.vc.globalvc.ui import GlobalRoomListView  # noqa: F401
+from core.vc.globalvc.ui import GlobalRoomListView, _TextChatToggleView  # noqa: F401
+from core.leaderboard_image import BoardRow, fetch_avatar_bytes, render_leaderboard_png  # noqa: F401
 
 logger = logging.getLogger("cogs.sio_globalVC")
 
@@ -106,10 +107,12 @@ class ManageMixin:
             embed.add_field(name="テーマ", value=f"🎯 {theme}（自動で毎日変更）", inline=False)
         elif theme:
             embed.add_field(name="テーマ", value=f"🎯 {theme}", inline=False)
+        embed.add_field(name="グロチャ自動接続", inline=False,
+                        value="OFF（下のボタンで ON にすると、VC参加時にそのテキストチャンネルもグロチャへ自動接続します）")
         if description:
             embed.add_field(name="説明", value=description, inline=False)
         embed.set_footer(text="/vc →「グローバルVCルーム」→「ルーム一覧」の参加ボタンから参加できます")
-        await r.send(embed=embed)
+        await r.send(embed=embed, view=_TextChatToggleView(self, room_name, r.user.id))
 
         # 作成者がボイスチャンネルにいるなら、そのままボットも参加させる
         voice = getattr(r.user, "voice", None)
@@ -192,6 +195,8 @@ class ManageMixin:
             embed.add_field(name="テーマ", value=f"🎯 {room.theme}", inline=False)
         else:
             embed.add_field(name="テーマ", value="なし", inline=False)
+        embed.add_field(name="グロチャ自動接続", value="ON" if room.text_chat else "OFF", inline=False)
+        embed.add_field(name="現在の参加者数", value=f"{len(_room_members(room_name))}人")
         embed.add_field(name="現在の参加サーバー数(VC)", value=str(len(servers)))
         if servers:
             embed.add_field(name="接続中のサーバー(VC)", value=", ".join(servers), inline=False)
@@ -202,6 +207,52 @@ class ManageMixin:
             embed.add_field(name="説明", value=room.description, inline=False)
         embed.add_field(name="作成日時", value=f"<t:{int(room.created_at)}:R>", inline=False)
         await r.send(embed=embed)
+
+
+    MEMBERS_BOARD_MAX = 60  # メンバー画像に載せる上限（多い場合は先頭から）
+
+    async def _members_impl(self, r: Responder):
+        """このサーバーが参加中のルームについて、GVCに入っている全員を画像で表示する。"""
+        await r.defer()
+        if r.guild is None:
+            return await r.send(f"{FAILED} サーバー内で実行してください。", ephemeral=True)
+        room_name = next(
+            (name for name, clients in GLOBAL_ROOMS.items()
+             if any(c.guild is not None and c.guild.id == r.guild.id for c in clients)),
+            None)
+        if room_name is None:
+            return await r.send(
+                f"{FAILED} このサーバーはグローバルVCに参加していません。先にルームへ参加してください。",
+                ephemeral=True)
+
+        members = _room_members(room_name)
+        if not members:
+            return await r.send(f"ルーム **{room_name}** のVCには現在だれもいません。")
+
+        total = len(members)
+        shown = members[: self.MEMBERS_BOARD_MAX]
+        sections: list = []
+        by_guild: dict[str, list] = {}
+        for member, guild in shown:
+            guild_name = getattr(guild, "name", None) or "不明なサーバー"
+            by_guild.setdefault(guild_name, []).append(BoardRow(
+                user_id=int(member.id),
+                name=str(getattr(member, "display_name", None) or getattr(member, "name", "") or ""),
+                value=str(member.id),
+            ))
+        sections = list(by_guild.items())
+        avatars = await fetch_avatar_bytes(self.bot, [row.user_id for _t, rows in sections for row in rows])
+        png = await asyncio.to_thread(
+            render_leaderboard_png,
+            title=f"GVCメンバー: {room_name}", sections=sections,
+            accent=(46, 204, 113), avatars=avatars, podium=False,
+            cache_namespace="gvc-members")
+        embed = discord.Embed(
+            title=f"🌐 GVCメンバー: {room_name}（{total}人）", color=0x2ECC71)
+        if total > len(shown):
+            embed.description = f"人数が多いため先頭 {len(shown)} 人まで表示しています。"
+        embed.set_image(url="attachment://gvc_members.png")
+        await r.send(embed=embed, file=discord.File(io.BytesIO(png), filename="gvc_members.png"))
 
 
     async def _room_delete_impl(self, r: Responder, room_name: str):

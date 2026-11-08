@@ -30,10 +30,10 @@ from core.vc.globalvc.common import logger, DISCORD_SAMPLE_RATE, CHANNELS, SAMPL
 from core.vc.globalvc.connect import logger, ConnectMixin  # noqa: F401
 from core.vc.globalvc.manage import logger, ManageMixin, Responder  # noqa: F401
 from core.vc.globalvc.restore import logger, RestoreMixin  # noqa: F401
-from core.vc.globalvc.rooms import logger, RoomConfig, ROOMS, GLOBAL_ROOMS, _room_to_dict, _room_from_dict, _persist_rooms, _load_rooms, _persist_join, _clear_join, _remove_vc_from_rooms, _prune_dead_clients, _disconnect_and_cleanup, _watchdog_interval_seconds, _WEBHOOK_BANNED_WORDS, _safe_webhook_username, _can_delete_room, rotate_room_themes  # noqa: F401
+from core.vc.globalvc.rooms import logger, RoomConfig, ROOMS, GLOBAL_ROOMS, _room_to_dict, _room_from_dict, _persist_rooms, _load_rooms, _persist_join, _clear_join, _remove_vc_from_rooms, _prune_dead_clients, _disconnect_and_cleanup, _watchdog_interval_seconds, _WEBHOOK_BANNED_WORDS, _safe_webhook_username, _can_delete_room, rotate_room_themes, _room_members, _room_user_count  # noqa: F401
 from core.vc.globalvc.themes import THEME_POOL, theme_day, theme_for  # noqa: F401
 from core.vc.globalvc.textlink import logger, TextLink, ROOM_TEXT_LINKS, CHANNEL_TO_ROOM, _text_link_to_dict, _persist_text_links, _restore_text_links, _remove_text_link  # noqa: F401
-from core.vc.globalvc.ui import logger, _RoomJoinButton, _PrivateRoomJoinModal, GlobalRoomListView  # noqa: F401
+from core.vc.globalvc.ui import logger, _RoomJoinButton, _PrivateRoomJoinModal, GlobalRoomListView, _TextChatToggleView  # noqa: F401
 
 logger = logging.getLogger("cogs.sio_globalVC")
 

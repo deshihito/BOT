@@ -94,6 +94,10 @@ class ConnectMixin:
                 getattr(text_channel, "id", None), user,
             )
 
+            # ルームの設定が有効なら、このテキストチャンネルもグロチャへ自動接続する
+            if room.text_chat and text_channel is not None:
+                await self._auto_link_text_chat(guild, text_channel, room)
+
             # 参加してきたサーバー自身はもちろん、すでに接続中の他サーバーも、止まっていれば再生を始める
             _start_room_playback(room_name)
             self._sync_watchdog_interval()

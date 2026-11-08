@@ -27,7 +27,7 @@ except Exception:  # numpy が無い環境では純Pythonで合成する
     np = None  # type: ignore[assignment]
 
 from core.vc.globalvc.common import *  # noqa: F401,F403 - shared constants/helpers
-from core.vc.globalvc.rooms import GLOBAL_ROOMS, ROOMS, _prune_dead_clients  # noqa: F401
+from core.vc.globalvc.rooms import GLOBAL_ROOMS, ROOMS, _persist_rooms, _prune_dead_clients, _room_user_count  # noqa: F401
 from core.vc.globalvc.textlink import ROOM_TEXT_LINKS  # noqa: F401
 
 logger = logging.getLogger("cogs.sio_globalVC")
@@ -48,6 +48,51 @@ class _RoomJoinButton(discord.ui.Button):
 
     async def callback(self, interaction: discord.Interaction):
         await self.view.join(interaction, self.room_name)
+
+
+class _TextChatToggleView(discord.ui.View):
+    """ルーム作成直後に「グロチャ自動接続」を切り替えるボタン（作成者だけ操作可）。
+
+    ON にした時点でこのサーバーがすでにルームへ接続中なら、そのチャンネルも
+    その場でグロチャへ自動接続する。以後の VC 参加では _connect_room が連動する。
+    """
+
+    def __init__(self, cog: "GlobalVCCog", room_name: str, user_id: int):
+        super().__init__(timeout=300)
+        self.cog = cog
+        self.room_name = room_name
+        self.user_id = user_id
+        self.button = discord.ui.Button()
+        self.button.callback = self._toggle
+        self.add_item(self.button)
+        self._sync()
+
+    def _sync(self):
+        room = ROOMS.get(self.room_name)
+        enabled = bool(room and room.text_chat)
+        self.button.label = f"グロチャ自動接続: {'ON' if enabled else 'OFF'}"
+        self.button.style = (discord.ButtonStyle.success if enabled
+                             else discord.ButtonStyle.secondary)
+
+    async def _toggle(self, interaction: discord.Interaction):
+        if interaction.user.id != self.user_id:
+            return await interaction.response.send_message(
+                "切り替えられるのはルームの作成者だけです。", ephemeral=True)
+        room = ROOMS.get(self.room_name)
+        if room is None:
+            return await interaction.response.send_message(
+                f"{FAILED} ルーム **{self.room_name}** は削除されています。", ephemeral=True)
+        room.text_chat = not room.text_chat
+        _persist_rooms()
+        self._sync()
+        await interaction.response.edit_message(view=self)
+        if room.text_chat and interaction.guild is not None:
+            connected = any(
+                c.guild is not None and c.guild.id == interaction.guild.id
+                for c in GLOBAL_ROOMS.get(room.name, []))
+            if connected:
+                await self.cog._auto_link_text_chat(
+                    interaction.guild, interaction.channel, room)
 
 
 class _PrivateRoomJoinModal(discord.ui.Modal, title="非公開ルームに参加"):
@@ -100,7 +145,8 @@ class GlobalRoomListView(discord.ui.LayoutView):
             cap = "無制限" if room.max_servers == 0 else f"{len(servers)}/{room.max_servers}"
             lock = "🔒" if room.private else "🌍"
             pin = "📌 " if room.permanent else ""
-            line = f"{pin}{lock} **{name}** ・ VC参加 {cap} ・ グロチャ {len(ROOM_TEXT_LINKS.get(name, []))}"
+            line = (f"{pin}{lock} **{name}** ・ VC参加 {cap} ・ 参加者 {_room_user_count(name)}人"
+                    f" ・ グロチャ {len(ROOM_TEXT_LINKS.get(name, []))}")
             if full:
                 line += " ・ 満員"
             if room.description:
