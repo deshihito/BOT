@@ -20,7 +20,7 @@ from core.support.legacy import Responder
 from core.vc import vc_feature_restore
 from core.vc.voice_session import VoiceBusy, get_manager
 from core.vc.voice_recv_patch import patch_voice_recv_client
-from core.support.messages import VOICE_NOT_JOINED, voice_connection_failed
+from core.support.messages import VOICE_NOT_JOINED, voice_connection_failed, FEATURE_UNAVAILABLE_CONTACT
 from core.support.emojis import CLOCK, FAILED, MUSIC, PAUSE
 
 from core.vc.rec.common import *  # noqa: F401,F403 - shared constants/helpers
@@ -50,12 +50,12 @@ class SessionMixin:
         guild_id = r.guild.id
         if guild_id in self.sessions:
             return await r.send(embed=we(
-                f"{FAILED} 既にこのサーバーで録音中です。`/vc のパネルから録音停止` で停止してください。"
+                f"{FAILED} 既にこのサーバーで録音中です。"
             ), ephemeral=True)
 
         if not discord.opus.is_loaded():
             return await r.send(embed=we(
-                FAILED + ' Opus ライブラリがロードされていません。サーバーに libopus をインストールしてください。'
+                FAILED + ' ' + FEATURE_UNAVAILABLE_CONTACT
             ))
 
         target_channel = voice.channel
@@ -95,8 +95,7 @@ class SessionMixin:
             f"🎙️ **{target_channel.name}** で録音を開始しました。\n"
             f"🔐 暗号化: `{negotiated_mode}` / DAVE(E2EE): `{dave_text}`\n"
             f"📦 受信パケット数: `0` 個\n"
-            f"{CLOCK} 録音は最長 {RECORD_LIMIT_SECONDS // 60} 分です。超えると自動で停止してファイルを送ります。\n"
-            f"停止するには `/vc のパネルから録音停止` を実行してください。"
+            f"{CLOCK} 録音は最長 {RECORD_LIMIT_SECONDS // 60} 分です。超えると自動で停止してファイルを送ります。"
         ), want_message=True)
 
         # 録音していることを、テキストチャンネルの全員に見える形で知らせる（Discord のポリシー）。
@@ -112,7 +111,7 @@ class SessionMixin:
                     f"🔴 **リアルタイム音階演奏中...**\n"
                     f"🎙️ チャンネル: **{target_channel.name}**\n"
                     f"🎹 リアルタイム検出音階: {notes_str}\n"
-                    f"📦 パケット数: `{count}` | 停止: `/vc のパネルから録音停止`"
+                    f"📦 パケット数: `{count}`"
                 ))
             except Exception:
                 logger.debug("録音: ステータス表示の更新に失敗しました", exc_info=True)
@@ -196,7 +195,7 @@ class SessionMixin:
         "stop": "💾 録音を停止しました",
         "time_limit": f"{CLOCK} 録音が上限の {RECORD_LIMIT_SECONDS // 60} 分に達したため自動で停止しました",
         "takeover": "💾 別の機能に切り替わったため録音を停止しました",
-        "leave": "💾 /vc のパネルからVC退出 で退出したため録音を停止しました",
+        "leave": "💾 VC退出のため録音を停止しました",
         "idle": "💾 ボイスチャンネルに誰もいなくなったため録音を停止しました",
         "disconnected": "💾 ボイスチャンネルから切断されたため録音を停止しました",
     }
@@ -222,8 +221,7 @@ class SessionMixin:
             embed = discord.Embed(
                 title=PAUSE + ' 待機中',
                 description=(
-                    "現在このサーバーで録音は行われていません。\n"
-                    "`/vc のパネルから録音開始` で開始できます。"
+                    "現在このサーバーで録音は行われていません。"
                 ),
                 color=0x95A5A6,
             )

@@ -1,4 +1,5 @@
 import discord
+from core.support.messages import FEATURE_UNAVAILABLE_CONTACT
 from core.support.panel_v2 import edit_message_v2
 from discord import app_commands  # ← 追加
 from discord.ext import commands, tasks
@@ -131,7 +132,7 @@ class PlaylistsMixin:
             if scope == 'server':
                 return await self._play_server_playlist(r, name, file)
             if not db:
-                return await r.send(embed=we("個人プレイリストを使うにはSupabaseを設定してください。"), ephemeral=True)
+                return await r.send(embed=we(FEATURE_UNAVAILABLE_CONTACT), ephemeral=True)
             if not name:
                 return await r.send(embed=we("再生するプレイリスト名を指定してください。"), ephemeral=True)
             try:
@@ -168,7 +169,7 @@ class PlaylistsMixin:
                 return await r.send(embed=we("プレイリストの削除に失敗しました。"), ephemeral=True)
 
         if not db:
-            return await r.send(embed=we("プレイリストを使うにはSupabaseを設定してください。"), ephemeral=True)
+            return await r.send(embed=we(FEATURE_UNAVAILABLE_CONTACT), ephemeral=True)
 
         if action == 'save':
             if not name:
@@ -196,7 +197,7 @@ class PlaylistsMixin:
                 logger.exception("Failed to save personal playlist")
                 detail = str(exc).lower()
                 if 'row-level security' in detail or 'permission denied' in detail or '42501' in detail:
-                    message = '保存権限がありません。SupabaseのRLSポリシーと、Botに設定したSupabaseキー（BOT_API_KEY / BOT_API_KEY）の権限を確認してください。'
+                    message = FEATURE_UNAVAILABLE_CONTACT
                 else:
                     message = f'保存に失敗しました。時間をおいて再度お試しください。解決しない場合はBotの運営に連絡してください。({type(exc).__name__})'
                 return await r.send(embed=we(message), ephemeral=True)
@@ -236,7 +237,7 @@ class PlaylistsMixin:
                     tokens = [str(tokens)]
             except Exception as e:
                 logger.debug("Server playlist JSON parse failed", exc_info=True)
-                return await r.send(embed=we(f"JSON解析エラー: {e}"))
+                return await r.send(embed=we("JSONの形式が正しくありません。"), ephemeral=True)
         elif name:
             tokens = name.replace(',', ' ').split()
             if self.bot.db_api:

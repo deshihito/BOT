@@ -18,7 +18,7 @@ from core.vc import vc_feature_restore
 from core.vc.vosk_model import ensure_model
 from core.vc.voice_session import VoiceBusy, get_manager
 from core.vc.voice_recv_patch import patch_voice_recv_client
-from core.support.messages import VOICE_NOT_JOINED
+from core.support.messages import VOICE_NOT_JOINED, not_running
 from core.support.emojis import FAILED, MUSIC
 try:
     from vosk import Model, KaldiRecognizer
@@ -51,7 +51,7 @@ class SessionMixin:
             return await self._score(r)
         if action == "stop":
             if r.guild.id not in self.sessions:
-                return await r.send(embed=we(f"{FAILED} 現在カラオケは実行されていません。"), ephemeral=True)
+                return await r.send(embed=we(f"{FAILED} " + not_running("カラオケ")), ephemeral=True)
             if not await self.voice_sessions.release(r.guild.id, "karaoke", reason="stop"):
                 self._cleanup(r.guild.id)("stop")
             return await r.send(embed=we("🛑 カラオケモードを終了しました！"))
@@ -66,7 +66,7 @@ class SessionMixin:
     async def _score(self, r: Responder):
         session = self.sessions.get(r.guild.id)
         if not session:
-            return await r.send(embed=we(f"{FAILED} 現在カラオケは実行されていません。"), ephemeral=True)
+            return await r.send(embed=we(f"{FAILED} " + not_running("カラオケ")), ephemeral=True)
 
         sink: KaraokeSink = session["sink"]
         target = clean_text(session["target_lyrics"])

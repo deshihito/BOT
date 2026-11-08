@@ -1,5 +1,6 @@
 import discord
-from core.support.panel_v2 import edit_message_v2
+from core.support.panel_v2 import edit_message_v2, edit_panel_view
+from core.vc.music.ui import _require_same_vc
 from discord import app_commands  # ← 追加
 from discord.ext import commands, tasks
 import asyncio
@@ -488,6 +489,34 @@ class PythonSpatialAudioSource(discord.AudioSource):
 # ==================================================
 # UI: 立体音響（Spatial）設定パネル・コントロール View
 # ==================================================
+def spatial_panel_embed(cog, guild_id: int) -> discord.Embed:
+    """立体音響パネルの Embed（表示組み立てはここ1箇所、sweep2 VC-02/16）。"""
+    state = cog.get_state(guild_id)
+    current_eq = state.get('eq', 'flat')
+    dist = state.get('spatial_distance', 2.0)
+    room = state.get('spatial_room_size', 0.3)
+    speaker = state.get('spatial_speaker', 'studio')
+    agc_max = state.get('spatial_agc_max', 4.0)
+    is_rotating = "ON" if state.get('is_rotating', True) else "OFF"
+    speaker_names = {
+        'studio': '🎙️ スタジオモニター',
+        'theater': '🎬 シアター',
+        'pa': VOL + ' PAスピーカー',
+        'small': '📻 小型スピーカー'
+    }
+    return discord.Embed(
+        title="🎧 立体音響の設定",
+        description=(
+            f"現在のモード: **{current_eq}**\n"
+            f"音像の距離: **{dist}x**\n"
+            f"部屋のリバーブ: **{room}**\n"
+            f"スピーカー特性: **{speaker_names.get(speaker, speaker)}**\n"
+            f"最大音量引き上げ幅: **{agc_max}x** (+{round(20 * math.log10(agc_max), 1)}dB)\n"
+            f"3帯域立体回転: **{is_rotating}**"
+        ),
+        color=0x3498DB
+    )
+
 class SpatialControlView(discord.ui.View):
     def __init__(self, cog, guild_id: int):
         super().__init__(timeout=PANEL_TIMEOUT_SECONDS)
@@ -517,6 +546,8 @@ class SpatialControlView(discord.ui.View):
     # 💡 ボタンの定義（デコレータで定義されたメソッド）
     @discord.ui.button(label="回転モード切替", style=discord.ButtonStyle.primary, row=0)
     async def toggle_rot_mode(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not await _require_same_vc(interaction):
+            return
         state = self.cog.get_state(self.guild_id)
         current = state.get('spatial_rot_mode', 'standard')
         
@@ -527,42 +558,18 @@ class SpatialControlView(discord.ui.View):
         
         await self.update_panel(interaction)
 
+    def embed(self) -> discord.Embed:
+        return spatial_panel_embed(self.cog, self.guild_id)
+
     async def update_panel(self, interaction: discord.Interaction):
-        """パネルのEmbed表示を最新状態に更新"""
-        state = self.cog.get_state(self.guild_id)
-        current_eq = state.get('eq', 'flat')
-        dist = state.get('spatial_distance', 2.0)
-        room = state.get('spatial_room_size', 0.3)
-        speaker = state.get('spatial_speaker', 'studio')
-        agc_max = state.get('spatial_agc_max', 4.0)
-        is_rotating = "ON" if state.get('is_rotating', True) else "OFF"
-
-        speaker_names = {
-            'studio': '🎙️ スタジオモニター (高解像度・フラット)',
-            'theater': '🎬 シアター (重低音・サラウンド)',
-            'pa': VOL + ' PAスピーカー (高音圧・指向性強)',
-            'small': '📻 小型スピーカー (コンパクト)'
-        }
-
-        embed = discord.Embed(
-            title="🎧 立体音響 (3D Spatial Audio) 設定パネル",
-            description=(
-                "リアルタイムHRTFおよび空間音響パラメータを個別設定できます。\n"
-                "下のメニュー操作は再生中の音声へ即座に反映されます。\n\n"
-                f"現在のモード: **{current_eq}**\n"
-                f"音像の距離 (Distance): **{dist}x**\n"
-                f"部屋のリバーブ (Reverb Mix): **{room}**\n"
-                f"スピーカー特性: **{speaker_names.get(speaker, speaker)}**\n"
-                f"最大音量引き上げ幅 (AGC): **{agc_max}x** (+{round(20*math.log10(agc_max), 1)}dB)\n"
-                f"3帯域立体回転: **{is_rotating}**"
-            ),
-            color=0x3498DB
-        )
-        await interaction.response.edit_message(embed=embed, view=self)
+        """パネルの表示を最新状態に更新（V2 ラッパー経由で再描画）。"""
+        await edit_panel_view(interaction, self)
 
     # 1. Spatialモード ON ボタン
     @discord.ui.button(label="🎧 Spatial ON", style=discord.ButtonStyle.primary, row=0)
     async def toggle_spatial(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not await _require_same_vc(interaction):
+            return
         state = self.cog.get_state(self.guild_id)
         state['eq'] = 'spatial'
         await self.update_panel(interaction)
@@ -571,7 +578,7 @@ class SpatialControlView(discord.ui.View):
 
     # 3. 部屋のリバーブ量 (Reverb Mix) 選択メニュー
     @discord.ui.select(
-        placeholder="🏠 部屋のリバーブ (残響量) を選択...",
+        placeholder="部屋のリバーブ (残響量) を選択...",
         options=[
             discord.SelectOption(label="リバーブ OFF (0.0)", value="0.0", description="残響なし・ドライな音"),
             discord.SelectOption(label="控えめ (0.15)", value="0.15", description="小さな防音室程度の響き"),
@@ -582,6 +589,8 @@ class SpatialControlView(discord.ui.View):
         row=1
     )
     async def select_reverb(self, interaction: discord.Interaction, select: discord.ui.Select):
+        if not await _require_same_vc(interaction):
+            return
         state = self.cog.get_state(self.guild_id)
         state['spatial_room_size'] = float(select.values[0])
         await self.update_panel(interaction)
@@ -599,13 +608,15 @@ class SpatialControlView(discord.ui.View):
         row=2
     )
     async def select_agc(self, interaction: discord.Interaction, select: discord.ui.Select):
+        if not await _require_same_vc(interaction):
+            return
         state = self.cog.get_state(self.guild_id)
         state['spatial_agc_max'] = float(select.values[0])
         await self.update_panel(interaction)
 
     # 5. 音像の距離 ＆ スピーカー特性 (ドロップダウン)
     @discord.ui.select(
-        placeholder="📻 スピーカー特性を選択...",
+        placeholder="スピーカー特性を選択...",
         options=[
             discord.SelectOption(label="スタジオモニター (高解像度・フラット)", value="studio", default=True),
             discord.SelectOption(label="シアター用 (重低音・サラウンド)", value="theater"),
@@ -615,6 +626,8 @@ class SpatialControlView(discord.ui.View):
         row=3
     )
     async def select_speaker(self, interaction: discord.Interaction, select: discord.ui.Select):
+        if not await _require_same_vc(interaction):
+            return
         state = self.cog.get_state(self.guild_id)
         state['spatial_speaker'] = select.values[0]
         await self.update_panel(interaction)

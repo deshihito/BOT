@@ -9,7 +9,7 @@ from discord.ext import commands
 from discord.ext import voice_recv
 from core.support.legacy import Responder
 from core.vc import vc_feature_restore
-from core.support.messages import VOICE_NOT_JOINED, voice_connection_failed
+from core.support.messages import VOICE_NOT_JOINED, voice_connection_failed, not_running
 from core.vc.voice_session import VoiceBusy, get_manager
 from core.support.emojis import CLOCK, FAILED, MUSIC, PAUSE, THU
 from functools import partial as _partial
@@ -34,7 +34,7 @@ class SessionMixin:
 
         if action == "stop":
             if session is None:
-                return await r.send(embed=we(f"{FAILED} ボイスチェンジャーは実行されていません。"), ephemeral=True)
+                return await r.send(embed=we(f"{FAILED} " + not_running("ボイスチェンジャー")), ephemeral=True)
             if not await self.voice_sessions.release(guild_id, "changer", reason="stop"):
                 self._cleanup(guild_id)("stop")
             return await r.send(embed=we("🛑 ボイスチェンジャーを停止しました。"))
@@ -44,6 +44,7 @@ class SessionMixin:
 
         if has_options:
             if session is None:
+                # オプション変更は「開始」が前提なので、停止時の文と区別して開始を促す。
                 return await r.send(embed=we(f"{FAILED} ボイスチェンジャーが開始されていません。"), ephemeral=True)
             return await self._apply(r, session, pitch, buffer_ms, max_ms)
 
@@ -89,7 +90,7 @@ class SessionMixin:
 
     async def _send_status(self, r: Responder, session: dict | None):
         if session is None:
-            return await r.send(embed=we(PAUSE + ' ボイスチェンジャー停止中 (`/vc のパネルからボイスチェンジャー開始` で開始)'))
+            return await r.send(embed=we(PAUSE + ' ボイスチェンジャー停止中'))
         sink: VoiceChangerSink = session["sink"]
         src = sink.audio_source
 
@@ -107,9 +108,7 @@ class SessionMixin:
             f"├ 🎯 目標プリバッファ: `{src.target_buffer_ms:.0f} ms` / 上限: `{src.max_buffer_ms:.0f} ms`\n"
             f"├ ⚠️ アンダーラン(待機発生)回数: `{src.underrun_count}` 回\n"
             f"├ 🩹 パケットロス補完(PLC): `{sink.concealed_count}` 回 (ロスト検出: `{sink.lost_packet_count}` 回)\n"
-            f"└ {CLOCK} **推定トータル遅延**: `~{total_est_delay:.1f} ms`\n\n"
-            f"・設定変更: `/vc のパネルからボイスチェンジャー状態 pitch:<半音数> buffer_ms:<目標ms> max_ms:<上限ms>`\n"
-            f"・停止: `/vc のパネルからボイスチェンジャー停止`"
+            f"└ {CLOCK} **推定トータル遅延**: `~{total_est_delay:.1f} ms`"
         ))
 
 
@@ -151,7 +150,7 @@ class SessionMixin:
             f"🎙️ **{target_channel.name}** でボイスチェンジャーを開始しました！\n"
             f"{MUSIC} ピッチ: `{pitch:+.1f}` 半音\n"
             f"📦 プリバッファ: `{(buffer[0] if buffer else DEFAULT_TARGET_BUFFER_MS):.0f} ms` (超低遅延モード)\n"
-            f"📊 `/vc のパネルからボイスチェンジャー状態` で遅延数値を確認できます。"
+            f"📊 状態表示で遅延数値を確認できます。"
         ))
 
 

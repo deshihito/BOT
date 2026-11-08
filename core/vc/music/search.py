@@ -77,7 +77,7 @@ class SearchMixin:
                 await self.cog.check_queue(self.guild_id)
                 await interaction.response.send_message(embed=we(f"{MUSIC} **{selected_track['title']}** を再生します！"))
             else:
-                await interaction.response.send_message(embed=we(f"{SUCCESS} キューに追加しました: **{selected_track['title']}**"))
+                await interaction.response.send_message(embed=we(f"{SUCCESS} **{selected_track['title']}** をキューに追加しました"))
                 await self.cog.update_panel(self.guild_id)
             await self.disable_all_items()
 
@@ -104,14 +104,14 @@ class SearchMixin:
                 return await self.start_playlist_load(r.source, tracks, title)
             except Exception as exc:
                 logger.exception("Spotify playlist fetch failed")
-                return await r.send(embed=we(f"Spotifyプレイリストの取得に失敗しました: {exc}"))
+                return await r.send(embed=we(f"{FAILED} Spotifyプレイリストの取得に失敗しました。"), ephemeral=True)
         if self._soundcloud_kind(keyword.strip()) == "set":
             try:
                 title, tracks = await self.get_soundcloud_playlist_entries(keyword.strip())
                 return await self.start_playlist_load(r.source, tracks, title)
             except Exception as exc:
                 logger.exception("SoundCloud set fetch failed")
-                return await r.send(embed=we(f"SoundCloudセットの取得に失敗しました: {exc}"))
+                return await r.send(embed=we(f"{FAILED} SoundCloudセットの取得に失敗しました。"), ephemeral=True)
         if self._soundcloud_kind(keyword.strip()) == "track":
             try:
                 info = await self.get_yt_info(keyword.strip())
@@ -119,7 +119,7 @@ class SearchMixin:
                 return await self.start_playlist_load(r.source, tracks, info['title'])
             except Exception as exc:
                 logger.exception("SoundCloud fetch failed")
-                return await r.send(embed=we(f"SoundCloudの取得に失敗しました: {exc}"))
+                return await r.send(embed=we(f"{FAILED} SoundCloudの取得に失敗しました。"), ephemeral=True)
         if niconico_url_kind(keyword.strip()) == "track":
             try:
                 info = await self.get_yt_info(keyword.strip())
@@ -127,7 +127,7 @@ class SearchMixin:
                 return await self.start_playlist_load(r.source, tracks, info['title'])
             except Exception as exc:
                 logger.exception("Niconico fetch failed")
-                return await r.send(embed=we(f"ニコニコ動画の取得に失敗しました: {exc}"))
+                return await r.send(embed=we(f"{FAILED} ニコニコ動画の取得に失敗しました。"), ephemeral=True)
         await r.send(f"{LOUPE} YouTubeで「{keyword}」の上位10件を検索中...")
         search_options = YTDL_OPTIONS.copy()
         search_options['default_search'] = 'ytsearch10'
@@ -145,12 +145,12 @@ class SearchMixin:
                     duration_str = f"{m}:{s:02d}" if duration_sec else "不明"
                     tracks.append({'title': title, 'url': url})
                     description_lines.append(f"**{idx + 1}.** {title} `[{duration_str}]`")
-                embed = we(title=f"「{keyword}」の検索結果 (上位10件)", description="\n".join(description_lines) + "\n\n下のメニューから曲を選択してください。")
+                embed = we(title=f"「{keyword}」の検索結果 (上位10件)", description="\n".join(description_lines))
                 view = self.SearchView(self, r.guild.id, r.source, tracks)
                 view.message = await r.send(embed=embed, view=view, want_message=True)
         except Exception as e:
             logging.error(f"Search command error: {e}")
-            await r.send(embed=we(f"{FAILED} 検索中にエラーが発生しました: {e}"))
+            await r.send(embed=we(f"{FAILED} 検索中にエラーが発生しました。"), ephemeral=True)
 
 
     async def _panel_impl(self, r: Responder):

@@ -1,4 +1,5 @@
 import discord
+from core.support.messages import VOICE_NOT_JOINED
 from core.support.panel_v2 import edit_message_v2
 from discord import app_commands  # ← 追加
 from discord.ext import commands, tasks
@@ -41,7 +42,7 @@ class ConnectionMixin:
     async def _join_impl(self, r: Responder):
         voice = getattr(r.user, "voice", None)
         if not voice or not voice.channel:
-            return await r.send(embed=we("先にボイスチャンネルに入ってください。"), ephemeral=True)
+            return await r.send(embed=we(VOICE_NOT_JOINED), ephemeral=True)
 
         # 接続処理が長引く可能性があるため defer（応答保留）を実行
         await r.defer()

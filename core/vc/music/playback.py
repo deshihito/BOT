@@ -111,7 +111,7 @@ class PlaybackMixin:
                 except Exception as e:
                     logging.error(f"YouTube解析失敗: {e}")
                     # 💡 安全なメッセージ送信ハンドラ
-                    await self._send_message(ctx_or_interaction, embed=we(f"{FAILED} 解析失敗: {e}"))
+                    await self._send_message(ctx_or_interaction, embed=we(f"{FAILED} 解析に失敗しました。"))
                     state['is_processing_queue'] = False
                     return await self.check_queue(guild_id)
             else:
@@ -390,7 +390,7 @@ class PlaybackMixin:
                 return await interaction.followup.send(f"{CLOCK} タイムアウト: YouTube情報の解析に時間がかかりすぎたため中断しました。")
             except Exception as e:
                 logger.exception("YouTube parse failed")
-                return await interaction.followup.send(embed=we(f"{FAILED} 解析失敗: {e}"))
+                return await interaction.followup.send(embed=we(f"{FAILED} 解析に失敗しました。"))
 
         # 3.5. SoundCloud単曲URLが直接指定された場合（再生時にページURLから再解析する）
         elif input_str and self._soundcloud_kind(input_str) == "track":
@@ -402,7 +402,7 @@ class PlaybackMixin:
                 return await interaction.followup.send(f"{CLOCK} タイムアウト: SoundCloud情報の解析に時間がかかりすぎたため中断しました。")
             except Exception as e:
                 logger.exception("SoundCloud parse failed")
-                return await interaction.followup.send(embed=we(f"{FAILED} 解析失敗: {e}"))
+                return await interaction.followup.send(embed=we(f"{FAILED} 解析に失敗しました。"))
 
         # 3.6. ニコニコ動画URLが直接指定された場合
         elif input_str and niconico_url_kind(input_str) == "track":
@@ -414,7 +414,7 @@ class PlaybackMixin:
                 return await interaction.followup.send(f"{CLOCK} タイムアウト: ニコニコ動画情報の解析に時間がかかりすぎたため中断しました。")
             except Exception as e:
                 logger.exception("Niconico parse failed")
-                return await interaction.followup.send(embed=we(f"{FAILED} 解析失敗: {e}"))
+                return await interaction.followup.send(embed=we(f"{FAILED} 解析に失敗しました。"))
 
         # 2. ファイルが添付されている場合
         elif file:
@@ -445,7 +445,7 @@ class PlaybackMixin:
                     return await interaction.followup.send(f"{CLOCK} タイムアウト: YouTube検索応答時間が超過しました。")
                 except Exception as e:
                     logger.exception("YouTube search failed")
-                    return await interaction.followup.send(embed=we(f"{FAILED} 検索失敗: {e}"))
+                    return await interaction.followup.send(embed=we(f"{FAILED} 検索に失敗しました。"))
 
         # 4. 検索キーワード指定
         elif input_str:
@@ -457,18 +457,16 @@ class PlaybackMixin:
                 return await interaction.followup.send(f"{CLOCK} タイムアウト: YouTube検索応答時間が超過しました。")
             except Exception as e:
                 logger.exception("YouTube search failed")
-                return await interaction.followup.send(embed=we(f"{FAILED} 検索失敗: {e}"))
+                return await interaction.followup.send(embed=we(f"{FAILED} 検索に失敗しました。"))
 
         # 5. 引数が何もない場合
         else:
             msg = "ファイル添付、ID、YouTube URL、SoundCloud URL、または検索キーワードを指定してください。"
-            embed = we(msg) if hasattr(self, 'we') else (we(msg) if 'we' in globals() else discord.Embed(description=msg, color=0xFF0000))
-            return await interaction.followup.send(embed=embed)
+            return await interaction.followup.send(embed=we(msg))
 
         if not url:
             msg = "情報の取得に失敗しました。"
-            embed = we(msg) if hasattr(self, 'we') else (we(msg) if 'we' in globals() else discord.Embed(description=msg, color=0xFF0000))
-            return await interaction.followup.send(embed=embed)
+            return await interaction.followup.send(embed=we(msg))
 
         # キューに追加（ギルド単位の上限を超える場合は受け付けない）
         if start_at is not None:
@@ -492,7 +490,7 @@ class PlaybackMixin:
                 await interaction.followup.send(embed=we(f"▶️ 再生を開始します: **{filename}**"))
                 await self.check_queue(interaction.guild_id)
             else:
-                await interaction.followup.send(embed=we(f"{SUCCESS} キューに追加: **{filename}**"))
+                await interaction.followup.send(embed=we(f"{SUCCESS} **{filename}** をキューに追加しました"))
                 await self.update_panel(interaction.guild_id)
         except Exception as e:
             logger.exception("Playback start failed")

@@ -17,6 +17,20 @@ from core.support.emojis import FAILED
 #: sio_globalVC / sio_karaoke / sio_rec / sio_voicechanger で共用。
 VOICE_NOT_JOINED = f"{FAILED} ボイスチャンネルに参加してから実行してください。"
 
+# インフラ未設定など、利用者側では直せない理由で機能が使えないときの定型（sweep2 VC-04）。
+FEATURE_UNAVAILABLE_CONTACT = "この機能は現在利用できません。Botの運営に連絡してください。"
+
+def room_not_found(room_name: str) -> str:
+    """GVC ルーム不存在文の統一形（sweep2 VC-19）。"""
+    return f"ルーム **{room_name}** は存在しません。"
+
+def not_running(feature: str) -> str:
+    """「現在〜は実行されていません。」の統一形（sweep2 VC-19）。"""
+    return f"現在{feature}は実行されていません。"
+
+# 音楽操作の同一VCチェック文（正は messages.py。music/common 側は別名で参照）。
+MUSIC_VC_REQUIRED = "この操作は、Bot が接続しているボイスチャンネルに参加しているメンバーだけが行えます。"
+
 
 def voice_connection_failed(error: object) -> str:
     """ボイス接続に失敗したときの文（末尾に例外をコード表記で付ける）。"""

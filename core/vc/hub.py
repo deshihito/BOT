@@ -15,24 +15,6 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 from core.support.emojis import FAILED, VOL
-try:
-    import encodec
-    import soundfile as sf
-    import torch
-
-    # CPU 推論はスレッドを増やしすぎると逆に遅くなることがある。上限を絞る。
-    torch.set_num_threads(min(4, os.cpu_count() or 4))
-
-    VOICE_TRIGGER_AVAILABLE = True
-except Exception:  # ImportError だけでなく共有ライブラリ不整合 (OSError) 等も捕捉
-    encodec = None
-    sf = None
-    torch = None
-    VOICE_TRIGGER_AVAILABLE = False
-    logging.getLogger(__name__).warning(
-        "EnCodec/torch/soundfile を読み込めなかったため、音声トリガー機能は無効になります",
-        exc_info=True,
-    )
 from core.general import action_usage
 from core.support.usage_stats import usage_stats
 from core.support.legacy import Responder
@@ -151,7 +133,7 @@ class VoiceHub(commands.Cog):
         key = feature.value
         valid = {
             "record": {"start", "stop", "status", "pitch"},
-            "echo": {"start", "stop", "delay"},
+            "echo": {"start", "stop", "delay", "status"},
             "transcribe": {"start", "stop"},
             "karaoke": {"start", "stop", "score"},
         }
@@ -232,7 +214,7 @@ class VoiceHub(commands.Cog):
             view = VoiceTriggerRegisterView(cog, audios)
             return await interaction.followup.send(view=view, ephemeral=True)
 
-        return await Responder(interaction).send("操作を選択してください。", ephemeral=True)
+        return await Responder(interaction).send("この操作は利用できません。", ephemeral=True)
 
     async def voice_global_rooms(self, interaction: discord.Interaction, value: str,
                                  form: dict | None = None):
@@ -271,7 +253,7 @@ class VoiceHub(commands.Cog):
             return await cog._chat_connect_impl(r, name, form.get("password") or None)
         if value == "gvc_auto_connect":
             return await cog._text_chat_toggle_impl(r, name)
-        return await r.send("操作を選択してください。", ephemeral=True)
+        return await r.send("この操作は利用できません。", ephemeral=True)
 
     @app_commands.command(name="vc", description="音楽・ボイス機能の操作パネルを表示します")
     async def vc(self, interaction: discord.Interaction):
@@ -366,7 +348,7 @@ class VoiceHub(commands.Cog):
         if value in {"join", "leave", "status"}:
             return await self.voice_connection(interaction, app_commands.Choice(name=value, value=value))
         if "_" not in value:
-            return await Responder(interaction).send("操作を選択してください。", ephemeral=True)
+            return await Responder(interaction).send("この操作は利用できません。", ephemeral=True)
         key, operation = value.rsplit("_", 1)
         if key in {"record", "echo", "transcribe", "karaoke"}:
             return await self.voice_studio(

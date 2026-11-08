@@ -19,7 +19,7 @@ from core.general.ai import logfare
 from core.vc import vc_feature_restore
 from core.vc.voice_session import VoiceBusy, get_manager
 from core.vc.voice_recv_patch import patch_voice_recv_client
-from core.support.messages import voice_connection_failed
+from core.support.messages import voice_connection_failed, FEATURE_UNAVAILABLE_CONTACT, not_running
 from core.vc.voice_media import add_receive_sink, remove_receive_sink
 from core.vc.transcription.speech_vad import SpeechDetector
 from core.support.emojis import FAILED, LOADING, LOUPE, PAUSE
@@ -51,7 +51,7 @@ class SessionMixin:
             return await self._start(r, target_channel)
         if action == "stop":
             if r.guild.id not in self.sessions:
-                return await r.send(embed=we(f"{FAILED} 現在文字起こしは実行されていません。"), ephemeral=True)
+                return await r.send(embed=we(f"{FAILED} " + not_running("文字起こし")), ephemeral=True)
             if not await self.voice_sessions.release(r.guild.id, "transcribe", reason="stop"):
                 self._cleanup(r.guild.id)("stop")
             return await r.send(embed=we("🛑 文字起こしを停止しました。"))
@@ -60,11 +60,10 @@ class SessionMixin:
             await r.send(embed=we(
                 f"🎙️ **Logfare {logfare.TRANSCRIPTION_MODEL} 文字起こし実行中**\n"
                 f"ボイスチャンネル: **{session['vc_channel_name']}**\n"
-                f"送信先チャンネル: {session['target_channel_mention']}\n"
-                f"停止コマンド: `/vc のパネルから文字起こし停止`"
+                f"送信先チャンネル: {session['target_channel_mention']}"
             ))
         else:
-            await r.send(embed=we(PAUSE + ' 文字起こし停止中 (`/vc のパネルから文字起こし開始` で開始)'))
+            await r.send(embed=we(PAUSE + ' 文字起こし停止中'))
 
 
     def _build_sender(self, guild_id: int, webhook, notice_channel):
@@ -119,7 +118,7 @@ class SessionMixin:
     async def _start_once(self, r: Responder, target_channel: discord.TextChannel | None):
         if not logfare.api_key():
             return await r.send(embed=we(
-                FAILED + ' `LOGFARE_API_KEY` が設定されていないため、文字起こしを開始できません。'
+                FAILED + ' ' + FEATURE_UNAVAILABLE_CONTACT
             ), ephemeral=True)
         voice = getattr(r.user, "voice", None)
         if not voice or not voice.channel:

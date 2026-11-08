@@ -1,5 +1,5 @@
 import discord
-from core.support.panel_v2 import edit_message_v2
+from core.support.panel_v2 import as_embed_v2, edit_message_v2
 from discord import app_commands  # ← 追加
 from discord.ext import commands, tasks
 import asyncio
@@ -116,7 +116,7 @@ class SearchModal(discord.ui.Modal, title="YouTube 楽曲検索"):
                     ephemeral=True,
                 )
                 return
-            await interaction.followup.send(embed=we(f"{SUCCESS} **{filename}** をキューに追加しました！"))
+            await interaction.followup.send(embed=we(f"{SUCCESS} **{filename}** をキューに追加しました"))
 
             # バグ修正: interaction.guild から voice_client を取得するように修正
             vc = interaction.guild.voice_client if interaction.guild else None
@@ -203,7 +203,7 @@ class VoiceControlView(discord.ui.View):
                 discord.SelectOption(label="32.0x", value="32.0"),
                 discord.SelectOption(label="64.0x", value="64.0"),
             ]
-            super().__init__(placeholder=f"⚡ 速度変更 (現在: {state['speed']}x)", min_values=1, max_values=1, options=options, row=0)
+            super().__init__(placeholder=f"速度変更 (現在: {state['speed']}x)", min_values=1, max_values=1, options=options, row=0)
 
         async def callback(self, interaction: discord.Interaction):
             if not await _require_same_vc(interaction):
@@ -258,7 +258,7 @@ class VoiceControlView(discord.ui.View):
                 discord.SelectOption(label="Rotate (回転音響)", value="rotate"),
             ]
             current_eq = state['eq'] if state['eq'] != "custom" else "custom (自由指定)"
-            super().__init__(placeholder=f"🎬 プリセットEQ選択 (現在: {current_eq})", min_values=1, max_values=1, options=options, row=2)
+            super().__init__(placeholder=f"プリセットEQ選択 (現在: {current_eq})", min_values=1, max_values=1, options=options, row=2)
 
         async def callback(self, interaction: discord.Interaction):
             if not await _require_same_vc(interaction):
@@ -351,9 +351,9 @@ class VoiceControlView(discord.ui.View):
         await self.cog.update_panel(self.guild_id)
         self.cog._save_music_snapshot(self.guild_id)
 
-    @discord.ui.button(label="📋", style=discord.ButtonStyle.secondary, row=4)
+    @discord.ui.button(label="", emoji="📋", style=discord.ButtonStyle.secondary, row=4)
     async def queue_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.send_message(embed=self.cog.build_queue_embed(self.guild_id))
+        await interaction.response.send_message(view=as_embed_v2(self.cog.build_queue_embed(self.guild_id)))
 
     @discord.ui.button(label="", emoji=BOOK, style=discord.ButtonStyle.secondary, row=4)
     async def library_button(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -544,7 +544,7 @@ class PlaylistLibraryView(discord.ui.View):
                 ephemeral=True,
             )
 
-    @discord.ui.button(label="💾", style=discord.ButtonStyle.success)
+    @discord.ui.button(label="", emoji="💾", style=discord.ButtonStyle.success)
     async def save_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.send_modal(PlaylistNameModal(self.cog, "save", self.scope))
 

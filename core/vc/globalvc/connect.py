@@ -18,7 +18,7 @@ from core.vc import voice_restore
 from core.support.legacy import Responder
 from core.vc.voice_session import VoiceBusy, get_manager
 from core.vc.voice_recv_patch import patch_voice_recv_client
-from core.support.messages import VOICE_NOT_JOINED, voice_connection_failed
+from core.support.messages import VOICE_NOT_JOINED, voice_connection_failed, room_not_found
 from core.vc.voice_media import add_audio_source, add_receive_sink, remove_audio_source, remove_receive_sink
 try:
     import numpy as np  # type: ignore
@@ -60,7 +60,7 @@ class ConnectMixin:
             _prune_dead_clients()
             room = ROOMS.get(room_name)
             if room is None:
-                raise _JoinRefused(f"ルーム **{room_name}** は存在しません。")
+                raise _JoinRefused(room_not_found(room_name))
             for name, clients in GLOBAL_ROOMS.items():
                 if any(c.guild and c.guild.id == guild.id for c in clients):
                     raise _JoinRefused(f"このサーバーはすでにルーム **{name}** に参加しています。")
