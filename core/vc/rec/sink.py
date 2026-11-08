@@ -54,14 +54,13 @@ class RecordingSink(voice_recv.AudioSink):
         # (前回追加した _lock, labels, decoders 等はそのまま維持)
 
         self.echo_source: _EchoAudioSource | None = None
+        self._echo_tasks: list = []
+        self._play_error_count = 0
         if self.is_echo:
             self.echo_source = _EchoAudioSource()
-            if self.vc and self.vc.is_connected():
-                try:
-                    self.vc.play(self.echo_source)
-                except Exception as e:
-                    logger.error("[ECHO] play() 開始失敗: %r", e)
-            self.bot.loop.create_task(self._echo_loop())
+            self._ensure_playing()
+            # ループは1本だけ（以前は誤って2本起動していた）
+            self._echo_tasks.append(self.bot.loop.create_task(self._echo_loop()))
         # ↓ここから追加
         self._lock = threading.Lock()
         self.labels: dict = {}
@@ -73,9 +72,6 @@ class RecordingSink(voice_recv.AudioSink):
         self.total_frame_count = 0
         self.write_call_count = 0
         # ↑ここまで追加
-
-        if self.is_echo:
-            self.bot.loop.create_task(self._echo_loop())
     def set_echo_delay(self, delay: float) -> None:
         self.echo_delay = float(delay)
 
@@ -112,21 +108,58 @@ class RecordingSink(voice_recv.AudioSink):
         if self.is_echo:
             self.packet_queue.append((now + self.echo_delay, pcm))
 
+    @property
+    def playback_active(self) -> bool:
+        """やまびこの再生が実際に流れているか（状態表示用）。"""
+        try:
+            return bool(self.vc and self.vc.is_connected() and self.vc.is_playing())
+        except Exception:
+            return False
+
+    def _ensure_playing(self) -> None:
+        """再生が止まっていたら連続再生ソースを (再) 開始する。
+
+        開始直後に play() が失敗（再生中・一時的）しても、鳴らすデータが
+        来た時点でここから復旧できるようにするための自己修復。
+        """
+        if self.echo_source is None:
+            return
+        try:
+            if self.vc and self.vc.is_connected() and not self.vc.is_playing():
+                self.vc.play(self.echo_source)
+        except Exception as e:
+            self._play_error_count += 1
+            if self._play_error_count <= 3 or self._play_error_count % 50 == 0:
+                logger.error("[ECHO] play() 開始失敗 (%d回目): %r", self._play_error_count, e)
+
     async def _echo_loop(self) -> None:
         """時間が来た音声データを連続再生ソースへ供給するだけのループ"""
         while self._running:
-            await asyncio.sleep(0.01)
-            if not self.packet_queue:
-                continue
-            now = time.time()
-            while self.packet_queue and self.packet_queue[0][0] <= now:
-                _, pcm_to_play = self.packet_queue.popleft()
-                if self.echo_source is not None:
-                    self.echo_source.feed(pcm_to_play)
+            try:
+                await asyncio.sleep(0.01)
+                if not self.packet_queue:
+                    continue
+                now = time.time()
+                due = False
+                while self.packet_queue and self.packet_queue[0][0] <= now:
+                    _, pcm_to_play = self.packet_queue.popleft()
+                    if self.echo_source is not None:
+                        self.echo_source.feed(pcm_to_play)
+                        due = True
+                if due:
+                    self._ensure_playing()
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                # 1回の失敗でループごと死ぬと、やまびこが無言で止まる
+                logger.exception("[ECHO] echo loop でエラー（継続します）")
 
     def cleanup(self) -> None:
         self._running = False
         self.packet_queue.clear()
+        for task in self._echo_tasks:
+            task.cancel()
+        self._echo_tasks.clear()
 
     def _write_inner(self, user, data) -> None:
         self.write_call_count += 1

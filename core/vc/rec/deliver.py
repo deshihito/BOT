@@ -46,24 +46,17 @@ class DeliverMixin:
     async def _deliver(self, session: dict, audio: dict[str, bytes], reason: str) -> None:
         """録音結果を、録音を始めたチャンネルへ送る。"""
         channel = session["text_channel"]
-        sink: RecordingSink = session["sink"]
         elapsed = int(time.time() - session["start"])
-        total = sink.total_frame_count
-        dave_rate = (sink.dave_error_count / total * 100) if total else 0.0
-        opus_rate = (sink.opus_error_count / total * 100) if total else 0.0
         headline = self.STOP_REASONS.get(reason, self.STOP_REASONS["stop"])
         try:
-            await self._send_recording(channel, session["guild"], audio, elapsed, total, dave_rate, opus_rate, sink, headline)
+            await self._send_recording(channel, session["guild"], audio, elapsed, headline)
         except Exception:
             logger.exception("[REC] 録音ファイルの送信に失敗しました")
 
 
-    async def _send_recording(self, ctx, guild, audio, elapsed, total, dave_rate, opus_rate, sink, headline):
+    async def _send_recording(self, ctx, guild, audio, elapsed, headline):
         await ctx.send(embed=we(
-            f"{headline}（録音時間: `{self.format_time(elapsed)}`）。ファイルを生成中...\n"
-            f"🩺 診断: write() `{sink.write_call_count}` / 有効フレーム `{total}` / "
-            f"DAVE復号失敗 `{sink.dave_error_count}` (`{dave_rate:.1f}%`) / "
-            f"Opusデコード失敗 `{sink.opus_error_count}` (`{opus_rate:.1f}%`)"
+            f"{headline}（録音時間: `{self.format_time(elapsed)}`）。ファイルを生成中..."
         ))
 
         if not audio:
