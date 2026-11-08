@@ -17,9 +17,9 @@ class GlobalVcGenreTest(unittest.TestCase):
         self.assertIn("global_start", rooms)
         self.assertIn("global_stop", rooms)
         self.assertEqual(VOICE_GENRES["community"][0], "ランダム通話")
-        # /vc パネル総数（常設ルーム作成・テーマ変更の追加で 35 → 37）
+        # /vc パネル総数（テーマ変更の追加で 35 → 36。常設作成は ! コマンド化）
         total = sum(len(items) for items in VOICE_ACTIONS_BY_GENRE.values())
-        self.assertEqual(total, 37)
+        self.assertEqual(total, 36)
 
 
 class SupportScopeLabelTest(unittest.TestCase):
