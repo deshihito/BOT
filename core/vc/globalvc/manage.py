@@ -34,7 +34,7 @@ from core.vc.globalvc.rooms import GLOBAL_ROOMS, ROOMS, RoomConfig, _can_delete_
 from core.vc.globalvc.themes import theme_day, theme_for  # noqa: F401
 from core.vc.globalvc.textlink import ROOM_TEXT_LINKS, _remove_text_link  # noqa: F401
 from core.vc.globalvc.ui import GlobalRoomListView, _TextChatToggleView  # noqa: F401
-from core.leaderboard_image import BoardRow, fetch_avatar_bytes, render_leaderboard_png  # noqa: F401
+from core.leaderboard_image import BoardRow, board_safe_name, fetch_avatar_bytes, render_leaderboard_png  # noqa: F401
 
 logger = logging.getLogger("cogs.sio_globalVC")
 
@@ -235,10 +235,13 @@ class ManageMixin:
         by_guild: dict[str, list] = {}
         for member, guild in shown:
             guild_name = getattr(guild, "name", None) or "不明なサーバー"
+            username = str(getattr(member, "name", "") or "")
             by_guild.setdefault(guild_name, []).append(BoardRow(
                 user_id=int(member.id),
-                name=str(getattr(member, "display_name", None) or getattr(member, "name", "") or ""),
-                value=str(member.id),
+                # 装飾文字の表示名は盤面フォントで描けないので通常文字へ戻す
+                name=board_safe_name(getattr(member, "display_name", None), fallback=username),
+                # 「ID」欄には数値IDではなく @ユーザー名 を出す
+                value=f"@{username}" if username else str(member.id),
             ))
         sections = list(by_guild.items())
         avatars = await fetch_avatar_bytes(self.bot, [row.user_id for _t, rows in sections for row in rows])
