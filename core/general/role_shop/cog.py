@@ -26,6 +26,7 @@ import discord
 from discord.ext import commands, tasks
 
 import config
+from core.general import economy_helpers
 from core.economy_image import PanelRow, render_panel_png
 from core.support import guild_settings
 from core.game.game import prison as prison_core
@@ -480,22 +481,11 @@ class RoleShopCog(commands.Cog):
 
     # ------------------------------------------------------------------ 購入
     def _wallet(self):
-        return self.bot.get_cog("WalletCog")
+        return economy_helpers.wallet_cog(self.bot)
 
-    async def _record_history(self, sender_id: str, receiver_id: str,
-                              amount: int, reason: str) -> None:
-        try:
-            await asyncio.to_thread(lambda: config.db_api.table(
-                "transaction_history").insert({
-                    "sender_id": sender_id,
-                    "receiver_id": receiver_id,
-                    "amount": amount,
-                    "reason": reason,
-                }).execute())
-        except Exception:
-            logger.exception(
-                "role_shop: 取引履歴の記録に失敗 sender=%s amount=%s",
-                sender_id, amount)
+    async def _record_history(self, sender_id: str, receiver_id: str, amount: int, reason: str) -> None:
+        await economy_helpers.record_transaction_history(
+            sender_id, receiver_id, amount, reason, log_label="role_shop")
 
     async def buy(self, guild: discord.Guild, member: discord.Member,
                   role_id: int, now: datetime | None = None) -> str:

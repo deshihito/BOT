@@ -33,6 +33,7 @@ import discord
 from discord.ext import commands, tasks
 
 import config
+from core.general import economy_helpers
 from core.economy_image import PanelHero, PanelRow, render_panel_png
 from core.game.clan import clan as clan_core
 from core.general.user_names import cached_display_name
@@ -52,7 +53,7 @@ from core.support.messages import (
     ITEMS_NOT_LOADED,
     feature_not_loaded,
 )
-from core.support.panel_v2 import as_panel_v2, edit_panel_v2, wrap_panel_view as _wrap
+from core.support.panel_v2 import as_panel_v2, edit_panel_v2, edit_panel_with_files as _edit_panel, wrap_panel_view as _wrap
 from cogs import general as wallet_module  # INSUFFICIENT は実行時に引く（テストの cog 再読込で同一性が崩れないため）
 
 logger = logging.getLogger(__name__)
@@ -64,32 +65,12 @@ MINING_ID = "MINING"
 LOTTERY_ID = "LOTTERY"
 
 
-async def _edit_panel(interaction: discord.Interaction, view, *, button=None) -> None:
-    """パネルをその場で再描画する（market と同型: 画像つきパネルは
-    panel_files() のファイルを編集時にも再供給する）。"""
-    container = getattr(button, "view", None)
-    if container is None or not hasattr(container, "_sync"):
-        container = getattr(view, "_v2", None) or view
-    if hasattr(container, "_sync"):
-        container._sync()
-        files = view.panel_files() if hasattr(view, "panel_files") else None
-        await edit_panel_v2(interaction, container, files=files)
-    elif interaction.response.is_done():
-        await interaction.edit_original_response(embed=view.embed(), view=view)
-    else:
-        await interaction.response.edit_message(embed=view.embed(), view=view)
-
-
-def _item_name(item_id: str) -> str:
-    definition = items_core.ITEM_DEFS.get(item_id)
-    return definition["name"] if definition else item_id
+_item_name = economy_helpers.item_name
 
 
 def _fmt_minutes(seconds: float) -> str:
-    minutes = int(seconds // 60) + (1 if seconds % 60 else 0)
-    if minutes >= 60:
-        return f"約{minutes / 60:.1f}時間"
-    return f"約{minutes}分"
+    """残り時間の表記は prison の format_remaining に統一する（money_panel と同方針）。"""
+    return prison_core.format_remaining(seconds)
 
 
 # ---------------------------------------------------------------------------
@@ -473,22 +454,11 @@ class CirculationCog(commands.Cog):
 
     # ------------------------------------------------------------------ 共通
     def _wallet(self):
-        wallet = self.bot.get_cog("WalletCog")
-        if wallet is None:
-            raise items_core.ItemError(feature_not_loaded("コイン機能"))
-        return wallet
+        return economy_helpers.wallet_cog(self.bot, items_core.ItemError)
 
     async def _record_history(self, sender_id: str, receiver_id: str, amount: int, reason: str) -> None:
-        try:
-            await asyncio.to_thread(lambda: config.db_api.table("transaction_history").insert({
-                "sender_id": sender_id,
-                "receiver_id": receiver_id,
-                "amount": amount,
-                "reason": reason,
-            }).execute())
-        except Exception:
-            logger.exception("circulation: 取引履歴の記録に失敗 sender=%s receiver=%s amount=%s",
-                             sender_id, receiver_id, amount)
+        await economy_helpers.record_transaction_history(
+            sender_id, receiver_id, amount, reason, log_label="circulation")
 
     async def _balance(self, user_id: str) -> int:
         """残高の読み取り（行が無いユーザーは0。行は作らない）。"""

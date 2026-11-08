@@ -41,6 +41,7 @@ import discord
 from discord.ext import commands
 
 import config
+from core.general import economy_helpers
 from core.economy_image import PanelHero, PanelRow, render_panel_png
 from core.general.money_panel import daily_bonus as daily_core
 from core.general.items import items as items_core
@@ -80,8 +81,7 @@ _SESSION_LABELS = {
 }
 
 
-def _fmt_tokens(amount: float) -> str:
-    return f"{amount:,.2f}"
+_fmt_tokens = economy_helpers.fmt_tokens
 
 
 def _fmt_minutes(seconds: float) -> str:

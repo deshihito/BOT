@@ -160,12 +160,11 @@ class MemeCancelView(discord.ui.View):
         super().__init__(timeout=MEME_WAIT_TIMEOUT + 30)
         self.cog, self.key, self.user_id = cog, key, user_id
 
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        return interaction.user.id == self.user_id
+
     @discord.ui.button(label="キャンセル", style=discord.ButtonStyle.secondary)
     async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if interaction.user.id != self.user_id:
-            return await interaction.response.send_message(
-                "meme作成を開始したユーザーだけキャンセルできます。", ephemeral=True
-            )
         event = self.cog._meme_waits.get(self.key)
         if event is not None:
             event.set()

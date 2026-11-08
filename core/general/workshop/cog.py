@@ -24,6 +24,7 @@ import discord
 from discord.ext import commands, tasks
 
 import config
+from core.general import economy_helpers
 from core.economy_image import PanelRow, render_panel_png
 from core.game.clan import clan as clan_core
 from core.general.workshop import craft as craft_core
@@ -54,9 +55,7 @@ WORKSHOP_ID = "WORKSHOP"
 # ---------------------------------------------------------------------------
 
 
-def _item_name(item_id: str) -> str:
-    definition = items_core.ITEM_DEFS.get(item_id)
-    return definition["name"] if definition else item_id
+_item_name = economy_helpers.item_name
 
 
 def _tier_lines() -> list[str]:
@@ -499,22 +498,11 @@ class WorkshopCog(commands.Cog):
 
     # ------------------------------------------------------------------ 実行
     def _wallet(self):
-        wallet = self.bot.get_cog("WalletCog")
-        if wallet is None:
-            raise items_core.ItemError("コイン機能が読み込まれていません。")
-        return wallet
+        return economy_helpers.wallet_cog(self.bot, items_core.ItemError)
 
     async def _record_history(self, sender_id: str, receiver_id: str, amount: int, reason: str) -> None:
-        try:
-            await asyncio.to_thread(lambda: config.db_api.table("transaction_history").insert({
-                "sender_id": sender_id,
-                "receiver_id": receiver_id,
-                "amount": amount,
-                "reason": reason,
-            }).execute())
-        except Exception:
-            logger.exception("workshop: 取引履歴の記録に失敗 sender=%s receiver=%s amount=%s",
-                             sender_id, receiver_id, amount)
+        await economy_helpers.record_transaction_history(
+            sender_id, receiver_id, amount, reason, log_label="workshop")
 
     async def execute_buy_machine(self, user_id: int, tier_id: str) -> str:
         uid = str(user_id)

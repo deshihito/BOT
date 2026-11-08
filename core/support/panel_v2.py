@@ -338,3 +338,21 @@ async def edit_panel_view(interaction: discord.Interaction, view, *, button=None
         await interaction.edit_original_response(embed=view.embed(), view=view)
     else:
         await interaction.response.edit_message(embed=view.embed(), view=view)
+
+
+async def edit_panel_with_files(interaction: discord.Interaction, view, *, button=None) -> None:
+    """パネルをその場で再描画する（画像つきパネルは panel_files() を再供給する）。
+
+    circulation / market に同型のローカル複製があったものを集約（sweep2 GEN-08）。
+    """
+    container = getattr(button, "view", None)
+    if container is None or not hasattr(container, "_sync"):
+        container = getattr(view, "_v2", None) or view
+    if hasattr(container, "_sync"):
+        container._sync()
+        files = view.panel_files() if hasattr(view, "panel_files") else None
+        await edit_panel_v2(interaction, container, files=files)
+    elif interaction.response.is_done():
+        await interaction.edit_original_response(embed=view.embed(), view=view)
+    else:
+        await interaction.response.edit_message(embed=view.embed(), view=view)
