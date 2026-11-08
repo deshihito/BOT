@@ -72,38 +72,62 @@ async def report_callback_error(interaction: discord.Interaction, context: str,
 
 SUPPORT_ACTIONS = [
     app_commands.Choice(name="Muted", value="muted"),
+    app_commands.Choice(name="Muted設定", value="muted_settings"),
     app_commands.Choice(name="匿名つぶやきパネル", value="whisper"),
     app_commands.Choice(name="Stickyパネル", value="sticky"),
     app_commands.Choice(name="メッセージ削除", value="clear"),
     app_commands.Choice(name="一括ロール付与・剥奪", value="role_bulk"),
-    app_commands.Choice(name="boardNotify状態", value="bumprta_status"),
-    app_commands.Choice(name="boardNotifyオン", value="bumprta_on"),
-    app_commands.Choice(name="boardNotifyオフ", value="bumprta_off"),
-    app_commands.Choice(name="boardNotifyメンションロール", value="bumprta_role"),
+    # boardNotify 再編: 旧 bumprta_status/on/off/role は正リストから外し、
+    # サービス別入口（boardnotify ジャンル）＋共通設定に置き換える。
+    # 旧 value は entry.py の dispatch 互換分岐で従来どおり動作する。
+    app_commands.Choice(name="DISBOARD", value="bumprta_bump"),
+    app_commands.Choice(name="ディス速", value="bumprta_up"),
+    app_commands.Choice(name="鯖ちゃんねる", value="bumprta_vote"),
+    app_commands.Choice(name="TakasumiBOT", value="bumprta_takasumi"),
+    app_commands.Choice(name="Dicoall", value="bumprta_dicoall"),
+    app_commands.Choice(name="Discord Cafe", value="bumprta_dcafe"),
+    app_commands.Choice(name="SharkBot", value="bumprta_sharkbot"),
+    app_commands.Choice(name="boardNotify設定（共通）", value="bumprta_settings"),
     app_commands.Choice(name="絵文字便乗設定（binjou）", value="binjou"),
+    app_commands.Choice(name="カスタム便乗ルール", value="binjou_custom"),
     app_commands.Choice(name="抽選（giveaway）", value="giveaway"),
     app_commands.Choice(name="VC入退室履歴", value="vc_log"),
     app_commands.Choice(name="メッセージ編集履歴", value="message_log"),
     app_commands.Choice(name="モデレート履歴（TO/KICK/BAN）", value="moderation_log"),
     app_commands.Choice(name="ハニーポット", value="honeypot"),
     app_commands.Choice(name="チケットツール", value="ticket"),
+    app_commands.Choice(name="チケット種別", value="ticket_types"),
+    app_commands.Choice(name="チケット記録（トランスクリプト）", value="ticket_transcript"),
+    app_commands.Choice(name="チケット担当アサイン", value="ticket_assign"),
     app_commands.Choice(name="認証パネル作成", value="auth_panel"),
+    app_commands.Choice(name="認証フォーム質問編集", value="auth_questions"),
     app_commands.Choice(name="ロールパネル作成", value="role_panel"),
     app_commands.Choice(name="言語設定", value="language"),
     app_commands.Choice(name="グローバルチャット", value="globalchat"),
+    app_commands.Choice(name="グローバルチャット モデレーション", value="globalchat_mod"),
     app_commands.Choice(name="Auto react設定", value="auto_react"),
-    app_commands.Choice(name="SNS新着通知（X・YouTube・GitHub）", value="sns_notify"),
+    # SNS 再編: 旧 sns_notify は正リストから外し、プラットフォーム別入口
+    # （sns ジャンル）に置き換える。旧 value は dispatch 互換で従来パネルを開く。
+    app_commands.Choice(name="YouTube通知", value="sns_youtube"),
+    app_commands.Choice(name="X通知", value="sns_x"),
+    app_commands.Choice(name="GitHub通知", value="sns_github"),
+    app_commands.Choice(name="RSS通知", value="sns_rss"),
+    app_commands.Choice(name="YouTubeライブ通知", value="sns_youtube_live"),
     app_commands.Choice(name="Quest通知（Discord Orbs）", value="quest_notify"),
+    app_commands.Choice(name="Quest手動投稿", value="quest_manual"),
     app_commands.Choice(name="レベルアップ通知（EXP）", value="levelup_notify"),
+    app_commands.Choice(name="レベルアップカードテーマ", value="levelup_card_theme"),
     # サーバーアシスト再編: 旧ハブ（server_assist）は廃止し、各機能を
     # assist_<key> の一級アクションとしてジャンルへ配置する。値とラベルは
     # core/support/server_assist/features の FEATURE と一致させること
     # （tests/test_server_assist.py が対応を固定する）。並びは機能の表示順。
     app_commands.Choice(name="参加・退出メッセージ", value="assist_welcome"),
+    app_commands.Choice(name="退出メッセージ", value="assist_goodbye"),
     app_commands.Choice(name="自動ロール", value="assist_autorole"),
     app_commands.Choice(name="Starboard", value="assist_starboard"),
     app_commands.Choice(name="レベル報酬", value="assist_leveling"),
     app_commands.Choice(name="一時VC", value="assist_tempvoice"),
+    app_commands.Choice(name="一時VC操作パネル", value="tempvoice_panel"),
     app_commands.Choice(name="提案箱", value="assist_suggestions"),
     app_commands.Choice(name="AutoMod", value="assist_automod"),
     app_commands.Choice(name="投票", value="assist_polls"),
@@ -111,20 +135,27 @@ SUPPORT_ACTIONS = [
     app_commands.Choice(name="自動スレッド", value="assist_autothread"),
     app_commands.Choice(name="サーバースタッツ", value="assist_stats"),
     app_commands.Choice(name="埋め込みビルダー", value="assist_embed"),
+    app_commands.Choice(name="埋め込みテンプレート管理", value="assist_embed_templates"),
     app_commands.Choice(name="Webhookビルダー", value="assist_webhook"),
     app_commands.Choice(name="タイマー告知", value="assist_timed"),
+    app_commands.Choice(name="一回限りリマインダー", value="assist_reminder"),
     app_commands.Choice(name="警告", value="assist_warnings"),
+    app_commands.Choice(name="警告エスカレーション", value="assist_warning_escalation"),
     app_commands.Choice(name="招待トラッカー", value="assist_invites"),
     app_commands.Choice(name="自動リアクション", value="assist_autoreact"),
     app_commands.Choice(name="イベント", value="assist_events"),
+    app_commands.Choice(name="公式イベント連携", value="assist_events_link"),
     app_commands.Choice(name="リアクションロール", value="assist_reactionroles"),
     app_commands.Choice(name="ロール復元", value="assist_stickyroles"),
     app_commands.Choice(name="カスタム返信", value="assist_customreplies"),
     app_commands.Choice(name="常駐しりとり", value="assist_shiritori_resident"),
     app_commands.Choice(name="応募フォーム", value="assist_applications"),
+    app_commands.Choice(name="応募審査", value="assist_application_review"),
     app_commands.Choice(name="音声トリガーのサーバー設定", value="voice_trigger"),
     app_commands.Choice(name="VC参加時の自動開始", value="vc_auto_start"),
     app_commands.Choice(name="BOT fixer", value="bot_fixer"),
+    app_commands.Choice(name="他ボット制限（BOT fixer）", value="bot_fixer_bots"),
+    app_commands.Choice(name="コマンドレート制限（BOT fixer）", value="bot_fixer_rates"),
     app_commands.Choice(name="即抜けRTA状態", value="sokunuke_status"),
     app_commands.Choice(name="即抜けRTA計測オン", value="sokunuke_on"),
     app_commands.Choice(name="即抜けRTA計測オフ", value="sokunuke_off"),
@@ -140,6 +171,8 @@ SUPPORT_GENRES = {
     "logs": ("履歴・ログ", ""),
     "automation": ("自動化・通知", ""),
     "rta": ("RTA設定", ""),
+    "boardnotify": ("boardNotify", ""),
+    "sns": ("SNS通知", ""),
 }
 
 # 旧バージョンで保存されたショートカットを新しいジャンルへ移行する。
@@ -155,27 +188,45 @@ def _support_actions(*values: str) -> list[tuple[str, str]]:
 
 SUPPORT_ACTIONS_BY_GENRE = {
     "moderation": _support_actions(
-        "muted", "whisper", "sticky", "clear", "honeypot", "ticket", "giveaway", "bot_fixer",
+        "muted", "muted_settings", "whisper", "sticky", "clear", "honeypot", "ticket",
+        "ticket_types", "ticket_transcript", "ticket_assign", "giveaway", "bot_fixer",
+        "bot_fixer_bots", "bot_fixer_rates",
         "assist_automod", "assist_warnings", "assist_applications",
     ),
     "roles": _support_actions(
-        "role_bulk", "auth_panel", "role_panel",
+        "role_bulk", "auth_panel", "auth_questions", "role_panel",
         "assist_autorole", "assist_leveling", "assist_reactionroles", "assist_stickyroles",
     ),
     "logs": _support_actions(
         "vc_log", "message_log", "moderation_log",
         "assist_serverlog", "assist_invites",
     ),
+    # 自動化・通知は33件あり、パネル側はページング（25件/ページ）で全件選べる。
+    # assist_warning_escalation / assist_application_review は、元機能
+    # （警告・応募フォーム）が moderation 側にあるが、preset 入口は
+    # 「自動化・通知」の分割としてここに置く（33件構成）。
     "automation": _support_actions(
-        "binjou", "auto_react", "levelup_notify", "voice_trigger", "sns_notify", "quest_notify", "language", "globalchat", "vc_auto_start",
-        "assist_welcome", "assist_starboard", "assist_tempvoice", "assist_suggestions",
-        "assist_polls", "assist_autothread", "assist_stats", "assist_embed", "assist_webhook",
-        "assist_timed", "assist_autoreact", "assist_events", "assist_customreplies",
-        "assist_shiritori_resident",
+        "binjou", "binjou_custom", "auto_react", "levelup_notify", "levelup_card_theme",
+        "voice_trigger", "quest_notify", "quest_manual", "language", "globalchat", "globalchat_mod",
+        "vc_auto_start",
+        "assist_welcome", "assist_goodbye", "assist_starboard", "assist_tempvoice", "tempvoice_panel",
+        "assist_suggestions",
+        "assist_polls", "assist_autothread", "assist_stats", "assist_embed", "assist_embed_templates",
+        "assist_webhook",
+        "assist_timed", "assist_reminder", "assist_autoreact", "assist_events", "assist_events_link",
+        "assist_customreplies",
+        "assist_shiritori_resident", "assist_warning_escalation", "assist_application_review",
     ),
     "rta": _support_actions(
-        "bumprta_status", "bumprta_on", "bumprta_off", "bumprta_role", "sokunuke_status", "sokunuke_on",
+        "sokunuke_status", "sokunuke_on",
         "sokunuke_off", "sokunuke_vc_on", "sokunuke_vc_off",
+    ),
+    "boardnotify": _support_actions(
+        "bumprta_bump", "bumprta_up", "bumprta_vote", "bumprta_takasumi",
+        "bumprta_dicoall", "bumprta_dcafe", "bumprta_sharkbot", "bumprta_settings",
+    ),
+    "sns": _support_actions(
+        "sns_youtube", "sns_x", "sns_github", "sns_rss", "sns_youtube_live",
     ),
 }
 

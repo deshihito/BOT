@@ -217,3 +217,24 @@ class GlobalChatSupportMixin:
             )
         view = GlobalChatSettingsView(self, interaction.guild, interaction.channel)
         await interaction.response.send_message(view=as_panel_v2(view), ephemeral=True)
+
+    async def show_globalchat_moderation(self, interaction: discord.Interaction):
+        """モデレーション側を直接開く（globalchat_mod 入口）。
+
+        元メッセージがある入口（パネル選択など）では荒らし対策モーダルを
+        そのまま開く。モーダルを開けない入口では設定画面を出し、
+        「荒らし対策」ボタンへの導線を示す。
+        """
+        if interaction.guild is None or interaction.channel is None:
+            return await interaction.response.send_message(
+                "この設定はサーバー内のテキストチャンネルで利用できます。",
+                ephemeral=True,
+            )
+        view = GlobalChatSettingsView(self, interaction.guild, interaction.channel)
+        if not view.can_manage(interaction):
+            return await interaction.response.send_message(
+                "この設定にはサーバー管理権限が必要です。", ephemeral=True)
+        if getattr(interaction, "message", None) is not None and not interaction.response.is_done():
+            return await interaction.response.send_modal(GlobalChatModerationModal(view))
+        view.notice = "荒らし対策は下の「荒らし対策（NG ワード・ブロック）」ボタンから開きます。"
+        await interaction.response.send_message(view=as_panel_v2(view), ephemeral=True)

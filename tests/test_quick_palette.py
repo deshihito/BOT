@@ -47,7 +47,10 @@ class AutocompleteFilterTest(unittest.TestCase):
 
     def test_id_substring_match(self):
         values = [c.value for c in quick.autocomplete_choices("sns")]
-        self.assertIn("support:sns_notify", values)
+        # 機能数再編: 旧 sns_notify は正リストから外れ、プラットフォーム別
+        # 入口（sns_*）に置き換わった。
+        self.assertIn("support:sns_youtube", values)
+        self.assertNotIn("support:sns_notify", values)
 
     def test_genre_match(self):
         # support の genre_label（例: モデレーション）でも絞れる。

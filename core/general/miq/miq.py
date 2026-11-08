@@ -1219,6 +1219,35 @@ class MiqMixin:
         return file, fmt, None
 
 
+    async def _miq_create_done(self, interaction: discord.Interaction, text: str):
+        """パネル経由の MIQ 作成 (general:miq_create): 入力テキストを
+        投稿者本人の名前/アバターで画像化して返す。
+
+        生成は既存の _miq_build_file（コンテキストメニュー等と同一経路）
+        を使い、フォーマット等の設定は本人の保存済み prefs に従う。
+        対象メッセージが無い単体生成のため、line / pair は
+        _miq_build_file 側の単体レイアウトにフォールバックする。
+        生成物に付ける操作 View (MiqOutputView) は対象メッセージを
+        前提とするため、ここでは付けない。
+        """
+        cleaned = _miq_clean_text(text)
+        if not cleaned:
+            return await interaction.response.send_message(
+                "文字のあるテキストを入力してください。", ephemeral=True)
+        if not self._miq_cooldown_ok(interaction.user.id):
+            return await interaction.response.send_message(
+                "少し待ってからもう一度お試しください。", ephemeral=True)
+        await interaction.response.defer(thinking=True)
+        prefs = miq_get_prefs(interaction.user.id)
+        size_limit = getattr(interaction.guild, "filesize_limit", None)
+        file = await self._miq_build_file(
+            interaction.user, cleaned, prefs, size_limit)
+        if file is None:
+            return await interaction.followup.send(
+                "引用画像を作れませんでした。時間をおいて再試行してください。")
+        await interaction.followup.send(file=file)
+
+
     async def miq_context(self, interaction: discord.Interaction, message: discord.Message):
         """メッセージの右クリックメニュー「引用画像にする」。"""
         author_id = getattr(message.author, "id", None)

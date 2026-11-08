@@ -233,6 +233,16 @@ class GeneralCog(
             view = MiqSettingsView(self, interaction.user.id)
             return await interaction.response.send_message(view=as_panel_v2(view), ephemeral=True)
 
+        if value == "miq_refuse":
+            view = MiqRefuseView(self, interaction.user.id)
+            return await interaction.response.send_message(view=as_panel_v2(view))
+
+        if value == "miq_create":
+            # モーダルを開けない経路 (メッセージ型ショートカット) では
+            # _MessageResponse.send_modal が案内する (meme_create と同じ扱い)。
+            modal = MiqCreateModal(self._miq_create_done)
+            return await interaction.response.send_modal(modal)
+
         if value == "meme_create":
             # モーダルを開けない経路 (メッセージ型ショートカット) では
             # _MessageResponse.send_modal が「パネルから実行してください」と
@@ -319,6 +329,14 @@ class GeneralCog(
                 )
             return await interaction.followup.send(embed=view.embed(), view=view, ephemeral=True)
 
+        if value in {"ai_chat", "ai_generate"}:
+            ai_cog = self.bot.get_cog("AICog")
+            if ai_cog is None:
+                return await self._safe_respond(interaction, "AI機能が読み込まれていません。")
+            if value == "ai_chat":
+                return await ai_cog.open_chat(interaction)
+            return await ai_cog.open_generate(interaction)
+
         if value == "shortcut_manage":
             view = ShortcutManagerView(self, interaction.guild_id, interaction.user.id)
             return await interaction.response.send_message(view=as_panel_v2(view))
@@ -384,6 +402,27 @@ class GeneralCog(
                 return await self._safe_respond(interaction, MONEY_PANEL_NOT_LOADED)
             return await panel_cog.show_panel(interaction)
 
+        if value in {"starter_claim", "daily_bonus_claim", "jailbreak"}:
+            # マネーパネルの概要ボタンと同じ実行部 (claim_starter /
+            # claim_daily_bonus / attempt_jailbreak) への独立入口。
+            # starter / daily は上の MONEY_PRISON_BLOCKED_VALUES で
+            # 逮捕中を既に弾いており、実行部側でも再チェックする。
+            # 脱獄だけは逮捕中専用フローなのでブロック対象外で、
+            # 結果はマネーパネルと同じく ephemeral で本人にだけ返す。
+            panel_cog = self.bot.get_cog("MoneyPanelCog")
+            if panel_cog is None:
+                return await self._safe_respond(interaction, MONEY_PANEL_NOT_LOADED)
+            if value == "jailbreak":
+                await interaction.response.defer(ephemeral=True)
+                message = await panel_cog.attempt_jailbreak(interaction.user.id)
+                return await interaction.followup.send(message, ephemeral=True)
+            await interaction.response.defer()
+            if value == "starter_claim":
+                message = await panel_cog.claim_starter(interaction.user.id)
+            else:
+                message = await panel_cog.claim_daily_bonus(interaction.user.id)
+            return await interaction.followup.send(message)
+
         if value == "daily_report":
             report_cog = self.bot.get_cog("DailyReportCog")
             if report_cog is None:
@@ -396,11 +435,23 @@ class GeneralCog(
                 return await self._safe_respond(interaction, feature_not_loaded("ロールショップ"))
             return await shop_cog.show_shop(interaction)
 
+        if value == "role_shop_manage":
+            shop_cog = self.bot.get_cog("RoleShopCog")
+            if shop_cog is None:
+                return await self._safe_respond(interaction, "ロールショップは現在利用できません。")
+            return await shop_cog.open_manage(interaction)
+
         if value == "gacha":
             gacha_cog = self.bot.get_cog("GachaCog")
             if gacha_cog is None:
                 return await self._safe_respond(interaction, feature_not_loaded("ガチャ"))
             return await gacha_cog.show_gacha(interaction)
+
+        if value == "gacha_party":
+            gacha_cog = self.bot.get_cog("GachaCog")
+            if gacha_cog is None:
+                return await self._safe_respond(interaction, "ガチャは現在利用できません。")
+            return await gacha_cog.open_party(interaction)
 
         if value == "clan":
             clan_cog = self.bot.get_cog("ClanCog")
@@ -408,7 +459,13 @@ class GeneralCog(
                 return await self._safe_respond(interaction, feature_not_loaded("クラン機能"))
             return await clan_cog.show_clan(interaction)
 
-        if value in {"items", "item_buy", "item_use", "box_open"}:
+        if value == "clan_manage":
+            clan_cog = self.bot.get_cog("ClanCog")
+            if clan_cog is None:
+                return await self._safe_respond(interaction, "クラン機能は現在利用できません。")
+            return await clan_cog.open_manage(interaction)
+
+        if value in {"items", "item_buy", "item_sell", "item_use", "box_open"}:
             items_cog = self.bot.get_cog("ItemsCog")
             if items_cog is None:
                 return await self._safe_respond(interaction, ITEMS_NOT_LOADED)
@@ -416,11 +473,14 @@ class GeneralCog(
                 return await items_cog.show_items(interaction)
             if value == "item_buy":
                 return await items_cog.open_buy(interaction)
+            if value == "item_sell":
+                return await items_cog.open_sell(interaction)
             if value == "item_use":
                 return await items_cog.open_use(interaction)
             return await items_cog.open_boxes(interaction)
 
-        if value in {"workshop", "machine_buy", "workshop_claim", "craft"}:
+        if value in {"workshop", "machine_buy", "workshop_claim", "craft",
+                     "craft_commission"}:
             workshop_cog = self.bot.get_cog("WorkshopCog")
             if workshop_cog is None:
                 return await self._safe_respond(interaction, WORKSHOP_NOT_LOADED)
@@ -430,6 +490,8 @@ class GeneralCog(
                 return await workshop_cog.open_buy_machine(interaction)
             if value == "workshop_claim":
                 return await workshop_cog.open_claim(interaction)
+            if value == "craft_commission":
+                return await workshop_cog.open_commission(interaction)
             return await workshop_cog.show_craft(interaction)
 
         if value in {"mining", "lottery", "lottery_buy", "steal"}:

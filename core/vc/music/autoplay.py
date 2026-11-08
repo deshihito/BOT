@@ -127,6 +127,28 @@ class AutoplayMixin:
             state['current_interaction'] = interaction
             await self.check_queue(interaction.guild_id)
 
+    async def _autoplay_panel_impl(self, r: Responder):
+        """自動再生の設定・再生履歴の管理パネルを開く（/vc の入口 music_autoplay）。
+
+        音楽パネル本体では自動再生トグル（AutoplayToggleButton）はパネル末尾に、
+        履歴削除（_history_clear_impl）はライブラリViewに分かれて置かれている。
+        ここではその2つを AutoplayHistoryView にまとめて出す（実体は共通）。
+        """
+        from core.vc.music.ui import AutoplayHistoryView
+
+        state = self.get_state(r.guild.id)
+        enabled = bool(state.get('autoplay_enabled', False))
+        embed = we(
+            title=f"{MUSIC} 自動再生・再生履歴管理",
+            description=(
+                f"自動再生: **{'ON' if enabled else 'OFF'}**\n"
+                "自動再生は、VCにいる人のリクエスト履歴をもとに選曲します"
+                "（履歴は自動再生のために保存されます）。\n"
+                "下のボタンで自動再生の ON/OFF と、自分の再生履歴の削除ができます。"
+            ),
+        )
+        await r.send(embed=embed, view=AutoplayHistoryView(self, r.guild.id), ephemeral=True)
+
     async def _history_clear_impl(self, interaction: discord.Interaction):
         store = history.get_store()
         removed = store.clear_user(interaction.user.id)

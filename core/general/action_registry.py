@@ -81,6 +81,19 @@ AI_BLOCKED_IDS = frozenset({
     "general:story54",
     # fastHTMLもファイル投稿待ちの対話フローなので meme_create と同様に対象外。
     "general:fast_html",
+    # 機能数再編で独立化した入口のうち、コイン授受・加工・個人設定・対話
+    # フローにあたるものは、元の集約先と同じ方針で AI 代理実行の対象外にする。
+    "general:item_sell", "general:starter_claim", "general:daily_bonus_claim",
+    "general:craft_commission",
+    # MIQ引用拒否は個人の同意設定なので miq_settings と同様に対象外。
+    "general:miq_refuse",
+    # MIQ本体はモーダル入力＋対象メッセージ前提の対話フローなので対象外。
+    "general:miq_create",
+    # !ai / !generate 本体を AI tools 経由で呼ぶのは再帰的になるため対象外。
+    "general:ai_chat", "general:ai_generate",
+    # ロールショップ商品管理は管理者向け設定操作、ガチャ編成は個人設定の
+    # 変更なので、明示操作に限定する（gacha 本体が blocked な方針と揃える）。
+    "general:role_shop_manage", "general:gacha_party",
     "support:clear", "support:role_bulk", "support:muted", "support:ticket", "support:honeypot",
     "support:whisper", "support:binjou", "support:message_log", "support:moderation_log",
     "vc:record_start", "vc:transcribe_start",
@@ -101,6 +114,13 @@ MESSAGE_SHORTCUT_BLOCKED_IDS = frozenset({
     # 植物栽培は本人の庭（個人の育成記録）の表示なので公開に反転させない。
     "general:garden",
     "general:items", "general:workshop", "general:money_panel",
+    # 機能数再編でマネーパネルから独立化した固有フローも、本人の受取状態・
+    # 逮捕状態に紐づく個人向け応答なので money_panel と同様に公開反転させない。
+    "general:starter_claim", "general:daily_bonus_claim", "general:jailbreak",
+    # MIQ引用拒否は個人設定パネルなので miq_settings と同様に対象外。
+    "general:miq_refuse",
+    # 生存ステータスは本人の生存判定の表示なので status と同様に対象外。
+    "general:fujo_status",
     # 日報DMの切り替え結果は本人の購読状態（個人設定）なので公開に反転させない。
     "general:daily_report",
 })
@@ -110,7 +130,9 @@ MESSAGE_SHORTCUT_BLOCKED_IDS = frozenset({
 # surfaces は落とさない（"aitools" を含んだまま候補に残り、実行前に
 # cogs/ai_tools の確認ビューを必ず経由する）。
 AI_CONFIRM_IDS = frozenset({
-    "support:bumprta_on", "support:bumprta_off",
+    # 旧 bumprta_on/off は機能数再編で boardNotify ジャンルへ統合し、
+    # レジストリからは外した（dispatch 互換のみ残置）。AI tools の候補は
+    # レジストリ由来のため、confirm 集合からも外す。
     "vc:echo_start", "vc:karaoke_start", "vc:global_start", "vc:match_start",
     "vc:changer_start",
 })
@@ -123,6 +145,14 @@ SUPPORT_AI_EXCLUDED_VALUES = frozenset({
     "sticky", "giveaway", "auth_panel", "role_panel", "language", "auto_react",
     "sns_notify", "quest_notify", "levelup_notify", "voice_trigger", "vc_auto_start", "globalchat", "bot_fixer",
     "sokunuke_on", "sokunuke_off", "sokunuke_vc_on", "sokunuke_vc_off",
+    # 機能数再編で独立化した設定系の入口も、元の集約先と同じ方針で
+    # AI tools の代理実行範囲には広げない（明示操作に限定する）。
+    "bumprta_settings",
+    "sns_youtube", "sns_x", "sns_github", "sns_rss", "sns_youtube_live",
+    "bot_fixer_bots", "bot_fixer_rates",
+    "muted_settings", "ticket_types", "ticket_transcript", "ticket_assign",
+    "auth_questions", "globalchat_mod", "tempvoice_panel",
+    "levelup_card_theme", "binjou_custom", "quest_manual",
 })
 
 
@@ -342,7 +372,14 @@ def build_general_actions(general_actions: dict, general_genres: dict) -> list[A
 # pitch 等が None なら既定値で開始する）、パネルからも直接実行されるため追加した。
 VC_SHORTCUT_ACTIONS: tuple[tuple[str, str], ...] = (
     ("VC参加", "join"), ("VC退出", "leave"), ("VC状態", "status"),
-    ("音楽操作パネル", "music_panel"), ("録音開始", "record_start"), ("録音停止", "record_stop"),
+    ("音楽操作パネル", "music_panel"),
+    # 機能数再編: 音楽パネルのサブフローを独立入口化（実体は音楽パネルと共有。
+    # パネル側の正リストは core/vc/common.py の VOICE_ACTIONS_BY_GENRE）。
+    ("プレイリスト管理", "music_playlist"), ("立体音響設定", "music_spatial"),
+    ("自動再生・再生履歴管理", "music_autoplay"), ("キュー表示", "music_queue"),
+    ("楽曲検索・追加", "music_search"), ("音声ファイルID一覧", "music_files"),
+    ("グロチャ自動接続設定", "gvc_auto_connect"),
+    ("録音開始", "record_start"), ("録音停止", "record_stop"),
     ("やまびこ開始", "echo_start"), ("やまびこ停止", "echo_stop"),
     ("文字起こし開始", "transcribe_start"), ("文字起こし停止", "transcribe_stop"),
     ("カラオケ開始", "karaoke_start"), ("カラオケ停止", "karaoke_stop"),
@@ -373,6 +410,8 @@ VC_SHORTCUT_ACTIONS: tuple[tuple[str, str], ...] = (
 VC_FORM_ACTION_VALUES = frozenset({
     "gvc_room_create", "gvc_room_theme", "gvc_room_info", "gvc_room_delete",
     "gvc_chat_connect", "tts_start", "tts_say", "tts_config", "trigger_register", "echo_delay",
+    # 機能数再編で独立化した入口のうち、モーダル/フォーム前提のもの。
+    "music_search", "gvc_auto_connect",
 })
 
 
@@ -437,6 +476,10 @@ VC_ACTION_PARAMS: dict[str, tuple[ParamSpec, ...]] = {
         ParamSpec(name="password", label="パスワード", type="text",
                   help="非公開ルームのみ"),
     ),
+    # グロチャ自動接続設定: 対象ルーム名が必須（パネル側はフォームで聞く）。
+    "gvc_auto_connect": (
+        ParamSpec(name="name", label="ルーム名", type="text", required=True),
+    ),
     # _global_impl: 参加にはルーム名が必須。パスワードは非公開ルーム用。
     "global_start": (
         ParamSpec(name="room", label="ルーム名", type="text", required=True,
@@ -459,13 +502,21 @@ def build_vc_actions() -> list[ActionSpec]:
 
 def build_game_actions(game_order: list, game_guides: dict) -> list[ActionSpec]:
     """core/game/game/game_guides.py の GAME_ORDER / GAME_GUIDES から導出する（従来方式の踏襲）。"""
-    return [
+    specs = [
         make_action(
             "game", f"game:{game}", "ゲーム開始: " + game_guides[game]["name"],
             "game", ROOT_LABELS["game"],
         )
         for game in game_order
     ]
+    # 今月のゲーム王: タイトルではなく月間横断ランキング（ハブの専用ボタンが
+    # 実体）。GAME_ORDER 由来の導出に乗らないため、help と同型の手書き枠で足す。
+    specs.append(make_action(
+        "game", "game:monthly_king", "今月のゲーム王",
+        "game", ROOT_LABELS["game"],
+        description="月間のゲーム勝利数ランキング",
+    ))
+    return specs
 
 
 def build_support_actions(support_actions: list, actions_by_genre: dict, support_genres: dict) -> list[ActionSpec]:

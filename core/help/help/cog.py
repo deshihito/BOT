@@ -76,7 +76,8 @@ ACTION_CATEGORY_MAP: dict[str, list[tuple[str, str | None]]] = {
             ("general", "make_image"), ("general", "exp"),
             ("general", "garden")],
     "admin": [("support", "moderation"), ("support", "roles"), ("support", "logs"),
-              ("support", "assist"), ("support", "rta")],
+              ("support", "assist"), ("support", "rta"),
+              ("support", "boardnotify"), ("support", "sns")],
 }
 
 

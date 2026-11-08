@@ -165,6 +165,7 @@ class VcParamSpecConsistencyTest(unittest.TestCase):
         "gvc_room_info": {"name"},
         "gvc_room_delete": {"name"},
         "gvc_chat_connect": {"name", "password"},
+        "gvc_auto_connect": {"name"},
     }
 
     @classmethod

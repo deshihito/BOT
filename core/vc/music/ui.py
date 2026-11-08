@@ -357,16 +357,7 @@ class VoiceControlView(discord.ui.View):
 
     @discord.ui.button(label="", emoji=BOOK, style=discord.ButtonStyle.secondary, row=4)
     async def library_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-        embed = discord.Embed(
-            title=f"{BOOK} ライブラリ",
-            description="プレイリストを保存・一覧表示・再生できます。対象範囲を選択してください。",
-            color=0x9B59B6,
-        )
-        await interaction.response.send_message(
-            embed=embed,
-            view=PlaylistLibraryView(self.cog),
-            ephemeral=True,
-        )
+        await self.cog._playlist_library_impl(Responder(interaction))
 
     @discord.ui.button(label="", emoji=RESET, style=discord.ButtonStyle.danger, row=4)
     async def stop_button(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -418,6 +409,47 @@ class AutoplayToggleButton(discord.ui.Button):
         await self.cog._autoplay_toggle_impl(interaction)
 
 
+class SpatialPanelButton(discord.ui.Button):
+    """立体音響設定パネル（_spatial_impl）を開くボタン。
+
+    VoiceControlView 側のボタン行は満杯のため、自動再生トグルと同じ
+    パネル末尾の独立した ActionRow として配置する（build_music_panel_layout が組み立てる）。
+    """
+
+    def __init__(self, cog, guild_id: int):
+        self.cog = cog
+        self.guild_id = guild_id
+        super().__init__(
+            label="立体音響設定",
+            emoji="🎧",
+            style=discord.ButtonStyle.secondary,
+        )
+
+    async def callback(self, interaction: discord.Interaction):
+        await self.cog._spatial_impl(Responder(interaction))
+
+
+class AutoplayHistoryView(discord.ui.View):
+    """自動再生のトグルと再生履歴の削除をまとめた管理 View（/vc の入口用）。
+
+    実体は音楽パネル本体と同じもの（AutoplayToggleButton と
+    _history_clear_impl）を使う。
+    """
+
+    def __init__(self, cog, guild_id: int):
+        super().__init__(timeout=PANEL_TIMEOUT_SECONDS)
+        self.cog = cog
+        self.guild_id = guild_id
+        self.add_item(AutoplayToggleButton(cog, guild_id))
+        clear_button = discord.ui.Button(
+            label="履歴を消す", style=discord.ButtonStyle.secondary)
+        clear_button.callback = self._clear_history
+        self.add_item(clear_button)
+
+    async def _clear_history(self, interaction: discord.Interaction):
+        await self.cog._history_clear_impl(interaction)
+
+
 def build_music_panel_layout(cog, guild_id: int, panel_text: str,
                              thumbnail_url: str | None = None) -> discord.ui.LayoutView:
     """操作部品とステータスをComponents V2コンテナにまとめる。
@@ -461,7 +493,8 @@ def build_music_panel_layout(cog, guild_id: int, panel_text: str,
     container = discord.ui.Container(
         *header,
         *action_rows,
-        discord.ui.ActionRow(AutoplayToggleButton(cog, guild_id)),
+        discord.ui.ActionRow(AutoplayToggleButton(cog, guild_id),
+                             SpatialPanelButton(cog, guild_id)),
         accent_colour=0xFFFFFF,
     )
     layout = discord.ui.LayoutView(timeout=PANEL_TIMEOUT_SECONDS)

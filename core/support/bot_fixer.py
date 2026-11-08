@@ -20,6 +20,7 @@ from core.support.command_control import (
     MODE_OFF,
     MODES,
     SELF_ACTION_ID,
+    SELF_ACTION_IDS,
 )
 
 PAGE_SIZE = 25
@@ -38,7 +39,7 @@ def _action_labels() -> dict[str, str]:
 def _actions_of_root(root: str) -> list:
     specs = [
         spec for spec in action_registry.default_registry().by_root(root)
-        if spec.id != SELF_ACTION_ID
+        if spec.id not in SELF_ACTION_IDS
     ]
     return specs
 
@@ -286,7 +287,7 @@ class BotFixerPanel(discord.ui.LayoutView):
     """BOT fixer の設定パネル（Components V2・サーバー管理権限）。"""
 
     def __init__(self, cog: "SupportCog", settings: dict, bot_settings: dict | None = None,
-                 notice: str | None = None):
+                 notice: str | None = None, preset: dict | None = None):
         super().__init__(timeout=300)
         self.cog = cog
         self.settings = settings
@@ -297,6 +298,17 @@ class BotFixerPanel(discord.ui.LayoutView):
         self.root = "general"
         self.page = 0
         self.purpose = "list"
+        # preset（機能数再編の分割入口）: {"area": "bot"} で他ボット制限側、
+        # {"area": "command", "purpose": "rates"} でコマンド制限の
+        # レート制限側を初期表示にする。purpose は内部表現 "rate" に寄せる。
+        if isinstance(preset, dict):
+            if preset.get("area") in {"command", "bot"}:
+                self.area = preset["area"]
+            purpose = preset.get("purpose")
+            if purpose in {"rate", "rates"}:
+                self.purpose = "rate"
+            elif purpose == "list":
+                self.purpose = "list"
         self._build()
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
@@ -473,7 +485,8 @@ class BotFixerPanel(discord.ui.LayoutView):
 class BotFixerSupportMixin:
     """SupportCog の一部。cogs/support.py で合成される。"""
 
-    async def show_bot_fixer_settings(self, interaction: discord.Interaction):
+    async def show_bot_fixer_settings(self, interaction: discord.Interaction,
+                                      preset: dict | None = None):
         if interaction.guild is None:
             return await interaction.response.send_message(
                 "この機能はサーバー内で利用できます。",
@@ -484,7 +497,7 @@ class BotFixerSupportMixin:
         settings = command_control.get_settings(store, interaction.guild_id)
         bot_settings = bot_control.get_settings(store, interaction.guild_id)
         await interaction.response.send_message(
-            view=BotFixerPanel(self, settings, bot_settings),
+            view=BotFixerPanel(self, settings, bot_settings, preset=preset),
             ephemeral=True,
         )
 

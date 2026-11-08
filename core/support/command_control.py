@@ -34,6 +34,13 @@ logger = logging.getLogger(__name__)
 
 COMMAND_CONTROL_SECTION = "command_control"
 SELF_ACTION_ID = "support:bot_fixer"
+# 機能数再編で増えた BOT fixer 自身の入口（他ボット制限／コマンドレート制限）
+# も、ロックアウト防止のため設定アクション自身として常に対象外にする。
+SELF_ACTION_IDS = frozenset({
+    SELF_ACTION_ID,
+    "support:bot_fixer_bots",
+    "support:bot_fixer_rates",
+})
 
 MODE_OFF = "off"
 MODE_DENY = "deny"
@@ -58,14 +65,14 @@ def normalize_settings(raw: Any) -> dict[str, Any]:
     actions: list[str] = []
     seen: set[str] = set()
     for item in raw.get("actions") or []:
-        if isinstance(item, str) and item and item != SELF_ACTION_ID and item not in seen:
+        if isinstance(item, str) and item and item not in SELF_ACTION_IDS and item not in seen:
             seen.add(item)
             actions.append(item)
     rates: dict[str, dict[str, int]] = {}
     raw_rates = raw.get("rates")
     if isinstance(raw_rates, dict):
         for action_id, rule in raw_rates.items():
-            if not isinstance(action_id, str) or action_id == SELF_ACTION_ID:
+            if not isinstance(action_id, str) or action_id in SELF_ACTION_IDS:
                 continue
             if not isinstance(rule, dict):
                 continue
@@ -94,7 +101,7 @@ def is_manager(user: Any) -> bool:
 
 def mode_blocks(settings: dict[str, Any], action_id: str) -> bool:
     """モード判定のみ（レートは見ない）。制限されるなら True。"""
-    if action_id == SELF_ACTION_ID:
+    if action_id in SELF_ACTION_IDS:
         return False
     mode = settings.get("mode", MODE_OFF)
     listed = action_id in (settings.get("actions") or [])
@@ -152,7 +159,7 @@ def check(settings: dict[str, Any], action_id: str, *, guild_id: int, user_id: i
           manager: bool, counter: Optional[RateCounter] = None,
           now: Optional[float] = None) -> Verdict:
     """制限判定の本体（純粋判定＋レート消費）。管理者は常に対象外。"""
-    if manager or action_id == SELF_ACTION_ID:
+    if manager or action_id in SELF_ACTION_IDS:
         return Verdict(True)
     if mode_blocks(settings, action_id):
         return Verdict(False, reason="restricted")

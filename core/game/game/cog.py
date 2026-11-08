@@ -440,6 +440,11 @@ class GameHubView(discord.ui.View):
                                     custom_id="panel:game:monthly", row=next_row)
         monthly.callback = self._monthly_callback
         self.add_item(monthly)
+        # ジャンルワープ（core/panel_warps.py の対応表から自動配置）。
+        from core.panel_warps import make_warp_button, warps_from
+
+        for warp in warps_from("game", None)[:2]:
+            self.add_item(make_warp_button("game", warp, row=next_row))
         if self.shortcut_mode:
             from cogs.general import ShortcutCommitButton
             self.add_item(ShortcutCommitButton("game"))
@@ -785,6 +790,16 @@ class GameHub(commands.Cog):
         )
         # 管理者向け総量統計も同じ入口で数える（個人履歴とは別集計）。
         usage_stats.record_action_safely(f"game:game:{game_id}")
+        if game_id == "monthly_king":
+            # 今月のゲーム王（横断ランキング）: タイトルではない特殊枠。
+            # ハブのボタン（panel:game:monthly）と同じ表示を入口からも出す。
+            embed, png = await monthly_board(
+                interaction.guild_id, bot=getattr(self, "bot", None))
+            if png is not None:
+                return await interaction.response.send_message(
+                    embed=embed,
+                    file=discord.File(io.BytesIO(png), filename=KING_BOARD_FILENAME))
+            return await interaction.response.send_message(embed=embed)
         cog = self.bot.get_cog(GAME_COGS[game_id])
         if cog is None or not hasattr(cog, "start_recruit"):
             name = GAME_GUIDES[game_id]["name"]

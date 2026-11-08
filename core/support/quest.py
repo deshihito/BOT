@@ -746,6 +746,38 @@ class QuestSupportMixin:
         )
 
 
+    async def show_quest_manual(self, interaction: discord.Interaction):
+        """Quest手動投稿モーダルを直接開く（quest_manual 入口）。
+
+        元メッセージがある入口では手入力モーダル（Quest名→即時投稿）を
+        そのまま開く。開けない入口では通知パネルを出し、「手動で通知を
+        送る」ボタンへの導線にする。
+        """
+        if interaction.guild is None:
+            return await interaction.response.send_message(
+                "この機能はサーバー内で利用できます。",
+                ephemeral=True,
+            )
+
+        if not can_manage_support_panel(interaction):
+            return await interaction.response.send_message(
+                "この機能は管理者のみ利用できます。",
+                ephemeral=True,
+            )
+
+        store = guild_settings.get_store()
+        await store.ensure_loaded()
+        settings = get_quest_settings(store, interaction.guild.id)
+        label = await self.quest_language_label(interaction.guild)
+        panel = QuestNotifyPanel(self, settings, lang_label=label)
+        if getattr(interaction, "message", None) is not None and not interaction.response.is_done():
+            return await interaction.response.send_modal(QuestManualModal(panel))
+        await interaction.response.send_message(
+            view=panel,
+            ephemeral=True,
+        )
+
+
     def _quest_channel(self, guild: discord.Guild, settings: dict):
         """送信先テキストチャンネル。投稿できない状態ならNone。"""
         channel = guild.get_channel(settings["channel_id"]) if settings["channel_id"] else None

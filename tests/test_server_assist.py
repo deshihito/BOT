@@ -173,7 +173,13 @@ class ServerAssistPanelTest(unittest.IsolatedAsyncioTestCase):
             self.assertIn(value, values)
             self.assertIn(value, [v for _label, v in SUPPORT_ACTIONS_BY_GENRE[genre]])
         for genre, items in SUPPORT_ACTIONS_BY_GENRE.items():
-            self.assertLessEqual(len(items), 25, genre)
+            # 機能数再編: automation は33件になり25件を超える。パネルは
+            # ページング（core/support/panel.py の support_action_pages）で
+            # 全件選べることが前提（tests/test_panel_warps.py が固定）。
+            if genre == "automation":
+                self.assertEqual(len(items), 33, genre)
+            else:
+                self.assertLessEqual(len(items), 25, genre)
         # 旧ハブ値の権限エントリは互換分岐（案内のみ）のために残る。
         self.assertEqual(SupportCog.SUPPORT_REQUIRED_PERMISSIONS["server_assist"], "manage_guild")
 
@@ -181,8 +187,14 @@ class ServerAssistPanelTest(unittest.IsolatedAsyncioTestCase):
         features = {feature.key: feature for feature in discover_features()}
         names = {choice.value: choice.name for choice in SUPPORT_ACTIONS}
         assist_values = [value for value in names if value.startswith("assist_")]
-        self.assertEqual(len(assist_values), len(features))
-        for value in assist_values:
+        # 機能数再編: assist_ には元機能への preset 入口（ASSIST_PRESET_ACTIONS）
+        # も含まれる。FEATURE と一致するのは元機能分だけ。
+        from core.support.entry import ASSIST_PRESET_ACTIONS
+
+        feature_values = [value for value in assist_values if value not in ASSIST_PRESET_ACTIONS]
+        self.assertEqual(len(feature_values), len(features))
+        self.assertTrue(set(ASSIST_PRESET_ACTIONS) <= set(assist_values))
+        for value in feature_values:
             feature = features[value.removeprefix("assist_")]
             self.assertEqual(names[value], feature.label, value)
 

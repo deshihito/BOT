@@ -435,6 +435,43 @@ class TicketAssignView(discord.ui.View):
         await self.cog.set_assignee(interaction, self.room_id, member)
 
 
+class TicketAssignGuideView(discord.ui.View):
+    """担当アサインの案内（実表面はチケットルーム内のみ）。
+
+    担当の指定は、開いているチケットルーム内の担当ボタン
+    （TicketAssignView）から行う。ここではその案内と、閲覧/操作権限など
+    担当まわりの詳細設定画面への導線を出す。
+    """
+
+    def __init__(self, cog: "TicketCog"):
+        super().__init__(timeout=300)
+        self.cog = cog
+        button = discord.ui.Button(
+            label="詳細設定を開く", style=discord.ButtonStyle.primary,
+            custom_id="ticket_assign_guide:advanced", row=0)
+        button.callback = self._open_advanced
+        self.add_item(button)
+
+    async def _open_advanced(self, interaction: discord.Interaction):
+        if interaction.guild_id is None:
+            return
+        store = guild_settings.get_store()
+        await store.ensure_loaded()
+        settings = get_ticket_settings(store, interaction.guild_id)
+        await edit_panel_v2(interaction, as_panel_v2(TicketAdvancedSettingsView(self.cog, settings)))
+
+    def embed(self):
+        return discord.Embed(
+            title="チケット担当アサイン",
+            description=(
+                "担当者の指定は、開いているチケットルーム内の「担当」ボタンから行います"
+                "（アサイン画面はルームごとに開くため、設定画面からは直接開けません）。\n"
+                "閲覧・操作できるユーザー/ロールや種別ごとの操作ロールは、詳細設定で変更できます。"
+            ),
+            color=0xFFFFFF,
+        )
+
+
 class TicketCog(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
@@ -453,6 +490,25 @@ class TicketCog(commands.Cog):
 
     async def show_advanced(self, interaction: discord.Interaction, settings: dict[str, Any]):
         await edit_panel_v2(interaction, as_panel_v2(TicketAdvancedSettingsView(self, settings)))
+
+    async def show_advanced_settings(self, interaction: discord.Interaction):
+        """詳細設定画面を直接開く（チケット種別／トランスクリプト保存先の入口）。
+
+        詳細設定には「種別を編集」ボタンとトランスクリプト保存先セレクトが
+        含まれるため、種別・記録どちらの入口からもこの画面に着地させる。
+        """
+        if interaction.guild is None:
+            return await interaction.response.send_message("この設定はサーバー内で利用できます。", ephemeral=True)
+        store = guild_settings.get_store()
+        await store.ensure_loaded()
+        settings = get_ticket_settings(store, interaction.guild.id)
+        await interaction.response.send_message(view=as_panel_v2(TicketAdvancedSettingsView(self, settings)), ephemeral=True)
+
+    async def show_assign_guide(self, interaction: discord.Interaction):
+        """担当アサインの案内を開く（実表面はルーム内 TicketAssignView のみ）。"""
+        if interaction.guild is None:
+            return await interaction.response.send_message("この設定はサーバー内で利用できます。", ephemeral=True)
+        await interaction.response.send_message(view=as_panel_v2(TicketAssignGuideView(self)), ephemeral=True)
 
     async def send_settings_panel(self, interaction: discord.Interaction, settings: dict[str, Any]):
         channel_id = settings.get("panel_channel_id")

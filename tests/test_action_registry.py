@@ -21,9 +21,11 @@ from core.general import action_registry  # noqa: E402
 from core.general.action_registry import ActionRegistry, ActionSpec, ParamSpec  # noqa: E402
 
 # 従来 SHORTCUT_ROOTS の support に無かった15件（仕様書 §2.2）。
+# 機能数再編で sns_notify は SNS ジャンル（sns_youtube 等）へ分割されたため、
+# 代表として sns_youtube に差し替える（件数は15のまま）。
 MISSING_SUPPORT_VALUES = {
     "sticky", "giveaway", "auth_panel", "role_panel", "language", "auto_react",
-    "sns_notify", "quest_notify", "levelup_notify", "voice_trigger",
+    "sns_youtube", "quest_notify", "levelup_notify", "voice_trigger",
     "sokunuke_status", "sokunuke_on", "sokunuke_off", "sokunuke_vc_on", "sokunuke_vc_off",
 }
 
@@ -70,7 +72,11 @@ class RegistryConsistencyTest(unittest.TestCase):
         from core.game.game.game_guides import GAME_ORDER
 
         registered = {spec.value for spec in self.registry.by_root("game")}
-        self.assertEqual(registered, {f"game:{game}" for game in GAME_ORDER})
+        # 機能数再編: 今月のゲーム王（game:monthly_king）はタイトルではない
+        # 特殊枠として GAME_ORDER の外側に1件だけ足す。
+        self.assertEqual(
+            registered,
+            {f"game:{game}" for game in GAME_ORDER} | {"game:monthly_king"})
 
     def test_vc_includes_changer_start(self):
         # changer_start は dispatch_voice_action が引数なしで実行できるため候補に含める。
@@ -78,7 +84,8 @@ class RegistryConsistencyTest(unittest.TestCase):
         self.assertIn("changer_start", vc_values)
         # 導線最適化 M4: フォーム系9件（gvc/tts/trigger/echo_delay）を追加し 27→36
         # テーマ変更の追加で 36→37（常設ルーム作成は !gvcperm コマンドだけ）
-        self.assertEqual(len(vc_values), 37)
+        # 機能数再編: 音楽サブフロー6件＋グロチャ自動接続設定で 37→44
+        self.assertEqual(len(vc_values), 44)
 
 
 class ShortcutRootsGenerationTest(unittest.TestCase):
@@ -130,7 +137,10 @@ class ShortcutRootsGenerationTest(unittest.TestCase):
         from core.game.game.game_guides import GAME_ORDER
 
         game_values = [value for _label, value in self.roots["game"][1]]
-        self.assertEqual(game_values, [f"game:{game}" for game in GAME_ORDER])
+        # 機能数再編: 末尾に今月のゲーム王（game:monthly_king）が加わる。
+        self.assertEqual(
+            game_values,
+            [f"game:{game}" for game in GAME_ORDER] + ["game:monthly_king"])
         self.assertEqual(self.roots["help"][1], [("ヘルプを表示", "overview")])
 
     def test_generated_roots_equal_registry_generation(self):
@@ -159,7 +169,7 @@ class AICandidatesTest(unittest.TestCase):
         # E-9: general:status / general:exp_status は表示系ショートカットで
         # AI 経由では実行できないため候補から除外された（別テストで担保）。
         for key in ("vc:join", "vc:leave",
-                    "support:bumprta_status", "support:vc_log",
+                    "support:bumprta_bump", "support:vc_log",
                     "vc:record_status", "vc:record_pitch", "vc:echo_status",
                     "vc:karaoke_score", "vc:changer_stop", "vc:changer_status",
                     "vc:gvc_room_list", "vc:gvc_chat_disconnect", "vc:tts_stop",
@@ -181,10 +191,15 @@ class AICandidatesTest(unittest.TestCase):
 
 
 class ConfirmTierTest(unittest.TestCase):
-    """D-3 決定: 7件を risk="confirm" に格上げし、残り22件は blocked 維持。"""
+    """D-3 決定: confirm 格上げと blocked 維持の集合を固定する。
+
+    機能数再編で旧 bumprta_on/off は boardNotify ジャンルへ統合され
+    レジストリから外れたため confirm は vc の5件のみ。blocked には
+    再編で独立化した入口のうちコイン授受・加工・個人設定・対話フロー
+    にあたる10件が加わる。
+    """
 
     CONFIRM_IDS = {
-        "support:bumprta_on", "support:bumprta_off",
         "vc:echo_start", "vc:karaoke_start", "vc:global_start", "vc:match_start",
         "vc:changer_start",
     }
@@ -201,6 +216,11 @@ class ConfirmTierTest(unittest.TestCase):
         "general:slot", "general:double", "general:blackjack", "general:dice",
         "general:bj_duel",
         "general:daily_report", "general:gacha",
+        # 機能数再編で独立化した入口（元の集約先と同じ方針で blocked）。
+        "general:item_sell", "general:starter_claim", "general:daily_bonus_claim",
+        "general:craft_commission", "general:miq_refuse", "general:miq_create",
+        "general:ai_chat", "general:ai_generate",
+        "general:role_shop_manage", "general:gacha_party",
         "support:clear", "support:role_bulk", "support:muted", "support:ticket",
         "support:honeypot", "support:whisper", "support:binjou",
         "support:message_log", "support:moderation_log",

@@ -839,7 +839,7 @@ class SnsRemoveSelect(discord.ui.Select):
                     label=f"{SNS_PLATFORMS[sub['platform']]['label']}: {sub['name']}"[:100],
                     value=f"{sub['platform']}:{sub['key']}"[:100],
                 )
-                for sub in parent.settings["subs"]
+                for sub in parent.visible_subs()
             ],
         )
 
@@ -859,7 +859,7 @@ class SnsGithubKindSelect(discord.ui.Select):
     def __init__(self, parent: "SnsNotifyPanel"):
         self.parent_view = parent
         options = []
-        for sub in parent.settings["subs"]:
+        for sub in parent.visible_subs():
             if sub["platform"] != "github":
                 continue
             current = sub.get("options") or {}
@@ -939,14 +939,34 @@ class SnsAddModal(discord.ui.Modal):
 
 
 class SnsNotifyPanel(discord.ui.LayoutView):
-    """SNS通知の設定パネル（Components V2・管理者専用）。"""
+    """SNS通知の設定パネル（Components V2・管理者専用）。
 
-    def __init__(self, cog: "SupportCog", settings: dict, notice: str | None = None):
+    preset（機能数再編のプラットフォーム別入口）:
+    - ``platform`` を渡すと購読一覧・追加ボタン・解除セレクトをその
+      プラットフォーム分だけに絞る（共通設定は従来どおり表示）。
+    - ``live=True`` は YouTube ライブ設定（live_enabled / live_role_id）
+      にスコープする（platform="youtube" と併用する）。
+    preset は refresh でも保持される（属性として保持し、再構築時に使う）。
+    """
+
+    def __init__(self, cog: "SupportCog", settings: dict, notice: str | None = None,
+                 platform: str | None = None, live: bool = False):
         super().__init__(timeout=300)
         self.cog = cog
         self.settings = settings
         self.notice = notice
+        self.platform = platform if platform in SNS_PLATFORMS else None
+        self.live = bool(live)
+        if self.live:
+            self.platform = "youtube"
         self._build()
+
+    def visible_subs(self) -> list:
+        """preset で絞った購読一覧（preset なしなら全件）。"""
+        subs = self.settings["subs"]
+        if self.platform is None:
+            return list(subs)
+        return [sub for sub in subs if sub["platform"] == self.platform]
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if can_manage_support_panel(interaction):
@@ -976,7 +996,7 @@ class SnsNotifyPanel(discord.ui.LayoutView):
         )
 
     def _subs_text(self) -> str:
-        subs = self.settings["subs"]
+        subs = self.visible_subs()
         if not subs:
             return "登録なし。下のボタンからアカウントを追加してください。"
         lines = []
@@ -997,34 +1017,63 @@ class SnsNotifyPanel(discord.ui.LayoutView):
 
     def _build(self):
         self.clear_items()
-        head = "## 📡 SNS新着通知\nX・YouTube・GitHub・RSSの新着をチャンネルへ通知します。（管理者専用）"
+        if self.live:
+            head = "## 📡 YouTubeライブ通知\nYouTubeのライブ開始をチャンネルへ通知します。（管理者専用）"
+        elif self.platform is not None:
+            meta = SNS_PLATFORMS[self.platform]
+            head = f"## 📡 {meta['label']}通知\n{meta['label']}の新着をチャンネルへ通知します。（管理者専用）"
+        else:
+            head = "## 📡 SNS新着通知\nX・YouTube・GitHub・RSSの新着をチャンネルへ通知します。（管理者専用）"
         if self.notice:
             head = f"{self.notice}\n\n{head}"
 
+        visible = self.visible_subs()
         children: list[discord.ui.Item] = [
             discord.ui.TextDisplay(head),
             discord.ui.TextDisplay(self._status_text()),
             discord.ui.Separator(),
-            discord.ui.TextDisplay(f"### 登録アカウント ({len(self.settings['subs'])}/{SNS_MAX_SUBS})\n{self._subs_text()}"),
+            discord.ui.TextDisplay(f"### 登録アカウント ({len(visible)}/{SNS_MAX_SUBS})\n{self._subs_text()}"),
             discord.ui.Separator(),
             discord.ui.ActionRow(SnsChannelSelect(self)),
-            discord.ui.ActionRow(SnsRoleSelect(self)),
-            discord.ui.ActionRow(SnsLiveRoleSelect(self)),
-            discord.ui.ActionRow(
+        ]
+        if self.live:
+            # ライブ設定にスコープ: ライブ用メンションとライブ切替だけ出す。
+            children.append(discord.ui.ActionRow(SnsLiveRoleSelect(self)))
+            children.append(discord.ui.ActionRow(
+                SnsAddButton(self, "youtube"),
+                SnsToggleButton(self),
+                SnsKindToggleButton(self, "live"),
+            ))
+        elif self.platform is not None:
+            children.append(discord.ui.ActionRow(SnsRoleSelect(self)))
+            if self.platform == "youtube":
+                children.append(discord.ui.ActionRow(SnsLiveRoleSelect(self)))
+            children.append(discord.ui.ActionRow(
+                SnsAddButton(self, self.platform),
+                SnsToggleButton(self),
+            ))
+            if self.platform == "youtube":
+                children.append(discord.ui.ActionRow(
+                    SnsKindToggleButton(self, "live"),
+                    SnsKindToggleButton(self, "uploads"),
+                ))
+        else:
+            children.append(discord.ui.ActionRow(SnsRoleSelect(self)))
+            children.append(discord.ui.ActionRow(SnsLiveRoleSelect(self)))
+            children.append(discord.ui.ActionRow(
                 SnsAddButton(self, "youtube"),
                 SnsAddButton(self, "x"),
                 SnsAddButton(self, "github"),
                 SnsAddButton(self, "rss"),
                 SnsToggleButton(self),
-            ),
-            discord.ui.ActionRow(
+            ))
+            children.append(discord.ui.ActionRow(
                 SnsKindToggleButton(self, "live"),
                 SnsKindToggleButton(self, "uploads"),
-            ),
-        ]
-        if any(s["platform"] == "github" for s in self.settings["subs"]):
+            ))
+        if any(s["platform"] == "github" for s in visible):
             children.append(discord.ui.ActionRow(SnsGithubKindSelect(self)))
-        if self.settings["subs"]:
+        if visible:
             children.append(discord.ui.ActionRow(SnsRemoveSelect(self)))
 
         self.add_item(discord.ui.Container(*children, accent_colour=0xFFFFFF))
@@ -1058,7 +1107,8 @@ class SnsSupportMixin:
         return self._sns_locks.setdefault(guild_id, asyncio.Lock())
 
 
-    async def show_sns_notify_settings(self, interaction: discord.Interaction):
+    async def show_sns_notify_settings(self, interaction: discord.Interaction,
+                                       platform: str | None = None, live: bool = False):
         if interaction.guild is None:
             return await interaction.response.send_message(
                 "この機能はサーバー内で利用できます。",
@@ -1075,7 +1125,7 @@ class SnsSupportMixin:
         await store.ensure_loaded()
         settings = get_sns_settings(store, interaction.guild.id)
         await interaction.response.send_message(
-            view=SnsNotifyPanel(self, settings),
+            view=SnsNotifyPanel(self, settings, platform=platform, live=live),
             ephemeral=True,
         )
 

@@ -289,6 +289,52 @@ class DeleteProductView(discord.ui.View):
         self.stop()
 
 
+class RoleShopManageView(discord.ui.View):
+    """商品管理の独立入口（登録・削除の2ボタンを束ねる）。
+
+    general:role_shop_manage の着地先。購入導線（RoleShopView）とは
+    分け、管理者だけが開ける ephemeral で出す。各ボタンは既存の
+    RegisterRoleView / DeleteProductView をそのまま開く。
+    """
+
+    def __init__(self, cog: "RoleShopCog", guild: discord.Guild,
+                 user_id: int, snapshot: dict):
+        super().__init__(timeout=180)
+        self.cog = cog
+        self.guild = guild
+        self.user_id = user_id
+        self.snapshot = snapshot
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        return interaction.user.id == self.user_id
+
+    def embed(self) -> discord.Embed:
+        count = len(self.snapshot["products"])
+        return discord.Embed(
+            title="ロールショップ商品管理",
+            description=f"登録中の商品: **{count} 件**\n"
+                        "商品の登録・削除は下のボタンから行えます。",
+            color=SHOP_COLOR)
+
+    @discord.ui.button(label="商品を登録", style=discord.ButtonStyle.primary)
+    async def register(self, interaction: discord.Interaction,
+                       button: discord.ui.Button):
+        view = RegisterRoleView(self.cog, self.guild, self.user_id)
+        await interaction.response.send_message(
+            "登録するロールを選んでください。", view=view, ephemeral=True)
+
+    @discord.ui.button(label="商品を削除", style=discord.ButtonStyle.danger)
+    async def delete(self, interaction: discord.Interaction,
+                     button: discord.ui.Button):
+        if not self.snapshot["products"]:
+            return await interaction.response.send_message(
+                "登録されている商品がありません。", ephemeral=True)
+        view = DeleteProductView(
+            self.cog, self.guild, self.snapshot["products"], self.user_id)
+        await interaction.response.send_message(
+            "削除する商品を選んでください。", view=view, ephemeral=True)
+
+
 class RoleShopCog(commands.Cog):
     def __init__(self, bot: commands.Bot,
                  store: shop_core.RoleShopStore | None = None,
@@ -361,6 +407,27 @@ class RoleShopCog(commands.Cog):
             view.message = await interaction.original_response()
         except Exception:
             logger.exception("role_shop: パネルのメッセージ取得に失敗しました")
+
+    async def open_manage(self, interaction: discord.Interaction):
+        """商品管理の独立入口（general:role_shop_manage）。
+
+        購入パネル（show_shop）と導線を分け、管理権限がある人だけに
+        登録・削除の入口（RoleShopManageView）を ephemeral で開く。
+        権限の最終判定は register_product / unregister_product 側でも
+        行う（B-4 の多層防御は従来どおり）。
+        """
+        guild = interaction.guild
+        if guild is None:
+            return await interaction.response.send_message(
+                "ロールショップはサーバー内でのみ使えます。", ephemeral=True)
+        snapshot = await self.snapshot(guild, interaction.user.id)
+        if not snapshot["can_manage"]:
+            return await interaction.response.send_message(
+                "商品を管理するにはロール管理（Manage Roles）権限が必要です。",
+                ephemeral=True)
+        view = RoleShopManageView(self, guild, interaction.user.id, snapshot)
+        await interaction.response.send_message(
+            view=_wrap(view), ephemeral=True)
 
     # ------------------------------------------------------------------ 管理
     def _bot_can_manage(self, guild: discord.Guild,

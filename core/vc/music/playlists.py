@@ -29,8 +29,9 @@ from core.vc import voice_restore
 from core.vc.voice_session import SHARED_FEATURES, VoiceBusy, get_manager
 from core.vc.voice_media import add_audio_source, has_audio_source, remove_audio_source
 from core.support.legacy import Responder
-from core.support.emojis import FAILED, MUSIC, SUCCESS
+from core.support.emojis import BOOK, FAILED, MUSIC, SUCCESS
 from core.vc.music.music_activity import build_music_activity_snapshot
+from core.vc.music.ui import PlaylistLibraryView  # noqa: F401
 
 from core.vc.music.common import *  # noqa: F401,F403 - shared helpers/constants
 
@@ -38,6 +39,18 @@ logger = logging.getLogger("cogs.sio_music")
 
 
 class PlaylistsMixin:
+    async def _playlist_library_impl(self, r: Responder):
+        """プレイリストのライブラリViewを開く（保存・一覧・再生・削除の入口）。
+
+        音楽パネルのライブラリボタンと /vc の入口（music_playlist）が共有する。
+        """
+        embed = discord.Embed(
+            title=f"{BOOK} ライブラリ",
+            description="プレイリストを保存・一覧表示・再生できます。対象範囲を選択してください。",
+            color=0x9B59B6,
+        )
+        await r.send(embed=embed, view=PlaylistLibraryView(self), ephemeral=True)
+
     def _serialize_personal_playlist(self, guild_id: int):
         """現在曲と待機キューを、再解析可能な入力だけで保存する。"""
         state = self.get_state(guild_id)

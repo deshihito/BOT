@@ -169,6 +169,25 @@ class ManageMixin:
         await r.send(f"📌 常設ルーム **{room_name}**: {result}")
 
 
+    async def _text_chat_toggle_impl(self, r: Responder, room_name: str):
+        """グロチャ自動接続設定（ルームの text_chat）のトグルViewを開く（/vc の入口 gvc_auto_connect）。
+
+        切り替え自体は _TextChatToggleView が行う。View へは開いた人ではなく
+        ルーム作成者のIDを渡す（切り替えられるのは作成者だけ、という
+        View 側の判定を入口が増えても保つため）。
+        """
+        await r.defer()
+        room = ROOMS.get(room_name)
+        if room is None:
+            return await r.send(
+                f"{FAILED} ルーム **{room_name}** は存在しません。", ephemeral=True
+            )
+        embed = discord.Embed(title=f"🌐 グロチャ自動接続設定: {room_name}", color=0x3498DB)
+        embed.add_field(name="グロチャ自動接続", value="ON" if room.text_chat else "OFF", inline=False)
+        embed.set_footer(
+            text="ON にすると、VC参加時にそのテキストチャンネルもグロチャへ自動接続します")
+        await r.send(embed=embed, view=_TextChatToggleView(self, room_name, room.owner_id))
+
     async def _room_info_impl(self, r: Responder, room_name: str):
         await r.defer()
         room = ROOMS.get(room_name)
