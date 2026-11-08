@@ -31,6 +31,35 @@ from core.vc.globalvc.rooms import RoomConfig  # noqa: E402
 from core.vc.globalvc.ui import _TextChatToggleView  # noqa: E402
 
 
+def _walk_items(item):
+    yield item
+    for child in getattr(item, "children", None) or []:
+        yield from _walk_items(child)
+
+
+def _view_text(view):
+    """Components V2 ビューから TextDisplay のテキストを集める（テスト用）。"""
+    out = []
+    for top in getattr(view, "children", []):
+        for item in _walk_items(top):
+            content = getattr(item, "content", None)
+            if isinstance(content, str):
+                out.append(content)
+    return "\n".join(out)
+
+
+def _media_urls(view):
+    """Components V2 ビューの MediaGallery が参照する URL を集める（テスト用）。"""
+    urls = []
+    for top in getattr(view, "children", []):
+        for item in _walk_items(top):
+            for entry in getattr(item, "items", None) or []:
+                url = getattr(getattr(entry, "media", None), "url", None)
+                if url:
+                    urls.append(url)
+    return urls
+
+
 def fake_member(user_id, name="user", bot=False):
     return types.SimpleNamespace(id=user_id, display_name=name, name=name, bot=bot)
 
@@ -169,8 +198,10 @@ class MembersImplTest(RoomStateTestCase, unittest.IsolatedAsyncioTestCase):
         content, kwargs = r.sent[-1]
         self.assertIn("file", kwargs)
         self.assertEqual(kwargs["file"].filename, "gvc_members.png")
-        self.assertIn("3人", kwargs["embed"].title)
-        self.assertEqual(kwargs["embed"].image.url, "attachment://gvc_members.png")
+        # 表示は Components V2（EmbedLayoutView）で送られる
+        view = kwargs["view"]
+        self.assertIn("3人", _view_text(view))
+        self.assertIn("attachment://gvc_members.png", _media_urls(view))
 
     async def test_not_joined_guild_gets_error(self):
         r = FakeResponder(guild_id=99)

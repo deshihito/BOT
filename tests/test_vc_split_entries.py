@@ -183,9 +183,11 @@ class ImplLandingTest(unittest.IsolatedAsyncioTestCase):
         responder = _FakeResponder()
         await _Cog()._playlist_library_impl(responder)
         self.assertEqual(len(responder.sent), 1)
-        self.assertIsInstance(responder.sent[0]["view"], PlaylistLibraryView)
+        # Components V2: パネルは PanelLayoutView で包んで送る（実体は .panel）
+        panel = responder.sent[0]["view"].panel
+        self.assertIsInstance(panel, PlaylistLibraryView)
         self.assertTrue(responder.sent[0]["ephemeral"])
-        self.assertIn("ライブラリ", responder.sent[0]["embed"].title)
+        self.assertIn("ライブラリ", panel.embed().title)
 
     async def test_autoplay_panel_impl_opens_history_view(self):
         from core.vc.music.autoplay import AutoplayMixin
@@ -200,10 +202,11 @@ class ImplLandingTest(unittest.IsolatedAsyncioTestCase):
         responder = _FakeResponder()
         await _Cog()._autoplay_panel_impl(responder)
         self.assertEqual(len(responder.sent), 1)
-        view = responder.sent[0]["view"]
+        # Components V2: パネルは PanelLayoutView で包んで送る（実体は .panel）
+        view = responder.sent[0]["view"].panel
         self.assertIsInstance(view, AutoplayHistoryView)
         self.assertTrue(any(isinstance(c, AutoplayToggleButton) for c in view.children))
-        self.assertIn("ON", responder.sent[0]["embed"].description)
+        self.assertIn("ON", view.embed().description)
 
     async def test_text_chat_toggle_impl_opens_view_for_owner(self):
         from core.vc.globalvc import rooms as rooms_mod
