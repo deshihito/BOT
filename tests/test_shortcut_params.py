@@ -160,7 +160,8 @@ class VcParamSpecConsistencyTest(unittest.TestCase):
         "global_start": {"room", "password"},
         # 導線最適化 M4 で追加したフォーム系
         "echo_delay": {"delay"},
-        "gvc_room_create": {"name", "max_servers", "password", "desc"},
+        "gvc_room_create": {"name", "max_servers", "password", "desc", "theme"},
+        "gvc_room_create_perm": {"name", "max_servers", "password", "desc", "theme"},
         "gvc_room_info": {"name"},
         "gvc_room_delete": {"name"},
         "gvc_chat_connect": {"name", "password"},
