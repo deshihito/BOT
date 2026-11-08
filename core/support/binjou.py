@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """便乗 (binjou) の UI と設定取得。元 cogs/support.py から分割。"""
 from __future__ import annotations
-from core.support.messages import SETTINGS_UPDATE_FAILED
+from core.support.messages import MANAGE_GUILD_REQUIRED, SETTINGS_UPDATE_FAILED
 from core.support.emojis import THINKING
 
 from .common import *
@@ -63,7 +63,7 @@ class EmojiBinjouView(discord.ui.View):
     async def manage_custom(self, interaction, source, target, remove=False):
         permissions = getattr(interaction.user, "guild_permissions", None)
         if not (getattr(permissions, "manage_guild", False) or getattr(permissions, "administrator", False)):
-            return await interaction.response.send_message("この設定にはサーバー管理権限が必要です。", ephemeral=True)
+            return await interaction.response.send_message(MANAGE_GUILD_REQUIRED, ephemeral=True)
         try:
             source_emoji = normalize_binjou_emoji(source)
             source_key = str(source_emoji)
@@ -88,7 +88,7 @@ class EmojiBinjouView(discord.ui.View):
             or getattr(permissions, "administrator", False)
         ):
             return await interaction.response.send_message(
-                "この設定にはサーバー管理権限が必要です。",
+                MANAGE_GUILD_REQUIRED,
                 ephemeral=True,
             )
 
@@ -117,11 +117,11 @@ class EmojiBinjouView(discord.ui.View):
     async def thinking_off(self, interaction: discord.Interaction, button: discord.ui.Button):
         await self.set_enabled(interaction, "thinking", False)
 
-    @discord.ui.button(label="👍 オン", style=discord.ButtonStyle.success, row=1)
+    @discord.ui.button(label="オン", emoji="👍", style=discord.ButtonStyle.success, row=1)
     async def thumbsup_on(self, interaction: discord.Interaction, button: discord.ui.Button):
         await self.set_enabled(interaction, "thumbsup", True)
 
-    @discord.ui.button(label="👍 オフ", style=discord.ButtonStyle.secondary, row=1)
+    @discord.ui.button(label="オフ", emoji="👍", style=discord.ButtonStyle.secondary, row=1)
     async def thumbsup_off(self, interaction: discord.Interaction, button: discord.ui.Button):
         await self.set_enabled(interaction, "thumbsup", False)
 

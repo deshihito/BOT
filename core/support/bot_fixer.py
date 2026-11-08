@@ -11,7 +11,7 @@ from .common import *
 from core.support import bot_control, command_control
 from core.general import action_registry
 from core.support.bot_control import BOT_CONTROL_SECTION
-from core.support.messages import SETTINGS_UPDATE_FAILED
+from core.support.messages import MANAGE_GUILD_REQUIRED, SETTINGS_UPDATE_FAILED
 from core.support.command_control import (
     COMMAND_CONTROL_SECTION,
     MODE_ALLOW,
@@ -131,6 +131,20 @@ class _ActionSelect(discord.ui.Select):
         await parent.save(interaction, notice)
 
 
+def _parse_rate_values(raw_count: str, raw_minutes: str):
+    """レート制限の入力を検証し ((count, minutes, window_seconds), None) か (None, エラー文) を返す。"""
+    try:
+        count = int(raw_count)
+        minutes = int(raw_minutes)
+    except ValueError:
+        return None, "回数と期間（分）は数字で入力してください。"
+    window = minutes * 60
+    if not (1 <= count <= command_control.RATE_MAX_COUNT) or not (60 <= window <= command_control.RATE_MAX_WINDOW_SECONDS):
+        return None, (f"回数は1〜{command_control.RATE_MAX_COUNT}、"
+                      f"期間は1〜{command_control.RATE_MAX_WINDOW_SECONDS // 60}分で入力してください。")
+    return (count, minutes, window), None
+
+
 class _RateModal(discord.ui.Modal, title="レート制限"):
     count = discord.ui.TextInput(label="回数（空欄で解除）", required=False, max_length=5)
     minutes = discord.ui.TextInput(label="期間（分）", required=False, max_length=6)
@@ -152,14 +166,10 @@ class _RateModal(discord.ui.Modal, title="レート制限"):
         if not raw_count and not raw_minutes:
             parent.settings["rates"].pop(self.action_id, None)
             return await parent.save(interaction, f"{self.action_label} のレート制限を解除しました。")
-        try:
-            count = int(raw_count)
-            minutes = int(raw_minutes)
-        except ValueError:
-            return await parent.fail(interaction, "回数と期間（分）は数字で入力してください。")
-        window = minutes * 60
-        if not (1 <= count <= command_control.RATE_MAX_COUNT) or not (60 <= window <= command_control.RATE_MAX_WINDOW_SECONDS):
-            return await parent.fail(interaction, "回数は1〜1000、期間は1〜10080分で入力してください。")
+        parsed, error = _parse_rate_values(raw_count, raw_minutes)
+        if error:
+            return await parent.fail(interaction, error)
+        count, minutes, window = parsed
         parent.settings["rates"][self.action_id] = {"count": count, "window_seconds": window}
         await parent.save(interaction, f"{self.action_label} にレート制限（{count}回／{minutes}分）を設定しました。")
 
@@ -268,14 +278,10 @@ class _BotRateModal(discord.ui.Modal, title="ボットのレート制限"):
             entry["rate"] = None
             parent.bot_settings[str(parent.bot_target)] = entry
             return await parent.save_bot(interaction, "レート制限を解除しました。", parent.bot_target, entry)
-        try:
-            count = int(raw_count)
-            minutes = int(raw_minutes)
-        except ValueError:
-            return await parent.fail(interaction, "回数と期間（分）は数字で入力してください。")
-        window = minutes * 60
-        if not (1 <= count <= command_control.RATE_MAX_COUNT) or not (60 <= window <= command_control.RATE_MAX_WINDOW_SECONDS):
-            return await parent.fail(interaction, "回数は1〜1000、期間は1〜10080分で入力してください。")
+        parsed, error = _parse_rate_values(raw_count, raw_minutes)
+        if error:
+            return await parent.fail(interaction, error)
+        count, minutes, window = parsed
         entry["rate"] = {"count": count, "window_seconds": window}
         parent.bot_settings[str(parent.bot_target)] = entry
         await parent.save_bot(
@@ -316,7 +322,7 @@ class BotFixerPanel(discord.ui.LayoutView):
         if getattr(permissions, "administrator", False) or getattr(permissions, "manage_guild", False):
             return True
         await interaction.response.send_message(
-            "この設定にはサーバー管理権限が必要です。",
+            MANAGE_GUILD_REQUIRED,
             ephemeral=True,
         )
         return False
@@ -407,7 +413,7 @@ class BotFixerPanel(discord.ui.LayoutView):
         if self.bot_target is not None:
             lines.append(f"\n編集中: <@{self.bot_target}>")
         else:
-            lines.append("\n下のセレクトでボットを選ぶと、そのボットの許可チャンネルとレート制限を編集できます。")
+            lines.append("\nボットを選ぶと、そのボットの許可チャンネルとレート制限を編集できます。")
         return "\n".join(lines)
 
     def _build_bot(self):

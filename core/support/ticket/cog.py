@@ -12,6 +12,8 @@ import discord
 from discord.ext import commands
 
 from core.support import guild_settings
+from core.support.common import can_manage_guild
+from core.support.messages import MANAGE_GUILD_REQUIRED
 from core.support.panel_v2 import as_panel_v2, edit_panel_v2
 
 logger = logging.getLogger(__name__)
@@ -299,7 +301,7 @@ class TicketAdvancedButton(discord.ui.Button):
 
     async def callback(self, interaction: discord.Interaction):
         if not self.parent_view.can_manage(interaction):
-            return await interaction.response.send_message("この設定にはサーバー管理権限が必要です。", ephemeral=True)
+            return await interaction.response.send_message(MANAGE_GUILD_REQUIRED, ephemeral=True)
         await edit_panel_v2(interaction, as_panel_v2(TicketAdvancedSettingsView(self.parent_view.cog, self.parent_view.settings)))
 
 
@@ -317,15 +319,14 @@ class TicketSettingsView(discord.ui.View):
 
     @staticmethod
     def can_manage(interaction: discord.Interaction) -> bool:
-        perms = getattr(interaction.user, "guild_permissions", None)
-        return bool(getattr(perms, "administrator", False) or getattr(perms, "manage_guild", False))
+        return can_manage_guild(interaction)
 
     def embed(self):
         return _ticket_embed(self.settings, self.notice)
 
     async def save_and_refresh(self, interaction: discord.Interaction, notice: str | None = None):
         if not self.can_manage(interaction):
-            return await interaction.response.send_message("この設定にはサーバー管理権限が必要です。", ephemeral=True)
+            return await interaction.response.send_message(MANAGE_GUILD_REQUIRED, ephemeral=True)
         await interaction.response.defer()
         await self.cog.save_settings(interaction.guild_id, self.settings)
         self.notice = notice
@@ -367,7 +368,7 @@ class TicketTypesModal(discord.ui.Modal):
             default=format_ticket_types(parent.settings.get("types") or [])[:1000],
             max_length=1000,
             required=False,
-            placeholder="例: 質問 | カテゴリID | 操作ロールID\n不具合報告",
+            placeholder="例: 質問 | カテゴリID | 操作ロールID\n不具合報告\n（IDは開発者モードをオンにして右クリック→「IDをコピー」）",
         )
         self.add_item(self.types_input)
 
@@ -534,7 +535,7 @@ class TicketCog(commands.Cog):
             message = await channel.send(
                 embed=discord.Embed(
                     title="お問い合わせチケット",
-                    description="お問い合わせやサポートが必要な場合は、下のボタンからチケットを作成してください。",
+                    description="お問い合わせやサポートが必要な場合はこちらから。",
                     color=0xFFFFFF,
                 ),
                 view=TicketPanelView(settings.get("types")),
@@ -862,6 +863,8 @@ class TicketCog(commands.Cog):
     async def handle_advanced(self, interaction: discord.Interaction, action: str):
         if interaction.guild_id is None:
             return
+        if not TicketSettingsView.can_manage(interaction):
+            return await interaction.response.send_message(MANAGE_GUILD_REQUIRED, ephemeral=True)
         store = guild_settings.get_store()
         await store.ensure_loaded()
         settings = get_ticket_settings(store, interaction.guild_id)

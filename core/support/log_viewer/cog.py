@@ -7,10 +7,7 @@ from core.support.emojis import FAILED
 
 logger = logging.getLogger("cogs.log_viewer")
 
-ALLOWED_USER_IDS = {
-    1320705325686587408,  # ← ここを実際のユーザーIDに置き換える
-    1000302102473613373,
-}
+from core.support.terminal.cog import ALLOWED_USER_IDS  # noqa: F401  正は terminal 側
 
 # 有効なログレベルの定義（優先度順）
 VALID_LEVELS = {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}
@@ -153,7 +150,7 @@ class LogViewer(commands.Cog):
             await ctx.send(f"{FAILED} ログ取得中にエラーが発生しました。")
         except Exception:
             logger.debug("エラー通知の送信に失敗しました", exc_info=True)
-        print(f"[LogViewer] logs command error: {error}")
+        logger.error("[LogViewer] logs command error: %s", error)
 
 
 async def setup(bot: commands.Bot):

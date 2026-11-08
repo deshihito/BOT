@@ -2,12 +2,16 @@
 """活動ログ / モデレーションログ / VCログの UI。元 cogs/support.py から分割。"""
 from __future__ import annotations
 
+import datetime
+
 from .common import *
-from core.support.messages import SETTINGS_UPDATE_FAILED
+from core.support.messages import DESTINATION_UPDATE_FAILED, MANAGE_GUILD_REQUIRED, SETTINGS_UPDATE_FAILED
 
 
-class ActivityLogChannelSelect(discord.ui.ChannelSelect):
-    def __init__(self, parent: "ActivityLogSettingsView"):
+class LogChannelSelect(discord.ui.ChannelSelect):
+    """履歴の送信先チャンネルを選ぶ共通セレクト（活動・モデレーション・VC 共通）。"""
+
+    def __init__(self, parent):
         self.parent_view = parent
         super().__init__(
             placeholder="履歴を送るテキストチャンネルを選択",
@@ -19,7 +23,7 @@ class ActivityLogChannelSelect(discord.ui.ChannelSelect):
     async def callback(self, interaction: discord.Interaction):
         if not self.parent_view.can_manage(interaction):
             return await interaction.response.send_message(
-                "この設定にはサーバー管理権限が必要です。",
+                MANAGE_GUILD_REQUIRED,
                 ephemeral=True,
             )
 
@@ -34,11 +38,16 @@ class ActivityLogChannelSelect(discord.ui.ChannelSelect):
             )
             await self.parent_view.refresh(interaction, "送信先を設定しました。")
         except Exception:
-            logger.exception("履歴送信先の更新に失敗しました")
+            logger.exception(
+                "履歴送信先の更新に失敗しました (section=%s)", self.parent_view.section)
             await interaction.followup.send(
-                "送信先の更新に失敗しました。時間をおいて再度お試しください。解決しない場合はBotの運営に連絡してください。",
+                DESTINATION_UPDATE_FAILED,
                 ephemeral=True,
             )
+
+
+ActivityLogChannelSelect = LogChannelSelect  # 互換名
+VCLogChannelSelect = LogChannelSelect  # 互換名
 
 
 class ModerationActionToggle(discord.ui.Button):
@@ -80,11 +89,7 @@ class ActivityLogSettingsView(discord.ui.View):
 
     @staticmethod
     def can_manage(interaction: discord.Interaction) -> bool:
-        permissions = getattr(interaction.user, "guild_permissions", None)
-        return bool(
-            getattr(permissions, "manage_guild", False)
-            or getattr(permissions, "administrator", False)
-        )
+        return can_manage_guild(interaction)
 
     def embed(self, notice: str | None = None) -> discord.Embed:
         channel_id = self.settings.get("channel_id")
@@ -126,7 +131,7 @@ class ActivityLogSettingsView(discord.ui.View):
     async def set_enabled(self, interaction: discord.Interaction, enabled: bool):
         if not self.can_manage(interaction):
             return await interaction.response.send_message(
-                "この設定にはサーバー管理権限が必要です。",
+                MANAGE_GUILD_REQUIRED,
                 ephemeral=True,
             )
 
@@ -155,7 +160,7 @@ class ActivityLogSettingsView(discord.ui.View):
     async def toggle_action(self, interaction: discord.Interaction, action: str):
         if not self.can_manage(interaction):
             return await interaction.response.send_message(
-                "この設定にはサーバー管理権限が必要です。",
+                MANAGE_GUILD_REQUIRED,
                 ephemeral=True,
             )
 
@@ -190,116 +195,21 @@ class ActivityLogSettingsView(discord.ui.View):
         await self.set_enabled(interaction, False)
 
 
-class VCLogChannelSelect(discord.ui.ChannelSelect):
-    def __init__(self, parent: "VCLogSettingsView"):
-        self.parent_view = parent
-        super().__init__(
-            placeholder="履歴を送るテキストチャンネルを選択",
-            channel_types=[discord.ChannelType.text, discord.ChannelType.news],
-            min_values=1,
-            max_values=1,
-        )
+class VCLogSettingsView(ActivityLogSettingsView):
+    """VC入退室履歴の設定（履歴設定ビューの共通実装の VC 版）。"""
 
-    async def callback(self, interaction: discord.Interaction):
-        if not self.parent_view.can_manage(interaction):
-            return await interaction.response.send_message(
-                "この設定にはサーバー管理権限が必要です。",
-                ephemeral=True,
-            )
-
-        await interaction.response.defer()
-
-        try:
-            channel = self.values[0]
-            await guild_settings.get_store().update(
-                interaction.guild_id,
-                VC_LOG_SECTION,
-                channel_id=channel.id,
-            )
-            await self.parent_view.refresh(interaction, "送信先を設定しました。")
-        except Exception:
-            logger.exception("VC履歴送信先の更新に失敗しました")
-            await interaction.followup.send(
-                "送信先の更新に失敗しました。時間をおいて再度お試しください。解決しない場合はBotの運営に連絡してください。",
-                ephemeral=True,
-            )
-
-
-class VCLogSettingsView(discord.ui.View):
     def __init__(self, cog: "SupportCog", settings: dict):
-        super().__init__(timeout=300)
-        self.cog = cog
-        self.settings = settings
-        self.add_item(VCLogChannelSelect(self))
-
-    @staticmethod
-    def can_manage(interaction: discord.Interaction) -> bool:
-        permissions = getattr(interaction.user, "guild_permissions", None)
-        return bool(
-            getattr(permissions, "manage_guild", False)
-            or getattr(permissions, "administrator", False)
-        )
-
-    def embed(self, notice: str | None = None) -> discord.Embed:
-        channel_id = self.settings.get("channel_id")
-        channel_label = f"<#{channel_id}>" if channel_id else "未設定"
-
-        description = (
-            f"状態: **{'オン' if self.settings['enabled'] else 'オフ'}**\n"
-            f"送信先: {channel_label}"
-        )
-
-        if notice:
-            description = f"{notice}\n\n{description}"
-
-        description += "\n\nVC入室・退出・VC間の移動を記録します。"
-
-        return discord.Embed(
-            title="VC入退室履歴の設定",
-            description=description,
-            color=0x3498DB,
+        super().__init__(
+            cog,
+            VC_LOG_SECTION,
+            "VC入退室履歴の設定",
+            "VC入室・退出・VC間の移動を記録します。",
+            settings,
         )
 
     async def refresh(self, interaction: discord.Interaction, notice: str | None = None):
         self.settings = get_vc_log_settings(guild_settings.get_store(), interaction.guild_id)
         await edit_panel_v2(interaction, as_panel_v2(self))
-
-    async def set_enabled(self, interaction: discord.Interaction, enabled: bool):
-        if not self.can_manage(interaction):
-            return await interaction.response.send_message(
-                "この設定にはサーバー管理権限が必要です。",
-                ephemeral=True,
-            )
-
-        if enabled and self.settings.get("channel_id") is None:
-            return await interaction.response.send_message(
-                "先に履歴を送るテキストチャンネルを選択してください。",
-                ephemeral=True,
-            )
-
-        await interaction.response.defer()
-
-        try:
-            await guild_settings.get_store().update(
-                interaction.guild_id,
-                VC_LOG_SECTION,
-                enabled=enabled,
-            )
-            await self.refresh(interaction, f"履歴を{'オン' if enabled else 'オフ'}にしました。")
-        except Exception:
-            logger.exception("VC履歴設定の更新に失敗しました")
-            await interaction.followup.send(
-                SETTINGS_UPDATE_FAILED,
-                ephemeral=True,
-            )
-
-    @discord.ui.button(label="オン", style=discord.ButtonStyle.success, row=1)
-    async def turn_on(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await self.set_enabled(interaction, True)
-
-    @discord.ui.button(label="オフ", style=discord.ButtonStyle.secondary, row=1)
-    async def turn_off(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await self.set_enabled(interaction, False)
 
 
 class LogSupportMixin:
@@ -377,8 +287,7 @@ class LogSupportMixin:
 
     @staticmethod
     def _clip(value, limit=1024):
-        text = str(value or "(内容なし)")
-        return text if len(text) <= limit else text[:limit - 1] + "…"
+        return self_clip(value, limit)
 
 
     @staticmethod
@@ -481,7 +390,8 @@ class LogSupportMixin:
         )
 
         if new_until is not None:
-            detail = f"タイムアウト期限: {new_until.isoformat()}"
+            until_ts = int(new_until.replace(tzinfo=new_until.tzinfo or datetime.timezone.utc).timestamp())
+            detail = f"タイムアウト期限: <t:{until_ts}:f>"
             title = "タイムアウト（TO）"
         else:
             detail = "タイムアウト解除"

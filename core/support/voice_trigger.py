@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from .common import *
 from core.support.emojis import FAILED
+from core.support.messages import SETTINGS_UPDATE_FAILED
 
 
 # ===== 音声トリガー UI ==================================================
@@ -99,5 +100,5 @@ class VoiceTriggerPanel(discord.ui.LayoutView):
                 interaction.guild_id, VOICE_TRIGGER_SETTINGS_SECTION, **values)
         except Exception:
             logger.exception("音声トリガー設定の更新に失敗")
-            return await interaction.followup.send("設定の更新に失敗しました。", ephemeral=True)
+            return await interaction.followup.send(SETTINGS_UPDATE_FAILED, ephemeral=True)
         await self.refresh(interaction, notice)

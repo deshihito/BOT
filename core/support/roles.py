@@ -56,7 +56,7 @@ class RolePanelUserView(discord.ui.LayoutView):
                 discord.SelectOption(
                     label=role.name[:100],
                     value=str(role.id),
-                    description=f"ID: {role.id}",
+                    
                 )
             )
 
@@ -76,7 +76,6 @@ class RolePanelUserView(discord.ui.LayoutView):
 **このパネルで付与・解除できるロール:**
 {role_list}
 
-ドロップダウンからロールを選択してください。
 まだ持っていないロールは付与され、すでに持っているロールは解除されます。"""
                 ),
                 discord.ui.ActionRow(RolePanelAssignSelect(options)),
@@ -145,7 +144,7 @@ class RolePanelCurrentRoleSelect(discord.ui.Select):
                 discord.SelectOption(
                     label=role.name[:100],
                     value=str(role.id),
-                    description=f"ID: {role.id}",
+                    
                     default=(role_id == parent.selected_role_id),
                 )
             )
@@ -402,8 +401,6 @@ class RolePanelSettingsView(discord.ui.View):
             lines.append("登録ロール: 未設定")
 
         lines.append("")
-        lines.append("※ この設定は管理者のみ変更できます。")
-        lines.append("※ ユーザーはドロップダウンからロールを選んで付与/解除できます。")
 
         return discord.Embed(
             title="ロールパネル作成",
@@ -517,8 +514,7 @@ class RoleBulkView(discord.ui.View):
         selected = self.role.mention if self.role else "未選択"
         return (
             f"対象ロール: {selected}\n"
-            f"対象アカウント: **{self.target_label()}**\n"
-            "下のボタンから付与・剥奪を選びます。"
+            f"対象アカウント: **{self.target_label()}**"
         )
 
     def embed(self):
@@ -535,22 +531,7 @@ class RoleBulkView(discord.ui.View):
         """Return a user-facing reason why the selected role cannot be changed."""
         if self.role is None:
             return "先に対象ロールを選択してください。"
-
-        if self.role.is_default():
-            return "@everyone ロールは操作できません。"
-
-        if getattr(self.role, "managed", False):
-            return "連携サービスが管理するロールは操作できません。"
-
-        me = getattr(self.guild, "me", None)
-        permissions = getattr(getattr(me, "guild_permissions", None), "manage_roles", False)
-        if me is None or not permissions:
-            return "Botに「ロールの管理」権限がありません。"
-
-        if self.role >= me.top_role:
-            return "Botより上位、または同順位のロールは操作できません。"
-
-        return None
+        return assignable_role_error(self.guild, self.role, "操作")
 
     async def choose_action(self, interaction: discord.Interaction, adding: bool):
         if error := self.role_error():

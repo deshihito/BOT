@@ -230,8 +230,6 @@ from core.support.server_setup.cog import (  # noqa: F401
     check_onboarding_permissions,
     has_missing_permissions,
     format_onboarding_report,
-    ModerationModal,
-    SetupWizard,
     ServerSetup,
 )
 

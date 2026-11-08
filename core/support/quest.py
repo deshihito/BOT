@@ -595,7 +595,7 @@ class QuestNotifyPanel(discord.ui.LayoutView):
         s = self.settings
         channel = f"<#{s['channel_id']}>" if s["channel_id"] else "未設定"
         role = f"<@&{s['role_id']}>" if s["role_id"] else "なし"
-        source = urlparse(_quest_feed_url()).hostname or "未設定"
+        source = "Discord Quest 公式フィード" if _quest_feed_url() else "未設定"
         text = (
             f"状態: **{'オン' if s['enabled'] else 'オフ'}**\n"
             f"送信先: {channel}\n"
@@ -607,7 +607,7 @@ class QuestNotifyPanel(discord.ui.LayoutView):
         )
         error = self.cog.quest_last_error()
         if error:
-            text += f"\n-# {FAILED} 直近の取得エラー: {error}"
+            text += f"\n-# {FAILED} 直近の取得に失敗しています。"
         return text
 
     def _build(self):
@@ -673,23 +673,13 @@ class QuestSupportMixin:
 
         cog = self.bot.get_cog("LocalizationCog")
         if cog is not None:
-            for name in (
-                "get_guild_language", "guild_language", "get_language",
-                "get_guild_locale", "get_locale", "language_for", "get_lang",
-            ):
-                fn = getattr(cog, name, None)
-                if not callable(fn):
-                    continue
-                for arg in (guild.id, guild):
-                    try:
-                        value = fn(arg)
-                        if inspect.isawaitable(value):
-                            value = await value
-                    except Exception:
-                        logger.debug("Quest: 言語アクセサの呼び出しに失敗しました", exc_info=True)
-                        continue
-                    if isinstance(value, str) and quest_language_countries(value):
-                        return value.strip(), f"LocalizationCog.{name}"
+            try:
+                value = await cog.get_guild_language(guild.id)
+            except Exception:
+                logger.debug("Quest: 言語アクセサの呼び出しに失敗しました", exc_info=True)
+                value = None
+            if isinstance(value, str) and quest_language_countries(value):
+                return value.strip(), "サーバーの言語設定"
 
         for section in QUEST_LANG_SECTIONS:
             try:
@@ -702,7 +692,7 @@ class QuestSupportMixin:
             )
             for value in candidates:
                 if isinstance(value, str) and quest_language_countries(value):
-                    return value.strip(), f"設定:{section}"
+                    return value.strip(), "サーバーの言語設定"
 
         preferred = getattr(guild, "preferred_locale", None)
         preferred = str(getattr(preferred, "value", preferred) or "")

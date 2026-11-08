@@ -4,6 +4,7 @@ import discord
 from discord.ext import commands, tasks
 from datetime import datetime, timedelta, timezone
 
+from core.support.panel_v2 import as_embed_v2, wrap_panel_view
 from core.support.storage import KVStore
 
 logger = logging.getLogger("cogs.muted")
@@ -107,7 +108,7 @@ class Muted(commands.Cog):
             return True
         
         embed = discord.Embed(description="管理ロールが設定されていないか、権限がありません。管理者による `/support` のパネルから「Muted」 の設定が必要です。", color=self.embed_color)
-        await interaction.response.send_message(embed=embed, ephemeral=True)
+        await interaction.response.send_message(view=as_embed_v2(embed), ephemeral=True)
         return False
 
     async def get_or_create_muted_role(self, guild: discord.Guild):
@@ -179,9 +180,13 @@ class Muted(commands.Cog):
 
     # --- セレクトメニュー ---
     class MuteSettingView(discord.ui.View):
-        def __init__(self, cog):
+        def __init__(self, cog, embed=None):
             super().__init__(timeout=60) # 1分でメニューを無効化
             self.cog = cog
+            self._embed = embed
+
+        def embed(self):
+            return self._embed
 
         @discord.ui.select(
             placeholder="操作を選択（一度選択すると終了します）",
@@ -226,7 +231,7 @@ class Muted(commands.Cog):
                 embed.description = "非表示設定を解除しました。" if is_hidden else "全てのチャンネルを非表示にしました。"
 
             # 選択されたらメニューを削除して、二度押しできないようにする
-            await interaction.edit_original_response(embed=embed, view=None)
+            await interaction.edit_original_response(view=as_embed_v2(embed))
             self.stop() # Viewのループを止める
 
     async def show_muted_settings(self, interaction: discord.Interaction):
@@ -238,7 +243,7 @@ class Muted(commands.Cog):
         if not await self.is_admin_role(interaction):
             return
         embed = discord.Embed(title="Muted システム設定", description="メニューを選択してください。一度実行すると終了します。", color=self.embed_color)
-        await interaction.response.send_message(embed=embed, view=self.MuteSettingView(self), ephemeral=True)
+        await interaction.response.send_message(view=wrap_panel_view(self.MuteSettingView(self, embed)), ephemeral=True)
 
     # --- メインコマンド ---
     async def muted_setting(
@@ -253,11 +258,11 @@ class Muted(commands.Cog):
         if admin_role:
             if not interaction.user.guild_permissions.manage_roles:
                 embed = discord.Embed(description="権限が不足しています。", color=self.embed_color)
-                return await interaction.response.send_message(embed=embed, ephemeral=True)
+                return await interaction.response.send_message(view=as_embed_v2(embed), ephemeral=True)
             self.admin_roles[interaction.guild_id] = admin_role.id
             await self.save(interaction.guild_id)
             embed = discord.Embed(description=f"管理ロールを {admin_role.mention} に設定しました。", color=self.embed_color)
-            return await interaction.response.send_message(embed=embed, ephemeral=True)
+            return await interaction.response.send_message(view=as_embed_v2(embed), ephemeral=True)
 
         # 権限チェック
         if not await self.is_admin_role(interaction): return
@@ -269,7 +274,7 @@ class Muted(commands.Cog):
             self.mute_tasks[(interaction.guild_id, target.id)] = datetime.now(timezone.utc) + timedelta(minutes=minutes)
             await self.save(interaction.guild_id)
             embed = discord.Embed(description=f"{target.display_name} を {minutes}分間 Mutedにしました。", color=self.embed_color)
-            return await interaction.response.send_message(embed=embed, ephemeral=True)
+            return await interaction.response.send_message(view=as_embed_v2(embed), ephemeral=True)
 
         # 3. 隔離設定
         if isolation_channel:
@@ -283,11 +288,11 @@ class Muted(commands.Cog):
                     logger.debug("Muted: 隔離用チャンネルの権限設定に失敗しました", exc_info=True)
                     continue
             embed = discord.Embed(description=f"{isolation_channel.mention} 以外を非表示にしました。", color=self.embed_color)
-            return await interaction.followup.send(embed=embed, ephemeral=True)
+            return await interaction.followup.send(view=as_embed_v2(embed), ephemeral=True)
 
         # 4. 引数なし：メニュー表示（一度使うと消える）
         embed = discord.Embed(title="Muted システム設定", description="メニューを選択してください。一度実行すると終了します。", color=self.embed_color)
-        await interaction.response.send_message(embed=embed, view=self.MuteSettingView(self), ephemeral=True)
+        await interaction.response.send_message(view=wrap_panel_view(self.MuteSettingView(self, embed)), ephemeral=True)
 
 async def setup(bot):
     await bot.add_cog(Muted(bot))

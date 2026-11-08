@@ -50,7 +50,7 @@ class GlobalChatCog(commands.Cog):
                 json.dump(list(self.active_channels), f)
             os.replace(tmp_file, self.save_file)
         except Exception as e:
-            print(f"データの保存に失敗しました: {e}")
+            logger.error("データの保存に失敗しました: %s", e)
 
     async def notify_sender(self, message: discord.Message, text: str):
         """送信者だけに知らせる（DM。送れなければ <:failed:1490986584676368535> リアクションと、すぐ消える返信）。"""
@@ -148,7 +148,7 @@ class GlobalChatCog(commands.Cog):
                     _agobot_skip_localization=True,
                 )
             except Exception as e:
-                print(f"チャンネル {cid} への転送中にエラーが発生しました: {e}")
+                logger.error("チャンネル %s への転送中にエラーが発生しました: %s", cid, e)
 
 
 # Botへの登録用関数

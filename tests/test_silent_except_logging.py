@@ -229,8 +229,11 @@ class MutedSyncLoggingTests(unittest.IsolatedAsyncioTestCase):
         select = types.SimpleNamespace(values=["link"])
         with self.assertLogs("cogs.muted", level="DEBUG") as logs:
             await raw_callback(view, interaction, select)
-        embed = interaction.edit_original_response.call_args.kwargs["embed"]
-        self.assertIn("失敗: 1", embed.description)
+        sent_view = interaction.edit_original_response.call_args.kwargs["view"]
+        text = "\n".join(
+            getattr(child, "content", "") for child in sent_view.children[0].children
+        )
+        self.assertIn("失敗: 1", text)
         self.assertTrue(any("権限同期" in line for line in logs.output))
 
 

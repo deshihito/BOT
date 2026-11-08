@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from .common import *
+from core.support.messages import MANAGE_GUILD_REQUIRED
 
 
 def get_honeypot_settings(store, guild_id: int) -> dict[str, int | bool | None]:
@@ -34,7 +35,7 @@ class HoneypotPanelView(discord.ui.LayoutView):
                 discord.ui.TextDisplay(
                     """## ⚠️ 警告
 このチャンネルはハニーポットです。
-ここにメッセージを送信すると、自動的にサーバーからキックされ、メッセージも削除されます。"""
+ここにメッセージを送信すると、投稿は削除され、送信者はソフトバン（7日分のメッセージ削除後に解除）されます。"""
                 ),
                 accent_colour=0xFFFFFF,
             )
@@ -54,7 +55,7 @@ class HoneypotChannelSelect(discord.ui.ChannelSelect):
     async def callback(self, interaction: discord.Interaction):
         if not self.parent_view.can_manage(interaction):
             return await interaction.response.send_message(
-                "この設定にはサーバー管理権限が必要です。",
+                MANAGE_GUILD_REQUIRED,
                 ephemeral=True,
             )
 
@@ -111,11 +112,7 @@ class HoneypotSettingsView(discord.ui.View):
 
     @staticmethod
     def can_manage(interaction: discord.Interaction) -> bool:
-        permissions = getattr(interaction.user, "guild_permissions", None)
-        return bool(
-            getattr(permissions, "manage_guild", False)
-            or getattr(permissions, "administrator", False)
-        )
+        return can_manage_guild(interaction)
 
     def embed(self, notice: str | None = None) -> discord.Embed:
         if notice is None:

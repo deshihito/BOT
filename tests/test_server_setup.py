@@ -121,9 +121,6 @@ class Base(unittest.IsolatedAsyncioTestCase):
     def new_store(self):
         return guild_settings.GuildSettings(KVStore("guild_settings", client=self.db, path=self.path))
 
-    def wizard(self, user_id=42):
-        return server_setup.SetupWizard(self.cog, self.guild, self.guild.general, user_id)
-
     def reload(self, section="auth"):
         """Supabase に保存された内容。"""
         return (self.db.value("guild_settings", str(self.guild.id)) or {}).get(section, {})
@@ -131,159 +128,6 @@ class Base(unittest.IsolatedAsyncioTestCase):
     @staticmethod
     def labels(view):
         return [getattr(item, "label", None) or getattr(item, "placeholder", None) for item in view.children]
-
-
-class WizardAuthTest(Base):
-    async def test_steps_without_optional_cogs(self):
-        self.assertEqual(self.wizard().steps, ["auth", "global", "nation", "summary"])
-
-    async def test_auth_selections_persist_and_show_on_rerun(self):
-        view = self.wizard()
-        await view.on_auth_role(fake_interaction(self.guild), types.SimpleNamespace(values=[self.guild.verified]))
-        await view.on_auth_channel(fake_interaction(self.guild), types.SimpleNamespace(values=[self.guild.intro]))
-        await view.on_auth_toggle(fake_interaction(self.guild))
-        self.assertEqual(self.reload(), {"role_id": 501, "intro_channel_id": 602, "enabled": False})
-
-        os.remove(self.path)  # ローカルのファイルが消えて再起動しても
-        guild_settings.set_store(self.new_store())
-        await guild_settings.get_store().ensure_loaded()  # 旧/setup画面なしでも保存済み設定を読み直せる
-        again = self.wizard()
-        fields = {f.name: f.value for f in again.embed().fields}
-        self.assertEqual(fields, {"フォーム": "停止中", "付けるロール": "<@&501>", "自己紹介チャンネル": "<#602>"})
-        role_select = next(i for i in again.children if isinstance(i, discord.ui.RoleSelect))
-        self.assertEqual([d.id for d in role_select.default_values], [501])
-        self.assertIn("フォームを有効にする", self.labels(again))
-
-    async def test_refresh_edits_message_with_note(self):
-        view = self.wizard()
-        interaction = fake_interaction(self.guild)
-        await view.on_auth_role(interaction, types.SimpleNamespace(values=[self.guild.verified]))
-        kwargs = interaction.response.edit_message.await_args.kwargs
-        self.assertIn("<@&501>", kwargs["embed"].description)
-        self.assertIs(kwargs["view"], view)
-
-    async def test_send_panel_needs_role_and_uses_settings_panel(self):
-        view = self.wizard()
-        await view.on_send_panel(fake_interaction(self.guild))
-        self.guild.general.send.assert_not_awaited()
-        await view.set_auth(role_id=501)
-        await view.on_send_panel(fake_interaction(self.guild))
-        sent_view = self.guild.general.send.await_args.kwargs["view"]
-        self.assertEqual(sent_view.children[0].custom_id, auth.PANEL_SETTINGS_ID)
-
-    async def test_category_perms_needs_role_then_syncs(self):
-        view = self.wizard()
-        children = [MagicMock(edit=AsyncMock()), MagicMock(edit=AsyncMock())]
-        category = types.SimpleNamespace(id=777, name="会員", channels=children, edit=AsyncMock(),
-                                         guild=types.SimpleNamespace(default_role="EVERYONE"))
-        self.guild.get_channel = lambda cid, _orig=self.guild.get_channel: category if cid == 777 else _orig(cid)
-        select = types.SimpleNamespace(values=[types.SimpleNamespace(id=777)])
-        await view.on_category_perms(fake_interaction(self.guild), select)
-        category.edit.assert_not_awaited()
-        await view.set_auth(role_id=501)
-        interaction = fake_interaction(self.guild)
-        await view.on_category_perms(interaction, select)
-        overwrites = category.edit.await_args.kwargs["overwrites"]
-        self.assertFalse(overwrites["EVERYONE"].view_channel)
-        self.assertTrue(overwrites[self.guild.verified].view_channel)
-        for child in children:
-            child.edit.assert_awaited_with(sync_permissions=True)
-        self.assertIn("2 チャンネル", interaction.response.edit_message.await_args.kwargs["embed"].description)
-
-    async def test_only_invoker_can_operate(self):
-        view = self.wizard(user_id=42)
-        other = fake_interaction(self.guild, user_id=99)
-        self.assertFalse(await view.interaction_check(other))
-        other.response.send_message.assert_awaited()
-        self.assertTrue(await view.interaction_check(fake_interaction(self.guild, user_id=42)))
-
-    async def test_navigation_skips(self):
-        view = self.wizard()
-        for expected in ("global", "nation", "summary", "summary"):
-            await view.on_next(fake_interaction(self.guild))
-            self.assertEqual(view.step, expected)
-        self.assertIn("完了", self.labels(view))
-        await view.on_back(fake_interaction(self.guild))
-        self.assertEqual(view.step, "nation")
-        self.assertEqual(self.reload(), {})  # 飛ばしただけでは何も保存しない
-
-
-class WizardOtherStepsTest(Base):
-    async def test_global_chat_toggle_uses_existing_store(self):
-        chat = types.SimpleNamespace(active_channels={12345}, save_channels=MagicMock())
-        self.cogs["GlobalChatCog"] = chat
-        view = self.wizard()
-        view.index = view.steps.index("global")
-        view.build()
-        self.assertIn("このチャンネルをつなぐ", self.labels(view))
-        await view.on_global_toggle(fake_interaction(self.guild))
-        self.assertEqual(chat.active_channels, {12345, 601})
-        chat.save_channels.assert_called_once()
-        self.assertIn("このチャンネルを外す", self.labels(view))
-        await view.on_global_toggle(fake_interaction(self.guild))
-        self.assertEqual(chat.active_channels, {12345})
-
-    async def test_mute_step_only_when_muted_can_save(self):
-        self.cogs["Muted"] = types.SimpleNamespace(admin_roles={})  # メモリだけの古い版
-        self.assertNotIn("mute", self.wizard().steps)
-
-        muted = types.SimpleNamespace(admin_roles={}, save=AsyncMock())
-        self.cogs["Muted"] = muted
-        view = self.wizard()
-        self.assertEqual(view.steps, ["auth", "global", "mute", "nation", "summary"])
-        await view.on_mute_role(fake_interaction(self.guild), types.SimpleNamespace(values=[self.guild.mod]))
-        self.assertEqual(muted.admin_roles, {77: 502})
-        muted.save.assert_awaited_once_with(77)
-
-
-class NationSetupTest(Base):
-    def nation_view(self):
-        view = self.wizard()
-        view.index = view.steps.index("nation")
-        view.build()
-        return view
-
-    async def test_defaults_without_settings(self):
-        self.assertEqual(guild_settings.nation_settings(77), {"enabled": True, "channel_id": None, "notify": "major"})
-        self.assertIsNone(guild_settings.nation_should_notify(77, major=True))
-        view = self.nation_view()
-        self.assertIn("参加をやめる", self.labels(view))
-        self.assertIn("通知: 大きな出来事だけ", self.labels(view))
-        self.assertIn("通知: 全部", self.labels(view))
-
-    async def test_settings_persist_and_helper_reads_them(self):
-        view = self.nation_view()
-        await view.on_nation_channel(fake_interaction(self.guild), types.SimpleNamespace(values=[self.guild.intro]))
-        self.assertEqual(guild_settings.nation_should_notify(77, major=True), 602)
-        self.assertIsNone(guild_settings.nation_should_notify(77, major=False))
-        await view.on_nation_notify(fake_interaction(self.guild), "all")
-        self.assertEqual(guild_settings.nation_should_notify(77, major=False), 602)
-        self.assertEqual(self.reload("nation"), {"channel_id": 602, "notify": "all"})
-        await view.on_nation_toggle(fake_interaction(self.guild))
-        self.assertFalse(guild_settings.nation_settings(77)["enabled"])
-        self.assertIsNone(guild_settings.nation_should_notify(77, major=True))
-        self.assertIn("参加する", self.labels(view))
-        # 読み直しても残っている
-        guild_settings.set_store(self.new_store())
-        await guild_settings.get_store().ensure_loaded()
-        self.assertEqual(guild_settings.nation_settings(77), {"enabled": False, "channel_id": 602, "notify": "all"})
-
-    async def test_bad_stored_values_fall_back_to_defaults(self):
-        await guild_settings.get_store().update(77, "nation", enabled="yes", channel_id="x", notify="loud")
-        self.assertEqual(guild_settings.nation_settings(77), {"enabled": True, "channel_id": None, "notify": "major"})
-
-    async def test_summary_and_permission_check(self):
-        await guild_settings.get_store().update(77, "nation", channel_id=602)
-        self.guild.intro.perms = server_setup.discord.Permissions(view_channel=True)
-        view = self.wizard()
-        view.index = len(view.steps) - 1
-        fields = {f.name: f.value for f in view.embed().fields}
-        self.assertIn("<#602>", fields["国づくり"])
-        self.assertIn("<:failed:1490986584676368535> **国づくり**", fields["Bot の権限チェック"])
-        await view.set_nation(enabled=False)
-        fields = {f.name: f.value for f in view.embed().fields}
-        self.assertEqual(fields["国づくり"], "参加しない")
-        self.assertIn("➖ **国づくり**", fields["Bot の権限チェック"])
 
 
 class SettingsStorageTest(Base):
@@ -300,50 +144,6 @@ class SettingsStorageTest(Base):
         await store.update(self.guild.id, "auth", role_id=501)
         await store.update(self.guild.id, "auth", role_id=None)
         self.assertIsNone(self.db.value("guild_settings", str(self.guild.id)))
-
-    async def test_mute_step_with_real_muted_cog(self):
-        from core.support.muted import cog as muted
-        cog = muted.Muted(types.SimpleNamespace(get_guild=lambda gid: None, is_ready=lambda: False),
-                          store=KVStore("muted", client=self.db, path=self.path))
-        self.addCleanup(cog.cog_unload)
-        self.cogs["Muted"] = cog
-        view = self.wizard()
-        self.assertIn("mute", view.steps)
-        await view.on_mute_role(fake_interaction(self.guild), types.SimpleNamespace(values=[self.guild.mod]))
-        self.assertEqual(self.db.value("muted", "77"), {"admin_role_id": 502})
-
-
-class PermissionCheckTest(Base):
-    async def test_missing_permissions_listed_per_feature(self):
-        self.guild = FakeGuild(guild_perms=discord.Permissions(connect=True), bot_top=3)
-        self.guild.intro.perms = BASIC
-        get_store = guild_settings.get_store()
-        await get_store.update(self.guild.id, "auth", role_id=501, intro_channel_id=602)
-        results = {r["label"]: r for r in self.wizard().permission_results()}
-        self.assertEqual(results["基本（このチャンネル）"]["missing"], [])
-        self.assertEqual(results["認証"]["missing"], ["ロールの管理", "ウェブフックの管理"])
-        self.assertIn("Bot のロールを「認証済み」より上に移動してください", results["認証"]["notes"])
-        self.assertEqual(results["ボイス・音楽"]["missing"], ["ボイスチャンネルで発言"])
-        self.assertTrue(results["グローバルチャット"]["skipped"])
-
-        report = server_setup.format_permission_report(list(results.values()))
-        self.assertIn("<:failed:1490986584676368535> **認証**: 足りない権限: ロールの管理、ウェブフックの管理", report)
-        self.assertIn("<:success:1490985168100659322> **基本（このチャンネル）**: OK", report)
-        self.assertIn("➖ **グローバルチャット**", report)
-
-    async def test_summary_all_ok(self):
-        await guild_settings.get_store().update(self.guild.id, "auth", role_id=501, intro_channel_id=602)
-        view = self.wizard()
-        view.index = len(view.steps) - 1
-        report = next(f.value for f in view.embed().fields if f.name == "Bot の権限チェック")
-        self.assertNotIn("<:failed:1490986584676368535>", report)
-        self.assertIn("<:success:1490985168100659322> **認証**: OK", report)
-
-    async def test_disabled_auth_not_checked(self):
-        await guild_settings.get_store().update(self.guild.id, "auth", enabled=False)
-        results = {r["label"]: r for r in self.wizard().permission_results()}
-        self.assertTrue(results["認証"]["skipped"])
-
 
 class WelcomeTest(Base):
     async def test_prefers_writable_system_channel(self):
@@ -538,20 +338,3 @@ if __name__ == "__main__":
     unittest.main()
 
 
-class WizardModerationTest(Base):
-    async def test_moderation_button_and_save(self):
-        self.cogs["GlobalChatCog"] = types.SimpleNamespace(active_channels=set(), save_channels=MagicMock())
-        view = self.wizard()
-        view.index = view.steps.index("global")
-        view.build()
-        self.assertIn("荒らし対策（NG ワード・ブロック）", self.labels(view))
-        it = fake_interaction(self.guild)
-        await view.on_moderation(it)
-        modal = it.response.send_modal.await_args.args[0]
-        self.assertIsInstance(modal, server_setup.ModerationModal)
-        await view.save_moderation(fake_interaction(self.guild), "スパム, 宣伝\nスパム",
-                                   "<@111> 222", f"333, {self.guild.id}, abc")
-        saved = self.reload("globalchat")
-        self.assertEqual(saved, {"ng_words": ["スパム", "宣伝"], "blocked_users": [111, 222], "blocked_guilds": [333]})
-        await view.save_moderation(fake_interaction(self.guild), "", "", "")
-        self.assertEqual(self.reload("globalchat"), {})

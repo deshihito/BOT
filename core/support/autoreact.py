@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from .common import *
+from core.support.messages import MANAGE_GUILD_REQUIRED, SETTINGS_UPDATE_FAILED
 from .binjou import normalize_binjou_emoji
 
 
@@ -18,7 +19,7 @@ class AutoReactChannelSelect(discord.ui.ChannelSelect):
 
     async def callback(self, interaction: discord.Interaction):
         if not self.parent_view.can_manage(interaction):
-            return await interaction.response.send_message("この設定にはサーバー管理権限が必要です。", ephemeral=True)
+            return await interaction.response.send_message(MANAGE_GUILD_REQUIRED, ephemeral=True)
         self.parent_view.channel_id = self.values[0].id
         await self.parent_view.refresh(interaction)
 
@@ -49,8 +50,7 @@ class AutoReactSettingsView(discord.ui.View):
 
     @staticmethod
     def can_manage(interaction):
-        permissions = getattr(interaction.user, "guild_permissions", None)
-        return bool(getattr(permissions, "manage_guild", False) or getattr(permissions, "administrator", False))
+        return can_manage_guild(interaction)
 
     def embed(self):
         rows = self.settings.get("channels", {})
@@ -69,14 +69,14 @@ class AutoReactSettingsView(discord.ui.View):
     @discord.ui.button(label="選択チャンネルの絵文字を設定", style=discord.ButtonStyle.primary, row=1)
     async def configure(self, interaction: discord.Interaction, button: discord.ui.Button):
         if not self.can_manage(interaction):
-            return await interaction.response.send_message("この設定にはサーバー管理権限が必要です。", ephemeral=True)
+            return await interaction.response.send_message(MANAGE_GUILD_REQUIRED, ephemeral=True)
         if self.channel_id is None:
             return await interaction.response.send_message("先にチャンネルを選択してください。", ephemeral=True)
         await interaction.response.send_modal(AutoReactModal(self))
 
     async def save(self, interaction, text):
         if not self.can_manage(interaction):
-            return await interaction.response.send_message("この設定にはサーバー管理権限が必要です。", ephemeral=True)
+            return await interaction.response.send_message(MANAGE_GUILD_REQUIRED, ephemeral=True)
         raw_emojis = [value.strip() for value in str(text or "").replace("\n", ",").split(",") if value.strip()]
         if len(raw_emojis) > 20:
             return await interaction.response.send_message("絵文字は1チャンネルにつき20個までです。", ephemeral=True)
@@ -95,4 +95,4 @@ class AutoReactSettingsView(discord.ui.View):
             await interaction.response.send_message("Auto react設定を更新しました。", ephemeral=True)
         except Exception:
             logger.exception("Auto react設定の保存に失敗しました")
-            await interaction.response.send_message("設定の保存に失敗しました。", ephemeral=True)
+            await interaction.response.send_message(SETTINGS_UPDATE_FAILED, ephemeral=True)
