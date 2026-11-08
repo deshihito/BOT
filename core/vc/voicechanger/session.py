@@ -17,6 +17,7 @@ from functools import partial as _partial
 from core.vc.voicechanger.common import *  # noqa: F401,F403 - shared constants/helpers
 from core.vc.voicechanger.common import DEFAULT_TARGET_BUFFER_MS, we  # noqa: F401
 from core.vc.voicechanger.sink import VoiceChangerSink  # noqa: F401
+from core.support.panel_v2 import as_embed_v2
 
 logger = logging.getLogger("cogs.sio_voicechanger")
 
@@ -34,10 +35,10 @@ class SessionMixin:
 
         if action == "stop":
             if session is None:
-                return await r.send(embed=we(f"{FAILED} " + not_running("ボイスチェンジャー")), ephemeral=True)
+                return await r.send(view=as_embed_v2(we(f"{FAILED} " + not_running("ボイスチェンジャー"))), ephemeral=True)
             if not await self.voice_sessions.release(guild_id, "changer", reason="stop"):
                 self._cleanup(guild_id)("stop")
-            return await r.send(embed=we("🛑 ボイスチェンジャーを停止しました。"))
+            return await r.send(view=as_embed_v2(we("🛑 ボイスチェンジャーを停止しました。")))
 
         if action == "start" and session is None:
             return await self._start(r, pitch, buffer_ms, max_ms)
@@ -45,13 +46,13 @@ class SessionMixin:
         if has_options:
             if session is None:
                 # オプション変更は「開始」が前提なので、停止時の文と区別して開始を促す。
-                return await r.send(embed=we(f"{FAILED} ボイスチェンジャーが開始されていません。"), ephemeral=True)
+                return await r.send(view=as_embed_v2(we(f"{FAILED} ボイスチェンジャーが開始されていません。")), ephemeral=True)
             return await self._apply(r, session, pitch, buffer_ms, max_ms)
 
         if action == "start":
-            return await r.send(embed=we(
+            return await r.send(view=as_embed_v2(we(
                 f"{FAILED} 既にボイスチェンジャーが実行中です。設定を変えるときは `pitch` や `buffer_ms` を付けてください。"
-            ), ephemeral=True)
+            )), ephemeral=True)
         await self._send_status(r, session)
 
 
@@ -73,7 +74,7 @@ class SessionMixin:
         if buffer_ms is not None or max_ms is not None:
             target, resolved_max, error = self._resolve_buffer(sink.audio_source.target_buffer_ms, buffer_ms, max_ms)
             if error:
-                return await r.send(embed=we(error), ephemeral=True)
+                return await r.send(view=as_embed_v2(we(error)), ephemeral=True)
             sink.audio_source.update_settings(target_buffer_ms=target, max_buffer_ms=resolved_max)
             lines.append(f"📦 バッファ: 目標 `{target:.0f} ms` / 上限 `{resolved_max:.0f} ms`")
         if pitch is not None:
@@ -85,30 +86,30 @@ class SessionMixin:
             "target_buffer_ms": sink.audio_source.target_buffer_ms,
             "max_buffer_ms": sink.audio_source.max_buffer_ms,
         })
-        await r.send(embed=we("🔧 ボイスチェンジャーの設定を変更しました。\n" + "\n".join(lines)))
+        await r.send(view=as_embed_v2(we("🔧 ボイスチェンジャーの設定を変更しました。\n" + "\n".join(lines))))
 
 
     async def _send_status(self, r: Responder, session: dict | None):
         if session is None:
-            return await r.send(embed=we(PAUSE + ' ボイスチェンジャー停止中'))
+            return await r.send(view=as_embed_v2(we(PAUSE + ' ボイスチェンジャー停止中')))
         sink: VoiceChangerSink = session["sink"]
 
-        await r.send(embed=we(
+        await r.send(view=as_embed_v2(we(
             f"🎙️ **ボイスチェンジャー動作中**\n"
             f"{MUSIC} 設定ピッチ: `{sink.semitones:+.1f}` 半音"
-        ))
+        )))
 
 
     async def _start(self, r: Responder, pitch, buffer_ms, max_ms):
         voice = getattr(r.user, "voice", None)
         if not voice or not voice.channel:
-            return await r.send(embed=we(VOICE_NOT_JOINED), ephemeral=True)
+            return await r.send(view=as_embed_v2(we(VOICE_NOT_JOINED)), ephemeral=True)
         pitch = 0.0 if pitch is None else pitch
         buffer = None
         if buffer_ms is not None or max_ms is not None:
             target, resolved_max, error = self._resolve_buffer(DEFAULT_TARGET_BUFFER_MS, buffer_ms, max_ms)
             if error:
-                return await r.send(embed=we(error), ephemeral=True)
+                return await r.send(view=as_embed_v2(we(error)), ephemeral=True)
             buffer = (target, resolved_max)
 
         guild_id = r.guild.id
@@ -122,9 +123,9 @@ class SessionMixin:
                 cleanup=self._cleanup(guild_id), text_channel=r.channel, force=True, timeout=30.0,
             )
         except VoiceBusy as busy:
-            return await r.send(embed=we(str(busy)), ephemeral=True)
+            return await r.send(view=as_embed_v2(we(str(busy))), ephemeral=True)
         except Exception as e:
-            return await r.send(embed=we(voice_connection_failed(e)))
+            return await r.send(view=as_embed_v2(we(voice_connection_failed(e))))
 
         sink = VoiceChangerSink(bot=self.bot, vc=vc, semitones=pitch)
         if buffer is not None:
@@ -133,11 +134,11 @@ class SessionMixin:
 
         self.vc_sessions[guild_id] = {"sink": sink, "vc": vc}
         self._save_resume_snapshot(guild_id, target_channel, r.channel, r.user, sink)
-        await r.send(embed=we(
+        await r.send(view=as_embed_v2(we(
             f"🎙️ **{target_channel.name}** でボイスチェンジャーを開始しました！\n"
             f"{MUSIC} ピッチ: `{pitch:+.1f}` 半音\n"
             f"📊 状態表示で状態を確認できます。"
-        ))
+        )))
 
 
     def _cleanup(self, guild_id: int):
