@@ -288,7 +288,12 @@ class FastHtmlMixin:
                     fast_html_api_create, att.filename, user_id, data,
                 )
             except FastHtmlApiError as exc:
-                logger.debug("fastHTML: 発行API呼び出しに失敗しました", exc_info=True)
+                logger.warning(
+                    "fastHTML: 発行API呼び出しに失敗しました code=%s status=%s",
+                    exc.code,
+                    exc.status_code,
+                    exc_info=True,
+                )
                 if exc.code == "FASTHTML_LIMIT":
                     text = (
                         f"同時に公開できるのは{FAST_HTML_MAX_ACTIVE_PER_USER}件までです。"
