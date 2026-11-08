@@ -209,6 +209,64 @@ class ToggleViewTest(RoomStateTestCase, unittest.IsolatedAsyncioTestCase):
         interaction.response.send_message.assert_awaited()
 
 
+class BoardSafeNameTest(unittest.TestCase):
+    def test_fancy_alphanumerics_fold_to_plain(self):
+        from core.leaderboard_image import board_safe_name
+
+        self.assertEqual(board_safe_name("𝐎𝐨𝐨", fallback="ooo"), "Ooo")
+        self.assertEqual(board_safe_name("𝕥𝕒𝕕𝕒𝕟𝕠𝕖𝕟", fallback="tadanoen"), "tadanoen")
+
+    def test_normal_name_unchanged(self):
+        from core.leaderboard_image import board_safe_name
+
+        self.assertEqual(board_safe_name("通常の名前123", fallback="x"), "通常の名前123")
+
+    def test_unrenderable_or_empty_falls_back(self):
+        from core.leaderboard_image import board_safe_name
+
+        self.assertEqual(board_safe_name("\ue000", fallback="user1"), "user1")
+        self.assertEqual(board_safe_name("", fallback="user1"), "user1")
+        self.assertEqual(board_safe_name(None, fallback="user1"), "user1")
+
+
+class MembersRowContentTest(RoomStateTestCase, unittest.IsolatedAsyncioTestCase):
+    async def test_rows_use_safe_name_and_handle(self):
+        import core.vc.globalvc.manage as manage_mod
+
+        fancy = types.SimpleNamespace(
+            id=1, display_name="𝐎𝐨𝐨", name="ooo", bot=False)
+        rooms_mod.GLOBAL_ROOMS["r"] = [
+            types.SimpleNamespace(
+                guild=types.SimpleNamespace(id=10, name="A"),
+                channel=types.SimpleNamespace(members=[fancy]))]
+
+        captured = {}
+        real_render = manage_mod.render_leaderboard_png
+        real_fetch = manage_mod.fetch_avatar_bytes
+
+        def fake_render(**kwargs):
+            captured.update(kwargs)
+            return b"\x89PNG"
+
+        manage_mod.render_leaderboard_png = fake_render
+        manage_mod.fetch_avatar_bytes = AsyncMock(return_value={})
+        try:
+            from core.vc.globalvc.entry import GlobalVCCog
+
+            cog = GlobalVCCog.__new__(GlobalVCCog)
+            cog.bot = types.SimpleNamespace()
+            r = FakeResponder(guild_id=10)
+            await cog._members_impl(r)
+        finally:
+            manage_mod.render_leaderboard_png = real_render
+            manage_mod.fetch_avatar_bytes = real_fetch
+
+        sections = captured["sections"]
+        row = sections[0][1][0]
+        self.assertEqual(row.name, "Ooo")       # 装飾文字は通常文字へ
+        self.assertEqual(row.value, "@ooo")     # ID欄は @ユーザー名
+
+
 class MembersWiringTest(unittest.TestCase):
     def test_members_action_registered(self):
         from core.general.action_registry import build_vc_actions
