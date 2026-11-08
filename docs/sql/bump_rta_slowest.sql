@@ -14,6 +14,14 @@ CREATE TABLE IF NOT EXISTS public.bump_rta_worst_records (
 CREATE INDEX IF NOT EXISTS bump_rta_worst_records_type_ranking_idx
     ON public.bump_rta_worst_records (guild_id, event_type, elapsed_ms DESC);
 ALTER TABLE public.bump_rta_worst_records DISABLE ROW LEVEL SECURITY;
+-- The self-hosted API connects as bot_api; without table privileges every
+-- worst-record call fails with 42501 (this bit production on 2026-11-08,
+-- where the table was created by postgres and no grant existed).
+DO $$ BEGIN
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'bot_api') THEN
+    GRANT SELECT, INSERT, UPDATE, DELETE ON public.bump_rta_worst_records TO bot_api;
+  END IF;
+END $$;
 
 DROP FUNCTION IF EXISTS public.record_bump_rta_worst(text, text, text, integer, timestamptz);
 CREATE OR REPLACE FUNCTION public.record_bump_rta_worst(
