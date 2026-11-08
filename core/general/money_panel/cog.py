@@ -49,7 +49,7 @@ from core.general.user_names import resolve_display_names
 from core.game.game import prison as prison_core
 from core.general.money_panel import starter as starter_core
 from core.leaderboard_image import fetch_avatar_bytes
-from core.support.messages import ACTION_FAILED_RETRY, CLAIM_FAILED_RETRY
+from core.support.messages import ACTION_FAILED_RETRY, CLAIM_FAILED_RETRY, ITEMS_NOT_LOADED, WORKSHOP_NOT_LOADED, feature_not_loaded
 from core.support.panel_v2 import as_panel_v2, edit_message_v2, edit_panel_v2, wrap_panel_view as _wrap
 from cogs import general as wallet_module  # 定数は実行時に引く（テストの cog 再読込対策）
 
@@ -540,7 +540,7 @@ class MoneyPanelView(discord.ui.View):
         circulation = self.cog.bot.get_cog("CirculationCog")
         if circulation is None:
             return await interaction.response.send_message(
-                "採掘機能が読み込まれていません。", ephemeral=True)
+                feature_not_loaded("採掘機能"), ephemeral=True)
         await self._run_direct(
             interaction, lambda: circulation.execute_mining(interaction.user.id))
 
@@ -549,7 +549,7 @@ class MoneyPanelView(discord.ui.View):
         items_cog = self.cog.bot.get_cog("ItemsCog")
         if items_cog is None:
             return await interaction.response.send_message(
-                "アイテム機能が読み込まれていません。", ephemeral=True)
+                ITEMS_NOT_LOADED, ephemeral=True)
         from cogs.general import ItemAmountModal
 
         await interaction.response.send_modal(ItemAmountModal(items_cog, "sell"))
@@ -558,7 +558,7 @@ class MoneyPanelView(discord.ui.View):
         items_cog = self.cog.bot.get_cog("ItemsCog")
         if items_cog is None:
             return await interaction.response.send_message(
-                "アイテム機能が読み込まれていません。", ephemeral=True)
+                ITEMS_NOT_LOADED, ephemeral=True)
         await self._run_direct(
             interaction, lambda: items_cog.execute_open_boxes(interaction.user.id))
 
@@ -566,7 +566,7 @@ class MoneyPanelView(discord.ui.View):
         workshop = self.cog.bot.get_cog("WorkshopCog")
         if workshop is None:
             return await interaction.response.send_message(
-                "工房機能が読み込まれていません。", ephemeral=True)
+                WORKSHOP_NOT_LOADED, ephemeral=True)
         await self._run_direct(
             interaction, lambda: workshop.execute_claim(interaction.user.id))
 
@@ -574,7 +574,7 @@ class MoneyPanelView(discord.ui.View):
         workshop = self.cog.bot.get_cog("WorkshopCog")
         if workshop is None:
             return await interaction.response.send_message(
-                "工房機能が読み込まれていません。", ephemeral=True)
+                WORKSHOP_NOT_LOADED, ephemeral=True)
         await self._run_direct(
             interaction, lambda: workshop.execute_claim_commissions(interaction.user.id))
 

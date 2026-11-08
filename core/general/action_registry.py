@@ -65,6 +65,12 @@ AI_BLOCKED_IDS = frozenset({
     "general:fujo_register", "general:fujo_freeze", "general:fujo_panic_disable",
     "general:shortcut_manage", "general:aitools", "general:ai_default",
     "general:image_default", "general:reasoning_default",
+    # 自動翻訳設定は個人設定の変更なので ai_default 等と同様に明示操作に限定する（sweep2 GEN-03）。
+    "general:translation_settings",
+    # ZetaModoki の履歴消去は不可逆寄りの操作なので AI の代理実行対象外（sweep2 GEN-03）。
+    "general:zeta_reset",
+    # ステータスは借金額を含む個人の財務状態なので AI 経由の公開表示を避ける（sweep2 GEN-02/03）。
+    "general:status",
     # MIQ設定は個人の設定パネルで /general から ephemeral で開くもの。AI 経由だと
     # 公開送信されてしまうため対象外（PR #373 の BLOCKED_ACTIONS 追加を継承）。
     "general:miq_settings",

@@ -143,7 +143,9 @@ class WalletCog(commands.Cog):
 
             embed, extra = coin_embed("プレイヤー情報", f"{target.mention} さんの現在のステータスです。")
             embed.add_field(name="保有コイン", value=f"{int(balance or 0):,} AGO", inline=True)
-            embed.add_field(name="借金額", value=f"{int(debt or 0):,} AGO", inline=True)
+            # 借金額は不利益情報なので本人以外には出さない（sweep2 GEN-02）。
+            if target.id == interaction.user.id:
+                embed.add_field(name="借金額", value=f"{int(debt or 0):,} AGO", inline=True)
 
             fujo = self.bot.get_cog("FujoSurvival")
             if fujo is not None and hasattr(fujo, "status_embed_for"):
@@ -156,13 +158,14 @@ class WalletCog(commands.Cog):
                     for field in survival.fields:
                         embed.add_field(name=field.name, value=field.value, inline=field.inline)
 
-            await interaction.followup.send(embed=embed, **extra)
+            # 自分のステータスは本人のみ（借金額を含むため、sweep2 GEN-02）。
+            await interaction.followup.send(embed=embed, ephemeral=target.id == interaction.user.id, **extra)
 
         except Exception as e:
             print("\n=== [WALLET COMMAND ERROR START] ===")
             traceback.print_exc()
             print("=== [WALLET COMMAND ERROR END] ===\n")
-            await interaction.followup.send(f"データの取得中にエラーが発生しました。\nエラー内容: `{type(e).__name__}`", ephemeral=True)
+            await interaction.followup.send("データの取得中にエラーが発生しました。時間をおいて再試行してください。", ephemeral=True)
 
     async def pay(self, interaction: discord.Interaction, receiver: discord.User, amount: int):
         # E-8a: モーダルを開いた時点の dispatch チェックだけでは
@@ -173,13 +176,13 @@ class WalletCog(commands.Cog):
             await interaction.response.send_message(blocked, ephemeral=True)
             return
         if amount <= 0:
-            await interaction.response.send_message("1コイン以上を指定してください。", ephemeral=True)
+            await interaction.response.send_message(PAY_MIN_AMOUNT, ephemeral=True)
             return
         if receiver.id == interaction.user.id:
-            await interaction.response.send_message("自分自身に送金することはできません。", ephemeral=True)
+            await interaction.response.send_message(PAY_TO_SELF, ephemeral=True)
             return
         if receiver.bot:
-            await interaction.response.send_message("Bot には送金できません。", ephemeral=True)
+            await interaction.response.send_message(PAY_TO_BOT, ephemeral=True)
             return
 
         # 途中の案内は本人にだけ見せる。送金できたときの完了通知だけを全体に出す。
@@ -216,7 +219,8 @@ class WalletCog(commands.Cog):
             await interaction.followup.send(embed=mine, ephemeral=True, **extra)
             embed, extra = coin_embed(
                 "送金完了", f"{interaction.user.mention} さんが {receiver.mention} に **{amount:,} AGO** コインを送金しました。")
-            await interaction.followup.send(embed=embed, **extra)
+            # 自分のステータスは本人のみ（借金額を含むため、sweep2 GEN-02）。
+            await interaction.followup.send(embed=embed, ephemeral=target.id == interaction.user.id, **extra)
             return
 
         # 旧スキーマ用: 送り手の残高を減らす（CASで競合時は読み直す）
@@ -251,7 +255,7 @@ class WalletCog(commands.Cog):
                     "（送り手から %s AGO を引いたまま、受け手には入っていません）",
                     sender_id, receiver_id, amount, amount)
                 await interaction.followup.send(
-                    f"送金に失敗し、{amount} AGO の返金もできませんでした。"
+                    f"送金に失敗し、{amount:,} AGO の返金もできませんでした。"
                     "お手数ですが管理者に連絡してください（記録は残してあります）。",
                     ephemeral=True,
                 )

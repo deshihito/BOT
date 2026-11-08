@@ -5,6 +5,11 @@ import logging
 logger = logging.getLogger(__name__)
 
 
+def whisper_panel_embed() -> discord.Embed:
+    """つぶやきパネルの Embed（投稿経路と表示経路で共用、sweep2 GEN-13）。"""
+    return discord.Embed(title="匿名のつぶやき", color=discord.Color.blue())
+
+
 class WhisperModal(discord.ui.Modal, title="匿名のつぶやき"):
     content = discord.ui.TextInput(
         label="内容",
@@ -37,11 +42,7 @@ class WhisperModal(discord.ui.Modal, title="匿名のつぶやき"):
             except Exception:
                 logger.debug("Whisper: 旧パネルの削除に失敗しました", exc_info=True)
 
-        panel_embed = discord.Embed(
-            title="匿名のつぶやき",
-            description="下のボタンを押してつぶやくことができます。",
-            color=discord.Color.blue()
-        )
+        panel_embed = whisper_panel_embed()
         new_message = await interaction.channel.send(embed=panel_embed, view=WhisperView(self.cog))
         if self.cog:
             self.cog.active_panels[guild_id] = (interaction.channel_id, new_message.id)
@@ -79,11 +80,7 @@ class WhisperCog(commands.Cog):
             except Exception:
                 logger.debug("Whisper: 旧パネルの削除に失敗しました", exc_info=True)
 
-        embed = discord.Embed(
-            title="匿名のつぶやき",
-            description="下のボタンを押してつぶやくことができます。",
-            color=discord.Color.blue()
-        )
+        embed = whisper_panel_embed()
         
         message = await interaction.channel.send(embed=embed, view=WhisperView(self))
         self.active_panels[guild_id] = (interaction.channel_id, message.id)

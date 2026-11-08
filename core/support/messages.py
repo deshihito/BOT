@@ -141,5 +141,14 @@ SETTINGS_UPDATE_FAILED = "設定の更新に失敗しました。時間をおい
 #: 受け取り処理が失敗したときの文。
 CLAIM_FAILED_RETRY = "受け取りに失敗しました。時間をおいて再試行してください。"
 
+def feature_not_loaded(feature: str) -> str:
+    """未読込文の統一形（sweep2 GEN-04）。個別定数が無い機能はこちらを使う。"""
+    return f"{feature}が読み込まれていません。時間をおいて再度お試しください。解決しない場合はBotの運営に連絡してください。"
+
+# 送金モーダルと送金実行部で同じ検証文を使う（sweep2 GEN-04）。
+PAY_MIN_AMOUNT = "1コイン以上を指定してください。"
+PAY_TO_SELF = "自分自身に送金することはできません。"
+PAY_TO_BOT = "Bot には送金できません。"
+
 #: 返金まで失敗したときの文（理由の後に続けて使う）。
 REFUND_FAILED_CONTACT = "返金に失敗しました。Botの運営に連絡してください。"

@@ -366,7 +366,7 @@ class AIToolsCog(commands.Cog):
                 names = "、".join(p.get("label") or p.get("name") for p in missing)
                 text = (
                     f"fastooler: 「{label}」には引数（{names}）が不足しています。"
-                    "下のボタンから入力してください。入力がなければ実行しません。"
+                    "入力がなければ実行しません。"
                 )
                 view = AIToolsParamCompletionView(
                     item=item,

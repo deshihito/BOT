@@ -53,7 +53,7 @@ class MoodAnalysis(commands.Cog):
                 await ctx.send(analysis_result)
 
         except Exception as e:
-            await ctx.send(f"エラーが発生しました: {e}")
+            await ctx.send("エラーが発生しました。時間をおいて再試行してください。")
 
 async def setup(bot):
     await bot.add_cog(MoodAnalysis(bot))

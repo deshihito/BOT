@@ -281,7 +281,7 @@ class QuickCog(commands.Cog):
             names = "、".join(param.label or param.name for param in missing)
             text = (
                 f"「{spec.label}」には引数（{names}）が必要です。"
-                "下のボタンから入力してください。入力がなければ実行しません。"
+                "入力がなければ実行しません。"
             )
             view = QuickParamPromptView(self, spec, missing, user_id=interaction.user.id)
             await interaction.response.send_message(text, view=view)

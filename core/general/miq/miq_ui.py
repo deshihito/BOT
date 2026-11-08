@@ -363,13 +363,8 @@ class MiqSettingsView(discord.ui.View):
         theme_label = MIQ_THEMES.get(p.get("theme"), MIQ_THEMES["bw"])[0]
         format_label = MIQ_FORMATS.get(p.get("format"), MIQ_FORMATS["random"])[0]
         lines = [
-            "**作り方**",
-            "・メッセージを右クリック(スマホは長押し) → アプリ → **引用画像にする**",
-            "・引用したいメッセージに返信して、`@BOT miq` と送信",
-            "",
             "**見た目**（あなたがMIQを作る時に使われます）",
             f"フォーマット: `{format_label}`",
-            "未設定の既定はランダムです。ランダムでは生成のたびに単体フォーマットから1つ選ばれます（LINE風・ペアハート風は選ばれません）。",
             f"モノクロ: `{onoff(p['grayscale'])}`　文字色連動: `{onoff(p['color_text'])}`　左右反転: `{onoff(p['flip'])}`",
             f"太字: `{onoff(p['bold'])}`　全面レイアウト: `{onoff(p['full'])}`　GIF出力: `{onoff(p['gif'])}`",
             f"フォント: `{font_label}`　配色: `{theme_label}`",
@@ -377,10 +372,5 @@ class MiqSettingsView(discord.ui.View):
             "**引用の拒否**",
             f"あなたのメッセージの引用を拒否: `{onoff(p['refuse'])}`",
             "ONにすると、他の人はあなたのメッセージをMIQにできません（自分の引用は可能）。",
-            "",
-            "GIF出力はアイコンがGIFアニメの時だけ有効です（それ以外はPNG）。",
-            "引用 (従来) 以外のフォーマットは常にPNGです（モノクロ等の設定は引用 (従来) 専用）。",
-            "LINE風は画像・スタンプ・絵文字の合成にも対応し、画像やスタンプだけのメッセージも変換できます。",
-            "ペアハート風は、対象のメッセージとその返信先の発言を左右に並べてハートでつなぎます（対象が返信でない場合は1人だけのレイアウトになります）。",
         ]
         return discord.Embed(title="MIQ設定", description="\n".join(lines), color=0xFFFFFF)

@@ -114,9 +114,9 @@ class JudgeCommentCog(commands.Cog):
                             f"【{selected_option}評価】 **{final_score}** / 100点"
                         )
                     else:
-                        await message.reply(f"評価サーバーエラーが発生しました (Status: {resp.status})")
+                        await message.reply("評価サーバーエラーが発生しました。時間をおいて再試行してください。")
         except Exception as e:
-            await message.reply(f"通信エラーが発生しました: {str(e)}")
+            await message.reply("通信エラーが発生しました。時間をおいて再試行してください。")
 
 async def setup(bot: commands.Bot):
     await bot.add_cog(JudgeCommentCog(bot))

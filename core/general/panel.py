@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from .common import *
+from core.support.messages import PAY_MIN_AMOUNT, PAY_TO_BOT, PAY_TO_SELF, feature_not_loaded
 
 class PayConfirmView(discord.ui.View):
     """送金の確認ビュー（B-8）。
@@ -47,7 +48,7 @@ class PayConfirmView(discord.ui.View):
         wallet = self.cog.bot.get_cog("WalletCog")
         if wallet is None:
             return await interaction.response.send_message(
-                "WalletCogが読み込まれていません。", ephemeral=True)
+                feature_not_loaded("WalletCog"), ephemeral=True)
         await wallet.pay(interaction, self.receiver, self.amount)
 
     @discord.ui.button(label="キャンセル", style=discord.ButtonStyle.secondary)
@@ -87,11 +88,11 @@ class PayModal(discord.ui.Modal, title="コインを送金"):
         # 宛先＋金額の確認ビュー（ephemeral・本人のみ）を挟む。
         # 最終判定（残高・prison 再チェック含む）は確認後の pay 側で行う。
         if amount <= 0:
-            return await interaction.response.send_message("1コイン以上を指定してください。", ephemeral=True)
+            return await interaction.response.send_message(PAY_MIN_AMOUNT, ephemeral=True)
         if receiver.id == interaction.user.id:
-            return await interaction.response.send_message("自分自身に送金することはできません。", ephemeral=True)
+            return await interaction.response.send_message(PAY_TO_SELF, ephemeral=True)
         if receiver.bot:
-            return await interaction.response.send_message("Bot には送金できません。", ephemeral=True)
+            return await interaction.response.send_message(PAY_TO_BOT, ephemeral=True)
         view = PayConfirmView(self.cog, interaction.user.id, receiver, amount)
         await interaction.response.send_message(
             view.confirm_text(), view=view, ephemeral=True)

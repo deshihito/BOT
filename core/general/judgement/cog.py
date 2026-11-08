@@ -166,7 +166,8 @@ class JudgeCog(commands.Cog):
                     self._rate_messages, type.value, sampled_messages
                 )
         except Exception as e:
-            await interaction.followup.send(f"エラーが発生しました: {e}")
+            log.exception("judgement: rating failed")
+            await interaction.followup.send("エラーが発生しました。時間をおいて再試行してください。")
             return
 
         if not scores:
