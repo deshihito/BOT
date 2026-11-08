@@ -19,12 +19,17 @@ class GenreAbsorptionTest(unittest.TestCase):
 
         self.assertNotIn("language", SUPPORT_GENRES)
         self.assertNotIn("event", SUPPORT_GENRES)
+        # サーバーアシスト再編: assist ジャンルも吸収し、各機能が既存
+        # ジャンルの一級アクションになった（旧ハブ1件→各機能23件）。
+        self.assertNotIn("assist", SUPPORT_GENRES)
         automation = [value for _label, value in SUPPORT_ACTIONS_BY_GENRE["automation"]]
         moderation = [value for _label, value in SUPPORT_ACTIONS_BY_GENRE["moderation"]]
         self.assertIn("language", automation)
         self.assertIn("giveaway", moderation)
+        self.assertIn("assist_welcome", automation)
+        self.assertIn("assist_automod", moderation)
         total = sum(len(items) for items in SUPPORT_ACTIONS_BY_GENRE.values())
-        self.assertEqual(total, 33)  # グローバルチャット＋vc_auto_start＋bot_fixer 追加後の総数。機能は減らない
+        self.assertEqual(total, 55)  # 旧33件 −ハブ1件 ＋アシスト機能23件。機能は減らない
 
     def test_genre_aliases_cover_absorbed_genres(self):
         from cogs.general import GENERAL_GENRE_ALIASES
@@ -33,6 +38,7 @@ class GenreAbsorptionTest(unittest.TestCase):
         self.assertEqual(GENERAL_GENRE_ALIASES["translation"], "custom")
         self.assertEqual(SUPPORT_GENRE_ALIASES["language"], "automation")
         self.assertEqual(SUPPORT_GENRE_ALIASES["event"], "moderation")
+        self.assertEqual(SUPPORT_GENRE_ALIASES["assist"], "automation")
 
 
 class VoiceTriggerLabelTest(unittest.TestCase):

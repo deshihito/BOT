@@ -132,7 +132,7 @@ class StickyRolesTest(unittest.IsolatedAsyncioTestCase):
         labels = {item.label for item in view.children if isinstance(item, discord.ui.Button)}
         self.assertIn("ロール復元", labels)
         self.assertIn("BOTを除外", labels)
-        self.assertIn("サーバーアシストへ戻る", labels)
+        self.assertIn("サポートへ戻る", labels)
 
 
 if __name__ == "__main__":

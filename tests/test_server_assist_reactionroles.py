@@ -179,7 +179,7 @@ class ReactionRoleSettingsTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn("絵文字とロール", labels)
         self.assertIn("リアクションを反映", labels)
         self.assertIn("リアクションロール", labels)
-        self.assertIn("サーバーアシストへ戻る", labels)
+        self.assertIn("サポートへ戻る", labels)
 
     def test_actor_role_hierarchy_check(self):
         guild = FakeGuild()

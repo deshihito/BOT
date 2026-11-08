@@ -8,29 +8,35 @@ import discord
 from core.support.panel_v2 import as_panel_v2
 
 
-class BackToAssistButton(discord.ui.Button):
+class BackToSupportButton(discord.ui.Button):
+    """設定画面から /support パネル（その機能のジャンル）へ戻るボタン。"""
+
     def __init__(self, row: int = 4):
-        super().__init__(label="サーバーアシストへ戻る", style=discord.ButtonStyle.secondary, row=row)
+        super().__init__(label="サポートへ戻る", style=discord.ButtonStyle.secondary, row=row)
 
     async def callback(self, interaction: discord.Interaction):
         cog = getattr(self.view, "cog", None)
         if cog is None:
             return await interaction.response.send_message("設定画面を開き直してください。", ephemeral=True)
-        await cog.show_home_edit(interaction)
+        await cog.show_panel_edit(interaction, getattr(self.view, "feature_key", "") or None)
+
+
+# 旧名の互換エイリアス（外部から import される場合に備える）。
+BackToAssistButton = BackToSupportButton
 
 
 class AssistFeatureView(discord.ui.View):
-    """Base class for a settings screen inside the server-assist hub."""
+    """Base class for a server-assist feature settings screen under /support."""
 
     feature_key = ""
-    feature_title = "サーバーアシスト設定"
+    feature_title = "サポート設定"
 
     def __init__(self, cog: Any, guild_id: int):
         super().__init__(timeout=300)
         self.cog = cog
         self.guild_id = guild_id
         self.notice: str | None = None
-        self.add_item(BackToAssistButton())
+        self.add_item(BackToSupportButton())
 
     def can_manage(self, interaction: discord.Interaction) -> bool:
         permissions = getattr(getattr(interaction, "user", None), "guild_permissions", None)

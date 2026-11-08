@@ -468,6 +468,7 @@ def build_support_actions(support_actions: list, actions_by_genre: dict, support
         for genre, items in actions_by_genre.items()
         for _label, value in items
     }
+    assist_descriptions: dict[str, str] | None = None
     specs: list[ActionSpec] = []
     for choice in support_actions:
         value = choice.value
@@ -477,28 +478,22 @@ def build_support_actions(support_actions: list, actions_by_genre: dict, support
         if value in SUPPORT_AI_EXCLUDED_VALUES:
             # 設定・モデレーション系パネルは明示操作に限定する（AI 代理実行範囲を広げない）。
             kwargs["surfaces"] = frozenset({"panel", "shortcut", "palette"})
+        if value.startswith("assist_"):
+            # サーバーアシスト再編で一級アクション化した各機能。実行は
+            # SupportCog.dispatch の assist_ 分岐が ServerAssistCog.show_feature
+            # へ委譲する。設定系のため AI tools には出さない（surfaces から
+            # aitools を除外。リスクは show_feature 側のサーバー管理権限
+            # チェックが担う）。説明文は機能側の FEATURE を正とする。
+            kwargs["surfaces"] = frozenset({"panel", "shortcut", "palette"})
+            if assist_descriptions is None:
+                from core.support.server_assist import discover_features
+
+                assist_descriptions = {
+                    f"assist_{feature.key}": feature.description
+                    for feature in discover_features()
+                }
+            kwargs["description"] = assist_descriptions.get(value, genre_desc)
         specs.append(make_action("support", value, choice.name, genre, genre_label, **kwargs))
-    return specs
-
-
-def build_assist_actions() -> list[ActionSpec]:
-    """サーバーアシスト22機能を support ルートのアクションとして登録する（導線最適化 M2）。
-
-    値・ID は "assist_<feature key>"。実行は SupportCog.dispatch の assist_
-    分岐が ServerAssistCog.show_feature へ委譲する。設定系のため AI tools には
-    出さない（surfaces から aitools を除外。リスクは show_feature 側の
-    サーバー管理権限チェックが担う）。
-    """
-    from core.support.server_assist import discover_features
-
-    specs: list[ActionSpec] = []
-    for feature in discover_features():
-        specs.append(make_action(
-            "support", f"assist_{feature.key}", feature.label,
-            "assist", "サーバーアシスト",
-            description=feature.description,
-            surfaces=frozenset({"panel", "shortcut", "palette"}),
-        ))
     return specs
 
 
@@ -526,7 +521,6 @@ def default_action_specs() -> list[ActionSpec]:
     specs += build_vc_actions()
     specs += build_game_actions(GAME_ORDER, GAME_GUIDES)
     specs += build_support_actions(SUPPORT_ACTIONS, SUPPORT_ACTIONS_BY_GENRE, SUPPORT_GENRES)
-    specs += build_assist_actions()
     specs += build_help_actions()
     return specs
 

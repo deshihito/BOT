@@ -125,6 +125,7 @@ class SupportCog(
         "vc_auto_start": "manage_guild",
         "bot_fixer": "manage_guild",
         "globalchat": "manage_guild",
+        # 旧ハブ値。アクションとしては廃止し、dispatch の互換分岐（案内のみ）用に残す。
         "server_assist": "manage_guild",
         "sokunuke_status": "manage_guild",
         "sokunuke_on": "manage_guild",
@@ -155,6 +156,10 @@ class SupportCog(
 
     async def check_support_permission(self, interaction: discord.Interaction, selected: str) -> bool:
         permission = self.SUPPORT_REQUIRED_PERMISSIONS.get(selected)
+        if permission is None and selected.startswith("assist_"):
+            # サーバーアシスト再編で一級アクション化した各機能。設定画面側
+            # （ServerAssistCog.show_feature）でも同じ権限を要求する。
+            permission = "manage_guild"
 
         if permission is None or self.has_support_permission(interaction, permission):
             return True
@@ -281,17 +286,21 @@ class SupportCog(
         usage_stats.record_action_safely(f"support:{selected}")
 
         if selected.startswith("assist_"):
-            # 導線最適化 M2: /quick・ショートカットから個別機能を直接開く。
+            # サーバーアシスト再編: 各機能は /support の一級アクション。
+            # パネル／quick・ショートカットから個別機能を直接開く。
             cog = self.bot.get_cog("ServerAssistCog")
             if cog is None:
                 return await self._missing(interaction, "サーバーアシスト")
             return await cog.show_feature(interaction, selected.removeprefix("assist_"))
 
         if selected == "server_assist":
-            cog = self.bot.get_cog("ServerAssistCog")
-            if cog is None:
-                return await self._missing(interaction, "サーバーアシスト")
-            return await cog.show_home(interaction)
+            # 旧ハブ値の互換分岐。保存済みショートカット等に残っていても
+            # 行き止まりにせず、新しい到達経路を案内する。
+            return await interaction.response.send_message(
+                "サーバーアシストは /support の各ジャンルに分かれました。"
+                "使いたい機能は /support パネルのジャンルから選んでください。",
+                ephemeral=True,
+            )
 
         if selected == "auth_panel":
             return await self.show_auth_settings(interaction)

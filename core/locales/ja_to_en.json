@@ -4887,6 +4887,7 @@
   " に build_view がありません": " is missing build_view",
   "%s に Feature が定義されていません": "Feature is not defined in %s",
   "サーバーアシストへ戻る": "Back to Server Assist",
+  "サポートへ戻る": "Back to Support",
   "招待リンク・外部リンク・メンションスパム・大文字スパムを自動削除します。": "Automatically deletes invite links, external links, mention spam, and uppercase spam.",
   "招待リンク": "Invite links",
   "外部リンク": "External links",

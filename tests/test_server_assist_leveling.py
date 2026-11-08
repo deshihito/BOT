@@ -134,7 +134,7 @@ class LevelingRewardsTest(unittest.IsolatedAsyncioTestCase):
         labels = {item.label for item in view.children if isinstance(item, discord.ui.Button)}
         self.assertIn("レベル報酬", labels)
         self.assertIn("レベル報酬を設定", labels)
-        self.assertIn("サーバーアシストへ戻る", labels)
+        self.assertIn("サポートへ戻る", labels)
 
     async def test_toggle_rejects_missing_manage_roles(self):
         await leveling.update_settings(1, leveling.KEY, role_rewards={"10": 50})

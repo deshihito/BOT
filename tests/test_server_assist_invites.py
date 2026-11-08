@@ -159,7 +159,7 @@ class InviteSettingsTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len([item for item in view.children if isinstance(item, discord.ui.Select)]), 1)
         labels = {item.label for item in view.children if isinstance(item, discord.ui.Button)}
         self.assertIn("招待トラッカー", labels)
-        self.assertIn("サーバーアシストへ戻る", labels)
+        self.assertIn("サポートへ戻る", labels)
 
 
 if __name__ == "__main__":

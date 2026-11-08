@@ -320,7 +320,7 @@ class PollTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn("投票", labels)
         self.assertIn("複数選択: オフ", labels)
         self.assertIn("パネルを送信", labels)
-        self.assertIn("サーバーアシストへ戻る", labels)
+        self.assertIn("サポートへ戻る", labels)
         panel_button = next(item for item in view.children if getattr(item, "label", None) == "パネルを送信")
         interaction = types.SimpleNamespace(
             guild=guild,

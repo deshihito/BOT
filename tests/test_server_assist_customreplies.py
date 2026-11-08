@@ -174,7 +174,7 @@ class CustomReplySettingsTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn("編集", labels)
         self.assertIn("削除", labels)
         self.assertIn("カスタム返信", labels)
-        self.assertIn("サーバーアシストへ戻る", labels)
+        self.assertIn("サポートへ戻る", labels)
 
     async def test_concurrent_adds_are_both_kept(self):
         cog = types.SimpleNamespace(bot=types.SimpleNamespace(get_guild=lambda _id: None))

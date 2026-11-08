@@ -204,7 +204,7 @@ class AutoThreadTest(unittest.IsolatedAsyncioTestCase):
         )
         labels = {item.label for item in view.children if isinstance(item, discord.ui.Button)}
         self.assertIn("自動スレッド", labels)
-        self.assertIn("サーバーアシストへ戻る", labels)
+        self.assertIn("サポートへ戻る", labels)
 
         archive = next(
             item for item in view.children

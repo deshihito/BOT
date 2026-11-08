@@ -16,46 +16,6 @@ from core.support.server_assist import discover_features, has_manage_permission
 logger = logging.getLogger(__name__)
 
 
-class AssistFeatureSelect(discord.ui.Select):
-    def __init__(self, cog: "ServerAssistCog"):
-        self.cog = cog
-        options = [
-            discord.SelectOption(
-                label=feature.label[:100],
-                description=feature.description[:100],
-                value=feature.key,
-            )
-            for feature in cog.features[:25]
-        ]
-        if not options:
-            options = [discord.SelectOption(label="利用できる機能がありません", value="__none__")]
-        super().__init__(placeholder="設定する機能を選択してください", options=options, row=0)
-
-    async def callback(self, interaction: discord.Interaction):
-        if self.values[0] == "__none__":
-            return await interaction.response.send_message("利用できる機能がありません。", ephemeral=True)
-        await self.cog.show_feature(interaction, self.values[0])
-
-
-class ServerAssistHomeView(discord.ui.View):
-    def __init__(self, cog: "ServerAssistCog"):
-        super().__init__(timeout=300)
-        self.cog = cog
-        self.add_item(AssistFeatureSelect(cog))
-
-    def embed(self) -> discord.Embed:
-        embed = discord.Embed(
-            title="サーバーアシスト",
-            description="サーバー運営に役立つ設定をまとめた入口です。",
-            color=0xFFFFFF,
-        )
-        # 初画面はタイトル＋状態だけ（導線最適化 S3）。機能の label/description は
-        # 直下の AssistFeatureSelect の option が担うため、embed には並べない。
-        if not self.cog.features:
-            embed.description = "利用できる機能がありません。時間をおいて再度お試しください。解決しない場合はBotの運営に連絡してください。"
-        return embed
-
-
 class ServerAssistCog(commands.Cog):
     """Loads feature modules and forwards Discord events to them."""
 
@@ -99,22 +59,41 @@ class ServerAssistCog(commands.Cog):
             except Exception:
                 logger.exception("サーバーアシストの shutdown に失敗しました: %s", key)
 
-    async def show_home(self, interaction: discord.Interaction):
-        if not has_manage_permission(interaction):
-            return await interaction.response.send_message(
-                "この設定には「サーバーの管理」権限が必要です。", ephemeral=True,
-            )
-        await interaction.response.send_message(
-            view=as_panel_v2(ServerAssistHomeView(self)),
-            ephemeral=True,
-        )
+    async def show_panel_edit(self, interaction: discord.Interaction, feature_key: str | None = None):
+        """設定画面から /support パネルへ戻る（その機能が属するジャンルを開く）。
 
-    async def show_home_edit(self, interaction: discord.Interaction):
+        旧ハブ（サーバーアシストホーム）は再編で廃止したため、戻り先は
+        /support パネルそのもの。ジャンルは SUPPORT_ACTIONS_BY_GENRE から
+        逆引きする（import は循環回避のため実行時に行う）。
+        """
         if not has_manage_permission(interaction):
             return await interaction.response.send_message(
                 "この設定には「サーバーの管理」権限が必要です。", ephemeral=True,
             )
-        return await edit_panel_v2(interaction, as_panel_v2(ServerAssistHomeView(self)))
+        support_cog = self.bot.get_cog("SupportCog")
+        if support_cog is None:
+            return await interaction.response.send_message(
+                "設定画面を開き直してください。", ephemeral=True,
+            )
+        genre = None
+        if feature_key:
+            from core.support.common import SUPPORT_ACTIONS_BY_GENRE
+
+            target = f"assist_{feature_key}"
+            genre = next(
+                (
+                    name
+                    for name, items in SUPPORT_ACTIONS_BY_GENRE.items()
+                    if any(value == target for _label, value in items)
+                ),
+                None,
+            )
+        from core.support.panel import SupportPanelView
+
+        view = SupportPanelView(
+            support_cog, genre=genre, owner_id=getattr(interaction.user, "id", None),
+        )
+        return await edit_panel_v2(interaction, as_panel_v2(view))
 
     async def show_feature(self, interaction: discord.Interaction, key: str):
         if not has_manage_permission(interaction):
