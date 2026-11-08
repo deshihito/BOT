@@ -307,6 +307,7 @@ from core.support.usage_stats.cog import (  # noqa: F401
 _FEATURE_MODULES = (
     ("allstats", "core.support.allstats.cog"),
     ("auth", "core.support.auth.cog"),
+    ("bot_status", "core.support.bot_status.cog"),
     ("clear", "core.support.clear.cog"),
     ("daily_report", "core.support.daily_report.cog"),
     ("errorhandler", "core.support.errorhandler.cog"),
