@@ -21,6 +21,21 @@ if db_api is None:
 GROQ_API_KEY = os.getenv('GROQ_API_KEY')
 GEMINI_API_KEY = os.getenv('GEMINI_API_KEY')
 
+# --- Bot管理者（追加分） ---
+# アプリの所有者に加えて、Bot管理者として扱うユーザーID（カンマ/空白区切り）。
+# 常設グローバルVCルームの作成・テーマ変更などが対象。
+def _parse_bot_admin_ids(raw: str) -> frozenset:
+    ids = set()
+    for part in (raw or "").replace(",", " ").split():
+        try:
+            ids.add(int(part))
+        except ValueError:
+            continue
+    return frozenset(ids)
+
+
+BOT_ADMIN_IDS = _parse_bot_admin_ids(os.getenv('BOT_ADMIN_IDS', ''))
+
 # --- LibreTranslate設定 ---
 # 自動翻訳とローカライズ用の翻訳経路で共有する設定。
 LIBRETRANSLATE_URL = os.getenv('LIBRETRANSLATE_URL', 'http://127.0.0.1:18080').rstrip('/')
