@@ -52,7 +52,9 @@ class UnifiedBoardGenreTest(unittest.TestCase):
         from core.general.common import GENERAL_ACTIONS
 
         values = [v for _label, v in GENERAL_ACTIONS["rta"]]
-        self.assertEqual(values, ["rankings", "asset_leaderboard"])
+        # 統合の趣旨は「旧 bump/up 個別ボードを rta ジャンルに残さない」こと。
+        # 即抜けRTAボードは別機能のボードとして同ジャンルに並ぶ（2026-11-08）。
+        self.assertEqual(values, ["rankings", "asset_leaderboard", "sokunuke_board"])
 
     def test_board_action_registered_in_new_genre(self):
         from core.general import action_registry
@@ -62,12 +64,14 @@ class UnifiedBoardGenreTest(unittest.TestCase):
         self.assertEqual(spec.genre, "boardnotify_rta")
 
     def test_registry_totals_after_unification(self):
-        # 旧8件 → 統合1件で general 76→69 / 全体 251→244（実 import での検証値）。Luna AI 追加で全体 244→245、人物分析 追加で 245→246
+        # 旧8件 → 統合1件で general 76→69 / 全体 251→244（実 import での検証値）。
+        # Luna AI 追加で全体 244→245、その後、即抜けRTAボード（general:sokunuke_board）追加で
+        # general 69→70 / 全体 245→246。人物分析（support:person_analysis）追加で全体 246→247。
         from core.general import action_registry
 
         specs = list(action_registry.default_registry()._by_id.values())
-        self.assertEqual(len(specs), 246)
-        self.assertEqual(len([s for s in specs if s.root == "general"]), 69)
+        self.assertEqual(len(specs), 247)
+        self.assertEqual(len([s for s in specs if s.root == "general"]), 70)
 
 
 class UnifiedBoardDispatchTest(unittest.IsolatedAsyncioTestCase):
