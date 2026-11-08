@@ -77,8 +77,8 @@ class RegistryConsistencyTest(unittest.TestCase):
         vc_values = {spec.value for spec in self.registry.by_root("vc")}
         self.assertIn("changer_start", vc_values)
         # 導線最適化 M4: フォーム系9件（gvc/tts/trigger/echo_delay）を追加し 27→36
-        # テーマ変更の追加で 36→37（常設ルーム作成は !gvcperm コマンドだけ）
-        self.assertEqual(len(vc_values), 37)
+        # テーマ変更・メンバー確認の追加で 36→38（常設ルーム作成は !gvcperm コマンドだけ）
+        self.assertEqual(len(vc_values), 38)
 
 
 class ShortcutRootsGenerationTest(unittest.TestCase):

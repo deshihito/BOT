@@ -97,6 +97,44 @@ class ChatMixin:
         await r.send(f"🌐 ルーム **{room_name}** のグロチャ接続を解除しました。")
 
 
+    async def _auto_link_text_chat(self, guild, channel, room) -> bool:
+        """text_chat が有効なルームへの VC 参加時に、そのテキストチャンネルもグロチャへ自動接続する。
+
+        すでに接続済みのチャンネル・別チャンネルで接続済みのサーバー・Webhook
+        権限が無い場合は何もしない。失敗しても VC 参加自体は止めない。
+        """
+        try:
+            if channel is None or getattr(channel, "id", None) is None:
+                return False
+            if channel.id in CHANNEL_TO_ROOM:
+                return False
+            if any(link.guild_id == guild.id for link in ROOM_TEXT_LINKS.get(room.name, [])):
+                return False
+            me = getattr(guild, "me", None)
+            if me is not None and not channel.permissions_for(me).manage_webhooks:
+                return False
+            webhook = await channel.create_webhook(
+                name=f"グロチャ: {room.name}", reason="グローバルチャット連携（自動接続）"
+            )
+            link = TextLink(guild_id=guild.id, channel_id=channel.id, webhook=webhook)
+            ROOM_TEXT_LINKS.setdefault(room.name, []).append(link)
+            CHANNEL_TO_ROOM[channel.id] = room.name
+            _persist_text_links()
+            logger.info("グローバルVC: ルーム %s のグロチャへ自動接続しました (channel_id=%s)",
+                        room.name, channel.id)
+            try:
+                await channel.send(
+                    f"🌐 ルーム **{room.name}** のグロチャにも自動接続しました"
+                    "（VC参加に連動する設定が有効なため）。")
+            except Exception:
+                logger.debug("グローバルVC: グロチャ自動接続の通知に失敗しました", exc_info=True)
+            return True
+        except Exception:
+            logger.debug("グローバルVC: グロチャ自動接続に失敗しました (room=%s)",
+                         getattr(room, "name", "?"), exc_info=True)
+            return False
+
+
     @commands.Cog.listener("on_message")
     async def on_message(self, message: discord.Message):
         # webhook からの中継メッセージ自身には反応しない (無限ループ防止)

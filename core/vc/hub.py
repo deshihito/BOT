@@ -245,6 +245,8 @@ class VoiceHub(commands.Cog):
             return await interaction.response.send_message(
                 view=cog.room_list_view(interaction.guild)
             )
+        if value == "gvc_members":
+            return await cog._members_impl(r)
         if value == "gvc_chat_disconnect":
             return await cog._chat_disconnect_impl(r)
         if form is None:

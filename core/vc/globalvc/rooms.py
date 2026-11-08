@@ -46,6 +46,7 @@ class RoomConfig:
     permanent: bool = False       # 常設ルーム（一覧の上部に固定表示される）
     theme: str = ""               # テーマ（話の話題）。"" = テーマなし
     theme_auto: bool = False      # 常設ルームの自動テーマ（毎日 theme_for で回す）
+    text_chat: bool = False       # VC参加時に、そのテキストチャンネルもグロチャへ自動接続する
 
 
 ROOMS: dict[str, RoomConfig] = {}
@@ -67,6 +68,7 @@ def _room_to_dict(room: RoomConfig) -> dict:
         "permanent": bool(room.permanent),
         "theme": room.theme,
         "theme_auto": bool(room.theme_auto),
+        "text_chat": bool(room.text_chat),
     }
 
 
@@ -90,6 +92,7 @@ def _room_from_dict(data) -> Optional[RoomConfig]:
             permanent=bool(data.get("permanent")),
             theme=str(data.get("theme") or ""),
             theme_auto=bool(data.get("theme_auto")),
+            text_chat=bool(data.get("text_chat")),
         )
     except (TypeError, ValueError):
         return None
@@ -160,6 +163,28 @@ def _clear_join(guild_id: int) -> None:
         store.flush()
     except Exception:
         logger.debug("グローバルVC: 参加状態の削除に失敗しました guild=%s", guild_id, exc_info=True)
+
+
+def _room_members(room_name: str) -> list:
+    """ルームに接続中の (member, guild) 一覧。人間だけ、ユーザーIDで重複を除く。"""
+    seen: set[int] = set()
+    members: list = []
+    for vc in GLOBAL_ROOMS.get(room_name, []):
+        channel = getattr(vc, "channel", None)
+        for member in getattr(channel, "members", None) or []:
+            if getattr(member, "bot", False):
+                continue
+            member_id = getattr(member, "id", None)
+            if member_id is None or member_id in seen:
+                continue
+            seen.add(member_id)
+            members.append((member, getattr(vc, "guild", None)))
+    return members
+
+
+def _room_user_count(room_name: str) -> int:
+    """ルームのVCに今入っているユーザー数（全接続サーバー合計）。"""
+    return len(_room_members(room_name))
 
 
 def _remove_vc_from_rooms(vc: voice_recv.VoiceRecvClient) -> Optional[str]:
