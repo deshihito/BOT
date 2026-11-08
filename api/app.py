@@ -28,6 +28,7 @@ TABLES = frozenset({
     "bump_rta_pending", "bump_rta_reminders", "jinrou_ratings",
     "fujo_users", "fujo_activities", "playlists", "user_music_playlists",
     "party_game_ranking", "party_game_monthly_ranking",
+    "luna_ai_memories", "luna_ai_turns",
 })
 
 # Callers may invoke only these known public functions and named arguments.

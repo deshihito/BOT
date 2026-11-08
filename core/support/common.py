@@ -150,6 +150,7 @@ SUPPORT_ACTIONS = [
     app_commands.Choice(name="ロール復元", value="assist_stickyroles"),
     app_commands.Choice(name="カスタム返信", value="assist_customreplies"),
     app_commands.Choice(name="常駐しりとり", value="assist_shiritori_resident"),
+    app_commands.Choice(name="Luna AI", value="assist_luna_ai"),
     app_commands.Choice(name="応募フォーム", value="assist_applications"),
     app_commands.Choice(name="応募審査", value="assist_application_review"),
     app_commands.Choice(name="音声トリガーのサーバー設定", value="voice_trigger"),
@@ -202,10 +203,10 @@ SUPPORT_ACTIONS_BY_GENRE = {
         "vc_log", "message_log", "moderation_log",
         "assist_serverlog", "assist_invites",
     ),
-    # 自動化・通知は33件あり、パネル側はページング（25件/ページ）で全件選べる。
+    # 自動化・通知は34件あり、パネル側はページング（25件/ページ）で全件選べる。
     # assist_warning_escalation / assist_application_review は、元機能
     # （警告・応募フォーム）が moderation 側にあるが、preset 入口は
-    # 「自動化・通知」の分割としてここに置く（33件構成）。
+    # 「自動化・通知」の分割としてここに置く（34件構成）。
     "automation": _support_actions(
         "binjou", "binjou_custom", "auto_react", "levelup_notify", "levelup_card_theme",
         "voice_trigger", "quest_notify", "quest_manual", "language", "globalchat", "globalchat_mod",
@@ -216,7 +217,7 @@ SUPPORT_ACTIONS_BY_GENRE = {
         "assist_webhook",
         "assist_timed", "assist_reminder", "assist_autoreact", "assist_events", "assist_events_link",
         "assist_customreplies",
-        "assist_shiritori_resident", "assist_warning_escalation", "assist_application_review",
+        "assist_shiritori_resident", "assist_luna_ai", "assist_warning_escalation", "assist_application_review",
     ),
     "rta": _support_actions(
         "sokunuke_status", "sokunuke_on",

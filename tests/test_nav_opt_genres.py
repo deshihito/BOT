@@ -29,8 +29,8 @@ class GenreAbsorptionTest(unittest.TestCase):
         self.assertIn("assist_welcome", automation)
         self.assertIn("assist_automod", moderation)
         total = sum(len(items) for items in SUPPORT_ACTIONS_BY_GENRE.values())
-        # 機能数再編: 55件 −旧 bumprta_* 4件 −旧 sns_notify 1件 ＋分割で増えた31件 = 81件。
-        self.assertEqual(total, 81)
+        # 機能数再編: 55件 −旧 bumprta_* 4件 −旧 sns_notify 1件 ＋分割で増えた31件 = 81件。Luna AI 追加で 82件。
+        self.assertEqual(total, 82)
 
     def test_genre_aliases_cover_absorbed_genres(self):
         from cogs.general import GENERAL_GENRE_ALIASES

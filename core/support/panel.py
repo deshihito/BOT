@@ -165,7 +165,7 @@ def support_action_pages(genre: str) -> list:
     """ジャンルのアクションをセレクト上限（25件）ごとのページに分ける。
 
     general の general_action_pages と同じ方式（セレクトは1つに固定し、
-    ページをボタンでめくる）。自動化・通知ジャンルが33件になったため、
+    ページをボタンでめくる）。自動化・通知ジャンルが34件になったため、
     support でも25件を超えるジャンルを全件選べるようにする。
     """
     actions = SUPPORT_ACTIONS_BY_GENRE[genre]
