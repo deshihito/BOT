@@ -5,6 +5,7 @@
 進行と集計は core/game/majority/majority.py。最終の最上位は party_ranking に記録。
 """
 import asyncio
+import io
 import logging
 import random
 
@@ -12,6 +13,7 @@ import discord
 from discord.ext import commands
 
 from core.game.game import game_panels, party_ranking
+from core.game.game.board_image import render_bars, render_cached
 from core.game.game.game_v2 import GamePanelView, LobbyView, original_response_or_none, safe_delete, text_panel
 from core.game.majority.majority import TOPICS, MajoritySession
 
@@ -103,13 +105,21 @@ class Majority(commands.Cog):
             session = MajoritySession(topics)
             for uid in players:
                 session.add_player(uid)
-            await self._play(channel, session)
+            names = {uid: getattr(m, "display_name", None) or f"プレイヤー{uid}"
+                     for uid, m in view.members.items()}
+            await self._play(channel, session, names)
         except Exception:  # noqa: BLE001
             logger.exception("Majority: 進行中にエラーが発生しました")
         finally:
             self.channels.discard(channel.id)
 
-    async def _play(self, channel, session: MajoritySession):
+    def _bars_file(self, rows, filename: str) -> discord.File:
+        key = ("majority-bars", filename, tuple(rows))
+        data = render_cached(key, lambda: render_bars(rows))
+        return discord.File(io.BytesIO(data), filename)
+
+    async def _play(self, channel, session: MajoritySession, names: dict | None = None):
+        names = names or {}
         while True:
             topic = session.next_round()
             if topic is None:
@@ -134,14 +144,24 @@ class Majority(commands.Cog):
             if not lines:
                 lines.append("回答がありませんでした。")
             # 結果は次のお題パネルに置き換わるまでの表示（ボタンなし）。
+            # 回答の分布はバー画像でも示す（人数の差が一目で分かるように）。
+            bar_rows = [(answer, len(uids)) for answer, uids in
+                        sorted(result["groups"].items(), key=lambda kv: -len(kv[1]))]
+            result_file = self._bars_file(bar_rows, "majority_round.png") if bar_rows else None
             await game_panels.replace(channel, "party", view=text_panel(
-                f"第{number}ラウンドの結果", "\n".join(lines)[:4000]))
+                f"第{number}ラウンドの結果", "\n".join(lines)[:4000]), file=result_file)
             await asyncio.sleep(3)
         rows = session.standings()
         medals = {1: "🥇", 2: "🥈", 3: "🥉"}
         text = "\n".join(f"{medals.get(i, f'{i}.')} <@{uid}> — {score}点" for i, (uid, score) in enumerate(rows, 1)) or "参加者がいませんでした。"
         await game_panels.clear(channel, "party")
-        await channel.send(view=text_panel("🏆 マジョリティ連想 最終結果", text))
+        final_file = None
+        if rows:
+            final_file = self._bars_file(
+                [(names.get(uid, f"プレイヤー{uid}"), score) for uid, score in rows],
+                "majority_final.png")
+        await channel.send(view=text_panel("🏆 マジョリティ連想 最終結果", text),
+                           file=final_file)
         guild = getattr(channel, "guild", None)
         if guild is not None:
             for uid in session.winners():

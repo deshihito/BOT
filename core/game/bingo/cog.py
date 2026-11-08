@@ -22,7 +22,7 @@ from discord.ext import commands
 from core.support.emojis import POYOPOYO
 from core.game.game import game_panels, party_ranking
 from core.game.bingo.bingo import BingoSession, format_card  # noqa: F401  format_card は cogs.bingo シムの再輸出用
-from core.game.game.board_image import render_bingo_card, render_cached
+from core.game.game.board_image import render_bingo_board, render_bingo_card, render_cached
 from core.game.game.game_v2 import GamePanelView, LobbyView, original_response_or_none, safe_delete, text_panel
 
 logger = logging.getLogger(__name__)
@@ -45,6 +45,16 @@ def card_png(card) -> bytes:
     return render_cached(key, lambda: render_bingo_card(card.grid, card.marked))
 
 
+def board_png(session: BingoSession) -> bytes:
+    """引かれた番号の全体盤（75球の開示状況）。"""
+    key = ("bingo-board", tuple(sorted(session.drawn)))
+    return render_cached(key, lambda: render_bingo_board(session.drawn))
+
+
+def board_file(session: BingoSession) -> discord.File:
+    return discord.File(io.BytesIO(board_png(session)), "bingo_board.png")
+
+
 class CardCheckPanel(GamePanelView):
     """進行表示＋「手札を確認」ボタンのパネル（V2）。
 
@@ -52,10 +62,13 @@ class CardCheckPanel(GamePanelView):
     本人にだけ見える ephemeral で返す（従来どおり）。
     """
 
-    def __init__(self, cog, session: BingoSession, body: str = ""):
+    def __init__(self, cog, session: BingoSession, body: str = "", *, board: bool = False):
         super().__init__("", body, timeout=3600)
         self.cog = cog
         self.session = session
+        if board:
+            self.add_extra(discord.ui.MediaGallery(
+                discord.MediaGalleryItem("attachment://bingo_board.png")))
         self.check = discord.ui.Button(label="手札を確認", style=discord.ButtonStyle.secondary)
         self.check.callback = self._check
         self.add_row(self.check)
@@ -148,8 +161,9 @@ class Bingo(commands.Cog):
         lines = [f"🎱 **{number}** が出ました。（{len(session.drawn)}球目）"]
         for uid in reach:
             lines.append(f"<@{uid}> さんが **リーチ** です！")
-        lines.append("これまで: " + " ".join(str(n) for n in session.drawn))
-        await tease.edit(view=CardCheckPanel(self, session, body="\n".join(lines)))
+        # 引かれた番号の一覧は全体盤の画像が担う（テキストの列挙は重複なので廃止）。
+        await tease.edit(view=CardCheckPanel(self, session, body="\n".join(lines), board=True),
+                         attachments=[board_file(session)])
         # 前回の開示（または開始アナウンス）は新しい開示で役割を終える。
         previous = getattr(session, "last_draw_msg", None)
         if previous is not None and previous is not tease:
