@@ -269,6 +269,8 @@ class VoiceHub(commands.Cog):
             return await cog._room_delete_impl(r, name)
         if value == "gvc_chat_connect":
             return await cog._chat_connect_impl(r, name, form.get("password") or None)
+        if value == "gvc_auto_connect":
+            return await cog._text_chat_toggle_impl(r, name)
         return await r.send("操作を選択してください。", ephemeral=True)
 
     @app_commands.command(name="vc", description="音楽・ボイス機能の操作パネルを表示します")
@@ -329,6 +331,28 @@ class VoiceHub(commands.Cog):
             cog = await self._cog(interaction, "music")
             if cog:
                 await cog._panel_impl(Responder(interaction))
+            return
+        if value == "music_search":
+            # 選択式検索（_search_impl / SearchView）はキーワードが要るため、
+            # tts_say 等のフォーム系と同じくモーダルで聞いてから impl へ渡す。
+            # 音楽パネル本体の検索ボタン（SearchModal）とは別経路。
+            return await interaction.response.send_modal(MusicSearchModal(self))
+        if value in {"music_playlist", "music_spatial", "music_autoplay",
+                     "music_queue", "music_files"}:
+            # 音楽パネル本体に同居する各機能への追加の入口（パネル本体は壊さない）。
+            cog = await self._cog(interaction, "music")
+            if cog:
+                responder = Responder(interaction)
+                if value == "music_playlist":
+                    await cog._playlist_library_impl(responder)
+                elif value == "music_spatial":
+                    await cog._spatial_impl(responder)
+                elif value == "music_autoplay":
+                    await cog._autoplay_panel_impl(responder)
+                elif value == "music_queue":
+                    await cog._queue_impl(interaction)
+                else:  # music_files
+                    await cog._files_impl(responder)
             return
         if value in GVC_ROOM_ACTIONS:
             if value in GVC_ROOM_FORMS and name is not None:
@@ -456,6 +480,12 @@ class VoicePanelView(discord.ui.View):
             action_select = VoiceActionSelect(self.hub, self.genre)
             action_select.row = offset + 1
             self.add_item(action_select)
+        # ジャンルワープ（core/panel_warps.py の対応表から自動配置。
+        # ジャンル未選択（ハブ）起点の行も含む。1ジャンル最大2本まで）。
+        from core.panel_warps import make_warp_button, warps_from
+
+        for warp in warps_from("vc", self.genre)[:2]:
+            self.add_item(make_warp_button("vc", warp, row=min(offset + 2, 4)))
         if self.shortcut_mode:
             from cogs.general import ShortcutCommitButton
             self.add_item(ShortcutCommitButton("vc"))
@@ -511,3 +541,27 @@ class GvcRoomModal(discord.ui.Modal):
     async def on_submit(self, interaction: discord.Interaction):
         form = {key: item.value.strip() for key, item in self.inputs.items()}
         await self.hub.voice_global_rooms(interaction, self.action, form)
+
+
+class MusicSearchModal(discord.ui.Modal, title="楽曲検索・追加（選択式）"):
+    """キーワードを聞き、選択式検索（音楽cog の _search_impl / SearchView）へ渡す。
+
+    音楽パネル本体の検索ボタン（SearchModal: 先頭候補をそのまま追加）とは別経路で、
+    こちらは候補一覧から選んで追加する。
+    """
+
+    keyword = discord.ui.TextInput(
+        label="検索キーワードまたはURL",
+        placeholder="例: 米津玄師 地球儀 / https://...",
+        required=True,
+        max_length=200,
+    )
+
+    def __init__(self, hub: VoiceHub):
+        super().__init__()
+        self.hub = hub
+
+    async def on_submit(self, interaction: discord.Interaction):
+        cog = await self.hub._cog(interaction, "music")
+        if cog:
+            await cog._search_impl(Responder(interaction), self.keyword.value.strip())

@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from ..common import *
 from .miq import (
-    MIQ_DEFAULT_PREFS, MIQ_FORMATS, MIQ_THEMES, _miq_available_fonts, miq_get_prefs,
-    miq_resolve_format, miq_save_prefs,
+    MIQ_DEFAULT_PREFS, MIQ_FORMATS, MIQ_MAX_CHARS, MIQ_THEMES, _miq_available_fonts,
+    miq_get_prefs, miq_resolve_format, miq_save_prefs,
 )
 from ..meme import MEME_MAX_TEXT
 
@@ -374,3 +374,93 @@ class MiqSettingsView(discord.ui.View):
             "ONにすると、他の人はあなたのメッセージをMIQにできません（自分の引用は可能）。",
         ]
         return discord.Embed(title="MIQ設定", description="\n".join(lines), color=0xFFFFFF)
+
+
+# ------------------------------------------------------------
+# MIQ引用拒否の独立入口 (general:miq_refuse) と MIQ作成モーダル (general:miq_create)
+# ------------------------------------------------------------
+
+class MiqRefuseToggleButton(discord.ui.Button):
+    def __init__(self, parent: "MiqRefuseView"):
+        self.parent_view = parent
+        on = bool(parent.prefs.get("refuse"))
+        style = discord.ButtonStyle.danger if on else discord.ButtonStyle.secondary
+        super().__init__(
+            label=f"引用を拒否: {'ON' if on else 'OFF'}", style=style, row=0)
+
+    async def callback(self, interaction: discord.Interaction):
+        parent = self.parent_view
+        if interaction.user.id != parent.user_id:
+            return await interaction.response.send_message(
+                "この設定画面を開いたユーザーだけ変更できます。", ephemeral=True)
+        parent.prefs["refuse"] = not parent.prefs.get("refuse")
+        await parent.commit(interaction)
+
+
+class MiqRefuseView(discord.ui.View):
+    """引用拒否トグルだけの小さな設定 View（general:miq_refuse の着地先）。
+
+    保存は MiqSettingsView と同じ miq_save_prefs を使い、見た目等の
+    他の設定には触れない（prefs は miq_get_prefs の全項目を持つ）。
+    """
+
+    def __init__(self, cog: "GeneralCog", user_id: int):
+        super().__init__(timeout=300)
+        self.cog, self.user_id = cog, user_id
+        self.prefs = miq_get_prefs(user_id)
+        self.refresh()
+
+    async def interaction_check(self, interaction) -> bool:
+        return interaction.user.id == self.user_id
+
+    def refresh(self):
+        self.clear_items()
+        self.add_item(MiqRefuseToggleButton(self))
+
+    async def commit(self, interaction: discord.Interaction):
+        ok = await miq_save_prefs(self.user_id, self.prefs)
+        self.refresh()
+        await edit_panel_v2(interaction, as_panel_v2(self))
+        if not ok:
+            try:
+                await interaction.followup.send(
+                    "設定の保存に失敗しました。時間をおいて再試行してください。",
+                    ephemeral=True)
+            except discord.HTTPException:
+                logger.debug("MIQ: 設定保存の失敗通知の送信に失敗しました", exc_info=True)
+
+    def embed(self) -> discord.Embed:
+        on = bool(self.prefs.get("refuse"))
+        lines = [
+            f"あなたのメッセージの引用を拒否: `{'ON' if on else 'OFF'}`",
+            "ONにすると、他の人はあなたのメッセージをMIQにできません（自分の引用は可能）。",
+            "見た目の設定は「MIQ設定（見た目・引用拒否）」から変更できます。",
+        ]
+        return discord.Embed(
+            title="MIQ引用拒否設定", description="\n".join(lines), color=0xFFFFFF)
+
+
+class MiqCreateModal(discord.ui.Modal, title="MIQ（メッセージ画像化）"):
+    """入力テキストを投稿者本人の名前/アバターで画像化するモーダル。
+
+    送信後の処理は handler に委ねる（MemeTextModal と同じ作り）。
+    handler は async callable(interaction, text)。
+    """
+
+    text = discord.ui.TextInput(
+        label="画像化するテキスト",
+        style=discord.TextStyle.paragraph,
+        max_length=MIQ_MAX_CHARS,
+        placeholder="例: その発言、画像に残しておきます",
+    )
+
+    def __init__(self, handler):
+        super().__init__()
+        self.handler = handler
+
+    async def on_submit(self, interaction: discord.Interaction):
+        text = (self.text.value or "").strip()
+        if not text:
+            return await interaction.response.send_message(
+                "テキストを入力してください。", ephemeral=True)
+        await self.handler(interaction, text)

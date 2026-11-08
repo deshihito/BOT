@@ -227,3 +227,30 @@ class LevelUpSupportMixin:
             view=LevelUpNotifyPanel(self, settings, interaction.guild),
             ephemeral=True,
         )
+
+    async def show_levelup_card_theme_settings(self, interaction: discord.Interaction):
+        """個人のカードテーマ変更を直接開く（levelup_card_theme 入口）。
+
+        テーマ変更の実体は LevelUpNotifyPanel 内の「自分のカードテーマ」
+        ボタン（押した本人のテーマを切り替える）のため、そのボタンを
+        含むパネルを案内つきで開く。
+        """
+        if interaction.guild is None:
+            return await interaction.response.send_message(
+                "この機能はサーバー内で利用できます。",
+                ephemeral=True,
+            )
+
+        from cogs.general import get_levelup_settings
+
+        store = guild_settings.get_store()
+        await store.ensure_loaded()
+        settings = get_levelup_settings(store, interaction.guild.id)
+        panel = LevelUpNotifyPanel(
+            self, settings, interaction.guild,
+            notice="「自分のカードテーマ」ボタンで、あなたのレベルアップカードのテーマを変更できます。",
+        )
+        await interaction.response.send_message(
+            view=panel,
+            ephemeral=True,
+        )

@@ -330,10 +330,14 @@ class WorkshopView(discord.ui.View):
 
 
 class CraftView(discord.ui.View):
-    def __init__(self, cog: "WorkshopCog", user_id: int):
+    def __init__(self, cog: "WorkshopCog", user_id: int, *,
+                 commission: bool = False):
         super().__init__(timeout=180)
         self.cog = cog
         self.user_id = user_id
+        # 委託加工の独立入口（general:craft_commission）から開いた場合は
+        # True。ボタン構成は共有し、案内文で委託モードであることを示す。
+        self.commission = commission
         self._png: bytes | None = None
         self._png_ready = False
         self.first: str | None = None
@@ -377,8 +381,13 @@ class CraftView(discord.ui.View):
         return [discord.File(io.BytesIO(png), filename=CRAFT_FILENAME)]
 
     def embed(self) -> discord.Embed:
-        return _craft_embed(
+        embed = _craft_embed(
             self.cog, self.user_id, image=self.panel_png() is not None)
+        if self.commission:
+            embed.description = (
+                "委託加工: 素材を2つ選んで「委託する」を押してください。"
+                "時間をかけて、通常の合成よりレアな結果が出やすくなります。")
+        return embed
 
     def _make_select_callback(self, slot: str):
         async def callback(interaction: discord.Interaction):
@@ -465,19 +474,28 @@ class WorkshopCog(commands.Cog):
         message = self.execute_claim(interaction.user.id)
         await interaction.followup.send(message)
 
-    async def show_craft(self, interaction: discord.Interaction):
+    async def show_craft(self, interaction: discord.Interaction, *,
+                         commission: bool = False):
         try:
             embed = _craft_embed(self, interaction.user.id)
         except items_core.ItemError as exc:
             return await interaction.response.send_message(
                 workshop_action_failed(exc), ephemeral=True)
-        view = CraftView(self, interaction.user.id)
+        view = CraftView(self, interaction.user.id, commission=commission)
         files = view.panel_files()
         if files:
             await interaction.response.send_message(
                 view=_wrap(view), files=files)
         else:
             await interaction.response.send_message(view=_wrap(view))
+
+    async def open_commission(self, interaction: discord.Interaction):
+        """委託加工の独立入口（general:craft_commission）。
+
+        合成画面（CraftView）は共有し、委託モードの案内付きで開く。
+        実行は CraftView の「委託する」→ execute_commission が担う。
+        """
+        await self.show_craft(interaction, commission=True)
 
     # ------------------------------------------------------------------ 実行
     def _wallet(self):

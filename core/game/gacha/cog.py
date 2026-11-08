@@ -314,6 +314,22 @@ class GachaCog(commands.Cog):
         return "\n".join(lines)
 
     # ------------------------------------------------------------------ 入口
+    async def open_party(self, interaction: discord.Interaction):
+        """編成の独立入口（general:gacha_party）。
+
+        GachaView の「編成する」と同じ PartyView を直接開く
+        （所持チェックも同条件）。
+        """
+        owned = self.store.owned(str(interaction.user.id))
+        if not owned:
+            return await interaction.response.send_message(
+                "所持キャラがいません。先にガチャを引いてください。",
+                ephemeral=True)
+        view = PartyView(self, interaction.user.id)
+        await interaction.response.send_message(
+            "編成するキャラを選んでください（最大3体）。",
+            view=view, ephemeral=True)
+
     async def show_gacha(self, interaction: discord.Interaction):
         view = GachaView(self, interaction.user.id)
         view._cached_embed = summary_embed(self, interaction.user.id)

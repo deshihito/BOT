@@ -74,11 +74,12 @@ GENERAL_GENRE_ALIASES = {"translation": "custom", "miq": "make_image", "meme": "
 # workshop / lottery のパネル表示）は含めない（開くことはできる）。
 MONEY_PRISON_BLOCKED_VALUES = frozenset({
     "pay", "token_buy", "token_sell",
-    "item_buy", "item_use", "box_open",
-    "machine_buy", "workshop_claim", "craft",
+    "item_buy", "item_use", "item_sell", "box_open",
+    "machine_buy", "workshop_claim", "craft", "craft_commission",
     "mining", "lottery_buy", "steal",
     "slot", "double", "blackjack", "dice", "bj_duel",
     "gacha",
+    "starter_claim", "daily_bonus_claim",
 })
 
 GENERAL_ACTIONS = {
@@ -111,6 +112,14 @@ GENERAL_ACTIONS = {
         ("ロールショップ", "role_shop"),
         ("ガチャ", "gacha"),
         ("クラン", "clan"),
+        ("スターター受取", "starter_claim"),
+        ("デイリーボーナス受取", "daily_bonus_claim"),
+        ("脱獄試行", "jailbreak"),
+        ("アイテムを売る", "item_sell"),
+        ("ロールショップ商品管理", "role_shop_manage"),
+        ("委託加工", "craft_commission"),
+        ("ガチャ編成", "gacha_party"),
+        ("クラン管理", "clan_manage"),
     ],
     "rta": [
         ("ランキング一覧", "rankings"),
@@ -131,6 +140,7 @@ GENERAL_ACTIONS = {
         ("fujo statusランキング", "fujo_ranking"),
         ("フリーズ", "fujo_freeze"),
         ("失踪警報解除", "fujo_panic_disable"),
+        ("生存ステータス", "fujo_status"),
     ],
     "garden": [
         ("grass simulator", "garden"),
@@ -147,6 +157,8 @@ GENERAL_ACTIONS = {
         ("画像生成AIモデルを設定", "image_default"),
         ("AI思考強度を設定", "reasoning_default"),
         ("自動翻訳を設定", "translation_settings"),
+        ("AIチャット（!ai）", "ai_chat"),
+        ("AI画像生成（!generate）", "ai_generate"),
     ],
     "zeta": [
         ("ZetaModokiと会話", "zetamodoki"),
@@ -160,6 +172,8 @@ GENERAL_ACTIONS = {
         ("memeを作成", "meme_create"),
         ("使い方", "meme_help"),
         ("MIQ設定（見た目・引用拒否）", "miq_settings"),
+        ("MIQ引用拒否設定", "miq_refuse"),
+        ("MIQ（メッセージ画像化）", "miq_create"),
     ],
 }
 

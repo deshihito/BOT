@@ -229,6 +229,17 @@ class Muted(commands.Cog):
             await interaction.edit_original_response(embed=embed, view=None)
             self.stop() # Viewのループを止める
 
+    async def show_muted_settings(self, interaction: discord.Interaction):
+        """Muted の設定側だけを開く（機能数再編の muted_settings 入口）。
+
+        付与側（対象・分数つき）は muted_setting の引数分岐が担い、
+        引数なし分岐と同じ MuteSettingView（権限同期・非表示切替）を出す。
+        """
+        if not await self.is_admin_role(interaction):
+            return
+        embed = discord.Embed(title="Muted システム設定", description="メニューを選択してください。一度実行すると終了します。", color=self.embed_color)
+        await interaction.response.send_message(embed=embed, view=self.MuteSettingView(self), ephemeral=True)
+
     # --- メインコマンド ---
     async def muted_setting(
         self, 

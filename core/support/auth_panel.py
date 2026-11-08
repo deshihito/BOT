@@ -737,6 +737,31 @@ class AuthSupportMixin:
         )
 
 
+    async def show_auth_question_settings(self, interaction: discord.Interaction):
+        """認証フォームの質問編集画面を直接開く（auth_questions 入口）。"""
+        if interaction.guild is None:
+            return await interaction.response.send_message(
+                "この機能はサーバー内で利用できます。",
+                ephemeral=True,
+            )
+
+        if not can_manage_auth_panel(interaction):
+            return await interaction.response.send_message(
+                "この機能は管理者のみ利用できます。",
+                ephemeral=True,
+            )
+
+        store = guild_settings.get_store()
+        await store.ensure_loaded()
+        settings = get_auth_settings(store, interaction.guild.id)
+
+        view = AuthQuestionSettingsView(self, settings)
+        await interaction.response.send_message(
+            view=as_panel_v2(view),
+            ephemeral=True,
+        )
+
+
     async def handle_auth_start(self, interaction: discord.Interaction):
         if interaction.guild is None:
             return

@@ -29,7 +29,7 @@ class MoneyGenrePagingTest(unittest.TestCase):
 
     def test_pages_split_at_limit(self):
         pages = general_action_pages("money")
-        self.assertEqual([len(p) for p in pages], [25, 3])
+        self.assertEqual([len(p) for p in pages], [25, 11])
         flat = [value for page in pages for _label, value in page]
         self.assertEqual(flat, [value for _label, value in GENERAL_ACTIONS["money"]])
 
@@ -57,7 +57,10 @@ class MoneyGenrePagingTest(unittest.TestCase):
         panel.refresh()
         select = _action_select(panel)
         self.assertEqual(
-            [o.value for o in select.options], ["role_shop", "gacha", "clan"])
+            [o.value for o in select.options],
+            ["role_shop", "gacha", "clan", "starter_claim", "daily_bonus_claim",
+             "jailbreak", "item_sell", "role_shop_manage", "craft_commission",
+             "gacha_party", "clan_manage"])
         self.assertIn("2/2", select.placeholder)
         buttons = _buttons(panel)
         self.assertFalse(buttons["panel:general:action_prev"].disabled)

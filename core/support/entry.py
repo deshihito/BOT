@@ -69,6 +69,55 @@ from core.support.sns import (
 
 logger = logging.getLogger("cogs.support")  # 集約後も従来のロガー名を維持（テストの assertLogs 互換）
 
+# 機能数再編: assist_ preset 入口 -> (元機能キー, preset 名, 案内文)。
+# 汎用 assist_ 分岐に落とすと show_feature(未知キー) で失敗するため、
+# dispatch では必ず汎用分岐より前に special-case する。
+ASSIST_PRESET_ACTIONS = {
+    "assist_reminder": (
+        "timed", "reminders",
+        "一回限りリマインダーは、下の「リマインダーを追加」から登録できます。",
+    ),
+    "assist_goodbye": (
+        "welcome", "goodbye",
+        "退出メッセージの設定です（送信先・文面・オン/オフ）。参加側は「参加・退出メッセージ」から変更できます。",
+    ),
+    "assist_embed_templates": (
+        "embed", "templates",
+        "埋め込みテンプレートの管理です（保存・読み込み・削除）。",
+    ),
+    "assist_warning_escalation": (
+        "warnings", "escalation",
+        "警告エスカレーション（警告が一定件数たまったときの自動処分）の設定です。",
+    ),
+    "assist_application_review": (
+        "applications", "review",
+        "応募審査まわりの設定です（レビュー先チャンネルなど）。審査自体は、レビュー先に届いた応募メッセージのボタンから行います。",
+    ),
+    "assist_events_link": (
+        "events", "scheduled",
+        "公式イベント連携（Discordのスケジュールイベントへの同期）の設定です。",
+    ),
+}
+
+# boardNotify サービス別入口 -> (BumpRta の event_type, 表示名)。
+BUMPRTA_SERVICE_ACTIONS = {
+    "bumprta_bump": ("bump", "DISBOARD"),
+    "bumprta_up": ("up", "ディス速"),
+    "bumprta_vote": ("vote", "鯖ちゃんねる"),
+    "bumprta_takasumi": ("takasumi", "TakasumiBOT"),
+    "bumprta_dicoall": ("dicoall", "Dicoall"),
+    "bumprta_dcafe": ("dcafe", "Discord Cafe"),
+    "bumprta_sharkbot": ("sharkbot", "SharkBot"),
+}
+
+# SNS プラットフォーム別入口 -> SnsNotifyPanel の platform preset。
+SNS_PLATFORM_ACTIONS = {
+    "sns_youtube": "youtube",
+    "sns_x": "x",
+    "sns_github": "github",
+    "sns_rss": "rss",
+}
+
 
 async def edit_auth_panel_message(interaction: discord.Interaction, panel):
     """Modal後などでも設定パネルを再描画するための補助。"""
@@ -104,11 +153,13 @@ class SupportCog(
 ):
     SUPPORT_REQUIRED_PERMISSIONS = {
         "muted": "manage_roles",
+        "muted_settings": "manage_roles",
         "whisper": "manage_channels",
         "sticky": "manage_guild",
         "clear": "manage_messages",
         "role_bulk": "manage_roles",
         "binjou": "manage_guild",
+        "binjou_custom": "manage_guild",
         "auto_react": "manage_guild",
         "giveaway": "manage_guild",
         "vc_log": "manage_guild",
@@ -116,15 +167,47 @@ class SupportCog(
         "moderation_log": "manage_guild",
         "honeypot": "manage_guild",
         "ticket": "manage_guild",
+        "ticket_types": "manage_guild",
+        "ticket_transcript": "manage_guild",
+        "ticket_assign": "manage_guild",
         "auth_panel": "administrator",
+        "auth_questions": "administrator",
         "role_panel": "administrator",
         "language": "manage_guild",
         "sns_notify": "administrator",
+        "sns_youtube": "administrator",
+        "sns_x": "administrator",
+        "sns_github": "administrator",
+        "sns_rss": "administrator",
+        "sns_youtube_live": "administrator",
         "quest_notify": "administrator",
+        "quest_manual": "administrator",
         "levelup_notify": "manage_guild",
+        "levelup_card_theme": "manage_guild",
         "vc_auto_start": "manage_guild",
         "bot_fixer": "manage_guild",
+        "bot_fixer_bots": "manage_guild",
+        "bot_fixer_rates": "manage_guild",
         "globalchat": "manage_guild",
+        "globalchat_mod": "manage_guild",
+        "tempvoice_panel": "manage_guild",
+        # boardNotify 再編の新 value。水準は bumprta_command 内の
+        # on/off/role 分岐が要求する manage_guild に合わせる。
+        "bumprta_bump": "manage_guild",
+        "bumprta_up": "manage_guild",
+        "bumprta_vote": "manage_guild",
+        "bumprta_takasumi": "manage_guild",
+        "bumprta_dicoall": "manage_guild",
+        "bumprta_dcafe": "manage_guild",
+        "bumprta_sharkbot": "manage_guild",
+        "bumprta_settings": "manage_guild",
+        # assist preset 入口（汎用 assist_ 分岐の manage_guild と同じ水準を明示）。
+        "assist_reminder": "manage_guild",
+        "assist_goodbye": "manage_guild",
+        "assist_embed_templates": "manage_guild",
+        "assist_warning_escalation": "manage_guild",
+        "assist_application_review": "manage_guild",
+        "assist_events_link": "manage_guild",
         # 旧ハブ値。アクションとしては廃止し、dispatch の互換分岐（案内のみ）用に残す。
         "server_assist": "manage_guild",
         "sokunuke_status": "manage_guild",
@@ -265,6 +348,73 @@ class SupportCog(
         )
 
 
+    async def show_bumprta_service(self, interaction: discord.Interaction, selected: str):
+        """boardNotify サービス別入口: 共通の通知状態＋次回予定＋ランキング案内。
+
+        サービス別設定は現行に存在しないため作らず、状態は共通設定
+        （BumpRta の _is_enabled / _role_id）をそのまま表示する。
+        次回通知予定は BumpRta のメモリ内リマインダー（_reminders）から
+        そのサービス分で最も早いものを出す。
+        """
+        event_type, label = BUMPRTA_SERVICE_ACTIONS[selected]
+        cog = self.bot.get_cog("BumpRta")
+        if cog is None:
+            return await self._missing(interaction, "boardNotify")
+
+        enabled = await cog._is_enabled(interaction.guild_id)
+        role_id = await cog._role_id(interaction.guild_id)
+        role_text = f"<@&{role_id}>" if role_id else "なし"
+
+        next_text = "予定なし（次にコマンドが成功すると予約されます）"
+        reminders = getattr(cog, "_reminders", {}) or {}
+        due_list = [
+            rem.due_ts for rem in reminders.values()
+            if getattr(rem, "guild_id", None) == interaction.guild_id
+            and getattr(rem, "kind", None) == event_type
+        ]
+        if due_list:
+            due = int(min(due_list))
+            next_text = f"<t:{due}:F>（<t:{due}:R>）"
+
+        embed = discord.Embed(
+            title=f"{label}（boardNotify）",
+            description=(
+                f"通知状態（共通）: **{'オン' if enabled else 'オフ'}**\n"
+                f"メンションロール（共通）: {role_text}\n"
+                f"次回通知予定: {next_text}\n\n"
+                "通知のオン/オフ・メンションロールの変更は「boardNotify設定（共通）」から行えます。\n"
+                f"{label} のRTAランキングは /general の「ランキング」で確認できます。"
+            ),
+            color=0xFFFFFF,
+        )
+        return await interaction.response.send_message(embed=embed, ephemeral=True)
+
+
+    async def show_bumprta_settings_panel(self, interaction: discord.Interaction):
+        """boardNotify 共通設定: 既存 bumprta_status の状態表示＋設定用View。
+
+        オン/オフ・ロール設定の実処理は BumpRtaSettingsView のボタンが
+        BumpRta.bumprta_command の既存分岐へ委譲する。
+        """
+        cog = self.bot.get_cog("BumpRta")
+        if cog is None:
+            return await self._missing(interaction, "boardNotify")
+
+        enabled = await cog._is_enabled(interaction.guild_id)
+        role_id = await cog._role_id(interaction.guild_id)
+        role_text = f"<@&{role_id}>" if role_id else "なし"
+        embed = discord.Embed(
+            title="boardNotify設定（共通）",
+            description=(
+                f"boardNotify: **{'オン' if enabled else 'オフ'}**（初期状態: オン）"
+                f"\n通知メンションロール: {role_text}"
+            ),
+            color=0xFFFFFF,
+        )
+        return await interaction.response.send_message(
+            embed=embed, view=BumpRtaSettingsView(cog), ephemeral=True)
+
+
     async def dispatch(self, interaction: discord.Interaction, selected: str):
         if not await self.check_support_permission(interaction, selected):
             return
@@ -285,6 +435,18 @@ class SupportCog(
         # 管理者向け総量統計も同じ入口で数える（個人履歴とは別集計）。
         usage_stats.record_action_safely(f"support:{selected}")
 
+        # 機能数再編: assist preset 入口は汎用 assist_ 分岐より前に処理する
+        # （汎用分岐へ落とすと show_feature(未知キー) で失敗する）。
+        if selected in ASSIST_PRESET_ACTIONS:
+            feature_key, preset, notice = ASSIST_PRESET_ACTIONS[selected]
+            cog = self.bot.get_cog("ServerAssistCog")
+            if cog is None:
+                return await self._missing(interaction, "サーバーアシスト")
+            show_preset = getattr(cog, "show_feature_preset", None)
+            if show_preset is None:
+                return await cog.show_feature(interaction, feature_key)
+            return await show_preset(interaction, feature_key, preset=preset, notice=notice)
+
         if selected.startswith("assist_"):
             # サーバーアシスト再編: 各機能は /support の一級アクション。
             # パネル／quick・ショートカットから個別機能を直接開く。
@@ -292,6 +454,81 @@ class SupportCog(
             if cog is None:
                 return await self._missing(interaction, "サーバーアシスト")
             return await cog.show_feature(interaction, selected.removeprefix("assist_"))
+
+        if selected in BUMPRTA_SERVICE_ACTIONS:
+            return await self.show_bumprta_service(interaction, selected)
+
+        if selected == "bumprta_settings":
+            return await self.show_bumprta_settings_panel(interaction)
+
+        if selected in SNS_PLATFORM_ACTIONS:
+            return await self.show_sns_notify_settings(
+                interaction, platform=SNS_PLATFORM_ACTIONS[selected])
+
+        if selected == "sns_youtube_live":
+            return await self.show_sns_notify_settings(interaction, live=True)
+
+        if selected == "bot_fixer_bots":
+            return await self.show_bot_fixer_settings(interaction, preset={"area": "bot"})
+
+        if selected == "bot_fixer_rates":
+            return await self.show_bot_fixer_settings(
+                interaction, preset={"area": "command", "purpose": "rates"})
+
+        if selected == "muted_settings":
+            cog = self.bot.get_cog("Muted")
+            if cog is None:
+                return await self._missing(interaction, "Muted")
+            show_settings = getattr(cog, "show_muted_settings", None)
+            if show_settings is not None:
+                return await show_settings(interaction)
+            return await cog.muted_setting(interaction)
+
+        if selected in {"ticket_types", "ticket_transcript"}:
+            cog = self.bot.get_cog("TicketCog")
+            if cog is None:
+                return await self._missing(interaction, "チケット")
+            show_advanced = getattr(cog, "show_advanced_settings", None)
+            if show_advanced is not None:
+                return await show_advanced(interaction)
+            return await cog.show_settings(interaction)
+
+        if selected == "ticket_assign":
+            cog = self.bot.get_cog("TicketCog")
+            if cog is None:
+                return await self._missing(interaction, "チケット")
+            show_guide = getattr(cog, "show_assign_guide", None)
+            if show_guide is not None:
+                return await show_guide(interaction)
+            return await cog.show_settings(interaction)
+
+        if selected == "auth_questions":
+            return await self.show_auth_question_settings(interaction)
+
+        if selected == "globalchat_mod":
+            return await self.show_globalchat_moderation(interaction)
+
+        if selected == "tempvoice_panel":
+            return await interaction.response.send_message(
+                view=as_panel_v2(TempVoicePanelGuideView(self)), ephemeral=True)
+
+        if selected == "levelup_card_theme":
+            return await self.show_levelup_card_theme_settings(interaction)
+
+        if selected == "quest_manual":
+            return await self.show_quest_manual(interaction)
+
+        if selected == "binjou_custom":
+            store = guild_settings.get_store()
+            await store.ensure_loaded()
+            settings = get_binjou_settings(store, interaction.guild_id)
+            view = EmojiBinjouView(self, settings)
+            if getattr(interaction, "message", None) is not None and not interaction.response.is_done():
+                return await interaction.response.send_modal(BinjouRuleModal(view))
+            return await interaction.response.send_message(
+                view=as_panel_v2(view),
+                ephemeral=True,
+            )
 
         if selected == "server_assist":
             # 旧ハブ値の互換分岐。保存済みショートカット等に残っていても
@@ -430,6 +667,11 @@ class SupportCog(
                 app_commands.Choice(name=action, value=action),
             )
 
+        # 最終フォールスルー（boardNotify 互換）: 正リストから外した旧
+        # bumprta_status/on/off/role もここへ落ち、従来どおり動作する
+        # （保存済みショートカット・/quick 経由の旧 value を死なせない）。
+        # 新 value（bumprta_bump 等のサービス別入口と bumprta_settings）は
+        # 上の special-case で処理済みのため、ここには来ない。
         cog = self.bot.get_cog("BumpRta")
         if cog is None:
             return await self._missing(interaction, "boardNotify")

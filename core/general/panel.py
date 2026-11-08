@@ -271,6 +271,13 @@ class GeneralPanel(discord.ui.View):
                     row=pager_row, disabled=True))
                 self.add_item(GeneralActionPageButton(
                     1, self.action_page, len(pages), row=pager_row))
+            # ジャンルワープ（core/panel_warps.py の対応表から自動配置。
+            # 1ジャンル最大2本まで）。
+            from core.panel_warps import make_warp_button, warps_from
+
+            warp_row = min(offset + 2 + (1 if len(pages) > 1 else 0), 4)
+            for warp in warps_from("general", self.genre)[:2]:
+                self.add_item(make_warp_button("general", warp, row=warp_row))
         if self.shortcut_mode:
             self.add_item(ShortcutCommitButton())
         else:

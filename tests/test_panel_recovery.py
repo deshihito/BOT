@@ -50,7 +50,9 @@ class CustomIdTest(unittest.TestCase):
             child_ids(GeneralPanel(None, genre="money")),
             {"panel:general:genre", "panel:general:action", "panel:general:register",
              "panel:general:action_prev", "panel:general:action_indicator",
-             "panel:general:action_next"},
+             "panel:general:action_next",
+             # 機能再編: money⇔rta のジャンルワープボタン
+             "panel:general:warp_general_rta"},
         )
         specs = [types.SimpleNamespace(label="プレイヤー状況", value="status")]
         self.assertIn("panel:general:history", child_ids(GeneralPanel(None, history_specs=specs)))
@@ -68,7 +70,10 @@ class CustomIdTest(unittest.TestCase):
         self.assertIn("panel:support:commit", child_ids(SupportPanelView(None, shortcut_mode=True)))
 
     def test_voice_panel(self):
-        self.assertEqual(child_ids(VoicePanelView(None)), {"panel:vc:genre", "panel:vc:register"})
+        # 機能再編: VCルート⇔support自動化 のジャンルワープボタンが常駐
+        self.assertEqual(child_ids(VoicePanelView(None)),
+                         {"panel:vc:genre", "panel:vc:register",
+                          "panel:vc:warp_support_automation"})
         self.assertEqual(
             child_ids(VoicePanelView(None, genre="connection")),
             {"panel:vc:genre", "panel:vc:action", "panel:vc:register"},
@@ -82,7 +87,9 @@ class CustomIdTest(unittest.TestCase):
         # （page_prev / page_indicator / page_next）を出す（select:2 は廃止）。
         self.assertEqual(child_ids(GameHubView(None)),
                          {"panel:game:genre", "panel:game:select", "panel:game:page_prev",
-                          "panel:game:page_indicator", "panel:game:page_next", "panel:game:monthly"})
+                          "panel:game:page_indicator", "panel:game:page_next", "panel:game:monthly",
+                          # 機能再編: ゲーム王⇔general:rta のジャンルワープボタン
+                          "panel:game:warp_general_rta"})
         view = GameHubView(None)
         view.genre = "party"
         view.refresh()

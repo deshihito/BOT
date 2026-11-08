@@ -317,6 +317,8 @@ class FujoSurvival(commands.Cog):
     ):
         if action == "register":
             return await self.register(interaction)
+        if action == "status":
+            return await self.status(interaction, target)
         if action == "hindo":
             return await self.hindo(interaction, target)
         if action == "analysis":

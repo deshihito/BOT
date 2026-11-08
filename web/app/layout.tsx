@@ -10,7 +10,7 @@ const ADSENSE_SCRIPT_SRC =
 
 const SITE_TITLE = "AGOBOT | 使いたいこと、全部このボットでいい。";
 const SITE_DESCRIPTION =
-  "AGOBOTは、ゲーム47種・音楽とVC・コイン経済・サーバー運営・AIまで、195の機能を6つのスラッシュコマンドに集約した多機能Discordボットです。";
+  "AGOBOTは、ゲーム47種・音楽とVC・コイン経済・サーバー運営・AIまで、250の機能を6つのスラッシュコマンドに集約した多機能Discordボットです。";
 
 export const metadata: Metadata = {
   metadataBase: new URL(SITE_URL),

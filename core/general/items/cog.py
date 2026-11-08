@@ -412,6 +412,9 @@ class ItemsCog(commands.Cog):
     async def open_buy(self, interaction: discord.Interaction):
         await _send_item_pick(interaction, self, "buy")
 
+    async def open_sell(self, interaction: discord.Interaction):
+        await _send_item_pick(interaction, self, "sell")
+
     async def open_use(self, interaction: discord.Interaction):
         await _send_item_pick(interaction, self, "use")
 

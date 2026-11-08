@@ -409,6 +409,193 @@ class AICog(commands.Cog):
             return await ctx.reply(f"少し待ってから再試行してください（{error.retry_after:.1f}秒）。", mention_author=False)
         logger.exception("!generate command error", exc_info=error)
 
+    # ------------------------------------------------------------------
+    # /general パネル入口 (general:ai_chat / general:ai_generate)
+    #
+    # !ai / !generate の実行部は commands.Context（message 前提）のため
+    # interaction から直接は呼べない。パネル版は「プロンプトのみ・
+    # 添付なし・履歴/リンク読み込みなし・web検索なし」の最小実装として、
+    # モデル解決と応答生成は prefix 版と同一の既存関数
+    # (ai_preferences / logfare.resolve_model / logfare.chat /
+    # ai_provider_router / ai_omnirush / logfare.generate_image) を
+    # そのまま使う（新しい AI 呼び出し経路は作らない）。
+    # ------------------------------------------------------------------
+
+    async def open_chat(self, interaction: discord.Interaction):
+        await interaction.response.send_modal(AiChatPromptModal(self))
+
+    async def open_generate(self, interaction: discord.Interaction):
+        await interaction.response.send_modal(AiGeneratePromptModal(self))
+
+    async def panel_chat(self, user_id: int, prompt: str):
+        """パネル版 !ai: (embed, file|None) か、エラー時は文面 (str) を返す。"""
+        preferred = ai_preferences.get_model(user_id) or logfare.configured_default_model()
+        auto = preferred == ai_provider_router.AUTO_MODEL
+        kios_model = preferred.partition("kiosapi::")[2] if preferred.startswith("kiosapi::") else None
+        apinex_model = preferred.partition("apinex::")[2] if preferred.startswith("apinex::") else None
+        omnirush_model = preferred if preferred.startswith("omnirush::") else None
+        if auto and not ai_provider_router.enabled():
+            return "AIの自動切替が未設定です。"
+        if not auto and not kios_model and not apinex_model and not omnirush_model and not logfare.api_key():
+            return "Logfareが未設定です。`.env` に `LOGFARE_API_KEY` を設定してください。"
+        routed = None
+        model = preferred
+        exact = True
+        reasoning_effort = None
+        try:
+            if auto or kios_model:
+                model, exact = preferred, True
+            elif apinex_model:
+                model, exact = apinex_model, True
+                requested_effort = ai_preferences.get_reasoning_effort(user_id)
+                supported_efforts = ai_provider_router.supported_reasoning_efforts("apinex", apinex_model)
+                reasoning_effort = requested_effort if requested_effort in supported_efforts else None
+            elif omnirush_model:
+                model, exact = omnirush_model, True
+                requested_effort = ai_preferences.get_reasoning_effort(user_id)
+                efforts = ai_omnirush.supports_reasoning_efforts(omnirush_model)
+                reasoning_effort = requested_effort if requested_effort in efforts else None
+            else:
+                model, exact = await logfare.resolve_model(preferred)
+                reasoning_effort = ai_preferences.get_reasoning_effort(user_id)
+                try:
+                    model_info = next(
+                        (item for item in await logfare.fetch_free_chat_models() if item.get("id") == model),
+                        None,
+                    )
+                except Exception:
+                    model_info = None
+                if reasoning_effort:
+                    if not model_info or reasoning_effort not in logfare.reasoning_efforts(model_info):
+                        reasoning_effort = None
+            messages = [
+                {
+                    "role": "system",
+                    "content": (
+                        "あなたはDiscord上の親切なアシスタントです。日本語で簡潔かつ正確に回答してください。"
+                        + ai_latex.SYSTEM_HINT
+                    ),
+                },
+                {"role": "user", "content": prompt},
+            ]
+            if auto:
+                routed = await ai_provider_router.chat(messages)
+                answer = routed.text
+            elif kios_model:
+                routed = await ai_provider_router.chat_with_model("kiosapi", kios_model, messages)
+                answer = routed.text
+            elif apinex_model:
+                routed = await ai_provider_router.chat_with_model(
+                    "apinex", apinex_model, messages, reasoning_effort=reasoning_effort
+                )
+                answer = routed.text
+            elif omnirush_model:
+                answer = await ai_omnirush.chat(
+                    omnirush_model,
+                    f"{ai_latex.SYSTEM_HINT}\n\n{prompt}",
+                    reasoning_effort=reasoning_effort,
+                )
+            else:
+                answer = await logfare.chat(model, messages, reasoning_effort=reasoning_effort)
+        except ai_omnirush.OmniRushLoginRequired:
+            return "OmniRushが未ログインです。Botと同じLinuxユーザーで `omnirush login` を実行してください。"
+        except ai_omnirush.OmniRushUnavailable:
+            return "OmniRush CLIが見つかりません。Botの実行ユーザーから利用可能か確認してください。"
+        except ai_omnirush.OmniRushError as exc:
+            return str(exc)
+        except Exception:
+            logger.exception("panel ai chat failed: user=%s model=%s", user_id, preferred)
+            return "AIへの問い合わせに失敗しました。しばらくしてから再試行してください。"
+        if not answer:
+            return "AIから空の回答が返りました。"
+        notice = "" if exact else f"（指定モデルがfree一覧にないため `{model}` を使用）"
+        latex = await ai_latex.process(answer)
+        description = latex.text[:4096]
+        composed = await ai_latex.compose([image for image in latex.images if image.marker in description])
+        file = None
+        embed = discord.Embed(title="AI回答", description=description, color=0x5865F2)
+        footer = (f"モデル: {routed.model} / 接続先: {routed.provider}（自動切替）"
+                  if auto else f"モデル: {routed.model} / 接続先: KiosAPI" if kios_model
+                  else f"モデル: {routed.model} / 接続先: APInex" if apinex_model
+                  else f"モデル: {ai_omnirush.model_name(omnirush_model)} / 接続先: OmniRush CLI" if omnirush_model
+                  else f"モデル: {model}{notice}")
+        embed.set_footer(text=footer)
+        if composed:
+            math_data, math_alt = composed
+            file = discord.File(io.BytesIO(math_data), filename="math.png", description=math_alt)
+            embed.set_image(url="attachment://math.png")
+        return embed, file
+
+    async def panel_generate(self, user_id: int, prompt: str):
+        """パネル版 !generate: (embed, file) か、エラー時は文面 (str) を返す。"""
+        if not logfare.api_key():
+            return "Logfareが未設定です。`.env` に `LOGFARE_API_KEY` を設定してください。"
+        preferred = ai_preferences.get_image_model(user_id)
+        try:
+            model, exact = await logfare.resolve_image_model(preferred)
+            image = await logfare.generate_image(model, prompt)
+        except Exception:
+            logger.exception("panel generate failed: user=%s model=%s", user_id, preferred)
+            return "画像生成に失敗しました。モデルの利用条件やプロンプトを確認してください。"
+        notice = "" if exact else f"（指定モデルが見つからないため `{model}` を使用）"
+        file = discord.File(io.BytesIO(image), filename="logfare-generated.png")
+        embed = discord.Embed(title="画像生成", description=notice or None, color=0xE67E22)
+        embed.set_image(url="attachment://logfare-generated.png")
+        embed.set_footer(text=f"モデル: {model}")
+        return embed, file
+
+
+class AiChatPromptModal(discord.ui.Modal, title="AIチャット（!ai）"):
+    """!ai へのプロンプトを聞くモーダル（パネル版はプロンプトのみ）。"""
+
+    prompt = discord.ui.TextInput(
+        label="質問・依頼", style=discord.TextStyle.paragraph,
+        max_length=4000, placeholder="例: Discord Botの作り方を教えて",
+    )
+
+    def __init__(self, cog: "AICog"):
+        super().__init__()
+        self.cog = cog
+
+    async def on_submit(self, interaction: discord.Interaction):
+        text = (self.prompt.value or "").strip()
+        if not text:
+            return await interaction.response.send_message(
+                "質問・依頼を入力してください。", ephemeral=True)
+        await interaction.response.defer(thinking=True)
+        result = await self.cog.panel_chat(interaction.user.id, text)
+        if isinstance(result, str):
+            return await interaction.followup.send(result)
+        embed, file = result
+        if file is not None:
+            return await interaction.followup.send(embed=embed, file=file)
+        return await interaction.followup.send(embed=embed)
+
+
+class AiGeneratePromptModal(discord.ui.Modal, title="AI画像生成（!generate）"):
+    """!generate へのプロンプトを聞くモーダル。"""
+
+    prompt = discord.ui.TextInput(
+        label="画像のプロンプト", style=discord.TextStyle.paragraph,
+        max_length=1000, placeholder="例: 星空の下の猫",
+    )
+
+    def __init__(self, cog: "AICog"):
+        super().__init__()
+        self.cog = cog
+
+    async def on_submit(self, interaction: discord.Interaction):
+        text = (self.prompt.value or "").strip()
+        if not text:
+            return await interaction.response.send_message(
+                "画像のプロンプトを入力してください。", ephemeral=True)
+        await interaction.response.defer(thinking=True)
+        result = await self.cog.panel_generate(interaction.user.id, text)
+        if isinstance(result, str):
+            return await interaction.followup.send(result)
+        embed, file = result
+        return await interaction.followup.send(embed=embed, file=file)
+
 
 async def setup(bot: commands.Bot):
     await bot.add_cog(AICog(bot))

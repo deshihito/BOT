@@ -139,6 +139,7 @@ class SupportGenreSelect(discord.ui.Select):
         try:
             view.genre = self.values[0]
             view.action = None
+            view.action_page = 0
             view.refresh()
 
             if hasattr(container, "_sync"):
@@ -157,14 +158,35 @@ class SupportGenreSelect(discord.ui.Select):
                 logger.exception("ジャンル更新エラーの通知にも失敗しました")
 
 
+ACTION_PAGE_SIZE = 25  # Discord のセレクト選択肢上限
+
+
+def support_action_pages(genre: str) -> list:
+    """ジャンルのアクションをセレクト上限（25件）ごとのページに分ける。
+
+    general の general_action_pages と同じ方式（セレクトは1つに固定し、
+    ページをボタンでめくる）。自動化・通知ジャンルが33件になったため、
+    support でも25件を超えるジャンルを全件選べるようにする。
+    """
+    actions = SUPPORT_ACTIONS_BY_GENRE[genre]
+    return [actions[i:i + ACTION_PAGE_SIZE]
+            for i in range(0, len(actions), ACTION_PAGE_SIZE)] or [[]]
+
+
 class SupportActionSelect(discord.ui.Select):
-    def __init__(self, cog: "SupportCog", genre: str, row: int = 1):
+    def __init__(self, cog: "SupportCog", genre: str, row: int = 1, page: int = 0):
         self.cog = cog
+        self.genre = genre
+        pages = support_action_pages(genre)
+        page = min(max(page, 0), len(pages) - 1)
+        placeholder = "機能を選択してください"
+        if len(pages) > 1:
+            placeholder = f"機能を選択してください（{page + 1}/{len(pages)}）"
         super().__init__(
-            placeholder="機能を選択してください",
+            placeholder=placeholder,
             options=[
                 discord.SelectOption(label=label, value=value)
-                for label, value in SUPPORT_ACTIONS_BY_GENRE[genre]
+                for label, value in pages[page]
             ],
             custom_id="panel:support:action",
             row=row,
@@ -186,6 +208,141 @@ class SupportActionSelect(discord.ui.Select):
         await self.cog.dispatch(interaction, value)
 
 
+class SupportActionPageButton(discord.ui.Button):
+    """アクションセレクトのページめくりボタン（前へ/次へ）。
+
+    general の GeneralActionPageButton と同じ作り。ページ状態は
+    SupportPanelView が保持する。custom_id は panel:support: の固定形で、
+    パネル復旧は root 単位で開き直すため新規追加でも適合する。
+    """
+
+    def __init__(self, delta: int, page: int, total_pages: int, row: int):
+        if delta < 0:
+            label, custom_id = "◀ 前へ", "panel:support:action_prev"
+            disabled = page <= 0
+        else:
+            label, custom_id = "次へ ▶", "panel:support:action_next"
+            disabled = page >= total_pages - 1
+        super().__init__(label=label, style=discord.ButtonStyle.secondary,
+                         custom_id=custom_id, row=row, disabled=disabled)
+        self.delta = delta
+
+    async def callback(self, interaction: discord.Interaction):
+        container = self.view
+        panel = getattr(container, "panel", container)
+        pages = support_action_pages(panel.genre)
+        panel.action_page = min(max(panel.action_page + self.delta, 0), len(pages) - 1)
+        if hasattr(container, "_sync"):
+            container._sync()
+            return await edit_panel_v2(interaction, container)
+        panel.refresh()
+        return await edit_panel_v2(interaction, as_panel_v2(panel))
+
+
+class SupportWarpButton(discord.ui.Button):
+    """ジャンルワープボタン（core/panel_warps.py の対応表から自動配置）。
+
+    着地は対象ルートのパネルを対象ジャンルで開く。custom_id は
+    panel:support: の固定形（復旧時は support パネルが開き直される）。
+    """
+
+    def __init__(self, warp, row: int):
+        super().__init__(
+            label=warp.label,
+            style=discord.ButtonStyle.primary,
+            custom_id=f"panel:support:warp_{warp.to_root}_{warp.to_genre or 'hub'}",
+            row=row,
+        )
+        self.warp = warp
+
+    async def callback(self, interaction: discord.Interaction):
+        from core.panel_warps import build_warp_panel
+
+        container = self.view
+        panel = getattr(container, "panel", container)
+        target = build_warp_panel(
+            interaction.client, self.warp,
+            owner_id=getattr(panel, "owner_id", None),
+        )
+        if target is None:
+            return await interaction.response.send_message(
+                "移動先のパネルが読み込まれていません。", ephemeral=True)
+        return await edit_panel_v2(interaction, as_panel_v2(target))
+
+
+class BumpRtaSettingsView(discord.ui.View):
+    """boardNotify 共通設定（オン/オフ・メンションロール）。
+
+    実処理は BumpRta.bumprta_command の既存分岐（on/off/role）に委譲し、
+    保存形式・判定は従来と完全に同じにする。状態表示は dispatch 側が
+    bumprta_status と同じ文面の embed を添えて出す。
+    """
+
+    def __init__(self, rta_cog):
+        super().__init__(timeout=300)
+        self.rta_cog = rta_cog
+
+    def embed(self):
+        return discord.Embed(title="boardNotify設定（共通）", color=0xFFFFFF)
+
+    async def _run(self, interaction: discord.Interaction, action: str):
+        if self.rta_cog is None:
+            return await interaction.response.send_message(
+                "boardNotify機能が読み込まれていません。", ephemeral=True)
+        return await self.rta_cog.bumprta_command(
+            interaction,
+            app_commands.Choice(name=action, value=action),
+        )
+
+    @discord.ui.button(label="通知オン", style=discord.ButtonStyle.success,
+                       custom_id="support:bumprta_settings:on")
+    async def on_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self._run(interaction, "on")
+
+    @discord.ui.button(label="通知オフ", style=discord.ButtonStyle.secondary,
+                       custom_id="support:bumprta_settings:off")
+    async def off_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self._run(interaction, "off")
+
+    @discord.ui.button(label="メンションロール設定", style=discord.ButtonStyle.primary,
+                       custom_id="support:bumprta_settings:role")
+    async def role_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self._run(interaction, "role")
+
+
+class TempVoicePanelGuideView(discord.ui.View):
+    """一時VC操作パネルの案内（実体はVCチャンネル内の常駐View）。
+
+    一時VCを作成すると、そのチャンネルに操作パネル（名前変更・人数制限
+    など）が常駐する。ここではその旨の案内と、一時VC設定画面
+    （assist_tempvoice）への導線だけを出す。
+    """
+
+    def __init__(self, cog: "SupportCog"):
+        super().__init__(timeout=300)
+        self.cog = cog
+
+    def embed(self):
+        return discord.Embed(
+            title="一時VC操作パネル",
+            description=(
+                "一時VCを作成すると、そのVCチャンネルに操作パネルが常駐します"
+                "（名前・人数制限などの操作はそのパネルから行います）。\n"
+                "一時VCの作成条件や送信先などの設定は、下のボタンから開けます。"
+            ),
+            color=0xFFFFFF,
+        )
+
+    @discord.ui.button(label="一時VC設定を開く", style=discord.ButtonStyle.primary,
+                       custom_id="support:tempvoice_panel:settings")
+    async def open_settings(self, interaction: discord.Interaction, button: discord.ui.Button):
+        cog = interaction.client.get_cog("ServerAssistCog")
+        if cog is None:
+            return await interaction.response.send_message(
+                "サーバーアシストが読み込まれていません。", ephemeral=True)
+        return await cog.show_feature(interaction, "tempvoice")
+
+
 class SupportPanelView(discord.ui.View):
     def __init__(
         self,
@@ -204,6 +361,14 @@ class SupportPanelView(discord.ui.View):
         saved_genre = saved.get("genre")
         self.genre = SUPPORT_GENRE_ALIASES.get(genre or saved_genre, genre or saved_genre)
         self.action = saved.get("value")
+        # 保存済みショートカットから開いた場合は、その機能が含まれる
+        # ページを初期表示にする（general と同じ配慮）。
+        self.action_page = 0
+        if self.genre in SUPPORT_ACTIONS_BY_GENRE and self.action:
+            for index, chunk in enumerate(support_action_pages(self.genre)):
+                if any(value == self.action for _label, value in chunk):
+                    self.action_page = index
+                    break
         self.shortcut_mode = shortcut_mode
         self.shortcut_item = shortcut_item
         # 「よく使う／最近」の対象。空ならセクション自体を出さない。
@@ -220,7 +385,28 @@ class SupportPanelView(discord.ui.View):
         self.add_item(SupportGenreSelect(self.cog, self.genre, row=offset))
 
         if self.genre:
-            self.add_item(SupportActionSelect(self.cog, self.genre, row=offset + 1))
+            pages = support_action_pages(self.genre)
+            self.action_page = min(max(self.action_page, 0), len(pages) - 1)
+            self.add_item(SupportActionSelect(
+                self.cog, self.genre, row=offset + 1, page=self.action_page))
+            extra_row = offset + 2
+            if len(pages) > 1:
+                self.add_item(SupportActionPageButton(
+                    -1, self.action_page, len(pages), row=extra_row))
+                self.add_item(discord.ui.Button(
+                    label=f"{self.action_page + 1} / {len(pages)}ページ",
+                    style=discord.ButtonStyle.secondary,
+                    custom_id="panel:support:action_indicator",
+                    row=extra_row, disabled=True))
+                self.add_item(SupportActionPageButton(
+                    1, self.action_page, len(pages), row=extra_row))
+            if not self.shortcut_mode:
+                # ジャンルワープ（core/panel_warps.py の対応表）。
+                # ページめくりがある場合は同じ行に相乗りし、行数を増やさない。
+                from core.panel_warps import warps_from
+
+                for warp in warps_from("support", self.genre):
+                    self.add_item(SupportWarpButton(warp, row=extra_row))
 
         if self.shortcut_mode:
             from cogs.general import ShortcutCommitButton

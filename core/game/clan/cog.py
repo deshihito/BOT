@@ -547,6 +547,15 @@ class ClanCog(commands.Cog):
         return f"クラン「{clan['name']}」を解散しました。"
 
     # ------------------------------------------------------------------ 入口
+    async def open_manage(self, interaction: discord.Interaction):
+        """クラン管理の独立入口（general:clan_manage）。
+
+        同居維持の原則どおり View は show_clan と共有する
+        （管理系ボタンは所属状態で出る: リーダーは招待コード・改名・
+        追放・解散、メンバーは脱退、未所属は作成・参加）。
+        """
+        await self.show_clan(interaction)
+
     async def show_clan(self, interaction: discord.Interaction):
         view = ClanView(self, interaction.user.id)
         view._cached_embed = clan_embed(self, interaction.user.id)

@@ -35,13 +35,19 @@ class AIToolsTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(set(candidates), expected)
         # /support の新規候補のうち AI に入るのは読み取り専用の状態確認だけ。
         self.assertIn("support:sokunuke_status", candidates)
-        self.assertNotIn("support:sns_notify", candidates)
+        # 機能数再編: sns_notify は SNS ジャンルへ分割され、設定系の新入口は
+        # いずれも AI 候補に入らない。boardNotify のサービス別状態表示は
+        # 読み取り専用なので候補に入る。
+        self.assertNotIn("support:sns_youtube", candidates)
+        self.assertIn("support:bumprta_bump", candidates)
         self.assertNotIn("support:sticky", candidates)
         self.assertTrue(candidates)
         self.assertNotIn("support:clear", candidates)
         self.assertNotIn("general:pay", candidates)
-        # D-3 で confirm に格上げされた7件は、確認ビュー付きの候補として入る。
-        for key in ("support:bumprta_on", "support:bumprta_off", "vc:echo_start",
+        # D-3 で confirm に格上げされた件は、確認ビュー付きの候補として入る。
+        # 旧 bumprta_on/off は boardNotify 統合でレジストリから外れたため、
+        # confirm は vc の5件のみが残る。
+        for key in ("vc:echo_start",
                     "vc:karaoke_start", "vc:global_start", "vc:match_start", "vc:changer_start"):
             self.assertIn(key, candidates)
             self.assertEqual(candidates[key]["risk"], "confirm")

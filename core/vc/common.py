@@ -101,7 +101,13 @@ VOICE_GENRES = {
 }
 VOICE_ACTIONS_BY_GENRE = {
     "connection": [("参加", "join"), ("退出", "leave"), ("状態", "status")],
-    "music": [("音楽操作パネル", "music_panel")],
+    "music": [("音楽操作パネル", "music_panel"),
+              ("プレイリスト管理", "music_playlist"),
+              ("立体音響設定", "music_spatial"),
+              ("自動再生・再生履歴管理", "music_autoplay"),
+              ("キュー表示", "music_queue"),
+              ("楽曲検索・追加", "music_search"),
+              ("音声ファイルID一覧", "music_files")],
     "studio": [(f"録音: {label}", f"record_{value}") for label, value in
                 (("開始", "start"), ("停止", "stop"), ("状態", "status"), ("音程解析", "pitch"))] +
                [(f"やまびこ: {label}", f"echo_{value}") for label, value in
@@ -117,7 +123,8 @@ VOICE_ACTIONS_BY_GENRE = {
                   ("常設ルームのテーマ変更", "gvc_room_theme"),
                   ("ルーム情報", "gvc_room_info"), ("ルーム削除", "gvc_room_delete"),
                   ("グロチャ: 接続（このチャンネル）", "gvc_chat_connect"),
-                  ("グロチャ: 接続解除（このチャンネル）", "gvc_chat_disconnect")],
+                  ("グロチャ: 接続解除（このチャンネル）", "gvc_chat_disconnect"),
+                  ("グロチャ自動接続設定", "gvc_auto_connect")],
     "tts": [("読み上げ: 開始（このチャンネルを読む）", "tts_start"), ("読み上げ: 停止", "tts_stop"),
             ("読み上げ: 話者・ピッチ・話速の設定", "tts_config"), ("読み上げ: 1回だけ読む", "tts_say")],
     "trigger": [
@@ -146,6 +153,10 @@ GVC_ROOM_FORMS = {
     "gvc_chat_connect": ("グロチャに接続（このチャンネル）", [
         ("name", "ルーム名", 100, True, ""),
         ("password", "パスワード（非公開ルームのみ）", 100, False, ""),
+    ]),
+    # ルーム名だけ聞き、切り替え自体は _TextChatToggleView（作成者だけ操作可）で行う。
+    "gvc_auto_connect": ("グロチャ自動接続設定", [
+        ("name", "ルーム名", 100, True, ""),
     ]),
 }
 # 入力なしでパネルから直接実行できる操作

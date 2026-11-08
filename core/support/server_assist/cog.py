@@ -114,6 +114,36 @@ class ServerAssistCog(commands.Cog):
             )
         return await edit_panel_v2(interaction, as_panel_v2(view))
 
+    async def show_feature_preset(self, interaction: discord.Interaction, key: str,
+                                  preset: str | None = None, notice: str | None = None):
+        """機能数再編の preset 入口（assist_reminder 等）から機能画面を開く。
+
+        元機能の View をそのまま使い、preset 名と案内文（notice）を
+        View に付与して開く。View の embed は notice_line(self.notice) で
+        案内を表示する（全 assist 機能共通）。preset は View の属性として
+        保持され、将来のスコープ表示に使える。
+        """
+        if not has_manage_permission(interaction):
+            return await interaction.response.send_message(
+                "この設定には「サーバーの管理」権限が必要です。", ephemeral=True,
+            )
+        feature = self.by_key.get(key)
+        if feature is None or interaction.guild_id is None:
+            return await interaction.response.send_message(
+                "設定画面を開き直してください。", ephemeral=True,
+            )
+        try:
+            view = feature.build_view(self, interaction.guild_id)
+        except Exception:
+            logger.exception("サーバーアシスト設定画面を作れませんでした: %s", key)
+            return await interaction.response.send_message(
+                "設定画面の読み込みに失敗しました。時間をおいて再度お試しください。解決しない場合はBotの運営に連絡してください。", ephemeral=True,
+            )
+        view.preset = preset
+        if notice:
+            view.notice = notice
+        return await edit_panel_v2(interaction, as_panel_v2(view))
+
     async def handle_level_rewards(self, guild, member, old_level: int, new_level: int):
         module = self.modules.get("leveling")
         if module is None:
