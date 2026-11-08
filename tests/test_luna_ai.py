@@ -744,9 +744,69 @@ class LoggerLevelTest(unittest.TestCase):
 
 
 class ModelSelectionTest(unittest.TestCase):
-    def test_default_model_is_deepseek_flash(self):
-        self.assertEqual(luna.DEFAULT_MODEL, "deepseek-v4.1-flash-1017")
+    def test_default_model_is_kiosapi_diffusiongemma(self):
+        self.assertEqual(luna.DEFAULT_PROVIDER, "kiosapi")
+        self.assertEqual(luna.DEFAULT_MODEL, "diffusiongemma-26b-a4b-it")
         self.assertEqual(luna.REASONING_EFFORT, "none")
+
+    def test_provider_name_defaults_to_kiosapi_and_env_selects_logfare(self):
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("LUNA_AI_PROVIDER", None)
+            self.assertEqual(luna.provider_name(), "kiosapi")
+        with patch.dict(os.environ, {"LUNA_AI_PROVIDER": "logfare"}):
+            self.assertEqual(luna.provider_name(), "logfare")
+        with patch.dict(os.environ, {"LUNA_AI_PROVIDER": "LOGFARE"}):
+            self.assertEqual(luna.provider_name(), "logfare")
+
+
+class KiosapiTest(unittest.IsolatedAsyncioTestCase):
+    def test_config_prefers_ai_prefixed_key_and_default_base(self):
+        env = {"AI_KIOSAPI_API_KEY": "key-a", "KIOSAPI_API_KEY": "key-b"}
+        with patch.dict(os.environ, env, clear=False):
+            os.environ.pop("AI_KIOSAPI_BASE_URL", None)
+            key, base_url = luna._kiosapi_config()
+        self.assertEqual(key, "key-a")
+        self.assertEqual(base_url, "https://kiosapi.com/v1")
+
+    def test_config_falls_back_to_plain_key(self):
+        with patch.dict(os.environ, {"KIOSAPI_API_KEY": "key-b"}, clear=False):
+            os.environ.pop("AI_KIOSAPI_API_KEY", None)
+            key, _base_url = luna._kiosapi_config()
+        self.assertEqual(key, "key-b")
+
+    async def test_sse_deltas_parse_openai_stream(self):
+        async def lines():
+            yield b'data: {"choices": [{"delta": {"content": "\u307e\u3041"}}]}'
+            yield b"data: not-json"
+            yield b'data: {"choices": [{"delta": {"content": [{"text": "\u69d8"}, {"text": "\u5b50"}]}}]}'
+            yield b"data: [DONE]"
+            yield b'data: {"choices": [{"delta": {"content": "x"}}]}'
+
+        got = [delta async for delta in luna._sse_deltas(lines())]
+        self.assertEqual(got, ["まぁ", "様子"])
+
+    async def test_chat_text_routes_to_kiosapi_by_default(self):
+        async def fake_stream(messages, *, max_tokens):
+            self.assertEqual(max_tokens, 800)
+            for delta in ("拡散", "生成", "かな"):
+                yield delta
+
+        with patch.dict(os.environ, {}, clear=False), \
+                patch.object(luna, "_kiosapi_chat_stream", fake_stream):
+            os.environ.pop("LUNA_AI_PROVIDER", None)
+            text, ttft, total = await luna._chat_text(
+                [{"role": "user", "content": "hi"}], max_tokens=800)
+        self.assertEqual(text, "拡散生成かな")
+        self.assertGreaterEqual(total, ttft)
+
+    async def test_kiosapi_stream_requires_key(self):
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("AI_KIOSAPI_API_KEY", None)
+            os.environ.pop("KIOSAPI_API_KEY", None)
+            with self.assertRaises(RuntimeError):
+                async for _delta in luna._kiosapi_chat_stream(
+                        [{"role": "user", "content": "hi"}], max_tokens=10):
+                    pass
 
 
 class ChatTextTest(unittest.IsolatedAsyncioTestCase):
@@ -758,7 +818,8 @@ class ChatTextTest(unittest.IsolatedAsyncioTestCase):
             for delta in ("まぁ", "様子見", "かな"):
                 yield delta
 
-        with patch.object(luna.logfare, "chat_stream", fake_stream):
+        with patch.dict(os.environ, {"LUNA_AI_PROVIDER": "logfare"}), \
+                patch.object(luna.logfare, "chat_stream", fake_stream):
             text, ttft, total = await luna._chat_text(
                 [{"role": "user", "content": "hi"}], max_tokens=800)
         self.assertEqual(text, "まぁ様子見かな")
@@ -770,6 +831,7 @@ class ChatTextTest(unittest.IsolatedAsyncioTestCase):
             raise luna.logfare.LogfareHTTPError(503)
             yield ""  # pragma: no cover
 
-        with patch.object(luna.logfare, "chat_stream", fake_stream):
+        with patch.dict(os.environ, {"LUNA_AI_PROVIDER": "logfare"}), \
+                patch.object(luna.logfare, "chat_stream", fake_stream):
             with self.assertRaises(luna.logfare.LogfareHTTPError):
                 await luna._chat_text([{"role": "user", "content": "hi"}], max_tokens=800)
