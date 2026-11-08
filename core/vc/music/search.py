@@ -1,5 +1,5 @@
 import discord
-from core.support.panel_v2 import edit_message_v2
+from core.support.panel_v2 import edit_message_v2, as_embed_v2, wrap_panel_view
 from discord import app_commands  # ← 追加
 from discord.ext import commands, tasks
 import asyncio
@@ -40,13 +40,14 @@ logger = logging.getLogger("cogs.sio_music")
 
 class SearchMixin:
     class SearchView(discord.ui.View):
-        def __init__(self, cog, guild_id, ctx, tracks):
+        def __init__(self, cog, guild_id, ctx, tracks, embed=None):
             super().__init__(timeout=60.0)
             self.cog = cog
             self.guild_id = guild_id
             self.ctx = ctx
             self.tracks = tracks
             self.message = None
+            self._embed = embed
 
             options = []
             for idx, track in enumerate(self.tracks):
@@ -60,7 +61,7 @@ class SearchMixin:
 
         async def select_callback(self, interaction: discord.Interaction):
             owner = Responder(self.ctx).user
-            if interaction.user.id != getattr(owner, 'id', None): return await interaction.response.send_message(embed=we(FAILED + ' この検索結果は他のユーザーのものです。'), ephemeral=True)
+            if interaction.user.id != getattr(owner, 'id', None): return await interaction.response.send_message(view=as_embed_v2(we(FAILED + ' この検索結果は他のユーザーのものです。')), ephemeral=True)
             idx = int(self.select_menu.values[0])
             selected_track = self.tracks[idx]
             state = self.cog.get_state(self.guild_id)
@@ -68,24 +69,33 @@ class SearchMixin:
             if not await self.cog.enqueue_track(self.guild_id, (selected_track['url'], selected_track['title'], None, True),
                                                 requester_id=interaction.user.id):
                 return await interaction.response.send_message(
-                    embed=we(f"{FAILED} キューの上限（{MAX_QUEUE_SIZE}件）に達しています。"),
+                    view=as_embed_v2(we(f"{FAILED} キューの上限（{MAX_QUEUE_SIZE}件）に達しています。")),
                     ephemeral=True,
                 )
 
             vc = Responder(self.ctx).voice_client
             if vc and not has_audio_source(vc, "music") and not state['is_processing_queue'] and not state['is_paused']:
                 await self.cog.check_queue(self.guild_id)
-                await interaction.response.send_message(embed=we(f"{MUSIC} **{selected_track['title']}** を再生します！"))
+                await interaction.response.send_message(view=as_embed_v2(we(f"{MUSIC} **{selected_track['title']}** を再生します！")))
             else:
-                await interaction.response.send_message(embed=we(f"{SUCCESS} **{selected_track['title']}** をキューに追加しました"))
+                await interaction.response.send_message(view=as_embed_v2(we(f"{SUCCESS} **{selected_track['title']}** をキューに追加しました")))
                 await self.cog.update_panel(self.guild_id)
             await self.disable_all_items()
+
+        def embed(self):
+            return self._embed
 
         async def on_timeout(self): await self.disable_all_items()
         async def disable_all_items(self):
             for item in self.children: item.disabled = True
             if self.message:
-                try: await self.message.edit(view=self)
+                try:
+                    wrapper = getattr(self, "_v2", None)
+                    if wrapper is not None:
+                        wrapper._sync()
+                        await self.message.edit(view=wrapper)
+                    else:
+                        await self.message.edit(view=self)
                 except Exception:
                     logger.debug("Failed to disable search view items", exc_info=True)
             self.stop()
@@ -94,24 +104,24 @@ class SearchMixin:
     async def _search_impl(self, r: Responder, keyword: str | None):
         """YouTube の上位10件を表示し、選んだ曲を再生・キューに追加する。"""
         if not keyword:
-            return await r.send(embed=we("検索キーワードを入力してください。"), ephemeral=True)
+            return await r.send(view=as_embed_v2(we("検索キーワードを入力してください。")), ephemeral=True)
         await r.defer()
         if error := await self._ensure_music_connection(r):
-            return await r.send(embed=we(error), ephemeral=True)
+            return await r.send(view=as_embed_v2(we(error)), ephemeral=True)
         if self._spotify_playlist_id(keyword.strip()):
             try:
                 title, tracks = await self.get_spotify_playlist_entries(keyword.strip())
                 return await self.start_playlist_load(r.source, tracks, title)
             except Exception as exc:
                 logger.exception("Spotify playlist fetch failed")
-                return await r.send(embed=we(f"{FAILED} Spotifyプレイリストの取得に失敗しました。"), ephemeral=True)
+                return await r.send(view=as_embed_v2(we(f"{FAILED} Spotifyプレイリストの取得に失敗しました。")), ephemeral=True)
         if self._soundcloud_kind(keyword.strip()) == "set":
             try:
                 title, tracks = await self.get_soundcloud_playlist_entries(keyword.strip())
                 return await self.start_playlist_load(r.source, tracks, title)
             except Exception as exc:
                 logger.exception("SoundCloud set fetch failed")
-                return await r.send(embed=we(f"{FAILED} SoundCloudセットの取得に失敗しました。"), ephemeral=True)
+                return await r.send(view=as_embed_v2(we(f"{FAILED} SoundCloudセットの取得に失敗しました。")), ephemeral=True)
         if self._soundcloud_kind(keyword.strip()) == "track":
             try:
                 info = await self.get_yt_info(keyword.strip())
@@ -119,7 +129,7 @@ class SearchMixin:
                 return await self.start_playlist_load(r.source, tracks, info['title'])
             except Exception as exc:
                 logger.exception("SoundCloud fetch failed")
-                return await r.send(embed=we(f"{FAILED} SoundCloudの取得に失敗しました。"), ephemeral=True)
+                return await r.send(view=as_embed_v2(we(f"{FAILED} SoundCloudの取得に失敗しました。")), ephemeral=True)
         if niconico_url_kind(keyword.strip()) == "track":
             try:
                 info = await self.get_yt_info(keyword.strip())
@@ -127,7 +137,7 @@ class SearchMixin:
                 return await self.start_playlist_load(r.source, tracks, info['title'])
             except Exception as exc:
                 logger.exception("Niconico fetch failed")
-                return await r.send(embed=we(f"{FAILED} ニコニコ動画の取得に失敗しました。"), ephemeral=True)
+                return await r.send(view=as_embed_v2(we(f"{FAILED} ニコニコ動画の取得に失敗しました。")), ephemeral=True)
         await r.send(f"{LOUPE} YouTubeで「{keyword}」の上位10件を検索中...")
         search_options = YTDL_OPTIONS.copy()
         search_options['default_search'] = 'ytsearch10'
@@ -135,7 +145,7 @@ class SearchMixin:
         try:
             with yt_dlp.YoutubeDL(search_options) as ydl:
                 data = await loop.run_in_executor(None, lambda: ydl.extract_info(keyword, download=False))
-                if 'entries' not in data or not data['entries']: return await r.send(embed=we(FAILED + ' 検索結果が見つかりませんでした。'))
+                if 'entries' not in data or not data['entries']: return await r.send(view=as_embed_v2(we(FAILED + ' 検索結果が見つかりませんでした。')))
                 tracks, description_lines = [], []
                 for idx, entry in enumerate(data['entries'][:10]):
                     title = entry.get('title', '不明なタイトル')
@@ -146,11 +156,11 @@ class SearchMixin:
                     tracks.append({'title': title, 'url': url})
                     description_lines.append(f"**{idx + 1}.** {title} `[{duration_str}]`")
                 embed = we(title=f"「{keyword}」の検索結果 (上位10件)", description="\n".join(description_lines))
-                view = self.SearchView(self, r.guild.id, r.source, tracks)
-                view.message = await r.send(embed=embed, view=view, want_message=True)
+                view = self.SearchView(self, r.guild.id, r.source, tracks, embed)
+                view.message = await r.send(view=wrap_panel_view(view), want_message=True)
         except Exception as e:
             logging.error(f"Search command error: {e}")
-            await r.send(embed=we(f"{FAILED} 検索中にエラーが発生しました。"), ephemeral=True)
+            await r.send(view=as_embed_v2(we(f"{FAILED} 検索中にエラーが発生しました。")), ephemeral=True)
 
 
     async def _panel_impl(self, r: Responder):
@@ -163,7 +173,7 @@ class SearchMixin:
             note_self_started(r.guild.id, "music_panel")
         await r.defer()
         if error := await self._ensure_music_connection(r):
-            return await r.send(embed=we(error), ephemeral=True)
+            return await r.send(view=as_embed_v2(we(error)), ephemeral=True)
         state = self.get_state(r.guild.id)
         state['current_ctx'] = r.source
         view = build_music_panel_layout(self, r.guild.id, '# ' + MUSIC + ' ボイスコントロールパネル\nステータスを同期中...')

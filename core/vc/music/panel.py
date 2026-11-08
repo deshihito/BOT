@@ -173,7 +173,7 @@ class PanelMixin:
     async def _eq_impl(self, interaction: discord.Interaction, mode: str = "flat"):
         vc = interaction.guild.voice_client if interaction.guild else None
         if vc and not is_same_voice_channel(interaction.user, vc):
-            return await interaction.response.send_message(embed=we(MUSIC_VC_REQUIRED_MESSAGE), ephemeral=True)
+            return await interaction.response.send_message(view=as_embed_v2(we(MUSIC_VC_REQUIRED_MESSAGE)), ephemeral=True)
         state = self.get_state(interaction.guild_id)
         
         if mode in EQ_SETTINGS:
@@ -185,7 +185,7 @@ class PanelMixin:
             state['custom_eq_filter'] = mode
             msg = f"{GEAR} カスタムEQフィルターを設定しました:\n`{mode}`"
 
-        await interaction.response.send_message(embed=we(msg))
+        await interaction.response.send_message(view=as_embed_v2(we(msg)))
         # 曲を止めずにパネルだけ更新
         await self.update_panel(interaction.guild_id)
 
@@ -205,24 +205,24 @@ class PanelMixin:
 
     async def _volume_impl(self, r: Responder, value: float):
         if not 0.1 <= value <= 2.0:
-            return await r.send(embed=we("音量は 0.1 から 2.0 の間で指定してください。"), ephemeral=True)
+            return await r.send(view=as_embed_v2(we("音量は 0.1 から 2.0 の間で指定してください。")), ephemeral=True)
         if r.voice_client and not is_same_voice_channel(r.user, r.voice_client):
-            return await r.send(embed=we(MUSIC_VC_REQUIRED_MESSAGE), ephemeral=True)
+            return await r.send(view=as_embed_v2(we(MUSIC_VC_REQUIRED_MESSAGE)), ephemeral=True)
         state = self.get_state(r.guild.id)
         state['volume'] = value
-        await r.send(embed=we(f"{VOL} 音量を `{value}` に設定しました。"))
+        await r.send(view=as_embed_v2(we(f"{VOL} 音量を `{value}` に設定しました。")))
         await self.apply_immediate_setting(r.source)
 
 
     async def _speed_impl(self, r: Responder, value: float):
         if not MIN_PLAYBACK_SPEED <= value <= MAX_PLAYBACK_SPEED:
-            return await r.send(embed=we(f"速度は {MIN_PLAYBACK_SPEED} から {MAX_PLAYBACK_SPEED:g} の間で指定してください。"), ephemeral=True)
+            return await r.send(view=as_embed_v2(we(f"速度は {MIN_PLAYBACK_SPEED} から {MAX_PLAYBACK_SPEED:g} の間で指定してください。")), ephemeral=True)
         if r.voice_client and not is_same_voice_channel(r.user, r.voice_client):
-            return await r.send(embed=we(MUSIC_VC_REQUIRED_MESSAGE), ephemeral=True)
+            return await r.send(view=as_embed_v2(we(MUSIC_VC_REQUIRED_MESSAGE)), ephemeral=True)
         state = self.get_state(r.guild.id)
         previous_speed = state.get('speed', 1.0)
         state['speed'] = value
-        await r.send(embed=we(f"{THU} 再生速度を `{value}` 倍に設定しました（現在位置から反映）。"))
+        await r.send(view=as_embed_v2(we(f"{THU} 再生速度を `{value}` 倍に設定しました（現在位置から反映）。")))
         await self.apply_immediate_setting(r.source, elapsed_speed=previous_speed)
 
 
@@ -233,11 +233,11 @@ class PanelMixin:
         if feedback is None and wet is None and resolution is None:
             return await self._spatial_panel(r, guild_id)
         if feedback is not None and not 0.0 <= feedback <= 0.95:
-            return await r.send(embed=we("フィードバック値（残響の長さ）は 0.0 〜 0.95 の間で指定してください。"), ephemeral=True)
+            return await r.send(view=as_embed_v2(we("フィードバック値（残響の長さ）は 0.0 〜 0.95 の間で指定してください。")), ephemeral=True)
         if wet is not None and not 0.0 <= wet <= 1.0:
-            return await r.send(embed=we("ウェット量（残響の音量）は 0.0 〜 1.0 の間で指定してください。"), ephemeral=True)
+            return await r.send(view=as_embed_v2(we("ウェット量（残響の音量）は 0.0 〜 1.0 の間で指定してください。")), ephemeral=True)
         if resolution is not None and resolution not in (4, 8):
-            return await r.send(embed=we("解像度は `4` (通常) または `8` (高解像度・滑らか) のどちらかを指定してください。"), ephemeral=True)
+            return await r.send(view=as_embed_v2(we("解像度は `4` (通常) または `8` (高解像度・滑らか) のどちらかを指定してください。")), ephemeral=True)
 
         state = self.get_state(guild_id)
         lines = []
@@ -251,7 +251,7 @@ class PanelMixin:
             state['fdn_resolution'] = resolution
             mode_str = "8次元ハウスホルダー（高密度・シルキー）" if resolution == 8 else "4次元ハウスホルダー（軽量・クリア）"
             lines.append(f"{GEAR} リバーブ解像度を `{resolution}` に切り替えました。\n現在のモード: **{mode_str}**")
-        await r.send(embed=we("\n".join(lines)))
+        await r.send(view=as_embed_v2(we("\n".join(lines))))
         # コントロールパネルの表示を更新
         await self.update_panel(guild_id)
 

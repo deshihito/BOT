@@ -1,6 +1,6 @@
 import discord
 from core.support.messages import VOICE_NOT_JOINED
-from core.support.panel_v2 import edit_message_v2
+from core.support.panel_v2 import edit_message_v2, as_embed_v2
 from discord import app_commands  # ← 追加
 from discord.ext import commands, tasks
 import asyncio
@@ -42,7 +42,7 @@ class ConnectionMixin:
     async def _join_impl(self, r: Responder):
         voice = getattr(r.user, "voice", None)
         if not voice or not voice.channel:
-            return await r.send(embed=we(VOICE_NOT_JOINED), ephemeral=True)
+            return await r.send(view=as_embed_v2(we(VOICE_NOT_JOINED)), ephemeral=True)
 
         # 接続処理が長引く可能性があるため defer（応答保留）を実行
         await r.defer()
@@ -55,14 +55,14 @@ class ConnectionMixin:
                 self._acquire_music(r.guild, channel, r.user, r.channel),
                 timeout=TIMEOUT_SECONDS,
             )
-            await r.send(embed=we(f"{VOL} **{channel.name}** に参加しました。"))
+            await r.send(view=as_embed_v2(we(f"{VOL} **{channel.name}** に参加しました。")))
         except VoiceBusy as busy:
-            await r.send(embed=we(str(busy)), ephemeral=True)
+            await r.send(view=as_embed_v2(we(str(busy))), ephemeral=True)
         except asyncio.TimeoutError:
-            await r.send(embed=we(f"{CLOCK} タイムアウト: ボイスチャンネルへの接続応答時間が超過しました。Botの権限やネットワーク状態をご確認ください。"))
+            await r.send(view=as_embed_v2(we(f"{CLOCK} タイムアウト: ボイスチャンネルへの接続応答時間が超過しました。Botの権限やネットワーク状態をご確認ください。")))
         except Exception as e:
             logger.exception("Voice channel join failed")
-            await r.send(embed=we(f"{FAILED} 接続失敗: {e}"))
+            await r.send(view=as_embed_v2(we(f"{FAILED} 接続失敗: {e}")))
 
 
     async def _leave_impl(self, r: Responder):
@@ -73,22 +73,22 @@ class ConnectionMixin:
             # 音楽は今までどおり誰でも止められる。録音などは開始した人・管理者（または開始した人が不在）のみ。
             if not self.voice_sessions.can_leave(session, r.user):
                 return await r.send(
-                    embed=we(f"{FAILED} いまは **{session.label}**（{session.user_name} さんが開始）で使用中です。"
-                              f"止められるのは開始した人か管理者だけです（`{self._stop_hint(session.feature)}`）。"),
+                    view=as_embed_v2(we(f"{FAILED} いまは **{session.label}**（{session.user_name} さんが開始）で使用中です。"
+                              f"止められるのは開始した人か管理者だけです（`{self._stop_hint(session.feature)}`）。")),
                     ephemeral=True,
                 )
             await r.defer()
             await self.voice_sessions.release(
                 guild_id, reason='stop' if session.feature == 'music' else 'leave', by=r.user,
             )
-            await r.send(embed=we("👋 退出しました。"))
+            await r.send(view=as_embed_v2(we("👋 退出しました。")))
         elif voice_client:
             # 持ち主の記録がない古い接続
             self._reset_playback(guild_id)
             await voice_client.disconnect(force=True)
-            await r.send(embed=we("👋 退出しました。"))
+            await r.send(view=as_embed_v2(we("👋 退出しました。")))
         else:
-            await r.send(embed=we("ボットはボイスチャンネルに参加していません。"), ephemeral=True)
+            await r.send(view=as_embed_v2(we("ボットはボイスチャンネルに参加していません。")), ephemeral=True)
 
 
     @staticmethod
@@ -112,15 +112,15 @@ class ConnectionMixin:
             if stdout:
                 # 出力の最初の一行（通常ここにバージョンが記載されています）を取得
                 first_line = stdout.decode('utf-8', errors='ignore').split('\n')[0]
-                await ctx.send(embed=we(title="FFmpeg Version Info", description=f"```\n{first_line}\n```"))
+                await ctx.send(view=as_embed_v2(we(title="FFmpeg Version Info", description=f"```\n{first_line}\n```")))
             else:
-                await ctx.send(embed=we(FAILED + ' FFmpegのバージョン情報を取得できませんでした。'))
+                await ctx.send(view=as_embed_v2(we(FAILED + ' FFmpegのバージョン情報を取得できませんでした。')))
                 
         except FileNotFoundError:
-            await ctx.send(embed=we(FAILED + ' システムに `ffmpeg` コマンドが見つかりません。パスが通っているか確認してください。'))
+            await ctx.send(view=as_embed_v2(we(FAILED + ' システムに `ffmpeg` コマンドが見つかりません。パスが通っているか確認してください。')))
         except Exception as e:
             logger.exception("ffversion command failed")
-            await ctx.send(embed=we(f"{FAILED} エラーが発生しました: {e}"))
+            await ctx.send(view=as_embed_v2(we(f"{FAILED} エラーが発生しました: {e}")))
 
 
     async def _ensure_music_connection(self, r: Responder) -> str | None:

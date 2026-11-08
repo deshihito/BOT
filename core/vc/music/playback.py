@@ -1,5 +1,5 @@
 import discord
-from core.support.panel_v2 import edit_message_v2
+from core.support.panel_v2 import edit_message_v2, as_embed_v2
 from discord import app_commands  # ← 追加
 from discord.ext import commands, tasks
 import asyncio
@@ -229,11 +229,11 @@ class PlaybackMixin:
         try:
             if isinstance(ctx_or_interaction, discord.Interaction):
                 if ctx_or_interaction.response.is_done():
-                    await ctx_or_interaction.followup.send(content=text, embed=embed)
+                    await ctx_or_interaction.followup.send(content=text, view=as_embed_v2(embed))
                 else:
-                    await ctx_or_interaction.response.send_message(content=text, embed=embed)
+                    await ctx_or_interaction.response.send_message(content=text, view=as_embed_v2(embed))
             elif hasattr(ctx_or_interaction, 'send'):
-                await ctx_or_interaction.send(content=text, embed=embed)
+                await ctx_or_interaction.send(content=text, view=as_embed_v2(embed))
         except Exception as e:
             logging.error(f"送信エラー: {e}")
 
@@ -341,15 +341,15 @@ class PlaybackMixin:
 
         # 💡 2. ボイスチャンネル接続（入っていなければ自動で参加。別機能が使用中なら断る）
         if error := await self._ensure_music_connection(Responder(interaction)):
-            return await interaction.followup.send(embed=we(error), ephemeral=True)
+            return await interaction.followup.send(view=as_embed_v2(we(error)), ephemeral=True)
 
         state = self.get_state(interaction.guild_id)
         state['current_interaction'] = interaction
         if start_at is not None and start_at < 0:
-            return await interaction.followup.send(embed=we("開始位置は0秒以上で指定してください。"), ephemeral=True)
+            return await interaction.followup.send(view=as_embed_v2(we("開始位置は0秒以上で指定してください。")), ephemeral=True)
         can_apply_start_at = not state.get('current_track') and state['queue'].empty() and not state.get('is_processing_queue')
         if start_at is not None and not can_apply_start_at:
-            return await interaction.followup.send(embed=we("開始位置の指定は、再生中の曲と待機キューがない場合のみ使えます。再生中の曲は `/vc` の音楽操作パネルから操作してください。"), ephemeral=True)
+            return await interaction.followup.send(view=as_embed_v2(we("開始位置の指定は、再生中の曲と待機キューがない場合のみ使えます。再生中の曲は `/vc` の音楽操作パネルから操作してください。")), ephemeral=True)
 
         is_yt = False
         url, filename, final_id = None, None, None
@@ -390,7 +390,7 @@ class PlaybackMixin:
                 return await interaction.followup.send(f"{CLOCK} タイムアウト: YouTube情報の解析に時間がかかりすぎたため中断しました。")
             except Exception as e:
                 logger.exception("YouTube parse failed")
-                return await interaction.followup.send(embed=we(f"{FAILED} 解析に失敗しました。"))
+                return await interaction.followup.send(view=as_embed_v2(we(f"{FAILED} 解析に失敗しました。")))
 
         # 3.5. SoundCloud単曲URLが直接指定された場合（再生時にページURLから再解析する）
         elif input_str and self._soundcloud_kind(input_str) == "track":
@@ -402,7 +402,7 @@ class PlaybackMixin:
                 return await interaction.followup.send(f"{CLOCK} タイムアウト: SoundCloud情報の解析に時間がかかりすぎたため中断しました。")
             except Exception as e:
                 logger.exception("SoundCloud parse failed")
-                return await interaction.followup.send(embed=we(f"{FAILED} 解析に失敗しました。"))
+                return await interaction.followup.send(view=as_embed_v2(we(f"{FAILED} 解析に失敗しました。")))
 
         # 3.6. ニコニコ動画URLが直接指定された場合
         elif input_str and niconico_url_kind(input_str) == "track":
@@ -414,7 +414,7 @@ class PlaybackMixin:
                 return await interaction.followup.send(f"{CLOCK} タイムアウト: ニコニコ動画情報の解析に時間がかかりすぎたため中断しました。")
             except Exception as e:
                 logger.exception("Niconico parse failed")
-                return await interaction.followup.send(embed=we(f"{FAILED} 解析に失敗しました。"))
+                return await interaction.followup.send(view=as_embed_v2(we(f"{FAILED} 解析に失敗しました。")))
 
         # 2. ファイルが添付されている場合
         elif file:
@@ -445,7 +445,7 @@ class PlaybackMixin:
                     return await interaction.followup.send(f"{CLOCK} タイムアウト: YouTube検索応答時間が超過しました。")
                 except Exception as e:
                     logger.exception("YouTube search failed")
-                    return await interaction.followup.send(embed=we(f"{FAILED} 検索に失敗しました。"))
+                    return await interaction.followup.send(view=as_embed_v2(we(f"{FAILED} 検索に失敗しました。")))
 
         # 4. 検索キーワード指定
         elif input_str:
@@ -457,16 +457,16 @@ class PlaybackMixin:
                 return await interaction.followup.send(f"{CLOCK} タイムアウト: YouTube検索応答時間が超過しました。")
             except Exception as e:
                 logger.exception("YouTube search failed")
-                return await interaction.followup.send(embed=we(f"{FAILED} 検索に失敗しました。"))
+                return await interaction.followup.send(view=as_embed_v2(we(f"{FAILED} 検索に失敗しました。")))
 
         # 5. 引数が何もない場合
         else:
             msg = "ファイル添付、ID、YouTube URL、SoundCloud URL、または検索キーワードを指定してください。"
-            return await interaction.followup.send(embed=we(msg))
+            return await interaction.followup.send(view=as_embed_v2(we(msg)))
 
         if not url:
             msg = "情報の取得に失敗しました。"
-            return await interaction.followup.send(embed=we(msg))
+            return await interaction.followup.send(view=as_embed_v2(we(msg)))
 
         # キューに追加（ギルド単位の上限を超える場合は受け付けない）
         if start_at is not None:
@@ -474,7 +474,7 @@ class PlaybackMixin:
         if not await self.enqueue_track(interaction.guild_id, (url, filename, final_id, is_yt),
                                        requester_id=interaction.user.id):
             return await interaction.followup.send(
-                embed=we(f"{FAILED} キューの上限（{MAX_QUEUE_SIZE}件）に達しています。再生完了または停止後に追加してください。"),
+                view=as_embed_v2(we(f"{FAILED} キューの上限（{MAX_QUEUE_SIZE}件）に達しています。再生完了または停止後に追加してください。")),
                 ephemeral=True,
             )
 
@@ -487,23 +487,23 @@ class PlaybackMixin:
         # 💡 再生処理呼び出しとレスポンスの明確化
         try:
             if not is_playing and not is_processing and not is_paused:
-                await interaction.followup.send(embed=we(f"▶️ 再生を開始します: **{filename}**"))
+                await interaction.followup.send(view=as_embed_v2(we(f"▶️ 再生を開始します: **{filename}**")))
                 await self.check_queue(interaction.guild_id)
             else:
-                await interaction.followup.send(embed=we(f"{SUCCESS} **{filename}** をキューに追加しました"))
+                await interaction.followup.send(view=as_embed_v2(we(f"{SUCCESS} **{filename}** をキューに追加しました")))
                 await self.update_panel(interaction.guild_id)
         except Exception as e:
             logger.exception("Playback start failed")
-            await interaction.followup.send(embed=we(f"{FAILED} 再生開始処理でエラーが発生しました: `{e}`"))
+            await interaction.followup.send(view=as_embed_v2(we(f"{FAILED} 再生開始処理でエラーが発生しました: `{e}`")))
 
 
     async def _stop_impl(self, r: Responder):
         """今流れている音楽をすべて停止しキューをクリアする（VC には残る）。"""
         vc = r.voice_client
         if not vc:
-            return await r.send(embed=we("ボットがボイスチャンネルに入っていません。"), ephemeral=True)
+            return await r.send(view=as_embed_v2(we("ボットがボイスチャンネルに入っていません。")), ephemeral=True)
         if not is_same_voice_channel(r.user, vc):
-            return await r.send(embed=we(MUSIC_VC_REQUIRED_MESSAGE), ephemeral=True)
+            return await r.send(view=as_embed_v2(we(MUSIC_VC_REQUIRED_MESSAGE)), ephemeral=True)
         state = self.get_state(r.guild.id)
         state['current_track'] = None
         state['elapsed_offset'] = 0
@@ -515,23 +515,23 @@ class PlaybackMixin:
             state['queue'].get_nowait()
         state['queue_requesters'] = []
         remove_audio_source(vc, "music", notify=True)
-        await r.send(embed=we("完全に停止し、キューをクリアしました。"))
+        await r.send(view=as_embed_v2(we("完全に停止し、キューをクリアしました。")))
         await self.update_panel(r.guild.id)
         self._save_music_snapshot(r.guild.id)
 
 
     async def _seek_impl(self, interaction: discord.Interaction, seconds: float):
         if seconds < 0:
-            return await interaction.response.send_message(embed=we("移動先は0秒以上で指定してください。"), ephemeral=True)
+            return await interaction.response.send_message(view=as_embed_v2(we("移動先は0秒以上で指定してください。")), ephemeral=True)
         state = self.get_state(interaction.guild_id)
         vc = interaction.guild.voice_client
         if vc and not is_same_voice_channel(interaction.user, vc):
-            return await interaction.response.send_message(embed=we(MUSIC_VC_REQUIRED_MESSAGE), ephemeral=True)
+            return await interaction.response.send_message(view=as_embed_v2(we(MUSIC_VC_REQUIRED_MESSAGE)), ephemeral=True)
         if not vc or not state.get('current_track'):
-            return await interaction.response.send_message(embed=we("現在再生中の曲がありません。"), ephemeral=True)
+            return await interaction.response.send_message(view=as_embed_v2(we("現在再生中の曲がありません。")), ephemeral=True)
         duration = state['current_track'][2] or 0
         if duration and seconds >= duration:
-            return await interaction.response.send_message(embed=we(f"移動先は曲の長さ（{int(duration)}秒）未満にしてください。"), ephemeral=True)
+            return await interaction.response.send_message(view=as_embed_v2(we(f"移動先は曲の長さ（{int(duration)}秒）未満にしてください。")), ephemeral=True)
         state['elapsed_offset'] = seconds
         state['is_changing_setting'] = True
         remove_audio_source(vc, "music", notify=True)
@@ -541,7 +541,7 @@ class PlaybackMixin:
             await asyncio.sleep(0.05)
         state['is_changing_setting'] = False
         await self.check_queue(interaction.guild_id)
-        await interaction.response.send_message(embed=we(f"再生位置を `{int(seconds)}秒` に移動しました。"))
+        await interaction.response.send_message(view=as_embed_v2(we(f"再生位置を `{int(seconds)}秒` に移動しました。")))
 
 
     async def _pause_impl(self, interaction: discord.Interaction):
@@ -549,9 +549,9 @@ class PlaybackMixin:
         state = self.get_state(interaction.guild_id)
 
         if not vc:
-            return await interaction.response.send_message(embed=we("ボットがボイスチャンネルに入っていません。"), ephemeral=True)
+            return await interaction.response.send_message(view=as_embed_v2(we("ボットがボイスチャンネルに入っていません。")), ephemeral=True)
         if not is_same_voice_channel(interaction.user, vc):
-            return await interaction.response.send_message(embed=we(MUSIC_VC_REQUIRED_MESSAGE), ephemeral=True)
+            return await interaction.response.send_message(view=as_embed_v2(we(MUSIC_VC_REQUIRED_MESSAGE)), ephemeral=True)
 
         # 1. 再生中の場合 -> 一時停止処理
         if has_audio_source(vc, "music"):
@@ -561,7 +561,7 @@ class PlaybackMixin:
             remove_audio_source(vc, "music", notify=True)
             
             await interaction.response.send_message(
-                embed=we(f"{PAUSE} 再生を一時停止しました。(`{int(state['elapsed_offset'])}秒` 時点)\nもう一度 `/vc` の音楽操作パネルから再開できます。")
+                view=as_embed_v2(we(f"{PAUSE} 再生を一時停止しました。(`{int(state['elapsed_offset'])}秒` 時点)\nもう一度 `/vc` の音楽操作パネルから再開できます。"))
             )
             await self.update_panel(interaction.guild_id)
             self._save_music_snapshot(interaction.guild_id)
@@ -570,11 +570,11 @@ class PlaybackMixin:
         elif state['is_paused'] and state['current_track']:
             state['is_paused'] = False
             await self.check_queue(interaction.guild_id)
-            await interaction.response.send_message(embed=we("▶️ 一時停止位置から再生を再開しました。"))
+            await interaction.response.send_message(view=as_embed_v2(we("▶️ 一時停止位置から再生を再開しました。")))
 
         # 3. どちらでもない場合
         else:
-            await interaction.response.send_message(embed=we("現在再生中・一時停止中のトラックがありません。"), ephemeral=True)
+            await interaction.response.send_message(view=as_embed_v2(we("現在再生中・一時停止中のトラックがありません。")), ephemeral=True)
 
 
     async def _skip_impl(self, interaction: discord.Interaction):
@@ -582,23 +582,23 @@ class PlaybackMixin:
         state = self.get_state(interaction.guild_id)
 
         if vc and not is_same_voice_channel(interaction.user, vc):
-            return await interaction.response.send_message(embed=we(MUSIC_VC_REQUIRED_MESSAGE), ephemeral=True)
+            return await interaction.response.send_message(view=as_embed_v2(we(MUSIC_VC_REQUIRED_MESSAGE)), ephemeral=True)
         if vc and (has_audio_source(vc, "music") or state['is_paused']):
             self._note_track_finished(interaction.guild_id, completed=False)
             state['current_track'] = None
             state['elapsed_offset'] = 0
             state['is_paused'] = False
             remove_audio_source(vc, "music", notify=True)
-            await interaction.response.send_message(embed=we("スキップしました。"))
+            await interaction.response.send_message(view=as_embed_v2(we("スキップしました。")))
         else:
-            await interaction.response.send_message(embed=we("現在再生中の楽曲がありません。"))
+            await interaction.response.send_message(view=as_embed_v2(we("現在再生中の楽曲がありません。")))
 
 
     async def _loop_impl(self, interaction: discord.Interaction, mode: str):
         state = self.get_state(interaction.guild_id)
         state['loop_mode'] = mode
         labels = {'off': 'OFF', 'track': '1曲ループ', 'queue': 'キューループ'}
-        await interaction.response.send_message(embed=we(f"ループ設定を **{labels[mode]}** に変更しました。"))
+        await interaction.response.send_message(view=as_embed_v2(we(f"ループ設定を **{labels[mode]}** に変更しました。")))
         await self.update_panel(interaction.guild_id)
         self._save_music_snapshot(interaction.guild_id)
 
@@ -607,7 +607,7 @@ class PlaybackMixin:
         state = self.get_state(interaction.guild_id)
         state['shuffle_enabled'] = not state.get('shuffle_enabled', False)
         label = 'ON' if state['shuffle_enabled'] else 'OFF'
-        await interaction.response.send_message(embed=we(f"シャッフル再生を **{label}** に変更しました。"))
+        await interaction.response.send_message(view=as_embed_v2(we(f"シャッフル再生を **{label}** に変更しました。")))
         await self.update_panel(interaction.guild_id)
         self._save_music_snapshot(interaction.guild_id)
 
@@ -625,4 +625,4 @@ class PlaybackMixin:
         desc = "このサーバー内で再生可能な音声ID（`/vc` の音楽操作パネルから再生できます）\n" + "─" * 20 + "\n"
         desc += "\n".join(lines) if lines else "音声ファイルは見つかりませんでした。"
         embed.description = desc[:4000]
-        await r.send(embed=embed)
+        await r.send(view=as_embed_v2(embed))

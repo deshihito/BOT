@@ -1,5 +1,5 @@
 import discord
-from core.support.panel_v2 import edit_message_v2
+from core.support.panel_v2 import edit_message_v2, as_embed_v2, wrap_panel_view
 from discord import app_commands  # ← 追加
 from discord.ext import commands, tasks
 import asyncio
@@ -119,7 +119,7 @@ class AutoplayMixin:
             if enabled else ""
         )
         await interaction.response.send_message(
-            embed=we(f"{MUSIC} 自動再生を **{label}** にしました。{note}"))
+            view=as_embed_v2(we(f"{MUSIC} 自動再生を **{label}** にしました。{note}")))
         await self.update_panel(interaction.guild_id)
         self._save_music_snapshot(interaction.guild_id)
         if enabled and not state.get('current_track') and state['queue'].empty():
@@ -147,15 +147,16 @@ class AutoplayMixin:
                 "下のボタンで自動再生の ON/OFF と、自分の再生履歴の削除ができます。"
             ),
         )
-        await r.send(embed=embed, view=AutoplayHistoryView(self, r.guild.id), ephemeral=True)
+        view = AutoplayHistoryView(self, r.guild.id, embed)
+        await r.send(view=wrap_panel_view(view), ephemeral=True)
 
     async def _history_clear_impl(self, interaction: discord.Interaction):
         store = history.get_store()
         removed = store.clear_user(interaction.user.id)
         store.flush()
         await interaction.response.send_message(
-            embed=we("あなたの再生履歴を削除しました。" if removed
-                     else "削除できる再生履歴はありませんでした。"),
+            view=as_embed_v2(we("あなたの再生履歴を削除しました。" if removed
+                     else "削除できる再生履歴はありませんでした。")),
             ephemeral=True,
         )
 

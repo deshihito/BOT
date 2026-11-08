@@ -1,5 +1,5 @@
 import discord
-from core.support.panel_v2 import edit_message_v2
+from core.support.panel_v2 import edit_message_v2, as_embed_v2
 from discord import app_commands  # ← 追加
 from discord.ext import commands, tasks
 import asyncio
@@ -119,7 +119,7 @@ class LoaderMixin:
         """ctx / interaction のどちらからでも呼べる。"""
         r = Responder(ctx)
         if not tracks:
-            return await r.send(embed=we("有効な曲が見つかりませんでした。"))
+            return await r.send(view=as_embed_v2(we("有効な曲が見つかりませんでした。")))
         state = self.get_state(r.guild.id)
         state['current_ctx'] = ctx
         task = state.get('playlist_load_task')
