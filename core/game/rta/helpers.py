@@ -123,3 +123,13 @@ def _timing_summary(message):
         return " ".join(parts)
     except Exception:
         return "timing=unavailable"
+
+
+def _rank_line(label: str, local_rank, global_rank) -> str:
+    """順位の表示行（例: 「最速: サーバー内 3位 / 全サーバー 15位」）。
+
+    どちらか一方でも欠けたら、その順位の行自体を出さない（空文字を返す）。
+    """
+    if local_rank is None or global_rank is None:
+        return ""
+    return f"{label}: サーバー内 **{local_rank}位** / 全サーバー **{global_rank}位**"
