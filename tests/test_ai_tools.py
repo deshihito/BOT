@@ -404,14 +404,14 @@ class AIToolsUnavailableTest(unittest.IsolatedAsyncioTestCase):
             "cogs.general.ai_tools_router.decide_action",
             new_callable=AsyncMock,
             side_effect=ai_tools_router.AIToolsDecisionError(
-                "MIQ設定はAI toolsから実行できません。/general から開いてください。"
+                "MIQ設定はfastoolerから実行できません。/general から開いてください。"
             ),
         ):
             await cog.on_message(message)
         message.reply.assert_awaited_once()
         text = message.reply.await_args.args[0]
-        self.assertIn("AI toolsは実行されませんでした。理由: ", text)
-        self.assertIn("MIQ設定はAI toolsから実行できません。/general から開いてください。", text)
+        self.assertIn("fastoolerは実行されませんでした。理由: ", text)
+        self.assertIn("MIQ設定はfastoolerから実行できません。/general から開いてください。", text)
 
 
 if __name__ == "__main__":

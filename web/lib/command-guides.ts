@@ -78,7 +78,7 @@ export const COMMAND_GUIDES: CommandGuide[] = [
     slug: "general",
     command: "/general",
     title: "一般機能",
-    summary: "マネー、生存確認、ショートカットをまとめて操作します。",
+    summary: "マネー、fujo status、ショートカットをまとめて操作します。",
     description: "目的のジャンルを選ぶだけで、日常的に使う機能を呼び出せる操作パネルです。",
     genres: [
       {
@@ -121,13 +121,13 @@ export const COMMAND_GUIDES: CommandGuide[] = [
       },
       {
         slug: "survival",
-        title: "生存確認",
+        title: "fujo status",
         description: "追跡・現在の高度・失踪警報に関する機能です。",
         functions: [
-          { title: "追跡登録・解除", description: "生存確認の追跡対象を登録または解除します。" },
+          { title: "追跡登録・解除", description: "fujo statusの追跡対象を登録または解除します。" },
           { title: "現在の高度", description: "対象ユーザーの現在の高度を確認します。高度は活動が検知されるたびに上がり、時間とともに下がります。" },
           { title: "fujo分析", description: "自分の検知記録から、時間帯ごとの1日あたり平均検知回数を棒グラフで確認します。" },
-          { title: "生存確認ランキング", description: "高度ランキングと化石ランキングを見ます。" },
+          { title: "fujo statusランキング", description: "高度ランキングと化石ランキングを見ます。" },
           { title: "フリーズ・失踪警報解除", description: "追跡状態の停止や失踪警報の解除を操作します。" },
         ],
       },
@@ -237,7 +237,7 @@ export const COMMAND_GUIDES: CommandGuide[] = [
         title: "モデレーション",
         description: "会話やチャンネルを整えるための機能です。",
         functions: [
-          { title: "Muted設定", description: "Mutedに関する設定を開きます。", note: "ロールの管理権限が必要です。" },
+          { title: "Muted", description: "Mutedに関する設定を開きます。", note: "ロールの管理権限が必要です。" },
           { title: "匿名つぶやきパネル", description: "匿名つぶやき用のパネルを開きます。", note: "チャンネルの管理権限が必要です。" },
           { title: "Stickyパネル", description: "固定表示するパネルの設置先・文言・オン／オフを設定します。", note: "サーバーの管理権限が必要です。" },
           { title: "メッセージ削除", description: "削除する件数を入力してメッセージを削除します。", note: "メッセージの管理権限が必要です。" },
@@ -258,12 +258,12 @@ export const COMMAND_GUIDES: CommandGuide[] = [
       },
       {
         slug: "bumprta",
-        title: "bump/up・RTA",
+        title: "boardNotify",
         description: "通知設定とRTAの状態を操作します。",
         functions: [
-          { title: "bump/up通知・RTA状態", description: "現在の通知・RTAの状態を確認します。" },
-          { title: "bump/up通知・RTAオン", description: "通知・RTAをオンにします。" },
-          { title: "bump/up通知・RTAオフ", description: "通知・RTAをオフにします。" },
+          { title: "boardNotify状態", description: "現在の通知・RTAの状態を確認します。" },
+          { title: "boardNotifyオン", description: "通知・RTAをオンにします。" },
+          { title: "boardNotifyオフ", description: "通知・RTAをオフにします。" },
         ],
       },
       {

@@ -725,10 +725,10 @@ export const SETTING_SECTIONS: SectionSpec[] = [
   },
   {
     section: "bump_rta",
-    label: "bump/up RTA通知",
+    label: "boardNotify",
     description: "DISBOARDのbumpや各種upの通知と、次に可能になる時刻のリマインダー・RTA計測の設定です。保存はBotに1分ほどで反映されます。",
     fields: [
-      { name: "notifications_enabled", label: "bump/up通知とRTA計測", type: "bool", default: true },
+      { name: "notifications_enabled", label: "boardNotify", type: "bool", default: true },
       { name: "role_id", label: "通知時にメンションするロール（任意）", type: "role" },
     ],
     external: "bump_rta",

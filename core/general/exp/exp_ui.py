@@ -384,7 +384,7 @@ class ActivityBoardView(discord.ui.View):
             band, _color = altitude_band(altitude)
             name = (await resolve_display_names(self.bot, [int(uid)])
                     ).get(int(uid), "")
-            return ("生存確認・現在の高度", name,
+            return ("fujo status・現在の高度", name,
                     f"{altitude:,.0f} m（{band}）")
         except Exception:
             logger.debug("活動ボード: 高度の取得に失敗", exc_info=True)

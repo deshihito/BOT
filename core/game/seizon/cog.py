@@ -60,7 +60,7 @@ log = logging.getLogger(__name__)
 JST = timezone(timedelta(hours=9))
 RECORD_INTERVAL = timedelta(minutes=5)
 PAGE_SIZE = 1000
-FOOTER = "Survival Surveillance System"
+FOOTER = "fujo status"
 USER_COLUMNS = (
     "user_id, streak_count, last_streak_date, is_frozen, last_pester_level, "
     "panic_days, panic_message, panic_channel_id, last_panic_at"
@@ -466,7 +466,7 @@ class FujoSurvival(commands.Cog):
 
     async def cog_app_command_error(self, interaction: discord.Interaction, error: app_commands.AppCommandError):
         log.exception("fujo command failed", exc_info=error)
-        embed = self.create_simple_embed("エラー", "生存確認のデータを読み書きできませんでした。少し待ってからもう一度試してください。", 0xe74c3c)
+        embed = self.create_simple_embed("エラー", "fujo statusのデータを読み書きできませんでした。少し待ってからもう一度試してください。", 0xe74c3c)
         try:
             await self._reply(interaction, embed, ephemeral=True)
         except discord.HTTPException:
@@ -601,14 +601,14 @@ class FujoSurvival(commands.Cog):
             await self._run(lambda: self.db_api.table("fujo_users").delete().eq("user_id", user_id))
             self.users.pop(user_id, None)
             self._last_record.pop(user_id, None)
-            embed = self.create_simple_embed("追跡解除", "生存確認の追跡を解除しました。これまでの記録と設定も消えました。", 0xe74c3c)
+            embed = self.create_simple_embed("追跡解除", "fujo statusの追跡を解除しました。これまでの記録と設定も消えました。", 0xe74c3c)
         else:
             row = {"user_id": user_id, "streak_count": 0, "is_frozen": False, "last_pester_level": 0}
             await self._run(lambda: self.db_api.table("fujo_users").upsert(row, on_conflict="user_id"))
             self.users[user_id] = dict(row)
             embed = self.create_simple_embed(
                 "追跡開始",
-                "生存確認の追跡を始めました。発言・通話・オンライン状態から生存を記録します。\n"
+                "fujo statusの追跡を始めました。発言・通話・オンライン状態から生存を記録します。\n"
                 "もう一度 `/fujo register` を実行すると解除できます。",
                 0x2ecc71,
             )

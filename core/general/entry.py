@@ -93,7 +93,7 @@ class RankingsView(discord.ui.View):
         ("up RTA", "up_leaderboard"),
         ("bump RTA 全サーバー", "bump_global_leaderboard"),
         ("up RTA 全サーバー", "up_global_leaderboard"),
-        ("生存確認", "fujo_ranking"),
+        ("fujo status", "fujo_ranking"),
         ("EXP", "exp_ranking"),
     )
 
@@ -282,7 +282,7 @@ class GeneralCog(
             from cogs.general import _enabled as ai_tools_enabled
             available = ai_tools_router.action_candidates()
             key_status = "設定済み" if logfare.api_key() else "未設定"
-            embed = discord.Embed(title="AI tools", color=0x5865F2)
+            embed = discord.Embed(title="fastooler", color=0x5865F2)
             embed.description = (
                 f"全体有効: `{ai_tools_enabled()}`\n"
                 f"Logfare APIキー: `{key_status}`\n"
@@ -500,13 +500,13 @@ class GeneralCog(
         if value == "garden":
             garden_cog = self.bot.get_cog("GardenCog")
             if garden_cog is None:
-                return await self._safe_respond(interaction, "植物栽培は現在利用できません。")
+                return await self._safe_respond(interaction, "grass simulatorは現在利用できません。")
             return await garden_cog.show_garden(interaction)
 
         # ===== fujo（生存確認）系 =====
         if value.startswith("fujo_"):
             if fujo is None:
-                return await self._safe_respond(interaction, "FujoSurvivalが読み込まれていません。")
+                return await self._safe_respond(interaction, "fujo statusが読み込まれていません。")
             action = value.removeprefix("fujo_")
             try:
                 return await fujo.fujo(interaction, action, None, "active", None, None)
@@ -518,7 +518,7 @@ class GeneralCog(
                 )
                 return await self._safe_respond(
                     interaction,
-                    "生存確認機能の処理中にエラーが発生しました。時間をおいて再試行してください。",
+                    "fujo statusの処理中にエラーが発生しました。時間をおいて再試行してください。",
                 )
 
         logger.warning("dispatch_general: unknown action %r", value)

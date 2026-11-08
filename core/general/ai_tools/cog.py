@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 # 例外のときに利用者へ返す汎用文。詳細（APIキーの確認指示など運用者向けの
 # 内容や生の例外文）は利用者に見せず、サーバーログにのみ残す。
 GENERIC_FAILURE_MESSAGE = (
-    "AI toolsの判定または機能実行に失敗しました。時間をおいて再度お試しください。"
+    "fastoolerの判定または機能実行に失敗しました。時間をおいて再度お試しください。"
     "解決しない場合はBotの運営に連絡してください。"
 )
 
@@ -268,7 +268,7 @@ class AIToolsParamCompletionView(discord.ui.View):
         self._disable_all()
         if ai_tools_router.requires_confirmation(self.item):
             # 補完できても confirm リスクなら、実行前に確認ビューを挟む。
-            text = f"AI tools: 「{label}」を実行しますか？" + (f"\n引数: {summary}" if summary else "")
+            text = f"fastooler: 「{label}」を実行しますか？" + (f"\n引数: {summary}" if summary else "")
             confirm_view = AIToolsConfirmView(
                 invoker_id=self.invoker_id,
                 base_text=text,
@@ -284,7 +284,7 @@ class AIToolsParamCompletionView(discord.ui.View):
         self.stop()
         await self.execute(merged)
         if self.message is not None:
-            done_text = f"AI tools: 「{label}」を実行しました。" + (f"（引数: {summary}）" if summary else "")
+            done_text = f"fastooler: 「{label}」を実行しました。" + (f"（引数: {summary}）" if summary else "")
             try:
                 await self.message.edit(content=done_text, view=self)
             except Exception:
@@ -308,16 +308,16 @@ class AIToolsCog(commands.Cog):
             await ai_tools_router.invoke_action(
                 self.bot, message, item, invoker=invoker, params=params)
 
-    @commands.command(name="aitools", help="Check the status of AI tools")
+    @commands.command(name="aitools", help="Check the status of fastooler")
     async def aitools(self, ctx: commands.Context, action: str = "status"):
         action = action.strip().lower()
         if action not in {"", "status"}:
-            return await ctx.reply("AI toolsはメンションから使う単一機能です。状態確認は `!aitools status`。", mention_author=False)
+            return await ctx.reply("fastoolerはメンションから使う単一機能です。状態確認は `!aitools status`。", mention_author=False)
         candidates = ai_tools_router.action_candidates()
         configured = bool(logfare.api_key())
         key_status = "設定済み" if configured else "未設定"
         return await ctx.reply(
-            "AI tools稼働状態\n"
+            "fastooler稼働状態\n"
             f"全体有効: `{_enabled()}`\n"
             f"Logfare APIキー: `{key_status}`\n"
             f"モデル: `clef`\n"
@@ -337,16 +337,16 @@ class AIToolsCog(commands.Cog):
         if _is_miq_trigger(message, self.bot.user):
             return
         if not _enabled():
-            return await message.reply("AI toolsはサーバー設定で停止中です。", mention_author=False)
+            return await message.reply("fastoolerはサーバー設定で停止中です。", mention_author=False)
         invoker = _resolve_invoker(message, self.bot.user)
         if invoker is None:
             return await message.reply(
-                "AI toolsは呼び出し元の人間を特定できませんでした。人間をメンションするか、VCに人間が一人だけいる状態で依頼してください。",
+                "fastoolerは呼び出し元の人間を特定できませんでした。人間をメンションするか、VCに人間が一人だけいる状態で依頼してください。",
                 mention_author=False,
             )
         if not logfare.api_key():
             return await message.reply(
-                "AI toolsを実行できません。運用環境に `LOGFARE_API_KEY` が設定されていません。",
+                "fastoolerを実行できません。運用環境に `LOGFARE_API_KEY` が設定されていません。",
                 mention_author=False,
             )
         prompt = self._prompt(message.content)
@@ -365,7 +365,7 @@ class AIToolsCog(commands.Cog):
                 # 操作できる補完ビューで入力を求める。
                 names = "、".join(p.get("label") or p.get("name") for p in missing)
                 text = (
-                    f"AI tools: 「{label}」には引数（{names}）が不足しています。"
+                    f"fastooler: 「{label}」には引数（{names}）が不足しています。"
                     "下のボタンから入力してください。入力がなければ実行しません。"
                 )
                 view = AIToolsParamCompletionView(
@@ -381,7 +381,7 @@ class AIToolsCog(commands.Cog):
             if ai_tools_router.requires_confirmation(item):
                 # risk="confirm" は実行前に確認ビューを挟む（確認なしには実行しない）。
                 summary = ai_tools_router.format_params_summary(item, params)
-                text = f"AI tools: 「{label}」を実行しますか？" + (f"\n引数: {summary}" if summary else "")
+                text = f"fastooler: 「{label}」を実行しますか？" + (f"\n引数: {summary}" if summary else "")
                 view = AIToolsConfirmView(
                     invoker_id=invoker.id,
                     base_text=text,
@@ -393,7 +393,7 @@ class AIToolsCog(commands.Cog):
                 # 引数付きで実行するときは、何を・どの引数で実行するか先に明示する。
                 summary = ai_tools_router.format_params_summary(item, params)
                 await message.reply(
-                    f"AI tools: 「{label}」を実行します（引数: {summary}）。",
+                    f"fastooler: 「{label}」を実行します（引数: {summary}）。",
                     mention_author=False,
                 )
             async with message.channel.typing():
@@ -411,7 +411,7 @@ class AIToolsCog(commands.Cog):
             await message.reply(GENERIC_FAILURE_MESSAGE, mention_author=False)
         except ai_tools_router.AIToolsDecisionError as exc:
             logger.info("AI tools stopped: %s", exc)
-            await message.reply(f"AI toolsは実行されませんでした。理由: {exc}", mention_author=False)
+            await message.reply(f"fastoolerは実行されませんでした。理由: {exc}", mention_author=False)
         except Exception:
             logger.exception("AI tools failed: user=%s", message.author.id)
             await message.reply(GENERIC_FAILURE_MESSAGE, mention_author=False)

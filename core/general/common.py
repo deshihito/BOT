@@ -60,7 +60,7 @@ GENERAL_GENRES = {
     "money": ("マネー", ""),
     "rta": ("ランキング", ""),
     "exp": ("EXP・レベル", "チャット・VC・generalのEXPとレベル"),
-    "survival": ("生存確認", "メンバーの安否・不在の検知"),
+    "survival": ("fujo status", "メンバーの安否・不在の検知"),
     "garden": ("栽培", ""),
     "custom": ("設定・AI", ""),
     "zeta": ("ZetaModoki", "ロールプレイ会話"),
@@ -130,12 +130,12 @@ GENERAL_ACTIONS = {
         ("追跡登録・解除", "fujo_register"),
         ("現在の高度", "fujo_hindo"),
         ("fujo分析", "fujo_analysis"),
-        ("生存確認ランキング", "fujo_ranking"),
+        ("fujo statusランキング", "fujo_ranking"),
         ("フリーズ", "fujo_freeze"),
         ("失踪警報解除", "fujo_panic_disable"),
     ],
     "garden": [
-        ("植物栽培", "garden"),
+        ("grass simulator", "garden"),
     ],
     "exp": [
         ("自分のEXP状況", "exp_status"),
@@ -144,7 +144,7 @@ GENERAL_ACTIONS = {
     ],
     "custom": [
         ("ショートカットを管理", "shortcut_manage"),
-        ("AI tools稼働状態", "aitools"),
+        ("fastooler稼働状態", "aitools"),
         ("チャットAIモデルを設定", "ai_default"),
         ("画像生成AIモデルを設定", "image_default"),
         ("AI思考強度を設定", "reasoning_default"),
