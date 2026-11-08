@@ -7,8 +7,10 @@ from typing import Any
 
 import discord
 
-from core.support.server_assist import Feature, get_settings, update_settings
+from core.support.server_assist import as_int, Feature, get_settings, update_settings
 from core.support.server_assist.ui import AssistFeatureView, channel_label, notice_line
+from core.support.server_assist.ui import AssistChannelSelect, AssistToggleButton, channel_permission_check, required_field
+from core.support.messages import ASSIST_MANAGE_REQUIRED
 
 logger = logging.getLogger(__name__)
 
@@ -27,8 +29,7 @@ FEATURE = Feature(
 def settings(guild_id: int) -> dict[str, Any]:
     raw = get_settings(guild_id, KEY)
     def channel_id(name: str) -> int | None:
-        value = raw.get(name)
-        return value if isinstance(value, int) and not isinstance(value, bool) else None
+        return as_int(raw.get(name))
     return {
         "enabled": bool(raw.get("enabled", False)),
         "member_channel_id": channel_id("member_channel_id"),
@@ -85,61 +86,6 @@ def start_tasks(cog: Any) -> None:
     getattr(cog, "_feature_tasks", []).append(task)
 
 
-class StatsChannelSelect(discord.ui.ChannelSelect):
-    def __init__(self, parent: "StatsSettingsView", kind: str):
-        self.parent_view = parent
-        self.kind = kind
-        current = parent.settings.get(f"{kind}_channel_id")
-        labels = {"member": "メンバー数", "online": "オンライン数", "boost": "ブースト数"}
-        super().__init__(
-            placeholder=f"{labels.get(kind, kind)}を表示するVC",
-            channel_types=[discord.ChannelType.voice, discord.ChannelType.stage_voice],
-            min_values=0,
-            max_values=1,
-            default_values=(
-                [discord.SelectDefaultValue(id=current, type=discord.SelectDefaultValueType.channel)]
-                if current is not None else []
-            ),
-            row=0 if kind == "member" else 1 if kind == "online" else 2,
-        )
-
-    async def callback(self, interaction: discord.Interaction):
-        if not self.parent_view.can_manage(interaction):
-            return await interaction.response.send_message(
-                "この設定には「サーバーの管理」権限が必要です。", ephemeral=True,
-            )
-        channel = self.values[0] if self.values else None
-        if channel is not None:
-            me = getattr(self.parent_view.guild, "me", None)
-            if me is not None and not getattr(channel.permissions_for(me), "manage_channels", False):
-                return await interaction.response.send_message("そのVCを管理する権限がありません。", ephemeral=True)
-        value = getattr(channel, "id", None)
-        field = f"{self.kind}_channel_id"
-        await update_settings(self.parent_view.guild_id, KEY, **{field: value})
-        self.parent_view.settings[field] = value
-        await self.parent_view.refresh(interaction, "スタッツの表示先を保存しました。")
-
-
-class StatsToggleButton(discord.ui.Button):
-    def __init__(self):
-        super().__init__(label="サーバースタッツ", style=discord.ButtonStyle.secondary, row=3)
-
-    async def callback(self, interaction: discord.Interaction):
-        view: StatsSettingsView = self.view
-        if not view.can_manage(interaction):
-            return await interaction.response.send_message(
-                "この設定には「サーバーの管理」権限が必要です。", ephemeral=True,
-            )
-        if not view.settings["enabled"] and not any(
-            view.settings[key] for key in ("member_channel_id", "online_channel_id", "boost_channel_id")
-        ):
-            return await interaction.response.send_message("先に表示先のVCを選んでください。", ephemeral=True)
-        value = not view.settings["enabled"]
-        await update_settings(view.guild_id, KEY, enabled=value)
-        view.settings["enabled"] = value
-        await view.refresh(interaction, f"サーバースタッツを{'オン' if value else 'オフ'}にしました。")
-
-
 class StatsRefreshButton(discord.ui.Button):
     def __init__(self):
         super().__init__(label="今すぐ更新", style=discord.ButtonStyle.success, row=3)
@@ -148,7 +94,7 @@ class StatsRefreshButton(discord.ui.Button):
         view: StatsSettingsView = self.view
         if not view.can_manage(interaction):
             return await interaction.response.send_message(
-                "この設定には「サーバーの管理」権限が必要です。", ephemeral=True,
+                ASSIST_MANAGE_REQUIRED, ephemeral=True,
             )
         if interaction.guild is None:
             return await interaction.response.send_message("サーバー内で実行してください。", ephemeral=True)
@@ -162,17 +108,16 @@ class StatsRefreshButton(discord.ui.Button):
 
 class StatsSettingsView(AssistFeatureView):
     feature_key = KEY
-    feature_title = "サーバースタッツ"
 
     def __init__(self, cog: Any, guild_id: int):
         self.guild = getattr(cog.bot, "get_guild", lambda _id: None)(guild_id)
         self.settings = settings(guild_id)
         super().__init__(cog, guild_id)
         if self.guild is not None:
-            self.add_item(StatsChannelSelect(self, "member"))
-            self.add_item(StatsChannelSelect(self, "online"))
-            self.add_item(StatsChannelSelect(self, "boost"))
-        self.add_item(StatsToggleButton())
+            self.add_item(AssistChannelSelect(self, field="member_channel_id", placeholder="メンバー数を表示するVC", notice="スタッツの表示先を保存しました。", channel_types=[discord.ChannelType.voice, discord.ChannelType.stage_voice], min_values=0, row=0, check=channel_permission_check("manage_channels", "そのVCを管理する権限がありません。")))
+            self.add_item(AssistChannelSelect(self, field="online_channel_id", placeholder="オンライン数を表示するVC", notice="スタッツの表示先を保存しました。", channel_types=[discord.ChannelType.voice, discord.ChannelType.stage_voice], min_values=0, row=1, check=channel_permission_check("manage_channels", "そのVCを管理する権限がありません。")))
+            self.add_item(AssistChannelSelect(self, field="boost_channel_id", placeholder="ブースト数を表示するVC", notice="スタッツの表示先を保存しました。", channel_types=[discord.ChannelType.voice, discord.ChannelType.stage_voice], min_values=0, row=2, check=channel_permission_check("manage_channels", "そのVCを管理する権限がありません。")))
+        self.add_item(AssistToggleButton("enabled", "サーバースタッツ", row=3, require=lambda view, interaction, value: "先に表示先のVCを選んでください。" if value and not any(view.settings[key] for key in ("member_channel_id", "online_channel_id", "boost_channel_id")) else None))
         self.add_item(StatsRefreshButton())
 
     def embed(self) -> discord.Embed:

@@ -7,9 +7,10 @@ from typing import Any
 
 import discord
 
-from core.support.messages import ROLE_HIERARCHY_ALREADY_SET, ROLE_HIERARCHY_CANNOT_SET
+from core.support.messages import ROLE_HIERARCHY_ALREADY_SET, ROLE_HIERARCHY_CANNOT_SET, ASSIST_MANAGE_REQUIRED
 from core.support.server_assist import Feature, can_assign_roles, get_settings, update_settings
 from core.support.server_assist.ui import AssistFeatureView, notice_line
+from core.support.server_assist.ui import AssistChannelSelect, AssistToggleButton, required_field
 
 logger = logging.getLogger(__name__)
 
@@ -103,37 +104,17 @@ def _parse_rewards(value: str) -> dict[str, int]:
         if separator is None:
             raise ValueError("レベル=ロールID の形式で入力してください。")
         level_text, role_text = token.split(separator, 1)
-        level = int(level_text.strip())
-        role_id = int(role_text.strip())
+        try:
+            level = int(level_text.strip())
+            role_id = int(role_text.strip())
+        except ValueError:
+            raise ValueError("レベルとロールIDは数値で入力してください。") from None
         if not 2 <= level <= 1000 or role_id <= 0:
             raise ValueError("レベルは2〜1000、ロールIDは正の整数で入力してください。")
         rewards[str(level)] = role_id
     if len(rewards) > MAX_REWARDS:
         raise ValueError(f"レベル報酬は最大{MAX_REWARDS}件です。")
     return dict(sorted(rewards.items(), key=lambda item: int(item[0])))
-
-
-class LevelingToggleButton(discord.ui.Button):
-    def __init__(self):
-        super().__init__(label="レベル報酬", style=discord.ButtonStyle.secondary, row=2)
-
-    async def callback(self, interaction: discord.Interaction):
-        view: LevelingSettingsView = self.view
-        if not view.can_manage(interaction):
-            return await interaction.response.send_message(
-                "この設定には「サーバーの管理」権限が必要です。", ephemeral=True,
-            )
-        value = not view.settings["enabled"]
-        if value and view.settings["role_rewards"] and not can_assign_roles(
-            interaction, view.guild, list(view.settings["role_rewards"].values()),
-        ):
-            return await interaction.response.send_message(
-                ROLE_HIERARCHY_ALREADY_SET,
-                ephemeral=True,
-            )
-        await update_settings(view.guild_id, KEY, enabled=value)
-        view.settings["enabled"] = value
-        await view.refresh(interaction, f"レベル報酬を{'オン' if value else 'オフ'}にしました。")
 
 
 class LevelingRewardsButton(discord.ui.Button):
@@ -144,7 +125,7 @@ class LevelingRewardsButton(discord.ui.Button):
         view: LevelingSettingsView = self.view
         if not view.can_manage(interaction):
             return await interaction.response.send_message(
-                "この設定には「サーバーの管理」権限が必要です。", ephemeral=True,
+                ASSIST_MANAGE_REQUIRED, ephemeral=True,
             )
         return await interaction.response.send_modal(LevelRewardsModal(view))
 
@@ -167,7 +148,7 @@ class LevelRewardsModal(discord.ui.Modal, title="レベル報酬"):
     async def on_submit(self, interaction: discord.Interaction):
         if not self.parent_view.can_manage(interaction):
             return await interaction.response.send_message(
-                "この設定には「サーバーの管理」権限が必要です。", ephemeral=True,
+                ASSIST_MANAGE_REQUIRED, ephemeral=True,
             )
         try:
             rewards = _parse_rewards(str(self.text.value or ""))
@@ -187,15 +168,22 @@ class LevelRewardsModal(discord.ui.Modal, title="レベル報酬"):
         await self.parent_view.refresh(interaction, "レベル報酬を保存しました。")
 
 
+def _toggle_require(view, interaction, value):
+    if value and view.settings["role_rewards"] and not can_assign_roles(
+        interaction, view.guild, list(view.settings["role_rewards"].values()),
+    ):
+        return ROLE_HIERARCHY_ALREADY_SET
+    return None
+
+
 class LevelingSettingsView(AssistFeatureView):
     feature_key = KEY
-    feature_title = "レベル報酬"
 
     def __init__(self, cog: Any, guild_id: int):
         self.guild = getattr(cog.bot, "get_guild", lambda _id: None)(guild_id)
         self.settings = settings(guild_id)
         super().__init__(cog, guild_id)
-        self.add_item(LevelingToggleButton())
+        self.add_item(AssistToggleButton("enabled", "レベル報酬", require=_toggle_require))
         self.add_item(LevelingRewardsButton())
 
     def embed(self) -> discord.Embed:

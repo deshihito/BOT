@@ -7,8 +7,10 @@ from typing import Any
 
 import discord
 
-from core.support.server_assist import Feature, get_settings, update_settings, usable_text_channels as _channels
+from core.support.server_assist import Feature, get_settings, update_settings
 from core.support.server_assist.ui import AssistFeatureView, channel_label, notice_line
+from core.support.server_assist.ui import AssistChannelSelect, AssistToggleButton, required_field
+from core.support.messages import ASSIST_MANAGE_REQUIRED
 
 logger = logging.getLogger(__name__)
 
@@ -143,57 +145,16 @@ async def on_member_join(cog: Any, member: Any) -> None:
         logger.debug("招待ログを送信できませんでした: guild=%s", getattr(guild, "id", None))
 
 
-class InviteChannelSelect(discord.ui.ChannelSelect):
-    def __init__(self, parent: "InviteSettingsView"):
-        self.parent_view = parent
-        current = parent.settings["channel_id"]
-        super().__init__(placeholder="招待ログの送信先", channel_types=[discord.ChannelType.text, discord.ChannelType.news],
-                         min_values=0, max_values=1,
-                         default_values=([discord.SelectDefaultValue(id=current, type=discord.SelectDefaultValueType.channel)]
-                                         if current is not None else []), row=0)
-
-    async def callback(self, interaction: discord.Interaction):
-        if not self.parent_view.can_manage(interaction):
-            return await interaction.response.send_message(
-                "この設定には「サーバーの管理」権限が必要です。", ephemeral=True,
-            )
-        if not self.values:
-            return await interaction.response.send_message("送信できるチャンネルがありません。", ephemeral=True)
-        channel_id = self.values[0].id
-        await update_settings(self.parent_view.guild_id, KEY, channel_id=channel_id)
-        self.parent_view.settings["channel_id"] = channel_id
-        await self.parent_view.refresh(interaction, "招待ログの送信先を保存しました。")
-
-
-class InviteToggleButton(discord.ui.Button):
-    def __init__(self):
-        super().__init__(label="招待トラッカー", style=discord.ButtonStyle.secondary, row=2)
-
-    async def callback(self, interaction: discord.Interaction):
-        view: InviteSettingsView = self.view
-        if not view.can_manage(interaction):
-            return await interaction.response.send_message(
-                "この設定には「サーバーの管理」権限が必要です。", ephemeral=True,
-            )
-        if not view.settings["enabled"] and not view.settings["channel_id"]:
-            return await interaction.response.send_message("先に送信先を選んでください。", ephemeral=True)
-        value = not view.settings["enabled"]
-        await update_settings(view.guild_id, KEY, enabled=value)
-        view.settings["enabled"] = value
-        await view.refresh(interaction, f"招待トラッカーを{'オン' if value else 'オフ'}にしました。")
-
-
 class InviteSettingsView(AssistFeatureView):
     feature_key = KEY
-    feature_title = "招待トラッカー"
 
     def __init__(self, cog: Any, guild_id: int):
         self.guild = getattr(cog.bot, "get_guild", lambda _id: None)(guild_id)
         self.settings = settings(guild_id)
         super().__init__(cog, guild_id)
         if self.guild is not None:
-            self.add_item(InviteChannelSelect(self))
-        self.add_item(InviteToggleButton())
+            self.add_item(AssistChannelSelect(self, field="channel_id", placeholder="招待ログの送信先", notice="招待ログの送信先を保存しました。", min_values=0, empty_message="送信できるチャンネルがありません。"))
+        self.add_item(AssistToggleButton("enabled", "招待トラッカー", require=required_field("channel_id", "先に送信先を選んでください。")))
 
     def embed(self) -> discord.Embed:
         return discord.Embed(
@@ -203,7 +164,6 @@ class InviteSettingsView(AssistFeatureView):
                 f"\n\n**状態**: {'オン' if self.settings['enabled'] else 'オフ'}"
                 f"\n**送信先**: {channel_label(self.settings['channel_id'])}"
                 "\n\nBotに「サーバーの管理」権限が必要です。"
-                "起動後に招待一覧を取得し、参加時の使用回数の差分から招待者を特定します。"
                 + notice_line(self.notice)
             )[:4096],
             color=0xFFFFFF,

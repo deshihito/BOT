@@ -6,8 +6,10 @@ from typing import Any
 
 import discord
 
-from core.support.server_assist import Feature, get_settings, update_settings, usable_text_channels as _channels
+from core.support.server_assist import register_persistent_views, Feature, get_settings, update_settings
 from core.support.server_assist.ui import AssistFeatureView, channel_label, notice_line
+from core.support.server_assist.ui import AssistChannelSelect, AssistToggleButton, required_field
+from core.support.messages import ASSIST_MANAGE_REQUIRED
 from core.support.storage import KVStore
 
 logger = logging.getLogger(__name__)
@@ -118,14 +120,7 @@ class SuggestionVoteView(discord.ui.View):
 
 
 def register_views(cog: Any) -> None:
-    add_view = getattr(getattr(cog, "bot", None), "add_view", None)
-    if not callable(add_view):
-        return
-    for view in (SuggestionCreateView(cog), SuggestionVoteView(cog)):
-        try:
-            add_view(view)
-        except Exception:
-            logger.exception("提案箱の永続ビューを登録できませんでした")
+    register_persistent_views(cog, "提案箱の永続ビューを登録できませんでした", SuggestionCreateView, SuggestionVoteView)
 
 
 class SuggestionCreateModal(discord.ui.Modal, title="提案を送信"):
@@ -226,46 +221,6 @@ async def handle_vote(cog: Any, interaction: discord.Interaction, action: str) -
     )
 
 
-class SuggestionChannelSelect(discord.ui.ChannelSelect):
-    def __init__(self, parent: "SuggestionSettingsView"):
-        self.parent_view = parent
-        current = parent.settings["channel_id"]
-        super().__init__(placeholder="提案を投稿するチャンネル", channel_types=[discord.ChannelType.text, discord.ChannelType.news],
-                         min_values=0, max_values=1,
-                         default_values=([discord.SelectDefaultValue(id=current, type=discord.SelectDefaultValueType.channel)]
-                                         if current is not None else []), row=0)
-
-    async def callback(self, interaction: discord.Interaction):
-        if not self.parent_view.can_manage(interaction):
-            return await interaction.response.send_message(
-                "この設定には「サーバーの管理」権限が必要です。", ephemeral=True,
-            )
-        if not self.values:
-            return await interaction.response.send_message("送信できるチャンネルがありません。", ephemeral=True)
-        channel_id = self.values[0].id
-        await update_settings(self.parent_view.guild_id, KEY, channel_id=channel_id)
-        self.parent_view.settings["channel_id"] = channel_id
-        await self.parent_view.refresh(interaction, "提案先のチャンネルを保存しました。")
-
-
-class SuggestionToggleButton(discord.ui.Button):
-    def __init__(self):
-        super().__init__(label="提案箱", style=discord.ButtonStyle.secondary, row=2)
-
-    async def callback(self, interaction: discord.Interaction):
-        view: SuggestionSettingsView = self.view
-        if not view.can_manage(interaction):
-            return await interaction.response.send_message(
-                "この設定には「サーバーの管理」権限が必要です。", ephemeral=True,
-            )
-        if not view.settings["enabled"] and not view.settings["channel_id"]:
-            return await interaction.response.send_message("先に提案先のチャンネルを選んでください。", ephemeral=True)
-        value = not view.settings["enabled"]
-        await update_settings(view.guild_id, KEY, enabled=value)
-        view.settings["enabled"] = value
-        await view.refresh(interaction, f"提案箱を{'オン' if value else 'オフ'}にしました。")
-
-
 class SuggestionPanelButton(discord.ui.Button):
     def __init__(self):
         super().__init__(label="パネルを送信", style=discord.ButtonStyle.primary, row=2)
@@ -274,7 +229,7 @@ class SuggestionPanelButton(discord.ui.Button):
         view: SuggestionSettingsView = self.view
         if not view.can_manage(interaction):
             return await interaction.response.send_message(
-                "この設定には「サーバーの管理」権限が必要です。", ephemeral=True,
+                ASSIST_MANAGE_REQUIRED, ephemeral=True,
             )
         channel_id = view.settings["channel_id"]
         channel = interaction.guild.get_channel(channel_id) if interaction.guild and channel_id else None
@@ -289,15 +244,14 @@ class SuggestionPanelButton(discord.ui.Button):
 
 class SuggestionSettingsView(AssistFeatureView):
     feature_key = KEY
-    feature_title = "提案箱"
 
     def __init__(self, cog: Any, guild_id: int):
         self.guild = getattr(cog.bot, "get_guild", lambda _id: None)(guild_id)
         self.settings = settings(guild_id)
         super().__init__(cog, guild_id)
         if self.guild is not None:
-            self.add_item(SuggestionChannelSelect(self))
-        self.add_item(SuggestionToggleButton())
+            self.add_item(AssistChannelSelect(self, field="channel_id", placeholder="提案を投稿するチャンネル", notice="提案先のチャンネルを保存しました。", min_values=0, empty_message="送信できるチャンネルがありません。"))
+        self.add_item(AssistToggleButton("enabled", "提案箱", require=required_field("channel_id", "先に提案先のチャンネルを選んでください。")))
         self.add_item(SuggestionPanelButton())
 
     def embed(self) -> discord.Embed:
@@ -307,8 +261,7 @@ class SuggestionSettingsView(AssistFeatureView):
                 "サーバーへの提案を募集するパネルを設置します。"
                 f"\n\n**状態**: {'オン' if self.settings['enabled'] else 'オフ'}"
                 f"\n**提案先**: {channel_label(self.settings['channel_id'])}"
-                "\n\n「パネルを送信」で、提案ボタン付きのパネルを投稿します。"
-                "投稿された提案は、誰でも賛成・反対に投票できます。"
+                "\n\n投稿された提案は、誰でも賛成・反対に投票できます。"
                 + notice_line(self.notice)
             )[:4096],
             color=0xFFFFFF,

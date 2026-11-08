@@ -15,7 +15,10 @@ import discord
 from core.game.shiritori.cog import check_answer, is_kana_word, normalize
 from core.support.panel_v2 import as_panel_v2, edit_panel_v2
 from core.support.server_assist import Feature, get_settings, update_settings
+from core.general.user_names import cached_display_name
 from core.support.server_assist.ui import AssistFeatureView, notice_line
+from core.support.server_assist.ui import AssistChannelSelect, AssistToggleButton, required_field
+from core.support.messages import ASSIST_MANAGE_REQUIRED
 
 logger = logging.getLogger(__name__)
 
@@ -181,7 +184,7 @@ class ShiritoriChannelSelect(discord.ui.ChannelSelect):
         view = self.parent_view
         if not view.can_manage(interaction):
             return await interaction.response.send_message(
-                "この設定には「サーバーの管理」権限が必要です。", ephemeral=True,
+                ASSIST_MANAGE_REQUIRED, ephemeral=True,
             )
         selected = self.values[0] if self.values else None
         view.selected_channel_id = getattr(selected, "id", None)
@@ -196,7 +199,7 @@ class ShiritoriRegisterButton(discord.ui.Button):
         view: ShiritoriResidentSettingsView = self.view
         if not view.can_manage(interaction):
             return await interaction.response.send_message(
-                "この設定には「サーバーの管理」権限が必要です。", ephemeral=True,
+                ASSIST_MANAGE_REQUIRED, ephemeral=True,
             )
         if view.selected_channel_id is None:
             return await interaction.response.send_message("先にチャンネルを選んでください。", ephemeral=True)
@@ -224,7 +227,7 @@ class ShiritoriResetButton(discord.ui.Button):
         view: ShiritoriResidentSettingsView = self.view
         if not view.can_manage(interaction):
             return await interaction.response.send_message(
-                "この設定には「サーバーの管理」権限が必要です。", ephemeral=True,
+                ASSIST_MANAGE_REQUIRED, ephemeral=True,
             )
         if view.selected_channel_id is None:
             return await interaction.response.send_message("先にチャンネルを選んでください。", ephemeral=True)
@@ -239,24 +242,8 @@ class ShiritoriResetButton(discord.ui.Button):
         await view.reopen(interaction, "チェーンをリセットしました（記録と参加者数は残ります）。")
 
 
-class ShiritoriToggleButton(discord.ui.Button):
-    def __init__(self):
-        super().__init__(label="常駐しりとり", style=discord.ButtonStyle.secondary, row=1)
-
-    async def callback(self, interaction: discord.Interaction):
-        view: ShiritoriResidentSettingsView = self.view
-        if not view.can_manage(interaction):
-            return await interaction.response.send_message(
-                "この設定には「サーバーの管理」権限が必要です。", ephemeral=True,
-            )
-        value = not view.settings["enabled"]
-        await update_settings(view.guild_id, KEY, enabled=value)
-        await view.reopen(interaction, f"常駐しりとりを{'オン' if value else 'オフ'}にしました。")
-
-
 class ShiritoriResidentSettingsView(AssistFeatureView):
     feature_key = KEY
-    feature_title = "常駐しりとり"
 
     def __init__(self, cog: Any, guild_id: int):
         self.settings = settings(guild_id)
@@ -265,7 +252,7 @@ class ShiritoriResidentSettingsView(AssistFeatureView):
         self.add_item(ShiritoriChannelSelect(self))
         self.add_item(ShiritoriRegisterButton())
         self.add_item(ShiritoriResetButton())
-        self.add_item(ShiritoriToggleButton())
+        self.add_item(AssistToggleButton("enabled", "常駐しりとり", row=1, reopen=True))
 
     async def reopen(self, interaction: discord.Interaction, notice: str | None = None):
         view = ShiritoriResidentSettingsView(self.cog, self.guild_id)
@@ -286,7 +273,7 @@ class ShiritoriResidentSettingsView(AssistFeatureView):
         if selected and selected["players"]:
             top = sorted(selected["players"].items(), key=lambda item: -item[1])[:5]
             ranking = "\n\n**参加者ランキング（選択中チャンネル）**\n" + "\n".join(
-                f"{index}. <@{user_id}> — {count}回"
+                f"{index}. {cached_display_name(self.cog.bot, user_id)} — {count}回"
                 for index, (user_id, count) in enumerate(top, start=1)
             )
         return discord.Embed(

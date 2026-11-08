@@ -6,8 +6,10 @@ from typing import Any
 
 import discord
 
-from core.support.server_assist import Feature, get_settings, update_settings, usable_text_channels as _channels
+from core.support.server_assist import Feature, get_settings, update_settings
 from core.support.server_assist.ui import AssistFeatureView, channel_label, notice_line
+from core.support.server_assist.ui import AssistChannelSelect, AssistToggleButton, required_field
+from core.support.messages import ASSIST_MANAGE_REQUIRED
 
 logger = logging.getLogger(__name__)
 
@@ -141,63 +143,21 @@ async def on_guild_channel_delete(cog: Any, channel: Any) -> None:
     await _send(guild, current, embed)
 
 
-class ServerLogChannelSelect(discord.ui.ChannelSelect):
-    def __init__(self, parent: "ServerLogSettingsView"):
-        self.parent_view = parent
-        current = parent.settings["channel_id"]
-        super().__init__(placeholder="サーバーログの送信先", channel_types=[discord.ChannelType.text, discord.ChannelType.news],
-                         min_values=0, max_values=1,
-                         default_values=([discord.SelectDefaultValue(id=current, type=discord.SelectDefaultValueType.channel)]
-                                         if current is not None else []), row=0)
-
-    async def callback(self, interaction: discord.Interaction):
-        if not self.parent_view.can_manage(interaction):
-            return await interaction.response.send_message(
-                "この設定には「サーバーの管理」権限が必要です。", ephemeral=True,
-            )
-        if not self.values:
-            return await interaction.response.send_message("送信できるチャンネルがありません。", ephemeral=True)
-        channel_id = self.values[0].id
-        await update_settings(self.parent_view.guild_id, KEY, channel_id=channel_id)
-        self.parent_view.settings["channel_id"] = channel_id
-        await self.parent_view.refresh(interaction, "サーバーログの送信先を保存しました。")
-
-
-class ServerLogToggleButton(discord.ui.Button):
-    def __init__(self, key: str, label: str, row: int = 2):
-        self.key = key
-        super().__init__(label=label, style=discord.ButtonStyle.secondary, row=row)
-
-    async def callback(self, interaction: discord.Interaction):
-        view: ServerLogSettingsView = self.view
-        if not view.can_manage(interaction):
-            return await interaction.response.send_message(
-                "この設定には「サーバーの管理」権限が必要です。", ephemeral=True,
-            )
-        if self.key == "enabled" and not view.settings["enabled"] and not view.settings["channel_id"]:
-            return await interaction.response.send_message("先にログの送信先を選んでください。", ephemeral=True)
-        value = not bool(view.settings[self.key])
-        await update_settings(view.guild_id, KEY, **{self.key: value})
-        view.settings[self.key] = value
-        await view.refresh(interaction, "サーバーログの設定を更新しました。")
-
-
 class ServerLogSettingsView(AssistFeatureView):
     feature_key = KEY
-    feature_title = "サーバーログ"
 
     def __init__(self, cog: Any, guild_id: int):
         self.guild = getattr(cog.bot, "get_guild", lambda _id: None)(guild_id)
         self.settings = settings(guild_id)
         super().__init__(cog, guild_id)
         if self.guild is not None:
-            self.add_item(ServerLogChannelSelect(self))
-        self.add_item(ServerLogToggleButton("enabled", "サーバーログ", row=2))
-        self.add_item(ServerLogToggleButton("log_joins", "参加", row=2))
-        self.add_item(ServerLogToggleButton("log_leaves", "退出", row=2))
-        self.add_item(ServerLogToggleButton("log_message_delete", "削除", row=2))
-        self.add_item(ServerLogToggleButton("log_roles", "ロール", row=2))
-        self.add_item(ServerLogToggleButton("log_channels", "チャンネル", row=3))
+            self.add_item(AssistChannelSelect(self, field="channel_id", placeholder="サーバーログの送信先", notice="サーバーログの送信先を保存しました。", min_values=0, empty_message="送信できるチャンネルがありません。"))
+        self.add_item(AssistToggleButton("enabled", "サーバーログ", row=2, notice="サーバーログの設定を更新しました。", require=required_field("channel_id", "先にログの送信先を選んでください。")))
+        self.add_item(AssistToggleButton("log_joins", "参加", row=2, notice="サーバーログの設定を更新しました。"))
+        self.add_item(AssistToggleButton("log_leaves", "退出", row=2, notice="サーバーログの設定を更新しました。"))
+        self.add_item(AssistToggleButton("log_message_delete", "削除", row=2, notice="サーバーログの設定を更新しました。"))
+        self.add_item(AssistToggleButton("log_roles", "ロール", row=2, notice="サーバーログの設定を更新しました。"))
+        self.add_item(AssistToggleButton("log_channels", "チャンネル", row=3, notice="サーバーログの設定を更新しました。"))
 
     def embed(self) -> discord.Embed:
         on_off = lambda value: "オン" if value else "オフ"

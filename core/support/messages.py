@@ -153,6 +153,8 @@ PURCHASE_FAILED_RETRY = "購入中にエラーが発生しました。時間を�
 SETTINGS_UPDATE_FAILED = "設定の更新に失敗しました。時間をおいて再度お試しください。解決しない場合はBotの運営に連絡してください。"
 DESTINATION_UPDATE_FAILED = "送信先の更新に失敗しました。時間をおいて再度お試しください。解決しない場合はBotの運営に連絡してください。"
 MANAGE_GUILD_REQUIRED = "この設定にはサーバー管理権限が必要です。"
+ASSIST_MANAGE_REQUIRED = "この設定には「サーバーの管理」権限が必要です。"
+CALLBACK_ERROR = "処理中にエラーが発生しました。時間をおいて再度お試しください。解決しない場合はBotの運営に連絡してください。"
 
 #: 受け取り処理が失敗したときの文。
 CLAIM_FAILED_RETRY = "受け取りに失敗しました。時間をおいて再試行してください。"

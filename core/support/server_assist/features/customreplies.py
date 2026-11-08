@@ -12,6 +12,8 @@ import discord
 from core.support.panel_v2 import as_panel_v2, edit_panel_v2
 from core.support.server_assist import Feature, format_template, get_settings, update_settings
 from core.support.server_assist.ui import AssistFeatureView, notice_line
+from core.support.server_assist.ui import AssistChannelSelect, AssistToggleButton, required_field
+from core.support.messages import ASSIST_MANAGE_REQUIRED
 
 logger = logging.getLogger(__name__)
 
@@ -280,7 +282,7 @@ class CustomReplyRoleSelect(discord.ui.RoleSelect):
         view = self.parent_view
         if not view.can_manage(interaction):
             return await interaction.response.send_message(
-                "この設定には「サーバーの管理」権限が必要です。", ephemeral=True,
+                ASSIST_MANAGE_REQUIRED, ephemeral=True,
             )
         if view.selected_id is None:
             return await interaction.response.send_message("先に返信を選んでください。", ephemeral=True)
@@ -324,7 +326,7 @@ class CustomReplyMinRoleSelect(discord.ui.RoleSelect):
         view = self.parent_view
         if not view.can_manage(interaction):
             return await interaction.response.send_message(
-                "この設定には「サーバーの管理」権限が必要です。", ephemeral=True,
+                ASSIST_MANAGE_REQUIRED, ephemeral=True,
             )
         role = self.values[0] if self.values else None
         if role is not None and (role.is_default() or role.managed):
@@ -346,7 +348,7 @@ class CustomReplyAddButton(discord.ui.Button):
         view: CustomReplySettingsView = self.view
         if not view.can_manage(interaction):
             return await interaction.response.send_message(
-                "この設定には「サーバーの管理」権限が必要です。", ephemeral=True,
+                ASSIST_MANAGE_REQUIRED, ephemeral=True,
             )
         if len(view.settings["replies"]) >= MAX_REPLIES:
             return await interaction.response.send_message(
@@ -363,7 +365,7 @@ class CustomReplyEditButton(discord.ui.Button):
         view: CustomReplySettingsView = self.view
         if not view.can_manage(interaction):
             return await interaction.response.send_message(
-                "この設定には「サーバーの管理」権限が必要です。", ephemeral=True,
+                ASSIST_MANAGE_REQUIRED, ephemeral=True,
             )
         reply = view.selected_reply()
         if reply is None:
@@ -379,7 +381,7 @@ class CustomReplyDeleteButton(discord.ui.Button):
         view: CustomReplySettingsView = self.view
         if not view.can_manage(interaction):
             return await interaction.response.send_message(
-                "この設定には「サーバーの管理」権限が必要です。", ephemeral=True,
+                ASSIST_MANAGE_REQUIRED, ephemeral=True,
             )
         if view.selected_id is None:
             return await interaction.response.send_message("先に返信を選んでください。", ephemeral=True)
@@ -392,21 +394,6 @@ class CustomReplyDeleteButton(discord.ui.Button):
         await view.reopen(interaction, "返信を削除しました。")
 
 
-class CustomReplyToggleButton(discord.ui.Button):
-    def __init__(self):
-        super().__init__(label="カスタム返信", style=discord.ButtonStyle.secondary, row=2)
-
-    async def callback(self, interaction: discord.Interaction):
-        view: CustomReplySettingsView = self.view
-        if not view.can_manage(interaction):
-            return await interaction.response.send_message(
-                "この設定には「サーバーの管理」権限が必要です。", ephemeral=True,
-            )
-        value = not view.settings["enabled"]
-        await update_settings(view.guild_id, KEY, enabled=value)
-        await view.reopen(interaction, f"カスタム返信を{'オン' if value else 'オフ'}にしました。")
-
-
 class CustomReplyMatchButton(discord.ui.Button):
     """選択中の返信のマッチ方式（完全一致／部分一致）を切り替える。"""
 
@@ -417,7 +404,7 @@ class CustomReplyMatchButton(discord.ui.Button):
         view: CustomReplySettingsView = self.view
         if not view.can_manage(interaction):
             return await interaction.response.send_message(
-                "この設定には「サーバーの管理」権限が必要です。", ephemeral=True,
+                ASSIST_MANAGE_REQUIRED, ephemeral=True,
             )
         reply = view.selected_reply()
         if reply is None:
@@ -447,7 +434,7 @@ class CustomReplyReactionButton(discord.ui.Button):
         view: CustomReplySettingsView = self.view
         if not view.can_manage(interaction):
             return await interaction.response.send_message(
-                "この設定には「サーバーの管理」権限が必要です。", ephemeral=True,
+                ASSIST_MANAGE_REQUIRED, ephemeral=True,
             )
         reply = view.selected_reply()
         if reply is None:
@@ -471,7 +458,7 @@ class CustomReplyReactionModal(discord.ui.Modal):
     async def on_submit(self, interaction: discord.Interaction):
         if not self.parent_view.can_manage(interaction):
             return await interaction.response.send_message(
-                "この設定には「サーバーの管理」権限が必要です。", ephemeral=True,
+                ASSIST_MANAGE_REQUIRED, ephemeral=True,
             )
         reaction = str(self.reaction_input.value or "").strip()[:32] or None
         replies = list(settings(self.parent_view.guild_id)["replies"])
@@ -515,7 +502,7 @@ class CustomReplyModal(discord.ui.Modal):
     async def on_submit(self, interaction: discord.Interaction):
         if not self.parent_view.can_manage(interaction):
             return await interaction.response.send_message(
-                "この設定には「サーバーの管理」権限が必要です。", ephemeral=True,
+                ASSIST_MANAGE_REQUIRED, ephemeral=True,
             )
         trigger = str(self.trigger_input.value or "").strip()
         response = str(self.response_input.value or "").strip()
@@ -569,7 +556,6 @@ class CustomReplyModal(discord.ui.Modal):
 
 class CustomReplySettingsView(AssistFeatureView):
     feature_key = KEY
-    feature_title = "カスタム返信"
 
     def __init__(self, cog: Any, guild_id: int):
         self.settings = settings(guild_id)
@@ -581,7 +567,7 @@ class CustomReplySettingsView(AssistFeatureView):
         self.add_item(CustomReplyAddButton())
         self.add_item(CustomReplyEditButton())
         self.add_item(CustomReplyDeleteButton())
-        self.add_item(CustomReplyToggleButton())
+        self.add_item(AssistToggleButton("enabled", "カスタム返信", reopen=True))
         self.add_item(CustomReplyMatchButton())
         self.add_item(CustomReplyReactionButton())
 

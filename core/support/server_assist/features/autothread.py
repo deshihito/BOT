@@ -10,6 +10,8 @@ import discord
 
 from core.support.server_assist import Feature, get_settings, update_settings
 from core.support.server_assist.ui import AssistFeatureView, channel_label, notice_line
+from core.support.server_assist.ui import AssistChannelSelect, AssistToggleButton, required_field
+from core.support.messages import ASSIST_MANAGE_REQUIRED
 
 logger = logging.getLogger(__name__)
 
@@ -144,36 +146,6 @@ async def on_message(cog: Any, message: Any) -> None:
     task.add_done_callback(_tasks.discard)
 
 
-class AutoThreadChannelSelect(discord.ui.ChannelSelect):
-    def __init__(self, parent: "AutoThreadSettingsView"):
-        self.parent_view = parent
-        super().__init__(
-            placeholder="自動スレッドを作るチャンネル",
-            channel_types=[discord.ChannelType.text, discord.ChannelType.news],
-            row=0,
-        )
-
-    async def callback(self, interaction: discord.Interaction):
-        if not self.parent_view.can_manage(interaction):
-            return await interaction.response.send_message(
-                "この設定には「サーバーの管理」権限が必要です。", ephemeral=True,
-            )
-        channel_id = self.values[0].id
-        channel = self.parent_view.guild.get_channel(channel_id)
-        me = getattr(self.parent_view.guild, "me", None)
-        if channel is not None and me is not None:
-            try:
-                if not channel.permissions_for(me).send_messages:
-                    return await interaction.response.send_message(
-                        "そのチャンネルには送信できません。", ephemeral=True,
-                    )
-            except Exception:
-                pass
-        await update_settings(self.parent_view.guild_id, KEY, channel_id=channel_id)
-        self.parent_view.settings["channel_id"] = channel_id
-        await self.parent_view.refresh(interaction, "自動スレッドのチャンネルを保存しました。")
-
-
 class AutoThreadArchiveSelect(discord.ui.Select):
     def __init__(self, parent: "AutoThreadSettingsView"):
         self.parent_view = parent
@@ -190,7 +162,7 @@ class AutoThreadArchiveSelect(discord.ui.Select):
     async def callback(self, interaction: discord.Interaction):
         if not self.parent_view.can_manage(interaction):
             return await interaction.response.send_message(
-                "この設定には「サーバーの管理」権限が必要です。", ephemeral=True,
+                ASSIST_MANAGE_REQUIRED, ephemeral=True,
             )
         minutes = int(self.values[0])
         await update_settings(self.parent_view.guild_id, KEY, archive_minutes=minutes)
@@ -198,36 +170,17 @@ class AutoThreadArchiveSelect(discord.ui.Select):
         await self.parent_view.refresh(interaction, "自動アーカイブの時間を保存しました。")
 
 
-class AutoThreadToggleButton(discord.ui.Button):
-    def __init__(self):
-        super().__init__(label="自動スレッド", style=discord.ButtonStyle.secondary, row=2)
-
-    async def callback(self, interaction: discord.Interaction):
-        view: AutoThreadSettingsView = self.view
-        if not view.can_manage(interaction):
-            return await interaction.response.send_message(
-                "この設定には「サーバーの管理」権限が必要です。", ephemeral=True,
-            )
-        if not view.settings["enabled"] and view.settings["channel_id"] is None:
-            return await interaction.response.send_message("先にチャンネルを選んでください。", ephemeral=True)
-        value = not view.settings["enabled"]
-        await update_settings(view.guild_id, KEY, enabled=value)
-        view.settings["enabled"] = value
-        await view.refresh(interaction, f"自動スレッドを{'オン' if value else 'オフ'}にしました。")
-
-
 class AutoThreadSettingsView(AssistFeatureView):
     feature_key = KEY
-    feature_title = "自動スレッド"
 
     def __init__(self, cog: Any, guild_id: int):
         self.guild = getattr(cog.bot, "get_guild", lambda _id: None)(guild_id)
         self.settings = settings(guild_id)
         super().__init__(cog, guild_id)
         if self.guild is not None:
-            self.add_item(AutoThreadChannelSelect(self))
+            self.add_item(AssistChannelSelect(self, field="channel_id", placeholder="自動スレッドを作るチャンネル", notice="自動スレッドのチャンネルを保存しました。", check="send"))
             self.add_item(AutoThreadArchiveSelect(self))
-        self.add_item(AutoThreadToggleButton())
+        self.add_item(AssistToggleButton("enabled", "自動スレッド", require=required_field("channel_id", "先にチャンネルを選んでください。")))
 
     def embed(self) -> discord.Embed:
         archive = ARCHIVE_CHOICES.get(self.settings["archive_minutes"], str(self.settings["archive_minutes"]))

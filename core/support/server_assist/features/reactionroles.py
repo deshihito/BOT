@@ -8,9 +8,10 @@ from typing import Any
 
 import discord
 
-from core.support.messages import ROLE_HIERARCHY_ALREADY_SET, ROLE_HIERARCHY_CANNOT_SET
-from core.support.server_assist import Feature, can_assign_roles, get_settings, update_settings, usable_text_channels as _channels
+from core.support.messages import ROLE_HIERARCHY_ALREADY_SET, ROLE_HIERARCHY_CANNOT_SET, ASSIST_MANAGE_REQUIRED
+from core.support.server_assist import Feature, can_assign_roles, get_settings, update_settings
 from core.support.server_assist.ui import AssistFeatureView, channel_label, notice_line
+from core.support.server_assist.ui import AssistChannelSelect, AssistToggleButton, required_field
 
 logger = logging.getLogger(__name__)
 
@@ -58,7 +59,10 @@ def parse_mappings(value: str) -> dict[str, int]:
             raise ValueError("絵文字=ロールID の形式で入力してください。")
         emoji, role_text = token.split(separator, 1)
         emoji = emoji.strip()
-        role_id = int(role_text.strip())
+        try:
+            role_id = int(role_text.strip())
+        except ValueError:
+            raise ValueError("ロールIDは数値で入力してください。") from None
         if not emoji or role_id <= 0:
             raise ValueError("絵文字とロールIDを確認してください。")
         mappings[emoji] = role_id
@@ -159,28 +163,6 @@ async def on_raw_reaction_remove(cog: Any, payload: Any) -> None:
     await _toggle(cog, payload, False)
 
 
-class ReactionRoleChannelSelect(discord.ui.ChannelSelect):
-    def __init__(self, parent: "ReactionRoleSettingsView"):
-        self.parent_view = parent
-        current = parent.settings["channel_id"]
-        super().__init__(placeholder="対象メッセージのチャンネル", channel_types=[discord.ChannelType.text, discord.ChannelType.news],
-                         min_values=0, max_values=1,
-                         default_values=([discord.SelectDefaultValue(id=current, type=discord.SelectDefaultValueType.channel)]
-                                         if current is not None else []), row=0)
-
-    async def callback(self, interaction: discord.Interaction):
-        if not self.parent_view.can_manage(interaction):
-            return await interaction.response.send_message(
-                "この設定には「サーバーの管理」権限が必要です。", ephemeral=True,
-            )
-        if not self.values:
-            return await interaction.response.send_message("送信できるチャンネルがありません。", ephemeral=True)
-        channel_id = self.values[0].id
-        await update_settings(self.parent_view.guild_id, KEY, channel_id=channel_id, message_id=None, mappings={})
-        self.parent_view.settings.update({"channel_id": channel_id, "message_id": None, "mappings": {}})
-        await self.parent_view.refresh(interaction, "対象チャンネルを保存しました。")
-
-
 class ReactionRoleMessageButton(discord.ui.Button):
     def __init__(self):
         super().__init__(label="対象メッセージ", style=discord.ButtonStyle.primary, row=2)
@@ -189,7 +171,7 @@ class ReactionRoleMessageButton(discord.ui.Button):
         view: ReactionRoleSettingsView = self.view
         if not view.can_manage(interaction):
             return await interaction.response.send_message(
-                "この設定には「サーバーの管理」権限が必要です。", ephemeral=True,
+                ASSIST_MANAGE_REQUIRED, ephemeral=True,
             )
         return await interaction.response.send_modal(ReactionRoleMessageModal(view))
 
@@ -202,7 +184,7 @@ class ReactionRoleMappingButton(discord.ui.Button):
         view: ReactionRoleSettingsView = self.view
         if not view.can_manage(interaction):
             return await interaction.response.send_message(
-                "この設定には「サーバーの管理」権限が必要です。", ephemeral=True,
+                ASSIST_MANAGE_REQUIRED, ephemeral=True,
             )
         if view.settings["message_id"] is None:
             return await interaction.response.send_message("先に対象メッセージを設定してください。", ephemeral=True)
@@ -217,7 +199,7 @@ class ReactionRoleRefreshButton(discord.ui.Button):
         view: ReactionRoleSettingsView = self.view
         if not view.can_manage(interaction):
             return await interaction.response.send_message(
-                "この設定には「サーバーの管理」権限が必要です。", ephemeral=True,
+                ASSIST_MANAGE_REQUIRED, ephemeral=True,
             )
         if interaction.guild is None:
             return await interaction.response.send_message("サーバー内で実行してください。", ephemeral=True)
@@ -225,37 +207,6 @@ class ReactionRoleRefreshButton(discord.ui.Button):
         return await interaction.response.send_message(
             f"{added}件のリアクションを追加しました。", ephemeral=True,
         )
-
-
-class ReactionRoleToggleButton(discord.ui.Button):
-    def __init__(self):
-        super().__init__(label="リアクションロール", style=discord.ButtonStyle.secondary, row=2)
-
-    async def callback(self, interaction: discord.Interaction):
-        view: ReactionRoleSettingsView = self.view
-        if not view.can_manage(interaction):
-            return await interaction.response.send_message(
-                "この設定には「サーバーの管理」権限が必要です。", ephemeral=True,
-            )
-        if not view.settings["enabled"] and (
-            view.settings["channel_id"] is None
-            or view.settings["message_id"] is None
-            or not view.settings["mappings"]
-        ):
-            return await interaction.response.send_message(
-                "チャンネル・メッセージ・絵文字マッピングを先に設定してください。", ephemeral=True,
-            )
-        if not view.settings["enabled"] and interaction.guild is not None and not can_assign_roles(
-            interaction, interaction.guild, list(view.settings["mappings"].values()),
-        ):
-            return await interaction.response.send_message(
-                ROLE_HIERARCHY_ALREADY_SET,
-                ephemeral=True,
-            )
-        value = not view.settings["enabled"]
-        await update_settings(view.guild_id, KEY, enabled=value)
-        view.settings["enabled"] = value
-        await view.refresh(interaction, f"リアクションロールを{'オン' if value else 'オフ'}にしました。")
 
 
 class ReactionRoleMessageModal(discord.ui.Modal, title="対象メッセージ"):
@@ -273,7 +224,7 @@ class ReactionRoleMessageModal(discord.ui.Modal, title="対象メッセージ"):
     async def on_submit(self, interaction: discord.Interaction):
         if not self.parent_view.can_manage(interaction):
             return await interaction.response.send_message(
-                "この設定には「サーバーの管理」権限が必要です。", ephemeral=True,
+                ASSIST_MANAGE_REQUIRED, ephemeral=True,
             )
         try:
             message_id = int(str(self.text.value).strip())
@@ -305,7 +256,7 @@ class ReactionRoleMappingModal(discord.ui.Modal, title="絵文字とロール"):
     async def on_submit(self, interaction: discord.Interaction):
         if not self.parent_view.can_manage(interaction):
             return await interaction.response.send_message(
-                "この設定には「サーバーの管理」権限が必要です。", ephemeral=True,
+                ASSIST_MANAGE_REQUIRED, ephemeral=True,
             )
         try:
             mappings = parse_mappings(str(self.text.value or ""))
@@ -325,20 +276,33 @@ class ReactionRoleMappingModal(discord.ui.Modal, title="絵文字とロール"):
         await self.parent_view.refresh(interaction, "絵文字とロールを保存しました。")
 
 
+def _toggle_require(view, interaction, value):
+    if value and (
+        view.settings["channel_id"] is None
+        or view.settings["message_id"] is None
+        or not view.settings["mappings"]
+    ):
+        return "チャンネル・メッセージ・絵文字マッピングを先に設定してください。"
+    if value and interaction.guild is not None and not can_assign_roles(
+        interaction, interaction.guild, list(view.settings["mappings"].values()),
+    ):
+        return ROLE_HIERARCHY_ALREADY_SET
+    return None
+
+
 class ReactionRoleSettingsView(AssistFeatureView):
     feature_key = KEY
-    feature_title = "リアクションロール"
 
     def __init__(self, cog: Any, guild_id: int):
         self.guild = getattr(cog.bot, "get_guild", lambda _id: None)(guild_id)
         self.settings = settings(guild_id)
         super().__init__(cog, guild_id)
         if self.guild is not None:
-            self.add_item(ReactionRoleChannelSelect(self))
+            self.add_item(AssistChannelSelect(self, field="channel_id", placeholder="対象メッセージのチャンネル", notice="対象チャンネルを保存しました。", min_values=0, empty_message="送信できるチャンネルがありません。", extra={"message_id": None, "mappings": {}}))
         self.add_item(ReactionRoleMessageButton())
         self.add_item(ReactionRoleMappingButton())
         self.add_item(ReactionRoleRefreshButton())
-        self.add_item(ReactionRoleToggleButton())
+        self.add_item(AssistToggleButton("enabled", "リアクションロール", require=_toggle_require))
 
     def embed(self) -> discord.Embed:
         mappings = self.settings["mappings"]

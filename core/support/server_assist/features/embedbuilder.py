@@ -10,6 +10,8 @@ import discord
 
 from core.support.server_assist import Feature, get_settings, update_settings, has_manage_permission as _can_manage
 from core.support.server_assist.ui import AssistFeatureView, channel_label, notice_line
+from core.support.server_assist.ui import AssistChannelSelect, AssistToggleButton, required_field
+from core.support.messages import ASSIST_MANAGE_REQUIRED
 
 logger = logging.getLogger(__name__)
 
@@ -264,54 +266,6 @@ async def handle_create(interaction: discord.Interaction) -> None:
     return await interaction.response.send_modal(EmbedCreateModal(interaction.guild_id))
 
 
-class EmbedChannelSelect(discord.ui.ChannelSelect):
-    def __init__(self, parent: "EmbedSettingsView"):
-        self.parent_view = parent
-        super().__init__(
-            placeholder="Embedを投稿するチャンネル",
-            channel_types=[discord.ChannelType.text, discord.ChannelType.news],
-            row=0,
-        )
-
-    async def callback(self, interaction: discord.Interaction):
-        if not self.parent_view.can_manage(interaction):
-            return await interaction.response.send_message(
-                "この設定には「サーバーの管理」権限が必要です。", ephemeral=True,
-            )
-        channel_id = self.values[0].id
-        channel = self.parent_view.guild.get_channel(channel_id)
-        me = getattr(self.parent_view.guild, "me", None)
-        if channel is not None and me is not None:
-            try:
-                if not channel.permissions_for(me).send_messages:
-                    return await interaction.response.send_message(
-                        "そのチャンネルには送信できません。", ephemeral=True,
-                    )
-            except Exception:
-                pass
-        await update_settings(self.parent_view.guild_id, KEY, channel_id=channel_id)
-        self.parent_view.settings["channel_id"] = channel_id
-        await self.parent_view.refresh(interaction, "投稿先のチャンネルを保存しました。")
-
-
-class EmbedToggleButton(discord.ui.Button):
-    def __init__(self):
-        super().__init__(label="埋め込みビルダー", style=discord.ButtonStyle.secondary, row=2)
-
-    async def callback(self, interaction: discord.Interaction):
-        view: EmbedSettingsView = self.view
-        if not view.can_manage(interaction):
-            return await interaction.response.send_message(
-                "この設定には「サーバーの管理」権限が必要です。", ephemeral=True,
-            )
-        if not view.settings["enabled"] and view.settings["channel_id"] is None:
-            return await interaction.response.send_message("先に投稿先を選んでください。", ephemeral=True)
-        value = not view.settings["enabled"]
-        await update_settings(view.guild_id, KEY, enabled=value)
-        view.settings["enabled"] = value
-        await view.refresh(interaction, f"埋め込みビルダーを{'オン' if value else 'オフ'}にしました。")
-
-
 class EmbedCreateButton(discord.ui.Button):
     def __init__(self):
         super().__init__(label="埋め込みを作成", style=discord.ButtonStyle.primary, row=2)
@@ -320,7 +274,7 @@ class EmbedCreateButton(discord.ui.Button):
         view: EmbedSettingsView = self.view
         if not view.can_manage(interaction):
             return await interaction.response.send_message(
-                "この設定には「サーバーの管理」権限が必要です。", ephemeral=True,
+                ASSIST_MANAGE_REQUIRED, ephemeral=True,
             )
         return await handle_create(interaction)
 
@@ -336,7 +290,7 @@ class EmbedTemplateSaveModal(discord.ui.Modal, title="テンプレとして保�
     async def on_submit(self, interaction: discord.Interaction):
         if not self.parent_view.can_manage(interaction):
             return await interaction.response.send_message(
-                "この設定には「サーバーの管理」権限が必要です。", ephemeral=True,
+                ASSIST_MANAGE_REQUIRED, ephemeral=True,
             )
         name = str(self.name_input.value or "").strip()[:30]
         if not name:
@@ -360,7 +314,7 @@ class EmbedTemplateSaveButton(discord.ui.Button):
         view: EmbedSettingsView = self.view
         if not view.can_manage(interaction):
             return await interaction.response.send_message(
-                "この設定には「サーバーの管理」権限が必要です。", ephemeral=True,
+                ASSIST_MANAGE_REQUIRED, ephemeral=True,
             )
         spec = _last_spec.get((view.guild_id, interaction.user.id))
         if spec is None:
@@ -383,7 +337,7 @@ class EmbedTemplateSelect(discord.ui.Select):
     async def callback(self, interaction: discord.Interaction):
         if not self.parent_view.can_manage(interaction):
             return await interaction.response.send_message(
-                "この設定には「サーバーの管理」権限が必要です。", ephemeral=True,
+                ASSIST_MANAGE_REQUIRED, ephemeral=True,
             )
         current = self.parent_view.settings
         if not current["enabled"] or current["channel_id"] is None:
@@ -421,7 +375,7 @@ class EmbedTemplateDeleteButton(discord.ui.Button):
         view: EmbedSettingsView = self.view
         if not view.can_manage(interaction):
             return await interaction.response.send_message(
-                "この設定には「サーバーの管理」権限が必要です。", ephemeral=True,
+                ASSIST_MANAGE_REQUIRED, ephemeral=True,
             )
         templates = dict(view.settings.get("templates") or {})
         if not templates:
@@ -435,17 +389,16 @@ class EmbedTemplateDeleteButton(discord.ui.Button):
 
 class EmbedSettingsView(AssistFeatureView):
     feature_key = KEY
-    feature_title = "埋め込みビルダー"
 
     def __init__(self, cog: Any, guild_id: int):
         self.guild = getattr(cog.bot, "get_guild", lambda _id: None)(guild_id)
         self.settings = settings(guild_id)
         super().__init__(cog, guild_id)
         if self.guild is not None:
-            self.add_item(EmbedChannelSelect(self))
+            self.add_item(AssistChannelSelect(self, field="channel_id", placeholder="Embedを投稿するチャンネル", notice="投稿先のチャンネルを保存しました。", check="send"))
         if self.settings.get("templates"):
             self.add_item(EmbedTemplateSelect(self))
-        self.add_item(EmbedToggleButton())
+        self.add_item(AssistToggleButton("enabled", "埋め込みビルダー", require=required_field("channel_id", "先に投稿先を選んでください。")))
         self.add_item(EmbedCreateButton())
         self.add_item(EmbedTemplateSaveButton())
         self.add_item(EmbedTemplateDeleteButton())
@@ -459,7 +412,7 @@ class EmbedSettingsView(AssistFeatureView):
                 f"\n\n**状態**: {'オン' if self.settings['enabled'] else 'オフ'}"
                 f"\n**投稿先**: {channel_label(self.settings['channel_id'])}"
                 f"\n**テンプレ**: {template_names}"
-                "\n\n「埋め込みを作成」から内容を入力してください。色は #RRGGBB 形式（空欄は白）です。"
+                "\n\n色は #RRGGBB 形式（空欄は白）です。"
                 "追加要素: 「画像: URL」「サムネ: URL」「F: 見出し | 内容 | inline」を1行ずつ書けます。"
                 + notice_line(self.notice)
             )[:4096],

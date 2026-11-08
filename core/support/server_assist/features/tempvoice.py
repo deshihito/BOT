@@ -6,8 +6,10 @@ from typing import Any
 
 import discord
 
-from core.support.server_assist import Feature, get_settings, update_settings
+from core.support.server_assist import register_persistent_views, Feature, get_settings, update_settings
 from core.support.server_assist.ui import AssistFeatureView, channel_label, notice_line
+from core.support.server_assist.ui import AssistChannelSelect, AssistToggleButton, required_field
+from core.support.messages import ASSIST_MANAGE_REQUIRED
 from core.support.storage import KVStore
 
 logger = logging.getLogger(__name__)
@@ -142,12 +144,7 @@ class TempVoiceControlView(discord.ui.View):
 
 
 def register_views(cog: Any) -> None:
-    add_view = getattr(getattr(cog, "bot", None), "add_view", None)
-    if callable(add_view):
-        try:
-            add_view(TempVoiceControlView(cog))
-        except Exception:
-            logger.exception("一時VCの操作パネルを永続登録できませんでした")
+    register_persistent_views(cog, "一時VCの操作パネルを永続登録できませんでした", TempVoiceControlView)
 
 
 def _allowed(interaction: discord.Interaction, entry: dict[str, Any]) -> bool:
@@ -370,48 +367,6 @@ class TempVoiceLimitModal(discord.ui.Modal, title="一時VCの人数制限"):
         return await interaction.response.send_message("人数制限を変更しました。", ephemeral=True)
 
 
-class TempVoiceChannelSelect(discord.ui.ChannelSelect):
-    def __init__(self, parent: "TempVoiceSettingsView"):
-        self.parent_view = parent
-        current = parent.settings["join_channel_id"]
-        super().__init__(placeholder="参加すると作成されるVC", channel_types=[discord.ChannelType.voice],
-                         min_values=0, max_values=1,
-                         default_values=([discord.SelectDefaultValue(id=current, type=discord.SelectDefaultValueType.channel)]
-                                         if current is not None else []), row=0)
-
-    async def callback(self, interaction: discord.Interaction):
-        if not self.parent_view.can_manage(interaction):
-            return await interaction.response.send_message(
-                "この設定には「サーバーの管理」権限が必要です。", ephemeral=True,
-            )
-        if not self.values:
-            return await interaction.response.send_message("作成できるVCがありません。", ephemeral=True)
-        channel_id = self.values[0].id
-        await update_settings(self.parent_view.guild_id, KEY, join_channel_id=channel_id)
-        self.parent_view.settings["join_channel_id"] = channel_id
-        await self.parent_view.refresh(interaction, "作成用VCを保存しました。")
-
-
-class TempVoiceToggleButton(discord.ui.Button):
-    def __init__(self):
-        super().__init__(label="一時VC", style=discord.ButtonStyle.secondary, row=2)
-
-    async def callback(self, interaction: discord.Interaction):
-        view: TempVoiceSettingsView = self.view
-        if not view.can_manage(interaction):
-            return await interaction.response.send_message(
-                "この設定には「サーバーの管理」権限が必要です。", ephemeral=True,
-            )
-        if not view.settings["enabled"] and not view.settings["join_channel_id"]:
-            return await interaction.response.send_message(
-                "先に作成用VCを選んでください。", ephemeral=True,
-            )
-        value = not view.settings["enabled"]
-        await update_settings(view.guild_id, KEY, enabled=value)
-        view.settings["enabled"] = value
-        await view.refresh(interaction, f"一時VCを{'オン' if value else 'オフ'}にしました。")
-
-
 class TempVoiceTemplateButton(discord.ui.Button):
     def __init__(self):
         super().__init__(label="名前テンプレート", style=discord.ButtonStyle.primary, row=2)
@@ -420,7 +375,7 @@ class TempVoiceTemplateButton(discord.ui.Button):
         view: TempVoiceSettingsView = self.view
         if not view.can_manage(interaction):
             return await interaction.response.send_message(
-                "この設定には「サーバーの管理」権限が必要です。", ephemeral=True,
+                ASSIST_MANAGE_REQUIRED, ephemeral=True,
             )
         return await interaction.response.send_modal(TempVoiceTemplateModal(view))
 
@@ -433,7 +388,7 @@ class TempVoiceLimitButton(discord.ui.Button):
         view: TempVoiceSettingsView = self.view
         if not view.can_manage(interaction):
             return await interaction.response.send_message(
-                "この設定には「サーバーの管理」権限が必要です。", ephemeral=True,
+                ASSIST_MANAGE_REQUIRED, ephemeral=True,
             )
         return await interaction.response.send_modal(TempVoiceDefaultLimitModal(view))
 
@@ -454,7 +409,7 @@ class TempVoiceTemplateModal(discord.ui.Modal, title="一時VCの名前テンプ
     async def on_submit(self, interaction: discord.Interaction):
         if not self.parent_view.can_manage(interaction):
             return await interaction.response.send_message(
-                "この設定には「サーバーの管理」権限が必要です。", ephemeral=True,
+                ASSIST_MANAGE_REQUIRED, ephemeral=True,
             )
         value = str(self.text.value or "").strip() or DEFAULT_TEMPLATE
         await update_settings(self.parent_view.guild_id, KEY, name_template=value[:100])
@@ -477,7 +432,7 @@ class TempVoiceDefaultLimitModal(discord.ui.Modal, title="一時VCの既定人�
     async def on_submit(self, interaction: discord.Interaction):
         if not self.parent_view.can_manage(interaction):
             return await interaction.response.send_message(
-                "この設定には「サーバーの管理」権限が必要です。", ephemeral=True,
+                ASSIST_MANAGE_REQUIRED, ephemeral=True,
             )
         try:
             limit = max(0, min(99, int(self.text.value)))
@@ -490,15 +445,14 @@ class TempVoiceDefaultLimitModal(discord.ui.Modal, title="一時VCの既定人�
 
 class TempVoiceSettingsView(AssistFeatureView):
     feature_key = KEY
-    feature_title = "一時VC"
 
     def __init__(self, cog: Any, guild_id: int):
         self.guild = getattr(cog.bot, "get_guild", lambda _id: None)(guild_id)
         self.settings = settings(guild_id)
         super().__init__(cog, guild_id)
         if self.guild is not None:
-            self.add_item(TempVoiceChannelSelect(self))
-        self.add_item(TempVoiceToggleButton())
+            self.add_item(AssistChannelSelect(self, field="join_channel_id", placeholder="参加すると作成されるVC", notice="作成用VCを保存しました。", channel_types=[discord.ChannelType.voice], min_values=0, empty_message="作成できるVCがありません。"))
+        self.add_item(AssistToggleButton("enabled", "一時VC", require=required_field("join_channel_id", "先に作成用VCを選んでください。")))
         self.add_item(TempVoiceTemplateButton())
         self.add_item(TempVoiceLimitButton())
 

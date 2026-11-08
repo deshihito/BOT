@@ -11,8 +11,10 @@ from typing import Any
 
 import discord
 
-from core.support.server_assist import Feature, get_settings, update_settings, has_manage_permission as _can_manage
+from core.support.server_assist import as_int, register_persistent_views, Feature, get_settings, has_manage_permission as _can_manage, update_settings
 from core.support.server_assist.ui import AssistFeatureView, channel_label, notice_line
+from core.support.server_assist.ui import AssistChannelSelect, AssistToggleButton, required_field
+from core.support.messages import ASSIST_MANAGE_REQUIRED
 from core.support.storage import KVStore
 
 logger = logging.getLogger(__name__)
@@ -73,15 +75,11 @@ def _lock(message_id: int) -> asyncio.Lock:
     return _locks.setdefault(str(message_id), asyncio.Lock())
 
 
-def _as_int(value: Any) -> int | None:
-    return value if isinstance(value, int) and not isinstance(value, bool) else None
-
-
 def settings(guild_id: int) -> dict[str, Any]:
     raw = get_settings(guild_id, KEY)
     return {
         "enabled": bool(raw.get("enabled", False)),
-        "channel_id": _as_int(raw.get("channel_id")),
+        "channel_id": as_int(raw.get("channel_id")),
         "sync_scheduled": bool(raw.get("sync_scheduled", False)),
     }
 
@@ -251,14 +249,7 @@ class EventRsvpView(discord.ui.View):
 
 
 def register_views(cog: Any) -> None:
-    add_view = getattr(getattr(cog, "bot", None), "add_view", None)
-    if not callable(add_view):
-        return
-    for view in (EventPanelView(cog), EventRsvpView(cog)):
-        try:
-            add_view(view)
-        except Exception:
-            logger.exception("イベントの永続ビューを登録できませんでした")
+    register_persistent_views(cog, "イベントの永続ビューを登録できませんでした", EventPanelView, EventRsvpView)
 
 
 class EventCreateModal(discord.ui.Modal, title="イベントを作成"):
@@ -443,70 +434,6 @@ async def handle_refresh(cog: Any, interaction: discord.Interaction) -> None:
             return await interaction.followup.send("表示を更新できませんでした。", ephemeral=True)
 
 
-class EventChannelSelect(discord.ui.ChannelSelect):
-    def __init__(self, parent: "EventSettingsView"):
-        self.parent_view = parent
-        super().__init__(
-            placeholder="イベントを投稿するチャンネル",
-            channel_types=[discord.ChannelType.text, discord.ChannelType.news],
-            row=0,
-        )
-
-    async def callback(self, interaction: discord.Interaction):
-        if not self.parent_view.can_manage(interaction):
-            return await interaction.response.send_message(
-                "この設定には「サーバーの管理」権限が必要です。", ephemeral=True,
-            )
-        channel_id = self.values[0].id
-        channel = self.parent_view.guild.get_channel(channel_id)
-        me = getattr(self.parent_view.guild, "me", None)
-        if channel is not None and me is not None:
-            try:
-                if not channel.permissions_for(me).send_messages:
-                    return await interaction.response.send_message(
-                        "そのチャンネルには送信できません。", ephemeral=True,
-                    )
-            except Exception:
-                pass
-        await update_settings(self.parent_view.guild_id, KEY, channel_id=channel_id)
-        self.parent_view.settings["channel_id"] = channel_id
-        await self.parent_view.refresh(interaction, "イベントの投稿先を保存しました。")
-
-
-class EventToggleButton(discord.ui.Button):
-    def __init__(self):
-        super().__init__(label="イベント", style=discord.ButtonStyle.secondary, row=2)
-
-    async def callback(self, interaction: discord.Interaction):
-        view: EventSettingsView = self.view
-        if not view.can_manage(interaction):
-            return await interaction.response.send_message(
-                "この設定には「サーバーの管理」権限が必要です。", ephemeral=True,
-            )
-        if not view.settings["enabled"] and view.settings["channel_id"] is None:
-            return await interaction.response.send_message("先に投稿先を選んでください。", ephemeral=True)
-        value = not view.settings["enabled"]
-        await update_settings(view.guild_id, KEY, enabled=value)
-        view.settings["enabled"] = value
-        await view.refresh(interaction, f"イベントを{'オン' if value else 'オフ'}にしました。")
-
-
-class EventSyncToggleButton(discord.ui.Button):
-    def __init__(self):
-        super().__init__(label="公式イベント連携", style=discord.ButtonStyle.secondary, row=2)
-
-    async def callback(self, interaction: discord.Interaction):
-        view: EventSettingsView = self.view
-        if not view.can_manage(interaction):
-            return await interaction.response.send_message(
-                "この設定には「サーバーの管理」権限が必要です。", ephemeral=True,
-            )
-        value = not view.settings.get("sync_scheduled", False)
-        await update_settings(view.guild_id, KEY, sync_scheduled=value)
-        view.settings["sync_scheduled"] = value
-        await view.refresh(interaction, f"公式イベント連携を{'オン' if value else 'オフ'}にしました。")
-
-
 class EventPanelButton(discord.ui.Button):
     def __init__(self):
         super().__init__(label="パネルを送信", style=discord.ButtonStyle.primary, row=2)
@@ -515,7 +442,7 @@ class EventPanelButton(discord.ui.Button):
         view: EventSettingsView = self.view
         if not view.can_manage(interaction):
             return await interaction.response.send_message(
-                "この設定には「サーバーの管理」権限が必要です。", ephemeral=True,
+                ASSIST_MANAGE_REQUIRED, ephemeral=True,
             )
         channel_id = view.settings["channel_id"]
         channel = interaction.guild.get_channel(channel_id) if interaction.guild and channel_id else None
@@ -531,16 +458,15 @@ class EventPanelButton(discord.ui.Button):
 
 class EventSettingsView(AssistFeatureView):
     feature_key = KEY
-    feature_title = "イベント"
 
     def __init__(self, cog: Any, guild_id: int):
         self.guild = getattr(cog.bot, "get_guild", lambda _id: None)(guild_id)
         self.settings = settings(guild_id)
         super().__init__(cog, guild_id)
         if self.guild is not None:
-            self.add_item(EventChannelSelect(self))
-        self.add_item(EventToggleButton())
-        self.add_item(EventSyncToggleButton())
+            self.add_item(AssistChannelSelect(self, field="channel_id", placeholder="イベントを投稿するチャンネル", notice="イベントの投稿先を保存しました。", check="send"))
+        self.add_item(AssistToggleButton("enabled", "イベント", require=required_field("channel_id", "先に投稿先を選んでください。")))
+        self.add_item(AssistToggleButton("sync_scheduled", "公式イベント連携"))
         self.add_item(EventPanelButton())
 
     def embed(self) -> discord.Embed:
@@ -551,8 +477,7 @@ class EventSettingsView(AssistFeatureView):
                 f"\n\n**状態**: {'オン' if self.settings['enabled'] else 'オフ'}"
                 f"\n**投稿先**: {channel_label(self.settings['channel_id'])}"
                 f"\n**公式イベント連携**: {'オン' if self.settings.get('sync_scheduled') else 'オフ'}"
-                "\n\n「パネルを送信」でイベント作成ボタン付きのパネルを投稿します。"
-                "連携オンでは、日時が読めるイベントをDiscordの予定イベントにも作成し、終了時に削除します。"
+                "\n\n連携オンでは、日時が読めるイベントをDiscordの予定イベントにも作成し、終了時に削除します。"
                 "終了は作成者か「サーバーの管理」権限を持つ人が操作できます。"
                 + notice_line(self.notice)
             )[:4096],

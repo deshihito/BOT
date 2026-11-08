@@ -60,6 +60,22 @@ def has_manage_permission(interaction: Any) -> bool:
     )
 
 
+def as_int(value: Any) -> int | None:
+    return value if isinstance(value, int) and not isinstance(value, bool) else None
+
+
+def register_persistent_views(cog: Any, failure_log: str, *view_factories: Any) -> None:
+    """永続 View の登録（bot.add_view の取得・失敗時ログまでを共通化）。"""
+    add_view = getattr(getattr(cog, "bot", None), "add_view", None)
+    if not callable(add_view):
+        return
+    for factory in view_factories:
+        try:
+            add_view(factory(cog))
+        except Exception:
+            logger.exception(failure_log)
+
+
 def usable_text_channels(guild: Any) -> list[Any]:
     """Bot が送信できるテキストチャンネルの一覧（セレクトの上限に合わせて25件まで）。"""
     me = getattr(guild, "me", None)

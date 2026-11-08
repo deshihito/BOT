@@ -11,6 +11,8 @@ import discord
 from core.support.panel_v2 import as_panel_v2, edit_panel_v2
 from core.support.server_assist import Feature, get_settings, update_settings
 from core.support.server_assist.ui import AssistFeatureView, channel_label, notice_line
+from core.support.server_assist.ui import AssistChannelSelect, AssistToggleButton, channel_permission_check, required_field
+from core.support.messages import ASSIST_MANAGE_REQUIRED
 
 logger = logging.getLogger(__name__)
 
@@ -102,56 +104,6 @@ async def post_via_webhook(channel: Any, bot_user_id: int | None, *, content: st
         )
 
 
-class WebhookChannelSelect(discord.ui.ChannelSelect):
-    def __init__(self, parent: "WebhookSettingsView"):
-        self.parent_view = parent
-        current = parent.settings["channel_id"]
-        super().__init__(
-            placeholder="Webhook投稿先",
-            channel_types=[discord.ChannelType.text, discord.ChannelType.news],
-            min_values=0,
-            max_values=1,
-            default_values=(
-                [discord.SelectDefaultValue(id=current, type=discord.SelectDefaultValueType.channel)]
-                if current is not None else []
-            ),
-            row=0,
-        )
-
-    async def callback(self, interaction: discord.Interaction):
-        if not self.parent_view.can_manage(interaction):
-            return await interaction.response.send_message(
-                "この設定には「サーバーの管理」権限が必要です。", ephemeral=True,
-            )
-        channel = self.values[0] if self.values else None
-        if channel is None:
-            return await interaction.response.send_message("送信できるチャンネルがありません。", ephemeral=True)
-        me = getattr(self.parent_view.guild, "me", None)
-        if me is not None and not getattr(channel.permissions_for(me), "manage_webhooks", False):
-            return await interaction.response.send_message(
-                "そのチャンネルではBotに「ウェブフックの管理」権限がありません。", ephemeral=True,
-            )
-        await update_settings(self.parent_view.guild_id, KEY, channel_id=channel.id)
-        await self.parent_view.reopen(interaction, "Webhook投稿先を保存しました。")
-
-
-class WebhookToggleButton(discord.ui.Button):
-    def __init__(self):
-        super().__init__(label="Webhookビルダー", style=discord.ButtonStyle.secondary, row=1)
-
-    async def callback(self, interaction: discord.Interaction):
-        view: WebhookSettingsView = self.view
-        if not view.can_manage(interaction):
-            return await interaction.response.send_message(
-                "この設定には「サーバーの管理」権限が必要です。", ephemeral=True,
-            )
-        if not view.settings["enabled"] and not view.settings["channel_id"]:
-            return await interaction.response.send_message("先に投稿先を選んでください。", ephemeral=True)
-        value = not view.settings["enabled"]
-        await update_settings(view.guild_id, KEY, enabled=value)
-        await view.reopen(interaction, f"Webhookビルダーを{'オン' if value else 'オフ'}にしました。")
-
-
 class WebhookPostButton(discord.ui.Button):
     def __init__(self):
         super().__init__(label="Webhookで投稿", style=discord.ButtonStyle.success, row=1)
@@ -160,7 +112,7 @@ class WebhookPostButton(discord.ui.Button):
         view: WebhookSettingsView = self.view
         if not view.can_manage(interaction):
             return await interaction.response.send_message(
-                "この設定には「サーバーの管理」権限が必要です。", ephemeral=True,
+                ASSIST_MANAGE_REQUIRED, ephemeral=True,
             )
         if not view.settings["enabled"] or view.settings["channel_id"] is None:
             return await interaction.response.send_message("Webhookビルダーは現在オフです。", ephemeral=True)
@@ -196,7 +148,7 @@ class WebhookPostModal(discord.ui.Modal):
     async def on_submit(self, interaction: discord.Interaction):
         if not self.parent_view.can_manage(interaction):
             return await interaction.response.send_message(
-                "この設定には「サーバーの管理」権限が必要です。", ephemeral=True,
+                ASSIST_MANAGE_REQUIRED, ephemeral=True,
             )
         current = settings(self.parent_view.guild_id)
         if not current["enabled"] or current["channel_id"] is None:
@@ -232,15 +184,14 @@ class WebhookPostModal(discord.ui.Modal):
 
 class WebhookSettingsView(AssistFeatureView):
     feature_key = KEY
-    feature_title = "Webhookビルダー"
 
     def __init__(self, cog: Any, guild_id: int):
         self.guild = getattr(cog.bot, "get_guild", lambda _id: None)(guild_id)
         self.settings = settings(guild_id)
         super().__init__(cog, guild_id)
         if self.guild is not None:
-            self.add_item(WebhookChannelSelect(self))
-        self.add_item(WebhookToggleButton())
+            self.add_item(AssistChannelSelect(self, field="channel_id", placeholder="Webhook投稿先", notice="Webhook投稿先を保存しました。", min_values=0, empty_message="送信できるチャンネルがありません。", check=channel_permission_check("manage_webhooks", "そのチャンネルではBotに「ウェブフックの管理」権限がありません。"), reopen=True))
+        self.add_item(AssistToggleButton("enabled", "Webhookビルダー", row=1, reopen=True, require=required_field("channel_id", "先に投稿先を選んでください。")))
         self.add_item(WebhookPostButton())
 
     async def reopen(self, interaction: discord.Interaction, notice: str | None = None):
@@ -255,8 +206,7 @@ class WebhookSettingsView(AssistFeatureView):
                 "Webhookを使って、名前とアイコンを変えたメッセージを投稿します。"
                 f"\n\n**状態**: {'オン' if self.settings['enabled'] else 'オフ'}"
                 f"\n**投稿先**: {channel_label(self.settings['channel_id'])}"
-                "\n\n「Webhookで投稿」から表示名・アイコン・本文を入力してください。"
-                "投稿にはBotの「ウェブフックの管理」権限が必要です。メンションは無効化されます。"
+                "\n\n投稿にはBotの「ウェブフックの管理」権限が必要です。メンションは無効化されます。"
                 + notice_line(self.notice)
             )[:4096],
             color=0xFFFFFF,

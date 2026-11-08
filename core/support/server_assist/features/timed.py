@@ -13,8 +13,10 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 import discord
 
 from core.support.panel_v2 import as_panel_v2, edit_panel_v2
-from core.support.server_assist import Feature, get_settings, update_settings, usable_text_channels as _channels
+from core.support.server_assist import Feature, get_settings, update_settings
 from core.support.server_assist.ui import AssistFeatureView, channel_label, notice_line
+from core.support.server_assist.ui import AssistChannelSelect, AssistToggleButton, channel_permission_check, required_field
+from core.support.messages import ASSIST_MANAGE_REQUIRED
 
 logger = logging.getLogger(__name__)
 
@@ -263,38 +265,6 @@ def start_tasks(cog: Any) -> None:
     getattr(cog, "_feature_tasks", []).append(task)
 
 
-class TimedChannelSelect(discord.ui.ChannelSelect):
-    def __init__(self, parent: "TimedSettingsView"):
-        self.parent_view = parent
-        current = parent.settings["channel_id"]
-        super().__init__(
-            placeholder="タイマー告知の送信先",
-            channel_types=[discord.ChannelType.text, discord.ChannelType.news],
-            min_values=0,
-            max_values=1,
-            default_values=(
-                [discord.SelectDefaultValue(id=current, type=discord.SelectDefaultValueType.channel)]
-                if current is not None else []
-            ),
-            row=0,
-        )
-
-    async def callback(self, interaction: discord.Interaction):
-        if not self.parent_view.can_manage(interaction):
-            return await interaction.response.send_message(
-                "この設定には「サーバーの管理」権限が必要です。", ephemeral=True,
-            )
-        channel = self.values[0] if self.values else None
-        if channel is None:
-            return await interaction.response.send_message("送信できるチャンネルがありません。", ephemeral=True)
-        me = getattr(self.parent_view.guild, "me", None)
-        if me is not None and not getattr(channel.permissions_for(me), "send_messages", False):
-            return await interaction.response.send_message("そのチャンネルにはBotが送信できません。", ephemeral=True)
-        channel_id = channel.id
-        await update_settings(self.parent_view.guild_id, KEY, channel_id=channel_id)
-        await self.parent_view.reopen(interaction, "タイマー告知の送信先を保存しました。")
-
-
 class TimedScheduleSelect(discord.ui.Select):
     def __init__(self, parent: "TimedSettingsView"):
         self.parent_view = parent
@@ -326,7 +296,7 @@ class TimedAddButton(discord.ui.Button):
         view: TimedSettingsView = self.view
         if not view.can_manage(interaction):
             return await interaction.response.send_message(
-                "この設定には「サーバーの管理」権限が必要です。", ephemeral=True,
+                ASSIST_MANAGE_REQUIRED, ephemeral=True,
             )
         if len(view.settings["schedules"]) >= MAX_SCHEDULES:
             return await interaction.response.send_message(
@@ -343,7 +313,7 @@ class TimedEditButton(discord.ui.Button):
         view: TimedSettingsView = self.view
         if not view.can_manage(interaction):
             return await interaction.response.send_message(
-                "この設定には「サーバーの管理」権限が必要です。", ephemeral=True,
+                ASSIST_MANAGE_REQUIRED, ephemeral=True,
             )
         schedule = view.selected_schedule()
         if schedule is None:
@@ -359,7 +329,7 @@ class TimedDeleteButton(discord.ui.Button):
         view: TimedSettingsView = self.view
         if not view.can_manage(interaction):
             return await interaction.response.send_message(
-                "この設定には「サーバーの管理」権限が必要です。", ephemeral=True,
+                ASSIST_MANAGE_REQUIRED, ephemeral=True,
             )
         if view.selected_id is None:
             return await interaction.response.send_message("先に告知を選んでください。", ephemeral=True)
@@ -370,23 +340,6 @@ class TimedDeleteButton(discord.ui.Button):
         await _save(view.guild_id, schedules)
         view.selected_id = None
         await view.reopen(interaction, "告知を削除しました。")
-
-
-class TimedToggleButton(discord.ui.Button):
-    def __init__(self):
-        super().__init__(label="タイマー告知", style=discord.ButtonStyle.secondary, row=2)
-
-    async def callback(self, interaction: discord.Interaction):
-        view: TimedSettingsView = self.view
-        if not view.can_manage(interaction):
-            return await interaction.response.send_message(
-                "この設定には「サーバーの管理」権限が必要です。", ephemeral=True,
-            )
-        if not view.settings["enabled"] and not view.settings["channel_id"]:
-            return await interaction.response.send_message("先に送信先を選んでください。", ephemeral=True)
-        value = not view.settings["enabled"]
-        await update_settings(view.guild_id, KEY, enabled=value)
-        await view.reopen(interaction, f"タイマー告知を{'オン' if value else 'オフ'}にしました。")
 
 
 class TimedModal(discord.ui.Modal):
@@ -414,7 +367,7 @@ class TimedModal(discord.ui.Modal):
     async def on_submit(self, interaction: discord.Interaction):
         if not self.parent_view.can_manage(interaction):
             return await interaction.response.send_message(
-                "この設定には「サーバーの管理」権限が必要です。", ephemeral=True,
+                ASSIST_MANAGE_REQUIRED, ephemeral=True,
             )
         time_text = str(self.time_input.value or "").strip()
         if parse_time(time_text) is None:
@@ -575,7 +528,6 @@ class ReminderDeleteButton(discord.ui.Button):
 
 class TimedSettingsView(AssistFeatureView):
     feature_key = KEY
-    feature_title = "タイマー告知"
 
     def __init__(self, cog: Any, guild_id: int):
         self.guild = getattr(cog.bot, "get_guild", lambda _id: None)(guild_id)
@@ -583,12 +535,12 @@ class TimedSettingsView(AssistFeatureView):
         self.selected_id: str | None = None
         super().__init__(cog, guild_id)
         if self.guild is not None:
-            self.add_item(TimedChannelSelect(self))
+            self.add_item(AssistChannelSelect(self, field="channel_id", placeholder="タイマー告知の送信先", notice="タイマー告知の送信先を保存しました。", min_values=0, empty_message="送信できるチャンネルがありません。", check=channel_permission_check("send_messages", "そのチャンネルにはBotが送信できません。"), reopen=True))
         self.add_item(TimedScheduleSelect(self))
         self.add_item(TimedAddButton())
         self.add_item(TimedEditButton())
         self.add_item(TimedDeleteButton())
-        self.add_item(TimedToggleButton())
+        self.add_item(AssistToggleButton("enabled", "タイマー告知", reopen=True, require=required_field("channel_id", "先に送信先を選んでください。")))
         self.add_item(ReminderAddButton())
         self.add_item(ReminderDeleteButton())
 
