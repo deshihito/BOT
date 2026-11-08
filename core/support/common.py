@@ -383,6 +383,15 @@ def assignable_role_error(guild: discord.Guild, role: discord.Role | None, actio
     return None
 
 
+def can_manage_guild(interaction: discord.Interaction) -> bool:
+    """設定パネルの操作権限（サーバー管理 or 管理者）の正。"""
+    permissions = getattr(interaction.user, "guild_permissions", None)
+    return bool(
+        getattr(permissions, "manage_guild", False)
+        or getattr(permissions, "administrator", False)
+    )
+
+
 def can_manage_support_panel(interaction: discord.Interaction) -> bool:
     """認証パネル・ロールパネルの設定を操作できるか。既定: 管理者権限のみ。"""
     permissions = getattr(interaction.user, "guild_permissions", None)

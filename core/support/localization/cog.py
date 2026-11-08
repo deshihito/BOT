@@ -5,6 +5,7 @@ import discord
 from discord.ext import commands
 from core.support.localization import localization
 from core.support.guild_settings import get_store  # noqa: F401  (re-exported via the entry; internal calls go through _get_store)
+from core.support.panel_v2 import as_panel_v2, edit_panel_v2, wrap_panel_view
 
 logger = logging.getLogger(__name__)
 
@@ -73,20 +74,35 @@ class LanguageSelect(discord.ui.Select):
     async def callback(self, interaction: discord.Interaction):
         locale = localization.normalize_locale(self.values[0])
         await self.cog.set_locale(interaction.guild_id, locale)
-        await interaction.response.edit_message(
-            embed=self.cog.language_embed(locale, note=localization.text("language_saved", locale,
-                                                                         language=localization.LOCALE_LABELS[locale])),
-            view=LanguageView(self.cog, locale),
-        )
+        note = localization.text("language_saved", locale,
+                                 language=localization.LOCALE_LABELS[locale])
+        await edit_panel_v2(interaction, as_panel_v2(LanguageView(self.cog, locale, note)))
 
 class LanguageView(discord.ui.View):
-    def __init__(self, cog: "LocalizationCog", current: str):
-        super().__init__(timeout=600)
+    def __init__(self, cog: "LocalizationCog", current: str, note: str | None = None):
+        super().__init__(timeout=300)
+        self.cog = cog
+        self.current = current
+        self.note = note
         self.add_item(LanguageSelect(cog, current))
+
+    def embed(self) -> discord.Embed:
+        return self.cog.language_embed(self.current, note=self.note)
 
 class LocalizationCog(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
+
+    async def get_guild_language(self, guild_id: int) -> str | None:
+        """明示設定されたギルド言語コード。未設定なら None（呼び出し側が代替手段を持つ場合用）。"""
+        store = _get_store()()
+        await store.ensure_loaded()
+        raw = store.get(guild_id, localization.LANGUAGE_SECTION)
+        if isinstance(raw, dict):
+            value = raw.get("locale")
+            if isinstance(value, str) and value.strip():
+                return localization.normalize_locale(value)
+        return None
 
     async def set_locale(self, guild_id: int, locale: str) -> str:
         locale = localization.normalize_locale(locale)
@@ -105,8 +121,8 @@ class LocalizationCog(commands.Cog):
         store = _get_store()()
         await store.ensure_loaded()
         current = localization.guild_locale(interaction.guild_id, store)
-        await interaction.response.send_message(embed=self.language_embed(current),
-                                                view=LanguageView(self, current), ephemeral=True)
+        await interaction.response.send_message(view=wrap_panel_view(LanguageView(self, current)),
+                                                ephemeral=True)
 
     @commands.Cog.listener()
     async def on_raw_reaction_add(self, payload: discord.RawReactionActionEvent):

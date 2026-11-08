@@ -299,7 +299,7 @@ class AuthPanelStartView(discord.ui.LayoutView):
         self.add_item(
             discord.ui.Container(
                 discord.ui.TextDisplay(
-                    "## 認証パネル\n下のボタンを押して認証を開始してください。"
+                    "## 認証パネル"
                 ),
                 discord.ui.ActionRow(AuthStartButton()),
                 accent_colour=0x2ECC71,
@@ -686,8 +686,6 @@ class AuthPanelSettingsView(discord.ui.View):
             )
 
         lines.append("")
-        lines.append("※ この設定は管理者のみ変更できます。")
-        lines.append("※ 認証パネルはコンポーネントV2で送信されます。")
 
         return discord.Embed(
             title="認証パネル作成",

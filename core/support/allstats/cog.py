@@ -12,10 +12,7 @@ FIELD_VALUE_LIMIT = 1024  # Discord の Embed フィールド値の上限
 # 管理者向けコマンド群 (!logs / !check_api / !terminal 等) と同じ許可リスト。
 # all_stats は Pi のスペック・バージョン・ファイル構成・経済プール残高まで
 # 出すため、hidden (ヘルプ非表示) だけでは足りず実行自体をゲートする (B-1)。
-ALLOWED_USER_IDS = {
-    1320705325686587408,
-    1000302102473613373,
-}
+from core.support.terminal.cog import ALLOWED_USER_IDS  # noqa: F401  正は terminal 側
 
 
 async def is_all_stats_allowed(ctx: commands.Context) -> bool:

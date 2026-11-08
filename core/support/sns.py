@@ -998,7 +998,7 @@ class SnsNotifyPanel(discord.ui.LayoutView):
     def _subs_text(self) -> str:
         subs = self.visible_subs()
         if not subs:
-            return "登録なし。下のボタンからアカウントを追加してください。"
+            return "登録なし。"
         lines = []
         for i, sub in enumerate(subs, 1):
             meta = SNS_PLATFORMS[sub["platform"]]

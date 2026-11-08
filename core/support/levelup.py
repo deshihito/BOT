@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from .common import *
-from core.support.messages import SETTINGS_UPDATE_FAILED
+from core.support.messages import MANAGE_GUILD_REQUIRED, SETTINGS_UPDATE_FAILED
 
 
 class LevelUpChannelSelect(discord.ui.ChannelSelect):
@@ -74,8 +74,7 @@ class LevelUpPreviewButton(discord.ui.Button):
         png = await cog.render_levelup_image(interaction.user, 4, 5)
         if png is None:
             return await interaction.followup.send(
-                "画像を生成できませんでした。Pillow が入っているか確認してください（`pip install pillow`）。"
-                "未導入の間は、レベルアップ通知は画像なしのテキストで送られます。",
+                "画像を生成できませんでした。レベルアップ通知は画像なしのテキストで送られます。",
                 ephemeral=True,
             )
         import io
@@ -122,7 +121,7 @@ class LevelUpNotifyPanel(discord.ui.LayoutView):
         if getattr(permissions, "administrator", False) or getattr(permissions, "manage_guild", False):
             return True
         await interaction.response.send_message(
-            "この設定にはサーバー管理権限が必要です。",
+            MANAGE_GUILD_REQUIRED,
             ephemeral=True,
         )
         return False

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from .common import *
-from core.support.messages import SETTINGS_UPDATE_FAILED
+from core.support.messages import MANAGE_GUILD_REQUIRED, SETTINGS_UPDATE_FAILED
 from core.vc.auto_start import (
     AUTO_START_FEATURES,
     VC_AUTO_START_SECTION,
@@ -74,7 +74,7 @@ class VcAutoStartPanel(discord.ui.LayoutView):
         if getattr(permissions, "administrator", False) or getattr(permissions, "manage_guild", False):
             return True
         await interaction.response.send_message(
-            "この設定にはサーバー管理権限が必要です。",
+            MANAGE_GUILD_REQUIRED,
             ephemeral=True,
         )
         return False

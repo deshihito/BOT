@@ -16,6 +16,8 @@ import discord
 
 from core.support.embeds import we
 from core.support.emojis import FAILED, SUCCESS
+from core.support.common import can_manage_guild
+from core.support.messages import MANAGE_GUILD_REQUIRED
 from core.support.panel_v2 import as_panel_v2, edit_panel_v2
 from core.support.globalchat import globalchat_moderation as mod
 from core.support.server_setup.cog import channel_list_text
@@ -94,7 +96,7 @@ class GlobalChatModerationModal(discord.ui.Modal, title="グローバルチャ�
     async def on_submit(self, interaction: discord.Interaction):
         if not self.parent_view.can_manage(interaction):
             return await interaction.response.send_message(
-                "この設定にはサーバー管理権限が必要です。", ephemeral=True)
+                MANAGE_GUILD_REQUIRED, ephemeral=True)
         words = mod.parse_words(self.ng_words.value)
         users = mod.parse_ids(self.blocked_users.value)
         guilds = [g for g in mod.parse_ids(self.blocked_guilds.value)
@@ -120,11 +122,7 @@ class GlobalChatSettingsView(discord.ui.View):
 
     @staticmethod
     def can_manage(interaction: discord.Interaction) -> bool:
-        permissions = getattr(interaction.user, "guild_permissions", None)
-        return bool(
-            getattr(permissions, "manage_guild", False)
-            or getattr(permissions, "administrator", False)
-        )
+        return can_manage_guild(interaction)
 
     def _gc(self):
         return globalchat_cog(self.cog.bot)
@@ -190,7 +188,7 @@ class GlobalChatSettingsView(discord.ui.View):
     async def on_toggle(self, interaction: discord.Interaction):
         if not self.can_manage(interaction):
             return await interaction.response.send_message(
-                "この設定にはサーバー管理権限が必要です。", ephemeral=True)
+                MANAGE_GUILD_REQUIRED, ephemeral=True)
         gc = self._gc()
         if gc is None:
             return await interaction.response.send_message(
@@ -204,7 +202,7 @@ class GlobalChatSettingsView(discord.ui.View):
     async def on_moderation(self, interaction: discord.Interaction):
         if not self.can_manage(interaction):
             return await interaction.response.send_message(
-                "この設定にはサーバー管理権限が必要です。", ephemeral=True)
+                MANAGE_GUILD_REQUIRED, ephemeral=True)
         await interaction.response.send_modal(GlobalChatModerationModal(self))
 
 
@@ -233,7 +231,7 @@ class GlobalChatSupportMixin:
         view = GlobalChatSettingsView(self, interaction.guild, interaction.channel)
         if not view.can_manage(interaction):
             return await interaction.response.send_message(
-                "この設定にはサーバー管理権限が必要です。", ephemeral=True)
+                MANAGE_GUILD_REQUIRED, ephemeral=True)
         if getattr(interaction, "message", None) is not None and not interaction.response.is_done():
             return await interaction.response.send_modal(GlobalChatModerationModal(view))
         view.notice = "荒らし対策は下の「荒らし対策（NG ワード・ブロック）」ボタンから開きます。"

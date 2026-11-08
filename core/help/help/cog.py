@@ -16,7 +16,7 @@ from core.help.help.command_catalog import (build_catalog, command_key, find_com
                                   visible_commands)
 from core.help.help.command_meta import COMMAND_META
 from core.support.emojis import BACK, BOOK, LEFT, RIGHT
-from core.support.panel_v2 import as_panel_v2, edit_panel_v2
+from core.support.panel_v2 import as_panel_v2, edit_panel_v2, wrap_panel_view
 
 # Discord の上限
 EMBED_TITLE = 256
@@ -76,7 +76,7 @@ ACTION_CATEGORY_MAP: dict[str, list[tuple[str, str | None]]] = {
             ("general", "make_image"), ("general", "exp"),
             ("general", "garden")],
     "admin": [("support", "moderation"), ("support", "roles"), ("support", "logs"),
-              ("support", "assist"), ("support", "rta"),
+              ("support", "rta"),
               ("support", "boardnotify"), ("support", "sns")],
 }
 
@@ -109,11 +109,14 @@ def panel_action_lines(category_id: str) -> list[str]:
 
 
 # ---------------------------------------------------------------- 埋め込み
+HIDDEN_FEATURE_LINE = "隠し機能: チャンネルで「今北産業」と送ると、直近の会話を最大3行で要約します。"
+
+
 def overview_embed(catalog: dict) -> discord.Embed:
     embed = discord.Embed(
         title="コマンド一覧",
         description=(
-            '`/help command:` にコマンド名を入れると詳しい説明が表示されます。\nパネル機能は `/quick` で名前から検索して直接実行できます。\n' + BOOK + ' はガイド（くわしい説明）があるコマンドです\n\n隠し機能: 会話を追うときは、チャンネルで「今北産業」と送ると直近の会話を最大3行で要約します。'
+            '`/help command:` にコマンド名を入れると詳しい説明が表示されます。\nパネル機能は `/quick` で名前から検索して直接実行できます。\n' + BOOK + ' はガイド（くわしい説明）があるコマンドです\n\n' + HIDDEN_FEATURE_LINE
         ),
         color=COLOR,
     )
@@ -132,7 +135,7 @@ def category_pages(catalog: dict, category_id: str) -> list[discord.Embed]:
         return [discord.Embed(title="カテゴリが見つかりません", color=COLOR)]
     header = clip(category["description"], 500)
     if category["guide"]:
-        header += "\n下のメニューの「このカテゴリの説明」でくわしい案内を読めます。"
+        header += "\n「このカテゴリの説明」でくわしい案内を読めます。"
     lines = [entry_line(e) for e in visible_commands(catalog, category_id)]
     action_lines = panel_action_lines(category_id)
     if action_lines:
@@ -343,9 +346,7 @@ class HelpView(discord.ui.View):
         view = HelpView(self.catalog, category_id, page, self.shortcut_mode, self.shortcut_item,
                         owner_id=self.owner_id)
         self.stop()
-        if v2:
-            return await edit_panel_v2(interaction, as_panel_v2(view))
-        await interaction.response.edit_message(embed=view.embed(), view=view)
+        return await edit_panel_v2(interaction, as_panel_v2(view))
 
     @discord.ui.button(label="前へ", emoji=LEFT, style=discord.ButtonStyle.secondary, row=2, custom_id="panel:help:prev")
     async def previous_page(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -444,7 +445,7 @@ class CatalogHelpCommand(commands.HelpCommand):
         embed.description = (
             "カテゴリごとの一覧と使い方は `/help` で見られます。\n"
             f"個別の使い方は `{self.context.clean_prefix}help コマンド名` で確認できます。\n"
-            "隠し機能: チャンネルで「今北産業」と送ると、直近の会話を最大3行で要約します。"
+            + HIDDEN_FEATURE_LINE
         )
         await self.get_destination().send(embed=embed)
 
@@ -504,8 +505,8 @@ class HelpCog(commands.Cog):
                     f"「{clip(command, 50)}」というコマンドは見つかりませんでした。`/help` で一覧を確認してください。",
                     ephemeral=True)
                 return
-            await interaction.response.send_message(embed=command_embed(entry, catalog),
-                                                    view=CommandView(catalog, entry, owner_id=interaction.user.id))
+            await interaction.response.send_message(
+                view=wrap_panel_view(CommandView(catalog, entry, owner_id=interaction.user.id)))
             return
         view = HelpView(catalog, owner_id=interaction.user.id)
         await interaction.response.send_message(view=as_panel_v2(view))

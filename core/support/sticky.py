@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from .common import *
-from core.support.messages import SETTINGS_UPDATE_FAILED
+from core.support.messages import MANAGE_GUILD_REQUIRED, SETTINGS_UPDATE_FAILED
 
 
 class StickyChannelSelect(discord.ui.ChannelSelect):
@@ -19,7 +19,7 @@ class StickyChannelSelect(discord.ui.ChannelSelect):
     async def callback(self, interaction: discord.Interaction):
         if not self.parent_view.can_manage(interaction):
             return await interaction.response.send_message(
-                "この設定にはサーバー管理権限が必要です。",
+                MANAGE_GUILD_REQUIRED,
                 ephemeral=True,
             )
 
@@ -65,7 +65,7 @@ class StickyChannelSelect(discord.ui.ChannelSelect):
         except Exception:
             logger.exception("Stickyパネル設置先の更新に失敗しました")
             await interaction.followup.send(
-                "Stickyパネル設置先の更新に失敗しました。時間をおいて再度お試しください。解決しない場合はBotの運営に連絡してください。",
+                SETTINGS_UPDATE_FAILED,
                 ephemeral=True,
             )
 
@@ -88,7 +88,7 @@ class StickyTextModal(discord.ui.Modal, title="Stickyパネルの文言"):
     async def on_submit(self, interaction: discord.Interaction):
         if not self.parent_view.can_manage(interaction):
             return await interaction.response.send_message(
-                "この設定にはサーバー管理権限が必要です。",
+                MANAGE_GUILD_REQUIRED,
                 ephemeral=True,
             )
 
@@ -119,7 +119,7 @@ class StickyTextModal(discord.ui.Modal, title="Stickyパネルの文言"):
             logger.exception("Stickyパネル文言の保存・送信に失敗しました")
             try:
                 await interaction.edit_original_response(
-                    content="文言の保存またはパネル送信に失敗しました。時間をおいて再度お試しください。解決しない場合はBotの運営に連絡してください。"
+                    content=SETTINGS_UPDATE_FAILED
                 )
             except discord.HTTPException:
                 logger.exception("Sticky文言保存エラーの通知に失敗しました")
@@ -134,11 +134,7 @@ class StickySettingsView(discord.ui.View):
 
     @staticmethod
     def can_manage(interaction: discord.Interaction) -> bool:
-        permissions = getattr(interaction.user, "guild_permissions", None)
-        return bool(
-            getattr(permissions, "manage_guild", False)
-            or getattr(permissions, "administrator", False)
-        )
+        return can_manage_guild(interaction)
 
     def embed(self, notice: str | None = None) -> discord.Embed:
         channel_id = self.settings.get("channel_id")
@@ -167,7 +163,7 @@ class StickySettingsView(discord.ui.View):
     async def set_enabled(self, interaction: discord.Interaction, enabled: bool):
         if not self.can_manage(interaction):
             return await interaction.response.send_message(
-                "この設定にはサーバー管理権限が必要です。",
+                MANAGE_GUILD_REQUIRED,
                 ephemeral=True,
             )
 
@@ -195,7 +191,7 @@ class StickySettingsView(discord.ui.View):
         except Exception:
             logger.exception("Stickyパネル有効状態の更新に失敗しました")
             await interaction.followup.send(
-                f"Sticky{SETTINGS_UPDATE_FAILED}",
+                SETTINGS_UPDATE_FAILED,
                 ephemeral=True,
             )
 
@@ -203,7 +199,7 @@ class StickySettingsView(discord.ui.View):
     async def edit_text(self, interaction: discord.Interaction, button: discord.ui.Button):
         if not self.can_manage(interaction):
             return await interaction.response.send_message(
-                "この設定にはサーバー管理権限が必要です。",
+                MANAGE_GUILD_REQUIRED,
                 ephemeral=True,
             )
 
