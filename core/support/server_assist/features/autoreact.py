@@ -9,8 +9,10 @@ from typing import Any
 
 import discord
 
-from core.support.server_assist import Feature, get_settings, update_settings, has_manage_permission as _can_manage
+from core.support.server_assist import as_int, Feature, get_settings, update_settings, has_manage_permission as _can_manage
 from core.support.server_assist.ui import AssistFeatureView, channel_label, notice_line
+from core.support.server_assist.ui import AssistChannelSelect, AssistToggleButton, required_field
+from core.support.messages import ASSIST_MANAGE_REQUIRED
 
 logger = logging.getLogger(__name__)
 
@@ -36,10 +38,6 @@ def reset_state() -> None:
     _seen.clear()
 
 
-def _as_int(value: Any) -> int | None:
-    return value if isinstance(value, int) and not isinstance(value, bool) else None
-
-
 def settings(guild_id: int) -> dict[str, Any]:
     raw = get_settings(guild_id, KEY)
     emojis = raw.get("emojis")
@@ -50,7 +48,7 @@ def settings(guild_id: int) -> dict[str, Any]:
                 cleaned.append(emoji.strip())
     return {
         "enabled": bool(raw.get("enabled", False)),
-        "channel_id": _as_int(raw.get("channel_id")),
+        "channel_id": as_int(raw.get("channel_id")),
         "emojis": cleaned[:MAX_EMOJIS],
     }
 
@@ -155,7 +153,7 @@ class AutoReactEmojiModal(discord.ui.Modal, title="自動リアクション"):
             return await interaction.response.send_message("サーバー内で実行してください。", ephemeral=True)
         if not _can_manage(interaction):
             return await interaction.response.send_message(
-                "この設定には「サーバーの管理」権限が必要です。", ephemeral=True,
+                ASSIST_MANAGE_REQUIRED, ephemeral=True,
             )
         emojis = parse_emojis(self.emoji_input.value)
         if not emojis:
@@ -166,36 +164,6 @@ class AutoReactEmojiModal(discord.ui.Modal, title="自動リアクション"):
         )
 
 
-class AutoReactChannelSelect(discord.ui.ChannelSelect):
-    def __init__(self, parent: "AutoReactSettingsView"):
-        self.parent_view = parent
-        super().__init__(
-            placeholder="自動リアクションを付けるチャンネル",
-            channel_types=[discord.ChannelType.text, discord.ChannelType.news],
-            row=0,
-        )
-
-    async def callback(self, interaction: discord.Interaction):
-        if not self.parent_view.can_manage(interaction):
-            return await interaction.response.send_message(
-                "この設定には「サーバーの管理」権限が必要です。", ephemeral=True,
-            )
-        channel_id = self.values[0].id
-        channel = self.parent_view.guild.get_channel(channel_id)
-        me = getattr(self.parent_view.guild, "me", None)
-        if channel is not None and me is not None:
-            try:
-                if not channel.permissions_for(me).send_messages:
-                    return await interaction.response.send_message(
-                        "そのチャンネルには送信できません。", ephemeral=True,
-                    )
-            except Exception:
-                pass
-        await update_settings(self.parent_view.guild_id, KEY, channel_id=channel_id)
-        self.parent_view.settings["channel_id"] = channel_id
-        await self.parent_view.refresh(interaction, "自動リアクションのチャンネルを保存しました。")
-
-
 class AutoReactEmojiButton(discord.ui.Button):
     def __init__(self):
         super().__init__(label="リアクションを設定", style=discord.ButtonStyle.secondary, row=2)
@@ -204,45 +172,22 @@ class AutoReactEmojiButton(discord.ui.Button):
         view: AutoReactSettingsView = self.view
         if not view.can_manage(interaction):
             return await interaction.response.send_message(
-                "この設定には「サーバーの管理」権限が必要です。", ephemeral=True,
+                ASSIST_MANAGE_REQUIRED, ephemeral=True,
             )
         return await interaction.response.send_modal(AutoReactEmojiModal(view.guild_id))
 
 
-class AutoReactToggleButton(discord.ui.Button):
-    def __init__(self):
-        super().__init__(label="自動リアクション", style=discord.ButtonStyle.secondary, row=2)
-
-    async def callback(self, interaction: discord.Interaction):
-        view: AutoReactSettingsView = self.view
-        if not view.can_manage(interaction):
-            return await interaction.response.send_message(
-                "この設定には「サーバーの管理」権限が必要です。", ephemeral=True,
-            )
-        if not view.settings["enabled"] and (
-            view.settings["channel_id"] is None or not view.settings["emojis"]
-        ):
-            return await interaction.response.send_message(
-                "先にチャンネルとリアクションを設定してください。", ephemeral=True,
-            )
-        value = not view.settings["enabled"]
-        await update_settings(view.guild_id, KEY, enabled=value)
-        view.settings["enabled"] = value
-        await view.refresh(interaction, f"自動リアクションを{'オン' if value else 'オフ'}にしました。")
-
-
 class AutoReactSettingsView(AssistFeatureView):
     feature_key = KEY
-    feature_title = "自動リアクション"
 
     def __init__(self, cog: Any, guild_id: int):
         self.guild = getattr(cog.bot, "get_guild", lambda _id: None)(guild_id)
         self.settings = settings(guild_id)
         super().__init__(cog, guild_id)
         if self.guild is not None:
-            self.add_item(AutoReactChannelSelect(self))
+            self.add_item(AssistChannelSelect(self, field="channel_id", placeholder="自動リアクションを付けるチャンネル", notice="自動リアクションのチャンネルを保存しました。", check="send"))
         self.add_item(AutoReactEmojiButton())
-        self.add_item(AutoReactToggleButton())
+        self.add_item(AssistToggleButton("enabled", "自動リアクション", require=lambda view, interaction, value: "先にチャンネルとリアクションを設定してください。" if value and (view.settings["channel_id"] is None or not view.settings["emojis"]) else None))
 
     def embed(self) -> discord.Embed:
         emojis = " ".join(self.settings["emojis"]) or "未設定"

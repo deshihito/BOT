@@ -8,8 +8,10 @@ from typing import Any
 
 import discord
 
-from core.support.server_assist import Feature, get_settings, update_settings, has_manage_permission as _can_manage
+from core.support.server_assist import register_persistent_views, Feature, get_settings, update_settings, has_manage_permission as _can_manage
 from core.support.server_assist.ui import AssistFeatureView, channel_label, notice_line
+from core.support.server_assist.ui import AssistChannelSelect, AssistToggleButton, required_field
+from core.support.messages import ASSIST_MANAGE_REQUIRED
 from core.support.storage import KVStore
 
 logger = logging.getLogger(__name__)
@@ -220,14 +222,7 @@ class PollVoteView(discord.ui.View):
 
 
 def register_views(cog: Any) -> None:
-    add_view = getattr(getattr(cog, "bot", None), "add_view", None)
-    if not callable(add_view):
-        return
-    for view in (PollPanelView(cog), PollVoteView(cog)):
-        try:
-            add_view(view)
-        except Exception:
-            logger.exception("投票の永続ビューを登録できませんでした")
+    register_persistent_views(cog, "投票の永続ビューを登録できませんでした", PollPanelView, PollVoteView)
 
 
 class PollCreateModal(discord.ui.Modal, title="投票を作成"):
@@ -440,36 +435,6 @@ async def handle_refresh(cog: Any, interaction: discord.Interaction) -> None:
             return await interaction.followup.send("表示を更新できませんでした。", ephemeral=True)
 
 
-class PollChannelSelect(discord.ui.ChannelSelect):
-    def __init__(self, parent: "PollSettingsView"):
-        self.parent_view = parent
-        super().__init__(
-            placeholder="投票を投稿するチャンネル",
-            channel_types=[discord.ChannelType.text, discord.ChannelType.news],
-            row=0,
-        )
-
-    async def callback(self, interaction: discord.Interaction):
-        if not self.parent_view.can_manage(interaction):
-            return await interaction.response.send_message(
-                "この設定には「サーバーの管理」権限が必要です。", ephemeral=True,
-            )
-        channel_id = self.values[0].id
-        channel = self.parent_view.guild.get_channel(channel_id)
-        me = getattr(self.parent_view.guild, "me", None)
-        if channel is not None and me is not None:
-            try:
-                if not channel.permissions_for(me).send_messages:
-                    return await interaction.response.send_message(
-                        "そのチャンネルには送信できません。", ephemeral=True,
-                    )
-            except Exception:
-                pass
-        await update_settings(self.parent_view.guild_id, KEY, channel_id=channel_id)
-        self.parent_view.settings["channel_id"] = channel_id
-        await self.parent_view.refresh(interaction, "投票の投稿先を保存しました。")
-
-
 class PollMultipleButton(discord.ui.Button):
     def __init__(self, multiple: bool):
         super().__init__(
@@ -482,31 +447,13 @@ class PollMultipleButton(discord.ui.Button):
         view: PollSettingsView = self.view
         if not view.can_manage(interaction):
             return await interaction.response.send_message(
-                "この設定には「サーバーの管理」権限が必要です。", ephemeral=True,
+                ASSIST_MANAGE_REQUIRED, ephemeral=True,
             )
         value = not view.settings["multiple"]
         await update_settings(view.guild_id, KEY, multiple=value)
         view.settings["multiple"] = value
         self.label = f"複数選択: {'オン' if value else 'オフ'}"
         await view.refresh(interaction, f"複数選択を{'オン' if value else 'オフ'}にしました。")
-
-
-class PollToggleButton(discord.ui.Button):
-    def __init__(self):
-        super().__init__(label="投票", style=discord.ButtonStyle.secondary, row=2)
-
-    async def callback(self, interaction: discord.Interaction):
-        view: PollSettingsView = self.view
-        if not view.can_manage(interaction):
-            return await interaction.response.send_message(
-                "この設定には「サーバーの管理」権限が必要です。", ephemeral=True,
-            )
-        if not view.settings["enabled"] and view.settings["channel_id"] is None:
-            return await interaction.response.send_message("先に投稿先を選んでください。", ephemeral=True)
-        value = not view.settings["enabled"]
-        await update_settings(view.guild_id, KEY, enabled=value)
-        view.settings["enabled"] = value
-        await view.refresh(interaction, f"投票を{'オン' if value else 'オフ'}にしました。")
 
 
 class PollPanelButton(discord.ui.Button):
@@ -517,7 +464,7 @@ class PollPanelButton(discord.ui.Button):
         view: PollSettingsView = self.view
         if not view.can_manage(interaction):
             return await interaction.response.send_message(
-                "この設定には「サーバーの管理」権限が必要です。", ephemeral=True,
+                ASSIST_MANAGE_REQUIRED, ephemeral=True,
             )
         channel_id = view.settings["channel_id"]
         channel = interaction.guild.get_channel(channel_id) if interaction.guild and channel_id else None
@@ -533,16 +480,15 @@ class PollPanelButton(discord.ui.Button):
 
 class PollSettingsView(AssistFeatureView):
     feature_key = KEY
-    feature_title = "投票"
 
     def __init__(self, cog: Any, guild_id: int):
         self.guild = getattr(cog.bot, "get_guild", lambda _id: None)(guild_id)
         self.settings = settings(guild_id)
         super().__init__(cog, guild_id)
         if self.guild is not None:
-            self.add_item(PollChannelSelect(self))
+            self.add_item(AssistChannelSelect(self, field="channel_id", placeholder="投票を投稿するチャンネル", notice="投票の投稿先を保存しました。", check="send"))
         self.add_item(PollMultipleButton(self.settings["multiple"]))
-        self.add_item(PollToggleButton())
+        self.add_item(AssistToggleButton("enabled", "投票", require=required_field("channel_id", "先に投稿先を選んでください。")))
         self.add_item(PollPanelButton())
 
     def embed(self) -> discord.Embed:
@@ -553,8 +499,7 @@ class PollSettingsView(AssistFeatureView):
                 f"\n\n**状態**: {'オン' if self.settings['enabled'] else 'オフ'}"
                 f"\n**投稿先**: {channel_label(self.settings['channel_id'])}"
                 f"\n**選択方式**: {'複数選択' if self.settings['multiple'] else '1つ選択'}"
-                "\n\n「パネルを送信」で投票作成ボタン付きのパネルを投稿します。"
-                "結果は投票メッセージにその場で表示されます。"
+                "\n\n結果は投票メッセージにその場で表示されます。"
                 + notice_line(self.notice)
             )[:4096],
             color=0xFFFFFF,

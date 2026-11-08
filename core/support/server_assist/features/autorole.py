@@ -6,9 +6,10 @@ from typing import Any
 
 import discord
 
-from core.support.messages import ROLE_HIERARCHY_ALREADY_SET
+from core.support.messages import ROLE_HIERARCHY_ALREADY_SET, ASSIST_MANAGE_REQUIRED
 from core.support.server_assist import Feature, can_assign_roles, get_settings, update_settings
 from core.support.server_assist.ui import AssistFeatureView, notice_line
+from core.support.server_assist.ui import AssistChannelSelect, AssistToggleButton, required_field
 
 logger = logging.getLogger(__name__)
 
@@ -113,7 +114,7 @@ class AutoRoleSelect(discord.ui.Select):
     async def callback(self, interaction: discord.Interaction):
         if not self.parent_view.can_manage(interaction):
             return await interaction.response.send_message(
-                "この設定には「サーバーの管理」権限が必要です。", ephemeral=True,
+                ASSIST_MANAGE_REQUIRED, ephemeral=True,
             )
         if self.values == ["__none__"]:
             return await interaction.response.send_message(
@@ -130,29 +131,6 @@ class AutoRoleSelect(discord.ui.Select):
         await self.parent_view.refresh(interaction, "自動付与するロールを保存しました。")
 
 
-class AutoRoleToggleButton(discord.ui.Button):
-    def __init__(self):
-        super().__init__(label="自動ロール", style=discord.ButtonStyle.secondary, row=2)
-
-    async def callback(self, interaction: discord.Interaction):
-        view: AutoRoleSettingsView = self.view
-        if not view.can_manage(interaction):
-            return await interaction.response.send_message(
-                "この設定には「サーバーの管理」権限が必要です。", ephemeral=True,
-            )
-        value = not view.settings["enabled"]
-        if value and view.settings["role_ids"] and not can_assign_roles(
-            interaction, view.guild, view.settings["role_ids"],
-        ):
-            return await interaction.response.send_message(
-                ROLE_HIERARCHY_ALREADY_SET,
-                ephemeral=True,
-            )
-        await update_settings(view.guild_id, KEY, enabled=value)
-        view.settings["enabled"] = value
-        await view.refresh(interaction, f"自動ロールを{'オン' if value else 'オフ'}にしました。")
-
-
 class AutoRoleBotsButton(discord.ui.Button):
     def __init__(self):
         super().__init__(label="BOTにも付与", style=discord.ButtonStyle.secondary, row=2)
@@ -161,7 +139,7 @@ class AutoRoleBotsButton(discord.ui.Button):
         view: AutoRoleSettingsView = self.view
         if not view.can_manage(interaction):
             return await interaction.response.send_message(
-                "この設定には「サーバーの管理」権限が必要です。", ephemeral=True,
+                ASSIST_MANAGE_REQUIRED, ephemeral=True,
             )
         value = not view.settings["include_bots"]
         await update_settings(view.guild_id, KEY, include_bots=value)
@@ -177,7 +155,7 @@ class AutoRoleTestButton(discord.ui.Button):
         view: AutoRoleSettingsView = self.view
         if not view.can_manage(interaction):
             return await interaction.response.send_message(
-                "この設定には「サーバーの管理」権限が必要です。", ephemeral=True,
+                ASSIST_MANAGE_REQUIRED, ephemeral=True,
             )
         member = interaction.user
         if not hasattr(member, "add_roles"):
@@ -199,9 +177,16 @@ class AutoRoleTestButton(discord.ui.Button):
         )
 
 
+def _toggle_require(view, interaction, value):
+    if value and view.settings["role_ids"] and not can_assign_roles(
+        interaction, view.guild, view.settings["role_ids"],
+    ):
+        return ROLE_HIERARCHY_ALREADY_SET
+    return None
+
+
 class AutoRoleSettingsView(AssistFeatureView):
     feature_key = KEY
-    feature_title = "自動ロール"
 
     def __init__(self, cog: Any, guild_id: int):
         self.guild = getattr(cog.bot, "get_guild", lambda _id: None)(guild_id)
@@ -209,7 +194,7 @@ class AutoRoleSettingsView(AssistFeatureView):
         super().__init__(cog, guild_id)
         if self.guild is not None:
             self.add_item(AutoRoleSelect(self))
-        self.add_item(AutoRoleToggleButton())
+        self.add_item(AssistToggleButton("enabled", "自動ロール", require=_toggle_require))
         self.add_item(AutoRoleBotsButton())
         self.add_item(AutoRoleTestButton())
 

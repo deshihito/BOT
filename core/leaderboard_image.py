@@ -385,7 +385,7 @@ async def fetch_avatar_bytes(bot, user_ids) -> dict:
     result: dict[int, bytes | None] = {}
     if bot is None:
         return {int(uid): None for uid in user_ids}
-    for uid in user_ids:
+    for uid in list(user_ids)[:25]:  # 表示名解決と同じ上限（user_names._MAX_FETCH）
         data = None
         try:
             user = bot.get_user(uid) if hasattr(bot, "get_user") else None

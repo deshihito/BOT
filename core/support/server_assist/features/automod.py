@@ -10,8 +10,10 @@ from typing import Any
 
 import discord
 
-from core.support.server_assist import Feature, get_settings, update_settings, usable_text_channels as _channels
+from core.support.server_assist import Feature, get_settings, update_settings
 from core.support.server_assist.ui import AssistFeatureView, channel_label, notice_line
+from core.support.server_assist.ui import AssistChannelSelect, AssistToggleButton, required_field
+from core.support.messages import ASSIST_MANAGE_REQUIRED
 
 logger = logging.getLogger(__name__)
 
@@ -261,26 +263,6 @@ async def on_message(cog: Any, message: Any) -> None:
             logger.debug("AutoMod: ログを送信できませんでした: %s", getattr(guild, "id", None))
 
 
-class AutoModLogChannelSelect(discord.ui.ChannelSelect):
-    def __init__(self, parent: "AutoModSettingsView"):
-        self.parent_view = parent
-        current = parent.settings["log_channel_id"]
-        super().__init__(placeholder="AutoModのログ送信先", channel_types=[discord.ChannelType.text, discord.ChannelType.news],
-                         min_values=0, max_values=1,
-                         default_values=([discord.SelectDefaultValue(id=current, type=discord.SelectDefaultValueType.channel)]
-                                         if current is not None else []), row=0)
-
-    async def callback(self, interaction: discord.Interaction):
-        if not self.parent_view.can_manage(interaction):
-            return await interaction.response.send_message(
-                "この設定には「サーバーの管理」権限が必要です。", ephemeral=True,
-            )
-        channel_id = self.values[0].id if self.values else None
-        await update_settings(self.parent_view.guild_id, KEY, log_channel_id=channel_id)
-        self.parent_view.settings["log_channel_id"] = channel_id
-        await self.parent_view.refresh(interaction, "AutoModのログ送信先を保存しました。")
-
-
 class AutoModMentionSelect(discord.ui.Select):
     def __init__(self, parent: "AutoModSettingsView"):
         self.parent_view = parent
@@ -295,7 +277,7 @@ class AutoModMentionSelect(discord.ui.Select):
     async def callback(self, interaction: discord.Interaction):
         if not self.parent_view.can_manage(interaction):
             return await interaction.response.send_message(
-                "この設定には「サーバーの管理」権限が必要です。", ephemeral=True,
+                ASSIST_MANAGE_REQUIRED, ephemeral=True,
             )
         value = int(self.values[0])
         await update_settings(self.parent_view.guild_id, KEY, max_mentions=value)
@@ -317,7 +299,7 @@ class AutoModCapsSelect(discord.ui.Select):
     async def callback(self, interaction: discord.Interaction):
         if not self.parent_view.can_manage(interaction):
             return await interaction.response.send_message(
-                "この設定には「サーバーの管理」権限が必要です。", ephemeral=True,
+                ASSIST_MANAGE_REQUIRED, ephemeral=True,
             )
         value = int(self.values[0])
         await update_settings(self.parent_view.guild_id, KEY, caps_percent=value)
@@ -338,7 +320,7 @@ class AutoModTimeoutButton(discord.ui.Button):
         view: AutoModSettingsView = self.view
         if not view.can_manage(interaction):
             return await interaction.response.send_message(
-                "この設定には「サーバーの管理」権限が必要です。", ephemeral=True,
+                ASSIST_MANAGE_REQUIRED, ephemeral=True,
             )
         current = int(view.settings.get("timeout_minutes") or 0)
         index = TIMEOUT_CHOICES.index(current) if current in TIMEOUT_CHOICES else 0
@@ -359,7 +341,7 @@ class AutoModCrossSpamButton(discord.ui.Button):
         view: AutoModSettingsView = self.view
         if not view.can_manage(interaction):
             return await interaction.response.send_message(
-                "この設定には「サーバーの管理」権限が必要です。", ephemeral=True,
+                ASSIST_MANAGE_REQUIRED, ephemeral=True,
             )
         current = int(view.settings.get("cross_count") or 0)
         index = CROSS_COUNT_CHOICES.index(current) if current in CROSS_COUNT_CHOICES else 0
@@ -380,7 +362,7 @@ class AutoModRaidButton(discord.ui.Button):
         view: AutoModSettingsView = self.view
         if not view.can_manage(interaction):
             return await interaction.response.send_message(
-                "この設定には「サーバーの管理」権限が必要です。", ephemeral=True,
+                ASSIST_MANAGE_REQUIRED, ephemeral=True,
             )
         current = int(view.settings.get("raid_users") or 0)
         index = RAID_USER_CHOICES.index(current) if current in RAID_USER_CHOICES else 0
@@ -391,22 +373,6 @@ class AutoModRaidButton(discord.ui.Button):
         await view.refresh(interaction, f"コピペ荒らし検知を{label}にしました。")
 
 
-class AutoModToggleButton(discord.ui.Button):
-    def __init__(self):
-        super().__init__(label="AutoMod", style=discord.ButtonStyle.secondary, row=4)
-
-    async def callback(self, interaction: discord.Interaction):
-        view: AutoModSettingsView = self.view
-        if not view.can_manage(interaction):
-            return await interaction.response.send_message(
-                "この設定には「サーバーの管理」権限が必要です。", ephemeral=True,
-            )
-        value = not view.settings["enabled"]
-        await update_settings(view.guild_id, KEY, enabled=value)
-        view.settings["enabled"] = value
-        await view.refresh(interaction, f"AutoModを{'オン' if value else 'オフ'}にしました。")
-
-
 class AutoModInvitesButton(discord.ui.Button):
     def __init__(self):
         super().__init__(label="招待リンク", style=discord.ButtonStyle.secondary, row=4)
@@ -415,7 +381,7 @@ class AutoModInvitesButton(discord.ui.Button):
         view: AutoModSettingsView = self.view
         if not view.can_manage(interaction):
             return await interaction.response.send_message(
-                "この設定には「サーバーの管理」権限が必要です。", ephemeral=True,
+                ASSIST_MANAGE_REQUIRED, ephemeral=True,
             )
         value = not view.settings["block_invites"]
         await update_settings(view.guild_id, KEY, block_invites=value)
@@ -431,7 +397,7 @@ class AutoModLinksButton(discord.ui.Button):
         view: AutoModSettingsView = self.view
         if not view.can_manage(interaction):
             return await interaction.response.send_message(
-                "この設定には「サーバーの管理」権限が必要です。", ephemeral=True,
+                ASSIST_MANAGE_REQUIRED, ephemeral=True,
             )
         value = not view.settings["block_links"]
         await update_settings(view.guild_id, KEY, block_links=value)
@@ -449,7 +415,7 @@ class AutoModSpamButton(discord.ui.Button):
         view: AutoModSettingsView = self.view
         if not view.can_manage(interaction):
             return await interaction.response.send_message(
-                "この設定には「サーバーの管理」権限が必要です。", ephemeral=True,
+                ASSIST_MANAGE_REQUIRED, ephemeral=True,
             )
         current = int(view.settings.get("spam_count") or 0)
         index = SPAM_COUNT_CHOICES.index(current) if current in SPAM_COUNT_CHOICES else 0
@@ -462,20 +428,19 @@ class AutoModSpamButton(discord.ui.Button):
 
 class AutoModSettingsView(AssistFeatureView):
     feature_key = KEY
-    feature_title = "AutoMod"
 
     def __init__(self, cog: Any, guild_id: int):
         self.guild = getattr(cog.bot, "get_guild", lambda _id: None)(guild_id)
         self.settings = settings(guild_id)
         super().__init__(cog, guild_id)
         if self.guild is not None:
-            self.add_item(AutoModLogChannelSelect(self))
+            self.add_item(AssistChannelSelect(self, field="log_channel_id", placeholder="AutoModのログ送信先", notice="AutoModのログ送信先を保存しました。", min_values=0))
         self.add_item(AutoModMentionSelect(self))
         self.add_item(AutoModCapsSelect(self))
         self.add_item(AutoModTimeoutButton())
         self.add_item(AutoModCrossSpamButton())
         self.add_item(AutoModRaidButton())
-        self.add_item(AutoModToggleButton())
+        self.add_item(AssistToggleButton("enabled", "AutoMod", row=4))
         self.add_item(AutoModInvitesButton())
         self.add_item(AutoModLinksButton())
         self.add_item(AutoModSpamButton())

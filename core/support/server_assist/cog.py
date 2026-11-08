@@ -11,6 +11,7 @@ from discord.ext import commands
 
 from core.support import guild_settings
 from core.support.panel_v2 import as_panel_v2, edit_panel_v2
+from core.support.messages import ASSIST_MANAGE_REQUIRED, feature_not_loaded
 from core.support.server_assist import discover_features, has_manage_permission
 
 logger = logging.getLogger(__name__)
@@ -68,7 +69,7 @@ class ServerAssistCog(commands.Cog):
         """
         if not has_manage_permission(interaction):
             return await interaction.response.send_message(
-                "この設定には「サーバーの管理」権限が必要です。", ephemeral=True,
+                ASSIST_MANAGE_REQUIRED, ephemeral=True,
             )
         support_cog = self.bot.get_cog("SupportCog")
         if support_cog is None:
@@ -98,7 +99,7 @@ class ServerAssistCog(commands.Cog):
     async def show_feature(self, interaction: discord.Interaction, key: str):
         if not has_manage_permission(interaction):
             return await interaction.response.send_message(
-                "この設定には「サーバーの管理」権限が必要です。", ephemeral=True,
+                ASSIST_MANAGE_REQUIRED, ephemeral=True,
             )
         feature = self.by_key.get(key)
         if feature is None or interaction.guild_id is None:
@@ -125,7 +126,7 @@ class ServerAssistCog(commands.Cog):
         """
         if not has_manage_permission(interaction):
             return await interaction.response.send_message(
-                "この設定には「サーバーの管理」権限が必要です。", ephemeral=True,
+                ASSIST_MANAGE_REQUIRED, ephemeral=True,
             )
         feature = self.by_key.get(key)
         if feature is None or interaction.guild_id is None:
@@ -144,6 +145,14 @@ class ServerAssistCog(commands.Cog):
             view.notice = notice
         return await edit_panel_v2(interaction, as_panel_v2(view))
 
+    async def _delegate(self, interaction, key: str, noun: str, method: str, *args):
+        module = self.modules.get(key)
+        if module is None:
+            return await interaction.response.send_message(
+                feature_not_loaded(noun), ephemeral=True,
+            )
+        return await getattr(module, method)(self, interaction, *args)
+
     async def handle_level_rewards(self, guild, member, old_level: int, new_level: int):
         module = self.modules.get("leveling")
         if module is None:
@@ -151,107 +160,42 @@ class ServerAssistCog(commands.Cog):
         return await module.handle_level_rewards(self, guild, member, old_level, new_level)
 
     async def handle_temp_voice_action(self, interaction, action: str):
-        module = self.modules.get("tempvoice")
-        if module is None:
-            return await interaction.response.send_message(
-                "一時VC機能を読み込めませんでした。", ephemeral=True,
-            )
-        return await module.handle_action(self, interaction, action)
+        return await self._delegate(interaction, "tempvoice", "一時VC機能", "handle_action", action)
 
     async def handle_suggestion_create(self, interaction):
-        module = self.modules.get("suggestions")
-        if module is None:
-            return await interaction.response.send_message(
-                "提案箱を読み込めませんでした。", ephemeral=True,
-            )
-        return await module.handle_create(self, interaction)
+        return await self._delegate(interaction, "suggestions", "提案箱", "handle_create")
 
     async def handle_suggestion_vote(self, interaction, action: str):
-        module = self.modules.get("suggestions")
-        if module is None:
-            return await interaction.response.send_message(
-                "提案箱を読み込めませんでした。", ephemeral=True,
-            )
-        return await module.handle_vote(self, interaction, action)
+        return await self._delegate(interaction, "suggestions", "提案箱", "handle_vote", action)
 
     async def handle_application_create(self, interaction):
-        module = self.modules.get("applications")
-        if module is None:
-            return await interaction.response.send_message(
-                "応募フォームを読み込めませんでした。", ephemeral=True,
-            )
-        return await module.handle_create(self, interaction)
+        return await self._delegate(interaction, "applications", "応募フォーム", "handle_create")
 
     async def handle_application_review(self, interaction, action: str):
-        module = self.modules.get("applications")
-        if module is None:
-            return await interaction.response.send_message(
-                "応募フォームを読み込めませんでした。", ephemeral=True,
-            )
-        return await module.handle_review(self, interaction, action)
+        return await self._delegate(interaction, "applications", "応募フォーム", "handle_review", action)
     async def handle_poll_create(self, interaction):
-        module = self.modules.get("polls")
-        if module is None:
-            return await interaction.response.send_message(
-                "投票を読み込めませんでした。", ephemeral=True,
-            )
-        return await module.handle_create(self, interaction)
+        return await self._delegate(interaction, "polls", "投票", "handle_create")
 
     async def handle_poll_vote(self, interaction, values):
-        module = self.modules.get("polls")
-        if module is None:
-            return await interaction.response.send_message(
-                "投票を読み込めませんでした。", ephemeral=True,
-            )
-        return await module.handle_vote(self, interaction, values)
+        return await self._delegate(interaction, "polls", "投票", "handle_vote", values)
 
     async def handle_poll_close(self, interaction):
-        module = self.modules.get("polls")
-        if module is None:
-            return await interaction.response.send_message(
-                "投票を読み込めませんでした。", ephemeral=True,
-            )
-        return await module.handle_close(self, interaction)
+        return await self._delegate(interaction, "polls", "投票", "handle_close")
 
     async def handle_poll_refresh(self, interaction):
-        module = self.modules.get("polls")
-        if module is None:
-            return await interaction.response.send_message(
-                "投票を読み込めませんでした。", ephemeral=True,
-            )
-        return await module.handle_refresh(self, interaction)
+        return await self._delegate(interaction, "polls", "投票", "handle_refresh")
 
     async def handle_event_create(self, interaction):
-        module = self.modules.get("events")
-        if module is None:
-            return await interaction.response.send_message(
-                "イベントを読み込めませんでした。", ephemeral=True,
-            )
-        return await module.handle_create(self, interaction)
+        return await self._delegate(interaction, "events", "イベント", "handle_create")
 
     async def handle_event_rsvp(self, interaction, choice):
-        module = self.modules.get("events")
-        if module is None:
-            return await interaction.response.send_message(
-                "イベントを読み込めませんでした。", ephemeral=True,
-            )
-        return await module.handle_rsvp(self, interaction, choice)
+        return await self._delegate(interaction, "events", "イベント", "handle_rsvp", choice)
 
     async def handle_event_close(self, interaction):
-        module = self.modules.get("events")
-        if module is None:
-            return await interaction.response.send_message(
-                "イベントを読み込めませんでした。", ephemeral=True,
-            )
-        return await module.handle_close(self, interaction)
+        return await self._delegate(interaction, "events", "イベント", "handle_close")
 
     async def handle_event_refresh(self, interaction):
-        module = self.modules.get("events")
-        if module is None:
-            return await interaction.response.send_message(
-                "イベントを読み込めませんでした。", ephemeral=True,
-            )
-        return await module.handle_refresh(self, interaction)
+        return await self._delegate(interaction, "events", "イベント", "handle_refresh")
 
     async def _dispatch(self, hook: str, *args: Any):
         # イベント駆動の機能（参加・退出メッセージ等）はここを通る。設定の

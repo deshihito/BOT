@@ -215,9 +215,12 @@ class WelcomeChannelSelectTest(unittest.IsolatedAsyncioTestCase):
         return interaction
 
     def _select(self, view, kind):
+        from core.support.server_assist.ui import AssistChannelSelect
+
+        field = "welcome_channel_id" if kind == "welcome" else "goodbye_channel_id"
         return next(
             item for item in view.children
-            if isinstance(item, welcome.WelcomeChannelSelect) and item.kind == kind
+            if isinstance(item, AssistChannelSelect) and item.field == field
         )
 
     async def test_select_saves_welcome_channel(self):

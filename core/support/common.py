@@ -32,6 +32,7 @@ from core.support import guild_settings
 from core.general import action_usage
 from core.support.usage_stats import usage_stats
 from core.support.panel_v2 import as_embed_v2, as_panel_v2, edit_panel_v2
+from core.support.messages import CALLBACK_ERROR
 
 logger = logging.getLogger("cogs.support")  # 分割後も従来のログ名に統一する
 
@@ -58,12 +59,12 @@ async def report_callback_error(interaction: discord.Interaction, context: str,
     try:
         if interaction.response.is_done():
             await interaction.followup.send(
-                "処理中にエラーが発生しました。時間をおいて再度お試しください。解決しない場合はBotの運営に連絡してください。",
+                CALLBACK_ERROR,
                 ephemeral=True,
             )
         else:
             await interaction.response.send_message(
-                "処理中にエラーが発生しました。時間をおいて再度お試しください。解決しない場合はBotの運営に連絡してください。",
+                CALLBACK_ERROR,
                 ephemeral=True,
             )
     except discord.HTTPException:

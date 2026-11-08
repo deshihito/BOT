@@ -10,8 +10,10 @@ from typing import Any
 
 import discord
 
-from core.support.server_assist import Feature, get_settings, update_settings
+from core.support.server_assist import as_int, Feature, get_settings, register_persistent_views, update_settings
 from core.support.server_assist.ui import AssistFeatureView, channel_label, notice_line
+from core.support.server_assist.ui import AssistChannelSelect, AssistToggleButton, required_field
+from core.support.messages import ASSIST_MANAGE_REQUIRED
 from core.support.storage import KVStore
 
 logger = logging.getLogger(__name__)
@@ -64,10 +66,6 @@ def _lock(key: str) -> asyncio.Lock:
     return _locks.setdefault(key, asyncio.Lock())
 
 
-def _as_int(value: Any) -> int | None:
-    return value if isinstance(value, int) and not isinstance(value, bool) else None
-
-
 ESCALATION_ACTIONS = ("timeout", "kick")
 ESCALATION_THRESHOLDS = (2, 3, 4, 5, 10)
 # 処罰サイクル: (action, timeout_minutes)
@@ -76,14 +74,14 @@ ESCALATION_PRESETS = (("timeout", 10), ("timeout", 60), ("timeout", 1440), ("kic
 
 def settings(guild_id: int) -> dict[str, Any]:
     raw = get_settings(guild_id, KEY)
-    threshold = _as_int(raw.get("escalation_threshold"))
-    timeout_minutes = _as_int(raw.get("escalation_timeout_minutes"))
+    threshold = as_int(raw.get("escalation_threshold"))
+    timeout_minutes = as_int(raw.get("escalation_timeout_minutes"))
     action = raw.get("escalation_action")
     return {
         "enabled": bool(raw.get("enabled", False)),
-        "panel_channel_id": _as_int(raw.get("panel_channel_id")),
-        "log_channel_id": _as_int(raw.get("log_channel_id")),
-        "mod_role_id": _as_int(raw.get("mod_role_id")),
+        "panel_channel_id": as_int(raw.get("panel_channel_id")),
+        "log_channel_id": as_int(raw.get("log_channel_id")),
+        "mod_role_id": as_int(raw.get("mod_role_id")),
         "escalation_enabled": bool(raw.get("escalation_enabled", False)),
         "escalation_threshold": threshold if threshold in ESCALATION_THRESHOLDS else 3,
         "escalation_action": action if action in ESCALATION_ACTIONS else "timeout",
@@ -228,13 +226,7 @@ class WarningPanelView(discord.ui.View):
 
 
 def register_views(cog: Any) -> None:
-    add_view = getattr(getattr(cog, "bot", None), "add_view", None)
-    if not callable(add_view):
-        return
-    try:
-        add_view(WarningPanelView(cog))
-    except Exception:
-        logger.exception("警告パネルの永続ビューを登録できませんでした")
+    register_persistent_views(cog, "警告パネルの永続ビューを登録できませんでした", WarningPanelView)
 
 
 class WarningReasonModal(discord.ui.Modal, title="警告"):
@@ -319,39 +311,6 @@ class WarningReasonModal(discord.ui.Modal, title="警告"):
         )
 
 
-class WarningChannelSelect(discord.ui.ChannelSelect):
-    def __init__(self, parent: "WarningSettingsView", kind: str):
-        self.parent_view = parent
-        self.kind = kind
-        labels = {"panel": "警告パネルを置くチャンネル", "log": "警告ログを送るチャンネル"}
-        super().__init__(
-            placeholder=labels.get(kind, "チャンネル"),
-            channel_types=[discord.ChannelType.text, discord.ChannelType.news],
-            row=0 if kind == "panel" else 1,
-        )
-
-    async def callback(self, interaction: discord.Interaction):
-        if not self.parent_view.can_manage(interaction):
-            return await interaction.response.send_message(
-                "この設定には「サーバーの管理」権限が必要です。", ephemeral=True,
-            )
-        channel_id = self.values[0].id
-        channel = self.parent_view.guild.get_channel(channel_id)
-        me = getattr(self.parent_view.guild, "me", None)
-        if channel is not None and me is not None:
-            try:
-                if not channel.permissions_for(me).send_messages:
-                    return await interaction.response.send_message(
-                        "そのチャンネルには送信できません。", ephemeral=True,
-                    )
-            except Exception:
-                pass
-        field = f"{self.kind}_channel_id"
-        await update_settings(self.parent_view.guild_id, KEY, **{field: channel_id})
-        self.parent_view.settings[field] = channel_id
-        await self.parent_view.refresh(interaction, "警告のチャンネルを保存しました。")
-
-
 class WarningRoleSelect(discord.ui.Select):
     def __init__(self, parent: "WarningSettingsView"):
         self.parent_view = parent
@@ -375,30 +334,12 @@ class WarningRoleSelect(discord.ui.Select):
     async def callback(self, interaction: discord.Interaction):
         if not self.parent_view.can_manage(interaction):
             return await interaction.response.send_message(
-                "この設定には「サーバーの管理」権限が必要です。", ephemeral=True,
+                ASSIST_MANAGE_REQUIRED, ephemeral=True,
             )
         value = None if self.values[0] == "__none__" else int(self.values[0])
         await update_settings(self.parent_view.guild_id, KEY, mod_role_id=value)
         self.parent_view.settings["mod_role_id"] = value
         await self.parent_view.refresh(interaction, "モデレーターロールを保存しました。")
-
-
-class WarningToggleButton(discord.ui.Button):
-    def __init__(self):
-        super().__init__(label="警告", style=discord.ButtonStyle.secondary, row=3)
-
-    async def callback(self, interaction: discord.Interaction):
-        view: WarningSettingsView = self.view
-        if not view.can_manage(interaction):
-            return await interaction.response.send_message(
-                "この設定には「サーバーの管理」権限が必要です。", ephemeral=True,
-            )
-        if not view.settings["enabled"] and view.settings["panel_channel_id"] is None:
-            return await interaction.response.send_message("先に警告パネルのチャンネルを選んでください。", ephemeral=True)
-        value = not view.settings["enabled"]
-        await update_settings(view.guild_id, KEY, enabled=value)
-        view.settings["enabled"] = value
-        await view.refresh(interaction, f"警告を{'オン' if value else 'オフ'}にしました。")
 
 
 class WarningPanelButton(discord.ui.Button):
@@ -409,7 +350,7 @@ class WarningPanelButton(discord.ui.Button):
         view: WarningSettingsView = self.view
         if not view.can_manage(interaction):
             return await interaction.response.send_message(
-                "この設定には「サーバーの管理」権限が必要です。", ephemeral=True,
+                ASSIST_MANAGE_REQUIRED, ephemeral=True,
             )
         channel_id = view.settings["panel_channel_id"]
         channel = interaction.guild.get_channel(channel_id) if interaction.guild and channel_id else None
@@ -423,22 +364,6 @@ class WarningPanelButton(discord.ui.Button):
         return await interaction.followup.send("警告パネルを送信しました。")
 
 
-class WarningEscalationToggleButton(discord.ui.Button):
-    def __init__(self):
-        super().__init__(label="エスカレーション", style=discord.ButtonStyle.secondary, row=3)
-
-    async def callback(self, interaction: discord.Interaction):
-        view: WarningSettingsView = self.view
-        if not view.can_manage(interaction):
-            return await interaction.response.send_message(
-                "この設定には「サーバーの管理」権限が必要です。", ephemeral=True,
-            )
-        value = not view.settings["escalation_enabled"]
-        await update_settings(view.guild_id, KEY, escalation_enabled=value)
-        view.settings["escalation_enabled"] = value
-        await view.refresh(interaction, f"警告エスカレーションを{'オン' if value else 'オフ'}にしました。")
-
-
 class WarningEscalationThresholdButton(discord.ui.Button):
     def __init__(self):
         super().__init__(label="エスカレーション閾値", style=discord.ButtonStyle.secondary, row=3)
@@ -447,7 +372,7 @@ class WarningEscalationThresholdButton(discord.ui.Button):
         view: WarningSettingsView = self.view
         if not view.can_manage(interaction):
             return await interaction.response.send_message(
-                "この設定には「サーバーの管理」権限が必要です。", ephemeral=True,
+                ASSIST_MANAGE_REQUIRED, ephemeral=True,
             )
         current = int(view.settings.get("escalation_threshold") or 3)
         index = ESCALATION_THRESHOLDS.index(current) if current in ESCALATION_THRESHOLDS else 1
@@ -465,7 +390,7 @@ class WarningEscalationActionButton(discord.ui.Button):
         view: WarningSettingsView = self.view
         if not view.can_manage(interaction):
             return await interaction.response.send_message(
-                "この設定には「サーバーの管理」権限が必要です。", ephemeral=True,
+                ASSIST_MANAGE_REQUIRED, ephemeral=True,
             )
         current = (
             str(view.settings.get("escalation_action") or "timeout"),
@@ -484,19 +409,18 @@ class WarningEscalationActionButton(discord.ui.Button):
 
 class WarningSettingsView(AssistFeatureView):
     feature_key = KEY
-    feature_title = "警告"
 
     def __init__(self, cog: Any, guild_id: int):
         self.guild = getattr(cog.bot, "get_guild", lambda _id: None)(guild_id)
         self.settings = settings(guild_id)
         super().__init__(cog, guild_id)
         if self.guild is not None:
-            self.add_item(WarningChannelSelect(self, "panel"))
-            self.add_item(WarningChannelSelect(self, "log"))
+            self.add_item(AssistChannelSelect(self, field="panel_channel_id", placeholder="警告パネルを置くチャンネル", notice="警告のチャンネルを保存しました。", row=0, check="send"))
+            self.add_item(AssistChannelSelect(self, field="log_channel_id", placeholder="警告ログを送るチャンネル", notice="警告のチャンネルを保存しました。", row=1, check="send"))
             self.add_item(WarningRoleSelect(self))
-        self.add_item(WarningToggleButton())
+        self.add_item(AssistToggleButton("enabled", "警告", row=3, require=required_field("panel_channel_id", "先に警告パネルのチャンネルを選んでください。")))
         self.add_item(WarningPanelButton())
-        self.add_item(WarningEscalationToggleButton())
+        self.add_item(AssistToggleButton("escalation_enabled", "エスカレーション", feature_label="警告エスカレーション", row=3))
         self.add_item(WarningEscalationThresholdButton())
         self.add_item(WarningEscalationActionButton())
 

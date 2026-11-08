@@ -8,6 +8,8 @@ import discord
 
 from core.support.server_assist import Feature, get_settings, update_settings
 from core.support.server_assist.ui import AssistFeatureView, notice_line
+from core.support.server_assist.ui import AssistChannelSelect, AssistToggleButton, required_field
+from core.support.messages import ASSIST_MANAGE_REQUIRED
 from core.support.storage import KVStore
 
 logger = logging.getLogger(__name__)
@@ -113,33 +115,14 @@ async def on_member_join(cog: Any, member: Any) -> None:
     await _store().delete(key)
 
 
-class StickyToggleButton(discord.ui.Button):
-    def __init__(self, key: str, label: str):
-        self.key = key
-        super().__init__(label=label, style=discord.ButtonStyle.secondary, row=2)
-
-    async def callback(self, interaction: discord.Interaction):
-        view: StickySettingsView = self.view
-        if not view.can_manage(interaction):
-            return await interaction.response.send_message(
-                "この設定には「サーバーの管理」権限が必要です。", ephemeral=True,
-            )
-        value = not bool(view.settings[self.key])
-        await update_settings(view.guild_id, KEY, **{self.key: value})
-        view.settings[self.key] = value
-        label = "オン" if value else "オフ"
-        await view.refresh(interaction, f"{self.label}を{label}にしました。")
-
-
 class StickySettingsView(AssistFeatureView):
     feature_key = KEY
-    feature_title = "ロール復元"
 
     def __init__(self, cog: Any, guild_id: int):
         self.settings = settings(guild_id)
         super().__init__(cog, guild_id)
-        self.add_item(StickyToggleButton("enabled", "ロール復元"))
-        self.add_item(StickyToggleButton("ignore_bots", "BOTを除外"))
+        self.add_item(AssistToggleButton("enabled", "ロール復元"))
+        self.add_item(AssistToggleButton("ignore_bots", "BOTを除外"))
 
     def embed(self) -> discord.Embed:
         return discord.Embed(

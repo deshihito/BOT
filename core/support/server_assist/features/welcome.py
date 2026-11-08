@@ -11,6 +11,8 @@ import discord
 
 from core.support.server_assist import Feature, format_template, get_settings, update_settings
 from core.support.server_assist.ui import AssistFeatureView, channel_label, notice_line
+from core.support.server_assist.ui import AssistChannelSelect, AssistToggleButton, required_field
+from core.support.messages import ASSIST_MANAGE_REQUIRED
 
 logger = logging.getLogger(__name__)
 
@@ -293,77 +295,6 @@ def build_embed(member: Any, guild: Any, template: str, *, kind: str = "welcome"
     return embed
 
 
-class WelcomeChannelSelect(discord.ui.ChannelSelect):
-    def __init__(self, parent: "WelcomeSettingsView", kind: str):
-        self.parent_view = parent
-        self.kind = kind
-        current = parent.settings["welcome_channel_id" if kind == "welcome" else "goodbye_channel_id"]
-        super().__init__(
-            placeholder="参加メッセージの送信先" if kind == "welcome" else "退出メッセージの送信先",
-            channel_types=[discord.ChannelType.text, discord.ChannelType.news],
-            min_values=0,
-            max_values=1,
-            default_values=(
-                [discord.SelectDefaultValue(id=current, type=discord.SelectDefaultValueType.channel)]
-                if current is not None else []
-            ),
-            row=0 if kind == "welcome" else 1,
-        )
-
-    async def callback(self, interaction: discord.Interaction):
-        if not self.parent_view.can_manage(interaction):
-            return await interaction.response.send_message(
-                "この設定には「サーバーの管理」権限が必要です。", ephemeral=True,
-            )
-        selected = self.values[0] if self.values else None
-        channel_id = getattr(selected, "id", None)
-        if channel_id is not None:
-            # values は AppCommandChannel (部分オブジェクト) で permissions_for を
-            # 持たないため、ギルドの実チャンネルに解決してから送信権限を確認する。
-            guild = self.parent_view.guild
-            channel = guild.get_channel(channel_id) if guild is not None else None
-            me = getattr(guild, "me", None)
-            if channel is not None and me is not None:
-                try:
-                    if not channel.permissions_for(me).send_messages:
-                        return await interaction.response.send_message(
-                            "そのチャンネルにはBotがメッセージを送信できません。", ephemeral=True,
-                        )
-                except Exception:
-                    pass
-        field = "welcome_channel_id" if self.kind == "welcome" else "goodbye_channel_id"
-        await update_settings(self.parent_view.guild_id, KEY, **{field: channel_id})
-        self.parent_view.settings[field] = channel_id
-        label = "参加" if self.kind == "welcome" else "退出"
-        if channel_id is None:
-            await self.parent_view.refresh(interaction, f"{label}メッセージの送信先を未設定に戻しました。")
-        else:
-            await self.parent_view.refresh(interaction, f"{label}メッセージの送信先を設定しました。")
-
-
-class WelcomeToggleButton(discord.ui.Button):
-    def __init__(self, kind: str):
-        self.kind = kind
-        super().__init__(
-            label="参加メッセージ" if kind == "welcome" else "退出メッセージ",
-            style=discord.ButtonStyle.secondary,
-            row=2,
-        )
-
-    async def callback(self, interaction: discord.Interaction):
-        view: WelcomeSettingsView = self.view
-        if not view.can_manage(interaction):
-            return await interaction.response.send_message(
-                "この設定には「サーバーの管理」権限が必要です。", ephemeral=True,
-            )
-        field = "welcome_enabled" if self.kind == "welcome" else "goodbye_enabled"
-        value = not bool(view.settings.get(field))
-        await update_settings(view.guild_id, KEY, **{field: value})
-        view.settings[field] = value
-        label = "参加" if self.kind == "welcome" else "退出"
-        await view.refresh(interaction, f"{label}メッセージを{'オン' if value else 'オフ'}にしました。")
-
-
 class WelcomeMessageButton(discord.ui.Button):
     def __init__(self, kind: str):
         self.kind = kind
@@ -377,7 +308,7 @@ class WelcomeMessageButton(discord.ui.Button):
         view: WelcomeSettingsView = self.view
         if not view.can_manage(interaction):
             return await interaction.response.send_message(
-                "この設定には「サーバーの管理」権限が必要です。", ephemeral=True,
+                ASSIST_MANAGE_REQUIRED, ephemeral=True,
             )
         return await interaction.response.send_modal(WelcomeMessageModal(view, self.kind))
 
@@ -390,7 +321,7 @@ class WelcomeTestButton(discord.ui.Button):
         view: WelcomeSettingsView = self.view
         if not view.can_manage(interaction):
             return await interaction.response.send_message(
-                "この設定には「サーバーの管理」権限が必要です。", ephemeral=True,
+                ASSIST_MANAGE_REQUIRED, ephemeral=True,
             )
         if interaction.guild is None:
             return await interaction.response.send_message("サーバー内で実行してください。", ephemeral=True)
@@ -408,22 +339,6 @@ class WelcomeTestButton(discord.ui.Button):
         return await interaction.response.send_message("テストメッセージを送信しました。", ephemeral=True)
 
 
-class WelcomeImageToggleButton(discord.ui.Button):
-    def __init__(self):
-        super().__init__(label="画像カード", style=discord.ButtonStyle.secondary, row=3)
-
-    async def callback(self, interaction: discord.Interaction):
-        view: WelcomeSettingsView = self.view
-        if not view.can_manage(interaction):
-            return await interaction.response.send_message(
-                "この設定には「サーバーの管理」権限が必要です。", ephemeral=True,
-            )
-        value = not bool(view.settings.get("welcome_image_enabled"))
-        await update_settings(view.guild_id, KEY, welcome_image_enabled=value)
-        view.settings["welcome_image_enabled"] = value
-        await view.refresh(interaction, f"画像カードを{'オン' if value else 'オフ'}にしました。")
-
-
 class WelcomeImageThemeButton(discord.ui.Button):
     def __init__(self):
         super().__init__(label="画像テーマ切替", style=discord.ButtonStyle.secondary, row=3)
@@ -432,7 +347,7 @@ class WelcomeImageThemeButton(discord.ui.Button):
         view: WelcomeSettingsView = self.view
         if not view.can_manage(interaction):
             return await interaction.response.send_message(
-                "この設定には「サーバーの管理」権限が必要です。", ephemeral=True,
+                ASSIST_MANAGE_REQUIRED, ephemeral=True,
             )
         keys = list(CARD_THEMES)
         current = view.settings.get("welcome_image_theme") or DEFAULT_CARD_THEME
@@ -461,7 +376,7 @@ class WelcomeMessageModal(discord.ui.Modal):
     async def on_submit(self, interaction: discord.Interaction):
         if not self.parent_view.can_manage(interaction):
             return await interaction.response.send_message(
-                "この設定には「サーバーの管理」権限が必要です。", ephemeral=True,
+                ASSIST_MANAGE_REQUIRED, ephemeral=True,
             )
         field = "welcome_message" if self.kind == "welcome" else "goodbye_message"
         value = str(self.text.value or "").strip() or (
@@ -474,20 +389,19 @@ class WelcomeMessageModal(discord.ui.Modal):
 
 class WelcomeSettingsView(AssistFeatureView):
     feature_key = KEY
-    feature_title = "参加・退出メッセージ"
 
     def __init__(self, cog: Any, guild_id: int):
         self.guild = getattr(cog.bot, "get_guild", lambda _id: None)(guild_id)
         self.settings = settings(guild_id)
         super().__init__(cog, guild_id)
-        self.add_item(WelcomeChannelSelect(self, "welcome"))
-        self.add_item(WelcomeChannelSelect(self, "goodbye"))
-        self.add_item(WelcomeToggleButton("welcome"))
-        self.add_item(WelcomeToggleButton("goodbye"))
+        self.add_item(AssistChannelSelect(self, field="welcome_channel_id", placeholder="参加メッセージの送信先", notice=lambda cid: "参加メッセージの送信先を未設定に戻しました。" if cid is None else "参加メッセージの送信先を設定しました。", min_values=0, row=0, check="send", check_error="そのチャンネルにはBotがメッセージを送信できません。"))
+        self.add_item(AssistChannelSelect(self, field="goodbye_channel_id", placeholder="退出メッセージの送信先", notice=lambda cid: "退出メッセージの送信先を未設定に戻しました。" if cid is None else "退出メッセージの送信先を設定しました。", min_values=0, row=1, check="send", check_error="そのチャンネルにはBotがメッセージを送信できません。"))
+        self.add_item(AssistToggleButton("welcome_enabled", "参加メッセージ", row=2))
+        self.add_item(AssistToggleButton("goodbye_enabled", "退出メッセージ", row=2))
         self.add_item(WelcomeMessageButton("welcome"))
         self.add_item(WelcomeMessageButton("goodbye"))
         self.add_item(WelcomeTestButton())
-        self.add_item(WelcomeImageToggleButton())
+        self.add_item(AssistToggleButton("welcome_image_enabled", "画像カード", row=3))
         self.add_item(WelcomeImageThemeButton())
 
     def embed(self) -> discord.Embed:
