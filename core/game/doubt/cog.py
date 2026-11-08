@@ -350,14 +350,16 @@ class Doubt(commands.Cog):
         channel = interaction.channel
         if channel.id in self.games or channel.id in self.recruiting:
             return await interaction.response.send_message(embed=we("このチャンネルでは既にダウトが進行中です。"), ephemeral=True)
-        await interaction.response.send_message(embed=we("ダウトの募集を開始しました。"))
-        await self._recruit(channel, interaction.user.id)
+        await self._recruit(channel, interaction.user.id, interaction)
 
-    async def _recruit(self, channel, host_id):
+    async def _recruit(self, channel, host_id, interaction=None):
         view = DoubtJoinView(host_id)
         self.recruiting.add(channel.id)
         try:
-            view.message = await game_panels.replace(channel, "party", view=view)
+            if interaction is not None:
+                view.message = await game_panels.send_as_response(interaction, channel, "party", view)
+            else:
+                view.message = await game_panels.replace(channel, "party", view=view)
             await self.start_from_hub(channel, view.players, join_view=view)
         finally:
             self.recruiting.discard(channel.id)

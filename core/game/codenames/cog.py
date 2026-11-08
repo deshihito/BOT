@@ -242,10 +242,9 @@ class Codenames(commands.Cog):
         session = {"teams": {"red": [], "blue": []}, "team_of": {},
                    "channel": channel, "guild_id": interaction.guild_id, "game": None, "leaders": {}}
         self.sessions[channel.id] = session
-        await interaction.response.send_message("コードネームの募集を開始しました。")
         try:
             lobby = TeamJoinPanel(session)
-            await game_panels.replace(channel, "party", view=lobby)
+            await game_panels.send_as_response(interaction, channel, "party", lobby)
             await asyncio.sleep(RECRUIT_SECONDS)
             lobby.stop()
             if len(session["teams"]["red"]) < 2 or len(session["teams"]["blue"]) < 2:

@@ -258,11 +258,9 @@ class Janken(commands.Cog):
         g.wager = max(0, min(int(wager), 500))
         g.players[interaction.user.id] = interaction.user
         self.games[channel.id] = g
-        await interaction.response.send_message(
-            embed=discord.Embed(description=f"じゃんけんの募集を開始しました（{RECRUIT_SECONDS}秒）。", color=COLOR))
         try:
             lobby = JoinView(self, g)
-            await game_panels.replace(channel, "party", view=lobby)
+            await game_panels.send_as_response(interaction, channel, "party", lobby)
             for _ in range(RECRUIT_SECONDS * 2):
                 if lobby.started or lobby.cancelled:
                     break

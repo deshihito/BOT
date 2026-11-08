@@ -367,7 +367,6 @@ class Daifugo(commands.Cog):
         g.rule_spade3 = bool(spade3)
         g.players[interaction.user.id] = interaction.user
         self.games[channel.id] = g
-        await interaction.response.send_message(f"大富豪の募集を開始しました（{RECRUIT_SECONDS}秒）。")
         try:
             lobby = LobbyView(
                 title="大富豪 参加者募集",
@@ -379,7 +378,7 @@ class Daifugo(commands.Cog):
                       f"{MIN_PLAYERS}人未満のときは Bot が入ります）。\n"
                       f"ルール: 8切り {'ON' if g.rule_eight_cut else 'OFF'} / スペ3返し {'ON' if g.rule_spade3 else 'OFF'}"),
                 timeout=RECRUIT_SECONDS + 30)
-            await game_panels.replace(channel, "party", view=lobby)
+            await game_panels.send_as_response(interaction, channel, "party", lobby)
             for _ in range(RECRUIT_SECONDS * 2):
                 if lobby.started or lobby.cancelled:
                     break

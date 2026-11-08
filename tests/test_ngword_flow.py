@@ -41,7 +41,7 @@ class NGWordTest(unittest.IsolatedAsyncioTestCase):
     async def test_not_enough_players_cleans_state(self):
         with fast_time():
             inter, task = await self.start([])
-            self.assertIn('募集を開始', inter.response.sent[0].text())
+            self.assertIn('参加者募集', inter.response.sent[0].text())
             await task
         self.assertIn('人数不足', self.channel.texts()[-1])
         self.assertEqual(self.cog.games, {})

@@ -616,8 +616,7 @@ class Uno(commands.Cog):
         self.games[channel_id] = game
 
         view = JoinView(game, self, host=interaction.user)
-        await interaction.response.send_message("[+] UNOゲームの募集を開始しました！")
-        game.active_panel_message = await game_panels.replace(interaction.channel, "party", view=view)
+        game.active_panel_message = await game_panels.send_as_response(interaction, interaction.channel, "party", view)
 
         # 募集は60秒。即時スタート/キャンセルはポーリングで拾う
         for _ in range(120):
