@@ -28,6 +28,7 @@ except Exception:  # numpy が無い環境では純Pythonで合成する
 
 from core.vc.globalvc.common import *  # noqa: F401,F403 - shared constants/helpers
 from core.vc.globalvc.rooms import GLOBAL_ROOMS, ROOMS, _persist_rooms, _prune_dead_clients, _room_user_count  # noqa: F401
+from core.vc.globalvc.lang import effective_filter_lang, locale_label, room_visible  # noqa: F401
 from core.vc.globalvc.textlink import ROOM_TEXT_LINKS  # noqa: F401
 
 logger = logging.getLogger("cogs.sio_globalVC")
@@ -134,8 +135,22 @@ class GlobalRoomListView(discord.ui.LayoutView):
             for clients in GLOBAL_ROOMS.values() for c in clients
         )
 
+        # 言語フィルタ: 原則は自サーバーと同じ言語のルームだけを出す（設定で変更可）
+        filter_lang = effective_filter_lang(self.guild_id)
+        visible = {name: room for name, room in ROOMS.items()
+                   if room_visible(room.language, filter_lang)}
+        if not visible:
+            label = locale_label(filter_lang) if filter_lang else ""
+            self.add_item(discord.ui.Container(
+                discord.ui.TextDisplay(
+                    f"## 🌐 ルーム一覧\n表示言語（{label}）に一致するルームはありません。"
+                    "「言語設定」から表示する言語を変更できます。"),
+                accent_colour=0x95A5A6,
+            ))
+            return
+
         # 常設ルームは一覧の上部に固定表示する（同種内は作成順を保つ）
-        names = sorted(ROOMS, key=lambda n: not ROOMS[n].permanent)[: self.MAX_ROOMS]
+        names = sorted(visible, key=lambda n: not visible[n].permanent)[: self.MAX_ROOMS]
         lines: list[str] = []
         buttons: list[_RoomJoinButton] = []
         for index, name in enumerate(names):
@@ -147,6 +162,8 @@ class GlobalRoomListView(discord.ui.LayoutView):
             pin = "📌 " if room.permanent else ""
             line = (f"{pin}{lock} **{name}** ・ VC参加 {cap} ・ 参加者 {_room_user_count(name)}人"
                     f" ・ グロチャ {len(ROOM_TEXT_LINKS.get(name, []))}")
+            if room.language:
+                line += f" ・ 言語: {locale_label(room.language)}"
             if full:
                 line += " ・ 満員"
             if room.description:
@@ -161,8 +178,10 @@ class GlobalRoomListView(discord.ui.LayoutView):
 
         header = "## 🌐 ルーム一覧\nボイスチャンネルに入っている必要があります。"
         notes: list[str] = []
-        if len(ROOMS) > self.MAX_ROOMS:
-            notes.append(f"表示は先頭 {self.MAX_ROOMS} 件です（全 {len(ROOMS)} 件）")
+        if len(visible) > self.MAX_ROOMS:
+            notes.append(f"表示は先頭 {self.MAX_ROOMS} 件です（全 {len(visible)} 件）")
+        if filter_lang is not None and len(visible) < len(ROOMS):
+            notes.append(f"表示言語: {locale_label(filter_lang)} のみ（言語設定で変更できます）")
         if joined_here:
             notes.append("このサーバーはすでにルームに参加中のため、参加ボタンは使えません")
         if notes:

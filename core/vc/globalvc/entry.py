@@ -32,6 +32,7 @@ from core.vc.globalvc.manage import logger, ManageMixin, Responder  # noqa: F401
 from core.vc.globalvc.restore import logger, RestoreMixin  # noqa: F401
 from core.vc.globalvc.rooms import logger, RoomConfig, ROOMS, GLOBAL_ROOMS, _room_to_dict, _room_from_dict, _persist_rooms, _load_rooms, _persist_join, _clear_join, _remove_vc_from_rooms, _prune_dead_clients, _disconnect_and_cleanup, _watchdog_interval_seconds, _WEBHOOK_BANNED_WORDS, _safe_webhook_username, _can_delete_room, rotate_room_themes, _room_members, _room_user_count  # noqa: F401
 from core.vc.globalvc.themes import THEME_POOL, theme_day, theme_for  # noqa: F401
+from core.vc.globalvc.lang import GVC_SETTINGS_SECTION, LANG_OVERRIDE_KEY, LOCALE_LABELS, effective_filter_lang, locale_label, room_visible, server_locale  # noqa: F401
 from core.vc.globalvc.textlink import logger, TextLink, ROOM_TEXT_LINKS, CHANNEL_TO_ROOM, _text_link_to_dict, _persist_text_links, _restore_text_links, _remove_text_link  # noqa: F401
 from core.vc.globalvc.ui import logger, _RoomJoinButton, _PrivateRoomJoinModal, GlobalRoomListView, _TextChatToggleView  # noqa: F401
 
@@ -45,7 +46,7 @@ class GlobalVCCog(ConnectMixin, RestoreMixin, ManageMixin, ChatMixin, commands.C
         self._join_locks: dict[int, asyncio.Lock] = {}
 
     @commands.command(name="gvcperm", aliases=["常設ルーム作成"],
-                      help="常設グローバルVCルームを作成します（Bot管理者のみ）。使い方: !gvcperm ルーム名 [テーマ]")
+                      help="常設グローバルVCルームを作成します（Bot管理者のみ）。使い方: !gvcperm ルーム名 [テーマ（省略=日替わり / なし=テーマなし / 自動=日替わり）]")
     async def gvcperm(self, ctx: commands.Context, room_name: str = "", *, theme: str = ""):
         """常設ルームの作成は誤操作防止のため、この ! コマンドからだけ行う。
 

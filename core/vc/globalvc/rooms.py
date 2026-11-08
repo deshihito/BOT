@@ -47,6 +47,7 @@ class RoomConfig:
     theme: str = ""               # テーマ（話の話題）。"" = テーマなし
     theme_auto: bool = False      # 常設ルームの自動テーマ（毎日 theme_for で回す）
     text_chat: bool = False       # VC参加時に、そのテキストチャンネルもグロチャへ自動接続する
+    language: str = ""            # ルームの言語（作成サーバーの言語設定）。"" = 指定なし（全言語に表示）
 
 
 ROOMS: dict[str, RoomConfig] = {}
@@ -69,6 +70,7 @@ def _room_to_dict(room: RoomConfig) -> dict:
         "theme": room.theme,
         "theme_auto": bool(room.theme_auto),
         "text_chat": bool(room.text_chat),
+        "language": room.language,
     }
 
 
@@ -93,6 +95,7 @@ def _room_from_dict(data) -> Optional[RoomConfig]:
             theme=str(data.get("theme") or ""),
             theme_auto=bool(data.get("theme_auto")),
             text_chat=bool(data.get("text_chat")),
+            language=str(data.get("language") or ""),
         )
     except (TypeError, ValueError):
         return None
