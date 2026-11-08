@@ -49,6 +49,10 @@ from core.support.server_assist import Feature, get_settings, update_settings
 from core.support.server_assist.ui import AssistChannelSelect, AssistFeatureView, AssistToggleButton, notice_line
 
 logger = logging.getLogger(__name__)
+# main.py の root は WARNING で、!logs のバッファは root ハンドラ経由。
+# 応答時間 (INFO) を実機で追えるよう、このモジュールだけ INFO を通す
+# (status_updater と同じ作法)。
+logger.setLevel(logging.INFO)
 
 KEY = "luna_ai"
 CUSTOM_NAME_MAX_CHARS = 32

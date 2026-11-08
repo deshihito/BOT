@@ -734,6 +734,15 @@ class SendSanitizeTest(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("<@123>", sent)
 
 
+class LoggerLevelTest(unittest.TestCase):
+    def test_logger_passes_info_for_log_buffer(self):
+        # main.py の root が WARNING のため、モジュール側で INFO を
+        # 通しておかないと応答時間ログが !logs に残らない。
+        import logging
+
+        self.assertEqual(luna.logger.level, logging.INFO)
+
+
 class ModelSelectionTest(unittest.TestCase):
     def test_default_model_is_deepseek_flash(self):
         self.assertEqual(luna.DEFAULT_MODEL, "deepseek-v4.1-flash-1017")
