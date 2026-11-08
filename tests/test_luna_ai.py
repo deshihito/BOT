@@ -744,19 +744,19 @@ class LoggerLevelTest(unittest.TestCase):
 
 
 class ModelSelectionTest(unittest.TestCase):
-    def test_default_model_is_kiosapi_diffusiongemma(self):
-        self.assertEqual(luna.DEFAULT_PROVIDER, "kiosapi")
-        self.assertEqual(luna.DEFAULT_MODEL, "diffusiongemma-26b-a4b-it")
+    def test_default_model_is_logfare_qwen(self):
+        self.assertEqual(luna.DEFAULT_PROVIDER, "logfare")
+        self.assertEqual(luna.DEFAULT_MODEL, "qwen-3.8-27b")
         self.assertEqual(luna.REASONING_EFFORT, "none")
 
-    def test_provider_name_defaults_to_kiosapi_and_env_selects_logfare(self):
+    def test_provider_name_defaults_to_logfare_and_env_selects_kiosapi(self):
         with patch.dict(os.environ, {}, clear=False):
             os.environ.pop("LUNA_AI_PROVIDER", None)
+            self.assertEqual(luna.provider_name(), "logfare")
+        with patch.dict(os.environ, {"LUNA_AI_PROVIDER": "kiosapi"}):
             self.assertEqual(luna.provider_name(), "kiosapi")
-        with patch.dict(os.environ, {"LUNA_AI_PROVIDER": "logfare"}):
-            self.assertEqual(luna.provider_name(), "logfare")
-        with patch.dict(os.environ, {"LUNA_AI_PROVIDER": "LOGFARE"}):
-            self.assertEqual(luna.provider_name(), "logfare")
+        with patch.dict(os.environ, {"LUNA_AI_PROVIDER": "KIOSAPI"}):
+            self.assertEqual(luna.provider_name(), "kiosapi")
 
 
 class KiosapiTest(unittest.IsolatedAsyncioTestCase):
@@ -785,15 +785,14 @@ class KiosapiTest(unittest.IsolatedAsyncioTestCase):
         got = [delta async for delta in luna._sse_deltas(lines())]
         self.assertEqual(got, ["まぁ", "様子"])
 
-    async def test_chat_text_routes_to_kiosapi_by_default(self):
+    async def test_chat_text_routes_to_kiosapi_when_selected(self):
         async def fake_stream(messages, *, max_tokens):
             self.assertEqual(max_tokens, 800)
             for delta in ("拡散", "生成", "かな"):
                 yield delta
 
-        with patch.dict(os.environ, {}, clear=False), \
+        with patch.dict(os.environ, {"LUNA_AI_PROVIDER": "kiosapi"}), \
                 patch.object(luna, "_kiosapi_chat_stream", fake_stream):
-            os.environ.pop("LUNA_AI_PROVIDER", None)
             text, ttft, total = await luna._chat_text(
                 [{"role": "user", "content": "hi"}], max_tokens=800)
         self.assertEqual(text, "拡散生成かな")
