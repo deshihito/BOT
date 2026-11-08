@@ -89,6 +89,8 @@ class RankingsView(discord.ui.View):
         ("総合資産", "asset_leaderboard"),
         ("bump RTA", "bump_leaderboard"),
         ("up RTA", "up_leaderboard"),
+        ("bump RTA 全サーバー", "bump_global_leaderboard"),
+        ("up RTA 全サーバー", "up_global_leaderboard"),
         ("生存確認", "fujo_ranking"),
         ("EXP", "exp_ranking"),
     )
@@ -461,7 +463,10 @@ class GeneralCog(
                 return await market_cog.open_buy(interaction)
             return await market_cog.open_sell(interaction)
 
-        if value in {"pay", "status", "coin_leaderboard", "asset_leaderboard", "bump_leaderboard", "up_leaderboard", "bump_slowest", "up_slowest"}:
+        if value in {"pay", "status", "coin_leaderboard", "asset_leaderboard",
+                     "bump_leaderboard", "up_leaderboard", "bump_slowest", "up_slowest",
+                     "bump_global_leaderboard", "up_global_leaderboard",
+                     "bump_global_slowest", "up_global_slowest"}:
             if wallet is None:
                 return await self._safe_respond(interaction, "WalletCogが読み込まれていません。")
             if value == "pay":
@@ -473,15 +478,13 @@ class GeneralCog(
             if value == "asset_leaderboard":
                 return await wallet.leaderboard(
                     interaction, app_commands.Choice(name="asset", value="asset"))
-            if value.endswith("_slowest"):
-                event_type = value.removesuffix("_slowest")
-                return await wallet.leaderboard(
-                    interaction, app_commands.Choice(name=event_type, value=event_type),
-                    slowest=True)
-            event_type = value.removesuffix("_leaderboard")
+            # bump/up RTA ランキング: このサーバー / 全サーバー × 最速 / 最遅
+            event_type = "bump" if value.startswith("bump") else "up"
+            scope = (app_commands.Choice(name="全サーバー", value="global")
+                     if "_global" in value else None)
             return await wallet.leaderboard(
-                interaction, app_commands.Choice(name=event_type, value=event_type)
-            )
+                interaction, app_commands.Choice(name=event_type, value=event_type),
+                scope, slowest=value.endswith("_slowest"))
 
         if value == "garden":
             garden_cog = self.bot.get_cog("GardenCog")
