@@ -28,6 +28,31 @@ async def replace(channel, key: str, *args, **kwargs):
     return message
 
 
+async def adopt(channel, key: str, message):
+    """送信済みメッセージをパネルとして登録する（旧パネルは削除する）。"""
+    if message is None:
+        return None
+    channel_id = getattr(channel, "id", None)
+    if channel_id is not None:
+        await _delete(_active.pop((channel_id, key), None))
+        _active[(channel_id, key)] = message
+    return message
+
+
+async def send_as_response(interaction, channel, key: str, view):
+    """ロビーを interaction 応答として出し、パネルとして登録する。
+
+    応答メッセージを取得できない環境では通常の replace 送信に落とす。
+    """
+    from core.game.game.game_v2 import original_response_or_none
+
+    await interaction.response.send_message(view=view)
+    message = await original_response_or_none(interaction)
+    if message is None:
+        return await replace(channel, key, view=view)
+    return await adopt(channel, key, message)
+
+
 async def clear(channel, key: str) -> None:
     """追跡中のパネルを削除する。"""
     channel_id = getattr(channel, "id", None)

@@ -128,8 +128,6 @@ class NGWord(commands.Cog):
         g = NGGame(channel.id, interaction.guild_id, interaction.user.id, minutes=minutes, mode=mode)
         g.players[interaction.user.id] = interaction.user
         self.games[channel.id] = g
-        await interaction.response.send_message(
-            embed=discord.Embed(description=f"NGワードの募集を開始しました（{RECRUIT_SECONDS}秒）。", color=COLOR))
         try:
             lobby = LobbyView(
                 title="NGワード 参加者募集", host=interaction.user,
@@ -137,7 +135,7 @@ class NGWord(commands.Cog):
                 note=(f"{interaction.user.mention} さんが募集中です。（{MODES[g.mode]}・{g.minutes}分）\n"
                       f"{recruit_join_prompt(RECRUIT_SECONDS)}"),
                 timeout=RECRUIT_SECONDS + 30)
-            await game_panels.replace(channel, "party", view=lobby)
+            await game_panels.send_as_response(interaction, channel, "party", lobby)
             for _ in range(RECRUIT_SECONDS * 2):
                 if lobby.started or lobby.cancelled:
                     break

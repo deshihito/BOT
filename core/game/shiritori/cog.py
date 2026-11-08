@@ -236,11 +236,9 @@ class OdaiShiritori(commands.Cog):
         g = ShiritoriGame(channel.id, interaction.guild_id, interaction.user.id)
         g.players[interaction.user.id] = interaction.user
         self.games[channel.id] = g
-        await interaction.response.send_message(
-            view=text_panel("", f"お題しりとりの募集を開始しました（{RECRUIT_SECONDS}秒）。"))
         try:
             lobby = JoinView(self, g)
-            await game_panels.replace(channel, "party", view=lobby)
+            await game_panels.send_as_response(interaction, channel, "party", lobby)
             # 募集時間いっぱい待つ。主催者の早期開始・取消にも追随する
             for _ in range(RECRUIT_SECONDS * 2):
                 await asyncio.sleep(0.5)

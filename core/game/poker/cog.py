@@ -666,7 +666,6 @@ class Poker(commands.Cog):
         t = PokerTable(channel.id, interaction.guild_id, interaction.user.id)
         t.players[interaction.user.id] = interaction.user
         self.games[channel.id] = t
-        await interaction.response.send_message("ポーカーの募集を開始しました。")
         try:
             lobby = LobbyView(
                 title="ポーカー（チップ制・5枚ドロー）参加者募集", host=interaction.user,
@@ -675,7 +674,7 @@ class Poker(commands.Cog):
                       f"{RECRUIT_SECONDS}秒以内に参加してください。\n"
                       f"参加後にバイイン（{'/'.join(f'{a:,}' for a in BUYIN_OPTIONS)} AGO→チップ）が必要です。"),
                 timeout=RECRUIT_SECONDS + 30)
-            await game_panels.replace(channel, "party", view=lobby)
+            await game_panels.send_as_response(interaction, channel, "party", lobby)
             for _ in range(RECRUIT_SECONDS * 2):
                 if lobby.started or lobby.cancelled:
                     break
