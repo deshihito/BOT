@@ -93,8 +93,9 @@ class ManageMixin:
             theme, theme_auto = "", True
         elif permanent and not theme:
             theme_auto = True
+        room_lang = server_locale(r.guild.id)
         if theme_auto:
-            theme = theme_for(room_name, theme_day())
+            theme = theme_for(room_name, theme_day(), room_lang)
         room_config = RoomConfig(
             name=room_name,
             owner_id=r.user.id,
@@ -106,7 +107,7 @@ class ManageMixin:
             permanent=permanent,
             theme=theme,
             theme_auto=theme_auto,
-            language=server_locale(r.guild.id),
+            language=room_lang,
         )
         ROOMS[room_name] = room_config
         _persist_rooms()
@@ -170,7 +171,7 @@ class ManageMixin:
                 "それ以外はそのテーマで固定されます）。", ephemeral=True)
         if value in ("自動", "日替わり"):
             room.theme_auto = True
-            room.theme = theme_for(room.name, theme_day())
+            room.theme = theme_for(room.name, theme_day(), room.language or "ja")
             result = f"🎯 テーマを日替わり（自動）にしました。今日のテーマは **{room.theme}** です。"
         elif value in ("なし", "無し"):
             room.theme_auto = False
