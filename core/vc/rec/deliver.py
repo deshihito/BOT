@@ -26,6 +26,7 @@ from core.support.emojis import CLOCK, FAILED, MUSIC, PAUSE
 from core.vc.rec.common import *  # noqa: F401,F403 - shared constants/helpers
 from core.vc.rec.common import CHANNELS, MIN_SAVE_BYTES, SAMPLE_RATE, SAMPLE_WIDTH  # noqa: F401
 from core.vc.rec.sink import RecordingSink  # noqa: F401
+from core.support.panel_v2 import as_embed_v2
 
 logger = logging.getLogger("cogs.sio_rec")
 
@@ -55,14 +56,14 @@ class DeliverMixin:
 
 
     async def _send_recording(self, ctx, guild, audio, elapsed, headline):
-        await ctx.send(embed=we(
+        await ctx.send(view=as_embed_v2(we(
             f"{headline}（録音時間: `{self.format_time(elapsed)}`）。ファイルを生成中..."
-        ))
+        )))
 
         if not audio:
-            return await ctx.send(embed=we(
+            return await ctx.send(view=as_embed_v2(we(
                 FAILED + ' 音声バッファが空でした。（発言が検知されなかったか、パケットが届いていません）'
-            ))
+            )))
 
         limit = getattr(guild, "filesize_limit", 8 * 1024 * 1024)
         if not isinstance(limit, int):
@@ -76,21 +77,26 @@ class DeliverMixin:
                     f"・`{name}` はファイルサイズ超過 ({size / 1024 / 1024:.1f}MB) のため送信できません。"
                     for name, size in skipped
                 )
-            return await ctx.send(embed=we(note))
+            return await ctx.send(view=as_embed_v2(we(note)))
 
         for i in range(0, len(files), 10):
             chunk = files[i:i + 10]
-            await ctx.send(
-                content=f"{MUSIC} **録音データ出力 ({i + 1}〜{i + len(chunk)}件 / 全{len(files)}件)**",
-                files=chunk,
-            )
+            layout = discord.ui.LayoutView(timeout=None)
+            items: list[discord.ui.Item] = [
+                discord.ui.TextDisplay(
+                    f"{MUSIC} **録音データ出力 ({i + 1}〜{i + len(chunk)}件 / 全{len(files)}件)**")
+            ]
+            items.extend(
+                discord.ui.File(media=f"attachment://{f.filename}") for f in chunk)
+            layout.add_item(discord.ui.Container(*items))
+            await ctx.send(view=layout, files=chunk)
 
         if skipped:
-            await ctx.send(embed=we(
+            await ctx.send(view=as_embed_v2(we(
                 f"{FAILED} 以下はサイズ超過のため送信できませんでした:\n" + "\n".join(
                     f"・`{name}` ({size / 1024 / 1024:.1f}MB)" for name, size in skipped
                 )
-            ))
+            )))
 
 
     async def build_files(self, audio: dict[str, bytes], limit: int):
