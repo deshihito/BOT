@@ -346,6 +346,7 @@ VC_SHORTCUT_ACTIONS: tuple[tuple[str, str], ...] = (
     ("ボイスチェンジャー開始", "changer_start"), ("ボイスチェンジャー停止", "changer_stop"),
     ("ボイスチェンジャー状態", "changer_status"),
     ("グローバルVCルーム一覧", "gvc_room_list"), ("グローバルVCメンバー確認", "gvc_members"),
+    ("グローバルVC言語設定", "gvc_lang_setting"),
     ("グロチャ接続解除", "gvc_chat_disconnect"),
     ("読み上げ停止", "tts_stop"), ("音声トリガー一覧・削除", "trigger_panel"),
     # 導線最適化 M4: パネルでフォーム必須だった9件も登録し、/quick・ショートカット
@@ -365,7 +366,8 @@ VC_SHORTCUT_ACTIONS: tuple[tuple[str, str], ...] = (
 # M4 で登録したフォーム系アクション（AI tools 対象外にする集合）。
 VC_FORM_ACTION_VALUES = frozenset({
     "gvc_room_create", "gvc_room_theme", "gvc_room_info", "gvc_room_delete",
-    "gvc_chat_connect", "tts_start", "tts_say", "tts_config", "trigger_register", "echo_delay",
+    "gvc_lang_setting", "gvc_chat_connect", "tts_start", "tts_say", "tts_config",
+    "trigger_register", "echo_delay",
 })
 
 
@@ -411,6 +413,11 @@ VC_ACTION_PARAMS: dict[str, tuple[ParamSpec, ...]] = {
         ParamSpec(name="desc", label="説明", type="text"),
         ParamSpec(name="theme", label="テーマ", type="text",
                   help="話の話題（空欄でテーマなし）"),
+    ),
+    # GVCの表示言語（サーバー管理権限が必要。impl 側で判定する）。
+    "gvc_lang_setting": (
+        ParamSpec(name="lang", label="表示言語", type="text",
+                  help="空欄=サーバーの言語設定と同じ / all=すべて表示 / ja・en・zh・ko・id・th・ar・hi"),
     ),
     # 常設ルームの作成はレジストリに載せない（!gvcperm コマンドだけから行う）。
     # 常設ルームのテーマ変更（Bot管理者だけ実行できる。impl 側で判定する）。
