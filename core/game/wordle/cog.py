@@ -101,6 +101,9 @@ class WordleGame:
         self.winner = None
         self.phase = "playing"       # playing / done
         self.message = None
+        # 盤面パネル（BoardView）。discord.Message には view 属性が無いので、
+        # 編集のたびにメッセージから取り直さず、ここに保持したものを編集する。
+        self.view = None
         self.last_notice = None      # 直近の推理表示（常に最新1通だけ残す）
         self.finished = asyncio.Event()
         self.started_at = time.time()  # 制限時間（GAME_SECONDS）の起点。再起動復旧でも使う
@@ -203,7 +206,8 @@ class Wordle(commands.Cog):
         self.games[channel.id] = g
         await interaction.response.send_message(view=text_panel("", "Wordle を始めました。"))
         try:
-            g.message = await game_panels.replace(channel, "party", view=BoardView(self, g))
+            g.view = BoardView(self, g)
+            g.message = await game_panels.replace(channel, "party", view=g.view)
             self._save_snapshot(g)
             await self._watch(channel, g, GAME_SECONDS)
         finally:
@@ -238,11 +242,9 @@ class Wordle(commands.Cog):
             await safe_delete(g.last_notice)
         await interaction.response.send_message(f"{''.join(colors)} `{w.upper()}`")
         g.last_notice = await original_response_or_none(interaction)
-        if g.message is not None:
-            panel = g.message.view
-            if isinstance(panel, BoardView):
-                panel.set_content(g.board_title(), g.board_body())
-            await g.message.edit(view=panel)
+        if g.message is not None and g.view is not None:
+            g.view.set_content(g.board_title(), g.board_body())
+            await g.message.edit(view=g.view)
         if g.over:
             g.finished.set()
 
@@ -319,12 +321,13 @@ class Wordle(commands.Cog):
             except Exception:
                 g.message = None
         self.games[channel_id] = g
+        g.view = BoardView(self, g)
         if g.message is not None:
             # 既存の盤面メッセージへ新しいパネルを付け直して復活させる
-            await g.message.edit(view=BoardView(self, g))
+            await g.message.edit(view=g.view)
         else:
             g.message = await game_panels.replace(
-                channel, "party", view=BoardView(self, g))
+                channel, "party", view=g.view)
         remaining = GAME_SECONDS - (time.time() - g.started_at)
         asyncio.create_task(self._run_restored_session(channel, g, max(0.0, remaining)))
         return True
