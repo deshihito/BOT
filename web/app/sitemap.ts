@@ -12,6 +12,7 @@ export default function sitemap(): MetadataRoute.Sitemap {
     { url: `${SITE_URL}/jinrou/roles`, lastModified: now, changeFrequency: "monthly", priority: 0.7 },
     { url: `${SITE_URL}/privacy`, lastModified: now, changeFrequency: "yearly", priority: 0.3 },
     { url: `${SITE_URL}/terms`, lastModified: now, changeFrequency: "yearly", priority: 0.3 },
+    { url: `${SITE_URL}/credits`, lastModified: now, changeFrequency: "yearly", priority: 0.3 },
   ];
   const roleEntries: MetadataRoute.Sitemap = JINROU_ROLES.map((role) => ({
     url: `${SITE_URL}/jinrou/roles/${encodeURIComponent(role.id)}`,
