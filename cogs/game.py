@@ -767,6 +767,7 @@ _LAZY_FEATURE_MODULES = {
     "_parse_ts": "core.game.seizon.cog",
     "_query_ntp_offset": "core.game.rta.entry",
     "_query_ntp_once": "core.game.rta.entry",
+    "_rank_line": "core.game.rta.entry",
     "_round_signature": "core.game.poker.cog",
     "_rules_embed": "core.game.gambling.cog",
     "_named_field_next_time": "core.game.rta.entry",

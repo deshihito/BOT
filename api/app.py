@@ -41,6 +41,7 @@ RPC_ARGUMENTS = {
     "record_bump_rta_worst": frozenset({"p_guild_id", "p_user_id", "p_event_type", "p_elapsed_ms", "p_completed_at"}),
     "get_bump_rta_global_ranking": frozenset({"p_event_type", "p_limit"}),
     "get_bump_rta_global_slowest_ranking": frozenset({"p_event_type", "p_limit"}),
+    "get_bump_rta_record_ranks": frozenset({"p_guild_id", "p_event_type", "p_elapsed_ms"}),
     "party_game_record_win": frozenset({"p_guild_id", "p_user_id", "p_game"}),
 }
 RPC_SCALAR_RESULTS = frozenset({"transfer_coins", "dungeon_apply_coins", "nation_adjust", "party_game_record_win"})

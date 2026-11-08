@@ -17,7 +17,13 @@ CREATE TABLE IF NOT EXISTS public.bump_rta_events (
     event_type text NOT NULL CHECK (event_type IN ('bump', 'up', 'legacy')),
     elapsed_ms integer NOT NULL CHECK (elapsed_ms > 0),
     bump_message_id text,
-    completed_at timestamptz NOT NULL DEFAULT now()
+    completed_at timestamptz NOT NULL DEFAULT now(),
+    -- 記録時点の順位（最速/最遅 × サーバー内/全体）。記録後に
+    -- get_bump_rta_record_ranks で算出して埋める。未算出は NULL。
+    rank_fast_local integer,
+    rank_fast_global integer,
+    rank_slow_local integer,
+    rank_slow_global integer
 );
 CREATE INDEX IF NOT EXISTS bump_rta_events_guild_type_time_idx
     ON public.bump_rta_events (guild_id, event_type, completed_at DESC);
@@ -142,3 +148,35 @@ AS $$
 $$;
 REVOKE ALL ON FUNCTION public.get_bump_rta_global_slowest_ranking(text, integer) FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.get_bump_rta_global_slowest_ranking(text, integer) TO anon, service_role;
+
+DROP FUNCTION IF EXISTS public.get_bump_rta_record_ranks(text, text, integer);
+CREATE OR REPLACE FUNCTION public.get_bump_rta_record_ranks(
+    p_guild_id text, p_event_type text, p_elapsed_ms integer
+) RETURNS TABLE(
+    rank_fast_local integer, rank_fast_global integer,
+    rank_slow_local integer, rank_slow_global integer
+)
+LANGUAGE sql SECURITY INVOKER
+AS $$
+    SELECT
+      (SELECT count(*)::integer + 1 FROM public.bump_rta_records AS r
+        WHERE r.guild_id = p_guild_id AND r.event_type = p_event_type
+          AND r.elapsed_ms < p_elapsed_ms),
+      (SELECT count(*)::integer + 1 FROM (
+          SELECT user_id, min(elapsed_ms) AS best_ms
+          FROM public.bump_rta_events
+          WHERE event_type = p_event_type
+          GROUP BY user_id) AS g
+        WHERE g.best_ms < p_elapsed_ms),
+      (SELECT count(*)::integer + 1 FROM public.bump_rta_worst_records AS w
+        WHERE w.guild_id = p_guild_id AND w.event_type = p_event_type
+          AND w.elapsed_ms > p_elapsed_ms),
+      (SELECT count(*)::integer + 1 FROM (
+          SELECT user_id, max(elapsed_ms) AS worst_ms
+          FROM public.bump_rta_events
+          WHERE event_type = p_event_type
+          GROUP BY user_id) AS g
+        WHERE g.worst_ms > p_elapsed_ms);
+$$;
+REVOKE ALL ON FUNCTION public.get_bump_rta_record_ranks(text, text, integer) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.get_bump_rta_record_ranks(text, text, integer) TO anon, service_role;

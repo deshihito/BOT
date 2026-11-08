@@ -17,7 +17,7 @@ from core.support.api_retry import run_with_retry
 from core.game.rta.common import *  # noqa: F401,F403 - shared constants/helpers
 from core.game.rta.common import DISBOARD_BOT_ID, DISOKU_BOT_ID  # noqa: F401
 from core.game.rta.detect import detect_event  # noqa: F401
-from core.game.rta.helpers import _parse_dt, _snowflake_ts  # noqa: F401
+from core.game.rta.helpers import _parse_dt, _rank_line, _snowflake_ts  # noqa: F401
 
 logger = logging.getLogger("cogs.disboard_rta")
 
@@ -73,6 +73,29 @@ class EventsMixin:
                 logger.exception("Failed to start %s RTA timer: guild=%s message=%s", kind, guild_id, message.id)
 
 
+    async def _record_ranks(self, gid, kind, elapsed, bump_message_id):
+        """記録時点の順位を算出して bump_rta_events の当該行へ保存する。
+
+        順位は「その記録が各ランキングに入る位置」= 自分より上位のユーザー
+        数 + 1（SQL関数 get_bump_rta_record_ranks が best/worst 反映後の
+        テーブルから算出する）。戻り値は順位 dict（通知表示にも使う）。
+        失敗は呼び出し側で握る前提で、ここでは例外をそのまま上げる。
+        """
+        result = await self._call(lambda: self.db.rpc("get_bump_rta_record_ranks", {
+            "p_guild_id": gid, "p_event_type": kind, "p_elapsed_ms": elapsed,
+        }).execute())
+        rows = result.data or []
+        if not rows:
+            return None
+        ranks = rows[0]
+        await self._call(lambda: self.db.table("bump_rta_events").update({
+            "rank_fast_local": ranks.get("rank_fast_local"),
+            "rank_fast_global": ranks.get("rank_fast_global"),
+            "rank_slow_local": ranks.get("rank_slow_local"),
+            "rank_slow_global": ranks.get("rank_slow_global"),
+        }).eq("bump_message_id", bump_message_id).eq("event_type", kind).execute())
+        return ranks
+
     async def _record_rta_event(self, message, kind, user_id, event_at):
         gid = str(message.guild.id)
         pending = await self._call(lambda: self.db.table("bump_rta_pending").select(
@@ -113,6 +136,7 @@ class EventsMixin:
         existing = await self._call(lambda: self.db.table("bump_rta_events").select(
             "elapsed_ms,completed_at").eq("bump_message_id", start["bump_message_id"]).eq(
             "event_type", kind).limit(1).execute())
+        recorded_new = False
         if existing.data:
             elapsed = int(existing.data[0]["elapsed_ms"])
             completed_at = existing.data[0]["completed_at"]
@@ -124,6 +148,7 @@ class EventsMixin:
                 "elapsed_ms": elapsed, "bump_message_id": start["bump_message_id"],
                 "completed_at": completed_at,
             }).execute())
+            recorded_new = True
         await self._call(lambda: self.db.rpc("record_bump_rta_best", {
             "p_guild_id": gid, "p_user_id": record_user_id, "p_event_type": kind,
             "p_elapsed_ms": elapsed, "p_completed_at": completed_at,
@@ -139,11 +164,31 @@ class EventsMixin:
             logger.warning(
                 "bump_rta worst record failed: guild=%s user=%s type=%s",
                 gid, record_user_id, kind, exc_info=True)
+        # 記録時点の順位（最速/最遅 × サーバー内/全体）も付随情報として保存する。
+        # 新規に記録した実行だけが対象（再送時は記録時点の順位を保持する）。
+        # 順位の保存先は実行単位の bump_rta_events 行。
+        ranks = None
+        if recorded_new:
+            try:
+                ranks = await self._record_ranks(
+                    gid, kind, elapsed, start["bump_message_id"])
+            except Exception:
+                logger.warning(
+                    "bump_rta record ranks failed: guild=%s user=%s type=%s",
+                    gid, record_user_id, kind, exc_info=True)
         await self._call(lambda: self.db.table("bump_rta_pending").delete().eq("guild_id", gid).eq(
             "event_type", kind).execute())
+        description = f"{kind} **{elapsed / 1000:.2f}秒**"
+        if ranks:
+            fast = _rank_line("最速", ranks.get("rank_fast_local"), ranks.get("rank_fast_global"))
+            slow = _rank_line("最遅", ranks.get("rank_slow_local"), ranks.get("rank_slow_global"))
+            if fast:
+                description += f"\n{fast}"
+            if slow:
+                description += f"\n{slow}"
         embed = discord.Embed(
             title="RTA記録",
-            description=f"{kind} **{elapsed / 1000:.2f}秒**",
+            description=description,
             color=0xFFFFFF,
         )
         try:
