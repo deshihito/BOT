@@ -62,11 +62,11 @@ class UnifiedBoardGenreTest(unittest.TestCase):
         self.assertEqual(spec.genre, "boardnotify_rta")
 
     def test_registry_totals_after_unification(self):
-        # 旧8件 → 統合1件で general 76→69 / 全体 251→244（実 import での検証値）
+        # 旧8件 → 統合1件で general 76→69 / 全体 251→244（実 import での検証値）。Luna AI 追加で全体 244→245
         from core.general import action_registry
 
         specs = list(action_registry.default_registry()._by_id.values())
-        self.assertEqual(len(specs), 244)
+        self.assertEqual(len(specs), 245)
         self.assertEqual(len([s for s in specs if s.root == "general"]), 69)
 
 
