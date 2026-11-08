@@ -277,19 +277,16 @@ class ExpRankingView(discord.ui.View):
             self._rival_text = f"あなたは {info['rank']} 位で首位です。"
         else:
             above_name = self._names.get(info["above_user_id"])
-            self._rival_text = (
-                f"あなたは {info['rank']} 位。真上の "
-                f"{above_name or 'ライバル'} まであと {info['gap']:,} EXP です。")
             if above_name is None:
-                # 真上の名前が未解決なら取り直してから表示する。
+                # 真上の名前が未解決なら取り直してから文を組み立てる。
                 if not interaction.response.is_done():
                     await interaction.response.defer()
                 names = await resolve_display_names(self.bot, [info["above_user_id"]])
                 self._names.update(names)
                 above_name = names.get(info["above_user_id"])
-                self._rival_text = (
-                    f"あなたは {info['rank']} 位。真上の "
-                    f"{above_name or 'ライバル'} まであと {info['gap']:,} EXP です。")
+            self._rival_text = (
+                f"あなたは {info['rank']} 位。真上の "
+                f"{above_name or 'ライバル'} まであと {info['gap']:,} EXP です。")
         if info is not None:
             self.page = (info["rank"] - 1) // PAGE_SIZE
         await self._reload_and_edit(interaction)
@@ -413,24 +410,9 @@ class ActivityBoardView(discord.ui.View):
 
     async def _asset_top(self):
         try:
-            import config
-            from core.general.wallet.cog import compute_asset_ranking
+            from core.general.wallet.cog import compute_asset_ranking, fetch_all_balances
 
-            def _fetch_balances() -> dict:
-                balances: dict[str, int] = {}
-                offset = 0
-                while True:
-                    response = (config.db_api.table("users")
-                                .select("user_id, balance")
-                                .range(offset, offset + 999).execute())
-                    rows = response.data or []
-                    for row in rows:
-                        balances[str(row["user_id"])] = _as_int(row.get("balance"))
-                    if len(rows) < 1000:
-                        return balances
-                    offset += 1000
-
-            balances = await asyncio.to_thread(_fetch_balances)
+            balances = await asyncio.to_thread(fetch_all_balances)
             token_balances: dict[str, float] = {}
             rate = 0.0
             market_cog = self.bot.get_cog("MarketCog") if self.bot else None

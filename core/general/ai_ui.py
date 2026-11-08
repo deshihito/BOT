@@ -32,10 +32,6 @@ class AIDefaultSelect(discord.ui.Select):
         super().__init__(placeholder="デフォルトAIを選択", options=options, row=0)
 
     async def callback(self, interaction: discord.Interaction):
-        if interaction.user.id != self.user_id:
-            return await interaction.response.send_message(
-                "この設定画面を開いたユーザーだけ変更できます。", ephemeral=True
-            )
         selected = self.values[0] if self.values else ""
         if selected not in self.model_ids:
             return await interaction.response.send_message(
@@ -66,10 +62,6 @@ class AIDefaultPageButton(discord.ui.Button):
         super().__init__(label=label, style=discord.ButtonStyle.secondary, row=1)
 
     async def callback(self, interaction: discord.Interaction):
-        if interaction.user.id != self.owner_view.user_id:
-            return await interaction.response.send_message(
-                "この設定画面を開いたユーザーだけ操作できます。", ephemeral=True
-            )
         next_page = self.owner_view.page + self.direction
         if next_page < 0 or next_page >= self.owner_view.page_count:
             return await interaction.response.send_message(
@@ -97,6 +89,9 @@ class AIDefaultView(discord.ui.View):
         if self.page_count > 1:
             self.add_item(AIDefaultPageButton(self, -1))
             self.add_item(AIDefaultPageButton(self, 1))
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        return interaction.user.id == self.user_id
 
     def refresh_select(self):
         self.remove_item(self.select)
@@ -179,10 +174,6 @@ class ReasoningSelect(discord.ui.Select):
         super().__init__(placeholder="思考強度を選択", options=options, row=0)
 
     async def callback(self, interaction: discord.Interaction):
-        if interaction.user.id != self.user_id:
-            return await interaction.response.send_message(
-                "この設定画面を開いたユーザーだけ変更できます。", ephemeral=True
-            )
         selected = self.values[0] if self.values else ""
         if selected != "__default__" and selected not in self.efforts:
             return await interaction.response.send_message(
@@ -213,6 +204,9 @@ class ReasoningView(discord.ui.View):
         self.add_item(ReasoningSelect(
             user_id, model_id, efforts, ai_preferences.get_reasoning_effort(user_id)
         ))
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        return interaction.user.id == self.user_id
 
     @classmethod
     async def create(cls, user_id: int):

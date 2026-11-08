@@ -34,6 +34,22 @@ COIN_FILENAME = "coin.png"
 COIN_COLOR = 0xf1c40f
 
 
+def fetch_all_balances() -> dict:
+    """全ユーザーの残高をページング取得する（資産ランキング用、sweep2 GEN-25 で集約）。"""
+    balances: dict[str, int] = {}
+    offset = 0
+    while True:
+        response = (config.db_api.table("users")
+                    .select("user_id, balance")
+                    .range(offset, offset + 999).execute())
+        rows = response.data or []
+        for row in rows:
+            balances[str(row["user_id"])] = int(row.get("balance") or 0)
+        if len(rows) < 1000:
+            return balances
+        offset += 1000
+
+
 def compute_asset_ranking(balances: dict, token_balances: dict,
                           rate: float, limit: int = 10) -> list[dict]:
     """総合資産ランキング（S6-6）: 残高＋トークン時価の合算で並べる。
@@ -407,22 +423,7 @@ class WalletCog(commands.Cog):
     async def _asset_leaderboard(self, interaction: discord.Interaction):
         """総合資産ランキング（S6-6）: 残高＋トークン時価（保有数×現在レート）。"""
         try:
-            def _fetch_balances() -> dict:
-                balances: dict[str, int] = {}
-                offset = 0
-                while True:
-                    response = (config.db_api.table("users")
-                                .select("user_id, balance")
-                                .range(offset, offset + 999).execute())
-                    rows = response.data or []
-                    for row in rows:
-                        balances[str(row["user_id"])] = int(
-                            row.get("balance") or 0)
-                    if len(rows) < 1000:
-                        return balances
-                    offset += 1000
-
-            balances = await asyncio.to_thread(_fetch_balances)
+            balances = await asyncio.to_thread(fetch_all_balances)
             token_balances: dict[str, float] = {}
             rate = 0.0
             market_cog = self.bot.get_cog("MarketCog")

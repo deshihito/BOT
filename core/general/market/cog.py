@@ -24,13 +24,14 @@ import discord
 from discord.ext import commands, tasks
 
 import config
+from core.general import economy_helpers
 from core.economy_image import render_market_chart_png
 from core.general.circulation import economy_pool as economy_core
 from core.general.items import items as items_core
 from core.general.market import market as market_core
 from core.game.game import prison as prison_core
 from core.support.messages import COIN_UPDATE_FAILED_RETRY, MARKET_INVALID_AMOUNT, market_trade_failed
-from core.support.panel_v2 import as_panel_v2, edit_panel_v2, wrap_panel_view as _wrap
+from core.support.panel_v2 import as_panel_v2, edit_panel_v2, edit_panel_with_files as _edit_panel, wrap_panel_view as _wrap
 from cogs.general import INSUFFICIENT
 
 logger = logging.getLogger(__name__)
@@ -65,23 +66,7 @@ def _chart_font_path():
 # コンポーネントV2 統一（core/support/panel_v2.py の流儀）
 # ---------------------------------------------------------------------------
 
-async def _edit_panel(interaction: discord.Interaction, view, *, button=None) -> None:
-    """パネルをその場で再描画する（V2 で包まれていれば V2 の編集経路）。"""
-    container = getattr(button, "view", None)
-    if container is None or not hasattr(container, "_sync"):
-        container = getattr(view, "_v2", None) or view
-    if hasattr(container, "_sync"):
-        container._sync()
-        files = view.panel_files() if hasattr(view, "panel_files") else None
-        await edit_panel_v2(interaction, container, files=files)
-    elif interaction.response.is_done():
-        await interaction.edit_original_response(embed=view.embed(), view=view)
-    else:
-        await interaction.response.edit_message(embed=view.embed(), view=view)
-
-
-def _fmt_tokens(amount: float) -> str:
-    return f"{amount:,.2f}"
+_fmt_tokens = economy_helpers.fmt_tokens
 
 
 def _market_changes(state: dict) -> tuple[float, float]:
@@ -346,23 +331,11 @@ class MarketCog(commands.Cog):
         return market_core.TRADE_CAP_POOL_RATIO
 
     def _wallet(self):
-        wallet = self.bot.get_cog("WalletCog")
-        if wallet is None:
-            raise market_core.TradeError("コイン機能が読み込まれていません。")
-        return wallet
+        return economy_helpers.wallet_cog(self.bot, market_core.TradeError)
 
     async def _record_history(self, sender_id: str, receiver_id: str, amount: int, reason: str) -> None:
-        try:
-            await asyncio.to_thread(lambda: config.db_api.table("transaction_history").insert({
-                "sender_id": sender_id,
-                "receiver_id": receiver_id,
-                "amount": amount,
-                "reason": reason,
-            }).execute())
-        except Exception:
-            # 売買自体は終わっているので、履歴だけ残せなかったことを記録する（wallet.pay と同方針）。
-            logger.exception("market: 取引履歴の記録に失敗 sender=%s receiver=%s amount=%s",
-                             sender_id, receiver_id, amount)
+        await economy_helpers.record_transaction_history(
+            sender_id, receiver_id, amount, reason, log_label="market")
 
     async def execute_buy(self, user_id: int, aga_amount: int) -> str:
         uid = str(user_id)

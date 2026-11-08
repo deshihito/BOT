@@ -22,6 +22,7 @@ import discord
 from discord.ext import commands, tasks
 
 import config
+from core.general import economy_helpers
 from core.economy_image import PanelRow, render_panel_png
 from core.general.items import items as items_core
 from core.game.game import prison as prison_core
@@ -49,9 +50,7 @@ BOX_ID = "TREASURE_BOX"
 # ---------------------------------------------------------------------------
 
 
-def _item_name(item_id: str) -> str:
-    definition = items_core.ITEM_DEFS.get(item_id)
-    return definition["name"] if definition else item_id
+_item_name = economy_helpers.item_name
 
 
 def _shop_lines() -> tuple[list[str], list[str]]:
@@ -425,23 +424,11 @@ class ItemsCog(commands.Cog):
 
     # ------------------------------------------------------------------ 実行
     def _wallet(self):
-        wallet = self.bot.get_cog("WalletCog")
-        if wallet is None:
-            raise items_core.ItemError("コイン機能が読み込まれていません。")
-        return wallet
+        return economy_helpers.wallet_cog(self.bot, items_core.ItemError)
 
     async def _record_history(self, sender_id: str, receiver_id: str, amount: int, reason: str) -> None:
-        try:
-            await asyncio.to_thread(lambda: config.db_api.table("transaction_history").insert({
-                "sender_id": sender_id,
-                "receiver_id": receiver_id,
-                "amount": amount,
-                "reason": reason,
-            }).execute())
-        except Exception:
-            # 操作自体は終わっているので、履歴だけ残せなかったことを記録する（wallet.pay と同方針）。
-            logger.exception("items: 取引履歴の記録に失敗 sender=%s receiver=%s amount=%s",
-                             sender_id, receiver_id, amount)
+        await economy_helpers.record_transaction_history(
+            sender_id, receiver_id, amount, reason, log_label="items")
 
     async def execute_buy(self, user_id: int, item_id: str, count: int) -> str:
         uid = str(user_id)

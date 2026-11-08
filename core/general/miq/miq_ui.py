@@ -30,8 +30,6 @@ class MiqToggleButton(discord.ui.Button):
 
     async def callback(self, interaction: discord.Interaction):
         parent = self.parent_view
-        if not await parent.check_owner(interaction):
-            return
         parent.prefs[self.field] = not parent.prefs.get(self.field)
         await parent.commit(interaction)
 
@@ -49,8 +47,6 @@ class MiqFontSelect(discord.ui.Select):
 
     async def callback(self, interaction: discord.Interaction):
         parent = self.parent_view
-        if not await parent.check_owner(interaction):
-            return
         parent.prefs["font"] = self.values[0]
         await parent.commit(interaction)
 
@@ -68,8 +64,6 @@ class MiqThemeSelect(discord.ui.Select):
 
     async def callback(self, interaction: discord.Interaction):
         parent = self.parent_view
-        if not await parent.check_owner(interaction):
-            return
         parent.prefs["theme"] = self.values[0]
         await parent.commit(interaction)
 
@@ -87,8 +81,6 @@ class MiqFormatSelect(discord.ui.Select):
 
     async def callback(self, interaction: discord.Interaction):
         parent = self.parent_view
-        if not await parent.check_owner(interaction):
-            return
         parent.prefs["format"] = self.values[0]
         await parent.commit(interaction)
 
@@ -100,8 +92,6 @@ class MiqPreviewButton(discord.ui.Button):
 
     async def callback(self, interaction: discord.Interaction):
         parent = self.parent_view
-        if not await parent.check_owner(interaction):
-            return
         await interaction.response.defer(ephemeral=True, thinking=True)
         limit = getattr(interaction.guild, "filesize_limit", None)
         # ランダムは押すたびに1回だけ解決する
@@ -156,8 +146,6 @@ class MiqResetButton(discord.ui.Button):
 
     async def callback(self, interaction: discord.Interaction):
         parent = self.parent_view
-        if not await parent.check_owner(interaction):
-            return
         for key, default in MIQ_DEFAULT_PREFS.items():
             if key != "refuse":  # 引用拒否の設定は初期化しない
                 parent.prefs[key] = default
@@ -336,11 +324,7 @@ class MiqSettingsView(discord.ui.View):
         self.add_item(MiqPreviewButton(self))
         self.add_item(MiqResetButton(self))
 
-    async def check_owner(self, interaction: discord.Interaction) -> bool:
-        if interaction.user.id == self.user_id:
-            return True
-        await interaction.response.send_message("この設定画面を開いたユーザーだけ変更できます。", ephemeral=True)
-        return False
+
 
     async def commit(self, interaction: discord.Interaction):
         ok = await miq_save_prefs(self.user_id, self.prefs)
