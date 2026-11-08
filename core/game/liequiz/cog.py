@@ -10,6 +10,7 @@ import logging
 import random
 
 import discord
+from core.general.user_names import cached_display_name
 from discord.ext import commands
 
 from core.game.game import party_ranking
@@ -138,7 +139,7 @@ class LieQuiz(commands.Cog):
             await asyncio.sleep(2)
         rows = session.standings()
         medals = {1: "🥇", 2: "🥈", 3: "🥉"}
-        text = "\n".join(f"{medals.get(i, f'{i}.')} <@{uid}> — {score}点" for i, (uid, score) in enumerate(rows, 1))
+        text = "\n".join(f"{medals.get(i, f'{i}.')} {cached_display_name(self.bot, uid)} — {score}点" for i, (uid, score) in enumerate(rows, 1))
         await channel.send(view=text_panel("🏆 うそ答えクイズ 最終結果", text))
         guild = getattr(channel, "guild", None)
         if guild is not None:

@@ -262,7 +262,7 @@ class CustomWordWolf(commands.Cog):
         lobby = LobbyView(
             title="ワードウルフ 参加者募集", host=interaction.user,
             min_players=3, max_players=99,
-            note=f"リスト: **{session.list_name}**\n{RECRUIT_SECONDS}秒以内に参加してください。",
+            note=f"リスト: **{session.list_name}**\n募集時間: {RECRUIT_SECONDS}秒",
             timeout=RECRUIT_SECONDS + 30)
         await interaction.response.send_message(view=lobby)
         lobby_msg = await original_response_or_none(interaction)
@@ -336,12 +336,12 @@ class CheckWordPanel(GamePanelView):
         word = self.session.player_words.get(interaction.user.id)
         if word:
             await interaction.response.send_message(
-                embed=self.session.cog._white_embed(f"あなたのワードは【**{word}**】です。"),
+                view=text_panel("", f"あなたのワードは【**{word}**】です。"),
                 ephemeral=True,
                 _agobot_skip_localization=True,
             )
         else:
-            await interaction.response.send_message(embed=self.session.cog._white_embed("プレイヤーではありません。"), ephemeral=True)
+            await interaction.response.send_message(view=text_panel("", "プレイヤーではありません。"), ephemeral=True)
 
 
 CheckWordView = CheckWordPanel  # 互換名

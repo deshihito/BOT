@@ -9,10 +9,11 @@ import asyncio
 import logging
 
 import discord
+from core.general.user_names import fallback_name
 from discord.ext import commands
 
 from core.game.game import game_panels, party_ranking
-from core.game.game.game_v2 import GamePanelView, LobbyView, original_response_or_none, safe_delete, text_panel
+from core.game.game.game_v2 import GamePanelView, LobbyView, original_response_or_none, safe_delete, text_panel, GAME_MSG_NOT_JOINED
 from core.game.onenight.onenight import (MAX_PLAYERS, MIN_PLAYERS, ROBBER, ROLE_INFO, SEER, VILLAGER, WOLF,
                            OneNightSession)
 
@@ -35,8 +36,9 @@ class Runtime:
 
 
 def _name(bot, guild, user_id):
+    """表示名（セレクトのラベル・結果表示用。メンションは返さない、sweep2 GA-24）。"""
     member = guild.get_member(user_id) if guild else None
-    return member.mention if member else f"<@{user_id}>"
+    return member.display_name if member else fallback_name(user_id)
 
 
 class SeerSelect(discord.ui.Select):
@@ -49,6 +51,8 @@ class SeerSelect(discord.ui.Select):
         self.cog, self.runtime, self.user_id = cog, runtime, user_id
 
     async def callback(self, interaction: discord.Interaction):
+        if interaction.user.id != self.user_id:
+            return await interaction.response.send_message("この操作は本人だけが行えます。", ephemeral=True)
         session = self.runtime.session
         if self.values[0] == "center":
             cards = session.seer_view_center(self.user_id)
@@ -70,6 +74,8 @@ class RobberSelect(discord.ui.Select):
         self.cog, self.runtime, self.user_id = cog, runtime, user_id
 
     async def callback(self, interaction: discord.Interaction):
+        if interaction.user.id != self.user_id:
+            return await interaction.response.send_message("この操作は本人だけが行えます。", ephemeral=True)
         session = self.runtime.session
         target = int(self.values[0])
         session.set_robber_target(self.user_id, target)
@@ -94,7 +100,7 @@ class NightPanel(GamePanelView):
         session = self.runtime.session
         uid = interaction.user.id
         if uid not in session.players:
-            return await interaction.response.send_message("あなたは参加していません。", ephemeral=True)
+            return await interaction.response.send_message(GAME_MSG_NOT_JOINED, ephemeral=True)
         if uid in self.runtime.acted:
             return await interaction.response.send_message("夜の行動は済んでいます。", ephemeral=True)
         role = session.initial[uid]
@@ -241,7 +247,7 @@ class OneNight(commands.Cog):
         lines = []
         for uid in session.players:
             mark = "（処刑）" if uid in result["executed"] else ""
-            lines.append(f"<@{uid}>: {session.final[uid]}{mark}")
+            lines.append(f"{_name(self.bot, guild, uid)}: {session.final[uid]}{mark}")
         if result["peaceful"]:
             verdict = "プレイヤーの中に人狼はいませんでした（平和な夜）。**村人陣営の勝ち**です。"
         elif result["village_win"]:

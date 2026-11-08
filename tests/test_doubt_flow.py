@@ -77,7 +77,7 @@ class DoubtFlowTest(unittest.IsolatedAsyncioTestCase):
         game = self.new_game([['[S-5]'], ['[H-2]', '[H-3]'], ['[D-4]']])
         with fast_time():
             await self.play(game, self.players[0], '[S-5]')
-        self.assertIn('勝者: <@1>', self.channel.texts()[-1])
+        self.assertIn('勝者: P1', self.channel.texts()[-1])
         self.assertNotIn(self.channel.id, self.cog.games)
 
     async def test_last_card_truthfully_doubted_still_wins(self):
@@ -88,7 +88,7 @@ class DoubtFlowTest(unittest.IsolatedAsyncioTestCase):
             await self.cog.on_message(FakeChatMessage(self.players[1], self.channel, 'ダウト'))
             await task
         self.assertIn('ダウト失敗', self.channel.texts()[-2])
-        self.assertIn('勝者: <@1>', self.channel.texts()[-1])
+        self.assertIn('勝者: P1', self.channel.texts()[-1])
         self.assertEqual(sorted(game.hands[2]), ['[H-2]', '[H-3]', '[S-1]'])
         self.assertEqual(sum('勝者' in t for t in self.channel.texts()), 1)
 

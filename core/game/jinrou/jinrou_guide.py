@@ -122,7 +122,7 @@ def guide_fields(role: str) -> list[tuple[str, str]]:
 
 def guide_text(role: str) -> str:
     """役職ガイドを V2 パネル用のテキスト（1 行 1 項目）で返す。"""
-    return "\n".join(f"🔰 {name}: {value[:1024]}" for name, value in guide_fields(role))
+    return "\n".join(f"🔰 {name}: {value[:3900]}" for name, value in guide_fields(role))
 
 
 def phase_text(phase: str, role: Optional[str]) -> tuple[str, str]:

@@ -52,7 +52,7 @@ def status_text(game: CodenamesGame, session, note: str = "") -> str:
     red_left = game.remaining("red")
     blue_left = game.remaining("blue")
     text = (f"残り: 🔴 {red_left}枚 ／ 🔵 {blue_left}枚\n"
-            f"リーダー: 🔴 {session['leaders']['red'].mention} ／ 🔵 {session['leaders']['blue'].mention}\n")
+            f"リーダー: 🔴 {session['leaders']['red'].display_name} ／ 🔵 {session['leaders']['blue'].display_name}\n")
     if game.phase == "done":
         text += f"🏆 {TEAM_LABEL[game.winner]} の勝ちです。"
         if game.loser_reason == "assassin":
@@ -157,6 +157,8 @@ class ControlPanel(GamePanelView):
         team = self._team(interaction)
         if team != game.turn or game.phase != "guess":
             return await interaction.response.send_message("今はパスできません。", ephemeral=True)
+        if team is not None and session["leaders"][team].id == interaction.user.id:
+            return await interaction.response.send_message("リーダーはパスできません。", ephemeral=True)
         game.pass_turn(team)
         await interaction.response.defer()
         await self.cog.refresh_board(session, note=f"{TEAM_LABEL[team]} がパスしました。")

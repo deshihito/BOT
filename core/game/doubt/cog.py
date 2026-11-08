@@ -3,9 +3,10 @@ import io
 from types import SimpleNamespace
 
 import discord
+from core.general.user_names import fallback_name
 from core.game.game import board_image, game_panels
 from core.game.game.board_image import render_cached, render_card, render_card_hand, render_card_pile
-from core.game.game.game_v2 import GamePanelView, LobbyView, safe_delete, text_panel
+from core.game.game.game_v2 import GamePanelView, LobbyView, safe_delete, text_panel, GAME_MSG_NOT_YOUR_TURN, GAME_MSG_NOT_JOINED
 from discord.ext import commands
 
 from core.general import action_usage
@@ -122,7 +123,7 @@ class CardSelect(discord.ui.Select):
         user_id = interaction.user.id
         
         if user_id != game.current_player_id:
-            return await interaction.response.send_message(embed=we("あなたのターンではありません"), ephemeral=True)
+            return await interaction.response.send_message(embed=we(GAME_MSG_NOT_YOUR_TURN), ephemeral=True)
         if game.is_accepting_doubt:
             return await interaction.response.send_message(embed=we("ダウト受付中です。受付が終わってから出してください。"), ephemeral=True)
         
@@ -187,7 +188,7 @@ class GameControlView(GamePanelView):
     async def _doubt(self, interaction: discord.Interaction):
         game = self.game_engine
         if interaction.user.id not in game.hands:
-            return await interaction.response.send_message(embed=we("あなたはゲームに参加していません。"), ephemeral=True)
+            return await interaction.response.send_message(embed=we(GAME_MSG_NOT_JOINED), ephemeral=True)
         if not game.is_accepting_doubt:
             return await interaction.response.send_message(embed=we("今はダウトできるタイミングではありません（カードが出てから5秒間だけです）。"), ephemeral=True)
         await interaction.response.send_message(embed=we("ダウトを宣言しました。"), ephemeral=True)
@@ -196,9 +197,9 @@ class GameControlView(GamePanelView):
     async def _pass_turn(self, interaction: discord.Interaction):
         game = self.game_engine
         if interaction.user.id not in game.hands:
-            return await interaction.response.send_message(embed=we("あなたはゲームに参加していません。"), ephemeral=True)
+            return await interaction.response.send_message(embed=we(GAME_MSG_NOT_JOINED), ephemeral=True)
         if interaction.user.id != game.current_player_id:
-            return await interaction.response.send_message(embed=we("あなたのターンではありません"), ephemeral=True)
+            return await interaction.response.send_message(embed=we(GAME_MSG_NOT_YOUR_TURN), ephemeral=True)
         if game.is_accepting_doubt:
             return await interaction.response.send_message(embed=we("ダウト受付中です。受付が終わってからにしてください。"), ephemeral=True)
         await interaction.response.send_message(embed=we("パスしました。"), ephemeral=True)
@@ -206,23 +207,21 @@ class GameControlView(GamePanelView):
 
     async def _check_hand(self, interaction: discord.Interaction):
         if interaction.user.id not in self.game_engine.hands:
-            return await interaction.response.send_message(embed=we("あなたはゲームに参加していません。"), ephemeral=True)
+            return await interaction.response.send_message(embed=we(GAME_MSG_NOT_JOINED), ephemeral=True)
             
         hand = self.game_engine.hands.get(interaction.user.id, [])
         hand_str = " ".join(hand) if hand else "手札がありません"
-        embed = discord.Embed(title="あなたの手札", description=hand_str, color=0xFFFFFF)
         if hand:
-            embed.set_image(url="attachment://doubt_hand.png")
-            await interaction.response.send_message(embed=embed, ephemeral=True, file=hand_file(hand))
+            await interaction.response.send_message(view=text_panel("あなたの手札", hand_str), ephemeral=True, file=hand_file(hand))
         else:
-            await interaction.response.send_message(embed=embed, ephemeral=True)
+            await interaction.response.send_message(view=text_panel("あなたの手札", hand_str), ephemeral=True)
 
     async def _play(self, interaction: discord.Interaction):
         if interaction.user.id not in self.game_engine.hands:
-            return await interaction.response.send_message(embed=we("あなたはゲームに参加していません。"), ephemeral=True)
+            return await interaction.response.send_message(embed=we(GAME_MSG_NOT_JOINED), ephemeral=True)
             
         if interaction.user.id != self.game_engine.current_player_id:
-            return await interaction.response.send_message(embed=we("あなたのターンではありません"), ephemeral=True)
+            return await interaction.response.send_message(embed=we(GAME_MSG_NOT_YOUR_TURN), ephemeral=True)
         if self.game_engine.is_accepting_doubt:
             return await interaction.response.send_message(embed=we("ダウト受付中です。受付が終わってから出してください。"), ephemeral=True)
         hand = self.game_engine.hands[interaction.user.id]
@@ -244,7 +243,7 @@ class DoubtJoinView(LobbyView):
         host = SimpleNamespace(id=host_id, display_name="", mention=f"<@{host_id}>")
         super().__init__(
             title="ダウト参加者募集", host=host, min_players=3, max_players=99,
-            note="ボタンを押して参加してください\n**3名以上で開始します**（募集時間: 60秒）",
+            note="**3名以上で開始します**（募集時間: 60秒）",
             timeout=65)
         self.closed = False
         self.message = None
@@ -282,7 +281,6 @@ class Doubt(commands.Cog):
         if note:
             lines.append(note)
         lines += [
-            f"次の方、カードを選んでください: <@{game.current_player_id}>",
             f"現在の手番: <@{game.current_player_id}>",
             f"出すべき数字: **{game.next_required_num}**",
             f"場の状況: 合計 {len(game.field)}枚",
@@ -300,7 +298,9 @@ class Doubt(commands.Cog):
         if announce is not None:
             game.last_announce = None
             await safe_delete(announce)
-        await channel.send(view=text_panel("Game Set!", f"勝者: <@{winner_id}>"))
+        winner_member = channel.guild.get_member(winner_id) if getattr(channel, "guild", None) else None
+        winner_name = winner_member.display_name if winner_member else fallback_name(winner_id)
+        await channel.send(view=text_panel("ダウト 終了", f"勝者: {winner_name}"))
         if self.games.get(channel.id) is game:
             del self.games[channel.id]
             # サーバーごとのランキング（core/game/game/party_ranking.py）: 手札を出し切った 1 人が勝ち

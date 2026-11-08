@@ -380,8 +380,8 @@ class Daifugo(commands.Cog):
                 min_players=1,   # 人数が足りない分は Bot が入るため、主催者だけでも開始できる
                 max_players=MAX_PLAYERS,
                 note=(f"{interaction.user.mention} さんが募集中です。\n"
-                      f"{RECRUIT_SECONDS}秒で自動開始します（{MIN_PLAYERS}〜{MAX_PLAYERS}人、"
-                      f"足りないときは Bot が入ります）。\n"
+                      f"{RECRUIT_SECONDS}秒で自動開始します（1人から開始でき、"
+                      f"{MIN_PLAYERS}人未満のときは Bot が入ります）。\n"
                       f"ルール: 8切り {'ON' if g.rule_eight_cut else 'OFF'} / スペ3返し {'ON' if g.rule_spade3 else 'OFF'}"),
                 timeout=RECRUIT_SECONDS + 30)
             await game_panels.replace(channel, "party", view=lobby)
@@ -503,7 +503,7 @@ class Daifugo(commands.Cog):
             return await interaction.response.send_message(error, ephemeral=True)
         if not g.can_play(interaction.user.id, tuple(play)):
             return await interaction.response.send_message("その手はもう出せません。", ephemeral=True)
-        await interaction.response.send_message(f"{label(play)} を出しました。")
+        await interaction.response.send_message(f"{label(play)} を出しました。", ephemeral=True)
         await self.apply(interaction.channel, g, interaction.user.id, tuple(play))
 
     async def on_pass(self, interaction: discord.Interaction, g: DaifugoGame):
@@ -512,7 +512,7 @@ class Daifugo(commands.Cog):
             return await interaction.response.send_message(error, ephemeral=True)
         if g.table is None:
             return await interaction.response.send_message("場にカードがないので、パスはできません。", ephemeral=True)
-        await interaction.response.send_message("パスしました。")
+        await interaction.response.send_message("パスしました。", ephemeral=True)
         await self.apply(interaction.channel, g, interaction.user.id, PASS)
 
     async def show_hand(self, interaction: discord.Interaction, g: DaifugoGame):

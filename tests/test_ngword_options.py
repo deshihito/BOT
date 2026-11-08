@@ -71,7 +71,7 @@ class CharModeFlowTest(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(await cog.handle_message(msg(members[0], channel, 'アイス食べたい')))
             self.assertTrue(await cog.handle_message(msg(members[1], channel, 'ちょっと')))
             await task
-        self.assertIn('<@3>', channel.sent[-1].text())
+        self.assertIn('P3', channel.sent[-1].text())
 
 
 class HubOptionsTest(unittest.IsolatedAsyncioTestCase):
