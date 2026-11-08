@@ -6,6 +6,7 @@
 進行は core/game/codenames/codenames.py の状態機械に従う。
 """
 import asyncio
+import io
 import logging
 import random
 from core.support.emojis import FAILED
@@ -15,6 +16,8 @@ from discord.ext import commands
 
 from core.game.game import party_ranking
 from core.game.game import game_panels
+from core.game.game.board_image import (codenames_key_cells, codenames_public_cells,
+                                        render_cached, render_codenames_board)
 from core.game.game.game_v2 import GamePanelView, refresh_panel, text_panel
 from core.game.codenames.codenames import TEAM_LABEL, CodenamesGame, other_team
 
@@ -62,7 +65,25 @@ def status_text(game: CodenamesGame, session, note: str = "") -> str:
                  f"（あと {game.guesses_left} 回選べます。パスもできます）")
     if note:
         text += f"\n{note}"
-    return text + f"\n```\n{board_text(game)}\n```"
+    return text
+
+
+def board_png(game: CodenamesGame, *, key_view: bool = False) -> bytes:
+    """盤面画像。共有盤面は未開示セルの種類を落としてから描く（秘匿）。
+
+    key_view=True はリーダーの ephemeral 専用で、キー全体を渡す。
+    """
+    if key_view:
+        cells = codenames_key_cells(game.key, game.revealed)
+    else:
+        cells = codenames_public_cells(game.key, game.revealed)
+    key = ("codenames-board", tuple(game.words), tuple(cells), key_view)
+    return render_cached(key, lambda: render_codenames_board(game.words, cells))
+
+
+def board_file(game: CodenamesGame, *, key_view: bool = False) -> discord.File:
+    return discord.File(io.BytesIO(board_png(game, key_view=key_view)),
+                        filename="codenames_key.png" if key_view else "board.png")
 
 
 class HintModal(discord.ui.Modal, title="ヒントを出す"):
@@ -94,6 +115,8 @@ class ControlPanel(GamePanelView):
         super().__init__("🕵 コードネーム", body, timeout=None)
         self.cog = cog
         self.session = session
+        self.add_extra(discord.ui.MediaGallery(
+            discord.MediaGalleryItem("attachment://board.png")))
         self.guess_select = guess_select
         if guess_select is not None:
             self.add_row(guess_select)
@@ -115,8 +138,8 @@ class ControlPanel(GamePanelView):
             return await interaction.response.send_message("キーは各チームのリーダーだけが見られます。", ephemeral=True)
         game: CodenamesGame = session["game"]
         await interaction.response.send_message(
-            f"キーカード（あなたは {TEAM_LABEL[self._team(interaction)]} のリーダー）:\n```\n{board_text(game, reveal_key=True)}\n```",
-            ephemeral=True)
+            f"キーカード（あなたは {TEAM_LABEL[self._team(interaction)]} のリーダー）",
+            file=board_file(game, key_view=True), ephemeral=True)
 
     async def _hint(self, interaction: discord.Interaction):
         session = self.session
@@ -264,14 +287,15 @@ class Codenames(commands.Cog):
                 winners = session["teams"][game.winner]
                 for member in winners:
                     await party_ranking.shared().record_win(session["guild_id"], member.id, GAME_ID)
-            # 盤面パネルを片付け、結果だけを残す。
+            # 盤面パネルを片付け、結果だけを残す（最終盤面の画像つき）。
             await game_panels.clear(channel, "party")
-            await channel.send(view=text_panel("🕵 コードネーム 終了", status_text(game, session, note)))
+            await channel.send(view=text_panel("🕵 コードネーム 終了", status_text(game, session, note)),
+                               file=board_file(game))
             self.sessions.pop(channel.id, None)
             return
         view = ControlPanel(self, session, body=status_text(game, session, note),
                             guess_select=GuessSelect(self, session))
-        await game_panels.replace(channel, "party", view=view)
+        await game_panels.replace(channel, "party", view=view, file=board_file(game))
 
 
 async def setup(bot):

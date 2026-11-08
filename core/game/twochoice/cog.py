@@ -6,12 +6,14 @@
 core/game/game/game_records.py の twochoice に残る。
 """
 import asyncio
+import io
 import random
 
 import discord
 from discord.ext import commands
 
 from core.game.game import game_panels, game_records
+from core.game.game.board_image import render_bars, render_cached
 from core.game.game.game_v2 import GamePanelView, text_panel
 from core.game.twochoice.twochoice import QUESTIONS_PER_SESSION, minority_side, pick_questions, tally
 
@@ -80,9 +82,14 @@ class TwoChoice(commands.Cog):
             votes = session["votes"]
             a, b = tally(votes)
             total = a + b
+            result_file = None
             if total == 0:
                 result = "投票がありませんでした。"
             else:
+                bar_rows = [(f"A: {opt_a}", a), (f"B: {opt_b}", b)]
+                key = ("twochoice-bars", tuple(bar_rows))
+                data = render_cached(key, lambda: render_bars(bar_rows))
+                result_file = discord.File(io.BytesIO(data), "twochoice_result.png")
                 pa = a * 100 // total
                 pb = 100 - pa
                 minority = minority_side(votes)
@@ -97,7 +104,7 @@ class TwoChoice(commands.Cog):
                     if minority and side == minority:
                         per_user_minority[uid] = per_user_minority.get(uid, 0) + 1
             await game_panels.replace(channel, "party", view=text_panel(
-                f"⚖ 結果（{idx}/{len(questions)}）", result))
+                f"⚖ 結果（{idx}/{len(questions)}）", result), file=result_file)
             await asyncio.sleep(3)
         for uid, count in per_user_votes.items():
             game_records.record_twochoice_safely(uid, count, per_user_minority.get(uid, 0))

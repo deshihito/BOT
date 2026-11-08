@@ -1,19 +1,20 @@
 # -*- coding: utf-8 -*-
 """「星か爆弾か」（Skull 系ブラフ＆競りゲーム）。
 
-盤面表現: 各人の「伏せた枚数・成功数」は少量の状態量で、空間的な盤面では
-ないため V2 構造化テキストで十分に伝わる（画像化は更新頻度＝全アクション
-ごとに見合わない。判断は実装ログ参照）。伏せた中身は最後まで非公開で、
-置く操作は本人のボタン選択のみ（内容は共有面に出ない）。
+盤面表現: 各人の山はディスク画像で示す（2026-11-08 の残存ギャップ対応で
+テキストから画像化）。画像に渡すのは伏せディスクの「枚数」と公開済みの
+めくれ結果だけ で、中身は最後まで共有面に出ない（秘匿の構造担保）。
 操作フェーズごとにパネルを差し替える（配置/競り/めくり）。
 """
 import asyncio
+import io
 import logging
 
 import discord
 from discord.ext import commands
 
 from core.game.game import party_ranking
+from core.game.game.board_image import render_cached, render_hoshi_board
 from core.game.game.game_v2 import GamePanelView, preview_notice_line, text_panel
 from core.game.hoshi.hoshi import BOMB, FLOWER, HoshiGame
 
@@ -34,6 +35,32 @@ def status_text(game: HoshiGame) -> str:
         mark = "💀脱落" if uid in game.eliminated else f"成功{game.wins[uid]}/2・残り{sum(game.owned[uid].values()) + len(game.stacks[uid])}枚"
         lines.append(f"<@{uid}>: 伏せ{len(game.stacks[uid])}枚（{mark}）")
     return "\n".join(lines)
+
+
+def board_rows(game: HoshiGame) -> list[dict]:
+    """盤面画像用の行。伏せディスクは枚数だけ、めくれた分は公開済みの種類だけ。"""
+    rows = []
+    for i, uid in enumerate(game.players):
+        label = f"プレイヤー{i + 1}"
+        if uid in game.eliminated:
+            label += "（脱落）"
+        else:
+            label += f"（成功{game.wins[uid]}/2）"
+        rows.append({
+            "label": label,
+            "stack": len(game.stacks[uid]),
+            "flipped": [kind for owner, kind in game.flipped if owner == uid],
+            "active": game.phase != "done" and getattr(game, "current", None) == uid,
+        })
+    return rows
+
+
+def board_file(game: HoshiGame) -> discord.File:
+    rows = board_rows(game)
+    key = ("hoshi-board", tuple((r["label"], r["stack"], tuple(r["flipped"]), r["active"])
+                                 for r in rows))
+    data = render_cached(key, lambda: render_hoshi_board(rows))
+    return discord.File(io.BytesIO(data), "hoshi_board.png")
 
 
 class Hoshi(commands.Cog):
@@ -214,11 +241,14 @@ class Hoshi(commands.Cog):
             panel.add_row(own_btn, pick_btn)
         else:
             return
+        panel.add_extra(discord.ui.MediaGallery(
+            discord.MediaGalleryItem("attachment://hoshi_board.png")))
+        file = board_file(game)
         msg = self.messages.get(channel.id)
         if msg is None:
-            self.messages[channel.id] = await channel.send(view=panel)
+            self.messages[channel.id] = await channel.send(view=panel, file=file)
         else:
-            await msg.edit(view=panel)
+            await msg.edit(view=panel, attachments=[file])
 
     async def _do_place(self, inter: discord.Interaction, game: HoshiGame, kind: str):
         if game.place(inter.user.id, kind):

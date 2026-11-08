@@ -112,8 +112,8 @@ class BoardPanel(GamePanelView):
         if sel is not None:
             lines.append(f"選択中: **{coord(sel[1], sel[0])}**"
                          + ("（旗モード）" if self.flag_mode else ""))
-        else:
-            lines.append("X（横）とY（縦）を選んでから「開く」を押してください。")
+        # 未選択時は行を足さない: 操作手順はセレクトとボタンのラベルが示し、
+        # 地雷の目安は1行目に出ている（旧: 手順説明の行があった）。
         if self.status:
             lines.append(self.status)
         return "\n".join(lines)

@@ -6,6 +6,7 @@
 進行は core/game/loveletter/loveletter.py の状態機械に従い、手番は60秒で自動プレイ。
 """
 import asyncio
+import io
 import logging
 import random
 
@@ -14,6 +15,7 @@ from discord.ext import commands
 
 from core.game.game import party_ranking
 from core.game.game import game_panels
+from core.game.game.board_image import render_cached, render_loveletter_cards
 from core.game.game.game_v2 import GamePanelView, LobbyView, safe_delete, text_panel
 from core.game.loveletter.loveletter import CARD_INFO, NEEDS_TARGET, LoveLetterGame, card_name
 
@@ -130,7 +132,11 @@ class TurnPanel(GamePanelView):
         if game.current == pid:
             legal = game.legal_cards()
             text += "\n出せるのは: " + "／".join(f"{r} {card_name(r)}" for r in legal)
-        await interaction.response.send_message(text, ephemeral=True)
+        key = ("loveletter-hand", tuple(cards))
+        data = render_cached(key, lambda: render_loveletter_cards(
+            [(r, card_name(r)) for r in cards]))
+        await interaction.response.send_message(
+            text, file=discord.File(io.BytesIO(data), "hand.png"), ephemeral=True)
 
     async def _play_first(self, interaction: discord.Interaction):
         await self._open_play(interaction, 0)
@@ -237,8 +243,9 @@ class LoveLetter(commands.Cog):
         session["turn_no"] += 1
         session["acted"].clear()
         session["pending_play"] = None
+        # ボタンのラベルが操作を示すため、毎ターンの操作説明は置かない。
         body = (public_state_text(game, members) +
-                f"\n\n{members[actor].mention} さんの番です。「手札を見る」で確認し、「カードを出す」からプレイしてください。")
+                f"\n\n{members[actor].mention} さんの番です。")
         await game_panels.replace(channel, "party", view=TurnPanel(self, session, body=body))
         prefix = ""
         try:

@@ -6,6 +6,7 @@
 core/game/quiz/quiz_game.py。優勝者は party_ranking に記録される。
 """
 import asyncio
+import io
 import logging
 import time
 
@@ -13,6 +14,7 @@ import discord
 from discord.ext import commands
 
 from core.game.game import game_panels, party_ranking
+from core.game.game.board_image import render_bars, render_cached
 from core.game.game.game_v2 import GamePanelView, LobbyView, original_response_or_none, safe_delete, text_panel
 from core.game.quiz.quiz_bank import default_source
 from core.game.quiz.quiz_game import QuizSession
@@ -110,13 +112,16 @@ class Quiz(commands.Cog):
             session = QuizSession(default_source().get_questions(QUESTION_COUNT))
             for uid in view.players:
                 session.add_player(uid)
-            await self._play(channel, session)
+            names = {uid: getattr(m, "display_name", None) or f"プレイヤー{uid}"
+                     for uid, m in view.members.items()}
+            await self._play(channel, session, names)
         except Exception:  # noqa: BLE001
             logger.exception("Quiz: 進行中にエラーが発生しました")
         finally:
             self.channels.discard(channel.id)
 
-    async def _play(self, channel, session: QuizSession):
+    async def _play(self, channel, session: QuizSession, names: dict | None = None):
+        names = names or {}
         total = len(session.questions)
         while True:
             q = session.next_question()
@@ -144,7 +149,16 @@ class Quiz(commands.Cog):
             await game_panels.replace(channel, "party", view=text_panel(f"第{number}問の答え", desc))
             await asyncio.sleep(3)
         await game_panels.clear(channel, "party")
-        await channel.send(view=text_panel("🏆 クイズ大会 結果発表", standings_text(session)))
+        final_file = None
+        rows = session.standings()[:10]
+        if rows:
+            bar_rows = [(names.get(uid, f"プレイヤー{uid}"), score)
+                        for uid, score, _c, _a in rows]
+            key = ("quiz-final-bars", tuple(bar_rows))
+            data = render_cached(key, lambda: render_bars(bar_rows))
+            final_file = discord.File(io.BytesIO(data), "quiz_final.png")
+        await channel.send(view=text_panel("🏆 クイズ大会 結果発表", standings_text(session)),
+                           file=final_file)
         guild = getattr(channel, "guild", None)
         if guild is not None:
             for uid in session.winners():

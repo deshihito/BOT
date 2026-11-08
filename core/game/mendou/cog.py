@@ -10,12 +10,14 @@ AGO読み替え: 害虫カードを「めんどうな用事」カード（宿題
 配布は1人5枚に絞って短縮した（山の残りは使わない）。
 """
 import asyncio
+import io
 import logging
 
 import discord
 from discord.ext import commands
 
 from core.game.game import party_ranking
+from core.game.game.board_image import render_cached, render_mendou_rows
 from core.game.game.game_v2 import GamePanelView, text_panel
 from core.game.mendou.mendou import KINDS, MendouGame
 
@@ -37,8 +39,9 @@ def status_text(game: MendouGame) -> str:
     names = labels(game)
     lines = []
     for uid in game.players:
-        front = "、".join(f"{k}×{n}" for k, n in game.fronts[uid].items() if n > 0)
-        lines.append(f"{names[uid]} <@{uid}>: 手札{game.hand_size(uid)}枚／場: {front or 'なし'}")
+        # 場の内訳はタイル画像が担う。テキストは枚数だけ（重複の削減）。
+        front_total = sum(game.fronts[uid].values())
+        lines.append(f"{names[uid]} <@{uid}>: 手札{game.hand_size(uid)}枚／場{front_total}枚")
     if game.last_result is not None:
         r = game.last_result
         truth_text = "本当" if r["truth"] else "嘘"
@@ -117,6 +120,27 @@ class PassView(discord.ui.View):
         self.add_item(confirm)
 
 
+def fronts_png(game: MendouGame) -> bytes | None:
+    """各プレイヤーの場のカード（公開情報のみ）のタイル画像。場が空なら None。"""
+    names = labels(game)
+    rows = []
+    for uid in game.players:
+        kinds = [(k, n) for k, n in game.fronts[uid].items() if n > 0]
+        if kinds:
+            rows.append((f"{names[uid]} の場", kinds))
+    if not rows:
+        return None
+    key = ("mendou-fronts", tuple((label, tuple(kinds)) for label, kinds in rows))
+    return render_cached(key, lambda: render_mendou_rows(rows))
+
+
+def hand_png(game: MendouGame, uid: int) -> bytes:
+    """自分の手札のタイル画像（ephemeral 専用）。"""
+    kinds = [(k, n) for k, n in game.hands[uid].items() if n > 0]
+    key = ("mendou-hand", tuple(kinds))
+    return render_cached(key, lambda: render_mendou_rows([("あなたの手札", kinds)]))
+
+
 class Mendou(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
@@ -173,7 +197,8 @@ class Mendou(commands.Cog):
                 return
             game = MendouGame(players)
             self.channels[channel.id] = game
-            self.messages[channel.id] = await channel.send(view=self._panel(game))
+            panel, board = self._panel(game)
+            self.messages[channel.id] = await channel.send(view=panel, file=board)
             while not game.finished:
                 await asyncio.sleep(1.0)
             await self._refresh(channel, game)
@@ -195,16 +220,26 @@ class Mendou(commands.Cog):
             self.messages.pop(channel.id, None)
 
     # ------------------------------------------------------------------ パネル
-    def _panel(self, game: MendouGame) -> GamePanelView:
+    def _panel(self, game: MendouGame) -> tuple[GamePanelView, discord.File | None]:
         panel = GamePanelView("📨 めんどうパス", status_text(game))
+        fronts = fronts_png(game)
+        board = None
+        if fronts is not None:
+            panel.add_extra(discord.ui.MediaGallery(
+                discord.MediaGalleryItem("attachment://mendou_fronts.png")))
+            board = discord.File(io.BytesIO(fronts), "mendou_fronts.png")
 
         async def on_hand(inter: discord.Interaction):
             uid = inter.user.id
             if uid not in game.players:
                 return await inter.response.send_message("参加者だけが見られます。", ephemeral=True)
             hand = "、".join(f"{k}×{n}" for k, n in game.hands[uid].items() if n > 0)
+            view = GamePanelView("あなたの手札", hand or "（なし）")
+            view.add_extra(discord.ui.MediaGallery(
+                discord.MediaGalleryItem("attachment://mendou_hand.png")))
             await inter.response.send_message(
-                view=GamePanelView("あなたの手札", hand or "（なし）"), ephemeral=True)
+                view=view, file=discord.File(io.BytesIO(hand_png(game, uid)), "mendou_hand.png"),
+                ephemeral=True)
 
         async def on_pass(inter: discord.Interaction):
             if game.chain_active or inter.user.id != game.starter:
@@ -246,13 +281,14 @@ class Mendou(commands.Cog):
             passon_btn = discord.ui.Button(label="回す", style=discord.ButtonStyle.success)
             passon_btn.callback = on_pass_on
             panel.add_row(peek_btn, true_btn, false_btn, passon_btn)
-        return panel
+        return panel, board
 
     async def _refresh(self, channel, game: MendouGame):
         msg = self.messages.get(channel.id)
         if msg is not None:
             try:
-                await msg.edit(view=self._panel(game))
+                panel, board = self._panel(game)
+                await msg.edit(view=panel, attachments=[board] if board else [])
             except Exception:  # noqa: BLE001
                 logger.debug("Mendou: パネル更新に失敗", exc_info=True)
 

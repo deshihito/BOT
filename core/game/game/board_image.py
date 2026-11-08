@@ -12,6 +12,9 @@
   スートは同梱フォントに ♠♦♣ のグリフが無いためベクタ描画する。
 - ``render_hanafuda`` / ``render_hanafuda_hand`` / ``render_hanafuda_rows``:
   花札描画（48枚＋裏面）。月モチーフを幾何図形で手続き描画する。
+- ``render_codenames_board`` / ``render_bingo_board`` / ``render_bars`` /
+  ``render_mendou_rows`` / ``render_loveletter_cards`` / ``render_hoshi_board``:
+  残存ギャップ対応（2026-11-08）で追加した盤面・集計・専用カード描画。
 どちらも PNG の bytes を返す純関数で、単体テストで検証できる。
 """
 import io
@@ -1430,6 +1433,339 @@ def render_hanafuda_rows(rows, *, title: str | None = None,
                 _paint_hanafuda(img, x, y, w, h, cid)
                 x += w + GAP
             y += h + GAP
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    return buf.getvalue()
+
+# ---------------------------------------------------------------------------
+# 残存ギャップ対応（2026-11-08）: コードネーム盤面 / ビンゴ全体盤 /
+# 集計バー / めんどうタイル / ラブレター役職カード / 星か爆弾か盤面
+#
+# 秘匿の原則は従来どおり: 共有画像の描画関数には「公開してよい情報」だけを
+# 渡す。コードネームは未開示セルの種類を cog 側で None に落としてから渡す
+# （描画関数は None を「伏せ」としてしか描かない）。
+# ---------------------------------------------------------------------------
+
+def _fit_font(draw, text, max_w, start_size, min_size=10):
+    """text が max_w に収まるフォントを返す。"""
+    size = start_size
+    while size > min_size:
+        font = _font(size)
+        if draw.textlength(str(text), font=font) <= max_w:
+            return font
+        size -= 2
+    return _font(min_size)
+
+
+CODENAMES_COLORS = {
+    "red": (198, 52, 60),
+    "blue": (44, 96, 196),
+    "neutral": (196, 178, 138),
+    "assassin": (38, 38, 46),
+}
+CODENAMES_FACE = (238, 233, 218)
+
+
+def render_codenames_board(words, cells, *, tile_w: int = 168, tile_h: int = 84) -> bytes:
+    """コードネームの 5×5 盤面。
+
+    cells は25要素の (kind, revealed) の組。kind は "red"/"blue"/"neutral"/
+    "assassin" か None。revealed=True のセルは種類色で塗る。revealed=False
+    かつ kind が判明しているセル（リーダー用キー表示でのみ渡される）は
+    種類色の縁取り＋淡色で示す。共有盤面では未開示セルの kind を必ず
+    None にして渡すこと（秘匿は呼び出し側＝cog の責務）。
+    """
+    assert len(words) == 25 and len(cells) == 25
+    width = PAD * 2 + 5 * tile_w + 4 * GAP
+    height = PAD * 2 + 5 * tile_h + 4 * GAP
+    img = Image.new("RGB", (width, height), BG)
+    draw = ImageDraw.Draw(img)
+    for i in range(25):
+        r, c = divmod(i, 5)
+        x = PAD + c * (tile_w + GAP)
+        y = PAD + r * (tile_h + GAP)
+        kind, revealed = cells[i]
+        if revealed and kind is not None:
+            draw.rounded_rectangle([x, y, x + tile_w, y + tile_h], radius=10,
+                                   fill=CODENAMES_COLORS[kind])
+            text_color = (255, 255, 255)
+        elif kind is not None:  # キー表示: 伏せだが種類が分かる
+            base = CODENAMES_COLORS[kind]
+            pale = tuple(int(v + (255 - v) * 0.72) for v in base)
+            draw.rounded_rectangle([x, y, x + tile_w, y + tile_h], radius=10, fill=pale,
+                                   outline=base, width=4)
+            text_color = (43, 45, 56)
+        else:
+            draw.rounded_rectangle([x, y, x + tile_w, y + tile_h], radius=10,
+                                   fill=CODENAMES_FACE)
+            text_color = (43, 45, 56)
+        font = _fit_font(draw, words[i], tile_w - 16, 25)
+        _centered(draw, x + tile_w // 2, y + tile_h // 2, str(words[i]), font, text_color)
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    return buf.getvalue()
+
+
+def codenames_public_cells(key, revealed):
+    """共有盤面用: 未開示セルの種類を落とした cells を作る（秘匿の構造担保）。"""
+    return [(key[i] if revealed[i] else None, bool(revealed[i])) for i in range(25)]
+
+
+def codenames_key_cells(key, revealed):
+    """リーダー用: 種類は全て渡し、開示状態と組にする（ephemeral 専用）。"""
+    return [(key[i], bool(revealed[i])) for i in range(25)]
+
+
+# ---------------------------------------------------------------------------
+# ビンゴ全体盤（75球の開示状況）
+# ---------------------------------------------------------------------------
+
+BINGO_DRAWN = (232, 126, 32)
+BINGO_UNDRAWN = (52, 56, 68)
+
+
+def render_bingo_board(drawn, *, cell: int = 44) -> bytes:
+    """引かれた番号の全体盤。列は B(1-15)/I(16-30)/N(31-45)/G(46-60)/O(61-75)。
+
+    drawn は開示済み番号の集合。出た番号を橙、未出を暗色で示す。
+    """
+    drawn = {int(n) for n in drawn}
+    header_h = 34
+    width = PAD * 2 + 5 * cell + 4 * GAP
+    height = PAD * 2 + header_h + 15 * cell + 14 * GAP
+    img = Image.new("RGB", (width, height), BG)
+    draw = ImageDraw.Draw(img)
+    head_font = _font(24)
+    num_font = _font(21)
+    for col, letter in enumerate("BINGO"):
+        x = PAD + col * (cell + GAP)
+        _centered(draw, x + cell // 2, PAD + header_h // 2, letter, head_font, FG)
+        for row in range(15):
+            n = col * 15 + row + 1
+            y = PAD + header_h + row * (cell + GAP)
+            if n in drawn:
+                draw.rounded_rectangle([x, y, x + cell, y + cell], radius=8, fill=BINGO_DRAWN)
+                color = (255, 255, 255)
+            else:
+                draw.rounded_rectangle([x, y, x + cell, y + cell], radius=8, fill=BINGO_UNDRAWN)
+                color = (148, 154, 168)
+            _centered(draw, x + cell // 2, y + cell // 2, str(n), num_font, color)
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    return buf.getvalue()
+
+
+# ---------------------------------------------------------------------------
+# 集計バー（投票・順位などの分布表示、白基調）
+# ---------------------------------------------------------------------------
+
+BAR_BG = (246, 247, 250)
+BAR_INK = (27, 31, 42)
+BAR_TRACK = (231, 234, 241)
+BAR_DEFAULT = (66, 110, 210)
+
+
+def render_bars(rows, *, title: str | None = None, width: int = 880,
+                bar_color=BAR_DEFAULT) -> bytes:
+    """(ラベル, 値) の横棒グラフ。値の大きい順に並べ替えはしない（呼び出し側の順）。
+
+    ラベルは左列、バーは値の最大値に対する割合で描き、右端に値を出す。
+    投票結果や最終順位など「分布・集計」表示用（白基調はリーダーボードと統一）。
+    """
+    rows = [(str(label), float(value)) for label, value in rows]
+    label_w = 300
+    value_w = 90
+    row_h = 46
+    title_h = 44 if title else 0
+    height = PAD * 2 + title_h + max(1, len(rows)) * row_h
+    img = Image.new("RGB", (width, height), BAR_BG)
+    draw = ImageDraw.Draw(img)
+    y = PAD
+    if title:
+        draw.text((PAD, y), title, fill=BAR_INK, font=_font(24))
+        y += title_h
+    max_v = max((v for _, v in rows), default=0.0) or 1.0
+    bar_x = PAD + label_w
+    bar_max = width - bar_x - value_w - PAD
+    label_font = _font(21)
+    value_font = _font(21)
+    for label, value in rows:
+        font = _fit_font(draw, label, label_w - 12, 21)
+        draw.text((PAD, y + row_h // 2), label, fill=BAR_INK, font=font, anchor="lm")
+        draw.rounded_rectangle([bar_x, y + 8, bar_x + bar_max, y + row_h - 8],
+                               radius=8, fill=BAR_TRACK)
+        w = int(bar_max * max(0.0, value) / max_v)
+        if w > 0:
+            draw.rounded_rectangle([bar_x, y + 8, bar_x + max(w, 16), y + row_h - 8],
+                                   radius=8, fill=bar_color)
+        text = str(int(value)) if float(value).is_integer() else f"{value:g}"
+        draw.text((bar_x + bar_max + 10, y + row_h // 2), text, fill=BAR_INK,
+                  font=value_font, anchor="lm")
+        y += row_h
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    return buf.getvalue()
+
+
+# ---------------------------------------------------------------------------
+# めんどうパス: 用事カードのタイル
+# ---------------------------------------------------------------------------
+
+MENDOU_COLORS = {
+    "宿題": (64, 110, 190), "残業": (96, 84, 170), "掃除当番": (38, 148, 120),
+    "ゴミ出し": (110, 140, 60), "買い出し": (200, 130, 40), "プレゼン": (178, 74, 92),
+    "修理": (90, 100, 116), "洗濯": (52, 140, 178),
+}
+MENDOU_TILE_W, MENDOU_TILE_H = 104, 64
+
+
+def _mendou_tiles_height(rows, per_row):
+    label_h = 26
+    height = PAD
+    for _label, kinds in rows:
+        n = sum(int(cnt) for _k, cnt in kinds)
+        chunks = max(1, -(-n // per_row))
+        height += label_h + chunks * MENDOU_TILE_H + (chunks - 1) * GAP + GAP
+    return height + PAD - GAP
+
+
+def render_mendou_rows(rows, *, title: str | None = None, max_width: int = 880) -> bytes:
+    """(ラベル, [(種類, 枚数), ...]) の行をタイルで描く。
+
+    場のカード（公開情報）や自分の手札の表示用。タイルは種類色＋種類名。
+    ここに渡す内容は全て「見せてよい情報」である前提（秘匿は呼び出し側）。
+    """
+    rows = [(str(label), [(str(k), int(c)) for k, c in kinds if int(c) > 0])
+            for label, kinds in rows]
+    per_row = max(1, (max_width - PAD * 2 + GAP) // (MENDOU_TILE_W + GAP))
+    title_h = 34 if title else 0
+    height = _mendou_tiles_height(rows, per_row) + title_h
+    img = Image.new("RGB", (max_width, max(height, 80)), BG)
+    draw = ImageDraw.Draw(img)
+    y = PAD
+    if title:
+        draw.text((PAD, y), title, fill=FG, font=_font(22))
+        y += title_h
+    label_font = _font(19)
+    tile_font = _font(20)
+    for label, kinds in rows:
+        draw.text((PAD, y), label, fill=FG, font=label_font)
+        y += 26
+        x = PAD
+        col = 0
+        for kind, count in kinds:
+            for _ in range(count):
+                if col >= per_row:
+                    col = 0
+                    x = PAD
+                    y += MENDOU_TILE_H + GAP
+                color = MENDOU_COLORS.get(kind, (100, 104, 118))
+                draw.rounded_rectangle([x, y, x + MENDOU_TILE_W, y + MENDOU_TILE_H],
+                                       radius=9, fill=color)
+                font = _fit_font(draw, kind, MENDOU_TILE_W - 10, 20)
+                _centered(draw, x + MENDOU_TILE_W // 2, y + MENDOU_TILE_H // 2,
+                          kind, font, (255, 255, 255))
+                x += MENDOU_TILE_W + GAP
+                col += 1
+        y += MENDOU_TILE_H + GAP
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    return buf.getvalue()
+
+
+# ---------------------------------------------------------------------------
+# ラブレター（アゴ姫への手紙）: 役職カード
+# ---------------------------------------------------------------------------
+
+LOVELETTER_COLORS = {
+    1: (96, 104, 118), 2: (64, 110, 190), 3: (178, 74, 92), 4: (64, 158, 120),
+    5: (150, 96, 190), 6: (200, 140, 40), 7: (190, 84, 150), 8: (210, 170, 60),
+}
+LOVELETTER_W, LOVELETTER_H = 132, 184
+
+
+def render_loveletter_cards(cards, *, title: str | None = None) -> bytes:
+    """(ランク, 名前) の役職カードを横に並べる（手札は1〜2枚想定）。
+
+    本人の ephemeral 手札表示専用。公開パネルには使わないこと。
+    """
+    cards = [(int(rank), str(name)) for rank, name in cards]
+    title_h = 34 if title else 0
+    width = PAD * 2 + len(cards) * LOVELETTER_W + max(0, len(cards) - 1) * GAP
+    height = PAD * 2 + title_h + LOVELETTER_H
+    img = Image.new("RGB", (max(width, 120), height), BG)
+    draw = ImageDraw.Draw(img)
+    y = PAD
+    if title:
+        draw.text((PAD, y), title, fill=FG, font=_font(21))
+        y += title_h
+    rank_font = _font(52)
+    for i, (rank, name) in enumerate(cards):
+        x = PAD + i * (LOVELETTER_W + GAP)
+        color = LOVELETTER_COLORS.get(rank, (100, 104, 118))
+        draw.rounded_rectangle([x, y, x + LOVELETTER_W, y + LOVELETTER_H], radius=12,
+                               fill=(250, 249, 245), outline=color, width=4)
+        draw.rounded_rectangle([x, y, x + LOVELETTER_W, y + 44], radius=12, fill=color)
+        draw.rectangle([x, y + 30, x + LOVELETTER_W, y + 44], fill=color)
+        _centered(draw, x + LOVELETTER_W // 2, y + 22, str(rank), _font(26), (255, 255, 255))
+        _centered(draw, x + LOVELETTER_W // 2, y + 96, str(rank), rank_font, color)
+        font = _fit_font(draw, name, LOVELETTER_W - 12, 24)
+        _centered(draw, x + LOVELETTER_W // 2, y + 148, name, font, (43, 45, 56))
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    return buf.getvalue()
+
+
+# ---------------------------------------------------------------------------
+# 星か爆弾か: ディスク盤面
+# ---------------------------------------------------------------------------
+
+def render_hoshi_board(rows, *, title: str | None = None) -> bytes:
+    """各プレイヤーの山（伏せディスク）とめくれたディスクを描く。
+
+    rows は [{label, stack, flipped, active}] の列。stack は伏せディスクの
+    「枚数だけ」（中身は渡さない＝秘匿の構造担保）。flipped は公開済みの
+    "star"/"bomb" の列（めくれた順）。
+    """
+    disc = 46
+    label_w = 250
+    row_h = 62
+    title_h = 36 if title else 0
+    max_discs = max((int(r.get("stack", 0)) + len(r.get("flipped", [])) for r in rows),
+                    default=0)
+    width = PAD * 2 + label_w + max(1, max_discs) * (disc + GAP)
+    height = PAD * 2 + title_h + max(1, len(rows)) * row_h
+    img = Image.new("RGB", (min(width, 1024), max(height, 80)), BG)
+    draw = ImageDraw.Draw(img)
+    y = PAD
+    if title:
+        draw.text((PAD, y), title, fill=FG, font=_font(22))
+        y += title_h
+    label_font = _font(19)
+    for row in rows:
+        label = str(row.get("label", ""))
+        font = _fit_font(draw, label, label_w - 10, 19)
+        color = (250, 204, 21) if row.get("active") else FG
+        draw.text((PAD, y + row_h // 2), label, fill=color, font=font, anchor="lm")
+        x = PAD + label_w
+        cy = y + row_h // 2
+        for kind in row.get("flipped", []):
+            if kind == "star":
+                draw.ellipse([x, cy - disc // 2, x + disc, cy + disc // 2],
+                             fill=(250, 204, 21), outline=(255, 255, 255), width=2)
+                _draw_star(draw, x + disc // 2, cy, disc * 0.30, (120, 84, 8))
+            else:
+                draw.ellipse([x, cy - disc // 2, x + disc, cy + disc // 2],
+                             fill=(30, 30, 38), outline=(255, 255, 255), width=2)
+                draw.ellipse([x + disc * 0.38, cy - disc * 0.10, x + disc * 0.62,
+                              cy + disc * 0.14], fill=(120, 124, 138))
+            x += disc + GAP
+        for _ in range(int(row.get("stack", 0))):
+            draw.ellipse([x, cy - disc // 2, x + disc, cy + disc // 2],
+                         fill=(70, 60, 130), outline=(150, 140, 210), width=2)
+            _centered(draw, x + disc // 2, cy, "?", _font(22), (220, 214, 250))
+            x += disc + GAP
+        y += row_h
     buf = io.BytesIO()
     img.save(buf, format="PNG")
     return buf.getvalue()

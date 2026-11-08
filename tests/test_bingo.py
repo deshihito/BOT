@@ -144,7 +144,11 @@ class DrawCycleTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(msg.edits), 1)
         edit = msg.edits[0]
         self.assertIn(f"**{number}**", panel_text(edit["view"]))
-        self.assertIn("これまで:", panel_text(edit["view"]))
+        # game-gaps (2026-11-08): 「これまで:」のテキスト列挙は全体盤の画像に
+        # 置き換えたため、添付ファイルが付くことを確認する。
+        attachments = edit.get("attachments") or []
+        self.assertEqual(len(attachments), 1)
+        self.assertEqual(attachments[0].filename, "bingo_board.png")
         # 開示メッセージには「手札を確認」ボタンが付く
         view = edit["view"]
         labels = [getattr(child, "label", None) for child in view.walk_children()]
