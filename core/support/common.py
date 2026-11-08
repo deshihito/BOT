@@ -95,7 +95,33 @@ SUPPORT_ACTIONS = [
     app_commands.Choice(name="SNS新着通知（X・YouTube・GitHub）", value="sns_notify"),
     app_commands.Choice(name="Quest通知（Discord Orbs）", value="quest_notify"),
     app_commands.Choice(name="レベルアップ通知（EXP）", value="levelup_notify"),
-    app_commands.Choice(name="サーバーアシスト設定", value="server_assist"),
+    # サーバーアシスト再編: 旧ハブ（server_assist）は廃止し、各機能を
+    # assist_<key> の一級アクションとしてジャンルへ配置する。値とラベルは
+    # core/support/server_assist/features の FEATURE と一致させること
+    # （tests/test_server_assist.py が対応を固定する）。並びは機能の表示順。
+    app_commands.Choice(name="参加・退出メッセージ", value="assist_welcome"),
+    app_commands.Choice(name="自動ロール", value="assist_autorole"),
+    app_commands.Choice(name="Starboard", value="assist_starboard"),
+    app_commands.Choice(name="レベル報酬", value="assist_leveling"),
+    app_commands.Choice(name="一時VC", value="assist_tempvoice"),
+    app_commands.Choice(name="提案箱", value="assist_suggestions"),
+    app_commands.Choice(name="AutoMod", value="assist_automod"),
+    app_commands.Choice(name="投票", value="assist_polls"),
+    app_commands.Choice(name="サーバーログ", value="assist_serverlog"),
+    app_commands.Choice(name="自動スレッド", value="assist_autothread"),
+    app_commands.Choice(name="サーバースタッツ", value="assist_stats"),
+    app_commands.Choice(name="埋め込みビルダー", value="assist_embed"),
+    app_commands.Choice(name="Webhookビルダー", value="assist_webhook"),
+    app_commands.Choice(name="タイマー告知", value="assist_timed"),
+    app_commands.Choice(name="警告", value="assist_warnings"),
+    app_commands.Choice(name="招待トラッカー", value="assist_invites"),
+    app_commands.Choice(name="自動リアクション", value="assist_autoreact"),
+    app_commands.Choice(name="イベント", value="assist_events"),
+    app_commands.Choice(name="リアクションロール", value="assist_reactionroles"),
+    app_commands.Choice(name="ロール復元", value="assist_stickyroles"),
+    app_commands.Choice(name="カスタム返信", value="assist_customreplies"),
+    app_commands.Choice(name="常駐しりとり", value="assist_shiritori_resident"),
+    app_commands.Choice(name="応募フォーム", value="assist_applications"),
     app_commands.Choice(name="音声トリガーのサーバー設定", value="voice_trigger"),
     app_commands.Choice(name="VC参加時の自動開始", value="vc_auto_start"),
     app_commands.Choice(name="BOT fixer", value="bot_fixer"),
@@ -113,15 +139,12 @@ SUPPORT_GENRES = {
     "roles": ("ロール・認証", ""),
     "logs": ("履歴・ログ", ""),
     "automation": ("自動化・通知", ""),
-    "assist": (
-        "サーバーアシスト",
-        "サーバー運営の細かな設定をまとめた入口",
-    ),
     "rta": ("RTA設定", ""),
 }
 
 # 旧バージョンで保存されたショートカットを新しいジャンルへ移行する。
-SUPPORT_GENRE_ALIASES = {"server": "roles", "notify": "automation", "bumprta": "rta", "sokunuke": "rta", "language": "automation", "event": "moderation"}
+# "assist" は再編で廃止した旧サーバーアシストジャンル（配下機能の大半の受け皿）。
+SUPPORT_GENRE_ALIASES = {"server": "roles", "notify": "automation", "bumprta": "rta", "sokunuke": "rta", "language": "automation", "event": "moderation", "assist": "automation"}
 
 _SUPPORT_ACTION_BY_VALUE = {choice.value: (choice.name, choice.value) for choice in SUPPORT_ACTIONS}
 
@@ -131,11 +154,25 @@ def _support_actions(*values: str) -> list[tuple[str, str]]:
 
 
 SUPPORT_ACTIONS_BY_GENRE = {
-    "moderation": _support_actions("muted", "whisper", "sticky", "clear", "honeypot", "ticket", "giveaway", "bot_fixer"),
-    "roles": _support_actions("role_bulk", "auth_panel", "role_panel"),
-    "logs": _support_actions("vc_log", "message_log", "moderation_log"),
-    "automation": _support_actions("binjou", "auto_react", "levelup_notify", "voice_trigger", "sns_notify", "quest_notify", "language", "globalchat", "vc_auto_start"),
-    "assist": _support_actions("server_assist"),
+    "moderation": _support_actions(
+        "muted", "whisper", "sticky", "clear", "honeypot", "ticket", "giveaway", "bot_fixer",
+        "assist_automod", "assist_warnings", "assist_applications",
+    ),
+    "roles": _support_actions(
+        "role_bulk", "auth_panel", "role_panel",
+        "assist_autorole", "assist_leveling", "assist_reactionroles", "assist_stickyroles",
+    ),
+    "logs": _support_actions(
+        "vc_log", "message_log", "moderation_log",
+        "assist_serverlog", "assist_invites",
+    ),
+    "automation": _support_actions(
+        "binjou", "auto_react", "levelup_notify", "voice_trigger", "sns_notify", "quest_notify", "language", "globalchat", "vc_auto_start",
+        "assist_welcome", "assist_starboard", "assist_tempvoice", "assist_suggestions",
+        "assist_polls", "assist_autothread", "assist_stats", "assist_embed", "assist_webhook",
+        "assist_timed", "assist_autoreact", "assist_events", "assist_customreplies",
+        "assist_shiritori_resident",
+    ),
     "rta": _support_actions(
         "bumprta_status", "bumprta_on", "bumprta_off", "bumprta_role", "sokunuke_status", "sokunuke_on",
         "sokunuke_off", "sokunuke_vc_on", "sokunuke_vc_off",

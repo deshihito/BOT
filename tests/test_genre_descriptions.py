@@ -75,11 +75,8 @@ class GenreDescriptionPolicyTest(unittest.TestCase):
         # 導線最適化 S7: 1件ジャンル「言語」「イベント」は吸収され、ジャンル自体が無い
         self.assertNotIn("language", SUPPORT_GENRES)
         self.assertNotIn("event", SUPPORT_GENRES)
-        # assist は HCD監査 quick fix #6 で部分列挙（5/22）をやめ、目的文に置換した
-        self.assertEqual(
-            SUPPORT_GENRES["assist"][1],
-            "サーバー運営の細かな設定をまとめた入口",
-        )
+        # サーバーアシスト再編: 「サーバーアシスト」ジャンル自体を廃止した
+        self.assertNotIn("assist", SUPPORT_GENRES)
 
     def test_voice_genres(self):
         for genre in ("connection", "music", "studio", "trigger", "community", "gvc_rooms"):
@@ -107,8 +104,9 @@ class GenreDescriptionPolicyTest(unittest.TestCase):
         self.assertEqual(registry.get("general:pay").description, "")
         self.assertEqual(registry.get("general:exp_status").description, "チャット・VC・generalのEXPとレベル")
         self.assertEqual(registry.get("general:fujo_register").description, "メンバーの安否・不在の検知")
-        self.assertEqual(registry.get("support:server_assist").description,
-                         "サーバー運営の細かな設定をまとめた入口")
+        # サーバーアシスト各機能の説明文は FEATURE 側の説明が正。
+        self.assertEqual(registry.get("support:assist_welcome").description,
+                         "メンバーの参加・退出を、選んだチャンネルへお知らせします。")
 
 
 if __name__ == "__main__":

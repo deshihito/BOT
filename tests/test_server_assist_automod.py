@@ -174,7 +174,7 @@ class AutoModSettingsTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn("横断連投", labels)
         self.assertIn("コピペ荒らし", labels)
         self.assertIn("タイムアウト", labels)
-        self.assertIn("サーバーアシストへ戻る", labels)
+        self.assertIn("サポートへ戻る", labels)
 
 
 if __name__ == "__main__":

@@ -151,7 +151,7 @@ class ServerLogSettingsTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn("削除", labels)
         self.assertIn("ロール", labels)
         self.assertIn("チャンネル", labels)
-        self.assertIn("サーバーアシストへ戻る", labels)
+        self.assertIn("サポートへ戻る", labels)
 
 
 if __name__ == "__main__":

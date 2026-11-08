@@ -47,10 +47,13 @@ class RegistryConsistencyTest(unittest.TestCase):
 
         registered = {spec.value for spec in self.registry.by_root("support")}
         expected = {choice.value for choice in SUPPORT_ACTIONS}
-        # 導線最適化 M2: サーバーアシスト機能が assist_<key> として加わる
-        expected |= {f"assist_{feature.key}" for feature in discover_features()}
+        # サーバーアシスト再編: 各機能は assist_<key> として SUPPORT_ACTIONS
+        # 自体に含まれる（旧ハブ server_assist は廃止）。
+        self.assertTrue(
+            {f"assist_{feature.key}" for feature in discover_features()} <= expected)
+        self.assertNotIn("server_assist", expected)
         self.assertEqual(registered, expected)
-        self.assertEqual(len(registered), 33 + len(discover_features()))
+        self.assertEqual(len(registered), len(SUPPORT_ACTIONS))
 
     def test_general_registration_matches_general_actions(self):
         from cogs.general import GENERAL_ACTIONS
@@ -93,12 +96,15 @@ class ShortcutRootsGenerationTest(unittest.TestCase):
                 self.assertIsInstance(item_label, str)
                 self.assertIsInstance(value, str)
 
-    def test_support_candidates_cover_all_33_including_missing_15(self):
+    def test_support_candidates_cover_all_actions_including_missing_15(self):
+        from cogs.support import SUPPORT_ACTIONS
         from core.support.server_assist import discover_features
 
         values = {value for _label, value in self.roots["support"][1]}
-        # 導線最適化 M2: 従来30件＋グローバルチャット＋vc_auto_start＋bot_fixer で33件＋アシスト機能（assist_<key>）が候補に入る
-        self.assertEqual(len(values), 33 + len(discover_features()))
+        # サーバーアシスト再編: 候補は SUPPORT_ACTIONS 全件（旧ハブを除き、
+        # アシスト各機能 assist_<key> を含む）。
+        self.assertEqual(len(values), len(SUPPORT_ACTIONS))
+        self.assertNotIn("server_assist", values)
         self.assertTrue(MISSING_SUPPORT_VALUES <= values)
         self.assertTrue(
             {f"assist_{feature.key}" for feature in discover_features()} <= values)
@@ -153,7 +159,7 @@ class AICandidatesTest(unittest.TestCase):
         # E-9: general:status / general:exp_status は表示系ショートカットで
         # AI 経由では実行できないため候補から除外された（別テストで担保）。
         for key in ("vc:join", "vc:leave",
-                    "support:bumprta_status", "support:vc_log", "support:server_assist",
+                    "support:bumprta_status", "support:vc_log",
                     "vc:record_status", "vc:record_pitch", "vc:echo_status",
                     "vc:karaoke_score", "vc:changer_stop", "vc:changer_status",
                     "vc:gvc_room_list", "vc:gvc_chat_disconnect", "vc:tts_stop",

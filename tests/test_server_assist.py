@@ -149,17 +149,45 @@ class ServerAssistSettingsTest(unittest.IsolatedAsyncioTestCase):
 
 
 class ServerAssistPanelTest(unittest.IsolatedAsyncioTestCase):
-    def test_support_panel_exposes_server_assist(self):
-        self.assertIn("server_assist", [choice.value for choice in SUPPORT_ACTIONS])
-        self.assertIn("assist", SUPPORT_GENRES)
-        self.assertEqual(
-            SUPPORT_ACTIONS_BY_GENRE["assist"],
-            [("サーバーアシスト設定", "server_assist")],
-        )
+    def test_support_panel_exposes_assist_features_in_genres(self):
+        # サーバーアシスト再編: 旧ハブ（server_assist / assist ジャンル）は
+        # 廃止し、各機能が既存ジャンルの一級アクションとして並ぶ。
+        values = [choice.value for choice in SUPPORT_ACTIONS]
+        self.assertNotIn("server_assist", values)
+        self.assertNotIn("assist", SUPPORT_GENRES)
+        expected_genres = {
+            "assist_automod": "moderation",
+            "assist_warnings": "moderation",
+            "assist_applications": "moderation",
+            "assist_autorole": "roles",
+            "assist_leveling": "roles",
+            "assist_reactionroles": "roles",
+            "assist_stickyroles": "roles",
+            "assist_serverlog": "logs",
+            "assist_invites": "logs",
+            "assist_welcome": "automation",
+            "assist_tempvoice": "automation",
+            "assist_timed": "automation",
+        }
+        for value, genre in expected_genres.items():
+            self.assertIn(value, values)
+            self.assertIn(value, [v for _label, v in SUPPORT_ACTIONS_BY_GENRE[genre]])
+        for genre, items in SUPPORT_ACTIONS_BY_GENRE.items():
+            self.assertLessEqual(len(items), 25, genre)
+        # 旧ハブ値の権限エントリは互換分岐（案内のみ）のために残る。
         self.assertEqual(SupportCog.SUPPORT_REQUIRED_PERMISSIONS["server_assist"], "manage_guild")
 
-    async def test_support_dispatch_opens_server_assist_home(self):
-        assistant = types.SimpleNamespace(show_home=AsyncMock())
+    def test_support_actions_labels_match_features(self):
+        features = {feature.key: feature for feature in discover_features()}
+        names = {choice.value: choice.name for choice in SUPPORT_ACTIONS}
+        assist_values = [value for value in names if value.startswith("assist_")]
+        self.assertEqual(len(assist_values), len(features))
+        for value in assist_values:
+            feature = features[value.removeprefix("assist_")]
+            self.assertEqual(names[value], feature.label, value)
+
+    async def test_support_dispatch_opens_assist_feature(self):
+        assistant = types.SimpleNamespace(show_feature=AsyncMock())
         bot = types.SimpleNamespace(get_cog=lambda name: assistant if name == "ServerAssistCog" else None)
         cog = SupportCog(bot)
         interaction = types.SimpleNamespace(
@@ -169,8 +197,24 @@ class ServerAssistPanelTest(unittest.IsolatedAsyncioTestCase):
             guild_id=1,
             response=types.SimpleNamespace(send_message=AsyncMock()),
         )
+        await cog.dispatch(interaction, "assist_welcome")
+        assistant.show_feature.assert_awaited_once_with(interaction, "welcome")
+
+    async def test_support_dispatch_legacy_server_assist_guides(self):
+        # 保存済みショートカット等に残る旧ハブ値は、行き止まりにせず案内する。
+        bot = types.SimpleNamespace(get_cog=lambda name: None)
+        cog = SupportCog(bot)
+        interaction = types.SimpleNamespace(
+            user=types.SimpleNamespace(
+                guild_permissions=types.SimpleNamespace(administrator=True, manage_guild=True),
+            ),
+            guild_id=1,
+            response=types.SimpleNamespace(send_message=AsyncMock()),
+        )
         await cog.dispatch(interaction, "server_assist")
-        assistant.show_home.assert_awaited_once_with(interaction)
+        interaction.response.send_message.assert_awaited_once()
+        message = interaction.response.send_message.await_args.args[0]
+        self.assertIn("各ジャンルに分かれました", message)
 
     def test_welcome_view_has_channel_selects_and_buttons(self):
         import discord
@@ -184,17 +228,62 @@ class ServerAssistPanelTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn("参加メッセージ", labels)
         self.assertIn("退出メッセージ", labels)
         self.assertIn("テスト送信", labels)
-        self.assertIn("サーバーアシストへ戻る", labels)
+        self.assertIn("サポートへ戻る", labels)
 
-    def test_home_view_lists_discovered_features(self):
-        from cogs.support import AssistFeatureSelect, ServerAssistCog, ServerAssistHomeView
-        cog = ServerAssistCog(types.SimpleNamespace())
-        view = ServerAssistHomeView(cog)
-        self.assertIn("welcome", [feature.key for feature in cog.features])
-        select = next(item for item in view.children if isinstance(item, AssistFeatureSelect))
-        self.assertIn("welcome", [option.value for option in select.options])
-        # 導線最適化 S3: ホーム embed は機能一覧を並べない（セレクトの option が担う）
-        self.assertEqual(view.embed().fields, [])
+    async def test_back_button_returns_to_support_panel(self):
+        # 設定画面の戻るボタンは、その機能が属するジャンルの /support
+        # パネルへ戻す（旧ハブへは戻らない）。
+        import discord
+        guild = FakeGuild()
+        cog = types.SimpleNamespace(
+            bot=types.SimpleNamespace(get_guild=lambda _id: guild),
+            show_panel_edit=AsyncMock(),
+        )
+        view = welcome.build_view(cog, guild.id)
+        button = next(
+            item for item in view.children
+            if isinstance(item, discord.ui.Button) and item.label == "サポートへ戻る"
+        )
+        interaction = types.SimpleNamespace()
+        await button.callback(interaction)
+        cog.show_panel_edit.assert_awaited_once_with(interaction, "welcome")
+
+    async def test_show_panel_edit_opens_feature_genre(self):
+        from unittest.mock import patch
+
+        from core.support.panel import SupportPanelView
+        from core.support.server_assist.cog import ServerAssistCog
+
+        support_cog = types.SimpleNamespace()
+        bot = types.SimpleNamespace(
+            get_cog=lambda name: support_cog if name == "SupportCog" else None)
+        cog = ServerAssistCog(bot)
+        interaction = types.SimpleNamespace(
+            user=types.SimpleNamespace(
+                id=7,
+                guild_permissions=types.SimpleNamespace(administrator=True, manage_guild=True),
+            ),
+            guild_id=1,
+            response=types.SimpleNamespace(send_message=AsyncMock()),
+        )
+        captured = {}
+
+        def capture_panel(view):
+            captured["view"] = view
+            return view
+
+        with patch(
+            "core.support.server_assist.cog.edit_panel_v2",
+            new=AsyncMock(),
+        ) as edit_mock, patch(
+            "core.support.server_assist.cog.as_panel_v2",
+            side_effect=capture_panel,
+        ):
+            await cog.show_panel_edit(interaction, "welcome")
+        edit_mock.assert_awaited_once()
+        panel = captured["view"]
+        self.assertIsInstance(panel, SupportPanelView)
+        self.assertEqual(panel.genre, "automation")
 
     def test_views_fit_components_v2_action_row_limits(self):
         from core.support.panel_v2 import as_panel_v2

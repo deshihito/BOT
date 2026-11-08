@@ -197,8 +197,6 @@ from core.support.panel_recovery.cog import (  # noqa: F401
 from core.support.server_assist.cog import (  # noqa: F401
     discover_features,
     has_manage_permission,
-    AssistFeatureSelect,
-    ServerAssistHomeView,
     ServerAssistCog,
 )
 

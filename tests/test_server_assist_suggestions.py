@@ -161,7 +161,7 @@ class SuggestionSettingsTest(unittest.IsolatedAsyncioTestCase):
         labels = {item.label for item in view.children if isinstance(item, discord.ui.Button)}
         self.assertIn("提案箱", labels)
         self.assertIn("パネルを送信", labels)
-        self.assertIn("サーバーアシストへ戻る", labels)
+        self.assertIn("サポートへ戻る", labels)
         panel_button = next(item for item in view.children if getattr(item, "label", None) == "パネルを送信")
         interaction = types.SimpleNamespace(
             guild=guild,

@@ -245,7 +245,7 @@ class StarboardSettingsTest(unittest.IsolatedAsyncioTestCase):
         labels = {item.label for item in buttons}
         self.assertIn("Starboard", labels)
         self.assertIn("自己リアクション", labels)
-        self.assertIn("サーバーアシストへ戻る", labels)
+        self.assertIn("サポートへ戻る", labels)
 
 
 if __name__ == "__main__":

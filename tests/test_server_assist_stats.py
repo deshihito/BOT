@@ -134,7 +134,7 @@ class StatsSettingsTest(unittest.IsolatedAsyncioTestCase):
         labels = {item.label for item in view.children if isinstance(item, discord.ui.Button)}
         self.assertIn("サーバースタッツ", labels)
         self.assertIn("今すぐ更新", labels)
-        self.assertIn("サーバーアシストへ戻る", labels)
+        self.assertIn("サポートへ戻る", labels)
 
 
 if __name__ == "__main__":

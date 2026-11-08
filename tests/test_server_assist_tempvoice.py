@@ -299,7 +299,7 @@ class TempVoiceSettingsTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn("一時VC", labels)
         self.assertIn("名前テンプレート", labels)
         self.assertIn("既定の人数上限", labels)
-        self.assertIn("サーバーアシストへ戻る", labels)
+        self.assertIn("サポートへ戻る", labels)
 
     def test_register_views(self):
         add_view = MagicMock()

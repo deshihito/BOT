@@ -140,7 +140,7 @@ class EmbedBuilderTest(unittest.IsolatedAsyncioTestCase):
         labels = {item.label for item in view.children if isinstance(item, discord.ui.Button)}
         self.assertIn("埋め込みビルダー", labels)
         self.assertIn("埋め込みを作成", labels)
-        self.assertIn("サーバーアシストへ戻る", labels)
+        self.assertIn("サポートへ戻る", labels)
         create = next(item for item in view.children if getattr(item, "label", None) == "埋め込みを作成")
         interaction = types.SimpleNamespace(
             guild=guild, guild_id=1,

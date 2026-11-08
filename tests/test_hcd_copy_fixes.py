@@ -61,18 +61,18 @@ class CoinHelpTest(unittest.TestCase):
         self.assertIn("マネー", category["description"] + guide)
 
 
-class ServerAssistHomeTest(unittest.TestCase):
-    def test_home_embed_lists_every_feature(self):
-        # 導線最適化 S3 で仕様変更: 機能一覧は AssistFeatureSelect の option が担い、
-        # ホーム embed はタイトル＋説明だけ（同一画面の二重表示をしない）。
-        from cogs.support import ServerAssistHomeView, ServerAssistCog
+class ServerAssistHubRemovedTest(unittest.TestCase):
+    def test_hub_view_and_entry_are_removed(self):
+        # サーバーアシスト再編: ハブ（ホーム画面＋機能セレクト）は廃止し、
+        # 各機能は /support のジャンルから直接開く。cog 本体（常駐処理と
+        # show_feature）は残る。
+        import cogs.support as support_module
+        from cogs.support import ServerAssistCog
 
-        cog = ServerAssistCog(types.SimpleNamespace())
-        self.assertGreater(len(cog.features), 20)
-        embed = ServerAssistHomeView(cog).embed()
-        self.assertEqual(len(embed.fields), 0)
-        self.assertNotIn("ProBot", embed.description)
-        self.assertNotIn("下のメニューから機能を選んでください", embed.description)
+        self.assertFalse(hasattr(support_module, "ServerAssistHomeView"))
+        self.assertFalse(hasattr(support_module, "AssistFeatureSelect"))
+        self.assertFalse(hasattr(ServerAssistCog, "show_home"))
+        self.assertTrue(hasattr(ServerAssistCog, "show_feature"))
 
 
 class GameCopyTest(unittest.TestCase):
@@ -88,11 +88,12 @@ class GameCopyTest(unittest.TestCase):
 
 
 class SupportGenreTest(unittest.TestCase):
-    def test_assist_genre_description_is_not_partial_listing(self):
+    def test_assist_genre_is_removed(self):
+        # サーバーアシスト再編: 「サーバーアシスト」ジャンルは廃止し、
+        # 各機能は既存ジャンル（moderation/roles/logs/automation）へ配置した。
         from core.support.common import SUPPORT_GENRES
 
-        _label, description = SUPPORT_GENRES["assist"]
-        self.assertEqual(description, "サーバー運営の細かな設定をまとめた入口")
+        self.assertNotIn("assist", SUPPORT_GENRES)
 
 
 class LanguageNoteTest(unittest.TestCase):

@@ -184,7 +184,7 @@ class TimedSettingsTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn("編集", labels)
         self.assertIn("削除", labels)
         self.assertIn("タイマー告知", labels)
-        self.assertIn("サーバーアシストへ戻る", labels)
+        self.assertIn("サポートへ戻る", labels)
 
 
 if __name__ == "__main__":
