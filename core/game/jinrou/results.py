@@ -123,29 +123,33 @@ class ResultsMixin:
         alive_ids = {p.id for p in game.alive_players}
         if target_id not in alive_ids:
             return
+        await self._execute_player(game, target_id)
 
+    async def _execute_player(self, game, target_id):
+        """処刑の実処理（貴族の肩代わり→追放→霊媒/黙々通知→特殊勝利判定→リア充道連れ）。
+
+        投票による追放（run_voting_phase）と強制処刑（apply_forced_execution）の共通部。
+        """
         actual_target_id = target_id
-
         lines: list[str] = []
         if game.roles.get(actual_target_id) == "貴族":
             slave_id = game.kizoku_slave.get(actual_target_id)
             if slave_id:
                 slave_m = game.game_channel.guild.get_member(slave_id)
-                if slave_m and slave_id in alive_ids:
+                if slave_m and slave_id in {p.id for p in game.alive_players}:
                     lines.append(f"貴族の処刑判定が奴隷 {slave_m.display_name} に肩代わりされました。")
                     actual_target_id = slave_id
 
         target_m = game.game_channel.guild.get_member(actual_target_id)
         if not target_m: return
 
+        lines.append(f"{target_m.display_name} さんが追放されました。")
         game.last_executed = actual_target_id
         game.silenced_players.add(actual_target_id)
         game.alive_players = [p for p in game.alive_players if p.id != actual_target_id]
 
         # 裏役職の判明トリガーチェック（死亡時）
         await _check_and_reveal_ura_yakushoku(game, actual_target_id, "death")
-
-        lines.append(f"{target_m.display_name} さんが追放されました。")
 
         await self._notify_reibai(game, actual_target_id)
         await self._check_mokumoku_reveal(game, actual_target_id)
@@ -214,49 +218,7 @@ class ResultsMixin:
         target_m = game.game_channel.guild.get_member(actual_target_id)
         if not target_m:
             return
-
-        lines: list[str] = []
-        if game.roles.get(actual_target_id) == "貴族":
-            slave_id = game.kizoku_slave.get(actual_target_id)
-            if slave_id:
-                slave_m = game.game_channel.guild.get_member(slave_id)
-                if slave_m and slave_id in {p.id for p in game.alive_players}:
-                    lines.append(f"貴族の処刑判定が奴隷 {slave_m.display_name} に肩代わりされました。")
-                    actual_target_id = slave_id
-                    target_m = slave_m
-
-        lines.append(f"{target_m.display_name} さんが追放されました。")
-        game.last_executed = actual_target_id
-        game.silenced_players.add(actual_target_id)
-        game.alive_players = [p for p in game.alive_players if p.id != actual_target_id]
-
-        # 裏役職の判明トリガーチェック（死亡時）
-        await _check_and_reveal_ura_yakushoku(game, actual_target_id, "death")
-
-        await self._notify_reibai(game, actual_target_id)
-        await self._check_mokumoku_reveal(game, actual_target_id)
-
-        executed_role = game.roles.get(actual_target_id)
-        if executed_role == "ハゲ":
-            lines.append(HAGE + 'ハゲが追放された。ハゲの勝利です。')
-            await self._send_exile_summary(game, lines)
-            await self._record_wins(game, [actual_target_id])
-            game.is_running = False
-            return
-        elif executed_role == "コウモリむに":
-            lines.append("コウモリむにが追放された。しかし追放ではコウモリむには勝利できない...")
-
-        for pair in game.riacchu_pairs:
-            if actual_target_id in pair:
-                partner_id = pair[1] if pair[0] == actual_target_id else pair[0]
-                if partner_id in {p.id for p in game.alive_players}:
-                    partner_m = game.game_channel.guild.get_member(partner_id)
-                    if partner_m:
-                        lines.append(f"リア充のパートナー {partner_m.display_name} も道連れになりました。")
-                        game.silenced_players.add(partner_id)
-                        game.alive_players = [p for p in game.alive_players if p.id != partner_id]
-                break
-        await self._send_exile_summary(game, lines)
+        await self._execute_player(game, actual_target_id)
 
 
     async def run_chairman_vote_phase(self, game):

@@ -22,7 +22,6 @@ import discord
 from core.game.game import board_image, game_panels, game_restore
 from core.game.game.board_image import render_cached, render_card_hand
 from core.game.game.game_v2 import GamePanelView, LobbyView, safe_delete, text_panel
-from core.support.messages import recruit_join_prompt  # noqa: F401  cogs.daifugo シムの再輸出用に残す
 from discord.ext import commands
 
 from core.game.game import party_ranking
@@ -280,9 +279,7 @@ def table_text(g: DaifugoGame) -> str:
 # --- カード画像（共通トランプ基盤） -------------------------------------------
 def card_spec_of(card: str):
     """内部表記（"S5" / "HK" / "JOKER"）を描画基盤の正規形に変換する。"""
-    if card == JOKER:
-        return board_image.CARD_JOKER
-    return board_image.card_spec(card[1:], card[0])
+    return board_image.suited_card_spec(card, JOKER)
 
 
 def cards_specs(cards) -> tuple:
@@ -299,10 +296,8 @@ def table_image(g: DaifugoGame):
 
 
 def hand_file(cards, filename="daifugo_hand.png"):
-    specs = cards_specs(cards)
-    data = render_cached(("daifugo-hand", specs),
-                         lambda: render_card_hand(list(specs), title="あなたの手札"))
-    return discord.File(io.BytesIO(data), filename=filename)
+    return board_image.card_hand_file(
+        "daifugo-hand", list(cards_specs(cards)), filename)
 
 
 

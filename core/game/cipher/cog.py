@@ -15,7 +15,7 @@ from discord.ext import commands
 
 from core.game.game import party_ranking
 from core.game.cipher.cipher import ALL_CODES, MAX_ROUNDS, WORDS, CipherGame, code_label
-from core.game.game.game_v2 import GamePanelView, text_panel
+from core.game.game.game_v2 import GamePanelView, text_panel, lobby_auto_start_text, lobby_not_enough_text
 
 logger = logging.getLogger(__name__)
 
@@ -110,7 +110,7 @@ class Cipher(commands.Cog):
 
         panel = GamePanelView("🔐 暗号バトル 参加者募集",
                               f"合言葉へのヒントで暗号を伝え合う2チーム対抗ゲームです（{MIN_PLAYERS}〜{MAX_PLAYERS}名）。\n"
-                              f"ホストが「開始する」を押すか、{RECRUIT_SECONDS}秒たつと開始します。\n参加者: <@{players[0]}>")
+                              f"{lobby_auto_start_text(RECRUIT_SECONDS)}\n参加者: <@{players[0]}>")
 
         async def on_join(inter: discord.Interaction):
             if inter.user.id in players:
@@ -119,7 +119,7 @@ class Cipher(commands.Cog):
                 return await inter.response.send_message("満員です。", ephemeral=True)
             players.append(inter.user.id)
             panel.set_content(body=f"合言葉へのヒントで暗号を伝え合う2チーム対抗ゲームです（{MIN_PLAYERS}〜{MAX_PLAYERS}名）。\n"
-                                   f"ホストが「開始する」を押すか、{RECRUIT_SECONDS}秒たつと開始します。\n"
+                                   f"{lobby_auto_start_text(RECRUIT_SECONDS)}\n"
                                    f"参加者（{len(players)}名）: " + " ".join(f"<@{p}>" for p in players))
             await inter.response.edit_message(view=panel)
 
@@ -145,7 +145,7 @@ class Cipher(commands.Cog):
                 await asyncio.sleep(0.5)
             players = list(dict.fromkeys(players))
             if len(players) < MIN_PLAYERS:
-                await channel.send(view=text_panel("暗号バトル", f"人数不足（{MIN_PLAYERS}名以上必要）のため、開始できませんでした。"))
+                await channel.send(view=text_panel("暗号バトル", f"{lobby_not_enough_text(MIN_PLAYERS)}"))
                 return
             teams = [players[0::2], players[1::2]]
             sampled = random.sample(WORDS, 8)

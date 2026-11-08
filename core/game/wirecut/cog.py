@@ -20,7 +20,7 @@ from discord.ext import commands
 
 from core.game.game import game_records
 from core.game.game.board_image import render_cached, render_wirecut_board
-from core.game.game.game_v2 import GamePanelView, preview_notice_line, text_panel
+from core.game.game.game_v2 import GamePanelView, preview_notice_line, text_panel, lobby_auto_start_text, lobby_not_enough_text
 from core.game.wirecut.wirecut import MAX_MISS, WireCutGame
 from core.support.panel_v2 import edit_message_v2
 
@@ -165,7 +165,7 @@ class WireCut(commands.Cog):
 
         panel = GamePanelView("💣 爆弾処理班 参加者募集",
                               f"数字ワイヤーを推理でカットしていく協力ゲームです（{MIN_PLAYERS}〜{MAX_PLAYERS}名）。\n"
-                              f"ホストが「開始する」を押すか、{RECRUIT_SECONDS}秒たつと開始します。\n参加者: <@{players[0]}>",
+                              f"{lobby_auto_start_text(RECRUIT_SECONDS)}\n参加者: <@{players[0]}>",
                               notice=preview_notice_line(GAME_ID))
 
         async def on_join(inter: discord.Interaction):
@@ -175,7 +175,7 @@ class WireCut(commands.Cog):
                 return await inter.response.send_message("満員です。", ephemeral=True)
             players.append(inter.user.id)
             panel.set_content(body=f"数字ワイヤーを推理でカットしていく協力ゲームです（{MIN_PLAYERS}〜{MAX_PLAYERS}名）。\n"
-                                   f"ホストが「開始する」を押すか、{RECRUIT_SECONDS}秒たつと開始します。\n"
+                                   f"{lobby_auto_start_text(RECRUIT_SECONDS)}\n"
                                    f"参加者（{len(players)}名）: " + " ".join(f"<@{p}>" for p in players))
             await inter.response.edit_message(view=panel)
 
@@ -201,7 +201,7 @@ class WireCut(commands.Cog):
                 await asyncio.sleep(0.5)
             players = list(dict.fromkeys(players))
             if len(players) < MIN_PLAYERS:
-                await channel.send(view=text_panel("爆弾処理班", f"人数不足（{MIN_PLAYERS}名以上必要）のため、開始できませんでした。"))
+                await channel.send(view=text_panel("爆弾処理班", f"{lobby_not_enough_text(MIN_PLAYERS)}"))
                 return
             game = WireCutGame(players)
             self.channels[channel.id] = game

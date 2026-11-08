@@ -23,7 +23,7 @@ from core.support.emojis import POYOPOYO
 from core.game.game import game_panels, party_ranking
 from core.game.bingo.bingo import BingoSession, format_card  # noqa: F401  format_card は cogs.bingo シムの再輸出用
 from core.game.game.board_image import render_bingo_board, render_bingo_card, render_cached
-from core.game.game.game_v2 import GamePanelView, LobbyView, original_response_or_none, safe_delete, text_panel
+from core.game.game.game_v2 import GamePanelView, LobbyView, original_response_or_none, safe_delete, text_panel, lobby_auto_start_text, board_image_panel
 
 logger = logging.getLogger(__name__)
 
@@ -84,11 +84,12 @@ class CardCheckPanel(GamePanelView):
             caption = "🔥 **リーチ！** あと1個でビンゴです。"
         else:
             caption = f"あと **{needed}** 個でビンゴです。"
-        embed = discord.Embed(title="あなたのビンゴカード", description=caption, color=0xFFFFFF)
-        embed.set_image(url="attachment://bingo_card.png")
-        embed.set_footer(text="橙色はマーク済み、★ はフリースポットです。")
+        panel = board_image_panel(
+            "あなたのビンゴカード",
+            caption + "\n橙色はマーク済み、★ はフリースポットです。",
+            "bingo_card.png")
         file = discord.File(io.BytesIO(card_png(card)), "bingo_card.png")
-        await interaction.response.send_message(embed=embed, file=file, ephemeral=True)
+        await interaction.response.send_message(view=panel, file=file, ephemeral=True)
 
 
 CardCheckView = CardCheckPanel  # 互換名
@@ -108,7 +109,7 @@ class Bingo(commands.Cog):
         view = LobbyView(
             title="🎱 ビンゴ大会 参加者募集", host=interaction.user,
             min_players=MIN_PLAYERS, max_players=MAX_PLAYERS,
-            note=(f"ホストが「開始する」を押すか、{RECRUIT_SECONDS}秒たつと開始します。"),
+            note=(f"{lobby_auto_start_text(RECRUIT_SECONDS)}"),
             timeout=RECRUIT_SECONDS + 10)
         await interaction.response.send_message(view=view)
         lobby_msg = await original_response_or_none(interaction)

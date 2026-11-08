@@ -497,6 +497,24 @@ CARD_W = 104
 CARD_H = 146
 
 
+def suited_card_spec(card: str, joker: str = "JOKER"):
+    """内部表記（"S5" / "HK" / ジョーカー）を描画基盤の正規形へ変換する。"""
+    if card == joker:
+        return CARD_JOKER
+    return card_spec(card[1:], card[0])
+
+
+def card_hand_file(cache_ns: str, specs, filename: str, title: str = "あなたの手札"):
+    """手札画像の discord.File を返す共通形（レンダリングキャッシュつき）。"""
+    import io
+
+    import discord
+
+    data = render_cached((cache_ns, tuple(specs)),
+                         lambda: render_card_hand(list(specs), title=title))
+    return discord.File(io.BytesIO(data), filename=filename)
+
+
 def card_spec(rank, suit):
     """(ランク, スート) を検証して正規形タプルで返す。スートは "SHDC"。"""
     rank = str(rank)

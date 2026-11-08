@@ -15,7 +15,7 @@ from discord.ext import commands
 
 from core.game.game import party_ranking
 from core.game.game.board_image import render_tiles
-from core.game.game.game_v2 import GamePanelView, text_panel
+from core.game.game.game_v2 import GamePanelView, text_panel, lobby_auto_start_text, lobby_not_enough_text
 from core.game.ruins.ruins import TOTAL_ROUNDS, RuinsGame
 
 logger = logging.getLogger(__name__)
@@ -78,7 +78,7 @@ class Ruins(commands.Cog):
         state = {"started": False}
         panel = GamePanelView("🏺 アゴ遺跡の秘宝 参加者募集",
                               f"進むか帰るかを選ぶチキンレースです（{MIN_PLAYERS}〜{MAX_PLAYERS}名、{TOTAL_ROUNDS}ラウンド）。\n"
-                              f"ホストが「開始する」を押すか、{RECRUIT_SECONDS}秒たつと開始します。\n参加者: <@{players[0]}>")
+                              f"{lobby_auto_start_text(RECRUIT_SECONDS)}\n参加者: <@{players[0]}>")
 
         async def on_join(inter: discord.Interaction):
             if inter.user.id in players:
@@ -87,7 +87,7 @@ class Ruins(commands.Cog):
                 return await inter.response.send_message("満員です。", ephemeral=True)
             players.append(inter.user.id)
             panel.set_content(body=f"進むか帰るかを選ぶチキンレースです（{MIN_PLAYERS}〜{MAX_PLAYERS}名、{TOTAL_ROUNDS}ラウンド）。\n"
-                                   f"ホストが「開始する」を押すか、{RECRUIT_SECONDS}秒たつと開始します。\n"
+                                   f"{lobby_auto_start_text(RECRUIT_SECONDS)}\n"
                                    f"参加者（{len(players)}名）: " + " ".join(f"<@{p}>" for p in players))
             await inter.response.edit_message(view=panel)
 
@@ -113,7 +113,7 @@ class Ruins(commands.Cog):
                 await asyncio.sleep(0.5)
             players = list(dict.fromkeys(players))
             if len(players) < MIN_PLAYERS:
-                await channel.send(view=text_panel("アゴ遺跡の秘宝", f"人数不足（{MIN_PLAYERS}名以上必要）のため、開始できませんでした。"))
+                await channel.send(view=text_panel("アゴ遺跡の秘宝", f"{lobby_not_enough_text(MIN_PLAYERS)}"))
                 return
             game = RuinsGame(players)
             self.channels[channel.id] = game

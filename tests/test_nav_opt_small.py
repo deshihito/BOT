@@ -36,7 +36,8 @@ class GameHubEmbedTest(unittest.TestCase):
         embed = hub_embed()
         self.assertEqual(embed.title, "パーティーゲーム")
         self.assertEqual(embed.fields, [])
-        self.assertNotIn("\n", embed.description)
+        # GB-01: 手順説明文は置かない（タイトルのみ）
+        self.assertIsNone(embed.description)
 
 
 class QuickDeadEndTest(unittest.TestCase):

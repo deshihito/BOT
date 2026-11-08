@@ -30,17 +30,6 @@ from core.support.panel_v2 import edit_panel_v2
 GAME_ID = "sudoku"
 
 
-def sudoku_embed(board, givens, user, label: str, status: str = "") -> discord.Embed:
-    """互換用に残す旧 embed 生成（現在の表示は V2 パネル＋画像）。"""
-    embed = discord.Embed(title=f"🔢 数独（{label}）", color=0xFFFFFF)
-    desc = f"<@{user.id}> の盤面です。\n```\n{board_text(board, givens)}\n```"
-    desc += "X→Y→数字の順に選んで入力します（0で消えます）。[ ] は最初から埋まっているマスです。"
-    if status:
-        desc += f"\n{status}"
-    embed.description = desc
-    return embed
-
-
 def board_png(board, givens, selected=None) -> bytes:
     key = ("sudoku", tuple(tuple(r) for r in board),
            tuple(tuple(r) for r in givens), selected)

@@ -7,6 +7,7 @@ import unittest
 
 from game_fakes import FakeChannel, FakeGuild, FakeInteraction, FakeMember, fast_time, press, real_sleep
 from core.support.ngword import cog as ngword
+from core.game.game import party_ranking
 
 
 def msg(author, channel, content):
@@ -76,7 +77,7 @@ class NGWordTest(unittest.IsolatedAsyncioTestCase):
         last = self.channel.sent[-1].text()
         self.assertIn('NGワード 終了', last)
         self.assertIn('P3', last)
-        self.assertEqual(self.cog.wins[self.guild.id], {3: 1})
+        self.assertEqual(await party_ranking.shared().top(self.guild.id, 'ngword'), [(3, 1)])
         self.assertEqual(self.cog.games, {})
 
     async def test_non_player_and_idle_channel_ignored(self):

@@ -31,23 +31,6 @@ RECRUIT_SECONDS = 45
 KIND_MARK = {"red": "🔴", "blue": "🔵", "neutral": "⚪", "assassin": "💀"}
 
 
-def board_text(game: CodenamesGame, reveal_key: bool = False) -> str:
-    lines = []
-    for r in range(5):
-        cells = []
-        for c in range(5):
-            i = r * 5 + c
-            word = game.words[i]
-            if game.revealed[i]:
-                cells.append(f"{KIND_MARK[game.key[i]]}{word}")
-            elif reveal_key:
-                cells.append(f"{KIND_MARK[game.key[i]]}{word}")
-            else:
-                cells.append(word)
-        lines.append(" ｜ ".join(cells))
-    return "\n".join(lines)
-
-
 def status_text(game: CodenamesGame, session, note: str = "") -> str:
     red_left = game.remaining("red")
     blue_left = game.remaining("blue")

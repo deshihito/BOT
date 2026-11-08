@@ -13,7 +13,7 @@ import discord
 from discord.ext import commands
 
 from core.game.game import game_records
-from core.game.game.game_v2 import GamePanelView, text_panel
+from core.game.game.game_v2 import GamePanelView, text_panel, lobby_auto_start_text, lobby_not_enough_text
 from core.game.justone.justone import ROUNDS_DEFAULT, WORDS, JustOneSession
 
 logger = logging.getLogger(__name__)
@@ -71,22 +71,29 @@ class JustOne(commands.Cog):
         players = [interaction.user.id]
         state = {"started": False}
 
-        panel = GamePanelView("🤝 ひとことヒント 参加者募集",
-                              f"ヒントが他の人と被ると消えてしまう協力ワードゲームです（{MIN_PLAYERS}〜{MAX_PLAYERS}名）。\n"
-                              f"ホストが「開始する」を押すか、{RECRUIT_SECONDS}秒たつと開始します。\n参加者: <@{players[0]}>")
+        def lobby_body(members):
+            return (f"ヒントが他の人と被ると消えてしまう協力ワードゲームです（{MIN_PLAYERS}〜{MAX_PLAYERS}名）。\n"
+                    f"{lobby_auto_start_text(RECRUIT_SECONDS)}\n"
+                    + (f"参加者: <@{members[0]}>" if len(members) == 1 else
+                       f"参加者（{len(members)}名）: " + " ".join(f"<@{p}>" for p in members)))
+
+        panel = GamePanelView("🤝 ひとことヒント 参加者募集", lobby_body(players),
+                              timeout=RECRUIT_SECONDS + 30)
 
         async def on_join(inter: discord.Interaction):
+            if state["started"] or state.get("closed"):
+                return await inter.response.send_message("募集は終了しました。", ephemeral=True)
             if inter.user.id in players:
                 return await inter.response.send_message("すでに参加しています。", ephemeral=True)
             if len(players) >= MAX_PLAYERS:
                 return await inter.response.send_message("満員です。", ephemeral=True)
             players.append(inter.user.id)
-            panel.set_content(body=f"ヒントが他の人と被ると消えてしまう協力ワードゲームです（{MIN_PLAYERS}〜{MAX_PLAYERS}名）。\n"
-                                   f"ホストが「開始する」を押すか、{RECRUIT_SECONDS}秒たつと開始します。\n"
-                                   f"参加者（{len(players)}名）: " + " ".join(f"<@{p}>" for p in players))
+            panel.set_content(body=lobby_body(players))
             await inter.response.edit_message(view=panel)
 
         async def on_start(inter: discord.Interaction):
+            if state.get("closed"):
+                return await inter.response.send_message("募集は終了しました。", ephemeral=True)
             if inter.user.id != players[0]:
                 return await inter.response.send_message("開始できるのはホストだけです。", ephemeral=True)
             state["started"] = True
@@ -106,9 +113,10 @@ class JustOne(commands.Cog):
                 if state["started"]:
                     break
                 await asyncio.sleep(0.5)
+            state["closed"] = True
             players = list(dict.fromkeys(players))
             if len(players) < MIN_PLAYERS:
-                await channel.send(view=text_panel("ひとことヒント", f"人数不足（{MIN_PLAYERS}名以上必要）のため、開始できませんでした。"))
+                await channel.send(view=text_panel("ひとことヒント", f"{lobby_not_enough_text(MIN_PLAYERS)}"))
                 return
             words = random.sample(WORDS, ROUNDS_DEFAULT)
             session = JustOneSession(players, words)

@@ -14,7 +14,7 @@ from discord.ext import commands
 
 from core.game.game import game_panels, party_ranking
 from core.game.game.board_image import render_bars, render_cached
-from core.game.game.game_v2 import GamePanelView, LobbyView, original_response_or_none, safe_delete, text_panel
+from core.game.game.game_v2 import GamePanelView, LobbyView, original_response_or_none, safe_delete, text_panel, lobby_auto_start_text, lobby_not_enough_text
 from core.game.majority.majority import TOPICS, MajoritySession
 
 logger = logging.getLogger(__name__)
@@ -79,7 +79,7 @@ class Majority(commands.Cog):
             title="👥 マジョリティ連想 参加者募集", host=interaction.user,
             min_players=MIN_PLAYERS, max_players=MAX_PLAYERS,
             note=(f"お題に「みんなが書きそうな答え」を出すゲームです。"
-                  f"ホストが「開始する」を押すか、{RECRUIT_SECONDS}秒たつと開始します。"),
+                  f"{lobby_auto_start_text(RECRUIT_SECONDS)}"),
             timeout=RECRUIT_SECONDS + 10)
         await interaction.response.send_message(view=view)
         lobby_msg = await original_response_or_none(interaction)
@@ -99,7 +99,7 @@ class Majority(commands.Cog):
             players = list(dict.fromkeys(view.players))
             if len(players) < MIN_PLAYERS:
                 await channel.send(view=text_panel(
-                    "", f"人数不足（{MIN_PLAYERS}名以上必要）のため、開始できませんでした。"))
+                    "", f"{lobby_not_enough_text(MIN_PLAYERS)}"))
                 return
             topics = random.sample(TOPICS, ROUNDS)
             session = MajoritySession(topics)

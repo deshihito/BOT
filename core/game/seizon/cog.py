@@ -29,6 +29,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands, tasks
 from core.support.api_client import API_NOT_CONFIGURED_MESSAGE
+from core.support.panel_v2 import as_embed_v2, wrap_panel_view
 from core.support.api_retry import run_with_retry
 from core.game.seizon.analysis import (
     ANALYSIS_WINDOW_DAYS,
@@ -258,9 +259,13 @@ class FujoAnalysisView(discord.ui.View):
     いつでも開ける）。対象は押した本人に固定する（分析は本人の記録専用）。
     """
 
-    def __init__(self, cog: "FujoSurvival"):
+    def __init__(self, cog: "FujoSurvival", embed: discord.Embed | None = None):
         super().__init__(timeout=3600)
         self.cog = cog
+        self._embed = embed
+
+    def embed(self) -> discord.Embed | None:
+        return self._embed
 
     @discord.ui.button(label="fujo分析", style=discord.ButtonStyle.secondary, custom_id="fujo:analysis")
     async def open_analysis(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -441,15 +446,20 @@ class FujoSurvival(commands.Cog):
         return embed
 
     async def _reply(self, interaction: discord.Interaction, embed: discord.Embed, ephemeral: bool = False, view: discord.ui.View | None = None, file: discord.File | None = None):
+        """対話応答は Components V2 で包んで返す（GB-15）。"""
         extra = {}
-        if view is not None:
-            extra["view"] = view
         if file is not None:
             extra["file"] = file
-        if interaction.response.is_done():
-            await interaction.followup.send(embed=embed, ephemeral=ephemeral, **extra)
+        if view is not None and hasattr(view, "embed"):
+            payload = {"view": wrap_panel_view(view)}
+        elif view is not None:
+            payload = {"embed": embed, "view": view}
         else:
-            await interaction.response.send_message(embed=embed, ephemeral=ephemeral, **extra)
+            payload = {"view": as_embed_v2(embed)}
+        if interaction.response.is_done():
+            await interaction.followup.send(ephemeral=ephemeral, **payload, **extra)
+        else:
+            await interaction.response.send_message(ephemeral=ephemeral, **payload, **extra)
 
     async def _reply_view(self, interaction: discord.Interaction, view: discord.ui.LayoutView, file: discord.File):
         """Components V2 のレイアウト（グラフ画像つき）を公開で返す。"""
@@ -720,7 +730,7 @@ class FujoSurvival(commands.Cog):
         unix_ts = int(latest_dt.timestamp())
         embed.add_field(name="最終検知", value=f"<t:{unix_ts}:R>（{latest_signal or '-'}）", inline=False)
         embed.set_footer(text=f"{FOOTER}（高度は検知のたびに上がり、時間とともに下がります）")
-        await self._reply(interaction, embed, view=FujoAnalysisView(self))
+        await self._reply(interaction, embed, view=FujoAnalysisView(self, embed))
 
     async def analysis(self, interaction: discord.Interaction):
         """本人の検知ログから時間帯別の1日平均を棒グラフで見せる（読み取り専用）。"""

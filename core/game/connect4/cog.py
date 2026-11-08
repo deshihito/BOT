@@ -17,7 +17,7 @@ from PIL import Image, ImageDraw, ImageFont
 from core.game.game import party_ranking
 from core.game.game import elo, game_panels, game_restore
 from core.game.connect4.connect4 import COLS, EMPTY, RED, ROWS, YELLOW, choose_ai_move, drop, is_full, legal_moves, new_board, winner
-from core.game.game.game_v2 import GamePanelView, LobbyView
+from core.game.game.game_v2 import GamePanelView, LobbyView, board_image_panel, GAME_MSG_ONLY_CURRENT_PLAYER
 
 logger = logging.getLogger(__name__)
 
@@ -91,8 +91,7 @@ async def record_result(g) -> str:
     if win is None:
         result = elo.record_draw_safely(g.guild_id, GAME_ID, red_p.id, yellow_p.id)
         if result:
-            return (f"📈 レート（引き分け）: {red_p.mention} {result['a']['rating']:.0f}（{result['a_delta']:+.0f}）"
-                    f" / {yellow_p.mention} {result['b']['rating']:.0f}（{result['b_delta']:+.0f}）")
+            return elo.format_draw_line(red_p, yellow_p, result)
         return ""
     w = red_p if win == RED else yellow_p
     l = yellow_p if win == RED else red_p
@@ -135,7 +134,7 @@ class MovePanel(GamePanelView):
         g = self.game
         user = g.current_user()
         if g.phase != "playing" or g.acted_col is not None or user is None or user.id != interaction.user.id:
-            return await interaction.response.send_message("現在の手番のプレイヤーだけが選択できます。", ephemeral=True)
+            return await interaction.response.send_message(GAME_MSG_ONLY_CURRENT_PLAYER, ephemeral=True)
         if self.select.values:
             g.acted_col = int(self.select.values[0])
         await interaction.response.defer()
@@ -146,11 +145,7 @@ MoveView = MovePanel  # 互換名
 
 def board_panel(title: str, body: str) -> GamePanelView:
     """盤面画像つきの表示専用パネル（開始・終了表示用）。"""
-    panel = GamePanelView(title, body, timeout=None)
-    gallery = discord.ui.MediaGallery()
-    gallery.add_item(media="attachment://connect4_board.png")
-    panel.add_extra(gallery)
-    return panel
+    return board_image_panel(title, body, "connect4_board.png")
 
 
 class Connect4(commands.Cog):

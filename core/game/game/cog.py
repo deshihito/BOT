@@ -147,7 +147,6 @@ def hub_embed() -> discord.Embed:
     # ゲームセレクトの label/description と詳細画面が担い、一覧テキストは出さない。
     return discord.Embed(
         title="パーティーゲーム",
-        description="遊びたいゲームを下のメニューから選んでください。",
         color=HUB_COLOR,
     )
 
