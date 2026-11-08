@@ -28,7 +28,7 @@ from core.vc.globalvc.audio import logger, GlobalAudioSink, _SILENCE, mix_pcm_fr
 from core.vc.globalvc.chat import logger, ChatMixin  # noqa: F401
 from core.vc.globalvc.common import logger, DISCORD_SAMPLE_RATE, CHANNELS, SAMPLE_WIDTH, FRAME_SIZE, FRAME_DURATION, FRAME_BYTE_SIZE, MAX_BUFFER_FRAMES, JITTER_PREFILL_FRAMES, TAIL_FLUSH_SECONDS, TRACK_IDLE_SECONDS, PLAYBACK_WATCHDOG_SECONDS, PLAYBACK_WATCHDOG_IDLE_SECONDS, STALE_VC_GRACE_SECONDS  # noqa: F401
 from core.vc.globalvc.connect import logger, ConnectMixin  # noqa: F401
-from core.vc.globalvc.manage import logger, ManageMixin  # noqa: F401
+from core.vc.globalvc.manage import logger, ManageMixin, Responder  # noqa: F401
 from core.vc.globalvc.restore import logger, RestoreMixin  # noqa: F401
 from core.vc.globalvc.rooms import logger, RoomConfig, ROOMS, GLOBAL_ROOMS, _room_to_dict, _room_from_dict, _persist_rooms, _load_rooms, _persist_join, _clear_join, _remove_vc_from_rooms, _prune_dead_clients, _disconnect_and_cleanup, _watchdog_interval_seconds, _WEBHOOK_BANNED_WORDS, _safe_webhook_username, _can_delete_room, rotate_room_themes  # noqa: F401
 from core.vc.globalvc.themes import THEME_POOL, theme_day, theme_for  # noqa: F401
@@ -43,6 +43,17 @@ class GlobalVCCog(ConnectMixin, RestoreMixin, ManageMixin, ChatMixin, commands.C
         self.bot = bot
         self.voice_sessions = get_manager(bot)
         self._join_locks: dict[int, asyncio.Lock] = {}
+
+    @commands.command(name="gvcperm", aliases=["常設ルーム作成"],
+                      help="常設グローバルVCルームを作成します（Bot管理者のみ）。使い方: !gvcperm ルーム名 [テーマ]")
+    async def gvcperm(self, ctx: commands.Context, room_name: str = "", *, theme: str = ""):
+        """常設ルームの作成は誤操作防止のため、この ! コマンドからだけ行う。
+
+        テーマを省略すると自動テーマ（日替わり）になる。最大参加サーバー数は
+        無制限・公開・説明なしで作る（変えたい場合は通常ルームを使ってください）。
+        """
+        await self._room_create_impl(
+            Responder(ctx), room_name, 0, "", "", theme=theme, permanent=True)
 
     async def cog_load(self):
         _load_rooms()
