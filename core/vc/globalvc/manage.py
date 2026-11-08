@@ -26,6 +26,8 @@ try:
 except Exception:  # numpy が無い環境では純Pythonで合成する
     np = None  # type: ignore[assignment]
 
+import config  # noqa: F401
+
 from core.vc.globalvc.common import *  # noqa: F401,F403 - shared constants/helpers
 from core.vc.globalvc.audio import _JoinRefused  # noqa: F401
 from core.vc.globalvc.rooms import GLOBAL_ROOMS, ROOMS, RoomConfig, _can_delete_room, _disconnect_and_cleanup, _persist_rooms, _prune_dead_clients  # noqa: F401
@@ -43,7 +45,12 @@ class ManageMixin:
 
 
     async def _is_bot_admin(self, user) -> bool:
-        """Bot管理者（アプリの所有者）かどうか。常設ルームの作成・テーマ変更の前提。"""
+        """Bot管理者かどうか。アプリの所有者か、BOT_ADMIN_IDS（config）に登録されたID。
+
+        常設ルームの作成・テーマ変更の前提になる判定。
+        """
+        if getattr(user, "id", None) in config.BOT_ADMIN_IDS:
+            return True
         try:
             return bool(await self.bot.is_owner(user))
         except Exception:
