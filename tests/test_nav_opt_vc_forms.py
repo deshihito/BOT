@@ -10,7 +10,7 @@ class VcFormRegistryTest(unittest.TestCase):
         self.specs = {spec.value: spec for spec in build_vc_actions()}
 
     def test_form_actions_registered(self):
-        for value in ("gvc_room_create", "gvc_room_theme", "gvc_room_info",
+        for value in ("gvc_room_create", "gvc_room_theme", "gvc_room_info", "gvc_lang_setting",
                       "gvc_room_delete", "gvc_chat_connect", "tts_start", "tts_say", "tts_config",
                       "trigger_register", "echo_delay"):
             self.assertIn(value, self.specs, value)
@@ -25,7 +25,7 @@ class VcFormRegistryTest(unittest.TestCase):
         self.assertIn("trigger_register", self.specs)
 
     def test_form_actions_not_for_ai(self):
-        for value in ("gvc_room_create", "gvc_room_theme", "gvc_room_delete",
+        for value in ("gvc_room_create", "gvc_room_theme", "gvc_room_delete", "gvc_lang_setting",
                       "tts_start", "trigger_register", "echo_delay"):
             spec = self.specs[value]
             self.assertNotIn("aitools", spec.surfaces, value)
@@ -51,7 +51,7 @@ class VcFormRegistryTest(unittest.TestCase):
         self.assertEqual(connect, {"name", "password"})
 
     def test_total_vc_actions(self):
-        self.assertEqual(len(self.specs), 38)  # 27 + M4の9件 + テーマ変更 + メンバー確認（常設作成は ! コマンド化）
+        self.assertEqual(len(self.specs), 45)  # 機能数再編後 44 + 言語設定（常設作成は ! コマンド化）
 
 
 class HistoryExpansionTest(unittest.TestCase):
