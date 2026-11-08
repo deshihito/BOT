@@ -347,6 +347,10 @@ class MiqSettingsView(discord.ui.View):
         theme_label = MIQ_THEMES.get(p.get("theme"), MIQ_THEMES["bw"])[0]
         format_label = MIQ_FORMATS.get(p.get("format"), MIQ_FORMATS["random"])[0]
         lines = [
+            "**作り方**",
+            "・メッセージを右クリック(スマホは長押し) → アプリ → **引用画像にする**",
+            "・引用したいメッセージに返信して、`@BOT miq` と送信",
+            "",
             "**見た目**（あなたがMIQを作る時に使われます）",
             f"フォーマット: `{format_label}`",
             f"モノクロ: `{onoff(p['grayscale'])}`　文字色連動: `{onoff(p['color_text'])}`　左右反転: `{onoff(p['flip'])}`",
