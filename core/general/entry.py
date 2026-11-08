@@ -50,6 +50,7 @@ from core.general.miq.miq_styles import *
 from core.general.miq.miq_cards import *
 from core.general.miq.miq_line import *
 from core.general.meme import *
+from core.general.fast_html import *
 from core.general.story54 import *
 from core.general.miq.miq_ui import *
 # アクション定義の単一の真実は core/action_registry。SHORTCUT_ROOTS は
@@ -73,6 +74,7 @@ from core.general.exp.levelup import LevelUpMixin
 from core.general.miq.miq import MiqMixin
 from core.general.miq.miq_line import MiqLineMixin
 from core.general.meme import MemeMixin
+from core.general.fast_html import FastHtmlMixin
 from core.general.translation import TranslationMixin
 from core.general.shortcuts import ShortcutsMixin
 
@@ -125,6 +127,7 @@ class GeneralCog(
     MiqMixin,
     MiqLineMixin,
     MemeMixin,
+    FastHtmlMixin,
     Story54Mixin,
     LevelUpMixin,
     TranslationMixin,
@@ -145,6 +148,10 @@ class GeneralCog(
         self.meme_menu = app_commands.ContextMenu(name="meme画像にする", callback=self.meme_context)
         # meme作成のパネル経由フローで画像待ち中のセッション {(channel_id, user_id): Event}
         self._meme_waits: dict[tuple[int, int], asyncio.Event] = {}
+        # fastHTMLのファイル待ちセッション {(channel_id, user_id): Event} と
+        # ユーザーごとの最終発行時刻（クールダウン用, monotonic 秒）
+        self._fast_html_waits: dict[tuple[int, int], asyncio.Event] = {}
+        self._fast_html_last_issue: dict[int, float] = {}
 
 
     async def cog_load(self):
@@ -232,6 +239,10 @@ class GeneralCog(
             # 案内する (pay 等の既存モーダル系と同じ扱い)。
             modal = MemeTextModal(self._meme_panel_texts_done)
             return await interaction.response.send_modal(modal)
+
+        if value == "fast_html":
+            # ファイル投稿待ちの対話フロー（meme の画像待ちと同じ作り）。
+            return await self._fast_html_start(interaction)
 
         if value == "story54":
             # モーダルを開けない経路 (メッセージ型ショートカット) では

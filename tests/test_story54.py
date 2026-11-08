@@ -87,7 +87,7 @@ class GenreReorgTest(unittest.TestCase):
     def test_make_image_genre_and_actions(self):
         self.assertEqual(g.GENERAL_GENRES["make_image"], ("画像作成", ""))
         values = [v for _label, v in g.GENERAL_ACTIONS["make_image"]]
-        self.assertEqual(values, ["story54", "meme_create", "meme_help", "miq_settings"])
+        self.assertEqual(values, ["story54", "fast_html", "meme_create", "meme_help", "miq_settings"])
         labels = {v: label for label, v in g.GENERAL_ACTIONS["make_image"]}
         self.assertEqual(labels["story54"], "54字の物語")
 
