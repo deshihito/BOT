@@ -73,6 +73,8 @@ AI_BLOCKED_IDS = frozenset({
     "general:meme_create",
     # 54字の物語もモーダル入力の対話フローなので meme_create と同様に対象外。
     "general:story54",
+    # fastHTMLもファイル投稿待ちの対話フローなので meme_create と同様に対象外。
+    "general:fast_html",
     "support:clear", "support:role_bulk", "support:muted", "support:ticket", "support:honeypot",
     "support:whisper", "support:binjou", "support:message_log", "support:moderation_log",
     "vc:record_start", "vc:transcribe_start",
@@ -345,8 +347,7 @@ VC_SHORTCUT_ACTIONS: tuple[tuple[str, str], ...] = (
     ("やまびこ状態", "echo_status"), ("カラオケ採点", "karaoke_score"),
     ("ボイスチェンジャー開始", "changer_start"), ("ボイスチェンジャー停止", "changer_stop"),
     ("ボイスチェンジャー状態", "changer_status"),
-    ("グローバルVCルーム一覧", "gvc_room_list"), ("グローバルVCメンバー確認", "gvc_members"),
-    ("グロチャ接続解除", "gvc_chat_disconnect"),
+    ("グローバルVCルーム一覧", "gvc_room_list"), ("グロチャ接続解除", "gvc_chat_disconnect"),
     ("読み上げ停止", "tts_stop"), ("音声トリガー一覧・削除", "trigger_panel"),
     # 導線最適化 M4: パネルでフォーム必須だった9件も登録し、/quick・ショートカット
     # から辿れるようにする（開始/停止の非対称の解消）。入力は ParamSpec 経由で

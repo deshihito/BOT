@@ -77,8 +77,8 @@ class RegistryConsistencyTest(unittest.TestCase):
         vc_values = {spec.value for spec in self.registry.by_root("vc")}
         self.assertIn("changer_start", vc_values)
         # 導線最適化 M4: フォーム系9件（gvc/tts/trigger/echo_delay）を追加し 27→36
-        # テーマ変更・メンバー確認の追加で 36→38（常設ルーム作成は !gvcperm コマンドだけ）
-        self.assertEqual(len(vc_values), 38)
+        # テーマ変更の追加で 36→37（常設ルーム作成は !gvcperm コマンドだけ）
+        self.assertEqual(len(vc_values), 37)
 
 
 class ShortcutRootsGenerationTest(unittest.TestCase):
@@ -193,6 +193,7 @@ class ConfirmTierTest(unittest.TestCase):
         "general:fujo_panic_disable", "general:shortcut_manage", "general:aitools",
         "general:ai_default", "general:image_default", "general:reasoning_default",
         "general:miq_settings", "general:meme_create", "general:story54",
+        "general:fast_html",
         "general:token_buy", "general:token_sell",
         "general:item_buy", "general:item_use", "general:box_open",
         "general:machine_buy", "general:workshop_claim", "general:craft",

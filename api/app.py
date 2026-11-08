@@ -1,13 +1,21 @@
 """Private, allowlisted HTTP API for the local PostgreSQL instance."""
 from __future__ import annotations
 
+import base64
 import hmac
+import json
 import logging
 import os
+import re
+import secrets
+import threading
+import time
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Any, Literal
+from urllib.parse import quote
 
-from fastapi import FastAPI, Header, HTTPException, Request
+from fastapi import FastAPI, Header, HTTPException, Request, Response
 from pydantic import BaseModel, ConfigDict, Field
 import psycopg
 from psycopg import sql
@@ -288,6 +296,7 @@ async def lifespan(app: FastAPI):
     )
     pool.open(wait=True)
     app.state.pool = pool
+    _fasthtml_prune_orphans(time.time())
     try:
         yield
     finally:
@@ -356,3 +365,191 @@ def rpc(request: Request, body: RPCRequest, authorization: str | None = Header(d
         raise HTTPException(status_code=503, detail={"code": "API_UNAVAILABLE", "message": "Database connection pool is busy; query was not started"}) from exc
     except psycopg.Error as exc:
         raise _database_error(exc) from exc
+
+
+# ===== fastHTML 一時配信（内部ストレージ） =====================================
+# Discord 側から受け取った HTML を、推測不能トークン付きの一時 URL で Web に
+# 中継するための保存・取得・削除。実体はこの API プロセス管理下の専用
+# ディレクトリに置く（DB には入れない）。HTML の中身は検査・変換しない。
+# Web（agobot.app の /fast/<token>）は BOT_API_KEY でここから取得し、
+# sandbox 系ヘッダを付けてそのまま返す。
+FASTHTML_TTL_SECONDS = 60 * 60
+FASTHTML_MAX_BYTES = 5 * 1024 * 1024
+FASTHTML_MAX_PER_USER = 3
+FASTHTML_TOKEN_ALPHABET = re.compile(r"^[A-Za-z0-9_-]{16,64}$")
+
+_fasthtml_lock = threading.Lock()
+_fasthtml_index: dict[str, Any] | None = None
+
+
+class FastHtmlCreateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    filename: str = Field(min_length=1, max_length=200)
+    owner_id: str = Field(min_length=1, max_length=32)
+    content_b64: str = Field(min_length=1)
+
+
+class FastHtmlDeleteRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    owner_id: str = Field(min_length=1, max_length=32)
+
+
+def _fasthtml_dir() -> Path:
+    override = os.environ.get("FASTHTML_STORAGE_DIR", "").strip()
+    if override:
+        return Path(override)
+    return Path(__file__).resolve().parent.parent / "data" / "fast_html"
+
+
+def _fasthtml_index_path() -> Path:
+    return _fasthtml_dir() / "index.json"
+
+
+def _fasthtml_load_index() -> dict[str, Any]:
+    global _fasthtml_index
+    if _fasthtml_index is None:
+        try:
+            raw = json.loads(_fasthtml_index_path().read_text(encoding="utf-8"))
+            _fasthtml_index = raw if isinstance(raw, dict) else {}
+        except (OSError, ValueError):
+            _fasthtml_index = {}
+    return _fasthtml_index
+
+
+def _fasthtml_save_index() -> None:
+    directory = _fasthtml_dir()
+    directory.mkdir(parents=True, exist_ok=True)
+    tmp = directory / "index.json.tmp"
+    tmp.write_text(json.dumps(_fasthtml_index or {}, ensure_ascii=False), encoding="utf-8")
+    os.replace(tmp, _fasthtml_index_path())
+
+
+def _fasthtml_remove_locked(token: str) -> None:
+    index = _fasthtml_load_index()
+    index.pop(token, None)
+    try:
+        (_fasthtml_dir() / f"{token}.html").unlink(missing_ok=True)
+    except OSError:
+        pass
+
+
+def _fasthtml_prune_locked(now: float) -> None:
+    """期限切れエントリを掃除する。呼び出し側で _fasthtml_lock を保持すること。"""
+    index = _fasthtml_load_index()
+    changed = False
+    for token, meta in list(index.items()):
+        expires = float(meta.get("expires_at") or 0) if isinstance(meta, dict) else 0.0
+        if expires <= now or not FASTHTML_TOKEN_ALPHABET.match(token):
+            _fasthtml_remove_locked(token)
+            changed = True
+    if changed:
+        _fasthtml_save_index()
+
+
+def _fasthtml_prune_orphans(now: float) -> None:
+    """起動時: インデックスに無い古い実体ファイルも残さない。"""
+    try:
+        directory = _fasthtml_dir()
+        if not directory.exists():
+            return
+        with _fasthtml_lock:
+            _fasthtml_prune_locked(now)
+            known = set(_fasthtml_load_index())
+            for path in directory.glob("*.html"):
+                if path.stem not in known and path.stat().st_mtime <= now - FASTHTML_TTL_SECONDS:
+                    try:
+                        path.unlink(missing_ok=True)
+                    except OSError:
+                        pass
+    except Exception:
+        log.warning("fastHTML prune failed", exc_info=True)
+
+
+@app.post("/v1/fast")
+def fast_html_create(body: FastHtmlCreateRequest, authorization: str | None = Header(default=None)):
+    _unauthorized(authorization)
+    try:
+        raw = base64.b64decode(body.content_b64.encode("ascii"), validate=True)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail={"code": "INVALID_CONTENT", "message": "content_b64 is not valid base64"}) from exc
+    if not raw:
+        raise HTTPException(status_code=400, detail={"code": "EMPTY_CONTENT", "message": "file is empty"})
+    if len(raw) > FASTHTML_MAX_BYTES:
+        raise HTTPException(status_code=413, detail={"code": "TOO_LARGE", "message": "file exceeds the 5MB limit"})
+    filename = "".join(ch for ch in body.filename if ch not in "\r\n/\\")[:200] or "index.html"
+    now = time.time()
+    with _fasthtml_lock:
+        _fasthtml_prune_locked(now)
+        index = _fasthtml_load_index()
+        active = sum(1 for meta in index.values() if isinstance(meta, dict) and str(meta.get("owner_id")) == body.owner_id)
+        if active >= FASTHTML_MAX_PER_USER:
+            raise HTTPException(status_code=429, detail={"code": "FASTHTML_LIMIT", "message": "too many active fastHTML pages for this user"})
+        token = secrets.token_urlsafe(24)
+        while token in index:
+            token = secrets.token_urlsafe(24)
+        directory = _fasthtml_dir()
+        directory.mkdir(parents=True, exist_ok=True)
+        tmp = directory / f"{token}.html.tmp"
+        tmp.write_bytes(raw)
+        os.replace(tmp, directory / f"{token}.html")
+        expires_at = now + FASTHTML_TTL_SECONDS
+        index[token] = {
+            "filename": filename,
+            "owner_id": body.owner_id,
+            "created_at": now,
+            "expires_at": expires_at,
+            "size": len(raw),
+        }
+        _fasthtml_save_index()
+    return {"data": {"token": token, "expires_at": int(expires_at), "size": len(raw)}}
+
+
+@app.get("/v1/fast/{token}")
+def fast_html_get(token: str, authorization: str | None = Header(default=None)):
+    _unauthorized(authorization)
+    if not FASTHTML_TOKEN_ALPHABET.match(token):
+        raise HTTPException(status_code=404, detail={"code": "NOT_FOUND", "message": "fastHTML page not found"})
+    now = time.time()
+    with _fasthtml_lock:
+        index = _fasthtml_load_index()
+        meta = index.get(token)
+        if not isinstance(meta, dict):
+            raise HTTPException(status_code=404, detail={"code": "NOT_FOUND", "message": "fastHTML page not found"})
+        if float(meta.get("expires_at") or 0) <= now:
+            _fasthtml_remove_locked(token)
+            _fasthtml_save_index()
+            raise HTTPException(status_code=410, detail={"code": "EXPIRED", "message": "fastHTML page has expired"})
+        try:
+            data = (_fasthtml_dir() / f"{token}.html").read_bytes()
+        except OSError:
+            _fasthtml_remove_locked(token)
+            _fasthtml_save_index()
+            raise HTTPException(status_code=404, detail={"code": "NOT_FOUND", "message": "fastHTML page not found"})
+        filename = str(meta.get("filename") or "index.html")
+        expires_at = int(float(meta.get("expires_at") or 0))
+    return Response(
+        content=data,
+        media_type="application/octet-stream",
+        headers={
+            "X-Fast-Filename": quote(filename, safe=""),
+            "X-Fast-Expires-At": str(expires_at),
+            "Cache-Control": "no-store",
+        },
+    )
+
+
+@app.delete("/v1/fast/{token}")
+def fast_html_delete(token: str, body: FastHtmlDeleteRequest, authorization: str | None = Header(default=None)):
+    _unauthorized(authorization)
+    if not FASTHTML_TOKEN_ALPHABET.match(token):
+        raise HTTPException(status_code=404, detail={"code": "NOT_FOUND", "message": "fastHTML page not found"})
+    with _fasthtml_lock:
+        index = _fasthtml_load_index()
+        meta = index.get(token)
+        if not isinstance(meta, dict):
+            raise HTTPException(status_code=404, detail={"code": "NOT_FOUND", "message": "fastHTML page not found"})
+        if str(meta.get("owner_id")) != body.owner_id:
+            raise HTTPException(status_code=403, detail={"code": "FORBIDDEN", "message": "only the uploader can delete this page"})
+        _fasthtml_remove_locked(token)
+        _fasthtml_save_index()
+    return {"data": {"deleted": True}}
