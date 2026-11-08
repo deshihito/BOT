@@ -17,6 +17,7 @@
     muted          core/support/muted/cog.py                    Muted
     ngword         core/support/ngword/cog.py                   NGWord
     panel_recovery core/support/panel_recovery/cog.py           PanelRecoveryCog
+    person_analysis core/support/person_analysis/cog.py         PersonAnalysisCog
     server_assist  core/support/server_assist/cog.py            ServerAssistCog
     server_setup   core/support/server_setup/cog.py             ServerSetup
     stat           core/support/stat/cog.py                     SystemInfoCog
@@ -195,6 +196,15 @@ from core.support.panel_recovery.cog import (  # noqa: F401
 )
 
 # =====================================================================
+# person_analysis — 実装: core/support/person_analysis/cog.py
+# =====================================================================
+from core.support.person_analysis.cog import (  # noqa: F401
+    PersonAnalysisCog,
+    PersonAnalysisView,
+    message_targets,
+)
+
+# =====================================================================
 # server_assist — 実装: core/support/server_assist/cog.py
 # =====================================================================
 from core.support.server_assist.cog import (  # noqa: F401
@@ -316,6 +326,7 @@ _FEATURE_MODULES = (
     ("muted", "core.support.muted.cog"),
     ("ngword", "core.support.ngword.cog"),
     ("panel_recovery", "core.support.panel_recovery.cog"),
+    ("person_analysis", "core.support.person_analysis.cog"),
     ("public_ranking", "core.support.public_ranking.cog"),
     ("server_assist", "core.support.server_assist.cog"),
     ("server_setup", "core.support.server_setup.cog"),
