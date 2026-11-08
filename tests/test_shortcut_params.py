@@ -162,6 +162,7 @@ class VcParamSpecConsistencyTest(unittest.TestCase):
         "echo_delay": {"delay"},
         "gvc_room_create": {"name", "max_servers", "password", "desc", "theme"},
         "gvc_room_create_perm": {"name", "max_servers", "password", "desc", "theme"},
+        "gvc_room_theme": {"name", "theme"},
         "gvc_room_info": {"name"},
         "gvc_room_delete": {"name"},
         "gvc_chat_connect": {"name", "password"},
