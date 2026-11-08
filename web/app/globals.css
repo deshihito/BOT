@@ -100,6 +100,13 @@ th,td { padding:6px 8px; border-bottom:1px solid var(--line); text-align:left; }
 .ranking-tab:hover { text-decoration:none; }
 .ranking-table td:first-child { font-weight:700; width:64px; }
 .ranking-table td:last-child { text-align:right; font-variant-numeric:tabular-nums; }
+.status-banner { display:flex; gap:12px; align-items:flex-start; margin:18px 0; padding:16px 18px; border:1px solid var(--line); border-radius:9px; background:var(--soft); }
+.status-dot { flex:0 0 auto; width:12px; height:12px; margin-top:8px; border-radius:50%; background:#e8590c; }
+.status-banner.ok .status-dot { background:#2f9e44; }
+.status-banner-title { font-weight:700; font-size:17px; }
+.status-banner-note { color:var(--muted); font-size:14px; }
+.status-table th { color:var(--muted); font-weight:400; width:180px; }
+.status-table td { text-align:right; font-variant-numeric:tabular-nums; }
 @media (max-width:650px) { header nav { gap:12px; align-items:flex-start; } .main-nav-links a { padding:3px 6px; font-size:13px; } main { padding-top:36px; } .home-hero { gap:18px; } .home-hero img { width:64px; height:64px; } .home-command-grid { grid-template-columns:1fr; } .command-card,.genre-card { gap:14px; padding:17px 0; } }
 
 /* Discord Activity: these selectors activate only on the Music Activity route. */
