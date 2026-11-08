@@ -39,6 +39,9 @@ class VoiceChangerSink(voice_recv.AudioSink):
 
         self.lost_packet_count: int = 0
         self.concealed_count: int = 0
+        self.error_count: int = 0
+        self._play_error_count: int = 0
+        self._watchdog_task = None
 
         self.shifter = AdaptiveWSOLAPitchShifter(sample_rate=SAMPLE_RATE)
         self.audio_source = WaitAndConnectAudioSource(
@@ -48,11 +51,42 @@ class VoiceChangerSink(voice_recv.AudioSink):
             shifter=self.shifter,
         )
 
-        if self.vc and self.vc.is_connected():
-            try:
+        self._ensure_playing()
+        # play() が開始時に失敗しても後から復旧できるよう、再生を監視する
+        try:
+            self._watchdog_task = self.bot.loop.create_task(self._playback_watchdog())
+        except Exception:
+            logger.debug("[VC_CHANGER] 再生ウォッチドッグの起動に失敗", exc_info=True)
+
+    @property
+    def playback_active(self) -> bool:
+        """変換音声の再生が実際に流れているか（状態表示用）。"""
+        try:
+            return bool(self.vc and self.vc.is_connected() and self.vc.is_playing())
+        except Exception:
+            return False
+
+    def _ensure_playing(self) -> None:
+        """再生が止まっていたら変換ソースを (再) 開始する（自己修復）。"""
+        try:
+            if self.vc and self.vc.is_connected() and not self.vc.is_playing():
                 self.vc.play(self.audio_source)
-            except Exception as e:
-                logger.error("[VC_CHANGER] play() 開始失敗: %r", e)
+        except Exception as e:
+            self._play_error_count += 1
+            if self._play_error_count <= 3 or self._play_error_count % 50 == 0:
+                logger.error("[VC_CHANGER] play() 開始失敗 (%d回目): %r", self._play_error_count, e)
+
+    async def _playback_watchdog(self) -> None:
+        import asyncio
+
+        while self._running:
+            try:
+                await asyncio.sleep(2.0)
+                self._ensure_playing()
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                logger.exception("[VC_CHANGER] 再生ウォッチドッグでエラー（継続します）")
 
     def set_semitones(self, semitones: float) -> None:
         with self._lock:
@@ -62,6 +96,15 @@ class VoiceChangerSink(voice_recv.AudioSink):
         return True
 
     def write(self, user, data: voice_recv.VoiceData) -> None:
+        # 1フレームの失敗で受信パイプライン全体を止めない（フレームを落として継続）
+        try:
+            self._write_inner(user, data)
+        except Exception:
+            self.error_count += 1
+            if self.error_count <= 3 or self.error_count % 50 == 0:
+                logger.exception("[VC_CHANGER] write 処理でエラー（%d回目、フレームを破棄）", self.error_count)
+
+    def _write_inner(self, user, data: voice_recv.VoiceData) -> None:
         start_time = time.perf_counter()
 
         user_id = getattr(user, 'id', 0) if user else 0
@@ -134,3 +177,6 @@ class VoiceChangerSink(voice_recv.AudioSink):
 
     def cleanup(self) -> None:
         self._running = False
+        if self._watchdog_task is not None:
+            self._watchdog_task.cancel()
+            self._watchdog_task = None

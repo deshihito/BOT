@@ -82,41 +82,15 @@ class SessionMixin:
 
         await asyncio.sleep(1.0)
 
-        negotiated_mode = getattr(vc, "mode", "不明")
-        dave_active = vc.dave_is_active() if hasattr(vc, "dave_is_active") else False
-        dave_ready = vc.dave_is_ready() if hasattr(vc, "dave_is_ready") else dave_active
-
-        if dave_active:
-            dave_text = "有効" if dave_ready else "有効(鍵交換中)"
-        else:
-            dave_text = "無効"
-
         status_msg = await r.send(embed=we(
             f"🎙️ **{target_channel.name}** で録音を開始しました。\n"
-            f"🔐 暗号化: `{negotiated_mode}` / DAVE(E2EE): `{dave_text}`\n"
-            f"📦 受信パケット数: `0` 個\n"
             f"{CLOCK} 録音は最長 {RECORD_LIMIT_SECONDS // 60} 分です。超えると自動で停止してファイルを送ります。"
         ), want_message=True)
 
         # 録音していることを、テキストチャンネルの全員に見える形で知らせる（Discord のポリシー）。
         await self._announce_recording(r, target_channel)
 
-        # --------------------------------------------------
-        # rec_start 内の on_packet_update (コールバック) を差し替え
-        # --------------------------------------------------
-        async def on_packet_update(count: int, notes: list[str]) -> None:
-            try:
-                notes_str = " / ".join([f"`{n}`" for n in notes]) if notes else "`解析中/発聲待機...`"
-                await status_msg.edit(embed=we(
-                    f"🔴 **リアルタイム音階演奏中...**\n"
-                    f"🎙️ チャンネル: **{target_channel.name}**\n"
-                    f"🎹 リアルタイム検出音階: {notes_str}\n"
-                    f"📦 パケット数: `{count}`"
-                ))
-            except Exception:
-                logger.debug("録音: ステータス表示の更新に失敗しました", exc_info=True)
-
-        sink = RecordingSink(bot=self.bot, vc=vc, update_callback=on_packet_update)
+        sink = RecordingSink(bot=self.bot, vc=vc)
 
         try:
             vc.listen(sink)
@@ -212,7 +186,6 @@ class SessionMixin:
                 description=(
                     f"チャンネル: **{session['channel_name']}**\n"
                     f"経過時間: **{self.format_time(elapsed)}**\n"
-                    f"受信パケット数: **{sink.packet_count}** 個\n"
                     f"録音中の話者数: **{len(sink.buffers)}** 人"
                 ),
                 color=0x2ECC71,

@@ -30,10 +30,22 @@ class AdaptiveWSOLAPitchShifter:
         self.win_size = 256  # 窓幅 (約5.3ms)
         self.prev_tail = np.zeros((self.win_size, CHANNELS), dtype=np.float32)
         self.reset_tail = True  # 無音待機明けなどのリセットフラグ
+        # write（受信スレッド）と read 側の mark_gap が同時に触るため保護する
+        self._lock = threading.Lock()
 
     def process(self, pcm_bytes: bytes, semitones: float) -> bytes:
+        with self._lock:
+            return self._process_locked(pcm_bytes, semitones)
+
+    def _process_locked(self, pcm_bytes: bytes, semitones: float) -> bytes:
         if len(pcm_bytes) == 0:
             return pcm_bytes
+        # フレーム境界に揃っていない入力は切り捨てる（reshape の例外防止）
+        frame = CHANNELS * 2
+        if len(pcm_bytes) % frame:
+            pcm_bytes = pcm_bytes[: len(pcm_bytes) - len(pcm_bytes) % frame]
+            if not pcm_bytes:
+                return pcm_bytes
 
         audio = np.frombuffer(pcm_bytes, dtype=np.int16).astype(np.float32) / 32768.0
         audio_stereo = audio.reshape(-1, CHANNELS)
@@ -78,4 +90,5 @@ class AdaptiveWSOLAPitchShifter:
 
     def mark_gap(self):
         """長時間無音が続いた時にテールをリセット"""
-        self.reset_tail = True
+        with self._lock:
+            self.reset_tail = True
