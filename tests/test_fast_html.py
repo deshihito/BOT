@@ -59,7 +59,7 @@ class AttachmentTest(unittest.TestCase):
 
     def test_public_url(self):
         self.assertEqual(
-            fast_html_public_url("abc123"), "https://agobot.app/fast/abc123",
+            fast_html_public_url("abc123"), "https://fast.agobot.app/fast/abc123",
         )
 
 

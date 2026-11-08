@@ -2,7 +2,7 @@
 """fastHTML（一時HTML埋め込み）。
 
 /general のアクションから起動し、ユーザーがチャンネルに送った HTML
-ファイルを一時 URL（https://agobot.app/fast/<token>、60分）で公開する。
+ファイルを一時 URL（https://fast.agobot.app/fast/<token>、60分）で公開する。
 ファイル実体は Bot 自前 API（api/app.py の /v1/fast）の管理下に置き、
 Web（agobot.app）はそれを中継するだけ。HTML の中身は検査・変換せず、
 実行は開いた人のブラウザ側で完結する（配信側の sandbox ヘッダで隔離）。
@@ -34,7 +34,7 @@ FAST_HTML_MAX_ACTIVE_PER_USER = 3     # 同時発行の上限（API側でも同�
 # ための下限間隔。待ちフロー自体が120秒あるため、体感を損なわない10秒。
 FAST_HTML_COOLDOWN_SECONDS = 10.0
 FAST_HTML_PUBLIC_BASE = (
-    os.getenv("FASTHTML_PUBLIC_BASE_URL") or "https://agobot.app"
+    os.getenv("FASTHTML_PUBLIC_BASE_URL") or "https://fast.agobot.app"
 ).rstrip("/")
 
 
