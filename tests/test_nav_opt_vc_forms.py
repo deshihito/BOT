@@ -51,7 +51,7 @@ class VcFormRegistryTest(unittest.TestCase):
         self.assertEqual(connect, {"name", "password"})
 
     def test_total_vc_actions(self):
-        self.assertEqual(len(self.specs), 37)  # 27 + M4の9件 + テーマ変更（常設作成は ! コマンド化）
+        self.assertEqual(len(self.specs), 38)  # 27 + M4の9件 + テーマ変更 + メンバー確認（常設作成は ! コマンド化）
 
 
 class HistoryExpansionTest(unittest.TestCase):
