@@ -46,6 +46,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             <div className="main-nav-links">
               <Link href="/commands">コマンド</Link>
               <Link href="/dashboard">ダッシュボード</Link>
+              <Link href="/ranking">ランキング</Link>
               <InviteButton />
             </div>
           </nav>
