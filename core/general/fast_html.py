@@ -3,14 +3,20 @@
 
 /general のアクションから起動し、ユーザーがチャンネルに送った HTML
 ファイルを一時 URL（https://fast.agobot.app/fast/<token>、60分）で公開する。
-ファイル実体は Bot 自前 API（api/app.py の /v1/fast）の管理下に置き、
-Web（agobot.app）はそれを中継するだけ。HTML の中身は検査・変換せず、
-実行は開いた人のブラウザ側で完結する（配信側の sandbox ヘッダで隔離）。
+
+サーバー側は HTML 実体を一切保存しない。添付実体は Discord CDN 上にだけ
+あり、Bot はその署名付き CDN URL を BOT_API_KEY で HMAC 署名した
+トークンに包んで渡すだけ。Web（fast.agobot.app）は署名を検証し、
+CDN からそのまま中継する。HTML の中身は検査・変換せず、実行は
+開いた人のブラウザ側で完結する（配信側の sandbox ヘッダで隔離）。
 """
 from __future__ import annotations
 
 import asyncio
 import base64
+import hashlib
+import hmac
+import json
 import logging
 import os
 import time
@@ -26,16 +32,23 @@ from core.general.attachment_wait import (
 logger = logging.getLogger("cogs.general")
 
 FAST_HTML_WAIT_TIMEOUT = 120.0        # ファイル投稿を待つ秒数（meme と同じ）
-FAST_HTML_TTL_SECONDS = 60 * 60       # 一時URLの有効期限（API側の保持期間と一致）
-FAST_HTML_MAX_BYTES = 5 * 1024 * 1024  # 添付のサイズ上限（API側でも同じ値を強制）
+FAST_HTML_TTL_SECONDS = 60 * 60       # 一時URLの有効期限（60分）
+FAST_HTML_MAX_BYTES = 5 * 1024 * 1024  # 添付のサイズ上限（Web の中継側でも強制）
 FAST_HTML_EXTS = (".html", ".htm")
-FAST_HTML_MAX_ACTIVE_PER_USER = 3     # 同時発行の上限（API側でも同じ値を強制）
-# 発行クールダウン: 5MB級のアップロードと URL 発行を短時間に連打させない
-# ための下限間隔。待ちフロー自体が120秒あるため、体感を損なわない10秒。
+FAST_HTML_MAX_ACTIVE_PER_USER = 3     # 同時発行の上限（Bot メモリ内で数える）
+# 発行クールダウン: URL 発行を短時間に連打させないための下限間隔。
+# 待ちフロー自体が120秒あるため、体感を損なわない10秒。
 FAST_HTML_COOLDOWN_SECONDS = 10.0
 FAST_HTML_PUBLIC_BASE = (
     os.getenv("FASTHTML_PUBLIC_BASE_URL") or "https://fast.agobot.app"
 ).rstrip("/")
+
+# 添付実体が置かれる Discord CDN の URL 接頭辞。これ以外はトークンに包まない。
+FAST_HTML_CDN_PREFIXES = (
+    "https://cdn.discordapp.com/attachments/",
+    "https://media.discordapp.net/attachments/",
+)
+FAST_HTML_TOKEN_VERSION = "v1"
 
 
 def fast_html_public_url(token: str) -> str:
@@ -71,90 +84,42 @@ def _fast_html_display_name(filename: str) -> str:
 
 
 # ------------------------------------------------------------
-# Bot 自前 API（/v1/fast）クライアント
+# 署名付きトークン（サーバーは実体を持たず、CDN URL を包むだけ）
 # ------------------------------------------------------------
-class FastHtmlApiError(RuntimeError):
-    def __init__(self, message: str, *, code: str = "API_ERROR", status_code: int | None = None):
-        super().__init__(message)
-        self.message = message
-        self.code = code
-        self.status_code = status_code
+def fast_html_cdn_url_ok(url) -> bool:
+    """Discord CDN の添付 URL かどうか（att.url は署名付き CDN URL）。"""
+    return isinstance(url, str) and url.startswith(FAST_HTML_CDN_PREFIXES)
 
 
-def _fast_html_api_config() -> tuple[str, str] | None:
-    base = (os.getenv("BOT_API_BASE_URL") or "").strip()
+def _b64url_encode(raw: bytes) -> str:
+    return base64.urlsafe_b64encode(raw).rstrip(b"=").decode("ascii")
+
+
+def _fast_html_signing_key() -> bytes | None:
     key = (os.getenv("BOT_API_KEY") or "").strip()
-    if not base or not key:
+    return key.encode("utf-8") if key else None
+
+
+def create_fast_html_token(cdn_url: str, *, now: float | None = None) -> tuple[str, int] | None:
+    """CDN URL を署名付きトークンに包み (token, expires_at) を返す。
+
+    形式は v1.<base64url(payload JSON)>.<base64url(HMAC-SHA256)> で、
+    署名対象は "v1.<base64url(payload)>"。Web 側が同じ BOT_API_KEY で
+    検証する。BOT_API_KEY 未設定なら None（発行基盤が未設定）。
+    """
+    key = _fast_html_signing_key()
+    if key is None:
         return None
-    return base.rstrip("/"), key
-
-
-def _fast_html_api_request(method: str, path: str, *, payload: dict | None = None,
-                           timeout: float = 30.0) -> dict:
-    """API へ同期リクエストする（呼び出し側で to_thread すること）。"""
-    import requests
-
-    config = _fast_html_api_config()
-    if config is None:
-        raise FastHtmlApiError(
-            "BOT_API_BASE_URL または BOT_API_KEY が設定されていません",
-            code="API_NOT_CONFIGURED",
-        )
-    base, key = config
-    try:
-        response = requests.request(
-            method,
-            f"{base}{path}",
-            json=payload,
-            headers={
-                "Authorization": f"Bearer {key}",
-                "Accept": "application/json",
-            },
-            timeout=timeout,
-        )
-    except requests.RequestException as exc:
-        raise FastHtmlApiError("自前APIに接続できません", code="API_CONNECTION_ERROR") from exc
-    try:
-        body = response.json()
-    except ValueError:
-        body = {}
-    if not response.ok:
-        detail = body.get("detail", {}) if isinstance(body, dict) else {}
-        if isinstance(detail, dict):
-            message = str(detail.get("message", "API request failed"))
-            code = str(detail.get("code", "API_ERROR"))
-        else:
-            message, code = "API request failed", "API_ERROR"
-        raise FastHtmlApiError(message, code=code, status_code=response.status_code)
-    data = body.get("data", {}) if isinstance(body, dict) else {}
-    return data if isinstance(data, dict) else {}
-
-
-def fast_html_api_create(filename: str, owner_id: int, data: bytes) -> dict:
-    """HTML を API へ保存し {token, expires_at, size} を返す（同期）。"""
-    return _fast_html_api_request(
-        "POST",
-        "/v1/fast",
-        payload={
-            "filename": (filename or "index.html")[:200],
-            "owner_id": str(owner_id),
-            "content_b64": base64.b64encode(data).decode("ascii"),
-        },
+    issued = int(time.time() if now is None else now)
+    expires_at = issued + FAST_HTML_TTL_SECONDS
+    payload = json.dumps(
+        {"u": cdn_url, "exp": expires_at}, separators=(",", ":"),
     )
-
-
-def fast_html_api_delete(token: str, owner_id: int) -> bool:
-    """本人の発行分を削除する（同期）。既に無い場合は False。"""
-    try:
-        _fast_html_api_request(
-            "DELETE", f"/v1/fast/{token}", payload={"owner_id": str(owner_id)},
-            timeout=10.0,
-        )
-        return True
-    except FastHtmlApiError as exc:
-        if exc.status_code == 404:
-            return False
-        raise
+    signing_input = f"{FAST_HTML_TOKEN_VERSION}.{_b64url_encode(payload.encode('utf-8'))}"
+    signature = hmac.new(
+        key, signing_input.encode("ascii"), hashlib.sha256,
+    ).digest()
+    return f"{signing_input}.{_b64url_encode(signature)}", expires_at
 
 
 # ------------------------------------------------------------
@@ -172,35 +137,42 @@ class FastHtmlCancelView(AttachmentWaitCancelView):
 
 
 class FastHtmlResultView(discord.ui.View):
-    """発行結果の「開く」リンク＋本人だけ押せる「削除」ボタン。"""
+    """発行結果の「開く」リンク＋本人だけ押せる「リンクを無効化」ボタン。
 
-    def __init__(self, cog: "FastHtmlMixin", token: str, owner_id: int):
+    実体は Discord CDN 上の元の投稿にしか無いため、無効化は
+    (1) この結果メッセージを無効化済みの文面に差し替え、
+    (2) 元の投稿メッセージの削除を試みる（消えれば CDN 実体も消え、
+    中継は 404 になる）。削除権限が無くても例外にはしない。
+    """
+
+    def __init__(self, cog: "FastHtmlMixin", token: str, owner_id: int,
+                 source_message=None):
         super().__init__(timeout=FAST_HTML_TTL_SECONDS)
         self.cog, self.token, self.owner_id = cog, token, owner_id
+        self.source_message = source_message
         self.add_item(discord.ui.Button(
             label="開く", style=discord.ButtonStyle.link,
             url=fast_html_public_url(token),
         ))
 
-    @discord.ui.button(label="削除", style=discord.ButtonStyle.danger)
+    @discord.ui.button(label="リンクを無効化", style=discord.ButtonStyle.danger)
     async def delete(self, interaction: discord.Interaction, button: discord.ui.Button):
         if interaction.user.id != self.owner_id:
             return await interaction.response.send_message(
-                "アップロードした本人だけ削除できます。", ephemeral=True
-            )
-        try:
-            await asyncio.to_thread(
-                fast_html_api_delete, self.token, self.owner_id,
-            )
-        except FastHtmlApiError:
-            logger.debug("fastHTML: 削除API呼び出しに失敗しました", exc_info=True)
-            return await interaction.response.send_message(
-                "削除できませんでした。時間をおいてもう一度お試しください。",
-                ephemeral=True,
+                "アップロードした本人だけ無効化できます。", ephemeral=True
             )
         await interaction.response.edit_message(
-            content="fastHTMLを削除しました。リンクは無効になりました。", view=None,
+            content="このリンクは無効化されました。", view=None,
         )
+        source = self.source_message
+        if source is not None:
+            try:
+                await source.delete()
+            except Exception:
+                logger.debug(
+                    "fastHTML: 元の投稿メッセージを削除できませんでした",
+                    exc_info=True,
+                )
 
 
 # ------------------------------------------------------------
@@ -208,6 +180,31 @@ class FastHtmlResultView(discord.ui.View):
 # ------------------------------------------------------------
 class FastHtmlMixin:
     """GeneralCog の一部。cogs/general.py で合成される。"""
+
+    def _fast_html_issue_log(self) -> dict[int, list[float]]:
+        store = getattr(self, "_fast_html_active", None)
+        if store is None:
+            store = self._fast_html_active = {}
+        return store
+
+    def _fast_html_active_count(self, user_id: int, now: float) -> int:
+        """TTL 内の発行件数を返す（期限切れ分は掃除する）。"""
+        store = self._fast_html_issue_log()
+        fresh = [
+            t for t in store.get(user_id, [])
+            if now - t < FAST_HTML_TTL_SECONDS
+        ]
+        store[user_id] = fresh
+        return len(fresh)
+
+    def _fast_html_record_issue(self, user_id: int, now: float) -> None:
+        store = self._fast_html_issue_log()
+        fresh = [
+            t for t in store.get(user_id, [])
+            if now - t < FAST_HTML_TTL_SECONDS
+        ]
+        fresh.append(now)
+        store[user_id] = fresh
 
     async def _fast_html_start(self, interaction: discord.Interaction):
         channel = interaction.channel
@@ -269,66 +266,46 @@ class FastHtmlMixin:
                     f"{error}fastHTMLを終了しました。", mention_author=False,
                 )
                 return
-            try:
-                data = await att.read()
-            except Exception:
-                logger.debug("fastHTML: 添付ファイルの取得に失敗しました", exc_info=True)
-                await msg.reply("ファイルを取得できませんでした。", mention_author=False)
-                return
-            if len(data) > FAST_HTML_MAX_BYTES:
-                await msg.reply(
-                    f"ファイルが大きすぎます（上限 "
-                    f"{FAST_HTML_MAX_BYTES // (1024 * 1024)}MB）。"
-                    "fastHTMLを終了しました。",
-                    mention_author=False,
-                )
-                return
-            try:
-                result = await asyncio.to_thread(
-                    fast_html_api_create, att.filename, user_id, data,
-                )
-            except FastHtmlApiError as exc:
-                logger.warning(
-                    "fastHTML: 発行API呼び出しに失敗しました code=%s status=%s",
-                    exc.code,
-                    exc.status_code,
-                    exc_info=True,
-                )
-                if exc.code == "FASTHTML_LIMIT":
-                    text = (
-                        f"同時に公開できるのは{FAST_HTML_MAX_ACTIVE_PER_USER}件までです。"
-                        "有効期限（60分）が切れるか、発行済みの削除ボタンで消してから"
-                        "もう一度お試しください。"
-                    )
-                elif exc.code == "API_NOT_CONFIGURED":
-                    text = "一時URLの発行基盤が未設定のため、今は利用できません。"
-                else:
-                    text = "一時URLを発行できませんでした。時間をおいてお試しください。"
-                await msg.reply(text, mention_author=False)
-                return
-            token = str(result.get("token") or "")
-            if not token:
+            # 実体はダウンロードしない。Discord CDN 上の添付 URL を
+            # 署名付きトークンに包むだけ（サーバーは実体を保存しない）。
+            cdn_url = getattr(att, "url", "") or ""
+            if not fast_html_cdn_url_ok(cdn_url):
                 await msg.reply(
                     "一時URLを発行できませんでした。時間をおいてお試しください。",
                     mention_author=False,
                 )
                 return
+            now = time.time()
+            if self._fast_html_active_count(user_id, now) >= FAST_HTML_MAX_ACTIVE_PER_USER:
+                await msg.reply(
+                    f"同時に公開できるのは{FAST_HTML_MAX_ACTIVE_PER_USER}件までです。"
+                    "有効期限（60分）が切れてからもう一度お試しください。",
+                    mention_author=False,
+                )
+                return
+            created = create_fast_html_token(cdn_url, now=now)
+            if created is None:
+                await msg.reply(
+                    "一時URLの発行基盤が未設定のため、今は利用できません。",
+                    mention_author=False,
+                )
+                return
+            token, expires_at = created
+            self._fast_html_record_issue(user_id, now)
             self._fast_html_last_issue[user_id] = time.monotonic()
-            expires_at = int(result.get("expires_at") or 0)
             embed = discord.Embed(title="fastHTML", color=0xFFFFFF)
             embed.add_field(
                 name="ファイル", value=_fast_html_display_name(att.filename), inline=False,
             )
-            if expires_at:
-                embed.add_field(
-                    name="有効期限", value=f"<t:{expires_at}:R>（60分）", inline=False,
-                )
+            embed.add_field(
+                name="有効期限", value=f"<t:{expires_at}:R>（60分）", inline=False,
+            )
             embed.set_footer(
                 text="リンクを知っている人は開けます。HTMLは開いた人のブラウザで実行されます。",
             )
             await msg.reply(
                 embed=embed,
-                view=FastHtmlResultView(self, token, user_id),
+                view=FastHtmlResultView(self, token, user_id, source_message=msg),
                 mention_author=False,
             )
             await edit_original_response_quietly(

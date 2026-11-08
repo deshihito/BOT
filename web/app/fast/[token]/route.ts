@@ -17,7 +17,7 @@ export async function GET(
       headers: fastHtmlContentHeaders(request.headers.get("host")),
     });
   }
-  const status = result.status === 410 ? 410 : result.status === 404 ? 404 : 503;
+  const status = result.status;
   return new Response(fastHtmlGoneHtml(status), {
     status,
     headers: {
