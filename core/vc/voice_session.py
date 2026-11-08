@@ -54,7 +54,9 @@ FEATURES: dict[str, tuple[str, str]] = {
     "global": ("グローバルVC", "/vc のパネルからグローバルVC退出"),
 }
 # These features share a single voice client and the PCM/sink multiplexers in voice_media.
-SHARED_FEATURES = frozenset({"music", "global", "transcribe", "tts"})
+# match（ランダム通話）も共有対象: 通話中に音楽・読み上げを併用でき、
+# それらの再生音声は voice_media のタップ経由で相手サーバーへも送られる。
+SHARED_FEATURES = frozenset({"music", "global", "transcribe", "tts", "match"})
 
 # release() の理由ごとに、使っていたチャンネルへ送るお知らせ。None は送らない（コマンド側で返信する）。
 DEFAULT_NOTICES: dict[str, Optional[str]] = {
