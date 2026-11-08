@@ -1,6 +1,6 @@
 import discord
 from core.support.messages import FEATURE_UNAVAILABLE_CONTACT
-from core.support.panel_v2 import edit_message_v2
+from core.support.panel_v2 import edit_message_v2, as_embed_v2, as_panel_v2
 from discord import app_commands  # ← 追加
 from discord.ext import commands, tasks
 import asyncio
@@ -50,7 +50,8 @@ class PlaylistsMixin:
             description="プレイリストを保存・一覧表示・再生できます。対象範囲を選択してください。",
             color=0x9B59B6,
         )
-        await r.send(embed=embed, view=PlaylistLibraryView(self), ephemeral=True)
+        view = PlaylistLibraryView(self, embed)
+        await r.send(view=as_panel_v2(view), ephemeral=True)
 
     def _serialize_personal_playlist(self, guild_id: int):
         """現在曲と待機キューを、再解析可能な入力だけで保存する。"""
@@ -128,29 +129,29 @@ class PlaylistsMixin:
         if action == 'play':
             await r.defer()
             if error := await self._ensure_music_connection(r):
-                return await r.send(embed=we(error), ephemeral=True)
+                return await r.send(view=as_embed_v2(we(error)), ephemeral=True)
             if scope == 'server':
                 return await self._play_server_playlist(r, name, file)
             if not db:
-                return await r.send(embed=we(FEATURE_UNAVAILABLE_CONTACT), ephemeral=True)
+                return await r.send(view=as_embed_v2(we(FEATURE_UNAVAILABLE_CONTACT)), ephemeral=True)
             if not name:
-                return await r.send(embed=we("再生するプレイリスト名を指定してください。"), ephemeral=True)
+                return await r.send(view=as_embed_v2(we("再生するプレイリスト名を指定してください。")), ephemeral=True)
             try:
                 result = db.table('user_music_playlists').select('tracks').eq('guild_id', r.guild.id).eq(
                     'owner_user_id', r.user.id
                 ).eq('name', name).limit(1).execute()
                 rows = result.data or []
                 if not rows:
-                    return await r.send(embed=we(f"個人プレイリスト `{name}` が見つかりません。"), ephemeral=True)
+                    return await r.send(view=as_embed_v2(we(f"個人プレイリスト `{name}` が見つかりません。")), ephemeral=True)
                 await self.start_playlist_load(r.source, rows[0].get('tracks') or [], name)
             except Exception:
                 logger.exception("Failed to play personal playlist")
-                await r.send(embed=we("個人プレイリストの読込に失敗しました。"), ephemeral=True)
+                await r.send(view=as_embed_v2(we("個人プレイリストの読込に失敗しました。")), ephemeral=True)
             return
 
         if action == 'delete':
             if not name:
-                return await r.send(embed=we("削除するプレイリスト名を指定してください。"), ephemeral=True)
+                return await r.send(view=as_embed_v2(we("削除するプレイリスト名を指定してください。")), ephemeral=True)
             try:
                 if scope == 'server':
                     result = db.table("playlists").delete().eq(
@@ -162,37 +163,37 @@ class PlaylistsMixin:
                     ).eq('owner_user_id', r.user.id).eq('name', name).execute()
                 if not result.data:
                     label = '共有' if scope == 'server' else '個人'
-                    return await r.send(embed=we(f"{label}プレイリスト `{name}` が見つかりません。"), ephemeral=True)
-                return await r.send(embed=we(f"プレイリスト `{name}` を削除しました。"))
+                    return await r.send(view=as_embed_v2(we(f"{label}プレイリスト `{name}` が見つかりません。")), ephemeral=True)
+                return await r.send(view=as_embed_v2(we(f"プレイリスト `{name}` を削除しました。")))
             except Exception:
                 logger.exception("Failed to delete playlist")
-                return await r.send(embed=we("プレイリストの削除に失敗しました。"), ephemeral=True)
+                return await r.send(view=as_embed_v2(we("プレイリストの削除に失敗しました。")), ephemeral=True)
 
         if not db:
-            return await r.send(embed=we(FEATURE_UNAVAILABLE_CONTACT), ephemeral=True)
+            return await r.send(view=as_embed_v2(we(FEATURE_UNAVAILABLE_CONTACT)), ephemeral=True)
 
         if action == 'save':
             if not name:
-                return await r.send(embed=we("保存するプレイリスト名を指定してください。"), ephemeral=True)
+                return await r.send(view=as_embed_v2(we("保存するプレイリスト名を指定してください。")), ephemeral=True)
             if scope == 'server':
                 ids = self._server_playlist_ids(r.guild.id)
                 if not ids:
-                    return await r.send(embed=we("保存できる曲がありません（サーバー共有に保存できるのは、アップロードした音声だけです）。"), ephemeral=True)
+                    return await r.send(view=as_embed_v2(we("保存できる曲がありません（サーバー共有に保存できるのは、アップロードした音声だけです）。")), ephemeral=True)
                 try:
                     db.table("playlists").upsert({"name": self._server_playlist_key(r.guild.id, name), "ids": ids}).execute()
-                    return await r.send(embed=we(f"{SUCCESS} このサーバー内のキューを `{name}` として保存しました（{len(ids)} 曲・サーバー共有）。"))
+                    return await r.send(view=as_embed_v2(we(f"{SUCCESS} このサーバー内のキューを `{name}` として保存しました（{len(ids)} 曲・サーバー共有）。")))
                 except Exception as exc:
                     logger.exception("Failed to save server playlist")
-                    return await r.send(embed=we(f"保存に失敗しました。({type(exc).__name__})"), ephemeral=True)
+                    return await r.send(view=as_embed_v2(we(f"保存に失敗しました。({type(exc).__name__})")), ephemeral=True)
             tracks = self._serialize_personal_playlist(r.guild.id)
             if not tracks:
-                return await r.send(embed=we("保存できる曲がありません。"), ephemeral=True)
+                return await r.send(view=as_embed_v2(we("保存できる曲がありません。")), ephemeral=True)
             try:
                 db.table('user_music_playlists').upsert(
                     {'guild_id': r.guild.id, 'owner_user_id': r.user.id, 'name': name, 'tracks': tracks},
                     on_conflict='guild_id,owner_user_id,name',
                 ).execute()
-                return await r.send(embed=we(f"個人プレイリスト `{name}` に {len(tracks)} 曲を保存しました。"))
+                return await r.send(view=as_embed_v2(we(f"個人プレイリスト `{name}` に {len(tracks)} 曲を保存しました。")))
             except Exception as exc:
                 logger.exception("Failed to save personal playlist")
                 detail = str(exc).lower()
@@ -200,7 +201,7 @@ class PlaylistsMixin:
                     message = FEATURE_UNAVAILABLE_CONTACT
                 else:
                     message = f'保存に失敗しました。時間をおいて再度お試しください。解決しない場合はBotの運営に連絡してください。({type(exc).__name__})'
-                return await r.send(embed=we(message), ephemeral=True)
+                return await r.send(view=as_embed_v2(we(message)), ephemeral=True)
 
         # 一覧
         try:
@@ -211,16 +212,16 @@ class PlaylistsMixin:
                 description = '\n'.join(
                     f"• **{row['name'][len(prefix):]}** — {len(row.get('ids') or [])} 曲" for row in rows[:25]
                 ) or '登録されていません。'
-                return await r.send(embed=we(title='このサーバーの共有プレイリスト', description=description))
+                return await r.send(view=as_embed_v2(we(title='このサーバーの共有プレイリスト', description=description)))
             result = db.table('user_music_playlists').select('name,tracks,updated_at').eq(
                 'guild_id', r.guild.id
             ).eq('owner_user_id', r.user.id).order('updated_at', desc=True).execute()
             rows = result.data or []
             description = '\n'.join(f"• **{row['name']}** — {len(row.get('tracks') or [])} 曲" for row in rows[:25]) or '登録されていません。'
-            return await r.send(embed=we(title='あなたの個人プレイリスト', description=description))
+            return await r.send(view=as_embed_v2(we(title='あなたの個人プレイリスト', description=description)))
         except Exception:
             logger.exception("Failed to list playlists")
-            return await r.send(embed=we("一覧取得に失敗しました。"), ephemeral=True)
+            return await r.send(view=as_embed_v2(we("一覧取得に失敗しました。")), ephemeral=True)
 
 
     async def _play_server_playlist(self, r: Responder, name: str, file: discord.Attachment | None):
@@ -237,7 +238,7 @@ class PlaylistsMixin:
                     tokens = [str(tokens)]
             except Exception as e:
                 logger.debug("Server playlist JSON parse failed", exc_info=True)
-                return await r.send(embed=we("JSONの形式が正しくありません。"), ephemeral=True)
+                return await r.send(view=as_embed_v2(we("JSONの形式が正しくありません。")), ephemeral=True)
         elif name:
             tokens = name.replace(',', ' ').split()
             if self.bot.db_api:
@@ -249,7 +250,7 @@ class PlaylistsMixin:
                 except Exception:
                     logger.warning("Server playlist DB lookup failed", exc_info=True)
         else:
-            return await r.send(embed=we("プレイリスト名、ID、またはJSONファイルを指定してください。"), ephemeral=True)
+            return await r.send(view=as_embed_v2(we("プレイリスト名、ID、またはJSONファイルを指定してください。")), ephemeral=True)
 
         tracks = []
         for token in tokens:

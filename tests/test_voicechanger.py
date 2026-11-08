@@ -140,6 +140,22 @@ class ResolveBufferTests(unittest.TestCase):
         self.assertIn("目標バッファ以上", error)
 
 
+def _view_text(view):
+    """Components V2 ビューから TextDisplay のテキストを集める（テスト用）。"""
+    out = []
+
+    def walk(item):
+        content = getattr(item, "content", None)
+        if isinstance(content, str):
+            out.append(content)
+        for child in getattr(item, "children", None) or []:
+            walk(child)
+
+    for top in getattr(view, "children", []):
+        walk(top)
+    return "\n".join(out)
+
+
 class _FakeResponder:
     def __init__(self, guild_id=1):
         self.guild = types.SimpleNamespace(id=guild_id)
@@ -148,6 +164,9 @@ class _FakeResponder:
         self.sent = []
 
     async def send(self, embed=None, ephemeral=False, **kwargs):
+        if embed is None and kwargs.get("view") is not None:
+            # V2 化された返信は、検証用にテキスト化して description として持つ
+            embed = types.SimpleNamespace(description=_view_text(kwargs["view"]))
         self.sent.append((embed, ephemeral))
 
     async def defer(self):

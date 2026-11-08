@@ -39,36 +39,53 @@ def _tts_cog():
     return cog
 
 
+def _view_text(view):
+    """Components V2 ビューから TextDisplay のテキストを集める（テスト用）。"""
+    out = []
+
+    def walk(item):
+        content = getattr(item, "content", None)
+        if isinstance(content, str):
+            out.append(content)
+        for child in getattr(item, "children", None) or []:
+            walk(child)
+
+    for top in getattr(view, "children", []):
+        walk(top)
+    return "\n".join(out)
+
+
 class TTSEmbedTest(unittest.IsolatedAsyncioTestCase):
-    async def test_start_sends_embed(self):
+    async def test_start_sends_v2(self):
         cog = _tts_cog()
         ctx = _ctx()
         await cog._start_impl(Responder(ctx))
         kwargs = ctx.send.call_args.kwargs
         self.assertNotIn("content", kwargs)
-        embed = kwargs["embed"]
-        self.assertIsInstance(embed, discord.Embed)
-        self.assertIn("読み上げを開始", embed.title)
-        self.assertIn("<#55>", embed.description)
-        self.assertIn("テスト話者", embed.description)
+        view = kwargs["view"]
+        self.assertIsInstance(view, discord.ui.LayoutView)
+        text = _view_text(view)
+        self.assertIn("読み上げを開始", text)
+        self.assertIn("<#55>", text)
+        self.assertIn("テスト話者", text)
 
-    async def test_stop_sends_embed(self):
+    async def test_stop_sends_v2(self):
         cog = _tts_cog()
         cog.read_channels = {1: 55}
         ctx = _ctx()
         await cog._stop_impl(Responder(ctx))
         kwargs = ctx.send.call_args.kwargs
         self.assertNotIn("content", kwargs)
-        self.assertIn("読み上げを停止", kwargs["embed"].description)
+        self.assertIn("読み上げを停止", _view_text(kwargs["view"]))
 
-    async def test_say_sends_embed(self):
+    async def test_say_sends_v2(self):
         cog = _tts_cog()
         cog.enqueue = AsyncMock(return_value=True)
         ctx = _ctx()
         await cog._say_impl(Responder(ctx), "こんにちは")
         kwargs = ctx.send.call_args.kwargs
         self.assertNotIn("content", kwargs)
-        self.assertIn("テスト話者", kwargs["embed"].description)
+        self.assertIn("テスト話者", _view_text(kwargs["view"]))
 
     async def test_settings_confirmation_is_embed(self):
         cog = _tts_cog()

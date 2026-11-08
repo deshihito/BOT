@@ -30,6 +30,7 @@ from core.vc.karaoke.dsp import annotations, asyncio, json, logging, os, threadi
 from core.vc.karaoke.restore import annotations, asyncio, json, logging, os, threading, time, re, SequenceMatcher, np, aiohttp, discord, commands, voice_recv, Responder, vc_feature_restore, ensure_model, VoiceBusy, get_manager, patch_voice_recv_client, VOICE_NOT_JOINED, FAILED, MUSIC, logger, RestoreMixin  # noqa: F401
 from core.vc.karaoke.session import annotations, asyncio, json, logging, os, threading, time, re, SequenceMatcher, np, aiohttp, discord, commands, voice_recv, Responder, vc_feature_restore, ensure_model, VoiceBusy, get_manager, patch_voice_recv_client, VOICE_NOT_JOINED, FAILED, MUSIC, logger, SessionMixin  # noqa: F401
 from core.vc.karaoke.sink import annotations, asyncio, json, logging, os, threading, time, re, SequenceMatcher, np, aiohttp, discord, commands, voice_recv, Responder, vc_feature_restore, ensure_model, VoiceBusy, get_manager, patch_voice_recv_client, VOICE_NOT_JOINED, FAILED, MUSIC, logger, KaraokeSink  # noqa: F401
+from core.support.panel_v2 import as_embed_v2
 
 logger = logging.getLogger("cogs.sio_karaoke")
 
@@ -50,18 +51,18 @@ class KaraokeCog(SessionMixin, RestoreMixin, commands.Cog):
 
     async def _start(self, r: Responder, target_lyrics: str | None):
         if not target_lyrics or not target_lyrics.strip():
-            return await r.send(embed=we(f"{FAILED} お題の歌詞を `lyrics` に入れてください。"), ephemeral=True)
+            return await r.send(view=as_embed_v2(we(f"{FAILED} お題の歌詞を `lyrics` に入れてください。")), ephemeral=True)
         # モデルが無いときは VC に入る前に断る。
         problem = await ensure_model(self, Model, MODEL_PATH)
         if problem:
-            return await r.send(embed=we(problem), ephemeral=True)
+            return await r.send(view=as_embed_v2(we(problem)), ephemeral=True)
         voice = getattr(r.user, "voice", None)
         if not voice or not voice.channel:
-            return await r.send(embed=we(VOICE_NOT_JOINED), ephemeral=True)
+            return await r.send(view=as_embed_v2(we(VOICE_NOT_JOINED)), ephemeral=True)
 
         guild_id = r.guild.id
         if guild_id in self.sessions:
-            return await r.send(embed=we(f"{FAILED} 既にカラオケ機能が実行中です。"), ephemeral=True)
+            return await r.send(view=as_embed_v2(we(f"{FAILED} 既にカラオケ機能が実行中です。")), ephemeral=True)
 
         vc_channel = voice.channel
         await r.defer()
@@ -74,9 +75,9 @@ class KaraokeCog(SessionMixin, RestoreMixin, commands.Cog):
                 cleanup=self._cleanup(guild_id), text_channel=r.channel, force=True, timeout=30.0,
             )
         except VoiceBusy as busy:
-            return await r.send(embed=we(str(busy)))
+            return await r.send(view=as_embed_v2(we(str(busy))))
         except Exception as e:
-            return await r.send(embed=we(f"{FAILED} VC接続に失敗しました: `{e}`"))
+            return await r.send(view=as_embed_v2(we(f"{FAILED} VC接続に失敗しました: `{e}`")))
 
         sink = KaraokeSink(bot=self.bot, vc=vc, vosk_model=self.vosk_model,
                            callback_coro=self._make_subtitle_sender(webhook))
@@ -90,11 +91,11 @@ class KaraokeCog(SessionMixin, RestoreMixin, commands.Cog):
         }
         self._save_resume_snapshot(guild_id, vc_channel, r.channel, r.user, target_lyrics)
 
-        await r.send(embed=we(
+        await r.send(view=as_embed_v2(we(
             f"🎤 **{vc_channel.name}** でカラオケを開始しました！\n\n"
             f"📜 **お題の歌詞:**\n```\n{target_lyrics}\n```\n"
             "歌った声がリアルタイムで字幕表示されます。終わったら `/vc のパネルからカラオケ採点` で採点！"
-        ), skip_localization=True)
+        )), skip_localization=True)
 
     async def _restore_session(self, guild_id: int, snapshot: dict) -> bool:
         settings = snapshot.get("settings")
@@ -153,12 +154,12 @@ class KaraokeCog(SessionMixin, RestoreMixin, commands.Cog):
         self._save_resume_snapshot(guild_id, channel, text_channel, user, target_lyrics)
 
         try:
-            await text_channel.send(embed=we(
+            await text_channel.send(view=as_embed_v2(we(
                 f"🎤 **{getattr(channel, 'name', '')}** でカラオケを再開しました！（Botの再起動による自動再開）\n\n"
                 f"📜 **お題の歌詞:**\n```\n{target_lyrics}\n```\n"
                 "歌った声がリアルタイムで字幕表示されます。終わったら `/vc のパネルからカラオケ採点` で採点！\n"
                 "※ 採点の履歴はリセットされています。"
-            ))
+            )))
         except Exception:
             logger.debug("カラオケ: 再開通知の送信に失敗しました", exc_info=True)
         logger.info("guild %s: カラオケを自動再開しました", guild_id)

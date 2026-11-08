@@ -31,6 +31,7 @@ except Exception:  # pragma: no cover
 from core.vc.transcription.common import *  # noqa: F401,F403 - shared constants/helpers
 from core.vc.transcription.common import we  # noqa: F401
 from core.vc.transcription.sink import TranscriptionSink  # noqa: F401
+from core.support.panel_v2 import as_embed_v2
 
 logger = logging.getLogger("cogs.sio_transcription")
 
@@ -130,11 +131,11 @@ class RestoreMixin:
         self._save_resume_snapshot(guild_id, channel, notice_channel, user, target_channel)
 
         try:
-            await notice_channel.send(embed=we(
+            await notice_channel.send(view=as_embed_v2(we(
                 f"🎙️ **{getattr(channel, 'name', '')}** で Logfare {logfare.TRANSCRIPTION_MODEL} による文字起こしを再開しました（Botの再起動による自動再開）。\n"
                 f"音声は無音区間ごとにLogfareへ送信され、結果を {getattr(target_channel, 'mention', '')} へ投稿します。\n"
                 "音楽・GVC・読み上げと同時に利用できます。利用者の音声は外部サービスで処理されます。"
-            ))
+            )))
         except Exception:
             logger.debug("文字起こし: 再開通知の送信に失敗しました", exc_info=True)
         logger.info("guild %s: 文字起こしを自動再開しました", guild_id)

@@ -26,6 +26,7 @@ from core.support.emojis import CLOCK, FAILED, MUSIC, PAUSE
 from core.vc.rec.common import *  # noqa: F401,F403 - shared constants/helpers
 from core.vc.rec.common import RECORD_LIMIT_SECONDS  # noqa: F401
 from core.vc.rec.sink import RecordingSink  # noqa: F401
+from core.support.panel_v2 import as_embed_v2
 
 logger = logging.getLogger("cogs.sio_rec")
 
@@ -45,18 +46,18 @@ class SessionMixin:
     async def start_command(self, r: Responder):
         voice = getattr(r.user, "voice", None)
         if not voice or not voice.channel:
-            return await r.send(embed=we(VOICE_NOT_JOINED), ephemeral=True)
+            return await r.send(view=as_embed_v2(we(VOICE_NOT_JOINED)), ephemeral=True)
 
         guild_id = r.guild.id
         if guild_id in self.sessions:
-            return await r.send(embed=we(
+            return await r.send(view=as_embed_v2(we(
                 f"{FAILED} 既にこのサーバーで録音中です。"
-            ), ephemeral=True)
+            )), ephemeral=True)
 
         if not discord.opus.is_loaded():
-            return await r.send(embed=we(
+            return await r.send(view=as_embed_v2(we(
                 FAILED + ' ' + FEATURE_UNAVAILABLE_CONTACT
-            ))
+            )))
 
         target_channel = voice.channel
         await r.defer()
@@ -69,10 +70,10 @@ class SessionMixin:
                 timeout=30.0,      # DAVE暗号化応答待ちのためタイムアウトを延長
             )
         except VoiceBusy as busy:
-            return await r.send(embed=we(str(busy)))
+            return await r.send(view=as_embed_v2(we(str(busy))))
         except Exception as e:
             logger.error(f"VC Connection Error: {e}", exc_info=True)
-            return await r.send(embed=we(voice_connection_failed(e)))
+            return await r.send(view=as_embed_v2(we(voice_connection_failed(e))))
 
         try:
             if vc.is_listening():
@@ -82,10 +83,10 @@ class SessionMixin:
 
         await asyncio.sleep(1.0)
 
-        status_msg = await r.send(embed=we(
+        status_msg = await r.send(view=as_embed_v2(we(
             f"🎙️ **{target_channel.name}** で録音を開始しました。\n"
             f"{CLOCK} 録音は最長 {RECORD_LIMIT_SECONDS // 60} 分です。超えると自動で停止してファイルを送ります。"
-        ), want_message=True)
+        )), want_message=True)
 
         # 録音していることを、テキストチャンネルの全員に見える形で知らせる（Discord のポリシー）。
         await self._announce_recording(r, target_channel)
@@ -96,7 +97,7 @@ class SessionMixin:
             vc.listen(sink)
         except Exception as e:
             await self.voice_sessions.release(guild_id, "record", reason="stop")
-            return await r.send(embed=we(f"{FAILED} 録音の開始に失敗しました: `{e}`"))
+            return await r.send(view=as_embed_v2(we(f"{FAILED} 録音の開始に失敗しました: `{e}`")))
 
         self.sessions[guild_id] = {
             "sink": sink,
@@ -153,7 +154,7 @@ class SessionMixin:
     async def stop_command(self, r: Responder):
         guild_id = r.guild.id
         if guild_id not in self.sessions:
-            return await r.send(embed=we(f"{FAILED} 現在録音は行われていません。"), ephemeral=True)
+            return await r.send(view=as_embed_v2(we(f"{FAILED} 現在録音は行われていません。")), ephemeral=True)
 
         await r.defer()
         if not await self.voice_sessions.release(guild_id, "record", reason="stop"):
@@ -162,7 +163,7 @@ class SessionMixin:
         if task is not None:
             await task
         if r.is_interaction:
-            await r.send(embed=we("🛑 録音を停止しました。ファイルはこのチャンネルに送りました。"))
+            await r.send(view=as_embed_v2(we("🛑 録音を停止しました。ファイルはこのチャンネルに送りました。")))
 
 
     STOP_REASONS = {
@@ -199,4 +200,4 @@ class SessionMixin:
                 color=0x95A5A6,
             )
 
-        await r.send(embed=embed)
+        await r.send(view=as_embed_v2(embed))

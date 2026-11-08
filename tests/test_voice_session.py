@@ -44,6 +44,22 @@ class FakeMember:
         self.guild = None
 
 
+def _view_text(view):
+    """Components V2 ビューから TextDisplay のテキストを集める（テスト用）。"""
+    out = []
+
+    def walk(item):
+        content = getattr(item, "content", None)
+        if isinstance(content, str):
+            out.append(content)
+        for child in getattr(item, "children", None) or []:
+            walk(child)
+
+    for top in getattr(view, "children", []):
+        walk(top)
+    return "\n".join(out)
+
+
 class FakeTextChannel:
     def __init__(self, guild, channel_id=500):
         self.id, self.guild, self.sent = channel_id, guild, []
@@ -51,7 +67,15 @@ class FakeTextChannel:
 
     async def send(self, content=None, **kwargs):
         embed = kwargs.get('embed')
-        self.sent.append(content if content is not None else (embed.description if embed else kwargs))
+        view = kwargs.get('view')
+        if content is not None:
+            self.sent.append(content)
+        elif embed is not None:
+            self.sent.append(embed.description)
+        elif view is not None:
+            self.sent.append(_view_text(view))
+        else:
+            self.sent.append(kwargs)
         return types.SimpleNamespace(edit=self._edit)
 
     async def _edit(self, **kwargs):
@@ -587,7 +611,10 @@ class MusicTest(unittest.IsolatedAsyncioTestCase):
         if content is not None:
             return content
         embed = kwargs.get('embed')
-        return getattr(embed, 'description', '') or ''
+        if embed is not None:
+            return getattr(embed, 'description', '') or ''
+        view = kwargs.get('view')
+        return _view_text(view) if view is not None else ''
 
     async def test_join_refused_while_recording(self):
         await self.rec.start_command(Responder(fake_ctx(self.w, self.w.alice, self.bot)))
@@ -619,7 +646,7 @@ class MusicTest(unittest.IsolatedAsyncioTestCase):
         if task is not None:
             await task
         self.assertIsNone(self.manager.get(self.w.guild.id))
-        self.assertIn('VC退出のため録音を停止しました', self.w.text.text())
+        self.assertIn('で退出操作を実行したため、録音を終了しました', self.w.text.text())
 
     async def test_join_hints_point_to_slash_join(self):
         source = (ROOT / 'core' / 'vc' / 'music' / 'entry.py').read_text(encoding='utf-8')

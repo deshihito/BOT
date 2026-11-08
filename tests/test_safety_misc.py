@@ -212,7 +212,24 @@ class _MusicCog:
         self._impl.get_state = lambda guild_id: state
         self._impl.update_panel = AsyncMock()
         self._impl._save_music_snapshot = lambda guild_id: None
+        self._impl._note_track_finished = lambda guild_id, *, completed: None
         self.state = state
+
+
+def _kwargs_text(kwargs):
+    """送信 kwargs から本文テキストを取り出す（embed / Components V2 両対応）。"""
+    embed = kwargs.get("embed")
+    if embed is not None:
+        return getattr(embed, "description", "") or ""
+    texts = []
+    stack = list(getattr(kwargs.get("view"), "children", []) or [])
+    while stack:
+        item = stack.pop()
+        content = getattr(item, "content", None)
+        if isinstance(content, str):
+            texts.append(content)
+        stack.extend(getattr(item, "children", []) or [])
+    return "\n".join(texts)
 
 
 class MusicImplGateTest(unittest.IsolatedAsyncioTestCase):
@@ -235,13 +252,13 @@ class MusicImplGateTest(unittest.IsolatedAsyncioTestCase):
         outsider = self._interaction(1, vc)
         await cog._impl._skip_impl(outsider)
         sent = outsider.response.send_message.await_args
-        self.assertIn("ボイスチャンネルに参加", sent.kwargs["embed"].description)
+        self.assertIn("ボイスチャンネルに参加", _kwargs_text(sent.kwargs))
         self.assertIsNotNone(state["current_track"])  # 状態は変わっていない
 
         member = self._interaction(2, vc)
         await cog._impl._skip_impl(member)
         sent = member.response.send_message.await_args
-        self.assertIn("スキップしました", sent.kwargs["embed"].description)
+        self.assertIn("スキップしました", _kwargs_text(sent.kwargs))
         self.assertIsNone(state["current_track"])
 
     async def test_stop_denied_for_non_member(self):
@@ -265,8 +282,7 @@ class MusicImplGateTest(unittest.IsolatedAsyncioTestCase):
             guild=guild, author=types.SimpleNamespace(id=1), send=send)
         await cog._impl._stop_impl(Responder(ctx))
         self.assertEqual(state["queue"].qsize(), 1)  # クリアされていない
-        self.assertIn("ボイスチャンネルに参加",
-                      sent[0]["embed"].description)
+        self.assertIn("ボイスチャンネルに参加", _kwargs_text(sent[0]))
 
 
 # ---------------------------------------------------------------------------

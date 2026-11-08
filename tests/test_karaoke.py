@@ -48,6 +48,22 @@ class CleanTextTests(unittest.TestCase):
         self.assertEqual(clean_text("！？…"), "")
 
 
+def _view_text(view):
+    """Components V2 ビューから TextDisplay のテキストを集める（テスト用）。"""
+    out = []
+
+    def walk(item):
+        content = getattr(item, "content", None)
+        if isinstance(content, str):
+            out.append(content)
+        for child in getattr(item, "children", None) or []:
+            walk(child)
+
+    for top in getattr(view, "children", []):
+        walk(top)
+    return "\n".join(out)
+
+
 class _FakeResponder:
     def __init__(self, guild_id=1):
         self.guild = types.SimpleNamespace(id=guild_id)
@@ -56,6 +72,9 @@ class _FakeResponder:
         self.sent = []
 
     async def send(self, embed=None, ephemeral=False, **kwargs):
+        if embed is None and kwargs.get("view") is not None:
+            # V2 化された返信は、検証用にテキスト化して description として持つ
+            embed = types.SimpleNamespace(description=_view_text(kwargs["view"]))
         self.sent.append((embed, ephemeral, kwargs))
 
     async def defer(self):
@@ -112,43 +131,45 @@ class ScoreTests(unittest.IsolatedAsyncioTestCase):
         cog = _cog({1: session})
         r = _FakeResponder()
         await cog._score(r)
-        return r.sent[0][0]
+        # 返信は Components V2 化されているため、表示テキストで検証する
+        return r.sent[0][0].description
 
     async def test_perfect_score(self):
-        embed = await self._score("あいうえお", {
+        text = await self._score("あいうえお", {
             11: {"display_name": "歌手", "history": ["あい", "うえお"]},
         })
-        self.assertEqual(len(embed.fields), 1)
-        self.assertIn("100.0 点", embed.fields[0].value)
-        self.assertIn("PERFECT", embed.fields[0].value)
+        self.assertIn("歌手", text)
+        self.assertIn("100.0 点", text)
+        self.assertIn("PERFECT", text)
 
     async def test_partial_score_uses_cleaned_text(self):
         # お題に空白・記号が混ざっていても正規化してから比較する
-        embed = await self._score("あい うえお!", {
+        text = await self._score("あい うえお!", {
             11: {"display_name": "歌手", "history": ["あいうえお"]},
         })
-        self.assertIn("100.0 点", embed.fields[0].value)
+        self.assertIn("100.0 点", text)
 
     async def test_low_score_comment(self):
-        embed = await self._score("あいうえおかきくけこ", {
+        text = await self._score("あいうえおかきくけこ", {
             11: {"display_name": "歌手", "history": ["さしすせそ"]},
         })
-        self.assertIn("KEEP TRYING", embed.fields[0].value)
+        self.assertIn("KEEP TRYING", text)
 
     async def test_no_singing_yet(self):
-        embed = await self._score("あいうえお", {
+        text = await self._score("あいうえお", {
             11: {"display_name": "歌手", "history": []},
         })
-        self.assertEqual(embed.fields, [])
-        self.assertEqual(embed.description, "まだ歌声が検知されていません！")
+        self.assertIn("まだ歌声が検知されていません！", text)
+        self.assertNotIn("歌手", text)
 
     async def test_users_without_history_are_skipped(self):
-        embed = await self._score("あいうえお", {
+        text = await self._score("あいうえお", {
             11: {"display_name": "無言", "history": []},
             12: {"display_name": "歌手", "history": ["あいうえお"]},
         })
-        self.assertEqual(len(embed.fields), 1)
-        self.assertIn("歌手", embed.fields[0].name)
+        self.assertIn("歌手", text)
+        self.assertIn("100.0 点", text)
+        self.assertNotIn("無言", text)
 
 
 if __name__ == "__main__":

@@ -30,6 +30,7 @@ from core.vc.karaoke.common import *  # noqa: F401,F403 - shared constants/helpe
 from core.vc.karaoke.common import we  # noqa: F401
 from core.vc.karaoke.dsp import clean_text  # noqa: F401
 from core.vc.karaoke.sink import KaraokeSink  # noqa: F401
+from core.support.panel_v2 import as_embed_v2
 
 logger = logging.getLogger("cogs.sio_karaoke")
 
@@ -51,28 +52,28 @@ class SessionMixin:
             return await self._score(r)
         if action == "stop":
             if r.guild.id not in self.sessions:
-                return await r.send(embed=we(f"{FAILED} " + not_running("カラオケ")), ephemeral=True)
+                return await r.send(view=as_embed_v2(we(f"{FAILED} " + not_running("カラオケ"))), ephemeral=True)
             if not await self.voice_sessions.release(r.guild.id, "karaoke", reason="stop"):
                 self._cleanup(r.guild.id)("stop")
-            return await r.send(embed=we("🛑 カラオケモードを終了しました！"))
-        await r.send(embed=we(
+            return await r.send(view=as_embed_v2(we("🛑 カラオケモードを終了しました！")))
+        await r.send(view=as_embed_v2(we(
             "🎤 **カラオケ機能の使い方**\n"
             "1. `/vc のパネルからカラオケ開始 lyrics:<お題の歌詞>` : 歌詞をセットして採点＆字幕開始\n"
             "2. `/vc のパネルからカラオケ採点` : 現在の歌唱スコアを表示\n"
             "3. `/vc のパネルからカラオケ終了` : カラオケを終了"
-        ))
+        )))
 
 
     async def _score(self, r: Responder):
         session = self.sessions.get(r.guild.id)
         if not session:
-            return await r.send(embed=we(f"{FAILED} " + not_running("カラオケ")), ephemeral=True)
+            return await r.send(view=as_embed_v2(we(f"{FAILED} " + not_running("カラオケ"))), ephemeral=True)
 
         sink: KaraokeSink = session["sink"]
         target = clean_text(session["target_lyrics"])
 
         if not target:
-            return await r.send(embed=we(FAILED + ' お題の歌詞が登録されていません。'), ephemeral=True)
+            return await r.send(view=as_embed_v2(we(FAILED + ' お題の歌詞が登録されていません。')), ephemeral=True)
 
         embed = discord.Embed(title="🏆 カラオケ採点結果", color=0xFFD700)
 
@@ -98,7 +99,7 @@ class SessionMixin:
         if not embed.fields:
             embed.description = "まだ歌声が検知されていません！"
 
-        await r.send(embed=embed)
+        await r.send(view=as_embed_v2(embed))
 
 
     def _cleanup(self, guild_id: int):

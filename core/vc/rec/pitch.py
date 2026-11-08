@@ -26,6 +26,7 @@ from core.support.emojis import CLOCK, FAILED, MUSIC, PAUSE
 from core.vc.rec.common import *  # noqa: F401,F403 - shared constants/helpers
 from core.vc.rec.common import NOTE_NAMES_FLAT, NOTE_NAMES_SHARP  # noqa: F401
 from core.vc.rec.sink import RecordingSink  # noqa: F401
+from core.support.panel_v2 import as_embed_v2
 
 logger = logging.getLogger("cogs.sio_rec")
 
@@ -83,12 +84,12 @@ class PitchMixin:
         """直近の音声からピアノ音階（単音/和音/声の倍音層）を解析する。"""
         session = self.sessions.get(r.guild.id)
         if not session:
-            return await r.send(embed=we(f"{FAILED} 現在録音中ではありません。"), ephemeral=True)
+            return await r.send(view=as_embed_v2(we(f"{FAILED} 現在録音中ではありません。")), ephemeral=True)
 
         sink: RecordingSink = session["sink"]
         audio_snapshot = sink.snapshot()
         if not audio_snapshot:
-            return await r.send(embed=we(MUSIC + ' 音声データがまだ蓄積されていません。話してから実行してください。'), ephemeral=True)
+            return await r.send(view=as_embed_v2(we(MUSIC + ' 音声データがまだ蓄積されていません。話してから実行してください。')), ephemeral=True)
 
         embed = discord.Embed(title="🎹 リアルタイム音階解析 (Pitch Detection)", color=0x3498DB)
         found_any = False
@@ -103,4 +104,4 @@ class PitchMixin:
 
         if not found_any:
             embed.description = "現在明確なピッチ（音階）は検出されませんでした。"
-        await r.send(embed=embed)
+        await r.send(view=as_embed_v2(embed))

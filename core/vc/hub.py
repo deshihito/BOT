@@ -20,7 +20,7 @@ from core.support.usage_stats import usage_stats
 from core.support.legacy import Responder
 from core.vc.voice_session import VoiceBusy, feature_label, get_manager, stop_hint
 from core.vc.voice_media import add_audio_source, remove_audio_source
-from core.support.panel_v2 import as_panel_v2, edit_panel_v2
+from core.support.panel_v2 import as_panel_v2, edit_panel_v2, as_embed_v2
 
 from core.vc.common import *  # noqa: F401,F403 - shared constants
 from core.vc.common import COGS, GVC_ROOM_ACTIONS, GVC_ROOM_FORMS, LAZY_EXTENSIONS, VOICE_ACTIONS_BY_GENRE, VOICE_GENRES, format_elapsed  # noqa: F401
@@ -118,7 +118,7 @@ class VoiceHub(commands.Cog):
     # ------------------------------------------------------------ 統合サブコマンド
     async def voice_connection(self, interaction: discord.Interaction, action: app_commands.Choice[str]):
         if action.value == "status":
-            return await Responder(interaction).send(embed=self.status_embed(interaction.guild))
+            return await Responder(interaction).send(view=as_embed_v2(self.status_embed(interaction.guild)))
         cog = await self._cog(interaction, "music")
         if cog:
             if action.value == "join":

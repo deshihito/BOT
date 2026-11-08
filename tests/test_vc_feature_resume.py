@@ -271,6 +271,22 @@ class RecordResumeTest(StoreTestCase, unittest.IsolatedAsyncioTestCase):
 
 
 # ---------------------------------------------------------------- カラオケ
+def _kwargs_text(kwargs):
+    """送信 kwargs から本文テキストを取り出す（embed / Components V2 両対応）。"""
+    embed = kwargs.get("embed")
+    if embed is not None:
+        return getattr(embed, "description", "") or ""
+    texts = []
+    stack = list(getattr(kwargs.get("view"), "children", []) or [])
+    while stack:
+        item = stack.pop()
+        content = getattr(item, "content", None)
+        if isinstance(content, str):
+            texts.append(content)
+        stack.extend(getattr(item, "children", []) or [])
+    return "\n".join(texts)
+
+
 class KaraokeResumeTest(StoreTestCase, unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         super().setUp()
@@ -300,7 +316,7 @@ class KaraokeResumeTest(StoreTestCase, unittest.IsolatedAsyncioTestCase):
         self.assertIsNotNone(session)
         self.assertEqual(session["target_lyrics"], "お題の歌詞テスト")
         self.assertEqual(cog.voice_sessions.get(10).feature, "karaoke")
-        descriptions = [getattr(kw.get("embed"), "description", "") or "" for _c, kw in text.sent]
+        descriptions = [_kwargs_text(kw) for _c, kw in text.sent]
         self.assertTrue(any("カラオケを再開しました" in d for d in descriptions))
         await cog.voice_sessions.release(guild, "karaoke", reason="stop")
         self.assertEqual(vc_feature_restore.feature_entries("karaoke"), {})
