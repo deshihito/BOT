@@ -6,7 +6,10 @@
 通信はしない (応答は Fake で記録するだけ)。
 """
 
+import asyncio
 import importlib
+import re
+import time
 import types
 import unittest
 from unittest.mock import patch
@@ -257,6 +260,180 @@ class FallbackTest(unittest.IsolatedAsyncioTestCase):
 
     def test_build_panel_unknown_root(self):
         self.assertIsNone(panel_recovery.build_panel(FakeBot(self.cogs), "unknown"))
+
+
+# ---------------------------------------------------------------------------
+# 生存判定 (ViewStore) と待機の回帰テスト (2026-11-08 実機バグ)
+#
+# 実機症状: 再起動直後に死んだ /general パネルを押すと、recovery が
+# 誰も応答しないことが確定しているケースでも一律 1.5 秒待ってから
+# 再表示を試み、高負荷と重なって Discord の初回応答期限 (3秒) を超え、
+# 10062 Unknown interaction で復旧自体が失敗し続けていた。
+# ---------------------------------------------------------------------------
+
+MESSAGE_ID = 999
+GENERAL_GENRE_KEY = (3, "panel:general:genre")  # (component_type, custom_id)
+
+
+class StoreBot(FakeBot):
+    """ViewStore の内部 dict を模した bot。"""
+
+    def __init__(self, cogs=None, views=None, dynamic_items=None):
+        super().__init__(cogs)
+        store = types.SimpleNamespace(
+            _views=views if views is not None else {},
+            _dynamic_items=dynamic_items or {},
+        )
+        self._connection = types.SimpleNamespace(_view_store=store)
+
+
+class RaisingResponse(FakeResponse):
+    """send_message が必ず指定の例外を投げる応答。"""
+
+    def __init__(self, error):
+        super().__init__(done=False)
+        self._error = error
+
+    async def send_message(self, *args, **kwargs):
+        self.calls.append((args, kwargs))
+        raise self._error
+
+
+def make_store_interaction(custom_id="panel:general:genre", *, response=None):
+    return types.SimpleNamespace(
+        type=discord.InteractionType.component,
+        data={"custom_id": custom_id, "component_type": 3},
+        message=types.SimpleNamespace(id=MESSAGE_ID),
+        response=response if response is not None else FakeResponse(),
+        guild_id=123,
+        user=types.SimpleNamespace(id=42),
+    )
+
+
+def live_view(finished=False):
+    return types.SimpleNamespace(is_finished=lambda: finished)
+
+
+class LiveCallbackExpectedTest(unittest.TestCase):
+    def setUp(self):
+        from core.support.panel_recovery.cog import _live_callback_expected
+
+        self.expected = _live_callback_expected
+        self.cogs = {"GeneralCog": object()}
+
+    def test_no_connection_info_is_conservative(self):
+        # store を確認できない bot では「応答する見込みあり」(待つ側) に倒す。
+        interaction = make_store_interaction()
+        self.assertTrue(self.expected(FakeBot(self.cogs), interaction))
+
+    def test_no_store_entry_means_dead(self):
+        interaction = make_store_interaction()
+        self.assertFalse(self.expected(StoreBot(self.cogs, views={}), interaction))
+
+    def test_item_with_dead_view_means_dead(self):
+        # 本番の "unknown view ... Discarding" 相当: item はあるが view が None。
+        views = {MESSAGE_ID: {GENERAL_GENRE_KEY: types.SimpleNamespace(view=None)}}
+        interaction = make_store_interaction()
+        self.assertFalse(self.expected(StoreBot(self.cogs, views=views), interaction))
+
+    def test_finished_view_means_dead(self):
+        views = {MESSAGE_ID: {GENERAL_GENRE_KEY: types.SimpleNamespace(view=live_view(finished=True))}}
+        interaction = make_store_interaction()
+        self.assertFalse(self.expected(StoreBot(self.cogs, views=views), interaction))
+
+    def test_live_view_means_expected(self):
+        views = {MESSAGE_ID: {GENERAL_GENRE_KEY: types.SimpleNamespace(view=live_view())}}
+        interaction = make_store_interaction()
+        self.assertTrue(self.expected(StoreBot(self.cogs, views=views), interaction))
+
+    def test_persistent_bucket_is_checked(self):
+        views = {None: {GENERAL_GENRE_KEY: types.SimpleNamespace(view=live_view())}}
+        interaction = make_store_interaction()
+        self.assertTrue(self.expected(StoreBot(self.cogs, views=views), interaction))
+
+    def test_dynamic_item_match_means_expected(self):
+        bot = StoreBot(self.cogs, views={}, dynamic_items={re.compile(r"panel:.*"): object()})
+        interaction = make_store_interaction()
+        self.assertTrue(self.expected(bot, interaction))
+
+
+class RecoveryLivenessFlowTest(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        self.cogs = {
+            "GeneralCog": object(),
+            "VoiceHub": object(),
+            "SupportCog": object(),
+            "GameHub": object(),
+            "HelpCog": FakeHelpCog(make_catalog()),
+        }
+
+    def make_recovery(self, **store_kwargs):
+        return panel_recovery.PanelRecoveryCog(StoreBot(self.cogs, **store_kwargs))
+
+    async def test_dead_panel_reopens_without_waiting(self):
+        # 待機上限が大きくても、死んだパネルは待たずに即応答する。
+        # (旧実装では上限まで眠るため wait_for がタイムアウトして落ちる)
+        recovery = self.make_recovery(views={})
+        interaction = make_store_interaction()
+        with patch.object(panel_recovery, "RECOVERY_WAIT_SECONDS", 30):
+            await asyncio.wait_for(recovery.on_interaction(interaction), timeout=5)
+        self.assertEqual(len(interaction.response.calls), 1)
+        _args, kwargs = interaction.response.calls[0]
+        self.assertIn("view", kwargs)
+        self.assertTrue(kwargs.get("ephemeral"))
+
+    async def test_discarded_view_reopens_without_waiting(self):
+        views = {MESSAGE_ID: {GENERAL_GENRE_KEY: types.SimpleNamespace(view=None)}}
+        recovery = self.make_recovery(views=views)
+        interaction = make_store_interaction()
+        with patch.object(panel_recovery, "RECOVERY_WAIT_SECONDS", 30):
+            await asyncio.wait_for(recovery.on_interaction(interaction), timeout=5)
+        self.assertEqual(len(interaction.response.calls), 1)
+
+    async def test_live_view_response_stands_down_early(self):
+        # 生存中 callback が途中で応答したら、上限を待たずに手を引き、
+        # 横取り (余計なパネル送信) もしない。
+        views = {MESSAGE_ID: {GENERAL_GENRE_KEY: types.SimpleNamespace(view=live_view())}}
+        recovery = self.make_recovery(views=views)
+        interaction = make_store_interaction()
+
+        async def respond_later():
+            await asyncio.sleep(0.15)
+            interaction.response._done = True
+
+        flip = asyncio.create_task(respond_later())
+        started = time.monotonic()
+        with patch.object(panel_recovery, "RECOVERY_WAIT_SECONDS", 5):
+            await recovery.on_interaction(interaction)
+        elapsed = time.monotonic() - started
+        await flip
+        self.assertEqual(interaction.response.calls, [])
+        self.assertLess(elapsed, 2)
+
+    async def test_live_view_silence_reopens_after_deadline(self):
+        # 生存扱いの View が上限まで応答しなければ、従来どおり再表示する。
+        views = {MESSAGE_ID: {GENERAL_GENRE_KEY: types.SimpleNamespace(view=live_view())}}
+        recovery = self.make_recovery(views=views)
+        interaction = make_store_interaction()
+        started = time.monotonic()
+        with patch.object(panel_recovery, "RECOVERY_WAIT_SECONDS", 0.2):
+            await recovery.on_interaction(interaction)
+        elapsed = time.monotonic() - started
+        self.assertGreaterEqual(elapsed, 0.15)
+        self.assertEqual(len(interaction.response.calls), 1)
+
+    async def test_expired_interaction_is_handled_quietly(self):
+        # 失効済み interaction (10062) では例外を外に出さず、案内文の
+        # 再送 (届きようがない) も試みない。
+        error = discord.NotFound(
+            types.SimpleNamespace(status=404, reason="Not Found"),
+            {"message": "Unknown interaction", "code": 10062},
+        )
+        recovery = self.make_recovery(views={})
+        interaction = make_store_interaction(response=RaisingResponse(error))
+        with patch.object(panel_recovery, "RECOVERY_WAIT_SECONDS", 0):
+            await recovery.on_interaction(interaction)  # 例外が出ないこと
+        self.assertEqual(len(interaction.response.calls), 1)
 
 
 if __name__ == "__main__":
