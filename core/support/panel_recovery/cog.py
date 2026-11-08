@@ -61,6 +61,12 @@ RECOVERY_POLL_INTERVAL_SECONDS = 0.05
 # interaction 自体が失効していることを示す Discord エラーコード。
 UNKNOWN_INTERACTION_CODE = 10062
 
+# 応答が既に記録されていることを示す Discord エラーコード。
+# ローカルの _response_type は HTTP 完了後に立つため、送信リクエストが
+# Discord 側で受理されたのに応答が失われて HTTP 層が再試行した場合など、
+# 「実際には届いている」のにこのエラーだけが返ることがある。
+ALREADY_ACKNOWLEDGED_CODE = 40060
+
 
 def _live_callback_expected(bot, interaction: discord.Interaction) -> bool:
     """生存中の View の callback がこの interaction に応答する見込みがあるか。
@@ -206,6 +212,15 @@ class PanelRecoveryCog(commands.Cog):
                     "panel recovery: interaction が失効していたため再表示できませんでした (%s)",
                     custom_id,
                 )
+                return
+            logger.exception("panel recovery: パネルの再表示に失敗しました (%s)", custom_id)
+            await _send_fallback_message(interaction)
+        except discord.HTTPException as exc:
+            if getattr(exc, "code", None) == ALREADY_ACKNOWLEDGED_CODE:
+                # 応答は Discord 側に受理済み (再試行との競合等)。
+                # 利用者にはパネルが届いているので、静かに終わる。
+                logger.debug(
+                    "panel recovery: 応答済みのため再表示を中止しました (%s)", custom_id)
                 return
             logger.exception("panel recovery: パネルの再表示に失敗しました (%s)", custom_id)
             await _send_fallback_message(interaction)

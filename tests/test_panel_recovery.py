@@ -17,6 +17,7 @@ from unittest.mock import patch
 import discord
 
 import cogs.support as panel_recovery
+from core.support.panel_recovery import cog as recovery_cog
 from cogs.game import GameDetailView, GameHubView
 from cogs.help import BackView, CommandView, HelpView
 from cogs.vc import VoicePanelView
@@ -434,6 +435,36 @@ class RecoveryLivenessFlowTest(unittest.IsolatedAsyncioTestCase):
         with patch.object(panel_recovery, "RECOVERY_WAIT_SECONDS", 0):
             await recovery.on_interaction(interaction)  # 例外が出ないこと
         self.assertEqual(len(interaction.response.calls), 1)
+
+    async def test_already_acknowledged_is_handled_quietly(self):
+        # 応答済み (40060) は「実際には届いている」競合なので、ERROR を
+        # 出さず、案内文の再送も試みない。
+        error = discord.HTTPException(
+            types.SimpleNamespace(status=400, reason="Bad Request"),
+            {"message": "Interaction has already been acknowledged.", "code": 40060},
+        )
+        recovery = self.make_recovery(views={})
+        interaction = make_store_interaction(response=RaisingResponse(error))
+        with patch.object(panel_recovery, "RECOVERY_WAIT_SECONDS", 0), \
+                patch.object(recovery_cog.logger, "exception") as log_exception:
+            await recovery.on_interaction(interaction)  # 例外が出ないこと
+        self.assertEqual(len(interaction.response.calls), 1)
+        log_exception.assert_not_called()
+
+    async def test_other_http_errors_still_log_and_fallback(self):
+        # 40060 以外の HTTPException は従来どおり失敗として記録し、
+        # 案内文の送信を試みる。
+        error = discord.HTTPException(
+            types.SimpleNamespace(status=500, reason="Internal Server Error"),
+            {"message": "Internal Server Error", "code": 0},
+        )
+        recovery = self.make_recovery(views={})
+        interaction = make_store_interaction(response=RaisingResponse(error))
+        with patch.object(panel_recovery, "RECOVERY_WAIT_SECONDS", 0), \
+                patch.object(recovery_cog.logger, "exception") as log_exception:
+            await recovery.on_interaction(interaction)
+        self.assertEqual(len(interaction.response.calls), 2)
+        log_exception.assert_called_once()
 
 
 if __name__ == "__main__":
