@@ -110,9 +110,12 @@ class GlobalLeaderboardTest(unittest.IsolatedAsyncioTestCase):
             guild_id=1, user=types.SimpleNamespace(id=2), followup=followup)
         await SokuNukeRta(types.SimpleNamespace()).leaderboard(interaction, scope="global")
         kwargs = followup.send.await_args.kwargs
-        self.assertIn("file", kwargs)
-        self.assertEqual(kwargs["embed"].title, "即抜けRTAランキング（全サーバー）")
-        self.assertEqual(kwargs["embed"].image.url, "attachment://sokunuke_leaderboard.png")
+        # ボードは切替View（V2）＋files で送る（boardNotify RTA と同方式）。
+        self.assertEqual([f.filename for f in kwargs["files"]],
+                         ["sokunuke_leaderboard.png"])
+        embed = kwargs["view"].panel.embed()
+        self.assertEqual(embed.title, "即抜けRTAランキング（全サーバー）")
+        self.assertEqual(embed.image.url, "attachment://sokunuke_leaderboard.png")
 
     async def test_global_board_empty(self):
         self.store = FakeStore({"1": {"records": []}})
@@ -121,9 +124,10 @@ class GlobalLeaderboardTest(unittest.IsolatedAsyncioTestCase):
             guild_id=1, user=types.SimpleNamespace(id=2), followup=followup)
         await SokuNukeRta(types.SimpleNamespace()).leaderboard(interaction, scope="global")
         kwargs = followup.send.await_args.kwargs
-        self.assertNotIn("file", kwargs)
-        self.assertEqual(kwargs["embed"].title, "即抜けRTAランキング（全サーバー）")
-        self.assertIn("まだ記録がありません", kwargs["embed"].description)
+        self.assertEqual(kwargs["files"], [])
+        embed = kwargs["view"].panel.embed()
+        self.assertEqual(embed.title, "即抜けRTAランキング（全サーバー）")
+        self.assertIn("まだ記録がありません", embed.description)
 
 
 if __name__ == "__main__":

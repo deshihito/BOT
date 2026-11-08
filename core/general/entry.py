@@ -35,6 +35,7 @@ from core.support.usage_stats import usage_stats
 from core.general.ai import ai_omnirush, ai_preferences, ai_provider_router
 from core.game.game.game_guides import GAME_GUIDES, GAME_ORDER
 from core.game.rta.views import RtaBoardView
+from core.game.sokunuke_rta.cog import SokunukeBoardView
 from core.general import translation_settings as translation
 from core.support.localization import localization
 from core.game.game import prison as prison_core
@@ -107,6 +108,7 @@ class RankingsView(discord.ui.View):
         ("コイン保有", "coin_leaderboard"),
         ("総合資産", "asset_leaderboard"),
         ("boardNotify RTA", "rta_board"),
+        ("即抜けRTA", "sokunuke_board"),
         ("fujo status", "fujo_ranking"),
         ("EXP", "exp_ranking"),
     )
@@ -558,6 +560,20 @@ class GeneralCog(
                 rta_cog, interaction.guild_id, interaction.user.id,
                 interaction.user.display_name,
                 **RTA_BOARD_PRESETS.get(value, {}))
+            await view.load()
+            return await interaction.followup.send(
+                view=as_panel_v2(view), files=view.files())
+
+        if value == "sokunuke_board":
+            # 即抜けRTAボード（boardNotify RTA と同方式の切替ボード）。
+            sokunuke_cog = self.bot.get_cog("SokuNukeRta")
+            if sokunuke_cog is None:
+                return await self._safe_respond(
+                    interaction, feature_not_loaded("即抜けRTA"))
+            # ボード取得は表示名解決を伴うため、先にACKする（rta_board と同じ）。
+            await interaction.response.defer()
+            view = SokunukeBoardView(
+                sokunuke_cog, interaction.guild_id, interaction.user.id)
             await view.load()
             return await interaction.followup.send(
                 view=as_panel_v2(view), files=view.files())
