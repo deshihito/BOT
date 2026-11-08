@@ -33,6 +33,38 @@ test("manageableGuilds はオーナーと管理権限だけ残す", () => {
   assert.deepEqual(m.manageableGuilds(guilds).map((g) => g.id), ["1", "2"]);
 });
 
+test("normalizeOAuthGuild は文字列 permissions をそのまま通す", () => {
+  const guild = m.normalizeOAuthGuild({ id: "123456789012345678", name: "s", icon: "hash", owner: false, permissions: ADMIN });
+  assert.deepEqual(guild, { id: "123456789012345678", name: "s", icon: "hash", owner: false, permissions: ADMIN });
+  assert.equal(m.hasManageGuild(guild.permissions), true);
+});
+
+test("normalizeOAuthGuild は数値 permissions と permissions_new を文字列へ寄せる", () => {
+  const numeric = m.normalizeOAuthGuild({ id: "123456789012345678", name: "s", icon: null, owner: false, permissions: 32 });
+  assert.equal(numeric.permissions, MANAGE);
+  const legacy = m.normalizeOAuthGuild({ id: "123456789012345678", name: "s", icon: null, owner: false, permissions: 0, permissions_new: ADMIN });
+  assert.equal(legacy.permissions, ADMIN);
+  assert.deepEqual(m.manageableGuilds([numeric, legacy]).length, 2);
+});
+
+test("normalizeOAuthGuild は数値 id を文字列化し、オーナーを permissions 0 でも残す", () => {
+  const guild = m.normalizeOAuthGuild({ id: 1234567890123456, name: "s", owner: true, permissions: NONE });
+  assert.equal(guild.id, "1234567890123456");
+  assert.equal(guild.icon, null);
+  assert.deepEqual(m.manageableGuilds([guild]).length, 1);
+});
+
+test("normalizeOAuthGuild は壊れた項目だけを落とす", () => {
+  assert.equal(m.normalizeOAuthGuild(null), null);
+  assert.equal(m.normalizeOAuthGuild("x"), null);
+  assert.equal(m.normalizeOAuthGuild({ name: "s", permissions: ADMIN }), null);
+  assert.equal(m.normalizeOAuthGuild({ id: "1", permissions: ADMIN }), null);
+  assert.equal(m.normalizeOAuthGuild({ id: "1", name: "s" }), null);
+  assert.equal(m.normalizeOAuthGuild({ id: "1", name: "s", permissions: {} }), null);
+  const valid = m.normalizeOAuthGuild({ id: "2", name: "ok", icon: 42, owner: "yes", permissions: VIEW });
+  assert.deepEqual(valid, { id: "2", name: "ok", icon: null, owner: false, permissions: VIEW });
+});
+
 test("isSnowflake は17〜20桁の数字だけ", () => {
   assert.equal(m.isSnowflake("12345678901234567"), true);
   assert.equal(m.isSnowflake("123456789012345678901"), false);
