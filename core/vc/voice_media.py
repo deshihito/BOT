@@ -40,7 +40,25 @@ class SharedAudioSource(discord.AudioSource):
     """Pull one frame from each active feature source and mix it for Discord."""
     def __init__(self):
         self._sources: dict[str, tuple[discord.AudioSource, object | None]] = {}
+        self._taps: dict[str, tuple[object, str | None]] = {}
         self._lock = threading.RLock()
+
+    def add_tap(self, key: str, callback, *, exclude_key: str | None = None) -> None:
+        """再生ミックスのコピーを callback(pcm_frame) へ渡す分岐を登録する。
+
+        exclude_key のソース（例: 中継受け側のプレースホルダ）は分岐側の
+        ミックスから除く（相手の音を相手へ送り返すループ防止）。
+        """
+        with self._lock:
+            self._taps[key] = (callback, exclude_key)
+
+    def remove_tap(self, key: str) -> bool:
+        with self._lock:
+            return self._taps.pop(key, None) is not None
+
+    def has_tap(self, key: str) -> bool:
+        with self._lock:
+            return key in self._taps
 
     def add(self, key: str, source: discord.AudioSource, after=None) -> None:
         with self._lock:
@@ -79,7 +97,9 @@ class SharedAudioSource(discord.AudioSource):
     def read(self) -> bytes:
         with self._lock:
             items = list(self._sources.items())
+            taps = list(self._taps.items())
         frames: list[bytes] = []
+        keyed_frames: list[tuple[str, bytes]] = []
         ended: list[tuple[str, tuple[discord.AudioSource, object | None], Exception | None]] = []
         for key, item in items:
             source = item[0]
@@ -87,6 +107,7 @@ class SharedAudioSource(discord.AudioSource):
                 frame = source.read()
                 if frame:
                     frames.append(frame)
+                    keyed_frames.append((key, frame))
                 else:
                     ended.append((key, item, None))
             except Exception as exc:
@@ -97,6 +118,15 @@ class SharedAudioSource(discord.AudioSource):
                     if self._sources.get(key) == item:
                         self._sources.pop(key, None)
                         self._finish(key, item, error)
+        if taps and keyed_frames:
+            for tap_key, (callback, exclude_key) in taps:
+                selected = [f for k, f in keyed_frames if k != exclude_key]
+                if not selected:
+                    continue
+                try:
+                    callback(_mix_frames(selected))
+                except Exception:
+                    logger.debug("audio tap failed: %s", tap_key, exc_info=True)
         return _mix_frames(frames)
 
     def is_opus(self) -> bool:
@@ -183,6 +213,18 @@ def remove_audio_source(vc, key: str, error=None, *, notify: bool = False) -> bo
 def has_audio_source(vc, key: str) -> bool:
     mixer = getattr(vc, "_shared_audio_source", None)
     return bool(mixer is not None and mixer.contains(key))
+
+
+def add_mixer_tap(vc, key: str, callback, *, exclude_key: str | None = None) -> SharedAudioSource:
+    """この VC の再生ミックス（音楽・読み上げ等）を callback へ分岐する。"""
+    mixer = get_audio_mixer(vc)
+    mixer.add_tap(key, callback, exclude_key=exclude_key)
+    return mixer
+
+
+def remove_mixer_tap(vc, key: str) -> bool:
+    mixer = getattr(vc, "_shared_audio_source", None)
+    return mixer.remove_tap(key) if mixer is not None else False
 
 
 def add_receive_sink(vc, key: str, sink: voice_recv.AudioSink) -> SharedReceiveSink:
