@@ -2,7 +2,8 @@
 
 Discord には接続しない。検証すること:
 
-- 各対象ゲーム: 状態の保存 → （新しい cog = 再起動を模す）復旧で対局が一致し、
+- 各対象ゲーム: 状態の保存 → 実ファイルへの flush → 再読込（別プロセスの
+  起動を模す）→ （新しい cog での）復旧で対局が一致し、
   そのまま続行・終了まで進んで後片付けされる
 - チャンネルが消えたスナップショットは復旧されず掃除される
 - ストアの JSON が壊れていても、またエントリの中身が壊れていても、
@@ -68,6 +69,30 @@ class StoreTestCase(unittest.TestCase):
         game_restore.reset_store(Path(self.tmp.name) / "unused.json")
         self.tmp.cleanup()
 
+    def reload_store_from_file(self):
+        """実ファイルへ flush してから読み直し、別プロセスでの起動を模す。
+
+        cog の _save_snapshot はメモリ上のストアに書くため、これを挟まないと
+        「実ファイルへの保存 → 再読込」の往復が検証できない。
+        """
+        game_restore.flush_store()
+        game_restore.reset_store(self.store_path)
+
+    async def wait_until(self, predicate, timeout=30.0):
+        """条件が満たされるまで実時間でポーリングする。
+
+        盤面・カードの画像レンダリング（PIL）が入ってから、復旧後の
+        1手番にかかる実時間は環境で大きく変わる（将棋は1回2秒弱）。
+        固定秒数の sleep では「終わるはずの対局がまだ終わっていない」
+        だけの失敗になるため、終了そのものを条件に待って保証する。
+        """
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            if predicate():
+                return True
+            await real_sleep(0.1)
+        return predicate()
+
 
 class StoreBasicsTest(StoreTestCase):
     def test_save_flush_reload_and_clear(self):
@@ -99,6 +124,7 @@ class ShogiRestoreTest(StoreTestCase, unittest.IsolatedAsyncioTestCase):
         cog._save_snapshot(s)
         saved = game_restore.session_entries("shogi")
         self.assertIn(6101, saved)
+        self.reload_store_from_file()
 
         # 再起動: 新しい bot / cog で復旧する
         bot2, guild2, channel2, members2 = make_world(6101)
@@ -112,8 +138,8 @@ class ShogiRestoreTest(StoreTestCase, unittest.IsolatedAsyncioTestCase):
             self.assertEqual(restored.game.turn, ShogiColor.GOTE)
             self.assertEqual(restored.players[ShogiColor.SENTE].id, 101)
             # 両者放置 → 時間切れパスが続いて対局が終わり、後片付けされる
-            # （盤面レンダリングが1回2秒弱かかるため長めに待つ）
-            await real_sleep(6.0)
+            cleaned = await self.wait_until(lambda: 6101 not in cog2.sessions)
+        self.assertTrue(cleaned, "復旧した対局が時間切れで終了しませんでした")
         self.assertNotIn(6101, cog2.sessions)
         self.assertEqual(game_restore.session_entries("shogi"), {})
 
@@ -124,6 +150,7 @@ class ShogiRestoreTest(StoreTestCase, unittest.IsolatedAsyncioTestCase):
         s.players = {ShogiColor.SENTE: members[101], ShogiColor.GOTE: members[102]}
         s.phase = "playing"
         cog._save_snapshot(s)
+        self.reload_store_from_file()
         empty_bot = FakeBot()   # チャンネルが無い世界
         cog2 = shogi_mod.Shogi(empty_bot)
         await cog2.restore_after_restart()
@@ -151,6 +178,7 @@ class ChessRestoreTest(StoreTestCase, unittest.IsolatedAsyncioTestCase):
         g.phase = "playing"
         g.push_move(((6, 4), (4, 4)))
         cog._save_snapshot(g)
+        self.reload_store_from_file()
 
         bot2, guild2, channel2, members2 = make_world(6201)
         cog2 = chess_mod.Chess(bot2)
@@ -162,7 +190,9 @@ class ChessRestoreTest(StoreTestCase, unittest.IsolatedAsyncioTestCase):
             self.assertEqual(restored.turn, "black")
             self.assertEqual(restored.castling, g.castling)
             self.assertEqual(restored.players["white"].id, 101)
-            await real_sleep(1.5)   # 黒が放置 → 時間切れで終局し後片付けされる
+            # 黒が放置 → 時間切れで終局し後片付けされる
+            cleaned = await self.wait_until(lambda: 6201 not in cog2.games)
+        self.assertTrue(cleaned, "復旧した対局が時間切れで終了しませんでした")
         self.assertNotIn(6201, cog2.games)
         self.assertEqual(game_restore.session_entries("chess"), {})
 
@@ -177,6 +207,7 @@ class OthelloRestoreTest(StoreTestCase, unittest.IsolatedAsyncioTestCase):
         self.assertTrue(othello_mod.play_move(g.board, othello_mod.BLACK, 2, 3))
         g.turn = othello_mod.WHITE
         cog._save_snapshot(g)
+        self.reload_store_from_file()
 
         bot2, guild2, channel2, members2 = make_world(6301)
         cog2 = othello_mod.Othello(bot2)
@@ -187,7 +218,9 @@ class OthelloRestoreTest(StoreTestCase, unittest.IsolatedAsyncioTestCase):
             self.assertEqual(restored.board, g.board)
             self.assertEqual(restored.turn, othello_mod.WHITE)
             self.assertEqual(restored.score(), g.score())
-            await real_sleep(1.5)   # 両者放置 → パスが続いて終局し後片付けされる
+            # 両者放置 → パスが続いて終局し後片付けされる
+            cleaned = await self.wait_until(lambda: 6301 not in cog2.games)
+        self.assertTrue(cleaned, "復旧した対局が放置で終了しませんでした")
         self.assertNotIn(6301, cog2.games)
         self.assertEqual(game_restore.session_entries("othello"), {})
 
@@ -202,6 +235,7 @@ class DaifugoRestoreTest(StoreTestCase, unittest.IsolatedAsyncioTestCase):
         g.turn = 101
         g.phase = "playing"
         cog._save_snapshot(g)
+        self.reload_store_from_file()
 
         bot2, guild2, channel2, members2 = make_world(6401)
         cog2 = daifugo_mod.Daifugo(bot2)
@@ -231,6 +265,7 @@ class BabanukiRestoreTest(StoreTestCase, unittest.IsolatedAsyncioTestCase):
         g.turn_index = 1
         g.phase = "playing"
         cog._save_snapshot(g)
+        self.reload_store_from_file()
 
         bot2, guild2, channel2, members2 = make_world(6501)
         cog2 = babanuki_mod.Babanuki(bot2)
@@ -242,8 +277,9 @@ class BabanukiRestoreTest(StoreTestCase, unittest.IsolatedAsyncioTestCase):
             self.assertEqual(restored.turn_index, 1)
             self.assertEqual(restored.current, 102)
             await real_sleep(0.3)
-            restored.phase = "done"
-            await real_sleep(0.8)
+            restored.phase = "done"   # 進行中の手番が終わった時点でループが抜け、後片付けされる
+            cleaned = await self.wait_until(lambda: 6501 not in cog2.games)
+        self.assertTrue(cleaned, "終了した対局が後片付けされませんでした")
         self.assertNotIn(6501, cog2.games)
         self.assertEqual(game_restore.session_entries("babanuki"), {})
 
@@ -264,6 +300,7 @@ class ShinkeiRestoreTest(StoreTestCase, unittest.IsolatedAsyncioTestCase):
         board_msg = await channel.send("board")
         g.message = board_msg
         cog._save_snapshot(g)
+        self.reload_store_from_file()
 
         bot2, guild2, channel2, members2 = make_world(6601)
         fetched = channel2.add_message(board_msg.id)
@@ -299,6 +336,7 @@ class ShiritoriRestoreTest(StoreTestCase, unittest.IsolatedAsyncioTestCase):
         g.history = [(102, "うま")]
         g.turn_index = 0
         cog._save_snapshot(g)
+        self.reload_store_from_file()
 
         bot2, guild2, channel2, members2 = make_world(6701)
         cog2 = shiritori_mod.OdaiShiritori(bot2)
@@ -335,6 +373,7 @@ class UnoRestoreTest(StoreTestCase, unittest.IsolatedAsyncioTestCase):
         game = self._make_started_game(cog, channel, members)
         await cog.send_game_panel(channel, game, info_msg="開始")
         self.assertIn(6801, game_restore.session_entries("uno"))
+        self.reload_store_from_file()
 
         bot2, guild2, channel2, members2 = make_world(6801, user_ids=(101, 102))
         cog2 = uno_mod.Uno(bot2)
@@ -363,6 +402,7 @@ class UnoRestoreTest(StoreTestCase, unittest.IsolatedAsyncioTestCase):
         cog = uno_mod.Uno(bot)
         game = self._make_started_game(cog, channel, members)
         await cog.send_game_panel(channel, game, info_msg="開始")
+        self.reload_store_from_file()
         cog2 = uno_mod.Uno(FakeBot())
         await cog2.restore_after_restart()
         self.assertEqual(cog2.games, {})
@@ -381,6 +421,7 @@ class WordleRestoreTest(StoreTestCase, unittest.IsolatedAsyncioTestCase):
         cog.games[6901] = g
         cog._save_snapshot(g)
         self.assertIn(6901, game_restore.session_entries("wordle"))
+        self.reload_store_from_file()
 
         bot2, guild2, channel2, members2 = make_world(6901, user_ids=(101, 102))
         fetched = channel2.add_message(g.message.id)
