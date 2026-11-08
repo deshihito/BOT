@@ -162,7 +162,7 @@ class MiqFormatPrefsTest(unittest.TestCase):
         for i, fmt in enumerate((
             "quote", "manga", "music", "line", "news", "xpost", "rpg", "random",
             "blueprint", "pixel", "card", "neon", "dark", "pop", "pastel", "ticket", "note",
-            "pair", "luxury", "tate", "novel", "glass",
+            "pair", "luxury", "tate", "novel", "glass", "versus",
         )):
             prefs = g.miq_get_prefs(400 + i)
             prefs["format"] = fmt
@@ -179,13 +179,13 @@ class MiqFormatPrefsTest(unittest.TestCase):
         self.assertEqual(g.miq_render_options(prefs)["format"], "quote")
 
     def test_formats_constant(self):
-        self.assertEqual(len(g.MIQ_FORMATS), 22)
+        self.assertEqual(len(g.MIQ_FORMATS), 23)
         self.assertEqual(
             set(g.MIQ_FORMATS),
             {
                 "random", "quote", "manga", "music", "line", "news", "xpost", "rpg",
                 "blueprint", "pixel", "card", "neon", "dark", "pop", "pastel", "ticket", "note",
-                "pair", "luxury", "tate", "novel", "glass",
+                "pair", "luxury", "tate", "novel", "glass", "versus",
             },
         )
         for label, emoji in g.MIQ_FORMATS.values():
@@ -198,6 +198,7 @@ class MiqResolveFormatTest(unittest.TestCase):
         seen = {g.miq_resolve_format("random") for _ in range(300)}
         self.assertNotIn("line", seen)
         self.assertNotIn("pair", seen)
+        self.assertNotIn("versus", seen)
         self.assertNotIn("random", seen)
         self.assertTrue(seen <= set(g.MIQ_RANDOM_POOL))
         self.assertTrue(seen)  # 何かは返る
@@ -205,6 +206,7 @@ class MiqResolveFormatTest(unittest.TestCase):
     def test_random_pool_composition(self):
         self.assertNotIn("line", g.MIQ_RANDOM_POOL)
         self.assertNotIn("pair", g.MIQ_RANDOM_POOL)
+        self.assertNotIn("versus", g.MIQ_RANDOM_POOL)
         self.assertNotIn("random", g.MIQ_RANDOM_POOL)
         self.assertEqual(len(g.MIQ_RANDOM_POOL), 19)
         self.assertEqual(
@@ -220,7 +222,7 @@ class MiqResolveFormatTest(unittest.TestCase):
         for fmt in (
             "quote", "manga", "music", "line", "news", "xpost", "rpg",
             "blueprint", "pixel", "card", "neon", "dark", "pop", "pastel", "ticket", "note",
-            "pair", "luxury", "tate", "novel", "glass",
+            "pair", "luxury", "tate", "novel", "glass", "versus",
         ):
             self.assertEqual(g.miq_resolve_format(fmt), fmt)
             self.assertEqual(g.miq_resolve_format({"format": fmt}), fmt)
@@ -372,9 +374,9 @@ class MiqExtraRendererTest(unittest.TestCase):
         self._check_png(g.render_miq_note_png(None, "アバターなし", "名無し", "noname", font_path=self.font_path))
 
     def test_renderer_table_covers_all_single_formats(self):
-        # レンダラ表は random/quote/line/pair (チェーン型) を除く全フォーマットをカバーする
+        # レンダラ表は random/quote/line/pair/versus (チェーン型) を除く全フォーマットをカバーする
         self.assertEqual(
-            set(g._MIQ_FORMAT_RENDERERS), set(g.MIQ_FORMATS) - {"random", "quote", "line", "pair"},
+            set(g._MIQ_FORMAT_RENDERERS), set(g.MIQ_FORMATS) - {"random", "quote", "line", "pair", "versus"},
         )
 
     def test_date_str_converts_to_jst(self):
@@ -436,6 +438,50 @@ class MiqMoreFormatsTest(unittest.TestCase):
         for entry in entries:
             entry["avatar_bytes"] = None
         self._check_png(g.render_miq_pair_png(entries, font_path=self.font_path))
+
+    def test_versus_renderer_two_entries(self):
+        entries = [
+            self._pair_entry("StudioYebisu", "studioyebisu_71733", "モテる漢は辛いンゴねぇ…", 1, minute=39),
+            self._pair_entry("きのこの山", "fafrotski_es", "しっし どっかいけ", 2, minute=40),
+        ]
+        img = self._check_png(g.render_miq_versus_png(entries, font_path=self.font_path))
+        # 左半分は赤系、右半分は青系 (スピード線が乗っても色相は保たれる)
+        px = img.convert("RGB")
+        lr, _lg, lb = px.getpixel((10, 660))
+        self.assertGreater(lr, 150)
+        self.assertLess(lb, 120)
+        rr, _rg, rb = px.getpixel((1190, 660))
+        self.assertGreater(rb, 140)
+        self.assertLess(rr, 120)
+
+    def test_versus_renderer_single_entry(self):
+        # 1件だけなら右側は「???」シルエットの単独レイアウトで落ちない
+        entries = [self._pair_entry("ひとり", "solo", "単独モードの発言です", 1)]
+        self._check_png(g.render_miq_versus_png(entries, font_path=self.font_path))
+
+    def test_versus_renderer_uses_latest_two_of_chain(self):
+        entries = [
+            self._pair_entry("A", "a", "古い発言", 1, minute=36),
+            self._pair_entry("B", "b", "前の発言", 2, minute=37),
+            self._pair_entry("A", "a", "対象の発言", 1, minute=38),
+        ]
+        self._check_png(g.render_miq_versus_png(entries, font_path=self.font_path))
+
+    def test_versus_renderer_empty_text_omits_bubble(self):
+        entries = [
+            self._pair_entry("あな", "anag2bgod", "", 1, minute=39),
+            self._pair_entry("いる科のCちゃん", "ciajo08", "テキストあり", 2, minute=40),
+        ]
+        self._check_png(g.render_miq_versus_png(entries, font_path=self.font_path))
+
+    def test_versus_renderer_without_avatar(self):
+        entries = [
+            self._pair_entry("あな", "anag2bgod", "アバターなし", 1, minute=39),
+            self._pair_entry("Cちゃん", "ciajo08", "こちらもなし", 2, minute=40),
+        ]
+        for entry in entries:
+            entry["avatar_bytes"] = None
+        self._check_png(g.render_miq_versus_png(entries, font_path=self.font_path))
 
     def test_luxury_renderer(self):
         img = self._check_png(g.render_miq_luxury_png(
@@ -960,6 +1006,10 @@ class _FakeCogForRegen(g.MiqMixin):
         self.calls.append(("pair", dict(prefs)))
         return object(), False
 
+    async def _miq_versus_file_for(self, target, requester_id, prefs, size_limit):
+        self.calls.append(("versus", dict(prefs)))
+        return object(), False
+
 
 class MiqRegenerateDispatchTest(unittest.TestCase):
     def setUp(self):
@@ -1001,11 +1051,17 @@ class MiqRegenerateDispatchTest(unittest.TestCase):
         self.assertEqual(resolved, "pair")
         self.assertEqual([(kind, p["format"]) for kind, p in self.cog.calls], [("pair", "pair")])
 
+    def test_versus_dispatches_to_chain_builder(self):
+        file, resolved, error = self._regen(self._target(), 999, "versus")
+        self.assertIsNone(error)
+        self.assertEqual(resolved, "versus")
+        self.assertEqual([(kind, p["format"]) for kind, p in self.cog.calls], [("versus", "versus")])
+
     def test_random_resolves_into_pool_each_time(self):
         file, resolved, error = self._regen(self._target(), 999, "random")
         self.assertIsNone(error)
         self.assertIn(resolved, g.MIQ_RANDOM_POOL)
-        self.assertNotIn(resolved, ("line", "pair", "random"))
+        self.assertNotIn(resolved, ("line", "pair", "versus", "random"))
         # プールは単体フォーマットだけなので必ず _miq_build_file に届く
         self.assertEqual([(kind, p["format"]) for kind, p in self.cog.calls], [("build", resolved)])
 
@@ -1146,7 +1202,7 @@ class MiqOutputViewTest(unittest.TestCase):
         view = self._view()
         select = self._select_of(view)
         self.assertEqual([o.value for o in select.options], list(g.MIQ_FORMATS))
-        self.assertEqual(len(select.options), 22)
+        self.assertEqual(len(select.options), 23)
         self.assertLessEqual(len(select.options), 25)
         self.assertEqual([o.value for o in select.options if o.default], ["quote"])
 

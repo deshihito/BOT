@@ -38,6 +38,7 @@ MIQ_FORMATS = {
     "ticket": ("チケット風", AGO_TICKET),
     "note": ("ノート風", "📓"),
     "pair": ("ペアハート風", "💞"),
+    "versus": ("VS対決風", "⚔️"),
     "luxury": ("ゴールド縦書き風", "👑"),
     "tate": ("和風縦書き風", "🎋"),
     "novel": ("小説風", BOOK),
@@ -45,7 +46,7 @@ MIQ_FORMATS = {
 }
 
 # ランダムで選ばれる単体メッセージ系フォーマット。
-# line / pair (返信チェーン前提) と random 自身は絶対に含めない。
+# line / pair / versus (返信チェーン前提) と random 自身は絶対に含めない。
 MIQ_RANDOM_POOL = (
     "quote", "manga", "music", "news", "xpost", "rpg",
     "blueprint", "pixel", "card", "neon", "dark", "pop", "pastel", "ticket", "note",
@@ -1184,7 +1185,7 @@ class MiqMixin:
 
         対象メッセージ target を、requester の現在の保存設定 (フォント等) を
         読み直した上で、フォーマットだけ selected_format に差し替えて作り直す。
-        line / pair は対象の返信チェーンを再取得して生成し直す。
+        line / pair / versus は対象の返信チェーンを再取得して生成し直す。
         戻り値 (file, resolved_format, error)。error はユーザー向けの失敗理由で、
         None でない場合は生成しておらず、元のメッセージは変更されない。
         """
@@ -1207,6 +1208,8 @@ class MiqMixin:
             file, refused = await self._miq_line_file_for(target, requester_id, eff_prefs, size_limit)
         elif fmt == "pair":
             file, refused = await self._miq_pair_file_for(target, requester_id, eff_prefs, size_limit)
+        elif fmt == "versus":
+            file, refused = await self._miq_versus_file_for(target, requester_id, eff_prefs, size_limit)
         else:
             file = await self._miq_build_file(
                 target.author, text, eff_prefs, size_limit,
@@ -1225,7 +1228,7 @@ class MiqMixin:
 
         生成は既存の _miq_build_file（コンテキストメニュー等と同一経路）
         を使い、フォーマット等の設定は本人の保存済み prefs に従う。
-        対象メッセージが無い単体生成のため、line / pair は
+        対象メッセージが無い単体生成のため、line / pair / versus は
         _miq_build_file 側の単体レイアウトにフォールバックする。
         生成物に付ける操作 View (MiqOutputView) は対象メッセージを
         前提とするため、ここでは付けない。
@@ -1282,6 +1285,10 @@ class MiqMixin:
                 return await interaction.followup.send("このユーザーは引用画像(MIQ)を拒否しています。")
         elif fmt == "pair":
             file, refused = await self._miq_pair_file_for(message, interaction.user.id, eff_prefs, size_limit)
+            if refused:
+                return await interaction.followup.send("このユーザーは引用画像(MIQ)を拒否しています。")
+        elif fmt == "versus":
+            file, refused = await self._miq_versus_file_for(message, interaction.user.id, eff_prefs, size_limit)
             if refused:
                 return await interaction.followup.send("このユーザーは引用画像(MIQ)を拒否しています。")
         else:
@@ -1342,6 +1349,13 @@ class MiqMixin:
                         return
                 elif fmt == "pair":
                     file, refused = await self._miq_pair_file_for(target, message.author.id, eff_prefs, size_limit)
+                    if refused:
+                        await message.reply(
+                            "このユーザーは引用画像(MIQ)を拒否しています。", mention_author=False, delete_after=8,
+                        )
+                        return
+                elif fmt == "versus":
+                    file, refused = await self._miq_versus_file_for(target, message.author.id, eff_prefs, size_limit)
                     if refused:
                         await message.reply(
                             "このユーザーは引用画像(MIQ)を拒否しています。", mention_author=False, delete_after=8,

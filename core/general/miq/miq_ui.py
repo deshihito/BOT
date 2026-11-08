@@ -128,6 +128,22 @@ class MiqPreviewButton(discord.ui.Button):
                  "avatar_bytes": avatar_bytes, "author_key": "miq-preview-self"},
             ]
             file = await parent.cog._miq_render_pair_file(entries, parent.prefs)
+        elif resolved_fmt == "versus":
+            # VS対決風のプレビューはサンプルの2人の会話で作る
+            avatar_bytes = None
+            try:
+                avatar_bytes = await interaction.user.display_avatar.replace(size=256, format="png").read()
+            except Exception:
+                logger.debug("MIQ: アバターの取得に失敗しました", exc_info=True)
+                avatar_bytes = None
+            entries = [
+                {"name": "サンプル", "username": "sample", "text": "勝負しようぜ",
+                 "avatar_bytes": None, "author_key": "miq-preview-other"},
+                {"name": interaction.user.display_name, "username": getattr(interaction.user, "name", ""),
+                 "text": "プレビューです。見た目の確認ができます。",
+                 "avatar_bytes": avatar_bytes, "author_key": "miq-preview-self"},
+            ]
+            file = await parent.cog._miq_render_versus_file(entries, parent.prefs)
         else:
             eff_prefs = dict(parent.prefs)
             eff_prefs["format"] = resolved_fmt
