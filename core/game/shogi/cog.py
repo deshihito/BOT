@@ -182,6 +182,77 @@ def _shogi_background() -> Image.Image:
     return _SHOGI_BG_CACHE.copy()
 
 
+# --- 駒の自前描画 ---------------------------------------------------------
+# 駒画像は外部素材を使わず、PIL で五角形の駒を描いて文字を載せる（ライセンス
+# の心配がない自前生成）。文字は同梱フォント（assets/fonts の Yuji Syuku、
+# SIL OFL 1.1）で描く。描画は2倍解像度で行い、縮小して滑らかにする。
+_PIECE_BASE_W, _PIECE_BASE_H = 248, 288
+_PIECE_FONT_CACHE: dict[int, "ImageFont.FreeTypeFont"] = {}
+
+
+def _piece_font(size: int):
+    if size not in _PIECE_FONT_CACHE:
+        root = ASSET_DIR.parent.parent
+        for candidate in (root / "assets" / "fonts" / "YujiSyuku-Regular.ttf",
+                          root / "font.ttf"):
+            if candidate.exists():
+                _PIECE_FONT_CACHE[size] = ImageFont.truetype(str(candidate), size)
+                break
+        else:  # pragma: no cover - 同梱フォントがある前提
+            _PIECE_FONT_CACHE[size] = ImageFont.load_default()
+    return _PIECE_FONT_CACHE[size]
+
+
+def _draw_piece_base(scale: int = 2) -> Image.Image:
+    """木目色のグラデーション＋縁取りの五角形（駒の地）を作る。"""
+    w, h = _PIECE_BASE_W * scale, _PIECE_BASE_H * scale
+    top, bottom = (244, 206, 132), (219, 158, 78)
+    strip = Image.new("RGB", (1, h))
+    for y in range(h):
+        t = y / max(1, h - 1)
+        strip.putpixel((0, y), tuple(int(top[i] + (bottom[i] - top[i]) * t) for i in range(3)))
+    body = strip.resize((w, h)).convert("RGBA")
+    mask = Image.new("L", (w, h), 0)
+    md = ImageDraw.Draw(mask)
+    points = [(0.50 * w, 0.015 * h), (0.965 * w, 0.27 * h), (0.875 * w, 0.985 * h),
+              (0.125 * w, 0.985 * h), (0.035 * w, 0.27 * h)]
+    md.polygon(points, fill=255)
+    img = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+    img.paste(body, (0, 0), mask)
+    draw = ImageDraw.Draw(img)
+    draw.polygon(points, outline=(122, 79, 32, 255), width=5 * scale)
+    return img
+
+
+def _draw_piece(text: str, red: bool) -> Image.Image:
+    """駒の地に文字を載せる。2文字は縦に並べ、成駒（後手）は赤文字にする。"""
+    scale = 2
+    img = _draw_piece_base(scale)
+    if text:
+        draw = ImageDraw.Draw(img)
+        w, h = img.size
+        fill = (178, 32, 38, 255) if red else (26, 18, 12, 255)
+        if len(text) == 1:
+            font = _piece_font(int(h * 0.52))
+            draw.text((w / 2, h * 0.56), text, font=font, fill=fill, anchor="mm")
+        else:
+            font = _piece_font(int(h * 0.34))
+            draw.text((w / 2, h * 0.36), text[0], font=font, fill=fill, anchor="mm")
+            draw.text((w / 2, h * 0.70), text[1], font=font, fill=fill, anchor="mm")
+    return img.resize((_PIECE_BASE_W, _PIECE_BASE_H), Image.Resampling.LANCZOS)
+
+
+_PIECE_TEXT = {
+    PieceType.ROOK: "飛", PieceType.BISHOP: "角", PieceType.GOLD: "金",
+    PieceType.SILVER: "銀", PieceType.KNIGHT: "桂", PieceType.LANCE: "香",
+    PieceType.PAWN: "歩",
+}
+_PIECE_TEXT_PROMOTED = {
+    PieceType.ROOK: "龍", PieceType.BISHOP: "馬", PieceType.SILVER: "成銀",
+    PieceType.KNIGHT: "成桂", PieceType.LANCE: "成香", PieceType.PAWN: "と金",
+}
+
+
 class ShogiRenderer:
     def __init__(self):
         self.font_label = ImageFont.truetype(str(ASSET_DIR.parent.parent / "font.ttf"), 16)
@@ -190,63 +261,21 @@ class ShogiRenderer:
 
     def _piece_img(self, piece: Piece) -> Image.Image:
         is_gote = piece.color == Color.GOTE
-        base = {
-            PieceType.KING: "王.png" if not is_gote else "玉.png",
-            PieceType.ROOK: "飛.png",
-            PieceType.BISHOP: "角.png",
-            PieceType.GOLD: "金.png",
-            PieceType.SILVER: "銀.png",
-            PieceType.KNIGHT: "桂.png",
-            PieceType.LANCE: "香.png",
-            PieceType.PAWN: "歩.png",
-        }.get(piece.type, "なし.png")
-        if piece.promoted:
-            if piece.type == PieceType.PAWN:
-                base = "と金赤.png" if is_gote else "と金.png"
-            elif piece.type == PieceType.ROOK:
-                base = "龍赤.png" if is_gote else "龍.png"
-            elif piece.type == PieceType.BISHOP:
-                base = "馬赤.png" if is_gote else "馬.png"
-            elif piece.type == PieceType.SILVER:
-                base = "成銀赤.png" if is_gote else "成銀.png"
-            elif piece.type == PieceType.KNIGHT:
-                base = "成桂赤.png" if is_gote else "成桂.png"
-            elif piece.type == PieceType.LANCE:
-                base = "成香赤.png" if is_gote else "成香.png"
-        path = ASSET_DIR / base
-        if not path.exists():
-            # 一部素材は別名・片側のみ提供されているため、透明画像ではなく
-            # 対応する実在素材を使う。将来的に正式な成駒素材を追加しても、
-            # この候補順で自動的にそちらを優先する。
-            aliases = {
-                "成桂.png": "成桂 .png",
-                "成銀赤.png": "成銀.png",
-                "成桂赤.png": "成桂赤.png",
-                "成香.png": "香.png",
-                "成香赤.png": "香.png",
-            }
-            path = ASSET_DIR / aliases.get(base, {
-                "成銀赤.png": "銀.png",
-                "成桂赤.png": "桂.png",
-                "成香赤.png": "香.png",
-            }.get(base, base))
-        if not path.exists():
-            path = ASSET_DIR / {
-                PieceType.PAWN: "歩.png", PieceType.LANCE: "香.png",
-                PieceType.KNIGHT: "桂.png", PieceType.SILVER: "銀.png",
-                PieceType.GOLD: "金.png", PieceType.BISHOP: "角.png",
-                PieceType.ROOK: "飛.png", PieceType.KING: "王.png",
-            }[piece.type]
-        ck = str(path) + ("g" if is_gote else "") + ("p" if piece.promoted else "")
+        if piece.type == PieceType.KING:
+            text = "玉" if is_gote else "王"
+        elif piece.promoted and piece.type in _PIECE_TEXT_PROMOTED:
+            text = _PIECE_TEXT_PROMOTED[piece.type]
+        else:
+            text = _PIECE_TEXT.get(piece.type, "")
+        # 従来素材の慣例に合わせ、後手の成駒だけ赤文字にする
+        red = bool(piece.promoted and is_gote)
+        ck = (text, red, is_gote)
         if ck not in self.cache:
-            try:
-                im = Image.open(path).convert("RGBA")
-                if is_gote:
-                    im = im.rotate(180, expand=False)
-                im.thumbnail((SQUARE_SIZE - 6, SQUARE_SIZE - 6), Image.Resampling.LANCZOS)
-                self.cache[ck] = im
-            except Exception:
-                self.cache[ck] = Image.new("RGBA", (40, 40), (0, 0, 0, 0))
+            im = _draw_piece(text, red)
+            if is_gote:
+                im = im.rotate(180, expand=False)
+            im.thumbnail((SQUARE_SIZE - 6, SQUARE_SIZE - 6), Image.Resampling.LANCZOS)
+            self.cache[ck] = im
         return self.cache[ck]
 
     def render(self, game: ShogiGame, labels=None, selected=None) -> io.BytesIO:
