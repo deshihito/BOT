@@ -28,17 +28,6 @@ GAME_ID = "nonogram"
 CELL_LABEL = {0: "未定", 1: "塗り", 2: "バツ"}
 
 
-def board_embed(board: NonogramBoard, user, status: str = "") -> discord.Embed:
-    """互換用に残す旧 embed 生成（現在の表示は V2 パネル＋画像）。"""
-    embed = discord.Embed(title=f"🧩 ノノグラム（{board.puzzle.size_key}）", color=0xFFFFFF)
-    desc = f"<@{user.id}> の盤面です。\n```\n{board.text()}\n```"
-    desc += "X→Yを選んでから、塗る／バツ／消すを押します。"
-    if status:
-        desc += f"\n{status}"
-    embed.description = desc
-    return embed
-
-
 def board_png(board: NonogramBoard, selected=None) -> bytes:
     puzzle = board.puzzle
     key = ("nonogram", puzzle.size_key, puzzle.name,

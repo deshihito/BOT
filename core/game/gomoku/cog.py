@@ -17,7 +17,7 @@ from PIL import Image, ImageDraw, ImageFont
 
 from core.game.game import party_ranking
 from core.game.game import elo, game_panels, game_restore
-from core.game.game.game_v2 import GamePanelView, LobbyView
+from core.game.game.game_v2 import GamePanelView, LobbyView, board_image_panel, GAME_MSG_ONLY_CURRENT_PLAYER
 from core.game.gomoku.gomoku import BLACK, EMPTY, SIZE, WHITE, choose_ai_move, is_full, is_win_at, legal_moves, new_board, winner
 
 logger = logging.getLogger(__name__)
@@ -127,8 +127,7 @@ async def record_result(g) -> str:
     if win is None:
         result = elo.record_draw_safely(g.guild_id, GAME_ID, black_p.id, white_p.id)
         if result:
-            return (f"📈 レート（引き分け）: {black_p.mention} {result['a']['rating']:.0f}（{result['a_delta']:+.0f}）"
-                    f" / {white_p.mention} {result['b']['rating']:.0f}（{result['b_delta']:+.0f}）")
+            return elo.format_draw_line(black_p, white_p, result)
         return ""
     w = black_p if win == BLACK else white_p
     l = white_p if win == BLACK else black_p
@@ -177,7 +176,7 @@ class MovePanel(GamePanelView):
 
     async def _col_callback(self, interaction):
         if not self._check_turn(interaction):
-            return await interaction.response.send_message("現在の手番のプレイヤーだけが選択できます。", ephemeral=True)
+            return await interaction.response.send_message(GAME_MSG_ONLY_CURRENT_PLAYER, ephemeral=True)
         if self.col_select.values:
             self.col = int(self.col_select.values[0])
         await interaction.response.defer()
@@ -185,7 +184,7 @@ class MovePanel(GamePanelView):
 
     async def _row_callback(self, interaction):
         if not self._check_turn(interaction):
-            return await interaction.response.send_message("現在の手番のプレイヤーだけが選択できます。", ephemeral=True)
+            return await interaction.response.send_message(GAME_MSG_ONLY_CURRENT_PLAYER, ephemeral=True)
         if self.row_select.values:
             self.row = int(self.row_select.values[0])
         await interaction.response.defer()
@@ -213,11 +212,7 @@ MoveView = MovePanel  # 互換名
 
 def board_panel(title: str, body: str) -> GamePanelView:
     """盤面画像つきの表示専用パネル（開始・終了表示用）。"""
-    panel = GamePanelView(title, body, timeout=None)
-    gallery = discord.ui.MediaGallery()
-    gallery.add_item(media="attachment://gomoku_board.png")
-    panel.add_extra(gallery)
-    return panel
+    return board_image_panel(title, body, "gomoku_board.png")
 
 
 class Gomoku(commands.Cog):

@@ -15,6 +15,8 @@ from core.support.panel_v2 import as_panel_v2, edit_panel_v2
 
 logger = logging.getLogger("cogs.zetamodoki")
 
+OWNER_ONLY_MSG = "この画面を開いたユーザーだけ操作できます。"
+
 
 # --- キャラクター＆シチュエーション構造定義 ---
 class BotPersona:

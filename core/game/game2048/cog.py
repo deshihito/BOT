@@ -24,17 +24,6 @@ from core.support.panel_v2 import edit_panel_v2
 GAME_ID = "game2048"
 
 
-def game_embed(game: Game2048, user, status: str = "") -> discord.Embed:
-    """互換用に残す旧 embed 生成（現在の表示は V2 パネル＋画像）。"""
-    embed = discord.Embed(title="🔢 2048", color=0xFFFFFF)
-    desc = (f"<@{user.id}> の盤面です。スコア: **{game.score}**／最大タイル: **{game.max_tile}**\n"
-            f"```\n{game.text()}\n```")
-    if status:
-        desc += status
-    embed.description = desc
-    return embed
-
-
 def board_png(game: Game2048) -> bytes:
     key = ("2048", tuple(tuple(row) for row in game.board))
     return render_cached(key, lambda: render_2048(game.board))

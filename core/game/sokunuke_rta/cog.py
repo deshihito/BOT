@@ -10,6 +10,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
+from core.game.game.game_v2 import text_panel
 from core.support import guild_settings
 from core.general.user_names import resolve_display_names
 from core.leaderboard_image import (
@@ -219,12 +220,11 @@ class SokuNukeRta(commands.Cog):
         settings = await self._get_settings(interaction.guild_id)
         if action.value == "status":
             return await interaction.response.send_message(
-                embed=discord.Embed(
-                    title="即抜けRTA設定",
-                    description=(f"計測: {'オン' if _enabled(settings, 'measurement_enabled') else 'オフ'}\n"
-                                 f"VC自動参加: {'オン' if _enabled(settings, 'vc_auto_join_enabled') else 'オフ'}"),
-                    color=0xFFFFFF,
-                ), ephemeral=True)
+                view=text_panel(
+                    "即抜けRTA設定",
+                    f"計測: {'オン' if _enabled(settings, 'measurement_enabled') else 'オフ'}\n"
+                    f"VC自動参加: {'オン' if _enabled(settings, 'vc_auto_join_enabled') else 'オフ'}"),
+                ephemeral=True)
         key, enabled = {
             "on": ("measurement_enabled", True),
             "off": ("measurement_enabled", False),

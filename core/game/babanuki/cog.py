@@ -54,16 +54,12 @@ def rank(card: str) -> str:
 # --- カード画像（共通トランプ基盤） -------------------------------------------
 def card_spec_of(card: str):
     """内部表記（"S5" / "HK" / "JOKER"）を描画基盤の正規形に変換する。"""
-    if card == JOKER:
-        return board_image.CARD_JOKER
-    return board_image.card_spec(card[1:], card[0])
+    return board_image.suited_card_spec(card, JOKER)
 
 
 def hand_file(cards, filename="babanuki_hand.png"):
-    specs = tuple(card_spec_of(c) for c in cards)
-    data = render_cached(("babanuki-hand", specs),
-                         lambda: render_card_hand(list(specs), title="あなたの手札"))
-    return discord.File(io.BytesIO(data), filename=filename)
+    return board_image.card_hand_file(
+        "babanuki-hand", [card_spec_of(c) for c in cards], filename)
 
 
 def backs_file(count: int, filename="babanuki_backs.png"):
@@ -184,15 +180,12 @@ class JoinView(LobbyView):
                   "だれも来なければ Bot が相手をします。"),
             timeout=RECRUIT_SECONDS + 30)
 
-    async def _on_join(self, interaction: discord.Interaction):
-        await super()._on_join(interaction)
-        if interaction.user.id in self.players:
-            self.game.players[interaction.user.id] = interaction.user
-
-    async def _on_leave(self, interaction: discord.Interaction):
-        await super()._on_leave(interaction)
-        if interaction.user.id not in self.players:
-            self.game.players.pop(interaction.user.id, None)
+    def on_members_changed(self, interaction: discord.Interaction):
+        uid = interaction.user.id
+        if uid in self.players:
+            self.game.players[uid] = interaction.user
+        else:
+            self.game.players.pop(uid, None)
 
 
 class PickButton(discord.ui.Button):

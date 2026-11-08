@@ -11,7 +11,7 @@ import discord
 from discord.ext import commands
 from core.game.game import party_ranking
 from core.game.game import elo, game_panels, game_restore
-from core.game.game.game_v2 import GamePanelView, LobbyView, safe_delete, _page_starts, paginate_labels
+from core.game.game.game_v2 import GamePanelView, LobbyView, board_image_panel, safe_delete, _page_starts, paginate_labels
 from PIL import Image, ImageDraw, ImageFont
 
 from core.game.shogi.shogi_engine import ShogiGame, Color, PieceType, Piece
@@ -360,11 +360,7 @@ class ShogiSession:
 
 def _board_panel(body: str, timeout=TURN_SECONDS) -> GamePanelView:
     """盤面画像つきパネルの土台（操作部品は呼び出し側が足す）。"""
-    panel = GamePanelView("", body, timeout=timeout)
-    gallery = discord.ui.MediaGallery()
-    gallery.add_item(media="attachment://shogi.png")
-    panel.add_extra(gallery)
-    return panel
+    return board_image_panel("", body, "shogi.png", timeout=timeout)
 
 
 class ShogiMoveSelect(discord.ui.Select):

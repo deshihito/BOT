@@ -9,7 +9,7 @@ import discord
 from discord.ext import commands
 from core.game.game import party_ranking
 from core.game.game import elo, game_panels, game_restore
-from core.game.game.game_v2 import GamePanelView, LobbyView, text_panel
+from core.game.game.game_v2 import GamePanelView, LobbyView, board_image_panel, text_panel, GAME_MSG_ONLY_CURRENT_PLAYER
 from PIL import Image, ImageDraw, ImageFont
 
 logger = logging.getLogger(__name__)
@@ -127,8 +127,7 @@ async def record_result(g) -> str:
     if black == white:
         result = elo.record_draw_safely(g.guild_id, GAME_ID, black_p.id, white_p.id)
         if result:
-            return (f"📈 レート（引き分け）: {black_p.mention} {result['a']['rating']:.0f}（{result['a_delta']:+.0f}）"
-                    f" / {white_p.mention} {result['b']['rating']:.0f}（{result['b_delta']:+.0f}）")
+            return elo.format_draw_line(black_p, white_p, result)
         return ""
     winner = black_p if black > white else white_p
     loser = white_p if black > white else black_p
@@ -217,11 +216,7 @@ class OthelloGame:
 
 def board_panel(title: str, body: str, filename: str = "othello_board.png") -> GamePanelView:
     """盤面画像つきの表示専用パネル（開始・通知・終了表示用）。"""
-    panel = GamePanelView(title, body, timeout=None)
-    gallery = discord.ui.MediaGallery()
-    gallery.add_item(media=f"attachment://{filename}")
-    panel.add_extra(gallery)
-    return panel
+    return board_image_panel(title, body, filename)
 
 
 class OthelloMoveSelect(discord.ui.Select):
@@ -236,7 +231,7 @@ class OthelloMoveSelect(discord.ui.Select):
         if (self.game.phase != "playing" or self.game.acted or current_user is None or
                 current_user.id != interaction.user.id):
             return await interaction.response.send_message(
-                "現在の手番のプレイヤーだけが選択できます。", ephemeral=True
+                GAME_MSG_ONLY_CURRENT_PLAYER, ephemeral=True
             )
         await interaction.response.defer()
         label = self.values[0]

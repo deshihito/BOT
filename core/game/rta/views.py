@@ -16,6 +16,7 @@ from core.support.api_retry import run_with_retry
 
 from core.game.rta.common import *  # noqa: F401,F403 - shared constants/helpers
 from core.game.rta.helpers import _white_embed  # noqa: F401
+from core.support.panel_v2 import as_embed_v2
 
 logger = logging.getLogger("cogs.disboard_rta")
 
@@ -23,10 +24,11 @@ logger = logging.getLogger("cogs.disboard_rta")
 class BumpRtaRoleView(discord.ui.View):
     """bump/up通知のメンションロール設定 (任意)。"""
 
-    def __init__(self, cog, guild_id, current_role_id):
+    def __init__(self, cog, guild_id, current_role_id, embed=None):
         super().__init__(timeout=300)
         self.cog = cog
         self.guild_id = guild_id
+        self._embed = embed
         select = discord.ui.RoleSelect(
             placeholder="メンションするロール",
             min_values=0,
@@ -39,22 +41,25 @@ class BumpRtaRoleView(discord.ui.View):
         select.callback = self._on_select
         self.add_item(select)
 
+    def embed(self):
+        return self._embed
+
     async def _on_select(self, interaction: discord.Interaction):
         if not getattr(getattr(interaction.user, "guild_permissions", None), "manage_guild", False):
             return await interaction.response.send_message(
-                embed=_white_embed("この操作にはサーバー管理権限が必要です。"), ephemeral=True)
+                view=as_embed_v2(_white_embed("この操作にはサーバー管理権限が必要です。")), ephemeral=True)
         select = self.children[0]
         role = select.values[0] if select.values else None
         if role is not None and (role.is_default() or role.managed):
             return await interaction.response.send_message(
-                embed=_white_embed("@everyone や連携サービス用のロールは指定できません。"), ephemeral=True)
+                view=as_embed_v2(_white_embed("@everyone や連携サービス用のロールは指定できません。")), ephemeral=True)
         await interaction.response.defer(ephemeral=True)
         try:
             await self.cog._set_role_id(self.guild_id, role.id if role else None)
         except Exception:
             logger.exception("bump_rta role update failed: guild=%s", self.guild_id)
             return await interaction.followup.send(
-                embed=_white_embed("設定の保存に失敗しました。時間をおいて再度お試しください。"),
+                view=as_embed_v2(_white_embed("設定の保存に失敗しました。時間をおいて再度お試しください。")),
                 ephemeral=True)
         text = f"通知メンションロールを <@&{role.id}> にしました。" if role else "通知メンションロールを解除しました。"
-        return await interaction.followup.send(embed=_white_embed(text), ephemeral=True)
+        return await interaction.followup.send(view=as_embed_v2(_white_embed(text)), ephemeral=True)

@@ -119,7 +119,6 @@ class NGWord(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
         self.games: dict = {}   # channel_id -> NGGame
-        self.wins: dict = {}    # guild_id -> {user_id: 勝利数}（メモリのみ）
 
     async def start_recruit(self, interaction: discord.Interaction, minutes: int = DEFAULT_MINUTES, mode: str = "word"):
         channel = interaction.channel
@@ -183,9 +182,7 @@ class NGWord(commands.Cog):
     async def finish(self, channel, g: NGGame):
         g.phase = "done"
         winners = g.alive
-        board = self.wins.setdefault(g.guild_id, {})
         for uid in winners:
-            board[uid] = board.get(uid, 0) + 1
             await party_ranking.shared().record_win(g.guild_id, uid, "ngword")
         reveal = "\n".join(f"{m.display_name}: {g.words.get(uid, '-')}" + ("（脱落）" if uid in g.out else "")
                            for uid, m in g.players.items())

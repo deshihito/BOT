@@ -17,6 +17,7 @@ from core.support.api_retry import run_with_retry
 
 from core.game.rta.common import *  # noqa: F401,F403 - shared constants/helpers
 from core.game.rta.helpers import _white_embed  # noqa: F401
+from core.support.panel_v2 import as_embed_v2, wrap_panel_view
 from core.general.user_names import resolve_display_names
 from core.game.rta.views import BumpRtaRoleView  # noqa: F401
 from core.leaderboard_image import (
@@ -188,7 +189,7 @@ class SettingsMixin:
         except Exception as e:
             logger.exception("bump/up leaderboard query failed: scope=%s kind=%s", scope, event_type)
             return await interaction.followup.send(
-                embed=_white_embed(f"ランキングの取得に失敗しました。\n（{type(e).__name__}: {e}）"))
+                view=as_embed_v2(_white_embed(f"ランキングの取得に失敗しました。\n（{type(e).__name__}: {e}）")))
 
 
     async def bumprta_command(
@@ -198,30 +199,31 @@ class SettingsMixin:
     ):
         if interaction.guild_id is None:
             return await interaction.response.send_message(
-                embed=_white_embed("このコマンドはサーバー内でのみ使えます。"), ephemeral=True)
+                view=as_embed_v2(_white_embed("このコマンドはサーバー内でのみ使えます。")), ephemeral=True)
         selected_action = action.value
         if selected_action == "status":
             enabled = await self._is_enabled(interaction.guild_id)
             role_id = await self._role_id(interaction.guild_id)
             role_text = f"<@&{role_id}>" if role_id else "なし"
             return await interaction.response.send_message(
-                embed=_white_embed(
+                view=as_embed_v2(_white_embed(
                     f"boardNotify: **{'オン' if enabled else 'オフ'}**（初期状態: オン）"
-                    f"\n通知メンションロール: {role_text}"),
+                    f"\n通知メンションロール: {role_text}")),
                 ephemeral=True)
         if selected_action == "role":
             if not getattr(getattr(interaction.user, "guild_permissions", None), "manage_guild", False):
                 return await interaction.response.send_message(
-                    embed=_white_embed("この操作にはサーバー管理権限が必要です。"), ephemeral=True)
+                    view=as_embed_v2(_white_embed("この操作にはサーバー管理権限が必要です。")), ephemeral=True)
             current_role = await self._role_id(interaction.guild_id)
             return await interaction.response.send_message(
-                embed=_white_embed("通知時にメンションするロールを選んでください（選択を外すと解除）。"),
-                view=BumpRtaRoleView(self, interaction.guild_id, current_role),
+                view=wrap_panel_view(BumpRtaRoleView(
+                    self, interaction.guild_id, current_role,
+                    embed=_white_embed("通知時にメンションするロールを選んでください（選択を外すと解除）。"))),
                 ephemeral=True)
         if selected_action in {"on", "off"}:
             if not getattr(getattr(interaction.user, "guild_permissions", None), "manage_guild", False):
                 return await interaction.response.send_message(
-                    embed=_white_embed("この操作にはサーバー管理権限が必要です。"), ephemeral=True)
+                    view=as_embed_v2(_white_embed("この操作にはサーバー管理権限が必要です。")), ephemeral=True)
             enabled = selected_action == "on"
             gid = str(interaction.guild_id)
             await interaction.response.defer(ephemeral=True)
@@ -238,14 +240,14 @@ class SettingsMixin:
                 except Exception:
                     logger.exception("bump_rta settings update failed: guild=%s", gid)
                     return await interaction.followup.send(
-                        embed=_white_embed("設定の保存に失敗しました。時間をおいて再度お試しください。"),
+                        view=as_embed_v2(_white_embed("設定の保存に失敗しました。時間をおいて再度お試しください。")),
                         ephemeral=True)
             self._cache_put(self._enabled_cache, gid, enabled)
             if not enabled:
                 self._cancel_guild(interaction.guild_id)
             return await interaction.followup.send(
-                embed=_white_embed(
-                    f"boardNotifyを **{'オン' if enabled else 'オフ'}** にしました。"),
+                view=as_embed_v2(_white_embed(
+                    f"boardNotifyを **{'オン' if enabled else 'オフ'}** にしました。")),
                 ephemeral=True)
         return await interaction.response.send_message(
-            embed=_white_embed("ランキングは `/leaderboard` から確認してください。"), ephemeral=True)
+            view=as_embed_v2(_white_embed("ランキングは `/leaderboard` から確認してください。")), ephemeral=True)

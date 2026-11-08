@@ -178,7 +178,7 @@ class ModeButton(discord.ui.Button):
     async def callback(self, interaction: discord.Interaction):
         view = self.parent_view
         if interaction.user.id != view.user_id:
-            return await interaction.response.send_message("この画面を開いたユーザーだけ操作できます。", ephemeral=True)
+            return await interaction.response.send_message(OWNER_ONLY_MSG, ephemeral=True)
         view.mode = self.mode
         view.rebuild()
         await edit_panel_v2(interaction, as_panel_v2(view))
@@ -192,7 +192,7 @@ class ModeBackButton(discord.ui.Button):
     async def callback(self, interaction: discord.Interaction):
         view = self.parent_view
         if interaction.user.id != view.user_id:
-            return await interaction.response.send_message("この画面を開いたユーザーだけ操作できます。", ephemeral=True)
+            return await interaction.response.send_message(OWNER_ONLY_MSG, ephemeral=True)
         view.mode = None
         view.rebuild()
         await edit_panel_v2(interaction, as_panel_v2(view))
@@ -265,7 +265,7 @@ class CharacterSelect(discord.ui.Select):
     async def callback(self, interaction: discord.Interaction):
         view = self.parent_view
         if interaction.user.id != view.user_id:
-            return await interaction.response.send_message("この画面を開いたユーザーだけ操作できます。", ephemeral=True)
+            return await interaction.response.send_message(OWNER_ONLY_MSG, ephemeral=True)
         if view.mode is None:
             return await interaction.response.send_message("先に会話モードを選択してください。", ephemeral=True)
 

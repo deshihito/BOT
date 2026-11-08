@@ -141,7 +141,6 @@ class ShiritoriFlowTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn('時間切れ', texts)
         self.assertIn('P1', self.channel.sent[-1].text())
         self.assertIn('ゴリラ', self.channel.sent[-1].text())
-        self.assertEqual(self.cog.wins[self.guild.id], {1: 1})
         self.assertEqual(await party_ranking.shared().top(self.guild.id, 'shiritori'), [(1, 1)])
         self.assertEqual(self.cog.games, {})
 

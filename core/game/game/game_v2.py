@@ -162,6 +162,25 @@ class GamePanelView(discord.ui.LayoutView):
         self._rebuild()
 
 
+def board_image_panel(title: str, body: str, filename: str, *, timeout=None) -> GamePanelView:
+    """盤面画像つきパネルの共通形（MediaGallery で attachment://<filename> を差す）。"""
+    panel = GamePanelView(title, body, timeout=timeout)
+    gallery = discord.ui.MediaGallery()
+    gallery.add_item(media=f"attachment://{filename}")
+    panel.add_extra(gallery)
+    return panel
+
+
+def lobby_auto_start_text(seconds: int) -> str:
+    """自前ロビー（GamePanelView 系）の開始条件文の正。"""
+    return f"ホストが「開始する」を押すか、{seconds}秒たつと開始します。"
+
+
+def lobby_not_enough_text(min_players: int) -> str:
+    """自前ロビーの人数不足で開始できなかったときの文の正。"""
+    return f"人数不足（{min_players}名以上必要）のため、開始できませんでした。"
+
+
 def text_panel(title: str, body: str) -> GamePanelView:
     """操作部品なしの表示専用 V2 パネル（結果発表など）。"""
     return GamePanelView(title, body, timeout=None)
@@ -227,6 +246,7 @@ LOBBY_MSG_ALREADY_STARTED = "すでに開始しています。"
 
 #: 対局中の拒否文の統一形（sweep2 GA-25）。
 GAME_MSG_NOT_YOUR_TURN = "あなたの番ではありません。"
+GAME_MSG_ONLY_CURRENT_PLAYER = "現在の手番のプレイヤーだけが選択できます。"
 GAME_MSG_NOT_JOINED = "このゲームに参加していません。"
 
 
@@ -322,6 +342,14 @@ class LobbyView(GamePanelView):
         self._wake()
 
     # ------------------------------------------------------------------
+    def on_members_changed(self, interaction: discord.Interaction) -> None:
+        """参加/退出が確定した直後のフック（既定は何もしない）。
+
+        game 側の参加者辞書など、ロビー外の状態を同期したいタイトルが
+        override する。interaction.user が対象メンバーで、self.players /
+        self.members は更新済みの状態で呼ばれる。
+        """
+
     async def _on_join(self, interaction: discord.Interaction) -> None:
         uid = interaction.user.id
         if self.started or self.cancelled:
@@ -340,6 +368,7 @@ class LobbyView(GamePanelView):
                 return await interaction.response.send_message(reason, ephemeral=True)
         self.players.append(uid)
         self.members[uid] = interaction.user
+        self.on_members_changed(interaction)
         self._sync_body()
         await refresh_panel(interaction, self)
 
@@ -353,6 +382,7 @@ class LobbyView(GamePanelView):
             return await interaction.response.send_message(LOBBY_MSG_NOT_JOINED, ephemeral=True)
         self.players.remove(uid)
         self.members.pop(uid, None)
+        self.on_members_changed(interaction)
         self._sync_body()
         await refresh_panel(interaction, self)
 

@@ -12,7 +12,7 @@ from PIL import Image, ImageDraw, ImageFont
 
 from core.game.game import party_ranking
 from core.game.game import elo, game_panels, game_restore
-from core.game.game.game_v2 import GamePanelView, LobbyView, safe_delete, paginate_labels
+from core.game.game.game_v2 import GamePanelView, LobbyView, board_image_panel, safe_delete, paginate_labels
 
 logger = logging.getLogger(__name__)
 
@@ -51,8 +51,7 @@ async def record_draw(g) -> str:
     result = elo.record_draw_safely(g.guild_id, GAME_ID, white.id, black.id)
     if not result:
         return ""
-    return (f"📈 レート（引き分け）: {white.mention} {result['a']['rating']:.0f}（{result['a_delta']:+.0f}）"
-            f" / {black.mention} {result['b']['rating']:.0f}（{result['b_delta']:+.0f}）")
+    return elo.format_draw_line(white, black, result)
 
 COLOR = 0x6F4E37
 RECRUIT_SECONDS = 30
@@ -436,11 +435,7 @@ class ChessGame:
 
 def _board_panel(body: str, timeout=TURN_SECONDS) -> GamePanelView:
     """盤面画像つきパネルの土台（操作部品は呼び出し側が足す）。"""
-    panel = GamePanelView("", body, timeout=timeout)
-    gallery = discord.ui.MediaGallery()
-    gallery.add_item(media="attachment://chess_board.png")
-    panel.add_extra(gallery)
-    return panel
+    return board_image_panel("", body, "chess_board.png", timeout=timeout)
 
 
 class ChessMoveSelect(discord.ui.Select):

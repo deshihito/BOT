@@ -12,7 +12,7 @@ import discord
 from discord.ext import commands
 
 from core.game.game import party_ranking
-from core.game.game.game_v2 import GamePanelView, preview_notice_line, text_panel
+from core.game.game.game_v2 import GamePanelView, preview_notice_line, text_panel, lobby_auto_start_text, lobby_not_enough_text
 from core.game.liardice.liardice import LiarDiceGame, is_legal_raise
 
 logger = logging.getLogger(__name__)
@@ -105,7 +105,7 @@ class LiarDice(commands.Cog):
 
         panel = GamePanelView("🎲 ライアーズダイス 参加者募集",
                               f"場全体の出目を読み合うブラフゲームです（{MIN_PLAYERS}〜{MAX_PLAYERS}名）。\n"
-                              f"ホストが「開始する」を押すか、{RECRUIT_SECONDS}秒たつと開始します。\n参加者: <@{players[0]}>",
+                              f"{lobby_auto_start_text(RECRUIT_SECONDS)}\n参加者: <@{players[0]}>",
                               notice=preview_notice_line(GAME_ID))
 
         async def on_join(inter: discord.Interaction):
@@ -115,7 +115,7 @@ class LiarDice(commands.Cog):
                 return await inter.response.send_message("満員です。", ephemeral=True)
             players.append(inter.user.id)
             panel.set_content(body=f"場全体の出目を読み合うブラフゲームです（{MIN_PLAYERS}〜{MAX_PLAYERS}名）。\n"
-                                   f"ホストが「開始する」を押すか、{RECRUIT_SECONDS}秒たつと開始します。\n"
+                                   f"{lobby_auto_start_text(RECRUIT_SECONDS)}\n"
                                    f"参加者（{len(players)}名）: " + " ".join(f"<@{p}>" for p in players))
             await inter.response.edit_message(view=panel)
 
@@ -141,7 +141,7 @@ class LiarDice(commands.Cog):
                 await asyncio.sleep(0.5)
             players = list(dict.fromkeys(players))
             if len(players) < MIN_PLAYERS:
-                await channel.send(view=text_panel("ライアーズダイス", f"人数不足（{MIN_PLAYERS}名以上必要）のため、開始できませんでした。"))
+                await channel.send(view=text_panel("ライアーズダイス", f"{lobby_not_enough_text(MIN_PLAYERS)}"))
                 return
             game = LiarDiceGame(players)
             self.channels[channel.id] = game

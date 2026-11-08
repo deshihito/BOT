@@ -102,7 +102,7 @@ class CustomEntrySelect(discord.ui.Select):
     async def callback(self, interaction: discord.Interaction):
         view = self.parent_view
         if interaction.user.id != view.owner_id:
-            return await interaction.response.send_message("この画面を開いたユーザーだけ操作できます。", ephemeral=True)
+            return await interaction.response.send_message(OWNER_ONLY_MSG, ephemeral=True)
         new_view = CustomManageView(view.cog, view.owner_id, self.values[0])
         await edit_panel_v2(interaction, as_panel_v2(new_view))
 
@@ -146,7 +146,7 @@ class CustomManageView(discord.ui.View):
 
     async def _owner_only(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id != self.owner_id:
-            await interaction.response.send_message("この画面を開いたユーザーだけ操作できます。", ephemeral=True)
+            await interaction.response.send_message(OWNER_ONLY_MSG, ephemeral=True)
             return False
         return True
 
@@ -195,7 +195,7 @@ class CustomDeleteConfirmView(discord.ui.View):
     @discord.ui.button(label="削除する", style=discord.ButtonStyle.danger)
     async def confirm(self, interaction: discord.Interaction, button: discord.ui.Button):
         if interaction.user.id != self.owner_id:
-            return await interaction.response.send_message("この画面を開いたユーザーだけ操作できます。", ephemeral=True)
+            return await interaction.response.send_message(OWNER_ONLY_MSG, ephemeral=True)
         removed, error = await self.cog.custom.delete(self.owner_id, self.entry_id)
         notice = error or f"「{removed['name']}」を削除しました。"
         view = CustomManageView(self.cog, self.owner_id, notice=notice)
@@ -204,7 +204,7 @@ class CustomDeleteConfirmView(discord.ui.View):
     @discord.ui.button(label="キャンセル", style=discord.ButtonStyle.secondary)
     async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button):
         if interaction.user.id != self.owner_id:
-            return await interaction.response.send_message("この画面を開いたユーザーだけ操作できます。", ephemeral=True)
+            return await interaction.response.send_message(OWNER_ONLY_MSG, ephemeral=True)
         view = CustomManageView(self.cog, self.owner_id, self.entry_id)
         await edit_panel_v2(interaction, as_panel_v2(view))
 

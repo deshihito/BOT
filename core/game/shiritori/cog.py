@@ -180,15 +180,12 @@ class JoinView(LobbyView):
             note=f"{host.mention if host else ''} さんが募集中です。\n{recruit_join_prompt(RECRUIT_SECONDS)}",
             timeout=RECRUIT_SECONDS + 30)
 
-    async def _on_join(self, interaction: discord.Interaction):
-        await super()._on_join(interaction)
-        if interaction.user.id in self.players:
-            self.game.players[interaction.user.id] = interaction.user
-
-    async def _on_leave(self, interaction: discord.Interaction):
-        await super()._on_leave(interaction)
-        if interaction.user.id not in self.players:
-            self.game.players.pop(interaction.user.id, None)
+    def on_members_changed(self, interaction: discord.Interaction):
+        uid = interaction.user.id
+        if uid in self.players:
+            self.game.players[uid] = interaction.user
+        else:
+            self.game.players.pop(uid, None)
 
 
 class VoteView(GamePanelView):
@@ -229,7 +226,6 @@ class OdaiShiritori(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
         self.games: dict = {}   # channel_id -> ShiritoriGame
-        self.wins: dict = {}    # guild_id -> {user_id: 勝利数}（メモリのみ）
 
     async def start_recruit(self, interaction: discord.Interaction):
         channel = interaction.channel
@@ -332,9 +328,7 @@ class OdaiShiritori(commands.Cog):
     async def finish(self, channel, g: ShiritoriGame):
         g.phase = "done"
         winners = g.alive
-        board = self.wins.setdefault(g.guild_id, {})
         for uid in winners:
-            board[uid] = board.get(uid, 0) + 1
             await party_ranking.shared().record_win(g.guild_id, uid, "shiritori")
         chain = " → ".join(w for _, w in g.history) or "（なし）"
         win_text = "、".join(g.players[uid].display_name for uid in winners) or "なし"

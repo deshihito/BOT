@@ -181,15 +181,12 @@ class JoinView(LobbyView):
                   + "だれも来なければ Bot が相手をします。"),
             timeout=RECRUIT_SECONDS + 30, join_hook=_janken_join_hook(game))
 
-    async def _on_join(self, interaction: discord.Interaction):
-        await super()._on_join(interaction)
-        if interaction.user.id in self.players:
-            self.game.players[interaction.user.id] = interaction.user
-
-    async def _on_leave(self, interaction: discord.Interaction):
-        await super()._on_leave(interaction)
-        if interaction.user.id not in self.players:
-            self.game.players.pop(interaction.user.id, None)
+    def on_members_changed(self, interaction: discord.Interaction):
+        uid = interaction.user.id
+        if uid in self.players:
+            self.game.players[uid] = interaction.user
+        else:
+            self.game.players.pop(uid, None)
 
 
 def _janken_join_hook(game: JankenGame):

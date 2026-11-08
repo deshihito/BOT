@@ -13,7 +13,7 @@ from core.general.user_names import fallback_name
 from discord.ext import commands
 
 from core.game.game import game_panels, party_ranking
-from core.game.game.game_v2 import GamePanelView, LobbyView, original_response_or_none, safe_delete, text_panel, GAME_MSG_NOT_JOINED
+from core.game.game.game_v2 import GamePanelView, LobbyView, original_response_or_none, safe_delete, text_panel, GAME_MSG_NOT_JOINED, lobby_auto_start_text
 from core.game.onenight.onenight import (MAX_PLAYERS, MIN_PLAYERS, ROBBER, ROLE_INFO, SEER, VILLAGER, WOLF,
                            OneNightSession)
 
@@ -184,7 +184,7 @@ class OneNight(commands.Cog):
             title="🌙 ワンナイト人狼 参加者募集", host=interaction.user,
             min_players=MIN_PLAYERS, max_players=MAX_PLAYERS,
             note=(f"約5分で終わる短縮版人狼です。"
-                  f"ホストが「開始する」を押すか、{RECRUIT_SECONDS}秒たつと開始します。"),
+                  f"{lobby_auto_start_text(RECRUIT_SECONDS)}"),
             timeout=RECRUIT_SECONDS + 10)
         await interaction.response.send_message(view=view)
         lobby_msg = await original_response_or_none(interaction)

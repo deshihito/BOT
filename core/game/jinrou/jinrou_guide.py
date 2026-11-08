@@ -137,16 +137,6 @@ def phase_text(phase: str, role: Optional[str]) -> tuple[str, str]:
     return title, "\n".join(lines)
 
 
-def phase_embed(phase: str, role: Optional[str]) -> discord.Embed:
-    title, body = PHASES.get(phase, ("❓ このフェーズ", "画面の案内に従ってください。"))
-    embed = discord.Embed(title=title, description=body, color=0xFFFFFF)
-    if role:
-        embed.add_field(name=f"あなた（{role}）の今夜やること" if phase == "night" else f"あなたの役職: {role}",
-                        value=night_todo(role) if phase == "night" else win_condition(role), inline=False)
-    embed.add_field(name="役職ガイド", value=role_url(role), inline=False)
-    return embed
-
-
 class PhaseHelpButton(discord.ui.Button):
     """フェーズのメッセージに付ける「？」ボタン。押した人にだけ説明を出す。"""
 
@@ -160,13 +150,3 @@ class PhaseHelpButton(discord.ui.Button):
         await interaction.response.send_message(view=text_panel(title, body), ephemeral=True)
 
 
-class PhaseHelpView(discord.ui.View):
-    """旧来のヘルプボタン単体 View（互換のため残置）。
-
-    フェーズのパネル本体は GamePanelView 化され、ボタンはそちらの行に
-    直接組み込まれるようになったため、進行コードからは使われていない。
-    """
-
-    def __init__(self, phase: str, role_lookup, timeout: Optional[float] = None):
-        super().__init__(timeout=timeout)
-        self.add_item(PhaseHelpButton(phase, role_lookup))

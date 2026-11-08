@@ -176,6 +176,14 @@ def record_draw_safely(guild_id, game: str, user_a, user_b) -> dict[str, Any] | 
         return None
 
 
+def format_draw_line(player_a, player_b, result: dict[str, Any] | None) -> str:
+    """引き分け結果表示に付けるレート変動の1行。記録できなければ空文字。"""
+    if not result:
+        return ""
+    return (f"📈 レート（引き分け）: {player_a.mention} {result['a']['rating']:.0f}（{result['a_delta']:+.0f}）"
+            f" / {player_b.mention} {result['b']['rating']:.0f}（{result['b_delta']:+.0f}）")
+
+
 def format_match_line(winner, loser, result: dict[str, Any] | None) -> str:
     """結果表示に付けるレート変動の1行。記録できなければ空文字。"""
     if not result:

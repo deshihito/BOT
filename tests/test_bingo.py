@@ -167,8 +167,13 @@ class DrawCycleTest(unittest.IsolatedAsyncioTestCase):
         _args, kwargs = interaction.response.send_message.call_args
         self.assertTrue(kwargs["ephemeral"])
         self.assertEqual(kwargs["file"].filename, "bingo_card.png")
-        self.assertEqual(kwargs["embed"].image.url, "attachment://bingo_card.png")
-        self.assertIn("あと", kwargs["embed"].description)
+        self.assertNotIn("embed", kwargs)
+        gallery_urls = []
+        for child in kwargs["view"].walk_children():
+            for item in getattr(child, "items", None) or []:
+                gallery_urls.append(getattr(getattr(item, "media", None), "url", None))
+        self.assertIn("attachment://bingo_card.png", gallery_urls)
+        self.assertIn("あと", kwargs["view"]._body)
 
 
 if __name__ == "__main__":
