@@ -16,6 +16,8 @@ NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=read-only
+# fastHTML の実体ファイル保存先（上記サンドボックスで読み取り専用になるため、ここだけ書き込みを許可する）
+ReadWritePaths=/home/luna/BOT/data/fast_html
 
 [Install]
 WantedBy=multi-user.target
