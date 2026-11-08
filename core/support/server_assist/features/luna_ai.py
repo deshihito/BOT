@@ -57,7 +57,7 @@ CUSTOM_ICON_URL_MAX_CHARS = 500
 # Webhook 名に使えない語（core.game.zeta.common の検証流儀に合わせる）。
 FORBIDDEN_NAME_WORDS = ("discord", "clyde")
 
-DEFAULT_MODEL = "gemma-4-26b"
+DEFAULT_MODEL = "glm-5.3-flash"
 DEBOUNCE_SECONDS = 3.0
 COOLDOWN_SECONDS = 8.0
 MAX_REPLIES_PER_HOUR = 120
@@ -124,6 +124,11 @@ def model_name() -> str:
     return os.getenv("LUNA_AI_MODEL", DEFAULT_MODEL).strip() or DEFAULT_MODEL
 
 
+# 思考強度は最小にする。glm-5.3-flash はカタログ上 reasoning が必須
+# (supported_efforts: max/high/low) で "none" を選べないため、下限の low。
+REASONING_EFFORT = "low"
+
+
 async def _chat_text(messages: list[dict[str, Any]], *, max_tokens: int) -> str:
     """Logfare からストリーミングで生成し、全文を返す。
 
@@ -132,7 +137,9 @@ async def _chat_text(messages: list[dict[str, Any]], *, max_tokens: int) -> str:
     120秒のストリーミング経路を使う）。
     """
     parts: list[str] = []
-    async for delta in logfare.chat_stream(model_name(), messages, max_tokens=max_tokens):
+    async for delta in logfare.chat_stream(
+            model_name(), messages, max_tokens=max_tokens,
+            reasoning_effort=REASONING_EFFORT):
         parts.append(delta)
     return "".join(parts).strip()
 
