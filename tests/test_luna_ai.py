@@ -439,6 +439,28 @@ class IconTest(unittest.IsolatedAsyncioTestCase):
         webhook.edit.assert_awaited_once_with(avatar=luna.icon_bytes())
         self.assertEqual(channel.created, [])
 
+    async def test_webhook_is_cached_per_channel(self):
+        webhook = FakeWebhook(avatar=object())
+        channel = FakeTextChannel([webhook])
+        channel.id = 424242
+        luna._webhook_cache.clear()
+        calls = 0
+        original = channel.webhooks
+
+        async def counting_webhooks():
+            nonlocal calls
+            calls += 1
+            return await original()
+
+        channel.webhooks = counting_webhooks
+        with patch.object(luna.discord, "TextChannel", FakeTextChannel):
+            first = await luna._get_or_create_webhook(channel)
+            second = await luna._get_or_create_webhook(channel)
+        self.assertIs(first, webhook)
+        self.assertIs(second, webhook)
+        self.assertEqual(calls, 1)
+        luna._webhook_cache.clear()
+
     async def test_existing_webhook_with_avatar_is_left_alone(self):
         webhook = FakeWebhook(avatar=object())
         channel = FakeTextChannel([webhook])
@@ -728,8 +750,11 @@ class ChatTextTest(unittest.IsolatedAsyncioTestCase):
                 yield delta
 
         with patch.object(luna.logfare, "chat_stream", fake_stream):
-            text = await luna._chat_text([{"role": "user", "content": "hi"}], max_tokens=800)
+            text, ttft, total = await luna._chat_text(
+                [{"role": "user", "content": "hi"}], max_tokens=800)
         self.assertEqual(text, "まぁ様子見かな")
+        self.assertGreaterEqual(ttft, 0)
+        self.assertGreaterEqual(total, ttft)
 
     async def test_chat_text_propagates_http_error(self):
         async def fake_stream(model, messages, *, max_tokens, reasoning_effort=None):

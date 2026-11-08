@@ -129,19 +129,27 @@ def model_name() -> str:
 REASONING_EFFORT = "none"
 
 
-async def _chat_text(messages: list[dict[str, Any]], *, max_tokens: int) -> str:
+async def _chat_text(
+        messages: list[dict[str, Any]], *, max_tokens: int) -> tuple[str, float, float]:
     """Logfare からストリーミングで生成し、全文を返す。
 
     非ストリーミングの logfare.chat は合計45秒でタイムアウトし、26B級モデル
     の全文生成が間に合わず空文言の TimeoutError になる（Zeta と同じ理由で
     120秒のストリーミング経路を使う）。
+    戻り値: (本文, 初トークンまでの秒数, 全体の秒数)。
     """
     parts: list[str] = []
+    started = time.monotonic()
+    first_token_at: float | None = None
     async for delta in logfare.chat_stream(
             model_name(), messages, max_tokens=max_tokens,
             reasoning_effort=REASONING_EFFORT):
+        if first_token_at is None:
+            first_token_at = time.monotonic()
         parts.append(delta)
-    return "".join(parts).strip()
+    finished = time.monotonic()
+    ttft = (first_token_at - started) if first_token_at is not None else (finished - started)
+    return "".join(parts).strip(), ttft, finished - started
 
 
 # ---------------------------------------------------------------- 設定
@@ -1017,7 +1025,7 @@ async def _integrate_memory(runtime: _Runtime, client: Any) -> None:
     memory_text = loaded_memory or ""
     prompt = build_integration_prompt(memory_text, turns)
     try:
-        new_memory = await _chat_text(
+        new_memory, _ttft, _total = await _chat_text(
             [
                 {"role": "system", "content": INTEGRATION_SYSTEM_PROMPT},
                 {"role": "user", "content": prompt},
@@ -1143,6 +1151,7 @@ def _link_blocks(links: list[Any]) -> str:
 
 
 async def _generate_and_send(runtime: _Runtime, batch: list[Any]) -> None:
+    started_at = time.monotonic()
     channel = runtime.channel
     channel_id = int(channel.id)
     prompt_text = "\n".join(str(getattr(m, "content", "") or "") for m in batch).strip()
@@ -1162,6 +1171,7 @@ async def _generate_and_send(runtime: _Runtime, batch: list[Any]) -> None:
         )
         if loaded:
             turns = loaded
+    db_ready_at = time.monotonic()
     context_text = build_context_text(memory_text, turns, luna_name=persona["name"])
     if not context_text:
         fallback = [turn for turn in (message_to_turn(m) for m in batch) if turn]
@@ -1188,7 +1198,7 @@ async def _generate_and_send(runtime: _Runtime, batch: list[Any]) -> None:
             {"role": "system", "content": system},
             {"role": "user", "content": user_content},
         ]
-        reply = await _chat_text(messages, max_tokens=800)
+        reply, ttft_seconds, stream_seconds = await _chat_text(messages, max_tokens=800)
     except (aiohttp.ClientError, asyncio.TimeoutError, logfare.LogfareHTTPError) as exc:
         logger.warning(
             "Luna AI の生成に失敗しました: channel=%s error=%s: %s",
@@ -1207,6 +1217,16 @@ async def _generate_and_send(runtime: _Runtime, batch: list[Any]) -> None:
     except (aiohttp.ClientError, asyncio.TimeoutError, discord.HTTPException) as exc:
         logger.warning("Luna AI の送信に失敗しました: channel=%s error=%s", channel_id, exc)
         return
+    sent_at = time.monotonic()
+    logger.info(
+        "Luna AI 応答時間: channel=%s total=%.2fs db=%.2fs ttft=%.2fs gen=%.2fs send=%.2fs",
+        channel_id,
+        sent_at - started_at,
+        db_ready_at - started_at,
+        ttft_seconds,
+        max(stream_seconds - ttft_seconds, 0.0),
+        sent_at - db_ready_at - stream_seconds,
+    )
     if client is not None:
         luna_turn = {"author_name": persona["name"], "is_luna": True, "content": reply.strip()}
         await _db_call(
@@ -1250,20 +1270,45 @@ async def _ensure_webhook_avatar(webhook: Any, avatar: bytes | None) -> None:
         logger.warning("Luna AI: webhook アバターを設定できませんでした: %s", exc)
 
 
+_webhook_cache: dict[int, Any] = {}
+
+
+def _webhook_parent(channel: Any) -> Any:
+    return channel.parent if isinstance(channel, discord.Thread) else channel
+
+
+def _evict_webhook(channel: Any) -> None:
+    parent_id = getattr(_webhook_parent(channel), "id", None)
+    if parent_id is not None:
+        _webhook_cache.pop(int(parent_id), None)
+
+
 async def _get_or_create_webhook(channel: Any, avatar: bytes | None = None) -> discord.Webhook:
-    parent = channel.parent if isinstance(channel, discord.Thread) else channel
+    parent = _webhook_parent(channel)
     if not isinstance(parent, discord.TextChannel):
         raise RuntimeError("Webhookの親テキストチャンネルを取得できませんでした。")
+    parent_id = getattr(parent, "id", None)
+    if parent_id is not None:
+        cached = _webhook_cache.get(int(parent_id))
+        if cached is not None:
+            return cached
     if avatar is None:
         avatar = icon_bytes()
+    webhook = None
     webhooks = await parent.webhooks()
-    for webhook in webhooks:
-        if webhook.name == WEBHOOK_NAME:
-            await _ensure_webhook_avatar(webhook, avatar)
-            return webhook
-    if avatar is not None:
-        return await parent.create_webhook(name=WEBHOOK_NAME, avatar=avatar)
-    return await parent.create_webhook(name=WEBHOOK_NAME)
+    for candidate in webhooks:
+        if candidate.name == WEBHOOK_NAME:
+            await _ensure_webhook_avatar(candidate, avatar)
+            webhook = candidate
+            break
+    if webhook is None:
+        if avatar is not None:
+            webhook = await parent.create_webhook(name=WEBHOOK_NAME, avatar=avatar)
+        else:
+            webhook = await parent.create_webhook(name=WEBHOOK_NAME)
+    if parent_id is not None:
+        _webhook_cache[int(parent_id)] = webhook
+    return webhook
 
 
 _custom_icon_cache: dict[str, bytes | None] = {}
@@ -1323,7 +1368,13 @@ async def _send_reply(
     for index, part in enumerate(split_response(sanitize_output(text))):
         if index:
             await asyncio.sleep(SEND_INTERVAL_SECONDS)
-        await webhook.send(content=part, **kwargs)
+        try:
+            await webhook.send(content=part, **kwargs)
+        except discord.NotFound:
+            # webhook が削除されていたらキャッシュを捨てて取り直し、1回だけ再送する。
+            _evict_webhook(channel)
+            webhook = await _get_or_create_webhook(channel, avatar)
+            await webhook.send(content=part, **kwargs)
 
 
 # ---------------------------------------------------------------- 設定パネル
