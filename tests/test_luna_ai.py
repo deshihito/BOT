@@ -710,3 +710,25 @@ class SendSanitizeTest(unittest.IsolatedAsyncioTestCase):
         sent = webhook.sent[0]["content"]
         self.assertEqual(sent, "@​everyone <@​123> 見て")
         self.assertNotIn("<@123>", sent)
+
+
+class ChatTextTest(unittest.IsolatedAsyncioTestCase):
+    async def test_chat_text_accumulates_stream_deltas(self):
+        async def fake_stream(model, messages, *, max_tokens):
+            self.assertEqual(model, luna.model_name())
+            self.assertEqual(max_tokens, 800)
+            for delta in ("まぁ", "様子見", "かな"):
+                yield delta
+
+        with patch.object(luna.logfare, "chat_stream", fake_stream):
+            text = await luna._chat_text([{"role": "user", "content": "hi"}], max_tokens=800)
+        self.assertEqual(text, "まぁ様子見かな")
+
+    async def test_chat_text_propagates_http_error(self):
+        async def fake_stream(model, messages, *, max_tokens):
+            raise luna.logfare.LogfareHTTPError(503)
+            yield ""  # pragma: no cover
+
+        with patch.object(luna.logfare, "chat_stream", fake_stream):
+            with self.assertRaises(luna.logfare.LogfareHTTPError):
+                await luna._chat_text([{"role": "user", "content": "hi"}], max_tokens=800)

@@ -124,6 +124,19 @@ def model_name() -> str:
     return os.getenv("LUNA_AI_MODEL", DEFAULT_MODEL).strip() or DEFAULT_MODEL
 
 
+async def _chat_text(messages: list[dict[str, Any]], *, max_tokens: int) -> str:
+    """Logfare からストリーミングで生成し、全文を返す。
+
+    非ストリーミングの logfare.chat は合計45秒でタイムアウトし、26B級モデル
+    の全文生成が間に合わず空文言の TimeoutError になる（Zeta と同じ理由で
+    120秒のストリーミング経路を使う）。
+    """
+    parts: list[str] = []
+    async for delta in logfare.chat_stream(model_name(), messages, max_tokens=max_tokens):
+        parts.append(delta)
+    return "".join(parts).strip()
+
+
 # ---------------------------------------------------------------- 設定
 
 def validate_custom(name: Any, persona: Any, icon_url: Any) -> tuple[dict[str, Any] | None, str | None]:
@@ -997,8 +1010,7 @@ async def _integrate_memory(runtime: _Runtime, client: Any) -> None:
     memory_text = loaded_memory or ""
     prompt = build_integration_prompt(memory_text, turns)
     try:
-        new_memory = await logfare.chat(
-            model_name(),
+        new_memory = await _chat_text(
             [
                 {"role": "system", "content": INTEGRATION_SYSTEM_PROMPT},
                 {"role": "user", "content": prompt},
@@ -1006,7 +1018,9 @@ async def _integrate_memory(runtime: _Runtime, client: Any) -> None:
             max_tokens=4000,
         )
     except (aiohttp.ClientError, asyncio.TimeoutError, logfare.LogfareHTTPError) as exc:
-        logger.warning("Luna AI の記憶統合に失敗しました: channel=%s error=%s", channel_id, exc)
+        logger.warning(
+            "Luna AI の記憶統合に失敗しました: channel=%s error=%s: %s",
+            channel_id, type(exc).__name__, exc)
         return
     new_memory = (new_memory or "").strip()
     if new_memory.startswith("```"):
@@ -1167,9 +1181,11 @@ async def _generate_and_send(runtime: _Runtime, batch: list[Any]) -> None:
             {"role": "system", "content": system},
             {"role": "user", "content": user_content},
         ]
-        reply = await logfare.chat(model_name(), messages, max_tokens=800)
+        reply = await _chat_text(messages, max_tokens=800)
     except (aiohttp.ClientError, asyncio.TimeoutError, logfare.LogfareHTTPError) as exc:
-        logger.warning("Luna AI の生成に失敗しました: channel=%s error=%s", channel_id, exc)
+        logger.warning(
+            "Luna AI の生成に失敗しました: channel=%s error=%s: %s",
+            channel_id, type(exc).__name__, exc)
         return
     if not reply or not reply.strip():
         return
