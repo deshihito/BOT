@@ -34,6 +34,8 @@ from core.vc.globalvc.rooms import GLOBAL_ROOMS, ROOMS, RoomConfig, _can_delete_
 from core.vc.globalvc.themes import theme_day, theme_for  # noqa: F401
 from core.vc.globalvc.textlink import ROOM_TEXT_LINKS, _remove_text_link  # noqa: F401
 from core.vc.globalvc.ui import GlobalRoomListView, _TextChatToggleView  # noqa: F401
+from core.vc.globalvc.lang import GVC_SETTINGS_SECTION, LANG_OVERRIDE_KEY, LOCALE_LABELS, effective_filter_lang, locale_label, server_locale  # noqa: F401
+from core.support import guild_settings  # noqa: F401
 from core.leaderboard_image import BoardRow, board_safe_name, fetch_avatar_bytes, render_leaderboard_png  # noqa: F401
 
 logger = logging.getLogger("cogs.sio_globalVC")
@@ -81,10 +83,18 @@ class ManageMixin:
 
         private = bool(password)
         theme = (theme or "").strip()
-        theme_auto = bool(permanent and not theme)
+        # テーマの指定方法: 「なし」ならテーマなし。常設は「自動」で日替わり、
+        # 省略時も自動（日替わり）。それ以外は固定テーマ。
+        theme_auto = False
+        if theme in ("なし", "無し"):
+            theme = ""
+        elif permanent and theme in ("自動", "日替わり"):
+            theme, theme_auto = "", True
+        elif permanent and not theme:
+            theme_auto = True
         if theme_auto:
             theme = theme_for(room_name, theme_day())
-        ROOMS[room_name] = RoomConfig(
+        room_config = RoomConfig(
             name=room_name,
             owner_id=r.user.id,
             owner_guild_id=r.guild.id,
@@ -95,7 +105,9 @@ class ManageMixin:
             permanent=permanent,
             theme=theme,
             theme_auto=theme_auto,
+            language=server_locale(r.guild.id),
         )
+        ROOMS[room_name] = room_config
         _persist_rooms()
 
         embed = discord.Embed(title=f"🌐 ルーム **{room_name}** を作成しました", color=0x2ECC71)
@@ -107,6 +119,10 @@ class ManageMixin:
             embed.add_field(name="テーマ", value=f"🎯 {theme}（自動で毎日変更）", inline=False)
         elif theme:
             embed.add_field(name="テーマ", value=f"🎯 {theme}", inline=False)
+        elif permanent:
+            embed.add_field(name="テーマ", value="なし", inline=False)
+        embed.add_field(name="言語", inline=False,
+                        value=f"{locale_label(room_config.language)}（作成サーバーの言語設定）")
         embed.add_field(name="グロチャ自動接続", inline=False,
                         value="OFF（ONにすると、VC参加時にそのテキストチャンネルもグロチャへ自動接続します）")
         if description:
@@ -213,6 +229,9 @@ class ManageMixin:
         else:
             embed.add_field(name="テーマ", value="なし", inline=False)
         embed.add_field(name="グロチャ自動接続", value="ON" if room.text_chat else "OFF", inline=False)
+        embed.add_field(name="言語", inline=False,
+                        value=(locale_label(room.language) if room.language
+                               else "指定なし（全言語に表示）"))
         embed.add_field(name="現在の参加者数", value=f"{len(_room_members(room_name))}人")
         embed.add_field(name="現在の参加サーバー数(VC)", value=str(len(servers)))
         if servers:
@@ -224,6 +243,48 @@ class ManageMixin:
             embed.add_field(name="説明", value=room.description, inline=False)
         embed.add_field(name="作成日時", value=f"<t:{int(room.created_at)}:R>", inline=False)
         await r.send(embed=embed)
+
+
+    async def _lang_setting_impl(self, r: Responder, raw: str):
+        """GVC一覧の表示言語を設定する（サーバー管理権限を持つ人だけ）。
+
+        空欄 = サーバーの言語設定に従う（デフォルト）。all = すべての言語。
+        言語コード = その言語のルームだけを表示する。
+        """
+        await r.defer()
+        if r.guild is None:
+            return await r.send(f"{FAILED} サーバー内で実行してください。", ephemeral=True)
+        perms = getattr(r.user, "guild_permissions", None)
+        if not (perms and perms.manage_guild):
+            return await r.send(
+                f"{FAILED} 言語設定を変更できるのはサーバー管理権限を持つ人だけです。",
+                ephemeral=True)
+        value = (raw or "").strip().lower()
+        store = guild_settings.get_store()
+        if value in ("", "サーバー", "同じ", "default", "auto"):
+            await store.update(r.guild.id, GVC_SETTINGS_SECTION,
+                               **{LANG_OVERRIDE_KEY: None})
+            note = "サーバーの言語設定に従います"
+        elif value in ("all", "すべて", "全部"):
+            await store.update(r.guild.id, GVC_SETTINGS_SECTION,
+                               **{LANG_OVERRIDE_KEY: "all"})
+            note = "すべての言語のルームを表示します"
+        elif value in LOCALE_LABELS:
+            await store.update(r.guild.id, GVC_SETTINGS_SECTION,
+                               **{LANG_OVERRIDE_KEY: value})
+            note = f"{locale_label(value)} のルームだけを表示します"
+        else:
+            return await r.send(
+                f"{FAILED} 言語は ja・en・zh・ko・id・th・ar・hi のいずれか、"
+                "または all（すべて）/ 空欄（サーバー設定に従う）で指定してください。",
+                ephemeral=True)
+        current = effective_filter_lang(r.guild.id)
+        current_text = "すべて" if current is None else locale_label(current)
+        await r.send(
+            f"🌐 GVCの表示言語を設定しました： {note}\n"
+            f"現在の表示対象: {current_text}"
+            f"（サーバーの言語設定: {locale_label(server_locale(r.guild.id))}）",
+            ephemeral=True)
 
 
     MEMBERS_BOARD_MAX = 60  # メンバー画像に載せる上限（多い場合は先頭から）
