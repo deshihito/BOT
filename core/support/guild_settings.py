@@ -73,6 +73,14 @@ class GuildSettings:
         """設定の写しを返す（未設定なら空の dict）。"""
         return copy.deepcopy(self._data.get(str(guild_id), {}).get(section, {}))
 
+    def all_sections(self, section: str) -> dict[str, dict[str, Any]]:
+        """全サーバー分の1セクションを {guild_id: 設定} で返す（全サーバー集計用）。"""
+        return {
+            guild_id: copy.deepcopy(sections[section])
+            for guild_id, sections in self._data.items()
+            if isinstance(sections.get(section), dict)
+        }
+
     async def update(self, guild_id: int, section: str, *, background: bool = False,
                      **values: Any) -> dict[str, Any]:
         """値を書き換えて保存する。値に None を渡すとその項目を消す。"""
