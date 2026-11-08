@@ -18,7 +18,7 @@ class RankingsBundleTest(unittest.TestCase):
         from core.general import action_registry
 
         registry = action_registry.default_registry()
-        self.assertEqual(len(RankingsView.TARGETS), 6)
+        self.assertEqual(len(RankingsView.TARGETS), 8)  # bump/up 全サーバーの追加で 6→8
         for _label, value in RankingsView.TARGETS:
             self.assertIsNotNone(registry.get(f"general:{value}"), value)
 
@@ -28,7 +28,7 @@ class RankingsBundleTest(unittest.TestCase):
         from cogs.general import RankingsView
 
         view = RankingsView(types.SimpleNamespace(), 1)
-        self.assertEqual(len(view.children), 6)
+        self.assertEqual(len(view.children), 8)
         self.assertIn("/game", view.embed().description)
 
 
