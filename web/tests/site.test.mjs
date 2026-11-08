@@ -44,3 +44,44 @@ test("parseRankingSnapshot は ID を含む余分な項目を落とし、数値�
   assert.equal(m.parseRankingSnapshot(null), null);
   assert.equal(m.parseRankingSnapshot({ exp: [] }), null);
 });
+
+test("parseBotStatusSnapshot は余分な項目を落とし、数値を整える", () => {
+  const snapshot = m.parseBotStatusSnapshot({
+    updated_at: "2026-11-08T03:00:00+00:00",
+    started_at: "2026-11-05T00:30:00+00:00",
+    guild_count: 25,
+    member_count: 40291.9,
+    latency_ms: 41.6,
+    guild_id: 123,
+    note: "extra",
+  });
+  assert.deepEqual(snapshot, {
+    updated_at: "2026-11-08T03:00:00+00:00",
+    started_at: "2026-11-05T00:30:00+00:00",
+    guild_count: 25,
+    member_count: 40291,
+    latency_ms: 41,
+  });
+});
+
+test("parseBotStatusSnapshot は欠けた任意項目を null にし、不正な本体は null を返す", () => {
+  const snapshot = m.parseBotStatusSnapshot({ updated_at: "2026-11-08T03:00:00+00:00" });
+  assert.deepEqual(snapshot, {
+    updated_at: "2026-11-08T03:00:00+00:00",
+    started_at: null,
+    guild_count: 0,
+    member_count: 0,
+    latency_ms: null,
+  });
+  assert.equal(m.parseBotStatusSnapshot(null), null);
+  assert.equal(m.parseBotStatusSnapshot("x"), null);
+  assert.equal(m.parseBotStatusSnapshot({}), null);
+  assert.equal(m.parseBotStatusSnapshot({ updated_at: "not-a-date" }), null);
+  assert.equal(m.parseBotStatusSnapshot({ updated_at: 123 }), null);
+});
+
+test("isBotStatusFresh は15分以内だけを新鮮とする", () => {
+  const snapshot = { updated_at: "2026-11-08T03:00:00+00:00" };
+  assert.equal(m.isBotStatusFresh(snapshot, new Date("2026-11-08T03:14:59+00:00")), true);
+  assert.equal(m.isBotStatusFresh(snapshot, new Date("2026-11-08T03:15:01+00:00")), false);
+});

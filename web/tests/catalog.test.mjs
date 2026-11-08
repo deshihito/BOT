@@ -6,7 +6,13 @@ import path from "node:path";
 
 const dataDir = path.join(import.meta.dirname, "..", "data");
 const files = ["commands.sample.json", "commands.json"].filter((f) => fs.existsSync(path.join(dataDir, f)));
-const publicCommands = ["game", "general", "help", "vc", "support"];
+// 公開スラッシュコマンドの構成はファイルごとに固定する。
+// commands.json は 2026-11-08 の再書き出しで /quick が独立した公開コマンドになった。
+// commands.sample.json はフォールバック用の旧スナップショットなので旧構成のまま。
+const publicCommandsByFile = {
+  "commands.sample.json": ["game", "general", "help", "vc", "support"],
+  "commands.json": ["help", "quick", "support", "game", "vc", "general"],
+};
 
 for (const file of files) {
   test(`${file} の形と公開コマンド`, () => {
@@ -30,7 +36,7 @@ for (const file of files) {
     }
     assert.deepEqual(
       data.commands.filter((cmd) => cmd.kind === "slash" && !cmd.hidden).map((cmd) => cmd.name),
-      publicCommands,
+      publicCommandsByFile[file],
     );
   });
 }
