@@ -177,9 +177,6 @@ def lottery_panel_png(cog: "CirculationCog", user_id: int) -> bytes:
 
 def _lottery_embed(cog: "CirculationCog", user_id: int,
                    *, image: bool = False) -> discord.Embed:
-    store = cog.lottery_store
-    current = store.current_round()
-    closes_at = datetime.fromisoformat(current["closes_at"])
     embed = discord.Embed(title="宝くじ", color=CIRCULATION_COLOR)
     if image:
         # 数値表示は画像（lottery_panel_png）に寄せ、embed は画像参照と
@@ -190,31 +187,26 @@ def _lottery_embed(cog: "CirculationCog", user_id: int,
                  f"{lottery_core.MAX_TICKETS_PER_USER}枚まで。抽選は毎日"
                  f"{lottery_core.DRAW_HOUR}:00 です。")
         return embed
+    hero, sections = lottery_panel_content(cog, user_id)
+    embed.add_field(name=hero.label, value=f"**{hero.value}**", inline=True)
     embed.add_field(
-        name=f"第{current['id']}回 賞金プール",
-        value=f"**{int(current['pool']):,} AGO**", inline=True)
-    embed.add_field(
-        name="締切", value=closes_at.strftime("%m/%d %H:%M"), inline=True)
-    embed.add_field(
-        name="あなたのチケット",
-        value=f"{store.tickets_of(str(user_id))} / {lottery_core.MAX_TICKETS_PER_USER} 枚",
-        inline=True)
-    last = store.last_result()
-    if last is not None:
-        if last["winners"]:
-            # 当選者は全サーバー横断の抽選結果なので、氏名は通常表記にする
-            lines = [
-                f"・{cached_display_name(cog.bot, w['user_id'])} — **{w['prize']:,} AGO**（{w['tickets']}枚）"
-                for w in last["winners"]
-            ]
-            value = "\n".join(lines)
-        else:
-            value = "購入がなかったため、プールは次回へ繰り越しました。"
-        if int(last.get("boost") or 0) > 0:
-            # 国庫放出の発生だけを伝える（内訳の数値は出さない）。
-            value += "\n🪙 国庫からの放出で賞金が上乗せされました。"
-        embed.add_field(name=f"前回（第{last['round_id']}回）の結果",
-                        value=value, inline=False)
+        name="締切", value=hero.sub.removeprefix("締切 "), inline=True)
+    for section_title, rows in sections:
+        if section_title is None:
+            for row in rows:
+                embed.add_field(name=row.label, value=row.value, inline=True)
+            continue
+        lines = []
+        for row in rows:
+            if row.value:
+                lines.append(
+                    f"・{row.label} — **{row.value}**"
+                    f"（{row.sub.replace(' ', '')}）")
+            elif row.label.startswith("国庫"):
+                lines.append(f"🪙 {row.label}")
+            else:
+                lines.append(row.label)
+        embed.add_field(name=section_title, value="\n".join(lines), inline=False)
     embed.set_footer(
         text=f"チケットは1枚 {lottery_core.TICKET_PRICE} AGO、1人"
              f"{lottery_core.MAX_TICKETS_PER_USER}枚まで。抽選は毎日"

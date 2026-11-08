@@ -53,25 +53,19 @@ BOX_ID = "TREASURE_BOX"
 _item_name = economy_helpers.item_name
 
 
+def _shop_line(row: PanelRow) -> str:
+    """ショップ行のテキスト版（画像行と同じ値・並び）。"""
+    return f"・{row.label} — **{row.value}**（{row.sub}）"
+
+
 def _shop_lines() -> tuple[list[str], list[str]]:
     """ショップ表示行を（素材・その他, 効果・消費）の2群で返す。
 
-    全アイテム売却可能（売却額は購入価格の半分）なので売却額は常に併記し、
-    効果・消費アイテムには短い効果説明を付ける。
+    行データの真実は _shop_rows（価格・売却額・説明はそちらで組み立てる）。
     """
-    plain: list[str] = []
-    consumables: list[str] = []
-    for item_id, definition in items_core.ITEM_DEFS.items():
-        if not definition["purchasable"]:
-            continue
-        line = (f"・{definition['name']} — **{definition['price']:,} AGO**"
-                f"（売却 {definition['sell_price']:,} AGO）")
-        if definition["kind"] == "consumable":
-            line += f"／{definition['desc']}"
-            consumables.append(line)
-        else:
-            plain.append(line)
-    return plain, consumables
+    plain, consumables = _shop_rows()
+    return ([_shop_line(row) for row in plain],
+            [_shop_line(row) for row in consumables])
 
 
 def _inventory_rows(store: items_core.ItemStore, user_id: int) -> list[PanelRow]:
@@ -142,7 +136,6 @@ def items_panel_png(store: items_core.ItemStore, user_id: int) -> bytes:
 
 def _items_embed(store: items_core.ItemStore, user_id: int,
                  *, image: bool = False) -> discord.Embed:
-    uid = str(user_id)
     embed = discord.Embed(title="アイテム", color=ITEMS_COLOR)
     if image:
         # 数値表示は画像（items_panel_png）に寄せ、embed は画像参照と
@@ -150,31 +143,15 @@ def _items_embed(store: items_core.ItemStore, user_id: int,
         embed.set_image(url=f"attachment://{ITEMS_FILENAME}")
         embed.set_footer(text="買えない素材は合成や宝箱で手に入ります。")
         return embed
-    inventory = store.inventory(uid)
-    if inventory:
-        lines = [
-            f"・{_item_name(item_id)} ×{count}"
-            for item_id, count in sorted(inventory.items())
-        ]
+    inventory_rows = _inventory_rows(store, user_id)
+    if inventory_rows:
+        lines = [f"・{row.label} {row.value}" for row in inventory_rows]
         embed.add_field(name="所持アイテム", value="\n".join(lines), inline=False)
     else:
         embed.add_field(name="所持アイテム", value="（なし）", inline=False)
-    effects = store.active_effects(uid)
-    if effects:
-        now = datetime.now(config.JST)
-        # 効果ID → 発動元アイテム名（定義から引く。無ければIDのまま）。
-        effect_labels = {
-            definition.get("effect"): definition["name"]
-            for definition in items_core.ITEM_DEFS.values()
-            if definition.get("effect")
-        }
-        lines = []
-        for effect_id, expires in effects.items():
-            # 残り時間の表記は prison.format_remaining に統一する
-            # （マネーパネルの「発動中の効果」と同一形式、導線最適化ラウンド4）。
-            remaining = max(0.0, (expires - now).total_seconds())
-            label = effect_labels.get(effect_id, effect_id)
-            lines.append(f"・{label}（あと{prison_core.format_remaining(remaining)}）")
+    effect_rows = _effect_rows(store, user_id)
+    if effect_rows:
+        lines = [f"・{row.label}（{row.value}）" for row in effect_rows]
         embed.add_field(name="発動中の効果", value="\n".join(lines), inline=False)
     plain_lines, consumable_lines = _shop_lines()
     if plain_lines:
