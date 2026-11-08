@@ -1,19 +1,32 @@
 // fastHTML（一時HTML埋め込み）の配信ヘルパー（サーバー専用）。
 // Bot 自前 API（/v1/fast/<token>）から生バイトを取得し、そのまま返す。
 // HTML の中身は検査・変換・レンダリングを一切しない。隔離は
-// fastHtmlContentHeaders の sandbox（allow-same-origin を付けない）で行う。
+// fastHtmlContentHeaders の sandbox で行う。
 
 export const FAST_HTML_TOKEN = /^[A-Za-z0-9_-]{16,64}$/;
 
+// fastHTML 専用ホスト。このホストではユーザー HTML 以外を配信しないため、
+// allow-same-origin を付けても agobot.app 本体のセッションには触れられない。
+export const FAST_HTML_DEDICATED_HOST = "fast.agobot.app";
+
+const FAST_HTML_SANDBOX_BASE =
+  "sandbox allow-scripts allow-modals allow-popups allow-forms allow-downloads";
+
 // ユーザー HTML を配信するときの必須ヘッダ。
-// sandbox に allow-same-origin / allow-top-navigation を含めないことで、
-// agobot.app と同一オリジンでも opaque origin として扱われ、
-// ダッシュボードの Cookie / セッションへは触れられない。
-export function fastHtmlContentHeaders(): Record<string, string> {
+// agobot.app 本体ホストでは allow-same-origin / allow-top-navigation を含めず、
+// opaque origin として扱うことで、ダッシュボードの Cookie / セッションへ
+// 触れられないようにする。専用ホスト（fast.agobot.app）でのみ
+// allow-same-origin を追加し、localStorage 等をそのオリジン専用に
+// 使えるようにする（保存先は専用ホストのオリジンに閉じ、本体とは混ざらない）。
+export function fastHtmlContentHeaders(host?: string | null): Record<string, string> {
+  const normalized = (host ?? "").split(":")[0].trim().toLowerCase();
+  const csp =
+    normalized === FAST_HTML_DEDICATED_HOST
+      ? `${FAST_HTML_SANDBOX_BASE} allow-same-origin`
+      : FAST_HTML_SANDBOX_BASE;
   return {
     "Content-Type": "text/html; charset=utf-8",
-    "Content-Security-Policy":
-      "sandbox allow-scripts allow-modals allow-popups allow-forms allow-downloads",
+    "Content-Security-Policy": csp,
     "X-Content-Type-Options": "nosniff",
     "Referrer-Policy": "no-referrer",
     "Cache-Control": "no-store",

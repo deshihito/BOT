@@ -31,6 +31,22 @@ test("配信ヘッダは sandbox 隔離（same-origin / top-navigation なし）
   assert.equal(headers["X-Robots-Tag"], "noindex");
 });
 
+test("専用ホスト（fast.agobot.app）でのみ allow-same-origin が付く", () => {
+  const dedicated = m.fastHtmlContentHeaders("fast.agobot.app");
+  const csp = dedicated["Content-Security-Policy"];
+  assert.match(csp, /^sandbox /);
+  assert.ok(csp.includes("allow-same-origin"), "専用ホストでは allow-same-origin を付ける");
+  assert.ok(!csp.includes("allow-top-navigation"), "allow-top-navigation は付けない");
+  // ポート付き・大文字の Host でも専用ホストとして扱う
+  assert.ok(
+    m.fastHtmlContentHeaders("FAST.agobot.app:3000")["Content-Security-Policy"].includes("allow-same-origin"),
+  );
+  // 本体ホスト・ホスト不明では付けない（従来どおり opaque origin で隔離）
+  assert.ok(!m.fastHtmlContentHeaders("agobot.app")["Content-Security-Policy"].includes("allow-same-origin"));
+  assert.ok(!m.fastHtmlContentHeaders(null)["Content-Security-Policy"].includes("allow-same-origin"));
+  assert.ok(!m.fastHtmlContentHeaders()["Content-Security-Policy"].includes("allow-same-origin"));
+});
+
 test("fetchFastHtml: 200 は生バイトを返し、認証ヘッダを付ける", async () => {
   process.env.BOT_API_BASE_URL = "http://127.0.0.1:8787";
   process.env.BOT_API_KEY = "test-key";
