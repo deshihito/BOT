@@ -81,3 +81,52 @@ export function parseRankingSnapshot(raw: unknown): PublicRankingSnapshot | null
     coin: cleanEntries(record.coin, false),
   };
 }
+
+/** Bot の稼働スナップショットを置く bot_kv の名前空間とキー。 */
+export const BOT_STATUS_NAMESPACE = "bot_status";
+export const BOT_STATUS_KEY = "snapshot";
+
+/** Bot の書き出し周期は5分。その3周期分までを「新鮮（稼働中）」とみなす。 */
+export const BOT_STATUS_FRESH_MS = 15 * 60 * 1000;
+
+export type BotStatusSnapshot = {
+  updated_at: string;
+  started_at: string | null;
+  guild_count: number;
+  member_count: number;
+  latency_ms: number | null;
+};
+
+function cleanCount(raw: unknown): number {
+  return typeof raw === "number" && Number.isFinite(raw) ? Math.max(0, Math.trunc(raw)) : 0;
+}
+
+function cleanOptionalCount(raw: unknown): number | null {
+  return typeof raw === "number" && Number.isFinite(raw) ? Math.max(0, Math.trunc(raw)) : null;
+}
+
+function cleanIsoString(raw: unknown): string | null {
+  return typeof raw === "string" && raw !== "" && !Number.isNaN(Date.parse(raw)) ? raw : null;
+}
+
+/** Bot が書いた生スナップショットを、表示に使える形へ検証して寄せる。 */
+export function parseBotStatusSnapshot(raw: unknown): BotStatusSnapshot | null {
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return null;
+  const record = raw as Record<string, unknown>;
+  const updatedAt = cleanIsoString(record.updated_at);
+  if (updatedAt === null) return null;
+  return {
+    updated_at: updatedAt,
+    started_at: cleanIsoString(record.started_at),
+    guild_count: cleanCount(record.guild_count),
+    member_count: cleanCount(record.member_count),
+    latency_ms: cleanOptionalCount(record.latency_ms),
+  };
+}
+
+/** スナップショットが新鮮（Bot が生きている証拠として扱える）かどうか。 */
+export function isBotStatusFresh(snapshot: BotStatusSnapshot, now: Date = new Date()): boolean {
+  const updatedMs = Date.parse(snapshot.updated_at);
+  if (Number.isNaN(updatedMs)) return false;
+  return now.getTime() - updatedMs <= BOT_STATUS_FRESH_MS;
+}
