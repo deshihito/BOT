@@ -156,6 +156,15 @@ class SnsError(Exception):
     """管理者にそのまま見せてよい取得・設定エラー。"""
 
 
+@dataclass(frozen=True)
+class SnsMedia:
+    """ポスト自身の添付メディア（X）。url は写真=表示用 / 動画=再生用mp4の直接URL。"""
+
+    kind: str  # "photo" | "video"
+    url: str
+    thumbnail: str | None = None
+
+
 @dataclass
 class SnsItem:
     id: str
@@ -165,6 +174,11 @@ class SnsItem:
     published: str | None = None
     thumbnail: str | None = None
     live: bool = False
+    # X の指標・添付メディア（他プラットフォームでは未設定のまま）
+    views: int | None = None
+    likes: int | None = None
+    reposts: int | None = None
+    media: tuple[SnsMedia, ...] = ()
 
 
 def _sns_text(value: str | None) -> str:
@@ -361,6 +375,63 @@ def parse_fx_profile(payload, username: str) -> tuple[str, str]:
     return uid, name
 
 
+def _fx_count(row: dict, key: str) -> int | None:
+    """FxTwitter の指標値（views / likes / reposts）。非負の整数の場合のみ採用する。"""
+    value = row.get(key)
+    if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
+        return value
+    return None
+
+
+def _fx_media(row: dict) -> tuple[SnsMedia, ...]:
+    """ポスト自身の添付メディアを取り出す（引用先ポストのメディアは対象外）。
+
+    FxTwitter の media.all（実測）: photo は url が表示用画像URL、video / gif は
+    url が再生用 mp4 の直接URLで thumbnail_url にサムネイルが入る。
+    """
+    media = row.get("media")
+    if not isinstance(media, dict):
+        return ()
+    found: list[SnsMedia] = []
+    for entry in media.get("all") or []:
+        if not isinstance(entry, dict):
+            continue
+        url = entry.get("url")
+        if not isinstance(url, str) or not url.startswith(("http://", "https://")):
+            continue
+        kind = entry.get("type")
+        if kind == "photo":
+            found.append(SnsMedia(kind="photo", url=url))
+        elif kind in ("video", "gif"):
+            thumb = entry.get("thumbnail_url")
+            found.append(
+                SnsMedia(
+                    kind="video",
+                    url=url,
+                    thumbnail=thumb
+                    if isinstance(thumb, str) and thumb.startswith(("http://", "https://"))
+                    else None,
+                )
+            )
+    return tuple(found)
+
+
+def sns_metrics_text(item: SnsItem) -> str | None:
+    """X ポストの指標行（👁 インプレッション / ❤️ ライク / 🔁 リポスト）。
+
+    指標が未取得、または全部 0（投稿直後で未集計）のときは行自体を出さない。
+    数値が取れている指標は 0 を含めてそのまま出す。
+    """
+    parts = [
+        f"{emoji} {value:,}"
+        for emoji, value in (("👁", item.views), ("❤️", item.likes), ("🔁", item.reposts))
+        if value is not None
+    ]
+    if not parts or not (item.views or item.likes or item.reposts):
+        return None
+    return "-# " + " · ".join(parts)
+
+
 def parse_fx_statuses(payload, username: str) -> list[SnsItem]:
     """FxTwitter の statuses 応答を、本人のポストのみに絞って SnsItem 化する。
 
@@ -404,6 +475,10 @@ def parse_fx_statuses(payload, username: str) -> list[SnsItem]:
                 url=str(row.get("url") or f"https://x.com/{username}/status/{post_id}"),
                 author=screen,
                 published=published,
+                views=_fx_count(row, "views"),
+                likes=_fx_count(row, "likes"),
+                reposts=_fx_count(row, "reposts"),
+                media=_fx_media(row),
             )
         )
     return items
@@ -675,6 +750,17 @@ class SnsNotifyMessage(discord.ui.LayoutView):
                 children.append(discord.ui.MediaGallery(discord.MediaGalleryItem(item.thumbnail)))
         else:
             children.append(discord.ui.TextDisplay((item.title or "(本文なし)")[:1500]))
+            if item.media:
+                # 写真は表示用URL、動画は再生用mp4の直接URLをギャラリーに入れる
+                # （Discord のメディアギャラリーは動画もその場で再生できる）。
+                children.append(
+                    discord.ui.MediaGallery(
+                        *(discord.MediaGalleryItem(m.url) for m in item.media[:10])
+                    )
+                )
+            metrics = sns_metrics_text(item)
+            if metrics:
+                children.append(discord.ui.TextDisplay(metrics))
 
         children.append(discord.ui.Separator())
         if item.url:
