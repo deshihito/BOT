@@ -42,6 +42,15 @@ class ManageMixin:
         return GlobalRoomListView(self, getattr(guild, "id", None))
 
 
+    async def _is_bot_admin(self, user) -> bool:
+        """Bot管理者（アプリの所有者）かどうか。常設ルームの作成・テーマ変更の前提。"""
+        try:
+            return bool(await self.bot.is_owner(user))
+        except Exception:
+            logger.debug("グローバルVC: Bot管理者チェックに失敗しました", exc_info=True)
+            return False
+
+
     async def _room_create_impl(self, r: Responder, room_name: str, max_servers: int,
                                 password: str, description: str,
                                 theme: str = "", permanent: bool = False):
@@ -53,6 +62,8 @@ class ManageMixin:
         await r.defer()
         if r.guild is None:
             return await r.send(f"{FAILED} ルームはサーバー内で作成してください。", ephemeral=True)
+        if permanent and not await self._is_bot_admin(r.user):
+            return await r.send(f"{FAILED} 常設ルームを作成できるのはBot管理者だけです。", ephemeral=True)
         if not room_name:
             return await r.send(f"{FAILED} ルーム名を入力してください。", ephemeral=True)
         if room_name in ROOMS:
@@ -110,6 +121,42 @@ class ManageMixin:
             await r.send(f"{FAILED} ルームは作成しましたが、VC への参加に失敗しました: `{e}`", ephemeral=True)
         else:
             await r.send(f"🎙️ **{voice.channel.name}** に参加し、ルーム **{room_name}** に接続しました。")
+
+
+    async def _room_theme_impl(self, r: Responder, room_name: str, theme_input: str):
+        """常設ルームのテーマを変更する（Bot管理者だけ）。
+
+        入力の解釈: 「自動」（または「日替わり」）= 日替わり自動テーマに切り替え、
+        「なし」= テーマなし、それ以外はそのテーマで固定する。
+        """
+        await r.defer()
+        if not await self._is_bot_admin(r.user):
+            return await r.send(f"{FAILED} 常設ルームのテーマを変更できるのはBot管理者だけです。", ephemeral=True)
+        room = ROOMS.get(room_name)
+        if room is None:
+            return await r.send(f"{FAILED} ルーム **{room_name}** は存在しません。", ephemeral=True)
+        if not room.permanent:
+            return await r.send(f"{FAILED} テーマを変更できるのは常設ルームだけです。", ephemeral=True)
+
+        value = (theme_input or "").strip()
+        if not value:
+            return await r.send(
+                f"{FAILED} テーマを入力してください（「自動」で日替わり、「なし」でテーマなし、"
+                "それ以外はそのテーマで固定されます）。", ephemeral=True)
+        if value in ("自動", "日替わり"):
+            room.theme_auto = True
+            room.theme = theme_for(room.name, theme_day())
+            result = f"🎯 テーマを日替わり（自動）にしました。今日のテーマは **{room.theme}** です。"
+        elif value in ("なし", "無し"):
+            room.theme_auto = False
+            room.theme = ""
+            result = "🎯 テーマをなしにしました。"
+        else:
+            room.theme_auto = False
+            room.theme = value
+            result = f"🎯 テーマを **{value}** に固定しました。"
+        _persist_rooms()
+        await r.send(f"📌 常設ルーム **{room_name}**: {result}")
 
 
     async def _room_info_impl(self, r: Responder, room_name: str):
