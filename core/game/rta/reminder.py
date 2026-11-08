@@ -210,6 +210,15 @@ class ReminderMixin:
         if channel is _GONE:
             await self._finish(rem, "channel unavailable", logging.WARNING)
             return None
+        if channel is None:
+            # 一時的な取得失敗。行は未送信のまま残り、次回 reconcile で
+            # 再登録されて再試行されるが、無言で終わると「通知が来ない」
+            # 事象の切り分けができないため必ず痕跡を残す。
+            logger.warning(
+                "Reminder channel could not be resolved (will retry via reconcile): "
+                "message=%s kind=%s channel=%s",
+                rem.message_id, rem.kind, rem.channel_id)
+            return None
         role_id = await self._role_id(rem.guild_id)
         noun = rem.kind if rem.kind in ("bump", "vote") else "up"
         # Keep the reminder wording exactly aligned with the supplied original.
