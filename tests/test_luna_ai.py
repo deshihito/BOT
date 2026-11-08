@@ -712,11 +712,18 @@ class SendSanitizeTest(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("<@123>", sent)
 
 
+class ModelSelectionTest(unittest.TestCase):
+    def test_default_model_is_glm_flash(self):
+        self.assertEqual(luna.DEFAULT_MODEL, "glm-5.3-flash")
+        self.assertEqual(luna.REASONING_EFFORT, "low")
+
+
 class ChatTextTest(unittest.IsolatedAsyncioTestCase):
     async def test_chat_text_accumulates_stream_deltas(self):
-        async def fake_stream(model, messages, *, max_tokens):
+        async def fake_stream(model, messages, *, max_tokens, reasoning_effort=None):
             self.assertEqual(model, luna.model_name())
             self.assertEqual(max_tokens, 800)
+            self.assertEqual(reasoning_effort, "low")
             for delta in ("まぁ", "様子見", "かな"):
                 yield delta
 
@@ -725,7 +732,7 @@ class ChatTextTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(text, "まぁ様子見かな")
 
     async def test_chat_text_propagates_http_error(self):
-        async def fake_stream(model, messages, *, max_tokens):
+        async def fake_stream(model, messages, *, max_tokens, reasoning_effort=None):
             raise luna.logfare.LogfareHTTPError(503)
             yield ""  # pragma: no cover
 
