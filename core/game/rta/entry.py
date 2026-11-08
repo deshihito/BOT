@@ -21,7 +21,7 @@ from core.game.rta.helpers import logger, _collect_embed_text, _white_embed, _sn
 from core.game.rta.reminder import logger, ReminderMixin  # noqa: F401
 from core.game.rta.settings import logger, SettingsMixin  # noqa: F401
 from core.game.rta.types import logger, _Reminder, _GONE  # noqa: F401
-from core.game.rta.views import logger, BumpRtaRoleView  # noqa: F401
+from core.game.rta.views import logger, BumpRtaRoleView, RtaBoardView  # noqa: F401
 from core.game.rta.worker import logger, WorkerMixin  # noqa: F401
 
 logger = logging.getLogger("cogs.disboard_rta")

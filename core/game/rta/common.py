@@ -73,6 +73,7 @@ CLOCK_STALE_AFTER = 1800.0
 NTP_REFRESH_SECONDS = 300.0
 NTP_FRESH_SECONDS = 900.0
 DISCORD_EPOCH_MS = 1420070400000
+RTA_BOARD_FILENAME = "rta_leaderboard.png"
 
 ACTION_CHOICES = [
     app_commands.Choice(name="状態", value="status"),
@@ -89,6 +90,19 @@ EVENT_TYPE_CHOICES = [
     app_commands.Choice(name="dcafe", value="dcafe"),
     app_commands.Choice(name="sharkbot", value="sharkbot"),
 ]
+# 統合 RTA ボードのサービス表示名。bump / up は従来のボード表題の表記を
+# 踏襲し、それ以外は /support の boardNotify 入口と同じ表示名にする。
+# legacy（分離前の混在履歴）はサービスではないので含めない。
+SERVICE_LABELS = {
+    "bump": "bump",
+    "up": "up",
+    "vote": "鯖ちゃんねる",
+    "takasumi": "TakasumiBOT",
+    "dicoall": "Dicoall",
+    "dcafe": "Discord Cafe",
+    "sharkbot": "SharkBot",
+}
+RTA_SERVICE_TYPES = tuple(SERVICE_LABELS)
 LEADERBOARD_SCOPE_CHOICES = [
     app_commands.Choice(name="自分のベスト", value="me"),
     app_commands.Choice(name="このサーバー", value="local"),

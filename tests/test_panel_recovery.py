@@ -54,8 +54,8 @@ class CustomIdTest(unittest.TestCase):
             {"panel:general:genre", "panel:general:action", "panel:general:register",
              "panel:general:action_prev", "panel:general:action_indicator",
              "panel:general:action_next",
-             # 機能再編: money⇔rta のジャンルワープボタン
-             "panel:general:warp_general_rta"},
+             # 機能再編: money⇔boardnotify_rta のジャンルワープボタン
+             "panel:general:warp_general_boardnotify_rta"},
         )
         specs = [types.SimpleNamespace(label="プレイヤー状況", value="status")]
         self.assertIn("panel:general:history", child_ids(GeneralPanel(None, history_specs=specs)))
@@ -91,8 +91,8 @@ class CustomIdTest(unittest.TestCase):
         self.assertEqual(child_ids(GameHubView(None)),
                          {"panel:game:genre", "panel:game:select", "panel:game:page_prev",
                           "panel:game:page_indicator", "panel:game:page_next", "panel:game:monthly",
-                          # 機能再編: ゲーム王⇔general:rta のジャンルワープボタン
-                          "panel:game:warp_general_rta"})
+                          # 機能再編: ゲーム王⇔general:boardnotify_rta のジャンルワープボタン
+                          "panel:game:warp_general_boardnotify_rta"})
         view = GameHubView(None)
         view.genre = "party"
         view.refresh()

@@ -54,11 +54,11 @@ class WarpTableValidityTest(unittest.TestCase):
         # support 側パネルに組み込むのは boardnotify / rta / automation の3本。
         self.assertEqual(
             [(w.to_root, w.to_genre) for w in warps_from("support", "boardnotify")],
-            [("general", "rta")],
+            [("general", "boardnotify_rta")],
         )
         self.assertEqual(
             [(w.to_root, w.to_genre) for w in warps_from("support", "rta")],
-            [("general", "rta")],
+            [("general", "boardnotify_rta")],
         )
         automation = warps_from("support", "automation")
         self.assertEqual(len(automation), 1)  # ジャンル単位で1本まで
@@ -70,19 +70,19 @@ class WarpTableValidityTest(unittest.TestCase):
     def test_all_pairs_declared(self):
         pairs = {(w.from_root, w.from_genre, w.to_root, w.to_genre) for w in PANEL_WARPS}
         expected = {
-            ("support", "boardnotify", "general", "rta"),
-            ("general", "rta", "support", "boardnotify"),
-            ("support", "rta", "general", "rta"),
-            ("general", "rta", "support", "rta"),
+            ("support", "boardnotify", "general", "boardnotify_rta"),
+            ("general", "boardnotify_rta", "support", "boardnotify"),
+            ("support", "rta", "general", "boardnotify_rta"),
+            ("general", "boardnotify_rta", "support", "rta"),
             ("support", "automation", "general", "exp"),
             ("general", "exp", "support", "automation"),
             ("vc", "trigger", "support", "automation"),
             ("support", "automation", "vc", "gvc_rooms"),
             ("vc", "gvc_rooms", "support", "automation"),
-            ("general", "money", "general", "rta"),
-            ("general", "rta", "general", "money"),
-            ("game", None, "general", "rta"),
-            ("general", "rta", "game", None),
+            ("general", "money", "general", "boardnotify_rta"),
+            ("general", "boardnotify_rta", "general", "money"),
+            ("game", None, "general", "boardnotify_rta"),
+            ("general", "boardnotify_rta", "game", None),
         }
         self.assertTrue(expected <= pairs, expected - pairs)
 
@@ -101,11 +101,11 @@ class SupportPanelWarpRenderTest(unittest.TestCase):
     def test_boardnotify_and_rta_have_warp(self):
         self.assertEqual(
             self._warp_ids("boardnotify"),
-            {"panel:support:warp_general_rta": "RTAランキングへ移動"},
+            {"panel:support:warp_general_boardnotify_rta": "RTAランキングへ移動"},
         )
         self.assertEqual(
             self._warp_ids("rta"),
-            {"panel:support:warp_general_rta": "RTAランキングへ移動"},
+            {"panel:support:warp_general_boardnotify_rta": "RTAランキングへ移動"},
         )
 
     def test_automation_has_single_warp(self):
