@@ -15,7 +15,6 @@ from __future__ import annotations
 from core.support.emojis import SUCCESS
 
 import asyncio
-import io
 import logging
 import math
 from datetime import datetime, timedelta
@@ -25,6 +24,7 @@ import discord
 from discord.ext import commands, tasks
 
 import config
+from core.economy_image import render_market_chart_png
 from core.general.circulation import economy_pool as economy_core
 from core.general.items import items as items_core
 from core.general.market import market as market_core
@@ -56,8 +56,9 @@ def _chart_path():
 
 def _chart_font_path():
     return CHART_FONT_PATH
-#: チャート描画に使う同梱の日本語フォント（matplotlib 既定には日本語が
-#: 無く、タイトル等が豆腐化するため font_manager へ登録して使う）。
+#: チャート描画に使う同梱の日本語フォント。描画基盤（core/economy_image
+#: → core/leaderboard_image）も同じフォントを最優先で使うため、
+#: タイトル等の日本語が豆腐化しない。
 
 
 # ---------------------------------------------------------------------------
@@ -83,15 +84,13 @@ def _fmt_tokens(amount: float) -> str:
     return f"{amount:,.2f}"
 
 
-def _market_embed(store: market_core.MarketStore, user_id: int,
-                  *, with_chart: bool = False) -> discord.Embed:
-    state = store.snapshot()
+def _market_changes(state: dict) -> tuple[float, float]:
+    """(1時間変動, 本日変動) を snapshot から計算する（表示専用）。"""
     now = datetime.now(config.JST)
     rate = float(state["rate"])
-    history = state["history"]
     change_day = rate / float(state["day_open_rate"]) - 1 if state["day_open_rate"] else 0.0
     change_1h = 0.0
-    for entry in reversed(history):
+    for entry in reversed(state["history"]):
         try:
             at = datetime.fromisoformat(entry["t"])
         except (ValueError, TypeError):
@@ -99,11 +98,41 @@ def _market_embed(store: market_core.MarketStore, user_id: int,
         if at <= now - timedelta(hours=1):
             change_1h = rate / float(entry["rate"]) - 1
             break
+    return change_1h, change_day
+
+
+def _chart_stats(store: market_core.MarketStore) -> dict:
+    """チャート画像のヘッダに出す全体ステータス（表示専用の値）。
+
+    プール額はユーザー向けに出さない方針（_market_embed と同じ）。
+    流通量は全ユーザーの保有合計で、総供給量は定数から出す。
+    """
+    state = store.snapshot()
+    change_1h, change_day = _market_changes(state)
+    return {
+        "rate": float(state["rate"]),
+        "change_1h": change_1h,
+        "change_day": change_day,
+        "supply": int(market_core.TOTAL_TOKEN_SUPPLY),
+        "circulating": int(sum(
+            float(v) for v in (state.get("balances") or {}).values())),
+    }
+
+
+def _market_embed(store: market_core.MarketStore, user_id: int,
+                  *, with_chart: bool = False) -> discord.Embed:
+    state = store.snapshot()
+    now = datetime.now(config.JST)
+    rate = float(state["rate"])
     halted, reason = store.halt_status(now)
     embed = discord.Embed(title=f"{market_core.TOKEN_NAME}市場", color=MARKET_COLOR)
-    embed.add_field(name="現在レート", value=f"**{rate:,.2f} AGO** / 1 {market_core.TOKEN_NAME}", inline=False)
-    embed.add_field(name="変動（1時間）", value=f"{change_1h:+.2%}", inline=True)
-    embed.add_field(name="変動（本日）", value=f"{change_day:+.2%}", inline=True)
+    if not with_chart:
+        # チャート画像がまだ無い間だけ、レートと変動をテキストで出す
+        # （チャートのヘッダに同じ値が載るため、画像がある時は二重にしない）。
+        change_1h, change_day = _market_changes(state)
+        embed.add_field(name="現在レート", value=f"**{rate:,.2f} AGO** / 1 {market_core.TOKEN_NAME}", inline=False)
+        embed.add_field(name="変動（1時間）", value=f"{change_1h:+.2%}", inline=True)
+        embed.add_field(name="変動（本日）", value=f"{change_day:+.2%}", inline=True)
     embed.add_field(name="あなたの保有量", value=f"{_fmt_tokens(store.token_balance(str(user_id)))} {market_core.TOKEN_NAME}", inline=True)
     # プール額はユーザー向けに出さない（取引可否の判定は内部で従来どおり）。
     embed.add_field(name="1回の取引上限", value=f"{store.trade_cap_aga():,} AGO", inline=True)
@@ -118,75 +147,28 @@ def _market_embed(store: market_core.MarketStore, user_id: int,
     return embed
 
 
-_chart_font_ready = False
-
-
-def _ensure_chart_font() -> None:
-    """同梱の日本語フォントを matplotlib に登録する（初回のみ）。
-
-    matplotlib の既定フォント（DejaVu）には日本語グリフが無く、タイトル
-    等が豆腐（□）になるため、リポジトリ同梱フォントを使う。
-    """
-    global _chart_font_ready
-    if _chart_font_ready:
-        return
-    _chart_font_ready = True
-    try:
-        import matplotlib
-        from matplotlib import font_manager
-        if _chart_font_path().exists():
-            font_manager.fontManager.addfont(str(_chart_font_path()))
-            family = font_manager.FontProperties(
-                fname=str(_chart_font_path())).get_name()
-            matplotlib.rcParams["font.family"] = family
-        matplotlib.rcParams["axes.unicode_minus"] = False
-    except Exception:
-        logger.exception("market: チャート用フォントの登録に失敗しました")
-
-
-def _render_chart(history: list[dict]) -> bytes | None:
+def _render_chart(history: list[dict], stats: dict | None = None) -> bytes | None:
     """過去5時間の価格チャート（OHLC＋20期間移動平均）を描く。
 
     出来高の下段グラフは廃止し、価格チャートだけにした（ユーザー指示）。
-    matplotlib は遅延 import、呼び出しは to_thread 前提。
+    描画は白基調の共通基盤（core/economy_image.py、PIL）へ移し、
+    ヘッダに現在レート・変動・総供給量/流通量も載せる。系列の整形
+    （ohlc_buckets / moving_average）は従来どおり市場ロジック側の
+    純関数を使い、表示層ではデータを加工しない。呼び出しは
+    to_thread 前提。バケットが無ければ None。
     """
-    try:
-        import matplotlib
-        matplotlib.use("Agg")
-        import matplotlib.pyplot as plt
-    except Exception:
-        logger.exception("market: matplotlib を読み込めませんでした")
-        return None
-    _ensure_chart_font()
     buckets = market_core.ohlc_buckets(history, hours=5)
     if not buckets:
         return None
     closes = [b["close"] for b in buckets]
     ma = market_core.moving_average(closes, window=20)
-    fig, ax = plt.subplots(figsize=(9, 4), facecolor="#2b2d31")
-    ax.set_facecolor("#2b2d31")
-    for i, b in enumerate(buckets):
-        color = "#00ff88" if b["close"] >= b["open"] else "#ff4444"
-        ax.plot([i, i], [b["low"], b["high"]], color=color)
-        ax.add_patch(plt.Rectangle((i - 0.3, min(b["open"], b["close"])), 0.6,
-                                   max(abs(b["close"] - b["open"]), 0.01), color=color))
-    ma_x = [i for i, v in enumerate(ma) if v is not None]
-    ax.plot(ma_x, [ma[i] for i in ma_x], color="#ffaa00", linewidth=2)
-    labels = [b["t"].strftime("%H:%M") for b in buckets]
-    step = max(1, len(labels) // 10)
-    ax.set_xticks(range(0, len(labels), step))
-    ax.set_xticklabels(labels[::step], rotation=45, color="white")
-    ax.tick_params(colors="white")
-    ax.set_title(f"{market_core.TOKEN_NAME}市場（過去5時間）", color="white")
-    buf = io.BytesIO()
     try:
-        plt.savefig(buf, format="png", bbox_inches="tight", facecolor="#2b2d31")
-        return buf.getvalue()
+        return render_market_chart_png(
+            buckets=buckets, ma=ma, token_name=market_core.TOKEN_NAME,
+            stats=stats)
     except Exception:
         logger.exception("market: チャート描画に失敗しました")
         return None
-    finally:
-        plt.close(fig)
 
 
 class TradeModal(discord.ui.Modal):
@@ -306,7 +288,9 @@ class MarketCog(commands.Cog):
         await self.bot.wait_until_ready()
 
     async def _refresh_chart_cache(self) -> None:
-        data = await asyncio.to_thread(_render_chart, self.store.snapshot()["history"])
+        data = await asyncio.to_thread(
+            _render_chart, self.store.snapshot()["history"],
+            _chart_stats(self.store))
         if data:
             try:
                 _chart_path().parent.mkdir(parents=True, exist_ok=True)

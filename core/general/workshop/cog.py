@@ -16,6 +16,7 @@ from __future__ import annotations
 from core.support.emojis import SUCCESS
 
 import asyncio
+import io
 import logging
 from datetime import datetime
 
@@ -23,6 +24,7 @@ import discord
 from discord.ext import commands, tasks
 
 import config
+from core.economy_image import PanelRow, render_panel_png
 from core.game.clan import clan as clan_core
 from core.general.workshop import craft as craft_core
 from core.general.items import items as items_core
@@ -41,6 +43,9 @@ from cogs import general as wallet_module  # INSUFFICIENT は実行時に引く�
 logger = logging.getLogger("cogs.workshop")
 
 WORKSHOP_COLOR = 0x95A5A6
+WORKSHOP_ACCENT = (96, 125, 139)
+WORKSHOP_FILENAME = "workshop_panel.png"
+CRAFT_FILENAME = "craft_panel.png"
 WORKSHOP_ID = "WORKSHOP"
 
 
@@ -72,11 +77,103 @@ def _tier_lines() -> list[str]:
     return lines
 
 
-def _workshop_embed(cog: "WorkshopCog", user_id: int) -> discord.Embed:
+def workshop_panel_content(cog: "WorkshopCog", user_id: int):
+    """工房画像の (banner, sections) を組み立てる。
+
+    行の内容は _workshop_embed のフィールドと同じ値・並びにする。
+    ストリークはバナー（強調帯）に移す。
+    """
+    uid = str(user_id)
+    now = datetime.now(config.JST)
+    store = cog.workshop_store
+    machine_rows: list[PanelRow] = []
+    for machine in store.machines(uid):
+        tier = workshop_core.MACHINE_TIERS[machine["tier"]]
+        pending = store.pending_cycles(machine, now)
+        max_cycles = tier["storage_hours"] // tier["cycle_hours"]
+        state = f"生産完了 {pending} サイクル分"
+        if pending >= max_cycles:
+            state += "（貯蔵上限で停止中）"
+        if pending >= int(machine.get("cycles_left", 0)):
+            state += "（受け取ると寿命が尽きます）"
+        lifespan = int(tier["lifespan_cycles"]) or 1
+        machine_rows.append(PanelRow(
+            tier["name"],
+            f"残り寿命 {machine.get('cycles_left', 0)} サイクル",
+            sub=state,
+            bar=max(0.0, min(1.0,
+                             int(machine.get("cycles_left", 0)) / lifespan))))
+    sections: list = [("所有加工機", machine_rows)]
+    streak = store.streak_status(uid, now)
+    banner = ""
+    if streak["days"]:
+        banner = (f"連続稼働ストリーク {streak['days']} 日"
+                  "（受け取り続けると生産ボーナスが付きます）")
+    jobs = store.commissions(uid)
+    if jobs:
+        job_rows = []
+        for job in jobs:
+            ready_at = datetime.fromisoformat(job["ready_at"])
+            names = f"{_item_name(job['a'])} ＋ {_item_name(job['b'])}"
+            if ready_at <= now:
+                job_rows.append(PanelRow(names, "受け取り可能"))
+            else:
+                seconds = (ready_at - now).total_seconds()
+                job_rows.append(PanelRow(
+                    names,
+                    f"完了まで{prison_core.format_remaining(seconds)}"))
+        sections.append(("委託加工", job_rows))
+    tier_rows = []
+    for tier_id, tier in workshop_core.MACHINE_TIERS.items():
+        materials = "・".join(
+            items_core.ITEM_DEFS[item_id]["name"]
+            for item_id, _w in tier["production"])
+        tier_rows.append(PanelRow(
+            tier["name"], f"{tier['price']:,} AGO",
+            sub=(f"{tier['cycle_hours']}時間ごとに {materials} を生産、"
+                 f"貯蔵は{tier['storage_hours']}時間分まで、"
+                 f"寿命{tier['lifespan_cycles']}サイクル"
+                 f"（満稼働で約{workshop_core.lifetime_days(tier_id):.0f}日）"
+                 "で消える使い捨て")))
+    sections.append(("加工機（購入）", tier_rows))
+    return banner, sections
+
+
+def workshop_panel_png(cog: "WorkshopCog", user_id: int) -> bytes:
+    """工房パネル（機械の状態・委託・購入一覧）の白基調画像を描く。"""
+    banner, sections = workshop_panel_content(cog, user_id)
+    return render_panel_png(
+        title="工房", accent=WORKSHOP_ACCENT, banner=banner,
+        sections=sections, cache_namespace="workshop-panel")
+
+
+def craft_panel_png(cog: "WorkshopCog", user_id: int) -> bytes:
+    """合成パネル（使える所持素材）の白基調画像を描く。"""
+    store = cog._item_store()
+    inventory = store.inventory(str(user_id))
+    rows = [
+        PanelRow(_item_name(item_id), f"×{count}")
+        for item_id, count in sorted(inventory.items())
+        if item_id in craft_core.craftable_item_ids() and count > 0
+    ]
+    return render_panel_png(
+        title="合成", accent=WORKSHOP_ACCENT,
+        sections=[("合成に使える所持素材", rows)],
+        cache_namespace="craft-panel")
+
+
+def _workshop_embed(cog: "WorkshopCog", user_id: int,
+                    *, image: bool = False) -> discord.Embed:
     uid = str(user_id)
     now = datetime.now(config.JST)
     store = cog.workshop_store
     embed = discord.Embed(title="工房", color=WORKSHOP_COLOR)
+    if image:
+        # 数値表示は画像（workshop_panel_png）に寄せ、embed は画像参照と
+        # フッターだけを持つ（本文の二重表示を避ける）。
+        embed.set_image(url=f"attachment://{WORKSHOP_FILENAME}")
+        embed.set_footer(text="生産物は「生産物を受け取る」でまとめて受け取れます。")
+        return embed
     machines = store.machines(uid)
     if machines:
         lines = []
@@ -119,10 +216,19 @@ def _workshop_embed(cog: "WorkshopCog", user_id: int) -> discord.Embed:
     return embed
 
 
-def _craft_embed(cog: "WorkshopCog", user_id: int) -> discord.Embed:
+def _craft_embed(cog: "WorkshopCog", user_id: int,
+                 *, image: bool = False) -> discord.Embed:
     store = cog._item_store()
     inventory = store.inventory(str(user_id))
     embed = discord.Embed(title="合成", color=WORKSHOP_COLOR)
+    if image:
+        # 素材一覧は画像（craft_panel_png）に寄せ、embed は画像参照と
+        # フッター（遊び方の案内）だけを持つ。
+        embed.set_image(url=f"attachment://{CRAFT_FILENAME}")
+        embed.set_footer(
+            text="素材を2つ選んで「合成する」と即時、「委託する」と時間をかけてレア結果が出やすくなります。"
+                 "組み合わせは試して見つけてください。")
+        return embed
     owned = [
         f"・{_item_name(item_id)} ×{count}"
         for item_id, count in sorted(inventory.items())
@@ -175,13 +281,32 @@ class WorkshopView(discord.ui.View):
         super().__init__(timeout=180)
         self.cog = cog
         self.user_id = user_id
+        self._png: bytes | None = None
+        self._png_ready = False
 
     async def interaction_check(self, interaction) -> bool:
         # 公開パネル化（ephemeral第2波）: 操作は本人のみ。
         return interaction.user.id == self.user_id
 
+    def panel_png(self) -> bytes | None:
+        if not self._png_ready:
+            self._png_ready = True
+            try:
+                self._png = workshop_panel_png(self.cog, self.user_id)
+            except Exception:
+                logger.exception("workshop: パネル画像の生成に失敗しました")
+                self._png = None
+        return self._png
+
+    def panel_files(self) -> list[discord.File] | None:
+        png = self.panel_png()
+        if png is None:
+            return None
+        return [discord.File(io.BytesIO(png), filename=WORKSHOP_FILENAME)]
+
     def embed(self) -> discord.Embed:
-        return _workshop_embed(self.cog, self.user_id)
+        return _workshop_embed(
+            self.cog, self.user_id, image=self.panel_png() is not None)
 
     # 導線最適化ラウンド4: 再描画だけの「更新」ボタンは置かない（S9/R2-5
     # と同じ作法）。受け取り・購入のたびにパネルは更新される。
@@ -209,6 +334,8 @@ class CraftView(discord.ui.View):
         super().__init__(timeout=180)
         self.cog = cog
         self.user_id = user_id
+        self._png: bytes | None = None
+        self._png_ready = False
         self.first: str | None = None
         self.second: str | None = None
         inventory = cog._item_store().inventory(str(user_id))
@@ -233,8 +360,25 @@ class CraftView(discord.ui.View):
         # 公開パネル化（ephemeral第2波）: 操作は本人のみ。
         return interaction.user.id == self.user_id
 
+    def panel_png(self) -> bytes | None:
+        if not self._png_ready:
+            self._png_ready = True
+            try:
+                self._png = craft_panel_png(self.cog, self.user_id)
+            except Exception:
+                logger.exception("workshop: 合成パネル画像の生成に失敗しました")
+                self._png = None
+        return self._png
+
+    def panel_files(self) -> list[discord.File] | None:
+        png = self.panel_png()
+        if png is None:
+            return None
+        return [discord.File(io.BytesIO(png), filename=CRAFT_FILENAME)]
+
     def embed(self) -> discord.Embed:
-        return _craft_embed(self.cog, self.user_id)
+        return _craft_embed(
+            self.cog, self.user_id, image=self.panel_png() is not None)
 
     def _make_select_callback(self, slot: str):
         async def callback(interaction: discord.Interaction):
@@ -305,7 +449,12 @@ class WorkshopCog(commands.Cog):
     # ------------------------------------------------------------------ 入口
     async def show_workshop(self, interaction: discord.Interaction):
         view = WorkshopView(self, interaction.user.id)
-        await interaction.response.send_message(view=_wrap(view))
+        files = view.panel_files()
+        if files:
+            await interaction.response.send_message(
+                view=_wrap(view), files=files)
+        else:
+            await interaction.response.send_message(view=_wrap(view))
 
     async def open_buy_machine(self, interaction: discord.Interaction):
         await interaction.response.send_message(
@@ -323,7 +472,12 @@ class WorkshopCog(commands.Cog):
             return await interaction.response.send_message(
                 workshop_action_failed(exc), ephemeral=True)
         view = CraftView(self, interaction.user.id)
-        await interaction.response.send_message(view=_wrap(view))
+        files = view.panel_files()
+        if files:
+            await interaction.response.send_message(
+                view=_wrap(view), files=files)
+        else:
+            await interaction.response.send_message(view=_wrap(view))
 
     # ------------------------------------------------------------------ 実行
     def _wallet(self):

@@ -463,17 +463,14 @@ class MarketChartTest(unittest.TestCase):
         self.assertTrue(data.startswith(b"\x89PNG"))
 
     def test_chart_uses_bundled_japanese_font(self):
+        # チャートは PIL 描画（core/economy_image）になり、描画基盤の
+        # 優先フォントが同梱の日本語フォントと一致することを確認する。
         data = _render_chart(self._history())
         self.assertIsNotNone(data)
-        import matplotlib
-        from matplotlib import font_manager
         from cogs.general import CHART_FONT_PATH
-        expected = font_manager.FontProperties(
-            fname=str(CHART_FONT_PATH)).get_name()
-        family = matplotlib.rcParams["font.family"]
-        if isinstance(family, list):
-            family = family[0]
-        self.assertEqual(family, expected)
+        from core import leaderboard_image
+        self.assertEqual(
+            leaderboard_image._BOARD_FONT_PATH, CHART_FONT_PATH)
 
     def test_market_embed_hides_pool_and_embeds_chart(self):
         with tempfile.TemporaryDirectory() as tmp:

@@ -14,6 +14,7 @@ from __future__ import annotations
 from core.support.emojis import SUCCESS
 
 import asyncio
+import io
 import logging
 from datetime import datetime
 
@@ -21,6 +22,7 @@ import discord
 from discord.ext import commands, tasks
 
 import config
+from core.economy_image import PanelRow, render_panel_png
 from core.general.items import items as items_core
 from core.game.game import prison as prison_core
 from core.support.messages import (
@@ -36,6 +38,8 @@ from cogs import general as wallet_module  # INSUFFICIENT は実行時に引く�
 logger = logging.getLogger(__name__)
 
 ITEMS_COLOR = 0xE67E22
+ITEMS_ACCENT = (230, 126, 34)
+ITEMS_FILENAME = "items_panel.png"
 SHOP_ID = "ITEM_SHOP"
 BOX_ID = "TREASURE_BOX"
 
@@ -71,9 +75,82 @@ def _shop_lines() -> tuple[list[str], list[str]]:
     return plain, consumables
 
 
-def _items_embed(store: items_core.ItemStore, user_id: int) -> discord.Embed:
+def _inventory_rows(store: items_core.ItemStore, user_id: int) -> list[PanelRow]:
+    """所持アイテムの画像行（_items_embed のフィールドと同じ並び・値）。"""
+    inventory = store.inventory(str(user_id))
+    return [
+        PanelRow(_item_name(item_id), f"×{count}")
+        for item_id, count in sorted(inventory.items())
+    ]
+
+
+def _effect_rows(store: items_core.ItemStore, user_id: int) -> list[PanelRow]:
+    """発動中の効果の画像行（_items_embed のフィールドと同じ表記）。"""
+    uid = str(user_id)
+    effects = store.active_effects(uid)
+    if not effects:
+        return []
+    now = datetime.now(config.JST)
+    effect_labels = {
+        definition.get("effect"): definition["name"]
+        for definition in items_core.ITEM_DEFS.values()
+        if definition.get("effect")
+    }
+    rows = []
+    for effect_id, expires in effects.items():
+        remaining = max(0.0, (expires - now).total_seconds())
+        rows.append(PanelRow(
+            effect_labels.get(effect_id, effect_id),
+            f"あと{prison_core.format_remaining(remaining)}"))
+    return rows
+
+
+def _shop_rows() -> tuple[list[PanelRow], list[PanelRow]]:
+    """ショップの画像行（_shop_lines と同じ並び・価格・説明）。"""
+    plain: list[PanelRow] = []
+    consumables: list[PanelRow] = []
+    for item_id, definition in items_core.ITEM_DEFS.items():
+        if not definition["purchasable"]:
+            continue
+        sub = f"売却 {definition['sell_price']:,} AGO"
+        if definition["kind"] == "consumable":
+            sub += f"／{definition['desc']}"
+            consumables.append(PanelRow(
+                definition["name"], f"{definition['price']:,} AGO", sub=sub))
+        else:
+            plain.append(PanelRow(
+                definition["name"], f"{definition['price']:,} AGO", sub=sub))
+    return plain, consumables
+
+
+def items_panel_png(store: items_core.ItemStore, user_id: int) -> bytes:
+    """アイテムパネル（所持・効果・ショップ）の白基調画像を描く。"""
+    plain, consumables = _shop_rows()
+    sections: list = [("所持アイテム", _inventory_rows(store, user_id))]
+    effect_rows = _effect_rows(store, user_id)
+    if effect_rows:
+        sections.append(("発動中の効果", effect_rows))
+    if plain:
+        sections.append(("ショップ（素材ほか）", plain, 2 if len(plain) > 10 else 1))
+    if consumables:
+        sections.append((
+            "ショップ（効果・消費）", consumables,
+            2 if len(consumables) > 10 else 1))
+    return render_panel_png(
+        title="アイテム", accent=ITEMS_ACCENT, sections=sections,
+        cache_namespace="items-panel")
+
+
+def _items_embed(store: items_core.ItemStore, user_id: int,
+                 *, image: bool = False) -> discord.Embed:
     uid = str(user_id)
     embed = discord.Embed(title="アイテム", color=ITEMS_COLOR)
+    if image:
+        # 数値表示は画像（items_panel_png）に寄せ、embed は画像参照と
+        # フッターだけを持つ（本文の二重表示を避ける）。
+        embed.set_image(url=f"attachment://{ITEMS_FILENAME}")
+        embed.set_footer(text="買えない素材は合成や宝箱で手に入ります。")
+        return embed
     inventory = store.inventory(uid)
     if inventory:
         lines = [
@@ -247,13 +324,33 @@ class ItemsView(discord.ui.View):
         super().__init__(timeout=180)
         self.cog = cog
         self.user_id = user_id
+        self._png: bytes | None = None
+        self._png_ready = False
 
     async def interaction_check(self, interaction) -> bool:
         # 公開パネル化（ephemeral第2波）: 操作は本人のみ。
         return interaction.user.id == self.user_id
 
+    def panel_png(self) -> bytes | None:
+        """パネル画像（初回だけ描き、失敗時はテキスト表示へ落とす）。"""
+        if not self._png_ready:
+            self._png_ready = True
+            try:
+                self._png = items_panel_png(self.cog.store, self.user_id)
+            except Exception:
+                logger.exception("items: パネル画像の生成に失敗しました")
+                self._png = None
+        return self._png
+
+    def panel_files(self) -> list[discord.File] | None:
+        png = self.panel_png()
+        if png is None:
+            return None
+        return [discord.File(io.BytesIO(png), filename=ITEMS_FILENAME)]
+
     def embed(self) -> discord.Embed:
-        return _items_embed(self.cog.store, self.user_id)
+        return _items_embed(
+            self.cog.store, self.user_id, image=self.panel_png() is not None)
 
     # 導線最適化ラウンド4: 再描画だけの「更新」ボタンは置かない（S9/R2-5
     # と同じ作法）。所持・効果の状態は自分の操作のたびに更新される。
@@ -305,7 +402,12 @@ class ItemsCog(commands.Cog):
     # ------------------------------------------------------------------ 入口
     async def show_items(self, interaction: discord.Interaction):
         view = ItemsView(self, interaction.user.id)
-        await interaction.response.send_message(view=_wrap(view))
+        files = view.panel_files()
+        if files:
+            await interaction.response.send_message(
+                view=_wrap(view), files=files)
+        else:
+            await interaction.response.send_message(view=_wrap(view))
 
     async def open_buy(self, interaction: discord.Interaction):
         await _send_item_pick(interaction, self, "buy")

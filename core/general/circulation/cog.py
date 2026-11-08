@@ -23,6 +23,7 @@ general:steal）だけ。
 from __future__ import annotations
 
 import asyncio
+import io
 import logging
 import random
 from datetime import datetime
@@ -32,6 +33,7 @@ import discord
 from discord.ext import commands, tasks
 
 import config
+from core.economy_image import PanelHero, PanelRow, render_panel_png
 from core.game.clan import clan as clan_core
 from core.general.user_names import cached_display_name
 from core.game.gacha import gacha as gacha_core
@@ -48,14 +50,32 @@ from core.support.messages import (
     PURCHASE_FAILED_RETRY,
     circulation_action_failed,
 )
-from core.support.panel_v2 import as_panel_v2, edit_panel_v2, edit_panel_view as _edit_panel, wrap_panel_view as _wrap
+from core.support.panel_v2 import as_panel_v2, edit_panel_v2, wrap_panel_view as _wrap
 from cogs import general as wallet_module  # INSUFFICIENT は実行時に引く（テストの cog 再読込で同一性が崩れないため）
 
 logger = logging.getLogger(__name__)
 
 CIRCULATION_COLOR = 0xE67E22
+LOTTERY_ACCENT = (230, 126, 34)
+LOTTERY_FILENAME = "lottery_panel.png"
 MINING_ID = "MINING"
 LOTTERY_ID = "LOTTERY"
+
+
+async def _edit_panel(interaction: discord.Interaction, view, *, button=None) -> None:
+    """パネルをその場で再描画する（market と同型: 画像つきパネルは
+    panel_files() のファイルを編集時にも再供給する）。"""
+    container = getattr(button, "view", None)
+    if container is None or not hasattr(container, "_sync"):
+        container = getattr(view, "_v2", None) or view
+    if hasattr(container, "_sync"):
+        container._sync()
+        files = view.panel_files() if hasattr(view, "panel_files") else None
+        await edit_panel_v2(interaction, container, files=files)
+    elif interaction.response.is_done():
+        await interaction.edit_original_response(embed=view.embed(), view=view)
+    else:
+        await interaction.response.edit_message(embed=view.embed(), view=view)
 
 
 def _item_name(item_id: str) -> str:
@@ -130,11 +150,63 @@ class MiningView(discord.ui.View):
 # 宝くじ
 # ---------------------------------------------------------------------------
 
-def _lottery_embed(cog: "CirculationCog", user_id: int) -> discord.Embed:
+def lottery_panel_content(cog: "CirculationCog", user_id: int):
+    """宝くじ画像の (hero, sections) を組み立てる。
+
+    hero は _lottery_embed の賞金プール／締切フィールドと同じ値、
+    前回結果は氏名表示ルール（ユーザー名テキスト）で同じ並びにする。
+    """
+    store = cog.lottery_store
+    current = store.current_round()
+    closes_at = datetime.fromisoformat(current["closes_at"])
+    hero = PanelHero(
+        f"第{current['id']}回 賞金プール",
+        f"{int(current['pool']):,} AGO",
+        sub=f"締切 {closes_at.strftime('%m/%d %H:%M')}")
+    sections: list = [(None, [PanelRow(
+        "あなたのチケット",
+        f"{store.tickets_of(str(user_id))} / "
+        f"{lottery_core.MAX_TICKETS_PER_USER} 枚")])]
+    last = store.last_result()
+    if last is not None:
+        rows = []
+        if last["winners"]:
+            for w in last["winners"]:
+                rows.append(PanelRow(
+                    cached_display_name(cog.bot, w["user_id"]),
+                    f"{w['prize']:,} AGO",
+                    sub=f"{w['tickets']} 枚"))
+        else:
+            rows.append(PanelRow("購入がなかったため、プールは次回へ繰り越しました", ""))
+        if int(last.get("boost") or 0) > 0:
+            rows.append(PanelRow("国庫からの放出で賞金が上乗せされました", ""))
+        sections.append((f"前回（第{last['round_id']}回）の結果", rows))
+    return hero, sections
+
+
+def lottery_panel_png(cog: "CirculationCog", user_id: int) -> bytes:
+    """宝くじパネル（プール・締切・前回結果）の白基調画像を描く。"""
+    hero, sections = lottery_panel_content(cog, user_id)
+    return render_panel_png(
+        title="宝くじ", accent=LOTTERY_ACCENT, hero=hero, sections=sections,
+        cache_namespace="lottery-panel")
+
+
+def _lottery_embed(cog: "CirculationCog", user_id: int,
+                   *, image: bool = False) -> discord.Embed:
     store = cog.lottery_store
     current = store.current_round()
     closes_at = datetime.fromisoformat(current["closes_at"])
     embed = discord.Embed(title="宝くじ", color=CIRCULATION_COLOR)
+    if image:
+        # 数値表示は画像（lottery_panel_png）に寄せ、embed は画像参照と
+        # フッターだけを持つ（本文の二重表示を避ける）。
+        embed.set_image(url=f"attachment://{LOTTERY_FILENAME}")
+        embed.set_footer(
+            text=f"チケットは1枚 {lottery_core.TICKET_PRICE} AGO、1人"
+                 f"{lottery_core.MAX_TICKETS_PER_USER}枚まで。抽選は毎日"
+                 f"{lottery_core.DRAW_HOUR}:00 です。")
+        return embed
     embed.add_field(
         name=f"第{current['id']}回 賞金プール",
         value=f"**{int(current['pool']):,} AGO**", inline=True)
@@ -205,13 +277,32 @@ class LotteryView(discord.ui.View):
         super().__init__(timeout=180)
         self.cog = cog
         self.user_id = user_id
+        self._png: bytes | None = None
+        self._png_ready = False
 
     async def interaction_check(self, interaction) -> bool:
         # 公開パネル化（ephemeral第2波）: 操作は本人のみ。
         return interaction.user.id == self.user_id
 
+    def panel_png(self) -> bytes | None:
+        if not self._png_ready:
+            self._png_ready = True
+            try:
+                self._png = lottery_panel_png(self.cog, self.user_id)
+            except Exception:
+                logger.exception("lottery: パネル画像の生成に失敗しました")
+                self._png = None
+        return self._png
+
+    def panel_files(self) -> list[discord.File] | None:
+        png = self.panel_png()
+        if png is None:
+            return None
+        return [discord.File(io.BytesIO(png), filename=LOTTERY_FILENAME)]
+
     def embed(self) -> discord.Embed:
-        return _lottery_embed(self.cog, self.user_id)
+        return _lottery_embed(
+            self.cog, self.user_id, image=self.panel_png() is not None)
 
     @discord.ui.button(label="更新", style=discord.ButtonStyle.secondary)
     async def refresh(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -413,7 +504,11 @@ class CirculationCog(commands.Cog):
         await interaction.response.defer()
         await self.settle_lottery()
         view = LotteryView(self, interaction.user.id)
-        await interaction.followup.send(view=_wrap(view))
+        files = view.panel_files()
+        if files:
+            await interaction.followup.send(view=_wrap(view), files=files)
+        else:
+            await interaction.followup.send(view=_wrap(view))
 
     async def open_lottery_buy(self, interaction: discord.Interaction):
         # 先にACKする（show_lottery と同じ理由）。

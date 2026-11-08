@@ -18,6 +18,7 @@
 from __future__ import annotations
 
 import asyncio
+import io
 import logging
 from datetime import datetime
 
@@ -25,6 +26,7 @@ import discord
 from discord.ext import commands, tasks
 
 import config
+from core.economy_image import PanelRow, render_panel_png
 from core.support import guild_settings
 from core.game.game import prison as prison_core
 from core.general.role_shop import role_shop as shop_core
@@ -37,11 +39,46 @@ logger = logging.getLogger(__name__)
 SHOP_COLOR = 0x9B59B6
 
 
-def shop_embed(snapshot: dict) -> discord.Embed:
+SHOP_ACCENT = (155, 89, 182)
+SHOP_FILENAME = "role_shop.png"
+
+
+def role_shop_rows(snapshot: dict) -> list[PanelRow]:
+    """カタログ画像の行（shop_embed のフィールドと同じ値・並び）。"""
+    grants = snapshot["grants"]
+    rows = []
+    for product in snapshot["products"]:
+        sub = ""
+        until = grants.get(product["role_id"])
+        if until is not None:
+            sub = f"所持中（{until.strftime('%m/%d %H:%M')} まで）"
+        rows.append(PanelRow(
+            product["name"],
+            f"{product['price']:,} AGO／{product['days']}日",
+            sub=sub))
+    return rows
+
+
+def role_shop_panel_png(snapshot: dict) -> bytes | None:
+    """ロールショップの商品カタログ画像（商品が無いときは None）。"""
+    if not snapshot["products"]:
+        return None
+    return render_panel_png(
+        title="ロールショップ", accent=SHOP_ACCENT,
+        sections=[(None, role_shop_rows(snapshot))],
+        cache_namespace="role-shop")
+
+
+def shop_embed(snapshot: dict, *, image: bool = False) -> discord.Embed:
     embed = discord.Embed(title="ロールショップ", color=SHOP_COLOR)
     items = snapshot["products"]
     if not items:
         embed.description = "まだ商品が登録されていません。"
+        return embed
+    if image:
+        # 商品表示は画像（role_shop_panel_png）に寄せ、embed は画像参照
+        # だけを持つ（本文の二重表示を避ける）。
+        embed.set_image(url=f"attachment://{SHOP_FILENAME}")
         return embed
     grants = snapshot["grants"]
     for product in items:
@@ -65,13 +102,31 @@ class RoleShopView(discord.ui.View):
         self.snapshot = snapshot
         self.message: discord.Message | None = None
         self._v2 = None
+        self._png: bytes | None = None
+        self._png_ready = False
         self.refresh()
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         return interaction.user.id == self.user_id
 
+    def panel_png(self) -> bytes | None:
+        if not self._png_ready:
+            self._png_ready = True
+            try:
+                self._png = role_shop_panel_png(self.snapshot)
+            except Exception:
+                logger.exception("role_shop: カタログ画像の生成に失敗しました")
+                self._png = None
+        return self._png
+
+    def panel_files(self) -> list[discord.File] | None:
+        png = self.panel_png()
+        if png is None:
+            return None
+        return [discord.File(io.BytesIO(png), filename=SHOP_FILENAME)]
+
     def embed(self) -> discord.Embed:
-        return shop_embed(self.snapshot)
+        return shop_embed(self.snapshot, image=self.panel_png() is not None)
 
     def refresh(self) -> None:
         self.clear_items()
@@ -107,14 +162,18 @@ class RoleShopView(discord.ui.View):
 
     async def _reload(self, interaction: discord.Interaction) -> None:
         self.snapshot = await self.cog.snapshot(self.guild, self.user_id)
+        self._png_ready = False  # スナップショットが変わったので画像を作り直す
         self.refresh()
         container = getattr(self, "_v2", None)
         try:
             if container is not None:
                 container._sync()
-                await edit_panel_v2(interaction, container)
+                await edit_panel_v2(
+                    interaction, container, files=self.panel_files())
             elif self.message is not None:
-                await self.message.edit(embed=self.embed(), view=self)
+                await self.message.edit(
+                    embed=self.embed(), view=self,
+                    attachments=self.panel_files() or [])
         except Exception:
             logger.exception("role_shop: パネルの更新に失敗しました")
 
@@ -292,7 +351,12 @@ class RoleShopCog(commands.Cog):
                 "ロールショップはサーバー内でのみ使えます。", ephemeral=True)
         snapshot = await self.snapshot(guild, interaction.user.id)
         view = RoleShopView(self, guild, interaction.user.id, snapshot)
-        await interaction.response.send_message(view=_wrap(view))
+        files = view.panel_files()
+        if files:
+            await interaction.response.send_message(
+                view=_wrap(view), files=files)
+        else:
+            await interaction.response.send_message(view=_wrap(view))
         try:
             view.message = await interaction.original_response()
         except Exception:
