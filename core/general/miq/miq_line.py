@@ -657,6 +657,128 @@ def render_miq_pair_png(entries, *, font_path: str | None = None) -> bytes:
     return _miq_save_png(img)
 
 
+def render_miq_versus_png(entries, *, font_path: str | None = None) -> bytes:
+    """VS対決風: 赤/青に割れた背景+稲妻+「VS」を挟み、2人が対峙する。
+
+    entries はペアハート風と同じ dict 形式 (name/username/text/avatar_bytes 等)。
+    直近2件を使い、古い方 (返信先) が左、新しい方 (対象) が右。
+    1件だけの場合は右側を「???」のシルエットにして対戦相手不在を表す。
+    テキストが空のエントリは吹き出しを省略する。
+    """
+    from PIL import Image, ImageDraw, ImageFilter, ImageOps
+
+    W, H = MIQ_NEW_W, MIQ_NEW_H
+    items = list(entries or [])[-2:]
+
+    # 背景: 左が赤、右が青
+    img = Image.new("RGB", (W, H), (24, 78, 207))
+    d = ImageDraw.Draw(img)
+    d.rectangle([0, 0, W // 2, H], fill=(206, 34, 44))
+
+    # 中心から放射状のスピード線 (白・低不透明度、本文から決定的に)
+    seed_text = "".join(str(_miq_line_field(e, "text") or "") for e in items)
+    lines_layer = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    ld = ImageDraw.Draw(lines_layer)
+    lrng = _miq_rng(seed_text, "versus-lines")
+    cx, cy = W // 2, H // 2
+    for deg in range(0, 360, 9):
+        jitter = lrng.uniform(-3.5, 3.5)
+        rad = math.radians(deg + jitter)
+        r0 = lrng.uniform(120, 210)
+        x0, y0 = cx + r0 * math.cos(rad), cy + r0 * math.sin(rad)
+        x1, y1 = cx + 900 * math.cos(rad), cy + 900 * math.sin(rad)
+        ld.line([x0, y0, x1, y1], fill=(255, 255, 255, lrng.choice((22, 30, 40))), width=lrng.choice((2, 3)))
+    img = Image.alpha_composite(img.convert("RGBA"), lines_layer).convert("RGB")
+    d = ImageDraw.Draw(img)
+
+    # 中央の稲妻 (黄色いジグザグ帯+グロー)
+    bolt_pts = []
+    step = 84
+    for i, yy in enumerate(range(-20, H + step, step)):
+        bolt_pts.append((cx + (-26 if i % 2 == 0 else 30), yy))
+    bolt = [(x - 21, y) for x, y in bolt_pts] + [(x + 21, y) for x, y in reversed(bolt_pts)]
+    glow_layer = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    ImageDraw.Draw(glow_layer).polygon(bolt, fill=(255, 214, 0, 190))
+    glow = glow_layer.filter(ImageFilter.GaussianBlur(16))
+    img = Image.alpha_composite(img.convert("RGBA"), glow).convert("RGB")
+    d = ImageDraw.Draw(img)
+    d.polygon(bolt, fill=(255, 208, 0), outline=(184, 134, 0))
+
+    ink = (30, 30, 34)
+    sub = (232, 236, 248)
+
+    def draw_avatar_square(x: int, y: int, size: int, entry):
+        """正方形アバター (黒い太枠)。entry が None の時は対戦相手不在のシルエット。"""
+        if entry is None:
+            d.rectangle([x, y, x + size, y + size], fill=(34, 38, 56))
+            d.ellipse([x + size * 0.36, y + size * 0.18, x + size * 0.64, y + size * 0.46], fill=(86, 93, 120))
+            d.ellipse([x + size * 0.2, y + size * 0.58, x + size * 0.8, y + size * 1.02], fill=(86, 93, 120))
+        else:
+            av_img = _miq_line_avatar_image(entry)
+            av = ImageOps.fit(av_img.convert("RGB"), (size, size), Image.LANCZOS)
+            img.paste(av, (x, y))
+        d.rectangle([x, y, x + size, y + size], outline=(10, 10, 12), width=7)
+
+    def draw_name(x: int, y: int, entry, *, right_align: bool):
+        """名前 (白太字) と @ID。entry が None の時は「???」だけ描く。"""
+        anchor = "ra" if right_align else "la"
+        if entry is None:
+            _miq_draw_name_units(img, d, x, y, "???", 36, font_path, (255, 255, 255), anchor=anchor, stroke_width=1)
+            return
+        shown = _miq_display_text(_miq_line_field(entry, "name") or "") or "unknown"
+        shown = _miq_truncate_units(d, shown, font_path, 36, 330)
+        _miq_draw_name_units(img, d, x, y, shown, 36, font_path, (255, 255, 255), anchor=anchor, stroke_width=1)
+        user = _miq_display_text(_miq_line_field(entry, "username") or "")
+        if user:
+            _miq_draw_name_units(img, d, x, y + 48, f"@{user}", 22, font_path, sub, anchor=anchor)
+
+    def draw_bubble(x0: int, x1: int, top: int, max_bottom: int, tail_x: int, entry):
+        """白い角丸吹き出し (アバター方向への尾つき)。テキストが無ければ描かない。
+
+        高さは本文量に合わせ、max_bottom を上限にする。
+        """
+        if entry is None:
+            return
+        text = str(_miq_line_field(entry, "text") or "")
+        if not text.strip():
+            return
+        max_w = x1 - x0 - 56
+        max_h = max_bottom - top - 44
+        lines, lh, size = _miq_fit_units(
+            d, text, font_path, max_w, max_h, max_size=32, min_size=15,
+        )
+        bh = min(max_bottom - top, len(lines) * lh + 44)
+        # 尾 (しっぽ): 吹き出し上辺からアバター方向へ
+        d.polygon([(tail_x - 17, top + 4), (tail_x + 17, top + 4), (tail_x, top - 26)], fill=(255, 255, 255))
+        d.rounded_rectangle([x0, top, x1, top + bh], radius=26, fill=(255, 255, 255))
+        ty = top + (bh - len(lines) * lh) // 2
+        font = _miq_load_font(font_path, size)
+        for line in lines:
+            if line:
+                d.text((x0 + 28, ty), "".join(u for u, _w in line), font=font, fill=ink)
+            ty += lh
+
+    left = items[0] if items else None
+    right = items[1] if len(items) >= 2 else None
+
+    # 左の人: アバター左端、名前はその右
+    if left is not None:
+        draw_avatar_square(48, 48, 150, left)
+        draw_name(224, 66, left, right_align=False)
+    # 右の人: ミラー配置 (アバター右端、名前はその左)
+    draw_avatar_square(1002, 48, 150, right)
+    draw_name(976, 66, right, right_align=True)
+
+    draw_bubble(30, 545, 292, 618, 123, left)
+    draw_bubble(660, 1170, 392, 636, 1077, right)
+
+    # 「VS」: 黄色文字+黒縁取りで、吹き出しより手前に大きく描く
+    vs_font = _miq_load_font(font_path, 148)
+    d.text((cx, cy - 8), "VS", font=vs_font, fill=(255, 213, 0), anchor="mm",
+           stroke_width=11, stroke_fill=(12, 12, 14))
+    return _miq_save_png(img)
+
+
 async def miq_collect_line_chain(message, *, max_messages: int = MIQ_LINE_MAX_MESSAGES, channel_resolver=None) -> list:
     """対象メッセージから reference を辿り、時系列順 (古い→新しい) のチェーンを返す。
 
@@ -776,6 +898,21 @@ class MiqLineMixin:
             self._miq_pillow_missing()
         except Exception:
             logger.exception("MIQ: ペアハート風引用画像の生成に失敗しました")
+        return None
+
+
+    async def _miq_render_versus_file(self, entries: list, prefs: dict) -> discord.File | None:
+        """VS対決風エントリ (dict のリスト) から discord.File を作る。"""
+        opts = miq_render_options(prefs, self.bot.user)
+        try:
+            async with self._levelup_sem:
+                data = await asyncio.to_thread(render_miq_versus_png, entries, font_path=opts.get("font_path"))
+                data = await asyncio.to_thread(apply_ago_overlay, data)
+            return discord.File(io.BytesIO(data), filename="quote-versus.png")
+        except ImportError:
+            self._miq_pillow_missing()
+        except Exception:
+            logger.exception("MIQ: VS対決風引用画像の生成に失敗しました")
         return None
 
 
@@ -921,6 +1058,45 @@ class MiqLineMixin:
         return await self._miq_render_pair_file(entries, prefs)
 
 
+    async def _miq_build_versus_file(
+        self, chain_messages: list, prefs: dict, size_limit: int | None = None,
+    ) -> discord.File | None:
+        """返信チェーンの直近2件からVS対決風の引用画像を作る。
+
+        古い方 (返信先) が左、新しい方 (対象) が右。チェーンが1件だけなら
+        右側が「???」シルエットの単独レイアウトになる (ペアハート風と同じ
+        エントリ構築を共有する)。
+        """
+        entries: list = []
+        avatar_cache: dict = {}
+        emoji_cache: dict = {}
+        limit = min(int(size_limit or MEME_MAX_IMAGE_BYTES), MEME_MAX_IMAGE_BYTES)
+        for msg in chain_messages:
+            segments = await self._miq_line_segments_for(msg, emoji_cache, limit)
+            text = _miq_clean_text("".join(
+                seg.get("text", "") if seg.get("type") == "text" else f":{seg.get('name') or 'emoji'}:"
+                for seg in segments
+            ))
+            author = getattr(msg, "author", None)
+            author_key = getattr(author, "id", None)
+            if author_key not in avatar_cache:
+                avatar_cache[author_key] = (
+                    await self._miq_fetch_avatar_bytes(author, size=256) if author is not None else None
+                )
+            entries.append({
+                "name": getattr(author, "display_name", None) or getattr(author, "name", "") or "",
+                "username": getattr(author, "name", "") or "",
+                "text": text,
+                "created_at": getattr(msg, "created_at", None),
+                "avatar_bytes": avatar_cache[author_key],
+                "author_key": author_key,
+            })
+        entries = entries[-2:]
+        if not entries:
+            return None
+        return await self._miq_render_versus_file(entries, prefs)
+
+
     async def _miq_build_file(
         self, author, text: str, prefs: dict, size_limit: int | None,
         *, created_at=None,
@@ -970,6 +1146,19 @@ class MiqLineMixin:
                     )
                     data = await asyncio.to_thread(apply_ago_overlay, data)
                     return discord.File(io.BytesIO(data), filename="quote-pair.png")
+                if fmt == "versus":
+                    # チェーンが無い単体呼び出し (プレビュー等) は1件で描き、
+                    # 右側が「???」シルエットの単独レイアウトになる
+                    entries = [{
+                        "name": name, "username": username, "text": text,
+                        "avatar_bytes": avatar_bytes,
+                        "author_key": getattr(author, "id", None),
+                    }]
+                    data = await asyncio.to_thread(
+                        render_miq_versus_png, entries, font_path=opts.get("font_path"),
+                    )
+                    data = await asyncio.to_thread(apply_ago_overlay, data)
+                    return discord.File(io.BytesIO(data), filename="quote-versus.png")
                 renderer = _MIQ_FORMAT_RENDERERS.get(fmt)
                 if renderer is not None:
                     kwargs = {"font_path": opts.get("font_path")}
@@ -1045,4 +1234,23 @@ class MiqLineMixin:
             if chained_id is not None and chained_id != requester_id and miq_is_refusing(chained_id):
                 return None, True
         file = await self._miq_build_pair_file(chain, prefs, size_limit)
+        return file, False
+
+
+    async def _miq_versus_file_for(
+        self, target, requester_id: int, prefs: dict, size_limit: int | None,
+    ) -> tuple[discord.File | None, bool]:
+        """VS対決風: ペアハート風と同じくチェーンを収集し、全作者の引用拒否を確認してから生成する。
+
+        戻り値 (file, refused)。refused=True の時は拒否により中止したことを表す。
+        """
+        chain = await miq_collect_line_chain(
+            target, channel_resolver=self._miq_line_channel_resolver,
+        )
+        for chained in chain:
+            chained_author = getattr(chained, "author", None)
+            chained_id = getattr(chained_author, "id", None)
+            if chained_id is not None and chained_id != requester_id and miq_is_refusing(chained_id):
+                return None, True
+        file = await self._miq_build_versus_file(chain, prefs, size_limit)
         return file, False
