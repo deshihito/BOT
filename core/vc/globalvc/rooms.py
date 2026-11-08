@@ -156,7 +156,7 @@ def rotate_room_themes(now=None) -> list[str]:
     for room in ROOMS.values():
         if not room.permanent or not room.theme_auto:
             continue
-        theme = theme_for(room.name, day)
+        theme = theme_for(room.name, day, room.language or "ja")
         if theme and theme != room.theme:
             room.theme = theme
             changed.append(room.name)
