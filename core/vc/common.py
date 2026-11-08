@@ -112,7 +112,8 @@ VOICE_ACTIONS_BY_GENRE = {
     "effects": [("開始", "changer_start"), ("停止", "changer_stop"), ("状態/設定", "changer_status")],
     "community": [("ランダム通話: 開始/参加", "match_start"), ("ランダム通話: 終了/退出", "match_stop")],
     "gvc_rooms": [("グローバルVC: 開始/参加", "global_start"), ("グローバルVC: 終了/退出", "global_stop"),
-                  ("ルーム一覧（参加ボタン付き）", "gvc_room_list"), ("ルーム作成", "gvc_room_create"),
+                  ("ルーム一覧（参加ボタン付き）", "gvc_room_list"), ("メンバー確認", "gvc_members"),
+                  ("ルーム作成", "gvc_room_create"),
                   ("常設ルームのテーマ変更", "gvc_room_theme"),
                   ("ルーム情報", "gvc_room_info"), ("ルーム削除", "gvc_room_delete"),
                   ("グロチャ: 接続（このチャンネル）", "gvc_chat_connect"),
@@ -148,7 +149,7 @@ GVC_ROOM_FORMS = {
     ]),
 }
 # 入力なしでパネルから直接実行できる操作
-GVC_ROOM_ACTIONS = {"gvc_room_list", "gvc_chat_disconnect", *GVC_ROOM_FORMS}
+GVC_ROOM_ACTIONS = {"gvc_room_list", "gvc_members", "gvc_chat_disconnect", *GVC_ROOM_FORMS}
 
 # 起動時のロード一覧に漏れていても、初回利用時に読み込み直せる拡張（機能キー -> モジュール名）
 LAZY_EXTENSIONS = {
