@@ -713,9 +713,9 @@ class SendSanitizeTest(unittest.IsolatedAsyncioTestCase):
 
 
 class ModelSelectionTest(unittest.TestCase):
-    def test_default_model_is_glm_flash(self):
-        self.assertEqual(luna.DEFAULT_MODEL, "glm-5.3-flash")
-        self.assertEqual(luna.REASONING_EFFORT, "low")
+    def test_default_model_is_deepseek_flash(self):
+        self.assertEqual(luna.DEFAULT_MODEL, "deepseek-v4.1-flash-1017")
+        self.assertEqual(luna.REASONING_EFFORT, "none")
 
 
 class ChatTextTest(unittest.IsolatedAsyncioTestCase):
@@ -723,7 +723,7 @@ class ChatTextTest(unittest.IsolatedAsyncioTestCase):
         async def fake_stream(model, messages, *, max_tokens, reasoning_effort=None):
             self.assertEqual(model, luna.model_name())
             self.assertEqual(max_tokens, 800)
-            self.assertEqual(reasoning_effort, "low")
+            self.assertEqual(reasoning_effort, "none")
             for delta in ("まぁ", "様子見", "かな"):
                 yield delta
 
