@@ -2,7 +2,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { getCurrentSession } from "@/lib/auth";
 import { guildIconUrl, userAvatarUrl } from "@/lib/dashboard-core";
-import { getDashboardContext, loadGuildRegistry } from "@/lib/dashboard";
+import { getDashboardContext, loadGuildRegistry, type GuildRegistryEntry } from "@/lib/dashboard";
 
 export const metadata = { title: "ダッシュボード | AGOBOT", robots: { index: false, follow: false } };
 export const dynamic = "force-dynamic";
@@ -60,6 +60,9 @@ export default async function DashboardPage() {
   } catch {
     registry = null;
   }
+  // 登録簿は導入済みかどうかの表示にだけ使う。読み取りに失敗しても
+  // 管理できるサーバーの一覧自体は落とさない（全件「未導入」として出す）。
+  const registryMap: Map<string, GuildRegistryEntry> = registry ?? new Map();
 
   return (
     <section className="dashboard-page">
@@ -69,13 +72,19 @@ export default async function DashboardPage() {
         <p className="muted">あなたが管理できるサーバーのうち、AGOBOTが導入されているサーバーの設定を変更できます。保存した設定は1分ほどでBotに反映されます。</p>
       </div>
       {registry === null ? (
-        <p className="login-error" role="alert">サーバーの導入状況を取得できませんでした。時間をおいて開き直してください。</p>
-      ) : context.guilds.length === 0 ? (
-        <p className="muted">管理できるサーバーがありません。</p>
+        <p className="login-error" role="alert">サーバーの導入状況を取得できませんでした。導入状態は未確認として表示しています。時間をおいて開き直してください。</p>
+      ) : null}
+      {context.guilds.length === 0 ? (
+        <p className="muted">
+          管理できるサーバーがありません。
+          {context.totalGuilds > 0
+            ? `Discordで参加中のサーバー ${context.totalGuilds} 件のうち、管理権限（管理者／サーバーの管理）を確認できるサーバーがありませんでした。権限のあるアカウントでログインしているか確認してください。`
+            : "Discordの応答では参加中のサーバーが0件でした。別のアカウントでログインしていないか確認してください。"}
+        </p>
       ) : (
         <nav className="dashboard-list guild-grid" aria-label="サーバー">
           {context.guilds.map((guild) => {
-            const entry = registry.get(guild.id);
+            const entry = registryMap.get(guild.id);
             const installed = entry !== undefined;
             const icon = guildIconUrl(guild.id, guild.icon ?? entry?.icon);
             const card = (

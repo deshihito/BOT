@@ -163,6 +163,41 @@ export function manageableGuilds(guilds: OAuthGuild[]): OAuthGuild[] {
   return guilds.filter((guild) => guild.owner || hasManageGuild(guild.permissions));
 }
 
+/**
+ * Discord の partial guild 1件を OAuthGuild へ寄せる。想定形式でなければ null。
+ * permissions は API v8+ では文字列だが、旧形式（数値の permissions /
+ * 文字列の permissions_new）でも管理権限を取りこぼさないよう両方受理する。
+ * ここで落とすと「参加しているのに管理できるサーバーが無い」表示になるため、
+ * 呼び出し側は落とした件数をログに残すこと。
+ */
+export function normalizeOAuthGuild(item: unknown): OAuthGuild | null {
+  if (typeof item !== "object" || item === null) return null;
+  const guild = item as Record<string, unknown>;
+  let id: string | null = null;
+  if (typeof guild.id === "string" && guild.id.length > 0) {
+    id = guild.id;
+  } else if (typeof guild.id === "number" && Number.isSafeInteger(guild.id)) {
+    id = String(guild.id);
+  }
+  if (id === null || typeof guild.name !== "string") return null;
+  let permissions: string | null = null;
+  if (typeof guild.permissions_new === "string") {
+    permissions = guild.permissions_new;
+  } else if (typeof guild.permissions === "string") {
+    permissions = guild.permissions;
+  } else if (typeof guild.permissions === "number" && Number.isFinite(guild.permissions)) {
+    permissions = String(Math.trunc(guild.permissions));
+  }
+  if (permissions === null) return null;
+  return {
+    id,
+    name: guild.name,
+    icon: typeof guild.icon === "string" ? guild.icon : null,
+    owner: guild.owner === true,
+    permissions,
+  };
+}
+
 // ---------------------------------------------------------------- Discord CDN
 
 /** ユーザーアバターのURL。ハッシュが無ければ ID から決まるデフォルトアバター。 */

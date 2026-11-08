@@ -6,6 +6,7 @@ import { isBotApiConfigured, kvDelete, kvGet, kvList, kvSet, tableSelect, tableU
 import {
   manageableGuilds,
   mergeGuildSettings,
+  normalizeOAuthGuild,
   type OAuthGuild,
 } from "./dashboard-core";
 
@@ -40,7 +41,10 @@ export async function createWebSession(
   try {
     await kvSet(WEB_SESSIONS_NAMESPACE, sid, record);
     return sid;
-  } catch {
+  } catch (error) {
+    // 保存に失敗すると Cookie だけのログインになり、ダッシュボードで再ログインを
+    // 求められる。原因を追えるよう、失敗は必ずサーバーログに残す（トークンは出さない）。
+    console.error("[Dashboard] web_sessions へのセッション保存に失敗しました", error);
     return null;
   }
 }
@@ -49,7 +53,8 @@ export async function loadWebSession(sid: string): Promise<WebSessionRecord | nu
   let raw: unknown;
   try {
     raw = await kvGet(WEB_SESSIONS_NAMESPACE, sid);
-  } catch {
+  } catch (error) {
+    console.error("[Dashboard] web_sessions の読み取りに失敗しました", error);
     return null;
   }
   if (typeof raw !== "object" || raw === null) return null;
@@ -76,48 +81,79 @@ export async function deleteWebSession(sid: string): Promise<void> {
   }
 }
 
-const guildCache = new Map<string, { at: number; guilds: OAuthGuild[] }>();
+const guildCache = new Map<string, { at: number; guilds: OAuthGuild[]; totalGuilds: number }>();
 
 export async function fetchDiscordGuilds(accessToken: string): Promise<OAuthGuild[] | null> {
+  let res: Response;
   try {
-    const res = await fetch("https://discord.com/api/users/@me/guilds", {
+    // バージョン無しURLは返却形式（permissions の型など）が保証されないため v10 に固定する
+    res = await fetch("https://discord.com/api/v10/users/@me/guilds", {
       headers: { Authorization: `Bearer ${accessToken}` },
       cache: "no-store",
       signal: AbortSignal.timeout(10_000),
     });
-    if (!res.ok) return null;
-    const data = (await res.json()) as unknown;
-    if (!Array.isArray(data)) return null;
-    const guilds: OAuthGuild[] = [];
-    for (const item of data) {
-      if (typeof item !== "object" || item === null) continue;
-      const guild = item as Record<string, unknown>;
-      if (typeof guild.id !== "string" || typeof guild.name !== "string" || typeof guild.permissions !== "string") continue;
-      guilds.push({
-        id: guild.id,
-        name: guild.name,
-        icon: typeof guild.icon === "string" ? guild.icon : null,
-        owner: guild.owner === true,
-        permissions: guild.permissions,
-      });
-    }
-    return guilds;
-  } catch {
+  } catch (error) {
+    console.error("[Dashboard] Discord ギルド一覧の取得に失敗しました", error);
     return null;
   }
+  if (!res.ok) {
+    let detail = "";
+    try {
+      const body = (await res.json()) as { code?: unknown; message?: unknown };
+      if (typeof body?.message === "string") detail = ` ${body.message}`;
+      if (typeof body?.code === "number" || typeof body?.code === "string") detail += ` (code: ${body.code})`;
+    } catch {
+      // エラー本文が JSON でなければステータスだけを残す
+    }
+    console.error(`[Dashboard] Discord ギルド一覧がエラー応答でした status=${res.status}${detail}`);
+    return null;
+  }
+  let data: unknown;
+  try {
+    data = await res.json();
+  } catch (error) {
+    console.error("[Dashboard] Discord ギルド一覧の応答を解釈できませんでした", error);
+    return null;
+  }
+  if (!Array.isArray(data)) {
+    console.error("[Dashboard] Discord ギルド一覧の応答が配列ではありませんでした");
+    return null;
+  }
+  const guilds: OAuthGuild[] = [];
+  let dropped = 0;
+  for (const item of data) {
+    const guild = normalizeOAuthGuild(item);
+    if (guild) guilds.push(guild);
+    else dropped += 1;
+  }
+  if (dropped > 0) {
+    // 形式の想定違いで全件落ちると「管理できるサーバーがありません」になる。
+    // 件数だけは必ず残し、黙って落とさない。
+    console.error(`[Dashboard] Discord ギルド一覧の ${data.length} 件中 ${dropped} 件を形式不一致で除外しました`);
+  }
+  return guilds;
 }
 
 export type DashboardContext = {
   user: { id: string; username: string; avatar: string | null };
   /** ログイン中ユーザーが管理できるギルド（Discordから再取得した最新状態） */
   guilds: OAuthGuild[];
+  /** 権限で絞り込む前の参加ギルド総数（空表示の切り分け用） */
+  totalGuilds: number;
 };
 
 /** Cookieのセッションから、権限再検証済みのダッシュボード文脈を作る。失敗したら null。 */
 export async function getDashboardContext(session: SessionInfo): Promise<DashboardContext | null> {
   if (!session.sid) return null;
   const record = await loadWebSession(session.sid);
-  if (!record || record.user_id !== session.id) return null;
+  if (!record) {
+    console.error("[Dashboard] セッションレコードが無いか期限切れのため、ギルド一覧を出せません");
+    return null;
+  }
+  if (record.user_id !== session.id) {
+    console.error("[Dashboard] セッションレコードのユーザーと Cookie のユーザーが一致しません");
+    return null;
+  }
 
   const user = {
     id: session.id,
@@ -126,13 +162,16 @@ export async function getDashboardContext(session: SessionInfo): Promise<Dashboa
   };
   const cached = guildCache.get(session.sid);
   if (cached && Date.now() - cached.at < GUILD_CACHE_MS) {
-    return { user, guilds: cached.guilds };
+    return { user, guilds: cached.guilds, totalGuilds: cached.totalGuilds };
   }
   const all = await fetchDiscordGuilds(record.access_token);
   if (!all) return null;
   const guilds = manageableGuilds(all);
-  guildCache.set(session.sid, { at: Date.now(), guilds });
-  return { user, guilds };
+  if (guilds.length === 0) {
+    console.error(`[Dashboard] 管理できるギルドが0件でした（参加ギルド ${all.length} 件）`);
+  }
+  guildCache.set(session.sid, { at: Date.now(), guilds, totalGuilds: all.length });
+  return { user, guilds, totalGuilds: all.length };
 }
 
 export type GuildRegistryEntry = {
