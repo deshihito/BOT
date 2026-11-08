@@ -263,6 +263,8 @@ class VoiceHub(commands.Cog):
                 theme=form.get("theme", ""))
         if value == "gvc_room_theme":
             return await cog._room_theme_impl(r, name, form.get("theme", ""))
+        if value == "gvc_lang_setting":
+            return await cog._lang_setting_impl(r, form.get("lang", ""))
         if value == "gvc_room_info":
             return await cog._room_info_impl(r, name)
         if value == "gvc_room_delete":
@@ -310,7 +312,8 @@ class VoiceHub(commands.Cog):
                     max_ms: app_commands.Range[float, 20.0, 4000.0] | None = None,
                     room: str | None = None, password: str | None = None,
                     name: str | None = None, max_servers: int | None = None,
-                    desc: str | None = None, theme: str | None = None):
+                    desc: str | None = None, theme: str | None = None,
+                    lang: str | None = None):
         # BOT fixer のコマンド制限（管理者は対象外）。
         from core.support import command_control
 
@@ -336,7 +339,7 @@ class VoiceHub(commands.Cog):
                 # 入力を、パネルのモーダルと同じ form 形式に変換して実行する。
                 form = {"name": name, "max": max_servers,
                         "password": password or "", "desc": desc or "",
-                        "theme": theme or ""}
+                        "theme": theme or "", "lang": lang or ""}
                 return await self.voice_global_rooms(interaction, value, form)
             return await self.voice_global_rooms(interaction, value)
         if value in {"join", "leave", "status"}:
