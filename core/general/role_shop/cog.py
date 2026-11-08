@@ -81,13 +81,11 @@ def shop_embed(snapshot: dict, *, image: bool = False) -> discord.Embed:
         # だけを持つ（本文の二重表示を避ける）。
         embed.set_image(url=f"attachment://{SHOP_FILENAME}")
         return embed
-    grants = snapshot["grants"]
-    for product in items:
-        value = f"{product['price']:,} AGO／{product['days']}日"
-        until = grants.get(product["role_id"])
-        if until is not None:
-            value += f"\n所持中（{until.strftime('%m/%d %H:%M')} まで）"
-        embed.add_field(name=product["name"], value=value, inline=False)
+    for row in role_shop_rows(snapshot):
+        value = row.value
+        if row.sub:
+            value += f"\n{row.sub}"
+        embed.add_field(name=row.label, value=value, inline=False)
     return embed
 
 

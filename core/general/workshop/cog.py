@@ -58,22 +58,26 @@ WORKSHOP_ID = "WORKSHOP"
 _item_name = economy_helpers.item_name
 
 
-def _tier_lines() -> list[str]:
-    # HCD方針（2026-11-06）: レア率や生産見込みの期待値のような数値仕様は
-    # ユーザー向け文言に出さない（遊び方と結果だけ出す）。
-    lines = []
+def _tier_rows() -> list[PanelRow]:
+    """加工機（購入）の一覧行（画像・テキスト共通の真実）。"""
+    rows = []
     for tier_id, tier in workshop_core.MACHINE_TIERS.items():
         materials = "・".join(
             items_core.ITEM_DEFS[item_id]["name"] for item_id, _w in tier["production"])
-        lines.append(
-            f"・**{tier['name']}** — {tier['price']:,} AGO"
-            f"（{tier['cycle_hours']}時間ごとに {materials} を生産、"
-            f"貯蔵は{tier['storage_hours']}時間分まで、"
-            f"寿命{tier['lifespan_cycles']}サイクル"
-            f"（満稼働で約{workshop_core.lifetime_days(tier_id):.0f}日）で"
-            "消える使い捨て）"
-        )
-    return lines
+        rows.append(PanelRow(
+            tier["name"], f"{tier['price']:,} AGO",
+            sub=(f"{tier['cycle_hours']}時間ごとに {materials} を生産、"
+                 f"貯蔵は{tier['storage_hours']}時間分まで、"
+                 f"寿命{tier['lifespan_cycles']}サイクル"
+                 f"（満稼働で約{workshop_core.lifetime_days(tier_id):.0f}日）"
+                 "で消える使い捨て")))
+    return rows
+
+
+def _tier_lines() -> list[str]:
+    # HCD方針（2026-11-06）: レア率や生産見込みの期待値のような数値仕様は
+    # ユーザー向け文言に出さない（遊び方と結果だけ出す）。
+    return [f"・**{row.label}** — {row.value}（{row.sub}）" for row in _tier_rows()]
 
 
 def workshop_panel_content(cog: "WorkshopCog", user_id: int):
@@ -122,19 +126,7 @@ def workshop_panel_content(cog: "WorkshopCog", user_id: int):
                     names,
                     f"完了まで{prison_core.format_remaining(seconds)}"))
         sections.append(("委託加工", job_rows))
-    tier_rows = []
-    for tier_id, tier in workshop_core.MACHINE_TIERS.items():
-        materials = "・".join(
-            items_core.ITEM_DEFS[item_id]["name"]
-            for item_id, _w in tier["production"])
-        tier_rows.append(PanelRow(
-            tier["name"], f"{tier['price']:,} AGO",
-            sub=(f"{tier['cycle_hours']}時間ごとに {materials} を生産、"
-                 f"貯蔵は{tier['storage_hours']}時間分まで、"
-                 f"寿命{tier['lifespan_cycles']}サイクル"
-                 f"（満稼働で約{workshop_core.lifetime_days(tier_id):.0f}日）"
-                 "で消える使い捨て")))
-    sections.append(("加工機（購入）", tier_rows))
+    sections.append(("加工機（購入）", _tier_rows()))
     return banner, sections
 
 
@@ -146,15 +138,20 @@ def workshop_panel_png(cog: "WorkshopCog", user_id: int) -> bytes:
         sections=sections, cache_namespace="workshop-panel")
 
 
-def craft_panel_png(cog: "WorkshopCog", user_id: int) -> bytes:
-    """合成パネル（使える所持素材）の白基調画像を描く。"""
+def craft_panel_rows(cog: "WorkshopCog", user_id: int) -> list[PanelRow]:
+    """合成に使える所持素材の行（画像・テキスト共通の真実）。"""
     store = cog._item_store()
     inventory = store.inventory(str(user_id))
-    rows = [
+    return [
         PanelRow(_item_name(item_id), f"×{count}")
         for item_id, count in sorted(inventory.items())
         if item_id in craft_core.craftable_item_ids() and count > 0
     ]
+
+
+def craft_panel_png(cog: "WorkshopCog", user_id: int) -> bytes:
+    """合成パネル（使える所持素材）の白基調画像を描く。"""
+    rows = craft_panel_rows(cog, user_id)
     return render_panel_png(
         title="合成", accent=WORKSHOP_ACCENT,
         sections=[("合成に使える所持素材", rows)],
@@ -163,9 +160,6 @@ def craft_panel_png(cog: "WorkshopCog", user_id: int) -> bytes:
 
 def _workshop_embed(cog: "WorkshopCog", user_id: int,
                     *, image: bool = False) -> discord.Embed:
-    uid = str(user_id)
-    now = datetime.now(config.JST)
-    store = cog.workshop_store
     embed = discord.Embed(title="工房", color=WORKSHOP_COLOR)
     if image:
         # 数値表示は画像（workshop_panel_png）に寄せ、embed は画像参照と
@@ -173,42 +167,26 @@ def _workshop_embed(cog: "WorkshopCog", user_id: int,
         embed.set_image(url=f"attachment://{WORKSHOP_FILENAME}")
         embed.set_footer(text="生産物は「生産物を受け取る」でまとめて受け取れます。")
         return embed
-    machines = store.machines(uid)
-    if machines:
-        lines = []
-        for machine in machines:
-            tier = workshop_core.MACHINE_TIERS[machine["tier"]]
-            pending = store.pending_cycles(machine, now)
-            max_cycles = tier["storage_hours"] // tier["cycle_hours"]
-            state = f"生産完了 **{pending} サイクル分**"
-            if pending >= max_cycles:
-                state += "（貯蔵上限で停止中）"
-            if pending >= int(machine.get("cycles_left", 0)):
-                state += "（受け取ると寿命が尽きます）"
-            lines.append(
-                f"・{tier['name']} — {state}"
-                f"／残り寿命 {machine.get('cycles_left', 0)} サイクル")
+    banner, sections = workshop_panel_content(cog, user_id)
+    section_map = {title: rows for title, rows in sections}
+    machine_rows = section_map.get("所有加工機", [])
+    if machine_rows:
+        lines = [
+            f"・{row.label} — {row.sub}／{row.value}" if row.sub
+            else f"・{row.label} — {row.value}"
+            for row in machine_rows
+        ]
         embed.add_field(name="所有加工機", value="\n".join(lines), inline=False)
     else:
         embed.add_field(name="所有加工機", value="（なし）", inline=False)
-    streak = store.streak_status(uid, now)
-    if streak["days"]:
+    if banner:
         embed.add_field(
             name="連続稼働ストリーク",
-            value=f"**{streak['days']} 日**（受け取り続けると生産ボーナスが付きます）",
+            value=banner.removeprefix("連続稼働ストリーク "),
             inline=False)
-    jobs = store.commissions(uid)
-    if jobs:
-        lines = []
-        for job in jobs:
-            ready_at = datetime.fromisoformat(job["ready_at"])
-            names = f"{_item_name(job['a'])} ＋ {_item_name(job['b'])}"
-            if ready_at <= now:
-                lines.append(f"・{names} — **受け取り可能**")
-            else:
-                # 残り時間の表記は prison.format_remaining に統一する（導線最適化ラウンド4）。
-                seconds = (ready_at - now).total_seconds()
-                lines.append(f"・{names} — 完了まで{prison_core.format_remaining(seconds)}")
+    job_rows = section_map.get("委託加工", [])
+    if job_rows:
+        lines = [f"・{row.label} — {row.value}" for row in job_rows]
         embed.add_field(name="委託加工", value="\n".join(lines), inline=False)
     embed.add_field(name="加工機（購入）", value="\n".join(_tier_lines()), inline=False)
     embed.set_footer(text="生産物は「生産物を受け取る」でまとめて受け取れます。")
@@ -217,8 +195,6 @@ def _workshop_embed(cog: "WorkshopCog", user_id: int,
 
 def _craft_embed(cog: "WorkshopCog", user_id: int,
                  *, image: bool = False) -> discord.Embed:
-    store = cog._item_store()
-    inventory = store.inventory(str(user_id))
     embed = discord.Embed(title="合成", color=WORKSHOP_COLOR)
     if image:
         # 素材一覧は画像（craft_panel_png）に寄せ、embed は画像参照と
@@ -229,9 +205,8 @@ def _craft_embed(cog: "WorkshopCog", user_id: int,
                  "組み合わせは試して見つけてください。")
         return embed
     owned = [
-        f"・{_item_name(item_id)} ×{count}"
-        for item_id, count in sorted(inventory.items())
-        if item_id in craft_core.craftable_item_ids() and count > 0
+        f"・{row.label} {row.value}"
+        for row in craft_panel_rows(cog, user_id)
     ]
     embed.add_field(
         name="合成に使える所持素材", value="\n".join(owned) if owned else "（なし）",

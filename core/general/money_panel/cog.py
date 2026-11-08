@@ -126,82 +126,44 @@ def status_embed(status: dict, *, image: bool = False) -> discord.Embed:
     if image:
         embed.set_image(url=f"attachment://{STATUS_FILENAME}")
         return embed
-    next_step = _next_step_line(status)
-    if next_step is not None:
-        embed.description = next_step
     # B-2: 逮捕状態（逮捕中であること・残り時間）は公開パネルに出さない。
     # S4 の線引き（逮捕・没収・脱獄の結果は ephemeral）に合わせ、状態も
     # 本人にだけ ephemeral で知らせる（show_panel 参照）。残高等の表示は
-    # 公開原則どおり維持する。
-    embed.add_field(
-        name="AGOコイン", value=f"**{status['balance']:,} AGO**", inline=True)
-    if status.get("rate") is not None:
+    # 公開原則どおり維持する。行データは status_panel_content が真実で、
+    # ここはそのテキスト版への整形だけを行う。
+    next_step = _next_step_line(status)
+    if next_step is not None:
+        embed.description = next_step
+    hero, _banner, sections = status_panel_content(status)
+    embed.add_field(name="AGOコイン", value=f"**{hero.value}**", inline=True)
+    if hero.sub:
         embed.add_field(
-            name=market_core.TOKEN_NAME,
-            value=(f"**{_fmt_tokens(status['tokens'])}**"
-                   f"（レート {status['rate']:,.2f} AGO）"),
-            inline=True)
-    if status.get("total_assets") is not None:
-        embed.add_field(
-            name="総資産", value=f"**{status['total_assets']:,} AGO**",
-            inline=True)
-    if status.get("items_total") is not None:
-        effects = status["effects"]
-        value = f"全 **{status['items_total']} 個**（{status['items_kinds']} 種）"
-        value += f"／宝箱 **{status['boxes']} 個**"
-        if effects:
-            value += f"／効果発動中 {effects} 件"
-        embed.add_field(name="アイテム", value=value, inline=True)
-    if status.get("machines") is not None:
-        if status["machines"]:
-            value = (
-                f"{status['machines']} 台／受け取り待ち "
-                f"**{status['pending_cycles']} サイクル分**")
-            if status["min_cycles_left"] is not None:
-                value += f"／最短の残り寿命 {status['min_cycles_left']} サイクル"
-            if status["commissions_total"]:
-                value += (
-                    f"／委託 {status['commissions_total']} 件"
-                    f"（受け取り可能 {status['commissions_ready']} 件）")
+            name="総資産",
+            value=f"**{hero.sub.removeprefix('総資産 ')}**", inline=True)
+    for section_title, rows in sections:
+        if section_title is None:
+            for row in rows:
+                embed.add_field(
+                    name=row.label, value=_status_field_value(row),
+                    inline=row.label != "工房")
         else:
-            value = "加工機なし"
-        if status["streak_days"]:
-            value += (
-                f"\nストリーク **{status['streak_days']} 日**"
-                "（生産ボーナスあり）")
-        embed.add_field(name="工房", value=value, inline=False)
-    if status.get("lottery_pool") is not None:
-        embed.add_field(
-            name="宝くじ",
-            value=(f"プール **{status['lottery_pool']:,} AGO**／"
-                   f"自分のチケット **{status['lottery_tickets']} 枚**"
-                   f"（締切 {status['lottery_closes']}）"),
-            inline=True)
-    if status.get("mining_session_left") is not None:
-        if status["mining_session_left"] > 0:
-            mining_value = (
-                f"**掘れます**（セッション残り {status['mining_session_left']} 回）")
-        elif status["mining_ready"]:
-            mining_value = "**いま掘れます**"
-        else:
-            mining_value = f"次まで {_fmt_minutes(status['mining_remaining'])}"
-        mining_value += f"／プール {status['mining_pool']:,} AGO"
-        embed.add_field(name="採掘", value=mining_value, inline=True)
-    if status.get("session_kind"):
-        label = _SESSION_LABELS.get(status["session_kind"], status["session_kind"])
-        embed.add_field(
-            name="ギャンブル", value=f"{label} のセッション進行中", inline=True)
-    if status.get("active_effect_details"):
-        lines = [
-            f"・{detail['name']}（あと{_fmt_minutes(detail['remaining'])}）"
-            for detail in status["active_effect_details"]
-        ]
-        embed.add_field(
-            name="発動中の効果", value="\n".join(lines), inline=False)
-    if status.get("party_count") is not None:
-        embed.add_field(
-            name="編成", value=f"**{status['party_count']} 体**", inline=True)
+            lines = [f"・{row.label}（{row.value}）" for row in rows]
+            embed.add_field(name=section_title, value="\n".join(lines), inline=False)
     return embed
+
+
+def _status_field_value(row) -> str:
+    """ステータス行のテキスト版の値（画像行と同じ値・並び）。"""
+    if row.label == market_core.TOKEN_NAME:
+        return f"**{row.value}**（{row.sub}）"
+    if row.label == "編成":
+        return f"**{row.value}**"
+    if row.label == "アイテム":
+        text = f"{row.value}／{row.sub}" if row.sub else row.value
+        return re.sub(r"(\d[\d,]*) 個", r"**\1 個**", text)
+    if row.sub:
+        return f"{row.value}／{row.sub}"
+    return row.value
 
 
 # 画像内バナーではカラー絵文字が同梱フォントに無く豆腐化するため、
