@@ -66,7 +66,8 @@ def entry_line(entry: dict) -> str:
 # そのルート全件。未対応のジャンルが残らないよう、全ジャンルをいずれかの
 # カテゴリに割り当てる（テストで網羅を固定する）。
 ACTION_CATEGORY_MAP: dict[str, list[tuple[str, str | None]]] = {
-    "support": [("general", "survival"), ("support", "automation")],
+    "support": [("general", "survival"), ("support", "automation"),
+                ("support", "analysis")],
     "economy": [("general", "money"), ("general", "rta"),
                 ("general", "boardnotify_rta")],
     "game": [("game", None)],

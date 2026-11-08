@@ -215,6 +215,9 @@ class SupportCog(
         "sokunuke_off": "manage_guild",
         "sokunuke_vc_on": "manage_guild",
         "sokunuke_vc_off": "manage_guild",
+        # 人物分析は一般メンバーが閲覧できる（権限要件なしを明示する）。
+        # 収集トグルの変更だけ、パネル側でサーバー管理権限を要求する。
+        "person_analysis": None,
     }
 
     def __init__(self, bot: commands.Bot):
@@ -654,6 +657,12 @@ class SupportCog(
             triggers = cog.list_triggers(interaction.guild_id) if cog else {}
             return await interaction.response.send_message(
                 view=VoiceTriggerPanel(self, settings, triggers), ephemeral=True)
+
+        if selected == "person_analysis":
+            cog = self.bot.get_cog("PersonAnalysisCog")
+            if cog is None:
+                return await self._missing(interaction, "人物分析")
+            return await cog.show_person_analysis(interaction)
 
         if selected.startswith("sokunuke_"):
             cog = self.bot.get_cog("SokuNukeRta")
