@@ -49,6 +49,10 @@ export type PublicRankingSnapshot = {
   updated_at: string;
   exp: RankingEntry[];
   coin: RankingEntry[];
+  /** bump RTA（全サーバー・速い順）。value は elapsed_ms。 */
+  bump: RankingEntry[];
+  /** up RTA（全サーバー・速い順）。value は elapsed_ms。 */
+  up: RankingEntry[];
 };
 
 function cleanEntries(raw: unknown, withLevel: boolean): RankingEntry[] {
@@ -79,6 +83,8 @@ export function parseRankingSnapshot(raw: unknown): PublicRankingSnapshot | null
     updated_at: record.updated_at,
     exp: cleanEntries(record.exp, true),
     coin: cleanEntries(record.coin, false),
+    bump: cleanEntries(record.bump, false),
+    up: cleanEntries(record.up, false),
   };
 }
 

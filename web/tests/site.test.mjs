@@ -34,13 +34,25 @@ test("parseRankingSnapshot は ID を含む余分な項目を落とし、数値�
     updated_at: "2026-11-07T00:00:00+00:00",
     exp: [{ name: "a", value: 100, level: 3, user_id: 999 }],
     coin: [{ name: "b", value: 50.7 }],
+    bump: [{ name: "c", value: 5300.9, user_id: 999 }],
+    up: [{ name: "d", value: 9870 }],
     guild_id: 123,
   });
   assert.deepEqual(snapshot, {
     updated_at: "2026-11-07T00:00:00+00:00",
     exp: [{ name: "a", value: 100, level: 3 }],
     coin: [{ name: "b", value: 50 }],
+    bump: [{ name: "c", value: 5300 }],
+    up: [{ name: "d", value: 9870 }],
   });
+  // RTA キーが無い旧スナップショットは空配列として読む
+  const legacy = m.parseRankingSnapshot({
+    updated_at: "2026-11-07T00:00:00+00:00",
+    exp: [],
+    coin: [],
+  });
+  assert.deepEqual(legacy.bump, []);
+  assert.deepEqual(legacy.up, []);
   assert.equal(m.parseRankingSnapshot(null), null);
   assert.equal(m.parseRankingSnapshot({ exp: [] }), null);
 });

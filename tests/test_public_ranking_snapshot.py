@@ -65,6 +65,33 @@ class BuildSnapshotTest(unittest.TestCase):
         snapshot = build_snapshot([exp_row(999, 5, 1)], [], {}, now=NOW)
         self.assertEqual(snapshot["exp"][0]["name"], "")
 
+    def test_rta_entries_sorted_fastest_first_and_no_ids(self):
+        bump_rows = [
+            {"user_id": 222, "elapsed_ms": 12450},
+            {"user_id": 111, "elapsed_ms": 5300},
+        ]
+        up_rows = [{"user_id": 333, "elapsed_ms": 9870}]
+        names = {111: "アゴ太郎", 222: "ミリィ", 333: "キーパー"}
+        snapshot = build_snapshot([], [], names, now=NOW,
+                                  bump_rows=bump_rows, up_rows=up_rows)
+        # RTA は速い順（elapsed_ms の昇順）に並ぶ
+        self.assertEqual(
+            snapshot["bump"],
+            [
+                {"name": "アゴ太郎", "value": 5300},
+                {"name": "ミリィ", "value": 12450},
+            ],
+        )
+        self.assertEqual(snapshot["up"], [{"name": "キーパー", "value": 9870}])
+        text = json.dumps(snapshot, ensure_ascii=False)
+        for forbidden in ("111", "222", "333", "user_id", "guild"):
+            self.assertNotIn(forbidden, text)
+
+    def test_rta_defaults_to_empty(self):
+        snapshot = build_snapshot([], [], {}, now=NOW)
+        self.assertEqual(snapshot["bump"], [])
+        self.assertEqual(snapshot["up"], [])
+
 
 if __name__ == "__main__":
     unittest.main()
