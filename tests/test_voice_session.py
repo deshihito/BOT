@@ -619,7 +619,7 @@ class MusicTest(unittest.IsolatedAsyncioTestCase):
         if task is not None:
             await task
         self.assertIsNone(self.manager.get(self.w.guild.id))
-        self.assertIn('/vc のパネルからVC退出 で退出したため録音を停止しました', self.w.text.text())
+        self.assertIn('VC退出のため録音を停止しました', self.w.text.text())
 
     async def test_join_hints_point_to_slash_join(self):
         source = (ROOT / 'core' / 'vc' / 'music' / 'entry.py').read_text(encoding='utf-8')

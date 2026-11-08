@@ -179,7 +179,10 @@ class MusicPanelImplDriveTest(unittest.IsolatedAsyncioTestCase):
         await _Cog()._spatial_panel(responder, 123)
 
         self.assertEqual(len(responder.sent), 1)
-        self.assertIsInstance(responder.sent[0]["view"], SpatialControlView)
+        # sweep2 VC-16: 立体音響パネルは V2 ラッパー経由で送信される。
+        sent_view = responder.sent[0]["view"]
+        inner = getattr(sent_view, "panel", sent_view)
+        self.assertIsInstance(inner, SpatialControlView)
 
 
 class MusicPanelHeadingEmojiTest(unittest.IsolatedAsyncioTestCase):

@@ -3,6 +3,7 @@
 # =====================
 
 import discord
+from core.support.embeds import we
 from discord.ext import commands
 import asyncio
 import logging
@@ -108,9 +109,9 @@ class SaitoRelay(commands.Cog):
 
         if not target_peer:
             self.matching_queue.append(r)
-            return await r.send(f"{LOUPE} 相手を探しています... ({r.guild.name})")
+            return await r.send(embed=we(f"{LOUPE} 相手を探しています... ({r.guild.name})"))
 
-        await r.send(f"🤝 **{target_peer.guild.name}** と接続中...")
+        await r.send(embed=we(f"🤝 **{target_peer.guild.name}** と接続中..."))
         await self._notify(target_peer, f"🤝 **{r.guild.name}** と接続中...")
 
         acquired = []
@@ -136,7 +137,7 @@ class SaitoRelay(commands.Cog):
             vc1.listen(_RelaySink(vc2))
             vc2.listen(_RelaySink(vc1))
 
-            await r.send("🎙️ 通話を開始しました。")
+            await r.send(embed=we("🎙️ 通話を開始しました。"))
             await self._notify(target_peer, "🎙️ 通話を開始しました。")
 
         except VoiceBusy as busy:
@@ -144,23 +145,23 @@ class SaitoRelay(commands.Cog):
             for guild_id in acquired:
                 self.peers.pop(guild_id, None)
                 await self.voice_sessions.release(guild_id, "match", reason="stop")
-            await r.send(f"{FAILED} 相手のサーバーで別の機能が始まったため、通話できませんでした。もう一度お試しください。")
+            await r.send(embed=we(f"{FAILED} 相手のサーバーで別の機能が始まったため、通話できませんでした。もう一度お試しください。"), ephemeral=True)
             await self._notify(target_peer, str(busy))
         except Exception as e:
             logging.error(f"Saito Match Error: {e}")
             for guild_id in acquired:
                 self.peers.pop(guild_id, None)
                 await self.voice_sessions.release(guild_id, "match", reason="stop")
-            await r.send(FAILED + ' 通話の接続に失敗しました。')
+            await r.send(embed=we(FAILED + ' 通話の接続に失敗しました。'), ephemeral=True)
 
     async def _stop(self, r: Responder):
         if await self.voice_sessions.release(r.guild.id, "match", reason="stop"):
-            return await r.send("通話を終了しました。")
+            return await r.send(embed=we("通話を終了しました。"))
         before = len(self.matching_queue)
         self.matching_queue = [c for c in self.matching_queue if c.guild.id != r.guild.id]
         if len(self.matching_queue) != before:
-            return await r.send("相手探しを取り消しました。")
-        await r.send("通話も相手探しもしていません。", ephemeral=True)
+            return await r.send(embed=we("相手探しを取り消しました。"))
+        await r.send(embed=we("通話も相手探しもしていません。"), ephemeral=True)
 
 
 async def setup(bot):

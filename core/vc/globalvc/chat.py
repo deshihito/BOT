@@ -18,7 +18,7 @@ from core.vc import voice_restore
 from core.support.legacy import Responder
 from core.vc.voice_session import VoiceBusy, get_manager
 from core.vc.voice_recv_patch import patch_voice_recv_client
-from core.support.messages import VOICE_NOT_JOINED, voice_connection_failed
+from core.support.messages import VOICE_NOT_JOINED, voice_connection_failed, room_not_found
 from core.vc.voice_media import add_audio_source, add_receive_sink, remove_audio_source, remove_receive_sink
 from core.support.emojis import FAILED
 try:
@@ -43,8 +43,8 @@ class ChatMixin:
         room = ROOMS.get(room_name)
         if room is None:
             return await r.send(
-                f"{FAILED} ルーム **{room_name}** は存在しません。"
-                "先に `/vc` →「グローバルVCルーム」→「ルーム作成」で作成してください。",
+                f"{FAILED} " + room_not_found(room_name)
+                + "先に `/vc` →「グローバルVCルーム」→「ルーム作成」で作成してください。",
                 ephemeral=True,
             )
 

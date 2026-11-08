@@ -15,24 +15,6 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 from core.support.emojis import FAILED
-try:
-    import encodec
-    import soundfile as sf
-    import torch
-
-    # CPU 推論はスレッドを増やしすぎると逆に遅くなることがある。上限を絞る。
-    torch.set_num_threads(min(4, os.cpu_count() or 4))
-
-    VOICE_TRIGGER_AVAILABLE = True
-except Exception:  # ImportError だけでなく共有ライブラリ不整合 (OSError) 等も捕捉
-    encodec = None
-    sf = None
-    torch = None
-    VOICE_TRIGGER_AVAILABLE = False
-    logging.getLogger(__name__).warning(
-        "EnCodec/torch/soundfile を読み込めなかったため、音声トリガー機能は無効になります",
-        exc_info=True,
-    )
 from core.general import action_usage
 from core.support.usage_stats import usage_stats
 from core.support.legacy import Responder
@@ -182,7 +164,7 @@ class VoiceTriggerCog(commands.Cog):
                        user: discord.abc.User) -> str:
         if not VOICE_TRIGGER_AVAILABLE:
             raise VoiceTriggerError(
-                "音声トリガー機能が利用できません。encodec / torch / soundfile の導入を確認してください。"
+                "音声トリガー機能は現在利用できません。"
             )
         word = word.strip()
         if not word:
@@ -378,7 +360,7 @@ class VoiceTriggerRegisterView(discord.ui.LayoutView):
                 discord.ui.Container(
                     discord.ui.TextDisplay(
                         f"## {FAILED} 音声トリガー機能は利用できません\n"
-                        "`encodec` / `torch` / `soundfile` の読み込みに失敗しています。"
+                        "Botの運営に連絡してください。"
                     ),
                     accent_colour=0xE74C3C,
                 )
@@ -466,7 +448,7 @@ class VoiceTriggerManageView(discord.ui.LayoutView):
                 discord.ui.Container(
                     discord.ui.TextDisplay(
                         f"## {FAILED} 音声トリガー機能は利用できません\n"
-                        "`encodec` / `torch` / `soundfile` の読み込みに失敗しています。時間をおいて再度お試しください。解決しない場合はBotの運営に連絡してください。"
+                        "時間をおいて再度お試しください。解決しない場合はBotの運営に連絡してください。"
                     ),
                     accent_colour=0xE74C3C,
                 )
@@ -479,9 +461,7 @@ class VoiceTriggerManageView(discord.ui.LayoutView):
                 discord.ui.Container(
                     discord.ui.TextDisplay(
                         "## 🎤 音声トリガー\n"
-                        "登録されているトリガーはありません。\n\n"
-                        "**登録方法**: `/vc` →「音声トリガー」→「トリガー登録（このチャンネルの音声から選ぶ）」"
-                        "で、チャンネル内の音声から選んで登録できます。"
+                        "登録されているトリガーはありません。"
                     ),
                     accent_colour=0xF1C40F,
                 )

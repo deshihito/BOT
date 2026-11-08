@@ -1,4 +1,5 @@
 import discord
+from core.support.messages import MUSIC_VC_REQUIRED
 from core.support.panel_v2 import edit_message_v2
 from discord import app_commands  # ← 追加
 from discord.ext import commands, tasks
@@ -107,6 +108,8 @@ PLAYLIST_SCOPE_CHOICES = [
 ]
 MIN_PLAYBACK_SPEED = 0.5
 MAX_PLAYBACK_SPEED = 64.0
+# 音楽パネルは再生セッションに紐づき操作が長時間に及ぶため、ルートパネルの
+# 600 より長い 900 にする（sweep2 VC-18: 値の変更は挙動変更のため理由明記のみ）。
 PANEL_TIMEOUT_SECONDS = 900
 SNAPSHOT_INTERVAL_SECONDS = 30.0  # 再起動復旧用スナップショットの定期保存間隔（SIGKILL でも最大この分だけ再生位置が巻き戻る）
 SAFE_CUSTOM_AUDIO_FILTERS = {
@@ -117,7 +120,7 @@ SAFE_CUSTOM_AUDIO_FILTERS = {
 
 
 #: 音楽操作 (停止・スキップ・速度/音量/EQ 等) を VC 外から拒否するときの文言。
-MUSIC_VC_REQUIRED_MESSAGE = "この操作は、Bot が接続しているボイスチャンネルに参加しているメンバーだけが行えます。"
+MUSIC_VC_REQUIRED_MESSAGE = MUSIC_VC_REQUIRED
 
 
 def is_same_voice_channel(user, voice_client) -> bool:

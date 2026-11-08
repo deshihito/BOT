@@ -20,7 +20,7 @@ from core.support.legacy import Responder
 from core.vc import vc_feature_restore
 from core.vc.voice_session import VoiceBusy, get_manager
 from core.vc.voice_recv_patch import patch_voice_recv_client
-from core.support.messages import VOICE_NOT_JOINED, voice_connection_failed
+from core.support.messages import VOICE_NOT_JOINED, voice_connection_failed, not_running
 from core.support.emojis import CLOCK, FAILED, MUSIC, PAUSE
 
 from core.vc.rec.common import *  # noqa: F401,F403 - shared constants/helpers
@@ -38,14 +38,14 @@ class EchoMixin:
         if action == "delay":
             session = self.echo_sessions.get(guild_id)
             if not session:
-                return await r.send(embed=we(f"{FAILED} 現在やまびこは実行されていません。"), ephemeral=True)
+                return await r.send(embed=we(f"{FAILED} " + not_running("やまびこ")), ephemeral=True)
             if delay is None or delay <= 0:
                 return await r.send(embed=we(f"{FAILED} 遅延時間は 0 秒より大きく設定してください。"), ephemeral=True)
             session["sink"].set_echo_delay(delay)
             return await r.send(embed=we(f"{CLOCK} やまびこの遅延時間を `{delay}` 秒に変更しました。"))
         if action == "stop":
             if guild_id not in self.echo_sessions:
-                return await r.send(embed=we(f"{FAILED} 現在やまびこは実行されていません。"), ephemeral=True)
+                return await r.send(embed=we(f"{FAILED} " + not_running("やまびこ")), ephemeral=True)
             if not await self.voice_sessions.release(guild_id, "echo", reason="stop"):
                 self._echo_cleanup(guild_id)("stop")
             return await r.send(embed=we("🛑 やまびこを停止しました。"))
@@ -53,12 +53,10 @@ class EchoMixin:
         if session:
             await r.send(embed=we(
                 f"🗣️ **やまびこ動作中**\n"
-                f"{CLOCK} 遅延時間: `{session['sink'].echo_delay}`秒\n"
-                f"遅延変更: `/vc のパネルからやまびこ遅延変更 delay:<秒数>`\n"
-                f"停止: `/vc のパネルからやまびこ停止`"
+                f"{CLOCK} 遅延時間: `{session['sink'].echo_delay}`秒"
             ))
         else:
-            await r.send(embed=we(PAUSE + ' やまびこ停止中 (`/vc のパネルからやまびこ開始` で開始)'))
+            await r.send(embed=we(PAUSE + ' やまびこ停止中'))
 
 
     async def _echo_start(self, r: Responder, delay: float):
@@ -98,7 +96,7 @@ class EchoMixin:
         await r.send(embed=we(
             f"🗣️ **{target_channel.name}** でやまびこを開始しました！\n"
             f"{CLOCK} 遅延時間: `{delay}`秒\n"
-            f"遅延変更: `/vc のパネルからやまびこ遅延変更 delay:3.0` | 停止: `/vc のパネルからやまびこ停止`"
+            f"遅延はパネルで変更できます。"
         ))
 
 

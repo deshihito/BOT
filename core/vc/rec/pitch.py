@@ -83,7 +83,7 @@ class PitchMixin:
         """直近の音声からピアノ音階（単音/和音/声の倍音層）を解析する。"""
         session = self.sessions.get(r.guild.id)
         if not session:
-            return await r.send(embed=we(f"{FAILED} 現在録音中ではありません。`/vc のパネルから録音開始` で開始してください。"), ephemeral=True)
+            return await r.send(embed=we(f"{FAILED} 現在録音中ではありません。"), ephemeral=True)
 
         sink: RecordingSink = session["sink"]
         audio_snapshot = sink.snapshot()

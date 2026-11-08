@@ -18,7 +18,7 @@ from core.vc import voice_restore
 from core.support.legacy import Responder
 from core.vc.voice_session import VoiceBusy, get_manager
 from core.vc.voice_recv_patch import patch_voice_recv_client
-from core.support.messages import VOICE_NOT_JOINED, voice_connection_failed
+from core.support.messages import VOICE_NOT_JOINED, voice_connection_failed, room_not_found
 from core.vc.voice_media import add_audio_source, add_receive_sink, remove_audio_source, remove_receive_sink
 from core.support.emojis import FAILED
 try:
@@ -108,18 +108,16 @@ class ManageMixin:
         elif theme:
             embed.add_field(name="テーマ", value=f"🎯 {theme}", inline=False)
         embed.add_field(name="グロチャ自動接続", inline=False,
-                        value="OFF（下のボタンで ON にすると、VC参加時にそのテキストチャンネルもグロチャへ自動接続します）")
+                        value="OFF（ONにすると、VC参加時にそのテキストチャンネルもグロチャへ自動接続します）")
         if description:
             embed.add_field(name="説明", value=description, inline=False)
-        embed.set_footer(text="/vc →「グローバルVCルーム」→「ルーム一覧」の参加ボタンから参加できます")
         await r.send(embed=embed, view=_TextChatToggleView(self, room_name, r.user.id))
 
         # 作成者がボイスチャンネルにいるなら、そのままボットも参加させる
         voice = getattr(r.user, "voice", None)
         if not voice or not voice.channel:
             return await r.send(
-                "ℹ️ ボイスチャンネルに入った状態でルームを作成すると、ボットが自動で参加します。"
-                "参加するには `/vc` のパネルから参加してください。",
+                "ℹ️ ボイスチャンネルに入った状態でルームを作成すると、ボットが自動で参加します。",
                 ephemeral=True,
             )
         try:
@@ -144,7 +142,7 @@ class ManageMixin:
             return await r.send(f"{FAILED} 常設ルームのテーマを変更できるのはBot管理者だけです。", ephemeral=True)
         room = ROOMS.get(room_name)
         if room is None:
-            return await r.send(f"{FAILED} ルーム **{room_name}** は存在しません。", ephemeral=True)
+            return await r.send(f"{FAILED} " + room_not_found(room_name), ephemeral=True)
         if not room.permanent:
             return await r.send(f"{FAILED} テーマを変更できるのは常設ルームだけです。", ephemeral=True)
 
@@ -180,7 +178,7 @@ class ManageMixin:
         room = ROOMS.get(room_name)
         if room is None:
             return await r.send(
-                f"{FAILED} ルーム **{room_name}** は存在しません。", ephemeral=True
+                f"{FAILED} " + room_not_found(room_name), ephemeral=True
             )
         embed = discord.Embed(title=f"🌐 グロチャ自動接続設定: {room_name}", color=0x3498DB)
         embed.add_field(name="グロチャ自動接続", value="ON" if room.text_chat else "OFF", inline=False)
@@ -193,7 +191,7 @@ class ManageMixin:
         room = ROOMS.get(room_name)
         if room is None:
             return await r.send(
-                f"{FAILED} ルーム **{room_name}** は存在しません。", ephemeral=True
+                f"{FAILED} " + room_not_found(room_name), ephemeral=True
             )
 
         clients = GLOBAL_ROOMS.get(room_name, [])
@@ -282,7 +280,7 @@ class ManageMixin:
         room = ROOMS.get(room_name)
         if room is None:
             return await r.send(
-                f"{FAILED} ルーム **{room_name}** は存在しません。", ephemeral=True
+                f"{FAILED} " + room_not_found(room_name), ephemeral=True
             )
 
         # Bot管理者はどのルームでも削除できる（常設・通常どちらも、作成者でなくても）
@@ -330,20 +328,21 @@ class ManageMixin:
         room = ROOMS.get(room_name)
         if room is None:
             return await r.send(
-                f"{FAILED} ルーム **{room_name}** は存在しません。"
-                f"先に `/vc` →「グローバルVCルーム」→「ルーム作成」で作成してください。"
+                f"{FAILED} " + room_not_found(room_name)
+                + "先に `/vc` →「グローバルVCルーム」→「ルーム作成」で作成してください。",
+                ephemeral=True,
             )
 
         if room.private and password != room.password:
-            return await r.send("🔒 このルームは非公開です。正しいパスワードを指定してください。")
+            return await r.send("🔒 このルームは非公開です。正しいパスワードを指定してください。", ephemeral=True)
 
         _prune_dead_clients(room_name)
         current_members = GLOBAL_ROOMS.get(room_name, [])
         if room.max_servers and len(current_members) >= room.max_servers:
-            return await r.send(f"{FAILED} ルーム **{room_name}** は満員です ({room.max_servers}サーバーまで)。")
+            return await r.send(f"{FAILED} ルーム **{room_name}** は満員です ({room.max_servers}サーバーまで)。", ephemeral=True)
 
         if any(vc.guild and vc.guild.id == r.guild.id for vc in current_members):
-            return await r.send(f"{FAILED} このサーバーはすでにルーム **{room_name}** に参加しています。")
+            return await r.send(f"{FAILED} このサーバーはすでにルーム **{room_name}** に参加しています。", ephemeral=True)
 
         vc_channel = voice.channel
         await r.defer()
@@ -354,7 +353,7 @@ class ManageMixin:
                            if any(c.guild and c.guild.id == r.guild.id for c in clients)), None)
             return await r.send(
                 f"{FAILED} このサーバーはすでにルーム **{joined or '不明'}** に参加しています。"
-                "先に `/vc のパネルからグローバルVC終了/退出` してください。"
+                "先に退出してください。"
             )
 
         try:
@@ -367,10 +366,7 @@ class ManageMixin:
             logger.warning("グローバルVC: ルーム %s への参加に失敗しました", room_name, exc_info=True)
             return await r.send(voice_connection_failed(e))
 
-        await r.send(
-            f"🌐 ルーム **{room_name}** に参加しました！\n"
-            f"別サーバーの同名ルームと相互接続されています。"
-        )
+        await r.send(f"🌐 ルーム **{room_name}** に参加しました。")
 
 
     async def _leave(self, r: Responder):

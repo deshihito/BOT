@@ -1,5 +1,5 @@
 import discord
-from core.support.panel_v2 import edit_message_v2
+from core.support.panel_v2 import as_embed_v2, edit_message_v2, wrap_panel_view
 from discord import app_commands  # ← 追加
 from discord.ext import commands, tasks
 import asyncio
@@ -114,8 +114,7 @@ class PanelMixin:
         autoplay_label = 'ON' if state.get('autoplay_enabled') else 'OFF'
         panel_text += (
             f"**再生モード:** ループ `{loop_label}` / シャッフル `{shuffle_label}` / 自動再生 `{autoplay_label}`\n"
-            f"**予約キュー:** {queue_info}\n\n"
-            "速度・音量・EQの選択と再生操作は、このパネル内の各コントロールから行えます。"
+            f"**予約キュー:** {queue_info}"
         )
         if state.get('autoplay_enabled'):
             panel_text += (
@@ -258,44 +257,8 @@ class PanelMixin:
 
 
     async def _spatial_panel(self, r: Responder, guild_id: int):
-        state = self.get_state(guild_id)
-        current_eq = state.get('eq', 'flat')
-        dist = state.get('spatial_distance', 2.0)
-        room = state.get('spatial_room_size', 0.3)
-        speaker = state.get('spatial_speaker', 'studio')
-        agc_max = state.get('spatial_agc_max', 4.0)
-        
-        # 💡 モード判定（3軸回転 / 通常回転 / 回転OFF）
-        rot_mode = state.get('spatial_rot_mode', 'standard')  # 'off', 'standard', '3d'
-        rot_labels = {
-            'off': PAUSE + ' 静止 (OFF)',
-            'standard': '🌀 通常水平回転 (Azimuth)',
-            '3d': '🪐 3軸立体回転 (3D Pitch/Yaw/Roll)'
-        }
-
-        speaker_names = {
-            'studio': '🎙️ スタジオモニター',
-            'theater': '🎬 シアター',
-            'pa': VOL + ' PAスピーカー',
-            'small': '📻 小型スピーカー'
-        }
-
-        embed = discord.Embed(
-            title="🎧 立体音響 (3D Spatial Audio) 設定パネル",
-            description=(
-                "リアルタイムHRTFおよびFDN空間音響パラメータを個別設定できます。\n"
-                "下のメニュー操作は再生中の音声へ即座に反映されます。\n\n"
-                f"現在のモード: **{current_eq}**\n"
-                f"音像の距離 (Distance): **{dist}x**\n"
-                f"部屋のリバーブ (FDN Mix): **{room}**\n"
-                f"スピーカー特性: **{speaker_names.get(speaker, speaker)}**\n"
-                f"最大音量引き上げ幅 (AGC): **{agc_max}x** (+{round(20*math.log10(agc_max), 1)}dB)\n"
-                f"回転モード: **{rot_labels.get(rot_mode, rot_mode)}**"
-            ),
-            color=0x3498DB
-        )
         view = SpatialControlView(self, guild_id)
-        await r.send(embed=embed, view=view)
+        await r.send(view=wrap_panel_view(view))
 
 
     def build_queue_embed(self, guild_id: int):
@@ -328,4 +291,4 @@ class PanelMixin:
 
 
     async def _queue_impl(self, interaction: discord.Interaction):
-        await interaction.response.send_message(embed=self.build_queue_embed(interaction.guild_id))
+        await interaction.response.send_message(view=as_embed_v2(self.build_queue_embed(interaction.guild_id)))

@@ -18,7 +18,7 @@ from core.vc import voice_restore
 from core.support.legacy import Responder
 from core.vc.voice_session import VoiceBusy, get_manager
 from core.vc.voice_recv_patch import patch_voice_recv_client
-from core.support.messages import VOICE_NOT_JOINED, voice_connection_failed
+from core.support.messages import VOICE_NOT_JOINED, voice_connection_failed, room_not_found
 from core.vc.voice_media import add_audio_source, add_receive_sink, remove_audio_source, remove_receive_sink
 from core.support.emojis import FAILED
 try:
@@ -159,7 +159,7 @@ class GlobalRoomListView(discord.ui.LayoutView):
             lines.append(line)
             buttons.append(_RoomJoinButton(index, name, room.private, disabled=joined_here or full))
 
-        header = "## 🌐 ルーム一覧\nボタンを押すと、そのルームに参加します（ボイスチャンネルに入っている必要があります）。"
+        header = "## 🌐 ルーム一覧\nボイスチャンネルに入っている必要があります。"
         notes: list[str] = []
         if len(ROOMS) > self.MAX_ROOMS:
             notes.append(f"表示は先頭 {self.MAX_ROOMS} 件です（全 {len(ROOMS)} 件）")
@@ -180,7 +180,7 @@ class GlobalRoomListView(discord.ui.LayoutView):
         room = ROOMS.get(room_name)
         if room is None:
             return await interaction.response.send_message(
-                f"{FAILED} ルーム **{room_name}** は存在しません。", ephemeral=True
+                f"{FAILED} " + room_not_found(room_name), ephemeral=True
             )
         if room.private:
             return await interaction.response.send_modal(_PrivateRoomJoinModal(self.cog, room_name))

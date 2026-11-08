@@ -82,7 +82,8 @@ class MusicQueueVisibilityTest(unittest.IsolatedAsyncioTestCase):
         mixin.build_queue_embed = lambda guild_id: discord.Embed(title="queue")
         interaction, sent = fake_interaction()
         await mixin._queue_impl(interaction)
-        self.assertEqual(sent["embed"].title, "queue")
+        # sweep2 VC-16: キュー表示は V2 (view) で公開送信される。
+        self.assertIn("queue", str(sent["view"].to_components()))
         self.assertNotEqual(sent.get("ephemeral"), True)
 
 
