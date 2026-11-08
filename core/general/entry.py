@@ -163,11 +163,9 @@ class GeneralCog(
         # meme作成のパネル経由フローで画像待ち中のセッション {(channel_id, user_id): Event}
         self._meme_waits: dict[tuple[int, int], asyncio.Event] = {}
         # fastHTMLのファイル待ちセッション {(channel_id, user_id): Event} と
-        # ユーザーごとの最終発行時刻（クールダウン用, monotonic 秒）、
-        # ユーザーごとの発行時刻リスト（同時発行上限用, 実時刻 秒）
+        # ユーザーごとの最終発行時刻（クールダウン用, monotonic 秒）
         self._fast_html_waits: dict[tuple[int, int], asyncio.Event] = {}
         self._fast_html_last_issue: dict[int, float] = {}
-        self._fast_html_active: dict[int, list[float]] = {}
 
 
     async def cog_load(self):

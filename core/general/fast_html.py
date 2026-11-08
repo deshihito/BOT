@@ -35,7 +35,6 @@ FAST_HTML_WAIT_TIMEOUT = 120.0        # ファイル投稿を待つ秒数（meme
 FAST_HTML_TTL_SECONDS = 60 * 60       # 一時URLの有効期限（60分）
 FAST_HTML_MAX_BYTES = 5 * 1024 * 1024  # 添付のサイズ上限（Web の中継側でも強制）
 FAST_HTML_EXTS = (".html", ".htm")
-FAST_HTML_MAX_ACTIVE_PER_USER = 3     # 同時発行の上限（Bot メモリ内で数える）
 # 発行クールダウン: URL 発行を短時間に連打させないための下限間隔。
 # 待ちフロー自体が120秒あるため、体感を損なわない10秒。
 FAST_HTML_COOLDOWN_SECONDS = 10.0
@@ -181,31 +180,6 @@ class FastHtmlResultView(discord.ui.View):
 class FastHtmlMixin:
     """GeneralCog の一部。cogs/general.py で合成される。"""
 
-    def _fast_html_issue_log(self) -> dict[int, list[float]]:
-        store = getattr(self, "_fast_html_active", None)
-        if store is None:
-            store = self._fast_html_active = {}
-        return store
-
-    def _fast_html_active_count(self, user_id: int, now: float) -> int:
-        """TTL 内の発行件数を返す（期限切れ分は掃除する）。"""
-        store = self._fast_html_issue_log()
-        fresh = [
-            t for t in store.get(user_id, [])
-            if now - t < FAST_HTML_TTL_SECONDS
-        ]
-        store[user_id] = fresh
-        return len(fresh)
-
-    def _fast_html_record_issue(self, user_id: int, now: float) -> None:
-        store = self._fast_html_issue_log()
-        fresh = [
-            t for t in store.get(user_id, [])
-            if now - t < FAST_HTML_TTL_SECONDS
-        ]
-        fresh.append(now)
-        store[user_id] = fresh
-
     async def _fast_html_start(self, interaction: discord.Interaction):
         channel = interaction.channel
         if channel is None:
@@ -276,13 +250,6 @@ class FastHtmlMixin:
                 )
                 return
             now = time.time()
-            if self._fast_html_active_count(user_id, now) >= FAST_HTML_MAX_ACTIVE_PER_USER:
-                await msg.reply(
-                    f"同時に公開できるのは{FAST_HTML_MAX_ACTIVE_PER_USER}件までです。"
-                    "有効期限（60分）が切れてからもう一度お試しください。",
-                    mention_author=False,
-                )
-                return
             created = create_fast_html_token(cdn_url, now=now)
             if created is None:
                 await msg.reply(
@@ -291,7 +258,6 @@ class FastHtmlMixin:
                 )
                 return
             token, expires_at = created
-            self._fast_html_record_issue(user_id, now)
             self._fast_html_last_issue[user_id] = time.monotonic()
             embed = discord.Embed(title="fastHTML", color=0xFFFFFF)
             embed.add_field(

@@ -3,7 +3,7 @@
 
 サーバーは実体を保存せず、Discord CDN の添付 URL を BOT_API_KEY で
 HMAC 署名したトークンに包むだけ。その生成・検証ラウンドトリップ、
-改竄検知、メモリ内発行制限、待ちフローの分岐、無効化ボタンの挙動を、
+改竄検知、待ちフローの分岐、無効化ボタンの挙動を、
 Discord / 外部ネットワークに接続せず偽オブジェクトで確かめる。
 """
 import asyncio
@@ -20,7 +20,6 @@ os.environ.setdefault("BOT_API_KEY", "test-key")
 
 from core.general import fast_html
 from core.general.fast_html import (
-    FAST_HTML_MAX_ACTIVE_PER_USER,
     FAST_HTML_MAX_BYTES,
     FAST_HTML_TTL_SECONDS,
     FastHtmlMixin,
@@ -204,7 +203,6 @@ class _Harness(FastHtmlMixin):
         self.bot = bot
         self._fast_html_waits = {}
         self._fast_html_last_issue = {}
-        self._fast_html_active = {}
         self.spawned = []
 
     def _spawn(self, coro):
@@ -245,8 +243,6 @@ class FlowTest(_PinnedKey, unittest.IsolatedAsyncioTestCase):
         embed = kwargs["embed"]
         self.assertEqual(embed.fields[0].value, "page.html")
         self.assertIn("有効期限", embed.fields[1].name)
-        # 発行がメモリ内カウンタに記録される
-        self.assertEqual(len(harness._fast_html_active[42]), 1)
         # 待ちセッションは掃除される
         self.assertEqual(harness._fast_html_waits, {})
 
@@ -258,31 +254,19 @@ class FlowTest(_PinnedKey, unittest.IsolatedAsyncioTestCase):
         await self._run(harness, interaction)
         self.assertEqual(att.read_calls, 0)
         self.assertIn("発行できませんでした", message.replies[0][0][0])
-        self.assertEqual(harness._fast_html_active.get(42, []), [])
 
-    async def test_active_limit_blocks_fourth_issue(self):
-        att = _Att()
-        message = _FakeMessage(42, 7, [att])
-        harness = _Harness(self._bot_returning(message))
-        now = time.time()
-        harness._fast_html_active[42] = [now] * FAST_HTML_MAX_ACTIVE_PER_USER
-        interaction = _FakeInteraction()
-        await self._run(harness, interaction)
-        self.assertIn("同時に公開できるのは", message.replies[0][0][0])
-        self.assertEqual(len(harness._fast_html_active[42]), FAST_HTML_MAX_ACTIVE_PER_USER)
-
-    async def test_expired_issues_do_not_count_toward_limit(self):
-        att = _Att()
-        message = _FakeMessage(42, 7, [att])
-        harness = _Harness(self._bot_returning(message))
-        old = time.time() - FAST_HTML_TTL_SECONDS - 1
-        harness._fast_html_active[42] = [old] * FAST_HTML_MAX_ACTIVE_PER_USER
-        interaction = _FakeInteraction()
-        await self._run(harness, interaction)
-        _args, kwargs = message.replies[0]
-        self.assertIsInstance(kwargs["view"], FastHtmlResultView)
-        # 期限切れ分は prune され、新規発行だけが残る
-        self.assertEqual(len(harness._fast_html_active[42]), 1)
+    async def test_no_active_limit_allows_many_issues(self):
+        # 同時発行の件数制限は撤廃済み: 何件でも続けて発行できる
+        # （クールダウンは開始側の判定なので、ここでは発行のたびに解除する）。
+        harness = _Harness(self._bot_returning(_FakeMessage(42, 7, [_Att()])))
+        for _ in range(6):
+            message = _FakeMessage(42, 7, [_Att()])
+            harness.bot = self._bot_returning(message)
+            harness._fast_html_last_issue.clear()
+            harness.spawned.clear()
+            await self._run(harness, _FakeInteraction())
+            _args, kwargs = message.replies[0]
+            self.assertIsInstance(kwargs["view"], FastHtmlResultView)
 
     async def test_oversize_attachment_ends_with_message(self):
         att = _Att(size=FAST_HTML_MAX_BYTES + 1)
@@ -291,7 +275,6 @@ class FlowTest(_PinnedKey, unittest.IsolatedAsyncioTestCase):
         interaction = _FakeInteraction()
         await self._run(harness, interaction)
         self.assertIn("大きすぎます", message.replies[0][0][0])
-        self.assertEqual(harness._fast_html_active.get(42, []), [])
 
     async def test_timeout_edits_guide_message(self):
         class Bot:
