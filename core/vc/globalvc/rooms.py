@@ -101,6 +101,50 @@ def _room_from_dict(data) -> Optional[RoomConfig]:
         return None
 
 
+# 公式の常設ルーム（言語ごと: 日替わりテーマ部屋＋テーマなしのフリー部屋）。
+# 値: (テーマ部屋の名前, テーマ部屋の説明, フリー部屋の名前, フリー部屋の説明)
+OFFICIAL_ROOMS: dict[str, tuple[str, str, str, str]] = {
+    "ja": ("日本語・日替わりテーマ", "毎日テーマが変わる常設ルームです。テーマに沿って雑談しましょう。",
+           "日本語・フリー雑談", "テーマなしの自由な常設ルームです。"),
+    "en": ("English - Daily Theme", "A permanent room with a new theme every day.",
+           "English - Free Chat", "A permanent room with no theme. Chat about anything."),
+    "zh": ("中文 - 每日主题", "每天更换主题的常设房间。",
+           "中文 - 自由聊天", "没有主题的自由常设房间。"),
+    "ko": ("한국어 - 오늘의 테마", "매일 테마가 바뀌는 상설 방입니다.",
+           "한국어 - 자유 채팅", "테마 없는 자유로운 상설 방입니다."),
+    "id": ("Bahasa Indonesia - Tema Harian", "Ruang permanen dengan tema baru setiap hari.",
+           "Bahasa Indonesia - Obrolan Bebas", "Ruang permanen tanpa tema. Bebas mengobrol apa saja."),
+    "th": ("ไทย - ธีมประจำวัน", "ห้องถาวรที่เปลี่ยนธีมทุกวัน",
+           "ไทย - ห้องคุยอิสระ", "ห้องถาวรไม่มีธีม คุยได้ทุกเรื่อง"),
+    "ar": ("العربية - موضوع اليوم", "غرفة دائمة بموضوع جديد كل يوم.",
+           "العربية - دردشة حرة", "غرفة دائمة بدون موضوع. دردش بحرية."),
+    "hi": ("हिन्दी - दैनिक थीम", "हर दिन नई थीम वाला स्थायी रूम।",
+           "हिन्दी - फ्री चैट", "बिना थीम का स्थायी रूम। किसी भी विषय पर बात करें।"),
+}
+
+
+def ensure_official_rooms() -> list[str]:
+    """公式の常設ルームが無ければ作る（言語ごとにテーマ部屋とフリー部屋）。
+
+    起動時に cog_load から呼ぶ。既にある名前（公式・ユーザー作成を問わない）は
+    一切変更しないので、管理者が後からテーマ等を変更しても元に戻らない。
+    作ったルーム名の一覧を返す。
+    """
+    created: list[str] = []
+    for code, (theme_name, theme_desc, free_name, free_desc) in OFFICIAL_ROOMS.items():
+        for name, desc, auto in ((theme_name, theme_desc, True), (free_name, free_desc, False)):
+            if name in ROOMS:
+                continue
+            ROOMS[name] = RoomConfig(
+                name=name, owner_id=0, owner_guild_id=0,
+                description=desc, permanent=True, theme_auto=auto, language=code)
+            created.append(name)
+    if created:
+        _persist_rooms()
+        logger.info("グローバルVC: 公式の常設ルームを作成しました: %s", ", ".join(created))
+    return created
+
+
 def rotate_room_themes(now=None) -> list[str]:
     """自動テーマの常設ルームに、その日のテーマを割り当てる。
 
