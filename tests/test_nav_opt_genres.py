@@ -12,7 +12,7 @@ class GenreAbsorptionTest(unittest.TestCase):
         values = [value for _label, value in GENERAL_ACTIONS["custom"]]
         self.assertIn("translation_settings", values)
         total = sum(len(items) for items in GENERAL_ACTIONS.values())
-        self.assertEqual(total, 76)  # 機能数再編で general に独立入口13件を追加した後の総数（旧63件＋13件）
+        self.assertEqual(total, 69)  # RTA 個別ボード8件を統合ボード1件に集約（76−8＋1）
 
     def test_support_single_action_genres_absorbed(self):
         from cogs.support import SUPPORT_ACTIONS_BY_GENRE, SUPPORT_GENRES

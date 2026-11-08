@@ -57,6 +57,7 @@ EXP_STORE_KEY = "exp"
 GENERAL_GENRES = {
     "money": ("マネー", ""),
     "rta": ("ランキング", ""),
+    "boardnotify_rta": ("boardNotify RTA", ""),
     "exp": ("EXP・レベル", "チャット・VC・generalのEXPとレベル"),
     "survival": ("fujo status", "メンバーの安否・不在の検知"),
     "garden": ("栽培", ""),
@@ -124,14 +125,12 @@ GENERAL_ACTIONS = {
     "rta": [
         ("ランキング一覧", "rankings"),
         ("総合資産ランキング", "asset_leaderboard"),
-        ("bump RTAランキング", "bump_leaderboard"),
-        ("up RTAランキング", "up_leaderboard"),
-        ("bump RTA全サーバーランキング", "bump_global_leaderboard"),
-        ("up RTA全サーバーランキング", "up_global_leaderboard"),
-        ("bump 最遅ランキング", "bump_slowest"),
-        ("up 最遅ランキング", "up_slowest"),
-        ("bump 最遅（全サーバー）", "bump_global_slowest"),
-        ("up 最遅（全サーバー）", "up_global_slowest"),
+    ],
+    # bump/up 等の RTA は統合ボード1件に集約（サービス×最速/最遅×スコープは
+    # ボード内で切り替える）。旧個別ボード8件の ID は dispatch 側の互換
+    # プリセットとしてだけ残る（core/general/entry.py の RTA_BOARD_PRESETS）。
+    "boardnotify_rta": [
+        ("RTAランキング", "rta_board"),
     ],
     "survival": [
         ("追跡登録・解除", "fujo_register"),

@@ -37,11 +37,11 @@ class PanelWarp:
 
 
 PANEL_WARPS: tuple[PanelWarp, ...] = (
-    # general:rta ⇔ support:boardnotify / support:rta
-    PanelWarp("support", "boardnotify", "general", "rta", "RTAランキングへ移動"),
-    PanelWarp("general", "rta", "support", "boardnotify", "boardNotifyへ移動"),
-    PanelWarp("support", "rta", "general", "rta", "RTAランキングへ移動"),
-    PanelWarp("general", "rta", "support", "rta", "RTA設定へ移動"),
+    # general:boardnotify_rta ⇔ support:boardnotify / support:rta
+    PanelWarp("support", "boardnotify", "general", "boardnotify_rta", "RTAランキングへ移動"),
+    PanelWarp("general", "boardnotify_rta", "support", "boardnotify", "boardNotifyへ移動"),
+    PanelWarp("support", "rta", "general", "boardnotify_rta", "RTAランキングへ移動"),
+    PanelWarp("general", "boardnotify_rta", "support", "rta", "RTA設定へ移動"),
     # support:automation(levelup) ⇔ general:exp
     PanelWarp("support", "automation", "general", "exp", "EXP・レベルへ移動",
               anchor="levelup_notify"),
@@ -62,13 +62,13 @@ PANEL_WARPS: tuple[PanelWarp, ...] = (
               scope="action", anchor="globalchat"),
     PanelWarp("vc", "gvc_rooms", "support", "automation", "グローバルチャット設定へ移動",
               anchor="globalchat"),
-    # general:money ⇔ general:rta
-    PanelWarp("general", "money", "general", "rta", "RTAランキングへ移動"),
-    PanelWarp("general", "rta", "general", "money", "マネーへ移動"),
-    # game ハブ（今月のゲーム王）⇔ general:rta
-    PanelWarp("game", None, "general", "rta", "RTAランキングへ移動",
+    # general:money ⇔ general:boardnotify_rta
+    PanelWarp("general", "money", "general", "boardnotify_rta", "RTAランキングへ移動"),
+    PanelWarp("general", "boardnotify_rta", "general", "money", "マネーへ移動"),
+    # game ハブ（今月のゲーム王）⇔ general:boardnotify_rta
+    PanelWarp("game", None, "general", "boardnotify_rta", "RTAランキングへ移動",
               anchor="monthly_king"),
-    PanelWarp("general", "rta", "game", None, "ゲームへ移動",
+    PanelWarp("general", "boardnotify_rta", "game", None, "ゲームへ移動",
               anchor="monthly_king"),
 )
 

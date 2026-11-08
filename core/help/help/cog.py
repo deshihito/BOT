@@ -67,7 +67,8 @@ def entry_line(entry: dict) -> str:
 # カテゴリに割り当てる（テストで網羅を固定する）。
 ACTION_CATEGORY_MAP: dict[str, list[tuple[str, str | None]]] = {
     "support": [("general", "survival"), ("support", "automation")],
-    "economy": [("general", "money"), ("general", "rta")],
+    "economy": [("general", "money"), ("general", "rta"),
+                ("general", "boardnotify_rta")],
     "game": [("game", None)],
     "voice": [("vc", None)],
     # 導線最適化ラウンド4: M8 で廃止された miq ジャンル（custom へ吸収済み）

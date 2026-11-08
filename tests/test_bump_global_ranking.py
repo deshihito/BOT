@@ -1,9 +1,10 @@
 # -*- coding: utf-8 -*-
-"""bump/up RTA 全サーバーランキングの表示導線のテスト。Discord には接続しない。
+"""boardNotify RTA 統合ボードの表示導線のテスト。Discord には接続しない。
 
-- core/general/common.py: rta ジャンルに全サーバー系4件が並ぶ
-- core/general/entry.py: dispatch_general が wallet.leaderboard へ
-  (category, scope, slowest) を正しく渡す（既存の local 系も含む）
+- /general の新ジャンル boardnotify_rta に統合ボード（rta_board）1件だけがある
+- 旧 bump/up 個別ボード8件はジャンルにもレジストリにも無い
+- dispatch_general は rta_board で統合ボードを開き、旧8件の ID は互換
+  プリセット（サービス/スコープ/最速最遅）として統合ボードに着地する
 """
 
 import os
@@ -21,37 +22,64 @@ if str(ROOT) not in sys.path:
 for _name, _value in {'BOT_API_BASE_URL': 'http://127.0.0.1:8787', 'BOT_API_KEY': 'dummy-key'}.items():
     os.environ.setdefault(_name, _value)
 
+OLD_BOARD_VALUES = (
+    "bump_leaderboard", "up_leaderboard",
+    "bump_global_leaderboard", "up_global_leaderboard",
+    "bump_slowest", "up_slowest",
+    "bump_global_slowest", "up_global_slowest",
+)
 
-class RtaGenreActionsTest(unittest.TestCase):
-    def test_global_actions_in_rta_genre(self):
+
+class UnifiedBoardGenreTest(unittest.TestCase):
+    def test_boardnotify_rta_genre_has_single_board_action(self):
+        from core.general.common import GENERAL_ACTIONS, GENERAL_GENRES
+
+        self.assertEqual(GENERAL_GENRES["boardnotify_rta"][0], "boardNotify RTA")
+        self.assertEqual(
+            GENERAL_ACTIONS["boardnotify_rta"], [("RTAランキング", "rta_board")])
+
+    def test_old_board_actions_removed_everywhere(self):
+        from core.general.common import GENERAL_ACTIONS
+        from core.general import action_registry
+
+        all_values = [v for items in GENERAL_ACTIONS.values() for _label, v in items]
+        registry = action_registry.default_registry()
+        for value in OLD_BOARD_VALUES:
+            self.assertNotIn(value, all_values, value)
+            self.assertIsNone(registry.get(f"general:{value}"), value)
+
+    def test_rankings_genre_keeps_only_bundle_and_asset(self):
         from core.general.common import GENERAL_ACTIONS
 
         values = [v for _label, v in GENERAL_ACTIONS["rta"]]
-        for value in ("bump_global_leaderboard", "up_global_leaderboard",
-                      "bump_global_slowest", "up_global_slowest"):
-            self.assertIn(value, values)
+        self.assertEqual(values, ["rankings", "asset_leaderboard"])
 
-    def test_global_actions_registered(self):
+    def test_board_action_registered_in_new_genre(self):
         from core.general import action_registry
 
-        registry = action_registry.default_registry()
-        for value in ("bump_global_leaderboard", "up_global_leaderboard",
-                      "bump_global_slowest", "up_global_slowest"):
-            spec = registry.get(f"general:{value}")
-            self.assertIsNotNone(spec, value)
-            self.assertEqual(spec.genre, "rta", value)
+        spec = action_registry.default_registry().get("general:rta_board")
+        self.assertIsNotNone(spec)
+        self.assertEqual(spec.genre, "boardnotify_rta")
+
+    def test_registry_totals_after_unification(self):
+        # 旧8件 → 統合1件で general 76→69 / 全体 251→244（実 import での検証値）
+        from core.general import action_registry
+
+        specs = list(action_registry.default_registry()._by_id.values())
+        self.assertEqual(len(specs), 244)
+        self.assertEqual(len([s for s in specs if s.root == "general"]), 69)
 
 
-class GlobalDispatchTest(unittest.IsolatedAsyncioTestCase):
-    def make_cog_and_interaction(self, wallet):
+class UnifiedBoardDispatchTest(unittest.IsolatedAsyncioTestCase):
+    def make_cog_and_interaction(self, rta):
         from cogs.general import GeneralCog
 
         cog = GeneralCog.__new__(GeneralCog)
         cog.bot = types.SimpleNamespace(
-            get_cog=lambda name: wallet if name == "WalletCog" else None)
+            get_cog=lambda name: rta if name == "BumpRta" else None)
         interaction = types.SimpleNamespace(
             guild_id=123, guild=None,
-            user=types.SimpleNamespace(id=456),
+            user=types.SimpleNamespace(id=456, display_name="自分"),
             response=types.SimpleNamespace(
                 is_done=lambda: False,
                 send_message=AsyncMock(),
@@ -64,46 +92,56 @@ class GlobalDispatchTest(unittest.IsolatedAsyncioTestCase):
     async def dispatch(self, value):
         from core.general import action_usage
         from core.support import command_control
+        import discord
 
-        wallet = types.SimpleNamespace(
-            leaderboard=AsyncMock(), user_status=AsyncMock())
-        cog, interaction = self.make_cog_and_interaction(wallet)
+        rta = types.SimpleNamespace(
+            build_rta_board=AsyncMock(
+                return_value=(discord.Embed(title="ボード"), None)))
+        cog, interaction = self.make_cog_and_interaction(rta)
         with mock.patch.object(command_control, "guard", new=AsyncMock(return_value=True)), \
                 mock.patch.object(action_usage, "record_safely_in_background", lambda *a: None):
             await cog.dispatch_general(interaction, value)
-        return wallet
+        return rta, interaction
 
-    async def test_local_fastest_unchanged(self):
-        wallet = await self.dispatch("bump_leaderboard")
-        args, kwargs = wallet.leaderboard.await_args
-        self.assertEqual(args[1].value, "bump")
-        self.assertIsNone(args[2])
-        self.assertFalse(kwargs["slowest"])
+    def board_view(self, interaction):
+        kwargs = interaction.followup.send.await_args.kwargs
+        return kwargs["view"].panel
 
-    async def test_local_slowest_unchanged(self):
-        wallet = await self.dispatch("up_slowest")
-        args, kwargs = wallet.leaderboard.await_args
-        self.assertEqual(args[1].value, "up")
-        self.assertIsNone(args[2])
-        self.assertTrue(kwargs["slowest"])
+    async def test_rta_board_opens_with_defaults(self):
+        rta, interaction = await self.dispatch("rta_board")
+        view = self.board_view(interaction)
+        self.assertEqual(view.event_type, "bump")
+        self.assertEqual(view.scope, "local")
+        self.assertFalse(view.slowest)
+        args, kwargs = rta.build_rta_board.await_args
+        self.assertEqual(args, ("bump", "local", False))
+        self.assertEqual(kwargs["guild_id"], 123)
+        self.assertEqual(kwargs["user_id"], 456)
 
-    async def test_global_fastest(self):
+    async def test_legacy_local_fastest_presets(self):
+        for value, event in (("bump_leaderboard", "bump"), ("up_leaderboard", "up")):
+            _rta, interaction = await self.dispatch(value)
+            view = self.board_view(interaction)
+            self.assertEqual((view.event_type, view.scope, view.slowest),
+                             (event, "local", False), value)
+
+    async def test_legacy_global_fastest_presets(self):
         for value, event in (("bump_global_leaderboard", "bump"),
                              ("up_global_leaderboard", "up")):
-            wallet = await self.dispatch(value)
-            args, kwargs = wallet.leaderboard.await_args
-            self.assertEqual(args[1].value, event, value)
-            self.assertEqual(args[2].value, "global", value)
-            self.assertFalse(kwargs["slowest"], value)
+            _rta, interaction = await self.dispatch(value)
+            view = self.board_view(interaction)
+            self.assertEqual((view.event_type, view.scope, view.slowest),
+                             (event, "global", False), value)
 
-    async def test_global_slowest(self):
-        for value, event in (("bump_global_slowest", "bump"),
-                             ("up_global_slowest", "up")):
-            wallet = await self.dispatch(value)
-            args, kwargs = wallet.leaderboard.await_args
-            self.assertEqual(args[1].value, event, value)
-            self.assertEqual(args[2].value, "global", value)
-            self.assertTrue(kwargs["slowest"], value)
+    async def test_legacy_slowest_presets(self):
+        for value, event, scope in (("bump_slowest", "bump", "local"),
+                                    ("up_slowest", "up", "local"),
+                                    ("bump_global_slowest", "bump", "global"),
+                                    ("up_global_slowest", "up", "global")):
+            _rta, interaction = await self.dispatch(value)
+            view = self.board_view(interaction)
+            self.assertEqual((view.event_type, view.scope, view.slowest),
+                             (event, scope, True), value)
 
 
 if __name__ == "__main__":

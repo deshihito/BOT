@@ -34,6 +34,7 @@ from core.general.ai import logfare
 from core.support.usage_stats import usage_stats
 from core.general.ai import ai_omnirush, ai_preferences, ai_provider_router
 from core.game.game.game_guides import GAME_GUIDES, GAME_ORDER
+from core.game.rta.views import RtaBoardView
 from core.general import translation_settings as translation
 from core.support.localization import localization
 from core.game.game import prison as prison_core
@@ -79,6 +80,22 @@ from core.general.translation import TranslationMixin
 from core.general.shortcuts import ShortcutsMixin
 
 
+# boardNotify RTA 統合ボード（general:rta_board）への旧 ID 互換プリセット。
+# 旧 bump/up 個別ボード8件はレジストリから外したが、保存済みショートカット・
+# /quick・BOT fixer 設定などが旧 ID を引いても壊れないよう、dispatch では
+# 統合ボードを該当の初期状態（サービス/スコープ/最速最遅）で開く。
+RTA_BOARD_PRESETS = {
+    "bump_leaderboard": {"event_type": "bump"},
+    "up_leaderboard": {"event_type": "up"},
+    "bump_global_leaderboard": {"event_type": "bump", "scope": "global"},
+    "up_global_leaderboard": {"event_type": "up", "scope": "global"},
+    "bump_slowest": {"event_type": "bump", "slowest": True},
+    "up_slowest": {"event_type": "up", "slowest": True},
+    "bump_global_slowest": {"event_type": "bump", "scope": "global", "slowest": True},
+    "up_global_slowest": {"event_type": "up", "scope": "global", "slowest": True},
+}
+
+
 class RankingsView(discord.ui.View):
     """ランキングの集約ビュー（導線最適化 M7）。
 
@@ -89,10 +106,7 @@ class RankingsView(discord.ui.View):
     TARGETS = (
         ("コイン保有", "coin_leaderboard"),
         ("総合資産", "asset_leaderboard"),
-        ("bump RTA", "bump_leaderboard"),
-        ("up RTA", "up_leaderboard"),
-        ("bump RTA 全サーバー", "bump_global_leaderboard"),
-        ("up RTA 全サーバー", "up_global_leaderboard"),
+        ("boardNotify RTA", "rta_board"),
         ("fujo status", "fujo_ranking"),
         ("EXP", "exp_ranking"),
     )
@@ -530,10 +544,25 @@ class GeneralCog(
                 return await market_cog.open_buy(interaction)
             return await market_cog.open_sell(interaction)
 
-        if value in {"pay", "status", "coin_leaderboard", "asset_leaderboard",
-                     "bump_leaderboard", "up_leaderboard", "bump_slowest", "up_slowest",
-                     "bump_global_leaderboard", "up_global_leaderboard",
-                     "bump_global_slowest", "up_global_slowest"}:
+        if value == "rta_board" or value in RTA_BOARD_PRESETS:
+            # boardNotify RTA 統合ボード。旧個別ボード8件の ID は互換プリセット
+            # （RTA_BOARD_PRESETS）として初期状態に読み替える。
+            rta_cog = self.bot.get_cog("BumpRta")
+            if rta_cog is None:
+                return await self._safe_respond(
+                    interaction, feature_not_loaded("boardNotify RTA"))
+            # 先にACKする: ボード取得は DB 参照と表示名解決を伴い、応答前に
+            # 行うと panel_recovery に死んだパネルと誤判定される（EXP 系と同じ）。
+            await interaction.response.defer()
+            view = RtaBoardView(
+                rta_cog, interaction.guild_id, interaction.user.id,
+                interaction.user.display_name,
+                **RTA_BOARD_PRESETS.get(value, {}))
+            await view.load()
+            return await interaction.followup.send(
+                view=as_panel_v2(view), files=view.files())
+
+        if value in {"pay", "status", "coin_leaderboard", "asset_leaderboard"}:
             if wallet is None:
                 return await self._safe_respond(interaction, feature_not_loaded("WalletCog"))
             if value == "pay":
@@ -542,16 +571,8 @@ class GeneralCog(
                 return await wallet.user_status(interaction)
             if value == "coin_leaderboard":
                 return await wallet.leaderboard(interaction)
-            if value == "asset_leaderboard":
-                return await wallet.leaderboard(
-                    interaction, app_commands.Choice(name="asset", value="asset"))
-            # bump/up RTA ランキング: このサーバー / 全サーバー × 最速 / 最遅
-            event_type = "bump" if value.startswith("bump") else "up"
-            scope = (app_commands.Choice(name="全サーバー", value="global")
-                     if "_global" in value else None)
             return await wallet.leaderboard(
-                interaction, app_commands.Choice(name=event_type, value=event_type),
-                scope, slowest=value.endswith("_slowest"))
+                interaction, app_commands.Choice(name="asset", value="asset"))
 
         if value == "garden":
             garden_cog = self.bot.get_cog("GardenCog")
