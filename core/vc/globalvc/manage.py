@@ -263,7 +263,13 @@ class ManageMixin:
                 f"{FAILED} ルーム **{room_name}** は存在しません。", ephemeral=True
             )
 
-        if not _can_delete_room(room, r.user, r.guild):
+        # Bot管理者はどのルームでも削除できる（常設・通常どちらも、作成者でなくても）
+        if not await self._is_bot_admin(r.user) and not _can_delete_room(room, r.user, r.guild):
+            if room.permanent:
+                return await r.send(
+                    f"{FAILED} 常設ルームを削除できるのはBot管理者だけです。",
+                    ephemeral=True,
+                )
             return await r.send(
                 f"{FAILED} このルームを削除できるのは、作成者か、ルームを作ったサーバーで"
                 "「サーバー管理」権限を持つ人だけです。",

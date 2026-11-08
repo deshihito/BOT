@@ -224,6 +224,73 @@ class AdminGateTest(unittest.IsolatedAsyncioTestCase):
         await self.mixin._room_theme_impl(r, "存在しない", "テーマ")
 
 
+class AdminDeleteTest(unittest.IsolatedAsyncioTestCase):
+    """Bot管理者は常設・通常どちらのルームも削除できる（作成者でなくても）。"""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.store = voice_restore.reset_store(Path(self.tmp.name) / "voice_restore.json")
+        rooms_mod.ROOMS.clear()
+        rooms_mod.GLOBAL_ROOMS.clear()
+
+    def tearDown(self):
+        rooms_mod.ROOMS.clear()
+        rooms_mod.GLOBAL_ROOMS.clear()
+        self.tmp.cleanup()
+
+    def make_cog(self):
+        from core.vc.globalvc.entry import GlobalVCCog
+
+        cog = GlobalVCCog.__new__(GlobalVCCog)
+        cog.bot = FakeBot({ADMIN_ID})
+        return cog
+
+    async def delete(self, user_id, room_name):
+        cog = self.make_cog()
+        r = FakeResponder(user_id)
+        await cog._room_delete_impl(r, room_name)
+        return r
+
+    async def test_admin_deletes_permanent_room_of_other(self):
+        rooms_mod.ROOMS["常設"] = RoomConfig(
+            name="常設", owner_id=555, owner_guild_id=10, permanent=True)
+        await self.delete(ADMIN_ID, "常設")
+        self.assertNotIn("常設", rooms_mod.ROOMS)
+
+    async def test_admin_deletes_normal_room_of_other(self):
+        rooms_mod.ROOMS["通常"] = RoomConfig(name="通常", owner_id=555, owner_guild_id=10)
+        await self.delete(ADMIN_ID, "通常")
+        self.assertNotIn("通常", rooms_mod.ROOMS)
+
+    async def test_non_admin_cannot_delete_permanent_room(self):
+        rooms_mod.ROOMS["常設"] = RoomConfig(
+            name="常設", owner_id=555, owner_guild_id=10, permanent=True)
+        r = await self.delete(111, "常設")
+        self.assertIn("常設", rooms_mod.ROOMS)
+        self.assertIn("Bot管理者だけです", r.sent[-1])
+
+    async def test_non_admin_cannot_delete_normal_room_of_other(self):
+        rooms_mod.ROOMS["通常"] = RoomConfig(name="通常", owner_id=555, owner_guild_id=10)
+        await self.delete(111, "通常")
+        self.assertIn("通常", rooms_mod.ROOMS)
+
+    async def test_creator_still_deletes_own_normal_room(self):
+        rooms_mod.ROOMS["通常"] = RoomConfig(name="通常", owner_id=111, owner_guild_id=10)
+        await self.delete(111, "通常")
+        self.assertNotIn("通常", rooms_mod.ROOMS)
+
+
+class ThemePoolExpansionTest(unittest.TestCase):
+    def test_pool_has_40_unique_themes(self):
+        self.assertEqual(len(themes.THEME_POOL), 40)
+        self.assertEqual(len(set(themes.THEME_POOL)), 40)
+
+    def test_rotation_covers_whole_pool(self):
+        base = datetime.date(2026, 1, 1)
+        seen = {themes.theme_for("room", base + datetime.timedelta(days=i)) for i in range(40)}
+        self.assertEqual(seen, set(themes.THEME_POOL))
+
+
 class GvcPermCommandTest(unittest.IsolatedAsyncioTestCase):
     """常設ルーム作成は !gvcperm コマンドからだけ行う（ジャンルには置かない）。"""
 
