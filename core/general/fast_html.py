@@ -17,6 +17,12 @@ import time
 
 import discord
 
+from core.general.attachment_wait import (
+    AttachmentWaitCancelView,
+    edit_original_response_quietly,
+    wait_for_attachment,
+)
+
 logger = logging.getLogger("cogs.general")
 
 FAST_HTML_WAIT_TIMEOUT = 120.0        # ファイル投稿を待つ秒数（meme と同じ）
@@ -154,22 +160,15 @@ def fast_html_api_delete(token: str, owner_id: int) -> bool:
 # ------------------------------------------------------------
 # Views
 # ------------------------------------------------------------
-class FastHtmlCancelView(discord.ui.View):
-    """ファイル待ちをキャンセルするためのボタン（meme と同じ作り）。"""
+class FastHtmlCancelView(AttachmentWaitCancelView):
+    """ファイル待ちをキャンセルするためのボタン。"""
 
     def __init__(self, cog: "FastHtmlMixin", key: tuple[int, int], user_id: int):
-        super().__init__(timeout=FAST_HTML_WAIT_TIMEOUT + 30)
-        self.cog, self.key, self.user_id = cog, key, user_id
-
-    async def interaction_check(self, interaction: discord.Interaction) -> bool:
-        return interaction.user.id == self.user_id
-
-    @discord.ui.button(label="キャンセル", style=discord.ButtonStyle.secondary)
-    async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button):
-        event = self.cog._fast_html_waits.get(self.key)
-        if event is not None:
-            event.set()
-        await interaction.response.edit_message(content="fastHTMLをキャンセルしました。", view=None)
+        super().__init__(
+            cog, "_fast_html_waits", key, user_id,
+            timeout=FAST_HTML_WAIT_TIMEOUT + 30,
+            cancel_text="fastHTMLをキャンセルしました。",
+        )
 
 
 class FastHtmlResultView(discord.ui.View):
@@ -251,24 +250,16 @@ class FastHtmlMixin:
                 and _fast_html_attachment(m) is not None
             )
 
-        msg_task = asyncio.ensure_future(self.bot.wait_for("message", check=check))
-        cancel_task = asyncio.ensure_future(event.wait())
         try:
-            done, _pending = await asyncio.wait(
-                {msg_task, cancel_task}, timeout=FAST_HTML_WAIT_TIMEOUT,
-                return_when=asyncio.FIRST_COMPLETED,
-            )
-            if cancel_task in done:
+            kind, msg = await wait_for_attachment(
+                self.bot, check=check, event=event, timeout=FAST_HTML_WAIT_TIMEOUT)
+            if kind == "cancel":
                 return  # キャンセルボタン側で案内済み
-            if msg_task not in done:
-                try:
-                    await interaction.edit_original_response(
-                        content="時間切れのためfastHTMLを終了しました。", view=None,
-                    )
-                except discord.HTTPException:
-                    logger.debug("fastHTML: 応答メッセージの編集に失敗しました", exc_info=True)
+            if kind == "timeout":
+                await edit_original_response_quietly(
+                    interaction, "fastHTML",
+                    content="時間切れのためfastHTMLを終了しました。", view=None)
                 return
-            msg = msg_task.result()
             att = _fast_html_attachment(msg)
             if att is None:
                 return
@@ -335,15 +326,9 @@ class FastHtmlMixin:
                 view=FastHtmlResultView(self, token, user_id),
                 mention_author=False,
             )
-            try:
-                await interaction.edit_original_response(
-                    content="fastHTMLを発行しました。", view=None,
-                )
-            except discord.HTTPException:
-                logger.debug("fastHTML: 応答メッセージの編集に失敗しました", exc_info=True)
+            await edit_original_response_quietly(
+                interaction, "fastHTML", content="fastHTMLを発行しました。", view=None)
         except Exception:
             logger.exception("fastHTML: ファイル待ち処理に失敗しました")
         finally:
-            for task in (msg_task, cancel_task):
-                task.cancel()
             self._fast_html_waits.pop(key, None)

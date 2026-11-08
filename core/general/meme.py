@@ -3,6 +3,11 @@
 from __future__ import annotations
 
 from .common import *
+from core.general.attachment_wait import (
+    AttachmentWaitCancelView,
+    edit_original_response_quietly,
+    wait_for_attachment,
+)
 from .miq.miq import (
     _MIQ_ASSET_FONTS, _miq_available_fonts, _miq_clean_text, _miq_load_font,
     _miq_save_png, _miq_wrap, miq_get_prefs, miq_is_refusing,
@@ -153,22 +158,15 @@ class MemeTextModal(discord.ui.Modal, title="memeを作成"):
         await self.handler(interaction, top, bottom)
 
 
-class MemeCancelView(discord.ui.View):
+class MemeCancelView(AttachmentWaitCancelView):
     """パネル経由の meme 作成で、画像待ちをキャンセルするためのボタン。"""
 
     def __init__(self, cog: "GeneralCog", key: tuple[int, int], user_id: int):
-        super().__init__(timeout=MEME_WAIT_TIMEOUT + 30)
-        self.cog, self.key, self.user_id = cog, key, user_id
-
-    async def interaction_check(self, interaction: discord.Interaction) -> bool:
-        return interaction.user.id == self.user_id
-
-    @discord.ui.button(label="キャンセル", style=discord.ButtonStyle.secondary)
-    async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button):
-        event = self.cog._meme_waits.get(self.key)
-        if event is not None:
-            event.set()
-        await interaction.response.edit_message(content="meme作成をキャンセルしました。", view=None)
+        super().__init__(
+            cog, "_meme_waits", key, user_id,
+            timeout=MEME_WAIT_TIMEOUT + 30,
+            cancel_text="meme作成をキャンセルしました。",
+        )
 
 
 class MemeMixin:
@@ -246,24 +244,16 @@ class MemeMixin:
                 and _meme_image_attachment(m) is not None
             )
 
-        msg_task = asyncio.ensure_future(self.bot.wait_for("message", check=check))
-        cancel_task = asyncio.ensure_future(event.wait())
         try:
-            done, _pending = await asyncio.wait(
-                {msg_task, cancel_task}, timeout=MEME_WAIT_TIMEOUT,
-                return_when=asyncio.FIRST_COMPLETED,
-            )
-            if cancel_task in done:
+            kind, msg = await wait_for_attachment(
+                self.bot, check=check, event=event, timeout=MEME_WAIT_TIMEOUT)
+            if kind == "cancel":
                 return  # キャンセルボタン側で案内済み
-            if msg_task not in done:
-                try:
-                    await interaction.edit_original_response(
-                        content="時間切れのためmeme作成を終了しました。", view=None,
-                    )
-                except discord.HTTPException:
-                    logger.debug("meme: 応答メッセージの編集に失敗しました", exc_info=True)
+            if kind == "timeout":
+                await edit_original_response_quietly(
+                    interaction, "meme",
+                    content="時間切れのためmeme作成を終了しました。", view=None)
                 return
-            msg = msg_task.result()
             att = _meme_image_attachment(msg)
             if att is None:
                 return
@@ -286,15 +276,11 @@ class MemeMixin:
                 await msg.reply(error or "meme画像を作れませんでした。", mention_author=False)
                 return
             await msg.reply(file=file, mention_author=False)
-            try:
-                await interaction.edit_original_response(content="memeを作成しました。", view=None)
-            except discord.HTTPException:
-                logger.debug("meme: 応答メッセージの編集に失敗しました", exc_info=True)
+            await edit_original_response_quietly(
+                interaction, "meme", content="memeを作成しました。", view=None)
         except Exception:
             logger.exception("meme: 画像待ち処理に失敗しました")
         finally:
-            for task in (msg_task, cancel_task):
-                task.cancel()
             self._meme_waits.pop(key, None)
 
 

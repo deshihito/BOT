@@ -24,6 +24,7 @@ from discord import app_commands
 from discord.ext import commands
 
 from core.general import action_registry
+from core.general.prompt_view import OwnerPromptView
 
 logger = logging.getLogger(__name__)
 
@@ -145,37 +146,7 @@ def missing_required_params(spec: action_registry.ActionSpec) -> list[action_reg
 
 def _convert_param_input(param: action_registry.ParamSpec, raw: str) -> Any:
     """モーダルの文字列入力を ParamSpec の型に変換する（変換できなければ ValueError）。"""
-    raw = (raw or "").strip()
-    label = param.label or param.name
-    if param.type == "int":
-        try:
-            return int(raw)
-        except ValueError:
-            try:
-                value = float(raw)
-            except ValueError:
-                raise ValueError(f"{label}は整数で入力してください。") from None
-            if not value.is_integer():
-                raise ValueError(f"{label}は整数で入力してください。")
-            return int(value)
-    if param.type in {"number", "duration"}:
-        try:
-            return float(raw)
-        except ValueError:
-            raise ValueError(f"{label}は数値で入力してください。") from None
-    if param.type == "bool":
-        lowered = raw.lower()
-        if lowered in {"true", "on", "オン", "有効", "yes", "1"}:
-            return True
-        if lowered in {"false", "off", "オフ", "無効", "no", "0"}:
-            return False
-        raise ValueError(f"{label}はオン/オフで入力してください。")
-    if param.type == "choice":
-        for choice_label, choice_value in param.choices:
-            if raw == str(choice_value) or raw == str(choice_label):
-                return choice_value
-        raise ValueError(f"{label}は選択肢の中から入力してください。")
-    return raw
+    return action_registry.convert_param_input(param, raw)
 
 
 class QuickParamModal(discord.ui.Modal, title="不足している引数の入力"):
@@ -212,7 +183,7 @@ class QuickParamModal(discord.ui.Modal, title="不足している引数の入力
         await dispatch_action(self.cog.bot, interaction, self.spec, params)
 
 
-class QuickParamPromptView(discord.ui.View):
+class QuickParamPromptView(OwnerPromptView):
     """required 引数が不足したときに、実行者へ入力を求めるビュー。
 
     押せるのは /quick を実行した本人だけ。入力が確定するまで対象アクションは
@@ -222,20 +193,14 @@ class QuickParamPromptView(discord.ui.View):
     def __init__(self, cog: "QuickCog", spec: action_registry.ActionSpec,
                  missing: list[action_registry.ParamSpec], *, user_id: int,
                  timeout: float = 300):
-        super().__init__(timeout=timeout)
+        super().__init__(owner_id=user_id, timeout=timeout)
         self.cog = cog
         self.spec = spec
         self.missing = missing
         self.user_id = user_id
-        self.message: discord.Message | None = None
-        self.finished = False
 
-    async def interaction_check(self, interaction: discord.Interaction) -> bool:
-        return interaction.user.id == self.user_id
-
-    def _disable_all(self) -> None:
-        for child in self.children:
-            child.disabled = True
+    def timeout_text(self) -> str:
+        return f"「{self.spec.label}」は時間切れのため実行しませんでした。"
 
     @discord.ui.button(label="不足分を入力", style=discord.ButtonStyle.primary)
     async def input_button(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -249,16 +214,6 @@ class QuickParamPromptView(discord.ui.View):
         await interaction.response.edit_message(
             content=f"「{self.spec.label}」はキャンセルしました。実行していません。", view=self)
         self.stop()
-
-    async def on_timeout(self) -> None:
-        if self.finished or self.message is None:
-            return
-        self._disable_all()
-        try:
-            await self.message.edit(
-                content=f"「{self.spec.label}」は時間切れのため実行しませんでした。", view=self)
-        except Exception:
-            logger.debug("quick param prompt timeout edit failed", exc_info=True)
 
 
 # ---------------------------------------------------------------------------

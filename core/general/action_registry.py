@@ -225,6 +225,59 @@ class ActionSpec:
             raise ValueError(f"ActionSpec {self.id!r}: params の名前が重複しています")
 
 
+def convert_param_input(param, raw: str) -> Any:
+    """モーダル等の文字列入力をパラメータの型に変換する（変換できなければ ValueError）。
+
+    param は ParamSpec でも dict でもよい。/quick と AI tools で別々に
+    実装されていた変換規則の統合先（GEN-09）。
+    """
+    import re as _re
+
+    if isinstance(param, dict):
+        label = param.get("label") or param.get("name") or "引数"
+        ptype = param.get("type")
+        choices = param.get("choices") or []
+    else:
+        label = param.label or param.name
+        ptype = param.type
+        choices = param.choices
+    raw = (raw or "").strip()
+    if ptype == "int":
+        try:
+            return int(raw)
+        except ValueError:
+            try:
+                value = float(raw)
+            except ValueError:
+                raise ValueError(f"{label}は整数で入力してください。") from None
+            if not value.is_integer():
+                raise ValueError(f"{label}は整数で入力してください。")
+            return int(value)
+    if ptype in {"number", "duration"}:
+        try:
+            return float(raw)
+        except ValueError:
+            raise ValueError(f"{label}は数値で入力してください。") from None
+    if ptype == "bool":
+        lowered = raw.lower()
+        if lowered in {"true", "on", "オン", "有効", "yes", "1"}:
+            return True
+        if lowered in {"false", "off", "オフ", "無効", "no", "0"}:
+            return False
+        raise ValueError(f"{label}はオン/オフで入力してください。")
+    if ptype == "choice":
+        for choice_label, choice_value in choices:
+            if raw == str(choice_value) or raw == str(choice_label):
+                return choice_value
+        raise ValueError(f"{label}は選択肢の中から入力してください。")
+    if ptype in {"member", "user", "channel", "role"}:
+        digits = _re.sub(r"\D", "", raw)
+        if not digits:
+            raise ValueError(f"{label}は対象を指定してください。")
+        return int(digits)
+    return raw
+
+
 def validate_params(spec: ActionSpec, params: dict | None) -> dict[str, Any]:
     """保存された params を ActionSpec の ParamSpec で検証し、検証済みの dict を返す。
 

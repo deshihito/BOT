@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 from .common import *
+from core.general.prompt_view import OwnerPromptView
 from core.support.messages import PAY_MIN_AMOUNT, PAY_TO_BOT, PAY_TO_SELF, feature_not_loaded
 
-class PayConfirmView(discord.ui.View):
+class PayConfirmView(OwnerPromptView):
     """送金の確認ビュー（B-8）。
 
     PayModal 送信直後は送金せず、宛先の表示名＋金額を見せて本人にだけ
@@ -15,13 +16,11 @@ class PayConfirmView(discord.ui.View):
     """
 
     def __init__(self, cog, sender_id: int, receiver, amount: int):
-        super().__init__(timeout=180)
+        super().__init__(owner_id=sender_id, timeout=180)
         self.cog = cog
         self.sender_id = sender_id
         self.receiver = receiver
         self.amount = amount
-        self.message = None
-        self.finished = False
 
     def confirm_text(self) -> str:
         name = getattr(self.receiver, "display_name", None) or str(self.receiver)
@@ -30,12 +29,8 @@ class PayConfirmView(discord.ui.View):
             f"{name} さん（{mention}）へ **{self.amount:,} AGO** を送りますか？\n"
             "送金は取り消せません。宛先と金額を確認してください。")
 
-    async def interaction_check(self, interaction) -> bool:
-        return interaction.user.id == self.sender_id
-
-    def _disable_all(self) -> None:
-        for child in self.children:
-            child.disabled = True
+    def timeout_text(self) -> str:
+        return "時間切れのため送金しませんでした。"
 
     @discord.ui.button(label="送金する", style=discord.ButtonStyle.primary)
     async def confirm_button(self, interaction, button):
@@ -58,16 +53,6 @@ class PayConfirmView(discord.ui.View):
         await interaction.response.edit_message(
             content="送金をキャンセルしました。", view=self)
         self.stop()
-
-    async def on_timeout(self) -> None:
-        if self.finished or self.message is None:
-            return
-        self._disable_all()
-        try:
-            await self.message.edit(
-                content="時間切れのため送金しませんでした。", view=self)
-        except Exception:
-            pass
 
 
 class PayModal(discord.ui.Modal, title="コインを送金"):

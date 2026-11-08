@@ -9,7 +9,9 @@ from typing import Any
 import discord
 from discord.ext import commands
 
+from core.general import action_registry
 from core.general.ai import logfare
+from core.general.prompt_view import OwnerPromptView
 from core.general.ai_tools import ai_tools_router
 logger = logging.getLogger(__name__)
 
@@ -89,46 +91,10 @@ def _resolve_invoker(message, bot_user):
 
 def _parse_param_input(param: dict, raw: str) -> Any:
     """補完モーダルの文字列入力を ParamSpec の型に変換する（変換できなければ ValueError）。"""
-    raw = (raw or "").strip()
-    label = param.get("label") or param.get("name") or "引数"
-    ptype = param.get("type")
-    if ptype == "int":
-        try:
-            return int(raw)
-        except ValueError:
-            try:
-                value = float(raw)
-            except ValueError:
-                raise ValueError(f"{label}は整数で入力してください。") from None
-            if not value.is_integer():
-                raise ValueError(f"{label}は整数で入力してください。")
-            return int(value)
-    if ptype in {"number", "duration"}:
-        try:
-            return float(raw)
-        except ValueError:
-            raise ValueError(f"{label}は数値で入力してください。") from None
-    if ptype == "bool":
-        lowered = raw.lower()
-        if lowered in {"true", "on", "オン", "有効", "yes", "1"}:
-            return True
-        if lowered in {"false", "off", "オフ", "無効", "no", "0"}:
-            return False
-        raise ValueError(f"{label}はオン/オフで入力してください。")
-    if ptype == "choice":
-        for choice_label, choice_value in param.get("choices") or []:
-            if raw == str(choice_value) or raw == str(choice_label):
-                return choice_value
-        raise ValueError(f"{label}は選択肢の中から入力してください。")
-    if ptype in {"member", "user", "channel", "role"}:
-        digits = re.sub(r"\D", "", raw)
-        if not digits:
-            raise ValueError(f"{label}は対象を指定してください。")
-        return int(digits)
-    return raw
+    return action_registry.convert_param_input(param, raw)
 
 
-class AIToolsConfirmView(discord.ui.View):
+class AIToolsConfirmView(OwnerPromptView):
     """risk="confirm" のアクションで、実行前に明示確認を挟むビュー。
 
     押せるのは依頼者（invoker）だけ。確認するまで対象アクションは実行されず、
@@ -136,19 +102,13 @@ class AIToolsConfirmView(discord.ui.View):
     """
 
     def __init__(self, *, invoker_id: int, base_text: str, on_execute, timeout: float = 180):
-        super().__init__(timeout=timeout)
+        super().__init__(owner_id=invoker_id, timeout=timeout)
         self.invoker_id = invoker_id
         self.base_text = base_text
         self.on_execute = on_execute
-        self.message: discord.Message | None = None
-        self.finished = False
 
-    async def interaction_check(self, interaction: discord.Interaction) -> bool:
-        return interaction.user.id == self.invoker_id
-
-    def _disable_all(self) -> None:
-        for child in self.children:
-            child.disabled = True
+    def timeout_text(self) -> str:
+        return self.base_text + "\n時間切れのため実行しませんでした。"
 
     @discord.ui.button(label="実行する", style=discord.ButtonStyle.danger)
     async def confirm_button(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -164,15 +124,6 @@ class AIToolsConfirmView(discord.ui.View):
         self._disable_all()
         await interaction.response.edit_message(content=self.base_text + "\nキャンセルしました。実行していません。", view=self)
         self.stop()
-
-    async def on_timeout(self) -> None:
-        if self.finished or self.message is None:
-            return
-        self._disable_all()
-        try:
-            await self.message.edit(content=self.base_text + "\n時間切れのため実行しませんでした。", view=self)
-        except Exception:
-            logger.debug("AI tools confirm view timeout edit failed", exc_info=True)
 
 
 class AIToolsParamModal(discord.ui.Modal, title="不足している引数の入力"):
@@ -197,7 +148,7 @@ class AIToolsParamModal(discord.ui.Modal, title="不足している引数の入�
         await self.parent_view.accept_values(interaction, raw)
 
 
-class AIToolsParamCompletionView(discord.ui.View):
+class AIToolsParamCompletionView(OwnerPromptView):
     """required 引数が不足したときに、依頼者へ入力を求めるビュー。
 
     押せるのは依頼者だけ。入力が確定するまで対象アクションは実行されず、
@@ -206,22 +157,16 @@ class AIToolsParamCompletionView(discord.ui.View):
 
     def __init__(self, *, item: dict, base_params: dict, missing: list[dict],
                  invoker_id: int, base_text: str, execute, timeout: float = 300):
-        super().__init__(timeout=timeout)
+        super().__init__(owner_id=invoker_id, timeout=timeout)
         self.item = item
         self.base_params = base_params
         self.missing = missing
         self.invoker_id = invoker_id
         self.base_text = base_text
         self.execute = execute
-        self.message: discord.Message | None = None
-        self.finished = False
 
-    async def interaction_check(self, interaction: discord.Interaction) -> bool:
-        return interaction.user.id == self.invoker_id
-
-    def _disable_all(self) -> None:
-        for child in self.children:
-            child.disabled = True
+    def timeout_text(self) -> str:
+        return self.base_text + "\n時間切れのため実行しませんでした。"
 
     @discord.ui.button(label="不足分を入力", style=discord.ButtonStyle.primary)
     async def input_button(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -233,15 +178,6 @@ class AIToolsParamCompletionView(discord.ui.View):
         self._disable_all()
         await interaction.response.edit_message(content=self.base_text + "\nキャンセルしました。実行していません。", view=self)
         self.stop()
-
-    async def on_timeout(self) -> None:
-        if self.finished or self.message is None:
-            return
-        self._disable_all()
-        try:
-            await self.message.edit(content=self.base_text + "\n時間切れのため実行しませんでした。", view=self)
-        except Exception:
-            logger.debug("AI tools completion view timeout edit failed", exc_info=True)
 
     async def accept_values(self, interaction: discord.Interaction, raw_values: dict[str, str]) -> None:
         """モーダルの入力を検証し、問題なければ実行（または確認ビューへ遷移）する。"""
