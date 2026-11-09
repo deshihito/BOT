@@ -9,7 +9,11 @@ import {
 } from "@/lib/site";
 import { InviteCtaBlock } from "../InviteCta";
 
-export const metadata = { title: "リーダーボード | AGOBOT", alternates: { canonical: "/ranking" } };
+export const metadata = {
+  title: "リーダーボード",
+  description: "AGOBOTのランキング。経験値・コイン保有・bump / up RTA の記録を、全サーバーとサーバー別に表示します。",
+  alternates: { canonical: "/ranking" },
+};
 export const dynamic = "force-dynamic";
 
 type Axis = "exp" | "coin" | "bump" | "up";
