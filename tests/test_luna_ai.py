@@ -755,6 +755,82 @@ class SlimContextTest(unittest.TestCase):
             self.assertEqual(luna.integration_model_name(), "custom-1")
 
 
+class FakeLoadingMessage:
+    def __init__(self):
+        self.deleted = False
+
+    async def delete(self):
+        self.deleted = True
+
+
+class FakeLoadingChannel:
+    def __init__(self, channel_id=777):
+        self.id = channel_id
+        self.sent_texts: list[str] = []
+        self.messages: list[FakeLoadingMessage] = []
+
+    async def send(self, content=None, **kwargs):
+        self.sent_texts.append(content)
+        message = FakeLoadingMessage()
+        self.messages.append(message)
+        return message
+
+
+class LoadingPlaceholderTest(unittest.IsolatedAsyncioTestCase):
+    async def test_send_loading_returns_message_and_delete_removes_it(self):
+        channel = FakeLoadingChannel()
+        message = await luna._send_loading(channel)
+        self.assertEqual(channel.sent_texts, [luna.LOADING_TEXT])
+        await luna._delete_loading(message)
+        self.assertTrue(message.deleted)
+        await luna._delete_loading(None)
+
+    async def test_send_loading_failure_is_soft(self):
+        class BrokenChannel:
+            id = 778
+
+            async def send(self, content=None, **kwargs):
+                raise luna.discord.HTTPException(
+                    types.SimpleNamespace(status=403, reason="Forbidden"), "no")
+
+        self.assertIsNone(await luna._send_loading(BrokenChannel()))
+
+    def _runtime(self, channel):
+        return luna._Runtime(guild_id=555, channel=channel)
+
+    async def test_placeholder_shown_and_removed_on_success(self):
+        channel = FakeLoadingChannel()
+        runtime = self._runtime(channel)
+        batch = [types.SimpleNamespace(content="こんにちは", attachments=[])]
+
+        async def fake_chat(messages, *, max_tokens, model=None):
+            return "返事だよ", 0.1, 0.2
+
+        with patch.object(luna, "_client", return_value=None), \
+                patch.object(luna, "_chat_text", fake_chat), \
+                patch.object(luna, "_send_reply", new=AsyncMock()) as send_reply:
+            await luna._generate_and_send(runtime, batch)
+        send_reply.assert_awaited_once()
+        self.assertEqual(channel.sent_texts, [luna.LOADING_TEXT])
+        self.assertTrue(channel.messages[0].deleted)
+
+    async def test_placeholder_removed_on_generation_failure(self):
+        channel = FakeLoadingChannel()
+        runtime = self._runtime(channel)
+        batch = [types.SimpleNamespace(content="こんにちは", attachments=[])]
+
+        async def failing_chat(messages, *, max_tokens, model=None):
+            raise luna.logfare.LogfareHTTPError(503)
+
+        with patch.object(luna, "_client", return_value=None), \
+                patch.object(luna, "_chat_text", failing_chat), \
+                patch.object(luna, "_send_reply", new=AsyncMock()) as send_reply:
+            await luna._generate_and_send(runtime, batch)
+        send_reply.assert_not_awaited()
+        self.assertEqual(channel.sent_texts, [luna.LOADING_TEXT])
+        self.assertTrue(channel.messages[0].deleted)
+
+
 class LoggerLevelTest(unittest.TestCase):
     def test_logger_passes_info_for_log_buffer(self):
         # main.py の root が WARNING のため、モジュール側で INFO を
