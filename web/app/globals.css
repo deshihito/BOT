@@ -279,3 +279,7 @@ body:has([data-activity-root]) > main { max-width:none; min-height:100svh; margi
 .op-summary li { display:flex; gap:10px; flex-wrap:wrap; padding:8px 12px; border:1px solid var(--line); border-radius:8px; background:var(--soft); font-size:14px; font-weight:700; }
 .op-summary li span { color:var(--muted); font-weight:400; }
 .op-result { margin:0; padding:16px; border:1px solid var(--line); border-radius:8px; background:var(--soft); white-space:pre-wrap; overflow-wrap:anywhere; font-size:14px; line-height:1.8; }
+.op-loading .op-dot { animation:op-pulse 1s ease-in-out infinite; }
+.op-loading .op-dot:nth-child(2) { animation-delay:.15s; }
+.op-loading .op-dot:nth-child(3) { animation-delay:.3s; }
+@keyframes op-pulse { 0%,100% { opacity:.25; } 50% { opacity:1; } }
