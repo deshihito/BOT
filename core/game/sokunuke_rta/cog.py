@@ -227,11 +227,10 @@ class SokuNukeRta(commands.Cog):
                 f"記録 **{_duration(elapsed_seconds)}**！\n"
                 f"ランキング {rank_text}"),
             color=0xFFFFFF)
-        # 連携広告枠（記録表示のみ。ギルド設定で OFF にできる）
-        if await partner_ads.ads_enabled(guild.id):
-            ad = partner_ads.next_ad_field()
-            if ad is not None:
-                embed.add_field(name=ad[0], value=ad[1], inline=False)
+        # 連携広告枠（記録表示のみ。強制表示）
+        ad = partner_ads.next_ad_field()
+        if ad is not None:
+            embed.add_field(name=ad[0], value=ad[1], inline=False)
         await channel.send(embed=embed, allowed_mentions=discord.AllowedMentions.none())
 
     @commands.Cog.listener()

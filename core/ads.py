@@ -4,24 +4,17 @@
 表示面（いまは boardNotify RTA の記録表示）が順送りで1件ずつ出す。
 
 外部の連携先が決まったら、CREATIVES に1件足すだけで差し替え・追加できる。
-表示の責務は呼び出し側にあり、ここでは「次に表示するクリエイティブ」と
-「ギルドごとの広告枠 ON/OFF（デフォルト ON）」だけを提供する。
+表示の責務は呼び出し側にあり、ここでは「次に表示するクリエイティブ」
+だけを提供する。
 
-ON/OFF の保存先は guild_settings の "boardnotify" セクション
-（キー ads_enabled）。DB マイグレーションは不要。
+広告枠は強制表示：ギルドごとの ON/OFF は無い。旧仕様で使っていた
+guild_settings の "boardnotify" セクション（キー ads_enabled）は
+もう読み書きしない（保存済みの値が残っていても無視される）。
 """
 from __future__ import annotations
 
 import itertools
-import logging
 from dataclasses import dataclass
-
-from core.support import guild_settings
-
-logger = logging.getLogger(__name__)
-
-SECTION = "boardnotify"
-ADS_ENABLED_KEY = "ads_enabled"
 
 FIELD_NAME = "連携"
 
@@ -77,26 +70,3 @@ def ad_field(creative: Creative | None) -> tuple[str, str] | None:
 def next_ad_field() -> tuple[str, str] | None:
     """次に表示する広告枠フィールド（無ければ None）。"""
     return ad_field(pick_creative())
-
-
-async def ads_enabled(guild_id) -> bool:
-    """そのギルドで広告枠を出すか（デフォルト ON、読み取り失敗時も ON）。"""
-    if guild_id is None:
-        return True
-    try:
-        store = guild_settings.get_store()
-        await store.ensure_loaded()
-        section = store.get(guild_id, SECTION)
-    except Exception:
-        logger.debug("広告枠設定の読み取りに失敗（ON として続行）", exc_info=True)
-        return True
-    if isinstance(section, dict):
-        value = section.get(ADS_ENABLED_KEY)
-        if isinstance(value, bool):
-            return value
-    return True
-
-
-async def set_ads_enabled(guild_id, enabled: bool) -> None:
-    store = guild_settings.get_store()
-    await store.update(guild_id, SECTION, **{ADS_ENABLED_KEY: bool(enabled)})
