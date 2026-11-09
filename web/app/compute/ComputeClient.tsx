@@ -1,9 +1,15 @@
 "use client";
 
 // 分散コンピューティングの参加UI（クライアント専用）。
-// 計算は「計算をはじめる」を押したときだけ始まり、Web Worker 内で実行する。
+// 計算は「計算をはじめる」を押したときだけ始まる。実行方式は CPU
+// （Web Worker）と WebGPU (GPGPU) から選べて、選択は localStorage に残す。
 // 個人の貢献数はこのブラウザの localStorage にだけ残し、サーバーへは送らない。
 import { useEffect, useRef, useState } from "react";
+import { isWebGpuSupported, runPerftOnGpu } from "../../lib/compute-gpu";
+
+type ComputeMethod = "cpu" | "gpu";
+type ComputeTask = { taskId: string; fen: string; depth: number };
+type ComputeFn = (task: ComputeTask) => Promise<{ nodes: number }>;
 
 type Progress = {
   suite: string;
@@ -46,8 +52,27 @@ type LeaseResponse =
 type MyStats = { tasks: number; nodes: number };
 
 const STORAGE_KEY = "agobot-compute-contrib-v1";
+const METHOD_STORAGE_KEY = "agobot-compute-method-v1";
 const REST_MS = 200;
 const RETRY_MS = 5000;
+/** WebGPU の計算が続けてこの回数失敗したら、CPU 方式へ自動で切り替える。 */
+const GPU_FAILURE_LIMIT = 2;
+
+function loadMethod(): ComputeMethod {
+  try {
+    return localStorage.getItem(METHOD_STORAGE_KEY) === "gpu" ? "gpu" : "cpu";
+  } catch {
+    return "cpu";
+  }
+}
+
+function saveMethod(method: ComputeMethod): void {
+  try {
+    localStorage.setItem(METHOD_STORAGE_KEY, method);
+  } catch {
+    // 保存できなくても計算は続行する
+  }
+}
 
 function loadStats(): MyStats {
   try {
@@ -90,11 +115,14 @@ export default function ComputeClient() {
   const [session, setSession] = useState<MyStats>({ tasks: 0, nodes: 0 });
   const [total, setTotal] = useState<MyStats>({ tasks: 0, nodes: 0 });
   const [message, setMessage] = useState("「計算をはじめる」を押すまで、計算は始まりません。");
+  const [method, setMethod] = useState<ComputeMethod>("cpu");
+  const [gpuSupported, setGpuSupported] = useState(false);
 
   const runIdRef = useRef(0);
   const workersRef = useRef<Worker[]>([]);
   const pendingRef = useRef(new Map<number, { resolve: (v: { nodes: number }) => void; reject: (e: Error) => void }>());
   const stopRef = useRef<() => void>(() => {});
+  const gpuFailuresRef = useRef(0);
 
   const stop = () => {
     runIdRef.current += 1;
@@ -123,6 +151,8 @@ export default function ComputeClient() {
 
   useEffect(() => {
     setTotal(loadStats());
+    setMethod(loadMethod());
+    setGpuSupported(isWebGpuSupported());
     void fetchProgress();
     const onVisibility = () => setTabHidden(document.hidden);
     document.addEventListener("visibilitychange", onVisibility);
@@ -158,7 +188,14 @@ export default function ComputeClient() {
       worker.postMessage({ type: "run", taskId: task.taskId, fen: task.fen, depth: task.depth });
     });
 
-  const runSlot = async (slot: number, runId: number, worker: Worker) => {
+  // リース取得 → 計算 → 結果送信のループ。計算方法（CPU / WebGPU）は
+  // compute 関数として差し替える。onComputeFailure が true を返したら
+  // ループを抜ける（WebGPU から CPU への自動切り替え用）。
+  const runLoop = async (
+    runId: number,
+    compute: ComputeFn,
+    onComputeFailure?: () => boolean,
+  ) => {
     while (runIdRef.current === runId) {
       if (document.hidden) {
         await sleep(800);
@@ -185,9 +222,10 @@ export default function ComputeClient() {
       setProgress(lease.progress);
       let nodes: number;
       try {
-        const result = await computeOnWorker(slot, worker, lease);
+        const result = await compute(lease);
         nodes = result.nodes;
       } catch {
+        if (onComputeFailure && onComputeFailure()) return;
         await sleep(1000);
         continue;
       }
@@ -216,13 +254,7 @@ export default function ComputeClient() {
     }
   };
 
-  const start = () => {
-    if (running) return;
-    const runId = runIdRef.current + 1;
-    runIdRef.current = runId;
-    setFinished(false);
-    setRunning(true);
-    setMessage("計算中です。タブを開いたままにしてください。");
+  const startCpu = (runId: number) => {
     const concurrency = Math.max(1, Math.min(4, (navigator.hardwareConcurrency || 2) - 1));
     const workers: Worker[] = [];
     for (let slot = 0; slot < concurrency; slot++) {
@@ -245,7 +277,48 @@ export default function ComputeClient() {
       workers.push(worker);
     }
     workersRef.current = workers;
-    workers.forEach((worker, slot) => void runSlot(slot, runId, worker));
+    workers.forEach((worker, slot) =>
+      void runLoop(runId, (task) => computeOnWorker(slot, worker, task)),
+    );
+  };
+
+  const startGpu = (runId: number) => {
+    gpuFailuresRef.current = 0;
+    const compute: ComputeFn = async (task) => {
+      try {
+        const result = await runPerftOnGpu(task.fen, task.depth);
+        gpuFailuresRef.current = 0;
+        return { nodes: result.nodes };
+      } catch (error) {
+        gpuFailuresRef.current += 1;
+        throw error;
+      }
+    };
+    void runLoop(runId, compute, () => {
+      if (gpuFailuresRef.current < GPU_FAILURE_LIMIT) return false;
+      // WebGPU を使い続けられない環境では、同じ実行のまま CPU 方式へ切り替える
+      setMessage("WebGPUで計算を続けられなかったため、CPU方式に切り替えて続行します。");
+      setMethod("cpu");
+      saveMethod("cpu");
+      startCpu(runId);
+      return true;
+    });
+  };
+
+  const start = () => {
+    if (running) return;
+    const runId = runIdRef.current + 1;
+    runIdRef.current = runId;
+    setFinished(false);
+    setRunning(true);
+    setMessage("計算中です。タブを開いたままにしてください。");
+    if (method === "gpu" && gpuSupported) startGpu(runId);
+    else startCpu(runId);
+  };
+
+  const chooseMethod = (next: ComputeMethod) => {
+    setMethod(next);
+    saveMethod(next);
   };
 
   const statusText = running
@@ -258,6 +331,36 @@ export default function ComputeClient() {
 
   return (
     <section className="compute-panel" aria-label="計算への参加">
+      <div className="compute-method" role="group" aria-label="実行方式">
+        <span className="compute-method-label">実行方式</span>
+        <button
+          type="button"
+          aria-pressed={method === "cpu"}
+          disabled={running}
+          onClick={() => chooseMethod("cpu")}
+        >
+          CPU（Web Worker）
+        </button>
+        <button
+          type="button"
+          aria-pressed={method === "gpu"}
+          disabled={running || !gpuSupported}
+          onClick={() => chooseMethod("gpu")}
+        >
+          WebGPU（GPGPU）
+        </button>
+      </div>
+      {!gpuSupported ? (
+        <p className="compute-status">
+          このブラウザは WebGPU に対応していないため、CPU方式のみ利用できます。
+        </p>
+      ) : null}
+      <p className="compute-status">
+        注意：スマートフォンでは、機種やブラウザによって WebGPU
+        が実行できない場合があります。その場合は CPU
+        方式をご利用ください（WebGPU の計算に続けて失敗したときは、自動で CPU
+        方式に切り替わります）。
+      </p>
       <div className="compute-actions">
         {running ? (
           <button type="button" className="compute-stop" onClick={stop}>
