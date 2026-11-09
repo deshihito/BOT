@@ -67,10 +67,12 @@ test("深さ0は baseCount=1 で確定し、ステイルメイトは0になる",
   const zero = gpu.splitForGpu(STARTPOS, 0);
   assert.equal(zero.baseCount, 1);
   assert.equal(zero.subs.length, 0);
-  // 黒番のステイルメイト（合法手なし）
+  // 黒番のステイルメイト（合法手なし）: 合計は0。
+  // 残り深さが分割の下限ちょうどの局面は展開されず、部分局面1件として
+  // GPU へ渡る（カーネルが合法手0件と数えるので合計は0のまま）。
   const mate = sumSplit("7k/5Q2/7K/8/8/8/8/8 b - - 0 1", 2);
   assert.equal(mate.total, 0);
-  assert.equal(mate.subs.length, 0);
+  assert.equal(mate.subs.length, 1);
 });
 
 test("カタログの実タスクでも分割合計が正解値と一致する", () => {
@@ -126,4 +128,15 @@ test("concatSubPositions はタスクごとの範囲を保って連結する", (
   // 連結後も各タスクの範囲は元の部分局面と一致する
   for (let i = 0; i < a.length; i++) assert.equal(subs[ranges[0].start + i], a[i]);
   for (let i = 0; i < b.length; i++) assert.equal(subs[ranges[2].start + i], b[i]);
+});
+
+test("splitForGpu は残り深さ2で止まり、GPU に部分探索を残す", () => {
+  // 深さ4: 2手展開して残り深さ2の部分局面になる（残り深さ1まで掘らない）
+  const { subs } = gpu.splitForGpu(STARTPOS, 4, 4096);
+  assert.ok(subs.length > 100);
+  assert.ok(subs.every((sub) => sub.depth === gpu.SPLIT_FLOOR_DEPTH));
+  // 深さ2以下は展開しない
+  const shallow = gpu.splitForGpu(STARTPOS, 2, 4096);
+  assert.equal(shallow.subs.length, 1);
+  assert.equal(shallow.subs[0].depth, 2);
 });

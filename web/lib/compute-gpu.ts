@@ -10,6 +10,9 @@ import type { Position } from "./chess-perft";
 /** GPU 側で扱える残り深さの上限。ホスト側の分割で必ずこの範囲に収める。 */
 export const MAX_GPU_DEPTH = 6;
 
+/** 分割を止める残り深さ。これより浅い部分探索は GPU カーネルが担う。 */
+export const SPLIT_FLOOR_DEPTH = 2;
+
 /** 1部分局面ぶんの入力レコード長 (u32 個数)。盤面128 + 手番 + キャスリング + EP + 深さ。 */
 export const SUB_STRIDE = 132;
 
@@ -28,6 +31,10 @@ function clonePosition(pos: Position): Position {
 /**
  * タスク局面を GPU 用の部分局面リストへ分割する。
  * 合法手を展開して frontier を広げ、targetSubs 程度まで増やす。
+ * ただし展开は残り深さ SPLIT_FLOOR_DEPTH までで止める: 残り深さ1まで
+ * 掘ると、深さ3〜4のタスクでは分割だけで CPU の全計算と同じだけ
+ * ホスト側の時間がかかり、GPU の仕事が最後の1手の集計だけになってしまう。
+ * 残り2手分は GPU 側のカーネルが各スレッドで探索する。
  * 残り深さが MAX_GPU_DEPTH を超える局面は目標数に達していても展開する。
  * baseCount は GPU に送らずに確定する分（深さ0のときの 1 のみ）。
  */
@@ -40,7 +47,7 @@ export function splitForGpu(
   type Node = { pos: Position; depth: number };
   let frontier: Node[] = [{ pos: parseFen(fen), depth }];
   const needsSplit = (node: Node): boolean =>
-    node.depth > 1 && (frontier.length < targetSubs || node.depth > MAX_GPU_DEPTH);
+    node.depth > SPLIT_FLOOR_DEPTH && (frontier.length < targetSubs || node.depth > MAX_GPU_DEPTH);
   while (frontier.length > 0 && frontier.some(needsSplit)) {
     const next: Node[] = [];
     for (const node of frontier) {
@@ -648,9 +655,11 @@ export async function runPerftBatchOnGpu(
       const idx = (range.start + j) * 2;
       nodes += counts[idx] + counts[idx + 1] * 4294967296;
     }
-    // 部分局面が1つ以上ある（＝合法手が存在する）局面で 0 はあり得ない。
+    // 合法手が1つでもある局面で合計0はあり得ない。ただし詰み・ステイル
+    // メイトの局面は正しく0になるので、0件のときだけホスト側で合法手の
+    // 有無を確認してから異常と判断する。
     // GPU 側の異常を結果として送信せず、呼び出し側の自動切り替えに任せる。
-    if (nodes === 0 && range.count > 0) {
+    if (nodes === 0 && range.count > 0 && generateLegalMoves(parseFen(tasks[i].fen)).length > 0) {
       throw new Error("WebGPU returned zero nodes for a non-terminal position");
     }
     return { nodes, elapsedMs: elapsed() };
