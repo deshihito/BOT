@@ -200,3 +200,30 @@ body:has([data-activity-root]) > main { max-width:none; min-height:100svh; margi
   .side-group-label { display:none; }
   .side-item { white-space:nowrap; }
 }
+
+/* ホームの動き: ふわっと登場 (A) + 背景ドリフト (E) */
+@keyframes home-fade-up { from { opacity:0; transform:translateY(14px); } to { opacity:1; transform:translateY(0); } }
+@keyframes home-drift-a { 0%,100% { transform:translate(0,0); } 50% { transform:translate(36px,14px); } }
+@keyframes home-drift-b { 0%,100% { transform:translate(0,0); } 50% { transform:translate(-28px,-10px); } }
+.home-hero { position:relative; overflow:hidden; isolation:isolate; }
+.home-hero::before, .home-hero::after { content:""; position:absolute; border-radius:50%; filter:blur(28px); pointer-events:none; z-index:-1; }
+.home-hero::before { width:210px; height:210px; background:#dcefea; top:-70px; right:-40px; animation:home-drift-a 11s ease-in-out infinite; }
+.home-hero::after { width:170px; height:170px; background:var(--note); bottom:-80px; left:22%; animation:home-drift-b 13s ease-in-out infinite; }
+.home-hero img { animation:home-fade-up .7s cubic-bezier(.22,.8,.32,1) .05s both; }
+.home-hero h1 { animation:home-fade-up .7s cubic-bezier(.22,.8,.32,1) .18s both; }
+.home-hero-actions { animation:home-fade-up .7s cubic-bezier(.22,.8,.32,1) .32s both; }
+.home-live-stats { animation:home-fade-up .7s cubic-bezier(.22,.8,.32,1) .46s both; }
+.home-command-link { animation:home-fade-up .6s ease both; }
+.home-command-link:nth-child(1) { animation-delay:.55s; }
+.home-command-link:nth-child(2) { animation-delay:.65s; }
+.home-command-link:nth-child(3) { animation-delay:.75s; }
+.home-command-link:nth-child(4) { animation-delay:.85s; }
+.home-command-link:nth-child(5) { animation-delay:.95s; }
+.home-command-link:nth-child(6) { animation-delay:1.05s; }
+.home-command-link:nth-child(7) { animation-delay:1.15s; }
+.home-command-link:nth-child(8) { animation-delay:1.25s; }
+.home-command-link:nth-child(n+9) { animation-delay:1.35s; }
+@media (prefers-reduced-motion: reduce) {
+  .home-hero::before, .home-hero::after, .home-hero img, .home-hero h1,
+  .home-hero-actions, .home-live-stats, .home-command-link { animation:none; }
+}
