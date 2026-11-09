@@ -17,7 +17,7 @@ from core.support.api_retry import run_with_retry
 from core.game.rta.common import *  # noqa: F401,F403 - shared constants/helpers
 from core.game.rta.common import DISBOARD_BOT_ID, DISOKU_BOT_ID  # noqa: F401
 from core.game.rta.detect import detect_event  # noqa: F401
-from core.game.rta.helpers import _parse_dt, _rank_line, _snowflake_ts  # noqa: F401
+from core.game.rta.helpers import _has_rich_content, _parse_dt, _rank_line, _snowflake_ts  # noqa: F401
 
 logger = logging.getLogger("cogs.disboard_rta")
 
@@ -40,7 +40,8 @@ class EventsMixin:
 
     async def _handle_message(self, message):
         author_id = getattr(getattr(message, "author", None), "id", None)
-        if author_id not in (DISBOARD_BOT_ID, DISOKU_BOT_ID) and not getattr(message, "embeds", None):
+        # Components V2 応答は Embed を持たないため、ゲートは detect_event と揃える
+        if author_id not in (DISBOARD_BOT_ID, DISOKU_BOT_ID) and not _has_rich_content(message):
             return
 
         if message.id in self._processed_messages:

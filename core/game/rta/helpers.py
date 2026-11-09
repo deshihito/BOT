@@ -41,6 +41,48 @@ def _collect_embed_text(message):
     return " ".join(str(part) for part in parts if part)
 
 
+def _collect_component_text(message):
+    """Collect text from Components V2 parts (TextDisplay content, recursively).
+
+    サービス側が Embed ではなく Components V2 で応答すると message.embeds は
+    空になる。その場合も成功文を拾えるよう、コンポーネント木をたどる。
+    """
+    parts = []
+
+    def walk(component, depth=0):
+        if component is None or depth > 6:
+            return
+        content = getattr(component, "content", None)
+        if isinstance(content, str) and content:
+            parts.append(content)
+        for attr in ("children", "components"):
+            children = getattr(component, attr, None)
+            if children:
+                for child in children:
+                    walk(child, depth + 1)
+        accessory = getattr(component, "accessory", None)
+        if accessory is not None:
+            walk(accessory, depth + 1)
+
+    for top in getattr(message, "components", ()) or ():
+        walk(top)
+    return " ".join(parts)
+
+
+def _collect_message_text(message):
+    """Embed と Components V2 の両方から集めた全文（検知の署名照合用）。"""
+    return " ".join(
+        part for part in (
+            _collect_embed_text(message), _collect_component_text(message))
+        if part)
+
+
+def _has_rich_content(message):
+    """Embed かコンポーネントを持つか（検知対象の一次ゲート用）。"""
+    return bool(getattr(message, "embeds", None)) or bool(
+        getattr(message, "components", None))
+
+
 def _white_embed(description=None, *, title=None):
     """Build the white embeds used by the bump/RTA feature."""
     return discord.Embed(title=title, description=description, color=0xFFFFFF)
