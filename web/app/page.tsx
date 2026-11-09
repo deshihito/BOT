@@ -34,7 +34,7 @@ async function loadLiveStats(): Promise<LiveStats | null> {
 export default async function Home() {
   const stats = await loadLiveStats();
   return (
-    <>
+    <div className="home-bg">
       <section className="home-hero">
         <img src="/img/nomal.png" alt="AGOBOT" />
         <div>
@@ -59,6 +59,6 @@ export default async function Home() {
           </Link>
         ))}
       </nav>
-    </>
+    </div>
   );
 }
