@@ -259,7 +259,7 @@ class RegistrationTest(unittest.TestCase):
         self.assertEqual(SUPPORT_GENRES["analysis"], ("分析", ""))
         values = [value for _label, value in
                   SUPPORT_ACTIONS_BY_GENRE["analysis"]]
-        self.assertEqual(values, ["person_analysis"])
+        self.assertEqual(values, ["person_analysis", "server_analytics"])
 
     def test_no_permission_required_but_key_present(self):
         from cogs.support import SupportCog

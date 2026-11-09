@@ -164,6 +164,7 @@ SUPPORT_ACTIONS = [
     app_commands.Choice(name="VC自動参加オン", value="sokunuke_vc_on"),
     app_commands.Choice(name="VC自動参加オフ", value="sokunuke_vc_off"),
     app_commands.Choice(name="人物分析", value="person_analysis"),
+    app_commands.Choice(name="サーバー分析", value="server_analytics"),
 ]
 
 # ジャンル説明は、ラベルや配下の機能名から読み取れない情報がある場合だけ書く。
@@ -234,6 +235,7 @@ SUPPORT_ACTIONS_BY_GENRE = {
     ),
     "analysis": _support_actions(
         "person_analysis",
+        "server_analytics",
     ),
 }
 
