@@ -65,9 +65,9 @@ CREATIVES: list[Creative] = [
         url="https://oneprompter.agobot.app",
     ),
     Creative(
-        name="AGO BOT サポートサーバー",
-        text="AGO BOT サポートサーバー — 質問・要望はこちら",
-        url="https://discord.gg/dCAQzJUaa9",
+        name="サーバー連携 募集中",
+        text="サーバー連携 募集中 — あなたのサーバーもこの広告枠に掲載できます",
+        url="https://agobot.app/dashboard/ads",
     ),
     Creative(
         name="AGO BOT 公式サイト",
