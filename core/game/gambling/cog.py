@@ -28,6 +28,7 @@ from __future__ import annotations
 from core.support.emojis import COIN, DICE, SUCCESS
 
 import asyncio
+import io
 import logging
 import random
 from typing import Callable
@@ -37,7 +38,10 @@ from discord.ext import commands, tasks
 
 import config
 from core.general.circulation import economy_pool as economy_core
+from core.game.gambling import blackjack_image
 from core.game.gambling import gambling as gambling_core
+from core.general.user_names import cached_display_name
+from core.leaderboard_image import fetch_avatar_bytes
 from core.general.items import items as items_core
 from core.game.game import prison as prison_core
 from core.support.messages import (
@@ -150,6 +154,17 @@ class _SessionPanel:
     def _build_embed(self, balance: int | None) -> discord.Embed:
         raise NotImplementedError
 
+    def panel_files(self) -> list[discord.File] | None:
+        """再描画時に再供給する添付ファイル（画像つきパネル用）。
+
+        既定は添付なし。盤面画像を持つパネルだけが上書きする。
+        """
+        return None
+
+    async def _prepare_files(self) -> None:
+        """panel_files() の前に必要な非同期準備（アバター取得など）。"""
+        return None
+
     def _sync_buttons(self) -> None:
         raise NotImplementedError
 
@@ -163,11 +178,17 @@ class _SessionPanel:
         self._sync_buttons()
         balance = await _fetch_balance(self.cog, self.user_id)
         self._last_balance = balance
+        await self._prepare_files()
+        files = self.panel_files()
         container = getattr(self, "_v2", None)
         try:
             if container is not None:
                 container._sync()
-                await edit_message_v2(self.message, container)
+                await edit_message_v2(self.message, container, files=files)
+            elif files:
+                await self.message.edit(
+                    embed=self._build_embed(balance), view=self,
+                    attachments=files)
             else:
                 await self.message.edit(embed=self._build_embed(balance), view=self)
         except Exception:
@@ -178,10 +199,15 @@ class _SessionPanel:
         self._sync_buttons()
         balance = await _fetch_balance(self.cog, self.user_id)
         self._last_balance = balance
+        await self._prepare_files()
+        files = self.panel_files()
         container = getattr(self, "_v2", None)
         if container is not None:
             container._sync()
-            await edit_panel_v2(interaction, container)
+            await edit_panel_v2(interaction, container, files=files)
+        elif files:
+            await interaction.edit_original_response(
+                embed=self._build_embed(balance), view=self, attachments=files)
         else:
             await interaction.edit_original_response(
                 embed=self._build_embed(balance), view=self)
@@ -459,20 +485,29 @@ class DoubleView(_SessionPanel, discord.ui.View):
 # ---------------------------------------------------------------------------
 
 def _blackjack_embed(cog: "GamblingCog", user_id: int, *, result: str | None = None,
-                     balance: int | None = None) -> discord.Embed:
+                     balance: int | None = None,
+                     board: bool = False) -> discord.Embed:
     embed = discord.Embed(title="ブラックジャック", color=GAMBLING_COLOR)
     if result:
         embed.add_field(name="結果", value=_fit(result), inline=False)
     session = cog.store.session(str(user_id))
     if session is not None and session["kind"] == "blackjack":
-        total = gambling_core.calc_total(session["player"])
-        embed.add_field(
-            name="あなたの手札",
-            value=f"{session['player']}（{total}）", inline=True)
-        embed.add_field(
-            name="ディーラー", value=f"{session['dealer'][0]} ?", inline=True)
-        embed.add_field(
-            name="ベット", value=f"**{session['bet']:,} AGO**", inline=True)
+        if board:
+            # 盤面画像が手札・合計・ベットを持つため、テキスト側は
+            # 重複させない（画像化できない場合は従来のテキスト表示）。
+            embed.set_image(url=f"attachment://{blackjack_image.FILENAME}")
+        else:
+            total = gambling_core.calc_total(session["player"])
+            embed.add_field(
+                name="あなたの手札",
+                value=f"{session['player']}（{total}）", inline=True)
+            embed.add_field(
+                name="ディーラー", value=f"{session['dealer'][0]} ?", inline=True)
+            embed.add_field(
+                name="ベット", value=f"**{session['bet']:,} AGO**", inline=True)
+    elif board:
+        # 精算直後（セッション終了済み）も最終盤面の画像を残す。
+        embed.set_image(url=f"attachment://{blackjack_image.FILENAME}")
     if balance is not None:
         embed.add_field(name="残高", value=f"**{balance:,} AGO**", inline=True)
     return embed
@@ -485,7 +520,101 @@ class BlackjackView(_SessionPanel, discord.ui.View):
         self.user_id = user_id
         self.message = None
         self.last_result = None
+        self._avatar_bytes: bytes | None = None
+        self._avatar_tried = False
+        self._board_cache_key: tuple | None = None
+        self._board_cache_png: bytes | None = None
         self._sync_buttons()
+
+    # ------------------------------------------------------------------ 盤面画像
+    def _board_state(self) -> dict | None:
+        """盤面描画用の状態。対局中はセッション、精算直後は最終状態。
+
+        ディーラーの伏せ札は値そのものを描画側へ渡さない（先頭1枚だけ）。
+        """
+        session = self._session()
+        if session is not None:
+            return {
+                "player": list(session["player"]),
+                "dealer": [session["dealer"][0]],
+                "dealer_hidden": True,
+                "bet": int(session["bet"]),
+                "outcome": None,
+                "delta": None,
+            }
+        final = self.cog.blackjack_final_state(self.user_id)
+        if final is None:
+            return None
+        if final.get("dealer") is None:
+            # バースト決着: ディーラーは最後まで伏せたまま。
+            return {
+                "player": list(final["player"]),
+                "dealer": [final["dealer_first"]],
+                "dealer_hidden": True,
+                "bet": int(final["bet"]),
+                "outcome": "bust",
+                "delta": int(final["delta"]),
+            }
+        return {
+            "player": list(final["player"]),
+            "dealer": list(final["dealer"]),
+            "dealer_hidden": False,
+            "bet": int(final["bet"]),
+            "outcome": final["outcome"],
+            "delta": int(final["delta"]),
+        }
+
+    def _board_png(self) -> bytes | None:
+        """盤面 PNG。生成に失敗したら None（テキスト表示に落とす）。"""
+        state = self._board_state()
+        if state is None:
+            self._board_cache_key = None
+            self._board_cache_png = None
+            return None
+        key = (
+            tuple(state["player"]), tuple(state["dealer"]),
+            state["dealer_hidden"], state["bet"], state["outcome"],
+            state["delta"], self._avatar_bytes is not None,
+        )
+        if key == self._board_cache_key:
+            return self._board_cache_png
+        try:
+            png = blackjack_image.render_blackjack_png(
+                player_hand=state["player"],
+                dealer_hand=state["dealer"],
+                dealer_hidden=state["dealer_hidden"],
+                bet=state["bet"],
+                player_name=cached_display_name(
+                    getattr(self.cog, "bot", None), self.user_id),
+                user_id=self.user_id,
+                avatar_bytes=self._avatar_bytes,
+                outcome=state["outcome"],
+                delta=state["delta"],
+            )
+        except Exception:
+            logger.exception("gambling: ブラックジャック盤面の描画に失敗しました")
+            png = None
+        self._board_cache_key = key
+        self._board_cache_png = png
+        return png
+
+    async def _prepare_files(self) -> None:
+        if self._avatar_tried:
+            return
+        self._avatar_tried = True
+        try:
+            avatars = await fetch_avatar_bytes(
+                getattr(self.cog, "bot", None), [self.user_id])
+            self._avatar_bytes = avatars.get(self.user_id)
+        except Exception:
+            self._avatar_bytes = None
+
+    def panel_files(self) -> list[discord.File] | None:
+        png = self._board_png()
+        if png is None:
+            return None
+        return [discord.File(io.BytesIO(png),
+                             filename=blackjack_image.FILENAME)]
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         return interaction.user.id == self.user_id
@@ -509,7 +638,8 @@ class BlackjackView(_SessionPanel, discord.ui.View):
 
     def _build_embed(self, balance: int | None) -> discord.Embed:
         return _blackjack_embed(
-            self.cog, self.user_id, result=self.last_result, balance=balance)
+            self.cog, self.user_id, result=self.last_result, balance=balance,
+            board=self._board_png() is not None)
 
     @discord.ui.button(label="ベットして始める", style=discord.ButtonStyle.primary)
     async def start(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -808,8 +938,15 @@ class GamblingCog(commands.Cog):
         self._refunded = False
         # スロットのセッション内配当累計（終了時に純損失を還流するため）。
         self._slot_rewards: dict[str, int] = {}
+        # ブラックジャックの直近の決着状態（盤面画像の最終表示専用。
+        # セッションは決着と同時に消えるため、表示のためだけに保持する）。
+        self._blackjack_final: dict[str, dict] = {}
         # 悪魔的な報酬（S6-4）の発動抽選用。
         self._rng = random.Random()
+
+    def blackjack_final_state(self, user_id: int) -> dict | None:
+        """直近のブラックジャック決着状態（盤面画像用、表示専用）。"""
+        return self._blackjack_final.get(str(user_id))
 
     # ------------------------------------------------------------------ 共有ストア
     def _item_store(self) -> items_core.ItemStore:
@@ -1006,7 +1143,12 @@ class GamblingCog(commands.Cog):
     async def show_blackjack(self, interaction: discord.Interaction):
         view = BlackjackView(self, interaction.user.id)
         view._last_balance = await _fetch_balance(self, interaction.user.id)
-        await interaction.response.send_message(view=_wrap(view))
+        await view._prepare_files()
+        files = view.panel_files()
+        if files:
+            await interaction.response.send_message(view=_wrap(view), files=files)
+        else:
+            await interaction.response.send_message(view=_wrap(view))
         view.message = await interaction.original_response()
 
     async def show_dice(self, interaction: discord.Interaction):
@@ -1355,6 +1497,7 @@ class GamblingCog(commands.Cog):
                     return gambling_action_failed(
                         REFUND_FAILED_CONTACT)
                 return gambling_action_failed(exc)
+            self._blackjack_final.pop(uid, None)
             await self._record_history(uid, GAMBLING_ID, bet, "gamble_blackjack")
             total = gambling_core.calc_total(session["player"])
             return (f"🃏 **ブラックジャック開始！** BET: {bet:,} AGO\n"
@@ -1376,10 +1519,19 @@ class GamblingCog(commands.Cog):
                 return gambling_action_failed(blocked), False
             result = self.store.blackjack_hit(uid)
             if result["bust"]:
+                self._blackjack_final[uid] = {
+                    "player": list(result["player"]),
+                    "dealer": None,
+                    "dealer_first": result["dealer_first"],
+                    "bet": int(result["bet"]),
+                    "outcome": "bust",
+                    "delta": -int(result["bet"]),
+                }
                 self._recycle(result["bet"])
                 return (f"💥 **バースト！** あなた: {result['player']}"
                         f"（{result['total']}）\n"
                         f"負け -{result['bet']:,} AGO", True)
+            self._blackjack_final.pop(uid, None)
             return (f"あなた: {result['player']}（{result['total']}）\n"
                     f"ディーラー: {result['dealer_first']} ?\n"
                     "ヒットかスタンドを選んでください。", False)
@@ -1397,6 +1549,13 @@ class GamblingCog(commands.Cog):
             if blocked:
                 return gambling_action_failed(blocked)
             result = self.store.blackjack_stand(uid)
+            self._blackjack_final[uid] = {
+                "player": list(result["player"]),
+                "dealer": list(result["dealer"]),
+                "bet": int(result["bet"]),
+                "outcome": result["outcome"],
+                "delta": int(result["payout"]) - int(result["bet"]),
+            }
             if result["payout"] > 0:
                 wallet = self._wallet()
                 credit = await wallet._change_balance(
