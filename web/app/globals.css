@@ -78,6 +78,11 @@ footer { position:relative; z-index:20; background:#fff; padding:20px; border-to
 .compute-page p,.compute-page li { line-height:1.9; }
 .compute-panel { display:grid; gap:14px; margin-top:20px; padding:20px; border:1px solid var(--line); border-radius:9px; }
 .compute-actions { display:flex; align-items:center; gap:14px; flex-wrap:wrap; }
+.compute-method { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+.compute-method-label { font-size:13px; font-weight:700; }
+.compute-method button { padding:8px 14px; border:1px solid var(--line); border-radius:7px; background:#fff; color:var(--text); font-weight:700; cursor:pointer; }
+.compute-method button[aria-pressed="true"] { background:var(--accent); border-color:var(--accent); color:#fff; }
+.compute-method button:disabled { opacity:.45; cursor:not-allowed; }
 .compute-start { padding:10px 18px; border:1px solid var(--accent); border-radius:7px; background:var(--accent); color:#fff; font-weight:700; cursor:pointer; }
 .compute-start:disabled { opacity:.45; cursor:not-allowed; }
 .compute-stop { padding:10px 18px; border:1px solid var(--line); border-radius:7px; background:#fff; color:var(--text); font-weight:700; cursor:pointer; }
