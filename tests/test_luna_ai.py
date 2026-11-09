@@ -734,6 +734,60 @@ class SpeakerAttributionTest(unittest.TestCase):
         self.assertIsNone(captured["author_id"])
 
 
+class WebSearchCueTest(unittest.TestCase):
+    def test_strong_cue_always_fires(self):
+        self.assertIsNotNone(luna.search_query_for("○○の新作について調べて"))
+        self.assertIsNotNone(luna.search_query_for("これ検索して"))
+        self.assertIsNotNone(luna.search_query_for("ググってくれる"))
+
+    def test_info_cue_needs_question_shape(self):
+        self.assertIsNotNone(luna.search_query_for("最新のニュース教えて"))
+        self.assertIsNotNone(luna.search_query_for("明日の天気はどう？"))
+        self.assertIsNone(luna.search_query_for("最新刊やっと買えた"))
+        self.assertIsNone(luna.search_query_for("ニュース見たわ"))
+
+    def test_casual_chat_never_fires(self):
+        self.assertIsNone(luna.search_query_for("おはよう"))
+        self.assertIsNone(luna.search_query_for("それな、ほんと笑う"))
+        self.assertIsNone(luna.search_query_for(""))
+        self.assertIsNone(luna.search_query_for(None))
+
+    def test_blocks_format_and_budget(self):
+        results = [
+            {"title": "記事A", "url": "https://example.com/a", "snippet": "要約A"},
+            {"title": "記事B", "url": "https://example.com/b", "snippet": "要約B"},
+        ]
+        text = luna._search_blocks(results)
+        self.assertIn("【検索結果1】記事A", text)
+        self.assertIn("https://example.com/b", text)
+        self.assertLessEqual(len(luna._search_blocks(results, budget=10)), 10)
+        self.assertEqual(luna._search_blocks([]), "")
+
+
+class WebSearchFetchTest(unittest.IsolatedAsyncioTestCase):
+    async def test_fetch_returns_blocks_when_cue_matches(self):
+        async def fake_search(query, *, max_results=5):
+            return [{"title": "記事", "url": "https://example.com", "snippet": "要約"}]
+
+        with patch.object(luna.web_search, "search", fake_search):
+            text = await luna._fetch_web_search_text("○○について調べて")
+        self.assertIn("【検索結果1】記事", text)
+
+    async def test_fetch_skips_without_cue(self):
+        async def fake_search(query, *, max_results=5):
+            raise AssertionError("検索が呼ばれてはいけない")
+
+        with patch.object(luna.web_search, "search", fake_search):
+            self.assertEqual(await luna._fetch_web_search_text("おはよう"), "")
+
+    async def test_fetch_failure_is_soft(self):
+        async def broken_search(query, *, max_results=5):
+            raise RuntimeError("network down")
+
+        with patch.object(luna.web_search, "search", broken_search):
+            self.assertEqual(await luna._fetch_web_search_text("○○を検索して"), "")
+
+
 class SanitizeOutputTest(unittest.TestCase):
     def test_everyone_and_here_defanged(self):
         self.assertEqual(luna.sanitize_output("@everyone 見て"), "@​everyone 見て")
@@ -925,9 +979,9 @@ class LoggerLevelTest(unittest.TestCase):
 
 
 class ModelSelectionTest(unittest.TestCase):
-    def test_default_model_is_logfare_qwen(self):
+    def test_default_model_is_logfare_deepseek(self):
         self.assertEqual(luna.DEFAULT_PROVIDER, "logfare")
-        self.assertEqual(luna.DEFAULT_MODEL, "qwen-3.8-27b")
+        self.assertEqual(luna.DEFAULT_MODEL, "deepseek-v4.1-flash-1017")
         self.assertEqual(luna.REASONING_EFFORT, "none")
 
     def test_provider_name_defaults_to_logfare_and_env_selects_kiosapi(self):

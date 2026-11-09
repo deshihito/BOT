@@ -43,6 +43,7 @@ from typing import Any
 import aiohttp
 import discord
 
+from core.general import web_search
 from core.general.ai import ai_context, ai_input, ai_provider_router, logfare
 from core.game.game.game_guides import GAME_GUIDES
 from core.support.messages import ASSIST_MANAGE_REQUIRED
@@ -64,7 +65,7 @@ CUSTOM_ICON_URL_MAX_CHARS = 500
 FORBIDDEN_NAME_WORDS = ("discord", "clyde")
 
 DEFAULT_PROVIDER = "logfare"
-DEFAULT_MODEL = "qwen-3.8-27b"
+DEFAULT_MODEL = "deepseek-v4.1-flash-1017"
 DEBOUNCE_SECONDS = 3.0
 COOLDOWN_SECONDS = 8.0
 MAX_REPLIES_PER_HOUR = 120
@@ -76,6 +77,8 @@ MEMORY_MAX_CHARS = 3500
 MEMORY_INTEGRATE_TURNS = 15
 MEMORY_IDLE_SECONDS = 600.0
 RAG_BUDGET_CHARS = 800
+SEARCH_BUDGET_CHARS = 1500
+SEARCH_MAX_RESULTS = 3
 RAG_MIN_SCORE = 6
 RAG_KEY_BOOST = 50
 MAX_SEND_PARTS = 3
@@ -152,9 +155,9 @@ def provider_name() -> str:
     return "kiosapi" if raw == "kiosapi" else "logfare"
 
 
-# Logfare 経路の思考はオフにする。qwen-3.8-27b はカタログ上 "none" に
-# 対応している (supported_efforts: xhigh/medium/low/none、既定は xhigh)。
-# KiosAPI 経路では送らない（!ai ルーターも KiosAPI には送らない作法）。
+# Logfare 経路の思考はオフにする。deepseek-v4.1-flash-1017 はカタログ上
+# "none" に対応している。KiosAPI 経路では送らない（!ai ルーターも
+# KiosAPI には送らない作法）。
 REASONING_EFFORT = "none"
 
 
@@ -914,6 +917,67 @@ def search_rag(
     return "\n\n".join(out)
 
 
+# ---------------------------------------------------------------- Web検索（生成前の資料差し込み）
+
+# 明示的な検索キュー。これがあれば検索意図が明確なので即発動する。
+SEARCH_CUES_STRONG = ("調べて", "調べ", "検索", "ググ")
+# 外部・最新の情報が要りそうな語。単独では雑談にも出るため、
+# 質問・依頼の形をした発言のときだけ発動する。
+SEARCH_CUES_INFO = ("最新", "ニュース", "速報", "天気", "発売日", "試合結果", "株価", "地震")
+SEARCH_QUESTION_HINTS = (
+    "？", "?", "教えて", "知りたい", "いつ", "どこ", "誰", "だれ",
+    "何", "なに", "いくら", "どう",
+)
+
+
+def search_query_for(text: Any) -> str | None:
+    """発言テキストから Web 検索クエリを決める（純関数）。検索不要なら None。
+
+    雑談の流れを壊さないよう発動条件は絞る: 明示キューは即発動、
+    情報系の語は質問・依頼の形のときだけ。クエリは発言そのものを
+    空白正規化して使う（検索側でも長さ制限がかかる）。
+    """
+    cleaned = re.sub(r"\s+", " ", str(text or "")).strip()
+    if not cleaned:
+        return None
+    if any(cue in cleaned for cue in SEARCH_CUES_STRONG):
+        return cleaned
+    if any(cue in cleaned for cue in SEARCH_CUES_INFO) and any(
+        hint in cleaned for hint in SEARCH_QUESTION_HINTS
+    ):
+        return cleaned
+    return None
+
+
+def _search_blocks(results: Any, *, budget: int = SEARCH_BUDGET_CHARS) -> str:
+    """検索結果を資料テキストにする（純関数）。予算を超えたら切り詰める。"""
+    blocks: list[str] = []
+    for index, result in enumerate(list(results or [])[:SEARCH_MAX_RESULTS], 1):
+        if not isinstance(result, dict):
+            continue
+        title = str(result.get("title") or "").strip()
+        url = str(result.get("url") or "").strip()
+        snippet = str(result.get("snippet") or "").strip()
+        block = f"【検索結果{index}】{title}\n{url}\n{snippet}".strip()
+        if block:
+            blocks.append(block)
+    return "\n\n".join(blocks)[:budget]
+
+
+async def _fetch_web_search_text(prompt_text: str) -> str:
+    """検索キューがあれば Web 検索して資料テキストを返す。失敗しても空文字（fail-soft）。"""
+    query = search_query_for(prompt_text)
+    if query is None:
+        return ""
+    try:
+        results = await web_search.search(query, max_results=SEARCH_MAX_RESULTS)
+    except Exception as exc:  # 検索は付け足し機能。失敗で返信を止めない。
+        logger.warning(
+            "Luna AI の Web 検索に失敗しました: error=%s: %s", type(exc).__name__, exc)
+        return ""
+    return _search_blocks(results)
+
+
 # ---------------------------------------------------------------- 出力サニタイズ・名前サニタイズ（純関数）
 
 _ZWSP = "\u200b"
@@ -1381,11 +1445,16 @@ async def _generate_and_send(runtime: _Runtime, batch: list[Any]) -> None:
             if urls:
                 links = await ai_context.fetch_links(urls[: ai_context.MAX_LINKS])
                 link_text = _link_blocks(links)
+            search_started_at = time.monotonic()
+            web_text = await _fetch_web_search_text(prompt_text)
+            search_seconds = time.monotonic() - search_started_at
             sections = [context_text] if context_text else []
             if rag_text:
                 sections.append(f"【AGO BOT資料】\n{rag_text}")
             if link_text:
                 sections.append(link_text)
+            if web_text:
+                sections.append(f"【Web検索結果】\n{web_text}")
             sections.append("直近の会話の流れ（誰が誰に何を言ったか）を踏まえて、最後の発言に続けて、Lunaとして自然に返信して")
             user_prompt = "\n\n".join(sections)
             attachments = []
@@ -1397,7 +1466,7 @@ async def _generate_and_send(runtime: _Runtime, batch: list[Any]) -> None:
                     attachments.extend(getattr(resolved, "attachments", None) or [])
             user_content = await _build_user_content(user_prompt, attachments)
             system = build_system_prompt(
-                persona["system_prompt"], has_materials=bool(rag_text or link_text))
+                persona["system_prompt"], has_materials=bool(rag_text or link_text or web_text))
             messages = [
                 {"role": "system", "content": system},
                 {"role": "user", "content": user_content},
@@ -1423,13 +1492,14 @@ async def _generate_and_send(runtime: _Runtime, batch: list[Any]) -> None:
             return
         sent_at = time.monotonic()
         logger.info(
-            "Luna AI 応答時間: channel=%s total=%.2fs db=%.2fs ttft=%.2fs gen=%.2fs send=%.2fs",
+            "Luna AI 応答時間: channel=%s total=%.2fs db=%.2fs search=%.2fs ttft=%.2fs gen=%.2fs send=%.2fs",
             channel_id,
             sent_at - started_at,
             db_ready_at - started_at,
+            search_seconds,
             ttft_seconds,
             max(stream_seconds - ttft_seconds, 0.0),
-            sent_at - db_ready_at - stream_seconds,
+            sent_at - db_ready_at - stream_seconds - search_seconds,
         )
         if client is not None:
             luna_turn = {"author_name": persona["name"], "is_luna": True, "content": reply.strip()}
