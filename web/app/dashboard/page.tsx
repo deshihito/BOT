@@ -118,6 +118,7 @@ export default async function DashboardPage() {
         <h2>その他の機能</h2>
       </div>
       <nav className="dashboard-list" aria-label="機能">
+        <Link href="/dashboard/ads" className="dashboard-card">サーバー広告の申請</Link>
         <Link href="/coder" className="dashboard-card">AGO Coder</Link>
         <Link href="/commands" className="dashboard-card">コマンド</Link>
       </nav>
