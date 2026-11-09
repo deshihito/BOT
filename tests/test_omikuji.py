@@ -385,6 +385,220 @@ class PanelTest(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(sent[1].get("ephemeral"))
 
 
+class FormatWeightsTest(unittest.TestCase):
+    """フォーマット抽選とフォーマット別確率テーブルの担保。"""
+
+    def test_format_weights_sum_to_100(self):
+        self.assertEqual(F.FORMATS, ("normal", "luxury", "spicy", "gaming"))
+        self.assertEqual(len(F.FORMAT_WEIGHTS), len(F.FORMATS))
+        self.assertEqual(sum(F.FORMAT_WEIGHTS), 100)
+
+    def test_format_boundaries(self):
+        boundaries = [
+            (1, "normal"), (55, "normal"),
+            (56, "luxury"), (70, "luxury"),
+            (71, "spicy"), (95, "spicy"),
+            (96, "gaming"), (100, "gaming"),
+        ]
+        for roll, expected in boundaries:
+            with self.subTest(roll=roll):
+                self.assertEqual(F.pick_format(_FixedRoll(roll)), expected)
+
+    def test_each_format_rank_table_sums_to_100(self):
+        self.assertEqual(set(F.FORMAT_RANK_WEIGHTS), set(F.FORMATS))
+        for fmt in F.FORMATS:
+            weights = F.FORMAT_RANK_WEIGHTS[fmt]
+            self.assertEqual(len(weights), len(F.RANKS), fmt)
+            self.assertEqual(sum(weights), 100, fmt)
+        # 通常フォーマットは従来テーブルそのまま
+        self.assertEqual(F.FORMAT_RANK_WEIGHTS["normal"], F.RANK_WEIGHTS)
+
+    def test_luxury_rank_boundaries(self):
+        boundaries = [
+            (1, "大吉"), (22, "大吉"), (23, "中吉"), (44, "中吉"),
+            (45, "小吉"), (62, "小吉"), (63, "吉"), (84, "吉"),
+            (85, "半吉"), (89, "半吉"), (90, "末吉"), (95, "末吉"),
+            (96, "末小吉"), (97, "末小吉"), (98, "凶"), (99, "凶"),
+            (100, "小凶"),
+        ]
+        for roll, expected in boundaries:
+            with self.subTest(roll=roll):
+                self.assertEqual(F.pick_rank(_FixedRoll(roll), "luxury"), expected)
+
+    def test_luxury_never_picks_zero_weight_ranks(self):
+        # 重み0の半凶・末凶・大凶は全ロール域で絶対に出ない
+        for roll in range(1, 101):
+            self.assertNotIn(F.pick_rank(_FixedRoll(roll), "luxury"),
+                             ("半凶", "末凶", "大凶"))
+
+    def test_gaming_rank_boundaries(self):
+        boundaries = [
+            (1, "大吉"), (18, "大吉"), (19, "中吉"), (38, "中吉"),
+            (39, "小吉"), (54, "小吉"), (55, "吉"), (76, "吉"),
+            (77, "半吉"), (82, "半吉"), (83, "末吉"), (90, "末吉"),
+            (91, "末小吉"), (93, "末小吉"), (94, "凶"), (97, "凶"),
+            (98, "小凶"), (99, "半凶"), (100, "大凶"),
+        ]
+        for roll, expected in boundaries:
+            with self.subTest(roll=roll):
+                self.assertEqual(F.pick_rank(_FixedRoll(roll), "gaming"), expected)
+
+    def test_gaming_never_picks_suekyou(self):
+        # ゲーミングは末凶だけ重み0＝絶対に出ない（大凶は出る）
+        for roll in range(1, 101):
+            self.assertNotEqual(F.pick_rank(_FixedRoll(roll), "gaming"), "末凶")
+
+    def test_spicy_rank_boundaries(self):
+        boundaries = [
+            (1, "大吉"), (4, "大吉"), (5, "中吉"), (12, "中吉"),
+            (13, "小吉"), (22, "小吉"), (23, "吉"), (38, "吉"),
+            (39, "半吉"), (46, "半吉"), (47, "末吉"), (58, "末吉"),
+            (59, "末小吉"), (64, "末小吉"), (65, "凶"), (80, "凶"),
+            (81, "小凶"), (87, "小凶"), (88, "半凶"), (92, "半凶"),
+            (93, "末凶"), (96, "末凶"), (97, "大凶"), (100, "大凶"),
+        ]
+        for roll, expected in boundaries:
+            with self.subTest(roll=roll):
+                self.assertEqual(F.pick_rank(_FixedRoll(roll), "spicy"), expected)
+
+
+class FormatStorageTest(unittest.TestCase):
+    """フォーマットの保持・後方互換・日次固定の担保。"""
+
+    def _fortune(self, fmt):
+        return F.Fortune(
+            number=7, rank="吉", waka=F.WAKA["吉"][0],
+            summary=F.SUMMARIES["吉"][0],
+            items=tuple((n, F.ITEM_FORTUNES["吉"][n][0]) for n in F.ITEMS),
+            format=fmt,
+        )
+
+    def test_draw_includes_a_format(self):
+        fortune = F.draw_fortune(F.seeded_rng(1, 2, "2026-11-09"))
+        self.assertIn(fortune.format, F.FORMATS)
+
+    def test_seeded_draws_cover_all_formats(self):
+        seen = {F.draw_fortune(F.seeded_rng(1, user, "2026-11-09")).format
+                for user in range(300)}
+        self.assertEqual(seen, set(F.FORMATS))
+
+    def test_round_trip_preserves_format(self):
+        for fmt in F.FORMATS:
+            fortune = self._fortune(fmt)
+            self.assertEqual(F.Fortune.from_dict(fortune.to_dict()), fortune)
+
+    def test_legacy_record_without_format_is_normal(self):
+        raw = self._fortune("luxury").to_dict()
+        del raw["format"]
+        self.assertEqual(F.Fortune.from_dict(raw).format, "normal")
+
+    def test_unknown_format_falls_back_to_normal(self):
+        raw = self._fortune("luxury").to_dict()
+        raw["format"] = "rainbow"
+        self.assertEqual(F.Fortune.from_dict(raw).format, "normal")
+
+
+class FormatDailyFixTest(unittest.TestCase):
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.path = os.path.join(self._tmp.name, "omikuji.json")
+        self.store = OmikujiStore(path=self.path)
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def test_format_is_fixed_within_a_day(self):
+        first, _ = self.store.get_or_draw(111, 222, "2026-11-09")
+        second, created = self.store.get_or_draw(111, 222, "2026-11-09")
+        self.assertFalse(created)
+        self.assertEqual(first.format, second.format)
+        reloaded = OmikujiStore(path=self.path)
+        third, created3 = reloaded.get_or_draw(111, 222, "2026-11-09")
+        self.assertFalse(created3)
+        self.assertEqual(third, first)
+
+    def test_unlimited_user_redraws_format_too(self):
+        formats = set()
+        for _ in range(60):
+            fortune, _created = self.store.get_or_draw(
+                111, 1320705325686587408, "2026-11-09")
+            formats.add(fortune.format)
+        self.assertGreater(len(formats), 1)
+
+
+class RenderFormatTest(unittest.TestCase):
+    def _fortune(self, fmt, rank):
+        pools = F.ITEM_FORTUNES[rank]
+        return F.Fortune(
+            number=100, rank=rank, waka=F.WAKA[rank][0],
+            summary=F.SUMMARIES[rank][0],
+            items=tuple((name, pools[name][0]) for name in F.ITEMS),
+            format=fmt,
+        )
+
+    def test_render_every_format(self):
+        # 枠の外（左マージン中央）はテーマの紙色そのものになる
+        expected_paper = {
+            "normal": (247, 242, 231),
+            "luxury": (36, 28, 20),
+            "spicy": (252, 252, 250),
+            "gaming": (247, 242, 231),
+        }
+        for fmt in F.FORMATS:
+            for rank in ("大吉", "大凶"):
+                data = R.render_omikuji_png(self._fortune(fmt, rank))
+                with self.subTest(format=fmt, rank=rank):
+                    self.assertGreater(len(data), 10_000)
+                    img = Image.open(io.BytesIO(data)).convert("RGB")
+                    self.assertEqual(img.size, (R.CANVAS_W, R.CANVAS_H))
+                    self.assertEqual(img.getpixel((8, 990)), expected_paper[fmt])
+
+    def test_luxury_header_differs_from_normal(self):
+        self.assertEqual(R._THEMES["luxury"].header, "黄金おみくじ")
+        self.assertEqual(R._THEMES["normal"].header, "おみくじ")
+        self.assertEqual(R._THEMES["spicy"].header, "おみくじ")
+        self.assertEqual(R._THEMES["gaming"].header, "ゲーミングおみくじ")
+
+
+class RenderGamingTest(unittest.TestCase):
+    """ゲーミングだけが複数フレームのアニメーション GIF になること。"""
+
+    def _fortune(self, fmt, rank="大吉"):
+        pools = F.ITEM_FORTUNES[rank]
+        return F.Fortune(
+            number=100, rank=rank, waka=F.WAKA[rank][0],
+            summary=F.SUMMARIES[rank][0],
+            items=tuple((name, pools[name][0]) for name in F.ITEMS),
+            format=fmt,
+        )
+
+    def test_gaming_renders_animated_gif(self):
+        data, filename = R.render_omikuji_image(self._fortune("gaming"))
+        self.assertEqual(filename, "omikuji.gif")
+        self.assertTrue(data.startswith(b"GIF8"))
+        img = Image.open(io.BytesIO(data))
+        self.assertEqual(img.format, "GIF")
+        self.assertEqual(img.size, (R.CANVAS_W, R.CANVAS_H))
+        self.assertEqual(img.n_frames, R.GAMING_FRAMES)
+        self.assertEqual(img.info.get("loop"), 0)
+        # フレーム間で枠色（外枠の左辺中央）が遷移している
+        img.seek(0)
+        first = img.convert("RGB").getpixel((29, 990))
+        img.seek(R.GAMING_FRAMES // 2)
+        middle = img.convert("RGB").getpixel((29, 990))
+        self.assertNotEqual(first, middle)
+        # 先頭フレームの枠は虹の開始色（赤系）
+        self.assertGreater(first[0], 150)
+        self.assertLess(first[1], 120)
+
+    def test_other_formats_stay_png(self):
+        for fmt in ("normal", "luxury", "spicy"):
+            data, filename = R.render_omikuji_image(self._fortune(fmt))
+            with self.subTest(format=fmt):
+                self.assertEqual(filename, "omikuji.png")
+                self.assertTrue(data.startswith(b"\x89PNG"))
+
+
 class RegistryTest(unittest.TestCase):
     def test_omikuji_is_registered_in_fortune_genre(self):
         from core.general import action_registry

@@ -23,7 +23,7 @@ from discord.ext import commands
 
 from core.support.localization.localization import guild_locale
 
-from .render import render_omikuji_png
+from .render import render_omikuji_image
 from .store import OmikujiStore, is_unlimited_user
 
 logger = logging.getLogger("cogs.omikuji")
@@ -52,8 +52,10 @@ class OmikujiCog(commands.Cog):
 
     async def _build_file(self, guild_id: int, user_id: int) -> discord.File:
         fortune, _created = self.store.get_or_draw(guild_id, user_id)
-        data = render_omikuji_png(fortune)
-        return discord.File(io.BytesIO(data), filename="omikuji.png")
+        # ゲーミングの札だけアニメーション GIF（ファイル名も .gif）になる。
+        # GIF 生成は重いため、イベントループを塞がないよう別スレッドで描く。
+        data, filename = await asyncio.to_thread(render_omikuji_image, fortune)
+        return discord.File(io.BytesIO(data), filename=filename)
 
     # --------------------------------------------------------------
     # メッセージ発動
