@@ -20,11 +20,11 @@ const core = await loadLib("compute-core.ts");
 
 const SUITES = [
   ["startpos", "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1", { 1: 20, 2: 400, 3: 8902, 4: 197281 }],
-  ["kiwipete", "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1", { 1: 48, 2: 2039, 3: 97862 }],
-  ["pos3", "8/2p5/3p4/KP5r/1R3p1k/8/4P1P1/8 w - - 0 1", { 1: 14, 2: 191, 3: 2812, 4: 43238, 5: 674624 }],
-  ["pos4", "r3k2r/Pppp1ppp/1b3nbN/nP6/BBP1P3/q4N2/Pp1P2PP/R2Q1RK1 w kq - 0 1", { 1: 6, 2: 264, 3: 9467, 4: 422333 }],
-  ["pos5", "rnbq1k1r/pp1Pbppp/2p5/8/2B5/8/PPP1NnPP/RNBQK2R w KQ - 1 8", { 1: 44, 2: 1486, 3: 62379 }],
-  ["pos6", "r4rk1/1pp1qppp/p1np1n2/2b1p1B1/2B1P1b1/P1NP1N2/1PP1QPPP/R4RK1 w - - 0 10", { 1: 46, 2: 2079, 3: 89890 }],
+  ["kiwipete", "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1", { 1: 48, 2: 2039, 3: 97862, 4: 4085603 }],
+  ["pos3", "8/2p5/3p4/KP5r/1R3p1k/8/4P1P1/8 w - - 0 1", { 1: 14, 2: 191, 3: 2812, 4: 43238, 5: 674624, 6: 11030083 }],
+  ["pos4", "r3k2r/Pppp1ppp/1b3nbN/nP6/BBP1P3/q4N2/Pp1P2PP/R2Q1RK1 w kq - 0 1", { 1: 6, 2: 264, 3: 9467, 4: 422333, 5: 15833292 }],
+  ["pos5", "rnbq1k1r/pp1Pbppp/2p5/8/2B5/8/PPP1NnPP/RNBQK2R w KQ - 1 8", { 1: 44, 2: 1486, 3: 62379, 4: 2103487 }],
+  ["pos6", "r4rk1/1pp1qppp/p1np1n2/2b1p1B1/2B1P1b1/P1NP1N2/1PP1QPPP/R4RK1 w - - 0 10", { 1: 46, 2: 2079, 3: 89890, 4: 3894594 }],
 ];
 
 test("perft が公開既知値と一致する（6局面×複数深さ）", () => {
@@ -53,13 +53,14 @@ test("divide: 初期局面の合法手は20通りで、深さ3の合計が 8,902
   assert.equal(sum, 8902);
 });
 
+// スイート2の局面別合計（chessprogramming wiki の Perft Results）:
+// startpos depth 6 / kiwipete depth 5 / pos3 depth 7 / pos5 depth 5 / pos6 depth 5
 const PUBLISHED_SUITE_TOTALS = {
-  startpos: 4865609,
-  kiwipete: 4085603,
-  pos3: 11030083,
-  pos4: 15833292,
-  pos5: 2103487,
-  pos6: 3894594,
+  startpos: 119060324,
+  kiwipete: 193690690,
+  pos3: 178633661,
+  pos5: 89941194,
+  pos6: 164075551,
 };
 
 test("カタログのスイート別合計が公開 perft 値と一致する", () => {
@@ -76,6 +77,21 @@ test("カタログのスイート別合計が公開 perft 値と一致する", (
   assert.equal(new Set(catalog.COMPUTE_CATALOG.map((t) => t.id)).size, catalog.COMPUTE_CATALOG.length);
 });
 
+test("カタログ v2 の形: スイート識別子・ID接頭辞・粒度の上限を守る", () => {
+  assert.equal(catalog.COMPUTE_SUITE_ID, "v2");
+  assert.ok(catalog.COMPUTE_CATALOG_TOTAL_TASKS <= 10_000);
+  // スイート1（613タスク / 41,812,668ノード）の10倍以上の規模
+  assert.ok(catalog.COMPUTE_CATALOG_TOTAL_NODES >= 41812668 * 10);
+  for (const task of catalog.COMPUTE_CATALOG) {
+    assert.ok(task.id.startsWith("v2:"), task.id);
+    assert.ok(task.expected >= 1 && task.expected <= 3_000_000, task.id);
+    assert.ok(task.depth >= 1, task.id);
+  }
+  // スイート1のタスクIDは現行カタログに存在しない（旧結果は unknown として弾かれる）
+  assert.equal(catalog.findComputeTask("startpos:e2e4"), undefined);
+  assert.ok(catalog.findComputeTask("v2:startpos:e2e4/a7a6"));
+});
+
 test("カタログの expected が実計算と一致する（サンプル検証）", () => {
   const tasks = catalog.COMPUTE_CATALOG;
   const samples = new Set();
@@ -90,14 +106,92 @@ test("カタログの expected が実計算と一致する（サンプル検証�
 });
 
 test("parsePoolState は壊れたデータを落として安全な形にする", () => {
-  assert.deepEqual(core.parsePoolState(null), { version: 1, done: {}, leases: {} });
-  assert.deepEqual(core.parsePoolState("x"), { version: 1, done: {}, leases: {} });
+  assert.deepEqual(core.parsePoolState(null), { version: 2, suite: "v1", done: {}, leases: {} });
+  assert.deepEqual(core.parsePoolState("x"), { version: 2, suite: "v1", done: {}, leases: {} });
   const parsed = core.parsePoolState({
     done: { a: 100, b: -1, c: 1.5, d: "10" },
     leases: { a: { exp: 123, token: "tok" }, b: { exp: "x", token: "tok" }, c: { exp: 1, token: "" } },
   });
   assert.deepEqual(parsed.done, { a: 100 });
   assert.deepEqual(parsed.leases, { a: { exp: 123, token: "tok" } });
+});
+
+test("parsePoolState は旧形式（suiteなし）を v1 として読み、v2形式の suite を保持する", () => {
+  assert.equal(core.parsePoolState({ version: 1, done: {}, leases: {} }).suite, "v1");
+  assert.equal(core.parsePoolState({ version: 2, suite: "v2", done: {}, leases: {} }).suite, "v2");
+  assert.equal(core.parsePoolState({ version: 2, suite: "", done: {}, leases: {} }).suite, "v1");
+  assert.equal(core.parsePoolState({ version: 2, suite: 42, done: {}, leases: {} }).suite, "v1");
+});
+
+test("migratePoolState は旧スイートの実績を退避し、現行スイートの空状態を返す", () => {
+  const legacy = core.emptyPoolState();
+  legacy.done = { "startpos:a2a3": 100, "startpos:a2a4": 200 };
+  legacy.leases = { "startpos:b2b3": { exp: 999, token: "tok" } };
+  const { state, archive } = core.migratePoolState(legacy, "v2", 123456);
+  assert.deepEqual(state, { version: 2, suite: "v2", done: {}, leases: {} });
+  assert.deepEqual(archive, {
+    suite: "v1",
+    totalTasks: 613,
+    completedTasks: 2,
+    totalNodes: 300,
+    targetNodes: 41812668,
+    completed: false,
+    archivedAt: 123456,
+  });
+});
+
+test("migratePoolState は完走済みの旧スイートを completed として退避する", () => {
+  const legacy = core.emptyPoolState();
+  for (let i = 0; i < 613; i++) legacy.done[`t${i}`] = 1;
+  const { archive } = core.migratePoolState(legacy, "v2", 1);
+  assert.equal(archive.completed, true);
+  assert.equal(archive.completedTasks, 613);
+});
+
+test("migratePoolState は空の旧状態を退避せず、現行スイートの状態には触れない", () => {
+  const empty = core.emptyPoolState();
+  const migrated = core.migratePoolState(empty, "v2", 1);
+  assert.equal(migrated.archive, null);
+  assert.deepEqual(migrated.state, { version: 2, suite: "v2", done: {}, leases: {} });
+  const current = core.emptyPoolState("v2");
+  current.done = { "v2:x": 5 };
+  const same = core.migratePoolState(current, "v2", 1);
+  assert.equal(same.archive, null);
+  assert.deepEqual(same.state.done, { "v2:x": 5 });
+});
+
+test("parseSuiteHistory / appendSuiteHistory は冪等で壊れた項目を落とす", () => {
+  const record = {
+    suite: "v1",
+    totalTasks: 613,
+    completedTasks: 613,
+    totalNodes: 41812668,
+    targetNodes: 41812668,
+    completed: true,
+    archivedAt: 42,
+  };
+  let history = core.appendSuiteHistory([], record);
+  assert.equal(history.length, 1);
+  history = core.appendSuiteHistory(history, record);
+  assert.equal(history.length, 1);
+  history = core.appendSuiteHistory(history, null);
+  assert.equal(history.length, 1);
+  assert.deepEqual(core.parseSuiteHistory("x"), []);
+  assert.deepEqual(core.parseSuiteHistory(null), []);
+  assert.deepEqual(core.parseSuiteHistory([{ suite: "v1" }, record, record]), [record]);
+  // totalTasks / targetNodes が null の記録（規模未知の世代）も保持する
+  const partial = { suite: "v9", totalTasks: null, completedTasks: 3, totalNodes: 30, targetNodes: null, completed: false, archivedAt: 7 };
+  assert.deepEqual(core.parseSuiteHistory([partial]), [partial]);
+});
+
+test("sanitizePoolState は旧スイートのタスク記録を掃除する", () => {
+  const state = core.emptyPoolState("v2");
+  const v2task = catalog.COMPUTE_CATALOG[0];
+  state.done = { "startpos:e2e4": 405385, [v2task.id]: v2task.expected };
+  state.leases = { "startpos:e2e4": { exp: 1, token: "tok" } };
+  core.sanitizePoolState(state, catalog.COMPUTE_CATALOG);
+  assert.deepEqual(state.done, { [v2task.id]: v2task.expected });
+  assert.deepEqual(state.leases, {});
 });
 
 test("leaseNextTask は順に貸し出し、期限切れを再配布し、完了済みを飛ばす", () => {
@@ -148,6 +242,7 @@ test("poolProgress は完了数とノード合計を集計する", () => {
   state.done = { a: 100, b: 250 };
   const progress = core.poolProgress(state, 10, 1000);
   assert.deepEqual(progress, {
+    suite: "v1",
     totalTasks: 10,
     completedTasks: 2,
     totalNodes: 350,
