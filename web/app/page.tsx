@@ -59,6 +59,19 @@ export default async function Home() {
           </Link>
         ))}
       </nav>
+      <section className="home-video">
+        <h2>紹介動画</h2>
+        <video
+          autoPlay
+          muted
+          loop
+          playsInline
+          controls
+          preload="metadata"
+          poster="/video/intro-poster.jpg"
+          src="/video/intro.mp4"
+        />
+      </section>
     </div>
   );
 }
