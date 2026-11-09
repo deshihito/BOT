@@ -1,7 +1,11 @@
 import Link from "next/link";
 import { COMMAND_GUIDES } from "@/lib/command-guides";
 
-export const metadata = { title: "コマンド | AGOBOT", alternates: { canonical: "/commands" } };
+export const metadata = {
+  title: "コマンド",
+  description: "AGOBOTのスラッシュコマンドと全機能の一覧。各コマンドの使い方ガイドへのリンク集です。",
+  alternates: { canonical: "/commands" },
+};
 
 export default function CommandsPage() {
   return (
