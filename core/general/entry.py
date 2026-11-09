@@ -245,6 +245,12 @@ class GeneralCog(
                 return await cog.manage(interaction)
             return await cog.reset(interaction)
 
+        if value == "omikuji":
+            cog = self.bot.get_cog("OmikujiCog")
+            if cog is None:
+                return await self._safe_respond(interaction, feature_not_loaded("おみくじ"))
+            return await cog.open_panel(interaction)
+
         if value == "miq_settings":
             view = MiqSettingsView(self, interaction.user.id)
             return await interaction.response.send_message(view=as_panel_v2(view), ephemeral=True)

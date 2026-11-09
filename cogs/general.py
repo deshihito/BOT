@@ -21,6 +21,7 @@
     market        core/general/market/cog.py               MarketCog
     money_panel   core/general/money_panel/cog.py          MoneyPanelCog
     mood          core/general/mood/cog.py                 MoodAnalysis
+    omikuji       core/general/omikuji/cog.py              OmikujiCog
     role_shop     core/general/role_shop/cog.py            RoleShopCog
     wallet        core/general/wallet/cog.py               WalletCog
     whisper       core/general/whisper/cog.py              WhisperCog
@@ -104,6 +105,7 @@ _FEATURE_MODULES = (
     ("market", "core.general.market.cog"),
     ("money_panel", "core.general.money_panel.cog"),
     ("mood", "core.general.mood.cog"),
+    ("omikuji", "core.general.omikuji.cog"),
     ("role_shop", "core.general.role_shop.cog"),
     ("wallet", "core.general.wallet.cog"),
     ("whisper", "core.general.whisper.cog"),
@@ -198,6 +200,7 @@ _LAZY_FEATURE_MODULES = {
     "MoneyPanelCog": "core.general.money_panel.cog",
     "MoneyPanelView": "core.general.money_panel.cog",
     "MoodAnalysis": "core.general.mood.cog",
+    "OmikujiCog": "core.general.omikuji.cog",
     "NEW_USER_BALANCE": "core.general.wallet.cog",
     "RECRUIT_SECONDS": "core.general.gauge.cog",
     "RegisterModal": "core.general.role_shop.cog",

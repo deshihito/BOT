@@ -67,11 +67,12 @@ class UnifiedBoardGenreTest(unittest.TestCase):
         # 旧8件 → 統合1件で general 76→69 / 全体 251→244（実 import での検証値）。
         # Luna AI 追加で全体 244→245、その後、即抜けRTAボード（general:sokunuke_board）追加で
         # general 69→70 / 全体 245→246。人物分析（support:person_analysis）追加で全体 246→247。
+        # おみくじ（general:omikuji、新ジャンル「占い」）追加で general 70→71 / 全体 247→248。
         from core.general import action_registry
 
         specs = list(action_registry.default_registry()._by_id.values())
-        self.assertEqual(len(specs), 247)
-        self.assertEqual(len([s for s in specs if s.root == "general"]), 70)
+        self.assertEqual(len(specs), 248)
+        self.assertEqual(len([s for s in specs if s.root == "general"]), 71)
 
 
 class UnifiedBoardDispatchTest(unittest.IsolatedAsyncioTestCase):
