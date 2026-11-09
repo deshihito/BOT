@@ -250,3 +250,9 @@ body { overflow-x:clip; }
   .home-hero img, .home-hero h1,
   .home-hero-actions, .home-live-stats, .home-command-link { animation:none; }
 }
+.home-video { margin-top:44px; animation:home-fade-up .6s ease 1.45s both; }
+.home-video h2 { font-size:17px; margin:0 0 12px; }
+.home-video video { display:block; width:100%; height:auto; border:1px solid var(--line); border-radius:12px; background:#fff; }
+@media (prefers-reduced-motion: reduce) {
+  .home-video { animation:none; }
+}
