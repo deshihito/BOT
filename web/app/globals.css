@@ -10,7 +10,7 @@ h2 { font-size:18px; line-height:1.5; }
 p { margin:0; }
 button,textarea { font:inherit; }
 code { padding:1px 6px; border:1px solid var(--line); border-radius:5px; background:var(--soft); font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:.92em; }
-header { border-bottom:1px solid var(--line); background:#fff; }
+header { position:relative; z-index:20; border-bottom:1px solid var(--line); background:#fff; }
 header nav { display:flex; align-items:center; gap:22px; max-width:960px; min-height:58px; margin:0 auto; padding:9px 20px; }
 .brand { display:flex; align-items:center; gap:7px; color:var(--text); font-size:17px; font-weight:800; letter-spacing:.04em; white-space:nowrap; }
 .brand img { width:30px; height:30px; }
@@ -18,7 +18,7 @@ header nav { display:flex; align-items:center; gap:22px; max-width:960px; min-he
 .main-nav-links a { padding:4px 9px; border-radius:6px; color:var(--text); font-size:14px; }
 .main-nav-links a:hover { background:var(--soft); text-decoration:none; }
 main { max-width:880px; min-height:calc(100vh - 120px); margin:0 auto; padding:52px 20px 72px; }
-footer { padding:20px; border-top:1px solid var(--line); }
+footer { position:relative; z-index:20; background:#fff; padding:20px; border-top:1px solid var(--line); }
 .footer-links { display:flex; justify-content:center; gap:18px; flex-wrap:wrap; font-size:13px; }
 .footer-links a { color:var(--muted); }
 .muted { color:var(--muted); }
@@ -232,7 +232,7 @@ body { overflow-x:clip; }
 .home-bg { position:relative; isolation:isolate; }
 .home-drift { position:sticky; top:0; height:100vh; margin-bottom:-100vh; z-index:-1; pointer-events:none; }
 .home-drift span { position:absolute; border-radius:50%; filter:blur(36px); }
-.home-drift .drift-a { width:340px; height:340px; background:#cdeee2; opacity:.85; top:-90px; right:-70px; animation:home-drift-a 11s ease-in-out infinite; }
+.home-drift .drift-a { width:340px; height:340px; background:#cdeee2; opacity:.85; top:-10px; right:-70px; animation:home-drift-a 11s ease-in-out infinite; }
 .home-drift .drift-b { width:260px; height:260px; background:#f3ecd9; opacity:.9; top:48vh; left:-90px; animation:home-drift-b 13s ease-in-out infinite; }
 .home-drift .drift-c { width:280px; height:280px; background:#dcefea; opacity:.7; top:64vh; right:-80px; animation:home-drift-a 16s ease-in-out infinite; }
 .home-hero img { animation:home-fade-up .7s cubic-bezier(.22,.8,.32,1) .05s both; }
