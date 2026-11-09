@@ -69,13 +69,13 @@ DEBOUNCE_SECONDS = 3.0
 COOLDOWN_SECONDS = 8.0
 MAX_REPLIES_PER_HOUR = 120
 RATE_WINDOW_SECONDS = 3600.0
-RECENT_TURNS_CONTEXT = 25
+RECENT_TURNS_CONTEXT = 12
 SEED_HISTORY_LIMIT = 50
 TURN_MAX_CHARS = 600
-MEMORY_MAX_CHARS = 8000
+MEMORY_MAX_CHARS = 3500
 MEMORY_INTEGRATE_TURNS = 15
 MEMORY_IDLE_SECONDS = 600.0
-RAG_BUDGET_CHARS = 1500
+RAG_BUDGET_CHARS = 800
 RAG_MIN_SCORE = 6
 RAG_KEY_BOOST = 50
 MAX_SEND_PARTS = 3
@@ -129,6 +129,21 @@ INTEGRATION_SYSTEM_PROMPT = (
 
 def model_name() -> str:
     return os.getenv("LUNA_AI_MODEL", DEFAULT_MODEL).strip() or DEFAULT_MODEL
+
+
+# 記憶統合は裏側の処理で、返信の速さより統合の質と長文耐性が要る。
+# 返信モデルとは分けて deepseek-v4.1-flash-1017 を使う (Logfare 経路のみ。
+# KiosAPI 経路では返信モデルをそのまま使う)。
+INTEGRATION_MODEL = "deepseek-v4.1-flash-1017"
+
+
+def integration_model_name() -> str:
+    override = os.getenv("LUNA_AI_INTEGRATION_MODEL", "").strip()
+    if override:
+        return override
+    if provider_name() == "logfare":
+        return INTEGRATION_MODEL
+    return model_name()
 
 
 def provider_name() -> str:
@@ -215,7 +230,8 @@ async def _kiosapi_chat_stream(messages: list[dict[str, Any]], *, max_tokens: in
 
 
 async def _chat_text(
-        messages: list[dict[str, Any]], *, max_tokens: int) -> tuple[str, float, float]:
+        messages: list[dict[str, Any]], *, max_tokens: int,
+        model: str | None = None) -> tuple[str, float, float]:
     """選択中のプロバイダーからストリーミングで生成し、全文を返す。
 
     非ストリーミング呼び出しは合計45秒でタイムアウトし、26B級モデルの
@@ -225,9 +241,10 @@ async def _chat_text(
     """
     if provider_name() == "logfare":
         stream = logfare.chat_stream(
-            model_name(), messages, max_tokens=max_tokens,
+            model or model_name(), messages, max_tokens=max_tokens,
             reasoning_effort=REASONING_EFFORT)
     else:
+        # KiosAPI 経路に統合モデルの ID は無いので model 上書きは使わない。
         stream = _kiosapi_chat_stream(messages, max_tokens=max_tokens)
     parts: list[str] = []
     started = time.monotonic()
@@ -1120,6 +1137,7 @@ async def _integrate_memory(runtime: _Runtime, client: Any) -> None:
                 {"role": "user", "content": prompt},
             ],
             max_tokens=4000,
+            model=integration_model_name(),
         )
     except (aiohttp.ClientError, asyncio.TimeoutError, logfare.LogfareHTTPError, KiosAPIHTTPError) as exc:
         logger.warning(
