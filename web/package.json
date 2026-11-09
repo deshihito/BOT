@@ -7,7 +7,9 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "test": "node --test tests/*.mjs"
+    "test": "node --test tests/*.mjs",
+    "build:workers": "node scripts/build-workers.mjs",
+    "prebuild": "node scripts/build-workers.mjs"
   },
   "dependencies": {
     "@discord/embedded-app-sdk": "^2.5.0",
