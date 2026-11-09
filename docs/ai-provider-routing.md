@@ -24,7 +24,7 @@ AI_CEREBRAS_MODEL=gpt-oss-120b
 組み込みの接続先は `groq`, `gemini`, `openrouter`, `cerebras`, `sambanova`,
 `deepseek`, `mistral`, `together`, `fireworks`, `nvidia_nim`, `openai`, `logfare`, `apinex` です。
 各社のキーは `<PROVIDER>_API_KEY` または `AI_<PROVIDER>_API_KEY` を使います。
-`logfare` は従来の `LOGFARE_API_KEY` を使います。
+`logfare` は従来の `LOGFARE_API_KEY` を使います。予備キー `LOGFARE_API_KEY_2`（さらに `LOGFARE_API_KEY_3`、カンマ区切りの `LOGFARE_API_KEYS` も可）を設定すると、Logfare が HTTP 429（日次リクエスト上限=RPD到達時）を返したときだけ自動で次のキーへ切り替わります。429 以外のエラーでは切り替えません。429 を返したキーは `Retry-After`（無ければ1時間、最大24時間）の間スキップされます。
 
 KiosAPI は汎用の OpenAI 互換プロバイダーとして追加できます。KiosAPI のモデル一覧は
 `/general` の「チャットAIモデルを設定」を開いたときに API キーで取得し、一覧から選んだモデルは KiosAPI に直接送ります。

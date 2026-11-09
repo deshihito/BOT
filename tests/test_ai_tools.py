@@ -280,7 +280,7 @@ class AIToolsTest(unittest.IsolatedAsyncioTestCase):
 
         session = FakeSession()
         question = {"action": {"type": "choice", "criteria": {"vc:join": "VC参加", "none": "なし"}}}
-        with patch("core.general.ai.logfare.api_key", return_value="test-key"), patch(
+        with patch.dict(os.environ, {"LOGFARE_API_KEY": "test-key"}), patch(
             "core.general.ai.logfare.aiohttp.ClientSession", return_value=session
         ):
             response = await logfare.decision("clef", "state", question, timeout=aiohttp.ClientTimeout(total=2))
@@ -290,7 +290,8 @@ class AIToolsTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response["result"]["answers"]["action"]["choice"], "vc:join")
 
     async def test_missing_logfare_key_fails_before_network(self):
-        with patch("core.general.ai.logfare.api_key", return_value=None), patch(
+        env = {k: v for k, v in os.environ.items() if not k.startswith("LOGFARE_API_KEY")}
+        with patch.dict(os.environ, env, clear=True), patch(
             "core.general.ai.logfare.aiohttp.ClientSession"
         ) as session:
             with self.assertRaisesRegex(RuntimeError, "LOGFARE_API_KEY"):
