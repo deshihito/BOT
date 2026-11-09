@@ -259,8 +259,8 @@ class MemoryPureTest(unittest.TestCase):
             for i in range(30)
         ]
         text = luna.build_context_text("", turns)
-        self.assertNotIn("発言4", text)
-        self.assertIn("発言5", text)
+        self.assertNotIn("発言17", text)
+        self.assertIn("発言18", text)
         self.assertIn("発言29", text)
 
     def test_integration_prompt_contains_memory_and_turns(self):
@@ -507,16 +507,16 @@ class ReplyProbabilityTest(unittest.TestCase):
         self.assertFalse(luna.roll_reply(50, rng=lambda: 0.50))
         self.assertFalse(luna.roll_reply(50, rng=lambda: 0.99))
 
-    def test_context_window_is_25_turns(self):
-        self.assertEqual(luna.RECENT_TURNS_CONTEXT, 25)
+    def test_context_window_is_12_turns(self):
+        self.assertEqual(luna.RECENT_TURNS_CONTEXT, 12)
         turns = [
             {"author_name": f"user{i}", "is_luna": False, "content": f"msg{i}"}
             for i in range(30)
         ]
         text = luna.build_context_text("", turns)
         self.assertIn("msg29", text)
-        self.assertIn("msg5", text)
-        self.assertNotIn("msg4", text)
+        self.assertIn("msg18", text)
+        self.assertNotIn("msg17", text)
 
 
 class PersonaKeyTest(unittest.TestCase):
@@ -732,6 +732,27 @@ class SendSanitizeTest(unittest.IsolatedAsyncioTestCase):
         sent = webhook.sent[0]["content"]
         self.assertEqual(sent, "@​everyone <@​123> 見て")
         self.assertNotIn("<@123>", sent)
+
+
+class SlimContextTest(unittest.TestCase):
+    def test_slimmed_budgets(self):
+        # 上流の prefill が重いため、返信プロンプトの材料を絞った値で固定する。
+        self.assertEqual(luna.MEMORY_MAX_CHARS, 3500)
+        self.assertEqual(luna.RAG_BUDGET_CHARS, 800)
+
+    def test_integration_model_is_deepseek_on_logfare(self):
+        with patch.dict(os.environ, {"LUNA_AI_PROVIDER": "logfare"}, clear=False):
+            os.environ.pop("LUNA_AI_INTEGRATION_MODEL", None)
+            self.assertEqual(luna.integration_model_name(), "deepseek-v4.1-flash-1017")
+
+    def test_integration_model_falls_back_to_reply_model_on_kiosapi(self):
+        with patch.dict(os.environ, {"LUNA_AI_PROVIDER": "kiosapi"}, clear=False):
+            os.environ.pop("LUNA_AI_INTEGRATION_MODEL", None)
+            self.assertEqual(luna.integration_model_name(), luna.model_name())
+
+    def test_integration_model_env_override_wins(self):
+        with patch.dict(os.environ, {"LUNA_AI_INTEGRATION_MODEL": "custom-1"}):
+            self.assertEqual(luna.integration_model_name(), "custom-1")
 
 
 class LoggerLevelTest(unittest.TestCase):
