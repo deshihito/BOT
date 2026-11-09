@@ -1,13 +1,14 @@
 // 端末への配慮（負荷の度合い）の設定。
+// ラベルは使用量そのものの表現にする（ひかえめ = 使用率が低い）。
 // 参加者の端末を守るため、使用率100%の設定は用意しない。最速の設定でも
 // 使用率は75%を目安とし、論理コアが2つ以上ある環境では常に
 // 1コアぶん以上の余力を残す。
-export type CareLevel = "high" | "medium" | "low";
+export type CareLevel = "light" | "medium" | "heavy";
 
 export const CARE_LEVELS: { key: CareLevel; label: string; usagePercent: number }[] = [
-  { key: "high", label: "しっかり", usagePercent: 25 },
+  { key: "light", label: "ひかえめ", usagePercent: 25 },
   { key: "medium", label: "ふつう", usagePercent: 50 },
-  { key: "low", label: "ひかえめ", usagePercent: 75 },
+  { key: "heavy", label: "しっかり", usagePercent: 75 },
 ];
 
 export type CareSettings = {
@@ -24,9 +25,9 @@ export type CareSettings = {
 };
 
 const TUNING: Record<CareLevel, { restMs: number; gpuTargetSubs: number; gpuBatch: number }> = {
-  high: { restMs: 600, gpuTargetSubs: 4096, gpuBatch: 4 },
+  light: { restMs: 600, gpuTargetSubs: 4096, gpuBatch: 4 },
   medium: { restMs: 300, gpuTargetSubs: 16384, gpuBatch: 8 },
-  low: { restMs: 150, gpuTargetSubs: 32768, gpuBatch: 8 },
+  heavy: { restMs: 150, gpuTargetSubs: 32768, gpuBatch: 8 },
 };
 
 /** 配慮レベルと端末の論理コア数から、実際の負荷設定を決める（純粋関数）。 */
