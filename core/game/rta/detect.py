@@ -16,7 +16,7 @@ from core.support.api_retry import run_with_retry
 
 from core.game.rta.common import *  # noqa: F401,F403 - shared constants/helpers
 from core.game.rta.common import ALLOWED_CHANNEL_TYPES, DCAFE_BOT_ID, DICOALL_BOT_ID, DISBOARD_BOT_ID, DISOKU_BOT_ID, SABACHA_BOT_ID, SHARKBOT_BOT_ID, TAKASUMI_BOT_ID  # noqa: F401
-from core.game.rta.helpers import _collect_embed_text, _event_time, _parse_dt  # noqa: F401
+from core.game.rta.helpers import _collect_embed_text, _collect_message_text, _event_time, _has_rich_content, _parse_dt  # noqa: F401
 
 logger = logging.getLogger("cogs.disboard_rta")
 
@@ -95,11 +95,14 @@ def detect_event(message):
     author = getattr(message, "author", None)
     author_id = getattr(author, "id", None)
     application_id = getattr(message, "application_id", None)
-    has_embeds = bool(getattr(message, "embeds", None))
-    if author_id not in (DISBOARD_BOT_ID, DISOKU_BOT_ID) and not has_embeds:
+    # Components V2 で応答するサービスは Embed を持たないため、一次ゲートは
+    # Embed / コンポーネントのどちらかで判定する。
+    if author_id not in (DISBOARD_BOT_ID, DISOKU_BOT_ID) and not _has_rich_content(message):
         return None
 
-    text = _collect_embed_text(message)
+    # 署名照合は Embed 全文 + Components V2 のテキストを合わせた全文で行う。
+    # 成功文が description 以外（フィールドや TextDisplay）に移っても拾える。
+    text = _collect_message_text(message)
     folded = text.casefold()
     # Dis速-specific signature from the real response: application/webhook ID,
     # the official embed title/URL, and the server-name field ending in
@@ -124,37 +127,45 @@ def detect_event(message):
     app_id_set = {int(value) for value in app_ids if value.isdigit()}
     is_disoku = DISOKU_BOT_ID in app_id_set and disoku_signature
     is_disboard = author_id == DISBOARD_BOT_ID
-    # 鯖ちゃんねる: 送信者Bot ID + 成功Embedフッター 'voted'
-    is_sabacha = SABACHA_BOT_ID in app_id_set and any(
-        "voted" in (getattr(getattr(embed, "footer", None), "text", "") or "")
-        for embed in embeds
+    # 以下5サービスは「送信者Bot ID + 成功文2フレーズ（鯖ちゃんねるは 'voted'）」
+    # を全文（Embed の各部 + Components V2）から照合する。従来は description
+    # だけを見ていたため、成功文の置き場所が変わると検知できなかった。
+    # 鯖ちゃんねる: 送信者Bot ID + 'voted'（従来は Embed フッターのみ）
+    is_sabacha = SABACHA_BOT_ID in app_id_set and (
+        any(
+            "voted" in (getattr(getattr(embed, "footer", None), "text", "") or "")
+            for embed in embeds
+        )
+        or "voted" in folded
     )
-    # TakasumiBOT: 送信者Bot ID + Embed本文の成功文 (実地観測 2026-11-05)
-    is_takasumi = TAKASUMI_BOT_ID in app_id_set and any(
-        "UPしました" in (getattr(embed, "description", "") or "")
-        and "表示順位が更新されました" in (getattr(embed, "description", "") or "")
-        for embed in embeds
+    # TakasumiBOT: 送信者Bot ID + 成功文2フレーズ (実地観測 2026-11-05)
+    is_takasumi = TAKASUMI_BOT_ID in app_id_set and (
+        "UPしました" in text and "表示順位が更新されました" in text
     )
-    # Dicoall: 送信者Bot ID + Embed本文の成功文2フレーズ (実地観測 2026-10-29)
-    is_dicoall = DICOALL_BOT_ID in app_id_set and any(
-        "サーバーがリストの最上段に更新されました" in (getattr(embed, "description", "") or "")
-        and "サーバーリストのトップに正常に表示されています" in (getattr(embed, "description", "") or "")
-        for embed in embeds
+    # Dicoall: 送信者Bot ID + 成功文2フレーズ (実地観測 2026-10-29)
+    is_dicoall = DICOALL_BOT_ID in app_id_set and (
+        "サーバーがリストの最上段に更新されました" in text
+        and "サーバーリストのトップに正常に表示されています" in text
     )
-    # Discord Cafe: 送信者Bot ID + Embedタイトル + 本文の成功文 (実地観測 2026-10-29)
-    is_dcafe = DCAFE_BOT_ID in app_id_set and any(
-        getattr(embed, "title", "") == "Discord Cafe | Discord掲示板"
-        and "サーバーの表示順位を上げました" in (getattr(embed, "description", "") or "")
-        for embed in embeds
+    # Discord Cafe: 送信者Bot ID + ブランド名 + 成功文 (実地観測 2026-10-29)
+    is_dcafe = DCAFE_BOT_ID in app_id_set and (
+        "Discord Cafe" in text and "サーバーの表示順位を上げました" in text
     )
-    # SharkBot: 送信者Bot ID + Embed本文の成功文 (実地観測 2026-10-29)
-    is_sharkbot = SHARKBOT_BOT_ID in app_id_set and any(
-        "サーバーをUpしました" in (getattr(embed, "description", "") or "")
-        and "2時間後に再度Upできます" in (getattr(embed, "description", "") or "")
-        for embed in embeds
+    # SharkBot: 送信者Bot ID + 成功文2フレーズ (実地観測 2026-10-29)
+    is_sharkbot = SHARKBOT_BOT_ID in app_id_set and (
+        "サーバーをUpしました" in text and "2時間後に再度Upできます" in text
     )
     if not (is_disboard or is_disoku or is_sabacha or is_takasumi
             or is_dicoall or is_dcafe or is_sharkbot):
+        # 既知サービスの Bot からの投稿なのに署名が一致しなかった場合は痕跡を
+        # 残す（サービス側の文面変更に気づけるように。Dis速の既存ログと同方針）。
+        if app_id_set & {SABACHA_BOT_ID, TAKASUMI_BOT_ID, DICOALL_BOT_ID,
+                         DCAFE_BOT_ID, SHARKBOT_BOT_ID, DISBOARD_BOT_ID}:
+            logger.info(
+                "Service message ignored (no recognized success signature): "
+                "message=%s apps=%s text=%r",
+                getattr(message, "id", None), sorted(app_id_set), text[:500],
+            )
         return None
 
 
@@ -170,6 +181,10 @@ def detect_event(message):
         kind = "sharkbot"
     elif is_disboard:
         if "表示順をアップしたよ" not in text and "bump done" not in folded:
+            logger.info(
+                "Disboard message ignored (no recognized success phrase): message=%s text=%r",
+                getattr(message, "id", None), text[:500],
+            )
             return None
         kind = "bump"
     else:
