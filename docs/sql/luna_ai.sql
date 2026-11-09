@@ -17,6 +17,7 @@ CREATE TABLE IF NOT EXISTS public.luna_ai_turns (
     channel_id bigint NOT NULL,
     guild_id bigint NOT NULL,
     author_name text NOT NULL,
+    author_id bigint,
     is_luna boolean NOT NULL DEFAULT false,
     content text NOT NULL,
     created_at timestamptz NOT NULL DEFAULT now(),
@@ -24,6 +25,8 @@ CREATE TABLE IF NOT EXISTS public.luna_ai_turns (
 );
 CREATE INDEX IF NOT EXISTS luna_ai_turns_channel_idx
     ON public.luna_ai_turns (channel_id, id);
+-- 既存テーブル向け: 発言者の取り違え対策にユーザーIDも保持する（既存行は NULL）。
+ALTER TABLE public.luna_ai_turns ADD COLUMN IF NOT EXISTS author_id bigint;
 CREATE INDEX IF NOT EXISTS luna_ai_turns_unintegrated_idx
     ON public.luna_ai_turns (channel_id, integrated, id);
 
