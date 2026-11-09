@@ -79,7 +79,7 @@ function saveMethod(method: ComputeMethod): void {
 function loadCare(): CareLevel {
   try {
     const saved = localStorage.getItem(CARE_STORAGE_KEY);
-    return saved === "high" || saved === "low" ? saved : "medium";
+    return saved === "light" || saved === "heavy" ? saved : "medium";
   } catch {
     return "medium";
   }
