@@ -101,6 +101,14 @@ test("WGSL ソースに compute エントリポイントがある", () => {
   assert.match(gpu.WGSL_SOURCE, /fn main\(/);
 });
 
+test("WGSL が予約語を識別子に使っていない", () => {
+  // from / target は WGSL の予約語で、実機のシェーダコンパイルで落ちた前例がある
+  assert.doesNotMatch(gpu.WGSL_SOURCE, /\b(?:let|var|fn)\s+(?:from|target)\b/);
+  assert.doesNotMatch(gpu.WGSL_SOURCE, /\(target\s*:/);
+  assert.match(gpu.WGSL_SOURCE, /from_sq/);
+  assert.match(gpu.WGSL_SOURCE, /target_piece/);
+});
+
 test("Node 環境では WebGPU 非対応と判定される", () => {
   assert.equal(gpu.isWebGpuSupported(), false);
 });
