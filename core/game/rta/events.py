@@ -193,12 +193,11 @@ class EventsMixin:
             description=description,
             color=0xFFFFFF,
         )
-        # 連携広告枠（記録表示のみ。ギルド設定で OFF にできる）
+        # 連携広告枠（記録表示のみ。強制表示）
         try:
-            if await partner_ads.ads_enabled(message.guild.id):
-                ad = partner_ads.next_ad_field()
-                if ad is not None:
-                    embed.add_field(name=ad[0], value=ad[1], inline=False)
+            ad = partner_ads.next_ad_field()
+            if ad is not None:
+                embed.add_field(name=ad[0], value=ad[1], inline=False)
         except Exception:
             logger.debug("広告枠の添付に失敗（記録表示は通常どおり送る）", exc_info=True)
         try:

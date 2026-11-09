@@ -2,8 +2,10 @@
 """boardNotify RTA 記録表示の連携広告枠（core/ads.py）のテスト。
 
 - クリエイティブのローテーション（一巡してラップ、空リストでは出ない）
-- ギルド別 ON/OFF（デフォルト ON、guild_settings の boardnotify セクション）
-- bump 記録 embed / 即抜け記録 embed に枠が付き、OFF で両方から消えること
+- 広告枠は強制表示：ギルド別 ON/OFF の仕組みは撤去済みで、旧設定値
+  （guild_settings の boardnotify.ads_enabled）が残っていても
+  bump 記録 embed / 即抜け記録 embed の両方に常時枠が付くこと
+- boardNotify 共通設定パネルに広告枠のトグルボタンが無いこと
 Discord / DB には接続しない。
 """
 
@@ -35,9 +37,13 @@ from core.game.sokunuke_rta.cog import SokuNukeRta  # noqa: E402
 
 T0 = datetime(2026, 11, 1, 0, 0, 0, tzinfo=timezone.utc)
 
+# 旧仕様の OFF 設定が保存済みの状態を再現するためのセクション／キー名。
+LEGACY_SECTION = "boardnotify"
+LEGACY_KEY = "ads_enabled"
+
 
 class AdsFakeStore:
-    """core/ads.py が使う GuildSettings の最小再現。"""
+    """GuildSettings の最小再現（旧広告枠設定が残った状態を作る用）。"""
 
     def __init__(self, by_guild=None):
         self._by_guild = {str(k): dict(v) for k, v in (by_guild or {}).items()}
@@ -54,7 +60,7 @@ class AdsFakeStore:
         current.update(values)
         return current
 
-    def section(self, guild_id, section=ads.SECTION):
+    def section(self, guild_id, section=LEGACY_SECTION):
         return self._by_guild.get(str(guild_id), {}).get(section, {})
 
 
@@ -102,23 +108,11 @@ class CreativeRotationTest(unittest.TestCase):
         self.assertEqual(field[1], f"[{ads.CREATIVES[0].text}]({ads.CREATIVES[0].url})")
 
 
-class AdsEnabledTest(unittest.IsolatedAsyncioTestCase):
-    async def test_default_on_without_any_setting(self):
-        use_ads_store(self, AdsFakeStore())
-        self.assertTrue(await ads.ads_enabled(123))
-
-    async def test_off_setting_is_respected(self):
-        use_ads_store(self, AdsFakeStore({"123": {ads.SECTION: {"ads_enabled": False}}}))
-        self.assertFalse(await ads.ads_enabled(123))
-        self.assertTrue(await ads.ads_enabled(999))
-
-    async def test_set_ads_enabled_roundtrip(self):
-        store = use_ads_store(self, AdsFakeStore())
-        await ads.set_ads_enabled(123, False)
-        self.assertEqual(store.section(123), {"ads_enabled": False})
-        self.assertFalse(await ads.ads_enabled(123))
-        await ads.set_ads_enabled(123, True)
-        self.assertTrue(await ads.ads_enabled(123))
+class ForcedDisplayApiTest(unittest.TestCase):
+    def test_no_per_guild_toggle_api_remains(self):
+        # 強制表示：ON/OFF の読み書き API は撤去されている。
+        self.assertFalse(hasattr(ads, "ads_enabled"))
+        self.assertFalse(hasattr(ads, "set_ads_enabled"))
 
 
 class BumpRecordAdTest(unittest.IsolatedAsyncioTestCase):
@@ -137,12 +131,14 @@ class BumpRecordAdTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn("](", fields[0].value)
         self.assertIn("http", fields[0].value)
 
-    async def test_record_embed_has_no_ad_field_when_off(self):
-        use_ads_store(self, AdsFakeStore({"456": {ads.SECTION: {"ads_enabled": False}}}))
+    async def test_record_embed_has_ad_field_even_with_legacy_off_setting(self):
+        # 旧仕様の OFF 設定が保存済みでも、強制表示で枠は出る。
+        use_ads_store(self, AdsFakeStore(
+            {"456": {LEGACY_SECTION: {LEGACY_KEY: False}}}))
         db = FakeDb()
         cog = make_cog(db)
         await self.record(cog, db)
-        self.assertEqual(ad_fields(sent_embed(cog)), [])
+        self.assertEqual(len(ad_fields(sent_embed(cog))), 1)
 
 
 class SokunukeRecordAdTest(unittest.IsolatedAsyncioTestCase):
@@ -165,46 +161,25 @@ class SokunukeRecordAdTest(unittest.IsolatedAsyncioTestCase):
         embed = self.channel.send.await_args.kwargs["embed"]
         self.assertEqual(len(ad_fields(embed)), 1)
 
-    async def test_announce_has_no_ad_field_when_off(self):
-        self.store._by_guild.setdefault("1", {})[ads.SECTION] = {"ads_enabled": False}
+    async def test_announce_has_ad_field_even_with_legacy_off_setting(self):
+        # 旧仕様の OFF 設定が保存済みでも、強制表示で枠は出る。
+        self.store._by_guild.setdefault("1", {})[LEGACY_SECTION] = {LEGACY_KEY: False}
         cog = SokuNukeRta(types.SimpleNamespace())
         await cog.on_member_remove(self.member)
         embed = self.channel.send.await_args.kwargs["embed"]
-        self.assertEqual(ad_fields(embed), [])
+        self.assertEqual(len(ad_fields(embed)), 1)
 
 
-class SettingsToggleTest(unittest.IsolatedAsyncioTestCase):
-    async def test_ads_button_toggles_setting(self):
-        from core.support.panel import BumpRtaSettingsView
-
-        store = use_ads_store(self, AdsFakeStore())
+class SettingsPanelTest(unittest.TestCase):
+    def test_view_has_no_ads_toggle_button(self):
+        self.assertFalse(hasattr(BumpRtaSettingsView, "ads_button"))
         view = BumpRtaSettingsView(None)
-        interaction = types.SimpleNamespace(
-            guild_id=456,
-            user=types.SimpleNamespace(
-                guild_permissions=types.SimpleNamespace(manage_guild=True)),
-            response=types.SimpleNamespace(send_message=AsyncMock()),
-        )
-        await view.ads_button.callback(interaction)
-        self.assertEqual(store.section(456), {"ads_enabled": False})
-        self.assertFalse(view.ads_on)
-        await view.ads_button.callback(interaction)
-        self.assertEqual(store.section(456), {"ads_enabled": True})
-        self.assertTrue(view.ads_on)
+        custom_ids = [getattr(child, "custom_id", None) for child in view.children]
+        self.assertNotIn("support:bumprta_settings:ads", custom_ids)
 
-    async def test_ads_button_requires_manage_guild(self):
-        from core.support.panel import BumpRtaSettingsView
-
-        store = use_ads_store(self, AdsFakeStore())
+    def test_view_has_no_ads_state(self):
         view = BumpRtaSettingsView(None)
-        interaction = types.SimpleNamespace(
-            guild_id=456,
-            user=types.SimpleNamespace(
-                guild_permissions=types.SimpleNamespace(manage_guild=False)),
-            response=types.SimpleNamespace(send_message=AsyncMock()),
-        )
-        await view.ads_button.callback(interaction)
-        self.assertEqual(store.section(456), {})
+        self.assertFalse(hasattr(view, "ads_on"))
 
 
 if __name__ == "__main__":
