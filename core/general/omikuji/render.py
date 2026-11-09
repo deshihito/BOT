@@ -4,15 +4,20 @@
 実物の札に寄せた体裁：生成り色の和紙風背景、朱色の二重枠、上部に
 「第○番」（漢数字）、大きな運勢、その右から左へ読む縦書きの和歌と
 総合、段組みの項目別運勢（見出しは朱色）、フッターに AGO 表記。
-フォントは story54 と同じ ZenOldMincho を使う。
+背景には AGO BOT のアイコン（web/public/img/nomal.png）を透かしとして
+大きく淡く敷く。フォントは story54 と同じ ZenOldMincho を使う。
 """
 from __future__ import annotations
 
 import io
+import logging
 
 from core.general.miq.miq import _MIQ_ASSET_FONTS, _miq_load_font
+from core.support import data_paths
 
 from .fortunes import Fortune
+
+logger = logging.getLogger(__name__)
 
 CANVAS_W = 920
 CANVAS_H = 1980
@@ -20,6 +25,13 @@ CANVAS_H = 1980
 _PAPER = (247, 242, 231)      # 生成り色の紙
 _INK = (43, 39, 34)           # 濃い墨色
 _VERMILLION = (176, 54, 42)   # 朱色（枠・見出し）
+
+# 背景の透かし（AGO アイコン）。アイコンは白いキャラ＋黒背景のため、
+# 輝度をアルファとして使い、キャラのシルエットだけを紙より少し濃い
+# 生成り色で淡く浮かせる（黒背景部分は透明になる）。
+_WATERMARK_SIZE = 680
+_WATERMARK_OPACITY = 0.15
+_WATERMARK_TINT = (208, 196, 175)
 
 _FRAME_OUTER = 26
 _FRAME_OUTER_W = 7
@@ -78,11 +90,30 @@ def _split_columns(text: str, max_columns: int) -> list[str]:
     return [text[i:i + chunk] for i in range(0, len(text), chunk)]
 
 
+def _apply_watermark(img) -> None:
+    """背景中央に AGO アイコンの透かしを敷く（素材が無ければ何もしない）。"""
+    from PIL import Image
+
+    path = data_paths.repo_root() / "web" / "public" / "img" / "nomal.png"
+    try:
+        icon = Image.open(path).convert("L")
+    except Exception:
+        logger.warning("omikuji: 透かし用アイコンを読めませんでした path=%s", path)
+        return
+    icon = icon.resize((_WATERMARK_SIZE, _WATERMARK_SIZE), Image.LANCZOS)
+    alpha = icon.point(lambda v: int(v * _WATERMARK_OPACITY))
+    tint = Image.new("RGB", (_WATERMARK_SIZE, _WATERMARK_SIZE), _WATERMARK_TINT)
+    x = CANVAS_W // 2 - _WATERMARK_SIZE // 2
+    y = CANVAS_H // 2 - _WATERMARK_SIZE // 2
+    img.paste(tint, (x, y), alpha)
+
+
 def render_omikuji_png(fortune: Fortune) -> bytes:
     """おみくじの結果を縦型の札画像 (PNG) にして返す。"""
     from PIL import Image, ImageDraw
 
     img = Image.new("RGB", (CANVAS_W, CANVAS_H), _PAPER)
+    _apply_watermark(img)
     draw = ImageDraw.Draw(img)
     font_path = _font_path()
 
@@ -135,7 +166,8 @@ def render_omikuji_png(fortune: Fortune) -> bytes:
     for i, (name, text) in enumerate(fortune.items):
         cx = 828 - i * 80
         _draw_vertical(draw, cx, items_top, name, label_font, _VERMILLION, 45)
-        _draw_vertical(draw, cx, items_top + 104, text, text_font, _INK, 36)
+        # 最長文面（15字）でも末尾がフッター（AGO）に届かないピッチにする
+        _draw_vertical(draw, cx, items_top + 100, text, text_font, _INK, 34)
 
     # フッター（内枠の内側・左下に小さく）
     draw.text((_FRAME_INNER + 12, CANVAS_H - _FRAME_INNER - 22), "AGO",
