@@ -2,12 +2,14 @@
 
 // 分散コンピューティングの参加UI（クライアント専用）。
 // 計算は「計算をはじめる」を押したときだけ始まる。実行方式は CPU
-// （Web Worker）と WebGPU (GPGPU) から選べて、選択は localStorage に残す。
+// （Web Worker の JavaScript）・WASM・WebGPU (GPGPU) から選べて、
+// 選択は localStorage に残す。
 // 個人の貢献数はこのブラウザの localStorage にだけ残し、サーバーへは送らない。
 import { useEffect, useRef, useState } from "react";
 import { isWebGpuSupported, runPerftOnGpu } from "../../lib/compute-gpu";
+import { isWasmSupported } from "../../lib/compute-wasm";
 
-type ComputeMethod = "cpu" | "gpu";
+type ComputeMethod = "cpu" | "wasm" | "gpu";
 type ComputeTask = { taskId: string; fen: string; depth: number };
 type ComputeFn = (task: ComputeTask) => Promise<{ nodes: number }>;
 
@@ -60,7 +62,8 @@ const GPU_FAILURE_LIMIT = 2;
 
 function loadMethod(): ComputeMethod {
   try {
-    return localStorage.getItem(METHOD_STORAGE_KEY) === "gpu" ? "gpu" : "cpu";
+    const saved = localStorage.getItem(METHOD_STORAGE_KEY);
+    return saved === "gpu" || saved === "wasm" ? saved : "cpu";
   } catch {
     return "cpu";
   }
@@ -117,12 +120,14 @@ export default function ComputeClient() {
   const [message, setMessage] = useState("「計算をはじめる」を押すまで、計算は始まりません。");
   const [method, setMethod] = useState<ComputeMethod>("cpu");
   const [gpuSupported, setGpuSupported] = useState(false);
+  const [wasmSupported, setWasmSupported] = useState(false);
 
   const runIdRef = useRef(0);
   const workersRef = useRef<Worker[]>([]);
   const pendingRef = useRef(new Map<number, { resolve: (v: { nodes: number }) => void; reject: (e: Error) => void }>());
   const stopRef = useRef<() => void>(() => {});
   const gpuFailuresRef = useRef(0);
+  const wasmFailuresRef = useRef(0);
 
   const stop = () => {
     runIdRef.current += 1;
@@ -153,6 +158,7 @@ export default function ComputeClient() {
     setTotal(loadStats());
     setMethod(loadMethod());
     setGpuSupported(isWebGpuSupported());
+    setWasmSupported(isWasmSupported());
     void fetchProgress();
     const onVisibility = () => setTabHidden(document.hidden);
     document.addEventListener("visibilitychange", onVisibility);
@@ -254,11 +260,30 @@ export default function ComputeClient() {
     }
   };
 
-  const startCpu = (runId: number) => {
+  // 実行中のワーカーを止め、方式を CPU に戻して新しい実行として再開する
+  // （WebGPU / WASM が使い続けられない環境向けの自動切り替え）。
+  const fallbackToCpu = (note: string) => {
+    for (const worker of workersRef.current) worker.terminate();
+    workersRef.current = [];
+    pendingRef.current.clear();
+    setMessage(note);
+    setMethod("cpu");
+    saveMethod("cpu");
+    const nextRunId = runIdRef.current + 1;
+    runIdRef.current = nextRunId;
+    startCpu(nextRunId);
+  };
+
+  const startWorkers = (runId: number, useWasm: boolean, onComputeFailure?: () => boolean) => {
     const concurrency = Math.max(1, Math.min(4, (navigator.hardwareConcurrency || 2) - 1));
     const workers: Worker[] = [];
     for (let slot = 0; slot < concurrency; slot++) {
-      const worker = new Worker(new URL("../../lib/compute.worker.ts", import.meta.url), { type: "module" });
+      const worker = new Worker(
+        useWasm
+          ? new URL("../../lib/compute-wasm.worker.ts", import.meta.url)
+          : new URL("../../lib/compute.worker.ts", import.meta.url),
+        { type: "module" },
+      );
       worker.onmessage = (event) => {
         const pending = pendingRef.current.get(slot);
         if (!pending) return;
@@ -278,8 +303,25 @@ export default function ComputeClient() {
     }
     workersRef.current = workers;
     workers.forEach((worker, slot) =>
-      void runLoop(runId, (task) => computeOnWorker(slot, worker, task)),
+      void runLoop(runId, (task) => computeOnWorker(slot, worker, task), onComputeFailure),
     );
+  };
+
+  const startCpu = (runId: number) => {
+    startWorkers(runId, false);
+  };
+
+  const startWasm = (runId: number) => {
+    wasmFailuresRef.current = 0;
+    let fellBack = false;
+    startWorkers(runId, true, () => {
+      if (fellBack) return true;
+      wasmFailuresRef.current += 1;
+      if (wasmFailuresRef.current < GPU_FAILURE_LIMIT) return false;
+      fellBack = true;
+      fallbackToCpu("WASMで計算を続けられなかったため、CPU方式に切り替えて続行します。");
+      return true;
+    });
   };
 
   const startGpu = (runId: number) => {
@@ -296,11 +338,8 @@ export default function ComputeClient() {
     };
     void runLoop(runId, compute, () => {
       if (gpuFailuresRef.current < GPU_FAILURE_LIMIT) return false;
-      // WebGPU を使い続けられない環境では、同じ実行のまま CPU 方式へ切り替える
-      setMessage("WebGPUで計算を続けられなかったため、CPU方式に切り替えて続行します。");
-      setMethod("cpu");
-      saveMethod("cpu");
-      startCpu(runId);
+      // WebGPU を使い続けられない環境では CPU 方式へ切り替えて続行する
+      fallbackToCpu("WebGPUで計算を続けられなかったため、CPU方式に切り替えて続行します。");
       return true;
     });
   };
@@ -313,6 +352,7 @@ export default function ComputeClient() {
     setRunning(true);
     setMessage("計算中です。タブを開いたままにしてください。");
     if (method === "gpu" && gpuSupported) startGpu(runId);
+    else if (method === "wasm" && wasmSupported) startWasm(runId);
     else startCpu(runId);
   };
 
@@ -343,6 +383,14 @@ export default function ComputeClient() {
         </button>
         <button
           type="button"
+          aria-pressed={method === "wasm"}
+          disabled={running || !wasmSupported}
+          onClick={() => chooseMethod("wasm")}
+        >
+          WASM
+        </button>
+        <button
+          type="button"
           aria-pressed={method === "gpu"}
           disabled={running || !gpuSupported}
           onClick={() => chooseMethod("gpu")}
@@ -350,6 +398,10 @@ export default function ComputeClient() {
           WebGPU（GPGPU）
         </button>
       </div>
+      <p className="compute-status">
+        速度の目安：WebGPU は、対応する環境では CPU・WASM
+        よりも高速です。WASM は、対応する環境では JavaScript（CPU方式）よりも高速です。
+      </p>
       {!gpuSupported ? (
         <p className="compute-status">
           このブラウザは WebGPU に対応していないため、CPU方式のみ利用できます。

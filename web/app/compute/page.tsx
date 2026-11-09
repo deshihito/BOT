@@ -50,12 +50,14 @@ export default function ComputePage() {
         </li>
         <li>
           <strong>実行方式を選べます。</strong>
-          標準の CPU（Web Worker）に加えて、対応ブラウザでは
-          WebGPU（GPGPU）でグラフィックチップを使って計算できます。
+          標準の CPU（Web Worker の JavaScript）に加えて、WASM と
+          WebGPU（GPGPU）に対応しています。速度の目安は、WebGPU
+          は対応する環境では CPU・WASM よりも高速で、WASM
+          は対応する環境では JavaScript よりも高速です。
           ただしスマートフォンでは、機種やブラウザによって WebGPU
-          が実行できない場合があります。その場合は CPU
-          方式をご利用ください（WebGPU の計算に続けて失敗したときは自動で CPU
-          方式に切り替わります）。
+          が実行できない場合があります。その場合は CPU 方式や WASM
+          をご利用ください（WebGPU・WASM の計算に続けて失敗したときは自動で
+          CPU 方式に切り替わります）。
         </li>
         <li>
           <strong>匿名で参加できます。</strong>
