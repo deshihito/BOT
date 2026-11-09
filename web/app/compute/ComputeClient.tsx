@@ -6,12 +6,12 @@
 // 選択は localStorage に残す。
 // 個人の貢献数はこのブラウザの localStorage にだけ残し、サーバーへは送らない。
 import { useEffect, useRef, useState } from "react";
-import { isWebGpuSupported, runPerftOnGpu } from "../../lib/compute-gpu";
+import { isWebGpuSupported, runPerftBatchOnGpu } from "../../lib/compute-gpu";
 import { isWasmSupported } from "../../lib/compute-wasm";
 
 type ComputeMethod = "cpu" | "wasm" | "gpu";
-type ComputeTask = { taskId: string; fen: string; depth: number };
-type ComputeFn = (task: ComputeTask) => Promise<{ nodes: number }>;
+type LeasedTask = { taskId: string; fen: string; depth: number; leaseToken: string; expiresAt: number };
+type ResultItem = { taskId: string; nodes: number; token: string };
 
 type Progress = {
   suite: string;
@@ -47,15 +47,15 @@ function formatHistoryLine(entry: HistoryEntry): string {
   return `${label}：${formatNumber(entry.completedTasks)}タスク・${formatNumber(entry.totalNodes)}ノードまで完了`;
 }
 
-type LeaseResponse =
-  | { taskId: string; fen: string; depth: number; leaseToken: string; expiresAt: number; progress: Progress }
-  | { done: true };
-
 type MyStats = { tasks: number; nodes: number };
 
 const STORAGE_KEY = "agobot-compute-contrib-v1";
 const METHOD_STORAGE_KEY = "agobot-compute-method-v1";
 const REST_MS = 200;
+/** CPU / WASM 方式で1回に借りるタスク数（サーバー往復をまとめて減らす）。 */
+const WORKER_BATCH = 16;
+/** WebGPU 方式で1回に借り、1回のディスパッチでまとめて計算するタスク数。 */
+const GPU_BATCH = 8;
 const RETRY_MS = 5000;
 /** WebGPU の計算が続けてこの回数失敗したら、CPU 方式へ自動で切り替える。 */
 const GPU_FAILURE_LIMIT = 2;
@@ -194,12 +194,78 @@ export default function ComputeClient() {
       worker.postMessage({ type: "run", taskId: task.taskId, fen: task.fen, depth: task.depth });
     });
 
-  // リース取得 → 計算 → 結果送信のループ。計算方法（CPU / WebGPU）は
-  // compute 関数として差し替える。onComputeFailure が true を返したら
-  // ループを抜ける（WebGPU から CPU への自動切り替え用）。
-  const runLoop = async (
+  // タスクをまとめて借りる。サーバー側の状態の読み書きも1回で済むため、
+  // 1件ずつ借りる場合に比べて往復の待ち時間が大きく減る。
+  const leaseBatch = async (
+    count: number,
+  ): Promise<{ tasks: LeasedTask[]; progress: Progress } | "done" | null> => {
+    try {
+      const res = await fetch("/api/compute/task", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ count }),
+      });
+      if (!res.ok) throw new Error(String(res.status));
+      const data = (await res.json()) as { tasks?: LeasedTask[]; progress?: Progress; done?: boolean };
+      if (data.done) return "done";
+      if (Array.isArray(data.tasks) && data.progress) return { tasks: data.tasks, progress: data.progress };
+      return null;
+    } catch {
+      return null;
+    }
+  };
+
+  // 結果をまとめて提出し、採用された分だけ自分の貢献に加える。
+  const submitAndReport = async (items: ResultItem[]) => {
+    try {
+      const res = await fetch("/api/compute/result", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ results: items }),
+      });
+      const data = (await res.json().catch(() => null)) as {
+        results?: { taskId: string; status: string }[];
+        progress?: Progress;
+      } | null;
+      if (!res.ok || !data?.results) return;
+      const statusByTask = new Map(data.results.map((r) => [r.taskId, r.status]));
+      let accepted = 0;
+      let acceptedNodes = 0;
+      let duplicates = 0;
+      let mismatches = 0;
+      for (const item of items) {
+        const status = statusByTask.get(item.taskId);
+        if (status === "accepted") {
+          accepted += 1;
+          acceptedNodes += item.nodes;
+        } else if (status === "duplicate") duplicates += 1;
+        else if (status === "mismatch") mismatches += 1;
+      }
+      if (accepted > 0) addMyStats(accepted, acceptedNodes);
+      if (data.progress) setProgress(data.progress);
+      if (mismatches > 0) {
+        setMessage(`結果を照合できないタスクが${formatNumber(mismatches)}件ありました。次のタスクに進みます。`);
+      } else if (accepted > 0) {
+        setMessage(`タスクを${formatNumber(accepted)}件完了しました。`);
+      } else if (duplicates > 0) {
+        setMessage("そのタスクは他の参加者が先に完了していました。次のタスクに進みます。");
+      }
+    } catch {
+      // 送信に失敗した結果は、リース期限の経過後に他の参加者へ再配布される
+    }
+  };
+
+  const finishAll = () => {
+    setFinished(true);
+    setMessage("すべてのタスクが完了しています。ご協力ありがとうございました！");
+    stopRef.current();
+  };
+
+  // CPU / WASM: 借りたバッチをワーカー群で分け合って計算し、まとめて提出する。
+  // onComputeFailure が true を返したらループを抜ける（CPU への自動切り替え用）。
+  const runWorkerBatchLoop = async (
     runId: number,
-    compute: ComputeFn,
+    workers: Worker[],
     onComputeFailure?: () => boolean,
   ) => {
     while (runIdRef.current === runId) {
@@ -207,55 +273,83 @@ export default function ComputeClient() {
         await sleep(800);
         continue;
       }
-      let lease: LeaseResponse | null = null;
-      try {
-        const res = await fetch("/api/compute/task", { method: "POST" });
-        if (!res.ok) throw new Error(String(res.status));
-        lease = (await res.json()) as LeaseResponse;
-      } catch {
-        if (runIdRef.current !== runId) return;
+      const leased = await leaseBatch(WORKER_BATCH);
+      if (runIdRef.current !== runId) return;
+      if (leased === null) {
         setMessage("サーバーに接続できませんでした。少し待ってから自動で再試行します。");
         await sleep(RETRY_MS);
         continue;
       }
-      if (runIdRef.current !== runId) return;
-      if ("done" in lease) {
-        setFinished(true);
-        setMessage("すべてのタスクが完了しています。ご協力ありがとうございました！");
-        stopRef.current();
+      if (leased === "done") {
+        finishAll();
         return;
       }
-      setProgress(lease.progress);
-      let nodes: number;
+      setProgress(leased.progress);
+      let nextIndex = 0;
+      let computeFailed = false;
+      const results: ResultItem[] = [];
+      const slotLoop = async (slot: number) => {
+        while (runIdRef.current === runId) {
+          const index = nextIndex;
+          nextIndex += 1;
+          if (index >= leased.tasks.length) return;
+          const task = leased.tasks[index];
+          try {
+            const { nodes } = await computeOnWorker(slot, workers[slot], task);
+            results.push({ taskId: task.taskId, nodes, token: task.leaseToken });
+          } catch {
+            // このスロットは抜ける。他スロットの分は提出し、失敗はバッチ単位で数える
+            computeFailed = true;
+            return;
+          }
+        }
+      };
+      await Promise.all(workers.map((_, slot) => slotLoop(slot)));
+      if (runIdRef.current !== runId) return;
+      if (results.length > 0) await submitAndReport(results);
+      if (runIdRef.current !== runId) return;
+      if (computeFailed && onComputeFailure && onComputeFailure()) return;
+      await sleep(REST_MS);
+    }
+  };
+
+  // WebGPU: 借りたバッチを1回のディスパッチでまとめて計算し、まとめて提出する。
+  const runGpuBatchLoop = async (runId: number) => {
+    while (runIdRef.current === runId) {
+      if (document.hidden) {
+        await sleep(800);
+        continue;
+      }
+      const leased = await leaseBatch(GPU_BATCH);
+      if (runIdRef.current !== runId) return;
+      if (leased === null) {
+        setMessage("サーバーに接続できませんでした。少し待ってから自動で再試行します。");
+        await sleep(RETRY_MS);
+        continue;
+      }
+      if (leased === "done") {
+        finishAll();
+        return;
+      }
+      setProgress(leased.progress);
+      let computed: { nodes: number }[];
       try {
-        const result = await compute(lease);
-        nodes = result.nodes;
+        computed = await runPerftBatchOnGpu(leased.tasks);
+        gpuFailuresRef.current = 0;
       } catch {
-        if (onComputeFailure && onComputeFailure()) return;
+        gpuFailuresRef.current += 1;
+        if (gpuFailuresRef.current >= GPU_FAILURE_LIMIT) {
+          // WebGPU を使い続けられない環境では CPU 方式へ切り替えて続行する
+          fallbackToCpu("WebGPUで計算を続けられなかったため、CPU方式に切り替えて続行します。");
+          return;
+        }
         await sleep(1000);
         continue;
       }
       if (runIdRef.current !== runId) return;
-      try {
-        const res = await fetch("/api/compute/result", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ taskId: lease.taskId, nodes, token: lease.leaseToken }),
-        });
-        const data = (await res.json().catch(() => null)) as { status?: string; progress?: Progress } | null;
-        if (res.ok && data?.status === "accepted") {
-          addMyStats(1, nodes);
-          setMessage(`タスクを1件完了しました（${formatNumber(nodes)} ノード計算）。`);
-          if (data.progress) setProgress(data.progress);
-        } else if (res.ok && data?.status === "duplicate") {
-          setMessage("そのタスクは他の参加者が先に完了していました。次のタスクに進みます。");
-          if (data?.progress) setProgress(data.progress);
-        } else if (res.status === 422) {
-          setMessage("結果を照合できませんでした。次のタスクに進みます。");
-        }
-      } catch {
-        // 送信に失敗した結果は、リース期限の経過後に他の参加者へ再配布される
-      }
+      await submitAndReport(
+        leased.tasks.map((task, i) => ({ taskId: task.taskId, nodes: computed[i].nodes, token: task.leaseToken })),
+      );
       await sleep(REST_MS);
     }
   };
@@ -302,9 +396,7 @@ export default function ComputeClient() {
       workers.push(worker);
     }
     workersRef.current = workers;
-    workers.forEach((worker, slot) =>
-      void runLoop(runId, (task) => computeOnWorker(slot, worker, task), onComputeFailure),
-    );
+    void runWorkerBatchLoop(runId, workers, onComputeFailure);
   };
 
   const startCpu = (runId: number) => {
@@ -326,22 +418,7 @@ export default function ComputeClient() {
 
   const startGpu = (runId: number) => {
     gpuFailuresRef.current = 0;
-    const compute: ComputeFn = async (task) => {
-      try {
-        const result = await runPerftOnGpu(task.fen, task.depth);
-        gpuFailuresRef.current = 0;
-        return { nodes: result.nodes };
-      } catch (error) {
-        gpuFailuresRef.current += 1;
-        throw error;
-      }
-    };
-    void runLoop(runId, compute, () => {
-      if (gpuFailuresRef.current < GPU_FAILURE_LIMIT) return false;
-      // WebGPU を使い続けられない環境では CPU 方式へ切り替えて続行する
-      fallbackToCpu("WebGPUで計算を続けられなかったため、CPU方式に切り替えて続行します。");
-      return true;
-    });
+    void runGpuBatchLoop(runId);
   };
 
   const start = () => {
