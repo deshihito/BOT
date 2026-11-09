@@ -68,6 +68,22 @@ export function splitForGpu(
   };
 }
 
+/**
+ * 複数タスク分の部分局面を1回のディスパッチ用に連結し、
+ * タスクごとの範囲（開始インデックスと件数）を返す。
+ */
+export function concatSubPositions(
+  groups: readonly (readonly GpuSubPosition[])[],
+): { subs: GpuSubPosition[]; ranges: { start: number; count: number }[] } {
+  const subs: GpuSubPosition[] = [];
+  const ranges: { start: number; count: number }[] = [];
+  for (const group of groups) {
+    ranges.push({ start: subs.length, count: group.length });
+    subs.push(...group);
+  }
+  return { subs, ranges };
+}
+
 /** 部分局面リストを GPU 入力バッファ形式 (先頭に件数) へ詰める。 */
 export function encodeSubPositions(subs: readonly GpuSubPosition[]): Uint32Array {
   const data = new Uint32Array(1 + subs.length * SUB_STRIDE);
@@ -546,20 +562,12 @@ async function getPipeline(device: GpuDeviceLike) {
   return pipeline;
 }
 
-/**
- * 1タスク分の perft を WebGPU で計算する。
- * WebGPU が使えない環境では例外を投げるので、呼び出し側で CPU 方式へ切り替えること。
- */
-export async function runPerftOnGpu(
-  fen: string,
-  depth: number,
-): Promise<{ nodes: number; elapsedMs: number }> {
-  const started = performance.now();
-  const { subs, baseCount } = splitForGpu(fen, depth);
-  if (subs.length === 0) return { nodes: baseCount, elapsedMs: performance.now() - started };
-
-  const device = await getDevice();
-  const pipeline = await getPipeline(device);
+/** 部分局面をまとめて GPU へ投げ、部分局面ごとのノード数 (u32 lo/hi ペア列) を返す。 */
+async function dispatchSubs(
+  device: GpuDeviceLike,
+  pipeline: ReturnType<GpuDeviceLike["createComputePipeline"]>,
+  subs: readonly GpuSubPosition[],
+): Promise<Uint32Array> {
   const input = encodeSubPositions(subs);
   const inputBuffer = device.createBuffer({ size: input.byteLength, usage: USAGE_STORAGE | USAGE_COPY_DST });
   device.queue.writeBuffer(inputBuffer, 0, input);
@@ -593,19 +601,70 @@ export async function runPerftOnGpu(
     await readbackBuffer.mapAsync(MAP_MODE_READ);
     const counts = new Uint32Array(readbackBuffer.getMappedRange().slice(0));
     readbackBuffer.unmap();
-    let nodes = baseCount;
-    for (let i = 0; i < subs.length; i++) {
-      nodes += counts[i * 2] + counts[i * 2 + 1] * 4294967296;
-    }
-    // 部分局面が1つ以上ある（＝合法手が存在する）局面で 0 はあり得ない。
-    // GPU 側の異常を結果として送信せず、呼び出し側の自動切り替えに任せる。
-    if (nodes === 0 && subs.length > 0) {
-      throw new Error("WebGPU returned zero nodes for a non-terminal position");
-    }
-    return { nodes, elapsedMs: performance.now() - started };
+    return counts;
   } finally {
     inputBuffer.destroy();
     outputBuffer.destroy();
     readbackBuffer.destroy();
   }
+}
+
+/** 1回のディスパッチに載せる部分局面の上限（バッファサイズの安全側）。 */
+const MAX_SUBS_PER_DISPATCH = 32768;
+
+/**
+ * 複数タスク分の perft を WebGPU でまとめて計算する。
+ * 全タスクの部分局面を1つのバッファに連結して投げるため、タスクごとに
+ * 投げ直す場合に比べて GPU の待機時間が減り、使用率が上がる。
+ * WebGPU が使えない環境では例外を投げるので、呼び出し側で CPU 方式へ切り替えること。
+ */
+export async function runPerftBatchOnGpu(
+  tasks: readonly { fen: string; depth: number }[],
+  targetTotalSubs = 16384,
+): Promise<{ nodes: number; elapsedMs: number }[]> {
+  const started = performance.now();
+  if (tasks.length === 0) return [];
+  const perTaskTarget = Math.max(256, Math.min(8192, Math.round(targetTotalSubs / tasks.length)));
+  const splits = tasks.map((task) => splitForGpu(task.fen, task.depth, perTaskTarget));
+  const { subs, ranges } = concatSubPositions(splits.map((s) => s.subs));
+  const elapsed = () => performance.now() - started;
+  if (subs.length === 0) {
+    return splits.map((s) => ({ nodes: s.baseCount, elapsedMs: elapsed() }));
+  }
+
+  const device = await getDevice();
+  const pipeline = await getPipeline(device);
+  const counts = new Uint32Array(subs.length * 2);
+  for (let offset = 0; offset < subs.length; offset += MAX_SUBS_PER_DISPATCH) {
+    const chunk = subs.slice(offset, offset + MAX_SUBS_PER_DISPATCH);
+    const chunkCounts = await dispatchSubs(device, pipeline, chunk);
+    counts.set(chunkCounts, offset * 2);
+  }
+
+  return splits.map((split, i) => {
+    let nodes = split.baseCount;
+    const range = ranges[i];
+    for (let j = 0; j < range.count; j++) {
+      const idx = (range.start + j) * 2;
+      nodes += counts[idx] + counts[idx + 1] * 4294967296;
+    }
+    // 部分局面が1つ以上ある（＝合法手が存在する）局面で 0 はあり得ない。
+    // GPU 側の異常を結果として送信せず、呼び出し側の自動切り替えに任せる。
+    if (nodes === 0 && range.count > 0) {
+      throw new Error("WebGPU returned zero nodes for a non-terminal position");
+    }
+    return { nodes, elapsedMs: elapsed() };
+  });
+}
+
+/**
+ * 1タスク分の perft を WebGPU で計算する。
+ * WebGPU が使えない環境では例外を投げるので、呼び出し側で CPU 方式へ切り替えること。
+ */
+export async function runPerftOnGpu(
+  fen: string,
+  depth: number,
+): Promise<{ nodes: number; elapsedMs: number }> {
+  const [result] = await runPerftBatchOnGpu([{ fen, depth }]);
+  return result;
 }

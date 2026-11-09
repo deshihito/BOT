@@ -215,6 +215,34 @@ export function leaseNextTask(
   return null;
 }
 
+/** 1回のバッチで貸し出すタスク数の上限。 */
+export const MAX_LEASE_BATCH = 16;
+/** 1回のバッチで受け付ける結果数の上限。 */
+export const MAX_RESULT_BATCH = 32;
+
+/**
+ * 未完了かつリース空きのタスクを最大 maxCount 件までまとめて貸し出す。
+ * サーバー側の状態の読み書きを1回に抑えるために使う（往復削減）。
+ * 1バッチ内のタスクは同じトークンで貸し出す。
+ */
+export function leaseTaskBatch(
+  state: ComputePoolState,
+  catalog: readonly ComputeTaskDef[],
+  now: number,
+  token: string,
+  maxCount: number,
+  leaseTtlMs: number = LEASE_TTL_MS,
+): { task: ComputeTaskDef; expiresAt: number }[] {
+  const leased: { task: ComputeTaskDef; expiresAt: number }[] = [];
+  const limit = Math.max(1, Math.min(MAX_LEASE_BATCH, Math.floor(maxCount) || 1));
+  for (let i = 0; i < limit; i++) {
+    const one = leaseNextTask(state, catalog, now, token, leaseTtlMs);
+    if (!one) break;
+    leased.push(one);
+  }
+  return leased;
+}
+
 export type SubmitOutcome = "accepted" | "duplicate" | "mismatch";
 
 /**
@@ -262,6 +290,33 @@ export function parseResultBody(
   }
   if (typeof token !== "string" || token.length < 8 || token.length > 64) return null;
   return { taskId, nodes, token };
+}
+
+/** バッチ結果 POST のボディ検証。各要素は parseResultBody と同じ基準を通す。 */
+export function parseBatchResultBody(
+  raw: unknown,
+): { taskId: string; nodes: number; token: string }[] | null {
+  if (!isPlainObject(raw)) return null;
+  const results = raw.results;
+  if (!Array.isArray(results) || results.length === 0 || results.length > MAX_RESULT_BATCH) {
+    return null;
+  }
+  const parsed: { taskId: string; nodes: number; token: string }[] = [];
+  for (const item of results) {
+    const one = parseResultBody(item);
+    if (!one) return null;
+    parsed.push(one);
+  }
+  return parsed;
+}
+
+/** バッチリース POST のボディから件数を取り出す。不正な値は null（=従来の1件リース）。 */
+export function parseLeaseBatchCount(raw: unknown): number | null {
+  if (!isPlainObject(raw)) return null;
+  const count = raw.count;
+  if (typeof count !== "number" || !Number.isSafeInteger(count)) return null;
+  if (count < 2 || count > MAX_LEASE_BATCH) return null;
+  return count;
 }
 
 /** 単純なスライディングウィンドウ判定（タイムスタンプ列は呼び出し側が保持する）。 */
