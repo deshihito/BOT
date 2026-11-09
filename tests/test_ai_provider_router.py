@@ -85,8 +85,7 @@ class AiProviderRouterTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_logfare_rate_limit_cools_down_and_logs_safe_status(self):
         messages = [{"role": "user", "content": "質問"}]
-        with patch.dict(os.environ, {"AI_PROVIDER_ORDER": "logfare,second"}), \
-             patch.object(router.logfare, "api_key", return_value="secret-key"), \
+        with patch.dict(os.environ, {"AI_PROVIDER_ORDER": "logfare,second", "LOGFARE_API_KEY": "secret-key"}), \
              patch.object(router.logfare, "BASE_URL", self.logfare_url), \
              self.assertLogs(router.logger, level="WARNING") as logs:
             first = await router.chat(messages)

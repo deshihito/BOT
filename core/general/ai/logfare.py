@@ -6,6 +6,8 @@ import base64
 import json
 import logging
 import os
+import time
+from collections.abc import Awaitable, Callable
 from typing import Any, AsyncIterator
 
 import aiohttp
@@ -54,8 +56,102 @@ class LogfareHTTPError(RuntimeError):
         super().__init__(f"Logfare API error {status}")
 
 
+# 予備キー（RPD = 日次リクエスト上限到達時用）のクールダウン。
+# 429 を返したキーは Retry-After（無ければ既定値）の間スキップする。メモリ内のみ。
+DEFAULT_KEY_COOLDOWN_SECONDS = 3600.0
+MAX_KEY_COOLDOWN_SECONDS = 86400.0
+_key_cooldown_until: dict[str, float] = {}
+
+
+def api_keys() -> list[str]:
+    """利用可能な API キーを優先順に返す。
+
+    主キー ``LOGFARE_API_KEY``、予備 ``LOGFARE_API_KEY_2`` / ``LOGFARE_API_KEY_3``、
+    追加分 ``LOGFARE_API_KEYS``（カンマ区切り）の順。空白除去・空欄除外・重複除去する。
+    """
+    candidates: list[str | None] = [
+        os.getenv("LOGFARE_API_KEY"),
+        os.getenv("LOGFARE_API_KEY_2"),
+        os.getenv("LOGFARE_API_KEY_3"),
+    ]
+    candidates.extend(os.getenv("LOGFARE_API_KEYS", "").split(","))
+    keys: list[str] = []
+    for candidate in candidates:
+        if candidate is None:
+            continue
+        key = candidate.strip()
+        if key and key not in keys:
+            keys.append(key)
+    return keys
+
+
 def api_key() -> str | None:
-    return os.getenv("LOGFARE_API_KEY")
+    """互換用: 先頭のキーを返す（未設定なら None）。設定有無チェックは従来通り動く。"""
+    keys = api_keys()
+    return keys[0] if keys else None
+
+
+def _retry_after_seconds(retry_after: str | None) -> float:
+    if retry_after:
+        try:
+            value = float(str(retry_after).strip())
+        except ValueError:
+            return DEFAULT_KEY_COOLDOWN_SECONDS
+        return min(max(value, 0.0), MAX_KEY_COOLDOWN_SECONDS)
+    return DEFAULT_KEY_COOLDOWN_SECONDS
+
+
+def _mark_key_cooldown(key: str, retry_after: str | None) -> None:
+    _key_cooldown_until[key] = time.monotonic() + _retry_after_seconds(retry_after)
+
+
+def _key_attempt_order() -> list[tuple[int, str]]:
+    """試行順の (キー番号, キー) 一覧。クールダウン中のキーは飛ばす。
+
+    全キーがクールダウン中なら、終了が一番早いキーだけを試す。
+    キー番号は api_keys() の 1 始まりの順序で、ログでの識別にだけ使う。
+    """
+    keys = api_keys()
+    if not keys:
+        return []
+    now = time.monotonic()
+    indexed = list(enumerate(keys, start=1))
+    available = [(i, k) for i, k in indexed if _key_cooldown_until.get(k, 0.0) <= now]
+    if available:
+        return available
+    return [min(indexed, key=lambda item: _key_cooldown_until.get(item[1], 0.0))]
+
+
+def _note_key_429(order: list[tuple[int, str]], pos: int, index: int, key: str, retry_after: str | None) -> None:
+    """429 を返したキーをクールダウンに入れ、切替をキー番号だけで記録する（キー値は出さない）。"""
+    _mark_key_cooldown(key, retry_after)
+    if pos + 1 < len(order):
+        logger.warning(
+            "Logfare APIキー #%d が HTTP 429 のため、キー #%d へ切り替えます", index, order[pos + 1][0]
+        )
+    else:
+        logger.warning("Logfare APIキーがすべて HTTP 429 を返しました（最後はキー #%d）", index)
+
+
+async def _with_key_failover(attempt: Callable[[str], Awaitable[Any]]) -> Any:
+    """attempt(key) を実行し、HTTP 429 のときだけ次のキーで同じリクエストを再試行する。
+
+    429 以外のエラーはそのまま上げる（設定ミス等を予備キーで隠さない）。
+    """
+    order = _key_attempt_order()
+    if not order:
+        raise RuntimeError("LOGFARE_API_KEY が設定されていません。")
+    last_error: LogfareHTTPError | None = None
+    for pos, (index, key) in enumerate(order):
+        try:
+            return await attempt(key)
+        except LogfareHTTPError as exc:
+            if exc.status != 429:
+                raise
+            _note_key_429(order, pos, index, key, exc.retry_after)
+            last_error = exc
+    assert last_error is not None
+    raise last_error
 
 
 def configured_default_model() -> str:
@@ -167,9 +263,14 @@ async def chat_stream(
     max_tokens: int = 2400,
     reasoning_effort: str | None = None,
 ) -> AsyncIterator[str]:
-    """Chat CompletionsのSSEストリームから回答本文を順次返す。"""
-    key = api_key()
-    if not key:
+    """Chat CompletionsのSSEストリームから回答本文を順次返す。
+
+    接続確立時（最初のデルタを返す前）に HTTP 429 が返った場合だけ予備キーへ
+    切り替える。ストリーム開始後の失敗は重複出力防止のため再試行しない
+    （ステータス判定は最初のデルタより前にあるので、切替は常に開始前に起きる）。
+    """
+    order = _key_attempt_order()
+    if not order:
         raise RuntimeError("LOGFARE_API_KEY が設定されていません。")
     payload: dict[str, Any] = {
         "model": model,
@@ -179,40 +280,51 @@ async def chat_stream(
     }
     if reasoning_effort:
         payload["reasoning_effort"] = reasoning_effort
-    headers = {
-        "Authorization": f"Bearer {key}",
-        "Content-Type": "application/json",
-        "Accept": "text/event-stream",
-    }
-    async with aiohttp.ClientSession(timeout=STREAM_TIMEOUT) as session:
-        async with session.post(
-            f"{BASE_URL}/chat/completions", headers=headers, json=payload
-        ) as response:
-            if response.status >= 400:
-                raise LogfareHTTPError(response.status, response.headers.get("Retry-After"))
-            async for raw_line in response.content:
-                line = raw_line.decode("utf-8", errors="replace").strip()
-                if not line.startswith("data:"):
-                    continue
-                event_data = line[5:].strip()
-                if event_data == "[DONE]":
-                    break
-                try:
-                    event = json.loads(event_data)
-                except ValueError:
-                    logger.warning("Logfare returned an invalid chat stream event")
-                    continue
-                choices = event.get("choices") or []
-                if not choices or not isinstance(choices[0], dict):
-                    continue
-                delta = (choices[0].get("delta") or {}).get("content")
-                if isinstance(delta, list):
-                    delta = "".join(
-                        part.get("text", "") for part in delta
-                        if isinstance(part, dict) and isinstance(part.get("text"), str)
-                    )
-                if isinstance(delta, str) and delta:
-                    yield delta
+    last_error: LogfareHTTPError | None = None
+    for pos, (index, key) in enumerate(order):
+        headers = {
+            "Authorization": f"Bearer {key}",
+            "Content-Type": "application/json",
+            "Accept": "text/event-stream",
+        }
+        try:
+            async with aiohttp.ClientSession(timeout=STREAM_TIMEOUT) as session:
+                async with session.post(
+                    f"{BASE_URL}/chat/completions", headers=headers, json=payload
+                ) as response:
+                    if response.status >= 400:
+                        raise LogfareHTTPError(response.status, response.headers.get("Retry-After"))
+                    async for raw_line in response.content:
+                        line = raw_line.decode("utf-8", errors="replace").strip()
+                        if not line.startswith("data:"):
+                            continue
+                        event_data = line[5:].strip()
+                        if event_data == "[DONE]":
+                            break
+                        try:
+                            event = json.loads(event_data)
+                        except ValueError:
+                            logger.warning("Logfare returned an invalid chat stream event")
+                            continue
+                        choices = event.get("choices") or []
+                        if not choices or not isinstance(choices[0], dict):
+                            continue
+                        delta = (choices[0].get("delta") or {}).get("content")
+                        if isinstance(delta, list):
+                            delta = "".join(
+                                part.get("text", "") for part in delta
+                                if isinstance(part, dict) and isinstance(part.get("text"), str)
+                            )
+                        if isinstance(delta, str) and delta:
+                            yield delta
+            return
+        except LogfareHTTPError as exc:
+            if exc.status != 429:
+                raise
+            _note_key_429(order, pos, index, key, exc.retry_after)
+            last_error = exc
+    if last_error is not None:
+        raise last_error
 
 
 async def chat_completion(
@@ -224,10 +336,7 @@ async def chat_completion(
     tools: list[dict[str, Any]] | None = None,
     tool_choice: str | dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Chat CompletionsのJSON全体を返す（ツール呼び出し用）。"""
-    key = api_key()
-    if not key:
-        raise RuntimeError("LOGFARE_API_KEY が設定されていません。")
+    """Chat CompletionsのJSON全体を返す（ツール呼び出し用）。429時は予備キーへ切替。"""
     payload = {
         "model": model,
         "messages": messages,
@@ -238,21 +347,25 @@ async def chat_completion(
     if tools:
         payload["tools"] = tools
         payload["tool_choice"] = tool_choice or "auto"
-    headers = {
-        "Authorization": f"Bearer {key}",
-        "Content-Type": "application/json",
-    }
-    async with aiohttp.ClientSession(timeout=DEFAULT_TIMEOUT) as session:
-        async with session.post(f"{BASE_URL}/chat/completions", headers=headers, json=payload) as response:
-            if response.status >= 400:
-                raise LogfareHTTPError(response.status, response.headers.get("Retry-After"))
-            try:
-                data = await response.json()
-            except ValueError as exc:
-                raise RuntimeError("Logfare API の応答をJSONとして解釈できませんでした。") from exc
-    if not isinstance(data, dict):
-        raise RuntimeError("Logfare APIの応答形式が不正です。")
-    return data
+
+    async def _attempt(key: str) -> dict[str, Any]:
+        headers = {
+            "Authorization": f"Bearer {key}",
+            "Content-Type": "application/json",
+        }
+        async with aiohttp.ClientSession(timeout=DEFAULT_TIMEOUT) as session:
+            async with session.post(f"{BASE_URL}/chat/completions", headers=headers, json=payload) as response:
+                if response.status >= 400:
+                    raise LogfareHTTPError(response.status, response.headers.get("Retry-After"))
+                try:
+                    data = await response.json()
+                except ValueError as exc:
+                    raise RuntimeError("Logfare API の応答をJSONとして解釈できませんでした。") from exc
+        if not isinstance(data, dict):
+            raise RuntimeError("Logfare APIの応答形式が不正です。")
+        return data
+
+    return await _with_key_failover(_attempt)
 
 
 def _extract_transcript(result: Any) -> str | None:
@@ -304,11 +417,9 @@ async def transcribe_audio(audio: bytes, *, filename: str = "voice.wav") -> str:
 
     追加フォーム項目が 400/422 で拒否された場合だけ、言語指定を維持して再送する。
     日本語の文字起こしで言語指定まで外すと、Whisperの自動判定で英語が混ざるため。
+    キー切替（429時）は外側のループ、パラメータのフォールバックは内側のループで
+    独立に働く。
     """
-    key = api_key()
-    if not key:
-        raise RuntimeError("LOGFARE_API_KEY が設定されていません。")
-    headers = {"Authorization": f"Bearer {key}"}
     timeout = aiohttp.ClientTimeout(total=90)
     # (language, 追加フォーム項目, 追加クエリ)。追加項目だけを外して再送する。
     fallback = (TRANSCRIPTION_LANGUAGE, {}, {})
@@ -316,36 +427,41 @@ async def transcribe_audio(audio: bytes, *, filename: str = "voice.wav") -> str:
     configured = (TRANSCRIPTION_LANGUAGE, TRANSCRIPTION_EXTRA_FIELDS, TRANSCRIPTION_EXTRA_QUERY)
     if configured != fallback:
         attempts.insert(0, configured)
-    raw = ""
-    async with aiohttp.ClientSession(timeout=timeout) as session:
-        for index, (language, extra_fields, extra_query) in enumerate(attempts):
-            form = _transcription_form(audio, filename, language, extra_fields)
-            async with session.post(
-                f"{BASE_URL}/audio/transcriptions",
-                headers=headers,
-                data=form,
-                params=extra_query or None,
-            ) as response:
-                if response.status >= 400:
-                    if index < len(attempts) - 1 and response.status in (400, 422):
-                        logger.warning(
-                            "Logfare が追加パラメータ (language=%s, fields=%s, query=%s) を受け付けませんでした "
-                            "(HTTP %s)。指定なしで再送します",
-                            language, extra_fields, extra_query, response.status,
-                        )
-                        continue
-                    raise LogfareHTTPError(response.status, response.headers.get("Retry-After"))
-                raw = await response.text()
-            break
-    try:
-        result: Any = json.loads(raw)
-    except ValueError:
-        result = raw  # プレーンテキストで返ってきた場合
-    text = _extract_transcript(result)
-    if text is None:
-        logger.warning("Logfare 音声認識の応答に text がありません。応答の先頭: %s", raw[:500])
-        raise RuntimeError("Logfare 音声認識 API の応答に文字起こし結果がありませんでした。")
-    return text.strip()
+
+    async def _attempt(key: str) -> str:
+        headers = {"Authorization": f"Bearer {key}"}
+        raw = ""
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            for index, (language, extra_fields, extra_query) in enumerate(attempts):
+                form = _transcription_form(audio, filename, language, extra_fields)
+                async with session.post(
+                    f"{BASE_URL}/audio/transcriptions",
+                    headers=headers,
+                    data=form,
+                    params=extra_query or None,
+                ) as response:
+                    if response.status >= 400:
+                        if index < len(attempts) - 1 and response.status in (400, 422):
+                            logger.warning(
+                                "Logfare が追加パラメータ (language=%s, fields=%s, query=%s) を受け付けませんでした "
+                                "(HTTP %s)。指定なしで再送します",
+                                language, extra_fields, extra_query, response.status,
+                            )
+                            continue
+                        raise LogfareHTTPError(response.status, response.headers.get("Retry-After"))
+                    raw = await response.text()
+                break
+        try:
+            result: Any = json.loads(raw)
+        except ValueError:
+            result = raw  # プレーンテキストで返ってきた場合
+        text = _extract_transcript(result)
+        if text is None:
+            logger.warning("Logfare 音声認識の応答に text がありません。応答の先頭: %s", raw[:500])
+            raise RuntimeError("Logfare 音声認識 API の応答に文字起こし結果がありませんでした。")
+        return text.strip()
+
+    return await _with_key_failover(_attempt)
 
 
 async def decision(
@@ -355,59 +471,72 @@ async def decision(
     *,
     timeout: aiohttp.ClientTimeout | None = None,
 ) -> dict[str, Any]:
-    """Logfare decision-model endpointへSystem One形式の判断を送る。"""
-    key = api_key()
-    if not key:
-        raise RuntimeError("LOGFARE_API_KEY が設定されていません。")
+    """Logfare decision-model endpointへSystem One形式の判断を送る。429時は予備キーへ切替。"""
     payload = {"model": model, "state": state, "questions": questions}
-    headers = {
-        "Authorization": f"Bearer {key}",
-        "Content-Type": "application/json",
-    }
-    async with aiohttp.ClientSession(timeout=timeout or DEFAULT_TIMEOUT) as session:
-        async with session.post(f"{BASE_URL}/decisions", headers=headers, json=payload) as response:
-            if response.status >= 400:
-                raise LogfareHTTPError(response.status, response.headers.get("Retry-After"))
-            try:
-                data = await response.json()
-            except ValueError as exc:
-                raise RuntimeError("Logfare decision API の応答をJSONとして解釈できませんでした。") from exc
-    if not isinstance(data, dict):
-        raise RuntimeError("Logfare decision APIの応答形式が不正です。")
-    return data
+
+    async def _attempt(key: str) -> dict[str, Any]:
+        headers = {
+            "Authorization": f"Bearer {key}",
+            "Content-Type": "application/json",
+        }
+        async with aiohttp.ClientSession(timeout=timeout or DEFAULT_TIMEOUT) as session:
+            async with session.post(f"{BASE_URL}/decisions", headers=headers, json=payload) as response:
+                if response.status >= 400:
+                    raise LogfareHTTPError(response.status, response.headers.get("Retry-After"))
+                try:
+                    data = await response.json()
+                except ValueError as exc:
+                    raise RuntimeError("Logfare decision API の応答をJSONとして解釈できませんでした。") from exc
+        if not isinstance(data, dict):
+            raise RuntimeError("Logfare decision APIの応答形式が不正です。")
+        return data
+
+    return await _with_key_failover(_attempt)
 
 
 async def generate_image(model: str, prompt: str, *, size: str = "1024x1024") -> bytes:
-    """画像生成結果をPNG/JPEG等のバイト列として返す。"""
-    key = api_key()
-    if not key:
-        raise RuntimeError("LOGFARE_API_KEY が設定されていません。")
-    headers = {
-        "Authorization": f"Bearer {key}",
-        "Content-Type": "application/json",
-    }
+    """画像生成結果をPNG/JPEG等のバイト列として返す。429時は予備キーへ切替。
+
+    画像URL取得の2段目 GET は切替対象外（429判定は生成 POST のみ）。
+    全キーで 429 の場合は従来形式の RuntimeError を上げる。
+    """
     payload = {"model": model, "prompt": prompt, "size": size, "n": 1}
-    async with aiohttp.ClientSession(timeout=DEFAULT_TIMEOUT) as session:
-        async with session.post(f"{BASE_URL}/images/generations", headers=headers, json=payload) as response:
-            body = await response.text()
-            if response.status >= 400:
-                raise RuntimeError(f"Logfare image API error {response.status}: {body[:300]}")
+    last_429_body: dict[str, str] = {"body": ""}
+
+    async def _attempt(key: str) -> bytes:
+        headers = {
+            "Authorization": f"Bearer {key}",
+            "Content-Type": "application/json",
+        }
+        async with aiohttp.ClientSession(timeout=DEFAULT_TIMEOUT) as session:
+            async with session.post(f"{BASE_URL}/images/generations", headers=headers, json=payload) as response:
+                body = await response.text()
+                if response.status >= 400:
+                    if response.status == 429:
+                        last_429_body["body"] = body
+                        raise LogfareHTTPError(response.status, response.headers.get("Retry-After"))
+                    raise RuntimeError(f"Logfare image API error {response.status}: {body[:300]}")
+                try:
+                    data = await response.json()
+                except ValueError as exc:
+                    raise RuntimeError("Logfare画像APIの応答をJSONとして解釈できませんでした。") from exc
+
             try:
-                data = await response.json()
-            except ValueError as exc:
-                raise RuntimeError("Logfare画像APIの応答をJSONとして解釈できませんでした。") from exc
+                item = data["data"][0]
+                if item.get("b64_json"):
+                    return base64.b64decode(item["b64_json"])
+                image_url = item["url"]
+            except (KeyError, IndexError, TypeError) as exc:
+                raise RuntimeError("Logfare画像APIの応答に画像データがありませんでした。") from exc
 
-        try:
-            item = data["data"][0]
-            if item.get("b64_json"):
-                return base64.b64decode(item["b64_json"])
-            image_url = item["url"]
-        except (KeyError, IndexError, TypeError) as exc:
-            raise RuntimeError("Logfare画像APIの応答に画像データがありませんでした。") from exc
+            async with session.get(image_url) as image_response:
+                image_response.raise_for_status()
+                return await image_response.read()
 
-        async with session.get(image_url) as image_response:
-            image_response.raise_for_status()
-            return await image_response.read()
+    try:
+        return await _with_key_failover(_attempt)
+    except LogfareHTTPError as exc:
+        raise RuntimeError(f"Logfare image API error 429: {last_429_body['body'][:300]}") from exc
 
 
 # ============================================================

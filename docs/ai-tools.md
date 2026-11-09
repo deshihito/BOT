@@ -22,10 +22,13 @@ BOTへのメンションに続く依頼をLogfare Clefが判定し、既存機�
 
 ```dotenv
 LOGFARE_API_KEY=<Logfare API key>
+LOGFARE_API_KEY_2=<予備のLogfare API key（任意）>
 AITOOLS_ENABLED=true
 AITOOLS_TIMEOUT=30
 AITOOLS_RETRIES=1
 ```
+
+予備キー`LOGFARE_API_KEY_2`（さらに`LOGFARE_API_KEY_3`、カンマ区切りの`LOGFARE_API_KEYS`も可）を設定すると、LogfareがHTTP 429（日次リクエスト上限=RPD到達時）を返したときだけ自動で次のキーへ切り替わります（decisionを含む全Logfare経路共通）。429以外のエラーでは切り替えません。429を返したキーは`Retry-After`（無ければ1時間、最大24時間）の間スキップされます。
 
 `AITOOLS_ENABLED`は既定で`true`です。全サーバーで停止したい場合だけ`false`を設定します。既定ではメンション1件につきdecisionリクエスト1回で、別モデルへのフォールバックはありません。選択されたアクションに選択式（choice / bool）の引数がある場合のみ、引数抽出のため2回目のdecisionリクエストを送ります（数値引数はAPIを使わず依頼文からローカルで抽出します）。
 
