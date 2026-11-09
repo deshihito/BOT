@@ -237,9 +237,16 @@ body { overflow-x:clip; }
 .home-bg { position:relative; isolation:isolate; }
 .home-drift { position:sticky; top:0; height:100vh; margin-bottom:-100vh; z-index:-1; pointer-events:none; }
 .home-drift span { position:absolute; border-radius:50%; filter:blur(36px); }
-.home-drift .drift-a { width:340px; height:340px; background:#cdeee2; opacity:.85; top:-10px; right:-70px; animation:home-drift-a 11s ease-in-out infinite; }
-.home-drift .drift-b { width:260px; height:260px; background:#f3ecd9; opacity:.9; top:48vh; left:-90px; animation:home-drift-b 13s ease-in-out infinite; }
-.home-drift .drift-c { width:280px; height:280px; background:#dcefea; opacity:.7; top:64vh; right:-80px; animation:home-drift-a 16s ease-in-out infinite; }
+.home-drift .drift-a { width:340px; height:340px; background:#b9e7d2; opacity:.9; top:-10px; right:-70px; animation:home-drift-a 11s ease-in-out infinite; }
+.home-drift .drift-b { width:260px; height:260px; background:#eee0b8; opacity:.95; top:48vh; left:-90px; animation:home-drift-b 13s ease-in-out infinite; }
+.home-drift .drift-c { width:280px; height:280px; background:#c2ead8; opacity:.8; top:64vh; right:-80px; animation:home-drift-a 16s ease-in-out infinite; }
+/* HDR ディスプレイでは白に近い淡色が階調圧縮で白へ潰れてしまうため、
+   HDR 環境では彩度を上げた広色域 (Display P3) の色に切り替える。 */
+@media (dynamic-range: high), (-webkit-dynamic-range: high) {
+  .home-drift .drift-a { background:color(display-p3 0.52 0.88 0.7); opacity:.95; }
+  .home-drift .drift-b { background:color(display-p3 0.96 0.84 0.5); opacity:1; }
+  .home-drift .drift-c { background:color(display-p3 0.58 0.9 0.75); opacity:.9; }
+}
 .home-hero img { animation:home-fade-up .7s cubic-bezier(.22,.8,.32,1) .05s both; }
 .home-hero h1 { animation:home-fade-up .7s cubic-bezier(.22,.8,.32,1) .18s both; }
 .home-hero-actions { animation:home-fade-up .7s cubic-bezier(.22,.8,.32,1) .32s both; }
