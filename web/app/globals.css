@@ -205,10 +205,17 @@ body:has([data-activity-root]) > main { max-width:none; min-height:100svh; margi
 @keyframes home-fade-up { from { opacity:0; transform:translateY(14px); } to { opacity:1; transform:translateY(0); } }
 @keyframes home-drift-a { 0%,100% { transform:translate(0,0); } 50% { transform:translate(36px,14px); } }
 @keyframes home-drift-b { 0%,100% { transform:translate(0,0); } 50% { transform:translate(-28px,-10px); } }
-.home-hero { position:relative; overflow:hidden; isolation:isolate; }
-.home-hero::before, .home-hero::after { content:""; position:absolute; border-radius:50%; filter:blur(28px); pointer-events:none; z-index:-1; }
-.home-hero::before { width:210px; height:210px; background:#dcefea; top:-70px; right:-40px; animation:home-drift-a 11s ease-in-out infinite; }
-.home-hero::after { width:170px; height:170px; background:var(--note); bottom:-80px; left:22%; animation:home-drift-b 13s ease-in-out infinite; }
+/* 背景ドリフトはヒーロー単体ではなくページ全体 (.home-bg) に敷く。
+   以前は .home-hero の overflow:hidden で色の丸が途中で切れて見えたため、
+   クリップをやめてページ端まで自然にぼかす（横スクロールは body の
+   overflow-x: clip で防止）。コマンドグリッドにも専用の丸を1つ置く。 */
+body { overflow-x:clip; }
+.home-bg { position:relative; isolation:isolate; }
+.home-bg::before, .home-bg::after { content:""; position:absolute; border-radius:50%; filter:blur(30px); pointer-events:none; z-index:-1; }
+.home-bg::before { width:260px; height:260px; background:#dcefea; opacity:.75; top:-50px; right:-70px; animation:home-drift-a 12s ease-in-out infinite; }
+.home-bg::after { width:200px; height:200px; background:var(--note); opacity:.85; top:360px; left:-80px; animation:home-drift-b 14s ease-in-out infinite; }
+.home-command-grid { position:relative; isolation:isolate; }
+.home-command-grid::before { content:""; position:absolute; width:220px; height:220px; border-radius:50%; background:#e6f2ee; opacity:.8; filter:blur(30px); pointer-events:none; z-index:-1; bottom:-70px; right:-60px; animation:home-drift-a 16s ease-in-out infinite; }
 .home-hero img { animation:home-fade-up .7s cubic-bezier(.22,.8,.32,1) .05s both; }
 .home-hero h1 { animation:home-fade-up .7s cubic-bezier(.22,.8,.32,1) .18s both; }
 .home-hero-actions { animation:home-fade-up .7s cubic-bezier(.22,.8,.32,1) .32s both; }
@@ -224,6 +231,7 @@ body:has([data-activity-root]) > main { max-width:none; min-height:100svh; margi
 .home-command-link:nth-child(8) { animation-delay:1.25s; }
 .home-command-link:nth-child(n+9) { animation-delay:1.35s; }
 @media (prefers-reduced-motion: reduce) {
-  .home-hero::before, .home-hero::after, .home-hero img, .home-hero h1,
+  .home-bg::before, .home-bg::after, .home-command-grid::before,
+  .home-hero img, .home-hero h1,
   .home-hero-actions, .home-live-stats, .home-command-link { animation:none; }
 }
