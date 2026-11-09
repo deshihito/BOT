@@ -46,16 +46,11 @@ const HOME_JSON_LD = {
 export default async function Home() {
   const stats = await loadLiveStats();
   return (
-    <div className="home-bg">
+    <>
       <script
         type="application/ld+json"
         dangerouslySetInnerHTML={{ __html: JSON.stringify(HOME_JSON_LD) }}
       />
-      <div className="home-drift" aria-hidden="true">
-        <span className="drift-a" />
-        <span className="drift-b" />
-        <span className="drift-c" />
-      </div>
       <section className="home-hero">
         <img src="/img/nomal.png" alt="AGOBOT" />
         <div>
@@ -93,6 +88,6 @@ export default async function Home() {
           src="/video/intro.mp4"
         />
       </section>
-    </div>
+    </>
   );
 }
