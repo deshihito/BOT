@@ -101,7 +101,7 @@ class CreativeRotationTest(unittest.TestCase):
     def test_house_creatives_have_url_and_text(self):
         urls = {c.url for c in ads.CREATIVES}
         self.assertIn("https://oneprompter.agobot.app", urls)
-        self.assertIn("https://discord.gg/dCAQzJUaa9", urls)
+        self.assertIn("https://agobot.app/dashboard/ads", urls)
         self.assertIn("https://agobot.app", urls)
         for creative in ads.CREATIVES:
             self.assertTrue(creative.text)
