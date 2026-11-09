@@ -8,6 +8,22 @@ export function generateStaticParams() {
   );
 }
 
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<{ command: string; genre: string }>;
+}) {
+  const { command, genre } = await params;
+  const commandGuide = getCommandGuide(command);
+  const genreGuide = getGenreGuide(command, genre);
+  if (!commandGuide || !genreGuide) return {};
+  return {
+    title: `${genreGuide.title} | ${commandGuide.command}`,
+    description: genreGuide.description,
+    alternates: { canonical: `/commands/${commandGuide.slug}/${genreGuide.slug}` },
+  };
+}
+
 export default async function GenrePage({
   params,
 }: {
