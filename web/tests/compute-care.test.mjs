@@ -14,41 +14,41 @@ const { careSettings, CARE_LEVELS } = care;
 
 test("使用率は最大でも75%で、100%の設定は存在しない", () => {
   assert.deepEqual(CARE_LEVELS.map((l) => l.usagePercent), [25, 50, 75]);
-  for (const level of ["high", "medium", "low"]) {
+  for (const level of ["light", "medium", "heavy"]) {
     assert.ok(careSettings(level, 8).usagePercent < 100);
   }
 });
 
 test("8コアでのワーカー数と休止・GPU設定", () => {
-  assert.equal(careSettings("high", 8).workerCount, 2);
+  assert.equal(careSettings("light", 8).workerCount, 2);
   assert.equal(careSettings("medium", 8).workerCount, 4);
-  assert.equal(careSettings("low", 8).workerCount, 6);
-  assert.equal(careSettings("high", 8).restMs, 600);
+  assert.equal(careSettings("heavy", 8).workerCount, 6);
+  assert.equal(careSettings("light", 8).restMs, 600);
   assert.equal(careSettings("medium", 8).restMs, 300);
-  assert.equal(careSettings("low", 8).restMs, 150);
-  assert.equal(careSettings("high", 8).gpuTargetSubs, 4096);
+  assert.equal(careSettings("heavy", 8).restMs, 150);
+  assert.equal(careSettings("light", 8).gpuTargetSubs, 4096);
   assert.equal(careSettings("medium", 8).gpuTargetSubs, 16384);
-  assert.equal(careSettings("low", 8).gpuTargetSubs, 32768);
+  assert.equal(careSettings("heavy", 8).gpuTargetSubs, 32768);
 });
 
 test("どのコア数でも全コアは使わない（最低1コア空ける）", () => {
   for (let cores = 1; cores <= 32; cores++) {
-    for (const level of ["high", "medium", "low"]) {
+    for (const level of ["light", "medium", "heavy"]) {
       const s = careSettings(level, cores);
       assert.ok(s.workerCount >= 1, `${level}/${cores}`);
       if (cores > 1) assert.ok(s.workerCount <= cores - 1, `${level}/${cores}: ${s.workerCount}`);
       if (cores >= 4) assert.ok(s.workerCount / cores <= 0.75, `${level}/${cores}`);
     }
   }
-  assert.equal(careSettings("low", 2).workerCount, 1);
-  assert.equal(careSettings("low", 1).workerCount, 1);
+  assert.equal(careSettings("heavy", 2).workerCount, 1);
+  assert.equal(careSettings("heavy", 1).workerCount, 1);
 });
 
-test("配慮を弱めるほどワーカーは増え、休止は短くなる", () => {
+test("使用量を増やすほどワーカーは増え、休止は短くなる", () => {
   for (const cores of [2, 4, 8, 16]) {
-    const h = careSettings("high", cores);
+    const h = careSettings("light", cores);
     const m = careSettings("medium", cores);
-    const l = careSettings("low", cores);
+    const l = careSettings("heavy", cores);
     assert.ok(h.workerCount <= m.workerCount && m.workerCount <= l.workerCount);
     assert.ok(h.restMs > m.restMs && m.restMs > l.restMs);
     assert.ok(h.gpuTargetSubs < m.gpuTargetSubs && m.gpuTargetSubs < l.gpuTargetSubs);
