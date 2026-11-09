@@ -8,17 +8,23 @@ import {
   COMPUTE_CATALOG,
   COMPUTE_CATALOG_TOTAL_NODES,
   COMPUTE_CATALOG_TOTAL_TASKS,
+  COMPUTE_SUITE_ID,
   findComputeTask,
 } from "./compute-catalog";
 import {
+  COMPUTE_POOL_HISTORY_KEY,
   COMPUTE_POOL_NAMESPACE,
   COMPUTE_POOL_STATE_KEY,
+  appendSuiteHistory,
   isRateLimited,
   leaseNextTask,
+  migratePoolState,
   parsePoolState,
+  parseSuiteHistory,
   poolProgress,
   sanitizePoolState,
   submitVerifiedResult,
+  type ArchivedSuiteRecord,
   type ComputePoolState,
   type PoolProgress,
   type SubmitOutcome,
@@ -50,7 +56,27 @@ function withLock<T>(fn: () => Promise<T>): Promise<T> {
 
 async function loadState(): Promise<ComputePoolState> {
   const raw = await kvGet(COMPUTE_POOL_NAMESPACE, COMPUTE_POOL_STATE_KEY);
-  return sanitizePoolState(parsePoolState(raw), COMPUTE_CATALOG);
+  const parsed = parsePoolState(raw);
+  if (parsed.suite !== COMPUTE_SUITE_ID) {
+    // 世代の異なる状態: 旧スイートの実績を history へ退避（冪等）してから
+    // 現行スイートの空状態で初期化する。history を先に書くので、途中で
+    // 失敗しても次回の読み込みで退避が重複することはない。
+    const { state: fresh, archive } = migratePoolState(parsed, COMPUTE_SUITE_ID, Date.now());
+    if (archive) {
+      const history = appendSuiteHistory(
+        parseSuiteHistory(await kvGet(COMPUTE_POOL_NAMESPACE, COMPUTE_POOL_HISTORY_KEY)),
+        archive,
+      );
+      await kvSet(COMPUTE_POOL_NAMESPACE, COMPUTE_POOL_HISTORY_KEY, history);
+    }
+    await saveState(fresh);
+    return fresh;
+  }
+  return sanitizePoolState(parsed, COMPUTE_CATALOG);
+}
+
+async function loadHistory(): Promise<ArchivedSuiteRecord[]> {
+  return parseSuiteHistory(await kvGet(COMPUTE_POOL_NAMESPACE, COMPUTE_POOL_HISTORY_KEY));
 }
 
 async function saveState(state: ComputePoolState): Promise<void> {
@@ -69,6 +95,20 @@ export function isComputeConfigured(): boolean {
 export async function getComputeProgress(): Promise<PoolProgress> {
   const state = await withLock(loadState);
   return currentProgress(state);
+}
+
+export type ComputeStatus = {
+  progress: PoolProgress;
+  /** 退避された過去スイートの実績（古い順）。 */
+  history: ArchivedSuiteRecord[];
+};
+
+/** 全体の進捗と過去スイートの実績（読み取りのみ）。 */
+export async function getComputeStatus(): Promise<ComputeStatus> {
+  return withLock(async () => {
+    const state = await loadState();
+    return { progress: currentProgress(state), history: await loadHistory() };
+  });
 }
 
 /** タスクを1つ貸し出す。貸し出せるタスクが無ければ null（カタログ完了）。 */

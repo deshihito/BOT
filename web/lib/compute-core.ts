@@ -1,11 +1,24 @@
 // クライアント分散コンピューティングのプール管理ロジック（純粋関数）。
-// 状態は Bot API 経由で bot_kv の compute_pool 名前空間に1レコードで保持する。
+// 状態は Bot API 経由で bot_kv の compute_pool 名前空間に保持する。
 // サーバー（Pi）側は配布・照合・集計だけを行い、計算そのものはしない。
+//
+// 状態は「スイート」（タスクカタログの世代）単位で管理する。現行スイートと
+// 世代の異なる状態を読んだら、旧スイートの実績を history へ退避してから
+// 現行スイートの空状態に切り替える（migratePoolState、冪等）。
 import type { ComputeTaskDef } from "./compute-catalog";
 
 /** プール状態を置く bot_kv の名前空間とキー。 */
 export const COMPUTE_POOL_NAMESPACE = "compute_pool";
 export const COMPUTE_POOL_STATE_KEY = "state";
+export const COMPUTE_POOL_HISTORY_KEY = "history";
+
+/** スイート識別子を持たない旧形式の状態が属する世代。 */
+export const LEGACY_SUITE_ID = "v1";
+
+/** 過去スイートの既知の規模（アーカイブ表示用）。未知の世代は null になる。 */
+export const KNOWN_SUITE_TOTALS: Readonly<Record<string, { totalTasks: number; targetNodes: number }>> = {
+  v1: { totalTasks: 613, targetNodes: 41812668 },
+};
 
 /** リースの有効期限。これを過ぎたタスクは未完了として再配布される。 */
 export const LEASE_TTL_MS = 3 * 60 * 1000;
@@ -13,14 +26,31 @@ export const LEASE_TTL_MS = 3 * 60 * 1000;
 export type LeaseInfo = { exp: number; token: string };
 
 export type ComputePoolState = {
-  version: 1;
+  version: 2;
+  /** この状態が属するスイート識別子。 */
+  suite: string;
   /** 検証を通過して完了したタスク: taskId -> 計算ノード数 */
   done: Record<string, number>;
   /** 配布中（リース中）のタスク: taskId -> リース情報 */
   leases: Record<string, LeaseInfo>;
 };
 
+/** 退避された過去スイートの実績。 */
+export type ArchivedSuiteRecord = {
+  suite: string;
+  /** スイート全体のタスク数（既知の場合のみ） */
+  totalTasks: number | null;
+  completedTasks: number;
+  /** 検証済みの累計計算ノード数 */
+  totalNodes: number;
+  /** スイート全体のノード数（既知の場合のみ） */
+  targetNodes: number | null;
+  completed: boolean;
+  archivedAt: number;
+};
+
 export type PoolProgress = {
+  suite: string;
   totalTasks: number;
   completedTasks: number;
   /** 検証済みの累計計算ノード数 */
@@ -30,8 +60,8 @@ export type PoolProgress = {
   percent: number;
 };
 
-export function emptyPoolState(): ComputePoolState {
-  return { version: 1, done: {}, leases: {} };
+export function emptyPoolState(suiteId: string = LEGACY_SUITE_ID): ComputePoolState {
+  return { version: 2, suite: suiteId, done: {}, leases: {} };
 }
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
@@ -42,10 +72,18 @@ function cleanCount(value: unknown): number | null {
   return typeof value === "number" && Number.isSafeInteger(value) && value > 0 ? value : null;
 }
 
-/** bot_kv から読んだ生データを、壊れた項目を落として安全な形へ寄せる。 */
+function cleanNonNegative(value: unknown): number | null {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : null;
+}
+
+/**
+ * bot_kv から読んだ生データを、壊れた項目を落として安全な形へ寄せる。
+ * suite を持たない旧形式（version 1）は LEGACY_SUITE_ID の状態として扱う。
+ */
 export function parsePoolState(raw: unknown): ComputePoolState {
   const state = emptyPoolState();
   if (!isPlainObject(raw)) return state;
+  if (typeof raw.suite === "string" && raw.suite !== "") state.suite = raw.suite;
   if (isPlainObject(raw.done)) {
     for (const [taskId, nodes] of Object.entries(raw.done)) {
       const clean = cleanCount(nodes);
@@ -76,6 +114,83 @@ export function sanitizePoolState(
     if (!known.has(taskId) || taskId in state.done) delete state.leases[taskId];
   }
   return state;
+}
+
+/**
+ * 旧スイートの状態からアーカイブ記録を作る。
+ * 完了・リースとも空の状態（実績なし）は退避する意味がないので null。
+ */
+export function buildArchiveRecord(
+  state: ComputePoolState,
+  archivedAt: number,
+): ArchivedSuiteRecord | null {
+  const doneEntries = Object.values(state.done);
+  if (doneEntries.length === 0 && Object.keys(state.leases).length === 0) return null;
+  const known = KNOWN_SUITE_TOTALS[state.suite];
+  const completedTasks = doneEntries.length;
+  return {
+    suite: state.suite,
+    totalTasks: known ? known.totalTasks : null,
+    completedTasks,
+    totalNodes: doneEntries.reduce((sum, n) => sum + n, 0),
+    targetNodes: known ? known.targetNodes : null,
+    completed: known ? completedTasks >= known.totalTasks : false,
+    archivedAt,
+  };
+}
+
+/**
+ * 状態の世代を現行スイートへ移行する。
+ * 既に現行スイートなら状態をそのまま返し、アーカイブは作らない。
+ * 世代が異なれば旧実績のアーカイブと、現行スイートの空状態を返す。
+ */
+export function migratePoolState(
+  state: ComputePoolState,
+  currentSuiteId: string,
+  archivedAt: number,
+): { state: ComputePoolState; archive: ArchivedSuiteRecord | null } {
+  if (state.suite === currentSuiteId) return { state, archive: null };
+  return {
+    state: emptyPoolState(currentSuiteId),
+    archive: buildArchiveRecord(state, archivedAt),
+  };
+}
+
+/** history の生データを安全な形へ寄せる。同じスイートは最初の1件だけ残す。 */
+export function parseSuiteHistory(raw: unknown): ArchivedSuiteRecord[] {
+  if (!Array.isArray(raw)) return [];
+  const seen = new Set<string>();
+  const history: ArchivedSuiteRecord[] = [];
+  for (const entry of raw) {
+    if (!isPlainObject(entry)) continue;
+    const suite = typeof entry.suite === "string" && entry.suite !== "" ? entry.suite : null;
+    const completedTasks = cleanNonNegative(entry.completedTasks);
+    const totalNodes = cleanNonNegative(entry.totalNodes);
+    const archivedAt = typeof entry.archivedAt === "number" && Number.isFinite(entry.archivedAt) ? entry.archivedAt : null;
+    if (suite === null || completedTasks === null || totalNodes === null || archivedAt === null) continue;
+    if (seen.has(suite)) continue;
+    seen.add(suite);
+    history.push({
+      suite,
+      totalTasks: cleanNonNegative(entry.totalTasks),
+      completedTasks,
+      totalNodes,
+      targetNodes: cleanNonNegative(entry.targetNodes),
+      completed: entry.completed === true,
+      archivedAt,
+    });
+  }
+  return history;
+}
+
+/** アーカイブを history へ追加する。同じスイートが既にあれば何もしない（冪等）。 */
+export function appendSuiteHistory(
+  history: readonly ArchivedSuiteRecord[],
+  record: ArchivedSuiteRecord | null,
+): ArchivedSuiteRecord[] {
+  if (record === null) return [...history];
+  if (history.some((entry) => entry.suite === record.suite)) return [...history];
+  return [...history, record];
 }
 
 /**
@@ -132,7 +247,7 @@ export function poolProgress(
   const completedTasks = doneEntries.length;
   const totalNodes = doneEntries.reduce((sum, n) => sum + n, 0);
   const percent = totalTasks > 0 ? Math.floor((completedTasks / totalTasks) * 1000) / 10 : 0;
-  return { totalTasks, completedTasks, totalNodes, targetNodes, percent };
+  return { suite: state.suite, totalTasks, completedTasks, totalNodes, targetNodes, percent };
 }
 
 /** 結果 POST のボディ検証。余分な型・範囲外の値は受け付けない。 */

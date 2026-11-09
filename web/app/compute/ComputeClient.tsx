@@ -6,12 +6,38 @@
 import { useEffect, useRef, useState } from "react";
 
 type Progress = {
+  suite: string;
   totalTasks: number;
   completedTasks: number;
   totalNodes: number;
   targetNodes: number;
   percent: number;
 };
+
+type HistoryEntry = {
+  suite: string;
+  totalTasks: number | null;
+  completedTasks: number;
+  totalNodes: number;
+  targetNodes: number | null;
+  completed: boolean;
+  archivedAt: number;
+};
+
+function formatSuiteLabel(suite: string): string {
+  return /^v\d+$/.test(suite) ? `スイート${suite.slice(1)}` : suite;
+}
+
+function formatHistoryLine(entry: HistoryEntry): string {
+  const label = formatSuiteLabel(entry.suite);
+  if (entry.completed) {
+    return `${label}：${formatNumber(entry.completedTasks)}タスク／${formatNumber(entry.totalNodes)}ノード 完走`;
+  }
+  if (entry.totalTasks !== null) {
+    return `${label}：${formatNumber(entry.completedTasks)} / ${formatNumber(entry.totalTasks)}タスク・${formatNumber(entry.totalNodes)}ノードまで完了`;
+  }
+  return `${label}：${formatNumber(entry.completedTasks)}タスク・${formatNumber(entry.totalNodes)}ノードまで完了`;
+}
 
 type LeaseResponse =
   | { taskId: string; fen: string; depth: number; leaseToken: string; expiresAt: number; progress: Progress }
@@ -56,6 +82,7 @@ function formatNumber(n: number): string {
 
 export default function ComputeClient() {
   const [progress, setProgress] = useState<Progress | null>(null);
+  const [history, setHistory] = useState<HistoryEntry[]>([]);
   const [progressUnavailable, setProgressUnavailable] = useState(false);
   const [running, setRunning] = useState(false);
   const [tabHidden, setTabHidden] = useState(false);
@@ -82,8 +109,9 @@ export default function ComputeClient() {
     try {
       const res = await fetch("/api/compute/status");
       if (!res.ok) throw new Error(String(res.status));
-      const data = (await res.json()) as { progress: Progress };
+      const data = (await res.json()) as { progress: Progress; history?: HistoryEntry[] };
       setProgress(data.progress);
+      if (Array.isArray(data.history)) setHistory(data.history);
       setProgressUnavailable(false);
       if (data.progress.completedTasks >= data.progress.totalTasks && data.progress.totalTasks > 0) {
         setFinished(true);
@@ -247,6 +275,9 @@ export default function ComputeClient() {
       <p className="compute-status">{message}</p>
 
       <div>
+        {progress ? (
+          <p className="compute-status">現在のスイート：{formatSuiteLabel(progress.suite)}</p>
+        ) : null}
         <p className="compute-status">
           全体の進捗：
           {progress
@@ -265,6 +296,17 @@ export default function ComputeClient() {
           </p>
         ) : null}
       </div>
+
+      {history.length > 0 ? (
+        <div className="compute-history">
+          <p className="compute-history-title">これまでのスイートの実績</p>
+          <ul>
+            {history.map((entry) => (
+              <li key={entry.suite}>{formatHistoryLine(entry)}</li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
 
       <div className="compute-stats">
         <div className="compute-stat">

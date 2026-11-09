@@ -88,6 +88,10 @@ footer { padding:20px; border-top:1px solid var(--line); }
 .compute-stat span { display:block; color:var(--muted); font-size:12px; }
 .compute-stat strong { font-size:16px; }
 .compute-status { color:var(--muted); font-size:13px; }
+.compute-history { color:var(--muted); font-size:12px; }
+.compute-history-title { margin:0 0 4px; }
+.compute-history ul { margin:0; padding-left:18px; }
+.compute-history li { line-height:1.7; }
 .draft-note { padding:14px 16px; border:1px solid #e8d9a8; border-radius:10px; background:#fffaf0; }
 .card { display:block; margin:10px 0; padding:16px 18px; border:1px solid var(--line); border-radius:12px; background:var(--bg); color:var(--text); }
 a.card:hover { box-shadow:0 3px 12px rgba(0,0,0,.05); text-decoration:none; }

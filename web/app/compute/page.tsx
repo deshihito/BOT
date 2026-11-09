@@ -58,7 +58,8 @@ export default function ComputePage() {
       <ComputeClient />
 
       <p className="quiet-note">
-        進捗が 100% になった時点で、この検証スイートは完了です。ご協力ありがとうございます。
+        進捗が 100% になった時点で、このスイートは完了です。これまでのスイートの実績は
+        上のパネルに表示されます。ご協力ありがとうございます。
       </p>
     </div>
   );
