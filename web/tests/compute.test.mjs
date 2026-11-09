@@ -282,3 +282,49 @@ test("isRateLimited はウィンドウ内の件数で判定する", () => {
   assert.equal(core.isRateLimited([now - 1000, now - 2000, now - 3000], now, 3, 60_000), true);
   assert.equal(core.isRateLimited([now - 120_000], now, 1, 60_000), false);
 });
+
+test("leaseTaskBatch は最大件数までまとめて貸し出し、空きが無ければ止まる", () => {
+  const tasks = [
+    { id: "t1", suite: "s", fen: "f", depth: 1, expected: 10 },
+    { id: "t2", suite: "s", fen: "f", depth: 1, expected: 20 },
+    { id: "t3", suite: "s", fen: "f", depth: 1, expected: 30 },
+  ];
+  const state = core.emptyPoolState();
+  const batch = core.leaseTaskBatch(state, tasks, 1000, "token-batch-1", 2, 100);
+  assert.deepEqual(batch.map((b) => b.task.id), ["t1", "t2"]);
+  assert.equal(batch[0].expiresAt, 1100);
+  // 残り1件だけ貸せる
+  const rest = core.leaseTaskBatch(state, tasks, 1000, "token-batch-2", 16, 100);
+  assert.deepEqual(rest.map((b) => b.task.id), ["t3"]);
+  // すべてリース中なら空
+  assert.deepEqual(core.leaseTaskBatch(state, tasks, 1050, "token-batch-3", 16, 100), []);
+  // 上限を超える要求は MAX_LEASE_BATCH に丸める（状態は期限切れで再配布される）
+  const capped = core.leaseTaskBatch(state, tasks, 2000, "token-batch-4", 1000, 100);
+  assert.equal(capped.length, 3);
+});
+
+test("parseBatchResultBody は各要素を検証し、上限を超えたら落とす", () => {
+  const ok = core.parseBatchResultBody({
+    results: [
+      { taskId: "t1", nodes: 42, token: "12345678" },
+      { taskId: "t2", nodes: 7, token: "abcdefgh" },
+    ],
+  });
+  assert.equal(ok.length, 2);
+  assert.equal(core.parseBatchResultBody({ results: [] }), null);
+  assert.equal(core.parseBatchResultBody({ results: [{ taskId: "t1", nodes: -1, token: "12345678" }] }), null);
+  assert.equal(core.parseBatchResultBody({ taskId: "t1", nodes: 42, token: "12345678" }), null);
+  const tooMany = { results: Array.from({ length: 33 }, (_, i) => ({ taskId: `t${i}`, nodes: 1, token: "12345678" })) };
+  assert.equal(core.parseBatchResultBody(tooMany), null);
+});
+
+test("parseLeaseBatchCount は 2〜16 の整数だけを通す", () => {
+  assert.equal(core.parseLeaseBatchCount({ count: 8 }), 8);
+  assert.equal(core.parseLeaseBatchCount({ count: 16 }), 16);
+  assert.equal(core.parseLeaseBatchCount({ count: 1 }), null);
+  assert.equal(core.parseLeaseBatchCount({ count: 17 }), null);
+  assert.equal(core.parseLeaseBatchCount({ count: 2.5 }), null);
+  assert.equal(core.parseLeaseBatchCount({ count: "8" }), null);
+  assert.equal(core.parseLeaseBatchCount({}), null);
+  assert.equal(core.parseLeaseBatchCount(null), null);
+});

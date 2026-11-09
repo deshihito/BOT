@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
-import { parseResultBody } from "@/lib/compute-core";
-import { allowComputeRequest, computeClientKey, isComputeConfigured, submitComputeResult } from "@/lib/compute-store";
+import { parseBatchResultBody, parseResultBody } from "@/lib/compute-core";
+import { allowComputeRequest, computeClientKey, isComputeConfigured, submitComputeResult, submitComputeResults } from "@/lib/compute-store";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -21,6 +21,20 @@ export async function POST(request: Request) {
     body = await request.json();
   } catch {
     return NextResponse.json({ error: "リクエストの形式が正しくありません" }, { status: 400 });
+  }
+  // バッチ提出: { results: [...] } はまとめて照合する（読み書き1回）。
+  // 項目ごとの成否は results の status で返す。不正な項目が1つでもあれば全体を 400 にする。
+  const batch = parseBatchResultBody(body);
+  if (batch) {
+    try {
+      const { outcomes, progress } = await submitComputeResults(batch);
+      return NextResponse.json({
+        results: outcomes.map((o) => ({ taskId: o.taskId, status: o.outcome })),
+        progress,
+      });
+    } catch {
+      return NextResponse.json({ error: "結果を受け付けられませんでした" }, { status: 503 });
+    }
   }
   const parsed = parseResultBody(body);
   if (!parsed) {

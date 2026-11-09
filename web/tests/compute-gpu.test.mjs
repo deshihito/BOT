@@ -112,3 +112,18 @@ test("WGSL が予約語を識別子に使っていない", () => {
 test("Node 環境では WebGPU 非対応と判定される", () => {
   assert.equal(gpu.isWebGpuSupported(), false);
 });
+
+test("concatSubPositions はタスクごとの範囲を保って連結する", () => {
+  const a = gpu.splitForGpu("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1", 3, 64).subs;
+  const b = gpu.splitForGpu("8/2p5/3p4/KP5r/1R3p1k/8/4P1P1/8 w - - 0 1", 3, 64).subs;
+  const { subs, ranges } = gpu.concatSubPositions([a, [], b]);
+  assert.equal(subs.length, a.length + b.length);
+  assert.deepEqual(ranges, [
+    { start: 0, count: a.length },
+    { start: a.length, count: 0 },
+    { start: a.length, count: b.length },
+  ]);
+  // 連結後も各タスクの範囲は元の部分局面と一致する
+  for (let i = 0; i < a.length; i++) assert.equal(subs[ranges[0].start + i], a[i]);
+  for (let i = 0; i < b.length; i++) assert.equal(subs[ranges[2].start + i], b[i]);
+});

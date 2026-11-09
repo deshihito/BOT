@@ -18,6 +18,7 @@ import {
   appendSuiteHistory,
   isRateLimited,
   leaseNextTask,
+  leaseTaskBatch,
   migratePoolState,
   parsePoolState,
   parseSuiteHistory,
@@ -132,6 +133,29 @@ export async function leaseComputeTask(): Promise<{ lease: LeasedTask; progress:
   });
 }
 
+/** タスクを最大 maxCount 件までまとめて貸し出す。状態の読み書きは1回だけ。 */
+export async function leaseComputeTaskBatch(
+  maxCount: number,
+): Promise<{ leases: LeasedTask[]; progress: PoolProgress } | null> {
+  return withLock(async () => {
+    const state = await loadState();
+    const token = randomUUID();
+    const leased = leaseTaskBatch(state, COMPUTE_CATALOG, Date.now(), token, maxCount);
+    if (leased.length === 0) return null;
+    await saveState(state);
+    return {
+      leases: leased.map((one) => ({
+        taskId: one.task.id,
+        fen: one.task.fen,
+        depth: one.task.depth,
+        leaseToken: token,
+        expiresAt: one.expiresAt,
+      })),
+      progress: currentProgress(state),
+    };
+  });
+}
+
 /** 結果を受け付け、正解値と照合してから集計に加える。 */
 export async function submitComputeResult(
   taskId: string,
@@ -145,6 +169,25 @@ export async function submitComputeResult(
     const outcome = submitVerifiedResult(state, task, nodes, token);
     if (outcome === "accepted" || outcome === "mismatch") await saveState(state);
     return { outcome, progress: currentProgress(state) };
+  });
+}
+
+/** 結果をまとめて受け付ける。状態の読み書きは1回だけ。項目ごとに結果を返す。 */
+export async function submitComputeResults(
+  items: readonly { taskId: string; nodes: number; token: string }[],
+): Promise<{ outcomes: { taskId: string; outcome: SubmitOutcome | "unknown_task" }[]; progress: PoolProgress }> {
+  return withLock(async () => {
+    const state = await loadState();
+    let changed = false;
+    const outcomes = items.map((item) => {
+      const task = findComputeTask(item.taskId);
+      if (!task) return { taskId: item.taskId, outcome: "unknown_task" as const };
+      const outcome = submitVerifiedResult(state, task, item.nodes, item.token);
+      if (outcome === "accepted" || outcome === "mismatch") changed = true;
+      return { taskId: item.taskId, outcome };
+    });
+    if (changed) await saveState(state);
+    return { outcomes, progress: currentProgress(state) };
   });
 }
 
