@@ -249,6 +249,16 @@ body:has([data-activity-root]) > main { max-width:none; min-height:100svh; margi
   .home-hero img, .home-hero h1,
   .home-hero-actions, .home-live-stats, .home-command-link { animation:none; }
 }
+.home-features { margin-top:44px; }
+.home-features h2 { font-size:20px; margin:0 0 10px; }
+.home-features-lead { color:var(--muted); line-height:1.7; margin:0 0 6px; }
+.home-feature { border-top:1px solid var(--line); padding:20px 0 8px; margin-top:14px; }
+.home-feature h3 { display:flex; align-items:baseline; flex-wrap:wrap; gap:10px; font-size:17px; margin:0 0 8px; }
+.home-feature-count { color:var(--muted); font-size:13px; font-weight:400; }
+.home-feature p { line-height:1.7; margin:0 0 10px; }
+.home-genres { list-style:none; margin:0 0 12px; padding:0; display:grid; gap:10px; }
+.home-genres li { line-height:1.65; }
+.home-genre-functions { color:var(--muted); font-size:13.5px; }
 .home-video { margin-top:44px; animation:home-fade-up .6s ease 1.45s both; }
 .home-video h2 { font-size:17px; margin:0 0 12px; }
 .home-video video { display:block; width:100%; height:auto; border:1px solid var(--line); border-radius:12px; background:#fff; }
