@@ -9,12 +9,16 @@
 
 抽選自体も (ギルド, ユーザー, 日付) のシードで決定的に行うため、
 万一保存に失敗しても同日内は同じ結果が再現される。
+
+例外：UNLIMITED_USER_IDS のユーザー（ユーザー本人）は回数制限の
+対象外で、保存も固定もせず毎回新規に抽選する。
 """
 from __future__ import annotations
 
 import json
 import logging
 import os
+import random
 import threading
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -30,6 +34,15 @@ logger = logging.getLogger(__name__)
 JST = timezone(timedelta(hours=9))
 
 _DEFAULT_PATH = data_paths.data_path("omikuji.json")
+
+#: 回数制限（1日1回）の対象外ユーザー（ユーザー本人）。
+#: このユーザーは毎回新規に抽選し、その日の固定結果には縛られない。
+UNLIMITED_USER_IDS = frozenset({1320705325686587408})
+
+
+def is_unlimited_user(user_id: int) -> bool:
+    """回数制限の対象外ユーザーかどうか。"""
+    return user_id in UNLIMITED_USER_IDS
 
 
 def jst_day(now: datetime | None = None) -> str:
@@ -79,6 +92,9 @@ class OmikujiStore:
         そのまま返すため、再表示でも画像内容は変わらない。
         """
         day = day or jst_day()
+        if is_unlimited_user(user_id):
+            # 回数制限の対象外：結果は保存せず、毎回まっさらから抽選する。
+            return draw_fortune(random.Random()), True
         key = self._key(guild_id, user_id)
         with self._lock:
             entry = self._entries.get(key)

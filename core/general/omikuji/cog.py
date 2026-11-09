@@ -6,7 +6,9 @@
   Bot・Webhook・DM は対象外（常駐しりとり/今北産業と同じ作法）。
 - パネル：/general の dispatch から呼ばれ、言語設定に関係なく引ける。
 - 結果は1日1回（ユーザー×ギルド、JST日次）で固定。再表示には短い
-  クールダウンを付け、連投による再投稿を抑える。
+  クールダウンを付け、連投による再投稿を抑える。ただし回数制限の
+  対象外ユーザー（store.UNLIMITED_USER_IDS）は毎回新規抽選で、
+  クールダウンも適用しない。
 - 投稿は公開（ephemeral 既定公開ポリシー通り）。経済には接続しない。
 """
 from __future__ import annotations
@@ -22,7 +24,7 @@ from discord.ext import commands
 from core.support.localization.localization import guild_locale
 
 from .render import render_omikuji_png
-from .store import OmikujiStore
+from .store import OmikujiStore, is_unlimited_user
 
 logger = logging.getLogger("cogs.omikuji")
 
@@ -76,10 +78,13 @@ class OmikujiCog(commands.Cog):
         lock = self._locks.setdefault(key, asyncio.Lock())
         if lock.locked():
             return
+        # 回数制限の対象外ユーザーはクールダウンも対象外（毎回新規抽選）。
+        unlimited = is_unlimited_user(author.id)
         async with lock:
-            if self._cooldown_left(*key) > 0:
+            if not unlimited and self._cooldown_left(*key) > 0:
                 return
-            self._last_posted[key] = self.clock()
+            if not unlimited:
+                self._last_posted[key] = self.clock()
             try:
                 file = await self._build_file(*key)
             except ImportError:
@@ -108,12 +113,15 @@ class OmikujiCog(commands.Cog):
         if lock.locked():
             return await interaction.response.send_message(
                 "今日のおみくじを表示しています。", ephemeral=True)
+        # 回数制限の対象外ユーザーはクールダウンも対象外（毎回新規抽選）。
+        unlimited = is_unlimited_user(user.id)
         async with lock:
-            if self._cooldown_left(*key) > 0:
+            if not unlimited and self._cooldown_left(*key) > 0:
                 return await interaction.response.send_message(
                     "今日のおみくじは表示済みです（結果は一日同じです）。",
                     ephemeral=True)
-            self._last_posted[key] = self.clock()
+            if not unlimited:
+                self._last_posted[key] = self.clock()
             try:
                 file = await self._build_file(*key)
             except ImportError:

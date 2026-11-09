@@ -145,6 +145,53 @@ class DailyFixTest(unittest.TestCase):
         self.assertEqual(first, second)
 
 
+class UnlimitedUserTest(unittest.TestCase):
+    """回数制限の対象外ユーザー（ユーザー本人）の例外仕様。"""
+
+    EXEMPT_ID = 1320705325686587408
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.path = os.path.join(self._tmp.name, "omikuji.json")
+        self.store = OmikujiStore(path=self.path)
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def test_exempt_id_is_registered(self):
+        from core.general.omikuji.store import UNLIMITED_USER_IDS, is_unlimited_user
+
+        self.assertIn(self.EXEMPT_ID, UNLIMITED_USER_IDS)
+        self.assertTrue(is_unlimited_user(self.EXEMPT_ID))
+        self.assertFalse(is_unlimited_user(222))
+
+    def test_exempt_user_is_never_fixed_within_a_day(self):
+        for _ in range(3):
+            _fortune, created = self.store.get_or_draw(
+                111, self.EXEMPT_ID, "2026-11-09")
+            self.assertTrue(created)
+        # 保存もされない（再読込したストアでも固定結果にならない）
+        reloaded = OmikujiStore(path=self.path)
+        _fortune, created = reloaded.get_or_draw(
+            111, self.EXEMPT_ID, "2026-11-09")
+        self.assertTrue(created)
+
+    def test_exempt_draws_vary(self):
+        results = set()
+        for _ in range(30):
+            fortune, _created = self.store.get_or_draw(
+                111, self.EXEMPT_ID, "2026-11-09")
+            results.add((fortune.rank, fortune.number))
+        self.assertGreater(len(results), 1)
+
+    def test_normal_user_stays_fixed_in_same_store(self):
+        first, created1 = self.store.get_or_draw(111, 222, "2026-11-09")
+        second, created2 = self.store.get_or_draw(111, 222, "2026-11-09")
+        self.assertTrue(created1)
+        self.assertFalse(created2)
+        self.assertEqual(first, second)
+
+
 class RenderTest(unittest.TestCase):
     def test_kanji_numbers(self):
         cases = {1: "一", 7: "七", 10: "十", 11: "十一", 20: "二十",
@@ -167,6 +214,24 @@ class RenderTest(unittest.TestCase):
                 img = Image.open(io.BytesIO(data))
                 self.assertEqual(img.format, "PNG")
                 self.assertEqual(img.size, (R.CANVAS_W, R.CANVAS_H))
+
+    def test_longest_items_do_not_reach_footer(self):
+        # 最長文面（15字）の列末尾がフッター「AGO」の帯（左下）に
+        # 墨色で侵入していないこと（干渉の回帰防止）。
+        pools = F.ITEM_FORTUNES["大凶"]
+        fortune = F.Fortune(
+            number=23, rank="大凶", waka=F.WAKA["大凶"][0],
+            summary=F.SUMMARIES["大凶"][0],
+            items=tuple((name, max(pools[name], key=len)) for name in F.ITEMS),
+        )
+        img = Image.open(io.BytesIO(R.render_omikuji_png(fortune))).convert("RGB")
+
+        def is_ink(px):
+            return abs(px[0] - 43) < 25 and abs(px[1] - 39) < 25 and abs(px[2] - 34) < 25
+
+        invaded = [(x, y) for y in range(1898, 1932) for x in range(50, 130)
+                   if is_ink(img.getpixel((x, y)))]
+        self.assertEqual(invaded, [])
 
 
 def _fake_message(*, guild_id=111, user_id=222, content="おみくじ引きたい",
@@ -237,6 +302,12 @@ class TriggerTest(unittest.IsolatedAsyncioTestCase):
         await self._dispatch(message)
         self.assertEqual(replies, [])
 
+    async def test_exempt_user_can_trigger_repeatedly(self):
+        message, replies = _fake_message(user_id=1320705325686587408)
+        await self._dispatch(message)
+        await self._dispatch(message)
+        self.assertEqual(len(replies), 2)
+
     async def test_cooldown_blocks_repeat_and_same_image_after(self):
         message, replies = _fake_message()
         await self._dispatch(message)
@@ -281,6 +352,37 @@ class PanelTest(unittest.IsolatedAsyncioTestCase):
         await cog.open_panel(interaction)
         self.assertEqual(len(sent), 2)
         self.assertTrue(sent[1].get("ephemeral"))
+
+    async def test_exempt_user_panel_is_not_cooldowned(self):
+        from core.general.omikuji.cog import OmikujiCog
+
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        cog = OmikujiCog(
+            bot=types.SimpleNamespace(),
+            store=OmikujiStore(path=os.path.join(tmp.name, "omikuji.json")),
+            clock=lambda: 1000.0,
+        )
+        sent = []
+
+        class _Response:
+            async def send_message(self, *args, **kwargs):
+                if args:
+                    kwargs["content"] = args[0]
+                sent.append(kwargs)
+
+        interaction = types.SimpleNamespace(
+            guild_id=111,
+            user=types.SimpleNamespace(
+                id=1320705325686587408, display_name="本人"),
+            response=_Response(),
+        )
+        await cog.open_panel(interaction)
+        await cog.open_panel(interaction)
+        self.assertEqual(len(sent), 2)
+        self.assertIn("file", sent[0])
+        self.assertIn("file", sent[1])
+        self.assertFalse(sent[1].get("ephemeral"))
 
 
 class RegistryTest(unittest.TestCase):
