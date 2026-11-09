@@ -2,7 +2,7 @@ import { VOICEVOX_CHARACTERS, VOICEVOX_CREDITS_AS_OF } from "@/lib/voicevox-cred
 import { FONT_CREDITS, FONT_LICENSES_URL } from "@/lib/font-credits";
 
 export const metadata = {
-  title: "クレジット | AGOBOT",
+  title: "クレジット",
   description: "AGOBOTの読み上げ機能で使用しているVOICEVOXのキャラクターと、使用フォントのクレジット一覧です。",
   alternates: { canonical: "/credits" },
 };

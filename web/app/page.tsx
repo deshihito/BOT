@@ -31,10 +31,31 @@ async function loadLiveStats(): Promise<LiveStats | null> {
   }
 }
 
+const HOME_JSON_LD = {
+  "@context": "https://schema.org",
+  "@type": "SoftwareApplication",
+  name: "AGOBOT",
+  applicationCategory: "CommunicationApplication",
+  operatingSystem: "Discord",
+  inLanguage: "ja",
+  description:
+    "ゲーム47種・音楽とVC・コイン経済・サーバー運営・AIまで、243の機能を6つのスラッシュコマンドに集約した多機能Discordボット。",
+  offers: { "@type": "Offer", price: "0", priceCurrency: "JPY" },
+};
+
 export default async function Home() {
   const stats = await loadLiveStats();
   return (
     <div className="home-bg">
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(HOME_JSON_LD) }}
+      />
+      <div className="home-drift" aria-hidden="true">
+        <span className="drift-a" />
+        <span className="drift-b" />
+        <span className="drift-c" />
+      </div>
       <section className="home-hero">
         <img src="/img/nomal.png" alt="AGOBOT" />
         <div>

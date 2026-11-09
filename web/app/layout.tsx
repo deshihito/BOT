@@ -14,8 +14,12 @@ const SITE_DESCRIPTION =
 
 export const metadata: Metadata = {
   metadataBase: new URL(SITE_URL),
-  title: SITE_TITLE,
+  title: { default: SITE_TITLE, template: "%s | AGOBOT" },
   description: SITE_DESCRIPTION,
+  keywords: [
+    "Discord", "Discordボット", "多機能ボット", "AGOBOT",
+    "ゲームボット", "人狼", "音楽ボット", "VC", "AI",
+  ],
   openGraph: {
     type: "website",
     locale: "ja_JP",
@@ -23,13 +27,13 @@ export const metadata: Metadata = {
     siteName: "AGOBOT",
     title: SITE_TITLE,
     description: SITE_DESCRIPTION,
-    images: ["/img/nomal.png"],
+    images: [{ url: "/img/ogp.png", width: 1200, height: 630, alt: "AGOBOT" }],
   },
   twitter: {
-    card: "summary",
+    card: "summary_large_image",
     title: SITE_TITLE,
     description: SITE_DESCRIPTION,
-    images: ["/img/nomal.png"],
+    images: ["/img/ogp.png"],
   },
   icons: { icon: "/img/nomal.png" },
 };

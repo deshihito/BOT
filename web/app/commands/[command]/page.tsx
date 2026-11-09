@@ -6,6 +6,16 @@ export function generateStaticParams() {
   return COMMAND_GUIDES.map((guide) => ({ command: guide.slug }));
 }
 
+export async function generateMetadata({ params }: { params: Promise<{ command: string }> }) {
+  const guide = getCommandGuide((await params).command);
+  if (!guide) return {};
+  return {
+    title: `${guide.command} ${guide.title}`,
+    description: guide.description,
+    alternates: { canonical: `/commands/${guide.slug}` },
+  };
+}
+
 export default async function CommandPage({ params }: { params: Promise<{ command: string }> }) {
   const { command } = await params;
   const guide = getCommandGuide(command);

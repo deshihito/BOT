@@ -1,6 +1,7 @@
 import type { MetadataRoute } from "next";
 import { SITE_URL } from "@/lib/site";
 import { JINROU_ROLES } from "@/lib/jinrou-roles";
+import { COMMAND_GUIDES } from "@/lib/command-guides";
 
 export default function sitemap(): MetadataRoute.Sitemap {
   const now = new Date();
@@ -21,5 +22,19 @@ export default function sitemap(): MetadataRoute.Sitemap {
     changeFrequency: "monthly",
     priority: 0.5,
   }));
-  return [...staticEntries, ...roleEntries];
+  const commandEntries: MetadataRoute.Sitemap = COMMAND_GUIDES.map((guide) => ({
+    url: `${SITE_URL}/commands/${guide.slug}`,
+    lastModified: now,
+    changeFrequency: "monthly",
+    priority: 0.7,
+  }));
+  const genreEntries: MetadataRoute.Sitemap = COMMAND_GUIDES.flatMap((guide) =>
+    guide.genres.map((genre) => ({
+      url: `${SITE_URL}/commands/${guide.slug}/${genre.slug}`,
+      lastModified: now,
+      changeFrequency: "monthly" as const,
+      priority: 0.6,
+    })),
+  );
+  return [...staticEntries, ...roleEntries, ...commandEntries, ...genreEntries];
 }

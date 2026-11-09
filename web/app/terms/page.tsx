@@ -1,4 +1,8 @@
-export const metadata = { title: "利用規約 | AGOBOT サポート", alternates: { canonical: "/terms" } };
+export const metadata = {
+  title: "利用規約",
+  description: "AGOBOTの利用規約です。ご利用の前にご確認ください。",
+  alternates: { canonical: "/terms" },
+};
 
 export default function TermsPage() {
   return (

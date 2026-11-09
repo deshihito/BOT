@@ -1,4 +1,8 @@
-export const metadata = { title: "プライバシーポリシー | AGOBOT サポート", alternates: { canonical: "/privacy" } };
+export const metadata = {
+  title: "プライバシーポリシー",
+  description: "AGOBOTのプライバシーポリシー。取得する情報とその利用目的について説明します。",
+  alternates: { canonical: "/privacy" },
+};
 
 export default function PrivacyPage() {
   return (

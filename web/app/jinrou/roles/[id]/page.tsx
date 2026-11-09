@@ -16,7 +16,12 @@ function findRole(id: string) {
 
 export async function generateMetadata({ params }: { params: Promise<{ id: string }> }) {
   const role = findRole((await params).id);
-  return { title: role ? `${role.name} | 人狼 役職図鑑 | AGOBOT` : "人狼 役職図鑑 | AGOBOT" };
+  if (!role) return { title: "人狼 役職図鑑" };
+  return {
+    title: `${role.name} | 人狼 役職図鑑`,
+    description: `${role.name}（${role.teamLabel}）：${role.ability}`,
+    alternates: { canonical: `/jinrou/roles/${encodeURIComponent(role.id)}` },
+  };
 }
 
 export default async function JinrouRolePage({ params }: { params: Promise<{ id: string }> }) {

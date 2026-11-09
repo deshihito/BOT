@@ -11,7 +11,7 @@ import {
 import { InviteCtaBlock } from "../InviteCta";
 
 export const metadata = {
-  title: "サービスステータス | AGOBOT",
+  title: "サービスステータス",
   description: "AGOBOTの稼働状況（導入サーバー数・メンバー数・応答速度・稼働時間）を表示します。",
   alternates: { canonical: "/status" },
 };
