@@ -28,6 +28,8 @@ export type CommandGuide = {
   title: string;
   summary: string;
   description: string;
+  /** ホームページの機能紹介で使う、そのコマンドの紹介文。 */
+  intro: string;
   guildOnly?: boolean;
   genres: GenreGuide[];
 };
@@ -71,6 +73,7 @@ type RootMeta = {
   title: string;
   summary: string;
   description: string;
+  intro: string;
   guildOnly?: boolean;
 };
 
@@ -81,24 +84,28 @@ const ROOT_META: RootMeta[] = [
     title: "ゲーム",
     summary: "遊ぶゲームを選び、ルール確認と募集を始めます。",
     description: "ゲームを選ぶと、ルールを確認してこのチャンネルで参加者を募ります。",
+    intro: "人狼・ワードウルフ・UNO・大富豪など、みんなで遊べるゲームの入口です。ゲームを選ぶとルール確認と参加者募集がその場で始まり、ボタンで参加できます。今月のゲーム王を競う要素もあります。",
   },
   {
     slug: "general",
     title: "一般機能",
     summary: "マネー、fujo status、AIや画像作成まで、日常的に使う機能をまとめて操作します。",
     description: "目的のジャンルを選ぶだけで、日常的に使う機能を呼び出せる操作パネルです。",
+    intro: "コイン経済（AGO）を中心に、日常的に使う機能をまとめた操作パネルです。残高確認や送金、市場・工房・採掘・宝くじなどのマネー機能のほか、EXPとレベル、各種ランキング、栽培シミュレーション、占い、AIチャットや画像作成（MIQなど）まで、ここから呼び出せます。",
   },
   {
     slug: "vc",
     title: "VC・音楽",
     summary: "ボイスチャンネルへの接続、音楽、録音、通話を操作します。",
     description: "ボイスチャンネルで使う機能を、目的別のジャンルから選ぶ操作パネルです。",
+    intro: "ボイスチャンネルで使う機能の操作パネルです。音楽再生（プレイリスト・立体音響・自動再生）、メッセージの読み上げ、録音・文字起こし・カラオケ、ボイスチェンジャーややまびこ、ほかのサーバーとつながるランダム通話とグローバルVCルームまで、VCまわりの遊びをまとめています。",
   },
   {
     slug: "support",
     title: "サポート",
     summary: "サーバー運用、通知、イベントに関する機能を操作します。",
     description: "サーバー内で使う管理・サポート機能の操作パネルです。必要な権限があるユーザーだけが実行できます。",
+    intro: "サーバー運営のための管理・サポート機能です。ミュートやメッセージの一括削除、認証・ロールパネル、各種ログ、グローバルチャットの接続、bump系サービスの更新検知（boardNotify）やSNSの新着通知、即抜けRTAの計測設定などを扱います。実行に権限が要る機能が多く、サーバー内でのみ使えます。",
     guildOnly: true,
   },
   {
@@ -106,6 +113,7 @@ const ROOT_META: RootMeta[] = [
     title: "ヘルプ",
     summary: "カテゴリやコマンド名から、使い方とガイドを探します。",
     description: "迷ったときの入口です。カテゴリをたどるか、知りたいコマンドを直接指定します。",
+    intro: "使い方の入口です。カテゴリをたどって機能を探したり、コマンド名を指定して、その使い方とガイドだけを表示したりできます。迷ったら、まず /help を開いてください。",
   },
 ];
 
@@ -354,6 +362,7 @@ function buildCommandGuides(): CommandGuide[] {
       title: meta.title,
       summary: meta.summary,
       description: meta.description,
+      intro: meta.intro,
       ...(meta.guildOnly ? { guildOnly: true } : {}),
       genres: root.genres.map((genre) => ({
         slug: genre.key,
