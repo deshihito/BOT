@@ -225,28 +225,8 @@ body:has([data-activity-root]) > main { max-width:none; min-height:100svh; margi
   .side-item { white-space:nowrap; }
 }
 
-/* ホームの動き: ふわっと登場 (A) + 背景ドリフト (E) */
+/* ホームの動き: ふわっと登場 */
 @keyframes home-fade-up { from { opacity:0; transform:translateY(14px); } to { opacity:1; transform:translateY(0); } }
-@keyframes home-drift-a { 0%,100% { transform:translate(0,0); } 50% { transform:translate(56px,22px); } }
-@keyframes home-drift-b { 0%,100% { transform:translate(0,0); } 50% { transform:translate(-44px,-18px); } }
-/* 背景ドリフトは .home-bg 内の sticky レイヤー (.home-drift) に敷く。
-   レイヤーはビューポートの高さで貼り付くため、スクロールに少しついてくる。
-   色の丸は大きく・濃くし、移動量も増やして PC でも動きが分かるようにした。
-   横スクロールは body の overflow-x: clip で防止する。 */
-body { overflow-x:clip; }
-.home-bg { position:relative; isolation:isolate; }
-.home-drift { position:sticky; top:0; height:100vh; margin-bottom:-100vh; z-index:-1; pointer-events:none; }
-.home-drift span { position:absolute; border-radius:50%; filter:blur(36px); }
-.home-drift .drift-a { width:340px; height:340px; background:#b9e7d2; opacity:.9; top:-10px; right:-70px; animation:home-drift-a 11s ease-in-out infinite; }
-.home-drift .drift-b { width:260px; height:260px; background:#eee0b8; opacity:.95; top:48vh; left:-90px; animation:home-drift-b 13s ease-in-out infinite; }
-.home-drift .drift-c { width:280px; height:280px; background:#c2ead8; opacity:.8; top:64vh; right:-80px; animation:home-drift-a 16s ease-in-out infinite; }
-/* HDR ディスプレイでは白に近い淡色が階調圧縮で白へ潰れてしまうため、
-   HDR 環境では彩度を上げた広色域 (Display P3) の色に切り替える。 */
-@media (dynamic-range: high), (-webkit-dynamic-range: high) {
-  .home-drift .drift-a { background:color(display-p3 0.52 0.88 0.7); opacity:.95; }
-  .home-drift .drift-b { background:color(display-p3 0.96 0.84 0.5); opacity:1; }
-  .home-drift .drift-c { background:color(display-p3 0.58 0.9 0.75); opacity:.9; }
-}
 .home-hero img { animation:home-fade-up .7s cubic-bezier(.22,.8,.32,1) .05s both; }
 .home-hero h1 { animation:home-fade-up .7s cubic-bezier(.22,.8,.32,1) .18s both; }
 .home-hero-actions { animation:home-fade-up .7s cubic-bezier(.22,.8,.32,1) .32s both; }
@@ -262,7 +242,6 @@ body { overflow-x:clip; }
 .home-command-link:nth-child(8) { animation-delay:1.25s; }
 .home-command-link:nth-child(n+9) { animation-delay:1.35s; }
 @media (prefers-reduced-motion: reduce) {
-  .home-drift span,
   .home-hero img, .home-hero h1,
   .home-hero-actions, .home-live-stats, .home-command-link { animation:none; }
 }
