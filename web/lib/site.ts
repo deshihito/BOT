@@ -49,11 +49,34 @@ export type PublicRankingSnapshot = {
   updated_at: string;
   exp: RankingEntry[];
   coin: RankingEntry[];
-  /** bump RTA（全サーバー・速い順）。value は elapsed_ms。 */
+  /** bump RTA（全サーバー・速い順）。value は elapsed_ms。旧形式スナップショット用。 */
   bump: RankingEntry[];
-  /** up RTA（全サーバー・速い順）。value は elapsed_ms。 */
+  /** up RTA（全サーバー・速い順）。value は elapsed_ms。旧形式スナップショット用。 */
   up: RankingEntry[];
+  /** bump系RTA のボード一式（サービス別＋総合 × 最速/最遅）。 */
+  rta: Record<string, RtaBoardSet>;
 };
+
+/** RTA の記録エントリ。at は記録日時 (ISO)、service は記録したサービス。 */
+export type RtaEntry = RankingEntry & { at?: string; service?: string };
+
+export type RtaBoardSet = { fast: RtaEntry[]; slow: RtaEntry[] };
+
+/** bump系RTA のサービス一覧（キーと表示名）。all は全サービス総合。 */
+export const RTA_SERVICES: { key: string; label: string }[] = [
+  { key: "all", label: "総合" },
+  { key: "bump", label: "bump" },
+  { key: "up", label: "up" },
+  { key: "vote", label: "鯖ちゃんねる" },
+  { key: "takasumi", label: "TakasumiBOT" },
+  { key: "dicoall", label: "Dicoall" },
+  { key: "dcafe", label: "Discord Cafe" },
+  { key: "sharkbot", label: "SharkBot" },
+];
+
+export const RTA_SERVICE_LABELS: Record<string, string> = Object.fromEntries(
+  RTA_SERVICES.map((s) => [s.key, s.label]),
+);
 
 function cleanEntries(raw: unknown, withLevel: boolean): RankingEntry[] {
   if (!Array.isArray(raw)) return [];
@@ -74,17 +97,65 @@ function cleanEntries(raw: unknown, withLevel: boolean): RankingEntry[] {
   return entries;
 }
 
+function cleanRtaEntries(raw: unknown): RtaEntry[] {
+  if (!Array.isArray(raw)) return [];
+  const entries: RtaEntry[] = [];
+  for (const item of raw) {
+    if (typeof item !== "object" || item === null) continue;
+    const record = item as Record<string, unknown>;
+    if (typeof record.value !== "number" || !Number.isFinite(record.value)) continue;
+    const entry: RtaEntry = {
+      name: typeof record.name === "string" ? record.name : "",
+      value: Math.trunc(record.value),
+    };
+    if (typeof record.at === "string" && record.at !== "") entry.at = record.at;
+    if (typeof record.service === "string" && record.service !== "") {
+      entry.service = record.service;
+    }
+    entries.push(entry);
+  }
+  return entries;
+}
+
+function cleanRtaBoards(
+  raw: unknown,
+  legacy: { bump: RankingEntry[]; up: RankingEntry[] },
+): Record<string, RtaBoardSet> {
+  const source =
+    typeof raw === "object" && raw !== null && !Array.isArray(raw)
+      ? (raw as Record<string, unknown>)
+      : {};
+  const boards: Record<string, RtaBoardSet> = {};
+  for (const { key } of RTA_SERVICES) {
+    const board = source[key];
+    const set =
+      typeof board === "object" && board !== null
+        ? (board as Record<string, unknown>)
+        : {};
+    boards[key] = { fast: cleanRtaEntries(set.fast), slow: cleanRtaEntries(set.slow) };
+  }
+  // 旧形式スナップショット（rta キーなし）は bump / up の最速だけを寄せる
+  if (Object.keys(source).length === 0) {
+    boards.bump = { fast: legacy.bump.map((e) => ({ ...e })), slow: [] };
+    boards.up = { fast: legacy.up.map((e) => ({ ...e })), slow: [] };
+  }
+  return boards;
+}
+
 /** Bot が書いた生スナップショットを、表示に使える形へ検証して寄せる。 */
 export function parseRankingSnapshot(raw: unknown): PublicRankingSnapshot | null {
   if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return null;
   const record = raw as Record<string, unknown>;
   if (typeof record.updated_at !== "string" || record.updated_at === "") return null;
+  const bump = cleanEntries(record.bump, false);
+  const up = cleanEntries(record.up, false);
   return {
     updated_at: record.updated_at,
     exp: cleanEntries(record.exp, true),
     coin: cleanEntries(record.coin, false),
-    bump: cleanEntries(record.bump, false),
-    up: cleanEntries(record.up, false),
+    bump,
+    up,
+    rta: cleanRtaBoards(record.rta, { bump, up }),
   };
 }
 

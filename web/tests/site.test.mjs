@@ -44,6 +44,16 @@ test("parseRankingSnapshot は ID を含む余分な項目を落とし、数値�
     coin: [{ name: "b", value: 50 }],
     bump: [{ name: "c", value: 5300 }],
     up: [{ name: "d", value: 9870 }],
+    rta: {
+      all: { fast: [], slow: [] },
+      bump: { fast: [{ name: "c", value: 5300 }], slow: [] },
+      up: { fast: [{ name: "d", value: 9870 }], slow: [] },
+      vote: { fast: [], slow: [] },
+      takasumi: { fast: [], slow: [] },
+      dicoall: { fast: [], slow: [] },
+      dcafe: { fast: [], slow: [] },
+      sharkbot: { fast: [], slow: [] },
+    },
   });
   // RTA キーが無い旧スナップショットは空配列として読む
   const legacy = m.parseRankingSnapshot({
@@ -96,4 +106,40 @@ test("isBotStatusFresh は15分以内だけを新鮮とする", () => {
   const snapshot = { updated_at: "2026-11-08T03:00:00+00:00" };
   assert.equal(m.isBotStatusFresh(snapshot, new Date("2026-11-08T03:14:59+00:00")), true);
   assert.equal(m.isBotStatusFresh(snapshot, new Date("2026-11-08T03:15:01+00:00")), false);
+});
+
+test("parseRankingSnapshot は rta ボード（サービス別・総合×最速/最遅、日時・サービスつき）を読み取る", () => {
+  const snapshot = m.parseRankingSnapshot({
+    updated_at: "2026-11-09T00:00:00+00:00",
+    exp: [],
+    coin: [],
+    rta: {
+      bump: {
+        fast: [{ name: "a", value: 5300, at: "2026-11-08T05:00:00+00:00", service: "bump" }],
+        slow: [{ name: "b", value: 90000, at: null, service: "bump" }],
+      },
+      all: {
+        fast: [{ name: "a", value: 4000, at: "2026-11-07T05:00:00+00:00", service: "up" }],
+        slow: [],
+      },
+    },
+  });
+  assert.equal(snapshot.rta.bump.fast[0].at, "2026-11-08T05:00:00+00:00");
+  assert.equal(snapshot.rta.bump.slow[0].at, undefined);
+  assert.equal(snapshot.rta.all.fast[0].service, "up");
+  assert.deepEqual(snapshot.rta.vote, { fast: [], slow: [] });
+  assert.equal(m.RTA_SERVICE_LABELS.sharkbot, "SharkBot");
+});
+
+test("parseRankingSnapshot は旧形式（rta キーなし）を bump/up の最速ボードへ寄せる", () => {
+  const snapshot = m.parseRankingSnapshot({
+    updated_at: "2026-11-09T00:00:00+00:00",
+    exp: [],
+    coin: [],
+    bump: [{ name: "a", value: 5300 }],
+    up: [{ name: "b", value: 6100 }],
+  });
+  assert.equal(snapshot.rta.bump.fast[0].value, 5300);
+  assert.equal(snapshot.rta.up.fast[0].value, 6100);
+  assert.deepEqual(snapshot.rta.all, { fast: [], slow: [] });
 });

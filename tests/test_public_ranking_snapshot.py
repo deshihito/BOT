@@ -95,3 +95,106 @@ class BuildSnapshotTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+from core.support.public_ranking.snapshot import (
+    best_rta_rows, combine_rta_boards,
+)
+
+
+def event(user_id, elapsed_ms, completed_at):
+    return {"user_id": user_id, "elapsed_ms": elapsed_ms,
+            "completed_at": completed_at}
+
+
+class BestRtaRowsTest(unittest.TestCase):
+    def test_first_row_per_user_wins(self):
+        rows = [
+            event(111, 3000, "2026-12-01T10:00:00+00:00"),
+            event(222, 4500, "2026-12-02T10:00:00+00:00"),
+            event(111, 6000, "2026-12-03T10:00:00+00:00"),
+        ]
+        picked = best_rta_rows(rows)
+        self.assertEqual(
+            picked,
+            [
+                {"user_id": 111, "elapsed_ms": 3000,
+                 "completed_at": "2026-12-01T10:00:00+00:00"},
+                {"user_id": 222, "elapsed_ms": 4500,
+                 "completed_at": "2026-12-02T10:00:00+00:00"},
+            ],
+        )
+
+    def test_limit_and_bad_rows(self):
+        rows = [event(1000 + i, 100 + i, None) for i in range(5)]
+        rows.insert(0, {"user_id": "x", "elapsed_ms": 1, "completed_at": None})
+        picked = best_rta_rows(rows, limit=3)
+        self.assertEqual(len(picked), 3)
+        self.assertEqual(picked[0]["completed_at"], None)
+
+
+class CombineRtaBoardsTest(unittest.TestCase):
+    def test_fastest_across_services_with_service_and_date(self):
+        boards = {
+            "bump": [
+                {"user_id": 111, "elapsed_ms": 5000,
+                 "completed_at": "2026-12-01T10:00:00+00:00"},
+                {"user_id": 222, "elapsed_ms": 8000,
+                 "completed_at": "2026-12-02T10:00:00+00:00"},
+            ],
+            "up": [
+                {"user_id": 222, "elapsed_ms": 4000,
+                 "completed_at": "2026-12-05T10:00:00+00:00"},
+                {"user_id": 333, "elapsed_ms": 9000,
+                 "completed_at": "2026-12-06T10:00:00+00:00"},
+            ],
+        }
+        combined = combine_rta_boards(boards)
+        self.assertEqual(
+            [(r["user_id"], r["elapsed_ms"], r["service"]) for r in combined],
+            [(222, 4000, "up"), (111, 5000, "bump"), (333, 9000, "up")],
+        )
+        self.assertEqual(combined[0]["completed_at"],
+                         "2026-12-05T10:00:00+00:00")
+
+    def test_slowest_picks_max(self):
+        boards = {
+            "bump": [{"user_id": 111, "elapsed_ms": 5000, "completed_at": None}],
+            "up": [{"user_id": 111, "elapsed_ms": 7000, "completed_at": None}],
+        }
+        combined = combine_rta_boards(boards, slowest=True)
+        self.assertEqual(combined[0]["elapsed_ms"], 7000)
+        self.assertEqual(combined[0]["service"], "up")
+
+
+class BuildSnapshotRtaBoardsTest(unittest.TestCase):
+    def test_rta_shape_and_legacy_keys(self):
+        boards = {
+            "bump": {
+                "fast": [{"user_id": 111, "elapsed_ms": 5300,
+                          "completed_at": "2026-12-25T10:00:00+00:00"}],
+                "slow": [{"user_id": 222, "elapsed_ms": 90000,
+                          "completed_at": "2026-12-26T10:00:00+00:00"}],
+            },
+        }
+        names = {111: "アゴ太郎", 222: "ミリィ"}
+        snapshot = build_snapshot([], [], names, now=NOW, rta_boards=boards)
+        # 新形式: 日時・サービスつき
+        self.assertEqual(
+            snapshot["rta"]["bump"]["fast"],
+            [{"name": "アゴ太郎", "value": 5300,
+              "at": "2026-12-25T10:00:00+00:00", "service": "bump"}],
+        )
+        self.assertEqual(snapshot["rta"]["bump"]["slow"][0]["value"], 90000)
+        # 総合ボードにも同じ記録がサービスつきで載る
+        self.assertEqual(snapshot["rta"]["all"]["fast"][0]["name"], "アゴ太郎")
+        self.assertEqual(snapshot["rta"]["all"]["fast"][0]["service"], "bump")
+        # データの無いサービスは空ボード
+        self.assertEqual(snapshot["rta"]["sharkbot"], {"fast": [], "slow": []})
+        # 旧キーは従来形式（name / value のみ）のまま
+        self.assertEqual(snapshot["bump"], [{"name": "アゴ太郎", "value": 5300}])
+        self.assertEqual(snapshot["up"], [])
+        # ID 類が JSON のどこにも現れないこと
+        text = json.dumps(snapshot, ensure_ascii=False)
+        for forbidden in ("user_id", "guild"):
+            self.assertNotIn(forbidden, text)

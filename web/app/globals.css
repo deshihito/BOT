@@ -124,6 +124,10 @@ th,td { padding:6px 8px; border-bottom:1px solid var(--line); text-align:left; }
 .ranking-tab.active { background:var(--accent); border-color:var(--accent); color:#fff; }
 .ranking-tab:hover { text-decoration:none; }
 .ranking-table td:first-child { font-weight:700; width:64px; }
+.ranking-service-form { display:flex; gap:10px; align-items:center; margin:18px 0 0; }
+.ranking-select { padding:6px 10px; border:1px solid var(--line); border-radius:8px; background:#fff; color:var(--text); font:inherit; }
+.ranking-service-form button { background:#fff; cursor:pointer; font:inherit; }
+.ranking-table td:last-child { white-space:nowrap; }
 .ranking-table td:last-child { text-align:right; font-variant-numeric:tabular-nums; }
 .status-banner { display:flex; gap:12px; align-items:flex-start; margin:18px 0; padding:16px 18px; border:1px solid var(--line); border-radius:9px; background:var(--soft); }
 .status-dot { flex:0 0 auto; width:12px; height:12px; margin-top:8px; border-radius:50%; background:#e8590c; }
