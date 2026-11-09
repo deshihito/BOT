@@ -5,6 +5,13 @@
 大吉・中吉・小吉・吉・半吉・末吉・末小吉・凶・小凶・半凶・末凶・大凶。
 重みは合計100に固定する（テストで固定）。
 
+札には4種のフォーマット（通常/豪華/辛口/ゲーミング）があり、引く
+たびにまずフォーマットを抽選し、そのフォーマット専用の重みで
+運勢を引く。ゲーミングは枠が虹色に遷移する GIF になる別レア枠。
+フォーマットは完全に運で決まり、ユーザーが選んだり設定したりする
+表面は一切持たない。文面プールは全フォーマット共通で、フォーマット
+差は見た目（render 側のテーマ）と運勢の重みだけである。
+
 各ランクに和歌（上の句/下の句）・総合の短文・項目別運勢（10項目）の
 文面プールを持ち、抽選はシード付き RNG で行うため、同じ
 (ギルド, ユーザー, JST日付) では必ず同じ結果になる。
@@ -22,8 +29,25 @@ RANKS: tuple[str, ...] = (
     "凶", "小凶", "半凶", "末凶", "大凶",
 )
 
-#: ランクの重み（合計100）。
+#: ランクの重み（合計100）。通常フォーマットのテーブルを指す。
 RANK_WEIGHTS: tuple[int, ...] = (12, 18, 16, 20, 6, 9, 3, 8, 3, 2, 2, 1)
+
+#: 札のフォーマット（ユーザーは選べない。引くたびに抽選で決まる）。
+FORMATS: tuple[str, ...] = ("normal", "luxury", "spicy", "gaming")
+
+#: フォーマット自体の抽選の重み（合計100、FORMATS と同順）。
+#: gaming は別レア枠として 5 に絞る。
+FORMAT_WEIGHTS: tuple[int, ...] = (55, 15, 25, 5)
+
+#: フォーマット別のランク重み（いずれも合計100、RANKS と同順）。
+#: luxury は甘口で下位3ランク（半凶・末凶・大凶）は重み0＝絶対に出ない。
+#: gaming は少し甘口だが大凶は残し、末凶だけ重み0。
+FORMAT_RANK_WEIGHTS: dict[str, tuple[int, ...]] = {
+    "normal": RANK_WEIGHTS,
+    "luxury": (22, 22, 18, 22, 5, 6, 2, 2, 1, 0, 0, 0),
+    "spicy": (4, 8, 10, 16, 8, 12, 6, 16, 7, 5, 4, 4),
+    "gaming": (18, 20, 16, 22, 6, 8, 3, 4, 1, 1, 0, 1),
+}
 
 #: 項目別運勢の項目（実物の定番10項目、表示順）。
 ITEMS: tuple[str, ...] = (
@@ -317,6 +341,8 @@ class Fortune:
     waka: tuple[str, str]
     summary: str
     items: tuple[tuple[str, str], ...]
+    #: 札のフォーマット（FORMATS のいずれか。その日の結果に含めて固定する）。
+    format: str = "normal"
 
     def to_dict(self) -> dict:
         return {
@@ -325,33 +351,56 @@ class Fortune:
             "waka": list(self.waka),
             "summary": self.summary,
             "items": [[name, text] for name, text in self.items],
+            "format": self.format,
         }
 
     @classmethod
     def from_dict(cls, raw: dict) -> "Fortune":
+        # format 導入前の保存レコードには format が無いため「通常」として
+        # 扱う（後方互換）。未知の値も「通常」に倒す。
+        fmt = str(raw.get("format") or "normal")
+        if fmt not in FORMATS:
+            fmt = "normal"
         return cls(
             number=int(raw["number"]),
             rank=str(raw["rank"]),
             waka=(str(raw["waka"][0]), str(raw["waka"][1])),
             summary=str(raw["summary"]),
             items=tuple((str(name), str(text)) for name, text in raw["items"]),
+            format=fmt,
         )
 
 
-def pick_rank(rng: random.Random) -> str:
-    """重み付きで運勢ランクを1つ選ぶ（1〜100 の一様乱数を重みに割り当てる）。"""
-    roll = rng.randint(1, sum(RANK_WEIGHTS))
+def _weighted_pick(rng: random.Random, options, weights) -> str:
+    """重み付きで1つ選ぶ（重み0の選択肢は絶対に選ばれない）。"""
+    roll = rng.randint(1, sum(weights))
     cumulative = 0
-    for rank, weight in zip(RANKS, RANK_WEIGHTS):
+    for option, weight in zip(options, weights):
         cumulative += weight
         if roll <= cumulative:
-            return rank
-    return RANKS[-1]
+            return option
+    return options[-1]
+
+
+def pick_format(rng: random.Random) -> str:
+    """札のフォーマットを抽選する（通常55 / 豪華15 / 辛口25 / ゲーミング5）。"""
+    return _weighted_pick(rng, FORMATS, FORMAT_WEIGHTS)
+
+
+def pick_rank(rng: random.Random, fmt: str = "normal") -> str:
+    """フォーマットの重みで運勢ランクを1つ選ぶ（既定は通常テーブル）。"""
+    weights = FORMAT_RANK_WEIGHTS.get(fmt, RANK_WEIGHTS)
+    return _weighted_pick(rng, RANKS, weights)
 
 
 def draw_fortune(rng: random.Random) -> Fortune:
-    """RNG から1回分のおみくじを引く（呼び出し順序は固定：決定的であること）。"""
-    rank = pick_rank(rng)
+    """RNG から1回分のおみくじを引く（呼び出し順序は固定：決定的であること）。
+
+    順序は フォーマット抽選 → そのフォーマットの重みで運勢抽選 →
+    番号・和歌・総合・項目別 の順。
+    """
+    fmt = pick_format(rng)
+    rank = pick_rank(rng, fmt)
     number = rng.randint(1, 100)
     waka = WAKA[rank][rng.randrange(len(WAKA[rank]))]
     summary = SUMMARIES[rank][rng.randrange(len(SUMMARIES[rank]))]
@@ -359,7 +408,8 @@ def draw_fortune(rng: random.Random) -> Fortune:
     items = tuple(
         (name, pools[name][rng.randrange(len(pools[name]))]) for name in ITEMS
     )
-    return Fortune(number=number, rank=rank, waka=waka, summary=summary, items=items)
+    return Fortune(number=number, rank=rank, waka=waka, summary=summary,
+                   items=items, format=fmt)
 
 
 def seeded_rng(guild_id: int, user_id: int, day: str) -> random.Random:
