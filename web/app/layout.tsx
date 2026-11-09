@@ -55,6 +55,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <footer>
           <nav className="footer-links" aria-label="ポリシー">
             <a href={SUPPORT_SERVER_URL} target="_blank" rel="noreferrer">サポートサーバー</a>
+            <Link href="/compute">計算に参加</Link>
             <Link href="/status">ステータス</Link>
             <Link href="/credits">クレジット</Link>
             <Link href="/terms">利用規約</Link>
