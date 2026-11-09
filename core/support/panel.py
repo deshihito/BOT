@@ -274,16 +274,19 @@ class SupportWarpButton(discord.ui.Button):
 
 
 class BumpRtaSettingsView(discord.ui.View):
-    """boardNotify 共通設定（オン/オフ・メンションロール）。
+    """boardNotify 共通設定（オン/オフ・メンションロール・広告枠）。
 
-    実処理は BumpRta.bumprta_command の既存分岐（on/off/role）に委譲し、
+    オン/オフ・ロールの実処理は BumpRta.bumprta_command の既存分岐（on/off/role）に委譲し、
     保存形式・判定は従来と完全に同じにする。状態表示は dispatch 側が
     bumprta_status と同じ文面の embed を添えて出す。
+    広告枠（記録表示に出る連携枠）の ON/OFF は guild_settings の
+    boardnotify セクションに保存する（core/ads.py）。
     """
 
-    def __init__(self, rta_cog):
+    def __init__(self, rta_cog, ads_on: bool = True):
         super().__init__(timeout=300)
         self.rta_cog = rta_cog
+        self.ads_on = ads_on
 
     def embed(self):
         return discord.Embed(title="boardNotify設定（共通）", color=0xFFFFFF)
@@ -311,6 +314,25 @@ class BumpRtaSettingsView(discord.ui.View):
                        custom_id="support:bumprta_settings:role")
     async def role_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         await self._run(interaction, "role")
+
+    @discord.ui.button(label="広告枠 ON/OFF", style=discord.ButtonStyle.secondary,
+                       custom_id="support:bumprta_settings:ads")
+    async def ads_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not getattr(getattr(interaction.user, "guild_permissions", None), "manage_guild", False):
+            return await interaction.response.send_message(
+                "この操作にはサーバー管理権限が必要です。", ephemeral=True)
+        if interaction.guild_id is None:
+            return await interaction.response.send_message(
+                "この操作はサーバー内でのみ使えます。", ephemeral=True)
+        from core import ads as partner_ads
+
+        current = await partner_ads.ads_enabled(interaction.guild_id)
+        new_value = not current
+        await partner_ads.set_ads_enabled(interaction.guild_id, new_value)
+        self.ads_on = new_value
+        return await interaction.response.send_message(
+            f"記録表示の広告枠を **{'オン' if new_value else 'オフ'}** にしました。",
+            ephemeral=True)
 
 
 class TempVoicePanelGuideView(discord.ui.View):

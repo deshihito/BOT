@@ -406,16 +406,20 @@ class SupportCog(
         enabled = await cog._is_enabled(interaction.guild_id)
         role_id = await cog._role_id(interaction.guild_id)
         role_text = f"<@&{role_id}>" if role_id else "なし"
+        from core import ads as partner_ads
+
+        ads_on = await partner_ads.ads_enabled(interaction.guild_id)
         embed = discord.Embed(
             title="boardNotify設定（共通）",
             description=(
                 f"boardNotify: **{'オン' if enabled else 'オフ'}**（初期状態: オン）"
                 f"\n通知メンションロール: {role_text}"
+                f"\n記録表示の広告枠: **{'オン' if ads_on else 'オフ'}**（初期状態: オン）"
             ),
             color=0xFFFFFF,
         )
         return await interaction.response.send_message(
-            embed=embed, view=BumpRtaSettingsView(cog), ephemeral=True)
+            embed=embed, view=BumpRtaSettingsView(cog, ads_on=ads_on), ephemeral=True)
 
 
     async def dispatch(self, interaction: discord.Interaction, selected: str):

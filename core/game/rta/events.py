@@ -12,6 +12,7 @@ from statistics import median
 import discord
 from discord import app_commands
 from discord.ext import commands, tasks
+from core import ads as partner_ads
 from core.support.api_retry import run_with_retry
 
 from core.game.rta.common import *  # noqa: F401,F403 - shared constants/helpers
@@ -192,6 +193,14 @@ class EventsMixin:
             description=description,
             color=0xFFFFFF,
         )
+        # 連携広告枠（記録表示のみ。ギルド設定で OFF にできる）
+        try:
+            if await partner_ads.ads_enabled(message.guild.id):
+                ad = partner_ads.next_ad_field()
+                if ad is not None:
+                    embed.add_field(name=ad[0], value=ad[1], inline=False)
+        except Exception:
+            logger.debug("広告枠の添付に失敗（記録表示は通常どおり送る）", exc_info=True)
         try:
             await self._send_timed(
                 message.channel,
