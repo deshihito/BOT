@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { COMMAND_GUIDES } from "@/lib/command-guides";
+import { COMMAND_GUIDES, GAME_COUNT, TOTAL_FUNCTIONS } from "@/lib/command-guides";
 import { isBotApiConfigured, kvList } from "@/lib/bot-api";
 import { GUILD_REGISTRY_NAMESPACE } from "@/lib/dashboard";
 import { InviteButton } from "./InviteCta";
@@ -39,7 +39,7 @@ const HOME_JSON_LD = {
   operatingSystem: "Discord",
   inLanguage: "ja",
   description:
-    "ゲーム47種・音楽とVC・コイン経済・サーバー運営・AIまで、243の機能を6つのスラッシュコマンドに集約した多機能Discordボット。",
+    `ゲーム${GAME_COUNT}種・音楽とVC・コイン経済・サーバー運営・AIまで、${TOTAL_FUNCTIONS}の機能を6つのスラッシュコマンドに集約した多機能Discordボット。`,
   offers: { "@type": "Offer", price: "0", priceCurrency: "JPY" },
 };
 

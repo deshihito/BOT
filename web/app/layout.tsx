@@ -3,6 +3,7 @@ import Link from "next/link";
 import "./globals.css";
 import { InviteButton } from "./InviteCta";
 import { SITE_URL, SUPPORT_SERVER_URL } from "@/lib/site";
+import { GAME_COUNT, TOTAL_FUNCTIONS } from "@/lib/command-guides";
 
 // Google AdSense の審査・所有権確認コード（自動広告もこのスクリプトで配信される）
 const ADSENSE_SCRIPT_SRC =
@@ -10,7 +11,7 @@ const ADSENSE_SCRIPT_SRC =
 
 const SITE_TITLE = "AGOBOT | 使いたいこと、全部このボットでいい。";
 const SITE_DESCRIPTION =
-  "AGOBOTは、ゲーム47種・音楽とVC・コイン経済・サーバー運営・AIまで、247の機能を6つのスラッシュコマンドに集約した多機能Discordボットです。";
+  `AGOBOTは、ゲーム${GAME_COUNT}種・音楽とVC・コイン経済・サーバー運営・AIまで、${TOTAL_FUNCTIONS}の機能を6つのスラッシュコマンドに集約した多機能Discordボットです。`;
 
 export const metadata: Metadata = {
   metadataBase: new URL(SITE_URL),
