@@ -1257,91 +1257,120 @@ def _link_blocks(links: list[Any]) -> str:
     return "\n\n".join(blocks)
 
 
+LOADING_TEXT = "返信を生成中です..."
+
+
+async def _send_loading(channel: Any) -> Any | None:
+    """生成の待ち時間に AGO BOT 本体が先行して出すローディング表示。
+
+    Webhook の返信が届くまでの無言の時間に安心感を持たせるためのもの。
+    送れなくても返信処理は止めない。
+    """
+    try:
+        return await channel.send(LOADING_TEXT)
+    except (discord.HTTPException, asyncio.TimeoutError):
+        return None
+
+
+async def _delete_loading(message: Any | None) -> None:
+    if message is None:
+        return
+    try:
+        await message.delete()
+    except (discord.HTTPException, asyncio.TimeoutError):
+        pass
+
+
 async def _generate_and_send(runtime: _Runtime, batch: list[Any]) -> None:
-    started_at = time.monotonic()
-    channel = runtime.channel
-    channel_id = int(channel.id)
-    prompt_text = "\n".join(str(getattr(m, "content", "") or "") for m in batch).strip()
-    await _flush_appends(runtime)
-    memory_text = ""
-    turns: list[dict[str, Any]] = []
-    client = _client()
-    persona = effective_persona(settings(runtime.guild_id).get("custom"))
-    if client is not None:
-        await _seed_if_needed(runtime, client)
-        _ok, loaded_memory = await _db_call(
-            "記憶取得", lambda: _load_memory_sync(client, runtime.guild_id, persona["key"]))
-        memory_text = loaded_memory or ""
-        _ok, loaded = await _db_call(
-            "直近ターン取得",
-            lambda: _load_recent_turns_sync(client, channel_id, RECENT_TURNS_CONTEXT),
-        )
-        if loaded:
-            turns = loaded
-    db_ready_at = time.monotonic()
-    context_text = build_context_text(memory_text, turns, luna_name=persona["name"])
-    if not context_text:
-        fallback = [turn for turn in (message_to_turn(m) for m in batch) if turn]
-        context_text = build_context_text("", fallback, luna_name=persona["name"])
+    loading = await _send_loading(runtime.channel)
     try:
-        rag_text = search_rag(prompt_text)
-        link_text = ""
-        urls = ai_context.extract_urls(prompt_text) if prompt_text else []
-        if urls:
-            links = await ai_context.fetch_links(urls[: ai_context.MAX_LINKS])
-            link_text = _link_blocks(links)
-        sections = [context_text] if context_text else []
-        if rag_text:
-            sections.append(f"【AGO BOT資料】\n{rag_text}")
-        if link_text:
-            sections.append(link_text)
-        sections.append("直近の会話の最後の発言に続けて、Lunaとして自然に返信して")
-        user_prompt = "\n\n".join(sections)
-        attachments = [item for m in batch for item in (getattr(m, "attachments", None) or [])]
-        user_content = await _build_user_content(user_prompt, attachments)
-        system = build_system_prompt(
-            persona["system_prompt"], has_materials=bool(rag_text or link_text))
-        messages = [
-            {"role": "system", "content": system},
-            {"role": "user", "content": user_content},
-        ]
-        reply, ttft_seconds, stream_seconds = await _chat_text(messages, max_tokens=800)
-    except (aiohttp.ClientError, asyncio.TimeoutError, logfare.LogfareHTTPError, KiosAPIHTTPError) as exc:
-        logger.warning(
-            "Luna AI の生成に失敗しました: channel=%s error=%s: %s",
-            channel_id, type(exc).__name__, exc)
-        return
-    if not reply or not reply.strip():
-        return
-    avatar = await _resolve_avatar_bytes(persona)
-    try:
-        await _send_reply(
-            channel, reply,
-            persona_name=persona["name"],
-            persona_icon_url=persona["icon_url"],
-            avatar=avatar,
+        started_at = time.monotonic()
+        channel = runtime.channel
+        channel_id = int(channel.id)
+        prompt_text = "\n".join(str(getattr(m, "content", "") or "") for m in batch).strip()
+        await _flush_appends(runtime)
+        memory_text = ""
+        turns: list[dict[str, Any]] = []
+        client = _client()
+        persona = effective_persona(settings(runtime.guild_id).get("custom"))
+        if client is not None:
+            await _seed_if_needed(runtime, client)
+            _ok, loaded_memory = await _db_call(
+                "記憶取得", lambda: _load_memory_sync(client, runtime.guild_id, persona["key"]))
+            memory_text = loaded_memory or ""
+            _ok, loaded = await _db_call(
+                "直近ターン取得",
+                lambda: _load_recent_turns_sync(client, channel_id, RECENT_TURNS_CONTEXT),
+            )
+            if loaded:
+                turns = loaded
+        db_ready_at = time.monotonic()
+        context_text = build_context_text(memory_text, turns, luna_name=persona["name"])
+        if not context_text:
+            fallback = [turn for turn in (message_to_turn(m) for m in batch) if turn]
+            context_text = build_context_text("", fallback, luna_name=persona["name"])
+        try:
+            rag_text = search_rag(prompt_text)
+            link_text = ""
+            urls = ai_context.extract_urls(prompt_text) if prompt_text else []
+            if urls:
+                links = await ai_context.fetch_links(urls[: ai_context.MAX_LINKS])
+                link_text = _link_blocks(links)
+            sections = [context_text] if context_text else []
+            if rag_text:
+                sections.append(f"【AGO BOT資料】\n{rag_text}")
+            if link_text:
+                sections.append(link_text)
+            sections.append("直近の会話の最後の発言に続けて、Lunaとして自然に返信して")
+            user_prompt = "\n\n".join(sections)
+            attachments = [item for m in batch for item in (getattr(m, "attachments", None) or [])]
+            user_content = await _build_user_content(user_prompt, attachments)
+            system = build_system_prompt(
+                persona["system_prompt"], has_materials=bool(rag_text or link_text))
+            messages = [
+                {"role": "system", "content": system},
+                {"role": "user", "content": user_content},
+            ]
+            reply, ttft_seconds, stream_seconds = await _chat_text(messages, max_tokens=800)
+        except (aiohttp.ClientError, asyncio.TimeoutError, logfare.LogfareHTTPError, KiosAPIHTTPError) as exc:
+            logger.warning(
+                "Luna AI の生成に失敗しました: channel=%s error=%s: %s",
+                channel_id, type(exc).__name__, exc)
+            return
+        if not reply or not reply.strip():
+            return
+        avatar = await _resolve_avatar_bytes(persona)
+        try:
+            await _send_reply(
+                channel, reply,
+                persona_name=persona["name"],
+                persona_icon_url=persona["icon_url"],
+                avatar=avatar,
+            )
+        except (aiohttp.ClientError, asyncio.TimeoutError, discord.HTTPException) as exc:
+            logger.warning("Luna AI の送信に失敗しました: channel=%s error=%s", channel_id, exc)
+            return
+        sent_at = time.monotonic()
+        logger.info(
+            "Luna AI 応答時間: channel=%s total=%.2fs db=%.2fs ttft=%.2fs gen=%.2fs send=%.2fs",
+            channel_id,
+            sent_at - started_at,
+            db_ready_at - started_at,
+            ttft_seconds,
+            max(stream_seconds - ttft_seconds, 0.0),
+            sent_at - db_ready_at - stream_seconds,
         )
-    except (aiohttp.ClientError, asyncio.TimeoutError, discord.HTTPException) as exc:
-        logger.warning("Luna AI の送信に失敗しました: channel=%s error=%s", channel_id, exc)
-        return
-    sent_at = time.monotonic()
-    logger.info(
-        "Luna AI 応答時間: channel=%s total=%.2fs db=%.2fs ttft=%.2fs gen=%.2fs send=%.2fs",
-        channel_id,
-        sent_at - started_at,
-        db_ready_at - started_at,
-        ttft_seconds,
-        max(stream_seconds - ttft_seconds, 0.0),
-        sent_at - db_ready_at - stream_seconds,
-    )
-    if client is not None:
-        luna_turn = {"author_name": persona["name"], "is_luna": True, "content": reply.strip()}
-        await _db_call(
-            "Lunaターン保存",
-            lambda: _append_turn_sync(client, channel_id, runtime.guild_id, luna_turn),
-        )
-        runtime.last_turn_at = time.monotonic()
-        _touch_idle_timer(runtime)
+        if client is not None:
+            luna_turn = {"author_name": persona["name"], "is_luna": True, "content": reply.strip()}
+            await _db_call(
+                "Lunaターン保存",
+                lambda: _append_turn_sync(client, channel_id, runtime.guild_id, luna_turn),
+            )
+            runtime.last_turn_at = time.monotonic()
+            _touch_idle_timer(runtime)
+
+    finally:
+        await _delete_loading(loading)
 
 
 _icon_bytes_cache: bytes | None = None
