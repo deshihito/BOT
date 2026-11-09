@@ -15,6 +15,8 @@ mkdir -p "$ROOT/releases"
 # コマンド一覧データは Bot コードから再生成する
 cd "$SRC"
 venv/bin/python -m tools.export_commands --out web/data/commands.json
+# コマンド解説（/commands）の機能一覧もレジストリから再生成する（自動追従）
+venv/bin/python -m tools.export_action_guides --out web/data/action-guides.json
 
 # ビルド用コピー（node_modules / .next は持ち込まない）
 rm -rf "$BUILD"

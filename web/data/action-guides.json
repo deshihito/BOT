@@ -1,0 +1,1775 @@
+{
+  "version": 1,
+  "total": 248,
+  "counts": {
+    "general": 71,
+    "vc": 45,
+    "game": 48,
+    "support": 83,
+    "help": 1
+  },
+  "game_count": 47,
+  "roots": [
+    {
+      "root": "general",
+      "command": "/general",
+      "genres": [
+        {
+          "key": "money",
+          "label": "マネー",
+          "description": "",
+          "functions": [
+            {
+              "id": "general:money_panel",
+              "value": "money_panel",
+              "title": "マネーパネル",
+              "description": ""
+            },
+            {
+              "id": "general:daily_report",
+              "value": "daily_report",
+              "title": "日報DM",
+              "description": ""
+            },
+            {
+              "id": "general:status",
+              "value": "status",
+              "title": "プレイヤー状況",
+              "description": ""
+            },
+            {
+              "id": "general:pay",
+              "value": "pay",
+              "title": "コイン送金",
+              "description": ""
+            },
+            {
+              "id": "general:market",
+              "value": "market",
+              "title": "市場",
+              "description": ""
+            },
+            {
+              "id": "general:token_buy",
+              "value": "token_buy",
+              "title": "アゴトークンを買う",
+              "description": ""
+            },
+            {
+              "id": "general:token_sell",
+              "value": "token_sell",
+              "title": "アゴトークンを売る",
+              "description": ""
+            },
+            {
+              "id": "general:items",
+              "value": "items",
+              "title": "アイテム",
+              "description": ""
+            },
+            {
+              "id": "general:item_buy",
+              "value": "item_buy",
+              "title": "アイテムを買う",
+              "description": ""
+            },
+            {
+              "id": "general:item_use",
+              "value": "item_use",
+              "title": "アイテムを使う",
+              "description": ""
+            },
+            {
+              "id": "general:box_open",
+              "value": "box_open",
+              "title": "宝箱を開ける",
+              "description": ""
+            },
+            {
+              "id": "general:workshop",
+              "value": "workshop",
+              "title": "工房",
+              "description": ""
+            },
+            {
+              "id": "general:machine_buy",
+              "value": "machine_buy",
+              "title": "加工機を買う",
+              "description": ""
+            },
+            {
+              "id": "general:workshop_claim",
+              "value": "workshop_claim",
+              "title": "生産物を受け取る",
+              "description": ""
+            },
+            {
+              "id": "general:craft",
+              "value": "craft",
+              "title": "合成する",
+              "description": ""
+            },
+            {
+              "id": "general:mining",
+              "value": "mining",
+              "title": "採掘する",
+              "description": ""
+            },
+            {
+              "id": "general:lottery",
+              "value": "lottery",
+              "title": "宝くじ",
+              "description": ""
+            },
+            {
+              "id": "general:lottery_buy",
+              "value": "lottery_buy",
+              "title": "宝くじを買う",
+              "description": ""
+            },
+            {
+              "id": "general:steal",
+              "value": "steal",
+              "title": "盗む",
+              "description": ""
+            },
+            {
+              "id": "general:slot",
+              "value": "slot",
+              "title": "スロット",
+              "description": ""
+            },
+            {
+              "id": "general:double",
+              "value": "double",
+              "title": "ダブルアップ",
+              "description": ""
+            },
+            {
+              "id": "general:blackjack",
+              "value": "blackjack",
+              "title": "ブラックジャック",
+              "description": ""
+            },
+            {
+              "id": "general:bj_duel",
+              "value": "bj_duel",
+              "title": "ブラックジャック対決",
+              "description": ""
+            },
+            {
+              "id": "general:dice",
+              "value": "dice",
+              "title": "ダイスベット",
+              "description": ""
+            },
+            {
+              "id": "general:coin_leaderboard",
+              "value": "coin_leaderboard",
+              "title": "コイン保有ランキング",
+              "description": ""
+            },
+            {
+              "id": "general:role_shop",
+              "value": "role_shop",
+              "title": "ロールショップ",
+              "description": ""
+            },
+            {
+              "id": "general:gacha",
+              "value": "gacha",
+              "title": "ガチャ",
+              "description": ""
+            },
+            {
+              "id": "general:clan",
+              "value": "clan",
+              "title": "クラン",
+              "description": ""
+            },
+            {
+              "id": "general:starter_claim",
+              "value": "starter_claim",
+              "title": "スターター受取",
+              "description": ""
+            },
+            {
+              "id": "general:daily_bonus_claim",
+              "value": "daily_bonus_claim",
+              "title": "デイリーボーナス受取",
+              "description": ""
+            },
+            {
+              "id": "general:jailbreak",
+              "value": "jailbreak",
+              "title": "脱獄試行",
+              "description": ""
+            },
+            {
+              "id": "general:item_sell",
+              "value": "item_sell",
+              "title": "アイテムを売る",
+              "description": ""
+            },
+            {
+              "id": "general:role_shop_manage",
+              "value": "role_shop_manage",
+              "title": "ロールショップ商品管理",
+              "description": ""
+            },
+            {
+              "id": "general:craft_commission",
+              "value": "craft_commission",
+              "title": "委託加工",
+              "description": ""
+            },
+            {
+              "id": "general:gacha_party",
+              "value": "gacha_party",
+              "title": "ガチャ編成",
+              "description": ""
+            },
+            {
+              "id": "general:clan_manage",
+              "value": "clan_manage",
+              "title": "クラン管理",
+              "description": ""
+            }
+          ]
+        },
+        {
+          "key": "rta",
+          "label": "ランキング",
+          "description": "",
+          "functions": [
+            {
+              "id": "general:rankings",
+              "value": "rankings",
+              "title": "ランキング一覧",
+              "description": ""
+            },
+            {
+              "id": "general:asset_leaderboard",
+              "value": "asset_leaderboard",
+              "title": "総合資産ランキング",
+              "description": ""
+            },
+            {
+              "id": "general:sokunuke_board",
+              "value": "sokunuke_board",
+              "title": "即抜けRTAランキング",
+              "description": ""
+            }
+          ]
+        },
+        {
+          "key": "boardnotify_rta",
+          "label": "boardNotify RTA",
+          "description": "",
+          "functions": [
+            {
+              "id": "general:rta_board",
+              "value": "rta_board",
+              "title": "RTAランキング",
+              "description": ""
+            }
+          ]
+        },
+        {
+          "key": "exp",
+          "label": "EXP・レベル",
+          "description": "チャット・VC・generalのEXPとレベル",
+          "functions": [
+            {
+              "id": "general:exp_status",
+              "value": "exp_status",
+              "title": "自分のEXP状況",
+              "description": ""
+            },
+            {
+              "id": "general:exp_ranking",
+              "value": "exp_ranking",
+              "title": "EXPランキング",
+              "description": ""
+            },
+            {
+              "id": "general:activity_board",
+              "value": "activity_board",
+              "title": "サーバー活動ボード",
+              "description": ""
+            }
+          ]
+        },
+        {
+          "key": "survival",
+          "label": "fujo status",
+          "description": "メンバーの安否・不在の検知",
+          "functions": [
+            {
+              "id": "general:fujo_register",
+              "value": "fujo_register",
+              "title": "追跡登録・解除",
+              "description": ""
+            },
+            {
+              "id": "general:fujo_hindo",
+              "value": "fujo_hindo",
+              "title": "現在の高度",
+              "description": ""
+            },
+            {
+              "id": "general:fujo_analysis",
+              "value": "fujo_analysis",
+              "title": "fujo分析",
+              "description": ""
+            },
+            {
+              "id": "general:fujo_ranking",
+              "value": "fujo_ranking",
+              "title": "fujo statusランキング",
+              "description": ""
+            },
+            {
+              "id": "general:fujo_freeze",
+              "value": "fujo_freeze",
+              "title": "フリーズ",
+              "description": ""
+            },
+            {
+              "id": "general:fujo_panic_disable",
+              "value": "fujo_panic_disable",
+              "title": "失踪警報解除",
+              "description": ""
+            },
+            {
+              "id": "general:fujo_status",
+              "value": "fujo_status",
+              "title": "生存ステータス",
+              "description": ""
+            }
+          ]
+        },
+        {
+          "key": "garden",
+          "label": "栽培",
+          "description": "",
+          "functions": [
+            {
+              "id": "general:garden",
+              "value": "garden",
+              "title": "grass simulator",
+              "description": ""
+            }
+          ]
+        },
+        {
+          "key": "fortune",
+          "label": "占い",
+          "description": "",
+          "functions": [
+            {
+              "id": "general:omikuji",
+              "value": "omikuji",
+              "title": "おみくじ",
+              "description": ""
+            }
+          ]
+        },
+        {
+          "key": "custom",
+          "label": "設定・AI",
+          "description": "",
+          "functions": [
+            {
+              "id": "general:shortcut_manage",
+              "value": "shortcut_manage",
+              "title": "ショートカットを管理",
+              "description": ""
+            },
+            {
+              "id": "general:aitools",
+              "value": "aitools",
+              "title": "fastooler稼働状態",
+              "description": ""
+            },
+            {
+              "id": "general:ai_default",
+              "value": "ai_default",
+              "title": "チャットAIモデルを設定",
+              "description": ""
+            },
+            {
+              "id": "general:image_default",
+              "value": "image_default",
+              "title": "画像生成AIモデルを設定",
+              "description": ""
+            },
+            {
+              "id": "general:reasoning_default",
+              "value": "reasoning_default",
+              "title": "AI思考強度を設定",
+              "description": ""
+            },
+            {
+              "id": "general:translation_settings",
+              "value": "translation_settings",
+              "title": "自動翻訳を設定",
+              "description": ""
+            },
+            {
+              "id": "general:ai_chat",
+              "value": "ai_chat",
+              "title": "AIチャット（!ai）",
+              "description": ""
+            },
+            {
+              "id": "general:ai_generate",
+              "value": "ai_generate",
+              "title": "AI画像生成（!generate）",
+              "description": ""
+            }
+          ]
+        },
+        {
+          "key": "zeta",
+          "label": "ZetaModoki",
+          "description": "ロールプレイ会話",
+          "functions": [
+            {
+              "id": "general:zetamodoki",
+              "value": "zetamodoki",
+              "title": "ZetaModokiと会話",
+              "description": ""
+            },
+            {
+              "id": "general:zeta_reset",
+              "value": "zeta_reset",
+              "title": "ZetaModoki会話をリセット",
+              "description": ""
+            },
+            {
+              "id": "general:zeta_register",
+              "value": "zeta_register",
+              "title": "シチュエーション・キャラクターを登録",
+              "description": ""
+            },
+            {
+              "id": "general:zeta_manage",
+              "value": "zeta_manage",
+              "title": "登録を管理（編集・削除）",
+              "description": ""
+            }
+          ]
+        },
+        {
+          "key": "make_image",
+          "label": "画像作成",
+          "description": "",
+          "functions": [
+            {
+              "id": "general:story54",
+              "value": "story54",
+              "title": "54字の物語",
+              "description": ""
+            },
+            {
+              "id": "general:fast_html",
+              "value": "fast_html",
+              "title": "fastHTML",
+              "description": ""
+            },
+            {
+              "id": "general:meme_create",
+              "value": "meme_create",
+              "title": "memeを作成",
+              "description": ""
+            },
+            {
+              "id": "general:meme_help",
+              "value": "meme_help",
+              "title": "使い方",
+              "description": ""
+            },
+            {
+              "id": "general:miq_settings",
+              "value": "miq_settings",
+              "title": "MIQ設定（見た目・引用拒否）",
+              "description": ""
+            },
+            {
+              "id": "general:miq_refuse",
+              "value": "miq_refuse",
+              "title": "MIQ引用拒否設定",
+              "description": ""
+            },
+            {
+              "id": "general:miq_create",
+              "value": "miq_create",
+              "title": "MIQ（メッセージ画像化）",
+              "description": ""
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "root": "vc",
+      "command": "/vc",
+      "genres": [
+        {
+          "key": "connection",
+          "label": "VC接続",
+          "description": "",
+          "functions": [
+            {
+              "id": "vc:join",
+              "value": "join",
+              "title": "VC参加",
+              "description": ""
+            },
+            {
+              "id": "vc:leave",
+              "value": "leave",
+              "title": "VC退出",
+              "description": ""
+            },
+            {
+              "id": "vc:status",
+              "value": "status",
+              "title": "VC状態",
+              "description": ""
+            }
+          ]
+        },
+        {
+          "key": "music",
+          "label": "音楽",
+          "description": "",
+          "functions": [
+            {
+              "id": "vc:music_panel",
+              "value": "music_panel",
+              "title": "音楽操作パネル",
+              "description": ""
+            },
+            {
+              "id": "vc:music_playlist",
+              "value": "music_playlist",
+              "title": "プレイリスト管理",
+              "description": ""
+            },
+            {
+              "id": "vc:music_spatial",
+              "value": "music_spatial",
+              "title": "立体音響設定",
+              "description": ""
+            },
+            {
+              "id": "vc:music_autoplay",
+              "value": "music_autoplay",
+              "title": "自動再生・再生履歴管理",
+              "description": ""
+            },
+            {
+              "id": "vc:music_queue",
+              "value": "music_queue",
+              "title": "キュー表示",
+              "description": ""
+            },
+            {
+              "id": "vc:music_search",
+              "value": "music_search",
+              "title": "楽曲検索・追加",
+              "description": ""
+            },
+            {
+              "id": "vc:music_files",
+              "value": "music_files",
+              "title": "音声ファイルID一覧",
+              "description": ""
+            }
+          ]
+        },
+        {
+          "key": "tts",
+          "label": "読み上げ",
+          "description": "VOICEVOXによるテキスト読み上げ",
+          "functions": [
+            {
+              "id": "vc:tts_stop",
+              "value": "tts_stop",
+              "title": "読み上げ停止",
+              "description": ""
+            },
+            {
+              "id": "vc:tts_start",
+              "value": "tts_start",
+              "title": "読み上げ開始",
+              "description": ""
+            },
+            {
+              "id": "vc:tts_say",
+              "value": "tts_say",
+              "title": "読み上げ: 1回だけ読む",
+              "description": ""
+            },
+            {
+              "id": "vc:tts_config",
+              "value": "tts_config",
+              "title": "読み上げ設定",
+              "description": ""
+            }
+          ]
+        },
+        {
+          "key": "studio",
+          "label": "録音・音声制作",
+          "description": "",
+          "functions": [
+            {
+              "id": "vc:record_start",
+              "value": "record_start",
+              "title": "録音開始",
+              "description": ""
+            },
+            {
+              "id": "vc:record_stop",
+              "value": "record_stop",
+              "title": "録音停止",
+              "description": ""
+            },
+            {
+              "id": "vc:echo_start",
+              "value": "echo_start",
+              "title": "やまびこ開始",
+              "description": ""
+            },
+            {
+              "id": "vc:echo_stop",
+              "value": "echo_stop",
+              "title": "やまびこ停止",
+              "description": ""
+            },
+            {
+              "id": "vc:transcribe_start",
+              "value": "transcribe_start",
+              "title": "文字起こし開始",
+              "description": ""
+            },
+            {
+              "id": "vc:transcribe_stop",
+              "value": "transcribe_stop",
+              "title": "文字起こし停止",
+              "description": ""
+            },
+            {
+              "id": "vc:karaoke_start",
+              "value": "karaoke_start",
+              "title": "カラオケ開始",
+              "description": ""
+            },
+            {
+              "id": "vc:karaoke_stop",
+              "value": "karaoke_stop",
+              "title": "カラオケ停止",
+              "description": ""
+            },
+            {
+              "id": "vc:record_status",
+              "value": "record_status",
+              "title": "録音状態",
+              "description": ""
+            },
+            {
+              "id": "vc:record_pitch",
+              "value": "record_pitch",
+              "title": "録音音程解析",
+              "description": ""
+            },
+            {
+              "id": "vc:echo_status",
+              "value": "echo_status",
+              "title": "やまびこ状態",
+              "description": ""
+            },
+            {
+              "id": "vc:karaoke_score",
+              "value": "karaoke_score",
+              "title": "カラオケ採点",
+              "description": ""
+            },
+            {
+              "id": "vc:echo_delay",
+              "value": "echo_delay",
+              "title": "やまびこ遅延変更",
+              "description": ""
+            }
+          ]
+        },
+        {
+          "key": "effects",
+          "label": "音声加工",
+          "description": "ボイスチェンジャー",
+          "functions": [
+            {
+              "id": "vc:changer_start",
+              "value": "changer_start",
+              "title": "ボイスチェンジャー開始",
+              "description": ""
+            },
+            {
+              "id": "vc:changer_stop",
+              "value": "changer_stop",
+              "title": "ボイスチェンジャー停止",
+              "description": ""
+            },
+            {
+              "id": "vc:changer_status",
+              "value": "changer_status",
+              "title": "ボイスチェンジャー状態",
+              "description": ""
+            }
+          ]
+        },
+        {
+          "key": "trigger",
+          "label": "音声トリガー",
+          "description": "",
+          "functions": [
+            {
+              "id": "vc:trigger_panel",
+              "value": "trigger_panel",
+              "title": "音声トリガー一覧・削除",
+              "description": ""
+            },
+            {
+              "id": "vc:trigger_register",
+              "value": "trigger_register",
+              "title": "音声トリガー登録",
+              "description": ""
+            }
+          ]
+        },
+        {
+          "key": "community",
+          "label": "ランダム通話",
+          "description": "",
+          "functions": [
+            {
+              "id": "vc:match_start",
+              "value": "match_start",
+              "title": "ランダム通話開始",
+              "description": ""
+            },
+            {
+              "id": "vc:match_stop",
+              "value": "match_stop",
+              "title": "ランダム通話終了",
+              "description": ""
+            }
+          ]
+        },
+        {
+          "key": "gvc_rooms",
+          "label": "グローバルVCルーム",
+          "description": "",
+          "functions": [
+            {
+              "id": "vc:gvc_auto_connect",
+              "value": "gvc_auto_connect",
+              "title": "グロチャ自動接続設定",
+              "description": ""
+            },
+            {
+              "id": "vc:global_start",
+              "value": "global_start",
+              "title": "グローバルVC開始",
+              "description": ""
+            },
+            {
+              "id": "vc:global_stop",
+              "value": "global_stop",
+              "title": "グローバルVC終了",
+              "description": ""
+            },
+            {
+              "id": "vc:gvc_room_list",
+              "value": "gvc_room_list",
+              "title": "グローバルVCルーム一覧",
+              "description": ""
+            },
+            {
+              "id": "vc:gvc_chat_disconnect",
+              "value": "gvc_chat_disconnect",
+              "title": "グロチャ接続解除",
+              "description": ""
+            },
+            {
+              "id": "vc:gvc_lang_setting",
+              "value": "gvc_lang_setting",
+              "title": "グローバルVC言語設定",
+              "description": ""
+            },
+            {
+              "id": "vc:gvc_room_create",
+              "value": "gvc_room_create",
+              "title": "グローバルVCルーム作成",
+              "description": ""
+            },
+            {
+              "id": "vc:gvc_room_theme",
+              "value": "gvc_room_theme",
+              "title": "グローバルVC常設ルームテーマ変更",
+              "description": ""
+            },
+            {
+              "id": "vc:gvc_room_info",
+              "value": "gvc_room_info",
+              "title": "グローバルVCルーム情報",
+              "description": ""
+            },
+            {
+              "id": "vc:gvc_room_delete",
+              "value": "gvc_room_delete",
+              "title": "グローバルVCルーム削除",
+              "description": ""
+            },
+            {
+              "id": "vc:gvc_chat_connect",
+              "value": "gvc_chat_connect",
+              "title": "グロチャ接続",
+              "description": ""
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "root": "game",
+      "command": "/game",
+      "genres": [
+        {
+          "key": "games",
+          "label": "ゲーム一覧",
+          "description": "",
+          "functions": [
+            {
+              "id": "game:game:jinrou",
+              "value": "game:jinrou",
+              "title": "ゲーム開始: 人狼",
+              "description": "村人と人狼に分かれ、昼の話し合いと投票で人狼を探す正体隠しゲーム。",
+              "note": "5人以上（おすすめ6〜12人）／15〜40分"
+            },
+            {
+              "id": "game:game:wordwolf",
+              "value": "game:wordwolf",
+              "title": "ゲーム開始: ワードウルフ",
+              "description": "1人だけ違うお題を持つ「ウルフ」を、会話から見つけ出すゲーム。",
+              "note": "3人以上（おすすめ4〜8人）／約6分（募集1分＋本編5分）"
+            },
+            {
+              "id": "game:game:uno",
+              "value": "game:uno",
+              "title": "ゲーム開始: UNO",
+              "description": "同じ色か同じ数字のカードを出していき、先に手札をなくした人が勝ち。",
+              "note": "2人以上（おすすめ2〜8人）／10〜20分"
+            },
+            {
+              "id": "game:game:doubt",
+              "value": "game:doubt",
+              "title": "ゲーム開始: ダウト",
+              "description": "決まった数字を宣言してカードを伏せて出す。嘘だと思ったら「ダウト」！",
+              "note": "3人以上（おすすめ3〜6人）／10〜20分"
+            },
+            {
+              "id": "game:game:ngword",
+              "value": "game:ngword",
+              "title": "ゲーム開始: NGワード",
+              "description": "自分だけ知らないNGワードを、うっかり言ったら脱落する会話ゲーム。",
+              "note": "3〜8人／約4〜11分（募集1分＋本編3・5・10分）"
+            },
+            {
+              "id": "game:game:shiritori",
+              "value": "game:shiritori",
+              "title": "ゲーム開始: お題しりとり",
+              "description": "お題（食べ物・動物など）に合う言葉だけでしりとり。つまったら脱落！",
+              "note": "3〜8人／約5分（募集1分＋本編）"
+            },
+            {
+              "id": "game:game:janken",
+              "value": "game:janken",
+              "title": "ゲーム開始: じゃんけん",
+              "description": "みんなで一斉にじゃんけん。最後まで勝ち残った人が優勝！1人なら Bot と対戦。",
+              "note": "1〜10人／約1分（募集30秒＋本編）"
+            },
+            {
+              "id": "game:game:wordle",
+              "value": "game:wordle",
+              "title": "ゲーム開始: Wordle",
+              "description": "5文字の英単語を6回以内に当てる推理ゲーム。",
+              "note": "1人〜／約5分（上限10分）"
+            },
+            {
+              "id": "game:game:shinkei",
+              "value": "game:shinkei",
+              "title": "ゲーム開始: 神経衰弱",
+              "description": "裏向きのカードを2枚ずつめくり、同じ英字のペアを集める記憶ゲーム。",
+              "note": "1〜6人／約10分"
+            },
+            {
+              "id": "game:game:babanuki",
+              "value": "game:babanuki",
+              "title": "ゲーム開始: ババ抜き",
+              "description": "同じ数字のペアを捨てていき、最後にジョーカーを持っていた人が負け。",
+              "note": "2〜6人／約10分"
+            },
+            {
+              "id": "game:game:guess",
+              "value": "game:guess",
+              "title": "ゲーム開始: 数字当て",
+              "description": "1〜3の数字を当ててAGOコインを賭ける、1人用のギャンブル。",
+              "note": "1人／数秒"
+            },
+            {
+              "id": "game:game:flash",
+              "value": "game:flash",
+              "title": "ゲーム開始: フラッシュ暗算",
+              "description": "一瞬ずつ表示される数字をすべて足す、1人用の暗算ゲーム。",
+              "note": "1人／約1分"
+            },
+            {
+              "id": "game:game:minesweeper",
+              "value": "game:minesweeper",
+              "title": "ゲーム開始: マインスイーパー",
+              "description": "地雷を避けて全てのマスを開く、画像盤面の1人用パズル。",
+              "note": "1人／約1〜10分"
+            },
+            {
+              "id": "game:game:daifugo",
+              "value": "game:daifugo",
+              "title": "ゲーム開始: 大富豪",
+              "description": "場より強いカードを同じ枚数で出していき、早く手札をなくした人ほど上の身分になるトランプゲーム。",
+              "note": "3〜6人（不足分はBotが入る）／約15分"
+            },
+            {
+              "id": "game:game:othello",
+              "value": "game:othello",
+              "title": "ゲーム開始: オセロ",
+              "description": "黒白の石で挟んでひっくり返し、最後に石が多い方が勝ち。",
+              "note": "2人／約2〜10分（募集30秒）"
+            },
+            {
+              "id": "game:game:poker",
+              "value": "game:poker",
+              "title": "ゲーム開始: ポーカー",
+              "description": "チップ制の5枚ドローポーカー。バイインしてハンドを重ね、チップをコインに精算。",
+              "note": "2〜6人／1ハンド約3分（テーブル制・継続可）"
+            },
+            {
+              "id": "game:game:shogi",
+              "value": "game:shogi",
+              "title": "ゲーム開始: 将棋",
+              "description": "日本の将棋。駒を動かして相手の王を詰める2人対戦。",
+              "note": "2人／約10〜30分（募集30秒）"
+            },
+            {
+              "id": "game:game:chess",
+              "value": "game:chess",
+              "title": "ゲーム開始: チェス",
+              "description": "駒を動かして相手のキングを詰ませる、2人対戦の西洋ボードゲーム。",
+              "note": "2人／約10〜30分（募集30秒）"
+            },
+            {
+              "id": "game:game:dungeon",
+              "value": "game:dungeon",
+              "title": "ゲーム開始: ダンジョン",
+              "description": "マップを探索し、戦闘と成長を重ねてダンジョンを攻略します。",
+              "note": "1人／自由にプレイ"
+            },
+            {
+              "id": "game:game:quiz",
+              "value": "game:quiz",
+              "title": "ゲーム開始: クイズ大会",
+              "description": "4択クイズに全員で同時回答し、得点を競う大会形式のゲーム。",
+              "note": "1人以上（おすすめ3〜10人）／約5分（10問）"
+            },
+            {
+              "id": "game:game:bingo",
+              "value": "game:bingo",
+              "title": "ゲーム開始: ビンゴ",
+              "description": "自動で進む抽選でカードのラインを揃える、全員参加型の古典ゲーム。",
+              "note": "2人以上／約5〜15分"
+            },
+            {
+              "id": "game:game:majority",
+              "value": "game:majority",
+              "title": "ゲーム開始: マジョリティ連想",
+              "description": "お題に「みんなが書きそうな答え」を出し、多数派と一致させるゲーム。",
+              "note": "3人以上／約5分（5ラウンド）"
+            },
+            {
+              "id": "game:game:onenight",
+              "value": "game:onenight",
+              "title": "ゲーム開始: ワンナイト人狼",
+              "description": "夜は1回だけ、約5分で終わる短縮版の人狼ゲーム。",
+              "note": "3〜6人／約5分"
+            },
+            {
+              "id": "game:game:loveletter",
+              "value": "game:loveletter",
+              "title": "ゲーム開始: アゴ姫への手紙",
+              "description": "手札1枚の読み合いでアゴ姫に手紙を届ける、短時間の心理戦カードゲーム。",
+              "note": "2〜4人／約5分（募集30秒）"
+            },
+            {
+              "id": "game:game:codenames",
+              "value": "game:codenames",
+              "title": "ゲーム開始: コードネーム",
+              "description": "リーダーのヒントから味方の単語を当てる、2チーム対抗の連想ゲーム。",
+              "note": "各チーム2人以上（合計4人以上）／約10〜20分"
+            },
+            {
+              "id": "game:game:twochoice",
+              "value": "game:twochoice",
+              "title": "ゲーム開始: 究極の二択",
+              "description": "「一生〇〇だけ」系のお題に全員で投票し、多数派か少数派かで盛り上がるゲーム。",
+              "note": "1人以上（多いほど楽しい）／約2分（5題）"
+            },
+            {
+              "id": "game:game:thirtyone",
+              "value": "game:thirtyone",
+              "title": "ゲーム開始: 31ゲーム",
+              "description": "順番に1〜3ずつ数字を進め、31を言った人が脱落するシンプルな勝ち残りゲーム。",
+              "note": "2〜8人／約3〜5分（募集30秒）"
+            },
+            {
+              "id": "game:game:koikoi",
+              "value": "game:koikoi",
+              "title": "ゲーム開始: こいこい",
+              "description": "花札で同じ月の札を取り合い、役を作って得点を競う2人対戦。3局戦の短縮ルール。",
+              "note": "2人（対人またはCPU）／約10分（3局戦）"
+            },
+            {
+              "id": "game:game:gomoku",
+              "value": "game:gomoku",
+              "title": "ゲーム開始: 五目並べ",
+              "description": "15×15の盤に交互に石を置き、先に5つ並べた方が勝つ古典ボードゲーム。",
+              "note": "2人（対人またはCPU）／約5〜15分（募集30秒）"
+            },
+            {
+              "id": "game:game:connect4",
+              "value": "game:connect4",
+              "title": "ゲーム開始: 四目並べ",
+              "description": "7列にコマを落とし、縦・横・斜めの4つ並びを先に作るボードゲーム。",
+              "note": "2人（対人またはCPU）／約3〜10分（募集30秒）"
+            },
+            {
+              "id": "game:game:sudoku",
+              "value": "game:sudoku",
+              "title": "ゲーム開始: 数独",
+              "description": "9×9のマスに1〜9を埋める定番パズル。難易度3段とデイリー問題つき。",
+              "note": "1人／約5〜20分"
+            },
+            {
+              "id": "game:game:game2048",
+              "value": "game:game2048",
+              "title": "ゲーム開始: 2048",
+              "description": "タイルを滑らせて同じ数字を合体させ、2048タイルを目指すソロパズル。",
+              "note": "1人／約3〜10分"
+            },
+            {
+              "id": "game:game:nonogram",
+              "value": "game:nonogram",
+              "title": "ゲーム開始: ノノグラム",
+              "description": "行と列の数字ヒントからマスを塗って絵を浮かび上がらせるパズル（お絵かきロジック）。",
+              "note": "1人／約2〜10分"
+            },
+            {
+              "id": "game:game:highlow",
+              "value": "game:highlow",
+              "title": "ゲーム開始: ハイ＆ロー",
+              "description": "次のカードが高いか低いかを当て続ける、ソロのストリーク勝負。賭けなし・記録のみ。",
+              "note": "1人／約1〜3分"
+            },
+            {
+              "id": "game:game:justone",
+              "value": "game:justone",
+              "title": "ゲーム開始: ひとことヒント",
+              "description": "ヒントが他の人と被ると消えてしまう、協力ワードゲーム。",
+              "note": "3〜8人／約5分（5ラウンド）"
+            },
+            {
+              "id": "game:game:ito",
+              "value": "game:ito",
+              "title": "ゲーム開始: たとえナンバー",
+              "description": "数字を言葉で例え合い、小さい順に出していく協力ゲーム。",
+              "note": "2〜10人／約5分（テーマ3本）"
+            },
+            {
+              "id": "game:game:insider",
+              "value": "game:insider",
+              "title": "ゲーム開始: 潜入者",
+              "description": "お題を知っている潜入者を、質問と投票で探す正体隠匿ゲーム。",
+              "note": "4〜8人／約5分"
+            },
+            {
+              "id": "game:game:gauge",
+              "value": "game:gauge",
+              "title": "ゲーム開始: 価値観ゲージ",
+              "description": "軸の上の「正解の位置」をヒントで読み合う、チーム対戦の価値観ゲーム。",
+              "note": "4〜12人／約10分"
+            },
+            {
+              "id": "game:game:ruins",
+              "value": "game:ruins",
+              "title": "ゲーム開始: アゴ遺跡の秘宝",
+              "description": "進むか帰るかを全員同時に選ぶ、欲と恐怖のチキンレース。",
+              "note": "3〜8人／約10分（5ラウンド）"
+            },
+            {
+              "id": "game:game:hanabi",
+              "value": "game:hanabi",
+              "title": "ゲーム開始: 花火大会",
+              "description": "自分の手札だけ見えない、ヒントで助け合う協力カードゲーム。",
+              "note": "2〜5人／約15分"
+            },
+            {
+              "id": "game:game:hoshi",
+              "value": "game:hoshi",
+              "title": "ゲーム開始: 星か爆弾か",
+              "description": "伏せたディスクをめくる度胸と読みの、ブラフ＆競りゲーム。",
+              "note": "3〜6人／約10分"
+            },
+            {
+              "id": "game:game:liequiz",
+              "value": "game:liequiz",
+              "title": "ゲーム開始: うそ答えクイズ",
+              "description": "本物そっくりの嘘の答えを作って騙し合うクイズゲーム。",
+              "note": "3〜8人／約8分（5ラウンド）"
+            },
+            {
+              "id": "game:game:cipher",
+              "value": "game:cipher",
+              "title": "ゲーム開始: 暗号バトル",
+              "description": "合言葉へのヒントで暗号を伝え合う、2チーム対抗の言葉の暗号戦。",
+              "note": "4〜8人／約20分（最大8ラウンド）"
+            },
+            {
+              "id": "game:game:wirecut",
+              "value": "game:wirecut",
+              "title": "ゲーム開始: 爆弾処理班",
+              "description": "数字ワイヤーを推理でカットしていく、全員協力の論理ゲーム。",
+              "note": "2〜5人／約15分"
+            },
+            {
+              "id": "game:game:liardice",
+              "value": "game:liardice",
+              "title": "ゲーム開始: ライアーズダイス",
+              "description": "ダイスの合計を読み合う、伝統的なブラフゲーム。",
+              "note": "2〜6人／約10分"
+            },
+            {
+              "id": "game:game:mendou",
+              "value": "game:mendou",
+              "title": "ゲーム開始: めんどうパス",
+              "description": "「これは残業だよ」——めんどうな用事カードを嘘で押し付け合うゲーム。",
+              "note": "2〜6人／約5分"
+            },
+            {
+              "id": "game:game:yotsuba",
+              "value": "game:yotsuba",
+              "title": "ゲーム開始: よつば合わせ",
+              "description": "単語ペアへのヒントを捻り、シャッフルされたカードの配置を当てる協力ワードゲーム。",
+              "note": "3〜6人／約15分"
+            },
+            {
+              "id": "game:game:monthly_king",
+              "value": "game:monthly_king",
+              "title": "今月のゲーム王",
+              "description": "月間のゲーム勝利数ランキング"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "root": "support",
+      "command": "/support",
+      "genres": [
+        {
+          "key": "moderation",
+          "label": "モデレーション",
+          "description": "",
+          "functions": [
+            {
+              "id": "support:muted",
+              "value": "muted",
+              "title": "Muted",
+              "description": ""
+            },
+            {
+              "id": "support:muted_settings",
+              "value": "muted_settings",
+              "title": "Muted設定",
+              "description": ""
+            },
+            {
+              "id": "support:whisper",
+              "value": "whisper",
+              "title": "匿名つぶやきパネル",
+              "description": ""
+            },
+            {
+              "id": "support:sticky",
+              "value": "sticky",
+              "title": "Stickyパネル",
+              "description": ""
+            },
+            {
+              "id": "support:clear",
+              "value": "clear",
+              "title": "メッセージ削除",
+              "description": ""
+            },
+            {
+              "id": "support:giveaway",
+              "value": "giveaway",
+              "title": "抽選（giveaway）",
+              "description": ""
+            },
+            {
+              "id": "support:honeypot",
+              "value": "honeypot",
+              "title": "ハニーポット",
+              "description": ""
+            },
+            {
+              "id": "support:ticket",
+              "value": "ticket",
+              "title": "チケットツール",
+              "description": ""
+            },
+            {
+              "id": "support:ticket_types",
+              "value": "ticket_types",
+              "title": "チケット種別",
+              "description": ""
+            },
+            {
+              "id": "support:ticket_transcript",
+              "value": "ticket_transcript",
+              "title": "チケット記録（トランスクリプト）",
+              "description": ""
+            },
+            {
+              "id": "support:ticket_assign",
+              "value": "ticket_assign",
+              "title": "チケット担当アサイン",
+              "description": ""
+            },
+            {
+              "id": "support:assist_automod",
+              "value": "assist_automod",
+              "title": "AutoMod",
+              "description": "招待リンク・外部リンク・メンションスパム・大文字スパム・連投・チャンネル横断のコピペ荒らしを自動削除します。"
+            },
+            {
+              "id": "support:assist_warnings",
+              "value": "assist_warnings",
+              "title": "警告",
+              "description": "メンバーへの警告を記録し、ログとDMで通知します。"
+            },
+            {
+              "id": "support:assist_applications",
+              "value": "assist_applications",
+              "title": "応募フォーム",
+              "description": "スタッフ応募を受け付け、レビュー担当が承認・不承認を選べます。"
+            },
+            {
+              "id": "support:bot_fixer",
+              "value": "bot_fixer",
+              "title": "BOT fixer",
+              "description": ""
+            },
+            {
+              "id": "support:bot_fixer_bots",
+              "value": "bot_fixer_bots",
+              "title": "他ボット制限（BOT fixer）",
+              "description": ""
+            },
+            {
+              "id": "support:bot_fixer_rates",
+              "value": "bot_fixer_rates",
+              "title": "コマンドレート制限（BOT fixer）",
+              "description": ""
+            }
+          ]
+        },
+        {
+          "key": "roles",
+          "label": "ロール・認証",
+          "description": "",
+          "functions": [
+            {
+              "id": "support:role_bulk",
+              "value": "role_bulk",
+              "title": "一括ロール付与・剥奪",
+              "description": ""
+            },
+            {
+              "id": "support:auth_panel",
+              "value": "auth_panel",
+              "title": "認証パネル作成",
+              "description": ""
+            },
+            {
+              "id": "support:auth_questions",
+              "value": "auth_questions",
+              "title": "認証フォーム質問編集",
+              "description": ""
+            },
+            {
+              "id": "support:role_panel",
+              "value": "role_panel",
+              "title": "ロールパネル作成",
+              "description": ""
+            },
+            {
+              "id": "support:assist_autorole",
+              "value": "assist_autorole",
+              "title": "自動ロール",
+              "description": "メンバーが参加したときに、指定したロールを自動で付与します。"
+            },
+            {
+              "id": "support:assist_leveling",
+              "value": "assist_leveling",
+              "title": "レベル報酬",
+              "description": "既存EXPのレベルに応じて、ロールを自動付与します。"
+            },
+            {
+              "id": "support:assist_reactionroles",
+              "value": "assist_reactionroles",
+              "title": "リアクションロール",
+              "description": "対象メッセージの絵文字リアクションでロールを付与・解除します。"
+            },
+            {
+              "id": "support:assist_stickyroles",
+              "value": "assist_stickyroles",
+              "title": "ロール復元",
+              "description": "退出したメンバーのロールを保存し、再参加時に戻します。"
+            }
+          ]
+        },
+        {
+          "key": "logs",
+          "label": "履歴・ログ",
+          "description": "",
+          "functions": [
+            {
+              "id": "support:vc_log",
+              "value": "vc_log",
+              "title": "VC入退室履歴",
+              "description": ""
+            },
+            {
+              "id": "support:message_log",
+              "value": "message_log",
+              "title": "メッセージ編集履歴",
+              "description": ""
+            },
+            {
+              "id": "support:moderation_log",
+              "value": "moderation_log",
+              "title": "モデレート履歴（TO/KICK/BAN）",
+              "description": ""
+            },
+            {
+              "id": "support:assist_serverlog",
+              "value": "assist_serverlog",
+              "title": "サーバーログ",
+              "description": "参加・退出、メッセージ削除、ロール/チャンネルの作成削除を記録します。"
+            },
+            {
+              "id": "support:assist_invites",
+              "value": "assist_invites",
+              "title": "招待トラッカー",
+              "description": "新しいメンバーがどの招待リンクから参加したかを記録します。"
+            }
+          ]
+        },
+        {
+          "key": "automation",
+          "label": "自動化・通知",
+          "description": "",
+          "functions": [
+            {
+              "id": "support:binjou",
+              "value": "binjou",
+              "title": "絵文字便乗設定（binjou）",
+              "description": ""
+            },
+            {
+              "id": "support:binjou_custom",
+              "value": "binjou_custom",
+              "title": "カスタム便乗ルール",
+              "description": ""
+            },
+            {
+              "id": "support:language",
+              "value": "language",
+              "title": "言語設定",
+              "description": ""
+            },
+            {
+              "id": "support:globalchat",
+              "value": "globalchat",
+              "title": "グローバルチャット",
+              "description": ""
+            },
+            {
+              "id": "support:globalchat_mod",
+              "value": "globalchat_mod",
+              "title": "グローバルチャット モデレーション",
+              "description": ""
+            },
+            {
+              "id": "support:auto_react",
+              "value": "auto_react",
+              "title": "Auto react設定",
+              "description": ""
+            },
+            {
+              "id": "support:quest_notify",
+              "value": "quest_notify",
+              "title": "Quest通知（Discord Orbs）",
+              "description": ""
+            },
+            {
+              "id": "support:quest_manual",
+              "value": "quest_manual",
+              "title": "Quest手動投稿",
+              "description": ""
+            },
+            {
+              "id": "support:levelup_notify",
+              "value": "levelup_notify",
+              "title": "レベルアップ通知（EXP）",
+              "description": ""
+            },
+            {
+              "id": "support:levelup_card_theme",
+              "value": "levelup_card_theme",
+              "title": "レベルアップカードテーマ",
+              "description": ""
+            },
+            {
+              "id": "support:assist_welcome",
+              "value": "assist_welcome",
+              "title": "参加・退出メッセージ",
+              "description": "メンバーの参加・退出を、選んだチャンネルへお知らせします。"
+            },
+            {
+              "id": "support:assist_goodbye",
+              "value": "assist_goodbye",
+              "title": "退出メッセージ",
+              "description": ""
+            },
+            {
+              "id": "support:assist_starboard",
+              "value": "assist_starboard",
+              "title": "Starboard",
+              "description": "リアクションが集まったメッセージを、Starboardチャンネルへ転載します。"
+            },
+            {
+              "id": "support:assist_tempvoice",
+              "value": "assist_tempvoice",
+              "title": "一時VC",
+              "description": "参加すると専用のボイスチャンネルを自動作成し、名前変更やロックができます。"
+            },
+            {
+              "id": "support:tempvoice_panel",
+              "value": "tempvoice_panel",
+              "title": "一時VC操作パネル",
+              "description": ""
+            },
+            {
+              "id": "support:assist_suggestions",
+              "value": "assist_suggestions",
+              "title": "提案箱",
+              "description": "サーバーへの提案を募集し、賛成・反対の票を集めます。"
+            },
+            {
+              "id": "support:assist_polls",
+              "value": "assist_polls",
+              "title": "投票",
+              "description": "質問と選択肢から投票を作り、結果をその場で集計します。"
+            },
+            {
+              "id": "support:assist_autothread",
+              "value": "assist_autothread",
+              "title": "自動スレッド",
+              "description": "指定したチャンネルの各メッセージにスレッドを作ります。"
+            },
+            {
+              "id": "support:assist_stats",
+              "value": "assist_stats",
+              "title": "サーバースタッツ",
+              "description": "メンバー数・オンライン数・ブースト数をVC名に反映します。"
+            },
+            {
+              "id": "support:assist_embed",
+              "value": "assist_embed",
+              "title": "埋め込みビルダー",
+              "description": "タイトル・本文・色・フッター・画像・フィールドを指定してEmbedを投稿します。"
+            },
+            {
+              "id": "support:assist_embed_templates",
+              "value": "assist_embed_templates",
+              "title": "埋め込みテンプレート管理",
+              "description": ""
+            },
+            {
+              "id": "support:assist_webhook",
+              "value": "assist_webhook",
+              "title": "Webhookビルダー",
+              "description": "Webhookを使って、名前とアイコンを変えたメッセージを投稿します。"
+            },
+            {
+              "id": "support:assist_timed",
+              "value": "assist_timed",
+              "title": "タイマー告知",
+              "description": "毎日決まった時刻の告知と、「10分後」などの一回限りのリマインダーを投稿します。"
+            },
+            {
+              "id": "support:assist_reminder",
+              "value": "assist_reminder",
+              "title": "一回限りリマインダー",
+              "description": ""
+            },
+            {
+              "id": "support:assist_warning_escalation",
+              "value": "assist_warning_escalation",
+              "title": "警告エスカレーション",
+              "description": ""
+            },
+            {
+              "id": "support:assist_autoreact",
+              "value": "assist_autoreact",
+              "title": "自動リアクション",
+              "description": "指定チャンネルのメッセージに自動でリアクションを付けます。"
+            },
+            {
+              "id": "support:assist_events",
+              "value": "assist_events",
+              "title": "イベント",
+              "description": "日時と場所を添えて、参加・不参加・未定を受け付けます。"
+            },
+            {
+              "id": "support:assist_events_link",
+              "value": "assist_events_link",
+              "title": "公式イベント連携",
+              "description": ""
+            },
+            {
+              "id": "support:assist_customreplies",
+              "value": "assist_customreplies",
+              "title": "カスタム返信",
+              "description": "言葉に反応して、Botが返信・リアクション・ロール付与をします。"
+            },
+            {
+              "id": "support:assist_shiritori_resident",
+              "value": "assist_shiritori_resident",
+              "title": "常駐しりとり",
+              "description": "指定チャンネルの発言がそのまましりとりの手になる常駐モードです。"
+            },
+            {
+              "id": "support:assist_luna_ai",
+              "value": "assist_luna_ai",
+              "title": "Luna AI",
+              "description": "指定チャンネルの会話に応答する常駐AIです。"
+            },
+            {
+              "id": "support:assist_application_review",
+              "value": "assist_application_review",
+              "title": "応募審査",
+              "description": ""
+            },
+            {
+              "id": "support:voice_trigger",
+              "value": "voice_trigger",
+              "title": "音声トリガーのサーバー設定",
+              "description": ""
+            },
+            {
+              "id": "support:vc_auto_start",
+              "value": "vc_auto_start",
+              "title": "VC参加時の自動開始",
+              "description": ""
+            }
+          ]
+        },
+        {
+          "key": "rta",
+          "label": "RTA設定",
+          "description": "",
+          "functions": [
+            {
+              "id": "support:sokunuke_status",
+              "value": "sokunuke_status",
+              "title": "即抜けRTA状態",
+              "description": ""
+            },
+            {
+              "id": "support:sokunuke_on",
+              "value": "sokunuke_on",
+              "title": "即抜けRTA計測オン",
+              "description": ""
+            },
+            {
+              "id": "support:sokunuke_off",
+              "value": "sokunuke_off",
+              "title": "即抜けRTA計測オフ",
+              "description": ""
+            },
+            {
+              "id": "support:sokunuke_vc_on",
+              "value": "sokunuke_vc_on",
+              "title": "VC自動参加オン",
+              "description": ""
+            },
+            {
+              "id": "support:sokunuke_vc_off",
+              "value": "sokunuke_vc_off",
+              "title": "VC自動参加オフ",
+              "description": ""
+            }
+          ]
+        },
+        {
+          "key": "boardnotify",
+          "label": "boardNotify",
+          "description": "",
+          "functions": [
+            {
+              "id": "support:bumprta_bump",
+              "value": "bumprta_bump",
+              "title": "DISBOARD",
+              "description": ""
+            },
+            {
+              "id": "support:bumprta_up",
+              "value": "bumprta_up",
+              "title": "ディス速",
+              "description": ""
+            },
+            {
+              "id": "support:bumprta_vote",
+              "value": "bumprta_vote",
+              "title": "鯖ちゃんねる",
+              "description": ""
+            },
+            {
+              "id": "support:bumprta_takasumi",
+              "value": "bumprta_takasumi",
+              "title": "TakasumiBOT",
+              "description": ""
+            },
+            {
+              "id": "support:bumprta_dicoall",
+              "value": "bumprta_dicoall",
+              "title": "Dicoall",
+              "description": ""
+            },
+            {
+              "id": "support:bumprta_dcafe",
+              "value": "bumprta_dcafe",
+              "title": "Discord Cafe",
+              "description": ""
+            },
+            {
+              "id": "support:bumprta_sharkbot",
+              "value": "bumprta_sharkbot",
+              "title": "SharkBot",
+              "description": ""
+            },
+            {
+              "id": "support:bumprta_settings",
+              "value": "bumprta_settings",
+              "title": "boardNotify設定（共通）",
+              "description": ""
+            }
+          ]
+        },
+        {
+          "key": "sns",
+          "label": "SNS通知",
+          "description": "",
+          "functions": [
+            {
+              "id": "support:sns_youtube",
+              "value": "sns_youtube",
+              "title": "YouTube通知",
+              "description": ""
+            },
+            {
+              "id": "support:sns_x",
+              "value": "sns_x",
+              "title": "X通知",
+              "description": ""
+            },
+            {
+              "id": "support:sns_github",
+              "value": "sns_github",
+              "title": "GitHub通知",
+              "description": ""
+            },
+            {
+              "id": "support:sns_rss",
+              "value": "sns_rss",
+              "title": "RSS通知",
+              "description": ""
+            },
+            {
+              "id": "support:sns_youtube_live",
+              "value": "sns_youtube_live",
+              "title": "YouTubeライブ通知",
+              "description": ""
+            }
+          ]
+        },
+        {
+          "key": "analysis",
+          "label": "分析",
+          "description": "",
+          "functions": [
+            {
+              "id": "support:person_analysis",
+              "value": "person_analysis",
+              "title": "人物分析",
+              "description": ""
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "root": "help",
+      "command": "/help",
+      "genres": [
+        {
+          "key": "help",
+          "label": "ヘルプ",
+          "description": "",
+          "functions": [
+            {
+              "id": "help:overview",
+              "value": "overview",
+              "title": "ヘルプを表示",
+              "description": ""
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

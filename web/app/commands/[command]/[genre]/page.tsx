@@ -48,9 +48,9 @@ export default async function GenrePage({
       </div>
       <section className="function-list" aria-label={`${genreGuide.title}の機能説明`}>
         {genreGuide.functions.map((feature) => (
-          <article key={feature.title} className="function-card">
+          <article key={feature.id} className="function-card">
             <h2>{feature.title}</h2>
-            <p>{feature.description}</p>
+            {feature.description && <p>{feature.description}</p>}
             {feature.note && <p className="function-note">{feature.note}</p>}
           </article>
         ))}
