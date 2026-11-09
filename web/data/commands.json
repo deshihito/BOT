@@ -1,10 +1,10 @@
 {
-  "generated_at": "2026-11-08T00:06:30+00:00",
+  "generated_at": "2026-11-09T09:09:56+00:00",
   "categories": [
     {
       "id": "support",
       "label": "サポート",
-      "description": "ヘルプ、サーバーをまたぐグローバルチャット、匿名のつぶやき、生存確認など、サーバー生活を便利にする機能です。",
+      "description": "ヘルプ、サーバーをまたぐグローバルチャット、匿名のつぶやき、fujo statusなど、サーバー生活を便利にする機能です。",
       "guide": "## はじめに\n`/help` でカテゴリごとのコマンド一覧を見られます。`/help command:` にコマンド名を入れると、そのコマンドの使い方だけを表示します。\n\n## グローバルチャット\nつないだチャンネルの発言が、ほかのサーバーの接続先へ届きます。チャンネルの接続・解除と荒らし対策（NG ワード・ブロック）は `/support` の「グローバルチャット」から設定します。通話のルームの作成・参加は `/vc` の「グローバルVCルーム」から行います。\n\n## 隠し機能: 今北産業\n会話の途中で「今北産業」と送ると、直近の会話を最大3行で要約します。"
     },
     {
@@ -270,7 +270,7 @@
       "name": "aitools",
       "kind": "prefix",
       "category": "fun",
-      "summary": "Check the status of AI tools",
+      "summary": "Check the status of fastooler",
       "usage": "!aitools [action=status]",
       "options": [
         {
@@ -513,6 +513,34 @@
       "guild_only": false,
       "aliases": [],
       "hidden": false,
+      "guide": null
+    },
+    {
+      "name": "gvcperm",
+      "kind": "prefix",
+      "category": "other",
+      "summary": "常設グローバルVCルームを作成します（Bot管理者のみ）。使い方: !gvcperm ルーム名 [テーマ（省略=日替わり / なし=テーマなし / 自動=日替わり）]",
+      "usage": "!gvcperm [room_name] [theme]",
+      "options": [
+        {
+          "name": "room_name",
+          "type": "string",
+          "required": false,
+          "description": ""
+        },
+        {
+          "name": "theme",
+          "type": "string",
+          "required": false,
+          "description": ""
+        }
+      ],
+      "permissions": [],
+      "guild_only": false,
+      "aliases": [
+        "常設ルーム作成"
+      ],
+      "hidden": true,
       "guide": null
     }
   ]
