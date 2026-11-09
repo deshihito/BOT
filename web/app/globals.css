@@ -255,3 +255,27 @@ body:has([data-activity-root]) > main { max-width:none; min-height:100svh; margi
 @media (prefers-reduced-motion: reduce) {
   .home-video { animation:none; }
 }
+
+/* One Prompter: 一文入力 → 二択質問 → 完成プロンプト */
+.op-page { max-width:680px; margin:0 auto; }
+.op-panel { display:grid; gap:14px; margin-top:20px; padding:20px; border:1px solid var(--line); border-radius:9px; }
+.op-label { font-weight:700; font-size:15px; }
+.op-panel textarea { width:100%; resize:vertical; padding:12px; border:1px solid var(--line); border-radius:8px; outline-color:var(--accent); font:inherit; }
+.op-actions { display:flex; align-items:center; gap:12px; flex-wrap:wrap; }
+.op-primary { padding:12px 20px; border:1px solid var(--accent); border-radius:7px; background:var(--accent); color:#fff; font-weight:700; font-size:16px; cursor:pointer; }
+.op-primary:disabled { opacity:.45; cursor:not-allowed; }
+.op-secondary { padding:12px 18px; border:1px solid var(--line); border-radius:7px; background:#fff; color:var(--text); font-weight:700; cursor:pointer; }
+.op-dots { display:flex; gap:8px; }
+.op-dot { width:10px; height:10px; border-radius:50%; background:var(--line); }
+.op-dot.done { background:var(--accent); }
+.op-dot.current { background:var(--accent); opacity:.45; }
+.op-count { color:var(--muted); font-size:13px; }
+.op-question { font-size:20px; }
+.op-options { display:grid; gap:12px; }
+.op-option { min-height:64px; padding:16px; border:1px solid var(--line); border-radius:9px; background:#fff; color:var(--text); font-size:17px; font-weight:700; text-align:left; cursor:pointer; }
+.op-option:hover { background:var(--accent-soft); border-color:var(--accent); }
+.op-back { justify-self:start; padding:4px 0; border:0; background:transparent; color:var(--muted); cursor:pointer; font-size:14px; }
+.op-summary { display:grid; gap:6px; margin:0; padding:0; list-style:none; }
+.op-summary li { display:flex; gap:10px; flex-wrap:wrap; padding:8px 12px; border:1px solid var(--line); border-radius:8px; background:var(--soft); font-size:14px; font-weight:700; }
+.op-summary li span { color:var(--muted); font-weight:400; }
+.op-result { margin:0; padding:16px; border:1px solid var(--line); border-radius:8px; background:var(--soft); white-space:pre-wrap; overflow-wrap:anywhere; font-size:14px; line-height:1.8; }
