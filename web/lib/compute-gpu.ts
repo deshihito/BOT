@@ -184,32 +184,32 @@ fn king_square(color: i32) -> i32 {
   return -1;
 }
 
-fn is_enemy(target: i32) -> bool {
-  return select(target <= 6, target >= 9, side == 0);
+fn is_enemy(target_piece: i32) -> bool {
+  return select((target_piece <= 6), (target_piece >= 9), side == 0);
 }
 
 fn make_move(m: i32, ply: i32) {
-  let from = m & 0x7f;
+  let from_sq = m & 0x7f;
   let to = (m >> 7) & 0x7f;
-  let piece = board[from];
+  let piece = board[from_sq];
   undo_captured[ply] = board[to];
   undo_castling[ply] = castling;
   undo_ep[ply] = ep;
   ep = -1;
-  castling = castling & ~castle_clear(from) & ~castle_clear(to) & 0xf;
+  castling = castling & ~castle_clear(from_sq) & ~castle_clear(to) & 0xf;
   if ((m & FLAG_EP) != 0) {
     let cap_sq = select(to + 16, to - 16, side == 0);
     undo_captured[ply] = board[cap_sq];
     board[cap_sq] = 0;
   }
   board[to] = piece;
-  board[from] = 0;
+  board[from_sq] = 0;
   let promo = (m >> 14) & 0x7;
   if (promo != 0) {
     board[to] = select(promo + 8, promo, side == 0);
   }
   if ((m & FLAG_DOUBLE) != 0) {
-    ep = select(from - 16, from + 16, side == 0);
+    ep = select(from_sq - 16, from_sq + 16, side == 0);
   }
   if ((m & FLAG_CASTLE) != 0) {
     if (to == 6) { board[5] = board[7]; board[7] = 0; }
@@ -222,14 +222,14 @@ fn make_move(m: i32, ply: i32) {
 
 fn unmake_move(m: i32, ply: i32) {
   side = 1 - side;
-  let from = m & 0x7f;
+  let from_sq = m & 0x7f;
   let to = (m >> 7) & 0x7f;
   var piece = board[to];
   let promo = (m >> 14) & 0x7;
   if (promo != 0) {
     piece = select(9, 1, side == 0);
   }
-  board[from] = piece;
+  board[from_sq] = piece;
   board[to] = 0;
   if ((m & FLAG_CASTLE) != 0) {
     if (to == 6) { board[7] = board[5]; board[5] = 0; }
@@ -250,52 +250,52 @@ fn unmake_move(m: i32, ply: i32) {
 fn gen_moves(ply: i32) -> i32 {
   let base = ply * MAX_MOVES;
   var n = 0;
-  for (var from = 0; from < 128; from++) {
-    if ((from & 0x88) != 0) { continue; }
-    let piece = board[from];
+  for (var from_sq = 0; from_sq < 128; from_sq++) {
+    if ((from_sq & 0x88) != 0) { continue; }
+    let piece = board[from_sq];
     if (piece == 0) { continue; }
-    if (select(piece < 9, piece > 6, side == 0)) { continue; }
+    if (select((piece < 9), (piece > 6), side == 0)) { continue; }
     let ptype = piece & 7;
     if (ptype == 1) {
       // ポーン
       let up = select(-16, 16, side == 0);
       let start_rank = select(6, 1, side == 0);
       let promo_rank = select(1, 6, side == 0);
-      let rank = from >> 4;
-      let one = from + up;
+      let rank = from_sq >> 4;
+      let one = from_sq + up;
       if (board[one] == 0) {
         if (rank == promo_rank) {
           for (var pi = 0; pi < 4; pi++) {
-            move_stack[base + n] = from | (one << 7) | (PROMOS[pi] << 14);
+            move_stack[base + n] = from_sq | (one << 7) | (PROMOS[pi] << 14);
             n += 1;
           }
         } else {
-          move_stack[base + n] = from | (one << 7);
+          move_stack[base + n] = from_sq | (one << 7);
           n += 1;
-          let two = from + 2 * up;
+          let two = from_sq + 2 * up;
           if (rank == start_rank && board[two] == 0) {
-            move_stack[base + n] = from | (two << 7) | FLAG_DOUBLE;
+            move_stack[base + n] = from_sq | (two << 7) | FLAG_DOUBLE;
             n += 1;
           }
         }
       }
       for (var di = 0; di < 2; di++) {
         let d = select(up + 1, up - 1, di == 0);
-        let to = from + d;
+        let to = from_sq + d;
         if ((to & 0x88) != 0) { continue; }
-        let target = board[to];
-        if (target != 0 && is_enemy(target)) {
+        let target_piece = board[to];
+        if (target_piece != 0 && is_enemy(target_piece)) {
           if (rank == promo_rank) {
             for (var pi = 0; pi < 4; pi++) {
-              move_stack[base + n] = from | (to << 7) | (PROMOS[pi] << 14) | FLAG_CAPTURE;
+              move_stack[base + n] = from_sq | (to << 7) | (PROMOS[pi] << 14) | FLAG_CAPTURE;
               n += 1;
             }
           } else {
-            move_stack[base + n] = from | (to << 7) | FLAG_CAPTURE;
+            move_stack[base + n] = from_sq | (to << 7) | FLAG_CAPTURE;
             n += 1;
           }
         } else if (to == ep) {
-          move_stack[base + n] = from | (to << 7) | FLAG_CAPTURE | FLAG_EP;
+          move_stack[base + n] = from_sq | (to << 7) | FLAG_CAPTURE | FLAG_EP;
           n += 1;
         }
       }
@@ -303,59 +303,59 @@ fn gen_moves(ply: i32) -> i32 {
       // ナイト / キング
       for (var i = 0; i < 8; i++) {
         let d = select(KING_DELTAS[i], KNIGHT_DELTAS[i], ptype == 2);
-        let to = from + d;
+        let to = from_sq + d;
         if ((to & 0x88) != 0) { continue; }
-        let target = board[to];
-        if (target == 0) {
-          move_stack[base + n] = from | (to << 7);
+        let target_piece = board[to];
+        if (target_piece == 0) {
+          move_stack[base + n] = from_sq | (to << 7);
           n += 1;
-        } else if (is_enemy(target)) {
-          move_stack[base + n] = from | (to << 7) | FLAG_CAPTURE;
+        } else if (is_enemy(target_piece)) {
+          move_stack[base + n] = from_sq | (to << 7) | FLAG_CAPTURE;
           n += 1;
         }
       }
       if (ptype == 6) {
         // キャスリング
-        if (side == 0 && from == 4) {
+        if (side == 0 && from_sq == 4) {
           if ((castling & 1) != 0 && board[5] == 0 && board[6] == 0 && board[7] == 4 &&
               !is_attacked(4, 1) && !is_attacked(5, 1) && !is_attacked(6, 1)) {
-            move_stack[base + n] = from | (6 << 7) | FLAG_CASTLE;
+            move_stack[base + n] = from_sq | (6 << 7) | FLAG_CASTLE;
             n += 1;
           }
           if ((castling & 2) != 0 && board[3] == 0 && board[2] == 0 && board[1] == 0 && board[0] == 4 &&
               !is_attacked(4, 1) && !is_attacked(3, 1) && !is_attacked(2, 1)) {
-            move_stack[base + n] = from | (2 << 7) | FLAG_CASTLE;
+            move_stack[base + n] = from_sq | (2 << 7) | FLAG_CASTLE;
             n += 1;
           }
-        } else if (side == 1 && from == 116) {
+        } else if (side == 1 && from_sq == 116) {
           if ((castling & 4) != 0 && board[117] == 0 && board[118] == 0 && board[119] == 12 &&
               !is_attacked(116, 0) && !is_attacked(117, 0) && !is_attacked(118, 0)) {
-            move_stack[base + n] = from | (118 << 7) | FLAG_CASTLE;
+            move_stack[base + n] = from_sq | (118 << 7) | FLAG_CASTLE;
             n += 1;
           }
           if ((castling & 8) != 0 && board[115] == 0 && board[114] == 0 && board[113] == 0 && board[112] == 12 &&
               !is_attacked(116, 0) && !is_attacked(115, 0) && !is_attacked(114, 0)) {
-            move_stack[base + n] = from | (114 << 7) | FLAG_CASTLE;
+            move_stack[base + n] = from_sq | (114 << 7) | FLAG_CASTLE;
             n += 1;
           }
         }
       }
     } else {
       // スライダー (3=ビショップ, 4=ルーク, 5=クイーン)
-      for (var set = 0; set < 2; set++) {
-        if (ptype == 3 && set == 1) { continue; }
-        if (ptype == 4 && set == 0) { continue; }
+      for (var set_idx = 0; set_idx < 2; set_idx++) {
+        if (ptype == 3 && set_idx == 1) { continue; }
+        if (ptype == 4 && set_idx == 0) { continue; }
         for (var i = 0; i < 4; i++) {
-          let d = select(ROOK_DELTAS[i], BISHOP_DELTAS[i], set == 0);
-          var to = from + d;
+          let d = select(ROOK_DELTAS[i], BISHOP_DELTAS[i], set_idx == 0);
+          var to = from_sq + d;
           while ((to & 0x88) == 0) {
-            let target = board[to];
-            if (target == 0) {
-              move_stack[base + n] = from | (to << 7);
+            let target_piece = board[to];
+            if (target_piece == 0) {
+              move_stack[base + n] = from_sq | (to << 7);
               n += 1;
             } else {
-              if (is_enemy(target)) {
-                move_stack[base + n] = from | (to << 7) | FLAG_CAPTURE;
+              if (is_enemy(target_piece)) {
+                move_stack[base + n] = from_sq | (to << 7) | FLAG_CAPTURE;
                 n += 1;
               }
               break;
@@ -443,11 +443,17 @@ type GpuDeviceLike = {
     submit: (commandBuffers: unknown[]) => void;
   };
   createBuffer: (desc: { size: number; usage: number }) => GpuBufferLike;
-  createShaderModule: (desc: { code: string }) => unknown;
+  createShaderModule: (desc: { code: string }) => {
+    getCompilationInfo: () => Promise<{
+      messages: { type: string; message: string; lineNum: number }[];
+    }>;
+  };
   createComputePipeline: (desc: {
     layout: string;
     compute: { module: unknown; entryPoint: string };
   }) => { getBindGroupLayout: (index: number) => unknown };
+  pushErrorScope: (filter: string) => void;
+  popErrorScope: () => Promise<{ message: string } | null>;
   createBindGroup: (desc: {
     layout: unknown;
     entries: { binding: number; resource: { buffer: GpuBufferLike } }[];
@@ -517,11 +523,24 @@ function getDevice(): Promise<GpuDeviceLike> {
 let pipelineCache: { device: GpuDeviceLike; pipeline: ReturnType<GpuDeviceLike["createComputePipeline"]> } | null =
   null;
 
-function getPipeline(device: GpuDeviceLike) {
+/**
+ * パイプラインを用意する。WGSL のコンパイルエラーを getCompilationInfo で
+ * 明示的に拾い、失敗したら例外にする（WebGPU の検証エラーは通常の例外に
+ * ならないため、放置すると無効なパイプラインで 0 ノードを返し続けてしまう）。
+ */
+async function getPipeline(device: GpuDeviceLike) {
   if (pipelineCache && pipelineCache.device === device) return pipelineCache.pipeline;
+  const module = device.createShaderModule({ code: WGSL_SOURCE });
+  const info = await module.getCompilationInfo();
+  const compileError = info.messages.find((m) => m.type === "error");
+  if (compileError) {
+    throw new Error(
+      `WGSL compile error (line ${compileError.lineNum}): ${compileError.message}`,
+    );
+  }
   const pipeline = device.createComputePipeline({
     layout: "auto",
-    compute: { module: device.createShaderModule({ code: WGSL_SOURCE }), entryPoint: "main" },
+    compute: { module, entryPoint: "main" },
   });
   pipelineCache = { device, pipeline };
   return pipeline;
@@ -540,7 +559,7 @@ export async function runPerftOnGpu(
   if (subs.length === 0) return { nodes: baseCount, elapsedMs: performance.now() - started };
 
   const device = await getDevice();
-  const pipeline = getPipeline(device);
+  const pipeline = await getPipeline(device);
   const input = encodeSubPositions(subs);
   const inputBuffer = device.createBuffer({ size: input.byteLength, usage: USAGE_STORAGE | USAGE_COPY_DST });
   device.queue.writeBuffer(inputBuffer, 0, input);
@@ -548,6 +567,8 @@ export async function runPerftOnGpu(
   const outputBuffer = device.createBuffer({ size: outputSize, usage: USAGE_STORAGE | USAGE_COPY_SRC });
   const readbackBuffer = device.createBuffer({ size: outputSize, usage: USAGE_MAP_READ | USAGE_COPY_DST });
   try {
+    // 検証エラーを例外として拾い、無効な実行結果を送信しないようにする
+    device.pushErrorScope("validation");
     const bindGroup = device.createBindGroup({
       layout: pipeline.getBindGroupLayout(0),
       entries: [
@@ -563,6 +584,11 @@ export async function runPerftOnGpu(
     pass.end();
     encoder.copyBufferToBuffer(outputBuffer, 0, readbackBuffer, 0, outputSize);
     device.queue.submit([encoder.finish()]);
+    const validationError = await device.popErrorScope();
+    if (validationError) {
+      pipelineCache = null;
+      throw new Error(`WebGPU validation error: ${validationError.message}`);
+    }
 
     await readbackBuffer.mapAsync(MAP_MODE_READ);
     const counts = new Uint32Array(readbackBuffer.getMappedRange().slice(0));
@@ -570,6 +596,11 @@ export async function runPerftOnGpu(
     let nodes = baseCount;
     for (let i = 0; i < subs.length; i++) {
       nodes += counts[i * 2] + counts[i * 2 + 1] * 4294967296;
+    }
+    // 部分局面が1つ以上ある（＝合法手が存在する）局面で 0 はあり得ない。
+    // GPU 側の異常を結果として送信せず、呼び出し側の自動切り替えに任せる。
+    if (nodes === 0 && subs.length > 0) {
+      throw new Error("WebGPU returned zero nodes for a non-terminal position");
     }
     return { nodes, elapsedMs: performance.now() - started };
   } finally {
