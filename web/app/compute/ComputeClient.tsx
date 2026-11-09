@@ -8,6 +8,7 @@
 import { useEffect, useRef, useState } from "react";
 import { isWebGpuSupported, runPerftBatchOnGpu } from "../../lib/compute-gpu";
 import { isWasmSupported } from "../../lib/compute-wasm";
+import { CARE_LEVELS, careSettings, type CareLevel, type CareSettings } from "../../lib/compute-care";
 
 type ComputeMethod = "cpu" | "wasm" | "gpu";
 type LeasedTask = { taskId: string; fen: string; depth: number; leaseToken: string; expiresAt: number };
@@ -51,11 +52,9 @@ type MyStats = { tasks: number; nodes: number };
 
 const STORAGE_KEY = "agobot-compute-contrib-v1";
 const METHOD_STORAGE_KEY = "agobot-compute-method-v1";
-const REST_MS = 200;
+const CARE_STORAGE_KEY = "agobot-compute-care-v1";
 /** CPU / WASM 方式で1回に借りるタスク数（サーバー往復をまとめて減らす）。 */
 const WORKER_BATCH = 16;
-/** WebGPU 方式で1回に借り、1回のディスパッチでまとめて計算するタスク数。 */
-const GPU_BATCH = 8;
 const RETRY_MS = 5000;
 /** WebGPU の計算が続けてこの回数失敗したら、CPU 方式へ自動で切り替える。 */
 const GPU_FAILURE_LIMIT = 2;
@@ -72,6 +71,23 @@ function loadMethod(): ComputeMethod {
 function saveMethod(method: ComputeMethod): void {
   try {
     localStorage.setItem(METHOD_STORAGE_KEY, method);
+  } catch {
+    // 保存できなくても計算は続行する
+  }
+}
+
+function loadCare(): CareLevel {
+  try {
+    const saved = localStorage.getItem(CARE_STORAGE_KEY);
+    return saved === "high" || saved === "low" ? saved : "medium";
+  } catch {
+    return "medium";
+  }
+}
+
+function saveCare(level: CareLevel): void {
+  try {
+    localStorage.setItem(CARE_STORAGE_KEY, level);
   } catch {
     // 保存できなくても計算は続行する
   }
@@ -119,6 +135,10 @@ export default function ComputeClient() {
   const [total, setTotal] = useState<MyStats>({ tasks: 0, nodes: 0 });
   const [message, setMessage] = useState("「計算をはじめる」を押すまで、計算は始まりません。");
   const [method, setMethod] = useState<ComputeMethod>("cpu");
+  const [care, setCare] = useState<CareLevel>("medium");
+  // 開始時点の配慮設定。実行中のループ（ワーカー数・休止・GPUのまとめ方）は
+  // これを参照する。設定の変更は停止中だけでき、次回開始から反映される。
+  const careSettingsRef = useRef<CareSettings>(careSettings("medium", 2));
   const [gpuSupported, setGpuSupported] = useState(false);
   const [wasmSupported, setWasmSupported] = useState(false);
 
@@ -157,6 +177,7 @@ export default function ComputeClient() {
   useEffect(() => {
     setTotal(loadStats());
     setMethod(loadMethod());
+    setCare(loadCare());
     setGpuSupported(isWebGpuSupported());
     setWasmSupported(isWasmSupported());
     void fetchProgress();
@@ -309,7 +330,7 @@ export default function ComputeClient() {
       if (results.length > 0) await submitAndReport(results);
       if (runIdRef.current !== runId) return;
       if (computeFailed && onComputeFailure && onComputeFailure()) return;
-      await sleep(REST_MS);
+      await sleep(careSettingsRef.current.restMs);
     }
   };
 
@@ -320,7 +341,7 @@ export default function ComputeClient() {
         await sleep(800);
         continue;
       }
-      const leased = await leaseBatch(GPU_BATCH);
+      const leased = await leaseBatch(careSettingsRef.current.gpuBatch);
       if (runIdRef.current !== runId) return;
       if (leased === null) {
         setMessage("サーバーに接続できませんでした。少し待ってから自動で再試行します。");
@@ -334,7 +355,7 @@ export default function ComputeClient() {
       setProgress(leased.progress);
       let computed: { nodes: number }[];
       try {
-        computed = await runPerftBatchOnGpu(leased.tasks);
+        computed = await runPerftBatchOnGpu(leased.tasks, careSettingsRef.current.gpuTargetSubs);
         gpuFailuresRef.current = 0;
       } catch {
         gpuFailuresRef.current += 1;
@@ -350,7 +371,7 @@ export default function ComputeClient() {
       await submitAndReport(
         leased.tasks.map((task, i) => ({ taskId: task.taskId, nodes: computed[i].nodes, token: task.leaseToken })),
       );
-      await sleep(REST_MS);
+      await sleep(careSettingsRef.current.restMs);
     }
   };
 
@@ -369,7 +390,7 @@ export default function ComputeClient() {
   };
 
   const startWorkers = (runId: number, useWasm: boolean, onComputeFailure?: () => boolean) => {
-    const concurrency = Math.max(1, Math.min(4, (navigator.hardwareConcurrency || 2) - 1));
+    const concurrency = careSettingsRef.current.workerCount;
     const workers: Worker[] = [];
     for (let slot = 0; slot < concurrency; slot++) {
       const worker = new Worker(
@@ -423,6 +444,7 @@ export default function ComputeClient() {
 
   const start = () => {
     if (running) return;
+    careSettingsRef.current = careSettings(care, navigator.hardwareConcurrency || 2);
     const runId = runIdRef.current + 1;
     runIdRef.current = runId;
     setFinished(false);
@@ -436,6 +458,11 @@ export default function ComputeClient() {
   const chooseMethod = (next: ComputeMethod) => {
     setMethod(next);
     saveMethod(next);
+  };
+
+  const chooseCare = (next: CareLevel) => {
+    setCare(next);
+    saveCare(next);
   };
 
   const statusText = running
@@ -475,6 +502,23 @@ export default function ComputeClient() {
           WebGPU（GPGPU）
         </button>
       </div>
+      <div className="compute-method" role="group" aria-label="端末への配慮">
+        <span className="compute-method-label">端末への配慮</span>
+        {CARE_LEVELS.map((entry) => (
+          <button
+            key={entry.key}
+            type="button"
+            aria-pressed={care === entry.key}
+            disabled={running}
+            onClick={() => chooseCare(entry.key)}
+          >
+            {entry.label}（使用率の目安{entry.usagePercent}%）
+          </button>
+        ))}
+      </div>
+      <p className="compute-status">
+        端末を守るため、使用率100%の設定はありません。どの設定でも余力を残して計算します。配慮の設定は、次に計算をはじめるときから反映されます。
+      </p>
       <p className="compute-status">
         速度の目安：WebGPU は、対応する環境では CPU・WASM
         よりも高速です。WASM は、対応する環境では JavaScript（CPU方式）よりも高速です。
