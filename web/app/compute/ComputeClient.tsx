@@ -280,8 +280,8 @@ export default function ComputeClient() {
     for (let slot = 0; slot < concurrency; slot++) {
       const worker = new Worker(
         useWasm
-          ? new URL("../../lib/compute-wasm.worker.ts", import.meta.url)
-          : new URL("../../lib/compute.worker.ts", import.meta.url),
+          ? new URL("../../lib/compute-wasm.worker.js", import.meta.url)
+          : new URL("../../lib/compute.worker.js", import.meta.url),
         { type: "module" },
       );
       worker.onmessage = (event) => {
