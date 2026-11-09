@@ -77,9 +77,21 @@ def ad_fields(embed):
 
 class CreativeRotationTest(unittest.TestCase):
     def setUp(self):
-        self._old_counter = ads._counter
-        ads._counter = itertools.count()
-        self.addCleanup(setattr, ads, "_counter", self._old_counter)
+        self._old_counters = (ads._slot_counter, ads._house_counter, ads._partner_counter)
+        self._old_partners = ads._partner_creatives
+        self._old_loaded_at = ads._partner_loaded_at
+        ads._slot_counter = itertools.count()
+        ads._house_counter = itertools.count()
+        ads._partner_counter = itertools.count()
+        ads._partner_creatives = []
+        # TTL 内扱いにして、同期テストで裏読み込みが走らないようにする
+        ads._partner_loaded_at = ads.time.monotonic()
+        self.addCleanup(self._restore)
+
+    def _restore(self):
+        ads._slot_counter, ads._house_counter, ads._partner_counter = self._old_counters
+        ads._partner_creatives = self._old_partners
+        ads._partner_loaded_at = self._old_loaded_at
 
     def test_rotation_covers_all_and_wraps(self):
         picks = [ads.pick_creative() for _ in range(len(ads.CREATIVES))]
