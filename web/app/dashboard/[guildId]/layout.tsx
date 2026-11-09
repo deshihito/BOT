@@ -75,7 +75,7 @@ export default async function GuildDashboardLayout({ children, params }: LayoutP
           ) : (
             <span className="guild-icon guild-icon-fallback" aria-hidden="true">{guild.name.slice(0, 1)}</span>
           )}
-          {guild.name}
+          <span className="guild-name">{guild.name}</span>
         </h1>
         <span className="user-chip">
           {/* eslint-disable-next-line @next/next/no-img-element */}
