@@ -99,7 +99,7 @@ class GenreReorgTest(unittest.TestCase):
         self.assertNotIn("miq", g.GENERAL_GENRES)
         custom_values = {v for _label, v in g.GENERAL_ACTIONS["custom"]}
         self.assertNotIn("miq_settings", custom_values)
-        self.assertEqual(len(g.GENERAL_GENRES), 9)  # boardNotify RTA ジャンル追加後
+        self.assertEqual(len(g.GENERAL_GENRES), 10)  # boardNotify RTA・占いジャンル追加後
 
     def test_aliases_for_saved_shortcuts(self):
         self.assertEqual(g.GENERAL_GENRE_ALIASES["meme"], "make_image")

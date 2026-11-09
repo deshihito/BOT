@@ -76,7 +76,7 @@ ACTION_CATEGORY_MAP: dict[str, list[tuple[str, str | None]]] = {
     # の対応が死にエントリとして残っていたため削除した。
     "fun": [("general", "custom"), ("general", "zeta"),
             ("general", "make_image"), ("general", "exp"),
-            ("general", "garden")],
+            ("general", "garden"), ("general", "fortune")],
     "admin": [("support", "moderation"), ("support", "roles"), ("support", "logs"),
               ("support", "rta"),
               ("support", "boardnotify"), ("support", "sns")],

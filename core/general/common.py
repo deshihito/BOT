@@ -61,6 +61,7 @@ GENERAL_GENRES = {
     "exp": ("EXP・レベル", "チャット・VC・generalのEXPとレベル"),
     "survival": ("fujo status", "メンバーの安否・不在の検知"),
     "garden": ("栽培", ""),
+    "fortune": ("占い", ""),
     "custom": ("設定・AI", ""),
     "zeta": ("ZetaModoki", "ロールプレイ会話"),
     "make_image": ("画像作成", ""),
@@ -144,6 +145,9 @@ GENERAL_ACTIONS = {
     ],
     "garden": [
         ("grass simulator", "garden"),
+    ],
+    "fortune": [
+        ("おみくじ", "omikuji"),
     ],
     "exp": [
         ("自分のEXP状況", "exp_status"),
