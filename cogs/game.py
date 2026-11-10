@@ -47,6 +47,7 @@ zetamodoki）は、本体を core/game/<機能>/entry.py へ verbatim 移植し�
     nation_onboarding  core.game.nation_onboarding.cog
     nonogram           core.game.nonogram.cog
     nurupo_rta         core.game.nurupo_rta.cog
+    nyokki             core.game.nyokki.cog
     onenight           core.game.onenight.cog
     othello            core.game.othello.cog
     poker              core.game.poker.cog
@@ -133,6 +134,7 @@ _FEATURE_MODULES = (
     ("nation_onboarding", "core.game.nation_onboarding.cog"),
     ("nonogram", "core.game.nonogram.cog"),
     ("nurupo_rta", "core.game.nurupo_rta.cog"),
+    ("nyokki", "core.game.nyokki.cog"),
     ("onenight", "core.game.onenight.cog"),
     ("othello", "core.game.othello.cog"),
     ("poker", "core.game.poker.cog"),
