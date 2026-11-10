@@ -4,6 +4,7 @@ import { COMMAND_GUIDES, GAME_COUNT, TOTAL_FUNCTIONS } from "@/lib/command-guide
 import { isBotApiConfigured, kvList } from "@/lib/bot-api";
 import { GUILD_REGISTRY_NAMESPACE } from "@/lib/dashboard";
 import { InviteButton } from "./InviteCta";
+import HomeIntro from "./HomeIntro";
 
 export const metadata: Metadata = {
   alternates: { canonical: "/" },
@@ -47,6 +48,7 @@ export default async function Home() {
   const stats = await loadLiveStats();
   return (
     <>
+      <HomeIntro />
       <script
         type="application/ld+json"
         dangerouslySetInnerHTML={{ __html: JSON.stringify(HOME_JSON_LD) }}

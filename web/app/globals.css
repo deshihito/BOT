@@ -252,6 +252,15 @@ body:has([data-activity-root]) > main { max-width:none; min-height:100svh; margi
   .home-hero img, .home-brand-name, .home-hero h1,
   .home-hero-actions, .home-live-stats, .home-command-link { animation:none; }
 }
+.home-intro { position:fixed; inset:0; z-index:100; background:#fff; opacity:1; transition:opacity .6s ease; }
+.home-intro-leaving { opacity:0; pointer-events:none; }
+.home-intro-brand, .home-intro-tagline { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; opacity:0; transition:opacity .5s ease; }
+.home-intro-brand { flex-direction:column; gap:14px; }
+.home-intro-brand img { width:104px; height:104px; }
+.home-intro-brand span { font-size:34px; font-weight:700; letter-spacing:.06em; }
+.home-intro-tagline { font-size:clamp(20px, 5.6vw, 32px); font-weight:700; margin:0; padding:0 20px; text-align:center; }
+.home-intro-show { opacity:1; }
+@media (prefers-reduced-motion: reduce) { .home-intro { display:none; } }
 .home-features { margin-top:44px; }
 .home-features h2 { font-size:20px; margin:0 0 10px; }
 .home-features-lead { color:var(--muted); line-height:1.7; margin:0 0 6px; }
