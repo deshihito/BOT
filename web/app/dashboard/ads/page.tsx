@@ -47,7 +47,7 @@ export default async function DashboardAdsPage() {
         <h2>連携広告枠への掲載申請</h2>
         <p className="muted">
           あなたが管理していてAGOBOTが導入されているサーバーは、boardNotify RTAの記録表示に出る連携広告枠へ掲載を申請できます。
-          審査を通ると30日間、他のサーバーの記録表示に順番で表示されます。
+          審査を通ると、他のサーバーの記録表示に順番で表示されます。掲載期限はないため、停止されるかAGOBOTがサーバーから退出するまで表示され続けます。
         </p>
       </div>
       <AdsClient />

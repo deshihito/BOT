@@ -27,12 +27,6 @@ const STATUS_LABEL: Record<AdStatus, string> = {
   revoked: "停止",
 };
 
-function formatDate(iso: string | null): string {
-  if (!iso) return "";
-  const date = new Date(iso);
-  return Number.isNaN(date.getTime()) ? "" : date.toLocaleDateString("ja-JP");
-}
-
 export default function AdsClient() {
   const [guilds, setGuilds] = useState<EligibleGuild[]>([]);
   const [applications, setApplications] = useState<AdApplication[]>([]);
@@ -231,9 +225,6 @@ export default function AdsClient() {
               <span>
                 <span className={`badge${app.status === "approved" ? " badge-on" : ""}`}>{STATUS_LABEL[app.status]}</span>
                 <strong>{app.guild_name}</strong> — {app.text}
-                {app.status === "approved" && app.expires_at ? (
-                  <span className="settings-note">（{formatDate(app.expires_at)}まで）</span>
-                ) : null}
                 {app.status === "rejected" ? (
                   <span className="settings-note">
                     理由: {REJECT_REASONS.find((item) => item.value === app.reject_reason)?.label ?? "—"}

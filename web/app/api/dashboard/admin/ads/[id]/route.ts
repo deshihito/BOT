@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
 import { loadGuildRegistry } from "@/lib/dashboard";
 import {
-  approvalExpiry,
   canApprove,
   effectiveStatus,
   validateRejectInput,
@@ -11,7 +10,7 @@ import { authorizeOwnerRequest, loadAllApplications, loadApplication, saveApplic
 
 export const runtime = "nodejs";
 
-// 審査操作: approve（掲載開始・期限30日）/ reject（理由分類＋自由文）/ revoke（即時停止）。
+// 審査操作: approve（掲載開始・期限なし）/ reject（理由分類＋自由文）/ revoke（即時停止）。
 // Bot は partner_ads を読み取り時に判定するため、ここで保存すれば次回読込（最長60秒）から反映される。
 
 export async function POST(request: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -62,7 +61,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       ...app,
       ...reviewer,
       status: "approved",
-      expires_at: approvalExpiry(nowMs),
+      expires_at: null,
       reject_reason: null,
       reject_note: null,
       revoke_reason: null,

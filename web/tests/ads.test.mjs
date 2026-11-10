@@ -80,10 +80,12 @@ test("normalizeApplication は壊れたレコードを落とし、必須項目�
 
 // ---------------------------------------------------------- 実効ステータスと上限
 
-test("effectiveStatus は期限切れを expired、退出を revoked として扱う", () => {
+test("effectiveStatus は掲載期限を無視し、退出を revoked として扱う", () => {
   const approved = app({ status: "approved", expires_at: FUTURE });
   assert.equal(m.effectiveStatus(approved, NOW, new Set(["111"])), "approved");
-  assert.equal(m.effectiveStatus(app({ status: "approved", expires_at: PAST }), NOW, new Set(["111"])), "expired");
+  // 掲載期限は撤廃されたため、expires_at が過去でも・無くても approved のまま（永続表示）
+  assert.equal(m.effectiveStatus(app({ status: "approved", expires_at: PAST }), NOW, new Set(["111"])), "approved");
+  assert.equal(m.effectiveStatus(app({ status: "approved", expires_at: null }), NOW, new Set(["111"])), "approved");
   assert.equal(m.effectiveStatus(approved, NOW, new Set(["222"])), "revoked");
   assert.equal(m.effectiveStatus(approved, NOW, null), "approved");
   assert.equal(m.effectiveStatus(app({ status: "pending" }), NOW, new Set()), "pending");
@@ -96,20 +98,26 @@ test("canCreateForGuild は pending があるギルドで新規申請を止め�
   assert.equal(m.canCreateForGuild([], "111"), true);
 });
 
-test("canApprove は全体上限20件（期限内・導入済みのみ数える）で止まる", () => {
+test("canApprove は全体上限20件（承認済み・導入済みのみ数える）で止まる", () => {
   const approved = Array.from({ length: 20 }, (_, i) =>
     app({ id: `a${i}`, guild_id: String(1000 + i), status: "approved", expires_at: FUTURE }));
   const registry = new Set(approved.map((a) => a.guild_id));
   assert.equal(m.countActiveApproved(approved, NOW, registry), 20);
   assert.equal(m.canApprove(approved, NOW, registry), false);
   assert.equal(m.canApprove(approved.slice(0, 19), NOW, registry), true);
-  // 期限切れと退出済みは上限に数えない
+  // 退出済みは上限に数えない。expires_at は数え方に影響しない（期限切れでも数える）
   const mixed = [...approved.slice(0, 19), app({ id: "x", guild_id: "2000", status: "approved", expires_at: PAST })];
-  assert.equal(m.canApprove(mixed, NOW, new Set([...registry, "2000"])), true);
+  assert.equal(m.canApprove(mixed, NOW, registry), true);
+  assert.equal(m.canApprove(mixed, NOW, new Set([...registry, "2000"])), false);
 });
 
-test("approvalExpiry は承認時点から30日", () => {
-  assert.equal(m.approvalExpiry(NOW), new Date(NOW + 30 * m.MS_PER_DAY).toISOString());
+test("isOwnerUser は OWNER_DISCORD_ID 一致のときだけ true（未設定なら常に false）", () => {
+  assert.equal(m.isOwnerUser("111", "111"), true);
+  assert.equal(m.isOwnerUser("222", "111"), false);
+  assert.equal(m.isOwnerUser("111", null), false);
+  assert.equal(m.isOwnerUser("111", ""), false);
+  assert.equal(m.isOwnerUser(null, "111"), false);
+  assert.equal(m.isOwnerUser(undefined, undefined), false);
 });
 
 // ---------------------------------------------------------- スクリーニング

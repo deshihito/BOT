@@ -6,6 +6,7 @@ import { kvGet, kvList, kvSet } from "./bot-api";
 import { getDashboardContext, type DashboardContext } from "./dashboard";
 import {
   buildScreeningRequest,
+  isOwnerUser,
   normalizeApplication,
   parseScreeningResponse,
   unavailableScreening,
@@ -112,8 +113,7 @@ export function ownerDiscordId(): string | null {
 }
 
 export function isOwner(userId: string): boolean {
-  const owner = ownerDiscordId();
-  return owner !== null && userId === owner;
+  return isOwnerUser(userId, ownerDiscordId());
 }
 
 type Authorized = { context: DashboardContext };
