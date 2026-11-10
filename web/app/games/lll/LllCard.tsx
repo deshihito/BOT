@@ -77,6 +77,12 @@ type Props = {
   current?: boolean;
   /** 被弾シェイク中。 */
   hit?: boolean;
+  /** 初回ガイド戦で推奨対象として示す（金枠パルス）。 */
+  guide?: boolean;
+  /** 逐次再生で攻撃側が前進する方向。player は上（敵方向）、cpu は下（自軍方向）。 */
+  lunge?: "up" | "down" | null;
+  /** シールド吸収・防御の拍でバッジ側を点滅させる。 */
+  shieldFlash?: boolean;
   onClick?: () => void;
   /** ドラッグ（Pointer Events）のパススルー。 */
   onPointerDown?: PointerEventHandler<HTMLElement>;
@@ -97,6 +103,9 @@ export default function LllCard({
   targetable = false,
   current = false,
   hit = false,
+  guide = false,
+  lunge = null,
+  shieldFlash = false,
   onClick,
   onPointerDown,
   onPointerMove,
@@ -118,6 +127,9 @@ export default function LllCard({
     targetable ? "lll-card-targetable" : "",
     current ? "lll-card-current" : "",
     hit ? "lll-card-hit" : "",
+    guide ? "lll-card-guide" : "",
+    lunge === "up" ? "lll-card-lunge-up" : lunge === "down" ? "lll-card-lunge-down" : "",
+    shieldFlash ? "lll-card-shieldflash" : "",
     dead ? "lll-card-dead" : "",
     draggableClass ? "lll-draggable" : "",
     onClick ? "lll-card-clickable" : "",
