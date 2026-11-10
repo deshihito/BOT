@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import "./globals.css";
 import { SiteNav } from "./SiteNav";
+import SiteChrome from "./SiteChrome";
 import { FOOTER_GROUPS, SITE_URL } from "@/lib/site";
 import { GAME_COUNT, TOTAL_FUNCTIONS } from "@/lib/command-guides";
 
@@ -45,14 +46,18 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       {/* React 19 が async script を <head> へ hoist するため、静的HTMLの head 内に実在する */}
       <script async src={ADSENSE_SCRIPT_SRC} crossOrigin="anonymous" />
       <body>
-        <header>
-          <nav aria-label="メインメニュー">
-            <Link href="/" className="brand"><img src="/img/nomal.png" alt="" />AGOBOT</Link>
-            <SiteNav />
-          </nav>
-        </header>
+        {/* One Prompter は別サービスのデモのため共通クロームを出さない（SiteChrome がパスで判定） */}
+        <SiteChrome>
+          <header>
+            <nav aria-label="メインメニュー">
+              <Link href="/" className="brand"><img src="/img/nomal.png" alt="" />AGOBOT</Link>
+              <SiteNav />
+            </nav>
+          </header>
+        </SiteChrome>
         <main>{children}</main>
-        <footer>
+        <SiteChrome>
+          <footer>
           <div className="footer-inner">
             {FOOTER_GROUPS.map((group) => (
               <nav key={group.label} className="footer-group" aria-label={group.label}>
@@ -67,7 +72,8 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               </nav>
             ))}
           </div>
-        </footer>
+          </footer>
+        </SiteChrome>
       </body>
     </html>
   );

@@ -321,6 +321,19 @@ body:has([data-activity-root]) > main { max-width:none; min-height:100svh; margi
 .op-loading .op-dot:nth-child(2) { animation-delay:.15s; }
 .op-loading .op-dot:nth-child(3) { animation-delay:.3s; }
 @keyframes op-pulse { 0%,100% { opacity:.25; } 50% { opacity:1; } }
+/* --- One Prompter 独自トーン（サイト共通テーマから独立） ---
+   .op-shell の範囲だけテーマ変数を差し替え、.op-* の既存ルールをそのまま
+   独自配色で描く。フォントもサイト共通の丸ゴシックではなく標準のゴシックにし、
+   ページ背景（body）もシェルがある場合だけ独自色にする。 */
+body:has(.op-shell) { background:#f7f3ec; }
+.op-shell { --bg:#f7f3ec; --soft:#efe9db; --line:#ddd2bd; --text:#2a251e; --muted:#7c7261; --accent:#b3491e; --accent-soft:#f7e8dc; --note:#f3ecd9; color:var(--text); font-family:system-ui,"Hiragino Sans","Noto Sans JP",sans-serif; }
+.op-shell .op-header { min-height:52px; padding:8px 2px; border-bottom:1px solid var(--line); background:transparent; }
+.op-brand { font-size:16px; font-weight:800; letter-spacing:.06em; }
+.op-shell .op-footer { display:flex; align-items:center; gap:18px; flex-wrap:wrap; margin-top:44px; padding:16px 2px 4px; border-top:1px solid var(--line); background:transparent; }
+.op-footer-brand { color:var(--muted); font-size:13px; font-weight:700; letter-spacing:.06em; }
+.op-legal { display:flex; gap:14px; margin-left:auto; }
+.op-legal a { color:var(--muted); font-size:12px; }
+.op-shell .op-option,.op-shell .op-secondary,.op-shell .op-suboption { background:#fffdf9; }
 /* --- WEB ゲーム（/games） --- */
 .games-shell[data-activity-root] { max-width:880px; margin:0 auto; padding:18px 16px 48px; }
 .games-embedded-bar { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:14px; padding-bottom:10px; border-bottom:1px solid var(--line); font-size:14px; }
