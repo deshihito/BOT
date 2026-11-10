@@ -133,6 +133,7 @@ GENERAL_ACTIONS = {
     # プリセットとしてだけ残る（core/general/entry.py の RTA_BOARD_PRESETS）。
     "boardnotify_rta": [
         ("RTAランキング", "rta_board"),
+        ("ぬるぽRTA", "nurupo_board"),
     ],
     "survival": [
         ("追跡登録・解除", "fujo_register"),
