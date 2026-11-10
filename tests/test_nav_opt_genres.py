@@ -12,7 +12,7 @@ class GenreAbsorptionTest(unittest.TestCase):
         values = [value for _label, value in GENERAL_ACTIONS["custom"]]
         self.assertIn("translation_settings", values)
         total = sum(len(items) for items in GENERAL_ACTIONS.values())
-        self.assertEqual(total, 71)  # RTA 個別ボード8件を統合ボード1件に集約（76−8＋1）、その後 即抜けRTAボード追加で +1、おみくじ（新ジャンル「占い」）追加で +1
+        self.assertEqual(total, 72)  # RTA 個別ボード8件を統合ボード1件に集約（76−8＋1）、その後 即抜けRTAボード追加で +1、おみくじ（新ジャンル「占い」）追加で +1、ぬるぽRTAボード追加で +1
 
     def test_support_single_action_genres_absorbed(self):
         from cogs.support import SUPPORT_ACTIONS_BY_GENRE, SUPPORT_GENRES

@@ -1,7 +1,8 @@
 # -*- coding: utf-8 -*-
 """boardNotify RTA 統合ボードの表示導線のテスト。Discord には接続しない。
 
-- /general の新ジャンル boardnotify_rta に統合ボード（rta_board）1件だけがある
+- /general の新ジャンル boardnotify_rta に統合ボード（rta_board）がある
+  （その後、別機能のボードとして ぬるぽRTA（nurupo_board）が同居した）
 - 旧 bump/up 個別ボード8件はジャンルにもレジストリにも無い
 - dispatch_general は rta_board で統合ボードを開き、旧8件の ID は互換
   プリセット（スコープ/最速最遅のみ引き継ぎ）として統合ボードに着地する
@@ -31,12 +32,15 @@ OLD_BOARD_VALUES = (
 
 
 class UnifiedBoardGenreTest(unittest.TestCase):
-    def test_boardnotify_rta_genre_has_single_board_action(self):
+    def test_boardnotify_rta_genre_actions(self):
         from core.general.common import GENERAL_ACTIONS, GENERAL_GENRES
 
         self.assertEqual(GENERAL_GENRES["boardnotify_rta"][0], "boardNotify RTA")
+        # 統合ボード1件が要（旧 bump/up 個別ボードは置かない）。ぬるぽRTA
+        # ボードは別機能のボードとして同ジャンルに並ぶ（2026-11-10）。
         self.assertEqual(
-            GENERAL_ACTIONS["boardnotify_rta"], [("RTAランキング", "rta_board")])
+            GENERAL_ACTIONS["boardnotify_rta"],
+            [("RTAランキング", "rta_board"), ("ぬるぽRTA", "nurupo_board")])
 
     def test_old_board_actions_removed_everywhere(self):
         from core.general.common import GENERAL_ACTIONS
@@ -71,11 +75,12 @@ class UnifiedBoardGenreTest(unittest.TestCase):
         # サーバー分析（support:server_analytics）追加で全体 248→249。
         # DiscordServers.io 入口（support:bumprta_dsio）追加で全体 249→250。
         # DISCOM 入口（support:bumprta_discom）追加で全体 250→251。
+        # ぬるぽRTAボード（general:nurupo_board）追加で general 71→72 / 全体 251→252。
         from core.general import action_registry
 
         specs = list(action_registry.default_registry()._by_id.values())
-        self.assertEqual(len(specs), 251)
-        self.assertEqual(len([s for s in specs if s.root == "general"]), 71)
+        self.assertEqual(len(specs), 252)
+        self.assertEqual(len([s for s in specs if s.root == "general"]), 72)
 
 
 class UnifiedBoardDispatchTest(unittest.IsolatedAsyncioTestCase):
