@@ -71,6 +71,7 @@ const computeWasm = flatten(
   ["./chess-perft", "./compute-wasm-bytes"],
   "compute-wasm.ts",
 );
+const chessEngine = flatten(transpile("chess-engine.ts"), ["./chess-perft"], "chess-engine.ts");
 
 buildWorker({
   outName: "compute.worker.js",
@@ -81,4 +82,9 @@ buildWorker({
   outName: "compute-wasm.worker.js",
   entryName: "compute-wasm.worker.entry.js",
   parts: [wasmBytes, chessPerft, computeWasm],
+});
+buildWorker({
+  outName: "chess-cpu.worker.js",
+  entryName: "chess-cpu.worker.entry.js",
+  parts: [chessPerft, chessEngine],
 });
