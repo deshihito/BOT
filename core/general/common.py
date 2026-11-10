@@ -62,6 +62,7 @@ GENERAL_GENRES = {
     "survival": ("fujo status", "メンバーの安否・不在の検知"),
     "garden": ("栽培", ""),
     "fortune": ("占い", ""),
+    "utility": ("ユーティリティ", ""),
     "custom": ("設定・AI", ""),
     "zeta": ("ZetaModoki", "ロールプレイ会話"),
     "make_image": ("画像作成", ""),
@@ -149,6 +150,9 @@ GENERAL_ACTIONS = {
     ],
     "fortune": [
         ("おみくじ", "omikuji"),
+    ],
+    "utility": [
+        ("天気", "weather"),
     ],
     "exp": [
         ("自分のEXP状況", "exp_status"),

@@ -1,8 +1,8 @@
 {
   "version": 1,
-  "total": 254,
+  "total": 255,
   "counts": {
-    "general": 72,
+    "general": 73,
     "vc": 45,
     "game": 49,
     "support": 87,
@@ -377,6 +377,19 @@
               "id": "general:omikuji",
               "value": "omikuji",
               "title": "おみくじ",
+              "description": ""
+            }
+          ]
+        },
+        {
+          "key": "utility",
+          "label": "ユーティリティ",
+          "description": "",
+          "functions": [
+            {
+              "id": "general:weather",
+              "value": "weather",
+              "title": "天気",
               "description": ""
             }
           ]
