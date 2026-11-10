@@ -331,9 +331,10 @@ body:has([data-activity-root]) > main { max-width:none; min-height:100svh; margi
 body:has(.op-shell) { background:#f4f8fd; }
 .op-shell { --bg:#f4f8fd; --soft:#edf0f4; --line:#d7dce2; --text:#17191c; --muted:#6a7280; --accent:#17191c; --accent-soft:#edf0f4; --note:#eef1f6; color:var(--text); font-family:system-ui,"Hiragino Sans","Noto Sans JP",sans-serif; }
 .op-shell .op-header { min-height:52px; padding:8px 2px; border-bottom:1px solid var(--line); background:transparent; }
-.op-brand { font-size:16px; font-weight:800; letter-spacing:.06em; }
+.op-brand { display:flex; align-items:center; gap:9px; font-size:16px; font-weight:800; letter-spacing:.06em; }
 .op-shell .op-footer { display:flex; align-items:center; gap:18px; flex-wrap:wrap; margin-top:44px; padding:16px 2px 4px; border-top:1px solid var(--line); background:transparent; }
-.op-footer-brand { color:var(--muted); font-size:13px; font-weight:700; letter-spacing:.06em; }
+.op-footer-brand { display:flex; align-items:center; gap:7px; color:var(--muted); font-size:13px; font-weight:700; letter-spacing:.06em; }
+.op-brand svg, .op-footer-brand svg { flex:none; display:block; }
 .op-shell .op-option,.op-shell .op-secondary,.op-shell .op-suboption { background:#ffffff; }
 /* --- WEB ゲーム（/games） --- */
 .games-shell[data-activity-root] { max-width:880px; margin:0 auto; padding:18px 16px 48px; }
