@@ -133,18 +133,22 @@ class FakeDb:
             return FakeResponse(None)
         if name in ("get_bump_rta_global_combined_ranking",
                     "get_bump_rta_global_combined_slowest_ranking"):
-            # 統合 RPC: event_type で絞らず全サービスを一括集計する。
+            # 統合 RPC: (user_id, event_type) ごとに集計したエントリを
+            # pooled で返す（legacy はエントリにしない）。
             slowest = name.endswith("_slowest_ranking")
             grouped = {}
             for event in self.tables["bump_rta_events"]:
-                entry = grouped.setdefault(event["user_id"], {"elapsed": [], "attempts": 0})
+                if event["event_type"] == "legacy":
+                    continue
+                key = (event["user_id"], event["event_type"])
+                entry = grouped.setdefault(key, {"elapsed": [], "attempts": 0})
                 entry["elapsed"].append(event["elapsed_ms"])
                 entry["attempts"] += 1
             data = [{
-                "user_id": uid,
+                "user_id": uid, "event_type": event_type,
                 "elapsed_ms": (max(v["elapsed"]) if slowest else min(v["elapsed"])),
                 "attempts": v["attempts"],
-            } for uid, v in grouped.items()]
+            } for (uid, event_type), v in grouped.items()]
             data.sort(key=lambda r: r["elapsed_ms"], reverse=slowest)
             return FakeResponse(data[:params.get("p_limit", 10)])
         raise AssertionError(f"unexpected rpc: {name}")
@@ -264,7 +268,7 @@ class SlowestLeaderboardTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(embed.title, title)
         self.assertTrue(png.startswith(b"\x89PNG"))
 
-    async def test_global_slowest_uses_max_per_user(self):
+    async def test_global_slowest_uses_max_per_user_and_type(self):
         db = FakeDb()
         db.tables["bump_rta_events"] = [
             {"guild_id": "1", "user_id": "111", "event_type": "bump",
@@ -297,12 +301,16 @@ class SlowestLeaderboardTest(unittest.IsolatedAsyncioTestCase):
         embed, png = await board_embed(cog, scope="me", slowest=True)
         self.assertIsNone(png)
         self.assertIn("最遅記録", embed.description)
-        self.assertIn("150.00秒", embed.description)
-        self.assertIn("200.00秒", embed.description)
+        # 種類別エントリとして bump の行に両スコープの値が並ぶ
+        self.assertIn("bump: このサーバー **150.00秒** / 全サーバー **200.00秒**",
+                      embed.description)
         embed, png = await board_embed(cog, scope="me")
         self.assertIsNone(png)
         self.assertIn("自己ベスト", embed.description)
         self.assertNotIn("最遅", embed.description)
+        # 最速側はこのサーバーに記録がなく、全サーバーの最小だけが出る
+        self.assertIn("bump: このサーバー 記録なし / 全サーバー **5.00秒**",
+                      embed.description)
 
     async def test_leaderboard_sends_image_board(self):
         db = FakeDb()
@@ -318,10 +326,15 @@ class SlowestLeaderboardTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn("file", kwargs)
 
 
-class CombinedBoardTest(unittest.IsolatedAsyncioTestCase):
-    """統合ランキング: ユーザーごとに全サービス中の最小（最速）/ 最大（最遅）。"""
+class EntryBoardTest(unittest.IsolatedAsyncioTestCase):
+    """統合ランキング: 行は (ユーザー × サービス種類) のエントリ単位。
 
-    async def test_local_fastest_uses_min_across_services(self):
+    同じユーザーが bump と up の記録を持てば両方載り、ユーザー単位には
+    潰さない。最速は records の全行、最遅は worst_records の全行を
+    pooled で並べる。
+    """
+
+    async def test_local_fastest_pools_service_entries(self):
         db = FakeDb()
         db.tables["bump_rta_records"] = [
             {"guild_id": "456", "user_id": "111", "event_type": "bump",
@@ -337,13 +350,15 @@ class CombinedBoardTest(unittest.IsolatedAsyncioTestCase):
         cog = make_cog(db)
         title, data = await board_rows(cog, scope="local")
         self.assertEqual(title, "このサーバー RTAランキング")
-        self.assertEqual([r["user_id"] for r in data], ["111", "222"])
-        self.assertEqual([r["elapsed_ms"] for r in data], [30000, 42000])
+        # user 111 が up と bump の2行で載る（ユーザー単位に潰さない）
+        self.assertEqual([r["user_id"] for r in data], ["111", "222", "111"])
+        self.assertEqual([r["event_type"] for r in data], ["up", "vote", "bump"])
+        self.assertEqual([r["elapsed_ms"] for r in data], [30000, 42000, 50000])
         embed, png = await board_embed(cog, scope="local")
         self.assertEqual(embed.title, title)
         self.assertTrue(png.startswith(b"\x89PNG"))
 
-    async def test_local_slowest_uses_max_across_services(self):
+    async def test_local_slowest_pools_service_entries(self):
         db = FakeDb()
         db.tables["bump_rta_worst_records"] = [
             {"guild_id": "456", "user_id": "111", "event_type": "bump",
@@ -356,14 +371,17 @@ class CombinedBoardTest(unittest.IsolatedAsyncioTestCase):
         cog = make_cog(db)
         title, data = await board_rows(cog, scope="local", slowest=True)
         self.assertEqual(title, "このサーバー 最遅ランキング")
-        self.assertEqual([r["user_id"] for r in data], ["111", "222"])
-        self.assertEqual([r["elapsed_ms"] for r in data], [150000, 120000])
+        self.assertEqual([r["user_id"] for r in data], ["111", "222", "111"])
+        self.assertEqual([r["event_type"] for r in data], ["up", "dcafe", "bump"])
+        self.assertEqual([r["elapsed_ms"] for r in data], [150000, 120000, 90000])
 
-    async def test_global_combined_merges_services_and_attempts(self):
+    async def test_global_entries_group_attempts_per_user_and_type(self):
         db = FakeDb()
         db.tables["bump_rta_events"] = [
             {"guild_id": "1", "user_id": "111", "event_type": "bump",
              "elapsed_ms": 50000, "completed_at": T0.isoformat()},
+            {"guild_id": "2", "user_id": "111", "event_type": "bump",
+             "elapsed_ms": 80000, "completed_at": T0.isoformat()},
             {"guild_id": "2", "user_id": "111", "event_type": "up",
              "elapsed_ms": 200000, "completed_at": T0.isoformat()},
             {"guild_id": "1", "user_id": "222", "event_type": "vote",
@@ -372,15 +390,49 @@ class CombinedBoardTest(unittest.IsolatedAsyncioTestCase):
         cog = make_cog(db)
         title, data = await board_rows(cog, scope="global")
         self.assertEqual(title, "全サーバー RTAランキング")
-        self.assertEqual([r["user_id"] for r in data], ["111", "222"])
-        self.assertEqual(data[0]["elapsed_ms"], 50000)
-        self.assertEqual(data[0]["attempts"], 2)  # bump + up の合計
+        self.assertEqual([r["user_id"] for r in data], ["111", "222", "111"])
+        self.assertEqual([r["event_type"] for r in data], ["bump", "vote", "up"])
+        self.assertEqual(data[0]["elapsed_ms"], 50000)  # (111, bump) の最小
+        self.assertEqual(data[0]["attempts"], 2)        # (111, bump) の2回分
+        self.assertEqual(data[2]["attempts"], 1)        # (111, up) は別集計
         title, data = await board_rows(cog, scope="global", slowest=True)
-        self.assertEqual([r["user_id"] for r in data], ["111", "222"])
-        self.assertEqual(data[0]["elapsed_ms"], 200000)
-        self.assertEqual(data[0]["attempts"], 2)
+        self.assertEqual([r["user_id"] for r in data], ["111", "222", "111"])
+        self.assertEqual([r["event_type"] for r in data], ["up", "vote", "bump"])
+        self.assertEqual([r["elapsed_ms"] for r in data], [200000, 120000, 80000])
+        self.assertEqual(data[2]["attempts"], 2)        # (111, bump) の最大側
 
-    async def test_me_combined_picks_extremes_across_services(self):
+    async def test_board_rows_carry_service_labels(self):
+        from unittest.mock import patch
+        db = FakeDb()
+        db.tables["bump_rta_records"] = [
+            {"guild_id": "456", "user_id": "111", "event_type": "bump",
+             "elapsed_ms": 50000, "completed_at": T0.isoformat()},
+            {"guild_id": "456", "user_id": "111", "event_type": "up",
+             "elapsed_ms": 30000, "completed_at": T0.isoformat()},
+        ]
+        db.tables["bump_rta_events"] = [
+            {"guild_id": "1", "user_id": "111", "event_type": "bump",
+             "elapsed_ms": 50000, "completed_at": T0.isoformat()},
+            {"guild_id": "2", "user_id": "111", "event_type": "bump",
+             "elapsed_ms": 80000, "completed_at": T0.isoformat()},
+        ]
+        cog = make_cog(db)
+        with patch("core.game.rta.settings.render_leaderboard_png",
+                   return_value=b"\x89PNG-fake") as render:
+            embed, png = await board_embed(cog, scope="local")
+        rows = render.call_args.kwargs["sections"][0][1]
+        self.assertEqual(png, b"\x89PNG-fake")
+        # 同じユーザーの2行とも名前は同じで、sub にサービス名が入る
+        self.assertEqual([r.name for r in rows], ["user-111", "user-111"])
+        self.assertEqual([r.sub for r in rows], ["up", "bump"])
+        with patch("core.game.rta.settings.render_leaderboard_png",
+                   return_value=b"\x89PNG-fake") as render:
+            embed, png = await board_embed(cog, scope="global")
+        rows = render.call_args.kwargs["sections"][0][1]
+        # global はサービス名に試行回数を併記する
+        self.assertEqual([r.sub for r in rows], ["bump ・ 2回"])
+
+    async def test_me_lists_entries_per_service(self):
         db = FakeDb()
         db.tables["bump_rta_records"] = [
             {"guild_id": "456", "user_id": "321", "event_type": "bump",
@@ -404,13 +456,20 @@ class CombinedBoardTest(unittest.IsolatedAsyncioTestCase):
         embed, png = await board_embed(cog, scope="me")
         self.assertIsNone(png)
         self.assertIn("自己ベスト", embed.description)
-        self.assertIn("25.00秒", embed.description)   # このサーバー: up の最小
-        self.assertIn("8.00秒", embed.description)    # 全サーバー: dicoall の最小
+        # 種類ごとに行が出て、欠けた側は「記録なし」になる
+        self.assertIn("bump: このサーバー **40.00秒** / 全サーバー **300.00秒**",
+                      embed.description)
+        self.assertIn("up: このサーバー **25.00秒** / 全サーバー 記録なし",
+                      embed.description)
+        self.assertIn("Dicoall: このサーバー 記録なし / 全サーバー **8.00秒**",
+                      embed.description)
         embed, png = await board_embed(cog, scope="me", slowest=True)
         self.assertIsNone(png)
         self.assertIn("最遅記録", embed.description)
-        self.assertIn("180.00秒", embed.description)  # このサーバー: vote の最大
-        self.assertIn("300.00秒", embed.description)  # 全サーバー: bump の最大
+        self.assertIn("bump: このサーバー **90.00秒** / 全サーバー **300.00秒**",
+                      embed.description)
+        self.assertIn("鯖ちゃんねる: このサーバー **180.00秒** / 全サーバー 記録なし",
+                      embed.description)
 
     async def test_empty_board_is_text_not_error(self):
         cog = make_cog(FakeDb())

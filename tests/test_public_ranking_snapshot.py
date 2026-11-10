@@ -98,7 +98,7 @@ if __name__ == "__main__":
 
 
 from core.support.public_ranking.snapshot import (
-    best_rta_rows, combine_rta_boards,
+    best_rta_rows, pool_rta_boards,
 )
 
 
@@ -133,8 +133,8 @@ class BestRtaRowsTest(unittest.TestCase):
         self.assertEqual(picked[0]["completed_at"], None)
 
 
-class CombineRtaBoardsTest(unittest.TestCase):
-    def test_fastest_across_services_with_service_and_date(self):
+class PoolRtaBoardsTest(unittest.TestCase):
+    def test_pools_entries_without_collapsing_users(self):
         boards = {
             "bump": [
                 {"user_id": 111, "elapsed_ms": 5000,
@@ -149,22 +149,26 @@ class CombineRtaBoardsTest(unittest.TestCase):
                  "completed_at": "2026-12-06T10:00:00+00:00"},
             ],
         }
-        combined = combine_rta_boards(boards)
+        pooled = pool_rta_boards(boards)
+        # user 222 は bump と up の2エントリで載る（ユーザー単位に潰さない）
         self.assertEqual(
-            [(r["user_id"], r["elapsed_ms"], r["service"]) for r in combined],
-            [(222, 4000, "up"), (111, 5000, "bump"), (333, 9000, "up")],
+            [(r["user_id"], r["elapsed_ms"], r["service"]) for r in pooled],
+            [(222, 4000, "up"), (111, 5000, "bump"),
+             (222, 8000, "bump"), (333, 9000, "up")],
         )
-        self.assertEqual(combined[0]["completed_at"],
+        self.assertEqual(pooled[0]["completed_at"],
                          "2026-12-05T10:00:00+00:00")
 
-    def test_slowest_picks_max(self):
+    def test_slowest_pools_in_descending_order(self):
         boards = {
             "bump": [{"user_id": 111, "elapsed_ms": 5000, "completed_at": None}],
             "up": [{"user_id": 111, "elapsed_ms": 7000, "completed_at": None}],
         }
-        combined = combine_rta_boards(boards, slowest=True)
-        self.assertEqual(combined[0]["elapsed_ms"], 7000)
-        self.assertEqual(combined[0]["service"], "up")
+        pooled = pool_rta_boards(boards, slowest=True)
+        self.assertEqual(
+            [(r["elapsed_ms"], r["service"]) for r in pooled],
+            [(7000, "up"), (5000, "bump")],
+        )
 
 
 class BuildSnapshotRtaBoardsTest(unittest.TestCase):
@@ -179,18 +183,20 @@ class BuildSnapshotRtaBoardsTest(unittest.TestCase):
         }
         names = {111: "アゴ太郎", 222: "ミリィ"}
         snapshot = build_snapshot([], [], names, now=NOW, rta_boards=boards)
-        # 新形式: 日時・サービスつき
+        # rta は日時・サービスつきの単一ボード（{fast, slow}）
         self.assertEqual(
-            snapshot["rta"]["bump"]["fast"],
+            snapshot["rta"]["fast"],
             [{"name": "アゴ太郎", "value": 5300,
               "at": "2026-12-25T10:00:00+00:00", "service": "bump"}],
         )
-        self.assertEqual(snapshot["rta"]["bump"]["slow"][0]["value"], 90000)
-        # 総合ボードにも同じ記録がサービスつきで載る
-        self.assertEqual(snapshot["rta"]["all"]["fast"][0]["name"], "アゴ太郎")
-        self.assertEqual(snapshot["rta"]["all"]["fast"][0]["service"], "bump")
-        # データの無いサービスは空ボード
-        self.assertEqual(snapshot["rta"]["sharkbot"], {"fast": [], "slow": []})
+        self.assertEqual(
+            snapshot["rta"]["slow"],
+            [{"name": "ミリィ", "value": 90000,
+              "at": "2026-12-26T10:00:00+00:00", "service": "bump"}],
+        )
+        # サービス別のキーは持たない
+        self.assertNotIn("bump", snapshot["rta"])
+        self.assertNotIn("all", snapshot["rta"])
         # 旧キーは従来形式（name / value のみ）のまま
         self.assertEqual(snapshot["bump"], [{"name": "アゴ太郎", "value": 5300}])
         self.assertEqual(snapshot["up"], [])
@@ -198,3 +204,27 @@ class BuildSnapshotRtaBoardsTest(unittest.TestCase):
         text = json.dumps(snapshot, ensure_ascii=False)
         for forbidden in ("user_id", "guild"):
             self.assertNotIn(forbidden, text)
+
+    def test_rta_board_keeps_same_user_per_service(self):
+        boards = {
+            "bump": {
+                "fast": [{"user_id": 111, "elapsed_ms": 5300,
+                          "completed_at": "2026-12-25T10:00:00+00:00"}],
+                "slow": [],
+            },
+            "up": {
+                "fast": [{"user_id": 111, "elapsed_ms": 4000,
+                          "completed_at": "2026-12-24T10:00:00+00:00"}],
+                "slow": [],
+            },
+        }
+        names = {111: "アゴ太郎"}
+        snapshot = build_snapshot([], [], names, now=NOW, rta_boards=boards)
+        # 同じユーザーが bump と up の2エントリで載る
+        self.assertEqual(
+            snapshot["rta"]["fast"],
+            [{"name": "アゴ太郎", "value": 4000,
+              "at": "2026-12-24T10:00:00+00:00", "service": "up"},
+             {"name": "アゴ太郎", "value": 5300,
+              "at": "2026-12-25T10:00:00+00:00", "service": "bump"}],
+        )

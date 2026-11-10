@@ -123,12 +123,13 @@ class SettingsMixin:
     async def _rta_ranking_rows(self, scope: str, slowest: bool, guild_id):
         """local / global スコープの (表題, 行データ) を取得する。
 
-        集計は全サービス一括（統合ランキング）: ユーザーごとに最速は
-        全サービス中の最小、最遅は全サービス中の最大。記録自体は
-        サービス別（event_type 付き）のまま保持し、表示だけを統合する。
-        local は記録テーブル（最速 bump_rta_records / 最遅
-        bump_rta_worst_records）の全サービス分を読み、ユーザーごとに
-        集約する。global は events から一括集計する統合 RPC を使う。
+        ランキングの行は「ユーザー × サービス種類」のエントリ単位:
+        同じユーザーが bump と up の記録を持てば両方の行が載る。
+        最速ボードは記録テーブル（bump_rta_records）の全行、最遅ボードは
+        bump_rta_worst_records の全行を、そのまま pooled で並べる。
+        local はギルド分を読み、global は events を (user_id, event_type)
+        で集計する統合 RPC を使う。legacy（分離前の混在履歴）はサービス
+        ではないためエントリにしない。
         """
         title = self._rta_board_title(scope, slowest)
         if scope == "global":
@@ -139,36 +140,59 @@ class SettingsMixin:
             return title, rows.data or []
         record_table = "bump_rta_worst_records" if slowest else "bump_rta_records"
         rows = await self._call(lambda: self.db.table(record_table).select(
-            "user_id,elapsed_ms,completed_at").eq("guild_id", str(guild_id)).order(
+            "user_id,event_type,elapsed_ms,completed_at").eq(
+            "guild_id", str(guild_id)).order(
             "elapsed_ms", desc=slowest).limit(10000).execute())
-        best: dict[str, dict] = {}
-        for row in rows.data or []:
-            uid = str(row["user_id"])
-            current = best.get(uid)
-            if current is None or (
-                (int(row["elapsed_ms"]) > int(current["elapsed_ms"])) if slowest
-                else (int(row["elapsed_ms"]) < int(current["elapsed_ms"]))
-            ):
-                best[uid] = row
-        data = sorted(
-            best.values(),
-            key=lambda r: int(r["elapsed_ms"]), reverse=slowest)[:10]
-        return title, data
+        data = [r for r in rows.data or []
+                if r.get("event_type") in SERVICE_LABELS]
+        data.sort(key=lambda r: int(r["elapsed_ms"]), reverse=slowest)
+        return title, data[:10]
 
     async def _rta_me_embed(self, slowest: bool, guild_id, user_id, user_name):
-        """me スコープ: 自分の統合記録（このサーバー / 全サーバー）のテキスト embed。"""
+        """me スコープ: 自分の種類別エントリ（このサーバー / 全サーバー）。
+
+        サービスごとに、このサーバーでの記録（記録テーブルの自分の行）と
+        全サーバーでの記録（events を種類別に集計した最小 / 最大）を並べる。
+        """
         uid, gid = str(user_id), str(guild_id)
         record_table = "bump_rta_worst_records" if slowest else "bump_rta_records"
         local_rows = await self._call(lambda: self.db.table(record_table).select(
-            "elapsed_ms,completed_at").eq("guild_id", gid).eq("user_id", uid).order(
-                "elapsed_ms", desc=slowest).limit(1).execute())
-        global_best = await self._call(lambda: self.db.table("bump_rta_events").select(
-            "elapsed_ms,completed_at").eq("user_id", uid).order("elapsed_ms", desc=slowest).limit(1).execute())
-        local_text = f"{local_rows.data[0]['elapsed_ms'] / 1000:.2f}秒" if local_rows.data else "記録なし"
-        global_text = f"{global_best.data[0]['elapsed_ms'] / 1000:.2f}秒" if global_best.data else "記録なし"
+            "event_type,elapsed_ms").eq("guild_id", gid).eq(
+            "user_id", uid).limit(100).execute())
+        event_rows = await self._call(lambda: self.db.table("bump_rta_events").select(
+            "event_type,elapsed_ms").eq("user_id", uid).limit(10000).execute())
+        local_by_type = {
+            str(r["event_type"]): int(r["elapsed_ms"])
+            for r in local_rows.data or []
+            if r.get("event_type") in SERVICE_LABELS}
+        global_by_type: dict[str, int] = {}
+        for r in event_rows.data or []:
+            event_type = r.get("event_type")
+            if event_type not in SERVICE_LABELS:
+                continue
+            elapsed = int(r["elapsed_ms"])
+            current = global_by_type.get(str(event_type))
+            if current is None or (elapsed > current if slowest
+                                    else elapsed < current):
+                global_by_type[str(event_type)] = elapsed
+
+        def fmt(by_type, event_type):
+            if event_type not in by_type:
+                return "記録なし"
+            return f"**{by_type[event_type] / 1000:.2f}秒**"
+
         label = "最遅記録" if slowest else "自己ベスト"
-        return _white_embed(
-            f"{user_name} の**{label}**\nこのサーバー: **{local_text}**\n全サーバー: **{global_text}**")
+        lines = [f"{user_name} の**{label}**"]
+        shown = [t for t in RTA_SERVICE_TYPES
+                 if t in local_by_type or t in global_by_type]
+        if not shown:
+            lines.append("まだ記録がありません。")
+        for event_type in shown:
+            lines.append(
+                f"{SERVICE_LABELS[event_type]}: "
+                f"このサーバー {fmt(local_by_type, event_type)} / "
+                f"全サーバー {fmt(global_by_type, event_type)}")
+        return _white_embed("\n".join(lines))
 
     async def build_rta_board(self, scope: str = "local", slowest: bool = False, *, guild_id, user_id, user_name):
         """RTA ボードの (embed, png) を組み立てる。
@@ -188,15 +212,23 @@ class SettingsMixin:
         # ランキングの氏名はメンションではなく通常表記にする（特に全サーバー
         # ランキングはサーバー外ユーザーのメンションが「不明のユーザー」になる）。
         bot = getattr(self, "bot", None)
-        names = await resolve_display_names(bot, [r["user_id"] for r in data])
+        names = await resolve_display_names(
+            bot, list({r["user_id"] for r in data}))
         board_rows = []
         for r in data:
+            # 行は (ユーザー, サービス) エントリ。サービス名は名前脇の
+            # 補助テキスト (sub) に併記し、global は従来の試行回数も足す。
+            service_label = SERVICE_LABELS.get(
+                r.get("event_type"), str(r.get("event_type") or ""))
+            sub = service_label
+            if scope == "global" and r.get("attempts") is not None:
+                sub = (f"{service_label} ・ {r['attempts']}回"
+                       if service_label else f"{r['attempts']}回")
             board_rows.append(BoardRow(
                 user_id=int(r["user_id"]),
                 name=names.get(int(r["user_id"]), ""),
                 value=f"{r['elapsed_ms'] / 1000:.2f}秒",
-                sub=(f"{r['attempts']}回" if scope == "global"
-                     and r.get("attempts") is not None else "")))
+                sub=sub))
         avatars = await fetch_avatar_bytes(
             bot, [row.user_id for row in board_rows])
         png = await asyncio.to_thread(

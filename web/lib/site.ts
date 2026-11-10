@@ -53,8 +53,8 @@ export type PublicRankingSnapshot = {
   bump: RankingEntry[];
   /** up RTA（全サーバー・速い順）。value は elapsed_ms。旧形式スナップショット用。 */
   up: RankingEntry[];
-  /** bump系RTA のボード一式（サービス別＋総合 × 最速/最遅）。 */
-  rta: Record<string, RtaBoardSet>;
+  /** bump系RTA の単一ボード（全サービスの記録を種類別エントリで pooled）。 */
+  rta: RtaBoardSet;
 };
 
 /** RTA の記録エントリ。at は記録日時 (ISO)、service は記録したサービス。 */
@@ -62,9 +62,8 @@ export type RtaEntry = RankingEntry & { at?: string; service?: string };
 
 export type RtaBoardSet = { fast: RtaEntry[]; slow: RtaEntry[] };
 
-/** bump系RTA のサービス一覧（キーと表示名）。all は全サービス総合。 */
+/** bump系RTA のサービス一覧（キーと表示名）。エントリのラベル表示用。 */
 export const RTA_SERVICES: { key: string; label: string }[] = [
-  { key: "all", label: "総合" },
   { key: "bump", label: "bump" },
   { key: "up", label: "up" },
   { key: "vote", label: "鯖ちゃんねる" },
@@ -119,29 +118,33 @@ function cleanRtaEntries(raw: unknown): RtaEntry[] {
   return entries;
 }
 
-function cleanRtaBoards(
+function cleanRtaBoard(
   raw: unknown,
   legacy: { bump: RankingEntry[]; up: RankingEntry[] },
-): Record<string, RtaBoardSet> {
+): RtaBoardSet {
   const source =
     typeof raw === "object" && raw !== null && !Array.isArray(raw)
       ? (raw as Record<string, unknown>)
       : {};
-  const boards: Record<string, RtaBoardSet> = {};
-  for (const { key } of RTA_SERVICES) {
-    const board = source[key];
-    const set =
-      typeof board === "object" && board !== null
-        ? (board as Record<string, unknown>)
-        : {};
-    boards[key] = { fast: cleanRtaEntries(set.fast), slow: cleanRtaEntries(set.slow) };
+  // 現行形式: rta 自体が {fast, slow} の単一ボード
+  if (Array.isArray(source.fast) || Array.isArray(source.slow)) {
+    return { fast: cleanRtaEntries(source.fast), slow: cleanRtaEntries(source.slow) };
   }
-  // 旧形式スナップショット（rta キーなし）は bump / up の最速だけを寄せる
+  // 移行期の旧形式（サービス別＋総合の Record）: 総合ボードを流用する
+  const all = source.all;
+  if (typeof all === "object" && all !== null) {
+    const set = all as Record<string, unknown>;
+    return { fast: cleanRtaEntries(set.fast), slow: cleanRtaEntries(set.slow) };
+  }
+  // rta キーなしの旧形式: bump / up の最速をサービス名タグつきで寄せる
   if (Object.keys(source).length === 0) {
-    boards.bump = { fast: legacy.bump.map((e) => ({ ...e })), slow: [] };
-    boards.up = { fast: legacy.up.map((e) => ({ ...e })), slow: [] };
+    const fast = [
+      ...legacy.bump.map((e) => ({ ...e, service: "bump" })),
+      ...legacy.up.map((e) => ({ ...e, service: "up" })),
+    ].sort((a, b) => a.value - b.value);
+    return { fast, slow: [] };
   }
-  return boards;
+  return { fast: [], slow: [] };
 }
 
 /** Bot が書いた生スナップショットを、表示に使える形へ検証して寄せる。 */
@@ -157,7 +160,7 @@ export function parseRankingSnapshot(raw: unknown): PublicRankingSnapshot | null
     coin: cleanEntries(record.coin, false),
     bump,
     up,
-    rta: cleanRtaBoards(record.rta, { bump, up }),
+    rta: cleanRtaBoard(record.rta, { bump, up }),
   };
 }
 

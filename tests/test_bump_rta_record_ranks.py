@@ -4,9 +4,10 @@
 記録時に、最速/最遅 × サーバー内/全体 の4順位を算出して bump_rta_events の
 当該行へ保存すること、完了通知 embed に順位が載ること、順位まわりが失敗
 （SQL マイグレーション未適用など）しても記録本体が壊れないことを検証する。
-順位の定義は「その記録が各ランキングに入る位置」= 上位のユーザー数 + 1。
-ランキング基準は全サービス一括の統合（ユーザーごとの最小/最大）で、
-記録したサービス以外の記録も順位に数える。
+順位の定義は「その記録が各ランキングに入る位置」= 上位のエントリ数 + 1。
+ランキング基準は全サービスの「ユーザー × サービス種類」エントリを
+pooled した統合ボードで、同じユーザーの別サービスのエントリも
+それぞれ順位に数える。
 """
 
 import unittest
@@ -140,26 +141,31 @@ class FakeDb:
         if name == "get_bump_rta_record_ranks":
             if self.fail_ranks:
                 raise RuntimeError("function get_bump_rta_record_ranks does not exist")
-            # 統合基準: p_event_type は互換のため受け取るだけで使わない。
+            # エントリ基準: p_event_type は互換のため受け取るだけで使わない。
+            # local は records / worst_records の全行がエントリ、global は
+            # events を (user_id, event_type) で集計した min / max がエントリ。
             gid, elapsed = params["p_guild_id"], params["p_elapsed_ms"]
+            fast_local = 1 + sum(
+                1 for r in self.tables["bump_rta_records"]
+                if r["guild_id"] == gid and r["event_type"] != "legacy"
+                and r["elapsed_ms"] < elapsed)
+            slow_local = 1 + sum(
+                1 for r in self.tables["bump_rta_worst_records"]
+                if r["guild_id"] == gid and r["event_type"] != "legacy"
+                and r["elapsed_ms"] > elapsed)
 
-            def combined(rows, guild_id, pick):
-                per_user = {}
-                for r in rows:
-                    if guild_id is not None and r["guild_id"] != guild_id:
+            def entry_extremes(pick):
+                per_entry = {}
+                for e in self.tables["bump_rta_events"]:
+                    if e["event_type"] == "legacy":
                         continue
-                    uid = r["user_id"]
-                    per_user[uid] = pick(per_user.get(uid, r["elapsed_ms"]), r["elapsed_ms"])
-                return per_user
+                    key = (e["user_id"], e["event_type"])
+                    per_entry[key] = pick(
+                        per_entry.get(key, e["elapsed_ms"]), e["elapsed_ms"])
+                return per_entry.values()
 
-            local_best = combined(self.tables["bump_rta_records"], gid, min)
-            local_worst = combined(self.tables["bump_rta_worst_records"], gid, max)
-            fast_local = 1 + sum(1 for v in local_best.values() if v < elapsed)
-            slow_local = 1 + sum(1 for v in local_worst.values() if v > elapsed)
-            best_by_user = combined(self.tables["bump_rta_events"], None, min)
-            worst_by_user = combined(self.tables["bump_rta_events"], None, max)
-            fast_global = 1 + sum(1 for v in best_by_user.values() if v < elapsed)
-            slow_global = 1 + sum(1 for v in worst_by_user.values() if v > elapsed)
+            fast_global = 1 + sum(1 for v in entry_extremes(min) if v < elapsed)
+            slow_global = 1 + sum(1 for v in entry_extremes(max) if v > elapsed)
             return FakeResponse([{
                 "rank_fast_local": fast_local, "rank_fast_global": fast_global,
                 "rank_slow_local": slow_local, "rank_slow_global": slow_global,
@@ -252,9 +258,9 @@ class RecordRanksTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn("最速: サーバー内 **2位** / 全サーバー **3位**", description)
         self.assertIn("最遅: サーバー内 **2位** / 全サーバー **3位**", description)
 
-    async def test_ranks_use_combined_all_services_basis(self):
+    async def test_ranks_use_all_services_entries_basis(self):
         db = FakeDb()
-        # A の記録が別サービス（up / vote / dicoall）だけでも統合順位に数える
+        # A の記録が別サービス（up / vote / dicoall）だけでも順位に数える
         db.tables["bump_rta_records"] = [
             {"guild_id": "456", "user_id": "111", "event_type": "up",
              "elapsed_ms": 30000, "completed_at": T0.isoformat()},
@@ -277,6 +283,43 @@ class RecordRanksTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(event["rank_slow_local"], 2)   # A の vote ワースト200秒が上位
         self.assertEqual(event["rank_fast_global"], 2)  # A の dicoall 最小30秒が上位
         self.assertEqual(event["rank_slow_global"], 2)  # A の up 最大200秒が上位
+
+    async def test_ranks_count_each_service_entry_not_each_user(self):
+        db = FakeDb()
+        # A（user 111）は1人だが、サービス別に2エントリずつ持っている。
+        # ユーザー単位に潰す旧基準なら順位は 2 になるが、エントリ基準では
+        # 上位エントリが2つあるため 3 位になる。
+        db.tables["bump_rta_records"] = [
+            {"guild_id": "456", "user_id": "111", "event_type": "bump",
+             "elapsed_ms": 10000, "completed_at": T0.isoformat()},
+            {"guild_id": "456", "user_id": "111", "event_type": "up",
+             "elapsed_ms": 20000, "completed_at": T0.isoformat()},
+        ]
+        db.tables["bump_rta_worst_records"] = [
+            {"guild_id": "456", "user_id": "111", "event_type": "bump",
+             "elapsed_ms": 400000, "completed_at": T0.isoformat()},
+            {"guild_id": "456", "user_id": "111", "event_type": "vote",
+             "elapsed_ms": 350000, "completed_at": T0.isoformat()},
+        ]
+        db.tables["bump_rta_events"] = [
+            {"guild_id": "999", "user_id": "111", "event_type": "dicoall",
+             "elapsed_ms": 5000, "bump_message_id": "a1", "completed_at": T0.isoformat()},
+            {"guild_id": "999", "user_id": "111", "event_type": "sharkbot",
+             "elapsed_ms": 15000, "bump_message_id": "a2", "completed_at": T0.isoformat()},
+            {"guild_id": "999", "user_id": "111", "event_type": "up",
+             "elapsed_ms": 500000, "bump_message_id": "a3", "completed_at": T0.isoformat()},
+            {"guild_id": "999", "user_id": "111", "event_type": "takasumi",
+             "elapsed_ms": 450000, "bump_message_id": "a4", "completed_at": T0.isoformat()},
+        ]
+        cog = make_cog(db)
+        # C（user 321）が 60秒で記録
+        await self.record(cog, db, start=T0, seconds=60, message_id="c1")
+        event = [e for e in db.tables["bump_rta_events"]
+                 if e["bump_message_id"] == "c1"][0]
+        self.assertEqual(event["rank_fast_local"], 3)   # A の bump / up 両エントリが上位
+        self.assertEqual(event["rank_slow_local"], 3)   # A の bump / vote 両エントリが上位
+        self.assertEqual(event["rank_fast_global"], 3)  # A の dicoall / sharkbot が上位
+        self.assertEqual(event["rank_slow_global"], 3)  # A の up / takasumi が上位
 
     async def test_rank_failure_does_not_break_recording(self):
         db = FakeDb(fail_ranks=True)

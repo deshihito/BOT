@@ -78,11 +78,12 @@ class EventsMixin:
     async def _record_ranks(self, gid, kind, elapsed, bump_message_id):
         """記録時点の順位を算出して bump_rta_events の当該行へ保存する。
 
-        順位は「その記録が各ランキングに入る位置」= 自分より上位のユーザー
-        数 + 1（SQL関数 get_bump_rta_record_ranks が best/worst 反映後の
-        テーブルから算出する）。順位の基準は表示ボードと同じ全サービス
-        一括の統合ランキング（p_event_type は互換のため渡すが、SQL 側では
-        統合集計に使わない）。戻り値は順位 dict（通知表示にも使う）。
+        順位は「その記録が各ランキングに入る位置」= 自分より上位の
+        エントリ数 + 1（SQL関数 get_bump_rta_record_ranks が best/worst
+        反映後のテーブルから算出する）。順位の基準は表示ボードと同じ
+        「ユーザー × サービス種類」のエントリを pooled した統合
+        ランキング（p_event_type は互換のため渡すが、SQL 側では
+        絞り込みに使わない）。戻り値は順位 dict（通知表示にも使う）。
         失敗は呼び出し側で握る前提で、ここでは例外をそのまま上げる。
         """
         result = await self._call(lambda: self.db.rpc("get_bump_rta_record_ranks", {
