@@ -6,6 +6,8 @@ core/support/storage.py（Supabase の bot_kv、namespace "guild_settings"）に
 読むときはメモリ上の写しから同期的に読む（``get``）。保存先からの読み直しは、最初に必要になったときと、
 前回の読み直しから ``RELOAD_INTERVAL`` 秒が過ぎたときに ``await ensure_loaded()`` で行う。
 Web ダッシュボードから書き換えた設定も、この再読込で遅くとも間隔分だけ遅れて届く。
+保存（``update``）のときは間隔を待たず、そのギルドの最新を読み直してから変更を重ねる。
+古い写しを丸ごと書き戻して Web 側の保存を巻き戻さないため。
 
     store = get_store()
     await store.ensure_loaded()
@@ -37,6 +39,7 @@ class GuildSettings:
         self._loaded = False
         self._loaded_at: Optional[float] = None
         self._lock: Optional[asyncio.Lock] = None
+        self._update_locks: dict[str, asyncio.Lock] = {}
         self.reload_interval = RELOAD_INTERVAL
 
     @staticmethod
@@ -81,26 +84,60 @@ class GuildSettings:
             if isinstance(sections.get(section), dict)
         }
 
+    async def _read_latest(self, key: str) -> dict[str, Any]:
+        """保存先にあるこのギルドの最新の写し（再読込間隔のキャッシュを通さない）。
+
+        KVStore.load_one があればそれで1件だけ読み直す。読めなければ手元の写しで続ける。
+        手元の写しと違っていたら、外部（Web ダッシュボード等）がその間に保存した変更を
+        取り込んだことになるので、その旨を記録する。
+        """
+        try:
+            load_one = getattr(self.kv, "load_one", None)
+            if load_one is not None:
+                value = await load_one(key)
+            else:
+                value = (await self.kv.load_all()).get(key)
+        except Exception:
+            logger.exception("サーバー設定の最新を読み直せませんでした（手元の写しで続けます）")
+            return copy.deepcopy(self._data.get(key, {}))
+        latest = copy.deepcopy(value) if isinstance(value, dict) else {}
+        if latest != self._data.get(key, {}):
+            logger.info("サーバー設定 %s は外部で更新されていたため、最新に合わせて保存します", key)
+        return latest
+
     async def update(self, guild_id: int, section: str, *, background: bool = False,
                      **values: Any) -> dict[str, Any]:
-        """値を書き換えて保存する。値に None を渡すとその項目を消す。"""
+        """値を書き換えて保存する。値に None を渡すとその項目を消す。
+
+        保存の直前に保存先の最新を読み直し、その上にこの変更だけを重ねて書き戻す。
+        手元の写し（最大で再読込間隔ぶん古い）を丸ごと書き戻すと、その間に Web
+        ダッシュボードが保存した変更まで巻き戻してしまう（lost update）ため。
+        同じギルドへの保存はロックで1本に並べ、読み直しから書き戻しまでを割らせない。
+        """
         await self.ensure_loaded()
         key = str(guild_id)
-        guild = self._data.setdefault(key, {})
-        current = guild.setdefault(section, {})
-        for name, value in values.items():
-            if value is None:
-                current.pop(name, None)
+        lock = self._update_locks.get(key)
+        if lock is None:
+            lock = self._update_locks[key] = asyncio.Lock()
+        async with lock:
+            guild = await self._read_latest(key)
+            current = guild.get(section)
+            if not isinstance(current, dict):
+                current = guild[section] = {}
+            for name, value in values.items():
+                if value is None:
+                    current.pop(name, None)
+                else:
+                    current[name] = value
+            if not current:
+                guild.pop(section, None)
+            if guild:
+                self._data[key] = guild
+                await self.kv.set(key, copy.deepcopy(guild), wait=not background)
             else:
-                current[name] = value
-        if not current:
-            guild.pop(section, None)
-        if guild:
-            await self.kv.set(key, copy.deepcopy(guild), wait=not background)
-        else:
-            self._data.pop(key, None)
-            await self.kv.delete(key, wait=not background)
-        return copy.deepcopy(current)
+                self._data.pop(key, None)
+                await self.kv.delete(key, wait=not background)
+            return copy.deepcopy(current)
 
 
 _store: Optional[GuildSettings] = None

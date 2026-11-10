@@ -420,6 +420,48 @@ class KVStore:
             self._schedule_retry()
         return await asyncio.to_thread(self.load_local)
 
+    async def load_one(self, key: str) -> Any:
+        """1キーだけを保存先から読み直す。キーが無ければ None。
+
+        優先順位は ``load_all`` と同じ（未送信のローカル変更 → 読み込み中に保存された
+        ローカル値 → 遠隔値）。全体を読み直さずに、書き込み直前の最新確認に使う。
+        """
+        key = str(key)
+        if self.remote_enabled:
+            snapshot = self._pending.get(key)
+            version = self._local_versions.get(key, 0)
+            try:
+                response = await self._run(
+                    lambda: self.client.table(TABLE).select("key,value")
+                    .eq("namespace", self.namespace).eq("key", key).range(0, 0)
+                )
+                rows = list(getattr(response, "data", None) or [])
+            except Exception as error:
+                self._remote_failed("読み込み", error)
+            else:
+                self._remote_recovered("読み込み")
+                found = bool(rows)
+                value = rows[0].get("value") if found else None
+                # 読んでいる間に変わった分は手元の最新が優先（load_all と同じ扱い）。
+                for item in (snapshot, self._pending.get(key)):
+                    if item is None:
+                        continue
+                    if item.get("deleted"):
+                        found, value = False, None
+                    else:
+                        found, value = True, item.get("value")
+                if self._local_versions.get(key, 0) != version:
+                    local_now = await asyncio.to_thread(self.load_local)
+                    if key in local_now:
+                        found, value = True, local_now[key]
+                    else:
+                        found, value = False, None
+                return value if found else None
+        if self._pending:
+            self._schedule_retry()
+        local = await asyncio.to_thread(self.load_local)
+        return local.get(key)
+
     async def set(self, key: str, value: Any, *, wait: bool = True) -> None:
         key = str(key)
         self._bump(key)
