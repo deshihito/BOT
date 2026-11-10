@@ -295,13 +295,37 @@ const APPRAISE_WORDS_PROMPT = [
 export async function appraiseWordsWithLogfare(imageDataUrl: string): Promise<AiWords | null> {
   const keys = logfareApiKeys();
   if (keys.length === 0) return null;
+  // 既定モデルが画像入力に未対応だった場合に備え、自動ルーティングも試す。
+  // 失敗理由は必ずログに残す（キーや応答本文は出さない）。
+  const models = [...new Set([process.env.LLL_MODEL?.trim() || DEFAULT_LLL_MODEL, "logfare/auto"])];
+  for (const model of models) {
+    const words = await appraiseWordsWithModel(imageDataUrl, keys, model, APPRAISE_WORDS_PROMPT);
+    if (words) return words;
+    // 形式崩れの可能性があるため、短い上限を再強調したプロンプトでもう一度だけ試す
+    const retry = await appraiseWordsWithModel(
+      imageDataUrl,
+      keys,
+      model,
+      APPRAISE_WORDS_PROMPT + "\n重要: name は12文字以内、flavor は40文字以内、技名と特性名は10文字以内に短くしてください。",
+    );
+    if (retry) return retry;
+  }
+  return null;
+}
+
+async function appraiseWordsWithModel(
+  imageDataUrl: string,
+  keys: string[],
+  model: string,
+  prompt: string,
+): Promise<AiWords | null> {
   const payload = {
-    model: process.env.LLL_MODEL?.trim() || DEFAULT_LLL_MODEL,
+    model,
     messages: [
       {
         role: "user",
         content: [
-          { type: "text", text: APPRAISE_WORDS_PROMPT },
+          { type: "text", text: prompt },
           { type: "image_url", image_url: { url: imageDataUrl } },
         ],
       },
@@ -320,31 +344,48 @@ export async function appraiseWordsWithLogfare(imageDataUrl: string): Promise<Ai
         body: JSON.stringify(payload),
         signal: AbortSignal.timeout(LOGFARE_TIMEOUT_MS),
       });
-    } catch {
+    } catch (error) {
       // ネットワークエラー・タイムアウトはキーを替えても直らないので諦める
+      console.warn(`lll: Logfare appraise request failed (model=${model}): ${error instanceof Error ? error.message : "unknown"}`);
       return null;
     }
     if (response.status === 429) {
       console.warn(`lll: Logfare key #${i + 1} returned 429, failing over to next key`);
       continue;
     }
-    if (!response.ok) return null;
+    if (!response.ok) {
+      console.warn(`lll: Logfare appraise failed (model=${model}, status=${response.status})`);
+      return null;
+    }
     let content: string;
     try {
       content = extractChatContent(await response.json());
     } catch {
+      console.warn(`lll: Logfare appraise response was not JSON (model=${model})`);
       return null;
     }
-    if (!content) return null;
+    if (!content) {
+      console.warn(`lll: Logfare appraise returned empty content (model=${model})`);
+      return null;
+    }
     const jsonMatch = content.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) return null;
+    if (!jsonMatch) {
+      console.warn(`lll: Logfare appraise content had no JSON object (model=${model}, length=${content.length})`);
+      return null;
+    }
     let parsed: unknown;
     try {
       parsed = JSON.parse(jsonMatch[0]);
     } catch {
+      console.warn(`lll: Logfare appraise JSON parse failed (model=${model})`);
       return null;
     }
-    return validateAiWords(parsed);
+    const words = validateAiWords(parsed);
+    if (!words) {
+      console.warn(`lll: Logfare appraise words failed validation (model=${model})`);
+      return null;
+    }
+    return words;
   }
   return null;
 }
