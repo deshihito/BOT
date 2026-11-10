@@ -611,3 +611,51 @@ export function perft(pos: Position, depth: number): number {
 export function perftFen(fen: string, depth: number): number {
   return perft(parseFen(fen), depth);
 }
+
+// --- 対局用ヘルパー（WEB ゲームのチェス CPU 対戦が使う） ---
+
+const PIECE_TO_CHAR: Record<number, string> = {
+  [WP]: "P", [WN]: "N", [WB]: "B", [WR]: "R", [WQ]: "Q", [WK]: "K",
+  [BP]: "p", [BN]: "n", [BB]: "b", [BR]: "r", [BQ]: "q", [BK]: "k",
+};
+
+/** 指定した色のキングがチェックされているか。 */
+export function isInCheck(pos: Position, color: number): boolean {
+  const ksq = kingSquare(pos, color);
+  if (ksq < 0) return false;
+  return isAttacked(pos, ksq, color === WHITE ? BLACK : WHITE);
+}
+
+/**
+ * 局面を FEN の先頭4フィールド（盤面・手番・キャスリング権・アンパッサン）
+ * として書き出す。手数カウンタは Position が保持しないため含めない
+ * （必要な呼び出し側が別に付け足す）。
+ */
+export function positionToFen(pos: Position): string {
+  const rows: string[] = [];
+  for (let rank = 7; rank >= 0; rank--) {
+    let row = "";
+    let empty = 0;
+    for (let file = 0; file < 8; file++) {
+      const piece = pos.board[rank * 16 + file];
+      if (piece === EMPTY) {
+        empty += 1;
+        continue;
+      }
+      if (empty > 0) {
+        row += String(empty);
+        empty = 0;
+      }
+      row += PIECE_TO_CHAR[piece] ?? "?";
+    }
+    if (empty > 0) row += String(empty);
+    rows.push(row);
+  }
+  let castling = "";
+  if (pos.castling & 1) castling += "K";
+  if (pos.castling & 2) castling += "Q";
+  if (pos.castling & 4) castling += "k";
+  if (pos.castling & 8) castling += "q";
+  const ep = pos.ep >= 0 ? squareName(pos.ep) : "-";
+  return `${rows.join("/")} ${pos.side === WHITE ? "w" : "b"} ${castling === "" ? "-" : castling} ${ep}`;
+}

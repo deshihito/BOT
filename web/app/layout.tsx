@@ -50,6 +50,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             <Link href="/" className="brand"><img src="/img/nomal.png" alt="" />AGOBOT</Link>
             <div className="main-nav-links">
               <Link href="/commands">コマンド</Link>
+              <Link href="/games">ゲーム</Link>
               <Link href="/dashboard">ダッシュボード</Link>
               <Link href="/ranking">ランキング</Link>
               <InviteButton />

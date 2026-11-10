@@ -196,7 +196,8 @@ export default function ActivityClient({ clientId }: { clientId: string }) {
       <video ref={videoRef} className="activity-video" playsInline muted controls={false} onError={handleVideoError} />
       {!snapshot?.videoId && <div className="activity-player-placeholder">{snapshot?.status === "unsupported" ? "動画を表示できません" : "Musicの再生を待っています"}</div>}
     </div>
-    <div className="activity-actions"><button type="button" className="activity-button" onClick={startPlayer} disabled={!snapshot?.videoId}>同期して再生</button>{authNeeded && <button type="button" className="activity-button activity-button-secondary" onClick={reconnect}>Discordに再接続</button>}</div>
+    <div className="activity-actions"><button type="button" className="activity-button" onClick={startPlayer} disabled={!snapshot?.videoId}>同期して再生</button>{authNeeded && <button type="button" className="activity-button activity-button-secondary" onClick={reconnect}>Discordに再接続</button>}{/* 相対リンク: アクティビティのプロキシ配下（/.proxy/activity/music）でも /games へ届く */}
+<a className="activity-button activity-button-secondary" href="../games" style={{ display: "inline-flex", alignItems: "center", textDecoration: "none" }}>ゲームで遊ぶ</a></div>
     <p className="activity-note">映像は無音です。音声はボイスチャンネルのMusicから再生されます。</p>
     {videoError && <p className="activity-error" role="alert">{videoError}</p>}
   </div></section>;
