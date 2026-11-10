@@ -5,6 +5,9 @@ import { WEB_GAMES, getWebGame } from "@/lib/games-catalog";
 import ChessClient from "../chess/ChessClient";
 import BalkuClient from "../balku/BalkuClient";
 import LllClient from "../lll/LllClient";
+import MinesweeperClient from "../minesweeper/MinesweeperClient";
+import SliderClient from "../2048/SliderClient";
+import MemoryClient from "../memory/MemoryClient";
 
 export function generateStaticParams() {
   return WEB_GAMES.map((game) => ({ id: game.slug }));
@@ -32,6 +35,15 @@ export default async function WebGamePage({ params }: { params: Promise<{ id: st
   }
   if (game.slug === "lll" && game.status === "playable") {
     return <LllClient />;
+  }
+  if (game.slug === "minesweeper" && game.status === "playable") {
+    return <MinesweeperClient />;
+  }
+  if (game.slug === "2048" && game.status === "playable") {
+    return <SliderClient />;
+  }
+  if (game.slug === "memory" && game.status === "playable") {
+    return <MemoryClient />;
   }
   return (
     <>

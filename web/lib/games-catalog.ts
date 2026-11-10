@@ -49,6 +49,39 @@ export const WEB_GAMES: WebGame[] = [
     players: "1〜4人（オンライン/CPU対戦）",
   },
   {
+    slug: "minesweeper",
+    title: "マインスイーパー",
+    description:
+      "地雷を避けてマスを全部開く定番パズル。数字は周囲の地雷の数で、最初のマスは必ず安全です。難易度は3段階、旗モードでスマホでも遊べます。",
+    glyph: "💣",
+    accent: "#b3543f",
+    status: "playable",
+    activity: true,
+    players: "1人",
+  },
+  {
+    slug: "2048",
+    title: "2048",
+    description:
+      "同じ数字をぶつけて大きくしていくスライドパズル。矢印キー・ボタン・スワイプで操作して、2048 のタイルを目指します。",
+    glyph: "2048",
+    accent: "#c98a2d",
+    status: "playable",
+    activity: true,
+    players: "1人",
+  },
+  {
+    slug: "memory",
+    title: "メモリーマッチ",
+    description:
+      "裏返したカードの絵柄を当てる神経衰弱。8ペア16枚を、手数の少なさを目指してそろえます。",
+    glyph: "🃏",
+    accent: "#3f7f5f",
+    status: "playable",
+    activity: true,
+    players: "1人",
+  },
+  {
     slug: "lll",
     title: "LLL",
     description:
