@@ -1,7 +1,7 @@
 "use client";
 
 // One Prompter の操作UI（クライアント）。
-// 雑な一文 → 二択質問（1問ずつ） →（LLM 経路のみ）深掘り質問 → 完成プロンプト表示。
+// やりたいこと（漠然とした一文） → 二択質問（1問ずつ） →（LLM 経路のみ）深掘り質問 → 完成プロンプト表示。
 // 質問生成とプロンプト合成は自サイトの API（/api/one-prompter、サーバー側で LLM を呼ぶ）に任せ、
 // API が使えない環境・失敗時はルールベース版（lib/one-prompter.ts）にその場で切り替える。
 import { useMemo, useState } from "react";
@@ -393,12 +393,13 @@ export default function OnePrompterClient() {
   if (phase.name === "input") {
     return (
       <div className="op-panel">
-        <label className="op-label" htmlFor="op-input">雑な一文でいいので、やりたいことを書いてください</label>
+        <label className="op-label" htmlFor="op-input">やりたいこと</label>
+        <p className="op-count">漠然としていて大丈夫です。思いついたままの言葉で書いてください。あとは二択の質問で細かく詰めていきます。</p>
         <textarea
           id="op-input"
           value={rough}
           onChange={(e) => setRough(e.target.value)}
-          placeholder="例：転職したい、自己PR書いて"
+          placeholder="例：転職の自己PRを書きたい"
           rows={3}
           maxLength={MAX_ROUGH_LENGTH}
           autoFocus
