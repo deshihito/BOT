@@ -17,6 +17,7 @@ from typing import Optional
 import discord
 from discord.ext import commands
 
+from core.channel_safety import is_hidden_channel
 from core.help.help.command_catalog import permission_label
 from core.support.emojis import BOOK, COIN, FAILED, GAME, GEAR, MUSIC, SUCCESS
 from core.support.guild_settings import NATION_SECTION, NOTIFY_LEVELS, NOTIFY_MAJOR, get_store, nation_settings
@@ -61,6 +62,9 @@ def channel_list_text(channel_ids, limit: int = FIELD_VALUE_LIMIT) -> str:
 def can_post(channel, me) -> bool:
     if channel is None or me is None:
         return False
+    if is_hidden_channel(channel):
+        # 閲覧できないチャンネルは権限フィールドも信頼できないため書き込めないものとして扱う
+        return False
     perms = channel.permissions_for(me)
     return bool(perms.view_channel and perms.send_messages and perms.embed_links)
 
@@ -80,6 +84,8 @@ def pick_welcome_channel(guild):
 def can_post_v2(channel, me) -> bool:
     """導入メッセージ（Components V2）専用の書き込み条件。Embed ではないため埋め込み権限は不要。"""
     if channel is None or me is None:
+        return False
+    if is_hidden_channel(channel):
         return False
     perms = channel.permissions_for(me)
     return bool(perms.view_channel and perms.send_messages)
@@ -288,6 +294,15 @@ def _missing(perms, names) -> list[str]:
     return [name for name in names if not getattr(perms, name, False)]
 
 
+def _channel_missing(channel, me, names) -> list[str]:
+    """チャンネルに対する不足権限。隠しチャンネルは権限フィールドが
+    信頼できないため、閲覧権限が常に不足しているものとして扱う。"""
+    missing = _missing(channel.permissions_for(me), names)
+    if is_hidden_channel(channel) and "view_channel" in names and "view_channel" not in missing:
+        missing.append("view_channel")
+    return missing
+
+
 def check_permissions(guild, channel, *, auth: dict, global_channel_ids=(), mute_supported: bool = True,
                       nation: Optional[dict] = None) -> list[dict]:
     """機能ごとに、Bot に足りない権限を調べる。
@@ -324,7 +339,7 @@ def check_permissions(guild, channel, *, auth: dict, global_channel_ids=(), mute
         if intro is None:
             notes.append("自己紹介チャンネルが未設定です（自己紹介は投稿されません）")
         else:
-            for name in _missing(intro.permissions_for(me), ["view_channel", "manage_webhooks"]):
+            for name in _channel_missing(intro, me, ["view_channel", "manage_webhooks"]):
                 if name not in missing:
                     missing.append(name)
         add("認証", missing, notes)
@@ -336,7 +351,7 @@ def check_permissions(guild, channel, *, auth: dict, global_channel_ids=(), mute
     else:
         missing = []
         for c in channels:
-            for name in _missing(c.permissions_for(me), ["view_channel", "manage_webhooks", "add_reactions"]):
+            for name in _channel_missing(c, me, ["view_channel", "manage_webhooks", "add_reactions"]):
                 if name not in missing:
                     missing.append(name)
         add("グローバルチャット", missing)
@@ -353,7 +368,7 @@ def check_permissions(guild, channel, *, auth: dict, global_channel_ids=(), mute
         elif target is None:
             add("国づくり", skipped=True, notes=["お知らせチャンネルが未設定です"])
         else:
-            add("国づくり", _missing(target.permissions_for(me), ["view_channel", "send_messages", "embed_links"]))
+            add("国づくり", _channel_missing(target, me, ["view_channel", "send_messages", "embed_links"]))
 
     # ボイス
     add("ボイス・音楽", _missing(guild_perms, ["connect", "speak"]))

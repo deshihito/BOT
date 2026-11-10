@@ -14,6 +14,7 @@ import discord
 import discord.opus
 from discord.ext import commands, tasks
 from discord.ext import voice_recv
+from core.channel_safety import channel_display_name
 from core.vc import voice_restore
 from core.support.legacy import Responder
 from core.vc.voice_session import VoiceBusy, get_manager
@@ -218,7 +219,7 @@ class ManageMixin:
         for link in ROOM_TEXT_LINKS.get(room_name, []):
             channel = self.bot.get_channel(link.channel_id)
             if channel:
-                chat_channels.append(f"#{channel.name} ({channel.guild.name})")
+                chat_channels.append(f"#{channel_display_name(channel)} ({channel.guild.name})")
 
         embed = discord.Embed(title=f"🌐 ルーム情報: {room_name}", color=0x3498DB)
         embed.add_field(name="公開設定", value="🔒 非公開" if room.private else "🌍 公開")

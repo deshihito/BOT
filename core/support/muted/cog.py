@@ -4,6 +4,7 @@ import discord
 from discord.ext import commands, tasks
 from datetime import datetime, timedelta, timezone
 
+from core.channel_safety import is_hidden_channel
 from core.support.panel_v2 import as_embed_v2, wrap_panel_view
 from core.support.storage import KVStore
 
@@ -212,8 +213,16 @@ class Muted(commands.Cog):
                 embed.description = f"同期完了 (成功: {success} / 失敗: {error})"
 
             elif select.values[0] == "hide_toggle":
-                # 最初のチャンネルの状態を見て、非表示にするか元に戻すか決める
-                target_ch = interaction.guild.text_channels[0]
+                # 最初のチャンネルの状態を見て、非表示にするか元に戻すか決める。
+                # 隠しチャンネルは上書き情報が信頼できないため、基準には使わない。
+                text_channels = list(interaction.guild.text_channels)
+                visible_channels = [ch for ch in text_channels if not is_hidden_channel(ch)]
+                target_ch = visible_channels[0] if visible_channels else (text_channels[0] if text_channels else None)
+                if target_ch is None:
+                    embed.description = "対象のテキストチャンネルがありません。"
+                    await interaction.edit_original_response(view=as_embed_v2(embed))
+                    self.stop()
+                    return
                 current_overwrite = target_ch.overwrites_for(role)
                 
                 # 現在「見えない」設定なら、設定をクリア(None)して見えるようにする

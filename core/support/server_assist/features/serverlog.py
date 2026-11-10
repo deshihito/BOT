@@ -6,6 +6,7 @@ from typing import Any
 
 import discord
 
+from core.channel_safety import channel_display_name
 from core.support.server_assist import Feature, get_settings, update_settings
 from core.support.server_assist.ui import AssistFeatureView, channel_label, notice_line
 from core.support.server_assist.ui import AssistChannelSelect, AssistToggleButton, required_field
@@ -127,7 +128,7 @@ async def on_guild_channel_create(cog: Any, channel: Any) -> None:
     if not current["log_channels"]:
         return
     embed = discord.Embed(title="チャンネル作成", description=getattr(channel, "mention", ""), color=0xFFFFFF)
-    embed.add_field(name="名前", value=str(getattr(channel, "name", "")), inline=True)
+    embed.add_field(name="名前", value=channel_display_name(channel, fallback="（不明）"), inline=True)
     embed.add_field(name="種類", value=str(getattr(channel, "type", "")), inline=True)
     await _send(guild, current, embed)
 
@@ -138,7 +139,7 @@ async def on_guild_channel_delete(cog: Any, channel: Any) -> None:
     if not current["log_channels"]:
         return
     embed = discord.Embed(title="チャンネル削除", color=0xFFFFFF)
-    embed.add_field(name="名前", value=str(getattr(channel, "name", "")), inline=True)
+    embed.add_field(name="名前", value=channel_display_name(channel, fallback="（不明）"), inline=True)
     embed.add_field(name="種類", value=str(getattr(channel, "type", "")), inline=True)
     await _send(guild, current, embed)
 

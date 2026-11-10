@@ -12,6 +12,7 @@ import pkgutil
 from dataclasses import dataclass, replace
 from typing import Any
 
+from core.channel_safety import is_hidden_channel
 from core.support import guild_settings
 
 logger = logging.getLogger(__name__)
@@ -82,9 +83,13 @@ def usable_text_channels(guild: Any) -> list[Any]:
     channels = list(getattr(guild, "text_channels", []) or [])
     usable: list[Any] = []
     for channel in channels:
+        if is_hidden_channel(channel):
+            # 閲覧できないチャンネルは送信先にできない（権限フィールドも信頼できない）
+            continue
         if me is not None:
             try:
-                if not channel.permissions_for(me).send_messages:
+                perms = channel.permissions_for(me)
+                if not (perms.view_channel and perms.send_messages):
                     continue
             except Exception:
                 pass

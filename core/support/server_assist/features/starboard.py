@@ -7,6 +7,7 @@ from typing import Any
 
 import discord
 
+from core.channel_safety import channel_display_name
 from core.support.server_assist import Feature, get_settings, update_settings
 from core.support.server_assist.ui import AssistFeatureView, channel_label, notice_line
 from core.support.server_assist.ui import AssistChannelSelect, AssistToggleButton, channel_permission_check, required_field
@@ -142,7 +143,7 @@ def build_board_embed(message: Any, count: int, emoji: str) -> discord.Embed:
         embed.set_author(name=name)
     channel = getattr(message, "channel", None)
     jump_url = getattr(message, "jump_url", None)
-    channel_name = getattr(channel, "name", "チャンネル")
+    channel_name = channel_display_name(channel, fallback="チャンネル")
     if jump_url:
         embed.add_field(name="元メッセージ", value=f"[#{channel_name} へ飛ぶ]({jump_url})", inline=False)
     attachments = list(getattr(message, "attachments", []) or [])
