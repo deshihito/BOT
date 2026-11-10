@@ -68,6 +68,20 @@ assert.ok(prompt.includes("条件同士が矛盾する場合は、より具体�
 assert.ok(!prompt.includes("場合は、を優先"));
 });
 
+test("fallback の完成プロンプトに定型の冒頭文・締め文は無い（中身の要件は残る）", () => {
+const { category, questions} = m.generateQuestions("転職したい、自己PR書いて");
+const answers = questions.map((q) => ({
+slot: q.slot, question: q.question, label: q.options[0].label, instruction: q.options[0].instruction,
+}));
+const prompt = m.buildPrompt("転職したい、自己PR書いて", category, answers);
+assert.ok(!prompt.includes("実務に精通した専門家です"));
+assert.ok(!prompt.includes("指定された条件をすべて満たす成果物を出力してください"));
+assert.ok(!prompt.includes("出力は成果物のみとし、確認や質問で止めないでください"));
+assert.ok(prompt.startsWith("転職したい、自己PR書いて"));
+for (const a of answers) assert.ok(prompt.includes(a.instruction));
+assert.ok(prompt.includes("差し替え項目"));
+});
+
 test("generateQuestions は count に追随する（既定5・プールが尽きればある分だけ）", () => {
 const input = "転職したい、自己PR書いて";
 assert.ok(m.generateQuestions(input).questions.length <= 5);

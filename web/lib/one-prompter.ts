@@ -380,24 +380,20 @@ const ANTI_SLOP_RULES = [
 export function buildPrompt(input: string, category: PrompterCategory, answers: PrompterAnswer[]): string {
 const rough = input.trim();
 const lines: string[] = [];
-lines.push("あなたは、この分野の実務に精通した専門家です。以下の依頼に対して、指定された条件をすべて満たす成果物を出力してください。");
-lines.push("");
-lines.push("");
+// 定型の役割文・締め文は置かない。依頼文と、決まった条件・対策・差し替え指示だけの最小構成にする。
 lines.push(rough);
 if (answers.length > 0) {
-lines.push("");
 lines.push("");
 for (const a of answers) {
 lines.push(`- ${a.instruction}`);
 }
 }
 lines.push("");
-lines.push("");
 for (const rule of ANTI_SLOP_RULES) {
 lines.push(`- ${rule}`);
 }
 lines.push("");
 lines.push("元の依頼に無い事実（名前・日時・数字・固有名詞など）が必要な場合は勝手に作らず、【会社名】のようなプレースホルダで示し、末尾に「差し替え項目」として一覧を付けること。");
-lines.push("条件同士が矛盾する場合は、より具体的な条件を優先してください。出力は成果物のみとし、確認や質問で止めないでください。");
+lines.push("条件同士が矛盾する場合は、より具体的な条件を優先してください。");
 return lines.join("\n");
 }
