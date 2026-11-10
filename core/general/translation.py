@@ -32,7 +32,11 @@ class TranslationLocaleSelect(discord.ui.Select):
         else:
             self.parent_view.target_locale = locale
             await translation_settings_update(self.parent_view.user_id, target_locale=locale)
-        await interaction.response.edit_message(embed=self.parent_view.embed(), view=self.parent_view)
+        # パネルは as_panel_v2 で送信された V2 メッセージなので、embed= 付きの
+        # 編集は Discord に 50035 で拒否される。refresh で部品を作り直してから
+        # V2 の編集経路 (edit_panel_v2) で再描画する (MiqSettingsView.commit と同型)。
+        self.parent_view.refresh()
+        await edit_panel_v2(interaction, as_panel_v2(self.parent_view))
 
 
 class TranslationToggleButton(discord.ui.Button):
@@ -48,7 +52,8 @@ class TranslationToggleButton(discord.ui.Button):
         self.parent_view.enabled = not self.parent_view.enabled
         await translation_settings_update(self.parent_view.user_id, enabled=self.parent_view.enabled)
         self.parent_view.refresh()
-        await interaction.response.edit_message(embed=self.parent_view.embed(), view=self.parent_view)
+        # 言語セレクトと同じく V2 の編集経路で再描画する (embed= は 50035 になる)。
+        await edit_panel_v2(interaction, as_panel_v2(self.parent_view))
 
 
 async def translation_settings_update(
