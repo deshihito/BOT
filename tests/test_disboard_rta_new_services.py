@@ -7,6 +7,8 @@ from cogs.game import (
     COOLDOWN,
     DCAFE_BOT_ID,
     DICOALL_BOT_ID,
+    DISCOM_BOT_ID,
+    DSIO_BOT_ID,
     SHARKBOT_BOT_ID,
     _named_field_next_time,
     detect_event,
@@ -142,6 +144,92 @@ class SharkBotDetectionTest(unittest.TestCase):
 
     def test_sharkbot_cooldown_two_hours(self):
         self.assertEqual(COOLDOWN["sharkbot"], timedelta(hours=2))
+
+
+class DsioDetectionTest(unittest.TestCase):
+    # 実成功 embed (2026-11-10 観測): タイトル「Server Bumped!」、
+    # 本文「<サーバー名> has been successfully bumped on discordservers.io」、
+    # 「Next bump available: 2時間後」、フッター「Bumped by <ユーザー名>」。
+    TITLE = "Server Bumped!"
+    DESCRIPTION = (
+        "テストサーバー has been successfully bumped on discordservers.io\n"
+        "Next bump available: 2時間後"
+    )
+
+    def test_bump_detected(self):
+        event = detect_event(make_message(
+            DSIO_BOT_ID, title=self.TITLE, description=self.DESCRIPTION))
+        self.assertIsNotNone(event)
+        self.assertEqual(event[0], "dsio")
+        self.assertEqual(event[1], 123)
+        self.assertIsNone(event[3])  # 相対表記のみ・固定クールダウン
+
+    def test_title_required(self):
+        self.assertIsNone(detect_event(make_message(
+            DSIO_BOT_ID, title="Bumped!", description=self.DESCRIPTION)))
+        self.assertIsNone(detect_event(make_message(
+            DSIO_BOT_ID, description=self.DESCRIPTION)))
+
+    def test_success_phrase_required(self):
+        self.assertIsNone(detect_event(make_message(
+            DSIO_BOT_ID, title=self.TITLE,
+            description="テストサーバー was bumped.")))
+
+    def test_wrong_bot_ignored(self):
+        self.assertIsNone(detect_event(make_message(
+            999, title=self.TITLE, description=self.DESCRIPTION)))
+        self.assertIsNone(detect_event(make_message(
+            DCAFE_BOT_ID, title=self.TITLE, description=self.DESCRIPTION)))
+
+    def test_dsio_bot_id_value(self):
+        # 裏取り済みの DiscordServers.io (旧 Disforge) の Bot ID。
+        self.assertEqual(DSIO_BOT_ID, 341738423134060544)
+
+    def test_dsio_cooldown_two_hours(self):
+        self.assertEqual(COOLDOWN["dsio"], timedelta(hours=2))
+
+
+class DiscomDetectionTest(unittest.TestCase):
+    # 実成功 embed (2026-11-10 観測): タイトル (リンク)「Discomサーバー掲示板」、
+    # 本文「UPが成功しました！」、「次回UP可能まで 約45分後」。
+    TITLE = "Discomサーバー掲示板"
+    DESCRIPTION = (
+        "UPが成功しました！\n"
+        "UPに成功しました！\n"
+        "次回UP可能まで 約45分後"
+    )
+
+    def test_up_detected(self):
+        event = detect_event(make_message(
+            DISCOM_BOT_ID, title=self.TITLE, description=self.DESCRIPTION))
+        self.assertIsNotNone(event)
+        self.assertEqual(event[0], "discom")
+        self.assertEqual(event[1], 123)
+        self.assertIsNone(event[3])  # 相対表記のみ・固定クールダウン
+
+    def test_title_required(self):
+        self.assertIsNone(detect_event(make_message(
+            DISCOM_BOT_ID, title="サーバー掲示板", description=self.DESCRIPTION)))
+        self.assertIsNone(detect_event(make_message(
+            DISCOM_BOT_ID, description=self.DESCRIPTION)))
+
+    def test_success_phrase_required(self):
+        self.assertIsNone(detect_event(make_message(
+            DISCOM_BOT_ID, title=self.TITLE,
+            description="次回UP可能まで 約45分後")))
+
+    def test_wrong_bot_ignored(self):
+        self.assertIsNone(detect_event(make_message(
+            999, title=self.TITLE, description=self.DESCRIPTION)))
+        self.assertIsNone(detect_event(make_message(
+            DSIO_BOT_ID, title=self.TITLE, description=self.DESCRIPTION)))
+
+    def test_discom_bot_id_value(self):
+        # ユーザーが実Botからコピーして提供した DISCOM の Bot ID (2026-11-10)。
+        self.assertEqual(DISCOM_BOT_ID, 1454830591504814100)
+
+    def test_discom_cooldown_fortyfive_minutes(self):
+        self.assertEqual(COOLDOWN["discom"], timedelta(minutes=45))
 
 
 class UnrelatedMessageTest(unittest.TestCase):

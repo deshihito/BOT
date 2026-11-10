@@ -88,6 +88,8 @@ SUPPORT_ACTIONS = [
     app_commands.Choice(name="Dicoall", value="bumprta_dicoall"),
     app_commands.Choice(name="Discord Cafe", value="bumprta_dcafe"),
     app_commands.Choice(name="SharkBot", value="bumprta_sharkbot"),
+    app_commands.Choice(name="DiscordServers.io", value="bumprta_dsio"),
+    app_commands.Choice(name="DISCOM", value="bumprta_discom"),
     app_commands.Choice(name="boardNotify設定（共通）", value="bumprta_settings"),
     app_commands.Choice(name="絵文字便乗設定（binjou）", value="binjou"),
     app_commands.Choice(name="カスタム便乗ルール", value="binjou_custom"),
@@ -228,7 +230,8 @@ SUPPORT_ACTIONS_BY_GENRE = {
     ),
     "boardnotify": _support_actions(
         "bumprta_bump", "bumprta_up", "bumprta_vote", "bumprta_takasumi",
-        "bumprta_dicoall", "bumprta_dcafe", "bumprta_sharkbot", "bumprta_settings",
+        "bumprta_dicoall", "bumprta_dcafe", "bumprta_sharkbot", "bumprta_dsio",
+        "bumprta_discom", "bumprta_settings",
     ),
     "sns": _support_actions(
         "sns_youtube", "sns_x", "sns_github", "sns_rss", "sns_youtube_live",

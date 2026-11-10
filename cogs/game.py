@@ -301,6 +301,8 @@ _LAZY_FEATURE_MODULES = {
     "DEFAULT_SEND_LEAD": "core.game.rta.entry",
     "DISABLED_TEXT": "core.game.nation.cog",
     "DCAFE_BOT_ID": "core.game.rta.entry",
+    "DSIO_BOT_ID": "core.game.rta.entry",
+    "DISCOM_BOT_ID": "core.game.rta.entry",
     "DICOALL_BOT_ID": "core.game.rta.entry",
     "DISBOARD_BOT_ID": "core.game.rta.entry",
     "DISCORD_EPOCH_MS": "core.game.rta.entry",

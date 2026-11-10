@@ -53,6 +53,8 @@ test("parseRankingSnapshot は ID を含む余分な項目を落とし、数値�
       dicoall: { fast: [], slow: [] },
       dcafe: { fast: [], slow: [] },
       sharkbot: { fast: [], slow: [] },
+      dsio: { fast: [], slow: [] },
+      discom: { fast: [], slow: [] },
     },
   });
   // RTA キーが無い旧スナップショットは空配列として読む
@@ -129,6 +131,8 @@ test("parseRankingSnapshot は rta ボード（サービス別・総合×最速/
   assert.equal(snapshot.rta.all.fast[0].service, "up");
   assert.deepEqual(snapshot.rta.vote, { fast: [], slow: [] });
   assert.equal(m.RTA_SERVICE_LABELS.sharkbot, "SharkBot");
+  assert.equal(m.RTA_SERVICE_LABELS.dsio, "DiscordServers.io");
+  assert.equal(m.RTA_SERVICE_LABELS.discom, "DISCOM");
 });
 
 test("parseRankingSnapshot は旧形式（rta キーなし）を bump/up の最速ボードへ寄せる", () => {

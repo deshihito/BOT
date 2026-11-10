@@ -42,6 +42,8 @@ TAKASUMI_BOT_ID = 981314695543783484   # TakasumiBOT
 DICOALL_BOT_ID = 903541413298450462    # Dicoall (SharkBot等の公開実装でも同IDで検知)
 DCAFE_BOT_ID = 850493201064132659      # Discord Cafe (DCafe)
 SHARKBOT_BOT_ID = 1322100616369147924  # SharkBot (公式招待リンク/Discordアプリディレクトリ)
+DSIO_BOT_ID = 341738423134060544      # DiscordServers.io (旧 Disforge)。公開 autobumper 実装の appId と Disforge 時代の OAuth client_id の一致で裏取り (2026-11-10)
+DISCOM_BOT_ID = 1454830591504814100   # DISCOM。ユーザーが実BotからIDをコピーして提供 (2026-11-10)
 
 # Time between the service's success message and the moment the command can be
 # used again.  (Dis速's /up interval may differ from Disboard's; change it here.)
@@ -53,6 +55,8 @@ COOLDOWN = {
     "dicoall": timedelta(hours=1),    # Dicoall /up (「次回の更新可能時間」フィールドがあればそちら優先)
     "dcafe": timedelta(hours=2),      # Discord Cafe /up (次回情報なし・固定)
     "sharkbot": timedelta(hours=2),   # SharkBot /up (応答本文「2時間後に再度Upできます」)
+    "dsio": timedelta(hours=2),       # DiscordServers.io /bump (成功文「Next bump available: 2時間後」・固定)
+    "discom": timedelta(minutes=45),  # DISCOM /up (成功文「次回UP可能まで 約45分後」・固定)
 }
 # Which timestamp the cooldown is counted from:
 #   "latest"      - message Snowflake, or the edit time if the service answered
@@ -89,6 +93,8 @@ EVENT_TYPE_CHOICES = [
     app_commands.Choice(name="dicoall", value="dicoall"),
     app_commands.Choice(name="dcafe", value="dcafe"),
     app_commands.Choice(name="sharkbot", value="sharkbot"),
+    app_commands.Choice(name="dsio", value="dsio"),
+    app_commands.Choice(name="discom", value="discom"),
 ]
 # 統合 RTA ボードのサービス表示名。bump / up は従来のボード表題の表記を
 # 踏襲し、それ以外は /support の boardNotify 入口と同じ表示名にする。
@@ -101,6 +107,8 @@ SERVICE_LABELS = {
     "dicoall": "Dicoall",
     "dcafe": "Discord Cafe",
     "sharkbot": "SharkBot",
+    "dsio": "DiscordServers.io",
+    "discom": "DISCOM",
 }
 RTA_SERVICE_TYPES = tuple(SERVICE_LABELS)
 LEADERBOARD_SCOPE_CHOICES = [

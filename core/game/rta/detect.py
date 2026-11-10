@@ -15,7 +15,7 @@ from discord.ext import commands, tasks
 from core.support.api_retry import run_with_retry
 
 from core.game.rta.common import *  # noqa: F401,F403 - shared constants/helpers
-from core.game.rta.common import ALLOWED_CHANNEL_TYPES, DCAFE_BOT_ID, DICOALL_BOT_ID, DISBOARD_BOT_ID, DISOKU_BOT_ID, SABACHA_BOT_ID, SHARKBOT_BOT_ID, TAKASUMI_BOT_ID  # noqa: F401
+from core.game.rta.common import ALLOWED_CHANNEL_TYPES, DCAFE_BOT_ID, DICOALL_BOT_ID, DISBOARD_BOT_ID, DISCOM_BOT_ID, DISOKU_BOT_ID, DSIO_BOT_ID, SABACHA_BOT_ID, SHARKBOT_BOT_ID, TAKASUMI_BOT_ID  # noqa: F401
 from core.game.rta.helpers import _collect_embed_text, _collect_message_text, _event_time, _has_rich_content, _parse_dt  # noqa: F401
 
 logger = logging.getLogger("cogs.disboard_rta")
@@ -155,12 +155,23 @@ def detect_event(message):
     is_sharkbot = SHARKBOT_BOT_ID in app_id_set and (
         "サーバーをUpしました" in text and "2時間後に再度Upできます" in text
     )
+    # DiscordServers.io: 送信者Bot ID + タイトル「Server Bumped!」+ 成功文 (実地観測 2026-11-10)
+    is_dsio = DSIO_BOT_ID in app_id_set and (
+        any(getattr(embed, "title", "") == "Server Bumped!" for embed in embeds)
+        and "has been successfully bumped on" in folded
+    )
+    # DISCOM: 送信者Bot ID + タイトル「Discomサーバー掲示板」+ 成功文 (実地観測 2026-11-10)
+    is_discom = DISCOM_BOT_ID in app_id_set and (
+        any(getattr(embed, "title", "") == "Discomサーバー掲示板" for embed in embeds)
+        and "UPが成功しました" in text
+    )
     if not (is_disboard or is_disoku or is_sabacha or is_takasumi
-            or is_dicoall or is_dcafe or is_sharkbot):
+            or is_dicoall or is_dcafe or is_sharkbot or is_dsio or is_discom):
         # 既知サービスの Bot からの投稿なのに署名が一致しなかった場合は痕跡を
         # 残す（サービス側の文面変更に気づけるように。Dis速の既存ログと同方針）。
         if app_id_set & {SABACHA_BOT_ID, TAKASUMI_BOT_ID, DICOALL_BOT_ID,
-                         DCAFE_BOT_ID, SHARKBOT_BOT_ID, DISBOARD_BOT_ID}:
+                         DCAFE_BOT_ID, SHARKBOT_BOT_ID, DISBOARD_BOT_ID,
+                         DSIO_BOT_ID, DISCOM_BOT_ID}:
             logger.info(
                 "Service message ignored (no recognized success signature): "
                 "message=%s apps=%s text=%r",
@@ -179,6 +190,10 @@ def detect_event(message):
         kind = "dcafe"
     elif is_sharkbot:
         kind = "sharkbot"
+    elif is_dsio:
+        kind = "dsio"
+    elif is_discom:
+        kind = "discom"
     elif is_disboard:
         if "表示順をアップしたよ" not in text and "bump done" not in folded:
             logger.info(

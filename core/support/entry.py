@@ -108,6 +108,8 @@ BUMPRTA_SERVICE_ACTIONS = {
     "bumprta_dicoall": ("dicoall", "Dicoall"),
     "bumprta_dcafe": ("dcafe", "Discord Cafe"),
     "bumprta_sharkbot": ("sharkbot", "SharkBot"),
+    "bumprta_dsio": ("dsio", "DiscordServers.io"),
+    "bumprta_discom": ("discom", "DISCOM"),
 }
 
 # SNS プラットフォーム別入口 -> SnsNotifyPanel の platform preset。
@@ -200,6 +202,8 @@ class SupportCog(
         "bumprta_dicoall": "manage_guild",
         "bumprta_dcafe": "manage_guild",
         "bumprta_sharkbot": "manage_guild",
+        "bumprta_dsio": "manage_guild",
+        "bumprta_discom": "manage_guild",
         "bumprta_settings": "manage_guild",
         # assist preset 入口（汎用 assist_ 分岐の manage_guild と同じ水準を明示）。
         "assist_reminder": "manage_guild",

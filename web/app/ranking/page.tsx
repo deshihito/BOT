@@ -14,7 +14,7 @@ import { InviteCtaBlock } from "../InviteCta";
 
 export const metadata = {
   title: "リーダーボード",
-  description: "AGOBOTのランキング。経験値・コイン保有と、bump系RTA（DISBOARD bump・Dis速 up・鯖ちゃんねる・TakasumiBOT・Dicoall・Discord Cafe・SharkBot）の全サーバー記録を、サービス別・総合で表示します。",
+  description: "AGOBOTのランキング。経験値・コイン保有と、bump系RTA（DISBOARD bump・Dis速 up・鯖ちゃんねる・TakasumiBOT・Dicoall・Discord Cafe・SharkBot・DiscordServers.io・DISCOM）の全サーバー記録を、総合・サービス別で表示します。",
   alternates: { canonical: "/ranking" },
 };
 export const dynamic = "force-dynamic";
