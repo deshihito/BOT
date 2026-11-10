@@ -1710,7 +1710,50 @@ GAME_GUIDES["yotsuba"] = {
 """,
 }
 
-GAME_ORDER = ["jinrou", "wordwolf", "uno", "doubt", "ngword", "shiritori", "janken", "wordle", "shinkei", "babanuki", "guess", "flash", "minesweeper", "daifugo", "othello", "poker", "shogi", "chess", "dungeon", "quiz", "bingo", "majority", "onenight", "loveletter", "codenames", "twochoice", "thirtyone", "koikoi", "gomoku", "connect4", "sudoku", "game2048", "nonogram", "highlow", "justone", "ito", "insider", "gauge", "ruins", "hanabi", "hoshi", "liequiz", "cipher", "wirecut", "liardice", "mendou", "yotsuba"]
+GAME_GUIDES["nyokki"] = {
+    "id": "nyokki",
+    "name": "にょっきゲーム",
+    "category": "game",
+    "summary": "「たけのこニョッキ」の読み合いゲーム。順番なしで、タイミングを見て番号をチャットで宣言する。",
+    "players": "2〜8人",
+    "min_players": 2,
+    "max_players": 8,
+    "duration": "約5分",
+    "commands": ["/game"],
+    "guide": """## 概要
+元ネタは定番レクリエーション「たけのこニョッキ」です。順番は決まっていません。各プレイヤーが自分のタイミングで次の番号を宣言し、誰とも被らずに宣言できたら勝ち抜けです。
+
+## 人数
+2〜8人で遊べます。ホストは募集のときにCPUを追加できます（CPUもチャットに実際に発言して宣言します）。
+
+## 所要時間
+約5分です（最大10ラウンド）。
+
+## 遊び方
+1. `/game` で「にょっきゲーム」を選び、「募集する」を押します。
+2. 参加者は「参加する」を押します。ホストは「CPUを追加」でCPUを足せます。ホストが「開始する」を押すか、60秒たつと始まります（合計2名未満だと開始できません）。
+3. ラウンドが始まったら、掛け声に続いて「次の番号」が表示されます。宣言したい人は、対戦しているチャンネルで **「1ニョッキ！」のように数字＋ニョッキと発言** してください（ボタンではありません）。発言の全文が宣言の形に一致したときだけ、宣言として扱われます。
+4. 最初に正しく宣言した人には🌱が付き、2秒以内にもう1人が同じ番号を宣言すると「カブり」で両者とも1アウトになり、そのラウンドは終わります。2秒過ぎれば最初の人が勝ち抜け、次の番号に進みます。
+5. 10秒間誰も宣言しなければ1回だけ延長され、それでも無ければアウト無しでラウンドが終わります。
+
+## ルール
+- **勝ち抜け**: 対象の番号を、誰とも被らずに宣言する
+- **カブり**: 最初の宣言から2秒以内に同じ番号をもう1人が宣言すると、両者1アウトでラウンド終了
+- **番号違い**: 対象でない番号を宣言すると1アウトを取り、そのラウンドは退場（ラウンドは続きます）
+- **最後の1人**: 勝ち抜けが進んで未宣言が1人だけ残ると、その人が1アウトを取ってラウンド終了
+- **脱落と優勝**: アウトが3つで脱落です。最後の1人が優勝。全員が同時に脱落条件に達したら引き分け、10ラウンドで決着しなければアウトの少ない人の勝ち（同数なら共同優勝）です
+
+## 注意
+- 宣言は対戦チャンネルでの発言でのみ受け付けます。他のチャンネルの発言や、参加していない人の発言は無視されます。
+- 賞金などのコイン要素はありません。
+- 再起動をまたいだ復旧には対応していません。
+
+## コマンド
+- `/game`: パーティーゲームの入口
+""",
+}
+
+GAME_ORDER = ["jinrou", "wordwolf", "uno", "doubt", "ngword", "shiritori", "janken", "wordle", "shinkei", "babanuki", "guess", "flash", "minesweeper", "daifugo", "othello", "poker", "shogi", "chess", "dungeon", "quiz", "bingo", "majority", "onenight", "loveletter", "codenames", "twochoice", "thirtyone", "koikoi", "gomoku", "connect4", "sudoku", "game2048", "nonogram", "highlow", "justone", "ito", "insider", "gauge", "ruins", "hanabi", "hoshi", "liequiz", "cipher", "wirecut", "liardice", "mendou", "yotsuba", "nyokki"]
 
 
 # ----------------------------------------------------------------------

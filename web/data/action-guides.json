@@ -1,14 +1,14 @@
 {
   "version": 1,
-  "total": 251,
+  "total": 253,
   "counts": {
-    "general": 71,
+    "general": 72,
     "vc": 45,
-    "game": 48,
+    "game": 49,
     "support": 86,
     "help": 1
   },
-  "game_count": 47,
+  "game_count": 48,
   "roots": [
     {
       "root": "general",
@@ -271,6 +271,12 @@
               "id": "general:rta_board",
               "value": "rta_board",
               "title": "RTAランキング",
+              "description": ""
+            },
+            {
+              "id": "general:nurupo_board",
+              "value": "nurupo_board",
+              "title": "ぬるぽRTA",
               "description": ""
             }
           ]
@@ -1181,6 +1187,13 @@
               "title": "ゲーム開始: よつば合わせ",
               "description": "単語ペアへのヒントを捻り、シャッフルされたカードの配置を当てる協力ワードゲーム。",
               "note": "3〜6人／約15分"
+            },
+            {
+              "id": "game:game:nyokki",
+              "value": "game:nyokki",
+              "title": "ゲーム開始: にょっきゲーム",
+              "description": "「たけのこニョッキ」の読み合いゲーム。順番なしで、タイミングを見て番号をチャットで宣言する。",
+              "note": "2〜8人／約5分"
             },
             {
               "id": "game:game:monthly_king",

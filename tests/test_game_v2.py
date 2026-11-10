@@ -46,7 +46,7 @@ class Round4RegistrationTest(unittest.TestCase):
     NEW_R5 = ["cipher", "wirecut", "liardice", "mendou", "yotsuba"]
 
     def test_total_47_games(self):
-        self.assertEqual(len(GAME_ORDER), 47)
+        self.assertEqual(len(GAME_ORDER), 48)
         for game in self.NEW + self.NEW_R5:
             self.assertIn(game, GAME_ORDER)
             self.assertIn(game, GAME_GUIDES)
@@ -56,12 +56,12 @@ class Round4RegistrationTest(unittest.TestCase):
         # ページ分割される（ハブのページング一般化）。
         from cogs.game import GAME_GENRE_BY_GAME, game_select_pages
         party = [g for g in GAME_ORDER if GAME_GENRE_BY_GAME[g] == "party"]
-        self.assertEqual(len(party), 29)
+        self.assertEqual(len(party), 30)
         pages = game_select_pages()
-        self.assertEqual(sum(len(p) for p in pages), 47)
+        self.assertEqual(sum(len(p) for p in pages), 48)
         self.assertTrue(all(len(p) <= 25 for p in pages))
         party_pages = game_select_pages("party")
-        self.assertEqual([len(p) for p in party_pages], [25, 4])
+        self.assertEqual([len(p) for p in party_pages], [25, 5])
 
     def test_ranked_games_known(self):
         from core.game.game import party_ranking

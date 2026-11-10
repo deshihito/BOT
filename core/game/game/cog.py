@@ -85,6 +85,7 @@ GAME_COGS = {
     "liardice": "LiarDice",
     "mendou": "Mendou",
     "yotsuba": "Yotsuba",
+    "nyokki": "Nyokki",
 }
 
 RANKED_GAMES = {"ngword", "shiritori"}
@@ -99,7 +100,7 @@ GAME_GENRES = {
 # 導線最適化ラウンド3: 1件ジャンル「アドベンチャー」（ダンジョンのみ）は器を畳み、
 # ダンジョン（1人・自由にプレイ）を solo へ寄せた。分類だけの変更で機能には触らない。
 GAME_GENRE_BY_GAME = {
-    **{game: "party" for game in ("jinrou", "wordwolf", "uno", "doubt", "ngword", "shiritori", "janken", "babanuki", "quiz", "bingo", "majority", "onenight", "loveletter", "codenames", "twochoice", "thirtyone", "justone", "ito", "insider", "gauge", "ruins", "hanabi", "hoshi", "liequiz", "cipher", "wirecut", "liardice", "mendou", "yotsuba")},
+    **{game: "party" for game in ("jinrou", "wordwolf", "uno", "doubt", "ngword", "shiritori", "janken", "babanuki", "quiz", "bingo", "majority", "onenight", "loveletter", "codenames", "twochoice", "thirtyone", "justone", "ito", "insider", "gauge", "ruins", "hanabi", "hoshi", "liequiz", "cipher", "wirecut", "liardice", "mendou", "yotsuba", "nyokki")},
     **{game: "solo" for game in ("wordle", "shinkei", "guess", "flash", "minesweeper", "sudoku", "game2048", "nonogram", "highlow", "dungeon")},
     **{game: "board" for game in ("daifugo", "othello", "poker", "shogi", "chess", "koikoi", "gomoku", "connect4")},
 }
