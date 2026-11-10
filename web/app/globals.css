@@ -355,3 +355,107 @@ body:has([data-activity-root]) > main { max-width:none; min-height:100svh; margi
   .game-card { padding:14px; }
   .game-card-glyph { width:52px; height:52px; font-size:29px; }
 }
+
+/* BALKU（/games/balku）: 白基調＋クリームの企画カード＋設計図シアン。
+   黄黒ハザードは伏せ企画と BALKU ボタンだけに使う。 */
+.balku-error { margin:0 0 14px; padding:10px 14px; border:1px solid #d9a0a0; border-radius:9px; background:#fdf0f0; color:#a34848; font-size:14px; }
+.balku-notice { margin:0 0 14px; padding:10px 14px; border:1px solid #e8d9a8; border-radius:9px; background:#fffaf0; color:#6f654d; font-size:14px; }
+.balku-steps { display:grid; gap:6px; margin:0 0 20px; padding:14px 18px; border:1px solid var(--line); border-radius:9px; background:var(--soft); list-style:none; font-size:14px; }
+.balku-lobby-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:16px; align-items:start; }
+.balku-panel { display:grid; gap:12px; padding:18px; border:1px solid var(--line); border-radius:9px; background:#fff; }
+.balku-panel h2 { font-size:17px; }
+.balku-field { display:grid; gap:6px; font-size:14px; }
+.balku-field > span { color:var(--muted); font-size:13px; font-weight:700; }
+.balku-input { width:100%; padding:9px 11px; border:1px solid var(--line); border-radius:8px; background:#fff; color:var(--text); font:inherit; outline-color:#2f7f9f; }
+.balku-code-input { text-transform:uppercase; letter-spacing:.12em; font-weight:700; }
+.balku-segmented { display:flex; border:1px solid var(--line); border-radius:8px; overflow:hidden; width:max-content; }
+.balku-segmented button { padding:6px 14px; border:0; border-right:1px solid var(--line); background:#fff; color:var(--text); cursor:pointer; font:inherit; font-size:14px; }
+.balku-segmented button:last-child { border-right:0; }
+.balku-segmented button.balku-segmented-active { background:#2f7f9f; color:#fff; font-weight:700; }
+.balku-check { display:flex; align-items:center; gap:9px; font-size:14px; cursor:pointer; }
+.balku-check input { width:17px; height:17px; accent-color:#2f7f9f; }
+.balku-btn { padding:8px 14px; border:1px solid var(--line); border-radius:7px; background:#fff; color:var(--text); font:inherit; font-size:14px; font-weight:700; cursor:pointer; }
+.balku-btn:hover { background:var(--soft); }
+.balku-btn:disabled { opacity:.45; cursor:not-allowed; }
+.balku-btn-primary { background:#2f7f9f; border-color:#2f7f9f; color:#fff; }
+.balku-btn-primary:hover { background:#276b86; }
+.balku-btn-ghost { border-color:transparent; color:var(--muted); font-weight:400; }
+.balku-btn-hazard { border:2px solid #191919; background:repeating-linear-gradient(45deg,#f5c518 0 10px,#191919 10px 20px); color:#fff; text-shadow:0 1px 2px #000,0 0 4px #000; }
+.balku-btn-hazard:hover { background:repeating-linear-gradient(45deg,#f5c518 0 10px,#191919 10px 20px); opacity:.92; }
+.balku-actions { display:flex; flex-wrap:wrap; gap:8px; align-items:center; }
+.balku-join-row { display:flex; gap:8px; }
+.balku-join-row .balku-input { flex:1; }
+.balku-public-list { display:grid; gap:8px; }
+.balku-public-row { display:flex; align-items:center; gap:12px; padding:9px 12px; border:1px solid var(--line); border-radius:8px; }
+.balku-public-code { font-weight:800; letter-spacing:.1em; }
+.balku-public-row .muted { margin-right:auto; font-size:13px; }
+.balku-room-code-row { display:flex; align-items:center; gap:12px; flex-wrap:wrap; }
+.balku-room-code { font-size:30px; font-weight:800; letter-spacing:.18em; color:#2f7f9f; }
+.balku-player-list { display:grid; gap:6px; }
+.balku-player-row { padding:8px 12px; border:1px solid var(--line); border-radius:8px; background:var(--soft); font-size:14px; }
+.balku-winner { font-size:18px; font-weight:800; }
+.balku-results { width:100%; }
+.balku-result-win td { background:#fffaf0; font-weight:700; }
+.balku-topbar { display:flex; flex-wrap:wrap; align-items:center; gap:10px 18px; margin-bottom:14px; padding:12px 14px; border:1px solid var(--line); border-radius:9px; background:var(--soft); font-size:14px; }
+.balku-deck { display:flex; align-items:center; gap:10px; }
+.balku-deckbar { width:130px; height:10px; border-radius:5px; background:#e8e8e2; overflow:hidden; }
+.balku-deckbar-fill { height:100%; background:#2f7f9f; transition:width .4s ease; }
+.balku-turn-now { padding:3px 10px; border-radius:999px; background:#2f7f9f; color:#fff; font-weight:800; }
+.balku-sync-note { color:var(--muted); font-size:12px; }
+.balku-auction { display:flex; flex-wrap:wrap; align-items:center; gap:8px 14px; margin-bottom:16px; padding:12px 14px; border:2px solid #2f7f9f; border-radius:9px; background:#f2f8fa; font-size:14px; }
+.balku-section-title { margin:20px 0 10px; font-size:16px; }
+.balku-opponents { display:grid; gap:12px; }
+.balku-opponent { padding:12px 14px; border:1px solid var(--line); border-radius:9px; }
+.balku-opponent-active { border-color:#2f7f9f; box-shadow:inset 0 0 0 1px #2f7f9f; }
+.balku-opponent-head { display:flex; flex-wrap:wrap; gap:6px 12px; align-items:center; margin-bottom:8px; font-size:14px; }
+.balku-bundles { display:grid; gap:8px; }
+.balku-bundle { padding:10px 12px; border:1px solid var(--line); border-radius:8px; background:#fffdf4; }
+.balku-bundle-down { border:2px solid #191919; background:repeating-linear-gradient(45deg,rgba(245,197,24,.16) 0 12px,rgba(25,25,25,.08) 12px 24px),#fffdf4; }
+.balku-bundle-main { display:flex; flex-wrap:wrap; align-items:center; gap:6px 10px; font-size:14px; }
+.balku-bundle-name { font-weight:800; }
+.balku-bundle-effect { color:var(--muted); font-size:13px; }
+.balku-badge { display:inline-block; padding:1px 8px; border-radius:999px; font-size:12px; font-weight:700; background:var(--soft); color:var(--muted); }
+.balku-badge-ok { background:#e5f3e8; color:#1e7a46; }
+.balku-badge-bad { background:#fbe9e9; color:#a34848; }
+.balku-badge-hazard { background:#f5c518; color:#191919; border:1px solid #191919; }
+.balku-bulk-area { display:flex; flex-wrap:wrap; gap:8px; margin-top:8px; }
+.balku-confirm { flex:1 1 260px; padding:10px 12px; border:1px solid #e8d9a8; border-radius:8px; background:#fffaf0; font-size:13px; }
+.balku-confirm p { margin-bottom:8px; }
+.balku-market { display:flex; flex-wrap:wrap; gap:8px; }
+.balku-market-chip { padding:8px 12px; border:1px solid #2f7f9f; border-radius:999px; background:#fff; color:var(--text); font:inherit; font-size:14px; font-weight:700; cursor:pointer; }
+.balku-market-chip span { color:#2f7f9f; font-size:12px; }
+.balku-market-chip:disabled { opacity:.4; cursor:not-allowed; border-color:var(--line); }
+.balku-hand-tools { display:flex; flex-wrap:wrap; align-items:center; gap:10px; margin-bottom:12px; }
+.balku-proj-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(210px,1fr)); gap:10px; }
+.balku-card { display:grid; gap:6px; padding:12px; border:1px solid #e3d9b8; border-radius:10px; background:#fff8e1; color:var(--text); font:inherit; text-align:left; cursor:pointer; }
+.balku-card:hover { border-color:#2f7f9f; }
+.balku-card-ready { border-color:#2f7f9f; box-shadow:inset 0 0 0 1px #2f7f9f; }
+.balku-card-selected { outline:3px solid #2f7f9f; outline-offset:1px; }
+.balku-card-sell { outline:3px solid #191919; outline-offset:1px; }
+.balku-card-head { display:flex; justify-content:space-between; gap:8px; font-size:14px; }
+.balku-card-effect { color:var(--muted); font-size:13px; }
+.balku-req-chips { display:flex; flex-wrap:wrap; gap:5px; }
+.balku-req-chip { padding:1px 7px; border-radius:999px; font-size:12px; background:#fff; border:1px solid var(--line); }
+.balku-req-chip-ok { border-color:#2c7a4a; color:#1e7a46; }
+.balku-req-chip-ng { border-color:#c96a6a; color:#a34848; }
+.balku-mats { display:flex; flex-wrap:wrap; gap:7px; margin-top:12px; }
+.balku-mat-chip { padding:6px 11px; border:1px solid var(--line); border-radius:999px; background:#fff; color:var(--text); font:inherit; font-size:13px; cursor:pointer; }
+.balku-mat-chip-selected { background:#2f7f9f; border-color:#2f7f9f; color:#fff; font-weight:700; }
+.balku-mat-chip-sell { background:#191919; border-color:#191919; color:#f5c518; font-weight:700; }
+.balku-submit-panel { display:grid; gap:10px; margin-top:16px; padding:16px; border:2px solid #2f7f9f; border-radius:10px; background:#f2f8fa; }
+.balku-submit-panel h3 { margin:0; font-size:16px; }
+.balku-legal-ok { color:#1e7a46; font-size:14px; font-weight:700; }
+.balku-legal-ng { color:#a34848; font-size:14px; font-weight:700; }
+.balku-target-chips { display:flex; flex-wrap:wrap; gap:8px; }
+.balku-target-chip { padding:7px 12px; border:1px solid var(--line); border-radius:999px; background:#fff; color:var(--text); font:inherit; font-size:13px; cursor:pointer; }
+.balku-target-chip-selected { background:#2f7f9f; border-color:#2f7f9f; color:#fff; font-weight:700; }
+.balku-log { display:grid; gap:3px; margin:0; padding:0; list-style:none; font-size:13px; color:var(--muted); }
+.balku-log-good { color:#1e7a46; }
+.balku-log-warning { color:#8a6d1a; }
+.balku-log-danger { color:#a34848; }
+@media (max-width:760px) {
+  .balku-lobby-grid { grid-template-columns:minmax(0,1fr); }
+  .balku-proj-grid { grid-template-columns:repeat(auto-fill,minmax(160px,1fr)); }
+  .balku-room-code { font-size:24px; }
+  .balku-deckbar { width:90px; }
+}
