@@ -1,8 +1,8 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import "./globals.css";
-import { InviteButton } from "./InviteCta";
-import { SITE_URL, SUPPORT_SERVER_URL } from "@/lib/site";
+import { SiteNav } from "./SiteNav";
+import { FOOTER_GROUPS, SITE_URL } from "@/lib/site";
 import { GAME_COUNT, TOTAL_FUNCTIONS } from "@/lib/command-guides";
 
 // Google AdSense の審査・所有権確認コード（自動広告もこのスクリプトで配信される）
@@ -48,26 +48,25 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <header>
           <nav aria-label="メインメニュー">
             <Link href="/" className="brand"><img src="/img/nomal.png" alt="" />AGOBOT</Link>
-            <div className="main-nav-links">
-              <Link href="/commands">コマンド</Link>
-              <Link href="/games">ゲーム</Link>
-              <Link href="/dashboard">ダッシュボード</Link>
-              <Link href="/ranking">ランキング</Link>
-              <InviteButton />
-            </div>
+            <SiteNav />
           </nav>
         </header>
         <main>{children}</main>
         <footer>
-          <nav className="footer-links" aria-label="ポリシー">
-            <a href={SUPPORT_SERVER_URL} target="_blank" rel="noreferrer">サポートサーバー</a>
-            <Link href="/features">機能紹介</Link>
-            <Link href="/compute">計算に参加</Link>
-            <Link href="/status">ステータス</Link>
-            <Link href="/credits">クレジット</Link>
-            <Link href="/terms">利用規約</Link>
-            <Link href="/privacy">プライバシーポリシー</Link>
-          </nav>
+          <div className="footer-inner">
+            {FOOTER_GROUPS.map((group) => (
+              <nav key={group.label} className="footer-group" aria-label={group.label}>
+                <p className="footer-group-title">{group.label}</p>
+                {group.links.map((link) =>
+                  link.external ? (
+                    <a key={link.href} href={link.href} target="_blank" rel="noreferrer">{link.label}</a>
+                  ) : (
+                    <Link key={link.href} href={link.href}>{link.label}</Link>
+                  ),
+                )}
+              </nav>
+            ))}
+          </div>
         </footer>
       </body>
     </html>
