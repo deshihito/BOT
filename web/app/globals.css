@@ -271,7 +271,8 @@ body:has([data-activity-root]) > main { max-width:none; min-height:100svh; margi
 .home-genres { list-style:none; margin:0 0 12px; padding:0; display:grid; gap:10px; }
 .home-genres li { line-height:1.65; }
 .home-genre-functions { color:var(--muted); font-size:13.5px; }
-.home-video { margin:44px 0 0; animation:home-fade-up .6s ease .05s both; }
+.home-video { margin:0 0 34px; animation:home-fade-up .6s ease .05s both; }
+.home-more-features { margin-top:26px; }
 .home-video h2 { font-size:17px; margin:0 0 12px; }
 .home-video video { display:block; width:100%; height:auto; border:1px solid var(--line); border-radius:12px; background:#fff; }
 @media (prefers-reduced-motion: reduce) {
