@@ -80,7 +80,9 @@ class EventsMixin:
 
         順位は「その記録が各ランキングに入る位置」= 自分より上位のユーザー
         数 + 1（SQL関数 get_bump_rta_record_ranks が best/worst 反映後の
-        テーブルから算出する）。戻り値は順位 dict（通知表示にも使う）。
+        テーブルから算出する）。順位の基準は表示ボードと同じ全サービス
+        一括の統合ランキング（p_event_type は互換のため渡すが、SQL 側では
+        統合集計に使わない）。戻り値は順位 dict（通知表示にも使う）。
         失敗は呼び出し側で握る前提で、ここでは例外をそのまま上げる。
         """
         result = await self._call(lambda: self.db.rpc("get_bump_rta_record_ranks", {

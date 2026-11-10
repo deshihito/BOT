@@ -189,7 +189,7 @@ const FUNCTION_OVERRIDES: Record<string, { description?: string; note?: string }
   "general:rankings": { description: "各種ランキングへの入口です。" },
   "general:asset_leaderboard": { description: "コインと資産の総合ランキングを確認します。" },
   "general:sokunuke_board": { description: "即抜けRTAの記録をランキングで確認します。" },
-  "general:rta_board": { description: "対応サービスのbump / up記録を、サービス別・最速／最遅でランキング表示します。" },
+  "general:rta_board": { description: "対応サービスのbump / up記録を、全サービス一括の統合ランキング（最速／最遅）で表示します。" },
   // /general EXP・レベル
   "general:exp_status": { description: "自分のEXPとレベル、進捗を確認します。" },
   "general:exp_ranking": { description: "EXPのランキングを画像ボードで確認します。" },

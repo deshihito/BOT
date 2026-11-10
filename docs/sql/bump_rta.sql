@@ -159,24 +159,58 @@ CREATE OR REPLACE FUNCTION public.get_bump_rta_record_ranks(
 LANGUAGE sql SECURITY INVOKER
 AS $$
     SELECT
-      (SELECT count(*)::integer + 1 FROM public.bump_rta_records AS r
-        WHERE r.guild_id = p_guild_id AND r.event_type = p_event_type
-          AND r.elapsed_ms < p_elapsed_ms),
+      (SELECT count(*)::integer + 1 FROM (
+          SELECT user_id, min(elapsed_ms) AS best_ms
+          FROM public.bump_rta_records
+          WHERE guild_id = p_guild_id
+          GROUP BY user_id) AS l
+        WHERE l.best_ms < p_elapsed_ms),
       (SELECT count(*)::integer + 1 FROM (
           SELECT user_id, min(elapsed_ms) AS best_ms
           FROM public.bump_rta_events
-          WHERE event_type = p_event_type
           GROUP BY user_id) AS g
         WHERE g.best_ms < p_elapsed_ms),
-      (SELECT count(*)::integer + 1 FROM public.bump_rta_worst_records AS w
-        WHERE w.guild_id = p_guild_id AND w.event_type = p_event_type
-          AND w.elapsed_ms > p_elapsed_ms),
+      (SELECT count(*)::integer + 1 FROM (
+          SELECT user_id, max(elapsed_ms) AS worst_ms
+          FROM public.bump_rta_worst_records
+          WHERE guild_id = p_guild_id
+          GROUP BY user_id) AS l
+        WHERE l.worst_ms > p_elapsed_ms),
       (SELECT count(*)::integer + 1 FROM (
           SELECT user_id, max(elapsed_ms) AS worst_ms
           FROM public.bump_rta_events
-          WHERE event_type = p_event_type
           GROUP BY user_id) AS g
         WHERE g.worst_ms > p_elapsed_ms);
 $$;
 REVOKE ALL ON FUNCTION public.get_bump_rta_record_ranks(text, text, integer) FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.get_bump_rta_record_ranks(text, text, integer) TO anon, service_role;
+
+-- Combined (all-services) global boards. Existing environments apply
+-- docs/sql/bump_rta_combined_ranking.sql instead.
+DROP FUNCTION IF EXISTS public.get_bump_rta_global_combined_ranking(integer);
+CREATE OR REPLACE FUNCTION public.get_bump_rta_global_combined_ranking(p_limit integer DEFAULT 10)
+RETURNS TABLE(user_id text, elapsed_ms integer, attempts bigint)
+LANGUAGE sql SECURITY INVOKER
+AS $$
+    SELECT e.user_id, min(e.elapsed_ms)::integer AS elapsed_ms, count(*)::bigint AS attempts
+    FROM public.bump_rta_events AS e
+    GROUP BY e.user_id
+    ORDER BY min(e.elapsed_ms) ASC
+    LIMIT greatest(1, least(coalesce(p_limit, 10), 100));
+$$;
+REVOKE ALL ON FUNCTION public.get_bump_rta_global_combined_ranking(integer) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.get_bump_rta_global_combined_ranking(integer) TO anon, service_role;
+
+DROP FUNCTION IF EXISTS public.get_bump_rta_global_combined_slowest_ranking(integer);
+CREATE OR REPLACE FUNCTION public.get_bump_rta_global_combined_slowest_ranking(p_limit integer DEFAULT 10)
+RETURNS TABLE(user_id text, elapsed_ms integer, attempts bigint)
+LANGUAGE sql SECURITY INVOKER
+AS $$
+    SELECT e.user_id, max(e.elapsed_ms)::integer AS elapsed_ms, count(*)::bigint AS attempts
+    FROM public.bump_rta_events AS e
+    GROUP BY e.user_id
+    ORDER BY max(e.elapsed_ms) DESC
+    LIMIT greatest(1, least(coalesce(p_limit, 10), 100));
+$$;
+REVOKE ALL ON FUNCTION public.get_bump_rta_global_combined_slowest_ranking(integer) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.get_bump_rta_global_combined_slowest_ranking(integer) TO anon, service_role;

@@ -26,16 +26,8 @@ from core.leaderboard_image import (
 
 logger = logging.getLogger("cogs.disboard_rta")
 
-# ボードのアクセント色（サービス別）。bump / up は従来の色を踏襲する。
-RTA_BOARD_ACCENTS = {
-    "bump": (37, 99, 235),
-    "up": (147, 51, 234),
-    "vote": (34, 197, 94),
-    "takasumi": (245, 158, 11),
-    "dicoall": (14, 165, 233),
-    "dcafe": (190, 24, 93),
-    "sharkbot": (71, 85, 105),
-}
+# 統合ボードのアクセント色（全サービス一括のため単色）。
+RTA_BOARD_ACCENT = (37, 99, 235)
 
 
 class SettingsMixin:
@@ -122,61 +114,75 @@ class SettingsMixin:
             on_conflict="guild_id").execute())
 
 
-    def _rta_board_title(self, event_type: str, scope: str, slowest: bool) -> str:
-        label = SERVICE_LABELS.get(event_type, event_type)
+    def _rta_board_title(self, scope: str, slowest: bool) -> str:
         kind = "最遅ランキング" if slowest else "RTAランキング"
         if scope == "global":
-            return f"全サーバー {label} {kind}"
-        return f"このサーバー {label} {kind}"
+            return f"全サーバー {kind}"
+        return f"このサーバー {kind}"
 
-    async def _rta_ranking_rows(self, event_type: str, scope: str, slowest: bool, guild_id):
+    async def _rta_ranking_rows(self, scope: str, slowest: bool, guild_id):
         """local / global スコープの (表題, 行データ) を取得する。
 
+        集計は全サービス一括（統合ランキング）: ユーザーごとに最速は
+        全サービス中の最小、最遅は全サービス中の最大。記録自体は
+        サービス別（event_type 付き）のまま保持し、表示だけを統合する。
         local は記録テーブル（最速 bump_rta_records / 最遅
-        bump_rta_worst_records）を直接読み、global は events から
-        ユーザーごとに集計する RPC を使う（従来方式のまま）。
+        bump_rta_worst_records）の全サービス分を読み、ユーザーごとに
+        集約する。global は events から一括集計する統合 RPC を使う。
         """
-        title = self._rta_board_title(event_type, scope, slowest)
+        title = self._rta_board_title(scope, slowest)
         if scope == "global":
-            rpc_name = "get_bump_rta_global_slowest_ranking" if slowest else "get_bump_rta_global_ranking"
+            rpc_name = ("get_bump_rta_global_combined_slowest_ranking" if slowest
+                        else "get_bump_rta_global_combined_ranking")
             rows = await self._call(lambda: self.db.rpc(rpc_name, {
-                "p_event_type": event_type, "p_limit": 10}).execute())
+                "p_limit": 10}).execute())
             return title, rows.data or []
         record_table = "bump_rta_worst_records" if slowest else "bump_rta_records"
         rows = await self._call(lambda: self.db.table(record_table).select(
-            "user_id,elapsed_ms,completed_at").eq("guild_id", str(guild_id)).eq(
-            "event_type", event_type).order("elapsed_ms", desc=slowest).limit(10).execute())
-        return title, rows.data or []
+            "user_id,elapsed_ms,completed_at").eq("guild_id", str(guild_id)).order(
+            "elapsed_ms", desc=slowest).limit(10000).execute())
+        best: dict[str, dict] = {}
+        for row in rows.data or []:
+            uid = str(row["user_id"])
+            current = best.get(uid)
+            if current is None or (
+                (int(row["elapsed_ms"]) > int(current["elapsed_ms"])) if slowest
+                else (int(row["elapsed_ms"]) < int(current["elapsed_ms"]))
+            ):
+                best[uid] = row
+        data = sorted(
+            best.values(),
+            key=lambda r: int(r["elapsed_ms"]), reverse=slowest)[:10]
+        return title, data
 
-    async def _rta_me_embed(self, event_type: str, slowest: bool, guild_id, user_id, user_name):
-        """me スコープ: 自分の記録（このサーバー / 全サーバー）のテキスト embed。"""
+    async def _rta_me_embed(self, slowest: bool, guild_id, user_id, user_name):
+        """me スコープ: 自分の統合記録（このサーバー / 全サーバー）のテキスト embed。"""
         uid, gid = str(user_id), str(guild_id)
         record_table = "bump_rta_worst_records" if slowest else "bump_rta_records"
-        local = await self._call(lambda: self.db.table(record_table).select(
-            "elapsed_ms,completed_at").eq("guild_id", gid).eq("user_id", uid).eq("event_type", event_type).order(
+        local_rows = await self._call(lambda: self.db.table(record_table).select(
+            "elapsed_ms,completed_at").eq("guild_id", gid).eq("user_id", uid).order(
                 "elapsed_ms", desc=slowest).limit(1).execute())
         global_best = await self._call(lambda: self.db.table("bump_rta_events").select(
-            "elapsed_ms,completed_at").eq("user_id", uid).eq("event_type", event_type).order("elapsed_ms", desc=slowest).limit(1).execute())
-        local_text = f"{local.data[0]['elapsed_ms'] / 1000:.2f}秒" if local.data else "記録なし"
+            "elapsed_ms,completed_at").eq("user_id", uid).order("elapsed_ms", desc=slowest).limit(1).execute())
+        local_text = f"{local_rows.data[0]['elapsed_ms'] / 1000:.2f}秒" if local_rows.data else "記録なし"
         global_text = f"{global_best.data[0]['elapsed_ms'] / 1000:.2f}秒" if global_best.data else "記録なし"
         label = "最遅記録" if slowest else "自己ベスト"
-        name = SERVICE_LABELS.get(event_type, event_type)
         return _white_embed(
-            f"{user_name} の**{name}{label}**\nこのサーバー: **{local_text}**\n全サーバー: **{global_text}**")
+            f"{user_name} の**{label}**\nこのサーバー: **{local_text}**\n全サーバー: **{global_text}**")
 
-    async def build_rta_board(self, event_type: str = "bump", scope: str = "local", slowest: bool = False, *, guild_id, user_id, user_name):
+    async def build_rta_board(self, scope: str = "local", slowest: bool = False, *, guild_id, user_id, user_name):
         """RTA ボードの (embed, png) を組み立てる。
 
         png は画像ボードのときだけ返し、me スコープ・記録なし・DB 未接続は
-        テキスト embed のみ（png=None）。記録が無いサービス/スコープでも
+        テキスト embed のみ（png=None）。記録が無いスコープでも
         例外にせず空ボード（テキスト）を返す。DB エラーは呼び出し側へ上げる。
         """
         if self.db is None:
             return _white_embed("Supabase未接続のため順位を取得できません。"), None
         if scope == "me":
             return await self._rta_me_embed(
-                event_type, slowest, guild_id, user_id, user_name), None
-        title, data = await self._rta_ranking_rows(event_type, scope, slowest, guild_id)
+                slowest, guild_id, user_id, user_name), None
+        title, data = await self._rta_ranking_rows(scope, slowest, guild_id)
         if not data:
             return _white_embed(f"**{title}**\nまだ記録がありません。"), None
         # ランキングの氏名はメンションではなく通常表記にする（特に全サーバー
@@ -196,15 +202,15 @@ class SettingsMixin:
         png = await asyncio.to_thread(
             render_leaderboard_png,
             title=title, sections=[(None, board_rows)],
-            accent=RTA_BOARD_ACCENTS.get(event_type, (37, 99, 235)),
+            accent=RTA_BOARD_ACCENT,
             avatars=avatars,
-            cache_namespace=f"rta-{event_type}-{scope}-{'slow' if slowest else 'fast'}")
+            cache_namespace=f"rta-all-{scope}-{'slow' if slowest else 'fast'}")
         embed = discord.Embed(title=title, color=0xFFFFFF)
         embed.set_image(url=f"attachment://{RTA_BOARD_FILENAME}")
         return embed, png
 
-    async def leaderboard(self, interaction: discord.Interaction, event_type: str = "bump", scope: str = "local", slowest: bool = False):
-        """/leaderboard から呼び出す bump/up RTA ランキング。
+    async def leaderboard(self, interaction: discord.Interaction, scope: str = "local", slowest: bool = False):
+        """/leaderboard から呼び出す bump/up RTA ランキング（全サービス統合）。
 
         slowest=True のときは同じ指標（実行可能になってから実際に実行する
         までの経過時間）を降順に並べた「最遅ランキング」を出す。最速側の
@@ -216,11 +222,11 @@ class SettingsMixin:
                 embed=_white_embed("Supabase未接続のため順位を取得できません。"), ephemeral=True)
         try:
             embed, png = await self.build_rta_board(
-                event_type, scope, slowest,
+                scope, slowest,
                 guild_id=interaction.guild_id, user_id=interaction.user.id,
                 user_name=interaction.user.display_name)
         except Exception as e:
-            logger.exception("bump/up leaderboard query failed: scope=%s kind=%s", scope, event_type)
+            logger.exception("bump/up leaderboard query failed: scope=%s", scope)
             return await interaction.followup.send(
                 view=as_embed_v2(_white_embed(f"ランキングの取得に失敗しました。\n（{type(e).__name__}: {e}）")))
         if png is None:

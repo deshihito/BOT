@@ -131,12 +131,12 @@ class FakeDb:
                 "completed_at": params["p_completed_at"],
             })
             return FakeResponse(None)
-        if name in ("get_bump_rta_global_ranking", "get_bump_rta_global_slowest_ranking"):
+        if name in ("get_bump_rta_global_combined_ranking",
+                    "get_bump_rta_global_combined_slowest_ranking"):
+            # 統合 RPC: event_type で絞らず全サービスを一括集計する。
             slowest = name.endswith("_slowest_ranking")
             grouped = {}
             for event in self.tables["bump_rta_events"]:
-                if event["event_type"] != params["p_event_type"]:
-                    continue
                 entry = grouped.setdefault(event["user_id"], {"elapsed": [], "attempts": 0})
                 entry["elapsed"].append(event["elapsed_ms"])
                 entry["attempts"] += 1
@@ -218,15 +218,13 @@ def make_interaction(user_id=321):
 async def board_rows(cog, **kwargs):
     """_rta_ranking_rows の (表題, 行) を返す（画像化前の並びを検証する）。"""
     return await cog._rta_ranking_rows(
-        kwargs.get("event_type", "bump"), kwargs.get("scope", "local"),
-        kwargs.get("slowest", False), 456)
+        kwargs.get("scope", "local"), kwargs.get("slowest", False), 456)
 
 
 async def board_embed(cog, **kwargs):
     """build_rta_board の (embed, png) を返す。"""
     return await cog.build_rta_board(
-        kwargs.get("event_type", "bump"), kwargs.get("scope", "local"),
-        kwargs.get("slowest", False),
+        kwargs.get("scope", "local"), kwargs.get("slowest", False),
         guild_id=456, user_id=321, user_name="自分")
 
 
@@ -240,11 +238,11 @@ class SlowestLeaderboardTest(unittest.IsolatedAsyncioTestCase):
              "elapsed_ms": 150000, "completed_at": T0.isoformat()},
         ]
         cog = make_cog(db)
-        title, data = await board_rows(cog, event_type="bump", scope="local", slowest=True)
-        self.assertEqual(title, "このサーバー bump 最遅ランキング")
+        title, data = await board_rows(cog, scope="local", slowest=True)
+        self.assertEqual(title, "このサーバー 最遅ランキング")
         self.assertEqual([r["user_id"] for r in data], ["111", "222"])
         self.assertEqual([r["elapsed_ms"] for r in data], [150000, 90000])
-        embed, png = await board_embed(cog, event_type="bump", scope="local", slowest=True)
+        embed, png = await board_embed(cog, scope="local", slowest=True)
         self.assertEqual(embed.title, title)
         self.assertTrue(png.startswith(b"\x89PNG"))
 
@@ -257,12 +255,12 @@ class SlowestLeaderboardTest(unittest.IsolatedAsyncioTestCase):
              "elapsed_ms": 30000, "completed_at": T0.isoformat()},
         ]
         cog = make_cog(db)
-        title, data = await board_rows(cog, event_type="bump", scope="local")
-        self.assertEqual(title, "このサーバー bump RTAランキング")
+        title, data = await board_rows(cog, scope="local")
+        self.assertEqual(title, "このサーバー RTAランキング")
         self.assertNotIn("最遅", title)
         self.assertEqual([r["user_id"] for r in data], ["111", "222"])
         self.assertEqual([r["elapsed_ms"] for r in data], [30000, 90000])
-        embed, png = await board_embed(cog, event_type="bump", scope="local")
+        embed, png = await board_embed(cog, scope="local")
         self.assertEqual(embed.title, title)
         self.assertTrue(png.startswith(b"\x89PNG"))
 
@@ -277,8 +275,8 @@ class SlowestLeaderboardTest(unittest.IsolatedAsyncioTestCase):
              "elapsed_ms": 120000, "completed_at": T0.isoformat()},
         ]
         cog = make_cog(db)
-        title, data = await board_rows(cog, event_type="bump", scope="global", slowest=True)
-        self.assertEqual(title, "全サーバー bump 最遅ランキング")
+        title, data = await board_rows(cog, scope="global", slowest=True)
+        self.assertEqual(title, "全サーバー 最遅ランキング")
         self.assertEqual([r["user_id"] for r in data], ["111", "222"])
         self.assertEqual(data[0]["elapsed_ms"], 200000)
         self.assertEqual(data[0]["attempts"], 2)
@@ -296,12 +294,12 @@ class SlowestLeaderboardTest(unittest.IsolatedAsyncioTestCase):
              "elapsed_ms": 5000, "completed_at": T0.isoformat()},
         ]
         cog = make_cog(db)
-        embed, png = await board_embed(cog, event_type="bump", scope="me", slowest=True)
+        embed, png = await board_embed(cog, scope="me", slowest=True)
         self.assertIsNone(png)
         self.assertIn("最遅記録", embed.description)
         self.assertIn("150.00秒", embed.description)
         self.assertIn("200.00秒", embed.description)
-        embed, png = await board_embed(cog, event_type="bump", scope="me")
+        embed, png = await board_embed(cog, scope="me")
         self.assertIsNone(png)
         self.assertIn("自己ベスト", embed.description)
         self.assertNotIn("最遅", embed.description)
@@ -314,49 +312,114 @@ class SlowestLeaderboardTest(unittest.IsolatedAsyncioTestCase):
         ]
         cog = make_cog(db)
         interaction = make_interaction()
-        await cog.leaderboard(interaction, event_type="bump", scope="local")
+        await cog.leaderboard(interaction, scope="local")
         kwargs = interaction.followup.send.await_args.kwargs
-        self.assertEqual(kwargs["embed"].title, "このサーバー bump RTAランキング")
+        self.assertEqual(kwargs["embed"].title, "このサーバー RTAランキング")
         self.assertIn("file", kwargs)
 
 
-class OtherServicesBoardTest(unittest.IsolatedAsyncioTestCase):
-    """bump/up 以外のサービスも同じボードで出せること（統合ボードの前提）。"""
+class CombinedBoardTest(unittest.IsolatedAsyncioTestCase):
+    """統合ランキング: ユーザーごとに全サービス中の最小（最速）/ 最大（最遅）。"""
 
-    async def test_vote_local_board(self):
+    async def test_local_fastest_uses_min_across_services(self):
         db = FakeDb()
         db.tables["bump_rta_records"] = [
-            {"guild_id": "456", "user_id": "111", "event_type": "vote",
+            {"guild_id": "456", "user_id": "111", "event_type": "bump",
+             "elapsed_ms": 50000, "completed_at": T0.isoformat()},
+            {"guild_id": "456", "user_id": "111", "event_type": "up",
+             "elapsed_ms": 30000, "completed_at": T0.isoformat()},
+            {"guild_id": "456", "user_id": "222", "event_type": "vote",
              "elapsed_ms": 42000, "completed_at": T0.isoformat()},
+            # 別サーバーの記録は混ざらない
+            {"guild_id": "999", "user_id": "111", "event_type": "bump",
+             "elapsed_ms": 1000, "completed_at": T0.isoformat()},
         ]
         cog = make_cog(db)
-        title, data = await board_rows(cog, event_type="vote", scope="local")
-        self.assertEqual(title, "このサーバー 鯖ちゃんねる RTAランキング")
-        self.assertEqual([r["user_id"] for r in data], ["111"])
-        embed, png = await board_embed(cog, event_type="vote", scope="local")
+        title, data = await board_rows(cog, scope="local")
+        self.assertEqual(title, "このサーバー RTAランキング")
+        self.assertEqual([r["user_id"] for r in data], ["111", "222"])
+        self.assertEqual([r["elapsed_ms"] for r in data], [30000, 42000])
+        embed, png = await board_embed(cog, scope="local")
         self.assertEqual(embed.title, title)
         self.assertTrue(png.startswith(b"\x89PNG"))
 
-    async def test_dicoall_global_board(self):
+    async def test_local_slowest_uses_max_across_services(self):
         db = FakeDb()
-        db.tables["bump_rta_events"] = [
-            {"guild_id": "1", "user_id": "111", "event_type": "dicoall",
-             "elapsed_ms": 61000, "completed_at": T0.isoformat()},
+        db.tables["bump_rta_worst_records"] = [
+            {"guild_id": "456", "user_id": "111", "event_type": "bump",
+             "elapsed_ms": 90000, "completed_at": T0.isoformat()},
+            {"guild_id": "456", "user_id": "111", "event_type": "up",
+             "elapsed_ms": 150000, "completed_at": T0.isoformat()},
+            {"guild_id": "456", "user_id": "222", "event_type": "dcafe",
+             "elapsed_ms": 120000, "completed_at": T0.isoformat()},
         ]
         cog = make_cog(db)
-        title, data = await board_rows(cog, event_type="dicoall", scope="global")
-        self.assertEqual(title, "全サーバー Dicoall RTAランキング")
-        self.assertEqual(data[0]["elapsed_ms"], 61000)
+        title, data = await board_rows(cog, scope="local", slowest=True)
+        self.assertEqual(title, "このサーバー 最遅ランキング")
+        self.assertEqual([r["user_id"] for r in data], ["111", "222"])
+        self.assertEqual([r["elapsed_ms"] for r in data], [150000, 120000])
+
+    async def test_global_combined_merges_services_and_attempts(self):
+        db = FakeDb()
+        db.tables["bump_rta_events"] = [
+            {"guild_id": "1", "user_id": "111", "event_type": "bump",
+             "elapsed_ms": 50000, "completed_at": T0.isoformat()},
+            {"guild_id": "2", "user_id": "111", "event_type": "up",
+             "elapsed_ms": 200000, "completed_at": T0.isoformat()},
+            {"guild_id": "1", "user_id": "222", "event_type": "vote",
+             "elapsed_ms": 120000, "completed_at": T0.isoformat()},
+        ]
+        cog = make_cog(db)
+        title, data = await board_rows(cog, scope="global")
+        self.assertEqual(title, "全サーバー RTAランキング")
+        self.assertEqual([r["user_id"] for r in data], ["111", "222"])
+        self.assertEqual(data[0]["elapsed_ms"], 50000)
+        self.assertEqual(data[0]["attempts"], 2)  # bump + up の合計
+        title, data = await board_rows(cog, scope="global", slowest=True)
+        self.assertEqual([r["user_id"] for r in data], ["111", "222"])
+        self.assertEqual(data[0]["elapsed_ms"], 200000)
+        self.assertEqual(data[0]["attempts"], 2)
+
+    async def test_me_combined_picks_extremes_across_services(self):
+        db = FakeDb()
+        db.tables["bump_rta_records"] = [
+            {"guild_id": "456", "user_id": "321", "event_type": "bump",
+             "elapsed_ms": 40000, "completed_at": T0.isoformat()},
+            {"guild_id": "456", "user_id": "321", "event_type": "up",
+             "elapsed_ms": 25000, "completed_at": T0.isoformat()},
+        ]
+        db.tables["bump_rta_worst_records"] = [
+            {"guild_id": "456", "user_id": "321", "event_type": "bump",
+             "elapsed_ms": 90000, "completed_at": T0.isoformat()},
+            {"guild_id": "456", "user_id": "321", "event_type": "vote",
+             "elapsed_ms": 180000, "completed_at": T0.isoformat()},
+        ]
+        db.tables["bump_rta_events"] = [
+            {"guild_id": "999", "user_id": "321", "event_type": "dicoall",
+             "elapsed_ms": 8000, "completed_at": T0.isoformat()},
+            {"guild_id": "999", "user_id": "321", "event_type": "bump",
+             "elapsed_ms": 300000, "completed_at": T0.isoformat()},
+        ]
+        cog = make_cog(db)
+        embed, png = await board_embed(cog, scope="me")
+        self.assertIsNone(png)
+        self.assertIn("自己ベスト", embed.description)
+        self.assertIn("25.00秒", embed.description)   # このサーバー: up の最小
+        self.assertIn("8.00秒", embed.description)    # 全サーバー: dicoall の最小
+        embed, png = await board_embed(cog, scope="me", slowest=True)
+        self.assertIsNone(png)
+        self.assertIn("最遅記録", embed.description)
+        self.assertIn("180.00秒", embed.description)  # このサーバー: vote の最大
+        self.assertIn("300.00秒", embed.description)  # 全サーバー: bump の最大
 
     async def test_empty_board_is_text_not_error(self):
         cog = make_cog(FakeDb())
-        for event_type in ("bump", "up", "vote", "takasumi", "dicoall", "dcafe", "sharkbot"):
-            embed, png = await board_embed(cog, event_type=event_type, scope="local")
-            self.assertIsNone(png, event_type)
-            self.assertIn("まだ記録がありません", embed.description, event_type)
-            embed, png = await board_embed(cog, event_type=event_type, scope="global", slowest=True)
-            self.assertIsNone(png, event_type)
-            self.assertIn("まだ記録がありません", embed.description, event_type)
+        embed, png = await board_embed(cog, scope="local")
+        self.assertIsNone(png)
+        self.assertIn("まだ記録がありません", embed.description)
+        embed, png = await board_embed(cog, scope="global", slowest=True)
+        self.assertIsNone(png)
+        self.assertIn("まだ記録がありません", embed.description)
 
 
 if __name__ == "__main__":

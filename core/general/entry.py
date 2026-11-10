@@ -84,16 +84,18 @@ from core.general.shortcuts import ShortcutsMixin
 # boardNotify RTA 統合ボード（general:rta_board）への旧 ID 互換プリセット。
 # 旧 bump/up 個別ボード8件はレジストリから外したが、保存済みショートカット・
 # /quick・BOT fixer 設定などが旧 ID を引いても壊れないよう、dispatch では
-# 統合ボードを該当の初期状態（サービス/スコープ/最速最遅）で開く。
+# 統合ボードを該当の初期状態で開く。ボードは全サービス一括の統合
+# ランキングになったため、サービス指定は引き継がず、スコープと
+# 最速/最遅の方向だけを引き継ぐ。
 RTA_BOARD_PRESETS = {
-    "bump_leaderboard": {"event_type": "bump"},
-    "up_leaderboard": {"event_type": "up"},
-    "bump_global_leaderboard": {"event_type": "bump", "scope": "global"},
-    "up_global_leaderboard": {"event_type": "up", "scope": "global"},
-    "bump_slowest": {"event_type": "bump", "slowest": True},
-    "up_slowest": {"event_type": "up", "slowest": True},
-    "bump_global_slowest": {"event_type": "bump", "scope": "global", "slowest": True},
-    "up_global_slowest": {"event_type": "up", "scope": "global", "slowest": True},
+    "bump_leaderboard": {},
+    "up_leaderboard": {},
+    "bump_global_leaderboard": {"scope": "global"},
+    "up_global_leaderboard": {"scope": "global"},
+    "bump_slowest": {"slowest": True},
+    "up_slowest": {"slowest": True},
+    "bump_global_slowest": {"scope": "global", "slowest": True},
+    "up_global_slowest": {"scope": "global", "slowest": True},
 }
 
 
