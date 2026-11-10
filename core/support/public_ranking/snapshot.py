@@ -29,7 +29,8 @@ TOP_N = 50
 # RTA_SERVICE_TYPES と同じ並び・同じキー。support 側から game 側を
 # import しないためここにも持ち、サービス追加時は両方を揃えること）。
 RTA_SERVICE_TYPES = (
-    "bump", "up", "vote", "takasumi", "dicoall", "dcafe", "sharkbot",
+    "bump", "up", "vote", "takasumi", "dicoall", "dcafe", "sharkbot", "dsio",
+    "discom",
 )
 
 

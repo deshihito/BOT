@@ -338,6 +338,8 @@ const FUNCTION_OVERRIDES: Record<string, { description?: string; note?: string }
   "support:bumprta_dicoall": { description: "Dicoallの更新検知と、次回通知の状態を確認します。" },
   "support:bumprta_dcafe": { description: "Discord Cafeの更新検知と、次回通知の状態を確認します。" },
   "support:bumprta_sharkbot": { description: "SharkBotの更新検知と、次回通知の状態を確認します。" },
+  "support:bumprta_dsio": { description: "DiscordServers.ioの更新検知と、次回通知の状態を確認します。" },
+  "support:bumprta_discom": { description: "DISCOMの更新検知と、次回通知の状態を確認します。" },
   "support:bumprta_settings": { description: "通知のオン／オフとメンションロールなど、全サービス共通の設定を行います。" },
   // /support SNS通知
   "support:sns_youtube": { description: "YouTubeチャンネルの新着動画を通知します。" },

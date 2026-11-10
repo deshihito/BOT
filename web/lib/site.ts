@@ -72,6 +72,8 @@ export const RTA_SERVICES: { key: string; label: string }[] = [
   { key: "dicoall", label: "Dicoall" },
   { key: "dcafe", label: "Discord Cafe" },
   { key: "sharkbot", label: "SharkBot" },
+  { key: "dsio", label: "DiscordServers.io" },
+  { key: "discom", label: "DISCOM" },
 ];
 
 export const RTA_SERVICE_LABELS: Record<string, string> = Object.fromEntries(
