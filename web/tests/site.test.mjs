@@ -45,16 +45,11 @@ test("parseRankingSnapshot は ID を含む余分な項目を落とし、数値�
     bump: [{ name: "c", value: 5300 }],
     up: [{ name: "d", value: 9870 }],
     rta: {
-      all: { fast: [], slow: [] },
-      bump: { fast: [{ name: "c", value: 5300 }], slow: [] },
-      up: { fast: [{ name: "d", value: 9870 }], slow: [] },
-      vote: { fast: [], slow: [] },
-      takasumi: { fast: [], slow: [] },
-      dicoall: { fast: [], slow: [] },
-      dcafe: { fast: [], slow: [] },
-      sharkbot: { fast: [], slow: [] },
-      dsio: { fast: [], slow: [] },
-      discom: { fast: [], slow: [] },
+      fast: [
+        { name: "c", value: 5300, service: "bump" },
+        { name: "d", value: 9870, service: "up" },
+      ],
+      slow: [],
     },
   });
   // RTA キーが無い旧スナップショットは空配列として読む
@@ -110,7 +105,30 @@ test("isBotStatusFresh は15分以内だけを新鮮とする", () => {
   assert.equal(m.isBotStatusFresh(snapshot, new Date("2026-11-08T03:15:01+00:00")), false);
 });
 
-test("parseRankingSnapshot は rta ボード（サービス別・総合×最速/最遅、日時・サービスつき）を読み取る", () => {
+test("parseRankingSnapshot は rta 単一ボード（最速/最遅、日時・サービスつき）を読み取る", () => {
+  const snapshot = m.parseRankingSnapshot({
+    updated_at: "2026-11-09T00:00:00+00:00",
+    exp: [],
+    coin: [],
+    rta: {
+      fast: [
+        { name: "a", value: 4000, at: "2026-11-07T05:00:00+00:00", service: "up" },
+        { name: "a", value: 5300, at: "2026-11-08T05:00:00+00:00", service: "bump" },
+      ],
+      slow: [{ name: "b", value: 90000, at: null, service: "bump" }],
+    },
+  });
+  // 同じユーザーでもサービスが違えば別エントリとして残る
+  assert.equal(snapshot.rta.fast.length, 2);
+  assert.equal(snapshot.rta.fast[0].service, "up");
+  assert.equal(snapshot.rta.fast[1].at, "2026-11-08T05:00:00+00:00");
+  assert.equal(snapshot.rta.slow[0].at, undefined);
+  assert.equal(m.RTA_SERVICE_LABELS.sharkbot, "SharkBot");
+  assert.equal(m.RTA_SERVICE_LABELS.dsio, "DiscordServers.io");
+  assert.equal(m.RTA_SERVICE_LABELS.discom, "DISCOM");
+});
+
+test("parseRankingSnapshot は移行期の旧形式（サービス別 Record）を総合ボードで読み替える", () => {
   const snapshot = m.parseRankingSnapshot({
     updated_at: "2026-11-09T00:00:00+00:00",
     exp: [],
@@ -118,7 +136,7 @@ test("parseRankingSnapshot は rta ボード（サービス別・総合×最速/
     rta: {
       bump: {
         fast: [{ name: "a", value: 5300, at: "2026-11-08T05:00:00+00:00", service: "bump" }],
-        slow: [{ name: "b", value: 90000, at: null, service: "bump" }],
+        slow: [],
       },
       all: {
         fast: [{ name: "a", value: 4000, at: "2026-11-07T05:00:00+00:00", service: "up" }],
@@ -126,13 +144,9 @@ test("parseRankingSnapshot は rta ボード（サービス別・総合×最速/
       },
     },
   });
-  assert.equal(snapshot.rta.bump.fast[0].at, "2026-11-08T05:00:00+00:00");
-  assert.equal(snapshot.rta.bump.slow[0].at, undefined);
-  assert.equal(snapshot.rta.all.fast[0].service, "up");
-  assert.deepEqual(snapshot.rta.vote, { fast: [], slow: [] });
-  assert.equal(m.RTA_SERVICE_LABELS.sharkbot, "SharkBot");
-  assert.equal(m.RTA_SERVICE_LABELS.dsio, "DiscordServers.io");
-  assert.equal(m.RTA_SERVICE_LABELS.discom, "DISCOM");
+  assert.equal(snapshot.rta.fast[0].value, 4000);
+  assert.equal(snapshot.rta.fast[0].service, "up");
+  assert.deepEqual(snapshot.rta.slow, []);
 });
 
 test("parseRankingSnapshot は旧形式（rta キーなし）を bump/up の最速ボードへ寄せる", () => {
@@ -143,7 +157,9 @@ test("parseRankingSnapshot は旧形式（rta キーなし）を bump/up の最�
     bump: [{ name: "a", value: 5300 }],
     up: [{ name: "b", value: 6100 }],
   });
-  assert.equal(snapshot.rta.bump.fast[0].value, 5300);
-  assert.equal(snapshot.rta.up.fast[0].value, 6100);
-  assert.deepEqual(snapshot.rta.all, { fast: [], slow: [] });
+  assert.deepEqual(snapshot.rta.fast, [
+    { name: "a", value: 5300, service: "bump" },
+    { name: "b", value: 6100, service: "up" },
+  ]);
+  assert.deepEqual(snapshot.rta.slow, []);
 });

@@ -85,34 +85,29 @@ def best_rta_rows(
     return list(picked.values())
 
 
-def combine_rta_boards(
+def pool_rta_boards(
     boards: Mapping[str, Iterable[Mapping[str, Any]]], *,
     slowest: bool = False, limit: int = TOP_N,
 ) -> list[dict[str, Any]]:
-    """サービス別の代表記録を総合ボードへ統合する。
+    """サービス別の代表記録を潰さずに単一ボードへ pooled する。
 
-    ユーザーごとに全サービス中の最速（slowest=True なら最遅）の記録を
-    採り、そのサービスと日時を保持する。同点は先に現れた記録を優先する。
+    入力は {サービス: best_rta_rows の行}。各行は「ユーザー × サービス」
+    のエントリとしてそのまま残し（同じユーザーが複数サービスに載れば
+    複数行になる）、サービスと日時を保持して elapsed の方向に並べる。
     """
-    best: dict[int, dict[str, Any]] = {}
+    pooled: list[dict[str, Any]] = []
     for service, rows in boards.items():
         for row in rows:
             user_id = _as_int(row.get("user_id"))
             if user_id == 0:
                 continue
-            elapsed = _as_int(row.get("elapsed_ms"))
-            current = best.get(user_id)
-            if current is not None:
-                better = elapsed > current["elapsed_ms"] if slowest else elapsed < current["elapsed_ms"]
-                if not better:
-                    continue
             completed_at = row.get("completed_at")
-            best[user_id] = {
+            pooled.append({
                 "user_id": user_id,
-                "elapsed_ms": elapsed,
+                "elapsed_ms": _as_int(row.get("elapsed_ms")),
                 "completed_at": completed_at if isinstance(completed_at, str) else None,
                 "service": service,
-            }
+            })
 
     def sort_key(item: Mapping[str, Any]):
         elapsed = _as_int(item.get("elapsed_ms"))
@@ -122,7 +117,7 @@ def combine_rta_boards(
             _as_int(item.get("user_id")),
         )
 
-    return sorted(best.values(), key=sort_key)[:limit]
+    return sorted(pooled, key=sort_key)[:limit]
 
 
 def _rta_board_entries(
@@ -159,9 +154,11 @@ def build_snapshot(
         旧形式の入力で、rta_boards が無いときだけ使う。
     rta_boards: {サービス: {"fast": 代表記録の行, "slow": 代表記録の行}}。
         代表記録の行は best_rta_rows の戻り値の形（user_id / elapsed_ms /
-        completed_at）。ここから日時・サービスつきの "rta" と、サービス
-        横断の総合ボード ("rta"["all"]) を作る。旧キーの bump / up は
-        fast 側から従来形式（name / value のみ）で引き続き出す。
+        completed_at）。ここから日時・サービスつきの単一ボード "rta"
+        （{"fast": ..., "slow": ...}）を作る。各サービス内の代表記録は
+        （ユーザー, サービス）エントリとして pooled され、潰されない。
+        旧キーの bump / up は fast 側から従来形式（name / value のみ）で
+        引き続き出す。
     戻り値に ID 類は一切含めない。
     """
     now = now or datetime.datetime.now(datetime.timezone.utc)
@@ -188,29 +185,22 @@ def build_snapshot(
         })
 
     if rta_boards is not None:
-        rta: dict[str, Any] = {}
         fast_by_service: dict[str, list[Mapping[str, Any]]] = {}
         slow_by_service: dict[str, list[Mapping[str, Any]]] = {}
         for service in RTA_SERVICE_TYPES:
             boards = rta_boards.get(service) or {}
-            fast_rows = list(boards.get("fast") or [])
-            slow_rows = list(boards.get("slow") or [])
-            fast_by_service[service] = fast_rows
-            slow_by_service[service] = slow_rows
-            rta[service] = {
-                "fast": _rta_board_entries(fast_rows, names, service),
-                "slow": _rta_board_entries(slow_rows, names, service),
-            }
-        rta["all"] = {
+            fast_by_service[service] = list(boards.get("fast") or [])
+            slow_by_service[service] = list(boards.get("slow") or [])
+        rta: dict[str, Any] = {
             "fast": _rta_board_entries(
-                combine_rta_boards(fast_by_service), names),
+                pool_rta_boards(fast_by_service), names),
             "slow": _rta_board_entries(
-                combine_rta_boards(slow_by_service, slowest=True), names),
+                pool_rta_boards(slow_by_service, slowest=True), names),
         }
         legacy_bump = fast_by_service["bump"]
         legacy_up = fast_by_service["up"]
     else:
-        rta = {}
+        rta = {"fast": [], "slow": []}
         legacy_bump = bump_rows
         legacy_up = up_rows
 

@@ -4,7 +4,6 @@ import {
   parseRankingSnapshot,
   PUBLIC_RANKING_KEY,
   PUBLIC_RANKING_NAMESPACE,
-  RTA_SERVICES,
   RTA_SERVICE_LABELS,
   type PublicRankingSnapshot,
   type RankingEntry,
@@ -14,7 +13,7 @@ import { InviteCtaBlock } from "../InviteCta";
 
 export const metadata = {
   title: "リーダーボード",
-  description: "AGOBOTのランキング。経験値・コイン保有と、bump系RTA（DISBOARD bump・Dis速 up・鯖ちゃんねる・TakasumiBOT・Dicoall・Discord Cafe・SharkBot・DiscordServers.io・DISCOM）の全サーバー記録を、総合・サービス別で表示します。",
+  description: "AGOBOTのランキング。経験値・コイン保有と、bump系RTA（DISBOARD bump・Dis速 up・鯖ちゃんねる・TakasumiBOT・Dicoall・Discord Cafe・SharkBot・DiscordServers.io・DISCOM）の全サーバー記録を、サービス種類別のエントリで1つのボードにまとめて表示します。",
   alternates: { canonical: "/ranking" },
 };
 export const dynamic = "force-dynamic";
@@ -30,7 +29,7 @@ const AXES: { key: Axis; label: string; natural: Order; valueLabel: string }[] =
 ];
 
 type PageProps = {
-  searchParams: Promise<{ axis?: string; order?: string; service?: string; speed?: string }>;
+  searchParams: Promise<{ axis?: string; order?: string; speed?: string }>;
 };
 
 async function loadSnapshot(): Promise<PublicRankingSnapshot | null> {
@@ -59,13 +58,12 @@ function formatRecordAt(entry: RtaEntry): string {
   return entry.at ? formatDateTime(entry.at) : "—";
 }
 
-type HrefOptions = { service?: string; speed?: Speed; order?: Order | null };
+type HrefOptions = { speed?: Speed; order?: Order | null };
 
 function rankingHref(axis: Axis, options: HrefOptions = {}): string {
   const params = new URLSearchParams();
   if (axis !== "exp") params.set("axis", axis);
   if (axis === "rta") {
-    if (options.service && options.service !== "all") params.set("service", options.service);
     if (options.speed && options.speed !== "fast") params.set("speed", options.speed);
   } else if (options.order) {
     params.set("order", options.order);
@@ -82,20 +80,12 @@ function formatValue(axis: Axis, entry: RankingEntry): string {
 
 export default async function RankingPage({ searchParams }: PageProps) {
   const params = await searchParams;
-  // 旧リンク互換: axis=bump / axis=up は bump系RTA の各サービスとして読む
-  let axisParam = params.axis;
-  let serviceParam = params.service;
-  if (axisParam === "bump" || axisParam === "up") {
-    serviceParam = axisParam;
-    axisParam = "rta";
-  }
+  // 旧リンク互換: axis=bump / axis=up は bump系RTA として読む
+  const axisParam = params.axis === "bump" || params.axis === "up" ? "rta" : params.axis;
   const active = AXES.find((a) => a.key === axisParam) ?? AXES[0];
   const chosenOrder: Order | null =
     params.order === "asc" || params.order === "desc" ? params.order : null;
   const effectiveOrder: Order = chosenOrder ?? active.natural;
-  const service = RTA_SERVICES.some((s) => s.key === serviceParam)
-    ? (serviceParam as string)
-    : "all";
   const speed: Speed = params.speed === "slow" ? "slow" : "fast";
 
   const snapshot = await loadSnapshot();
@@ -104,7 +94,7 @@ export default async function RankingPage({ searchParams }: PageProps) {
     snapshot && !isRta ? [...snapshot[active.key as "exp" | "coin"]] : [];
   if (!isRta && effectiveOrder !== active.natural) plainEntries.reverse();
   const rtaEntries: RtaEntry[] =
-    snapshot && isRta ? (snapshot.rta[service]?.[speed] ?? []) : [];
+    snapshot && isRta ? snapshot.rta[speed] : [];
 
   return (
     <section className="ranking-page">
@@ -114,7 +104,7 @@ export default async function RankingPage({ searchParams }: PageProps) {
         {AXES.map((a) => (
           <Link
             key={a.key}
-            href={rankingHref(a.key, a.key === "rta" ? { service, speed } : { order: chosenOrder })}
+            href={rankingHref(a.key, a.key === "rta" ? { speed } : { order: chosenOrder })}
             className={active.key === a.key ? "ranking-tab active" : "ranking-tab"}
             role="tab"
             aria-selected={active.key === a.key}
@@ -130,32 +120,17 @@ export default async function RankingPage({ searchParams }: PageProps) {
         </div>
       ) : isRta ? (
         <>
-          <form className="ranking-service-form" method="get" action="/ranking">
-            <input type="hidden" name="axis" value="rta" />
-            {speed !== "fast" ? <input type="hidden" name="speed" value={speed} /> : null}
-            <label>
-              サービス：
-              <select name="service" defaultValue={service} className="ranking-select">
-                {RTA_SERVICES.map((s) => (
-                  <option key={s.key} value={s.key}>
-                    {s.label}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <button type="submit" className="ranking-tab">表示</button>
-          </form>
           <div className="ranking-tabs" role="group" aria-label="最速か最遅か">
             <span className="muted">記録：</span>
             <Link
-              href={rankingHref("rta", { service, speed: "fast" })}
+              href={rankingHref("rta", { speed: "fast" })}
               className={speed === "fast" ? "ranking-tab active" : "ranking-tab"}
               aria-pressed={speed === "fast"}
             >
               最速
             </Link>
             <Link
-              href={rankingHref("rta", { service, speed: "slow" })}
+              href={rankingHref("rta", { speed: "slow" })}
               className={speed === "slow" ? "ranking-tab active" : "ranking-tab"}
               aria-pressed={speed === "slow"}
             >
@@ -167,7 +142,7 @@ export default async function RankingPage({ searchParams }: PageProps) {
               <tr>
                 <th scope="col">順位</th>
                 <th scope="col">ユーザー</th>
-                {service === "all" ? <th scope="col">サービス</th> : null}
+                <th scope="col">サービス</th>
                 <th scope="col">タイム</th>
                 <th scope="col">記録日時</th>
               </tr>
@@ -177,9 +152,7 @@ export default async function RankingPage({ searchParams }: PageProps) {
                 <tr key={index}>
                   <td>{index + 1}</td>
                   <td>{entry.name || "（名前を取得できませんでした）"}</td>
-                  {service === "all" ? (
-                    <td>{RTA_SERVICE_LABELS[entry.service ?? ""] ?? entry.service ?? "—"}</td>
-                  ) : null}
+                  <td>{RTA_SERVICE_LABELS[entry.service ?? ""] ?? entry.service ?? "—"}</td>
                   <td>{formatValue("rta", entry)}</td>
                   <td>{formatRecordAt(entry)}</td>
                 </tr>
