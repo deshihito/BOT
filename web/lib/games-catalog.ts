@@ -37,6 +37,17 @@ export const WEB_GAMES: WebGame[] = [
     activity: true,
     players: "1人（CPU対戦）",
   },
+  {
+    slug: "balku",
+    title: "BALKU",
+    description:
+      "素材を集めて企画を完成させる建築ブラフのカードゲーム。ルームコードで集まってオンライン対戦。伏せて提出された企画が怪しければ「BALKU」とコールして暴けます。",
+    glyph: "🏗",
+    accent: "#2f7f9f",
+    status: "playable",
+    activity: true,
+    players: "2〜4人（オンライン）",
+  },
 ];
 
 export function getWebGame(slug: string): WebGame | undefined {
