@@ -19,20 +19,22 @@ class RankingsBundleTest(unittest.TestCase):
 
         registry = action_registry.default_registry()
         # bump/up 個別4件は boardNotify RTA 統合ボード1件に集約し、
-        # 即抜けRTAボードを同列に追加（5→6）
-        self.assertEqual(len(RankingsView.TARGETS), 6)
+        # 即抜けRTAボードを同列に追加（5→6）。その後、ぬるぽRTAボードも
+        # 同列に追加（6→7）。
+        self.assertEqual(len(RankingsView.TARGETS), 7)
         for _label, value in RankingsView.TARGETS:
             self.assertIsNotNone(registry.get(f"general:{value}"), value)
         self.assertIn("rta_board", [value for _label, value in RankingsView.TARGETS])
         self.assertIn("sokunuke_board", [value for _label, value in RankingsView.TARGETS])
+        self.assertIn("nurupo_board", [value for _label, value in RankingsView.TARGETS])
 
-    def test_rankings_view_has_six_buttons(self):
+    def test_rankings_view_has_seven_buttons(self):
         import types
 
         from cogs.general import RankingsView
 
         view = RankingsView(types.SimpleNamespace(), 1)
-        self.assertEqual(len(view.children), 6)
+        self.assertEqual(len(view.children), 7)
         self.assertIn("/game", view.embed().description)
 
 
