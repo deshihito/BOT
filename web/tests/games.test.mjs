@@ -203,6 +203,26 @@ async function runChessWorker(fen, depth) {
   }
 }
 
+test("盤面 CSS: 全マスが中身に依存しない均一な正方形になる構造", () => {
+  const css = fs.readFileSync(path.join(import.meta.dirname, "..", "app", "globals.css"), "utf8");
+  const block = (selector) => {
+    const start = css.indexOf(selector + " {");
+    assert.notEqual(start, -1, `${selector} が globals.css に無い`);
+    return css.slice(start, css.indexOf("}", start));
+  };
+  const board = block(".chess-board");
+  // 行・列とも minmax(0,1fr) で固定し、盤の正方形（aspect-ratio）から等分する。
+  // 行が auto だと駒グリフのある段だけ高くなり、中央の空きマス段が潰れる。
+  assert.match(board, /grid-template-columns:\s*repeat\(8,\s*minmax\(0,\s*1fr\)\)/);
+  assert.match(board, /grid-template-rows:\s*repeat\(8,\s*minmax\(0,\s*1fr\)\)/);
+  assert.match(board, /aspect-ratio:\s*1/);
+  const square = block(".chess-square");
+  // セルの最小サイズを 0 にし、中身（駒グリフ）がトラック寸法を押し広げないようにする。
+  assert.match(square, /min-width:\s*0/);
+  assert.match(square, /min-height:\s*0/);
+  assert.match(square, /overflow:\s*hidden/);
+});
+
 test("生成済み CPU ワーカーが1手詰めを返す", async () => {
   const result = await runChessWorker("6k1/5ppp/8/8/8/8/8/R6K w - - 0 1", 2);
   assert.equal(result.type, "bestmove");
