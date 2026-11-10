@@ -4,7 +4,7 @@
 - /general の新ジャンル boardnotify_rta に統合ボード（rta_board）1件だけがある
 - 旧 bump/up 個別ボード8件はジャンルにもレジストリにも無い
 - dispatch_general は rta_board で統合ボードを開き、旧8件の ID は互換
-  プリセット（サービス/スコープ/最速最遅）として統合ボードに着地する
+  プリセット（スコープ/最速最遅のみ引き継ぎ）として統合ボードに着地する
 """
 
 import os
@@ -118,38 +118,37 @@ class UnifiedBoardDispatchTest(unittest.IsolatedAsyncioTestCase):
     async def test_rta_board_opens_with_defaults(self):
         rta, interaction = await self.dispatch("rta_board")
         view = self.board_view(interaction)
-        self.assertEqual(view.event_type, "bump")
         self.assertEqual(view.scope, "local")
         self.assertFalse(view.slowest)
         args, kwargs = rta.build_rta_board.await_args
-        self.assertEqual(args, ("bump", "local", False))
+        self.assertEqual(args, ("local", False))
         self.assertEqual(kwargs["guild_id"], 123)
         self.assertEqual(kwargs["user_id"], 456)
 
     async def test_legacy_local_fastest_presets(self):
-        for value, event in (("bump_leaderboard", "bump"), ("up_leaderboard", "up")):
+        # 統合ボードではサービスは引き継がず、スコープと方向だけを引き継ぐ
+        for value in ("bump_leaderboard", "up_leaderboard"):
             _rta, interaction = await self.dispatch(value)
             view = self.board_view(interaction)
-            self.assertEqual((view.event_type, view.scope, view.slowest),
-                             (event, "local", False), value)
+            self.assertEqual((view.scope, view.slowest),
+                             ("local", False), value)
 
     async def test_legacy_global_fastest_presets(self):
-        for value, event in (("bump_global_leaderboard", "bump"),
-                             ("up_global_leaderboard", "up")):
+        for value in ("bump_global_leaderboard", "up_global_leaderboard"):
             _rta, interaction = await self.dispatch(value)
             view = self.board_view(interaction)
-            self.assertEqual((view.event_type, view.scope, view.slowest),
-                             (event, "global", False), value)
+            self.assertEqual((view.scope, view.slowest),
+                             ("global", False), value)
 
     async def test_legacy_slowest_presets(self):
-        for value, event, scope in (("bump_slowest", "bump", "local"),
-                                    ("up_slowest", "up", "local"),
-                                    ("bump_global_slowest", "bump", "global"),
-                                    ("up_global_slowest", "up", "global")):
+        for value, scope in (("bump_slowest", "local"),
+                             ("up_slowest", "local"),
+                             ("bump_global_slowest", "global"),
+                             ("up_global_slowest", "global")):
             _rta, interaction = await self.dispatch(value)
             view = self.board_view(interaction)
-            self.assertEqual((view.event_type, view.scope, view.slowest),
-                             (event, scope, True), value)
+            self.assertEqual((view.scope, view.slowest),
+                             (scope, True), value)
 
 
 if __name__ == "__main__":

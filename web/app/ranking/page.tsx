@@ -65,7 +65,7 @@ function rankingHref(axis: Axis, options: HrefOptions = {}): string {
   const params = new URLSearchParams();
   if (axis !== "exp") params.set("axis", axis);
   if (axis === "rta") {
-    if (options.service && options.service !== "bump") params.set("service", options.service);
+    if (options.service && options.service !== "all") params.set("service", options.service);
     if (options.speed && options.speed !== "fast") params.set("speed", options.speed);
   } else if (options.order) {
     params.set("order", options.order);
@@ -95,7 +95,7 @@ export default async function RankingPage({ searchParams }: PageProps) {
   const effectiveOrder: Order = chosenOrder ?? active.natural;
   const service = RTA_SERVICES.some((s) => s.key === serviceParam)
     ? (serviceParam as string)
-    : "bump";
+    : "all";
   const speed: Speed = params.speed === "slow" ? "slow" : "fast";
 
   const snapshot = await loadSnapshot();

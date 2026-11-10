@@ -1,7 +1,8 @@
 # -*- coding: utf-8 -*-
 """RtaBoardView（boardNotify RTA 統合ボード）のテスト。Discord には接続しない。
 
-- サービス切替は7サービスのセレクト、最速/最遅とスコープはトグルボタン
+- ランキングは全サービス一括の統合表示（サービス切替セレクトは無い）
+- 最速/最遅とスコープはトグルボタン
 - 切替で状態が変わり、BumpRta.build_rta_board が新しい状態で呼ばれる
 - 「自分」スコープは押した人の記録として読み直す
 """
@@ -45,17 +46,14 @@ def make_interaction(user_id=999, name="押した人"):
 
 
 class RtaBoardStructureTest(unittest.TestCase):
-    def test_service_select_has_seven_services(self):
-        from core.game.rta.common import RTA_SERVICE_TYPES, SERVICE_LABELS
+    def test_no_service_select(self):
+        import discord
 
         _cog, view = make_view()
-        select = view._service_select
-        self.assertEqual([o.value for o in select.options], list(RTA_SERVICE_TYPES))
-        self.assertEqual([o.label for o in select.options],
-                         [SERVICE_LABELS[t] for t in RTA_SERVICE_TYPES])
-        self.assertNotIn("legacy", [o.value for o in select.options])
-        defaults = [o.value for o in select.options if o.default]
-        self.assertEqual(defaults, ["bump"])
+        selects = [item for item in view.children
+                   if isinstance(item, discord.ui.Select)]
+        self.assertEqual(selects, [])
+        self.assertFalse(hasattr(view, "event_type"))
 
     def test_toggle_buttons_reflect_state(self):
         _cog, view = make_view(scope="global", slowest=True)
@@ -77,7 +75,7 @@ class RtaBoardSwitchTest(unittest.IsolatedAsyncioTestCase):
         await view._make_scope("global")(make_interaction())
         self.assertEqual(view.scope, "global")
         args, kwargs = cog.build_rta_board.await_args
-        self.assertEqual(args, ("bump", "global", False))
+        self.assertEqual(args, ("global", False))
         # 「自分」スコープ用に、押した人へ読み替えられる
         self.assertEqual(kwargs["user_id"], 999)
         self.assertEqual(kwargs["user_name"], "押した人")
@@ -87,15 +85,7 @@ class RtaBoardSwitchTest(unittest.IsolatedAsyncioTestCase):
         await view._make_speed(True)(make_interaction())
         self.assertTrue(view.slowest)
         args, _kwargs = cog.build_rta_board.await_args
-        self.assertEqual(args, ("bump", "local", True))
-
-    async def test_service_switch_reloads_service(self):
-        cog, view = make_view()
-        view._service_select._values = ["dcafe"]
-        await view._on_service(make_interaction())
-        self.assertEqual(view.event_type, "dcafe")
-        args, _kwargs = cog.build_rta_board.await_args
-        self.assertEqual(args, ("dcafe", "local", False))
+        self.assertEqual(args, ("local", True))
 
     async def test_load_failure_shows_text_only(self):
         cog, view = make_view()
