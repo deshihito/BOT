@@ -178,6 +178,61 @@ test("対戦: 未解放ティアは開始できない", async () => {
   await assert.rejects(() => server.startBattle(token, 5), server.LllError);
 });
 
+test("鑑定モデルチェーン: 既定モデルが失敗したら画像対応モデルへ進み aiUsed=true になる", async () => {
+  const PREFIX_WITH_KEY = `
+import { createHash, randomBytes } from "node:crypto";
+function isBotApiConfigured() { return false; }
+async function kvGet() { return null; }
+async function kvSet() {}
+function logfareApiKeys() { return ["test-key"]; }
+`;
+  const withAi = await loadBundle(
+    ["lll-game.ts", "lll-battle.ts", "lll-server.ts"],
+    ["getOrCreateProfile", "appraise", "appraiseWordsWithLogfare"],
+    PREFIX_WITH_KEY,
+  );
+  const calls = [];
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (url, init) => {
+    const payload = JSON.parse(init.body);
+    calls.push(payload.model);
+    if (payload.model === "gemma-4-26b") {
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          choices: [
+            {
+              message: {
+                content: JSON.stringify({
+                  name: "夕焼けの番人",
+                  flavor: "茜色の空を見守る者。",
+                  skillNames: ["残照斬", "茜の盾"],
+                  traitName: "夕凪",
+                }),
+              },
+            },
+          ],
+        }),
+      };
+    }
+    return { ok: false, status: 400, json: async () => ({}) };
+  };
+  try {
+    const words = await withAi.appraiseWordsWithLogfare(IMG_A);
+    assert.ok(words, "どこかのモデルで言葉が取れる");
+    assert.equal(words.name, "夕焼けの番人");
+    assert.equal(calls[0], "claude-haiku-5-5", "最初は既定モデルを試す");
+    assert.equal(calls[calls.length - 1], "gemma-4-26b", "失敗したら画像対応モデルへ進む");
+    const { token } = await withAi.getOrCreateProfile(null);
+    const res = await withAi.appraise(token, FEATURES, IMG_A);
+    assert.equal(res.aiUsed, true);
+    assert.equal(res.card.name, "夕焼けの番人");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("parsePlayerAction: 契約 {skill,targetKey} を検証し type 併記も受ける", () => {
   assert.deepEqual(server.parsePlayerAction({ skill: "basic", targetKey: "cpu_0" }), {
     skill: "basic",
