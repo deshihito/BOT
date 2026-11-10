@@ -78,11 +78,12 @@ class UnifiedBoardGenreTest(unittest.TestCase):
         # ぬるぽRTAボード（general:nurupo_board）追加で general 71→72 / 全体 251→252。
         # にょっきゲーム（game:nyokki_started）追加で全体 252→253。
         # 地震情報（support:earthquake）追加で全体 253→254。
+        # 天気（general:weather、新ジャンル「ユーティリティ」）追加で general 72→73 / 全体 254→255。
         from core.general import action_registry
 
         specs = list(action_registry.default_registry()._by_id.values())
-        self.assertEqual(len(specs), 254)
-        self.assertEqual(len([s for s in specs if s.root == "general"]), 72)
+        self.assertEqual(len(specs), 255)
+        self.assertEqual(len([s for s in specs if s.root == "general"]), 73)
 
 
 class UnifiedBoardDispatchTest(unittest.IsolatedAsyncioTestCase):

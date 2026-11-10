@@ -24,6 +24,7 @@
     omikuji       core/general/omikuji/cog.py              OmikujiCog
     role_shop     core/general/role_shop/cog.py            RoleShopCog
     wallet        core/general/wallet/cog.py               WalletCog
+    weather       core/general/weather/cog.py              WeatherCog
     whisper       core/general/whisper/cog.py              WhisperCog
     workshop      core/general/workshop/cog.py             WorkshopCog
 
@@ -108,6 +109,7 @@ _FEATURE_MODULES = (
     ("omikuji", "core.general.omikuji.cog"),
     ("role_shop", "core.general.role_shop.cog"),
     ("wallet", "core.general.wallet.cog"),
+    ("weather", "core.general.weather.cog"),
     ("whisper", "core.general.whisper.cog"),
     ("workshop", "core.general.workshop.cog"),
 )
@@ -217,6 +219,7 @@ _LAZY_FEATURE_MODULES = {
     "TradeModal": "core.general.market.cog",
     "WORKSHOP_COLOR": "core.general.workshop.cog",
     "WORKSHOP_ID": "core.general.workshop.cog",
+    "WeatherCog": "core.general.weather.cog",
     "WhisperCog": "core.general.whisper.cog",
     "WhisperModal": "core.general.whisper.cog",
     "WhisperView": "core.general.whisper.cog",

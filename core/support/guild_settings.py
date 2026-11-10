@@ -212,3 +212,56 @@ def autoplay_enabled(guild_id: Optional[int]) -> bool:
         return AUTOPLAY_DEFAULTS["enabled"]
     value = raw.get("enabled")
     return value if isinstance(value, bool) else AUTOPLAY_DEFAULTS["enabled"]
+
+
+# ---------------------------------------------------------------- 天気（core/general/weather）
+WEATHER_SECTION = "weather"
+WEATHER_DEFAULTS: dict[str, Any] = {
+    "default_area": None,    # サーバーの既定地域（気象庁の発表官署コード）
+    "post_enabled": False,   # 全国の天気の定時投稿をするか（既定はオフ）
+    "post_channel_id": None,  # 定時投稿先チャンネル ID
+    "post_time": None,       # 定時投稿の時刻 "HH:MM"（JST）
+    "posted_date": None,     # 最後に定時投稿した日 "YYYY-MM-DD"（二重投稿防止）
+}
+
+
+def weather_settings(guild_id: int) -> dict[str, Any]:
+    """このサーバーの天気設定を、既定値で補って返す。"""
+    raw = get_store().get(guild_id, WEATHER_SECTION)
+    result = dict(WEATHER_DEFAULTS)
+    if isinstance(raw.get("default_area"), str) and raw["default_area"]:
+        result["default_area"] = raw["default_area"]
+    if isinstance(raw.get("post_enabled"), bool):
+        result["post_enabled"] = raw["post_enabled"]
+    if isinstance(raw.get("post_channel_id"), int):
+        result["post_channel_id"] = raw["post_channel_id"]
+    if isinstance(raw.get("post_time"), str) and raw["post_time"]:
+        result["post_time"] = raw["post_time"]
+    if isinstance(raw.get("posted_date"), str) and raw["posted_date"]:
+        result["posted_date"] = raw["posted_date"]
+    return result
+
+
+def weather_post_due(guild_id: int, now) -> Optional[int]:
+    """定時投稿すべきなら投稿先チャンネル ID を、そうでなければ None を返す。
+
+    now は JST の datetime。設定時刻を過ぎていて、その日まだ投稿して
+    いなければ対象（起動遅延や再起動で時刻ちょうどを逃しても、その日の
+    うちに1回は届く）。
+    """
+    settings = weather_settings(guild_id)
+    if not settings["post_enabled"]:
+        return None
+    channel_id = settings["post_channel_id"]
+    post_time = settings["post_time"]
+    if channel_id is None or not post_time:
+        return None
+    if settings["posted_date"] == now.strftime("%Y-%m-%d"):
+        return None
+    try:
+        hour, minute = (int(part) for part in str(post_time).split(":"))
+    except (TypeError, ValueError):
+        return None
+    if (now.hour, now.minute) < (hour, minute):
+        return None
+    return channel_id
