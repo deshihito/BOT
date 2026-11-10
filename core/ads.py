@@ -59,12 +59,8 @@ class Creative:
 
 
 # ハウス枠（自社告知）。フェーズ1からの定数をそのまま残す。
+# ※ One Prompter はまだ実装中のため当面載せない（ユーザー決定 2026-11-10）。
 CREATIVES: list[Creative] = [
-    Creative(
-        name="One Prompter",
-        text="One Prompter — 雑な一文から、AIに通じるプロンプトへ",
-        url="https://oneprompter.agobot.app",
-    ),
     Creative(
         name="サーバー連携 募集中",
         text="サーバー連携 募集中 — あなたのサーバーもこの広告枠に掲載できます",
