@@ -145,9 +145,9 @@ test("generateQuestionsWithLlm は形式崩れを1回だけ組み直し、駄目
 
 test("synthesizeWithLlm はフェンスを剥がした完成プロンプトを返す", async () => {
   const env = { LOGFARE_API_KEY: "dummy" };
-  const fetchImpl = async () => chatResponse("```\n## 依頼文\n転職したい\n```");
+  const fetchImpl = async () => chatResponse("```\n完成プロンプト本文\n```");
   const prompt = await server.synthesizeWithLlm("転職したい", [{ question: "使い道は？", answer: "書類選考を通す" }], { env, fetchImpl });
-  assert.equal(prompt, "## 依頼文\n転職したい");
+  assert.equal(prompt, "完成プロンプト本文");
 });
 
 test("validateAnswers は1+2ラウンド合計で最大11件まで許容し、12件を弾く", () => {
@@ -187,6 +187,30 @@ test("合成プロンプトはAIあるある禁止・積極指示・詰め固定
   // 差し替え項目リストの必須化
   assert.match(c, /差し替え項目/);
   assert.match(c, /プレースホルダ/);
+});
+
+test("合成プロンプトは固定文・定型構成を強制せず、用途に合わせて組み立てる指示を含む", () => {
+  const [system] = llm.buildSynthesizeMessages("依頼", [{ question: "Q?", answer: "A" }]);
+  const c = system.content;
+  // 形の固定を外す指示
+  assert.match(c, /依頼の種類と用途に合った形式で書く/);
+  assert.match(c, /毎回同じ見出し・同じ書き出し・同じ締めにしない/);
+  assert.match(c, /どう並べ、どういう言葉で書くかは固定しない/);
+  // 固定見出し・定型の構成指定が残っていない
+  assert.ok(!c.includes("## 依頼文"));
+  assert.ok(!c.includes("## 条件"));
+  assert.ok(!c.includes("## 禁止事項"));
+  assert.ok(!c.includes("この順序で書くこと"));
+  // 定型の役割文は使わず、必要な場合だけ依頼専用の役割を書く
+  assert.match(c, /定型の役割文（「実務に精通した専門家です」等）は使わない/);
+  assert.match(c, /役割が成果物を左右しない依頼では、役割を無理に付けない/);
+  // AIあるある対策は固定文ブロックではなく、選択適用＋用途別の翻訳で扱う
+  assert.match(c, /すべてを固定文のブロックとして丸ごと写さない/);
+  assert.match(c, /成果物の種類に関係するものだけを選び/);
+  assert.match(c, /文章以外の成果物には持ち込まない/);
+  assert.match(c, /TODO や省略記法で済ませず/);
+  assert.match(c, /雰囲気語の羅列で済ませず/);
+  assert.match(c, /一般論の列挙で済ませず/);
 });
 
 test("深掘りメッセージは1ラウンド目のQ&Aを含み、残りの曖昧さだけを狙う", () => {
@@ -334,12 +358,18 @@ test("revise の検証は instruction 201字と prompt 欠落・過長を弾く"
   assert.equal(llm.validatePromptInput("あ".repeat(llm.MAX_PROMPT_CHARS + 1)), null);
 });
 
-test("buildReviseMessages は禁止事項を弱めない指示と現在の内容・修正指示を含む", () => {
+test("buildReviseMessages は対策の中身を弱めない指示と現在の内容・修正指示を含む", () => {
   const messages = llm.buildReviseMessages("現在のプロンプト本文", "もっと短く");
-  assert.match(messages[0].content, /弱めない・落とさない/);
-  assert.match(messages[0].content, /禁止事項側を優先/);
+  assert.match(messages[0].content, /中身（意図）を弱めない・落とさない/);
+  assert.match(messages[0].content, /対策側を優先/);
   assert.match(messages[1].content, /現在のプロンプト本文/);
   assert.match(messages[1].content, /もっと短く/);
+});
+
+test("buildReviseMessages は書き直しを定型構成に戻さない指示を含む", () => {
+  const messages = llm.buildReviseMessages("現在のプロンプト本文", "もっと短く");
+  assert.match(messages[0].content, /定型の見出し構成や定型の冒頭文に寄せない/);
+  assert.match(messages[0].content, /依頼の用途に合った形を保つ/);
 });
 
 test("reviseWithLlm はフェンスを剥がした書き直し結果を返す", async () => {
