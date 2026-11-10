@@ -36,6 +36,7 @@ const SESSION_KEY = "balku-room-session";
 const NAME_KEY = "balku-display-name";
 
 type Session = { code: string; playerToken: string };
+type ChatMessage = { id: string; playerId: number; name: string; text: string; at: number };
 type RoomView = {
   code: string;
   status: BalkuSnapshot["phase"];
@@ -43,6 +44,8 @@ type RoomView = {
   maxPlayers: number;
   player: { seat: number; displayName: string; isHost: boolean };
   state: BalkuSnapshot;
+  chat: ChatMessage[];
+  cpuSeats: number[];
 };
 type PublicRoom = { code: string; maxPlayers: number; playerCount: number; createdAt: number };
 
@@ -159,6 +162,12 @@ export default function BalkuClient() {
   const soundPrimedRef = useRef(false);
   const prevActiveSeatRef = useRef<number | null>(null);
   const finishSoundRef = useRef<string | null>(null);
+  // --- ルーム内チャット（右下固定ウィジェット） ---
+  const [chatOpen, setChatOpen] = useState(false);
+  const [chatText, setChatText] = useState("");
+  const [chatSending, setChatSending] = useState(false);
+  const lastSeenChatIdRef = useRef<string | null>(null);
+  const chatListRef = useRef<HTMLDivElement | null>(null);
   // --- ドラッグ＆ドロップ ---
   const [drag, setDrag] = useState<DragState | null>(null);
   const [dropHot, setDropHot] = useState<DropZoneId | null>(null);
@@ -461,6 +470,53 @@ export default function BalkuClient() {
     }
   };
 
+  const sendChat = async () => {
+    const text = chatText.trim();
+    if (!session || !text || chatSending) return;
+    setChatSending(true);
+    setError("");
+    try {
+      const { res, data } = await postJson(`/api/balku/rooms/${session.code}/chat`, {
+        playerToken: session.playerToken,
+        text,
+      });
+      if (!res.ok) {
+        setError(typeof data.error === "string" ? data.error : "メッセージを送信できませんでした。");
+        return;
+      }
+      setChatText("");
+      playSe("click");
+      await fetchView(session);
+    } catch {
+      setError("通信に失敗しました。");
+    } finally {
+      setChatSending(false);
+    }
+  };
+
+  const doCpu = async (action: "add" | "remove", seat?: number) => {
+    if (!session || busy) return;
+    setBusy(true);
+    setError("");
+    try {
+      const { res, data } = await postJson(`/api/balku/rooms/${session.code}/cpu`, {
+        playerToken: session.playerToken,
+        action,
+        ...(seat !== undefined ? { seat } : {}),
+      });
+      if (!res.ok) {
+        setError(typeof data.error === "string" ? data.error : "CPUを操作できませんでした。");
+      } else {
+        playSe("click");
+        await fetchView(session);
+      }
+    } catch {
+      setError("通信に失敗しました。");
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const copyCode = async () => {
     if (!session) return;
     try {
@@ -488,6 +544,31 @@ export default function BalkuClient() {
     // me の同一性はポーリングごとに変わるため、手札の中身で判定する
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state?.turn, state?.activeSeat, me?.hand.length]);
+
+  // --- チャット: 未読管理と自動スクロール ---
+  const chatMessages = view?.chat ?? [];
+  const lastSeenIdx = chatMessages.findIndex((m) => m.id === lastSeenChatIdRef.current);
+  const chatUnread =
+    lastSeenChatIdRef.current === null
+      ? 0
+      : chatMessages.slice(lastSeenIdx + 1).filter((m) => m.playerId !== mySeat).length;
+  // 初回表示では既存の履歴を未読にしない
+  useEffect(() => {
+    if (lastSeenChatIdRef.current === null && chatMessages.length > 0) {
+      lastSeenChatIdRef.current = chatMessages[chatMessages.length - 1].id;
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [view?.revision]);
+  // 開いている間は既読にし続け、一番下へスクロールする
+  useEffect(() => {
+    if (!chatOpen) return;
+    if (chatMessages.length > 0) {
+      lastSeenChatIdRef.current = chatMessages[chatMessages.length - 1].id;
+    }
+    const el = chatListRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [chatOpen, chatMessages.length, view?.revision]);
 
   // --- 演出: イベントバナー（同じログでは二度出さない）＋ログ連動 SE ---
   const latestLog = state?.logs[0];
@@ -704,6 +785,62 @@ export default function BalkuClient() {
   const st = state;
   const isHost = view.player.isHost;
 
+  // --- ルーム内チャット（右下固定。ロビー/対戦/終了の全画面で共通） ---
+  const renderChat = () => (
+    <div className="balku-chat">
+      {chatOpen ? (
+        <div className="balku-chat-panel" role="dialog" aria-label="ルームチャット">
+          <div className="balku-chat-head">
+            <span className="balku-plate">ルームチャット</span>
+            <button type="button" className="balku-chat-close" onClick={() => setChatOpen(false)} aria-label="チャットを閉じる">
+              ×
+            </button>
+          </div>
+          <div className="balku-chat-list" ref={chatListRef}>
+            {chatMessages.length === 0 ? (
+              <p className="balku-chat-empty">まだメッセージはありません。</p>
+            ) : (
+              chatMessages.map((m) => (
+                <div key={m.id} className={`balku-chat-msg${m.playerId === mySeat ? " balku-chat-mine" : ""}`}>
+                  <span className="balku-chat-meta">
+                    {m.name}
+                    <span className="balku-chat-time">
+                      {new Date(m.at).toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit" })}
+                    </span>
+                  </span>
+                  <span className="balku-chat-text">{m.text}</span>
+                </div>
+              ))
+            )}
+          </div>
+          <form
+            className="balku-chat-form"
+            onSubmit={(e) => {
+              e.preventDefault();
+              void sendChat();
+            }}
+          >
+            <input
+              className="balku-chat-input"
+              value={chatText}
+              onChange={(e) => setChatText(e.target.value)}
+              placeholder="メッセージ（200文字まで）"
+              aria-label="チャットメッセージ"
+            />
+            <button type="submit" className="balku-btn balku-btn-primary balku-chat-send" disabled={chatSending || chatText.trim().length === 0}>
+              送信
+            </button>
+          </form>
+        </div>
+      ) : (
+        <button type="button" className="balku-chat-fab" onClick={() => setChatOpen(true)}>
+          チャット
+          {chatUnread > 0 && <span className="balku-chat-badge">{chatUnread}</span>}
+        </button>
+      )}
+    </div>
+  );
+
   // --- 待機画面 ---
   if (view.status === "lobby") {
     return (
@@ -720,15 +857,24 @@ export default function BalkuClient() {
           </div>
           <p className="muted">このコードを共有すると、他のプレイヤーが参加できます。</p>
           <div className="balku-player-list">
-            {st.players.map((p) => (
-              <div key={p.seat} className="balku-player-row">
-                <span>
-                  {p.name}
-                  {p.seat === mySeat ? "（あなた）" : ""}
-                  {p.seat === 0 ? "（ホスト）" : ""}
-                </span>
-              </div>
-            ))}
+            {st.players.map((p) => {
+              const isCpuSeat = view.cpuSeats.includes(p.seat);
+              return (
+                <div key={p.seat} className="balku-player-row">
+                  <span>
+                    {p.name}
+                    {p.seat === mySeat ? "（あなた）" : ""}
+                    {p.seat === 0 ? "（ホスト）" : ""}
+                    {isCpuSeat && <span className="balku-badge balku-badge-cpu">CPU</span>}
+                  </span>
+                  {isHost && isCpuSeat && (
+                    <button type="button" className="balku-btn balku-btn-ghost balku-cpu-remove" onClick={() => doCpu("remove", p.seat)} disabled={busy}>
+                      外す
+                    </button>
+                  )}
+                </div>
+              );
+            })}
           </div>
           <p className="muted">
             {st.players.length} / {view.maxPlayers} 人
@@ -741,13 +887,19 @@ export default function BalkuClient() {
             ) : (
               <p className="muted">ホストの開始を待っています…</p>
             )}
+            {isHost && st.players.length < view.maxPlayers && (
+              <button type="button" className="balku-btn" onClick={() => doCpu("add")} disabled={busy}>
+                CPUを追加
+              </button>
+            )}
             <button type="button" className="balku-btn balku-btn-ghost" onClick={leaveRoom} disabled={busy}>
               退出
             </button>
           </div>
-          {isHost && st.players.length < 2 && <p className="muted">2人以上で開始できます。</p>}
+          {isHost && st.players.length < 2 && <p className="muted">あと1席で開始できます。参加者を待つか、CPUを追加してください。</p>}
         </section>
         </div>
+        {renderChat()}
       </>
     );
   }
@@ -811,6 +963,7 @@ export default function BalkuClient() {
           {!isHost && <p className="muted">再戦の準備はホストが行います。</p>}
         </section>
         </div>
+        {renderChat()}
       </>
     );
   }
@@ -1150,6 +1303,7 @@ export default function BalkuClient() {
     <div key={p.seat} className={`balku-seat${st.activeSeat === p.seat ? " balku-seat-active" : ""}`}>
       <div className="balku-seat-head">
         <span className="balku-nameplate">{p.name}</span>
+        {view.cpuSeats.includes(p.seat) && <span className="balku-badge balku-badge-cpu">CPU</span>}
         {p.eliminated ? (
           <span className="balku-badge balku-badge-bad">脱落</span>
         ) : (
@@ -1553,6 +1707,7 @@ export default function BalkuClient() {
           <strong>{fly.name}</strong>
         </div>
       )}
+      {renderChat()}
     </>
   );
 }

@@ -85,7 +85,7 @@ test("カタログ: balku が playable・アクティビティ対応でオンラ
   assert.equal(game.title, "BALKU");
   assert.equal(game.status, "playable");
   assert.equal(game.activity, true);
-  assert.equal(game.players, "2〜4人（オンライン）");
+  assert.equal(game.players, "1〜4人（オンライン/CPU対戦）");
   assert.ok(catalog.playableGames().some((g) => g.slug === "balku"));
 });
 

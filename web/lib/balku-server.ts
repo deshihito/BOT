@@ -25,6 +25,7 @@ import {
   type MaterialKind,
   type RoomGameState,
 } from "./balku-game";
+import { applyCpuStepToState, cpuActionPending, nextCpuName } from "./balku-cpu";
 
 export class BalkuRoomError extends Error {
   status: number;
@@ -34,7 +35,11 @@ export class BalkuRoomError extends Error {
   }
 }
 
-export type BalkuPlayerRecord = { token: string; seat: number; name: string; isHost: boolean };
+export type BalkuPlayerRecord = { token: string; seat: number; name: string; isHost: boolean; isCpu?: boolean };
+
+/** ルーム内チャットの1件。playerId は発言時点の seat。 */
+export type BalkuChatMessage = { id: string; playerId: number; name: string; text: string; at: number };
+
 export type BalkuRoomRecord = {
   code: string;
   maxPlayers: number;
@@ -44,6 +49,10 @@ export type BalkuRoomRecord = {
   updatedAt: number;
   players: BalkuPlayerRecord[];
   state: RoomGameState;
+  /** チャット履歴（最新 CHAT_KEEP 件まで保持する）。 */
+  chat: BalkuChatMessage[];
+  /** 次に CPU が1手進めてよい時刻（未予約は null）。 */
+  cpuDueAt: number | null;
 };
 
 export type BalkuRoomView = {
@@ -53,10 +62,20 @@ export type BalkuRoomView = {
   maxPlayers: number;
   player: { seat: number; displayName: string; isHost: boolean };
   state: BalkuSnapshot;
+  /** チャットの最新50件。ビューは着席メンバーにしか返らない。 */
+  chat: BalkuChatMessage[];
+  /** CPU が座っている seat の一覧。 */
+  cpuSeats: number[];
 };
 
 const NAMESPACE = "balku_rooms";
 const ROOM_TTL_MS = 24 * 60 * 60 * 1000;
+const CHAT_KEEP = 100;
+const CHAT_VIEW = 50;
+const CHAT_MAX_LENGTH = 200;
+/** CPU が1手進める間隔（約1.2〜2.0秒）。人間に動きが見える速さにする。 */
+const CPU_DELAY_MIN_MS = 1200;
+const CPU_DELAY_SPREAD_MS = 800;
 const CODE_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
 const MATERIAL_ENUM: MaterialKind[] = ["木材", "鉄骨", "コンクリート", "ガラス", "銅線", "合金", "超伝導体", "ゴミ"];
 
@@ -100,6 +119,9 @@ async function ensureLoaded(): Promise<void> {
           const now = Date.now();
           for (const [key, value] of stored) {
             if (isRoomRecord(value) && now - value.updatedAt <= ROOM_TTL_MS) {
+              // チャット/CPU 予約を持たない旧レコードを正規化する
+              if (!Array.isArray(value.chat)) value.chat = [];
+              if (typeof value.cpuDueAt !== "number") value.cpuDueAt = null;
               map.set(key, value);
             }
           }
@@ -220,7 +242,68 @@ function toView(record: BalkuRoomRecord, player: BalkuPlayerRecord): BalkuRoomVi
     maxPlayers: record.maxPlayers,
     player: { seat: player.seat, displayName: player.name, isHost: player.isHost },
     state: snapshotFor(record.state, player.seat),
+    chat: record.chat.slice(-CHAT_VIEW),
+    cpuSeats: record.players
+      .filter((p) => p.isCpu)
+      .map((p) => p.seat)
+      .sort((a, b) => a - b),
   };
+}
+
+// --- 進行処理（期限切れ＋CPU） ---
+
+function cpuSeatSet(record: BalkuRoomRecord): Set<number> {
+  return new Set(record.players.filter((p) => p.isCpu).map((p) => p.seat));
+}
+
+function hasHumanSeated(record: BalkuRoomRecord): boolean {
+  return record.players.some((p) => !p.isCpu);
+}
+
+function cpuDelayMs(): number {
+  return CPU_DELAY_MIN_MS + Math.floor(Math.random() * CPU_DELAY_SPREAD_MS);
+}
+
+/**
+ * CPU の手を進める。手が要る状況なら cpuDueAt を予約し、予約時刻を
+ * 過ぎていたら（または force なら）1手だけ人間と同じ move 適用経路
+ * （applyGameAction）で実行して revision を上げ publish する。
+ * 1手ずつにすることで、人間に CPU の動きが段階的に見える。
+ * 人間の着席者が0人のルームでは進めない（CPU だけの試合がサーバーに
+ * 残り続けないようにし、掃除は既存の24時間 TTL に任せる）。
+ */
+async function progressCpu(record: BalkuRoomRecord, force: boolean): Promise<void> {
+  if (record.state.phase !== "active" || !hasHumanSeated(record)) {
+    record.cpuDueAt = null;
+    return;
+  }
+  const seats = cpuSeatSet(record);
+  if (seats.size === 0 || !cpuActionPending(record.state, seats)) {
+    record.cpuDueAt = null;
+    return;
+  }
+  if (record.cpuDueAt == null) {
+    record.cpuDueAt = Date.now() + cpuDelayMs();
+    if (!force) return;
+  }
+  if (!force && Date.now() < record.cpuDueAt) return;
+  record.cpuDueAt = null;
+  const next = applyCpuStepToState(record.state, seats, Math.random);
+  if (!next) return;
+  await applyChange(record, next);
+  if (record.state.phase === "active" && hasHumanSeated(record) && cpuActionPending(record.state, seats)) {
+    record.cpuDueAt = Date.now() + cpuDelayMs();
+  }
+}
+
+/**
+ * ルーム読み取り/変更のたびに呼ばれる進行処理。期限切れ（自動パス・
+ * オークション決済）を適用し、続けて CPU の手も進める。
+ */
+async function progressRoom(record: BalkuRoomRecord, forceCpu: boolean): Promise<void> {
+  const expired = expireTimedOutTurn(record.state);
+  if (expired !== record.state) await applyChange(record, expired);
+  await progressCpu(record, forceCpu);
 }
 
 // --- ルーム操作（すべて直列化される） ---
@@ -243,6 +326,8 @@ export async function createBalkuRoom(input: { displayName: string; maxPlayers: 
       updatedAt: now,
       players: [{ token: playerToken, seat: 0, name: input.displayName, isHost: true }],
       state: createLobbyState(input.displayName),
+      chat: [],
+      cpuDueAt: null,
     };
     rooms!.set(code, record);
     await persistRecord(record);
@@ -286,15 +371,37 @@ export async function listPublicBalkuRooms(): Promise<{ code: string; maxPlayers
   });
 }
 
-/** 取得時に期限切れ処理（自動パス・オークション決済）を適用し、変わっていたら保存する。 */
+/** 取得時に進行処理（期限切れ・CPU）を適用し、変わっていたら保存する。 */
 export async function getBalkuRoom(code: string, playerToken: string): Promise<BalkuRoomView> {
   return serialize(async () => {
     await ensureLoaded();
     const record = requireRoom(code);
     const player = requirePlayer(record, playerToken);
-    const expired = expireTimedOutTurn(record.state);
-    if (expired !== record.state) await applyChange(record, expired);
+    await progressRoom(record, false);
     return toView(record, player);
+  });
+}
+
+/**
+ * SSE ハートビート等からの軽い「触る」操作。進行処理（期限切れ・CPU）
+ * だけを回し、詰まらないようにする。ビューは返さない。
+ */
+export async function touchBalkuRoom(code: string, playerToken: string): Promise<void> {
+  return serialize(async () => {
+    await ensureLoaded();
+    const record = requireRoom(code);
+    requirePlayer(record, playerToken);
+    await progressRoom(record, false);
+  });
+}
+
+/** テスト用: CPU の1手を予約時刻を待たずに即時進める。 */
+export async function forceBalkuCpuStep(code: string, playerToken: string): Promise<void> {
+  return serialize(async () => {
+    await ensureLoaded();
+    const record = requireRoom(code);
+    requirePlayer(record, playerToken);
+    await progressRoom(record, true);
   });
 }
 
@@ -312,8 +419,7 @@ export async function subscribeBalkuRoom(
     await ensureLoaded();
     const record = requireRoom(code);
     const player = requirePlayer(record, playerToken);
-    const expired = expireTimedOutTurn(record.state);
-    if (expired !== record.state) await applyChange(record, expired);
+    await progressRoom(record, false);
     const subscriber: BalkuSubscriber = { token: playerToken, send };
     let set = subscribers.get(code);
     if (!set) {
@@ -346,6 +452,7 @@ export async function startBalkuGame(code: string, playerToken: string, expected
       throw new BalkuRoomError(400, error instanceof Error ? error.message : "対戦開始に失敗しました。");
     }
     await applyChange(record, next);
+    await progressCpu(record, false);
     return { success: true as const, revision: record.revision };
   });
 }
@@ -359,6 +466,7 @@ export async function restartBalkuGame(code: string, playerToken: string, expect
     if (record.revision !== expectedRevision) throw new BalkuRoomError(409, "盤面が更新されました。もう一度お試しください。");
     if (record.state.phase !== "finished") throw new BalkuRoomError(400, "対戦終了後に再戦を準備できます。");
     await applyChange(record, resetToLobby(record.state));
+    await progressCpu(record, false);
     return { success: true as const, revision: record.revision };
   });
 }
@@ -395,11 +503,14 @@ export async function leaveBalkuRoom(code: string, playerToken: string, expected
       });
     }
     if (wasHost && !record.players.some((p) => p.isHost)) {
-      // ホストが抜けたら最若席のプレイヤーをホストにする（開始・再戦の担い手）
-      const promoted = [...record.players].sort((a, b) => a.seat - b.seat)[0];
+      // ホストが抜けたら人間の最若席をホストにする（開始・再戦の担い手）。
+      // 人間が居ない場合のみ CPU が引き継ぐ（そのルームは実質終了扱い）。
+      const candidates = [...record.players].sort((a, b) => a.seat - b.seat);
+      const promoted = candidates.find((p) => !p.isCpu) ?? candidates[0];
       if (promoted) promoted.isHost = true;
     }
     await applyChange(record, next);
+    await progressCpu(record, false);
     return { success: true as const };
   });
 }
@@ -429,6 +540,91 @@ export async function applyBalkuMove(
     } catch (error) {
       throw new BalkuRoomError(400, error instanceof Error ? error.message : "操作を処理できませんでした。");
     }
+    await applyChange(record, next);
+    // 次の手番が CPU なら予約だけ入れる（実行は進行処理に任せる）
+    await progressCpu(record, false);
+    return { success: true as const, revision: record.revision };
+  });
+}
+
+/**
+ * ルーム内チャットへ投稿する。着席メンバー以外は拒否。ゲーム状態は
+ * 変えないが、revision を上げて永続化＋SSE publish の経路に乗せる。
+ * 保持は最新 CHAT_KEEP 件まで（古いものは捨てる）。
+ */
+export async function postBalkuChat(
+  code: string,
+  playerToken: string,
+  rawText: unknown,
+): Promise<{ success: true; revision: number; message: BalkuChatMessage }> {
+  return serialize(async () => {
+    await ensureLoaded();
+    const record = requireRoom(code);
+    const player = requirePlayer(record, playerToken);
+    if (typeof rawText !== "string") throw new BalkuRoomError(400, "メッセージの形式が正しくありません。");
+    const text = rawText.trim();
+    if (text.length === 0) throw new BalkuRoomError(400, "メッセージを入力してください。");
+    if (text.length > CHAT_MAX_LENGTH) throw new BalkuRoomError(400, `メッセージは${CHAT_MAX_LENGTH}文字以内で入力してください。`);
+    const message: BalkuChatMessage = {
+      id: `chat-${randomBytes(6).toString("hex")}`,
+      playerId: player.seat,
+      name: player.name,
+      text,
+      at: Date.now(),
+    };
+    record.chat = [...record.chat, message].slice(-CHAT_KEEP);
+    await applyChange(record, record.state);
+    return { success: true as const, revision: record.revision, message };
+  });
+}
+
+/**
+ * CPU の追加/削除（ホストのみ・待機中のみ）。CPU は通常の着席
+ * プレイヤーとして扱い、エンジン側のロビー参加/退出と同じ経路で
+ * 席を増減させる。CPU のトークンは内部専用で外部へ返さない。
+ */
+export async function setBalkuCpu(
+  code: string,
+  playerToken: string,
+  action: "add" | "remove",
+  seat?: number,
+): Promise<{ success: true; revision: number }> {
+  return serialize(async () => {
+    await ensureLoaded();
+    const record = requireRoom(code);
+    const player = requirePlayer(record, playerToken);
+    if (!player.isHost) throw new BalkuRoomError(403, "CPUを操作できるのはルーム作成者だけです。");
+    if (record.state.phase !== "lobby") throw new BalkuRoomError(400, "CPUの追加・削除は待機中のみ可能です。");
+    if (action === "add") {
+      if (record.players.length >= record.maxPlayers || record.state.players.length >= 4) {
+        throw new BalkuRoomError(400, "このルームは満席です。");
+      }
+      const name = nextCpuName(record.players.map((p) => p.name));
+      let next: RoomGameState;
+      try {
+        next = addLobbyPlayer(record.state, name);
+      } catch (error) {
+        throw new BalkuRoomError(400, error instanceof Error ? error.message : "CPUを追加できませんでした。");
+      }
+      record.players.push({ token: newPlayerToken(), seat: next.players.length - 1, name, isHost: false, isCpu: true });
+      await applyChange(record, next);
+      return { success: true as const, revision: record.revision };
+    }
+    if (seat === undefined) throw new BalkuRoomError(400, "外すCPUの席を指定してください。");
+    const target = record.players.find((p) => p.seat === seat);
+    if (!target || !target.isCpu) throw new BalkuRoomError(400, "指定された席のCPUが見つかりません。");
+    let next: RoomGameState;
+    try {
+      next = removePlayerFromState(record.state, seat);
+    } catch (error) {
+      throw new BalkuRoomError(400, error instanceof Error ? error.message : "CPUを外せませんでした。");
+    }
+    record.players = record.players.filter((p) => p.token !== target.token);
+    // ロビー退出と同じく、エンジン側の seat 振り直しにレコードを同期させる
+    record.players.sort((a, b) => a.seat - b.seat);
+    record.players.forEach((p, i) => {
+      p.seat = i;
+    });
     await applyChange(record, next);
     return { success: true as const, revision: record.revision };
   });
@@ -551,6 +747,27 @@ export function parseGameAction(value: unknown): GameAction | null {
     default:
       return null;
   }
+}
+
+export function parseChatBody(body: unknown): { playerToken: string; text: string } {
+  const data = asBody(body);
+  if (typeof data.text !== "string") throw new BalkuRoomError(400, "メッセージの形式が正しくありません。");
+  return { playerToken: parsePlayerToken(data.playerToken), text: data.text };
+}
+
+export function parseCpuBody(body: unknown): { playerToken: string; action: "add" | "remove"; seat?: number } {
+  const data = asBody(body);
+  if (data.action !== "add" && data.action !== "remove") {
+    throw new BalkuRoomError(400, "操作の形式が正しくありません。");
+  }
+  let seat: number | undefined;
+  if (data.seat !== undefined) {
+    if (typeof data.seat !== "number" || !Number.isInteger(data.seat) || data.seat < 0 || data.seat > 3) {
+      throw new BalkuRoomError(400, "席の指定が正しくありません。");
+    }
+    seat = data.seat;
+  }
+  return { playerToken: parsePlayerToken(data.playerToken), action: data.action, ...(seat !== undefined ? { seat } : {}) };
 }
 
 export function parseMoveBody(body: unknown): { playerToken: string; expectedRevision: number; action: GameAction } {

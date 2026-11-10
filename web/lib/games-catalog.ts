@@ -46,7 +46,7 @@ export const WEB_GAMES: WebGame[] = [
     accent: "#2f7f9f",
     status: "playable",
     activity: true,
-    players: "2〜4人（オンライン）",
+    players: "1〜4人（オンライン/CPU対戦）",
   },
 ];
 

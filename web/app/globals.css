@@ -423,7 +423,9 @@ body:has([data-activity-root]) > main { max-width:none; min-height:100svh; margi
 .balku-room-code-row { display:flex; align-items:center; gap:12px; flex-wrap:wrap; }
 .balku-room-code { font-size:30px; font-weight:800; letter-spacing:.18em; color:#2f7f9f; }
 .balku-player-list { display:grid; gap:6px; }
-.balku-player-row { padding:8px 12px; border:1px solid #ddd5b8; border-radius:8px; background:rgba(255,255,255,.45); font-size:14px; }
+.balku-player-row { display:flex; align-items:center; justify-content:space-between; gap:8px; padding:8px 12px; border:1px solid #ddd5b8; border-radius:8px; background:rgba(255,255,255,.45); font-size:14px; }
+.balku-player-row .balku-badge-cpu { margin-left:6px; }
+.balku-cpu-remove { min-height:32px; padding:4px 10px; font-size:13px; }
 .balku-winner { font-size:18px; font-weight:800; }
 .balku-results { width:100%; border-collapse:collapse; }
 .balku-results th, .balku-results td { padding:6px 8px; text-align:left; font-size:14px; }
@@ -504,6 +506,7 @@ button.balku-card:hover { box-shadow:0 10px 20px rgba(0,0,0,.45), inset 0 0 0 3p
 .balku-badge-ok { background:#dff2e4 !important; color:#1e7a46 !important; }
 .balku-badge-bad { background:#fbe3e1 !important; color:#a33c34 !important; }
 .balku-badge-hazard { background:#f5c518 !important; color:#191919 !important; border:1px solid #191919; }
+.balku-badge-cpu { background:#2f7f9f !important; color:#fff !important; margin-left:6px; }
 .balku-bulk-area { display:flex; flex-wrap:wrap; gap:8px; margin-top:8px; }
 .balku-bulk-area .balku-btn { min-height:34px; padding:5px 12px; font-size:13px; }
 .balku-confirm { flex:1 1 230px; padding:10px 12px; border:1px solid #e8d9a8; border-radius:8px; background:#fffaf0; color:#25251f; font-size:12px; }
@@ -615,7 +618,31 @@ button.balku-card:hover { box-shadow:0 10px 20px rgba(0,0,0,.45), inset 0 0 0 3p
 @keyframes balku-flash { 0% { box-shadow:0 0 0 3px rgba(245,197,24,.95); } 100% { box-shadow:0 0 0 3px rgba(245,197,24,0); } }
 .balku-bundle-flash { animation:balku-shake 450ms ease-in-out, balku-flash 600ms ease-out; }
 
+/* --- ルーム内チャット（右下固定ウィジェット。テーブルの世界観で統一） --- */
+.balku-chat { position:fixed; right:16px; bottom:16px; z-index:60; display:flex; flex-direction:column; align-items:flex-end; }
+.balku-chat-fab { position:relative; min-height:40px; padding:8px 16px; border:1px solid #39bfe8; border-radius:999px; background:#12242e; color:#e9f2f4; font:inherit; font-size:14px; font-weight:700; cursor:pointer; box-shadow:0 8px 20px rgba(10,25,32,.4); transition:transform var(--balku-dur,180ms) cubic-bezier(.2,.8,.25,1), background var(--balku-dur,180ms); }
+.balku-chat-fab:hover { background:#1a3442; }
+.balku-chat-fab:active { transform:scale(.96); }
+.balku-chat-badge { position:absolute; top:-7px; right:-5px; min-width:20px; height:20px; padding:0 5px; border-radius:999px; background:#e36a61; color:#fff; font-size:11px; font-weight:800; line-height:20px; text-align:center; box-shadow:0 2px 6px rgba(0,0,0,.35); }
+.balku-chat-panel { display:flex; flex-direction:column; width:320px; height:min(440px,62vh); border:1px solid rgba(120,200,230,.4); border-radius:12px; background:#12242e; color:#e9f2f4; box-shadow:0 14px 34px rgba(10,25,32,.5); overflow:hidden; animation:balku-in var(--balku-dur,180ms) cubic-bezier(.2,.8,.25,1); }
+.balku-chat-head { display:flex; align-items:center; justify-content:space-between; padding:8px 12px; border-bottom:1px solid rgba(120,200,230,.25); }
+.balku-chat-close { width:32px; height:32px; border:0; border-radius:8px; background:transparent; color:#9fb6bd; font-size:20px; line-height:1; cursor:pointer; }
+.balku-chat-close:hover { background:rgba(255,255,255,.08); color:#e9f2f4; }
+.balku-chat-list { flex:1; display:flex; flex-direction:column; gap:8px; padding:12px; overflow-y:auto; }
+.balku-chat-empty { color:#9fb6bd; font-size:13px; }
+.balku-chat-msg { display:grid; gap:2px; max-width:88%; padding:8px 10px; border-radius:8px; background:rgba(255,255,255,.07); font-size:14px; overflow-wrap:anywhere; }
+.balku-chat-mine { align-self:flex-end; background:#f7efdb; color:#25251f; }
+.balku-chat-meta { font-size:11px; font-weight:700; color:#aee3f5; }
+.balku-chat-mine .balku-chat-meta { color:#2f7f9f; }
+.balku-chat-time { margin-left:6px; font-weight:400; color:#9fb6bd; }
+.balku-chat-mine .balku-chat-time { color:#6d6a5e; }
+.balku-chat-form { display:flex; gap:8px; padding:8px; border-top:1px solid rgba(120,200,230,.25); }
+.balku-chat-input { flex:1; min-width:0; padding:9px 11px; border:1px solid rgba(120,200,230,.4); border-radius:8px; background:rgba(255,255,255,.06); color:#e9f2f4; font:inherit; font-size:14px; outline-color:#39bfe8; }
+.balku-chat-send { flex:none; }
+
 @media (max-width:760px) {
+  .balku-chat { left:16px; }
+  .balku-chat-panel { width:100%; height:min(440px,58vh); }
   .balku-table { padding:8px; gap:8px; border-radius:12px; }
   .balku-lobby-grid { grid-template-columns:minmax(0,1fr); }
   .balku-room-code { font-size:24px; }
