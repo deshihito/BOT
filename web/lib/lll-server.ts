@@ -292,23 +292,42 @@ const APPRAISE_WORDS_PROMPT = [
  * 生成する。キーが無い・失敗・検証 NG のときは null を返し、呼び出し側が
  * 決定的フォールバック生成に倒す。キー切替は HTTP 429 のときだけ。
  */
+/**
+ * 鑑定モデルの優先順。既定モデルの次に、Logfare の公開カタログで画像入力
+ * 対応（chat_vision）が確認できるモデルを並べ、最後に自動ルーティング。
+ * 既定モデルはカタログ未掲載で、自動ルーティングはテキスト専用のため、
+ * どちらかが画像入力で失敗しても AI の言葉生成を諦めないための並び
+ * （2026-11-10 に GET /v1/models で実測して選定）。
+ */
+const APPRAISE_MODEL_CHAIN: string[] = [
+  DEFAULT_LLL_MODEL,
+  "gemma-4-26b",
+  "gemma-4-31b-it",
+  "qwen-3.8-27b",
+  "logfare/auto",
+];
+
 export async function appraiseWordsWithLogfare(imageDataUrl: string): Promise<AiWords | null> {
   const keys = logfareApiKeys();
   if (keys.length === 0) return null;
-  // 既定モデルが画像入力に未対応だった場合に備え、自動ルーティングも試す。
   // 失敗理由は必ずログに残す（キーや応答本文は出さない）。
-  const models = [...new Set([process.env.LLL_MODEL?.trim() || DEFAULT_LLL_MODEL, "logfare/auto"])];
-  for (const model of models) {
+  const override = process.env.LLL_MODEL?.trim();
+  const models = [...new Set([...(override ? [override] : []), ...APPRAISE_MODEL_CHAIN])];
+  for (let index = 0; index < models.length; index++) {
+    const model = models[index];
     const words = await appraiseWordsWithModel(imageDataUrl, keys, model, APPRAISE_WORDS_PROMPT);
     if (words) return words;
-    // 形式崩れの可能性があるため、短い上限を再強調したプロンプトでもう一度だけ試す
-    const retry = await appraiseWordsWithModel(
-      imageDataUrl,
-      keys,
-      model,
-      APPRAISE_WORDS_PROMPT + "\n重要: name は12文字以内、flavor は40文字以内、技名と特性名は10文字以内に短くしてください。",
-    );
-    if (retry) return retry;
+    // 形式崩れの可能性があるため、短い上限を再強調したプロンプトでもう一度だけ試す。
+    // 再試行は先頭候補だけに絞り、候補全体を回る場合の待ち時間を抑える。
+    if (index === 0) {
+      const retry = await appraiseWordsWithModel(
+        imageDataUrl,
+        keys,
+        model,
+        APPRAISE_WORDS_PROMPT + "\n重要: name は12文字以内、flavor は40文字以内、技名と特性名は10文字以内に短くしてください。",
+      );
+      if (retry) return retry;
+    }
   }
   return null;
 }
