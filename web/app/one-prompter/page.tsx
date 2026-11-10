@@ -1,8 +1,7 @@
 import type { Metadata } from "next";
 import OnePrompterClient from "./OnePrompterClient";
 
-const OP_DESCRIPTION =
-  "やりたいことを漠然と書くだけ。あとは二択の質問に答えていくと、空欄を埋めて細かく詰め切り、AIあるあるを消す条件まで入れた完成プロンプトに仕上がります。";
+const OP_DESCRIPTION = "雑な意見を、神プロンプトに。漠然とした『やりたいこと』を二択の質問で詰め切り、完成プロンプトに仕上げるサービスです。";
 
 // 独立サービス化を前提にした別サービスのデモのため、メタ情報も AGO BOT の
 // 名義（ルートの title テンプレート「%s | AGOBOT」、OGP、サイト名、既定
@@ -37,10 +36,7 @@ export default function OnePrompterPage() {
     <div className="op-page">
       <div className="page-heading">
         <h1>One Prompter</h1>
-        <p className="muted">
-          やりたいことが漠然としていると、足りない部分をAIが無難な平均で埋めるため、無難な結果になります。
-          ここでは先に二択で空欄を埋めて条件を細かく詰め切り、定型表現や誇張などの「AIあるある」を消す指定まで入れた完成プロンプトに仕上げます。
-        </p>
+        <p className="op-lead">雑な意見を、神プロンプトに。</p>
       </div>
       <OnePrompterClient />
     </div>

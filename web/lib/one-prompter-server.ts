@@ -10,11 +10,14 @@ import {
   buildFollowupRetryMessages,
   buildQuestionsMessages,
   buildQuestionsRetryMessages,
+  buildRefineMessages,
   buildReviseMessages,
   buildSynthesizeMessages,
+  buildVerifyMessages,
   cleanSynthesizedPrompt,
   parseFollowupQuestionsJson,
   parseQuestionsJson,
+  parseVerificationJson,
   resolveQuestionCount,
   type ChatMessage,
   type LlmAnswer,
@@ -24,6 +27,12 @@ import {
 export const DEFAULT_MODEL = "deepseek-v4.1-flash-1017";
 const DEFAULT_BASE_URL = "https://logfare.ai/v1";
 const REQUEST_TIMEOUT_MS = 30_000;
+/**
+ * 合成後の自己検証と直しの各呼び出しの上限時間。
+ * 下書き生成（既定30秒）と合わせて route の maxDuration=60秒に収まるよう、
+ * 追加の2呼び出しは短めに切る（通常応答は数秒で返る前提の上限値）。
+ */
+const VERIFY_TIMEOUT_MS = 15_000;
 
 type Env = Record<string, string | undefined>;
 type FetchImpl = typeof fetch;
@@ -159,14 +168,43 @@ export async function generateFollowupQuestionsWithLlm(
   return parseFollowupQuestionsJson(second, asked);
 }
 
-/** 完成プロンプトを LLM で合成する。整形できなければ null。 */
+/**
+ * 完成プロンプトを LLM で合成する。整形できなければ null。
+ * 合成は「下書き生成 → 自己検証 → 問題があれば1回だけ直し」の順に行い、
+ * 検証して直してから出す。検証・直しの呼び出しが失敗したり応答の形式が
+ * 崩れたりした場合は下書きをそのまま返す（この段の失敗では落とさない）。
+ * 下書き生成自体の失敗（例外・整形不可）は従来どおり呼び出し側に委ねる。
+ */
 export async function synthesizeWithLlm(
   rough: string,
   answers: LlmAnswer[],
   deps: { env?: Env; fetchImpl?: FetchImpl } = {},
 ): Promise<string | null> {
   const raw = await logfareChat(buildSynthesizeMessages(rough, answers), { maxTokens: 1800, ...deps });
-  return cleanSynthesizedPrompt(raw);
+  const draft = cleanSynthesizedPrompt(raw);
+  if (!draft) return null;
+
+  const verifyDeps = { env: deps.env, fetchImpl: deps.fetchImpl, timeoutMs: VERIFY_TIMEOUT_MS };
+  let issues: string[] | null;
+  try {
+    const verifyRaw = await logfareChat(buildVerifyMessages(rough, answers, draft), { maxTokens: 800, ...verifyDeps });
+    issues = parseVerificationJson(verifyRaw);
+  } catch {
+    // 検証の呼び出しに失敗したら、下書きをそのまま出す
+    return draft;
+  }
+  if (!issues || issues.length === 0) return draft;
+
+  try {
+    const refinedRaw = await logfareChat(buildRefineMessages(rough, answers, draft, issues), {
+      maxTokens: 2400,
+      ...verifyDeps,
+    });
+    return cleanSynthesizedPrompt(refinedRaw) ?? draft;
+  } catch {
+    // 直しの呼び出しに失敗したら、下書きをそのまま出す
+    return draft;
+  }
 }
 
 /** 完成プロンプトを修正指示どおりに LLM で書き直す。整形できなければ null。 */
