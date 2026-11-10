@@ -1,9 +1,9 @@
 "use client";
 
-// 分散コンピューティングの参加UI（クライアント専用）。
-// 計算は「計算をはじめる」を押したときだけ始まる。実行方式は CPU
-// （Web Worker の JavaScript）・WASM・WebGPU (GPGPU) から選べて、
-// 選択は localStorage に残す。
+// 分散コンピューティングの基盤UI（クライアント専用）。
+// 開始・停止ボタンはユーザー決定（2026-11-10）で撤去済みで、UI から
+// 計算は開始できない。実行方式は CPU（Web Worker の JavaScript）・
+// WASM・WebGPU (GPGPU) から選べて、選択は localStorage に残す。
 // 個人の貢献数はこのブラウザの localStorage にだけ残し、サーバーへは送らない。
 import { useEffect, useRef, useState } from "react";
 import { isWebGpuSupported, runPerftBatchOnGpu } from "../../lib/compute-gpu";
@@ -133,7 +133,7 @@ export default function ComputeClient() {
   const [finished, setFinished] = useState(false);
   const [session, setSession] = useState<MyStats>({ tasks: 0, nodes: 0 });
   const [total, setTotal] = useState<MyStats>({ tasks: 0, nodes: 0 });
-  const [message, setMessage] = useState("「計算をはじめる」を押すまで、計算は始まりません。");
+  const [message, setMessage] = useState("検証スイートは完了しています。このページは結果の表示専用です。");
   const [method, setMethod] = useState<ComputeMethod>("cpu");
   const [care, setCare] = useState<CareLevel>("medium");
   // 開始時点の配慮設定。実行中のループ（ワーカー数・休止・GPUのまとめ方）は
@@ -517,7 +517,7 @@ export default function ComputeClient() {
         ))}
       </div>
       <p className="compute-status">
-        端末を守るため、使用率100%の設定はありません。どの設定でも余力を残して計算します。配慮の設定は、次に計算をはじめるときから反映されます。
+        端末を守るため、使用率100%の設定はありません。どの設定でも余力を残して計算します。
       </p>
       <p className="compute-status">
         速度の目安：WebGPU は、対応する環境では CPU・WASM
