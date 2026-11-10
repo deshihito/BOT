@@ -182,6 +182,7 @@ class SupportCog(
         "sns_github": "administrator",
         "sns_rss": "administrator",
         "sns_youtube_live": "administrator",
+        "earthquake": "administrator",
         "quest_notify": "administrator",
         "quest_manual": "administrator",
         "levelup_notify": "manage_guild",
@@ -676,6 +677,12 @@ class SupportCog(
             if cog is None:
                 return await self._missing(interaction, "サーバー分析")
             return await cog.show_server_analytics(interaction)
+
+        if selected == "earthquake":
+            cog = self.bot.get_cog("EarthquakeCog")
+            if cog is None:
+                return await self._missing(interaction, "地震情報")
+            return await cog.show_earthquake_settings(interaction)
 
         if selected.startswith("sokunuke_"):
             cog = self.bot.get_cog("SokuNukeRta")
