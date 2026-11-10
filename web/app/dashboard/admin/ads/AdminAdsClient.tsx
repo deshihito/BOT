@@ -148,7 +148,7 @@ export default function AdminAdsClient() {
             <p><ScreeningBadges app={app} /></p>
             <div className="settings-actions">
               <button type="button" disabled={busyId !== null || capReached || !app.guild.installed} onClick={() => void act(app, "approve")}>
-                承認する（30日掲載）
+                承認する
               </button>
             </div>
             <div className="settings-field">
@@ -189,9 +189,6 @@ export default function AdminAdsClient() {
             <li key={app.id}>
               <span>
                 <strong>{app.guild_name}</strong> — {app.text}
-                {app.expires_at ? (
-                  <span className="settings-note">（{new Date(app.expires_at).toLocaleDateString("ja-JP")}まで）</span>
-                ) : null}
               </span>
               <button type="button" disabled={busyId !== null} onClick={() => void act(app, "revoke")}>
                 即時停止

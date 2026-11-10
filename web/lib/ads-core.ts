@@ -2,10 +2,12 @@
 //
 // 仕様: ~/workspace/goals/ago-bot-2/files/ad-application-system-spec-2026-11-10.md
 // レコードは bot_kv の partner_ads 名前空間に「1申請＝1キー」で置き、
-// Bot（core/ads.py）は status=approved・期限内・対象ギルドが guild_registry に
-// 現存するものだけを読み取り時に配信対象にする。
+// Bot（core/ads.py）は status=approved・対象ギルドが guild_registry に
+// 現存するものだけを読み取り時に配信対象にする。掲載期限は無い（永続表示）。
 
 export type AdStatus = "pending" | "approved" | "rejected" | "expired" | "revoked";
+// "expired" は旧仕様（承認から30日で掲載終了）の名残として型と正規化にだけ残す。
+// 掲載期限は撤廃されたため、実効ステータスとして expired が返ることはもうない。
 
 export type RejectReason = "spam" | "shop" | "nsfw" | "mismatch" | "screening" | "other";
 
@@ -47,11 +49,11 @@ export type AdApplication = {
   reject_reason: RejectReason | null;
   reject_note: string | null;
   revoke_reason: "bot_removed" | "manual" | null;
+  /** 旧仕様の掲載期限。期限は撤廃され、新規承認では null。残っていても無視する。 */
   expires_at: string | null;
 };
 
 export const AD_TEXT_MAX = 60;
-export const AD_TERM_DAYS = 30;
 export const AD_GLOBAL_APPROVED_LIMIT = 20;
 export const SCREENING_MODEL = "clef";
 export const MS_PER_DAY = 24 * 60 * 60 * 1000;
@@ -160,20 +162,19 @@ export function newApplicationId(nowMs: number, guildId: string, randomHex: stri
 // ---------------------------------------------------------------- 状態と上限
 
 /**
- * 表示・配信の実効ステータス。approved でも期限切れなら expired、
- * registryIds が渡され対象ギルドが含まれなければ revoked（Bot退出）として扱う。
+ * 表示・配信の実効ステータス。approved でも registryIds が渡され対象ギルドが
+ * 含まれなければ revoked（Bot退出）として扱う。掲載期限は無いため、レコードの
+ * expires_at は見ない（旧仕様の名残として残っていても無視する）。
  * レコード自体の status は書き換えない（書き換えは審査操作のときだけ）。
+ * nowMs は将来の判定拡張用に引数の形だけ残している（現在は未使用）。
  */
 export function effectiveStatus(
   app: Pick<AdApplication, "status" | "expires_at" | "guild_id">,
   nowMs: number,
   registryIds?: ReadonlySet<string> | null,
 ): AdStatus {
+  void nowMs;
   if (app.status !== "approved") return app.status;
-  if (app.expires_at) {
-    const expires = Date.parse(app.expires_at);
-    if (Number.isFinite(expires) && expires <= nowMs) return "expired";
-  }
   if (registryIds && !registryIds.has(app.guild_id)) return "revoked";
   return "approved";
 }
@@ -193,9 +194,12 @@ export function canApprove(apps: AdApplication[], nowMs: number, registryIds?: R
   return countActiveApproved(apps, nowMs, registryIds) < AD_GLOBAL_APPROVED_LIMIT;
 }
 
-/** 承認時の掲載期限（承認時点＋30日）。 */
-export function approvalExpiry(nowMs: number): string {
-  return new Date(nowMs + AD_TERM_DAYS * MS_PER_DAY).toISOString();
+/**
+ * オーナー判定（純粋関数）。OWNER_DISCORD_ID 未設定（null/空）なら誰もオーナーに
+ * ならない（管理ページは存在しないものとして扱う）。lib/ads.ts の isOwner が使う。
+ */
+export function isOwnerUser(userId: string | null | undefined, ownerId: string | null | undefined): boolean {
+  return Boolean(ownerId) && Boolean(userId) && userId === ownerId;
 }
 
 // ---------------------------------------------------------------- スクリーニング（clef）
