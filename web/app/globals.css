@@ -29,7 +29,9 @@ footer { position:relative; z-index:20; background:#fff; padding:20px; border-to
 .quiet-note { margin-top:16px; color:var(--muted); font-size:13px; }
 .primary-link { display:inline-block; width:max-content; margin-top:12px; padding:8px 13px; border:1px solid var(--accent); border-radius:7px; color:var(--accent); font-weight:700; }
 .primary-link:hover { background:var(--accent-soft); text-decoration:none; }
-.home-hero { display:flex; align-items:center; gap:28px; padding:8px 0 34px; }
+.home-hero { display:flex; flex-direction:column; align-items:flex-start; gap:14px; padding:8px 0 34px; }
+.home-brand { display:flex; align-items:center; gap:16px; }
+.home-brand-name { font-size:32px; font-weight:700; letter-spacing:.05em; }
 .home-hero img { width:92px; height:92px; flex:0 0 auto; }
 .home-command-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); border-top:1px solid var(--line); border-left:1px solid var(--line); }
 .home-command-link { display:flex; align-items:center; justify-content:space-between; gap:12px; min-height:66px; padding:13px 15px; border-right:1px solid var(--line); border-bottom:1px solid var(--line); color:var(--text); }
@@ -136,7 +138,7 @@ th,td { padding:6px 8px; border-bottom:1px solid var(--line); text-align:left; }
 .status-banner-note { color:var(--muted); font-size:14px; }
 .status-table th { color:var(--muted); font-weight:400; width:180px; }
 .status-table td { text-align:right; font-variant-numeric:tabular-nums; }
-@media (max-width:650px) { header nav { gap:12px; align-items:flex-start; } .main-nav-links a { padding:3px 6px; font-size:13px; } main { padding-top:36px; } .home-hero { gap:18px; } .home-hero img { width:64px; height:64px; } .home-command-grid { grid-template-columns:1fr; } .command-card,.genre-card { gap:14px; padding:17px 0; } .guild-title { font-size:20px; line-height:1.4; } }
+@media (max-width:650px) { header nav { gap:12px; align-items:flex-start; } .main-nav-links a { padding:3px 6px; font-size:13px; } main { padding-top:36px; } .home-hero { gap:12px; } .home-brand-name { font-size:26px; } .home-hero img { width:64px; height:64px; } .home-command-grid { grid-template-columns:1fr; } .command-card,.genre-card { gap:14px; padding:17px 0; } .guild-title { font-size:20px; line-height:1.4; } }
 
 /* Discord Activity: these selectors activate only on the Music Activity route. */
 body:has([data-activity-root]) > header,
@@ -232,6 +234,7 @@ body:has([data-activity-root]) > main { max-width:none; min-height:100svh; margi
 /* ホームの動き: ふわっと登場 */
 @keyframes home-fade-up { from { opacity:0; transform:translateY(14px); } to { opacity:1; transform:translateY(0); } }
 .home-hero img { animation:home-fade-up .7s cubic-bezier(.22,.8,.32,1) .05s both; }
+.home-brand-name { animation:home-fade-up .7s cubic-bezier(.22,.8,.32,1) .12s both; }
 .home-hero h1 { animation:home-fade-up .7s cubic-bezier(.22,.8,.32,1) .18s both; }
 .home-hero-actions { animation:home-fade-up .7s cubic-bezier(.22,.8,.32,1) .32s both; }
 .home-live-stats { animation:home-fade-up .7s cubic-bezier(.22,.8,.32,1) .46s both; }
@@ -246,7 +249,7 @@ body:has([data-activity-root]) > main { max-width:none; min-height:100svh; margi
 .home-command-link:nth-child(8) { animation-delay:1.25s; }
 .home-command-link:nth-child(n+9) { animation-delay:1.35s; }
 @media (prefers-reduced-motion: reduce) {
-  .home-hero img, .home-hero h1,
+  .home-hero img, .home-brand-name, .home-hero h1,
   .home-hero-actions, .home-live-stats, .home-command-link { animation:none; }
 }
 .home-features { margin-top:44px; }
@@ -259,8 +262,7 @@ body:has([data-activity-root]) > main { max-width:none; min-height:100svh; margi
 .home-genres { list-style:none; margin:0 0 12px; padding:0; display:grid; gap:10px; }
 .home-genres li { line-height:1.65; }
 .home-genre-functions { color:var(--muted); font-size:13.5px; }
-.home-video { margin:0 0 34px; animation:home-fade-up .6s ease .05s both; }
-.home-more-features { margin-top:26px; }
+.home-video { margin:44px 0 0; animation:home-fade-up .6s ease .05s both; }
 .home-video h2 { font-size:17px; margin:0 0 12px; }
 .home-video video { display:block; width:100%; height:auto; border:1px solid var(--line); border-radius:12px; background:#fff; }
 @media (prefers-reduced-motion: reduce) {
