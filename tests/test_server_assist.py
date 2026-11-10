@@ -176,8 +176,9 @@ class ServerAssistPanelTest(unittest.IsolatedAsyncioTestCase):
             # 機能数再編: automation は34件になり25件を超える。パネルは
             # ページング（core/support/panel.py の support_action_pages）で
             # 全件選べることが前提（tests/test_panel_warps.py が固定）。
+            # 地震情報の追加で 35件（ページング前提は変わらない）。
             if genre == "automation":
-                self.assertEqual(len(items), 34, genre)
+                self.assertEqual(len(items), 35, genre)
             else:
                 self.assertLessEqual(len(items), 25, genre)
         # 旧ハブ値の権限エントリは互換分岐（案内のみ）のために残る。

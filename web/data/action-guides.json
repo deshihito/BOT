@@ -1,11 +1,11 @@
 {
   "version": 1,
-  "total": 253,
+  "total": 254,
   "counts": {
     "general": 72,
     "vc": 45,
     "game": 49,
-    "support": 86,
+    "support": 87,
     "help": 1
   },
   "game_count": 48,
@@ -1449,6 +1449,12 @@
               "id": "support:auto_react",
               "value": "auto_react",
               "title": "Auto react設定",
+              "description": ""
+            },
+            {
+              "id": "support:earthquake",
+              "value": "earthquake",
+              "title": "地震情報",
               "description": ""
             },
             {

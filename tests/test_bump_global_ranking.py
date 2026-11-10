@@ -77,10 +77,11 @@ class UnifiedBoardGenreTest(unittest.TestCase):
         # DISCOM 入口（support:bumprta_discom）追加で全体 250→251。
         # ぬるぽRTAボード（general:nurupo_board）追加で general 71→72 / 全体 251→252。
         # にょっきゲーム（game:nyokki_started）追加で全体 252→253。
+        # 地震情報（support:earthquake）追加で全体 253→254。
         from core.general import action_registry
 
         specs = list(action_registry.default_registry()._by_id.values())
-        self.assertEqual(len(specs), 253)
+        self.assertEqual(len(specs), 254)
         self.assertEqual(len([s for s in specs if s.root == "general"]), 72)
 
 

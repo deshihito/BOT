@@ -48,10 +48,10 @@ def make_cog(cogs):
 
 class RegistryShapeTest(unittest.TestCase):
     def test_counts(self):
-        self.assertEqual(len(SUPPORT_ACTIONS), 86)
+        self.assertEqual(len(SUPPORT_ACTIONS), 87)
         counts = {genre: len(items) for genre, items in SUPPORT_ACTIONS_BY_GENRE.items()}
         self.assertEqual(counts, {
-            "moderation": 17, "roles": 8, "logs": 5, "automation": 34,
+            "moderation": 17, "roles": 8, "logs": 5, "automation": 35,
             "rta": 5, "boardnotify": 10, "sns": 5, "analysis": 2,
         })
         values = {choice.value for choice in SUPPORT_ACTIONS}

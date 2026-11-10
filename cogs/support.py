@@ -10,6 +10,7 @@
     auth           core/support/auth/cog.py                     VerificationCog
     clear          core/support/clear/cog.py                    ClearCog
     daily_report   core/support/daily_report/cog.py             DailyReportCog
+    earthquake     core/support/earthquake/cog.py               EarthquakeCog
     errorhandler   core/support/errorhandler/cog.py             ErrorHandler
     globalchat     core/support/globalchat/cog.py               GlobalChatCog
     localization   core/support/localization/cog.py             LocalizationCog
@@ -111,6 +112,11 @@ from core.support.entry import *  # noqa: F401,F403
 # daily_report — 実装: core/support/daily_report/cog.py
 # =====================================================================
 from core.support.daily_report.cog import DailyReportCog  # noqa: F401
+
+# =====================================================================
+# earthquake — 実装: core/support/earthquake/cog.py
+# =====================================================================
+from core.support.earthquake.cog import EarthquakeCog  # noqa: F401
 
 # =====================================================================
 # errorhandler — 実装: core/support/errorhandler/cog.py
@@ -328,6 +334,7 @@ _FEATURE_MODULES = (
     ("bot_status", "core.support.bot_status.cog"),
     ("clear", "core.support.clear.cog"),
     ("daily_report", "core.support.daily_report.cog"),
+    ("earthquake", "core.support.earthquake.cog"),
     ("errorhandler", "core.support.errorhandler.cog"),
     ("globalchat", "core.support.globalchat.cog"),
     ("localization", "core.support.localization.cog"),

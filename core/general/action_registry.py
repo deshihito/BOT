@@ -154,6 +154,8 @@ SUPPORT_AI_EXCLUDED_VALUES = frozenset({
     # AI tools の代理実行範囲には広げない（明示操作に限定する）。
     "bumprta_settings",
     "sns_youtube", "sns_x", "sns_github", "sns_rss", "sns_youtube_live",
+    # 地震情報も外部フィードの設定パネルのため、SNS通知と同じく明示操作に限定する。
+    "earthquake",
     "bot_fixer_bots", "bot_fixer_rates",
     "muted_settings", "ticket_types", "ticket_transcript", "ticket_assign",
     "auth_questions", "globalchat_mod", "tempvoice_panel",
