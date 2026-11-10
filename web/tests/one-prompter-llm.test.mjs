@@ -143,11 +143,17 @@ test("generateQuestionsWithLlm は形式崩れを1回だけ組み直し、駄目
   assert.equal(await server.generateQuestionsWithLlm("転職したい", { env, fetchImpl: badFetch }), null);
 });
 
-test("synthesizeWithLlm はフェンスを剥がした完成プロンプトを返す", async () => {
+test("synthesizeWithLlm はフェンスを剥がした完成プロンプトを返す（検証応答が読めなければ下書き）", async () => {
   const env = { LOGFARE_API_KEY: "dummy" };
-  const fetchImpl = async () => chatResponse("```\n完成プロンプト本文\n```");
+  let calls = 0;
+  const fetchImpl = async () => {
+    calls += 1;
+    return chatResponse("```\n完成プロンプト本文\n```");
+  };
   const prompt = await server.synthesizeWithLlm("転職したい", [{ question: "使い道は？", answer: "書類選考を通す" }], { env, fetchImpl });
   assert.equal(prompt, "完成プロンプト本文");
+  // 下書き生成＋自己検証の2回呼ばれる（検証応答はJSONでないため下書きが返る）
+  assert.equal(calls, 2);
 });
 
 test("validateAnswers は1+2ラウンド合計で最大11件まで許容し、12件を弾く", () => {
@@ -377,4 +383,135 @@ test("reviseWithLlm はフェンスを剥がした書き直し結果を返す", 
   const fetchImpl = async () => chatResponse("```\n書き直したプロンプト\n```");
   const revised = await server.reviseWithLlm("元のプロンプト", "短く", { env, fetchImpl });
   assert.equal(revised, "書き直したプロンプト");
+});
+
+test("質問生成プロンプトは影響度順・対立軸の明確さ・逃げの選択肢禁止を含む（深掘りも）", () => {
+  const [system] = llm.buildQuestionsMessages("転職したい、自己PR書いて");
+  assert.match(system.content, /成果物への影響度が高い順に並べる/);
+  assert.match(system.content, /対立軸をはっきりさせる/);
+  assert.match(system.content, /何がどう変わるかが、選択肢の文面から読み取れる/);
+  assert.match(system.content, /中間的な逃げの選択肢は作らない/);
+  const [followupSystem] = llm.buildFollowupMessages("転職したい", [{ question: "Q?", answer: "A" }]);
+  assert.match(followupSystem.content, /成果物への影響度が高い順に並べる/);
+  assert.match(followupSystem.content, /対立軸をはっきりさせる/);
+  assert.match(followupSystem.content, /中間的な逃げの選択肢は作らない/);
+});
+
+test("合成プロンプトは完成プロンプト自体の冗長さ排除（密度）を含む", () => {
+  const [system] = llm.buildSynthesizeMessages("依頼", [{ question: "Q?", answer: "A" }]);
+  assert.match(system.content, /完成プロンプト自体を冗長にしない/);
+  assert.match(system.content, /同じことを2回言わない/);
+  assert.match(system.content, /条件は短い文で言い切り/);
+});
+
+test("buildVerifyMessages は検査観点と下書き・回答を含む", () => {
+  const answers = [{ question: "使い道は？", answer: "書類選考を通す" }];
+  const messages = llm.buildVerifyMessages("転職したい", answers, "下書きのプロンプト");
+  const c = messages[0].content;
+  assert.match(c, /決まった条件が、下書きに落ちていないか/);
+  assert.match(c, /改変されていないか/);
+  assert.match(c, /曖昧な表現や、未処理のまま残った曖昧な箇所/);
+  assert.match(c, /プロンプト自体にAIあるある/);
+  assert.match(c, /条件同士が矛盾していないか/);
+  assert.match(c, /用途に合わない形式/);
+  assert.match(c, /"issues"/);
+  assert.match(messages[1].content, /転職したい/);
+  assert.match(messages[1].content, /使い道は？ → 書類選考を通す/);
+  assert.match(messages[1].content, /下書きのプロンプト/);
+});
+
+test("parseVerificationJson は問題リストと空配列を読み、崩れを弾き、上限で切り詰める", () => {
+  assert.deepEqual(llm.parseVerificationJson('{"issues":["条件Xが落ちている","「適宜」が残っている"]}'), [
+    "条件Xが落ちている",
+    "「適宜」が残っている",
+  ]);
+  assert.deepEqual(llm.parseVerificationJson('{"issues":[]}'), []);
+  const fenced = "```json\n" + '{"issues":["問題A"]}' + "\n```";
+  assert.deepEqual(llm.parseVerificationJson(fenced), ["問題A"]);
+  assert.equal(llm.parseVerificationJson("JSONではありません"), null);
+  assert.equal(llm.parseVerificationJson('{"foo":1}'), null);
+  assert.equal(llm.parseVerificationJson('{"issues":"文字列"}'), null);
+  const many = { issues: Array.from({ length: llm.MAX_VERIFY_ISSUES + 2 }, (_, i) => `問題${i}`) };
+  assert.equal(llm.parseVerificationJson(JSON.stringify(many)).length, llm.MAX_VERIFY_ISSUES);
+  // 空・長すぎの項目は読み飛ばす
+  assert.deepEqual(llm.parseVerificationJson(JSON.stringify({ issues: ["", "問題B", "あ".repeat(201)] })), ["問題B"]);
+});
+
+test("buildRefineMessages は問題リストと下書きを含み、問題だけを直す指示を持つ", () => {
+  const messages = llm.buildRefineMessages("転職したい", [{ question: "使い道は？", answer: "書類選考を通す" }], "下書きのプロンプト", [
+    "条件Xが落ちている",
+  ]);
+  assert.match(messages[0].content, /問題だけを直した完成プロンプトの全文/);
+  assert.match(messages[0].content, /AIあるある対策の中身/);
+  assert.match(messages[0].content, /弱めない・落とさない/);
+  assert.match(messages[1].content, /下書きのプロンプト/);
+  assert.match(messages[1].content, /条件Xが落ちている/);
+});
+
+test("synthesizeWithLlm は問題があれば直しを1回だけ呼んで直した版を返す", async () => {
+  const env = { LOGFARE_API_KEY: "k" };
+  const bodies = [];
+  const queue = [
+    chatResponse("下書きのプロンプト"),
+    chatResponse('{"issues":["分量の条件が落ちている"]}'),
+    chatResponse("直したプロンプト"),
+  ];
+  const fetchImpl = async (url, init) => {
+    bodies.push(JSON.parse(init.body));
+    return queue.shift();
+  };
+  const answers = [{ question: "分量は？", answer: "400字でしっかり" }];
+  const prompt = await server.synthesizeWithLlm("転職したい", answers, { env, fetchImpl });
+  assert.equal(prompt, "直したプロンプト");
+  assert.equal(bodies.length, 3);
+  // 3回目（直し）のリクエストには問題リストと下書きが入っている
+  const refineUser = bodies[2].messages[1].content;
+  assert.match(refineUser, /分量の条件が落ちている/);
+  assert.match(refineUser, /下書きのプロンプト/);
+});
+
+test("synthesizeWithLlm は問題が無ければ下書きをそのまま返し、直しを呼ばない", async () => {
+  const env = { LOGFARE_API_KEY: "k" };
+  let calls = 0;
+  const queue = [chatResponse("下書きのプロンプト"), chatResponse('{"issues":[]}')];
+  const fetchImpl = async () => {
+    calls += 1;
+    return queue.shift();
+  };
+  const prompt = await server.synthesizeWithLlm("転職したい", [{ question: "Q?", answer: "A" }], { env, fetchImpl });
+  assert.equal(prompt, "下書きのプロンプト");
+  assert.equal(calls, 2);
+});
+
+test("synthesizeWithLlm は検証・直しの失敗時に下書きをそのまま返す", async () => {
+  const env = { LOGFARE_API_KEY: "k" };
+  const answers = [{ question: "Q?", answer: "A" }];
+  // 検証の呼び出しが例外（ネットワークエラー）
+  const verifyThrows = [chatResponse("下書きのプロンプト"), new Error("network down")];
+  const fetchVerifyThrows = async () => {
+    const next = verifyThrows.shift();
+    if (next instanceof Error) throw next;
+    return next;
+  };
+  assert.equal(await server.synthesizeWithLlm("転職したい", answers, { env, fetchImpl: fetchVerifyThrows }), "下書きのプロンプト");
+  // 検証の応答がJSONとして読めない
+  const verifyGarbage = [chatResponse("下書きのプロンプト"), chatResponse("検査できませんでした")];
+  const fetchVerifyGarbage = async () => verifyGarbage.shift();
+  assert.equal(await server.synthesizeWithLlm("転職したい", answers, { env, fetchImpl: fetchVerifyGarbage }), "下書きのプロンプト");
+  // 直しの呼び出しが例外
+  const refineThrows = [chatResponse("下書きのプロンプト"), chatResponse('{"issues":["問題あり"]}'), new Error("network down")];
+  const fetchRefineThrows = async () => {
+    const next = refineThrows.shift();
+    if (next instanceof Error) throw next;
+    return next;
+  };
+  assert.equal(await server.synthesizeWithLlm("転職したい", answers, { env, fetchImpl: fetchRefineThrows }), "下書きのプロンプト");
+  // 直しの応答が整形できない（長すぎ）
+  const refineTooLong = [
+    chatResponse("下書きのプロンプト"),
+    chatResponse('{"issues":["問題あり"]}'),
+    chatResponse("あ".repeat(llm.MAX_PROMPT_CHARS + 1)),
+  ];
+  const fetchRefineTooLong = async () => refineTooLong.shift();
+  assert.equal(await server.synthesizeWithLlm("転職したい", answers, { env, fetchImpl: fetchRefineTooLong }), "下書きのプロンプト");
 });

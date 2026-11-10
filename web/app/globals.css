@@ -286,6 +286,7 @@ body:has([data-activity-root]) > main { max-width:none; min-height:100svh; margi
 
 /* One Prompter: 一文入力 → 二択質問 → 完成プロンプト */
 .op-page { max-width:680px; margin:0 auto; }
+.op-lead { font-size:24px; font-weight:800; line-height:1.5; }
 .op-panel { display:grid; gap:14px; margin-top:20px; padding:20px; border:1px solid var(--line); border-radius:9px; }
 .op-label { font-weight:700; font-size:15px; }
 .op-panel textarea { width:100%; resize:vertical; padding:12px; border:1px solid var(--line); border-radius:8px; outline-color:var(--accent); font:inherit; }
