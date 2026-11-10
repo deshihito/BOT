@@ -809,7 +809,7 @@ button.balku-card:hover { box-shadow:0 10px 20px rgba(0,0,0,.45), inset 0 0 0 3p
 .lll-trait { color:#f7d774; }
 .lll-trait-sm { color:#f7d774; font-weight:700; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .lll-statuses { display:flex; flex-wrap:wrap; gap:3px; }
-.lll-status-chip { padding:0 6px; border-radius:999px; background:rgba(227,106,97,.22); border:1px solid rgba(227,106,97,.5); font-size:.8em; font-weight:700; }
+.lll-status-chip { padding:0 6px; border-radius:999px; background:rgba(227,106,97,.22); border:1px solid rgba(227,106,97,.5); font-size:.8em; font-weight:700; animation:lll-pop 320ms var(--lll-ease); }
 .lll-flavor { color:#b7abdd; font-size:.85em; line-height:1.4; overflow:hidden; display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical; }
 .lll-team-badge { position:absolute; top:4px; right:4px; z-index:2; padding:1px 7px; border-radius:999px; background:var(--lll-accent); color:#fff; font-size:10px; font-weight:800; }
 .lll-remove-chip { position:absolute; top:4px; right:4px; z-index:2; width:24px; height:24px; border:1px solid rgba(255,255,255,.5); border-radius:999px; background:rgba(0,0,0,.65); color:#fff; font-size:15px; line-height:1; cursor:pointer; }
@@ -882,8 +882,28 @@ button.balku-card:hover { box-shadow:0 10px 20px rgba(0,0,0,.45), inset 0 0 0 3p
 .lll-logline-latest { font-size:13px; color:#ece7fb; font-weight:700; }
 .lll-actionbar { display:flex; flex-wrap:wrap; align-items:center; justify-content:center; gap:8px; padding:12px; border:1px solid rgba(245,197,24,.4); border-radius:12px; background:rgba(245,197,24,.06); animation:lll-pop var(--lll-dur) var(--lll-ease); }
 .lll-actionbar-label { width:100%; text-align:center; font-size:13px; font-weight:800; color:#f7d774; }
-.lll-dmg { position:absolute; top:26%; left:50%; z-index:5; transform:translateX(-50%); color:#ff8f86; font-size:20px; font-weight:900; text-shadow:0 2px 6px #000; pointer-events:none; animation:lll-dmg-float 950ms ease-out both; }
+.lll-dmg { position:absolute; top:26%; left:50%; z-index:5; transform:translateX(-50%); color:#ff8f86; font-size:20px; font-weight:900; text-shadow:0 2px 6px #000; pointer-events:none; animation:lll-dmg-float 950ms ease-out both; white-space:nowrap; }
 .lll-dmg-heal { color:#7fd6a4; }
+.lll-dmg-weak { color:var(--lll-gold); font-size:25px; }
+.lll-dmg-resist { color:#9a93b8; font-size:16px; }
+.lll-dmg-status { color:#ffb27a; font-size:15px; }
+.lll-dmg-burn { color:#ffb27a; font-size:16px; }
+.lll-dmg-trait { color:#f7d774; font-size:17px; }
+.lll-dmg-shield { color:#bcd8ff; font-size:16px; }
+.lll-dmg-shieldbreak { color:#bcd8ff; font-size:18px; }
+.lll-dmg-death { top:38%; padding:2px 12px; border:2px solid #fff; border-radius:6px; background:rgba(227,106,97,.92); color:#fff; font-size:16px; letter-spacing:.14em; animation:lll-stamp-in 320ms var(--lll-ease) both; }
+.lll-card-lunge-up { animation:lll-lunge-up 240ms var(--lll-ease); }
+.lll-card-lunge-down { animation:lll-lunge-down 240ms var(--lll-ease); }
+.lll-card-shieldflash { animation:lll-shield-flash 360ms ease-in-out; }
+.lll-card-guide { outline:3px solid var(--lll-gold); outline-offset:2px; animation:lll-guide-pulse 1200ms ease-in-out infinite; }
+.lll-btn-guide { border-color:var(--lll-gold); box-shadow:0 0 0 2px rgba(245,197,24,.45), 0 0 16px rgba(245,197,24,.35); }
+.lll-speedbar { display:flex; gap:6px; margin-left:auto; }
+.lll-queue { display:flex; flex-wrap:wrap; gap:4px; justify-content:center; }
+.lll-queue-chip { padding:1px 8px; border:1px solid rgba(236,231,251,.18); border-radius:999px; color:#8f83b8; font-size:11px; font-weight:700; white-space:nowrap; }
+.lll-queue-chip-now { border-color:var(--lll-gold); color:#f7d774; }
+.lll-queue-chip-done { opacity:.45; }
+.lll-queue-chip-dead { opacity:.35; text-decoration:line-through; }
+.lll-playbackbar { border-color:rgba(167,139,250,.45); background:rgba(124,92,255,.08); }
 .lll-result { display:grid; gap:16px; justify-items:center; padding:16px 0 8px; }
 .lll-result-stamp { padding:6px 34px; border:3px solid var(--lll-ok); border-radius:10px; color:var(--lll-ok); font-size:30px; font-weight:900; letter-spacing:.24em; transform:rotate(-6deg); animation:lll-stamp-in 380ms var(--lll-ease) both; }
 .lll-result-lose { border-color:var(--lll-bad); color:var(--lll-bad); }
@@ -901,6 +921,10 @@ button.balku-card:hover { box-shadow:0 10px 20px rgba(0,0,0,.45), inset 0 0 0 3p
 @keyframes lll-shake { 0%,100% { transform:translateX(0); } 20% { transform:translateX(-6px); } 40% { transform:translateX(6px); } 60% { transform:translateX(-4px); } 80% { transform:translateX(4px); } }
 @keyframes lll-dmg-float { 0% { opacity:0; transform:translateX(-50%) translateY(6px) scale(.8); } 18% { opacity:1; transform:translateX(-50%) translateY(0) scale(1.12); } 100% { opacity:0; transform:translateX(-50%) translateY(-34px) scale(1); } }
 @keyframes lll-target-pulse { 0%,100% { box-shadow:0 0 0 0 rgba(227,106,97,.0); } 50% { box-shadow:0 0 18px 3px rgba(227,106,97,.65); } }
+@keyframes lll-lunge-up { 0% { transform:translateY(0); } 45% { transform:translateY(-8px) scale(1.04); } 100% { transform:translateY(0); } }
+@keyframes lll-lunge-down { 0% { transform:translateY(0); } 45% { transform:translateY(8px) scale(1.04); } 100% { transform:translateY(0); } }
+@keyframes lll-shield-flash { 0%,100% { box-shadow:0 4px 10px rgba(0,0,0,.45); } 50% { box-shadow:0 0 20px 4px rgba(140,190,255,.75); } }
+@keyframes lll-guide-pulse { 0%,100% { box-shadow:0 0 0 0 rgba(245,197,24,.0); } 50% { box-shadow:0 0 18px 3px rgba(245,197,24,.6); } }
 @keyframes lll-cue-glow { 0%,100% { box-shadow:0 0 0 0 rgba(124,92,255,.0); } 50% { box-shadow:0 0 22px 2px rgba(124,92,255,.45); } }
 @keyframes lll-legend-flash { from { opacity:1; } to { opacity:0; } }
 

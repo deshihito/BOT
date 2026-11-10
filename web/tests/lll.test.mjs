@@ -36,7 +36,7 @@ async function loadBundle(files, exportNames) {
 }
 
 const game = await loadBundle(
-  ["lll-game.ts", "lll-battle.ts"],
+  ["lll-game.ts", "lll-battle.ts", "lll-playback.ts"],
   [
     "TIER_BUDGET",
     "STAT_TOTAL_CAP",
@@ -62,6 +62,9 @@ const game = await loadBundle(
     "applyAction",
     "cpuChooseAction",
     "simulateBattle",
+    "PLAYBACK_DURATIONS",
+    "buildPlaybackSteps",
+    "stepDurationMs",
   ],
 );
 
@@ -225,4 +228,75 @@ test("重複変換の欠片量はティア表どおり", () => {
   assert.equal(game.DUPLICATE_SHARDS.normal, 5);
   assert.equal(game.DUPLICATE_SHARDS.elite, 15);
   assert.equal(game.DUPLICATE_SHARDS.legend, 40);
+});
+
+test("バトルイベントの表示用メタ: damage は affinity と hpAfter、状態付与は statusKind を持つ", () => {
+  let sawStatusKind = false;
+  for (const seed of [1, 7, 42, 1234, 2024]) {
+    const state = game.createBattle(`meta${seed}`, game.STARTER_CARDS, game.ladderDeck(2), 2, seed);
+    const done = game.simulateBattle(state);
+    assert.ok(done.log.some((e) => e.type === "damage"));
+    for (const e of done.log) {
+      if (e.type === "damage") {
+        assert.equal(typeof e.hpAfter, "number", `seed ${seed} の damage に hpAfter が無い`);
+        assert.ok([0.8, 1, 1.25].includes(e.affinity), `seed ${seed} の affinity が不正: ${e.affinity}`);
+        assert.ok(e.hpAfter >= 0);
+      }
+      if (e.type === "heal") assert.equal(typeof e.hpAfter, "number");
+      if (e.type === "shield") assert.equal(typeof e.shieldAfter, "number");
+      if (e.type === "status" && e.amount === undefined && e.text.includes("スタンで動けない") === false) {
+        // 経過ダメージ（やけど）以外の status は付与イベントなので statusKind を持つ
+        if (e.text.includes("やけどを負った") || e.text.includes("スタンした") || e.text.includes("防御が崩れた") || e.text.includes("攻撃力が上がった")) {
+          assert.ok(["burn", "stun", "guard_break", "overdrive"].includes(e.statusKind), `statusKind が無い: ${e.text}`);
+          sawStatusKind = true;
+        }
+      }
+    }
+  }
+  assert.ok(sawStatusKind, "状態付与イベントが1件も発生しなかった（シード選定を見直す）");
+});
+
+test("逐次再生: ステップ列の最終状態はサーバーの最終状態（HP/シールド/生死）と一致する", () => {
+  for (const seed of [3, 42, 777]) {
+    const state = game.createBattle(`pb${seed}`, game.STARTER_CARDS, game.ladderDeck(1), 1, seed);
+    let guard = 0;
+    while (state.phase === "battle" && guard++ < 40) {
+      const prevActors = structuredClone(state.actors);
+      const prevLogLength = state.log.length;
+      const actor = game.currentActor(state);
+      game.applyAction(state, game.cpuChooseAction(state, actor));
+      const events = state.log.slice(prevLogLength);
+      assert.ok(events.length >= 1);
+      const steps = game.buildPlaybackSteps(prevActors, events);
+      assert.equal(steps.length, events.length);
+      const finalActors = steps[steps.length - 1].actors;
+      for (const nextActor of state.actors) {
+        const mid = finalActors.find((a) => a.key === nextActor.key);
+        assert.ok(mid, `${nextActor.key} が再生状態に無い`);
+        assert.equal(mid.hp, Math.max(0, nextActor.hp), `seed ${seed} ${nextActor.key} のHPが一致しない`);
+        assert.equal(mid.shield, nextActor.shield, `seed ${seed} ${nextActor.key} のシールドが一致しない`);
+        assert.equal(mid.alive, nextActor.alive, `seed ${seed} ${nextActor.key} の生死が一致しない`);
+      }
+    }
+    assert.equal(state.phase, "finished");
+  }
+});
+
+test("逐次再生: 相性1.25の damage は弱点フロート、2倍速の撃破は360msを割らない", () => {
+  const prev = [
+    { key: "player_0", side: "player", hp: 100, maxHp: 100, shield: 0, alive: true, statuses: [] },
+    { key: "cpu_0", side: "cpu", hp: 100, maxHp: 100, shield: 0, alive: true, statuses: [] },
+  ];
+  const steps = game.buildPlaybackSteps(prev, [
+    { type: "damage", text: "攻撃。", actorKey: "player_0", targetKey: "cpu_0", amount: 50, hpAfter: 50, affinity: 1.25 },
+    { type: "death", text: "倒れた。", targetKey: "cpu_0" },
+  ]);
+  assert.equal(steps[0].float.kind, "weak");
+  assert.ok(steps[0].float.text.includes("弱点"));
+  assert.equal(steps[0].actors.find((a) => a.key === "cpu_0").hp, 50);
+  assert.equal(steps[1].float.kind, "death");
+  assert.equal(steps[1].actors.find((a) => a.key === "cpu_0").alive, false);
+  assert.equal(game.stepDurationMs(steps[1], "2x"), 360);
+  assert.equal(game.stepDurationMs(steps[0], "2x"), 280);
+  assert.equal(game.PLAYBACK_DURATIONS.damage, 560);
 });

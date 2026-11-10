@@ -52,6 +52,14 @@ export type BattleEvent = {
   actorKey?: string;
   targetKey?: string;
   amount?: number;
+  /** 表示用メタ（計算には使わない）: このイベント適用直後の対象のHP。クライアントの逐次再生が中間状態を再構成するために使う。 */
+  hpAfter?: number;
+  /** 表示用メタ: このイベント適用直後の対象のシールド残量。 */
+  shieldAfter?: number;
+  /** 表示用メタ（damage のみ）: 属性相性倍率（1.25 / 1.0 / 0.8）。 */
+  affinity?: number;
+  /** 表示用メタ（status の付与イベントのみ）: 付与した状態の種類。 */
+  statusKind?: BattleStatusKind;
 };
 export type BattleState = {
   id: string;
@@ -207,10 +215,11 @@ function dealDamage(state: BattleState, attacker: BattleActor, target: BattleAct
       (target.trait.kind === "guard" ? 0.9 : 1),
   );
   damage = Math.max(1, damage);
+  const affinity = affinityMultiplier(attacker.element, target.element);
   const absorbed = Math.min(target.shield, damage);
   if (absorbed > 0) {
     target.shield -= absorbed;
-    pushLog(state, { type: "shield", text: `${target.name}のシールドが ${absorbed} を吸収。`, actorKey: attacker.key, targetKey: target.key, amount: absorbed });
+    pushLog(state, { type: "shield", text: `${target.name}のシールドが ${absorbed} を吸収。`, actorKey: attacker.key, targetKey: target.key, amount: absorbed, shieldAfter: target.shield });
   }
   const dealt = damage - absorbed;
   target.hp -= dealt;
@@ -220,13 +229,15 @@ function dealDamage(state: BattleState, attacker: BattleActor, target: BattleAct
     actorKey: attacker.key,
     targetKey: target.key,
     amount: dealt,
+    hpAfter: Math.max(0, target.hp),
+    affinity,
   });
   markDead(state, target);
   // 特性 thorns: 生き残った被弾者が与ダメの20%を返す
   if (dealt > 0 && target.alive && target.trait.kind === "thorns" && attacker.alive) {
     const reflected = Math.max(1, Math.floor(dealt * 0.2));
     attacker.hp -= reflected;
-    pushLog(state, { type: "trait", text: `${target.name}の特性で ${attacker.name}に ${reflected} 反射。`, actorKey: target.key, targetKey: attacker.key, amount: reflected });
+    pushLog(state, { type: "trait", text: `${target.name}の特性で ${attacker.name}に ${reflected} 反射。`, actorKey: target.key, targetKey: attacker.key, amount: reflected, hpAfter: Math.max(0, attacker.hp) });
     markDead(state, attacker);
   }
   return dealt;
@@ -235,7 +246,7 @@ function dealDamage(state: BattleState, attacker: BattleActor, target: BattleAct
 function healActor(state: BattleState, source: BattleActor, target: BattleActor, amount: number): number {
   const healed = Math.max(0, Math.min(amount, target.maxHp - target.hp));
   target.hp += healed;
-  pushLog(state, { type: "heal", text: `${target.name}のHPが ${healed} 回復。`, actorKey: source.key, targetKey: target.key, amount: healed });
+  pushLog(state, { type: "heal", text: `${target.name}のHPが ${healed} 回復。`, actorKey: source.key, targetKey: target.key, amount: healed, hpAfter: target.hp });
   return healed;
 }
 
@@ -299,13 +310,13 @@ function executeAction(state: BattleState, actor: BattleActor, action: PlayerAct
   if (skill.kind === "shield") {
     const target = resolveTarget(state, actor, action.targetKey, "ally");
     target.shield += skill.power;
-    pushLog(state, { type: "shield", text: `${actor.name}の「${skill.name}」。${target.name}にシールド ${skill.power}。`, actorKey: actor.key, targetKey: target.key, amount: skill.power });
+    pushLog(state, { type: "shield", text: `${actor.name}の「${skill.name}」。${target.name}にシールド ${skill.power}。`, actorKey: actor.key, targetKey: target.key, amount: skill.power, shieldAfter: target.shield });
     return;
   }
   if (skill.kind === "overdrive") {
     // 自分への強化技。対象指定（クライアントの敵タップ等）は無視して自分に付与する
     addStatus(actor, "overdrive", 2);
-    pushLog(state, { type: "status", text: `${actor.name}の「${skill.name}」。攻撃力が上がった。`, actorKey: actor.key, targetKey: actor.key });
+    pushLog(state, { type: "status", text: `${actor.name}の「${skill.name}」。攻撃力が上がった。`, actorKey: actor.key, targetKey: actor.key, statusKind: "overdrive" });
     return;
   }
   // 攻撃系（damage / burn / stun / guard_break / drain）
@@ -315,13 +326,13 @@ function executeAction(state: BattleState, actor: BattleActor, action: PlayerAct
   if (target.alive) {
     if (skill.kind === "burn") {
       addStatus(target, "burn", 2);
-      pushLog(state, { type: "status", text: `${target.name}はやけどを負った。`, actorKey: actor.key, targetKey: target.key });
+      pushLog(state, { type: "status", text: `${target.name}はやけどを負った。`, actorKey: actor.key, targetKey: target.key, statusKind: "burn" });
     } else if (skill.kind === "stun") {
       addStatus(target, "stun", 1);
-      pushLog(state, { type: "status", text: `${target.name}はスタンした。`, actorKey: actor.key, targetKey: target.key });
+      pushLog(state, { type: "status", text: `${target.name}はスタンした。`, actorKey: actor.key, targetKey: target.key, statusKind: "stun" });
     } else if (skill.kind === "guard_break") {
       addStatus(target, "guard_break", 2);
-      pushLog(state, { type: "status", text: `${target.name}の防御が崩れた。`, actorKey: actor.key, targetKey: target.key });
+      pushLog(state, { type: "status", text: `${target.name}の防御が崩れた。`, actorKey: actor.key, targetKey: target.key, statusKind: "guard_break" });
     }
   }
   if (skill.kind === "drain" && dealt > 0 && actor.alive) {
@@ -338,7 +349,7 @@ function processTurnStart(state: BattleState, actor: BattleActor): boolean {
   if (hasStatus(actor, "burn")) {
     const burnDamage = Math.max(1, Math.floor(actor.maxHp * 0.06));
     actor.hp -= burnDamage;
-    pushLog(state, { type: "status", text: `${actor.name}はやけどで ${burnDamage} ダメージ。`, targetKey: actor.key, amount: burnDamage });
+    pushLog(state, { type: "status", text: `${actor.name}はやけどで ${burnDamage} ダメージ。`, targetKey: actor.key, amount: burnDamage, hpAfter: Math.max(0, actor.hp), statusKind: "burn" });
     markDead(state, actor);
     if (!actor.alive) return true;
   }
@@ -400,7 +411,7 @@ function advanceToPlayerTurn(state: BattleState): void {
     }
     if (checkFinish(state)) return;
     if (hasStatus(actor, "stun")) {
-      pushLog(state, { type: "status", text: `${actor.name}はスタンで動けない。`, actorKey: actor.key });
+      pushLog(state, { type: "status", text: `${actor.name}はスタンで動けない。`, actorKey: actor.key, statusKind: "stun" });
       processTurnEnd(actor);
       state.turnCount += 1;
       state.queuePos += 1;

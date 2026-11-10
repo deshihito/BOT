@@ -14,6 +14,7 @@ import {
   unlockAudio,
 } from "@/lib/lll-sound";
 import LllCard, { TIER_LABEL, type LllCardView } from "./LllCard";
+import { buildPlaybackSteps, stepDurationMs, type PlaybackStep } from "@/lib/lll-playback";
 
 /* --- サウンド（公開関数の型は並行実装側に合わせ、ここでは薄く包む） --- */
 type SoundSettings = { bgm: boolean; se: boolean };
@@ -78,7 +79,17 @@ type BattleActor = {
   defending: boolean;
   alive: boolean;
 };
-type BattleLog = { type: string; text: string; actorKey?: string; targetKey?: string; amount?: number };
+type BattleLog = {
+  type: string;
+  text: string;
+  actorKey?: string;
+  targetKey?: string;
+  amount?: number;
+  hpAfter?: number;
+  shieldAfter?: number;
+  affinity?: number;
+  statusKind?: string;
+};
 type Battle = {
   id: string;
   tierIndex: number;
@@ -278,7 +289,10 @@ async function processImage(file: File): Promise<{ imageDataUrl: string; feature
 
 type Tab = "scout" | "binder" | "arena";
 type PendingSkill = { skill: 0 | 1 | "basic" | "defend"; targetSide: "player" | "cpu" | null; label: string };
-type FloatNum = { id: number; targetKey: string; text: string; heal: boolean };
+type FloatNum = { id: number; targetKey: string; text: string; kind: string };
+type SpeedMode = "1x" | "2x" | "instant";
+const SPEED_KEY = "lll-battle-speed";
+const TUTORIAL_KEY = "lll-tutorial-battle";
 
 export default function LllClient() {
   const [token, setToken] = useState<string | null>(null);
@@ -311,12 +325,26 @@ export default function LllClient() {
   const [floats, setFloats] = useState<FloatNum[]>([]);
   const battleRef = useRef<Battle | null>(null);
   battleRef.current = battle;
-  const battleStartRef = useRef<{ shards: number; lumen: number } | null>(null);
+  const battleStartRef = useRef<{ shards: number; lumen: number; clearedBefore: boolean } | null>(null);
   const finishSeRef = useRef<string | null>(null);
   const floatIdRef = useRef(0);
   const battleTrackRef = useRef<{ actorKey: string; startX: number; startY: number; active: boolean } | null>(null);
   const [battleDrag, setBattleDrag] = useState<{ actorKey: string; x: number; y: number } | null>(null);
   const suppressClickRef = useRef(false);
+  // 逐次再生（1イベント=1拍）。displayBattle が表示中の間は入力をロックする
+  const [displayBattle, setDisplayBattle] = useState<Battle | null>(null);
+  const [speed, setSpeed] = useState<SpeedMode>("1x");
+  const speedRef = useRef<SpeedMode>("1x");
+  const playbackRef = useRef<{ steps: PlaybackStep[]; index: number; next: Battle; nextProfile: Profile | null; prevLogLength: number } | null>(null);
+  const playbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [playbackInfo, setPlaybackInfo] = useState<{ index: number; total: number; actorKey: string | null } | null>(null);
+  const [lungeKey, setLungeKey] = useState<string | null>(null);
+  const [shieldFlashKeys, setShieldFlashKeys] = useState<Record<string, true>>({});
+  // 初回ガイド戦（戦績0の Tier0 初戦、最初の3手だけ）
+  const [guideBattle, setGuideBattle] = useState(false);
+  const guideBattleRef = useRef(false);
+  const [guideTurnsUsed, setGuideTurnsUsed] = useState(0);
+  const guideTurnsUsedRef = useRef(0);
 
   const postJson = useCallback(async (url: string, body: unknown): Promise<{ res: Response; data: Record<string, unknown> }> => {
     const res = await fetch(url, {
@@ -371,6 +399,37 @@ export default function LllClient() {
     window.addEventListener("pointerdown", unlock);
     return () => window.removeEventListener("pointerdown", unlock);
   }, []);
+
+  /* --- 逐次再生タイマーの後片付け --- */
+  useEffect(() => {
+    return () => {
+      if (playbackTimerRef.current) clearTimeout(playbackTimerRef.current);
+    };
+  }, []);
+
+  /* --- 再生速度の読み込み --- */
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(SPEED_KEY);
+      if (raw === "2x" || raw === "instant" || raw === "1x") {
+        setSpeed(raw);
+        speedRef.current = raw;
+      }
+    } catch {
+      // 既定の1倍のまま
+    }
+  }, []);
+
+  const changeSpeed = (next: SpeedMode) => {
+    setSpeed(next);
+    speedRef.current = next;
+    try {
+      localStorage.setItem(SPEED_KEY, next);
+    } catch {
+      // 保存できなくても今回の対戦では有効
+    }
+    playSe("tap");
+  };
 
   const toggleSound = (key: keyof SoundSettings) => {
     unlockAudio();
@@ -600,7 +659,20 @@ export default function LllClient() {
     setBusy(true);
     setError("");
     setPending(null);
-    battleStartRef.current = { shards: profile.shards, lumen: profile.lumen };
+    stopPlayback();
+    battleStartRef.current = { shards: profile.shards, lumen: profile.lumen, clearedBefore: profile.clearedTiers.includes(tierIndex) };
+    // ガイド戦の判定: 戦績が全て0で、まだガイドを終えていないプレイヤーの Tier0 初戦だけ
+    let tutorialDone = false;
+    try {
+      tutorialDone = localStorage.getItem(TUTORIAL_KEY) === "done";
+    } catch {
+      // 読めなければガイドなし扱いにしない（戦績0の判定が残る）
+    }
+    const isGuide = tierIndex === 0 && profile.wins + profile.losses + profile.draws === 0 && !tutorialDone;
+    guideBattleRef.current = isGuide;
+    setGuideBattle(isGuide);
+    guideTurnsUsedRef.current = 0;
+    setGuideTurnsUsed(0);
     try {
       const { res, data } = await postJson("/api/lll/battle/start", { token, tierIndex });
       if (!res.ok) {
@@ -618,7 +690,135 @@ export default function LllClient() {
     }
   };
 
-  /** 新しいバトル状態に対して被弾シェイクとダメージ数字を付ける。 */
+  /* --- 逐次再生（1イベント = 1拍） --- */
+
+  const clearPlaybackTimer = () => {
+    if (playbackTimerRef.current) {
+      clearTimeout(playbackTimerRef.current);
+      playbackTimerRef.current = null;
+    }
+  };
+
+  const stopPlayback = () => {
+    clearPlaybackTimer();
+    playbackRef.current = null;
+    setPlaybackInfo(null);
+    setDisplayBattle(null);
+    setLungeKey(null);
+  };
+
+  /** 再生を終え、サーバーの最終状態と報酬をそのまま反映する。 */
+  const finishPlayback = useCallback(() => {
+    const pb = playbackRef.current;
+    clearPlaybackTimer();
+    playbackRef.current = null;
+    setPlaybackInfo(null);
+    setDisplayBattle(null);
+    setLungeKey(null);
+    if (!pb) return;
+    setBattle(pb.next);
+    if (pb.nextProfile) setProfile(pb.nextProfile);
+  }, []);
+
+  /** step を1拍ぶん表示する（数字・シェイク・SE・振動はこのタイミングで発火）。 */
+  const showPlaybackStep = useCallback((index: number) => {
+    const pb = playbackRef.current;
+    if (!pb) return;
+    if (index >= pb.steps.length) {
+      finishPlayback();
+      return;
+    }
+    const step = pb.steps[index];
+    pb.index = index;
+    setPlaybackInfo({ index, total: pb.steps.length, actorKey: step.event.actorKey ?? step.event.targetKey ?? null });
+    // 表示状態: アクターはステップ適用後、ログはこのイベントまで、phase は再生中は battle 固定
+    setDisplayBattle((prevDisplay) => {
+      const base = prevDisplay ?? battleRef.current;
+      if (!base) return base;
+      const byKey = new Map(step.actors.map((a) => [a.key, a]));
+      return {
+        ...pb.next,
+        phase: "battle",
+        round: base.round,
+        queue: base.queue,
+        queuePos: base.queuePos,
+        winner: null,
+        actors: pb.next.actors.map((nextActor) => {
+          const mid = byKey.get(nextActor.key);
+          if (!mid) return nextActor;
+          return {
+            ...nextActor,
+            hp: mid.hp,
+            shield: mid.shield,
+            alive: mid.alive,
+            statuses: mid.statuses.map((s) => ({ ...s })),
+            // CD と防御表示はこのイベント列では追わない（最終状態で確定する）
+            cooldowns: (base.actors.find((a) => a.key === nextActor.key)?.cooldowns ?? nextActor.cooldowns) as number[],
+            defending: base.actors.find((a) => a.key === nextActor.key)?.defending ?? nextActor.defending,
+          };
+        }),
+        log: [...(battleRef.current?.log ?? []), ...pb.next.log.slice(pb.prevLogLength, pb.prevLogLength + index + 1)],
+      };
+    });
+    // 攻撃側の前進（info の技宣言と damage の着弾で出す）
+    const attackerKey = step.event.actorKey;
+    if (attackerKey && (step.event.type === "damage" || step.event.type === "info")) {
+      setLungeKey(attackerKey);
+      setTimeout(() => setLungeKey((k) => (k === attackerKey ? null : k)), 260);
+    }
+    // 被弾シェイク
+    if (step.float && (step.event.type === "damage" || step.event.type === "trait" || step.event.type === "status") && step.float.targetKey) {
+      const key = step.float.targetKey;
+      setHitKeys({ [key]: true });
+      setTimeout(() => setHitKeys((h) => (h[key] ? {} : h)), 480);
+    }
+    // シールド/防御バッジの点滅
+    if (step.shieldFlashKey) {
+      const key = step.shieldFlashKey;
+      setShieldFlashKeys({ [key]: true });
+      setTimeout(() => setShieldFlashKeys((h) => (h[key] ? {} : h)), 380);
+    }
+    // フロート（数字・状態名・撃破）
+    if (step.float) {
+      floatIdRef.current += 1;
+      const id = floatIdRef.current;
+      const entry: FloatNum = { id, targetKey: step.float.targetKey, text: step.float.text, kind: step.float.kind };
+      setFloats((f) => [...f.slice(-8), entry]);
+      setTimeout(() => setFloats((f) => f.filter((x) => x.id !== id)), 1100);
+    }
+    if (step.se) playSe(step.se);
+    if (step.vibrate) {
+      try {
+        navigator.vibrate?.(step.vibrate);
+      } catch {
+        // 振動できない環境では何もしない
+      }
+    }
+    const dur = speedRef.current === "2x" ? stepDurationMs(step, "2x") : step.durationMs;
+    playbackTimerRef.current = setTimeout(() => showPlaybackStep(index + 1), dur);
+  }, [finishPlayback]);
+
+  /** 盤面タップ: 現在の拍を即時完了して次の拍へ進める。 */
+  const advancePlayback = () => {
+    const pb = playbackRef.current;
+    if (!pb) return;
+    clearPlaybackTimer();
+    showPlaybackStep(pb.index + 1);
+  };
+
+  /** 前状態→次状態をイベント単位で再生する。再生しない場合は false。 */
+  const startPlayback = (prev: Battle, next: Battle, nextProfile: Profile | null): boolean => {
+    if (speedRef.current === "instant") return false;
+    const newEvents = next.log.slice(prev.log.length);
+    if (newEvents.length < 2) return false;
+    const steps = buildPlaybackSteps(prev.actors, newEvents);
+    if (steps.length < 2) return false;
+    playbackRef.current = { steps, index: 0, next, nextProfile, prevLogLength: prev.log.length };
+    showPlaybackStep(0);
+    return true;
+  };
+
+  /** 新しいバトル状態に対して被弾シェイクとダメージ数字を付ける（一斉表示モード用）。 */
   const applyBattleFx = (prev: Battle | null, next: Battle) => {
     if (!prev) return;
     const hits: Record<string, true> = {};
@@ -634,7 +834,7 @@ export default function LllClient() {
           id: floatIdRef.current,
           targetKey: actor.key,
           text: diff < 0 ? `-${-diff}` : `+${diff}`,
-          heal: diff > 0,
+          kind: diff > 0 ? "heal" : "damage",
         });
       }
     }
@@ -651,11 +851,14 @@ export default function LllClient() {
 
   const sendAction = async (action: { skill: 0 | 1 | "basic" | "defend"; targetKey?: string }) => {
     const current = battleRef.current;
-    if (!token || !current || busy || current.phase !== "battle") return;
+    if (!token || !current || busy || playbackRef.current || current.phase !== "battle") return;
     setBusy(true);
     setError("");
     setPending(null);
-    playSe("hit");
+    if (guideBattleRef.current) {
+      guideTurnsUsedRef.current += 1;
+      setGuideTurnsUsed(guideTurnsUsedRef.current);
+    }
     try {
       // 契約フィールド（skill/targetKey）に加え、サーバー検証が要求する type も併記する
       const actionPayload = {
@@ -669,9 +872,14 @@ export default function LllClient() {
         return;
       }
       const next = data.battle as Battle;
-      applyBattleFx(current, next);
-      setBattle(next);
-      if (data.profile) setProfile(data.profile as Profile);
+      const nextProfile = (data.profile as Profile | undefined) ?? null;
+      // 逐次再生が始まったら、最終状態と報酬は再生完了時に反映する
+      if (!startPlayback(current, next, nextProfile)) {
+        playSe("hit");
+        applyBattleFx(current, next);
+        setBattle(next);
+        if (nextProfile) setProfile(nextProfile);
+      }
     } catch {
       setError("通信に失敗しました。");
     } finally {
@@ -684,7 +892,7 @@ export default function LllClient() {
   const isPlayerTurn = currentActor?.side === "player";
 
   const chooseSkill = (skill: 0 | 1 | "basic" | "defend") => {
-    if (!currentActor || !isPlayerTurn || busy) return;
+    if (!currentActor || !isPlayerTurn || busy || playbackRef.current) return;
     playSe("tap");
     if (skill === "defend") {
       void sendAction({ skill: "defend" });
@@ -705,7 +913,7 @@ export default function LllClient() {
 
   const tapActor = (actor: BattleActor) => {
     if (suppressClickRef.current) return;
-    if (!pending || !isPlayerTurn || busy || !actor.alive) return;
+    if (!pending || !isPlayerTurn || busy || playbackRef.current || !actor.alive) return;
     if (actor.side !== pending.targetSide) return;
     void sendAction({ skill: pending.skill, ...(pending.skill === "defend" ? {} : { targetKey: actor.key }) });
   };
@@ -713,7 +921,7 @@ export default function LllClient() {
   // 現在アクターを敵へドラッグ → 通常攻撃（タップ列の代替導線）
   const battleDragHandlers = (actor: BattleActor) => ({
     onPointerDown: (e: React.PointerEvent) => {
-      if (!isPlayerTurn || busy || actor.key !== currentActor?.key || e.button > 0) return;
+      if (!isPlayerTurn || busy || playbackRef.current || actor.key !== currentActor?.key || e.button > 0) return;
       battleTrackRef.current = { actorKey: actor.key, startX: e.clientX, startY: e.clientY, active: false };
       try {
         (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
@@ -759,13 +967,46 @@ export default function LllClient() {
     if (finishSeRef.current === battle.id) return;
     finishSeRef.current = battle.id;
     playSe(battle.winner === "player" ? "win" : battle.winner === "draw" ? "click" : "lose");
+    if (guideBattleRef.current) {
+      guideBattleRef.current = false;
+      try {
+        localStorage.setItem(TUTORIAL_KEY, "done");
+      } catch {
+        // 保存できなくても戦績が付くため、次回は戦績判定でガイド対象から外れる
+      }
+    }
   }, [battle]);
 
   /* --- 描画部品 --- */
   const detailCard = detailCardId ? profile?.cards.find((c) => c.id === detailCardId) ?? null : null;
 
+  // ガイド戦の推奨手（最初の3手だけ）: 回復が要る味方がいれば回復技、
+  // なければ使用可能な最大威力の攻撃技、どちらも無ければ通常攻撃。
+  const guideActive = guideBattle && guideTurnsUsed < 3 && !displayBattle;
+  const guideRecommendation: { skill: 0 | 1 | "basic"; targetKey: string | null } | null = (() => {
+    if (!guideActive || !currentActor || !battle || battle.phase !== "battle") return null;
+    const allies = battle.actors.filter((a) => a.side === "player" && a.alive);
+    const enemies = battle.actors.filter((a) => a.side === "cpu" && a.alive);
+    const lowestEnemy = enemies.slice().sort((a, b) => a.hp - b.hp || a.key.localeCompare(b.key))[0] ?? null;
+    for (const idx of [0, 1] as const) {
+      const skill = currentActor.skills[idx];
+      if (!skill || skill.kind !== "heal" || (currentActor.cooldowns[idx] ?? 0) > 0) continue;
+      const wounded = allies.filter((a) => a.hp / a.maxHp < 0.5).sort((a, b) => a.hp / a.maxHp - b.hp / b.maxHp || a.key.localeCompare(b.key))[0];
+      if (wounded) return { skill: idx, targetKey: wounded.key };
+    }
+    let best: { skill: 0 | 1 | "basic"; power: number } = { skill: "basic", power: 40 };
+    for (const idx of [0, 1] as const) {
+      const skill = currentActor.skills[idx];
+      if (!skill || (currentActor.cooldowns[idx] ?? 0) > 0) continue;
+      if (!["damage", "burn", "stun", "guard_break", "drain"].includes(skill.kind)) continue;
+      if (skill.power > best.power) best = { skill: idx, power: skill.power };
+    }
+    return { skill: best.skill, targetKey: lowestEnemy?.key ?? null };
+  })();
+
   const renderActor = (actor: BattleActor) => {
-    const targetable = !!pending && pending.targetSide === actor.side && actor.alive && isPlayerTurn;
+    const targetable = !!pending && pending.targetSide === actor.side && actor.alive && isPlayerTurn && !displayBattle;
+    const guideTarget = !!pending && guideRecommendation?.skill === pending.skill && guideRecommendation?.targetKey === actor.key;
     return (
       <div key={actor.key} className="lll-actor-wrap">
         <LllCard
@@ -775,6 +1016,9 @@ export default function LllClient() {
           current={currentActor?.key === actor.key && battle?.phase === "battle"}
           targetable={targetable}
           hit={!!hitKeys[actor.key]}
+          guide={guideTarget}
+          lunge={lungeKey === actor.key ? (actor.side === "player" ? "up" : "down") : null}
+          shieldFlash={!!shieldFlashKeys[actor.key]}
           dimmed={!actor.alive}
           onClick={() => tapActor(actor)}
           draggableClass={actor.side === "player"}
@@ -783,7 +1027,7 @@ export default function LllClient() {
         {floats
           .filter((f) => f.targetKey === actor.key)
           .map((f) => (
-            <span key={f.id} className={`lll-dmg${f.heal ? " lll-dmg-heal" : ""}`} aria-hidden="true">
+            <span key={f.id} className={`lll-dmg lll-dmg-${f.kind}`} aria-hidden="true">
               {f.text}
             </span>
           ))}
@@ -808,6 +1052,35 @@ export default function LllClient() {
     .map((id) => profile.cards.find((c) => c.id === id))
     .filter((c): c is CardT => !!c);
   const scoutCue = profile.cards.length <= 3;
+  const shownBattle = displayBattle ?? battle;
+  // 結果画面の戦績3項目（バトルログのイベント集計）
+  const battleRecap = (() => {
+    if (!battle || battle.phase !== "finished") return null;
+    let totalDamage = 0;
+    let maxHit = 0;
+    let maxHitLabel = "";
+    let lastSkillName = "通常攻撃";
+    const perActor = new Map<string, number>();
+    for (const entry of battle.log) {
+      const skillMatch = entry.text.match(/「(.+?)」/);
+      if (entry.type === "info" && skillMatch) lastSkillName = skillMatch[1];
+      if (entry.type === "info" && entry.text.includes("通常攻撃")) lastSkillName = "通常攻撃";
+      if ((entry.type === "damage" || entry.type === "trait") && entry.actorKey?.startsWith("player_") && typeof entry.amount === "number") {
+        totalDamage += entry.amount;
+        perActor.set(entry.actorKey, (perActor.get(entry.actorKey) ?? 0) + entry.amount);
+        if (entry.type === "damage" && entry.amount > maxHit) {
+          maxHit = entry.amount;
+          maxHitLabel = lastSkillName;
+        }
+      }
+    }
+    let mvp: { name: string; total: number } | null = null;
+    for (const [key, total] of perActor) {
+      const actor = battle.actors.find((a) => a.key === key);
+      if (actor && (!mvp || total > mvp.total)) mvp = { name: actor.name, total };
+    }
+    return { totalDamage, maxHit, maxHitLabel, mvp };
+  })();
 
   return (
     <div className="lll-table">
@@ -1092,21 +1365,57 @@ export default function LllClient() {
               </div>
             </>
           ) : (
-            <div className="lll-battle">
+            <div
+              className="lll-battle"
+              onClick={() => {
+                if (displayBattle) advancePlayback();
+              }}
+            >
               <div className="lll-battle-side-label">
                 <span className="lll-chip lll-chip-enemy">CPU ・ {TIERS[battle.tierIndex]?.name ?? ""}</span>
+                <div className="lll-speedbar" role="group" aria-label="再生速度">
+                  {(["1x", "2x", "instant"] as SpeedMode[]).map((mode) => (
+                    <button
+                      key={mode}
+                      type="button"
+                      className={`lll-snd-btn${speed === mode ? " lll-snd-on" : ""}`}
+                      aria-pressed={speed === mode}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        changeSpeed(mode);
+                      }}
+                    >
+                      {mode === "instant" ? "一斉" : mode}
+                    </button>
+                  ))}
+                </div>
               </div>
-              <div className="lll-battle-row">{battle.actors.filter((a) => a.side === "cpu").map(renderActor)}</div>
+              <div className="lll-battle-row">{(shownBattle ?? battle).actors.filter((a) => a.side === "cpu").map(renderActor)}</div>
+              <div className="lll-queue" aria-label="行動順">
+                {(shownBattle ?? battle).queue.map((key, i) => {
+                  const actor = (shownBattle ?? battle).actors.find((a) => a.key === key);
+                  if (!actor) return null;
+                  const nowKey = displayBattle
+                    ? (playbackInfo?.actorKey ?? key)
+                    : (shownBattle ?? battle).queue[(shownBattle ?? battle).queuePos];
+                  const done = !displayBattle && i < (shownBattle ?? battle).queuePos;
+                  return (
+                    <span key={`${key}-${i}`} className={`lll-queue-chip${key === nowKey ? " lll-queue-chip-now" : ""}${done ? " lll-queue-chip-done" : ""}${actor.alive ? "" : " lll-queue-chip-dead"}`}>
+                      {actor.name}
+                    </span>
+                  );
+                })}
+              </div>
               <div className="lll-logstrip" aria-live="polite">
-                <span className="lll-chip">R{battle.round}</span>
-                {[...battle.log].slice(-3).reverse().map((entry, i) => (
-                  <p key={`${battle.log.length}-${i}`} className={`lll-logline${i === 0 ? " lll-logline-latest" : ""}`}>
+                <span className="lll-chip">R{(shownBattle ?? battle).round}</span>
+                {[...(shownBattle ?? battle).log].slice(-3).reverse().map((entry, i) => (
+                  <p key={`${(shownBattle ?? battle).log.length}-${i}`} className={`lll-logline${i === 0 ? " lll-logline-latest" : ""}`}>
                     {entry.text}
                   </p>
                 ))}
-                {battle.log.length === 0 && <p className="lll-logline">対戦開始</p>}
+                {(shownBattle ?? battle).log.length === 0 && <p className="lll-logline">対戦開始</p>}
               </div>
-              <div className="lll-battle-row">{battle.actors.filter((a) => a.side === "player").map(renderActor)}</div>
+              <div className="lll-battle-row">{(shownBattle ?? battle).actors.filter((a) => a.side === "player").map(renderActor)}</div>
 
               {battle.phase === "finished" ? (
                 <div className="lll-result">
@@ -1123,10 +1432,28 @@ export default function LllClient() {
                       )}
                     </div>
                   )}
+                  {battleRecap && battleRecap.totalDamage > 0 && (
+                    <div className="lll-currencies" aria-label="戦績">
+                      <span className="lll-chip">与ダメージ {battleRecap.totalDamage}</span>
+                      {battleRecap.maxHit > 0 && <span className="lll-chip">最大の一撃 {battleRecap.maxHitLabel} {battleRecap.maxHit}</span>}
+                      {battleRecap.mvp && <span className="lll-chip">最もダメージを出したカード {battleRecap.mvp.name}（{battleRecap.mvp.total}）</span>}
+                    </div>
+                  )}
                   <div className="lll-actions">
-                    <button type="button" className="lll-btn lll-btn-primary" disabled={busy} onClick={() => void startBattle(battle.tierIndex)}>
-                      もう一度
-                    </button>
+                    {battle.winner === "player" && battleStartRef.current && !battleStartRef.current.clearedBefore && battle.tierIndex < TIERS.length - 1 ? (
+                      <>
+                        <button type="button" className="lll-btn lll-btn-primary" disabled={busy} onClick={() => void startBattle(battle.tierIndex + 1)}>
+                          次のティア（{TIERS[battle.tierIndex + 1].name}）へ
+                        </button>
+                        <button type="button" className="lll-btn" disabled={busy} onClick={() => void startBattle(battle.tierIndex)}>
+                          もう一度
+                        </button>
+                      </>
+                    ) : (
+                      <button type="button" className="lll-btn lll-btn-primary" disabled={busy} onClick={() => void startBattle(battle.tierIndex)}>
+                        {guideBattle && battle.winner === "cpu" ? "もう一度（同じ相手）" : "もう一度"}
+                      </button>
+                    )}
                     <button
                       type="button"
                       className="lll-btn"
@@ -1140,12 +1467,30 @@ export default function LllClient() {
                     </button>
                   </div>
                 </div>
+              ) : displayBattle ? (
+                <div className="lll-actionbar lll-playbackbar">
+                  <span className="lll-chip">
+                    再生中 {playbackInfo ? playbackInfo.index + 1 : 1}/{playbackInfo?.total ?? ""}
+                  </span>
+                  <span className="lll-chip">タップで次の拍へ</span>
+                  <button
+                    type="button"
+                    className="lll-btn"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      finishPlayback();
+                    }}
+                  >
+                    全表示
+                  </button>
+                </div>
               ) : isPlayerTurn && currentActor ? (
                 <div className="lll-actionbar">
                   <span className="lll-actionbar-label">{currentActor.name} の行動</span>
+                  {guideActive && <span className="lll-chip lll-chip-picked">ガイド中 あと{3 - guideTurnsUsed}手</span>}
                   <button
                     type="button"
-                    className={`lll-btn${pending?.skill === "basic" ? " lll-btn-primary" : ""}`}
+                    className={`lll-btn${pending?.skill === "basic" ? " lll-btn-primary" : ""}${guideRecommendation?.skill === "basic" ? " lll-btn-guide" : ""}`}
                     disabled={busy}
                     onClick={() => chooseSkill("basic")}
                   >
@@ -1159,7 +1504,7 @@ export default function LllClient() {
                       <button
                         key={idx}
                         type="button"
-                        className={`lll-btn${pending?.skill === idx ? " lll-btn-primary" : ""}`}
+                        className={`lll-btn${pending?.skill === idx ? " lll-btn-primary" : ""}${guideRecommendation?.skill === idx ? " lll-btn-guide" : ""}`}
                         disabled={busy || cd > 0}
                         onClick={() => chooseSkill(idx)}
                         title={skill.description}

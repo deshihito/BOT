@@ -15,7 +15,11 @@ export type LllSeName =
   | "lose"
   | "levelup"
   | "error"
-  | "coin";
+  | "coin"
+  | "status"
+  | "ko"
+  | "guard"
+  | "break";
 
 export type SoundSettings = { bgm: boolean; se: boolean };
 
@@ -194,6 +198,25 @@ const SE_RECIPES: Record<LllSeName, (t: number) => void> = {
   coin: (t) => {
     tone({ freq: 2093, dur: 0.09, type: "sine", gain: 0.14, at: t });
     tone({ freq: 2637, dur: 0.12, type: "sine", gain: 0.12, at: t + 0.055 });
+  },
+  // バトル逐次再生用（状態付与・撃破・シールド）。着弾の hit とは別系統の短い音にする
+  status: (t) => {
+    tone({ freq: 220, freqEnd: 110, dur: 0.18, type: "sawtooth", gain: 0.07, at: t });
+    tone({ freq: 440, dur: 0.1, type: "sine", gain: 0.08, at: t + 0.05 });
+  },
+  ko: (t) => {
+    noise({ dur: 0.25, gain: 0.2, at: t, filterFrom: 3000, filterTo: 200 });
+    tone({ freq: 320, freqEnd: 60, dur: 0.3, type: "triangle", gain: 0.2, at: t });
+    tone({ freq: 98, dur: 0.4, type: "sine", gain: 0.14, at: t + 0.05 });
+  },
+  guard: (t) => {
+    tone({ freq: 1568, dur: 0.07, type: "square", gain: 0.06, at: t });
+    tone({ freq: 2093, dur: 0.09, type: "sine", gain: 0.07, at: t + 0.05 });
+    noise({ dur: 0.05, gain: 0.06, at: t, filterFrom: 3200, filterTo: 2400 });
+  },
+  break: (t) => {
+    noise({ dur: 0.18, gain: 0.18, at: t, filterFrom: 4000, filterTo: 800 });
+    tone({ freq: 880, freqEnd: 220, dur: 0.16, type: "square", gain: 0.07, at: t });
   },
 };
 
