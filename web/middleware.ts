@@ -1,17 +1,20 @@
 import { NextRequest, NextResponse } from "next/server";
-
-// One Prompter 専用サブドメイン: ルートは /one-prompter をそのまま表示する
-const ONE_PROMPTER_HOST = "oneprompter.agobot.app";
+import { onePrompterRedirectUrl } from "@/lib/subdomain";
 
 export function middleware(request: NextRequest) {
   const { nextUrl } = request;
-  // Cloudflare Tunnel 経由では元のホストが X-Forwarded-Host に入る（api/coder/run と同じ見方）
-  const host =
-    request.headers.get("x-forwarded-host")?.split(",")[0]?.trim() || nextUrl.hostname;
-  if (nextUrl.pathname === "/" && host === ONE_PROMPTER_HOST) {
-    const prompterUrl = nextUrl.clone();
-    prompterUrl.pathname = "/one-prompter";
-    return NextResponse.rewrite(prompterUrl);
+  // One Prompter 専用サブドメイン: ルートは /one-prompter へ飛ばす。
+  // rewrite だと Tunnel 配下で外部プロキシ扱いになり 500 になるため redirect
+  // （経緯は lib/subdomain.ts の冒頭コメント参照）。
+  const prompterUrl = onePrompterRedirectUrl({
+    pathname: nextUrl.pathname,
+    // Cloudflare Tunnel 経由では元のホストが X-Forwarded-Host に入る（api/coder/run と同じ見方）
+    forwardedHost: request.headers.get("x-forwarded-host"),
+    hostname: nextUrl.hostname,
+    search: nextUrl.search,
+  });
+  if (prompterUrl) {
+    return NextResponse.redirect(prompterUrl);
   }
   if (
     nextUrl.pathname === "/" &&
