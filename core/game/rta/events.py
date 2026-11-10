@@ -88,6 +88,9 @@ class EventsMixin:
         （rank_all_*: 最速=全サービス中の最小、最遅=最大を1人1エントリ
         として数える）も同じ関数が返す（SQL マイグレーション適用後）。
         総合ぶんの保存は独立に試み、失敗しても通常の順位は残す。
+        関数が総合順位を返さない移行前の DB では、テーブル API から
+        同じ定義で算出するフォールバック（_combined_ranks_fallback）で
+        表示だけでも成立させる。
         失敗は呼び出し側で握る前提で、ここでは例外をそのまま上げる。
         """
         result = await self._call(lambda: self.db.rpc("get_bump_rta_record_ranks", {
@@ -97,6 +100,15 @@ class EventsMixin:
         if not rows:
             return None
         ranks = rows[0]
+        if not any(key in ranks for key in (
+                "rank_all_fast_local", "rank_all_fast_global",
+                "rank_all_slow_local", "rank_all_slow_global")):
+            fallback = await self._combined_ranks_fallback(gid, elapsed)
+            if fallback is not None:
+                logger.info(
+                    "bump_rta combined ranks computed bot-side "
+                    "(SQL migration not applied?): guild=%s", gid)
+                ranks = {**ranks, **fallback}
         await self._call(lambda: self.db.table("bump_rta_events").update({
             "rank_fast_local": ranks.get("rank_fast_local"),
             "rank_fast_global": ranks.get("rank_fast_global"),
@@ -121,6 +133,82 @@ class EventsMixin:
                     "bump_rta combined ranks save failed: guild=%s", gid,
                     exc_info=True)
         return ranks
+
+    async def _combined_ranks_fallback(self, gid, elapsed):
+        """総合順位をテーブル API から算出する（移行前の DB 向け）。
+
+        get_bump_rta_record_ranks が総合順位を返さない環境では、SQL と
+        同じ定義（ユーザー単位: 最速は全サービス中の最小、最遅は最大、
+        legacy は対象外）で bot 側から数える。全体順位は events を
+        elapsed 順に走査し、自分より上位の間だけ数えるため、記録が
+        上位ほど走査は短い。走査がページ上限に達して数え切れない
+        場合は、誤った順位を表示しないため None を返す。失敗時も
+        None（呼び出し側は総合なしで続行する）。
+        """
+        page_size = 1000
+        max_pages = 50
+        try:
+            records = await self._call(lambda: self.db.table(
+                "bump_rta_records").select("user_id,event_type,elapsed_ms").eq(
+                "guild_id", gid).limit(10000).execute())
+            worst = await self._call(lambda: self.db.table(
+                "bump_rta_worst_records").select(
+                "user_id,event_type,elapsed_ms").eq(
+                "guild_id", gid).limit(10000).execute())
+
+            def per_user(rows, pick):
+                best = {}
+                for row in rows or []:
+                    if row.get("event_type") == "legacy":
+                        continue
+                    uid = str(row.get("user_id"))
+                    value = int(row["elapsed_ms"])
+                    best[uid] = (pick(best[uid], value)
+                                 if uid in best else value)
+                return best.values()
+
+            fast_local = 1 + sum(
+                1 for v in per_user(records.data, min) if v < elapsed)
+            slow_local = 1 + sum(
+                1 for v in per_user(worst.data, max) if v > elapsed)
+
+            async def count_global(*, slowest):
+                users = set()
+                for page in range(max_pages):
+                    offset = page * page_size
+                    rows = await self._call(lambda: self.db.table(
+                        "bump_rta_events").select(
+                        "user_id,event_type,elapsed_ms").order(
+                        "elapsed_ms", desc=slowest).range(
+                        offset, offset + page_size - 1).execute())
+                    data = rows.data or []
+                    for row in data:
+                        value = int(row["elapsed_ms"])
+                        beyond = (value > elapsed) if slowest else (value < elapsed)
+                        if not beyond:
+                            # 並び順の境界（以降の行は全て対象外）
+                            return 1 + len(users)
+                        if row.get("event_type") != "legacy":
+                            users.add(str(row.get("user_id")))
+                    if len(data) < page_size:
+                        return 1 + len(users)
+                return None
+
+            fast_global = await count_global(slowest=False)
+            slow_global = await count_global(slowest=True)
+            if fast_global is None or slow_global is None:
+                return None
+            return {
+                "rank_all_fast_local": fast_local,
+                "rank_all_fast_global": fast_global,
+                "rank_all_slow_local": slow_local,
+                "rank_all_slow_global": slow_global,
+            }
+        except Exception:
+            logger.warning(
+                "bump_rta combined ranks fallback failed: guild=%s", gid,
+                exc_info=True)
+            return None
 
     async def _record_rta_event(self, message, kind, user_id, event_at):
         gid = str(message.guild.id)
