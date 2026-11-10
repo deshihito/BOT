@@ -48,6 +48,17 @@ export const WEB_GAMES: WebGame[] = [
     activity: true,
     players: "1〜4人（オンライン/CPU対戦）",
   },
+  {
+    slug: "lll",
+    title: "LLL",
+    description:
+      "画像をスカウトして世界に1枚のカードを作り、3枚チームで戦うカードゲーム。「想像を、切り札に。」あなたの画像が、属性・ステータス・技を持つ切り札になります。",
+    glyph: "✦",
+    accent: "#7c5cff",
+    status: "playable",
+    activity: true,
+    players: "1人（CPU対戦）",
+  },
 ];
 
 export function getWebGame(slug: string): WebGame | undefined {

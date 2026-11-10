@@ -4,6 +4,7 @@ import { notFound } from "next/navigation";
 import { WEB_GAMES, getWebGame } from "@/lib/games-catalog";
 import ChessClient from "../chess/ChessClient";
 import BalkuClient from "../balku/BalkuClient";
+import LllClient from "../lll/LllClient";
 
 export function generateStaticParams() {
   return WEB_GAMES.map((game) => ({ id: game.slug }));
@@ -28,6 +29,9 @@ export default async function WebGamePage({ params }: { params: Promise<{ id: st
   }
   if (game.slug === "balku" && game.status === "playable") {
     return <BalkuClient />;
+  }
+  if (game.slug === "lll" && game.status === "playable") {
+    return <LllClient />;
   }
   return (
     <>
