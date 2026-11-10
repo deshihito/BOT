@@ -17,11 +17,11 @@ export const runtime = "nodejs";
 export const maxDuration = 60;
 
 // One Prompter の LLM 化エンドポイント。
-// action=questions: 雑な一文から二択質問を生成する。任意フィールド count（3/5/8）で
+// action=questions: 「やりたいこと」から二択質問を生成する。任意フィールド count（3/5/8）で
 //   1ラウンド目の質問数を指定できる（不正値は既定の5に丸める）。
 //   任意フィールド answers（1ラウンド目の回答）を伴う場合は深掘り（2ラウンド目）:
 //   まだ曖昧な箇所だけを狙う追加質問を最大3問返す。深掘り不要なら { questions: [] }。
-// action=synthesize: 元の一文＋回答（1+2ラウンド合計で最大11件）から完成プロンプトを合成する
+// action=synthesize: 「やりたいこと」＋回答（1+2ラウンド合計で最大11件）から完成プロンプトを合成する
 // action=revise: 現在の完成プロンプトを修正指示（200字以内）どおりに書き直す
 // API キー未設定・LLM失敗時は { fallback: true } を返し、クライアントが
 // ルールベース版（lib/one-prompter.ts）でそのまま続行する。ページは壊れない。
