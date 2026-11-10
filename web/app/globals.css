@@ -298,6 +298,16 @@ body:has([data-activity-root]) > main { max-width:none; min-height:100svh; margi
 .op-option { min-height:64px; padding:16px; border:1px solid var(--line); border-radius:9px; background:#fff; color:var(--text); font-size:17px; font-weight:700; text-align:left; cursor:pointer; }
 .op-option:hover { background:var(--accent-soft); border-color:var(--accent); }
 .op-back { justify-self:start; padding:4px 0; border:0; background:transparent; color:var(--muted); cursor:pointer; font-size:14px; }
+.op-suboptions { display:flex; gap:10px; flex-wrap:wrap; }
+.op-suboption { padding:8px 14px; border:1px solid var(--line); border-radius:999px; background:#fff; color:var(--muted); font-size:14px; font-weight:700; cursor:pointer; }
+.op-suboption:hover { border-color:var(--accent); color:var(--text); }
+.op-suboption.selected { background:var(--accent); border-color:var(--accent); color:#fff; }
+.op-countrow { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+.op-countlabel { color:var(--muted); font-size:14px; font-weight:700; }
+.op-freeform { display:grid; gap:10px; }
+.op-primary.op-small { justify-self:start; padding:10px 16px; font-size:14px; }
+.op-edit { min-height:280px; background:var(--soft); font-size:14px; line-height:1.8; }
+.op-count .op-back { margin-left:10px; padding:0; }
 .op-summary { display:grid; gap:6px; margin:0; padding:0; list-style:none; }
 .op-summary li { display:flex; gap:10px; flex-wrap:wrap; padding:8px 12px; border:1px solid var(--line); border-radius:8px; background:var(--soft); font-size:14px; font-weight:700; }
 .op-summary li span { color:var(--muted); font-weight:400; }
