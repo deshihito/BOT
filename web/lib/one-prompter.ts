@@ -343,14 +343,16 @@ options: [
 ],
 };
 
+/** 質問数の既定値。generateQuestions の count はこれを既定として追随する。 */
 export const MAX_QUESTIONS = 5;
 
-export function generateQuestions(input: string): { category: PrompterCategory; questions: BinaryQuestion[]} {
+export function generateQuestions(input: string, count: number = MAX_QUESTIONS): { category: PrompterCategory; questions: BinaryQuestion[]} {
+const cap = Math.max(1, Math.floor(count) || MAX_QUESTIONS);
 const category = categorizeInput(input);
 const picked: BinaryQuestion[] = [];
 const usedSlots = new Set<QuestionSlot>();
 const push = (q: BinaryQuestion) => {
-if (picked.length >= MAX_QUESTIONS || usedSlots.has(q.slot)) return;
+if (picked.length >= cap || usedSlots.has(q.slot)) return;
 usedSlots.add(q.slot);
 picked.push(q);
 };
@@ -358,15 +360,21 @@ if (category!== "generic") {
 for (const q of CATEGORY_QUESTIONS[category]) push(q);
 }
 for (const q of UNIVERSAL_QUESTIONS) push(q);
-return { category, questions: picked.slice(0, MAX_QUESTIONS)};
+return { category, questions: picked.slice(0, cap)};
 }
 
 const ANTI_SLOP_RULES = [
-"「いかがでしたか」「〜と言えるでしょう」などの定型の締め文句を使わない",
-"「革新的」「画期的」など根拠のない誇張表現を使わない。具体的な事実で示す",
+"「いかがでしたか」「まとめると」「結論として」「〜と言えるでしょう」などの定型の締め文句や、「お役に立てれば幸いです」「ぜひ〜してみてください」などの定型の前置きを使わない",
+"「まず〜、次に〜、最後に〜」式の機械的な列挙をしない。文の長さとリズムに自然なばらつきを持たせる",
+"「しかしながら」「さらに」「また」「そのため」などの接続詞を連発しない",
+"依頼に不要な見出し・箇条書き・絵文字で装飾しない",
+"「革新的」「画期的」「寄り添う」「伴走」「深掘り」「解像度を上げる」「刺さる」など具体に落とせないバズワードや、根拠のない誇張表現を使わない。具体的な事実で示す",
+"「魅力」「価値」「可能性」「重要性」などの抽象語を、具体的な事実・数字・固有名詞なしに使わない",
+"両論併記で結論を逃げない。書き手の立場を1つに決めて書き切り、過剰なへりくだり・謝罪をしない",
+"全部を均等に扱わず、重要なものに分量と順序で優先順位を付ける",
 "前置き・言い訳・自己言及（「以下に示します」等）を入れず、成果物から始める",
 "情報が足りない部分は無難な一般論で埋めず、その旨を明示するか、最も妥当な前提を1つ置いて明示する",
-"同じ内容の言い換え繰り返しで分量を稼がない",
+"同じ内容の言い換え繰り返しで分量を稼がず、締めで内容を焼き直した要約をしない",
 ];
 
 export function buildPrompt(input: string, category: PrompterCategory, answers: PrompterAnswer[]): string {
@@ -389,6 +397,7 @@ for (const rule of ANTI_SLOP_RULES) {
 lines.push(`- ${rule}`);
 }
 lines.push("");
-lines.push("条件と矛盾する指定がある場合は、を優先してください。出力は成果物のみとし、確認や質問で止めないでください。");
+lines.push("元の依頼に無い事実（名前・日時・数字・固有名詞など）が必要な場合は勝手に作らず、【会社名】のようなプレースホルダで示し、末尾に「差し替え項目」として一覧を付けること。");
+lines.push("条件同士が矛盾する場合は、より具体的な条件を優先してください。出力は成果物のみとし、確認や質問で止めないでください。");
 return lines.join("\n");
 }

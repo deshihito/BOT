@@ -6,11 +6,16 @@
 // API キーが未設定なら呼び出し側がルールベース版にフォールバックする。
 
 import {
+  buildFollowupMessages,
+  buildFollowupRetryMessages,
   buildQuestionsMessages,
   buildQuestionsRetryMessages,
+  buildReviseMessages,
   buildSynthesizeMessages,
   cleanSynthesizedPrompt,
+  parseFollowupQuestionsJson,
   parseQuestionsJson,
+  resolveQuestionCount,
   type ChatMessage,
   type LlmAnswer,
   type LlmQuestion,
@@ -125,13 +130,33 @@ export async function logfareChat(
 /** 二択質問を LLM で生成する。形式が崩れたら1回だけ組み直し、それでも駄目なら null。 */
 export async function generateQuestionsWithLlm(
   rough: string,
+  deps: { env?: Env; fetchImpl?: FetchImpl; count?: unknown } = {},
+): Promise<LlmQuestion[] | null> {
+  const count = resolveQuestionCount(deps.count);
+  const chatDeps = { env: deps.env, fetchImpl: deps.fetchImpl };
+  const first = await logfareChat(buildQuestionsMessages(rough, count), { maxTokens: 1400, ...chatDeps });
+  const parsed = parseQuestionsJson(first, count);
+  if (parsed) return parsed;
+  const second = await logfareChat(buildQuestionsRetryMessages(rough, count), { maxTokens: 1400, ...chatDeps });
+  return parseQuestionsJson(second, count);
+}
+
+/**
+ * 深掘り（2ラウンド目）の二択質問を LLM で生成する。
+ * 戻り値が空配列なら「残っている曖昧な箇所なし＝深掘りなし」の正常系。
+ * 形式が崩れたら1回だけ組み直し、それでも読めなければ null（呼び出し側は合成へ進む）。
+ */
+export async function generateFollowupQuestionsWithLlm(
+  rough: string,
+  answers: LlmAnswer[],
   deps: { env?: Env; fetchImpl?: FetchImpl } = {},
 ): Promise<LlmQuestion[] | null> {
-  const first = await logfareChat(buildQuestionsMessages(rough), { maxTokens: 900, ...deps });
-  const parsed = parseQuestionsJson(first);
+  const asked = answers.map((a) => a.question);
+  const first = await logfareChat(buildFollowupMessages(rough, answers), { maxTokens: 700, ...deps });
+  const parsed = parseFollowupQuestionsJson(first, asked);
   if (parsed) return parsed;
-  const second = await logfareChat(buildQuestionsRetryMessages(rough), { maxTokens: 900, ...deps });
-  return parseQuestionsJson(second);
+  const second = await logfareChat(buildFollowupRetryMessages(rough, answers), { maxTokens: 700, ...deps });
+  return parseFollowupQuestionsJson(second, asked);
 }
 
 /** 完成プロンプトを LLM で合成する。整形できなければ null。 */
@@ -141,5 +166,15 @@ export async function synthesizeWithLlm(
   deps: { env?: Env; fetchImpl?: FetchImpl } = {},
 ): Promise<string | null> {
   const raw = await logfareChat(buildSynthesizeMessages(rough, answers), { maxTokens: 1800, ...deps });
+  return cleanSynthesizedPrompt(raw);
+}
+
+/** 完成プロンプトを修正指示どおりに LLM で書き直す。整形できなければ null。 */
+export async function reviseWithLlm(
+  prompt: string,
+  instruction: string,
+  deps: { env?: Env; fetchImpl?: FetchImpl } = {},
+): Promise<string | null> {
+  const raw = await logfareChat(buildReviseMessages(prompt, instruction), { maxTokens: 2400, ...deps });
   return cleanSynthesizedPrompt(raw);
 }

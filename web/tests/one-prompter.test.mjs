@@ -49,3 +49,41 @@ for (const a of answers) assert.ok(prompt.includes(a.instruction));
 assert.ok(prompt.includes(""));
 assert.ok(prompt.includes("定型の締め文句"));
 });
+
+test("完成プロンプトの禁止事項はAIあるあるを網羅し、差し替え項目と矛盾時の優先順位を含む", () => {
+const { category, questions} = m.generateQuestions("転職したい、自己PR書いて");
+const answers = questions.map((q) => ({
+slot: q.slot, question: q.question, label: q.options[0].label, instruction: q.options[0].instruction,
+}));
+const prompt = m.buildPrompt("転職したい、自己PR書いて", category, answers);
+assert.ok(prompt.includes("定型の締め文句"));
+assert.ok(prompt.includes("まず〜、次に〜、最後に〜"));
+assert.ok(prompt.includes("接続詞を連発しない"));
+assert.ok(prompt.includes("両論併記で結論を逃げない"));
+assert.ok(prompt.includes("バズワード"));
+assert.ok(prompt.includes("焼き直した要約をしない"));
+assert.ok(prompt.includes("差し替え項目"));
+assert.ok(prompt.includes("プレースホルダ"));
+assert.ok(prompt.includes("条件同士が矛盾する場合は、より具体的な条件を優先してください。"));
+assert.ok(!prompt.includes("場合は、を優先"));
+});
+
+test("generateQuestions は count に追随する（既定5・プールが尽きればある分だけ）", () => {
+const input = "転職したい、自己PR書いて";
+assert.ok(m.generateQuestions(input).questions.length <= 5);
+assert.equal(m.generateQuestions(input, 3).questions.length, 3);
+const eight = m.generateQuestions(input, 8).questions;
+assert.ok(eight.length > 5 && eight.length <= 8);
+assert.equal(new Set(eight.map((q) => q.slot)).size, eight.length);
+});
+
+test("fallback の完成プロンプトは検討中・保留・自由入力の指定を反映する", () => {
+const prompt = m.buildPrompt("転職したい、自己PR書いて", "job", [
+{ slot: "tone", question: "トーンは？", label: "検討中", instruction: "（トーンは？）は検討中。最も妥当な既定を1つ置き、その前提を明示すること" },
+{ slot: "length", question: "分量は？", label: "保留", instruction: "（分量は？）は保留。決め打ちせず、差し替え可能な形で残すこと" },
+{ slot: "angle", question: "切り口は？", label: "実務の失敗談から入る", instruction: "ユーザーの指定: 実務の失敗談から入る" },
+]);
+assert.ok(prompt.includes("は検討中。最も妥当な既定を1つ置き、その前提を明示すること"));
+assert.ok(prompt.includes("は保留。決め打ちせず、差し替え可能な形で残すこと"));
+assert.ok(prompt.includes("ユーザーの指定: 実務の失敗談から入る"));
+});
