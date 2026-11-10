@@ -23,7 +23,12 @@ CREATE TABLE IF NOT EXISTS public.bump_rta_events (
     rank_fast_local integer,
     rank_fast_global integer,
     rank_slow_local integer,
-    rank_slow_global integer
+    rank_slow_global integer,
+    -- 記録時点の総合順位（全サービスを通したユーザー単位）。
+    rank_all_fast_local integer,
+    rank_all_fast_global integer,
+    rank_all_slow_local integer,
+    rank_all_slow_global integer
 );
 CREATE INDEX IF NOT EXISTS bump_rta_events_guild_type_time_idx
     ON public.bump_rta_events (guild_id, event_type, completed_at DESC);
@@ -154,7 +159,9 @@ CREATE OR REPLACE FUNCTION public.get_bump_rta_record_ranks(
     p_guild_id text, p_event_type text, p_elapsed_ms integer
 ) RETURNS TABLE(
     rank_fast_local integer, rank_fast_global integer,
-    rank_slow_local integer, rank_slow_global integer
+    rank_slow_local integer, rank_slow_global integer,
+    rank_all_fast_local integer, rank_all_fast_global integer,
+    rank_all_slow_local integer, rank_all_slow_global integer
 )
 LANGUAGE sql SECURITY INVOKER
 AS $$
@@ -176,10 +183,35 @@ AS $$
           FROM public.bump_rta_events
           WHERE event_type <> 'legacy'
           GROUP BY user_id, event_type) AS g
+        WHERE g.worst_ms > p_elapsed_ms),
+      (SELECT count(*)::integer + 1 FROM (
+          SELECT user_id, min(elapsed_ms) AS best_ms
+          FROM public.bump_rta_records
+          WHERE guild_id = p_guild_id AND event_type <> 'legacy'
+          GROUP BY user_id) AS l
+        WHERE l.best_ms < p_elapsed_ms),
+      (SELECT count(*)::integer + 1 FROM (
+          SELECT user_id, min(elapsed_ms) AS best_ms
+          FROM public.bump_rta_events
+          WHERE event_type <> 'legacy'
+          GROUP BY user_id) AS g
+        WHERE g.best_ms < p_elapsed_ms),
+      (SELECT count(*)::integer + 1 FROM (
+          SELECT user_id, max(elapsed_ms) AS worst_ms
+          FROM public.bump_rta_worst_records
+          WHERE guild_id = p_guild_id AND event_type <> 'legacy'
+          GROUP BY user_id) AS l
+        WHERE l.worst_ms > p_elapsed_ms),
+      (SELECT count(*)::integer + 1 FROM (
+          SELECT user_id, max(elapsed_ms) AS worst_ms
+          FROM public.bump_rta_events
+          WHERE event_type <> 'legacy'
+          GROUP BY user_id) AS g
         WHERE g.worst_ms > p_elapsed_ms);
 $$;
 REVOKE ALL ON FUNCTION public.get_bump_rta_record_ranks(text, text, integer) FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.get_bump_rta_record_ranks(text, text, integer) TO anon, service_role;
+
 
 -- Combined (all-services) global boards, entry-based: one row per
 -- (user, event_type). Existing environments apply

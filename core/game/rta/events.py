@@ -84,6 +84,10 @@ class EventsMixin:
         「ユーザー × サービス種類」のエントリを pooled した統合
         ランキング（p_event_type は互換のため渡すが、SQL 側では
         絞り込みに使わない）。戻り値は順位 dict（通知表示にも使う）。
+        あわせて、全サービスを通したユーザー単位の「総合」順位
+        （rank_all_*: 最速=全サービス中の最小、最遅=最大を1人1エントリ
+        として数える）も同じ関数が返す（SQL マイグレーション適用後）。
+        総合ぶんの保存は独立に試み、失敗しても通常の順位は残す。
         失敗は呼び出し側で握る前提で、ここでは例外をそのまま上げる。
         """
         result = await self._call(lambda: self.db.rpc("get_bump_rta_record_ranks", {
@@ -99,6 +103,23 @@ class EventsMixin:
             "rank_slow_local": ranks.get("rank_slow_local"),
             "rank_slow_global": ranks.get("rank_slow_global"),
         }).eq("bump_message_id", bump_message_id).eq("event_type", kind).execute())
+        combined = {
+            key: ranks[key]
+            for key in ("rank_all_fast_local", "rank_all_fast_global",
+                        "rank_all_slow_local", "rank_all_slow_global")
+            if key in ranks
+        }
+        if combined:
+            try:
+                await self._call(lambda: self.db.table("bump_rta_events").update(
+                    combined).eq("bump_message_id", bump_message_id).eq(
+                    "event_type", kind).execute())
+            except Exception:
+                # 総合順位の保存は付随情報（カラム追加のマイグレーション
+                # 未適用など）。失敗しても通常の順位と表示は通常どおり。
+                logger.warning(
+                    "bump_rta combined ranks save failed: guild=%s", gid,
+                    exc_info=True)
         return ranks
 
     async def _record_rta_event(self, message, kind, user_id, event_at):
@@ -191,6 +212,12 @@ class EventsMixin:
                 description += f"\n{fast}"
             if slow:
                 description += f"\n{slow}"
+            all_fast = _rank_line("総合最速", ranks.get("rank_all_fast_local"), ranks.get("rank_all_fast_global"))
+            all_slow = _rank_line("総合最遅", ranks.get("rank_all_slow_local"), ranks.get("rank_all_slow_global"))
+            if all_fast:
+                description += f"\n{all_fast}"
+            if all_slow:
+                description += f"\n{all_slow}"
         embed = discord.Embed(
             title="RTA記録",
             description=description,
