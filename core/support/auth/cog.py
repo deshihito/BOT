@@ -204,7 +204,16 @@ async def sync_category_perms(category, role) -> int:
     await category.edit(overwrites=overwrites)
     count = 0
     for channel in category.channels:
-        await channel.edit(sync_permissions=True)
+        try:
+            await channel.edit(sync_permissions=True)
+        except (discord.Forbidden, discord.HTTPException):
+            # 閲覧・管理できないチャンネル（隠しチャンネル等）は同期できない。
+            # 1件の失敗で残り全部を止めないよう、飛ばして続行する。
+            logger.warning(
+                "カテゴリ権限の同期をスキップしました: channel=%s",
+                getattr(channel, "id", None),
+            )
+            continue
         count += 1
     return count
 

@@ -28,6 +28,7 @@ from discord.ext import commands, tasks
 
 from cogs.support import MAX_CLEAR
 from cogs.support import get_intro_webhook, sanitize_webhook_name, role_failure_reason
+from core.channel_safety import channel_display_name
 from core.support import guild_settings
 from core.general import action_usage
 from core.support.usage_stats import usage_stats
@@ -476,7 +477,7 @@ def vc_log_embed(member: discord.Member, channel: discord.VoiceChannel, joined: 
     embed = discord.Embed(
         title="VC入室" if joined else "VC退室",
         description=(
-            f"{member.mention} が **{discord.utils.escape_markdown(channel.name)}** "
+            f"{member.mention} が **{discord.utils.escape_markdown(channel_display_name(channel))}** "
             f"{'に' if joined else 'から'}{action}。"
         ),
         color=0x2ECC71 if joined else 0xE74C3C,

@@ -10,6 +10,8 @@ from pydantic import Field, create_model
 
 import needle
 
+from core.channel_safety import is_hidden_channel
+
 log = logging.getLogger(__name__)
 
 # Needle は「入力文中に根拠のある値」しか引数に入れられない（grounding）。
@@ -133,6 +135,9 @@ class JudgeCog(commands.Cog):
         # サーバー全体のテキストチャンネルから発言ログを取得（最大500件）
         user_messages = []
         for channel in interaction.guild.text_channels:
+            if is_hidden_channel(channel):
+                # 閲覧できないチャンネルは履歴を読めない（権限フィールドも信頼できない）
+                continue
             permissions = channel.permissions_for(interaction.guild.me)
             if not permissions.read_messages or not permissions.read_message_history:
                 continue
