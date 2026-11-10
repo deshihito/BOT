@@ -4,6 +4,9 @@
 記録時に、最速/最遅 × サーバー内/全体 の4順位を算出して bump_rta_events の
 当該行へ保存すること、完了通知 embed に順位が載ること、順位まわりが失敗
 （SQL マイグレーション未適用など）しても記録本体が壊れないことを検証する。
+あわせて、全サービスを通したユーザー単位の「総合」順位（rank_all_*）が
+保存・表示されること、総合ぶんのマイグレーション未適用時は通常の順位
+だけが残ることも検証する。
 順位の定義は「その記録が各ランキングに入る位置」= 上位のエントリ数 + 1。
 ランキング基準は全サービスの「ユーザー × サービス種類」エントリを
 pooled した統合ボードで、同じユーザーの別サービスのエントリも
@@ -78,7 +81,8 @@ class FakeRpcCall:
 class FakeDb:
     """bump_rta 系テーブルと RPC の意味論（順位関数含む）を再現する Fake。"""
 
-    def __init__(self, *, fail_ranks=False):
+    def __init__(self, *, fail_ranks=False, combined_ranks=True):
+        self.combined_ranks = combined_ranks
         self.tables = {
             "bump_rta_pending": [],
             "bump_rta_events": [],
@@ -166,10 +170,45 @@ class FakeDb:
 
             fast_global = 1 + sum(1 for v in entry_extremes(min) if v < elapsed)
             slow_global = 1 + sum(1 for v in entry_extremes(max) if v > elapsed)
-            return FakeResponse([{
+            ranks = {
                 "rank_fast_local": fast_local, "rank_fast_global": fast_global,
                 "rank_slow_local": slow_local, "rank_slow_global": slow_global,
-            }])
+            }
+            if self.combined_ranks:
+                # 総合: ユーザー単位に潰す（最速=全サービス中の最小、
+                # 最遅=最大）。local はギルドの records / worst_records、
+                # global は全 events から集計する。
+                def user_extremes(rows, pick, *, guild_only):
+                    per_user = {}
+                    for r in rows:
+                        if r["event_type"] == "legacy":
+                            continue
+                        if guild_only and r["guild_id"] != gid:
+                            continue
+                        per_user[r["user_id"]] = pick(
+                            per_user.get(r["user_id"], r["elapsed_ms"]),
+                            r["elapsed_ms"])
+                    return per_user.values()
+
+                ranks.update({
+                    "rank_all_fast_local": 1 + sum(
+                        1 for v in user_extremes(
+                            self.tables["bump_rta_records"], min,
+                            guild_only=True) if v < elapsed),
+                    "rank_all_slow_local": 1 + sum(
+                        1 for v in user_extremes(
+                            self.tables["bump_rta_worst_records"], max,
+                            guild_only=True) if v > elapsed),
+                    "rank_all_fast_global": 1 + sum(
+                        1 for v in user_extremes(
+                            self.tables["bump_rta_events"], min,
+                            guild_only=False) if v < elapsed),
+                    "rank_all_slow_global": 1 + sum(
+                        1 for v in user_extremes(
+                            self.tables["bump_rta_events"], max,
+                            guild_only=False) if v > elapsed),
+                })
+            return FakeResponse([ranks])
         raise AssertionError(f"unexpected rpc: {name}")
 
 
@@ -215,9 +254,15 @@ class RecordRanksTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(event["rank_fast_global"], 1)
         self.assertEqual(event["rank_slow_local"], 1)
         self.assertEqual(event["rank_slow_global"], 1)
+        self.assertEqual(event["rank_all_fast_local"], 1)
+        self.assertEqual(event["rank_all_fast_global"], 1)
+        self.assertEqual(event["rank_all_slow_local"], 1)
+        self.assertEqual(event["rank_all_slow_global"], 1)
         description = sent_embed(cog).description
         self.assertIn("最速: サーバー内 **1位** / 全サーバー **1位**", description)
         self.assertIn("最遅: サーバー内 **1位** / 全サーバー **1位**", description)
+        self.assertIn("総合最速: サーバー内 **1位** / 全サーバー **1位**", description)
+        self.assertIn("総合最遅: サーバー内 **1位** / 全サーバー **1位**", description)
 
     async def test_ranks_reflect_position_among_other_users(self):
         db = FakeDb()
@@ -320,6 +365,59 @@ class RecordRanksTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(event["rank_slow_local"], 3)   # A の bump / vote 両エントリが上位
         self.assertEqual(event["rank_fast_global"], 3)  # A の dicoall / sharkbot が上位
         self.assertEqual(event["rank_slow_global"], 3)  # A の up / takasumi が上位
+
+    async def test_combined_ranks_count_each_user_once(self):
+        db = FakeDb()
+        # エントリ基準のテストと同じ並び: A（user 111）はサービス別に
+        # 2エントリずつ持つ。エントリ順位は 3 位になるが、総合は
+        # ユーザー単位に潰すので A を1回だけ数えて 2 位になる。
+        db.tables["bump_rta_records"] = [
+            {"guild_id": "456", "user_id": "111", "event_type": "bump",
+             "elapsed_ms": 10000, "completed_at": T0.isoformat()},
+            {"guild_id": "456", "user_id": "111", "event_type": "up",
+             "elapsed_ms": 20000, "completed_at": T0.isoformat()},
+        ]
+        db.tables["bump_rta_worst_records"] = [
+            {"guild_id": "456", "user_id": "111", "event_type": "bump",
+             "elapsed_ms": 400000, "completed_at": T0.isoformat()},
+            {"guild_id": "456", "user_id": "111", "event_type": "vote",
+             "elapsed_ms": 350000, "completed_at": T0.isoformat()},
+        ]
+        db.tables["bump_rta_events"] = [
+            {"guild_id": "999", "user_id": "111", "event_type": "dicoall",
+             "elapsed_ms": 5000, "bump_message_id": "a1", "completed_at": T0.isoformat()},
+            {"guild_id": "999", "user_id": "111", "event_type": "sharkbot",
+             "elapsed_ms": 15000, "bump_message_id": "a2", "completed_at": T0.isoformat()},
+            {"guild_id": "999", "user_id": "111", "event_type": "up",
+             "elapsed_ms": 500000, "bump_message_id": "a3", "completed_at": T0.isoformat()},
+            {"guild_id": "999", "user_id": "111", "event_type": "takasumi",
+             "elapsed_ms": 450000, "bump_message_id": "a4", "completed_at": T0.isoformat()},
+        ]
+        cog = make_cog(db)
+        await self.record(cog, db, start=T0, seconds=60, message_id="c1")
+        event = [e for e in db.tables["bump_rta_events"]
+                 if e["bump_message_id"] == "c1"][0]
+        self.assertEqual(event["rank_fast_local"], 3)
+        self.assertEqual(event["rank_all_fast_local"], 2)   # A の最小10秒のみ
+        self.assertEqual(event["rank_all_slow_local"], 2)   # A の最大400秒のみ
+        self.assertEqual(event["rank_all_fast_global"], 2)  # A の最小5秒のみ
+        self.assertEqual(event["rank_all_slow_global"], 2)  # A の最大500秒のみ
+        description = sent_embed(cog).description
+        self.assertIn("総合最速: サーバー内 **2位** / 全サーバー **2位**", description)
+        self.assertIn("総合最遅: サーバー内 **2位** / 全サーバー **2位**", description)
+
+    async def test_without_combined_migration_base_ranks_remain(self):
+        # SQL マイグレーション未適用（関数が総合順位を返さない）環境では、
+        # 通常の順位だけが保存・表示され、総合の行は付かない。
+        db = FakeDb(combined_ranks=False)
+        cog = make_cog(db)
+        await self.record(cog, db, start=T0, seconds=90, message_id="111")
+        event = db.tables["bump_rta_events"][0]
+        self.assertEqual(event["rank_fast_local"], 1)
+        self.assertNotIn("rank_all_fast_local", event)
+        description = sent_embed(cog).description
+        self.assertIn("最速: サーバー内 **1位** / 全サーバー **1位**", description)
+        self.assertNotIn("総合", description)
 
     async def test_rank_failure_does_not_break_recording(self):
         db = FakeDb(fail_ranks=True)
