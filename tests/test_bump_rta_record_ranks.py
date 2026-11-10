@@ -5,8 +5,9 @@
 当該行へ保存すること、完了通知 embed に順位が載ること、順位まわりが失敗
 （SQL マイグレーション未適用など）しても記録本体が壊れないことを検証する。
 あわせて、全サービスを通したユーザー単位の「総合」順位（rank_all_*）が
-保存・表示されること、総合ぶんのマイグレーション未適用時は通常の順位
-だけが残ることも検証する。
+保存・表示されること、総合ぶんのマイグレーション未適用時は bot 側の
+フォールバック算出で総合が表示される（保存は失敗して残らない）ことも
+検証する。
 順位の定義は「その記録が各ランキングに入る位置」= 上位のエントリ数 + 1。
 ランキング基準は全サービスの「ユーザー × サービス種類」エントリを
 pooled した統合ボードで、同じユーザーの別サービスのエントリも
@@ -35,6 +36,7 @@ class FakeQuery:
         self.filters = {}
         self.orders = []
         self.limit_n = None
+        self.range_span = None
         self.op = "select"
         self.payload = None
 
@@ -52,6 +54,10 @@ class FakeQuery:
 
     def limit(self, count):
         self.limit_n = int(count)
+        return self
+
+    def range(self, start, end):
+        self.range_span = (int(start), int(end))
         return self
 
     def insert(self, payload):
@@ -81,8 +87,10 @@ class FakeRpcCall:
 class FakeDb:
     """bump_rta 系テーブルと RPC の意味論（順位関数含む）を再現する Fake。"""
 
-    def __init__(self, *, fail_ranks=False, combined_ranks=True):
+    def __init__(self, *, fail_ranks=False, combined_ranks=True,
+                 fail_combined_save=False):
         self.combined_ranks = combined_ranks
+        self.fail_combined_save = fail_combined_save
         self.tables = {
             "bump_rta_pending": [],
             "bump_rta_events": [],
@@ -108,6 +116,9 @@ class FakeDb:
             rows.append(dict(query.payload))
             return FakeResponse([])
         if query.op == "update":
+            if self.fail_combined_save and any(
+                    key.startswith("rank_all_") for key in query.payload):
+                raise RuntimeError("column rank_all_fast_local does not exist")
             for row in rows:
                 if self._match(row, query.filters):
                     row.update(query.payload)
@@ -118,6 +129,9 @@ class FakeDb:
         data = [dict(r) for r in rows if self._match(r, query.filters)]
         for column, desc in reversed(query.orders):
             data.sort(key=lambda r: r[column], reverse=desc)
+        if query.range_span is not None:
+            start, end = query.range_span
+            data = data[start:end + 1]
         if query.limit_n is not None:
             data = data[:query.limit_n]
         return FakeResponse(data)
@@ -406,10 +420,12 @@ class RecordRanksTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn("総合最速: サーバー内 **2位** / 全サーバー **2位**", description)
         self.assertIn("総合最遅: サーバー内 **2位** / 全サーバー **2位**", description)
 
-    async def test_without_combined_migration_base_ranks_remain(self):
-        # SQL マイグレーション未適用（関数が総合順位を返さない）環境では、
-        # 通常の順位だけが保存・表示され、総合の行は付かない。
-        db = FakeDb(combined_ranks=False)
+    async def test_without_combined_migration_fallback_shows_combined(self):
+        # SQL マイグレーション未適用（関数が総合順位を返さず、events に
+        # 総合カラムも無い）環境では、bot 側のフォールバック算出で
+        # 総合の行が表示される。保存は失敗するので行には残らないが、
+        # 通常の順位の保存と表示は通常どおり。
+        db = FakeDb(combined_ranks=False, fail_combined_save=True)
         cog = make_cog(db)
         await self.record(cog, db, start=T0, seconds=90, message_id="111")
         event = db.tables["bump_rta_events"][0]
@@ -417,7 +433,44 @@ class RecordRanksTest(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("rank_all_fast_local", event)
         description = sent_embed(cog).description
         self.assertIn("最速: サーバー内 **1位** / 全サーバー **1位**", description)
-        self.assertNotIn("総合", description)
+        self.assertIn("総合最速: サーバー内 **1位** / 全サーバー **1位**", description)
+        self.assertIn("総合最遅: サーバー内 **1位** / 全サーバー **1位**", description)
+
+    async def test_fallback_combined_ranks_count_each_user_once(self):
+        # 移行前の DB でも、総合はエントリ基準（3位）と違いユーザー
+        # 単位に潰した値（2位）で表示される。
+        db = FakeDb(combined_ranks=False, fail_combined_save=True)
+        db.tables["bump_rta_records"] = [
+            {"guild_id": "456", "user_id": "111", "event_type": "bump",
+             "elapsed_ms": 10000, "completed_at": T0.isoformat()},
+            {"guild_id": "456", "user_id": "111", "event_type": "up",
+             "elapsed_ms": 20000, "completed_at": T0.isoformat()},
+        ]
+        db.tables["bump_rta_worst_records"] = [
+            {"guild_id": "456", "user_id": "111", "event_type": "bump",
+             "elapsed_ms": 400000, "completed_at": T0.isoformat()},
+            {"guild_id": "456", "user_id": "111", "event_type": "vote",
+             "elapsed_ms": 350000, "completed_at": T0.isoformat()},
+        ]
+        db.tables["bump_rta_events"] = [
+            {"guild_id": "999", "user_id": "111", "event_type": "dicoall",
+             "elapsed_ms": 5000, "bump_message_id": "a1", "completed_at": T0.isoformat()},
+            {"guild_id": "999", "user_id": "111", "event_type": "sharkbot",
+             "elapsed_ms": 15000, "bump_message_id": "a2", "completed_at": T0.isoformat()},
+            {"guild_id": "999", "user_id": "111", "event_type": "up",
+             "elapsed_ms": 500000, "bump_message_id": "a3", "completed_at": T0.isoformat()},
+            {"guild_id": "999", "user_id": "111", "event_type": "takasumi",
+             "elapsed_ms": 450000, "bump_message_id": "a4", "completed_at": T0.isoformat()},
+        ]
+        cog = make_cog(db)
+        await self.record(cog, db, start=T0, seconds=60, message_id="c1")
+        event = [e for e in db.tables["bump_rta_events"]
+                 if e["bump_message_id"] == "c1"][0]
+        self.assertEqual(event["rank_fast_local"], 3)
+        self.assertNotIn("rank_all_fast_local", event)
+        description = sent_embed(cog).description
+        self.assertIn("総合最速: サーバー内 **2位** / 全サーバー **2位**", description)
+        self.assertIn("総合最遅: サーバー内 **2位** / 全サーバー **2位**", description)
 
     async def test_rank_failure_does_not_break_recording(self):
         db = FakeDb(fail_ranks=True)
