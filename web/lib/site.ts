@@ -212,3 +212,58 @@ export function isBotStatusFresh(snapshot: BotStatusSnapshot, now: Date = new Da
   if (Number.isNaN(updatedMs)) return false;
   return now.getTime() - updatedMs <= BOT_STATUS_FRESH_MS;
 }
+
+/** 共通レイアウトの導線定義（ヘッダー／フッターの唯一の正）。
+ * 規則: 公開ページへの入り口は共通レイアウト内の1か所だけに置く。
+ * 同じ行き先を複数か所に置く場合は名称を完全に一致させる（現状は外部の
+ * サポートサーバーだけが、ヘッダーの補助導線とフッターのサポート群に同名で載る）。
+ * ヘッダー主導線＝探索、ヘッダー補助導線＝運用・支援、フッター＝補完、と役割で分ける。 */
+export type SiteLink = { href: string; label: string; external?: boolean };
+
+/** ヘッダー主導線（探索系）。左の塊に固定する。 */
+export const PRIMARY_NAV: SiteLink[] = [
+  { href: "/features", label: "機能紹介" },
+  { href: "/commands", label: "コマンド" },
+  { href: "/games", label: "ゲーム" },
+  { href: "/ranking", label: "ランキング" },
+];
+
+/** ヘッダー補助導線（運用・支援系）。主導線とは別の塊に分け、右に固定する。 */
+export const UTILITY_NAV: SiteLink[] = [
+  { href: SUPPORT_SERVER_URL, label: "サポートサーバー", external: true },
+  { href: "/dashboard", label: "ダッシュボード" },
+];
+
+/** フッター（補完専用）。主導線の複写は置かず、役割ごとの群に分ける。 */
+export const FOOTER_GROUPS: { label: string; links: SiteLink[] }[] = [
+  {
+    label: "ツール",
+    links: [
+      { href: "/one-prompter", label: "One Prompter" },
+      { href: "/compute", label: "計算に参加" },
+    ],
+  },
+  {
+    label: "サポート",
+    links: [
+      { href: SUPPORT_SERVER_URL, label: "サポートサーバー", external: true },
+      { href: "/status", label: "ステータス" },
+    ],
+  },
+  {
+    label: "サイト情報",
+    links: [{ href: "/credits", label: "クレジット" }],
+  },
+  {
+    label: "ポリシー",
+    links: [
+      { href: "/terms", label: "利用規約" },
+      { href: "/privacy", label: "プライバシーポリシー" },
+    ],
+  },
+];
+
+/** 現在地判定。配下のページ（/commands/… など）でも親の導線を現在地とする。 */
+export function isNavActive(pathname: string, href: string): boolean {
+  return pathname === href || pathname.startsWith(`${href}/`);
+}

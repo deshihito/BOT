@@ -11,16 +11,22 @@ p { margin:0; }
 button,textarea { font:inherit; }
 code { padding:1px 6px; border:1px solid var(--line); border-radius:5px; background:var(--soft); font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:.92em; }
 header { position:relative; z-index:20; border-bottom:1px solid var(--line); background:#fff; }
-header nav { display:flex; align-items:center; gap:22px; max-width:960px; min-height:58px; margin:0 auto; padding:9px 20px; }
+header nav { display:flex; align-items:center; gap:22px; max-width:880px; min-height:58px; margin:0 auto; padding:9px 20px; }
 .brand { display:flex; align-items:center; gap:7px; color:var(--text); font-size:17px; font-weight:800; letter-spacing:.04em; white-space:nowrap; }
 .brand img { width:30px; height:30px; }
-.main-nav-links { display:flex; flex-wrap:wrap; gap:2px; }
-.main-nav-links a { padding:4px 9px; border-radius:6px; color:var(--text); font-size:14px; }
-.main-nav-links a:hover { background:var(--soft); text-decoration:none; }
+.nav-primary { display:flex; align-items:center; gap:2px; }
+.nav-utility { display:flex; align-items:center; gap:2px; margin-left:auto; padding-left:14px; border-left:1px solid var(--line); }
+.nav-primary a,.nav-utility a { padding:4px 9px; border-radius:6px; color:var(--text); font-size:14px; white-space:nowrap; }
+.nav-utility a { color:var(--muted); }
+.nav-primary a:hover,.nav-utility a:hover { background:var(--soft); text-decoration:none; }
+.nav-primary a[aria-current],.nav-utility a[aria-current] { background:var(--accent-soft); color:var(--accent); font-weight:700; }
+@media (max-width:650px) { header nav { flex-wrap:wrap; row-gap:6px; } .nav-primary { order:3; flex-basis:100%; overflow-x:auto; } .nav-utility { padding-left:0; border-left:0; } }
 main { max-width:880px; min-height:calc(100vh - 120px); margin:0 auto; padding:52px 20px 72px; }
 footer { position:relative; z-index:20; background:#fff; padding:20px; border-top:1px solid var(--line); }
-.footer-links { display:flex; justify-content:center; gap:18px; flex-wrap:wrap; font-size:13px; }
-.footer-links a { color:var(--muted); }
+.footer-inner { display:flex; flex-wrap:wrap; gap:16px 44px; max-width:880px; margin:0 auto; }
+.footer-group { display:grid; align-content:start; gap:5px; }
+.footer-group-title { color:var(--muted); font-size:12px; font-weight:800; letter-spacing:.1em; }
+.footer-group a { width:max-content; color:var(--text); font-size:13px; }
 .muted { color:var(--muted); }
 .eyebrow { color:var(--accent); font-size:12px; font-weight:800; letter-spacing:.14em; }
 .page-heading { margin-bottom:28px; }
@@ -113,7 +119,6 @@ th,td { padding:6px 8px; border-bottom:1px solid var(--line); text-align:left; }
 .map-wrap { overflow:auto; padding:12px; }
 .nation-map { display:block; width:100%; max-width:720px; height:auto; margin:0 auto; background:var(--bg); }
 .swatch { display:inline-block; width:14px; height:14px; margin-right:8px; border:1px solid var(--line); border-radius:4px; vertical-align:middle; }
-.main-nav-links { align-items:center; margin-left:auto; }
 .invite-button { display:inline-block; padding:6px 12px !important; border-radius:7px; background:#5865f2; color:#fff !important; font-weight:700; white-space:nowrap; }
 .invite-button:hover { background:#4752c4; text-decoration:none; }
 .home-hero-actions { display:flex; flex-wrap:wrap; gap:10px; align-items:center; }
@@ -138,7 +143,7 @@ th,td { padding:6px 8px; border-bottom:1px solid var(--line); text-align:left; }
 .status-banner-note { color:var(--muted); font-size:14px; }
 .status-table th { color:var(--muted); font-weight:400; width:180px; }
 .status-table td { text-align:right; font-variant-numeric:tabular-nums; }
-@media (max-width:650px) { header nav { gap:12px; align-items:flex-start; } .main-nav-links a { padding:3px 6px; font-size:13px; } main { padding-top:36px; } .home-hero { gap:12px; } .home-brand-name { font-size:26px; } .home-hero img { width:64px; height:64px; } .home-command-grid { grid-template-columns:1fr; } .command-card,.genre-card { gap:14px; padding:17px 0; } .guild-title { font-size:20px; line-height:1.4; } }
+@media (max-width:650px) { header nav { gap:12px; align-items:flex-start; } .nav-primary a,.nav-utility a { padding:3px 6px; font-size:13px; } main { padding-top:36px; } .home-hero { gap:12px; } .home-brand-name { font-size:26px; } .home-hero img { width:64px; height:64px; } .home-command-grid { grid-template-columns:1fr; } .command-card,.genre-card { gap:14px; padding:17px 0; } .guild-title { font-size:20px; line-height:1.4; } }
 
 /* Discord Activity: these selectors activate only on the Music Activity route. */
 body:has([data-activity-root]) > header,
