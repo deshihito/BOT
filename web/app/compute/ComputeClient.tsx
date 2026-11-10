@@ -535,15 +535,8 @@ export default function ComputeClient() {
         方式に切り替わります）。
       </p>
       <div className="compute-actions">
-        {running ? (
-          <button type="button" className="compute-stop" onClick={stop}>
-            停止する
-          </button>
-        ) : (
-          <button type="button" className="compute-start" onClick={start} disabled={finished}>
-            計算をはじめる
-          </button>
-        )}
+        {/* 開始・停止ボタンはユーザー決定（2026-11-10）で撤去。開始ロジックと
+            エンジン群は基盤として残してあり、UI から計算は開始できない。 */}
         <p className="compute-status" role="status">
           状態：{statusText}
         </p>
