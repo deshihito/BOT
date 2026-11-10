@@ -1,7 +1,8 @@
 # -*- coding: utf-8 -*-
 """連携広告枠のパートナー広告配信（core/ads.py フェーズ2）のテスト。
 
-- 配信対象の選別（承認済み・期限内・guild_registry に現存するものだけ）
+- 配信対象の選別（承認済み・guild_registry に現存するものだけ。
+  掲載期限は無いので expires_at は無視する）
 - 配分（承認広告がある間はハウス25%＋承認広告均等、0件なら従来どおり）
 - キャッシュ（60秒TTL、読み込み失敗時は手元のキャッシュで継続）
 - 裏読み込みの予約（pick_creative からのスケジュール）
@@ -38,7 +39,7 @@ def record(**overrides):
         "text": "みんなでゲームする鯖です",
         "url": "https://discord.gg/example",
         "status": "approved",
-        "expires_at": FUTURE,
+        "expires_at": None,
     }
     base.update(overrides)
     return base
@@ -79,9 +80,9 @@ class AdsStateMixin:
 
 class RecordFilterTest(unittest.TestCase):
     def select(self, records, registry=REGISTRY):
-        return ads.partner_creatives_from_records(records, set(registry), now=NOW)
+        return ads.partner_creatives_from_records(records, set(registry))
 
-    def test_approved_in_registry_and_unexpired_is_selected(self):
+    def test_approved_in_registry_is_selected(self):
         picked = self.select({"a1": record()})
         self.assertEqual(len(picked), 1)
         self.assertEqual(picked[0].text, "みんなでゲームする鯖です")
@@ -92,10 +93,15 @@ class RecordFilterTest(unittest.TestCase):
         for status in ("pending", "rejected", "expired", "revoked"):
             self.assertEqual(self.select({"a1": record(status=status)}), [], status)
 
-    def test_expired_is_excluded(self):
-        self.assertEqual(self.select({"a1": record(expires_at=PAST)}), [])
-        self.assertEqual(self.select({"a1": record(expires_at=None)}), [])
-        self.assertEqual(self.select({"a1": record(expires_at="not-a-date")}), [])
+    def test_expires_at_is_ignored(self):
+        # 掲載期限は撤廃されたため、expires_at が過去でも・壊れていても・
+        # 無くても、承認済みで在籍中なら配信される（永続表示）。
+        self.assertEqual(len(self.select({"a1": record(expires_at=PAST)})), 1)
+        self.assertEqual(len(self.select({"a1": record(expires_at=FUTURE)})), 1)
+        self.assertEqual(len(self.select({"a1": record(expires_at="not-a-date")})), 1)
+        without_key = record()
+        del without_key["expires_at"]
+        self.assertEqual(len(self.select({"a1": without_key})), 1)
 
     def test_guild_removed_from_registry_is_excluded(self):
         # Bot が退出したギルドの広告は、レコードが approved のままでも配信しない
@@ -162,9 +168,8 @@ class RefreshTest(AdsStateMixin, unittest.IsolatedAsyncioTestCase):
         return stores
 
     async def test_refresh_loads_filtered_partners(self):
-        future = (datetime.now(timezone.utc) + timedelta(days=5)).isoformat()
         self.install_kv(
-            {"a1": record(expires_at=future), "a2": record(status="pending")},
+            {"a1": record(), "a2": record(status="pending")},
             {"111": {"name": "対象鯖"}},
         )
         ads._partner_loaded_at = None
@@ -197,8 +202,7 @@ class RefreshTest(AdsStateMixin, unittest.IsolatedAsyncioTestCase):
         self.assertIn(ads.pick_creative(), ads.CREATIVES)
 
     async def test_pick_schedules_background_refresh_when_stale(self):
-        future = (datetime.now(timezone.utc) + timedelta(days=5)).isoformat()
-        self.install_kv({"a1": record(expires_at=future)}, {"111": {"name": "対象鯖"}})
+        self.install_kv({"a1": record()}, {"111": {"name": "対象鯖"}})
         ads._partner_loaded_at = None
         ads.pick_creative()
         await asyncio.sleep(0.1)

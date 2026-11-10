@@ -7,10 +7,12 @@
 - ハウス枠：このファイルの定数 ``CREATIVES``（自社告知）。
 - パートナー広告：Web の広告申請システムで承認された申請。
   bot_kv の ``partner_ads`` 名前空間（1申請＝1キー）に Web 側だけが書き、
-  Bot は読むだけ。status の書き換え（expired / revoked への遷移）は
-  Web 側の責務で、Bot は読み取り時点の判定（承認済み・期限内・対象
-  ギルドが guild_registry に現存）で配信対象を決める。そのため
-  Bot 退出による自動失効も、レコードを書き換えずに読み取りで効く。
+  Bot は読むだけ。承認された広告は掲載期限なしで永続表示される
+  （2026-11-10 のユーザー決定で、承認から30日の期限は撤廃）。
+  Bot は読み取り時点の判定（承認済み・対象ギルドが guild_registry に
+  現存）で配信対象を決めるため、Bot 退出による自動失効も、レコードを
+  書き換えずに読み取りで効く。レコードの ``expires_at`` は旧仕様の
+  名残で、Bot は無視する（互換のため残っていても構わない）。
 
 配信の配分は、承認広告がある間はハウス枠を合算25%相当に間引き
 （4回に1回）、残りを承認広告が均等に回す。承認広告が0件なら
@@ -33,7 +35,6 @@ import itertools
 import logging
 import time
 from dataclasses import dataclass
-from datetime import datetime, timezone
 from typing import Any, Callable, Mapping, Optional
 
 logger = logging.getLogger(__name__)
@@ -104,28 +105,15 @@ def set_kv_factory(factory: Optional[Callable[[str], Any]]) -> None:
     _kv_factory = factory
 
 
-def _parse_iso(value: Any) -> Optional[datetime]:
-    if not isinstance(value, str) or not value:
-        return None
-    try:
-        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
-    except ValueError:
-        return None
-    if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=timezone.utc)
-    return parsed
-
-
 def partner_creatives_from_records(
     records: Mapping[str, Any],
     registry_guild_ids: set[str],
-    *,
-    now: datetime,
 ) -> list[Creative]:
     """申請レコード群から、配信対象の承認広告だけを Creative の列にする（純粋関数）。
 
-    対象は「status=approved かつ expires_at が未来 かつ 対象ギルドが
-    guild_registry に現存する」もの。並びはキー（申請ID）の昇順で安定させる。
+    対象は「status=approved かつ 対象ギルドが guild_registry に現存
+    する」もの。掲載期限は無い（承認されれば永続表示）ため、レコードの
+    expires_at は見ない。並びはキー（申請ID）の昇順で安定させる。
     形式が壊れているレコードは黙って落とす（1件の破損で全体を止めない）。
     """
     result: list[Creative] = []
@@ -138,9 +126,6 @@ def partner_creatives_from_records(
         guild_id = record.get("guild_id")
         guild_id = str(guild_id) if guild_id is not None else ""
         if not guild_id or guild_id not in registry_guild_ids:
-            continue
-        expires_at = _parse_iso(record.get("expires_at"))
-        if expires_at is None or expires_at <= now:
             continue
         text = record.get("text")
         url = record.get("url")
@@ -177,7 +162,6 @@ async def refresh_partner_ads(*, force: bool = False) -> list[Creative]:
         creatives = partner_creatives_from_records(
             records if isinstance(records, dict) else {},
             set(registry.keys()) if isinstance(registry, dict) else set(),
-            now=datetime.now(timezone.utc),
         )
     except Exception:
         # KVStore 側が失敗の詳細をログに残しているため、ここでは1行だけ。
