@@ -1058,7 +1058,7 @@ button.balku-card:hover { box-shadow:0 10px 20px rgba(0,0,0,.45), inset 0 0 0 3p
 
 /* 定番ゲーム3本（マインスイーパー / 2048 / メモリーマッチ）の共通部品と盤面 */
 .classic-controls { display:flex; flex-wrap:wrap; gap:8px; margin:14px 0; }
-.classic-btn { padding:7px 14px; border:1px solid var(--line); border-radius:8px; background:#fff; color:var(--text); font-size:14px; cursor:pointer; }
+.classic-btn { padding:7px 14px; border:1px solid var(--line); border-radius:8px; background:#fff; color:var(--text); font-size:14px; cursor:pointer; min-height:40px; display:inline-flex; align-items:center; justify-content:center; }
 .classic-btn:hover { background:var(--soft); }
 .classic-btn-active { background:var(--accent-soft); border-color:var(--accent); color:var(--accent); font-weight:700; }
 .classic-status { color:var(--muted); font-size:14px; margin:10px 0; display:flex; flex-wrap:wrap; align-items:center; gap:10px; }

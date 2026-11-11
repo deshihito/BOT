@@ -1,0 +1,239 @@
+"use client";
+// ケンケン。ロジックは lib/kenken.ts（解先行生成・ルール検証で完成判定）。
+// マスを選んで下の数字パッドから入力する。端末内で完結し、サーバーへ送信しない。
+import Link from "next/link";
+import { useEffect, useMemo, useState } from "react";
+import {
+  checkKenken,
+  createKenkenGame,
+  setKenkenValue,
+  type KenkenSize,
+  type KenkenState,
+  type KenkenViolation,
+} from "@/lib/kenken";
+import { useGamesNav } from "../GamesShell";
+
+const SIZES: { key: KenkenSize; label: string }[] = [
+  { key: 4, label: "4×4" },
+  { key: 5, label: "5×5" },
+];
+
+function newGame(size: KenkenSize): KenkenState {
+  return createKenkenGame(size, Date.now() % 2147483647);
+}
+
+export default function KenkenClient() {
+  const { prefix } = useGamesNav();
+  const [size, setSize] = useState<KenkenSize>(4);
+  const [state, setState] = useState<KenkenState>(() => newGame(4));
+  const [selected, setSelected] = useState(0);
+  const [seconds, setSeconds] = useState(0);
+  const [best, setBest] = useState<number | null>(null);
+  const [checked, setChecked] = useState<KenkenViolation[] | null>(null);
+
+  useEffect(() => {
+    if (state.status !== "playing" || state.moves === 0) return;
+    const id = setInterval(() => setSeconds((s) => s + 1), 1000);
+    return () => clearInterval(id);
+  }, [state.status, state.moves]);
+
+  useEffect(() => {
+    try {
+      const saved = Number(window.localStorage.getItem(`ago-kenken-best-${size}`));
+      setBest(Number.isFinite(saved) && saved > 0 ? saved : null);
+    } catch {
+      setBest(null);
+    }
+  }, [size]);
+
+  useEffect(() => {
+    if (state.status !== "won" || seconds <= 0) return;
+    if (best !== null && seconds >= best) return;
+    setBest(seconds);
+    try {
+      window.localStorage.setItem(`ago-kenken-best-${size}`, String(seconds));
+    } catch {
+      // 保存失敗はプレイに影響しない。
+    }
+  }, [state.status, seconds, best, size]);
+
+  const restart = (nextSize: KenkenSize) => {
+    setSize(nextSize);
+    setState(newGame(nextSize));
+    setSelected(0);
+    setSeconds(0);
+    setChecked(null);
+  };
+
+  const input = (value: number) => {
+    setChecked(null);
+    setState((s) => setKenkenValue(s, selected, value));
+  };
+
+  const badCells = useMemo(() => {
+    const set = new Set<number>();
+    if (checked) for (const v of checked) for (const c of v.cells) set.add(c);
+    return set;
+  }, [checked]);
+
+  // ケージのラベルは、そのケージで最も小さい index のマスに表示する。
+  const labelCell = useMemo(() => {
+    const map = new Map<number, number>();
+    for (const cage of state.cages) {
+      map.set(Math.min(...cage.cells), cage.id);
+    }
+    return map;
+  }, [state.cages]);
+
+  const statusText =
+    state.status === "won"
+      ? "完成！クリアです。"
+      : checked !== null
+        ? checked.length === 0
+          ? "いまのところルール違反はありません。"
+          : checked[0].message
+        : "マスを選んで数字を入れよう。各行・各列に同じ数字は1つだけ。ケージの計算も合わせよう。";
+
+  return (
+    <>
+      <nav className="breadcrumbs" aria-label="パンくず">
+        <Link href={`${prefix}/games`}>ゲーム</Link>
+        <span> / </span>
+        <span>ケンケン</span>
+      </nav>
+      <div className="page-heading compact-heading">
+        <h1>ケンケン</h1>
+        <p className="muted">
+          マスをタップして選び、下の数字パッドで入力します。太線で囲まれたまとまりがケージで、左上の数字が目標値です。
+        </p>
+      </div>
+
+      <div className="classic-controls" role="group" aria-label="サイズ">
+        {SIZES.map((s) => (
+          <button
+            key={s.key}
+            type="button"
+            aria-pressed={size === s.key}
+            className={size === s.key ? "classic-btn classic-btn-active" : "classic-btn"}
+            onClick={() => restart(s.key)}
+          >
+            {s.label}
+          </button>
+        ))}
+        <button type="button" className="classic-btn" onClick={() => restart(size)}>
+          もう一度
+        </button>
+        <button
+          type="button"
+          className="classic-btn"
+          onClick={() => setChecked(checkKenken(state).violations)}
+        >
+          チェック
+        </button>
+      </div>
+
+      <p className="classic-status" role="status">
+        {seconds} 秒{best !== null ? ` ・ ベスト ${best} 秒` : ""} ・ {statusText}
+      </p>
+
+      <div
+        role="grid"
+        aria-label="ケンケンの盤"
+        style={{
+          display: "grid",
+          gridTemplateColumns: `repeat(${size}, minmax(0, 1fr))`,
+          maxWidth: size === 4 ? 400 : 460,
+          margin: "0 auto",
+          border: "3px solid var(--text)",
+        }}
+      >
+        {state.values.map((value, i) => {
+          const cageId = state.cageOf[i];
+          const r = Math.floor(i / size);
+          const c = i % size;
+          const thick = "3px solid var(--text)";
+          const thin = "1px solid var(--line)";
+          const borderTop = r === 0 || state.cageOf[i - size] !== cageId ? thick : thin;
+          const borderLeft = c === 0 || state.cageOf[i - 1] !== cageId ? thick : thin;
+          const borderRight = c === size - 1 || state.cageOf[i + 1] !== cageId ? thick : thin;
+          const borderBottom = r === size - 1 || state.cageOf[i + size] !== cageId ? thick : thin;
+          const labelId = labelCell.get(i);
+          const cage = labelId !== undefined ? state.cages[labelId] : null;
+          return (
+            <button
+              key={i}
+              type="button"
+              role="gridcell"
+              aria-label={`${r + 1}行${c + 1}列${value ? ` ${value}` : ""}`}
+              aria-pressed={selected === i}
+              onClick={() => setSelected(i)}
+              style={{
+                position: "relative",
+                aspectRatio: "1",
+                minWidth: 0,
+                padding: 0,
+                cursor: "pointer",
+                fontSize: size === 4 ? 26 : 22,
+                fontWeight: 700,
+                color: "var(--text)",
+                background: badCells.has(i)
+                  ? "#f7e3e0"
+                  : selected === i
+                    ? "var(--accent-soft)"
+                    : "#fff",
+                borderTop,
+                borderLeft,
+                borderRight,
+                borderBottom,
+              }}
+            >
+              {cage ? (
+                <span
+                  style={{
+                    position: "absolute",
+                    top: 2,
+                    left: 4,
+                    fontSize: 12,
+                    fontWeight: 700,
+                    color: "var(--muted)",
+                  }}
+                >
+                  {cage.target}
+                  {cage.op}
+                </span>
+              ) : null}
+              {value !== 0 ? value : ""}
+            </button>
+          );
+        })}
+      </div>
+
+      <div
+        className="classic-controls"
+        role="group"
+        aria-label="数字入力"
+        style={{ justifyContent: "center", marginTop: 14 }}
+      >
+        {Array.from({ length: size }, (_, i) => i + 1).map((n) => (
+          <button
+            key={n}
+            type="button"
+            className="classic-btn"
+            style={{ minWidth: 44, minHeight: 44, fontSize: 18, fontWeight: 700 }}
+            onClick={() => input(n)}
+          >
+            {n}
+          </button>
+        ))}
+        <button
+          type="button"
+          className="classic-btn"
+          style={{ minWidth: 44, minHeight: 44 }}
+          onClick={() => input(0)}
+        >
+          消す
+        </button>
+      </div>
+    </>
+  );
+}

@@ -14,9 +14,20 @@ import {
 } from "@/lib/memory-match";
 import { useGamesNav } from "../GamesShell";
 
+const LEVELS = [
+  { key: "easy", label: "かんたん（6ペア）", pairs: 6 },
+  { key: "normal", label: "ふつう（8ペア）", pairs: 8 },
+] as const;
+
+type LevelKey = (typeof LEVELS)[number]["key"];
+
 export default function MemoryClient() {
   const { prefix } = useGamesNav();
-  const [state, setState] = useState<MemState>(() => createMemoryGame(Date.now() % 2147483647));
+  const [levelKey, setLevelKey] = useState<LevelKey>("normal");
+  const pairs = LEVELS.find((l) => l.key === levelKey)?.pairs ?? 8;
+  const [state, setState] = useState<MemState>(() => createMemoryGame(Date.now() % 2147483647, 8));
+  const [seconds, setSeconds] = useState(0);
+  const [best, setBest] = useState<number | null>(null);
 
   useEffect(() => {
     if (!isPairPending(state)) return;
@@ -25,7 +36,39 @@ export default function MemoryClient() {
     return () => clearTimeout(id);
   }, [state]);
 
-  const restart = () => setState(createMemoryGame(Date.now() % 2147483647));
+  const started = state.moves > 0 || state.faceUp.length > 0;
+  useEffect(() => {
+    if (!started || state.status === "won") return;
+    const id = setInterval(() => setSeconds((s) => s + 1), 1000);
+    return () => clearInterval(id);
+  }, [started, state.status]);
+
+  useEffect(() => {
+    try {
+      const saved = Number(window.localStorage.getItem(`ago-memory-best-${pairs}`));
+      setBest(Number.isFinite(saved) && saved > 0 ? saved : null);
+    } catch {
+      setBest(null);
+    }
+  }, [pairs]);
+
+  useEffect(() => {
+    if (state.status !== "won") return;
+    if (best !== null && state.moves >= best) return;
+    setBest(state.moves);
+    try {
+      window.localStorage.setItem(`ago-memory-best-${pairs}`, String(state.moves));
+    } catch {
+      // 保存失敗はプレイに影響しない。
+    }
+  }, [state.status, state.moves, best, pairs]);
+
+  const restart = (key: LevelKey = levelKey) => {
+    const level = LEVELS.find((l) => l.key === key) ?? LEVELS[1];
+    setLevelKey(key);
+    setState(createMemoryGame(Date.now() % 2147483647, level.pairs));
+    setSeconds(0);
+  };
 
   return (
     <>
@@ -36,12 +79,27 @@ export default function MemoryClient() {
       </nav>
       <div className="page-heading compact-heading">
         <h1>メモリーマッチ</h1>
-        <p className="muted">裏返したカードの絵柄を当てる神経衰弱。8ペア16枚、手数の少なさを目指そう。</p>
+        <p className="muted">裏返したカードの絵柄を当てる神経衰弱。手数の少なさを目指そう。</p>
+      </div>
+
+      <div className="classic-controls" role="group" aria-label="難易度">
+        {LEVELS.map((level) => (
+          <button
+            key={level.key}
+            type="button"
+            className={levelKey === level.key ? "classic-btn classic-btn-active" : "classic-btn"}
+            aria-pressed={levelKey === level.key}
+            onClick={() => restart(level.key)}
+          >
+            {level.label}
+          </button>
+        ))}
       </div>
 
       <p className="classic-status" role="status">
-        {state.moves} 手 ・ そろったペア {state.matchedPairs} / 8
-        {state.status === "won" ? ` ・ 全ペア制覇！ ${state.moves} 手でクリアです。` : ""}
+        {state.moves} 手 ・ そろったペア {state.matchedPairs} / {pairs} ・ {seconds} 秒
+        {best !== null ? ` ・ ベスト ${best} 手` : ""}
+        {state.status === "won" ? ` ・ 全ペア制覇！ ${state.moves} 手・${seconds} 秒でクリアです。` : ""}
       </p>
 
       <div className="mem-board" role="grid" aria-label="メモリーマッチの盤">
@@ -67,7 +125,7 @@ export default function MemoryClient() {
       </div>
 
       <div className="classic-controls">
-        <button type="button" className="classic-btn" onClick={restart}>
+        <button type="button" className="classic-btn" onClick={() => restart()}>
           もう一度
         </button>
       </div>

@@ -1,0 +1,218 @@
+"use client";
+// マスターマインド。ロジックは lib/mastermind.ts（ヒット＆ブローの集計・勝敗）。
+// 色を4つ並べて判定し、10回までに正解の並びを当てる。端末内で完結。
+import Link from "next/link";
+import { useState } from "react";
+import {
+  createMastermindGame,
+  isValidGuess,
+  mmPalette,
+  remainingGuesses,
+  submitGuess,
+  MM_CODE_LENGTH,
+  type MmColor,
+  type MmDifficulty,
+  type MmState,
+} from "@/lib/mastermind";
+import { useGamesNav } from "../GamesShell";
+
+const DIFFS: { key: MmDifficulty; label: string }[] = [
+  { key: "easy", label: "かんたん（5色）" },
+  { key: "normal", label: "ふつう（6色）" },
+];
+
+function newGame(diff: MmDifficulty): MmState {
+  return createMastermindGame(Date.now() % 2147483647, diff);
+}
+
+function Peg({ color, size = 30 }: { color: MmColor | undefined; size?: number }) {
+  return (
+    <span
+      aria-label={color ? color.label : "未選択"}
+      style={{
+        display: "inline-block",
+        width: size,
+        height: size,
+        borderRadius: "50%",
+        background: color ? color.value : "transparent",
+        border: color ? "2px solid rgba(0,0,0,0.25)" : "2px dashed var(--line)",
+        verticalAlign: "middle",
+      }}
+    />
+  );
+}
+
+export default function MastermindClient() {
+  const { prefix } = useGamesNav();
+  const [difficulty, setDifficulty] = useState<MmDifficulty>("normal");
+  const [state, setState] = useState<MmState>(() => newGame("normal"));
+  const [current, setCurrent] = useState<(string | null)[]>(() => Array(MM_CODE_LENGTH).fill(null));
+  const [slot, setSlot] = useState(0);
+
+  const palette = mmPalette(state.difficulty);
+  const colorOf = (id: string | null) => palette.find((c) => c.id === id) ?? undefined;
+  const full = current.every((c) => c !== null);
+  const canSubmit = state.status === "playing" && full && isValidGuess(state, current as string[]);
+
+  const restart = (diff: MmDifficulty) => {
+    setDifficulty(diff);
+    setState(newGame(diff));
+    setCurrent(Array(MM_CODE_LENGTH).fill(null));
+    setSlot(0);
+  };
+
+  const pickColor = (id: string) => {
+    if (state.status !== "playing") return;
+    const next = [...current];
+    next[slot] = id;
+    setCurrent(next);
+    const emptyAfter = next.findIndex((c, i) => i > slot && c === null);
+    const emptyAny = next.findIndex((c) => c === null);
+    setSlot(emptyAfter >= 0 ? emptyAfter : emptyAny >= 0 ? emptyAny : slot);
+  };
+
+  const onSubmit = () => {
+    if (!canSubmit) return;
+    setState((s) => submitGuess(s, current as string[]));
+    setCurrent(Array(MM_CODE_LENGTH).fill(null));
+    setSlot(0);
+  };
+
+  return (
+    <>
+      <nav className="breadcrumbs" aria-label="パンくず">
+        <Link href={`${prefix}/games`}>ゲーム</Link>
+        <span> / </span>
+        <span>マスターマインド</span>
+      </nav>
+      <div className="page-heading compact-heading">
+        <h1>マスターマインド</h1>
+        <p className="muted">
+          隠された4つの色の並びを当てる推理ゲーム。ヒットは色も位置も一致、ブローは色だけ一致（位置違い）です。色は重複します。
+        </p>
+      </div>
+
+      <div className="classic-controls" role="group" aria-label="難易度">
+        {DIFFS.map((d) => (
+          <button
+            key={d.key}
+            type="button"
+            aria-pressed={difficulty === d.key}
+            className={difficulty === d.key ? "classic-btn classic-btn-active" : "classic-btn"}
+            onClick={() => restart(d.key)}
+          >
+            {d.label}
+          </button>
+        ))}
+        <button type="button" className="classic-btn" onClick={() => restart(difficulty)}>
+          もう一度
+        </button>
+      </div>
+
+      <p className="classic-status" role="status">
+        残り {remainingGuesses(state)} 回
+        {state.status === "won"
+          ? ` ・ 🎉 正解！ ${state.guesses.length} 回で当てました。`
+          : state.status === "lost"
+            ? " ・ 終了… 正解は下の通りでした。"
+            : ""}
+      </p>
+
+      {state.status === "lost" && (
+        <p style={{ display: "flex", alignItems: "center", gap: 8, margin: "6px 0" }}>
+          <strong>正解:</strong>
+          {state.secret.map((id, i) => (
+            <Peg key={i} color={colorOf(id) ?? { id, label: id, value: "#999" }} />
+          ))}
+          <span className="muted">{state.secret.map((id) => colorOf(id)?.label ?? id).join("・")}</span>
+        </p>
+      )}
+
+      <section aria-label="いまの予想" style={{ margin: "14px 0" }}>
+        <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+          {current.map((id, i) => (
+            <button
+              key={i}
+              type="button"
+              aria-label={`${i + 1} 番目のマス${id ? `（${colorOf(id)?.label ?? id}）` : "（未選択）"}`}
+              aria-pressed={slot === i}
+              onClick={() => setSlot(i)}
+              style={{
+                padding: 4,
+                borderRadius: "50%",
+                border: slot === i ? "3px solid var(--accent)" : "3px solid transparent",
+                background: "transparent",
+                cursor: "pointer",
+              }}
+            >
+              <Peg color={colorOf(id)} size={36} />
+            </button>
+          ))}
+          <button type="button" className="classic-btn" onClick={() => { setCurrent(Array(MM_CODE_LENGTH).fill(null)); setSlot(0); }}>
+            クリア
+          </button>
+          <button
+            type="button"
+            className="classic-btn classic-btn-active"
+            disabled={!canSubmit}
+            onClick={onSubmit}
+            style={canSubmit ? undefined : { opacity: 0.5, cursor: "not-allowed" }}
+          >
+            判定する
+          </button>
+        </div>
+        <div style={{ display: "flex", gap: 10, marginTop: 12, flexWrap: "wrap" }} role="group" aria-label="色の選択">
+          {palette.map((c) => (
+            <button
+              key={c.id}
+              type="button"
+              aria-label={`${c.label}を選ぶ`}
+              onClick={() => pickColor(c.id)}
+              style={{ padding: 2, border: "none", background: "transparent", cursor: "pointer" }}
+            >
+              <Peg color={c} size={34} />
+            </button>
+          ))}
+        </div>
+      </section>
+
+      <section aria-label="履歴">
+        <h2 style={{ fontSize: 16, margin: "14px 0 8px" }}>履歴</h2>
+        {state.guesses.length === 0 ? (
+          <p className="muted">まだ判定していません。色を4つ選んで「判定する」を押してください。</p>
+        ) : (
+          <ol style={{ listStyle: "none", padding: 0, margin: 0, display: "grid", gap: 8 }}>
+            {[...state.guesses].reverse().map((g, ri) => {
+              const turn = state.guesses.length - ri;
+              return (
+                <li
+                  key={turn}
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 10,
+                    flexWrap: "wrap",
+                    padding: "8px 10px",
+                    border: "1px solid var(--line)",
+                    borderRadius: 10,
+                    background: "#fff",
+                  }}
+                >
+                  <span style={{ fontWeight: 700, minWidth: 34 }}>{turn}.</span>
+                  <span style={{ display: "inline-flex", gap: 6 }}>
+                    {g.pegs.map((id, i) => (
+                      <Peg key={i} color={colorOf(id) ?? { id, label: id, value: "#999" }} size={24} />
+                    ))}
+                  </span>
+                  <span>
+                    ● ヒット {g.hits} ・ ○ ブロー {g.blows}
+                  </span>
+                </li>
+              );
+            })}
+          </ol>
+        )}
+      </section>
+    </>
+  );
+}

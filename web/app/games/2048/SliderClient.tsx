@@ -19,13 +19,48 @@ const KEY_DIRS: Record<string, SlideDir> = {
   ArrowDown: "down",
 };
 
+const BEST_KEY = "ago-2048-best";
+
 export default function SliderClient() {
   const { prefix } = useGamesNav();
   const [state, setState] = useState<SlideState>(() => createSlideGame(Date.now() % 2147483647));
+  const [best, setBest] = useState(0);
   const touchRef = useRef<{ x: number; y: number } | null>(null);
+  const historyRef = useRef<SlideState[]>([]);
+
+  useEffect(() => {
+    try {
+      const saved = Number(window.localStorage.getItem(BEST_KEY));
+      if (Number.isFinite(saved) && saved > 0) setBest(saved);
+    } catch {
+      // 保存できない環境ではベスト表示なしで続行する。
+    }
+  }, []);
+
+  useEffect(() => {
+    if (state.score <= best) return;
+    setBest(state.score);
+    try {
+      window.localStorage.setItem(BEST_KEY, String(state.score));
+    } catch {
+      // 保存失敗はプレイに影響しない。
+    }
+  }, [state.score, best]);
 
   const doMove = useCallback((dir: SlideDir) => {
-    setState((s) => moveSlide(s, dir).state);
+    setState((s) => {
+      const result = moveSlide(s, dir);
+      if (!result.moved) return s;
+      historyRef.current = [...historyRef.current.slice(-49), s];
+      return result.state;
+    });
+  }, []);
+
+  const undo = useCallback(() => {
+    const prev = historyRef.current[historyRef.current.length - 1];
+    if (!prev) return;
+    historyRef.current = historyRef.current.slice(0, -1);
+    setState(prev);
   }, []);
 
   useEffect(() => {
@@ -39,7 +74,10 @@ export default function SliderClient() {
     return () => window.removeEventListener("keydown", onKey);
   }, [doMove]);
 
-  const restart = () => setState(createSlideGame(Date.now() % 2147483647));
+  const restart = () => {
+    historyRef.current = [];
+    setState(createSlideGame(Date.now() % 2147483647));
+  };
 
   const onTouchEnd = (e: React.TouchEvent) => {
     const start = touchRef.current;
@@ -66,6 +104,7 @@ export default function SliderClient() {
 
       <p className="classic-status" role="status">
         スコア {state.score} ・ {state.moves} 手
+        {best > 0 ? ` ・ ベスト ${best}` : ""}
         {state.status === "won" ? " ・ 2048 達成！" : ""}
         {state.status === "lost" ? " ・ もう動けません" : ""}
       </p>
@@ -104,6 +143,9 @@ export default function SliderClient() {
         <button type="button" className="classic-btn" aria-label="上へ" onClick={() => doMove("up")}>↑</button>
         <button type="button" className="classic-btn" aria-label="下へ" onClick={() => doMove("down")}>↓</button>
         <button type="button" className="classic-btn" aria-label="右へ" onClick={() => doMove("right")}>→</button>
+        <button type="button" className="classic-btn" onClick={undo}>
+          1手もどす
+        </button>
         <button type="button" className="classic-btn" onClick={restart}>
           もう一度
         </button>
