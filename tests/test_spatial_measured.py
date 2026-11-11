@@ -109,5 +109,33 @@ class SpatialErrorFallbackTest(unittest.TestCase):
         self.assertEqual(len(frame2), 3840)
 
 
+class BlockConvolverTest(unittest.TestCase):
+    def test_block_convolution_matches_reference_with_block_delay(self):
+        import sys as _sys
+        import types as _types
+
+        _sys.modules.setdefault("yt_dlp", _types.ModuleType("yt_dlp"))
+        from core.vc.music.spatial import _BlockConvolver
+
+        rng = np.random.default_rng(42)
+        sig = rng.standard_normal(20000).astype(np.float32)
+        ir = rng.standard_normal(3000).astype(np.float32) * 0.1
+        ref = np.convolve(sig, ir)[: len(sig)]
+        conv = _BlockConvolver()
+        outs = []
+        for i in range(0, len(sig), 960):
+            chunk = sig[i : i + 960]
+            if len(chunk) < 960:
+                chunk = np.pad(chunk, (0, 960 - len(chunk)))
+            o, _ = conv.process(chunk, chunk, ir, ir, ("room", 0.5))
+            outs.append(o)
+        out = np.concatenate(outs)
+        # ウェット出力は「ブロックが満ちたフレーム」から出始めるため、
+        # 960サンプルフレームでは 3840 サンプル遅れて一致する
+        delay = 3840
+        delayed = out[delay : delay + 10000]
+        self.assertTrue(np.allclose(delayed, ref[:10000], atol=1e-4))
+
+
 if __name__ == "__main__":
     unittest.main()
