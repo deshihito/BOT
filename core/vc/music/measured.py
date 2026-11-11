@@ -22,6 +22,24 @@ _room_cache = None  # None=未読込 / False=失敗 / dict=成功
 _speaker_cache = None
 
 
+# 1フレーム(20ms)の畳み込みコストを抑えるため、IR は最大 1.5 秒まで使う。
+# 末尾はフェードアウトさせて切り取る（残響の聞こえ方はほぼ変わらない）。
+_MAX_IR_SECONDS = 1.5
+_FADE_SECONDS = 0.25
+
+
+def _truncate_ir(ir: np.ndarray) -> np.ndarray:
+    """(samples, 2) の IR を最大長へ切り詰め、末尾をフェードアウトさせる。"""
+    max_len = int(48000 * _MAX_IR_SECONDS)
+    if len(ir) <= max_len:
+        return ir
+    out = np.array(ir[:max_len], dtype=np.float32)
+    fade = int(48000 * _FADE_SECONDS)
+    ramp = np.linspace(1.0, 0.0, fade, dtype=np.float32) ** 2
+    out[-fade:] *= ramp[:, None]
+    return out
+
+
 def load_room_irs():
     """{"room": (L, R), "hall": (L, R)}（float32, 48kHz）を返す。読めなければ None。"""
     global _room_cache
@@ -31,7 +49,7 @@ def load_room_irs():
         with np.load(_ASSETS / "room_ir.npz") as data:
             result = {}
             for key in ("room", "hall"):
-                ir = np.array(data[key], dtype=np.float32)
+                ir = _truncate_ir(np.array(data[key], dtype=np.float32))
                 result[key] = (ir[:, 0].copy(), ir[:, 1].copy())
         _room_cache = result
         logger.info("実測の部屋IRを読み込みました")
