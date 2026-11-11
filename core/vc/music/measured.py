@@ -50,6 +50,12 @@ def load_room_irs():
             result = {}
             for key in ("room", "hall"):
                 ir = _truncate_ir(np.array(data[key], dtype=np.float32))
+                # ウェット量の基準をそろえるため、IR はエネルギー（L2ノルム）= 1 に
+                # 正規化する。これで畳み込み後のウェット音量はドライと同程度 ×
+                # wet_val になり、部屋ごとの音量差もなくなる。
+                norm = float(np.sqrt(np.sum(ir.astype(np.float64) ** 2)))
+                if norm > 0:
+                    ir = (ir / norm).astype(np.float32)
                 result[key] = (ir[:, 0].copy(), ir[:, 1].copy())
         _room_cache = result
         logger.info("実測の部屋IRを読み込みました")
