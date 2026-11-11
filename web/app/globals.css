@@ -360,6 +360,7 @@ body:has([data-activity-root]) > main { max-width:none; min-height:100svh; margi
 .op-suboption { padding:8px 14px; border:1px solid var(--line); border-radius:999px; background:#fff; color:var(--muted); font-size:14px; font-weight:700; cursor:pointer; }
 .op-suboption:hover { border-color:var(--accent); color:var(--text); }
 .op-suboption.selected { background:var(--accent); border-color:var(--accent); color:#fff; }
+.op-suboption:disabled { opacity:.45; cursor:not-allowed; }
 .op-countrow { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
 .op-countlabel { color:var(--muted); font-size:14px; font-weight:700; min-width:104px; }
 .op-settings { display:grid; gap:10px; padding:14px; border:1px solid var(--line); border-radius:9px; background:#fff; }
@@ -370,9 +371,12 @@ body:has([data-activity-root]) > main { max-width:none; min-height:100svh; margi
 .op-menu-panel { position:absolute; top:calc(100% + 8px); right:0; z-index:30; width:min(300px,82vw); display:grid; gap:10px; padding:16px; border:1px solid var(--line); border-radius:9px; background:#fff; box-shadow:0 10px 28px rgba(23,25,28,.13); }
 .op-menu-head { display:flex; align-items:center; justify-content:space-between; font-size:14px; font-weight:800; }
 .op-menu-close { padding:2px 6px; border:0; background:transparent; color:var(--muted); font-size:18px; line-height:1; cursor:pointer; }
-.op-menu-steps { display:grid; gap:6px; margin:0; padding-left:20px; font-size:14px; line-height:1.6; }
-.op-menu-link { padding:10px 12px; border:1px solid var(--line); border-radius:8px; color:var(--text); font-size:14px; font-weight:700; text-decoration:none; }
-.op-menu-link:hover { background:var(--accent-soft); }
+.op-menu-models { display:grid; gap:6px; margin:0; padding:0; list-style:none; }
+.op-menu-model { display:flex; align-items:center; gap:8px; width:100%; padding:10px 12px; border:1px solid var(--line); border-radius:8px; background:#fff; color:var(--text); font-size:14px; font-weight:700; text-align:left; cursor:pointer; }
+.op-menu-model:hover { background:var(--accent-soft); }
+.op-menu-check { flex:none; width:16px; text-align:center; }
+.op-header-right { display:flex; align-items:center; gap:10px; }
+.op-header-model { color:var(--muted); font-size:12px; font-weight:700; white-space:nowrap; }
 .op-freeform { display:grid; gap:10px; }
 .op-primary.op-small { justify-self:start; padding:10px 16px; font-size:14px; }
 .op-edit { min-height:280px; background:var(--soft); font-size:14px; line-height:1.8; }
@@ -398,7 +402,14 @@ body:has(.op-shell) { background:#f4f8fd; }
 .op-shell .op-footer { display:flex; align-items:center; gap:18px; flex-wrap:wrap; margin-top:44px; padding:16px 2px 4px; border-top:1px solid var(--line); background:transparent; }
 .op-footer-brand { display:flex; align-items:center; gap:7px; color:var(--muted); font-size:13px; font-weight:700; letter-spacing:.06em; }
 .op-brand svg, .op-footer-brand svg { flex:none; display:block; }
-.op-shell .op-option,.op-shell .op-secondary,.op-shell .op-suboption { background:#ffffff; }
+.op-shell .op-option,.op-shell .op-secondary,.op-shell .op-suboption:not(.selected) { background:#ffffff; }
+/* 選択中はプライマリと同じ黒背景＋白文字で統一する。
+   以前は上の行の一律「background:#ffffff」が詳細度同点・後勝ちで
+   .op-suboption.selected の黒背景を打ち消し、選択中ボタンが
+   白背景＋白文字で真っ白に見えるバグがあった（:not(.selected) と
+   この明示ルールの二重で防ぐ）。 */
+.op-shell .op-suboption.selected { background:#17191c; border-color:#17191c; color:#fff; }
+.op-shell .op-menu-model.selected { background:#17191c; border-color:#17191c; color:#fff; }
 /* --- WEB ゲーム（/games） --- */
 .games-shell[data-activity-root] { max-width:880px; margin:0 auto; padding:18px 16px 48px; }
 .games-embedded-bar { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:14px; padding-bottom:10px; border-bottom:1px solid var(--line); font-size:14px; }

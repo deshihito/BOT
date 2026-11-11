@@ -61,13 +61,19 @@ export function resolvePromptLang(value: unknown): PromptLang {
  */
 export type PrompterModelKey = "glm53" | "glm53-flash" | "deepseek1017" | "gemma26b" | "qwen27b" | "kimi31pro";
 
-export const PROMPTER_MODEL_OPTIONS: { key: PrompterModelKey; label: string }[] = [
-  { key: "glm53", label: "GLM 5.3" },
-  { key: "glm53-flash", label: "GLM 5.3 Flash" },
-  { key: "deepseek1017", label: "DeepSeek 1017" },
-  { key: "gemma26b", label: "Gemma 26B" },
-  { key: "qwen27b", label: "Qwen 3.8 27B" },
-  { key: "kimi31pro", label: "Kimi K3.1 Pro" },
+/**
+ * think は「より考える」トグル（思考強度のオン）がそのモデルで効くか。
+ * reasoning パラメータの出し分けが確認できているモデルだけ true。
+ * gemma / kimi は reasoning の対応が未確認のため false（トグルは無効化され、
+ * サーバー側でもオン扱いにしない）。
+ */
+export const PROMPTER_MODEL_OPTIONS: { key: PrompterModelKey; label: string; think: boolean }[] = [
+  { key: "glm53", label: "GLM 5.3", think: true },
+  { key: "glm53-flash", label: "GLM 5.3 Flash", think: true },
+  { key: "deepseek1017", label: "DeepSeek 1017", think: true },
+  { key: "gemma26b", label: "Gemma 26B", think: false },
+  { key: "qwen27b", label: "Qwen 3.8 27B", think: true },
+  { key: "kimi31pro", label: "Kimi K3.1 Pro", think: false },
 ];
 
 export const DEFAULT_MODEL_KEY: PrompterModelKey = "deepseek1017";
@@ -78,6 +84,16 @@ export function resolveModelKey(value: unknown): PrompterModelKey {
     return value as PrompterModelKey;
   }
   return DEFAULT_MODEL_KEY;
+}
+
+/** API の think フィールドを検証する。true のときだけオン、それ以外（不正値・未指定）はオフに丸める。 */
+export function resolveThink(value: unknown): boolean {
+  return value === true;
+}
+
+/** 「より考える」トグルがそのモデルで効くか（reasoning の出し分け対象か）。 */
+export function modelSupportsThink(key: PrompterModelKey): boolean {
+  return PROMPTER_MODEL_OPTIONS.some((o) => o.key === key && o.think);
 }
 
 export type LlmQuestion = {
