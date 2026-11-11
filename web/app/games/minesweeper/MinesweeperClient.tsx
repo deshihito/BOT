@@ -30,12 +30,33 @@ export default function MinesweeperClient() {
   const [state, setState] = useState<MsState>(() => newGame("easy"));
   const [flagMode, setFlagMode] = useState(false);
   const [seconds, setSeconds] = useState(0);
+  const [best, setBest] = useState<number | null>(null);
 
   useEffect(() => {
     if (state.status !== "playing") return;
     const id = setInterval(() => setSeconds((s) => s + 1), 1000);
     return () => clearInterval(id);
   }, [state.status]);
+
+  useEffect(() => {
+    try {
+      const saved = Number(window.localStorage.getItem(`ago-minesweeper-best-${levelKey}`));
+      setBest(Number.isFinite(saved) && saved > 0 ? saved : null);
+    } catch {
+      setBest(null);
+    }
+  }, [levelKey]);
+
+  useEffect(() => {
+    if (state.status !== "won" || seconds <= 0) return;
+    if (best !== null && seconds >= best) return;
+    setBest(seconds);
+    try {
+      window.localStorage.setItem(`ago-minesweeper-best-${levelKey}`, String(seconds));
+    } catch {
+      // 保存失敗はプレイに影響しない。
+    }
+  }, [state.status, seconds, best, levelKey]);
 
   const restart = (key: LevelKey) => {
     setLevelKey(key);
@@ -99,7 +120,8 @@ export default function MinesweeperClient() {
       </div>
 
       <p className="classic-status" role="status">
-        残りの地雷 {state.mineTotal - state.flags} ・ {seconds} 秒 ・ {statusText}
+        残りの地雷 {state.mineTotal - state.flags} ・ {seconds} 秒
+        {best !== null ? ` ・ ベスト ${best} 秒` : ""} ・ {statusText}
       </p>
 
       <div
