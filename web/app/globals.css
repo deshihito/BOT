@@ -884,6 +884,25 @@ button.balku-card:hover { box-shadow:0 10px 20px rgba(0,0,0,.45), inset 0 0 0 3p
 .lll-logline-latest { font-size:13px; color:#ece7fb; font-weight:700; }
 .lll-actionbar { display:flex; flex-wrap:wrap; align-items:center; justify-content:center; gap:8px; padding:12px; border:1px solid rgba(245,197,24,.4); border-radius:12px; background:rgba(245,197,24,.06); animation:lll-pop var(--lll-dur) var(--lll-ease); }
 .lll-actionbar-label { width:100%; text-align:center; font-size:13px; font-weight:800; color:#f7d774; }
+/* 高密度化: 戦術デッキ選択と手札バー */
+.lll-deckpick { display:flex; flex-wrap:wrap; gap:8px; justify-content:center; margin-top:12px; }
+.lll-deck-btn { flex:1 1 150px; max-width:230px; display:grid; gap:2px; padding:10px 12px; border:1px solid rgba(236,231,251,.18); border-radius:10px; background:rgba(255,255,255,.04); color:#ece7fb; font:inherit; text-align:left; cursor:pointer; transition:border-color var(--lll-dur) var(--lll-ease), transform var(--lll-dur) var(--lll-ease); }
+.lll-deck-btn:hover { border-color:rgba(167,139,250,.55); }
+.lll-deck-btn:active { transform:scale(.99); }
+.lll-deck-selected { border-color:var(--lll-gold); background:rgba(245,197,24,.08); box-shadow:0 0 0 1px var(--lll-gold); }
+.lll-deck-name { font-size:14px; font-weight:800; }
+.lll-deck-desc { font-size:11px; line-height:1.5; color:#b3a9d6; }
+.lll-deck-note { width:100%; font-size:11px; line-height:1.6; color:#8f83b8; text-align:center; }
+.lll-tactics { display:flex; flex-wrap:wrap; align-items:center; justify-content:center; gap:6px; margin-bottom:8px; padding:10px; border:1px solid rgba(124,92,255,.45); border-radius:12px; background:rgba(124,92,255,.08); animation:lll-pop var(--lll-dur) var(--lll-ease); }
+.lll-chip-tp { border-color:rgba(245,197,24,.6); color:#f7d774; font-weight:800; }
+.lll-chip-reserve { border-color:rgba(127,214,164,.55); color:#7fd6a4; }
+.lll-hand { display:flex; flex-wrap:wrap; gap:6px; justify-content:center; width:100%; }
+.lll-tactic-btn { display:grid; gap:1px; min-width:104px; padding:7px 10px; border:1px solid rgba(167,139,250,.5); border-radius:9px; background:linear-gradient(160deg, rgba(124,92,255,.22), rgba(255,255,255,.05)); color:#ece7fb; font:inherit; cursor:pointer; text-align:left; transition:transform var(--lll-dur) var(--lll-ease), border-color var(--lll-dur) var(--lll-ease); }
+.lll-tactic-btn:hover:not(:disabled) { border-color:var(--lll-gold); transform:translateY(-1px); }
+.lll-tactic-btn:disabled { opacity:.42; cursor:not-allowed; }
+.lll-tactic-name { font-size:12px; font-weight:800; white-space:nowrap; }
+.lll-tactic-meta { font-size:10px; color:#b3a9d6; white-space:nowrap; }
+.lll-tactics-hint { width:100%; font-size:11px; color:#8f83b8; text-align:center; }
 .lll-dmg { position:absolute; top:26%; left:50%; z-index:5; transform:translateX(-50%); color:#ff8f86; font-size:20px; font-weight:900; text-shadow:0 2px 6px #000; pointer-events:none; animation:lll-dmg-float 950ms ease-out both; white-space:nowrap; }
 .lll-dmg-heal { color:#7fd6a4; }
 .lll-dmg-weak { color:var(--lll-gold); font-size:25px; }

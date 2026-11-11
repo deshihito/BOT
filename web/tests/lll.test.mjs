@@ -36,7 +36,7 @@ async function loadBundle(files, exportNames) {
 }
 
 const game = await loadBundle(
-  ["lll-game.ts", "lll-battle.ts", "lll-playback.ts"],
+  ["lll-game.ts", "lll-tactics.ts", "lll-battle.ts", "lll-playback.ts"],
   [
     "TIER_BUDGET",
     "STAT_TOTAL_CAP",
@@ -62,6 +62,14 @@ const game = await loadBundle(
     "applyAction",
     "cpuChooseAction",
     "simulateBattle",
+    "TACTIC_CARDS",
+    "TACTIC_CARD_BY_ID",
+    "TACTIC_DECKS",
+    "tacticDeckList",
+    "applyTacticPlay",
+    "canPlayTactic",
+    "evalTacticCond",
+    "cpuPlayTactics",
     "PLAYBACK_DURATIONS",
     "buildPlaybackSteps",
     "stepDurationMs",
@@ -299,4 +307,135 @@ test("逐次再生: 相性1.25の damage は弱点フロート、2倍速の撃�
   assert.equal(game.stepDurationMs(steps[1], "2x"), 360);
   assert.equal(game.stepDurationMs(steps[0], "2x"), 280);
   assert.equal(game.PLAYBACK_DURATIONS.damage, 560);
+});
+
+/* --- 高密度化（戦術カード） --- */
+
+function densityBattle(seed, playerDeck = "chain", cpuDeck = "pursuit") {
+  return game.createBattle(`den${seed}`, game.STARTER_CARDS, game.STARTER_CARDS, 4, seed, {
+    tacticDecks: {
+      player: playerDeck ? game.tacticDeckList(playerDeck) : null,
+      cpu: cpuDeck ? game.tacticDeckList(cpuDeck) : null,
+    },
+  });
+}
+
+test("高密度化: 戦術カードは36種、各プリセットデッキは検証済み分布の30枚", () => {
+  assert.equal(game.TACTIC_CARDS.length, 36);
+  // プリセット分布はプロトタイプ検証（仕様 §4.4）の最終値そのもの。
+  // 汎用の同名3枚制限は将来のデッキ構築UIの規則で、検証済みプリセットの
+  // 接続札（B5 等）はこの限りではない。
+  const expectedFillers = { chain: 5, echo: 3, pursuit: 6 };
+  for (const deckId of ["chain", "echo", "pursuit"]) {
+    const list = game.tacticDeckList(deckId);
+    assert.equal(list.length, 30, `${deckId} は30枚`);
+    for (const id of list) assert.ok(game.TACTIC_CARD_BY_ID.has(id), `${id} の定義が無い`);
+    assert.equal(list.filter((id) => id === "B5").length, expectedFillers[deckId], `${deckId} の B5 枚数が分布と違う`);
+  }
+  assert.equal(game.tacticDeckList("nope"), null);
+});
+
+test("高密度化: デッキ付きで生成すると初期手札4枚・TP5、無指定なら戦術層は無い", () => {
+  const state = densityBattle(11);
+  assert.ok(state.tactics);
+  assert.equal(state.tactics.player.hand.length, 4);
+  assert.equal(state.tactics.player.deck.length, 26);
+  assert.equal(state.tactics.player.tp, 5);
+  assert.equal(state.tactics.cpu.hand.length, 4);
+  const legacy = game.createBattle("legacy", game.STARTER_CARDS, game.STARTER_CARDS, 0, 11);
+  assert.equal(legacy.tactics, undefined);
+  const noCpuDeck = densityBattle(12, "chain", null);
+  assert.equal(noCpuDeck.tactics.cpu.hand.length, 0);
+  assert.equal(noCpuDeck.tactics.cpu.deck.length, 0);
+});
+
+test("高密度化: applyTacticPlay の検証（手札に無い／TP不足／条件未達）", () => {
+  const state = densityBattle(21);
+  state.tactics.player.hand = ["A4"];
+  state.tactics.player.tp = 5;
+  assert.throws(() => game.applyTacticPlay(state, "B5"), /手札にありません/);
+  state.tactics.player.tp = 1;
+  assert.throws(() => game.applyTacticPlay(state, "A4"), /TPが足りません/);
+  state.tactics.player.tp = 5;
+  state.tactics.player.hand = ["A3"]; // A3 は「このターン1枚以上プレイ」が条件
+  assert.equal(game.canPlayTactic(state, "player", "A3"), false);
+  assert.throws(() => game.applyTacticPlay(state, "A3"), /条件を満たしていません/);
+});
+
+test("高密度化: A8 は自己参照で連鎖ドローが発動し、A5 のTP獲得は同名1回まで", () => {
+  const state = densityBattle(31);
+  const actor = game.currentActor(state);
+  assert.equal(actor.side, "player");
+  state.tactics.cpu.reserves = []; // 生成時の CPU 手番で置かれた設置を除き、A8 の着弾を素通しにする
+  state.tactics.player.hand = ["A8", "A5", "A5"];
+  state.tactics.player.tp = 5;
+  const handBefore = state.tactics.player.hand.length;
+  game.applyTacticPlay(state, "A8");
+  // A8: 1枚消費 → 連鎖で1枚ドロー → 手札は元の枚数のまま
+  assert.equal(state.tactics.player.hand.length, handBefore - 1 + 1);
+  assert.ok(state.log.some((e) => e.text.includes("連鎖効果")));
+  assert.equal(state.tactics.turn.cardsPlayed, 1);
+  assert.ok(state.tactics.turn.dmgCount >= 1);
+  // A5 を2回: 1回目は TP5→4→5、2回目はコストだけ払って獲得は止まる
+  game.applyTacticPlay(state, "A5");
+  assert.equal(state.tactics.player.tp, 5);
+  game.applyTacticPlay(state, "A5");
+  assert.equal(state.tactics.player.tp, 4);
+  assert.ok(state.log.some((e) => e.text.includes("1ターンに1回まで")));
+  // 戦術プレイでは手番は進まない
+  assert.equal(game.currentActor(state).key, actor.key);
+});
+
+test("高密度化: 設置 C4 は被ダメージを軽減して消費される", () => {
+  const state = densityBattle(41);
+  const actor = game.currentActor(state);
+  state.tactics.cpu.reserves = ["C4"];
+  const cpuTarget = state.actors.find((a) => a.side === "cpu" && a.alive);
+  const hpBefore = cpuTarget.hp;
+  game.applyAction(state, { skill: "basic", targetKey: cpuTarget.key });
+  assert.ok(state.log.some((e) => e.text.includes("軽減")), "C4 の軽減イベントが無い");
+  // 消費された C4 は捨札へ（この後の CPU 手番で別の C4 が設置される場合があるため、
+  // 設置枠そのものではなく消費の痕跡で判定する）
+  assert.ok(state.tactics.cpu.discard.includes("C4"), "消費された C4 が捨札に無い");
+  // 軽減30ぶん、通常攻撃（威力40）でも与ダメは素の計算より小さい
+  assert.ok(cpuTarget.hp > hpBefore - 40 || cpuTarget.hp === hpBefore, "軽減が効いていない");
+});
+
+test("高密度化: スタン中のプレイヤーは戦術だけ切れて、行動はパスになる", () => {
+  const state = densityBattle(51);
+  const actor = game.currentActor(state);
+  actor.statuses.push({ kind: "stun", turns: 1 });
+  state.tactics.player.hand = ["B5"];
+  state.tactics.player.tp = 5;
+  game.applyTacticPlay(state, "B5"); // ドロー1（スタンでも戦術は使える）
+  assert.equal(state.tactics.turn.cardsPlayed, 1);
+  const logBefore = state.log.length;
+  game.applyAction(state, { skill: "basic", targetKey: "cpu_0" });
+  const newEvents = state.log.slice(logBefore);
+  assert.ok(newEvents.some((e) => e.text.includes("スタンで動けない")));
+  assert.ok(!newEvents.some((e) => e.type === "damage" && e.actorKey === actor.key), "スタン中に攻撃している");
+});
+
+test("高密度化: 両軍デッキ付きの対戦は終局し、同一シードで決定的", () => {
+  const playOut = (seed) => {
+    const state = densityBattle(seed);
+    let guard = 0;
+    while (state.phase === "battle" && guard++ < 500) {
+      const actor = game.currentActor(state);
+      game.cpuPlayTactics(state, actor);
+      if (state.phase !== "battle") break;
+      game.applyAction(state, game.cpuChooseAction(state, game.currentActor(state)));
+    }
+    return state;
+  };
+  for (const seed of [7, 123, 2024]) {
+    const a = playOut(seed);
+    const b = playOut(seed);
+    assert.equal(a.phase, "finished", `seed ${seed} が終局しない`);
+    assert.equal(a.winner, b.winner);
+    assert.equal(a.log.length, b.log.length);
+    const plays = a.log.filter((e) => e.text.includes("戦術カード「")).length;
+    assert.ok(plays >= 10, `seed ${seed} の戦術プレイが少なすぎる: ${plays}`);
+    assert.ok(a.log.length < 6000, `seed ${seed} のログが膨らみすぎ: ${a.log.length}`);
+  }
 });

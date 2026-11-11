@@ -13,8 +13,8 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "リクエストの形式が正しくありません" }, { status: 400 });
   }
   try {
-    const { token, tierIndex } = parseBattleStartBody(body);
-    const result = await startBattle(token, tierIndex);
+    const { token, tierIndex, tacticDeckId } = parseBattleStartBody(body);
+    const result = await startBattle(token, tierIndex, tacticDeckId);
     return NextResponse.json(result);
   } catch (error) {
     if (error instanceof LllError) return NextResponse.json({ error: error.message }, { status: error.status });
