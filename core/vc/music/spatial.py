@@ -33,6 +33,7 @@ from core.support.legacy import Responder
 from core.support.emojis import FAILED, MUSIC, PAUSE, RESTART, SUCCESS, VOL
 from core.vc.music.music_activity import build_music_activity_snapshot
 
+from core.vc.music.hrtf import load_hrtf_tables
 from core.vc.music.common import *  # noqa: F401,F403 - shared helpers/constants
 
 logger = logging.getLogger("cogs.sio_music")
@@ -59,38 +60,45 @@ class PythonSpatialAudioSource(discord.AudioSource):
         self.fdn_delay_bufs = [np.zeros(l, dtype=np.float32) for l in self.fdn_delay_lens]
         self.fdn_lp_zi = [np.zeros((1, 2), dtype=np.float32) for _ in range(4)]
         # --- [1] HRTF (頭部伝達関数) テーブル構築 ---
-        self.num_directions = 36  # 10度刻み
-        self.hrir_len = 96
-        self.hrir_table_l = {}
-        self.hrir_table_r = {}
+        # 実測HRTF (KEMAR) を優先し、読めない環境では従来の簡易モデルを使う。
+        real_hrtf = load_hrtf_tables()
+        if real_hrtf is not None:
+            self.num_directions, self.hrir_len, self.hrir_table_l, self.hrir_table_r = real_hrtf
+            self.hrtf_kind = "kemar"
+        else:
+            self.hrtf_kind = "synthetic"
+            self.num_directions = 36  # 10度刻み
+            self.hrir_len = 96
+            self.hrir_table_l = {}
+            self.hrir_table_r = {}
         
-        head_radius = 0.0875
-        vsound = 340.0
-        max_delay = (head_radius / vsound) * self.sr
+            head_radius = 0.0875
+            vsound = 340.0
+            max_delay = (head_radius / vsound) * self.sr
 
-        for y_pos in [-4.0, 0.0, 4.0]:
-            elevation_factor = 1.0 + (y_pos * 0.05)
-            for idx in range(self.num_directions):
-                angle_rad = (idx * (360.0 / self.num_directions)) * np.pi / 180.0
+            for y_pos in [-4.0, 0.0, 4.0]:
+                elevation_factor = 1.0 + (y_pos * 0.05)
+                for idx in range(self.num_directions):
+                    angle_rad = (idx * (360.0 / self.num_directions)) * np.pi / 180.0
                 
-                itd_l = int(max_delay * (1.0 - np.sin(angle_rad)))
-                itd_r = int(max_delay * (1.0 + np.sin(angle_rad)))
+                    itd_l = int(max_delay * (1.0 - np.sin(angle_rad)))
+                    itd_r = int(max_delay * (1.0 + np.sin(angle_rad)))
                 
-                atten_l = 0.4 + 0.6 * np.clip(0.5 * (1.0 + np.cos(angle_rad - np.pi / 2.0)), 0.0, 1.0)
-                atten_r = 0.4 + 0.6 * np.clip(0.5 * (1.0 + np.cos(angle_rad - 3.0 * np.pi / 2.0)), 0.0, 1.0)
+                    atten_l = 0.4 + 0.6 * np.clip(0.5 * (1.0 + np.cos(angle_rad - np.pi / 2.0)), 0.0, 1.0)
+                    atten_r = 0.4 + 0.6 * np.clip(0.5 * (1.0 + np.cos(angle_rad - 3.0 * np.pi / 2.0)), 0.0, 1.0)
                 
-                ir_l = np.zeros(self.hrir_len, dtype=np.float32)
-                ir_r = np.zeros(self.hrir_len, dtype=np.float32)
+                    ir_l = np.zeros(self.hrir_len, dtype=np.float32)
+                    ir_r = np.zeros(self.hrir_len, dtype=np.float32)
                 
-                if 0 <= itd_l < self.hrir_len - 20:
-                    ir_l[itd_l] = atten_l
-                    ir_l[itd_l + int(6 * elevation_factor)] = -0.25 * atten_l
-                if 0 <= itd_r < self.hrir_len - 20:
-                    ir_r[itd_r] = atten_r
-                    ir_r[itd_r + int(6 * elevation_factor)] = -0.25 * atten_r
+                    if 0 <= itd_l < self.hrir_len - 20:
+                        ir_l[itd_l] = atten_l
+                        ir_l[itd_l + int(6 * elevation_factor)] = -0.25 * atten_l
+                    if 0 <= itd_r < self.hrir_len - 20:
+                        ir_r[itd_r] = atten_r
+                        ir_r[itd_r + int(6 * elevation_factor)] = -0.25 * atten_r
                     
-                self.hrir_table_l[(y_pos, idx)] = ir_l
-                self.hrir_table_r[(y_pos, idx)] = ir_r
+                    self.hrir_table_l[(y_pos, idx)] = ir_l
+                    self.hrir_table_r[(y_pos, idx)] = ir_r
 
         # --- [2] 帯域分割フィルター ---
         self.sos_low = signal.iirfilter(2, 320 / (self.sr / 2), btype='lowpass', ftype='butter', output='sos')
