@@ -21,6 +21,7 @@ import {
   resolveModelKey,
   resolvePromptLang,
   resolveQuestionCount,
+  resolveThink,
   type ChatMessage,
   type LlmAnswer,
   type LlmQuestion,
@@ -57,7 +58,7 @@ export function onePrompterModel(env: Env = process.env): string {
 }
 
 /** reasoning_effort に渡せる値。モデルによってはパラメータ自体を送らない。 */
-export type ModelReasoning = "none" | "low";
+export type ModelReasoning = "none" | "low" | "high";
 
 /**
  * モデルキー → 実モデル ID と reasoning の対応表（サーバー側だけが持つ。
@@ -66,6 +67,9 @@ export type ModelReasoning = "none" | "low";
  * - deepseek / qwen は reasoning "none" 可
  * - glm 系は reasoning が必須で下限が "low"（"none" は不可）
  * - gemma / kimi は reasoning パラメータを送らない
+ * 「より考える」オン（think）のときは、reasoning を送れるモデルでは
+ * 一律 "high" に上げる（"max" は合成の連鎖呼び出しで遅延・タイムアウトの
+ * リスクが大きいため使わない）。reasoning を送らないモデルはオンでも送らない。
  * ID は env で差し替え可能。既定モデル（deepseek1017）の ID は、従来の
  * ONE_PROMPTER_MODEL が「既定モデルの ID 上書き」としてそのまま効く。
  * 注意: kimi31pro の ID "kimi-k3.1-pro" は未検証の推定値。実在が確認できるまでは
@@ -80,15 +84,21 @@ const MODEL_CATALOG: Record<PrompterModelKey, { id: string; reasoning?: ModelRea
   kimi31pro: { id: "kimi-k3.1-pro", envName: "ONE_PROMPTER_MODEL_KIMI" },
 };
 
-/** モデルキー（不正値は既定に丸める）を、実際に送る ID と reasoning に解決する。 */
+/**
+ * モデルキー（不正値は既定に丸める）を、実際に送る ID と reasoning に解決する。
+ * think がオンなら、reasoning を送れるモデルでは "high" に上げる。
+ */
 export function resolveModelSpec(
   value: unknown,
   env: Env = process.env,
+  think?: unknown,
 ): { key: PrompterModelKey; id: string; reasoning?: ModelReasoning } {
   const key = resolveModelKey(value);
   const entry = MODEL_CATALOG[key];
   const id = env[entry.envName]?.trim() || entry.id;
-  return entry.reasoning === undefined ? { key, id } : { key, id, reasoning: entry.reasoning };
+  const reasoning =
+    entry.reasoning === undefined ? undefined : resolveThink(think) ? "high" : entry.reasoning;
+  return reasoning === undefined ? { key, id } : { key, id, reasoning };
 }
 
 function logfareBaseUrl(env: Env): string {
@@ -134,13 +144,15 @@ export async function logfareChat(
     timeoutMs?: number;
     /** モデルキー（resolveModelKey で丸める）。未指定は既定モデル。 */
     model?: unknown;
+    /** 「より考える」（思考強度オン）。true のときだけ有効、それ以外はオフに丸める。 */
+    think?: unknown;
   },
 ): Promise<string> {
   const env = options.env ?? process.env;
   const fetchImpl = options.fetchImpl ?? fetch;
   const keys = logfareApiKeys(env);
   if (keys.length === 0) throw new Error("LOGFARE_API_KEY が設定されていません。");
-  const spec = resolveModelSpec(options.model, env);
+  const spec = resolveModelSpec(options.model, env, options.think);
   const payload: Record<string, unknown> = {
     model: spec.id,
     messages,
@@ -181,10 +193,10 @@ export async function logfareChat(
 /** 二択質問を LLM で生成する。形式が崩れたら1回だけ組み直し、それでも駄目なら null。 */
 export async function generateQuestionsWithLlm(
   rough: string,
-  deps: { env?: Env; fetchImpl?: FetchImpl; count?: unknown; model?: unknown } = {},
+  deps: { env?: Env; fetchImpl?: FetchImpl; count?: unknown; model?: unknown; think?: unknown } = {},
 ): Promise<LlmQuestion[] | null> {
   const count = resolveQuestionCount(deps.count);
-  const chatDeps = { env: deps.env, fetchImpl: deps.fetchImpl, model: deps.model };
+  const chatDeps = { env: deps.env, fetchImpl: deps.fetchImpl, model: deps.model, think: deps.think };
   const first = await logfareChat(buildQuestionsMessages(rough, count), { maxTokens: 1400, ...chatDeps });
   const parsed = parseQuestionsJson(first, count);
   if (parsed) return parsed;
@@ -200,7 +212,7 @@ export async function generateQuestionsWithLlm(
 export async function generateFollowupQuestionsWithLlm(
   rough: string,
   answers: LlmAnswer[],
-  deps: { env?: Env; fetchImpl?: FetchImpl; model?: unknown } = {},
+  deps: { env?: Env; fetchImpl?: FetchImpl; model?: unknown; think?: unknown } = {},
 ): Promise<LlmQuestion[] | null> {
   const asked = answers.map((a) => a.question);
   const first = await logfareChat(buildFollowupMessages(rough, answers), { maxTokens: 700, ...deps });
@@ -220,16 +232,16 @@ export async function generateFollowupQuestionsWithLlm(
 export async function synthesizeWithLlm(
   rough: string,
   answers: LlmAnswer[],
-  deps: { env?: Env; fetchImpl?: FetchImpl; lang?: unknown; model?: unknown } = {},
+  deps: { env?: Env; fetchImpl?: FetchImpl; lang?: unknown; model?: unknown; think?: unknown } = {},
 ): Promise<string | null> {
   // 出力言語モード（不正値は hybrid に丸める）。検証・直しも同じモードで通す。
   const lang = resolvePromptLang(deps.lang);
-  const chatDeps = { env: deps.env, fetchImpl: deps.fetchImpl, model: deps.model };
+  const chatDeps = { env: deps.env, fetchImpl: deps.fetchImpl, model: deps.model, think: deps.think };
   const raw = await logfareChat(buildSynthesizeMessages(rough, answers, lang), { maxTokens: 1800, ...chatDeps });
   const draft = cleanSynthesizedPrompt(raw);
   if (!draft) return null;
 
-  const verifyDeps = { env: deps.env, fetchImpl: deps.fetchImpl, timeoutMs: VERIFY_TIMEOUT_MS, model: deps.model };
+  const verifyDeps = { env: deps.env, fetchImpl: deps.fetchImpl, timeoutMs: VERIFY_TIMEOUT_MS, model: deps.model, think: deps.think };
   let issues: string[] | null;
   try {
     const verifyRaw = await logfareChat(buildVerifyMessages(rough, answers, draft, lang), { maxTokens: 800, ...verifyDeps });
@@ -259,12 +271,18 @@ export async function synthesizeWithLlm(
 export async function reviseWithLlm(
   prompt: string,
   instruction: string,
-  deps: { env?: Env; fetchImpl?: FetchImpl; lang?: unknown; model?: unknown } = {},
+  deps: { env?: Env; fetchImpl?: FetchImpl; lang?: unknown; model?: unknown; think?: unknown } = {},
 ): Promise<string | null> {
   const messages =
     deps.lang === undefined
       ? buildReviseMessages(prompt, instruction)
       : buildReviseMessages(prompt, instruction, resolvePromptLang(deps.lang));
-  const raw = await logfareChat(messages, { maxTokens: 2400, env: deps.env, fetchImpl: deps.fetchImpl, model: deps.model });
+  const raw = await logfareChat(messages, {
+    maxTokens: 2400,
+    env: deps.env,
+    fetchImpl: deps.fetchImpl,
+    model: deps.model,
+    think: deps.think,
+  });
   return cleanSynthesizedPrompt(raw);
 }

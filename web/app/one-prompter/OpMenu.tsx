@@ -1,21 +1,18 @@
 "use client";
 
 // ヘッダー右端のハンバーガーメニュー（クライアント）。
-// 中身は情報・規約系だけに絞る: 使い方（3ステップ）と、利用規約・
-// プライバシーポリシーへのリンク。法務リンクはこのメニュー内だけに置き、
-// 画面の常設表示には出さない。リンク先は AGO BOT サイト側の文書ページで、
-// 新規タブで開く。文面ではサービス名を繰り返さない。
+// 中身はモデル選択専用: 生成モデルの一覧から1つを選ぶリスト。
+// 現在の選択にはチェックを付け、選んだらその場で切り替えて閉じる。
+// モデルの状態は OpModelContext 経由で操作UI（OnePrompterClient）と共有する。
+// 表示名のどこにもプロバイダ名は出さない。
 import { useEffect, useRef, useState } from "react";
-
-const STEPS = [
-  "やりたいことを書く",
-  "二択の質問に答える",
-  "完成プロンプトをコピー／保存して、好きなAIに貼る",
-];
+import { PROMPTER_MODEL_OPTIONS } from "../../lib/one-prompter-llm";
+import { useOpModel } from "./OpModelContext";
 
 export default function OpMenu() {
   const [open, setOpen] = useState(false);
   const wrapRef = useRef<HTMLDivElement>(null);
+  const { modelKey, setModelKey } = useOpModel();
 
   // 開いている間だけ、外側クリックと Esc で閉じる
   useEffect(() => {
@@ -47,24 +44,36 @@ export default function OpMenu() {
         ☰
       </button>
       {open && (
-        <nav className="op-menu-panel" aria-label="メニュー">
+        <nav className="op-menu-panel" aria-label="モデル選択">
           <div className="op-menu-head">
-            <span>使い方</span>
+            <span>モデル</span>
             <button type="button" className="op-menu-close" aria-label="メニューを閉じる" onClick={() => setOpen(false)}>
               ×
             </button>
           </div>
-          <ol className="op-menu-steps">
-            {STEPS.map((step) => (
-              <li key={step}>{step}</li>
-            ))}
-          </ol>
-          <a className="op-menu-link" href="https://agobot.app/terms" target="_blank" rel="noreferrer">
-            利用規約
-          </a>
-          <a className="op-menu-link" href="https://agobot.app/privacy" target="_blank" rel="noreferrer">
-            プライバシーポリシー
-          </a>
+          <ul className="op-menu-models">
+            {PROMPTER_MODEL_OPTIONS.map((opt) => {
+              const selected = opt.key === modelKey;
+              return (
+                <li key={opt.key}>
+                  <button
+                    type="button"
+                    className={selected ? "op-menu-model selected" : "op-menu-model"}
+                    aria-pressed={selected}
+                    onClick={() => {
+                      setModelKey(opt.key);
+                      setOpen(false);
+                    }}
+                  >
+                    <span className="op-menu-check" aria-hidden="true">
+                      {selected ? "✓" : ""}
+                    </span>
+                    {opt.label}
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
         </nav>
       )}
     </div>

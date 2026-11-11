@@ -30,6 +30,9 @@ export const maxDuration = 60;
 // questions / synthesize / revise の全 LLM 呼び出しに効き、不正値・未指定は
 // 既定モデルに丸める。実モデル ID への解決はサーバー側の対応表で行い、
 // クライアントには ID を返さない。
+// 任意フィールド think（boolean）は「より考える」= 思考強度のオン。
+// 全 LLM 呼び出しに伝播し、reasoning を送れるモデルでは reasoning を
+// "high" に上げる。true 以外（不正値・未指定）はオフに丸める。
 // API キー未設定・LLM失敗時は { fallback: true } を返し、クライアントが
 // ルールベース版（lib/one-prompter.ts）でそのまま続行する。ページは壊れない。
 
@@ -59,6 +62,7 @@ export async function POST(request: Request) {
     instruction?: unknown;
     lang?: unknown;
     model?: unknown;
+    think?: unknown;
   };
   try {
     body = await request.json();
@@ -77,7 +81,7 @@ export async function POST(request: Request) {
     // ログに出すのは選択されたモデルキーだけ（ID・APIキー値は出さない）
     console.info(`one-prompter: revise model=${resolveModelKey(body.model)}`);
     try {
-      const revised = await reviseWithLlm(prompt, instruction, { lang: body.lang, model: body.model });
+      const revised = await reviseWithLlm(prompt, instruction, { lang: body.lang, model: body.model, think: body.think });
       if (!revised) return fallback();
       return NextResponse.json({ prompt: revised });
     } catch (error) {
@@ -106,11 +110,11 @@ export async function POST(request: Request) {
         if (!priorAnswers) {
           return NextResponse.json({ error: "入力を確認してください。" }, { status: 400 });
         }
-        const followups = await generateFollowupQuestionsWithLlm(rough, priorAnswers, { model: body.model });
+        const followups = await generateFollowupQuestionsWithLlm(rough, priorAnswers, { model: body.model, think: body.think });
         if (!followups) return fallback();
         return NextResponse.json({ questions: followups });
       }
-      const questions = await generateQuestionsWithLlm(rough, { count: body.count, model: body.model });
+      const questions = await generateQuestionsWithLlm(rough, { count: body.count, model: body.model, think: body.think });
       if (!questions) return fallback();
       return NextResponse.json({ questions });
     }
@@ -119,7 +123,7 @@ export async function POST(request: Request) {
       if (!answers) {
         return NextResponse.json({ error: "入力を確認してください。" }, { status: 400 });
       }
-      const prompt = await synthesizeWithLlm(rough, answers, { lang: body.lang, model: body.model });
+      const prompt = await synthesizeWithLlm(rough, answers, { lang: body.lang, model: body.model, think: body.think });
       if (!prompt) return fallback();
       return NextResponse.json({ prompt });
     }
