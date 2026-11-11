@@ -12,6 +12,7 @@ import {
   type PrompterCategory,
   type QuestionSlot,
 } from "../../lib/one-prompter";
+import { buildPromptDownload, type PromptDownloadFormat } from "../../lib/one-prompter-download";
 import {
   bothAnswerText,
   DEFERRED_ANSWER_TEXT,
@@ -391,6 +392,19 @@ export default function OnePrompterClient() {
     }
   };
 
+  /** ファイルとして保存する。コピーと同じく、今テキストエリアにある内容をそのまま書き出す。 */
+  const download = (format: PromptDownloadFormat) => {
+    if (phase.name !== "result") return;
+    const { fileName, mimeType, content } = buildPromptDownload(format, phase.prompt);
+    const blob = new Blob([content], { type: `${mimeType};charset=utf-8` });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = fileName;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
   const dots = useMemo(() => {
     if (phase.name !== "questions") return null;
     return (
@@ -557,6 +571,12 @@ export default function OnePrompterClient() {
       <div className="op-actions">
         <button type="button" className="op-primary" onClick={copy}>
           {copied ? "コピーしました" : "プロンプトをコピー"}
+        </button>
+        <button type="button" className="op-secondary" onClick={() => download("txt")}>
+          .txt で保存
+        </button>
+        <button type="button" className="op-secondary" onClick={() => download("md")}>
+          .md で保存
         </button>
         <button type="button" className="op-secondary" onClick={restart}>
           最初からやり直す
