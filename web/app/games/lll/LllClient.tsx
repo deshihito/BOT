@@ -15,6 +15,7 @@ import {
 } from "@/lib/lll-sound";
 import LllCard, { TIER_LABEL, type LllCardView } from "./LllCard";
 import { buildPlaybackSteps, stepDurationMs, type PlaybackStep } from "@/lib/lll-playback";
+import { TACTIC_CARD_BY_ID, TACTIC_DECKS } from "@/lib/lll-tactics";
 
 /* --- サウンド（公開関数の型は並行実装側に合わせ、ここでは薄く包む） --- */
 type SoundSettings = { bgm: boolean; se: boolean };
@@ -56,6 +57,22 @@ type Profile = {
   losses: number;
   draws: number;
   createdAt: number;
+  tacticDeckId?: string;
+};
+/** 戦術カード層の表示用ビュー（サーバーの publicBattle がマスクした形）。 */
+type TacticSideView = {
+  hand: string[];
+  handCount?: number;
+  deckCount: number;
+  discard: string[];
+  tp: number;
+  reserves: string[];
+  reserveCount?: number;
+};
+type TacticsView = {
+  player: TacticSideView;
+  cpu: TacticSideView;
+  turn: { actorKey: string; cardsPlayed: number; dmgCount: number };
 };
 type BattleActor = {
   key: string;
@@ -100,6 +117,7 @@ type Battle = {
   phase: "battle" | "finished";
   winner?: string | null;
   log: BattleLog[];
+  tactics?: TacticsView;
 };
 type AppraiseResult = { card: CardT | null; duplicated: boolean; shardsGained: number; aiUsed: boolean };
 // サーバー（lll-server parseFeatures）の検証に合わせ、数値フィールドのみで送る。
@@ -319,6 +337,7 @@ export default function LllClient() {
   const binderTrackRef = useRef<{ cardId: string; name: string; startX: number; startY: number; active: boolean } | null>(null);
   // アリーナ
   const [selectedTier, setSelectedTier] = useState(0);
+  const [selectedDeck, setSelectedDeck] = useState<string>("chain");
   const [battle, setBattle] = useState<Battle | null>(null);
   const [pending, setPending] = useState<PendingSkill | null>(null);
   const [hitKeys, setHitKeys] = useState<Record<string, true>>({});
@@ -345,6 +364,13 @@ export default function LllClient() {
   const guideBattleRef = useRef(false);
   const [guideTurnsUsed, setGuideTurnsUsed] = useState(0);
   const guideTurnsUsedRef = useRef(0);
+
+  // 戦術デッキの選択はプロフィール保存値に追随する（対戦開始時にサーバーへ送る）
+  useEffect(() => {
+    if (profile?.tacticDeckId && profile.tacticDeckId in TACTIC_DECKS) {
+      setSelectedDeck(profile.tacticDeckId);
+    }
+  }, [profile?.tacticDeckId]);
 
   const postJson = useCallback(async (url: string, body: unknown): Promise<{ res: Response; data: Record<string, unknown> }> => {
     const res = await fetch(url, {
@@ -674,7 +700,7 @@ export default function LllClient() {
     guideTurnsUsedRef.current = 0;
     setGuideTurnsUsed(0);
     try {
-      const { res, data } = await postJson("/api/lll/battle/start", { token, tierIndex });
+      const { res, data } = await postJson("/api/lll/battle/start", { token, tierIndex, tacticDeckId: selectedDeck });
       if (!res.ok) {
         setError(typeof data.error === "string" ? data.error : "対戦を開始できませんでした。");
         playSe("error");
@@ -887,9 +913,42 @@ export default function LllClient() {
     }
   };
 
+  /** 戦術カードのプレイ。手番は進まないので、再生後に同じアクターの戦術フェイズが続く。 */
+  const sendTactic = async (cardId: string) => {
+    const current = battleRef.current;
+    if (!token || !current || busy || playbackRef.current || current.phase !== "battle") return;
+    setBusy(true);
+    setError("");
+    try {
+      const { res, data } = await postJson("/api/lll/battle/action", {
+        token,
+        battleId: current.id,
+        action: { type: "tactic", cardId },
+      });
+      if (!res.ok) {
+        setError(typeof data.error === "string" ? data.error : "戦術カードを使えませんでした。");
+        playSe("error");
+        return;
+      }
+      playSe("flip");
+      const next = data.battle as Battle;
+      const nextProfile = (data.profile as Profile | undefined) ?? null;
+      if (!startPlayback(current, next, nextProfile)) {
+        applyBattleFx(current, next);
+        setBattle(next);
+        if (nextProfile) setProfile(nextProfile);
+      }
+    } catch {
+      setError("通信に失敗しました。");
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const currentActor: BattleActor | undefined =
     battle?.phase === "battle" ? battle.actors.find((a) => a.key === battle.queue[battle.queuePos]) : undefined;
   const isPlayerTurn = currentActor?.side === "player";
+  const currentStunned = !!currentActor?.statuses.some((s) => s.kind === "stun");
 
   const chooseSkill = (skill: 0 | 1 | "basic" | "defend") => {
     if (!currentActor || !isPlayerTurn || busy || playbackRef.current) return;
@@ -1352,6 +1411,27 @@ export default function LllClient() {
                   );
                 })}
               </div>
+              <div className="lll-deckpick" role="group" aria-label="戦術デッキ">
+                <span className="lll-actionbar-label">戦術デッキ（30枚）</span>
+                {Object.entries(TACTIC_DECKS).map(([deckId, deck]) => (
+                  <button
+                    key={deckId}
+                    type="button"
+                    className={`lll-deck-btn${selectedDeck === deckId ? " lll-deck-selected" : ""}`}
+                    aria-pressed={selectedDeck === deckId}
+                    onClick={() => {
+                      setSelectedDeck(deckId);
+                      playSe("tap");
+                    }}
+                  >
+                    <span className="lll-deck-name">{deck.name}</span>
+                    <span className="lll-deck-desc">{deck.description}</span>
+                  </button>
+                ))}
+                <p className="lll-deck-note">
+                  対戦中は各アクターの行動前に戦術カードを切れる。手札4枚で始まり、ラウンドごとに2枚引いて TP は5に戻る（Tier4以上の敵も戦術デッキを持つ）。
+                </p>
+              </div>
               <div className="lll-actions">
                 <button
                   type="button"
@@ -1373,6 +1453,12 @@ export default function LllClient() {
             >
               <div className="lll-battle-side-label">
                 <span className="lll-chip lll-chip-enemy">CPU ・ {TIERS[battle.tierIndex]?.name ?? ""}</span>
+                {battle.tactics && battle.tactics.cpu.deckCount + (battle.tactics.cpu.handCount ?? 0) > 0 && (
+                  <span className="lll-chip">
+                    CPU 手札 {battle.tactics.cpu.handCount ?? 0} ・ 山札 {battle.tactics.cpu.deckCount}
+                    {(battle.tactics.cpu.reserveCount ?? 0) > 0 ? ` ・ 設置 ${battle.tactics.cpu.reserveCount}` : ""}
+                  </span>
+                )}
                 <div className="lll-speedbar" role="group" aria-label="再生速度">
                   {(["1x", "2x", "instant"] as SpeedMode[]).map((mode) => (
                     <button
@@ -1485,8 +1571,49 @@ export default function LllClient() {
                   </button>
                 </div>
               ) : isPlayerTurn && currentActor ? (
+                <>
+                {battle.tactics && (
+                  <div className="lll-tactics" aria-label="戦術カード">
+                    <span className="lll-chip lll-chip-tp">TP {battle.tactics.player.tp} / 5</span>
+                    <span className="lll-chip">山札 {battle.tactics.player.deckCount} ・ 捨札 {battle.tactics.player.discard.length}</span>
+                    {battle.tactics.player.reserves.map((cardId, i) => (
+                      <span key={`res-${cardId}-${i}`} className="lll-chip lll-chip-reserve">
+                        設置中：{TACTIC_CARD_BY_ID.get(cardId)?.name ?? cardId}
+                      </span>
+                    ))}
+                    <div className="lll-hand">
+                      {battle.tactics.player.hand.length === 0 && <span className="lll-chip">手札なし（行動のみ）</span>}
+                      {battle.tactics.player.hand.map((cardId, i) => {
+                        const def = TACTIC_CARD_BY_ID.get(cardId);
+                        if (!def) return null;
+                        const unaffordable = def.cost > (battle.tactics?.player.tp ?? 0);
+                        return (
+                          <button
+                            key={`${cardId}-${i}`}
+                            type="button"
+                            className="lll-tactic-btn"
+                            disabled={busy || unaffordable}
+                            title={def.text}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              void sendTactic(cardId);
+                            }}
+                          >
+                            <span className="lll-tactic-name">{def.name}</span>
+                            <span className="lll-tactic-meta">
+                              {def.reserve ? "設置" : def.tags.join("・")} ・ TP{def.cost}
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                    <span className="lll-tactics-hint">戦術カードは行動の前に何枚でも切れる（TP の範囲で）。カード名に触れると効果文が出る。</span>
+                  </div>
+                )}
                 <div className="lll-actionbar">
-                  <span className="lll-actionbar-label">{currentActor.name} の行動</span>
+                  <span className="lll-actionbar-label">
+                    {currentStunned ? `${currentActor.name} はスタン中：戦術のみ使える（下のボタンは手番を渡す）` : `${currentActor.name} の行動`}
+                  </span>
                   {guideActive && <span className="lll-chip lll-chip-picked">ガイド中 あと{3 - guideTurnsUsed}手</span>}
                   <button
                     type="button"
@@ -1526,6 +1653,7 @@ export default function LllClient() {
                     </>
                   )}
                 </div>
+                </>
               ) : (
                 <p className="lll-loading">相手の行動中…</p>
               )}

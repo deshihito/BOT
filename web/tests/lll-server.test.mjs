@@ -57,7 +57,7 @@ function logfareApiKeys() { return []; }
 `;
 
 const server = await loadBundle(
-  ["lll-game.ts", "lll-battle.ts", "lll-server.ts"],
+  ["lll-game.ts", "lll-tactics.ts", "lll-battle.ts", "lll-server.ts"],
   [
     "LllError",
     "getOrCreateProfile",
@@ -68,9 +68,12 @@ const server = await loadBundle(
     "exchangeLumen",
     "startBattle",
     "battleAction",
+    "battleTactic",
     "getBattle",
     "parsePlayerAction",
     "parseFeatures",
+    "parseBattleStartBody",
+    "parseBattleActionBody",
   ],
   PREFIX,
 );
@@ -241,4 +244,84 @@ test("parsePlayerAction: 契約 {skill,targetKey} を検証し type 併記も受
   assert.deepEqual(server.parsePlayerAction({ skill: 1, type: "skill" }), { skill: 1, targetKey: undefined });
   assert.throws(() => server.parsePlayerAction({ skill: "fireball" }), server.LllError);
   assert.throws(() => server.parsePlayerAction({ type: "basic" }), server.LllError);
+});
+
+test("高密度化: 新規プロフィールは戦術デッキ chain を持ち、開始状態は秘匿部がマスクされる", async () => {
+  const { token, profile } = await server.getOrCreateProfile(null);
+  assert.equal(profile.tacticDeckId, "chain");
+  const started = await server.startBattle(token, 0);
+  const t = started.battle.tactics;
+  assert.ok(t, "戦術層がある");
+  assert.equal(t.player.hand.length, 4, "自分の手札は見える");
+  assert.equal(t.player.deck.length, 0, "山札の並びは返さない");
+  assert.equal(t.player.deckCount, 26);
+  assert.equal(t.player.tp, 5);
+  assert.equal(t.cpu.handCount, 0, "Tier0 の敵は戦術デッキを持たない");
+  assert.equal(t.cpu.deckCount, 0);
+  assert.deepEqual(t.stack, []);
+});
+
+test("高密度化: デッキ指定は保存され、不正な指定は 400", async () => {
+  const { token } = await server.getOrCreateProfile(null);
+  const started = await server.startBattle(token, 0, "echo");
+  assert.ok(started.battle.tactics);
+  const profile = await server.getProfile(token);
+  assert.equal(profile.tacticDeckId, "echo");
+  await assert.rejects(() => server.startBattle(token, 0, "nope"), server.LllError);
+  assert.throws(
+    () => server.parseBattleStartBody({ token: "x".repeat(24), tierIndex: 0, tacticDeckId: "nope" }),
+    server.LllError,
+  );
+  const ok = server.parseBattleStartBody({ token: "x".repeat(24), tierIndex: 0, tacticDeckId: "pursuit" });
+  assert.equal(ok.tacticDeckId, "pursuit");
+});
+
+test("高密度化: battleTactic は手番を進めず、手札に無いカードは拒否される", async () => {
+  let played = false;
+  for (let attempt = 0; attempt < 3 && !played; attempt++) {
+    const { token } = await server.getOrCreateProfile(null);
+    const started = await server.startBattle(token, 0);
+    const battleId = started.battle.id;
+    await assert.rejects(() => server.battleTactic(token, battleId, "A12"), (e) => {
+      // 手札に偶然 A12 がある場合はこの検証はスキップ扱い（別カードで判定）
+      return e instanceof server.LllError;
+    });
+    const before = started.battle;
+    const actorKey = before.queue[before.queuePos];
+    for (const cardId of [...new Set(before.tactics.player.hand)]) {
+      try {
+        const res = await server.battleTactic(token, battleId, cardId);
+        assert.equal(res.battle.queue[res.battle.queuePos], actorKey, "戦術プレイで手番が進んでいない");
+        played = true;
+        break;
+      } catch (e) {
+        assert.ok(e instanceof server.LllError, "検証エラーは LllError");
+      }
+    }
+  }
+  assert.ok(played, "3回の開始で1回も戦術カードをプレイできなかった");
+});
+
+test("高密度化: parseBattleActionBody は tactic 形式を判別する", () => {
+  const token = "x".repeat(24);
+  const tactic = server.parseBattleActionBody({ token, battleId: "b1", action: { type: "tactic", cardId: "A8" } });
+  assert.equal(tactic.kind, "tactic");
+  assert.equal(tactic.cardId, "A8");
+  assert.throws(
+    () => server.parseBattleActionBody({ token, battleId: "b1", action: { type: "tactic", cardId: "Z9" } }),
+    server.LllError,
+  );
+  const action = server.parseBattleActionBody({ token, battleId: "b1", action: { skill: "basic" } });
+  assert.equal(action.kind, "action");
+});
+
+test("高密度化: Tier4 の敵は戦術デッキを持つ（手札はマスクされる）", async () => {
+  const { token, profile } = await server.getOrCreateProfile(null);
+  profile.clearedTiers = [0, 1, 2, 3]; // メモリモードでは返却オブジェクトが正本
+  const started = await server.startBattle(token, 4);
+  const t = started.battle.tactics;
+  // 初手で CPU が先行して戦術を切る場合があるため、総量（30枚）側で判定する
+  assert.ok(t.cpu.deckCount >= 20, `敵の山札がある: ${t.cpu.deckCount}`);
+  assert.ok(t.cpu.handCount >= 1 && t.cpu.handCount <= 8, `敵の手札がある: ${t.cpu.handCount}`);
+  assert.equal(t.cpu.hand.length, 0, "敵の手札の中身は返さない");
 });

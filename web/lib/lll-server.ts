@@ -26,7 +26,19 @@ import {
   type LllCard,
   type LllTier,
 } from "./lll-game";
-import { applyAction, createBattle, type BattleState, type PlayerAction } from "./lll-battle";
+import {
+  applyAction,
+  applyTacticPlay,
+  createBattle,
+  type BattleState,
+  type PlayerAction,
+} from "./lll-battle";
+import {
+  ENEMY_TACTIC_DECK_BY_TIER,
+  TACTIC_CARD_BY_ID,
+  TACTIC_DECKS,
+  tacticDeckList,
+} from "./lll-tactics";
 
 export class LllError extends Error {
   status: number;
@@ -47,6 +59,8 @@ export type LllProfile = {
   losses: number;
   draws: number;
   createdAt: number;
+  /** 高密度化: 選択中の戦術プリセットデッキID（lll-tactics の TACTIC_DECKS のキー）。 */
+  tacticDeckId: string;
 };
 
 type LllBattleRecord = {
@@ -130,6 +144,10 @@ function normalizeProfile(value: LllProfile): LllProfile {
     losses: typeof value.losses === "number" ? value.losses : 0,
     draws: typeof value.draws === "number" ? value.draws : 0,
     createdAt: typeof value.createdAt === "number" ? value.createdAt : Date.now(),
+    tacticDeckId:
+      typeof value.tacticDeckId === "string" && value.tacticDeckId in TACTIC_DECKS
+        ? value.tacticDeckId
+        : "chain",
   };
 }
 
@@ -244,6 +262,7 @@ export async function getOrCreateProfile(
       losses: 0,
       draws: 0,
       createdAt: Date.now(),
+      tacticDeckId: "chain",
     };
     profiles.set(newToken, profile);
     await persistProfile(profile);
@@ -570,9 +589,61 @@ function battleOutcome(state: BattleState): BattleOutcome {
   return "draw";
 }
 
+/**
+ * クライアントへ返す対戦状態。エンジンの正本は秘匿しない方針だが、
+ * 高密度化では相手の手札・両者の山札の並び・自分の設置内容など
+ * 「伏せられている情報」だけは枚数に置き換えて返す（正本は record.state）。
+ */
+function publicBattle(state: BattleState): BattleState {
+  const view = deepClone(state);
+  if (view.tactics) {
+    const t = view.tactics as unknown as Record<string, Record<string, unknown>>;
+    const player = t.player;
+    player.deckCount = (player.deck as string[]).length;
+    player.deck = [];
+    player.lastPlayedEffects = null;
+    const cpu = t.cpu;
+    cpu.handCount = (cpu.hand as string[]).length;
+    cpu.hand = [];
+    cpu.deckCount = (cpu.deck as string[]).length;
+    cpu.deck = [];
+    cpu.reserveCount = (cpu.reserves as string[]).length;
+    cpu.reserves = [];
+    cpu.lastPlayedEffects = null;
+    (view.tactics as unknown as Record<string, unknown>).stack = [];
+    (view.tactics as unknown as Record<string, unknown>).effectDepth = 0;
+  }
+  return view;
+}
+
+/** 終局していたら報酬を1回だけ付与する（行動・戦術プレイ共通）。 */
+async function settleIfFinished(profile: LllProfile, record: LllBattleRecord): Promise<void> {
+  const next = record.state;
+  if (next.phase !== "finished" || record.rewarded) return;
+  record.rewarded = true;
+  const rewards = tierRewards(record.tierIndex);
+  const outcome = battleOutcome(next);
+  if (outcome === "win") {
+    const firstClear = !profile.clearedTiers.includes(record.tierIndex);
+    const multiplier = firstClear ? 2 : 1;
+    profile.shards += rewards.winShards * multiplier;
+    profile.lumen += rewards.winLumen * multiplier;
+    if (firstClear) profile.clearedTiers = [...profile.clearedTiers, record.tierIndex].sort((a, b) => a - b);
+    profile.wins += 1;
+  } else if (outcome === "lose") {
+    profile.shards += rewards.loseShards;
+    profile.losses += 1;
+  } else {
+    profile.shards += Math.floor(rewards.loseShards / 2);
+    profile.draws += 1;
+  }
+  await persistProfile(profile);
+}
+
 export async function startBattle(
   token: string,
   tierIndex: number,
+  tacticDeckId?: string,
 ): Promise<{ battleId: string; battle: BattleState }> {
   return serialize(async () => {
     const profile = await requireProfile(token);
@@ -589,10 +660,24 @@ export async function startBattle(
       if (card) teamCards.push(card);
     }
     if (teamCards.length !== 3) throw new LllError(400, "チームは3枚で編成してください。");
+    // 戦術デッキ: 指定があれば選択として保存し、無ければ前回の選択を使う
+    if (tacticDeckId !== undefined && !(tacticDeckId in TACTIC_DECKS)) {
+      throw new LllError(400, "戦術デッキの指定が正しくありません。");
+    }
+    if (tacticDeckId !== undefined && tacticDeckId !== profile.tacticDeckId) {
+      profile.tacticDeckId = tacticDeckId;
+      await persistProfile(profile);
+    }
+    const enemyDeckId = ENEMY_TACTIC_DECK_BY_TIER[tierIndex] ?? null;
     const battleId = newBattleId();
     let state: BattleState;
     try {
-      state = createBattle(battleId, deepClone(teamCards), ladderDeck(tierIndex), tierIndex, randomSeed());
+      state = createBattle(battleId, deepClone(teamCards), ladderDeck(tierIndex), tierIndex, randomSeed(), {
+        tacticDecks: {
+          player: tacticDeckList(profile.tacticDeckId),
+          cpu: enemyDeckId ? tacticDeckList(enemyDeckId) : null,
+        },
+      });
     } catch (error) {
       throw new LllError(400, error instanceof Error ? error.message : "対戦を開始できませんでした。");
     }
@@ -608,7 +693,7 @@ export async function startBattle(
     };
     battles.set(battleId, record);
     await persistBattle(record);
-    return { battleId, battle: state };
+    return { battleId, battle: publicBattle(state) };
   });
 }
 
@@ -621,7 +706,7 @@ export async function battleAction(
     const profile = await requireProfile(token);
     const record = await requireBattle(token, battleId);
     if (record.state.phase === "finished" && record.rewarded) {
-      return { battle: record.state, profile };
+      return { battle: publicBattle(record.state), profile };
     }
     let next: BattleState;
     try {
@@ -631,37 +716,40 @@ export async function battleAction(
     }
     record.state = next;
     record.updatedAt = Date.now();
-
-    // 終了時の報酬は1回だけ付与する
-    if (next.phase === "finished" && !record.rewarded) {
-      record.rewarded = true;
-      const rewards = tierRewards(record.tierIndex);
-      const outcome = battleOutcome(next);
-      if (outcome === "win") {
-        const firstClear = !profile.clearedTiers.includes(record.tierIndex);
-        const multiplier = firstClear ? 2 : 1;
-        profile.shards += rewards.winShards * multiplier;
-        profile.lumen += rewards.winLumen * multiplier;
-        if (firstClear) profile.clearedTiers = [...profile.clearedTiers, record.tierIndex].sort((a, b) => a - b);
-        profile.wins += 1;
-      } else if (outcome === "lose") {
-        profile.shards += rewards.loseShards;
-        profile.losses += 1;
-      } else {
-        profile.shards += Math.floor(rewards.loseShards / 2);
-        profile.draws += 1;
-      }
-      await persistProfile(profile);
-    }
+    await settleIfFinished(profile, record);
     await persistBattle(record);
-    return { battle: record.state, profile };
+    return { battle: publicBattle(record.state), profile };
+  });
+}
+
+/** 戦術カードのプレイ。手番は進まず、同じアクターの戦術フェイズが続く。 */
+export async function battleTactic(
+  token: string,
+  battleId: string,
+  cardId: string,
+): Promise<{ battle: BattleState; profile: LllProfile }> {
+  return serialize(async () => {
+    const profile = await requireProfile(token);
+    const record = await requireBattle(token, battleId);
+    if (record.state.phase === "finished" && record.rewarded) {
+      return { battle: publicBattle(record.state), profile };
+    }
+    try {
+      applyTacticPlay(record.state, cardId);
+    } catch (error) {
+      throw new LllError(400, error instanceof Error ? error.message : "戦術カードを使えませんでした。");
+    }
+    record.updatedAt = Date.now();
+    await settleIfFinished(profile, record);
+    await persistBattle(record);
+    return { battle: publicBattle(record.state), profile };
   });
 }
 
 export async function getBattle(token: string, battleId: string): Promise<BattleState> {
   return serialize(async () => {
     const record = await requireBattle(token, battleId);
-    return record.state;
+    return publicBattle(record.state);
   });
 }
 
@@ -767,13 +855,20 @@ export function parseGrowBody(body: unknown): GrowRequest {
   return { token, action: "levelup", cardId: data.cardId };
 }
 
-export function parseBattleStartBody(body: unknown): { token: string; tierIndex: number } {
+export function parseBattleStartBody(body: unknown): { token: string; tierIndex: number; tacticDeckId?: string } {
   const data = asBody(body);
   const token = parseToken(data.token);
   if (typeof data.tierIndex !== "number" || !Number.isInteger(data.tierIndex)) {
     throw new LllError(400, "ティアの指定が正しくありません。");
   }
-  return { token, tierIndex: data.tierIndex };
+  let tacticDeckId: string | undefined;
+  if (data.tacticDeckId !== undefined) {
+    if (typeof data.tacticDeckId !== "string" || !(data.tacticDeckId in TACTIC_DECKS)) {
+      throw new LllError(400, "戦術デッキの指定が正しくありません。");
+    }
+    tacticDeckId = data.tacticDeckId;
+  }
+  return { token, tierIndex: data.tierIndex, tacticDeckId };
 }
 
 export function parsePlayerAction(value: unknown): PlayerAction {
@@ -791,13 +886,25 @@ export function parsePlayerAction(value: unknown): PlayerAction {
   return { skill, targetKey } as PlayerAction;
 }
 
-export function parseBattleActionBody(body: unknown): { token: string; battleId: string; action: PlayerAction } {
+export type BattleRequestBody =
+  | { token: string; battleId: string; kind: "action"; action: PlayerAction }
+  | { token: string; battleId: string; kind: "tactic"; cardId: string };
+
+export function parseBattleActionBody(body: unknown): BattleRequestBody {
   const data = asBody(body);
   const token = parseToken(data.token);
   if (typeof data.battleId !== "string" || data.battleId.length === 0 || data.battleId.length > 128) {
     throw new LllError(400, "対戦IDが正しくありません。");
   }
-  return { token, battleId: data.battleId, action: parsePlayerAction(data.action) };
+  const rawAction = data.action as Record<string, unknown> | undefined;
+  if (rawAction && typeof rawAction === "object" && rawAction.type === "tactic") {
+    const cardId = rawAction.cardId;
+    if (typeof cardId !== "string" || !TACTIC_CARD_BY_ID.has(cardId)) {
+      throw new LllError(400, "戦術カードの指定が正しくありません。");
+    }
+    return { token, battleId: data.battleId, kind: "tactic", cardId };
+  }
+  return { token, battleId: data.battleId, kind: "action", action: parsePlayerAction(data.action) };
 }
 
 export function parseBattleId(value: unknown): string {

@@ -1,10 +1,10 @@
 import { NextResponse } from "next/server";
-import { LllError, battleAction, parseBattleActionBody } from "@/lib/lll-server";
+import { LllError, battleAction, battleTactic, parseBattleActionBody } from "@/lib/lll-server";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-/** 行動を適用する。CPU 行動まで進めた状態と、最新のプロフィールを返す。 */
+/** 行動または戦術カードのプレイを適用する。進めた状態と最新のプロフィールを返す。 */
 export async function POST(request: Request) {
   let body: unknown;
   try {
@@ -13,8 +13,11 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "リクエストの形式が正しくありません" }, { status: 400 });
   }
   try {
-    const { token, battleId, action } = parseBattleActionBody(body);
-    const result = await battleAction(token, battleId, action);
+    const parsed = parseBattleActionBody(body);
+    const result =
+      parsed.kind === "tactic"
+        ? await battleTactic(parsed.token, parsed.battleId, parsed.cardId)
+        : await battleAction(parsed.token, parsed.battleId, parsed.action);
     return NextResponse.json(result);
   } catch (error) {
     if (error instanceof LllError) return NextResponse.json({ error: error.message }, { status: error.status });
