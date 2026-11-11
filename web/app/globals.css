@@ -20,7 +20,7 @@ header nav { display:flex; align-items:center; gap:22px; max-width:880px; min-he
 .nav-utility a { color:var(--muted); }
 .nav-primary a:hover,.nav-utility a:hover { background:var(--soft); text-decoration:none; }
 .nav-primary a[aria-current],.nav-utility a[aria-current] { background:var(--accent-soft); color:var(--accent); font-weight:700; }
-@media (max-width:650px) { header nav { flex-wrap:wrap; row-gap:6px; } .nav-primary { order:3; flex-basis:100%; overflow-x:auto; } .nav-utility { padding-left:0; border-left:0; } }
+@media (max-width:650px) { header { position:sticky; top:0; } header nav { flex-wrap:wrap; row-gap:6px; } .nav-primary { order:3; flex-basis:100%; overflow-x:auto; } .nav-utility { padding-left:0; border-left:0; } }
 main { max-width:880px; min-height:calc(100vh - 120px); margin:0 auto; padding:52px 20px 72px; }
 footer { position:relative; z-index:20; background:#fff; padding:20px; border-top:1px solid var(--line); }
 .footer-inner { display:flex; flex-wrap:wrap; gap:16px 44px; max-width:880px; margin:0 auto; }
@@ -126,6 +126,56 @@ th,td { padding:6px 8px; border-bottom:1px solid var(--line); text-align:left; }
 .invite-hero:hover { background:#4752c4; }
 .home-live-stats { margin-top:14px; color:var(--muted); font-size:14px; }
 .invite-cta-block { display:grid; justify-items:center; gap:10px; margin-top:36px; padding:24px 16px; border:1px solid var(--line); border-radius:9px; background:var(--soft); text-align:center; }
+/* 共通部品: 最終CTA帯（公開ページのフッター直前） */
+.final-cta-band { border-top:1px solid var(--line); background:var(--soft); }
+.final-cta-inner { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:12px 20px; max-width:880px; margin:0 auto; padding:22px 20px; }
+.final-cta-copy { font-size:17px; font-weight:700; }
+.final-cta-actions { display:flex; flex-wrap:wrap; align-items:center; gap:10px; }
+.sub-cta-link { display:inline-block; padding:6px 12px; border:1px solid var(--accent); border-radius:7px; color:var(--accent); font-weight:700; white-space:nowrap; }
+.sub-cta-link:hover { background:var(--accent-soft); text-decoration:none; }
+/* 共通部品: スマホ下部固定CTAバー（主CTAのみ・スマホ幅だけ表示） */
+.mobile-cta-bar { display:none; }
+@media (max-width:650px) {
+  .mobile-cta-bar { position:fixed; right:0; bottom:0; left:0; z-index:30; display:flex; justify-content:center; padding:10px 16px calc(10px + env(safe-area-inset-bottom)); border-top:1px solid var(--line); background:#fff; }
+  .mobile-cta-bar .invite-button { width:100%; padding:10px 12px !important; text-align:center; font-size:15px; }
+  body:has(> .mobile-cta-bar) { padding-bottom:64px; }
+}
+/* 共通部品: 判断材料ストリップ（説明文より前に置く） */
+.facts-strip { display:flex; flex-wrap:wrap; gap:10px 12px; margin:0 0 26px; padding:14px 16px; border:1px solid var(--line); border-radius:9px; background:var(--soft); }
+.facts-strip .fact { min-width:120px; }
+.facts-strip dt { color:var(--muted); font-size:12px; font-weight:800; letter-spacing:.06em; }
+.facts-strip dd { margin:0; font-size:16px; font-weight:700; }
+/* トップ: 機能の入口と後段の入口グリッド */
+.home-entry { margin-top:34px; padding:20px; border:1px solid var(--line); border-radius:9px; background:var(--accent-soft); }
+.home-entry h2 { margin-bottom:6px; font-size:20px; }
+.home-entry p { color:var(--muted); font-size:14px; }
+.home-entries { margin-top:34px; }
+.home-entries h2 { margin-bottom:12px; font-size:20px; }
+/* トップ: リピーター向けゾーン（主導線と競合させない控えめな面） */
+.home-repeater { display:grid; gap:22px; margin-top:44px; padding-top:22px; border-top:1px solid var(--line); }
+.home-repeater h2 { margin-bottom:8px; color:var(--muted); font-size:14px; letter-spacing:.06em; }
+.quick-links { display:flex; flex-wrap:wrap; gap:6px 18px; }
+.quick-links a { font-size:14px; }
+.home-updates { list-style:none; display:grid; gap:6px; margin:0; padding:0; font-size:14px; }
+.home-updates .muted { font-size:13px; }
+/* /features: ジャンル絞り込みチップとカード */
+.feature-chips { display:flex; flex-wrap:wrap; gap:8px; margin:0 0 20px; }
+.feature-chip { padding:6px 14px; border:1px solid var(--line); border-radius:999px; background:#fff; color:var(--text); cursor:pointer; font:inherit; font-size:14px; }
+.feature-chip[aria-pressed="true"] { background:var(--accent); border-color:var(--accent); color:#fff; }
+.genre-card-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:14px; }
+.genre-feature-card { display:grid; align-content:start; gap:8px; padding:16px; border:1px solid var(--line); border-radius:9px; }
+.genre-feature-card h3 { display:flex; flex-wrap:wrap; align-items:baseline; gap:8px; margin:0; font-size:16px; }
+.genre-feature-card .genre-card-lead { line-height:1.65; }
+.genre-feature-card .genre-card-meta { display:flex; flex-wrap:wrap; gap:6px; }
+.genre-feature-card .genre-card-meta span { padding:1px 8px; border-radius:999px; background:var(--soft); color:var(--muted); font-size:12px; }
+.genre-feature-card .genre-card-functions { color:var(--muted); font-size:13.5px; line-height:1.65; }
+@media (max-width:650px) { .genre-card-grid { grid-template-columns:1fr; } }
+/* /faq: アコーディオン */
+.faq-list { display:grid; gap:10px; }
+.faq-item { border:1px solid var(--line); border-radius:9px; }
+.faq-q { width:100%; padding:14px 16px; border:0; background:transparent; color:var(--text); cursor:pointer; font:inherit; font-weight:700; text-align:left; }
+.faq-a { padding:0 16px 14px; color:var(--muted); line-height:1.7; }
+.faq-a p + p { margin-top:8px; }
 .ranking-tabs { display:flex; gap:8px; margin:18px 0; }
 .ranking-tab { padding:6px 14px; border:1px solid var(--line); border-radius:999px; color:var(--text); }
 .ranking-tab.active { background:var(--accent); border-color:var(--accent); color:#fff; }
@@ -147,7 +197,9 @@ th,td { padding:6px 8px; border-bottom:1px solid var(--line); text-align:left; }
 
 /* Discord Activity: these selectors activate only on the Music Activity route. */
 body:has([data-activity-root]) > header,
-body:has([data-activity-root]) > footer { display:none; }
+body:has([data-activity-root]) > footer,
+body:has([data-activity-root]) > .final-cta-band,
+body:has([data-activity-root]) > .mobile-cta-bar { display:none; }
 body:has([data-activity-root]) > main { max-width:none; min-height:100svh; margin:0; padding:0; }
 .activity-screen { display:grid; min-height:100vh; min-height:100svh; place-items:center; padding:clamp(14px,3vw,32px); }
 .activity-content { display:grid; width:min(100%,1000px); gap:12px; }

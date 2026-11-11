@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
-import Link from "next/link";
 import { notFound } from "next/navigation";
 import { WEB_GAMES, getWebGame } from "@/lib/games-catalog";
+import { GameDetailHeader } from "../GamesChrome";
 import ChessClient from "../chess/ChessClient";
 import BalkuClient from "../balku/BalkuClient";
 import LllClient from "../lll/LllClient";
@@ -28,30 +28,56 @@ export default async function WebGamePage({ params }: { params: Promise<{ id: st
   const game = getWebGame(id);
   if (!game) notFound();
   if (game.slug === "chess" && game.status === "playable") {
-    return <ChessClient />;
+    return (
+      <>
+        <GameDetailHeader game={game} />
+        <ChessClient />
+      </>
+    );
   }
   if (game.slug === "balku" && game.status === "playable") {
-    return <BalkuClient />;
+    return (
+      <>
+        <GameDetailHeader game={game} />
+        <BalkuClient />
+      </>
+    );
   }
   if (game.slug === "lll" && game.status === "playable") {
-    return <LllClient />;
+    return (
+      <>
+        <GameDetailHeader game={game} />
+        <LllClient />
+      </>
+    );
   }
   if (game.slug === "minesweeper" && game.status === "playable") {
-    return <MinesweeperClient />;
+    return (
+      <>
+        <GameDetailHeader game={game} />
+        <MinesweeperClient />
+      </>
+    );
   }
   if (game.slug === "2048" && game.status === "playable") {
-    return <SliderClient />;
+    return (
+      <>
+        <GameDetailHeader game={game} />
+        <SliderClient />
+      </>
+    );
   }
   if (game.slug === "memory" && game.status === "playable") {
-    return <MemoryClient />;
+    return (
+      <>
+        <GameDetailHeader game={game} />
+        <MemoryClient />
+      </>
+    );
   }
   return (
     <>
-      <nav className="breadcrumbs" aria-label="パンくず">
-        <Link href="/games">ゲーム</Link>
-        <span> / </span>
-        <span>{game.title}</span>
-      </nav>
+      <GameDetailHeader game={game} />
       <div className="page-heading">
         <h1>{game.title}</h1>
         <p className="muted">{game.description}</p>

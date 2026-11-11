@@ -1,4 +1,7 @@
 import type { Metadata } from "next";
+import { playableGames } from "@/lib/games-catalog";
+import FactsStrip from "../FactsStrip";
+import { GamesBreadcrumb } from "./GamesChrome";
 import GamesGrid from "./GamesGrid";
 
 export const metadata: Metadata = {
@@ -9,8 +12,10 @@ export const metadata: Metadata = {
 };
 
 export default function GamesPage() {
+  const playable = playableGames();
   return (
     <>
+      <GamesBreadcrumb />
       <div className="page-heading">
         <p className="eyebrow">WEB GAMES</p>
         <h1>ゲーム</h1>
@@ -19,6 +24,15 @@ export default function GamesPage() {
           Discord のボイスチャンネルでアクティビティとして起動しても、そのまま遊べます。
         </p>
       </div>
+      <FactsStrip
+        facts={[
+          { label: "遊べるゲーム", value: `${playable.length}本` },
+          { label: "対応環境", value: "ブラウザ／Discordアクティビティ" },
+          { label: "対戦相手", value: "CPU・オンライン" },
+          { label: "料金", value: "無料" },
+        ]}
+        label="ゲームの判断材料"
+      />
       <GamesGrid />
       <p className="quiet-note">
         チェスの対局データは端末の中だけで処理され、サーバーへ送信されることはありません。

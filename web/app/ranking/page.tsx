@@ -9,6 +9,8 @@ import {
   type RankingEntry,
   type RtaEntry,
 } from "@/lib/site";
+import Breadcrumbs from "../Breadcrumbs";
+import FactsStrip from "../FactsStrip";
 import { InviteCtaBlock } from "../InviteCta";
 
 export const metadata = {
@@ -98,8 +100,17 @@ export default async function RankingPage({ searchParams }: PageProps) {
 
   return (
     <section className="ranking-page">
+      <Breadcrumbs items={[{ label: "ランキング" }]} />
       <h1>リーダーボード</h1>
-      <p className="muted">全サーバー横断のランキングです。1時間ごとに更新されます。</p>
+      <FactsStrip
+        facts={[
+          { label: "集計範囲", value: "全サーバー横断" },
+          { label: "種類", value: "EXP・コイン・bump系RTA" },
+          { label: "更新", value: "1時間ごと" },
+          { label: "表示件数", value: "各ボード上位50件" },
+        ]}
+        label="ランキングの判断材料"
+      />
       <div className="ranking-tabs" role="tablist" aria-label="ランキングの種類">
         {AXES.map((a) => (
           <Link

@@ -23,3 +23,29 @@ test("それ以外のページでは共通クロームを出す", () => {
   assert.equal(m.isChromelessPath("/features"), false);
   assert.equal(m.isChromelessPath("/one-prompterx"), false);
 });
+
+test("最終CTA帯は主要な公開ページで出す", () => {
+  for (const path of [
+    "/", "/features", "/commands", "/commands/general", "/commands/general/game",
+    "/games", "/games/chess", "/ranking", "/faq", "/compute", "/status",
+    "/jinrou/roles", "/jinrou/roles/some-role",
+  ]) {
+    assert.equal(m.showsCtaBand(path), true, `${path} でCTA帯が出ない`);
+  }
+});
+
+test("最終CTA帯はアプリ画面・ポリシー系・審査用・分離ページで出さない", () => {
+  for (const path of [
+    "/one-prompter", "/dashboard", "/dashboard/123", "/admin", "/admin/ads",
+    "/login", "/activity/music", "/coder", "/map", "/nation",
+    "/terms", "/privacy", "/credits", "/intents",
+  ]) {
+    assert.equal(m.showsCtaBand(path), false, `${path} でCTA帯が出てしまう`);
+  }
+});
+
+test("アクティビティのプロキシ配下でも公開ページ判定は通常パスと同じ", () => {
+  assert.equal(m.showsCtaBand("/.proxy/games"), true);
+  assert.equal(m.showsCtaBand("/.proxy/games/chess"), true);
+  assert.equal(m.showsCtaBand("/.proxy/dashboard"), false);
+});

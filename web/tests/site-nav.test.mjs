@@ -56,7 +56,7 @@ test("サイトマップの主要公開ページはすべて共通レイアウ�
   const hrefs = new Set(allLinks.map((l) => l.href));
   for (const href of [
     "/features", "/commands", "/games", "/ranking",
-    "/one-prompter", "/compute", "/status", "/credits", "/terms", "/privacy",
+    "/one-prompter", "/compute", "/status", "/credits", "/terms", "/privacy", "/faq",
   ]) {
     assert.ok(hrefs.has(href), `${href} への共通導線がない`);
   }

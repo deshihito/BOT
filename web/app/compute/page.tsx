@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import Breadcrumbs from "../Breadcrumbs";
 import ComputeClient from "./ComputeClient";
 
 export const metadata: Metadata = {
@@ -12,6 +13,7 @@ export const metadata: Metadata = {
 export default function ComputePage() {
   return (
     <div className="compute-page">
+      <Breadcrumbs items={[{ label: "計算に参加" }]} />
       <div className="page-heading">
         <p className="eyebrow">DISTRIBUTED COMPUTING</p>
         <h1>計算に参加</h1>
