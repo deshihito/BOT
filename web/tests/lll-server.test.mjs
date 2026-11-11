@@ -53,6 +53,8 @@ import { createHash, randomBytes } from "node:crypto";
 function isBotApiConfigured() { return false; }
 async function kvGet() { return null; }
 async function kvSet() {}
+async function tableSelect() { return []; }
+async function tableUpsert() {}
 function logfareApiKeys() { return []; }
 `;
 
@@ -187,6 +189,8 @@ import { createHash, randomBytes } from "node:crypto";
 function isBotApiConfigured() { return false; }
 async function kvGet() { return null; }
 async function kvSet() {}
+async function tableSelect() { return []; }
+async function tableUpsert() {}
 function logfareApiKeys() { return ["test-key"]; }
 `;
   const withAi = await loadBundle(
@@ -324,4 +328,45 @@ test("高密度化: Tier4 の敵は戦術デッキを持つ（手札はマスク
   assert.ok(t.cpu.deckCount >= 20, `敵の山札がある: ${t.cpu.deckCount}`);
   assert.ok(t.cpu.handCount >= 1 && t.cpu.handCount <= 8, `敵の手札がある: ${t.cpu.handCount}`);
   assert.equal(t.cpu.hand.length, 0, "敵の手札の中身は返さない");
+});
+
+test("DB永続化: 専用テーブルへの保存・読み戻しと bot_kv フォールバック", async () => {
+  const PREFIX_DB = `
+import { createHash, randomBytes } from "node:crypto";
+function isBotApiConfigured() { return true; }
+const __tables = { lll_profiles: new Map(), lll_battles: new Map() };
+const __kv = new Map();
+async function tableUpsert(table, values) {
+  const key = table === "lll_profiles" ? values.token : values.id;
+  __tables[table].set(key, values.data);
+}
+async function tableSelect(table, columns, filters) {
+  const key = filters[0].value;
+  return __tables[table].has(key) ? [{ data: __tables[table].get(key) }] : [];
+}
+async function kvGet(ns, key) { return __kv.get(ns + ":" + key) ?? null; }
+async function kvSet(ns, key, value) { __kv.set(ns + ":" + key, value); }
+function logfareApiKeys() { return []; }
+`;
+  const db = await loadBundle(
+    ["lll-game.ts", "lll-tactics.ts", "lll-battle.ts", "lll-server.ts"],
+    ["getOrCreateProfile", "getProfile", "__tables", "__kv"],
+    PREFIX_DB,
+  );
+  // 新規プロフィールは専用テーブルへ書かれる（bot_kv ではない）
+  const { token } = await db.getOrCreateProfile(null);
+  assert.ok(db.__tables.lll_profiles.has(token), "プロフィールがテーブルに保存される");
+  assert.equal(db.__kv.size, 0, "bot_kv へは書かない");
+  // テーブルにだけあるプロフィールは読み戻せる（コールド読み）
+  db.__tables.lll_profiles.set("cold-token", {
+    token: "cold-token", cards: [], teamIds: [], tacticDeckId: "echo",
+  });
+  const cold = await db.getProfile("cold-token");
+  assert.equal(cold.tacticDeckId, "echo");
+  // 移行前の bot_kv にだけ残っているプロフィールもフォールバックで読める
+  db.__kv.set("lll_profiles:kv-only-token", {
+    token: "kv-only-token", cards: [], teamIds: [], tacticDeckId: "pursuit",
+  });
+  const legacy = await db.getProfile("kv-only-token");
+  assert.equal(legacy.tacticDeckId, "pursuit");
 });

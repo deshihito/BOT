@@ -1,14 +1,16 @@
 // LLL のサーバー側ストア（サーバー専用）。
-// プロフィールと対戦状態の正本は Bot API 経由の bot_kv に保持する
-// （namespace "lll_profiles" キー=プレイヤートークン、"lll_battles"
-// キー=バトルID）。プロフィールはトークン単位でオンデマンドに読み込み
-// （kvGet）、以後はメモリ上のコピーを正として、変更のたびに直列
-// チェーンの中で kvSet してから応答する（BALKU 流儀）。
+// プロフィールと対戦状態の正本は Bot API 経由の専用テーブルに保持する
+// （lll_profiles キー=プレイヤートークン、lll_battles キー=バトルID、
+// docs/sql/lll_tables.sql）。プロフィールはトークン単位でオンデマンドに
+// 読み込み、以後はメモリ上のコピーを正として、変更のたびに直列
+// チェーンの中で upsert してから応答する（BALKU 流儀）。
+// 読み込みは専用テーブルに無い場合のみ、移行前の bot_kv（同名
+// namespace）へフォールバックする。
 // BOT API が未設定の環境ではメモリのみで動作する。
 // 対戦は単独プレイヤー対 CPU で秘匿情報がないため、BattleState は
 // そのままクライアントへ返す（snapshotFor 相当の秘匿は不要）。
 import { createHash, randomBytes } from "node:crypto";
-import { isBotApiConfigured, kvGet, kvSet } from "./bot-api";
+import { isBotApiConfigured, kvGet, tableSelect, tableUpsert } from "./bot-api";
 import { logfareApiKeys } from "./one-prompter-server";
 import {
   COLLECTION_CAP,
@@ -166,7 +168,11 @@ function isBattleRecord(value: unknown): value is LllBattleRecord {
 async function persistProfile(profile: LllProfile): Promise<void> {
   if (!isBotApiConfigured()) return;
   try {
-    await kvSet(PROFILES_NAMESPACE, profile.token, deepClone(profile));
+    await tableUpsert(
+      PROFILES_NAMESPACE,
+      { token: profile.token, data: deepClone(profile), updated_at: new Date().toISOString() },
+      "token",
+    );
   } catch {
     // 書けなくてもメモリ上の状態が正として処理は続ける
   }
@@ -175,19 +181,39 @@ async function persistProfile(profile: LllProfile): Promise<void> {
 async function persistBattle(record: LllBattleRecord): Promise<void> {
   if (!isBotApiConfigured()) return;
   try {
-    await kvSet(BATTLES_NAMESPACE, record.battleId, deepClone(record));
+    await tableUpsert(
+      BATTLES_NAMESPACE,
+      { id: record.battleId, data: deepClone(record), updated_at: new Date().toISOString() },
+      "id",
+    );
   } catch {
     // 同上
   }
 }
 
-/** メモリに無いプロフィールを kv からオンデマンドで読み込む。 */
+/** 専用テーブルから1行読み、無ければ移行前の bot_kv へフォールバックする。 */
+async function readStoredRow(
+  table: string,
+  keyColumn: "token" | "id",
+  key: string,
+): Promise<unknown | null> {
+  const rows = await tableSelect<{ data: unknown }>(
+    table,
+    "data",
+    [{ column: keyColumn, op: "eq", value: key }],
+    1,
+  );
+  if (rows.length > 0) return rows[0].data ?? null;
+  return kvGet(table, key);
+}
+
+/** メモリに無いプロフィールを DB からオンデマンドで読み込む。 */
 async function loadProfile(token: string): Promise<LllProfile | null> {
   const cached = profiles.get(token);
   if (cached) return cached;
   if (isBotApiConfigured()) {
     try {
-      const stored = await kvGet(PROFILES_NAMESPACE, token);
+      const stored = await readStoredRow(PROFILES_NAMESPACE, "token", token);
       if (isProfile(stored)) {
         const profile = normalizeProfile(stored);
         profiles.set(token, profile);
@@ -205,7 +231,7 @@ async function loadBattle(battleId: string): Promise<LllBattleRecord | null> {
   if (cached) return cached;
   if (isBotApiConfigured()) {
     try {
-      const stored = await kvGet(BATTLES_NAMESPACE, battleId);
+      const stored = await readStoredRow(BATTLES_NAMESPACE, "id", battleId);
       if (isBattleRecord(stored)) {
         const record: LllBattleRecord = {
           battleId: stored.battleId,
