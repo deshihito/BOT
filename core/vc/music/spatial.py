@@ -664,6 +664,9 @@ class SpatialControlView(discord.ui.View):
             return
         state = self.cog.get_state(self.guild_id)
         state['eq'] = 'spatial'
+        # 再生中の曲にも即時反映する（音声ソースを作り直す）。
+        # 状態を変えるだけだと、ソースが作り直される次の曲まで立体音響が掛からない。
+        await self.cog.apply_immediate_setting(interaction)
         await self.update_panel(interaction)
 
 
