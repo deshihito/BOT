@@ -137,5 +137,71 @@ class BlockConvolverTest(unittest.TestCase):
         self.assertTrue(np.allclose(delayed, ref[:10000], atol=1e-4))
 
 
+class IrNormalizationTest(unittest.TestCase):
+    def test_ir_energy_normalized_to_one(self):
+        irs = measured.load_room_irs()
+        for key, (l, r) in irs.items():
+            norm = float(np.sqrt(np.sum(l.astype(np.float64) ** 2) + np.sum(r.astype(np.float64) ** 2)))
+            self.assertAlmostEqual(norm, 1.0, places=3, msg=key)
+
+
+class DistanceSelectTest(unittest.TestCase):
+    def _make_src(self, state):
+        import struct as _struct
+        import sys as _sys
+        import types as _types
+
+        _sys.modules.setdefault("yt_dlp", _types.ModuleType("yt_dlp"))
+        from core.vc.music import spatial
+
+        class _FakeSource:
+            def __init__(self):
+                self.t = 0
+
+            def read(self):
+                import math as _math
+
+                out = []
+                for i in range(960):
+                    tt = (self.t + i) / 48000
+                    v = int(9000 * _math.sin(2 * _math.pi * 440 * tt))
+                    out += [v, v]
+                self.t += 960
+                return _struct.pack("<1920h", *out)
+
+            def cleanup(self):
+                pass
+
+        return spatial.PythonSpatialAudioSource(_FakeSource(), state), spatial
+
+    def test_distance_changes_output_level(self):
+        import numpy as _np
+
+        def rms(distance):
+            state = {"eq": "spatial", "volume": 1.0, "spatial_room_size": 0.0,
+                     "spatial_distance": distance}
+            src, _ = self._make_src(state)
+            frames = [_np.frombuffer(src.read(), dtype=_np.int16).astype(_np.float32) for _ in range(60)]
+            out = _np.concatenate(frames[20:])
+            return float(_np.sqrt(_np.mean(out ** 2)))
+
+        near = rms(0.5)
+        far = rms(5.0)
+        self.assertGreater(near / far, 5.0)
+
+    def test_panel_has_distance_select_and_no_agc(self):
+        _, spatial = self._make_src({"eq": "spatial"})
+
+        class FakeCog:
+            def get_state(self, gid):
+                return {"eq": "spatial", "spatial_distance": 2.0, "spatial_room_size": 0.3,
+                        "spatial_speaker": "studio", "is_rotating": True}
+
+        view = spatial.SpatialControlView(FakeCog(), 1)
+        placeholders = [getattr(c, "placeholder", "") or "" for c in view.children]
+        self.assertTrue(any("距離" in p for p in placeholders))
+        self.assertFalse(any("AGC" in p or "引き上げ" in p for p in placeholders))
+
+
 if __name__ == "__main__":
     unittest.main()
