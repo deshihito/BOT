@@ -193,6 +193,23 @@ th,td { padding:6px 8px; border-bottom:1px solid var(--line); text-align:left; }
 .status-banner-note { color:var(--muted); font-size:14px; }
 .status-table th { color:var(--muted); font-weight:400; width:180px; }
 .status-table td { text-align:right; font-variant-numeric:tabular-nums; }
+.status-section { margin:26px 0; }
+.status-section h2, .chart-card h2 { font-size:16px; margin:0; }
+.uptime-head { display:flex; justify-content:space-between; align-items:baseline; gap:12px; margin-bottom:8px; }
+.uptime-state { color:#2f9e44; font-weight:700; font-size:14px; }
+.uptime-state.stale { color:#e8590c; }
+.uptime-bars { display:flex; gap:3px; }
+.uptime-bar { flex:1 1 0; height:34px; border-radius:3px; background:#2f9e44; }
+.uptime-bar.warn { background:#e8a13a; }
+.uptime-bar.low { background:#e8590c; }
+.uptime-bar.none { background:var(--line); }
+.uptime-caption { display:flex; justify-content:space-between; color:var(--muted); font-size:13px; margin-top:6px; }
+.chart-grid { display:grid; grid-template-columns:1fr 1fr; gap:16px; margin:26px 0; }
+.chart-card { border:1px solid var(--line); border-radius:9px; padding:14px 16px; background:var(--soft); }
+.chart-value { font-size:24px; font-weight:700; font-variant-numeric:tabular-nums; margin:4px 0 8px; }
+.chart-range { display:flex; justify-content:space-between; color:var(--muted); font-size:12px; margin-top:4px; }
+.status-chart { width:100%; height:auto; display:block; }
+@media (max-width: 720px) { .chart-grid { grid-template-columns:1fr; } }
 @media (max-width:650px) { header nav { gap:12px; align-items:flex-start; } .nav-primary a,.nav-utility a { padding:3px 6px; font-size:13px; } main { padding-top:36px; } .home-hero { gap:12px; } .home-brand-name { font-size:26px; } .home-hero img { width:64px; height:64px; } .home-command-grid { grid-template-columns:1fr; } .command-card,.genre-card { gap:14px; padding:17px 0; } .guild-title { font-size:20px; line-height:1.4; } }
 
 /* Discord Activity: these selectors activate only on the Music Activity route. */
