@@ -249,7 +249,7 @@ class PanelMixin:
             lines.append(f"💧 残響のミックス（ウェット量）を `{wet}` に設定しました。")
         if resolution is not None:
             state['fdn_resolution'] = resolution
-            mode_str = "8次元ハウスホルダー（高密度・シルキー）" if resolution == 8 else "4次元ハウスホルダー（軽量・クリア）"
+            mode_str = "8 (高解像度)" if resolution == 8 else "4 (通常)"
             lines.append(f"{GEAR} リバーブ解像度を `{resolution}` に切り替えました。\n現在のモード: **{mode_str}**")
         await r.send(view=as_embed_v2(we("\n".join(lines))))
         # コントロールパネルの表示を更新
