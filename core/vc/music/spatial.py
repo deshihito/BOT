@@ -22,6 +22,8 @@ import threading
 import random
 import numpy as np
 from scipy import signal
+from scipy.fft import irfft as _irfft
+from scipy.fft import rfft as _rfft
 import numpy as np
 import re
 import wave
@@ -39,6 +41,59 @@ from core.vc.music.common import *  # noqa: F401,F403 - shared helpers/constants
 
 logger = logging.getLogger("cogs.sio_music")
 
+
+
+class _BlockConvolver:
+    """長いIR（残響）用のブロック畳み込み。
+
+    20msフレームごとに大きなFFTを行う代わりに、4096サンプル単位で
+    まとめて畳み込む。ウェット音は最大でブロック長ぶん（約85ms）遅れるが、
+    残響のプリディレイとして聞こえる範囲で、処理量は数分の一になる。
+    """
+
+    BLOCK = 4096
+
+    def __init__(self):
+        self._key = None
+        self.reset()
+
+    def reset(self):
+        self._in_l = np.zeros(0, dtype=np.float32)
+        self._in_r = np.zeros(0, dtype=np.float32)
+        self._out_l = np.zeros(0, dtype=np.float32)
+        self._out_r = np.zeros(0, dtype=np.float32)
+        self._tail_l = np.zeros(0, dtype=np.float32)
+        self._tail_r = np.zeros(0, dtype=np.float32)
+
+    def process(self, in_l, in_r, ir_l, ir_r, key):
+        if key != self._key:
+            self.reset()
+            self._key = key
+        self._in_l = np.concatenate([self._in_l, in_l])
+        self._in_r = np.concatenate([self._in_r, in_r])
+        while len(self._in_l) >= self.BLOCK:
+            block_l = self._in_l[:self.BLOCK]
+            block_r = self._in_r[:self.BLOCK]
+            self._in_l = self._in_l[self.BLOCK:]
+            self._in_r = self._in_r[self.BLOCK:]
+            full_l = signal.oaconvolve(block_l, ir_l, mode="full")
+            full_r = signal.oaconvolve(block_r, ir_r, mode="full")
+            full_l[:len(self._tail_l)] += self._tail_l
+            full_r[:len(self._tail_r)] += self._tail_r
+            self._tail_l = full_l[self.BLOCK:].copy()
+            self._tail_r = full_r[self.BLOCK:].copy()
+            self._out_l = np.concatenate([self._out_l, full_l[:self.BLOCK]])
+            self._out_r = np.concatenate([self._out_r, full_r[:self.BLOCK]])
+        n = len(in_l)
+        out_l = np.zeros(n, dtype=np.float32)
+        out_r = np.zeros(n, dtype=np.float32)
+        take = min(n, len(self._out_l))
+        if take:
+            out_l[:take] = self._out_l[:take]
+            out_r[:take] = self._out_r[:take]
+            self._out_l = self._out_l[take:]
+            self._out_r = self._out_r[take:]
+        return out_l, out_r
 
 
 class PythonSpatialAudioSource(discord.AudioSource):
@@ -138,6 +193,8 @@ class PythonSpatialAudioSource(discord.AudioSource):
         self._sp_fir_overlap = np.zeros(255, dtype=np.float32)
         self._rev_ir_key = None
         self._rev_ir = None
+        self._reverb_block = _BlockConvolver()
+        self._spec_cache = {}
         self._rev_tail_l = np.zeros(0, dtype=np.float32)
         self._rev_tail_r = np.zeros(0, dtype=np.float32)
 
@@ -184,8 +241,8 @@ class PythonSpatialAudioSource(discord.AudioSource):
         self.rev_buf_r = np.zeros(12000, dtype=np.float32)
         self.rev_idx = 0
 
-    def _read_spatial(self, samples, fmt):
-        in_data = np.array(samples, dtype=np.float32) / 32768.0
+    def _read_spatial(self, raw_data):
+        in_data = np.frombuffer(raw_data, dtype="<i2").astype(np.float32) / 32768.0
         mono_in = (in_data[0::2] + in_data[1::2]) * 0.5
         n_samples = len(mono_in)
 
@@ -209,7 +266,11 @@ class PythonSpatialAudioSource(discord.AudioSource):
             if self._sp_fir_key != speaker_type:
                 self._sp_fir_key = speaker_type
                 self._sp_fir = sp["fir"]
-            fir_full = signal.oaconvolve(mono_in, self._sp_fir, mode="full")
+            if n_samples + len(self._sp_fir) - 1 <= 2048:
+                spec = self._spec(("sp", speaker_type), self._sp_fir)
+                fir_full = _irfft(_rfft(mono_in, 2048) * spec, 2048)[:n_samples + len(self._sp_fir) - 1]
+            else:
+                fir_full = signal.oaconvolve(mono_in, self._sp_fir, mode="full")
             fir_full[:len(self._sp_fir_overlap)] += self._sp_fir_overlap
             self._sp_fir_overlap = fir_full[n_samples:].copy()
             mono_in = fir_full[:n_samples]
@@ -277,8 +338,15 @@ class PythonSpatialAudioSource(discord.AudioSource):
             band_sig = band_signals[i] * dist_atten * air_gains[i]
 
             # 空気吸収（高域減衰）の適用
-            full_out_l += signal.oaconvolve(band_sig, hrir_l, mode='full')
-            full_out_r += signal.oaconvolve(band_sig, hrir_r, mode='full')
+            if n_samples + self.hrir_len - 1 <= 2048:
+                spec_l = self._spec(("hl", y_elevation, dir_idx), hrir_l)
+                spec_r = self._spec(("hr", y_elevation, dir_idx), hrir_r)
+                band_fft = _rfft(band_sig, 2048)
+                full_out_l += _irfft(band_fft * spec_l, 2048)[:n_samples + self.hrir_len - 1]
+                full_out_r += _irfft(band_fft * spec_r, 2048)[:n_samples + self.hrir_len - 1]
+            else:
+                full_out_l += signal.oaconvolve(band_sig, hrir_l, mode='full')
+                full_out_r += signal.oaconvolve(band_sig, hrir_r, mode='full')
 
         # Overlap-Add 処理
         full_out_l[:self.hrir_len - 1] += self.conv_overlap_l
@@ -292,7 +360,7 @@ class PythonSpatialAudioSource(discord.AudioSource):
 
         wet_val = float(self.state.get('fdn_wet', reverb_mix * 1.2))
         if self.room_irs is not None:
-            rev_out_l, rev_out_r = self._measured_reverb(spatial_out_l, spatial_out_r, reverb_mix)
+            rev_out_l, rev_out_r = self._measured_reverb(spatial_out_l, spatial_out_r, reverb_mix, wet_val)
         else:
             # 💡 [機能拡張③] 4×4 FDN (Feedback Delay Network) による高音質室内残響
             rev_out_l = np.zeros(n_samples, dtype=np.float32)
@@ -410,11 +478,11 @@ class PythonSpatialAudioSource(discord.AudioSource):
         final_l = np.clip(mix_l * self.agc_gain * volume, -1.0, 1.0)
         final_r = np.clip(mix_r * self.agc_gain * volume, -1.0, 1.0)
 
-        out_samples = np.empty(len(samples), dtype=np.int16)
-        out_samples[0::2] = (final_l * 32767).astype(np.int16)
-        out_samples[1::2] = (final_r * 32767).astype(np.int16)
+        out_samples = np.empty(n_samples * 2, dtype="<i2")
+        out_samples[0::2] = (final_l * 32767).astype("<i2")
+        out_samples[1::2] = (final_r * 32767).astype("<i2")
 
-        return struct.pack(fmt, *out_samples.tolist())
+        return out_samples.tobytes()
 
     def read(self):
         raw_data = self.source.read()
@@ -427,16 +495,13 @@ class PythonSpatialAudioSource(discord.AudioSource):
             return b""
 
         self.has_output = True
-        num_samples = len(raw_data) // 4
-        fmt = f"<{num_samples * 2}h"
-        samples = list(struct.unpack(fmt, raw_data))
         
         mode = self.state.get('eq', 'flat')
         self.count += 1
 
         if mode == 'spatial' and not self._spatial_failed:
             try:
-                return self._read_spatial(samples, fmt)
+                return self._read_spatial(raw_data)
             except Exception:
                 self._spatial_failed = True
                 logger.exception("立体音響の処理でエラーが発生したため、この再生では立体音響を無効化して通常再生を続けます")
@@ -445,8 +510,12 @@ class PythonSpatialAudioSource(discord.AudioSource):
             volume = float(np.clip(self.state.get('volume', 1.0), 0.0, 2.0))
             if volume == 1.0:
                 return raw_data
-            gained = np.clip(np.array(samples, dtype=np.float32) * volume, -32768, 32767).astype(np.int16)
-            return struct.pack(fmt, *gained.tolist())
+            gained = np.clip(np.frombuffer(raw_data, dtype="<i2").astype(np.float32) * volume, -32768, 32767).astype("<i2")
+            return gained.tobytes()
+        num_samples = len(raw_data) // 4
+        fmt = f"<{num_samples * 2}h"
+        samples = list(struct.unpack(fmt, raw_data))
+
             
         # ==================================================
         # それ以外のモード（従来のサンプル単位処理）
@@ -537,12 +606,15 @@ class PythonSpatialAudioSource(discord.AudioSource):
             
         return struct.pack(fmt, *out_samples)
 
-    def _measured_reverb(self, in_l, in_r, room_size):
+    def _measured_reverb(self, in_l, in_r, room_size, wet_val=1.0):
         """実測インパルス応答の畳み込みリバーブ。ウェット信号（未スケール）を返す。
 
         部屋の選択は残響量で切り替える（小さい=スタジオ、大さい=ホール）。
         fdn_feedback は尾の伸縮として解釈する（0.5 で実測どおり）。
+        軽量化のためブロック畳み込みを使う（ウェット音は最大で約85ms遅れる）。
         """
+        if wet_val <= 0.01:
+            return np.zeros_like(in_l), np.zeros_like(in_r)
         key = 'hall' if room_size >= 0.45 else 'room'
         feedback = float(np.clip(self.state.get('fdn_feedback', 0.5), 0.0, 0.95))
         cache_key = (key, round(feedback, 2))
@@ -556,17 +628,16 @@ class PythonSpatialAudioSource(discord.AudioSource):
                 ir_r = ir_r * env
             self._rev_ir = (ir_l, ir_r)
             self._rev_ir_key = cache_key
-            self._rev_tail_l = np.zeros(len(ir_l) - 1, dtype=np.float32)
-            self._rev_tail_r = np.zeros(len(ir_r) - 1, dtype=np.float32)
         ir_l, ir_r = self._rev_ir
-        n = len(in_l)
-        full_l = signal.oaconvolve(in_l, ir_l, mode='full')
-        full_r = signal.oaconvolve(in_r, ir_r, mode='full')
-        full_l[:len(self._rev_tail_l)] += self._rev_tail_l
-        full_r[:len(self._rev_tail_r)] += self._rev_tail_r
-        self._rev_tail_l = full_l[n:].copy()
-        self._rev_tail_r = full_r[n:].copy()
-        return full_l[:n], full_r[:n]
+        return self._reverb_block.process(in_l, in_r, ir_l, ir_r, cache_key)
+
+    def _spec(self, key, ir):
+        """短いIRのスペクトル（FFT長2048固定）をキャッシュして返す。"""
+        spec = self._spec_cache.get(key)
+        if spec is None:
+            spec = _rfft(ir, 2048)
+            self._spec_cache[key] = spec
+        return spec
 
     def cleanup(self):
         self.source.cleanup()
