@@ -15,7 +15,8 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
-from core.support.bot_status.snapshot import build_snapshot, collect_snapshot
+from core.support.bot_status.snapshot import (
+    build_history, build_snapshot, collect_snapshot)
 
 NOW = datetime.datetime(2026, 11, 8, 12, 0, tzinfo=datetime.timezone.utc)
 STARTED = datetime.datetime(2026, 11, 5, 9, 30, tzinfo=datetime.timezone.utc)
@@ -32,6 +33,40 @@ class FakeBot:
     def __init__(self, guilds, latency):
         self.guilds = guilds
         self.latency = latency
+
+
+class BuildHistoryTest(unittest.TestCase):
+    def snapshot(self, guilds=3, users=1234):
+        return build_snapshot(
+            guild_count=guilds, member_count=users, latency_ms=42,
+            started_at=STARTED, now=NOW)
+
+    def test_first_sample_creates_today(self):
+        history = build_history(None, self.snapshot(), {}, now=NOW)
+        # NOW は UTC 12:00 = JST 21:00 で同日
+        self.assertEqual(history["days"], {
+            "2026-11-08": {"samples": 1, "guilds": 3, "users": 1234}})
+        self.assertEqual(history["cmd_hours"], {})
+
+    def test_same_day_accumulates_and_refreshes_counts(self):
+        first = build_history(None, self.snapshot(), {}, now=NOW)
+        second = build_history(first, self.snapshot(guilds=4, users=1300), {}, now=NOW)
+        entry = second["days"]["2026-11-08"]
+        self.assertEqual(entry["samples"], 2)
+        self.assertEqual(entry["guilds"], 4)
+        self.assertEqual(entry["users"], 1300)
+
+    def test_prunes_days_older_than_30_and_hours_over_48(self):
+        previous = {"days": {
+            "2026-10-01": {"samples": 288, "guilds": 1, "users": 10},
+            "2026-11-07": {"samples": 100, "guilds": 2, "users": 20},
+        }}
+        hours = {f"2026-11-0{1 + i // 24}T{i % 24:02d}": i for i in range(72)}
+        history = build_history(previous, self.snapshot(), hours, now=NOW)
+        self.assertNotIn("2026-10-01", history["days"])
+        self.assertIn("2026-11-07", history["days"])
+        self.assertEqual(len(history["cmd_hours"]), 48)
+        self.assertEqual(max(history["cmd_hours"]), "2026-11-03T23")
 
 
 class BuildSnapshotTest(unittest.TestCase):
