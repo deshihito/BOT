@@ -98,7 +98,7 @@ class _BlockConvolver:
 
 class PythonSpatialAudioSource(discord.AudioSource):
     """
-    可変自動音量引き上げ（AGC）搭載：3帯域独立回転 × スピーカー特性切り替え × 壁面吸音リバーブ統合エンジン
+    3帯域独立回転 × スピーカー特性切り替え × 壁面吸音リバーブ統合エンジン
     """
     def __init__(self, source, state):
         self.source = source
@@ -216,10 +216,6 @@ class PythonSpatialAudioSource(discord.AudioSource):
         self.wall_lp_l = 0.0
         self.wall_lp_r = 0.0
 
-        # --- [5] 自動音量引き上げ（AGC）用状態変数 ---
-        self.agc_gain = 1.0         # 現在のブースト倍率
-        self.target_peak = 0.85      # 目標ピーク値 (85%)
-
         # --- [6] 従来エフェクト（Bass / Echo / Vocal / Live / Reverb）用状態変数の初期化 ---
         self.bass_lp_l = 0.0
         self.bass_lp_r = 0.0
@@ -256,7 +252,6 @@ class PythonSpatialAudioSource(discord.AudioSource):
 
         speaker_type = self.state.get('spatial_speaker', 'studio')
         preset = self.speaker_presets.get(speaker_type, self.speaker_presets['studio'])
-        max_boost = max(1.0, float(self.state.get('spatial_agc_max', 4.0)))
 
         # 実測スピーカー特性: 軸上周波数特性をFIRで適用（帯域分割の前段）
         sp_dir = None
@@ -358,7 +353,7 @@ class PythonSpatialAudioSource(discord.AudioSource):
         spatial_out_l = full_out_l[:n_samples]
         spatial_out_r = full_out_r[:n_samples]
 
-        wet_val = float(self.state.get('fdn_wet', reverb_mix * 1.2))
+        wet_val = float(self.state.get('fdn_wet', reverb_mix * 0.6))
         if self.room_irs is not None:
             rev_out_l, rev_out_r = self._measured_reverb(spatial_out_l, spatial_out_r, reverb_mix, wet_val)
         else:
@@ -465,18 +460,10 @@ class PythonSpatialAudioSource(discord.AudioSource):
         mix_l = spatial_out_l + rev_out_l * wet_val
         mix_r = spatial_out_r + rev_out_r * wet_val
 
-        # E. 可変自動音量引き上げ（AGC）処理
-        current_peak = max(np.max(np.abs(mix_l)), np.max(np.abs(mix_r)), 1e-5)
-        desired_gain = np.clip(self.target_peak / current_peak, 0.8, max_boost)
-
-        if desired_gain < self.agc_gain:
-            self.agc_gain = self.agc_gain * 0.8 + desired_gain * 0.2
-        else:
-            self.agc_gain = self.agc_gain * 0.98 + desired_gain * 0.02
-
+        # E. 最終段は音量のみ（自動音量引き上げは廃止）
         volume = float(np.clip(self.state.get('volume', 1.0), 0.0, 2.0))
-        final_l = np.clip(mix_l * self.agc_gain * volume, -1.0, 1.0)
-        final_r = np.clip(mix_r * self.agc_gain * volume, -1.0, 1.0)
+        final_l = np.clip(mix_l * volume, -1.0, 1.0)
+        final_r = np.clip(mix_r * volume, -1.0, 1.0)
 
         out_samples = np.empty(n_samples * 2, dtype="<i2")
         out_samples[0::2] = (final_l * 32767).astype("<i2")
@@ -653,7 +640,6 @@ def spatial_panel_embed(cog, guild_id: int) -> discord.Embed:
     dist = state.get('spatial_distance', 2.0)
     room = state.get('spatial_room_size', 0.3)
     speaker = state.get('spatial_speaker', 'studio')
-    agc_max = state.get('spatial_agc_max', 4.0)
     is_rotating = "ON" if state.get('is_rotating', True) else "OFF"
     speaker_names = {
         'studio': '🎙️ スタジオモニター（Neumann KH120A）',
@@ -673,7 +659,6 @@ def spatial_panel_embed(cog, guild_id: int) -> discord.Embed:
             f"音像の距離: **{dist}x**\n"
             f"部屋のリバーブ: **{room}**\n"
             f"スピーカー特性: **{speaker_names.get(speaker, speaker)}**\n"
-            f"最大音量引き上げ幅: **{agc_max}x** (+{round(20 * math.log10(agc_max), 1)}dB)\n"
             f"3帯域立体回転: **{is_rotating}**\n"
             f"エンジン: {engine}"
         ),
@@ -761,23 +746,25 @@ class SpatialControlView(discord.ui.View):
         state['spatial_room_size'] = float(select.values[0])
         await self.update_panel(interaction)
 
-    # 4. 音量引き上げ幅 (AGC) 選択メニュー
+    # 4. 音像の距離 選択メニュー
     @discord.ui.select(
-        # placeholder 内ではアプリ絵文字 markup が描画されないため、絵文字は各選択肢の emoji 引数側で持たせる。
-        placeholder='自動音量引き上げ幅 (AGC) を選択...',
+        placeholder="音像の距離を選択...",
         options=[
-            discord.SelectOption(label="引き上げなし (1.0x / 0dB)", value="1.0", emoji=VOL),
-            discord.SelectOption(label="控えめ (2.0x / +6dB)", value="2.0", emoji=VOL),
-            discord.SelectOption(label="標準 (4.0x / +12dB)", value="4.0", default=True, emoji=VOL),
-            discord.SelectOption(label="強力 (6.0x / +15.5dB)", value="6.0", emoji=VOL),
+            discord.SelectOption(label="すぐ近く (0.5x)", value="0.5"),
+            discord.SelectOption(label="近い (1.0x)", value="1.0"),
+            discord.SelectOption(label="やや近い (1.5x)", value="1.5"),
+            discord.SelectOption(label="標準 (2.0x)", value="2.0", default=True),
+            discord.SelectOption(label="遠め (3.0x)", value="3.0"),
+            discord.SelectOption(label="遠い (5.0x)", value="5.0"),
+            discord.SelectOption(label="かなり遠い (8.0x)", value="8.0"),
         ],
         row=2
     )
-    async def select_agc(self, interaction: discord.Interaction, select: discord.ui.Select):
+    async def select_distance(self, interaction: discord.Interaction, select: discord.ui.Select):
         if not await _require_same_vc(interaction):
             return
         state = self.cog.get_state(self.guild_id)
-        state['spatial_agc_max'] = float(select.values[0])
+        state['spatial_distance'] = float(select.values[0])
         await self.update_panel(interaction)
 
     # 5. 音像の距離 ＆ スピーカー特性 (ドロップダウン)
