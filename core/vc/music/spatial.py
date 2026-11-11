@@ -168,10 +168,18 @@ class PythonSpatialAudioSource(discord.AudioSource):
         self.sos_high = signal.iirfilter(2, 5000 / (self.sr / 2), btype='highpass', ftype='butter', output='sos')
         self.zi_high = np.zeros((self.sos_high.shape[0], 2), dtype=np.float32)
 
+        # 回転は「全帯域で共有する主回転＋帯域ごとの小さな揺れ」で構成する。
+        # 帯域ごとに独立して回すと音像が帯域ごとにバラバラになり、
+        # どの方向から聞こえるのか分かりにくくなるため。
+        # 揺れの速度: 低音は主回転より遅れてゆっくり / 中音は主回転そのもの /
+        # 高音は主回転より速く細かく揺れる。
+        self._rot_theta = 0.0
+        self._wet_balance = 0.0
+        self._last_band_angles = [0.0, 0.0, 0.0]
         self.band_configs = [
-            {'type': 'low',  'y': -4.0, 'speed': 0.5, 'angle': 0.0},
-            {'type': 'mid',  'y':  0.0, 'speed': 1.0, 'angle': 0.0},
-            {'type': 'high', 'y':  4.0, 'speed': 2.5, 'angle': 0.0},
+            {'type': 'low',  'y': -4.0, 'phase': 0.0, 'wobble_amp': 0.30, 'wobble_rate': -0.004},
+            {'type': 'mid',  'y':  0.0, 'phase': 0.0, 'wobble_amp': 0.0,  'wobble_rate': 0.0},
+            {'type': 'high', 'y':  4.0, 'phase': 2.1, 'wobble_amp': 0.45, 'wobble_rate': 0.007},
         ]
 
         self.conv_overlap_l = np.zeros(self.hrir_len - 1, dtype=np.float32)
@@ -279,23 +287,33 @@ class PythonSpatialAudioSource(discord.AudioSource):
         band_high, self.zi_high = signal.sosfilt(self.sos_high, mono_in, zi=self.zi_high)
         band_signals = [band_low, band_mid, band_high]
 
+        # 回転角度: 主回転（全帯域共有）に帯域ごとの揺れを加えたもの
+        if rot_mode in ('standard', '3d'):
+            self._rot_theta += 0.012
+        band_angles = []
+        for config in self.band_configs:
+            if rot_mode == 'off':
+                band_angles.append(0.0)
+            else:
+                config['phase'] += config['wobble_rate']
+                band_angles.append(self._rot_theta + config['wobble_amp'] * math.sin(config['phase']))
+        self._last_band_angles = band_angles
+
 
         full_out_l = np.zeros(n_samples + self.hrir_len - 1, dtype=np.float32)
         full_out_r = np.zeros(n_samples + self.hrir_len - 1, dtype=np.float32)
 
         # B. 帯域ごとの回転 ＆ 距離計算 ＆ 畳み込み
         for i, config in enumerate(self.band_configs):
-            # 1. 回転位置計算
+            # 1. 回転位置計算（角度はループ前に帯域ぶん一括で決める）
+            angle_rad = band_angles[i]
             if rot_mode == '3d':
                 # 3軸 (Pitch/Yaw/Roll 複合) 回転
-                config['angle'] += 0.015 * config['speed']
-                pitch = math.sin(config['angle'] * 0.7) * 0.45  # 上下角 (Pitch)
-                yaw = config['angle']                         # 水平角 (Yaw)
-                
-                x = math.sin(yaw) * math.cos(pitch) * global_distance
-                z = -math.cos(yaw) * math.cos(pitch) * global_distance
+                pitch = math.sin(self._rot_theta * 0.7) * 0.45  # 上下角 (Pitch)
+                x = math.sin(angle_rad) * math.cos(pitch) * global_distance
+                z = -math.cos(angle_rad) * math.cos(pitch) * global_distance
                 angle_deg = math.degrees(math.atan2(x, -z)) % 360
-                
+
                 # HRTFテーブルは -4.0 / 0.0 / 4.0 の仰角キーで構築している。
                 # 3D回転でも必ず同じ集合から最も近い仰角を選択する。
                 elevation_levels = (-4.0, 0.0, 4.0)
@@ -303,10 +321,7 @@ class PythonSpatialAudioSource(discord.AudioSource):
                 y_elevation = min(elevation_levels, key=lambda value: abs(value - target_elevation))
             elif rot_mode == 'standard':
                 # 通常 2D 水平回転
-                config['angle'] += 0.015 * config['speed']
-                x = math.sin(config['angle']) * global_distance
-                z = -math.cos(config['angle']) * global_distance
-                angle_deg = math.degrees(math.atan2(x, -z)) % 360
+                angle_deg = math.degrees(angle_rad) % 360
                 y_elevation = config['y']
             else:
                 # 静止 (OFF)
@@ -455,6 +470,15 @@ class PythonSpatialAudioSource(discord.AudioSource):
             else:
                 rev_out_l = (fb_out[0] + fb_out[2]) * 0.5
                 rev_out_r = (fb_out[1] + fb_out[3]) * 0.5
+
+        # 反響も音像の方向へ寄せる: ドライ音の左右バランス（平滑化）に合わせて
+        # ウェット音の左右を傾け、残響の雲も音源のいる方向に定位させる
+        dry_lvl_l = float(np.sqrt(np.mean(spatial_out_l.astype(np.float64) ** 2))) + 1e-9
+        dry_lvl_r = float(np.sqrt(np.mean(spatial_out_r.astype(np.float64) ** 2))) + 1e-9
+        balance = (dry_lvl_l - dry_lvl_r) / (dry_lvl_l + dry_lvl_r)
+        self._wet_balance = 0.85 * self._wet_balance + 0.15 * balance
+        rev_out_l = rev_out_l * (1.0 + 0.6 * self._wet_balance)
+        rev_out_r = rev_out_r * (1.0 - 0.6 * self._wet_balance)
 
         # D. ミックス処理
         mix_l = spatial_out_l + rev_out_l * wet_val
