@@ -53,6 +53,33 @@ export function resolvePromptLang(value: unknown): PromptLang {
   return DEFAULT_PROMPT_LANG;
 }
 
+/**
+ * 生成に使うモデルの選択肢。キーは表示名由来の中立なスラッグで、実際の
+ * モデル ID はサーバー側（one-prompter-server.ts の対応表）だけが知る。
+ * 表示名・キー・画面のどこにもプロバイダ名は出さない。
+ * 既定は DeepSeek 1017（従来の既定モデル）。
+ */
+export type PrompterModelKey = "glm53" | "glm53-flash" | "deepseek1017" | "gemma26b" | "qwen27b" | "kimi31pro";
+
+export const PROMPTER_MODEL_OPTIONS: { key: PrompterModelKey; label: string }[] = [
+  { key: "glm53", label: "GLM 5.3" },
+  { key: "glm53-flash", label: "GLM 5.3 Flash" },
+  { key: "deepseek1017", label: "DeepSeek 1017" },
+  { key: "gemma26b", label: "Gemma 26B" },
+  { key: "qwen27b", label: "Qwen 3.8 27B" },
+  { key: "kimi31pro", label: "Kimi K3.1 Pro" },
+];
+
+export const DEFAULT_MODEL_KEY: PrompterModelKey = "deepseek1017";
+
+/** API の model フィールドを検証する。不正値・未指定は既定モデルに丸める。 */
+export function resolveModelKey(value: unknown): PrompterModelKey {
+  if (typeof value === "string" && PROMPTER_MODEL_OPTIONS.some((o) => o.key === value)) {
+    return value as PrompterModelKey;
+  }
+  return DEFAULT_MODEL_KEY;
+}
+
 export type LlmQuestion = {
   question: string;
   options: [string, string];

@@ -1,13 +1,16 @@
 import type { ReactNode } from "react";
+import OpMenu from "./OpMenu";
 
 // One Prompter 単独の外枠。
 // このページでは AGO BOT サイト共通のヘッダー/フッターを出さない
-// （ルート側の SiteChrome がパスで判定して省く）ため、サービス名だけの
-// 最小限のヘッダーとフッターをここで持つ。AGO BOT のロゴ・名称・
-// サイト内リンクは置かない。フッターもサービス名のみで、リンク類は置かない。
+// （ルート側の SiteChrome がパスで判定して省く）ため、最小限のヘッダーと
+// フッターをここで持つ。AGO BOT のロゴ・名称・サイト内リンクは置かない。
+// サービス名の常時表示はヘッダーの1箇所だけ。フッターには名前を出さず、
+// 利用規約・プライバシーポリシーへのリンクはヘッダー右端のハンバーガー
+// メニュー（OpMenu）の中だけに置く。
 // ブランドマークはロゴA「プロンプト記号」（黒い角丸スクエアに白抜きの
-// ターミナルプロンプト「>_」）。ヘッダーとフッターの名義の左に置き、
-// ファビコン（page.tsx の OP_ICON）も同一形状に揃えている。
+// ターミナルプロンプト「>_」）。ヘッダーの名義の左に置き、ファビコン
+// （page.tsx の OP_ICON）も同一形状に揃えている。
 function OpLogoMark({ size }: { size: number }) {
   return (
     <svg width={size} height={size} viewBox="0 0 64 64" aria-hidden="true" focusable="false">
@@ -33,14 +36,10 @@ export default function OnePrompterLayout({ children }: { children: ReactNode })
           <OpLogoMark size={28} />
           One Prompter
         </p>
+        <OpMenu />
       </header>
       {children}
-      <footer className="op-footer">
-        <p className="op-footer-brand">
-          <OpLogoMark size={18} />
-          One Prompter
-        </p>
-      </footer>
+      <footer className="op-footer" aria-hidden="true" />
     </div>
   );
 }

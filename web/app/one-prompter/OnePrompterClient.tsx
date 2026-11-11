@@ -16,14 +16,17 @@ import { buildPromptDownload, type PromptDownloadFormat } from "../../lib/one-pr
 import {
   bothAnswerText,
   DEFERRED_ANSWER_TEXT,
+  DEFAULT_MODEL_KEY,
   DEFAULT_PROMPT_LANG,
   DEFAULT_QUESTION_COUNT,
   MAX_ANSWER_CHARS,
   MAX_REVISE_INSTRUCTION_CHARS,
   MAX_ROUGH_LENGTH,
   pendingAnswerText,
+  PROMPTER_MODEL_OPTIONS,
   type LlmQuestion,
   type PromptLang,
+  type PrompterModelKey,
 } from "../../lib/one-prompter-llm";
 
 /** 出力言語モードの選択肢。変わるのは完成プロンプトの言語だけで、画面と質問は日本語のまま。 */
@@ -116,6 +119,8 @@ export default function OnePrompterClient() {
   const [questionCount, setQuestionCount] = useState(DEFAULT_QUESTION_COUNT);
   /** 完成プロンプトの出力言語モード（ja/en/hybrid）。LLM 経路でのみ有効（fallback は日本語のみ）。 */
   const [promptLang, setPromptLang] = useState<PromptLang>(DEFAULT_PROMPT_LANG);
+  /** 生成モデル。LLM 経路でのみ有効（fallback はルールベースでモデルを使わない）。 */
+  const [modelKey, setModelKey] = useState<PrompterModelKey>(DEFAULT_MODEL_KEY);
   /** 自由入力の展開状態と下書き（質問が切り替わるたびにリセットする）。 */
   const [freeOpen, setFreeOpen] = useState(false);
   const [freeDraft, setFreeDraft] = useState("");
@@ -156,7 +161,7 @@ export default function OnePrompterClient() {
     resetFree();
     setReviseNote("");
     setPhase({ name: "loading-questions" });
-    const data = await postOnePrompter({ action: "questions", rough: rough.trim(), count: questionCount });
+    const data = await postOnePrompter({ action: "questions", rough: rough.trim(), count: questionCount, model: modelKey });
     if (data && isLlmQuestions(data.questions, questionCount)) {
       setPhase({
         name: "questions",
@@ -197,6 +202,7 @@ export default function OnePrompterClient() {
       rough: rough.trim(),
       answers: answers.map((a) => ({ question: a.question, answer: a.label })),
       lang: promptLang,
+      model: modelKey,
     });
     if (data && typeof data.prompt === "string" && data.prompt.trim()) {
       setPhase({ name: "result", answers, prompt: data.prompt, originalPrompt: data.prompt });
@@ -215,6 +221,7 @@ export default function OnePrompterClient() {
       action: "questions",
       rough: rough.trim(),
       answers: answers.map((a) => ({ question: a.question, answer: a.label })),
+      model: modelKey,
     });
     if (data && Array.isArray(data.questions) && data.questions.length > 0 && isFollowupQuestions(data.questions)) {
       setPhase({
@@ -371,7 +378,7 @@ export default function OnePrompterClient() {
     if (!instruction || !phase.prompt.trim()) return;
     setRevising(true);
     setReviseNote("");
-    const data = await postOnePrompter({ action: "revise", prompt: phase.prompt, instruction, lang: promptLang });
+    const data = await postOnePrompter({ action: "revise", prompt: phase.prompt, instruction, lang: promptLang, model: modelKey });
     setRevising(false);
     if (data && typeof data.prompt === "string" && data.prompt.trim()) {
       setPhase({ ...phase, prompt: data.prompt });
@@ -430,31 +437,47 @@ export default function OnePrompterClient() {
           maxLength={MAX_ROUGH_LENGTH}
           autoFocus
         />
-        <div className="op-countrow">
-          <span className="op-countlabel">質問の数</span>
-          {[3, 5, 8].map((n) => (
-            <button
-              key={n}
-              type="button"
-              className={n === questionCount ? "op-suboption selected" : "op-suboption"}
-              onClick={() => setQuestionCount(n)}
-            >
-              {n}問
-            </button>
-          ))}
-        </div>
-        <div className="op-countrow">
-          <span className="op-countlabel">プロンプトの言語</span>
-          {PROMPT_LANG_OPTIONS.map((opt) => (
-            <button
-              key={opt.value}
-              type="button"
-              className={opt.value === promptLang ? "op-suboption selected" : "op-suboption"}
-              onClick={() => setPromptLang(opt.value)}
-            >
-              {opt.label}
-            </button>
-          ))}
+        <div className="op-settings" role="group" aria-label="設定">
+          <span className="op-settings-label">設定</span>
+          <div className="op-countrow">
+            <span className="op-countlabel">質問の数</span>
+            {[3, 5, 8].map((n) => (
+              <button
+                key={n}
+                type="button"
+                className={n === questionCount ? "op-suboption selected" : "op-suboption"}
+                onClick={() => setQuestionCount(n)}
+              >
+                {n}問
+              </button>
+            ))}
+          </div>
+          <div className="op-countrow">
+            <span className="op-countlabel">プロンプトの言語</span>
+            {PROMPT_LANG_OPTIONS.map((opt) => (
+              <button
+                key={opt.value}
+                type="button"
+                className={opt.value === promptLang ? "op-suboption selected" : "op-suboption"}
+                onClick={() => setPromptLang(opt.value)}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
+          <div className="op-countrow">
+            <span className="op-countlabel">モデル</span>
+            {PROMPTER_MODEL_OPTIONS.map((opt) => (
+              <button
+                key={opt.key}
+                type="button"
+                className={opt.key === modelKey ? "op-suboption selected" : "op-suboption"}
+                onClick={() => setModelKey(opt.key)}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
         </div>
         <div className="op-actions">
           <button type="button" className="op-primary" onClick={() => void start()} disabled={!canStart}>
