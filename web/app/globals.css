@@ -1092,3 +1092,254 @@ button.balku-card:hover { box-shadow:0 10px 20px rgba(0,0,0,.45), inset 0 0 0 3p
 @media (prefers-reduced-motion: reduce) {
   .mem-card-inner { transition:none; }
 }
+
+/* --- オンラインゲーム共通（.og- 接頭辞 / app/games/online の OnlineShell と
+   各ゲームクライアントが共有する標準セット） ---
+   shell 担当への引き継ぎ: クラス名はこのブロックが正。不足があれば
+   このブロック内への追加で対応し、既存ルールは変更しない。
+   色は共通変数（--bg/--soft/--line/--text/--muted/--accent/--accent-soft）を
+   基本とし、盤面・石・カードの識別色だけを locally に足す。 */
+
+/* --- shell の枠 --- */
+.og-shell { display:grid; gap:16px; }
+.og-entry { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:16px; align-items:start; }
+@media (max-width:760px) { .og-entry { grid-template-columns:minmax(0,1fr); } }
+.og-lobby { display:grid; gap:12px; padding:16px; border:1px solid var(--line); border-radius:9px; background:var(--soft); }
+.og-field { display:grid; gap:6px; font-size:14px; }
+.og-field > span { color:var(--muted); font-size:13px; font-weight:700; }
+.og-input { width:100%; padding:9px 11px; border:1px solid var(--line); border-radius:8px; background:#fff; color:var(--text); font:inherit; outline-color:var(--accent); }
+.og-button { display:inline-flex; align-items:center; justify-content:center; min-height:40px; padding:8px 16px; border:1px solid var(--line); border-radius:8px; background:#fff; color:var(--text); font:inherit; font-size:14px; font-weight:700; cursor:pointer; }
+.og-button:hover { background:var(--accent-soft); }
+.og-button:disabled { opacity:.45; cursor:not-allowed; }
+.og-button:disabled:hover { background:#fff; }
+.og-button-primary { background:var(--accent); border-color:var(--accent); color:#fff; }
+.og-button-primary:hover { background:var(--accent); filter:brightness(1.08); }
+.og-button-primary:disabled:hover { background:var(--accent); filter:none; }
+.og-button-danger { border-color:#c96a6a; color:#a34848; }
+.og-button-danger:hover { background:#fdf0f0; }
+.og-room-list { display:grid; gap:8px; }
+.og-error { margin:0; padding:10px 14px; border:1px solid #d9a0a0; border-radius:9px; background:#fdf0f0; color:#a34848; font-size:14px; }
+.og-notice { margin:0; padding:10px 14px; border:1px solid #e8d9a8; border-radius:9px; background:#fffaf0; color:#6f654d; font-size:14px; }
+.og-status-line { color:var(--muted); font-size:14px; }
+.og-soundbar { display:flex; gap:8px; flex-wrap:wrap; }
+.og-turn-banner { display:flex; flex-wrap:wrap; align-items:center; gap:10px; padding:10px 14px; border:1px solid var(--line); border-radius:9px; background:var(--soft); font-weight:700; }
+.og-turn-banner-mine { border-color:var(--accent); background:var(--accent-soft); color:var(--accent); }
+.og-badge { display:inline-block; padding:1px 8px; border-radius:999px; background:var(--accent-soft); color:var(--accent); font-size:12px; font-weight:700; }
+.og-badge-revolution { background:#a34848; color:#fff; }
+
+/* --- 参加者リスト --- */
+.og-members { display:flex; flex-wrap:wrap; gap:8px; }
+.og-member { display:grid; gap:2px; min-width:120px; padding:8px 12px; border:1px solid var(--line); border-radius:8px; background:#fff; font-size:14px; }
+.og-member-name { font-weight:700; }
+.og-member-meta { color:var(--muted); font-size:12px; }
+.og-member-turn { border-color:var(--accent); background:var(--accent-soft); }
+.og-member-mine { box-shadow:inset 0 0 0 1px var(--accent); }
+.og-member-dead { opacity:.55; }
+
+/* --- チャット（shell のルームチャット） --- */
+.og-chat { display:grid; gap:8px; padding:12px; border:1px solid var(--line); border-radius:9px; background:#fff; }
+.og-chat-log { display:grid; gap:6px; max-height:220px; overflow-y:auto; font-size:14px; }
+.og-chat-form { display:flex; gap:8px; }
+.og-chat-form .og-input { flex:1; }
+
+/* --- ゲーム共通の小物 --- */
+.og-game { display:grid; gap:16px; }
+.og-actions { display:flex; flex-wrap:wrap; gap:8px; align-items:center; }
+.og-log { display:grid; gap:6px; }
+.og-log h2 { font-size:15px; }
+.og-log-list { display:grid; gap:4px; margin:0; padding:0; list-style:none; color:var(--muted); font-size:13px; }
+.og-result { display:grid; gap:10px; padding:16px; border:1px solid var(--line); border-radius:9px; background:var(--soft); }
+.og-result-list { display:grid; gap:6px; margin:0; padding:0; list-style:none; }
+.og-result-list li { display:flex; align-items:center; gap:10px; padding:8px 12px; border:1px solid var(--line); border-radius:8px; background:#fff; font-size:14px; }
+.og-result-mine { border-color:var(--accent); background:var(--accent-soft); font-weight:700; }
+.og-result-rank { font-weight:800; min-width:3em; }
+
+/* --- 盤面系 ---
+   マス目は aspect-ratio:1 と minmax(0,1fr) で固定し、行にも必ず
+   minmax(0,1fr) を入れる（チェス盤の歪み修正と同じ教訓）。 */
+.og-board { display:grid; gap:4px; width:100%; max-width:560px; margin:0 auto; padding:8px; border-radius:10px; }
+.og-board-8 { grid-template-columns:repeat(8,minmax(0,1fr)); grid-template-rows:repeat(8,minmax(0,1fr)); }
+.og-board-10 { grid-template-columns:repeat(10,minmax(0,1fr)); grid-template-rows:repeat(10,minmax(0,1fr)); }
+.og-board-15 { grid-template-columns:repeat(15,minmax(0,1fr)); grid-template-rows:repeat(15,minmax(0,1fr)); gap:2px; max-width:620px; }
+.og-board-connect4 { grid-template-columns:repeat(7,minmax(0,1fr)); grid-template-rows:repeat(6,minmax(0,1fr)); }
+.og-cell { position:relative; display:grid; place-items:center; aspect-ratio:1; min-width:0; min-height:0; overflow:hidden; border:0; border-radius:6px; padding:0; font:inherit; }
+button.og-cell { cursor:pointer; }
+button.og-cell:disabled { cursor:default; }
+/* リバーシ: 緑盤＋黒白ディスク */
+.og-board-reversi { background:#1f7a4d; border:2px solid #14532d; }
+.og-board-reversi .og-cell { background:#238457; border-radius:3px; }
+.og-board-reversi button.og-cell:hover { background:#2a9266; }
+.og-disc { display:block; width:84%; height:84%; border-radius:50%; pointer-events:none; }
+.og-disc-black { background:radial-gradient(circle at 35% 30%, #4a4a4a, #141414 70%); box-shadow:0 2px 4px rgba(0,0,0,.45); }
+.og-disc-white { background:radial-gradient(circle at 35% 30%, #ffffff, #d9d9d2 75%); box-shadow:0 2px 4px rgba(0,0,0,.4); }
+/* 四目並べ: 青盤＋赤黄ディスク */
+.og-board-connect4-wrap { background:#2f5f8f; border:2px solid #234a70; }
+.og-board-connect4-wrap .og-cell { background:#fdfdf8; border-radius:50%; }
+.og-disc-red { background:radial-gradient(circle at 35% 30%, #f08080, #c0392b 75%); box-shadow:inset 0 -2px 4px rgba(0,0,0,.3); }
+.og-disc-yellow { background:radial-gradient(circle at 35% 30%, #ffe9a3, #d9a41c 75%); box-shadow:inset 0 -2px 4px rgba(0,0,0,.3); }
+/* 五目並べ: 木盤＋黒白石 */
+.og-board-gomoku { background:#dcb87a; border:2px solid #b08d4f; }
+.og-board-gomoku .og-cell { background:transparent; border-radius:3px; box-shadow:inset 0 0 0 1px rgba(120,85,30,.45); }
+.og-board-gomoku button.og-cell:hover { background:rgba(255,255,255,.28); }
+.og-stone { display:block; width:88%; height:88%; border-radius:50%; pointer-events:none; }
+.og-stone-black { background:radial-gradient(circle at 35% 30%, #4a4a4a, #101010 72%); box-shadow:0 1px 3px rgba(0,0,0,.5); }
+.og-stone-white { background:radial-gradient(circle at 35% 30%, #ffffff, #d8d8d0 78%); box-shadow:0 1px 3px rgba(0,0,0,.45); }
+/* 海戦: 自海/攻撃海のセル状態色（命中=赤系、外れ=薄色、沈没=濃色、自艦=グレー） */
+.og-board-sea { background:#bcd6ea; border:2px solid #7fa8c9; gap:2px; }
+.og-sea-cell { background:#dcebf5; border-radius:2px; color:var(--text); font-size:13px; font-weight:700; line-height:1; }
+button.og-sea-cell { cursor:pointer; }
+button.og-sea-cell:hover { background:#c3dcee; }
+button.og-sea-cell:disabled { cursor:default; }
+.og-sea-miss { background:#f2f6f9; color:var(--muted); }
+.og-sea-hit { background:#e36a61; color:#fff; }
+.og-sea-sunk { background:#8f2d26; color:#fff; }
+.og-sea-ship { background:#9aa5ad; color:#fff; }
+
+/* --- カード系（大富豪） --- */
+.og-hand { display:flex; flex-wrap:wrap; gap:8px; align-items:flex-end; }
+.og-card { display:inline-grid; place-items:center; width:58px; aspect-ratio:5/7; padding:6px 4px; border:1px solid var(--line); border-radius:8px; background:#fff; color:var(--text); box-shadow:0 2px 5px rgba(0,0,0,.08); font:inherit; }
+button.og-card { cursor:pointer; transition:transform .12s ease, box-shadow .12s ease; }
+button.og-card:hover:not(:disabled) { transform:translateY(-3px); }
+button.og-card:disabled { cursor:default; opacity:.85; }
+.og-card-selected { transform:translateY(-10px); border-color:var(--accent); box-shadow:0 0 0 2px var(--accent), 0 6px 12px rgba(0,0,0,.14); }
+button.og-card-selected:hover:not(:disabled) { transform:translateY(-10px); }
+.og-card-red { color:#c0392b; }
+.og-card-face { display:grid; justify-items:center; gap:1px; line-height:1.15; pointer-events:none; }
+.og-card-suit { font-size:17px; }
+.og-card-rank { font-size:15px; font-weight:800; }
+.og-field-area { display:grid; gap:8px; justify-items:center; padding:16px; border:1px solid var(--line); border-radius:9px; background:var(--soft); }
+.og-field-cards { display:flex; flex-wrap:wrap; gap:8px; justify-content:center; }
+.og-field-cards .og-card { width:72px; cursor:default; }
+.og-field-cards .og-card-suit { font-size:21px; }
+.og-field-cards .og-card-rank { font-size:18px; }
+
+/* --- 人狼系 --- */
+.og-role-card { display:grid; gap:4px; padding:14px 16px; border:1px solid var(--line); border-left:6px solid var(--muted); border-radius:9px; background:var(--soft); }
+.og-role-label { color:var(--muted); font-size:12px; font-weight:800; letter-spacing:.08em; }
+.og-role-name { font-size:22px; font-weight:800; }
+.og-role-desc { color:var(--muted); font-size:14px; }
+.og-role-wolf { border-left-color:#c0392b; background:#fdf0f0; }
+.og-role-seer { border-left-color:#2f5f8f; background:#eef4fb; }
+.og-role-hunter { border-left-color:#2f7f5e; background:#edf7f1; }
+.og-role-villager { border-left-color:#9aa5ad; background:var(--soft); }
+.og-player-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(150px,1fr)); gap:8px; }
+.og-phase-banner { display:flex; flex-wrap:wrap; align-items:center; gap:12px; padding:12px 16px; border:1px solid var(--line); border-radius:9px; background:var(--soft); }
+.og-phase-title { font-size:19px; font-weight:800; }
+.og-phase-night { background:#232838; border-color:#232838; color:#eef0f6; }
+.og-phase-day { background:#fff7e0; border-color:#e8d9a8; }
+.og-phase-vote { background:#fdf0f0; border-color:#d9a0a0; }
+.og-phase-panel { display:grid; gap:10px; padding:16px; border:1px solid var(--line); border-radius:9px; }
+.og-phase-panel h2 { font-size:16px; }
+.og-timer { font-size:18px; font-weight:800; font-variant-numeric:tabular-nums; }
+.og-target-grid { display:flex; flex-wrap:wrap; gap:8px; }
+.og-seer-history { display:grid; gap:6px; }
+.og-seer-history h2 { font-size:15px; }
+
+/* --- shell 実装が使うクラス（OnlineShell.tsx の実クラス名に合わせた定義。
+   上の標準セット（og-button 等）と併せて最終版とする） --- */
+.og-header { display:grid; gap:8px; }
+.og-title { font-size:20px; }
+.og-muted { color:var(--muted); font-size:14px; }
+.og-main { display:grid; gap:16px; }
+.og-game-area { display:grid; gap:16px; min-width:0; }
+.og-panel { display:grid; gap:12px; padding:16px; border:1px solid var(--line); border-radius:9px; background:var(--soft); }
+.og-panel h3 { margin:0; font-size:16px; }
+.og-btn { display:inline-flex; align-items:center; justify-content:center; min-height:40px; padding:8px 16px; border:1px solid var(--line); border-radius:8px; background:#fff; color:var(--text); font:inherit; font-size:14px; font-weight:700; cursor:pointer; }
+.og-btn:hover { background:var(--accent-soft); }
+.og-btn:disabled { opacity:.45; cursor:not-allowed; }
+.og-btn-primary { background:var(--accent); border-color:var(--accent); color:#fff; }
+.og-btn-primary:hover { background:var(--accent); filter:brightness(1.08); }
+.og-btn-ghost { border-color:transparent; background:transparent; color:var(--muted); font-weight:400; }
+.og-btn-ghost:hover { background:var(--soft); }
+.og-btn-small { min-height:32px; padding:4px 10px; font-size:13px; }
+.og-segmented { display:flex; width:max-content; max-width:100%; border:1px solid var(--line); border-radius:8px; overflow:hidden; }
+.og-segmented button { padding:6px 14px; border:0; border-right:1px solid var(--line); background:#fff; color:var(--text); cursor:pointer; font:inherit; font-size:14px; }
+.og-segmented button:last-child { border-right:0; }
+.og-segmented button.og-segmented-active { background:var(--accent); color:#fff; font-weight:700; }
+.og-check { display:flex; align-items:center; gap:9px; font-size:14px; cursor:pointer; }
+.og-check input { width:17px; height:17px; accent-color:var(--accent); }
+.og-join-row { display:flex; gap:8px; }
+.og-join-row .og-input { flex:1; }
+.og-code-input { text-transform:uppercase; letter-spacing:.12em; font-weight:700; }
+.og-public-list { display:grid; gap:8px; }
+.og-public-row { display:flex; align-items:center; gap:12px; padding:8px 12px; border:1px solid var(--line); border-radius:8px; background:#fff; font-size:14px; }
+.og-public-code { font-weight:800; letter-spacing:.1em; }
+.og-public-row .og-muted { margin-right:auto; font-size:13px; }
+.og-room-bar { display:flex; flex-wrap:wrap; align-items:center; gap:10px; font-size:14px; }
+.og-room-code { font-size:22px; font-weight:800; letter-spacing:.16em; color:var(--accent); }
+.og-sync { color:var(--muted); font-size:12px; }
+.og-connecting { padding:12px 0; }
+.og-sound-btn { padding:5px 12px; border:1px solid var(--line); border-radius:999px; background:#fff; color:var(--muted); font:inherit; font-size:12px; font-weight:700; cursor:pointer; }
+.og-sound-on { background:var(--accent); border-color:var(--accent); color:#fff; }
+.og-notice-inline { color:#6f654d; font-size:13px; }
+.og-footer-actions { margin-top:4px; }
+.og-turn-mine { border-color:var(--accent); background:var(--accent-soft); color:var(--accent); }
+.og-turn-banner-mine { border-color:var(--accent); background:var(--accent-soft); color:var(--accent); }
+/* shell のロビー参加者リスト */
+.og-player-list { display:grid; gap:6px; }
+.og-player-row { display:flex; align-items:center; justify-content:space-between; gap:8px; padding:8px 12px; border:1px solid var(--line); border-radius:8px; background:#fff; font-size:14px; }
+.og-player-me { border-color:var(--accent); background:var(--accent-soft); }
+.og-player-name { display:inline-flex; align-items:center; gap:6px; font-weight:700; }
+.og-badge-host { background:var(--accent); color:#fff; }
+.og-badge-cpu { background:var(--soft); color:var(--muted); border:1px solid var(--line); }
+/* shell のチャット詳細 */
+.og-chat-title { margin:0; font-size:14px; }
+.og-chat-list { display:grid; gap:6px; max-height:220px; overflow-y:auto; font-size:14px; }
+.og-chat-msg { display:grid; gap:1px; padding:6px 10px; border-radius:8px; background:var(--soft); }
+.og-chat-mine { background:var(--accent-soft); }
+.og-chat-meta { display:flex; gap:8px; align-items:baseline; font-size:12px; font-weight:700; }
+.og-chat-time { color:var(--muted); font-weight:400; }
+.og-chat-text { overflow-wrap:anywhere; }
+.og-chat-empty { color:var(--muted); font-size:13px; }
+.og-chat-input { flex:1; padding:9px 11px; border:1px solid var(--line); border-radius:8px; background:#fff; color:var(--text); font:inherit; outline-color:var(--accent); }
+.og-chat-send { flex:none; }
+/* スコア表示（盤面系クライアント共通） */
+.og-board-wrap { display:grid; gap:12px; }
+.og-score-row { display:flex; flex-wrap:wrap; gap:8px; }
+.og-score { display:inline-flex; align-items:center; gap:7px; padding:6px 12px; border:1px solid var(--line); border-radius:999px; background:#fff; font-size:14px; font-weight:700; }
+.og-score .og-disc { width:18px; height:18px; }
+.og-score-turn { border-color:var(--accent); background:var(--accent-soft); }
+.og-cell-last { box-shadow:inset 0 0 0 3px rgba(230,185,61,.85); }
+.og-cell-win { box-shadow:inset 0 0 0 3px #e6b93d; }
+.og-legal-dot { display:block; width:26%; height:26%; border-radius:50%; background:rgba(255,255,255,.55); pointer-events:none; }
+.og-disc-win { box-shadow:0 0 0 3px #e6b93d, 0 2px 4px rgba(0,0,0,.4); }
+/* seat インデックスのディスク（0=先手色 / 1=後手色。ゲーム別に盤面側で上書き） */
+.og-disc-0 { background:radial-gradient(circle at 35% 30%, #4a4a4a, #141414 70%); box-shadow:0 2px 4px rgba(0,0,0,.45); }
+.og-disc-1 { background:radial-gradient(circle at 35% 30%, #ffffff, #d9d9d2 75%); box-shadow:0 2px 4px rgba(0,0,0,.4); }
+.og-c4-board .og-disc-0, .og-board-connect4 .og-disc-0 { background:radial-gradient(circle at 35% 30%, #f08080, #c0392b 75%); box-shadow:inset 0 -2px 4px rgba(0,0,0,.3); }
+.og-c4-board .og-disc-1, .og-board-connect4 .og-disc-1 { background:radial-gradient(circle at 35% 30%, #ffe9a3, #d9a41c 75%); box-shadow:inset 0 -2px 4px rgba(0,0,0,.3); }
+/* リバーシ盤（og-reversi-board / og-reversi-cell） */
+.og-reversi-board { display:grid; grid-template-columns:repeat(8,minmax(0,1fr)); grid-template-rows:repeat(8,minmax(0,1fr)); gap:4px; width:100%; max-width:560px; margin:0 auto; padding:8px; border-radius:10px; background:#1f7a4d; border:2px solid #14532d; }
+.og-reversi-cell { background:#238457; border-radius:3px; }
+button.og-reversi-cell:hover { background:#2a9266; }
+/* 四目並べ盤（og-c4-board / og-c4-cell / ドロップ列） */
+.og-c4-board { display:grid; grid-template-columns:repeat(7,minmax(0,1fr)); grid-template-rows:repeat(6,minmax(0,1fr)); gap:4px; width:100%; max-width:520px; margin:0 auto; padding:8px; border-radius:10px; background:#2f5f8f; border:2px solid #234a70; }
+.og-c4-cell { background:#fdfdf8; border-radius:50%; }
+.og-c4-drop-row { display:grid; grid-template-columns:repeat(7,minmax(0,1fr)); gap:4px; width:100%; max-width:520px; margin:0 auto; padding:0 8px; }
+.og-c4-drop-btn { min-height:36px; border:1px solid var(--line); border-radius:8px; background:#fff; color:var(--accent); font:inherit; font-size:15px; font-weight:800; cursor:pointer; }
+.og-c4-drop-btn:hover:not(:disabled) { background:var(--accent-soft); }
+.og-c4-drop-btn:disabled { opacity:.4; cursor:not-allowed; }
+/* 五目並べ盤（og-gomoku-board / og-gomoku-cell） */
+.og-gomoku-board { display:grid; grid-template-columns:repeat(15,minmax(0,1fr)); grid-template-rows:repeat(15,minmax(0,1fr)); gap:2px; width:100%; max-width:620px; margin:0 auto; padding:8px; border-radius:10px; background:#dcb87a; border:2px solid #b08d4f; }
+.og-gomoku-cell { background:transparent; border-radius:3px; box-shadow:inset 0 0 0 1px rgba(120,85,30,.45); }
+button.og-gomoku-cell:hover { background:rgba(255,255,255,.28); }
+/* 海戦（og-bs-*）: 状態色は og-sea-* と同じ意味付け */
+.og-bs-seas { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:16px; align-items:start; }
+@media (max-width:760px) { .og-bs-seas { grid-template-columns:minmax(0,1fr); } }
+.og-bs-sea { display:grid; gap:8px; }
+.og-bs-sea-title { margin:0; font-size:15px; }
+.og-bs-board { display:grid; grid-template-columns:repeat(10,minmax(0,1fr)); grid-template-rows:repeat(10,minmax(0,1fr)); gap:2px; width:100%; max-width:480px; margin:0 auto; padding:6px; border-radius:8px; background:#bcd6ea; border:2px solid #7fa8c9; }
+.og-bs-cell { background:#dcebf5; border-radius:2px; color:var(--text); font-size:12px; font-weight:700; line-height:1; }
+button.og-bs-cell:hover { background:#c3dcee; }
+.og-bs-cell-ship { background:#9aa5ad; color:#fff; }
+.og-bs-cell-hit { background:#e36a61; color:#fff; }
+.og-bs-cell-miss { background:#f2f6f9; color:var(--muted); }
+.og-bs-cell-sunk { background:#8f2d26; color:#fff; }
+.og-bs-fleet { display:flex; flex-wrap:wrap; gap:8px; }
+.og-bs-ship-btn { padding:7px 14px; border:1px solid var(--line); border-radius:8px; background:#fff; color:var(--text); font:inherit; font-size:14px; font-weight:700; cursor:pointer; }
+.og-bs-ship-btn:hover { background:var(--accent-soft); }
+.og-bs-ship-selected { background:var(--accent); border-color:var(--accent); color:#fff; }
+/* 大富豪: 場カードの大型修飾 / 人狼: 終了フェーズ見出し */
+.og-card-field { width:72px; cursor:default; }
+.og-phase-finished { background:var(--accent-soft); border-color:var(--accent); }
+.og-daifugo, .og-werewolf { min-width:0; }

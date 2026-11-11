@@ -82,6 +82,72 @@ export const WEB_GAMES: WebGame[] = [
     players: "1人",
   },
   {
+    slug: "reversi",
+    title: "リバーシ",
+    description:
+      "挟んでひっくり返す定番ボードゲーム。ルームコードや公開ルームでオンライン対戦ができ、CPU相手に1人で遊ぶこともできます。角を取る読み合いが勝負です。",
+    glyph: "●",
+    accent: "#2f7f5e",
+    status: "playable",
+    activity: true,
+    players: "2人（オンライン/CPU対戦）",
+  },
+  {
+    slug: "connect4",
+    title: "四目並べ",
+    description:
+      "コマを落として縦・横・斜めのどれか4つを先にそろえる対戦パズル。ルームコードや公開ルームでオンライン対戦ができ、CPU相手にも遊べます。",
+    glyph: "🔴",
+    accent: "#c94f43",
+    status: "playable",
+    activity: true,
+    players: "2人（オンライン/CPU対戦）",
+  },
+  {
+    slug: "gomoku",
+    title: "五目並べ",
+    description:
+      "石を交互に置いて5つ並べた方が勝ちの古典ボードゲーム。ルームコードや公開ルームでオンライン対戦ができ、CPU相手に1人でも遊べます。",
+    glyph: "⚫",
+    accent: "#8a6d3b",
+    status: "playable",
+    activity: true,
+    players: "2人（オンライン/CPU対戦）",
+  },
+  {
+    slug: "battleship",
+    title: "海戦ゲーム",
+    description:
+      "艦隊を配置して相手の海域を砲撃し合う読み合いの対戦ゲーム。ルームコードや公開ルームで集まってオンライン対戦できます。命中と沈没の駆け引きが鍵です。",
+    glyph: "🚢",
+    accent: "#2f5f8f",
+    status: "playable",
+    activity: true,
+    players: "2人（オンライン）",
+  },
+  {
+    slug: "daifugo",
+    title: "大富豪",
+    description:
+      "手札を全て出し切る順位を競う定番トランプゲーム。ルームコードや公開ルームで2〜4人がオンライン対戦でき、空き席にはCPUも入れられます。革命や流れる場の読み合いが楽しめます。",
+    glyph: "♠",
+    accent: "#7a4fa3",
+    status: "playable",
+    activity: true,
+    players: "2〜4人（オンライン/CPU対戦）",
+  },
+  {
+    slug: "werewolf",
+    title: "人狼",
+    description:
+      "村人の中に紛れた人狼を、夜の襲撃と昼の議論・投票で見抜く正体隠匿ゲーム。ルームコードや公開ルームで4〜8人がオンラインで遊べます。役職は各プレイヤーにだけ知らされます。",
+    glyph: "🐺",
+    accent: "#5b4a8a",
+    status: "playable",
+    activity: true,
+    players: "4〜8人（オンライン）",
+  },
+  {
     slug: "lll",
     title: "LLL",
     description:
