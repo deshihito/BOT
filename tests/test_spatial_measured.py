@@ -203,5 +203,48 @@ class DistanceSelectTest(unittest.TestCase):
         self.assertFalse(any("AGC" in p or "引き上げ" in p for p in placeholders))
 
 
+class RotationCoherenceTest(unittest.TestCase):
+    def _make_src(self, state):
+        import struct as _struct
+        import sys as _sys
+        import types as _types
+
+        _sys.modules.setdefault("yt_dlp", _types.ModuleType("yt_dlp"))
+        from core.vc.music import spatial
+
+        class _FakeSource:
+            def read(self):
+                return _struct.pack("<1920h", *([1000, 1000] * 960))
+
+            def cleanup(self):
+                pass
+
+        return spatial.PythonSpatialAudioSource(_FakeSource(), state)
+
+    def test_band_angles_stay_coherent(self):
+        import math as _math
+
+        src = self._make_src({"eq": "spatial", "volume": 1.0})
+        max_spread = 0.0
+        seen = []
+        for _ in range(600):
+            src.read()
+            angles = [a % (2 * _math.pi) for a in src._last_band_angles]
+            pts = sorted(angles)
+            gaps = [pts[1] - pts[0], pts[2] - pts[1], pts[0] + 2 * _math.pi - pts[2]]
+            spread = 2 * _math.pi - max(gaps)
+            max_spread = max(max_spread, spread)
+            seen.append(angles[1])
+        # 帯域間の角度差は常に 50 度以内（旧方式は最大 180 度までバラけた）
+        self.assertLessEqual(_math.degrees(max_spread), 50.0)
+        # 主回転は進んでいる
+        self.assertGreater(max(seen) - min(seen), 1.0)
+
+    def test_band_angles_zero_when_off(self):
+        src = self._make_src({"eq": "spatial", "volume": 1.0, "spatial_rot_mode": "off"})
+        src.read()
+        self.assertEqual(src._last_band_angles, [0.0, 0.0, 0.0])
+
+
 if __name__ == "__main__":
     unittest.main()
