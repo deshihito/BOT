@@ -126,6 +126,13 @@ class PythonSpatialAudioSource(discord.AudioSource):
         # --- 実測データ（部屋IR・スピーカー特性）。読めなければ簡易モデルへ ---
         self.room_irs = load_room_irs()
         self.speakers = load_speakers()
+        self._spatial_failed = False
+        logger.info(
+            "立体音響ソース開始: hrtf=%s room_ir=%s speakers=%s",
+            self.hrtf_kind,
+            "実測" if self.room_irs is not None else "簡易(FDN)",
+            "実測" if self.speakers is not None else "簡易",
+        )
         self._sp_fir_key = None
         self._sp_fir = None
         self._sp_fir_overlap = np.zeros(255, dtype=np.float32)
@@ -177,6 +184,238 @@ class PythonSpatialAudioSource(discord.AudioSource):
         self.rev_buf_r = np.zeros(12000, dtype=np.float32)
         self.rev_idx = 0
 
+    def _read_spatial(self, samples, fmt):
+        in_data = np.array(samples, dtype=np.float32) / 32768.0
+        mono_in = (in_data[0::2] + in_data[1::2]) * 0.5
+        n_samples = len(mono_in)
+
+        global_distance = max(0.1, float(self.state.get('spatial_distance', 2.0)))
+        reverb_mix = float(self.state.get('spatial_room_size', 0.3))
+        
+        # 💡 [機能拡張①] 回転モード ('off', 'standard', '3d')
+        rot_mode = self.state.get('spatial_rot_mode', 'standard')
+        if 'spatial_rot_mode' not in self.state:
+            rot_mode = 'standard' if self.state.get('is_rotating', True) else 'off'
+
+        speaker_type = self.state.get('spatial_speaker', 'studio')
+        preset = self.speaker_presets.get(speaker_type, self.speaker_presets['studio'])
+        max_boost = max(1.0, float(self.state.get('spatial_agc_max', 4.0)))
+
+        # 実測スピーカー特性: 軸上周波数特性をFIRで適用（帯域分割の前段）
+        sp_dir = None
+        if self.speakers is not None:
+            sp = self.speakers.get(speaker_type) or self.speakers['studio']
+            sp_dir = sp["directivity"]
+            if self._sp_fir_key != speaker_type:
+                self._sp_fir_key = speaker_type
+                self._sp_fir = sp["fir"]
+            fir_full = signal.oaconvolve(mono_in, self._sp_fir, mode="full")
+            fir_full[:len(self._sp_fir_overlap)] += self._sp_fir_overlap
+            self._sp_fir_overlap = fir_full[n_samples:].copy()
+            mono_in = fir_full[:n_samples]
+
+        # 空気吸収（ISO 9613-1）: 距離で高音ほど減衰する
+        air_gains = air_absorption_gains(global_distance)
+
+        # A. 帯域分割
+        band_low, self.zi_low = signal.sosfilt(self.sos_low, mono_in, zi=self.zi_low)
+        band_mid, self.zi_mid = signal.sosfilt(self.sos_mid, mono_in, zi=self.zi_mid)
+        band_high, self.zi_high = signal.sosfilt(self.sos_high, mono_in, zi=self.zi_high)
+        band_signals = [band_low, band_mid, band_high]
+
+
+        full_out_l = np.zeros(n_samples + self.hrir_len - 1, dtype=np.float32)
+        full_out_r = np.zeros(n_samples + self.hrir_len - 1, dtype=np.float32)
+
+        # B. 帯域ごとの回転 ＆ 距離計算 ＆ 畳み込み
+        for i, config in enumerate(self.band_configs):
+            # 1. 回転位置計算
+            if rot_mode == '3d':
+                # 3軸 (Pitch/Yaw/Roll 複合) 回転
+                config['angle'] += 0.015 * config['speed']
+                pitch = math.sin(config['angle'] * 0.7) * 0.45  # 上下角 (Pitch)
+                yaw = config['angle']                         # 水平角 (Yaw)
+                
+                x = math.sin(yaw) * math.cos(pitch) * global_distance
+                z = -math.cos(yaw) * math.cos(pitch) * global_distance
+                angle_deg = math.degrees(math.atan2(x, -z)) % 360
+                
+                # HRTFテーブルは -4.0 / 0.0 / 4.0 の仰角キーで構築している。
+                # 3D回転でも必ず同じ集合から最も近い仰角を選択する。
+                elevation_levels = (-4.0, 0.0, 4.0)
+                target_elevation = (pitch / 0.45) * 4.0
+                y_elevation = min(elevation_levels, key=lambda value: abs(value - target_elevation))
+            elif rot_mode == 'standard':
+                # 通常 2D 水平回転
+                config['angle'] += 0.015 * config['speed']
+                x = math.sin(config['angle']) * global_distance
+                z = -math.cos(config['angle']) * global_distance
+                angle_deg = math.degrees(math.atan2(x, -z)) % 360
+                y_elevation = config['y']
+            else:
+                # 静止 (OFF)
+                angle_deg = 0.0
+                y_elevation = config['y']
+
+            dir_idx = int((angle_deg / 360.0) * self.num_directions) % self.num_directions
+            
+            if sp_dir is not None:
+                # 実測の指向性（帯域別・方位5度刻み、正面=1）
+                dir_idx72 = int((angle_deg / 360.0) * 72) % 72
+                speaker_gain = float(sp_dir[i, dir_idx72])
+            else:
+                directivity_power = preset['directivity'][i]
+                band_gain = preset['gains'][i]
+                cos_theta = math.cos(math.radians(angle_deg))
+                speaker_gain = math.pow(max(0.0, 0.5 * (1.0 + cos_theta)), directivity_power) * band_gain
+
+            hrir_l = self.hrir_table_l[(y_elevation, dir_idx)]
+            hrir_r = self.hrir_table_r[(y_elevation, dir_idx)]
+
+            # 距離減衰 ＋ 指向性ゲイン
+            dist_atten = (1.0 / max(0.5, global_distance)) * speaker_gain
+            band_sig = band_signals[i] * dist_atten * air_gains[i]
+
+            # 空気吸収（高域減衰）の適用
+            full_out_l += signal.oaconvolve(band_sig, hrir_l, mode='full')
+            full_out_r += signal.oaconvolve(band_sig, hrir_r, mode='full')
+
+        # Overlap-Add 処理
+        full_out_l[:self.hrir_len - 1] += self.conv_overlap_l
+        full_out_r[:self.hrir_len - 1] += self.conv_overlap_r
+
+        self.conv_overlap_l = full_out_l[n_samples:].copy()
+        self.conv_overlap_r = full_out_r[n_samples:].copy()
+
+        spatial_out_l = full_out_l[:n_samples]
+        spatial_out_r = full_out_r[:n_samples]
+
+        wet_val = float(self.state.get('fdn_wet', reverb_mix * 1.2))
+        if self.room_irs is not None:
+            rev_out_l, rev_out_r = self._measured_reverb(spatial_out_l, spatial_out_r, reverb_mix)
+        else:
+            # 💡 [機能拡張③] 4×4 FDN (Feedback Delay Network) による高音質室内残響
+            rev_out_l = np.zeros(n_samples, dtype=np.float32)
+            rev_out_r = np.zeros(n_samples, dtype=np.float32)
+        
+            # FDN用のフィードバック・反射ゲイン計算（距離に応じて初期反射の遅延と壁吸収率が可変）
+            wall_absorption = preset['wall_absorption'] * math.pow(0.9, global_distance)
+            fb_matrix = 0.5 * np.array([
+                [ 1,  1,  1,  1],
+                [ 1, -1,  1, -1],
+                [ 1,  1, -1, -1],
+                [ 1, -1, -1,  1]
+            ], dtype=np.float32)  # Hadamard 行列によるエネルギー保存拡散
+
+            # C. FDN 室内残響（プツプツ音ノイズ対策・平滑化版）
+            res_mode = self.state.get('fdn_resolution', 4)
+            n_ch = 8 if res_mode == 8 else 4
+
+            # 1. バッファ等の動的初期化
+            if (not hasattr(self, 'fdn_delay_bufs') or 
+                len(self.fdn_delay_bufs) != n_ch or 
+                not hasattr(self, 'fdn_prev_fb') or 
+                len(self.fdn_prev_fb) != n_ch):
+            
+                if n_ch == 8:
+                    self.fdn_delay_lens = [1117, 1357, 1597, 1861, 2111, 2399, 2671, 2999]
+                else:
+                    self.fdn_delay_lens = [1117, 1357, 1597, 1861]
+            
+                self.fdn_delay_bufs = [np.zeros(l, dtype=np.float32) for l in self.fdn_delay_lens]
+                self.fdn_lp_zi = [np.zeros((1, 2), dtype=np.float32) for _ in range(n_ch)]
+                self.fdn_prev_fb = np.zeros(n_ch, dtype=np.float32)
+
+            # 2. コマンド値の取得（発振によるノイズを防ぐため fb_val を安全値に上限ガード）
+            fb_val = np.clip(float(self.state.get('fdn_feedback', 0.5)), 0.0, 0.85)
+
+            # 3. 壁面吸音（ローパスフィルタ）
+            wall_abs = np.clip(preset['wall_absorption'], 0.1, 0.8)
+            cutoff_freq = max(1000.0, 12000.0 * (1.0 - wall_abs))
+            sos_wall = signal.butter(1, cutoff_freq / (self.sr / 2), 'low', output='sos')
+
+            # 4. 拡散行列の構築
+            if n_ch == 8:
+                u = np.ones((8, 1), dtype=np.float32)
+                matrix_base = np.eye(8, dtype=np.float32) - (2.0 / 8.0) * np.dot(u, u.T)
+                dry_in = [
+                    spatial_out_l, spatial_out_r, 
+                    spatial_out_l * 0.7, spatial_out_r * 0.7,
+                    spatial_out_l * 0.5, spatial_out_r * 0.5,
+                    spatial_out_l * 0.3, spatial_out_r * 0.3
+                ]
+            else:
+                matrix_base = 0.5 * np.array([
+                    [ 1,  1,  1,  1],
+                    [ 1, -1,  1, -1],
+                    [ 1, -1, -1,  1],
+                    [-1,  1, -1,  1]
+                ], dtype=np.float32)
+                dry_in = [spatial_out_l, spatial_out_r, spatial_out_l * 0.7, spatial_out_r * 0.7]
+
+            fb_matrix = fb_val * matrix_base
+
+            # 5. 各チャンネルのループ・ディレイ処理（クリックノイズ解消処理）
+            rev_channels = []
+            for ch in range(n_ch):
+                buf = self.fdn_delay_bufs[ch]
+            
+                # 入力信号に前回のフィードバック(単一値ではなく滑らかにフェード接続)を加算
+                fb_smooth = np.linspace(self.fdn_prev_fb[ch], 0.0, n_samples, dtype=np.float32)
+                in_sig = dry_in[ch] + fb_smooth
+            
+                # ディレイバッファと入力をスムーズに結合
+                concatenated = np.concatenate([buf, in_sig])
+                delay_out = concatenated[:n_samples]
+            
+                # 次回用バッファの更新
+                self.fdn_delay_bufs[ch] = concatenated[n_samples:]
+
+                # 壁面吸音フィルタを通す
+                lp_out, self.fdn_lp_zi[ch] = signal.sosfilt(
+                    sos_wall,
+                    delay_out, 
+                    zi=self.fdn_lp_zi[ch]
+                )
+                rev_channels.append(lp_out)
+
+            # 6. 行列演算とフィードバック保持
+            rev_stacked = np.vstack(rev_channels)
+            fb_out = np.dot(fb_matrix, rev_stacked)
+        
+            # フレーム間の境界ノイズを防ぐため、末尾のフィードバック音を滑らかに更新
+            self.fdn_prev_fb = fb_out[:, -1]
+
+            if n_ch == 8:
+                rev_out_l = (fb_out[0] + fb_out[2] + fb_out[4] + fb_out[6]) * 0.25
+                rev_out_r = (fb_out[1] + fb_out[3] + fb_out[5] + fb_out[7]) * 0.25
+            else:
+                rev_out_l = (fb_out[0] + fb_out[2]) * 0.5
+                rev_out_r = (fb_out[1] + fb_out[3]) * 0.5
+
+        # D. ミックス処理
+        mix_l = spatial_out_l + rev_out_l * wet_val
+        mix_r = spatial_out_r + rev_out_r * wet_val
+
+        # E. 可変自動音量引き上げ（AGC）処理
+        current_peak = max(np.max(np.abs(mix_l)), np.max(np.abs(mix_r)), 1e-5)
+        desired_gain = np.clip(self.target_peak / current_peak, 0.8, max_boost)
+
+        if desired_gain < self.agc_gain:
+            self.agc_gain = self.agc_gain * 0.8 + desired_gain * 0.2
+        else:
+            self.agc_gain = self.agc_gain * 0.98 + desired_gain * 0.02
+
+        volume = float(np.clip(self.state.get('volume', 1.0), 0.0, 2.0))
+        final_l = np.clip(mix_l * self.agc_gain * volume, -1.0, 1.0)
+        final_r = np.clip(mix_r * self.agc_gain * volume, -1.0, 1.0)
+
+        out_samples = np.empty(len(samples), dtype=np.int16)
+        out_samples[0::2] = (final_l * 32767).astype(np.int16)
+        out_samples[1::2] = (final_r * 32767).astype(np.int16)
+
+        return struct.pack(fmt, *out_samples.tolist())
+
     def read(self):
         raw_data = self.source.read()
         if not raw_data:
@@ -195,237 +434,19 @@ class PythonSpatialAudioSource(discord.AudioSource):
         mode = self.state.get('eq', 'flat')
         self.count += 1
 
+        if mode == 'spatial' and not self._spatial_failed:
+            try:
+                return self._read_spatial(samples, fmt)
+            except Exception:
+                self._spatial_failed = True
+                logger.exception("立体音響の処理でエラーが発生したため、この再生では立体音響を無効化して通常再生を続けます")
         if mode == 'spatial':
-            in_data = np.array(samples, dtype=np.float32) / 32768.0
-            mono_in = (in_data[0::2] + in_data[1::2]) * 0.5
-            n_samples = len(mono_in)
-
-            global_distance = max(0.1, float(self.state.get('spatial_distance', 2.0)))
-            reverb_mix = float(self.state.get('spatial_room_size', 0.3))
-            
-            # 💡 [機能拡張①] 回転モード ('off', 'standard', '3d')
-            rot_mode = self.state.get('spatial_rot_mode', 'standard')
-            if 'spatial_rot_mode' not in self.state:
-                rot_mode = 'standard' if self.state.get('is_rotating', True) else 'off'
-
-            speaker_type = self.state.get('spatial_speaker', 'studio')
-            preset = self.speaker_presets.get(speaker_type, self.speaker_presets['studio'])
-            max_boost = max(1.0, float(self.state.get('spatial_agc_max', 4.0)))
-
-            # 実測スピーカー特性: 軸上周波数特性をFIRで適用（帯域分割の前段）
-            sp_dir = None
-            if self.speakers is not None:
-                sp = self.speakers.get(speaker_type) or self.speakers['studio']
-                sp_dir = sp["directivity"]
-                if self._sp_fir_key != speaker_type:
-                    self._sp_fir_key = speaker_type
-                    self._sp_fir = sp["fir"]
-                fir_full = signal.oaconvolve(mono_in, self._sp_fir, mode="full")
-                fir_full[:len(self._sp_fir_overlap)] += self._sp_fir_overlap
-                self._sp_fir_overlap = fir_full[n_samples:].copy()
-                mono_in = fir_full[:n_samples]
-
-            # 空気吸収（ISO 9613-1）: 距離で高音ほど減衰する
-            air_gains = air_absorption_gains(global_distance)
-
-            # A. 帯域分割
-            band_low, self.zi_low = signal.sosfilt(self.sos_low, mono_in, zi=self.zi_low)
-            band_mid, self.zi_mid = signal.sosfilt(self.sos_mid, mono_in, zi=self.zi_mid)
-            band_high, self.zi_high = signal.sosfilt(self.sos_high, mono_in, zi=self.zi_high)
-            band_signals = [band_low, band_mid, band_high]
-
-
-            full_out_l = np.zeros(n_samples + self.hrir_len - 1, dtype=np.float32)
-            full_out_r = np.zeros(n_samples + self.hrir_len - 1, dtype=np.float32)
-
-            # B. 帯域ごとの回転 ＆ 距離計算 ＆ 畳み込み
-            for i, config in enumerate(self.band_configs):
-                # 1. 回転位置計算
-                if rot_mode == '3d':
-                    # 3軸 (Pitch/Yaw/Roll 複合) 回転
-                    config['angle'] += 0.015 * config['speed']
-                    pitch = math.sin(config['angle'] * 0.7) * 0.45  # 上下角 (Pitch)
-                    yaw = config['angle']                         # 水平角 (Yaw)
-                    
-                    x = math.sin(yaw) * math.cos(pitch) * global_distance
-                    z = -math.cos(yaw) * math.cos(pitch) * global_distance
-                    angle_deg = math.degrees(math.atan2(x, -z)) % 360
-                    
-                    # HRTFテーブルは -4.0 / 0.0 / 4.0 の仰角キーで構築している。
-                    # 3D回転でも必ず同じ集合から最も近い仰角を選択する。
-                    elevation_levels = (-4.0, 0.0, 4.0)
-                    target_elevation = (pitch / 0.45) * 4.0
-                    y_elevation = min(elevation_levels, key=lambda value: abs(value - target_elevation))
-                elif rot_mode == 'standard':
-                    # 通常 2D 水平回転
-                    config['angle'] += 0.015 * config['speed']
-                    x = math.sin(config['angle']) * global_distance
-                    z = -math.cos(config['angle']) * global_distance
-                    angle_deg = math.degrees(math.atan2(x, -z)) % 360
-                    y_elevation = config['y']
-                else:
-                    # 静止 (OFF)
-                    angle_deg = 0.0
-                    y_elevation = config['y']
-
-                dir_idx = int((angle_deg / 360.0) * self.num_directions) % self.num_directions
-                
-                if sp_dir is not None:
-                    # 実測の指向性（帯域別・方位5度刻み、正面=1）
-                    dir_idx72 = int((angle_deg / 360.0) * 72) % 72
-                    speaker_gain = float(sp_dir[i, dir_idx72])
-                else:
-                    directivity_power = preset['directivity'][i]
-                    band_gain = preset['gains'][i]
-                    cos_theta = math.cos(math.radians(angle_deg))
-                    speaker_gain = math.pow(max(0.0, 0.5 * (1.0 + cos_theta)), directivity_power) * band_gain
-
-                hrir_l = self.hrir_table_l[(y_elevation, dir_idx)]
-                hrir_r = self.hrir_table_r[(y_elevation, dir_idx)]
-
-                # 距離減衰 ＋ 指向性ゲイン
-                dist_atten = (1.0 / max(0.5, global_distance)) * speaker_gain
-                band_sig = band_signals[i] * dist_atten * air_gains[i]
-
-                # 空気吸収（高域減衰）の適用
-                full_out_l += signal.oaconvolve(band_sig, hrir_l, mode='full')
-                full_out_r += signal.oaconvolve(band_sig, hrir_r, mode='full')
-
-            # Overlap-Add 処理
-            full_out_l[:self.hrir_len - 1] += self.conv_overlap_l
-            full_out_r[:self.hrir_len - 1] += self.conv_overlap_r
-
-            self.conv_overlap_l = full_out_l[n_samples:].copy()
-            self.conv_overlap_r = full_out_r[n_samples:].copy()
-
-            spatial_out_l = full_out_l[:n_samples]
-            spatial_out_r = full_out_r[:n_samples]
-
-            wet_val = float(self.state.get('fdn_wet', reverb_mix * 1.2))
-            if self.room_irs is not None:
-                rev_out_l, rev_out_r = self._measured_reverb(spatial_out_l, spatial_out_r, reverb_mix)
-            else:
-                # 💡 [機能拡張③] 4×4 FDN (Feedback Delay Network) による高音質室内残響
-                rev_out_l = np.zeros(n_samples, dtype=np.float32)
-                rev_out_r = np.zeros(n_samples, dtype=np.float32)
-            
-                # FDN用のフィードバック・反射ゲイン計算（距離に応じて初期反射の遅延と壁吸収率が可変）
-                wall_absorption = preset['wall_absorption'] * math.pow(0.9, global_distance)
-                fb_matrix = 0.5 * np.array([
-                    [ 1,  1,  1,  1],
-                    [ 1, -1,  1, -1],
-                    [ 1,  1, -1, -1],
-                    [ 1, -1, -1,  1]
-                ], dtype=np.float32)  # Hadamard 行列によるエネルギー保存拡散
-
-                # C. FDN 室内残響（プツプツ音ノイズ対策・平滑化版）
-                res_mode = self.state.get('fdn_resolution', 4)
-                n_ch = 8 if res_mode == 8 else 4
-
-                # 1. バッファ等の動的初期化
-                if (not hasattr(self, 'fdn_delay_bufs') or 
-                    len(self.fdn_delay_bufs) != n_ch or 
-                    not hasattr(self, 'fdn_prev_fb') or 
-                    len(self.fdn_prev_fb) != n_ch):
-                
-                    if n_ch == 8:
-                        self.fdn_delay_lens = [1117, 1357, 1597, 1861, 2111, 2399, 2671, 2999]
-                    else:
-                        self.fdn_delay_lens = [1117, 1357, 1597, 1861]
-                
-                    self.fdn_delay_bufs = [np.zeros(l, dtype=np.float32) for l in self.fdn_delay_lens]
-                    self.fdn_lp_zi = [np.zeros((1, 2), dtype=np.float32) for _ in range(n_ch)]
-                    self.fdn_prev_fb = np.zeros(n_ch, dtype=np.float32)
-
-                # 2. コマンド値の取得（発振によるノイズを防ぐため fb_val を安全値に上限ガード）
-                fb_val = np.clip(float(self.state.get('fdn_feedback', 0.5)), 0.0, 0.85)
-
-                # 3. 壁面吸音（ローパスフィルタ）
-                wall_abs = np.clip(preset['wall_absorption'], 0.1, 0.8)
-                cutoff_freq = max(1000.0, 12000.0 * (1.0 - wall_abs))
-                sos_wall = signal.butter(1, cutoff_freq / (self.sr / 2), 'low', output='sos')
-
-                # 4. 拡散行列の構築
-                if n_ch == 8:
-                    u = np.ones((8, 1), dtype=np.float32)
-                    matrix_base = np.eye(8, dtype=np.float32) - (2.0 / 8.0) * np.dot(u, u.T)
-                    dry_in = [
-                        spatial_out_l, spatial_out_r, 
-                        spatial_out_l * 0.7, spatial_out_r * 0.7,
-                        spatial_out_l * 0.5, spatial_out_r * 0.5,
-                        spatial_out_l * 0.3, spatial_out_r * 0.3
-                    ]
-                else:
-                    matrix_base = 0.5 * np.array([
-                        [ 1,  1,  1,  1],
-                        [ 1, -1,  1, -1],
-                        [ 1, -1, -1,  1],
-                        [-1,  1, -1,  1]
-                    ], dtype=np.float32)
-                    dry_in = [spatial_out_l, spatial_out_r, spatial_out_l * 0.7, spatial_out_r * 0.7]
-
-                fb_matrix = fb_val * matrix_base
-
-                # 5. 各チャンネルのループ・ディレイ処理（クリックノイズ解消処理）
-                rev_channels = []
-                for ch in range(n_ch):
-                    buf = self.fdn_delay_bufs[ch]
-                
-                    # 入力信号に前回のフィードバック(単一値ではなく滑らかにフェード接続)を加算
-                    fb_smooth = np.linspace(self.fdn_prev_fb[ch], 0.0, n_samples, dtype=np.float32)
-                    in_sig = dry_in[ch] + fb_smooth
-                
-                    # ディレイバッファと入力をスムーズに結合
-                    concatenated = np.concatenate([buf, in_sig])
-                    delay_out = concatenated[:n_samples]
-                
-                    # 次回用バッファの更新
-                    self.fdn_delay_bufs[ch] = concatenated[n_samples:]
-
-                    # 壁面吸音フィルタを通す
-                    lp_out, self.fdn_lp_zi[ch] = signal.sosfilt(
-                        sos_wall,
-                        delay_out, 
-                        zi=self.fdn_lp_zi[ch]
-                    )
-                    rev_channels.append(lp_out)
-
-                # 6. 行列演算とフィードバック保持
-                rev_stacked = np.vstack(rev_channels)
-                fb_out = np.dot(fb_matrix, rev_stacked)
-            
-                # フレーム間の境界ノイズを防ぐため、末尾のフィードバック音を滑らかに更新
-                self.fdn_prev_fb = fb_out[:, -1]
-
-                if n_ch == 8:
-                    rev_out_l = (fb_out[0] + fb_out[2] + fb_out[4] + fb_out[6]) * 0.25
-                    rev_out_r = (fb_out[1] + fb_out[3] + fb_out[5] + fb_out[7]) * 0.25
-                else:
-                    rev_out_l = (fb_out[0] + fb_out[2]) * 0.5
-                    rev_out_r = (fb_out[1] + fb_out[3]) * 0.5
-
-            # D. ミックス処理
-            mix_l = spatial_out_l + rev_out_l * wet_val
-            mix_r = spatial_out_r + rev_out_r * wet_val
-
-            # E. 可変自動音量引き上げ（AGC）処理
-            current_peak = max(np.max(np.abs(mix_l)), np.max(np.abs(mix_r)), 1e-5)
-            desired_gain = np.clip(self.target_peak / current_peak, 0.8, max_boost)
-
-            if desired_gain < self.agc_gain:
-                self.agc_gain = self.agc_gain * 0.8 + desired_gain * 0.2
-            else:
-                self.agc_gain = self.agc_gain * 0.98 + desired_gain * 0.02
-
+            # フォールバック時: 音量だけ適用してそのまま返す
             volume = float(np.clip(self.state.get('volume', 1.0), 0.0, 2.0))
-            final_l = np.clip(mix_l * self.agc_gain * volume, -1.0, 1.0)
-            final_r = np.clip(mix_r * self.agc_gain * volume, -1.0, 1.0)
-
-            out_samples = np.empty(len(samples), dtype=np.int16)
-            out_samples[0::2] = (final_l * 32767).astype(np.int16)
-            out_samples[1::2] = (final_r * 32767).astype(np.int16)
-
-            return struct.pack(fmt, *out_samples.tolist())
+            if volume == 1.0:
+                return raw_data
+            gained = np.clip(np.array(samples, dtype=np.float32) * volume, -32768, 32767).astype(np.int16)
+            return struct.pack(fmt, *gained.tolist())
             
         # ==================================================
         # それ以外のモード（従来のサンプル単位処理）
@@ -569,6 +590,11 @@ def spatial_panel_embed(cog, guild_id: int) -> discord.Embed:
         'pa': VOL + ' PAスピーカー（Yamaha DXR8）',
         'small': '📻 小型スピーカー（Genelec 8020）'
     }
+    engine = (
+        f"HRTF: **{'実測 (KEMAR)' if load_hrtf_tables() is not None else '簡易'}** / "
+        f"リバーブ: **{'実測IR' if load_room_irs() is not None else '簡易'}** / "
+        f"スピーカー: **{'実測' if load_speakers() is not None else '簡易'}**"
+    )
     return discord.Embed(
         title="🎧 立体音響の設定",
         description=(
@@ -577,7 +603,8 @@ def spatial_panel_embed(cog, guild_id: int) -> discord.Embed:
             f"部屋のリバーブ: **{room}**\n"
             f"スピーカー特性: **{speaker_names.get(speaker, speaker)}**\n"
             f"最大音量引き上げ幅: **{agc_max}x** (+{round(20 * math.log10(agc_max), 1)}dB)\n"
-            f"3帯域立体回転: **{is_rotating}**"
+            f"3帯域立体回転: **{is_rotating}**\n"
+            f"エンジン: {engine}"
         ),
         color=0x3498DB
     )
