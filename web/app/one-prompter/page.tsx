@@ -37,8 +37,8 @@ export default function OnePrompterPage() {
   return (
     <div className="op-page">
       <div className="page-heading">
-        <h1>One Prompter</h1>
-        <p className="op-lead">雑な意見を、神プロンプトに。</p>
+        {/* サービス名の常時表示はヘッダーの1箇所だけにするため、見出しはキャッチフレーズにする */}
+        <h1 className="op-lead">雑な意見を、神プロンプトに。</h1>
       </div>
       <OnePrompterClient />
     </div>

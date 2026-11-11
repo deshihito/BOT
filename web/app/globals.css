@@ -361,7 +361,18 @@ body:has([data-activity-root]) > main { max-width:none; min-height:100svh; margi
 .op-suboption:hover { border-color:var(--accent); color:var(--text); }
 .op-suboption.selected { background:var(--accent); border-color:var(--accent); color:#fff; }
 .op-countrow { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
-.op-countlabel { color:var(--muted); font-size:14px; font-weight:700; }
+.op-countlabel { color:var(--muted); font-size:14px; font-weight:700; min-width:104px; }
+.op-settings { display:grid; gap:10px; padding:14px; border:1px solid var(--line); border-radius:9px; background:#fff; }
+.op-settings-label { color:var(--muted); font-size:13px; font-weight:700; letter-spacing:.05em; }
+.op-menu { position:relative; }
+.op-menu-button { width:40px; height:40px; border:1px solid var(--line); border-radius:8px; background:#fff; color:var(--text); font-size:18px; line-height:1; cursor:pointer; }
+.op-menu-button:hover { border-color:var(--accent); }
+.op-menu-panel { position:absolute; top:calc(100% + 8px); right:0; z-index:30; width:min(300px,82vw); display:grid; gap:10px; padding:16px; border:1px solid var(--line); border-radius:9px; background:#fff; box-shadow:0 10px 28px rgba(23,25,28,.13); }
+.op-menu-head { display:flex; align-items:center; justify-content:space-between; font-size:14px; font-weight:800; }
+.op-menu-close { padding:2px 6px; border:0; background:transparent; color:var(--muted); font-size:18px; line-height:1; cursor:pointer; }
+.op-menu-steps { display:grid; gap:6px; margin:0; padding-left:20px; font-size:14px; line-height:1.6; }
+.op-menu-link { padding:10px 12px; border:1px solid var(--line); border-radius:8px; color:var(--text); font-size:14px; font-weight:700; text-decoration:none; }
+.op-menu-link:hover { background:var(--accent-soft); }
 .op-freeform { display:grid; gap:10px; }
 .op-primary.op-small { justify-self:start; padding:10px 16px; font-size:14px; }
 .op-edit { min-height:280px; background:var(--soft); font-size:14px; line-height:1.8; }
@@ -382,7 +393,7 @@ body:has([data-activity-root]) > main { max-width:none; min-height:100svh; margi
    ページ背景（body）もシェルがある場合だけ背景色に揃える。 */
 body:has(.op-shell) { background:#f4f8fd; }
 .op-shell { --bg:#f4f8fd; --soft:#edf0f4; --line:#d7dce2; --text:#17191c; --muted:#6a7280; --accent:#17191c; --accent-soft:#edf0f4; --note:#eef1f6; color:var(--text); font-family:system-ui,"Hiragino Sans","Noto Sans JP",sans-serif; }
-.op-shell .op-header { min-height:52px; padding:8px 2px; border-bottom:1px solid var(--line); background:transparent; }
+.op-shell .op-header { display:flex; align-items:center; justify-content:space-between; gap:12px; min-height:52px; padding:8px 2px; border-bottom:1px solid var(--line); background:transparent; }
 .op-brand { display:flex; align-items:center; gap:9px; font-size:16px; font-weight:800; letter-spacing:.06em; }
 .op-shell .op-footer { display:flex; align-items:center; gap:18px; flex-wrap:wrap; margin-top:44px; padding:16px 2px 4px; border-top:1px solid var(--line); background:transparent; }
 .op-footer-brand { display:flex; align-items:center; gap:7px; color:var(--muted); font-size:13px; font-weight:700; letter-spacing:.06em; }
