@@ -1,6 +1,8 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { COMMAND_GUIDES, getCommandGuide, getGenreGuide } from "@/lib/command-guides";
+import Breadcrumbs from "../../../Breadcrumbs";
+import FactsStrip from "../../../FactsStrip";
 
 export function generateStaticParams() {
   return COMMAND_GUIDES.flatMap((command) =>
@@ -36,16 +38,26 @@ export default async function GenrePage({
 
   return (
     <>
-      <nav className="breadcrumbs" aria-label="パンくず">
-        <Link href="/commands">コマンド一覧</Link><span> / </span>
-        <Link href={`/commands/${commandGuide.slug}`}>{commandGuide.command}</Link><span> / </span>
-        <span>{genreGuide.title}</span>
-      </nav>
+      <Breadcrumbs
+        items={[
+          { href: "/commands", label: "コマンド" },
+          { href: `/commands/${commandGuide.slug}`, label: commandGuide.command },
+          { label: genreGuide.title },
+        ]}
+      />
       <div className="page-heading compact-heading">
         <code className="command-code">{commandGuide.command}</code>
         <h1>{genreGuide.title}</h1>
         <p className="muted">{genreGuide.description}</p>
       </div>
+      <FactsStrip
+        facts={[
+          { label: "機能", value: `${genreGuide.functions.length}件` },
+          { label: "呼び出し方", value: `${commandGuide.command} から選択` },
+          { label: "使える場所", value: commandGuide.guildOnly ? "サーバー内のみ" : "Discord内" },
+        ]}
+        label={`${genreGuide.title} の判断材料`}
+      />
       <section className="function-list" aria-label={`${genreGuide.title}の機能説明`}>
         {genreGuide.functions.map((feature) => (
           <article key={feature.id} className="function-card">

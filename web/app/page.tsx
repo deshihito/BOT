@@ -1,8 +1,16 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { COMMAND_GUIDES, GAME_COUNT, TOTAL_FUNCTIONS } from "@/lib/command-guides";
-import { isBotApiConfigured, kvList } from "@/lib/bot-api";
+import { isBotApiConfigured, kvGet, kvList } from "@/lib/bot-api";
 import { GUILD_REGISTRY_NAMESPACE } from "@/lib/dashboard";
+import {
+  BOT_STATUS_KEY,
+  BOT_STATUS_NAMESPACE,
+  isBotStatusFresh,
+  parseBotStatusSnapshot,
+  type BotStatusSnapshot,
+} from "@/lib/site";
+import FactsStrip, { type Fact } from "./FactsStrip";
 import { InviteButton } from "./InviteCta";
 import HomeIntro from "./HomeIntro";
 
@@ -32,6 +40,27 @@ async function loadLiveStats(): Promise<LiveStats | null> {
   }
 }
 
+async function loadBotStatus(): Promise<BotStatusSnapshot | null> {
+  if (!isBotApiConfigured()) return null;
+  try {
+    return parseBotStatusSnapshot(await kvGet(BOT_STATUS_NAMESPACE, BOT_STATUS_KEY));
+  } catch {
+    return null;
+  }
+}
+
+function formatDateTime(iso: string): string {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return iso;
+  return new Intl.DateTimeFormat("ja-JP", {
+    timeZone: "Asia/Tokyo",
+    month: "numeric",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(date);
+}
+
 const HOME_JSON_LD = {
   "@context": "https://schema.org",
   "@type": "SoftwareApplication",
@@ -45,7 +74,20 @@ const HOME_JSON_LD = {
 };
 
 export default async function Home() {
-  const stats = await loadLiveStats();
+  const [stats, botStatus] = await Promise.all([loadLiveStats(), loadBotStatus()]);
+  const facts: Fact[] = [
+    { label: "機能数", value: `${TOTAL_FUNCTIONS}件` },
+    { label: "ゲーム", value: `${GAME_COUNT}種` },
+    { label: "料金", value: "無料" },
+    { label: "対応環境", value: "Discord" },
+  ];
+  if (stats) {
+    facts.push({ label: "導入サーバー数", value: `${stats.guilds.toLocaleString("ja-JP")}件` });
+    if (stats.members > 0) {
+      facts.push({ label: "利用者数", value: `${stats.members.toLocaleString("ja-JP")}人` });
+    }
+  }
+  const statusFresh = botStatus !== null && isBotStatusFresh(botStatus);
   return (
     <>
       <HomeIntro />
@@ -74,26 +116,74 @@ export default async function Home() {
         <h1>使いたいこと、全部このボットでいい。</h1>
         <p className="home-hero-actions">
           <InviteButton className="primary-link invite-hero" />
-          <Link className="primary-link" href="/commands">コマンド一覧</Link>
+          <Link href="/commands">コマンド一覧を見る</Link>
         </p>
-        {stats ? (
-          <p className="home-live-stats">
-            導入サーバー数 {stats.guilds.toLocaleString("ja-JP")} 件
-            {stats.members > 0 ? <> ／ 利用者数 {stats.members.toLocaleString("ja-JP")} 人</> : null}
-          </p>
-        ) : null}
       </section>
-      <nav className="home-command-grid" aria-label="コマンド">
-        {COMMAND_GUIDES.map((guide) => (
-          <Link key={guide.slug} href={`/commands/${guide.slug}`} className="home-command-link">
-            <code>{guide.command}</code>
-            <span>{guide.title}</span>
+      <section className="home-entry" aria-label="機能紹介への入口">
+        <h2>まず、できることを見る</h2>
+        <p>
+          ゲーム・音楽とVC・コイン経済・サーバー運営・AIまで、全{TOTAL_FUNCTIONS}件の機能を
+          ジャンルごとに紹介しています。
+        </p>
+        <p>
+          <Link href="/features">機能紹介（全{TOTAL_FUNCTIONS}件）→</Link>
+        </p>
+      </section>
+      <div style={{ marginTop: 34 }}>
+        <FactsStrip facts={facts} label="AGOBOTの判断材料" />
+      </div>
+      <section className="home-entries" aria-label="コマンドと遊び場への入口">
+        <h2>コマンドから探す</h2>
+        <nav className="home-command-grid" aria-label="コマンド">
+          {COMMAND_GUIDES.map((guide) => (
+            <Link key={guide.slug} href={`/commands/${guide.slug}`} className="home-command-link">
+              <code>{guide.command}</code>
+              <span>{guide.title}</span>
+            </Link>
+          ))}
+        </nav>
+        <h2 style={{ marginTop: 26 }}>遊ぶ・見る</h2>
+        <nav className="home-command-grid" aria-label="遊ぶ・見る">
+          <Link href="/games" className="home-command-link">
+            <span>ゲーム</span>
+            <span>ブラウザでそのまま遊べる</span>
           </Link>
-        ))}
-      </nav>
-      <p className="home-more-features">
-        <Link href="/features">機能紹介（全{TOTAL_FUNCTIONS}件）→</Link>
-      </p>
+          <Link href="/ranking" className="home-command-link">
+            <span>ランキング</span>
+            <span>全サーバー横断の記録</span>
+          </Link>
+        </nav>
+      </section>
+      <section className="home-repeater" aria-label="よく使うページと更新情報">
+        <div>
+          <h2>よく使うページ</h2>
+          <nav className="quick-links" aria-label="クイックリンク">
+            <Link href="/dashboard">ダッシュボード</Link>
+            <Link href="/status">ステータス</Link>
+            <Link href="/ranking">ランキング</Link>
+            <Link href="/games">ゲーム</Link>
+          </nav>
+        </div>
+        <div>
+          <h2>更新情報</h2>
+          <ul className="home-updates">
+            {botStatus ? (
+              <li>
+                Bot の稼働状況：{statusFresh ? "稼働中" : "最新の状態を確認中"}
+                <span className="muted">（最終確認 {formatDateTime(botStatus.updated_at)}）</span>{" "}
+                <Link href="/status">ステータスを見る</Link>
+              </li>
+            ) : (
+              <li>
+                Bot の稼働状況は <Link href="/status">ステータス</Link> で確認できます。
+              </li>
+            )}
+            <li>
+              ランキングは1時間ごとに更新されます。<Link href="/ranking">ランキングを見る</Link>
+            </li>
+          </ul>
+        </div>
+      </section>
     </>
   );
 }

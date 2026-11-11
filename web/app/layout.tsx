@@ -3,6 +3,7 @@ import Link from "next/link";
 import "./globals.css";
 import { SiteNav } from "./SiteNav";
 import SiteChrome from "./SiteChrome";
+import PageChrome from "./PageChrome";
 import { FOOTER_GROUPS, SITE_URL } from "@/lib/site";
 import { GAME_COUNT, TOTAL_FUNCTIONS } from "@/lib/command-guides";
 
@@ -56,6 +57,8 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           </header>
         </SiteChrome>
         <main>{children}</main>
+        {/* 公開ページ共通の最終CTA帯とスマホ下部固定CTAバー（出し分けは PageChrome 内） */}
+        <PageChrome />
         <SiteChrome>
           <footer>
           <div className="footer-inner">

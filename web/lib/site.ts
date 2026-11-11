@@ -247,6 +247,7 @@ export const FOOTER_GROUPS: { label: string; links: SiteLink[] }[] = [
     label: "サポート",
     links: [
       { href: SUPPORT_SERVER_URL, label: "サポートサーバー", external: true },
+      { href: "/faq", label: "よくある質問" },
       { href: "/status", label: "ステータス" },
     ],
   },
