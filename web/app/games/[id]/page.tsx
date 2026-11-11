@@ -8,6 +8,12 @@ import LllClient from "../lll/LllClient";
 import MinesweeperClient from "../minesweeper/MinesweeperClient";
 import SliderClient from "../2048/SliderClient";
 import MemoryClient from "../memory/MemoryClient";
+import ReversiClient from "../reversi/ReversiClient";
+import Connect4Client from "../connect4/Connect4Client";
+import GomokuClient from "../gomoku/GomokuClient";
+import BattleshipClient from "../battleship/BattleshipClient";
+import DaifugoClient from "../daifugo/DaifugoClient";
+import WerewolfClient from "../werewolf/WerewolfClient";
 
 export function generateStaticParams() {
   return WEB_GAMES.map((game) => ({ id: game.slug }));
@@ -72,6 +78,54 @@ export default async function WebGamePage({ params }: { params: Promise<{ id: st
       <>
         <GameDetailHeader game={game} />
         <MemoryClient />
+      </>
+    );
+  }
+  if (game.slug === "reversi" && game.status === "playable") {
+    return (
+      <>
+        <GameDetailHeader game={game} />
+        <ReversiClient />
+      </>
+    );
+  }
+  if (game.slug === "connect4" && game.status === "playable") {
+    return (
+      <>
+        <GameDetailHeader game={game} />
+        <Connect4Client />
+      </>
+    );
+  }
+  if (game.slug === "gomoku" && game.status === "playable") {
+    return (
+      <>
+        <GameDetailHeader game={game} />
+        <GomokuClient />
+      </>
+    );
+  }
+  if (game.slug === "battleship" && game.status === "playable") {
+    return (
+      <>
+        <GameDetailHeader game={game} />
+        <BattleshipClient />
+      </>
+    );
+  }
+  if (game.slug === "daifugo" && game.status === "playable") {
+    return (
+      <>
+        <GameDetailHeader game={game} />
+        <DaifugoClient />
+      </>
+    );
+  }
+  if (game.slug === "werewolf" && game.status === "playable") {
+    return (
+      <>
+        <GameDetailHeader game={game} />
+        <WerewolfClient />
       </>
     );
   }
