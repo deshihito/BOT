@@ -483,6 +483,145 @@ test("synthesizeWithLlm は問題が無ければ下書きをそのまま返し�
   assert.equal(calls, 2);
 });
 
+test("resolvePromptLang は ja/en/hybrid だけを通し、それ以外は既定の hybrid に丸める", () => {
+  assert.equal(llm.DEFAULT_PROMPT_LANG, "hybrid");
+  assert.equal(llm.resolvePromptLang("ja"), "ja");
+  assert.equal(llm.resolvePromptLang("en"), "en");
+  assert.equal(llm.resolvePromptLang("hybrid"), "hybrid");
+  assert.equal(llm.resolvePromptLang(undefined), "hybrid");
+  assert.equal(llm.resolvePromptLang(null), "hybrid");
+  assert.equal(llm.resolvePromptLang("fr"), "hybrid");
+  assert.equal(llm.resolvePromptLang("JA"), "hybrid");
+  assert.equal(llm.resolvePromptLang(3), "hybrid");
+});
+
+test("質問生成プロンプトは作る系の深さ分岐（文書まで／作り切る）を観点に含む（深掘りも）", () => {
+  const [system] = llm.buildQuestionsMessages("タスク管理アプリを作りたい");
+  assert.match(system.content, /成果物の深さの分岐/);
+  assert.match(system.content, /設計・提案の文書まででよい／実際に動く形まで作り切る/);
+  assert.match(system.content, /深さが既に明らかな場合/);
+  const [followupSystem] = llm.buildFollowupMessages("タスク管理アプリを作りたい", [{ question: "Q?", answer: "A" }]);
+  assert.match(followupSystem.content, /成果物の深さ（設計・提案の文書までか、実際に動く形まで作り切るか）/);
+});
+
+test("合成プロンプトは作る系の完了駆動要件（文書止まり禁止・確認で止めない）と文書選択時の例外を含む", () => {
+  const [system] = llm.buildSynthesizeMessages("タスク管理アプリを作りたい", [{ question: "深さは？", answer: "実際に動く形まで作り切る" }]);
+  const c = system.content;
+  assert.match(c, /完成条件を「動く成果物が存在し、動作確認まで済んだ状態」と定義する/);
+  assert.match(c, /文書の作成だけで終わらせない/);
+  assert.match(c, /中間物として扱い、実装まで進める/);
+  assert.match(c, /途中で確認の質問を挟まず/);
+  assert.match(c, /動作確認・検証まで行う/);
+  // ユーザーが文書そのものを選んだ場合は実装指示を付けない
+  assert.match(c, /文書（提案書・仕様書・計画書など）そのものを成果物として選んだ場合は/);
+  assert.match(c, /実装まで進める指示は付けない/);
+});
+
+test("合成と revise は受け取るAIが実行しやすい形（宣言的・列挙・判別可能）を原則に含む", () => {
+  const [system] = llm.buildSynthesizeMessages("依頼", [{ question: "Q?", answer: "A" }]);
+  assert.match(system.content, /受け取るAIが誤解なく実行できることを優先する/);
+  assert.match(system.content, /指示は宣言的で曖昧さのない文で言い切る/);
+  assert.match(system.content, /機械的に判別できる形にする/);
+  assert.match(system.content, /情緒的な言い回し/);
+  const [reviseSystem] = llm.buildReviseMessages("現在のプロンプト", "短く");
+  assert.match(reviseSystem.content, /受け取るAIが誤解なく実行できる形を崩さない/);
+});
+
+test("合成の出力言語モード: 既定は hybrid（英語フレーム＋原文引用）、en は全文英語化と英訳、ja は日本語", () => {
+  const answers = [{ question: "Q?", answer: "A" }];
+  // 既定（lang 省略）= hybrid
+  const [hybridSystem] = llm.buildSynthesizeMessages("依頼", answers);
+  assert.match(hybridSystem.content, /OUTPUT LANGUAGE — HYBRID MODE/);
+  assert.match(hybridSystem.content, /Write the frame of the finished prompt/);
+  assert.match(hybridSystem.content, /verbatim in the original Japanese/);
+  assert.match(hybridSystem.content, /Do not translate it/);
+  // en
+  const [enSystem] = llm.buildSynthesizeMessages("依頼", answers, "en");
+  assert.match(enSystem.content, /OUTPUT LANGUAGE — ENGLISH MODE/);
+  assert.match(enSystem.content, /Write the entire finished prompt in English/);
+  assert.match(enSystem.content, /Translate it into English/);
+  assert.match(enSystem.content, /The deliverable must be written in Japanese/);
+  // ja
+  const [jaSystem] = llm.buildSynthesizeMessages("依頼", answers, "ja");
+  assert.match(jaSystem.content, /完成プロンプトは日本語で書くこと/);
+  assert.ok(!jaSystem.content.includes("OUTPUT LANGUAGE — ENGLISH MODE"));
+  assert.ok(!jaSystem.content.includes("OUTPUT LANGUAGE — HYBRID MODE"));
+});
+
+test("検証メッセージは観点 (f)（作る系の文書止まり）と出力言語モードを含む", () => {
+  const answers = [{ question: "深さは？", answer: "実際に動く形まで作り切る" }];
+  const messages = llm.buildVerifyMessages("アプリを作りたい", answers, "下書き", "en");
+  assert.match(messages[0].content, /文書の作成止まりになり得る形になっていないか/);
+  assert.match(messages[0].content, /ユーザーが文書そのものを成果物として選んだ場合は、この観点は対象外/);
+  assert.match(messages[0].content, /出力言語モード（ユーザーメッセージで指定される ja \/ en \/ hybrid）/);
+  assert.match(messages[1].content, /出力言語モード: en/);
+  // 既定は hybrid
+  const [def] = [llm.buildVerifyMessages("依頼", answers, "下書き")[1]];
+  assert.match(def.content, /出力言語モード: hybrid/);
+});
+
+test("直しメッセージは出力言語モードを含み、モード維持の指示を持つ", () => {
+  const messages = llm.buildRefineMessages("依頼", [{ question: "Q?", answer: "A" }], "下書き", ["問題"], "ja");
+  assert.match(messages[0].content, /出力言語モード（ユーザーメッセージで指定される）を維持する/);
+  assert.match(messages[1].content, /出力言語モード: ja/);
+});
+
+test("buildReviseMessages の言語: 未指定は現在の言語に合わせ、en/hybrid はモード指示になる", () => {
+  const [keepSystem] = llm.buildReviseMessages("現在のプロンプト", "短く");
+  assert.match(keepSystem.content, /現在のプロンプトの言語に合わせる/);
+  assert.match(keepSystem.content, /言語を勝手に切り替えない/);
+  const [enSystem] = llm.buildReviseMessages("現在のプロンプト", "短く", "en");
+  assert.match(enSystem.content, /OUTPUT LANGUAGE — ENGLISH MODE/);
+  assert.match(enSystem.content, /translate the whole prompt into English/);
+  const [hybridSystem] = llm.buildReviseMessages("現在のプロンプト", "短く", "hybrid");
+  assert.match(hybridSystem.content, /OUTPUT LANGUAGE — HYBRID MODE/);
+  assert.match(hybridSystem.content, /quoted verbatim in the original Japanese/);
+});
+
+test("synthesizeWithLlm は lang を合成・検証の両方へ伝播する（不正値は hybrid）", async () => {
+  const env = { LOGFARE_API_KEY: "k" };
+  const bodies = [];
+  const queue = [chatResponse("下書きのプロンプト"), chatResponse('{"issues":[]}')];
+  const fetchImpl = async (url, init) => {
+    bodies.push(JSON.parse(init.body));
+    return queue.shift();
+  };
+  const answers = [{ question: "Q?", answer: "A" }];
+  const prompt = await server.synthesizeWithLlm("依頼", answers, { env, fetchImpl, lang: "en" });
+  assert.equal(prompt, "下書きのプロンプト");
+  assert.equal(bodies.length, 2);
+  assert.match(bodies[0].messages[0].content, /OUTPUT LANGUAGE — ENGLISH MODE/);
+  assert.match(bodies[1].messages[1].content, /出力言語モード: en/);
+
+  const bodies2 = [];
+  const queue2 = [chatResponse("下書きのプロンプト"), chatResponse('{"issues":[]}')];
+  const fetchImpl2 = async (url, init) => {
+    bodies2.push(JSON.parse(init.body));
+    return queue2.shift();
+  };
+  await server.synthesizeWithLlm("依頼", answers, { env, fetchImpl: fetchImpl2, lang: "xx" });
+  assert.match(bodies2[0].messages[0].content, /OUTPUT LANGUAGE — HYBRID MODE/);
+});
+
+test("reviseWithLlm は lang 指定でモードを伝え、未指定では現在の言語維持になる", async () => {
+  const env = { LOGFARE_API_KEY: "k" };
+  let seenBody = "";
+  const fetchImpl = async (url, init) => {
+    seenBody = init.body;
+    return chatResponse("書き直したプロンプト");
+  };
+  const revised = await server.reviseWithLlm("元のプロンプト", "短く", { env, fetchImpl, lang: "en" });
+  assert.equal(revised, "書き直したプロンプト");
+  assert.match(JSON.parse(seenBody).messages[0].content, /OUTPUT LANGUAGE — ENGLISH MODE/);
+  let seenBody2 = "";
+  const fetchImpl2 = async (url, init) => {
+    seenBody2 = init.body;
+    return chatResponse("書き直したプロンプト");
+  };
+  await server.reviseWithLlm("元のプロンプト", "短く", { env, fetchImpl: fetchImpl2 });
+  assert.match(JSON.parse(seenBody2).messages[0].content, /現在のプロンプトの言語に合わせる/);
+});
+
 test("synthesizeWithLlm は検証・直しの失敗時に下書きをそのまま返す", async () => {
   const env = { LOGFARE_API_KEY: "k" };
   const answers = [{ question: "Q?", answer: "A" }];

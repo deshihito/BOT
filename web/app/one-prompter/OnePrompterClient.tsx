@@ -15,13 +15,22 @@ import {
 import {
   bothAnswerText,
   DEFERRED_ANSWER_TEXT,
+  DEFAULT_PROMPT_LANG,
   DEFAULT_QUESTION_COUNT,
   MAX_ANSWER_CHARS,
   MAX_REVISE_INSTRUCTION_CHARS,
   MAX_ROUGH_LENGTH,
   pendingAnswerText,
   type LlmQuestion,
+  type PromptLang,
 } from "../../lib/one-prompter-llm";
+
+/** 出力言語モードの選択肢。変わるのは完成プロンプトの言語だけで、画面と質問は日本語のまま。 */
+const PROMPT_LANG_OPTIONS: { value: PromptLang; label: string }[] = [
+  { value: "ja", label: "日本語" },
+  { value: "en", label: "英語" },
+  { value: "hybrid", label: "AI向け（英語フレーム）" },
+];
 
 type UiOption = {
   label: string;
@@ -104,6 +113,8 @@ export default function OnePrompterClient() {
   const [copied, setCopied] = useState(false);
   /** 1ラウンド目の質問数（3/5/8）。深掘りは別枠で最大3問。 */
   const [questionCount, setQuestionCount] = useState(DEFAULT_QUESTION_COUNT);
+  /** 完成プロンプトの出力言語モード（ja/en/hybrid）。LLM 経路でのみ有効（fallback は日本語のみ）。 */
+  const [promptLang, setPromptLang] = useState<PromptLang>(DEFAULT_PROMPT_LANG);
   /** 自由入力の展開状態と下書き（質問が切り替わるたびにリセットする）。 */
   const [freeOpen, setFreeOpen] = useState(false);
   const [freeDraft, setFreeDraft] = useState("");
@@ -184,6 +195,7 @@ export default function OnePrompterClient() {
       action: "synthesize",
       rough: rough.trim(),
       answers: answers.map((a) => ({ question: a.question, answer: a.label })),
+      lang: promptLang,
     });
     if (data && typeof data.prompt === "string" && data.prompt.trim()) {
       setPhase({ name: "result", answers, prompt: data.prompt, originalPrompt: data.prompt });
@@ -358,7 +370,7 @@ export default function OnePrompterClient() {
     if (!instruction || !phase.prompt.trim()) return;
     setRevising(true);
     setReviseNote("");
-    const data = await postOnePrompter({ action: "revise", prompt: phase.prompt, instruction });
+    const data = await postOnePrompter({ action: "revise", prompt: phase.prompt, instruction, lang: promptLang });
     setRevising(false);
     if (data && typeof data.prompt === "string" && data.prompt.trim()) {
       setPhase({ ...phase, prompt: data.prompt });
@@ -414,6 +426,19 @@ export default function OnePrompterClient() {
               onClick={() => setQuestionCount(n)}
             >
               {n}問
+            </button>
+          ))}
+        </div>
+        <div className="op-countrow">
+          <span className="op-countlabel">プロンプトの言語</span>
+          {PROMPT_LANG_OPTIONS.map((opt) => (
+            <button
+              key={opt.value}
+              type="button"
+              className={opt.value === promptLang ? "op-suboption selected" : "op-suboption"}
+              onClick={() => setPromptLang(opt.value)}
+            >
+              {opt.label}
             </button>
           ))}
         </div>

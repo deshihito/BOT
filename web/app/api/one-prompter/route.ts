@@ -23,6 +23,8 @@ export const maxDuration = 60;
 //   まだ曖昧な箇所だけを狙う追加質問を最大3問返す。深掘り不要なら { questions: [] }。
 // action=synthesize: 「やりたいこと」＋回答（1+2ラウンド合計で最大11件）から完成プロンプトを合成する
 // action=revise: 現在の完成プロンプトを修正指示（200字以内）どおりに書き直す
+// 任意フィールド lang（"ja" | "en" | "hybrid"）は synthesize / revise の出力言語モード。
+// 不正値は hybrid に丸める。questions では使わない（質問は常に日本語）。
 // API キー未設定・LLM失敗時は { fallback: true } を返し、クライアントが
 // ルールベース版（lib/one-prompter.ts）でそのまま続行する。ページは壊れない。
 
@@ -43,7 +45,15 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "リクエストを確認できません。" }, { status: 403 });
   }
 
-  let body: { action?: unknown; rough?: unknown; answers?: unknown; count?: unknown; prompt?: unknown; instruction?: unknown };
+  let body: {
+    action?: unknown;
+    rough?: unknown;
+    answers?: unknown;
+    count?: unknown;
+    prompt?: unknown;
+    instruction?: unknown;
+    lang?: unknown;
+  };
   try {
     body = await request.json();
   } catch {
@@ -59,7 +69,7 @@ export async function POST(request: Request) {
     }
     if (logfareApiKeys().length === 0) return fallback();
     try {
-      const revised = await reviseWithLlm(prompt, instruction);
+      const revised = await reviseWithLlm(prompt, instruction, { lang: body.lang });
       if (!revised) return fallback();
       return NextResponse.json({ prompt: revised });
     } catch (error) {
@@ -98,7 +108,7 @@ export async function POST(request: Request) {
       if (!answers) {
         return NextResponse.json({ error: "入力を確認してください。" }, { status: 400 });
       }
-      const prompt = await synthesizeWithLlm(rough, answers);
+      const prompt = await synthesizeWithLlm(rough, answers, { lang: body.lang });
       if (!prompt) return fallback();
       return NextResponse.json({ prompt });
     }

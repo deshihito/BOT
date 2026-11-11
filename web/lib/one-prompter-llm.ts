@@ -7,8 +7,10 @@
 // 未指定の部分を残さないこと、(2) 完成プロンプトで生成される成果物から
 // 「AIあるある」（定型表現・均一な構成・根拠のない誇張など）を極限まで消すこと。
 // 合成は下書きをそのまま出さず、自己検証（条件の落とし・曖昧さ・AIあるある・矛盾・
-// 形式違いの検査）を挟み、問題があれば1回だけ直してから出す。検証側の失敗では
-// 下書きをそのまま返す（サーバー側 synthesizeWithLlm の契約）。
+// 形式違い・作る系の文書止まりの検査）を挟み、問題があれば1回だけ直してから出す。
+// 検証側の失敗では下書きをそのまま返す（サーバー側 synthesizeWithLlm の契約）。
+// 完成プロンプトの出力言語はモード（ja / en / hybrid、既定は hybrid）で切り替える。
+// 質問と画面の言語は常に日本語で、モードが変えるのは完成プロンプトだけ。
 
 /** 「やりたいこと」入力の上限（コスト・悪用ガード）。クライアント側でも同じ値で制限する。 */
 export const MAX_ROUGH_LENGTH = 500;
@@ -31,6 +33,24 @@ export const MAX_TOTAL_ANSWERS = MAX_LLM_QUESTIONS + MAX_FOLLOWUP_QUESTIONS;
 export function resolveQuestionCount(value: unknown): number {
   if (typeof value === "number" && QUESTION_COUNT_OPTIONS.includes(value)) return value;
   return DEFAULT_QUESTION_COUNT;
+}
+
+/**
+ * 完成プロンプトの出力言語モード。
+ * - ja: 完成プロンプトを全文日本語で組む
+ * - en: 完成プロンプトを全文英語で組む（「やりたいこと」も英訳して使う）
+ * - hybrid: 指示・条件などのフレームは英語、「やりたいこと」は原文の日本語のまま引用し、
+ *   日本語固有のニュアンスに関わる条件は日本語で保持する（既定値）
+ * 画面と質問の言語は常に対象外で、モードが変えるのは完成プロンプトだけ。
+ */
+export type PromptLang = "ja" | "en" | "hybrid";
+export const PROMPT_LANG_OPTIONS: PromptLang[] = ["ja", "en", "hybrid"];
+export const DEFAULT_PROMPT_LANG: PromptLang = "hybrid";
+
+/** API の lang フィールドを検証する。不正値・未指定は既定の hybrid に丸める。 */
+export function resolvePromptLang(value: unknown): PromptLang {
+  if (value === "ja" || value === "en" || value === "hybrid") return value;
+  return DEFAULT_PROMPT_LANG;
 }
 
 export type LlmQuestion = {
@@ -112,6 +132,7 @@ function questionsSystemPrompt(count: number): string {
     "- 分岐の観点は目的・読み手・成果物の形・トーン・分量・切り口から、この依頼に効く順に選ぶ。",
     "- 大きな枠だけでなく、元の文の中の曖昧な表現・未指定のパラメータ（分量、期限、対象の範囲、「しっかり」「短め」など程度を表す言葉）そのものを洗い出し、成果物への影響が大きい順に具体的な分岐にする。元の文の「甘い」箇所を狙う粒度で聞くこと。",
     "- AIあるあるを消すための指定に直結する分岐（書き手の立場を取るか、具体例・固有名詞を使うか、見出しや箇条書きなどの装飾を付けるか等）も、この依頼に効く場合は観点に含める。",
+    "- 作る・作りたい・実装する・開発する・直す・改善するといった「作る系」のやりたいことでは、成果物の深さの分岐（例:「設計・提案の文書まででよい／実際に動く形まで作り切る」）を優先的に含めること。深さは成果物の形そのものを決める、影響度の特に大きい分岐である（これを聞き逃すと、完成プロンプトを受けたAIが提案書や仕様書を出して止まってしまう）。ただし、入力の文面から深さが既に明らかな場合（「設計書を作りたい」と明言されている等）は聞かなくてよい。",
     "",
     "出力は次の形式のJSONだけを出すこと。前置き・解説・コードフェンスは一切付けない。",
     '{"questions":[{"question":"質問文","options":["選択肢A","選択肢B"]}]}',
@@ -143,6 +164,7 @@ const FOLLOWUP_QUESTIONS_SYSTEM_PROMPT = [
   "ルール:",
   "- 質問は最大3個。追加で聞く価値のある曖昧な箇所が残っていなければ、空の配列を返すこと（それが正常な結果です）。",
   "- 1ラウンド目で「検討中」「保留」と答えた項目は、ユーザーが意図的に先送りしたものとして蒸し返さない（同趣旨の質問は出さない）。",
+  "- 作る系のやりたいことで、成果物の深さ（設計・提案の文書までか、実際に動く形まで作り切るか）がまだ決まっていなければ、それを狙う分岐を含める。回答や文面から既に深さが決まっている場合は蒸し返さない。",
   "- 追加質問も成果物への影響度が高い順に並べる。どちらの選択肢を選んでも成果物があまり変わらない分岐は聞かない。",
   "- 2つの選択肢は対立軸をはっきりさせる。片方を選ぶと成果物の何がどう変わるかが、選択肢の文面から読み取れる具体さにすること。「どちらでもよい」のような中間的な逃げの選択肢は作らない。",
   "- 各質問には選択肢をちょうど2つ。抽象的なラベルではなく、この依頼に即した具体的な中身で切る。",
@@ -191,11 +213,18 @@ const SYNTHESIZE_SYSTEM_PROMPT = [
   "- 完成プロンプト自体を冗長にしない。同じことを2回言わない。条件は短い文で言い切り、説明の繰り返しや前置きで膨らませない",
   "- 「やりたいこと」に残っている曖昧な表現は、そのまま転記しない。回答や文脈から決め切るか、前提として明示するか、差し替え項目（プレースホルダ）にするかのいずれかで必ず処理する",
   "- 未指定事項の扱いを線引きする: AIが裁量で決めてよい範囲と、勝手に決めず前提を明示しなければならない範囲を分けて書く",
+  "- 作る・実装する・開発する・直す系の依頼で、回答や文脈から「実際に動く形まで作り切る」方向が選ばれている（または深さが文脈上明らかな）場合は、次を完成プロンプトに必ず含める: (a) 完成条件を「動く成果物が存在し、動作確認まで済んだ状態」と定義する (b) 提案書・仕様書・計画書などの文書の作成だけで終わらせない。文書が必要な場合も中間物として扱い、実装まで進める (c) 途中で確認の質問を挟まず、情報が足りない箇所は最も妥当な前提を1つ置いて明示し、先へ進める (d) 成果物を提示して終わらせず、可能な範囲で動作確認・検証まで行う",
+  "- 逆に、ユーザーが文書（提案書・仕様書・計画書など）そのものを成果物として選んだ場合は、その文書が完成物であることを完成プロンプトに明記し、実装まで進める指示は付けない",
   "- 回答が「どちらも（「A」と「B」の両方）」の形の項目は、両方の選択肢の条件を矛盾なく両立させる指示として反映する",
   "- 回答が「検討中（…）」の項目は、未決定であることを完成プロンプトの中で明示し、下流のAIに最も妥当な既定を1つ置かせ、その前提を成果物に明示させる指示にする（黙って無難な平均値で埋めさせない）",
   "- 回答が「保留（今は決めない）」の項目は、決め打ちせずプレースホルダ／差し替え可能な形で残し、下流のAIに勝手に決めさせない。差し替え項目の一覧にも載せる",
   "- 選択肢の文言そのままではない回答は、ユーザーが自由入力した明示指定として扱い、他の条件と矛盾する場合はそちらを優先して反映する",
   "- 「やりたいこと」にも回答にも無い事実（名前・日時・数字・固有名詞など）が必要な箇所は、本文中に【会社名】のようなプレースホルダで示し、実在の情報を勝手に作らない。使ったプレースホルダはすべて、ユーザーが差し替えるべき項目として完成プロンプトの末尾に一覧で示す（並べ方や見出しは全体の形に合わせる）。プレースホルダが1つも無い場合は、そのための一覧は作らない",
+  "",
+  "受け取るAIが実行しやすい形にする（明確さのための構造化であり、形の固定化ではない）:",
+  "- 完成プロンプトの形式は、受け取るAIが誤解なく実行できることを優先する。指示は宣言的で曖昧さのない文で言い切る",
+  "- 条件は列挙で区切り、対象・制約・完成条件のどれに当たるかが機械的に判別できる形にする。条件同士の関係や優先順位も、読み手が推測しなくて済むように書く",
+  "- 人間向けの情緒的な言い回しや、読み物としての流れのために指示がぼやける書き方はしない",
   "",
   "AIあるある対策は、固定文のブロックとしてではなく、用途に合わせて選んで書く:",
   "- 次の対策リストは素材である。すべてを固定文のブロックとして丸ごと写さない。成果物の種類に関係するものだけを選び、この依頼に合った具体的な言い方に置き換えて使う",
@@ -223,10 +252,39 @@ const SYNTHESIZE_SYSTEM_PROMPT = [
   "出力は完成プロンプトの本文だけ。前置き・解説・コードフェンスは付けない。",
 ].join("\n");
 
-export function buildSynthesizeMessages(rough: string, answers: LlmAnswer[]): ChatMessage[] {
+/**
+ * 合成の出力言語モード別の指示。システムプロンプト本体（日本語）の末尾に付け足す。
+ * en / hybrid の指示文自体を英語で書くのは、フレームの言語をモデルに誤解なく伝えるため。
+ */
+const SYNTHESIZE_LANG_DIRECTIVES: Record<PromptLang, string> = {
+  ja: [
+    "出力言語（日本語モード）:",
+    "- 完成プロンプトは日本語で書くこと。「やりたいこと」も回答も、日本語のまま扱う。",
+  ].join("\n"),
+  en: [
+    "OUTPUT LANGUAGE — ENGLISH MODE:",
+    "- Write the entire finished prompt in English: the task statement, instructions, conditions, prohibitions, completion criteria, and the replacement-item list.",
+    "- The user's request (their \"want\") is given in Japanese. Translate it into English and use the translation as the task statement in the finished prompt. Do not quote the Japanese original.",
+    "- If the deliverable itself must be in Japanese (for example Japanese copywriting or a Japanese self-PR), state that requirement explicitly in English inside the prompt, e.g. \"The deliverable must be written in Japanese.\"",
+    "- Keep Japanese only for proper nouns or quoted terms that would lose their meaning in translation.",
+  ].join("\n"),
+  hybrid: [
+    "OUTPUT LANGUAGE — HYBRID MODE (English frame, original request):",
+    "- Write the frame of the finished prompt — instructions, conditions, prohibitions, and completion criteria — in English.",
+    "- Quote the user's request (their \"want\") verbatim in the original Japanese. Do not translate it and do not paraphrase it.",
+    "- Conditions that turn on Japanese-specific nuance (writing style and tone, honorifics/keigo, the intended readers of a Japanese deliverable, Japanese wording choices) stay in Japanese, exactly where that nuance matters.",
+    "- When the deliverable is a Japanese text, state \"The deliverable must be written in Japanese.\" in the English frame, and keep the nuance conditions in Japanese.",
+  ].join("\n"),
+};
+
+export function buildSynthesizeMessages(
+  rough: string,
+  answers: LlmAnswer[],
+  lang: PromptLang = DEFAULT_PROMPT_LANG,
+): ChatMessage[] {
   const lines = answers.map((a) => `- ${a.question} → ${a.answer}`).join("\n");
   return [
-    { role: "system", content: SYNTHESIZE_SYSTEM_PROMPT },
+    { role: "system", content: `${SYNTHESIZE_SYSTEM_PROMPT}\n\n${SYNTHESIZE_LANG_DIRECTIVES[lang]}` },
     {
       role: "user",
       content: `やりたいこと:\n${rough}\n\n二択質問への回答:\n${lines}`,
@@ -243,24 +301,31 @@ const VERIFY_SYSTEM_PROMPT = [
   "(c) プロンプト自体にAIあるある（定型の前置き・締め、根拠のない誇張、具体に落ちない抽象語・バズワード、均一な構成）が混ざっていないか",
   "(d) 条件同士が矛盾していないか",
   "(e) 依頼の用途に合わない形式（文章向けの文体指定がコード向けに混ざる等）になっていないか",
+  "(f) 作る・実装する系の依頼なのに、完成条件が提案書・仕様書・計画書などの文書の作成止まりになり得る形になっていないか。「作り切る」方向の依頼では、完成条件が「動く成果物が存在し、動作確認まで済んだ状態」になっているか、文書だけで終わらせない・途中で確認の質問を挟まないという指示が入っているか（ユーザーが文書そのものを成果物として選んだ場合は、この観点は対象外）",
   "",
   "ルール:",
   "- 問題は、どこをどう直すべきかが分かる具体さで、1件ごとに短く書く。問題が無ければ空の配列を返す。",
   "- 好みの範囲の言い換えや、要件を満たしている部分への感想は問題に含めない。実害のある問題だけを挙げる。",
   "- 回答にも要件にも無い新しい条件を要求しない。検査は「決まったことと要件が守られているか」の確認に限る。",
+  "- 出力言語モード（ユーザーメッセージで指定される ja / en / hybrid）に下書きが沿っているかも検査する。フレームの言語や「やりたいこと」の引用の扱いがモードと違う場合は、問題として挙げる。",
   "",
   "出力は次の形式のJSONだけを出すこと。前置き・解説・コードフェンスは一切付けない。",
   '{"issues":["問題1","問題2"]}',
 ].join("\n");
 
-/** 合成後の自己検証用メッセージ。下書きを観点 (a)〜(e) で検査させる。 */
-export function buildVerifyMessages(rough: string, answers: LlmAnswer[], draft: string): ChatMessage[] {
+/** 合成後の自己検証用メッセージ。下書きを観点 (a)〜(f) で検査させる。言語モードも検査対象。 */
+export function buildVerifyMessages(
+  rough: string,
+  answers: LlmAnswer[],
+  draft: string,
+  lang: PromptLang = DEFAULT_PROMPT_LANG,
+): ChatMessage[] {
   const lines = answers.map((a) => `- ${a.question} → ${a.answer}`).join("\n");
   return [
     { role: "system", content: VERIFY_SYSTEM_PROMPT },
     {
       role: "user",
-      content: `やりたいこと:\n${rough}\n\n二択質問への回答:\n${lines}\n\n完成プロンプトの下書き:\n${draft}`,
+      content: `やりたいこと:\n${rough}\n\n二択質問への回答:\n${lines}\n\n出力言語モード: ${lang}\n\n完成プロンプトの下書き:\n${draft}`,
     },
   ];
 }
@@ -315,19 +380,26 @@ const REFINE_SYSTEM_PROMPT = [
   "- AIあるある対策の中身（定型表現・誇張・抽象語の排除など）は弱めない・落とさない。下書きの形式と、依頼の用途に合った形を保ち、定型の見出し構成や定型の冒頭文に戻さない。",
   "- プレースホルダと差し替え項目の形は保つ。新しい事実（実績、数字、固有名詞など）を勝手に作らない。",
   "- 完成プロンプト自体を冗長にしない。同じことを2回言わない。",
+  "- 出力言語モード（ユーザーメッセージで指定される）を維持する。直しの過程で、フレームの言語や「やりたいこと」の引用の扱いを勝手に変えない。",
   "",
   "出力は直した完成プロンプトの本文だけ。前置き・解説・コードフェンスは付けない。",
 ].join("\n");
 
-/** 自己検証で見つかった問題を直すためのメッセージ。下書きの全文を書き直させる。 */
-export function buildRefineMessages(rough: string, answers: LlmAnswer[], draft: string, issues: string[]): ChatMessage[] {
+/** 自己検証で見つかった問題を直すためのメッセージ。下書きの全文を書き直させる。言語モードは維持させる。 */
+export function buildRefineMessages(
+  rough: string,
+  answers: LlmAnswer[],
+  draft: string,
+  issues: string[],
+  lang: PromptLang = DEFAULT_PROMPT_LANG,
+): ChatMessage[] {
   const lines = answers.map((a) => `- ${a.question} → ${a.answer}`).join("\n");
   const issueLines = issues.map((issue) => `- ${issue}`).join("\n");
   return [
     { role: "system", content: REFINE_SYSTEM_PROMPT },
     {
       role: "user",
-      content: `やりたいこと:\n${rough}\n\n二択質問への回答:\n${lines}\n\n完成プロンプトの下書き:\n${draft}\n\n検査で見つかった問題:\n${issueLines}`,
+      content: `やりたいこと:\n${rough}\n\n二択質問への回答:\n${lines}\n\n出力言語モード: ${lang}\n\n完成プロンプトの下書き:\n${draft}\n\n検査で見つかった問題:\n${issueLines}`,
     },
   ];
 }
@@ -357,15 +429,42 @@ const REVISE_SYSTEM_PROMPT = [
   "ルール:",
   "- 既存の条件・対策（AIあるあるの排除と、詰めの指定）は、その中身（意図）を弱めない・落とさない。文言や並びを整えるのはよいが、対策そのものを削除・無効化しない。修正指示と既存の対策が矛盾する場合は、対策側を優先する。",
   "- 書き直しの結果を、定型の見出し構成や定型の冒頭文に寄せない。現在のプロンプトの形式と、依頼の用途に合った形を保つ（修正指示で形式の変更を求められた場合を除く）。",
+  "- 書き直し後も、受け取るAIが誤解なく実行できる形を崩さない: 指示は宣言的で曖昧さのない文にし、条件は列挙で区切り、対象・制約・完成条件が判別できる構造を保つ。情緒的な言い回しや読み物としての流れのために、指示をぼやけさせない。",
   "- 修正指示に無い部分は、意味を変えずにそのまま残す。元の「やりたいこと」の趣旨は変えない。",
   "- 新しい事実（実績、数字、固有名詞など）を勝手に作らない。必要な場合はプレースホルダと差し替え項目の形を保つ。",
   "",
   "出力は書き直した完成プロンプトの本文だけ。前置き・解説・コードフェンスは付けない。",
 ].join("\n");
 
-export function buildReviseMessages(prompt: string, instruction: string): ChatMessage[] {
+/** revise で言語モードが未指定のときの指示: 現在のプロンプトの言語に合わせ、勝手に切り替えない。 */
+const REVISE_KEEP_LANGUAGE_DIRECTIVE = [
+  "出力言語:",
+  "- 出力言語は現在のプロンプトの言語に合わせること。現在のプロンプトが英語主体なら英語のまま、日本語主体なら日本語のまま書き直し、言語を勝手に切り替えない。フレームと言語の引用の扱いも、現在のプロンプトの流儀を保つ。",
+].join("\n");
+
+/** revise の言語モード別指示（合成と同義）。 */
+const REVISE_LANG_DIRECTIVES: Record<PromptLang, string> = {
+  ja: ["出力言語（日本語モード）:", "- 書き直した完成プロンプトは日本語で書くこと。"].join("\n"),
+  en: [
+    "OUTPUT LANGUAGE — ENGLISH MODE:",
+    "- Write the entire revised prompt in English. If the current prompt is in Japanese, translate the whole prompt into English as part of the revision, keeping every condition and requirement intact.",
+  ].join("\n"),
+  hybrid: [
+    "OUTPUT LANGUAGE — HYBRID MODE (English frame, original request):",
+    "- Write the frame of the revised prompt — instructions, conditions, prohibitions, and completion criteria — in English.",
+    "- Keep the user's request quoted verbatim in the original Japanese; do not translate it.",
+    "- Conditions that turn on Japanese-specific nuance (writing style and tone, honorifics/keigo, the intended readers of a Japanese deliverable) stay in Japanese.",
+  ].join("\n"),
+};
+
+/**
+ * revise 用メッセージ。lang を渡すとそのモードで書き直させ、
+ * 省略時は「現在のプロンプトの言語に合わせる」指示になる。
+ */
+export function buildReviseMessages(prompt: string, instruction: string, lang?: PromptLang): ChatMessage[] {
+  const directive = lang ? REVISE_LANG_DIRECTIVES[lang] : REVISE_KEEP_LANGUAGE_DIRECTIVE;
   return [
-    { role: "system", content: REVISE_SYSTEM_PROMPT },
+    { role: "system", content: `${REVISE_SYSTEM_PROMPT}\n\n${directive}` },
     {
       role: "user",
       content: `現在のプロンプト:\n${prompt}\n\n修正指示:\n${instruction}`,

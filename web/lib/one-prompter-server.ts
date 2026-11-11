@@ -18,6 +18,7 @@ import {
   parseFollowupQuestionsJson,
   parseQuestionsJson,
   parseVerificationJson,
+  resolvePromptLang,
   resolveQuestionCount,
   type ChatMessage,
   type LlmAnswer,
@@ -178,16 +179,19 @@ export async function generateFollowupQuestionsWithLlm(
 export async function synthesizeWithLlm(
   rough: string,
   answers: LlmAnswer[],
-  deps: { env?: Env; fetchImpl?: FetchImpl } = {},
+  deps: { env?: Env; fetchImpl?: FetchImpl; lang?: unknown } = {},
 ): Promise<string | null> {
-  const raw = await logfareChat(buildSynthesizeMessages(rough, answers), { maxTokens: 1800, ...deps });
+  // 出力言語モード（不正値は hybrid に丸める）。検証・直しも同じモードで通す。
+  const lang = resolvePromptLang(deps.lang);
+  const chatDeps = { env: deps.env, fetchImpl: deps.fetchImpl };
+  const raw = await logfareChat(buildSynthesizeMessages(rough, answers, lang), { maxTokens: 1800, ...chatDeps });
   const draft = cleanSynthesizedPrompt(raw);
   if (!draft) return null;
 
   const verifyDeps = { env: deps.env, fetchImpl: deps.fetchImpl, timeoutMs: VERIFY_TIMEOUT_MS };
   let issues: string[] | null;
   try {
-    const verifyRaw = await logfareChat(buildVerifyMessages(rough, answers, draft), { maxTokens: 800, ...verifyDeps });
+    const verifyRaw = await logfareChat(buildVerifyMessages(rough, answers, draft, lang), { maxTokens: 800, ...verifyDeps });
     issues = parseVerificationJson(verifyRaw);
   } catch {
     // 検証の呼び出しに失敗したら、下書きをそのまま出す
@@ -196,7 +200,7 @@ export async function synthesizeWithLlm(
   if (!issues || issues.length === 0) return draft;
 
   try {
-    const refinedRaw = await logfareChat(buildRefineMessages(rough, answers, draft, issues), {
+    const refinedRaw = await logfareChat(buildRefineMessages(rough, answers, draft, issues, lang), {
       maxTokens: 2400,
       ...verifyDeps,
     });
@@ -207,12 +211,19 @@ export async function synthesizeWithLlm(
   }
 }
 
-/** 完成プロンプトを修正指示どおりに LLM で書き直す。整形できなければ null。 */
+/**
+ * 完成プロンプトを修正指示どおりに LLM で書き直す。整形できなければ null。
+ * lang 指定時はその出力言語モードで、未指定なら現在のプロンプトの言語に合わせて書き直す。
+ */
 export async function reviseWithLlm(
   prompt: string,
   instruction: string,
-  deps: { env?: Env; fetchImpl?: FetchImpl } = {},
+  deps: { env?: Env; fetchImpl?: FetchImpl; lang?: unknown } = {},
 ): Promise<string | null> {
-  const raw = await logfareChat(buildReviseMessages(prompt, instruction), { maxTokens: 2400, ...deps });
+  const messages =
+    deps.lang === undefined
+      ? buildReviseMessages(prompt, instruction)
+      : buildReviseMessages(prompt, instruction, resolvePromptLang(deps.lang));
+  const raw = await logfareChat(messages, { maxTokens: 2400, env: deps.env, fetchImpl: deps.fetchImpl });
   return cleanSynthesizedPrompt(raw);
 }
