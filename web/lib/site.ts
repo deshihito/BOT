@@ -206,6 +206,55 @@ export function parseBotStatusSnapshot(raw: unknown): BotStatusSnapshot | null {
   };
 }
 
+/** Bot の履歴ドキュメント（稼働率・推移グラフ用）を置く bot_kv のキー。 */
+export const BOT_STATUS_HISTORY_KEY = "history";
+
+export type BotStatusDay = {
+  date: string;
+  samples: number;
+  guilds: number;
+  users: number;
+};
+
+export type BotStatusHistory = {
+  days: BotStatusDay[];
+  cmdHours: { hour: string; count: number }[];
+};
+
+const BOT_STATUS_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+const BOT_STATUS_HOUR_RE = /^\d{4}-\d{2}-\d{2}T\d{2}$/;
+
+/** Bot が書いた生の履歴を、表示に使える形へ検証して寄せる。 */
+export function parseBotStatusHistory(raw: unknown): BotStatusHistory | null {
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return null;
+  const record = raw as Record<string, unknown>;
+  const days: BotStatusDay[] = [];
+  if (typeof record.days === "object" && record.days !== null && !Array.isArray(record.days)) {
+    for (const [date, value] of Object.entries(record.days as Record<string, unknown>)) {
+      if (!BOT_STATUS_DATE_RE.test(date)) continue;
+      if (typeof value !== "object" || value === null || Array.isArray(value)) continue;
+      const entry = value as Record<string, unknown>;
+      days.push({
+        date,
+        samples: cleanCount(entry.samples),
+        guilds: cleanCount(entry.guilds),
+        users: cleanCount(entry.users),
+      });
+    }
+  }
+  days.sort((a, b) => a.date.localeCompare(b.date));
+  const cmdHours: BotStatusHistory["cmdHours"] = [];
+  if (typeof record.cmd_hours === "object" && record.cmd_hours !== null && !Array.isArray(record.cmd_hours)) {
+    for (const [hour, value] of Object.entries(record.cmd_hours as Record<string, unknown>)) {
+      if (!BOT_STATUS_HOUR_RE.test(hour)) continue;
+      cmdHours.push({ hour, count: cleanCount(value) });
+    }
+  }
+  cmdHours.sort((a, b) => a.hour.localeCompare(b.hour));
+  if (days.length === 0 && cmdHours.length === 0) return null;
+  return { days, cmdHours };
+}
+
 /** スナップショットが新鮮（Bot が生きている証拠として扱える）かどうか。 */
 export function isBotStatusFresh(snapshot: BotStatusSnapshot, now: Date = new Date()): boolean {
   const updatedMs = Date.parse(snapshot.updated_at);

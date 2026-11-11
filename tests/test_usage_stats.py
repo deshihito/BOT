@@ -53,6 +53,24 @@ class UsageStatsStoreTest(unittest.TestCase):
             # 件数自体は日別ローテーションで消えない（総量は保持する）。
             self.assertEqual(store.snapshot()["commands"]["!logs"], 10)
 
+    def test_hourly_buckets_and_rotation(self):
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            store = make_store(tmp)
+            base = datetime(2026, 11, 1, 12, 30, tzinfo=usage_stats.JST)
+            store.record_command("!logs", now=base)
+            store.record_command("!logs", now=base + timedelta(minutes=10))
+            store.record_action("general:miq", now=base + timedelta(hours=1))
+            hourly = store.snapshot()["hourly"]
+            self.assertEqual(hourly["2026-11-01T12"], {"commands": 2, "actions": 0})
+            self.assertEqual(hourly["2026-11-01T13"], {"commands": 0, "actions": 1})
+            # 48時間より古いバケットは間引かれる
+            store.record_command("!logs", now=base + timedelta(hours=60))
+            hourly = store.snapshot()["hourly"]
+            self.assertNotIn("2026-11-01T12", hourly)
+            self.assertIn("2026-11-04T00", hourly)
+
     def test_flush_writes_only_at_threshold_and_roundtrips(self):
         import tempfile
 

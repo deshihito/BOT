@@ -34,6 +34,7 @@ logger = logging.getLogger(__name__)
 
 JST = timezone(timedelta(hours=9))
 DAILY_KEEP_DAYS = 7
+HOURLY_KEEP_HOURS = 48
 FLUSH_EVERY_EVENTS = 100
 FLUSH_INTERVAL_SECONDS = 300.0
 
@@ -80,6 +81,12 @@ def _merge_migrated(canonical: Any, stray: Any) -> Any:
     for day in set(canon_daily) | set(stray_daily):
         daily[day] = _max_counts(canon_daily.get(day), stray_daily.get(day))
     merged["daily"] = daily
+    hourly: dict = {}
+    canon_hourly = canonical.get("hourly") if isinstance(canonical.get("hourly"), dict) else {}
+    stray_hourly = stray.get("hourly") if isinstance(stray.get("hourly"), dict) else {}
+    for hour in set(canon_hourly) | set(stray_hourly):
+        hourly[hour] = _max_counts(canon_hourly.get(hour), stray_hourly.get(hour))
+    merged["hourly"] = hourly
     return merged
 
 
@@ -97,6 +104,7 @@ def _empty_data(now: datetime) -> dict[str, Any]:
         "commands": {},
         "actions": {},
         "daily": {},
+        "hourly": {},
     }
 
 
@@ -108,6 +116,19 @@ def _clean_counts(raw: Any) -> dict[str, int]:
         for k, v in raw.items()
         if isinstance(v, int) or (isinstance(v, str) and v.isdigit())
     }
+
+
+def _clean_hourly(raw: Any) -> dict[str, dict[str, int]]:
+    if not isinstance(raw, dict):
+        return {}
+    hourly: dict[str, dict[str, int]] = {}
+    for hour, bucket in raw.items():
+        if isinstance(bucket, dict):
+            hourly[str(hour)] = {
+                "commands": int(bucket.get("commands") or 0),
+                "actions": int(bucket.get("actions") or 0),
+            }
+    return hourly
 
 
 def _clean_daily(raw: Any) -> dict[str, dict[str, int]]:
@@ -166,6 +187,7 @@ class UsageStatsStore:
         data["commands"] = _clean_counts(raw.get("commands"))
         data["actions"] = _clean_counts(raw.get("actions"))
         data["daily"] = _clean_daily(raw.get("daily"))
+        data["hourly"] = _clean_hourly(raw.get("hourly"))
         return data
 
     def flush(self) -> None:
@@ -204,6 +226,17 @@ class UsageStatsStore:
             cutoff = (now.astimezone(JST).date() - timedelta(days=DAILY_KEEP_DAYS - 1)).isoformat()
             for old in [d for d in daily if d < cutoff]:
                 del daily[old]
+            # 時間別（JST の "YYYY-MM-DDTHH"）も数える。ステータスの
+            # 「1時間ごとの実行数」グラフ用で、直近 HOURLY_KEEP_HOURS
+            # 時間分だけ残す。
+            hour = now.astimezone(JST).strftime("%Y-%m-%dT%H")
+            hourly = self._data["hourly"]
+            hentry = hourly.setdefault(hour, {"commands": 0, "actions": 0})
+            hentry[kind] += 1
+            hour_cutoff = (now.astimezone(JST) - timedelta(
+                hours=HOURLY_KEEP_HOURS - 1)).strftime("%Y-%m-%dT%H")
+            for old in [h for h in hourly if h < hour_cutoff]:
+                del hourly[old]
             self._dirty += 1
         self._maybe_flush()
 
