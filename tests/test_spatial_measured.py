@@ -68,5 +68,46 @@ class AirAbsorptionTest(unittest.TestCase):
         self.assertLess(far[2], far[0])  # 遠距離では高音が最も減る
 
 
+class RoomIrTruncationTest(unittest.TestCase):
+    def test_hall_ir_truncated_to_1p5s_with_fade(self):
+        irs = measured.load_room_irs()
+        hall_l = irs["hall"][0]
+        self.assertLessEqual(len(hall_l), 72000)
+        # 末尾はフェードで 0 になっている
+        self.assertAlmostEqual(float(hall_l[-1]), 0.0, places=6)
+        # 先頭は切り取られていない
+        room_l = irs["room"][0]
+        self.assertLess(len(room_l), 48000)
+
+
+class SpatialErrorFallbackTest(unittest.TestCase):
+    def test_read_falls_back_to_passthrough_on_dsp_error(self):
+        import struct as _struct
+        import sys as _sys
+        import types as _types
+
+        # ローカル環境に yt_dlp が無い場合のスタブ（本番では実物が入る）
+        _sys.modules.setdefault("yt_dlp", _types.ModuleType("yt_dlp"))
+        from core.vc.music import spatial
+
+        class _FakeSource:
+            def read(self):
+                samples = []
+                for i in range(960):
+                    samples += [1000, 1000]
+                return _struct.pack("<1920h", *samples)
+
+            def cleanup(self):
+                pass
+
+        state = {"eq": "spatial", "volume": 1.0, "spatial_distance": "abc"}
+        src = spatial.PythonSpatialAudioSource(_FakeSource(), state)
+        frame = src.read()  # 例外にならず、そのままの音が返る
+        self.assertEqual(len(frame), 3840)
+        self.assertTrue(src._spatial_failed)
+        frame2 = src.read()
+        self.assertEqual(len(frame2), 3840)
+
+
 if __name__ == "__main__":
     unittest.main()
