@@ -99,6 +99,36 @@ test("parseBotStatusSnapshot は欠けた任意項目を null にし、不正な
   assert.equal(m.parseBotStatusSnapshot({ updated_at: 123 }), null);
 });
 
+test("parseBotStatusHistory は日別と時間別を整えて並べ替える", () => {
+  const history = m.parseBotStatusHistory({
+    days: {
+      "2026-11-08": { samples: 288.7, guilds: 25, users: 40291 },
+      "2026-11-07": { samples: 100, guilds: 24, users: 40000 },
+      "11/08": { samples: 1, guilds: 1, users: 1 },
+      "2026-11-06": "broken",
+    },
+    cmd_hours: { "2026-11-08T21": 12, "2026-11-08T20": 3.9, bad: 5 },
+    extra: true,
+  });
+  assert.deepEqual(history, {
+    days: [
+      { date: "2026-11-07", samples: 100, guilds: 24, users: 40000 },
+      { date: "2026-11-08", samples: 288, guilds: 25, users: 40291 },
+    ],
+    cmdHours: [
+      { hour: "2026-11-08T20", count: 3 },
+      { hour: "2026-11-08T21", count: 12 },
+    ],
+  });
+});
+
+test("parseBotStatusHistory は中身が無ければ null を返す", () => {
+  assert.equal(m.parseBotStatusHistory(null), null);
+  assert.equal(m.parseBotStatusHistory({}), null);
+  assert.equal(m.parseBotStatusHistory({ days: {}, cmd_hours: {} }), null);
+  assert.equal(m.parseBotStatusHistory({ days: { "2026-11-08": null } }), null);
+});
+
 test("isBotStatusFresh は15分以内だけを新鮮とする", () => {
   const snapshot = { updated_at: "2026-11-08T03:00:00+00:00" };
   assert.equal(m.isBotStatusFresh(snapshot, new Date("2026-11-08T03:14:59+00:00")), true);
