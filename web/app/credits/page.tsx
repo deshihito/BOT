@@ -1,9 +1,10 @@
 import { VOICEVOX_CHARACTERS, VOICEVOX_CREDITS_AS_OF } from "@/lib/voicevox-credits";
 import { FONT_CREDITS, FONT_LICENSES_URL } from "@/lib/font-credits";
+import { AUDIO_DATA_CREDITS } from "@/lib/audio-credits";
 
 export const metadata = {
   title: "クレジット",
-  description: "AGOBOTの読み上げ機能で使用しているVOICEVOXのキャラクターと、使用フォントのクレジット一覧です。",
+  description: "AGOBOTの読み上げ機能で使用しているVOICEVOXのキャラクター、使用フォント、立体音響の実測データのクレジット一覧です。",
   alternates: { canonical: "/credits" },
 };
 
@@ -14,7 +15,7 @@ export default function CreditsPage() {
       <h1>クレジット</h1>
       <p>
         AGOBOTの読み上げ機能は、音声合成ソフトウェア<strong>VOICEVOX</strong>のキャラクターボイスを使用しています。
-        使用している全キャラクターのクレジットを以下に表記します。
+        使用している全キャラクターのクレジットと、使用フォント・立体音響の実測データの出典を以下に表記します。
       </p>
 
       <h2>音声合成</h2>
@@ -66,6 +67,25 @@ export default function CreditsPage() {
         ))}
       </ul>
       <p className="muted">リポジトリ直下の font.ttf は Hachi Maru Pop です。</p>
+
+      <h2>音響データ（立体音響）</h2>
+      <p>
+        立体音響では、HRTF・部屋の残響・スピーカー特性に以下の実測データを使用しています。
+      </p>
+      <ul>
+        {AUDIO_DATA_CREDITS.map((data) => (
+          <li key={data.name}>
+            <strong>{data.usage}：{data.name}</strong>
+            <br />
+            <span className="muted">{data.credit}</span>
+            <br />
+            <span className="muted">
+              {data.terms}{" "}
+              <a href={data.url} target="_blank" rel="noreferrer">出典</a>
+            </span>
+          </li>
+        ))}
+      </ul>
     </article>
   );
 }
