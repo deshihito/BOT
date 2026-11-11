@@ -22,6 +22,13 @@ logger = logging.getLogger(__name__)
 
 NAMESPACE = "bot_status"
 SNAPSHOT_KEY = "snapshot"
+HISTORY_KEY = "history"
+
+JST = datetime.timezone(datetime.timedelta(hours=9))
+# スナップショットは5分ごとに書かれるため、1日分は最大 288 サンプル。
+SAMPLES_PER_DAY = 24 * 12
+HISTORY_DAYS = 30
+CMD_HOURS_KEEP = 48
 
 
 def _as_count(value: Any) -> int:
@@ -76,6 +83,68 @@ def collect_snapshot(
     )
 
 
+def _clean_day_entry(value: Any) -> dict[str, int]:
+    if not isinstance(value, dict):
+        return {"samples": 0, "guilds": 0, "users": 0}
+    return {
+        "samples": _as_count(value.get("samples")),
+        "guilds": _as_count(value.get("guilds")),
+        "users": _as_count(value.get("users")),
+    }
+
+
+def build_history(
+    previous: Any,
+    snapshot: dict[str, Any],
+    cmd_hours: Any,
+    *,
+    now: Optional[datetime.datetime] = None,
+) -> dict[str, Any]:
+    """履歴ドキュメントを1サンプル分進める（純粋関数）。
+
+    days は JST の日付キーで、samples=その日の書き出し回数（稼働率の
+    分子）、guilds / users=その日の最新値。直近 HISTORY_DAYS 日分だけ
+    残す。cmd_hours は usage_stats の時間別カウンタ（合計値）の写しで、
+    直近 CMD_HOURS_KEEP 件だけ残す。
+    """
+    now = now or datetime.datetime.now(datetime.timezone.utc)
+    today = now.astimezone(JST).date()
+    days: dict[str, dict[str, int]] = {}
+    if isinstance(previous, dict) and isinstance(previous.get("days"), dict):
+        for key, value in previous["days"].items():
+            days[str(key)] = _clean_day_entry(value)
+    key = today.isoformat()
+    entry = days.get(key) or {"samples": 0, "guilds": 0, "users": 0}
+    entry["samples"] += 1
+    entry["guilds"] = _as_count(snapshot.get("guild_count"))
+    entry["users"] = _as_count(snapshot.get("member_count"))
+    days[key] = entry
+    cutoff = (today - datetime.timedelta(days=HISTORY_DAYS - 1)).isoformat()
+    days = {k: v for k, v in days.items() if k >= cutoff}
+    hours: dict[str, int] = {}
+    if isinstance(cmd_hours, dict):
+        for hour, count in cmd_hours.items():
+            hours[str(hour)] = _as_count(count)
+    if len(hours) > CMD_HOURS_KEEP:
+        hours = {k: hours[k] for k in sorted(hours)[-CMD_HOURS_KEEP:]}
+    return {"days": days, "cmd_hours": hours}
+
+
+def collect_cmd_hours() -> dict[str, int]:
+    """usage_stats の時間別カウンタを「コマンド+アクション」の合計に直す。"""
+    try:
+        from core.support.usage_stats import usage_stats
+
+        hourly = usage_stats.get_store().snapshot().get("hourly") or {}
+        return {
+            str(hour): _as_count(bucket.get("commands")) + _as_count(bucket.get("actions"))
+            for hour, bucket in hourly.items()
+            if isinstance(bucket, dict)
+        }
+    except Exception:
+        return {}
+
+
 async def write_snapshot(
     bot: Any,
     *,
@@ -85,4 +154,11 @@ async def write_snapshot(
     snapshot = collect_snapshot(bot, started_at=started_at)
     store = kv or KVStore(NAMESPACE)
     await store.set(SNAPSHOT_KEY, snapshot, wait=True)
+    try:
+        previous = await store.load_one(HISTORY_KEY)
+        history = build_history(previous, snapshot, collect_cmd_hours())
+        await store.set(HISTORY_KEY, history, wait=True)
+    except Exception:
+        # 履歴は付随情報。失敗してもスナップショット自体は書けている。
+        logger.exception("サービスステータスの履歴書き出しに失敗しました")
     return snapshot
