@@ -115,6 +115,7 @@ def tr(key: str, guild_id: int | None = None, locale: str | None = None, **value
         locale = guild_locale(guild_id) if guild_id is not None else DEFAULT_LOCALE
     locale = normalize_locale(locale)
     result = (_KEY_CATALOGS.get(locale, {}).get(key)
+              or _KEY_CATALOGS.get("en", {}).get(key)
               or _KEY_CATALOGS.get(DEFAULT_LOCALE, {}).get(key)
               or _KEY_CATALOGS.get("ja", {}).get(key)
               or _TRANSLATIONS.get(key, {}).get(locale)

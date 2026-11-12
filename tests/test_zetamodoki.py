@@ -1,7 +1,7 @@
 import unittest
 from unittest.mock import AsyncMock, patch
 
-from cogs.game import ChatButtonView, CharacterSelectView, PRESETS, SessionModeSelect, ZetaModoki
+from cogs.game import CharacterSelect, ChatButtonView, CharacterSelectView, ModeButton, PRESETS, ZetaModoki
 
 
 class ZetaModokiLogfareTests(unittest.IsolatedAsyncioTestCase):
@@ -100,9 +100,13 @@ class ZetaModokiLogfareTests(unittest.IsolatedAsyncioTestCase):
             ["返信する", "再試行", "このスレッドを削除"],
         )
 
-        selection = CharacterSelectView(cog)
-        mode_menu = next(item for item in selection.children if isinstance(item, SessionModeSelect))
-        self.assertEqual([option.value for option in mode_menu.options], ["public", "private"])
+        selection = CharacterSelectView(cog, 123)
+        mode_buttons = [item for item in selection.children if isinstance(item, ModeButton)]
+        self.assertEqual([button.mode for button in mode_buttons], ["public", "private"])
+
+        selection.mode = "public"
+        selection.rebuild()
+        self.assertTrue(any(isinstance(item, CharacterSelect) for item in selection.children))
 
     async def test_split_messages_have_controls_only_on_the_last_part(self):
         cog = ZetaModoki(bot=None)

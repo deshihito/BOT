@@ -1,11 +1,11 @@
-"""cogs/jinrou.py の HELP_ROLES から、サイトの役職図鑑用データ web/lib/jinrou-roles.ts を作る。
+"""core/game/jinrou/common.py の HELP_ROLES から、サイトの役職図鑑用データ web/lib/jinrou-roles.ts を作る。
 
 使い方: python scripts/export_jinrou_roles.py        # 書き出す
         python scripts/export_jinrou_roles.py --check # 差分があれば終了コード 1
 
-役職 ID は、core/jinrou_guide.py の ROLE_URL_USE_SLUG が True で役職データに英語の `id` があればそれを、
+役職 ID は、core/game/jinrou/jinrou_guide.py の ROLE_URL_USE_SLUG が True で役職データに英語の `id` があればそれを、
 それ以外は日本語の役職名を使う。
-役職一覧は ast で読み、勝ち方の文は core/jinrou_guide.py の win_condition() を使う
+役職一覧は ast で読み、勝ち方の文は core/game/jinrou/jinrou_guide.py の win_condition() を使う
 （Bot の「？」ボタンと同じ文になる）。discord.py が要るので venv で実行する。
 """
 from __future__ import annotations
@@ -17,10 +17,10 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from core import jinrou_guide  # noqa: E402
+from core.game.jinrou import jinrou_guide  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
-COG = ROOT / "cogs" / "jinrou.py"
+COG = ROOT / "core" / "game" / "jinrou" / "common.py"
 ASSETS = ROOT / "Assets"
 OUT_TS = ROOT / "web" / "lib" / "jinrou-roles.ts"
 IMG_DIR = ROOT / "web" / "public" / "img" / "jinrou"
@@ -41,8 +41,8 @@ def load_help_roles(path: Path = COG) -> list:
     raise RuntimeError("HELP_ROLES が見つかりません")
 
 
-def load_use_slug(path: Path = ROOT / "core" / "jinrou_guide.py") -> bool:
-    """core/jinrou_guide.py の ROLE_URL_USE_SLUG（Bot のリンクとサイトの URL を同じ切り替えでそろえる）。"""
+def load_use_slug(path: Path = ROOT / "core" / "game" / "jinrou" / "jinrou_guide.py") -> bool:
+    """core/game/jinrou/jinrou_guide.py の ROLE_URL_USE_SLUG（Bot のリンクとサイトの URL を同じ切り替えでそろえる）。"""
     for node in ast.parse(path.read_text(encoding="utf-8")).body:
         if isinstance(node, ast.Assign) and any(isinstance(t, ast.Name) and t.id == "ROLE_URL_USE_SLUG" for t in node.targets):
             return bool(ast.literal_eval(node.value))
@@ -90,7 +90,7 @@ def render_ts(roles: list[dict]) -> str:
     data = [{k: v for k, v in r.items() if not k.startswith("_")} for r in roles]
     body = json.dumps(data, ensure_ascii=False, indent=2)
     return (
-        "// このファイルは scripts/export_jinrou_roles.py が cogs/jinrou.py から自動生成しています。手で編集しないでください。\n"
+        "// このファイルは scripts/export_jinrou_roles.py が core/game/jinrou/common.py から自動生成しています。手で編集しないでください。\n"
         "export type JinrouTeam = \"village\" | \"wolf\" | \"third\";\n\n"
         "export type JinrouRole = {\n  id: string;\n  name: string;\n  team: JinrouTeam;\n  teamLabel: string;\n"
         "  ability: string;\n  win: string;\n  image: string | null;\n};\n\n"

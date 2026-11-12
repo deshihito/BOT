@@ -324,10 +324,14 @@ test("高密度化: Tier4 の敵は戦術デッキを持つ（手札はマスク
   profile.clearedTiers = [0, 1, 2, 3]; // メモリモードでは返却オブジェクトが正本
   const started = await server.startBattle(token, 4);
   const t = started.battle.tactics;
-  // 初手で CPU が先行して戦術を切る場合があるため、総量（30枚）側で判定する
-  assert.ok(t.cpu.deckCount >= 20, `敵の山札がある: ${t.cpu.deckCount}`);
-  assert.ok(t.cpu.handCount >= 1 && t.cpu.handCount <= 8, `敵の手札がある: ${t.cpu.handCount}`);
+  // 初手で CPU が先行して戦術を切り、手札を使い切ったりドローで山札が
+  // 大きく減ったりするため、個別の枚数ではなく総量の保存で判定する:
+  // 山札30枚は 山札+手札+捨て札+設置 のどこかに必ず存在する
+  const total = t.cpu.deckCount + t.cpu.handCount + t.cpu.discard.length + t.cpu.reserveCount;
+  assert.equal(total, 30, `敵の戦術デッキ30枚の所在が全て確認できる: ${total}`);
   assert.equal(t.cpu.hand.length, 0, "敵の手札の中身は返さない");
+  assert.equal(t.cpu.deck.length, 0, "敵の山札の並びは返さない");
+  assert.equal(t.cpu.reserves.length, 0, "敵の設置内容は返さない");
 });
 
 test("DB永続化: 専用テーブルへの保存・読み戻しと bot_kv フォールバック", async () => {

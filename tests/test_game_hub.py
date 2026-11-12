@@ -24,6 +24,7 @@ from core.support.ngword import cog as ngword
 from core.game.game import game_guides as guides
 from core.game.game import party_ranking
 from core.game.game.game_guides import GAME_GUIDES, GAME_ORDER
+from core.support.panel_v2 import PanelLayoutView
 
 
 class HubBot(FakeBot):
@@ -70,16 +71,32 @@ class GameHubTest(unittest.IsolatedAsyncioTestCase):
         self.daifugo = self.bot.add(daifugo.Daifugo(self.bot))
 
     async def open_hub(self):
+        # 現行の /game は defer のあと followup で Components V2 パネル
+        # （PanelLayoutView で包んだ GameHubView）を送る。テストでは包みを
+        # ほどき、中のパネルとその embed を従来どおりの形で返す。
         inter = FakeInteraction(self.host, self.channel)
         await self.hub.game.callback(self.hub, inter)
-        return inter.response.sent[0]
+        sent = inter.followup.sent[0]
+        panel = sent.view.panel if isinstance(sent.view, PanelLayoutView) else sent.view
+        return FakeMessage(self.channel, embed=panel.embed(), view=panel)
 
     async def open_detail(self, game_id):
         hub_message = await self.open_hub()
-        select = next(c for c in hub_message.view.children if isinstance(c, discord.ui.Select))
-        message = FakeMessage(self.channel, embed=hub_message.embed, view=hub_message.view)
+        view = hub_message.view
+        # ハブのゲームセレクトは25件ごとのページ分割で、対象ゲームが載る
+        # ページを開いてから選ぶ（ジャンル絞り込みセレクトと取り違えない
+        # よう GameSelect を明示する）。
+        page = next(i for i, chunk in enumerate(game.game_select_pages()) if game_id in chunk)
+        if view.page != page:
+            view.page = page
+            view.refresh()
+        select = next(c for c in view.children if isinstance(c, game.GameSelect))
+        message = FakeMessage(self.channel, embed=hub_message.embed, view=view)
         await choose(select, game_id, FakeInteraction(self.host, self.channel, message=message))
-        return message
+        # 選択コールバックは edit_panel_v2 で詳細パネル（V2ラッパー）に
+        # 差し替える。包みをほどき、詳細 embed と生パネルの形に戻す。
+        panel = message.view.panel if isinstance(message.view, PanelLayoutView) else message.view
+        return FakeMessage(self.channel, embed=panel.embed(), view=panel)
 
     def test_guides_schema(self):
         self.assertEqual(sorted(GAME_ORDER), sorted(GAME_GUIDES))
@@ -99,13 +116,26 @@ class GameHubTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_hub_lists_all_games(self):
         message = await self.open_hub()
-        self.assertEqual([f.name for f in message.embed.fields], [GAME_GUIDES[g]['name'] for g in GAME_ORDER])
-        for g in GAME_ORDER:
-            self.assertIn(GAME_GUIDES[g]['players'], message.text())
-            self.assertIn(GAME_GUIDES[g]['duration'], message.text())
+        # 現行ハブの初画面はタイトルだけ（導線最適化 S2）。ゲームの一覧は
+        # ページ分割されたゲームセレクトが担い、全ゲームへ到達できること、
+        # 人数・所要時間は各ゲームの詳細 embed の欄に出ることを確かめる。
+        self.assertEqual(message.embed.title, 'パーティーゲーム')
         embed_size_ok(self, message.embed)
-        select = next(c for c in message.view.children if isinstance(c, discord.ui.Select))
-        self.assertEqual([o.value for o in select.options], GAME_ORDER)
+        view = message.view
+        seen = []
+        for i, _chunk in enumerate(game.game_select_pages()):
+            view.page = i
+            view.refresh()
+            select = next(c for c in view.children if isinstance(c, game.GameSelect))
+            self.assertLessEqual(len(select.options), 25)
+            for option in select.options:
+                self.assertTrue(option.label.startswith(GAME_GUIDES[option.value]['name']))
+            seen.extend(o.value for o in select.options)
+        self.assertEqual(seen, GAME_ORDER)
+        for g in GAME_ORDER:
+            fields = {f.name: f.value for f in game.detail_embed(g).fields}
+            self.assertEqual(fields['人数の目安'], GAME_GUIDES[g]['players'])
+            self.assertEqual(fields['所要時間'], GAME_GUIDES[g]['duration'])
 
     async def test_detail_and_rules_for_every_game(self):
         for game_id in GAME_ORDER:
@@ -125,7 +155,8 @@ class GameHubTest(unittest.IsolatedAsyncioTestCase):
 
                 back = FakeMessage(self.channel)
                 await press(message.view, 'back', FakeInteraction(self.host, self.channel, message=back))
-                self.assertIsInstance(back.view, game.GameHubView)
+                back_panel = back.view.panel if isinstance(back.view, PanelLayoutView) else back.view
+                self.assertIsInstance(back_panel, game.GameHubView)
 
     async def test_global_mode_only_on_jinrou(self):
         for game_id in GAME_ORDER:
@@ -189,7 +220,8 @@ class GameHubTest(unittest.IsolatedAsyncioTestCase):
         inter = FakeInteraction(self.plain_member(77), self.channel)
         await press(message.view, 'end_game', inter)
         self.assertTrue(g.is_running)
-        self.assertIn('参加者・ホスト・管理者だけ', inter.response.sent[0].embed.description)
+        # 拒否通知は現行では embed ではなくプレーンテキストで届く。
+        self.assertIn('参加者・ホスト・管理者だけ', inter.response.sent[0].text())
 
     async def test_uno_end_button_needs_member(self):
         message = await self.open_detail('uno')
@@ -224,7 +256,8 @@ class GameHubTest(unittest.IsolatedAsyncioTestCase):
             await real_sleep(0.01)
             self.assertIn(self.channel.id, self.uno.games)
             self.assertIsInstance(self.channel.sent[-1].view, uno.JoinView)
-            self.assertIn('募集を開始', inter.texts()[0])
+            # 「募集を開始」の別文確認は廃止され、募集パネル自体が応答で届く。
+            self.assertIn('UNO 対戦ルーム', inter.texts()[0])
             await task
         self.assertNotIn(self.channel.id, self.uno.games)  # 1 人だけなので募集終了
 
@@ -234,7 +267,8 @@ class GameHubTest(unittest.IsolatedAsyncioTestCase):
             inter = FakeInteraction(self.host, self.channel)
             task = asyncio.create_task(press(message.view, 'recruit', inter))
             await real_sleep(0.01)
-            self.assertIn('募集を開始', inter.texts()[0])
+            # 「募集を開始」の別文確認は廃止され、募集パネル自体が応答で届く。
+            self.assertIn('ダウト参加者募集', inter.texts()[0])
             self.assertIsInstance(self.channel.sent[-1].view, doubt.DoubtJoinView)
             again = FakeInteraction(self.host, self.channel)
             await press(message.view, 'recruit', again)

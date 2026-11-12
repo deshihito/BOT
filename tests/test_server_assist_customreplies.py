@@ -74,7 +74,7 @@ class CustomReplySettingsTest(unittest.IsolatedAsyncioTestCase):
         choice.assert_called_once_with(["🌱", "🌱🌱", "ガチ草"])
 
     async def test_settings_deduplicates_legacy_trigger_conflicts(self):
-        await self.store.update(1, customreplies.KEY, replies=[
+        await customreplies.update_settings(1, customreplies.KEY, replies=[
             {"id": "a", "trigger": " Hello ", "response": "first"},
             {"id": "b", "trigger": "hello", "response": "second"},
         ])
@@ -98,10 +98,15 @@ class CustomReplySettingsTest(unittest.IsolatedAsyncioTestCase):
         message = FakeMessage("草")
         with patch.object(customreplies.random, "choice", return_value="ガチ草"):
             await customreplies.on_message(None, message)
-        message.reply.assert_awaited_once_with(
-            "ガチ草",
-            mention_author=False,
-            allowed_mentions=discord.AllowedMentions.none(),
+        # AllowedMentions は __eq__ を持たないため、呼び出しを分解して確かめる。
+        message.reply.assert_awaited_once()
+        args, kwargs = message.reply.await_args
+        self.assertEqual(args, ("ガチ草",))
+        self.assertEqual(kwargs["mention_author"], False)
+        mentions = kwargs["allowed_mentions"]
+        self.assertEqual(
+            (mentions.everyone, mentions.users, mentions.roles, mentions.replied_user),
+            (False, False, False, False),
         )
 
     async def test_disabled_bot_and_commands_are_ignored(self):

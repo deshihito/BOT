@@ -1,9 +1,9 @@
 {
   "version": 1,
-  "total": 255,
+  "total": 256,
   "counts": {
     "general": 73,
-    "vc": 45,
+    "vc": 46,
     "game": 49,
     "support": 87,
     "help": 1
@@ -815,6 +815,12 @@
               "id": "vc:gvc_room_list",
               "value": "gvc_room_list",
               "title": "グローバルVCルーム一覧",
+              "description": ""
+            },
+            {
+              "id": "vc:gvc_members",
+              "value": "gvc_members",
+              "title": "メンバー確認",
               "description": ""
             },
             {

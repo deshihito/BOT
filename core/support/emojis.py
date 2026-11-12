@@ -37,6 +37,15 @@ CLOCK = "<:clock:1563559483257655306>"
 LOUPE = "<:loupe:1563559480069853245>"
 CROCK = "<:crock:1561710960387956757>"
 
+
+def strip_leading_clock(text: str) -> str:
+    """文頭の時計絵文字（⏰ そのもの／CROCK マークアップ）を外す。
+
+    lstrip(CROCK) はマークアップの文字集合で削ってしまうため使わない
+    （通常文の先頭文字まで巻き込む）。
+    """
+    return text.removeprefix(CROCK).lstrip("⏰").strip()
+
 # --- 音楽・音声 ---
 MUSIC = "<:music:1561710964238450809>"
 VOL = "<:vol:1563559476265488414>"

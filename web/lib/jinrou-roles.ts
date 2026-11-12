@@ -1,4 +1,4 @@
-// このファイルは scripts/export_jinrou_roles.py が cogs/jinrou.py から自動生成しています。手で編集しないでください。
+// このファイルは scripts/export_jinrou_roles.py が core/game/jinrou/common.py から自動生成しています。手で編集しないでください。
 export type JinrouTeam = "village" | "wolf" | "third";
 
 export type JinrouRole = {

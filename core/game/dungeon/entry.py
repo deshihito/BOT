@@ -128,7 +128,7 @@ class DungeonCog(Cog):
             try:
                 self.db_api.table("dungeon_players").delete().neq("user_id", "").execute()
             except Exception as e:
-                print(f"dungeon_reset DB削除失敗: {e}")
+                logger.exception("dungeon_reset DB削除失敗")
 
         em = discord.Embed(title="リセット完了", description="プレイヤーデータを消去しました。マップはプレイヤー毎に再生成されます。", color=0xFFFFFF)
         await ctx.send(embed=em)
@@ -155,7 +155,7 @@ class DungeonCog(Cog):
                 for uid in list(dg_players):
                     await dg_save_player(uid, self.db_api)
 
-            print("✓ ダンジョン月次リセット完了")
+            logger.info("✓ ダンジョン月次リセット完了")
 
     @dungeon_monthly_task.before_loop
     async def before_dungeon_task(self):
@@ -166,4 +166,4 @@ class DungeonCog(Cog):
 async def setup(bot):
     """Cogをロード"""
     await bot.add_cog(DungeonCog(bot))
-    print("✓ DungeonCog loaded")
+    logger.info("✓ DungeonCog loaded")

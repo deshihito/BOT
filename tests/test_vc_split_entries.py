@@ -1,7 +1,8 @@
 # -*- coding: utf-8 -*-
-"""機能数再編 vc ルート拡張（37 → 44）の固定テスト。
+"""機能数再編 vc ルート拡張（37 → 44、その後 gvc_members 追加で 45）の固定テスト。
 
-- VOICE_ACTIONS_BY_GENRE に音楽6件＋グロチャ自動接続1件が追加され総数44になること
+- VOICE_ACTIONS_BY_GENRE に音楽6件＋グロチャ自動接続1件が追加され総数44、
+  さらにメンバー確認 (gvc_members) が加わり 45 になること
 - dispatch_voice_action が新 value を音楽cog / GVCcog の既存 impl へ配線すること
 - 音楽パネル本体（build_music_panel_layout）に立体音響の入口ボタンが増え、
   既存の自動再生トグル行が保たれること
@@ -35,9 +36,10 @@ NEW_MUSIC = [
 
 
 class GenreListTest(unittest.TestCase):
-    def test_total_is_44(self):
+    def test_total_is_45(self):
+        # 44 に gvc メンバー確認 (gvc_members) が加わり 45。
         total = sum(len(items) for items in VOICE_ACTIONS_BY_GENRE.values())
-        self.assertEqual(total, 44)
+        self.assertEqual(total, 45)
 
     def test_music_genre_entries(self):
         self.assertEqual(

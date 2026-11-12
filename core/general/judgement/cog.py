@@ -8,7 +8,16 @@ from discord import app_commands
 from discord.ext import commands
 from pydantic import Field, create_model
 
-import needle
+try:
+    import needle
+
+    NEEDLE_AVAILABLE = True
+except Exception:  # ImportError だけでなく共有ライブラリ不整合等も捕捉（core/vc/common.py と同じ作法）
+    needle = None
+    NEEDLE_AVAILABLE = False
+    logging.getLogger(__name__).warning(
+        "needle を読み込めなかったため、判定機能は無効になります"
+    )
 
 from core.channel_safety import is_hidden_channel
 
@@ -95,6 +104,8 @@ class JudgeCog(commands.Cog):
         self._lock = asyncio.Lock()
 
     async def cog_load(self):
+        if not NEEDLE_AVAILABLE:
+            return
         # 初回はエンジンと重み(needle3.cact)のダウンロードが走るので、先に温めておく
         try:
             model = next(iter(self._models.values()))
@@ -104,6 +115,8 @@ class JudgeCog(commands.Cog):
 
     def _rate_messages(self, key: str, messages: list[str]) -> list[float]:
         """同期処理。メッセージごとに分類して 0-100 の点数リストを返す。"""
+        if not NEEDLE_AVAILABLE:
+            return []
         model = self._models[key]
         scores: list[float] = []
         for msg in messages:
@@ -126,6 +139,10 @@ class JudgeCog(commands.Cog):
         type: app_commands.Choice[str],
     ):
         await interaction.response.defer()
+
+        if not NEEDLE_AVAILABLE:
+            await interaction.followup.send("判定エンジンが読み込まれていないため、この機能は現在利用できません。")
+            return
 
         judge_info = JUDGE_TYPES.get(type.value)
         if not judge_info or not interaction.guild:

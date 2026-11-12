@@ -1,10 +1,19 @@
-"""統合した/voiceグループ（PR-C）のテスト。Discord には接続しない。
+"""統合したボイス機能（PR-C）のテスト。Discord には接続しない。
 
-- 4 個の統合サブコマンドが、各機能の実装関数を正しい引数で呼ぶこと
+現行構造（メソッド＋パネル方式）への対応メモ:
+- 旧 /voice グループ（app_commands.Group）は廃止され、入口は VoiceHub の
+  メソッド（voice_connection / voice_studio / voice_effects / voice_community）
+  と /vc パネルになった。そのため検証は hub のメソッド経由で行う。
+  テスト本体の呼び出し名（join・record・changer など）は可読性のため残し、
+  Base.voice() が現行メソッドへ変換する。
+- 返信は embed ではなく Components V2 ビュー（view=）で送られるため、
+  本文の確認は FakeInteraction.texts()（V2 の TextDisplay を読む）で行う。
+
+- 4 個の統合入口が、各機能の実装関数を正しい引数で呼ぶこと
 - 旧コマンド（/join・!rec・!stt・!saito・!gvc join など）が登録されていないこと
-- /voice connection action:状態 が、VC を使っている機能と開始した人を表示すること
+- 状態表示が、VC を使っている機能と開始した人を表示すること
 - Logfareキーが無いとき文字起こし、Voskモデルが無いときカラオケは VC に入らずに断ること
-- /voice studio feature:録音 action:音程解析が NameError にならず音階を返すこと
+- 録音の音程解析が NameError にならず音階を返すこと
 - 録音を始めると、テキストチャンネルに全員に見えるお知らせが出ること
 """
 
@@ -88,9 +97,22 @@ class Base(unittest.IsolatedAsyncioTestCase):
             kwargs['network'] = choice(network)
             if network == 'global' and 'action' in kwargs:
                 kwargs['action'] = choice({'join': 'start', 'leave': 'stop'}.get(kwargs['action'].value, kwargs['action'].value))
-        command = self.hub.voice_group.get_command(name)
         interaction = interaction or self.interaction()
-        await command.callback(self.hub, interaction, **kwargs)
+        # 現行の入口は hub のメソッド（旧 Group のサブコマンドに相当）
+        if name == 'connection':
+            await self.hub.voice_connection(interaction, kwargs['action'])
+        elif name == 'studio':
+            await self.hub.voice_studio(interaction, kwargs['feature'], kwargs['action'],
+                                        delay=kwargs.get('delay'), channel=kwargs.get('channel'),
+                                        lyrics=kwargs.get('lyrics'))
+        elif name == 'effects':
+            await self.hub.voice_effects(interaction, kwargs['action'], pitch=kwargs.get('pitch'),
+                                         buffer_ms=kwargs.get('buffer_ms'), max_ms=kwargs.get('max_ms'))
+        elif name == 'community':
+            await self.hub.voice_community(interaction, kwargs['network'], kwargs['action'],
+                                           room=kwargs.get('room'), password=kwargs.get('password'))
+        else:  # pragma: no cover
+            raise AssertionError(f'unknown entry: {name}')
         return interaction
 
 
@@ -172,9 +194,13 @@ class SubcommandImplementationTest(Base):
         await self.check(self.gvc, '_global_impl', 'global', {'action': choice('leave')},
                          {'action': 'leave', 'room_name': None, 'password': None})
 
-    def test_four_consolidated_subcommands(self):
-        names = sorted(c.name for c in self.hub.voice_group.commands)
-        self.assertEqual(names, sorted(['connection', 'studio', 'effects', 'community']))
+    def test_four_consolidated_entry_points(self):
+        # 旧 Group の4サブコマンドは、hub の4メソッドが統合入口として残っている
+        for name in ('voice_connection', 'voice_studio', 'voice_effects', 'voice_community'):
+            self.assertTrue(callable(getattr(self.hub, name)), name)
+        # スラッシュコマンドは /vc（パネル）1つだけ
+        names = {c.name for c in self.hub.get_app_commands()}
+        self.assertEqual(names, {'vc'})
 
 
 class LegacyRemovedTest(Base):
@@ -189,7 +215,9 @@ class LegacyRemovedTest(Base):
         gvc = {c.qualified_name for c in self.gvc.walk_commands() if isinstance(c, commands.Command)}
         self.assertNotIn('gvc join', gvc)
         self.assertNotIn('gvc leave', gvc)
-        self.assertTrue({'gvc create', 'gvc list', 'gvc info', 'gvc delete', 'gvc chat'} <= gvc)
+        # ルーム操作（create/list/info/delete/chat）は現行では /vc パネル側へ移り、
+        # prefix コマンドとして残るのは常設ルーム作成の !gvcperm だけ
+        self.assertEqual(gvc, {'gvcperm'})
 
     def test_old_slash_join_leave_are_gone(self):
         names = {c.name for c in self.music.get_app_commands()}
@@ -208,25 +236,26 @@ class LegacyRemovedTest(Base):
 
 class StatusTest(Base):
     async def test_nobody(self):
+        # 現行の状態表示は V2 ビューで公開送信される（旧: ephemeral + embed）
         interaction = await self.voice('status')
-        content, kwargs = interaction.sent[-1]
-        self.assertTrue(kwargs['ephemeral'])
-        self.assertIn('どの機能も使っていません', kwargs['embed'].description)
+        self.assertIn('どの機能も使っていません', interaction.texts())
 
     async def test_shows_feature_user_and_stop_hint(self):
         await self.rec._record_impl(Responder(self.ctx(self.w.alice)), 'start')
         interaction = await self.voice('status', self.interaction(self.w.bob))
-        embed = interaction.sent[-1][1]['embed']
-        fields = {f.name: f.value for f in embed.fields}
-        self.assertEqual(fields['機能'], '録音')
-        self.assertEqual(fields['開始した人'], 'alice')
-        self.assertIn('/voice studio feature:録音 action:停止', fields['終了するには'])
-        self.assertIn('秒', fields['経過時間'])
+        text = interaction.texts()  # V2 化された embed 相当の本文
+        self.assertIn('機能', text)
+        self.assertIn('録音', text)
+        self.assertIn('開始した人', text)
+        self.assertIn('alice', text)
+        # 終了方法は現行の案内（stop_hint: /vc のパネルから録音停止）
+        self.assertIn('/vc のパネルから録音停止', text)
+        self.assertIn('秒', text)  # 経過時間
 
     async def test_busy_message_points_to_voice_commands(self):
         await self.rec._record_impl(Responder(self.ctx(self.w.alice)), 'start')
         interaction = await self.voice('join', self.interaction(self.w.bob))
-        self.assertIn('/voice studio feature:録音 action:停止', interaction.texts())
+        self.assertIn('/vc のパネルから録音停止', interaction.texts())
         self.assertEqual(self.manager.owner(self.w.guild.id), 'record')
 
 
@@ -243,7 +272,8 @@ class ModelMissingTest(Base):
     async def test_transcribe_refuses_without_logfare_key(self):
         with patch.object(sio_transcription.logfare, 'api_key', return_value=None):
             interaction = await self.voice('transcribe', action=choice('start'))
-        self.assertIn('LOGFARE_API_KEY', interaction.texts())
+        # 拒否文は現行では汎用の「利用できません」に統一され、キー名は出ない
+        self.assertIn('この機能は現在利用できません', interaction.texts())
         self.assertTrue(interaction.sent[-1][1]['ephemeral'])
         self.assert_not_touched()
 
@@ -303,10 +333,10 @@ class RecordingTest(Base):
         sink = self.rec.sessions[self.w.guild.id]['sink']
         with patch.object(sink, 'snapshot', return_value={'alice': pcm}):
             interaction = await self.voice('record', action=choice('pitch'))  # 以前は NameError（detected_notes）
-        embed = next(kwargs['embed'] for _, kwargs in interaction.sent if kwargs.get('embed') is not None
-                     and kwargs['embed'].title and '音階' in kwargs['embed'].title)
-        self.assertEqual(embed.fields[0].name, '🎙️ alice')
-        self.assertIn('A4', embed.fields[0].value)
+        text = interaction.texts()  # 音階解析の embed は V2 ビューで送られる
+        self.assertIn('音階', text)
+        self.assertIn('🎙️ alice', text)
+        self.assertIn('A4', text)
 
     def test_format_notes(self):
         self.assertEqual(sio_rec.format_notes([('A4', 'A4', 69), ('C#4', 'Db4', 61)]), ['A4', 'C#4/Db4'])
@@ -316,8 +346,14 @@ class ChangerOptionsTest(Base):
     async def test_options_change_running_changer(self):
         sink = type('Sink', (), {})()
         sink.set_semitones = lambda value: setattr(sink, 'semitones', value)
-        src = type('Src', (), {'target_buffer_ms': 60.0})()
-        src.update_settings = lambda **kw: setattr(src, 'settings', kw)
+        # 現行の _apply は update_settings の反映値（target/max の両方）を読み直す
+        src = type('Src', (), {'target_buffer_ms': 60.0, 'max_buffer_ms': 120.0})()
+
+        def update_settings(**kw):
+            src.settings = kw
+            for key, value in kw.items():
+                setattr(src, key, value)
+        src.update_settings = update_settings
         sink.audio_source = src
         self.changer.vc_sessions[self.w.guild.id] = {'sink': sink, 'vc': None}
         interaction = await self.voice('changer', action=choice('status'), pitch=4.0, buffer_ms=40.0)

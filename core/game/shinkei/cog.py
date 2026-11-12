@@ -15,7 +15,7 @@ import random
 import discord
 from core.game.game import game_panels, game_restore
 from core.game.game.game_v2 import GamePanelView, LobbyView, safe_delete, text_panel
-from core.support.emojis import CROCK
+from core.support.emojis import strip_leading_clock
 
 logger = logging.getLogger(__name__)
 from core.support.messages import recruit_join_prompt
@@ -282,7 +282,7 @@ class Shinkei(commands.Cog):
                 await self._notice(channel, g, f"{member.mention} さんは時間切れのため、手番を飛ばします。")
                 await self.refresh(g)
                 return "timeout"
-            await self._notice(channel, g, result.notice.lstrip(CROCK).strip())   # 絵文字を外して自分で送る
+            await self._notice(channel, g, strip_leading_clock(result.notice))   # 絵文字を外して自分で送る
             outcome = g.flip(uid, int(result.action) - 1)
             await self.refresh(g)
             if outcome == "miss":

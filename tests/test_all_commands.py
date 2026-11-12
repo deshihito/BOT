@@ -31,7 +31,10 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 for _name, _value in {'BOT_API_BASE_URL': 'http://127.0.0.1:8787', 'BOT_API_KEY': 'dummy-key',
-                      'GROQ_API_KEY': 'dummy-key', 'GEMINI_API_KEY': 'dummy-key'}.items():
+                      'GROQ_API_KEY': 'dummy-key', 'GEMINI_API_KEY': 'dummy-key',
+                      # 利用統計の保存先をリポジトリ外へ（計数リスナーが data/ を作らないように）
+                      'USAGE_STATS_PATH': os.path.join(tempfile.gettempdir(), 'ago_test_usage_stats.json'),
+                      'VOICE_RESTORE_DATA_PATH': os.path.join(tempfile.gettempdir(), 'ago_test_voice_restore.json')}.items():
     os.environ.setdefault(_name, _value)
 
 import discord
@@ -44,32 +47,27 @@ USER_ID = 4242
 # ラズパイにだけ入っているライブラリを使う cog（tests/test_cog_loading.py と同じ扱い）。
 OPTIONAL_COGS = {'judgement': 'needle'}
 
+# スラッシュコマンドはパネル入口の6本だけ（game / general / help / quick / support / vc）。
+# 個別機能（pay・user_status・fujo・giveaway・判定など）は各パネルのアクションとして
+# 実行されるため、ここには載せない（アクション側の検証は各機能のテストが担う）。
 SLASH_ARGUMENTS = {
-    'giveaway': {'prize': 'テスト賞品', 'winners': 1, 'minutes': 5},
-    'setup': {},
+    'general': {},
+    'vc': {},
     'support': {},
     'game': {},
     'help': {},
-    'fujo': {'action': 'register'},
-    'music': {},
-    'voice': {},
-    'user_status': {},
-    'pay': {'receiver': 'OTHER', 'amount': 1},
-    'leaderboard': {},
-    'nation join': {}, 'nation found': {}, 'nation status': {},
-    'judgement': None,  # needle3 が無い環境では読み込まれない（下で除外）
+    'quick': {'action': '存在しない機能'},
 }
 
 PREFIX_ARGUMENTS = {
     'all_stats': {}, 'mood': {}, 'doubt': {}, 'terminal': {}, 'guild': {}, 'd1ping': {}, 'check_api': {}, 'dungeon_reset': {},
     'ggrks': {'keyword': 'discord'},
-    'mimic': {'prompt': 'こんにちは'}, 'mimic_toggle': {},
     'coin': {'amount': 1},
     'ffversion': {},
-    'gvc': {}, 'gvc info': {'room_name': 'room'},
-    'gvc create': {'room_name': 'room'}, 'gvc chat': {},
-    'gvc chat disconnect': {}, 'gvc chat connect': {'room_name': 'room'},
-    'gvc list': {}, 'gvc delete': {'room_name': 'room'},
+    'ai': {}, 'aitools': {}, 'generate': {},
+    'gvcperm': {'room_name': 'room'},
+    'logs': {}, 'sttdebug': {}, 'usage_stats': {},
+    'nation': {}, 'nation join': {}, 'nation found': {}, 'nation status': {},
 }
 
 # このテストで見つかった既知の問題。直したら消すこと（消し忘れは test_known_issues_are_still_present が知らせる）。
@@ -80,6 +78,7 @@ SILENT_BY_DESIGN = {
     '!terminal': '許可されたユーザー以外には反応しない（存在を知らせないため）',
     '!d1ping': '許可されたユーザー以外には反応しない（tests/test_admin_prefix.py）',
     '!check_api': '許可されたユーザー以外には反応しない（tests/test_admin_prefix.py）',
+    '!usage_stats': '許可されたユーザー以外には反応しない（!check_api と同じ流儀）',
     '!dungeon_reset': '許可されたユーザー以外には反応しない（tests/test_admin_prefix.py）',
     '!guild': '許可されたユーザー以外には反応しない（tests/test_guild_list.py で両方を確認）',
 }

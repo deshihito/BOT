@@ -149,6 +149,8 @@ COMMAND_META: dict[str, dict] = {
                "summary": "全機能から検索して直接実行します（クイックパレット）",
                "usage": "/quick action:<機能名>",
                "options": {"action": "実行する機能（入力すると候補が出ます）"}},
+    # /general の重心はマネー（コイン経済圏の入口: ステータス・市場・工房・採掘も経済側）
+    "/general": {"category": "economy", "usage": "/general（操作パネルを表示）"},
     # ---------------------------------------------------------------- コイン
     "!nation": {"category": "economy", "summary": "国づくり機能", "guild_only": True, "hidden": True},
     "!nation join": {"category": "economy", "guide": NATION_GUIDE, "guild_only": True,
@@ -169,6 +171,8 @@ COMMAND_META: dict[str, dict] = {
     # ---------------------------------------------------------------- ボイス・音楽
     "/vc": {"category": "voice", "usage": "/vc（操作パネルを表示）"},
     "!ffversion": {"category": "voice", "hidden": True},
+    "!gvcperm": {"category": "voice", "summary": "常設グローバルVCルームを作成します", "permissions": ["bot_admin"],
+                 "hidden": True},
 
     # ---------------------------------------------------------------- おたのしみ・AI
     "/judge": {"category": "fun"},

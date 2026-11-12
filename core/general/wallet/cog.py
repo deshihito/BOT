@@ -6,9 +6,9 @@ import io
 import logging
 import config
 import os
-import traceback
 from core.support.api_client import APIError
 from core.support.api_retry import run_with_retry
+from core.support.messages import PAY_MIN_AMOUNT, PAY_TO_BOT, PAY_TO_SELF
 from core.game.game import prison as prison_core
 from core.general.user_names import resolve_display_names
 from core.leaderboard_image import (
@@ -137,7 +137,7 @@ class WalletCog(commands.Cog):
             }).execute()
             await ctx.send(f"コインを **{amount:,} AGO** に設定しました（変更: {delta:+,} AGO）。")
         except Exception:
-            traceback.print_exc()
+            logger.exception("admin_coin_set failed")
             await ctx.send("コイン設定中にエラーが発生しました。")
 
     async def user_status(self, interaction: discord.Interaction, target: discord.User | None = None):
@@ -177,10 +177,8 @@ class WalletCog(commands.Cog):
             # 自分のステータスは本人のみ（借金額を含むため、sweep2 GEN-02）。
             await interaction.followup.send(embed=embed, ephemeral=target.id == interaction.user.id, **extra)
 
-        except Exception as e:
-            print("\n=== [WALLET COMMAND ERROR START] ===")
-            traceback.print_exc()
-            print("=== [WALLET COMMAND ERROR END] ===\n")
+        except Exception:
+            logger.exception("user_status: wallet command failed user=%s", interaction.user.id)
             await interaction.followup.send("データの取得中にエラーが発生しました。時間をおいて再試行してください。", ephemeral=True)
 
     async def pay(self, interaction: discord.Interaction, receiver: discord.User, amount: int):
@@ -235,8 +233,8 @@ class WalletCog(commands.Cog):
             await interaction.followup.send(embed=mine, ephemeral=True, **extra)
             embed, extra = coin_embed(
                 "送金完了", f"{interaction.user.mention} さんが {receiver.mention} に **{amount:,} AGO** コインを送金しました。")
-            # 自分のステータスは本人のみ（借金額を含むため、sweep2 GEN-02）。
-            await interaction.followup.send(embed=embed, ephemeral=target.id == interaction.user.id, **extra)
+            # 完了通知は全体に出す（冒頭コメント参照）。ここに target は無い。
+            await interaction.followup.send(embed=embed, ephemeral=False, **extra)
             return
 
         # 旧スキーマ用: 送り手の残高を減らす（CASで競合時は読み直す）
@@ -417,7 +415,7 @@ class WalletCog(commands.Cog):
                 embed=embed,
                 file=discord.File(io.BytesIO(png), filename=COIN_BOARD_FILENAME))
         except Exception:
-            traceback.print_exc()
+            logger.exception("coin leaderboard failed")
             await interaction.followup.send("ランキングの取得中にエラーが発生しました。", ephemeral=True)
 
     async def _asset_leaderboard(self, interaction: discord.Interaction):
@@ -462,7 +460,7 @@ class WalletCog(commands.Cog):
                 embed=embed,
                 file=discord.File(io.BytesIO(png), filename=ASSET_BOARD_FILENAME))
         except Exception:
-            traceback.print_exc()
+            logger.exception("asset leaderboard failed")
             await interaction.followup.send("ランキングの取得中にエラーが発生しました。", ephemeral=True)
 
 async def setup(bot: commands.Bot):

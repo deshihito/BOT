@@ -134,7 +134,9 @@ def _interaction_id(message):
 
 def _event_time(message):
     """The moment the cooldown starts, as an aware UTC datetime."""
-    created = _snowflake_datetime(message.id)
+    # id を欠くメッセージ状オブジェクトでも AttributeError で落とさず、
+    # TypeError として呼び出し側 (detect_event) の復号失敗ハンドリングに乗せる
+    created = _snowflake_datetime(getattr(message, "id", None))
     if REMINDER_ANCHOR == "interaction":
         iid = _interaction_id(message)
         if iid is not None:

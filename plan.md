@@ -44,7 +44,7 @@ Discord内で利用者がActivityを起動すると、そのActivityが同じボ
 - `web/lib/activity-auth.ts`: Activity用短寿命トークンの署名と検証。
 - `web/app/globals.css`: Activityルート内だけに適用する全画面・レスポンシブスタイル。既存ページの外観は変えない。
 - `web/public/manus-routes.json`: Activityページのルート宣言。
-- `cogs/sio_music.py`と`core/music_activity.py`: 既存Music状態から、秘密情報を含まないYouTube同期スナップショットを作成。
+- `core/vc/music/music_activity.py`: 既存Music状態から、秘密情報を含まないYouTube同期スナップショットを作成（`build_music_activity_snapshot`。音楽cog一式は `core/vc/music/` に集約済み）。
 - `keep_alive.py`: HMAC検証済みのBot内部Music状態ルート。Webサーバーからのみ利用。
 - `tests/`と`web/tests/`: 既存テスト環境に沿った同期データ／認証回帰カバレッジ。
 

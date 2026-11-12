@@ -13,7 +13,10 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def load_cog(name):
     # この PC には無関係な site-packages/cogs があるため、ファイルを直接ロードする。
-    spec = importlib.util.spec_from_file_location(f"agobot_{name}", ROOT / "cogs" / f"{name}.py")
+    # ai は cogs 集約で core/general/ai/cog.py へ移った（cogs/ai.py は無い）。
+    path = (ROOT / "core" / "general" / "ai" / "cog.py" if name == "ai"
+            else ROOT / "cogs" / f"{name}.py")
+    spec = importlib.util.spec_from_file_location(f"agobot_{name}", path)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
@@ -40,7 +43,8 @@ class AiAutoSelectionTest(unittest.IsolatedAsyncioTestCase):
              patch.object(ai.logfare, "api_key", return_value=None), \
              patch.object(ai.logfare, "resolve_model", new_callable=AsyncMock) as resolve:
             await ai.AICog.ai.callback(ai.AICog(None), ctx, prompt="質問")
-        chat.assert_awaited_once()
+        # 現在は履歴要否の判定 (ask_plain) + 本回答で同じ chat を2回使う。
+        self.assertEqual(chat.await_count, 2)
         resolve.assert_not_awaited()
         embed = ctx.reply.await_args.kwargs["embed"]
         self.assertEqual(embed.description, "回答")
@@ -65,7 +69,8 @@ class AiAutoSelectionTest(unittest.IsolatedAsyncioTestCase):
                           return_value="回答") as logfare_chat:
             await ai.AICog.ai.callback(ai.AICog(None), ctx, prompt="質問")
         routed.assert_not_awaited()
-        logfare_chat.assert_awaited_once()
+        # 履歴判定 (ask_plain) + 本回答の2回とも Logfare 側で処理される。
+        self.assertEqual(logfare_chat.await_count, 2)
 
     async def test_general_picker_has_one_auto_model(self):
         general = load_cog("general")
@@ -91,7 +96,8 @@ class AiAutoSelectionTest(unittest.IsolatedAsyncioTestCase):
              patch.object(ai.ai_omnirush, "chat", new_callable=AsyncMock,
                           return_value="OmniRushの回答") as omnirush_chat:
             await ai.AICog.ai.callback(ai.AICog(None), ctx, prompt="質問")
-        omnirush_chat.assert_awaited_once()
+        # 履歴判定 (ask_plain) + 本回答の2回。await_args は本回答 (最後) の呼び出し。
+        self.assertEqual(omnirush_chat.await_count, 2)
         call = omnirush_chat.await_args
         self.assertEqual(call.args[0], "omnirush::gpt-6-sol")
         self.assertIn(ai.ai_latex.SYSTEM_HINT, call.args[1])
