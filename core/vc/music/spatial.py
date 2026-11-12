@@ -36,64 +36,11 @@ from core.support.emojis import FAILED, MUSIC, PAUSE, RESTART, SUCCESS, VOL
 from core.vc.music.music_activity import build_music_activity_snapshot
 
 from core.vc.music.hrtf import load_hrtf_tables
-from core.vc.music.measured import air_absorption_gain, load_room_irs, load_speakers
+from core.vc.music.measured import air_absorption_gain, load_speakers
 from core.vc.music.common import *  # noqa: F401,F403 - shared helpers/constants
 
 logger = logging.getLogger("cogs.sio_music")
 
-
-
-class _BlockConvolver:
-    """長いIR（残響）用のブロック畳み込み。
-
-    20msフレームごとに大きなFFTを行う代わりに、4096サンプル単位で
-    まとめて畳み込む。ウェット音は最大でブロック長ぶん（約85ms）遅れるが、
-    残響のプリディレイとして聞こえる範囲で、処理量は数分の一になる。
-    """
-
-    BLOCK = 4096
-
-    def __init__(self):
-        self._key = None
-        self.reset()
-
-    def reset(self):
-        self._in_l = np.zeros(0, dtype=np.float32)
-        self._in_r = np.zeros(0, dtype=np.float32)
-        self._out_l = np.zeros(0, dtype=np.float32)
-        self._out_r = np.zeros(0, dtype=np.float32)
-        self._tail_l = np.zeros(0, dtype=np.float32)
-        self._tail_r = np.zeros(0, dtype=np.float32)
-
-    def process(self, in_l, in_r, ir_l, ir_r, key):
-        if key != self._key:
-            self.reset()
-            self._key = key
-        self._in_l = np.concatenate([self._in_l, in_l])
-        self._in_r = np.concatenate([self._in_r, in_r])
-        while len(self._in_l) >= self.BLOCK:
-            block_l = self._in_l[:self.BLOCK]
-            block_r = self._in_r[:self.BLOCK]
-            self._in_l = self._in_l[self.BLOCK:]
-            self._in_r = self._in_r[self.BLOCK:]
-            full_l = signal.oaconvolve(block_l, ir_l, mode="full")
-            full_r = signal.oaconvolve(block_r, ir_r, mode="full")
-            full_l[:len(self._tail_l)] += self._tail_l
-            full_r[:len(self._tail_r)] += self._tail_r
-            self._tail_l = full_l[self.BLOCK:].copy()
-            self._tail_r = full_r[self.BLOCK:].copy()
-            self._out_l = np.concatenate([self._out_l, full_l[:self.BLOCK]])
-            self._out_r = np.concatenate([self._out_r, full_r[:self.BLOCK]])
-        n = len(in_l)
-        out_l = np.zeros(n, dtype=np.float32)
-        out_r = np.zeros(n, dtype=np.float32)
-        take = min(n, len(self._out_l))
-        if take:
-            out_l[:take] = self._out_l[:take]
-            out_r[:take] = self._out_r[:take]
-            self._out_l = self._out_l[take:]
-            self._out_r = self._out_r[take:]
-        return out_l, out_r
 
 
 def _wfs_tap_table(half_aperture_deg: float, step_deg: float):
@@ -115,6 +62,15 @@ def _wfs_tap_table(half_aperture_deg: float, step_deg: float):
 
 
 _SINGLE_TAP = ((0.0, 1.0),)
+
+# FDN リバーブのフィードバック行列（Hadamard 行列 / 2: 直交でエネルギーを保存する）
+_FDN_MATRIX = 0.5 * np.array([
+    [1, 1, 1, 1],
+    [1, -1, 1, -1],
+    [1, 1, -1, -1],
+    [1, -1, -1, 1],
+], dtype=np.float32)
+_FDN_OUT_GAIN = 0.34
 # ライブモードの音像の大きさ（開口幅）は固定値。パラメータでは調整しない。
 _LIVE_TAPS_NARROW = _wfs_tap_table(15.0, 7.5)   # 低域: 狭い開口（定位の芯）
 _LIVE_TAPS_WIDE = _wfs_tap_table(30.0, 10.0)    # 中高域: 広い開口（ステージの大きさ）
@@ -135,10 +91,17 @@ class PythonSpatialAudioSource(discord.AudioSource):
         if not hasattr(self, 'sr'):
             self.sr = 48000
 
-        # FDNディレイラインと壁面反射フィルタ用 zi の初期化 (shape: (1, 2))
-        self.fdn_delay_lens = [1117, 1357, 1597, 1861]
-        self.fdn_delay_bufs = [np.zeros(l, dtype=np.float32) for l in self.fdn_delay_lens]
-        self.fdn_lp_zi = [np.zeros((1, 2), dtype=np.float32) for _ in range(4)]
+        # FDN リバーブの状態（部屋の広さに合わせて遅延構築する）
+        self._fdn_room = None
+        self._fdn_delays = []
+        self._fdn_gains = []
+        self._fdn_bufs = []
+        self._fdn_lp_zi = []
+        self._fdn_pos = 0
+        self._fdn_early = []
+        self._fdn_ering_l = np.zeros(16384, dtype=np.float32)
+        self._fdn_ering_r = np.zeros(16384, dtype=np.float32)
+        self._fdn_epos = 0
         # --- [1] HRTF (頭部伝達関数) テーブル構築 ---
         # 実測HRTF (KEMAR) を優先し、読めない環境では従来の簡易モデルを使う。
         real_hrtf = load_hrtf_tables()
@@ -216,25 +179,18 @@ class PythonSpatialAudioSource(discord.AudioSource):
         self.conv_overlap_r = np.zeros(self.hrir_len - 1, dtype=np.float32)
 
         # --- [3] スピーカー特性プリセット ---
-        # --- 実測データ（部屋IR・スピーカー特性）。読めなければ簡易モデルへ ---
-        self.room_irs = load_room_irs()
+        # --- 実測データ（スピーカー特性）。読めなければ簡易モデルへ ---
         self.speakers = load_speakers()
         self._spatial_failed = False
         logger.info(
-            "立体音響ソース開始: hrtf=%s room_ir=%s speakers=%s",
+            "立体音響ソース開始: hrtf=%s reverb=FDN speakers=%s",
             self.hrtf_kind,
-            "実測" if self.room_irs is not None else "簡易(FDN)",
             "実測" if self.speakers is not None else "簡易",
         )
         self._sp_fir_key = None
         self._sp_fir = None
         self._sp_fir_overlap = np.zeros(255, dtype=np.float32)
-        self._rev_ir_key = None
-        self._rev_ir = None
-        self._reverb_block = _BlockConvolver()
         self._spec_cache = {}
-        self._rev_tail_l = np.zeros(0, dtype=np.float32)
-        self._rev_tail_r = np.zeros(0, dtype=np.float32)
 
         self.speaker_presets = {
             'studio': {'gains': [1.0, 1.0, 1.1], 'directivity': [1.0, 2.0, 3.5], 'wall_absorption': 0.35},
@@ -419,107 +375,14 @@ class PythonSpatialAudioSource(discord.AudioSource):
         spatial_out_r = full_out_r[:n_samples]
 
         wet_val = float(self.state.get('fdn_wet', reverb_mix * 0.6))
-        if self.room_irs is not None:
-            rev_out_l, rev_out_r = self._measured_reverb(spatial_out_l, spatial_out_r, reverb_mix, wet_val)
+        if wet_val <= 0.01:
+            rev_out_l = np.zeros_like(spatial_out_l)
+            rev_out_r = np.zeros_like(spatial_out_r)
         else:
-            # 💡 [機能拡張③] 4×4 FDN (Feedback Delay Network) による高音質室内残響
-            rev_out_l = np.zeros(n_samples, dtype=np.float32)
-            rev_out_r = np.zeros(n_samples, dtype=np.float32)
-        
-            # FDN用のフィードバック・反射ゲイン計算（距離に応じて初期反射の遅延と壁吸収率が可変）
-            wall_absorption = preset['wall_absorption'] * math.pow(0.9, global_distance)
-            fb_matrix = 0.5 * np.array([
-                [ 1,  1,  1,  1],
-                [ 1, -1,  1, -1],
-                [ 1,  1, -1, -1],
-                [ 1, -1, -1,  1]
-            ], dtype=np.float32)  # Hadamard 行列によるエネルギー保存拡散
-
-            # C. FDN 室内残響（プツプツ音ノイズ対策・平滑化版）
-            res_mode = self.state.get('fdn_resolution', 4)
-            n_ch = 8 if res_mode == 8 else 4
-
-            # 1. バッファ等の動的初期化
-            if (not hasattr(self, 'fdn_delay_bufs') or 
-                len(self.fdn_delay_bufs) != n_ch or 
-                not hasattr(self, 'fdn_prev_fb') or 
-                len(self.fdn_prev_fb) != n_ch):
-            
-                if n_ch == 8:
-                    self.fdn_delay_lens = [1117, 1357, 1597, 1861, 2111, 2399, 2671, 2999]
-                else:
-                    self.fdn_delay_lens = [1117, 1357, 1597, 1861]
-            
-                self.fdn_delay_bufs = [np.zeros(l, dtype=np.float32) for l in self.fdn_delay_lens]
-                self.fdn_lp_zi = [np.zeros((1, 2), dtype=np.float32) for _ in range(n_ch)]
-                self.fdn_prev_fb = np.zeros(n_ch, dtype=np.float32)
-
-            # 2. コマンド値の取得（発振によるノイズを防ぐため fb_val を安全値に上限ガード）
-            fb_val = np.clip(float(self.state.get('fdn_feedback', 0.5)), 0.0, 0.85)
-
-            # 3. 壁面吸音（ローパスフィルタ）
-            wall_abs = np.clip(preset['wall_absorption'], 0.1, 0.8)
-            cutoff_freq = max(1000.0, 12000.0 * (1.0 - wall_abs))
-            sos_wall = signal.butter(1, cutoff_freq / (self.sr / 2), 'low', output='sos')
-
-            # 4. 拡散行列の構築
-            if n_ch == 8:
-                u = np.ones((8, 1), dtype=np.float32)
-                matrix_base = np.eye(8, dtype=np.float32) - (2.0 / 8.0) * np.dot(u, u.T)
-                dry_in = [
-                    spatial_out_l, spatial_out_r, 
-                    spatial_out_l * 0.7, spatial_out_r * 0.7,
-                    spatial_out_l * 0.5, spatial_out_r * 0.5,
-                    spatial_out_l * 0.3, spatial_out_r * 0.3
-                ]
-            else:
-                matrix_base = 0.5 * np.array([
-                    [ 1,  1,  1,  1],
-                    [ 1, -1,  1, -1],
-                    [ 1, -1, -1,  1],
-                    [-1,  1, -1,  1]
-                ], dtype=np.float32)
-                dry_in = [spatial_out_l, spatial_out_r, spatial_out_l * 0.7, spatial_out_r * 0.7]
-
-            fb_matrix = fb_val * matrix_base
-
-            # 5. 各チャンネルのループ・ディレイ処理（クリックノイズ解消処理）
-            rev_channels = []
-            for ch in range(n_ch):
-                buf = self.fdn_delay_bufs[ch]
-            
-                # 入力信号に前回のフィードバック(単一値ではなく滑らかにフェード接続)を加算
-                fb_smooth = np.linspace(self.fdn_prev_fb[ch], 0.0, n_samples, dtype=np.float32)
-                in_sig = dry_in[ch] + fb_smooth
-            
-                # ディレイバッファと入力をスムーズに結合
-                concatenated = np.concatenate([buf, in_sig])
-                delay_out = concatenated[:n_samples]
-            
-                # 次回用バッファの更新
-                self.fdn_delay_bufs[ch] = concatenated[n_samples:]
-
-                # 壁面吸音フィルタを通す
-                lp_out, self.fdn_lp_zi[ch] = signal.sosfilt(
-                    sos_wall,
-                    delay_out, 
-                    zi=self.fdn_lp_zi[ch]
-                )
-                rev_channels.append(lp_out)
-
-            # 6. 行列演算とフィードバック保持
-            rev_stacked = np.vstack(rev_channels)
-            fb_out = np.dot(fb_matrix, rev_stacked)
-        
-            # フレーム間の境界ノイズを防ぐため、末尾のフィードバック音を滑らかに更新
-            self.fdn_prev_fb = fb_out[:, -1]
-
-            if n_ch == 8:
-                rev_out_l = (fb_out[0] + fb_out[2] + fb_out[4] + fb_out[6]) * 0.25
-                rev_out_r = (fb_out[1] + fb_out[3] + fb_out[5] + fb_out[7]) * 0.25
-            else:
-                rev_out_l = (fb_out[0] + fb_out[2]) * 0.5
-                rev_out_r = (fb_out[1] + fb_out[3]) * 0.5
+            # リバーブは FDN（フィードバック遅延ネットワーク）。
+            # 部屋の広さで反響の質感そのものが変わる。
+            room_m = float(self.state.get('spatial_room_m', 6.0))
+            rev_out_l, rev_out_r = self._fdn_reverb(spatial_out_l, spatial_out_r, room_m)
 
         # 反響も音像の方向へ寄せる: ドライ音の左右バランス（平滑化）に合わせて
         # ウェット音の左右を傾け、残響の雲も音源のいる方向に定位させる
@@ -667,30 +530,93 @@ class PythonSpatialAudioSource(discord.AudioSource):
             
         return struct.pack(fmt, *out_samples)
 
-    def _measured_reverb(self, in_l, in_r, room_size, wet_val=1.0):
-        """実測インパルス応答の畳み込みリバーブ。ウェット信号（未スケール）を返す。
+    def _fdn_setup(self, room_m: float):
+        """部屋の広さに合わせて FDN の遅延・減衰・初期反射を組み直す。"""
+        size = float(room_m)
+        delay_ms = [size * f for f in (3.1, 3.7, 4.3, 5.0)]
+        self._fdn_delays = [max(200, int(ms * self.sr / 1000.0)) for ms in delay_ms]
+        # 残響時間は部屋が広いほど長い
+        rt60 = min(2.6, max(0.4, 0.35 + 0.085 * size))
+        self._fdn_gains = [10.0 ** (-3.0 * (d / self.sr) / rt60) for d in self._fdn_delays]
+        self._fdn_bufs = [np.zeros(d + 2048, dtype=np.float32) for d in self._fdn_delays]
+        self._fdn_lp_zi = [np.zeros(1, dtype=np.float64) for _ in range(4)]
+        self._fdn_pos = 0
+        # 初期反射（壁からの一次反射）: 間隔は部屋の広さに比例し、
+        # 左右を交互に入れ替えて壁の位置を感じさせる
+        self._fdn_early = [
+            (max(64, int(size * ms * self.sr / 1000.0)), gain, cross)
+            for ms, gain, cross in (
+                (0.9, 0.45, False), (1.7, 0.34, True), (2.6, 0.25, False), (3.8, 0.18, True),
+            )
+        ]
+        self._fdn_ering_l = np.zeros(16384, dtype=np.float32)
+        self._fdn_ering_r = np.zeros(16384, dtype=np.float32)
+        self._fdn_epos = 0
+        self._fdn_room = size
 
-        部屋の選択は残響量で切り替える（小さい=スタジオ、大さい=ホール）。
-        fdn_feedback は尾の伸縮として解釈する（0.5 で実測どおり）。
-        軽量化のためブロック畳み込みを使う（ウェット音は最大で約85ms遅れる）。
+    def _fdn_reverb(self, in_l, in_r, room_m: float):
+        """FDN リバーブ。ウェット信号（未スケール）を返す。
+
+        部屋の広さで遅延長・残響時間・初期反射の間隔が変わるため、
+        反響の質感そのものが部屋ごとに変化する。フレーム内を小ブロックに
+        分けて行列演算で処理する（遅延がブロック長以上なら再帰が回る）。
         """
-        if wet_val <= 0.01:
-            return np.zeros_like(in_l), np.zeros_like(in_r)
-        key = 'hall' if room_size >= 0.45 else 'room'
-        feedback = float(np.clip(self.state.get('fdn_feedback', 0.5), 0.0, 0.95))
-        cache_key = (key, round(feedback, 2))
-        if self._rev_ir_key != cache_key:
-            ir_l, ir_r = self.room_irs[key]
-            if abs(feedback - 0.5) > 0.01:
-                t = np.arange(len(ir_l), dtype=np.float32) / float(self.sr)
-                env = np.exp(-t * (0.5 - feedback) * 4.0)
-                env = np.minimum(env, 2.0).astype(np.float32)
-                ir_l = ir_l * env
-                ir_r = ir_r * env
-            self._rev_ir = (ir_l, ir_r)
-            self._rev_ir_key = cache_key
-        ir_l, ir_r = self._rev_ir
-        return self._reverb_block.process(in_l, in_r, ir_l, ir_r, cache_key)
+        n = len(in_l)
+        if self._fdn_room != float(room_m):
+            self._fdn_setup(room_m)
+        block = 96
+        arange = np.arange(block)
+        out_l = np.zeros(n, dtype=np.float32)
+        out_r = np.zeros(n, dtype=np.float32)
+        damp = 0.42
+        b_lp = np.array([1.0 - damp])
+        a_lp = np.array([1.0, -damp])
+        ering_len = len(self._fdn_ering_l)
+        for start in range(0, n, block):
+            end = min(n, start + block)
+            m = end - start
+            idxs = arange[:m]
+            blk_l = in_l[start:end]
+            blk_r = in_r[start:end]
+
+            # --- 初期反射 ---
+            eidx = (self._fdn_epos + idxs) % ering_len
+            self._fdn_ering_l[eidx] = blk_l
+            self._fdn_ering_r[eidx] = blk_r
+            wet_l = np.zeros(m, dtype=np.float32)
+            wet_r = np.zeros(m, dtype=np.float32)
+            for dly, gain, cross in self._fdn_early:
+                ridx = (self._fdn_epos - dly + idxs) % ering_len
+                if cross:
+                    wet_l += gain * self._fdn_ering_r[ridx]
+                    wet_r += gain * self._fdn_ering_l[ridx]
+                else:
+                    wet_l += gain * self._fdn_ering_l[ridx]
+                    wet_r += gain * self._fdn_ering_r[ridx]
+            self._fdn_epos += m
+
+            # --- FDN 本体 ---
+            ins = (blk_l * 0.5, blk_r * 0.5, blk_l * 0.5, blk_r * 0.5)
+            delayed = []
+            for ch in range(4):
+                buf = self._fdn_bufs[ch]
+                ridx = (self._fdn_pos - self._fdn_delays[ch] + idxs) % len(buf)
+                delayed.append(buf[ridx])
+            damped = []
+            for ch in range(4):
+                y, self._fdn_lp_zi[ch] = signal.lfilter(
+                    b_lp, a_lp, delayed[ch].astype(np.float64), zi=self._fdn_lp_zi[ch])
+                damped.append((y * self._fdn_gains[ch]).astype(np.float32))
+            fb = _FDN_MATRIX @ np.array(damped)
+            for ch in range(4):
+                buf = self._fdn_bufs[ch]
+                widx = (self._fdn_pos + idxs) % len(buf)
+                buf[widx] = ins[ch] + fb[ch]
+            self._fdn_pos += m
+
+            out_l[start:end] = wet_l + (delayed[0] + delayed[2]) * _FDN_OUT_GAIN
+            out_r[start:end] = wet_r + (delayed[1] + delayed[3]) * _FDN_OUT_GAIN
+        return out_l, out_r
 
     def _spec(self, key, ir):
         """短いIRのスペクトル（FFT長2048固定）をキャッシュして返す。"""
@@ -713,6 +639,8 @@ def spatial_panel_embed(cog, guild_id: int) -> discord.Embed:
     current_eq = state.get('eq', 'flat')
     dist = state.get('spatial_distance', 2.0)
     room = state.get('spatial_room_size', 0.3)
+    room_m = float(state.get('spatial_room_m', 6.0))
+    room_m_labels = {3.0: '小部屋', 6.0: 'リビング', 12.0: '大部屋', 25.0: 'ホール'}
     speaker = state.get('spatial_speaker', 'studio')
     is_rotating = "ON" if state.get('is_rotating', True) else "OFF"
     speaker_names = {
@@ -723,7 +651,7 @@ def spatial_panel_embed(cog, guild_id: int) -> discord.Embed:
     }
     engine = (
         f"HRTF: **{'実測 (KEMAR)' if load_hrtf_tables() is not None else '簡易'}** / "
-        f"リバーブ: **{'実測IR' if load_room_irs() is not None else '簡易'}** / "
+        f"リバーブ: **FDN** / "
         f"スピーカー: **{'実測' if load_speakers() is not None else '簡易'}**"
     )
     return discord.Embed(
@@ -732,6 +660,7 @@ def spatial_panel_embed(cog, guild_id: int) -> discord.Embed:
             f"現在のモード: **{current_eq}**\n"
             f"音像の距離: **{dist}x**\n"
             f"部屋のリバーブ: **{room}**\n"
+            f"部屋の広さ: **{room_m_labels.get(room_m, str(room_m))} ({room_m:.0f}m)**\n"
             f"スピーカー特性: **{speaker_names.get(speaker, speaker)}**\n"
             f"5帯域立体回転: **{is_rotating}**\n"
             f"エンジン: {engine}"
@@ -779,6 +708,7 @@ class SpatialControlView(discord.ui.View):
             (self.select_reverb, state.get('spatial_room_size', 0.3)),
             (self.select_distance, state.get('spatial_distance', 2.0)),
             (self.select_speaker, state.get('spatial_speaker', 'studio')),
+            (self.select_room_size, state.get('spatial_room_m', 6.0)),
         )
         for select, current in targets:
             for option in select.options:
@@ -885,4 +815,22 @@ class SpatialControlView(discord.ui.View):
             return
         state = self.cog.get_state(self.guild_id)
         state['spatial_speaker'] = select.values[0]
+        await self.update_panel(interaction)
+
+    # 6. 部屋の広さ（FDN の遅延・残響時間・初期反射が連動して変わる）
+    @discord.ui.select(
+        placeholder="部屋の広さを選択...",
+        options=[
+            discord.SelectOption(label="小部屋 (3m)", value="3.0", description="タイトで近い反響"),
+            discord.SelectOption(label="リビング (6m)", value="6.0", default=True, description="標準的な部屋の響き"),
+            discord.SelectOption(label="大部屋 (12m)", value="12.0", description="広がりのある残響"),
+            discord.SelectOption(label="ホール (25m)", value="25.0", description="長い残響のコンサートホール"),
+        ],
+        row=4
+    )
+    async def select_room_size(self, interaction: discord.Interaction, select: discord.ui.Select):
+        if not await _require_same_vc(interaction):
+            return
+        state = self.cog.get_state(self.guild_id)
+        state['spatial_room_m'] = float(select.values[0])
         await self.update_panel(interaction)
