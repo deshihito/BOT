@@ -36,7 +36,7 @@ from core.support.emojis import FAILED, MUSIC, PAUSE, RESTART, SUCCESS, VOL
 from core.vc.music.music_activity import build_music_activity_snapshot
 
 from core.vc.music.hrtf import load_hrtf_tables
-from core.vc.music.measured import air_absorption_gains, load_room_irs, load_speakers
+from core.vc.music.measured import air_absorption_gain, load_room_irs, load_speakers
 from core.vc.music.common import *  # noqa: F401,F403 - shared helpers/constants
 
 logger = logging.getLogger("cogs.sio_music")
@@ -96,9 +96,33 @@ class _BlockConvolver:
         return out_l, out_r
 
 
+def _wfs_tap_table(half_aperture_deg: float, step_deg: float):
+    """波面合成（WFS）の駆動重みテーブル。
+
+    仮想音源の波面を、聞き手を囲む円周上の二次音源群で合成する考え方。
+    重みは開口に対する raised-cosine 窓 × 入射角の余弦（Kirchhoff 積分の
+    傾斜因子）で、正規化して返す。
+    """
+    taps = []
+    n = int(round(half_aperture_deg / step_deg))
+    for k in range(-n, n + 1):
+        off = float(k * step_deg)
+        w = (math.cos(math.pi * off / (2.0 * half_aperture_deg)) ** 2) * math.cos(math.radians(off))
+        if w > 0.01:
+            taps.append((off, w))
+    total = sum(w for _, w in taps)
+    return tuple((off, w / total) for off, w in taps)
+
+
+_SINGLE_TAP = ((0.0, 1.0),)
+# ライブモードの音像の大きさ（開口幅）は固定値。パラメータでは調整しない。
+_LIVE_TAPS_NARROW = _wfs_tap_table(15.0, 7.5)   # 低域: 狭い開口（定位の芯）
+_LIVE_TAPS_WIDE = _wfs_tap_table(30.0, 10.0)    # 中高域: 広い開口（ステージの大きさ）
+
+
 class PythonSpatialAudioSource(discord.AudioSource):
     """
-    3帯域独立回転 × スピーカー特性切り替え × 壁面吸音リバーブ統合エンジン
+    5帯域連動回転 × スピーカー特性切り替え × 壁面吸音リバーブ統合エンジン
     """
     def __init__(self, source, state):
         self.source = source
@@ -156,17 +180,20 @@ class PythonSpatialAudioSource(discord.AudioSource):
                     self.hrir_table_l[(y_pos, idx)] = ir_l
                     self.hrir_table_r[(y_pos, idx)] = ir_r
 
-        # --- [2] 帯域分割フィルター ---
-        self.sos_low = signal.iirfilter(2, 320 / (self.sr / 2), btype='lowpass', ftype='butter', output='sos')
-        self.zi_low = np.zeros((self.sos_low.shape[0], 2), dtype=np.float32)
-
-        bw = 1500.0 / 1.0
-        low_f, high_f = max(20.0, 1500.0 - bw / 2.0), min(self.sr / 2.0 - 100, 1500.0 + bw / 2.0)
-        self.sos_mid = signal.iirfilter(2, [low_f / (self.sr / 2), high_f / (self.sr / 2)], btype='bandpass', ftype='butter', output='sos')
-        self.zi_mid = np.zeros((self.sos_mid.shape[0], 2), dtype=np.float32)
-
-        self.sos_high = signal.iirfilter(2, 5000 / (self.sr / 2), btype='highpass', ftype='butter', output='sos')
-        self.zi_high = np.zeros((self.sos_high.shape[0], 2), dtype=np.float32)
+        # --- [2] 帯域分割フィルター（5帯域） ---
+        # 周波数を細かく分けて帯域ごとに少しずつ違う角度を与えることで、
+        # 音像を保ったまま音の広がりを出す。
+        _nyq = self.sr / 2.0
+        self.band_sos = [
+            signal.iirfilter(2, 150 / _nyq, btype='lowpass', ftype='butter', output='sos'),
+            signal.iirfilter(2, [150 / _nyq, 500 / _nyq], btype='bandpass', ftype='butter', output='sos'),
+            signal.iirfilter(2, [500 / _nyq, 1800 / _nyq], btype='bandpass', ftype='butter', output='sos'),
+            signal.iirfilter(2, [1800 / _nyq, 5000 / _nyq], btype='bandpass', ftype='butter', output='sos'),
+            signal.iirfilter(2, 5000 / _nyq, btype='highpass', ftype='butter', output='sos'),
+        ]
+        self.band_zi = [np.zeros((sos.shape[0], 2), dtype=np.float32) for sos in self.band_sos]
+        # 実測スピーカー特性は3帯域ぶんしかないため、5帯域から対応づける
+        self._sp_band_map = (0, 1, 1, 2, 2)
 
         # 回転は「全帯域で共有する主回転＋帯域ごとの小さな揺れ」で構成する。
         # 帯域ごとに独立して回すと音像が帯域ごとにバラバラになり、
@@ -174,12 +201,15 @@ class PythonSpatialAudioSource(discord.AudioSource):
         # 揺れの速度: 低音は主回転より遅れてゆっくり / 中音は主回転そのもの /
         # 高音は主回転より速く細かく揺れる。
         self._rot_theta = 0.0
+        self._live_phase = 0.0
         self._wet_balance = 0.0
-        self._last_band_angles = [0.0, 0.0, 0.0]
+        self._last_band_angles = [0.0, 0.0, 0.0, 0.0, 0.0]
         self.band_configs = [
-            {'type': 'low',  'y': -4.0, 'phase': 0.0, 'wobble_amp': 0.30, 'wobble_rate': -0.004},
-            {'type': 'mid',  'y':  0.0, 'phase': 0.0, 'wobble_amp': 0.0,  'wobble_rate': 0.0},
-            {'type': 'high', 'y':  4.0, 'phase': 2.1, 'wobble_amp': 0.45, 'wobble_rate': 0.007},
+            {'type': 'low',     'y': -4.0, 'phase': 0.0, 'wobble_amp': 0.18, 'wobble_rate': -0.003},
+            {'type': 'lowmid',  'y': -4.0, 'phase': 1.3, 'wobble_amp': 0.26, 'wobble_rate': -0.0015},
+            {'type': 'mid',     'y':  0.0, 'phase': 0.0, 'wobble_amp': 0.0,  'wobble_rate': 0.0},
+            {'type': 'highmid', 'y':  4.0, 'phase': 2.6, 'wobble_amp': 0.38, 'wobble_rate': 0.004},
+            {'type': 'high',    'y':  4.0, 'phase': 4.2, 'wobble_amp': 0.50, 'wobble_rate': 0.008},
         ]
 
         self.conv_overlap_l = np.zeros(self.hrir_len - 1, dtype=np.float32)
@@ -278,26 +308,36 @@ class PythonSpatialAudioSource(discord.AudioSource):
             self._sp_fir_overlap = fir_full[n_samples:].copy()
             mono_in = fir_full[:n_samples]
 
-        # 空気吸収（ISO 9613-1）: 距離で高音ほど減衰する
-        air_gains = air_absorption_gains(global_distance)
+        # 空気吸収（ISO 9613-1）: 距離で高音ほど減衰する（5帯域の代表周波数で評価）
+        air_gains = [air_absorption_gain(global_distance, f)
+                     for f in (75.0, 275.0, 950.0, 3000.0, 9000.0)]
 
-        # A. 帯域分割
-        band_low, self.zi_low = signal.sosfilt(self.sos_low, mono_in, zi=self.zi_low)
-        band_mid, self.zi_mid = signal.sosfilt(self.sos_mid, mono_in, zi=self.zi_mid)
-        band_high, self.zi_high = signal.sosfilt(self.sos_high, mono_in, zi=self.zi_high)
-        band_signals = [band_low, band_mid, band_high]
+        # A. 帯域分割（5帯域）
+        band_signals = []
+        for _bi, _sos in enumerate(self.band_sos):
+            _band_out, self.band_zi[_bi] = signal.sosfilt(_sos, mono_in, zi=self.band_zi[_bi])
+            band_signals.append(_band_out)
 
         # 回転角度: 主回転（全帯域共有）に帯域ごとの揺れを加えたもの
         if rot_mode in ('standard', '3d'):
             self._rot_theta += 0.012
-        band_angles = []
-        for config in self.band_configs:
-            if rot_mode == 'off':
-                band_angles.append(0.0)
-            else:
+            band_angles = []
+            for config in self.band_configs:
                 config['phase'] += config['wobble_rate']
                 band_angles.append(self._rot_theta + config['wobble_amp'] * math.sin(config['phase']))
+        elif rot_mode == 'live':
+            # ライブ配置: 低音は正面に固定、その他はステージ上に固定配置。
+            # ボーカル帯域（中音）だけが前方の左右をゆっくり往復する。
+            self._live_phase += 0.010
+            vocal_angle = 0.87 * math.sin(self._live_phase)
+            band_angles = [0.0, -0.18, vocal_angle, 0.21, 0.35]
+        else:
+            band_angles = [0.0] * len(self.band_configs)
         self._last_band_angles = band_angles
+
+        # 距離補正: 遠くすると 1/d で小さくなる分を一部だけ持ち上げる。
+        # 内容に追従する AGC とは違い、距離だけに連動する固定カーブ。
+        dist_comp = max(1.0, (global_distance / 2.0) ** 0.8)
 
 
         full_out_l = np.zeros(n_samples + self.hrir_len - 1, dtype=np.float32)
@@ -319,8 +359,8 @@ class PythonSpatialAudioSource(discord.AudioSource):
                 elevation_levels = (-4.0, 0.0, 4.0)
                 target_elevation = (pitch / 0.45) * 4.0
                 y_elevation = min(elevation_levels, key=lambda value: abs(value - target_elevation))
-            elif rot_mode == 'standard':
-                # 通常 2D 水平回転
+            elif rot_mode in ('standard', 'live'):
+                # 通常 2D 水平回転（ライブ配置も水平面で処理する）
                 angle_deg = math.degrees(angle_rad) % 360
                 y_elevation = config['y']
             else:
@@ -328,35 +368,45 @@ class PythonSpatialAudioSource(discord.AudioSource):
                 angle_deg = 0.0
                 y_elevation = config['y']
 
-            dir_idx = int((angle_deg / 360.0) * self.num_directions) % self.num_directions
-            
-            if sp_dir is not None:
-                # 実測の指向性（帯域別・方位5度刻み、正面=1）
-                dir_idx72 = int((angle_deg / 360.0) * 72) % 72
-                speaker_gain = float(sp_dir[i, dir_idx72])
+            # ライブモードでは波面合成（WFS）の考え方で、1帯域を円周上の
+            # 複数の二次音源から合成し、音像に大きさを持たせる。
+            # 通常モードは単一方向（点音源）で定位を優先する。
+            if rot_mode == 'live':
+                taps = _LIVE_TAPS_WIDE if i >= 2 else _LIVE_TAPS_NARROW
             else:
-                directivity_power = preset['directivity'][i]
-                band_gain = preset['gains'][i]
-                cos_theta = math.cos(math.radians(angle_deg))
-                speaker_gain = math.pow(max(0.0, 0.5 * (1.0 + cos_theta)), directivity_power) * band_gain
+                taps = _SINGLE_TAP
 
-            hrir_l = self.hrir_table_l[(y_elevation, dir_idx)]
-            hrir_r = self.hrir_table_r[(y_elevation, dir_idx)]
+            sp_i = self._sp_band_map[i]
+            for tap_deg, tap_w in taps:
+                t_deg = (angle_deg + tap_deg) % 360
+                dir_idx = int((t_deg / 360.0) * self.num_directions) % self.num_directions
 
-            # 距離減衰 ＋ 指向性ゲイン
-            dist_atten = (1.0 / max(0.5, global_distance)) * speaker_gain
-            band_sig = band_signals[i] * dist_atten * air_gains[i]
+                if sp_dir is not None:
+                    # 実測の指向性（帯域別・方位5度刻み、正面=1）
+                    dir_idx72 = int((t_deg / 360.0) * 72) % 72
+                    speaker_gain = float(sp_dir[sp_i, dir_idx72])
+                else:
+                    directivity_power = preset['directivity'][sp_i]
+                    band_gain = preset['gains'][sp_i]
+                    cos_theta = math.cos(math.radians(t_deg))
+                    speaker_gain = math.pow(max(0.0, 0.5 * (1.0 + cos_theta)), directivity_power) * band_gain
 
-            # 空気吸収（高域減衰）の適用
-            if n_samples + self.hrir_len - 1 <= 2048:
-                spec_l = self._spec(("hl", y_elevation, dir_idx), hrir_l)
-                spec_r = self._spec(("hr", y_elevation, dir_idx), hrir_r)
-                band_fft = _rfft(band_sig, 2048)
-                full_out_l += _irfft(band_fft * spec_l, 2048)[:n_samples + self.hrir_len - 1]
-                full_out_r += _irfft(band_fft * spec_r, 2048)[:n_samples + self.hrir_len - 1]
-            else:
-                full_out_l += signal.oaconvolve(band_sig, hrir_l, mode='full')
-                full_out_r += signal.oaconvolve(band_sig, hrir_r, mode='full')
+                hrir_l = self.hrir_table_l[(y_elevation, dir_idx)]
+                hrir_r = self.hrir_table_r[(y_elevation, dir_idx)]
+
+                # 距離減衰 ＋ 距離補正 ＋ 指向性ゲイン
+                dist_atten = (1.0 / max(0.5, global_distance)) * dist_comp * speaker_gain
+                band_sig = band_signals[i] * dist_atten * air_gains[i] * tap_w
+
+                if n_samples + self.hrir_len - 1 <= 2048:
+                    spec_l = self._spec(("hl", y_elevation, dir_idx), hrir_l)
+                    spec_r = self._spec(("hr", y_elevation, dir_idx), hrir_r)
+                    band_fft = _rfft(band_sig, 2048)
+                    full_out_l += _irfft(band_fft * spec_l, 2048)[:n_samples + self.hrir_len - 1]
+                    full_out_r += _irfft(band_fft * spec_r, 2048)[:n_samples + self.hrir_len - 1]
+                else:
+                    full_out_l += signal.oaconvolve(band_sig, hrir_l, mode='full')
+                    full_out_r += signal.oaconvolve(band_sig, hrir_r, mode='full')
 
         # Overlap-Add 処理
         full_out_l[:self.hrir_len - 1] += self.conv_overlap_l
@@ -683,7 +733,7 @@ def spatial_panel_embed(cog, guild_id: int) -> discord.Embed:
             f"音像の距離: **{dist}x**\n"
             f"部屋のリバーブ: **{room}**\n"
             f"スピーカー特性: **{speaker_names.get(speaker, speaker)}**\n"
-            f"3帯域立体回転: **{is_rotating}**\n"
+            f"5帯域立体回転: **{is_rotating}**\n"
             f"エンジン: {engine}"
         ),
         color=0x3498DB
@@ -702,7 +752,8 @@ class SpatialControlView(discord.ui.View):
         rot_labels = {
             'off': '回転: OFF',
             'standard': '🌀 回転: 通常',
-            '3d': '🪐 回転: 3D'
+            '3d': '🪐 回転: 3D',
+            'live': '🎤 回転: ライブ'
         }
         # ボタンの label 文字列内ではカスタム絵文字 markup が描画されないため、
         # OFF 時の一時停止アイコンは emoji 引数側で持たせる。
@@ -745,7 +796,7 @@ class SpatialControlView(discord.ui.View):
         current = state.get('spatial_rot_mode', 'standard')
         
         # モードの順繰り切替: standard -> 3d -> off -> standard
-        next_mode = {'standard': '3d', '3d': 'off', 'off': 'standard'}[current]
+        next_mode = {'standard': '3d', '3d': 'live', 'live': 'off', 'off': 'standard'}[current]
         state['spatial_rot_mode'] = next_mode
         state['is_rotating'] = (next_mode != 'off')
         
