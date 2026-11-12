@@ -21,6 +21,7 @@
     market        core/general/market/cog.py               MarketCog
     money_panel   core/general/money_panel/cog.py          MoneyPanelCog
     mood          core/general/mood/cog.py                 MoodAnalysis
+    news          core/general/news/cog.py                 NewsCog
     omikuji       core/general/omikuji/cog.py              OmikujiCog
     role_shop     core/general/role_shop/cog.py            RoleShopCog
     wallet        core/general/wallet/cog.py               WalletCog
@@ -106,6 +107,7 @@ _FEATURE_MODULES = (
     ("market", "core.general.market.cog"),
     ("money_panel", "core.general.money_panel.cog"),
     ("mood", "core.general.mood.cog"),
+    ("news", "core.general.news.cog"),
     ("omikuji", "core.general.omikuji.cog"),
     ("role_shop", "core.general.role_shop.cog"),
     ("wallet", "core.general.wallet.cog"),
