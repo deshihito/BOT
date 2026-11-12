@@ -7,8 +7,10 @@
   いないため使わない。
 - トピックは日本のニュース・政治・経済・国際・スポーツ・防災の6つ。
   日本語メディアの記事に絞り、分類はキーワード検索で行う。
-- 設定は guild_settings の news セクション（既定 OFF）。/news コマンドの
-  パネル（サーバー管理権限が必要）で投稿先とトピックを決める。
+- 設定は guild_settings の news セクション（既定 OFF）。入口は
+  /support の「自動化・通知」→「ニュース通知」（サーバー管理権限が
+  必要）で、投稿先とトピックを決める。トップレベルのコマンドは
+  増やさない方針のため、専用コマンドは持たない。
 - 15分ごとのループで確認し、未投稿の記事だけをまとめて1メッセージで
   投稿する。初回は既存記事を遡って投稿せず、取り込みだけ行う
   （有効化した瞬間に大量投稿しないため）。
@@ -21,7 +23,6 @@ from datetime import datetime, timezone
 
 import aiohttp
 import discord
-from discord import app_commands
 from discord.ext import commands, tasks
 
 import config
@@ -156,11 +157,9 @@ class NewsCog(commands.Cog):
         return posted
 
     # --------------------------------------------------------------
-    # /news 設定パネル
+    # 設定パネル（/support の「ニュース通知」から開く）
     # --------------------------------------------------------------
-    @app_commands.command(
-        name="news", description="ニュース通知の設定（新着ニュースを自動投稿）")
-    async def news(self, interaction: discord.Interaction):
+    async def open_panel(self, interaction: discord.Interaction):
         if interaction.guild_id is None:
             return await interaction.response.send_message(
                 "サーバー内でのみ使えます。", ephemeral=True)

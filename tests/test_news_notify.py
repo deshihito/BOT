@@ -197,3 +197,39 @@ class FormatPostTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class OpenPanelTest(unittest.IsolatedAsyncioTestCase):
+    """設定パネルの入口（/support の「ニュース通知」から呼ばれる）。"""
+
+    def setUp(self):
+        use_temp_settings(self)
+        self.cog = NewsCog(FakeBot(FakeChannel()))
+
+    def _interaction(self, *, admin: bool):
+        from unittest.mock import AsyncMock
+        import types as _types
+        perms = _types.SimpleNamespace(manage_guild=admin)
+        return _types.SimpleNamespace(
+            guild_id=777,
+            user=_types.SimpleNamespace(id=42, guild_permissions=perms),
+            response=_types.SimpleNamespace(send_message=AsyncMock()),
+        )
+
+    async def test_admin_gets_settings_view(self):
+        interaction = self._interaction(admin=True)
+        await self.cog.open_panel(interaction)
+        kwargs = interaction.response.send_message.call_args.kwargs
+        self.assertIn("view", kwargs)
+
+    async def test_non_admin_gets_summary_only(self):
+        interaction = self._interaction(admin=False)
+        await self.cog.open_panel(interaction)
+        args, kwargs = interaction.response.send_message.call_args
+        self.assertIn("OFF", args[0])
+        self.assertTrue(kwargs.get("ephemeral"))
+        self.assertNotIn("view", kwargs)
+
+    def test_no_standalone_app_command(self):
+        # トップレベルコマンドを増やさない方針: /news は持たない
+        self.assertFalse(hasattr(self.cog, "news"))

@@ -188,6 +188,7 @@ class SupportCog(
         "levelup_notify": "manage_guild",
         "levelup_card_theme": "manage_guild",
         "vc_auto_start": "manage_guild",
+        "news_notify": "manage_guild",
         "bot_fixer": "manage_guild",
         "bot_fixer_bots": "manage_guild",
         "bot_fixer_rates": "manage_guild",
@@ -683,6 +684,12 @@ class SupportCog(
             if cog is None:
                 return await self._missing(interaction, "地震情報")
             return await cog.show_earthquake_settings(interaction)
+
+        if selected == "news_notify":
+            cog = self.bot.get_cog("NewsCog")
+            if cog is None:
+                return await self._missing(interaction, "ニュース通知")
+            return await cog.open_panel(interaction)
 
         if selected.startswith("sokunuke_"):
             cog = self.bot.get_cog("SokuNukeRta")
