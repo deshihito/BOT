@@ -271,7 +271,7 @@ NEWS_SECTION = "news"
 NEWS_DEFAULTS: dict[str, Any] = {
     "enabled": False,        # ニュース通知をするか（既定はオフ）
     "channel_id": None,      # 投稿先チャンネル ID
-    "feeds": ["top"],        # 購読するカテゴリ（core.general.news.feeds.FEEDS のキー）
+    "feeds": ["top"],        # 購読するトピック（core.general.news.feeds.TOPICS のキー）
     "seen": [],              # 投稿済み記事のリンク（古い順・最大60件、二重投稿防止）
 }
 NEWS_SEEN_LIMIT = 60
