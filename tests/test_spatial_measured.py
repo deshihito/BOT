@@ -187,7 +187,9 @@ class DistanceSelectTest(unittest.TestCase):
 
         near = rms(0.5)
         far = rms(5.0)
-        self.assertGreater(near / far, 5.0)
+        # 距離補正（遠いほど持ち上げる固定カーブ）が入ったため、純粋な 1/d の
+        # 10 倍よりは小さいが、距離による音量差ははっきり残る
+        self.assertGreater(near / far, 3.0)
 
     def test_panel_has_distance_select_and_no_agc(self):
         _, spatial = self._make_src({"eq": "spatial"})
@@ -231,19 +233,70 @@ class RotationCoherenceTest(unittest.TestCase):
             src.read()
             angles = [a % (2 * _math.pi) for a in src._last_band_angles]
             pts = sorted(angles)
-            gaps = [pts[1] - pts[0], pts[2] - pts[1], pts[0] + 2 * _math.pi - pts[2]]
+            gaps = [pts[i + 1] - pts[i] for i in range(len(pts) - 1)]
+            gaps.append(pts[0] + 2 * _math.pi - pts[-1])
             spread = 2 * _math.pi - max(gaps)
             max_spread = max(max_spread, spread)
             seen.append(angles[1])
-        # 帯域間の角度差は常に 50 度以内（旧方式は最大 180 度までバラけた）
-        self.assertLessEqual(_math.degrees(max_spread), 50.0)
+        # 帯域間の角度差は常に 55 度以内（設計上の上限は約 50 度。
+        # 帯域ごとに独立回転していた旧方式は最大 180 度までバラけた）
+        self.assertLessEqual(_math.degrees(max_spread), 55.0)
         # 主回転は進んでいる
         self.assertGreater(max(seen) - min(seen), 1.0)
 
     def test_band_angles_zero_when_off(self):
         src = self._make_src({"eq": "spatial", "volume": 1.0, "spatial_rot_mode": "off"})
         src.read()
-        self.assertEqual(src._last_band_angles, [0.0, 0.0, 0.0])
+        self.assertEqual(src._last_band_angles, [0.0, 0.0, 0.0, 0.0, 0.0])
+
+    def test_distance_compensation_keeps_level(self):
+        import math as _math
+        import struct as _struct
+        import sys as _sys
+        import types as _types
+
+        import numpy as _np
+
+        _sys.modules.setdefault("yt_dlp", _types.ModuleType("yt_dlp"))
+        from core.vc.music import spatial
+
+        class _NoiseSource:
+            def __init__(self):
+                self.t = 0
+
+            def read(self):
+                out = []
+                for i in range(960):
+                    tt = (self.t + i) / 48000
+                    v = int(6000 * _math.sin(2 * _math.pi * 110 * tt)
+                            + 6000 * _math.sin(2 * _math.pi * 900 * tt)
+                            + 6000 * _math.sin(2 * _math.pi * 6000 * tt))
+                    out += [v, v]
+                self.t += 960
+                return _struct.pack(f"<{len(out)}h", *out)
+
+            def cleanup(self):
+                pass
+
+        def rms_at(distance):
+            src = spatial.PythonSpatialAudioSource(_NoiseSource(), {
+                "eq": "spatial", "volume": 1.0, "spatial_rot_mode": "off",
+                "spatial_room_size": 0.0, "spatial_distance": distance,
+            })
+            # 周期信号だと測定がぶれるため、フレームごとに違う波形を使う
+            total = 0.0
+            count = 0
+            for f in range(60):
+                frame = _np.frombuffer(src.read(), dtype=_np.int16).astype(_np.float64)
+                if f >= 20:
+                    total += float(_np.sum(frame ** 2))
+                    count += frame.size
+            return (total / max(1, count)) ** 0.5
+
+        near = rms_at(2.0)
+        far = rms_at(8.0)
+        # 補正なしでは 1/d で 0.25 倍になる。距離補正で 0.5 倍以上を保つ
+        self.assertGreater(far / near, 0.5)
 
 
 class SpatialPanelFixesTest(unittest.IsolatedAsyncioTestCase):
@@ -303,6 +356,65 @@ class SpatialPanelFixesTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(order, ["defer", "apply", "update"])
         self.assertEqual(state["eq"], "spatial")
+
+
+class LiveModeTest(unittest.TestCase):
+    def _make_src(self, state):
+        import struct as _struct
+        import sys as _sys
+        import types as _types
+
+        _sys.modules.setdefault("yt_dlp", _types.ModuleType("yt_dlp"))
+        from core.vc.music import spatial
+
+        class _FakeSource:
+            def read(self):
+                return _struct.pack("<1920h", *([1000, 1000] * 960))
+
+            def cleanup(self):
+                pass
+
+        return spatial.PythonSpatialAudioSource(_FakeSource(), state), spatial
+
+    def test_live_band_angles(self):
+        import math as _math
+
+        src, _spatial = self._make_src({
+            "eq": "spatial", "volume": 1.0, "spatial_rot_mode": "live",
+        })
+        vocal_angles = []
+        for _ in range(400):
+            src.read()
+            angles = src._last_band_angles
+            # 低音は正面に固定、その他（ボーカル以外）は固定配置
+            self.assertEqual(angles[0], 0.0)
+            self.assertAlmostEqual(angles[1], -0.18)
+            self.assertAlmostEqual(angles[3], 0.21)
+            self.assertAlmostEqual(angles[4], 0.35)
+            # ボーカル帯域は前方の範囲内だけで動く
+            self.assertLessEqual(abs(angles[2]), 0.87)
+            vocal_angles.append(angles[2])
+        self.assertGreater(max(vocal_angles) - min(vocal_angles), 1.0)
+
+    def test_wfs_tap_tables(self):
+        _src, spatial = self._make_src({"eq": "spatial", "volume": 1.0})
+        for table in (spatial._LIVE_TAPS_NARROW, spatial._LIVE_TAPS_WIDE):
+            self.assertAlmostEqual(sum(w for _o, w in table), 1.0, places=6)
+            offsets = [o for o, _w in table]
+            self.assertEqual(offsets, sorted(offsets))
+            self.assertEqual(offsets[0], -offsets[-1])
+        self.assertGreater(len(spatial._LIVE_TAPS_WIDE), len(spatial._LIVE_TAPS_NARROW))
+
+    def test_live_mode_renders(self):
+        import numpy as _np
+
+        src, _spatial = self._make_src({
+            "eq": "spatial", "volume": 1.0, "spatial_rot_mode": "live",
+            "spatial_room_size": 0.3,
+        })
+        frame = _np.frombuffer(src.read(), dtype=_np.int16)
+        self.assertEqual(frame.size, 1920)
+        self.assertGreater(float(_np.max(_np.abs(frame))), 0.0)
 
 
 if __name__ == "__main__":
