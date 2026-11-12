@@ -41,25 +41,28 @@ test("サービス名の常時表示はヘッダーの1箇所だけ（フッタ�
   assert.ok(!withoutLineComments(menuSrc).includes("One Prompter"));
 });
 
-test("レイアウトはヘッダーを置き、モデル状態の Provider は持たない", () => {
-  assert.match(layoutSrc, /import OpHeader from "\.\/OpHeader"/);
-  assert.match(layoutSrc, /<OpHeader \/>/);
+test("レイアウトはヘッダーを置き、モデル状態の Provider は持たず、セッションを渡す", () => {
+  assert.match(layoutSrc, /import OpHeader[^\n]*from "\.\/OpHeader"/);
+  assert.match(layoutSrc, /<OpHeader user={user} googleEnabled={isGoogleConfigured\(\)} \/>/);
   assert.ok(!layoutSrc.includes("OpModelProvider"));
   assert.ok(!layoutSrc.includes("OpModelContext"));
   // モデル状態の共有コンテキスト自体を廃止した
   assert.ok(!exists("app/one-prompter/OpModelContext.tsx"));
+  // ログイン状態は共通セッションから読み、プロバイダでアバターの形を出し分ける
+  assert.match(layoutSrc, /getCurrentSession\(\)/);
+  assert.match(layoutSrc, /session\.provider === "google"/);
+  assert.match(layoutSrc, /userAvatarUrl\(session\.id, session\.avatar\)/);
 });
 
-test("ヘッダーはハンバーガーメニューを出し、現在のモデル名表示は持たない", () => {
+test("ヘッダーはハンバーガーメニューを出し、ユーザー情報をそのまま渡す", () => {
   assert.match(headerSrc, /import OpMenu from "\.\/OpMenu"/);
-  assert.match(headerSrc, /<OpMenu \/>/);
+  assert.match(headerSrc, /<OpMenu user={user} googleEnabled={googleEnabled} \/>/);
   assert.ok(!headerSrc.includes("op-header-model"));
   assert.ok(!headerSrc.includes("useOpModel"));
 });
 
-test("メニューはモデル選択を持たず、規約リンクも使い方も持たない（閉じる操作はある）", () => {
+test("メニューはログイン導線だけを持ち、モデル選択も規約リンクも使い方も持たない", () => {
   assert.ok(!menuSrc.includes("PROMPTER_MODEL_OPTIONS"));
-  assert.ok(!menuSrc.includes("モデル"));
   assert.ok(!menuSrc.includes("✓"));
   // 利用規約・プライバシーポリシーは画面のどこにも置かない
   assert.ok(!menuSrc.includes("agobot.app/terms"));
@@ -69,6 +72,17 @@ test("メニューはモデル選択を持たず、規約リンクも使い方�
   // 使い方の項目もメニューから外した
   assert.ok(!menuSrc.includes("使い方"));
   assert.ok(!menuSrc.includes("やりたいことを書く"));
+  // 未ログイン: 共通 OAuth ルートへの導線（完了後はこの画面へ戻る）。Google は有効時のみ
+  assert.match(menuSrc, /href={\`\/api\/auth\/discord\/authorize\?next=\$\{NEXT\}\`}/);
+  assert.match(menuSrc, /Discord でログイン/);
+  assert.match(menuSrc, /googleEnabled && \(/);
+  assert.match(menuSrc, /href={\`\/api\/auth\/google\/authorize\?next=\$\{NEXT\}\`}/);
+  assert.match(menuSrc, /Google でログイン/);
+  assert.match(menuSrc, /NEXT = "\/one-prompter"/);
+  // ログイン中: ユーザー表示とログアウト（戻り先つき）
+  assert.match(menuSrc, /op-menu-username/);
+  assert.match(menuSrc, /action={\`\/api\/auth\/logout\?next=\$\{NEXT\}\`}/);
+  assert.match(menuSrc, /ログアウト/);
   // 閉じるボタン・Esc・外側クリック
   assert.match(menuSrc, /aria-label="メニューを閉じる"/);
   assert.match(menuSrc, /"Escape"/);

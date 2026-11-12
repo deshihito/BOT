@@ -5,6 +5,12 @@
 // ターミナルプロンプト「>_」）。ファビコン（page.tsx の OP_ICON）も同一形状。
 import OpMenu from "./OpMenu";
 
+/** メニューのアカウント表示に必要な最小限のユーザー情報（レイアウトがセッションから作る）。 */
+export type OpMenuUser = {
+  name: string;
+  avatarUrl: string | null;
+};
+
 function OpLogoMark({ size }: { size: number }) {
   return (
     <svg width={size} height={size} viewBox="0 0 64 64" aria-hidden="true" focusable="false">
@@ -22,7 +28,13 @@ function OpLogoMark({ size }: { size: number }) {
   );
 }
 
-export default function OpHeader() {
+export default function OpHeader({
+  user,
+  googleEnabled,
+}: {
+  user: OpMenuUser | null;
+  googleEnabled: boolean;
+}) {
   return (
     <header className="op-header">
       <p className="op-brand">
@@ -30,7 +42,7 @@ export default function OpHeader() {
         One Prompter
       </p>
       <div className="op-header-right">
-        <OpMenu />
+        <OpMenu user={user} googleEnabled={googleEnabled} />
       </div>
     </header>
   );
