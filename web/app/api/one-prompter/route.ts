@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { getRequestSession, sessionOwnerKey } from "@/lib/auth";
 import {
   validateAnswers,
   validatePromptInput,
@@ -12,6 +13,7 @@ import {
   reviseWithLlm,
   synthesizeWithLlm,
 } from "@/lib/one-prompter-server";
+import { loadUserApiKey } from "@/lib/one-prompter-user-key";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -49,6 +51,14 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "リクエストを確認できません。" }, { status: 403 });
   }
 
+  // ログイン中ユーザーが自前キーを登録していれば、そのキーだけで生成する
+  // （共有キーへの自動フォールバックはしない）。読み取りに失敗した場合は
+  // 従来どおり共有キーに倒す。ゲストは常に共有キー。
+  const session = getRequestSession(request);
+  const userApiKey = session ? await loadUserApiKey(sessionOwnerKey(session)) : null;
+  const hasAnyKey = logfareApiKeys().length > 0 || Boolean(userApiKey);
+  const apiKey = userApiKey ?? undefined;
+
   let body: {
     action?: unknown;
     rough?: unknown;
@@ -72,9 +82,9 @@ export async function POST(request: Request) {
     if (!prompt || !instruction) {
       return NextResponse.json({ error: "入力を確認してください。" }, { status: 400 });
     }
-    if (logfareApiKeys().length === 0) return fallback();
+    if (!hasAnyKey) return fallback();
     try {
-      const revised = await reviseWithLlm(prompt, instruction, { lang: body.lang, think: body.think });
+      const revised = await reviseWithLlm(prompt, instruction, { lang: body.lang, think: body.think, apiKey });
       if (!revised) return fallback();
       return NextResponse.json({ prompt: revised });
     } catch (error) {
@@ -88,8 +98,8 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "入力を確認してください。" }, { status: 400 });
   }
 
-  // キーが無い環境では最初からフォールバック（Web 用 env は Bot の .env と別）
-  if (logfareApiKeys().length === 0) return fallback();
+  // 共有キーも自前キーも無い場合は最初からフォールバック（Web 用 env は Bot の .env と別）
+  if (!hasAnyKey) return fallback();
 
   try {
     if (body.action === "questions") {
@@ -100,11 +110,11 @@ export async function POST(request: Request) {
         if (!priorAnswers) {
           return NextResponse.json({ error: "入力を確認してください。" }, { status: 400 });
         }
-        const followups = await generateFollowupQuestionsWithLlm(rough, priorAnswers, { think: body.think });
+        const followups = await generateFollowupQuestionsWithLlm(rough, priorAnswers, { think: body.think, apiKey });
         if (!followups) return fallback();
         return NextResponse.json({ questions: followups });
       }
-      const questions = await generateQuestionsWithLlm(rough, { count: body.count, think: body.think });
+      const questions = await generateQuestionsWithLlm(rough, { count: body.count, think: body.think, apiKey });
       if (!questions) return fallback();
       return NextResponse.json({ questions });
     }
@@ -113,7 +123,7 @@ export async function POST(request: Request) {
       if (!answers) {
         return NextResponse.json({ error: "入力を確認してください。" }, { status: 400 });
       }
-      const prompt = await synthesizeWithLlm(rough, answers, { lang: body.lang, think: body.think });
+      const prompt = await synthesizeWithLlm(rough, answers, { lang: body.lang, think: body.think, apiKey });
       if (!prompt) return fallback();
       return NextResponse.json({ prompt });
     }

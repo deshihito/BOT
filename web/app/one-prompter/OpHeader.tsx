@@ -31,9 +31,11 @@ function OpLogoMark({ size }: { size: number }) {
 export default function OpHeader({
   user,
   googleEnabled,
+  userKeyEnabled,
 }: {
   user: OpMenuUser | null;
   googleEnabled: boolean;
+  userKeyEnabled: boolean;
 }) {
   return (
     <header className="op-header">
@@ -42,7 +44,7 @@ export default function OpHeader({
         One Prompter
       </p>
       <div className="op-header-right">
-        <OpMenu user={user} googleEnabled={googleEnabled} />
+        <OpMenu user={user} googleEnabled={googleEnabled} userKeyEnabled={userKeyEnabled} />
       </div>
     </header>
   );

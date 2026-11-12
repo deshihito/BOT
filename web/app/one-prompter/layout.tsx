@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import OpHeader, { type OpMenuUser } from "./OpHeader";
 import { getCurrentSession, isGoogleConfigured } from "@/lib/auth";
 import { userAvatarUrl } from "@/lib/dashboard-core";
+import { isUserKeyEnabled } from "@/lib/one-prompter-user-key";
 
 // One Prompter 単独の外枠。
 // このページでは AGO BOT サイト共通のヘッダー/フッターを出さない
@@ -23,7 +24,7 @@ export default async function OnePrompterLayout({ children }: { children: ReactN
     : null;
   return (
     <div className="op-shell">
-      <OpHeader user={user} googleEnabled={isGoogleConfigured()} />
+      <OpHeader user={user} googleEnabled={isGoogleConfigured()} userKeyEnabled={isUserKeyEnabled()} />
       {children}
       <footer className="op-footer" aria-hidden="true" />
     </div>

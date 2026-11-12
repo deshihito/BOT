@@ -11,15 +11,24 @@ import type { OpMenuUser } from "./OpHeader";
 
 const NEXT = "/one-prompter";
 
+type KeyStatus = { registered: boolean; masked: string | null };
+
 export default function OpMenu({
   user,
   googleEnabled,
+  userKeyEnabled,
 }: {
   user: OpMenuUser | null;
   googleEnabled: boolean;
+  userKeyEnabled: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const wrapRef = useRef<HTMLDivElement>(null);
+  /** 自前 API キーの登録状態（開いたときに取得する。null は未取得）。 */
+  const [keyStatus, setKeyStatus] = useState<KeyStatus | null>(null);
+  const [keyDraft, setKeyDraft] = useState("");
+  const [keyBusy, setKeyBusy] = useState(false);
+  const [keyNote, setKeyNote] = useState("");
 
   // 開いている間だけ、外側クリックと Esc で閉じる
   useEffect(() => {
@@ -37,6 +46,66 @@ export default function OpMenu({
       document.removeEventListener("mousedown", onPointerDown);
     };
   }, [open ]);
+
+  // ログイン中でキー機能が有効なときだけ、開いたタイミングで登録状態を取りに行く
+  useEffect(() => {
+    if (!open || !user || !userKeyEnabled || keyStatus !== null) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const response = await fetch("/api/one-prompter/key");
+        if (!response.ok) return;
+        const data = (await response.json()) as { registered?: unknown; masked?: unknown };
+        if (cancelled) return;
+        setKeyStatus({
+          registered: data.registered === true,
+          masked: typeof data.masked === "string" ? data.masked : null,
+        });
+      } catch {
+        // 取得できなければ未登録表示のまま（登録操作はサーバー側で弾かれる）
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [open, user, userKeyEnabled, keyStatus]);
+
+  const registerKey = async () => {
+    const apiKey = keyDraft.trim();
+    if (!apiKey || keyBusy) return;
+    setKeyBusy(true);
+    setKeyNote("");
+    try {
+      const response = await fetch("/api/one-prompter/key", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ apiKey }),
+      });
+      const data = (await response.json().catch(() => null)) as { masked?: unknown } | null;
+      if (!response.ok) throw new Error("register failed");
+      setKeyStatus({ registered: true, masked: typeof data?.masked === "string" ? data.masked : null });
+      setKeyDraft("");
+    } catch {
+      setKeyNote("登録できませんでした。キーを確認してください。");
+    } finally {
+      setKeyBusy(false);
+    }
+  };
+
+  const removeKey = async () => {
+    if (keyBusy) return;
+    setKeyBusy(true);
+    setKeyNote("");
+    try {
+      const response = await fetch("/api/one-prompter/key", { method: "DELETE" });
+      if (!response.ok) throw new Error("delete failed");
+      setKeyStatus({ registered: false, masked: null });
+    } catch {
+      setKeyNote("削除できませんでした。");
+    } finally {
+      setKeyBusy(false);
+    }
+  };
 
   return (
     <div className="op-menu" ref={wrapRef}>
@@ -73,6 +142,40 @@ export default function OpMenu({
                     ログアウト
                   </button>
                 </form>
+                {userKeyEnabled && (
+                  <div className="op-menu-key">
+                    <p className="op-menu-key-label">自分のAPIキー</p>
+                    {keyStatus?.registered ? (
+                      <>
+                        <p className="op-menu-key-masked">{keyStatus.masked}（登録済み）</p>
+                        <button type="button" className="op-menu-logout" onClick={() => void removeKey()} disabled={keyBusy}>
+                          削除
+                        </button>
+                      </>
+                    ) : (
+                      <>
+                        <input
+                          type="password"
+                          className="op-menu-key-input"
+                          value={keyDraft}
+                          onChange={(e) => setKeyDraft(e.target.value)}
+                          placeholder="APIキーを入力"
+                          autoComplete="off"
+                        />
+                        <button
+                          type="button"
+                          className="op-menu-logout"
+                          onClick={() => void registerKey()}
+                          disabled={keyBusy || !keyDraft.trim()}
+                        >
+                          登録
+                        </button>
+                        <p className="op-menu-note">登録すると、生成はあなたのキーで動きます。</p>
+                      </>
+                    )}
+                    {keyNote && <p className="op-menu-note">{keyNote}</p>}
+                  </div>
+                )}
               </>
             ) : (
               <>

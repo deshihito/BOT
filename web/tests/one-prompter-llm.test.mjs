@@ -757,3 +757,52 @@ test("think は質問生成・深掘り・合成（検証・直し含む）・re
   await server.reviseWithLlm("元のプロンプト", "短く", { env, fetchImpl: reviseFetch, think: true });
   assert.equal(JSON.parse(reviseBody).reasoning_effort, "high");
 });
+
+test("logfareChat は apiKey 指定時にそのキーだけを使い、共有キーへフォールバックしない", async () => {
+  // 共有キーがある環境でも、Authorization は自前キーになる
+  const seen = [];
+  const fetchImpl = async (url, init) => {
+    seen.push(init.headers.Authorization);
+    return chatResponse("ok");
+  };
+  const env = { LOGFARE_API_KEY: "shared-1", LOGFARE_API_KEY_2: "shared-2" };
+  const out = await server.logfareChat([{ role: "user", content: "hi" }], {
+    maxTokens: 10,
+    env,
+    fetchImpl,
+    apiKey: "test-user-key",
+  });
+  assert.equal(out, "ok");
+  assert.deepEqual(seen, ["Bearer test-user-key"]);
+
+  // 共有キーが無い環境でも自前キーだけで動く
+  const out2 = await server.logfareChat([{ role: "user", content: "hi" }], {
+    maxTokens: 10,
+    env: {},
+    fetchImpl,
+    apiKey: "test-user-key",
+  });
+  assert.equal(out2, "ok");
+
+  // 自前キーが 401 なら即失敗し、共有キーは試さない
+  let calls401 = 0;
+  const fetch401 = async () => {
+    calls401 += 1;
+    return jsonResponse(401, {});
+  };
+  await assert.rejects(() =>
+    server.logfareChat([{ role: "user", content: "hi" }], { maxTokens: 10, env, fetchImpl: fetch401, apiKey: "test-user-key" }),
+  );
+  assert.equal(calls401, 1);
+
+  // 自前キーが 429 でも共有キーへは切り替えない（切替先が無いので失敗で終わる）
+  let calls429 = 0;
+  const fetch429 = async () => {
+    calls429 += 1;
+    return jsonResponse(429, {});
+  };
+  await assert.rejects(() =>
+    server.logfareChat([{ role: "user", content: "hi" }], { maxTokens: 10, env, fetchImpl: fetch429, apiKey: "test-user-key" }),
+  );
+  assert.equal(calls429, 1);
+});
