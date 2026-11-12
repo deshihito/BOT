@@ -21,8 +21,10 @@ from .exp_board import (
     AXIS_LABELS, PAGE_SIZE, build_rows, find_rank, paginate, render_board_png,
     render_card_png, rival_info, top_clan,
 )
-from core.support import emojis
+from core.support import colors, emojis
 from core.general.user_names import cached_display_name, resolve_display_names
+from . import levelup_card
+from .level_card import render_level_card_png
 from core.leaderboard_image import fetch_avatar_bytes as _fetch_avatar_bytes
 
 logger = logging.getLogger(__name__)
@@ -485,3 +487,121 @@ class ActivityBoardView(discord.ui.View):
             await interaction.response.defer()
         await self.refresh_data()
         await edit_panel_v2(interaction, as_panel_v2(self))
+
+
+LEVEL_CARD_FILENAME = "level_card.png"
+
+
+class LevelCardView(discord.ui.View):
+    """/level の個人レベルカード表示（ガラス調カード・表示専用）。
+
+    描画は level_card.render_level_card_png（PIL・同期処理）を
+    asyncio.to_thread 経由で呼ぶ。送信時は as_panel_v2 で包む
+    （ExpRankingView と同じ形）。embed の色は意味色の緑で固定。
+    """
+
+    def __init__(self, author_id: int, guild_id, bot=None):
+        super().__init__(timeout=300)
+        self.author_id, self.guild_id = author_id, guild_id
+        self.bot = bot
+        self.theme = levelup_card.get_theme(author_id)
+        self._chat_exp = 0
+        self._vc_exp = 0
+        self._name: str | None = None
+        self._server_rank: int | None = None
+        self._global_rank: int | None = None
+        self._avatar_bytes: bytes | None = None
+        self._card_png: bytes | None = None
+
+    async def load(self):
+        data = await _exp_load()
+        user = _exp_ensure(data, self.guild_id, self.author_id)
+        self._chat_exp = _as_int(user.get("chat_exp"))
+        self._vc_exp = _as_int(user.get("vc_exp"))
+        if self.guild_id:
+            server_rows = build_rows(data, "general", self.guild_id)
+            self._server_rank = find_rank(server_rows, self.author_id)
+        global_rows = build_rows(data, "general", None)
+        self._global_rank = find_rank(global_rows, self.author_id)
+        names = await resolve_display_names(self.bot, [self.author_id])
+        self._name = names.get(self.author_id)
+        avatars = await _fetch_avatar_bytes(self.bot, [self.author_id])
+        self._avatar_bytes = avatars.get(self.author_id)
+        await self._render()
+
+    async def _render(self):
+        self._card_png = await asyncio.to_thread(
+            render_level_card_png, user_id=self.author_id,
+            name=self._name or "ユーザー", avatar_bytes=self._avatar_bytes,
+            chat_exp=self._chat_exp, vc_exp=self._vc_exp,
+            server_rank=self._server_rank, global_rank=self._global_rank,
+            theme=self.theme)
+
+    def card_file(self) -> discord.File:
+        return discord.File(io.BytesIO(self._card_png), filename=LEVEL_CARD_FILENAME)
+
+    def embed(self) -> discord.Embed:
+        gl = general_level(self._chat_exp, self._vc_exp)
+        embed = discord.Embed(
+            title="レベル",
+            description=(
+                f"**general Lv.{gl}**\n"
+                f"総EXP {self._chat_exp + self._vc_exp:,}"
+            ),
+            color=colors.SUCCESS,
+        )
+        embed.set_image(url=f"attachment://{LEVEL_CARD_FILENAME}")
+        return embed
+
+
+class LevelThemeSelect(discord.ui.Select):
+    def __init__(self, parent: "LevelSettingsView"):
+        options = [
+            discord.SelectOption(
+                label=theme["label"], value=key,
+                default=(key == parent.theme))
+            for key, theme in levelup_card.THEMES.items()
+        ]
+        super().__init__(
+            placeholder="レベルカードのテーマ",
+            options=options, min_values=1, max_values=1)
+        self.parent_view = parent
+
+    async def callback(self, interaction: discord.Interaction):
+        await self.parent_view.apply_theme(interaction, self.values[0])
+
+
+class LevelSettingsView(LevelCardView):
+    """/level_settings の個人設定（テーマ選択＋プレビュー、本人のみ）。"""
+
+    def __init__(self, author_id: int, guild_id, bot=None):
+        super().__init__(author_id, guild_id, bot=bot)
+        self._notice: str | None = None
+        self.add_item(LevelThemeSelect(self))
+
+    async def interaction_check(self, interaction) -> bool:
+        return interaction.user.id == self.author_id
+
+    def embed(self) -> discord.Embed:
+        lines = [f"現在のテーマ: **{levelup_card.theme_label(self.theme)}**"]
+        if self._notice:
+            lines.append(self._notice)
+        embed = discord.Embed(
+            title="レベルカード設定",
+            description="\n".join(lines),
+            color=colors.SUCCESS,
+        )
+        embed.set_image(url=f"attachment://{LEVEL_CARD_FILENAME}")
+        return embed
+
+    async def apply_theme(self, interaction: discord.Interaction, theme: str):
+        await interaction.response.defer()
+        self.theme = await levelup_card.set_theme(interaction.user.id, theme)
+        self._notice = f"テーマを「{levelup_card.theme_label(self.theme)}」にしました。"
+        # 選択中の表示を新しいテーマへ寄せる。
+        for child in self.children:
+            if isinstance(child, LevelThemeSelect):
+                self.remove_item(child)
+                self.add_item(LevelThemeSelect(self))
+        await self._render()
+        await edit_panel_v2(interaction, as_panel_v2(self), files=[self.card_file()])
