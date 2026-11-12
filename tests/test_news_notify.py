@@ -233,3 +233,69 @@ class OpenPanelTest(unittest.IsolatedAsyncioTestCase):
     def test_no_standalone_app_command(self):
         # トップレベルコマンドを増やさない方針: /news は持たない
         self.assertFalse(hasattr(self.cog, "news"))
+
+
+class FakeResponse:
+    def __init__(self, status, headers=None, text=""):
+        self.status = status
+        self.headers = headers or {}
+        self._text = text
+
+    async def text(self):
+        return self._text
+
+    def raise_for_status(self):
+        if self.status >= 400:
+            raise AssertionError("429 は raise_for_status より前に処理する")
+
+
+class FakeSession:
+    def __init__(self, response):
+        self._response = response
+
+    def get(self, url, **kwargs):
+        session = self
+
+        class _Ctx:
+            async def __aenter__(self):
+                return session._response
+
+            async def __aexit__(self, *exc):
+                return False
+
+        return _Ctx()
+
+
+class FetchRateLimitTest(unittest.IsolatedAsyncioTestCase):
+    async def test_429_raises_rate_limited_with_retry_after(self):
+        session = FakeSession(FakeResponse(429, {"Retry-After": "120"}))
+        with self.assertRaises(feeds_mod.RateLimited) as ctx:
+            await feeds_mod.fetch_feed(session, "top")
+        self.assertEqual(ctx.exception.retry_after, 120.0)
+
+
+class PollRateLimitTest(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        use_temp_settings(self)
+        self.channel = FakeChannel()
+        self.calls = 0
+
+        async def fetcher(session, feed_key):
+            self.calls += 1
+            raise feeds_mod.RateLimited(60)
+
+        self.cog = NewsCog(FakeBot(self.channel), fetcher=fetcher)
+
+    async def test_rate_limited_topic_backs_off(self):
+        store = guild_settings.get_store()
+        await store.update(777, guild_settings.NEWS_SECTION,
+                           enabled=True, channel_id=4242,
+                           feeds=["top"], seen=["a"])
+        # 429 でも例外にならず、投稿もしない
+        posted = await self.cog.poll_once()
+        self.assertEqual(posted, 0)
+        self.assertEqual(self.calls, 1)
+        # バックオフ中は取得自体を試みない
+        posted = await self.cog.poll_once()
+        self.assertEqual(posted, 0)
+        self.assertEqual(self.calls, 1)
