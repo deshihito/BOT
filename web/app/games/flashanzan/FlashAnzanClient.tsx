@@ -67,6 +67,7 @@ function Board({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
   const [now, setNow] = useState(() => Date.now());
   const [input, setInput] = useState("");
   const finishRef = useRef<string | null>(null);
+  const turnRef = useRef<string | null>(null);
 
   useEffect(() => {
     const id = setInterval(() => setNow(Date.now()), 100);
@@ -80,6 +81,15 @@ function Board({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
     const myRank = state.standings?.find((s) => s.seat === mySeat)?.rank;
     playSe(myRank === 1 ? "win" : "click");
   }, [state, mySeat, view.code]);
+
+  // 新しいラウンドの出題が始まったら合図を1回だけ鳴らす。
+  useEffect(() => {
+    if (!state || state.phase !== "showing") return;
+    const key = `${view.code}:${state.round}`;
+    if (turnRef.current === key) return;
+    turnRef.current = key;
+    playSe("turn");
+  }, [state, view.code]);
 
   // ラウンドが変わったら入力をリセットする。
   const roundKey = state ? `${view.code}:${state.round}:${state.phase}` : "";
@@ -102,11 +112,16 @@ function Board({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
       : 0;
 
   const submit = () => {
+    if (input.trim() === "") {
+      api.setError("合計を入力してください");
+      return;
+    }
     const value = Number(input);
     if (!Number.isInteger(value) || value < 0 || value > 99999) {
       api.setError("0〜99999 の整数で答えてください");
       return;
     }
+    playSe("submit");
     void api.move({ type: "answer", value });
   };
 
@@ -130,6 +145,8 @@ function Board({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
       {state.phase === "showing" && (
         <div style={{ textAlign: "center", padding: "12px 0 4px" }}>
           <div
+            key={`${state.round}:${state.shownCount}:${state.currentNumber ?? ""}`}
+            className="juice-flip"
             aria-live="polite"
             style={{ fontSize: 96, fontWeight: 800, lineHeight: 1.1, minHeight: 110 }}
           >
@@ -144,8 +161,8 @@ function Board({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
       )}
 
       {state.phase === "answer" && (
-        <div style={{ padding: "12px 0 4px" }}>
-          <p style={{ fontWeight: 700, textAlign: "center" }}>合計はいくつ？</p>
+        <div className="juice-slide" style={{ padding: "12px 0 4px" }}>
+          <p className="juice-pulse" style={{ fontWeight: 700, textAlign: "center" }}>合計はいくつ？</p>
           {answerRemaining !== null && <Bar ratio={answerRemaining / FA_ANSWER_LIMIT_MS} />}
           {canAnswer ? (
             <div
@@ -198,14 +215,15 @@ function Board({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
       )}
 
       {state.phase === "reveal" && (
-        <div style={{ padding: "12px 0 4px" }}>
+        <div className="juice-slide" style={{ padding: "12px 0 4px" }}>
           <p style={{ textAlign: "center", fontSize: 20 }}>
-            正解は <strong style={{ fontSize: 28 }}>{state.correctAnswer}</strong>
+            正解は <strong key={state.round} className="juice-pop" style={{ fontSize: 28 }}>{state.correctAnswer}</strong>
           </p>
           <ul style={{ listStyle: "none", padding: 0, margin: "12px 0" }}>
             {state.players.map((p) => (
               <li
                 key={p.seat}
+                className={p.winner ? "juice-pop" : undefined}
                 style={{
                   display: "flex",
                   justifyContent: "space-between",
@@ -217,7 +235,7 @@ function Board({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
                 }}
               >
                 <span>
-                  {p.winner ? "🎉 " : ""}
+                  {p.winner ? "" : ""}
                   {p.name}
                   {p.seat === mySeat ? "（あなた）" : ""}
                   {p.left ? "（退出）" : ""}
@@ -235,8 +253,8 @@ function Board({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
       )}
 
       {state.phase === "finished" && (
-        <div style={{ padding: "12px 0 4px" }}>
-          <h2 style={{ textAlign: "center" }}>結果</h2>
+        <div className="juice-slide" style={{ padding: "12px 0 4px" }}>
+          <h2 className="juice-pulse" style={{ textAlign: "center" }}>結果</h2>
           <ul style={{ listStyle: "none", padding: 0, margin: "12px 0" }}>
             {(state.standings ?? []).map((s) => {
               const p = state.players.find((x) => x.seat === s.seat);

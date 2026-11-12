@@ -11,6 +11,8 @@ import {
   stackerIntervalMs,
   type StackerState,
 } from "@/lib/stacker";
+import { sfxCorrect, sfxLose, sfxPlace } from "@/lib/sfx";
+import { EndScreen } from "../GameJuice";
 import { useGamesNav } from "../GamesShell";
 
 const BEST_KEY = "ago-stacker-best";
@@ -29,6 +31,7 @@ export default function StackerClient() {
   const { prefix } = useGamesNav();
   const [state, setState] = useState<StackerState>(() => createStackerGame());
   const [best, setBest] = useState(0);
+  const [prevBest, setPrevBest] = useState<number | null>(null);
   const stateRef = useRef(state);
   stateRef.current = state;
 
@@ -49,6 +52,7 @@ export default function StackerClient() {
   useEffect(() => {
     if (state.status !== "gameover") return;
     const prev = loadBest();
+    setPrevBest(prev);
     if (state.score > prev) {
       setBest(state.score);
       try {
@@ -60,12 +64,21 @@ export default function StackerClient() {
   }, [state.status, state.score]);
 
   const drop = useCallback(() => {
-    setState((s) => dropStacker(s));
+    const cur = stateRef.current;
+    if (cur.status !== "playing") return;
+    const next = dropStacker(cur);
+    if (next.status === "gameover") sfxLose();
+    else if (next.lastPerfect) sfxCorrect();
+    else sfxPlace();
+    setState(next);
   }, []);
 
-  // スペースキーでも落とせる
+  // スペースキーでも落とせる（キーボード経路はこの window リスナ1本に統一する。
+  // 盤面 div の onKeyDown を併用すると二重発火するため置かない）
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      if (e.repeat) return;
+      if (stateRef.current.status !== "playing") return;
       if (e.code === "Space" || e.code === "ArrowDown") {
         e.preventDefault();
         drop();
@@ -89,6 +102,7 @@ export default function StackerClient() {
   const renderRow = (start: number, width: number, level: number, ghost: boolean) => (
     <div key={level} style={{ position: "relative", height: cell, width: boardWidthPx }}>
       <div
+        className={!ghost && level === state.rows.length - 1 ? "juice-pop" : undefined}
         style={{
           position: "absolute",
           left: start * cell,
@@ -120,8 +134,8 @@ export default function StackerClient() {
       </div>
 
       <p className="classic-status" role="status">
-        {state.score} 段 ・ ベスト {Math.max(best, state.score)} 段
-        {state.lastPerfect && state.status === "playing" ? " ・ ぴったり！" : ""}
+        <span key={state.score} className="juice-pulse" style={{ display: "inline-block" }}>{state.score}</span> 段 ・ ベスト {Math.max(best, state.score)} 段
+        {state.lastPerfect && state.status === "playing" ? <span className="juice-pulse" style={{ display: "inline-block" }}> ・ ぴったり！</span> : ""}
         {state.status === "gameover" ? ` ・ 重ならず落下… ${state.score} 段で終了です。` : ""}
       </p>
 
@@ -130,12 +144,6 @@ export default function StackerClient() {
         aria-label="ブロックを止める"
         tabIndex={0}
         onClick={drop}
-        onKeyDown={(e) => {
-          if (e.code === "Space") {
-            e.preventDefault();
-            drop();
-          }
-        }}
         style={{
           width: boardWidthPx,
           maxWidth: "92vw",
@@ -158,6 +166,20 @@ export default function StackerClient() {
         })}
         {levels.length === 0 && <div style={{ height: cell }} />}
       </div>
+
+      {state.status === "gameover" && (
+        <div style={{ maxWidth: 520, margin: "14px auto 0" }}>
+          <EndScreen
+            outcome="finish"
+            title="落下… ゲームオーバー"
+            score={state.score}
+            scoreLabel="積んだ段数"
+            newBest={prevBest !== null && state.score > prevBest}
+            previousBest={prevBest}
+            onRetry={restart}
+          />
+        </div>
+      )}
 
       <div className="classic-controls" style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 14 }}>
         {state.status === "playing" ? (

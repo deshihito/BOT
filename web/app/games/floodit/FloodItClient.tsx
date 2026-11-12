@@ -3,13 +3,15 @@
 // 左上の領域と同じ色を広げていき、制限手数以内に盤全体を1色にする。
 // 制限手数は生成時の貪欲解 + 8手なので、必ず解ける。端末内で完結する。
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   applyFloodMove,
   createFloodGame,
   floodRegionIndices,
   type FloodState,
 } from "@/lib/floodit";
+import { sfxLose, sfxPlace, sfxWin } from "@/lib/sfx";
+import { EndScreen } from "../GameJuice";
 import { useGamesNav } from "../GamesShell";
 
 const COLOR_DEFS = [
@@ -27,6 +29,26 @@ export default function FloodItClient() {
   const { prefix } = useGamesNav();
   const [state, setState] = useState<FloodState>(() => createFloodGame(Date.now() % 2147483647));
   const [best, setBest] = useState<number | null>(null);
+  const [resultNewBest, setResultNewBest] = useState(false);
+  const [resultPrevBest, setResultPrevBest] = useState<number | null>(null);
+  const prevStatusRef = useRef(state.status);
+
+  // 終局遷移の瞬間だけジングルを鳴らし、その時点（保存前）のベストで更新判定を控える。
+  useEffect(() => {
+    const prev = prevStatusRef.current;
+    prevStatusRef.current = state.status;
+    if (prev === state.status) return;
+    if (state.status === "won") {
+      const isNew = best === null || state.movesUsed < best;
+      setResultNewBest(isNew);
+      setResultPrevBest(isNew ? null : best);
+      sfxWin();
+    } else if (state.status === "lost") {
+      setResultNewBest(false);
+      setResultPrevBest(best);
+      sfxLose();
+    }
+  }, [state.status, state.movesUsed, best]);
 
   useEffect(() => {
     try {
@@ -49,6 +71,12 @@ export default function FloodItClient() {
       return state.movesUsed;
     });
   }, [state.status, state.movesUsed]);
+
+  const restart = () => {
+    setState(createFloodGame(Date.now() % 2147483647));
+    setResultNewBest(false);
+    setResultPrevBest(null);
+  };
 
   const region = useMemo(() => new Set(floodRegionIndices(state.cells, state.size)), [state]);
   const regionColor = state.cells[0];
@@ -74,11 +102,7 @@ export default function FloodItClient() {
       </div>
 
       <div className="classic-controls">
-        <button
-          type="button"
-          className="classic-btn"
-          onClick={() => setState(createFloodGame(Date.now() % 2147483647))}
-        >
+        <button type="button" className="classic-btn" onClick={restart}>
           もう一度
         </button>
       </div>
@@ -102,6 +126,7 @@ export default function FloodItClient() {
         {state.cells.map((color, i) => (
           <div
             key={i}
+            className={region.has(i) ? "juice-pop" : undefined}
             style={{
               aspectRatio: "1",
               borderRadius: 3,
@@ -126,7 +151,10 @@ export default function FloodItClient() {
               aria-label={def.name}
               aria-pressed={isCurrent}
               disabled={state.status !== "playing" || isCurrent}
-              onClick={() => setState((s) => applyFloodMove(s, color))}
+              onClick={() => {
+                sfxPlace();
+                setState((s) => applyFloodMove(s, color));
+              }}
               style={{
                 width: 52,
                 height: 52,
@@ -144,6 +172,23 @@ export default function FloodItClient() {
       <p className="og-muted" style={{ textAlign: "center" }}>
         白い枠が今つながっている領域です。隣の色を取り込むように選ぶのがコツ。
       </p>
+
+      {state.status !== "playing" && (
+        <div style={{ marginTop: 16 }}>
+          <EndScreen
+            outcome={state.status === "won" ? "win" : "lose"}
+            score={state.movesUsed}
+            scoreLabel="手数"
+            newBest={resultNewBest}
+            previousBest={resultPrevBest}
+            onRetry={restart}
+          >
+            <p className="muted">
+              目安 {state.parMoves} 手 ・ 制限 {state.maxMoves} 手中 {state.movesUsed} 手使いました。
+            </p>
+          </EndScreen>
+        </div>
+      )}
     </>
   );
 }

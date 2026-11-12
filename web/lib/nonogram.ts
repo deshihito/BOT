@@ -317,6 +317,67 @@ export function setNonoMark(state: NonoState, index: number, mark: NonoMark): No
   };
 }
 
+/**
+ * 1行（列）の手がかりのうち、現在の印で「確定した」と言えるもののマスクを返す。
+ * 判定は現在の印だけに基づく: 両端が ×印か盤端で閉じた塗りランを、
+ * 行端から順に手がかりと照合し、長さが一致した分を確定とする
+ * （一般的なノノグラムアプリの手がかり消し込みと同じ方式）。
+ */
+export function lineHintSatisfaction(hints: number[], marks: NonoMark[]): boolean[] {
+  const result = hints.map(() => false);
+  if (hints.length === 1 && hints[0] === 0) {
+    return [!marks.some((m) => m === 1)];
+  }
+  type Run = { len: number; sealed: boolean };
+  const runs: Run[] = [];
+  let i = 0;
+  while (i < marks.length) {
+    if (marks[i] !== 1) {
+      i++;
+      continue;
+    }
+    const start = i;
+    while (i < marks.length && marks[i] === 1) i++;
+    const end = i - 1;
+    const sealedLeft = start === 0 || marks[start - 1] === 2;
+    const sealedRight = end === marks.length - 1 || marks[end + 1] === 2;
+    runs.push({ len: end - start + 1, sealed: sealedLeft && sealedRight });
+  }
+  // 左端から照合
+  let ri = 0;
+  let hi = 0;
+  while (ri < runs.length && hi < hints.length && runs[ri].sealed) {
+    if (runs[ri].len !== hints[hi]) break;
+    result[hi] = true;
+    ri++;
+    hi++;
+  }
+  // 右端から照合（左で使ったラン・手がかりと重ならない範囲）
+  let rj = runs.length - 1;
+  let hj = hints.length - 1;
+  while (rj >= ri && hj >= hi && runs[rj].sealed) {
+    if (runs[rj].len !== hints[hj]) break;
+    result[hj] = true;
+    rj--;
+    hj--;
+  }
+  return result;
+}
+
+/** 全行・全列の手がかり満足マスク（表示で確定した数字を薄くするため）。 */
+export function nonogramHintSatisfaction(state: NonoState): { rows: boolean[][]; cols: boolean[][] } {
+  const n = state.size;
+  const rows = state.rowHints.map((hints, r) =>
+    lineHintSatisfaction(hints, state.marks.slice(r * n, r * n + n)),
+  );
+  const cols = state.colHints.map((hints, c) => {
+    const line: NonoMark[] = [];
+    for (let r = 0; r < n; r++) line.push(state.marks[r * n + c]);
+    return lineHintSatisfaction(hints, line);
+  });
+  return { rows, cols };
+}
+
 /** 正解マスのうち塗れた数 / 正解マス総数（進捗表示用）。 */
 export function nonogramProgress(state: NonoState): { filled: number; total: number } {
   let filled = 0;

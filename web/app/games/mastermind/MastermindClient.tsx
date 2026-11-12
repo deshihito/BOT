@@ -2,7 +2,7 @@
 // マスターマインド。ロジックは lib/mastermind.ts（ヒット＆ブローの集計・勝敗）。
 // 色を4つ並べて判定し、10回までに正解の並びを当てる。端末内で完結。
 import Link from "next/link";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   createMastermindGame,
   isValidGuess,
@@ -14,6 +14,8 @@ import {
   type MmDifficulty,
   type MmState,
 } from "@/lib/mastermind";
+import { sfxFlip, sfxLose, sfxPlace, sfxTap, sfxWin } from "@/lib/sfx";
+import { EndScreen } from "../GameJuice";
 import { useGamesNav } from "../GamesShell";
 
 const DIFFS: { key: MmDifficulty; label: string }[] = [
@@ -29,6 +31,7 @@ function Peg({ color, size = 30 }: { color: MmColor | undefined; size?: number }
   return (
     <span
       aria-label={color ? color.label : "未選択"}
+      className={color ? "juice-pop" : undefined}
       style={{
         display: "inline-block",
         width: size,
@@ -49,6 +52,15 @@ export default function MastermindClient() {
   const [current, setCurrent] = useState<(string | null)[]>(() => Array(MM_CODE_LENGTH).fill(null));
   const [slot, setSlot] = useState(0);
 
+  const prevStatusRef = useRef(state.status);
+  useEffect(() => {
+    const prev = prevStatusRef.current;
+    prevStatusRef.current = state.status;
+    if (prev === state.status) return;
+    if (state.status === "won") sfxWin();
+    else if (state.status === "lost") sfxLose();
+  }, [state.status]);
+
   const palette = mmPalette(state.difficulty);
   const colorOf = (id: string | null) => palette.find((c) => c.id === id) ?? undefined;
   const full = current.every((c) => c !== null);
@@ -63,6 +75,7 @@ export default function MastermindClient() {
 
   const pickColor = (id: string) => {
     if (state.status !== "playing") return;
+    sfxPlace();
     const next = [...current];
     next[slot] = id;
     setCurrent(next);
@@ -73,7 +86,11 @@ export default function MastermindClient() {
 
   const onSubmit = () => {
     if (!canSubmit) return;
-    setState((s) => submitGuess(s, current as string[]));
+    const next = submitGuess(state, current as string[]);
+    if (next === state) return;
+    // 終局時は終局ジングルに任せ、二重に鳴らさない。
+    if (next.status === "playing") sfxFlip();
+    setState(next);
     setCurrent(Array(MM_CODE_LENGTH).fill(null));
     setSlot(0);
   };
@@ -112,7 +129,7 @@ export default function MastermindClient() {
       <p className="classic-status" role="status">
         残り {remainingGuesses(state)} 回
         {state.status === "won"
-          ? ` ・ 🎉 正解！ ${state.guesses.length} 回で当てました。`
+          ? ` ・ 正解！ ${state.guesses.length} 回で当てました。`
           : state.status === "lost"
             ? " ・ 終了… 正解は下の通りでした。"
             : ""}
@@ -128,6 +145,21 @@ export default function MastermindClient() {
         </p>
       )}
 
+      {state.status !== "playing" && (
+        <div style={{ margin: "14px 0" }}>
+          <EndScreen
+            outcome={state.status === "won" ? "win" : "lose"}
+            title={state.status === "won" ? "正解！" : undefined}
+            onRetry={() => restart(difficulty)}
+          >
+            <p>
+              {state.guesses.length} 回判定 ・ {DIFFS.find((d) => d.key === difficulty)?.label ?? difficulty}
+              {state.status === "won" ? ` ・ ${state.guesses.length} 回で当てました` : ""}
+            </p>
+          </EndScreen>
+        </div>
+      )}
+
       <section aria-label="いまの予想" style={{ margin: "14px 0" }}>
         <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
           {current.map((id, i) => (
@@ -136,7 +168,10 @@ export default function MastermindClient() {
               type="button"
               aria-label={`${i + 1} 番目のマス${id ? `（${colorOf(id)?.label ?? id}）` : "（未選択）"}`}
               aria-pressed={slot === i}
-              onClick={() => setSlot(i)}
+              onClick={() => {
+                sfxTap();
+                setSlot(i);
+              }}
               style={{
                 padding: 4,
                 borderRadius: "50%",
@@ -148,7 +183,7 @@ export default function MastermindClient() {
               <Peg color={colorOf(id)} size={36} />
             </button>
           ))}
-          <button type="button" className="classic-btn" onClick={() => { setCurrent(Array(MM_CODE_LENGTH).fill(null)); setSlot(0); }}>
+          <button type="button" className="classic-btn" onClick={() => { sfxTap(); setCurrent(Array(MM_CODE_LENGTH).fill(null)); setSlot(0); }}>
             クリア
           </button>
           <button
@@ -187,6 +222,7 @@ export default function MastermindClient() {
               return (
                 <li
                   key={turn}
+                  className="juice-slide"
                   style={{
                     display: "flex",
                     alignItems: "center",

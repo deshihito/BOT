@@ -4,7 +4,9 @@
 // ピース未選択で配置済みのマスをタップすると、そのピースを外せる。
 // 端末内で完結し、サーバーへ送信しない。
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { sfxPlace, sfxTap, sfxWin, sfxWrong } from "@/lib/sfx";
+import { EndScreen } from "../GameJuice";
 import {
   canPlacePent,
   createPentGame,
@@ -76,6 +78,13 @@ export default function PentominoClient() {
   const [hover, setHover] = useState<number | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
+  const prevStatusRef = useRef(state.status);
+  useEffect(() => {
+    const prev = prevStatusRef.current;
+    prevStatusRef.current = state.status;
+    if (prev !== "won" && state.status === "won") sfxWin();
+  }, [state.status]);
+
   const occupancy = useMemo(() => pentOccupancy(state), [state]);
   const covered = occupancy.filter(Boolean).length;
   const remaining = useMemo(() => pentRemaining(state), [state]);
@@ -101,6 +110,7 @@ export default function PentominoClient() {
   };
 
   const selectPiece = (id: PentId) => {
+    sfxTap();
     if (selected === id) {
       setSelected(null);
       return;
@@ -117,9 +127,11 @@ export default function PentominoClient() {
     if (selected) {
       const after = placePent(state, selected, orientation, r, c);
       if (after === state) {
+        sfxWrong();
         setNotice("そこには置けません（盤の外・他のピースと重なり）。");
         return;
       }
+      sfxPlace();
       setNotice(null);
       setState(after);
       if (after.status === "won") setSelected(null);
@@ -127,6 +139,7 @@ export default function PentominoClient() {
     }
     const occupant = occupancy[index];
     if (occupant) {
+      sfxTap();
       setState((s) => removePent(s, occupant));
       setNotice(`${occupant} を外しました。`);
     }
@@ -171,7 +184,14 @@ export default function PentominoClient() {
         </button>
       </div>
 
-      <p className="classic-status" role="status">
+      <p
+        className={
+          notice?.startsWith("そこには置けません")
+            ? "classic-status juice-shake"
+            : "classic-status"
+        }
+        role="status"
+      >
         配置 {12 - remaining.length}/12 ピース ・ {covered}/60 マス ・ {statusText}
       </p>
 
@@ -218,7 +238,7 @@ export default function PentominoClient() {
       {/* 選択中ピースの操作 */}
       {selected && selectedCells && (
         <div
-          className="classic-controls"
+          className="classic-controls juice-pop"
           style={{ alignItems: "center" }}
           role="group"
           aria-label="ピース操作"
@@ -227,14 +247,20 @@ export default function PentominoClient() {
           <button
             type="button"
             className="classic-btn"
-            onClick={() => setOrientation((o) => rotatePentOrientation(selected, o))}
+            onClick={() => {
+              sfxTap();
+              setOrientation((o) => rotatePentOrientation(selected, o));
+            }}
           >
             ⟳ 回転
           </button>
           <button
             type="button"
             className="classic-btn"
-            onClick={() => setOrientation((o) => flipPentOrientation(selected, o))}
+            onClick={() => {
+              sfxTap();
+              setOrientation((o) => flipPentOrientation(selected, o));
+            }}
           >
             ⇋ 反転
           </button>
@@ -243,6 +269,7 @@ export default function PentominoClient() {
               type="button"
               className="classic-btn"
               onClick={() => {
+                sfxTap();
                 setState((s) => removePent(s, selected));
                 setSelected(null);
               }}
@@ -250,7 +277,14 @@ export default function PentominoClient() {
               外す
             </button>
           )}
-          <button type="button" className="classic-btn" onClick={() => setSelected(null)}>
+          <button
+            type="button"
+            className="classic-btn"
+            onClick={() => {
+              sfxTap();
+              setSelected(null);
+            }}
+          >
             選択解除
           </button>
         </div>
@@ -281,6 +315,7 @@ export default function PentominoClient() {
               key={index}
               type="button"
               role="gridcell"
+              className={occupant ? "juice-pop" : undefined}
               aria-label={
                 occupant ? `ピース ${occupant}` : isPreview ? "配置プレビュー" : "空きマス"
               }
@@ -311,10 +346,12 @@ export default function PentominoClient() {
       </div>
 
       {state.status === "won" && (
-        <div className="classic-controls" style={{ marginTop: 14 }}>
-          <button type="button" className="classic-btn" onClick={() => restart(boardKey)}>
-            もう一度
-          </button>
+        <div style={{ marginTop: 14 }}>
+          <EndScreen outcome="win" title="完成です！" onRetry={() => restart(boardKey)}>
+            <p className="muted" style={{ margin: 0 }}>
+              12ピースすべてを配置し、60マス全部が埋まりました。
+            </p>
+          </EndScreen>
         </div>
       )}
     </>

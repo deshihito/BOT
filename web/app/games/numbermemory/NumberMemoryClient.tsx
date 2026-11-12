@@ -11,6 +11,8 @@ import {
   submitNumberAnswer,
   type NmState,
 } from "@/lib/numbermemory";
+import { sfxCorrect, sfxLose, sfxSpawn, sfxTap, sfxWrong } from "@/lib/sfx";
+import { EndScreen } from "../GameJuice";
 import { useGamesNav } from "../GamesShell";
 
 const BEST_KEY = "ago-numbermemory-best";
@@ -52,12 +54,15 @@ export default function NumberMemoryClient() {
   const [phase, setPhase] = useState<Phase>("ready");
   const [input, setInput] = useState("");
   const [best, setBest] = useState(0);
+  const [sessionPrevBest, setSessionPrevBest] = useState(0);
   const [progress, setProgress] = useState(1);
   const timersRef = useRef<number[]>([]);
   const rafRef = useRef(0);
 
   useEffect(() => {
-    setBest(loadBest());
+    const b = loadBest();
+    setBest(b);
+    setSessionPrevBest(b);
     return () => {
       timersRef.current.forEach((id) => window.clearTimeout(id));
       timersRef.current = [];
@@ -78,6 +83,7 @@ export default function NumberMemoryClient() {
 
   const showNumber = useCallback(
     (s: NmState) => {
+      sfxSpawn();
       setPhase("showing");
       setProgress(1);
       const duration = showDurationMs(s.digits);
@@ -98,7 +104,9 @@ export default function NumberMemoryClient() {
   );
 
   const start = useCallback(() => {
+    sfxTap();
     clearTimers();
+    setSessionPrevBest(loadBest());
     const s = createNumberMemoryGame(Date.now() % 2147483647);
     setState(s);
     showNumber(s);
@@ -109,11 +117,14 @@ export default function NumberMemoryClient() {
     const { state: next, correct } = submitNumberAnswer(state, input);
     setState(next);
     if (correct) {
+      sfxCorrect();
       saveBest(next.bestDigits);
       setBest(loadBest());
       setPhase("correct");
       later(() => showNumber(next), 1100);
     } else {
+      sfxWrong();
+      sfxLose();
       setPhase("failed");
     }
   }, [phase, state, input, later, showNumber]);
@@ -148,18 +159,13 @@ export default function NumberMemoryClient() {
         {phase === "showing" && <>{state.digits} 桁の数字を覚えて…</>}
         {phase === "input" && <>{state.digits} 桁の数字を入力してください</>}
         {phase === "correct" && <>正解！ 次は {state.digits} 桁です</>}
-        {phase === "failed" && (
-          <>
-            残念、正解は {state.number} でした。記録は {state.bestDigits} 桁
-            （ベスト {Math.max(best, state.bestDigits)} 桁）
-          </>
-        )}
+        {phase === "failed" && <>残念… 結果は下に表示しています</>}
       </p>
 
       <div style={{ maxWidth: 560, margin: "0 auto" }}>
         {phase === "showing" && (
           <>
-            <div style={bigNumberStyle} aria-label={`${state.digits}桁の数字`}>
+            <div style={bigNumberStyle} className="juice-pop" aria-label={`${state.digits}桁の数字`}>
               {state.number}
             </div>
             <div
@@ -192,7 +198,7 @@ export default function NumberMemoryClient() {
               autoFocus
               aria-label="覚えた数字"
               value={input}
-              onChange={(e) => setInput(e.target.value.replace(/[^0-9]/g, "").slice(0, 30))}
+              onChange={(e) => setInput(e.target.value.replace(/[^0-9]/g, "").slice(0, state.digits))}
               placeholder={"0".repeat(state.digits)}
               style={{
                 fontSize: 32,
@@ -215,18 +221,30 @@ export default function NumberMemoryClient() {
         )}
 
         {phase === "correct" && (
-          <div style={{ ...bigNumberStyle, color: "#2e9e4f" }}>✓</div>
+          <div style={{ ...bigNumberStyle, color: "#2e9e4f" }} className="juice-pop">✓</div>
         )}
 
         {phase === "failed" && (
-          <div style={{ ...bigNumberStyle, fontSize: "min(10vw, 44px)" }}>{state.number}</div>
+          <EndScreen
+            outcome="lose"
+            title="残念…"
+            score={state.bestDigits}
+            scoreLabel="記録（桁）"
+            newBest={state.bestDigits > sessionPrevBest}
+            previousBest={sessionPrevBest}
+            onRetry={start}
+          >
+            <p className="muted" style={{ margin: 0 }}>
+              正解は <span style={{ fontWeight: 800, letterSpacing: "0.08em" }}>{state.number}</span> でした
+            </p>
+          </EndScreen>
         )}
       </div>
 
       <div className="classic-controls" style={{ marginTop: 16 }}>
-        {(phase === "ready" || phase === "failed") && (
+        {phase === "ready" && (
           <button type="button" style={mainBtn} onClick={start}>
-            {phase === "failed" ? "もう一度" : "スタート"}
+            スタート
           </button>
         )}
       </div>

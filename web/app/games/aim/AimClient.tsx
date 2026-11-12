@@ -4,6 +4,7 @@
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
+  AIM_FIELD_HEIGHT,
   AIM_GAME_MS,
   activeTargetsAt,
   createAimSchedule,
@@ -11,6 +12,8 @@ import {
   pointsForHit,
   type AimTarget,
 } from "@/lib/aim";
+import { sfxLose, sfxTap, sfxWin } from "@/lib/sfx";
+import { EndScreen, ScorePop } from "../GameJuice";
 import { useGamesNav } from "../GamesShell";
 
 const BEST_KEY = "ago-aim-best";
@@ -35,6 +38,17 @@ export default function AimClient() {
   const [remainSec, setRemainSec] = useState(30);
   const [targets, setTargets] = useState<AimTarget[]>([]);
   const [lastGain, setLastGain] = useState<{ id: number; gained: number; key: number } | null>(null);
+  const [resultInfo, setResultInfo] = useState<{ newBest: boolean; prevBest: number } | null>(null);
+  const prevPhaseRef = useRef<Phase>("ready");
+
+  // 終局遷移の瞬間だけジングルを鳴らす。
+  useEffect(() => {
+    const prev = prevPhaseRef.current;
+    prevPhaseRef.current = phase;
+    if (prev === phase || phase !== "finished") return;
+    if (resultInfo?.newBest) sfxWin();
+    else sfxLose();
+  }, [phase, resultInfo]);
 
   const areaRef = useRef<HTMLDivElement | null>(null);
   const mountedRef = useRef(true);
@@ -61,6 +75,9 @@ export default function AimClient() {
     clearLoops();
     if (!mountedRef.current) return;
     setTargets([]);
+    // 保存前のベストで更新判定を控える。
+    const prevBest = loadBest();
+    setResultInfo({ newBest: scoreRef.current > 0 && scoreRef.current > prevBest, prevBest });
     setPhase("finished");
     setRemainSec(0);
     if (scoreRef.current > loadBest()) {
@@ -94,6 +111,7 @@ export default function AimClient() {
     setShots(0);
     setTargets([]);
     setLastGain(null);
+    setResultInfo(null);
     setRemainSec(30);
     setPhase("playing");
     startAtRef.current = performance.now();
@@ -117,8 +135,9 @@ export default function AimClient() {
     if (!area) return;
     const rect = area.getBoundingClientRect();
     if (rect.width <= 0 || rect.height <= 0) return;
+    // lib と同じ統一単位（横幅=100）へ変換する。縦も幅で割ることで円判定と一致させる。
     const x = ((e.clientX - rect.left) / rect.width) * 100;
-    const y = ((e.clientY - rect.top) / rect.height) * 100;
+    const y = ((e.clientY - rect.top) / rect.width) * 100;
     shotsRef.current += 1;
     setShots(shotsRef.current);
     const elapsed = performance.now() - startAtRef.current;
@@ -128,6 +147,7 @@ export default function AimClient() {
       .sort((a, b) => b.spawnAtMs - a.spawnAtMs);
     const target = candidates[0];
     if (!target) return;
+    sfxTap();
     hitIdsRef.current.add(target.id);
     const gained = pointsForHit(target, elapsed);
     scoreRef.current += gained;
@@ -203,13 +223,15 @@ export default function AimClient() {
         {targets.map((t) => {
           // 横幅基準の % で円の大きさを決める（縦は aspect-ratio で追従させるため padding 方式は使わず width のみ）
           const sizePct = t.radius * 2;
+          // 中心の縦位置は「高さ=75単位」から % へ換算し、判定空間と一致させる
+          const topPct = (t.y / AIM_FIELD_HEIGHT) * 100;
           return (
             <div
               key={t.id}
               aria-hidden="true"
               style={{
                 position: "absolute",
-                left: `${t.x}%`, top: `${t.y}%`,
+                left: `${t.x}%`, top: `${topPct}%`,
                 width: `${sizePct}%`, aspectRatio: "1 / 1",
                 transform: "translate(-50%, -50%)",
                 borderRadius: "50%",
@@ -226,20 +248,29 @@ export default function AimClient() {
           );
         })}
         {lastGain && phase === "playing" && (
-          <span
-            key={lastGain.key}
-            style={{ position: "absolute", top: 8, right: 12, fontWeight: 800, color: "#ffd23e", pointerEvents: "none" }}
-          >
-            +{lastGain.gained}
+          <span key={lastGain.key} style={{ position: "absolute", top: 8, right: 12, pointerEvents: "none" }}>
+            <ScorePop amount={lastGain.gained} />
           </span>
         )}
       </div>
 
       {phase === "finished" && (
-        <p className="classic-status" role="alert">
-          🎯 終了！ スコア {score} ・ 命中 {hits}/{shots}（{accuracy}%） ・ ベスト {best}
-          {score >= best && score > 0 ? " ・ ベスト更新！" : ""}
-        </p>
+        <div style={{ maxWidth: 560, margin: "16px auto 0" }}>
+          <EndScreen
+            outcome="finish"
+            title="終了！"
+            score={score}
+            scoreLabel="スコア"
+            newBest={resultInfo?.newBest ?? false}
+            previousBest={resultInfo && !resultInfo.newBest && resultInfo.prevBest > 0 ? resultInfo.prevBest : null}
+            onRetry={start}
+            retryLabel="もう一度遊ぶ"
+          >
+            <p className="muted">
+              命中 {hits}/{shots}（{accuracy}%）でした。
+            </p>
+          </EndScreen>
+        </div>
       )}
 
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "center", marginTop: 16 }}>

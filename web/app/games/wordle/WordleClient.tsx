@@ -2,15 +2,23 @@
 // ワード当て（5文字英単語推測）。ロジックは lib/wordle.ts。
 // 画面キーボードと物理キーボードの両方に対応。端末内で完結し、サーバーへ送信しない。
 import Link from "next/link";
-import { useCallback, useEffect, useState, type CSSProperties } from "react";
+import { useCallback, useEffect, useRef, useState, type CSSProperties } from "react";
 import {
+  buildShareText,
+  createDailyWordleGame,
   createWordleGame,
+  dailyKeyFor,
+  emptyWordleStats,
   keyboardState,
+  recordWordleResult,
   submitGuess,
   WORDLE_LENGTH,
   type LetterMark,
   type WordleState,
+  type WordleStats,
 } from "@/lib/wordle";
+import { sfxFlip, sfxLose, sfxTap, sfxWin, sfxWrong } from "@/lib/sfx";
+import { EndScreen } from "../GameJuice";
 import { useGamesNav } from "../GamesShell";
 
 const MARK_COLORS: Record<LetterMark, string> = {
@@ -20,24 +28,100 @@ const MARK_COLORS: Record<LetterMark, string> = {
 };
 
 const KEY_ROWS: string[] = ["QWERTYUIOP", "ASDFGHJKL", "ZXCVBNM"];
+const STATS_KEY = "ago-wordle-stats";
+
+type Mode = "daily" | "random";
+
+function loadStats(): WordleStats {
+  try {
+    const raw = window.localStorage.getItem(STATS_KEY);
+    if (!raw) return emptyWordleStats();
+    const parsed = JSON.parse(raw) as Partial<WordleStats>;
+    const base = emptyWordleStats();
+    return {
+      played: typeof parsed.played === "number" ? parsed.played : 0,
+      wins: typeof parsed.wins === "number" ? parsed.wins : 0,
+      currentStreak: typeof parsed.currentStreak === "number" ? parsed.currentStreak : 0,
+      maxStreak: typeof parsed.maxStreak === "number" ? parsed.maxStreak : 0,
+      distribution:
+        Array.isArray(parsed.distribution) && parsed.distribution.length === 6
+          ? parsed.distribution.map((n) => (typeof n === "number" ? n : 0))
+          : base.distribution,
+      recordedKeys: Array.isArray(parsed.recordedKeys)
+        ? parsed.recordedKeys.filter((k): k is string => typeof k === "string")
+        : [],
+    };
+  } catch {
+    return emptyWordleStats();
+  }
+}
 
 export default function WordleClient() {
   const { prefix } = useGamesNav();
-  const [game, setGame] = useState<WordleState>(() => createWordleGame(Date.now() % 2147483647));
+  const [mode, setMode] = useState<Mode>("daily");
+  const [game, setGame] = useState<WordleState>(() => createDailyWordleGame());
+  const [gameKey, setGameKey] = useState<string>(() => `daily:${dailyKeyFor(new Date())}`);
   const [current, setCurrent] = useState("");
   const [message, setMessage] = useState("");
+  const [shakeKey, setShakeKey] = useState(0);
+  const [stats, setStats] = useState<WordleStats>(() => emptyWordleStats());
+  const [copied, setCopied] = useState(false);
+  const prevStatusRef = useRef(game.status);
+  const recordedKeyRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    setStats(loadStats());
+  }, []);
+
+  // 終局の瞬間に成績を1回だけ記録する（同じゲームの二重記録は lib 側でも防ぐ）。
+  useEffect(() => {
+    if (game.status === "playing") return;
+    if (recordedKeyRef.current === gameKey) return;
+    recordedKeyRef.current = gameKey;
+    setStats((prev) => {
+      const next = recordWordleResult(prev, {
+        won: game.status === "won",
+        guessesUsed: game.guesses.length,
+        key: gameKey,
+      });
+      if (next !== prev) {
+        try {
+          window.localStorage.setItem(STATS_KEY, JSON.stringify(next));
+        } catch {
+          // 保存失敗はプレイに影響しない。
+        }
+      }
+      return next;
+    });
+  }, [game.status, game.guesses.length, gameKey]);
+
+  // 終局遷移の瞬間だけジングルを鳴らす。
+  useEffect(() => {
+    const prev = prevStatusRef.current;
+    prevStatusRef.current = game.status;
+    if (prev === game.status) return;
+    if (game.status === "won") sfxWin();
+    else if (game.status === "lost") sfxLose();
+  }, [game.status]);
+
+  const failInput = (text: string) => {
+    sfxWrong();
+    setShakeKey((k) => k + 1);
+    setMessage(text);
+  };
 
   const submit = useCallback(() => {
     if (game.status !== "playing") return;
     if (current.length < WORDLE_LENGTH) {
-      setMessage("5文字の単語を入力してください");
+      failInput("5文字の単語を入力してください");
       return;
     }
     const result = submitGuess(game, current);
     if (result.error) {
-      setMessage(result.error);
+      failInput(result.error);
       return;
     }
+    if (result.state.status === "playing") sfxFlip();
     setGame(result.state);
     setCurrent("");
     if (result.state.status === "won") {
@@ -57,14 +141,16 @@ export default function WordleClient() {
         return;
       }
       if (key === "BACK") {
+        sfxTap();
         setCurrent((c) => c.slice(0, -1));
         return;
       }
       if (/^[A-Z]$/.test(key)) {
+        if (current.length < WORDLE_LENGTH) sfxTap();
         setCurrent((c) => (c.length < WORDLE_LENGTH ? c + key : c));
       }
     },
-    [game.status, submit],
+    [game.status, submit, current],
   );
 
   useEffect(() => {
@@ -78,10 +164,34 @@ export default function WordleClient() {
     return () => window.removeEventListener("keydown", onKey);
   }, [press]);
 
-  const restart = () => {
-    setGame(createWordleGame(Date.now() % 2147483647));
+  const startGame = (nextMode: Mode) => {
+    setMode(nextMode);
     setCurrent("");
     setMessage("");
+    setCopied(false);
+    if (nextMode === "daily") {
+      setGame(createDailyWordleGame());
+      setGameKey(`daily:${dailyKeyFor(new Date())}`);
+    } else {
+      const seed = Date.now() % 2147483647;
+      setGame(createWordleGame(seed));
+      setGameKey(`random:${seed}`);
+    }
+  };
+
+  const restart = () => startGame(mode);
+
+  const shareLabel = mode === "daily" ? `デイリー ${dailyKeyFor(new Date())}` : "ランダム";
+
+  const copyShare = async () => {
+    const text = buildShareText(game, shareLabel);
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      setMessage("コピーできませんでした");
+    }
   };
 
   const kb = keyboardState(game);
@@ -146,7 +256,27 @@ export default function WordleClient() {
         <h1>ワード当て</h1>
         <p className="muted">
           隠れた5文字の英単語を6回以内に当てるゲーム。緑は位置も一致、黄は文字が含まれます。
+          デイリーはその日の答えが全員共通です。
         </p>
+      </div>
+
+      <div className="classic-controls" role="group" aria-label="モード" style={{ justifyContent: "center" }}>
+        <button
+          type="button"
+          aria-pressed={mode === "daily"}
+          className={mode === "daily" ? "classic-btn classic-btn-active" : "classic-btn"}
+          onClick={() => startGame("daily")}
+        >
+          デイリー（{dailyKeyFor(new Date())}）
+        </button>
+        <button
+          type="button"
+          aria-pressed={mode === "random"}
+          className={mode === "random" ? "classic-btn classic-btn-active" : "classic-btn"}
+          onClick={() => startGame("random")}
+        >
+          ランダム
+        </button>
       </div>
 
       <p className="classic-status" role="status" aria-live="polite">
@@ -170,7 +300,12 @@ export default function WordleClient() {
           const marks = game.marks[row];
           const isCurrentRow = row === game.guesses.length && game.status === "playing";
           return (
-            <div key={row} style={{ display: "flex", gap: 6 }} role="row">
+            <div
+              key={isCurrentRow ? `cur-${shakeKey}` : row}
+              style={{ display: "flex", gap: 6 }}
+              role="row"
+              className={isCurrentRow && shakeKey > 0 ? "juice-shake" : undefined}
+            >
               {Array.from({ length: WORDLE_LENGTH }, (_, col) => {
                 const letter = guess
                   ? guess[col]
@@ -178,7 +313,12 @@ export default function WordleClient() {
                     ? (current[col] ?? "")
                     : "";
                 return (
-                  <div key={col} style={tileStyle(marks ? marks[col] : null, letter !== "")} role="gridcell">
+                  <div
+                    key={col}
+                    style={tileStyle(marks ? marks[col] : null, letter !== "")}
+                    role="gridcell"
+                    className={marks ? "juice-flip" : isCurrentRow && letter !== "" ? "juice-pop" : undefined}
+                  >
                     {letter}
                   </div>
                 );
@@ -216,6 +356,52 @@ export default function WordleClient() {
         ))}
       </div>
 
+      {game.status !== "playing" && (
+        <div style={{ maxWidth: 500, margin: "16px auto 0" }}>
+          <EndScreen
+            outcome={game.status === "won" ? "win" : "lose"}
+            title={game.status === "won" ? "正解！" : "残念…"}
+            onRetry={restart}
+            retryLabel={mode === "daily" ? "今日の単語でもう一度" : "別の単語でもう一度"}
+          >
+            <p className="muted">
+              {game.status === "won"
+                ? `答えは ${game.answer}。${game.guesses.length} 回で当てました。`
+                : `答えは ${game.answer} でした。`}
+            </p>
+            {stats.played > 0 && (
+              <div className="muted" style={{ fontSize: 13, lineHeight: 1.7 }}>
+                <p style={{ margin: "8px 0 2px" }}>
+                  成績: {stats.played} 戦 {stats.wins} 勝（勝率{" "}
+                  {Math.round((stats.wins / stats.played) * 100)}%） ・ 連勝 {stats.currentStreak} ・ 最大連勝{" "}
+                  {stats.maxStreak}
+                </p>
+                <p style={{ margin: 0 }}>
+                  推測回数の分布:{" "}
+                  {stats.distribution.map((n, i) => `${i + 1}回 ${n}`).join(" / ")}
+                </p>
+              </div>
+            )}
+            <button
+              type="button"
+              onClick={copyShare}
+              style={{
+                marginTop: 10,
+                padding: "8px 14px",
+                borderRadius: 8,
+                border: "1px solid #9ca3af",
+                background: "#ffffff",
+                color: "#1f2937",
+                fontSize: 14,
+                cursor: "pointer",
+              }}
+            >
+              {copied ? "コピーしました" : "結果をコピー（シェア用）"}
+            </button>
+          </EndScreen>
+        </div>
+      )}
+
       <div style={{ display: "flex", justifyContent: "center", marginTop: 16 }}>
         <button
           type="button"
@@ -230,7 +416,7 @@ export default function WordleClient() {
             cursor: "pointer",
           }}
         >
-          別の単語でもう一度
+          {mode === "daily" ? "今日の単語でもう一度" : "別の単語でもう一度"}
         </button>
       </div>
     </>

@@ -11,6 +11,7 @@ import {
   CRANE_DROP_MS,
   type CraneState,
 } from "@/lib/cranegame";
+import { sfxPlace, sfxTap, sfxWin, sfxWrong } from "@/lib/sfx";
 import { useGamesNav } from "../GamesShell";
 
 const COLLECTION_KEY = "ago-cranegame-collection";
@@ -24,6 +25,7 @@ export default function CraneGameClient() {
   const [state, setState] = useState<CraneState>(() => newGame());
   const [collected, setCollected] = useState(0);
   const countedSeedRef = useRef<number | null>(null);
+  const doneSfxRef = useRef<number | null>(null);
 
   // クレーンの往復・降下のアニメーション。
   useEffect(() => {
@@ -65,8 +67,24 @@ export default function CraneGameClient() {
     });
   }, [state.phase, state.result, state.seed]);
 
+  useEffect(() => {
+    if (state.phase !== "done") return;
+    if (doneSfxRef.current === state.seed) return;
+    doneSfxRef.current = state.seed;
+    if (state.result && state.result.prizeId !== null) sfxWin();
+    else sfxWrong();
+  }, [state.phase, state.seed, state.result]);
+
+  const handleStop = () => {
+    if (state.phase === "aimX") sfxTap();
+    else if (state.phase === "aimY") sfxPlace();
+    setState((s) => stopCrane(s));
+  };
+
   const restart = () => {
+    sfxTap();
     countedSeedRef.current = null;
+    doneSfxRef.current = null;
     setState(newGame());
   };
 
@@ -83,7 +101,7 @@ export default function CraneGameClient() {
         : state.phase === "dropping"
           ? "クレーンが降りていきます…。"
           : wonPrize
-            ? `🎉 ${wonPrize.emoji} ${wonPrize.name} が取れた！`
+            ? `${wonPrize.name} が取れた！`
             : `残念、あと少し（中心まで ${state.result?.dist ?? "—"} ）でした。`;
 
   // クレーンの表示位置。aimX の間は上のレール上、aimY 以降は奥行きに合わせる。
@@ -112,7 +130,7 @@ export default function CraneGameClient() {
           type="button"
           className="classic-btn classic-btn-active"
           disabled={state.phase !== "aimX" && state.phase !== "aimY"}
-          onClick={() => setState((s) => stopCrane(s))}
+          onClick={handleStop}
           style={{ minWidth: 140, minHeight: 48, fontSize: 17, fontWeight: 700 }}
         >
           {state.phase === "aimX" ? "とめる（横）" : state.phase === "aimY" ? "とめる（奥行き）" : "とめる"}
@@ -122,7 +140,10 @@ export default function CraneGameClient() {
         </button>
       </div>
 
-      <p className="classic-status" role="status">
+      <p
+        className={`classic-status${state.phase === "done" ? (wonPrize ? " juice-pulse" : " juice-shake") : ""}`}
+        role="status"
+      >
         取れた景品の累計 {collected} 個 ・ {statusText}
       </p>
 
@@ -159,6 +180,7 @@ export default function CraneGameClient() {
           return (
             <div
               key={p.id}
+              className={got ? "juice-pop" : undefined}
               aria-hidden
               style={{
                 position: "absolute",
@@ -168,16 +190,18 @@ export default function CraneGameClient() {
                 width: `${p.radius * 2}%`,
                 aspectRatio: "1",
                 borderRadius: "50%",
-                background: got ? "#ffe082" : "rgba(255,255,255,0.65)",
+                background: got ? "#ffe082" : p.color,
+                color: p.ink,
                 border: "2px solid rgba(138,109,59,0.45)",
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "center",
-                fontSize: "clamp(18px, 6vw, 30px)",
+                fontSize: p.mark.length > 1 ? "clamp(11px, 3.4vw, 17px)" : "clamp(16px, 5vw, 26px)",
+                fontWeight: 800,
                 transition: "transform 200ms ease",
               }}
             >
-              {p.emoji}
+              {p.mark}
             </div>
           );
         })}

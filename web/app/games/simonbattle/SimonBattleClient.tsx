@@ -76,6 +76,8 @@ function Board({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
   const audioRef = useRef<AudioContext | null>(null);
   const finishRef = useRef<string | null>(null);
   const flashRef = useRef<string>("");
+  const turnRef = useRef<string | null>(null);
+  const outRef = useRef<string | null>(null);
 
   useEffect(() => {
     const id = setInterval(() => setNow(Date.now()), 100);
@@ -124,6 +126,27 @@ function Board({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
     if (finishRef.current === view.code) return;
     finishRef.current = view.code;
     playSe(state.winnerSeat === mySeat ? "win" : "click");
+  }, [state, mySeat, view.code]);
+
+  // 自分の入力／追加フェーズが来たら合図を1回だけ鳴らす。
+  useEffect(() => {
+    if (!state) return;
+    if (state.phase !== "input" && state.phase !== "add") return;
+    if (!state.you.isTurn || state.you.out) return;
+    const key = `${view.code}:${state.sequenceLength}:${state.phase}:${state.turnSeat}`;
+    if (turnRef.current === key) return;
+    turnRef.current = key;
+    playSe("turn");
+  }, [state, view.code]);
+
+  // 自分が脱落したときだけエラー音を1回鳴らす（他人の脱落では鳴らさない）。
+  useEffect(() => {
+    if (!state || !state.lastEvent) return;
+    if (state.lastEvent.kind !== "out" || state.lastEvent.seat !== mySeat) return;
+    const key = `${view.code}:out:${mySeat}`;
+    if (outRef.current === key) return;
+    outRef.current = key;
+    playSe("error");
   }, [state, mySeat, view.code]);
 
   if (!state) return <p className="og-muted">対戦の開始を待っています…</p>;
@@ -231,11 +254,14 @@ function Board({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
 
       {state.phase !== "finished" && (
         <>
-          <p role="status" style={{ fontWeight: 700, textAlign: "center", minHeight: 24 }}>
+          <p key={`${state.phase}-${state.turnSeat}-${state.sequenceLength}`} className="juice-slide" role="status" style={{ fontWeight: 700, textAlign: "center", minHeight: 24 }}>
             {phaseText}
           </p>
           {eventText && (
-            <p className="og-muted" style={{ textAlign: "center" }}>
+            <p
+              className={`og-muted ${state.lastEvent?.kind === "out" && state.lastEvent.seat === mySeat ? "juice-shake" : "juice-pop"}`}
+              style={{ textAlign: "center" }}
+            >
               {eventText}
             </p>
           )}
@@ -259,6 +285,7 @@ function Board({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
               <button
                 key={pad.name}
                 type="button"
+                className={litPad === i ? "juice-pop" : undefined}
                 style={padStyle(i)}
                 disabled={!canPress}
                 aria-label={pad.name}
@@ -277,13 +304,13 @@ function Board({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
       )}
 
       {state.phase === "finished" && (
-        <div style={{ padding: "12px 0 4px" }}>
-          <h2 style={{ textAlign: "center" }}>結果</h2>
-          <p style={{ textAlign: "center", fontSize: 18 }}>
+        <div className="juice-slide" style={{ padding: "12px 0 4px" }}>
+          <h2 className="juice-pulse" style={{ textAlign: "center" }}>結果</h2>
+          <p className={state.winnerSeat === mySeat ? "juice-pulse" : undefined} style={{ textAlign: "center", fontSize: 18 }}>
             {state.winnerSeat === null
               ? "勝者はいませんでした。"
               : state.winnerSeat === mySeat
-                ? "🎉 あなたの勝ちです！"
+                ? "あなたの勝ちです！"
                 : `${state.players.find((p) => p.seat === state.winnerSeat)?.name ?? ""} さんの勝ちです。`}
           </p>
           {state.sequence && (

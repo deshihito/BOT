@@ -11,6 +11,8 @@ import {
   createColorMatchGame,
   type CmState,
 } from "@/lib/colormatch";
+import { sfxCorrect, sfxTap, sfxTick, sfxWin, sfxWrong } from "@/lib/sfx";
+import { EndScreen } from "../GameJuice";
 import { useGamesNav } from "../GamesShell";
 
 const BEST_KEY = "ago-colormatch-best";
@@ -44,6 +46,7 @@ export default function ColorMatchClient() {
   const [state, setState] = useState<CmState>(() => createColorMatchGame(Date.now() % 2147483647));
   const [remainMs, setRemainMs] = useState(CM_GAME_SECONDS * 1000);
   const [best, setBest] = useState(0);
+  const [resultInfo, setResultInfo] = useState<{ newBest: boolean; prevBest: number } | null>(null);
   const endAtRef = useRef(0);
   const phaseRef = useRef<Phase>("ready");
   phaseRef.current = phase;
@@ -57,7 +60,11 @@ export default function ColorMatchClient() {
   const finish = useCallback(() => {
     setPhase("finished");
     const score = stateRef.current.score;
-    if (score > loadBest()) {
+    const prev = loadBest();
+    const isNewBest = score > prev;
+    setResultInfo({ newBest: isNewBest, prevBest: prev });
+    if (isNewBest) {
+      sfxWin();
       setBest(score);
       try {
         localStorage.setItem(BEST_KEY, String(score));
@@ -84,6 +91,8 @@ export default function ColorMatchClient() {
   }, [phase, finish]);
 
   const start = useCallback(() => {
+    sfxTap();
+    setResultInfo(null);
     setState(createColorMatchGame(Date.now() % 2147483647));
     endAtRef.current = Date.now() + CM_GAME_SECONDS * 1000;
     setRemainMs(CM_GAME_SECONDS * 1000);
@@ -94,7 +103,10 @@ export default function ColorMatchClient() {
     (saidMatch: boolean) => {
       if (phaseRef.current !== "playing") return;
       if (Date.now() >= endAtRef.current) return;
-      setState((s) => answerColorMatch(s, saidMatch));
+      const next = answerColorMatch(stateRef.current, saidMatch);
+      if (next.lastCorrect) sfxCorrect();
+      else sfxWrong();
+      setState(next);
     },
     [],
   );
@@ -113,6 +125,11 @@ export default function ColorMatchClient() {
   const word = CM_COLORS[state.question.wordIndex];
   const ink = CM_COLORS[state.question.inkIndex];
   const remainSec = Math.ceil(remainMs / 1000);
+
+  // 終了間際（残り3秒）だけ秒読み音
+  useEffect(() => {
+    if (phase === "playing" && remainSec <= 3 && remainSec >= 1) sfxTick();
+  }, [remainSec, phase]);
   const feedbackColor =
     state.lastCorrect === null ? undefined : state.lastCorrect ? "#2e9e4f" : "#c62828";
 
@@ -143,17 +160,31 @@ export default function ColorMatchClient() {
           </>
         )}
         {phase === "ready" && <>ベスト {best} 点</>}
-        {phase === "finished" && (
-          <>
-            終了！ スコア {state.score} 点 ・ {state.answered} 問中 {state.correct} 問正解 ・
-            最大コンボ {state.maxCombo} ・ ベスト {Math.max(best, state.score)} 点
-          </>
-        )}
+        {phase === "finished" && <>終了！</>}
       </p>
+
+      {phase === "finished" && (
+        <div style={{ maxWidth: 520, margin: "0 auto 14px" }}>
+          <EndScreen
+            outcome="finish"
+            score={state.score}
+            scoreLabel="スコア（点）"
+            newBest={resultInfo?.newBest ?? false}
+            previousBest={resultInfo ? resultInfo.prevBest : undefined}
+            onRetry={start}
+          >
+            <p className="muted" style={{ margin: 0 }}>
+              {state.answered} 問中 {state.correct} 問正解 ・ 最大コンボ {state.maxCombo}
+            </p>
+          </EndScreen>
+        </div>
+      )}
 
       {phase === "playing" && (
         <div style={{ maxWidth: 480, margin: "0 auto", textAlign: "center" }}>
           <div
+            key={state.answered}
+            className={state.lastCorrect === false ? "juice-shake" : "juice-pop"}
             aria-live="off"
             style={{
               fontSize: "min(22vw, 96px)",

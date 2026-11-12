@@ -16,9 +16,9 @@ const JK_TIME_LIMIT_MS = 15000;
 type JankenHand = "rock" | "scissors" | "paper";
 
 const HAND_LABEL: Record<JankenHand, string> = {
-  rock: "✊ グー",
-  scissors: "✌️ チョキ",
-  paper: "🖐️ パー",
+  rock: "グー",
+  scissors: "チョキ",
+  paper: "パー",
 };
 
 type JankenViewPlayer = {
@@ -47,6 +47,7 @@ function Board({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
   const mySeat = view.player.seat;
   const [now, setNow] = useState(() => Date.now());
   const finishRef = useRef<string | null>(null);
+  const turnKeyRef = useRef<string | null>(null);
 
   useEffect(() => {
     const id = setInterval(() => setNow(Date.now()), 200);
@@ -60,6 +61,15 @@ function Board({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
     const myRank = state.standings?.find((s) => s.seat === mySeat)?.rank;
     playSe(myRank === 1 ? "win" : "click");
   }, [state, mySeat, view.code]);
+
+  // 新しいラウンドの選択フェーズが来たら知らせる（ラウンド遷移で1回だけ）
+  useEffect(() => {
+    if (!state || state.phase !== "choosing") return;
+    const key = `${view.code}:${state.round}`;
+    const prev = turnKeyRef.current;
+    turnKeyRef.current = key;
+    if (prev !== null && prev !== key && !state.you.submitted && !state.you.left) playSe("turn");
+  }, [state, view.code]);
 
   if (!state) return <p className="og-muted">対戦の開始を待っています…</p>;
 
@@ -151,7 +161,7 @@ function Board({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
           ) : null}
 
           {state.phase === "reveal" ? (
-            <div style={{ marginTop: 14 }}>
+            <div className="juice-slide" style={{ marginTop: 14 }}>
               <p className="og-turn-banner" role="status">
                 {lastWinners.length > 0
                   ? `勝ち: ${lastWinners.map((p) => p.name).join("、")}（+1点）`
@@ -161,6 +171,7 @@ function Board({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
                 {state.players.map((p) => (
                   <li
                     key={p.seat}
+                    className="juice-flip"
                     style={{
                       display: "flex",
                       justifyContent: "space-between",
@@ -183,8 +194,8 @@ function Board({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
           ) : null}
         </>
       ) : (
-        <div style={{ textAlign: "center" }}>
-          <h2 style={{ fontSize: 24, margin: "10px 0" }}>結果発表</h2>
+        <div className="juice-slide" style={{ textAlign: "center" }}>
+          <h2 className="juice-pulse" style={{ fontSize: 24, margin: "10px 0" }}>結果発表</h2>
           <ul style={{ listStyle: "none", margin: 0, padding: 0, display: "grid", gap: 8 }}>
             {(state.standings ?? [...state.players].map((p) => ({ seat: p.seat, score: p.score, rank: 0 })))
               .slice()
@@ -207,7 +218,7 @@ function Board({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
                   >
                     <span>
                       {s.rank}位 {p.name}
-                      {s.seat === mySeat ? "（あなた）🎉" : ""}
+                      {s.seat === mySeat ? "（あなた）" : ""}
                       {p.left ? "（退出）" : ""}
                     </span>
                     <strong>{s.score}点</strong>

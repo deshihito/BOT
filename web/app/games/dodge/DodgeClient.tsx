@@ -3,6 +3,8 @@
 // 描画と物理はこの Client 内で完結する（純粋 lib は持たない）。
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { sfxLose, sfxWin } from "@/lib/sfx";
+import { EndScreen } from "../GameJuice";
 import { useGamesNav } from "../GamesShell";
 
 const BEST_KEY = "ago-dodge-best";
@@ -39,6 +41,7 @@ export default function DodgeClient() {
   const [scoreSec, setScoreSec] = useState(0);
   const [best, setBest] = useState(0);
   const [dodged, setDodged] = useState(0);
+  const [resultInfo, setResultInfo] = useState<{ newBest: boolean; prevBest: number } | null>(null);
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const mountedRef = useRef(true);
@@ -126,6 +129,10 @@ export default function DodgeClient() {
       setScoreSec(Math.round(elapsedSec * 10) / 10);
       setDodged(dodgedRef.current);
       const prev = loadBest();
+      // 終局は1回だけ呼ばれるので、ここで保存前のベストを控えてジングルを鳴らす。
+      setResultInfo({ newBest: elapsedSec > prev, prevBest: prev });
+      if (elapsedSec > prev) sfxWin();
+      else sfxLose();
       if (elapsedSec > prev) {
         const rounded = Math.round(elapsedSec * 10) / 10;
         setBest(rounded);
@@ -150,6 +157,7 @@ export default function DodgeClient() {
     spawnInRef.current = 350;
     setDodged(0);
     setScoreSec(0);
+    setResultInfo(null);
     setPhase("playing");
     phaseRef.current = "playing";
     startAtRef.current = performance.now();
@@ -251,11 +259,22 @@ export default function DodgeClient() {
       if (e.key === "ArrowLeft" || e.key === "a" || e.key === "A") keysRef.current.left = false;
       if (e.key === "ArrowRight" || e.key === "d" || e.key === "D") keysRef.current.right = false;
     };
+    // フォーカスを失うと keyup を受け取れずキーが押しっぱなしになる。離脱時にリセットする。
+    const resetKeys = () => {
+      keysRef.current = { left: false, right: false };
+    };
+    const onVisibility = () => {
+      if (document.hidden) resetKeys();
+    };
     window.addEventListener("keydown", down);
     window.addEventListener("keyup", up);
+    window.addEventListener("blur", resetKeys);
+    document.addEventListener("visibilitychange", onVisibility);
     return () => {
       window.removeEventListener("keydown", down);
       window.removeEventListener("keyup", up);
+      window.removeEventListener("blur", resetKeys);
+      document.removeEventListener("visibilitychange", onVisibility);
     };
   }, []);
 
@@ -296,7 +315,7 @@ export default function DodgeClient() {
         生存 {scoreSec.toFixed(1)} 秒 ・ ベスト {best > 0 ? `${best.toFixed(1)} 秒` : "—"} ・ {statusText}
       </p>
 
-      <div style={{ maxWidth: 400, margin: "0 auto" }}>
+      <div className={phase === "gameover" ? "juice-shake" : undefined} style={{ maxWidth: 400, margin: "0 auto" }}>
         <canvas
           ref={canvasRef}
           width={FIELD_W * 2}
@@ -316,10 +335,20 @@ export default function DodgeClient() {
       </div>
 
       {phase === "gameover" && (
-        <p className="classic-status" role="alert">
-          💥 ぶつかりました！ 生存 {scoreSec.toFixed(1)} 秒 ・ よけた障害物 {dodged} 個 ・ ベスト {best.toFixed(1)} 秒
-          {best > 0 && scoreSec >= best ? " ・ ベスト更新！" : ""}
-        </p>
+        <div style={{ maxWidth: 400, margin: "16px auto 0" }}>
+          <EndScreen
+            outcome="lose"
+            title="ぶつかりました！"
+            newBest={resultInfo?.newBest ?? false}
+            previousBest={resultInfo && !resultInfo.newBest && resultInfo.prevBest > 0 ? resultInfo.prevBest : null}
+            onRetry={start}
+            retryLabel="もう一度挑戦"
+          >
+            <p className="muted">
+              生存 {scoreSec.toFixed(1)} 秒 ・ よけた障害物 {dodged} 個でした。
+            </p>
+          </EndScreen>
+        </div>
       )}
 
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "center", marginTop: 16 }}>

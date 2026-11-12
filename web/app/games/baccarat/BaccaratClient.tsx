@@ -4,7 +4,7 @@
 // チップが動くのは「配る」＝結果確定の遷移だけなので、読み込み完了後に
 // チップ残高が変わったタイミングで保存すれば確定時のみ保存になる。
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   BACCARAT_MIN_BET,
   BACCARAT_START_CHIPS,
@@ -19,6 +19,8 @@ import {
   type BaccaratState,
 } from "@/lib/baccarat";
 import { useGamesNav } from "../GamesShell";
+import { sfxCorrect, sfxDeal, sfxPop, sfxTap, sfxWrong } from "@/lib/sfx";
+import { ScorePop } from "../GameJuice";
 
 const CHIPS_KEY = "ago-baccarat-chips";
 const AMOUNTS = [10, 50, 100, 500] as const;
@@ -33,6 +35,7 @@ function CardChip({ card }: { card: BaccaratCard }) {
   const red = card.suit === 1 || card.suit === 2;
   return (
     <span
+      className="juice-flip"
       style={{
         display: "inline-flex",
         alignItems: "center",
@@ -61,7 +64,7 @@ function HandRow({ title, cards, color }: { title: string; cards: BaccaratCard[]
         {cards.length > 0 ? ` ・ 合計 ${baccaratHandValue(cards)}` : ""}
       </p>
       <div style={{ display: "flex", gap: 6, flexWrap: "wrap", minHeight: 64 }}>
-        {cards.length === 0 ? <span className="muted">まだ配られていません</span> : cards.map((c, i) => <CardChip key={i} card={c} />)}
+        {cards.length === 0 ? <span className="muted">まだ配られていません</span> : cards.map((c, i) => <CardChip key={`${i}-${c.rank}-${c.suit}`} card={c} />)}
       </div>
     </div>
   );
@@ -102,11 +105,24 @@ export default function BaccaratClient() {
   const broke = state.chips < BACCARAT_MIN_BET;
   const canBet = state.phase === "betting" && !broke;
 
+  // 結果確定時に収支へ効果音を連動させる。
+  const resultSoundRef = useRef(-1);
+  useEffect(() => {
+    if (state.phase !== "result") return;
+    if (resultSoundRef.current === state.round) return;
+    resultSoundRef.current = state.round;
+    if (state.lastDelta > 0) sfxCorrect();
+    else if (state.lastDelta < 0) sfxWrong();
+    else sfxTap();
+  }, [state.phase, state.round, state.lastDelta]);
+
   const deal = () => {
     setError(null);
     try {
+      sfxDeal();
       setState((s) => placeBaccaratBet(s, betKind, amount));
     } catch (e) {
+      sfxWrong();
       setError(e instanceof Error ? e.message : "賭けられませんでした");
     }
   };
@@ -139,6 +155,9 @@ export default function BaccaratClient() {
         {state.phase === "result" && resultText
           ? ` ・ ${resultText} （${state.lastDelta > 0 ? `+${state.lastDelta}` : state.lastDelta}）`
           : ""}
+        {state.phase === "result" && state.lastDelta !== 0 ? (
+          <ScorePop key={state.round} amount={state.lastDelta} />
+        ) : null}
       </p>
 
       <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 14 }}>
@@ -155,7 +174,7 @@ export default function BaccaratClient() {
                 type="button"
                 aria-pressed={betKind === opt.kind}
                 className={betKind === opt.kind ? "classic-btn classic-btn-active" : "classic-btn"}
-                onClick={() => setBetKind(opt.kind)}
+                onClick={() => { sfxTap(); setBetKind(opt.kind); }}
                 title={opt.note}
               >
                 {opt.label}
@@ -172,7 +191,7 @@ export default function BaccaratClient() {
                 type="button"
                 aria-pressed={amount === a}
                 className={amount === a ? "classic-btn classic-btn-active" : "classic-btn"}
-                onClick={() => setAmount(a)}
+                onClick={() => { sfxTap(); setAmount(a); }}
               >
                 {a}
               </button>
@@ -187,7 +206,7 @@ export default function BaccaratClient() {
             <button
               type="button"
               className="classic-btn"
-              onClick={() => setState((s) => refillBaccarat(s))}
+              onClick={() => { sfxPop(); setState((s) => refillBaccarat(s)); }}
             >
               チップを再支給する（{BACCARAT_START_CHIPS}）
             </button>
@@ -212,7 +231,7 @@ export default function BaccaratClient() {
           )}
         </div>
       ) : (
-        <button type="button" className="classic-btn" onClick={() => setState((s) => nextBaccaratRound(s))}>
+        <button type="button" className="classic-btn" onClick={() => { sfxTap(); setState((s) => nextBaccaratRound(s)); }}>
           次のラウンドへ
         </button>
       )}

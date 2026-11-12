@@ -1,36 +1,58 @@
 "use client";
-// ボウリング。スコア計算とピンの倒れ方モデルは lib/bowling.ts（シード決定的）。
-// 狙い（横位置）を決め、往復するパワーメーターを止めて投げる。
+// ボウリング（3D）。レーンと物理は BowlingScene3D（three.js、動的 import）、
+// スコア進行は lib/bowling.ts の throwPins（物理で決まった倒ピンを受け取る）。
+// 操作: ドラッグでボールの位置を決め、上へフリックすると速さ・方向・回転が決まる。
+// ボタン投球（左右移動＋「投げる」）でも遊べる。
 // ベスト記録: localStorage `ago-bowling-best` に最高スコアを保存する。
-// 端末内で完結し、サーバーへ送信しない。
+import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import {
-  AIM_MAX,
-  AIM_MIN,
-  PIN_POSITIONS,
   createBowlingGame,
   frameScores,
   rollMark,
   scoreRolls,
   standingCount,
-  throwBall,
+  throwPins,
   type BowlingState,
 } from "@/lib/bowling";
+import { isSfxMuted, setSfxMuted } from "@/lib/sfx";
 import { useGamesNav } from "../GamesShell";
+import type { BowlingSceneApi } from "./BowlingScene3D";
+
+const BowlingScene3D = dynamic(() => import("./BowlingScene3D"), {
+  ssr: false,
+  loading: () => (
+    <div
+      style={{
+        height: 470,
+        borderRadius: 12,
+        background: "#232b36",
+        color: "#dfe7ef",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        fontSize: 14,
+      }}
+    >
+      読み込み中…
+    </div>
+  ),
+});
 
 const BEST_KEY = "ago-bowling-best";
 
 export default function BowlingClient() {
   const { prefix } = useGamesNav();
   const [state, setState] = useState<BowlingState>(() => createBowlingGame(Date.now() % 2147483647));
-  const [aim, setAim] = useState(0.2);
-  const [power, setPower] = useState(0);
-  const [metering, setMetering] = useState(false);
-  const [message, setMessage] = useState("狙いを決めて「パワーを決める」を押してください。");
+  const [rolling, setRolling] = useState(false);
+  const [message, setMessage] = useState("ボールを左右に動かして、上へフリックで投げてください。");
   const [best, setBest] = useState<number | null>(null);
-  const dirRef = useRef(1);
+  const [muted, setMuted] = useState(false);
   const savedRef = useRef(false);
+  const stateRef = useRef(state);
+  stateRef.current = state;
+  const sceneApiRef = useRef<BowlingSceneApi | null>(null);
 
   useEffect(() => {
     try {
@@ -39,20 +61,8 @@ export default function BowlingClient() {
     } catch {
       setBest(null);
     }
+    setMuted(isSfxMuted());
   }, []);
-
-  useEffect(() => {
-    if (!metering) return;
-    const id = setInterval(() => {
-      setPower((p) => {
-        let next = p + dirRef.current * 2.4;
-        if (next >= 100) { next = 100; dirRef.current = -1; }
-        if (next <= 0) { next = 0; dirRef.current = 1; }
-        return next;
-      });
-    }, 16);
-    return () => clearInterval(id);
-  }, [metering]);
 
   useEffect(() => {
     if (!state.finished || savedRef.current) return;
@@ -69,25 +79,31 @@ export default function BowlingClient() {
   }, [state.finished, state.rolls, best]);
 
   const restart = () => {
+    if (rolling) return;
     setState(createBowlingGame(Date.now() % 2147483647));
-    setAim(0.2);
-    setPower(0);
-    setMetering(false);
     savedRef.current = false;
-    setMessage("狙いを決めて「パワーを決める」を押してください。");
+    setMessage("ボールを左右に動かして、上へフリックで投げてください。");
   };
 
-  const doThrow = () => {
-    setMetering(false);
-    const result = throwBall(state, aim, Math.round(power));
+  const toggleMute = () => {
+    const next = !muted;
+    setMuted(next);
+    setSfxMuted(next);
+  };
+
+  const handleResult = (knockedPins: number[]) => {
+    const prev = stateRef.current;
+    const result = throwPins(prev, knockedPins);
     setState(result.state);
     if (result.state.finished) {
       setMessage(`ゲーム終了！ スコアは ${scoreRolls(result.state.rolls)} 点でした。`);
-    } else if (result.knocked === 10 && state.ballInFrame === 0) {
-      setMessage("ストライク！ 🎳");
+    } else if (result.knocked === 10 && prev.ballInFrame === 0) {
+      setMessage("ストライク！");
+    } else if (result.knocked === 0) {
+      setMessage("ガター…1本も倒れませんでした。" + (result.state.ballInFrame > 0 ? "次の投球です。" : "次のフレームです。"));
     } else {
       setMessage(
-        `${result.knocked} 本倒れました（${result.knockedPins.join("・") || "なし"}）。` +
+        `${result.knocked} 本倒れました（${result.knockedPins.join("・")} 番）。` +
           (result.state.ballInFrame > 0 ? "次の投球です。" : "次のフレームです。"),
       );
     }
@@ -105,12 +121,15 @@ export default function BowlingClient() {
       </nav>
       <div className="page-heading compact-heading">
         <h1>ボウリング</h1>
-        <p className="muted">真ん中やや右（1番と3番の間）がストライクの狙い目です。強すぎる球は荒れるので注意。</p>
+        <p className="muted">真ん中やや右（1番と3番の間）がストライクの狙い目です。フリックの横のブレがそのまま曲がりになります。</p>
       </div>
 
       <div className="classic-controls" role="group" aria-label="操作">
-        <button type="button" className="classic-btn" onClick={restart}>
+        <button type="button" className="classic-btn" onClick={restart} disabled={rolling}>
           もう一度
+        </button>
+        <button type="button" className="classic-btn" onClick={toggleMute} aria-pressed={muted}>
+          音: {muted ? "オフ" : "オン"}
         </button>
       </div>
 
@@ -121,155 +140,55 @@ export default function BowlingClient() {
         {best !== null ? ` ・ ベスト ${best}` : ""} ・ {message}
       </p>
 
-      <div style={{ maxWidth: 380, margin: "0 auto" }}>
-        <div
-          role="img"
-          aria-label={`立っているピン ${standingCount(state.standing)} 本`}
-          style={{
-            position: "relative",
-            height: 250,
-            borderRadius: 12,
-            background: "linear-gradient(#c9a15f, #a67c3d)",
-            border: "2px solid #7d5a24",
-            overflow: "hidden",
+      <div style={{ maxWidth: 430, margin: "0 auto" }}>
+        <BowlingScene3D
+          standing={state.standing}
+          interactive={!state.finished}
+          onResult={handleResult}
+          onBusyChange={setRolling}
+          onReady={(api) => {
+            sceneApiRef.current = api;
           }}
-        >
-          {PIN_POSITIONS.map((pin, i) => {
-            const up = state.standing[i];
-            return (
-              <div
-                key={i}
-                aria-hidden
-                style={{
-                  position: "absolute",
-                  left: `${((pin.x + 2) / 4) * 100}%`,
-                  top: `${8 + pin.y * 17}%`,
-                  transform: `translate(-50%, 0) ${up ? "" : "rotate(70deg)"}`,
-                  width: 30,
-                  height: 30,
-                  borderRadius: "50%",
-                  background: up ? "#fff" : "rgba(255,255,255,0.35)",
-                  border: "2px solid #c0392b",
-                  color: "#c0392b",
-                  fontSize: 13,
-                  fontWeight: 700,
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  opacity: up ? 1 : 0.45,
-                }}
-              >
-                {i + 1}
-              </div>
-            );
-          })}
-          <div
-            aria-hidden
-            style={{
-              position: "absolute",
-              bottom: 12,
-              left: `${((aim * 1.7 + 2) / 4) * 100}%`,
-              transform: "translateX(-50%)",
-              width: 26,
-              height: 26,
-              borderRadius: "50%",
-              background: "#37474f",
-              border: "2px solid #10222b",
-            }}
-          />
-          <div
-            aria-hidden
-            style={{
-              position: "absolute",
-              bottom: 44,
-              left: `${((aim * 1.7 + 2) / 4) * 100}%`,
-              transform: "translateX(-50%)",
-              fontSize: 14,
-            }}
-          >
-            ▲
-          </div>
-        </div>
+        />
 
-        <div style={{ marginTop: 14 }}>
-          <label htmlFor="bowling-aim" style={{ fontSize: 14 }}>
-            狙い（横位置）: {aim.toFixed(2)}
-          </label>
-          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-            <button
-              type="button"
-              className="classic-btn"
-              aria-label="左へ"
-              onClick={() => setAim((a) => Math.max(AIM_MIN, a - 0.1))}
-            >
-              ◀
-            </button>
-            <input
-              id="bowling-aim"
-              type="range"
-              min={AIM_MIN}
-              max={AIM_MAX}
-              step={0.05}
-              value={aim}
-              onChange={(e) => setAim(Number(e.target.value))}
-              style={{ flex: 1, minHeight: 40 }}
-            />
-            <button
-              type="button"
-              className="classic-btn"
-              aria-label="右へ"
-              onClick={() => setAim((a) => Math.min(AIM_MAX, a + 0.1))}
-            >
-              ▶
-            </button>
-          </div>
-        </div>
-
-        <div style={{ marginTop: 10 }}>
-          <div style={{ fontSize: 14, marginBottom: 4 }}>パワー: {Math.round(power)}</div>
-          <div
-            aria-hidden
-            style={{ height: 14, borderRadius: 7, background: "var(--soft, #eee)", overflow: "hidden" }}
+        <div style={{ display: "flex", gap: 8, marginTop: 12 }} role="group" aria-label="ボタンで投げる">
+          <button
+            type="button"
+            className="classic-btn"
+            style={{ minWidth: 56, minHeight: 48 }}
+            aria-label="左へ移動"
+            disabled={rolling || state.finished}
+            onClick={() => sceneApiRef.current?.adjustAim(-0.18)}
           >
-            <div
-              style={{
-                height: "100%",
-                width: `${power}%`,
-                background: power > 95 ? "#c0392b" : power >= 55 ? "#2e9e5b" : "#d9a400",
-              }}
-            />
-          </div>
-          <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
-            {!metering ? (
-              <button
-                type="button"
-                className="classic-btn classic-btn-active"
-                style={{ flex: 1, minHeight: 48 }}
-                disabled={state.finished}
-                onClick={() => {
-                  dirRef.current = 1;
-                  setPower(0);
-                  setMetering(true);
-                }}
-              >
-                パワーを決める
-              </button>
-            ) : (
-              <button
-                type="button"
-                className="classic-btn classic-btn-active"
-                style={{ flex: 1, minHeight: 48 }}
-                onClick={doThrow}
-              >
-                投げる！
-              </button>
-            )}
-          </div>
+            ◀
+          </button>
+          <button
+            type="button"
+            className="classic-btn classic-btn-active"
+            style={{ flex: 1, minHeight: 48 }}
+            disabled={rolling || state.finished}
+            onClick={() => sceneApiRef.current?.throwStraight()}
+          >
+            投げる
+          </button>
+          <button
+            type="button"
+            className="classic-btn"
+            style={{ minWidth: 56, minHeight: 48 }}
+            aria-label="右へ移動"
+            disabled={rolling || state.finished}
+            onClick={() => sceneApiRef.current?.adjustAim(0.18)}
+          >
+            ▶
+          </button>
         </div>
+        <p className="muted" style={{ fontSize: 13, marginTop: 8 }}>
+          レーンをドラッグでボールの位置、素早く上へフリックすると投球（横のブレで曲がります）。ボタンでも投げられます。
+        </p>
 
         <table
           aria-label="スコアシート"
-          style={{ width: "100%", borderCollapse: "collapse", marginTop: 16, fontSize: 13 }}
+          style={{ width: "100%", borderCollapse: "collapse", marginTop: 12, fontSize: 13 }}
         >
           <thead>
             <tr>

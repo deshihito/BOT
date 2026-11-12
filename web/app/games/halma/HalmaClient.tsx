@@ -4,7 +4,7 @@
 // コマをタップして選び、光ったマスをタップすると移動する。
 // ジャンプは隣のコマを飛び越える動きで、1手の中で連鎖できる。
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   HALMA_CELLS,
   HALMA_CAMPS,
@@ -15,6 +15,8 @@ import {
   halmaMovesFrom,
   type HalmaState,
 } from "@/lib/halma";
+import { sfxLose, sfxSlide, sfxTap, sfxWin } from "@/lib/sfx";
+import { EndScreen } from "../GameJuice";
 import { useGamesNav } from "../GamesShell";
 
 const CAMP0 = new Set(HALMA_CAMPS[0]);
@@ -48,6 +50,25 @@ export default function HalmaClient() {
     createHalmaGame(Date.now() % 2147483647),
   );
   const [selected, setSelected] = useState<number | null>(null);
+  const prevStatusRef = useRef(state.status);
+
+  // 終局遷移の瞬間だけジングルを鳴らす。
+  useEffect(() => {
+    const prev = prevStatusRef.current;
+    prevStatusRef.current = state.status;
+    if (prev === state.status) return;
+    if (state.status === "won") {
+      if (state.winner === 0) sfxWin();
+      else sfxLose();
+    } else if (state.status === "draw") {
+      sfxTap();
+    }
+  }, [state.status, state.winner]);
+
+  // CPU が指し終えた（手番が自分に戻った）瞬間に移動音を鳴らす。
+  useEffect(() => {
+    if (state.status === "playing" && state.turn === 0 && state.moves > 0) sfxSlide();
+  }, [state.moves, state.turn, state.status]);
 
   const myTurn = state.status === "playing" && state.turn === 0;
   const targets = useMemo(() => {
@@ -77,11 +98,14 @@ export default function HalmaClient() {
   const onCell = (index: number) => {
     if (!myTurn) return;
     if (targets.has(index) && selected !== null) {
-      setState((s) => halmaApplyMove(s, selected, index));
+      const next = halmaApplyMove(state, selected, index);
+      if (next !== state && next.status === "playing") sfxSlide();
+      setState(next);
       setSelected(null);
       return;
     }
     if (state.board[index] === 1) {
+      sfxTap();
       setSelected(index === selected ? null : index);
     } else {
       setSelected(null);
@@ -89,11 +113,13 @@ export default function HalmaClient() {
   };
 
   const statusText =
-    state.status === "won"
-      ? state.winner === 0
-        ? "あなたの勝ちです！相手の陣地をすべて占めました。"
-        : "CPUの勝ちです。相手陣地を先に占められました。"
-      : myTurn
+    state.status === "draw"
+      ? "引き分けです（同一局面の繰り返し、または手数上限に達しました）。"
+      : state.status === "won"
+        ? state.winner === 0
+          ? "あなたの勝ちです！相手の陣地をすべて占めました。"
+          : "CPUの勝ちです。相手陣地を先に占められました。"
+        : myTurn
         ? selected !== null
           ? "光ったマスをタップすると移動します（ジャンプ連鎖も1手）。"
           : "あなたの手番です。青いコマを選んでください。"
@@ -172,6 +198,29 @@ export default function HalmaClient() {
           })}
         </svg>
       </div>
+
+      {state.status === "won" && (
+        <div style={{ maxWidth: 540, margin: "16px auto 0" }}>
+          <EndScreen
+            outcome={state.winner === 0 ? "win" : "lose"}
+            title={state.winner === 0 ? "あなたの勝ち！" : "CPUの勝ち…"}
+            onRetry={restart}
+          >
+            <p className="muted">
+              手数 {state.moves} ・ あなたの進み具合 {inTarget}/10 でした。
+            </p>
+          </EndScreen>
+        </div>
+      )}
+      {state.status === "draw" && (
+        <div style={{ maxWidth: 540, margin: "16px auto 0" }}>
+          <EndScreen outcome="draw" onRetry={restart}>
+            <p className="muted">
+              同一局面の繰り返し、または手数上限に達しました（手数 {state.moves}）。
+            </p>
+          </EndScreen>
+        </div>
+      )}
 
       <div className="classic-controls" role="group" aria-label="操作" style={{ marginTop: 12 }}>
         <button type="button" className="classic-btn" onClick={restart}>

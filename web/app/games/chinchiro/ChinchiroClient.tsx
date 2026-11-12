@@ -17,6 +17,8 @@ import {
   type CcState,
 } from "@/lib/chinchiro";
 import { useGamesNav } from "../GamesShell";
+import { sfxCorrect, sfxDice, sfxLose, sfxPlace, sfxTap, sfxWin, sfxWrong } from "@/lib/sfx";
+import { EndScreen } from "../GameJuice";
 
 const BEST_KEY = "ago-chinchiro-best";
 const DICE_FACES = ["⚀", "⚁", "⚂", "⚃", "⚄", "⚅"];
@@ -30,7 +32,8 @@ function DiceRow({ dice, size }: { dice: CcDice | null; size: number }) {
     <div role="group" style={{ display: "flex", gap: 8 }} aria-label={dice ? `出目 ${dice.join("・")}` : "まだ振っていない"}>
       {(dice ?? [0, 0, 0]).map((d, i) => (
         <span
-          key={i}
+          key={`${i}-${d}`}
+          className={dice ? "juice-pop" : undefined}
           style={{
             fontSize: size,
             lineHeight: 1,
@@ -45,7 +48,7 @@ function DiceRow({ dice, size }: { dice: CcDice | null; size: number }) {
             opacity: dice ? 1 : 0.35,
           }}
         >
-          {dice ? DICE_FACES[d - 1] : "🎲"}
+          {dice ? DICE_FACES[d - 1] : "？"}
         </span>
       ))}
     </div>
@@ -61,12 +64,17 @@ export default function ChinchiroClient() {
   const [state, setState] = useState<CcState>(() => newGame());
   const [best, setBest] = useState<number | null>(null);
   const countedSeed = useRef<number | null>(null);
+  const prevBestRef = useRef<number | null>(null);
+  const roundSoundRef = useRef(-1);
+  const endSoundRef = useRef<number | null>(null);
 
   useEffect(() => {
     try {
       const raw = window.localStorage.getItem(BEST_KEY);
       const saved = raw === null ? NaN : Number(raw);
-      setBest(Number.isFinite(saved) ? saved : null);
+      const loaded = Number.isFinite(saved) ? saved : null;
+      setBest(loaded);
+      prevBestRef.current = loaded;
     } catch {
       setBest(null);
     }
@@ -85,7 +93,29 @@ export default function ChinchiroClient() {
     }
   }, [state.phase, state.seed, state.playerScore, best]);
 
+  // ラウンド決着と最終結果に効果音を連動させる。
+  useEffect(() => {
+    if (state.phase === "roundEnd") {
+      const last = state.history[state.history.length - 1];
+      if (!last || roundSoundRef.current === last.round) return;
+      roundSoundRef.current = last.round;
+      if (last.winner === "player") sfxCorrect();
+      else if (last.winner === "cpu") sfxWrong();
+      else sfxTap();
+    }
+    if (state.phase === "finished") {
+      if (endSoundRef.current === state.seed) return;
+      endSoundRef.current = state.seed;
+      const w = ccWinner(state);
+      if (w === "player") sfxWin();
+      else if (w === "cpu") sfxLose();
+      else sfxTap();
+    }
+  }, [state]);
+
   const restart = () => {
+    prevBestRef.current = best;
+    roundSoundRef.current = -1;
     setState(newGame());
   };
 
@@ -165,9 +195,9 @@ export default function ChinchiroClient() {
                 type="button"
                 className="classic-btn classic-btn-active"
                 style={{ minHeight: 48, minWidth: 140 }}
-                onClick={() => setState((s) => rollCc(s))}
+                onClick={() => { sfxDice(); setState((s) => rollCc(s)); }}
               >
-                {state.playerRolls === 0 ? "🎲 振る" : "🎲 振り直す"}
+                {state.playerRolls === 0 ? "振る" : "振り直す"}
               </button>
             )}
             {state.phase === "decide" && (
@@ -175,7 +205,7 @@ export default function ChinchiroClient() {
                 type="button"
                 className="classic-btn"
                 style={{ minHeight: 48, minWidth: 140 }}
-                onClick={() => setState((s) => keepCcHand(s))}
+                onClick={() => { sfxPlace(); setState((s) => keepCcHand(s)); }}
               >
                 この役で確定
               </button>
@@ -185,23 +215,28 @@ export default function ChinchiroClient() {
                 type="button"
                 className="classic-btn classic-btn-active"
                 style={{ minHeight: 48, minWidth: 140 }}
-                onClick={() => setState((s) => nextCcRound(s))}
+                onClick={() => { sfxTap(); setState((s) => nextCcRound(s)); }}
               >
                 次のラウンドへ
               </button>
             )}
-            {state.phase === "finished" && (
-              <button
-                type="button"
-                className="classic-btn classic-btn-active"
-                style={{ minHeight: 48, minWidth: 140 }}
-                onClick={restart}
-              >
-                もう一度遊ぶ
-              </button>
-            )}
           </div>
         </section>
+
+        {state.phase === "finished" && winner !== null && (
+          <EndScreen
+            outcome={winner === "player" ? "win" : winner === "cpu" ? "lose" : "draw"}
+            score={state.playerScore}
+            scoreLabel="あなたのスコア"
+            newBest={prevBestRef.current === null || state.playerScore > prevBestRef.current}
+            previousBest={prevBestRef.current}
+            onRetry={restart}
+          >
+            <p className="muted" style={{ margin: 0 }}>
+              あなた {state.playerScore} 点 ・ 親（CPU） {state.cpuScore} 点
+            </p>
+          </EndScreen>
+        )}
 
         {state.history.length > 0 && (
           <section aria-label="ラウンド履歴">

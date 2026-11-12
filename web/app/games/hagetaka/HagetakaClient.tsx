@@ -41,6 +41,7 @@ function Board({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
   const state = view.state as HagetakaView | null;
   const mySeat = view.player.seat;
   const finishRef = useRef<string | null>(null);
+  const turnKeyRef = useRef<string | null>(null);
 
   useEffect(() => {
     if (!state || state.phase !== "finished") return;
@@ -49,6 +50,15 @@ function Board({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
     const myRank = state.standings?.find((s) => s.seat === mySeat)?.rank;
     playSe(myRank === 1 ? "win" : "click");
   }, [state, mySeat, view.code]);
+
+  // 新しいラウンドの入札が始まったら知らせる（ラウンド遷移で1回だけ）
+  useEffect(() => {
+    if (!state || state.phase !== "bidding") return;
+    const key = `${view.code}:${state.round}`;
+    const prev = turnKeyRef.current;
+    turnKeyRef.current = key;
+    if (prev !== null && prev !== key && !state.you.submitted && !state.you.left) playSe("turn");
+  }, [state, view.code]);
 
   if (!state) return <p className="og-muted">対戦の開始を待っています…</p>;
 
@@ -72,8 +82,8 @@ function Board({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
       </div>
 
       {state.phase === "finished" ? (
-        <div style={{ textAlign: "center", margin: "16px 0" }}>
-          <p style={{ fontSize: 20, fontWeight: 700 }}>対戦終了</p>
+        <div className="juice-slide" style={{ textAlign: "center", margin: "16px 0" }}>
+          <p className="juice-pulse" style={{ fontSize: 20, fontWeight: 700 }}>対戦終了</p>
           <ul style={{ listStyle: "none", padding: 0 }}>
             {(state.standings ?? []).map((s) => {
               const p = state.players.find((x) => x.seat === s.seat);
@@ -96,7 +106,8 @@ function Board({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
             <span className="og-muted">場の得点カード: </span>
             {state.table.map((v, i) => (
               <span
-                key={i}
+                key={`${state.round}-${i}-${v}`}
+                className="juice-pop"
                 style={{
                   display: "inline-block",
                   minWidth: 44,
@@ -133,7 +144,10 @@ function Board({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
                   type="button"
                   className="og-btn"
                   style={{ minWidth: 48, minHeight: 52, fontSize: 17, fontWeight: 700 }}
-                  onClick={() => void api.move({ type: "bid", card })}
+                  onClick={() => {
+                    playSe("play");
+                    void api.move({ type: "bid", card });
+                  }}
                 >
                   {card}
                 </button>
@@ -150,7 +164,7 @@ function Board({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
       )}
 
       {last && (
-        <div style={{ marginTop: 16, borderTop: "1px solid var(--line, #ddd)", paddingTop: 10 }}>
+        <div className="juice-slide" style={{ marginTop: 16, borderTop: "1px solid var(--line, #ddd)", paddingTop: 10 }}>
           <p style={{ fontWeight: 700, margin: "0 0 6px" }}>前ラウンド（{last.round + 1}）の結果</p>
           <p style={{ margin: "0 0 6px" }}>
             得点カード {last.prizes.map(prizeLabel).join(" / ")}（合計 {prizeLabel(last.prizeTotal)}）→{" "}
@@ -164,9 +178,9 @@ function Board({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
             {last.bids.map((b) => {
               const p = state.players.find((x) => x.seat === b.seat);
               return (
-                <span key={b.seat} className="og-score">
+                <span key={b.seat} className="og-score juice-flip">
                   {p?.name}: {b.card !== null ? b.card : "―"}
-                  {last.taker === b.seat ? " 🏆" : ""}
+                  {last.taker === b.seat ? " （獲得）" : ""}
                 </span>
               );
             })}

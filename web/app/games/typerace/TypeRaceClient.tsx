@@ -76,7 +76,11 @@ function Board({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
   const [now, setNow] = useState(() => Date.now());
   const [typed, setTyped] = useState("");
   const sentRef = useRef(0);
+  const sendingRef = useRef(false);
+  const lastAttemptRef = useRef(0);
   const finishRef = useRef<string | null>(null);
+  const turnRef = useRef<string | null>(null);
+  const completeRef = useRef<string | null>(null);
 
   useEffect(() => {
     const id = setInterval(() => setNow(Date.now()), 100);
@@ -91,20 +95,33 @@ function Board({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
       lastRoundKey.current = roundKey;
       setTyped("");
       sentRef.current = 0;
+      sendingRef.current = false;
+      lastAttemptRef.current = 0;
     }
   }, [roundKey]);
 
   const text = state?.text ?? "";
   const prefix = state ? correctPrefix(text, typed) : 0;
 
-  // 正しい接頭辞が伸びたらサーバーへ申告する。
+  // 正しい接頭辞が伸びたらサーバーへ申告する。sentRef は送信が成功した
+  // ときだけ進める。失敗（基盤の busy や 409 で捨てられた等）した場合は
+  // 同じ prefix を送り直す。now（100ms 時計）を依存に入れて定期的に
+  // 再評価するため、完走時の最終進捗も次の打鍵が無くても再試行される。
   useEffect(() => {
     if (!state || state.phase !== "racing") return;
-    if (prefix > sentRef.current) {
-      sentRef.current = prefix;
-      void api.move({ type: "progress", count: prefix });
-    }
-  }, [prefix, state, api]);
+    // サーバーが記録済みの進捗までは送信済みとして扱う。
+    if (state.you.progress > sentRef.current) sentRef.current = state.you.progress;
+    if (prefix <= sentRef.current || sendingRef.current) return;
+    const nowMs = Date.now();
+    if (nowMs - lastAttemptRef.current < 300) return;
+    lastAttemptRef.current = nowMs;
+    sendingRef.current = true;
+    const target = prefix;
+    void api.move({ type: "progress", count: target }).then((ok) => {
+      sendingRef.current = false;
+      if (ok && target > sentRef.current) sentRef.current = target;
+    });
+  }, [prefix, state, api, now]);
 
   useEffect(() => {
     if (!state || state.phase !== "finished") return;
@@ -113,6 +130,24 @@ function Board({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
     const myRank = state.standings?.find((s) => s.seat === mySeat)?.rank;
     playSe(myRank === 1 ? "win" : "click");
   }, [state, mySeat, view.code]);
+
+  // 新しいラウンドの開始を1回だけ知らせる（打鍵ごとには鳴らさない）。
+  useEffect(() => {
+    if (!state || state.phase !== "racing") return;
+    const key = `${view.code}:${state.round}`;
+    if (turnRef.current === key) return;
+    turnRef.current = key;
+    playSe("turn");
+  }, [state, view.code]);
+
+  // 自分の完走がサーバーに確定した節目だけ1回鳴らす。
+  useEffect(() => {
+    if (!state || !state.you.completed) return;
+    const key = `${view.code}:${state.round}:completed`;
+    if (completeRef.current === key) return;
+    completeRef.current = key;
+    playSe("submit");
+  }, [state, view.code]);
 
   if (!state) return <p className="og-muted">出題を待っています…</p>;
 
@@ -148,7 +183,7 @@ function Board({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
       )}
 
       {(state.phase === "racing" || state.phase === "reveal") && (
-        <div style={{ padding: "12px 0 4px" }}>
+        <div key={state.round} className="juice-slide" style={{ padding: "12px 0 4px" }}>
           <p
             aria-label={`課題文: ${text}`}
             style={{
@@ -209,7 +244,7 @@ function Board({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
                 }}
               />
             ) : (
-              <p className="og-muted" style={{ textAlign: "center", marginTop: 10 }}>
+              <p className="og-muted juice-pop" style={{ textAlign: "center", marginTop: 10 }}>
                 {state.you.left
                   ? "退出したため、このゲームには参加していません。"
                   : "完走しました！他の人の結果を待っています。"}
@@ -218,11 +253,11 @@ function Board({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
 
           <div style={{ marginTop: 14, display: "grid", gap: 6 }}>
             {state.players.map((p) => (
-              <div key={p.seat} style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <div key={p.seat} className={p.completed && p.seat === mySeat ? "juice-pop" : undefined} style={{ display: "flex", alignItems: "center", gap: 8 }}>
                 <span style={{ minWidth: 110, fontSize: 13 }}>
                   {p.name}
                   {p.seat === mySeat ? "（あなた）" : ""}
-                  {p.completed ? " 🏁" : ""}
+                  {p.completed ? " （完走）" : ""}
                 </span>
                 <Bar ratio={p.ratio} />
                 <span style={{ fontSize: 13, minWidth: 64, textAlign: "right" }}>
@@ -239,7 +274,7 @@ function Board({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
       )}
 
       {state.phase === "reveal" && state.lastResults && (
-        <div style={{ padding: "4px 0" }}>
+        <div className="juice-slide" style={{ padding: "4px 0" }}>
           <h2 style={{ textAlign: "center", fontSize: 18 }}>ラウンド結果</h2>
           <ul style={{ listStyle: "none", padding: 0, margin: "8px 0" }}>
             {[...state.lastResults]
@@ -272,8 +307,8 @@ function Board({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
       )}
 
       {state.phase === "finished" && (
-        <div style={{ padding: "12px 0 4px" }}>
-          <h2 style={{ textAlign: "center" }}>結果</h2>
+        <div className="juice-slide" style={{ padding: "12px 0 4px" }}>
+          <h2 className="juice-pulse" style={{ textAlign: "center" }}>結果</h2>
           <ul style={{ listStyle: "none", padding: 0, margin: "12px 0" }}>
             {(state.standings ?? []).map((s) => {
               const p = state.players.find((x) => x.seat === s.seat);

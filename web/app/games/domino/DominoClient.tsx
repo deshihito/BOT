@@ -4,7 +4,9 @@
 // 契約: view.state.yourHand は自分の手札（牌 id 配列）、他人は others[].count
 // （枚数）だけが見える。場は board（向き付きチェーン）、両端は leftEnd/rightEnd。
 // 操作は { type: "place", tile, side } / { type: "draw" } / { type: "pass" }。
+import { useEffect, useRef } from "react";
 import { dominoTilePips } from "@/lib/online/games/domino";
+import { playSe } from "@/lib/balku-sound";
 import OnlineShell from "../online/OnlineShell";
 import type { OnlineRoomApi, OnlineRoomView } from "../online/useOnlineRoom";
 
@@ -80,6 +82,25 @@ export default function DominoClient() {
 function DominoTable({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
   const state = view.state as DominoState | null;
   const mySeat = view.player.seat;
+  const turnRef = useRef<number | null>(null);
+  const finishRef = useRef<string | null>(null);
+
+  // 自分の手番が来たら知らせる（遷移時のみ1回）
+  useEffect(() => {
+    if (!state || state.finished) return;
+    const prev = turnRef.current;
+    turnRef.current = state.turn;
+    if (prev !== null && prev !== state.turn && state.turn === mySeat) playSe("turn");
+  }, [state, mySeat]);
+
+  // 終局の勝敗 SE（対局ごとに一度だけ、view.code をキーに再戦時も鳴る）
+  useEffect(() => {
+    if (!state?.finished) return;
+    if (finishRef.current === view.code) return;
+    finishRef.current = view.code;
+    playSe(state.winners.includes(mySeat) ? "win" : "lose");
+  }, [state?.finished, state?.winners, mySeat, view.code]);
+
   if (!state) return <p className="muted">読み込み中です…</p>;
 
   const myTurn = !state.finished && state.turn === mySeat;
@@ -96,6 +117,11 @@ function DominoTable({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }
     return sides;
   };
 
+  // 最後に置かれた牌（ログ末尾の place が指す端）を演出対象にする
+  const lastLog = state.log[state.log.length - 1];
+  const newestTileIndex =
+    lastLog?.kind === "place" ? (lastLog.side === "left" ? 0 : state.board.length - 1) : -1;
+
   const statusText = state.finished
     ? state.winners.includes(mySeat)
       ? "あなたの勝ちです！"
@@ -110,7 +136,7 @@ function DominoTable({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }
 
   return (
     <div>
-      <p className="classic-status" role="status">
+      <p className={`classic-status${myTurn ? " juice-pulse" : ""}`} role="status">
         {statusText}
       </p>
 
@@ -166,6 +192,7 @@ function DominoTable({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }
           state.board.map((p, i) => (
             <span
               key={`${p.tile}-${i}`}
+              className={i === newestTileIndex ? "juice-pop" : undefined}
               style={{
                 border: "1px solid #94a3b8",
                 borderRadius: 6,
@@ -214,7 +241,10 @@ function DominoTable({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }
                       className="classic-btn"
                       style={{ padding: "2px 8px", fontSize: 12 }}
                       aria-label={`${a}と${b}の牌を${side === "left" ? "左" : "右"}端に置く`}
-                      onClick={() => void api.move({ type: "place", tile, side })}
+                      onClick={() => {
+                        playSe("play");
+                        void api.move({ type: "place", tile, side });
+                      }}
                     >
                       {state.board.length === 0 ? "置く" : side === "left" ? "←左" : "右→"}
                     </button>
@@ -232,7 +262,10 @@ function DominoTable({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }
             <button
               type="button"
               className="classic-btn classic-btn-active"
-              onClick={() => void api.move({ type: "draw" })}
+              onClick={() => {
+                playSe("play");
+                void api.move({ type: "draw" });
+              }}
             >
               山から引く
             </button>
@@ -241,7 +274,10 @@ function DominoTable({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }
             <button
               type="button"
               className="classic-btn classic-btn-active"
-              onClick={() => void api.move({ type: "pass" })}
+              onClick={() => {
+                playSe("click");
+                void api.move({ type: "pass" });
+              }}
             >
               パスする
             </button>
@@ -250,13 +286,13 @@ function DominoTable({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }
       ) : null}
 
       {state.finished ? (
-        <div style={{ marginTop: 12 }}>
+        <div className="juice-slide" style={{ marginTop: 12 }}>
           <h2 style={{ fontSize: 15, margin: "8px 0" }}>結果（残り手札の目の合計・小さいほど上位）</h2>
           <ul style={{ margin: 0, paddingLeft: 18 }}>
             {state.players.map((p) => (
               <li key={p.seat}>
                 {p.name}: {state.scores[p.seat] >= 9999 ? "退出" : `${state.scores[p.seat]}点`}
-                {state.winners.includes(p.seat) ? " 🏆" : ""}
+                {state.winners.includes(p.seat) ? " （優勝）" : ""}
               </li>
             ))}
           </ul>

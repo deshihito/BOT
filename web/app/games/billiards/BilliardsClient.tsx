@@ -19,6 +19,8 @@ import {
   type BilliardsState,
   type BlBall,
 } from "@/lib/billiards";
+import { sfxCorrect, sfxSlide, sfxTap, sfxWin, sfxWrong } from "@/lib/sfx";
+import { EndScreen } from "../GameJuice";
 import { useGamesNav } from "../GamesShell";
 
 const BEST_KEY = "ago-billiards-best";
@@ -42,8 +44,11 @@ export default function BilliardsClient() {
   const [displayBalls, setDisplayBalls] = useState<BlBall[]>(() => state.balls);
   const [rolling, setRolling] = useState(false);
   const [best, setBest] = useState<number | null>(null);
+  const [prevBest, setPrevBest] = useState<number | null>(null);
+  const [isNewBest, setIsNewBest] = useState(false);
   const animRef = useRef<number | null>(null);
   const savedRef = useRef<number | null>(null);
+  const shotSfxRef = useRef<string | null>(null);
 
   const cue = state.balls.find((b) => b.id === 0) ?? state.balls[0];
   const shownCue = displayBalls.find((b) => b.id === 0) ?? cue;
@@ -80,15 +85,29 @@ export default function BilliardsClient() {
     if (savedRef.current === state.seed) return;
     savedRef.current = state.seed;
     const cur = loadBest();
+    setPrevBest(cur);
     if (cur === null || score < cur) {
+      setIsNewBest(cur !== null);
       setBest(score);
       try {
         localStorage.setItem(BEST_KEY, String(score));
       } catch {
         // 保存失敗はプレイに影響しない。
       }
+    } else {
+      setIsNewBest(false);
     }
   }, [state.phase, state.seed, score]);
+
+  useEffect(() => {
+    if (state.shots === 0) return;
+    const key = `${state.seed}:${state.shots}`;
+    if (shotSfxRef.current === key) return;
+    shotSfxRef.current = key;
+    if (state.phase === "cleared") sfxWin();
+    else if (state.lastScratch) sfxWrong();
+    else if (state.lastPocketed.length > 0) sfxCorrect();
+  }, [state.seed, state.shots, state.phase, state.lastScratch, state.lastPocketed]);
 
   useEffect(
     () => () => {
@@ -99,12 +118,16 @@ export default function BilliardsClient() {
 
   const restart = () => {
     if (animRef.current !== null) cancelAnimationFrame(animRef.current);
+    sfxTap();
     setRolling(false);
+    setIsNewBest(false);
+    setPrevBest(null);
     setState(createBilliardsGame(Date.now() % 2147483647));
   };
 
   const doShoot = () => {
     if (state.phase !== "aiming" || rolling) return;
+    sfxSlide();
     const { state: next, result } = shoot(state, angle, power);
     if (result.frames.length <= 1) {
       setState(next);
@@ -165,10 +188,29 @@ export default function BilliardsClient() {
         </button>
       </div>
 
-      <p className="classic-status" role="status">
+      <p
+        className={`classic-status${state.lastScratch ? " juice-shake" : state.lastPocketed.length > 0 ? " juice-pulse" : ""}`}
+        role="status"
+      >
         スコア {score}（{state.shots} 打・スクラッチ {state.scratches}） ・ 残り {remaining} 個
         {best !== null ? ` ・ ベスト ${best}` : ""} ・ {statusText}
       </p>
+
+      {state.phase === "cleared" && (
+        <EndScreen
+          outcome="win"
+          title="全部の的球を落としました！"
+          score={score}
+          scoreLabel="スコア"
+          newBest={isNewBest}
+          previousBest={isNewBest ? null : prevBest}
+          onRetry={restart}
+        >
+          <p className="muted" style={{ margin: 0 }}>
+            {state.shots} 打 ・ スクラッチ {state.scratches}
+          </p>
+        </EndScreen>
+      )}
 
       <svg
         viewBox={`0 0 ${BL_WIDTH} ${BL_HEIGHT}`}

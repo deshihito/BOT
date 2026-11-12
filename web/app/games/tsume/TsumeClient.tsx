@@ -3,7 +3,7 @@
 // 玉方の応手はソルバーが自動で指す（詰みを逃れられる手があればそれを選ぶ）。
 // 端末内で完結し、サーバーへ送信しない。
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   PIECE_LABEL,
   TSUME_PROBLEMS,
@@ -15,6 +15,8 @@ import {
   type TsumeGameState,
   type TsumeMove,
 } from "@/lib/tsume";
+import { sfxCorrect, sfxLose, sfxTap, sfxWin, sfxWrong } from "@/lib/sfx";
+import { EndScreen } from "../GameJuice";
 import { useGamesNav } from "../GamesShell";
 
 type Selection =
@@ -29,6 +31,15 @@ export default function TsumeClient() {
   const [state, setState] = useState<TsumeGameState>(() => createTsumeGame(TSUME_PROBLEMS[0].id));
   const [selection, setSelection] = useState<Selection>(null);
   const [promoteChoice, setPromoteChoice] = useState<TsumeMove[] | null>(null);
+
+  const prevStatusRef = useRef(state.status);
+  useEffect(() => {
+    const prev = prevStatusRef.current;
+    prevStatusRef.current = state.status;
+    if (prev === state.status || state.status === "playing") return;
+    if (state.status === "cleared") sfxWin();
+    else if (state.status === "failed") sfxLose();
+  }, [state.status]);
 
   const moves = useMemo(() => (state.status === "playing" ? attackerMoves(state) : []), [state]);
 
@@ -52,7 +63,14 @@ export default function TsumeClient() {
   };
 
   const doMove = (m: TsumeMove) => {
-    setState((s) => playAttackerMove(s, m));
+    const next = playAttackerMove(state, m);
+    // 終局（cleared/failed）は終局ジングル側が担当し、二重に鳴らさない。
+    if (next.status === "playing") {
+      // 手数が進んだ＝王手として受理された正解方向の手。それ以外は指せない手・王手でない手。
+      if (next.movesUsed > state.movesUsed) sfxCorrect();
+      else sfxWrong();
+    }
+    setState(next);
     setSelection(null);
     setPromoteChoice(null);
   };
@@ -71,6 +89,7 @@ export default function TsumeClient() {
     setPromoteChoice(null);
     const cell = state.pos.board[index];
     if (cell && cell.side === "A") {
+      sfxTap();
       setSelection({ kind: "board", from: index });
     } else {
       setSelection(null);
@@ -122,7 +141,7 @@ export default function TsumeClient() {
 
       <p className="classic-status" role="status">
         {state.status === "cleared"
-          ? "🎉 詰み！"
+          ? "詰み！"
           : state.status === "failed"
             ? "詰みませんでした。"
             : `あと ${remaining} 手で詰ませる問題です。`}{" "}
@@ -163,6 +182,7 @@ export default function TsumeClient() {
                 key={i}
                 type="button"
                 role="gridcell"
+                className={isSelected ? "juice-pulse" : undefined}
                 aria-label={
                   cell
                     ? `${Math.floor(i / 9) + 1}段${9 - (i % 9)}筋 ${cell.side === "A" ? "攻め方" : "玉方"} ${PIECE_LABEL[cell.piece]}`
@@ -220,6 +240,7 @@ export default function TsumeClient() {
                 className={selected ? "classic-btn classic-btn-active" : "classic-btn"}
                 style={{ minWidth: 52, marginRight: 6, marginBottom: 6 }}
                 onClick={() => {
+                  sfxTap();
                   setPromoteChoice(null);
                   setSelection(selected ? null : { kind: "hand", piece: p });
                 }}
@@ -239,7 +260,7 @@ export default function TsumeClient() {
         </div>
 
         {promoteChoice && (
-          <div className="classic-controls" role="group" aria-label="成り・不成の選択" style={{ marginTop: 8 }}>
+          <div className="classic-controls juice-pop" role="group" aria-label="成り・不成の選択" style={{ marginTop: 8 }}>
             <span style={{ fontSize: 14 }}>成りますか？</span>
             {promoteChoice.map((m) => (
               <button key={String(m.promote)} type="button" className="classic-btn" onClick={() => doMove(m)}>
@@ -256,6 +277,20 @@ export default function TsumeClient() {
           <p style={{ fontSize: 13, marginTop: 10 }}>
             手順: {state.line.join(" → ")}
           </p>
+        )}
+
+        {state.status !== "playing" && (
+          <div style={{ marginTop: 12 }}>
+            <EndScreen
+              outcome={state.status === "cleared" ? "win" : "lose"}
+              title={state.status === "cleared" ? "詰み！" : "詰みませんでした"}
+              onRetry={() => startProblem(state.problem.id)}
+            >
+              <p className="muted" style={{ margin: 0 }}>
+                {state.problem.title}（{state.problem.moves}手） ・ 攻め方 {state.movesUsed} 手
+              </p>
+            </EndScreen>
+          </div>
         )}
       </div>
     </>

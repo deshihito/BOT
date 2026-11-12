@@ -2,13 +2,15 @@
 // あかり。ロジックは lib/akari.ts（解先行生成・ルール検証で完成判定）。
 // 白マスをタップして電球を置く／外す。端末内で完結し、サーバーへ送信しない。
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   createAkariGame,
   evaluateAkari,
   toggleBulb,
   type AkariState,
 } from "@/lib/akari";
+import { sfxPlace, sfxTap, sfxWin } from "@/lib/sfx";
+import { EndScreen } from "../GameJuice";
 import { useGamesNav } from "../GamesShell";
 
 const BEST_KEY = "ago-akari-best";
@@ -22,12 +24,26 @@ export default function AkariClient() {
   const [state, setState] = useState<AkariState>(() => newGame());
   const [seconds, setSeconds] = useState(0);
   const [best, setBest] = useState<number | null>(null);
+  const [resultNewBest, setResultNewBest] = useState(false);
+  const [resultPrevBest, setResultPrevBest] = useState<number | null>(null);
+  const prevStatusRef = useRef(state.status);
+
+  // 終局遷移の瞬間だけジングルを鳴らし、その時点（保存前）のベストで更新判定を控える。
+  useEffect(() => {
+    const prev = prevStatusRef.current;
+    prevStatusRef.current = state.status;
+    if (prev === state.status || state.status !== "won") return;
+    const isNew = seconds > 0 && (best === null || seconds < best);
+    setResultNewBest(isNew);
+    setResultPrevBest(isNew ? null : best);
+    sfxWin();
+  }, [state.status, seconds, best]);
 
   useEffect(() => {
-    if (state.status !== "playing" || state.moves === 0) return;
+    if (state.status !== "playing") return;
     const id = setInterval(() => setSeconds((s) => s + 1), 1000);
     return () => clearInterval(id);
-  }, [state.status, state.moves]);
+  }, [state.status]);
 
   useEffect(() => {
     try {
@@ -52,6 +68,17 @@ export default function AkariClient() {
   const restart = () => {
     setState(newGame());
     setSeconds(0);
+    setResultNewBest(false);
+    setResultPrevBest(null);
+  };
+
+  const handleCell = (i: number) => {
+    const next = toggleBulb(state, i);
+    if (next !== state && next.status !== "won") {
+      if (next.bulbs.includes(i)) sfxPlace();
+      else sfxTap();
+    }
+    setState(next);
   };
 
   const evaluation = useMemo(() => evaluateAkari(state), [state]);
@@ -150,7 +177,8 @@ export default function AkariClient() {
               aria-label={`${r}行${c}列 ${hasBulb ? "電球あり" : lit ? "照らされている" : "暗い"}`}
               aria-pressed={hasBulb}
               disabled={state.status === "won"}
-              onClick={() => setState((s) => toggleBulb(s, i))}
+              className={conflict ? "juice-shake" : hasBulb ? "juice-pop" : undefined}
+              onClick={() => handleCell(i)}
               style={{
                 aspectRatio: "1",
                 minWidth: 0,
@@ -169,11 +197,29 @@ export default function AkariClient() {
                 borderRadius: 8,
               }}
             >
-              {hasBulb ? "💡" : ""}
+              {hasBulb ? "●" : ""}
             </button>
           );
         })}
       </div>
+
+      {state.status === "won" && (
+        <div style={{ marginTop: 16 }}>
+          <EndScreen
+            outcome="win"
+            title="全部照らせた！"
+            score={seconds}
+            scoreLabel="クリアタイム（秒）"
+            newBest={resultNewBest}
+            previousBest={resultPrevBest}
+            onRetry={restart}
+          >
+            <p className="muted">
+              電球 {state.bulbs.length} 個で全ての白マスを照らしました。
+            </p>
+          </EndScreen>
+        </div>
+      )}
     </>
   );
 }

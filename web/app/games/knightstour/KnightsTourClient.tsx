@@ -2,7 +2,7 @@
 // ナイトツアー。ロジックは lib/knightstour.ts（完全ツアーを構成済みで必ず解ける）。
 // 光っているマスをタップしてナイトを進める。端末内で完結し、サーバーへ送信しない。
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   createKnightsTour,
   legalMoves,
@@ -11,6 +11,8 @@ import {
   visitOrder,
   type KtState,
 } from "@/lib/knightstour";
+import { sfxLose, sfxSlide, sfxTap, sfxWin } from "@/lib/sfx";
+import { EndScreen } from "../GameJuice";
 import { useGamesNav } from "../GamesShell";
 
 const SIZES = [
@@ -30,12 +32,30 @@ export default function KnightsTourClient() {
   const [state, setState] = useState<KtState>(() => newGame(5));
   const [seconds, setSeconds] = useState(0);
   const [best, setBest] = useState<number | null>(null);
+  const [resultNewBest, setResultNewBest] = useState(false);
+  const [resultPrevBest, setResultPrevBest] = useState<number | null>(null);
+  const prevStatusRef = useRef(state.status);
+
+  // 終局遷移の瞬間だけジングルを鳴らし、勝利時はその時点（保存前）のベストで更新判定を控える。
+  useEffect(() => {
+    const prev = prevStatusRef.current;
+    prevStatusRef.current = state.status;
+    if (prev === state.status) return;
+    if (state.status === "won") {
+      const isNew = seconds > 0 && (best === null || seconds < best);
+      setResultNewBest(isNew);
+      setResultPrevBest(isNew ? null : best);
+      sfxWin();
+    } else if (state.status === "stuck") {
+      sfxLose();
+    }
+  }, [state.status, seconds, best]);
 
   useEffect(() => {
-    if (state.status !== "playing" || state.path.length <= 1) return;
+    if (state.status !== "playing") return;
     const id = setInterval(() => setSeconds((s) => s + 1), 1000);
     return () => clearInterval(id);
-  }, [state.status, state.path.length]);
+  }, [state.status]);
 
   useEffect(() => {
     try {
@@ -61,6 +81,19 @@ export default function KnightsTourClient() {
     setSize(next);
     setState(newGame(next));
     setSeconds(0);
+    setResultNewBest(false);
+    setResultPrevBest(null);
+  };
+
+  const handleMove = (i: number) => {
+    const next = moveKnight(state, i);
+    if (next !== state && next.status === "playing") sfxSlide();
+    setState(next);
+  };
+
+  const handleUndo = () => {
+    sfxTap();
+    setState((s) => undoMove(s));
   };
 
   const order = visitOrder(state);
@@ -108,7 +141,7 @@ export default function KnightsTourClient() {
           type="button"
           className="classic-btn"
           disabled={state.path.length <= 1}
-          onClick={() => setState((s) => undoMove(s))}
+          onClick={handleUndo}
         >
           1手戻す
         </button>
@@ -152,7 +185,8 @@ export default function KnightsTourClient() {
                       ? "次に進めるマス"
                       : "未訪問のマス"
               }
-              onClick={() => setState((s) => moveKnight(s, i))}
+              className={isHead ? "juice-pop" : isMove ? "juice-pulse" : undefined}
+              onClick={() => handleMove(i)}
               style={{
                 aspectRatio: "1",
                 borderRadius: 8,
@@ -181,6 +215,33 @@ export default function KnightsTourClient() {
           );
         })}
       </div>
+
+      {state.status === "won" && (
+        <div style={{ marginTop: 16 }}>
+          <EndScreen
+            outcome="win"
+            title="全マスを巡回できた！"
+            score={seconds}
+            scoreLabel="クリアタイム（秒）"
+            newBest={resultNewBest}
+            previousBest={resultPrevBest}
+            onRetry={() => restart(size)}
+          >
+            <p className="muted">
+              {total} マス全てを {state.path.length} 手で巡りました。
+            </p>
+          </EndScreen>
+        </div>
+      )}
+      {state.status === "stuck" && (
+        <div style={{ marginTop: 16 }}>
+          <EndScreen outcome="lose" title="行き詰まった…" onRetry={() => restart(size)}>
+            <p className="muted">
+              {state.path.length} / {total} マスまで進みました。1手戻して別の道も試せます。
+            </p>
+          </EndScreen>
+        </div>
+      )}
     </>
   );
 }

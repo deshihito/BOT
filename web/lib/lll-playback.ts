@@ -178,7 +178,7 @@ export function buildPlaybackSteps<T extends PlaybackActorLike>(
           const broke = !granted && target.shield === 0 && before > 0;
           float = {
             targetKey: target.key,
-            text: granted ? `🛡+${event.amount ?? 0}` : `🛡-${event.amount ?? 0}`,
+            text: granted ? `盾+${event.amount ?? 0}` : `盾-${event.amount ?? 0}`,
             kind: broke ? "shieldbreak" : "shield",
           };
           se = broke ? "break" : "guard";

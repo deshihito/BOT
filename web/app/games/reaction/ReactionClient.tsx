@@ -14,6 +14,8 @@ import {
   tapTooEarly,
   type ReactionState,
 } from "@/lib/reaction";
+import { sfxCorrect, sfxTap, sfxWin, sfxWrong } from "@/lib/sfx";
+import { EndScreen } from "../GameJuice";
 import { useGamesNav } from "../GamesShell";
 
 const BEST_KEY = "ago-reaction-best";
@@ -42,7 +44,19 @@ export default function ReactionClient() {
   const [session, setSession] = useState<ReactionState | null>(null);
   const [best, setBest] = useState(0);
   const [isNewBest, setIsNewBest] = useState(false);
+  const [prevBestAtDone, setPrevBestAtDone] = useState<number | null>(null);
+  const prevPhaseRef = useRef<string>("idle");
   // 画面表示専用: 全体が終わったかどうかは session.phase === "done" で判定する
+
+  // 終局遷移の瞬間だけジングルを鳴らす。
+  useEffect(() => {
+    const phaseNow = session?.phase ?? "idle";
+    const prev = prevPhaseRef.current;
+    prevPhaseRef.current = phaseNow;
+    if (prev === phaseNow || phaseNow !== "done") return;
+    if (isNewBest) sfxWin();
+    else sfxCorrect();
+  }, [session?.phase, isNewBest]);
 
   const mountedRef = useRef(true);
   const timerRef = useRef<number | null>(null);
@@ -89,6 +103,9 @@ export default function ReactionClient() {
 
   const startSession = useCallback(() => {
     setIsNewBest(false);
+    // 開始ボタンにフォーカスが残ると、計測中のスペースがボタンの標準活性化で
+    // startSession を再発火させてしまう。開始直後にフォーカスを外す。
+    if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
     const fresh = createReactionSession(Date.now() % 2147483647, REACTION_ROUNDS);
     beginRound(fresh);
   }, [beginRound]);
@@ -101,6 +118,7 @@ export default function ReactionClient() {
     }
     if (cur.phase === "waiting") {
       clearTimer();
+      sfxWrong();
       const foul = tapTooEarly(cur);
       sessionRef.current = foul;
       setSession(foul);
@@ -122,7 +140,10 @@ export default function ReactionClient() {
           const nb = saveBest(summary.averageMs);
           setBest(nb);
           setIsNewBest(prevBest === 0 || summary.averageMs < prevBest);
+          setPrevBestAtDone(prevBest === 0 ? null : prevBest);
         }
+      } else {
+        sfxTap();
       }
       return;
     }
@@ -225,6 +246,7 @@ export default function ReactionClient() {
           {session.results.map((ms, i) => (
             <span
               key={i}
+              className="juice-pop"
               style={{ padding: "6px 10px", borderRadius: 999, background: "rgba(255,255,255,0.08)", fontWeight: 700, fontSize: 14 }}
             >
               {i + 1}回目 {ms} ms
@@ -242,11 +264,22 @@ export default function ReactionClient() {
       )}
 
       {session && phase === "done" && summary && (
-        <p className="classic-status" role="alert">
-          ⏱ 平均 {summary.averageMs} ms ・ 最速 {summary.bestMs} ms ・ 最遅 {summary.worstMs} ms ・ 評価「{gradeForAverage(summary.averageMs)}」
-          {session.fouls > 0 ? ` ・ フライング ${session.fouls} 回` : ""}
-          {isNewBest ? " ・ ベスト平均を更新！" : ""}
-        </p>
+        <div style={{ maxWidth: 520, margin: "16px auto 0" }}>
+          <EndScreen
+            outcome="finish"
+            title={`評価「${gradeForAverage(summary.averageMs)}」`}
+            score={summary.averageMs}
+            scoreLabel="平均（ms）"
+            newBest={isNewBest}
+            previousBest={isNewBest ? null : prevBestAtDone}
+            onRetry={startSession}
+          >
+            <p className="muted">
+              最速 {summary.bestMs} ms ・ 最遅 {summary.worstMs} ms
+              {session.fouls > 0 ? ` ・ フライング ${session.fouls} 回` : ""}
+            </p>
+          </EndScreen>
+        </div>
       )}
 
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "center", marginTop: 16 }}>

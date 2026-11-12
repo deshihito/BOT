@@ -2,7 +2,7 @@
 // ケンケン。ロジックは lib/kenken.ts（解先行生成・ルール検証で完成判定）。
 // マスを選んで下の数字パッドから入力する。端末内で完結し、サーバーへ送信しない。
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   checkKenken,
   createKenkenGame,
@@ -11,6 +11,8 @@ import {
   type KenkenState,
   type KenkenViolation,
 } from "@/lib/kenken";
+import { sfxCorrect, sfxPlace, sfxTap, sfxWin, sfxWrong } from "@/lib/sfx";
+import { EndScreen } from "../GameJuice";
 import { useGamesNav } from "../GamesShell";
 
 const SIZES: { key: KenkenSize; label: string }[] = [
@@ -57,17 +59,47 @@ export default function KenkenClient() {
     }
   }, [state.status, seconds, best, size]);
 
+  // 勝利への遷移で1回だけジングルを鳴らし、その時点のベストと比較した結果を保持する。
+  const prevStatusRef = useRef(state.status);
+  const [winResult, setWinResult] = useState<{ newBest: boolean; prevBest: number | null } | null>(null);
+  useEffect(() => {
+    const prev = prevStatusRef.current;
+    prevStatusRef.current = state.status;
+    if (state.status === "won" && prev !== "won") {
+      sfxWin();
+      setWinResult({ newBest: best === null || seconds < best, prevBest: best });
+    }
+  }, [state.status, seconds, best]);
+
   const restart = (nextSize: KenkenSize) => {
     setSize(nextSize);
     setState(newGame(nextSize));
     setSelected(0);
     setSeconds(0);
     setChecked(null);
+    setWinResult(null);
   };
 
   const input = (value: number) => {
+    if (state.status === "playing") {
+      if (value === 0) {
+        sfxTap();
+      } else {
+        sfxPlace();
+      }
+    }
     setChecked(null);
     setState((s) => setKenkenValue(s, selected, value));
+  };
+
+  const onCheck = () => {
+    const result = checkKenken(state);
+    if (result.violations.length === 0) {
+      sfxCorrect();
+    } else {
+      sfxWrong();
+    }
+    setChecked(result.violations);
   };
 
   const badCells = useMemo(() => {
@@ -126,7 +158,7 @@ export default function KenkenClient() {
         <button
           type="button"
           className="classic-btn"
-          onClick={() => setChecked(checkKenken(state).violations)}
+          onClick={onCheck}
         >
           チェック
         </button>
@@ -166,7 +198,19 @@ export default function KenkenClient() {
               role="gridcell"
               aria-label={`${r + 1}行${c + 1}列${value ? ` ${value}` : ""}`}
               aria-pressed={selected === i}
-              onClick={() => setSelected(i)}
+              className={
+                badCells.has(i)
+                  ? "juice-shake"
+                  : selected === i
+                    ? "juice-pulse"
+                    : value !== 0
+                      ? "juice-pop"
+                      : undefined
+              }
+              onClick={() => {
+                sfxTap();
+                setSelected(i);
+              }}
               style={{
                 position: "relative",
                 aspectRatio: "1",
@@ -234,6 +278,21 @@ export default function KenkenClient() {
           消す
         </button>
       </div>
+
+      {state.status === "won" ? (
+        <EndScreen
+          outcome="win"
+          score={seconds}
+          scoreLabel="クリアタイム（秒）"
+          newBest={winResult?.newBest}
+          previousBest={winResult && !winResult.newBest ? winResult.prevBest : undefined}
+          onRetry={() => restart(size)}
+        >
+          <p className="muted">
+            {size}×{size} ・ {state.moves} 手でクリア
+          </p>
+        </EndScreen>
+      ) : null}
     </>
   );
 }

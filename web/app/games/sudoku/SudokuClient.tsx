@@ -2,7 +2,7 @@
 // 数独。ロジックは lib/sudoku.ts（唯一解を保って穴あけ、ヒント・矛盾チェック付き）。
 // 端末内で完結し、サーバーへ送信しない。
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   applyHint,
   clearCell,
@@ -14,6 +14,8 @@ import {
   type SudokuDifficulty,
   type SudokuState,
 } from "@/lib/sudoku";
+import { sfxCorrect, sfxPlace, sfxTap, sfxWin, sfxWrong } from "@/lib/sfx";
+import { EndScreen } from "../GameJuice";
 import { useGamesNav } from "../GamesShell";
 
 const LEVELS: { key: SudokuDifficulty; label: string }[] = [
@@ -46,6 +48,13 @@ export default function SudokuClient() {
     return () => clearInterval(id);
   }, [state.status]);
 
+  const prevStatusRef = useRef(state.status);
+  useEffect(() => {
+    const prev = prevStatusRef.current;
+    prevStatusRef.current = state.status;
+    if (prev !== state.status && state.status === "won") sfxWin();
+  }, [state.status]);
+
   const conflicts = useMemo(() => conflictIndexes(state), [state]);
 
   const restart = (d: SudokuDifficulty) => {
@@ -59,12 +68,29 @@ export default function SudokuClient() {
   const onPad = (value: number) => {
     if (selected === null || state.status === "won") return;
     if (noteMode && value !== 0) {
+      if (state.givens[selected] || state.board[selected] !== 0) return;
+      sfxTap();
       setState((s) => toggleNote(s, selected, value));
     } else if (value === 0) {
+      if (state.givens[selected] || state.board[selected] === 0) return;
+      sfxTap();
       setState((s) => clearCell(s, selected));
     } else {
-      setState((s) => setCell(s, selected, value));
+      if (state.givens[selected] || state.board[selected] === value) return;
+      const next = setCell(state, selected, value);
+      // 完成時は終局ジングルに任せ、二重に鳴らさない。
+      if (next.status !== "won") {
+        if (value === state.solution[selected]) sfxCorrect();
+        else sfxWrong();
+      }
+      setState(next);
     }
+  };
+
+  const onHint = () => {
+    const next = applyHint(state);
+    if (next !== state && next.status !== "won") sfxPlace();
+    setState(next);
   };
 
   const selectedValue = selected !== null ? state.board[selected] : 0;
@@ -102,15 +128,15 @@ export default function SudokuClient() {
           className={noteMode ? "classic-btn classic-btn-active" : "classic-btn"}
           onClick={() => setNoteMode((v) => !v)}
         >
-          ✏️ メモ{noteMode ? " ON" : " OFF"}
+          メモ{noteMode ? " ON" : " OFF"}
         </button>
         <button
           type="button"
           className="classic-btn"
           disabled={state.hintsLeft <= 0 || state.status === "won"}
-          onClick={() => setState((s) => applyHint(s))}
+          onClick={onHint}
         >
-          💡 ヒント（残り{state.hintsLeft}）
+          ヒント（残り{state.hintsLeft}）
         </button>
       </div>
 
@@ -160,7 +186,19 @@ export default function SudokuClient() {
               role="gridcell"
               aria-label={`行${row + 1}列${col + 1}${value ? ` ${value}` : " 空き"}`}
               aria-pressed={isSelected}
-              onClick={() => setSelected(i)}
+              className={
+                mistake || conflict
+                  ? "juice-shake"
+                  : isHint
+                    ? "juice-pulse"
+                    : value !== 0 && !isGiven
+                      ? "juice-pop"
+                      : undefined
+              }
+              onClick={() => {
+                sfxTap();
+                setSelected(i);
+              }}
               style={{
                 aspectRatio: "1",
                 minWidth: 0,
@@ -235,6 +273,16 @@ export default function SudokuClient() {
       <p className="muted" style={{ fontSize: 13, marginTop: 8 }}>
         赤いマスは解答と違うか、同じ列・行・ブロックで重なっています。完成後は操作できません。
       </p>
+
+      {state.status === "won" && (
+        <div style={{ marginTop: 14, maxWidth: 450 }}>
+          <EndScreen outcome="win" title="完成！" onRetry={() => restart(difficulty)}>
+            <p>
+              タイム {formatTime(seconds)} ・ ミス {state.mistakes} 回 ・ ヒント残り {state.hintsLeft} 回
+            </p>
+          </EndScreen>
+        </div>
+      )}
     </>
   );
 }

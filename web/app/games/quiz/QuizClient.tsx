@@ -3,7 +3,9 @@
 // 回答すると即フィードバック（正解の選択肢と得点）を表示し、「次の問題」へ進む。
 // 端末内で完結し、サーバーへ送信しない。
 import Link from "next/link";
-import { useState, type CSSProperties } from "react";
+import { useEffect, useRef, useState, type CSSProperties } from "react";
+import { sfxCorrect, sfxLose, sfxTap, sfxWin, sfxWrong } from "@/lib/sfx";
+import { EndScreen } from "../GameJuice";
 import {
   answerQuestion,
   createQuizGame,
@@ -38,6 +40,26 @@ export default function QuizClient() {
   const [state, setState] = useState<QuizState>(() => createQuizGame(Date.now() % 2147483647));
 
   const restart = () => setState(createQuizGame(Date.now() % 2147483647));
+
+  const prevPhaseRef = useRef(state.phase);
+  useEffect(() => {
+    if (prevPhaseRef.current !== "finished" && state.phase === "finished") {
+      if (quizCorrectCount(state) * 2 >= state.deck.length) sfxWin();
+      else sfxLose();
+    }
+    prevPhaseRef.current = state.phase;
+  }, [state]);
+
+  const onAnswer = (i: number) => {
+    if (state.phase !== "answering") return;
+    const next = answerQuestion(state, i);
+    if (next.last) {
+      if (next.last.correct) sfxCorrect();
+      else sfxWrong();
+    }
+    setState(next);
+  };
+
   const q = currentQuizQuestion(state);
   const total = state.deck.length;
   const grade = quizGrade(state);
@@ -109,8 +131,9 @@ export default function QuizClient() {
                 <button
                   key={i}
                   type="button"
+                  className={revealed && isAnswer ? "juice-pulse" : revealed && isPicked ? "juice-shake" : undefined}
                   disabled={state.phase !== "answering"}
-                  onClick={() => setState((s) => answerQuestion(s, i))}
+                  onClick={() => onAnswer(i)}
                   style={choiceStyle(bg, border)}
                 >
                   <span style={{ fontWeight: 800, opacity: 0.6 }}>{["A", "B", "C", "D"][i]}</span>
@@ -124,50 +147,47 @@ export default function QuizClient() {
 
           {state.phase === "revealed" && state.last ? (
             <div style={{ marginTop: 16, textAlign: "center" }}>
-              <p className="classic-status" role="status" style={{ justifyContent: "center" }}>
+              <p className="classic-status juice-pop" role="status" style={{ justifyContent: "center" }}>
                 {state.last.correct ? `正解！ +${state.last.gained}点` : `残念、正解は「${q.choices[state.last.correctIndex]}」でした`}
               </p>
-              <button type="button" className="classic-btn classic-btn-active" onClick={() => setState((s) => nextQuestion(s))}>
+              <button type="button" className="classic-btn classic-btn-active" onClick={() => { sfxTap(); setState((s) => nextQuestion(s)); }}>
                 {state.current + 1 >= total ? "結果を見る" : "次の問題へ"}
               </button>
             </div>
           ) : null}
         </div>
       ) : (
-        <div style={{ maxWidth: 640, margin: "0 auto", textAlign: "center" }}>
-          <p className="classic-status" role="status" style={{ justifyContent: "center", fontSize: 18 }}>
-            結果: {quizCorrectCount(state)} / {state.answers.length} 問正解 ・ スコア {state.score} 点
-          </p>
-          <h2 style={{ fontSize: 26, margin: "8px 0" }}>{grade.label}</h2>
-          <p className="muted">{grade.comment}</p>
-          <p className="muted">最大連続正解: {state.bestStreak} ／ 正答率 {state.answers.length ? Math.round((quizCorrectCount(state) / state.answers.length) * 100) : 0}%</p>
+        <div style={{ maxWidth: 640, margin: "0 auto" }}>
+          <EndScreen outcome="finish" title={grade.label} score={state.score} scoreLabel="スコア" onRetry={restart}>
+            <p className="classic-status" role="status" style={{ justifyContent: "center", fontSize: 18 }}>
+              結果: {quizCorrectCount(state)} / {state.answers.length} 問正解 ・ スコア {state.score} 点
+            </p>
+            <p className="muted" style={{ textAlign: "center" }}>{grade.comment}</p>
+            <p className="muted" style={{ textAlign: "center" }}>最大連続正解: {state.bestStreak} ／ 正答率 {state.answers.length ? Math.round((quizCorrectCount(state) / state.answers.length) * 100) : 0}%</p>
 
-          <div style={{ display: "grid", gap: 8, margin: "20px 0", textAlign: "left" }}>
-            {stats.map((s) => (
-              <div
-                key={s.category}
-                style={{
-                  display: "flex",
-                  justifyContent: "space-between",
-                  alignItems: "center",
-                  gap: 12,
-                  padding: "10px 14px",
-                  borderRadius: 10,
-                  border: "1px solid #e5e7eb",
-                  background: "#fffdf6",
-                }}
-              >
-                <span style={{ fontWeight: 700 }}>{s.category}</span>
-                <span>
-                  {s.correct} / {s.total} 正解（{s.total ? Math.round((s.correct / s.total) * 100) : 0}%）
-                </span>
-              </div>
-            ))}
-          </div>
-
-          <button type="button" className="classic-btn classic-btn-active" onClick={restart}>
-            もう一度
-          </button>
+            <div style={{ display: "grid", gap: 8, margin: "20px 0", textAlign: "left" }}>
+              {stats.map((s) => (
+                <div
+                  key={s.category}
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                    gap: 12,
+                    padding: "10px 14px",
+                    borderRadius: 10,
+                    border: "1px solid #e5e7eb",
+                    background: "#fffdf6",
+                  }}
+                >
+                  <span style={{ fontWeight: 700 }}>{s.category}</span>
+                  <span>
+                    {s.correct} / {s.total} 正解（{s.total ? Math.round((s.correct / s.total) * 100) : 0}%）
+                  </span>
+                </div>
+              ))}
+            </div>
+          </EndScreen>
         </div>
       )}
     </>

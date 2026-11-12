@@ -5,7 +5,8 @@
 //   - phase discuss: discussionEndsAt まで議論、全員 ready で早期に投票へ
 //   - phase vote/revote: vote アクション。revote では tiedCandidates のみ投票可
 //   - phase finished: result にウルフ・お題ペア・集計が開示される
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { playSe } from "@/lib/balku-sound";
 import OnlineShell, { useOnlineCreateOptions } from "../online/OnlineShell";
 import type { OnlineRoomApi, OnlineRoomView } from "../online/useOnlineRoom";
 
@@ -78,6 +79,26 @@ function Board({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
     return () => clearInterval(id);
   }, []);
 
+  // SE: 投票フェーズへの遷移で1回だけ鳴らす。
+  const prevPhaseRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!state) return;
+    const prev = prevPhaseRef.current;
+    prevPhaseRef.current = state.phase;
+    if (prev !== null && prev !== state.phase && (state.phase === "vote" || state.phase === "revote") && !state.you.left) playSe("turn");
+  }, [state]);
+
+  // SE: 終局（結果開示）遷移で1回だけ（view.code をキーに再戦で再び鳴る）。
+  const finishRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!state || state.phase !== "finished" || !state.result) return;
+    if (finishRef.current === view.code) return;
+    finishRef.current = view.code;
+    const iAmWolf = state.result.wolfSeat === mySeat;
+    const won = (state.result.winner === "wolf") === iAmWolf;
+    playSe(won ? "win" : "lose");
+  }, [state, mySeat, view.code]);
+
   if (!state) return <p className="og-muted">お題を配っています…</p>;
 
   const inVote = state.phase === "vote" || state.phase === "revote";
@@ -91,6 +112,7 @@ function Board({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
 
   const send = async (action: unknown) => {
     if (busy) return;
+    playSe("play");
     setBusy(true);
     try {
       await api.move(action);
@@ -102,6 +124,7 @@ function Board({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
   return (
     <div style={{ maxWidth: 640, margin: "0 auto" }}>
       <div
+        className="juice-pop"
         style={{
           textAlign: "center",
           padding: "18px 12px",
@@ -147,8 +170,8 @@ function Board({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
       ) : null}
 
       {inVote ? (
-        <div style={{ marginTop: 14 }}>
-          <h2 style={{ fontSize: 20, margin: "6px 0" }}>
+        <div className="juice-slide" style={{ marginTop: 14 }}>
+          <h2 className="juice-pulse" style={{ fontSize: 20, margin: "6px 0" }}>
             {state.phase === "revote" ? "決選投票：ウルフだと思う人を選んでください" : "投票：ウルフだと思う人を選んでください"}
           </h2>
           {state.you.voted ? (
@@ -175,8 +198,8 @@ function Board({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
       ) : null}
 
       {state.phase === "finished" && state.result ? (
-        <div style={{ textAlign: "center", marginTop: 14 }}>
-          <h2 style={{ fontSize: 24, margin: "8px 0" }}>
+        <div className="juice-slide" style={{ textAlign: "center", marginTop: 14 }}>
+          <h2 className={(state.result.winner === "wolf") === (state.result.wolfSeat === mySeat) ? "juice-pulse" : undefined} style={{ fontSize: 24, margin: "8px 0" }}>
             {state.result.winner === "majority" ? "多数派の勝ち！ウルフを当てました" : "ウルフの逃げ切り勝ち！"}
           </h2>
           <p style={{ fontSize: 16 }}>
@@ -200,6 +223,7 @@ function Board({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
               return (
                 <li
                   key={p.seat}
+                  className="juice-pop"
                   style={{
                     display: "flex",
                     justifyContent: "space-between",

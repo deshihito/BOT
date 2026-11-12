@@ -3,7 +3,9 @@
 // 鏡をタップすると / と \ が切り替わる。光路は毎回 traceLaser で描き直す。
 // 端末内で完結し、サーバーへ送信しない。
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { sfxTap, sfxWin } from "@/lib/sfx";
+import { EndScreen } from "../GameJuice";
 import {
   createLaserPuzzle,
   rotateLaserMirror,
@@ -45,6 +47,21 @@ export default function LaserClient() {
     return () => clearInterval(id);
   }, [started, state.status]);
 
+  const prevStatusRef = useRef(state.status);
+  const [winPrevBest, setWinPrevBest] = useState<number | null>(null);
+  const [winNewBest, setWinNewBest] = useState(false);
+
+  // 終局遷移の捕捉はベスト保存 effect より前に置き、保存前のベストを記録する。
+  useEffect(() => {
+    const prev = prevStatusRef.current;
+    prevStatusRef.current = state.status;
+    if (prev !== "solved" && state.status === "solved") {
+      setWinPrevBest(best);
+      setWinNewBest(best === null || seconds < best);
+      sfxWin();
+    }
+  }, [state.status, best, seconds]);
+
   useEffect(() => {
     if (state.status !== "solved" || seconds <= 0) return;
     setBest((prev) => {
@@ -65,9 +82,12 @@ export default function LaserClient() {
     setState(createLaserPuzzle(Date.now() % 2147483647));
     setSeconds(0);
     setStarted(false);
+    setWinPrevBest(null);
+    setWinNewBest(false);
   };
 
   const onMirror = (index: number) => {
+    if (state.status === "playing") sfxTap();
     setStarted(true);
     setState((s) => rotateLaserMirror(s, index));
   };
@@ -92,7 +112,7 @@ export default function LaserClient() {
       ? `的に当たった！ ${seconds} 秒・${state.moves} 回転でクリアです。`
       : trace.looped
         ? "光が輪になってしまいました。どこかの鏡を回してみよう。"
-        : "鏡をタップすると向きが切り替わります。光を的（🎯）まで導こう。";
+        : "鏡をタップすると向きが切り替わります。光を的まで導こう。";
 
   return (
     <>
@@ -163,16 +183,12 @@ export default function LaserClient() {
             strokeLinejoin="round"
             strokeLinecap="round"
           />
-          {/* 的 */}
-          <text
-            x={center(state.target).x}
-            y={center(state.target).y}
-            fontSize={44}
-            textAnchor="middle"
-            dominantBaseline="central"
-          >
-            🎯
-          </text>
+          {/* 的（同心円で描く。絵文字は使わない） */}
+          <g className="juice-pulse" aria-hidden>
+            <circle cx={center(state.target).x} cy={center(state.target).y} r={17} fill="#e53935" />
+            <circle cx={center(state.target).x} cy={center(state.target).y} r={11} fill="#ffffff" />
+            <circle cx={center(state.target).x} cy={center(state.target).y} r={5.2} fill="#e53935" />
+          </g>
           {/* 鏡（タップで回転） */}
           {state.mirrors.map((m) => {
             const x = (m.index % state.cols) * CELL;
@@ -204,6 +220,23 @@ export default function LaserClient() {
             ))}
         </svg>
       </div>
+      {state.status === "solved" && (
+        <div style={{ maxWidth: 560, margin: "14px auto 0" }}>
+          <EndScreen
+            outcome="win"
+            title="的に当たった！"
+            score={seconds}
+            scoreLabel="クリアタイム（秒）"
+            newBest={winNewBest}
+            previousBest={winPrevBest}
+            onRetry={restart}
+          >
+            <p className="muted" style={{ margin: 0 }}>
+              {seconds} 秒・{state.moves} 回転でクリアです。
+            </p>
+          </EndScreen>
+        </div>
+      )}
       <p className="og-muted" style={{ textAlign: "center" }}>
         鏡に当たると光は直角に曲がります。
       </p>

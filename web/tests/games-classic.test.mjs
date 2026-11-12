@@ -136,6 +136,19 @@ test("2048: 空きも合体も無い盤では負け判定になる", () => {
   assert.equal(slide.canMove(almost), true);
 });
 
+test("メモリー: 絵柄は形×色の図形8種で、全て区別できる", () => {
+  assert.equal(mem.MEMORY_SYMBOLS.length, 8);
+  const combos = mem.MEMORY_SYMBOLS.map((s) => `${s.shape}|${s.color}`);
+  assert.equal(new Set(combos).size, 8);
+  assert.equal(new Set(mem.MEMORY_SYMBOLS.map((s) => s.id)).size, 8);
+  assert.deepEqual(mem.MEMORY_ICONS, mem.MEMORY_SYMBOLS.map((s) => s.id));
+  for (const s of mem.MEMORY_SYMBOLS) {
+    assert.ok(/^#[0-9a-f]{6}$/.test(s.color), `${s.id} の色`);
+    assert.ok(s.label.length > 0);
+    assert.equal(mem.memorySymbol(s.id), s);
+  }
+});
+
 test("メモリー: デッキは全絵柄がちょうど2枚ずつ", () => {
   const state = mem.createMemoryGame(21);
   assert.equal(state.cards.length, 16);

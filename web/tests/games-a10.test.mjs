@@ -536,3 +536,30 @@ test("テキサス: 退出はフォールド扱いで、tick で次のハンド�
   assert.equal(gm.parseAction(null), null);
   assert.equal(gm.parseAction("call"), null);
 });
+
+test("テキサス: ベッティングの手番には締切があり、tick で自動フォールドされる", () => {
+  const gm = texas.gameModule;
+  let state = gm.createState(seats(3), rngStub, {});
+  assert.equal(state.phase, "betting");
+  assert.equal(typeof state.turnEndsAt, "number");
+  // ビューにも締切が伝わる。
+  assert.equal(gm.viewFor(state, 0).turnEndsAt, state.turnEndsAt);
+  // 締切前は同一参照。
+  assert.equal(gm.tick(state, state.turnEndsAt - 1), state);
+  const turnSeat = state.turn;
+  state = gm.tick(state, state.turnEndsAt + 1);
+  assert.equal(state.players[turnSeat].folded, true);
+  assert.notEqual(state.turn, turnSeat);
+  assert.equal(state.phase, "betting");
+  assert.equal(typeof state.turnEndsAt, "number");
+});
+
+test("テキサス: 2人で手番が時間切れになると相手の勝ちでハンドが終わる", () => {
+  const gm = texas.gameModule;
+  let state = gm.createState(seats(2), rngStub, {});
+  state = gm.tick(state, state.turnEndsAt + 1);
+  assert.equal(state.phase, "handEnd");
+  assert.equal(state.turnEndsAt, null);
+  assert.equal(state.lastResult.showdown, false);
+  assert.equal(state.lastResult.winners.length, 1);
+});

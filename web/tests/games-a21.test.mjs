@@ -266,3 +266,40 @@ test("ダーツ対戦: parseAction の検証と退出処理", () => {
   assert.equal(view.players[2].rank, 1);
   assert.equal(view.players[0].rank, null, "退出者は順位なし");
 });
+
+test("ダーツ対戦: tick は締切前に同一参照、超過で時間切れミスが記録される", () => {
+  const rng = makeRng(7);
+  let s = db.gameModule.createState(PLAYERS2, rng, {});
+  assert.equal(typeof s.turnEndsAt, "number");
+  // 締切前は何も起きない（同一参照）。
+  assert.equal(db.gameModule.tick(s, s.turnEndsAt - 1), s);
+  // ビューにも締切が伝わる。
+  assert.equal(db.gameModule.viewFor(s, 0).turnEndsAt, s.turnEndsAt);
+  // 1投分の時間切れ: ミスが1本記録され、まだ同じ手番（3投に満たない）。
+  s = db.gameModule.tick(s, s.turnEndsAt + 1);
+  assert.equal(s.throws[0].length, 1);
+  assert.equal(s.throws[0][0].score, 0);
+  assert.equal(s.throws[0][0].label, "MISS（時間切れ）");
+  assert.equal(s.totals[0], 0);
+  assert.equal(s.turn, 0);
+  // 残り2投も時間切れになると手番が次へ移る。
+  s = db.gameModule.tick(s, s.turnEndsAt + 1);
+  s = db.gameModule.tick(s, s.turnEndsAt + 1);
+  assert.equal(s.throws[0].length, 3);
+  assert.equal(s.turn, 1);
+});
+
+test("ダーツ対戦: 全投擲が時間切れでも対戦は最後まで進んで終了する", () => {
+  const rng = makeRng(11);
+  let s = db.gameModule.createState(PLAYERS2, rng, {});
+  let guard = 0;
+  while (!s.finished && guard++ < 200) {
+    s = db.gameModule.tick(s, s.turnEndsAt + 1);
+  }
+  assert.equal(s.finished, true);
+  assert.equal(s.turnEndsAt, null);
+  assert.equal(s.throws[0].length, db.DB_TOTAL_ROUNDS * 3);
+  assert.equal(s.throws[1].length, db.DB_TOTAL_ROUNDS * 3);
+  assert.equal(s.totals[0], 0);
+  assert.equal(s.totals[1], 0);
+});

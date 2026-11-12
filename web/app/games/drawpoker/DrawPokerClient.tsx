@@ -17,6 +17,8 @@ import {
   type DpState,
 } from "@/lib/drawpoker";
 import { useGamesNav } from "../GamesShell";
+import { sfxCorrect, sfxDeal, sfxFlip, sfxPop, sfxTap, sfxWrong } from "@/lib/sfx";
+import { ScorePop } from "../GameJuice";
 
 const CHIPS_KEY = "ago-drawpoker-chips";
 const BET_OPTIONS = [10, 50, 100, 500] as const;
@@ -81,9 +83,21 @@ export default function DrawPokerClient() {
     }
   }, [hydrated, state.phase, state.round, state.chips]);
 
+  // ラウンド確定時に収支へ効果音を連動させる。
+  const settledSoundRef = useRef(0);
+  useEffect(() => {
+    if (state.phase !== "settled" || !state.result) return;
+    if (settledSoundRef.current === state.round) return;
+    settledSoundRef.current = state.round;
+    if (state.result.delta > 0) sfxCorrect();
+    else if (state.result.delta < 0) sfxWrong();
+    else sfxTap();
+  }, [state.phase, state.round, state.result]);
+
   const deal = () => {
     const next = startRound(state, bet);
     if (next === state) return;
+    sfxDeal();
     setDiscards([]);
     setState(next);
     // 簡易戦略で初期の「残す札」を選び、捨て札をその補集合にする。
@@ -93,10 +107,12 @@ export default function DrawPokerClient() {
 
   const toggleDiscard = (index: number) => {
     if (state.phase !== "draw") return;
+    sfxTap();
     setDiscards((d) => (d.includes(index) ? d.filter((x) => x !== index) : [...d, index]));
   };
 
   const confirmDraw = () => {
+    sfxFlip();
     setState((s) => drawCards(s, discards));
   };
 
@@ -122,7 +138,7 @@ export default function DrawPokerClient() {
           ← ゲーム一覧へ
         </Link>
       </p>
-      <h1 style={{ fontSize: 22, margin: "0 0 6px" }}>♠️ ドローポーカー</h1>
+      <h1 style={{ fontSize: 22, margin: "0 0 6px" }}>♠ ドローポーカー</h1>
       <p style={{ margin: "0 0 12px", color: "#64748b", fontSize: 14, lineHeight: 1.6 }}>
         ベット額を選んで「配る」を押し、交換したい札をタップで選んで確定します。
       </p>
@@ -140,6 +156,7 @@ export default function DrawPokerClient() {
       {state.phase === "settled" && state.result && (
         <p role="status" style={{ minHeight: 22, margin: "0 0 8px", fontWeight: 700, color: state.result.delta >= 0 ? "#16a34a" : "#dc2626" }}>
           {state.result.message}（収支 {state.result.delta >= 0 ? "+" : ""}{state.result.delta}）
+          {state.result.delta !== 0 ? <ScorePop key={state.round} amount={state.result.delta} /> : null}
         </p>
       )}
 
@@ -160,7 +177,8 @@ export default function DrawPokerClient() {
           const dropping = discards.includes(i);
           return (
             <button
-              key={i}
+              key={`${state.round}-${i}-${card.suit}-${card.rank}`}
+              className="juice-flip"
               type="button"
               disabled={state.phase !== "draw"}
               aria-pressed={dropping}
@@ -195,13 +213,13 @@ export default function DrawPokerClient() {
         <div>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
             {BET_OPTIONS.map((amount) => (
-              <button key={amount} type="button" style={chipBtn(amount)} onClick={() => setBet(amount)} aria-pressed={bet === amount}>
+              <button key={amount} type="button" style={chipBtn(amount)} onClick={() => { sfxTap(); setBet(amount); }} aria-pressed={bet === amount}>
                 {amount}
               </button>
             ))}
           </div>
           {broke ? (
-            <button type="button" style={mainBtn} onClick={() => setState((s) => refillDpChips(s))}>
+            <button type="button" style={mainBtn} onClick={() => { sfxPop(); setState((s) => refillDpChips(s)); }}>
               チップを再支給する（{DP_INITIAL_CHIPS}）
             </button>
           ) : (

@@ -67,14 +67,13 @@ function TerritoryBoard({ view, api }: { view: OnlineRoomView; api: OnlineRoomAp
     if (prev !== null && prev !== state.turn && state.turn === mySeat) playSe("turn");
   }, [state, mySeat]);
 
-  const finishRef = useRef(false);
+  const finishRef = useRef<string | null>(null);
   useEffect(() => {
-    if (!state || finishRef.current) return;
-    if (state.finished) {
-      finishRef.current = true;
-      playSe(state.winner === "draw" ? "click" : state.winner === mySeat ? "win" : "lose");
-    }
-  }, [state, mySeat]);
+    if (!state?.finished) return;
+    if (finishRef.current === view.code) return;
+    finishRef.current = view.code;
+    playSe(state.winner === "draw" ? "click" : state.winner === mySeat ? "win" : "lose");
+  }, [state, mySeat, view.code]);
 
   const myPlacements = useMemo(() => {
     if (!state || !myTurn) return [];
@@ -133,14 +132,14 @@ function TerritoryBoard({ view, api }: { view: OnlineRoomView; api: OnlineRoomAp
 
   return (
     <div className="og-game og-territory">
-      <div className={`og-turn-banner${myTurn ? " og-turn-mine" : ""}`} role="status" aria-live="polite">
+      <div className={`og-turn-banner${myTurn ? " og-turn-mine" : ""}${state.finished ? " juice-slide" : myTurn ? " juice-pulse" : ""}`} role="status" aria-live="polite">
         {state.finished ? (
           <span>
             対戦終了：
             {state.winner === "draw"
               ? `引き分け（${state.scores[0]} 対 ${state.scores[1]}）`
               : `勝者 ${winnerName}（${state.scores[0]} 対 ${state.scores[1]}）`}
-            {state.winner === mySeat ? " 🎉" : ""}
+            {state.winner === mySeat ? "" : ""}
           </span>
         ) : myTurn ? (
           <span>
@@ -220,6 +219,7 @@ function TerritoryBoard({ view, api }: { view: OnlineRoomView; api: OnlineRoomAp
                       : ""
                 }${inPreview ? " プレビュー中" : ""}`}
                 disabled={!myTurn || selectedPiece === null}
+                className={owner >= 0 && isLast ? "juice-pop" : undefined}
                 onClick={() => {
                   playSe("select");
                   setAnchor(index);

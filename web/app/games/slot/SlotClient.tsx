@@ -16,6 +16,8 @@ import {
   type SlotState,
   type SlotSymbolId,
 } from "@/lib/slot";
+import { sfxCorrect, sfxSlide, sfxTap, sfxTick, sfxWin } from "@/lib/sfx";
+import { ScorePop } from "../GameJuice";
 import { useGamesNav } from "../GamesShell";
 
 const CHIPS_KEY = "ago-slot-chips";
@@ -54,6 +56,7 @@ export default function SlotClient() {
   const timersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const pendingRef = useRef<SlotState | null>(null);
+  const stoppedRef = useRef(3);
 
   useEffect(() => {
     setState(createSlotGame(Date.now() % 2147483647, loadChips()));
@@ -78,16 +81,26 @@ export default function SlotClient() {
     if (spinning || bet > state.chips || bet < SLOT_MIN_BET) return;
     const result = spin(state, bet);
     if (result === state) return;
+    sfxSlide();
     pendingRef.current = result;
     setSpinning(true);
     setStopped(0);
+    stoppedRef.current = 0;
     const finalReels = result.reels ?? display;
-    // 回転中はランダム表示を回し、左から順に最終結果で止める
+    // 回転中はまだ止まっていないリールだけランダム表示を回し、左から順に最終結果で止める
     intervalRef.current = setInterval(() => {
-      setDisplay((d) => d.map(() => SLOT_SYMBOLS[Math.floor(Math.random() * SLOT_SYMBOLS.length)].id));
+      setDisplay((d) =>
+        d.map((sym, idx) =>
+          idx < stoppedRef.current
+            ? sym
+            : SLOT_SYMBOLS[Math.floor(Math.random() * SLOT_SYMBOLS.length)].id,
+        ),
+      );
     }, 80);
     [650, 1150, 1650].forEach((ms, i) => {
       const t = setTimeout(() => {
+        sfxTick();
+        stoppedRef.current = i + 1;
         setStopped(i + 1);
         setDisplay((d) => {
           const next = [...d];
@@ -98,7 +111,14 @@ export default function SlotClient() {
           if (intervalRef.current) clearInterval(intervalRef.current);
           intervalRef.current = null;
           setSpinning(false);
-          if (pendingRef.current) setState(pendingRef.current);
+          if (pendingRef.current) {
+            const delta = pendingRef.current.result?.delta ?? 0;
+            if (delta > 0) {
+              if (delta >= bet * 5) sfxWin();
+              else sfxCorrect();
+            }
+            setState(pendingRef.current);
+          }
           pendingRef.current = null;
         }
       }, ms);
@@ -137,12 +157,16 @@ export default function SlotClient() {
         {!spinning && state.result
           ? ` ・ ${state.result.message}（${state.result.delta >= 0 ? "+" : ""}${state.result.delta}）`
           : ""}
+        {!spinning && state.result && state.result.delta !== 0 ? (
+          <ScorePop key={state.spins} amount={state.result.delta} />
+        ) : null}
         {spinning ? " ・ 回転中…" : ""}
       </p>
 
       <div
         role="img"
         aria-label={`リール: ${display.map((id) => slotSymbol(id).label).join("、")}`}
+        className={!spinning && state.result && state.result.delta > 0 ? "juice-pulse" : undefined}
         style={{
           display: "flex",
           gap: 10,
@@ -187,7 +211,10 @@ export default function SlotClient() {
                 type="button"
                 style={chipBtn(amount)}
                 disabled={spinning || amount > state.chips}
-                onClick={() => setBet(amount)}
+                onClick={() => {
+                  sfxTap();
+                  setBet(amount);
+                }}
               >
                 {amount}
               </button>
@@ -222,7 +249,7 @@ export default function SlotClient() {
             </li>
           ))}
           <li style={{ display: "flex", justifyContent: "space-between", fontSize: 15 }}>
-            <span>🍒🍒 チェリー×2（先頭2つ）</span>
+            <span>桜桜 チェリー×2（先頭2つ）</span>
             <span style={{ fontWeight: 700 }}>{SLOT_CHERRY_PAIR_MULT} 倍</span>
           </li>
         </ul>

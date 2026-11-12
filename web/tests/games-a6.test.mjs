@@ -102,6 +102,19 @@ test("間違い探し: 正解タップで found が増え、全部見つける�
   assert.equal(same, state);
 });
 
+test("間違い探し: パレットは形×色の図形28種で全て区別でき、盤面はパレット内のみで構成される", () => {
+  assert.equal(sd.SPOT_DIFF_SYMBOLS.length, 28);
+  const combos = sd.SPOT_DIFF_SYMBOLS.map((s) => `${s.shape}|${s.color}`);
+  assert.equal(new Set(combos).size, 28);
+  assert.equal(new Set(sd.SPOT_DIFF_SYMBOLS.map((s) => s.id)).size, 28);
+  assert.deepEqual(sd.SPOT_DIFF_PALETTE, sd.SPOT_DIFF_SYMBOLS.map((s) => s.id));
+  const state = sd.createSpotDiffGame("hard", 7);
+  for (const v of [...state.base, ...state.altered]) {
+    assert.ok(sd.SPOT_DIFF_PALETTE.includes(v), `盤面の絵柄 ${v} がパレット内にある`);
+    assert.equal(sd.spotDiffSymbol(v).id, v);
+  }
+});
+
 test("間違い探し: 範囲外タップは無視される", () => {
   const state = sd.createSpotDiffGame("easy", 5);
   assert.equal(sd.tapSpotDiff(state, -1), state);
@@ -111,9 +124,9 @@ test("間違い探し: 範囲外タップは無視される", () => {
 
 // ---------------------------------------------------------------- flagquiz
 
-test("フラッグクイズ: ペアは40組以上で旗と国名が重複しない", () => {
+test("フラッグクイズ: ペアは40組以上で国コードと国名が重複しない", () => {
   assert.ok(fq.FLAG_PAIRS.length >= 40);
-  assert.equal(new Set(fq.FLAG_PAIRS.map((p) => p.flag)).size, fq.FLAG_PAIRS.length);
+  assert.equal(new Set(fq.FLAG_PAIRS.map((p) => p.code)).size, fq.FLAG_PAIRS.length);
   assert.equal(new Set(fq.FLAG_PAIRS.map((p) => p.name)).size, fq.FLAG_PAIRS.length);
 });
 

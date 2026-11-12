@@ -306,3 +306,40 @@ export function tryMoveToFoundation(state: SolState, source: FoundationSource): 
     ? moveWasteToFoundation(state)
     : moveTableauToFoundation(state, source.col);
 }
+
+/**
+ * オートフィニッシュ可能な状態か。場札のカードが全て表向きなら、
+ * ストックを循環させながら全カードを組札へ送り切れる。
+ */
+export function canAutoFinish(state: SolState): boolean {
+  if (state.status !== "playing") return false;
+  return state.tableau.every((pile) => pile.every((card) => card.faceUp));
+}
+
+/**
+ * 全カードを組札へ自動で送って仕上げる。オートフィニッシュ可能でない場合は
+ * 同じ状態を返す。組札が増えないままストックを一周したら安全に打ち切る
+ * （通常は全て送り切って won になる）。
+ */
+export function autoFinishSolitaire(state: SolState): SolState {
+  if (!canAutoFinish(state)) return state;
+  let s = state;
+  let drawsSinceProgress = 0;
+  for (let guard = 0; guard < 1000 && s.status !== "won"; guard++) {
+    const source = findFoundationMove(s);
+    if (source) {
+      const next = tryMoveToFoundation(s, source);
+      if (next === s) break;
+      s = next;
+      drawsSinceProgress = 0;
+      continue;
+    }
+    const drawn = drawFromStock(s);
+    if (drawn === s) break; // ストックも捨て札も無いのに送れない
+    s = drawn;
+    drawsSinceProgress++;
+    // ストック全体（＋再循環分）を見ても組札が増えなければ進展なし
+    if (drawsSinceProgress > state.stock.length + state.waste.length + 54) break;
+  }
+  return s;
+}

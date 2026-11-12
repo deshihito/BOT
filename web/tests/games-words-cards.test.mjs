@@ -234,6 +234,15 @@ test("ワード当て: 辞書検証（候補・追加単語は可、存在しな
   assert.equal(wd.validateGuess("CRANE"), null);
 });
 
+test("ワード当て: 一般的な5文字語が辞書に受理される（バッチC辞書増量）", () => {
+  // 以前は辞書が約310語しかなく HELLO/WORLD 等の一般語が弾かれていた
+  for (const w of ["HELLO", "WORLD", "LIGHT", "MOUSE", "HAPPY", "WATER", "HOUSE", "MUSIC", "MONEY", "SMILE"]) {
+    assert.equal(wd.validateGuess(w), null, `${w} が辞書にない`);
+    assert.equal(wd.isValidGuess(w), true, `${w} が推測できない`);
+  }
+  assert.ok(wd.WORDLE_DICTIONARY.size >= 690, `辞書が増えていない: ${wd.WORDLE_DICTIONARY.size}`);
+});
+
 test("ワード当て: 正解で勝ち、6回外すと負け、当たれば答えが明かせる状態になる", () => {
   let s = wd.createWordleGameWithAnswer("CRANE");
   const miss = wd.submitGuess(s, "SLATE");

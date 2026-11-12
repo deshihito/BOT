@@ -2,7 +2,45 @@
 // めくる操作は flipCard、2枚開いたあとの照合は settlePair が行う
 // （UI 側は不一致のとき少し見せてから settlePair を呼ぶ）。
 
-export const MEMORY_ICONS = ["🍎", "🍋", "🍇", "🍓", "🍑", "🍈", "🍒", "🥝"] as const;
+export type MemoryShape =
+  | "circle"
+  | "triangle"
+  | "square"
+  | "star"
+  | "diamond"
+  | "heart"
+  | "pentagon"
+  | "cross";
+
+export interface MemorySymbol {
+  /** 絵柄 ID（MemCard.icon に入る）。 */
+  id: string;
+  shape: MemoryShape;
+  /** 塗り色（CSS カラー）。 */
+  color: string;
+  /** 読み上げ・ラベル用の呼び名。 */
+  label: string;
+}
+
+/** ペアの絵柄は「形×色」の図形8種。色と形の両方が8種すべて異なる。 */
+export const MEMORY_SYMBOLS: MemorySymbol[] = [
+  { id: "circle", shape: "circle", color: "#d93a3a", label: "赤い丸" },
+  { id: "triangle", shape: "triangle", color: "#2f6fd0", label: "青い三角" },
+  { id: "square", shape: "square", color: "#2f9e5f", label: "緑の四角" },
+  { id: "star", shape: "star", color: "#d99a06", label: "金の星" },
+  { id: "diamond", shape: "diamond", color: "#8b4fc0", label: "紫の菱形" },
+  { id: "heart", shape: "heart", color: "#ef6fa5", label: "ピンクのハート" },
+  { id: "pentagon", shape: "pentagon", color: "#ef7d1a", label: "オレンジの五角形" },
+  { id: "cross", shape: "cross", color: "#0e9594", label: "青緑の十字" },
+];
+
+/** 絵柄 ID の列（createMemoryGame の既定ペア数に使う）。 */
+export const MEMORY_ICONS: string[] = MEMORY_SYMBOLS.map((s) => s.id);
+
+/** 絵柄 ID から図形定義を引く。 */
+export function memorySymbol(icon: string): MemorySymbol {
+  return MEMORY_SYMBOLS.find((s) => s.id === icon) ?? MEMORY_SYMBOLS[0];
+}
 
 export type MemCard = {
   icon: string;

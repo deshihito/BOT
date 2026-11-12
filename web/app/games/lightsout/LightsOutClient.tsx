@@ -2,7 +2,7 @@
 // ライツアウト。ロジックは lib/lightsout.ts（解ける盤を逆再生で生成）。
 // 押したマスと上下左右が反転する。全消灯でクリア。端末内で完結。
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   createLightsOutGame,
   litCount,
@@ -11,6 +11,8 @@ import {
   type LightsOutSize,
   type LightsOutState,
 } from "@/lib/lightsout";
+import { sfxFlip, sfxWin } from "@/lib/sfx";
+import { EndScreen } from "../GameJuice";
 import { useGamesNav } from "../GamesShell";
 
 const SIZES: { key: LightsOutSize; label: string }[] = [
@@ -41,12 +43,26 @@ export default function LightsOutClient() {
   const [difficulty, setDifficulty] = useState<LightsOutDifficulty>("normal");
   const [state, setState] = useState<LightsOutState>(() => newGame(5, "normal"));
   const [seconds, setSeconds] = useState(0);
+  const prevStatusRef = useRef(state.status);
+
+  // 終局遷移の瞬間だけジングルを鳴らす。
+  useEffect(() => {
+    const prev = prevStatusRef.current;
+    prevStatusRef.current = state.status;
+    if (prev !== state.status && state.status === "won") sfxWin();
+  }, [state.status]);
 
   useEffect(() => {
-    if (state.status === "won" || state.moves === 0) return;
+    if (state.status === "won") return;
     const id = setInterval(() => setSeconds((s) => s + 1), 1000);
     return () => clearInterval(id);
-  }, [state.status, state.moves]);
+  }, [state.status]);
+
+  const handlePress = (i: number) => {
+    const next = pressCell(state, i);
+    if (next !== state && next.status !== "won") sfxFlip();
+    setState(next);
+  };
 
   const restart = (nextSize: LightsOutSize, nextDiff: LightsOutDifficulty) => {
     setSize(nextSize);
@@ -122,7 +138,8 @@ export default function LightsOutClient() {
             role="gridcell"
             aria-label={on ? "点灯" : "消灯"}
             aria-pressed={on}
-            onClick={() => setState((s) => pressCell(s, i))}
+            className={on ? "juice-flip" : undefined}
+            onClick={() => handlePress(i)}
             style={{
               aspectRatio: "1",
               minHeight: 52,
@@ -135,7 +152,7 @@ export default function LightsOutClient() {
               boxShadow: on ? "0 0 12px rgba(251,191,36,0.55)" : "inset 0 1px 3px rgba(0,0,0,0.5)",
             }}
           >
-            {on ? "💡" : "·"}
+            {on ? "●" : "·"}
           </button>
         ))}
       </div>
@@ -143,6 +160,16 @@ export default function LightsOutClient() {
       <p className="muted" style={{ fontSize: 13, marginTop: 10 }}>
         端から攻めると解きやすいです。どの盤も必ず解けるように作られています。
       </p>
+
+      {state.status === "won" && (
+        <div style={{ marginTop: 16 }}>
+          <EndScreen outcome="win" title="全消灯！" score={state.moves} scoreLabel="手数" onRetry={() => restart(size, difficulty)}>
+            <p className="muted">
+              {size}×{size}（{DIFFS.find((d) => d.key === difficulty)?.label}）を {formatTime(seconds)} で消し切りました。
+            </p>
+          </EndScreen>
+        </div>
+      )}
     </>
   );
 }

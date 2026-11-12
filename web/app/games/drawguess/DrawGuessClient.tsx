@@ -106,6 +106,25 @@ function Board({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
     playSe(myRank === 1 ? "win" : "click");
   }, [state, mySeat, view.code]);
 
+  // SE: 自分が描き手になるフェーズ遷移で1回だけ鳴らす。
+  const prevPhaseRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!state) return;
+    const key = `${view.code}:${state.roundIndex}:${state.phase}:${state.drawerSeat ?? ""}`;
+    const prev = prevPhaseRef.current;
+    prevPhaseRef.current = key;
+    if (prev !== null && prev !== key && state.you.isDrawer && (state.phase === "choosing" || state.phase === "drawing")) playSe("turn");
+  }, [state, view.code]);
+
+  // SE: 自分が正解した遷移で1回だけ鳴らす。
+  const prevCorrectRef = useRef<boolean | null>(null);
+  useEffect(() => {
+    if (!state) return;
+    const prev = prevCorrectRef.current;
+    prevCorrectRef.current = state.you.correct;
+    if (prev === false && state.you.correct) playSe("coin");
+  }, [state]);
+
   if (!state) return <p className="og-muted">部屋の準備を待っています…</p>;
 
   const atStrokeLimit = strokes.length >= DG_MAX_STROKES;
@@ -169,7 +188,7 @@ function Board({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
       <div className="og-score-row" role="status">
         {state.players.map((p) => (
           <span key={p.seat} className="og-score">
-            {p.isDrawer ? "✏️ " : ""}
+            {p.isDrawer ? "（描き手）" : ""}
             {p.name}
             {p.seat === mySeat ? "（あなた）" : ""}
             {p.left ? "（退出）" : ""} ・ {p.score}点
@@ -192,7 +211,7 @@ function Board({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
 
       {state.phase === "choosing" ? (
         state.you.isDrawer && state.wordOptions ? (
-          <div style={{ marginTop: 16 }}>
+          <div className="juice-pop" style={{ marginTop: 16 }}>
             <p style={{ fontWeight: 800, margin: "0 0 10px" }}>描くお題を選んでください</p>
             <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
               {state.wordOptions.map((word, i) => (
@@ -238,7 +257,7 @@ function Board({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
           {state.phase === "drawing" && !state.you.isDrawer ? (
             <p role="status" style={{ margin: "14px 0 8px", fontWeight: 800, fontSize: 18 }}>
               お題は {state.wordLength ?? "？"} 文字
-              {state.you.correct ? " ・ あなたは正解済みです🎉" : ""}
+              {state.you.correct ? " ・ あなたは正解済みです" : ""}
             </p>
           ) : null}
 
@@ -367,9 +386,10 @@ function Board({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
 
           {state.feed.length > 0 ? (
             <ul style={{ listStyle: "none", margin: "14px 0 0", padding: 0, display: "grid", gap: 6 }}>
-              {state.feed.slice(-8).map((entry, i) => (
+              {state.feed.slice(-8).map((entry, i, arr) => (
                 <li
                   key={`${i}-${entry.seat}`}
+                  className={i === arr.length - 1 ? "juice-pop" : undefined}
                   style={{
                     padding: "7px 12px",
                     borderRadius: 10,
@@ -377,14 +397,14 @@ function Board({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
                     background: entry.correct ? "#f0fdf4" : "#fffdf6",
                   }}
                 >
-                  <strong>{nameOf(entry.seat)}</strong>: {entry.correct ? "🎉 正解！" : entry.text}
+                  <strong>{nameOf(entry.seat)}</strong>: {entry.correct ? "正解！" : entry.text}
                 </li>
               ))}
             </ul>
           ) : null}
 
           {state.phase === "reveal" ? (
-            <p className="og-turn-banner" role="status" style={{ marginTop: 14 }}>
+            <p className="og-turn-banner juice-slide" role="status" style={{ marginTop: 14 }}>
               お題は「{state.word ?? "—"}」でした
               {state.correctSeats.length > 0
                 ? ` ・ 正解: ${state.correctSeats.map((s) => nameOf(s)).join("、")}`
@@ -395,8 +415,8 @@ function Board({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
       ) : null}
 
       {state.phase === "finished" ? (
-        <div style={{ textAlign: "center" }}>
-          <h2 style={{ fontSize: 24, margin: "10px 0" }}>結果発表</h2>
+        <div className="juice-slide" style={{ textAlign: "center" }}>
+          <h2 className={state.standings?.find((s) => s.seat === mySeat)?.rank === 1 ? "juice-pulse" : undefined} style={{ fontSize: 24, margin: "10px 0" }}>結果発表</h2>
           {state.word ? <p className="muted">最後のお題は「{state.word}」でした。</p> : null}
           <ul style={{ listStyle: "none", margin: 0, padding: 0, display: "grid", gap: 8 }}>
             {(state.standings ?? [...state.players].map((p) => ({ seat: p.seat, score: p.score, rank: 0 })))
@@ -420,7 +440,7 @@ function Board({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
                   >
                     <span>
                       {s.rank}位 {p.name}
-                      {s.seat === mySeat ? "（あなた）🎉" : ""}
+                      {s.seat === mySeat ? "（あなた）" : ""}
                       {p.left ? "（退出）" : ""}
                     </span>
                     <strong>{s.score}点</strong>

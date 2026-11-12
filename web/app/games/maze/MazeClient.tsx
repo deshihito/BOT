@@ -2,7 +2,7 @@
 // めいろ。ロジックは lib/maze.ts（完全迷路を生成し、最短路も lib で求める）。
 // 矢印キー／WASD／画面ボタンで移動。ヒントで最短路のマスをうっすら光らせる。端末内で完結。
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   createMazeGame,
   movePlayer,
@@ -11,6 +11,8 @@ import {
   type MazeSizeKey,
   type MazeState,
 } from "@/lib/maze";
+import { sfxSlide, sfxWin } from "@/lib/sfx";
+import { EndScreen } from "../GameJuice";
 import { useGamesNav } from "../GamesShell";
 
 const SIZE_KEYS: MazeSizeKey[] = ["small", "medium", "large"];
@@ -46,22 +48,45 @@ export default function MazeClient() {
   const [state, setState] = useState<MazeState>(() => newGame("medium"));
   const [showHint, setShowHint] = useState(false);
   const [seconds, setSeconds] = useState(0);
+  const prevStatusRef = useRef(state.status);
+  const stateRef = useRef(state);
 
   useEffect(() => {
-    if (state.status === "won" || state.moves === 0) return;
+    stateRef.current = state;
+  }, [state]);
+
+  // 終局遷移の瞬間だけジングルを鳴らす。
+  useEffect(() => {
+    const prev = prevStatusRef.current;
+    prevStatusRef.current = state.status;
+    if (prev !== state.status && state.status === "won") sfxWin();
+  }, [state.status]);
+
+  useEffect(() => {
+    if (state.status === "won") return;
     const id = setInterval(() => setSeconds((s) => s + 1), 1000);
     return () => clearInterval(id);
-  }, [state.status, state.moves]);
+  }, [state.status]);
+
+  const doMove = (dir: MazeDir) => {
+    const current = stateRef.current;
+    const next = movePlayer(current, dir);
+    if (next === current) return;
+    if (next.status !== "won") sfxSlide();
+    setState(next);
+  };
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const dir = KEY_TO_DIR[e.key];
       if (!dir) return;
       e.preventDefault();
-      setState((s) => movePlayer(s, dir));
+      doMove(dir);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
+    // doMove は stateRef 経由で最新状態を読むため、登録は初回のみでよい。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const restart = (next: MazeSizeKey) => {
@@ -118,14 +143,14 @@ export default function MazeClient() {
           className={showHint ? "classic-btn classic-btn-active" : "classic-btn"}
           onClick={() => setShowHint((v) => !v)}
         >
-          💡 最短路ヒント
+          最短路ヒント
         </button>
       </div>
 
       <p className="classic-status" role="status">
         {state.moves} 手 ・ ⏱ {formatTime(seconds)}
         {state.status === "won"
-          ? ` ・ 🎉 ゴール！ ${state.moves} 手 / 最短 ${state.solution.length - 1} 手でした。`
+          ? ` ・ ゴール！ ${state.moves} 手 / 最短 ${state.solution.length - 1} 手でした。`
           : showHint
             ? " ・ 光っているマスが最短路です。"
             : ""}
@@ -151,6 +176,7 @@ export default function MazeClient() {
             <div
               key={i}
               role="gridcell"
+              className={isPlayer ? "juice-pop" : undefined}
               aria-label={isPlayer ? "現在位置" : isGoal ? "ゴール" : undefined}
               style={{
                 aspectRatio: "1",
@@ -171,7 +197,7 @@ export default function MazeClient() {
                       : "transparent",
               }}
             >
-              {isPlayer ? "🏃" : isGoal ? "🏁" : ""}
+              {isPlayer ? <span style={{ color: "#1565c0" }}>●</span> : isGoal ? <span style={{ color: "#2e7d32" }}>◎</span> : ""}
             </div>
           );
         })}
@@ -188,23 +214,33 @@ export default function MazeClient() {
         }}
       >
         <span />
-        <button type="button" style={padBtn} aria-label="上へ" onClick={() => setState((s) => movePlayer(s, "up"))}>
+        <button type="button" style={padBtn} aria-label="上へ" onClick={() => doMove("up")}>
           ↑
         </button>
         <span />
-        <button type="button" style={padBtn} aria-label="左へ" onClick={() => setState((s) => movePlayer(s, "left"))}>
+        <button type="button" style={padBtn} aria-label="左へ" onClick={() => doMove("left")}>
           ←
         </button>
-        <button type="button" style={padBtn} aria-label="下へ" onClick={() => setState((s) => movePlayer(s, "down"))}>
+        <button type="button" style={padBtn} aria-label="下へ" onClick={() => doMove("down")}>
           ↓
         </button>
-        <button type="button" style={padBtn} aria-label="右へ" onClick={() => setState((s) => movePlayer(s, "right"))}>
+        <button type="button" style={padBtn} aria-label="右へ" onClick={() => doMove("right")}>
           →
         </button>
       </div>
       <p className="muted" style={{ fontSize: 13, marginTop: 10 }}>
         矢印キー・WASD でも動けます。
       </p>
+
+      {state.status === "won" && (
+        <div style={{ marginTop: 16 }}>
+          <EndScreen outcome="win" title="ゴール！" score={state.moves} scoreLabel="手数" onRetry={() => restart(size)}>
+            <p className="muted">
+              最短 {state.solution.length - 1} 手のところを {state.moves} 手・{formatTime(seconds)} でゴールしました。
+            </p>
+          </EndScreen>
+        </div>
+      )}
     </>
   );
 }

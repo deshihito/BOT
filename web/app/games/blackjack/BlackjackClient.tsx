@@ -2,7 +2,7 @@
 // ブラックジャック。ロジックは lib/blackjack.ts（配当 3:2、ディーラーは17でスタンド）。
 // チップは端末内だけの遊び用ポイントで localStorage に保存する。サーバーへ送信しない。
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   BJ_INITIAL_CHIPS,
   BJ_MIN_BET,
@@ -19,6 +19,8 @@ import {
   type Card,
 } from "@/lib/blackjack";
 import { useGamesNav } from "../GamesShell";
+import { sfxCorrect, sfxDeal, sfxPlace, sfxPop, sfxTap, sfxWrong } from "@/lib/sfx";
+import { ScorePop } from "../GameJuice";
 
 const CHIPS_KEY = "ago-blackjack-chips";
 const BET_OPTIONS = [10, 50, 100, 500] as const;
@@ -52,6 +54,7 @@ function CardView({ card, hidden }: { card?: Card; hidden?: boolean }) {
   return (
     <span
       aria-hidden="true"
+      className="juice-flip"
       style={{
         display: "inline-flex",
         flexDirection: "column",
@@ -120,12 +123,40 @@ export default function BlackjackClient() {
     }
   }, [hydrated, state.chips, state.phase]);
 
+  // ラウンド確定時に結果へ効果音を連動させる。
+  const settledSoundRef = useRef<BjState["result"]>(null);
+  useEffect(() => {
+    if (state.phase !== "settled" || !state.result) return;
+    if (settledSoundRef.current === state.result) return;
+    settledSoundRef.current = state.result;
+    if (state.result.delta > 0) sfxCorrect();
+    else if (state.result.delta < 0) sfxWrong();
+    else sfxTap();
+  }, [state.phase, state.result]);
+
   const player = handValue(state.playerHand);
   const dealerUp =
     state.phase === "player" && state.dealerHand.length > 0
       ? handValue([state.dealerHand[0]])
       : handValue(state.dealerHand);
   const broke = state.phase !== "player" && state.chips < BJ_MIN_BET;
+
+  const dealRound = () => {
+    sfxDeal();
+    setState((s) => startRound(s, bet));
+  };
+  const doHit = () => {
+    sfxDeal();
+    setState((s) => hit(s));
+  };
+  const doStand = () => {
+    sfxPlace();
+    setState((s) => stand(s));
+  };
+  const doDouble = () => {
+    sfxDeal();
+    setState((s) => doubleDown(s));
+  };
 
   const chipBtn = (amount: number): React.CSSProperties => ({
     padding: "8px 14px",
@@ -161,6 +192,9 @@ export default function BlackjackClient() {
         {state.result
           ? ` ・ ${state.result.message}（${state.result.delta >= 0 ? "+" : ""}${state.result.delta}）`
           : ""}
+        {state.phase === "settled" && state.result && state.result.delta !== 0 ? (
+          <ScorePop key={state.chips} amount={state.result.delta} />
+        ) : null}
       </p>
 
       <div style={{ display: "grid", gap: 18, maxWidth: 640 }}>
@@ -177,9 +211,9 @@ export default function BlackjackClient() {
             {state.dealerHand.length === 0 && <span className="muted">まだ配られていません</span>}
             {state.dealerHand.map((card, i) =>
               state.phase === "player" && i === 1 ? (
-                <CardView key={i} hidden />
+                <CardView key={`${i}-hole`} hidden />
               ) : (
-                <CardView key={i} card={card} />
+                <CardView key={`${i}-${card.suit}-${card.rank}`} card={card} />
               ),
             )}
           </div>
@@ -195,7 +229,7 @@ export default function BlackjackClient() {
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap", minHeight: 78 }}>
             {state.playerHand.length === 0 && <span className="muted">ベットして始めましょう</span>}
             {state.playerHand.map((card, i) => (
-              <CardView key={i} card={card} />
+              <CardView key={`${i}-${card.suit}-${card.rank}`} card={card} />
             ))}
           </div>
         </section>
@@ -211,7 +245,7 @@ export default function BlackjackClient() {
                   type="button"
                   style={chipBtn(amount)}
                   disabled={amount > state.chips}
-                  onClick={() => setBet(amount)}
+                  onClick={() => { sfxTap(); setBet(amount); }}
                 >
                   {amount}
                 </button>
@@ -221,7 +255,7 @@ export default function BlackjackClient() {
               type="button"
               style={bet <= state.chips ? btnStyle : btnDisabled}
               disabled={bet > state.chips}
-              onClick={() => setState((s) => startRound(s, bet))}
+              onClick={dealRound}
             >
               配る
             </button>
@@ -229,29 +263,29 @@ export default function BlackjackClient() {
         )}
         {state.phase === "player" && (
           <>
-            <button type="button" style={btnStyle} onClick={() => setState((s) => hit(s))}>
+            <button type="button" style={btnStyle} onClick={doHit}>
               ヒット
             </button>
-            <button type="button" style={btnStyle} onClick={() => setState((s) => stand(s))}>
+            <button type="button" style={btnStyle} onClick={doStand}>
               スタンド
             </button>
             <button
               type="button"
               style={canDouble(state) ? btnStyle : btnDisabled}
               disabled={!canDouble(state)}
-              onClick={() => setState((s) => doubleDown(s))}
+              onClick={doDouble}
             >
               ダブル
             </button>
           </>
         )}
         {state.phase === "settled" && (
-          <button type="button" style={btnStyle} onClick={() => setState((s) => nextRound(s))}>
+          <button type="button" style={btnStyle} onClick={() => { sfxTap(); setState((s) => nextRound(s)); }}>
             次のラウンド
           </button>
         )}
         {broke && (
-          <button type="button" style={btnStyle} onClick={() => setState((s) => refillChips(s))}>
+          <button type="button" style={btnStyle} onClick={() => { sfxPop(); setState((s) => refillChips(s)); }}>
             チップを再支給（{BJ_INITIAL_CHIPS}）
           </button>
         )}

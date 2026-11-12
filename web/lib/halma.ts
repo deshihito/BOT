@@ -16,7 +16,12 @@
 // プレイヤー1の陣地 (8, -4) 側（右上）を目指す。逆も同様。
 
 export type HalmaPlayer = 0 | 1;
-export type HalmaStatus = "playing" | "won";
+export type HalmaStatus = "playing" | "won" | "draw";
+
+/** 手数（両者合計の着手数）の上限。達したら引き分け。 */
+export const HALMA_MAX_MOVES = 300;
+/** 同一局面（盤面＋手番）がこの回数現れたら引き分け。 */
+export const HALMA_REPETITION_LIMIT = 3;
 
 /** マス。x/y は描画用の相対座標（比率）。 */
 export type HalmaCell = { q: number; r: number; x: number; y: number };
@@ -38,7 +43,14 @@ export type HalmaState = {
   moves: number;
   seed: number;
   lastMove: { from: number; to: number } | null;
+  /** 局面キー（手番＋盤面）の履歴。同一局面の反復検出に使う。 */
+  history: string[];
 };
+
+/** 反復検出用の局面キー。 */
+function positionKey(board: number[], turn: HalmaPlayer): string {
+  return `${turn}:${board.join("")}`;
+}
 
 /** キューブ座標の6方向（(dq, dr)。s = -q - r が従属する）。 */
 const DIRS: ReadonlyArray<readonly [number, number]> = [
@@ -145,6 +157,7 @@ export function createHalmaGame(seed: number): HalmaState {
     moves: 0,
     seed: seed | 0,
     lastMove: null,
+    history: [positionKey(board, 0)],
   };
 }
 
@@ -162,6 +175,7 @@ export function halmaCustomState(board: number[], turn: HalmaPlayer): HalmaState
     moves: 0,
     seed: 0,
     lastMove: null,
+    history: [positionKey(copy, turn)],
   };
   return { ...state, winner: halmaWinnerOf(copy), status: halmaWinnerOf(copy) ? "won" : "playing" };
 }
@@ -227,6 +241,30 @@ export function halmaLegalMoves(state: HalmaState): HalmaMove[] {
   return out;
 }
 
+/**
+ * 着手後の状態を作る。手番を交代し、勝敗・同一局面の反復・手数上限を判定する。
+ * 同一局面（盤面＋手番）が HALMA_REPETITION_LIMIT 回現れたら引き分け、
+ * 手数が HALMA_MAX_MOVES に達しても引き分けにする（終わらない対局を作らない）。
+ */
+function afterMove(
+  state: HalmaState,
+  board: number[],
+  lastMove: { from: number; to: number } | null,
+): HalmaState {
+  const turn: HalmaPlayer = state.turn === 0 ? 1 : 0;
+  const moves = state.moves + 1;
+  const winner = halmaWinnerOf(board);
+  const key = positionKey(board, turn);
+  const history = [...state.history, key];
+  const base: HalmaState = { ...state, board, moves, turn, lastMove, history };
+  if (winner !== null) return { ...base, winner, status: "won" };
+  const repeated = history.filter((k) => k === key).length >= HALMA_REPETITION_LIMIT;
+  if (repeated || moves >= HALMA_MAX_MOVES) {
+    return { ...base, winner: null, status: "draw" };
+  }
+  return { ...base, winner: null, status: "playing" };
+}
+
 export function halmaApplyMove(state: HalmaState, from: number, to: number): HalmaState {
   if (state.status !== "playing") return state;
   const move = halmaMovesFrom(state, from).find((m) => m.to === to);
@@ -234,16 +272,7 @@ export function halmaApplyMove(state: HalmaState, from: number, to: number): Hal
   const board = [...state.board];
   board[to] = board[from];
   board[from] = 0;
-  const winner = halmaWinnerOf(board);
-  return {
-    ...state,
-    board,
-    winner,
-    status: winner !== null ? "won" : "playing",
-    moves: state.moves + 1,
-    turn: state.turn === 0 ? 1 : 0,
-    lastMove: { from, to },
-  };
+  return afterMove(state, board, { from, to });
 }
 
 /** 局面評価（player 視点。大きいほど有利）。 */
@@ -274,6 +303,10 @@ export function halmaChooseMove(state: HalmaState): HalmaMove | null {
     const next = halmaApplyMove(state, move.from, move.to);
     let score = halmaEvaluate(next, player);
     if (next.winner === player) score += 100000;
+    // 既出局面の再現は大きく減点し、反復ループに入らないようにする。
+    if (next.status !== "won" && state.history.includes(positionKey(next.board, next.turn))) {
+      score -= 10000;
+    }
     // ジャンプ連鎖は勢いがあるので僅かに優遇する。
     score += (move.path.length - 2) * 1.5;
     if (score > bestScore) {
@@ -290,7 +323,7 @@ export function halmaCpuTurn(state: HalmaState): HalmaState {
   const move = halmaChooseMove(state);
   if (!move) {
     // 合法手が無い場合はパスする（通常は起こらない）。
-    return { ...state, turn: state.turn === 0 ? 1 : 0, moves: state.moves + 1 };
+    return afterMove(state, [...state.board], state.lastMove);
   }
   return halmaApplyMove(state, move.from, move.to);
 }

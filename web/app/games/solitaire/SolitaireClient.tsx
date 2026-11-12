@@ -5,7 +5,9 @@
 import Link from "next/link";
 import { useEffect, useRef, useState, type CSSProperties } from "react";
 import {
+  autoFinishSolitaire,
   autoMoveToFoundation,
+  canAutoFinish,
   canStackOnFoundation,
   drawFromStock,
   foundationTotal,
@@ -24,6 +26,8 @@ import {
   type SolState,
 } from "@/lib/solitaire";
 import { useGamesNav } from "../GamesShell";
+import { sfxFlip, sfxPlace, sfxTap, sfxWin } from "@/lib/sfx";
+import { EndScreen } from "../GameJuice";
 
 type Selection =
   | { kind: "waste" }
@@ -56,9 +60,11 @@ export default function SolitaireClient() {
   }, [game.status]);
 
   /** 移動を試みる。合法なら履歴に積んで状態を差し替え、選択は必ず解除する。 */
-  const attempt = (next: SolState) => {
+  const attempt = (next: SolState, silent = false) => {
     setSelection(null);
     if (next === game) return;
+    if (next.status === "won") sfxWin();
+    else if (!silent) sfxPlace();
     if (startRef.current === null) startRef.current = Date.now();
     setHistory((h) => [...h, game]);
     setGame(next);
@@ -124,7 +130,10 @@ export default function SolitaireClient() {
       moveSelectionToTableau(col);
       return;
     }
-    if (card.faceUp) setSelection({ kind: "tableau", col, index });
+    if (card.faceUp) {
+      sfxTap();
+      setSelection({ kind: "tableau", col, index });
+    }
   };
 
   const onFoundation = (pile: number) => {
@@ -133,6 +142,7 @@ export default function SolitaireClient() {
       return;
     }
     if (game.foundations[pile].length > 0) {
+      sfxTap();
       setSelection(
         selection?.kind === "foundation" && selection.pile === pile
           ? null
@@ -215,6 +225,7 @@ export default function SolitaireClient() {
       aria-pressed={selected}
       onClick={onClick}
       onDoubleClick={onDoubleClick}
+      className={card.faceUp ? "juice-flip" : undefined}
       style={{ ...cardStyle(card, selected), ...extra }}
     >
       {card.faceUp ? (
@@ -255,13 +266,13 @@ export default function SolitaireClient() {
         <div style={{ display: "flex", gap: "1.4vw", justifyContent: "space-between", marginBottom: 14 }}>
           <div style={{ display: "flex", gap: "1.4vw" }}>
             {stockTop ? (
-              renderCard(stockTop, false, () => attempt(drawFromStock(game)))
+              renderCard(stockTop, false, () => { sfxFlip(); attempt(drawFromStock(game), true); })
             ) : (
               <button
                 type="button"
                 style={slotStyle(false)}
                 aria-label="捨て札を戻して再循環"
-                onClick={() => attempt(drawFromStock(game))}
+                onClick={() => { sfxFlip(); attempt(drawFromStock(game), true); }}
               >
                 ↻
               </button>
@@ -270,8 +281,10 @@ export default function SolitaireClient() {
               renderCard(
                 wasteTop,
                 selection?.kind === "waste",
-                () =>
-                  setSelection(selection?.kind === "waste" ? null : { kind: "waste" }),
+                () => {
+                  sfxTap();
+                  setSelection(selection?.kind === "waste" ? null : { kind: "waste" });
+                },
                 () => attempt(tryMoveToFoundation(game, { kind: "waste" })),
               )
             ) : (
@@ -358,15 +371,28 @@ export default function SolitaireClient() {
         <button type="button" style={btnStyle} onClick={autoAll}>
           組札へ自動移動
         </button>
+        {canAutoFinish(game) && (
+          <button
+            type="button"
+            style={{ ...btnStyle, borderColor: "#d97706", fontWeight: 700 }}
+            onClick={() => attempt(autoFinishSolitaire(game))}
+          >
+            自動で仕上げる
+          </button>
+        )}
         <button type="button" style={btnStyle} onClick={restart}>
           もう一度
         </button>
       </div>
 
       {game.status === "won" ? (
-        <p style={{ textAlign: "center", fontSize: 18, marginTop: 16 }} role="status">
-          🎉 クリア！ お見事でした。
-        </p>
+        <div style={{ maxWidth: 580, margin: "16px auto 0" }}>
+          <EndScreen outcome="win" title="クリア！" onRetry={restart}>
+            <p className="muted" style={{ margin: 0 }}>
+              {game.moves} 手、{formatTime(elapsed)} でクリアです。お見事でした。
+            </p>
+          </EndScreen>
+        </div>
       ) : null}
     </>
   );

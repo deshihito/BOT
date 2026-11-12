@@ -15,11 +15,14 @@ import {
   playerProgress,
   rpmFraction,
   shift,
+  shiftQuality,
   shiftQualityLabel,
   type DragDifficulty,
   type DragState,
   createDragRace,
 } from "@/lib/dragrace";
+import { sfxCorrect, sfxLose, sfxSlide, sfxTap, sfxTick, sfxWin, sfxWrong } from "@/lib/sfx";
+import { EndScreen } from "../GameJuice";
 import { useGamesNav } from "../GamesShell";
 
 const DIFFICULTIES: { key: DragDifficulty; label: string }[] = [
@@ -40,6 +43,7 @@ export default function DragRaceClient() {
     createDragRace(Date.now() % 2147483647, "normal"),
   );
   const [green, setGreen] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
   const [elapsed, setElapsed] = useState(0); // 発進からの経過 ms（表示・操作用）
   const [best, setBest] = useState<number | null>(null);
   const greenAtRef = useRef(0);
@@ -47,6 +51,29 @@ export default function DragRaceClient() {
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const savedRef = useRef<string | null>(null);
+  const prevPhaseRef = useRef(state.phase);
+  const bestAtStartRef = useRef<number | null>(null);
+  const [resultNewBest, setResultNewBest] = useState(false);
+  const [resultPrevBest, setResultPrevBest] = useState<number | null>(null);
+
+  // 終局遷移の瞬間だけジングルを鳴らす（ベスト判定はレース開始時点のベストで行う）。
+  useEffect(() => {
+    const prev = prevPhaseRef.current;
+    prevPhaseRef.current = state.phase;
+    if (prev === state.phase) return;
+    if (state.phase === "finished") {
+      const total = state.playerTotalMs;
+      const startBest = bestAtStartRef.current;
+      const isNew = total !== null && (startBest === null || total < startBest);
+      setResultNewBest(isNew);
+      setResultPrevBest(isNew ? null : startBest);
+      if (state.winner === "player") sfxWin();
+      else if (state.winner === "draw") sfxTap();
+      else sfxLose();
+    } else if (state.phase === "fouled") {
+      sfxWrong();
+    }
+  }, [state.phase, state.playerTotalMs, state.winner]);
 
   const clearTimers = () => {
     if (timeoutRef.current) clearTimeout(timeoutRef.current);
@@ -84,6 +111,7 @@ export default function DragRaceClient() {
     clearTimers();
     setDifficulty(diff);
     setGreen(false);
+    setNotice(null);
     setElapsed(0);
     savedRef.current = null;
     setState(createDragRace(Date.now() % 2147483647, diff));
@@ -92,12 +120,17 @@ export default function DragRaceClient() {
   const startCountdown = () => {
     clearTimers();
     setGreen(false);
+    setNotice(null);
     setElapsed(0);
+    bestAtStartRef.current = best;
+    setResultNewBest(false);
+    setResultPrevBest(null);
     setState((s) => {
       const next = beginCountdown(s);
       if (next.phase === "waiting") {
         timeoutRef.current = setTimeout(() => {
           greenAtRef.current = performance.now();
+          sfxTick();
           setGreen(true);
         }, next.waitMs);
       }
@@ -114,8 +147,21 @@ export default function DragRaceClient() {
         return;
       }
       const reaction = performance.now() - greenAtRef.current;
-      setState((s) => launch(s, reaction));
+      const launched = launch(state, reaction);
+      if (launched.phase !== "running") {
+        // 反応が遅すぎる（5秒超）などで発進できなかった。無言で固まらせず、
+        // 理由を表示して ready に戻し、スタートからやり直せるようにする。
+        clearTimers();
+        setGreen(false);
+        setNotice("反応が遅すぎて発進できませんでした（グリーンから5秒超）。スタートからやり直してください。");
+        setState((s) => (s.phase === "waiting" ? { ...s, phase: "ready" as const } : s));
+        return;
+      }
+      setNotice(null);
+      sfxSlide();
+      setState(launched);
       launchAtRef.current = performance.now();
+      if (intervalRef.current) clearInterval(intervalRef.current);
       intervalRef.current = setInterval(() => {
         const el = performance.now() - launchAtRef.current;
         setElapsed(el);
@@ -133,7 +179,15 @@ export default function DragRaceClient() {
     if (state.phase === "running") {
       const el = performance.now() - launchAtRef.current;
       setElapsed(el);
-      setState((s) => shift(s, el));
+      const next = shift(state, el);
+      if (next !== state) {
+        const err = next.shiftErrors[next.shiftsDone - 1];
+        const q = typeof err === "number" ? shiftQuality(err) : "ok";
+        if (q === "perfect" || q === "good") sfxCorrect();
+        else if (q === "ok") sfxTap();
+        else sfxWrong();
+      }
+      setState(next);
     }
   };
 
@@ -147,7 +201,8 @@ export default function DragRaceClient() {
   const cProg = cpuProgress(state, raceTotalElapsed) * 100;
 
   const statusText =
-    state.phase === "ready"
+    notice ??
+    (state.phase === "ready"
       ? "スタートを押すとライトが点きます。グリーンになったらすぐ押そう。"
       : state.phase === "waiting"
         ? green
@@ -165,7 +220,7 @@ export default function DragRaceClient() {
               ? "勝ち! 相手より速かった。"
               : state.winner === "draw"
                 ? "まったくの同タイムで引き分け。"
-                : "負け…反応とシフトを磨こう。";
+                : "負け…反応とシフトを磨こう。");
 
   const actionLabel =
     state.phase === "waiting"
@@ -211,7 +266,7 @@ export default function DragRaceClient() {
           type="button"
           className="classic-btn"
           onClick={startCountdown}
-          disabled={state.phase === "waiting" || state.phase === "running"}
+          disabled={state.phase !== "ready"}
         >
           スタート
         </button>
@@ -281,7 +336,7 @@ export default function DragRaceClient() {
                     transition: "width 60ms linear",
                   }}
                 />
-                <span style={{ position: "absolute", right: 6, top: 4, fontSize: 16 }}>🏎️</span>
+                <span aria-hidden style={{ position: "absolute", right: 6, top: "50%", transform: "translateY(-50%)", width: 22, height: 11, borderRadius: 3, background: "linear-gradient(180deg, #4b5563 0 45%, #1f2937 45% 100%)", boxShadow: "inset 0 0 0 1px rgba(255,255,255,0.35)" }} />
               </div>
             </div>
           ))}
@@ -358,10 +413,31 @@ export default function DragRaceClient() {
         </button>
 
         {state.phase === "finished" && (
-          <p style={{ textAlign: "center", marginTop: 12 }}>
-            あなた {fmt(state.playerTotalMs)}（反応 {state.reactionMs}ms） / CPU {fmt(state.cpuTotalMs)}
-            （反応 {state.cpuReactionMs}ms）
-          </p>
+          <div style={{ marginTop: 16 }}>
+            <EndScreen
+              outcome={state.winner === "player" ? "win" : state.winner === "draw" ? "draw" : "lose"}
+              title={
+                state.winner === "player" ? "勝ち！" : state.winner === "draw" ? "まったくの同タイム" : "負け…"
+              }
+              score={state.playerTotalMs !== null ? Math.round(state.playerTotalMs) : undefined}
+              scoreLabel="あなたのタイム（ms）"
+              newBest={resultNewBest}
+              previousBest={resultPrevBest !== null ? Math.round(resultPrevBest) : null}
+              onRetry={() => restart(difficulty)}
+            >
+              <p className="muted">
+                あなた {fmt(state.playerTotalMs)}（反応 {state.reactionMs}ms） / CPU {fmt(state.cpuTotalMs)}
+                （反応 {state.cpuReactionMs}ms）
+              </p>
+            </EndScreen>
+          </div>
+        )}
+        {state.phase === "fouled" && (
+          <div style={{ marginTop: 16 }}>
+            <EndScreen outcome="lose" title="フライングで失格…" onRetry={() => restart(difficulty)}>
+              <p className="muted">グリーンになるまで待ってから押そう。</p>
+            </EndScreen>
+          </div>
         )}
       </div>
     </>

@@ -11,6 +11,8 @@ import {
   type MoleKind,
   type ScheduledMole,
 } from "@/lib/mole";
+import { sfxCorrect, sfxLose, sfxPlace, sfxWin, sfxWrong } from "@/lib/sfx";
+import { EndScreen, ScorePop } from "../GameJuice";
 import { useGamesNav } from "../GamesShell";
 
 const BEST_KEY = "ago-mole-best";
@@ -26,6 +28,31 @@ function loadBest(): number {
   }
 }
 
+/** モグラの顔を SVG で描く（絵文字は使わない）。hit 時は目が×になる。 */
+function MoleFace({ hit }: { hit: boolean }) {
+  return (
+    <svg viewBox="0 0 48 48" width="72%" height="72%" aria-hidden style={{ display: "block" }}>
+      <circle cx="10" cy="9" r="5.5" fill="#6d4c41" />
+      <circle cx="38" cy="9" r="5.5" fill="#6d4c41" />
+      <circle cx="24" cy="26" r="16.5" fill="#8d6e63" />
+      <ellipse cx="24" cy="32.5" rx="8.6" ry="6" fill="#d7ccc8" />
+      <ellipse cx="24" cy="29.5" rx="3.2" ry="2.3" fill="#4e342e" />
+      {hit ? (
+        <>
+          <path d="M12.5 18.5l5 5m0-5l-5 5" stroke="#212121" strokeWidth="2.2" strokeLinecap="round" />
+          <path d="M30.5 18.5l5 5m0-5l-5 5" stroke="#212121" strokeWidth="2.2" strokeLinecap="round" />
+        </>
+      ) : (
+        <>
+          <circle cx="16" cy="21" r="2.1" fill="#212121" />
+          <circle cx="32" cy="21" r="2.1" fill="#212121" />
+        </>
+      )}
+      <rect x="22.3" y="35.5" width="3.4" height="4.4" rx="0.8" fill="#ffffff" stroke="#bdbdbd" strokeWidth="0.5" />
+    </svg>
+  );
+}
+
 export default function MoleClient() {
   const { prefix } = useGamesNav();
   const [phase, setPhase] = useState<Phase>("ready");
@@ -36,6 +63,17 @@ export default function MoleClient() {
   const [remainSec, setRemainSec] = useState(30);
   const [active, setActive] = useState<ActiveMole[]>([]);
   const [lastGain, setLastGain] = useState<{ hole: number; gained: number; id: number } | null>(null);
+  const [resultInfo, setResultInfo] = useState<{ newBest: boolean; prevBest: number } | null>(null);
+  const prevPhaseRef = useRef<Phase>("ready");
+
+  // 終局遷移の瞬間だけジングルを鳴らす。
+  useEffect(() => {
+    const prev = prevPhaseRef.current;
+    prevPhaseRef.current = phase;
+    if (prev === phase || phase !== "finished") return;
+    if (resultInfo?.newBest) sfxWin();
+    else sfxLose();
+  }, [phase, resultInfo]);
 
   const mountedRef = useRef(true);
   const rafRef = useRef(0);
@@ -67,6 +105,9 @@ export default function MoleClient() {
     activeRef.current = [];
     if (!mountedRef.current) return;
     setActive([]);
+    // 保存前のベストで更新判定を控える。
+    const prevBest = loadBest();
+    setResultInfo({ newBest: scoreRef.current > 0 && scoreRef.current > prevBest, prevBest });
     setPhase("finished");
     setRemainSec(0);
     if (scoreRef.current > loadBest()) {
@@ -89,6 +130,7 @@ export default function MoleClient() {
     setMaxCombo(0);
     setActive([]);
     setLastGain(null);
+    setResultInfo(null);
     setRemainSec(30);
     setPhase("playing");
 
@@ -137,9 +179,12 @@ export default function MoleClient() {
 
   const whack = (hole: number) => {
     if (phase !== "playing") return;
+    // ヒット済みモグラの再タップは空振りにしない（消えるまでの間もコンボを切らない）。
+    if (activeRef.current.some((a) => a.hole === hole && a.hit)) return;
     const target = activeRef.current.find((a) => a.hole === hole && !a.hit);
     if (!target) {
       // 空振り: コンボリセット
+      sfxWrong();
       const r = applyMoleMiss(scoreRef.current);
       comboRef.current = r.combo;
       setCombo(0);
@@ -147,6 +192,8 @@ export default function MoleClient() {
       return;
     }
     const kind: MoleKind = target.kind;
+    if (kind === "gold") sfxCorrect();
+    else sfxPlace();
     const result = applyMoleHit(scoreRef.current, comboRef.current, kind);
     scoreRef.current = result.score;
     comboRef.current = result.combo;
@@ -214,13 +261,15 @@ export default function MoleClient() {
         {Array.from({ length: 9 }, (_, hole) => {
           const mole = active.find((a) => a.hole === hole);
           const isGold = mole?.kind === "gold";
-          const gain = lastGain && lastGain.hole === hole && mole ? lastGain : null;
+          // +得点表示は、そのモグラ（id 一致）が出ている間だけ。次のモグラには引き継がない。
+          const gain = lastGain && lastGain.hole === hole && mole && lastGain.id === mole.id ? lastGain : null;
           return (
             <button
               key={hole}
               type="button"
               role="gridcell"
               aria-label={mole ? (isGold ? "金モグラ" : "モグラ") : "穴"}
+              className={mole && !mole.hit ? "juice-pop" : undefined}
               onPointerDown={() => whack(hole)}
               style={{
                 aspectRatio: "1 / 1",
@@ -246,11 +295,11 @@ export default function MoleClient() {
                 WebkitTapHighlightColor: "transparent",
               }}
             >
-              {mole ? (mole.hit ? "💫" : "🦫") : ""}
-              {isGold && !mole?.hit && mole ? <span style={{ position: "absolute", top: 2, right: 6, fontSize: 14 }}>✨</span> : null}
+              {mole ? <MoleFace hit={mole.hit} /> : ""}
+              {isGold && !mole?.hit && mole ? <span style={{ position: "absolute", top: 2, right: 6, fontSize: 14, color: "#f9a825" }}>★</span> : null}
               {gain ? (
-                <span style={{ position: "absolute", top: -8, fontSize: 13, fontWeight: 800, color: isGold ? "#e8c832" : "#fff" }}>
-                  +{gain.gained}
+                <span style={{ position: "absolute", top: -8 }}>
+                  <ScorePop key={gain.id} amount={gain.gained} />
                 </span>
               ) : null}
             </button>
@@ -259,10 +308,20 @@ export default function MoleClient() {
       </div>
 
       {phase === "finished" && (
-        <p className="classic-status" role="alert">
-          ⏱ 終了！ スコア {score} ・ 最大コンボ {maxCombo} ・ ベスト {best}
-          {score >= best && score > 0 ? " ・ ベスト更新！" : ""}
-        </p>
+        <div style={{ maxWidth: 420, margin: "16px auto 0" }}>
+          <EndScreen
+            outcome="finish"
+            title="終了！"
+            score={score}
+            scoreLabel="スコア"
+            newBest={resultInfo?.newBest ?? false}
+            previousBest={resultInfo && !resultInfo.newBest && resultInfo.prevBest > 0 ? resultInfo.prevBest : null}
+            onRetry={start}
+            retryLabel="もう一度遊ぶ"
+          >
+            <p className="muted">最大 {maxCombo} コンボでした。</p>
+          </EndScreen>
+        </div>
       )}
 
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "center", marginTop: 16 }}>

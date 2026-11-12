@@ -14,6 +14,8 @@ import {
   type SnakeDir,
   type SnakeState,
 } from "@/lib/snake";
+import { sfxLose, sfxPop, sfxWin } from "@/lib/sfx";
+import { EndScreen } from "../GameJuice";
 import { useGamesNav } from "../GamesShell";
 
 const BEST_KEY = "ago-snake-best";
@@ -45,6 +47,8 @@ export default function SnakeClient() {
   const { prefix } = useGamesNav();
   const [state, setState] = useState<SnakeState>(() => createSnakeGame(20, 20, Date.now() % 2147483647));
   const [best, setBest] = useState(0);
+  const [prevBest, setPrevBest] = useState<number | null>(null);
+  const prevFoodsRef = useRef(0);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const touchRef = useRef<{ x: number; y: number } | null>(null);
   const mountedRef = useRef(true);
@@ -61,6 +65,9 @@ export default function SnakeClient() {
 
   useEffect(() => {
     if (state.status === "gameover" || state.status === "won") {
+      setPrevBest(best);
+      if (state.status === "won") sfxWin();
+      else sfxLose();
       if (state.score > best) {
         setBest(state.score);
         try {
@@ -72,6 +79,12 @@ export default function SnakeClient() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state.status]);
+
+  // 餌を食べた瞬間だけ音を鳴らす（ループ内では鳴らさない）
+  useEffect(() => {
+    if (state.foodsEaten > prevFoodsRef.current && state.status === "playing") sfxPop();
+    prevFoodsRef.current = state.foodsEaten;
+  }, [state.foodsEaten, state.status]);
 
   // ゲームループ
   useEffect(() => {
@@ -207,10 +220,10 @@ export default function SnakeClient() {
       </div>
 
       <p className="classic-status" role="status">
-        スコア {state.score} ・ ベスト {best} ・ {statusText}
+        スコア <span key={state.score} className="juice-pulse" style={{ display: "inline-block" }}>{state.score}</span> ・ ベスト {best} ・ {statusText}
       </p>
 
-      <div style={{ maxWidth: 480, margin: "0 auto" }}>
+      <div style={{ maxWidth: 480, margin: "0 auto" }} className={state.status === "gameover" ? "juice-shake" : undefined}>
         <canvas
           ref={canvasRef}
           style={{ width: "100%", aspectRatio: "1 / 1", display: "block", borderRadius: 12, background: "#14231a", touchAction: "none" }}
@@ -233,9 +246,20 @@ export default function SnakeClient() {
       </div>
 
       {(state.status === "gameover" || state.status === "won") && (
-        <p className="classic-status" role="alert">
-          {state.status === "won" ? "🎉 クリア！" : "💥 ゲームオーバー"} スコア {state.score}（ベスト {best}）
-        </p>
+        <div style={{ maxWidth: 480, margin: "14px auto 0" }}>
+          <EndScreen
+            outcome={state.status === "won" ? "win" : "lose"}
+            title={state.status === "won" ? "クリア！" : "ゲームオーバー"}
+            score={state.score}
+            newBest={prevBest !== null && state.score > prevBest}
+            previousBest={prevBest}
+            onRetry={restart}
+          >
+            <p className="muted" style={{ margin: 0 }}>
+              食べた数 {state.foodsEaten} ・ 速度 Lv.{snakeSpeedLevel(state) + 1}
+            </p>
+          </EndScreen>
+        </div>
       )}
 
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "center", marginTop: 14 }}>

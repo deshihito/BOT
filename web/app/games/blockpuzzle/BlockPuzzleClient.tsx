@@ -2,7 +2,7 @@
 // ブロックスパズル。ロジックは lib/blockpuzzle.ts（シード決定的・回転なし）。
 // 下のブロックを選んで盤をタップすると配置。縦・横・3x3 がそろうと消える。端末内で完結する。
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   BP_SHAPES,
   BP_SIZE,
@@ -12,6 +12,8 @@ import {
   placePiece,
   type BpState,
 } from "@/lib/blockpuzzle";
+import { sfxCorrect, sfxLose, sfxPlace, sfxTap, sfxWrong } from "@/lib/sfx";
+import { EndScreen } from "../GameJuice";
 import { useGamesNav } from "../GamesShell";
 
 const CELL_COLORS = ["#e2534a", "#3f8f4f", "#3366cc", "#e8a13a", "#8a55c7"];
@@ -27,6 +29,20 @@ export default function BlockPuzzleClient() {
   const [selected, setSelected] = useState<number | null>(0);
   const [hover, setHover] = useState<{ r: number; c: number } | null>(null);
   const [best, setBest] = useState<number | null>(null);
+  const [resultNewBest, setResultNewBest] = useState(false);
+  const [resultPrevBest, setResultPrevBest] = useState<number | null>(null);
+  const prevStatusRef = useRef(state.status);
+
+  // 終局遷移の瞬間だけジングルを鳴らし、その時点（保存前）のベストで更新判定を控える。
+  useEffect(() => {
+    const prev = prevStatusRef.current;
+    prevStatusRef.current = state.status;
+    if (prev === state.status || state.status !== "over") return;
+    const isNew = best === null || state.score > best;
+    setResultNewBest(isNew);
+    setResultPrevBest(isNew ? null : best);
+    sfxLose();
+  }, [state.status, state.score, best]);
 
   useEffect(() => {
     try {
@@ -52,12 +68,19 @@ export default function BlockPuzzleClient() {
     setState(newGame());
     setSelected(0);
     setHover(null);
+    setResultNewBest(false);
+    setResultPrevBest(null);
   };
 
   const onCellClick = (r: number, c: number) => {
     if (selected === null || state.status !== "playing") return;
     const next = placePiece(state, selected, r, c);
-    if (next === state) return; // 置けない場所は無反応（選択は維持）
+    if (next === state) {
+      sfxWrong();
+      return; // 置けない場所は状態を変えない（選択は維持）
+    }
+    if (next.lines > state.lines) sfxCorrect();
+    else sfxPlace();
     setState(next);
     const nextUnused = next.pieces.findIndex((p) => !p.used);
     setSelected(nextUnused >= 0 ? nextUnused : null);
@@ -143,6 +166,7 @@ export default function BlockPuzzleClient() {
               type="button"
               role="gridcell"
               aria-label={cell !== null ? "埋まったマス" : "空きマス"}
+              className={cell !== null ? "juice-pop" : undefined}
               onClick={() => onCellClick(r, c)}
               onMouseEnter={() => setHover({ r, c })}
               onFocus={() => setHover({ r, c })}
@@ -180,7 +204,11 @@ export default function BlockPuzzleClient() {
               disabled={piece.used}
               aria-pressed={isSel}
               aria-label={`ブロック ${idx + 1}${piece.used ? "（使用済み）" : fits ? "" : "（置ける場所なし）"}`}
-              onClick={() => setSelected(idx)}
+              className={isSel ? "juice-pulse" : undefined}
+              onClick={() => {
+                sfxTap();
+                setSelected(idx);
+              }}
               style={{
                 padding: 8,
                 border: isSel ? "2px solid #3366cc" : "2px solid #d4d9de",
@@ -220,9 +248,20 @@ export default function BlockPuzzleClient() {
         })}
       </div>
       {state.status === "over" ? (
-        <p className="classic-status" role="status">
-          最終スコア {state.score} 点（配置 {state.placedCells} マス / 消去 {state.lines} ライン）
-        </p>
+        <div style={{ marginTop: 16 }}>
+          <EndScreen
+            outcome="finish"
+            score={state.score}
+            scoreLabel="最終スコア"
+            newBest={resultNewBest}
+            previousBest={resultPrevBest}
+            onRetry={restart}
+          >
+            <p className="muted">
+              配置 {state.placedCells} マス / 消去 {state.lines} ライン
+            </p>
+          </EndScreen>
+        </div>
       ) : null}
     </>
   );

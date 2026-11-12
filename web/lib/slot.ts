@@ -22,12 +22,12 @@ export type SlotSymbol = {
 };
 
 export const SLOT_SYMBOLS: SlotSymbol[] = [
-  { id: "cherry", glyph: "🍒", label: "チェリー", weight: 30, three: 8 },
-  { id: "lemon", glyph: "🍋", label: "レモン", weight: 25, three: 12 },
-  { id: "bell", glyph: "🔔", label: "ベル", weight: 20, three: 20 },
-  { id: "grape", glyph: "🍇", label: "ぶどう", weight: 12, three: 30 },
-  { id: "star", glyph: "⭐", label: "ほし", weight: 8, three: 80 },
-  { id: "seven", glyph: "7️⃣", label: "セブン", weight: 5, three: 300 },
+  { id: "cherry", glyph: "桜", label: "チェリー", weight: 30, three: 8 },
+  { id: "lemon", glyph: "檸", label: "レモン", weight: 25, three: 12 },
+  { id: "bell", glyph: "鐘", label: "ベル", weight: 20, three: 20 },
+  { id: "grape", glyph: "葡", label: "ぶどう", weight: 12, three: 30 },
+  { id: "star", glyph: "星", label: "ほし", weight: 8, three: 80 },
+  { id: "seven", glyph: "7", label: "セブン", weight: 5, three: 300 },
 ];
 
 export const SLOT_TOTAL_WEIGHT = SLOT_SYMBOLS.reduce((sum, s) => sum + s.weight, 0);

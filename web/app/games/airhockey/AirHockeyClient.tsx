@@ -17,6 +17,8 @@ import {
   type AirDifficulty,
   type AirHockeyState,
 } from "@/lib/airhockey";
+import { sfxCorrect, sfxLose, sfxWin, sfxWrong } from "@/lib/sfx";
+import { EndScreen } from "../GameJuice";
 import { useGamesNav } from "../GamesShell";
 
 const BEST_KEY = "ago-airhockey-best";
@@ -45,6 +47,20 @@ export default function AirHockeyClient() {
   const [difficulty, setDifficulty] = useState<AirDifficulty>("normal");
   const [display, setDisplay] = useState({ player: 0, cpu: 0, finished: false, winner: null as "player" | "cpu" | null });
   const [wins, setWins] = useState(0);
+  const prevDisplayRef = useRef(display);
+
+  // 得点の変化と終局遷移にだけ音を付ける（毎フレームの描画には付けない）。
+  useEffect(() => {
+    const prev = prevDisplayRef.current;
+    prevDisplayRef.current = display;
+    if (!prev.finished && display.finished) {
+      if (display.winner === "player") sfxWin();
+      else sfxLose();
+      return;
+    }
+    if (display.player > prev.player) sfxCorrect();
+    else if (display.cpu > prev.cpu) sfxWrong();
+  }, [display]);
 
   const setPhase = useCallback((p: Phase) => {
     phaseRef.current = p;
@@ -152,7 +168,7 @@ export default function AirHockeyClient() {
   const finished = display.finished;
   const statusText = finished
     ? display.winner === "player"
-      ? "🎉 あなたの勝ち！"
+      ? "あなたの勝ち！"
       : "CPUの勝ち…"
     : phase === "ready"
       ? `先に ${AIR_WIN_SCORE} 点で勝ち。スタートを押して開始。`
@@ -258,6 +274,21 @@ export default function AirHockeyClient() {
       <p className="muted" style={{ textAlign: "center", fontSize: 13 }}>
         パドルを速く動かして打つと、速いシュートになります。
       </p>
+
+      {finished && (
+        <div style={{ maxWidth: 400, margin: "16px auto 0" }}>
+          <EndScreen
+            outcome={display.winner === "player" ? "win" : "lose"}
+            title={display.winner === "player" ? "あなたの勝ち！" : "CPUの勝ち…"}
+            onRetry={() => newGame(difficulty)}
+          >
+            <p className="muted">
+              最終スコアは あなた {display.player} - {display.cpu} CPU でした。
+              {wins > 0 ? ` 通算勝利 ${wins} 回。` : ""}
+            </p>
+          </EndScreen>
+        </div>
+      )}
     </>
   );
 }

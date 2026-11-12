@@ -105,20 +105,26 @@ test("ワードウルフ増量(A41): 追加10組が近接ペアとして収録�
 
 test("ナンジャ増量(A41): 生き物は30種で重複がなく、自動名も30件そろっている", () => {
   assert.equal(nanja.NANJA_CREATURES.length, 30);
-  const pairs = nanja.NANJA_CREATURES.map((c) => `${c.face}|${c.deco}`);
+  const pairs = nanja.NANJA_CREATURES.map((c) => `${c.color}|${c.shape}`);
   assert.equal(new Set(pairs).size, 30);
+  const triples = nanja.NANJA_CREATURES.map((c) => `${c.color}|${c.shape}|${c.kana}`);
+  assert.equal(new Set(triples).size, 30);
+  assert.equal(new Set(nanja.NANJA_CREATURES.map((c) => c.kana)).size, 30);
   const labels = nanja.NANJA_CREATURES.map((c) => c.label);
   assert.equal(new Set(labels).size, 30);
   for (const c of nanja.NANJA_CREATURES) {
-    assert.ok(typeof c.face === "string" && c.face.length > 0);
-    assert.ok(typeof c.deco === "string" && c.deco.length > 0);
+    assert.ok(typeof c.color === "string" && /^#[0-9a-f]{6}$/.test(c.color));
+    assert.ok(typeof c.colorName === "string" && c.colorName.length > 0);
+    assert.ok(["circle", "triangle", "square", "star", "diamond"].includes(c.shape));
+    assert.ok(typeof c.shapeName === "string" && c.shapeName.length > 0);
+    assert.ok(typeof c.kana === "string" && c.kana.length === 1);
     assert.ok(typeof c.label === "string" && c.label.length > 0);
   }
   assert.equal(nanja.NANJA_DEFAULT_NAMES.length, 30);
   assert.equal(new Set(nanja.NANJA_DEFAULT_NAMES).size, 30);
-  // 追加分の代表例が含まれている
-  assert.ok(nanja.NANJA_CREATURES.some((c) => c.face === "🐭" && c.deco === "🧀"));
-  assert.ok(nanja.NANJA_CREATURES.some((c) => c.face === "🦖" && c.deco === "🍦"));
+  // 代表例が含まれている（色×形×カナで一意に区別できる）
+  assert.ok(nanja.NANJA_CREATURES.some((c) => c.colorName === "オレンジ" && c.shape === "circle" && c.kana === "ナ"));
+  assert.ok(nanja.NANJA_CREATURES.some((c) => c.colorName === "きいろ" && c.shape === "square" && c.kana === "ツ"));
 });
 
 test("ナンジャ増量(A41): Client の表示用複製が lib と完全一致する", () => {
@@ -126,13 +132,13 @@ test("ナンジャ増量(A41): Client の表示用複製が lib と完全一致�
   const start = src.indexOf("const CREATURES");
   assert.ok(start >= 0, "Client に CREATURES があること");
   const block = src.slice(start, src.indexOf("];", start));
-  const entries = [...block.matchAll(/\{ face: "([^"]+)", deco: "([^"]+)", label: "([^"]+)" \}/g)].map(
-    (m) => ({ face: m[1], deco: m[2], label: m[3] }),
+  const entries = [...block.matchAll(/\{ color: "([^"]+)", colorName: "([^"]+)", shape: "([^"]+)", shapeName: "([^"]+)", kana: "([^"]+)", label: "([^"]+)" \}/g)].map(
+    (m) => ({ color: m[1], colorName: m[2], shape: m[3], shapeName: m[4], kana: m[5], label: m[6] }),
   );
   assert.equal(entries.length, 30);
   assert.deepEqual(
     entries,
-    nanja.NANJA_CREATURES.map((c) => ({ face: c.face, deco: c.deco, label: c.label })),
+    nanja.NANJA_CREATURES.map((c) => ({ color: c.color, colorName: c.colorName, shape: c.shape, shapeName: c.shapeName, kana: c.kana, label: c.label })),
   );
 });
 

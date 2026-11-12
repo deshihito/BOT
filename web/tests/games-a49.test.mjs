@@ -122,23 +122,12 @@ test("クイズ増量(A49): 180問バンクでもゲームが完走する", () =
 
 // ---------------------------------------------------------------- フラッグ増量第4弾
 
-function flagToIso(flag) {
-  return [...flag]
-    .map((ch) => String.fromCodePoint((ch.codePointAt(0) ?? 0) - 0x1f1e6 + 65))
-    .join("");
-}
-
-test("フラッグ増量(A49): バンクは195組で重複がなく、全ての旗が regional indicator ペア", () => {
+test("フラッグ増量(A49): バンクは195組で重複がなく、全ての国コードが ISO alpha-2 小文字", () => {
   assert.equal(fq.FLAG_PAIRS.length, 195);
-  assert.equal(new Set(fq.FLAG_PAIRS.map((p) => p.flag)).size, 195);
+  assert.equal(new Set(fq.FLAG_PAIRS.map((p) => p.code)).size, 195);
   assert.equal(new Set(fq.FLAG_PAIRS.map((p) => p.name)).size, 195);
   for (const p of fq.FLAG_PAIRS) {
-    const cps = [...p.flag];
-    assert.equal(cps.length, 2, p.name);
-    for (const ch of cps) {
-      const cp = ch.codePointAt(0) ?? 0;
-      assert.ok(cp >= 0x1f1e6 && cp <= 0x1f1ff, p.name);
-    }
+    assert.ok(/^[a-z]{2}$/.test(p.code), `${p.name} の国コード ${p.code}`);
     assert.ok(typeof p.name === "string" && p.name.length > 0);
   }
 });
@@ -158,7 +147,7 @@ test("フラッグ増量(A49): 追加10組の ISO コードと国名が一致す
   ]);
   assert.equal(expected.size, 10);
   for (const [iso, name] of expected) {
-    const pair = fq.FLAG_PAIRS.find((p) => flagToIso(p.flag) === iso);
+    const pair = fq.FLAG_PAIRS.find((p) => p.code === iso.toLowerCase());
     assert.ok(pair, `ISO ${iso} のペアが収録されていること`);
     assert.equal(pair.name, name, iso);
   }
@@ -179,10 +168,10 @@ test("フラッグ増量(A49): 195組バンクでもゲームが完走する", (
 
 // ---------------------------------------------------------------- しりとり増量第3弾
 
-test("しりとり増量(A49): 辞書は1600語・重複なし・全語が正しい形式", () => {
+test("しりとり増量(A49): 辞書は1610語・重複なし・全語が正しい形式", () => {
   const words = shi.SHIRITORI_WORDS;
-  assert.equal(words.length, 1600);
-  assert.equal(new Set(words).size, 1600, "単語に重複なし");
+  assert.equal(words.length, 1610);
+  assert.equal(new Set(words).size, 1610, "単語に重複なし");
   for (const w of words) {
     assert.ok(shi.isValidWordForm(w), `形式が正しいこと: ${w}`);
   }
@@ -231,4 +220,18 @@ test("しりとり増量(A49): 増量分の代表語がバンクに収録され�
   assert.equal(s.history[5].foul, true);
   assert.equal(s.finished, true);
   assert.equal(s.winner, 0);
+});
+
+test("しりとり補強(バッチC): 「ゼ」始まりの一般名詞が増え、全て接続先がある", () => {
+  const words = shi.SHIRITORI_WORDS;
+  const added = ["ゼミ", "ゼニガメ", "ゼラニウム", "ゼロ", "ゼンザイ", "ゼツボウ", "ゼンコク", "ゼンタイ", "ゼンゴ", "ゼンカ"];
+  const zeWords = words.filter((w) => w.startsWith("ゼ"));
+  assert.ok(zeWords.length >= 12, `ゼ始まりが少ない: ${zeWords.length}`);
+  const starts = new Set(words.map((w) => w.charAt(0)));
+  for (const w of added) {
+    assert.ok(shi.isBankWord(w), `${w} がバンクに無い`);
+    assert.ok(!w.endsWith("ン"), `${w} は脱落語（ン終わり）でないこと`);
+    // 追加語の末尾から続く語がバンク内に存在する（行き止まりを作らない）
+    assert.ok(starts.has(shi.shiritoriTail(w)), `${w} の接続先（${shi.shiritoriTail(w)}始まり）が無い`);
+  }
 });

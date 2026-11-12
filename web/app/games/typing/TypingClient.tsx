@@ -10,6 +10,8 @@ import {
   isTypingComplete,
   type TypingResult,
 } from "@/lib/typing";
+import { sfxCorrect, sfxTap, sfxWrong } from "@/lib/sfx";
+import { EndScreen } from "../GameJuice";
 import { useGamesNav } from "../GamesShell";
 
 const DURATION_SECONDS = 60;
@@ -25,6 +27,7 @@ export default function TypingClient() {
   const [timeLeft, setTimeLeft] = useState(DURATION_SECONDS);
   const [result, setResult] = useState<TypingResult | null>(null);
   const [best, setBest] = useState<number | null>(null);
+  const [prevBest, setPrevBest] = useState<number | null>(null);
   const [isNewBest, setIsNewBest] = useState(false);
   const startRef = useRef<number | null>(null);
   const typedRef = useRef("");
@@ -45,6 +48,8 @@ export default function TypingClient() {
 
   const finish = (finalTyped: string, elapsedSeconds: number) => {
     const r = evaluateTyping(promptRef.current, finalTyped, elapsedSeconds);
+    setPrevBest(best);
+    if (best === null || r.wpm > best) sfxCorrect();
     setResult(r);
     setPhase("done");
     setTimeLeft(Math.max(0, DURATION_SECONDS - Math.ceil(elapsedSeconds)));
@@ -83,6 +88,12 @@ export default function TypingClient() {
   const handleChange = (value: string) => {
     if (phase === "done") return;
     const cleaned = value.replace(/[\r\n]+/g, " ").slice(0, prompt.length);
+    // 追加された1打鍵だけ音で返す（削除では鳴らさない）
+    if (cleaned.length > typedRef.current.length) {
+      const idx = cleaned.length - 1;
+      if (cleaned[idx] === prompt[idx]) sfxTap();
+      else sfxWrong();
+    }
     if (phase === "ready" && cleaned.length > 0) {
       startRef.current = Date.now();
       setPhase("running");
@@ -105,6 +116,7 @@ export default function TypingClient() {
     setTimeLeft(DURATION_SECONDS);
     setResult(null);
     setIsNewBest(false);
+    setPrevBest(null);
     startRef.current = null;
   };
 
@@ -234,24 +246,22 @@ export default function TypingClient() {
       </div>
 
       {phase === "done" && result ? (
-        <div
-          role="status"
-          style={{
-            maxWidth: 640,
-            margin: "16px auto 0",
-            padding: "16px",
-            border: "1px solid #d1d5db",
-            borderRadius: 10,
-            textAlign: "center",
-          }}
-        >
-          <p style={{ fontSize: 20, fontWeight: 700, margin: "0 0 8px" }}>
-            結果: {result.wpm} WPM{isNewBest ? " ・ ベスト更新！" : ""}
-          </p>
-          <p style={{ margin: 0 }}>
-            正確率 {result.accuracy}% ・ 打鍵数 {result.totalChars}（正解 {result.correctChars} / ミス{" "}
-            {result.incorrectChars}）{best !== null ? ` ・ ベスト ${best} WPM` : ""}
-          </p>
+        <div style={{ maxWidth: 640, margin: "16px auto 0" }}>
+          <EndScreen
+            outcome="finish"
+            title="結果"
+            score={result.wpm}
+            scoreLabel="WPM"
+            newBest={isNewBest}
+            previousBest={prevBest}
+            onRetry={restart}
+            retryLabel="別の課題でもう一度"
+          >
+            <p style={{ margin: 0 }}>
+              正確率 {result.accuracy}% ・ 打鍵数 {result.totalChars}（正解 {result.correctChars} / ミス{" "}
+              {result.incorrectChars}）
+            </p>
+          </EndScreen>
         </div>
       ) : null}
 

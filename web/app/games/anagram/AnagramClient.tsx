@@ -2,7 +2,9 @@
 // アナグラム。ロジックは lib/anagram.ts（カタカナ単語10問・タイル並べ替え）。
 // タイルをタップして並べ、揃ったら「答える」。ヒントは1文字開示で -20点。
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { sfxCorrect, sfxLose, sfxTap, sfxWin, sfxWrong } from "@/lib/sfx";
+import { EndScreen } from "../GameJuice";
 import {
   clearPicks,
   currentWord,
@@ -37,6 +39,24 @@ export default function AnagramClient() {
     setSeconds(0);
   };
 
+  const prevStatusRef = useRef(state.status);
+  useEffect(() => {
+    if (prevStatusRef.current !== "finished" && state.status === "finished") {
+      if (state.correctCount >= state.words.length * 0.7) sfxWin();
+      else sfxLose();
+    }
+    prevStatusRef.current = state.status;
+  }, [state]);
+
+  const onSubmit = () => {
+    const next = submitAnswer(state);
+    if (next.status === "answered") {
+      if (next.lastCorrect) sfxCorrect();
+      else sfxWrong();
+    }
+    setState(next);
+  };
+
   const word = currentWord(state);
   const wordLen = word ? [...word].length : 0;
   const answered = state.status === "answered";
@@ -61,20 +81,24 @@ export default function AnagramClient() {
       </p>
 
       {state.status === "finished" ? (
-        <div style={{ textAlign: "center", maxWidth: 480, margin: "0 auto" }}>
-          <h2 style={{ fontSize: 24, margin: "12px 0" }}>
-            {state.correctCount === state.words.length
-              ? "🎉 全問正解！"
-              : state.correctCount >= state.words.length * 0.7
-                ? "👏 なかなかの出来です"
-                : "おつかれさまでした"}
-          </h2>
-          <p className="muted">
-            スコア {state.score} 点（満点 {state.words.length * 100} 点）・ 正解 {state.correctCount} 問 ・ タイム {seconds} 秒
-          </p>
-          <button type="button" className="classic-btn" onClick={restart}>
-            もう一度
-          </button>
+        <div style={{ maxWidth: 480, margin: "0 auto" }}>
+          <EndScreen
+            outcome={state.correctCount === state.words.length ? "win" : "finish"}
+            title={
+              state.correctCount === state.words.length
+                ? "全問正解！"
+                : state.correctCount >= state.words.length * 0.7
+                  ? "なかなかの出来です"
+                  : "おつかれさまでした"
+            }
+            score={state.score}
+            scoreLabel="スコア"
+            onRetry={restart}
+          >
+            <p className="muted" style={{ textAlign: "center" }}>
+              スコア {state.score} 点（満点 {state.words.length * 100} 点）・ 正解 {state.correctCount} 問 ・ タイム {seconds} 秒
+            </p>
+          </EndScreen>
         </div>
       ) : (
         <div style={{ maxWidth: 520, margin: "0 auto" }}>
@@ -92,7 +116,7 @@ export default function AnagramClient() {
                   key={pos}
                   type="button"
                   disabled={!tile || answered}
-                  onClick={() => setState((s) => unpickTile(s, pos))}
+                  onClick={() => { sfxTap(); setState((s) => unpickTile(s, pos)); }}
                   aria-label={tile ? `${pos + 1}文字目 ${tile.char} を外す` : `${pos + 1}文字目（空き）`}
                   style={{
                     width: 52,
@@ -140,7 +164,7 @@ export default function AnagramClient() {
                   key={tile.id}
                   type="button"
                   disabled={used || answered}
-                  onClick={() => setState((s) => pickTile(s, tile.id))}
+                  onClick={() => { sfxTap(); setState((s) => pickTile(s, tile.id)); }}
                   style={{
                     width: 52,
                     height: 56,
@@ -162,13 +186,13 @@ export default function AnagramClient() {
 
           {answered ? (
             <div style={{ textAlign: "center", marginTop: 18 }}>
-              <p role="status" style={{ fontWeight: 800, fontSize: 18, margin: "0 0 10px" }}>
-                {state.lastCorrect ? "⭕ 正解！" : `❌ 不正解。正解は「${word ?? ""}」でした。`}
+              <p role="status" className={state.lastCorrect ? "juice-pop" : "juice-shake"} style={{ fontWeight: 800, fontSize: 18, margin: "0 0 10px" }}>
+                {state.lastCorrect ? "○ 正解！" : `✕ 不正解。正解は「${word ?? ""}」でした。`}
               </p>
               <button
                 type="button"
                 className="classic-btn"
-                onClick={() => setState((s) => nextQuestion(s))}
+                onClick={() => { sfxTap(); setState((s) => nextQuestion(s)); }}
                 style={{ fontWeight: 800 }}
               >
                 {state.index + 1 >= state.words.length ? "結果を見る" : "次の問題へ →"}
@@ -180,7 +204,7 @@ export default function AnagramClient() {
                 type="button"
                 className="classic-btn"
                 disabled={!allPicked}
-                onClick={() => setState((s) => submitAnswer(s))}
+                onClick={onSubmit}
                 style={{ fontWeight: 800 }}
               >
                 答える
@@ -189,7 +213,7 @@ export default function AnagramClient() {
                 type="button"
                 className="classic-btn"
                 disabled={state.picked.length === 0}
-                onClick={() => setState((s) => clearPicks(s))}
+                onClick={() => { sfxTap(); setState((s) => clearPicks(s)); }}
               >
                 並べ直す
               </button>
@@ -197,9 +221,9 @@ export default function AnagramClient() {
                 type="button"
                 className="classic-btn"
                 disabled={state.hintPositions.length >= wordLen}
-                onClick={() => setState((s) => useHint(s))}
+                onClick={() => { sfxTap(); setState((s) => useHint(s)); }}
               >
-                💡 ヒント（-20点）
+                ヒント（-20点）
               </button>
               <button type="button" className="classic-btn" onClick={restart}>
                 もう一度

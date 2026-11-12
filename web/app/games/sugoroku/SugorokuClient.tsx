@@ -13,23 +13,43 @@ import {
   type SugorokuState,
 } from "@/lib/sugoroku";
 import { useGamesNav } from "../GamesShell";
+import { sfxDice, sfxLose, sfxWin } from "@/lib/sfx";
+import { EndScreen } from "../GameJuice";
 
 const PLAYER_COLORS = ["#2563eb", "#dc2626", "#059669"];
-const PLAYER_MARKS = ["🔵", "🔴", "🟢"];
+
+/** プレイヤーのコマを色ドットで描く（絵文字は使わない）。 */
+function PlayerDot({ index, size = 13 }: { index: number; size?: number }) {
+  return (
+    <span
+      aria-hidden
+      style={{
+        display: "inline-block",
+        width: size,
+        height: size,
+        borderRadius: "50%",
+        background: PLAYER_COLORS[index],
+        border: "2px solid #ffffff",
+        boxShadow: "0 0 0 1px rgba(0,0,0,0.25)",
+        verticalAlign: "middle",
+      }}
+    />
+  );
+}
 
 function effectIcon(index: number): string {
-  if (index === 0) return "🏁";
-  if (index === SUGOROKU_GOAL) return "🏆";
+  if (index === 0) return "";
+  if (index === SUGOROKU_GOAL) return "";
   const e = squareEffect(index);
   switch (e.type) {
     case "forward":
-      return "⏩";
+      return "»";
     case "back":
-      return "⏪";
+      return "«";
     case "skip":
-      return "💤";
+      return "休";
     case "coins":
-      return e.amount >= 0 ? "🪙" : "💸";
+      return e.amount >= 0 ? "＋" : "－";
     default:
       return "";
   }
@@ -46,7 +66,10 @@ export default function SugorokuClient() {
 
   useEffect(() => {
     if (!needAutoStep) return;
-    const id = setTimeout(() => setState((s) => rollDice(s)), cpuTurn ? 900 : 700);
+    const id = setTimeout(() => {
+      sfxDice();
+      setState((s) => rollDice(s));
+    }, cpuTurn ? 900 : 700);
     return () => clearTimeout(id);
   }, [needAutoStep, cpuTurn, state]);
 
@@ -58,6 +81,15 @@ export default function SugorokuClient() {
   const restart = () => {
     setState(createSugorokuGame(Date.now() % 2147483647));
   };
+
+  const endSoundRef = useRef<SugorokuState | null>(null);
+  useEffect(() => {
+    if (state.status !== "finished") return;
+    if (endSoundRef.current === state) return;
+    endSoundRef.current = state;
+    if (state.winner === 0) sfxWin();
+    else sfxLose();
+  }, [state]);
 
   return (
     <>
@@ -76,10 +108,10 @@ export default function SugorokuClient() {
           type="button"
           className="classic-btn"
           disabled={state.status !== "playing" || cpuTurn || auto}
-          onClick={() => setState((s) => rollDice(s))}
+          onClick={() => { sfxDice(); setState((s) => rollDice(s)); }}
           style={{ fontWeight: 800 }}
         >
-          🎲 サイコロを振る
+          サイコロを振る
         </button>
         <button
           type="button"
@@ -96,7 +128,7 @@ export default function SugorokuClient() {
 
       <p className="classic-status" role="status">
         {state.status === "finished"
-          ? `🏆 ${state.winner !== null ? state.players[state.winner].name : ""} の勝ち！`
+          ? `${state.winner !== null ? state.players[state.winner].name : ""} の勝ち！`
           : cpuTurn
             ? `${state.players[state.turn].name} の番です…`
             : auto
@@ -109,6 +141,7 @@ export default function SugorokuClient() {
         {state.players.map((p, i) => (
           <span
             key={p.name}
+            className={state.turn === i && state.status === "playing" ? "juice-pulse" : undefined}
             style={{
               padding: "6px 12px",
               borderRadius: 999,
@@ -118,8 +151,8 @@ export default function SugorokuClient() {
               fontSize: 14,
             }}
           >
-            {PLAYER_MARKS[i]} {p.name}: {p.position} マス目 ・ 🪙 {p.coins}
-            {p.skipNext ? " ・ 💤次は休み" : ""}
+            <PlayerDot index={i} /> {p.name}: {p.position} マス目 ・ コイン {p.coins} 枚
+            {p.skipNext ? " ・ 次は休み" : ""}
           </span>
         ))}
       </div>
@@ -158,8 +191,8 @@ export default function SugorokuClient() {
               <div style={{ color: "#666" }}>{effectText}</div>
               <div style={{ fontSize: 14, minHeight: 18 }}>
                 {here.map((pi) => (
-                  <span key={pi} title={state.players[pi].name}>
-                    {PLAYER_MARKS[pi]}
+                  <span key={`${pi}-${state.players[pi].position}`} className="juice-pop" title={state.players[pi].name}>
+                    <PlayerDot index={pi} />
                   </span>
                 ))}
               </div>
@@ -167,6 +200,20 @@ export default function SugorokuClient() {
           );
         })}
       </div>
+
+      {state.status === "finished" && state.winner !== null ? (
+        <div style={{ maxWidth: 640, margin: "0 auto 14px" }}>
+          <EndScreen
+            outcome={state.winner === 0 ? "win" : "lose"}
+            title={`${state.players[state.winner].name} の勝ち！`}
+            onRetry={restart}
+          >
+            <p className="muted" style={{ margin: 0 }}>
+              {state.players.map((pl) => `${pl.name}: ${pl.position} マス目 ・ コイン ${pl.coins}`).join(" ／ ")}
+            </p>
+          </EndScreen>
+        </div>
+      ) : null}
 
       <div
         ref={logRef}

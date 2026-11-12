@@ -8,10 +8,13 @@ import {
   createHanoiGame,
   hanoiMinMoves,
   hanoiSolution,
+  hanoiTop,
   moveDisk,
   type HanoiMove,
   type HanoiState,
 } from "@/lib/hanoi";
+import { sfxPlace, sfxTap, sfxWin, sfxWrong } from "@/lib/sfx";
+import { EndScreen } from "../GameJuice";
 import { useGamesNav } from "../GamesShell";
 
 const DISK_COUNTS = [3, 4, 5, 6, 7, 8] as const;
@@ -22,6 +25,7 @@ export default function HanoiClient() {
   const [disks, setDisks] = useState<number>(5);
   const [state, setState] = useState<HanoiState>(() => createHanoiGame(5));
   const [selected, setSelected] = useState<number | null>(null);
+  const [wrongPeg, setWrongPeg] = useState<number | null>(null);
   const [auto, setAuto] = useState(false);
   const solveRef = useRef<{ moves: HanoiMove[]; index: number } | null>(null);
 
@@ -40,12 +44,20 @@ export default function HanoiClient() {
     return () => clearInterval(id);
   }, [auto]);
 
+  const prevStatusRef = useRef(state.status);
+  useEffect(() => {
+    const prev = prevStatusRef.current;
+    prevStatusRef.current = state.status;
+    if (prev !== state.status && state.status === "solved") sfxWin();
+  }, [state.status]);
+
   const restart = (nextDisks: number) => {
     setAuto(false);
     solveRef.current = null;
     setDisks(nextDisks);
     setState(createHanoiGame(nextDisks));
     setSelected(null);
+    setWrongPeg(null);
   };
 
   const startAuto = () => {
@@ -60,17 +72,36 @@ export default function HanoiClient() {
     if (auto) return;
     if (state.status === "solved") return;
     if (selected === null) {
-      if (state.pegs[peg].length > 0) setSelected(peg);
+      if (state.pegs[peg].length > 0) {
+        sfxTap();
+        setWrongPeg(null);
+        setSelected(peg);
+      }
       return;
     }
     if (selected === peg) {
+      sfxTap();
+      setWrongPeg(null);
       setSelected(null);
       return;
     }
     if (canMoveDisk(state, selected, peg)) {
-      setState((s) => moveDisk(s, selected, peg));
+      const next = moveDisk(state, selected, peg);
+      // 完成時は終局ジングルに任せ、二重に鳴らさない。
+      if (next.status !== "solved") sfxPlace();
+      setState(next);
+      setWrongPeg(null);
       setSelected(null);
     } else if (state.pegs[peg].length > 0) {
+      const moving = hanoiTop(state, selected);
+      const target = hanoiTop(state, peg);
+      if (moving !== null && target !== null && moving > target) {
+        sfxWrong();
+        setWrongPeg(peg);
+      } else {
+        sfxTap();
+        setWrongPeg(null);
+      }
       setSelected(peg);
     } else {
       setSelected(null);
@@ -150,6 +181,7 @@ export default function HanoiClient() {
               type="button"
               aria-label={`${peg + 1}番目の柱${isSelected ? "（選択中）" : ""}`}
               aria-pressed={isSelected}
+              className={wrongPeg === peg ? "juice-shake" : isSelected ? "juice-pulse" : undefined}
               onClick={() => onPeg(peg)}
               style={{
                 position: "relative",
@@ -198,6 +230,7 @@ export default function HanoiClient() {
                   <span
                     key={disk}
                     aria-hidden="true"
+                    className="juice-slide"
                     style={{
                       position: "relative",
                       zIndex: 1,
@@ -223,6 +256,17 @@ export default function HanoiClient() {
       <p className="muted" style={{ textAlign: "center", marginTop: 10 }}>
         「自動解答を見る」は、最初の配置から再生します。
       </p>
+
+      {solved && (
+        <div style={{ marginTop: 14 }}>
+          <EndScreen outcome="win" title="クリア！" onRetry={() => restart(disks)}>
+            <p>
+              {state.moves} 手でクリア（最少は {min} 手）{state.moves === min ? " ・ 最少手数達成！" : ""} ・ 円盤{" "}
+              {disks} 枚
+            </p>
+          </EndScreen>
+        </div>
+      )}
     </>
   );
 }

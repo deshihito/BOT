@@ -68,6 +68,65 @@ test("カタログ: スラッグが一意で、チェスがプレイ可能・ア
   assert.ok(catalog.playableGames().some((g) => g.slug === "chess"));
 });
 
+test("カタログ: glyph / accent フィールドは廃止され、参照も残っていない", () => {
+  for (const g of catalog.WEB_GAMES) {
+    assert.ok(!("glyph" in g), `${g.slug}: glyph が残っている`);
+    assert.ok(!("accent" in g), `${g.slug}: accent が残っている`);
+  }
+  const gridSrc = fs.readFileSync(path.join(import.meta.dirname, "..", "app", "games", "GamesGrid.tsx"), "utf8");
+  assert.ok(!gridSrc.includes(".glyph"), "GamesGrid が glyph を参照している");
+  assert.ok(!gridSrc.includes(".accent"), "GamesGrid が accent を参照している");
+  const catalogSrc = fs.readFileSync(path.join(libDir, "games-catalog.ts"), "utf8");
+  assert.ok(!catalogSrc.includes("glyph"), "カタログに glyph が残っている");
+});
+
+test("デイリー: jstDateKey は JST の日付を返す（UTC との境界）", () => {
+  // 2026-11-11 16:00 UTC = 2026-11-12 01:00 JST
+  assert.equal(catalog.jstDateKey(new Date(Date.UTC(2026, 10, 11, 16, 0))), "2026-11-12");
+  // 2026-11-12 14:59 UTC = 2026-11-12 23:59 JST
+  assert.equal(catalog.jstDateKey(new Date(Date.UTC(2026, 10, 12, 14, 59))), "2026-11-12");
+  // 2026-11-12 15:00 UTC = 2026-11-13 00:00 JST
+  assert.equal(catalog.jstDateKey(new Date(Date.UTC(2026, 10, 12, 15, 0))), "2026-11-13");
+});
+
+test("デイリー: dailyPicksFor は同じ日付で決定的に同じ3本を返す", () => {
+  const day = new Date("2026-11-12T03:00:00+09:00");
+  const a = catalog.dailyPicksFor(day).map((g) => g.slug);
+  const b = catalog.dailyPicksFor(new Date("2026-11-12T23:30:00+09:00")).map((g) => g.slug);
+  assert.deepEqual(a, b);
+  assert.equal(a.length, 3);
+  assert.equal(new Set(a).size, 3, "3本は互いに異なる");
+  assert.ok(!a.includes("wordle"), "ワードルは別枠表示のため候補から除く");
+  for (const slug of a) {
+    assert.equal(catalog.getWebGame(slug).status, "playable", `${slug} は playable のみ`);
+  }
+  // 件数指定も効く
+  assert.equal(catalog.dailyPicksFor(day, 5).length, 5);
+  assert.deepEqual(
+    catalog.dailyPicksFor(day, 5).slice(0, 3).map((g) => g.slug),
+    a,
+    "件数を増やしても先頭の顔ぶれは変わらない",
+  );
+});
+
+test("デイリー: 日付が変われば顔ぶれが変わりうる", () => {
+  const seen = new Set();
+  for (let d = 0; d < 14; d++) {
+    const day = new Date(Date.UTC(2026, 10, 12 + d, 3, 0)); // JST 正午
+    seen.add(catalog.dailyPicksFor(day).map((g) => g.slug).join(","));
+  }
+  assert.ok(seen.size > 1, `14日とも同じ顔ぶれだった: ${[...seen][0]}`);
+});
+
+test("デイリー: ハブにデイリー帯とワードル連勝表示が配線されている", () => {
+  const gridSrc = fs.readFileSync(path.join(import.meta.dirname, "..", "app", "games", "GamesGrid.tsx"), "utf8");
+  assert.ok(gridSrc.includes("今日のデイリー"), "デイリー帯の見出しが無い");
+  assert.ok(gridSrc.includes("今日のワードル"), "ワードルのデイリー枠が無い");
+  assert.ok(gridSrc.includes("dailyPicksFor"), "日替わり選出を使っていない");
+  assert.ok(gridSrc.includes("ago-wordle-stats"), "ワードルの成績を読んでいない");
+  assert.ok(gridSrc.includes("連勝中"), "連勝表示が無い");
+});
+
 test("初期局面: 合法手20・対局中・FEN が往復する", () => {
   const state = game.createGame();
   assert.equal(state.status, "playing");

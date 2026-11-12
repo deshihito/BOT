@@ -468,3 +468,45 @@ test("ナンジャ: parseAction の形式検証と standings の順位", () => {
     ],
   );
 });
+
+test("ナンジャ: ビューでは対局中は名前が伏せられ、終了時に開示される", () => {
+  let st = gm.createState(seats(2), makeRng(5), {});
+  st = { ...st, deck: [3] };
+  st.names[3] = "テスト";
+  const s = gm.applyAction(st, 0, { type: "flip" }, makeRng(1));
+  assert.equal(s.phase, "shout");
+  const view = gm.viewFor(s, 0);
+  // 命名済みであることは分かるが、名前そのものは対局中は配られない。
+  assert.equal(view.named[3], true);
+  assert.equal(view.names[3], null);
+  assert.ok(!JSON.stringify(view).includes("テスト"), "対局中のビューに正解名が漏れている");
+  // 終了したビューでは開示される。
+  const finView = gm.viewFor({ ...s, phase: "finished" }, 0);
+  assert.equal(finView.names[3], "テスト");
+});
+
+test("ナンジャ: めくる番が放置すると tick が代わりにめくる", () => {
+  const st = gm.createState(seats(2), makeRng(5), {});
+  assert.equal(st.phase, "flip");
+  assert.equal(typeof st.phaseEndsAt, "number");
+  // 締切前は同一参照。
+  assert.equal(gm.tick(st, st.phaseEndsAt - 1), st);
+  const s = gm.tick(st, st.phaseEndsAt + 1);
+  assert.equal(s.pile.length, 1);
+  assert.equal(s.phase, "naming"); // 初めての生き物なので命名フェーズへ
+  assert.equal(s.namingSeat, 0);
+});
+
+test("ナンジャ: 叫ぶフェーズが時間切れになると山が流れて次の手番になる", () => {
+  let st = gm.createState(seats(2), makeRng(5), {});
+  st = { ...st, deck: [5, 3] };
+  st.names[3] = "テスト";
+  let s = gm.applyAction(st, 0, { type: "flip" }, makeRng(1));
+  assert.equal(s.phase, "shout");
+  assert.equal(typeof s.phaseEndsAt, "number");
+  s = gm.tick(s, s.phaseEndsAt + 1);
+  assert.equal(s.phase, "flip");
+  assert.equal(s.pile.length, 1); // 山は場に残る
+  assert.equal(s.current, 1); // 手番はめくった人の次へ
+  assert.equal(s.lastEvent.type, "dead");
+});

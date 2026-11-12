@@ -106,6 +106,8 @@ export interface WordwolfState {
   phase: WordwolfPhase;
   discussionSec: number;
   discussionEndsAt: number | null;
+  /** 投票・決選投票フェーズの締切（ms epoch）。それ以外のフェーズは null。 */
+  voteEndsAt: number | null;
   readySeats: number[];
   votes: { seat: number; target: number }[];
   revoteUsed: boolean;
@@ -132,6 +134,8 @@ export interface WordwolfView {
   phase: WordwolfPhase;
   discussionSec: number;
   discussionEndsAt: number | null;
+  /** 投票・決選投票フェーズの締切（ms epoch）。それ以外のフェーズは null。 */
+  voteEndsAt: number | null;
   /** 自分のお題だけが見える。他人のお題・ウルフは出さない。 */
   you: { word: string; left: boolean; voted: boolean; ready: boolean };
   players: WordwolfViewPlayer[];
@@ -155,6 +159,8 @@ function clone<T>(value: T): T {
 
 const DISCUSSION_CHOICES = [120, 180, 240] as const;
 const DEFAULT_DISCUSSION_SEC = 180;
+/** 投票・決選投票の制限時間（ms）。締切時点で未投票の人は棄権扱い。 */
+export const WW_VOTE_TIME_MS = 60000;
 
 function normalizeDiscussionSec(value: unknown): number {
   if (value === undefined) return DEFAULT_DISCUSSION_SEC;
@@ -177,22 +183,24 @@ function finish(draft: WordwolfState, winner: WordwolfWinner, caughtSeat: number
   draft.caughtSeat = caughtSeat;
   draft.phase = "finished";
   draft.discussionEndsAt = null;
+  draft.voteEndsAt = null;
   const tally: Record<number, number> = {};
   for (const v of draft.votes) tally[v.target] = (tally[v.target] ?? 0) + 1;
   draft.tally = tally;
 }
 
-function enterVote(draft: WordwolfState): void {
+function enterVote(draft: WordwolfState, now: number): void {
   draft.phase = "vote";
   draft.votes = [];
   draft.revoteUsed = false;
   draft.tiedCandidates = [];
   draft.discussionEndsAt = null;
+  draft.voteEndsAt = now + WW_VOTE_TIME_MS;
   draft.readySeats = [];
 }
 
 /** 投票を集計する（draft を破壊的に更新する内部用）。 */
-function resolveVotes(draft: WordwolfState): void {
+function resolveVotes(draft: WordwolfState, now: number): void {
   const counts = new Map<number, number>();
   for (const v of draft.votes) counts.set(v.target, (counts.get(v.target) ?? 0) + 1);
   let max = 0;
@@ -211,6 +219,7 @@ function resolveVotes(draft: WordwolfState): void {
     draft.tiedCandidates = tops;
     draft.votes = [];
     draft.phase = "revote";
+    draft.voteEndsAt = now + WW_VOTE_TIME_MS;
     return;
   }
   // 決選でも同票、または投票なし → ウルフの逃げ切り勝ち。
@@ -263,6 +272,7 @@ function createState(
     phase: "discuss",
     discussionSec,
     discussionEndsAt: Date.now() + discussionSec * 1000,
+    voteEndsAt: null,
     readySeats: [],
     votes: [],
     revoteUsed: false,
@@ -287,7 +297,7 @@ function applyAction(state: WordwolfState, seat: number, action: WordwolfAction,
     if (draft.phase !== "discuss") throw new Error("今は議論フェーズではありません");
     if (draft.readySeats.includes(seat)) throw new Error("すでに準備完了しています");
     draft.readySeats.push(seat);
-    if (activeSeats(draft).every((s) => draft.readySeats.includes(s))) enterVote(draft);
+    if (activeSeats(draft).every((s) => draft.readySeats.includes(s))) enterVote(draft, Date.now());
     return draft;
   }
 
@@ -304,7 +314,7 @@ function applyAction(state: WordwolfState, seat: number, action: WordwolfAction,
     }
     if (draft.votes.some((v) => v.seat === seat)) throw new Error("すでに投票しています");
     draft.votes.push({ seat, target });
-    if (activeSeats(draft).every((s) => draft.votes.some((v) => v.seat === s))) resolveVotes(draft);
+    if (activeSeats(draft).every((s) => draft.votes.some((v) => v.seat === s))) resolveVotes(draft, Date.now());
     return draft;
   }
 
@@ -319,6 +329,7 @@ function viewFor(state: WordwolfState, seat: number): WordwolfView {
     phase: state.phase,
     discussionSec: state.discussionSec,
     discussionEndsAt: state.discussionEndsAt,
+    voteEndsAt: state.voteEndsAt,
     you: {
       word: state.words[seat],
       left: Boolean(state.left[seat]),
@@ -390,10 +401,10 @@ function onPlayerLeft(state: WordwolfState, seat: number): WordwolfState {
   if (finishIfBroken(draft)) return draft;
   if (draft.phase === "discuss") {
     const active = activeSeats(draft);
-    if (active.length > 0 && active.every((s) => draft.readySeats.includes(s))) enterVote(draft);
+    if (active.length > 0 && active.every((s) => draft.readySeats.includes(s))) enterVote(draft, Date.now());
   } else if (draft.phase === "vote" || draft.phase === "revote") {
     const active = activeSeats(draft);
-    if (active.length > 0 && active.every((s) => draft.votes.some((v) => v.seat === s))) resolveVotes(draft);
+    if (active.length > 0 && active.every((s) => draft.votes.some((v) => v.seat === s))) resolveVotes(draft, Date.now());
   }
   return draft;
 }
@@ -401,7 +412,22 @@ function onPlayerLeft(state: WordwolfState, seat: number): WordwolfState {
 function tick(state: WordwolfState, now: number): WordwolfState {
   if (state.phase === "discuss" && state.discussionEndsAt !== null && now >= state.discussionEndsAt) {
     const draft = clone(state);
-    enterVote(draft);
+    enterVote(draft, now);
+    return draft;
+  }
+  if (
+    (state.phase === "vote" || state.phase === "revote") &&
+    state.voteEndsAt !== null &&
+    now >= state.voteEndsAt
+  ) {
+    // 締切: 未投票者は棄権扱いとし、入っている票だけで集計する。
+    // 1票も入っていなければ誰も指名されず、ウルフの逃げ切り勝ち。
+    const draft = clone(state);
+    if (draft.votes.length === 0) {
+      finish(draft, "wolf", null);
+    } else {
+      resolveVotes(draft, now);
+    }
     return draft;
   }
   return state;

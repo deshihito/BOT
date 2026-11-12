@@ -14,6 +14,8 @@ import {
   type NumberlinkSize,
   type NumberlinkState,
 } from "@/lib/numberlink";
+import { sfxCorrect, sfxTap, sfxWin } from "@/lib/sfx";
+import { EndScreen } from "../GameJuice";
 import { useGamesNav } from "../GamesShell";
 
 const PAIR_COLORS = [
@@ -71,12 +73,34 @@ export default function NumberLinkClient() {
     }
   }, [state.status, seconds, best, size]);
 
+  // 勝利への遷移で1回だけジングルを鳴らし、その時点のベストと比較した結果を保持する。
+  const prevStatusRef = useRef(state.status);
+  const [winResult, setWinResult] = useState<{ newBest: boolean; prevBest: number | null } | null>(null);
+  useEffect(() => {
+    const prev = prevStatusRef.current;
+    prevStatusRef.current = state.status;
+    if (state.status === "won" && prev !== "won") {
+      sfxWin();
+      setWinResult({ newBest: best === null || seconds < best, prevBest: best });
+    }
+  }, [state.status, seconds, best]);
+
+  // つながったペア数が増えたら正解音を鳴らす。
+  const connected = checkNumberlink(state).connectedPairs;
+  const prevConnectedRef = useRef(connected);
+  useEffect(() => {
+    const prev = prevConnectedRef.current;
+    prevConnectedRef.current = connected;
+    if (connected > prev) sfxCorrect();
+  }, [connected]);
+
   const restart = (nextSize: NumberlinkSize) => {
     setSize(nextSize);
     setState(createNumberlink(nextSize, Date.now() % 2147483647));
     setSeconds(0);
     strokeRef.current = null;
     setDrawing(false);
+    setWinResult(null);
   };
 
   const cellFromPointer = (e: React.PointerEvent): number | null => {
@@ -96,6 +120,7 @@ export default function NumberLinkClient() {
     const owner = ownerOf(state);
     const pair = state.endpoints[cell] ?? (owner[cell] > 0 ? owner[cell] : null);
     if (pair === null) return;
+    sfxTap();
     strokeRef.current = { pair, cells: [cell] };
     setDrawing(true);
     setState((s) => applyStroke(s, pair, [cell]));
@@ -211,6 +236,7 @@ export default function NumberLinkClient() {
             <div
               key={i}
               role="gridcell"
+              className={connected && pair !== null ? "juice-pop" : undefined}
               aria-label={
                 pair !== null
                   ? `数字 ${pair}${connected ? "（接続済み）" : ""}`
@@ -242,6 +268,21 @@ export default function NumberLinkClient() {
         })}
       </div>
 
+      {state.status === "won" ? (
+        <EndScreen
+          outcome="win"
+          score={seconds}
+          scoreLabel="クリアタイム（秒）"
+          newBest={winResult?.newBest}
+          previousBest={winResult && !winResult.newBest ? winResult.prevBest : undefined}
+          onRetry={() => restart(size)}
+        >
+          <p className="muted">
+            全 {check.pairCount} ペア接続 ・ 埋まったマス {check.filled} / {check.total}
+          </p>
+        </EndScreen>
+      ) : null}
+
       <div
         className="classic-controls"
         role="group"
@@ -255,7 +296,10 @@ export default function NumberLinkClient() {
             type="button"
             className="classic-btn"
             style={{ minWidth: 40, borderColor: pairColor(pair), color: pairColor(pair) }}
-            onClick={() => setState((s) => clearPath(s, pair))}
+            onClick={() => {
+              sfxTap();
+              setState((s) => clearPath(s, pair));
+            }}
           >
             {pair}
           </button>

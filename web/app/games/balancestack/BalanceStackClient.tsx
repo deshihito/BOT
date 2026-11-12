@@ -14,6 +14,8 @@ import {
   previewStability,
   type BalanceState,
 } from "@/lib/balancestack";
+import { sfxLose, sfxPlace, sfxTap } from "@/lib/sfx";
+import { EndScreen, ScorePop } from "../GameJuice";
 import { useGamesNav } from "../GamesShell";
 
 const BEST_KEY = "ago-balancestack-best";
@@ -32,11 +34,14 @@ export default function BalanceStackClient() {
   const [best, setBest] = useState<number | null>(null);
   const fieldRef = useRef<HTMLDivElement | null>(null);
   const savedRef = useRef<string | null>(null);
+  const gameBestRef = useRef<number | null>(null);
 
   useEffect(() => {
     try {
       const saved = Number(window.localStorage.getItem(BEST_KEY));
-      setBest(Number.isFinite(saved) && saved > 0 ? saved : null);
+      const loaded = Number.isFinite(saved) && saved > 0 ? saved : null;
+      setBest(loaded);
+      gameBestRef.current = loaded;
     } catch {
       setBest(null);
     }
@@ -72,26 +77,38 @@ export default function BalanceStackClient() {
 
   const onFieldTap = (e: React.PointerEvent<HTMLDivElement>) => {
     if (state.status !== "playing" || !fieldRef.current) return;
+    sfxTap();
     const rect = fieldRef.current.getBoundingClientRect();
     const ratio = (e.clientX - rect.left) / rect.width;
     setCenter(Math.round(ratio * BALANCE_FIELD_WIDTH * 2) / 2);
   };
 
   const restart = () => {
+    sfxTap();
+    gameBestRef.current = best;
     setState(newGame());
     setCenter(50);
+  };
+
+  const place = () => {
+    if (state.status !== "playing") return;
+    const next = placeBlock(state, center);
+    if (next.status === "collapsed") sfxLose();
+    else sfxPlace();
+    setState(next);
   };
 
   const renderBlock = (
     block: { center: number; width: number; weight: number },
     level: number,
-    opts: { ghost?: boolean; collapsed?: boolean },
+    opts: { ghost?: boolean; collapsed?: boolean; juiceClass?: string },
   ) => {
     const leftPct = ((block.center - block.width / 2) / BALANCE_FIELD_WIDTH) * 100;
     const widthPct = (block.width / BALANCE_FIELD_WIDTH) * 100;
     return (
       <div
         key={level}
+        className={opts.juiceClass}
         aria-hidden
         style={{
           position: "absolute",
@@ -140,7 +157,28 @@ export default function BalanceStackClient() {
           ? `${state.collapsedLevel !== null ? state.collapsedLevel + 1 : "?"} 段目でバランスを崩しました。記録は ${state.score} 個です。`
           : `積んだ数: ${state.score} 個 / 次のブロック: 幅 ${state.current.width}・重さ ${state.current.weight}（${WEIGHT_LABEL[state.current.weight]}）`}
         {best !== null ? ` / ベスト: ${best} 個` : ""}
+        {state.status === "playing" && state.score > 0 ? <ScorePop key={state.score} amount={1} /> : null}
       </p>
+
+      {state.status === "collapsed" && (
+        <EndScreen
+          outcome="lose"
+          title="タワーが崩れました"
+          score={state.score}
+          scoreLabel="積んだ数"
+          newBest={state.score > 0 && (gameBestRef.current === null || state.score > gameBestRef.current)}
+          previousBest={
+            state.score > 0 && gameBestRef.current !== null && state.score > gameBestRef.current
+              ? null
+              : gameBestRef.current
+          }
+          onRetry={restart}
+        >
+          <p className="muted" style={{ margin: 0 }}>
+            {state.collapsedLevel !== null ? state.collapsedLevel + 1 : "?"} 段目でバランスを崩しました。
+          </p>
+        </EndScreen>
+      )}
 
       <div
         ref={fieldRef}
@@ -187,10 +225,21 @@ export default function BalanceStackClient() {
         />
         <div aria-hidden style={{ position: "absolute", left: 0, right: 0, bottom: 0, height: 14, background: "#8a6d4f" }} />
         {state.blocks.map((b, i) =>
-          renderBlock(b, i, { collapsed: state.status === "collapsed" && state.collapsedLevel === i }),
+          renderBlock(b, i, {
+            collapsed: state.status === "collapsed" && state.collapsedLevel === i,
+            juiceClass:
+              state.status === "collapsed"
+                ? "juice-shake"
+                : i === state.blocks.length - 1
+                  ? "juice-pop"
+                  : undefined,
+          }),
         )}
         {state.status === "playing" &&
-          renderBlock({ ...state.current, center: previewCenter }, state.blocks.length, { ghost: true })}
+          renderBlock({ ...state.current, center: previewCenter }, state.blocks.length, {
+            ghost: true,
+            juiceClass: preview && !preview.stable ? "juice-shake" : undefined,
+          })}
       </div>
 
       {state.status === "playing" && preview && (
@@ -232,7 +281,7 @@ export default function BalanceStackClient() {
           className="classic-btn"
           style={{ minHeight: 44, minWidth: 110, fontWeight: 700 }}
           disabled={state.status !== "playing"}
-          onClick={() => setState((s) => placeBlock(s, center))}
+          onClick={place}
         >
           置く
         </button>

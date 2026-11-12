@@ -3,6 +3,8 @@
 // CPU は追従 AI。先に7点で勝利、難易度3段階。
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { sfxCorrect, sfxLose, sfxTap, sfxWin, sfxWrong } from "@/lib/sfx";
+import { EndScreen } from "../GameJuice";
 import { useGamesNav } from "../GamesShell";
 
 const FIELD_W = 800;
@@ -132,6 +134,7 @@ export default function PongClient() {
               ball.vx = Math.cos(ang) * speed;
               ball.vy = Math.sin(ang) * speed;
               ball.x = 18 + PADDLE_W + BALL_R;
+              sfxTap();
             }
             // 右パドル（CPU、x = FIELD_W - 18 - PADDLE_W）
             const cpuX = FIELD_W - 18 - PADDLE_W;
@@ -152,15 +155,27 @@ export default function PongClient() {
             if (ball.x < -20) {
               scoresRef.current = { ...scoresRef.current, cpu: scoresRef.current.cpu + 1 };
               if (mountedRef.current) setScores({ ...scoresRef.current });
-              if (scoresRef.current.cpu >= WIN_SCORE || scoresRef.current.player >= WIN_SCORE) setPhase("finished");
-              else serve(false);
+              if (scoresRef.current.cpu >= WIN_SCORE || scoresRef.current.player >= WIN_SCORE) {
+                if (scoresRef.current.player > scoresRef.current.cpu) sfxWin();
+                else sfxLose();
+                setPhase("finished");
+              } else {
+                sfxWrong();
+                serve(false);
+              }
               break;
             }
             if (ball.x > FIELD_W + 20) {
               scoresRef.current = { ...scoresRef.current, player: scoresRef.current.player + 1 };
               if (mountedRef.current) setScores({ ...scoresRef.current });
-              if (scoresRef.current.cpu >= WIN_SCORE || scoresRef.current.player >= WIN_SCORE) setPhase("finished");
-              else serve(true);
+              if (scoresRef.current.cpu >= WIN_SCORE || scoresRef.current.player >= WIN_SCORE) {
+                if (scoresRef.current.player > scoresRef.current.cpu) sfxWin();
+                else sfxLose();
+                setPhase("finished");
+              } else {
+                sfxCorrect();
+                serve(true);
+              }
               break;
             }
           }
@@ -287,7 +302,7 @@ export default function PongClient() {
             type="button"
             style={difficulty === d.key ? activeBtn : btn}
             aria-pressed={difficulty === d.key}
-            onClick={() => { setDifficulty(d.key); diffRef.current = d; }}
+            onClick={() => { sfxTap(); setDifficulty(d.key); diffRef.current = d; }}
           >
             {d.label}
           </button>
@@ -295,7 +310,7 @@ export default function PongClient() {
       </div>
 
       <p className="classic-status" role="status">
-        あなた {scores.player} - {scores.cpu} CPU ・ {statusText}
+        あなた <span key={`${scores.player}-${scores.cpu}`} className="juice-pulse" style={{ display: "inline-block" }}>{scores.player} - {scores.cpu}</span> CPU ・ {statusText}
       </p>
 
       <div style={{ maxWidth: 800, margin: "0 auto" }}>
@@ -311,9 +326,17 @@ export default function PongClient() {
       </div>
 
       {phase === "finished" && (
-        <p className="classic-status" role="alert">
-          {scores.player > scores.cpu ? "🎉 あなたの勝ち！" : "CPUの勝ち…"} 最終スコア {scores.player} - {scores.cpu}
-        </p>
+        <div style={{ maxWidth: 520, margin: "14px auto 0" }}>
+          <EndScreen
+            outcome={scores.player > scores.cpu ? "win" : "lose"}
+            title={scores.player > scores.cpu ? "あなたの勝ち！" : "CPUの勝ち…"}
+            onRetry={resetGame}
+          >
+            <p className="muted" style={{ margin: 0 }}>
+              最終スコア {scores.player} - {scores.cpu}（{DIFFS.find((d) => d.key === difficulty)?.label}）
+            </p>
+          </EndScreen>
+        </div>
       )}
 
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "center", marginTop: 14 }}>

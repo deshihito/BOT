@@ -3,7 +3,7 @@
 // マスをタップしてクイーンを置く／外す。利き筋と利き合うペアを色で知らせる。
 // 端末内で完結し、サーバーへ送信しない。
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   attackedSquares,
   conflictingQueens,
@@ -11,6 +11,8 @@ import {
   toggleQueen,
   type QnState,
 } from "@/lib/queens";
+import { sfxPlace, sfxTap, sfxWin } from "@/lib/sfx";
+import { EndScreen } from "../GameJuice";
 import { useGamesNav } from "../GamesShell";
 
 const SIZES = [
@@ -30,12 +32,26 @@ export default function QueensClient() {
   const [state, setState] = useState<QnState>(() => newGame(8));
   const [seconds, setSeconds] = useState(0);
   const [best, setBest] = useState<number | null>(null);
+  const [resultNewBest, setResultNewBest] = useState(false);
+  const [resultPrevBest, setResultPrevBest] = useState<number | null>(null);
+  const prevStatusRef = useRef(state.status);
+
+  // 終局遷移の瞬間だけジングルを鳴らし、その時点（保存前）のベストで更新判定を控える。
+  useEffect(() => {
+    const prev = prevStatusRef.current;
+    prevStatusRef.current = state.status;
+    if (prev === state.status || state.status !== "won") return;
+    const isNew = seconds > 0 && (best === null || seconds < best);
+    setResultNewBest(isNew);
+    setResultPrevBest(isNew ? null : best);
+    sfxWin();
+  }, [state.status, seconds, best]);
 
   useEffect(() => {
-    if (state.status !== "playing" || state.queens.length === 0) return;
+    if (state.status !== "playing") return;
     const id = setInterval(() => setSeconds((s) => s + 1), 1000);
     return () => clearInterval(id);
-  }, [state.status, state.queens.length]);
+  }, [state.status]);
 
   useEffect(() => {
     try {
@@ -61,6 +77,17 @@ export default function QueensClient() {
     setSize(next);
     setState(newGame(next));
     setSeconds(0);
+    setResultNewBest(false);
+    setResultPrevBest(null);
+  };
+
+  const handleCell = (i: number) => {
+    const next = toggleQueen(state, i);
+    if (next !== state && next.status !== "won") {
+      if (next.queens.includes(i)) sfxPlace();
+      else sfxTap();
+    }
+    setState(next);
   };
 
   const conflicts = useMemo(() => new Set(conflictingQueens(state)), [state]);
@@ -143,7 +170,8 @@ export default function QueensClient() {
                     ? "利き筋のマス"
                     : "空きマス"
               }
-              onClick={() => setState((s) => toggleQueen(s, i))}
+              className={bad ? "juice-shake" : has ? "juice-pop" : undefined}
+              onClick={() => handleCell(i)}
               style={{
                 aspectRatio: "1",
                 borderRadius: 6,
@@ -173,6 +201,24 @@ export default function QueensClient() {
           );
         })}
       </div>
+
+      {state.status === "won" && (
+        <div style={{ marginTop: 16 }}>
+          <EndScreen
+            outcome="win"
+            title="配置が完成！"
+            score={seconds}
+            scoreLabel="クリアタイム（秒）"
+            newBest={resultNewBest}
+            previousBest={resultPrevBest}
+            onRetry={() => restart(size)}
+          >
+            <p className="muted">
+              {state.size} 個のクイーンが1つも利き合わない配置になりました。
+            </p>
+          </EndScreen>
+        </div>
+      )}
     </>
   );
 }

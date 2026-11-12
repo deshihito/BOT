@@ -2,7 +2,9 @@
 // ダイスロール。ロジックは lib/diceroll.ts（ランダムウォークで解を先に作る生成）。
 // 矢印ボタンかキーボードの矢印キーで転がす。端末内で完結し、サーバーへ送信しない。
 import Link from "next/link";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { sfxDice, sfxTap, sfxWin } from "@/lib/sfx";
+import { EndScreen } from "../GameJuice";
 import {
   createDiceRollGame,
   rollDie,
@@ -54,6 +56,9 @@ export default function DiceRollClient() {
   const [initial, setInitial] = useState<DiceRollState>(() => newGame());
   const [state, setState] = useState<DiceRollState>(initial);
   const [best, setBest] = useState<number | null>(null);
+  const [prevBest, setPrevBest] = useState<number | null>(null);
+  const [isNewBest, setIsNewBest] = useState(false);
+  const wonRef = useRef<number | null>(null);
 
   useEffect(() => {
     try {
@@ -66,18 +71,33 @@ export default function DiceRollClient() {
 
   useEffect(() => {
     if (state.status !== "won") return;
-    if (best !== null && state.moves >= best) return;
+    if (wonRef.current === state.seed) return;
+    wonRef.current = state.seed;
+    sfxWin();
+    setPrevBest(best);
+    if (best !== null && state.moves >= best) {
+      setIsNewBest(false);
+      return;
+    }
+    setIsNewBest(best !== null);
     setBest(state.moves);
     try {
       window.localStorage.setItem(BEST_KEY, String(state.moves));
     } catch {
       // 保存失敗はプレイに影響しない。
     }
-  }, [state.status, state.moves, best]);
+  }, [state.status, state.moves, state.seed, best]);
 
-  const roll = useCallback((dir: DiceDir) => {
-    setState((s) => rollDie(s, dir));
-  }, []);
+  const roll = useCallback(
+    (dir: DiceDir) => {
+      if (state.status !== "playing") return;
+      const next = rollDie(state, dir);
+      if (next === state) return;
+      sfxDice();
+      setState(next);
+    },
+    [state],
+  );
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -91,12 +111,22 @@ export default function DiceRollClient() {
   }, [roll]);
 
   const restart = () => {
+    sfxTap();
+    wonRef.current = null;
+    setIsNewBest(false);
+    setPrevBest(null);
     const g = newGame();
     setInitial(g);
     setState(g);
   };
 
-  const reset = () => setState(initial);
+  const reset = () => {
+    sfxTap();
+    wonRef.current = null;
+    setIsNewBest(false);
+    setPrevBest(null);
+    setState(initial);
+  };
 
   const blockedSet = new Set(state.blocked);
   const o = state.orientation;
@@ -133,6 +163,22 @@ export default function DiceRollClient() {
         {best !== null ? ` ・ ベスト ${best} 手` : ""} ・ 上の目 {o.top} ・ {statusText}
       </p>
 
+      {state.status === "won" && (
+        <EndScreen
+          outcome="win"
+          title="ゴールの目がそろった！クリアです。"
+          score={state.moves}
+          scoreLabel="手数"
+          newBest={isNewBest}
+          previousBest={isNewBest ? null : prevBest}
+          onRetry={restart}
+        >
+          <p className="muted" style={{ margin: 0 }}>
+            ゴールの目 {state.targetTop} にそろえて止まりました。
+          </p>
+        </EndScreen>
+      )}
+
       <div
         role="grid"
         aria-label="ダイスロールの盤"
@@ -151,7 +197,8 @@ export default function DiceRollClient() {
           const isBlocked = blockedSet.has(i);
           return (
             <div
-              key={i}
+              key={isDie ? `die-${state.moves}` : i}
+              className={isDie ? "juice-pop" : undefined}
               role="gridcell"
               aria-label={
                 isDie

@@ -6,13 +6,20 @@
 // OnlineShell / useOnlineRoom の実 API に合わせた接続（統合時に確定）:
 // view.state は unknown で渡るため、ここで DaifugoState にキャストする。
 import { useEffect, useMemo, useRef, useState } from "react";
-import OnlineShell from "../online/OnlineShell";
+import OnlineShell, { useOnlineCreateOptions } from "../online/OnlineShell";
 import type { OnlineRoomApi, OnlineRoomView } from "../online/useOnlineRoom";
 import { playSe } from "@/lib/balku-sound";
 
 /* --- 大富豪のゲーム別ビュー（モジュール担当との契約） --- */
 type DaifugoOther = { seat: number; name: string; count: number; finished: number | null };
 type DaifugoLogEntry = { seat: number; kind: "play" | "pass"; cards?: number[] };
+type DaifugoRulesView = {
+  revolution: boolean;
+  eightCut: boolean;
+  spade3Return: boolean;
+  suitLock: boolean;
+};
+
 type DaifugoState = {
   yourHand: number[];
   others: DaifugoOther[];
@@ -24,6 +31,8 @@ type DaifugoState = {
   finished: boolean;
   log: DaifugoLogEntry[];
   players: { seat: number; name: string }[];
+  rules?: DaifugoRulesView;
+  lockedSuit?: number | null;
 };
 
 /* --- カード表現（id: 0〜51 = 通常札、52 = ジョーカー） --- */
@@ -52,7 +61,7 @@ function CardFace({ id, big = false }: { id: number; big?: boolean }) {
   if (id === 52) {
     return (
       <span className="og-card-face">
-        <span className="og-card-suit">🃏</span>
+        <span className="og-card-suit">★</span>
         <span className="og-card-rank">JOKER</span>
       </span>
     );
@@ -68,9 +77,49 @@ function CardFace({ id, big = false }: { id: number; big?: boolean }) {
   );
 }
 
+const DEFAULT_RULES: DaifugoRulesView = {
+  revolution: true,
+  eightCut: true,
+  spade3Return: false,
+  suitLock: false,
+};
+
+const RULE_FIELDS: { key: keyof DaifugoRulesView; label: string }[] = [
+  { key: "revolution", label: "革命（5枚以上）" },
+  { key: "eightCut", label: "8切り" },
+  { key: "spade3Return", label: "スペ3返し" },
+  { key: "suitLock", label: "縛り（同じマーク）" },
+];
+
+/** ルーム作成フォームへ差し込むローカルルールのトグル（createOptions）。 */
+function DaifugoCreateOptions() {
+  const { options, setOptions } = useOnlineCreateOptions();
+  const current = (options as { rules?: Partial<DaifugoRulesView> } | undefined)?.rules;
+  const rules: DaifugoRulesView = { ...DEFAULT_RULES, ...(current ?? {}) };
+  // 未操作でも既定値が options として作成時に渡るようにする
+  useEffect(() => {
+    if (current === undefined) setOptions({ rules: { ...DEFAULT_RULES } });
+  }, [current, setOptions]);
+  return (
+    <fieldset className="og-field">
+      <legend>ルール設定（ホスト）</legend>
+      {RULE_FIELDS.map(({ key, label }) => (
+        <label key={key} style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 4 }}>
+          <input
+            type="checkbox"
+            checked={rules[key]}
+            onChange={(e) => setOptions({ rules: { ...rules, [key]: e.target.checked } })}
+          />
+          <span>{label}</span>
+        </label>
+      ))}
+    </fieldset>
+  );
+}
+
 export default function DaifugoClient() {
   return (
-    <OnlineShell gameId="daifugo" title="大富豪" playerRange={{ min: 2, max: 4 }}>
+    <OnlineShell gameId="daifugo" title="大富豪" playerRange={{ min: 2, max: 4 }} createOptions={<DaifugoCreateOptions />}>
       {(view, api) => <DaifugoTable view={view} api={api} />}
     </OnlineShell>
   );
@@ -101,15 +150,17 @@ function DaifugoTable({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi 
     if (prev !== null && prev !== state.turn && state.turn === mySeat && !state.finished) playSe("turn");
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state?.turn, state?.finished]);
-  const finishSeRef = useRef(false);
+  const finishSeRef = useRef<string | null>(null);
   useEffect(() => {
-    if (!state || finishSeRef.current) return;
+    if (!state) return;
     if (state.yourRank !== null || state.finished) {
-      finishSeRef.current = true;
+      const key = `${view.code}:finished`;
+      if (finishSeRef.current === key) return;
+      finishSeRef.current = key;
       playSe(state.yourRank === 1 ? "win" : state.finished && state.yourRank === null ? "lose" : "win");
     }
-    if (!state.finished && state.yourRank === null) finishSeRef.current = false;
-  }, [state]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state, view.code]);
 
   const nameOf = useMemo(() => {
     const map = new Map<number, string>();
@@ -157,7 +208,7 @@ function DaifugoTable({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi 
 
   return (
     <div className="og-game og-daifugo">
-      <div className={`og-turn-banner${isMyTurn ? " og-turn-mine" : ""}`} role="status" aria-live="polite">
+      <div className={`og-turn-banner${isMyTurn ? " og-turn-mine juice-pulse" : ""}`} role="status" aria-live="polite">
         {state.finished ? (
           <span>対戦終了</span>
         ) : state.yourRank !== null ? (
@@ -170,6 +221,13 @@ function DaifugoTable({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi 
           <span>{turnName} の手番です</span>
         )}
         {state.revolution && <span className="og-badge og-badge-revolution">革命中</span>}
+        {state.rules?.suitLock && state.lockedSuit !== null && state.lockedSuit !== undefined && (
+          <span className="og-badge">縛り中: {SUIT_GLYPHS[state.lockedSuit]}</span>
+        )}
+        {state.rules?.spade3Return && <span className="og-badge">スペ3返しあり</span>}
+        {state.rules?.suitLock && <span className="og-badge">縛りあり</span>}
+        {state.rules && !state.rules.revolution && <span className="og-badge">革命なし</span>}
+        {state.rules && !state.rules.eightCut && <span className="og-badge">8切りなし</span>}
       </div>
 
       {/* 他プレイヤー */}
@@ -196,7 +254,7 @@ function DaifugoTable({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi 
           <>
             <div className="og-field-cards">
               {state.field.cards.map((id, i) => (
-                <span key={`${id}-${i}`} className={`og-card og-card-field${isRedCard(id) ? " og-card-red" : ""}`}>
+                <span key={`${id}-${i}`} className={`og-card og-card-field juice-flip${isRedCard(id) ? " og-card-red" : ""}`}>
                   <CardFace id={id} big />
                 </span>
               ))}
@@ -210,8 +268,8 @@ function DaifugoTable({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi 
 
       {/* 終了時の全順位 */}
       {state.finished && (
-        <section className="og-result" aria-label="最終順位">
-          <h2>最終順位</h2>
+        <section className="og-result juice-slide" aria-label="最終順位">
+          <h2 className={state.yourRank === 1 ? "juice-pulse" : undefined}>最終順位</h2>
           <ol className="og-result-list">
             {state.finishOrder.map((seat, index) => (
               <li key={seat} className={seat === mySeat ? "og-result-mine" : ""}>
@@ -268,7 +326,7 @@ function DaifugoTable({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi 
           <h2>ログ</h2>
           <ul className="og-log-list">
             {recentLog.map((entry, i) => (
-              <li key={`${view.revision}-${i}`}>
+              <li key={`${view.revision}-${i}`} className={i === 0 ? "juice-pop" : undefined}>
                 {entry.kind === "play" ? (
                   <span>
                     {nameOf(entry.seat)} が {(entry.cards ?? []).map((id) => cardLabel(id)).join(" ")} を出しました

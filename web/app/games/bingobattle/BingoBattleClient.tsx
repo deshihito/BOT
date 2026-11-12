@@ -59,6 +59,7 @@ function Board({ view }: { view: OnlineRoomView; api: OnlineRoomApi }) {
   const mySeat = view.player.seat;
   const finishRef = useRef<string | null>(null);
   const reachRef = useRef<string | null>(null);
+  const startRef = useRef<string | null>(null);
 
   useEffect(() => {
     if (!state || state.phase !== "finished") return;
@@ -66,6 +67,15 @@ function Board({ view }: { view: OnlineRoomView; api: OnlineRoomApi }) {
     finishRef.current = view.code;
     playSe(state.winners?.includes(mySeat) ? "win" : "click");
   }, [state, mySeat, view.code]);
+
+  // 抽選フェーズの開始（対戦開始）を1回だけ知らせる。自分の操作も手番も無い
+  // 自動進行ゲームのため、抽選ごとの発火はせず開始の合図だけに留める。
+  useEffect(() => {
+    if (!state || state.phase !== "drawing") return;
+    if (startRef.current === view.code) return;
+    startRef.current = view.code;
+    playSe("turn");
+  }, [state, view.code]);
 
   useEffect(() => {
     if (!state || state.phase !== "drawing" || !state.you.reach) return;
@@ -120,16 +130,16 @@ function Board({ view }: { view: OnlineRoomView; api: OnlineRoomApi }) {
             <p className="og-muted">
               抽選 {state.totalDrawn} / {state.maxNumber} 球目
             </p>
-            <div style={{ fontSize: 44, fontWeight: 800, lineHeight: 1.2 }} aria-live="polite">
+            <div key={state.totalDrawn} className="juice-flip" style={{ fontSize: 44, fontWeight: 800, lineHeight: 1.2 }} aria-live="polite">
               {state.lastDrawn !== null ? ballLabel(state.lastDrawn) : "まもなく開始"}
             </div>
             <p className="og-muted">数字は自動で引かれ、カードのマスも自動で開きます。</p>
           </>
         ) : (
-          <p style={{ fontSize: 22, fontWeight: 700 }}>
+          <p className={myWin ? "juice-pulse" : undefined} style={{ fontSize: 22, fontWeight: 700 }}>
             {state.winners && state.winners.length > 0
               ? myWin
-                ? "🎉 あなたのビンゴ！優勝です。"
+                ? "あなたのビンゴ！優勝です。"
                 : "ビンゴが出て終了しました。"
               : "終了しました。"}
           </p>
@@ -141,6 +151,7 @@ function Board({ view }: { view: OnlineRoomView; api: OnlineRoomApi }) {
           {recent.map((n, i) => (
             <span
               key={`${n}-${i}`}
+              className={i === recent.length - 1 ? "juice-pop" : undefined}
               style={{
                 display: "inline-block",
                 minWidth: 34,
@@ -183,9 +194,11 @@ function Board({ view }: { view: OnlineRoomView; api: OnlineRoomApi }) {
           const marked = you.marked[i];
           const inLine = completedCells.has(i);
           const isFree = value === 0;
+          const justMarked = marked && state.lastDrawn !== null && value === state.lastDrawn;
           return (
             <div
               key={i}
+              className={justMarked ? "juice-pop" : undefined}
               role="gridcell"
               aria-label={
                 isFree ? "フリー" : `${ballLabel(value)} ${marked ? "開いた" : "まだ"}`
@@ -213,7 +226,7 @@ function Board({ view }: { view: OnlineRoomView; api: OnlineRoomApi }) {
         })}
       </div>
 
-      <p className="classic-status" role="status" style={{ textAlign: "center" }}>
+      <p className={`classic-status${you.bingo ? " juice-pulse" : you.reach ? " juice-pop" : ""}`} role="status" style={{ textAlign: "center" }}>
         {you.bingo
           ? `ビンゴ！ ${you.lines.length}ライン完成`
           : you.reach
@@ -223,8 +236,8 @@ function Board({ view }: { view: OnlineRoomView; api: OnlineRoomApi }) {
       </p>
 
       {state.phase === "finished" && state.standings && (
-        <div style={{ padding: "8px 0 4px" }}>
-          <h2 style={{ textAlign: "center" }}>結果</h2>
+        <div className="juice-slide" style={{ padding: "8px 0 4px" }}>
+          <h2 className="juice-pulse" style={{ textAlign: "center" }}>結果</h2>
           <ul style={{ listStyle: "none", padding: 0, margin: "12px 0" }}>
             {state.standings.map((s) => {
               const p = state.players.find((x) => x.seat === s.seat);

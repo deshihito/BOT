@@ -2,7 +2,9 @@
 // ビンゴ。ロジックは lib/bingo.ts（5x5カード・抽選1〜75・ライン判定）。
 // CPU 3枚と同時に進行し、先にビンゴした方が勝ち。端末内で完結し、サーバーへ送信しない。
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { sfxLose, sfxSpawn, sfxTap, sfxWin } from "@/lib/sfx";
+import { EndScreen } from "../GameJuice";
 import {
   BINGO_LINES,
   cardStatus,
@@ -43,6 +45,21 @@ export default function BingoClient() {
   useEffect(() => {
     if (state.phase === "finished") setAuto(false);
   }, [state.phase]);
+
+  const prevDrawnRef = useRef(state.drawn.length);
+  useEffect(() => {
+    if (state.drawn.length > prevDrawnRef.current) sfxSpawn();
+    prevDrawnRef.current = state.drawn.length;
+  }, [state.drawn.length]);
+
+  const prevPhaseRef = useRef(state.phase);
+  useEffect(() => {
+    if (prevPhaseRef.current !== "finished" && state.phase === "finished") {
+      if (state.winner?.type === "player") sfxWin();
+      else if (state.winner?.type === "cpu") sfxLose();
+    }
+    prevPhaseRef.current = state.phase;
+  }, [state.phase, state.winner]);
 
   const restart = () => {
     setAuto(false);
@@ -89,7 +106,10 @@ export default function BingoClient() {
             <button
               type="button"
               style={btnStyle}
-              onClick={() => setState((s) => drawNext(s))}
+              onClick={() => {
+                sfxTap();
+                setState((s) => drawNext(s));
+              }}
             >
               次の数字を引く
             </button>
@@ -97,17 +117,28 @@ export default function BingoClient() {
               type="button"
               style={btnStyle}
               aria-pressed={auto}
-              onClick={() => setAuto((v) => !v)}
+              onClick={() => {
+                sfxTap();
+                setAuto((v) => !v);
+              }}
             >
               {auto ? "自動進行を止める" : "自動で進める"}
             </button>
           </>
-        ) : (
-          <button type="button" style={btnStyle} onClick={restart}>
-            もう一度
-          </button>
-        )}
+        ) : null}
       </div>
+
+      {!playing && (
+        <EndScreen
+          outcome={state.winner?.type === "player" ? "win" : state.winner?.type === "cpu" ? "lose" : "draw"}
+          title={winnerMessage(state, CPU_NAMES)}
+          onRetry={restart}
+        >
+          <p className="muted">
+            {state.drawn.length} 球で決着 ・ 完成ライン {playerStatus.lines.length} ・ マーク {playerStatus.markedCount} / 25
+          </p>
+        </EndScreen>
+      )}
 
       <div style={{ display: "flex", gap: 22, flexWrap: "wrap", alignItems: "flex-start" }}>
         <section aria-label="あなたのカード">
@@ -135,6 +166,7 @@ export default function BingoClient() {
               return (
                 <div
                   key={i}
+                  className={inLine ? "juice-pulse" : undefined}
                   role="gridcell"
                   aria-label={value === 0 ? "フリー" : `${value}${marked ? "（的中）" : ""}`}
                   style={{
@@ -199,6 +231,7 @@ export default function BingoClient() {
             {[...state.drawn].reverse().map((n, i) => (
               <span
                 key={`${n}-${i}`}
+                className={i === 0 ? "juice-pop" : undefined}
                 style={{
                   minWidth: 34,
                   height: 34,

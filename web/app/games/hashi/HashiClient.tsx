@@ -3,17 +3,22 @@
 // 島と島の間のマスをタップすると橋が 1本→2本→なし と切り替わる。
 // 端末内で完結し、サーバーへ送信しない。
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   createHashiGame,
   cycleHashiBridge,
   hashiCandidateEdges,
   hashiCellBridge,
   hashiDegrees,
+  hashiEdgeKey,
+  hashiTapEdge,
   hashiViolations,
+  type HashiEdge,
   type HashiSize,
   type HashiState,
 } from "@/lib/hashi";
+import { sfxPlace, sfxTap, sfxWin, sfxWrong } from "@/lib/sfx";
+import { EndScreen } from "../GameJuice";
 import { useGamesNav } from "../GamesShell";
 
 const SIZES: { key: HashiSize; label: string }[] = [
@@ -59,14 +64,33 @@ export default function HashiClient() {
   const [best, setBest] = useState<number | null>(null);
   const [showCheck, setShowCheck] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+  const [resultNewBest, setResultNewBest] = useState(false);
+  const [resultPrevBest, setResultPrevBest] = useState<number | null>(null);
+  const prevStatusRef = useRef(state.status);
+
+  // 終局遷移の瞬間だけジングルを鳴らし、その時点（保存前）のベストで更新判定を控える。
+  useEffect(() => {
+    const prev = prevStatusRef.current;
+    prevStatusRef.current = state.status;
+    if (prev === state.status || state.status !== "won") return;
+    const isNew = seconds > 0 && (best === null || seconds < best);
+    setResultNewBest(isNew);
+    setResultPrevBest(isNew ? null : best);
+    sfxWin();
+  }, [state.status, seconds, best]);
 
   const degrees = useMemo(() => hashiDegrees(state), [state]);
   const edges = useMemo(() => hashiCandidateEdges(state), [state]);
-  const edgeByCell = useMemo(() => {
-    const map = new Map<number, { a: number; b: number }>();
-    for (const e of edges) for (const cell of e.cells) map.set(cell, { a: e.a, b: e.b });
+  // 交差セルでは候補辺が2本あるため、セル→辺は多重対応で持つ。
+  const edgesByCell = useMemo(() => {
+    const map = new Map<number, HashiEdge[]>();
+    for (const e of edges) {
+      for (const cell of e.cells) map.set(cell, [...(map.get(cell) ?? []), e]);
+    }
     return map;
   }, [edges]);
+  // 交差セルで前回選んだ辺のキー（連続タップで両方の辺に到達するため）。
+  const lastTapKeyRef = useRef(new Map<number, string>());
   const islandByIndex = useMemo(
     () => new Map(state.islands.map((i) => [i.index, i])),
     [state.islands],
@@ -82,10 +106,10 @@ export default function HashiClient() {
   const satisfied = state.islands.filter((island, i) => degrees[i] === island.need).length;
 
   useEffect(() => {
-    if (state.status !== "playing" || state.moves === 0) return;
+    if (state.status !== "playing") return;
     const id = setInterval(() => setSeconds((s) => s + 1), 1000);
     return () => clearInterval(id);
-  }, [state.status, state.moves]);
+  }, [state.status]);
 
   useEffect(() => {
     try {
@@ -113,16 +137,28 @@ export default function HashiClient() {
     setSeconds(0);
     setShowCheck(false);
     setNotice(null);
+    setResultNewBest(false);
+    setResultPrevBest(null);
+    lastTapKeyRef.current.clear();
   };
 
   const onBridgeCell = (a: number, b: number) => {
     const after = cycleHashiBridge(state, a, b);
     if (after === state) {
+      sfxWrong();
       setNotice("橋が交差するため、そこには置けません。");
       return;
     }
+    if (after.status !== "won") sfxPlace();
     setNotice(null);
     setState(after);
+  };
+
+  const onBridgeCellTap = (index: number) => {
+    const target = hashiTapEdge(state, index, lastTapKeyRef.current.get(index) ?? null);
+    if (!target) return;
+    lastTapKeyRef.current.set(index, hashiEdgeKey(target.a, target.b));
+    onBridgeCell(target.a, target.b);
   };
 
   const statusText =
@@ -164,7 +200,10 @@ export default function HashiClient() {
           type="button"
           aria-pressed={showCheck}
           className={showCheck ? "classic-btn classic-btn-active" : "classic-btn"}
-          onClick={() => setShowCheck((v) => !v)}
+          onClick={() => {
+            sfxTap();
+            setShowCheck((v) => !v);
+          }}
         >
           チェック
         </button>
@@ -213,6 +252,7 @@ export default function HashiClient() {
                 }}
               >
                 <span
+                  className={isBad ? "juice-shake" : isDone ? "juice-pulse" : undefined}
                   style={{
                     width: "82%",
                     height: "82%",
@@ -233,15 +273,16 @@ export default function HashiClient() {
             );
           }
           const bridge = hashiCellBridge(state, index);
-          const edge = edgeByCell.get(index);
-          if (edge) {
+          const cellEdges = edgesByCell.get(index);
+          if (cellEdges && cellEdges.length > 0) {
             return (
               <button
                 key={index}
                 type="button"
                 role="gridcell"
                 aria-label={bridge ? `橋 ${bridge.count}本（タップで変更）` : "橋をかけるマス"}
-                onClick={() => onBridgeCell(edge.a, edge.b)}
+                className={bridge ? "juice-pop" : undefined}
+                onClick={() => onBridgeCellTap(index)}
                 style={{
                   aspectRatio: "1",
                   position: "relative",
@@ -264,6 +305,24 @@ export default function HashiClient() {
       <p className="muted" style={{ marginTop: 12 }}>
         チェックを押すと、数字を超えた島などの間違いを表示します。
       </p>
+
+      {state.status === "won" && (
+        <div style={{ marginTop: 16 }}>
+          <EndScreen
+            outcome="win"
+            title="全部の島がつながった！"
+            score={seconds}
+            scoreLabel="クリアタイム（秒）"
+            newBest={resultNewBest}
+            previousBest={resultPrevBest}
+            onRetry={() => restart(size)}
+          >
+            <p className="muted">
+              {state.islands.length} 個の島を {seconds} 秒でつなぎました。
+            </p>
+          </EndScreen>
+        </div>
+      )}
     </>
   );
 }

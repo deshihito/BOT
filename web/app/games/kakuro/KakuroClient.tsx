@@ -2,7 +2,7 @@
 // カックロ。ロジックは lib/kakuro.ts（完成盤先行生成・ルール検証で完成判定）。
 // マスを選んで下の数字パッドから入力する。端末内で完結し、サーバーへ送信しない。
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   checkKakuro,
   createKakuroGame,
@@ -10,6 +10,8 @@ import {
   type KakuroState,
   type KakuroViolation,
 } from "@/lib/kakuro";
+import { sfxCorrect, sfxPlace, sfxTap, sfxWin, sfxWrong } from "@/lib/sfx";
+import { EndScreen } from "../GameJuice";
 import { useGamesNav } from "../GamesShell";
 
 const BEST_KEY = "ago-kakuro-best";
@@ -25,6 +27,20 @@ export default function KakuroClient() {
   const [seconds, setSeconds] = useState(0);
   const [best, setBest] = useState<number | null>(null);
   const [checked, setChecked] = useState<KakuroViolation[] | null>(null);
+  const [resultNewBest, setResultNewBest] = useState(false);
+  const [resultPrevBest, setResultPrevBest] = useState<number | null>(null);
+  const prevStatusRef = useRef(state.status);
+
+  // 終局遷移の瞬間だけジングルを鳴らし、その時点（保存前）のベストで更新判定を控える。
+  useEffect(() => {
+    const prev = prevStatusRef.current;
+    prevStatusRef.current = state.status;
+    if (prev === state.status || state.status !== "won") return;
+    const isNew = seconds > 0 && (best === null || seconds < best);
+    setResultNewBest(isNew);
+    setResultPrevBest(isNew ? null : best);
+    sfxWin();
+  }, [state.status, seconds, best]);
 
   // 最初の白マス（与え数字でない）を初期選択にする。
   useEffect(() => {
@@ -35,10 +51,10 @@ export default function KakuroClient() {
   }, []);
 
   useEffect(() => {
-    if (state.status !== "playing" || state.moves === 0) return;
+    if (state.status !== "playing") return;
     const id = setInterval(() => setSeconds((s) => s + 1), 1000);
     return () => clearInterval(id);
-  }, [state.status, state.moves]);
+  }, [state.status]);
 
   useEffect(() => {
     try {
@@ -67,11 +83,25 @@ export default function KakuroClient() {
     setSelected(first >= 0 ? first : 0);
     setSeconds(0);
     setChecked(null);
+    setResultNewBest(false);
+    setResultPrevBest(null);
   };
 
   const input = (value: number) => {
     setChecked(null);
-    setState((s) => setKakuroValue(s, selected, value));
+    const next = setKakuroValue(state, selected, value);
+    if (next !== state && next.status !== "won") {
+      if (value === 0) sfxTap();
+      else sfxPlace();
+    }
+    setState(next);
+  };
+
+  const handleCheck = () => {
+    const result = checkKakuro(state);
+    if (result.violations.length === 0) sfxCorrect();
+    else sfxWrong();
+    setChecked(result.violations);
   };
 
   const badCells = useMemo(() => {
@@ -108,11 +138,7 @@ export default function KakuroClient() {
         <button type="button" className="classic-btn" onClick={restart}>
           もう一度
         </button>
-        <button
-          type="button"
-          className="classic-btn"
-          onClick={() => setChecked(checkKakuro(state).violations)}
-        >
+        <button type="button" className="classic-btn" onClick={handleCheck}>
           チェック
         </button>
       </div>
@@ -197,7 +223,11 @@ export default function KakuroClient() {
               aria-label={`${r + 1}行${c + 1}列${value ? ` ${value}` : ""}${cell.given ? "（はじめから入っている数字）" : ""}`}
               aria-pressed={selected === i}
               disabled={cell.given}
-              onClick={() => setSelected(i)}
+              className={badCells.has(i) ? "juice-shake" : value !== 0 && !cell.given ? "juice-pop" : undefined}
+              onClick={() => {
+                sfxTap();
+                setSelected(i);
+              }}
               style={{
                 aspectRatio: "1",
                 minWidth: 0,
@@ -248,6 +278,22 @@ export default function KakuroClient() {
           消す
         </button>
       </div>
+
+      {state.status === "won" && (
+        <div style={{ marginTop: 16 }}>
+          <EndScreen
+            outcome="win"
+            title="完成！"
+            score={seconds}
+            scoreLabel="クリアタイム（秒）"
+            newBest={resultNewBest}
+            previousBest={resultPrevBest}
+            onRetry={restart}
+          >
+            <p className="muted">すべての合計がそろいました。</p>
+          </EndScreen>
+        </div>
+      )}
     </>
   );
 }

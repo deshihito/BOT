@@ -20,6 +20,8 @@ import {
   totalAmmo,
   type MissileState,
 } from "@/lib/missile";
+import { sfxCorrect, sfxLose, sfxPop, sfxTap } from "@/lib/sfx";
+import { EndScreen } from "../GameJuice";
 import { useGamesNav } from "../GamesShell";
 
 function newGame(): MissileState {
@@ -30,8 +32,12 @@ export default function MissileClient() {
   const { prefix } = useGamesNav();
   const [state, setState] = useState<MissileState>(() => newGame());
   const [best, setBest] = useState<number | null>(null);
+  const [endInfo, setEndInfo] = useState<{ newBest: boolean; prevBest: number | null } | null>(null);
   const svgRef = useRef<SVGSVGElement | null>(null);
   const savedRef = useRef<string | null>(null);
+  const stateRef = useRef(state);
+  stateRef.current = state;
+  const prevKillsRef = useRef(0);
 
   // 固定ステップでシミュレーションを進める。
   useEffect(() => {
@@ -48,11 +54,24 @@ export default function MissileClient() {
     }
   }, []);
 
+  // ウェーブクリア／ゲームオーバーの遷移音（フェーズ変化時のみ）
+  useEffect(() => {
+    if (state.phase === "waveclear") sfxCorrect();
+    else if (state.phase === "over") sfxLose();
+  }, [state.phase]);
+
+  // 敵ミサイルを破壊した瞬間の爆発音（キル数の変化時のみ）
+  useEffect(() => {
+    if (state.kills > prevKillsRef.current && state.phase === "playing") sfxPop();
+    prevKillsRef.current = state.kills;
+  }, [state.kills, state.phase]);
+
   useEffect(() => {
     if (state.phase !== "over") return;
     const key = `${state.seed}:${state.wave}:${state.score}`;
     if (savedRef.current === key) return;
     savedRef.current = key;
+    setEndInfo({ newBest: best === null || state.score > best, prevBest: best });
     if (best !== null && state.score <= best) return;
     setBest(state.score);
     try {
@@ -69,11 +88,17 @@ export default function MissileClient() {
     if (rect.width <= 0 || rect.height <= 0) return;
     const x = ((e.clientX - rect.left) / rect.width) * FIELD_W;
     const y = ((e.clientY - rect.top) / rect.height) * FIELD_H;
-    setState((s) => fireAt(s, x, y));
+    const cur = stateRef.current;
+    const next = fireAt(cur, x, y);
+    if (next.interceptors.length > cur.interceptors.length) sfxTap();
+    setState(next);
   };
 
   const restart = () => {
+    sfxTap();
     savedRef.current = null;
+    prevKillsRef.current = 0;
+    setEndInfo(null);
     setState(newGame());
   };
 
@@ -107,7 +132,7 @@ export default function MissileClient() {
       </div>
 
       <p className="classic-status" role="status">
-        ウェーブ {state.wave} ・ スコア {state.score}
+        ウェーブ {state.wave} ・ スコア <span key={state.score} className="juice-pulse" style={{ display: "inline-block" }}>{state.score}</span>
         {best !== null ? ` ・ ベスト ${best}` : ""} ・ 都市 {aliveCities(state)}/6 ・ 基地{" "}
         {aliveBases(state)}/3 ・ 残弾 {totalAmmo(state)} ・ 破壊 {state.kills} ・ {statusText}
       </p>
@@ -176,7 +201,7 @@ export default function MissileClient() {
                 <rect x={s.x - 22} y={GROUND_Y - 8} width={44} height={8} fill="#555" />
               )}
               <text x={s.x} y={GROUND_Y + 24} textAnchor="middle" fontSize={15} fill="#dce8f5">
-                {s.alive ? "🏙" : "💥"}
+                {s.alive ? "都市" : "壊滅"}
               </text>
             </g>
           ) : (
@@ -190,7 +215,7 @@ export default function MissileClient() {
                 <rect x={s.x - 24} y={GROUND_Y - 8} width={48} height={8} fill="#555" />
               )}
               <text x={s.x} y={GROUND_Y + 24} textAnchor="middle" fontSize={15} fill="#dce8f5">
-                {s.alive ? "🚀" : "💥"}
+                {s.alive ? "基地" : "壊滅"}
               </text>
             </g>
           ),
@@ -223,6 +248,23 @@ export default function MissileClient() {
       <p className="muted" style={{ textAlign: "center", marginTop: 8 }}>
         残弾はウェーブごとに補充されます。分裂したミサイルは爆風でまとめて壊せます。
       </p>
+
+      {state.phase === "over" && (
+        <div style={{ maxWidth: 520, margin: "14px auto 0" }}>
+          <EndScreen
+            outcome="lose"
+            title="ゲームオーバー"
+            score={state.score}
+            newBest={endInfo?.newBest ?? false}
+            previousBest={endInfo ? endInfo.prevBest : undefined}
+            onRetry={restart}
+          >
+            <p className="muted" style={{ margin: 0 }}>
+              ウェーブ {state.wave} まで防衛 ・ 破壊 {state.kills} ・ 都市 {aliveCities(state)}/6
+            </p>
+          </EndScreen>
+        </div>
+      )}
     </>
   );
 }

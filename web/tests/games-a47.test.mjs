@@ -101,7 +101,7 @@ test("川渡り増量(A47): 増量2題の危険ペアが実在の荷物だけを
     const itemIds = new Set(p.items.map((i) => i.id));
     assert.equal(itemIds.size, p.items.length, `${id}: 荷物 ID が重複しない`);
     for (const item of p.items) {
-      assert.ok(item.name.length > 0 && item.emoji.length > 0, `${id}: 荷物に名前と絵文字がある`);
+      assert.ok(item.name.length > 0 && item.kanji.length === 1 && /^#[0-9a-f]{6}$/.test(item.color), `${id}: 荷物に名前と漢字チップ（1字＋色）がある`);
     }
     for (const [x, y] of p.dangerPairs) {
       assert.ok(itemIds.has(x) && itemIds.has(y), `${id}: 危険ペア ${x}/${y} が実在する`);

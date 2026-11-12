@@ -2,8 +2,9 @@
 // カナクロス。ロジックは lib/kanacross.ts（内蔵問題・単語判定・完成判定）。
 // マスを選んでカナパレット（またはキーボード）で入力する。端末内で完結する。
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
+  KANA_PALETTE_ROWS,
   KANACROSS_PUZZLES,
   checkWord,
   getKanacrossPuzzle,
@@ -16,15 +17,9 @@ import {
   type KanaState,
   type KanaWord,
 } from "@/lib/kanacross";
+import { sfxCorrect, sfxPlace, sfxTap, sfxWin, sfxWrong } from "@/lib/sfx";
+import { EndScreen } from "../GameJuice";
 import { useGamesNav } from "../GamesShell";
-
-const PALETTE_ROWS = [
-  "アイウエオカキクケコ",
-  "サシスセソタチツテト",
-  "ナニヌネノハヒフヘホ",
-  "マミムメモヤユヨラリルレロ",
-  "ワヲンーァィゥェォャュョッ",
-];
 
 const btnStyle: React.CSSProperties = {
   padding: "10px 20px",
@@ -59,6 +54,13 @@ export default function KanacrossClient() {
   const puzzle = getKanacrossPuzzle(state.puzzleIndex);
   const prog = progress(state);
 
+  const prevStatusRef = useRef(state.status);
+  useEffect(() => {
+    const prev = prevStatusRef.current;
+    prevStatusRef.current = state.status;
+    if (prev !== state.status && state.status === "completed") sfxWin();
+  }, [state.status]);
+
   useEffect(() => {
     if (state.status !== "playing") return;
     const id = setInterval(() => setSeconds((s) => s + 1), 1000);
@@ -92,6 +94,7 @@ export default function KanacrossClient() {
 
   const onCell = (index: number) => {
     if (puzzle.solution[index] === null) return;
+    sfxTap();
     const across = wordAt(state.puzzleIndex, index, "across");
     const down = wordAt(state.puzzleIndex, index, "down");
     if (selected && selected.index === index && across && down) {
@@ -105,6 +108,11 @@ export default function KanacrossClient() {
     if (!selected || !selectedWord) return;
     const next = setEntry(state, selected.index, ch);
     if (next === state && ch !== "") return;
+    // 完成（completed）は終局ジングル側が担当する。
+    if (next !== state && next.status !== "completed") {
+      if (ch === "") sfxTap();
+      else sfxPlace();
+    }
     setState(next);
     setNotice("");
     if (ch !== "") {
@@ -148,6 +156,8 @@ export default function KanacrossClient() {
       return;
     }
     const { state: next, status } = checkWord(state, selectedWord.id);
+    if (status === "correct") sfxCorrect();
+    else if (status === "wrong") sfxWrong();
     setState(next);
     setNotice(
       status === "correct"
@@ -159,6 +169,7 @@ export default function KanacrossClient() {
   };
 
   const selectWord = (word: KanaWord) => {
+    sfxTap();
     const cells = wordCells(puzzle, word);
     setSelected({ index: cells[0], dir: word.direction });
     setNotice("");
@@ -235,7 +246,7 @@ export default function KanacrossClient() {
         </button>
       </div>
 
-      <p className="classic-status" role="status">
+      <p className={`classic-status${notice.includes("どこか違います") ? " juice-shake" : ""}`} role="status">
         {puzzle.title} ・ 入力 {prog.filled} / {prog.total} マス ・ チェックのミス {state.mistakes} 回 ・ {seconds} 秒
         {state.status === "completed" ? ` ・ 完成！ お見事です（${seconds} 秒）。` : ""}
         {notice ? ` ・ ${notice}` : ""}
@@ -264,6 +275,7 @@ export default function KanacrossClient() {
                   key={i}
                   type="button"
                   role="gridcell"
+                  className={isSelected ? "juice-pulse" : correct ? "juice-pop" : undefined}
                   aria-label={`${Math.floor(i / puzzle.cols) + 1}行${(i % puzzle.cols) + 1}列${state.entries[i] ? ` ${state.entries[i]}` : " 空白"}`}
                   aria-pressed={isSelected}
                   onClick={() => onCell(i)}
@@ -287,7 +299,7 @@ export default function KanacrossClient() {
           </div>
 
           <div aria-label="カナ入力パレット" style={{ marginTop: 14, display: "grid", gap: 4, maxWidth: 480 }}>
-            {PALETTE_ROWS.map((row, ri) => (
+            {KANA_PALETTE_ROWS.map((row, ri) => (
               <div key={ri} style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
                 {row.split("").map((ch) => (
                   <button
@@ -308,7 +320,7 @@ export default function KanacrossClient() {
                     {ch}
                   </button>
                 ))}
-                {ri === PALETTE_ROWS.length - 1 && (
+                {ri === KANA_PALETTE_ROWS.length - 1 && (
                   <button
                     type="button"
                     onClick={backspace}
@@ -342,6 +354,16 @@ export default function KanacrossClient() {
           {wordList("down", "↓ たてのヒント")}
         </div>
       </div>
+
+      {state.status === "completed" && (
+        <div style={{ marginTop: 16 }}>
+          <EndScreen outcome="win" title="完成！" onRetry={() => changePuzzle(state.puzzleIndex)}>
+            <p className="muted" style={{ margin: 0 }}>
+              {puzzle.title} ・ {seconds} 秒 ・ チェックのミス {state.mistakes} 回
+            </p>
+          </EndScreen>
+        </div>
+      )}
     </>
   );
 }

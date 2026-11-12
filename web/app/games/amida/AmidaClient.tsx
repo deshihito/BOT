@@ -4,6 +4,7 @@
 // 端末内で完結し、サーバーへ送信しない。
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { sfxPop, sfxTap } from "@/lib/sfx";
 import {
   AMIDA_MAX_PLAYERS,
   AMIDA_MIN_PLAYERS,
@@ -18,7 +19,7 @@ const X_STEP = 72;
 const X0 = 46;
 const Y0 = 44;
 const Y_STEP = 34;
-const DEFAULT_PRIZES = ["🏆 大当たり", "🍰 ケーキ", "🍬 あめ", "🎁 プレゼント", "⭐ ラッキー", "🍀 クローバー", "🎈 風船", "📦 はこ"];
+const DEFAULT_PRIZES = ["大当たり", "ケーキ", "あめ", "プレゼント", "ラッキー", "クローバー", "風船", "はこ"];
 const DEFAULT_NAMES = ["A", "B", "C", "D", "E", "F", "G", "H"];
 
 const btnStyle: React.CSSProperties = {
@@ -85,6 +86,7 @@ export default function AmidaClient() {
   };
 
   const startTrace = (i: number) => {
+    sfxTap();
     if (timerRef.current) clearInterval(timerRef.current);
     setSelected(i);
     setStep(0);
@@ -94,6 +96,7 @@ export default function AmidaClient() {
       s += 1;
       setStep(s);
       if (s >= t.path.length) {
+        sfxPop();
         if (timerRef.current) clearInterval(timerRef.current);
         timerRef.current = null;
       }
@@ -152,10 +155,10 @@ export default function AmidaClient() {
             )}
           </select>
         </label>
-        <button type="button" style={btnStyle} onClick={() => regenerate(count)}>
+        <button type="button" style={btnStyle} onClick={() => { sfxTap(); regenerate(count); }}>
           くじを作り直す
         </button>
-        <button type="button" style={btnStyle} onClick={() => setShowResults((v) => !v)} aria-pressed={showResults}>
+        <button type="button" style={btnStyle} onClick={() => { sfxTap(); setShowResults((v) => !v); }} aria-pressed={showResults}>
           {showResults ? "結果を隠す" : "全員の結果を見る"}
         </button>
       </div>
@@ -238,7 +241,7 @@ export default function AmidaClient() {
             <polyline points={tracedPoints} fill="none" stroke="#d8542e" strokeWidth={4} strokeLinejoin="round" strokeLinecap="round" />
           )}
           {trace && step >= trace.path.length && (
-            <circle cx={px(trace.end)} cy={py(amida.levels)} r={7} fill="#d8542e" />
+            <circle className="juice-pop" cx={px(trace.end)} cy={py(amida.levels)} r={7} fill="#d8542e" />
           )}
         </svg>
       </div>
@@ -281,6 +284,7 @@ export default function AmidaClient() {
             {results.map((end, i) => (
               <li
                 key={i}
+                className="juice-slide"
                 style={{ display: "flex", justifyContent: "space-between", border: "1px solid #d5d8e0", borderRadius: 10, padding: "8px 12px", fontSize: 15 }}
               >
                 <span style={{ fontWeight: 700 }}>{names[i] || `参加者 ${i + 1}`}</span>

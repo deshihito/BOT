@@ -16,6 +16,8 @@ import {
   submitPass,
   type HeartsState,
 } from "@/lib/hearts";
+import { sfxDeal, sfxFlip, sfxLose, sfxTap, sfxWin } from "@/lib/sfx";
+import { EndScreen } from "../GameJuice";
 import { useGamesNav } from "../GamesShell";
 
 const BEST_KEY = "ago-hearts-best";
@@ -79,6 +81,7 @@ export default function HeartsClient() {
   const [selectedPass, setSelectedPass] = useState<number[]>([]);
   const [wins, setWins] = useState(0);
   const countedSeed = useRef<number | null>(null);
+  const endSfxRef = useRef<number | null>(null);
 
   useEffect(() => {
     setWins(loadWins());
@@ -97,12 +100,23 @@ export default function HeartsClient() {
     }
   }, [state.phase, state.winners, state.seed]);
 
+  useEffect(() => {
+    if (state.phase !== "finished") return;
+    if (endSfxRef.current === state.seed) return;
+    endSfxRef.current = state.seed;
+    if (state.winners?.includes(0)) sfxWin();
+    else sfxLose();
+  }, [state.phase, state.seed, state.winners]);
+
   const restart = () => {
+    sfxTap();
+    endSfxRef.current = null;
     setState(createHeartsGame(Date.now() % 2147483647));
     setSelectedPass([]);
   };
 
   const togglePassCard = (id: number) => {
+    sfxTap();
     setSelectedPass((prev) => {
       if (prev.includes(id)) return prev.filter((c) => c !== id);
       if (prev.length >= 3) return prev;
@@ -138,6 +152,7 @@ export default function HeartsClient() {
             className="classic-btn classic-btn-active"
             disabled={selectedPass.length !== 3}
             onClick={() => {
+              sfxDeal();
               setState((s) => submitPass(s, selectedPass));
               setSelectedPass([]);
             }}
@@ -146,7 +161,14 @@ export default function HeartsClient() {
           </button>
         )}
         {state.phase === "handEnd" && (
-          <button type="button" className="classic-btn classic-btn-active" onClick={() => setState((s) => nextHand(s))}>
+          <button
+            type="button"
+            className="classic-btn classic-btn-active"
+            onClick={() => {
+              sfxDeal();
+              setState((s) => nextHand(s));
+            }}
+          >
             次のハンドへ
           </button>
         )}
@@ -181,7 +203,7 @@ export default function HeartsClient() {
             <div style={{ fontWeight: 700 }}>
               {p.name}
               {state.phase === "play" && state.turn === p.seat ? "（手番）" : ""}
-              {state.winners?.includes(p.seat) ? " 🏆" : ""}
+              {state.winners?.includes(p.seat) ? " （優勝）" : ""}
             </div>
             <div>
               {p.score} 点
@@ -206,7 +228,11 @@ export default function HeartsClient() {
         )}
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
           {state.trick.map((play) => (
-            <div key={play.seat} style={{ textAlign: "center" }}>
+            <div
+              key={`${play.seat}-${play.card}-${state.tricksPlayed}`}
+              className="juice-flip"
+              style={{ textAlign: "center" }}
+            >
               <CardView id={play.card} />
               <div style={{ fontSize: 12 }}>{state.players[play.seat].name}</div>
             </div>
@@ -239,7 +265,10 @@ export default function HeartsClient() {
                 disabled={disabled && !isPassPhase}
                 onClick={() => {
                   if (isPassPhase) togglePassCard(id);
-                  else if (playable) setState((s) => playCard(s, id));
+                  else if (playable) {
+                    sfxFlip();
+                    setState((s) => playCard(s, id));
+                  }
                 }}
                 style={{
                   padding: 2,
@@ -261,7 +290,7 @@ export default function HeartsClient() {
       </section>
 
       {state.phase === "handEnd" && state.handPoints && (
-        <section aria-label="ハンド結果" style={{ marginTop: 12 }}>
+        <section aria-label="ハンド結果" className="juice-slide" style={{ marginTop: 12 }}>
           <h2 style={{ fontSize: 16, margin: "0 0 6px" }}>ハンド結果</h2>
           <ul style={{ margin: 0, paddingLeft: 18 }}>
             {state.players.map((p) => (
@@ -275,10 +304,24 @@ export default function HeartsClient() {
       )}
 
       {state.phase === "finished" && (
-        <section aria-label="最終結果" style={{ marginTop: 12 }}>
-          <h2 style={{ fontSize: 18, margin: "0 0 6px" }}>最終結果</h2>
-          <p role="status">{state.message}</p>
-        </section>
+        <EndScreen
+          outcome={state.winners?.includes(0) ? "win" : "lose"}
+          score={state.players[0].score}
+          scoreLabel="あなたの点数"
+          onRetry={restart}
+        >
+          <p role="status" style={{ margin: 0 }}>
+            {state.message}
+          </p>
+          <ul style={{ margin: 0, paddingLeft: 18, textAlign: "left" }}>
+            {state.players.map((p) => (
+              <li key={p.seat}>
+                {p.name}: {p.score} 点{state.winners?.includes(p.seat) ? "（勝者）" : ""}
+              </li>
+            ))}
+          </ul>
+          {wins > 0 ? <p className="muted" style={{ margin: 0 }}>優勝回数 {wins}</p> : null}
+        </EndScreen>
       )}
     </>
   );

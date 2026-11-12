@@ -44,6 +44,7 @@ function Board({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
   const mySeat = view.player.seat;
   const [now, setNow] = useState(() => Date.now());
   const finishRef = useRef<string | null>(null);
+  const turnKeyRef = useRef<string | null>(null);
 
   useEffect(() => {
     const id = setInterval(() => setNow(Date.now()), 200);
@@ -56,6 +57,15 @@ function Board({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
     finishRef.current = view.code;
     playSe(state.winners?.includes(mySeat) ? "win" : "click");
   }, [state, mySeat, view.code]);
+
+  // 新しい問いが来て自分が回答できる番になったら知らせる（ラウンド遷移で1回だけ）
+  useEffect(() => {
+    if (!state || state.phase !== "question") return;
+    const key = `${view.code}:${state.round}`;
+    const prev = turnKeyRef.current;
+    turnKeyRef.current = key;
+    if (prev !== null && prev !== key && state.you.alive && !state.you.answered && !state.you.left) playSe("turn");
+  }, [state, view.code]);
 
   if (!state) return <p className="og-muted">お題を待っています…</p>;
 
@@ -130,8 +140,10 @@ function Board({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
                 <button
                   key={i}
                   type="button"
+                  className={revealing ? "juice-flip" : undefined}
                   disabled={!canAnswer}
                   onClick={() => {
+                    playSe("play");
                     void api.move({ type: "answer", choice: i });
                   }}
                   style={{
@@ -154,7 +166,7 @@ function Board({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
           </div>
 
           {revealing ? (
-            <div style={{ marginTop: 14 }}>
+            <div className="juice-slide" style={{ marginTop: 14 }}>
               <p style={{ fontWeight: 700, margin: "0 0 6px" }}>結果</p>
               <ul style={{ listStyle: "none", margin: 0, padding: 0, display: "grid", gap: 4 }}>
                 {state.players.map((p) => {
@@ -188,12 +200,12 @@ function Board({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
       ) : null}
 
       {state.phase === "finished" && state.standings ? (
-        <div style={{ marginTop: 16 }}>
-          <h2 style={{ fontSize: 20, margin: "0 0 10px" }}>最終結果</h2>
+        <div className="juice-slide" style={{ marginTop: 16 }}>
+          <h2 className="juice-pulse" style={{ fontSize: 20, margin: "0 0 10px" }}>最終結果</h2>
           {state.winners && state.winners.length > 0 ? (
             <p style={{ fontWeight: 800 }}>
-              🏆 優勝：{state.winners.map((s) => state.players.find((p) => p.seat === s)?.name ?? "").filter(Boolean).join(" さん、")}
-              {state.winners.includes(mySeat) ? "（あなたも優勝です🎉）" : ""}
+              優勝：{state.winners.map((s) => state.players.find((p) => p.seat === s)?.name ?? "").filter(Boolean).join(" さん、")}
+              {state.winners.includes(mySeat) ? "（あなたも優勝です）" : ""}
             </p>
           ) : null}
           <ul style={{ listStyle: "none", margin: 0, padding: 0, display: "grid", gap: 8 }}>
@@ -220,7 +232,7 @@ function Board({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
                       {s.seat === mySeat ? "（あなた）" : ""}
                       {p.left ? "（退出）" : ""}
                     </span>
-                    <strong>{s.winner ? "優勝🏆" : "脱落"}</strong>
+                    <strong>{s.winner ? "優勝" : "脱落"}</strong>
                   </li>
                 );
               })}

@@ -13,6 +13,8 @@ import {
   isBreakoutCleared,
   type BreakoutBrick,
 } from "@/lib/breakout";
+import { sfxLose, sfxPop, sfxTap, sfxWin, sfxWrong } from "@/lib/sfx";
+import { EndScreen } from "../GameJuice";
 import { useGamesNav } from "../GamesShell";
 
 type Phase = "ready" | "playing" | "paused" | "life-lost" | "gameover" | "cleared" | "all-cleared";
@@ -137,6 +139,7 @@ export default function BreakoutClient() {
             ball.vx = Math.sin(angle) * speed;
             ball.vy = -Math.cos(angle) * speed;
             ball.y = PADDLE_Y - ball.r;
+            sfxTap();
           }
 
           // ブロック
@@ -150,6 +153,7 @@ export default function BreakoutClient() {
             if (result.gained > 0) {
               scoreRef.current += result.gained;
               if (mountedRef.current) setScore(scoreRef.current);
+              sfxPop();
             }
             // 反射方向: 前位置から判定（簡易: 侵入量が小さい軸で反射）
             const overlapLeft = ball.x + ball.r - b.x;
@@ -168,12 +172,15 @@ export default function BreakoutClient() {
           livesRef.current -= 1;
           if (mountedRef.current) setLives(livesRef.current);
           if (livesRef.current <= 0) {
+            sfxLose();
             setPhase("gameover");
           } else {
+            sfxWrong();
             resetBallAndPaddle(levelRef.current);
             setPhase("life-lost");
           }
         } else if (isBreakoutCleared(bricksRef.current)) {
+          sfxWin();
           setPhase(hasNextLevel(levelRef.current) ? "cleared" : "all-cleared");
         }
       } else if (phaseRef.current === "ready" || phaseRef.current === "life-lost") {
@@ -270,7 +277,10 @@ export default function BreakoutClient() {
   };
 
   const launch = () => {
-    if (phase === "ready" || phase === "life-lost" || phase === "paused") setPhase("playing");
+    if (phase === "ready" || phase === "life-lost" || phase === "paused") {
+      sfxTap();
+      setPhase("playing");
+    }
   };
 
   const statusText =
@@ -307,7 +317,7 @@ export default function BreakoutClient() {
       </div>
 
       <p className="classic-status" role="status">
-        スコア {score} ・ ライフ {"❤".repeat(Math.max(0, lives)) || "—"} ・ {BREAKOUT_LEVELS[levelIdx].name} ・ {statusText}
+        スコア <span key={score} className="juice-pulse" style={{ display: "inline-block" }}>{score}</span> ・ ライフ {"♥".repeat(Math.max(0, lives)) || "—"} ・ {BREAKOUT_LEVELS[levelIdx].name} ・ {statusText}
       </p>
 
       <div style={{ maxWidth: 800, margin: "0 auto" }}>
@@ -327,6 +337,21 @@ export default function BreakoutClient() {
           }}
         />
       </div>
+
+      {(phase === "gameover" || phase === "all-cleared") && (
+        <div style={{ maxWidth: 520, margin: "14px auto 0" }}>
+          <EndScreen
+            outcome={phase === "all-cleared" ? "win" : "lose"}
+            title={phase === "all-cleared" ? "全レベルクリア！" : "ゲームオーバー"}
+            score={score}
+            onRetry={startGame}
+          >
+            <p className="muted" style={{ margin: 0 }}>
+              到達レベル {levelIdx + 1} / {BREAKOUT_LEVELS.length}
+            </p>
+          </EndScreen>
+        </div>
+      )}
 
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "center", marginTop: 14 }}>
         {phase === "ready" || phase === "life-lost" || phase === "paused" ? (

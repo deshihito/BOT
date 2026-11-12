@@ -2,7 +2,7 @@
 // ビルディング（Skyscrapers）。ロジックは lib/skyscrapers.ts（解先行生成・ルール検証で完成判定）。
 // マスを選んで下の数字パッドで高さを入れる。端末内で完結し、サーバーへ送信しない。
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   createSkyscrapersGame,
   setSkyValue,
@@ -10,6 +10,8 @@ import {
   type SkyscrapersSize,
   type SkyscrapersState,
 } from "@/lib/skyscrapers";
+import { sfxPlace, sfxTap, sfxWin } from "@/lib/sfx";
+import { EndScreen } from "../GameJuice";
 import { useGamesNav } from "../GamesShell";
 
 const BEST_KEY = (size: number) => `ago-skyscrapers-best-${size}`;
@@ -28,12 +30,26 @@ export default function SkyscrapersClient() {
   const [selected, setSelected] = useState<number | null>(null);
   const [seconds, setSeconds] = useState(0);
   const [best, setBest] = useState<number | null>(null);
+  const [resultNewBest, setResultNewBest] = useState(false);
+  const [resultPrevBest, setResultPrevBest] = useState<number | null>(null);
+  const prevStatusRef = useRef(state.status);
+
+  // 終局遷移の瞬間だけジングルを鳴らし、その時点（保存前）のベストで更新判定を控える。
+  useEffect(() => {
+    const prev = prevStatusRef.current;
+    prevStatusRef.current = state.status;
+    if (prev === state.status || state.status !== "won") return;
+    const isNew = seconds > 0 && (best === null || seconds < best);
+    setResultNewBest(isNew);
+    setResultPrevBest(isNew ? null : best);
+    sfxWin();
+  }, [state.status, seconds, best]);
 
   useEffect(() => {
-    if (state.status !== "playing" || state.moves === 0) return;
+    if (state.status !== "playing") return;
     const id = setInterval(() => setSeconds((s) => s + 1), 1000);
     return () => clearInterval(id);
-  }, [state.status, state.moves]);
+  }, [state.status]);
 
   useEffect(() => {
     try {
@@ -61,6 +77,18 @@ export default function SkyscrapersClient() {
     setState(newGame(nextSize, nextHard));
     setSelected(null);
     setSeconds(0);
+    setResultNewBest(false);
+    setResultPrevBest(null);
+  };
+
+  const inputValue = (v: number) => {
+    if (selected === null) return;
+    const next = setSkyValue(state, selected, v);
+    if (next !== state && next.status !== "won") {
+      if (v === 0) sfxTap();
+      else sfxPlace();
+    }
+    setState(next);
   };
 
   const violations = useMemo(() => skyViolations(state), [state]);
@@ -137,7 +165,11 @@ export default function SkyscrapersClient() {
           aria-label={`${gr}行${gc}列 ${value === 0 ? "空き" : `高さ ${value}`}`}
           aria-pressed={isSelected}
           disabled={state.status === "won"}
-          onClick={() => setSelected(index)}
+          className={badCells.has(index) ? "juice-shake" : value !== 0 ? "juice-pop" : undefined}
+          onClick={() => {
+            sfxTap();
+            setSelected(index);
+          }}
           style={{
             aspectRatio: "1",
             minWidth: 0,
@@ -233,7 +265,7 @@ export default function SkyscrapersClient() {
             className="classic-btn"
             style={{ minWidth: 48, minHeight: 48, fontSize: 18, fontWeight: 700 }}
             disabled={selected === null || state.status === "won"}
-            onClick={() => selected !== null && setState((s) => setSkyValue(s, selected, v))}
+            onClick={() => inputValue(v)}
           >
             {v}
           </button>
@@ -243,11 +275,29 @@ export default function SkyscrapersClient() {
           className="classic-btn"
           style={{ minWidth: 64, minHeight: 48 }}
           disabled={selected === null || state.status === "won"}
-          onClick={() => selected !== null && setState((s) => setSkyValue(s, selected, 0))}
+          onClick={() => inputValue(0)}
         >
           消す
         </button>
       </div>
+
+      {state.status === "won" && (
+        <div style={{ marginTop: 16 }}>
+          <EndScreen
+            outcome="win"
+            title="完成！"
+            score={seconds}
+            scoreLabel="クリアタイム（秒）"
+            newBest={resultNewBest}
+            previousBest={resultPrevBest}
+            onRetry={() => restart(size, hard)}
+          >
+            <p className="muted">
+              {n}×{n} の街並みを {seconds} 秒で完成させました。
+            </p>
+          </EndScreen>
+        </div>
+      )}
     </>
   );
 }

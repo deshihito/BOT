@@ -3,7 +3,9 @@
 // 自分のコマ（白）をタップして選び、光った移動先をタップする。
 // 端末内で完結し、サーバーへ送信しない。
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { sfxDice, sfxLose, sfxPlace, sfxTap, sfxWin } from "@/lib/sfx";
+import { EndScreen } from "../GameJuice";
 import {
   bgApplyMove,
   bgChooseMove,
@@ -45,6 +47,7 @@ function CheckerStack({
   return (
     <button
       type="button"
+      className={selected ? "juice-pulse" : isTarget ? "juice-pop" : undefined}
       aria-label={label}
       aria-pressed={selected}
       onClick={onClick}
@@ -91,6 +94,7 @@ export default function BackgammonClient() {
   const { prefix } = useGamesNav();
   const [state, setState] = useState<BgState>(() => newGame());
   const [selected, setSelected] = useState<BgFrom | null>(null);
+  const endSfxRef = useRef<number | null>(null);
 
   const myTurn = state.turn === 0 && state.phase !== "finished";
   const legal = useMemo(
@@ -107,10 +111,20 @@ export default function BackgammonClient() {
     setSelected(null);
   }, [state]);
 
+  useEffect(() => {
+    if (state.phase !== "finished") return;
+    if (endSfxRef.current === state.seed) return;
+    endSfxRef.current = state.seed;
+    if (state.winner === 0) sfxWin();
+    else sfxLose();
+  }, [state.phase, state.seed, state.winner]);
+
   // CPU の手番: ダイス→1手ずつ進める
   useEffect(() => {
     if (state.phase === "finished" || state.turn !== 1) return;
     const timer = setTimeout(() => {
+      if (state.phase === "roll") sfxDice();
+      else if (bgChooseMove(state)) sfxPlace();
       setState((s) => {
         if (s.phase === "finished" || s.turn !== 1) return s;
         if (s.phase === "roll") return bgRollDice(s);
@@ -123,8 +137,15 @@ export default function BackgammonClient() {
   }, [state]);
 
   const restart = () => {
+    sfxTap();
+    endSfxRef.current = null;
     setState(newGame());
     setSelected(null);
+  };
+
+  const applyMove = (move: BgMove) => {
+    sfxPlace();
+    setState((s) => bgApplyMove(s, move));
   };
 
   const onPointClick = (index: number) => {
@@ -132,9 +153,10 @@ export default function BackgammonClient() {
     // 移動先として選ばれた場合
     const dest = targets.find((m) => m.to === index);
     if (dest && selected !== null) {
-      setState((s) => bgApplyMove(s, dest));
+      applyMove(dest);
       return;
     }
+    sfxTap();
     // 自分のコマがあるマス／バーを選択
     if (state.bar[0] > 0) {
       if (legal.some((m) => m.from === "bar")) setSelected("bar");
@@ -218,16 +240,22 @@ export default function BackgammonClient() {
           <button
             type="button"
             className="classic-btn classic-btn-active"
-            onClick={() => setState((s) => bgRollDice(s))}
+            onClick={() => {
+              sfxDice();
+              setState((s) => bgRollDice(s));
+            }}
           >
-            🎲 ダイスを振る
+            ダイスを振る
           </button>
         ) : null}
         {myTurn && state.phase === "move" && legal.length === 0 ? (
           <button
             type="button"
             className="classic-btn classic-btn-active"
-            onClick={() => setState((s) => bgPassTurn(s))}
+            onClick={() => {
+              sfxTap();
+              setState((s) => bgPassTurn(s));
+            }}
           >
             パスする
           </button>
@@ -236,7 +264,7 @@ export default function BackgammonClient() {
           <button
             type="button"
             className="classic-btn classic-btn-active"
-            onClick={() => setState((s) => bgApplyMove(s, bearOffMove))}
+            onClick={() => applyMove(bearOffMove)}
           >
             ⬆ 上がる（ベアオフ）
           </button>
@@ -245,7 +273,10 @@ export default function BackgammonClient() {
           <button
             type="button"
             className={selected === "bar" ? "classic-btn classic-btn-active" : "classic-btn"}
-            onClick={() => setSelected("bar")}
+            onClick={() => {
+              sfxTap();
+              setSelected("bar");
+            }}
           >
             バーから復帰（{state.bar[0]}個）
           </button>
@@ -253,9 +284,13 @@ export default function BackgammonClient() {
       </div>
 
       <p className="classic-status" role="status">
-        {state.lastRoll
-          ? `ダイス ${DICE_FACES[state.lastRoll[0]]}${DICE_FACES[state.lastRoll[1]]}`
-          : "ダイス未"}
+        {state.lastRoll ? (
+          <span key={`${state.lastRoll[0]}-${state.lastRoll[1]}-${state.dice.length}`} className="juice-pop">
+            {`ダイス ${DICE_FACES[state.lastRoll[0]]}${DICE_FACES[state.lastRoll[1]]}`}
+          </span>
+        ) : (
+          "ダイス未"
+        )}
         {state.phase === "move" && state.dice.length > 0
           ? ` ・ 残りの目 ${state.dice.join("、")}`
           : ""}
@@ -266,6 +301,19 @@ export default function BackgammonClient() {
           : ""}{" "}
         ・ {statusText}
       </p>
+
+      {state.phase === "finished" && (
+        <EndScreen
+          outcome={state.winner === 0 ? "win" : "lose"}
+          title={state.winner === 0 ? "あなたの勝ちです！" : "CPUの勝ちです。"}
+          onRetry={restart}
+        >
+          <p className="muted" style={{ margin: 0 }}>
+            上がり あなた {state.off[0]} / CPU {state.off[1]} ・ 残り距離 あなた {bgPipCount(state, 0)} / CPU{" "}
+            {bgPipCount(state, 1)}
+          </p>
+        </EndScreen>
+      )}
 
       <div style={{ maxWidth: 640, margin: "0 auto" }}>
         <div

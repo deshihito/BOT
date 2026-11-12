@@ -404,7 +404,7 @@ export const STARTER_CARDS: LllCard[] = [
     "星詠みの守護者",
     "星の巡りを読み、仲間を守る守護者。",
     "water",
-    "🔮",
+    "星",
     { hp: 120, atk: 55, def: 75, spd: 50 },
     [makeSkill("蒼の奔流", "damage", 55, 1), makeSkill("癒しの星詠み", "heal", 85, 2)],
     makeTrait("再生の雫", "regen"),
@@ -414,7 +414,7 @@ export const STARTER_CARDS: LllCard[] = [
     "紅蓮の番人",
     "燃え上がる想いを刃に宿した番人。",
     "fire",
-    "🔥",
+    "炎",
     { hp: 100, atk: 80, def: 55, spd: 65 },
     [makeSkill("紅蓮斬", "damage", 55, 0), makeSkill("灼熱の咆哮", "burn", 85, 2)],
     makeTrait("反撃の炎", "thorns"),
@@ -456,7 +456,7 @@ const LADDER_TEMPLATES: { names: [string, string, string]; elements: [LllElement
   { names: ["レジェンドドラゴン", "伝説の勇者", "世界樹の守護者"], elements: ["light", "dark", "fire"] },
 ];
 
-const ELEMENT_GLYPH: Record<LllElement, string> = { fire: "🔥", water: "💧", wind: "🍃", earth: "🪨", light: "✨", dark: "🌙" };
+const ELEMENT_GLYPH: Record<LllElement, string> = { fire: "火", water: "水", wind: "風", earth: "土", light: "光", dark: "闇" };
 
 /** ラダー敵デッキ。ティアごとに決定的な3枚（純粋関数: 時刻・乱数なし）。 */
 export function ladderDeck(tierIndex: number): LllCard[] {

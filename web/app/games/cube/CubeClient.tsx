@@ -2,7 +2,9 @@
 // 2x2 ルービックキューブ。ロジックは lib/cube.ts（ステッカーモデル）。
 // 展開図で6面を表示し、面ごとの回転ボタンで操作する。端末内で完結する。
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { sfxTap, sfxWin } from "@/lib/sfx";
+import { EndScreen } from "../GameJuice";
 import {
   CUBE_FACES,
   applyCubeMove,
@@ -77,6 +79,21 @@ export default function CubeClient() {
     }
   }, []);
 
+  const prevStatusRef = useRef(state.status);
+  const [winPrevBest, setWinPrevBest] = useState<number | null>(null);
+  const [winNewBest, setWinNewBest] = useState(false);
+
+  // 終局遷移の捕捉はベスト保存 effect より前に置き、保存前のベストを記録する。
+  useEffect(() => {
+    const prev = prevStatusRef.current;
+    prevStatusRef.current = state.status;
+    if (prev !== "won" && state.status === "won") {
+      setWinPrevBest(best);
+      setWinNewBest(best === null || state.moves < best);
+      sfxWin();
+    }
+  }, [state.status, state.moves, best]);
+
   useEffect(() => {
     if (state.status !== "won") return;
     if (best !== null && state.moves >= best) return;
@@ -88,8 +105,15 @@ export default function CubeClient() {
     }
   }, [state.status, state.moves, best]);
 
-  const restart = () => setState(createCubeGame(Date.now() % 2147483647));
-  const doMove = (move: CubeMove) => setState((s) => applyCubeMove(s, move));
+  const restart = () => {
+    setState(createCubeGame(Date.now() % 2147483647));
+    setWinPrevBest(null);
+    setWinNewBest(false);
+  };
+  const doMove = (move: CubeMove) => {
+    if (state.status !== "won") sfxTap();
+    setState((s) => applyCubeMove(s, move));
+  };
 
   const statusText =
     state.status === "won"
@@ -119,6 +143,7 @@ export default function CubeClient() {
       </p>
 
       <div
+        className={state.status === "won" ? "juice-pop" : undefined}
         style={{
           display: "grid",
           gridTemplateColumns: "repeat(4, minmax(0, 76px))",
@@ -193,6 +218,24 @@ export default function CubeClient() {
           </div>
         ))}
       </div>
+
+      {state.status === "won" && (
+        <div style={{ maxWidth: 460, margin: "16px auto 0" }}>
+          <EndScreen
+            outcome="win"
+            title="完成！"
+            score={state.moves}
+            scoreLabel="手数"
+            newBest={winNewBest}
+            previousBest={winPrevBest}
+            onRetry={restart}
+          >
+            <p className="muted" style={{ margin: 0 }}>
+              {state.moves} 手でそろえました。
+            </p>
+          </EndScreen>
+        </div>
+      )}
     </>
   );
 }
