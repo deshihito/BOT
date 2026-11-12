@@ -337,7 +337,10 @@ class StealTargetSelect(discord.ui.UserSelect):
     async def callback(self, interaction: discord.Interaction):
         target = self.values[0]
         guild = interaction.guild
-        member = guild.get_member(target.id) if guild is not None else None
+        # キャッシュに無いだけの相手を「サーバー外」と誤判定しないよう、
+        # キャッシュ→REST の順で引く。
+        from core.member_access import get_or_fetch_member
+        member = await get_or_fetch_member(guild, target.id)
         # 結果は本人だけに返す（S4-2）ため ephemeral で defer する。
         await interaction.response.defer(ephemeral=True)
         message = await self.cog.execute_steal(

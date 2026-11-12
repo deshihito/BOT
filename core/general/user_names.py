@@ -18,6 +18,10 @@ import time
 _CACHE: dict[int, tuple[str, float]] = {}
 _CACHE_TTL = 3600.0
 _MAX_FETCH = 25
+# キャッシュが大きくなったら、期限切れ分をまとめて掃除する閾値。
+# （期限切れは読み出し時に個別に捨てているが、二度と引かれない
+# ユーザーの分が残り続けるため。挙動は変わらない。）
+_CACHE_SWEEP_SIZE = 8192
 
 
 def fallback_name(user_id) -> str:
@@ -38,6 +42,11 @@ def _cache_get(user_id: int) -> str | None:
 
 def _cache_put(user_id: int, name: str) -> None:
     if name:
+        if len(_CACHE) >= _CACHE_SWEEP_SIZE:
+            now = time.monotonic()
+            for key in [k for k, (_, saved_at) in _CACHE.items()
+                        if now - saved_at > _CACHE_TTL]:
+                _CACHE.pop(key, None)
         _CACHE[user_id] = (name, time.monotonic())
 
 

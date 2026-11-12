@@ -781,8 +781,11 @@ class FujoSurvival(commands.Cog):
         await interaction.response.defer()
         await self._ensure_users()
         ids = set(self.users)
-        if interaction.guild is not None and getattr(interaction.guild, "members", None):
-            members = {m.id for m in interaction.guild.members}
+        if interaction.guild is not None:
+            # 母集団は「登録者 ∩ サーバーメンバー」。キャッシュは不完全
+            # になりうるため、必要な時だけメンバー全件を取得する。
+            from core.member_access import list_all_members
+            members = {m.id for m in await list_all_members(interaction.guild)}
             if members:
                 ids &= members
         if not ids:
@@ -859,8 +862,9 @@ class FujoSurvival(commands.Cog):
         """
         await self._ensure_users()
         ids = set(self.users)
-        if guild is not None and getattr(guild, "members", None):
-            members = {m.id for m in guild.members}
+        if guild is not None:
+            from core.member_access import list_all_members
+            members = {m.id for m in await list_all_members(guild)}
             if members:
                 ids &= members
         if not ids:

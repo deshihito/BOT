@@ -55,8 +55,10 @@ class LogBuffer(logging.Handler):
 
 class MyBot(commands.Bot):
     def __init__(self):
-        intents = discord.Intents.all() 
-        super().__init__(command_prefix=config.PREFIX, intents=intents)
+        # メモリ方針（起動時チャンク停止・メッセージキャッシュ上限・
+        # typing intent 無効化）は core/member_access.py に集約する。
+        from core.member_access import bot_client_kwargs
+        super().__init__(command_prefix=config.PREFIX, **bot_client_kwargs())
         self.updated_notified = False
         self._restore_started = False
         self._registry_synced = False

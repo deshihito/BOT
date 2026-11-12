@@ -21,6 +21,22 @@ logger = logging.getLogger(__name__)
 INITIAL_DELAY_SECONDS = 60
 
 
+def trim_released_heap() -> bool:
+    """glibc の未使用ヒープを OS へ返却する（malloc_trim）。
+
+    画像生成（PIL）等で断片化したヒープは、オブジェクトを解放しても
+    プロセスの RSS に残り続けることがある。Linux/glibc 以外や失敗時は
+    何もしない。戻り値は「返却が実行できたか」。
+    """
+    try:
+        import ctypes
+
+        libc = ctypes.CDLL("libc.so.6")
+        return bool(libc.malloc_trim(0))
+    except Exception:
+        return False
+
+
 class BotStatusCog(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
@@ -50,6 +66,8 @@ class BotStatusCog(commands.Cog):
 
     @tasks.loop(minutes=5)
     async def publish_loop(self) -> None:
+        # スナップショット周期に合わせてヒープの断片化も戻す（失敗は無視）。
+        trim_released_heap()
         try:
             await snapshot.write_snapshot(self.bot, started_at=self.started_at)
         except Exception:

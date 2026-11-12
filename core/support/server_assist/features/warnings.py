@@ -113,7 +113,10 @@ async def apply_escalation(guild: Any, user_id: int, total: int, current: dict[s
     action = escalation_action_for(total, current)
     if action is None or guild is None:
         return None
-    member = guild.get_member(user_id) if hasattr(guild, "get_member") else None
+    # キャッシュに無いだけのメンバーを「いない」と誤判定しないよう、
+    # キャッシュ→REST の順で引く（処罰の取りこぼし防止）。
+    from core.member_access import get_or_fetch_member
+    member = await get_or_fetch_member(guild, user_id)
     if member is None:
         return None
     me = getattr(guild, "me", None)
