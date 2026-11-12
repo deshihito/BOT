@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from datetime import datetime, timezone
 
 import aiohttp
@@ -36,6 +37,8 @@ logger = logging.getLogger("cogs.news")
 
 POLL_MINUTES = 15  # GDELT のデータ更新間隔に合わせる
 MAX_POSTS_PER_POLL = 5  # 1回のチェックで投稿する新着の上限（古い順）
+FETCH_SPACING_SECONDS = 6  # GDELT の目安（1リクエスト/5秒）を超えない間隔
+RATE_LIMIT_BACKOFF_SECONDS = 1800  # 429 のときは最低30分休む
 
 
 def format_post(items: list[NewsItem], topic_keys: list[str]) -> str:
@@ -60,6 +63,8 @@ class NewsCog(commands.Cog):
         self.bot = bot
         # fetcher: async (session, topic_key) -> list[NewsItem]（テスト差し替え用）
         self._fetcher = fetcher or feeds_mod.fetch_feed
+        # 429 を受けたトピックの再試行時刻（time.monotonic 基準）
+        self._topic_backoff: dict[str, float] = {}
 
     async def cog_load(self) -> None:
         if not self.poll_loop.is_running():
@@ -103,17 +108,31 @@ class NewsCog(commands.Cog):
             return 0
 
         # 取得はサーバー間で共有する（同じトピックは1回だけ取る）。
+        # GDELT の制限（1リクエスト/5秒目安）に当たらないよう、並列では
+        # なく間隔を空けて順に取る。429 のトピックはしばらく休む。
         wanted = {key for _gid, s in targets for key in s["feeds"] if key in TOPICS}
         fetched: dict[str, list[NewsItem]] = {}
+        now_mono = time.monotonic()
         async with aiohttp.ClientSession() as session:
-            results = await asyncio.gather(
-                *(self._fetcher(session, key) for key in sorted(wanted)),
-                return_exceptions=True)
-        for key, result in zip(sorted(wanted), results):
-            if isinstance(result, Exception):
-                logger.warning("news: 取得に失敗 topic=%s", key, exc_info=result)
-                continue
-            fetched[key] = result
+            first = True
+            for key in sorted(wanted):
+                if self._topic_backoff.get(key, 0.0) > now_mono:
+                    continue
+                if not first:
+                    await asyncio.sleep(FETCH_SPACING_SECONDS)
+                first = False
+                try:
+                    fetched[key] = await self._fetcher(session, key)
+                except feeds_mod.RateLimited as exc:
+                    backoff = max(exc.retry_after or 0.0,
+                                  RATE_LIMIT_BACKOFF_SECONDS)
+                    self._topic_backoff[key] = time.monotonic() + backoff
+                    logger.info(
+                        "news: GDELT が混雑しています（429）。topic=%s は "
+                        "%.0f 分ほど取得を休みます", key, backoff / 60)
+                except Exception:
+                    logger.warning("news: 取得に失敗 topic=%s", key,
+                                   exc_info=True)
 
         posted = 0
         for guild_id, settings in targets:
