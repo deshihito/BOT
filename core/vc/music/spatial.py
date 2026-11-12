@@ -715,6 +715,27 @@ class SpatialControlView(discord.ui.View):
             self.toggle_rotate.label = "🌀 回転: ON" if is_rotating else '回転: OFF'
             self.toggle_rotate.emoji = None if is_rotating else PAUSE
 
+        self._sync_select_defaults()
+
+    def _sync_select_defaults(self):
+        """各セレクトの表示上の既定値を、現在の状態に合わせる。
+
+        選択肢の default はクラス定義時に固定されているため、そのままだと
+        値を変えてもドロップダウンの表示だけ標準値のまま残ってしまう。
+        """
+        state = self.cog.get_state(self.guild_id)
+        targets = (
+            (self.select_reverb, state.get('spatial_room_size', 0.3)),
+            (self.select_distance, state.get('spatial_distance', 2.0)),
+            (self.select_speaker, state.get('spatial_speaker', 'studio')),
+        )
+        for select, current in targets:
+            for option in select.options:
+                try:
+                    option.default = float(option.value) == float(current)
+                except (TypeError, ValueError):
+                    option.default = option.value == current
+
     # 💡 ボタンの定義（デコレータで定義されたメソッド）
     @discord.ui.button(label="回転モード切替", style=discord.ButtonStyle.primary, row=0)
     async def toggle_rot_mode(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -735,6 +756,7 @@ class SpatialControlView(discord.ui.View):
 
     async def update_panel(self, interaction: discord.Interaction):
         """パネルの表示を最新状態に更新（V2 ラッパー経由で再描画）。"""
+        self._sync_select_defaults()
         await edit_panel_view(interaction, self)
 
     # 1. Spatialモード ON ボタン
@@ -744,6 +766,11 @@ class SpatialControlView(discord.ui.View):
             return
         state = self.cog.get_state(self.guild_id)
         state['eq'] = 'spatial'
+        # 先に応答を済ませる。ソースの再作成（URL解決など）は数秒かかることが
+        # あり、応答が遅れると Discord に「時間内に応答しませんでした」と
+        # 表示されてしまう（状態は変わるのに失敗したように見える）。
+        if not interaction.response.is_done():
+            await interaction.response.defer()
         # 再生中の曲にも即時反映する（音声ソースを作り直す）。
         # 状態を変えるだけだと、ソースが作り直される次の曲まで立体音響が掛からない。
         await self.cog.apply_immediate_setting(interaction)

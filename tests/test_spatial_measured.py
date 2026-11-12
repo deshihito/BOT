@@ -246,5 +246,64 @@ class RotationCoherenceTest(unittest.TestCase):
         self.assertEqual(src._last_band_angles, [0.0, 0.0, 0.0])
 
 
+class SpatialPanelFixesTest(unittest.IsolatedAsyncioTestCase):
+    def _make_view(self, state):
+        import sys as _sys
+        import types as _types
+
+        _sys.modules.setdefault("yt_dlp", _types.ModuleType("yt_dlp"))
+        from core.vc.music import spatial
+
+        class _FakeCog:
+            def get_state(self, guild_id):
+                return state
+
+        return spatial.SpatialControlView(_FakeCog(), 123), spatial
+
+    def test_select_defaults_follow_state(self):
+        state = {
+            "spatial_room_size": 0.75,
+            "spatial_distance": 8.0,
+            "spatial_speaker": "pa",
+        }
+        view, _spatial = self._make_view(state)
+        for select, expected in (
+            (view.select_reverb, "0.75"),
+            (view.select_distance, "8.0"),
+            (view.select_speaker, "pa"),
+        ):
+            defaults = [o.value for o in select.options if o.default]
+            self.assertEqual(defaults, [expected])
+
+    async def test_toggle_spatial_defers_before_reload(self):
+        from unittest.mock import AsyncMock, MagicMock
+
+        state = {"eq": "flat"}
+        view, spatial = self._make_view(state)
+        order = []
+
+        interaction = MagicMock()
+        interaction.response.is_done = MagicMock(return_value=False)
+
+        async def _defer():
+            order.append("defer")
+
+        async def _apply(_interaction):
+            order.append("apply")
+
+        async def _update(_interaction):
+            order.append("update")
+
+        interaction.response.defer = AsyncMock(side_effect=_defer)
+        view.cog.apply_immediate_setting = AsyncMock(side_effect=_apply)
+        view.update_panel = AsyncMock(side_effect=_update)
+        spatial._require_same_vc = AsyncMock(return_value=True)
+
+        await view.toggle_spatial.callback(interaction)
+
+        self.assertEqual(order, ["defer", "apply", "update"])
+        self.assertEqual(state["eq"], "spatial")
+
+
 if __name__ == "__main__":
     unittest.main()
