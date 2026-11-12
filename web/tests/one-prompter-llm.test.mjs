@@ -655,119 +655,31 @@ test("synthesizeWithLlm は検証・直しの失敗時に下書きをそのま�
   assert.equal(await server.synthesizeWithLlm("転職したい", answers, { env, fetchImpl: fetchRefineTooLong }), "下書きのプロンプト");
 });
 
-test("モデル選択肢は6つで、表示名にプロバイダ名を含まない", () => {
-  assert.equal(llm.PROMPTER_MODEL_OPTIONS.length, 6);
-  assert.deepEqual(
-    llm.PROMPTER_MODEL_OPTIONS.map((o) => o.label),
-    ["GLM 5.3", "GLM 5.3 Flash", "DeepSeek 1017", "Gemma 26B", "Qwen 3.8 27B", "Kimi K3.1 Pro"],
-  );
-  for (const opt of llm.PROMPTER_MODEL_OPTIONS) {
-    assert.ok(!/logfare/i.test(opt.label), `表示名にプロバイダ名: ${opt.label}`);
-    assert.ok(!/logfare/i.test(opt.key), `キーにプロバイダ名: ${opt.key}`);
-  }
-  assert.equal(llm.DEFAULT_MODEL_KEY, "deepseek1017");
+test("resolveReasoning は think オンで high、オフ・不正値では none を返す（モデルは ds1017 固定）", () => {
+  assert.equal(server.resolveReasoning(true), "high");
+  assert.equal(server.resolveReasoning(false), "none");
+  assert.equal(server.resolveReasoning(undefined), "none");
+  assert.equal(server.resolveReasoning("yes"), "none");
+  assert.equal(server.resolveReasoning(1), "none");
 });
 
-test("resolveModelKey は正しいキーだけを通し、それ以外は既定に丸める", () => {
-  for (const opt of llm.PROMPTER_MODEL_OPTIONS) {
-    assert.equal(llm.resolveModelKey(opt.key), opt.key);
-  }
-  assert.equal(llm.resolveModelKey(undefined), "deepseek1017");
-  assert.equal(llm.resolveModelKey(null), "deepseek1017");
-  assert.equal(llm.resolveModelKey("deepseek-v4.1-flash-1017"), "deepseek1017"); // ID そのものはキーとして受け付けない
-  assert.equal(llm.resolveModelKey("GLM 5.3"), "deepseek1017"); // 表示名も受け付けない
-  assert.equal(llm.resolveModelKey(42), "deepseek1017");
-});
-
-test("resolveModelSpec はキーごとに ID と reasoning を対応付ける", () => {
-  assert.deepEqual(server.resolveModelSpec("glm53", {}), { key: "glm53", id: "glm-5.3", reasoning: "low" });
-  assert.deepEqual(server.resolveModelSpec("glm53-flash", {}), { key: "glm53-flash", id: "glm-5.3-flash", reasoning: "low" });
-  assert.deepEqual(server.resolveModelSpec("deepseek1017", {}), {
-    key: "deepseek1017",
-    id: "deepseek-v4.1-flash-1017",
-    reasoning: "none",
-  });
-  assert.deepEqual(server.resolveModelSpec("gemma26b", {}), { key: "gemma26b", id: "gemma-4-26b" });
-  assert.deepEqual(server.resolveModelSpec("qwen27b", {}), { key: "qwen27b", id: "qwen-3.8-27b", reasoning: "none" });
-  assert.deepEqual(server.resolveModelSpec("kimi31pro", {}), { key: "kimi31pro", id: "kimi-k3.1-pro" });
-  // 不正値は既定モデルに丸まる
-  assert.equal(server.resolveModelSpec("nope", {}).key, "deepseek1017");
-  assert.equal(server.resolveModelSpec(undefined, {}).key, "deepseek1017");
-});
-
-test("resolveModelSpec は env で ID を差し替えられる（既定モデルは ONE_PROMPTER_MODEL が効く）", () => {
-  assert.equal(server.resolveModelSpec("deepseek1017", { ONE_PROMPTER_MODEL: "custom-default" }).id, "custom-default");
-  assert.equal(server.resolveModelSpec("kimi31pro", { ONE_PROMPTER_MODEL_KIMI: "kimi-real-id" }).id, "kimi-real-id");
-  assert.equal(server.resolveModelSpec("glm53", { ONE_PROMPTER_MODEL_GLM53: "glm-alt" }).id, "glm-alt");
-  // 他モデルの env は既定モデルに影響しない
-  assert.equal(server.resolveModelSpec("deepseek1017", { ONE_PROMPTER_MODEL_KIMI: "x" }).id, "deepseek-v4.1-flash-1017");
-});
-
-test("logfareChat は6モデル分のリクエストを reasoning の出し分け込みで組み立てる", async () => {
-  const cases = [
-    { key: "glm53", id: "glm-5.3", reasoning: "low" },
-    { key: "glm53-flash", id: "glm-5.3-flash", reasoning: "low" },
-    { key: "deepseek1017", id: "deepseek-v4.1-flash-1017", reasoning: "none" },
-    { key: "gemma26b", id: "gemma-4-26b", reasoning: undefined },
-    { key: "qwen27b", id: "qwen-3.8-27b", reasoning: "none" },
-    { key: "kimi31pro", id: "kimi-k3.1-pro", reasoning: undefined },
-  ];
-  for (const c of cases) {
-    let seenBody = "";
-    const fetchImpl = async (url, init) => {
-      seenBody = init.body;
-      return chatResponse("ok");
-    };
-    const env = { LOGFARE_API_KEY: "dummy" };
-    await server.logfareChat([{ role: "user", content: "hi" }], { maxTokens: 10, env, fetchImpl, model: c.key });
-    const payload = JSON.parse(seenBody);
-    assert.equal(payload.model, c.id, `${c.key} のモデル ID`);
-    if (c.reasoning === undefined) {
-      assert.ok(!("reasoning_effort" in payload), `${c.key} では reasoning_effort を送らない`);
-    } else {
-      assert.equal(payload.reasoning_effort, c.reasoning, `${c.key} の reasoning`);
-    }
-  }
-});
-
-test("model は質問生成・合成（検証含む）・revise の全呼び出しに伝播する", async () => {
+test("logfareChat は常に ds1017 を使い、env ONE_PROMPTER_MODEL でだけ差し替えられる", async () => {
   const env = { LOGFARE_API_KEY: "dummy" };
-  const bodies = [];
-  const fetchImpl = async (url, init) => {
-    bodies.push(JSON.parse(init.body));
-    return chatResponse(JSON.stringify(VALID_QUESTIONS));
-  };
-  await server.generateQuestionsWithLlm("転職したい", { env, fetchImpl, model: "glm53" });
-  assert.equal(bodies[0].model, "glm-5.3");
-  assert.equal(bodies[0].reasoning_effort, "low");
-
-  const bodies2 = [];
-  const queue = [chatResponse("下書きのプロンプト"), chatResponse('{"issues":[]}')];
-  const fetchImpl2 = async (url, init) => {
-    bodies2.push(JSON.parse(init.body));
-    return queue.shift();
-  };
-  const out = await server.synthesizeWithLlm("転職したい", [{ question: "Q?", answer: "A" }], {
-    env,
-    fetchImpl: fetchImpl2,
-    model: "gemma26b",
-  });
-  assert.equal(out, "下書きのプロンプト");
-  assert.equal(bodies2.length, 2); // 下書き＋検証
-  for (const b of bodies2) {
-    assert.equal(b.model, "gemma-4-26b");
-    assert.ok(!("reasoning_effort" in b));
-  }
-
   let seenBody = "";
-  const fetchImpl3 = async (url, init) => {
+  const fetchImpl = async (url, init) => {
     seenBody = init.body;
-    return chatResponse("書き直したプロンプト");
+    return chatResponse("ok");
   };
-  await server.reviseWithLlm("元のプロンプト", "短く", { env, fetchImpl: fetchImpl3, model: "qwen27b" });
-  const payload3 = JSON.parse(seenBody);
-  assert.equal(payload3.model, "qwen-3.8-27b");
-  assert.equal(payload3.reasoning_effort, "none");
+  await server.logfareChat([{ role: "user", content: "hi" }], { maxTokens: 10, env, fetchImpl });
+  const payload = JSON.parse(seenBody);
+  assert.equal(payload.model, "deepseek-v4.1-flash-1017");
+  assert.equal(payload.reasoning_effort, "none");
+  await server.logfareChat([{ role: "user", content: "hi" }], {
+    maxTokens: 10,
+    env: { ...env, ONE_PROMPTER_MODEL: "custom-x" },
+    fetchImpl,
+  });
+  assert.equal(JSON.parse(seenBody).model, "custom-x");
 });
 
 test("resolveThink は true のときだけオン、それ以外はオフに丸める", () => {
@@ -779,44 +691,20 @@ test("resolveThink は true のときだけオン、それ以外はオフに丸�
   assert.equal(llm.resolveThink(1), false);
 });
 
-test("modelSupportsThink は reasoning 対応が確認済みのモデルだけ true", () => {
-  for (const key of ["glm53", "glm53-flash", "deepseek1017", "qwen27b"]) {
-    assert.equal(llm.modelSupportsThink(key), true, key);
-  }
-  // gemma / kimi は reasoning の対応が未確認のためトグル対象外
-  for (const key of ["gemma26b", "kimi31pro"]) {
-    assert.equal(llm.modelSupportsThink(key), false, key);
-  }
-});
-
-test("resolveModelSpec は think オンで reasoning を送れるモデルだけ high に上げる", () => {
-  // オン: deepseek / qwen / glm 系は "high"（"max" にはしない）
-  assert.equal(server.resolveModelSpec("glm53", {}, true).reasoning, "high");
-  assert.equal(server.resolveModelSpec("glm53-flash", {}, true).reasoning, "high");
-  assert.equal(server.resolveModelSpec("deepseek1017", {}, true).reasoning, "high");
-  assert.equal(server.resolveModelSpec("qwen27b", {}, true).reasoning, "high");
-  // オンでも gemma / kimi には reasoning を付けない
-  assert.deepEqual(server.resolveModelSpec("gemma26b", {}, true), { key: "gemma26b", id: "gemma-4-26b" });
-  assert.deepEqual(server.resolveModelSpec("kimi31pro", {}, true), { key: "kimi31pro", id: "kimi-k3.1-pro" });
-  // オフ・不正値は従来どおり
-  assert.equal(server.resolveModelSpec("deepseek1017", {}, false).reasoning, "none");
-  assert.equal(server.resolveModelSpec("glm53", {}, "yes").reasoning, "low");
-  assert.equal(server.resolveModelSpec("deepseek1017", {}).reasoning, "none");
-});
-
 test("logfareChat は think を reasoning_effort に反映する", async () => {
-const env = { LOGFARE_API_KEY: "test-key" };
+  const env = { LOGFARE_API_KEY: "test-key" };
   const bodies = [];
   const fetchImpl = async (url, init) => {
     bodies.push(JSON.parse(init.body));
     return chatResponse("ok");
   };
-  await server.logfareChat([{ role: "user", content: "hi" }], { maxTokens: 10, env, fetchImpl, model: "deepseek1017", think: true });
+  await server.logfareChat([{ role: "user", content: "hi" }], { maxTokens: 10, env, fetchImpl, think: true });
   assert.equal(bodies[0].reasoning_effort, "high");
-  await server.logfareChat([{ role: "user", content: "hi" }], { maxTokens: 10, env, fetchImpl, model: "gemma26b", think: true });
-  assert.ok(!("reasoning_effort" in bodies[1]), "gemma は think オンでも reasoning を送らない");
-  await server.logfareChat([{ role: "user", content: "hi" }], { maxTokens: 10, env, fetchImpl, model: "glm53", think: false });
-  assert.equal(bodies[2].reasoning_effort, "low");
+  assert.equal(bodies[0].model, "deepseek-v4.1-flash-1017");
+  await server.logfareChat([{ role: "user", content: "hi" }], { maxTokens: 10, env, fetchImpl, think: false });
+  assert.equal(bodies[1].reasoning_effort, "none");
+  await server.logfareChat([{ role: "user", content: "hi" }], { maxTokens: 10, env, fetchImpl });
+  assert.equal(bodies[2].reasoning_effort, "none");
 });
 
 test("think は質問生成・深掘り・合成（検証・直し含む）・revise の全呼び出しに伝播する", async () => {
@@ -826,7 +714,7 @@ test("think は質問生成・深掘り・合成（検証・直し含む）・re
     bodies.push(JSON.parse(init.body));
     return chatResponse(JSON.stringify(VALID_QUESTIONS));
   };
-  await server.generateQuestionsWithLlm("転職したい", { env, fetchImpl, model: "qwen27b", think: true });
+  await server.generateQuestionsWithLlm("転職したい", { env, fetchImpl, think: true });
   assert.equal(bodies[0].reasoning_effort, "high");
 
   const followBodies = [];
@@ -837,7 +725,6 @@ test("think は質問生成・深掘り・合成（検証・直し含む）・re
   await server.generateFollowupQuestionsWithLlm("転職したい", [{ question: "Q?", answer: "A" }], {
     env,
     fetchImpl: followFetch,
-    model: "qwen27b",
     think: true,
   });
   assert.equal(followBodies[0].reasoning_effort, "high");
@@ -856,7 +743,6 @@ test("think は質問生成・深掘り・合成（検証・直し含む）・re
   const out = await server.synthesizeWithLlm("転職したい", [{ question: "Q?", answer: "A" }], {
     env,
     fetchImpl: synthFetch,
-    model: "deepseek1017",
     think: true,
   });
   assert.equal(out, "直したプロンプト");
@@ -868,6 +754,6 @@ test("think は質問生成・深掘り・合成（検証・直し含む）・re
     reviseBody = init.body;
     return chatResponse("書き直したプロンプト");
   };
-  await server.reviseWithLlm("元のプロンプト", "短く", { env, fetchImpl: reviseFetch, model: "glm53-flash", think: true });
+  await server.reviseWithLlm("元のプロンプト", "短く", { env, fetchImpl: reviseFetch, think: true });
   assert.equal(JSON.parse(reviseBody).reasoning_effort, "high");
 });

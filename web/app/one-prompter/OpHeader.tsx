@@ -1,14 +1,9 @@
-"use client";
-
-// One Prompter のヘッダー（クライアント）。
+// One Prompter のヘッダー。
 // 左にブランド（ロゴA＋サービス名。サービス名の常時表示はここの1箇所だけ）、
-// 右に現在選択中のモデル名（小さく muted で）とハンバーガーメニュー。
-// 選択中モデルの表示は、メニューを開かなくても今のモデルが分かるように置く。
+// 右にハンバーガーメニュー（中身は OpMenu 側で持つ）。
 // ブランドマークはロゴA「プロンプト記号」（黒い角丸スクエアに白抜きの
 // ターミナルプロンプト「>_」）。ファビコン（page.tsx の OP_ICON）も同一形状。
 import OpMenu from "./OpMenu";
-import { useOpModel } from "./OpModelContext";
-import { PROMPTER_MODEL_OPTIONS } from "../../lib/one-prompter-llm";
 
 function OpLogoMark({ size }: { size: number }) {
   return (
@@ -28,8 +23,6 @@ function OpLogoMark({ size }: { size: number }) {
 }
 
 export default function OpHeader() {
-  const { modelKey } = useOpModel();
-  const current = PROMPTER_MODEL_OPTIONS.find((o) => o.key === modelKey);
   return (
     <header className="op-header">
       <p className="op-brand">
@@ -37,7 +30,6 @@ export default function OpHeader() {
         One Prompter
       </p>
       <div className="op-header-right">
-        <span className="op-header-model">{current?.label}</span>
         <OpMenu />
       </div>
     </header>

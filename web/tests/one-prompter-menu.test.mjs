@@ -1,20 +1,22 @@
-// ハンバーガーメニュー（モデル選択専用）・サービス名の表示回数・
-// モデル状態の共有・「より考える」トグルの配線・選択中ボタンの
-// スタイルを、ソースコードの静的チェックで確かめる（画面描画はしない）。
+// ハンバーガーメニュー・サービス名の表示回数・「より考える」トグルの配線・
+// モデル選択の廃止（ds1017 固定）・選択中ボタンのスタイルを、
+// ソースコードの静的チェックで確かめる（画面描画はしない）。
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 
 const read = (rel) => fs.readFileSync(path.join(import.meta.dirname, "..", rel), "utf8");
+const exists = (rel) => fs.existsSync(path.join(import.meta.dirname, "..", rel));
 
 const layoutSrc = read("app/one-prompter/layout.tsx");
 const headerSrc = read("app/one-prompter/OpHeader.tsx");
-const contextSrc = read("app/one-prompter/OpModelContext.tsx");
 const pageSrc = read("app/one-prompter/page.tsx");
 const menuSrc = read("app/one-prompter/OpMenu.tsx");
 const clientSrc = read("app/one-prompter/OnePrompterClient.tsx");
 const routeSrc = read("app/api/one-prompter/route.ts");
+const llmSrc = read("lib/one-prompter-llm.ts");
+const serverSrc = read("lib/one-prompter-server.ts");
 const cssSrc = read("app/globals.css");
 
 /** 行コメント（// で始まる行）を除いた本文。コメント中の言及を表示と数えないため。 */
@@ -39,32 +41,27 @@ test("サービス名の常時表示はヘッダーの1箇所だけ（フッタ�
   assert.ok(!withoutLineComments(menuSrc).includes("One Prompter"));
 });
 
-test("レイアウトはモデル状態の Provider で包み、ヘッダーを置く", () => {
+test("レイアウトはヘッダーを置き、モデル状態の Provider は持たない", () => {
   assert.match(layoutSrc, /import OpHeader from "\.\/OpHeader"/);
-  assert.match(layoutSrc, /import \{ OpModelProvider \} from "\.\/OpModelContext"/);
-  assert.match(layoutSrc, /<OpModelProvider>/);
   assert.match(layoutSrc, /<OpHeader \/>/);
-  // コンテキストは既定モデルで初期化される
-  assert.match(contextSrc, /useState<PrompterModelKey>\(DEFAULT_MODEL_KEY\)/);
+  assert.ok(!layoutSrc.includes("OpModelProvider"));
+  assert.ok(!layoutSrc.includes("OpModelContext"));
+  // モデル状態の共有コンテキスト自体を廃止した
+  assert.ok(!exists("app/one-prompter/OpModelContext.tsx"));
 });
 
-test("ヘッダーはハンバーガーメニューと現在のモデル名（控えめ表示）を出す", () => {
+test("ヘッダーはハンバーガーメニューを出し、現在のモデル名表示は持たない", () => {
   assert.match(headerSrc, /import OpMenu from "\.\/OpMenu"/);
   assert.match(headerSrc, /<OpMenu \/>/);
-  assert.match(headerSrc, /className="op-header-model"/);
-  assert.match(headerSrc, /PROMPTER_MODEL_OPTIONS\.find/);
-  assert.match(headerSrc, /useOpModel\(\)/);
+  assert.ok(!headerSrc.includes("op-header-model"));
+  assert.ok(!headerSrc.includes("useOpModel"));
 });
 
-test("メニューはモデル選択専用: 一覧とチェックと閉じる操作を持ち、規約リンクも使い方も持たない", () => {
-  assert.match(menuSrc, />モデル</);
-  assert.match(menuSrc, /PROMPTER_MODEL_OPTIONS\.map/);
-  assert.match(menuSrc, /✓/);
-  assert.match(menuSrc, /aria-pressed=\{selected\}/);
-  // 選んだら切り替えて閉じる
-  assert.match(menuSrc, /setModelKey\(opt\.key\)/);
-  assert.match(menuSrc, /setOpen\(false\)/);
-  // 件1: 利用規約・プライバシーポリシーは画面のどこにも置かない
+test("メニューはモデル選択を持たず、規約リンクも使い方も持たない（閉じる操作はある）", () => {
+  assert.ok(!menuSrc.includes("PROMPTER_MODEL_OPTIONS"));
+  assert.ok(!menuSrc.includes("モデル"));
+  assert.ok(!menuSrc.includes("✓"));
+  // 利用規約・プライバシーポリシーは画面のどこにも置かない
   assert.ok(!menuSrc.includes("agobot.app/terms"));
   assert.ok(!menuSrc.includes("agobot.app/privacy"));
   assert.ok(!menuSrc.includes("利用規約"));
@@ -97,7 +94,6 @@ test("クライアント側コードと表示文言にプロバイダ名（Logfa
     ["OnePrompterClient.tsx", clientSrc],
     ["OpMenu.tsx", menuSrc],
     ["OpHeader.tsx", headerSrc],
-    ["OpModelContext.tsx", contextSrc],
     ["layout.tsx", layoutSrc],
     ["page.tsx", pageSrc],
   ]) {
@@ -105,46 +101,55 @@ test("クライアント側コードと表示文言にプロバイダ名（Logfa
   }
 });
 
-test("モデル状態はコンテキスト経由でクライアントと共有される", () => {
-  assert.match(clientSrc, /const \{ modelKey \} = useOpModel\(\);/);
-  assert.match(menuSrc, /const \{ modelKey, setModelKey \} = useOpModel\(\);/);
+test("モデル選択は廃止され、生成は ds1017 固定（env 差し替えのみ）", () => {
+  // 選択肢・キー解決・対応表の痕跡がどこにもない
+  for (const [name, src] of [
+    ["one-prompter-llm.ts", llmSrc],
+    ["one-prompter-server.ts", serverSrc],
+    ["OnePrompterClient.tsx", clientSrc],
+    ["OpMenu.tsx", menuSrc],
+    ["OpHeader.tsx", headerSrc],
+    ["route.ts", routeSrc],
+  ]) {
+    assert.ok(!src.includes("PROMPTER_MODEL_OPTIONS"), `${name} にモデル選択肢が残っている`);
+    assert.ok(!src.includes("resolveModelKey"), `${name} にモデルキー解決が残っている`);
+    assert.ok(!src.includes("resolveModelSpec"), `${name} にモデル対応表が残っている`);
+    assert.ok(!src.includes("modelSupportsThink"), `${name} にモデル別 think 判定が残っている`);
+  }
+  // サーバー側は固定モデルを env でだけ差し替える
+  assert.match(serverSrc, /model: onePrompterModel\(env\)/);
+  assert.match(serverSrc, /env\.ONE_PROMPTER_MODEL/);
+  assert.match(serverSrc, /"deepseek-v4\.1-flash-1017"/);
 });
 
-test("入力画面の設定グループは質問の数・言語・思考トグルだけで、モデル選択を含まない", () => {
+test("入力画面の設定グループは質問の数・言語・思考トグルだけ", () => {
   const groupStart = clientSrc.indexOf('className="op-settings"');
   assert.ok(groupStart >= 0, "設定グループがない");
   const group = clientSrc.slice(groupStart, clientSrc.indexOf('className="op-actions"', groupStart));
   assert.match(group, />設定</);
   assert.ok(group.indexOf("質問の数") < group.indexOf("プロンプトの言語"), "質問の数→言語の順で並ぶ");
   assert.ok(group.indexOf("プロンプトの言語") < group.indexOf("より考える"), "言語→思考トグルの順で並ぶ");
-  // モデル選択はメニューへ移したので、設定グループには行ごと無い
-  assert.ok(!group.includes('op-countlabel">モデル'), "設定グループにモデル行が残っている");
-  assert.ok(!group.includes("PROMPTER_MODEL_OPTIONS"), "設定グループでモデル選択肢を描いている");
-  // メニュー側がモデル一覧を描く
-  assert.match(menuSrc, /PROMPTER_MODEL_OPTIONS\.map/);
+  assert.ok(!group.includes("モデル"), "設定グループにモデルが残っている");
 });
 
-test("「より考える」トグルは既定オフで、非対応モデルでは無効化される", () => {
+test("「より考える」トグルは既定オフで、無効化されない（ds1017 専用の挙動）", () => {
   assert.match(clientSrc, /const \[think, setThink\] = useState\(false\);/);
   assert.match(clientSrc, /className=\{think \? "op-suboption selected" : "op-suboption"\}/);
   assert.match(clientSrc, /aria-pressed=\{think\}/);
-  assert.match(clientSrc, /disabled=\{!thinkSupported\}/);
-  assert.match(clientSrc, /const thinkSupported = modelSupportsThink\(modelKey\);/);
+  assert.ok(!clientSrc.includes("thinkSupported"));
   assert.ok(clientSrc.includes("より考える"));
 });
 
-test("クライアントは全リクエスト（質問・深掘り・合成・revise）に model と think を送る", () => {
-  assert.equal((clientSrc.match(/model: modelKey/g) || []).length, 4);
-  // think の送り方は2形: 末尾に並べる形（質問開始・revise）と単独行（深掘り・合成）
-  assert.equal((clientSrc.match(/model: modelKey, think \}/g) || []).length, 2);
+test("クライアントは全リクエスト（質問・深掘り・合成・revise）に think を送り、model は送らない", () => {
+  assert.ok(!clientSrc.includes("model:"));
+  assert.equal((clientSrc.match(/count: questionCount, think \}/g) || []).length, 1);
   assert.equal((clientSrc.match(/^\s+think,$/gm) || []).length, 2);
+  assert.equal((clientSrc.match(/lang: promptLang, think \}/g) || []).length, 1);
 });
 
-test("API ルートは model と think を全アクションの LLM 呼び出しへ伝播する", () => {
-  assert.equal((routeSrc.match(/model: body\.model/g) || []).length, 4);
+test("API ルートは think を全アクションの LLM 呼び出しへ伝播し、model は受け取らない", () => {
   assert.equal((routeSrc.match(/think: body\.think/g) || []).length, 4);
-  // ログにはモデルキーだけを出す（ID 解決はサーバー側の対応表）
-  assert.match(routeSrc, /resolveModelKey\(body\.model\)/);
+  assert.ok(!routeSrc.includes("body.model"));
 });
 
 test("選択中ボタンが真っ白にならない（黒背景＋白文字が白背景の一律上書きに負けない）", () => {
@@ -157,6 +162,4 @@ test("選択中ボタンが真っ白にならない（黒背景＋白文字が�
   assert.match(cssSrc, /\.op-suboption:not\(\.selected\) \{ background:#ffffff; \}/);
   // 選択中はプライマリと同じ黒背景（#17191c）＋白文字を明示する
   assert.match(cssSrc, /\.op-shell \.op-suboption\.selected \{ background:#17191c; border-color:#17191c; color:#fff; \}/);
-  // メニューのモデル一覧の選択中も同じ統一
-  assert.match(cssSrc, /\.op-shell \.op-menu-model\.selected \{ background:#17191c; border-color:#17191c; color:#fff; \}/);
 });
