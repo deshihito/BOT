@@ -21,6 +21,7 @@ NEW_VALUES = {
     "assist_reminder", "assist_goodbye", "globalchat_mod", "tempvoice_panel",
     "assist_embed_templates", "assist_warning_escalation", "assist_application_review",
     "assist_events_link", "levelup_card_theme", "binjou_custom", "quest_manual",
+    "news_notify",
 }
 REMOVED_VALUES = {"bumprta_status", "bumprta_on", "bumprta_off", "bumprta_role", "sns_notify"}
 
@@ -48,10 +49,10 @@ def make_cog(cogs):
 
 class RegistryShapeTest(unittest.TestCase):
     def test_counts(self):
-        self.assertEqual(len(SUPPORT_ACTIONS), 87)
+        self.assertEqual(len(SUPPORT_ACTIONS), 88)
         counts = {genre: len(items) for genre, items in SUPPORT_ACTIONS_BY_GENRE.items()}
         self.assertEqual(counts, {
-            "moderation": 17, "roles": 8, "logs": 5, "automation": 35,
+            "moderation": 17, "roles": 8, "logs": 5, "automation": 36,
             "rta": 5, "boardnotify": 10, "sns": 5, "analysis": 2,
         })
         values = {choice.value for choice in SUPPORT_ACTIONS}
