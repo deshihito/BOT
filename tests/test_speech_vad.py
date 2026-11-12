@@ -52,9 +52,9 @@ class SpeechDetectorTest(unittest.TestCase):
         from cogs.vc import UserAudioBuffer
 
         buffer = UserAudioBuffer(1, "speaker")
-        voice = self.pcm_frame(700)
+        # 現行の声判定 (VAD + ノイズ比 + 声帯域) を満たす音量・帯域の声を使う。
         for index in range(20):
-            buffer.append(self.pcm_frame(700, 100 + 30 * (index % 5)))
+            buffer.append(self.pcm_frame(3000, 150 + 30 * (index % 5)))
         self.assertTrue(buffer.is_speaking)
         audio = buffer.pop_audio()
         self.assertIsNotNone(audio)

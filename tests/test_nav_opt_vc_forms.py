@@ -51,7 +51,7 @@ class VcFormRegistryTest(unittest.TestCase):
         self.assertEqual(connect, {"name", "password"})
 
     def test_total_vc_actions(self):
-        self.assertEqual(len(self.specs), 45)  # 機能数再編後 44 + 言語設定（常設作成は ! コマンド化）
+        self.assertEqual(len(self.specs), 46)  # 機能数再編後 44 + 言語設定 + gvc_members 登録漏れ是正（常設作成は ! コマンド化）
 
 
 class HistoryExpansionTest(unittest.TestCase):

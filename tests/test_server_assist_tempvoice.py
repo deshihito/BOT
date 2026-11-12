@@ -294,7 +294,7 @@ class TempVoiceSettingsTest(unittest.IsolatedAsyncioTestCase):
             ],
         )
         settings_view = tempvoice.build_view(cog, guild.id)
-        self.assertEqual(len([item for item in settings_view.children if isinstance(item, discord.ui.Select)]), 1)
+        self.assertEqual(len([item for item in settings_view.children if isinstance(item, (discord.ui.Select, discord.ui.ChannelSelect, discord.ui.RoleSelect, discord.ui.UserSelect, discord.ui.MentionableSelect))]), 1)
         labels = {item.label for item in settings_view.children if isinstance(item, discord.ui.Button)}
         self.assertIn("一時VC", labels)
         self.assertIn("名前テンプレート", labels)

@@ -21,7 +21,7 @@ import discord
 from core.game.game import board_image, game_panels, game_restore
 from core.game.game.board_image import render_cached, render_card_hand
 from core.game.game.game_v2 import GamePanelView, LobbyView, safe_delete, text_panel
-from core.support.emojis import CROCK
+from core.support.emojis import strip_leading_clock
 from core.support.messages import recruit_join_prompt
 from discord.ext import commands
 
@@ -318,7 +318,7 @@ class Babanuki(commands.Cog):
             describe=lambda a: f"{a}番目のカードを引きま")
         if result is not None and result.action is not None:
             position = int(result.action) - 1
-            notice = result.notice.lstrip(CROCK).strip()      # 絵文字を外して自分で送る
+            notice = strip_leading_clock(result.notice)      # 絵文字を外して自分で送る
         else:
             position = rng.randrange(count)
             notice = f"{member.display_name}さんが時間切れのため、ランダムに{position + 1}番目のカードを引きました"

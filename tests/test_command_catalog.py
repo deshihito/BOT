@@ -353,20 +353,32 @@ class CommandCatalogTest(unittest.TestCase):
         interaction = fake_interaction(self.bot)
         self.run_async(callback(self.cog, interaction))
         name, content, kwargs = interaction.response.calls[-1]
-        self.assertTrue(kwargs['ephemeral'])
-        # 概要は panel_v2（Components V2）のビューで送られる。包まれたパネルの
-        # Embed が「コマンド一覧」であることを確かめる
+        self.assertEqual(name, 'send_message')
+        # 公開パネル化（ephemeral第2波）: 概要は ephemeral ではなく公開で送られ、
+        # embed は kwargs ではなく view（PanelLayoutView）側が持つ。包まれた
+        # パネル（HelpView）の Embed が「コマンド一覧」であることを確かめる
+        self.assertNotIn('ephemeral', kwargs)
+        self.assertNotIn('embed', kwargs)
         self.assertIsNotNone(kwargs['view'])
         self.assertEqual(kwargs['view'].panel.embed().title, 'コマンド一覧')
 
         self.run_async(callback(self.cog, interaction, command='/vc'))
-        self.assertEqual(interaction.response.calls[-1][2]['embed'].title, '/vc')
-        self.run_async(callback(self.cog, interaction, command='gvc create'))
-        self.assertIn('見つかりませんでした', interaction.response.calls[-1][1])
-        self.run_async(callback(self.cog, interaction, command='存在しない'))
-        self.assertIn('見つかりませんでした', interaction.response.calls[-1][1])
-        self.run_async(callback(self.cog, interaction, command='!terminal'))
-        self.assertIn('見つかりませんでした', interaction.response.calls[-1][1])
+        name, content, kwargs = interaction.response.calls[-1]
+        self.assertEqual(name, 'send_message')
+        self.assertNotIn('ephemeral', kwargs)
+        self.assertNotIn('embed', kwargs)
+        # 詳細は wrap_panel_view(CommandView(...)): 返るのは PanelLayoutView
+        # （元の CommandView の _v2）で、.panel 側の Embed がタイトルを持つ
+        detail_layout = kwargs['view']
+        self.assertIs(detail_layout, detail_layout.panel._v2)
+        self.assertEqual(detail_layout.panel.embed().title, '/vc')
+        for unknown in ('gvc create', '存在しない', '!terminal'):
+            with self.subTest(unknown=unknown):
+                self.run_async(callback(self.cog, interaction, command=unknown))
+                name, content, kwargs = interaction.response.calls[-1]
+                self.assertEqual(name, 'send_message')
+                self.assertTrue(kwargs['ephemeral'])
+                self.assertIn('見つかりませんでした', content)
 
     def test_help_view_navigation(self):
         from cogs import help as help_module
@@ -375,20 +387,42 @@ class CommandCatalogTest(unittest.TestCase):
             interaction = fake_interaction(self.bot)
             view = help_module.HelpView(self.catalog)
             await view.show(interaction, 'voice', 0)
-            embed, voice_view = interaction.response.calls[-1][2]['embed'], interaction.response.calls[-1][2]['view']
-            self.assertTrue(embed.title.startswith('ボイス・音楽'))
+            # show() は edit_panel_v2(interaction, as_panel_v2(view)) 経由:
+            # edit_message の embed は None（V2 では持てない）で、view は
+            # PanelLayoutView。その .panel が遷移先の HelpView 本体
+            name, _, kwargs = interaction.response.calls[-1]
+            self.assertEqual(name, 'edit_message')
+            self.assertIsNone(kwargs['embed'])
+            voice_view = kwargs['view'].panel
+            self.assertTrue(voice_view.embed().title.startswith('ボイス・音楽'))
+            # PanelLayoutView 側の children は Container 1つだけで、ページ送り等の
+            # ボタンは内側 HelpView の children にある（_sync が ActionRow へ移す）
+            self.assertEqual(len(kwargs['view'].children), 1)
+            self.assertIsNotNone(voice_view.next_page)
+            self.assertIsNotNone(voice_view.back_to_top)
+            current_view = voice_view
             if len(voice_view.pages) > 1:
                 await voice_view.next_page.callback(interaction)
-                self.assertEqual(interaction.response.calls[-1][2]['view'].page, 1)
-            await voice_view.back_to_top.callback(interaction)
-            self.assertEqual(interaction.response.calls[-1][2]['embed'].title, 'コマンド一覧')
+                name, _, kwargs = interaction.response.calls[-1]
+                self.assertEqual(name, 'edit_message')
+                self.assertIsNone(kwargs['embed'])
+                current_view = kwargs['view'].panel
+                self.assertEqual(current_view.page, 1)
+            await current_view.back_to_top.callback(interaction)
+            name, _, kwargs = interaction.response.calls[-1]
+            self.assertEqual(name, 'edit_message')
+            self.assertIsNone(kwargs['embed'])
+            self.assertEqual(kwargs['view'].panel.embed().title, 'コマンド一覧')
             game_view = help_module.HelpView(self.catalog, 'game')
             guide_select = next((i for i in game_view.children if isinstance(i, help_module.GuideSelect)), None)
             self.assertIsNotNone(guide_select, 'パーティーゲームのカテゴリ説明が選べるはず')
             guide_select._values = [help_module.CATEGORY_GUIDE]
             await guide_select.callback(interaction)
-            # ガイド画面は panel_v2 で送られる。包まれた BackView の Embed を確かめる
-            self.assertIn('パーティーゲーム', interaction.response.calls[-1][2]['view'].panel.embed().title)
+            # ガイド画面も edit_panel_v2 経由。包まれた BackView の Embed を確かめる
+            name, _, kwargs = interaction.response.calls[-1]
+            self.assertEqual(name, 'edit_message')
+            self.assertIsNone(kwargs['embed'])
+            self.assertIn('パーティーゲーム', kwargs['view'].panel.embed().title)
         self.run_async(run())
 
     # ------------------------------------------------------------ !help

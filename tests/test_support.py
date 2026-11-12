@@ -262,7 +262,7 @@ class SupportAutoReactTest(unittest.IsolatedAsyncioTestCase):
 
     def test_auto_react_is_a_server_support_action(self):
         self.assertIn("auto_react", [choice.value for choice in SUPPORT_ACTIONS])
-        self.assertIn("auto_react", [value for _, value in SUPPORT_ACTIONS_BY_GENRE["server"]])
+        self.assertIn("auto_react", [value for _, value in SUPPORT_ACTIONS_BY_GENRE["automation"]])
         view = AutoReactSettingsView({"channels": {"8": ["🎉"]}})
         self.assertIn("< #8>".replace(" ", ""), view.embed().description)
 

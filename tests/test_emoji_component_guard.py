@@ -154,16 +154,22 @@ class SpatialControlViewEmojiTest(unittest.TestCase):
         self.assertEqual(view.toggle_rot_mode.label, "🌀 回転: 通常")
         self.assertIsNone(view.toggle_rot_mode.emoji)
 
-    def test_agc_select_placeholder_and_option_emojis(self):
+    def test_select_placeholders_and_options_have_no_markup(self):
+        # AGC セレクトは廃止されたため、現行の全セレクトを対象にする:
+        # placeholder / option label に絵文字 markup を埋めず、絵文字は
+        # emoji= 引数 (オブジェクト) でのみ持つことを守る。
         view = self._view("standard")
-        agc = next(
+        selects = [
             child for child in view.children
-            if getattr(child, "placeholder", None) and "AGC" in child.placeholder)
-        self.assertNotIn("<:", agc.placeholder)
-        self.assertTrue(agc.options)
-        for option in agc.options:
-            self.assertIsNotNone(option.emoji)
-            self.assertEqual(option.emoji.name, "vol")
+            if getattr(child, "placeholder", None)]
+        self.assertTrue(selects)
+        for select in selects:
+            self.assertNotIn("<:", select.placeholder)
+            self.assertTrue(select.options)
+            for option in select.options:
+                self.assertNotIn("<:", option.label)
+                if option.emoji is not None:
+                    self.assertNotIn("<:", option.emoji.name or "")
 
 
 if __name__ == "__main__":

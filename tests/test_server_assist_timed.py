@@ -176,7 +176,7 @@ class TimedSettingsTest(unittest.IsolatedAsyncioTestCase):
         guild = FakeGuild()
         cog = types.SimpleNamespace(bot=types.SimpleNamespace(get_guild=lambda _id: guild))
         view = timed.build_view(cog, guild.id)
-        self.assertEqual(len([item for item in view.children if isinstance(item, discord.ui.Select)]), 2)
+        self.assertEqual(len([item for item in view.children if isinstance(item, (discord.ui.Select, discord.ui.ChannelSelect, discord.ui.RoleSelect, discord.ui.UserSelect, discord.ui.MentionableSelect))]), 2)
         labels = {item.label for item in view.children if isinstance(item, discord.ui.Button)}
         self.assertIn("告知を追加", labels)
         self.assertIn("リマインダーを追加", labels)

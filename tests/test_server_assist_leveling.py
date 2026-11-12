@@ -173,14 +173,15 @@ class LevelingRewardsTest(unittest.IsolatedAsyncioTestCase):
 
 class LevelingGeneralIntegrationTest(unittest.IsolatedAsyncioTestCase):
     async def test_general_on_message_notifies_rewards(self):
-        from cogs import general as general_module
+        # EXP ヘルパーの実体は集約先の core.general.entry が import して使う。
+        from core.general import entry as general_module
         from cogs.general import GeneralCog
 
         store = types.SimpleNamespace(
             ensure_loaded=AsyncMock(),
             get=lambda _guild_id, _section: {},
         )
-        cog = GeneralCog(types.SimpleNamespace())
+        cog = GeneralCog(types.SimpleNamespace(user=None))
         cog._notify_level_rewards = AsyncMock()
         cog._spawn = lambda coro: coro.close()
         message = types.SimpleNamespace(

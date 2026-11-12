@@ -86,7 +86,8 @@ class RegistryConsistencyTest(unittest.TestCase):
         # テーマ変更の追加で 36→37（常設ルーム作成は !gvcperm コマンドだけ）
         # 機能数再編: 音楽サブフロー6件＋グロチャ自動接続設定で 37→44
         # 言語設定の追加で 44→45
-        self.assertEqual(len(vc_values), 45)
+        # gvc_members のショートカット登録漏れ是正で 45→46
+        self.assertEqual(len(vc_values), 46)
 
 
 class ShortcutRootsGenerationTest(unittest.TestCase):

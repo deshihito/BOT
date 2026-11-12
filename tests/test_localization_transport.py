@@ -57,6 +57,7 @@ class LocalizationTransportTest(unittest.TestCase):
         get_store.assert_not_called()
 
     def test_missing_or_legacy_language_setting_falls_back_without_blocking_send(self):
+        # 設定が無い・旧形式の場合は既定ロケール (ja) に倒れ、原文のまま送る。
         sender = types.SimpleNamespace(guild=types.SimpleNamespace(id=77))
         payload = {"content": "日本語本文"}
         for stored_value in ({}, None, "legacy-value"):
@@ -65,7 +66,7 @@ class LocalizationTransportTest(unittest.TestCase):
                     patch.object(localization, "_ENGLISH_PAIRS", [("日本語本文", "English body")]), \
                     patch.object(localization, "get_store", return_value=store):
                 result = localization.localize_kwargs(sender, payload)
-            self.assertEqual(result["content"], "English body")
+            self.assertEqual(result["content"], "日本語本文")
 
     def test_settings_store_failure_does_not_block_send(self):
         sender = types.SimpleNamespace(guild=types.SimpleNamespace(id=77))

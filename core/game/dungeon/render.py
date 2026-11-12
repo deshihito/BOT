@@ -44,9 +44,9 @@ def load_all_assets():
             try:
                 img = Image.open(path).convert("RGBA").resize((TILE, TILE), Image.Resampling.NEAREST)
                 _ASSET_CACHE[(biome, tid)] = img
-                print(f"✓ {fname} を読み込みました")
+                logger.info("✓ %s を読み込みました", fname)
             except Exception as e:
-                print(f"{FAILED} {fname} ロード失敗: {e}")
+                logger.error("%s %s ロード失敗: %s", FAILED, fname, e)
 
 def _draw_tile(draw, img, x, y, cell, biome, is_player=False, is_fog=False):
     """タイルを描画"""
@@ -173,5 +173,5 @@ async def d_render_image(uid, floor, px, py, bot, radius=D_VIEW_R):
         msg = await ch.send(file=discord.File(buf, filename="map.png"))
         return msg.attachments[0].url
     except Exception as e:
-        print(f"画像アップロード失敗: {e}")
+        logger.error("画像アップロード失敗: %s", e)
         return None

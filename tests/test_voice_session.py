@@ -507,7 +507,7 @@ class CogTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_gvc_delete_releases_sessions(self):
         await self.gvc_join(self.w.alice)
-        await self.gvc.gvc_delete.callback(self.gvc, self.ctx(self.w.alice), 'lobby')
+        await self.gvc._room_delete_impl(Responder(self.ctx(self.w.alice)), 'lobby')
         self.assertIsNone(self.manager.get(self.w.guild.id))
         self.assertIsNone(self.w.guild.voice_client)
         self.assertEqual(gvc.GLOBAL_ROOMS, {})

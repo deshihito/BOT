@@ -93,11 +93,15 @@ class PlaylistsMixin:
         state = self.get_state(guild_id)
         entries = []
 
-        def add(track):
+        def add(track, *, is_current=False):
             if not track:
                 return
-            source_input, title, _duration, reference, is_yt = track
-            source = state.get('current_yt_page_url') if is_yt and track is state.get('current_track') else source_input
+            # 現在曲は5タプル（duration 付き）、待機キューは4タプル（enqueue_track の形式）
+            if is_current:
+                source_input, title, _duration, reference, is_yt = track
+            else:
+                source_input, title, reference, is_yt = track
+            source = state.get('current_yt_page_url') if is_yt and is_current else source_input
             source = source or reference
             if not source:
                 return
@@ -111,7 +115,7 @@ class PlaylistsMixin:
                     'is_youtube': bool(is_yt),
                 })
 
-        add(state.get('current_track'))
+        add(state.get('current_track'), is_current=True)
         for item in list(state['queue']._queue):
             add(item)
         return entries

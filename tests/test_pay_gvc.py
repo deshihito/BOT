@@ -23,6 +23,7 @@ from discord.ext import commands  # noqa: E402
 
 import config  # noqa: E402
 from core.support.api_client import APIError  # noqa: E402
+from core.support.legacy import Responder  # noqa: E402
 from core.vc.globalvc import entry as gvc  # noqa: E402
 from core.general.wallet import cog as wallet_module  # noqa: E402
 
@@ -260,13 +261,22 @@ class PayTest(unittest.TestCase):
 
 
 class GvcDeleteTest(unittest.TestCase):
+    """ルーム削除の権限を現行の _room_create_impl / _room_delete_impl で検証する。
+
+    旧 gvc_create / gvc_delete コマンドは廃止され、本番は Responder 経由の
+    impl（core/vc/globalvc/manage.py）に移行済み。fake_context で作った
+    ctx を Responder で包む渡し方は tests/test_voice_session.py 等と同じ。
+    fake_context に渡すコマンドは ctx の組み立て（qualified_name 等）に
+    使われるだけで、残っている唯一のプレフィックスコマンド gvcperm を使う。
+    """
+
     def setUp(self):
         self.bot = commands.Bot(command_prefix='!', intents=discord.Intents.none())
         self.cog = gvc.GlobalVCCog(self.bot)
         self.saved = (dict(gvc.ROOMS), dict(gvc.GLOBAL_ROOMS), dict(gvc.ROOM_TEXT_LINKS), dict(gvc.CHANNEL_TO_ROOM))
-        gvc.ROOMS.clear()
+        for target in (gvc.ROOMS, gvc.GLOBAL_ROOMS, gvc.ROOM_TEXT_LINKS, gvc.CHANNEL_TO_ROOM):
+            target.clear()
         self.addCleanup(self.restore)
-        self.create, self.delete = self.cog.gvc_create, self.cog.gvc_delete
 
     def restore(self):
         for target, saved in zip((gvc.ROOMS, gvc.GLOBAL_ROOMS, gvc.ROOM_TEXT_LINKS, gvc.CHANNEL_TO_ROOM), self.saved):
@@ -274,42 +284,56 @@ class GvcDeleteTest(unittest.TestCase):
             target.update(saved)
 
     def ctx(self, user_id, guild_id, manage_guild=False):
-        ctx, recorder, objects = fake_context(self.bot, self.delete)
+        ctx, recorder, objects = fake_context(self.bot, self.cog.gvcperm)
         ctx.author.id = user_id
         ctx.author.guild_permissions = discord.Permissions(manage_guild=manage_guild)
         ctx.guild.id = guild_id
         ctx.send = AsyncMock()
         return ctx
 
+    @staticmethod
+    def sent_text(ctx):
+        """Responder 経由の ctx.send は content をキーワード引数で渡す。"""
+        call = ctx.send.await_args
+        if call is None:
+            return ''
+        if call.args:
+            return call.args[0] or ''
+        return call.kwargs.get('content') or ''
+
     def make_room(self):
         owner = self.ctx(1, 100)
-        asyncio.run(self.create.callback(self.cog, owner, 'lobby', options=None))
+        asyncio.run(self.cog._room_create_impl(Responder(owner), 'lobby', 0, '', ''))
         self.assertIn('lobby', gvc.ROOMS)
         self.assertEqual((gvc.ROOMS['lobby'].owner_id, gvc.ROOMS['lobby'].owner_guild_id), (1, 100))
+
+    def delete(self, ctx, room_name='lobby'):
+        asyncio.run(self.cog._room_delete_impl(Responder(ctx), room_name))
 
     def test_admin_of_another_server_is_refused(self):
         self.make_room()
         other_admin = self.ctx(2, 200, manage_guild=True)
-        asyncio.run(self.delete.callback(self.cog, other_admin, 'lobby'))
+        self.delete(other_admin)
         self.assertIn('lobby', gvc.ROOMS)
-        self.assertIn('作成者か', other_admin.send.await_args.args[0])
+        self.assertIn('作成者か', self.sent_text(other_admin))
 
     def test_member_of_owner_server_without_permission_is_refused(self):
         self.make_room()
         member = self.ctx(3, 100)
-        asyncio.run(self.delete.callback(self.cog, member, 'lobby'))
+        self.delete(member)
         self.assertIn('lobby', gvc.ROOMS)
+        self.assertIn('作成者か', self.sent_text(member))
 
     def test_owner_can_delete_even_from_another_server(self):
         self.make_room()
         owner = self.ctx(1, 200)
-        asyncio.run(self.delete.callback(self.cog, owner, 'lobby'))
+        self.delete(owner)
         self.assertNotIn('lobby', gvc.ROOMS)
 
     def test_admin_of_owner_server_can_delete(self):
         self.make_room()
         admin = self.ctx(4, 100, manage_guild=True)
-        asyncio.run(self.delete.callback(self.cog, admin, 'lobby'))
+        self.delete(admin)
         self.assertNotIn('lobby', gvc.ROOMS)
 
 

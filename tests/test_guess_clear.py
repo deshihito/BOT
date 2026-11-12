@@ -171,14 +171,15 @@ class ClearTest(unittest.TestCase):
         if bot_permissions is not None:
             interaction.app_permissions = bot_permissions
         interaction.channel.purge = purge or AsyncMock(side_effect=lambda limit, check: [object()] * limit)
-        run(self.cog.clear.callback(self.cog, interaction, amount))
+        run(self.cog.clear(interaction, amount))
         return interaction
 
     def test_command_is_hidden_from_members_without_manage_messages(self):
-        command = self.cog.clear
-        self.assertEqual(command.default_permissions, discord.Permissions(manage_messages=True))
-        self.assertTrue(command.guild_only)
-        amount = next(p for p in command.parameters if p.name == 'amount')
+        # 再編後は独立コマンドではなく /support の入口が clear の必要権限を持つ。
+        from core.support.entry import SupportCog
+        self.assertEqual(
+            SupportCog.SUPPORT_REQUIRED_PERMISSIONS['clear'], 'manage_messages')
+        amount = self.cog.clear.__annotations__['amount']
         self.assertEqual((amount.min_value, amount.max_value), (1, MAX_CLEAR))
 
     def test_rejected_without_manage_messages(self):
@@ -192,7 +193,8 @@ class ClearTest(unittest.TestCase):
         interaction.channel.purge.assert_awaited_once()
         self.assertEqual(interaction.channel.purge.await_args.kwargs['limit'], 5)
         self.assertIn('5 件削除しました', interaction._sent[-1]['content'])
-        self.assertTrue(interaction._sent[-1]['ephemeral'])
+        # 完了通知は公開が既定（ephemeral はエラー系だけ）。
+        self.assertFalse(interaction._sent[-1]['ephemeral'])
 
     def test_amount_is_capped(self):
         for amount in (0, -1, MAX_CLEAR + 1, 10_000):

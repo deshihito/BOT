@@ -234,7 +234,7 @@ class ServerAssistPanelTest(unittest.IsolatedAsyncioTestCase):
         guild = FakeGuild()
         cog = types.SimpleNamespace(bot=types.SimpleNamespace(get_guild=lambda _id: guild))
         view = welcome.build_view(cog, guild.id)
-        selects = [item for item in view.children if isinstance(item, discord.ui.Select)]
+        selects = [item for item in view.children if isinstance(item, (discord.ui.Select, discord.ui.ChannelSelect, discord.ui.RoleSelect, discord.ui.UserSelect, discord.ui.MentionableSelect))]
         buttons = [item for item in view.children if isinstance(item, discord.ui.Button)]
         self.assertEqual(len(selects), 2)
         labels = {item.label for item in buttons}

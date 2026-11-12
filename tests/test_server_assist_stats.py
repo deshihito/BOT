@@ -130,7 +130,7 @@ class StatsSettingsTest(unittest.IsolatedAsyncioTestCase):
         guild = FakeGuild()
         cog = types.SimpleNamespace(bot=types.SimpleNamespace(get_guild=lambda _id: guild))
         view = stats.build_view(cog, guild.id)
-        self.assertEqual(len([item for item in view.children if isinstance(item, discord.ui.Select)]), 3)
+        self.assertEqual(len([item for item in view.children if isinstance(item, (discord.ui.Select, discord.ui.ChannelSelect, discord.ui.RoleSelect, discord.ui.UserSelect, discord.ui.MentionableSelect))]), 3)
         labels = {item.label for item in view.children if isinstance(item, discord.ui.Button)}
         self.assertIn("サーバースタッツ", labels)
         self.assertIn("今すぐ更新", labels)

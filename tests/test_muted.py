@@ -165,13 +165,13 @@ class PersistenceTest(Base):
         target = self.guild.member(user_id)
         target.roles.clear()
         with patch.object(cog, "get_or_create_muted_role", AsyncMock(return_value=(self.guild.role, False))):
-            await cog.muted_setting.callback(cog, self.interaction(), target=target, minutes=minutes)
+            await cog.muted_setting(self.interaction(), target=target, minutes=minutes)
         return target
 
     async def test_saved_to_supabase_and_survive_restart(self):
         cog = self.cog()
         target = await self.mute_via_command(cog)
-        await cog.muted_setting.callback(cog, self.interaction(), admin_role=types.SimpleNamespace(id=555, mention="@mod"))
+        await cog.muted_setting(self.interaction(), admin_role=types.SimpleNamespace(id=555, mention="@mod"))
         saved = self.db.value("muted", "1")
         self.assertEqual(saved["admin_role_id"], 555)
         self.assertEqual(list(saved["mutes"]), ["10"])
@@ -193,7 +193,8 @@ class PersistenceTest(Base):
     async def test_last_entry_removed_deletes_row(self):
         cog = self.cog()
         await self.mute_via_command(cog)
-        await cog.unmute_expired(NOW + timedelta(days=1))
+        expire = cog.mute_tasks[(1, 10)]
+        await cog.unmute_expired(expire + timedelta(seconds=1))
         self.assertIsNone(self.db.value("muted", "1"))
 
     async def test_expired_while_offline_unmuted_on_first_check(self):

@@ -535,9 +535,10 @@ class MiqMoreFormatsTest(unittest.TestCase):
         font = g._miq_load_font(self.font_path, 40)
         text = "あいうえおかきくけこさしすせそたちつてと"
         columns, adv = g._miq_vertical_columns(text, font, 200)
-        # 200px に収まる文字数ごとに割れて複数列になる
+        # 200px に収まる文字数ごとに割れて複数列になる。
+        # 列は「単位（文字/絵文字）」のリスト（絵文字対応で文字列から変更された）。
         self.assertGreaterEqual(len(columns), 2)
-        self.assertEqual("".join(columns), text)
+        self.assertEqual("".join("".join(col) for col in columns), text)
         for col in columns:
             # 各列は col_h をはみ出さない
             self.assertLessEqual(len(col) * adv, 200)
@@ -545,7 +546,7 @@ class MiqMoreFormatsTest(unittest.TestCase):
     def test_vertical_columns_newline_breaks_column(self):
         font = g._miq_load_font(self.font_path, 40)
         columns, _adv = g._miq_vertical_columns("あっ\nイク\nあう", font, 1000)
-        self.assertEqual(columns, ["あっ", "イク", "あう"])
+        self.assertEqual(["".join(col) for col in columns], ["あっ", "イク", "あう"])
 
     def test_fit_vertical_fits_width(self):
         font, columns, adv_y, adv_x, _size = g._miq_fit_vertical(

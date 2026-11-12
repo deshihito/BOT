@@ -239,7 +239,7 @@ class StarboardSettingsTest(unittest.IsolatedAsyncioTestCase):
     def test_settings_view_controls(self):
         cog, guild = self.make_cog()
         view = starboard.build_view(cog, guild.id)
-        selects = [item for item in view.children if isinstance(item, discord.ui.Select)]
+        selects = [item for item in view.children if isinstance(item, (discord.ui.Select, discord.ui.ChannelSelect, discord.ui.RoleSelect, discord.ui.UserSelect, discord.ui.MentionableSelect))]
         buttons = [item for item in view.children if isinstance(item, discord.ui.Button)]
         self.assertEqual(len(selects), 3)
         labels = {item.label for item in buttons}
