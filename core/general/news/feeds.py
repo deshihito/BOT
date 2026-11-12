@@ -1,81 +1,129 @@
 # -*- coding: utf-8 -*-
-"""NHK ニュース RSS の取得と解析。
+"""GDELT DOC 2.0 API からのニュース取得と解析。
 
-ニュースの取得元は NHK の公開 RSS（API キー不要・利用登録不要）。
-カテゴリ別フィード（cat0〜cat7）をそのまま読み、見出しとリンクと
-公開時刻だけを使う。記事本文は取得しない。
+取得元は GDELT Project（世界のニュースメディアを収集したオープンデータ）。
+利用条件（https://www.gdeltproject.org/about.html#termsofuse）:
+データは無償・無制限に利用でき、再配布・再公開も認められる。条件は
+出典（GDELT Project）の明記とサイトへのリンクのみで、API キーは不要。
+投稿メッセージには毎回この出典表記を入れる（cog.format_post）。
+
+NHK をはじめ国内メディア各社の RSS は「プログラムによる再配信」を
+認めていないため使わない（2026-11-13 に公式の利用条件で確認）。
 """
 from __future__ import annotations
 
+import json
 import logging
-import xml.etree.ElementTree as ET
 from dataclasses import dataclass
-from datetime import datetime
-from email.utils import parsedate_to_datetime
+from datetime import datetime, timezone
+from urllib.parse import urlencode
 
 import aiohttp
 
 logger = logging.getLogger("cogs.news")
 
-# キー → (表示名, フィード URL)。NHK のカテゴリ別 RSS。
-FEEDS: dict[str, tuple[str, str]] = {
-    "top": ("主要", "https://www3.nhk.or.jp/rss/news/cat0.xml"),
-    "society": ("社会", "https://www3.nhk.or.jp/rss/news/cat1.xml"),
-    "science": ("科学・文化", "https://www3.nhk.or.jp/rss/news/cat2.xml"),
-    "politics": ("政治", "https://www3.nhk.or.jp/rss/news/cat3.xml"),
-    "business": ("経済", "https://www3.nhk.or.jp/rss/news/cat4.xml"),
-    "world": ("国際", "https://www3.nhk.or.jp/rss/news/cat5.xml"),
-    "sports": ("スポーツ", "https://www3.nhk.or.jp/rss/news/cat6.xml"),
-    "entertainment": ("エンタメ", "https://www3.nhk.or.jp/rss/news/cat7.xml"),
+API_URL = "https://api.gdeltproject.org/api/v2/doc/doc"
+SITE_URL = "https://www.gdeltproject.org/"
+
+# キー → (表示名, DOC API のクエリ)。日本語メディアの記事に絞り、
+# 分類は GDELT が英訳した本文へのキーワード検索で行う（NHK RSS のような
+# 出版社側のカテゴリ分けではない）。クエリの前提:
+# - sourcelang:japanese … 日本語の記事だけ（見出しも日本語で返る）
+# - sourcecountry:JA … 日本のメディア（GDELT の国コードは FIPS 準拠）
+TOPICS: dict[str, tuple[str, str]] = {
+    "top": ("日本のニュース", "sourcecountry:JA sourcelang:japanese"),
+    "politics": ("政治",
+                 "(politics OR government OR election OR parliament OR diplomacy) "
+                 "sourcelang:japanese"),
+    "business": ("経済",
+                 "(economy OR market OR stocks OR trade OR inflation) "
+                 "sourcelang:japanese"),
+    "world": ("国際",
+              "(summit OR \"foreign minister\" OR ukraine OR \"middle east\" "
+              "OR nato OR \"un security council\") sourcelang:japanese"),
+    "sports": ("スポーツ",
+               "(baseball OR soccer OR olympics OR \"world cup\" OR tennis) "
+               "sourcelang:japanese"),
+    "disaster": ("防災",
+                 "(earthquake OR typhoon OR tsunami OR flood OR evacuation) "
+                 "sourcecountry:JA sourcelang:japanese"),
 }
 
-FETCH_TIMEOUT = aiohttp.ClientTimeout(total=15)
+FETCH_TIMEOUT = aiohttp.ClientTimeout(total=20)
 USER_AGENT = "AGOBOT news notifier (+https://agobot.app)"
+MAX_RECORDS = 25
+TIMESPAN = "24h"
 
 
 @dataclass(frozen=True)
 class NewsItem:
-    feed_key: str
+    feed_key: str  # TOPICS のキー
     title: str
     link: str
     published: datetime | None  # tz-aware（取れなければ None）
 
 
-def parse_rss(xml_text: str, feed_key: str, limit: int = 20) -> list[NewsItem]:
-    """RSS 2.0 の XML から記事を取り出す。壊れた XML では空リスト。"""
+def build_url(topic_key: str) -> str:
+    _label, query = TOPICS[topic_key]
+    params = {
+        "query": query,
+        "mode": "ArtList",
+        "format": "json",
+        "maxrecords": str(MAX_RECORDS),
+        "sort": "datedesc",
+        "timespan": TIMESPAN,
+    }
+    return f"{API_URL}?{urlencode(params)}"
+
+
+def _parse_seendate(raw: str) -> datetime | None:
     try:
-        root = ET.fromstring(xml_text)
-    except ET.ParseError:
-        logger.warning("news: RSS の解析に失敗しました feed=%s", feed_key)
+        return datetime.strptime(raw, "%Y%m%dT%H%M%SZ").replace(
+            tzinfo=timezone.utc)
+    except (TypeError, ValueError):
+        return None
+
+
+def parse_doc(text: str, topic_key: str, limit: int = 20) -> list[NewsItem]:
+    """DOC API の JSON から記事を取り出す。
+
+    GDELT はエラー時に JSON でないテキストを返すことがあるため、
+    壊れた応答では空リストを返す（次回ポーリングで再試行される）。
+    """
+    try:
+        data = json.loads(text)
+    except (TypeError, ValueError):
+        logger.warning("news: GDELT の応答が JSON ではありません topic=%s",
+                       topic_key)
+        return []
+    articles = data.get("articles") if isinstance(data, dict) else None
+    if not isinstance(articles, list):
         return []
     items: list[NewsItem] = []
-    for node in root.iter("item"):
-        title = (node.findtext("title") or "").strip()
-        link = (node.findtext("link") or "").strip()
-        if not title or not link:
+    seen_links: set[str] = set()
+    for entry in articles:
+        if not isinstance(entry, dict):
             continue
-        published = None
-        raw_date = (node.findtext("pubDate") or "").strip()
-        if raw_date:
-            try:
-                published = parsedate_to_datetime(raw_date)
-            except (TypeError, ValueError):
-                published = None
-        items.append(NewsItem(feed_key=feed_key, title=title, link=link,
-                              published=published))
+        title = str(entry.get("title") or "").strip()
+        link = str(entry.get("url") or "").strip()
+        if not title or not link or link in seen_links:
+            continue
+        seen_links.add(link)
+        items.append(NewsItem(
+            feed_key=topic_key, title=title, link=link,
+            published=_parse_seendate(str(entry.get("seendate") or ""))))
         if len(items) >= limit:
             break
     return items
 
 
-async def fetch_feed(session: aiohttp.ClientSession, feed_key: str) -> list[NewsItem]:
-    """1 フィードを取得する。失敗したら例外（呼び出し側で握る）。"""
-    _label, url = FEEDS[feed_key]
-    async with session.get(url, timeout=FETCH_TIMEOUT,
+async def fetch_feed(session: aiohttp.ClientSession, topic_key: str) -> list[NewsItem]:
+    """1 トピックを取得する。失敗したら例外（呼び出し側で握る）。"""
+    async with session.get(build_url(topic_key), timeout=FETCH_TIMEOUT,
                            headers={"User-Agent": USER_AGENT}) as resp:
         resp.raise_for_status()
         text = await resp.text()
-    return parse_rss(text, feed_key)
+    return parse_doc(text, topic_key)
 
 
 def select_new(items: list[NewsItem], seen_links: list[str],
@@ -91,7 +139,7 @@ def select_new(items: list[NewsItem], seen_links: list[str],
         return [], True
     seen = set(seen_links)
     fresh = [item for item in items if item.link not in seen]
-    # フィードは新しい順に並んでいる前提で、投稿は古い順にする。
+    # API は新しい順に返す前提で、投稿は古い順にする。
     fresh.reverse()
     if len(fresh) > cap:
         fresh = fresh[-cap:]
