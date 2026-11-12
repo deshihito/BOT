@@ -265,3 +265,35 @@ def weather_post_due(guild_id: int, now) -> Optional[int]:
     if (now.hour, now.minute) < (hour, minute):
         return None
     return channel_id
+
+
+NEWS_SECTION = "news"
+NEWS_DEFAULTS: dict[str, Any] = {
+    "enabled": False,        # ニュース通知をするか（既定はオフ）
+    "channel_id": None,      # 投稿先チャンネル ID
+    "feeds": ["top"],        # 購読するカテゴリ（core.general.news.feeds.FEEDS のキー）
+    "seen": [],              # 投稿済み記事のリンク（古い順・最大60件、二重投稿防止）
+}
+NEWS_SEEN_LIMIT = 60
+
+
+def news_settings(guild_id: int) -> dict[str, Any]:
+    """このサーバーのニュース通知設定を、既定値で補って返す。"""
+    raw = get_store().get(guild_id, NEWS_SECTION)
+    result = dict(NEWS_DEFAULTS)
+    result["feeds"] = list(NEWS_DEFAULTS["feeds"])
+    result["seen"] = []
+    if isinstance(raw.get("enabled"), bool):
+        result["enabled"] = raw["enabled"]
+    if isinstance(raw.get("channel_id"), int):
+        result["channel_id"] = raw["channel_id"]
+    feeds = raw.get("feeds")
+    if isinstance(feeds, list):
+        cleaned = [key for key in feeds if isinstance(key, str) and key]
+        if cleaned:
+            result["feeds"] = cleaned
+    seen = raw.get("seen")
+    if isinstance(seen, list):
+        result["seen"] = [link for link in seen
+                           if isinstance(link, str) and link][-NEWS_SEEN_LIMIT:]
+    return result
