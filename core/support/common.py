@@ -118,6 +118,7 @@ SUPPORT_ACTIONS = [
     app_commands.Choice(name="RSS通知", value="sns_rss"),
     app_commands.Choice(name="YouTubeライブ通知", value="sns_youtube_live"),
     app_commands.Choice(name="地震情報", value="earthquake"),
+    app_commands.Choice(name="ニュース通知", value="news_notify"),
     app_commands.Choice(name="Quest通知（Discord Orbs）", value="quest_notify"),
     app_commands.Choice(name="Quest手動投稿", value="quest_manual"),
     app_commands.Choice(name="レベルアップ通知（EXP）", value="levelup_notify"),
@@ -210,13 +211,13 @@ SUPPORT_ACTIONS_BY_GENRE = {
         "vc_log", "message_log", "moderation_log",
         "assist_serverlog", "assist_invites",
     ),
-    # 自動化・通知は35件あり、パネル側はページング（25件/ページ）で全件選べる。
+    # 自動化・通知は36件あり、パネル側はページング（25件/ページ）で全件選べる。
     # assist_warning_escalation / assist_application_review は、元機能
     # （警告・応募フォーム）が moderation 側にあるが、preset 入口は
-    # 「自動化・通知」の分割としてここに置く（35件構成）。
+    # 「自動化・通知」の分割としてここに置く（36件構成）。
     "automation": _support_actions(
         "binjou", "binjou_custom", "auto_react", "levelup_notify", "levelup_card_theme",
-        "voice_trigger", "quest_notify", "quest_manual", "earthquake", "language", "globalchat", "globalchat_mod",
+        "voice_trigger", "quest_notify", "quest_manual", "earthquake", "news_notify", "language", "globalchat", "globalchat_mod",
         "vc_auto_start",
         "assist_welcome", "assist_goodbye", "assist_starboard", "assist_tempvoice", "tempvoice_panel",
         "assist_suggestions",
