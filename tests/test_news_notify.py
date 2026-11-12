@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
 """ニュース通知（core/general/news）のテスト。
 
-RSS 解析・新着選別・設定の正規化・ポーリング投稿を、実ネットワーク
-なし（フェイク取得）で検証する。
+GDELT 応答の解析・新着選別・設定の正規化・ポーリング投稿を、
+実ネットワークなし（フェイク取得）で検証する。
 """
 from __future__ import annotations
 
@@ -16,21 +16,21 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from core.general.news import feeds as feeds_mod  # noqa: E402
 from core.general.news.cog import NewsCog, format_post  # noqa: E402
-from core.general.news.feeds import NewsItem, parse_rss, select_new  # noqa: E402
+from core.general.news.feeds import NewsItem, parse_doc, select_new  # noqa: E402
 from core.support import guild_settings  # noqa: E402
 from core.support.storage import KVStore  # noqa: E402
 
-SAMPLE_RSS = """<?xml version="1.0" encoding="UTF-8"?>
-<rss version="2.0"><channel>
-<title>NHKニュース</title>
-<item><title>新しい記事</title><link>https://example.com/a2</link>
-<pubDate>Fri, 13 Nov 2026 06:30:00 +0900</pubDate>
-<description>概要2</description></item>
-<item><title>古い記事</title><link>https://example.com/a1</link>
-<pubDate>Fri, 13 Nov 2026 05:00:00 +0900</pubDate>
-<description>概要1</description></item>
-<item><title>リンクなし</title><pubDate>Fri, 13 Nov 2026 04:00:00 +0900</pubDate></item>
-</channel></rss>"""
+SAMPLE_DOC = """{"articles": [
+{"url": "https://example.com/a2", "title": "新しい記事",
+ "seendate": "20261112T213000Z", "domain": "example.com",
+ "language": "Japanese", "sourcecountry": "JA"},
+{"url": "https://example.com/a1", "title": "古い記事",
+ "seendate": "20261112T200000Z", "domain": "example.com",
+ "language": "Japanese", "sourcecountry": "JA"},
+{"url": "https://example.com/a2", "title": "重複記事",
+ "seendate": "20261112T213000Z"},
+{"title": "リンクなし", "seendate": "20261112T190000Z"}
+]}"""
 
 
 def use_temp_settings(test):
@@ -49,24 +49,26 @@ def make_item(link: str, hour: int, feed: str = "top") -> NewsItem:
                                        tzinfo=timezone.utc))
 
 
-class ParseRssTest(unittest.TestCase):
+class ParseDocTest(unittest.TestCase):
     def test_parse_items(self):
-        items = parse_rss(SAMPLE_RSS, "top")
-        # リンクのない item は落ちる
+        items = parse_doc(SAMPLE_DOC, "top")
+        # リンクのない記事と重複は落ちる
         self.assertEqual([i.link for i in items],
                          ["https://example.com/a2", "https://example.com/a1"])
         self.assertEqual(items[0].title, "新しい記事")
-        self.assertEqual(items[0].published.hour, 6)
+        # seendate は UTC。21:30Z = 翌 06:30 JST
+        self.assertEqual(items[0].published.hour, 21)
         self.assertIsNotNone(items[0].published.tzinfo)
 
-    def test_broken_xml_returns_empty(self):
-        self.assertEqual(parse_rss("<rss><channel>", "top"), [])
+    def test_non_json_returns_empty(self):
+        # GDELT はエラー時に JSON でないテキストを返すことがある
+        self.assertEqual(parse_doc("Please limit your query", "top"), [])
 
-    def test_feed_table(self):
-        self.assertEqual(len(feeds_mod.FEEDS), 8)
-        for key, (_label, url) in feeds_mod.FEEDS.items():
-            self.assertTrue(url.startswith("https://www3.nhk.or.jp/rss/news/"),
-                            msg=key)
+    def test_topic_table(self):
+        self.assertEqual(len(feeds_mod.TOPICS), 6)
+        for key, (_label, query) in feeds_mod.TOPICS.items():
+            self.assertIn("sourcelang:japanese", query, msg=key)
+        self.assertIn("api.gdeltproject.org", feeds_mod.API_URL)
 
 
 class SelectNewTest(unittest.TestCase):
@@ -186,8 +188,11 @@ class PollTest(unittest.IsolatedAsyncioTestCase):
 class FormatPostTest(unittest.TestCase):
     def test_format(self):
         text = format_post([make_item("a", 6)], ["top"])
-        self.assertIn("NHKニュース（主要）", text)
+        self.assertIn("ニュース（日本のニュース）", text)
         self.assertIn("[記事a](a)", text)
+        # GDELT の利用条件: 出典明記とリンク
+        self.assertIn("GDELT Project", text)
+        self.assertIn("https://www.gdeltproject.org/", text)
 
 
 if __name__ == "__main__":
