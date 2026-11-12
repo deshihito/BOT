@@ -70,7 +70,7 @@ export default function CreditsPage() {
 
       <h2>音響データ（立体音響）</h2>
       <p>
-        立体音響では、HRTF・部屋の残響・スピーカー特性に以下の実測データを使用しています。
+        立体音響では、HRTF・スピーカー特性に以下の実測データを使用しています（残響は FDN で合成しています）。
       </p>
       <ul>
         {AUDIO_DATA_CREDITS.map((data) => (
