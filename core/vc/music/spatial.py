@@ -165,6 +165,7 @@ class PythonSpatialAudioSource(discord.AudioSource):
         # 高音は主回転より速く細かく揺れる。
         self._rot_theta = 0.0
         self._live_phase = 0.0
+        self._air_cache = {}
         self._wet_balance = 0.0
         self._last_band_angles = [0.0, 0.0, 0.0, 0.0, 0.0]
         self.band_configs = [
@@ -264,9 +265,13 @@ class PythonSpatialAudioSource(discord.AudioSource):
             self._sp_fir_overlap = fir_full[n_samples:].copy()
             mono_in = fir_full[:n_samples]
 
-        # 空気吸収（ISO 9613-1）: 距離で高音ほど減衰する（5帯域の代表周波数で評価）
-        air_gains = [air_absorption_gain(global_distance, f)
-                     for f in (75.0, 275.0, 950.0, 3000.0, 9000.0)]
+        # 空気吸収（ISO 9613-1）: 距離で高音ほど減衰する（5帯域の代表周波数で評価。
+        # 距離は選択式で離散値しか取らないため結果をキャッシュする）
+        air_gains = self._air_cache.get(global_distance)
+        if air_gains is None:
+            air_gains = [air_absorption_gain(global_distance, f)
+                         for f in (75.0, 275.0, 950.0, 3000.0, 9000.0)]
+            self._air_cache[global_distance] = air_gains
 
         # A. 帯域分割（5帯域）
         band_signals = []
@@ -333,6 +338,7 @@ class PythonSpatialAudioSource(discord.AudioSource):
                 taps = _SINGLE_TAP
 
             sp_i = self._sp_band_map[i]
+            band_fft = None
             for tap_deg, tap_w in taps:
                 t_deg = (angle_deg + tap_deg) % 360
                 dir_idx = int((t_deg / 360.0) * self.num_directions) % self.num_directions
@@ -352,15 +358,20 @@ class PythonSpatialAudioSource(discord.AudioSource):
 
                 # 距離減衰 ＋ 距離補正 ＋ 指向性ゲイン
                 dist_atten = (1.0 / max(0.5, global_distance)) * dist_comp * speaker_gain
-                band_sig = band_signals[i] * dist_atten * air_gains[i] * tap_w
 
-                if n_samples + self.hrir_len - 1 <= 2048:
-                    spec_l = self._spec(("hl", y_elevation, dir_idx), hrir_l)
-                    spec_r = self._spec(("hr", y_elevation, dir_idx), hrir_r)
-                    band_fft = _rfft(band_sig, 2048)
-                    full_out_l += _irfft(band_fft * spec_l, 2048)[:n_samples + self.hrir_len - 1]
-                    full_out_r += _irfft(band_fft * spec_r, 2048)[:n_samples + self.hrir_len - 1]
+                if n_samples + self.hrir_len - 1 <= 1152:
+                    # 帯域信号の FFT はタップ間で共有し、タップごとの係数は
+                    # 周波数領域で掛ける（線形なので等価）。
+                    # FFT 長は畳み込みに必要な最小限（1152）にして軽くする。
+                    if band_fft is None:
+                        band_fft = _rfft(band_signals[i], 1152)
+                    spec_l = self._spec(("hl", y_elevation, dir_idx), hrir_l, 1152)
+                    spec_r = self._spec(("hr", y_elevation, dir_idx), hrir_r, 1152)
+                    scale = dist_atten * air_gains[i] * tap_w
+                    full_out_l += _irfft(band_fft * spec_l * scale, 1152)[:n_samples + self.hrir_len - 1]
+                    full_out_r += _irfft(band_fft * spec_r * scale, 1152)[:n_samples + self.hrir_len - 1]
                 else:
+                    band_sig = band_signals[i] * dist_atten * air_gains[i] * tap_w
                     full_out_l += signal.oaconvolve(band_sig, hrir_l, mode='full')
                     full_out_r += signal.oaconvolve(band_sig, hrir_r, mode='full')
 
@@ -386,8 +397,8 @@ class PythonSpatialAudioSource(discord.AudioSource):
 
         # 反響も音像の方向へ寄せる: ドライ音の左右バランス（平滑化）に合わせて
         # ウェット音の左右を傾け、残響の雲も音源のいる方向に定位させる
-        dry_lvl_l = float(np.sqrt(np.mean(spatial_out_l.astype(np.float64) ** 2))) + 1e-9
-        dry_lvl_r = float(np.sqrt(np.mean(spatial_out_r.astype(np.float64) ** 2))) + 1e-9
+        dry_lvl_l = float(np.sqrt(np.mean(spatial_out_l[::4].astype(np.float64) ** 2))) + 1e-9
+        dry_lvl_r = float(np.sqrt(np.mean(spatial_out_r[::4].astype(np.float64) ** 2))) + 1e-9
         balance = (dry_lvl_l - dry_lvl_r) / (dry_lvl_l + dry_lvl_r)
         self._wet_balance = 0.85 * self._wet_balance + 0.15 * balance
         rev_out_l = rev_out_l * (1.0 + 0.6 * self._wet_balance)
@@ -539,7 +550,7 @@ class PythonSpatialAudioSource(discord.AudioSource):
         rt60 = min(2.6, max(0.4, 0.35 + 0.085 * size))
         self._fdn_gains = [10.0 ** (-3.0 * (d / self.sr) / rt60) for d in self._fdn_delays]
         self._fdn_bufs = [np.zeros(d + 2048, dtype=np.float32) for d in self._fdn_delays]
-        self._fdn_lp_zi = [np.zeros(1, dtype=np.float64) for _ in range(4)]
+        self._fdn_lp_zi = [np.zeros(1, dtype=np.float32) for _ in range(4)]
         self._fdn_pos = 0
         # 初期反射（壁からの一次反射）: 間隔は部屋の広さに比例し、
         # 左右を交互に入れ替えて壁の位置を感じさせる
@@ -564,14 +575,32 @@ class PythonSpatialAudioSource(discord.AudioSource):
         n = len(in_l)
         if self._fdn_room != float(room_m):
             self._fdn_setup(room_m)
-        block = 96
-        arange = np.arange(block)
         out_l = np.zeros(n, dtype=np.float32)
         out_r = np.zeros(n, dtype=np.float32)
-        damp = 0.42
-        b_lp = np.array([1.0 - damp])
-        a_lp = np.array([1.0, -damp])
         ering_len = len(self._fdn_ering_l)
+        frame_idx = np.arange(n)
+
+        # --- 初期反射（純粋な遅延なのでフレーム一括で処理できる） ---
+        eidx = (self._fdn_epos + frame_idx) % ering_len
+        self._fdn_ering_l[eidx] = in_l
+        self._fdn_ering_r[eidx] = in_r
+        for dly, gain, cross in self._fdn_early:
+            ridx = (self._fdn_epos - dly + frame_idx) % ering_len
+            if cross:
+                out_l += gain * self._fdn_ering_r[ridx]
+                out_r += gain * self._fdn_ering_l[ridx]
+            else:
+                out_l += gain * self._fdn_ering_l[ridx]
+                out_r += gain * self._fdn_ering_r[ridx]
+        self._fdn_epos += n
+
+        # --- FDN 本体（ブロック処理。遅延がブロック長以上なら再帰が回る） ---
+        block = 192
+        arange = np.arange(block)
+        damp = 0.42
+        b_lp = np.array([1.0 - damp], dtype=np.float32)
+        a_lp = np.array([1.0, -damp], dtype=np.float32)
+        damped_buf = np.empty((4, block), dtype=np.float32)
         for start in range(0, n, block):
             end = min(n, start + block)
             m = end - start
@@ -579,51 +608,33 @@ class PythonSpatialAudioSource(discord.AudioSource):
             blk_l = in_l[start:end]
             blk_r = in_r[start:end]
 
-            # --- 初期反射 ---
-            eidx = (self._fdn_epos + idxs) % ering_len
-            self._fdn_ering_l[eidx] = blk_l
-            self._fdn_ering_r[eidx] = blk_r
-            wet_l = np.zeros(m, dtype=np.float32)
-            wet_r = np.zeros(m, dtype=np.float32)
-            for dly, gain, cross in self._fdn_early:
-                ridx = (self._fdn_epos - dly + idxs) % ering_len
-                if cross:
-                    wet_l += gain * self._fdn_ering_r[ridx]
-                    wet_r += gain * self._fdn_ering_l[ridx]
-                else:
-                    wet_l += gain * self._fdn_ering_l[ridx]
-                    wet_r += gain * self._fdn_ering_r[ridx]
-            self._fdn_epos += m
-
-            # --- FDN 本体 ---
             ins = (blk_l * 0.5, blk_r * 0.5, blk_l * 0.5, blk_r * 0.5)
             delayed = []
             for ch in range(4):
                 buf = self._fdn_bufs[ch]
                 ridx = (self._fdn_pos - self._fdn_delays[ch] + idxs) % len(buf)
                 delayed.append(buf[ridx])
-            damped = []
-            for ch in range(4):
                 y, self._fdn_lp_zi[ch] = signal.lfilter(
-                    b_lp, a_lp, delayed[ch].astype(np.float64), zi=self._fdn_lp_zi[ch])
-                damped.append((y * self._fdn_gains[ch]).astype(np.float32))
-            fb = _FDN_MATRIX @ np.array(damped)
+                    b_lp, a_lp, delayed[ch], zi=self._fdn_lp_zi[ch])
+                damped_buf[ch, :m] = y * self._fdn_gains[ch]
+            fb = _FDN_MATRIX @ damped_buf[:, :m]
             for ch in range(4):
                 buf = self._fdn_bufs[ch]
                 widx = (self._fdn_pos + idxs) % len(buf)
                 buf[widx] = ins[ch] + fb[ch]
             self._fdn_pos += m
 
-            out_l[start:end] = wet_l + (delayed[0] + delayed[2]) * _FDN_OUT_GAIN
-            out_r[start:end] = wet_r + (delayed[1] + delayed[3]) * _FDN_OUT_GAIN
+            out_l[start:end] += (delayed[0] + delayed[2]) * _FDN_OUT_GAIN
+            out_r[start:end] += (delayed[1] + delayed[3]) * _FDN_OUT_GAIN
         return out_l, out_r
 
-    def _spec(self, key, ir):
-        """短いIRのスペクトル（FFT長2048固定）をキャッシュして返す。"""
-        spec = self._spec_cache.get(key)
+    def _spec(self, key, ir, n=2048):
+        """短いIRのスペクトルをキャッシュして返す（FFT長ごとに別キャッシュ）。"""
+        cache_key = (key, n)
+        spec = self._spec_cache.get(cache_key)
         if spec is None:
-            spec = _rfft(ir, 2048)
-            self._spec_cache[key] = spec
+            spec = _rfft(ir, n)
+            self._spec_cache[cache_key] = spec
         return spec
 
     def cleanup(self):
