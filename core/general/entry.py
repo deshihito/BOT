@@ -205,25 +205,6 @@ class GeneralCog(
         await interaction.followup.send(view=as_panel_v2(view))
 
 
-    @app_commands.command(name="level", description="自分のレベルを確認します")
-    async def level(self, interaction: discord.Interaction):
-        # カード描画 (PIL) は view.load() 内で asyncio.to_thread 経由。
-        await interaction.response.defer(thinking=True)
-        view = LevelCardView(interaction.user.id, interaction.guild_id, bot=self.bot)
-        await view.load()
-        await interaction.followup.send(view=as_panel_v2(view), file=view.card_file())
-
-
-    @app_commands.command(name="level_settings", description="レベルカードの設定を変更します")
-    async def level_settings(self, interaction: discord.Interaction):
-        # 個人設定のため ephemeral。プレビューの再描画も to_thread 経由。
-        await interaction.response.defer(ephemeral=True, thinking=True)
-        view = LevelSettingsView(interaction.user.id, interaction.guild_id, bot=self.bot)
-        await view.load()
-        await interaction.followup.send(
-            view=as_panel_v2(view), file=view.card_file(), ephemeral=True)
-
-
     async def _safe_respond(self, interaction: discord.Interaction, message: str, *, ephemeral: bool = True):
         """interaction の応答状態に応じて安全にメッセージを返す。
 
