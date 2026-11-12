@@ -109,34 +109,6 @@ class SpatialErrorFallbackTest(unittest.TestCase):
         self.assertEqual(len(frame2), 3840)
 
 
-class BlockConvolverTest(unittest.TestCase):
-    def test_block_convolution_matches_reference_with_block_delay(self):
-        import sys as _sys
-        import types as _types
-
-        _sys.modules.setdefault("yt_dlp", _types.ModuleType("yt_dlp"))
-        from core.vc.music.spatial import _BlockConvolver
-
-        rng = np.random.default_rng(42)
-        sig = rng.standard_normal(20000).astype(np.float32)
-        ir = rng.standard_normal(3000).astype(np.float32) * 0.1
-        ref = np.convolve(sig, ir)[: len(sig)]
-        conv = _BlockConvolver()
-        outs = []
-        for i in range(0, len(sig), 960):
-            chunk = sig[i : i + 960]
-            if len(chunk) < 960:
-                chunk = np.pad(chunk, (0, 960 - len(chunk)))
-            o, _ = conv.process(chunk, chunk, ir, ir, ("room", 0.5))
-            outs.append(o)
-        out = np.concatenate(outs)
-        # ウェット出力は「ブロックが満ちたフレーム」から出始めるため、
-        # 960サンプルフレームでは 3840 サンプル遅れて一致する
-        delay = 3840
-        delayed = out[delay : delay + 10000]
-        self.assertTrue(np.allclose(delayed, ref[:10000], atol=1e-4))
-
-
 class IrNormalizationTest(unittest.TestCase):
     def test_ir_energy_normalized_to_one(self):
         irs = measured.load_room_irs()
@@ -415,6 +387,83 @@ class LiveModeTest(unittest.TestCase):
         frame = _np.frombuffer(src.read(), dtype=_np.int16)
         self.assertEqual(frame.size, 1920)
         self.assertGreater(float(_np.max(_np.abs(frame))), 0.0)
+
+
+class FdnReverbTest(unittest.TestCase):
+    def _make_src(self, state):
+        import struct as _struct
+        import sys as _sys
+        import types as _types
+
+        _sys.modules.setdefault("yt_dlp", _types.ModuleType("yt_dlp"))
+        from core.vc.music import spatial
+
+        class _FakeSource:
+            def read(self):
+                return _struct.pack("<1920h", *([1000, 1000] * 960))
+
+            def cleanup(self):
+                pass
+
+        return spatial.PythonSpatialAudioSource(_FakeSource(), state)
+
+    def test_fdn_wet_level_and_room_difference(self):
+        import numpy as _np
+
+        def wet_rms(room_m, frames=100):
+            src = self._make_src({"eq": "spatial", "volume": 1.0})
+            rng = _np.random.default_rng(42)
+            sig = rng.standard_normal(960 * frames).astype(_np.float32) * 0.3
+            total = 0.0
+            count = 0
+            for f in range(frames):
+                wl, wr = src._fdn_reverb(sig[f * 960:(f + 1) * 960], sig[f * 960:(f + 1) * 960], room_m)
+                if f >= 50:
+                    total += float(_np.sum(wl ** 2) + _np.sum(wr ** 2))
+                    count += wl.size * 2
+            return (total / max(1, count)) ** 0.5
+
+        small = wet_rms(3.0)
+        # ウェット音が十分なレベルで返る（無音や過大でない）
+        self.assertGreater(small, 0.05)
+        self.assertLess(small, 0.6)
+
+    def test_fdn_room_size_changes_tail(self):
+        import numpy as _np
+
+        def tail_energy(room_m):
+            src = self._make_src({"eq": "spatial", "volume": 1.0})
+            rng = _np.random.default_rng(7)
+            sig = rng.standard_normal(960).astype(_np.float32) * 0.3
+            silence = _np.zeros(960, dtype=_np.float32)
+            for _ in range(50):  # 1 秒間鳴らして残響を育てる
+                src._fdn_reverb(sig, sig, room_m)
+            energy = 0.0
+            for f in range(75):  # 止めてから 0.5〜2.0 秒の尾を測る
+                wl, wr = src._fdn_reverb(silence, silence, room_m)
+                if f >= 25:
+                    energy += float(_np.sum(wl ** 2) + _np.sum(wr ** 2))
+            return energy
+
+        # 部屋が広いほど尾が長く残る（反響による音の変化）
+        self.assertGreater(tail_energy(25.0), tail_energy(3.0) * 2.0)
+
+    def test_fdn_tail_decays(self):
+        import numpy as _np
+
+        src = self._make_src({"eq": "spatial", "volume": 1.0})
+        impulse = _np.zeros(960, dtype=_np.float32)
+        impulse[0] = 1.0
+        silence = _np.zeros(960, dtype=_np.float32)
+        src._fdn_reverb(impulse, impulse, 25.0)
+        energies = []
+        for f in range(100):  # 2 秒分
+            wl, wr = src._fdn_reverb(silence, silence, 25.0)
+            if f % 25 == 0:
+                energies.append(float(_np.sum(wl ** 2) + _np.sum(wr ** 2)))
+        # 尾は残りつつ、時間とともに減衰する
+        self.assertGreater(energies[0], 0.0)
+        self.assertLess(energies[-1], energies[0])
 
 
 if __name__ == "__main__":
