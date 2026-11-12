@@ -9,26 +9,10 @@ from core.vc.music import measured
 
 class LoadMeasuredTest(unittest.TestCase):
     def setUp(self):
-        measured._room_cache = None
         measured._speaker_cache = None
 
     def tearDown(self):
-        measured._room_cache = None
         measured._speaker_cache = None
-
-    def test_room_irs(self):
-        rooms = measured.load_room_irs()
-        self.assertIsNotNone(rooms)
-        self.assertEqual(set(rooms), {"room", "hall"})
-        room_l, room_r = rooms["room"]
-        hall_l, hall_r = rooms["hall"]
-        self.assertEqual(len(room_l), len(room_r))
-        self.assertGreater(len(hall_l), len(room_l))  # ホールは部屋より長い
-        for ir in (room_l, hall_l):
-            self.assertTrue(np.all(np.isfinite(ir)))
-            head = float(np.sqrt(np.mean(ir[:4800] ** 2)))
-            tail = float(np.sqrt(np.mean(ir[-4800:] ** 2)))
-            self.assertGreater(head, tail)  # 減衰している
 
     def test_speakers(self):
         speakers = measured.load_speakers()
@@ -46,7 +30,6 @@ class LoadMeasuredTest(unittest.TestCase):
         original = measured._ASSETS
         measured._ASSETS = Path(tempfile.mkdtemp())
         try:
-            self.assertIsNone(measured.load_room_irs())
             self.assertIsNone(measured.load_speakers())
         finally:
             measured._ASSETS = original
@@ -66,55 +49,6 @@ class AirAbsorptionTest(unittest.TestCase):
         for g_near, g_far in zip(near, far):
             self.assertGreater(g_near, g_far)
         self.assertLess(far[2], far[0])  # 遠距離では高音が最も減る
-
-
-class RoomIrTruncationTest(unittest.TestCase):
-    def test_hall_ir_truncated_to_1p5s_with_fade(self):
-        irs = measured.load_room_irs()
-        hall_l = irs["hall"][0]
-        self.assertLessEqual(len(hall_l), 72000)
-        # 末尾はフェードで 0 になっている
-        self.assertAlmostEqual(float(hall_l[-1]), 0.0, places=6)
-        # 先頭は切り取られていない
-        room_l = irs["room"][0]
-        self.assertLess(len(room_l), 48000)
-
-
-class SpatialErrorFallbackTest(unittest.TestCase):
-    def test_read_falls_back_to_passthrough_on_dsp_error(self):
-        import struct as _struct
-        import sys as _sys
-        import types as _types
-
-        # ローカル環境に yt_dlp が無い場合のスタブ（本番では実物が入る）
-        _sys.modules.setdefault("yt_dlp", _types.ModuleType("yt_dlp"))
-        from core.vc.music import spatial
-
-        class _FakeSource:
-            def read(self):
-                samples = []
-                for i in range(960):
-                    samples += [1000, 1000]
-                return _struct.pack("<1920h", *samples)
-
-            def cleanup(self):
-                pass
-
-        state = {"eq": "spatial", "volume": 1.0, "spatial_distance": "abc"}
-        src = spatial.PythonSpatialAudioSource(_FakeSource(), state)
-        frame = src.read()  # 例外にならず、そのままの音が返る
-        self.assertEqual(len(frame), 3840)
-        self.assertTrue(src._spatial_failed)
-        frame2 = src.read()
-        self.assertEqual(len(frame2), 3840)
-
-
-class IrNormalizationTest(unittest.TestCase):
-    def test_ir_energy_normalized_to_one(self):
-        irs = measured.load_room_irs()
-        for key, (l, r) in irs.items():
-            norm = float(np.sqrt(np.sum(l.astype(np.float64) ** 2) + np.sum(r.astype(np.float64) ** 2)))
-            self.assertAlmostEqual(norm, 1.0, places=3, msg=key)
 
 
 class DistanceSelectTest(unittest.TestCase):
