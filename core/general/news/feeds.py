@@ -49,6 +49,14 @@ TOPICS: dict[str, tuple[str, str]] = {
                  "sourcecountry:JA sourcelang:japanese"),
 }
 
+class RateLimited(Exception):
+    """GDELT が混雑している（HTTP 429）。retry_after は秒（不明なら None）。"""
+
+    def __init__(self, retry_after: float | None = None):
+        super().__init__("GDELT rate limited")
+        self.retry_after = retry_after
+
+
 FETCH_TIMEOUT = aiohttp.ClientTimeout(total=20)
 USER_AGENT = "AGOBOT news notifier (+https://agobot.app)"
 MAX_RECORDS = 25
@@ -118,9 +126,19 @@ def parse_doc(text: str, topic_key: str, limit: int = 20) -> list[NewsItem]:
 
 
 async def fetch_feed(session: aiohttp.ClientSession, topic_key: str) -> list[NewsItem]:
-    """1 トピックを取得する。失敗したら例外（呼び出し側で握る）。"""
+    """1 トピックを取得する。失敗したら例外（呼び出し側で握る）。
+
+    429 は RateLimited として投げ、呼び出し側がバックオフする。
+    """
     async with session.get(build_url(topic_key), timeout=FETCH_TIMEOUT,
                            headers={"User-Agent": USER_AGENT}) as resp:
+        if resp.status == 429:
+            retry_after = resp.headers.get("Retry-After")
+            try:
+                retry_after = float(retry_after) if retry_after else None
+            except (TypeError, ValueError):
+                retry_after = None
+            raise RateLimited(retry_after)
         resp.raise_for_status()
         text = await resp.text()
     return parse_doc(text, topic_key)

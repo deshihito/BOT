@@ -24,6 +24,10 @@ logger = logging.getLogger("cogs.disboard_rta")
 
 
 class EventsMixin:
+    # 総合順位のカラムが DB にない（マイグレーション未適用）ことが
+    # 分かったら、プロセスの間は書き込みを試行しない。
+    _combined_write_disabled = False
+
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message):
         try:
@@ -121,17 +125,26 @@ class EventsMixin:
                         "rank_all_slow_local", "rank_all_slow_global")
             if key in ranks
         }
-        if combined:
+        if combined and not self._combined_write_disabled:
             try:
                 await self._call(lambda: self.db.table("bump_rta_events").update(
                     combined).eq("bump_message_id", bump_message_id).eq(
                     "event_type", kind).execute())
-            except Exception:
-                # 総合順位の保存は付随情報（カラム追加のマイグレーション
-                # 未適用など）。失敗しても通常の順位と表示は通常どおり。
-                logger.warning(
-                    "bump_rta combined ranks save failed: guild=%s", gid,
-                    exc_info=True)
+            except Exception as exc:
+                if "Unknown column" in str(exc):
+                    # カラム追加のマイグレーション未適用。表示側は bot 側
+                    # フォールバックで出るので、書き込みだけを止めて
+                    # エラーを繰り返さない（再起動で再判定する）。
+                    type(self)._combined_write_disabled = True
+                    logger.info(
+                        "bump_rta: 総合順位のカラムが DB にないため、"
+                        "保存を無効化しました（表示はフォールバックで継続）")
+                else:
+                    # 総合順位の保存は付随情報。失敗しても通常の順位と
+                    # 表示は通常どおり。
+                    logger.warning(
+                        "bump_rta combined ranks save failed: guild=%s", gid,
+                        exc_info=True)
         return ranks
 
     async def _combined_ranks_fallback(self, gid, elapsed):

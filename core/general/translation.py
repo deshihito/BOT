@@ -171,6 +171,9 @@ class TranslationMixin:
             await webhook.send(**kwargs)
         except LibreTranslateError:
             logger.warning("自動翻訳APIの呼び出しに失敗しました (guild=%s)", message.guild.id, exc_info=True)
+        except discord.NotFound:
+            # 元メッセージ（または送信先）が既に消えていた競合。実害なし。
+            logger.info("自動翻訳の対象が既に削除されていました (guild=%s)", message.guild.id)
         except discord.HTTPException:
             logger.warning("自動翻訳メッセージの削除または送信に失敗しました", exc_info=True)
         except Exception:
