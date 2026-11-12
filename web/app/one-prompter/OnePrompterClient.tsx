@@ -21,12 +21,10 @@ import {
   MAX_ANSWER_CHARS,
   MAX_REVISE_INSTRUCTION_CHARS,
   MAX_ROUGH_LENGTH,
-  modelSupportsThink,
   pendingAnswerText,
   type LlmQuestion,
   type PromptLang,
 } from "../../lib/one-prompter-llm";
-import { useOpModel } from "./OpModelContext";
 
 /** 出力言語モードの選択肢。変わるのは完成プロンプトの言語だけで、画面と質問は日本語のまま。 */
 const PROMPT_LANG_OPTIONS: { value: PromptLang; label: string }[] = [
@@ -118,12 +116,8 @@ export default function OnePrompterClient() {
   const [questionCount, setQuestionCount] = useState(DEFAULT_QUESTION_COUNT);
   /** 完成プロンプトの出力言語モード（ja/en/hybrid）。LLM 経路でのみ有効（fallback は日本語のみ）。 */
   const [promptLang, setPromptLang] = useState<PromptLang>(DEFAULT_PROMPT_LANG);
-  /** 生成モデル。選択UIはヘッダーのハンバーガーメニュー側にあり、状態はコンテキストで共有する。LLM 経路でのみ有効。 */
-  const { modelKey } = useOpModel();
-  /** 「より考える」（思考強度のオン）。既定はオフ。LLM 経路でのみ有効。 */
+  /** 「より考える」（思考強度のオン）。既定はオフ。生成モデルは ds1017 固定で、LLM 経路でのみ有効。 */
   const [think, setThink] = useState(false);
-  /** 現在のモデルで「より考える」が効くか（reasoning の対応が未確認のモデルではトグルを無効化する）。 */
-  const thinkSupported = modelSupportsThink(modelKey);
   /** 自由入力の展開状態と下書き（質問が切り替わるたびにリセットする）。 */
   const [freeOpen, setFreeOpen] = useState(false);
   const [freeDraft, setFreeDraft] = useState("");
@@ -164,7 +158,7 @@ export default function OnePrompterClient() {
     resetFree();
     setReviseNote("");
     setPhase({ name: "loading-questions" });
-    const data = await postOnePrompter({ action: "questions", rough: rough.trim(), count: questionCount, model: modelKey, think });
+    const data = await postOnePrompter({ action: "questions", rough: rough.trim(), count: questionCount, think });
     if (data && isLlmQuestions(data.questions, questionCount)) {
       setPhase({
         name: "questions",
@@ -205,7 +199,6 @@ export default function OnePrompterClient() {
       rough: rough.trim(),
       answers: answers.map((a) => ({ question: a.question, answer: a.label })),
       lang: promptLang,
-      model: modelKey,
       think,
     });
     if (data && typeof data.prompt === "string" && data.prompt.trim()) {
@@ -225,7 +218,6 @@ export default function OnePrompterClient() {
       action: "questions",
       rough: rough.trim(),
       answers: answers.map((a) => ({ question: a.question, answer: a.label })),
-      model: modelKey,
       think,
     });
     if (data && Array.isArray(data.questions) && data.questions.length > 0 && isFollowupQuestions(data.questions)) {
@@ -383,7 +375,7 @@ export default function OnePrompterClient() {
     if (!instruction || !phase.prompt.trim()) return;
     setRevising(true);
     setReviseNote("");
-    const data = await postOnePrompter({ action: "revise", prompt: phase.prompt, instruction, lang: promptLang, model: modelKey, think });
+    const data = await postOnePrompter({ action: "revise", prompt: phase.prompt, instruction, lang: promptLang, think });
     setRevising(false);
     if (data && typeof data.prompt === "string" && data.prompt.trim()) {
       setPhase({ ...phase, prompt: data.prompt });
@@ -476,7 +468,6 @@ export default function OnePrompterClient() {
               type="button"
               className={think ? "op-suboption selected" : "op-suboption"}
               aria-pressed={think}
-              disabled={!thinkSupported}
               onClick={() => setThink((v) => !v)}
             >
               より考える

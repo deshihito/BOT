@@ -1,18 +1,12 @@
 "use client";
 
 // ヘッダー右端のハンバーガーメニュー（クライアント）。
-// 中身はモデル選択専用: 生成モデルの一覧から1つを選ぶリスト。
-// 現在の選択にはチェックを付け、選んだらその場で切り替えて閉じる。
-// モデルの状態は OpModelContext 経由で操作UI（OnePrompterClient）と共有する。
-// 表示名のどこにもプロバイダ名は出さない。
+// 中身はアカウント（ログイン）セクションだけを持つ。
 import { useEffect, useRef, useState } from "react";
-import { PROMPTER_MODEL_OPTIONS } from "../../lib/one-prompter-llm";
-import { useOpModel } from "./OpModelContext";
 
 export default function OpMenu() {
   const [open, setOpen] = useState(false);
   const wrapRef = useRef<HTMLDivElement>(null);
-  const { modelKey, setModelKey } = useOpModel();
 
   // 開いている間だけ、外側クリックと Esc で閉じる
   useEffect(() => {
@@ -44,36 +38,13 @@ export default function OpMenu() {
         ☰
       </button>
       {open && (
-        <nav className="op-menu-panel" aria-label="モデル選択">
+        <nav className="op-menu-panel" aria-label="メニュー">
           <div className="op-menu-head">
-            <span>モデル</span>
+            <span>メニュー</span>
             <button type="button" className="op-menu-close" aria-label="メニューを閉じる" onClick={() => setOpen(false)}>
               ×
             </button>
           </div>
-          <ul className="op-menu-models">
-            {PROMPTER_MODEL_OPTIONS.map((opt) => {
-              const selected = opt.key === modelKey;
-              return (
-                <li key={opt.key}>
-                  <button
-                    type="button"
-                    className={selected ? "op-menu-model selected" : "op-menu-model"}
-                    aria-pressed={selected}
-                    onClick={() => {
-                      setModelKey(opt.key);
-                      setOpen(false);
-                    }}
-                  >
-                    <span className="op-menu-check" aria-hidden="true">
-                      {selected ? "✓" : ""}
-                    </span>
-                    {opt.label}
-                  </button>
-                </li>
-              );
-            })}
-          </ul>
         </nav>
       )}
     </div>

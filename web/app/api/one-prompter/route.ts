@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server";
 import {
-  resolveModelKey,
   validateAnswers,
   validatePromptInput,
   validateReviseInstruction,
@@ -26,13 +25,10 @@ export const maxDuration = 60;
 // action=revise: 現在の完成プロンプトを修正指示（200字以内）どおりに書き直す
 // 任意フィールド lang（"ja" | "en" | "hybrid"）は synthesize / revise の出力言語モード。
 // 不正値は hybrid に丸める。questions では使わない（質問は常に日本語）。
-// 任意フィールド model は生成モデルのキー（表示名スラッグの中立キー）。
-// questions / synthesize / revise の全 LLM 呼び出しに効き、不正値・未指定は
-// 既定モデルに丸める。実モデル ID への解決はサーバー側の対応表で行い、
-// クライアントには ID を返さない。
+// 生成モデルは ds1017 固定（サーバー側 onePrompterModel、env で差し替え可）。
 // 任意フィールド think（boolean）は「より考える」= 思考強度のオン。
-// 全 LLM 呼び出しに伝播し、reasoning を送れるモデルでは reasoning を
-// "high" に上げる。true 以外（不正値・未指定）はオフに丸める。
+// 全 LLM 呼び出しに伝播し、reasoning を "high" に上げる。
+// true 以外（不正値・未指定）はオフに丸める。
 // API キー未設定・LLM失敗時は { fallback: true } を返し、クライアントが
 // ルールベース版（lib/one-prompter.ts）でそのまま続行する。ページは壊れない。
 
@@ -61,7 +57,6 @@ export async function POST(request: Request) {
     prompt?: unknown;
     instruction?: unknown;
     lang?: unknown;
-    model?: unknown;
     think?: unknown;
   };
   try {
@@ -78,10 +73,8 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "入力を確認してください。" }, { status: 400 });
     }
     if (logfareApiKeys().length === 0) return fallback();
-    // ログに出すのは選択されたモデルキーだけ（ID・APIキー値は出さない）
-    console.info(`one-prompter: revise model=${resolveModelKey(body.model)}`);
     try {
-      const revised = await reviseWithLlm(prompt, instruction, { lang: body.lang, model: body.model, think: body.think });
+      const revised = await reviseWithLlm(prompt, instruction, { lang: body.lang, think: body.think });
       if (!revised) return fallback();
       return NextResponse.json({ prompt: revised });
     } catch (error) {
@@ -98,9 +91,6 @@ export async function POST(request: Request) {
   // キーが無い環境では最初からフォールバック（Web 用 env は Bot の .env と別）
   if (logfareApiKeys().length === 0) return fallback();
 
-  // ログに出すのは選択されたモデルキーだけ（ID・APIキー値は出さない）
-  console.info(`one-prompter: ${String(body.action)} model=${resolveModelKey(body.model)}`);
-
   try {
     if (body.action === "questions") {
       if (body.answers !== undefined) {
@@ -110,11 +100,11 @@ export async function POST(request: Request) {
         if (!priorAnswers) {
           return NextResponse.json({ error: "入力を確認してください。" }, { status: 400 });
         }
-        const followups = await generateFollowupQuestionsWithLlm(rough, priorAnswers, { model: body.model, think: body.think });
+        const followups = await generateFollowupQuestionsWithLlm(rough, priorAnswers, { think: body.think });
         if (!followups) return fallback();
         return NextResponse.json({ questions: followups });
       }
-      const questions = await generateQuestionsWithLlm(rough, { count: body.count, model: body.model, think: body.think });
+      const questions = await generateQuestionsWithLlm(rough, { count: body.count, think: body.think });
       if (!questions) return fallback();
       return NextResponse.json({ questions });
     }
@@ -123,7 +113,7 @@ export async function POST(request: Request) {
       if (!answers) {
         return NextResponse.json({ error: "入力を確認してください。" }, { status: 400 });
       }
-      const prompt = await synthesizeWithLlm(rough, answers, { lang: body.lang, model: body.model, think: body.think });
+      const prompt = await synthesizeWithLlm(rough, answers, { lang: body.lang, think: body.think });
       if (!prompt) return fallback();
       return NextResponse.json({ prompt });
     }
