@@ -388,6 +388,15 @@ body:has([data-activity-root]) > main { max-width:none; min-height:100svh; margi
 .op-menu-panel { position:absolute; top:calc(100% + 8px); right:0; z-index:30; width:min(300px,82vw); display:grid; gap:10px; padding:16px; border:1px solid var(--line); border-radius:9px; background:#fff; box-shadow:0 10px 28px rgba(23,25,28,.13); }
 .op-menu-head { display:flex; align-items:center; justify-content:space-between; font-size:14px; font-weight:800; }
 .op-menu-close { padding:2px 6px; border:0; background:transparent; color:var(--muted); font-size:18px; line-height:1; cursor:pointer; }
+.op-menu-section { display:grid; gap:8px; }
+.op-menu-user { display:flex; align-items:center; gap:10px; margin:0; font-size:14px; font-weight:700; }
+.op-menu-avatar { width:28px; height:28px; border-radius:50%; object-fit:cover; background:var(--soft); }
+.op-menu-username { overflow-wrap:anywhere; }
+.op-menu-login { display:block; padding:10px 12px; border:1px solid var(--line); border-radius:8px; background:#fff; color:var(--text); font-size:14px; font-weight:700; text-align:center; text-decoration:none; cursor:pointer; }
+.op-menu-login:hover { border-color:var(--accent); }
+.op-menu-logout { width:100%; padding:10px 12px; border:1px solid var(--line); border-radius:8px; background:#fff; color:var(--text); font-size:14px; font-weight:700; cursor:pointer; }
+.op-menu-logout:hover { border-color:var(--accent); }
+.op-menu-note { margin:0; color:var(--muted); font-size:12px; }
 .op-header-right { display:flex; align-items:center; gap:10px; }
 .op-freeform { display:grid; gap:10px; }
 .op-primary.op-small { justify-self:start; padding:10px 16px; font-size:14px; }
