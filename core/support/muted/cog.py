@@ -165,6 +165,20 @@ class Muted(commands.Cog):
             is_ready = getattr(self.bot, "is_ready", None)
             return bool(is_ready and is_ready())
         member = guild.get_member(user_id)
+        if member is None:
+            # キャッシュに無いだけかもしれないので、REST でも引く。
+            # 本当にいない（NotFound）場合だけ「抜けた」とみなし、
+            # 通信失敗時は記録を消さず次の確認でやり直す。
+            fetch_member = getattr(guild, "fetch_member", None)
+            if callable(fetch_member):
+                try:
+                    member = await fetch_member(user_id)
+                except discord.NotFound:
+                    member = None
+                except discord.HTTPException:
+                    logger.warning("ミュート解除: メンバー取得に失敗しました（次の確認でやり直します）: guild=%s user=%s", guild_id, user_id,
+                                   exc_info=True)
+                    return False
         role = discord.utils.get(guild.roles, name="Muted")
         if member is None or role is None:
             return True  # サーバーを抜けた・ロールが消えた

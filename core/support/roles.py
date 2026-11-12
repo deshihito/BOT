@@ -749,14 +749,20 @@ class RoleSupportMixin:
             or not getattr(getattr(me, "guild_permissions", None), "manage_roles", False)
             or role >= me.top_role
         ):
-            return 0, 0, len(getattr(guild, "members", []))
+            member_count = getattr(guild, "member_count", None)
+            total = member_count if isinstance(member_count, int) and member_count > 0 \
+                else len(getattr(guild, "members", []))
+            return 0, 0, total
 
         if target_mode not in {"humans", "all", "bots"}:
             target_mode = "humans"
 
         affected = skipped = failed = 0
 
-        for member in guild.members:
+        # 一括適用は全メンバーが対象。キャッシュは起動時チャンクを止めた
+        # ため不完全になりうるので、必要な時だけ全件取得する。
+        from core.member_access import list_all_members
+        for member in await list_all_members(guild):
             is_bot = bool(getattr(member, "bot", False))
 
             if (target_mode == "humans" and is_bot) or (target_mode == "bots" and not is_bot):

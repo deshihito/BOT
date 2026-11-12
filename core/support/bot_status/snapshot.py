@@ -45,16 +45,48 @@ def build_snapshot(
     latency_ms: Any,
     started_at: Optional[datetime.datetime],
     now: Optional[datetime.datetime] = None,
+    process_rss_mb: Any = None,
+    cached_member_count: Any = None,
+    cached_user_count: Any = None,
 ) -> dict[str, Any]:
-    """表示用の値だけからステータススナップショットを作る（純粋関数）。"""
+    """表示用の値だけからステータススナップショットを作る（純粋関数）。
+
+    メモリ系の3項目は任意（渡されたときだけ含める）。Bot プロセスの
+    RSS とメンバー／ユーザーのキャッシュ件数で、メモリ削減の効果を
+    デプロイ後に /status のデータから追えるようにするためのもの。
+    """
     now = now or datetime.datetime.now(datetime.timezone.utc)
-    return {
+    snapshot = {
         "updated_at": now.isoformat(),
         "started_at": started_at.isoformat() if started_at is not None else None,
         "guild_count": _as_count(guild_count),
         "member_count": _as_count(member_count),
         "latency_ms": _as_count(latency_ms) if latency_ms is not None else None,
     }
+    if process_rss_mb is not None:
+        snapshot["process_rss_mb"] = _as_count(process_rss_mb)
+    if cached_member_count is not None:
+        snapshot["cached_member_count"] = _as_count(cached_member_count)
+    if cached_user_count is not None:
+        snapshot["cached_user_count"] = _as_count(cached_user_count)
+    return snapshot
+
+
+def _process_rss_mb() -> Optional[int]:
+    """自プロセスの RSS（MiB）。取得できない環境では None。"""
+    try:
+        import psutil
+
+        return round(psutil.Process().memory_info().rss / (1024 * 1024))
+    except Exception:
+        pass
+    try:
+        import resource
+
+        # Linux の ru_maxrss は KiB（ピーク値だが取得手段が無いときの代替）。
+        return round(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024)
+    except Exception:
+        return None
 
 
 def collect_snapshot(
@@ -70,6 +102,21 @@ def collect_snapshot(
     """
     guilds = list(getattr(bot, "guilds", None) or [])
     member_count = sum(_as_count(getattr(guild, "member_count", 0)) for guild in guilds)
+    cached_member_count = 0
+    for guild in guilds:
+        members = getattr(guild, "members", None)
+        if members is not None:
+            try:
+                cached_member_count += len(members)
+            except TypeError:
+                pass
+    users = getattr(bot, "users", None)
+    cached_user_count: Optional[int] = None
+    if users is not None:
+        try:
+            cached_user_count = len(users)
+        except TypeError:
+            cached_user_count = None
     latency = getattr(bot, "latency", None)
     latency_ms: Optional[int] = None
     if isinstance(latency, (int, float)) and math.isfinite(latency) and latency >= 0:
@@ -80,6 +127,9 @@ def collect_snapshot(
         latency_ms=latency_ms,
         started_at=started_at,
         now=now,
+        process_rss_mb=_process_rss_mb(),
+        cached_member_count=cached_member_count,
+        cached_user_count=cached_user_count,
     )
 
 

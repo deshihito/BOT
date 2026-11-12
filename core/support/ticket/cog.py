@@ -550,7 +550,11 @@ class TicketCog(commands.Cog):
 
     async def _members_for_roles(self, guild: discord.Guild, role_ids: list[int]) -> list[discord.Member]:
         role_set = set(role_ids)
-        return [member for member in guild.members if any(role.id in role_set for role in getattr(member, "roles", []))]
+        # 閲覧・対応ロールの所持者全員が対象。キャッシュは不完全になり
+        # うるため、必要な時だけメンバー全件を取得する。
+        from core.member_access import list_all_members
+        members = await list_all_members(guild)
+        return [member for member in members if any(role.id in role_set for role in getattr(member, "roles", []))]
 
     async def _allowed_ids(self, guild: discord.Guild, settings: dict[str, Any], extra_role_ids: list[int] | None = None) -> set[int]:
         members = await self._members_for_roles(
@@ -584,8 +588,9 @@ class TicketCog(commands.Cog):
                     invitable=False,
                     reason="チケット作成",
                 )
+                from core.member_access import get_or_fetch_member
                 for user_id in allowed_ids:
-                    member = guild.get_member(user_id)
+                    member = await get_or_fetch_member(guild, user_id)
                     if member is not None and member.id != getattr(self.bot.user, "id", None):
                         try:
                             await room.add_user(member)
