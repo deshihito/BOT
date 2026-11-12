@@ -532,6 +532,14 @@ class LevelUpMixin:
                 if ok:
                     target, can_attach = channel, attach
                     break
+            if cfg["channel_id"] and (configured is None or target is not configured):
+                # 指定チャンネルが削除済み/投稿不可で使えなかった。通知の行き先が
+                # 無言で変わったり消えたりしないよう、警告を残してから続行する。
+                logger.warning(
+                    "レベルアップ通知: 指定チャンネルに投稿できないため%s (guild=%s, channel_id=%s)",
+                    "EXPが入った場所へ通知します" if target is not None else "通知をスキップします",
+                    guild.id, cfg["channel_id"],
+                )
             if target is None:
                 logger.info("レベルアップ通知: 投稿できるチャンネルがありません (guild=%s)", guild.id)
                 return
