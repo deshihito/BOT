@@ -117,3 +117,9 @@ def air_absorption_gains(distance_m: float) -> tuple[float, float, float]:
     """距離に対する帯域別ゲイン（ISO 9613-1 の空気吸収）。"""
     d = max(0.0, float(distance_m))
     return tuple(10.0 ** (-alpha * d / 20.0) for alpha in _BAND_ALPHA)  # type: ignore[return-value]
+
+
+def air_absorption_gain(distance_m: float, freq_hz: float) -> float:
+    """任意の代表周波数に対する空気吸収ゲイン（帯域数が変わっても使える単体版）。"""
+    alpha = _iso9613_alpha_db_per_m(freq_hz)
+    return 10.0 ** (-alpha * max(0.0, float(distance_m)) / 20.0)
