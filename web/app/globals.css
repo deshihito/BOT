@@ -397,6 +397,10 @@ body:has([data-activity-root]) > main { max-width:none; min-height:100svh; margi
 .op-menu-logout { width:100%; padding:10px 12px; border:1px solid var(--line); border-radius:8px; background:#fff; color:var(--text); font-size:14px; font-weight:700; cursor:pointer; }
 .op-menu-logout:hover { border-color:var(--accent); }
 .op-menu-note { margin:0; color:var(--muted); font-size:12px; }
+.op-menu-key { display:grid; gap:8px; border-top:1px solid var(--line); padding-top:12px; }
+.op-menu-key-label { margin:0; font-size:13px; font-weight:800; }
+.op-menu-key-masked { margin:0; color:var(--muted); font-size:13px; }
+.op-menu-key-input { width:100%; box-sizing:border-box; padding:10px 12px; border:1px solid var(--line); border-radius:8px; background:#fff; color:var(--text); font-size:14px; }
 .op-header-right { display:flex; align-items:center; gap:10px; }
 .op-freeform { display:grid; gap:10px; }
 .op-primary.op-small { justify-self:start; padding:10px 16px; font-size:14px; }

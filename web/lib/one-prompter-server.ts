@@ -109,11 +109,17 @@ export async function logfareChat(
     timeoutMs?: number;
     /** 「より考える」（思考強度オン）。true のときだけ有効、それ以外はオフに丸める。 */
     think?: unknown;
+    /**
+     * ログインユーザーが登録した自前キー。渡された場合はこのキーだけを使う
+     * （共有キーへの自動フォールバックはしない。失敗はそのまま失敗として返す）。
+     */
+    apiKey?: string;
   },
 ): Promise<string> {
   const env = options.env ?? process.env;
   const fetchImpl = options.fetchImpl ?? fetch;
-  const keys = logfareApiKeys(env);
+  const userKey = options.apiKey?.trim();
+  const keys = userKey ? [userKey] : logfareApiKeys(env);
   if (keys.length === 0) throw new Error("LOGFARE_API_KEY が設定されていません。");
   const payload: Record<string, unknown> = {
     model: onePrompterModel(env),
@@ -154,10 +160,10 @@ export async function logfareChat(
 /** 二択質問を LLM で生成する。形式が崩れたら1回だけ組み直し、それでも駄目なら null。 */
 export async function generateQuestionsWithLlm(
   rough: string,
-  deps: { env?: Env; fetchImpl?: FetchImpl; count?: unknown; think?: unknown } = {},
+  deps: { env?: Env; fetchImpl?: FetchImpl; count?: unknown; think?: unknown; apiKey?: string } = {},
 ): Promise<LlmQuestion[] | null> {
   const count = resolveQuestionCount(deps.count);
-  const chatDeps = { env: deps.env, fetchImpl: deps.fetchImpl, think: deps.think };
+  const chatDeps = { env: deps.env, fetchImpl: deps.fetchImpl, think: deps.think, apiKey: deps.apiKey };
   const first = await logfareChat(buildQuestionsMessages(rough, count), { maxTokens: 1400, ...chatDeps });
   const parsed = parseQuestionsJson(first, count);
   if (parsed) return parsed;
@@ -173,7 +179,7 @@ export async function generateQuestionsWithLlm(
 export async function generateFollowupQuestionsWithLlm(
   rough: string,
   answers: LlmAnswer[],
-  deps: { env?: Env; fetchImpl?: FetchImpl; think?: unknown } = {},
+  deps: { env?: Env; fetchImpl?: FetchImpl; think?: unknown; apiKey?: string } = {},
 ): Promise<LlmQuestion[] | null> {
   const asked = answers.map((a) => a.question);
   const first = await logfareChat(buildFollowupMessages(rough, answers), { maxTokens: 700, ...deps });
@@ -193,16 +199,16 @@ export async function generateFollowupQuestionsWithLlm(
 export async function synthesizeWithLlm(
   rough: string,
   answers: LlmAnswer[],
-  deps: { env?: Env; fetchImpl?: FetchImpl; lang?: unknown; think?: unknown } = {},
+  deps: { env?: Env; fetchImpl?: FetchImpl; lang?: unknown; think?: unknown; apiKey?: string } = {},
 ): Promise<string | null> {
   // 出力言語モード（不正値は hybrid に丸める）。検証・直しも同じモードで通す。
   const lang = resolvePromptLang(deps.lang);
-  const chatDeps = { env: deps.env, fetchImpl: deps.fetchImpl, think: deps.think };
+  const chatDeps = { env: deps.env, fetchImpl: deps.fetchImpl, think: deps.think, apiKey: deps.apiKey };
   const raw = await logfareChat(buildSynthesizeMessages(rough, answers, lang), { maxTokens: 1800, ...chatDeps });
   const draft = cleanSynthesizedPrompt(raw);
   if (!draft) return null;
 
-  const verifyDeps = { env: deps.env, fetchImpl: deps.fetchImpl, timeoutMs: VERIFY_TIMEOUT_MS, think: deps.think };
+  const verifyDeps = { env: deps.env, fetchImpl: deps.fetchImpl, timeoutMs: VERIFY_TIMEOUT_MS, think: deps.think, apiKey: deps.apiKey };
   let issues: string[] | null;
   try {
     const verifyRaw = await logfareChat(buildVerifyMessages(rough, answers, draft, lang), { maxTokens: 800, ...verifyDeps });
@@ -232,7 +238,7 @@ export async function synthesizeWithLlm(
 export async function reviseWithLlm(
   prompt: string,
   instruction: string,
-  deps: { env?: Env; fetchImpl?: FetchImpl; lang?: unknown; think?: unknown } = {},
+  deps: { env?: Env; fetchImpl?: FetchImpl; lang?: unknown; think?: unknown; apiKey?: string } = {},
 ): Promise<string | null> {
   const messages =
     deps.lang === undefined
@@ -243,6 +249,7 @@ export async function reviseWithLlm(
     env: deps.env,
     fetchImpl: deps.fetchImpl,
     think: deps.think,
+    apiKey: deps.apiKey,
   });
   return cleanSynthesizedPrompt(raw);
 }

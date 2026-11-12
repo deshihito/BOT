@@ -43,7 +43,7 @@ test("サービス名の常時表示はヘッダーの1箇所だけ（フッタ�
 
 test("レイアウトはヘッダーを置き、モデル状態の Provider は持たず、セッションを渡す", () => {
   assert.match(layoutSrc, /import OpHeader[^\n]*from "\.\/OpHeader"/);
-  assert.match(layoutSrc, /<OpHeader user={user} googleEnabled={isGoogleConfigured\(\)} \/>/);
+  assert.match(layoutSrc, /<OpHeader user={user} googleEnabled={isGoogleConfigured\(\)} userKeyEnabled={isUserKeyEnabled\(\)} \/>/);
   assert.ok(!layoutSrc.includes("OpModelProvider"));
   assert.ok(!layoutSrc.includes("OpModelContext"));
   // モデル状態の共有コンテキスト自体を廃止した
@@ -56,7 +56,7 @@ test("レイアウトはヘッダーを置き、モデル状態の Provider は�
 
 test("ヘッダーはハンバーガーメニューを出し、ユーザー情報をそのまま渡す", () => {
   assert.match(headerSrc, /import OpMenu from "\.\/OpMenu"/);
-  assert.match(headerSrc, /<OpMenu user={user} googleEnabled={googleEnabled} \/>/);
+  assert.match(headerSrc, /<OpMenu user={user} googleEnabled={googleEnabled} userKeyEnabled={userKeyEnabled} \/>/);
   assert.ok(!headerSrc.includes("op-header-model"));
   assert.ok(!headerSrc.includes("useOpModel"));
 });
