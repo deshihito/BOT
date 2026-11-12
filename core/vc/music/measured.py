@@ -1,8 +1,9 @@
-"""立体音響の実測データ（部屋IR・スピーカー特性）と空気吸収の読み込み。
+"""立体音響の実測データ（スピーカー特性）と空気吸収の読み込み。
 
-部屋の残響は実測インパルス応答、スピーカー特性は無響室実測
-（DIRPAT）の軸上特性＋指向性を使う。読み込みに失敗した場合は None を
-返し、呼び出し側が従来の簡易モデルへフォールバックする
+スピーカー特性は無響室実測（DIRPAT）の軸上特性＋指向性を使う。
+残響は FDN（フィードバック遅延ネットワーク）で合成するため、
+部屋のインパルス応答データは使わない。読み込みに失敗した場合は
+None を返し、呼び出し側が従来の簡易モデルへフォールバックする
 （このモジュールは numpy 以外に依存しない）。
 """
 from __future__ import annotations
@@ -18,51 +19,7 @@ logger = logging.getLogger("cogs.sio_music")
 _ASSETS = Path(__file__).resolve().parents[3] / "assets" / "spatial"
 _SPEAKER_KEYS = ("studio", "theater", "pa", "small")
 
-_room_cache = None  # None=未読込 / False=失敗 / dict=成功
 _speaker_cache = None
-
-
-# 1フレーム(20ms)の畳み込みコストを抑えるため、IR は最大 1.5 秒まで使う。
-# 末尾はフェードアウトさせて切り取る（残響の聞こえ方はほぼ変わらない）。
-_MAX_IR_SECONDS = 1.5
-_FADE_SECONDS = 0.25
-
-
-def _truncate_ir(ir: np.ndarray) -> np.ndarray:
-    """(samples, 2) の IR を最大長へ切り詰め、末尾をフェードアウトさせる。"""
-    max_len = int(48000 * _MAX_IR_SECONDS)
-    if len(ir) <= max_len:
-        return ir
-    out = np.array(ir[:max_len], dtype=np.float32)
-    fade = int(48000 * _FADE_SECONDS)
-    ramp = np.linspace(1.0, 0.0, fade, dtype=np.float32) ** 2
-    out[-fade:] *= ramp[:, None]
-    return out
-
-
-def load_room_irs():
-    """{"room": (L, R), "hall": (L, R)}（float32, 48kHz）を返す。読めなければ None。"""
-    global _room_cache
-    if _room_cache is not None:
-        return _room_cache or None
-    try:
-        with np.load(_ASSETS / "room_ir.npz") as data:
-            result = {}
-            for key in ("room", "hall"):
-                ir = _truncate_ir(np.array(data[key], dtype=np.float32))
-                # ウェット量の基準をそろえるため、IR はエネルギー（L2ノルム）= 1 に
-                # 正規化する。これで畳み込み後のウェット音量はドライと同程度 ×
-                # wet_val になり、部屋ごとの音量差もなくなる。
-                norm = float(np.sqrt(np.sum(ir.astype(np.float64) ** 2)))
-                if norm > 0:
-                    ir = (ir / norm).astype(np.float32)
-                result[key] = (ir[:, 0].copy(), ir[:, 1].copy())
-        _room_cache = result
-        logger.info("実測の部屋IRを読み込みました")
-    except Exception:
-        logger.warning("部屋IRの読み込みに失敗したため、簡易リバーブへフォールバックします", exc_info=True)
-        _room_cache = False
-    return _room_cache or None
 
 
 def load_speakers():

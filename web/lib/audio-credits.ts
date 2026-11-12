@@ -1,5 +1,5 @@
 /**
- * 立体音響で使用している実測データ（HRTF・部屋の残響・スピーカー特性）のクレジット。
+ * 立体音響で使用している実測データ（HRTF・スピーカー特性）のクレジット。
  * 各データの利用条件は出典元の表記に従う（確認日: 2026-11-11）。
  */
 export type AudioDataCredit = {
@@ -22,20 +22,6 @@ export const AUDIO_DATA_CREDITS: AudioDataCredit[] = [
     credit: "Bill Gardner and Keith Martin, MIT Media Lab (Copyright 1994 by the MIT Media Laboratory)",
     terms: "著者の引用を条件に、無制限に利用できます。",
     url: "https://sound.media.mit.edu/resources/KEMAR.html",
-  },
-  {
-    usage: "リバーブ（コンサートホール）",
-    name: "Pori Concert Hall Impulse Responses",
-    credit: "Copyright © 2005 Helsinki University of Technology (TKK), Akukon Oy, and the authors",
-    terms: "非商用目的に限り、著者の引用を条件に利用できます（商用利用は権利者の書面許可が必要）。",
-    url: "http://legacy.spa.aalto.fi/projects/poririrs/",
-  },
-  {
-    usage: "リバーブ（録音スタジオ）",
-    name: "EchoThief Impulse Response Library",
-    credit: "Chris Warren (San Diego State University)",
-    terms: "Steinman Foundation Recording Suite のインパルス応答を使用。残響づけなどの派生的な音響作品への利用が許可されています。",
-    url: "https://www.echothief.com/",
   },
   {
     usage: "スピーカー特性・指向性",
