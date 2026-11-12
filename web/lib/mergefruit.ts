@@ -12,18 +12,18 @@ export const MERGE_COLS = 6;
 export const MERGE_ROWS = 10;
 export const MERGE_CELLS = MERGE_COLS * MERGE_ROWS;
 
-/** フルーツの段階（小さい順）。index が段階。 */
+/** フルーツの段階（小さい順）。index が段階。mark は円バッジに描く頭文字、color/ink はバッジの色。 */
 export const FRUIT_KINDS = [
-  { emoji: "🍒", name: "さくらんぼ" },
-  { emoji: "🍓", name: "いちご" },
-  { emoji: "🍇", name: "ぶどう" },
-  { emoji: "🍊", name: "みかん" },
-  { emoji: "🍋", name: "レモン" },
-  { emoji: "🍎", name: "りんご" },
-  { emoji: "🍐", name: "なし" },
-  { emoji: "🍑", name: "もも" },
-  { emoji: "🍈", name: "メロン" },
-  { emoji: "🍉", name: "すいか" },
+  { mark: "サ", color: "#c2255c", ink: "#ffffff", name: "さくらんぼ" },
+  { mark: "イ", color: "#fa5252", ink: "#ffffff", name: "いちご" },
+  { mark: "ブ", color: "#7950f2", ink: "#ffffff", name: "ぶどう" },
+  { mark: "み", color: "#fd7e14", ink: "#ffffff", name: "みかん" },
+  { mark: "レ", color: "#ffd43b", ink: "#664d03", name: "レモン" },
+  { mark: "リ", color: "#a61e1e", ink: "#ffffff", name: "りんご" },
+  { mark: "ナ", color: "#b7c33a", ink: "#2f3805", name: "なし" },
+  { mark: "モ", color: "#faa2c1", ink: "#6d1039", name: "もも" },
+  { mark: "メ", color: "#69db7c", ink: "#0b3d1a", name: "メロン" },
+  { mark: "ス", color: "#2b8a3e", ink: "#ffffff", name: "すいか" },
 ] as const;
 
 /** 落とせるのは小さい方からこの段階まで。 */

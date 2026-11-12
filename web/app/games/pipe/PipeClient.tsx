@@ -3,7 +3,9 @@
 // タイルをタップすると90度回転し、水源から水が届くタイルは色づく。
 // 端末内で完結し、サーバーへ送信しない。
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { sfxTap, sfxWin } from "@/lib/sfx";
+import { EndScreen } from "../GameJuice";
 import {
   createPipeGame,
   flowIndices,
@@ -63,6 +65,21 @@ export default function PipeClient() {
     return () => clearInterval(id);
   }, [state.status]);
 
+  const prevStatusRef = useRef(state.status);
+  const [winPrevBest, setWinPrevBest] = useState<number | null>(null);
+  const [winNewBest, setWinNewBest] = useState(false);
+
+  // 終局遷移の捕捉はベスト保存 effect より前に置き、保存前のベストを記録する。
+  useEffect(() => {
+    const prev = prevStatusRef.current;
+    prevStatusRef.current = state.status;
+    if (prev !== "won" && state.status === "won") {
+      setWinPrevBest(best);
+      setWinNewBest(best === null || seconds < best);
+      sfxWin();
+    }
+  }, [state.status, best, seconds]);
+
   useEffect(() => {
     if (!hydrated || state.status !== "won" || seconds <= 0) return;
     if (best !== null && seconds >= best) return;
@@ -80,6 +97,8 @@ export default function PipeClient() {
   const restart = () => {
     setState(createPipeGame(Date.now() % 2147483647));
     setSeconds(0);
+    setWinPrevBest(null);
+    setWinNewBest(false);
   };
 
   const cellLabel = (index: number): string => {
@@ -95,9 +114,9 @@ export default function PipeClient() {
           ← ゲーム一覧へ
         </Link>
       </p>
-      <h1 style={{ fontSize: 22, margin: "0 0 6px" }}>🚰 パイプつなぎ</h1>
+      <h1 style={{ fontSize: 22, margin: "0 0 6px" }}>パイプつなぎ</h1>
       <p style={{ margin: "0 0 12px", color: "#64748b", fontSize: 14, lineHeight: 1.6 }}>
-        タイルをタップすると90度回転します。左端の水源（💧）から右端の排水口（🕳️）までつなげてください。
+        タイルをタップすると90度回転します。左端の水源（青い雫）から右端の排水口（黒い穴）までつなげてください。
       </p>
 
       <div style={{ display: "flex", flexWrap: "wrap", gap: 12, alignItems: "center", marginBottom: 12, fontSize: 14 }}>
@@ -143,7 +162,11 @@ export default function PipeClient() {
               role="gridcell"
               aria-label={`${cellLabel(i)}${flowing ? "（水が流れている）" : ""}`}
               disabled={won}
-              onClick={() => setState((s) => rotatePipe(s, i))}
+              className={flowing ? "juice-pulse" : undefined}
+              onClick={() => {
+                sfxTap();
+                setState((s) => rotatePipe(s, i));
+              }}
               style={{
                 aspectRatio: "1",
                 padding: 2,
@@ -156,12 +179,34 @@ export default function PipeClient() {
               }}
             >
               <TileSvg cell={cell} flowing={flowing} />
-              {isSource && <span style={{ position: "absolute", top: 1, left: 3, fontSize: 12 }}>💧</span>}
-              {isDrain && <span style={{ position: "absolute", top: 1, right: 3, fontSize: 12 }}>🕳️</span>}
+              {isSource && (
+                <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden style={{ position: "absolute", top: 1, left: 2 }}>
+                  <path d="M12 2.8C12 2.8 5 11 5 15.4A7 7 0 0 0 19 15.4C19 11 12 2.8 12 2.8Z" fill="#2196f3" stroke="#0d47a1" strokeWidth="1" />
+                </svg>
+              )}
+              {isDrain && <span style={{ position: "absolute", top: 1, right: 3, fontSize: 12, color: "#263238" }}>●</span>}
             </button>
           );
         })}
       </div>
+
+      {won && (
+        <div style={{ marginTop: 14 }}>
+          <EndScreen
+            outcome="win"
+            title="つながりました！"
+            score={seconds}
+            scoreLabel="クリアタイム（秒）"
+            newBest={winNewBest}
+            previousBest={winPrevBest}
+            onRetry={restart}
+          >
+            <p className="muted" style={{ margin: 0 }}>
+              {state.moves}手・{seconds}秒でクリアです。
+            </p>
+          </EndScreen>
+        </div>
+      )}
     </div>
   );
 }

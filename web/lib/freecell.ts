@@ -25,7 +25,30 @@ export type FcState = {
   moves: number;
   status: "playing" | "won";
   seed: number;
+  /** undo 用の履歴（過去の盤面スナップショット。古い順）。未設定は空履歴として扱う。 */
+  past?: FcSnapshot[];
 };
+
+/** undo で復元する盤面スナップショット（履歴自体は含まない）。 */
+export type FcSnapshot = {
+  columns: FcCard[][];
+  freeCells: (FcCard | null)[];
+  foundations: FcCard[][];
+  moves: number;
+  status: "playing" | "won";
+  seed: number;
+};
+
+function snapshotOf(state: FcState): FcSnapshot {
+  return {
+    columns: state.columns.map((col) => [...col]),
+    freeCells: [...state.freeCells],
+    foundations: state.foundations.map((pile) => [...pile]),
+    moves: state.moves,
+    status: state.status,
+    seed: state.seed,
+  };
+}
 
 export type FcSource = { kind: "column"; column: number } | { kind: "freecell"; index: number };
 export type FcTarget =
@@ -102,6 +125,7 @@ export function createFreecell(seed: number): FcState {
     moves: 0,
     status: "playing",
     seed,
+    past: [],
   };
 }
 
@@ -221,8 +245,23 @@ export function moveFreecell(state: FcState, source: FcSource, target: FcTarget,
   } else {
     foundations[target.index].push(moving[0]);
   }
-  const next: FcState = { ...state, columns, freeCells, foundations, moves: state.moves + 1 };
+  const next: FcState = {
+    ...state,
+    columns,
+    freeCells,
+    foundations,
+    moves: state.moves + 1,
+    past: [...(state.past ?? []), snapshotOf(state)],
+  };
   return isWon(next) ? { ...next, status: "won" } : next;
+}
+
+/** 一手戻す。履歴が無ければ状態をそのまま返す。 */
+export function undoFreecell(state: FcState): FcState {
+  const past = state.past ?? [];
+  if (past.length === 0) return state;
+  const prev = past[past.length - 1];
+  return { ...prev, past: past.slice(0, -1) };
 }
 
 /** そのカードを組札へ自動で送って安全か（相手色の組札が rank-1 以上進んでいる、または 2 以下）。 */
@@ -267,7 +306,9 @@ export function autoMoveFreecell(state: FcState): FcState {
     }
     if (!moved) break;
   }
-  return current;
+  if (current === state) return state;
+  // 自動送り全体を undo の1ステップとして扱う（送る前の盤面だけを履歴に残す）。
+  return { ...current, past: [...(state.past ?? []), snapshotOf(state)] };
 }
 
 /** 残り枚数（組札以外にあるカード数）。 */

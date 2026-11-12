@@ -921,7 +921,7 @@ export default function BalkuClient() {
           <h2>最終精算</h2>
           <p className="balku-winner">
             {st.winnerSeats.length > 1 ? `共同勝利: ${winnerNames.join(" / ")}` : `勝者: ${winnerNames[0] ?? "—"}`}
-            {st.winnerSeats.includes(mySeat) ? " 🎉" : ""}
+            {st.winnerSeats.includes(mySeat) ? "" : ""}
           </p>
           <table className="balku-results">
             <thead>

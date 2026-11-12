@@ -53,11 +53,11 @@ function Board({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
 
   return (
     <div className="og-board-wrap">
-      <div className={`og-turn-banner${myTurn ? " og-turn-mine" : ""}`} role="status">
+      <div className={`og-turn-banner${myTurn ? " og-turn-mine" : ""}${state.finished ? " juice-slide" : myTurn ? " juice-pulse" : ""}`} role="status">
         {state.finished
           ? state.winner === "draw"
             ? "引き分け"
-            : `勝者: ${winnerName ?? "—"}${state.winner === mySeat ? " 🎉" : ""}`
+            : `勝者: ${winnerName ?? "—"}${state.winner === mySeat ? "" : ""}`
           : myTurn
             ? "あなたの手番です"
             : `${turnName} の手番です（待機中）`}
@@ -88,7 +88,7 @@ function Board({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
                 void api.move({ type: "place", index });
               }}
             >
-              {seat >= 0 ? <span className={`og-disc og-disc-${seat}${winSet.has(index) ? " og-disc-win" : ""}`} aria-hidden="true" /> : null}
+              {seat >= 0 ? <span className={`og-disc og-disc-${seat}${winSet.has(index) ? " og-disc-win" : ""}${state.lastMove === index ? " juice-pop" : ""}`} aria-hidden="true" /> : null}
             </button>
           );
         })}

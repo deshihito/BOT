@@ -3,7 +3,7 @@
 // マスをタップして始点を決め、もう一度タップしたマスまでを長方形にする。
 // 既にある長方形のマスをタップすると、その長方形を取り除く。端末内で完結する。
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   applyShikakuRect,
   coveredCount,
@@ -16,6 +16,8 @@ import {
   type ShikakuState,
   type ShikakuViolation,
 } from "@/lib/shikaku";
+import { sfxCorrect, sfxPlace, sfxTap, sfxWin, sfxWrong } from "@/lib/sfx";
+import { EndScreen } from "../GameJuice";
 import { useGamesNav } from "../GamesShell";
 
 const SIZES: { key: ShikakuSize; label: string }[] = [
@@ -81,12 +83,25 @@ export default function ShikakuClient() {
     }
   }, [state.status, seconds, best, size]);
 
+  // 勝利への遷移で1回だけジングルを鳴らし、その時点のベストと比較した結果を保持する。
+  const prevStatusRef = useRef(state.status);
+  const [winResult, setWinResult] = useState<{ newBest: boolean; prevBest: number | null } | null>(null);
+  useEffect(() => {
+    const prev = prevStatusRef.current;
+    prevStatusRef.current = state.status;
+    if (state.status === "won" && prev !== "won") {
+      sfxWin();
+      setWinResult({ newBest: best === null || seconds < best, prevBest: best });
+    }
+  }, [state.status, seconds, best]);
+
   const restart = (nextSize: ShikakuSize) => {
     setSize(nextSize);
     setState(newGame(nextSize));
     setAnchor(null);
     setSeconds(0);
     setCheckResult(null);
+    setWinResult(null);
   };
 
   const onCell = (index: number) => {
@@ -94,16 +109,28 @@ export default function ShikakuClient() {
     setCheckResult(null);
     if (anchor === null) {
       if (rectIndexAt(state, index) >= 0) {
+        sfxTap();
         setState((s) => removeShikakuRectAt(s, index));
       } else {
+        sfxTap();
         setAnchor(index);
       }
       return;
     }
     if (index === anchor) {
+      // 数字 1 のマスは 1×1 の長方形として確定する（それ以外は従来どおり取り消し）。
+      if (state.clues[anchor] === 1) {
+        sfxPlace();
+        const r = Math.floor(anchor / state.size);
+        const c = anchor % state.size;
+        setState((s) => applyShikakuRect(s, { r1: r, c1: c, r2: r, c2: c }));
+      } else {
+        sfxTap();
+      }
       setAnchor(null);
       return;
     }
+    sfxPlace();
     const r1 = Math.floor(anchor / state.size);
     const c1 = anchor % state.size;
     const r2 = Math.floor(index / state.size);
@@ -114,10 +141,17 @@ export default function ShikakuClient() {
 
   const onCheck = () => {
     if (isShikakuComplete(state)) {
+      sfxCorrect();
       setCheckResult([]);
       return;
     }
-    setCheckResult(shikakuViolations(state));
+    const violations = shikakuViolations(state);
+    if (violations.length === 0) {
+      sfxCorrect();
+    } else {
+      sfxWrong();
+    }
+    setCheckResult(violations);
   };
 
   const violationCells = new Set((checkResult ?? []).flatMap((v) => v.cells));
@@ -134,7 +168,9 @@ export default function ShikakuClient() {
             : `ルール違反はありません。あと ${total - covered} マスです。`
           : `違反が ${checkResult.length} 件あります: ${checkResult[0].message}`
         : anchor !== null
-          ? "長方形の反対側の角をタップ。始点をもう一度タップすると取り消します。"
+          ? state.clues[anchor] === 1
+            ? "数字 1 のマスです。もう一度タップすると 1×1 の四角として確定します。"
+            : "長方形の反対側の角をタップ。始点をもう一度タップすると取り消します。"
           : "マスをタップして始点を決め、もう一つの角で長方形を描きます。長方形のマスをタップすると消せます。";
 
   return (
@@ -215,6 +251,9 @@ export default function ShikakuClient() {
                     ? "長方形の中のマス"
                     : "空きマス"
               }
+              className={
+                isViolation ? "juice-shake" : isAnchor ? "juice-pulse" : rect ? "juice-pop" : undefined
+              }
               onClick={() => onCell(i)}
               style={{
                 aspectRatio: "1",
@@ -239,6 +278,21 @@ export default function ShikakuClient() {
           );
         })}
       </div>
+
+      {state.status === "won" ? (
+        <EndScreen
+          outcome="win"
+          score={seconds}
+          scoreLabel="クリアタイム（秒）"
+          newBest={winResult?.newBest}
+          previousBest={winResult && !winResult.newBest ? winResult.prevBest : undefined}
+          onRetry={() => restart(size)}
+        >
+          <p className="muted">
+            {size}×{size} ・ 手数 {state.moves}
+          </p>
+        </EndScreen>
+      ) : null}
     </>
   );
 }

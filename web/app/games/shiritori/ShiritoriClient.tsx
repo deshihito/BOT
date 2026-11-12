@@ -55,14 +55,23 @@ function ShiritoriTable({ view, api }: { view: OnlineRoomView; api: OnlineRoomAp
     if (el) el.scrollTop = el.scrollHeight;
   }, [state?.history.length]);
 
-  const finishRef = useRef(false);
+  const prevTurnRef = useRef<number | null>(null);
   useEffect(() => {
-    if (!state || finishRef.current) return;
+    if (!state) return;
+    const prev = prevTurnRef.current;
+    prevTurnRef.current = state.turn;
+    if (prev !== null && prev !== state.turn && state.turn === mySeat && !state.finished && state.you.alive) playSe("turn");
+  }, [state, mySeat]);
+
+  const finishRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!state) return;
     if (state.finished) {
-      finishRef.current = true;
+      if (finishRef.current === view.code) return;
+      finishRef.current = view.code;
       playSe(state.winner === mySeat ? "win" : "lose");
     }
-  }, [state, mySeat]);
+  }, [state, mySeat, view.code]);
 
   if (!state) {
     return <p className="og-notice">対戦の開始を待っています…</p>;
@@ -81,6 +90,7 @@ function ShiritoriTable({ view, api }: { view: OnlineRoomView; api: OnlineRoomAp
   const submit = async () => {
     const value = word.trim();
     if (!value) return;
+    playSe("play");
     const ok = await api.move({ type: "submit", word: value });
     if (ok) setWord("");
   };
@@ -103,10 +113,10 @@ function ShiritoriTable({ view, api }: { view: OnlineRoomView; api: OnlineRoomAp
 
   return (
     <div>
-      <p role="status" style={{ fontWeight: 700, margin: "4px 0 6px" }}>
+      <p role="status" className={state.finished ? "juice-slide" : myTurn ? "juice-pulse" : undefined} style={{ fontWeight: 700, margin: "4px 0 6px" }}>
         {state.finished
           ? state.winner !== null
-            ? `🏆 ${nameOf(state.winner)} の勝ちです！`
+            ? `${nameOf(state.winner)} の勝ちです！`
             : "勝者なし"
           : state.turn === mySeat
             ? "あなたの番です"
@@ -124,7 +134,12 @@ function ShiritoriTable({ view, api }: { view: OnlineRoomView; api: OnlineRoomAp
         )}
       </p>
       {lastEventText && (
-        <p aria-live="polite" style={{ margin: "0 0 12px", color: "#475569", fontSize: 14 }}>
+        <p
+          key={lastEventText}
+          aria-live="polite"
+          className={state.lastEvent?.kind === "n-foul" && state.lastEvent.seat === mySeat ? "juice-shake" : "juice-pop"}
+          style={{ margin: "0 0 12px", color: "#475569", fontSize: 14 }}
+        >
           {lastEventText}
         </p>
       )}
@@ -143,7 +158,7 @@ function ShiritoriTable({ view, api }: { view: OnlineRoomView; api: OnlineRoomAp
               fontWeight: p.seat === mySeat ? 700 : 400,
             }}
           >
-            {p.alive ? "🙂" : "💀"} {nameOf(p.seat)}
+            {p.alive ? "○" : "✕"} {nameOf(p.seat)}
             {p.left && "（退出）"}
           </span>
         ))}
@@ -168,10 +183,10 @@ function ShiritoriTable({ view, api }: { view: OnlineRoomView; api: OnlineRoomAp
         ) : (
           <ol style={{ listStyle: "none", margin: 0, padding: 0, display: "flex", flexDirection: "column", gap: 4 }}>
             {state.history.map((h, i) => (
-              <li key={i} style={{ fontSize: 15, color: h.foul ? "#dc2626" : "#1f2937" }}>
+              <li key={i} className={i === state.history.length - 1 ? "juice-pop" : undefined} style={{ fontSize: 15, color: h.foul ? "#dc2626" : "#1f2937" }}>
                 <span style={{ color: "#64748b", fontSize: 13 }}>{nameOf(h.seat)}: </span>
                 {h.word}
-                {h.foul && " 💥"}
+                {h.foul && " （反則）"}
               </li>
             ))}
           </ol>

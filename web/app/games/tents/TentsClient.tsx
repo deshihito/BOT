@@ -2,7 +2,7 @@
 // テントと木。ロジックは lib/tents.ts（解を先に作る生成で必ず解ける）。
 // マスをタップすると 未定→テント→草→未定 と切り替わる。端末内で完結する。
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   createTentsGame,
   cycleTentsMark,
@@ -12,6 +12,8 @@ import {
   type TentsState,
   type TentsViolation,
 } from "@/lib/tents";
+import { sfxCorrect, sfxPlace, sfxTap, sfxWin, sfxWrong } from "@/lib/sfx";
+import { EndScreen } from "../GameJuice";
 import { useGamesNav } from "../GamesShell";
 
 const SIZES: { key: TentsSize; label: string }[] = [
@@ -36,6 +38,20 @@ export default function TentsClient() {
   const [seconds, setSeconds] = useState(0);
   const [best, setBest] = useState<number | null>(null);
   const [checkResult, setCheckResult] = useState<TentsViolation[] | null>(null);
+  const [resultNewBest, setResultNewBest] = useState(false);
+  const [resultPrevBest, setResultPrevBest] = useState<number | null>(null);
+  const prevStatusRef = useRef(state.status);
+
+  // 終局遷移の瞬間だけジングルを鳴らし、その時点（保存前）のベストで更新判定を控える。
+  useEffect(() => {
+    const prev = prevStatusRef.current;
+    prevStatusRef.current = state.status;
+    if (prev === state.status || state.status !== "won") return;
+    const isNew = seconds > 0 && (best === null || seconds < best);
+    setResultNewBest(isNew);
+    setResultPrevBest(isNew ? null : best);
+    sfxWin();
+  }, [state.status, seconds, best]);
 
   useEffect(() => {
     if (state.status !== "playing") return;
@@ -64,23 +80,34 @@ export default function TentsClient() {
   }, [state.status, seconds, best, size]);
 
   const restart = (nextSize: TentsSize) => {
+    sfxTap();
     setSize(nextSize);
     setState(newGame(nextSize));
     setSeconds(0);
     setCheckResult(null);
+    setResultNewBest(false);
+    setResultPrevBest(null);
   };
 
   const onCell = (index: number) => {
     setCheckResult(null);
-    setState((s) => cycleTentsMark(s, index));
+    const next = cycleTentsMark(state, index);
+    if (next === state) return;
+    if (next.marks[index] === 1) sfxPlace();
+    else sfxTap();
+    setState(next);
   };
 
   const onCheck = () => {
     if (isTentsComplete(state)) {
+      sfxCorrect();
       setCheckResult([]);
       return;
     }
-    setCheckResult(tentsViolations(state));
+    const violations = tentsViolations(state);
+    if (violations.length === 0) sfxCorrect();
+    else sfxWrong();
+    setCheckResult(violations);
   };
 
   const violationCells = new Set((checkResult ?? []).flatMap((v) => v.cells));
@@ -190,6 +217,7 @@ export default function TentsClient() {
                   isTree ? "木" : mark === 1 ? "テント" : mark === 2 ? "草（テントなし）" : "未定"
                 }
                 disabled={isTree || state.status !== "playing"}
+                className={[mark === 1 ? "juice-pop" : "", bad ? "juice-shake" : ""].filter(Boolean).join(" ") || undefined}
                 onClick={() => onCell(i)}
                 style={{
                   aspectRatio: "1",
@@ -203,7 +231,17 @@ export default function TentsClient() {
                   padding: 0,
                 }}
               >
-                {isTree ? "🌲" : mark === 1 ? "⛺" : mark === 2 ? "・" : ""}
+                {isTree ? (
+                  <svg viewBox="0 0 24 24" width="68%" height="68%" aria-hidden style={{ display: "block", margin: "0 auto" }}>
+                    <path d="M12 1.5 19 11h-3.6L20 18.5H4L8.6 11H5Z" fill="#2e7d32" />
+                    <rect x="10.9" y="18.5" width="2.2" height="3.6" fill="#6d4c41" />
+                  </svg>
+                ) : mark === 1 ? (
+                  <svg viewBox="0 0 24 24" width="68%" height="68%" aria-hidden style={{ display: "block", margin: "0 auto" }}>
+                    <path d="M12 3.5 22 20H2Z" fill="#ef6c00" />
+                    <path d="M12 11.5 16.8 20H7.2Z" fill="#8d3b00" />
+                  </svg>
+                ) : mark === 2 ? "・" : ""}
               </button>
             );
           }),
@@ -212,6 +250,23 @@ export default function TentsClient() {
       <p className="muted" style={{ textAlign: "center", marginTop: 10 }}>
         端の数字が緑になれば、その行・列のテント数は合っています。
       </p>
+
+      {state.status === "won" && (
+        <div style={{ marginTop: 16 }}>
+          <EndScreen
+            outcome="win"
+            score={seconds}
+            scoreLabel="クリアタイム（秒）"
+            newBest={resultNewBest}
+            previousBest={resultPrevBest}
+            onRetry={() => restart(size)}
+          >
+            <p className="muted">
+              {size}×{size} ・ {formatTime(seconds)}でクリアしました。
+            </p>
+          </EndScreen>
+        </div>
+      )}
     </>
   );
 }

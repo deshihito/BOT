@@ -3,7 +3,7 @@
 // ダイス5個を振り（振り直し最大2回）、13カテゴリへ順に記録していく。
 // 端末内で完結し、サーバーへ送信しない。
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   applyYahtzeeScore,
   createYahtzee,
@@ -19,6 +19,8 @@ import {
   type YahtzeeState,
 } from "@/lib/yahtzee";
 import { useGamesNav } from "../GamesShell";
+import { sfxDice, sfxPlace, sfxTap, sfxWin } from "@/lib/sfx";
+import { EndScreen } from "../GameJuice";
 
 const DICE_FACES = ["", "⚀", "⚁", "⚂", "⚃", "⚄", "⚅"];
 
@@ -28,6 +30,8 @@ export default function YahtzeeClient() {
     createYahtzee(Date.now() % 2147483647),
   );
   const [best, setBest] = useState<number | null>(null);
+  const prevBestRef = useRef<number | null>(null);
+  const endSoundRef = useRef<YahtzeeState | null>(null);
 
   const totals = yahtzeeTotals(state);
   const finished = state.status === "finished";
@@ -35,7 +39,9 @@ export default function YahtzeeClient() {
   useEffect(() => {
     try {
       const saved = Number(window.localStorage.getItem("ago-yahtzee-best"));
-      setBest(Number.isFinite(saved) && saved > 0 ? saved : null);
+      const loaded = Number.isFinite(saved) && saved > 0 ? saved : null;
+      setBest(loaded);
+      prevBestRef.current = loaded;
     } catch {
       setBest(null);
     }
@@ -52,8 +58,29 @@ export default function YahtzeeClient() {
     }
   }, [finished, totals.total, best]);
 
+  useEffect(() => {
+    if (!finished) return;
+    if (endSoundRef.current === state) return;
+    endSoundRef.current = state;
+    sfxWin();
+  }, [finished, state]);
+
   const restart = () => {
+    prevBestRef.current = best;
     setState(createYahtzee(Date.now() % 2147483647));
+  };
+
+  const roll = () => {
+    sfxDice();
+    setState((s) => rollYahtzeeDice(s));
+  };
+  const toggleHold = (i: number) => {
+    sfxTap();
+    setState((s) => toggleYahtzeeHold(s, i));
+  };
+  const record = (category: (typeof YAHTZEE_CATEGORIES)[number]) => {
+    sfxPlace();
+    setState((s) => applyYahtzeeScore(s, category));
   };
 
   const rollsLeft = MAX_ROLLS_PER_TURN - state.rollsUsed;
@@ -95,12 +122,13 @@ export default function YahtzeeClient() {
           const held = state.held[i];
           return (
             <button
-              key={i}
+              key={`${state.turnsDone}-${state.rollsUsed}-${i}-${d}`}
+              className="juice-flip"
               type="button"
               disabled={finished || state.rollsUsed === 0}
               aria-pressed={held}
               aria-label={`ダイス ${d}${held ? "（保持中）" : ""}`}
-              onClick={() => setState((s) => toggleYahtzeeHold(s, i))}
+              onClick={() => toggleHold(i)}
               style={{
                 width: 58,
                 height: 58,
@@ -127,10 +155,10 @@ export default function YahtzeeClient() {
           type="button"
           className="classic-btn"
           disabled={finished || rollsLeft <= 0}
-          onClick={() => setState((s) => rollYahtzeeDice(s))}
+          onClick={roll}
           style={{ minWidth: 180, fontWeight: 700 }}
         >
-          🎲 ダイスを振る{state.rollsUsed > 0 ? `（あと ${rollsLeft} 回）` : ""}
+          ダイスを振る{state.rollsUsed > 0 ? `（あと ${rollsLeft} 回）` : ""}
         </button>
       </div>
 
@@ -164,7 +192,7 @@ export default function YahtzeeClient() {
               <button
                 type="button"
                 disabled={!canRecord}
-                onClick={() => setState((s) => applyYahtzeeScore(s, category))}
+                onClick={() => record(category)}
                 aria-label={
                   recorded !== null
                     ? `${YAHTZEE_CATEGORY_LABELS[category]} 記録済み ${recorded} 点`
@@ -218,6 +246,22 @@ export default function YahtzeeClient() {
       <p className="muted" style={{ textAlign: "center", fontSize: 13 }}>
         青字は今のダイスでその役に記録した場合の点数です。1つの役には1回だけ記録できます。
       </p>
+
+      {finished ? (
+        <div style={{ maxWidth: 520, margin: "16px auto 0" }}>
+          <EndScreen
+            outcome="finish"
+            score={totals.total}
+            newBest={prevBestRef.current === null || totals.total > prevBestRef.current}
+            previousBest={prevBestRef.current}
+            onRetry={restart}
+          >
+            <p className="muted" style={{ margin: 0 }}>
+              上段合計 {totals.upper} 点{totals.upperBonus > 0 ? `（ボーナス +${totals.upperBonus}）` : ""} ・ 下段合計 {totals.lower} 点
+            </p>
+          </EndScreen>
+        </div>
+      ) : null}
     </>
   );
 }

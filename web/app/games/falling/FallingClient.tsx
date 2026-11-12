@@ -3,7 +3,7 @@
 // キーボードと画面ボタンの両方で操作でき、端末内で完結する（サーバー送信なし）。
 // ベストスコアは localStorage の ago-falling-best に保存する。
 import Link from "next/link";
-import { useCallback, useEffect, useState, type CSSProperties } from "react";
+import { useCallback, useEffect, useRef, useState, type CSSProperties } from "react";
 import {
   FALLING_COLS,
   FALLING_PIECE_COLORS,
@@ -24,6 +24,8 @@ import {
   type FallingPieceType,
   type FallingState,
 } from "@/lib/falling";
+import { sfxCorrect, sfxLose, sfxPlace, sfxTap, sfxWin } from "@/lib/sfx";
+import { EndScreen } from "../GameJuice";
 import { useGamesNav } from "../GamesShell";
 
 const BEST_KEY = "ago-falling-best";
@@ -101,10 +103,38 @@ export default function FallingClient() {
   const [state, setState] = useState<FallingState>(() => createFallingGame(Date.now() % 2147483647));
   const [paused, setPaused] = useState(false);
   const [best, setBest] = useState(0);
+  const [resultNewBest, setResultNewBest] = useState(false);
+  const [resultPrevBest, setResultPrevBest] = useState<number | null>(null);
+  const prevStatusRef = useRef(state.status);
+  const prevLinesRef = useRef(state.lines);
+  const sessionBestRef = useRef(0);
+  const statusRef = useRef(state.status);
+  statusRef.current = state.status;
 
   useEffect(() => {
-    setBest(loadBest());
+    const loaded = loadBest();
+    setBest(loaded);
+    sessionBestRef.current = loaded;
   }, []);
+
+  // 終局遷移の瞬間だけジングルを鳴らす（ベストは対局開始時点の値で判定する）。
+  useEffect(() => {
+    const prev = prevStatusRef.current;
+    prevStatusRef.current = state.status;
+    if (prev === state.status || state.status !== "gameover") return;
+    const isNew = state.score > sessionBestRef.current;
+    setResultNewBest(isNew);
+    setResultPrevBest(isNew ? null : sessionBestRef.current > 0 ? sessionBestRef.current : null);
+    if (isNew) sfxWin();
+    else sfxLose();
+  }, [state.status, state.score]);
+
+  // ライン消去の瞬間に正解音を鳴らす。
+  useEffect(() => {
+    const prev = prevLinesRef.current;
+    prevLinesRef.current = state.lines;
+    if (state.lines > prev) sfxCorrect();
+  }, [state.lines]);
 
   useEffect(() => {
     if (state.score > best) {
@@ -128,12 +158,27 @@ export default function FallingClient() {
 
   const restart = useCallback(() => {
     setPaused(false);
+    sessionBestRef.current = loadBest();
+    setResultNewBest(false);
+    setResultPrevBest(null);
     setState(createFallingGame(Date.now() % 2147483647));
   }, []);
 
   const act = useCallback((fn: (s: FallingState) => FallingState) => {
     setState((s) => (s.status === "playing" ? fn(s) : s));
   }, []);
+
+  const actHardDrop = useCallback(() => {
+    if (statusRef.current !== "playing") return;
+    sfxPlace();
+    act(hardDrop);
+  }, [act]);
+
+  const actHold = useCallback(() => {
+    if (statusRef.current !== "playing") return;
+    sfxTap();
+    act(holdPiece);
+  }, [act]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -170,12 +215,12 @@ export default function FallingClient() {
           break;
         case " ":
           e.preventDefault();
-          act(hardDrop);
+          actHardDrop();
           break;
         case "c":
         case "C":
           e.preventDefault();
-          act(holdPiece);
+          actHold();
           break;
         default:
           break;
@@ -183,7 +228,7 @@ export default function FallingClient() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [act, paused]);
+  }, [act, actHardDrop, actHold, paused]);
 
   // 表示用盤面: 固定ブロック + ゴースト + 落下中ピースを重ねる
   const ghost = state.status === "playing" ? ghostY(state) : state.active.y;
@@ -292,7 +337,7 @@ export default function FallingClient() {
         <div style={{ display: "grid", gap: 14, minWidth: 92, justifyItems: "center" }}>
           <Preview type={state.next} label="NEXT" />
           <Preview type={state.hold} label="HOLD" />
-          <button type="button" className="classic-btn" onClick={() => act(holdPiece)} disabled={gameOver || !state.canHold}>
+          <button type="button" className="classic-btn" onClick={actHold} disabled={gameOver || !state.canHold}>
             ホールド（C）
           </button>
           <button
@@ -334,10 +379,26 @@ export default function FallingClient() {
         <button type="button" style={ctrlBtn} aria-label="回転" {...press((s) => rotatePiece(s, 1))}>
           ⟳ 回転
         </button>
-        <button type="button" style={ctrlBtn} aria-label="ハードドロップ" {...press(hardDrop)}>
+        <button
+          type="button"
+          style={ctrlBtn}
+          aria-label="ハードドロップ"
+          onPointerDown={(e) => {
+            e.preventDefault();
+            if (!paused) actHardDrop();
+          }}
+        >
           ⤓ 落下
         </button>
-        <button type="button" style={ctrlBtn} aria-label="ホールド" {...press(holdPiece)}>
+        <button
+          type="button"
+          style={ctrlBtn}
+          aria-label="ホールド"
+          onPointerDown={(e) => {
+            e.preventDefault();
+            if (!paused) actHold();
+          }}
+        >
           ホールド
         </button>
       </div>
@@ -345,11 +406,21 @@ export default function FallingClient() {
         操作: ←→ 移動 / ↓ ソフトドロップ / ↑・X 回転 / Z 左回転 / スペース ハードドロップ / C ホールド
       </p>
       {gameOver && (
-        <p className="classic-status" style={{ justifyContent: "center" }}>
-          <button type="button" className="classic-btn classic-btn-active" onClick={restart}>
-            もう一度
-          </button>
-        </p>
+        <div style={{ maxWidth: 560, margin: "16px auto 0" }}>
+          <EndScreen
+            outcome="finish"
+            title="ゲームオーバー"
+            score={state.score}
+            scoreLabel="スコア"
+            newBest={resultNewBest}
+            previousBest={resultPrevBest}
+            onRetry={restart}
+          >
+            <p className="muted">
+              ライン {state.lines} ・ レベル {state.level} まで進みました。
+            </p>
+          </EndScreen>
+        </div>
       )}
     </>
   );

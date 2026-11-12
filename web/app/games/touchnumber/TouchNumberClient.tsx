@@ -4,6 +4,8 @@
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { createTouchGame, isCleared, tapCell, touchColumns, type TouchState } from "@/lib/touchnumber";
+import { sfxPop, sfxTap, sfxWin, sfxWrong } from "@/lib/sfx";
+import { EndScreen } from "../GameJuice";
 import { useGamesNav } from "../GamesShell";
 
 const PENALTY_SEC = 3;
@@ -15,7 +17,10 @@ export default function TouchNumberClient() {
   const [state, setState] = useState<TouchState>(() => createTouchGame(25, Date.now() % 2147483647));
   const [elapsed, setElapsed] = useState(0);
   const [best, setBest] = useState<number | null>(null);
+  const [newBest, setNewBest] = useState(false);
+  const [wrongIndex, setWrongIndex] = useState<number | null>(null);
   const startRef = useRef<number | null>(null);
+  const recordedRef = useRef<string | null>(null);
 
   const started = state.taps > 0;
   const totalSec = elapsed + state.misses * PENALTY_SEC;
@@ -40,6 +45,11 @@ export default function TouchNumberClient() {
   useEffect(() => {
     if (state.status !== "won") return;
     const total = elapsed + state.misses * PENALTY_SEC;
+    const key = `${state.seed}:${size}`;
+    if (recordedRef.current !== key) {
+      recordedRef.current = key;
+      setNewBest(best === null || total < best);
+    }
     if (best !== null && total >= best) return;
     setBest(total);
     try {
@@ -50,16 +60,31 @@ export default function TouchNumberClient() {
   }, [state.status, elapsed, state.misses, best, size]);
 
   const restart = (nextSize: number) => {
+    sfxTap();
     setSize(nextSize);
     setState(createTouchGame(nextSize, Date.now() % 2147483647));
     setElapsed(0);
+    setNewBest(false);
+    setWrongIndex(null);
+    recordedRef.current = null;
     startRef.current = null;
   };
 
   const onTap = (index: number) => {
     if (state.status !== "playing") return;
     if (startRef.current === null) startRef.current = Date.now();
-    setState((s) => tapCell(s, index));
+    const next = tapCell(state, index);
+    if (next.misses > state.misses) {
+      sfxWrong();
+      setWrongIndex(index);
+    } else if (next.status === "won") {
+      sfxWin();
+      setWrongIndex(null);
+    } else if (next !== state) {
+      sfxPop();
+      setWrongIndex(null);
+    }
+    setState(next);
   };
 
   const cols = touchColumns(size);
@@ -119,6 +144,7 @@ export default function TouchNumberClient() {
               type="button"
               role="gridcell"
               disabled={cleared}
+              className={wrongIndex === i ? "juice-shake" : cleared ? "juice-pop" : undefined}
               onClick={() => onTap(i)}
               aria-label={`数字 ${value}`}
               style={{
@@ -139,6 +165,16 @@ export default function TouchNumberClient() {
           );
         })}
       </div>
+
+      {state.status === "won" && (
+        <div style={{ maxWidth: 520, margin: "14px auto 0" }}>
+          <EndScreen outcome="win" title="クリア！" newBest={newBest} onRetry={() => restart(size)}>
+            <p className="muted" style={{ margin: 0 }}>
+              記録 {totalSec.toFixed(1)} 秒（実タイム {elapsed.toFixed(1)} 秒 ＋ ミス {state.misses} 回 × {PENALTY_SEC} 秒）
+            </p>
+          </EndScreen>
+        </div>
+      )}
     </>
   );
 }

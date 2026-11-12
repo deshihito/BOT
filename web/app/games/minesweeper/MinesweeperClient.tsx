@@ -2,13 +2,16 @@
 // マインスイーパー。ロジックは lib/minesweeper.ts（初手は必ず安全）。
 // タップで開く／旗モードか右クリックで旗を立てる。端末内で完結し、サーバーへ送信しない。
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
+  chordCell,
   createMsGame,
   revealCell,
   toggleFlag,
   type MsState,
 } from "@/lib/minesweeper";
+import { sfxFlip, sfxLose, sfxPlace, sfxTap, sfxWin } from "@/lib/sfx";
+import { EndScreen } from "../GameJuice";
 import { useGamesNav } from "../GamesShell";
 
 const LEVELS = [
@@ -22,6 +25,29 @@ type LevelKey = (typeof LEVELS)[number]["key"];
 function newGame(levelKey: LevelKey): MsState {
   const level = LEVELS.find((l) => l.key === levelKey) ?? LEVELS[0];
   return createMsGame(level.rows, level.cols, level.mines, Date.now() % 2147483647);
+}
+
+/** 地雷を SVG で描く（絵文字は使わない）。 */
+function MineIcon() {
+  return (
+    <svg viewBox="0 0 24 24" width="78%" height="78%" aria-hidden style={{ display: "block", margin: "0 auto" }}>
+      <g stroke="#212121" strokeWidth="1.8" strokeLinecap="round">
+        <path d="M12 2.5v19M2.5 12h19M5.3 5.3l13.4 13.4M18.7 5.3L5.3 18.7" />
+      </g>
+      <circle cx="12" cy="12" r="6.4" fill="#212121" />
+      <circle cx="9.8" cy="9.6" r="1.7" fill="#e0e0e0" />
+    </svg>
+  );
+}
+
+/** 旗を SVG で描く（絵文字は使わない）。 */
+function FlagIcon() {
+  return (
+    <svg viewBox="0 0 24 24" width="78%" height="78%" aria-hidden style={{ display: "block", margin: "0 auto" }}>
+      <path d="M6 22V3.5" stroke="#5d4037" strokeWidth="2" strokeLinecap="round" />
+      <path d="M6 4c3-1.8 5.5 1.6 9 .4v7.2c-3.5 1.2-6-2.2-9-.4Z" fill="#e53935" />
+    </svg>
+  );
 }
 
 export default function MinesweeperClient() {
@@ -58,6 +84,15 @@ export default function MinesweeperClient() {
     }
   }, [state.status, seconds, best, levelKey]);
 
+  const prevStatusRef = useRef(state.status);
+  useEffect(() => {
+    const prev = prevStatusRef.current;
+    prevStatusRef.current = state.status;
+    if (prev === state.status) return;
+    if (state.status === "won") sfxWin();
+    else if (state.status === "lost") sfxLose();
+  }, [state.status]);
+
   const restart = (key: LevelKey) => {
     setLevelKey(key);
     setState(newGame(key));
@@ -65,12 +100,26 @@ export default function MinesweeperClient() {
     setFlagMode(false);
   };
 
+  const toggleFlagWithSound = (index: number) => {
+    const cell = state.cells[index];
+    if (!cell || cell.open || state.status === "won" || state.status === "lost") return;
+    if (cell.flagged) sfxTap();
+    else sfxPlace();
+    setState((s) => toggleFlag(s, index));
+  };
+
   const onCell = (index: number) => {
     if (flagMode) {
-      setState((s) => toggleFlag(s, index));
-    } else {
-      setState((s) => revealCell(s, index));
+      toggleFlagWithSound(index);
+      return;
     }
+    const cell = state.cells[index];
+    // 開いた数字マスの再タップはコード入力（周囲の旗が合っていれば一括開放）。
+    const next = cell?.open ? chordCell(state, index) : revealCell(state, index);
+    if (next === state) return;
+    // 終局時は終局ジングルに任せ、二重に鳴らさない。
+    if (next.status !== "won" && next.status !== "lost") sfxFlip();
+    setState(next);
   };
 
   const statusText =
@@ -91,7 +140,7 @@ export default function MinesweeperClient() {
       </nav>
       <div className="page-heading compact-heading">
         <h1>マインスイーパー</h1>
-        <p className="muted">地雷を避けてマスを全部開く定番パズル。旗モードならスマホでも旗が立てられます。</p>
+        <p className="muted">地雷を避けてマスを全部開く定番パズル。盤面は推測なしで最後まで解けるよう生成しています。開いた数字マスをもう一度タップすると、周囲の旗の数が合っているときに残りのマスをまとめて開けます。旗モードならスマホでも旗が立てられます。</p>
       </div>
 
       <div className="classic-controls" role="group" aria-label="難易度">
@@ -113,9 +162,12 @@ export default function MinesweeperClient() {
           type="button"
           aria-pressed={flagMode}
           className={flagMode ? "classic-btn classic-btn-active" : "classic-btn"}
-          onClick={() => setFlagMode((v) => !v)}
+          onClick={() => {
+            sfxTap();
+            setFlagMode((v) => !v);
+          }}
         >
-          🚩 旗モード
+          旗モード
         </button>
       </div>
 
@@ -136,6 +188,9 @@ export default function MinesweeperClient() {
             cell.open ? "ms-cell-open" : "",
             cell.open && cell.mine ? "ms-cell-mine" : "",
             state.exploded === i ? "ms-cell-exploded" : "",
+            cell.open ? "juice-flip" : "",
+            state.exploded === i ? "juice-shake" : "",
+            !cell.open && cell.flagged ? "juice-pop" : "",
           ]
             .filter(Boolean)
             .join(" ");
@@ -157,14 +212,42 @@ export default function MinesweeperClient() {
               onClick={() => onCell(i)}
               onContextMenu={(e) => {
                 e.preventDefault();
-                setState((s) => toggleFlag(s, i));
+                toggleFlagWithSound(i);
               }}
             >
-              {cell.open ? (cell.mine ? "💣" : cell.count > 0 ? cell.count : "") : cell.flagged ? "🚩" : ""}
+              {cell.open ? (cell.mine ? <MineIcon /> : cell.count > 0 ? cell.count : "") : cell.flagged ? <FlagIcon /> : ""}
             </button>
           );
         })}
       </div>
+
+      {state.status === "won" && (
+        <div style={{ marginTop: 14 }}>
+          <EndScreen
+            outcome="win"
+            title="クリア！"
+            score={seconds}
+            scoreLabel="クリアタイム（秒）"
+            onRetry={() => restart(levelKey)}
+          >
+            <p>
+              {LEVELS.find((l) => l.key === levelKey)?.label ?? levelKey} ・ 地雷 {state.mineTotal} 個
+              {best !== null ? ` ・ ベスト ${best} 秒` : ""}
+            </p>
+          </EndScreen>
+        </div>
+      )}
+
+      {state.status === "lost" && (
+        <div style={{ marginTop: 14 }}>
+          <EndScreen outcome="lose" onRetry={() => restart(levelKey)}>
+            <p>
+              開いたマス {state.opened} / {state.rows * state.cols - state.mineTotal} ・ {seconds} 秒 ・ 地雷{" "}
+              {state.mineTotal} 個
+            </p>
+          </EndScreen>
+        </div>
+      )}
     </>
   );
 }

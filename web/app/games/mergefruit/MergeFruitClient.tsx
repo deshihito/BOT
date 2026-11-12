@@ -3,7 +3,9 @@
 // 列を選んでフルーツを落とし、同じ段階が2個以上くっつくと合体して大きくなる。
 // 端末内で完結し、サーバーへ送信しない。
 import Link from "next/link";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { sfxLose, sfxPop, sfxSlide, sfxTap } from "@/lib/sfx";
+import { EndScreen, ScorePop } from "../GameJuice";
 import {
   createMergeGame,
   dropFruit,
@@ -18,11 +20,41 @@ function newGame(): MergeFruitState {
   return createMergeGame(Date.now() % 2147483647);
 }
 
+/** フルーツを色付き円バッジ（色＋頭文字）で描く。絵文字は使わない。 */
+function FruitBadge({ level, size }: { level: number; size: number }) {
+  const k = FRUIT_KINDS[level];
+  return (
+    <span
+      aria-hidden
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        justifyContent: "center",
+        width: size,
+        height: size,
+        borderRadius: "50%",
+        background: k.color,
+        color: k.ink,
+        fontSize: Math.round(size * 0.52),
+        fontWeight: 800,
+        lineHeight: 1,
+        flex: "0 0 auto",
+      }}
+    >
+      {k.mark}
+    </span>
+  );
+}
+
 export default function MergeFruitClient() {
   const { prefix } = useGamesNav();
   const [state, setState] = useState<MergeFruitState>(() => newGame());
   const [best, setBest] = useState<number | null>(null);
+  const [prevBest, setPrevBest] = useState<number | null>(null);
+  const [isNewBest, setIsNewBest] = useState(false);
+  const [scorePop, setScorePop] = useState<{ amount: number; key: number } | null>(null);
   const [hoverCol, setHoverCol] = useState<number | null>(null);
+  const prevRef = useRef<{ score: number; dropped: number; status: string } | null>(null);
 
   useEffect(() => {
     try {
@@ -35,14 +67,39 @@ export default function MergeFruitClient() {
 
   useEffect(() => {
     if (state.status !== "gameover" || state.score <= 0) return;
-    if (best !== null && state.score <= best) return;
+    setPrevBest(best);
+    if (best !== null && state.score <= best) {
+      setIsNewBest(false);
+      return;
+    }
+    setIsNewBest(best !== null);
     setBest(state.score);
     try {
       window.localStorage.setItem("ago-mergefruit-best", String(state.score));
     } catch {
       // 保存失敗はプレイに影響しない。
     }
-  }, [state.status, state.score, best]);
+    // ベスト保存はゲームオーバー時に1回だけ行う（best の変化で再実行しない）。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state.status, state.score]);
+
+  useEffect(() => {
+    const prev = prevRef.current;
+    prevRef.current = { score: state.score, dropped: state.dropped, status: state.status };
+    if (!prev) return;
+    if (state.status === "gameover" && prev.status !== "gameover") {
+      sfxLose();
+      return;
+    }
+    if (state.dropped > prev.dropped) {
+      if (state.score > prev.score) {
+        sfxPop();
+        setScorePop({ amount: state.score - prev.score, key: state.dropped });
+      } else {
+        sfxSlide();
+      }
+    }
+  }, [state.score, state.dropped, state.status]);
 
   const drop = useCallback((col: number) => {
     setState((s) => dropFruit(s, col));
@@ -90,6 +147,11 @@ export default function MergeFruitClient() {
           type="button"
           className="classic-btn"
           onClick={() => {
+            sfxTap();
+            setIsNewBest(false);
+            setPrevBest(null);
+            setScorePop(null);
+            prevRef.current = null;
             setState(newGame());
             setHoverCol(null);
           }}
@@ -98,6 +160,7 @@ export default function MergeFruitClient() {
         </button>
         <span className="classic-status" role="status" style={{ margin: 0 }}>
           スコア {state.score}
+          {scorePop ? <ScorePop key={scorePop.key} amount={scorePop.amount} /> : null}
           {best !== null ? ` ・ ベスト ${best}` : ""} ・ 落とした数 {state.dropped}
           {state.maxChain >= 2 ? ` ・ 最大${state.maxChain}連鎖` : ""}
         </span>
@@ -106,6 +169,31 @@ export default function MergeFruitClient() {
       <p className="classic-status" role="status">
         {statusText}
       </p>
+
+      {state.status === "gameover" && (
+        <EndScreen
+          outcome="lose"
+          title="ゲームオーバー"
+          score={state.score}
+          scoreLabel="スコア"
+          newBest={isNewBest}
+          previousBest={isNewBest ? null : prevBest}
+          onRetry={() => {
+            sfxTap();
+            setIsNewBest(false);
+            setPrevBest(null);
+            setScorePop(null);
+            prevRef.current = null;
+            setState(newGame());
+            setHoverCol(null);
+          }}
+        >
+          <p className="muted" style={{ margin: 0 }}>
+            天井まで積み上がってゲームオーバー。落とした数 {state.dropped}
+            {state.maxChain >= 2 ? ` ・ 最大${state.maxChain}連鎖` : ""}
+          </p>
+        </EndScreen>
+      )}
 
       <div
         style={{
@@ -121,6 +209,7 @@ export default function MergeFruitClient() {
           <div
             role="grid"
             aria-label="フルーツの箱"
+            className={state.status === "gameover" ? "juice-shake" : undefined}
             tabIndex={0}
             onKeyDown={onKeyDown}
             style={{
@@ -162,7 +251,7 @@ export default function MergeFruitClient() {
                     opacity: isGhost ? 0.45 : 1,
                   }}
                 >
-                  {kind ? kind.emoji : isGhost ? FRUIT_KINDS[state.current].emoji : ""}
+                  {kind ? <FruitBadge level={v as number} size={30} /> : isGhost ? <FruitBadge level={state.current} size={30} /> : ""}
                 </div>
               );
             })}
@@ -203,12 +292,18 @@ export default function MergeFruitClient() {
             }}
           >
             <div style={{ fontSize: 12, opacity: 0.75 }}>つぎに落とす</div>
-            <div role="img" style={{ fontSize: 40, lineHeight: 1.2 }} aria-label={FRUIT_KINDS[state.current].name}>
-              {FRUIT_KINDS[state.current].emoji}
+            <div
+              key={state.dropped}
+              className="juice-pop"
+              role="img"
+              style={{ lineHeight: 1.2 }}
+              aria-label={FRUIT_KINDS[state.current].name}
+            >
+              <FruitBadge level={state.current} size={44} />
             </div>
             <div style={{ fontSize: 13 }}>{FRUIT_KINDS[state.current].name}</div>
-            <div style={{ fontSize: 12, opacity: 0.75, marginTop: 8 }}>
-              そのつぎ: {FRUIT_KINDS[state.next].emoji} {FRUIT_KINDS[state.next].name}
+            <div style={{ fontSize: 12, opacity: 0.75, marginTop: 8, display: "flex", alignItems: "center", justifyContent: "center", gap: 4 }}>
+              そのつぎ: <FruitBadge level={state.next} size={16} /> {FRUIT_KINDS[state.next].name}
             </div>
           </div>
           <div
@@ -223,8 +318,8 @@ export default function MergeFruitClient() {
             aria-label="フルーツの進化"
           >
             {FRUIT_KINDS.map((k, i) => (
-              <div key={k.name} style={{ fontWeight: state.maxLevel === i ? 700 : 400 }}>
-                {k.emoji} {k.name}
+              <div key={k.name} style={{ fontWeight: state.maxLevel === i ? 700 : 400, display: "flex", alignItems: "center", gap: 5 }}>
+                <FruitBadge level={i} size={17} /> {k.name}
                 {i < FRUIT_KINDS.length - 1 ? " →" : ""}
               </div>
             ))}

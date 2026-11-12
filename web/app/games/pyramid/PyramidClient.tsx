@@ -3,7 +3,7 @@
 // 合計13のペアか K 単体を取り除く。下の2枚が無くなったカードから使える。
 // 端末内で完結し、サーバーへ送信しない。
 import Link from "next/link";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   canRemove,
   createPyramid,
@@ -20,6 +20,8 @@ import {
   type PyramidState,
   type PyramidTarget,
 } from "@/lib/pyramid";
+import { sfxCorrect, sfxFlip, sfxLose, sfxTap, sfxWin } from "@/lib/sfx";
+import { EndScreen } from "../GameJuice";
 import { useGamesNav } from "../GamesShell";
 
 function CardFace({ card }: { card: PyramidCard }) {
@@ -55,6 +57,16 @@ export default function PyramidClient() {
     createPyramid(Date.now() % 2147483647),
   );
   const [selected, setSelected] = useState<PyramidTarget | null>(null);
+  const prevStatusRef = useRef(state.status);
+
+  // 終局遷移の瞬間だけジングルを鳴らす。
+  useEffect(() => {
+    const prev = prevStatusRef.current;
+    prevStatusRef.current = state.status;
+    if (prev === state.status) return;
+    if (state.status === "won") sfxWin();
+    else if (state.status === "stuck") sfxLose();
+  }, [state.status]);
 
   const restart = () => {
     setState(createPyramid(Date.now() % 2147483647));
@@ -68,11 +80,14 @@ export default function PyramidClient() {
     if (state.status !== "playing") return;
     // K は単体で取り除ける（選択中でも K 自体の除去を優先する）。
     if (card.rank === 13 && canRemove(state, [target])) {
-      setState((s) => removePyramidCards(s, [target]));
+      const next = removePyramidCards(state, [target]);
+      if (next.status !== "won") sfxCorrect();
+      setState(next);
       setSelected(null);
       return;
     }
     if (selected === null) {
+      sfxTap();
       setSelected(target);
       return;
     }
@@ -81,15 +96,19 @@ export default function PyramidClient() {
       (selected.kind === "waste" ||
         (target.kind === "pyramid" && selected.slot === target.slot));
     if (sameTarget) {
+      sfxTap();
       setSelected(null);
       return;
     }
     if (canRemove(state, [selected, target])) {
       const pair: [PyramidTarget, PyramidTarget] = [selected, target];
-      setState((s) => removePyramidCards(s, pair));
+      const next = removePyramidCards(state, pair);
+      if (next.status !== "won") sfxCorrect();
+      setState(next);
       setSelected(null);
     } else {
       // 合計13にならない場合は、選択を今のカードへ移す。
+      sfxTap();
       setSelected(target);
     }
   };
@@ -161,6 +180,7 @@ export default function PyramidClient() {
                   disabled={!isExposed || state.status !== "playing"}
                   aria-label={`${pyramidSuitSymbol(card.suit)}${pyramidRankLabel(card.rank)}${isExposed ? "" : "（覆われています）"}`}
                   aria-pressed={sel}
+                  className={sel ? "juice-pulse" : undefined}
                   onClick={() => onTarget({ kind: "pyramid", slot }, card)}
                   style={{
                     padding: 0,
@@ -198,8 +218,15 @@ export default function PyramidClient() {
           <button
             type="button"
             className="classic-btn"
-            disabled={state.status === "won" || (state.stock.length === 0 && state.waste.length === 0)}
+            disabled={
+              state.status === "won" ||
+              state.status === "stuck" ||
+              (state.stock.length === 0 && state.waste.length === 0)
+            }
             onClick={() => {
+              // 捨て山の選択は「山そのもの」への参照なので、めくると別カードに移ってしまう。選択を解除する。
+              sfxFlip();
+              setSelected(null);
               setState((s) => flipPyramidStock(s));
             }}
             aria-label={state.stock.length > 0 ? "ストックを1枚めくる" : "捨て山を裏返して再利用"}
@@ -211,10 +238,12 @@ export default function PyramidClient() {
         <div style={{ textAlign: "center" }}>
           {wasteTop ? (
             <button
+              key={state.waste.length}
               type="button"
               disabled={state.status !== "playing"}
               aria-label={`捨て山の一番上 ${pyramidSuitSymbol(wasteTop.suit)}${pyramidRankLabel(wasteTop.rank)}`}
               aria-pressed={isSelected({ kind: "waste" })}
+              className="juice-flip"
               onClick={() => onTarget({ kind: "waste" }, wasteTop)}
               style={{
                 padding: 0,
@@ -255,6 +284,23 @@ export default function PyramidClient() {
         A=1、J=11、Q=12 として、2枚の合計が13になれば消せます。K は1枚で消えます。
         ストックが尽きたら、捨て山を裏返してもう一度使えます。
       </p>
+
+      {state.status === "won" && (
+        <div style={{ maxWidth: 480, margin: "16px auto 0" }}>
+          <EndScreen outcome="win" title="ピラミッドを全部消した！" score={state.moves} scoreLabel="手数" onRetry={restart}>
+            <p className="muted">全 {PYRAMID_SLOTS} 枚を取り除きました。</p>
+          </EndScreen>
+        </div>
+      )}
+      {state.status === "stuck" && (
+        <div style={{ maxWidth: 480, margin: "16px auto 0" }}>
+          <EndScreen outcome="lose" title="取り除ける組み合わせがありません" onRetry={restart}>
+            <p className="muted">
+              残り {PYRAMID_SLOTS - state.removed} 枚 ・ {state.moves} 手でした。
+            </p>
+          </EndScreen>
+        </div>
+      )}
     </>
   );
 }

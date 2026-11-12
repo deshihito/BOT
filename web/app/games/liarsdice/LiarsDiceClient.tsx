@@ -5,7 +5,8 @@
 //   宣言へのアクションは { type: "bid", count, face } / { type: "challenge" }。
 //   チャレンジの開示結果は lastReveal（前のラウンドの全ダイスと実際の個数）。
 // ルール: 1の目はワイルド。宣言は「個数を上げる」か「同じ個数で数字を上げる」。
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { playSe } from "@/lib/balku-sound";
 import OnlineShell from "../online/OnlineShell";
 import type { OnlineRoomApi, OnlineRoomView } from "../online/useOnlineRoom";
 
@@ -41,11 +42,11 @@ type LdView = {
   standings: { seat: number; rank: number }[] | null;
 };
 
-function DiceRow({ dice, size = 30 }: { dice: number[]; size?: number }) {
+function DiceRow({ dice, size = 30, juiceClass }: { dice: number[]; size?: number; juiceClass?: string }) {
   return (
     <span style={{ display: "inline-flex", gap: 4, flexWrap: "wrap" }}>
       {dice.map((d, i) => (
-        <span key={i} role="img" style={{ fontSize: size, lineHeight: 1 }} aria-label={`ダイス ${d}`}>
+        <span key={i} role="img" className={juiceClass} style={{ fontSize: size, lineHeight: 1, display: "inline-block" }} aria-label={`ダイス ${d}`}>
           {DICE_FACES[d - 1] ?? "?"}
         </span>
       ))}
@@ -70,6 +71,40 @@ function Board({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
     if (state.currentBid.face < 6) return { count: state.currentBid.count, face: state.currentBid.face + 1 };
     return { count: state.currentBid.count + 1, face: 2 };
   }, [state]);
+
+  // 現在の宣言が変わったら、フォームの選択も suggestion に同期する
+  // （前の宣言より弱い値のまま残って宣言ボタンが押せなくなるのを防ぐ）。
+  useEffect(() => {
+    setCount(suggestion.count);
+    setFace(suggestion.face);
+  }, [suggestion.count, suggestion.face]);
+
+  const prevTurnRef = useRef<boolean>(false);
+  useEffect(() => {
+    if (!state) return;
+    const isTurn = state.phase === "bidding" && state.you.isYourTurn && !state.you.left && !state.you.eliminated;
+    const was = prevTurnRef.current;
+    prevTurnRef.current = isTurn;
+    if (!was && isTurn) playSe("turn");
+  }, [state]);
+
+  const finishRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!state || state.phase !== "finished") return;
+    if (finishRef.current === view.code) return;
+    finishRef.current = view.code;
+    playSe(state.winner === mySeat ? "win" : "lose");
+  }, [state, mySeat, view.code]);
+
+  // 新しいラウンドで自分のダイスが振り直されたら知らせる（ダイス変化で1回だけ）
+  const diceSigRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!state || state.phase !== "bidding" || state.you.dice.length === 0) return;
+    const sig = `${view.code}:${state.round}:${state.you.dice.join(",")}`;
+    const prev = diceSigRef.current;
+    diceSigRef.current = sig;
+    if (prev !== null && prev !== sig) playSe("draw");
+  }, [state, view.code]);
 
   if (!state) return <p className="og-muted">ダイスを待っています…</p>;
 
@@ -107,7 +142,9 @@ function Board({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
           <div style={{ border: "2px solid #d8c9a3", borderRadius: 12, padding: 12, background: "#fffdf6", marginBottom: 12 }}>
             <p style={{ margin: "0 0 6px", fontWeight: 700 }}>あなたのダイス</p>
             {state.you.dice.length > 0 ? (
-              <DiceRow dice={state.you.dice} />
+              <span key={`${state.round}-${state.you.dice.join(",")}`}>
+                <DiceRow dice={state.you.dice} juiceClass="juice-flip" />
+              </span>
             ) : (
               <span className="og-muted">ダイスはありません（{state.you.left ? "退出" : "脱落"}）</span>
             )}
@@ -120,7 +157,7 @@ function Board({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
                 "まだ宣言はありません。"
               )}
             </p>
-            <p style={{ margin: "4px 0 0" }}>
+            <p className={isMyTurn ? "juice-pulse" : undefined} style={{ margin: "4px 0 0" }}>
               {isMyTurn
                 ? "あなたの手番です。宣言するか、チャレンジしてください。"
                 : `${nameOf(state, state.currentSeat)}さんの手番です。`}
@@ -166,7 +203,10 @@ function Board({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
                 <button
                   type="button"
                   disabled={!canRaise}
-                  onClick={() => void api.move({ type: "bid", count, face })}
+                  onClick={() => {
+                    playSe("play");
+                    void api.move({ type: "bid", count, face });
+                  }}
                   style={{
                     minHeight: 48,
                     padding: "0 20px",
@@ -184,7 +224,10 @@ function Board({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
                 {bid ? (
                   <button
                     type="button"
-                    onClick={() => void api.move({ type: "challenge" })}
+                    onClick={() => {
+                      playSe("play");
+                      void api.move({ type: "challenge" });
+                    }}
                     style={{
                       minHeight: 48,
                       padding: "0 20px",
@@ -212,7 +255,7 @@ function Board({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
       ) : null}
 
       {reveal ? (
-        <div style={{ border: "2px solid #93c5fd", borderRadius: 12, padding: 12, background: "#eff6ff", marginTop: 14 }}>
+        <div className="juice-slide" style={{ border: "2px solid #93c5fd", borderRadius: 12, padding: 12, background: "#eff6ff", marginTop: 14 }}>
           <p style={{ fontWeight: 800, margin: "0 0 6px" }}>
             第{reveal.round}ラウンドの開示：{nameOf(state, reveal.bid.seat)}さんの宣言「{reveal.bid.face} が {reveal.bid.count} 個」
             → 実際は {reveal.actual} 個（{reveal.actual >= reveal.bid.count ? "宣言どおり！" : "嘘でした"}）
@@ -230,7 +273,7 @@ function Board({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
                     {p.name}
                     {p.seat === mySeat ? "（あなた）" : ""}：
                   </span>
-                  <DiceRow dice={dice} size={22} />
+                  <DiceRow dice={dice} size={22} juiceClass="juice-flip" />
                 </li>
               );
             })}
@@ -239,12 +282,12 @@ function Board({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
       ) : null}
 
       {state.phase === "finished" && state.standings ? (
-        <div style={{ marginTop: 16 }}>
-          <h2 style={{ fontSize: 20, margin: "0 0 10px" }}>最終結果</h2>
+        <div className="juice-slide" style={{ marginTop: 16 }}>
+          <h2 className="juice-pulse" style={{ fontSize: 20, margin: "0 0 10px" }}>最終結果</h2>
           {state.winner !== null ? (
             <p style={{ fontWeight: 800 }}>
-              🏆 優勝は {nameOf(state, state.winner)}
-              {state.winner === mySeat ? "（あなた）🎉" : ""} さんです！
+              優勝は {nameOf(state, state.winner)}
+              {state.winner === mySeat ? "（あなた）" : ""} さんです！
             </p>
           ) : null}
           <ul style={{ listStyle: "none", margin: 0, padding: 0, display: "grid", gap: 8 }}>

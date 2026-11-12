@@ -40,6 +40,7 @@ function Board({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
   const [now, setNow] = useState(() => Date.now());
   const prevPhaseRef = useRef<string>("");
   const finishRef = useRef<string | null>(null);
+  const turnRef = useRef<string | null>(null);
 
   useEffect(() => {
     const id = setInterval(() => setNow(Date.now()), 100);
@@ -62,6 +63,15 @@ function Board({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
     playSe(state.winnerSeat === mySeat ? "win" : "click");
   }, [state, mySeat, view.code]);
 
+  // 新しいラウンド（音楽の開始）を1回だけ知らせる。
+  useEffect(() => {
+    if (!state || state.phase !== "playing") return;
+    const key = `${view.code}:${state.round}`;
+    if (turnRef.current === key) return;
+    turnRef.current = key;
+    playSe("turn");
+  }, [state, view.code]);
+
   if (!state) return <p className="og-muted">対戦の開始を待っています…</p>;
 
   const nameOf = (seat: number) => state.players.find((p) => p.seat === seat)?.name ?? `プレイヤー${seat + 1}`;
@@ -81,7 +91,7 @@ function Board({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
             {p.name}
             {p.seat === mySeat ? "（あなた）" : ""}
             {p.left ? "（退出）" : !p.alive ? "（脱落）" : ""}
-            {(state.phase === "racing" || state.phase === "intermission") && p.alive && p.sat ? " ・ 🪑座れた" : ""}
+            {(state.phase === "racing" || state.phase === "intermission") && p.alive && p.sat ? " ・ 座れた" : ""}
           </span>
         ))}
       </div>
@@ -91,9 +101,9 @@ function Board({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
       </p>
 
       {state.phase === "playing" && (
-        <div style={{ textAlign: "center", padding: "18px 0 6px" }}>
-          <div aria-hidden style={{ fontSize: 56, lineHeight: 1.2 }}>
-            🎵🎶🎵
+        <div className="juice-slide" style={{ textAlign: "center", padding: "18px 0 6px" }}>
+          <div className="juice-pulse" aria-hidden style={{ fontSize: 56, lineHeight: 1.2 }}>
+            ♪♫♪
           </div>
           <p role="status" style={{ fontWeight: 700, fontSize: 18 }}>
             音楽が流れています…
@@ -106,7 +116,7 @@ function Board({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
               disabled
               style={{ minWidth: 200, minHeight: 64, fontSize: 20, fontWeight: 800, opacity: 0.55 }}
             >
-              🪑 まだ止まっていない…
+              まだ止まっていない…
             </button>
           ) : (
             <p className="og-muted">あなたは脱落しました。対戦の様子は見られます。</p>
@@ -115,9 +125,9 @@ function Board({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
       )}
 
       {state.phase === "racing" && (
-        <div style={{ textAlign: "center", padding: "18px 0 6px" }}>
-          <p role="alert" style={{ fontWeight: 800, fontSize: 22 }}>
-            🔕 音楽が止まった！
+        <div className="juice-slide" style={{ textAlign: "center", padding: "18px 0 6px" }}>
+          <p className="juice-pulse" role="alert" style={{ fontWeight: 800, fontSize: 22 }}>
+            音楽が止まった！
           </p>
           {reactRatio !== null && (
             <div
@@ -139,12 +149,15 @@ function Board({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
               type="button"
               className="classic-btn classic-btn-active"
               style={{ minWidth: 220, minHeight: 72, fontSize: 24, fontWeight: 800, marginTop: 14 }}
-              onClick={() => void api.move({ type: "sit" })}
+              onClick={() => {
+                playSe("play");
+                void api.move({ type: "sit" });
+              }}
             >
-              🪑 座る！
+              座る！
             </button>
           ) : state.you.alive ? (
-            <p role="status" style={{ fontWeight: 700, marginTop: 14 }}>
+            <p className="juice-pop" role="status" style={{ fontWeight: 700, marginTop: 14 }}>
               座れました！ 結果を待っています…
             </p>
           ) : (
@@ -159,8 +172,8 @@ function Board({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
       )}
 
       {state.phase === "intermission" && result && (
-        <div style={{ padding: "12px 0 4px" }}>
-          <p role="status" style={{ textAlign: "center", fontWeight: 700, fontSize: 18 }}>
+        <div className="juice-slide" style={{ padding: "12px 0 4px" }}>
+          <p className={result.eliminatedSeat === mySeat ? "juice-shake" : "juice-pop"} role="status" style={{ textAlign: "center", fontWeight: 700, fontSize: 18 }}>
             {nameOf(result.eliminatedSeat)} さんが脱落しました
             {result.reason === "nosit" ? "（時間内に座れませんでした）" : "（一番遅かった）"}
           </p>
@@ -171,7 +184,7 @@ function Board({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
                   {s.order + 1} 番目 {nameOf(s.seat)}
                   {s.seat === mySeat ? "（あなた）" : ""}
                 </span>
-                <span>🪑</span>
+                <span>座れた</span>
               </li>
             ))}
             {result.notSat.map((seat) => (
@@ -191,13 +204,13 @@ function Board({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
       )}
 
       {state.phase === "finished" && (
-        <div style={{ padding: "12px 0 4px" }}>
-          <h2 style={{ textAlign: "center" }}>結果</h2>
-          <p style={{ textAlign: "center", fontSize: 18 }}>
+        <div className="juice-slide" style={{ padding: "12px 0 4px" }}>
+          <h2 className="juice-pulse" style={{ textAlign: "center" }}>結果</h2>
+          <p className={state.winnerSeat === mySeat ? "juice-pulse" : undefined} style={{ textAlign: "center", fontSize: 18 }}>
             {state.winnerSeat === null
               ? "勝者はいませんでした。"
               : state.winnerSeat === mySeat
-                ? "🎉 あなたの勝ちです！"
+                ? "あなたの勝ちです！"
                 : `${nameOf(state.winnerSeat)} さんの勝ちです。`}
           </p>
           <ul style={{ listStyle: "none", padding: 0, margin: "12px 0" }}>

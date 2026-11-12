@@ -140,9 +140,9 @@ test("アナグラム: 増量20語がバンクにあり、シャッフルが元�
 
 // ---------------------------------------------------------------- しりとり増量
 
-test("しりとり: 辞書は1600語で、重複がなく全て有効な形式", () => {
+test("しりとり: 辞書は1610語で、重複がなく全て有効な形式", () => {
   const words = shi.SHIRITORI_WORDS;
-  assert.equal(words.length, 1600);
+  assert.equal(words.length, 1610);
   assert.equal(new Set(words).size, words.length, "重複がある");
   for (const w of words) {
     assert.ok(shi.isValidWordForm(w), `形式が不正: ${w}`);

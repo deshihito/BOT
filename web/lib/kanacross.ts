@@ -317,6 +317,22 @@ export function isValidPuzzle(puzzle: KanaPuzzle): boolean {
 
 const KANA_RE = /^[ァ-ヶー]$/;
 
+/**
+ * 入力パレットの行構成（清音＋小書き＋濁点・半濁点）。
+ * 全問題の solution に現れる文字は必ずこのパレットに含まれる
+ * （パレットだけで全問題を完成できること。テストで検証する）。
+ */
+export const KANA_PALETTE_ROWS: string[] = [
+  "アイウエオカキクケコ",
+  "サシスセソタチツテト",
+  "ナニヌネノハヒフヘホ",
+  "マミムメモヤユヨラリルレロ",
+  "ワヲンーァィゥェォャュョッ",
+  "ガギグゲゴザジズゼゾ",
+  "ダヂヅデドバビブベボ",
+  "パピプペポ",
+];
+
 export function createKanacrossGame(puzzleIndex: number): KanaState {
   const puzzle = getKanacrossPuzzle(puzzleIndex);
   return {

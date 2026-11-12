@@ -3,7 +3,9 @@
 // 円形ボードを SVG で描き、クリック位置へ投げる。ブレはクライアント側で
 // クリック点へ小さな乱数を加える方式（ON/OFF 即時切替、lib は jitter 無効で生成）。
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { sfxCorrect, sfxPlace, sfxWin, sfxWrong } from "@/lib/sfx";
+import { EndScreen } from "../GameJuice";
 import { DART_SECTORS, createDartsGame, roundScores, throwDart, type DartsState } from "@/lib/darts";
 import { useGamesNav } from "../GamesShell";
 
@@ -64,7 +66,7 @@ function Board({ state, onThrow }: { state: DartsState; onThrow: (x: number, y: 
       <circle cx={0} cy={0} r={16} fill="#1e8449" />
       <circle cx={0} cy={0} r={7} fill="#c0392b" />
       {darts.map((d, i) => (
-        <g key={i}>
+        <g key={i} className={i === darts.length - 1 ? "juice-pop" : undefined}>
           <circle cx={d.x * 100} cy={-d.y * 100} r={3.2} fill="#ffd54a" stroke="#5d4037" strokeWidth={1} />
         </g>
       ))}
@@ -77,6 +79,17 @@ export default function DartsClient() {
   const [state, setState] = useState<DartsState>(() => createDartsGame(Date.now() % 2147483647, TOTAL_ROUNDS, false));
   const [jitterOn, setJitterOn] = useState(true);
   const [best, setBest] = useState<number | null>(null);
+  const [finishInfo, setFinishInfo] = useState<{ prevBest: number | null; isNewBest: boolean } | null>(null);
+  const prevStatusRef = useRef(state.status);
+
+  // 終了が確定した瞬間の「前回ベスト」を、ベスト更新 effect より先に記録する。
+  useEffect(() => {
+    if (prevStatusRef.current !== "finished" && state.status === "finished") {
+      setFinishInfo({ prevBest: best, isNewBest: best === null || state.totalScore > best });
+      sfxWin();
+    }
+    prevStatusRef.current = state.status;
+  }, [state.status, state.totalScore, best]);
 
   useEffect(() => {
     try {
@@ -99,6 +112,7 @@ export default function DartsClient() {
   }, [state.status, state.totalScore, best]);
 
   const onThrow = (x: number, y: number) => {
+    if (state.status !== "playing") return;
     let tx = x;
     let ty = y;
     if (jitterOn) {
@@ -107,10 +121,21 @@ export default function DartsClient() {
       tx += Math.cos(angle) * dist;
       ty += Math.sin(angle) * dist;
     }
-    setState((s) => throwDart(s, tx, ty));
+    const next = throwDart(state, tx, ty);
+    const thrownDarts = next.rounds.flat();
+    const landed = thrownDarts[thrownDarts.length - 1];
+    if (landed) {
+      if (landed.score >= 50) sfxCorrect();
+      else if (landed.score <= 0) sfxWrong();
+      else sfxPlace();
+    }
+    setState(next);
   };
 
-  const restart = () => setState(createDartsGame(Date.now() % 2147483647, TOTAL_ROUNDS, false));
+  const restart = () => {
+    setFinishInfo(null);
+    setState(createDartsGame(Date.now() % 2147483647, TOTAL_ROUNDS, false));
+  };
   const scores = roundScores(state);
   const thrown = state.rounds.flat().length;
   const currentRoundNum = Math.min(TOTAL_ROUNDS, Math.floor(thrown / 3) + 1);
@@ -158,6 +183,21 @@ export default function DartsClient() {
           </span>
         ))}
       </div>
+
+      {state.status === "finished" && (
+        <EndScreen
+          outcome="finish"
+          score={state.totalScore}
+          scoreLabel="合計スコア"
+          newBest={finishInfo?.isNewBest ?? false}
+          previousBest={finishInfo && !finishInfo.isNewBest ? finishInfo.prevBest : undefined}
+          onRetry={restart}
+        >
+          <p className="muted" style={{ textAlign: "center" }}>
+            {TOTAL_ROUNDS} ラウンド ・ {thrown} 投の合計です。
+          </p>
+        </EndScreen>
+      )}
     </>
   );
 }

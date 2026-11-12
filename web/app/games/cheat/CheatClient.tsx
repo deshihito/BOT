@@ -6,7 +6,8 @@
 // 操作は { type: "play", cards } / { type: "challenge" }。
 // 手番のランクは expectedRank で固定され、出すカード自体は自由（ブラフ可）。
 // 直前の宣言にチャレンジしたい場合は、カードを出す前に押す。
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { playSe } from "@/lib/balku-sound";
 import OnlineShell from "../online/OnlineShell";
 import type { OnlineRoomApi, OnlineRoomView } from "../online/useOnlineRoom";
 
@@ -104,6 +105,40 @@ function CheatTable({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state?.yourHand.join(",")]);
 
+  // SE: 自分の手番になった遷移で1回だけ鳴らす。
+  const prevTurnRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (!state) return;
+    const prev = prevTurnRef.current;
+    prevTurnRef.current = state.turn;
+    if (prev !== null && prev !== state.turn && state.turn === mySeat && !state.finished) playSe("turn");
+  }, [state, mySeat]);
+
+  // SE: 終局遷移で1回だけ（view.code をキーに再戦で再び鳴る）。
+  const finishRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!state || !state.finished) return;
+    if (finishRef.current === view.code) return;
+    finishRef.current = view.code;
+    playSe(state.yourRank === 1 ? "win" : "click");
+  }, [state, view.code]);
+
+  // SE: チャレンジ開示（ダウト結果）が新しく届いたときに1回だけ鳴らす。
+  const prevRevealRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!state) return;
+    const key = state.lastReveal
+      ? `${state.lastReveal.challenger}:${state.lastReveal.seat}:${state.lastReveal.cards.join(",")}:${state.lastReveal.taker ?? ""}`
+      : "";
+    if (prevRevealRef.current === null) {
+      prevRevealRef.current = key;
+      return;
+    }
+    const prev = prevRevealRef.current;
+    prevRevealRef.current = key;
+    if (key !== "" && prev !== key) playSe("draw");
+  }, [state]);
+
   if (!state) return <p className="muted">読み込み中です…</p>;
 
   const myTurn = !state.finished && state.turn === mySeat;
@@ -114,6 +149,7 @@ function CheatTable({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi })
   const iAmCandidate = state.candidate === mySeat;
 
   const toggleCard = (id: number) => {
+    playSe("select");
     setSelected((prev) => {
       if (prev.includes(id)) return prev.filter((c) => c !== id);
       if (prev.length >= 3) return prev;
@@ -135,7 +171,7 @@ function CheatTable({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi })
 
   return (
     <div>
-      <p className="classic-status" role="status">
+      <p className={`classic-status${myTurn ? " juice-pulse" : ""}`} role="status">
         {statusText}
       </p>
 
@@ -203,6 +239,7 @@ function CheatTable({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi })
 
       {state.lastReveal ? (
         <div
+          className="juice-slide"
           role="group"
           aria-label="チャレンジの開示結果"
           style={{
@@ -226,6 +263,7 @@ function CheatTable({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi })
             {state.lastReveal.cards.map((id) => (
               <span
                 key={id}
+                className="juice-flip"
                 style={{
                   border: "1px solid #94a3b8",
                   borderRadius: 6,
@@ -282,7 +320,10 @@ function CheatTable({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi })
               type="button"
               className="classic-btn"
               style={{ borderColor: "#dc2626", color: "#dc2626", fontWeight: 700 }}
-              onClick={() => void api.move({ type: "challenge" })}
+              onClick={() => {
+                playSe("play");
+                void api.move({ type: "challenge" });
+              }}
             >
               チャレンジする
             </button>
@@ -292,6 +333,7 @@ function CheatTable({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi })
             className="classic-btn classic-btn-active"
             disabled={selected.length === 0}
             onClick={() => {
+              playSe("play");
               void api.move({ type: "play", cards: selected });
               setSelected([]);
             }}
@@ -302,8 +344,8 @@ function CheatTable({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi })
       ) : null}
 
       {state.finished ? (
-        <div style={{ marginTop: 12 }}>
-          <h2 style={{ fontSize: 15, margin: "8px 0" }}>結果</h2>
+        <div className="juice-slide" style={{ marginTop: 12 }}>
+          <h2 className={state.yourRank === 1 ? "juice-pulse" : undefined} style={{ fontSize: 15, margin: "8px 0" }}>結果</h2>
           <ul style={{ margin: 0, paddingLeft: 18 }}>
             {state.players.map((p) => {
               const other = state.others.find((o) => o.seat === p.seat);
@@ -318,7 +360,7 @@ function CheatTable({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi })
               return (
                 <li key={p.seat}>
                   {p.name}: {left ? "退出" : rank !== null ? `${rank}位` : "—"}
-                  {rank === 1 ? " 🏆" : ""}
+                  {rank === 1 ? " （1位）" : ""}
                 </li>
               );
             })}

@@ -1,7 +1,7 @@
 // A27フェーズの検証。
 // - lib/mergefruit.ts: 落下・合体・連鎖・天井ゲームオーバー・決定性
 // - lib/online/games/wordbasket.ts: 形式検証・得点式・秘匿・ロック・退出・完走
-// - lib/flagquiz.ts: 増量後のバンク（150組・重複なし・旗は regional indicator ペア）
+// - lib/flagquiz.ts: 増量後のバンク（195組・重複なし・国コードは ISO alpha-2）
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
@@ -320,22 +320,18 @@ test("バスケット: 退出は脱落扱いだがスコアは順位に残り、
 
 // ---------------------------------------------------------------- フラッグクイズ増量
 
-test("フラッグ増量: バンクは195組で重複がなく、全ての旗が regional indicator ペア", () => {
+test("フラッグ増量: バンクは195組で重複がなく、全ての国コードが ISO alpha-2 小文字", () => {
   assert.equal(fq.FLAG_PAIRS.length, 195);
-  assert.equal(new Set(fq.FLAG_PAIRS.map((p) => p.flag)).size, 195);
+  assert.equal(new Set(fq.FLAG_PAIRS.map((p) => p.code)).size, 195);
   assert.equal(new Set(fq.FLAG_PAIRS.map((p) => p.name)).size, 195);
   for (const p of fq.FLAG_PAIRS) {
-    const cps = [...p.flag].map((c) => c.codePointAt(0));
-    assert.equal(cps.length, 2);
-    assert.ok(cps.every((cp) => cp >= 0x1f1e6 && cp <= 0x1f1ff));
+    assert.ok(/^[a-z]{2}$/.test(p.code), `${p.name} の国コード ${p.code}`);
     assert.ok(p.name.length > 0);
   }
 });
 
-test("フラッグ増量: 追加分の国名と旗（ISO）が一致している", () => {
-  const flagOf = (iso) =>
-    [...iso].map((c) => String.fromCodePoint(0x1f1e6 + c.charCodeAt(0) - 65)).join("");
-  const byName = new Map(fq.FLAG_PAIRS.map((p) => [p.name, p.flag]));
+test("フラッグ増量: 追加分の国名と国コード（ISO）が一致している", () => {
+  const byName = new Map(fq.FLAG_PAIRS.map((p) => [p.name, p.code]));
   const added = [
     ["キューバ", "CU"],
     ["ジャマイカ", "JM"],
@@ -351,7 +347,7 @@ test("フラッグ増量: 追加分の国名と旗（ISO）が一致している
     ["ボスニア・ヘルツェゴビナ", "BA"],
   ];
   for (const [name, iso] of added) {
-    assert.equal(byName.get(name), flagOf(iso), `${name} の旗が ISO ${iso} と一致すること`);
+    assert.equal(byName.get(name), iso.toLowerCase(), `${name} の国コードが ISO ${iso} と一致すること`);
   }
   // 増量後も出題が成立する（選択肢は全てバンク内）
   const game = fq.createFlagQuizGame(7);

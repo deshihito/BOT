@@ -3,7 +3,7 @@
 // children で描く。view.state の形はモジュール側の契約:
 // board は 64 マス（0=空き, 1=seat0, 2=seat1 を基本とし、-1=seat1 も許容）、
 // 着手は { type: "place", index }、パスは { type: "pass" }。
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { playSe } from "@/lib/balku-sound";
 import OnlineShell from "../online/OnlineShell";
 import type { OnlineRoomApi, OnlineRoomView } from "../online/useOnlineRoom";
@@ -32,6 +32,26 @@ function Board({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
   const mySeat = view.player.seat;
   const finishRef = useRef<string | null>(null);
   const turnRef = useRef<number | null>(null);
+  const prevBoardRef = useRef<number[] | null>(null);
+  const [flipped, setFlipped] = useState<ReadonlySet<number>>(new Set());
+
+  // 前回盤面と比較し、色が変わった石に反転アニメーションを付ける。
+  useEffect(() => {
+    const cur = state?.board ?? null;
+    const prev = prevBoardRef.current;
+    if (cur) prevBoardRef.current = [...cur];
+    if (!prev || !cur) return;
+    const next = new Set<number>();
+    for (let i = 0; i < 64; i++) {
+      const a = cellSeat(prev[i]);
+      const b = cellSeat(cur[i]);
+      if (a >= 0 && b >= 0 && a !== b) next.add(i);
+    }
+    if (next.size === 0) return;
+    setFlipped(next);
+    const timer = setTimeout(() => setFlipped(new Set()), 800);
+    return () => clearTimeout(timer);
+  }, [state?.board]);
 
   // 自分の手番が来たら知らせる
   useEffect(() => {
@@ -59,11 +79,11 @@ function Board({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
 
   return (
     <div className="og-board-wrap">
-      <div className={`og-turn-banner${myTurn ? " og-turn-mine" : ""}`} role="status">
+      <div className={`og-turn-banner${myTurn ? " og-turn-mine" : ""}${state.finished ? " juice-slide" : myTurn ? " juice-pulse" : ""}`} role="status">
         {state.finished
           ? state.winner === "draw"
             ? "引き分け"
-            : `勝者: ${winnerName ?? "—"}${state.winner === mySeat ? " 🎉" : ""}`
+            : `勝者: ${winnerName ?? "—"}${state.winner === mySeat ? "" : ""}`
           : myTurn
             ? "あなたの手番です"
             : `${turnName} の手番です（待機中）`}
@@ -95,7 +115,19 @@ function Board({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
                 void api.move({ type: "place", index });
               }}
             >
-              {seat >= 0 ? <span className={`og-disc og-disc-${seat}`} aria-hidden="true" /> : isLegal ? <span className="og-legal-dot" aria-hidden="true" /> : null}
+              {seat >= 0 ? (
+                <span
+                  className={`og-disc og-disc-${seat}${state.lastMove === index ? " juice-pop" : ""}${flipped.has(index) ? " og-disc-flipping" : ""}`}
+                  style={
+                    flipped.has(index) && state.lastMove !== null
+                      ? {
+                          animationDelay: `${(Math.abs(Math.floor(index / 8) - Math.floor(state.lastMove / 8)) + Math.abs((index % 8) - (state.lastMove % 8))) * 45}ms`,
+                        }
+                      : undefined
+                  }
+                  aria-hidden="true"
+                />
+              ) : isLegal ? <span className="og-legal-dot" aria-hidden="true" /> : null}
             </button>
           );
         })}

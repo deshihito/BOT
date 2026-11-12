@@ -2,7 +2,7 @@
 // ぬりかべ。ロジックは lib/nurikabe.ts（解を先に作る生成＋ルール検証で完成判定）。
 // タップで 未定→海→島→未定 と切り替える。端末内で完結し、サーバーへ送信しない。
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   checkNurikabe,
   createNurikabeGame,
@@ -11,6 +11,8 @@ import {
   type NurikabeState,
   type NurikabeViolation,
 } from "@/lib/nurikabe";
+import { sfxCorrect, sfxPlace, sfxTap, sfxWin, sfxWrong } from "@/lib/sfx";
+import { EndScreen } from "../GameJuice";
 import { useGamesNav } from "../GamesShell";
 
 const SIZES: { key: NurikabeSize; label: string }[] = [
@@ -56,22 +58,48 @@ export default function NurikabeClient() {
     }
   }, [state.status, seconds, best, size]);
 
+  // 勝利への遷移で1回だけジングルを鳴らし、その時点のベストと比較した結果を保持する。
+  const prevStatusRef = useRef(state.status);
+  const [winResult, setWinResult] = useState<{ newBest: boolean; prevBest: number | null } | null>(null);
+  useEffect(() => {
+    const prev = prevStatusRef.current;
+    prevStatusRef.current = state.status;
+    if (state.status === "won" && prev !== "won") {
+      sfxWin();
+      setWinResult({ newBest: best === null || seconds < best, prevBest: best });
+    }
+  }, [state.status, seconds, best]);
+
   const restart = (nextSize: NurikabeSize) => {
     setSize(nextSize);
     setState(newGame(nextSize));
     setSeconds(0);
     setViolations([]);
+    setWinResult(null);
   };
 
   const violationCells = useMemo(() => new Set(violations.flatMap((v) => v.cells)), [violations]);
 
   const onCell = (index: number) => {
+    if (state.status !== "playing" || state.clues[index] !== null) return;
+    // 循環の次の印が「未定」に戻る場合はタップ音、それ以外（海・島を置く）は配置音。
+    if (state.marks[index] === 2) {
+      sfxTap();
+    } else {
+      sfxPlace();
+    }
     setViolations([]);
     setState((s) => cycleNurikabeMark(s, index));
   };
 
   const onCheck = () => {
-    setViolations(checkNurikabe(state));
+    const result = checkNurikabe(state);
+    if (result.length === 0) {
+      sfxCorrect();
+    } else {
+      sfxWrong();
+    }
+    setViolations(result);
   };
 
   const statusText =
@@ -174,9 +202,10 @@ export default function NurikabeClient() {
           }
           return (
             <button
-              key={i}
+              key={`${i}-${mark}`}
               type="button"
               role="gridcell"
+              className={bad ? "juice-shake" : mark !== 0 ? "juice-pop" : undefined}
               aria-label={
                 isClue
                   ? `数字 ${clue} の島`
@@ -210,6 +239,21 @@ export default function NurikabeClient() {
       <p className="muted" style={{ textAlign: "center", marginTop: 12, fontSize: 13 }}>
         凡例：〜=海（塗り）／ ・=島 ／ 数字=島の大きさ（固定）
       </p>
+
+      {state.status === "won" ? (
+        <EndScreen
+          outcome="win"
+          score={seconds}
+          scoreLabel="クリアタイム（秒）"
+          newBest={winResult?.newBest}
+          previousBest={winResult && !winResult.newBest ? winResult.prevBest : undefined}
+          onRetry={() => restart(size)}
+        >
+          <p className="muted">
+            {size}×{size} ・ {state.moves}手でクリア
+          </p>
+        </EndScreen>
+      ) : null}
     </>
   );
 }

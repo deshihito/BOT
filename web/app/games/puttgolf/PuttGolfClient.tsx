@@ -18,6 +18,8 @@ import {
   type PgPoint,
   type PuttState,
 } from "@/lib/puttgolf";
+import { sfxCorrect, sfxSlide, sfxTap, sfxWin } from "@/lib/sfx";
+import { EndScreen } from "../GameJuice";
 import { useGamesNav } from "../GamesShell";
 
 const BEST_KEY = "ago-puttgolf-best";
@@ -46,8 +48,11 @@ export default function PuttGolfClient() {
   const [ballPos, setBallPos] = useState<PgPoint>(() => state.ball);
   const [rolling, setRolling] = useState(false);
   const [best, setBest] = useState<number | null>(null);
+  const [prevBest, setPrevBest] = useState<number | null>(null);
+  const [isNewBest, setIsNewBest] = useState(false);
   const animRef = useRef<number | null>(null);
   const savedRef = useRef<number | null>(null);
+  const phaseSfxRef = useRef<string | null>(null);
 
   const hole = state.holes[state.holeIndex];
 
@@ -69,15 +74,32 @@ export default function PuttGolfClient() {
     if (savedRef.current === state.seed) return;
     savedRef.current = state.seed;
     const cur = loadBest();
+    setPrevBest(cur);
     if (cur === null || state.totalStrokes < cur) {
+      setIsNewBest(cur !== null);
       setBest(state.totalStrokes);
       try {
         localStorage.setItem(BEST_KEY, String(state.totalStrokes));
       } catch {
         // 保存失敗はプレイに影響しない。
       }
+    } else {
+      setIsNewBest(false);
     }
   }, [state.phase, state.seed, state.totalStrokes]);
+
+  useEffect(() => {
+    if (state.phase === "playing") return;
+    const key = `${state.seed}:${state.holeIndex}:${state.phase}`;
+    if (phaseSfxRef.current === key) return;
+    phaseSfxRef.current = key;
+    if (state.phase === "holed") {
+      sfxCorrect();
+    } else if (state.phase === "finished") {
+      if (state.totalStrokes <= totalPar(state)) sfxWin();
+      else sfxCorrect();
+    }
+  }, [state.phase, state.seed, state.holeIndex, state.totalStrokes]);
 
   useEffect(
     () => () => {
@@ -88,12 +110,16 @@ export default function PuttGolfClient() {
 
   const restart = () => {
     if (animRef.current !== null) cancelAnimationFrame(animRef.current);
+    sfxTap();
     setRolling(false);
+    setIsNewBest(false);
+    setPrevBest(null);
     setState(createPuttGame(Date.now() % 2147483647));
   };
 
   const doShoot = () => {
     if (state.phase !== "playing" || rolling) return;
+    sfxSlide();
     const { state: next, result } = shoot(state, angle, power);
     setRolling(true);
     const pts = result.points;
@@ -114,6 +140,7 @@ export default function PuttGolfClient() {
   };
 
   const aimAtCup = () => {
+    sfxTap();
     setAngle(angleTo(ballPos, hole.cup));
     setPower(
       Math.max(5, Math.round(powerForDistance(Math.hypot(hole.cup.x - ballPos.x, hole.cup.y - ballPos.y)))),
@@ -160,19 +187,42 @@ export default function PuttGolfClient() {
           カップを狙う
         </button>
         {state.phase === "holed" && (
-          <button type="button" className="classic-btn classic-btn-active" onClick={() => setState((s) => nextHole(s))}>
+          <button
+            type="button"
+            className="classic-btn classic-btn-active"
+            onClick={() => {
+              sfxTap();
+              setState((s) => nextHole(s));
+            }}
+          >
             次のホールへ
           </button>
         )}
       </div>
 
-      <p className="classic-status" role="status">
+      <p className={`classic-status${state.phase === "holed" ? " juice-pulse" : ""}`} role="status">
         {statusText}
         {best !== null ? ` ・ ベスト ${best} 打` : ""}
         {playedHoles > 0 && state.phase !== "finished"
           ? ` ・ ここまで ${strokesSoFar} 打（パー ${parSoFar}、${scoreDiffLabel(strokesSoFar - parSoFar)}）`
           : ""}
       </p>
+
+      {state.phase === "finished" && (
+        <EndScreen
+          outcome={state.totalStrokes <= totalPar(state) ? "win" : "finish"}
+          title="全ホール終了"
+          score={state.totalStrokes}
+          scoreLabel="合計打数"
+          newBest={isNewBest}
+          previousBest={isNewBest ? null : prevBest}
+          onRetry={restart}
+        >
+          <p className="muted" style={{ margin: 0 }}>
+            パー {totalPar(state)} ・ {scoreDiffLabel(state.totalStrokes - totalPar(state))}
+          </p>
+        </EndScreen>
+      )}
 
       <svg
         viewBox={`0 0 ${PG_WIDTH} ${PG_HEIGHT}`}
@@ -221,7 +271,15 @@ export default function PuttGolfClient() {
             aria-hidden="true"
           />
         )}
-        <circle cx={ballPos.x} cy={ballPos.y} r={7} fill="#ffffff" stroke="#999" strokeWidth={1} />
+        <circle
+          cx={ballPos.x}
+          cy={ballPos.y}
+          r={7}
+          fill="#ffffff"
+          stroke="#999"
+          strokeWidth={1}
+          className={state.phase === "holed" ? "juice-pop" : undefined}
+        />
       </svg>
 
       <div

@@ -238,6 +238,47 @@ test("フリーセル: 全52枚を組札にそろえると勝利", () => {
   assert.equal(cur.status, "won");
 });
 
+test("フリーセル: undo で1手戻り、手数が戻る／履歴がなければ同一参照", () => {
+  const s = emptyFcState();
+  s.columns[0] = [card("hearts", 5)];
+  s.columns[1] = [card("spades", 6)];
+  // 履歴のない状態（テスト用リテラル等）では undo は同一参照を返す。
+  assert.equal(fc.undoFreecell(s), s);
+  const moved = fc.moveFreecell(s, { kind: "column", column: 0 }, { kind: "column", column: 1 }, 1);
+  assert.equal(moved.moves, s.moves + 1);
+  const back = fc.undoFreecell(moved);
+  assert.notEqual(back, moved);
+  assert.deepEqual(back.columns, s.columns);
+  assert.deepEqual(back.freeCells, s.freeCells);
+  assert.deepEqual(back.foundations, s.foundations);
+  assert.equal(back.moves, s.moves);
+  assert.equal(back.status, s.status);
+  // もう一度 undo しても戻り先はない（同一参照）。
+  assert.equal(fc.undoFreecell(back), back);
+});
+
+test("フリーセル: 連続移動は1手ずつ戻れる／自動送りは undo 1ステップで戻る", () => {
+  const s = emptyFcState();
+  s.columns[0] = [card("spades", 1)];
+  s.columns[1] = [card("spades", 2)];
+  s.columns[2] = [card("spades", 3)];
+  const auto = fc.autoMoveFreecell(s);
+  assert.equal(auto.foundations[0].length, 2);
+  const back = fc.undoFreecell(auto);
+  assert.deepEqual(back.columns, s.columns);
+  assert.deepEqual(back.foundations, s.foundations);
+  assert.equal(back.moves, s.moves);
+  // 手動の2手は2回 undo で初期状態へ。
+  const m1 = fc.moveFreecell(s, { kind: "column", column: 0 }, { kind: "foundation", index: 0 }, 1);
+  const m2 = fc.moveFreecell(m1, { kind: "column", column: 1 }, { kind: "foundation", index: 0 }, 1);
+  const b1 = fc.undoFreecell(m2);
+  assert.deepEqual(b1.columns, m1.columns);
+  assert.deepEqual(b1.foundations, m1.foundations);
+  const b2 = fc.undoFreecell(b1);
+  assert.deepEqual(b2.columns, s.columns);
+  assert.equal(b2.moves, s.moves);
+});
+
 // ---------------------------------------------------------------- コラムス
 
 const emptyBoard = () => new Array(col.COLUMNS_CELLS).fill(null);

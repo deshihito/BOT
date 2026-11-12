@@ -494,3 +494,20 @@ test("基盤: パーサは create の任意項目と move の raw action を契�
   assert.deepEqual(server.parseCpuBody({ playerToken: token, action: "remove", seat: 2 }), { playerToken: token, action: "remove", seat: 2 });
   assert.deepEqual(server.parseChatBody({ playerToken: token, text: "hi" }), { playerToken: token, text: "hi" });
 });
+
+test("useOnlineRoom: タブを閉じたら leave API へ beacon で通知する構造になっている", () => {
+  const src = fs.readFileSync(
+    path.join(webDir, "app/games/online/useOnlineRoom.ts"),
+    "utf8",
+  );
+  // pagehide（タブ/ブラウザを閉じる・離脱）で退出を通知する。
+  assert.ok(src.includes("pagehide"), "pagehide リスナが無い");
+  assert.ok(src.includes("beforeunload"), "beforeunload リスナが無い");
+  // 送信は sendBeacon を優先し、fetch keepalive にフォールバックする。
+  assert.ok(src.includes("sendBeacon"), "sendBeacon が無い");
+  assert.ok(src.includes("keepalive"), "fetch keepalive フォールバックが無い");
+  // 既存の leave ルートへ、playerToken と expectedRevision を送る。
+  assert.ok(src.includes("/leave"), "leave ルートへの送信が無い");
+  assert.ok(src.includes("playerToken"), "playerToken が送られていない");
+  assert.ok(src.includes("expectedRevision"), "expectedRevision が送られていない");
+});

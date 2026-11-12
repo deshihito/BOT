@@ -2,58 +2,73 @@
 // モジュール契約は lib/online/types.ts の OnlineGameModule に従う。
 // 実行時 import は禁止（テストが import を剥がして連結するため type のみ）。
 //
-// 生き物カードは絵文字の組み合わせ30種 × 各4枚 = 120枚の山札。
+// 生き物カードは色×形×頭文字カナの図形バッジ30種 × 各4枚 = 120枚の山札。
 // 手番の人が1枚めくり、初めて出た生き物にはその人が名前を付ける（30秒制限、
 // 時間切れは自動名）。既に名前のある生き物が再び出たら、全員が名前を
 // 叫べる（専用アクションでテキスト送信）。最初に完全一致で正解した人が
 // 場の山を全部もらう。誤答した人はそのラウンド（その山）には参加できない。
 // 山札が尽きて場の山も決着したら、獲得枚数の多い順に順位を付ける。
+// 名前は「覚える」ことが勝負なので、ビューでは対局中は名前を伏せ、
+// 命名済みかどうか（named）だけを配る。名前そのものは終了時に開示する。
+// めくる番・叫ぶフェーズにも制限時間があり、tick が自動で進行させる。
 import type { OnlineGameModule, Rng, SeatInfo } from "../types";
 
 export const NANJA_NAME_TIME_MS = 30000;
+/** めくる番の制限時間（ms）。過ぎると tick が自動でめくる。 */
+export const NANJA_FLIP_TIME_MS = 30000;
+/** 叫ぶフェーズの制限時間（ms）。過ぎると tick がその山を流す。 */
+export const NANJA_SHOUT_TIME_MS = 30000;
 export const NANJA_NAME_MAX = 12;
 export const NANJA_COPIES_PER_CREATURE = 4;
 
+export type NanjaShape = "circle" | "triangle" | "square" | "star" | "diamond";
+
 export interface NanjaCreature {
-  /** 顔の絵文字。 */
-  face: string;
-  /** 飾りの絵文字。 */
-  deco: string;
+  /** 図形の塗り色（CSS カラー）。 */
+  color: string;
+  /** 色の呼び名。 */
+  colorName: string;
+  /** 図形の種類。 */
+  shape: NanjaShape;
+  /** 図形の呼び名。 */
+  shapeName: string;
+  /** 図形の中央に重ねる頭文字カナ（1文字）。 */
+  kana: string;
   /** 未命名時に表示する仮の呼び名。 */
   label: string;
 }
 
 export const NANJA_CREATURES: NanjaCreature[] = [
-  { face: "🐶", deco: "🎩", label: "ぼうしのワンコ" },
-  { face: "🐱", deco: "👑", label: "かんむりのネコ" },
-  { face: "🐸", deco: "🎀", label: "リボンのカエル" },
-  { face: "🐵", deco: "🕶️", label: "グラサンのサル" },
-  { face: "🐷", deco: "🌸", label: "お花のブタ" },
-  { face: "🐰", deco: "⭐", label: "星のウサギ" },
-  { face: "🦊", deco: "🍀", label: "クローバーのキツネ" },
-  { face: "🐻", deco: "🎈", label: "風船のクマ" },
-  { face: "🐼", deco: "🍩", label: "ドーナツのパンダ" },
-  { face: "🦁", deco: "🔔", label: "ベルのライオン" },
-  { face: "🐨", deco: "🍎", label: "りんごのコアラ" },
-  { face: "🦄", deco: "🌈", label: "虹のユニコーン" },
-  { face: "🐙", deco: "🍓", label: "いちごのタコ" },
-  { face: "🐥", deco: "🎧", label: "ヘッドホンのヒヨコ" },
-  { face: "🐢", deco: "🌙", label: "お月さまのカメ" },
-  { face: "🦉", deco: "🧣", label: "マフラーのフクロウ" },
-  { face: "🐴", deco: "🍇", label: "ぶどうのウマ" },
-  { face: "🐘", deco: "🍕", label: "ピザのゾウ" },
-  { face: "🦒", deco: "❄️", label: "ゆきのキリン" },
-  { face: "🐳", deco: "🧢", label: "キャップのクジラ" },
-  { face: "🐭", deco: "🧀", label: "チーズのネズミ" },
-  { face: "🐮", deco: "🍼", label: "ミルクのウシ" },
-  { face: "🐯", deco: "🎸", label: "ギターのトラ" },
-  { face: "🦩", deco: "💐", label: "花束のフラミンゴ" },
-  { face: "🐧", deco: "🎿", label: "スキーのペンギン" },
-  { face: "🦖", deco: "🍦", label: "アイスのキョウリュウ" },
-  { face: "🐹", deco: "🌻", label: "ひまわりのハムスター" },
-  { face: "🦓", deco: "🍉", label: "スイカのシマウマ" },
-  { face: "🦢", deco: "💎", label: "宝石のハクチョウ" },
-  { face: "🐌", deco: "🍃", label: "葉っぱのカタツムリ" },
+  { color: "#d93a3a", colorName: "あか", shape: "circle", shapeName: "丸", kana: "ア", label: "あか丸のア" },
+  { color: "#d93a3a", colorName: "あか", shape: "triangle", shapeName: "三角", kana: "イ", label: "あか三角のイ" },
+  { color: "#d93a3a", colorName: "あか", shape: "square", shapeName: "四角", kana: "ウ", label: "あか四角のウ" },
+  { color: "#d93a3a", colorName: "あか", shape: "star", shapeName: "星", kana: "エ", label: "あか星のエ" },
+  { color: "#d93a3a", colorName: "あか", shape: "diamond", shapeName: "菱形", kana: "オ", label: "あか菱形のオ" },
+  { color: "#2f6fd0", colorName: "あお", shape: "circle", shapeName: "丸", kana: "カ", label: "あお丸のカ" },
+  { color: "#2f6fd0", colorName: "あお", shape: "triangle", shapeName: "三角", kana: "キ", label: "あお三角のキ" },
+  { color: "#2f6fd0", colorName: "あお", shape: "square", shapeName: "四角", kana: "ク", label: "あお四角のク" },
+  { color: "#2f6fd0", colorName: "あお", shape: "star", shapeName: "星", kana: "ケ", label: "あお星のケ" },
+  { color: "#2f6fd0", colorName: "あお", shape: "diamond", shapeName: "菱形", kana: "コ", label: "あお菱形のコ" },
+  { color: "#2f9e5f", colorName: "みどり", shape: "circle", shapeName: "丸", kana: "サ", label: "みどり丸のサ" },
+  { color: "#2f9e5f", colorName: "みどり", shape: "triangle", shapeName: "三角", kana: "シ", label: "みどり三角のシ" },
+  { color: "#2f9e5f", colorName: "みどり", shape: "square", shapeName: "四角", kana: "ス", label: "みどり四角のス" },
+  { color: "#2f9e5f", colorName: "みどり", shape: "star", shapeName: "星", kana: "セ", label: "みどり星のセ" },
+  { color: "#2f9e5f", colorName: "みどり", shape: "diamond", shapeName: "菱形", kana: "ソ", label: "みどり菱形のソ" },
+  { color: "#e0aa00", colorName: "きいろ", shape: "circle", shapeName: "丸", kana: "タ", label: "きいろ丸のタ" },
+  { color: "#e0aa00", colorName: "きいろ", shape: "triangle", shapeName: "三角", kana: "チ", label: "きいろ三角のチ" },
+  { color: "#e0aa00", colorName: "きいろ", shape: "square", shapeName: "四角", kana: "ツ", label: "きいろ四角のツ" },
+  { color: "#e0aa00", colorName: "きいろ", shape: "star", shapeName: "星", kana: "テ", label: "きいろ星のテ" },
+  { color: "#e0aa00", colorName: "きいろ", shape: "diamond", shapeName: "菱形", kana: "ト", label: "きいろ菱形のト" },
+  { color: "#ef7d1a", colorName: "オレンジ", shape: "circle", shapeName: "丸", kana: "ナ", label: "オレンジ丸のナ" },
+  { color: "#ef7d1a", colorName: "オレンジ", shape: "triangle", shapeName: "三角", kana: "ニ", label: "オレンジ三角のニ" },
+  { color: "#ef7d1a", colorName: "オレンジ", shape: "square", shapeName: "四角", kana: "ヌ", label: "オレンジ四角のヌ" },
+  { color: "#ef7d1a", colorName: "オレンジ", shape: "star", shapeName: "星", kana: "ネ", label: "オレンジ星のネ" },
+  { color: "#ef7d1a", colorName: "オレンジ", shape: "diamond", shapeName: "菱形", kana: "ノ", label: "オレンジ菱形のノ" },
+  { color: "#8b4fc0", colorName: "むらさき", shape: "circle", shapeName: "丸", kana: "ハ", label: "むらさき丸のハ" },
+  { color: "#8b4fc0", colorName: "むらさき", shape: "triangle", shapeName: "三角", kana: "ヒ", label: "むらさき三角のヒ" },
+  { color: "#8b4fc0", colorName: "むらさき", shape: "square", shapeName: "四角", kana: "フ", label: "むらさき四角のフ" },
+  { color: "#8b4fc0", colorName: "むらさき", shape: "star", shapeName: "星", kana: "ヘ", label: "むらさき星のヘ" },
+  { color: "#8b4fc0", colorName: "むらさき", shape: "diamond", shapeName: "菱形", kana: "ホ", label: "むらさき菱形のホ" },
 ];
 
 /** 命名が時間切れになったときに付く自動名（生き物ごとに固定）。 */
@@ -120,6 +135,8 @@ export interface NanjaState {
   namingCreature: number | null;
   /** 命名の締切（ms epoch）。 */
   namingEndsAt: number | null;
+  /** flip / shout フェーズの締切（ms epoch）。それ以外のフェーズは null。 */
+  phaseEndsAt: number | null;
   /** この山で誤答して参加できない seat のフラグ。 */
   shoutLocked: boolean[];
   /** seat ごとの獲得枚数。 */
@@ -150,7 +167,10 @@ export interface NanjaView {
   pileCount: number;
   /** 場の山の一番上の生き物（無ければ null）。 */
   top: number | null;
+  /** 名前そのもの。対局中は秘匿のため全て null、終了時にだけ開示する。 */
   names: (string | null)[];
+  /** 生き物 id ごとに命名済みかどうか（対局中も公開）。 */
+  named: boolean[];
   namedBy: (number | null)[];
   current: number;
   lastFlipper: number | null;
@@ -158,6 +178,8 @@ export interface NanjaView {
   namingSeat: number | null;
   namingCreature: number | null;
   namingEndsAt: number | null;
+  /** flip / shout フェーズの締切（ms epoch）。それ以外のフェーズは null。 */
+  phaseEndsAt: number | null;
   shoutLocked: boolean[];
   captured: number[];
   leftSeats: number[];
@@ -180,6 +202,7 @@ function cloneState(state: NanjaState): NanjaState {
     namingSeat: state.namingSeat,
     namingCreature: state.namingCreature,
     namingEndsAt: state.namingEndsAt,
+    phaseEndsAt: state.phaseEndsAt,
     shoutLocked: [...state.shoutLocked],
     captured: [...state.captured],
     leftSeats: [...state.leftSeats],
@@ -213,6 +236,7 @@ function finishGame(state: NanjaState): NanjaState {
   next.namingSeat = null;
   next.namingCreature = null;
   next.namingEndsAt = null;
+  next.phaseEndsAt = null;
   const best = Math.max(...next.captured);
   next.winners = next.players
     .map((p) => p.seat)
@@ -221,7 +245,7 @@ function finishGame(state: NanjaState): NanjaState {
 }
 
 /** 命名（手動/自動共通）を確定し、次の手番へ進める。state は変更済みの前提。 */
-function settleNaming(state: NanjaState, name: string, auto: boolean): NanjaState {
+function settleNaming(state: NanjaState, name: string, auto: boolean, now: number): NanjaState {
   const creature = state.namingCreature;
   const seat = state.namingSeat;
   if (creature === null || seat === null) return state;
@@ -235,19 +259,45 @@ function settleNaming(state: NanjaState, name: string, auto: boolean): NanjaStat
     return finishGame(state);
   }
   state.phase = "flip";
+  state.phaseEndsAt = now + NANJA_FLIP_TIME_MS;
   state.current = nextActive(state, state.lastFlipper ?? seat);
   return state;
 }
 
-/** 叫びラウンドが全員誤答で流れたときの処理。state は変更済みの前提。 */
-function settleDeadRound(state: NanjaState): NanjaState {
+/** 叫びラウンドが全員誤答または時間切れで流れたときの処理。state は変更済みの前提。 */
+function settleDeadRound(state: NanjaState, now: number): NanjaState {
   state.lastEvent = { type: "dead" };
   state.shoutLocked = state.shoutLocked.map(() => false);
   if (state.deck.length === 0) {
     return finishGame(state);
   }
   state.phase = "flip";
+  state.phaseEndsAt = now + NANJA_FLIP_TIME_MS;
   state.current = nextActive(state, state.lastFlipper ?? state.current);
+  return state;
+}
+
+/**
+ * カードを1枚めくる処理（手動アクションと tick の自動めくり共通）。
+ * state は変更済みの前提。山札が空なら何もしない。
+ */
+function applyFlip(state: NanjaState, seat: number, now: number): NanjaState {
+  if (state.deck.length === 0) return state;
+  const creature = state.deck.pop() as number;
+  state.pile.push(creature);
+  state.lastFlipper = seat;
+  state.shoutLocked = state.shoutLocked.map(() => false);
+  state.lastEvent = { type: "flip", seat, creature };
+  if (state.names[creature] === null) {
+    state.phase = "naming";
+    state.namingSeat = seat;
+    state.namingCreature = creature;
+    state.namingEndsAt = now + NANJA_NAME_TIME_MS;
+    state.phaseEndsAt = null;
+  } else {
+    state.phase = "shout";
+    state.phaseEndsAt = now + NANJA_SHOUT_TIME_MS;
+  }
   return state;
 }
 
@@ -300,6 +350,7 @@ export const gameModule: OnlineGameModule<NanjaState, NanjaAction, NanjaView> = 
       namingSeat: null,
       namingCreature: null,
       namingEndsAt: null,
+      phaseEndsAt: Date.now() + NANJA_FLIP_TIME_MS,
       shoutLocked: players.map(() => false),
       captured: players.map(() => 0),
       leftSeats: [],
@@ -319,20 +370,7 @@ export const gameModule: OnlineGameModule<NanjaState, NanjaAction, NanjaView> = 
       if (seat !== state.current) throw new Error("あなたの手番ではありません");
       if (state.deck.length === 0) throw new Error("山札がもうありません");
       const next = cloneState(state);
-      const creature = next.deck.pop() as number;
-      next.pile.push(creature);
-      next.lastFlipper = seat;
-      next.shoutLocked = next.shoutLocked.map(() => false);
-      next.lastEvent = { type: "flip", seat, creature };
-      if (next.names[creature] === null) {
-        next.phase = "naming";
-        next.namingSeat = seat;
-        next.namingCreature = creature;
-        next.namingEndsAt = Date.now() + NANJA_NAME_TIME_MS;
-      } else {
-        next.phase = "shout";
-      }
-      return next;
+      return applyFlip(next, seat, Date.now());
     }
 
     if (action.type === "name") {
@@ -345,7 +383,7 @@ export const gameModule: OnlineGameModule<NanjaState, NanjaAction, NanjaView> = 
         throw new Error(`名前は${NANJA_NAME_MAX}文字までです`);
       }
       const next = cloneState(state);
-      return settleNaming(next, name, false);
+      return settleNaming(next, name, false, Date.now());
     }
 
     if (action.type === "shout") {
@@ -367,13 +405,14 @@ export const gameModule: OnlineGameModule<NanjaState, NanjaAction, NanjaView> = 
           return finishGame(next);
         }
         next.phase = "flip";
+        next.phaseEndsAt = Date.now() + NANJA_FLIP_TIME_MS;
         next.current = seat; // 山を取った人が次をめくる
         return next;
       }
       next.shoutLocked[seat] = true;
       next.lastEvent = { type: "wrong", seat };
       if (allActiveLocked(next)) {
-        return settleDeadRound(next);
+        return settleDeadRound(next, Date.now());
       }
       return next;
     }
@@ -389,7 +428,11 @@ export const gameModule: OnlineGameModule<NanjaState, NanjaAction, NanjaView> = 
       pile: [...state.pile],
       pileCount: state.pile.length,
       top: state.pile.length > 0 ? state.pile[state.pile.length - 1] : null,
-      names: [...state.names],
+      // 名前は覚えることが勝負なので、対局中は配らない（終了時のみ開示）。
+      // 命名済みかどうかは named で分かる。lastEvent の名前は、名付け・
+      // 正解の瞬間に全員へ一度だけ流れる告知として従来どおり含める。
+      names: finished ? [...state.names] : state.names.map(() => null),
+      named: state.names.map((n) => n !== null),
       namedBy: [...state.namedBy],
       current: state.current,
       lastFlipper: state.lastFlipper,
@@ -397,6 +440,7 @@ export const gameModule: OnlineGameModule<NanjaState, NanjaAction, NanjaView> = 
       namingSeat: state.namingSeat,
       namingCreature: state.namingCreature,
       namingEndsAt: state.namingEndsAt,
+      phaseEndsAt: state.phaseEndsAt,
       shoutLocked: [...state.shoutLocked],
       captured: [...state.captured],
       leftSeats: [...state.leftSeats],
@@ -427,11 +471,34 @@ export const gameModule: OnlineGameModule<NanjaState, NanjaAction, NanjaView> = 
   },
 
   tick(state: NanjaState, now: number): NanjaState {
-    if (state.phase !== "naming" || state.namingEndsAt === null) return state;
-    if (now < state.namingEndsAt) return state;
-    const next = cloneState(state);
-    const creature = next.namingCreature ?? 0;
-    return settleNaming(next, NANJA_DEFAULT_NAMES[creature] ?? "モジャ", true);
+    if (state.phase === "naming") {
+      if (state.namingEndsAt === null || now < state.namingEndsAt) return state;
+      const next = cloneState(state);
+      const creature = next.namingCreature ?? 0;
+      return settleNaming(next, NANJA_DEFAULT_NAMES[creature] ?? "モジャ", true, now);
+    }
+    if (state.phase === "flip") {
+      if (state.phaseEndsAt === null || now < state.phaseEndsAt) return state;
+      const next = cloneState(state);
+      if (next.deck.length === 0) {
+        return finishGame(next);
+      }
+      if (next.leftSeats.includes(next.current)) {
+        // 手番の人が既にいなければ手番を送り、締切を数え直す。
+        next.current = nextActive(next, next.current);
+        next.phaseEndsAt = now + NANJA_FLIP_TIME_MS;
+        return next;
+      }
+      // めくる番が放置したら、サーバーが代わりにめくる。
+      return applyFlip(next, next.current, now);
+    }
+    if (state.phase === "shout") {
+      if (state.phaseEndsAt === null || now < state.phaseEndsAt) return state;
+      // 誰も正解を叫べないまま時間切れになったら、その山は流れる。
+      const next = cloneState(state);
+      return settleDeadRound(next, now);
+    }
+    return state;
   },
 
   onPlayerLeft(state: NanjaState, seat: number): NanjaState {
@@ -446,13 +513,15 @@ export const gameModule: OnlineGameModule<NanjaState, NanjaAction, NanjaView> = 
     }
     if (next.phase === "naming" && next.namingSeat === seat) {
       const creature = next.namingCreature ?? 0;
-      return settleNaming(next, NANJA_DEFAULT_NAMES[creature] ?? "モジャ", true);
+      return settleNaming(next, NANJA_DEFAULT_NAMES[creature] ?? "モジャ", true, Date.now());
     }
     if (next.phase === "flip" && next.current === seat) {
       next.current = nextActive(next, seat);
+      // 手番が移ったので、新しい手番の人の締切を数え直す。
+      next.phaseEndsAt = Date.now() + NANJA_FLIP_TIME_MS;
     }
     if (next.phase === "shout" && allActiveLocked(next)) {
-      return settleDeadRound(next);
+      return settleDeadRound(next, Date.now());
     }
     return next;
   },

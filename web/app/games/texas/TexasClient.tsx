@@ -108,15 +108,14 @@ function TexasTable({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi })
     if (!was && state.yourTurn) playSe("turn");
   }, [state]);
 
-  const finishRef = useRef(false);
+  const finishRef = useRef<string | null>(null);
   useEffect(() => {
-    if (!state || finishRef.current) return;
-    if (state.finished) {
-      finishRef.current = true;
-      const mine = state.standings?.find((s) => s.seat === mySeat);
-      playSe(mine && mine.rank === 1 ? "win" : "lose");
-    }
-  }, [state, mySeat]);
+    if (!state || !state.finished) return;
+    if (finishRef.current === view.code) return;
+    finishRef.current = view.code;
+    const mine = state.standings?.find((s) => s.seat === mySeat);
+    playSe(mine && mine.rank === 1 ? "win" : "lose");
+  }, [state, mySeat, view.code]);
 
   if (!state) {
     return <p className="og-notice">対戦の開始を待っています…</p>;
@@ -161,7 +160,7 @@ function TexasTable({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi })
 
   return (
     <div className="og-game og-texas">
-      <div className={`og-turn-banner${state.yourTurn ? " og-turn-mine" : ""}`} role="status" aria-live="polite">
+      <div className={`og-turn-banner${state.yourTurn ? " og-turn-mine juice-pulse" : ""}`} role="status" aria-live="polite">
         <span>{banner}</span>
       </div>
 
@@ -243,8 +242,8 @@ function TexasTable({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi })
             }
             return (
               <span
-                key={i}
-                className={`og-card${isRedCard(card) ? " og-card-red" : ""}`}
+                key={`${state.handNumber}-${i}-${card}`}
+                className={`og-card juice-flip${isRedCard(card) ? " og-card-red" : ""}`}
                 role="img"
                 aria-label={cardAriaLabel(card)}
               >
@@ -261,8 +260,8 @@ function TexasTable({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi })
         <div className="og-hand" role="group" aria-label="あなたの手札">
           {state.yourCards.map((id) => (
             <span
-              key={id}
-              className={`og-card${isRedCard(id) ? " og-card-red" : ""}`}
+              key={`${state.handNumber}-${id}`}
+              className={`og-card juice-flip${isRedCard(id) ? " og-card-red" : ""}`}
               role="img"
               aria-label={cardAriaLabel(id)}
             >
@@ -314,7 +313,7 @@ function TexasTable({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi })
 
       {/* ハンド結果 */}
       {state.phase === "handEnd" && state.lastResult && (
-        <section className="og-result" aria-label="ハンド結果" style={{ marginTop: 14 }}>
+        <section className="og-result juice-slide" aria-label="ハンド結果" style={{ marginTop: 14 }}>
           <h2>ハンド {state.lastResult.hand} の結果</h2>
           <p className="og-status-line">
             {state.lastResult.winners.length > 0
@@ -334,7 +333,7 @@ function TexasTable({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi })
                       {info.cards.map((id) => (
                         <span
                           key={id}
-                          className={`og-card${isRedCard(id) ? " og-card-red" : ""}`}
+                          className={`og-card juice-flip${isRedCard(id) ? " og-card-red" : ""}`}
                           role="img"
                           aria-label={cardAriaLabel(id)}
                           style={{ transform: "scale(0.8)", transformOrigin: "center" }}
@@ -363,8 +362,8 @@ function TexasTable({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi })
 
       {/* 最終結果 */}
       {state.finished && state.standings && (
-        <section className="og-result" aria-label="最終結果" style={{ marginTop: 14 }}>
-          <h2>最終結果</h2>
+        <section className="og-result juice-slide" aria-label="最終結果" style={{ marginTop: 14 }}>
+          <h2 className="juice-pulse">最終結果</h2>
           <ol className="og-result-list">
             {[...state.standings]
               .sort((a, b) => a.rank - b.rank || a.seat - b.seat)

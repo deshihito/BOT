@@ -238,15 +238,19 @@ test("椅子取り: 退出は脱落扱いで、生存1人で終了する／parse
 
 test("ナンジャ増量: 生き物は30種で重複がなく、自動名も30件そろっている", () => {
   assert.equal(nanja.NANJA_CREATURES.length, 30);
-  const pairs = nanja.NANJA_CREATURES.map((c) => `${c.face}|${c.deco}`);
+  const pairs = nanja.NANJA_CREATURES.map((c) => `${c.color}|${c.shape}`);
   assert.equal(new Set(pairs).size, 30);
+  const triples = nanja.NANJA_CREATURES.map((c) => `${c.color}|${c.shape}|${c.kana}`);
+  assert.equal(new Set(triples).size, 30);
+  assert.equal(new Set(nanja.NANJA_CREATURES.map((c) => c.kana)).size, 30);
   const labels = nanja.NANJA_CREATURES.map((c) => c.label);
   assert.equal(new Set(labels).size, 30);
   assert.equal(nanja.NANJA_DEFAULT_NAMES.length, 30);
   assert.equal(new Set(nanja.NANJA_DEFAULT_NAMES).size, 30);
-  // 追加分の代表例が含まれている
-  assert.ok(nanja.NANJA_CREATURES.some((c) => c.face === "🐙" && c.deco === "🍓"));
-  assert.ok(nanja.NANJA_CREATURES.some((c) => c.face === "🐳" && c.deco === "🧢"));
+  // 代表例が含まれている（色×形×カナで一意に区別できる）
+  assert.ok(nanja.NANJA_CREATURES.some((c) => c.colorName === "あか" && c.shape === "circle" && c.kana === "ア"));
+  assert.ok(nanja.NANJA_CREATURES.some((c) => c.colorName === "みどり" && c.shape === "square" && c.kana === "ス"));
+  assert.ok(nanja.NANJA_CREATURES.some((c) => c.colorName === "むらさき" && c.shape === "diamond" && c.kana === "ホ"));
 });
 
 test("ナンジャ増量: 山札は30種×4枚=120枚で全種そろっている", () => {

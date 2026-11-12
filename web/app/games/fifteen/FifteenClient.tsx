@@ -2,7 +2,7 @@
 // 15パズル。ロジックは lib/fifteen.ts（解可能性を保証するシャッフル）。
 // 空白と同じ行・列のタイルをタップするとまとめてスライドする。端末内で完結。
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   canSlide,
   createFifteenGame,
@@ -10,6 +10,8 @@ import {
   type FifteenSize,
   type FifteenState,
 } from "@/lib/fifteen";
+import { sfxSlide, sfxWin, sfxWrong } from "@/lib/sfx";
+import { EndScreen } from "../GameJuice";
 import { useGamesNav } from "../GamesShell";
 
 const SIZES: { key: FifteenSize; label: string }[] = [
@@ -33,12 +35,30 @@ export default function FifteenClient() {
   const [size, setSize] = useState<FifteenSize>(4);
   const [state, setState] = useState<FifteenState>(() => newGame(4));
   const [seconds, setSeconds] = useState(0);
+  const prevStatusRef = useRef(state.status);
+
+  // 終局遷移の瞬間だけジングルを鳴らす。
+  useEffect(() => {
+    const prev = prevStatusRef.current;
+    prevStatusRef.current = state.status;
+    if (prev !== state.status && state.status === "won") sfxWin();
+  }, [state.status]);
 
   useEffect(() => {
-    if (state.status === "won" || state.moves === 0) return;
+    if (state.status === "won") return;
     const id = setInterval(() => setSeconds((s) => s + 1), 1000);
     return () => clearInterval(id);
-  }, [state.status, state.moves]);
+  }, [state.status]);
+
+  const handleTile = (i: number) => {
+    if (!canSlide(state, i)) {
+      sfxWrong();
+      return;
+    }
+    const next = slideTile(state, i);
+    if (next.status !== "won") sfxSlide();
+    setState(next);
+  };
 
   const restart = (nextSize: FifteenSize) => {
     setSize(nextSize);
@@ -104,7 +124,7 @@ export default function FifteenClient() {
               role="gridcell"
               disabled={isBlank}
               aria-label={isBlank ? "空白" : `タイル ${value}`}
-              onClick={() => setState((s) => slideTile(s, i))}
+              onClick={() => handleTile(i)}
               style={{
                 aspectRatio: "1",
                 minHeight: 52,
@@ -142,6 +162,16 @@ export default function FifteenClient() {
         ))}
         <span style={{ fontSize: 11, color: "#94a3b8" }}>← 完成形の並び</span>
       </div>
+
+      {state.status === "won" && (
+        <div style={{ marginTop: 16 }}>
+          <EndScreen outcome="win" title="完成！" score={state.moves} scoreLabel="手数" onRetry={() => restart(size)}>
+            <p className="muted">
+              {size}×{size} の盤を {formatTime(seconds)} でそろえました。
+            </p>
+          </EndScreen>
+        </div>
+      )}
     </>
   );
 }

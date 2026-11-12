@@ -2,7 +2,9 @@
 // ナンバーコード。ロジックは lib/numbercode.ts（重複なし3桁、EAT/BITE 判定）。
 // 数字パッドで3桁を入力して提出する。端末内で完結し、サーバーへ送信しない。
 import Link from "next/link";
-import { useState, type CSSProperties } from "react";
+import { useEffect, useRef, useState, type CSSProperties } from "react";
+import { sfxLose, sfxPlace, sfxTap, sfxWin } from "@/lib/sfx";
+import { EndScreen } from "../GameJuice";
 import {
   createNumberCodeGame,
   isValidNcGuess,
@@ -44,13 +46,27 @@ export default function NumberCodeClient() {
   const playing = state.status === "playing";
   const remaining = ncRemainingTries(state);
 
+  const prevStatusRef = useRef(state.status);
+  useEffect(() => {
+    if (prevStatusRef.current === "playing" && state.status !== "playing") {
+      if (state.status === "won") sfxWin();
+      else sfxLose();
+    }
+    prevStatusRef.current = state.status;
+  }, [state.status]);
+
   const pushDigit = (d: number) => {
     if (!playing) return;
+    if (input.length < 3 && !input.includes(d)) sfxTap();
     setInput((cur) => (cur.length >= 3 || cur.includes(d) ? cur : [...cur, d]));
   };
-  const backspace = () => setInput((cur) => cur.slice(0, -1));
+  const backspace = () => {
+    if (input.length > 0) sfxTap();
+    setInput((cur) => cur.slice(0, -1));
+  };
   const submit = () => {
     if (!isValidNcGuess(input)) return;
+    sfxPlace();
     setState((s) => submitNcGuess(s, input));
     setInput([]);
   };
@@ -83,7 +99,7 @@ export default function NumberCodeClient() {
 
       <div style={{ display: "flex", gap: 10, justifyContent: "center", margin: "14px 0" }} role="group" aria-label="入力中の数字">
         {[0, 1, 2].map((i) => (
-          <div key={i} style={slotStyle}>
+          <div key={`${i}-${input[i] ?? "empty"}`} className={input[i] !== undefined ? "juice-pop" : undefined} style={slotStyle}>
             {input[i] !== undefined ? input[i] : "・"}
           </div>
         ))}
@@ -112,7 +128,7 @@ export default function NumberCodeClient() {
             <button type="button" className="classic-btn" onClick={backspace} disabled={input.length === 0}>
               ⌫ 消す
             </button>
-            <button type="button" className="classic-btn" onClick={() => setInput([])} disabled={input.length === 0}>
+            <button type="button" className="classic-btn" onClick={() => { sfxTap(); setInput([]); }} disabled={input.length === 0}>
               クリア
             </button>
             <button type="button" className="classic-btn classic-btn-active" onClick={submit} disabled={!isValidNcGuess(input)}>
@@ -121,11 +137,15 @@ export default function NumberCodeClient() {
           </div>
         </>
       ) : (
-        <div className="classic-controls" style={{ justifyContent: "center" }}>
-          <button type="button" className="classic-btn classic-btn-active" onClick={restart}>
-            もう一度
-          </button>
-        </div>
+        <EndScreen
+          outcome={state.status === "won" ? "win" : "lose"}
+          title={state.status === "won" ? `${state.guesses.length}回で正解！` : "回数オーバー…"}
+          onRetry={restart}
+        >
+          <p className="muted" style={{ textAlign: "center" }}>
+            コードは {state.code.join("")} でした ・ 回答 {state.guesses.length} 件
+          </p>
+        </EndScreen>
       )}
 
       {state.guesses.length > 0 ? (
@@ -135,6 +155,7 @@ export default function NumberCodeClient() {
             {[...state.guesses].reverse().map((g, i) => (
               <li
                 key={state.guesses.length - i}
+                className={i === 0 ? "juice-slide" : undefined}
                 style={{
                   display: "flex",
                   justifyContent: "space-between",

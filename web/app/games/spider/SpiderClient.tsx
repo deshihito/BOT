@@ -3,7 +3,7 @@
 // タップ選択式：動かしたい束の先頭カード→置き先の列の順にタップする。
 // 端末内で完結し、サーバーへ送信しない。
 import Link from "next/link";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   SPIDER_COLUMNS,
   canMoveSpiderRun,
@@ -16,6 +16,8 @@ import {
   type SpiderState,
 } from "@/lib/spider";
 import { useGamesNav } from "../GamesShell";
+import { sfxDeal, sfxLose, sfxPlace, sfxTap, sfxWin, sfxWrong } from "@/lib/sfx";
+import { EndScreen } from "../GameJuice";
 
 type Selection = { col: number; index: number } | null;
 
@@ -35,6 +37,15 @@ export default function SpiderClient() {
     setMessage(null);
   };
 
+  const endSoundRef = useRef<SpiderState | null>(null);
+  useEffect(() => {
+    if (state.status === "playing") return;
+    if (endSoundRef.current === state) return;
+    endSoundRef.current = state;
+    if (state.status === "won") sfxWin();
+    else sfxLose();
+  }, [state]);
+
   const onCardClick = (col: number, index: number) => {
     if (state.status !== "playing") return;
     const pile = state.columns[col];
@@ -43,9 +54,11 @@ export default function SpiderClient() {
       // 置き先としてこの列が選ばれた
       if (selection.col !== col) {
         if (canMoveSpiderRun(state, selection.col, selection.index, col)) {
+          sfxPlace();
           setState((s) => moveSpider(s, selection.col, selection.index, col));
           setMessage(null);
         } else {
+          sfxWrong();
           setMessage("そこには置けません。下降順の束と、置き先の数字を確認してください。");
         }
         setSelection(null);
@@ -64,9 +77,11 @@ export default function SpiderClient() {
     // 動かせる束の範囲内なら、その位置から選択する
     const runStart = pile.length - movableRunLength(state, col);
     if (index >= runStart) {
+      sfxTap();
       setSelection({ col, index });
       setMessage(null);
     } else {
+      sfxWrong();
       setSelection(null);
       setMessage("まとめて動かせるのは、下降順に続いた部分だけです。");
     }
@@ -75,9 +90,11 @@ export default function SpiderClient() {
   const onEmptyColumnClick = (col: number) => {
     if (!selection || state.status !== "playing") return;
     if (canMoveSpiderRun(state, selection.col, selection.index, col)) {
+      sfxPlace();
       setState((s) => moveSpider(s, selection.col, selection.index, col));
       setMessage(null);
     } else {
+      sfxWrong();
       setMessage("そこには置けません。");
     }
     setSelection(null);
@@ -85,9 +102,11 @@ export default function SpiderClient() {
 
   const onDeal = () => {
     if (state.columns.some((p) => p.length === 0)) {
+      sfxWrong();
       setMessage("空の列があるときは配れません。先にカードを置いてください。");
       return;
     }
+    sfxDeal();
     setState((s) => dealSpider(s));
     setSelection(null);
     setMessage(null);
@@ -127,11 +146,13 @@ export default function SpiderClient() {
         手数 {state.moves} ・ 完成 {state.completed} / 8組
         {state.status === "won"
           ? " ・ 全8組そろった！クリアです。"
-          : message
-            ? ` ・ ${message}`
-            : selection
-              ? " ・ 置き先の列を選んでください。"
-              : " ・ 動かしたいカードを選んでください。"}
+          : state.status === "stuck"
+            ? " ・ 詰みです。動かせる手がもうありません。「もう一度」で新しい配布に挑戦してください。"
+            : message
+              ? ` ・ ${message}`
+              : selection
+                ? " ・ 置き先の列を選んでください。"
+                : " ・ 動かしたいカードを選んでください。"}
       </p>
 
       <div
@@ -179,6 +200,7 @@ export default function SpiderClient() {
                         : "裏向きのカード"
                     }
                     aria-pressed={isSelected}
+                    className={card.faceUp ? "juice-flip" : undefined}
                     onClick={() => onCardClick(col, index)}
                     style={{
                       height: 62,
@@ -211,6 +233,24 @@ export default function SpiderClient() {
           </div>
         ))}
       </div>
+
+      {state.status === "won" ? (
+        <div style={{ maxWidth: 640, margin: "16px auto 0" }}>
+          <EndScreen outcome="win" title="クリア！" onRetry={restart}>
+            <p className="muted" style={{ margin: 0 }}>
+              全8組そろいました。手数 {state.moves} 手でクリアです。
+            </p>
+          </EndScreen>
+        </div>
+      ) : state.status === "stuck" ? (
+        <div style={{ maxWidth: 640, margin: "16px auto 0" }}>
+          <EndScreen outcome="lose" title="詰みです" onRetry={restart}>
+            <p className="muted" style={{ margin: 0 }}>
+              動かせる手がもうありません。完成 {state.completed} / 8組、手数 {state.moves} 手でした。
+            </p>
+          </EndScreen>
+        </div>
+      ) : null}
     </>
   );
 }

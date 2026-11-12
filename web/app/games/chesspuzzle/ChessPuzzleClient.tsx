@@ -2,7 +2,7 @@
 // 詰めチェス。王手をかけ続けて指定手数で詰ませるパズル。ロジックとソルバーは lib/chesspuzzle.ts。
 // 黒の応手は「最も粘る手」が自動で指される。端末内で完結し、サーバーへ送信しない。
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   CHESS_PROBLEMS,
   createChessPuzzleGame,
@@ -16,6 +16,8 @@ import {
   type CpMove,
   type CpPieceType,
 } from "@/lib/chesspuzzle";
+import { sfxPlace, sfxSlide, sfxTap, sfxWin, sfxWrong } from "@/lib/sfx";
+import { EndScreen } from "../GameJuice";
 import { useGamesNav } from "../GamesShell";
 
 const GLYPHS: Record<string, string> = {
@@ -44,6 +46,14 @@ export default function ChessPuzzleClient() {
   const [hint, setHint] = useState<CpMove | null>(null);
   const [solvedIds, setSolvedIds] = useState<string[]>([]);
   const [message, setMessage] = useState<string>("");
+  const prevStatusRef = useRef(state.status);
+
+  // 終局遷移の瞬間だけジングルを鳴らす。
+  useEffect(() => {
+    const prev = prevStatusRef.current;
+    prevStatusRef.current = state.status;
+    if (prev !== state.status && state.status === "solved") sfxWin();
+  }, [state.status]);
 
   const problem = CHESS_PROBLEMS.find((p) => p.id === state.problemId) ?? CHESS_PROBLEMS[0];
   const moves = useMemo(() => playableMoves(state), [state]);
@@ -81,7 +91,9 @@ export default function ChessPuzzleClient() {
   };
 
   const doMove = (m: CpMove) => {
-    setState((s) => playPuzzleMove(s, m));
+    const next = playPuzzleMove(state, m);
+    if (next !== state && next.status !== "solved") sfxPlace();
+    setState(next);
     setSelected(null);
     setPromoOptions(null);
     setHint(null);
@@ -93,6 +105,7 @@ export default function ChessPuzzleClient() {
     if (selected !== null && targets.has(index)) {
       const options = targets.get(index) as CpMove[];
       if (options.length > 1) {
+        sfxTap();
         setPromoOptions(options);
       } else {
         doMove(options[0]);
@@ -102,10 +115,14 @@ export default function ChessPuzzleClient() {
     const piece = state.position.board[index];
     if (piece && piece.color === "w") {
       const has = moves.some((m) => m.from === index);
+      if (has) sfxTap();
+      else sfxWrong();
       setSelected(index);
+      setPromoOptions(null);
       setMessage(has ? "" : "その駒で王手をかける手はありません。");
     } else {
       setSelected(null);
+      setPromoOptions(null);
       setMessage("");
     }
   };
@@ -113,9 +130,11 @@ export default function ChessPuzzleClient() {
   const showHint = () => {
     const h = hintMove(state);
     if (!h) {
+      sfxWrong();
       setMessage("ヒントが見つかりませんでした。「1手戻す」で戻って別の手を試してください。");
       return;
     }
+    sfxTap();
     setHint(h);
     setMessage(`ヒント: ${moveNotation(state.position, h)}`);
   };
@@ -199,6 +218,7 @@ export default function ChessPuzzleClient() {
               type="button"
               role="gridcell"
               aria-label={`${squareName(index)}${piece ? ` ${piece.color === "w" ? "白" : "黒"}の${piece.type}` : ""}`}
+              className={isSelected ? "juice-pulse" : undefined}
               onClick={() => onSquare(index)}
               style={{
                 aspectRatio: "1",
@@ -247,7 +267,7 @@ export default function ChessPuzzleClient() {
       </div>
 
       {promoOptions && (
-        <div style={{ display: "flex", gap: 6, marginTop: 10, alignItems: "center" }} role="group" aria-label="昇格する駒を選ぶ">
+        <div className="juice-pop" style={{ display: "flex", gap: 6, marginTop: 10, alignItems: "center" }} role="group" aria-label="昇格する駒を選ぶ">
           <span style={{ fontSize: 13 }}>昇格:</span>
           {PROMOTIONS.map((p) => {
             const opt = promoOptions.find((m) => (m.promotion ?? "Q") === p);
@@ -284,6 +304,7 @@ export default function ChessPuzzleClient() {
           className="classic-btn"
           style={{ minHeight: 40 }}
           onClick={() => {
+            sfxSlide();
             setState((s) => undoPuzzleMove(s));
             setSelected(null);
             setPromoOptions(null);
@@ -310,6 +331,22 @@ export default function ChessPuzzleClient() {
       <p style={{ fontSize: 12, color: "#888", marginTop: 8 }}>
         解けた問題: {solvedIds.length} / {CHESS_PROBLEMS.length}（端末に記録されます）
       </p>
+
+      {state.status === "solved" && (
+        <div style={{ marginTop: 16 }}>
+          <EndScreen
+            outcome="win"
+            title="詰ませました！"
+            score={state.history.length}
+            scoreLabel="手数"
+            onRetry={() => startProblem(state.problemId)}
+          >
+            <p className="muted">
+              「{problem.title}」（{problem.mateIn}手詰め）を解きました。解けた問題は {solvedIds.length} / {CHESS_PROBLEMS.length} です。
+            </p>
+          </EndScreen>
+        </div>
+      )}
     </div>
   );
 }

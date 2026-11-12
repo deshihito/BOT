@@ -45,12 +45,12 @@ export type LllCardView = {
 };
 
 export const ELEMENT_LABEL: Record<LllElement, string> = {
-  fire: "🔥火",
-  water: "💧水",
-  wind: "🍃風",
-  earth: "🪨土",
-  light: "✨光",
-  dark: "🌙闇",
+  fire: "火",
+  water: "水",
+  wind: "風",
+  earth: "土",
+  light: "光",
+  dark: "闇",
 };
 
 export const TIER_LABEL: Record<LllTier, string> = {
@@ -60,10 +60,10 @@ export const TIER_LABEL: Record<LllTier, string> = {
 };
 
 const STATUS_LABEL: Record<string, string> = {
-  burn: "🔥やけど",
-  stun: "💫スタン",
-  guard_break: "🛡崩し",
-  overdrive: "⚡加速",
+  burn: "やけど",
+  stun: "スタン",
+  guard_break: "盾崩し",
+  overdrive: "加速",
 };
 
 type Props = {
@@ -174,7 +174,7 @@ export default function LllCard({
           </span>
         )}
         <span className={`lll-element lll-element-${view.element}`}>{ELEMENT_LABEL[view.element] ?? view.element}</span>
-        {view.shield !== undefined && view.shield > 0 && <span className="lll-shield-badge">🛡{view.shield}</span>}
+        {view.shield !== undefined && view.shield > 0 && <span className="lll-shield-badge">盾{view.shield}</span>}
         {view.defending && <span className="lll-shield-badge lll-defend-badge">防御中</span>}
       </div>
       {view.hpBar ? (

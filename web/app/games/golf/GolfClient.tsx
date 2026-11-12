@@ -3,7 +3,9 @@
 // 台札と ±1 の関係にある列の一番下のカードをタップして取る。
 // 端末内で完結し、サーバーへ送信しない。
 import Link from "next/link";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { sfxFlip, sfxLose, sfxPlace, sfxTap, sfxWin } from "@/lib/sfx";
+import { EndScreen } from "../GameJuice";
 import {
   createGolf,
   flipGolfStock,
@@ -46,8 +48,31 @@ function CardFace({ card }: { card: GolfCard }) {
 export default function GolfClient() {
   const { prefix } = useGamesNav();
   const [state, setState] = useState<GolfState>(() => newGame());
+  const endSfxRef = useRef<string | null>(null);
 
-  const restart = () => setState(newGame());
+  useEffect(() => {
+    if (state.status === "playing") return;
+    const key = `${state.seed}:${state.status}`;
+    if (endSfxRef.current === key) return;
+    endSfxRef.current = key;
+    if (state.status === "won") sfxWin();
+    else sfxLose();
+  }, [state.status, state.seed]);
+
+  const restart = () => {
+    sfxTap();
+    setState(newGame());
+  };
+
+  const handleFlip = () => {
+    sfxFlip();
+    setState((s) => flipGolfStock(s));
+  };
+
+  const handleTake = (col: number) => {
+    sfxPlace();
+    setState((s) => takeGolf(s, col));
+  };
   const playable = golfPlayableColumns(state);
   const wasteTop = golfWasteTop(state);
   const remaining = golfRemaining(state);
@@ -84,7 +109,7 @@ export default function GolfClient() {
         <button
           type="button"
           className="classic-btn"
-          onClick={() => setState((s) => flipGolfStock(s))}
+          onClick={handleFlip}
           disabled={state.stock.length === 0 || state.status !== "playing"}
         >
           山札をめくる（残り{state.stock.length}枚）
@@ -94,6 +119,22 @@ export default function GolfClient() {
       <p className="classic-status" role="status">
         手数 {state.moves} ・ 取った枚数 {state.taken} ・ 場の残り {remaining} 枚 ・ {statusText}
       </p>
+
+      {state.status !== "playing" && (
+        <EndScreen
+          outcome={state.status === "won" ? "win" : "lose"}
+          score={state.taken}
+          scoreLabel="取った枚数"
+          onRetry={restart}
+        >
+          <p className="muted" style={{ margin: 0 }}>
+            {state.status === "won"
+              ? "場札を全部取った！クリアです。"
+              : `終了です。残り ${remaining} 枚でした。`}
+            {` 手数 ${state.moves} ・ 取った枚数 ${state.taken}`}
+          </p>
+        </EndScreen>
+      )}
 
       <div
         style={{
@@ -107,6 +148,8 @@ export default function GolfClient() {
       >
         <div style={{ textAlign: "center" }}>
           <div
+            key={wasteTop ? wasteTop.id : "empty"}
+            className={wasteTop ? "juice-flip" : undefined}
             role="img"
             aria-label={wasteTop ? `台札 ${golfRankLabel(wasteTop.rank)}` : "台札なし"}
             style={{
@@ -183,9 +226,10 @@ export default function GolfClient() {
                   <button
                     key={card.id}
                     type="button"
+                    className={canTake ? "juice-pulse" : undefined}
                     disabled={!canTake}
                     aria-label={`${golfSuitSymbol(card.suit)}の${golfRankLabel(card.rank)}${canTake ? "（取れます）" : ""}`}
-                    onClick={() => setState((s) => takeGolf(s, col))}
+                    onClick={() => handleTake(col)}
                     style={{
                       height: 62,
                       marginTop: index === 0 ? 0 : -38,

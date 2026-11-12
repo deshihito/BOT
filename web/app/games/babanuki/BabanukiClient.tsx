@@ -48,7 +48,7 @@ function CardFace({ id }: { id: number }) {
   if (id === 52) {
     return (
       <span className="og-card-face">
-        <span className="og-card-suit">🃏</span>
+        <span className="og-card-suit">★</span>
         <span className="og-card-rank">JOKER</span>
       </span>
     );
@@ -81,14 +81,15 @@ function BabanukiTable({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi
     if (prev !== null && prev !== state.turn && state.turn === mySeat) playSe("turn");
   }, [state, mySeat]);
 
-  const finishRef = useRef(false);
+  const finishRef = useRef<string | null>(null);
   useEffect(() => {
-    if (!state || finishRef.current) return;
+    if (!state) return;
     if (state.finished) {
-      finishRef.current = true;
+      if (finishRef.current === view.code) return;
+      finishRef.current = view.code;
       playSe(state.loser === mySeat ? "lose" : "win");
     }
-  }, [state, mySeat]);
+  }, [state, mySeat, view.code]);
 
   if (!state) {
     return <p className="og-notice">対戦の開始を待っています…</p>;
@@ -123,7 +124,7 @@ function BabanukiTable({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi
 
   return (
     <div className="og-game og-babanuki">
-      <div className={`og-turn-banner${isMyTurn ? " og-turn-mine" : ""}`} role="status" aria-live="polite">
+      <div className={`og-turn-banner${isMyTurn ? " og-turn-mine juice-pulse" : ""}`} role="status" aria-live="polite">
         {state.finished ? (
           <span>
             対戦終了{state.loser !== null ? `: ${nameOf(state.loser)} の負け` : ""}
@@ -166,8 +167,8 @@ function BabanukiTable({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi
 
       {/* 終了時の結果 */}
       {state.finished && (
-        <section className="og-result" aria-label="最終結果">
-          <h2>結果</h2>
+        <section className="og-result juice-slide" aria-label="最終結果">
+          <h2 className={state.loser !== mySeat ? "juice-pulse" : undefined}>結果</h2>
           <ol className="og-result-list">
             {state.finishOrder.map((seat, index) => (
               <li key={seat} className={seat === mySeat ? "og-result-mine" : ""}>
@@ -241,7 +242,7 @@ function BabanukiTable({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi
             {state.yourHand.map((id) => (
               <span
                 key={id}
-                className={`og-card${isRedCard(id) ? " og-card-red" : ""}`}
+                className={`og-card juice-pop${isRedCard(id) ? " og-card-red" : ""}`}
                 role="img"
                 aria-label={cardAriaLabel(id)}
                 style={id === 52 ? { borderColor: "#7a4a21", background: "#fff7e0" } : undefined}
@@ -263,7 +264,7 @@ function BabanukiTable({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi
           <h2>ログ</h2>
           <ul className="og-log-list">
             {recentLog.map((entry, i) => (
-              <li key={`${view.revision}-${i}`}>{logText(entry)}</li>
+              <li key={`${view.revision}-${i}`} className={i === 0 ? "juice-pop" : undefined}>{logText(entry)}</li>
             ))}
           </ul>
         </section>

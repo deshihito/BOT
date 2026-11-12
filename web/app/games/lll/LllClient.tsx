@@ -1175,8 +1175,8 @@ export default function LllClient() {
       <nav className="lll-tabs" aria-label="ビュー切替">
         {(
           [
-            ["scout", "🔍 スカウト"],
-            ["binder", "🗂 バインダー"],
+            ["scout", "スカウト"],
+            ["binder", "バインダー"],
             ["arena", "⚔ アリーナ"],
           ] as [Tab, string][]
         ).map(([key, label]) => (
@@ -1400,7 +1400,7 @@ export default function LllClient() {
                       <span className="lll-tier-name">
                         {tier.name}
                         {cleared && <span className="lll-tier-clear">✓ クリア</span>}
-                        {!unlocked && <span aria-hidden="true"> 🔒</span>}
+                        {!unlocked && <span aria-hidden="true"> （未開放）</span>}
                       </span>
                       <span className="lll-tier-meta">敵 Lv{tier.enemyLv}</span>
                       <span className="lll-tier-reward">

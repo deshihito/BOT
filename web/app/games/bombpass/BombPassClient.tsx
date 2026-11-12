@@ -45,13 +45,21 @@ function BombTable({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) 
   const state = view.state as BombView | null;
   const mySeat = view.player.seat;
 
-  const finishRef = useRef(false);
+  const finishRef = useRef<string | null>(null);
   useEffect(() => {
-    if (!state || finishRef.current) return;
-    if (state.finished) {
-      finishRef.current = true;
-      playSe(state.winner === mySeat ? "win" : "lose");
-    }
+    if (!state || !state.finished) return;
+    if (finishRef.current === view.code) return;
+    finishRef.current = view.code;
+    playSe(state.winner === mySeat ? "win" : state.winner === null ? "click" : "lose");
+  }, [state, mySeat, view.code]);
+
+  const turnRef = useRef<boolean>(false);
+  useEffect(() => {
+    if (!state) return;
+    const isHolder = !state.finished && state.you.alive && state.holder === mySeat;
+    const was = turnRef.current;
+    turnRef.current = isHolder;
+    if (!was && isHolder) playSe("turn");
   }, [state, mySeat]);
 
   const boomRef = useRef<BombEvent | null>(null);
@@ -81,9 +89,9 @@ function BombTable({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) 
       case "pass":
         return `${nameOf(ev.from)} が ${nameOf(ev.to)} に爆弾をパスしました`;
       case "explode":
-        return `💥 爆発！ ${nameOf(ev.seat)} に1失点`;
+        return `爆発！ ${nameOf(ev.seat)} に1失点`;
       case "eliminate":
-        return `💥 爆発！ ${nameOf(ev.seat)} は3失点で脱落しました`;
+        return `爆発！ ${nameOf(ev.seat)} は3失点で脱落しました`;
       case "left":
         return `${nameOf(ev.seat)} が退出しました（脱落）`;
     }
@@ -103,14 +111,14 @@ function BombTable({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) 
 
   return (
     <div>
-      <p role="status" style={{ fontWeight: 700, margin: "4px 0 10px" }}>
+      <p role="status" className={state.finished ? "juice-slide" : isHolder ? "juice-pulse" : undefined} style={{ fontWeight: 700, margin: "4px 0 10px" }}>
         {state.finished
           ? state.winner !== null
-            ? `🏆 ${nameOf(state.winner)} の勝ちです！`
+            ? `${nameOf(state.winner)} の勝ちです！`
             : "引き分け（全員脱落）"
           : `ラウンド ${state.round} ／ 爆弾は ${nameOf(state.holder)} が持っています`}
       </p>
-      <p aria-live="polite" style={{ margin: "0 0 14px", color: "#475569", fontSize: 14 }}>
+      <p key={state.lastEvent ? `${state.lastEvent.kind}-${state.round}-${view.revision}` : "none"} className="juice-pop" aria-live="polite" style={{ margin: "0 0 14px", color: "#475569", fontSize: 14 }}>
         {eventText(state.lastEvent)}
       </p>
 
@@ -130,7 +138,9 @@ function BombTable({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) 
               fontSize: 15,
             }}
           >
-            <span style={{ fontSize: 20 }}>{p.isHolder && !state.finished ? "💣" : p.alive ? "🙂" : "💀"}</span>
+            <span className={p.isHolder && !state.finished ? "juice-pulse" : undefined} style={{ fontSize: 20, display: "inline-block" }}>{p.isHolder && !state.finished ? (
+              <span aria-hidden style={{ display: "inline-block", width: 19, height: 19, borderRadius: "50%", background: "radial-gradient(circle at 35% 32%, #9ca3af, #111827 70%)", verticalAlign: "middle" }} />
+            ) : p.alive ? "○" : "✕"}</span>
             <span style={{ fontWeight: p.seat === mySeat ? 700 : 400 }}>
               {nameOf(p.seat)}
               {p.left && "（退出）"}
@@ -148,11 +158,19 @@ function BombTable({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) 
       )}
 
       {isHolder && (
-        <div>
-          <p style={{ fontWeight: 700, margin: "0 0 8px" }}>💣 あなたが爆弾を持っています！ 誰かにパス：</p>
+        <div className="juice-slide">
+          <p className="juice-pulse" style={{ fontWeight: 700, margin: "0 0 8px" }}>あなたが爆弾を持っています！ 誰かにパス：</p>
           <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
             {targets.map((p) => (
-              <button key={p.seat} type="button" style={btnStyle} onClick={() => void api.move({ type: "pass", target: p.seat })}>
+              <button
+                key={p.seat}
+                type="button"
+                style={btnStyle}
+                onClick={() => {
+                  playSe("play");
+                  void api.move({ type: "pass", target: p.seat });
+                }}
+              >
                 {nameOf(p.seat)} にパス
               </button>
             ))}

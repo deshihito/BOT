@@ -4,7 +4,9 @@
 // ベスト記録の設計: localStorage `ago-kwordle-best` に「勝利したゲームの最少推測回数」
 // （1〜6、小さいほど良い）を保存する。負けたゲームは記録対象外。
 import Link from "next/link";
-import { useCallback, useEffect, useState, type CSSProperties } from "react";
+import { useCallback, useEffect, useRef, useState, type CSSProperties } from "react";
+import { sfxLose, sfxPlace, sfxTap, sfxWin, sfxWrong } from "@/lib/sfx";
+import { EndScreen } from "../GameJuice";
 import {
   createKwordleGame,
   isKanaChar,
@@ -42,10 +44,25 @@ export default function KwordleClient() {
   const [current, setCurrent] = useState("");
   const [message, setMessage] = useState("");
   const [best, setBest] = useState<number | null>(null);
+  const [finishInfo, setFinishInfo] = useState<{ prevBest: number | null; isNewBest: boolean } | null>(null);
+  const prevStatusRef = useRef(game.status);
 
   useEffect(() => {
     setBest(loadBest());
   }, []);
+
+  // 終局が確定した瞬間の「前回ベスト」を、ベスト更新 effect より先に記録する。
+  useEffect(() => {
+    if (prevStatusRef.current === "playing" && game.status !== "playing") {
+      setFinishInfo({
+        prevBest: best,
+        isNewBest: game.status === "won" && (best === null || game.guesses.length < best),
+      });
+      if (game.status === "won") sfxWin();
+      else sfxLose();
+    }
+    prevStatusRef.current = game.status;
+  }, [game.status, game.guesses.length, best]);
 
   // 勝利したらベスト（最少推測回数）を更新する。
   useEffect(() => {
@@ -67,14 +84,17 @@ export default function KwordleClient() {
   const submit = useCallback(() => {
     if (game.status !== "playing") return;
     if (kanaChars(current).length < KWORDLE_LENGTH) {
+      sfxWrong();
       setMessage("カタカナ5文字を入力してください");
       return;
     }
     const result = submitKwordleGuess(game, current);
     if (result.error) {
+      sfxWrong();
       setMessage(result.error);
       return;
     }
+    if (result.state.status === "playing") sfxPlace();
     setGame(result.state);
     setCurrent("");
     if (result.state.status === "won") {
@@ -94,14 +114,16 @@ export default function KwordleClient() {
         return;
       }
       if (key === "BACK") {
+        sfxTap();
         setCurrent((c) => kanaChars(c).slice(0, -1).join(""));
         return;
       }
       if (isKanaChar(key)) {
+        if (kanaChars(current).length < KWORDLE_LENGTH) sfxTap();
         setCurrent((c) => (kanaChars(c).length < KWORDLE_LENGTH ? c + key : c));
       }
     },
-    [game.status, submit],
+    [game.status, submit, current],
   );
 
   useEffect(() => {
@@ -119,6 +141,7 @@ export default function KwordleClient() {
     setGame(createKwordleGame(Date.now() % 2147483647));
     setCurrent("");
     setMessage("");
+    setFinishInfo(null);
   };
 
   const keyState = kwordleKeyboardState(game);
@@ -185,7 +208,12 @@ export default function KwordleClient() {
                 const ch = guess ? kanaChars(guess)[col] : isCurrentRow ? (currentChars[col] ?? "") : "";
                 const mark = marks ? marks[col] : null;
                 return (
-                  <div key={col} role="gridcell" style={cellStyle(mark, ch !== "")}>
+                  <div
+                    key={col}
+                    role="gridcell"
+                    className={mark ? "juice-flip" : isCurrentRow && ch !== "" ? "juice-pop" : undefined}
+                    style={cellStyle(mark, ch !== "")}
+                  >
                     {ch}
                   </div>
                 );
@@ -244,6 +272,22 @@ export default function KwordleClient() {
           </button>
         </div>
       </div>
+
+      {game.status !== "playing" && (
+        <EndScreen
+          outcome={game.status === "won" ? "win" : "lose"}
+          title={game.status === "won" ? `正解！ ${game.guesses.length} 回で当てました。` : `残念… 答えは ${game.answer} でした。`}
+          score={game.status === "won" ? game.guesses.length : undefined}
+          scoreLabel="推測回数"
+          newBest={game.status === "won" ? (finishInfo?.isNewBest ?? false) : undefined}
+          previousBest={game.status === "won" && finishInfo && !finishInfo.isNewBest ? finishInfo.prevBest : undefined}
+          onRetry={restart}
+        >
+          <p className="muted" style={{ textAlign: "center" }}>
+            答えは {game.answer} でした{best !== null ? ` ・ ベスト ${best} 回` : ""}
+          </p>
+        </EndScreen>
+      )}
     </>
   );
 }

@@ -132,6 +132,35 @@ export function hashiEdgeAtCell(
   return null;
 }
 
+/** セル index を通る候補辺すべて（交差セルでは水平・垂直の2本）。 */
+export function hashiEdgesAtCell(
+  state: Pick<HashiState, "size" | "islands">,
+  index: number,
+): HashiEdge[] {
+  if (!Number.isInteger(index) || index < 0 || index >= state.size * state.size) return [];
+  return hashiCandidateEdges(state).filter((edge) => edge.cells.includes(index));
+}
+
+/**
+ * セルのタップで循環させるべき辺を決める（交差セルの多重対応用）。
+ * - 候補が1本だけならそれ。
+ * - 交差セルで片方の辺に橋がかかっていれば、その辺（もう片方は交差で置けない）。
+ * - どちらにも橋がなければ、前回このセルで選んだ辺（lastKey）と違う方を選び、
+ *   連続タップで両方の辺に到達できるようにする。
+ */
+export function hashiTapEdge(
+  state: HashiState,
+  index: number,
+  lastKey: string | null,
+): HashiEdge | null {
+  const candidates = hashiEdgesAtCell(state, index);
+  if (candidates.length === 0) return null;
+  if (candidates.length === 1) return candidates[0];
+  const bridged = candidates.find((e) => hashiBridgeCount(state, e.a, e.b) > 0);
+  if (bridged) return bridged;
+  return candidates.find((e) => hashiEdgeKey(e.a, e.b) !== lastKey) ?? candidates[0];
+}
+
 /** 現在の橋の本数（島 id の昇順配列と対応）。 */
 export function hashiBridgeCount(state: HashiState, a: number, b: number): number {
   return state.bridges[hashiEdgeKey(a, b)] ?? 0;

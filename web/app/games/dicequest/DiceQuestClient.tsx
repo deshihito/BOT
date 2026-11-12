@@ -3,7 +3,7 @@
 // 白ダイス2個＋色ダイス4個を振り、各行の候補から1マスだけチェックする。
 // 端末内で完結し、サーバーへ送信しない。
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   applyDqCheck,
   applyDqPass,
@@ -23,6 +23,8 @@ import {
   type DqState,
 } from "@/lib/dicequest";
 import { useGamesNav } from "../GamesShell";
+import { sfxDice, sfxPlace, sfxWin, sfxWrong } from "@/lib/sfx";
+import { EndScreen } from "../GameJuice";
 
 const ROW_STYLES: Record<DqColor, { bg: string; soft: string; text: string }> = {
   red: { bg: "#d64545", soft: "#fbe7e7", text: "#fff" },
@@ -68,6 +70,14 @@ export default function DiceQuestClient() {
 
   const restart = () => setState(createDiceQuestGame(Date.now() % 2147483647));
 
+  const endSoundRef = useRef<DqState | null>(null);
+  useEffect(() => {
+    if (state.phase !== "finished") return;
+    if (endSoundRef.current === state) return;
+    endSoundRef.current = state;
+    sfxWin();
+  }, [state]);
+
   const statusText =
     state.phase === "finished"
       ? "ゲーム終了です。"
@@ -96,15 +106,15 @@ export default function DiceQuestClient() {
           type="button"
           className="classic-btn"
           disabled={state.phase !== "roll"}
-          onClick={() => setState((s) => rollDqDice(s))}
+          onClick={() => { sfxDice(); setState((s) => rollDqDice(s)); }}
         >
-          🎲 サイコロを振る
+          サイコロを振る
         </button>
         <button
           type="button"
           className="classic-btn"
           disabled={state.phase !== "choice"}
-          onClick={() => setState((s) => applyDqPass(s))}
+          onClick={() => { sfxWrong(); setState((s) => applyDqPass(s)); }}
         >
           チェックしない（失敗+1）
         </button>
@@ -121,6 +131,8 @@ export default function DiceQuestClient() {
 
       {state.dice && (
         <div
+          key={state.rolls}
+          className="juice-pop"
           role="group"
           aria-label="ダイスの目"
           style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center", margin: "6px 0 14px" }}
@@ -181,7 +193,7 @@ export default function DiceQuestClient() {
                       disabled={!isCandidate}
                       aria-pressed={checked}
                       aria-label={`${DQ_COLOR_LABELS[color]} ${value}${checked ? "（チェック済み）" : ""}${isFinal ? "（最後の数字）" : ""}`}
-                      onClick={() => setState((s) => applyDqCheck(s, color, value))}
+                      onClick={() => { sfxPlace(); setState((s) => applyDqCheck(s, color, value)); }}
                       style={{
                         aspectRatio: "1",
                         minHeight: 34,
@@ -196,8 +208,13 @@ export default function DiceQuestClient() {
                         touchAction: "manipulation",
                         boxShadow: isCandidate ? `0 0 0 2px ${style.soft}` : undefined,
                       }}
+                      className={isCandidate ? "juice-pulse" : undefined}
                     >
-                      {checked ? "✓" : finalLocked ? "🔒" : value}
+                      {checked ? "✓" : finalLocked ? (
+                        <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden style={{ display: "block", margin: "0 auto" }}>
+                          <path d="M12 2.8a5.2 5.2 0 0 0-5.2 5.2v3H5.6A1.6 1.6 0 0 0 4 12.6v7.8A1.6 1.6 0 0 0 5.6 22h12.8a1.6 1.6 0 0 0 1.6-1.6v-7.8a1.6 1.6 0 0 0-1.6-1.6h-1.2V8A5.2 5.2 0 0 0 12 2.8Zm-3.2 8.2V8a3.2 3.2 0 1 1 6.4 0v3Z" fill="#8a6d3b" />
+                        </svg>
+                      ) : value}
                     </button>
                   );
                 })}
@@ -211,22 +228,18 @@ export default function DiceQuestClient() {
       </div>
 
       {state.phase === "finished" && (
-        <section aria-label="結果" style={{ marginTop: 18 }}>
-          <h2 style={{ fontSize: 18, margin: "0 0 8px" }}>結果: {score.total} 点</h2>
-          <ul className="muted" style={{ margin: 0, paddingLeft: 18 }}>
-            {DQ_COLORS.map((color) => (
-              <li key={color}>
-                {DQ_COLOR_LABELS[color]}: {score.perRow[color].count} チェックで {score.perRow[color].points} 点
-              </li>
-            ))}
-            <li>失敗 {state.failures} 回で -{score.penalty} 点</li>
-          </ul>
-          <div className="classic-controls" style={{ marginTop: 10 }}>
-            <button type="button" className="classic-btn" onClick={restart}>
-              もう一度
-            </button>
-          </div>
-        </section>
+        <div style={{ marginTop: 18 }}>
+          <EndScreen outcome="finish" score={score.total} onRetry={restart}>
+            <ul className="muted" style={{ margin: 0, paddingLeft: 18, textAlign: "left" }}>
+              {DQ_COLORS.map((color) => (
+                <li key={color}>
+                  {DQ_COLOR_LABELS[color]}: {score.perRow[color].count} チェックで {score.perRow[color].points} 点
+                </li>
+              ))}
+              <li>失敗 {state.failures} 回で -{score.penalty} 点</li>
+            </ul>
+          </EndScreen>
+        </div>
       )}
     </>
   );

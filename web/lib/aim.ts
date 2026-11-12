@@ -1,18 +1,24 @@
 // エイム（的あて）の純粋ロジック（UI 非依存・シード決定的）。
 // 的の出現スケジュール/位置生成、ヒット判定、スコア計算をここに寄せる。
-// 座標はプレイエリアに対する 0〜100 の正規化座標（%）で表す。
+// 座標は「横幅=100」を単位とするピクセル等価空間で表す。プレイエリアは
+// 4:3 なので縦は 75 単位。判定も描画もこの空間の円で統一し、縦横で
+// スケールがずれないようにする（旧: 縦横別々の % 正規化で判定が潰れていた）。
 
 export const AIM_GAME_MS = 30_000;
+/** フィールドの横幅（単位）。 */
+export const AIM_FIELD_WIDTH = 100;
+/** フィールドの高さ（単位）。4:3 なので 75。 */
+export const AIM_FIELD_HEIGHT = 75;
 /** 的の半径の範囲（正規化座標）。小さいほど高得点で、終盤ほど小さくなる。 */
 export const AIM_MAX_RADIUS = 5.5;
 export const AIM_MIN_RADIUS = 3.5;
 
 export type AimTarget = {
   id: number;
-  /** 中心座標（0〜100）。 */
+  /** 中心座標（x: 0〜100、y: 0〜75 の統一単位）。 */
   x: number;
   y: number;
-  /** 半径（0〜100 座標系）。 */
+  /** 半径（統一単位）。 */
   radius: number;
   /** ゲーム開始からの出現時刻（ms）。 */
   spawnAtMs: number;
@@ -73,7 +79,7 @@ export function pointsForHit(target: AimTarget, hitElapsedMs: number): number {
   return target.points + speedBonusFor(target, hitElapsedMs);
 }
 
-/** ヒット判定。タップ座標が的の円内にあるか。 */
+/** ヒット判定。タップ座標（統一単位）が的の円内にあるか。 */
 export function hitTest(target: AimTarget, x: number, y: number): boolean {
   if (!Number.isFinite(x) || !Number.isFinite(y)) return false;
   const dx = x - target.x;
@@ -104,15 +110,18 @@ export function createAimSchedule(seed: number, durationMs: number = AIM_GAME_MS
       rng = r.rng;
       return r.value;
     };
-    let x = radius + draw() * (100 - radius * 2);
-    let y = radius + draw() * (100 - radius * 2);
+    let x = radius + draw() * (AIM_FIELD_WIDTH - radius * 2);
+    let y = radius + draw() * (AIM_FIELD_HEIGHT - radius * 2);
     if (prev) {
       const dx = x - prev.x;
       const dy = y - prev.y;
       if (dx * dx + dy * dy < 20 * 20) {
         // 前の的から離れた位置へ寄せる（決定的な補正）
-        x = x < 50 ? Math.min(100 - radius, x + 30) : Math.max(radius, x - 30);
-        y = y < 50 ? Math.min(100 - radius, y + 25) : Math.max(radius, y - 25);
+        x = x < AIM_FIELD_WIDTH / 2 ? Math.min(AIM_FIELD_WIDTH - radius, x + 30) : Math.max(radius, x - 30);
+        y =
+          y < AIM_FIELD_HEIGHT / 2
+            ? Math.min(AIM_FIELD_HEIGHT - radius, y + 25)
+            : Math.max(radius, y - 25);
       }
     }
     prev = { x, y };

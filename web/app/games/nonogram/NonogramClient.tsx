@@ -3,15 +3,18 @@
 // 塗る／×印の2モード。マスを押したままなぞると連続で塗れる（ドラッグ塗り）。
 // 端末内で完結し、サーバーへ送信しない。
 import Link from "next/link";
-import { Fragment, useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import {
   createNonogramGame,
+  nonogramHintSatisfaction,
   nonogramProgress,
   setNonoMark,
   type NonoMark,
   type NonoSize,
   type NonoState,
 } from "@/lib/nonogram";
+import { sfxPlace, sfxTap, sfxWin } from "@/lib/sfx";
+import { EndScreen } from "../GameJuice";
 import { useGamesNav } from "../GamesShell";
 
 type Mode = "fill" | "cross";
@@ -38,13 +41,27 @@ export default function NonogramClient() {
   const [mode, setMode] = useState<Mode>("fill");
   const [seconds, setSeconds] = useState(0);
   const [best, setBest] = useState<number | null>(null);
+  const [resultNewBest, setResultNewBest] = useState(false);
+  const [resultPrevBest, setResultPrevBest] = useState<number | null>(null);
   const paintingRef = useRef<NonoMark | null>(null);
+  const prevStatusRef = useRef(state.status);
+
+  // 終局遷移の瞬間だけジングルを鳴らし、その時点（保存前）のベストで更新判定を控える。
+  useEffect(() => {
+    const prev = prevStatusRef.current;
+    prevStatusRef.current = state.status;
+    if (prev === state.status || state.status !== "won") return;
+    const isNew = seconds > 0 && (best === null || seconds < best);
+    setResultNewBest(isNew);
+    setResultPrevBest(isNew ? null : best);
+    sfxWin();
+  }, [state.status, seconds, best]);
 
   useEffect(() => {
-    if (state.status === "won" || state.moves === 0) return;
+    if (state.status === "won") return;
     const id = setInterval(() => setSeconds((s) => s + 1), 1000);
     return () => clearInterval(id);
-  }, [state.status, state.moves]);
+  }, [state.status]);
 
   useEffect(() => {
     try {
@@ -82,6 +99,8 @@ export default function NonogramClient() {
     setSize(nextSize);
     setState(newGame(nextSize));
     setSeconds(0);
+    setResultNewBest(false);
+    setResultPrevBest(null);
     paintingRef.current = null;
   };
 
@@ -90,7 +109,12 @@ export default function NonogramClient() {
     const current = state.marks[index];
     const target: NonoMark = mode === "fill" ? (current === 1 ? 0 : 1) : current === 2 ? 0 : 2;
     paintingRef.current = target;
-    setState((s) => setNonoMark(s, index, target));
+    const next = setNonoMark(state, index, target);
+    if (next.status !== "won") {
+      if (target === 1) sfxPlace();
+      else sfxTap();
+    }
+    setState(next);
   };
 
   const continuePaint = (index: number) => {
@@ -111,6 +135,7 @@ export default function NonogramClient() {
 
   const n = state.size;
   const progress = nonogramProgress(state);
+  const satisfaction = useMemo(() => nonogramHintSatisfaction(state), [state]);
   const errorSet = new Set(state.errors);
   const maxColHints = Math.max(...state.colHints.map((h) => h.length));
   const won = state.status === "won";
@@ -216,7 +241,16 @@ export default function NonogramClient() {
             }}
           >
             {hints.map((h, i) => (
-              <span key={i}>{h}</span>
+              <span
+                key={i}
+                style={
+                  satisfaction.cols[c][i]
+                    ? { opacity: 0.35, fontWeight: 400, textDecoration: "line-through" }
+                    : undefined
+                }
+              >
+                {h}
+              </span>
             ))}
           </div>
         ))}
@@ -237,7 +271,16 @@ export default function NonogramClient() {
               }}
             >
               {hints.map((h, i) => (
-                <span key={i}>{h}</span>
+                <span
+                  key={i}
+                  style={
+                    satisfaction.rows[r][i]
+                      ? { opacity: 0.35, fontWeight: 400, textDecoration: "line-through" }
+                      : undefined
+                  }
+                >
+                  {h}
+                </span>
               ))}
             </div>
             {Array.from({ length: n }, (_, c) => {
@@ -258,6 +301,7 @@ export default function NonogramClient() {
                   }}
                   onPointerEnter={() => continuePaint(index)}
                   onContextMenu={(e) => e.preventDefault()}
+                  className={isError && !won ? "juice-shake" : filled ? "juice-pop" : undefined}
                   style={{
                     aspectRatio: "1",
                     padding: 0,
@@ -291,6 +335,25 @@ export default function NonogramClient() {
       <p className="muted" style={{ textAlign: "center", marginTop: 10 }}>
         マスを押したままなぞると、まとめて塗ったり消したりできます。×印は「塗らないマス」のメモです。
       </p>
+
+      {won && (
+        <div style={{ marginTop: 16 }}>
+          <EndScreen
+            outcome="win"
+            title="完成！"
+            score={seconds}
+            scoreLabel="クリアタイム（秒）"
+            newBest={resultNewBest}
+            previousBest={resultPrevBest}
+            onRetry={() => restart(size)}
+            retryLabel="別の問題"
+          >
+            <p className="muted">
+              絵柄は「{state.patternTitle}」でした。ミス {state.mistakes} 回で完成させました。
+            </p>
+          </EndScreen>
+        </div>
+      )}
     </>
   );
 }

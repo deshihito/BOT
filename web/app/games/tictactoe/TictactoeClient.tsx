@@ -27,6 +27,12 @@ function Board({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
   const mySeat = view.player.seat;
   const finishRef = useRef<string | null>(null);
   const turnRef = useRef<number | null>(null);
+  // state に lastMove が無いので、前回盤面との差分で最後に置かれたマスを割り出す
+  const prevBoardRef = useRef<number[] | null>(null);
+  const prevBoard = prevBoardRef.current;
+  useEffect(() => {
+    prevBoardRef.current = state?.board ?? null;
+  }, [state]);
 
   useEffect(() => {
     if (!state || state.finished) return;
@@ -45,6 +51,10 @@ function Board({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
   if (!state) return <p className="og-muted">盤面を待っています…</p>;
 
   const myTurn = !state.finished && state.turn === mySeat;
+  const lastPlaced =
+    prevBoard !== null
+      ? state.board.findIndex((v, i) => cellSeat(prevBoard[i] ?? 0) === -1 && cellSeat(v) >= 0)
+      : -1;
   const winSet = new Set(state.winCells ?? []);
   const turnName = state.players.find((p) => p.seat === state.turn)?.name ?? `プレイヤー${state.turn + 1}`;
   const winnerName =
@@ -55,11 +65,11 @@ function Board({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
 
   return (
     <div className="og-board-wrap">
-      <div className={`og-turn-banner${myTurn ? " og-turn-mine" : ""}`} role="status">
+      <div className={`og-turn-banner${myTurn ? " og-turn-mine" : ""}${state.finished ? " juice-slide" : myTurn ? " juice-pulse" : ""}`} role="status">
         {state.finished
           ? state.winner === "draw"
             ? "引き分け"
-            : `勝者: ${winnerName ?? "—"}${state.winner === mySeat ? " 🎉" : ""}`
+            : `勝者: ${winnerName ?? "—"}${state.winner === mySeat ? "" : ""}`
           : myTurn
             ? "あなたの手番です"
             : `${turnName} の手番です（待機中）`}
@@ -102,6 +112,7 @@ function Board({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
               key={index}
               type="button"
               role="gridcell"
+              className={index === lastPlaced ? "juice-pop" : undefined}
               disabled={!playable}
               aria-label={`${Math.floor(index / 3) + 1}行${(index % 3) + 1}列${seat === 0 ? " ○" : seat === 1 ? " ×" : playable ? " 置けます" : ""}`}
               onClick={() => {

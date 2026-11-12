@@ -2,7 +2,7 @@
 // ウォーターソート。ロジックは lib/watersort.ts（完成状態からの逆操作生成で必ず解ける）。
 // ボトルをタップして選び、別のボトルをタップして注ぐ。端末内で完結し、サーバーへ送信しない。
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   canPour,
   createWaterSortGame,
@@ -10,6 +10,8 @@ import {
   undoWaterSort,
   type WsState,
 } from "@/lib/watersort";
+import { sfxPlace, sfxSlide, sfxTap, sfxWin } from "@/lib/sfx";
+import { EndScreen } from "../GameJuice";
 import { useGamesNav } from "../GamesShell";
 
 const LIQUID_COLORS = ["#e2534a", "#3366cc", "#3f9e4d", "#f2c230", "#8a55c7", "#ef7d1a", "#2bb3a3"];
@@ -25,6 +27,20 @@ export default function WaterSortClient() {
   const [state, setState] = useState<WsState>(() => newGame());
   const [selected, setSelected] = useState<number | null>(null);
   const [best, setBest] = useState<number | null>(null);
+  const [resultNewBest, setResultNewBest] = useState(false);
+  const [resultPrevBest, setResultPrevBest] = useState<number | null>(null);
+  const prevStatusRef = useRef(state.status);
+
+  // 終局遷移の瞬間だけジングルを鳴らし、その時点（保存前）のベストで更新判定を控える。
+  useEffect(() => {
+    const prev = prevStatusRef.current;
+    prevStatusRef.current = state.status;
+    if (prev === state.status || state.status !== "won") return;
+    const isNew = best === null || state.moves < best;
+    setResultNewBest(isNew);
+    setResultPrevBest(isNew ? null : best);
+    sfxWin();
+  }, [state.status, state.moves, best]);
 
   useEffect(() => {
     try {
@@ -49,25 +65,34 @@ export default function WaterSortClient() {
   const restart = () => {
     setState(newGame());
     setSelected(null);
+    setResultNewBest(false);
+    setResultPrevBest(null);
   };
 
   const onBottle = (index: number) => {
     if (state.status !== "playing") return;
     if (selected === null) {
-      if (state.bottles[index].length > 0) setSelected(index);
+      if (state.bottles[index].length > 0) {
+        sfxTap();
+        setSelected(index);
+      }
       return;
     }
     if (selected === index) {
+      sfxTap();
       setSelected(null);
       return;
     }
     if (canPour(state, selected, index)) {
+      sfxPlace();
       setState((s) => pourWater(s, selected, index));
       setSelected(null);
     } else if (state.bottles[index].length > 0) {
       // 注げない場合は、タップしたボトルを選び直す。
+      sfxTap();
       setSelected(index);
     } else {
+      sfxTap();
       setSelected(null);
     }
   };
@@ -100,6 +125,7 @@ export default function WaterSortClient() {
           className="classic-btn"
           disabled={state.history.length === 0}
           onClick={() => {
+            sfxSlide();
             setState((s) => undoWaterSort(s));
             setSelected(null);
           }}
@@ -133,10 +159,13 @@ export default function WaterSortClient() {
           });
           const topName =
             bottle.length > 0 ? COLOR_NAMES[bottle[bottle.length - 1]] : "空";
+          const isComplete =
+            bottle.length === state.capacity && bottle.every((c) => c === bottle[0]);
           return (
             <button
               key={i}
               type="button"
+              className={isComplete ? "juice-pop" : undefined}
               aria-pressed={isSel}
               aria-label={`ボトル ${i + 1}（${bottle.length} 層、一番上は ${topName}）${isSel ? " 選択中" : ""}`}
               onClick={() => onBottle(i)}
@@ -173,6 +202,21 @@ export default function WaterSortClient() {
           );
         })}
       </div>
+
+      {state.status === "won" && (
+        <div style={{ marginTop: 16 }}>
+          <EndScreen
+            outcome="win"
+            score={state.moves}
+            scoreLabel="手数"
+            newBest={resultNewBest}
+            previousBest={resultPrevBest}
+            onRetry={restart}
+          >
+            <p className="muted">ボトル {state.bottles.length} 本を色ごとにそろえました。</p>
+          </EndScreen>
+        </div>
+      )}
     </>
   );
 }

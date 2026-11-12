@@ -2,13 +2,15 @@
 // バイナリー（Binairo）。ロジックは lib/binairo.ts（解先行生成・ルール検証で完成判定）。
 // マスをタップすると 空き→0→1→空き と切り替わる。端末内で完結し、サーバーへ送信しない。
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   binairoViolations,
   createBinairoGame,
   cycleBinairoCell,
   type BinairoState,
 } from "@/lib/binairo";
+import { sfxTap, sfxWin } from "@/lib/sfx";
+import { EndScreen } from "../GameJuice";
 import { useGamesNav } from "../GamesShell";
 
 function newGame(): BinairoState {
@@ -20,6 +22,20 @@ export default function BinairoClient() {
   const [state, setState] = useState<BinairoState>(() => newGame());
   const [seconds, setSeconds] = useState(0);
   const [best, setBest] = useState<number | null>(null);
+  const [resultNewBest, setResultNewBest] = useState(false);
+  const [resultPrevBest, setResultPrevBest] = useState<number | null>(null);
+  const prevStatusRef = useRef(state.status);
+
+  // 終局遷移の瞬間だけジングルを鳴らし、その時点（保存前）のベストで更新判定を控える。
+  useEffect(() => {
+    const prev = prevStatusRef.current;
+    prevStatusRef.current = state.status;
+    if (prev === state.status || state.status !== "won") return;
+    const isNew = seconds > 0 && (best === null || seconds < best);
+    setResultNewBest(isNew);
+    setResultPrevBest(isNew ? null : best);
+    sfxWin();
+  }, [state.status, seconds, best]);
 
   useEffect(() => {
     if (state.status !== "playing" || state.moves === 0) return;
@@ -50,6 +66,8 @@ export default function BinairoClient() {
   const restart = () => {
     setState(newGame());
     setSeconds(0);
+    setResultNewBest(false);
+    setResultPrevBest(null);
   };
 
   const violations = useMemo(() => binairoViolations(state), [state]);
@@ -114,7 +132,11 @@ export default function BinairoClient() {
               role="gridcell"
               aria-label={`${r + 1}行${c + 1}列${given ? "（固定）" : ""} ${value === -1 ? "空き" : value}`}
               disabled={given || state.status === "won"}
-              onClick={() => setState((s) => cycleBinairoCell(s, i))}
+              className={badCells.has(i) ? "juice-shake" : value !== -1 ? "juice-pop" : undefined}
+              onClick={() => {
+                sfxTap();
+                setState((s) => cycleBinairoCell(s, i));
+              }}
               style={{
                 aspectRatio: "1",
                 minWidth: 0,
@@ -133,6 +155,23 @@ export default function BinairoClient() {
           );
         })}
       </div>
+
+      {state.status === "won" && (
+        <div style={{ marginTop: 16 }}>
+          <EndScreen
+            outcome="win"
+            score={seconds}
+            scoreLabel="クリアタイム（秒）"
+            newBest={resultNewBest}
+            previousBest={resultPrevBest}
+            onRetry={restart}
+          >
+            <p className="muted">
+              {state.board.length} マスを {seconds} 秒で完成させました。
+            </p>
+          </EndScreen>
+        </div>
+      )}
     </>
   );
 }

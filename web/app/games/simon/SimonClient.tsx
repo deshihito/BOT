@@ -4,6 +4,7 @@
 // 端末内で完結し、ベストラウンドは localStorage の ago-simon-best に保存する。
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState, type CSSProperties } from "react";
+import { EndScreen } from "../GameJuice";
 import { useGamesNav } from "../GamesShell";
 
 const BEST_KEY = "ago-simon-best";
@@ -39,6 +40,7 @@ export default function SimonClient() {
   const [pressed, setPressed] = useState<number | null>(null);
   const [best, setBest] = useState(0);
   const [message, setMessage] = useState("スタートを押すと、光る順番が流れます。");
+  const [result, setResult] = useState<{ cleared: number; newBest: boolean; prevBest: number } | null>(null);
   const inputIndexRef = useRef(0);
   const timersRef = useRef<Array<ReturnType<typeof setTimeout>>>([]);
   const audioRef = useRef<AudioContext | null>(null);
@@ -147,6 +149,10 @@ export default function SimonClient() {
   const start = useCallback(() => {
     for (const t of timersRef.current) clearTimeout(t);
     timersRef.current = [];
+    // 押下表示の消灯タイマーも消えるため、pressed を明示的にリセットする（常時点灯防止）。
+    setPressed(null);
+    setLit(null);
+    setResult(null);
     const seq = [randomPad()];
     setSequence(seq);
     inputIndexRef.current = 0;
@@ -177,7 +183,10 @@ export default function SimonClient() {
     if (pad !== expected) {
       runIdRef.current++;
       playErrorTone();
-      saveBest(Math.max(0, seq.length - 1));
+      const cleared = Math.max(0, seq.length - 1);
+      // 保存（saveBest）前のベストで更新判定を控える。
+      setResult({ cleared, newBest: cleared > best, prevBest: best });
+      saveBest(cleared);
       setPhase("gameover");
       setMessage(
         `まちがいです。ラウンド ${seq.length} で終了しました（正解は「${PADS[expected]?.name ?? ""}」でした）。`,
@@ -253,6 +262,7 @@ export default function SimonClient() {
       </p>
 
       <div
+        className={phase === "gameover" ? "juice-shake" : undefined}
         style={{
           display: "grid",
           gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
@@ -294,6 +304,22 @@ export default function SimonClient() {
         <p className="classic-status" style={{ justifyContent: "center" }}>
           音が出ない環境でも、色の点滅だけで遊べます。
         </p>
+      ) : null}
+
+      {phase === "gameover" && result ? (
+        <div style={{ maxWidth: 420, margin: "16px auto 0" }}>
+          <EndScreen
+            outcome="lose"
+            title="まちがい…"
+            score={result.cleared}
+            scoreLabel="クリアしたラウンド"
+            newBest={result.newBest}
+            previousBest={result.newBest ? null : result.prevBest > 0 ? result.prevBest : null}
+            onRetry={start}
+          >
+            <p className="muted">ラウンド {round} まで進みました。</p>
+          </EndScreen>
+        </div>
       ) : null}
     </>
   );

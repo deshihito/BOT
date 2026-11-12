@@ -22,6 +22,8 @@ export const TX_ANTE = 10;
 export const TX_BET = 10;
 export const TX_TOTAL_HANDS = 5;
 export const TX_HAND_END_MS = 8000;
+/** ベッティング中の手番の制限時間（ms）。tick が超過を自動フォールドにする。 */
+export const TX_TURN_TIME_MS = 30000;
 
 export type TexasStreet = "preflop" | "flop" | "turn" | "river";
 export const TX_STREETS: TexasStreet[] = ["preflop", "flop", "turn", "river"];
@@ -79,6 +81,8 @@ export interface TexasState {
   board: number[];
   pot: number;
   turn: number;
+  /** 現在の手番の締切（ms epoch）。ベッティング中以外は null。 */
+  turnEndsAt: number | null;
   nextFrom: number;
   acted: number[];
   lastResult: TexasLastResult | null;
@@ -111,6 +115,8 @@ export interface TexasView {
   board: number[];
   yourCards: number[];
   turn: number | null;
+  /** 現在の手番の締切（ms epoch）。ベッティング中以外は null。 */
+  turnEndsAt: number | null;
   yourTurn: boolean;
   callAmount: number;
   players: TexasPlayerView[];
@@ -233,6 +239,7 @@ function txContenders(state: TexasState): TexasPlayerState[] {
 function txEnterHandEnd(state: TexasState): void {
   state.phase = "handEnd";
   state.nextHandAt = null;
+  state.turnEndsAt = null;
 }
 
 function txSettleFoldWin(state: TexasState): void {
@@ -316,7 +323,7 @@ function txNextActor(state: TexasState): number | null {
 }
 
 /** アクション後の進行（ストリート送り・決着・ショーダウン）を回す。 */
-function txAdvance(state: TexasState): void {
+function txAdvance(state: TexasState, now: number): void {
   while (state.phase === "betting") {
     const contenders = txContenders(state);
     if (contenders.length <= 1) {
@@ -326,6 +333,7 @@ function txAdvance(state: TexasState): void {
     const actor = txNextActor(state);
     if (actor !== null) {
       state.turn = actor;
+      state.turnEndsAt = now + TX_TURN_TIME_MS;
       return;
     }
     const streetIdx = TX_STREETS.indexOf(state.street);
@@ -339,7 +347,7 @@ function txAdvance(state: TexasState): void {
   }
 }
 
-function txStartHand(state: TexasState): void {
+function txStartHand(state: TexasState, now: number): void {
   state.handNumber += 1;
   state.lastResult = null;
   state.phase = "betting";
@@ -347,6 +355,7 @@ function txStartHand(state: TexasState): void {
   state.acted = [];
   state.nextFrom = 0;
   state.nextHandAt = null;
+  state.turnEndsAt = null;
   for (const p of state.players) {
     p.hole = [];
     p.inHand = false;
@@ -372,11 +381,12 @@ function txStartHand(state: TexasState): void {
     if (p.chips === 0) p.allIn = true;
   }
   txPushLog(state, { kind: "hand", hand: state.handNumber });
-  txAdvance(state);
+  txAdvance(state, now);
 }
 
 function txFinishMatch(state: TexasState): void {
   state.phase = "finished";
+  state.turnEndsAt = null;
   state.standings = state.players.map((p) => ({
     seat: p.seat,
     chips: p.chips,
@@ -385,13 +395,13 @@ function txFinishMatch(state: TexasState): void {
 }
 
 /** handEnd から次へ進む（次のハンド or 終了）。 */
-function txProceed(state: TexasState): void {
+function txProceed(state: TexasState, now: number): void {
   const remaining = state.players.filter((p) => !p.left && p.chips > 0);
   if (state.handNumber >= TX_TOTAL_HANDS || remaining.length < 2) {
     txFinishMatch(state);
     return;
   }
-  txStartHand(state);
+  txStartHand(state, now);
 }
 
 // ---------------------------------------------------------------- モジュール
@@ -434,6 +444,7 @@ function txCreateState(
     board: [],
     pot: 0,
     turn: 0,
+    turnEndsAt: null,
     nextFrom: 0,
     acted: [],
     lastResult: null,
@@ -441,7 +452,7 @@ function txCreateState(
     nextHandAt: null,
     log: [],
   };
-  txStartHand(state);
+  txStartHand(state, Date.now());
   return state;
 }
 
@@ -460,7 +471,7 @@ function txApplyAction(
   if (action.type === "next") {
     if (state.phase !== "handEnd") throw new Error("ハンドの終了待ちではありません");
     const next = txClone(state);
-    txProceed(next);
+    txProceed(next, Date.now());
     return next;
   }
   if (action.type !== "act") throw new Error("不正なアクションです");
@@ -488,7 +499,7 @@ function txApplyAction(
   }
   next.acted = [...next.acted, seat];
   next.nextFrom = seat + 1;
-  txAdvance(next);
+  txAdvance(next, Date.now());
   return next;
 }
 
@@ -504,6 +515,7 @@ function txViewFor(state: TexasState, seat: number): TexasView {
     board: betting ? state.board.slice(0, TX_BOARD_COUNT[state.street]) : [...state.board],
     yourCards: me ? [...me.hole] : [],
     turn: betting ? state.turn : null,
+    turnEndsAt: betting ? state.turnEndsAt : null,
     yourTurn: betting && !!me && state.turn === seat && me.inHand && !me.folded,
     callAmount:
       betting && me && state.turn === seat ? Math.min(TX_BET, me.chips) : 0,
@@ -551,19 +563,34 @@ function txOnPlayerLeft(state: TexasState, seat: number): TexasState {
     // 退出はフォールド扱い。手番だった場合も含め、進行は txAdvance が
     // 「フォールド済みは候補から外す」ことで正しく回す。
     player.folded = true;
-    txAdvance(next);
+    txAdvance(next, Date.now());
   }
   return next;
 }
 
 function txTick(state: TexasState, now: number): TexasState {
+  if (state.phase === "betting") {
+    // 手番の制限時間を超えたら自動フォールドして次へ進める。
+    if (state.turnEndsAt === null || now < state.turnEndsAt) return state;
+    const next = txClone(state);
+    const seat = next.turn;
+    const player = next.players[seat];
+    if (player && player.inHand && !player.folded && !player.left) {
+      player.folded = true;
+      txPushLog(next, { kind: "fold", seat });
+      next.acted = [...next.acted, seat];
+      next.nextFrom = seat + 1;
+    }
+    txAdvance(next, now);
+    return next;
+  }
   if (state.phase !== "handEnd") return state;
   if (state.nextHandAt === null) {
     return { ...state, nextHandAt: now + TX_HAND_END_MS };
   }
   if (now >= state.nextHandAt) {
     const next = txClone(state);
-    txProceed(next);
+    txProceed(next, now);
     return next;
   }
   return state;

@@ -320,6 +320,19 @@ export function applyHint(state: SudokuState): SudokuState {
   const board = [...state.board];
   board[idx] = state.solution[idx];
   const notes = state.notes.map((n, i) => (i === idx ? [] : [...n]));
+  // setCell と同じく、確定した数字を同じ行・列・ブロックのメモから取り除く
+  const value = state.solution[idx];
+  const row = Math.floor(idx / 9);
+  const col = idx % 9;
+  const br = Math.floor(row / 3) * 3;
+  const bc = Math.floor(col / 3) * 3;
+  const peers = new Set<number>();
+  for (let c = 0; c < 9; c++) peers.add(row * 9 + c);
+  for (let r = 0; r < 9; r++) peers.add(r * 9 + col);
+  for (let r = br; r < br + 3; r++) for (let c = bc; c < bc + 3; c++) peers.add(r * 9 + c);
+  peers.forEach((p) => {
+    if (notes[p].includes(value)) notes[p] = notes[p].filter((v) => v !== value);
+  });
   const next: SudokuState = {
     ...state,
     board,

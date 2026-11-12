@@ -54,6 +54,41 @@ export const EXTRA_WORDS: readonly string[] = [
   "SHUSH", "SHYLY", "ADIEU", "AUDIO", "OUIJA", "XYLEM", "JAZZY", "FUZZY", "PIZZA", "JIFFY",
   "QUIRK", "JUMBO", "VODKA", "WHIRL", "ZESTY", "YACHT", "XENON", "WALTZ", "VEXED", "MOCHA",
   "LATTE", "SUSHI", "RAMEN", "PASTA", "TACOS", "CURRY", "GYOZA", "KEBAB", "KABOB", "MANGA",
+  "ABIDE", "ABODE", "ABORT", "ABUSE", "ABYSS", "ACORN", "ACRID", "ACTED", "ADEPT", "ADOBE", "ADORE",
+  "ADORN", "AFIRE", "AFOOT", "AGAPE", "AGATE", "AGILE", "AGING", "AGLOW", "AGONY", "AILED", "AIMED",
+  "AISLE", "ALDER", "ALGAE", "ALIBI", "ALLAY", "ALLEY", "ALLOT", "ALLOY", "ALOFT", "AMASS", "AMAZE",
+  "AMBLE", "AMIGO", "AMINO", "AMISS", "AMITY", "AMONG", "AMUSE", "ANGST", "ANIMA", "ANIME", "ANISE",
+  "ANNEX", "ANNOY", "ANNUL", "ANODE", "ANTIC", "ANVIL", "AORTA", "APHID", "APPLY", "APRON", "ARBOR",
+  "ARDOR", "AREAS", "ARGON", "ARGOT", "ARGUS", "ARIAS", "ARIES", "ARMED", "ARRAY", "ARSON", "ASCOT",
+  "ASHEN", "ASHES", "ASKER", "ASKEW", "ASPEN", "ASSAY", "ATOLL", "ATOMS", "ATONE", "ATTIC", "AVAIL",
+  "AWAIT", "AXIAL", "AXIOM", "AXLES", "AZURE", "BADLY", "BAILS", "BAITS", "BAKED", "BAKES", "BALES",
+  "BALKS", "BALLS", "BALMS", "BALMY", "BANAL", "BANDS", "BANES", "BANGS", "BANJO", "BANKS", "BARBS",
+  "BARDS", "BARED", "BARER", "BARES", "BARFS", "BARGE", "BARKS", "BARMY", "BARNS", "BARON", "BARRE",
+  "BEARS", "BONES", "BOOKS", "BOWLS", "CAKES", "CAMEL", "CARPS", "CLAMS", "CLASS", "CLEAN", "CLEAR",
+  "CLIMB", "CLOCK", "CLOSE", "CLOUD", "COCKS", "COLOR", "COMET", "COOKS", "CORAL", "COUCH", "COUNT",
+  "COVER", "CRABS", "CRACK", "CRASH", "CREAM", "CRICK", "CRISP", "CROSS", "CROWS", "CRUDE", "CRUEL",
+  "CRUSH", "CURLY", "DADDY", "DAILY", "DAISY", "DANCE", "DESKS", "DICEY", "DINGY", "DINKY", "DIRTY",
+  "DISCO", "DITTO", "DITZY", "DIVED", "DIVER", "DIVES", "DIZZY", "DODGE", "DODGY", "DOERS", "DOEST",
+  "DOETH", "DOFFS", "DOGGY", "DOGMA", "DOORS", "DRANK", "DRESS", "DRIED", "DRIFT", "DRILL", "DRINK",
+  "DRIVE", "DROPS", "DROWN", "DRUMS", "DRYLY", "DUCKS", "DULLY", "DUMPS", "DUMPY", "ELBOW", "FAINT",
+  "FAIRY", "FAITH", "FALLS", "FALSE", "FANCY", "FANGS", "FARMS", "FATAL", "FEARS", "FEAST", "FEATS",
+  "FEEDS", "FEELS", "FEIGN", "FEINT", "FELON", "FENCE", "FERNS", "FERRY", "FETAL", "FETCH", "FETID",
+  "FEUDS", "FEVER", "FEWER", "FIBER", "FIELD", "FIEND", "FIERY", "FIFTH", "FIFTY", "FIGHT", "FILCH",
+  "FILED", "FILER", "FILES", "FILET", "FILLO", "FILLS", "FILMS", "FILMY", "FILTH", "FINAL", "FINCH",
+  "FINIS", "FINKS", "FLIES", "FLUTE", "FOGGY", "FORKS", "FOXES", "FROGS", "FROST", "FRUIT", "GAILY",
+  "GAINS", "GAITS", "GALAS", "GALES", "GALLS", "GALOP", "GAMES", "GAMEY", "GAMIN", "GAMMA", "GAMMY",
+  "GAMUT", "GANEF", "GANGS", "GANJA", "GEESE", "GIRLS", "GLASS", "GOALS", "GOATS", "GOLDS", "GOOSE",
+  "GRASS", "GREEN", "HABIT", "HACKS", "HAILS", "HAIRS", "HANDS", "HAPPY", "HEADS", "HEART", "HELLO",
+  "HERON", "HONEY", "HORSE", "HYENA", "JELLY", "JUMPS", "KICKS", "KITTY", "KNEES", "KNIFE", "LAMPS",
+  "LEAFY", "LEARN", "LIGHT", "LIONS", "LIVER", "LLAMA", "LOCKS", "LUNGS", "MANLY", "MATCH", "MELON",
+  "MILKS", "MISTY", "MOLES", "MOMMY", "MONEY", "MOONS", "MOOSE", "MOTHS", "MOUSE", "MOUTH", "MUSIC", "NAILS",
+  "NOSES", "NURSE", "ORBIT", "OTTER", "OVALS", "PANDA", "PAPER", "PEACH", "PEARL", "PHONE", "PIGGY",
+  "PLANT", "PLATE", "PUMAS", "QUICK", "RACER", "RACES", "RAINY", "RAVEN", "ROBIN", "ROCKS", "ROSES",
+  "ROUND", "SACKS", "SACRA", "SADLY", "SALAD", "SANDS", "SCORE", "SEEDS", "SHAPE", "SINGS", "SKUNK",
+  "SLEEP", "SLUGS", "SMILE", "SNOWY", "SONGS", "SPEED", "SPOON", "SPORT", "SQUID", "STARS", "STORK", "STORM",
+  "STOVE", "STUDY", "SUGAR", "SUNNY", "SWANS", "SWIMS", "TABLE", "TEACH", "TEAMS", "TEDDY", "TEETH",
+  "THROW", "TIRED", "TOADS", "TREES", "TRIAD", "TRUMP", "TULIP", "VOLES", "WASPS", "WATCH", "WAVES",
+  "WHALE", "WHITE", "WINDY", "WOLFS", "WOMAN", "WORKS", "WORLD", "WORMS", "WRENS", "WRITE",
 ];
 
 /** 推測に使える全単語（答え候補＋追加単語、大文字5文字）。 */
@@ -170,6 +205,90 @@ export function submitGuess(state: WordleState, rawGuess: string): SubmitResult 
     },
     error: null,
   };
+}
+
+/** デイリー用の日付キー（Asia/Tokyo の YYYY-MM-DD）。全員が同じ日付で同じ答えになる。 */
+export function dailyKeyFor(date: Date): string {
+  const jst = new Date(date.getTime() + 9 * 60 * 60 * 1000);
+  const y = jst.getUTCFullYear();
+  const m = String(jst.getUTCMonth() + 1).padStart(2, "0");
+  const d = String(jst.getUTCDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+}
+
+/** 日付キーから決定的なシードを作る。 */
+export function dailySeedFor(date: Date): number {
+  const key = dailyKeyFor(date);
+  let h = 2166136261;
+  for (let i = 0; i < key.length; i++) {
+    h ^= key.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return h | 0;
+}
+
+/** デイリーモードのゲーム（その日の答えは全員共通）。 */
+export function createDailyWordleGame(date: Date = new Date()): WordleState {
+  return createWordleGame(dailySeedFor(date));
+}
+
+export type WordleStats = {
+  played: number;
+  wins: number;
+  currentStreak: number;
+  maxStreak: number;
+  /** 推測回数分布: index 0 = 1回で正解 … index 5 = 6回で正解。 */
+  distribution: number[];
+  /** 記録済みゲームのキー（同一ゲームの二重記録を防ぐ）。直近60件だけ保持する。 */
+  recordedKeys: string[];
+};
+
+export function emptyWordleStats(): WordleStats {
+  return {
+    played: 0,
+    wins: 0,
+    currentStreak: 0,
+    maxStreak: 0,
+    distribution: [0, 0, 0, 0, 0, 0],
+    recordedKeys: [],
+  };
+}
+
+/**
+ * 終了したゲームの結果を成績へ反映する。key はゲームを一意に識別する文字列
+ * （デイリーは日付キー、ランダムは開始時刻など）。同じ key は二度記録しない。
+ */
+export function recordWordleResult(
+  stats: WordleStats,
+  result: { won: boolean; guessesUsed: number; key: string },
+): WordleStats {
+  if (stats.recordedKeys.includes(result.key)) return stats;
+  const distribution = [...stats.distribution];
+  if (result.won && result.guessesUsed >= 1 && result.guessesUsed <= 6) {
+    distribution[result.guessesUsed - 1]++;
+  }
+  const currentStreak = result.won ? stats.currentStreak + 1 : 0;
+  return {
+    played: stats.played + 1,
+    wins: stats.wins + (result.won ? 1 : 0),
+    currentStreak,
+    maxStreak: Math.max(stats.maxStreak, currentStreak),
+    distribution,
+    recordedKeys: [...stats.recordedKeys, result.key].slice(-60),
+  };
+}
+
+const SHARE_MARKS: Record<LetterMark, string> = {
+  correct: "■",
+  present: "▨",
+  absent: "□",
+};
+
+/** 結果シェア文（絵文字ではなくブロック文字で盤面を表す）。 */
+export function buildShareText(state: WordleState, label: string): string {
+  const score = state.status === "won" ? String(state.guesses.length) : "X";
+  const lines = state.marks.map((row) => row.map((m) => SHARE_MARKS[m]).join(""));
+  return [`ワード当て ${label} ${score}/${state.maxGuesses}`, ...lines].join("\n");
 }
 
 const MARK_PRIORITY: Record<LetterMark, number> = { absent: 0, present: 1, correct: 2 };

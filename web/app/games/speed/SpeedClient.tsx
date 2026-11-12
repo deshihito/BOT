@@ -109,6 +109,7 @@ function Board({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
       return;
     }
     if (legal.length >= 2) {
+      playSe("select");
       setSelected(selected === handIndex ? null : handIndex);
       return;
     }
@@ -117,9 +118,9 @@ function Board({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
 
   return (
     <div className="og-board-wrap">
-      <div className={`og-turn-banner${state.finished ? "" : " og-turn-mine"}`} role="status">
+      <div className={`og-turn-banner${state.finished ? " juice-slide" : " og-turn-mine"}`} role="status">
         {state.finished
-          ? `勝者: ${winnerName ?? "—"}${state.winner === mySeat ? " 🎉" : ""}`
+          ? `勝者: ${winnerName ?? "—"}${state.winner === mySeat ? "" : ""}`
           : "同時進行です。出せる札はどんどん出してください。"}
       </div>
 
@@ -139,7 +140,9 @@ function Board({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
       </p>
       <div style={{ display: "flex", gap: 8, justifyContent: "center", flexWrap: "wrap", minHeight: 54 }}>
         {opponent.hand.map((id) => (
-          <CardFace key={id} id={id} small />
+          <span key={id} className="juice-pop" style={{ display: "inline-flex" }}>
+            <CardFace id={id} small />
+          </span>
         ))}
         {opponent.hand.length === 0 && <span className="og-muted">場札なし</span>}
       </div>
@@ -171,7 +174,13 @@ function Board({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
                 touchAction: "manipulation",
               }}
             >
-              {pile.top !== null ? <CardFace id={pile.top} /> : <span className="og-muted">（空）</span>}
+              {pile.top !== null ? (
+                <span key={`${pile.top}-${pile.count}`} className="juice-flip" style={{ display: "inline-grid" }}>
+                  <CardFace id={pile.top} />
+                </span>
+              ) : (
+                <span className="og-muted">（空）</span>
+              )}
               <span style={{ fontSize: 12, color: "#6b5f45" }}>{pile.count} 枚</span>
             </button>
           );
@@ -179,7 +188,11 @@ function Board({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
       </div>
 
       {state.lastPlay && (
-        <p className="og-muted" style={{ textAlign: "center" }}>
+        <p
+          key={`${state.lastPlay.card}-${state.centers[0].count + state.centers[1].count}`}
+          className="og-muted juice-slide"
+          style={{ textAlign: "center" }}
+        >
           {state.lastPlay.seat === mySeat ? "あなた" : opponent.name} が {cardText(state.lastPlay.card).label}{" "}
           を出しました
         </p>
@@ -197,6 +210,7 @@ function Board({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
             <button
               key={id}
               type="button"
+              className="juice-pop"
               disabled={!myTurnFree}
               aria-label={`場札 ${cardText(id).label}${playable ? " 出せます" : ""}`}
               aria-pressed={isSelected}

@@ -1,5 +1,5 @@
 // 間違い探しの純粋ロジック（UI 非依存・シード決定的）。
-// 絵文字のモザイク場面を生成し、右盤だけ N 箇所を別の絵文字に差し替える。
+// 形×色の図形モザイク場面を生成し、右盤だけ N 箇所を別の図形に差し替える。
 // 差し替え位置・見つけた位置・ミスタップ数を状態として持つ。
 
 export const SPOT_DIFF_ROWS = 6;
@@ -14,13 +14,36 @@ export const SPOT_DIFF_COUNTS: Record<SpotDiffLevelKey, number> = {
   hard: 7,
 };
 
-/** 場面に使う絵文字のパレット。差し替え先もここから選ばれる。 */
-export const SPOT_DIFF_PALETTE: string[] = [
-  "🌳", "🌲", "🌸", "🌼", "🌻", "🍄", "🍎", "🍊",
-  "🍇", "🍓", "🐶", "🐱", "🐰", "🦊", "🐢", "🐠",
-  "🐦", "🦋", "☀️", "⭐", "🌙", "⚽", "🚗", "🏠",
-  "🎈", "🍦", "📚", "🎁",
+export type SpotShape = "circle" | "triangle" | "square" | "star" | "diamond" | "heart" | "cross";
+
+export interface SpotDiffSymbol {
+  /** 絵柄 ID（盤面のマスに入る）。 */
+  id: string;
+  shape: SpotShape;
+  /** 塗り色（CSS カラー）。 */
+  color: string;
+}
+
+const SPOT_SHAPES: SpotShape[] = ["circle", "triangle", "square", "star", "diamond", "heart", "cross"];
+const SPOT_COLORS: { key: string; value: string }[] = [
+  { key: "red", value: "#d93a3a" },
+  { key: "blue", value: "#2f6fd0" },
+  { key: "green", value: "#2f9e5f" },
+  { key: "purple", value: "#8b4fc0" },
 ];
+
+/** 場面に使う絵柄（形7種×色4色＝28種、全て見分けが付く）。差し替え先もここから選ばれる。 */
+export const SPOT_DIFF_SYMBOLS: SpotDiffSymbol[] = SPOT_SHAPES.flatMap((shape) =>
+  SPOT_COLORS.map((c) => ({ id: `${shape}-${c.key}`, shape, color: c.value })),
+);
+
+/** 絵柄 ID のパレット。 */
+export const SPOT_DIFF_PALETTE: string[] = SPOT_DIFF_SYMBOLS.map((s) => s.id);
+
+/** 絵柄 ID から図形定義を引く。 */
+export function spotDiffSymbol(id: string): SpotDiffSymbol {
+  return SPOT_DIFF_SYMBOLS.find((s) => s.id === id) ?? SPOT_DIFF_SYMBOLS[0];
+}
 
 export type SpotDiffStatus = "playing" | "won";
 

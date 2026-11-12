@@ -3,7 +3,7 @@
 // ドラッグではなくタップ選択式：カード（の山）をタップして選び、置き先をタップする。
 // 端末内で完結し、サーバーへ送信しない。
 import Link from "next/link";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   autoMoveFreecell,
   createFreecell,
@@ -13,11 +13,14 @@ import {
   moveFreecell,
   rankLabel,
   suitSymbol,
+  undoFreecell,
   type FcCard,
   type FcSource,
   type FcState,
   type FcTarget,
 } from "@/lib/freecell";
+import { sfxFlip, sfxPlace, sfxSlide, sfxTap, sfxWin, sfxWrong } from "@/lib/sfx";
+import { EndScreen } from "../GameJuice";
 import { useGamesNav } from "../GamesShell";
 
 type Selection =
@@ -87,6 +90,14 @@ export default function FreeCellClient() {
   const [state, setState] = useState<FcState>(() => newGame());
   const [selected, setSelected] = useState<Selection>(null);
   const [message, setMessage] = useState<string>("");
+  const prevStatusRef = useRef(state.status);
+
+  // 終局遷移の瞬間だけジングルを鳴らす。
+  useEffect(() => {
+    const prev = prevStatusRef.current;
+    prevStatusRef.current = state.status;
+    if (prev !== state.status && state.status === "won") sfxWin();
+  }, [state.status]);
 
   const restart = () => {
     setState(newGame());
@@ -94,14 +105,32 @@ export default function FreeCellClient() {
     setMessage("");
   };
 
+  const retrySameDeal = () => {
+    setState(createFreecell(state.seed));
+    setSelected(null);
+    setMessage("同じ盤面で最初からやり直します。");
+  };
+
+  const onUndo = () => {
+    const next = undoFreecell(state);
+    if (next !== state) {
+      sfxSlide();
+      setState(next);
+      setSelected(null);
+      setMessage("一手戻しました。");
+    }
+  };
+
   const tryMove = (source: FcSource, target: FcTarget, count: number) => {
     const next = moveFreecell(state, source, target, count);
     if (next !== state) {
+      if (next.status !== "won") sfxPlace();
       setState(next);
       setSelected(null);
       setMessage(next.status === "won" ? "全部そろいました。クリア！" : "");
       return true;
     }
+    sfxWrong();
     setMessage("そこへは置けません。");
     return false;
   };
@@ -136,15 +165,18 @@ export default function FreeCellClient() {
     const stack = col.slice(position);
     if (stack.length === 0) return;
     if (!isValidStack(stack)) {
+      sfxWrong();
       setMessage("そのカードからは正しい並びで持てません。");
       return;
     }
     if (stack.length > maxMovableCards(state)) {
+      sfxTap();
       setMessage(`今は最大 ${maxMovableCards(state)} 枚までしかまとめて動かせません。`);
       // 持てる範囲（先頭=一番手前のカード）に絞って選択する。
       setSelected({ kind: "column", column, startIndex: col.length - 1 });
       return;
     }
+    sfxTap();
     setMessage("");
     setSelected({ kind: "column", column, startIndex: position });
   };
@@ -165,6 +197,7 @@ export default function FreeCellClient() {
       }
     }
     if (card) {
+      sfxTap();
       setSelected(selected?.kind === "freecell" && selected.index === index ? null : { kind: "freecell", index });
       setMessage("");
     }
@@ -173,6 +206,7 @@ export default function FreeCellClient() {
   const onFoundation = (index: number) => {
     if (!selected) return;
     if (selectionCount() !== 1) {
+      sfxWrong();
       setMessage("組札へは1枚ずつだけ送れます。");
       return;
     }
@@ -183,10 +217,12 @@ export default function FreeCellClient() {
   const onAuto = () => {
     const next = autoMoveFreecell(state);
     if (next !== state) {
+      if (next.status !== "won") sfxFlip();
       setState(next);
       setSelected(null);
       setMessage(next.status === "won" ? "全部そろいました。クリア！" : "安全に送れるカードを組札へ送りました。");
     } else {
+      sfxWrong();
       setMessage("今は安全に送れるカードがありません。");
     }
   };
@@ -208,8 +244,19 @@ export default function FreeCellClient() {
       </div>
 
       <div className="classic-controls" role="group" aria-label="操作">
+        <button
+          type="button"
+          className="classic-btn"
+          onClick={onUndo}
+          disabled={(state.past ?? []).length === 0}
+        >
+          一手戻す
+        </button>
+        <button type="button" className="classic-btn" onClick={retrySameDeal}>
+          同じ盤面でもう一度
+        </button>
         <button type="button" className="classic-btn" onClick={restart}>
-          もう一度
+          新しい盤面
         </button>
         <button type="button" className="classic-btn" onClick={onAuto}>
           自動送り
@@ -276,6 +323,14 @@ export default function FreeCellClient() {
           ))}
         </div>
       </div>
+
+      {state.status === "won" && (
+        <div style={{ maxWidth: 560, margin: "16px auto 0" }}>
+          <EndScreen outcome="win" title="クリア！" score={state.moves} scoreLabel="手数" onRetry={restart} retryLabel="新しい盤面">
+            <p className="muted">全カードを組札へそろえました。</p>
+          </EndScreen>
+        </div>
+      )}
     </>
   );
 }

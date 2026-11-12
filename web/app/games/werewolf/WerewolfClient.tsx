@@ -116,14 +116,15 @@ function WerewolfTable({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi
     prevPhaseRef.current = state.phase;
     if (prev !== null && prev !== state.phase && state.phase !== "finished") playSe("turn");
   }, [state]);
-  const finishSeRef = useRef(false);
+  const finishSeRef = useRef<string | null>(null);
   useEffect(() => {
-    if (!state || state.phase !== "finished" || finishSeRef.current) return;
-    finishSeRef.current = true;
+    if (!state || state.phase !== "finished") return;
+    if (finishSeRef.current === view.code) return;
+    finishSeRef.current = view.code;
     const iAmWolf = state.you.role === "wolf";
     const won = (state.winner === "wolf") === iAmWolf;
     playSe(won ? "win" : "lose");
-  }, [state]);
+  }, [state, view.code]);
 
   if (!state) {
     return <p className="og-notice">対戦の開始を待っています…</p>;
@@ -182,21 +183,21 @@ function WerewolfTable({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi
 
   return (
     <div className="og-game og-werewolf">
-      <div className={`og-phase-banner og-phase-${state.phase}`} role="status" aria-live="polite">
+      <div key={`${state.phase}-${state.dayCount}`} className={`og-phase-banner og-phase-${state.phase} juice-slide`} role="status" aria-live="polite">
         <span className="og-phase-title">{phaseLabel}</span>
         {remainingSec !== null && <span className="og-timer">残り {formatClock(remainingSec)}</span>}
       </div>
 
       {/* 前夜・前回の結果 */}
       {state.lastNightResult && state.phase !== "finished" && (
-        <p className="og-notice">
+        <p className="og-notice juice-slide">
           {state.lastNightResult.deadSeat === null
             ? "昨夜は誰も襲撃されませんでした。"
             : `昨夜、${nameOf(state.lastNightResult.deadSeat)} が襲撃されました。`}
         </p>
       )}
       {state.lastExecution && state.phase !== "finished" && (
-        <p className="og-notice">
+        <p className="og-notice juice-slide">
           {state.lastExecution.tied
             ? "前回の投票は同票で、処刑はありませんでした。"
             : state.lastExecution.deadSeat === null
@@ -206,7 +207,7 @@ function WerewolfTable({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi
       )}
 
       {/* 自分の役職カード */}
-      <section className={`og-role-card ${roleMeta.className}`} aria-label="あなたの役職">
+      <section className={`og-role-card ${roleMeta.className} juice-pop`} aria-label="あなたの役職">
         <span className="og-role-label">あなたの役職</span>
         <span className="og-role-name">{roleMeta.label}</span>
         <span className="og-role-desc">{roleMeta.description}</span>
@@ -237,7 +238,7 @@ function WerewolfTable({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi
 
       {/* ===== 夜 ===== */}
       {state.phase === "night" && (
-        <section className="og-phase-panel" aria-label="夜の行動">
+        <section className="og-phase-panel juice-slide" aria-label="夜の行動">
           {!iAmAlive || state.you.role === "villager" ? (
             <p className="og-status-line">夜が明けるのを待っています…</p>
           ) : state.night.submitted ? (
@@ -271,7 +272,7 @@ function WerewolfTable({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi
 
       {/* ===== 昼（議論） ===== */}
       {state.phase === "day" && (
-        <section className="og-phase-panel" aria-label="昼の議論">
+        <section className="og-phase-panel juice-slide" aria-label="昼の議論">
           <p className="og-status-line">
             話し合い中です。終了に同意: {state.day.readyCount} / {state.day.aliveCount} 人
           </p>
@@ -293,7 +294,7 @@ function WerewolfTable({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi
 
       {/* ===== 投票 ===== */}
       {state.phase === "vote" && (
-        <section className="og-phase-panel" aria-label="投票">
+        <section className="og-phase-panel juice-slide" aria-label="投票">
           {state.vote.revote && <p className="og-notice">同票のため再投票です。</p>}
           <p className="og-status-line">
             投票済み: {state.vote.votedCount} / {state.vote.aliveCount} 人
@@ -321,8 +322,8 @@ function WerewolfTable({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi
 
       {/* ===== 終了 ===== */}
       {state.phase === "finished" && (
-        <section className="og-result" aria-label="対戦結果">
-          <h2>{state.winner === "wolf" ? "人狼陣営の勝利" : state.winner === "village" ? "村人陣営の勝利" : "対戦終了"}</h2>
+        <section className="og-result juice-slide" aria-label="対戦結果">
+          <h2 className="juice-pulse">{state.winner === "wolf" ? "人狼陣営の勝利" : state.winner === "village" ? "村人陣営の勝利" : "対戦終了"}</h2>
           <p className="og-status-line">
             {state.winner === "wolf"
               ? "人狼が村を支配しました。"

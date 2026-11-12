@@ -235,6 +235,55 @@ export function useOnlineRoom(gameId: string): OnlineRoomApi {
     return fetchView(target);
   }, [fetchView]);
 
+  // --- タブ/ブラウザを閉じたら退出扱いにする ---
+  // pagehide（モバイル含め最も確実）と beforeunload（旧環境向け）の両方で、
+  // 既存の leave API へ sendBeacon（不可なら fetch keepalive）で通知する。
+  // 応答は読めないため、revision は手元の最新ビューを使うベストエフォート。
+  // 明示的な「退出」ボタンは従来の leave() が処理し、こちらは二重送信を防ぐ。
+  const beaconLeftRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!session) return;
+    const sendLeaveBeacon = () => {
+      const target = sessionRef.current;
+      const current = viewRef.current;
+      if (!target || !current) return;
+      const key = `${target.code}:${target.token}`;
+      if (beaconLeftRef.current === key) return;
+      beaconLeftRef.current = key;
+      const url = `${base}/rooms/${target.code}/leave`;
+      const payload = JSON.stringify({
+        playerToken: target.token,
+        expectedRevision: current.revision,
+      });
+      let sent = false;
+      try {
+        if (typeof navigator !== "undefined" && typeof navigator.sendBeacon === "function") {
+          sent = navigator.sendBeacon(url, new Blob([payload], { type: "application/json" }));
+        }
+      } catch {
+        sent = false;
+      }
+      if (!sent) {
+        try {
+          void fetch(url, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: payload,
+            keepalive: true,
+          }).catch(() => undefined);
+        } catch {
+          // 送信できなくてもページは閉じられる（ルームは TTL で掃除される）
+        }
+      }
+    };
+    window.addEventListener("pagehide", sendLeaveBeacon);
+    window.addEventListener("beforeunload", sendLeaveBeacon);
+    return () => {
+      window.removeEventListener("pagehide", sendLeaveBeacon);
+      window.removeEventListener("beforeunload", sendLeaveBeacon);
+    };
+  }, [session, base]);
+
   const disconnect = useCallback(() => {
     saveSession(null);
     setError("");

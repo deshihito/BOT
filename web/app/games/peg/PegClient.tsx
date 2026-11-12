@@ -2,7 +2,7 @@
 // ペグソリティア（英式33穴）。ロジックは lib/peg.ts。
 // ペグを選ぶと移動できる空き穴が光るので、そこを押して飛び越える。端末内で完結。
 import Link from "next/link";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   applyPegMove,
   createPegGame,
@@ -13,6 +13,8 @@ import {
   PEG_SIZE,
   type PegState,
 } from "@/lib/peg";
+import { sfxLose, sfxPlace, sfxSlide, sfxTap, sfxWin } from "@/lib/sfx";
+import { EndScreen } from "../GameJuice";
 import { useGamesNav } from "../GamesShell";
 
 export default function PegClient() {
@@ -20,6 +22,15 @@ export default function PegClient() {
   const [state, setState] = useState<PegState>(() => createPegGame());
   const [selected, setSelected] = useState<number | null>(null);
   const [history, setHistory] = useState<PegState[]>([]);
+
+  const prevStatusRef = useRef(state.status);
+  useEffect(() => {
+    const prev = prevStatusRef.current;
+    prevStatusRef.current = state.status;
+    if (prev === state.status) return;
+    if (state.status === "cleared") sfxWin();
+    else if (state.status === "stuck") sfxLose();
+  }, [state.status]);
 
   const remaining = pegCount(state);
   const destinations = selected !== null ? pegMovesFrom(state, selected) : [];
@@ -34,6 +45,7 @@ export default function PegClient() {
   const undo = () => {
     const prev = history[history.length - 1];
     if (!prev) return;
+    sfxSlide();
     setHistory(history.slice(0, -1));
     setState(prev);
     setSelected(null);
@@ -46,6 +58,8 @@ export default function PegClient() {
       if (move) {
         const next = applyPegMove(state, move);
         if (next !== state) {
+          // 終局時は終局ジングルに任せ、二重に鳴らさない。
+          if (next.status === "playing") sfxPlace();
           setHistory((h) => [...h.slice(-99), state]);
           setState(next);
           setSelected(null);
@@ -54,6 +68,7 @@ export default function PegClient() {
       }
     }
     if (state.cells[index] === 1) {
+      sfxTap();
       setSelected(selected === index ? null : index);
     } else {
       setSelected(null);
@@ -122,6 +137,7 @@ export default function PegClient() {
                   : `${r + 1}行${c + 1}列の空き穴${isDest ? "（移動できます）" : ""}`
               }
               onClick={() => onCell(index)}
+              className={isSelected ? "juice-pulse" : undefined}
               style={{
                 aspectRatio: "1",
                 display: "grid",
@@ -142,6 +158,7 @@ export default function PegClient() {
               {hasPeg ? (
                 <span
                   aria-hidden="true"
+                  className="juice-pop"
                   style={{
                     display: "block",
                     width: "72%",
@@ -156,6 +173,7 @@ export default function PegClient() {
               ) : (
                 <span
                   aria-hidden="true"
+                  className={isDest ? "juice-pulse" : undefined}
                   style={{
                     display: "block",
                     width: isDest ? "46%" : "30%",
@@ -178,6 +196,20 @@ export default function PegClient() {
           もう一度
         </button>
       </div>
+
+      {state.status !== "playing" && (
+        <div style={{ marginTop: 14 }}>
+          <EndScreen
+            outcome={state.status === "cleared" ? "win" : "finish"}
+            title={state.status === "cleared" ? "全クリア！" : undefined}
+            onRetry={restart}
+          >
+            <p>
+              残りペグ {remaining} 個 ・ {state.moves} 手 ・ 評価: {pegRating(remaining)}
+            </p>
+          </EndScreen>
+        </div>
+      )}
     </>
   );
 }

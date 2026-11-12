@@ -3,7 +3,7 @@
 // 判定は元の答えとの一致ではなく「埋めた数字で筆算の式が整合するか」で行うため、
 // 整合する別の解でもクリアになる。端末内で完結し、サーバーへ送信しない。
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   checkMushoku,
   createMushoku,
@@ -11,6 +11,8 @@ import {
   type MushokuLevel,
   type MushokuState,
 } from "@/lib/mushoku";
+import { sfxCorrect, sfxPlace, sfxTap, sfxWin, sfxWrong } from "@/lib/sfx";
+import { EndScreen } from "../GameJuice";
 import { useGamesNav } from "../GamesShell";
 
 const LEVELS: { key: MushokuLevel; label: string }[] = [
@@ -49,6 +51,18 @@ export default function MushokuClient() {
     setBests(loadBests());
   }, []);
 
+  const prevStatusRef = useRef(state.status);
+  useEffect(() => {
+    const prev = prevStatusRef.current;
+    prevStatusRef.current = state.status;
+    if (prev !== state.status && state.status === "solved") sfxWin();
+  }, [state.status]);
+
+  // キーボード用 effect は selectedId の変化でしか張り直されないため、
+  // inputDigit が古い state を掴まないよう最新 state を ref で参照する。
+  const stateRef = useRef(state);
+  stateRef.current = state;
+
   useEffect(() => {
     if (!started || state.status !== "playing") return;
     const id = setInterval(() => setSeconds((s) => s + 1), 1000);
@@ -82,10 +96,16 @@ export default function MushokuClient() {
 
   const inputDigit = (digit: number | null) => {
     if (selectedId === null) return;
+    const current = stateRef.current;
+    const next = setMushokuInput(current, selectedId, digit);
+    if (next !== current) {
+      if (digit === null) sfxTap();
+      else sfxPlace();
+    }
     setStarted(true);
     setWrongIds([]);
     setMessage(null);
-    setState((s) => setMushokuInput(s, selectedId, digit));
+    setState(next);
   };
 
   useEffect(() => {
@@ -107,6 +127,11 @@ export default function MushokuClient() {
 
   const onCheck = () => {
     const { state: next, evaluation } = checkMushoku(state);
+    // 正解で solved になる場合は終局ジングル側が担当する。
+    if (next.status !== "solved") {
+      if (evaluation.wrongIds.length > 0 || (evaluation.complete && !evaluation.consistent)) sfxWrong();
+      else if (!evaluation.complete) sfxCorrect();
+    }
     setState(next);
     setWrongIds(evaluation.wrongIds);
     if (evaluation.consistent) {
@@ -206,9 +231,13 @@ export default function MushokuClient() {
                 <button
                   key={col}
                   type="button"
+                  className={wrong ? "juice-shake" : selected ? "juice-pulse" : undefined}
                   aria-label={`${row + 1}行目 ${col + 1}列目のマス${cell.input !== null ? `（${cell.input}）` : "（空き）"}`}
                   aria-pressed={selected}
-                  onClick={() => setSelectedId(cell.id)}
+                  onClick={() => {
+                    sfxTap();
+                    setSelectedId(cell.id);
+                  }}
                   style={{
                     flex: 1,
                     minHeight: 52,
@@ -273,6 +302,16 @@ export default function MushokuClient() {
           {message}
         </p>
       ) : null}
+      {state.status === "solved" && (
+        <div style={{ maxWidth: 360, margin: "16px auto 0" }}>
+          <EndScreen outcome="win" title="クリア！" score={seconds} scoreLabel="クリア時間（秒）" onRetry={() => restart(level)}>
+            <p className="muted" style={{ margin: 0 }}>
+              {LEVELS.find((l) => l.key === level)?.label}
+              {best !== undefined ? ` ・ ベスト ${best} 秒` : ""}
+            </p>
+          </EndScreen>
+        </div>
+      )}
     </>
   );
 }

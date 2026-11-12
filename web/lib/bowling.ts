@@ -112,10 +112,15 @@ export function computeKnocked(
   return { knocked, rng: r };
 }
 
-/** 1投する。aim は AIM_MIN〜AIM_MAX、power は 0〜100。 */
-export function throwBall(state: BowlingState, aim: number, power: number): ThrowResult {
-  if (state.finished) return { state, knockedPins: [], knocked: 0 };
-  const { knocked, rng } = computeKnocked(state.standing, aim, power, state.rng);
+/**
+ * 倒れたピンの集合が決まった後の共通処理（フレーム進行・ラック付け替え・終了判定）。
+ * knocked は「今回倒れたピン」の真偽配列（index 0〜9）。rng は投球後の乱数状態。
+ */
+function applyKnocked(
+  state: BowlingState,
+  knocked: boolean[],
+  rng: number,
+): ThrowResult {
   const knockedPins: number[] = [];
   const standing = state.standing.map((s, i) => {
     if (s && knocked[i]) {
@@ -170,6 +175,29 @@ export function throwBall(state: BowlingState, aim: number, power: number): Thro
     knockedPins,
     knocked: knockedCount,
   };
+}
+
+/** 1投する。aim は AIM_MIN〜AIM_MAX、power は 0〜100。 */
+export function throwBall(state: BowlingState, aim: number, power: number): ThrowResult {
+  if (state.finished) return { state, knockedPins: [], knocked: 0 };
+  const { knocked, rng } = computeKnocked(state.standing, aim, power, state.rng);
+  return applyKnocked(state, knocked, rng);
+}
+
+/**
+ * 倒れたピンが外側（3D 物理など）で決まった場合の1投。
+ * pins は倒れたピンの番号（1〜10）の集合。現在立っていないピン・範囲外・重複は無視する。
+ * 乱数は消費しない（結果は呼び出し側で確定しているため）。
+ */
+export function throwPins(state: BowlingState, pins: Iterable<number>): ThrowResult {
+  if (state.finished) return { state, knockedPins: [], knocked: 0 };
+  const knocked = state.standing.map(() => false);
+  for (const p of pins) {
+    if (Number.isInteger(p) && p >= 1 && p <= 10 && state.standing[p - 1]) {
+      knocked[p - 1] = true;
+    }
+  }
+  return applyKnocked(state, knocked, state.rng);
 }
 
 /** 指定フレーム（0始まり）までに記録された rolls から、そのフレーム分だけを取り出す。 */

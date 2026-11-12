@@ -3,7 +3,7 @@
 // 記号を選んで数字パッドで割り当てる。端末内で完結し、ベストタイムは
 // localStorage の ago-alphametic-best に保存する。
 import Link from "next/link";
-import { useEffect, useState, type CSSProperties } from "react";
+import { useEffect, useRef, useState, type CSSProperties } from "react";
 import {
   alphameticTermValue,
   createAlphameticGame,
@@ -11,6 +11,8 @@ import {
   setAlphameticGuess,
   type AlphameticState,
 } from "@/lib/alphametic";
+import { sfxPlace, sfxTap, sfxWin } from "@/lib/sfx";
+import { EndScreen } from "../GameJuice";
 import { useGamesNav } from "../GamesShell";
 
 const BEST_KEY = "ago-alphametic-best";
@@ -40,6 +42,13 @@ export default function AlphameticClient() {
       setBest(null);
     }
   }, []);
+
+  const prevStatusRef = useRef(state.status);
+  useEffect(() => {
+    const prev = prevStatusRef.current;
+    prevStatusRef.current = state.status;
+    if (prev !== state.status && state.status === "won") sfxWin();
+  }, [state.status]);
 
   useEffect(() => {
     if (state.status !== "won" || seconds <= 0) return;
@@ -82,9 +91,13 @@ export default function AlphameticClient() {
             <button
               key={`${ch}-${i}`}
               type="button"
+              className={isSelected ? "juice-pulse" : undefined}
               aria-label={`記号 ${ch}${d !== undefined ? `（${d}）` : ""}`}
               aria-pressed={isSelected}
-              onClick={() => setSelected(isSelected ? null : ch)}
+              onClick={() => {
+                sfxTap();
+                setSelected(isSelected ? null : ch);
+              }}
               style={{
                 width: 52,
                 height: 62,
@@ -104,7 +117,11 @@ export default function AlphameticClient() {
               }}
             >
               <span>{ch}</span>
-              <span style={{ fontSize: 14, color: d !== undefined ? "var(--accent)" : "var(--muted, #999)", minHeight: 18 }}>
+              <span
+                key={d !== undefined ? d : "empty"}
+                className={d !== undefined ? "juice-pop" : undefined}
+                style={{ fontSize: 14, color: d !== undefined ? "var(--accent)" : "var(--muted, #999)", minHeight: 18 }}
+              >
                 {d !== undefined ? d : "・"}
               </span>
             </button>
@@ -194,7 +211,10 @@ export default function AlphameticClient() {
             (d === 0 && selected !== null && state.leading.includes(selected));
           return padBtn(String(d), disabled, () => {
             if (selected === null) return;
-            setState((s) => setAlphameticGuess(s, selected, d));
+            const next = setAlphameticGuess(state, selected, d);
+            // 完成（won）は終局ジングル側が担当する。
+            if (next !== state && next.status === "playing") sfxPlace();
+            setState(next);
           });
         })}
         {padBtn(
@@ -202,10 +222,23 @@ export default function AlphameticClient() {
           state.status !== "playing" || selected === null || state.guesses[selected] === undefined,
           () => {
             if (selected === null) return;
-            setState((s) => setAlphameticGuess(s, selected, null));
+            const next = setAlphameticGuess(state, selected, null);
+            if (next !== state) sfxTap();
+            setState(next);
           },
         )}
       </div>
+
+      {state.status === "won" && (
+        <div style={{ maxWidth: 560, margin: "16px auto 0" }}>
+          <EndScreen outcome="win" title="クリア！" score={seconds} scoreLabel="クリア時間（秒）" onRetry={restart}>
+            <p className="muted" style={{ margin: 0 }}>
+              {aVal} + {bVal} = {cVal} ・ 割り当て {state.moves} 手
+              {best !== null ? ` ・ ベスト ${best} 秒` : ""}
+            </p>
+          </EndScreen>
+        </div>
+      )}
 
       <p className="classic-status" style={{ justifyContent: "center" }}>
         {selected === null

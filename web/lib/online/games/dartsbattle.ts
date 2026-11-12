@@ -8,11 +8,15 @@
 // 同じ量・同じ条件）を加えて着弾点を決め、エリア判定で得点化する。
 // エリア判定の定数（セクター順・半径）はソロ版 lib/darts.ts と同一。
 // 投擲結果は全て公開情報。退出者は脱落し、その人の手番は飛ばす。
+// 1投ごとに制限時間（DB_THROW_TIME_MS）があり、tick が時間切れを
+// ミス投擲として記録して進行させる（放置で対戦が止まらないように）。
 import type { OnlineGameModule, Rng, SeatInfo } from "../types";
 
 export const DB_TOTAL_ROUNDS = 8;
 export const DB_THROWS_PER_TURN = 3;
 export const DB_JITTER_RADIUS = 0.05;
+/** 1投の制限時間（ms）。手番が進むたび・投げるたびに数え直す。 */
+export const DB_THROW_TIME_MS = 30000;
 
 const DB_SECTORS = [
   20, 1, 18, 4, 13, 6, 10, 15, 2, 17, 3, 19, 7, 16, 8, 11, 14, 9, 12, 5,
@@ -38,6 +42,8 @@ export interface DartsBattleState {
   finished: boolean;
   leftSeats: number[];
   lastThrow: { seat: number; hit: DbThrow } | null;
+  /** 現在の投擲の締切（ms epoch）。終了時は null。 */
+  turnEndsAt: number | null;
 }
 
 export type DartsBattleAction = { type: "throw"; x: number; y: number };
@@ -60,6 +66,8 @@ export interface DartsBattleView {
   throwsThisTurn: number;
   finished: boolean;
   lastThrow: { seat: number; hit: DbThrow } | null;
+  /** 現在の投擲の締切（ms epoch）。終了時は null。 */
+  turnEndsAt: number | null;
   you: { seat: number; left: boolean };
 }
 
@@ -147,6 +155,7 @@ function dbCreateState(
     finished: false,
     leftSeats: [],
     lastThrow: null,
+    turnEndsAt: Date.now() + DB_THROW_TIME_MS,
   };
 }
 
@@ -189,6 +198,7 @@ function dbApplyAction(
   if (next.throws[seat].length % DB_THROWS_PER_TURN === 0) {
     dbAdvanceTurn(next);
   }
+  next.turnEndsAt = next.finished ? null : Date.now() + DB_THROW_TIME_MS;
   return next;
 }
 
@@ -220,6 +230,7 @@ function dbViewFor(state: DartsBattleState, seat: number): DartsBattleView {
     throwsThisTurn: state.finished ? 0 : turnThrows % DB_THROWS_PER_TURN,
     finished: state.finished,
     lastThrow: state.lastThrow ? dbClone(state.lastThrow) : null,
+    turnEndsAt: state.finished ? null : state.turnEndsAt,
     you: { seat, left: state.leftSeats.includes(seat) },
   };
 }
@@ -247,6 +258,7 @@ function dbOnPlayerLeft(state: DartsBattleState, seat: number): DartsBattleState
   next.leftSeats.push(seat);
   if (dbActiveSeats(next).length <= 1) {
     next.finished = true;
+    next.turnEndsAt = null;
     return next;
   }
   if (wasTurn) {
@@ -254,13 +266,42 @@ function dbOnPlayerLeft(state: DartsBattleState, seat: number): DartsBattleState
       next.round += 1;
       if (next.round >= DB_TOTAL_ROUNDS) {
         next.finished = true;
+        next.turnEndsAt = null;
         return next;
       }
       next.turn = dbActiveSeats(next)[0];
     } else {
       next.turn = dbNextActive(next, seat);
     }
+    // 手番が移ったので、新しい手番プレイヤーに制限時間をはじめから与える。
+    next.turnEndsAt = Date.now() + DB_THROW_TIME_MS;
   }
+  return next;
+}
+
+/**
+ * 時間進行。現在の投擲が締切を過ぎていたら、その投擲を時間切れミス
+ * （0点）として記録し、必要なら手番を次へ進める。変化がなければ
+ * 同一参照を返す。
+ */
+function dbTick(state: DartsBattleState, now: number): DartsBattleState {
+  if (state.finished || state.turnEndsAt === null) return state;
+  if (now < state.turnEndsAt) return state;
+  const next = dbClone(state);
+  const seat = next.turn;
+  if (!dbIsActive(next, seat)) {
+    // 手番プレイヤーが既にいない異常系では、手番だけ進めて立て直す。
+    dbAdvanceTurn(next);
+    next.turnEndsAt = next.finished ? null : now + DB_THROW_TIME_MS;
+    return next;
+  }
+  const hit: DbThrow = { x: 2, y: 0, ...dbScoreDart(2, 0), label: "MISS（時間切れ）" };
+  next.throws[seat] = [...next.throws[seat], hit];
+  next.lastThrow = { seat, hit: dbClone(hit) };
+  if (next.throws[seat].length % DB_THROWS_PER_TURN === 0) {
+    dbAdvanceTurn(next);
+  }
+  next.turnEndsAt = next.finished ? null : now + DB_THROW_TIME_MS;
   return next;
 }
 
@@ -278,4 +319,5 @@ export const gameModule: OnlineGameModule<DartsBattleState, DartsBattleAction, D
   phaseOf: (state) => (state.finished ? "finished" : "playing"),
   isFinished: (state) => state.finished,
   onPlayerLeft: dbOnPlayerLeft,
+  tick: dbTick,
 };

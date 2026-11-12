@@ -4,6 +4,8 @@
 // 端末内で完結し、ベスト誤差は localStorage の ago-stopwatch-best に保存する。
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
+import { sfxPlace, sfxTap, sfxWin } from "@/lib/sfx";
+import { EndScreen } from "../GameJuice";
 import { useGamesNav } from "../GamesShell";
 
 const TARGET_MS = 10000;
@@ -33,6 +35,7 @@ export default function StopwatchClient() {
   const [resultMs, setResultMs] = useState<number | null>(null);
   const [blind, setBlind] = useState(false);
   const [best, setBest] = useState<number | null>(null);
+  const [resultInfo, setResultInfo] = useState<{ newBest: boolean; prevBest: number | null } | null>(null);
   const startRef = useRef(0);
   const rafRef = useRef<number | null>(null);
 
@@ -49,6 +52,8 @@ export default function StopwatchClient() {
   }, []);
 
   const start = () => {
+    sfxTap();
+    setResultInfo(null);
     if (rafRef.current !== null) cancelAnimationFrame(rafRef.current);
     startRef.current = performance.now();
     setResultMs(null);
@@ -69,6 +74,9 @@ export default function StopwatchClient() {
     setResultMs(finalMs);
     setPhase("stopped");
     const absDiff = Math.abs(finalMs - TARGET_MS);
+    if (absDiff <= 100) sfxWin();
+    else sfxPlace();
+    setResultInfo({ newBest: best === null || absDiff < best, prevBest: best });
     if (best === null || absDiff < best) {
       setBest(absDiff);
       try {
@@ -97,6 +105,7 @@ export default function StopwatchClient() {
       <div style={{ maxWidth: 480, margin: "0 auto", textAlign: "center" }}>
         <div
           aria-live="off"
+          className={phase === "stopped" ? "juice-pulse" : undefined}
           style={{
             fontSize: "clamp(56px, 16vw, 88px)",
             fontWeight: 800,
@@ -115,21 +124,22 @@ export default function StopwatchClient() {
         </p>
 
         {phase === "stopped" && diff !== null && resultMs !== null ? (
-          <div
-            role="status"
-            style={{
-              padding: "14px 16px",
-              borderRadius: 12,
-              border: "2px solid #c9b489",
-              background: "#fffdf6",
-              marginBottom: 16,
-            }}
-          >
-            <p style={{ margin: "0 0 4px", fontSize: 18, fontWeight: 800 }}>
-              結果 {formatSeconds(resultMs)} 秒 ・ 誤差 {diff >= 0 ? "+" : "−"}
-              {(Math.abs(diff) / 1000).toFixed(3)} 秒（{diff >= 0 ? "遅い" : "早い"}）
-            </p>
-            <p style={{ margin: 0 }}>{evaluate(Math.abs(diff))}</p>
+          <div style={{ marginBottom: 16, textAlign: "left" }}>
+            <EndScreen
+              outcome={Math.abs(diff) <= 100 ? "win" : "finish"}
+              title={evaluate(Math.abs(diff))}
+              score={Math.round(Math.abs(diff))}
+              scoreLabel="誤差（ミリ秒）"
+              newBest={resultInfo?.newBest ?? false}
+              previousBest={resultInfo && resultInfo.prevBest !== null ? Math.round(resultInfo.prevBest) : null}
+              onRetry={start}
+              retryLabel="もう一度スタート"
+            >
+              <p style={{ margin: 0 }}>
+                結果 {formatSeconds(resultMs)} 秒 ・ 誤差 {diff >= 0 ? "+" : "−"}
+                {(Math.abs(diff) / 1000).toFixed(3)} 秒（{diff >= 0 ? "遅い" : "早い"}）
+              </p>
+            </EndScreen>
           </div>
         ) : null}
 

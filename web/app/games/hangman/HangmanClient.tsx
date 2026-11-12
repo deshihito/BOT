@@ -2,7 +2,9 @@
 // ハングマン。ロジックは lib/hangman.ts（文字開示・ミス6回・勝敗）。
 // 画面のアルファベットキーと物理キーボードで入力できる。端末内で完結。
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { sfxCorrect, sfxLose, sfxWin, sfxWrong } from "@/lib/sfx";
+import { EndScreen } from "../GameJuice";
 import {
   createHangmanGame,
   displayWord,
@@ -44,15 +46,32 @@ export default function HangmanClient() {
   const { prefix } = useGamesNav();
   const [state, setState] = useState<HangmanState>(() => newGame());
 
+  const prevStatusRef = useRef(state.status);
+  useEffect(() => {
+    if (prevStatusRef.current === "playing" && state.status !== "playing") {
+      if (state.status === "won") sfxWin();
+      else sfxLose();
+    }
+    prevStatusRef.current = state.status;
+  }, [state.status]);
+
+  const doGuess = (letter: string) => {
+    if (state.status !== "playing") return;
+    if (state.guessed.includes(letter.toUpperCase())) return;
+    if (isLetterInWord(state, letter.toUpperCase())) sfxCorrect();
+    else sfxWrong();
+    setState(guessLetter(state, letter));
+  };
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key.length === 1 && /[a-zA-Z]/.test(e.key)) {
-        setState((s) => guessLetter(s, e.key));
+        doGuess(e.key);
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, []);
+  });
 
   const restart = () => setState(newGame());
   const shown = displayWord(state);
@@ -78,14 +97,16 @@ export default function HangmanClient() {
       <p className="classic-status" role="status">
         カテゴリ: <strong>{state.category}</strong> ・ あと {remainingMisses(state)} 回ミスできます
         {state.status === "won"
-          ? " ・ 🎉 正解！ 単語を当てました。"
+          ? " ・ 正解！ 単語を当てました。"
           : state.status === "lost"
             ? ` ・ 終了… 正解は ${state.word} でした。`
             : ""}
       </p>
 
       <div style={{ display: "flex", gap: 20, alignItems: "flex-start", flexWrap: "wrap" }}>
-        <Gallows misses={state.misses} />
+        <div key={state.misses} className={state.misses > 0 ? "juice-shake" : undefined}>
+          <Gallows misses={state.misses} />
+        </div>
         <div
           aria-label="単語"
           style={{
@@ -100,6 +121,7 @@ export default function HangmanClient() {
           {shown.split("").map((ch, i) => (
             <span
               key={i}
+              className={ch !== "_" ? "juice-pop" : undefined}
               style={{
                 display: "inline-flex",
                 alignItems: "center",
@@ -133,7 +155,7 @@ export default function HangmanClient() {
               type="button"
               disabled={used || state.status !== "playing"}
               aria-label={`${letter}${used ? "（入力済み）" : ""}`}
-              onClick={() => setState((s) => guessLetter(s, letter))}
+              onClick={() => doGuess(letter)}
               style={{
                 width: 38,
                 height: 38,
@@ -155,6 +177,19 @@ export default function HangmanClient() {
       <p className="muted" style={{ fontSize: 13, marginTop: 10 }}>
         物理キーボードの A〜Z でも入力できます。
       </p>
+
+      {state.status !== "playing" && (
+        <EndScreen
+          outcome={state.status === "won" ? "win" : "lose"}
+          title={state.status === "won" ? "正解！ 単語を当てました。" : `終了… 正解は ${state.word} でした。`}
+          onRetry={restart}
+          retryLabel="もう一度（別の単語）"
+        >
+          <p className="muted" style={{ textAlign: "center" }}>
+            単語 {state.word} ・ カテゴリ {state.category} ・ ミス {state.misses} 回
+          </p>
+        </EndScreen>
+      )}
     </>
   );
 }

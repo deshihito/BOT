@@ -10,6 +10,8 @@ import {
   type IceDir,
   type IceState,
 } from "@/lib/icemaze";
+import { sfxSlide, sfxTap, sfxWin } from "@/lib/sfx";
+import { EndScreen } from "../GameJuice";
 import { useGamesNav } from "../GamesShell";
 
 const BEST_KEY = "ago-icemaze-best";
@@ -29,6 +31,21 @@ export default function IceMazeClient() {
     }
   }, []);
 
+  const prevStatusRef = useRef(state.status);
+  const [winPrevBest, setWinPrevBest] = useState<number | null>(null);
+  const [winNewBest, setWinNewBest] = useState(false);
+
+  // 終局遷移の捕捉はベスト保存 effect より前に置き、保存前のベストを記録する。
+  useEffect(() => {
+    const prev = prevStatusRef.current;
+    prevStatusRef.current = state.status;
+    if (prev !== "won" && state.status === "won") {
+      setWinPrevBest(best);
+      setWinNewBest(best === null || state.moves < best);
+      sfxWin();
+    }
+  }, [state.status, state.moves, best]);
+
   useEffect(() => {
     if (state.status !== "won") return;
     if (best !== null && state.moves >= best) return;
@@ -42,11 +59,20 @@ export default function IceMazeClient() {
 
   const restart = useCallback(() => {
     setState(createIceMaze(Date.now() % 2147483647));
+    setWinPrevBest(null);
+    setWinNewBest(false);
   }, []);
 
-  const slide = useCallback((dir: IceDir) => {
-    setState((s) => slideIce(s, dir));
-  }, []);
+  const slide = useCallback(
+    (dir: IceDir) => {
+      const next = slideIce(state, dir);
+      if (next !== state) {
+        sfxSlide();
+        setState(next);
+      }
+    },
+    [state],
+  );
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -107,7 +133,7 @@ export default function IceMazeClient() {
         <span>氷の迷路</span>
       </nav>
 
-      <h1 style={{ fontSize: 22, margin: "8px 0" }}>🧊 氷の迷路</h1>
+      <h1 style={{ fontSize: 22, margin: "8px 0" }}>氷の迷路</h1>
       <p className="og-muted">
         矢印ボタンか方向キー、盤面のスワイプで滑ります。
       </p>
@@ -119,7 +145,10 @@ export default function IceMazeClient() {
         <button
           type="button"
           className="classic-btn"
-          onClick={() => setState((s) => undoIce(s))}
+          onClick={() => {
+            sfxTap();
+            setState((s) => undoIce(s));
+          }}
           disabled={state.history.length === 0}
         >
           1手戻す
@@ -156,6 +185,7 @@ export default function IceMazeClient() {
             <div
               key={i}
               role="gridcell"
+              className={isPlayer ? "juice-pop" : isGoal ? "juice-pulse" : undefined}
               aria-label={wall ? "壁" : isPlayer ? "現在位置" : isGoal ? "ゴール" : "床"}
               style={{
                 aspectRatio: "1",
@@ -174,7 +204,7 @@ export default function IceMazeClient() {
                 border: isPlayer ? "2px solid #1565c0" : "1px solid #cfe4f5",
               }}
             >
-              {wall ? "🧊" : isPlayer ? "⛄" : isGoal ? "🏁" : isStart ? "・" : ""}
+              {wall ? "" : isPlayer ? <span style={{ color: "#0d47a1" }}>●</span> : isGoal ? <span style={{ color: "#8d6e00" }}>◎</span> : isStart ? "・" : ""}
             </div>
           );
         })}
@@ -198,11 +228,23 @@ export default function IceMazeClient() {
       </div>
 
       {state.status === "won" && (
-        <p style={{ textAlign: "center", marginTop: 12 }}>
-          <button type="button" className="classic-btn" onClick={restart}>
-            もう一度遊ぶ
-          </button>
-        </p>
+        <div style={{ maxWidth: 420, margin: "14px auto 0" }}>
+          <EndScreen
+            outcome="win"
+            title="ゴールに止まれた！"
+            score={state.moves}
+            scoreLabel="手数"
+            newBest={winNewBest}
+            previousBest={winPrevBest}
+            onRetry={restart}
+            retryLabel="もう一度遊ぶ"
+          >
+            <p className="muted" style={{ margin: 0 }}>
+              {state.moves}手でクリア（最短 {state.minMoves} 手）
+              {state.moves <= state.minMoves ? "。最短手数です。" : "。"}
+            </p>
+          </EndScreen>
+        </div>
       )}
     </>
   );

@@ -3,7 +3,9 @@
 // 単語の選択は「始点タップ → 終点タップ」の2タップ式（ドラッグ不要でスマホ向け）。
 // 選択した直線が配置単語（逆順でも可）と一致すれば発見になる。
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { sfxCorrect, sfxTap, sfxWin, sfxWrong } from "@/lib/sfx";
+import { EndScreen } from "../GameJuice";
 import {
   createWordSearch,
   selectLine,
@@ -25,6 +27,17 @@ export default function WordSearchClient() {
   const [seconds, setSeconds] = useState(0);
   const [message, setMessage] = useState<string | null>(null);
   const [best, setBest] = useState<number | null>(null);
+  const [finishInfo, setFinishInfo] = useState<{ prevBest: number | null; isNewBest: boolean } | null>(null);
+  const prevStatusRef = useRef(state.status);
+
+  // クリアが確定した瞬間の「前回ベスト」を、ベスト更新 effect より先に記録する。
+  useEffect(() => {
+    if (prevStatusRef.current !== "won" && state.status === "won") {
+      setFinishInfo({ prevBest: best, isNewBest: best === null || seconds < best });
+      sfxWin();
+    }
+    prevStatusRef.current = state.status;
+  }, [state.status, seconds, best]);
 
   useEffect(() => {
     try {
@@ -73,16 +86,19 @@ export default function WordSearchClient() {
     setFirstTap(null);
     setSeconds(0);
     setMessage(null);
+    setFinishInfo(null);
   };
 
   const onCell = (index: number) => {
     if (state.status !== "playing") return;
     if (firstTap === null) {
+      sfxTap();
       setFirstTap(index);
       setMessage("単語の最後の文字をタップしてください。");
       return;
     }
     if (index === firstTap) {
+      sfxTap();
       setFirstTap(null);
       setMessage(null);
       return;
@@ -90,6 +106,7 @@ export default function WordSearchClient() {
     const line = wsLineCells(firstTap, index, state.size);
     if (!line) {
       // 直線にならない場合は、終点候補を選び直す。
+      sfxWrong();
       setFirstTap(index);
       setMessage("縦・横・斜めの直線になるように選んでください。");
       return;
@@ -99,9 +116,11 @@ export default function WordSearchClient() {
     setState(next);
     setFirstTap(null);
     if (next.found.length > before) {
+      sfxCorrect();
       const word = next.found[next.found.length - 1];
       setMessage(`「${word}」を見つけました！`);
     } else {
+      sfxWrong();
       setMessage("その単語はありませんでした。");
     }
   };
@@ -155,6 +174,7 @@ export default function WordSearchClient() {
               <button
                 key={i}
                 type="button"
+                className={isFound ? "juice-pop" : isFirst ? "juice-pulse" : undefined}
                 role="gridcell"
                 aria-label={`文字 ${ch}`}
                 aria-pressed={isFirst}
@@ -187,6 +207,7 @@ export default function WordSearchClient() {
               return (
                 <li
                   key={p.word}
+                  className={found ? "juice-pulse" : undefined}
                   style={{
                     padding: "6px 10px",
                     borderRadius: 8,
@@ -206,6 +227,22 @@ export default function WordSearchClient() {
           </ul>
         </div>
       </div>
+
+      {state.status === "won" && (
+        <EndScreen
+          outcome="win"
+          title="全部見つけました！クリアです"
+          score={seconds}
+          scoreLabel="タイム（秒）"
+          newBest={finishInfo?.isNewBest ?? false}
+          previousBest={finishInfo && !finishInfo.isNewBest ? finishInfo.prevBest : undefined}
+          onRetry={restart}
+        >
+          <p className="muted" style={{ textAlign: "center" }}>
+            {state.placements.length} 語すべて発見{state.mistakes > 0 ? ` ・ はずれ ${state.mistakes} 回` : ""}
+          </p>
+        </EndScreen>
+      )}
     </>
   );
 }

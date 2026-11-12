@@ -3,7 +3,7 @@
 // ボタン操作とキーボード（←→移動／↑回転／↓ソフトドロップ／スペース=ハードドロップ）。
 // 端末内で完結し、サーバーへ送信しない。
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   COLUMNS_COLS,
   COLUMNS_ROWS,
@@ -16,6 +16,8 @@ import {
   type ColumnsState,
 } from "@/lib/columns";
 import { useGamesNav } from "../GamesShell";
+import { sfxCorrect, sfxLose, sfxPlace, sfxSlide, sfxTap } from "@/lib/sfx";
+import { EndScreen, ScorePop } from "../GameJuice";
 
 const FALL_MS = 650;
 const BEST_KEY = "ago-columns-best";
@@ -29,11 +31,18 @@ export default function ColumnsClient() {
   const [state, setState] = useState<ColumnsState>(() => newGame());
   const [best, setBest] = useState<number | null>(null);
   const [started, setStarted] = useState(false);
+  const [scorePop, setScorePop] = useState<{ amount: number; key: number } | null>(null);
+  const prevBestRef = useRef<number | null>(null);
+  const prevScoreRef = useRef(0);
+  const prevClearedRef = useRef(0);
+  const endSoundRef = useRef<ColumnsState | null>(null);
 
   useEffect(() => {
     try {
       const saved = Number(window.localStorage.getItem(BEST_KEY));
-      setBest(Number.isFinite(saved) && saved > 0 ? saved : null);
+      const loaded = Number.isFinite(saved) && saved > 0 ? saved : null;
+      setBest(loaded);
+      prevBestRef.current = loaded;
     } catch {
       setBest(null);
     }
@@ -59,24 +68,41 @@ export default function ColumnsClient() {
     }
   }, [state.status, state.score, best]);
 
+  // スコアが伸びたら ScorePop と効果音、ゲームオーバーで敗北音。
+  useEffect(() => {
+    if (state.score > prevScoreRef.current) {
+      setScorePop({ amount: state.score - prevScoreRef.current, key: state.score });
+    }
+    prevScoreRef.current = state.score;
+    if (state.cleared > prevClearedRef.current) sfxCorrect();
+    prevClearedRef.current = state.cleared;
+  }, [state.score, state.cleared]);
+
+  useEffect(() => {
+    if (state.status !== "gameover") return;
+    if (endSoundRef.current === state) return;
+    endSoundRef.current = state;
+    sfxLose();
+  }, [state]);
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (!started) return;
       if (e.key === "ArrowLeft") {
         e.preventDefault();
-        setState((s) => moveColumns(s, -1));
+        doMove(-1);
       } else if (e.key === "ArrowRight") {
         e.preventDefault();
-        setState((s) => moveColumns(s, 1));
+        doMove(1);
       } else if (e.key === "ArrowUp") {
         e.preventDefault();
-        setState((s) => rotateColumns(s));
+        doRotate();
       } else if (e.key === "ArrowDown") {
         e.preventDefault();
-        setState((s) => stepColumns(s));
+        doStep();
       } else if (e.key === " ") {
         e.preventDefault();
-        setState((s) => dropColumns(s));
+        doDrop();
       }
     };
     window.addEventListener("keydown", onKey);
@@ -84,8 +110,28 @@ export default function ColumnsClient() {
   }, [started]);
 
   const restart = () => {
+    prevBestRef.current = best;
+    prevScoreRef.current = 0;
+    prevClearedRef.current = 0;
+    setScorePop(null);
     setState(newGame());
     setStarted(true);
+  };
+
+  const doMove = (dir: -1 | 1) => {
+    sfxSlide();
+    setState((s) => moveColumns(s, dir));
+  };
+  const doRotate = () => {
+    sfxTap();
+    doRotate();
+  };
+  const doStep = () => {
+    setState((s) => stepColumns(s));
+  };
+  const doDrop = () => {
+    sfxPlace();
+    setState((s) => dropColumns(s));
   };
 
   // 盤面＋落下中ブロックを合成して描く。
@@ -115,19 +161,19 @@ export default function ColumnsClient() {
         <button type="button" className="classic-btn" onClick={restart}>
           {started ? "もう一度" : "スタート"}
         </button>
-        <button type="button" className="classic-btn" onClick={() => setState((s) => moveColumns(s, -1))} disabled={!started}>
+        <button type="button" className="classic-btn" onClick={() => doMove(-1)} disabled={!started}>
           ← 左
         </button>
-        <button type="button" className="classic-btn" onClick={() => setState((s) => rotateColumns(s))} disabled={!started}>
+        <button type="button" className="classic-btn" onClick={doRotate} disabled={!started}>
           ↻ 回転
         </button>
-        <button type="button" className="classic-btn" onClick={() => setState((s) => moveColumns(s, 1))} disabled={!started}>
+        <button type="button" className="classic-btn" onClick={() => doMove(1)} disabled={!started}>
           右 →
         </button>
-        <button type="button" className="classic-btn" onClick={() => setState((s) => stepColumns(s))} disabled={!started}>
+        <button type="button" className="classic-btn" onClick={doStep} disabled={!started}>
           ↓ 落とす
         </button>
-        <button type="button" className="classic-btn" onClick={() => setState((s) => dropColumns(s))} disabled={!started}>
+        <button type="button" className="classic-btn" onClick={doDrop} disabled={!started}>
           ⤓ 一気に落とす
         </button>
       </div>
@@ -138,7 +184,7 @@ export default function ColumnsClient() {
         ) : !started ? (
           <span>スタートを押すと始まります。</span>
         ) : null}
-        <span>スコア {state.score}</span>
+        <span>スコア {state.score}{scorePop ? <ScorePop key={scorePop.key} amount={scorePop.amount} /> : null}</span>
         <span>消去 {state.cleared} 個</span>
         <span>最大 {state.maxChain} 連鎖</span>
         {best !== null ? <span>ベスト {best}</span> : null}
@@ -161,6 +207,7 @@ export default function ColumnsClient() {
           {cells.map((v, i) => (
             <div
               key={i}
+              className={v === null ? undefined : "juice-pop"}
               style={{
                 aspectRatio: "1",
                 borderRadius: "50%",
@@ -177,7 +224,8 @@ export default function ColumnsClient() {
           <div style={{ display: "grid", gap: 3, justifyContent: "center" }}>
             {state.next.map((g, i) => (
               <div
-                key={i}
+                key={`${state.cleared}-${state.score}-${i}-${g}`}
+                className="juice-pop"
                 style={{
                   width: 26,
                   height: 26,
@@ -190,6 +238,23 @@ export default function ColumnsClient() {
           </div>
         </div>
       </div>
+
+      {state.status === "gameover" ? (
+        <div style={{ maxWidth: 420, margin: "16px auto 0" }}>
+          <EndScreen
+            outcome="finish"
+            title="ゲームオーバー"
+            score={state.score}
+            newBest={state.score > 0 && (prevBestRef.current === null || state.score > prevBestRef.current)}
+            previousBest={prevBestRef.current}
+            onRetry={restart}
+          >
+            <p className="muted" style={{ margin: 0 }}>
+              消去 {state.cleared} 個 ・ 最大 {state.maxChain} 連鎖
+            </p>
+          </EndScreen>
+        </div>
+      ) : null}
     </>
   );
 }

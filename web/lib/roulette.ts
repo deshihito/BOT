@@ -127,8 +127,11 @@ export function betLabel(bet: RouletteBet): string {
       const d = typeof bet.value === "number" ? bet.value : 1;
       return `ダースン${d}（${(d - 1) * 12 + 1}-${d * 12}）`;
     }
-    case "column":
-      return `列${bet.value}`;
+    case "column": {
+      const c = typeof bet.value === "number" ? bet.value : 1;
+      // 列c は c, c+3, c+6, …, c+33 の12数字（c=1→1,4,…,34 / c=3→3,6,…,36）。
+      return `列${c}（${c}・${c + 3}・${c + 6}…${c + 33}）`;
+    }
     default:
       return "賭け";
   }

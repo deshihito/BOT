@@ -230,9 +230,9 @@ export function canDouble(state: BjState): boolean {
   );
 }
 
-/** 次のラウンドへ。チップが尽きていたら初期チップを再支給する。 */
+/** 次のラウンドへ。チップが最小ベット未満なら初期チップを再支給する。 */
 export function nextRound(state: BjState): BjState {
-  const chips = state.chips <= 0 ? BJ_INITIAL_CHIPS : state.chips;
+  const chips = state.chips < BJ_MIN_BET ? BJ_INITIAL_CHIPS : state.chips;
   return {
     ...state,
     chips,
@@ -245,8 +245,8 @@ export function nextRound(state: BjState): BjState {
   };
 }
 
-/** チップ再支給のみを行う（破産時）。ゲーム中は無効。 */
+/** チップ再支給のみを行う（最小ベット未満まで減ったとき）。ゲーム中は無効。 */
 export function refillChips(state: BjState): BjState {
-  if (state.phase === "player" || state.chips > 0) return state;
+  if (state.phase === "player" || state.chips >= BJ_MIN_BET) return state;
   return { ...state, chips: BJ_INITIAL_CHIPS };
 }

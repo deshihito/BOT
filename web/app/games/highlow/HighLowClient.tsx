@@ -2,7 +2,9 @@
 // ハイ＆ロー。ロジックは lib/highlow.ts。
 // 次のカードが今より高いか低いかを当て続ける。外すと終了、同数は引き分けで続行。
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { sfxCorrect, sfxLose, sfxTap, sfxWin } from "@/lib/sfx";
+import { EndScreen } from "../GameJuice";
 import {
   createHighLowGame,
   guessHighLow,
@@ -75,6 +77,25 @@ export default function HighLowClient() {
     }
   }, [state.bestStreak, best]);
 
+  const prevStatusRef = useRef(state.status);
+  useEffect(() => {
+    if (prevStatusRef.current !== "finished" && state.status === "finished") {
+      if (state.finishReason === "cleared") sfxWin();
+      else sfxLose();
+    }
+    prevStatusRef.current = state.status;
+  }, [state.status, state.finishReason]);
+
+  const onGuess = (dir: "high" | "low") => {
+    if (state.status !== "playing") return;
+    const next = guessHighLow(state, dir);
+    if (next.last) {
+      if (next.last.result === "correct") sfxCorrect();
+      else if (next.last.result === "draw") sfxTap();
+    }
+    setState(next);
+  };
+
   const current = highLowCurrent(state);
   const last = state.last;
   const lastText = !last
@@ -107,7 +128,7 @@ export default function HighLowClient() {
       </p>
 
       <div style={{ display: "flex", gap: 18, alignItems: "center", justifyContent: "center", margin: "14px 0 20px", flexWrap: "wrap" }}>
-        <div style={{ textAlign: "center" }}>
+        <div key={`${current}-${state.streak}`} className="juice-flip" style={{ textAlign: "center" }}>
           {current !== null ? <CardFace card={current} /> : null}
           <p className="muted" style={{ margin: "8px 0 0" }}>
             {last ? "今のカード（前にめくったカード）" : "最初のカード"}
@@ -151,7 +172,7 @@ export default function HighLowClient() {
               cursor: "pointer",
               touchAction: "manipulation",
             }}
-            onClick={() => setState((s) => guessHighLow(s, "high"))}
+            onClick={() => onGuess("high")}
           >
             ↑ 高い
           </button>
@@ -169,26 +190,22 @@ export default function HighLowClient() {
               cursor: "pointer",
               touchAction: "manipulation",
             }}
-            onClick={() => setState((s) => guessHighLow(s, "low"))}
+            onClick={() => onGuess("low")}
           >
             ↓ 低い
           </button>
         </div>
       ) : (
-        <div style={{ textAlign: "center" }}>
-          <p style={{ fontSize: 20, fontWeight: 800, margin: "6px 0" }}>
-            {state.finishReason === "cleared" ? "🎉 全カード制覇！" : `連続 ${state.bestStreak} 回で終了`}
-          </p>
-          <p className="muted" style={{ margin: "4px 0 14px" }}>正解 {state.correctTotal} 回 ・ ベスト記録 {Math.max(best, state.bestStreak)} 回</p>
-          <button
-            type="button"
-            className="classic-btn"
-            style={{ minHeight: 48, padding: "10px 28px", fontSize: 16 }}
-            onClick={() => setState(newGame())}
-          >
-            もう一度
-          </button>
-        </div>
+        <EndScreen
+          outcome={state.finishReason === "cleared" ? "win" : "lose"}
+          title={state.finishReason === "cleared" ? "全カード制覇！" : `連続 ${state.bestStreak} 回で終了`}
+          score={state.bestStreak}
+          scoreLabel="連続正解"
+          previousBest={best > state.bestStreak ? best : undefined}
+          onRetry={() => setState(newGame())}
+        >
+          <p className="muted" style={{ textAlign: "center" }}>正解 {state.correctTotal} 回 ・ ベスト記録 {Math.max(best, state.bestStreak)} 回</p>
+        </EndScreen>
       )}
     </>
   );

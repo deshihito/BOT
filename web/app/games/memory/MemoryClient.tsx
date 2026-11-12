@@ -3,15 +3,18 @@
 // 2枚開いたら、一致はすぐ・不一致は少し見せてから settlePair で照合する。
 // 端末内で完結し、サーバーへ送信しない。
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   createMemoryGame,
   flipCard,
   isPairPending,
+  memorySymbol,
   pendingIsMatch,
   settlePair,
   type MemState,
 } from "@/lib/memory-match";
+import { sfxCorrect, sfxFlip, sfxWin, sfxWrong } from "@/lib/sfx";
+import { EndScreen } from "../GameJuice";
 import { useGamesNav } from "../GamesShell";
 
 const LEVELS = [
@@ -20,6 +23,49 @@ const LEVELS = [
 ] as const;
 
 type LevelKey = (typeof LEVELS)[number]["key"];
+
+function polygonPoints(n: number, r: number, innerRatio?: number): string {
+  const count = innerRatio === undefined ? n : n * 2;
+  return Array.from({ length: count }, (_, i) => {
+    const angle = ((i * 360) / count - 90) * (Math.PI / 180);
+    const radius = innerRatio === undefined || i % 2 === 0 ? r : r * innerRatio;
+    return `${(50 + radius * Math.cos(angle)).toFixed(1)},${(50 + radius * Math.sin(angle)).toFixed(1)}`;
+  }).join(" ");
+}
+
+/** カードの絵柄（形×色の SVG 図形）。 */
+function MemorySymbolIcon({ icon }: { icon: string }) {
+  const s = memorySymbol(icon);
+  const shape =
+    s.shape === "circle" ? (
+      <circle cx="50" cy="50" r="36" fill={s.color} />
+    ) : s.shape === "triangle" ? (
+      <polygon points="50,14 86,80 14,80" fill={s.color} />
+    ) : s.shape === "square" ? (
+      <rect x="16" y="16" width="68" height="68" rx="6" fill={s.color} />
+    ) : s.shape === "star" ? (
+      <polygon points={polygonPoints(5, 40, 0.42)} fill={s.color} />
+    ) : s.shape === "diamond" ? (
+      <polygon points="50,10 88,50 50,90 12,50" fill={s.color} />
+    ) : s.shape === "heart" ? (
+      <path
+        d="M50 86 C18 62 10 44 10 30 C10 17 20 8 32 8 C41 8 47 14 50 21 C53 14 59 8 68 8 C80 8 90 17 90 30 C90 44 82 62 50 86 Z"
+        fill={s.color}
+      />
+    ) : s.shape === "pentagon" ? (
+      <polygon points={polygonPoints(5, 38)} fill={s.color} />
+    ) : (
+      <polygon
+        points="38,12 62,12 62,38 88,38 88,62 62,62 62,88 38,88 38,62 12,62 12,38 38,38"
+        fill={s.color}
+      />
+    );
+  return (
+    <svg width="1.35em" height="1.35em" viewBox="0 0 100 100" aria-hidden="true" style={{ display: "block" }}>
+      {shape}
+    </svg>
+  );
+}
 
 export default function MemoryClient() {
   const { prefix } = useGamesNav();
@@ -31,8 +77,16 @@ export default function MemoryClient() {
 
   useEffect(() => {
     if (!isPairPending(state)) return;
-    const delay = pendingIsMatch(state) ? 350 : 850;
-    const id = setTimeout(() => setState((s) => settlePair(s)), delay);
+    const matched = pendingIsMatch(state);
+    const delay = matched ? 350 : 850;
+    const id = setTimeout(() => {
+      if (matched) {
+        sfxCorrect();
+      } else {
+        sfxWrong();
+      }
+      setState((s) => settlePair(s));
+    }, delay);
     return () => clearTimeout(id);
   }, [state]);
 
@@ -63,11 +117,38 @@ export default function MemoryClient() {
     }
   }, [state.status, state.moves, best, pairs]);
 
+  // 勝利への遷移で1回だけジングルを鳴らし、その時点のベストと比較した結果を保持する。
+  const prevStatusRef = useRef(state.status);
+  const [winResult, setWinResult] = useState<{ newBest: boolean; prevBest: number | null } | null>(null);
+  useEffect(() => {
+    const prev = prevStatusRef.current;
+    prevStatusRef.current = state.status;
+    if (state.status === "won" && prev !== "won") {
+      sfxWin();
+      setWinResult({ newBest: best === null || state.moves < best, prevBest: best });
+    }
+  }, [state.status, state.moves, best]);
+
+  const onFlip = (index: number) => {
+    const card = state.cards[index];
+    if (
+      state.status === "playing" &&
+      card &&
+      !card.matched &&
+      !state.faceUp.includes(index) &&
+      state.faceUp.length < 2
+    ) {
+      sfxFlip();
+    }
+    setState((s) => flipCard(s, index));
+  };
+
   const restart = (key: LevelKey = levelKey) => {
     const level = LEVELS.find((l) => l.key === key) ?? LEVELS[1];
     setLevelKey(key);
     setState(createMemoryGame(Date.now() % 2147483647, level.pairs));
     setSeconds(0);
+    setWinResult(null);
   };
 
   return (
@@ -110,19 +191,40 @@ export default function MemoryClient() {
               key={i}
               type="button"
               role="gridcell"
-              className={faceUp ? "mem-card mem-card-up" : "mem-card"}
-              aria-label={faceUp ? card.icon : "裏向きのカード"}
+              className={faceUp ? "mem-card mem-card-up juice-flip" : "mem-card"}
+              aria-label={faceUp ? memorySymbol(card.icon).label : "裏向きのカード"}
               aria-pressed={faceUp}
-              onClick={() => setState((s) => flipCard(s, i))}
+              onClick={() => onFlip(i)}
             >
               <span className="mem-card-inner">
-                <span className="mem-face mem-face-back" aria-hidden="true">✦</span>
-                <span className="mem-face mem-face-front" aria-hidden="true">{card.icon}</span>
+                <span className="mem-face mem-face-back" aria-hidden="true">
+                  <svg width="1em" height="1em" viewBox="0 0 100 100" style={{ display: "block" }}>
+                    <polygon points={polygonPoints(5, 42, 0.42)} fill="#ffffff" />
+                  </svg>
+                </span>
+                <span className="mem-face mem-face-front" aria-hidden="true">
+                  <MemorySymbolIcon icon={card.icon} />
+                </span>
               </span>
             </button>
           );
         })}
       </div>
+
+      {state.status === "won" ? (
+        <EndScreen
+          outcome="win"
+          score={state.moves}
+          scoreLabel="手数"
+          newBest={winResult?.newBest}
+          previousBest={winResult && !winResult.newBest ? winResult.prevBest : undefined}
+          onRetry={() => restart()}
+        >
+          <p className="muted">
+            {seconds} 秒でクリア ・ そろったペア {state.matchedPairs} / {pairs}
+          </p>
+        </EndScreen>
+      ) : null}
 
       <div className="classic-controls">
         <button type="button" className="classic-btn" onClick={() => restart()}>

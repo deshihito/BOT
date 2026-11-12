@@ -312,3 +312,44 @@ test("ワードウルフ: parseAction の形式検証", () => {
   assert.equal(ww.gameModule.parseAction({ type: "nope" }), null);
   assert.equal(ww.gameModule.parseAction(null), null);
 });
+
+test("ワードウルフ: 投票に締切があり、tick で未投票者を棄権として集計する", () => {
+  let s = toVote(startWw(4, 42));
+  assert.equal(s.phase, "vote");
+  assert.equal(typeof s.voteEndsAt, "number");
+  // ビューにも締切が伝わる。
+  assert.equal(ww.gameModule.viewFor(s, 0).voteEndsAt, s.voteEndsAt);
+  // 締切前は同一参照。
+  assert.equal(ww.gameModule.tick(s, s.voteEndsAt - 1), s);
+  const wolf = s.wolfSeat;
+  const voters = s.players.filter((p) => p.seat !== wolf).slice(0, 2);
+  for (const v of voters) {
+    s = ww.gameModule.applyAction(s, v.seat, { type: "vote", target: wolf }, seeded(1));
+  }
+  assert.equal(s.phase, "vote", "まだ全員分そろっていないので投票中");
+  // 締切で残りは棄権扱いになり、入った票（ウルフへの2票）で決着する。
+  s = ww.gameModule.tick(s, s.voteEndsAt + 1);
+  assert.equal(s.phase, "finished");
+  assert.equal(s.winner, "majority");
+  assert.equal(s.caughtSeat, wolf);
+});
+
+test("ワードウルフ: 投票で1票も入らなければ締切でウルフの逃げ切り", () => {
+  let s = toVote(startWw(4, 42));
+  s = ww.gameModule.tick(s, s.voteEndsAt + 1);
+  assert.equal(s.phase, "finished");
+  assert.equal(s.winner, "wolf");
+  assert.equal(s.caughtSeat, null);
+});
+
+test("ワードウルフ: 決選投票にも締切があり、過ぎると集計される", () => {
+  let s = toVote(startWw(4, 42));
+  const first = { 0: 1, 1: 0, 2: 1, 3: 0 };
+  s = voteAll(s, (seat) => first[seat]);
+  assert.equal(s.phase, "revote");
+  assert.equal(typeof s.voteEndsAt, "number");
+  // 誰も決選投票をしないまま締切 → 同票のままなのでウルフの勝ち。
+  s = ww.gameModule.tick(s, s.voteEndsAt + 1);
+  assert.equal(s.phase, "finished");
+  assert.equal(s.winner, "wolf");
+});

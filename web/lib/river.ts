@@ -11,7 +11,10 @@ export type RiverStatus = "playing" | "won" | "failed";
 export type RiverItemDef = {
   id: string;
   name: string;
-  emoji: string;
+  /** チップに大きく出す漢字1字。 */
+  kanji: string;
+  /** チップのバッジ色（CSS カラー）。 */
+  color: string;
 };
 
 export type RiverProblem = {
@@ -31,9 +34,9 @@ export const RIVER_PROBLEMS: RiverProblem[] = [
     title: "オオカミとヤギとキャベツ",
     description: "古典題。オオカミはヤギを、ヤギはキャベツを食べてしまう。ボートには荷物1つまで。",
     items: [
-      { id: "wolf", name: "オオカミ", emoji: "🐺" },
-      { id: "goat", name: "ヤギ", emoji: "🐐" },
-      { id: "cabbage", name: "キャベツ", emoji: "🥬" },
+      { id: "wolf", name: "オオカミ", kanji: "狼", color: "#5b6b7c" },
+      { id: "goat", name: "ヤギ", kanji: "山", color: "#a16207" },
+      { id: "cabbage", name: "キャベツ", kanji: "菜", color: "#3f9142" },
     ],
     dangerPairs: [
       ["wolf", "goat"],
@@ -46,9 +49,9 @@ export const RIVER_PROBLEMS: RiverProblem[] = [
     title: "キツネとニワトリとトウモロコシ",
     description: "キツネはニワトリを、ニワトリはトウモロコシをつついてしまう。ボートには荷物1つまで。",
     items: [
-      { id: "fox", name: "キツネ", emoji: "🦊" },
-      { id: "chicken", name: "ニワトリ", emoji: "🐔" },
-      { id: "corn", name: "トウモロコシ", emoji: "🌽" },
+      { id: "fox", name: "キツネ", kanji: "狐", color: "#c2571b" },
+      { id: "chicken", name: "ニワトリ", kanji: "鶏", color: "#a03d2d" },
+      { id: "corn", name: "トウモロコシ", kanji: "玉", color: "#c99700" },
     ],
     dangerPairs: [
       ["fox", "chicken"],
@@ -61,9 +64,9 @@ export const RIVER_PROBLEMS: RiverProblem[] = [
     title: "大きなボート",
     description: "荷物2つまで乗せられる大きなボート。古典題も一気に短くなる。",
     items: [
-      { id: "wolf", name: "オオカミ", emoji: "🐺" },
-      { id: "goat", name: "ヤギ", emoji: "🐐" },
-      { id: "cabbage", name: "キャベツ", emoji: "🥬" },
+      { id: "wolf", name: "オオカミ", kanji: "狼", color: "#5b6b7c" },
+      { id: "goat", name: "ヤギ", kanji: "山", color: "#a16207" },
+      { id: "cabbage", name: "キャベツ", kanji: "菜", color: "#3f9142" },
     ],
     dangerPairs: [
       ["wolf", "goat"],
@@ -76,10 +79,10 @@ export const RIVER_PROBLEMS: RiverProblem[] = [
     title: "イヌとネコとネズミとチーズ",
     description: "荷物2つまで。イヌはネコを、ネコはネズミを、ネズミはチーズを追いかける。",
     items: [
-      { id: "dog", name: "イヌ", emoji: "🐶" },
-      { id: "cat", name: "ネコ", emoji: "🐱" },
-      { id: "mouse", name: "ネズミ", emoji: "🐭" },
-      { id: "cheese", name: "チーズ", emoji: "🧀" },
+      { id: "dog", name: "イヌ", kanji: "犬", color: "#7c5c2e" },
+      { id: "cat", name: "ネコ", kanji: "猫", color: "#5a4fcf" },
+      { id: "mouse", name: "ネズミ", kanji: "鼠", color: "#707a88" },
+      { id: "cheese", name: "チーズ", kanji: "酪", color: "#a87e0a" },
     ],
     dangerPairs: [
       ["dog", "cat"],
@@ -93,9 +96,9 @@ export const RIVER_PROBLEMS: RiverProblem[] = [
     title: "ネコとトリとサカナ",
     description: "ネコはトリもサカナも狙ってしまう。トリとサカナだけなら大丈夫。ボートには荷物1つまで。",
     items: [
-      { id: "cat", name: "ネコ", emoji: "🐱" },
-      { id: "bird", name: "トリ", emoji: "🐦" },
-      { id: "fish", name: "サカナ", emoji: "🐟" },
+      { id: "cat", name: "ネコ", kanji: "猫", color: "#5a4fcf" },
+      { id: "bird", name: "トリ", kanji: "鳥", color: "#2f7fb8" },
+      { id: "fish", name: "サカナ", kanji: "魚", color: "#1f8a8a" },
     ],
     dangerPairs: [
       ["cat", "bird"],
@@ -108,10 +111,10 @@ export const RIVER_PROBLEMS: RiverProblem[] = [
     title: "花といっしょに",
     description: "荷物2つまで。花は誰にも食べられないので、危ない組み合わせを避けるクッションにできる。",
     items: [
-      { id: "wolf", name: "オオカミ", emoji: "🐺" },
-      { id: "goat", name: "ヤギ", emoji: "🐐" },
-      { id: "cabbage", name: "キャベツ", emoji: "🥬" },
-      { id: "flower", name: "花", emoji: "🌸" },
+      { id: "wolf", name: "オオカミ", kanji: "狼", color: "#5b6b7c" },
+      { id: "goat", name: "ヤギ", kanji: "山", color: "#a16207" },
+      { id: "cabbage", name: "キャベツ", kanji: "菜", color: "#3f9142" },
+      { id: "flower", name: "花", kanji: "花", color: "#d1609e" },
     ],
     dangerPairs: [
       ["wolf", "goat"],
@@ -124,9 +127,9 @@ export const RIVER_PROBLEMS: RiverProblem[] = [
     title: "クマとハチミツとミツバチ",
     description: "クマはハチミツをなめてしまい、ミツバチには刺されてしまう。クマを他の2つと離しておく。ボートには荷物1つまで。",
     items: [
-      { id: "bear", name: "クマ", emoji: "🐻" },
-      { id: "honey", name: "ハチミツ", emoji: "🍯" },
-      { id: "bee", name: "ミツバチ", emoji: "🐝" },
+      { id: "bear", name: "クマ", kanji: "熊", color: "#6e4f2a" },
+      { id: "honey", name: "ハチミツ", kanji: "蜜", color: "#c98a04" },
+      { id: "bee", name: "ミツバチ", kanji: "蜂", color: "#7a6200" },
     ],
     dangerPairs: [
       ["bear", "honey"],
@@ -139,11 +142,11 @@ export const RIVER_PROBLEMS: RiverProblem[] = [
     title: "ネコを中心に5匹",
     description: "荷物2つまで。イヌはネコを、ネコはネズミとトリを追いかけ、トリはタマゴをつついてしまう。",
     items: [
-      { id: "dog", name: "イヌ", emoji: "🐶" },
-      { id: "cat", name: "ネコ", emoji: "🐱" },
-      { id: "mouse", name: "ネズミ", emoji: "🐭" },
-      { id: "bird", name: "トリ", emoji: "🐦" },
-      { id: "egg", name: "タマゴ", emoji: "🥚" },
+      { id: "dog", name: "イヌ", kanji: "犬", color: "#7c5c2e" },
+      { id: "cat", name: "ネコ", kanji: "猫", color: "#5a4fcf" },
+      { id: "mouse", name: "ネズミ", kanji: "鼠", color: "#707a88" },
+      { id: "bird", name: "トリ", kanji: "鳥", color: "#2f7fb8" },
+      { id: "egg", name: "タマゴ", kanji: "卵", color: "#8f8578" },
     ],
     dangerPairs: [
       ["dog", "cat"],
@@ -158,12 +161,12 @@ export const RIVER_PROBLEMS: RiverProblem[] = [
     title: "オオカミ組とキツネ組",
     description: "荷物2つまで。オオカミはヤギを、ヤギはキャベツを、キツネはニワトリを、ニワトリはトウモロコシを狙う。2組のチェーンを同時にさばく。",
     items: [
-      { id: "wolf", name: "オオカミ", emoji: "🐺" },
-      { id: "goat", name: "ヤギ", emoji: "🐐" },
-      { id: "cabbage", name: "キャベツ", emoji: "🥬" },
-      { id: "fox", name: "キツネ", emoji: "🦊" },
-      { id: "chicken", name: "ニワトリ", emoji: "🐔" },
-      { id: "corn", name: "トウモロコシ", emoji: "🌽" },
+      { id: "wolf", name: "オオカミ", kanji: "狼", color: "#5b6b7c" },
+      { id: "goat", name: "ヤギ", kanji: "山", color: "#a16207" },
+      { id: "cabbage", name: "キャベツ", kanji: "菜", color: "#3f9142" },
+      { id: "fox", name: "キツネ", kanji: "狐", color: "#c2571b" },
+      { id: "chicken", name: "ニワトリ", kanji: "鶏", color: "#a03d2d" },
+      { id: "corn", name: "トウモロコシ", kanji: "玉", color: "#c99700" },
     ],
     dangerPairs: [
       ["wolf", "goat"],
@@ -178,11 +181,11 @@ export const RIVER_PROBLEMS: RiverProblem[] = [
     title: "オオカミとイヌとヒツジ",
     description: "荷物2つまで。オオカミはヒツジとイヌを、イヌもヒツジを追いかけ、ヒツジはキャベツも草も食べてしまう。",
     items: [
-      { id: "wolf", name: "オオカミ", emoji: "🐺" },
-      { id: "sheep", name: "ヒツジ", emoji: "🐑" },
-      { id: "dog", name: "イヌ", emoji: "🐶" },
-      { id: "cabbage", name: "キャベツ", emoji: "🥬" },
-      { id: "grass", name: "草", emoji: "🌿" },
+      { id: "wolf", name: "オオカミ", kanji: "狼", color: "#5b6b7c" },
+      { id: "sheep", name: "ヒツジ", kanji: "羊", color: "#7d7461" },
+      { id: "dog", name: "イヌ", kanji: "犬", color: "#7c5c2e" },
+      { id: "cabbage", name: "キャベツ", kanji: "菜", color: "#3f9142" },
+      { id: "grass", name: "草", kanji: "草", color: "#4c9a3f" },
     ],
     dangerPairs: [
       ["wolf", "sheep"],
@@ -198,11 +201,11 @@ export const RIVER_PROBLEMS: RiverProblem[] = [
     title: "牧場の見張り",
     description: "荷物2つまで。オオカミはヒツジもヤギも狙い、ヒツジはキャベツを、ヤギはキャベツもニンジンも食べてしまう。",
     items: [
-      { id: "wolf", name: "オオカミ", emoji: "🐺" },
-      { id: "sheep", name: "ヒツジ", emoji: "🐑" },
-      { id: "goat", name: "ヤギ", emoji: "🐐" },
-      { id: "cabbage", name: "キャベツ", emoji: "🥬" },
-      { id: "carrot", name: "ニンジン", emoji: "🥕" },
+      { id: "wolf", name: "オオカミ", kanji: "狼", color: "#5b6b7c" },
+      { id: "sheep", name: "ヒツジ", kanji: "羊", color: "#7d7461" },
+      { id: "goat", name: "ヤギ", kanji: "山", color: "#a16207" },
+      { id: "cabbage", name: "キャベツ", kanji: "菜", color: "#3f9142" },
+      { id: "carrot", name: "ニンジン", kanji: "参", color: "#d1542c" },
     ],
     dangerPairs: [
       ["wolf", "sheep"],
@@ -218,11 +221,11 @@ export const RIVER_PROBLEMS: RiverProblem[] = [
     title: "キツネと2つのエサ",
     description: "荷物2つまで。キツネはウサギもニワトリも狙い、ウサギはニンジンを、ニワトリはトウモロコシをつついてしまう。",
     items: [
-      { id: "fox", name: "キツネ", emoji: "🦊" },
-      { id: "rabbit", name: "ウサギ", emoji: "🐰" },
-      { id: "chicken", name: "ニワトリ", emoji: "🐔" },
-      { id: "carrot", name: "ニンジン", emoji: "🥕" },
-      { id: "corn", name: "トウモロコシ", emoji: "🌽" },
+      { id: "fox", name: "キツネ", kanji: "狐", color: "#c2571b" },
+      { id: "rabbit", name: "ウサギ", kanji: "兎", color: "#a05a7a" },
+      { id: "chicken", name: "ニワトリ", kanji: "鶏", color: "#a03d2d" },
+      { id: "carrot", name: "ニンジン", kanji: "参", color: "#d1542c" },
+      { id: "corn", name: "トウモロコシ", kanji: "玉", color: "#c99700" },
     ],
     dangerPairs: [
       ["fox", "rabbit"],

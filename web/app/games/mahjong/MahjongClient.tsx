@@ -3,7 +3,7 @@
 // フリーな牌（上に牌が無く、左右どちらかが空いている）を選んで、
 // 同じ種類のペアを取り除いていく。端末内で完結し、サーバーへ送信しない。
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   MJ_BOARD_H,
   MJ_BOARD_W,
@@ -16,6 +16,8 @@ import {
   removePair,
   type MjState,
 } from "@/lib/mahjong";
+import { sfxLose, sfxPlace, sfxTap, sfxWin } from "@/lib/sfx";
+import { EndScreen } from "../GameJuice";
 import { useGamesNav } from "../GamesShell";
 
 function newGame(): MjState {
@@ -32,6 +34,15 @@ export default function MahjongClient() {
   const pairs = useMemo(() => availablePairs(state), [state]);
   const remaining = remainingCount(state);
 
+  const prevStatusRef = useRef(state.status);
+  useEffect(() => {
+    const prev = prevStatusRef.current;
+    prevStatusRef.current = state.status;
+    if (prev === state.status || state.status === "playing") return;
+    if (state.status === "won") sfxWin();
+    else if (state.status === "stuck") sfxLose();
+  }, [state.status]);
+
   const restart = () => {
     setState(newGame());
     setSelected(null);
@@ -43,25 +54,32 @@ export default function MahjongClient() {
     const tile = state.tiles[id];
     if (!tile || tile.removed) return;
     if (selected === id) {
+      sfxTap();
       setSelected(null);
       return;
     }
     if (!free.has(id)) return;
     if (selected === null) {
+      sfxTap();
       setSelected(id);
       return;
     }
     const first = state.tiles[selected];
     if (first && first.kind === tile.kind) {
-      setState((s) => removePair(s, selected, id));
+      const next = removePair(state, selected, id);
+      // 終局（won）は終局ジングル側が担当するので、ここでは置き音だけ。
+      if (next.status === "playing") sfxPlace();
+      setState(next);
       setSelected(null);
       setHint(null);
     } else {
+      sfxTap();
       setSelected(id);
     }
   };
 
   const onHint = () => {
+    sfxTap();
     const pair = hintPair(state);
     setHint(pair);
     setSelected(null);
@@ -144,6 +162,7 @@ export default function MahjongClient() {
               }}
             >
               <span
+                className={isSelected || isHint ? "juice-pulse" : undefined}
                 style={{
                   display: "flex",
                   alignItems: "center",
@@ -169,6 +188,17 @@ export default function MahjongClient() {
           );
         })}
       </div>
+      {state.status !== "playing" && (
+        <EndScreen
+          outcome={state.status === "won" ? "win" : "lose"}
+          title={state.status === "won" ? "クリア！" : "取れるペアがありません"}
+          onRetry={restart}
+        >
+          <p className="muted" style={{ margin: 0 }}>
+            残り {remaining} 枚 ・ {state.moves} 手 ・ 取れるペア {pairs.length} 組
+          </p>
+        </EndScreen>
+      )}
       <p className="muted" style={{ fontSize: 13 }}>
         層が高い牌ほど手前にずれて表示されます。暗い牌は今は取れません。
       </p>

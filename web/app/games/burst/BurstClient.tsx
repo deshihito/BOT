@@ -58,6 +58,8 @@ function Board({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
   const [selected, setSelected] = useState<number | null>(null);
   const [now, setNow] = useState(() => Date.now());
   const finishRef = useRef<string | null>(null);
+  const turnKeyRef = useRef<string | null>(null);
+  const chooseRef = useRef<boolean>(false);
 
   useEffect(() => {
     const id = setInterval(() => setNow(Date.now()), 250);
@@ -75,6 +77,24 @@ function Board({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
     const myRank = state.standings?.find((s) => s.seat === mySeat)?.rank;
     playSe(myRank === 1 ? "win" : "click");
   }, [state, mySeat, view.code]);
+
+  // 新しいラウンドの選択が始まったら知らせる（ラウンド遷移で1回だけ）
+  useEffect(() => {
+    if (!state || state.phase !== "selecting") return;
+    const key = `${view.code}:${state.round}`;
+    const prev = turnKeyRef.current;
+    turnKeyRef.current = key;
+    if (prev !== null && prev !== key && !state.you.submitted && !state.you.left) playSe("turn");
+  }, [state, view.code]);
+
+  // 列を選ぶ番になったら知らせる（choosing への遷移で1回だけ）
+  useEffect(() => {
+    if (!state) return;
+    const choosing = state.phase === "choosing" && state.you.choosing;
+    const was = chooseRef.current;
+    chooseRef.current = choosing;
+    if (!was && choosing) playSe("turn");
+  }, [state]);
 
   if (!state) return <p className="og-muted">対戦の開始を待っています…</p>;
 
@@ -98,8 +118,8 @@ function Board({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
       </div>
 
       {state.phase === "finished" ? (
-        <div style={{ textAlign: "center", margin: "16px 0" }}>
-          <p style={{ fontSize: 20, fontWeight: 700 }}>対戦終了</p>
+        <div className="juice-slide" style={{ textAlign: "center", margin: "16px 0" }}>
+          <p className="juice-pulse" style={{ fontSize: 20, fontWeight: 700 }}>対戦終了</p>
           <ul style={{ listStyle: "none", padding: 0 }}>
             {(state.standings ?? []).map((s) => (
               <li key={s.seat} style={{ margin: "4px 0" }}>
@@ -145,7 +165,8 @@ function Board({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
                   <span style={{ fontWeight: 700, minWidth: 44 }}>列{i + 1}</span>
                   {row.cards.map((card, j) => (
                     <span
-                      key={j}
+                      key={`${state.round}-${j}-${card}`}
+                      className="juice-pop"
                       style={{
                         display: "inline-block",
                         minWidth: 36,
@@ -168,7 +189,10 @@ function Board({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
                       type="button"
                       className="og-btn og-btn-primary"
                       style={{ minHeight: 44 }}
-                      onClick={() => void api.move({ type: "takeRow", row: i })}
+                      onClick={() => {
+                        playSe("play");
+                        void api.move({ type: "takeRow", row: i });
+                      }}
                     >
                       この列を取る
                     </button>
@@ -179,7 +203,7 @@ function Board({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
           </div>
 
           {state.you.choosing ? (
-            <p style={{ textAlign: "center", fontWeight: 700, margin: "10px 0" }} role="alert">
+            <p className="juice-pulse" style={{ textAlign: "center", fontWeight: 700, margin: "10px 0" }} role="alert">
               あなたの {state.you.pendingCard} はどの列にも置けません。取る列を選んでください（時間切れでペナルティ最小の列を自動で取ります）。
             </p>
           ) : canPlay ? (
@@ -196,7 +220,10 @@ function Board({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
                     aria-pressed={selected === card}
                     className={selected === card ? "og-btn og-btn-primary" : "og-btn"}
                     style={{ minWidth: 48, minHeight: 52, fontWeight: 700, fontSize: 16 }}
-                    onClick={() => setSelected(card)}
+                    onClick={() => {
+                      playSe("select");
+                      setSelected(card);
+                    }}
                   >
                     {card}
                   </button>
@@ -209,7 +236,10 @@ function Board({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
                   style={{ minWidth: 160, minHeight: 48 }}
                   disabled={selected === null}
                   onClick={() => {
-                    if (selected !== null) void api.move({ type: "play", card: selected });
+                    if (selected !== null) {
+                      playSe("play");
+                      void api.move({ type: "play", card: selected });
+                    }
                   }}
                 >
                   {selected !== null ? `${selected} を出す` : "カードを選んでください"}
@@ -229,7 +259,7 @@ function Board({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
       )}
 
       {state.lastSteps.length > 0 && state.phase !== "finished" && (
-        <div style={{ marginTop: 14, borderTop: "1px solid var(--line, #ddd)", paddingTop: 10 }}>
+        <div className="juice-slide" style={{ marginTop: 14, borderTop: "1px solid var(--line, #ddd)", paddingTop: 10 }}>
           <p style={{ fontWeight: 700, margin: "0 0 6px" }}>直近の配置結果</p>
           <ul style={{ margin: 0, paddingLeft: 18 }}>
             {state.lastSteps.map((s, i) => (

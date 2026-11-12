@@ -56,6 +56,16 @@ function Board({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
     playSe(myRank === 1 ? "win" : "click");
   }, [state, mySeat, view.code]);
 
+  // SE: 新しい問題フェーズが来た遷移で1回だけ鳴らす。
+  const prevQuestionRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!state) return;
+    const key = `${view.code}:${state.index}:${state.phase}`;
+    const prev = prevQuestionRef.current;
+    prevQuestionRef.current = key;
+    if (prev !== null && prev !== key && state.phase === "question" && !state.you.left) playSe("turn");
+  }, [state, view.code]);
+
   if (!state) return <p className="og-muted">問題を待っています…</p>;
 
   const remainingMs = state.questionEndsAt !== null ? Math.max(0, state.questionEndsAt - now) : null;
@@ -110,7 +120,7 @@ function Board({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
             </div>
           ) : null}
 
-          <h2 style={{ fontSize: 20, lineHeight: 1.5, margin: "6px 0 16px" }}>{state.question.question}</h2>
+          <h2 key={state.index} className="juice-pop" style={{ fontSize: 20, lineHeight: 1.5, margin: "6px 0 16px" }}>{state.question.question}</h2>
 
           <div style={{ display: "grid", gap: 10 }}>
             {state.question.choices.map((choice, i) => {
@@ -130,6 +140,7 @@ function Board({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
                 <button
                   key={i}
                   type="button"
+                  className={revealed && isAnswer ? "juice-pulse" : undefined}
                   disabled={!canAnswer}
                   onClick={() => {
                     playSe("play");
@@ -172,7 +183,7 @@ function Board({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
           ) : null}
 
           {state.phase === "reveal" ? (
-            <div style={{ marginTop: 16 }}>
+            <div className="juice-slide" style={{ marginTop: 16 }}>
               <p className="og-turn-banner" role="status">
                 正解は「{state.correctChoice !== null ? state.question.choices[state.correctChoice] : "—"}」でした
               </p>
@@ -180,6 +191,7 @@ function Board({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
                 {state.players.map((p) => (
                   <li
                     key={p.seat}
+                    className="juice-pop"
                     style={{
                       display: "flex",
                       justifyContent: "space-between",
@@ -202,8 +214,8 @@ function Board({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
           ) : null}
         </>
       ) : (
-        <div style={{ textAlign: "center" }}>
-          <h2 style={{ fontSize: 24, margin: "10px 0" }}>結果発表</h2>
+        <div className="juice-slide" style={{ textAlign: "center" }}>
+          <h2 className={state.standings?.find((s) => s.seat === mySeat)?.rank === 1 ? "juice-pulse" : undefined} style={{ fontSize: 24, margin: "10px 0" }}>結果発表</h2>
           <ul style={{ listStyle: "none", margin: 0, padding: 0, display: "grid", gap: 8 }}>
             {(state.standings ?? [...state.players].map((p) => ({ seat: p.seat, score: p.score, rank: 0 })))
               .slice()
@@ -226,7 +238,7 @@ function Board({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
                   >
                     <span>
                       {s.rank}位 {p.name}
-                      {s.seat === mySeat ? "（あなた）🎉" : ""}
+                      {s.seat === mySeat ? "（あなた）" : ""}
                       {p.left ? "（退出）" : ""}
                     </span>
                     <strong>{s.score}点</strong>

@@ -108,11 +108,11 @@ function Board({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
 
   return (
     <div className="og-board-wrap">
-      <div className={`og-turn-banner${myTurn ? " og-turn-mine" : ""}`} role="status">
+      <div className={`og-turn-banner${myTurn ? " og-turn-mine" : ""}${state.finished ? " juice-slide" : myTurn ? " juice-pulse" : ""}`} role="status">
         {state.finished
           ? state.winner === "draw"
             ? "引き分け"
-            : `勝者: ${winnerName ?? "—"}${state.winner === mySeat ? " 🎉" : ""}`
+            : `勝者: ${winnerName ?? "—"}${state.winner === mySeat ? "" : ""}`
           : myTurn
             ? state.mustCaptureFrom !== null
               ? "連続取り中です。同じコマで続けて取ってください"
@@ -207,6 +207,7 @@ function Board({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
               {owner >= 0 ? (
                 <span
                   aria-hidden="true"
+                  className={state.lastMove?.to === index ? "juice-pop" : undefined}
                   style={{
                     display: "grid",
                     placeItems: "center",

@@ -16,7 +16,12 @@ export const CRANE_DROP_MS = 900;
 export const CRANE_PRIZE_COUNT = 8;
 
 export interface CranePrizeKind {
-  emoji: string;
+  /** 円バッジに描く短いラベル（絵文字は使わない）。 */
+  mark: string;
+  /** バッジの背景色。 */
+  color: string;
+  /** バッジの文字色。 */
+  ink: string;
   name: string;
   /** 見た目の半径（0〜100 座標系）。 */
   radius: number;
@@ -25,21 +30,23 @@ export interface CranePrizeKind {
 }
 
 export const CRANE_PRIZE_KINDS: CranePrizeKind[] = [
-  { emoji: "🧸", name: "クマのぬいぐるみ", radius: 9, weight: 2 },
-  { emoji: "🐰", name: "ウサギのぬいぐるみ", radius: 8, weight: 1 },
-  { emoji: "🐱", name: "ネコのぬいぐるみ", radius: 8, weight: 2 },
-  { emoji: "🐼", name: "パンダのぬいぐるみ", radius: 10, weight: 3 },
-  { emoji: "🍩", name: "ドーナツクッション", radius: 9, weight: 1 },
-  { emoji: "⭐", name: "星のクッション", radius: 8, weight: 1 },
-  { emoji: "🎁", name: "プレゼント箱", radius: 7, weight: 3 },
-  { emoji: "🍰", name: "ケーキの置物", radius: 7, weight: 2 },
+  { mark: "熊", color: "#a1887f", ink: "#ffffff", name: "クマのぬいぐるみ", radius: 9, weight: 2 },
+  { mark: "兎", color: "#f8bbd0", ink: "#6d1039", name: "ウサギのぬいぐるみ", radius: 8, weight: 1 },
+  { mark: "猫", color: "#ffb74d", ink: "#5d3506", name: "ネコのぬいぐるみ", radius: 8, weight: 2 },
+  { mark: "パンダ", color: "#eeeeee", ink: "#212121", name: "パンダのぬいぐるみ", radius: 10, weight: 3 },
+  { mark: "輪", color: "#bcaaa4", ink: "#3e2723", name: "ドーナツクッション", radius: 9, weight: 1 },
+  { mark: "星", color: "#ffd54f", ink: "#664d03", name: "星のクッション", radius: 8, weight: 1 },
+  { mark: "箱", color: "#e57373", ink: "#ffffff", name: "プレゼント箱", radius: 7, weight: 3 },
+  { mark: "ケ", color: "#f48fb1", ink: "#5c0e2e", name: "ケーキの置物", radius: 7, weight: 2 },
 ];
 
 export interface CranePrize {
   id: number;
   /** CRANE_PRIZE_KINDS の添字。 */
   kind: number;
-  emoji: string;
+  mark: string;
+  color: string;
+  ink: string;
   name: string;
   x: number;
   y: number;
@@ -143,7 +150,9 @@ export function createCraneGame(seed: number): CraneState {
       prizes.push({
         id,
         kind: kinds[id],
-        emoji: kind.emoji,
+        mark: kind.mark,
+        color: kind.color,
+        ink: kind.ink,
         name: kind.name,
         x: round2(slotX[col] + jx),
         y: round2(slotY[row] + jy),

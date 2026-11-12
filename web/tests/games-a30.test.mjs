@@ -255,6 +255,107 @@ test("ボウリング: 自動プレイで最後まで進行し、投球数とス
   }
 });
 
+// ------------------------------------------------------------ bowling: throwPins（物理結果の受け口）
+
+test("ボウリング: throwPins で全投ストライクなら300点で終了する", () => {
+  const all = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+  let g = bowling.createBowlingGame(9);
+  let guard = 0;
+  while (!g.finished && guard++ < 30) {
+    g = bowling.throwPins(g, all).state;
+  }
+  assert.equal(g.finished, true);
+  assert.equal(g.rolls.length, 12);
+  assert.ok(g.rolls.every((r) => r === 10));
+  assert.equal(bowling.scoreRolls(g.rolls), 300);
+});
+
+test("ボウリング: throwPins は立っていないピン・範囲外・重複を無視する", () => {
+  const g = bowling.createBowlingGame(3);
+  const r1 = bowling.throwPins(g, [1, 2, 3, 0, 11, -1, 2.5, 2]);
+  assert.equal(r1.knocked, 3);
+  assert.deepEqual(r1.knockedPins, [1, 2, 3]);
+  // 2投目: 既に倒れた1番は数えず、残りから4本倒すとスペアにならず通常進行
+  const r2 = bowling.throwPins(r1.state, [1, 4, 5, 6, 7]);
+  assert.equal(r2.knocked, 4);
+  assert.deepEqual(r2.knockedPins, [4, 5, 6, 7]);
+  assert.equal(r2.state.frame, 1);
+  assert.equal(r2.state.ballInFrame, 0);
+  assert.ok(r2.state.standing.every(Boolean));
+});
+
+test("ボウリング: throwPins のスペアはフレームが進み、10フレーム目の付け替えも従来どおり", () => {
+  // スペア（6+4）
+  let g = bowling.createBowlingGame(5);
+  g = bowling.throwPins(g, [1, 2, 3, 4, 5, 6]).state;
+  assert.equal(g.ballInFrame, 1);
+  const sp = bowling.throwPins(g, [7, 8, 9, 10]);
+  assert.equal(sp.knocked, 4);
+  assert.equal(sp.state.frame, 1);
+  assert.ok(sp.state.standing.every(Boolean));
+
+  // 10フレーム目: 9フレームをガターで進め、ストライク→ラック付け替え→残りで3投目
+  let h = bowling.createBowlingGame(5);
+  for (let f = 0; f < 9; f++) {
+    h = bowling.throwPins(h, []).state;
+    h = bowling.throwPins(h, []).state;
+  }
+  assert.equal(h.frame, 9);
+  const t1 = bowling.throwPins(h, [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+  assert.equal(t1.knocked, 10);
+  assert.equal(t1.state.finished, false);
+  assert.ok(t1.state.standing.every(Boolean), "ストライク後は新しいラック");
+  const t2 = bowling.throwPins(t1.state, [1, 2, 3]);
+  assert.equal(t2.knocked, 3);
+  assert.equal(t2.state.finished, false);
+  assert.equal(bowling.standingCount(t2.state.standing), 7, "残りピンをそのまま狙う");
+  const t3 = bowling.throwPins(t2.state, [4, 5]);
+  assert.equal(t3.state.finished, true);
+  assert.equal(bowling.frameScores(t3.state.rolls)[9], 15);
+
+  // 10フレーム目スペア→3投目は新しいラック
+  let k = bowling.createBowlingGame(5);
+  for (let f = 0; f < 9; f++) {
+    k = bowling.throwPins(k, []).state;
+    k = bowling.throwPins(k, []).state;
+  }
+  k = bowling.throwPins(k, [1, 2, 3, 4]).state;
+  const k2 = bowling.throwPins(k, [5, 6, 7, 8, 9, 10]);
+  assert.equal(k2.knocked, 6);
+  assert.ok(k2.state.standing.every(Boolean), "スペア後は新しいラック");
+  const k3 = bowling.throwPins(k2.state, [1]);
+  assert.equal(k3.state.finished, true);
+});
+
+test("ボウリング: throwPins は終了後の状態を変えず、throwBall と同じ進行規則になる", () => {
+  let g = bowling.createBowlingGame(5);
+  for (let f = 0; f < 9; f++) {
+    g = bowling.throwPins(g, []).state;
+    g = bowling.throwPins(g, []).state;
+  }
+  g = bowling.throwPins(g, []).state;
+  const done = bowling.throwPins(g, []).state;
+  assert.equal(done.finished, true);
+  const noop = bowling.throwPins(done, [1, 2, 3]);
+  assert.equal(noop.state, done);
+  assert.equal(noop.knocked, 0);
+
+  // throwBall の倒れ方モデル結果を throwPins に渡すと rolls が一致する
+  for (const seed of [1, 7, 42, 123]) {
+    let a = bowling.createBowlingGame(seed);
+    let b = bowling.createBowlingGame(seed);
+    while (!a.finished) {
+      const r = bowling.throwBall(a, 0.2, 80);
+      const via = bowling.throwPins(b, r.knockedPins);
+      a = r.state;
+      b = via.state;
+      assert.deepEqual(b.rolls, a.rolls);
+      assert.deepEqual(b.standing, a.standing);
+    }
+    assert.equal(bowling.scoreRolls(b.rolls), bowling.scoreRolls(a.rolls));
+  }
+});
+
 // ------------------------------------------------------------ wordwolf bank
 
 test("ワードウルフ: お題ペアは80組で、全ての単語が重複しない", () => {

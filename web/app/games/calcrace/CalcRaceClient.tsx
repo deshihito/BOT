@@ -60,6 +60,8 @@ function Board({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
   const [input, setInput] = useState("");
   const finishRef = useRef<string | null>(null);
   const prevPhaseRef = useRef<string>("");
+  const turnRef = useRef<string | null>(null);
+  const lockRef = useRef<number | null>(null);
 
   useEffect(() => {
     const id = setInterval(() => setNow(Date.now()), 100);
@@ -73,6 +75,23 @@ function Board({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
     const myRank = state.standings?.find((s) => s.seat === mySeat)?.rank;
     playSe(myRank === 1 ? "win" : "click");
   }, [state, mySeat, view.code]);
+
+  // 新しい問題が出たら合図を1回だけ鳴らす。
+  useEffect(() => {
+    if (!state || state.phase !== "question") return;
+    const key = `${view.code}:${state.index}`;
+    if (turnRef.current === key) return;
+    turnRef.current = key;
+    playSe("turn");
+  }, [state, view.code]);
+
+  // 自分の不正解でロックされたらエラー音を1回だけ鳴らす。
+  useEffect(() => {
+    if (!state || state.you.lockedUntil === null) return;
+    if (lockRef.current === state.you.lockedUntil) return;
+    lockRef.current = state.you.lockedUntil;
+    playSe("error");
+  }, [state]);
 
   // 問題が変わったら入力をリセットする。
   const roundKey = state ? `${view.code}:${state.index}:${state.phase}` : "";
@@ -102,6 +121,7 @@ function Board({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
       api.setError("答えは整数で入力してください");
       return;
     }
+    playSe("submit");
     void api.move({ type: "answer", value });
   };
 
@@ -124,7 +144,7 @@ function Board({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
 
       {state.phase === "question" && (
         <div style={{ padding: "12px 0 4px" }}>
-          <div aria-live="polite" style={{ textAlign: "center", fontSize: 44, fontWeight: 800, lineHeight: 1.2, minHeight: 56 }}>
+          <div key={state.index} className="juice-slide" aria-live="polite" style={{ textAlign: "center", fontSize: 44, fontWeight: 800, lineHeight: 1.2, minHeight: 56 }}>
             {state.questionText ?? "…"}
           </div>
           {remaining !== null && <Bar ratio={remaining / CR_TIME_LIMIT_MS} />}
@@ -133,11 +153,11 @@ function Board({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
               退出したため、このゲームには参加していません。
             </p>
           ) : state.you.solved ? (
-            <p className="og-muted" style={{ textAlign: "center" }}>
+            <p className="og-muted juice-pop" style={{ textAlign: "center" }}>
               正解済みです。他の人の正解を待っています。
             </p>
           ) : locked ? (
-            <p className="og-muted" style={{ textAlign: "center" }} role="status">
+            <p className="og-muted juice-shake" style={{ textAlign: "center" }} role="status">
               不正解でした。あと {(lockedMs / 1000).toFixed(1)} 秒で再挑戦できます。
               <Bar ratio={lockedMs / CR_LOCK_MS} />
             </p>
@@ -164,14 +184,15 @@ function Board({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
       )}
 
       {state.phase === "reveal" && (
-        <div style={{ padding: "12px 0 4px" }}>
+        <div className="juice-slide" style={{ padding: "12px 0 4px" }}>
           <p style={{ textAlign: "center", fontSize: 20 }}>
-            {state.questionText} = <strong style={{ fontSize: 28 }}>{state.correctAnswer}</strong>
+            {state.questionText} = <strong key={state.index} className="juice-pop" style={{ fontSize: 28 }}>{state.correctAnswer}</strong>
           </p>
           <ul style={{ listStyle: "none", padding: 0, margin: "12px 0" }}>
             {state.players.map((p) => (
               <li
                 key={p.seat}
+                className={p.winner ? "juice-pop" : undefined}
                 style={{
                   display: "flex",
                   justifyContent: "space-between",
@@ -183,7 +204,7 @@ function Board({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
                 }}
               >
                 <span>
-                  {p.winner ? "🎉 " : ""}
+                  {p.winner ? "" : ""}
                   {p.name}
                   {p.seat === mySeat ? "（あなた）" : ""}
                   {p.left ? "（退出）" : ""}
@@ -199,8 +220,8 @@ function Board({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
       )}
 
       {state.phase === "finished" && (
-        <div style={{ padding: "12px 0 4px" }}>
-          <h2 style={{ textAlign: "center" }}>結果</h2>
+        <div className="juice-slide" style={{ padding: "12px 0 4px" }}>
+          <h2 className="juice-pulse" style={{ textAlign: "center" }}>結果</h2>
           <ul style={{ listStyle: "none", padding: 0, margin: "12px 0" }}>
             {(state.standings ?? []).map((s) => {
               const p = state.players.find((x) => x.seat === s.seat);

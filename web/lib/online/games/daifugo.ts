@@ -9,6 +9,45 @@ import type { OnlineGameModule, Rng, SeatInfo } from "../types";
 export const JOKER = 52;
 /** ♦3 のカード id（最初の手番の目印）。 */
 export const DIAMOND3 = 26;
+/** ♠3 のカード id（スペ3返しで使う）。 */
+export const SPADE3 = 0;
+
+/** ルーム作成時にホストが選べるローカルルール。既定値は従来の固定ルールと同一。 */
+export interface DaifugoRules {
+  /** 革命（5枚以上で革命が発動/解除される）。 */
+  revolution: boolean;
+  /** 8切り（8を含む手を出すと場が流れて自分がリード）。 */
+  eightCut: boolean;
+  /** スペ3返し（ジョーカー単体に♠3単体で返せる）。 */
+  spade3Return: boolean;
+  /** 縛り（場と同じマークを出すと、以後の手はそのマークに縛られる）。 */
+  suitLock: boolean;
+}
+
+export const DEFAULT_DAIFUGO_RULES: DaifugoRules = {
+  revolution: true,
+  eightCut: true,
+  spade3Return: false,
+  suitLock: false,
+};
+
+/** options.rules を正規化する（真偽値以外は既定値に倒す）。 */
+export function normalizeDaifugoRules(raw: unknown): DaifugoRules {
+  if (!raw || typeof raw !== "object") return { ...DEFAULT_DAIFUGO_RULES };
+  const r = raw as Record<string, unknown>;
+  const pick = (key: keyof DaifugoRules): boolean =>
+    typeof r[key] === "boolean" ? (r[key] as boolean) : DEFAULT_DAIFUGO_RULES[key];
+  return {
+    revolution: pick("revolution"),
+    eightCut: pick("eightCut"),
+    spade3Return: pick("spade3Return"),
+    suitLock: pick("suitLock"),
+  };
+}
+
+function parseOptions(raw: Record<string, unknown>): Record<string, unknown> {
+  return { rules: normalizeDaifugoRules(raw?.rules) };
+}
 
 export interface DaifugoField {
   cards: number[];
@@ -36,6 +75,10 @@ export interface DaifugoState {
   /** 退出した seat（順位は付けない）。 */
   leftSeats: number[];
   started: boolean;
+  /** このルームのローカルルール。 */
+  rules: DaifugoRules;
+  /** 縛り中のマーク（suit 番号）。縛りが無ければ null。 */
+  lockedSuit: number | null;
 }
 
 export type DaifugoAction =
@@ -53,6 +96,13 @@ export interface DaifugoView {
   finished: boolean;
   log: DaifugoLogEntry[];
   players: SeatInfo[];
+  rules: DaifugoRules;
+  lockedSuit: number | null;
+}
+
+/** 状態のルールを読む（手組みの旧状態でも既定値で動くよう正規化して返す）。 */
+function rulesOf(state: DaifugoState): DaifugoRules {
+  return state.rules ? normalizeDaifugoRules(state.rules) : { ...DEFAULT_DAIFUGO_RULES };
 }
 
 function clone<T>(value: T): T {
@@ -112,9 +162,32 @@ function hasReal8(cards: number[]): boolean {
 }
 
 /** その手を出すと反則あがりになるか（手札が0になる前提で判定する側が使う）。 */
-function isForbiddenFinish(cards: number[], handSize: number): boolean {
+function isForbiddenFinish(cards: number[], handSize: number, rules: DaifugoRules): boolean {
   if (cards.length !== handSize) return false;
-  return hasReal8(cards) || cards.includes(JOKER) || cards.length >= 5;
+  return (
+    (rules.eightCut && hasReal8(cards)) ||
+    cards.includes(JOKER) ||
+    (rules.revolution && cards.length >= 5)
+  );
+}
+
+/**
+ * 組み合わせの実効マーク。ジョーカー以外の札が全て同じマークならその番号、
+ * ジョーカー単体は "wild"（どのマークとしても扱える）、マークが混ざれば null。
+ */
+function comboSuit(cards: number[]): number | "wild" | null {
+  const nonJoker = cards.filter((c) => c !== JOKER);
+  if (nonJoker.length === 0) return "wild";
+  const suit = Math.floor(nonJoker[0] / 13);
+  return nonJoker.every((c) => Math.floor(c / 13) === suit) ? suit : null;
+}
+
+/** スペ3返しが成立する手か（ルール有効時、場がジョーカー単体で♠3単体を出す）。 */
+function isSpade3Return(state: DaifugoState, cards: number[], rules: DaifugoRules): boolean {
+  if (!rules.spade3Return || !state.field) return false;
+  if (cards.length !== 1 || cards[0] !== SPADE3) return false;
+  const fieldInfo = comboInfo(state.field.cards);
+  return !!fieldInfo && fieldInfo.jokerSingle;
 }
 
 function isActive(state: DaifugoState, seat: number): boolean {
@@ -184,12 +257,19 @@ function enumerateCombos(hand: number[]): number[][] {
 export function legalPlays(state: DaifugoState, seat: number): number[][] {
   const hand = state.hands[seat];
   if (!hand) return [];
+  const rules = rulesOf(state);
   const fieldInfo = state.field ? comboInfo(state.field.cards) : null;
+  const lockedSuit = rules.suitLock ? (state.lockedSuit ?? null) : null;
   return enumerateCombos(hand).filter((cards) => {
-    if (isForbiddenFinish(cards, hand.length)) return false;
+    if (isForbiddenFinish(cards, hand.length, rules)) return false;
     if (!fieldInfo) return true;
     const info = comboInfo(cards);
     if (!info || info.count !== fieldInfo.count) return false;
+    if (lockedSuit !== null) {
+      const suit = comboSuit(cards);
+      if (suit !== "wild" && suit !== lockedSuit) return false;
+    }
+    if (isSpade3Return(state, cards, rules)) return true;
     return strengthOf(info, state.revolution) > strengthOf(fieldInfo, state.revolution);
   });
 }
@@ -203,7 +283,7 @@ function createState(
   rng: Rng,
   options: Record<string, unknown>,
 ): DaifugoState {
-  void options;
+  const rules = normalizeDaifugoRules(options?.rules);
   if (!Array.isArray(players) || players.length < 2 || players.length > 4) {
     throw new Error("大富豪は2〜4人で遊びます");
   }
@@ -236,6 +316,8 @@ function createState(
     log: [],
     leftSeats: [],
     started: true,
+    rules,
+    lockedSuit: null,
   };
 }
 
@@ -256,6 +338,7 @@ function applyPlay(
       throw new Error("手札にないカードは出せません");
     }
   }
+  const rules = rulesOf(state);
   const info = comboInfo(cards);
   if (!info) {
     throw new Error("同じランクの組み合わせでしか出せません");
@@ -265,11 +348,22 @@ function applyPlay(
     if (info.count !== fieldInfo.count) {
       throw new Error("場と同じ枚数で出してください");
     }
-    if (strengthOf(info, state.revolution) <= strengthOf(fieldInfo, state.revolution)) {
+    if (
+      !isSpade3Return(state, cards, rules) &&
+      strengthOf(info, state.revolution) <= strengthOf(fieldInfo, state.revolution)
+    ) {
       throw new Error("場より強い組み合わせで出してください");
     }
+    // 縛り中は場と同じマーク（またはジョーカー単体）しか出せない
+    const lockedSuit = rules.suitLock ? (state.lockedSuit ?? null) : null;
+    if (lockedSuit !== null) {
+      const suit = comboSuit(cards);
+      if (suit !== "wild" && suit !== lockedSuit) {
+        throw new Error("縛り中は同じマークでしか出せません");
+      }
+    }
   }
-  if (isForbiddenFinish(cards, hand.length)) {
+  if (isForbiddenFinish(cards, hand.length, rules)) {
     throw new Error("反則あがりになる手は出せません");
   }
 
@@ -280,8 +374,22 @@ function applyPlay(
   next.passStreak = 0;
   next.leadPassStreak = 0;
   pushLog(next, { seat, kind: "play", cards: played });
+  // 縛りの成立/維持: 場と同じマークを出すと縛りが発生し、場が流れるまで続く。
+  if (rules.suitLock && state.field) {
+    const playedSuit = comboSuit(played);
+    const fieldSuit = comboSuit(state.field.cards);
+    if (typeof playedSuit === "number" && playedSuit === fieldSuit) {
+      next.lockedSuit = playedSuit;
+    } else if (typeof state.lockedSuit === "number") {
+      next.lockedSuit = state.lockedSuit;
+    } else {
+      next.lockedSuit = null;
+    }
+  } else {
+    next.lockedSuit = null;
+  }
   // 革命の発動/解除はトグル。その手自体の強さ判定は発動前の状態で済んでいる。
-  if (played.length >= 5) {
+  if (rules.revolution && played.length >= 5) {
     next.revolution = !next.revolution;
   }
   const finishedNow = next.hands[seat].length === 0;
@@ -295,10 +403,11 @@ function applyPlay(
     next.turn = remaining[0];
     return next;
   }
-  if (hasReal8(played)) {
+  if (rules.eightCut && hasReal8(played)) {
     // 8切り: その手の直後に場が流れ、出した本人が次のリードになる。
     // （8を含む手で上がることは反則あがりとして弾かれているので本人は現役。）
     next.field = null;
+    next.lockedSuit = null;
     next.turn = seat;
     return next;
   }
@@ -308,6 +417,7 @@ function applyPlay(
 
 function applyPass(state: DaifugoState, seat: number): DaifugoState {
   const next = clone(state);
+  next.lockedSuit = rulesOf(state).suitLock ? (state.lockedSuit ?? null) : null;
   pushLog(next, { seat, kind: "pass" });
   if (!state.field) {
     // リードでは原則パス不可。合法手が反則あがりしか存在しない場合のみ許可する
@@ -334,6 +444,7 @@ function applyPass(state: DaifugoState, seat: number): DaifugoState {
     // 場が流れる。次のリードは場の持ち主（上がっている/退出済みなら次の現役）。
     const owner = (state.field as DaifugoField).seat;
     next.field = null;
+    next.lockedSuit = null;
     next.passStreak = 0;
     next.leadPassStreak = 0;
     next.turn = isActive(next, owner) ? owner : nextActive(next, owner);
@@ -426,6 +537,7 @@ function onPlayerLeft(state: DaifugoState, seat: number): DaifugoState {
   if (next.field && next.passStreak >= neededPasses(next)) {
     const owner = next.field.seat;
     next.field = null;
+    next.lockedSuit = null;
     next.passStreak = 0;
     next.turn = isActive(next, owner) ? owner : nextActive(next, owner);
     return next;
@@ -460,6 +572,8 @@ function viewFor(state: DaifugoState, seat: number): DaifugoView {
     finished: state.finished,
     log: clone(state.log),
     players: clone(state.players),
+    rules: rulesOf(state),
+    lockedSuit: rulesOf(state).suitLock ? (state.lockedSuit ?? null) : null,
   };
 }
 
@@ -490,6 +604,7 @@ export const gameModule: OnlineGameModule<DaifugoState, DaifugoAction, DaifugoVi
   applyAction,
   viewFor,
   parseAction,
+  parseOptions,
   phaseOf: (state) => (state.finished ? "finished" : "playing"),
   isFinished: (state) => state.finished,
   onPlayerLeft,

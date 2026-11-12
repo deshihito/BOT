@@ -28,7 +28,8 @@ export type SpiderState = {
   /** 取り除いた組数（0〜8）。 */
   completed: number;
   moves: number;
-  status: "playing" | "won";
+  /** stuck = 山札が尽き、動かせる手も無い詰みの状態。 */
+  status: "playing" | "won" | "stuck";
   seed: number;
 };
 
@@ -180,6 +181,39 @@ function flipSourceTop(columns: SpiderCard[][], col: number): SpiderCard[][] {
   return next;
 }
 
+/**
+ * 意味のある合法手が存在するか。
+ * 「列全体を空列へ移すだけ」の手は局面が実質変わらないため数えない。
+ */
+export function hasSpiderMove(state: SpiderState): boolean {
+  for (let fromCol = 0; fromCol < SPIDER_COLUMNS; fromCol++) {
+    const pile = state.columns[fromCol];
+    if (!pile || pile.length === 0) continue;
+    const runLength = movableRunLength(state, fromCol);
+    for (let k = 0; k < runLength; k++) {
+      const fromIndex = pile.length - 1 - k;
+      for (let toCol = 0; toCol < SPIDER_COLUMNS; toCol++) {
+        if (toCol === fromCol) continue;
+        if (fromIndex === 0 && state.columns[toCol].length === 0) continue;
+        if (canMoveSpiderRun(state, fromCol, fromIndex, toCol)) return true;
+      }
+    }
+  }
+  return false;
+}
+
+/** 詰み判定: 山札が尽きていて（配布1回分未満）、意味のある合法手も無い。 */
+export function isSpiderStuck(state: SpiderState): boolean {
+  if (state.status !== "playing") return false;
+  if (state.stock.length >= SPIDER_COLUMNS) return false;
+  return !hasSpiderMove(state);
+}
+
+/** 遷移後の状態に詰み判定を反映する。 */
+function markStuck(state: SpiderState): SpiderState {
+  return isSpiderStuck(state) ? { ...state, status: "stuck" } : state;
+}
+
 /** 場札の列同士でカードの束を動かす。不正な手は状態を変えずにそのまま返す。 */
 export function moveSpider(
   state: SpiderState,
@@ -195,7 +229,7 @@ export function moveSpider(
     return pile;
   });
   columns = flipSourceTop(columns, fromCol);
-  return withRemoval({ ...state, columns, moves: state.moves + 1 });
+  return markStuck(withRemoval({ ...state, columns, moves: state.moves + 1 }));
 }
 
 /** 山札から各列へ1枚ずつ（計10枚）配る。 */
@@ -206,7 +240,7 @@ export function dealSpider(state: SpiderState): SpiderState {
   const dealt = state.stock.slice(state.stock.length - SPIDER_COLUMNS);
   const stock = state.stock.slice(0, state.stock.length - SPIDER_COLUMNS);
   const columns = state.columns.map((pile, i) => [...pile, { ...dealt[i], faceUp: true }]);
-  return withRemoval({ ...state, columns, stock, moves: state.moves + 1 });
+  return markStuck(withRemoval({ ...state, columns, stock, moves: state.moves + 1 }));
 }
 
 /** 山札の残り配布回数。 */

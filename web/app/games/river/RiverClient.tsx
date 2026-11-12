@@ -3,7 +3,7 @@
 // 荷物をタップでボートに乗せ、「わたる」で川を渡る。端末内で完結し、
 // 問題ごとの最少渡河回数は localStorage の ago-river-best-<problemId> に保存する。
 import Link from "next/link";
-import { useEffect, useState, type CSSProperties } from "react";
+import { useEffect, useRef, useState, type CSSProperties } from "react";
 import {
   createRiverGame,
   crossRiver,
@@ -14,9 +14,35 @@ import {
   type RiverSide,
   type RiverState,
 } from "@/lib/river";
+import { sfxLose, sfxPlace, sfxSlide, sfxTap, sfxWin } from "@/lib/sfx";
+import { EndScreen } from "../GameJuice";
 import { useGamesNav } from "../GamesShell";
 
-const FARMER = { name: "農夫", emoji: "🧑‍🌾" };
+const FARMER = { name: "農夫", kanji: "農", color: "#3c6e47" };
+
+/** 荷物・農夫の漢字チップ（漢字1字＋色分けバッジ）。 */
+function KanjiBadge({ kanji, color }: { kanji: string; color: string }) {
+  return (
+    <span
+      aria-hidden="true"
+      style={{
+        display: "inline-grid",
+        placeItems: "center",
+        width: 30,
+        height: 30,
+        borderRadius: 9,
+        background: color,
+        color: "#fff",
+        fontSize: 16,
+        fontWeight: 800,
+        lineHeight: 1,
+        flex: "0 0 auto",
+      }}
+    >
+      {kanji}
+    </span>
+  );
+}
 
 function bestKey(problemId: string): string {
   return `ago-river-best-${problemId}`;
@@ -38,6 +64,15 @@ export default function RiverClient() {
     }
   }, [state.problemId]);
 
+  const prevStatusRef = useRef(state.status);
+  useEffect(() => {
+    const prev = prevStatusRef.current;
+    prevStatusRef.current = state.status;
+    if (prev === state.status || state.status === "playing") return;
+    if (state.status === "won") sfxWin();
+    else if (state.status === "failed") sfxLose();
+  }, [state.status]);
+
   useEffect(() => {
     if (state.status !== "won") return;
     if (best !== null && state.crossings >= best) return;
@@ -50,6 +85,7 @@ export default function RiverClient() {
   }, [state.status, state.crossings, best, state.problemId]);
 
   const selectProblem = (problemId: string) => {
+    sfxTap();
     setState(createRiverGame(problemId));
   };
 
@@ -74,13 +110,25 @@ export default function RiverClient() {
     gap: 8,
   };
 
-  const chip = (id: string, name: string, emoji: string, clickable: boolean, onBoat: boolean) => (
+  const chip = (
+    id: string,
+    name: string,
+    kanji: string,
+    color: string,
+    clickable: boolean,
+    onBoat: boolean,
+  ) => (
     <button
       key={id}
       type="button"
+      className={onBoat ? "juice-pop" : undefined}
       disabled={!clickable || state.status !== "playing"}
       aria-label={name}
-      onClick={() => setState((s) => toggleRiverItem(s, id))}
+      onClick={() => {
+        const next = toggleRiverItem(state, id);
+        if (next !== state) sfxPlace();
+        setState(next);
+      }}
       style={{
         display: "inline-flex",
         alignItems: "center",
@@ -97,7 +145,7 @@ export default function RiverClient() {
         touchAction: "manipulation",
       }}
     >
-      <span style={{ fontSize: 22 }}>{emoji}</span>
+      <KanjiBadge kanji={kanji} color={color} />
       {name}
     </button>
   );
@@ -121,11 +169,11 @@ export default function RiverClient() {
                 minHeight: 44,
               }}
             >
-              <span style={{ fontSize: 22 }}>{FARMER.emoji}</span>
+              <KanjiBadge kanji={FARMER.kanji} color={FARMER.color} />
               {FARMER.name}
             </span>
           )}
-          {itemsHere.map((i) => chip(i.id, i.name, i.emoji, farmerHere, false))}
+          {itemsHere.map((i) => chip(i.id, i.name, i.kanji, i.color, farmerHere, false))}
           {itemsHere.length === 0 && !farmerHere && <span className="muted">（だれもいません）</span>}
         </div>
       </div>
@@ -163,7 +211,7 @@ export default function RiverClient() {
         </button>
       </div>
 
-      <p className="classic-status" role="status">
+      <p className={`classic-status${state.status === "failed" ? " juice-shake" : ""}`} role="status">
         渡った回数 {state.crossings} 回 ・ 最短 {minCrossings} 回
         {best !== null ? ` ・ あなたの最少 ${best} 回` : ""} ・ {statusText}
       </p>
@@ -195,6 +243,8 @@ export default function RiverClient() {
         >
           <p style={{ margin: 0, fontWeight: 800 }}>川（ボートは{state.farmerSide === "left" ? "左岸" : "右岸"}）</p>
           <div
+            key={state.farmerSide}
+            className="juice-slide"
             style={{
               border: "2px dashed rgba(0,0,0,0.35)",
               borderRadius: 10,
@@ -204,11 +254,11 @@ export default function RiverClient() {
             }}
           >
             <p style={{ margin: "0 0 6px", fontWeight: 700, fontSize: 14 }}>
-              🚣 ボート（{boatItems.length} / {problem.capacity}）
+              ボート（{boatItems.length} / {problem.capacity}）
             </p>
             <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
               {boatItems.length === 0 && <span className="muted">（空っぽ）</span>}
-              {boatItems.map((i) => chip(i.id, i.name, i.emoji, true, true))}
+              {boatItems.map((i) => chip(i.id, i.name, i.kanji, i.color, true, true))}
             </div>
           </div>
         </div>
@@ -220,18 +270,31 @@ export default function RiverClient() {
           type="button"
           className="classic-btn classic-btn-active"
           disabled={state.status !== "playing"}
-          onClick={() => setState((s) => crossRiver(s))}
+          onClick={() => {
+            const next = crossRiver(state);
+            // 終局（won/failed）は終局ジングル側が担当する。
+            if (next !== state && next.status === "playing") sfxSlide();
+            setState(next);
+          }}
           style={{ minHeight: 52, fontSize: 17, fontWeight: 800, padding: "0 28px" }}
         >
           {state.farmerSide === "left" ? "わたる →" : "← もどる"}
         </button>
       </div>
       {state.status !== "playing" && (
-        <div className="classic-controls" style={{ justifyContent: "center" }}>
-          <button type="button" className="classic-btn" onClick={restart}>
-            もう一度
-          </button>
-        </div>
+        <EndScreen
+          outcome={state.status === "won" ? "win" : "lose"}
+          title={state.status === "won" ? "全員渡れました！" : "失敗です"}
+          score={state.status === "won" ? state.crossings : undefined}
+          scoreLabel="渡った回数"
+          onRetry={restart}
+        >
+          <p className="muted" style={{ margin: 0 }}>
+            {problem.title} ・ 最短 {minCrossings} 回
+            {best !== null ? ` ・ あなたの最少 ${best} 回` : ""}
+            {state.status === "failed" && state.failMessage ? ` ・ ${state.failMessage}` : ""}
+          </p>
+        </EndScreen>
       )}
     </>
   );

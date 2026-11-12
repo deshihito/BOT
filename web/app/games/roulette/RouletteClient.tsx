@@ -16,6 +16,8 @@ import {
   type RouletteBet,
   type RouletteState,
 } from "@/lib/roulette";
+import { sfxCorrect, sfxSlide, sfxTap, sfxTick, sfxWrong } from "@/lib/sfx";
+import { ScorePop } from "../GameJuice";
 import { useGamesNav } from "../GamesShell";
 
 const CHIPS_KEY = "ago-roulette-chips";
@@ -97,20 +99,26 @@ export default function RouletteClient() {
     try {
       next = spinRoulette(state, [placed]);
     } catch (e) {
+      sfxWrong();
       setError(e instanceof Error ? e.message : "スピンできませんでした");
       return;
     }
     setError(null);
     setSpinning(true);
+    sfxSlide();
     const resultPocket = next.lastResult?.pocket ?? 0;
     let ticks = 0;
     timerRef.current = setInterval(() => {
       ticks += 1;
+      if (ticks % 4 === 0) sfxTick();
       setDisplayPocket(ROULETTE_WHEEL[Math.floor(Math.random() * ROULETTE_WHEEL.length)]);
       if (ticks >= 14) {
         if (timerRef.current) clearInterval(timerRef.current);
         timerRef.current = null;
         setDisplayPocket(resultPocket);
+        const delta = next.lastResult?.delta ?? 0;
+        if (delta > 0) sfxCorrect();
+        else if (delta < 0) sfxWrong();
         setState(next);
         setSpinning(false);
       }
@@ -134,6 +142,8 @@ export default function RouletteClient() {
 
       <div style={{ textAlign: "center", margin: "8px 0 4px" }} aria-live="polite">
         <div
+          key={spinning ? "spinning" : state.spins}
+          className={!spinning && last ? "juice-pop" : undefined}
           style={{
             display: "inline-flex",
             alignItems: "center",
@@ -154,6 +164,7 @@ export default function RouletteClient() {
         <p className="classic-status" role="status">
           チップ {state.chips} ・ スピン {state.spins} 回
           {!spinning && last ? ` ・ 前回 ${last.pocket}（${last.color === "green" ? "緑" : last.color === "red" ? "赤" : "黒"}） ${last.delta >= 0 ? `+${last.delta}` : last.delta}` : ""}
+          {!spinning && last && last.delta !== 0 ? <ScorePop key={state.spins} amount={last.delta} /> : null}
           {spinning ? " ・ 回転中…" : ""}
         </p>
       </div>
@@ -182,7 +193,11 @@ export default function RouletteClient() {
               type="button"
               className={betKey(selected) === betKey(bet) ? "classic-btn classic-btn-active" : "classic-btn"}
               aria-pressed={betKey(selected) === betKey(bet)}
-              onClick={() => setSelected(bet)}
+              disabled={spinning}
+              onClick={() => {
+                sfxTap();
+                setSelected(bet);
+              }}
             >
               {betLabel(bet)}
             </button>
@@ -191,7 +206,11 @@ export default function RouletteClient() {
             type="button"
             className={selected.kind === "straight" ? "classic-btn classic-btn-active" : "classic-btn"}
             aria-pressed={selected.kind === "straight"}
-            onClick={() => setSelected({ kind: "straight", value: straightNumber })}
+            disabled={spinning}
+            onClick={() => {
+              sfxTap();
+              setSelected({ kind: "straight", value: straightNumber });
+            }}
           >
             単数（配当35倍）
           </button>
@@ -202,6 +221,7 @@ export default function RouletteClient() {
                 type="number"
                 min={0}
                 max={36}
+                disabled={spinning}
                 value={straightNumber}
                 onChange={(e) => {
                   const v = Math.min(36, Math.max(0, Math.floor(Number(e.target.value) || 0)));
@@ -221,7 +241,11 @@ export default function RouletteClient() {
               type="button"
               className={amount === a ? "classic-btn classic-btn-active" : "classic-btn"}
               aria-pressed={amount === a}
-              onClick={() => setAmount(a)}
+              disabled={spinning}
+              onClick={() => {
+                sfxTap();
+                setAmount(a);
+              }}
             >
               {a}
             </button>
@@ -229,7 +253,12 @@ export default function RouletteClient() {
         </div>
 
         <div className="classic-controls">
-          <button type="button" className="classic-btn" onClick={onSpin} disabled={spinning || state.chips <= 0}>
+          <button
+            type="button"
+            className="classic-btn"
+            onClick={onSpin}
+            disabled={spinning || state.chips <= 0 || amount > state.chips}
+          >
             {betLabel(currentBet)}に{amount}を賭けてスピン
           </button>
           {state.chips <= 0 ? (

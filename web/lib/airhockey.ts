@@ -201,7 +201,14 @@ function collidePaddle(
     vx = (vx / speed) * MIN_BOUNCE_SPEED;
     vy = (vy / speed) * MIN_BOUNCE_SPEED;
   }
-  return { x, y, vx, vy };
+  // パドルに押し出された先が場外（隅など）でも、パック中心は場内へ戻す。
+  // 戻さないと壁反射もゴール判定も届かない位置で固着する。
+  return {
+    x: clamp(x, AIR_PUCK_R, AIR_FIELD_W - AIR_PUCK_R),
+    y: clamp(y, AIR_PUCK_R, AIR_FIELD_H - AIR_PUCK_R),
+    vx,
+    vy,
+  };
 }
 
 /**

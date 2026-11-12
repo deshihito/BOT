@@ -118,6 +118,7 @@ function Board({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
   const [now, setNow] = useState(() => Date.now());
   const [builder, setBuilder] = useState<Builder | null>(null);
   const finishRef = useRef<string | null>(null);
+  const turnRef = useRef<string | null>(null);
 
   useEffect(() => {
     const id = setInterval(() => setNow(Date.now()), 200);
@@ -139,6 +140,15 @@ function Board({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
     const myRank = state.standings?.find((s) => s.seat === mySeat)?.rank;
     playSe(myRank === 1 ? "win" : "click");
   }, [state, mySeat, view.code]);
+
+  // 新しいラウンド（新しい問題）が始まったら手番の合図を1回だけ鳴らす。
+  useEffect(() => {
+    if (!state || state.phase !== "playing") return;
+    const key = `${view.code}:${state.round}`;
+    if (turnRef.current === key) return;
+    turnRef.current = key;
+    playSe("turn");
+  }, [state, view.code]);
 
   if (!state) return <p className="og-muted">対戦の開始を待っています…</p>;
 
@@ -297,7 +307,7 @@ function Board({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
 
           <div style={{ textAlign: "center", margin: "6px 0 12px" }}>
             <span className="og-muted">目標</span>
-            <div style={{ fontSize: 44, fontWeight: 900, lineHeight: 1.1 }}>{state.target}</div>
+            <div key={`${state.round}-${state.target}`} className="juice-flip" style={{ fontSize: 44, fontWeight: 900, lineHeight: 1.1 }}>{state.target}</div>
           </div>
 
           {state.phase === "playing" ? (
@@ -307,7 +317,7 @@ function Board({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
               </p>
             ) : state.you.submitted ? (
               <div style={{ textAlign: "center" }}>
-                <p className="og-turn-banner" role="status">
+                <p className="og-turn-banner juice-slide" role="status">
                   「{state.you.yourValue}」で提出済み。全員の提出か制限時間で締め切られます。
                 </p>
                 <ul style={{ listStyle: "none", margin: "8px 0 0", padding: 0, color: "#4b4237" }}>
@@ -346,6 +356,7 @@ function Board({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
                       <button
                         key={`step-${i}`}
                         type="button"
+                        className="juice-pop"
                         disabled={!canPlay || b.usedSteps[i]}
                         onClick={() => tapTile(ref)}
                         style={{ ...tileStyle(refEquals(b.sel, ref), b.usedSteps[i]), borderStyle: "dashed" }}
@@ -385,8 +396,8 @@ function Board({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
                 {/* 組み立てた式 */}
                 {b.steps.length > 0 ? (
                   <ul style={{ listStyle: "none", margin: "12px 0 0", padding: 0, textAlign: "center", color: "#4b4237" }}>
-                    {formatSteps(numbers, b.steps, null).map((line, i) => (
-                      <li key={i} style={{ fontVariantNumeric: "tabular-nums", fontWeight: 700 }}>
+                    {formatSteps(numbers, b.steps, null).map((line, i, arr) => (
+                      <li key={i} className={i === arr.length - 1 ? "juice-pop" : undefined} style={{ fontVariantNumeric: "tabular-nums", fontWeight: 700 }}>
                         {line}
                       </li>
                     ))}
@@ -400,7 +411,7 @@ function Board({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
                       : "数字タイルを選んでください。そのまま提出もできます。"}
                 </p>
                 {b.error ? (
-                  <p role="alert" style={{ textAlign: "center", color: "#dc2626", fontWeight: 700 }}>
+                  <p role="alert" className="juice-shake" style={{ textAlign: "center", color: "#dc2626", fontWeight: 700 }}>
                     {b.error}
                   </p>
                 ) : null}
@@ -432,7 +443,7 @@ function Board({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
           ) : null}
 
           {state.phase === "reveal" ? (
-            <div style={{ marginTop: 6 }}>
+            <div className="juice-slide" style={{ marginTop: 6 }}>
               <p className="og-turn-banner" role="status">
                 {winner
                   ? `${winner.name} が ${winner.value}（目標まで ${winner.distance}）で +${winner.points}点！`
@@ -476,8 +487,8 @@ function Board({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
           ) : null}
         </>
       ) : (
-        <div style={{ textAlign: "center" }}>
-          <h2 style={{ fontSize: 24, margin: "10px 0" }}>結果発表</h2>
+        <div className="juice-slide" style={{ textAlign: "center" }}>
+          <h2 className="juice-pulse" style={{ fontSize: 24, margin: "10px 0" }}>結果発表</h2>
           <ul style={{ listStyle: "none", margin: 0, padding: 0, display: "grid", gap: 8 }}>
             {(state.standings ?? [...state.players].map((p) => ({ seat: p.seat, score: p.score, rank: 0 })))
               .slice()
@@ -500,7 +511,7 @@ function Board({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
                   >
                     <span>
                       {s.rank}位 {p.name}
-                      {s.seat === mySeat ? "（あなた）🎉" : ""}
+                      {s.seat === mySeat ? "（あなた）" : ""}
                       {p.left ? "（退出）" : ""}
                     </span>
                     <strong>{s.score}点</strong>

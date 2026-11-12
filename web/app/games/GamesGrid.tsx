@@ -5,8 +5,8 @@
 // 絞り込み（1人用／CPU対戦／オンライン）とタイトル検索、ランダム1本もここで持つ。
 // 分類は catalog の players 表示文字列から導出する（カタログ側に新フィールドは足さない）。
 import Link from "next/link";
-import { useMemo, useState } from "react";
-import { WEB_GAMES, type WebGame } from "@/lib/games-catalog";
+import { useEffect, useMemo, useState } from "react";
+import { WEB_GAMES, dailyPicksFor, getWebGame, type WebGame } from "@/lib/games-catalog";
 import { useGamesNav } from "./GamesShell";
 
 type FilterKey = "all" | "solo" | "cpu" | "online";
@@ -25,11 +25,30 @@ function matchesFilter(game: WebGame, filter: FilterKey): boolean {
   return game.players.includes("オンライン");
 }
 
+/** カード左のタイル色はジャンル（遊び方）から決定的に割り当てる。 */
+type GenreKey = "solo" | "cpu" | "online";
+
+const GENRE_TILE_COLOR: Record<GenreKey, string> = {
+  solo: "#4e7a51",
+  cpu: "#46618e",
+  online: "#8a4f7d",
+};
+
+function genreOf(game: WebGame): GenreKey {
+  if (game.players.includes("オンライン")) return "online";
+  if (game.players.includes("CPU")) return "cpu";
+  return "solo";
+}
+
 function GameCard({ game, prefix }: { game: WebGame; prefix: string }) {
   const inner = (
     <>
-      <div className="game-card-glyph" style={{ background: game.accent }} aria-hidden="true">
-        {game.glyph}
+      <div
+        className="game-card-tile"
+        style={{ background: GENRE_TILE_COLOR[genreOf(game)] }}
+        aria-hidden="true"
+      >
+        {[...game.title][0] ?? ""}
       </div>
       <div className="game-card-body">
         <h2>{game.title}</h2>
@@ -57,11 +76,108 @@ function GameCard({ game, prefix }: { game: WebGame; prefix: string }) {
   );
 }
 
+/** ワードルの成績キー（WordleClient と同じ端末内記録）。 */
+const WORDLE_STATS_KEY = "ago-wordle-stats";
+
+type DailyState = {
+  /** JST の日付ラベル（例: 2026年11月12日（木））。 */
+  label: string;
+  wordle: WebGame | null;
+  picks: WebGame[];
+  /** ワードルの現在連勝数。記録が無い・連勝中でない場合は 0（表示しない）。 */
+  wordleStreak: number;
+};
+
+function loadWordleStreak(): number {
+  try {
+    const raw = window.localStorage.getItem(WORDLE_STATS_KEY);
+    if (!raw) return 0;
+    const parsed = JSON.parse(raw) as { currentStreak?: unknown };
+    return typeof parsed.currentStreak === "number" && parsed.currentStreak > 0
+      ? Math.floor(parsed.currentStreak)
+      : 0;
+  } catch {
+    return 0;
+  }
+}
+
+function DailyStrip({ daily, prefix }: { daily: DailyState; prefix: string }) {
+  const { wordle, picks, label, wordleStreak } = daily;
+  return (
+    <section aria-label="今日のデイリー" style={{ margin: "0 0 28px" }}>
+      <p className="eyebrow">DAILY</p>
+      <h2 style={{ margin: "0 0 4px" }}>今日のデイリー</h2>
+      <p className="muted" style={{ margin: "0 0 14px" }}>
+        {label}のラインアップです。毎日0時（JST）に切り替わります。
+      </p>
+      {wordle && (
+        <Link
+          className="game-card"
+          href={`${prefix}/games/${wordle.slug}`}
+          style={{ margin: "0 0 14px" }}
+        >
+          <div
+            className="game-card-tile"
+            style={{ background: GENRE_TILE_COLOR[genreOf(wordle)] }}
+            aria-hidden="true"
+          >
+            {[...wordle.title][0] ?? ""}
+          </div>
+          <div className="game-card-body">
+            <h2>今日のワードル</h2>
+            <p>{label}の答えは全員共通です。6回以内に当ててみましょう。</p>
+            <div className="game-card-meta">
+              <span>デイリー</span>
+              {wordleStreak > 0 && (
+                <span className="game-badge">ワードル {wordleStreak}連勝中</span>
+              )}
+            </div>
+          </div>
+          <span className="card-arrow" aria-hidden="true">
+            →
+          </span>
+        </Link>
+      )}
+      {picks.length > 0 && (
+        <>
+          <p className="muted" style={{ margin: "0 0 10px", fontSize: 14 }}>
+            日替わりおすすめ
+          </p>
+          <div className="games-grid">
+            {picks.map((game) => (
+              <GameCard key={game.slug} game={game} prefix={prefix} />
+            ))}
+          </div>
+        </>
+      )}
+    </section>
+  );
+}
+
 export default function GamesGrid() {
   const { prefix } = useGamesNav();
   const [filter, setFilter] = useState<FilterKey>("all");
   const [query, setQuery] = useState("");
   const [picked, setPicked] = useState<WebGame | null>(null);
+  // デイリー帯は日付と端末内記録に依存するため、マウント後にだけ確定させる
+  // （サーバー描画との日付ずれによる不一致を避ける）。
+  const [daily, setDaily] = useState<DailyState | null>(null);
+
+  useEffect(() => {
+    const now = new Date();
+    setDaily({
+      label: new Intl.DateTimeFormat("ja-JP", {
+        timeZone: "Asia/Tokyo",
+        year: "numeric",
+        month: "long",
+        day: "numeric",
+        weekday: "short",
+      }).format(now),
+      wordle: getWebGame("wordle") ?? null,
+      picks: dailyPicksFor(now),
+      wordleStreak: loadWordleStreak(),
+    });
+  }, []);
 
   const visible = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -84,6 +200,7 @@ export default function GamesGrid() {
 
   return (
     <>
+      {daily && <DailyStrip daily={daily} prefix={prefix} />}
       <div
         style={{
           display: "flex",
@@ -145,7 +262,7 @@ export default function GamesGrid() {
             fontSize: 14,
           }}
         >
-          🎲 ランダムで1本
+          ランダムで1本
         </button>
         {picked && (
           <Link href={`${prefix}/games/${picked.slug}`} style={{ fontSize: 14 }}>

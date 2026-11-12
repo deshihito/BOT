@@ -3,7 +3,9 @@
 // 必ず解ける）。車を選ぶと動かせる方向と距離がボタンで出る。
 // 1回のスライド（距離を問わず）を1手として数える。
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { sfxSlide, sfxTap, sfxWin } from "@/lib/sfx";
+import { EndScreen } from "../GameJuice";
 import {
   RUSH_EXIT_ROW,
   createRushHour,
@@ -36,6 +38,21 @@ export default function RushHourClient() {
     }
   }, []);
 
+  const prevStatusRef = useRef(state.status);
+  const [winPrevBest, setWinPrevBest] = useState<number | null>(null);
+  const [winNewBest, setWinNewBest] = useState(false);
+
+  // 終局遷移の捕捉はベスト保存 effect より前に置き、保存前のベストを記録する。
+  useEffect(() => {
+    const prev = prevStatusRef.current;
+    prevStatusRef.current = state.status;
+    if (prev !== "won" && state.status === "won") {
+      setWinPrevBest(best);
+      setWinNewBest(best === null || state.moves < best);
+      sfxWin();
+    }
+  }, [state.status, state.moves, best]);
+
   useEffect(() => {
     if (state.status !== "won") return;
     if (best !== null && state.moves >= best) return;
@@ -50,6 +67,8 @@ export default function RushHourClient() {
   const restart = () => {
     setState(createRushHour(Date.now() % 2147483647));
     setSelected(null);
+    setWinPrevBest(null);
+    setWinNewBest(false);
   };
 
   const options = selected !== null ? rushSlideOptions(state, selected) : [];
@@ -126,7 +145,11 @@ export default function RushHourClient() {
                   ? "赤い車（出口へ出す車）"
                   : `${car.dir === "h" ? "横" : "縦"}の車（長さ${car.len}）`
               }
-              onClick={() => setSelected(isSel ? null : car.id)}
+              className={isSel ? "juice-pulse" : undefined}
+              onClick={() => {
+                sfxTap();
+                setSelected(isSel ? null : car.id);
+              }}
               style={{
                 position: "absolute",
                 left: `${(car.col / 6) * 100 + 0.6}%`,
@@ -145,7 +168,7 @@ export default function RushHourClient() {
                 padding: 0,
               }}
             >
-              {car.target ? "🚗" : ""}
+              {car.target ? "★" : ""}
             </button>
           );
         })}
@@ -167,7 +190,10 @@ export default function RushHourClient() {
                   key={delta}
                   type="button"
                   className="classic-btn classic-btn-active"
-                  onClick={() => setState((s) => rushSlide(s, selectedCar.id, delta))}
+                  onClick={() => {
+                    sfxSlide();
+                    setState((s) => rushSlide(s, selectedCar.id, delta));
+                  }}
                 >
                   {arrow} {Math.abs(delta)}マス
                 </button>
@@ -191,6 +217,24 @@ export default function RushHourClient() {
           ゲーム一覧へ
         </Link>
       </div>
+
+      {state.status === "won" && (
+        <div style={{ maxWidth: 480, margin: "14px auto 0" }}>
+          <EndScreen
+            outcome="win"
+            title="脱出成功！"
+            score={state.moves}
+            scoreLabel="手数"
+            newBest={winNewBest}
+            previousBest={winPrevBest}
+            onRetry={restart}
+          >
+            <p className="muted" style={{ margin: 0 }}>
+              {state.moves}手でクリアです。
+            </p>
+          </EndScreen>
+        </div>
+      )}
     </div>
   );
 }

@@ -158,26 +158,26 @@ export function rollDice(state: SugorokuState): SugorokuState {
     me.position = SUGOROKU_GOAL;
     status = "finished";
     winner = state.turn;
-    log = pushLog(log, `🎉 ${me.name} がゴール！勝ちです。`);
+    log = pushLog(log, `${me.name} がゴール！勝ちです。`);
   } else {
     const effect = squareEffect(pos);
     if (effect.type === "forward") {
       pos = Math.min(SUGOROKU_GOAL, pos + effect.steps);
-      log = pushLog(log, `  ⏩ ${describeEffect(effect)} → ${pos} マス目。`);
+      log = pushLog(log, `  ${describeEffect(effect)} → ${pos} マス目。`);
       if (pos >= SUGOROKU_GOAL) {
         status = "finished";
         winner = state.turn;
-        log = pushLog(log, `🎉 ${me.name} がゴール！勝ちです。`);
+        log = pushLog(log, `${me.name} がゴール！勝ちです。`);
       }
     } else if (effect.type === "back") {
       pos = Math.max(0, pos - effect.steps);
-      log = pushLog(log, `  ⏪ ${describeEffect(effect)} → ${pos} マス目。`);
+      log = pushLog(log, `  ${describeEffect(effect)} → ${pos} マス目。`);
     } else if (effect.type === "skip") {
       me.skipNext = true;
-      log = pushLog(log, `  💤 ${me.name} は次の番は1回休み。`);
+      log = pushLog(log, `  ${me.name} は次の番は1回休み。`);
     } else if (effect.type === "coins") {
       me.coins = Math.max(0, me.coins + effect.amount);
-      log = pushLog(log, `  🪙 ${describeEffect(effect)}（所持 ${me.coins} 枚）。`);
+      log = pushLog(log, `  ${describeEffect(effect)}（所持 ${me.coins} 枚）。`);
     }
     me.position = pos;
   }

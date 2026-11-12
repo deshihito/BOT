@@ -193,7 +193,7 @@ function Board({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
               </button>
             </div>
             {localError && (
-              <p className="og-error" role="alert">
+              <p className="og-error juice-shake" role="alert">
                 {localError}
               </p>
             )}
@@ -209,7 +209,7 @@ function Board({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
                 key={index}
                 type="button"
                 role="gridcell"
-                className={`og-cell og-bs-cell${shipIndex >= 0 ? " og-bs-cell-ship" : ""}`}
+                className={`og-cell og-bs-cell${shipIndex >= 0 ? " og-bs-cell-ship juice-pop" : ""}`}
                 disabled={confirmed}
                 aria-label={`${Math.floor(index / 10) + 1}行${(index % 10) + 1}列${shipIndex >= 0 ? " 艦あり" : ""}`}
                 onClick={() => tryPlace(index)}
@@ -276,11 +276,11 @@ function Board({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
 
   return (
     <div className="og-board-wrap">
-      <div className={`og-turn-banner${myTurn ? " og-turn-mine" : ""}`} role="status">
+      <div className={`og-turn-banner${myTurn ? " og-turn-mine" : ""}${state.phase === "finished" ? " juice-slide" : myTurn ? " juice-pulse" : ""}`} role="status">
         {state.phase === "finished"
           ? state.winner === "draw"
             ? "引き分け"
-            : `勝者: ${winnerName ?? "—"}${state.winner === mySeat ? " 🎉" : ""}`
+            : `勝者: ${winnerName ?? "—"}${state.winner === mySeat ? "" : ""}`
           : myTurn
             ? "あなたの手番です。相手の海をタップして攻撃"
             : `${turnName} の手番です（待機中）`}
@@ -296,7 +296,7 @@ function Board({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
                 <div
                   key={index}
                   role="gridcell"
-                  className={`og-cell og-bs-cell${ship ? " og-bs-cell-ship" : ""}${ship?.sunk ? " og-bs-cell-sunk" : ""}${hit ? (isHitResult(hit) ? " og-bs-cell-hit" : " og-bs-cell-miss") : ""}`}
+                  className={`og-cell og-bs-cell${ship ? " og-bs-cell-ship" : ""}${ship?.sunk ? " og-bs-cell-sunk" : ""}${hit ? (isHitResult(hit) ? " og-bs-cell-hit" : " og-bs-cell-miss") : ""}${state.lastShot?.index === index && state.lastShot.seat !== undefined && state.lastShot.seat !== mySeat ? " juice-pop" : ""}`}
                   aria-label={`${Math.floor(index / 10) + 1}行${(index % 10) + 1}列${ship ? " 艦あり" : ""}${hit ? (isHitResult(hit) ? " 被弾" : " 着水") : ""}`}
                 >
                   {hit ? (isHitResult(hit) ? "✕" : "・") : null}
@@ -317,7 +317,7 @@ function Board({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
                   key={index}
                   type="button"
                   role="gridcell"
-                  className={`og-cell og-bs-cell${sunkCell ? " og-bs-cell-sunk" : ""}${result ? (isHitResult(result) ? " og-bs-cell-hit" : " og-bs-cell-miss") : ""}${state.lastShot?.index === index ? " og-cell-last" : ""}`}
+                  className={`og-cell og-bs-cell${sunkCell ? " og-bs-cell-sunk" : ""}${result ? (isHitResult(result) ? " og-bs-cell-hit" : " og-bs-cell-miss") : ""}${state.lastShot?.index === index ? " og-cell-last juice-pop" : ""}`}
                   disabled={!myTurn || result !== undefined}
                   aria-label={`${Math.floor(index / 10) + 1}行${(index % 10) + 1}列${result ? (isHitResult(result) ? " 命中" : " はずれ") : ""}`}
                   onClick={() => fire(index)}

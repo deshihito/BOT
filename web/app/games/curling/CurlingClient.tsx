@@ -21,6 +21,8 @@ import {
   type CuStone,
   type CurlingState,
 } from "@/lib/curling";
+import { sfxCorrect, sfxLose, sfxSlide, sfxTap, sfxWin } from "@/lib/sfx";
+import { EndScreen } from "../GameJuice";
 import { useGamesNav } from "../GamesShell";
 
 const BEST_KEY = "ago-curling-best";
@@ -59,6 +61,7 @@ export default function CurlingClient() {
   const cpuTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const cpuKeyRef = useRef<string>("");
   const savedRef = useRef<number | null>(null);
+  const phaseSfxRef = useRef<string | null>(null);
 
   useEffect(() => {
     setWins(loadWins());
@@ -89,7 +92,24 @@ export default function CurlingClient() {
     [],
   );
 
+  useEffect(() => {
+    if (state.phase !== "endScored" && state.phase !== "finished") return;
+    const key = `${state.seed}:${state.end}:${state.phase}`;
+    if (phaseSfxRef.current === key) return;
+    phaseSfxRef.current = key;
+    if (state.phase === "endScored") {
+      sfxCorrect();
+    } else if (state.winner === "player") {
+      sfxWin();
+    } else if (state.winner === "cpu") {
+      sfxLose();
+    } else {
+      sfxCorrect();
+    }
+  }, [state.phase, state.seed, state.end, state.winner]);
+
   const animateThrow = (next: CurlingState, frames: CuStone[][]) => {
+    sfxSlide();
     if (frames.length <= 1) {
       setState(next);
       return;
@@ -131,6 +151,7 @@ export default function CurlingClient() {
     if (animRef.current !== null) cancelAnimationFrame(animRef.current);
     if (cpuTimerRef.current !== null) clearTimeout(cpuTimerRef.current);
     cpuKeyRef.current = "";
+    sfxTap();
     setRolling(false);
     setState(createCurlingGame(Date.now() % 2147483647));
   };
@@ -183,17 +204,34 @@ export default function CurlingClient() {
           <button
             type="button"
             className="classic-btn classic-btn-active"
-            onClick={() => setState((s) => nextEnd(s))}
+            onClick={() => {
+              sfxTap();
+              setState((s) => nextEnd(s));
+            }}
           >
             {state.end >= 2 ? "結果を見る" : "次のエンドへ"}
           </button>
         )}
       </div>
 
-      <p className="classic-status" role="status">
+      <p className={`classic-status${state.phase === "endScored" ? " juice-pulse" : ""}`} role="status">
         スコア あなた {state.scores.player} - {state.scores.cpu} CPU
         {wins > 0 ? ` ・ 通算 ${wins} 勝` : ""} ・ {statusText}
       </p>
+
+      {state.phase === "finished" && (
+        <EndScreen
+          outcome={state.winner === "player" ? "win" : state.winner === "cpu" ? "lose" : "draw"}
+          score={state.scores.player}
+          scoreLabel="あなたのスコア"
+          onRetry={restart}
+        >
+          <p className="muted" style={{ margin: 0 }}>
+            最終スコア あなた {state.scores.player} - {state.scores.cpu} CPU
+            {wins > 0 ? ` ・ 通算 ${wins} 勝` : ""}
+          </p>
+        </EndScreen>
+      )}
 
       <svg
         viewBox={`0 0 ${CU_WIDTH} ${CU_HEIGHT}`}

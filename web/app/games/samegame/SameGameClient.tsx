@@ -2,7 +2,7 @@
 // セイムゲーム。ロジックは lib/samegame.ts。
 // 同色でつながった2個以上のグループをタップで消す。端末内で完結する。
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   createSameGame,
   removeSameGameGroup,
@@ -11,6 +11,8 @@ import {
   sameGameRemaining,
   type SameGameState,
 } from "@/lib/samegame";
+import { sfxCorrect, sfxLose, sfxWin, sfxWrong } from "@/lib/sfx";
+import { EndScreen } from "../GameJuice";
 import { useGamesNav } from "../GamesShell";
 
 const COLOR_STYLES = [
@@ -32,6 +34,21 @@ export default function SameGameClient() {
   const [state, setState] = useState<SameGameState>(() => newGame());
   const [hover, setHover] = useState<number | null>(null);
   const [best, setBest] = useState<number | null>(null);
+  const [resultNewBest, setResultNewBest] = useState(false);
+  const [resultPrevBest, setResultPrevBest] = useState<number | null>(null);
+  const prevStatusRef = useRef(state.status);
+
+  // 終局遷移の瞬間だけジングルを鳴らし、その時点（保存前）のベストで更新判定を控える。
+  useEffect(() => {
+    const prev = prevStatusRef.current;
+    prevStatusRef.current = state.status;
+    if (prev === state.status || state.status !== "finished") return;
+    const isNew = best === null || state.score > best;
+    setResultNewBest(isNew);
+    setResultPrevBest(isNew ? null : best);
+    if (sameGameRemaining(state) === 0) sfxWin();
+    else sfxLose();
+  }, [state, best]);
 
   useEffect(() => {
     try {
@@ -52,6 +69,13 @@ export default function SameGameClient() {
       // 保存失敗はプレイに影響しない。
     }
   }, [state.status, state.score, best]);
+
+  const restart = () => {
+    setState(newGame());
+    setHover(null);
+    setResultNewBest(false);
+    setResultPrevBest(null);
+  };
 
   const hoverGroup = useMemo(() => {
     if (hover === null || state.status !== "playing") return [] as number[];
@@ -83,7 +107,7 @@ export default function SameGameClient() {
       </div>
 
       <div className="classic-controls" role="group" aria-label="操作">
-        <button type="button" className="classic-btn" onClick={() => { setState(newGame()); setHover(null); }}>
+        <button type="button" className="classic-btn" onClick={restart}>
           もう一度
         </button>
       </div>
@@ -118,7 +142,12 @@ export default function SameGameClient() {
               type="button"
               role="gridcell"
               aria-label={`${style.label}のブロック`}
+              className={highlighted ? "juice-pulse" : undefined}
               onClick={() => {
+                if (state.status === "playing") {
+                  if (sameGameGroupAt(state, i).length >= 2) sfxCorrect();
+                  else sfxWrong();
+                }
                 setState((s) => removeSameGameGroup(s, i));
                 setHover(null);
               }}
@@ -140,6 +169,24 @@ export default function SameGameClient() {
           );
         })}
       </div>
+
+      {state.status === "finished" && (
+        <div style={{ marginTop: 16 }}>
+          <EndScreen
+            outcome={remaining === 0 ? "win" : "finish"}
+            score={state.score}
+            scoreLabel="スコア"
+            newBest={resultNewBest}
+            previousBest={resultPrevBest}
+            onRetry={restart}
+          >
+            <p className="muted">
+              消したブロック {state.removed} 個 ・ 残り {remaining} 個
+              {state.bonus > 0 ? ` ・ ボーナス +${state.bonus}` : ""}
+            </p>
+          </EndScreen>
+        </div>
+      )}
     </>
   );
 }
