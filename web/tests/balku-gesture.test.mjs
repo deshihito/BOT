@@ -109,13 +109,58 @@ test("可読下限: カード幅とテキストの下限を絶対値で守る", 
   // 手札の企画カードは縦・横とも最低 104px
   assert.ok(css.includes("clamp(104px, 30cqw, 126px)"), "縦持ちの手札カード下限がない");
   assert.ok(css.includes("clamp(104px, 13.5cqw, 140px)"), "横向きの手札カード下限がない");
-  // ステージ予約は実測 chrome ベースの 96px（旧 150px の過大予約を撤去）
-  assert.ok(css.includes("100dvh - 96px"), "ステージ予約が 96px になっていない");
-  assert.ok(!css.includes("100dvh - 150px"), "旧 150px 予約が残っている");
+  // ステージ予約は実測 chrome ベースの 96px、基準は svh（ツールバー裏まで
+  // 数える dvh は Safari でステージを過大評価し、潰れの原因になった）
+  assert.ok(css.includes("100svh - 96px"), "ステージ予約が svh 96px になっていない");
+  assert.ok(!css.includes("100dvh"), "dvh 基準が残っている");
   // 高さ連動で束を潰す旧ルール（12.5cqh）は撤去済み
   assert.ok(!css.includes("12.5cqh"), "束の cqh 連動縮小が残っている");
   // 詳細表示の束は全サイズ（148px）で出す
   assert.ok(/\.balku-bundle \{[^}]*width:148px/.test(css), "束の全サイズ表示がない");
+});
+
+test("床: ゾーンの最低高が比率より優先され、席と中央帯は潰れて消えない", () => {
+  // ステージ：高さの上限で比率を壊さず、min-height の床が比率由来の
+  // 高さを上回ったらステージが伸びる（旧 max-height＋minmax(0,1fr) は
+  // iPhone 横向きで席・場が0に潰れて消えた）
+  const stageStart = css.indexOf(".balku-table-game {");
+  const stageRule = css.slice(stageStart, css.indexOf("}", stageStart));
+  assert.ok(stageRule.includes("grid-template-rows:minmax(86px, auto) minmax(128px, 1fr) auto"), "行の床（席86/中央128）がない");
+  assert.ok(stageRule.includes("min-height:632px"), "ステージの床（横向き）がない");
+  assert.ok(!stageRule.includes("max-height"), "ステージに高さ上限が残っている");
+  assert.ok(!stageRule.includes("minmax(0,1fr)"), "中央行が0まで潰れる指定が残っている");
+  // 列は minmax(0,1fr) で固定する（列定義がないと中身の min-content で
+  // ステージ幅より列が広がり、席や自領域が右にはみ出して切れた）
+  assert.ok(stageRule.includes("grid-template-columns:minmax(0, 1fr)"), "ステージの列固定がない");
+  assert.ok(/\.balku-self \{[^}]*grid-template-columns:minmax\(0, 1fr\)/.test(css), "自領域の列固定がない（情報バーの min-content で列が広がる）");
+  // 狭幅ではオークションが折り返す分、中央の床を上げる。縦持ちの床は
+  // 中央228＋自領域の実測合計まで含めて固定する
+  assert.ok(css.includes("minmax(228px, 1fr)"), "狭幅の中央の床（228）がない");
+  assert.ok(css.includes("min-height:724px"), "ステージの床（縦持ち/狭幅）がない");
+  // 情報バーは常に1行（折り返して自領域を押し上げない）
+  assert.ok(/\.balku-infobar \{[^}]*flex-wrap:nowrap/.test(css), "情報バーが1行に固定されていない");
+  // 席は固定高ストリップ（顔は小型版、名前と所持情報は右の列）
+  assert.ok(/\.balku-seats \{[^}]*height:86px/.test(css), "席ストリップの固定高がない");
+  assert.ok(/\.balku-seat \{[^}]*height:72px/.test(css), "席の固定高がない");
+  assert.ok(/\.balku-seat \.balku-stackface \{[^}]*width:104px/.test(css), "席内の小型の顔がない");
+  assert.ok(client.includes("balku-seat-meta") && client.includes("balku-seat-statsline"), "席の情報列がない");
+  assert.ok(client.includes("balku-seat-noface"), "提出なし席のプレースホルダがない");
+  // 手札ファンは固定高コンテナに完全収納し、重なりはカード幅の45%まで。
+  // 名前とPTは左列に縦積みし、重なりの下に隠れない
+  assert.ok(css.includes(".balku-fan-projects { height:140px; }"), "企画ファンの固定高がない");
+  assert.ok(css.includes(".balku-fan-mats { height:100px; }"), "素材ファンの固定高がない");
+  assert.ok(/\.balku-fan-projects \.balku-card \{[^}]*height:118px/.test(css), "手札カードの固定高がない");
+  assert.ok(css.includes("--balku-fan-card-w:clamp(104px, 13.5cqw, 140px)"), "横向きのカード幅変数がない");
+  assert.ok(css.includes("--balku-fan-card-w:clamp(104px, 30cqw, 126px)"), "縦持ちのカード幅変数がない");
+  assert.ok(css.includes("* -0.45"), "重なりの上限（45%）がない");
+  assert.ok(!css.includes("-17cqw") && !css.includes("-7.4cqw"), "旧の強い重なりが残っている");
+  assert.ok(/\.balku-fan-projects \.balku-card-head \{[^}]*flex-direction:column/.test(css), "名前とPTの縦積みがない");
+  // 情報バーの副次表示（同期状態）はハンバーガーへ。低丈の横向きでは
+  // 情報バーを1行に畳み、市場タブは場の行（ステージ縦中央）に付く
+  assert.ok(menuBlock.includes("ポーリングで同期中"), "同期状態がハンバーガーにない");
+  assert.ok(!client.includes("balku-chip balku-sync-note"), "情報バーに同期チップが残っている");
+  assert.ok(css.includes("@media (orientation: landscape) and (max-height: 600px)"), "低丈の横向きルールがない");
+  assert.ok(/\.balku-shelf-tab \{[^}]*top:50%/.test(css), "市場タブが場の行の中央に付いていない");
 });
 
 test("同時表示の削減: 要約スタック・中央帯1コンテキスト・詳細シート", () => {
