@@ -2175,26 +2175,11 @@ export default function BalkuClient() {
         else setDetailSeat(p.seat);
       }}
     >
-      <div className="balku-seat-head">
-        <span className="balku-nameplate">{p.name}</span>
-        {view.cpuSeats.includes(p.seat) && <span className="balku-badge balku-badge-cpu">CPU</span>}
-        {p.eliminated ? (
-          <span className="balku-badge balku-badge-bad">脱落</span>
-        ) : (
-          <span className="balku-seat-stats">
-            <BackStack count={p.handCount} />
-            <span>
-              {p.coins}コイン / {getTotalPoints(p)} PT
-              {st.activeSeat === p.seat && turnSec !== null ? ` / あと${turnSec}秒` : ""}
-            </span>
-          </span>
-        )}
-      </div>
-      {st.activeSeat === p.seat && turnSec !== null && <TimerBar sec={turnSec} total={60} />}
-      {/* 同時表示は最新の束だけ（要約スタック）。残りは件数で示し、
+      {/* 席は固定高ストリップ：左に最新の束の小型の顔、右に名前と
+          所持情報の列。同時表示は最新の束だけ（要約スタック）で、
           全束はタップで開く詳細シートで全サイズ表示する。 */}
       {p.submitted.length === 0 ? (
-        <p className="balku-table-note">提出なし</p>
+        <div className="balku-seat-noface">提出なし</div>
       ) : (
         <div className="balku-seatstack">
           {renderStackFace(p, p.submitted[p.submitted.length - 1])}
@@ -2205,6 +2190,23 @@ export default function BalkuClient() {
           )}
         </div>
       )}
+      <div className="balku-seat-meta">
+        <div className="balku-seat-head">
+          <span className="balku-nameplate">{p.name}</span>
+          {view.cpuSeats.includes(p.seat) && <span className="balku-badge balku-badge-cpu">CPU</span>}
+          {p.eliminated && <span className="balku-badge balku-badge-bad">脱落</span>}
+        </div>
+        {!p.eliminated && (
+          <span className="balku-seat-statsline">
+            <BackStack count={p.handCount} />
+            <span>
+              {p.coins}コイン / {getTotalPoints(p)} PT
+              {st.activeSeat === p.seat && turnSec !== null ? ` / あと${turnSec}秒` : ""}
+            </span>
+          </span>
+        )}
+        {st.activeSeat === p.seat && turnSec !== null && <TimerBar sec={turnSec} total={60} />}
+      </div>
     </div>
   );
 
@@ -2240,6 +2242,7 @@ export default function BalkuClient() {
                   {copied ? "コピーしました" : "コードをコピー"}
                 </button>
               </div>
+              {syncMode === "polling" && <p className="balku-sync-note">ポーリングで同期中</p>}
             </div>
             <div className="balku-menu-sec">
               <h3>サウンド</h3>
@@ -2529,7 +2532,6 @@ export default function BalkuClient() {
                 </span>
               )}
             </span>
-            {syncMode === "polling" && <span className="balku-chip balku-sync-note">ポーリングで同期中</span>}
             {myCharges.map((charge) => (
               <span
                 key={charge.id}
