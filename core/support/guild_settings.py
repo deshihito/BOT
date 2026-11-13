@@ -273,8 +273,12 @@ NEWS_DEFAULTS: dict[str, Any] = {
     "channel_id": None,      # 投稿先チャンネル ID
     "feeds": ["top"],        # 購読するトピック（core.general.news.feeds.TOPICS のキー）
     "seen": [],              # 投稿済み記事のリンク（古い順・最大60件、二重投稿防止）
+    "custom_feeds": [],      # 任意のRSS/Atomフィード（{"name","url"}、最大3件）
+    "custom_seen": [],       # カスタムフィードの投稿済みリンク（最大60件）
+    "custom_seeded": [],     # 初回シード済みのフィードURL（登録直後の大量投稿防止）
 }
 NEWS_SEEN_LIMIT = 60
+MAX_CUSTOM_FEEDS = 3  # 1サーバーに登録できるカスタムフィードの上限
 
 
 def news_settings(guild_id: int) -> dict[str, Any]:
@@ -283,6 +287,9 @@ def news_settings(guild_id: int) -> dict[str, Any]:
     result = dict(NEWS_DEFAULTS)
     result["feeds"] = list(NEWS_DEFAULTS["feeds"])
     result["seen"] = []
+    result["custom_feeds"] = []
+    result["custom_seen"] = []
+    result["custom_seeded"] = []
     if isinstance(raw.get("enabled"), bool):
         result["enabled"] = raw["enabled"]
     if isinstance(raw.get("channel_id"), int):
@@ -296,4 +303,28 @@ def news_settings(guild_id: int) -> dict[str, Any]:
     if isinstance(seen, list):
         result["seen"] = [link for link in seen
                            if isinstance(link, str) and link][-NEWS_SEEN_LIMIT:]
+    raw_feeds = raw.get("custom_feeds")
+    if isinstance(raw_feeds, list):
+        cleaned_feeds = []
+        for entry in raw_feeds:
+            if not isinstance(entry, dict):
+                continue
+            name = entry.get("name")
+            url = entry.get("url")
+            if (isinstance(name, str) and name.strip()
+                    and isinstance(url, str)
+                    and url.startswith(("https://", "http://"))):
+                cleaned_feeds.append(
+                    {"name": name.strip()[:50], "url": url.strip()[:500]})
+            if len(cleaned_feeds) >= MAX_CUSTOM_FEEDS:
+                break
+        result["custom_feeds"] = cleaned_feeds
+    custom_seen = raw.get("custom_seen")
+    if isinstance(custom_seen, list):
+        result["custom_seen"] = [link for link in custom_seen
+                                  if isinstance(link, str) and link][-NEWS_SEEN_LIMIT:]
+    custom_seeded = raw.get("custom_seeded")
+    if isinstance(custom_seeded, list):
+        result["custom_seeded"] = [u for u in custom_seeded
+                                    if isinstance(u, str) and u][:MAX_CUSTOM_FEEDS]
     return result
