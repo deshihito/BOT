@@ -620,8 +620,12 @@ button.balku-card:hover { box-shadow:0 10px 20px rgba(0,0,0,.45), inset 0 0 0 3p
 .balku-card-static { animation:none; }
 
 /* --- 上段：他社席 --- */
-.balku-seats { display:flex; flex-wrap:wrap; gap:16px; }
-.balku-seat { flex:1 1 248px; min-width:0; padding:12px; border:1px solid rgba(233,242,244,.12); border-radius:12px; background:rgba(255,255,255,.045); }
+/* 対戦画面は縦スクロールするページではなく、ビューポート高に収まる
+   1枚のテーブルにする。上段=他社席 / 中段=場（市場は引き出し）/
+   下段=自分の領域（施工ゾーンは手札の真上）。 */
+.balku-table-game { position:relative; aspect-ratio:16/10; width:min(100%, calc((100dvh - 150px) * 1.6)); max-height:calc(100dvh - 150px); margin-inline:auto; container-type:size; grid-template-rows:auto minmax(0,1fr) auto; gap:10px; padding:12px; overflow:hidden; }
+.balku-seats { display:flex; flex-wrap:nowrap; gap:10px; overflow-x:auto; overflow-y:hidden; padding-right:52px; padding-bottom:2px; scrollbar-width:thin; }
+.balku-seat { flex:1 1 0; min-width:230px; padding:8px 10px; border:1px solid rgba(233,242,244,.12); border-radius:12px; background:rgba(255,255,255,.045); }
 .balku-seat-active { border-color:var(--balku-cyan); box-shadow:inset 0 0 0 1px var(--balku-cyan); }
 .balku-seat-head { display:flex; flex-wrap:wrap; align-items:center; gap:8px 12px; margin-bottom:8px; font-size:13px; }
 .balku-nameplate { padding:3px 12px; border-radius:4px; background:rgba(0,0,0,.35); border:1px solid rgba(233,242,244,.2); font-size:14px; font-weight:800; letter-spacing:.05em; }
@@ -648,15 +652,18 @@ button.balku-card:hover { box-shadow:0 10px 20px rgba(0,0,0,.45), inset 0 0 0 3p
 .balku-badge-cpu { background:#2f7f9f !important; color:#fff !important; margin-left:6px; }
 
 /* --- 中央：場 --- */
-.balku-fieldrow { display:grid; grid-template-columns:minmax(0,1fr) 176px; gap:16px; align-items:start; }
-.balku-field { display:grid; gap:16px; min-width:0; }
+.balku-fieldrow { position:relative; display:grid; grid-template-columns:minmax(0,1fr); min-height:0; }
+.balku-field { display:grid; gap:10px; min-width:0; min-height:0; align-content:start; overflow:hidden; }
 .balku-myfield { display:grid; gap:8px; }
+.balku-seat .balku-bundle, .balku-myfield .balku-bundle { width:clamp(70px, 12.5cqh, 100px); padding:7px; }
+.balku-seat .balku-bundles { flex-wrap:nowrap; overflow-x:auto; overflow-y:hidden; padding-bottom:4px; scrollbar-width:thin; }
 .balku-auction { display:flex; flex-wrap:wrap; align-items:center; gap:8px 16px; padding:12px; border:2px solid var(--balku-cyan-deep); border-radius:12px; background:rgba(57,191,232,.08); font-size:14px; animation:balku-pulse-once var(--balku-dur) var(--balku-ease); }
 .balku-auction-info { color:#e9f2f4; }
 .balku-auction-danger { color:var(--balku-bad); font-weight:800; animation:balku-danger-pulse 1s ease-in-out infinite; }
 
 /* 施工ゾーン（ドロップ先） */
-.balku-buildzone { display:grid; gap:8px; min-height:208px; padding:16px; border:2px dashed rgba(120,200,230,.45); border-radius:12px; background:rgba(57,191,232,.05); transition:border-color var(--balku-dur) var(--balku-ease), box-shadow var(--balku-dur) var(--balku-ease), background var(--balku-dur) var(--balku-ease); }
+.balku-buildrow { display:flex; gap:10px; align-items:stretch; height:clamp(118px, 21cqh, 172px); }
+.balku-buildzone { flex:1 1 auto; min-width:0; display:grid; gap:8px; min-height:0; height:100%; overflow-y:auto; padding:10px 12px; border:2px dashed rgba(120,200,230,.45); border-radius:12px; background:rgba(57,191,232,.05); transition:border-color var(--balku-dur) var(--balku-ease), box-shadow var(--balku-dur) var(--balku-ease), background var(--balku-dur) var(--balku-ease); }
 .balku-buildzone-set { border-style:solid; border-color:rgba(120,200,230,.55); background:rgba(57,191,232,.09); }
 .balku-buildzone-empty { display:grid; gap:4px; place-content:center; text-align:center; color:#aee3f5; font-size:16px; font-weight:800; letter-spacing:.1em; }
 .balku-buildzone-empty span { font-size:12px; font-weight:400; letter-spacing:0; color:#9fb6bd; }
@@ -677,7 +684,10 @@ button.balku-card:hover { box-shadow:0 10px 20px rgba(0,0,0,.45), inset 0 0 0 3p
 .balku-target-hint strong { color:#aee3f5; }
 
 /* --- 市場の棚＋ログ（台の隅） --- */
-.balku-shelf { display:grid; gap:8px; align-content:start; padding:12px; border:1px solid rgba(233,242,244,.12); border-radius:12px; background:rgba(255,255,255,.045); }
+/* 市場はテーブル端の引き出し。閉じている間はタブだけが見え、開くと
+   テーブルの上に重なる（レイアウトの高さに一切影響しない）。 */
+.balku-shelf-tab { position:absolute; top:50%; right:0; z-index:46; transform:translateY(-50%); writing-mode:vertical-rl; padding:14px 7px; border:1px solid rgba(120,200,230,.45); border-right:none; border-radius:10px 0 0 10px; background:#17303d; color:#cfeeff; font-size:13px; font-weight:700; letter-spacing:.14em; cursor:pointer; touch-action:manipulation; }
+.balku-shelf { position:absolute; right:8px; bottom:8px; z-index:40; display:grid; gap:8px; align-content:start; width:min(272px,88vw); max-height:calc(100% - 16px); overflow-y:auto; padding:12px; border:1px solid rgba(120,200,230,.4); border-radius:12px; background:#17303d; box-shadow:0 18px 44px rgba(0,0,0,.55); animation:balku-in var(--balku-dur) var(--balku-ease); }
 .balku-market { display:grid; gap:8px; }
 .balku-market-card { display:flex; align-items:center; gap:8px; padding:6px 8px; border:1px solid rgba(233,242,244,.18); border-radius:10px; background:rgba(0,0,0,.22); color:#e9f2f4; font:inherit; cursor:pointer; transition:transform var(--balku-dur) var(--balku-ease), opacity var(--balku-dur); }
 .balku-market-card:active { transform:scale(.97); }
@@ -689,7 +699,7 @@ button.balku-card:hover { box-shadow:0 10px 20px rgba(0,0,0,.45), inset 0 0 0 3p
 .balku-log-danger { color:#f0938c; }
 
 /* --- 下段：自分の領域 --- */
-.balku-self { display:grid; gap:8px; padding:12px; border:1px solid rgba(233,242,244,.14); border-radius:12px; background:rgba(255,255,255,.05); }
+.balku-self { display:grid; gap:6px; padding:10px; border:1px solid rgba(233,242,244,.14); border-radius:12px; background:rgba(255,255,255,.05); }
 .balku-infobar { display:flex; flex-wrap:wrap; align-items:center; gap:8px; }
 .balku-chip { display:inline-flex; align-items:center; gap:8px; padding:5px 12px; border:1px solid rgba(233,242,244,.2); border-radius:999px; background:rgba(0,0,0,.28); font-size:13px; font-weight:600; }
 .balku-chip-now { background:#2f7f9f; border-color:#39bfe8; color:#fff; font-weight:800; animation:balku-pop var(--balku-dur) var(--balku-ease); }
@@ -699,18 +709,18 @@ button.balku-card:hover { box-shadow:0 10px 20px rgba(0,0,0,.45), inset 0 0 0 3p
 .balku-sync-note { color:#9fb6bd; font-size:12px; font-weight:400; }
 .balku-leave { margin-left:auto; min-height:32px; padding:4px 10px; }
 .balku-hand-tools { display:flex; flex-wrap:wrap; align-items:stretch; gap:8px; }
-.balku-sellpocket { margin-left:auto; display:grid; gap:0; place-content:center; padding:6px 16px; border:2px dashed rgba(245,197,24,.55); border-radius:10px; color:#f5c518; font-size:13px; font-weight:800; text-align:center; transition:box-shadow var(--balku-dur) var(--balku-ease), background var(--balku-dur); }
+.balku-sellpocket { display:inline-flex; align-items:center; gap:8px; padding:5px 12px; border:2px dashed rgba(245,197,24,.55); border-radius:10px; color:#f5c518; font-size:13px; font-weight:800; text-align:center; transition:box-shadow var(--balku-dur) var(--balku-ease), background var(--balku-dur); }
 .balku-sellpocket span { font-size:11px; font-weight:400; color:#d8c98a; }
 .balku-sellpocket.balku-drop-armed { border-color:#f5c518; }
 .balku-sellpocket.balku-drop-hot { box-shadow:0 0 0 3px rgba(245,197,24,.5), inset 0 0 24px rgba(245,197,24,.25); background:rgba(245,197,24,.12); }
-.balku-preview { min-height:1.5em; font-size:13px; color:#aee3f5; }
+.balku-preview { min-height:1.2em; font-size:12px; color:#aee3f5; }
 
 /* 手札ファン（重なり配置。ホバー/フォーカスでせり上がる） */
-.balku-fan { display:flex; align-items:flex-end; padding:16px 8px 4px; overflow-x:auto; scrollbar-width:thin; }
+.balku-fan { display:flex; align-items:flex-end; padding:8px 4px 2px; overflow-x:auto; scrollbar-width:thin; }
 .balku-fan-item { flex:0 0 auto; }
 .balku-fan .balku-card:hover, .balku-fan .balku-card:focus-visible { transform:translateY(-16px) scale(1.05); }
 .balku-fan-mats { padding-top:8px; align-items:flex-start; }
-.balku-matgroup { position:relative; display:grid; justify-items:center; gap:4px; padding:8px 6px 6px; border:1px solid rgba(0,0,0,.3); border-radius:10px; background:rgba(0,0,0,.25); color:#e9f2f4; font:inherit; cursor:pointer; transition:transform var(--balku-dur) var(--balku-ease), box-shadow var(--balku-dur) var(--balku-ease); }
+.balku-matgroup { position:relative; display:grid; justify-items:center; gap:4px; padding:5px 4px 4px; border:1px solid rgba(0,0,0,.3); border-radius:10px; background:rgba(0,0,0,.25); color:#e9f2f4; font:inherit; cursor:pointer; transition:transform var(--balku-dur) var(--balku-ease), box-shadow var(--balku-dur) var(--balku-ease); }
 .balku-matgroup .balku-matface { box-shadow:3px -3px 0 rgba(255,255,255,.25),6px -6px 0 rgba(255,255,255,.12), 0 3px 8px rgba(0,0,0,.35); }
 .balku-fan-mats .balku-matgroup:hover, .balku-fan-mats .balku-matgroup:focus-visible { transform:translateY(-10px); }
 .balku-matgroup-attached { box-shadow:0 0 0 2px var(--balku-cyan); }
@@ -768,7 +778,8 @@ button.balku-card:hover { box-shadow:0 10px 20px rgba(0,0,0,.45), inset 0 0 0 3p
 .balku-bundle-ghost { width:110px; }
 /* 提出パッド（束の放り先） */
 .balku-submitpads { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
-.balku-submitpad { display:grid; gap:2px; place-content:center; min-height:72px; padding:10px; border-radius:12px; font-size:15px; font-weight:800; letter-spacing:.08em; text-align:center; cursor:pointer; transition:box-shadow var(--balku-dur) var(--balku-ease), background var(--balku-dur); }
+.balku-submitpads { flex:0 0 138px; grid-template-columns:none; grid-template-rows:1fr 1fr; }
+.balku-submitpad { display:grid; gap:2px; place-content:center; min-height:0; padding:10px; border-radius:12px; font-size:15px; font-weight:800; letter-spacing:.08em; text-align:center; cursor:pointer; transition:box-shadow var(--balku-dur) var(--balku-ease), background var(--balku-dur); }
 .balku-submitpad span { font-size:11px; font-weight:400; letter-spacing:0; }
 .balku-submitpad-open { border:2px dashed rgba(120,200,230,.6); background:rgba(57,191,232,.07); color:#aee3f5; }
 .balku-submitpad-down { border:3px solid transparent; background:linear-gradient(#20303a,#20303a) padding-box, repeating-linear-gradient(45deg,#f5c518 0 10px,#191919 10px 20px) border-box; color:#f5c518; }
@@ -822,23 +833,76 @@ button.balku-card:hover { box-shadow:0 10px 20px rgba(0,0,0,.45), inset 0 0 0 3p
 .balku-chat-input { flex:1; min-width:0; padding:9px 11px; border:1px solid rgba(120,200,230,.4); border-radius:8px; background:rgba(255,255,255,.06); color:#e9f2f4; font:inherit; font-size:14px; outline-color:#39bfe8; }
 .balku-chat-send { flex:none; }
 
+/* ハンバーガー：対戦外 chrome（ルーム/サウンド/スコア/ログ/進め方/退出）の退避先 */
+.balku-menu-btn { position:absolute; top:10px; right:10px; z-index:55; display:grid; place-content:center; gap:5px; width:40px; height:40px; padding:0; border:1px solid rgba(120,200,230,.45); border-radius:10px; background:rgba(23,48,61,.92); cursor:pointer; touch-action:manipulation; }
+.balku-menu-btn span { display:block; width:20px; height:2px; border-radius:2px; background:#cfeeff; }
+.balku-menu-drawer { position:absolute; top:58px; right:10px; bottom:10px; z-index:56; display:grid; gap:14px; align-content:start; width:min(330px,calc(100vw - 32px)); overflow-y:auto; padding:14px; border:1px solid rgba(120,200,230,.4); border-radius:12px; background:#0e1c24; box-shadow:0 18px 44px rgba(0,0,0,.55); animation:balku-in var(--balku-dur) var(--balku-ease); }
+.balku-menu-sec { display:grid; gap:8px; }
+.balku-menu-sec h3 { margin:0; font-size:12px; letter-spacing:.14em; color:#8fd8f2; }
+.balku-menu-row { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+.balku-menu-scores { display:grid; gap:6px; margin:0; padding:0; list-style:none; font-size:13px; }
+.balku-menu-scores li { display:flex; justify-content:space-between; gap:10px; }
+.balku-menu-log { display:grid; gap:4px; }
+.balku-menu-rules { display:grid; gap:4px; margin:0; padding-left:18px; font-size:13px; color:#c8d8dc; }
+.balku-table-game .balku-fan .balku-card { width:clamp(76px, 8.6cqw, 118px); }
+
 @media (max-width:760px) {
   .balku-chat { left:16px; }
   .balku-chat-panel { width:100%; height:min(440px,58vh); }
   .balku-table { padding:8px; gap:8px; border-radius:12px; }
   .balku-lobby-grid { grid-template-columns:minmax(0,1fr); }
   .balku-room-code { font-size:24px; }
-  .balku-seat { flex:1 1 100%; padding:8px; }
+  .balku-table-game { padding:8px; }
+  .balku-seat { flex:0 0 236px; padding:8px; }
   .balku-bundles { gap:6px; }
   .balku-bundle { width:124px; padding:8px; }
   .balku-fieldrow { grid-template-columns:minmax(0,1fr); }
-  .balku-shelf { order:2; }
   .balku-market { display:flex; flex-wrap:wrap; }
   .balku-market-card { flex:1 1 96px; }
   .balku-logcorner { display:none; }
-  .balku-fan .balku-card { width:112px; }
+  .balku-fan .balku-card { width:92px; }
+  .balku-buildrow { flex-direction:column; height:auto; }
+  .balku-buildzone { height:128px; }
+  .balku-submitpads { flex:none; grid-template-rows:none; grid-template-columns:1fr 1fr; height:46px; }
+  .balku-menu-drawer { width:calc(100vw - 24px); }
   .balku-deckbar { width:56px; }
   .balku-banner { top:10px; }
+}
+/* 企画イラスト（フラット SVG・ベタ塗り） */
+.balku-art { display:block; width:100%; height:40px; margin:4px 0; border-radius:6px; background:#dceef5; }
+.balku-art-mini { height:22px; margin:2px 0; }
+.balku-build-head .balku-art { width:64px; flex:none; margin:0; }
+.balku-bundle .balku-art { max-width:120px; }
+/* ドロー：山札方向からカードが飛んでくる */
+@keyframes balku-deal { from { transform:translate(-36px,-52px) scale(.65) rotate(-6deg); opacity:0; } to { transform:none; opacity:1; } }
+.balku-deal { animation:balku-deal .45s var(--balku-ease); }
+/* 開示バリエーション：接収は自側へ吸い込まれ、正規は光る、違法はヒビ */
+.balku-reveal-card { position:relative; overflow:hidden; }
+.balku-cracks { position:absolute; inset:0; width:100%; height:100%; pointer-events:none; }
+@keyframes balku-seize { 0% { transform:none; opacity:1; } 55% { transform:translateY(10px) scale(.97); opacity:1; } 100% { transform:translateY(46px) scale(.88); opacity:.25; } }
+.balku-reveal-seize .balku-reveal-card { animation:balku-seize 1.5s var(--balku-ease) .45s both; }
+@keyframes balku-okglow { 0% { box-shadow:0 0 0 rgba(245,197,24,0); } 35% { box-shadow:0 0 26px rgba(245,197,24,.75); } 100% { box-shadow:0 0 6px rgba(245,197,24,.25); } }
+.balku-reveal-ok .balku-reveal-card { animation:balku-okglow 1.2s var(--balku-ease); }
+/* 落札：コインが弾ける */
+.balku-coinburst { position:absolute; left:50%; top:38%; z-index:34; width:0; height:0; pointer-events:none; }
+.balku-coinburst span { position:absolute; left:-7px; top:-7px; width:14px; height:14px; border-radius:50%; background:radial-gradient(circle at 35% 35%, #ffe9a8, #f5c518 65%, #c99612); animation:balku-burst .85s var(--balku-ease) both; animation-delay:calc(var(--i) * 22ms); }
+@keyframes balku-burst { from { transform:rotate(calc(var(--i) * 45deg)) translateY(0) scale(1); opacity:1; } to { transform:rotate(calc(var(--i) * 45deg)) translateY(-46px) scale(.45); opacity:0; } }
+/* BALKU失敗：自分の領域が崩れる */
+@keyframes balku-hurt { 0%,100% { transform:none; } 20% { transform:translateX(-5px) rotate(-.5deg); } 45% { transform:translateX(5px) rotate(.5deg); } 70% { transform:translateX(-3px); } }
+.balku-self-hurt { animation:balku-hurt .55s var(--balku-ease); }
+.balku-self-hurt .balku-fan-item { animation:balku-hurt .55s var(--balku-ease); }
+/* 脱落した席は暗転 */
+.balku-seat-out { filter:grayscale(.85) brightness(.55); }
+/* 正規フリップに施工完了の光の帯 */
+.balku-bundle-flip::after { content:""; position:absolute; inset:0; background:linear-gradient(115deg, transparent 30%, rgba(255,233,168,.55) 50%, transparent 70%); transform:translateX(-110%); animation:balku-shine .8s var(--balku-ease) .1s both; pointer-events:none; }
+@keyframes balku-shine { to { transform:translateX(110%); } }
+/* 縦持ちはステージ比率を縦長に固定（5:7） */
+@media (orientation: portrait) {
+  .balku-table-game { aspect-ratio:5/7; width:min(100%, calc((100dvh - 150px) * 0.7143)); }
+  .balku-table-game .balku-fan .balku-card { width:clamp(70px, 21cqw, 96px); }
+  .balku-buildrow { flex-direction:column; height:auto; }
+  .balku-buildzone { height:19cqh; }
+  .balku-submitpads { flex:none; grid-template-rows:none; grid-template-columns:1fr 1fr; height:max(40px, 6.5cqh); }
 }
 @media (prefers-reduced-motion: reduce) {
   .balku-table *, .balku-banner, .balku-drag-clone, .balku-fly-card { animation:none !important; transition:none !important; }

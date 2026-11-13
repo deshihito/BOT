@@ -170,6 +170,121 @@ function MatFace({ kind, premium = false, mini = false }: { kind: MaterialKind; 
   );
 }
 
+/**
+ * 企画ごとの個別イラスト。外部アセットではなく、フラットなベタ塗り SVG を
+ * コードで組み立てる（企画名→モチーフ対応表＋効果タイプのフォールバック）。
+ * 画風は素材アイコン（MatIcon）と同系統：太めの輪郭なし・ベタ塗り2色。
+ */
+type ArtMotif =
+  | "house" | "houses" | "tower" | "office" | "bridge" | "dome" | "greenhouse"
+  | "museum" | "hall" | "farm" | "wind" | "nuclear" | "power" | "antenna"
+  | "rocket" | "port" | "aqua" | "wheel" | "lab" | "shelter" | "mystery"
+  | "trash" | "crane" | "wrench" | "scroll" | "speech" | "eye" | "gear"
+  | "leaf" | "logs" | "beam" | "blocks" | "pane" | "coil" | "crate"
+  | "ground" | "chart" | "badge" | "sign" | "network" | "float" | "generic";
+
+const PROJECT_ART: Record<string, ArtMotif> = {
+  "ミステリーハウス": "mystery", "小屋": "house", "光ファイバー": "network",
+  "ミュージアム": "museum", "ゴミ山": "trash", "解体工事": "wrench",
+  "環境アセス": "leaf", "地下シェルター": "shelter", "スマート農場": "farm",
+  "風力発電所": "wind", "水族館": "aqua", "宇宙港": "rocket",
+  "緊急補修": "wrench", "独占契約": "scroll", "高層ビル": "tower",
+  "原子力施設": "nuclear", "遊園地": "wheel", "整地": "ground",
+  "資材調達": "crate", "コストカット": "chart", "文句": "speech",
+  "産業スパイ": "eye", "内部工作": "gear", "木材調達": "logs",
+  "鉄骨調達": "beam", "コンクリ調達": "blocks", "ガラス調達": "pane",
+  "銅線調達": "coil", "ホール": "hall", "住宅街": "houses",
+  "再開発": "crane", "巨大温室": "greenhouse", "つり橋": "bridge",
+  "オフィス": "office", "ガラスドーム": "dome", "言いがかり": "speech",
+  "品質保証": "badge", "文句を言うもんく": "speech", "施工停止命令": "sign",
+  "通信制御棟": "antenna", "高耐久ドーム": "dome", "都市物流港": "port",
+  "深層研究区": "lab", "量子通信塔": "antenna", "浮体都市中枢": "float",
+  "電力供給網": "power",
+};
+
+const EFFECT_ART: Partial<Record<string, ArtMotif>> = {
+  coins: "crate", draw: "scroll", pointBoost: "tower", stealCoins: "speech",
+  stealCard: "eye", discard: "wrench", gainMaterial: "crate",
+  randomMaterial: "crate", randomProject: "scroll", income: "power",
+  forceBulk: "sign", mysteryHouse: "mystery",
+};
+
+const ART_COLORS: Record<ArtMotif, [string, string]> = {
+  house: ["#c96f4a", "#7a3b2e"], houses: ["#b85c48", "#5d7a4e"], tower: ["#4a6b8a", "#2c4356"],
+  office: ["#5d7d99", "#33566b"], bridge: ["#8a4f3d", "#d9a05a"], dome: ["#7fb3c8", "#3e7ca6"],
+  greenhouse: ["#8fd0a8", "#3f8f5f"], museum: ["#d9c9a3", "#8a6d3b"], hall: ["#a3703f", "#5f3d22"],
+  farm: ["#7ba05b", "#c94f43"], wind: ["#9db8c4", "#39bfe8"], nuclear: ["#b9c0c7", "#e0a100"],
+  power: ["#f5c518", "#33566b"], antenna: ["#6d7f8c", "#39bfe8"], rocket: ["#e8e4da", "#c94f43"],
+  port: ["#4a7d99", "#d9a05a"], aqua: ["#3e7ca6", "#7fd4e8"], wheel: ["#c95d7a", "#f5c518"],
+  lab: ["#7a6fb0", "#57c785"], shelter: ["#6b6f66", "#3d4038"], mystery: ["#3a3f5c", "#8a7fd4"],
+  trash: ["#8a7a5c", "#5d5240"], crane: ["#d9a05a", "#33566b"], wrench: ["#8c99a3", "#4a5a66"],
+  scroll: ["#e8dcc0", "#a3854f"], speech: ["#e8e4da", "#c94f43"], eye: ["#e8e4da", "#33566b"],
+  gear: ["#8c99a3", "#33566b"], leaf: ["#57c785", "#2c7a4b"], logs: ["#a3703f", "#6e4a26"],
+  beam: ["#7d99ae", "#42657c"], blocks: ["#b9bcbe", "#7d8287"], pane: ["#a8d4e6", "#5b93ad"],
+  coil: ["#c97b4a", "#8a4f26"], crate: ["#b3854f", "#7a5a30"], ground: ["#a38f6e", "#57c785"],
+  chart: ["#5d7d99", "#c94f43"], badge: ["#f5c518", "#2c7a4b"], sign: ["#e36a61", "#e8e4da"],
+  network: ["#33566b", "#39bfe8"], float: ["#4a7d99", "#f5c518"], generic: ["#5d7d99", "#33566b"],
+};
+
+function artShapes(motif: ArtMotif, m: string, a: string) {
+  const ground = <rect x="0" y="30" width="48" height="6" fill="#00000022" />;
+  const win = (x: number, y: number) => <rect key={`${x}-${y}`} x={x} y={y} width="3" height="4" fill="#ffe9a8" />;
+  switch (motif) {
+    case "house": return <>{ground}<polygon points="10,15 24,5 38,15" fill={a} /><rect x="14" y="15" width="20" height="15" fill={m} /><rect x="21" y="21" width="6" height="9" fill={a} />{win(16, 18)}{win(29, 18)}</>;
+    case "houses": return <>{ground}<polygon points="2,18 12,10 22,18" fill={a} /><rect x="5" y="18" width="14" height="12" fill={m} /><polygon points="24,16 36,7 48,16" fill={a} /><rect x="27" y="16" width="17" height="14" fill={m} /><rect x="33" y="22" width="5" height="8" fill={a} /></>;
+    case "tower": return <>{ground}<rect x="18" y="3" width="12" height="27" fill={m} /><rect x="16" y="1" width="16" height="3" fill={a} />{[7, 13, 19].map((y) => win(21, y))}{[7, 13, 19].map((y) => win(26, y))}</>;
+    case "office": return <>{ground}<rect x="9" y="7" width="30" height="23" fill={m} />{[11, 17, 23].map((y) => [13, 20, 27, 34].map((x) => win(x, y)))}</>;
+    case "bridge": return <>{ground}<rect x="2" y="24" width="44" height="3" fill={m} /><rect x="10" y="10" width="4" height="14" fill={a} /><rect x="34" y="10" width="4" height="14" fill={a} /><path d="M2 24 Q 24 8 46 24" stroke={a} strokeWidth="2" fill="none" /><path d="M12 17 L12 24 M24 13 L24 24 M36 17 L36 24" stroke={a} strokeWidth="1.5" /></>;
+    case "dome": return <>{ground}<path d="M8 30 A 16 16 0 0 1 40 30 Z" fill={m} /><path d="M16 30 A 8 12 0 0 1 32 30" stroke={a} strokeWidth="2" fill="none" /><rect x="22" y="10" width="4" height="5" fill={a} /></>;
+    case "greenhouse": return <>{ground}<path d="M6 30 A 18 18 0 0 1 42 30 Z" fill={m} opacity="0.75" /><path d="M15 30 A 9 14 0 0 1 33 30 M24 12 L24 30" stroke={a} strokeWidth="1.6" fill="none" /><polygon points="20,30 24,22 28,30" fill={a} /></>;
+    case "museum": return <>{ground}<polygon points="24,4 44,13 4,13" fill={a} /><rect x="8" y="16" width="4" height="12" fill={m} /><rect x="17" y="16" width="4" height="12" fill={m} /><rect x="27" y="16" width="4" height="12" fill={m} /><rect x="36" y="16" width="4" height="12" fill={m} /><rect x="4" y="28" width="40" height="2" fill={a} /></>;
+    case "hall": return <>{ground}<path d="M10 30 L10 16 A 14 12 0 0 1 38 16 L38 30 Z" fill={m} /><path d="M20 30 L20 22 A 4 5 0 0 1 28 22 L28 30 Z" fill={a} /></>;
+    case "farm": return <>{ground}<circle cx="40" cy="7" r="4" fill={a} /><polygon points="8,16 20,8 32,16" fill={a} /><rect x="11" y="16" width="18" height="12" fill={m} /><path d="M2 30 L46 30 M4 33 L44 33" stroke={a} strokeWidth="1.6" /><polygon points="34,28 37,20 40,28" fill={a} /></>;
+    case "wind": return <>{ground}<rect x="14" y="14" width="3" height="16" fill={m} /><polygon points="15.5,14 18,3 13.5,3" fill={a} /><polygon points="15.5,14 25,17 24,12" fill={a} /><polygon points="15.5,14 7,19 10,22" fill={a} /><rect x="30" y="20" width="12" height="10" fill={m} /><polygon points="28,20 36,14 44,20" fill={a} /></>;
+    case "nuclear": return <>{ground}<polygon points="16,30 19,10 29,10 32,30" fill={m} /><ellipse cx="24" cy="7" rx="7" ry="3" fill={a} opacity="0.8" /><ellipse cx="31" cy="4" rx="5" ry="2.4" fill={a} opacity="0.55" /></>;
+    case "power": return <>{ground}<polygon points="25,3 13,19 22,19 19,31 35,14 26,14" fill={m} stroke={a} strokeWidth="1.4" /></>;
+    case "antenna": return <>{ground}<polygon points="24,8 16,30 32,30" fill="none" stroke={m} strokeWidth="2.4" /><path d="M14 12 A 13 13 0 0 1 34 12 M17 15 A 8 8 0 0 1 31 15" stroke={a} strokeWidth="2" fill="none" /><circle cx="24" cy="9" r="2.4" fill={a} /></>;
+    case "rocket": return <>{ground}<polygon points="24,2 30,12 30,24 18,24 18,12" fill={m} /><polygon points="18,20 12,28 18,27 30,27 36,28 30,20" fill={a} /><circle cx="24" cy="14" r="3.4" fill={a} /><polygon points="21,28 24,35 27,28" fill="#f5c518" /></>;
+    case "port": return <>{ground}<rect x="6" y="6" width="3" height="20" fill={m} /><rect x="6" y="6" width="30" height="3" fill={m} /><line x1="30" y1="9" x2="30" y2="16" stroke={a} strokeWidth="1.6" /><rect x="26" y="16" width="9" height="6" fill={a} /><rect x="8" y="22" width="11" height="6" fill={a} /><path d="M0 32 Q 6 29 12 32 T 24 32 T 36 32 T 48 32" stroke={m} strokeWidth="2" fill="none" /></>;
+    case "aqua": return <>{ground}<path d="M0 10 Q 6 6 12 10 T 24 10 T 36 10 T 48 10" stroke={m} strokeWidth="2.4" fill="none" /><ellipse cx="22" cy="22" rx="9" ry="5" fill={a} /><polygon points="30,22 37,17 37,27" fill={a} /><circle cx="18" cy="21" r="1.4" fill="#fff" /><circle cx="38" cy="14" r="1.8" fill={m} /><circle cx="42" cy="19" r="1.2" fill={m} /></>;
+    case "wheel": return <>{ground}<circle cx="24" cy="15" r="11" fill="none" stroke={m} strokeWidth="2.4" /><path d="M24 4 L24 26 M13 15 L35 15 M16 7 L32 23 M32 7 L16 23" stroke={a} strokeWidth="1.4" /><polygon points="24,26 17,32 31,32" fill={a} /></>;
+    case "lab": return <>{ground}<polygon points="20,6 28,6 28,14 36,27 36,30 12,30 12,27 20,14" fill={m} opacity="0.85" /><rect x="18" y="3" width="12" height="3" fill={a} /><circle cx="21" cy="24" r="2" fill={a} /><circle cx="27" cy="26" r="1.5" fill={a} /><rect x="14" y="27" width="20" height="3" fill={a} opacity="0.7" /></>;
+    case "shelter": return <><rect x="0" y="24" width="48" height="12" fill={a} opacity="0.5" /><path d="M8 24 A 16 12 0 0 1 40 24 Z" fill={m} /><rect x="20" y="17" width="8" height="7" fill={a} /></>;
+    case "mystery": return <>{ground}<circle cx="39" cy="7" r="4.4" fill={a} /><polygon points="8,16 22,7 36,16" fill={a} /><rect x="11" y="16" width="22" height="14" fill={m} /><rect x="19" y="21" width="6" height="9" fill="#171a2e" /><circle cx="15" cy="12" r="1.3" fill="#ffe9a8" /><circle cx="30" cy="10" r="1" fill="#ffe9a8" /></>;
+    case "trash": return <>{ground}<polygon points="6,30 16,16 26,24 33,14 44,30" fill={m} /><rect x="18" y="10" width="6" height="5" fill={a} transform="rotate(18 21 12)" /><circle cx="33" cy="12" r="2.6" fill={a} /></>;
+    case "crane": return <>{ground}<rect x="10" y="4" width="3.4" height="26" fill={m} /><rect x="10" y="4" width="34" height="3.4" fill={m} /><line x1="38" y1="7" x2="38" y2="15" stroke={a} strokeWidth="1.6" /><rect x="33" y="15" width="10" height="7" fill={a} /><rect x="20" y="22" width="12" height="8" fill={a} opacity="0.65" /></>;
+    case "wrench": return <>{ground}<circle cx="17" cy="12" r="6" fill="none" stroke={m} strokeWidth="4" /><rect x="21" y="15" width="5" height="16" fill={m} transform="rotate(-38 23 23)" /><circle cx="38" cy="10" r="2" fill={a} /></>;
+    case "scroll": return <>{ground}<rect x="10" y="10" width="28" height="16" fill={m} /><circle cx="10" cy="18" r="5" fill={a} /><circle cx="38" cy="18" r="5" fill={a} /><path d="M16 16 L32 16 M16 21 L29 21" stroke={a} strokeWidth="1.8" /></>;
+    case "speech": return <>{ground}<rect x="7" y="7" width="34" height="17" rx="5" fill={m} /><polygon points="16,24 14,31 24,24" fill={m} /><circle cx="17" cy="15" r="2" fill={a} /><circle cx="24" cy="15" r="2" fill={a} /><circle cx="31" cy="15" r="2" fill={a} /></>;
+    case "eye": return <>{ground}<ellipse cx="24" cy="17" rx="17" ry="9" fill={m} /><circle cx="24" cy="17" r="5.4" fill={a} /><circle cx="24" cy="17" r="2.2" fill="#171a2e" /></>;
+    case "gear": return <>{ground}<circle cx="24" cy="17" r="9" fill={m} /><circle cx="24" cy="17" r="3.6" fill="#dceef5" />{[0, 45, 90, 135, 180, 225, 270, 315].map((deg) => <rect key={deg} x="22.4" y="4" width="3.2" height="6" fill={a} transform={`rotate(${deg} 24 17)`} />)}</>;
+    case "leaf": return <>{ground}<path d="M10 28 C 8 12 20 5 38 6 C 37 24 26 31 10 28 Z" fill={m} /><path d="M12 27 C 20 19 28 12 36 8" stroke={a} strokeWidth="1.8" fill="none" /></>;
+    case "logs": return <>{ground}<rect x="6" y="10" width="30" height="7" rx="3.5" fill={m} /><rect x="10" y="19" width="30" height="7" rx="3.5" fill={m} /><circle cx="36" cy="13.5" r="3.4" fill={a} /><circle cx="40" cy="22.5" r="3.4" fill={a} /></>;
+    case "beam": return <>{ground}<rect x="8" y="9" width="32" height="4.6" fill={m} /><rect x="8" y="23" width="32" height="4.6" fill={m} /><rect x="21" y="13" width="6" height="10" fill={a} /></>;
+    case "blocks": return <>{ground}<rect x="8" y="21" width="15" height="8" fill={m} /><rect x="25" y="21" width="15" height="8" fill={a} opacity="0.75" /><rect x="16" y="12" width="15" height="8" fill={m} opacity="0.85" /></>;
+    case "pane": return <>{ground}<rect x="12" y="6" width="24" height="24" fill={m} opacity="0.8" /><path d="M17 26 L29 10 M23 28 L33 14" stroke={a} strokeWidth="2.4" /></>;
+    case "coil": return <>{ground}<ellipse cx="24" cy="11" rx="12" ry="4.6" fill="none" stroke={m} strokeWidth="3" /><ellipse cx="24" cy="18" rx="12" ry="4.6" fill="none" stroke={a} strokeWidth="3" /><ellipse cx="24" cy="25" rx="12" ry="4.6" fill="none" stroke={m} strokeWidth="3" /></>;
+    case "crate": return <>{ground}<rect x="11" y="9" width="26" height="21" fill={m} /><path d="M11 9 L37 30 M37 9 L11 30" stroke={a} strokeWidth="2.2" /></>;
+    case "ground": return <>{ground}<rect x="4" y="27" width="40" height="3.4" fill={m} /><path d="M6 23 L42 23" stroke={a} strokeWidth="1.6" strokeDasharray="4 3" /><rect x="35" y="10" width="2" height="13" fill={a} /><polygon points="37,10 44,12.4 37,15" fill="#c94f43" /></>;
+    case "chart": return <>{ground}<rect x="9" y="10" width="6" height="17" fill={m} /><rect x="19" y="15" width="6" height="12" fill={m} opacity="0.8" /><rect x="29" y="20" width="6" height="7" fill={m} opacity="0.6" /><path d="M8 8 L40 22" stroke={a} strokeWidth="2.2" /><polygon points="40,22 34,21 37,16" fill={a} /></>;
+    case "badge": return <>{ground}<circle cx="24" cy="15" r="9" fill={m} /><path d="M19 15 L22.6 18.6 L29 11.6" stroke={a} strokeWidth="2.4" fill="none" /><polygon points="19,22 16,31 22,27 24,31 27,26" fill={a} /></>;
+    case "sign": return <>{ground}<polygon points="17,5 31,5 38,12 38,22 31,29 17,29 10,22 10,12" fill={m} /><rect x="16" y="14.6" width="16" height="4.4" fill={a} /></>;
+    case "network": return <>{ground}<path d="M10 24 L24 10 L38 24 M24 10 L24 27" stroke={a} strokeWidth="1.8" /><circle cx="10" cy="24" r="3.6" fill={m} /><circle cx="38" cy="24" r="3.6" fill={m} /><circle cx="24" cy="10" r="3.6" fill={m} /><circle cx="24" cy="28" r="3" fill={a} /></>;
+    case "float": return <>{ground}<rect x="19" y="8" width="10" height="12" fill={m} />{win(22, 12)}<polygon points="10,20 38,20 33,27 15,27" fill={a} /><path d="M2 31 Q 8 28 14 31 T 26 31 T 38 31 T 48 31" stroke={m} strokeWidth="2" fill="none" /></>;
+    default: return <>{ground}<rect x="13" y="12" width="22" height="18" fill={m} /><polygon points="10,12 24,4 38,12" fill={a} />{win(18, 18)}{win(27, 18)}<rect x="21" y="23" width="6" height="7" fill={a} /></>;
+  }
+}
+
+function ProjectArt({ name, effectType, mini = false }: { name: string; effectType?: string; mini?: boolean }) {
+  const motif = PROJECT_ART[name] ?? EFFECT_ART[effectType ?? ""] ?? "generic";
+  const [main, accent] = ART_COLORS[motif];
+  return (
+    <svg className={`balku-art${mini ? " balku-art-mini" : ""}`} viewBox="0 0 48 36" aria-hidden="true" focusable="false">
+      {artShapes(motif, main, accent)}
+    </svg>
+  );
+}
+
 /** 残り時間バー（数字と併せて「減っていく」こと自体を見せる）。 */
 function TimerBar({ sec, total }: { sec: number; total: number }) {
   const pct = Math.max(0, Math.min(100, (sec / total) * 100));
@@ -273,7 +388,9 @@ export default function BalkuClient() {
   // 開示フリップ（裏→表にめくれる対象束。key は flashKeys と同じ）
   const [flipKeys, setFlipKeys] = useState<Record<string, true>>({});
   // 接収で消えた束の開示カード（場に短くフリップ表示する）
-  const [revealCard, setRevealCard] = useState<{ name: string; legal: boolean; key: string } | null>(null);
+  const [revealCard, setRevealCard] = useState<{ name: string; legal: boolean; key: string; seized?: boolean } | null>(null);
+  const [burstKey, setBurstKey] = useState<string | null>(null);
+  const [selfHurtKey, setSelfHurtKey] = useState<string | null>(null);
   // 自分のコイン増減ポップ（前スナップショットとの差分）
   const [coinPop, setCoinPop] = useState<{ delta: number; key: number } | null>(null);
   const prevCoinsRef = useRef<number | null>(null);
@@ -297,6 +414,8 @@ export default function BalkuClient() {
   const [dropHot, setDropHot] = useState<DropZoneId | null>(null);
   const [fly, setFly] = useState<FlyState | null>(null);
   const [hoverCard, setHoverCard] = useState<string | null>(null);
+  const [marketOpen, setMarketOpen] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
   const dragTrackRef = useRef<{
     payload: DragPayload;
     label: string;
@@ -372,20 +491,20 @@ export default function BalkuClient() {
 
   // --- 同期 ---
   const fetchView = useCallback(
-    async (target: Session): Promise<boolean> => {
+    async (target: Session): Promise<RoomView | null> => {
       try {
         const res = await fetch(`/api/balku/rooms/${target.code}?token=${encodeURIComponent(target.playerToken)}`, { cache: "no-store" });
         if (res.status === 403 || res.status === 404) {
           setError("ルームから切断されました。");
           saveSession(null);
-          return false;
+          return null;
         }
-        if (!res.ok) return false;
+        if (!res.ok) return null;
         const data = (await res.json()) as RoomView;
         setView(data);
-        return true;
+        return data;
       } catch {
-        return false;
+        return null;
       }
     },
     [saveSession],
@@ -535,12 +654,25 @@ export default function BalkuClient() {
     else if (action.type === "sellCards") playSe("sell");
     else if (action.type === "bid") playSe("bid");
     else if (action.type === "endTurn") playSe("click");
-    try {
-      const { res, data } = await postJson(`/api/balku/rooms/${session.code}/move`, {
+    const postMove = (revision: number) =>
+      postJson(`/api/balku/rooms/${session.code}/move`, {
         playerToken: session.playerToken,
-        expectedRevision: current.revision,
+        expectedRevision: revision,
         action,
       });
+    try {
+      let { res, data } = await postMove(current.revision);
+      // BALKU系は手番外アクションで、CPU進行やオークションで revision が
+      // 頻繁に進む局面とぶつかり 409 になりやすい（「押せない」体感の主因）。
+      // bulkCall / forceBulk に限り、最新盤面を取り直して1回だけ再送する。
+      // 対象の束が最新盤面で消えている場合はサーバーが 400 を返し、通常の
+      // エラー表示に落ちる（無効なコールを蘇らせはしない）。
+      if (res.status === 409 && (action.type === "bulkCall" || action.type === "forceBulk")) {
+        const fresh = await fetchView(session);
+        if (fresh) {
+          ({ res, data } = await postMove(fresh.revision));
+        }
+      }
       if (res.status === 409) {
         setNotice(typeof data.error === "string" ? data.error : "盤面が更新されました。");
         await fetchView(session);
@@ -723,6 +855,12 @@ export default function BalkuClient() {
         playSe("auctionWin");
         playSe("coin");
       } else if (text.includes("落札")) playSe("coin");
+      if (text.includes("落札") || text.includes("自動オークション成立")) setBurstKey(latestLog.id);
+      if (text.includes("BALKU失敗")) {
+        const caller = text.match(/BALKU失敗。(.+?)は/)?.[1];
+        const myName = state?.players.find((p) => p.seat === mySeat)?.name;
+        if (caller && myName && caller === myName) setSelfHurtKey(latestLog.id);
+      }
       else if (text.includes("公開で") || text.includes("伏せ企画を完成") || text.includes("伏せて")) playSe("play");
     }
     const event = toEventBanner(latestLog);
@@ -813,7 +951,7 @@ export default function BalkuClient() {
       name = quoted.length >= 2 ? quoted[1] : null;
     }
     if (!name) return;
-    setRevealCard({ name, legal: false, key: `log:${latestLog.id}` });
+    setRevealCard({ name, legal: false, key: `log:${latestLog.id}`, seized: true });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [latestLog?.id]);
 
@@ -823,6 +961,30 @@ export default function BalkuClient() {
     const timer = setTimeout(() => setRevealCard((r) => (r?.key === revealCard.key ? null : r)), 2100);
     return () => clearTimeout(timer);
   }, [revealCard]);
+
+  // 落札バーストと自領域の崩れは短く出して消す
+  useEffect(() => {
+    if (!burstKey) return;
+    const timer = setTimeout(() => setBurstKey((k) => (k === burstKey ? null : k)), 1300);
+    return () => clearTimeout(timer);
+  }, [burstKey]);
+  useEffect(() => {
+    if (!selfHurtKey) return;
+    const timer = setTimeout(() => setSelfHurtKey((k) => (k === selfHurtKey ? null : k)), 900);
+    return () => clearTimeout(timer);
+  }, [selfHurtKey]);
+
+  // --- 演出: ドローで山札から手札へカードが飛ぶ（初回スナップショットは除く） ---
+  const seenHandRef = useRef<Set<string>>(new Set());
+  const handPrimedRef = useRef(false);
+  const myHandCards = state?.players.find((p) => p.seat === mySeat)?.hand ?? [];
+  const dealIds = handPrimedRef.current ? new Set(myHandCards.filter((c) => !seenHandRef.current.has(c.id)).map((c) => c.id)) : new Set<string>();
+  const myHandIdsKey = myHandCards.map((c) => c.id).join(",");
+  useEffect(() => {
+    for (const c of myHandCards) seenHandRef.current.add(c.id);
+    handPrimedRef.current = true;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [myHandIdsKey]);
 
   // --- 演出: 自分のコインが動いたら +N / −N を浮かせる ---
   const myCoinsNow = state?.players.find((p) => p.seat === mySeat)?.coins;
@@ -848,6 +1010,7 @@ export default function BalkuClient() {
         <h1>BALKU</h1>
         <p className="muted">素材を集めて企画を完成させる、オンライン建築ブラフ。</p>
       </div>
+      {!(view && view.status === "active") && (
       <div className="balku-soundbar" role="group" aria-label="サウンド設定">
         <button
           type="button"
@@ -866,6 +1029,7 @@ export default function BalkuClient() {
           SE {soundSettings.se ? "ON" : "OFF"}
         </button>
       </div>
+      )}
       {error && (
         <p className="balku-error" role="alert">
           {error}
@@ -1577,6 +1741,7 @@ export default function BalkuClient() {
             <span className="muted">素材 {sub.materialCount}枚</span>
             {isMine && <span className={sub.legal ? "balku-badge balku-badge-ok" : "balku-badge balku-badge-bad"}>{sub.legal ? "正規" : "違法"}</span>}
           </div>
+          {isMine && <ProjectArt name={sub.project.name} effectType={sub.project.effect.type} mini />}
           {renderBundleMats(sub, isMine)}
           {canBulk && <span className="balku-bundle-pullhint" aria-hidden="true">▽ 引くとBALKU</span>}
         </div>
@@ -1601,6 +1766,7 @@ export default function BalkuClient() {
           <span className={sub.legal ? "balku-badge balku-badge-ok" : "balku-badge balku-badge-bad"}>{sub.legal ? "正規" : "違法"}</span>
           <span className="muted">素材 {sub.materialCount}枚</span>
         </div>
+        <ProjectArt name={sub.project.name} effectType={sub.project.effect.type} mini />
         <p className="balku-bundle-effect">{sub.project.effect.label}</p>
         {renderBundleMats(sub, true)}
         {canBulk && <span className="balku-bundle-pullhint" aria-hidden="true">▽ 引くとBALKU</span>}
@@ -1610,9 +1776,9 @@ export default function BalkuClient() {
 
   const latestLogEntry = st.logs[0];
   // 手札ファンの重なり率（カードが多いほど深く重ねて横幅に収める）
-  const projStep = handProjects.length <= 5 ? 118 : handProjects.length <= 8 ? 84 : handProjects.length <= 12 ? 60 : 44;
+  const projStep = handProjects.length <= 5 ? 88 : handProjects.length <= 8 ? 64 : handProjects.length <= 12 ? 48 : 36;
   const matKindsInHand = MARKET_MATERIALS.filter((kind) => ownedCount(kind) > 0);
-  const matStep = matKindsInHand.length <= 5 ? 84 : matKindsInHand.length <= 8 ? 62 : 48;
+  const matStep = matKindsInHand.length <= 5 ? 64 : matKindsInHand.length <= 8 ? 50 : 40;
   const dragProjectId = drag?.payload.source === "hand-project" ? drag.payload.card.id : null;
   const dragMatKind = drag?.payload.source === "hand-material" || drag?.payload.source === "attached-material" ? drag.payload.kind : null;
 
@@ -1621,7 +1787,7 @@ export default function BalkuClient() {
   const renderSeat = (p: SnapshotPlayer) => (
     <div
       key={p.seat}
-      className={`balku-seat${st.activeSeat === p.seat ? " balku-seat-active" : ""}${targetPicking && !p.eliminated ? " balku-seat-targetable" : ""}${targetPicking && targetSeat === p.seat ? " balku-seat-targeted" : ""}`}
+      className={`balku-seat${p.eliminated ? " balku-seat-out" : ""}${st.activeSeat === p.seat ? " balku-seat-active" : ""}${targetPicking && !p.eliminated ? " balku-seat-targetable" : ""}${targetPicking && targetSeat === p.seat ? " balku-seat-targeted" : ""}`}
       onClick={
         targetPicking && !p.eliminated
           ? () => {
@@ -1664,6 +1830,93 @@ export default function BalkuClient() {
         </div>
       )}
       <div className="balku-table balku-table-game">
+        {/* BALKU-MENU-START：対戦外 chrome の退避先（ハンバーガー） */}
+        <button
+          type="button"
+          className="balku-menu-btn"
+          aria-expanded={menuOpen}
+          aria-label="メニューを開く"
+          onClick={() => setMenuOpen((v) => !v)}
+        >
+          <span />
+          <span />
+          <span />
+        </button>
+        {menuOpen && (
+          <div className="balku-menu-drawer">
+            <div className="balku-menu-sec">
+              <h3>ルーム</h3>
+              <div className="balku-menu-row">
+                <code className="balku-code">{session.code}</code>
+                <button type="button" className="balku-btn balku-btn-ghost" onClick={copyCode}>
+                  {copied ? "コピーしました" : "コードをコピー"}
+                </button>
+              </div>
+            </div>
+            <div className="balku-menu-sec">
+              <h3>サウンド</h3>
+              <div className="balku-menu-row">
+                <button
+                  type="button"
+                  className={`balku-snd-btn${soundSettings.bgm ? " balku-snd-on" : ""}`}
+                  aria-pressed={soundSettings.bgm}
+                  onClick={() => toggleSound("bgm")}
+                >
+                  BGM {soundSettings.bgm ? "ON" : "OFF"}
+                </button>
+                <button
+                  type="button"
+                  className={`balku-snd-btn${soundSettings.se ? " balku-snd-on" : ""}`}
+                  aria-pressed={soundSettings.se}
+                  onClick={() => toggleSound("se")}
+                >
+                  SE {soundSettings.se ? "ON" : "OFF"}
+                </button>
+              </div>
+            </div>
+            <div className="balku-menu-sec">
+              <h3>スコア</h3>
+              <ul className="balku-menu-scores">
+                {st.players.map((p) => (
+                  <li key={p.seat}>
+                    <span>
+                      {p.name}
+                      {p.seat === me.seat ? "（あなた）" : ""}
+                    </span>
+                    <span>
+                      {p.coins}コイン / 提出 {p.submitted.length}件
+                      {p.seat === me.seat && myBreakdown ? ` / 現在 ${myBreakdown.points}点` : ""}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+            <div className="balku-menu-sec">
+              <h3>ログ</h3>
+              <div className="balku-menu-log">
+                {st.logs.map((log) => (
+                  <p key={log.id} className={`balku-logline balku-log-${log.tone}`}>
+                    {log.text}
+                  </p>
+                ))}
+              </div>
+            </div>
+            <div className="balku-menu-sec">
+              <h3>進め方</h3>
+              <ul className="balku-menu-rules">
+                <li>企画カードをタップし、素材をドラッグして施工ゾーンで束を作る。</li>
+                <li>束を公開／伏せのドロップ先へ放つと提出。</li>
+                <li>相手の伏せ束は自分の側へ引くと BALKU。違法を暴けば没収、正規なら奪われる。</li>
+                <li>調達市場はテーブル右端のタブから開く。</li>
+                <li>手番トークンを次の席へ放つとパス。</li>
+              </ul>
+            </div>
+            <button type="button" className="balku-btn balku-btn-ghost" onClick={leaveRoom} disabled={busy}>
+              退出する
+            </button>
+          </div>
+        )}
+        {/* BALKU-MENU-END */}
         {/* 上段：他社席（手番トークンの放り先＝パス） */}
         <div className="balku-seats" ref={seatsRef} data-drop="pass">
           {opponents.map((p) => renderSeat(p))}
@@ -1681,6 +1934,7 @@ export default function BalkuClient() {
                       <strong>{st.auction.card.name}</strong>
                       <span>{(st.auction.card as ProjectCard).points} PT</span>
                     </span>
+                    <ProjectArt name={st.auction.card.name} effectType={(st.auction.card as ProjectCard).effect.type} />
                     <span className="balku-card-effect">{(st.auction.card as ProjectCard).effect.label}</span>
                   </span>
                 ) : (
@@ -1727,15 +1981,143 @@ export default function BalkuClient() {
             </div>
 
             {revealCard && (
-              <div key={revealCard.key} className="balku-reveal" role="status" aria-live="polite">
+              <div key={revealCard.key} className={`balku-reveal${revealCard.seized ? " balku-reveal-seize" : ""}${revealCard.legal ? " balku-reveal-ok" : ""}`} role="status" aria-live="polite">
                 <span className="balku-plate">開示</span>
                 <span className="balku-reveal-card">
                   <strong>{revealCard.name}</strong>
+                  {!revealCard.legal && (
+                    <svg className="balku-cracks" viewBox="0 0 100 60" aria-hidden="true" focusable="false">
+                      <path d="M8 4 L26 22 L18 34 L34 50 M26 22 L44 18 M62 2 L58 20 L74 30 L68 48 M58 20 L46 34" stroke="#2b2b26" strokeWidth="1.6" fill="none" opacity="0.65" />
+                    </svg>
+                  )}
                   <span className={`balku-stamp ${revealCard.legal ? "" : "balku-stamp-bad"}`}>{revealCard.legal ? "承認" : "違法"}</span>
                 </span>
               </div>
             )}
+            {burstKey && (
+              <div key={burstKey} className="balku-coinburst" aria-hidden="true">
+                {Array.from({ length: 8 }, (_, i) => (
+                  <span key={i} style={{ "--i": i } as React.CSSProperties} />
+                ))}
+              </div>
+            )}
 
+          </div>
+
+          <div
+            role="button"
+            tabIndex={0}
+            className="balku-shelf-tab"
+            aria-expanded={marketOpen}
+            onClick={() => setMarketOpen((v) => !v)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                setMarketOpen((v) => !v);
+              }
+            }}
+          >
+            調達市場
+          </div>
+          {marketOpen && (
+            <aside className="balku-shelf balku-shelf-drawer">
+              <span className="balku-plate">調達市場（手札へドラッグで購入）</span>
+            <div className="balku-market">
+              {MARKET_MATERIALS.map((kind) => {
+                const canBuy = !busy && myTurn && me.coins >= getMarketPrice(kind);
+                return (
+                  <div
+                    key={kind}
+                    className={`balku-market-card balku-draggable${canBuy ? "" : " balku-inert"}`}
+                    {...dragHandlers({ source: "market-material", kind }, kind, canBuy)}
+                    tabIndex={canBuy ? 0 : -1}
+                    role="button"
+                    aria-label={`${kind}を${getMarketPrice(kind)}コインで購入（自分の領域へドラッグ）`}
+                    onKeyDown={(e) => {
+                      if (canBuy && (e.key === "Enter" || e.key === " ")) {
+                        e.preventDefault();
+                        void doMove({ type: "buyMaterial", material: kind });
+                      }
+                    }}
+                  >
+                    <MatFace kind={kind} premium={kind === "超伝導体"} mini />
+                    <span className="balku-price-tag">{getMarketPrice(kind)}コイン</span>
+                  </div>
+                );
+              })}
+            </div>
+            </aside>
+          )}
+        </div>
+
+        {/* 下段：自分の領域（情報バー＋手札） */}
+        <section ref={handZoneRef} className={`balku-self${selfHurtKey ? " balku-self-hurt" : ""}`} aria-label="あなたの領域">
+          <div className="balku-infobar">
+            <span className="balku-chip balku-chip-deck">
+              <CardBack mini />
+              <span className="balku-deckbar" aria-hidden="true">
+                <span className="balku-deckbar-fill" style={{ width: `${deckPct}%` }} />
+              </span>
+              山札 {st.deckCount} / {st.deckInitialCount}
+            </span>
+            <span className="balku-chip">第{st.turn}ターン</span>
+            {myTurn && !me.eliminated ? (
+              <span
+                key={`mine-${st.turn}`}
+                className="balku-chip balku-chip-now balku-draggable balku-turntoken"
+                {...dragHandlers({ source: "turn-token" }, "手番トークン", true)}
+                tabIndex={0}
+                role="button"
+                aria-label="手番トークン（相手の席へ放つとパス）"
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    void doMove({ type: "endTurn" });
+                  }
+                }}
+              >
+                あなたの手番{turnSec !== null ? ` ・ あと${turnSec}秒` : ""} ｜ 席へ放つとパス
+              </span>
+            ) : (
+              <span key="other" className="balku-chip">
+                {me.eliminated ? "脱落（観戦中）" : `${activePlayer?.name ?? ""}の手番${turnSec !== null ? ` ・ あと${turnSec}秒` : ""}`}
+              </span>
+            )}
+            {turnSec !== null && st.phase === "active" && <TimerBar sec={turnSec} total={60} />}
+            <span className="balku-chip balku-chip-coins">
+              {me.coins}コイン / {myBreakdown.points} PT（提出{myBreakdown.submittedPoints}＋ボーナス{myBreakdown.bonusPoints}）
+              {coinPop && (
+                <span key={coinPop.key} className={`balku-coin-pop${coinPop.delta < 0 ? " balku-coin-pop-minus" : ""}`} aria-hidden="true">
+                  {coinPop.delta > 0 ? `+${coinPop.delta}` : `${coinPop.delta}`}
+                </span>
+              )}
+            </span>
+            {myCharges.map((charge) => (
+              <span
+                key={charge.id}
+                className="balku-chip balku-chip-charge balku-draggable"
+                {...dragHandlers({ source: "force-charge", chargeId: charge.id }, "強制BALKU権", !me.eliminated && st.phase === "active")}
+                tabIndex={0}
+                role="button"
+                aria-label={`強制BALKU権（${charge.sourceProject}）：相手の束へドラッグで発動`}
+                title={`強制BALKU権（${charge.sourceProject}）：相手の束へドラッグで発動`}
+              >
+                強制BALKU権（{charge.sourceProject}）
+              </span>
+            ))}
+            <div
+              ref={sellZoneRef}
+              data-drop="sell"
+              className={`balku-sellpocket${drag ? " balku-drop-armed" : ""}${dropHot === "sell" ? " balku-drop-hot" : ""}`}
+            >
+              売却ポケット
+              <span>カードをここへ放つと +1コイン / 枚</span>
+            {syncMode === "polling" && <span className="balku-chip balku-sync-note">ポーリングで同期中</span>}
+          </div>
+
+          </div>
+
+          <div className="balku-buildrow">
             <section
               ref={buildZoneRef}
               data-drop="build"
@@ -1765,6 +2147,7 @@ export default function BalkuClient() {
                   <div className="balku-build-head">
                     <strong>{selectedProject.name}</strong>
                     <span>{selectedProject.points} PT</span>
+                    <ProjectArt name={selectedProject.name} effectType={selectedProject.effect.type} mini />
                     <span className="balku-build-effect">
                       {selectedProject.immediate ? "即時 / " : ""}
                       {selectedProject.effect.label}
@@ -1875,114 +2258,6 @@ export default function BalkuClient() {
             )}
           </div>
 
-          <aside className="balku-shelf">
-            <span className="balku-plate">調達市場</span>
-            <div className="balku-market">
-              {MARKET_MATERIALS.map((kind) => {
-                const canBuy = !busy && myTurn && me.coins >= getMarketPrice(kind);
-                return (
-                  <div
-                    key={kind}
-                    className={`balku-market-card balku-draggable${canBuy ? "" : " balku-inert"}`}
-                    {...dragHandlers({ source: "market-material", kind }, kind, canBuy)}
-                    tabIndex={canBuy ? 0 : -1}
-                    role="button"
-                    aria-label={`${kind}を${getMarketPrice(kind)}コインで購入（自分の領域へドラッグ）`}
-                    onKeyDown={(e) => {
-                      if (canBuy && (e.key === "Enter" || e.key === " ")) {
-                        e.preventDefault();
-                        void doMove({ type: "buyMaterial", material: kind });
-                      }
-                    }}
-                  >
-                    <MatFace kind={kind} premium={kind === "超伝導体"} mini />
-                    <span className="balku-price-tag">{getMarketPrice(kind)}コイン</span>
-                  </div>
-                );
-              })}
-            </div>
-            <div className="balku-logcorner" aria-label="ログ">
-              {st.logs.slice(0, 4).map((log) => (
-                <p key={log.id} className={`balku-logline balku-log-${log.tone}`}>
-                  {log.text}
-                </p>
-              ))}
-            </div>
-          </aside>
-        </div>
-
-        {/* 下段：自分の領域（情報バー＋手札） */}
-        <section ref={handZoneRef} className="balku-self" aria-label="あなたの領域">
-          <div className="balku-infobar">
-            <span className="balku-chip balku-chip-deck">
-              <CardBack mini />
-              <span className="balku-deckbar" aria-hidden="true">
-                <span className="balku-deckbar-fill" style={{ width: `${deckPct}%` }} />
-              </span>
-              山札 {st.deckCount} / {st.deckInitialCount}
-            </span>
-            <span className="balku-chip">第{st.turn}ターン</span>
-            {myTurn && !me.eliminated ? (
-              <span
-                key={`mine-${st.turn}`}
-                className="balku-chip balku-chip-now balku-draggable balku-turntoken"
-                {...dragHandlers({ source: "turn-token" }, "手番トークン", true)}
-                tabIndex={0}
-                role="button"
-                aria-label="手番トークン（相手の席へ放つとパス）"
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" || e.key === " ") {
-                    e.preventDefault();
-                    void doMove({ type: "endTurn" });
-                  }
-                }}
-              >
-                あなたの手番{turnSec !== null ? ` ・ あと${turnSec}秒` : ""} ｜ 席へ放つとパス
-              </span>
-            ) : (
-              <span key="other" className="balku-chip">
-                {me.eliminated ? "脱落（観戦中）" : `${activePlayer?.name ?? ""}の手番${turnSec !== null ? ` ・ あと${turnSec}秒` : ""}`}
-              </span>
-            )}
-            {turnSec !== null && st.phase === "active" && <TimerBar sec={turnSec} total={60} />}
-            <span className="balku-chip balku-chip-coins">
-              {me.coins}コイン / {myBreakdown.points} PT（提出{myBreakdown.submittedPoints}＋ボーナス{myBreakdown.bonusPoints}）
-              {coinPop && (
-                <span key={coinPop.key} className={`balku-coin-pop${coinPop.delta < 0 ? " balku-coin-pop-minus" : ""}`} aria-hidden="true">
-                  {coinPop.delta > 0 ? `+${coinPop.delta}` : `${coinPop.delta}`}
-                </span>
-              )}
-            </span>
-            {myCharges.map((charge) => (
-              <span
-                key={charge.id}
-                className="balku-chip balku-chip-charge balku-draggable"
-                {...dragHandlers({ source: "force-charge", chargeId: charge.id }, "強制BALKU権", !me.eliminated && st.phase === "active")}
-                tabIndex={0}
-                role="button"
-                aria-label={`強制BALKU権（${charge.sourceProject}）：相手の束へドラッグで発動`}
-                title={`強制BALKU権（${charge.sourceProject}）：相手の束へドラッグで発動`}
-              >
-                強制BALKU権（{charge.sourceProject}）
-              </span>
-            ))}
-            {syncMode === "polling" && <span className="balku-chip balku-sync-note">ポーリングで同期中</span>}
-            <button type="button" className="balku-btn balku-btn-ghost balku-leave" onClick={leaveRoom} disabled={busy}>
-              退出する
-            </button>
-          </div>
-
-          <div className="balku-hand-tools">
-            <div
-              ref={sellZoneRef}
-              data-drop="sell"
-              className={`balku-sellpocket${drag ? " balku-drop-armed" : ""}${dropHot === "sell" ? " balku-drop-hot" : ""}`}
-            >
-              売却ポケット
-              <span>カードをここへ放つと +1コイン / 枚</span>
-            </div>
-          </div>
-
           <p className="balku-preview" aria-live="polite">
             {hoverCard ?? ""}
           </p>
@@ -1992,23 +2267,31 @@ export default function BalkuClient() {
               const ready = selectLegalMaterials(card, me.hand) !== null;
               const selected = selectedProjectId === card.id;
               return (
-                <button
+                <div
                   key={card.id}
-                  type="button"
+                  role="button"
+                  tabIndex={myTurn ? 0 : -1}
                   data-hand-project={card.id}
-                  style={i === 0 ? undefined : { marginLeft: projStep - 132 }}
-                  className={`balku-card balku-fan-item balku-draggable${ready ? " balku-card-ready" : ""}${selected ? " balku-card-selected" : ""}${dragProjectId === card.id ? " balku-card-ghost" : ""}${myTurn ? "" : " balku-inert"}`}
+                  style={i === 0 ? undefined : { marginLeft: projStep - 100 }}
+                  className={`balku-card balku-fan-item balku-draggable${dealIds.has(card.id) ? " balku-deal" : ""}${ready ? " balku-card-ready" : ""}${selected ? " balku-card-selected" : ""}${dragProjectId === card.id ? " balku-card-ghost" : ""}${myTurn ? "" : " balku-inert"}`}
                   {...dragHandlers({ source: "hand-project", card }, card.name, myTurn)}
                   onClick={() => selectProject(card)}
                   onMouseEnter={() => setHoverCard(`${card.name}（${card.points} PT）：${card.effect.label}`)}
                   onMouseLeave={() => setHoverCard(null)}
                   onFocus={() => setHoverCard(`${card.name}（${card.points} PT）：${card.effect.label}`)}
                   onBlur={() => setHoverCard(null)}
+                  onKeyDown={(e) => {
+                    if (myTurn && (e.key === "Enter" || e.key === " ")) {
+                      e.preventDefault();
+                      selectProject(card);
+                    }
+                  }}
                 >
                   <span className="balku-card-head">
                     <strong>{card.name}</strong>
                     <span>{card.points} PT</span>
                   </span>
+                  <ProjectArt name={card.name} effectType={card.effect.type} />
                   <span className="balku-card-effect">
                     {card.immediate ? "即時 / " : ""}
                     {card.effect.label}
@@ -2029,7 +2312,7 @@ export default function BalkuClient() {
                     )}
                   </span>
                   {ready && <span className="balku-badge balku-badge-ok">完成可能</span>}
-                </button>
+                </div>
               );
             })}
             {handProjects.length === 0 && <p className="balku-table-note">企画カードはありません。</p>}
@@ -2041,11 +2324,12 @@ export default function BalkuClient() {
               const premium = handMaterials.some((c) => c.material === kind && c.rarity === "premium");
               const attached = selectedProject ? attachOf(kind) : 0;
               return (
-                <button
+                <div
                   key={kind}
-                  type="button"
-                  style={i === 0 ? undefined : { marginLeft: matStep - 80 }}
-                  className={`balku-matgroup balku-fan-item balku-draggable${attached > 0 ? " balku-matgroup-attached" : ""}${dragMatKind === kind && drag?.payload.source === "hand-material" ? " balku-card-ghost" : ""}${myTurn ? "" : " balku-inert"}`}
+                  role="button"
+                  tabIndex={myTurn ? 0 : -1}
+                  style={i === 0 ? undefined : { marginLeft: matStep - 58 }}
+                  className={`balku-matgroup balku-fan-item balku-draggable${handMaterials.some((c) => c.material === kind && dealIds.has(c.id)) ? " balku-deal" : ""}${attached > 0 ? " balku-matgroup-attached" : ""}${dragMatKind === kind && drag?.payload.source === "hand-material" ? " balku-card-ghost" : ""}${myTurn ? "" : " balku-inert"}`}
                   {...dragHandlers({ source: "hand-material", kind }, kind, myTurn)}
                   onClick={() => {
                     if (suppressClickRef.current) return;
@@ -2057,11 +2341,18 @@ export default function BalkuClient() {
                   onMouseEnter={() => setHoverCard(`${kind} ×${owned}${selectedProject ? "（タップ/ドロップで施工ゾーンへ添付）" : ""}`)}
                   onMouseLeave={() => setHoverCard(null)}
                   aria-label={`${kind} ${owned}枚`}
+                  onKeyDown={(e) => {
+                    if (myTurn && (e.key === "Enter" || e.key === " ") && selectedProject && kind in selectedProject.requirements) {
+                      e.preventDefault();
+                      playSe("play");
+                      setAttachCounts((prev) => ({ ...prev, [kind]: Math.min(owned, attachOf(kind) + 1) }));
+                    }
+                  }}
                 >
-                  <MatFace kind={kind} premium={premium} />
+                  <MatFace kind={kind} premium={premium} mini />
                   <span className="balku-matgroup-count">×{owned}</span>
                   {attached > 0 && <span className="balku-badge balku-badge-ok">添付 {attached}</span>}
-                </button>
+                </div>
               );
             })}
             {handMaterials.length === 0 && <p className="balku-table-note">素材はありません。</p>}
