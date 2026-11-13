@@ -196,14 +196,10 @@ class NewsCog(commands.Cog):
                 fresh, seeded = feeds_mod.select_new(
                     items, settings["seen"], MAX_POSTS_PER_POLL)
                 fresh_total += len(fresh)
-                # 投稿の成否に関わらず見た記事は記録し、失敗したサーバーが
-                # 次回も同じ新着を送り続けないようにする（天気の定時投稿と
-                # 同じ割り切り）。
-                seen = list(settings["seen"])
-                for item in items:
-                    if item.link not in seen:
-                        seen.append(item.link)
-                updates["seen"] = seen[-guild_settings.NEWS_SEEN_LIMIT:]
+                # 既読は「投稿できたとき」にだけ付ける。投稿先の不備などで
+                # 失敗した回は既読にせず、次回のチェックで送り直す
+                # （失敗した新着が二度と届かなくなるのを防ぐ）。
+                delivered = seeded or not fresh
                 if not seeded and fresh:
                     target_channel = await resolve_channel()
                     if target_channel is not None:
@@ -211,6 +207,7 @@ class NewsCog(commands.Cog):
                             await target_channel.send(
                                 format_post(fresh, settings["feeds"]))
                             posted += 1
+                            delivered = True
                             logger.info(
                                 "news: 投稿しました guild=%s channel=%s items=%d",
                                 guild_id, settings["channel_id"], len(fresh))
@@ -218,6 +215,12 @@ class NewsCog(commands.Cog):
                             logger.exception(
                                 "news: 投稿に失敗 guild=%s channel=%s",
                                 guild_id, settings["channel_id"])
+                if delivered:
+                    seen = list(settings["seen"])
+                    for item in items:
+                        if item.link not in seen:
+                            seen.append(item.link)
+                    updates["seen"] = seen[-guild_settings.NEWS_SEEN_LIMIT:]
 
             # --- カスタムフィード ---
             if settings["custom_feeds"]:
@@ -238,14 +241,14 @@ class NewsCog(commands.Cog):
                         continue
                     fresh_c, _ = feeds_mod.select_new(
                         feed_items, custom_seen, MAX_POSTS_PER_POLL)
-                    for item in feed_items:
-                        if item.link not in custom_seen:
-                            custom_seen.append(item.link)
                     if not fresh_c:
+                        for item in feed_items:
+                            if item.link not in custom_seen:
+                                custom_seen.append(item.link)
                         continue
                     target_channel = await resolve_channel()
                     if target_channel is None:
-                        continue
+                        continue  # 既読を進めず次回に送り直す
                     try:
                         await target_channel.send(
                             format_custom_post(fresh_c, feed["name"]))
@@ -254,7 +257,11 @@ class NewsCog(commands.Cog):
                             "news: カスタムフィードを投稿しました guild=%s "
                             "feed=%s items=%d",
                             guild_id, feed["name"], len(fresh_c))
+                        for item in feed_items:
+                            if item.link not in custom_seen:
+                                custom_seen.append(item.link)
                     except Exception:
+                        # 既読を進めないので、次回のチェックで送り直す
                         logger.exception(
                             "news: カスタムフィードの投稿に失敗 guild=%s feed=%s",
                             guild_id, feed["name"])
