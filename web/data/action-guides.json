@@ -1,11 +1,11 @@
 {
   "version": 1,
-  "total": 256,
+  "total": 253,
   "counts": {
     "general": 73,
     "vc": 46,
     "game": 49,
-    "support": 87,
+    "support": 84,
     "help": 1
   },
   "game_count": 48,
@@ -1477,6 +1477,12 @@
               "description": ""
             },
             {
+              "id": "support:news_notify",
+              "value": "news_notify",
+              "title": "ニュース通知",
+              "description": ""
+            },
+            {
               "id": "support:quest_notify",
               "value": "quest_notify",
               "title": "Quest通知（Discord Orbs）",
@@ -1652,33 +1658,9 @@
           "description": "",
           "functions": [
             {
-              "id": "support:sokunuke_status",
-              "value": "sokunuke_status",
-              "title": "即抜けRTA状態",
-              "description": ""
-            },
-            {
-              "id": "support:sokunuke_on",
-              "value": "sokunuke_on",
-              "title": "即抜けRTA計測オン",
-              "description": ""
-            },
-            {
-              "id": "support:sokunuke_off",
-              "value": "sokunuke_off",
-              "title": "即抜けRTA計測オフ",
-              "description": ""
-            },
-            {
-              "id": "support:sokunuke_vc_on",
-              "value": "sokunuke_vc_on",
-              "title": "VC自動参加オン",
-              "description": ""
-            },
-            {
-              "id": "support:sokunuke_vc_off",
-              "value": "sokunuke_vc_off",
-              "title": "VC自動参加オフ",
+              "id": "support:sokunuke_settings",
+              "value": "sokunuke_settings",
+              "title": "即抜けRTA設定",
               "description": ""
             }
           ]

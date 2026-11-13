@@ -33,8 +33,11 @@ class AIToolsTest(unittest.IsolatedAsyncioTestCase):
             and spec.id not in action_registry.MESSAGE_SHORTCUT_BLOCKED_IDS
         }
         self.assertEqual(set(candidates), expected)
-        # /support の新規候補のうち AI に入るのは読み取り専用の状態確認だけ。
-        self.assertIn("support:sokunuke_status", candidates)
+        # 即抜けRTAは設定パネル（sokunuke_settings）へ統合され、設定系パネルは
+        # AI 候補に入らない。旧 value（sokunuke_status 等）はレジストリから
+        # 外れたため候補にも存在しない。
+        self.assertNotIn("support:sokunuke_settings", candidates)
+        self.assertNotIn("support:sokunuke_status", candidates)
         # 機能数再編: sns_notify は SNS ジャンルへ分割され、設定系の新入口は
         # いずれも AI 候補に入らない。boardNotify のサービス別状態表示は
         # 読み取り専用なので候補に入る。

@@ -1,9 +1,10 @@
 # -*- coding: utf-8 -*-
-"""即抜けRTA改善のテスト（2026-11-08）。Discord には接続しない。
+"""即抜けRTA改善のテスト（2026-11-08／設定パネル統合 2026-11-13）。Discord には接続しない。
 
 - 記録時の embed 通知（名前・記録・順位、プレーン名、システムチャンネル宛）
 - 状態確認から VC自動参加 の項目が消えていること
 - ボードの最速/最遅切替（build_board / SokunukeBoardView）
+- 設定パネル（オン/オフ統合・送信先チャンネル選択）と送信先の解決
 """
 
 import os
@@ -26,7 +27,9 @@ from discord import app_commands  # noqa: E402
 
 from core.game.sokunuke_rta import cog as sokunuke_mod  # noqa: E402
 from core.game.sokunuke_rta.cog import (  # noqa: E402
-    SokuNukeRta, SokunukeBoardView, _global_worst_records, _rank_of,
+    SokuNukeRta, SokunukeBoardView, SokunukeNotifyChannelSelect,
+    SokunukeSettingsView, _global_worst_records, _rank_of,
+    _resolve_notify_channel,
 )
 
 SECTION = sokunuke_mod.SECTION
@@ -307,6 +310,192 @@ class SokunukeBoardDispatchTest(unittest.IsolatedAsyncioTestCase):
         args, bkwargs = sokunuke.build_board.await_args
         self.assertEqual(args, (123, 456))
         self.assertEqual(bkwargs, {"scope": "local", "slowest": False})
+
+
+class ResolveNotifyChannelTest(unittest.TestCase):
+    def make_guild(self, channels=None, system_channel="SYSTEM"):
+        channels = channels or {}
+        return types.SimpleNamespace(
+            id=1, system_channel=system_channel,
+            me=types.SimpleNamespace(id=99),
+            get_channel=lambda cid: channels.get(cid))
+
+    def test_unset_uses_system_channel(self):
+        guild = self.make_guild()
+        self.assertEqual(_resolve_notify_channel(guild, {}), "SYSTEM")
+        self.assertEqual(
+            _resolve_notify_channel(guild, {"notify_channel_id": None}), "SYSTEM")
+
+    def test_designated_channel_wins(self):
+        custom = types.SimpleNamespace(
+            id=777, permissions_for=lambda me: types.SimpleNamespace(send_messages=True))
+        guild = self.make_guild({777: custom})
+        self.assertIs(
+            _resolve_notify_channel(guild, {"notify_channel_id": 777}), custom)
+        # 文字列で保存されていても解決できる
+        self.assertIs(
+            _resolve_notify_channel(guild, {"notify_channel_id": "777"}), custom)
+
+    def test_missing_channel_falls_back_to_system(self):
+        guild = self.make_guild({})
+        self.assertEqual(
+            _resolve_notify_channel(guild, {"notify_channel_id": 888}), "SYSTEM")
+
+    def test_unpostable_channel_falls_back_to_system(self):
+        custom = types.SimpleNamespace(
+            id=777, permissions_for=lambda me: types.SimpleNamespace(send_messages=False))
+        guild = self.make_guild({777: custom})
+        self.assertEqual(
+            _resolve_notify_channel(guild, {"notify_channel_id": 777}), "SYSTEM")
+
+    def test_no_destination_returns_none(self):
+        guild = self.make_guild(system_channel=None)
+        self.assertIsNone(_resolve_notify_channel(guild, {}))
+
+
+class AnnounceChannelTest(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        joined = (datetime.now(timezone.utc) - timedelta(seconds=300)).isoformat()
+        self.store = use_store(self, FakeStore({
+            "1": {SECTION: {
+                "joins": {"2": joined},
+                "records": [{"user_id": "3", "elapsed": 100.0}],
+            }},
+        }))
+        self.system = types.SimpleNamespace(send=AsyncMock())
+        self.custom = types.SimpleNamespace(
+            id=777, send=AsyncMock(),
+            permissions_for=lambda me: types.SimpleNamespace(send_messages=True))
+        guild = types.SimpleNamespace(
+            id=1, system_channel=self.system, me=types.SimpleNamespace(id=99),
+            get_channel=lambda cid: self.custom if cid == 777 else None)
+        self.member = types.SimpleNamespace(
+            id=2, bot=False, guild=guild, display_name="ぬけお", name="nukeo")
+
+    async def test_designated_channel_receives_record(self):
+        self.store.section(1)["notify_channel_id"] = 777
+        cog = SokuNukeRta(types.SimpleNamespace())
+        await cog.on_member_remove(self.member)
+        self.custom.send.assert_awaited_once()
+        self.system.send.assert_not_awaited()
+
+    async def test_missing_designated_channel_falls_back_to_system(self):
+        self.store.section(1)["notify_channel_id"] = 888
+        cog = SokuNukeRta(types.SimpleNamespace())
+        await cog.on_member_remove(self.member)
+        self.system.send.assert_awaited_once()
+        self.custom.send.assert_not_awaited()
+
+
+def fake_panel_interaction():
+    return types.SimpleNamespace(
+        guild_id=1,
+        user=types.SimpleNamespace(
+            id=7,
+            guild_permissions=types.SimpleNamespace(
+                administrator=False, manage_guild=True)),
+        response=types.SimpleNamespace(
+            is_done=lambda: True, defer=AsyncMock(), send_message=AsyncMock()),
+        edit_original_response=AsyncMock())
+
+
+class SettingsPanelTest(unittest.IsolatedAsyncioTestCase):
+    def make_view(self, settings=None):
+        self.store = use_store(self, FakeStore({"1": {SECTION: dict(settings or {})}}))
+        self.cog = SokuNukeRta(types.SimpleNamespace())
+        self.custom = types.SimpleNamespace(
+            id=777, mention="<#777>",
+            permissions_for=lambda me: types.SimpleNamespace(send_messages=True))
+        guild = types.SimpleNamespace(
+            id=1, system_channel=None, me=types.SimpleNamespace(id=99),
+            get_channel=lambda cid: self.custom if cid == 777 else None)
+        return SokunukeSettingsView(self.cog, guild, dict(settings or {}))
+
+    def button(self, view, label):
+        for child in view.children:
+            if getattr(child, "label", None) == label:
+                return child
+        raise AssertionError(f"button not found: {label}")
+
+    def test_layout_and_defaults(self):
+        view = self.make_view()
+        labels = [getattr(c, "label", None) for c in view.children]
+        self.assertEqual(labels[0], "計測をオフにする")       # 既定はオン
+        self.assertEqual(labels[1], "VC自動参加をオフにする")  # 既定はオン
+        self.assertIsInstance(view.children[2], SokunukeNotifyChannelSelect)
+        reset = view.children[3]
+        self.assertEqual(reset.label, "送信先の指定を解除")
+        self.assertTrue(reset.disabled)  # 未指定では解除できない
+        body = view.embed().description
+        self.assertIn("計測: **オン**", body)
+        self.assertIn("記録の送信先: システムチャンネル", body)
+
+    async def test_toggle_measurement_saves_and_refreshes(self):
+        view = self.make_view()
+        interaction = fake_panel_interaction()
+        await self.button(view, "計測をオフにする").callback(interaction)
+        self.assertFalse(self.store.section(1)["measurement_enabled"])
+        self.assertIn("計測: **オフ**", view.embed().description)
+        self.assertEqual(self.button(view, "計測をオンにする").label, "計測をオンにする")
+        interaction.edit_original_response.assert_awaited()
+
+    async def test_toggle_vc_saves(self):
+        view = self.make_view()
+        interaction = fake_panel_interaction()
+        await self.button(view, "VC自動参加をオフにする").callback(interaction)
+        self.assertFalse(self.store.section(1)["vc_auto_join_enabled"])
+        self.assertIn("VC自動参加: **オフ**", view.embed().description)
+
+    async def test_channel_select_saves_destination(self):
+        view = self.make_view()
+        select = view.children[2]
+        select._values = [types.SimpleNamespace(id=777)]
+        interaction = fake_panel_interaction()
+        await select.callback(interaction)
+        self.assertEqual(self.store.section(1)["notify_channel_id"], 777)
+        self.assertIn("記録の送信先: <#777>", view.embed().description)
+        self.assertFalse(view.children[3].disabled)  # 解除ボタンが有効になる
+
+    async def test_reset_clears_destination(self):
+        view = self.make_view({"notify_channel_id": 777})
+        self.assertIn("記録の送信先: <#777>", view.embed().description)
+        interaction = fake_panel_interaction()
+        await view.children[3].callback(interaction)
+        self.assertIsNone(self.store.section(1)["notify_channel_id"])
+        self.assertIn("記録の送信先: システムチャンネル", view.embed().description)
+
+    async def test_interaction_check_requires_manage_guild(self):
+        view = self.make_view()
+        allowed = fake_panel_interaction()
+        self.assertTrue(await view.interaction_check(allowed))
+        denied = fake_panel_interaction()
+        denied.user.guild_permissions = types.SimpleNamespace(
+            administrator=False, manage_guild=False)
+        self.assertFalse(await view.interaction_check(denied))
+
+    async def test_settings_action_opens_panel(self):
+        self.make_view()  # ストア差し替えと cog を用意する
+        interaction = types.SimpleNamespace(
+            guild_id=1, guild=types.SimpleNamespace(id=1),
+            response=types.SimpleNamespace(send_message=AsyncMock()))
+        await self.cog.sokunuke_command(
+            interaction, app_commands.Choice(name="即抜けRTA設定", value="settings"))
+        kwargs = interaction.response.send_message.await_args.kwargs
+        self.assertTrue(kwargs["ephemeral"])
+        panel = kwargs["view"].panel
+        self.assertIsInstance(panel, SokunukeSettingsView)
+
+    async def test_legacy_actions_still_work(self):
+        self.make_view()
+        interaction = types.SimpleNamespace(
+            guild_id=1,
+            response=types.SimpleNamespace(send_message=AsyncMock()))
+        await self.cog.sokunuke_command(
+            interaction, app_commands.Choice(name="オフ", value="off"))
+        self.assertFalse(self.store.section(1)["measurement_enabled"])
+        await self.cog.sokunuke_command(
+            interaction, app_commands.Choice(name="オン", value="vc_off"))
+        self.assertFalse(self.store.section(1)["vc_auto_join_enabled"])
 
 
 if __name__ == "__main__":

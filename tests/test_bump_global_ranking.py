@@ -81,10 +81,11 @@ class UnifiedBoardGenreTest(unittest.TestCase):
         # 天気（general:weather、新ジャンル「ユーティリティ」）追加で general 72→73 / 全体 254→255。
         # gvc_members のショートカット登録漏れ是正で vc 45→46 / 全体 255→256。
         # ニュース通知（support:news_notify）追加で全体 256→257。
+        # 即抜けRTA設定の統合（support 5件→設定パネル1件）で全体 257→253。
         from core.general import action_registry
 
         specs = list(action_registry.default_registry()._by_id.values())
-        self.assertEqual(len(specs), 257)
+        self.assertEqual(len(specs), 253)
         self.assertEqual(len([s for s in specs if s.root == "general"]), 73)
 
 

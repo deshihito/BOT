@@ -13,6 +13,7 @@ from discord.ext import commands
 from core import ads as partner_ads
 from core.game.game.game_v2 import text_panel
 from core.support import guild_settings
+from core.support.messages import MANAGE_GUILD_REQUIRED
 from core.support.panel_v2 import as_panel_v2, edit_panel_v2
 from core.general.user_names import resolve_display_names
 from core.leaderboard_image import (
@@ -35,6 +36,40 @@ def _settings(store, guild_id: int) -> dict:
 def _enabled(settings: dict, key: str) -> bool:
     value = settings.get(key)
     return value if isinstance(value, bool) else True
+
+
+def _notify_channel_id(settings: dict) -> int | None:
+    raw = settings.get("notify_channel_id")
+    try:
+        return int(raw) if raw is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _resolve_notify_channel(guild, settings: dict):
+    """記録の送信先チャンネル。指定があればそれを優先する。
+
+    指定チャンネルが削除済み、または Bot に投稿権限が無い場合は
+    システムチャンネルへフォールバックする（どちらも無ければ None）。
+    """
+    channel = None
+    channel_id = _notify_channel_id(settings)
+    get_channel = getattr(guild, "get_channel", None)
+    if channel_id is not None and callable(get_channel):
+        channel = get_channel(channel_id)
+    if channel is not None:
+        me = getattr(guild, "me", None)
+        permissions_for = getattr(channel, "permissions_for", None)
+        if me is not None and callable(permissions_for):
+            try:
+                perms = permissions_for(me)
+            except Exception:
+                perms = None
+            if perms is not None and not getattr(perms, "send_messages", True):
+                channel = None
+    if channel is None:
+        channel = getattr(guild, "system_channel", None)
+    return channel
 
 
 def _duration(seconds: float) -> str:
@@ -200,15 +235,18 @@ class SokuNukeRta(commands.Cog):
                 logger.exception("即抜けRTAの記録通知に失敗しました: guild=%s", member.guild.id)
 
     async def _announce_record(self, member, elapsed_seconds: float, guild_records: list):
-        """即抜けが記録されたら、サーバーのシステムチャンネルへ embed で知らせる。
+        """即抜けが記録されたら、記録の送信先へ embed で知らせる。
 
+        送信先は設定パネルの指定チャンネル（notify_channel_id）を優先し、
+        未指定・使用不能ならサーバーのシステムチャンネルへ送る。
         順位は「その記録が入る位置」（最速ランキング）。名前はプレーン表記
         （退出済みユーザーのメンションは「不明のユーザー」になるため、
         ランキング表示の規約に合わせてメンションしない）。
         通知先が無ければ何もしない。
         """
         guild = member.guild
-        channel = getattr(guild, "system_channel", None)
+        settings = await self._get_settings(guild.id)
+        channel = _resolve_notify_channel(guild, settings)
         if channel is None:
             return
         rank_text = f"このサーバー **{_rank_of(elapsed_seconds, guild_records)}位**"
@@ -318,9 +356,19 @@ class SokuNukeRta(commands.Cog):
             view=as_panel_v2(view), files=view.files(),
             allowed_mentions=discord.AllowedMentions.none())
 
+    async def show_settings(self, interaction: discord.Interaction):
+        """即抜けRTA設定パネル（オン/オフ統合＋送信先チャンネル選択）。"""
+        if interaction.guild_id is None or interaction.guild is None:
+            return await interaction.response.send_message("この機能はサーバー内でのみ使えます。", ephemeral=True)
+        settings = await self._get_settings(interaction.guild_id)
+        view = SokunukeSettingsView(self, interaction.guild, settings)
+        await interaction.response.send_message(view=as_panel_v2(view), ephemeral=True)
+
     async def sokunuke_command(self, interaction: discord.Interaction, action: app_commands.Choice[str]):
         if interaction.guild_id is None:
             return await interaction.response.send_message("この機能はサーバー内でのみ使えます。", ephemeral=True)
+        if action.value == "settings":
+            return await self.show_settings(interaction)
         settings = await self._get_settings(interaction.guild_id)
         if action.value == "status":
             # 状態確認は即抜けRTAの計測状態だけを示す（VC自動参加は別機能の
@@ -339,6 +387,144 @@ class SokuNukeRta(commands.Cog):
         await self._save(interaction.guild_id, **{key: enabled})
         label = "計測" if key == "measurement_enabled" else "VC自動参加"
         await interaction.response.send_message(f"{label}を{'オン' if enabled else 'オフ'}にしました。", ephemeral=True)
+
+
+class SokunukeNotifyChannelSelect(discord.ui.ChannelSelect):
+    def __init__(self, parent: "SokunukeSettingsView"):
+        self.parent_view = parent
+        channel = parent.notify_channel()
+        super().__init__(
+            placeholder="記録を送るテキストチャンネルを選択",
+            channel_types=[discord.ChannelType.text, discord.ChannelType.news],
+            min_values=1,
+            max_values=1,
+            default_values=(
+                [discord.SelectDefaultValue(id=channel.id, type=discord.SelectDefaultValueType.channel)]
+                if channel is not None
+                else []
+            ),
+        )
+
+    async def callback(self, interaction: discord.Interaction):
+        await self.parent_view.save(
+            interaction, "記録の送信先を設定しました。",
+            notify_channel_id=self.values[0].id)
+
+
+class SokunukeSettingsView(discord.ui.View):
+    """即抜けRTA設定パネル（サーバー管理権限）。
+
+    旧 support アクション（状態確認・計測オン/オフ・VC自動参加オン/オフ）を
+    1パネルへ統合したもの。あわせて記録の送信先チャンネルを選べる。
+    保存先は従来と同じ sokunuke_rta セクションで、旧アクションの
+    dispatch 互換（sokunuke_command の status/on/off/vc_on/vc_off）も
+    同じキーを読み書きする。
+    """
+
+    def __init__(self, cog, guild, settings: dict):
+        super().__init__(timeout=300)
+        self.cog = cog
+        self.guild = guild
+        self.guild_id = guild.id
+        self.settings = settings if isinstance(settings, dict) else {}
+        self.notice = None
+        self._sync()
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        permissions = getattr(interaction.user, "guild_permissions", None)
+        if getattr(permissions, "administrator", False) or getattr(permissions, "manage_guild", False):
+            return True
+        await interaction.response.send_message(MANAGE_GUILD_REQUIRED, ephemeral=True)
+        return False
+
+    def notify_channel(self):
+        """指定済みで実在する送信先チャンネル。無ければ None。"""
+        channel_id = _notify_channel_id(self.settings)
+        get_channel = getattr(self.guild, "get_channel", None)
+        if channel_id is None or not callable(get_channel):
+            return None
+        return get_channel(channel_id)
+
+    def embed(self):
+        measurement = _enabled(self.settings, "measurement_enabled")
+        vc_auto_join = _enabled(self.settings, "vc_auto_join_enabled")
+        channel = self.notify_channel()
+        if channel is not None:
+            target = getattr(channel, "mention", None) or f"<#{channel.id}>"
+        elif _notify_channel_id(self.settings) is not None:
+            target = "⚠️ 指定のチャンネルが見つかりません（システムチャンネルへ送ります）"
+        else:
+            target = "システムチャンネル"
+        lines = []
+        if self.notice:
+            lines.append(self.notice)
+        lines.extend([
+            f"計測: **{'オン' if measurement else 'オフ'}**",
+            f"VC自動参加: **{'オン' if vc_auto_join else 'オフ'}**",
+            f"記録の送信先: {target}",
+        ])
+        if channel is not None:
+            me = getattr(self.guild, "me", None)
+            permissions_for = getattr(channel, "permissions_for", None)
+            if me is not None and callable(permissions_for):
+                try:
+                    perms = permissions_for(me)
+                except Exception:
+                    perms = None
+                if perms is not None and not getattr(perms, "send_messages", True):
+                    lines.append("⚠️ Botがこのチャンネルに投稿できません。システムチャンネルへ送ります。")
+        return discord.Embed(
+            title="即抜けRTA設定", description="\n".join(lines), color=0xFFFFFF)
+
+    def _sync(self):
+        self.clear_items()
+
+        def add_toggle(label, key, row):
+            enabled = _enabled(self.settings, key)
+            button = discord.ui.Button(
+                label=f"{label}を{'オフ' if enabled else 'オン'}にする",
+                style=(discord.ButtonStyle.secondary if enabled
+                       else discord.ButtonStyle.success),
+                row=row)
+            button.callback = self._make_toggle(key, label)
+            self.add_item(button)
+
+        add_toggle("計測", "measurement_enabled", 0)
+        add_toggle("VC自動参加", "vc_auto_join_enabled", 0)
+        select = SokunukeNotifyChannelSelect(self)
+        select.row = 1
+        self.add_item(select)
+        reset = discord.ui.Button(
+            label="送信先の指定を解除",
+            style=discord.ButtonStyle.secondary,
+            row=2,
+            disabled=_notify_channel_id(self.settings) is None)
+        reset.callback = self._reset_channel
+        self.add_item(reset)
+
+    async def save(self, interaction: discord.Interaction, notice: str | None = None, **values):
+        await self.cog._save(self.guild_id, **values)
+        self.settings = await self.cog._get_settings(self.guild_id)
+        self.notice = notice
+        self._sync()
+        if not interaction.response.is_done():
+            await interaction.response.defer()
+        await edit_panel_v2(interaction, as_panel_v2(self))
+
+    def _make_toggle(self, key: str, label: str):
+        async def callback(interaction: discord.Interaction):
+            enabled = not _enabled(self.settings, key)
+            await self.save(
+                interaction,
+                f"{label}を{'オン' if enabled else 'オフ'}にしました。",
+                **{key: enabled})
+        return callback
+
+    async def _reset_channel(self, interaction: discord.Interaction):
+        await self.save(
+            interaction,
+            "送信先の指定を解除しました。システムチャンネルへ送ります。",
+            notify_channel_id=None)
 
 
 class SokunukeBoardView(discord.ui.View):
