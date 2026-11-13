@@ -1,6 +1,6 @@
 "use client";
 // すごろく。ロジックは lib/sugoroku.ts（30マス・CPU 2人とのレース）。
-// 自分の番はボタンでサイコロを振り、CPU の番と自動進行モードはタイマーで進む。
+// 自分の番は盤面タップでサイコロを振り、CPU の番と自動進行モードはタイマーで進む。
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import {
@@ -13,6 +13,7 @@ import {
   type SugorokuState,
 } from "@/lib/sugoroku";
 import { useGamesNav } from "../GamesShell";
+import { tappableProps, useGesture } from "@/lib/gesture";
 import { sfxDice, sfxLose, sfxWin } from "@/lib/sfx";
 import { EndScreen } from "../GameJuice";
 
@@ -82,6 +83,13 @@ export default function SugorokuClient() {
     setState(createSugorokuGame(Date.now() % 2147483647));
   };
 
+  const canRoll = state.status === "playing" && !cpuTurn && !auto;
+  // 盤面タップでサイコロを振る（ボタンは置かない）。
+  const boardGesture = useGesture({
+    onTap: () => { if (canRoll) { sfxDice(); setState((s) => rollDice(s)); } },
+    onSwipe: () => { if (canRoll) { sfxDice(); setState((s) => rollDice(s)); } },
+  });
+
   const endSoundRef = useRef<SugorokuState | null>(null);
   useEffect(() => {
     if (state.status !== "finished") return;
@@ -104,26 +112,17 @@ export default function SugorokuClient() {
       </div>
 
       <div className="classic-controls" role="group" aria-label="操作">
-        <button
-          type="button"
-          className="classic-btn"
-          disabled={state.status !== "playing" || cpuTurn || auto}
-          onClick={() => { sfxDice(); setState((s) => rollDice(s)); }}
-          style={{ fontWeight: 800 }}
-        >
-          サイコロを振る
-        </button>
-        <button
-          type="button"
+        <div
+          {...tappableProps(() => setAuto((v) => !v))}
           aria-pressed={auto}
           className={auto ? "classic-btn classic-btn-active" : "classic-btn"}
-          onClick={() => setAuto((v) => !v)}
         >
-          {auto ? "⏸ 自動進行を止める" : "▶ 自動進行"}
-        </button>
+          {auto ? "自動進行: ON" : "自動進行: OFF"}
+        </div>
         <button type="button" className="classic-btn" onClick={restart}>
           もう一度
         </button>
+        <span className="muted" style={{ fontSize: 13 }}>あなたの番は盤面をタップでサイコロ</span>
       </div>
 
       <p className="classic-status" role="status">
@@ -158,14 +157,18 @@ export default function SugorokuClient() {
       </div>
 
       <div
-        role="img"
-        aria-label="すごろくのコース"
+        {...boardGesture}
+        role="button"
+        tabIndex={0}
+        onKeyDown={(e) => { if ((e.key === "Enter" || e.key === " ") && canRoll) { e.preventDefault(); sfxDice(); setState((s) => rollDice(s)); } }}
+        aria-label="すごろくのコース（タップでサイコロを振る）"
         style={{
           display: "grid",
           gridTemplateColumns: "repeat(6, minmax(0, 1fr))",
           gap: 5,
           maxWidth: 640,
           margin: "0 auto",
+          touchAction: "none",
         }}
       >
         {Array.from({ length: SUGOROKU_GOAL + 1 }, (_, i) => {

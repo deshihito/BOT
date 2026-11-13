@@ -2,7 +2,7 @@
 // 数独。ロジックは lib/sudoku.ts（唯一解を保って穴あけ、ヒント・矛盾チェック付き）。
 // 端末内で完結し、サーバーへ送信しない。
 import Link from "next/link";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   applyHint,
   clearCell,
@@ -15,6 +15,7 @@ import {
   type SudokuState,
 } from "@/lib/sudoku";
 import { sfxCorrect, sfxPlace, sfxTap, sfxWin, sfxWrong } from "@/lib/sfx";
+import { tappableProps, useGesture } from "@/lib/gesture";
 import { EndScreen } from "../GameJuice";
 import { useGamesNav } from "../GamesShell";
 
@@ -65,7 +66,7 @@ export default function SudokuClient() {
     setNoteMode(false);
   };
 
-  const onPad = (value: number) => {
+  const onPad = useCallback((value: number) => {
     if (selected === null || state.status === "won") return;
     if (noteMode && value !== 0) {
       if (state.givens[selected] || state.board[selected] !== 0) return;
@@ -85,13 +86,33 @@ export default function SudokuClient() {
       }
       setState(next);
     }
-  };
+  }, [selected, state, noteMode]);
+
+  // 物理キーボードでも数字を入れられる（画面パッドの代替）。
+  // パッドの div は Enter/Space のみ受けるため数字キーとの二重発火はない。
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA")) return;
+      if (/^[1-9]$/.test(e.key)) onPad(Number(e.key));
+      else if (e.key === "Backspace" || e.key === "Delete") onPad(0);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onPad]);
 
   const onHint = () => {
     const next = applyHint(state);
     if (next !== state && next.status !== "won") sfxPlace();
     setState(next);
   };
+
+  // 盤面の上スワイプでヒント（ヒントボタン廃止）。マスのタップは各マスが受ける。
+  const boardGesture = useGesture({
+    onSwipe: (dir) => {
+      if (dir === "up") onHint();
+    },
+  });
 
   const selectedValue = selected !== null ? state.board[selected] : 0;
 
@@ -109,46 +130,37 @@ export default function SudokuClient() {
 
       <div className="classic-controls" role="group" aria-label="難易度">
         {LEVELS.map((lv) => (
-          <button
+          <div
             key={lv.key}
-            type="button"
+            {...tappableProps(() => restart(lv.key))}
             aria-pressed={difficulty === lv.key}
             className={difficulty === lv.key ? "classic-btn classic-btn-active" : "classic-btn"}
-            onClick={() => restart(lv.key)}
           >
             {lv.label}
-          </button>
+          </div>
         ))}
         <button type="button" className="classic-btn" onClick={() => restart(difficulty)}>
           もう一度
         </button>
-        <button
-          type="button"
+        <div
+          {...tappableProps(() => setNoteMode((v) => !v))}
           aria-pressed={noteMode}
           className={noteMode ? "classic-btn classic-btn-active" : "classic-btn"}
-          onClick={() => setNoteMode((v) => !v)}
         >
           メモ{noteMode ? " ON" : " OFF"}
-        </button>
-        <button
-          type="button"
-          className="classic-btn"
-          disabled={state.hintsLeft <= 0 || state.status === "won"}
-          onClick={onHint}
-        >
-          ヒント（残り{state.hintsLeft}）
-        </button>
+        </div>
       </div>
 
       <p className="classic-status" role="status">
-        ⏱ {formatTime(seconds)} ・ ミス {state.mistakes} 回
+        時間 {formatTime(seconds)} ・ ミス {state.mistakes} 回 ・ ヒント残り {state.hintsLeft} 回
         {state.status === "won" ? ` ・ 完成！ ${formatTime(seconds)} でクリアです。` : ""}
         {state.status !== "won" && selected === null ? " ・ マスを選んで数字を入れてください。" : ""}
       </p>
 
       <div
+        {...boardGesture}
         role="grid"
-        aria-label="数独の盤"
+        aria-label="数独の盤（上スワイプでヒント）"
         style={{
           display: "grid",
           gridTemplateColumns: "repeat(9, minmax(0, 1fr))",
@@ -156,6 +168,7 @@ export default function SudokuClient() {
           width: "100%",
           border: "2px solid #333",
           boxSizing: "border-box",
+          touchAction: "none",
         }}
       >
         {state.board.map((value, i) => {
@@ -180,10 +193,10 @@ export default function SudokuClient() {
           else if (sameUnit) bg = "#eff6ff";
           if (mistake || conflict) bg = isSelected ? "#fecaca" : "#fee2e2";
           return (
-            <button
+            <div
               key={i}
-              type="button"
               role="gridcell"
+              tabIndex={0}
               aria-label={`行${row + 1}列${col + 1}${value ? ` ${value}` : " 空き"}`}
               aria-pressed={isSelected}
               className={
@@ -196,6 +209,12 @@ export default function SudokuClient() {
                       : undefined
               }
               onClick={() => {
+                sfxTap();
+                setSelected(i);
+              }}
+              onKeyDown={(e) => {
+                if (e.key !== "Enter" && e.key !== " ") return;
+                e.preventDefault();
                 sfxTap();
                 setSelected(i);
               }}
@@ -240,7 +259,7 @@ export default function SudokuClient() {
               ) : (
                 ""
               )}
-            </button>
+            </div>
           );
         })}
       </div>
@@ -251,27 +270,28 @@ export default function SudokuClient() {
         style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 14, maxWidth: 450 }}
       >
         {[1, 2, 3, 4, 5, 6, 7, 8, 9].map((n) => (
-          <button
+          <div
             key={n}
-            type="button"
+            {...tappableProps(() => onPad(n))}
+            aria-label={`数字 ${n}`}
             className="classic-btn"
-            style={{ minWidth: 44, minHeight: 44, fontSize: 18, fontWeight: 700 }}
-            onClick={() => onPad(n)}
+            style={{ minWidth: 44, minHeight: 44, fontSize: 18, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center" }}
           >
             {n}
-          </button>
+          </div>
         ))}
-        <button
-          type="button"
+        <div
+          {...tappableProps(() => onPad(0))}
+          aria-label="消す"
           className="classic-btn"
-          style={{ minWidth: 44, minHeight: 44 }}
-          onClick={() => onPad(0)}
+          style={{ minWidth: 44, minHeight: 44, display: "flex", alignItems: "center", justifyContent: "center" }}
         >
           消す
-        </button>
+        </div>
       </div>
       <p className="muted" style={{ fontSize: 13, marginTop: 8 }}>
         赤いマスは解答と違うか、同じ列・行・ブロックで重なっています。完成後は操作できません。
+        盤面を上にスワイプするとヒントを使えます。物理キーボードの 1〜9 / Backspace でも入力できます。
       </p>
 
       {state.status === "won" && (

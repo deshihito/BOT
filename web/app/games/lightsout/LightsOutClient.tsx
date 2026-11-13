@@ -12,6 +12,7 @@ import {
   type LightsOutState,
 } from "@/lib/lightsout";
 import { sfxFlip, sfxWin } from "@/lib/sfx";
+import { tappableProps } from "@/lib/gesture";
 import { EndScreen } from "../GameJuice";
 import { useGamesNav } from "../GamesShell";
 
@@ -87,28 +88,26 @@ export default function LightsOutClient() {
 
       <div className="classic-controls" role="group" aria-label="盤のサイズ">
         {SIZES.map((s) => (
-          <button
+          <div
             key={s.key}
-            type="button"
+            {...tappableProps(() => restart(s.key, difficulty))}
             aria-pressed={size === s.key}
             className={size === s.key ? "classic-btn classic-btn-active" : "classic-btn"}
-            onClick={() => restart(s.key, difficulty)}
           >
             {s.label}
-          </button>
+          </div>
         ))}
       </div>
       <div className="classic-controls" role="group" aria-label="難易度">
         {DIFFS.map((d) => (
-          <button
+          <div
             key={d.key}
-            type="button"
+            {...tappableProps(() => restart(size, d.key))}
             aria-pressed={difficulty === d.key}
             className={difficulty === d.key ? "classic-btn classic-btn-active" : "classic-btn"}
-            onClick={() => restart(size, d.key)}
           >
             {d.label}
-          </button>
+          </div>
         ))}
         <button type="button" className="classic-btn" onClick={() => restart(size, difficulty)}>
           もう一度
@@ -116,7 +115,7 @@ export default function LightsOutClient() {
       </div>
 
       <p className="classic-status" role="status">
-        点灯 {lit} / {state.cells.length} ・ {state.moves} 手 ・ ⏱ {formatTime(seconds)}
+        点灯 {lit} / {state.cells.length} ・ {state.moves} 手 ・ 時間 {formatTime(seconds)}
         {state.status === "won" ? ` ・ 全消灯！ ${state.moves} 手でクリアです。` : ""}
       </p>
 
@@ -132,14 +131,20 @@ export default function LightsOutClient() {
         }}
       >
         {state.cells.map((on, i) => (
-          <button
+          <div
             key={i}
-            type="button"
             role="gridcell"
+            tabIndex={state.status === "won" ? -1 : 0}
             aria-label={on ? "点灯" : "消灯"}
             aria-pressed={on}
+            aria-disabled={state.status === "won"}
             className={on ? "juice-flip" : undefined}
             onClick={() => handlePress(i)}
+            onKeyDown={(e) => {
+              if (e.key !== "Enter" && e.key !== " ") return;
+              e.preventDefault();
+              handlePress(i);
+            }}
             style={{
               aspectRatio: "1",
               minHeight: 52,
@@ -153,7 +158,7 @@ export default function LightsOutClient() {
             }}
           >
             {on ? "●" : "·"}
-          </button>
+          </div>
         ))}
       </div>
 

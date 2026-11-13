@@ -2,8 +2,9 @@
 // ナンバーコード。ロジックは lib/numbercode.ts（重複なし3桁、EAT/BITE 判定）。
 // 数字パッドで3桁を入力して提出する。端末内で完結し、サーバーへ送信しない。
 import Link from "next/link";
-import { useEffect, useRef, useState, type CSSProperties } from "react";
+import { useCallback, useEffect, useRef, useState, type CSSProperties } from "react";
 import { sfxLose, sfxPlace, sfxTap, sfxWin } from "@/lib/sfx";
+import { tappableProps, useGesture } from "@/lib/gesture";
 import { EndScreen } from "../GameJuice";
 import {
   createNumberCodeGame,
@@ -55,25 +56,61 @@ export default function NumberCodeClient() {
     prevStatusRef.current = state.status;
   }, [state.status]);
 
-  const pushDigit = (d: number) => {
-    if (!playing) return;
-    if (input.length < 3 && !input.includes(d)) sfxTap();
-    setInput((cur) => (cur.length >= 3 || cur.includes(d) ? cur : [...cur, d]));
-  };
-  const backspace = () => {
+  const pushDigit = useCallback(
+    (d: number) => {
+      if (!playing) return;
+      if (input.length < 3 && !input.includes(d)) sfxTap();
+      setInput((cur) => (cur.length >= 3 || cur.includes(d) ? cur : [...cur, d]));
+    },
+    [input, playing],
+  );
+  const backspace = useCallback(() => {
     if (input.length > 0) sfxTap();
     setInput((cur) => cur.slice(0, -1));
-  };
-  const submit = () => {
+  }, [input]);
+  const clearInput = useCallback(() => {
+    if (input.length === 0) return;
+    sfxTap();
+    setInput([]);
+  }, [input]);
+  const submit = useCallback(() => {
     if (!isValidNcGuess(input)) return;
     sfxPlace();
     setState((s) => submitNcGuess(s, input));
     setInput([]);
-  };
+  }, [input]);
   const restart = () => {
     setState(createNumberCodeGame(Date.now() % 2147483647));
     setInput([]);
   };
+
+  // 入力枠の上スワイプ=回答する、左スワイプ=クリア。
+  const slotsGesture = useGesture({
+    onSwipe: (dir) => {
+      if (dir === "up") submit();
+      else if (dir === "left") clearInput();
+    },
+  });
+
+  // 物理キーボードでも入力できる（sudoku / skyscrapers と同じ）。
+  // 数字パッド・操作チップにフォーカスがあるときの Enter は、その要素の
+  // Enter ハンドラに任せ、window 側の回答と二重に走らせない（wordle の教訓）。
+  // 数字・Backspace には div 側のハンドラがないためガードは Enter 分岐の中だけ。
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      if (e.key === "Enter") {
+        if ((e.target as HTMLElement | null)?.closest?.("[data-numbercode-key]")) return;
+        submit();
+      } else if (e.key === "Backspace") {
+        backspace();
+      } else if (/^[0-9]$/.test(e.key)) {
+        pushDigit(Number(e.key));
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [pushDigit, backspace, submit]);
 
   return (
     <>
@@ -85,7 +122,7 @@ export default function NumberCodeClient() {
       <div className="page-heading compact-heading">
         <h1>ナンバーコード</h1>
         <p className="muted">
-          EAT は数字も位置も一致、BITE は数字だけ一致。手がかりを読み解いて、3桁のコードを絞り込みます。
+          EAT は数字も位置も一致、BITE は数字だけ一致。手がかりを読み解いて、3桁のコードを絞り込みます。入力枠を上にスワイプすると回答、左にスワイプするとクリア。キーボードの数字・Backspace・Enter でも入力できます。
         </p>
       </div>
 
@@ -97,7 +134,12 @@ export default function NumberCodeClient() {
             : `残り ${remaining} 回 ・ これまでの回答 ${state.guesses.length} 件`}
       </p>
 
-      <div style={{ display: "flex", gap: 10, justifyContent: "center", margin: "14px 0" }} role="group" aria-label="入力中の数字">
+      <div
+        {...slotsGesture}
+        style={{ display: "flex", gap: 10, justifyContent: "center", margin: "14px 0", touchAction: "none" }}
+        role="group"
+        aria-label="入力中の数字"
+      >
         {[0, 1, 2].map((i) => (
           <div key={`${i}-${input[i] ?? "empty"}`} className={input[i] !== undefined ? "juice-pop" : undefined} style={slotStyle}>
             {input[i] !== undefined ? input[i] : "・"}
@@ -119,21 +161,47 @@ export default function NumberCodeClient() {
             aria-label="数字パッド"
           >
             {[1, 2, 3, 4, 5, 6, 7, 8, 9, 0].map((d) => (
-              <button key={d} type="button" disabled={input.includes(d)} onClick={() => pushDigit(d)} style={padStyle(input.includes(d))} aria-label={`数字${d}`}>
+              <div
+                key={d}
+                {...tappableProps(() => pushDigit(d))}
+                style={padStyle(input.includes(d))}
+                aria-label={`数字${d}`}
+                aria-disabled={input.includes(d)}
+                tabIndex={input.includes(d) ? -1 : 0}
+                data-numbercode-key=""
+              >
                 {d}
-              </button>
+              </div>
             ))}
           </div>
           <div className="classic-controls" style={{ justifyContent: "center", marginTop: 12 }}>
-            <button type="button" className="classic-btn" onClick={backspace} disabled={input.length === 0}>
+            <div
+              {...tappableProps(backspace)}
+              className="classic-btn"
+              aria-disabled={input.length === 0}
+              tabIndex={input.length === 0 ? -1 : 0}
+              data-numbercode-key=""
+            >
               ⌫ 消す
-            </button>
-            <button type="button" className="classic-btn" onClick={() => { sfxTap(); setInput([]); }} disabled={input.length === 0}>
+            </div>
+            <div
+              {...tappableProps(clearInput)}
+              className="classic-btn"
+              aria-disabled={input.length === 0}
+              tabIndex={input.length === 0 ? -1 : 0}
+              data-numbercode-key=""
+            >
               クリア
-            </button>
-            <button type="button" className="classic-btn classic-btn-active" onClick={submit} disabled={!isValidNcGuess(input)}>
+            </div>
+            <div
+              {...tappableProps(submit)}
+              className="classic-btn classic-btn-active"
+              aria-disabled={!isValidNcGuess(input)}
+              tabIndex={!isValidNcGuess(input) ? -1 : 0}
+              data-numbercode-key=""
+            >
               回答する
-            </button>
+            </div>
           </div>
         </>
       ) : (

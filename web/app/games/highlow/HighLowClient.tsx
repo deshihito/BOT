@@ -17,6 +17,7 @@ import {
   type HighLowState,
 } from "@/lib/highlow";
 import { useGamesNav } from "../GamesShell";
+import { useGesture } from "@/lib/gesture";
 
 const BEST_KEY = "ago-highlow-best";
 
@@ -96,6 +97,14 @@ export default function HighLowClient() {
     setState(next);
   };
 
+  // カードエリアのスワイプに一本化: 上スワイプ=高い / 下スワイプ=低い。
+  const cardGesture = useGesture({
+    onSwipe: (dir) => {
+      if (dir === "up") onGuess("high");
+      else if (dir === "down") onGuess("low");
+    },
+  });
+
   const current = highLowCurrent(state);
   const last = state.last;
   const lastText = !last
@@ -115,7 +124,7 @@ export default function HighLowClient() {
       </nav>
       <div className="page-heading compact-heading">
         <h1>ハイ＆ロー</h1>
-        <p className="muted">「高い」「低い」のボタンで、次のカードを予想します。</p>
+        <p className="muted">カードを上へスワイプすると「高い」、下へスワイプすると「低い」で、次のカードを予想します。</p>
       </div>
 
       <p className="classic-status" role="status">
@@ -127,7 +136,7 @@ export default function HighLowClient() {
           : ""}
       </p>
 
-      <div style={{ display: "flex", gap: 18, alignItems: "center", justifyContent: "center", margin: "14px 0 20px", flexWrap: "wrap" }}>
+      <div {...cardGesture} style={{ display: "flex", gap: 18, alignItems: "center", justifyContent: "center", margin: "14px 0 20px", flexWrap: "wrap", touchAction: "none", cursor: state.status === "playing" ? "grab" : "default" }} aria-label="カードエリア: 上スワイプで高い、下スワイプで低い">
         <div key={`${current}-${state.streak}`} className="juice-flip" style={{ textAlign: "center" }}>
           {current !== null ? <CardFace card={current} /> : null}
           <p className="muted" style={{ margin: "8px 0 0" }}>
@@ -157,43 +166,13 @@ export default function HighLowClient() {
       </div>
 
       {state.status === "playing" ? (
-        <div style={{ display: "flex", gap: 12, justifyContent: "center", flexWrap: "wrap" }}>
-          <button
-            type="button"
-            style={{
-              minHeight: 56,
-              padding: "12px 34px",
-              fontSize: 19,
-              fontWeight: 800,
-              borderRadius: 12,
-              border: "2px solid #b3543f",
-              background: "#fdf0ec",
-              color: "#93392a",
-              cursor: "pointer",
-              touchAction: "manipulation",
-            }}
-            onClick={() => onGuess("high")}
-          >
-            ↑ 高い
-          </button>
-          <button
-            type="button"
-            style={{
-              minHeight: 56,
-              padding: "12px 34px",
-              fontSize: 19,
-              fontWeight: 800,
-              borderRadius: 12,
-              border: "2px solid #2e6da4",
-              background: "#ecf4fb",
-              color: "#1d4e79",
-              cursor: "pointer",
-              touchAction: "manipulation",
-            }}
-            onClick={() => onGuess("low")}
-          >
-            ↓ 低い
-          </button>
+        <div aria-hidden="true" style={{ display: "flex", gap: 12, justifyContent: "center", flexWrap: "wrap" }}>
+          <div style={{ padding: "10px 26px", fontSize: 17, fontWeight: 800, borderRadius: 12, border: "2px solid #b3543f", background: "#fdf0ec", color: "#93392a" }}>
+            ↑ スワイプ: 高い
+          </div>
+          <div style={{ padding: "10px 26px", fontSize: 17, fontWeight: 800, borderRadius: 12, border: "2px solid #2e6da4", background: "#ecf4fb", color: "#1d4e79" }}>
+            ↓ スワイプ: 低い
+          </div>
         </div>
       ) : (
         <EndScreen

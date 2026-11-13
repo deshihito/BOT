@@ -4,6 +4,7 @@
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { sfxCorrect, sfxLose, sfxTap, sfxWin, sfxWrong } from "@/lib/sfx";
+import { tappableProps, useGesture } from "@/lib/gesture";
 import { EndScreen } from "../GameJuice";
 import {
   clearPicks,
@@ -27,6 +28,9 @@ export default function AnagramClient() {
   const { prefix } = useGamesNav();
   const [state, setState] = useState<AnagramState>(() => newGame());
   const [seconds, setSeconds] = useState(0);
+  // 直前の「外す」操作の時刻。回答欄のダブルタップ=ヒントが、マスの連続タップ
+  // （外す操作）と重なって誤発火しないためのガード（下の onDoubleTap 参照）。
+  const lastUnpickAtRef = useRef(0);
 
   useEffect(() => {
     if (state.status === "finished") return;
@@ -62,6 +66,41 @@ export default function AnagramClient() {
   const answered = state.status === "answered";
   const allPicked = state.picked.length === state.tiles.length && state.tiles.length > 0;
 
+  const trySubmit = () => {
+    if (!allPicked || answered) return;
+    onSubmit();
+  };
+  const tryClear = () => {
+    if (state.picked.length === 0 || answered) return;
+    sfxTap();
+    setState((s) => clearPicks(s));
+  };
+  const tryHint = () => {
+    if (answered || state.hintPositions.length >= wordLen) return;
+    sfxTap();
+    setState((s) => useHint(s));
+  };
+
+  // 回答欄のジェスチャ: 上スワイプ = 答える、左スワイプ = 並べ直す、
+  // ダブルタップ = ヒント。キーボードは回答欄フォーカス時の Enter / Space・
+  // Backspace・H。window リスナーはないため二重発火の余地はない。
+  // 子の回答マスの onClick との二重発火は useGesture の suppressClickAfterSwipe が抑止する。
+  // ただしダブルタップ判定は子のマスのタップも拾うため、直前に外す操作が
+  // あった場合はヒントにしない（lastUnpickAtRef 参照）。
+  const answerGesture = useGesture({
+    onSwipe: (dir) => {
+      if (dir === "up") trySubmit();
+      else if (dir === "left") tryClear();
+    },
+    onDoubleTap: () => {
+      // マスのタップは click（外す）が pointerup より後に発火するため、
+      // 同じマスのダブルタップや2マスの連続タップもダブルタップ判定に入る。
+      // 直前に外す操作があった場合はヒントにしない（-20点の誤発火を防ぐ）。
+      if (Date.now() - lastUnpickAtRef.current < 400) return;
+      tryHint();
+    },
+  });
+
   return (
     <>
       <nav className="breadcrumbs" aria-label="パンくず">
@@ -71,7 +110,7 @@ export default function AnagramClient() {
       </nav>
       <div className="page-heading compact-heading">
         <h1>アナグラム</h1>
-        <p className="muted">文字タイルをタップして並べ、答えができたら「答える」で判定します。</p>
+        <p className="muted">文字タイルをタップして並べ、答えができたら回答欄を上にスワイプ（または Enter）で判定します。左スワイプで並べ直し、ダブルタップでヒント（-20点）。</p>
       </div>
 
       <p className="classic-status" role="status">
@@ -104,50 +143,86 @@ export default function AnagramClient() {
         <div style={{ maxWidth: 520, margin: "0 auto" }}>
           {/* 回答欄 */}
           <div
-            aria-label="あなたの回答"
-            style={{ display: "flex", gap: 6, justifyContent: "center", flexWrap: "wrap", minHeight: 60 }}
+            aria-label="あなたの回答（上にスワイプで答える・左スワイプで並べ直す・ダブルタップでヒント）"
+            role="group"
+            tabIndex={0}
+            {...answerGesture}
+            onKeyDown={(e) => {
+              // 子の回答マス（tappableProps）の Enter / Space はマス自身が受けるため、
+              // 回答欄そのものにフォーカスがあるときだけ判定する。ガードがないと
+              // 全選択済みのマスで Enter を押したときに外す操作と判定が両方走る
+              // （reaction / wordle の二重発火と同じ構図）。
+              if ((e.key === "Enter" || e.key === " ") && e.target !== e.currentTarget) return;
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                trySubmit();
+              } else if (e.key === "Backspace") {
+                e.preventDefault();
+                tryClear();
+              } else if (e.key === "h" || e.key === "H") {
+                tryHint();
+              }
+            }}
+            style={{ display: "flex", gap: 6, justifyContent: "center", flexWrap: "wrap", minHeight: 60, touchAction: "none" }}
           >
             {Array.from({ length: wordLen }, (_, pos) => {
               const tileId = state.picked[pos];
               const tile = tileId !== undefined ? state.tiles.find((t) => t.id === tileId) : undefined;
               const hint = hintCharAt(state, pos);
-              return (
-                <button
-                  key={pos}
-                  type="button"
-                  disabled={!tile || answered}
-                  onClick={() => { sfxTap(); setState((s) => unpickTile(s, pos)); }}
-                  aria-label={tile ? `${pos + 1}文字目 ${tile.char} を外す` : `${pos + 1}文字目（空き）`}
+              const slotStyle: React.CSSProperties = {
+                width: 52,
+                height: 56,
+                borderRadius: 10,
+                border: tile ? "2px solid #4a6fa5" : "2px dashed #c9b98f",
+                background: tile ? "#e0eaff" : "#fffdf6",
+                fontSize: 24,
+                fontWeight: 800,
+                cursor: tile && !answered ? "pointer" : "default",
+                position: "relative",
+                touchAction: "manipulation",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+              };
+              const hintMark = hint && !tile ? (
+                <span
                   style={{
-                    width: 52,
-                    height: 56,
-                    borderRadius: 10,
-                    border: tile ? "2px solid #4a6fa5" : "2px dashed #c9b98f",
-                    background: tile ? "#e0eaff" : "#fffdf6",
-                    fontSize: 24,
-                    fontWeight: 800,
-                    cursor: tile && !answered ? "pointer" : "default",
-                    position: "relative",
-                    touchAction: "manipulation",
+                    position: "absolute",
+                    inset: 0,
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    color: "#b45309",
+                    opacity: 0.55,
                   }}
                 >
+                  {hint}
+                </span>
+              ) : null;
+              if (!tile || answered) {
+                return (
+                  <div
+                    key={pos}
+                    aria-label={tile ? `${pos + 1}文字目 ${tile.char} を外す` : `${pos + 1}文字目（空き）`}
+                    aria-disabled="true"
+                    tabIndex={-1}
+                    style={slotStyle}
+                  >
+                    {tile ? tile.char : ""}
+                    {hintMark}
+                  </div>
+                );
+              }
+              return (
+                <div
+                  key={pos}
+                  {...tappableProps(() => { sfxTap(); lastUnpickAtRef.current = Date.now(); setState((s) => unpickTile(s, pos)); })}
+                  aria-label={tile ? `${pos + 1}文字目 ${tile.char} を外す` : `${pos + 1}文字目（空き）`}
+                  style={slotStyle}
+                >
                   {tile ? tile.char : ""}
-                  {hint && !tile ? (
-                    <span
-                      style={{
-                        position: "absolute",
-                        inset: 0,
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        color: "#b45309",
-                        opacity: 0.55,
-                      }}
-                    >
-                      {hint}
-                    </span>
-                  ) : null}
-                </button>
+                  {hintMark}
+                </div>
               );
             })}
           </div>
@@ -159,27 +234,37 @@ export default function AnagramClient() {
           >
             {state.tiles.map((tile) => {
               const used = state.picked.includes(tile.id);
+              const tileStyle: React.CSSProperties = {
+                width: 52,
+                height: 56,
+                borderRadius: 10,
+                border: "2px solid #d8c9a3",
+                background: used ? "#e5e7eb" : "#fff3c4",
+                color: used ? "#9ca3af" : "inherit",
+                fontSize: 24,
+                fontWeight: 800,
+                cursor: used || answered ? "default" : "pointer",
+                touchAction: "manipulation",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+              };
+              if (used || answered) {
+                return (
+                  <div key={tile.id} aria-label={tile.char} aria-disabled="true" tabIndex={-1} style={tileStyle}>
+                    {used ? "・" : tile.char}
+                  </div>
+                );
+              }
               return (
-                <button
+                <div
                   key={tile.id}
-                  type="button"
-                  disabled={used || answered}
-                  onClick={() => { sfxTap(); setState((s) => pickTile(s, tile.id)); }}
-                  style={{
-                    width: 52,
-                    height: 56,
-                    borderRadius: 10,
-                    border: "2px solid #d8c9a3",
-                    background: used ? "#e5e7eb" : "#fff3c4",
-                    color: used ? "#9ca3af" : "inherit",
-                    fontSize: 24,
-                    fontWeight: 800,
-                    cursor: used || answered ? "default" : "pointer",
-                    touchAction: "manipulation",
-                  }}
+                  {...tappableProps(() => { sfxTap(); setState((s) => pickTile(s, tile.id)); })}
+                  aria-label={tile.char}
+                  style={tileStyle}
                 >
-                  {used ? "・" : tile.char}
-                </button>
+                  {tile.char}
+                </div>
               );
             })}
           </div>
@@ -189,42 +274,16 @@ export default function AnagramClient() {
               <p role="status" className={state.lastCorrect ? "juice-pop" : "juice-shake"} style={{ fontWeight: 800, fontSize: 18, margin: "0 0 10px" }}>
                 {state.lastCorrect ? "○ 正解！" : `✕ 不正解。正解は「${word ?? ""}」でした。`}
               </p>
-              <button
-                type="button"
+              <div
+                {...tappableProps(() => { sfxTap(); setState((s) => nextQuestion(s)); })}
                 className="classic-btn"
-                onClick={() => { sfxTap(); setState((s) => nextQuestion(s)); }}
                 style={{ fontWeight: 800 }}
               >
                 {state.index + 1 >= state.words.length ? "結果を見る" : "次の問題へ →"}
-              </button>
+              </div>
             </div>
           ) : (
             <div className="classic-controls" style={{ justifyContent: "center", marginTop: 18 }}>
-              <button
-                type="button"
-                className="classic-btn"
-                disabled={!allPicked}
-                onClick={onSubmit}
-                style={{ fontWeight: 800 }}
-              >
-                答える
-              </button>
-              <button
-                type="button"
-                className="classic-btn"
-                disabled={state.picked.length === 0}
-                onClick={() => { sfxTap(); setState((s) => clearPicks(s)); }}
-              >
-                並べ直す
-              </button>
-              <button
-                type="button"
-                className="classic-btn"
-                disabled={state.hintPositions.length >= wordLen}
-                onClick={() => { sfxTap(); setState((s) => useHint(s)); }}
-              >
-                ヒント（-20点）
-              </button>
               <button type="button" className="classic-btn" onClick={restart}>
                 もう一度
               </button>

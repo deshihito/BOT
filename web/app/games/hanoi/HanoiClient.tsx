@@ -14,6 +14,7 @@ import {
   type HanoiState,
 } from "@/lib/hanoi";
 import { sfxPlace, sfxTap, sfxWin, sfxWrong } from "@/lib/sfx";
+import { tappableProps } from "@/lib/gesture";
 import { EndScreen } from "../GameJuice";
 import { useGamesNav } from "../GamesShell";
 
@@ -135,27 +136,30 @@ export default function HanoiClient() {
 
       <div className="classic-controls" role="group" aria-label="円盤の枚数">
         {DISK_COUNTS.map((n) => (
-          <button
+          <div
             key={n}
-            type="button"
+            {...tappableProps(() => restart(n))}
             aria-pressed={disks === n}
             className={disks === n ? "classic-btn classic-btn-active" : "classic-btn"}
-            onClick={() => restart(n)}
           >
             {n}枚
-          </button>
+          </div>
         ))}
         <button type="button" className="classic-btn" onClick={() => restart(disks)}>
           もう一度
         </button>
         {auto ? (
-          <button type="button" className="classic-btn" onClick={() => setAuto(false)}>
+          <div
+            {...tappableProps(() => setAuto(false))}
+            aria-pressed={auto}
+            className="classic-btn"
+          >
             自動解答を止める
-          </button>
+          </div>
         ) : (
-          <button type="button" className="classic-btn" onClick={startAuto}>
+          <div {...tappableProps(startAuto)} aria-pressed={auto} className="classic-btn">
             自動解答を見る
-          </button>
+          </div>
         )}
       </div>
 
@@ -176,13 +180,12 @@ export default function HanoiClient() {
           const topFirst = [...stack].reverse();
           const isSelected = selected === peg;
           return (
-            <button
+            <div
               key={peg}
-              type="button"
+              {...tappableProps(() => onPeg(peg))}
               aria-label={`${peg + 1}番目の柱${isSelected ? "（選択中）" : ""}`}
               aria-pressed={isSelected}
               className={wrongPeg === peg ? "juice-shake" : isSelected ? "juice-pulse" : undefined}
-              onClick={() => onPeg(peg)}
               style={{
                 position: "relative",
                 height: 240,
@@ -249,7 +252,7 @@ export default function HanoiClient() {
               <span style={{ position: "relative", zIndex: 1, fontSize: 12, color: "#8a7a52", marginTop: 6 }}>
                 {peg === 0 ? "スタート" : peg === 2 ? "ゴール" : ""}
               </span>
-            </button>
+            </div>
           );
         })}
       </div>

@@ -11,6 +11,7 @@ import {
   type SkyscrapersState,
 } from "@/lib/skyscrapers";
 import { sfxPlace, sfxTap, sfxWin } from "@/lib/sfx";
+import { tappableProps } from "@/lib/gesture";
 import { EndScreen } from "../GameJuice";
 import { useGamesNav } from "../GamesShell";
 
@@ -91,8 +92,21 @@ export default function SkyscrapersClient() {
     setState(next);
   };
 
-  const violations = useMemo(() => skyViolations(state), [state]);
-  const badCells = useMemo(() => {
+  // 物理キーボードの数字・Backspace / Delete でも入力できる（sudoku と同じ）。
+  // 数字パッドの div は Enter / Space しか受けないため数字キーとの二重発火はない。
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key >= "1" && e.key <= String(n)) {
+        inputValue(Number(e.key));
+      } else if (e.key === "Backspace" || e.key === "Delete") {
+        inputValue(0);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  });
+
+  const violations = useMemo(() => skyViolations(state), [state]);  const badCells = useMemo(() => {
     const set = new Set<number>();
     for (const v of violations) for (const c of v.cells) set.add(c);
     return set;
@@ -158,15 +172,23 @@ export default function SkyscrapersClient() {
       const value = state.values[index];
       const isSelected = selected === index;
       gridCells.push(
-        <button
+        <div
           key={key}
-          type="button"
           role="gridcell"
+          tabIndex={state.status === "won" ? -1 : 0}
+          aria-disabled={state.status === "won"}
           aria-label={`${gr}行${gc}列 ${value === 0 ? "空き" : `高さ ${value}`}`}
           aria-pressed={isSelected}
-          disabled={state.status === "won"}
           className={badCells.has(index) ? "juice-shake" : value !== 0 ? "juice-pop" : undefined}
           onClick={() => {
+            if (state.status === "won") return;
+            sfxTap();
+            setSelected(index);
+          }}
+          onKeyDown={(e) => {
+            if (e.key !== "Enter" && e.key !== " ") return;
+            e.preventDefault();
+            if (state.status === "won") return;
             sfxTap();
             setSelected(index);
           }}
@@ -184,7 +206,7 @@ export default function SkyscrapersClient() {
           }}
         >
           {value === 0 ? "" : value}
-        </button>,
+        </div>,
       );
     }
   }
@@ -199,30 +221,28 @@ export default function SkyscrapersClient() {
       <div className="page-heading compact-heading">
         <h1>ビルディング</h1>
         <p className="muted">
-          マスをタップして選び、下の数字パッドでビルの高さを入れます。
+          マスをタップして選び、下の数字パッドでビルの高さを入れます。キーボードの数字キーでも入力できます。
         </p>
       </div>
 
       <div className="classic-controls" role="group" aria-label="操作">
         {([4, 5] as SkyscrapersSize[]).map((s) => (
-          <button
+          <div
             key={s}
-            type="button"
+            {...tappableProps(() => restart(s, hard))}
             className={`classic-btn${size === s ? " classic-btn-active" : ""}`}
             aria-pressed={size === s}
-            onClick={() => restart(s, hard)}
           >
             {s}×{s}
-          </button>
+          </div>
         ))}
-        <button
-          type="button"
+        <div
+          {...tappableProps(() => restart(size, !hard))}
           className={`classic-btn${hard ? " classic-btn-active" : ""}`}
           aria-pressed={hard}
-          onClick={() => restart(size, !hard)}
         >
           ヒント一部隠し
-        </button>
+        </div>
         <button type="button" className="classic-btn" onClick={() => restart(size, hard)}>
           もう一度
         </button>
@@ -258,27 +278,30 @@ export default function SkyscrapersClient() {
           marginTop: 14,
         }}
       >
-        {Array.from({ length: n }, (_, i) => i + 1).map((v) => (
-          <button
-            key={v}
-            type="button"
-            className="classic-btn"
-            style={{ minWidth: 48, minHeight: 48, fontSize: 18, fontWeight: 700 }}
-            disabled={selected === null || state.status === "won"}
-            onClick={() => inputValue(v)}
-          >
-            {v}
-          </button>
-        ))}
-        <button
-          type="button"
+        {Array.from({ length: n }, (_, i) => i + 1).map((v) => {
+          const padDisabled = selected === null || state.status === "won";
+          return (
+            <div
+              key={v}
+              {...(padDisabled
+                ? { "aria-disabled": true as const, tabIndex: -1 }
+                : tappableProps(() => inputValue(v)))}
+              className="classic-btn"
+              style={{ minWidth: 48, minHeight: 48, fontSize: 18, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center" }}
+            >
+              {v}
+            </div>
+          );
+        })}
+        <div
+          {...(selected === null || state.status === "won"
+            ? { "aria-disabled": true as const, tabIndex: -1 }
+            : tappableProps(() => inputValue(0)))}
           className="classic-btn"
-          style={{ minWidth: 64, minHeight: 48 }}
-          disabled={selected === null || state.status === "won"}
-          onClick={() => inputValue(0)}
+          style={{ minWidth: 64, minHeight: 48, display: "flex", alignItems: "center", justifyContent: "center" }}
         >
           消す
-        </button>
+        </div>
       </div>
 
       {state.status === "won" && (

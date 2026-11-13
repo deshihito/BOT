@@ -2,7 +2,7 @@
 // ボウリング（3D）。レーンと物理は BowlingScene3D（three.js、動的 import）、
 // スコア進行は lib/bowling.ts の throwPins（物理で決まった倒ピンを受け取る）。
 // 操作: ドラッグでボールの位置を決め、上へフリックすると速さ・方向・回転が決まる。
-// ボタン投球（左右移動＋「投げる」）でも遊べる。
+// キーボードでも狙える（←→で狙い、スペース / Enter で投げる）。
 // ベスト記録: localStorage `ago-bowling-best` に最高スコアを保存する。
 import dynamic from "next/dynamic";
 import Link from "next/link";
@@ -17,6 +17,7 @@ import {
   type BowlingState,
 } from "@/lib/bowling";
 import { isSfxMuted, setSfxMuted } from "@/lib/sfx";
+import { tappableProps } from "@/lib/gesture";
 import { useGamesNav } from "../GamesShell";
 import type { BowlingSceneApi } from "./BowlingScene3D";
 
@@ -91,6 +92,31 @@ export default function BowlingClient() {
     setSfxMuted(next);
   };
 
+  // 矢印キーで狙い、スペース / Enter で投げる（旧 ◀ / 投げる / ▶ ボタンの代替）。
+  // 投球・狙いの可否はシーン側の phase（aim のときだけ有効）が守る。
+  // 音トグル div・「もう一度」ボタンにフォーカスがあるときのスペース / Enter は
+  // ネイティブ側に任せ、window 側の投球と二重に走らせない（falling / wordle と同じ構図）。
+  // 矢印キーには div 側のハンドラがないためガードは投球分岐の中だけに置き、
+  // 音トグル等にフォーカスがあっても狙いは矢印キーで動かせる。
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "ArrowLeft") {
+        e.preventDefault();
+        sceneApiRef.current?.adjustAim(-0.18);
+      } else if (e.key === "ArrowRight") {
+        e.preventDefault();
+        sceneApiRef.current?.adjustAim(0.18);
+      } else if (e.key === " " || e.key === "Enter") {
+        const target = e.target as HTMLElement | null;
+        if (target?.closest?.("[data-bowling-ui]")) return;
+        e.preventDefault();
+        sceneApiRef.current?.throwStraight();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
   const handleResult = (knockedPins: number[]) => {
     const prev = stateRef.current;
     const result = throwPins(prev, knockedPins);
@@ -125,12 +151,17 @@ export default function BowlingClient() {
       </div>
 
       <div className="classic-controls" role="group" aria-label="操作">
-        <button type="button" className="classic-btn" onClick={restart} disabled={rolling}>
+        <button type="button" className="classic-btn" onClick={restart} disabled={rolling} data-bowling-ui="">
           もう一度
         </button>
-        <button type="button" className="classic-btn" onClick={toggleMute} aria-pressed={muted}>
+        <div
+          {...tappableProps(toggleMute)}
+          aria-pressed={muted}
+          data-bowling-ui=""
+          className="classic-btn"
+        >
           音: {muted ? "オフ" : "オン"}
-        </button>
+        </div>
       </div>
 
       <p className="classic-status" role="status">
@@ -151,39 +182,8 @@ export default function BowlingClient() {
           }}
         />
 
-        <div style={{ display: "flex", gap: 8, marginTop: 12 }} role="group" aria-label="ボタンで投げる">
-          <button
-            type="button"
-            className="classic-btn"
-            style={{ minWidth: 56, minHeight: 48 }}
-            aria-label="左へ移動"
-            disabled={rolling || state.finished}
-            onClick={() => sceneApiRef.current?.adjustAim(-0.18)}
-          >
-            ◀
-          </button>
-          <button
-            type="button"
-            className="classic-btn classic-btn-active"
-            style={{ flex: 1, minHeight: 48 }}
-            disabled={rolling || state.finished}
-            onClick={() => sceneApiRef.current?.throwStraight()}
-          >
-            投げる
-          </button>
-          <button
-            type="button"
-            className="classic-btn"
-            style={{ minWidth: 56, minHeight: 48 }}
-            aria-label="右へ移動"
-            disabled={rolling || state.finished}
-            onClick={() => sceneApiRef.current?.adjustAim(0.18)}
-          >
-            ▶
-          </button>
-        </div>
         <p className="muted" style={{ fontSize: 13, marginTop: 8 }}>
-          レーンをドラッグでボールの位置、素早く上へフリックすると投球（横のブレで曲がります）。ボタンでも投げられます。
+          レーンをドラッグでボールの位置、素早く上へフリックすると投球（横のブレで曲がります）。キーボードでも狙えます（←→で狙い、スペースで投げる）。
         </p>
 
         <table

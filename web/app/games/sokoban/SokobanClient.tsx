@@ -1,6 +1,6 @@
 "use client";
 // 倉庫番。ロジックは lib/sokoban.ts。箱を全部ゴールの上に運ぶ定番パズル。
-// 十字ボタンとキーボード（矢印/WASD）で操作。1手戻し・最初から直し対応。
+// 盤面のスワイプとキーボード（矢印/WASD）で操作。1手戻し・最初から直し対応。
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
@@ -14,6 +14,7 @@ import {
   type SokobanState,
 } from "@/lib/sokoban";
 import { sfxPlace, sfxSlide, sfxTap, sfxWin, sfxWrong } from "@/lib/sfx";
+import { tappableProps, useGesture } from "@/lib/gesture";
 import { EndScreen } from "../GameJuice";
 import { useGamesNav } from "../GamesShell";
 
@@ -77,6 +78,8 @@ export default function SokobanClient() {
   );
 
   const prevStatusRef = useRef(state.status);
+  // 直近の移動・箱押しの時刻（ダブルタップ=1手戻すの誤発火防止用）。
+  const lastActionAtRef = useRef(0);
   useEffect(() => {
     const prev = prevStatusRef.current;
     prevStatusRef.current = state.status;
@@ -97,6 +100,7 @@ export default function SokobanClient() {
         if (state.status === "playing") sfxWrong();
         return;
       }
+      lastActionAtRef.current = Date.now();
       // クリア手は終局ジングルに任せ、二重に鳴らさない。
       if (next.status !== "won") {
         if (next.pushes > state.pushes) sfxPlace();
@@ -138,12 +142,44 @@ export default function SokobanClient() {
 
   const cellPx = Math.max(30, Math.min(52, Math.floor(340 / state.width) + 8));
 
+  // 盤面スワイプで移動（十字ボタン廃止）。箱マスの onClick との二重発火は
+  // useGesture の suppressClickAfterSwipe が抑止する。
+  // ダブルタップ = 1手戻す（キーボードは従来どおり Ctrl+Z）。
+  // 4方向すべてが移動のため左スワイプへの割り当てはできない。
+  // 直前400ms以内に移動・箱押しがあったダブルタップは戻すにしない
+  // （anagram のヒント誤発火と同じ構図。素早い連続タップでの誤発火を防ぐ）。
+  const boardGesture = useGesture({
+    onSwipe: (dir) => {
+      move(dir);
+    },
+    onDoubleTap: () => {
+      // click は pointerup の直後に発火するため、ダブルタップ判定の時点では
+      // 2発目のタップの操作（箱押し）がまだ lastActionAtRef に記録されていない。
+      // 床→箱の順のダブルタップで戻すが誤発火しないよう、少し遅らせてから
+      // 再判定する（anagram のヒント誤発火と同じ構図の残りを塞ぐ）。
+      // 遅延中に箱押し・移動があれば記録が更新され、戻すは抑止される。
+      setTimeout(() => {
+        if (Date.now() - lastActionAtRef.current < 400) return;
+        lastActionAtRef.current = Date.now();
+        setState((s) => {
+          const next = undoSokoban(s);
+          if (next !== s) sfxSlide();
+          return next;
+        });
+      }, 80);
+    },
+  });
+
   const onBoxClick = (i: number) => {
     const next = pushBoxByClick(state, i);
     if (next === state) {
+      // 押せなかった場合も箱へのタップ自体は操作のため記録する。
+      // 記録しないと床→箱の順のダブルタップで戻すが誤発火する。
+      lastActionAtRef.current = Date.now();
       if (state.status === "playing") sfxWrong();
       return;
     }
+    lastActionAtRef.current = Date.now();
     if (next.status !== "won") {
       if (next.pushes > state.pushes) sfxPlace();
       else sfxSlide();
@@ -227,26 +263,6 @@ export default function SokobanClient() {
     );
   };
 
-  const padButton = (dir: SokobanDir, label: string) => (
-    <button
-      type="button"
-      aria-label={label}
-      onClick={() => move(dir)}
-      style={{
-        width: 60,
-        height: 52,
-        borderRadius: 10,
-        border: "1px solid #d8c9a3",
-        background: "#fffdf6",
-        fontSize: 20,
-        cursor: "pointer",
-        touchAction: "manipulation",
-      }}
-    >
-      {label}
-    </button>
-  );
-
   return (
     <>
       <nav className="breadcrumbs" aria-label="パンくず">
@@ -256,37 +272,22 @@ export default function SokobanClient() {
       </nav>
       <div className="page-heading compact-heading">
         <h1>倉庫番</h1>
-        <p className="muted">下の十字ボタンかキーボードで移動し、箱を押して運びます。</p>
+        <p className="muted">盤面をスワイプするかキーボードで移動し、箱を押して運びます。</p>
       </div>
 
       <div className="classic-controls" role="group" aria-label="面の選択">
         {SOKOBAN_LEVELS.map((lv, i) => (
-          <button
+          <div
             key={lv.name}
-            type="button"
+            {...tappableProps(() => startLevel(i))}
             aria-pressed={level === i}
             className={level === i ? "classic-btn classic-btn-active" : "classic-btn"}
-            onClick={() => startLevel(i)}
           >
             {lv.name}
-          </button>
+          </div>
         ))}
         <button type="button" className="classic-btn" onClick={() => startLevel(level)}>
           もう一度
-        </button>
-        <button
-          type="button"
-          className="classic-btn"
-          disabled={state.history.length === 0}
-          onClick={() =>
-            setState((s) => {
-              const next = undoSokoban(s);
-              if (next !== s) sfxSlide();
-              return next;
-            })
-          }
-        >
-          ↩ 1手戻す
         </button>
       </div>
 
@@ -300,13 +301,14 @@ export default function SokobanClient() {
       </p>
       {deadlocked.size > 0 && state.status === "playing" && (
         <p className="classic-status" role="alert" style={{ color: "#b91c1c" }}>
-          ⚠ 赤い箱はこのままでは二度と動かせません（詰み）。「1手戻す」で立て直せます。
+          ⚠ 赤い箱はこのままでは二度と動かせません（詰み）。盤面のダブルタップで1手戻せます。
         </p>
       )}
 
       <div
+        {...boardGesture}
         role="img"
-        aria-label="倉庫番の盤面"
+        aria-label="倉庫番の盤面（スワイプで移動、ダブルタップで1手戻す）"
         style={{
           display: "grid",
           gridTemplateColumns: `repeat(${state.width}, ${cellPx}px)`,
@@ -316,29 +318,10 @@ export default function SokobanClient() {
           maxWidth: "100%",
           overflowX: "auto",
           padding: 4,
+          touchAction: "none",
         }}
       >
         {Array.from({ length: state.width * state.height }, (_, i) => renderCell(i))}
-      </div>
-
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(3, 60px)",
-          gridTemplateRows: "repeat(2, 52px)",
-          gap: 6,
-          justifyContent: "center",
-          marginTop: 8,
-        }}
-        role="group"
-        aria-label="移動ボタン"
-      >
-        <span />
-        {padButton("up", "▲")}
-        <span />
-        {padButton("left", "◀")}
-        {padButton("down", "▼")}
-        {padButton("right", "▶")}
       </div>
       <p className="muted" style={{ textAlign: "center" }}>
         キーボードの矢印キー / WASD でも動けます（Ctrl+Z で1手戻し）。
@@ -357,11 +340,15 @@ export default function SokobanClient() {
       )}
 
       {state.status === "won" && level + 1 < SOKOBAN_LEVELS.length ? (
-        <p style={{ textAlign: "center" }}>
-          <button type="button" className="classic-btn" onClick={() => startLevel(level + 1)}>
+        <div style={{ textAlign: "center" }}>
+          <div
+            {...tappableProps(() => startLevel(level + 1))}
+            className="classic-btn"
+            style={{ display: "inline-block" }}
+          >
             次の面へ →
-          </button>
-        </p>
+          </div>
+        </div>
       ) : null}
     </>
   );

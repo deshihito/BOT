@@ -14,6 +14,7 @@ import {
   type BreakoutBrick,
 } from "@/lib/breakout";
 import { sfxLose, sfxPop, sfxTap, sfxWin, sfxWrong } from "@/lib/sfx";
+import { useGesture } from "@/lib/gesture";
 import { EndScreen } from "../GameJuice";
 import { useGamesNav } from "../GamesShell";
 
@@ -240,10 +241,16 @@ export default function BreakoutClient() {
       if (e.key === "ArrowLeft" || e.key.toLowerCase() === "a") { keysRef.current.left = true; e.preventDefault(); }
       if (e.key === "ArrowRight" || e.key.toLowerCase() === "d") { keysRef.current.right = true; e.preventDefault(); }
       if (e.key === " " || e.key === "Enter") {
+        const target = e.target as HTMLElement | null;
+        // 「もう一度」ボタンにフォーカスがあるときはネイティブ click に任せ、
+        // window 側の発射・次レベル・再開と二重に走らせない（falling / wordle と同じ構図）。
+        if (target?.closest?.("[data-breakout-ui]")) return;
         e.preventDefault();
         if (phaseRef.current === "ready" || phaseRef.current === "life-lost") setPhase("playing");
         else if (phaseRef.current === "playing") setPhase("paused");
         else if (phaseRef.current === "paused") setPhase("playing");
+        else if (phaseRef.current === "cleared") startLevel(levelRef.current + 1, true, true);
+        else if (phaseRef.current === "gameover" || phaseRef.current === "all-cleared") startGame();
       }
       if (e.key.toLowerCase() === "p") {
         if (phaseRef.current === "playing") setPhase("paused");
@@ -260,7 +267,7 @@ export default function BreakoutClient() {
       window.removeEventListener("keydown", down);
       window.removeEventListener("keyup", up);
     };
-  }, [setPhase]);
+  }, [setPhase, startGame, startLevel]);
 
   const pointerToFieldX = (clientX: number): number => {
     const canvas = canvasRef.current;
@@ -283,6 +290,17 @@ export default function BreakoutClient() {
     }
   };
 
+  // 盤面のジェスチャ: タップ = 発射・再開・次レベルへ（onPointerDown 側で処理）、
+  // 下スワイプ = ポーズ（プレイ中のみ。横方向のドラッグはパドル移動のため無視）。
+  const boardGesture = useGesture({
+    onSwipe: (dir) => {
+      if (dir === "down" && phaseRef.current === "playing") {
+        sfxTap();
+        setPhase("paused");
+      }
+    },
+  });
+
   const statusText =
     phase === "gameover"
       ? `ゲームオーバー。スコア ${score} でした。`
@@ -293,16 +311,15 @@ export default function BreakoutClient() {
           : phase === "paused"
             ? "一時停止中です。"
             : phase === "life-lost"
-              ? `ミス… 残りライフ ${lives}。クリックかスペースで再開。`
+              ? `ミス… 残りライフ ${lives}。タップかスペースで再開。`
               : phase === "ready"
-                ? "クリックかスペースでボール発射。"
+                ? "タップかスペースでボール発射。"
                 : `${BREAKOUT_LEVELS[levelIdx].name} ・ スコア ${score}`;
 
   const btn: React.CSSProperties = {
     padding: "10px 14px", borderRadius: 10, border: "1px solid rgba(255,255,255,0.18)",
     background: "rgba(255,255,255,0.06)", color: "inherit", cursor: "pointer", fontWeight: 700, minHeight: 44, touchAction: "manipulation",
   };
-  const activeBtn: React.CSSProperties = { ...btn, background: "#3f8fd2", color: "#06121f", borderColor: "#3f8fd2" };
 
   return (
     <>
@@ -324,9 +341,17 @@ export default function BreakoutClient() {
         <canvas
           ref={canvasRef}
           style={{ width: "100%", aspectRatio: `${BREAKOUT_FIELD_W} / ${BREAKOUT_FIELD_H}`, display: "block", borderRadius: 12, background: "#101827", touchAction: "none", cursor: "pointer" }}
-          aria-label="ブロック崩しの盤"
+          aria-label="ブロック崩しの盤（タップで発射・再開・次のレベルへ、下にスワイプでポーズ）"
           onPointerMove={onPointerMove}
-          onPointerDown={(e) => { onPointerMove(e); launch(); }}
+          onPointerDown={(e) => {
+            onPointerMove(e);
+            launch();
+            // クリア時は盤面タップで次のレベルへ（旧「次のレベルへ」ボタンの代替）。
+            if (phaseRef.current === "cleared") startLevel(levelRef.current + 1, true, true);
+            boardGesture.onPointerDown(e);
+          }}
+          onPointerUp={boardGesture.onPointerUp}
+          onPointerCancel={boardGesture.onPointerCancel}
           onTouchStart={(e) => {
             const t = e.touches[0];
             paddleRef.current.x = pointerToFieldX(t.clientX);
@@ -354,21 +379,12 @@ export default function BreakoutClient() {
       )}
 
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "center", marginTop: 14 }}>
-        {phase === "ready" || phase === "life-lost" || phase === "paused" ? (
-          <button type="button" style={activeBtn} onClick={launch}>{phase === "paused" ? "再開" : "発射 / スタート"}</button>
-        ) : phase === "playing" ? (
-          <button type="button" style={btn} onClick={() => setPhase("paused")}>ポーズ</button>
-        ) : null}
-        {phase === "cleared" && (
-          <button type="button" style={activeBtn} onClick={() => startLevel(levelRef.current + 1, true, true)}>次のレベルへ</button>
-        )}
-        {(phase === "gameover" || phase === "all-cleared") && (
-          <button type="button" style={activeBtn} onClick={startGame}>もう一度</button>
-        )}
-        <button type="button" style={btn} onClick={startGame}>もう一度</button>
+        <button type="button" style={btn} onClick={startGame} data-breakout-ui="">
+          もう一度
+        </button>
       </div>
       <p className="muted" style={{ textAlign: "center", fontSize: 13 }}>
-        マウス / タッチ / ←→・A D キーでパドル移動。スペースで発射・ポーズ。
+        マウス / タッチでパドル移動。盤面タップで発射・再開、クリア時は盤面タップで次のレベルへ。盤面を下へスワイプでポーズ。←→・A D キーでも移動でき、スペースで発射・ポーズ、P キーでもポーズ切替。
       </p>
     </>
   );

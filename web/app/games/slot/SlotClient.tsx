@@ -19,6 +19,7 @@ import {
 import { sfxCorrect, sfxSlide, sfxTap, sfxTick, sfxWin } from "@/lib/sfx";
 import { ScorePop } from "../GameJuice";
 import { useGamesNav } from "../GamesShell";
+import { tappableProps, useGesture } from "@/lib/gesture";
 
 const CHIPS_KEY = "ago-slot-chips";
 const BET_OPTIONS = [10, 50, 100, 500] as const;
@@ -31,19 +32,6 @@ function loadChips(): number {
     return SLOT_INITIAL_CHIPS;
   }
 }
-
-const btnStyle: React.CSSProperties = {
-  padding: "10px 22px",
-  borderRadius: 999,
-  border: "1px solid #8a90a3",
-  background: "#22304f",
-  color: "#fff",
-  fontSize: 16,
-  fontWeight: 700,
-  cursor: "pointer",
-  minHeight: 44,
-};
-const btnDisabled: React.CSSProperties = { ...btnStyle, opacity: 0.4, cursor: "default" };
 
 export default function SlotClient() {
   const { prefix } = useGamesNav();
@@ -127,7 +115,13 @@ export default function SlotClient() {
   };
 
   const broke = !spinning && state.chips < SLOT_MIN_BET;
-  const chipBtn = (amount: number): React.CSSProperties => ({
+  // レバー/リールへの下スワイプ（レバーを引く動き）でスピン。ボタンは置かない。
+  // チップ切れのときだけ、筐体タップが再支給になる（局面が排他なので二重化ではない）。
+  const machineGesture = useGesture({
+    onSwipe: (dir) => { if (dir === "down") startSpin(); },
+    onTap: () => { if (broke) setState((s) => refillChips(s)); },
+  });
+  const chipStyle = (amount: number): React.CSSProperties => ({
     padding: "8px 14px",
     borderRadius: 999,
     border: bet === amount ? "2px solid #f2b33d" : "1px solid #8a90a3",
@@ -149,7 +143,7 @@ export default function SlotClient() {
       </nav>
       <div className="page-heading compact-heading">
         <h1>スロット</h1>
-        <p className="muted">ベットを選んでスピン。リールは左から順に止まります。配当は下の表のとおりです。</p>
+        <p className="muted">ベットのチップを選んで、レバーを下へ引くと回ります。リールは左から順に止まります。配当は下の表のとおりです。</p>
       </div>
 
       <p className="classic-status" role="status">
@@ -163,9 +157,9 @@ export default function SlotClient() {
         {spinning ? " ・ 回転中…" : ""}
       </p>
 
-      <div
+      <div {...machineGesture}
         role="img"
-        aria-label={`リール: ${display.map((id) => slotSymbol(id).label).join("、")}`}
+        aria-label={`リール: ${display.map((id) => slotSymbol(id).label).join("、")}。下へスワイプでスピン`}
         className={!spinning && state.result && state.result.delta > 0 ? "juice-pulse" : undefined}
         style={{
           display: "flex",
@@ -177,6 +171,8 @@ export default function SlotClient() {
           borderRadius: 16,
           background: "#182238",
           boxShadow: "inset 0 0 0 2px #f2b33d",
+          touchAction: "none",
+          cursor: "grab",
         }}
       >
         {display.map((id, i) => (
@@ -200,41 +196,36 @@ export default function SlotClient() {
             {slotSymbol(id).glyph}
           </div>
         ))}
+        <div aria-hidden="true" style={{ display: "flex", flexDirection: "column", alignItems: "center", width: 28 }}>
+          <div
+            style={{
+              width: 34, height: 34, borderRadius: "50%", background: "#c0392b",
+              border: "2px solid #f2b33d", marginBottom: -4, zIndex: 1,
+              transform: spinning ? "translateY(26px)" : "none", transition: "transform 0.25s",
+            }}
+          />
+          <div style={{ width: 8, height: 74, borderRadius: 4, background: "#8a90a3" }} />
+        </div>
       </div>
 
       <div className="classic-controls" style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
         {!broke && (
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }} role="group" aria-label="ベット額">
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }} role="group" aria-label="ベット額チップ">
             {BET_OPTIONS.map((amount) => (
-              <button
+              <div
                 key={amount}
-                type="button"
-                style={chipBtn(amount)}
-                disabled={spinning || amount > state.chips}
-                onClick={() => {
-                  sfxTap();
-                  setBet(amount);
-                }}
+                {...tappableProps(() => { if (!spinning && amount <= state.chips) { sfxTap(); setBet(amount); } })}
+                aria-disabled={spinning || amount > state.chips}
+                style={chipStyle(amount)}
               >
                 {amount}
-              </button>
+              </div>
             ))}
           </div>
         )}
-        {!broke ? (
-          <button
-            type="button"
-            style={!spinning && bet <= state.chips ? btnStyle : btnDisabled}
-            disabled={spinning || bet > state.chips}
-            onClick={startSpin}
-          >
-            スピン
-          </button>
-        ) : (
-          <button type="button" style={btnStyle} onClick={() => setState((s) => refillChips(s))}>
-            チップを再支給（{SLOT_INITIAL_CHIPS}）
-          </button>
-        )}
+        <p className="muted" style={{ margin: 0, fontSize: 13 }}>
+          {broke ? "チップ切れ: 筐体をタップで再支給" : "レバーを下へ引く（リールを下スワイプ）でスピン"}
+        </p>
       </div>
 
       <section aria-label="配当表" style={{ marginTop: 22, maxWidth: 420 }}>
@@ -254,7 +245,7 @@ export default function SlotClient() {
           </li>
         </ul>
         <p className="muted" style={{ fontSize: 13 }}>
-          回転中の表示は演出です。結果はスピンを押した時点で決まっています。
+          回転中の表示は演出です。結果はスピンを始めた時点で決まっています。
         </p>
       </section>
     </>

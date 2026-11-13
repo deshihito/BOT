@@ -1,6 +1,6 @@
 "use client";
 // スネーク。ロジックは lib/snake.ts（純粋関数）。
-// canvas 描画、矢印/WASD＋画面ボタン＋スワイプ操作、ポーズ、ベストスコア保存。
+// canvas 描画、盤面スワイプで方向転換・タップで開始/ポーズ（ボタンなし）。矢印/WASDも可。ベストスコア保存。
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
@@ -15,6 +15,7 @@ import {
   type SnakeState,
 } from "@/lib/snake";
 import { sfxLose, sfxPop, sfxWin } from "@/lib/sfx";
+import { useGesture } from "@/lib/gesture";
 import { EndScreen } from "../GameJuice";
 import { useGamesNav } from "../GamesShell";
 
@@ -50,7 +51,6 @@ export default function SnakeClient() {
   const [prevBest, setPrevBest] = useState<number | null>(null);
   const prevFoodsRef = useRef(0);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const touchRef = useRef<{ x: number; y: number } | null>(null);
   const mountedRef = useRef(true);
   const stateRef = useRef(state);
   stateRef.current = state;
@@ -160,6 +160,12 @@ export default function SnakeClient() {
     });
   }, []);
 
+  // 盤面ジェスチャ: スワイプ=方向転換（ready なら開始も兼ねる）、タップ=開始/ポーズ/再開。
+  const boardGesture = useGesture({
+    onSwipe: (dir) => move(dir),
+    onTap: () => setState((s) => (s.status === "playing" ? pauseSnake(s) : startSnake(s))),
+  });
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === " " || e.key === "Enter") {
@@ -190,22 +196,8 @@ export default function SnakeClient() {
         : state.status === "paused"
           ? "一時停止中です。"
           : state.status === "ready"
-            ? "スタートを押すか、方向キーで開始できます。"
+            ? "盤面をタップかスワイプ、または方向キーで開始できます。"
             : `食べた数 ${state.foodsEaten} ・ 速度 Lv.${snakeSpeedLevel(state) + 1}`;
-
-  const btn: React.CSSProperties = {
-    padding: "10px 14px",
-    borderRadius: 10,
-    border: "1px solid rgba(255,255,255,0.18)",
-    background: "rgba(255,255,255,0.06)",
-    color: "inherit",
-    cursor: "pointer",
-    fontWeight: 700,
-    minWidth: 52,
-    minHeight: 48,
-    touchAction: "manipulation",
-  };
-  const activeBtn: React.CSSProperties = { ...btn, background: "#3fb56a", color: "#07130c", borderColor: "#3fb56a" };
 
   return (
     <>
@@ -227,21 +219,8 @@ export default function SnakeClient() {
         <canvas
           ref={canvasRef}
           style={{ width: "100%", aspectRatio: "1 / 1", display: "block", borderRadius: 12, background: "#14231a", touchAction: "none" }}
-          aria-label="スネークの盤"
-          onTouchStart={(e) => {
-            const t = e.touches[0];
-            touchRef.current = { x: t.clientX, y: t.clientY };
-          }}
-          onTouchEnd={(e) => {
-            const start = touchRef.current;
-            touchRef.current = null;
-            if (!start) return;
-            const t = e.changedTouches[0];
-            const dx = t.clientX - start.x;
-            const dy = t.clientY - start.y;
-            if (Math.max(Math.abs(dx), Math.abs(dy)) < 20) return;
-            move(Math.abs(dx) > Math.abs(dy) ? (dx > 0 ? "right" : "left") : dy > 0 ? "down" : "up");
-          }}
+          aria-label="スネークの盤（スワイプで方向転換、タップで開始・ポーズ）"
+          {...boardGesture}
         />
       </div>
 
@@ -262,42 +241,8 @@ export default function SnakeClient() {
         </div>
       )}
 
-      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "center", marginTop: 14 }}>
-        {state.status === "ready" || state.status === "paused" ? (
-          <button type="button" style={activeBtn} onClick={() => setState((s) => startSnake(s))}>
-            {state.status === "paused" ? "再開" : "スタート"}
-          </button>
-        ) : (
-          <button type="button" style={btn} onClick={() => setState((s) => pauseSnake(s))}>
-            ポーズ
-          </button>
-        )}
-        <button type="button" style={btn} onClick={restart}>
-          もう一度
-        </button>
-      </div>
-
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(3, 56px)",
-          gridTemplateRows: "repeat(2, 52px)",
-          gap: 6,
-          justifyContent: "center",
-          marginTop: 14,
-        }}
-        role="group"
-        aria-label="方向ボタン"
-      >
-        <span />
-        <button type="button" style={btn} aria-label="上へ" onClick={() => move("up")}>↑</button>
-        <span />
-        <button type="button" style={btn} aria-label="左へ" onClick={() => move("left")}>←</button>
-        <button type="button" style={btn} aria-label="下へ" onClick={() => move("down")}>↓</button>
-        <button type="button" style={btn} aria-label="右へ" onClick={() => move("right")}>→</button>
-      </div>
       <p className="muted" style={{ textAlign: "center", fontSize: 13 }}>
-        矢印キー / WASD / スワイプ / ボタンで操作。スペースでポーズ・再開。
+        盤面をスワイプで方向転換、タップで開始・ポーズ。再挑戦は結果画面から。矢印キー / WASD も使えます。
       </p>
     </>
   );

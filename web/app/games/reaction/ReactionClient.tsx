@@ -170,12 +170,6 @@ export default function ReactionClient() {
   const lastResult =
     session && session.results.length > 0 ? session.results[session.results.length - 1] : null;
 
-  const btn: React.CSSProperties = {
-    padding: "10px 14px", borderRadius: 10, border: "1px solid rgba(255,255,255,0.18)",
-    background: "rgba(255,255,255,0.06)", color: "inherit", cursor: "pointer", fontWeight: 700, minHeight: 44, touchAction: "manipulation",
-  };
-  const activeBtn: React.CSSProperties = { ...btn, background: "#3fae5a", color: "#06130a", borderColor: "#3fae5a" };
-
   let areaBg = "rgba(255,255,255,0.05)";
   let areaText = "タップしてスタート（全5回計測）";
   let areaSub = "赤くなったら待って、緑になった瞬間にタップ";
@@ -221,13 +215,17 @@ export default function ReactionClient() {
           : `ベスト平均 ${best > 0 ? `${best} ms` : "—"} ・ まだ計測していません`}
       </p>
 
-      <button
-        type="button"
+      <div
+        role="button"
+        tabIndex={0}
         onPointerDown={(e) => {
           e.preventDefault();
           handleTap();
         }}
-        aria-label="反応速度の計測エリア"
+        // Space は window の keydown リスナーが受けるためここでは Enter のみ
+        // （両方で Space を受けると handleTap が1回のキーで2回走る）。
+        onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); handleTap(); } }}
+        aria-label="反応速度の計測エリア（タップ面）"
         style={{
           display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 8,
           width: "100%", maxWidth: 520, margin: "0 auto", minHeight: 260,
@@ -239,7 +237,7 @@ export default function ReactionClient() {
       >
         <span style={{ fontSize: "clamp(28px, 7vw, 44px)", fontWeight: 800 }}>{areaText}</span>
         {areaSub ? <span style={{ fontSize: 14, opacity: 0.85 }}>{areaSub}</span> : null}
-      </button>
+      </div>
 
       {session && session.results.length > 0 && (
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "center", marginTop: 14 }} aria-label="各回の結果">
@@ -282,13 +280,8 @@ export default function ReactionClient() {
         </div>
       )}
 
-      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "center", marginTop: 16 }}>
-        <button type="button" style={session && phase !== "done" ? btn : activeBtn} onClick={startSession}>
-          {session ? "もう一度" : "計測スタート"}
-        </button>
-      </div>
       <p className="muted" style={{ textAlign: "center", fontSize: 13 }}>
-        エリアをタップ / クリック、またはスペースキーで反応。緑になる前に押すとフライングです。
+        大きなエリア面をタップで反応（開始・再計測も同じ面）。緑になる前に押すとフライングです。
       </p>
     </>
   );

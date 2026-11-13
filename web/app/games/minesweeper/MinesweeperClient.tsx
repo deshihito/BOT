@@ -11,6 +11,7 @@ import {
   type MsState,
 } from "@/lib/minesweeper";
 import { sfxFlip, sfxLose, sfxPlace, sfxTap, sfxWin } from "@/lib/sfx";
+import { tappableProps } from "@/lib/gesture";
 import { EndScreen } from "../GameJuice";
 import { useGamesNav } from "../GamesShell";
 
@@ -145,30 +146,28 @@ export default function MinesweeperClient() {
 
       <div className="classic-controls" role="group" aria-label="難易度">
         {LEVELS.map((level) => (
-          <button
+          <div
             key={level.key}
-            type="button"
+            {...tappableProps(() => restart(level.key))}
             aria-pressed={levelKey === level.key}
             className={levelKey === level.key ? "classic-btn classic-btn-active" : "classic-btn"}
-            onClick={() => restart(level.key)}
           >
             {level.label}
-          </button>
+          </div>
         ))}
         <button type="button" className="classic-btn" onClick={() => restart(levelKey)}>
           もう一度
         </button>
-        <button
-          type="button"
-          aria-pressed={flagMode}
-          className={flagMode ? "classic-btn classic-btn-active" : "classic-btn"}
-          onClick={() => {
+        <div
+          {...tappableProps(() => {
             sfxTap();
             setFlagMode((v) => !v);
-          }}
+          })}
+          aria-pressed={flagMode}
+          className={flagMode ? "classic-btn classic-btn-active" : "classic-btn"}
         >
           旗モード
-        </button>
+        </div>
       </div>
 
       <p className="classic-status" role="status">
@@ -195,10 +194,10 @@ export default function MinesweeperClient() {
             .filter(Boolean)
             .join(" ");
           return (
-            <button
+            <div
               key={i}
-              type="button"
               role="gridcell"
+              tabIndex={0}
               className={classes}
               aria-label={
                 cell.open
@@ -210,13 +209,18 @@ export default function MinesweeperClient() {
                     : "閉じたマス"
               }
               onClick={() => onCell(i)}
+              onKeyDown={(e) => {
+                if (e.key !== "Enter" && e.key !== " ") return;
+                e.preventDefault();
+                onCell(i);
+              }}
               onContextMenu={(e) => {
                 e.preventDefault();
                 toggleFlagWithSound(i);
               }}
             >
               {cell.open ? (cell.mine ? <MineIcon /> : cell.count > 0 ? cell.count : "") : cell.flagged ? <FlagIcon /> : ""}
-            </button>
+            </div>
           );
         })}
       </div>

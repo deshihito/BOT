@@ -1,6 +1,6 @@
 "use client";
 // 川渡りパズル。ロジックと最短手数は lib/river.ts（全状態 BFS で計算）。
-// 荷物をタップでボートに乗せ、「わたる」で川を渡る。端末内で完結し、
+// 荷物をタップでボートに乗せ、ボートを対岸へスワイプして渡る。端末内で完結し、
 // 問題ごとの最少渡河回数は localStorage の ago-river-best-<problemId> に保存する。
 import Link from "next/link";
 import { useEffect, useRef, useState, type CSSProperties } from "react";
@@ -15,6 +15,7 @@ import {
   type RiverState,
 } from "@/lib/river";
 import { sfxLose, sfxPlace, sfxSlide, sfxTap, sfxWin } from "@/lib/sfx";
+import { tappableProps, useGesture } from "@/lib/gesture";
 import { EndScreen } from "../GameJuice";
 import { useGamesNav } from "../GamesShell";
 
@@ -98,7 +99,7 @@ export default function RiverClient() {
         : `全員渡れました！クリアです（最短は ${minCrossings} 回）。`
       : state.status === "failed"
         ? (state.failMessage ?? "失敗です。")
-        : "荷物をタップしてボートに乗せ、「わたる」で川を渡ろう。農夫のいない岸に危険なペアを残さないように。";
+        : "荷物をタップしてボートに乗せ、ボートを対岸へスワイプして渡ろう。農夫のいない岸に危険なペアを残さないように。";
 
   const bankStyle: CSSProperties = {
     flex: "1 1 150px",
@@ -117,38 +118,42 @@ export default function RiverClient() {
     color: string,
     clickable: boolean,
     onBoat: boolean,
-  ) => (
-    <button
-      key={id}
-      type="button"
-      className={onBoat ? "juice-pop" : undefined}
-      disabled={!clickable || state.status !== "playing"}
-      aria-label={name}
-      onClick={() => {
-        const next = toggleRiverItem(state, id);
-        if (next !== state) sfxPlace();
-        setState(next);
-      }}
-      style={{
-        display: "inline-flex",
-        alignItems: "center",
-        gap: 6,
-        padding: "8px 10px",
-        borderRadius: 999,
-        border: onBoat ? "2px solid var(--accent)" : "1px solid var(--line)",
-        background: onBoat ? "var(--accent-soft)" : "var(--bg, #fff)",
-        fontSize: 15,
-        fontWeight: 700,
-        minHeight: 44,
-        cursor: clickable && state.status === "playing" ? "pointer" : "default",
-        opacity: clickable || onBoat ? 1 : 0.55,
-        touchAction: "manipulation",
-      }}
-    >
-      <KanjiBadge kanji={kanji} color={color} />
-      {name}
-    </button>
-  );
+  ) => {
+    const interactive = clickable && state.status === "playing";
+    return (
+      <div
+        key={id}
+        {...(interactive
+          ? tappableProps(() => {
+              const next = toggleRiverItem(state, id);
+              if (next !== state) sfxPlace();
+              setState(next);
+            })
+          : {})}
+        aria-disabled={!interactive}
+        className={onBoat ? "juice-pop" : undefined}
+        aria-label={name}
+        style={{
+          display: "inline-flex",
+          alignItems: "center",
+          gap: 6,
+          padding: "8px 10px",
+          borderRadius: 999,
+          border: onBoat ? "2px solid var(--accent)" : "1px solid var(--line)",
+          background: onBoat ? "var(--accent-soft)" : "var(--bg, #fff)",
+          fontSize: 15,
+          fontWeight: 700,
+          minHeight: 44,
+          cursor: interactive ? "pointer" : "default",
+          opacity: clickable || onBoat ? 1 : 0.55,
+          touchAction: "manipulation",
+        }}
+      >
+        <KanjiBadge kanji={kanji} color={color} />
+        {name}
+      </div>
+    );
+  };
 
   const bank = (side: RiverSide, label: string, color: string) => {
     const itemsHere = problem.items.filter((i) => state.locations[i.id] === side);
@@ -182,6 +187,24 @@ export default function RiverClient() {
 
   const boatItems = problem.items.filter((i) => state.locations[i.id] === "boat");
 
+  const cross = () => {
+    const next = crossRiver(state);
+    // 終局（won/failed）は終局ジングル側が担当する。
+    if (next !== state && next.status === "playing") sfxSlide();
+    setState(next);
+  };
+
+  // ボートの横スワイプ = 渡る（対岸の方向へ）。ボート内の荷物タップとは分離する:
+  // タップ（24px未満）は荷物の乗せ降ろしだけで、スワイプだけが渡る。
+  // スワイプ直後の click は useGesture の suppressClickAfterSwipe が抑止し、
+  // 荷物の誤切替を防ぐ（solitaire / tsume / sudoku / battleship と同じ）。
+  const boatGesture = useGesture({
+    onSwipe: (dir) => {
+      if (state.farmerSide === "left" && dir === "right") cross();
+      else if (state.farmerSide === "right" && dir === "left") cross();
+    },
+  });
+
   return (
     <>
       <nav className="breadcrumbs" aria-label="パンくず">
@@ -196,15 +219,14 @@ export default function RiverClient() {
 
       <div className="classic-controls" role="group" aria-label="問題">
         {RIVER_PROBLEMS.map((p) => (
-          <button
+          <div
             key={p.id}
-            type="button"
+            {...tappableProps(() => selectProblem(p.id))}
             aria-pressed={state.problemId === p.id}
             className={state.problemId === p.id ? "classic-btn classic-btn-active" : "classic-btn"}
-            onClick={() => selectProblem(p.id)}
           >
             {p.title}
-          </button>
+          </div>
         ))}
         <button type="button" className="classic-btn" onClick={restart}>
           もう一度
@@ -243,7 +265,21 @@ export default function RiverClient() {
         >
           <p style={{ margin: 0, fontWeight: 800 }}>川（ボートは{state.farmerSide === "left" ? "左岸" : "右岸"}）</p>
           <div
+            {...boatGesture}
             key={state.farmerSide}
+            role="button"
+            tabIndex={0}
+            aria-label={`ボート（${state.farmerSide === "left" ? "左岸" : "右岸"}、対岸へスワイプで渡る）`}
+            onKeyDown={(e) => {
+              // ボートそのものにフォーカスがあるときだけ Enter で渡る。
+              // ガードがないと荷物チップにフォーカスして Enter を押したときに
+              // 乗せ降ろしと渡河が両方走る（anagram / mastermind と同じ構図）。
+              if (e.target !== e.currentTarget) return;
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                cross();
+              }
+            }}
             className="juice-slide"
             style={{
               border: "2px dashed rgba(0,0,0,0.35)",
@@ -251,6 +287,7 @@ export default function RiverClient() {
               padding: 8,
               minWidth: 130,
               background: "rgba(255,255,255,0.65)",
+              touchAction: "none",
             }}
           >
             <p style={{ margin: "0 0 6px", fontWeight: 700, fontSize: 14 }}>
@@ -261,26 +298,13 @@ export default function RiverClient() {
               {boatItems.map((i) => chip(i.id, i.name, i.kanji, i.color, true, true))}
             </div>
           </div>
+          <p className="muted" style={{ margin: "6px 0 0", fontSize: 13 }}>
+            ボートを{state.farmerSide === "left" ? "右" : "左"}へスワイプ（またはボートにフォーカスして Enter）で渡ります。
+          </p>
         </div>
         {bank("right", "右岸（ゴール）", "var(--soft)")}
       </div>
 
-      <div className="classic-controls" style={{ justifyContent: "center", marginTop: 12 }}>
-        <button
-          type="button"
-          className="classic-btn classic-btn-active"
-          disabled={state.status !== "playing"}
-          onClick={() => {
-            const next = crossRiver(state);
-            // 終局（won/failed）は終局ジングル側が担当する。
-            if (next !== state && next.status === "playing") sfxSlide();
-            setState(next);
-          }}
-          style={{ minHeight: 52, fontSize: 17, fontWeight: 800, padding: "0 28px" }}
-        >
-          {state.farmerSide === "left" ? "わたる →" : "← もどる"}
-        </button>
-      </div>
       {state.status !== "playing" && (
         <EndScreen
           outcome={state.status === "won" ? "win" : "lose"}

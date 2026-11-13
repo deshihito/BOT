@@ -8,6 +8,7 @@
 // 射撃は { type: "fire", index } を送る。
 import { useEffect, useMemo, useRef, useState } from "react";
 import { playSe } from "@/lib/balku-sound";
+import { tappableProps, useGesture } from "@/lib/gesture";
 import OnlineShell from "../online/OnlineShell";
 import type { OnlineRoomApi, OnlineRoomView } from "../online/useOnlineRoom";
 
@@ -99,6 +100,93 @@ function Board({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
     playSe(state.winner === "draw" ? "click" : state.winner === mySeat ? "win" : "lose");
   }, [state, mySeat, view.code]);
 
+  /* ---------- 配置フェーズの操作（トップレベルに置く。配置盤の useGesture は
+     フェーズが変わってもフック数が変わらないよう無条件で呼ぶ必要があるため） ---------- */
+  const confirmed = state !== null && state.you.ships.length > 0;
+  const occupied = new Set(placed.flatMap((s) => s.cells));
+
+  const tryPlace = (anchor: number) => {
+    if (!state || state.phase !== "placing" || confirmed || selectedSize === 0) return;
+    // 配置済みの艦をタップしたらその艦を取り消す（1隻取り消しボタンの代替）。
+    const hitIndex = placed.findIndex((s) => s.cells.includes(anchor));
+    if (hitIndex >= 0) {
+      setLocalError("");
+      playSe("click");
+      setPlaced((prev) => prev.filter((_, i) => i !== hitIndex));
+      return;
+    }
+    const cells = cellsFor(anchor, selectedSize, horizontal);
+    if (!cells) {
+      setLocalError("盤の外にはみ出します。");
+      playSe("error");
+      return;
+    }
+    if (cells.some((c) => occupied.has(c))) {
+      setLocalError("他の艦と重なります。");
+      playSe("error");
+      return;
+    }
+    setLocalError("");
+    playSe("play");
+    setPlaced((prev) => [...prev, { cells, size: selectedSize }]);
+  };
+
+  const randomPlace = () => {
+    for (let attempt = 0; attempt < 200; attempt += 1) {
+      const used = new Set<number>();
+      const ships: PlacedShip[] = [];
+      let ok = true;
+      for (const size of FLEET_SIZES) {
+        let shipCells: number[] | null = null;
+        for (let t = 0; t < 100 && !shipCells; t += 1) {
+          const anchor = Math.floor(Math.random() * 100);
+          const cells = cellsFor(anchor, size, Math.random() < 0.5);
+          if (cells && !cells.some((c) => used.has(c))) shipCells = cells;
+        }
+        if (!shipCells) {
+          ok = false;
+          break;
+        }
+        shipCells.forEach((c) => used.add(c));
+        ships.push({ cells: shipCells, size });
+      }
+      if (ok) {
+        setPlaced(ships);
+        setLocalError("");
+        playSe("select");
+        return;
+      }
+    }
+    setLocalError("ランダム配置に失敗しました。もう一度お試しください。");
+  };
+
+  const confirmPlacement = () => {
+    if (remainingSizes.length > 0) {
+      setLocalError("まだ配置が終わっていません。");
+      playSe("error");
+      return;
+    }
+    playSe("submit");
+    void api.move({ type: "placeShips", ships: placed.map((s) => s.cells) });
+  };
+
+  // 配置盤のスワイプ: 左=全消し、右=ランダム配置、上=配置を確定。
+  // 艦のタップは各マスが受ける（配置済み艦のタップは取り消し）。
+  const placementGesture = useGesture({
+    onSwipe: (dir) => {
+      if (!state || state.phase !== "placing" || confirmed) return;
+      if (dir === "left") {
+        setPlaced([]);
+        setLocalError("");
+        playSe("click");
+      } else if (dir === "right") {
+        randomPlace();
+      } else if (dir === "up") {
+        confirmPlacement();
+      }
+    },
+  });
+
   if (!state) return <p className="og-muted">海域を準備中…</p>;
 
   const opponentPlayer = state.players.find((p) => p.seat !== mySeat);
@@ -109,56 +197,6 @@ function Board({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
 
   /* ---------- 配置フェーズ ---------- */
   if (state.phase === "placing") {
-    const confirmed = state.you.ships.length > 0;
-    const occupied = new Set(placed.flatMap((s) => s.cells));
-
-    const tryPlace = (anchor: number) => {
-      if (confirmed || selectedSize === 0) return;
-      const cells = cellsFor(anchor, selectedSize, horizontal);
-      if (!cells) {
-        setLocalError("盤の外にはみ出します。");
-        playSe("error");
-        return;
-      }
-      if (cells.some((c) => occupied.has(c))) {
-        setLocalError("他の艦と重なります。");
-        playSe("error");
-        return;
-      }
-      setLocalError("");
-      playSe("play");
-      setPlaced((prev) => [...prev, { cells, size: selectedSize }]);
-    };
-
-    const randomPlace = () => {
-      for (let attempt = 0; attempt < 200; attempt += 1) {
-        const used = new Set<number>();
-        const ships: PlacedShip[] = [];
-        let ok = true;
-        for (const size of FLEET_SIZES) {
-          let shipCells: number[] | null = null;
-          for (let t = 0; t < 100 && !shipCells; t += 1) {
-            const anchor = Math.floor(Math.random() * 100);
-            const cells = cellsFor(anchor, size, Math.random() < 0.5);
-            if (cells && !cells.some((c) => used.has(c))) shipCells = cells;
-          }
-          if (!shipCells) {
-            ok = false;
-            break;
-          }
-          shipCells.forEach((c) => used.add(c));
-          ships.push({ cells: shipCells, size });
-        }
-        if (ok) {
-          setPlaced(ships);
-          setLocalError("");
-          playSe("select");
-          return;
-        }
-      }
-      setLocalError("ランダム配置に失敗しました。もう一度お試しください。");
-    };
-
     return (
       <div className="og-board-wrap">
         <div className="og-turn-banner" role="status">
@@ -175,23 +213,31 @@ function Board({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
                 const usedCount = placed.filter((s) => s.size === size).length;
                 const totalCount = FLEET_SIZES.filter((s) => s === size).length;
                 const done = usedCount >= totalCount;
+                const isSelected = selectedSize === size && !done;
                 return (
-                  <button
+                  <div
                     key={`${size}-${i}`}
-                    type="button"
-                    className={`og-bs-ship-btn${selectedSize === size && !done ? " og-bs-ship-selected" : ""}`}
-                    disabled={done}
-                    aria-pressed={selectedSize === size}
-                    onClick={() => setSelectedSize(size)}
+                    {...(done
+                      ? { "aria-disabled": true as const }
+                      : tappableProps(() => setSelectedSize(size)))}
+                    className={`og-bs-ship-btn${isSelected ? " og-bs-ship-selected" : ""}`}
+                    aria-pressed={isSelected}
                   >
                     {SIZE_NAMES[size]}（{size}マス）{done ? " 配置済み" : usedCount > 0 ? ` ${usedCount}/${totalCount}` : ""}
-                  </button>
+                  </div>
                 );
               })}
-              <button type="button" className="og-btn" aria-pressed={!horizontal} onClick={() => setHorizontal((h) => !h)}>
+              <div
+                {...tappableProps(() => setHorizontal((h) => !h))}
+                className="og-btn"
+                aria-pressed={!horizontal}
+              >
                 向き: {horizontal ? "横 →" : "縦 ↓"}
-              </button>
+              </div>
             </div>
+            <p className="og-muted">
+              配置 {placed.length}/5隻。配置済みの艦をタップで取り消し。盤を左スワイプで全消し、右スワイプでランダム配置、上スワイプで確定。
+            </p>
             {localError && (
               <p className="og-error juice-shake" role="alert">
                 {localError}
@@ -199,64 +245,30 @@ function Board({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
             )}
           </>
         )}
-        <div className="og-bs-board" role="grid" aria-label="自分の海（配置）">
+        <div {...placementGesture} className="og-bs-board" role="grid" aria-label="自分の海（配置。左スワイプで全消し、右スワイプでランダム配置、上スワイプで確定）" style={{ touchAction: "none" }}>
           {Array.from({ length: 100 }, (_, index) => {
             const shipIndex = confirmed
               ? state.you.ships.findIndex((s) => s.cells.includes(index))
               : placed.findIndex((s) => s.cells.includes(index));
             return (
-              <button
+              <div
                 key={index}
-                type="button"
                 role="gridcell"
+                tabIndex={confirmed ? -1 : 0}
                 className={`og-cell og-bs-cell${shipIndex >= 0 ? " og-bs-cell-ship juice-pop" : ""}`}
-                disabled={confirmed}
+                aria-disabled={confirmed}
                 aria-label={`${Math.floor(index / 10) + 1}行${(index % 10) + 1}列${shipIndex >= 0 ? " 艦あり" : ""}`}
                 onClick={() => tryPlace(index)}
+                onKeyDown={(e) => {
+                  if (e.key !== "Enter" && e.key !== " ") return;
+                  e.preventDefault();
+                  tryPlace(index);
+                }}
+                style={{ cursor: confirmed ? "default" : "pointer" }}
               />
             );
           })}
         </div>
-        {!confirmed && (
-          <div className="og-actions">
-            <button
-              type="button"
-              className="og-btn"
-              disabled={placed.length === 0}
-              onClick={() => {
-                setPlaced((prev) => prev.slice(0, -1));
-                playSe("click");
-              }}
-            >
-              1隻取り消し
-            </button>
-            <button
-              type="button"
-              className="og-btn"
-              disabled={placed.length === 0}
-              onClick={() => {
-                setPlaced([]);
-                playSe("click");
-              }}
-            >
-              全消し
-            </button>
-            <button type="button" className="og-btn" onClick={randomPlace}>
-              ランダム配置
-            </button>
-            <button
-              type="button"
-              className="og-btn og-btn-primary"
-              disabled={remainingSizes.length > 0}
-              onClick={() => {
-                playSe("submit");
-                void api.move({ type: "placeShips", ships: placed.map((s) => s.cells) });
-              }}
-            >
-              配置を確定（{placed.length}/5隻）
-            </button>
-          </div>
-        )}
       </div>
     );
   }
@@ -312,18 +324,25 @@ function Board({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
             {Array.from({ length: 100 }, (_, index) => {
               const result = myShots.get(index);
               const sunkCell = sunkEnemyCells.has(index);
+              const canFire = myTurn && result === undefined;
               return (
-                <button
+                <div
                   key={index}
-                  type="button"
                   role="gridcell"
+                  tabIndex={canFire ? 0 : -1}
                   className={`og-cell og-bs-cell${sunkCell ? " og-bs-cell-sunk" : ""}${result ? (isHitResult(result) ? " og-bs-cell-hit" : " og-bs-cell-miss") : ""}${state.lastShot?.index === index ? " og-cell-last juice-pop" : ""}`}
-                  disabled={!myTurn || result !== undefined}
+                  aria-disabled={!canFire}
                   aria-label={`${Math.floor(index / 10) + 1}行${(index % 10) + 1}列${result ? (isHitResult(result) ? " 命中" : " はずれ") : ""}`}
                   onClick={() => fire(index)}
+                  onKeyDown={(e) => {
+                    if (e.key !== "Enter" && e.key !== " ") return;
+                    e.preventDefault();
+                    fire(index);
+                  }}
+                  style={{ cursor: canFire ? "pointer" : "default" }}
                 >
                   {result ? (isHitResult(result) ? "✕" : "・") : null}
-                </button>
+                </div>
               );
             })}
           </div>

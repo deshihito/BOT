@@ -14,6 +14,7 @@ import {
   type NonoState,
 } from "@/lib/nonogram";
 import { sfxPlace, sfxTap, sfxWin } from "@/lib/sfx";
+import { tappableProps } from "@/lib/gesture";
 import { EndScreen } from "../GameJuice";
 import { useGamesNav } from "../GamesShell";
 
@@ -168,15 +169,14 @@ export default function NonogramClient() {
 
       <div className="classic-controls" role="group" aria-label="盤のサイズ">
         {SIZES.map((s) => (
-          <button
+          <div
             key={s.key}
-            type="button"
+            {...tappableProps(() => restart(s.key))}
             aria-pressed={size === s.key}
             className={size === s.key ? "classic-btn classic-btn-active" : "classic-btn"}
-            onClick={() => restart(s.key)}
           >
             {s.label}
-          </button>
+          </div>
         ))}
         <button type="button" className="classic-btn" onClick={() => restart(size)}>
           別の問題
@@ -184,22 +184,20 @@ export default function NonogramClient() {
       </div>
 
       <div className="classic-controls" role="group" aria-label="入力モード">
-        <button
-          type="button"
+        <div
+          {...tappableProps(() => setMode("fill"))}
           aria-pressed={mode === "fill"}
           className={mode === "fill" ? "classic-btn classic-btn-active" : "classic-btn"}
-          onClick={() => setMode("fill")}
         >
           ■ 塗る
-        </button>
-        <button
-          type="button"
+        </div>
+        <div
+          {...tappableProps(() => setMode("cross"))}
           aria-pressed={mode === "cross"}
           className={mode === "cross" ? "classic-btn classic-btn-active" : "classic-btn"}
-          onClick={() => setMode("cross")}
         >
           × 印
-        </button>
+        </div>
       </div>
 
       <p className="classic-status" role="status">
@@ -289,10 +287,10 @@ export default function NonogramClient() {
               const isError = errorSet.has(index);
               const filled = won ? state.solution[index] : mark === 1;
               return (
-                <button
+                <div
                   key={index}
-                  type="button"
                   role="gridcell"
+                  tabIndex={won ? -1 : 0}
                   data-nono-index={index}
                   aria-label={`${r + 1}行${c + 1}列${filled ? " 塗り" : mark === 2 ? " ×印" : ""}`}
                   onPointerDown={(e) => {
@@ -300,6 +298,11 @@ export default function NonogramClient() {
                     startPaint(index);
                   }}
                   onPointerEnter={() => continuePaint(index)}
+                  onKeyDown={(e) => {
+                    if (e.key !== "Enter" && e.key !== " ") return;
+                    e.preventDefault();
+                    startPaint(index);
+                  }}
                   onContextMenu={(e) => e.preventDefault()}
                   className={isError && !won ? "juice-shake" : filled ? "juice-pop" : undefined}
                   style={{
@@ -326,7 +329,7 @@ export default function NonogramClient() {
                   }}
                 >
                   {!filled && mark === 2 ? "×" : ""}
-                </button>
+                </div>
               );
             })}
           </Fragment>

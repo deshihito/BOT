@@ -4,6 +4,7 @@
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { sfxCorrect, sfxLose, sfxTap, sfxWin, sfxWrong } from "@/lib/sfx";
+import { tappableProps } from "@/lib/gesture";
 import { EndScreen } from "../GameJuice";
 import { useGamesNav } from "../GamesShell";
 
@@ -234,6 +235,11 @@ export default function PongClient() {
       if (e.key === "ArrowUp" || e.key.toLowerCase() === "w") { keysRef.current.up = true; e.preventDefault(); }
       if (e.key === "ArrowDown" || e.key.toLowerCase() === "s") { keysRef.current.down = true; e.preventDefault(); }
       if (e.key === " " || e.key === "Enter") {
+        // 難易度チップ・「もう一度」ボタンにフォーカスがあるときは、その要素の
+        // Enter / Space ハンドラに任せ、window 側の開始・ポーズと二重に走らせ
+        // ない（falling / wordle / bowling の教訓）。矢印・W/S・P キーには
+        // div 側のハンドラがないためガードはこの分岐の中だけに置く。
+        if ((e.target as HTMLElement | null)?.closest?.("[data-pong-ui]")) return;
         e.preventDefault();
         if (phaseRef.current === "ready") setPhase("playing");
         else if (phaseRef.current === "playing") setPhase("paused");
@@ -267,6 +273,33 @@ export default function PongClient() {
     playerRef.current.y = Math.max(PADDLE_H / 2, Math.min(FIELD_H - PADDLE_H / 2, pointerToY(clientY)));
   };
 
+  // プレイ中のダブルタップ=ポーズ。パドル操作は pointerdown の即時性が本質の
+  // ため useGesture（pointerup 判定・onTap 320ms 遅延）には寄せず、手書きで
+  // pointerdown 時に判定する（reaction / stopwatch と同じ意図的な例外）。
+  // 開始・再開のタップは遅延なしで即座に走る。待機中・停止中のタップは
+  // 開始・再開のみで、直後のダブルタップによる即ポーズは起きないよう
+  // 記録を消す。パドル位置調整のつもりの素早い2回タップがポーズになる
+  // 誤発火を抑えるため、2回目が1回目とほぼ同じ高さ（48px以内）のときに
+  // だけポーズする（意図的なダブルタップはその場で2回叩くため残る）。
+  const lastPlayTapAtRef = useRef<{ t: number; y: number } | null>(null);
+  const onCanvasPointerDown = (clientY: number) => {
+    onPointer(clientY);
+    if (phaseRef.current === "ready" || phaseRef.current === "paused") {
+      lastPlayTapAtRef.current = null;
+      setPhase("playing");
+      return;
+    }
+    if (phaseRef.current !== "playing") return;
+    const now = performance.now();
+    const last = lastPlayTapAtRef.current;
+    if (last && now - last.t <= 300 && Math.abs(clientY - last.y) <= 48) {
+      lastPlayTapAtRef.current = null;
+      setPhase("paused");
+    } else {
+      lastPlayTapAtRef.current = { t: now, y: clientY };
+    }
+  };
+
   const winner = scores.player > scores.cpu ? "あなた" : "CPU";
   const statusText =
     phase === "finished"
@@ -274,7 +307,7 @@ export default function PongClient() {
       : phase === "paused"
         ? "一時停止中です。"
         : phase === "ready"
-          ? `先に ${WIN_SCORE} 点取った方が勝ち。スタートを押して開始。`
+          ? `先に ${WIN_SCORE} 点取った方が勝ち。コートをタップして開始。`
           : `先に ${WIN_SCORE} 点で勝利`;
 
   const btn: React.CSSProperties = {
@@ -297,15 +330,15 @@ export default function PongClient() {
 
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 10 }} role="group" aria-label="難易度">
         {DIFFS.map((d) => (
-          <button
+          <div
             key={d.key}
-            type="button"
+            {...tappableProps(() => { sfxTap(); setDifficulty(d.key); diffRef.current = d; })}
             style={difficulty === d.key ? activeBtn : btn}
             aria-pressed={difficulty === d.key}
-            onClick={() => { sfxTap(); setDifficulty(d.key); diffRef.current = d; }}
+            data-pong-ui=""
           >
             {d.label}
-          </button>
+          </div>
         ))}
       </div>
 
@@ -319,7 +352,7 @@ export default function PongClient() {
           style={{ width: "100%", aspectRatio: `${FIELD_W} / ${FIELD_H}`, display: "block", borderRadius: 12, background: "#0d1520", touchAction: "none" }}
           aria-label="ピンポンの盤"
           onPointerMove={(e) => onPointer(e.clientY)}
-          onPointerDown={(e) => { onPointer(e.clientY); if (phase === "ready") setPhase("playing"); }}
+          onPointerDown={(e) => onCanvasPointerDown(e.clientY)}
           onTouchStart={(e) => onPointer(e.touches[0].clientY)}
           onTouchMove={(e) => onPointer(e.touches[0].clientY)}
         />
@@ -340,15 +373,12 @@ export default function PongClient() {
       )}
 
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "center", marginTop: 14 }}>
-        {phase === "ready" || phase === "paused" ? (
-          <button type="button" style={activeBtn} onClick={() => setPhase("playing")}>{phase === "paused" ? "再開" : "スタート"}</button>
-        ) : phase === "playing" ? (
-          <button type="button" style={btn} onClick={() => setPhase("paused")}>ポーズ</button>
-        ) : null}
-        <button type="button" style={btn} onClick={resetGame}>もう一度</button>
+        <button type="button" style={btn} onClick={resetGame} data-pong-ui="">
+          もう一度
+        </button>
       </div>
       <p className="muted" style={{ textAlign: "center", fontSize: 13 }}>
-        マウス / タッチ / ↑↓・W S キーで左パドルを操作。スペースで開始・ポーズ。
+        マウス / タッチ / ↑↓・W S キーで左パドルを操作。コートをタップで開始・再開、プレイ中のダブルタップでポーズ。スペース・P キーでも開始・ポーズ。
       </p>
     </>
   );

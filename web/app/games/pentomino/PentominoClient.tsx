@@ -6,6 +6,7 @@
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { sfxPlace, sfxTap, sfxWin, sfxWrong } from "@/lib/sfx";
+import { tappableProps, useGesture } from "@/lib/gesture";
 import { EndScreen } from "../GameJuice";
 import {
   canPlacePent,
@@ -145,12 +146,32 @@ export default function PentominoClient() {
     }
   };
 
+  // 選択中ピースの操作: プレビュー表示のタップ=回転、左右スワイプ=反転。
+  // 「外す」は選択解除（パレットをもう一度タップ）→ 配置済みマスをタップ、
+  // 「選択解除」はパレットの再タップで代替するため両ボタンとも廃止。
+  const rotateSelected = () => {
+    if (!selected) return;
+    sfxTap();
+    setOrientation((o) => rotatePentOrientation(selected, o));
+  };
+  const flipSelected = () => {
+    if (!selected) return;
+    sfxTap();
+    setOrientation((o) => flipPentOrientation(selected, o));
+  };
+  const previewGesture = useGesture({
+    onTap: () => rotateSelected(),
+    onSwipe: (dir) => {
+      if (dir === "left" || dir === "right") flipSelected();
+    },
+  });
+
   const statusText =
     state.status === "won"
       ? "60マス全部が埋まりました。完成です！"
       : notice ??
         (selected
-          ? `${selected} を置くマスをタップしてください（タップしたマスにピースの端が乗ります）。`
+          ? `${selected} を置くマスをタップしてください（タップしたマスにピースの端が乗ります）。上のピース表示をタップで回転、左右スワイプで反転。`
           : "パレットからピースを選んでください。配置済みのマスをタップすると外せます。");
 
   return (
@@ -169,15 +190,14 @@ export default function PentominoClient() {
 
       <div className="classic-controls" role="group" aria-label="盤面">
         {BOARD_KEYS.map((key) => (
-          <button
+          <div
             key={key}
-            type="button"
+            {...tappableProps(() => restart(key))}
             aria-pressed={boardKey === key}
             className={boardKey === key ? "classic-btn classic-btn-active" : "classic-btn"}
-            onClick={() => restart(key)}
           >
             {PENT_BOARDS[key].label}
-          </button>
+          </div>
         ))}
         <button type="button" className="classic-btn" onClick={() => restart(boardKey)}>
           もう一度
@@ -206,12 +226,11 @@ export default function PentominoClient() {
           const isSelected = selected === def.id;
           const cells = pentOrientationCells(def.id, 0) ?? def.cells;
           return (
-            <button
+            <div
               key={def.id}
-              type="button"
+              {...tappableProps(() => selectPiece(def.id))}
               aria-pressed={isSelected}
               aria-label={`ピース ${def.id}${placed ? "（配置済み）" : ""}`}
-              onClick={() => selectPiece(def.id)}
               style={{
                 display: "flex",
                 flexDirection: "column",
@@ -230,7 +249,7 @@ export default function PentominoClient() {
             >
               <PiecePreview cells={cells} color={def.color} cellSize={7} />
               <span style={{ fontSize: 12, fontWeight: 700 }}>{def.id}</span>
-            </button>
+            </div>
           );
         })}
       </div>
@@ -238,55 +257,20 @@ export default function PentominoClient() {
       {/* 選択中ピースの操作 */}
       {selected && selectedCells && (
         <div
+          {...previewGesture}
+          role="button"
+          tabIndex={0}
+          aria-label={`${selected} を操作中。タップで回転、左右スワイプで反転`}
           className="classic-controls juice-pop"
-          style={{ alignItems: "center" }}
-          role="group"
-          aria-label="ピース操作"
+          style={{ alignItems: "center", cursor: "pointer", touchAction: "none" }}
+          onKeyDown={(e) => {
+            if (e.key !== "Enter" && e.key !== " ") return;
+            e.preventDefault();
+            rotateSelected();
+          }}
         >
           <PiecePreview cells={selectedCells} color={pentPieceDef(selected).color} cellSize={13} />
-          <button
-            type="button"
-            className="classic-btn"
-            onClick={() => {
-              sfxTap();
-              setOrientation((o) => rotatePentOrientation(selected, o));
-            }}
-          >
-            ⟳ 回転
-          </button>
-          <button
-            type="button"
-            className="classic-btn"
-            onClick={() => {
-              sfxTap();
-              setOrientation((o) => flipPentOrientation(selected, o));
-            }}
-          >
-            ⇋ 反転
-          </button>
-          {state.placements[selected] && (
-            <button
-              type="button"
-              className="classic-btn"
-              onClick={() => {
-                sfxTap();
-                setState((s) => removePent(s, selected));
-                setSelected(null);
-              }}
-            >
-              外す
-            </button>
-          )}
-          <button
-            type="button"
-            className="classic-btn"
-            onClick={() => {
-              sfxTap();
-              setSelected(null);
-            }}
-          >
-            選択解除
-          </button>
+          <span style={{ fontSize: 13 }}>タップ: 回転 / 左右スワイプ: 反転</span>
         </div>
       )}
 
@@ -311,15 +295,20 @@ export default function PentominoClient() {
               ? pentPieceDef(selected).color
               : null;
           return (
-            <button
+            <div
               key={index}
-              type="button"
               role="gridcell"
+              tabIndex={0}
               className={occupant ? "juice-pop" : undefined}
               aria-label={
                 occupant ? `ピース ${occupant}` : isPreview ? "配置プレビュー" : "空きマス"
               }
               onClick={() => onCell(index)}
+              onKeyDown={(e) => {
+                if (e.key !== "Enter" && e.key !== " ") return;
+                e.preventDefault();
+                onCell(index);
+              }}
               onMouseEnter={() => setHover(index)}
               onMouseLeave={() => setHover(null)}
               style={{
@@ -340,7 +329,7 @@ export default function PentominoClient() {
               }}
             >
               {occupant ?? ""}
-            </button>
+            </div>
           );
         })}
       </div>

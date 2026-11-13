@@ -17,6 +17,7 @@ import {
 } from "@/lib/spider";
 import { useGamesNav } from "../GamesShell";
 import { sfxDeal, sfxLose, sfxPlace, sfxTap, sfxWin, sfxWrong } from "@/lib/sfx";
+import { tappableProps, useGesture } from "@/lib/gesture";
 import { EndScreen } from "../GameJuice";
 
 type Selection = { col: number; index: number } | null;
@@ -114,6 +115,33 @@ export default function SpiderClient() {
 
   const deals = spiderStockDeals(state);
 
+  // 山札から配る（旧ボタンの代替: 配る対象物のタップ / 盤面の下スワイプ / D キー）。
+  // 旧ボタンの disabled 条件（残り0回・プレイ中でない）と同等に、無効なときは無音の no-op。
+  const tryDeal = () => {
+    if (deals === 0 || state.status !== "playing") return;
+    onDeal();
+  };
+  const dealDisabled = deals === 0 || state.status !== "playing";
+
+  // 盤面の下スワイプ = 山札から配る。子の札の onClick との二重発火は
+  // useGesture の suppressClickAfterSwipe が抑止する（solitaire / freecell と同じ）。
+  const boardGesture = useGesture({
+    onSwipe: (dir) => {
+      if (dir === "down") tryDeal();
+    },
+  });
+
+  // D キーでも山札から配れる（札の div は Enter/Space のみのため二重発火なし）。
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA")) return;
+      if (e.key === "d" || e.key === "D") tryDeal();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  });
+
   return (
     <>
       <nav className="breadcrumbs" aria-label="パンくず">
@@ -124,7 +152,7 @@ export default function SpiderClient() {
       <div className="page-heading compact-heading">
         <h1>スパイダーソリティア</h1>
         <p className="muted">
-          動かしたい束の先頭カードをタップし、続けて置き先の列をタップします。全カードがスペードの1スート制です。
+          動かしたい束の先頭カードをタップし、続けて置き先の列をタップします。全カードがスペードの1スート制です。盤面を下にスワイプ（または D キー）で山札から配ります。
         </p>
       </div>
 
@@ -132,14 +160,14 @@ export default function SpiderClient() {
         <button type="button" className="classic-btn" onClick={restart}>
           もう一度
         </button>
-        <button
-          type="button"
+        <div
+          {...(dealDisabled ? {} : tappableProps(tryDeal))}
+          aria-disabled={dealDisabled}
           className="classic-btn"
-          onClick={onDeal}
-          disabled={deals === 0 || state.status !== "playing"}
+          style={dealDisabled ? { opacity: 0.5, cursor: "default" } : undefined}
         >
           山札から配る（残り{deals}回）
-        </button>
+        </div>
       </div>
 
       <p className="classic-status" role="status">
@@ -156,6 +184,7 @@ export default function SpiderClient() {
       </p>
 
       <div
+        {...boardGesture}
         role="group"
         style={{
           display: "grid",
@@ -163,16 +192,16 @@ export default function SpiderClient() {
           gap: 4,
           maxWidth: 860,
           margin: "0 auto",
+          touchAction: "none",
         }}
-        aria-label="スパイダーの場札"
+        aria-label="スパイダーの場札（下にスワイプで山札から配る）"
       >
         {state.columns.map((pile, col) => (
           <div key={col} style={{ display: "flex", flexDirection: "column" }}>
             {pile.length === 0 ? (
-              <button
-                type="button"
+              <div
+                {...tappableProps(() => onEmptyColumnClick(col))}
                 aria-label={`${col + 1}列目（空）`}
-                onClick={() => onEmptyColumnClick(col)}
                 style={{
                   height: 62,
                   borderRadius: 7,
@@ -184,24 +213,25 @@ export default function SpiderClient() {
                 }}
               >
                 空
-              </button>
+              </div>
             ) : (
               pile.map((card, index) => {
                 const isSelected =
                   selection !== null && selection.col === col && index >= selection.index;
                 return (
-                  <button
+                  <div
                     key={card.id}
-                    type="button"
-                    disabled={!card.faceUp}
+                    {...(card.faceUp
+                      ? tappableProps(() => onCardClick(col, index))
+                      : {})}
                     aria-label={
                       card.faceUp
                         ? `スペードの${spiderRankLabel(card.rank)}`
                         : "裏向きのカード"
                     }
-                    aria-pressed={isSelected}
+                    aria-pressed={card.faceUp ? isSelected : undefined}
+                    aria-disabled={!card.faceUp}
                     className={card.faceUp ? "juice-flip" : undefined}
-                    onClick={() => onCardClick(col, index)}
                     style={{
                       height: 62,
                       marginTop: index === 0 ? 0 : -38,
@@ -226,7 +256,7 @@ export default function SpiderClient() {
                     }}
                   >
                     {card.faceUp ? `♠${spiderRankLabel(card.rank)}` : "🂠"}
-                  </button>
+                  </div>
                 );
               })
             )}

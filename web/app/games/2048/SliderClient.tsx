@@ -1,6 +1,6 @@
 "use client";
 // 2048 方式のスライドパズル。ロジックは lib/slider2048.ts。
-// 矢印キー・ボタン・スワイプで操作する。端末内で完結し、サーバーへ送信しない。
+// 矢印キー・盤面スワイプで操作する。盤面ダブルタップで1手もどす（U キーでも可）。
 // タイルは絶対配置し、lib の moveSlideDetailed が返す移動情報で
 // transform を遷移させてスライドアニメーションする（最終状態は lib の盤面と一致）。
 import Link from "next/link";
@@ -14,6 +14,7 @@ import {
   type SlideState,
 } from "@/lib/slider2048";
 import { sfxLose, sfxSlide, sfxSpawn, sfxWin } from "@/lib/sfx";
+import { tappableProps, useGesture } from "@/lib/gesture";
 import { EndScreen } from "../GameJuice";
 import { useGamesNav } from "../GamesShell";
 
@@ -34,7 +35,6 @@ export default function SliderClient() {
   const [initial] = useState<SlideState>(() => createSlideGame(Date.now() % 2147483647));
   const [state, setState] = useState<SlideState>(initial);
   const [best, setBest] = useState(0);
-  const touchRef = useRef<{ x: number; y: number } | null>(null);
   const historyRef = useRef<SlideState[]>([]);
   // このゲーム開始時点のベスト。終了画面のベスト更新判定に使う（ベスト自体はプレイ中も更新される）。
   const startBestRef = useRef(0);
@@ -156,13 +156,24 @@ export default function SliderClient() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const dir = KEY_DIRS[e.key];
-      if (!dir) return;
-      e.preventDefault();
-      doMove(dir);
+      if (dir) {
+        e.preventDefault();
+        doMove(dir);
+        return;
+      }
+      // タップ対象物は Enter / Space しか受けないため U との二重発火はない。
+      if (e.key === "u" || e.key === "U") undo();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [doMove]);
+  }, [doMove, undo]);
+
+  // 盤面スワイプ = 移動、ダブルタップ = 1手もどす。旧来の TouchEvent 直書きを
+  // 共通ヘルパー useGesture に寄せた（touchAction: "none" は盤面に既存）。
+  const boardGesture = useGesture({
+    onSwipe: (dir) => doMove(dir),
+    onDoubleTap: () => undo(),
+  });
 
   // 状態変化を見て効果音を鳴らす: 移動=スライド、最大タイル更新=出現、終局=ジングル。
   const prevStateRef = useRef(state);
@@ -190,17 +201,6 @@ export default function SliderClient() {
     );
   };
 
-  const onTouchEnd = (e: React.TouchEvent) => {
-    const start = touchRef.current;
-    touchRef.current = null;
-    if (!start) return;
-    const touch = e.changedTouches[0];
-    const dx = touch.clientX - start.x;
-    const dy = touch.clientY - start.y;
-    if (Math.max(Math.abs(dx), Math.abs(dy)) < 24) return;
-    doMove(Math.abs(dx) > Math.abs(dy) ? (dx > 0 ? "right" : "left") : dy > 0 ? "down" : "up");
-  };
-
   return (
     <>
       <nav className="breadcrumbs" aria-label="パンくず">
@@ -210,7 +210,7 @@ export default function SliderClient() {
       </nav>
       <div className="page-heading compact-heading">
         <h1>2048</h1>
-        <p className="muted">同じ数字をぶつけて大きくしていくスライドパズル。2048 のタイルを目指そう。</p>
+        <p className="muted">同じ数字をぶつけて大きくしていくスライドパズル。盤面をスワイプして動かします。ダブルタップ（U キー）で1手もどします。2048 のタイルを目指そう。</p>
       </div>
 
       <p className="classic-status" role="status">
@@ -222,12 +222,8 @@ export default function SliderClient() {
 
       <div
         role="grid"
-        aria-label="2048 の盤"
-        onTouchStart={(e) => {
-          const touch = e.touches[0];
-          touchRef.current = { x: touch.clientX, y: touch.clientY };
-        }}
-        onTouchEnd={onTouchEnd}
+        aria-label="2048 の盤（スワイプで移動・ダブルタップで1手もどす）"
+        {...boardGesture}
         style={{
           position: "relative",
           width: "100%",
@@ -297,9 +293,9 @@ export default function SliderClient() {
           onRetry={restart}
         >
           <p className="muted">2048 のタイルができました。</p>
-          <button type="button" className="classic-btn" onClick={() => applyState(continueSlide(stateRef.current))}>
+          <div {...tappableProps(() => applyState(continueSlide(stateRef.current)))} className="classic-btn">
             このまま続ける
-          </button>
+          </div>
         </EndScreen>
       ) : null}
       {state.status === "lost" ? (
@@ -315,14 +311,7 @@ export default function SliderClient() {
         </EndScreen>
       ) : null}
 
-      <div className="classic-controls" role="group" aria-label="移動ボタン">
-        <button type="button" className="classic-btn" aria-label="左へ" onClick={() => doMove("left")}>←</button>
-        <button type="button" className="classic-btn" aria-label="上へ" onClick={() => doMove("up")}>↑</button>
-        <button type="button" className="classic-btn" aria-label="下へ" onClick={() => doMove("down")}>↓</button>
-        <button type="button" className="classic-btn" aria-label="右へ" onClick={() => doMove("right")}>→</button>
-        <button type="button" className="classic-btn" onClick={undo}>
-          1手もどす
-        </button>
+      <div className="classic-controls" role="group" aria-label="操作">
         <button type="button" className="classic-btn" onClick={restart}>
           もう一度
         </button>

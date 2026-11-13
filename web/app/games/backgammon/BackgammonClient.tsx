@@ -19,6 +19,7 @@ import {
   type BgState,
 } from "@/lib/backgammon";
 import { useGamesNav } from "../GamesShell";
+import { tappableProps, useGesture } from "@/lib/gesture";
 
 function newGame(): BgState {
   return bgCreateGame(Date.now() % 2147483647);
@@ -45,13 +46,13 @@ function CheckerStack({
 }) {
   const shown = Math.min(count, 5);
   return (
-    <button
-      type="button"
+    <div
+      {...(onClick ? tappableProps(onClick) : {})}
+      data-backgammon-ui=""
       className={selected ? "juice-pulse" : isTarget ? "juice-pop" : undefined}
       aria-label={label}
       aria-pressed={selected}
-      onClick={onClick}
-      disabled={!onClick}
+      aria-disabled={!onClick || undefined}
       style={{
         width: "100%",
         minHeight: 74,
@@ -86,7 +87,7 @@ function CheckerStack({
         <span style={{ fontSize: 10, fontWeight: 700, color: "#374151" }}>×{count}</span>
       ) : null}
       {count === 0 ? <span style={{ fontSize: 10, color: "#a8a29e" }}>・</span> : null}
-    </button>
+    </div>
   );
 }
 
@@ -171,6 +172,61 @@ export default function BackgammonClient() {
 
   const bearOffMove: BgMove | undefined = targets.find((m) => m.to === "off");
 
+  const rollDice = () => {
+    if (!myTurn || state.phase !== "roll") return;
+    sfxDice();
+    setState((s) => bgRollDice(s));
+  };
+
+  const passTurn = () => {
+    if (!myTurn || state.phase !== "move" || legal.length !== 0) return;
+    sfxTap();
+    setState((s) => bgPassTurn(s));
+  };
+
+  const bearOff = () => {
+    if (bearOffMove) applyMove(bearOffMove);
+  };
+
+  // 盤面ジェスチャ: ロール局面のタップ=ダイスを振る、左スワイプ=パス、
+  // 上スワイプ=上がる（ベアオフ）。子のマスの onClick との二重発火は
+  // useGesture の suppressClickAfterSwipe が抑止する。
+  // バーからの復帰は旧ボタンと同じく盤のマスタップで行う（onPointClick が
+  // バーあり時に選択を "bar" にするため、専用ボタンは不要）。
+  const boardGesture = useGesture({
+    onSwipe: (dir) => {
+      if (dir === "left") passTurn();
+      else if (dir === "up") bearOff();
+    },
+    onTap: () => {
+      rollDice();
+    },
+  });
+
+  // Space=ダイスを振る、P=パス、B=上がる。タップ対象物（マス・ダイス・
+  // もう一度）にフォーカスがあるときの Space は tappableProps / ボタン側が
+  // 受けるため、window 側は data-backgammon-ui ガードで無視する
+  // （reaction / falling / wordle の二重発火と同じ構図）。
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA")) return;
+      if (e.key === " " && target?.closest?.("[data-backgammon-ui]")) return;
+      if (e.key === " ") {
+        // ロール局面以外では Space のページスクロールを奪わない。
+        if (!myTurn || state.phase !== "roll") return;
+        e.preventDefault();
+        rollDice();
+      } else if (e.key === "p" || e.key === "P") {
+        passTurn();
+      } else if (e.key === "b" || e.key === "B") {
+        bearOff();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [rollDice, passTurn, bearOff, myTurn, state.phase]);
+
   const statusText =
     state.phase === "finished"
       ? state.winner === 0
@@ -201,7 +257,12 @@ export default function BackgammonClient() {
     const clickable =
       myTurn &&
       state.phase === "move" &&
-      (isTarget || (state.bar[0] === 0 && value > 0 && legal.some((m) => m.from === index)));
+      (isTarget ||
+        // バーにコマがあるときは、どのマスのタップでも onPointClick が
+        // "bar" を選択する（旧「バーから復帰」ボタンの代替）。この条件が
+        // ないと復帰先を選べず、合法手があるのにパスもできない詰みになる。
+        (state.bar[0] > 0 && legal.some((m) => m.from === "bar")) ||
+        (state.bar[0] === 0 && value > 0 && legal.some((m) => m.from === index)));
     return (
       <div key={index}>
         <CheckerStack
@@ -228,79 +289,47 @@ export default function BackgammonClient() {
       <div className="page-heading compact-heading">
         <h1>バックギャモン</h1>
         <p className="muted">
-          白があなた、黒がCPUです（あなたは24→1の向きに進みます）。自分のコマをタップして選び、光った移動先をタップします。
+          白があなた、黒がCPUです（あなたは24→1の向きに進みます）。自分のコマをタップして選び、光った移動先をタップします。ダイスはタップして振ります。動かせる手がないときは盤面を左にスワイプしてパス、上がれるときは上にスワイプします。
         </p>
       </div>
 
       <div className="classic-controls" role="group" aria-label="操作">
-        <button type="button" className="classic-btn" onClick={restart}>
+        <button type="button" className="classic-btn" data-backgammon-ui="" onClick={restart}>
           もう一度
         </button>
-        {myTurn && state.phase === "roll" ? (
-          <button
-            type="button"
-            className="classic-btn classic-btn-active"
-            onClick={() => {
-              sfxDice();
-              setState((s) => bgRollDice(s));
-            }}
-          >
-            ダイスを振る
-          </button>
-        ) : null}
-        {myTurn && state.phase === "move" && legal.length === 0 ? (
-          <button
-            type="button"
-            className="classic-btn classic-btn-active"
-            onClick={() => {
-              sfxTap();
-              setState((s) => bgPassTurn(s));
-            }}
-          >
-            パスする
-          </button>
-        ) : null}
-        {bearOffMove ? (
-          <button
-            type="button"
-            className="classic-btn classic-btn-active"
-            onClick={() => applyMove(bearOffMove)}
-          >
-            ⬆ 上がる（ベアオフ）
-          </button>
-        ) : null}
-        {state.bar[0] > 0 && myTurn && state.phase === "move" ? (
-          <button
-            type="button"
-            className={selected === "bar" ? "classic-btn classic-btn-active" : "classic-btn"}
-            onClick={() => {
-              sfxTap();
-              setSelected("bar");
-            }}
-          >
-            バーから復帰（{state.bar[0]}個）
-          </button>
-        ) : null}
       </div>
 
       <p className="classic-status" role="status">
-        {state.lastRoll ? (
-          <span key={`${state.lastRoll[0]}-${state.lastRoll[1]}-${state.dice.length}`} className="juice-pop">
-            {`ダイス ${DICE_FACES[state.lastRoll[0]]}${DICE_FACES[state.lastRoll[1]]}`}
-          </span>
-        ) : (
-          "ダイス未"
-        )}
         {state.phase === "move" && state.dice.length > 0
-          ? ` ・ 残りの目 ${state.dice.join("、")}`
+          ? `残りの目 ${state.dice.join("、")} ・ `
           : ""}
-        {" ・ "}上がり あなた {state.off[0]} / CPU {state.off[1]}
+        上がり あなた {state.off[0]} / CPU {state.off[1]}
         {" ・ "}残り距離 あなた {bgPipCount(state, 0)} / CPU {bgPipCount(state, 1)}
         {state.bar[0] + state.bar[1] > 0
           ? ` ・ バー あなた ${state.bar[0]} / CPU ${state.bar[1]}`
           : ""}{" "}
         ・ {statusText}
       </p>
+
+      {/* ダイスの出目を表示する対象物。ロール局面ではタップして振る。 */}
+      <div style={{ maxWidth: 640, margin: "0 auto 10px", textAlign: "center" }}>
+        {myTurn && state.phase === "roll" ? (
+          <div
+            {...tappableProps(rollDice)}
+            data-backgammon-ui=""
+            className="classic-btn classic-btn-active"
+            style={{ display: "inline-block", minWidth: 180 }}
+          >
+            ダイスを振る
+          </div>
+        ) : state.lastRoll ? (
+          <span key={`${state.lastRoll[0]}-${state.lastRoll[1]}-${state.dice.length}`} className="juice-pop" style={{ fontWeight: 800 }}>
+            {`ダイス ${DICE_FACES[state.lastRoll[0]]}${DICE_FACES[state.lastRoll[1]]}`}
+          </span>
+        ) : (
+          <span className="muted">ダイス未</span>
+        )}
+      </div>
 
       {state.phase === "finished" && (
         <EndScreen
@@ -315,7 +344,11 @@ export default function BackgammonClient() {
         </EndScreen>
       )}
 
-      <div style={{ maxWidth: 640, margin: "0 auto" }}>
+      <div
+        {...boardGesture}
+        aria-label="バックギャモンの盤（タップでダイスを振る・コマを選ぶ、左にスワイプでパス、上にスワイプで上がる）"
+        style={{ maxWidth: 640, margin: "0 auto", touchAction: "none" }}
+      >
         <div
           role="group"
           style={{

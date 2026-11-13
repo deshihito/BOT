@@ -27,6 +27,7 @@ import {
 } from "@/lib/solitaire";
 import { useGamesNav } from "../GamesShell";
 import { sfxFlip, sfxPlace, sfxTap, sfxWin } from "@/lib/sfx";
+import { tappableProps, useGesture } from "@/lib/gesture";
 import { EndScreen } from "../GameJuice";
 
 type Selection =
@@ -176,6 +177,7 @@ export default function SolitaireClient() {
     flexShrink: 0,
     position: "relative",
     zIndex: selected ? 5 : undefined,
+    touchAction: "manipulation",
   });
 
   const slotStyle = (highlight: boolean): CSSProperties => ({
@@ -193,6 +195,7 @@ export default function SolitaireClient() {
     boxSizing: "border-box",
     flexShrink: 0,
     padding: 0,
+    touchAction: "manipulation",
   });
 
   const btnStyle: CSSProperties = {
@@ -205,6 +208,18 @@ export default function SolitaireClient() {
     cursor: "pointer",
   };
 
+  // 盤面の左右スワイプ: 左=1手もどる、右=組札へ自動移動（仕上げ可能なら自動で仕上げる）。
+  // ジェスチャは横方向だけのため touchAction は pan-y とし、縦スクロールを奪わない。
+  const boardGesture = useGesture({
+    onSwipe: (dir) => {
+      if (dir === "left") undo();
+      else if (dir === "right") {
+        if (canAutoFinish(game)) attempt(autoFinishSolitaire(game));
+        else autoAll();
+      }
+    },
+  });
+
   const wasteTop = game.waste.length > 0 ? game.waste[game.waste.length - 1] : null;
   const stockTop = game.stock.length > 0 ? game.stock[game.stock.length - 1] : null;
 
@@ -215,15 +230,14 @@ export default function SolitaireClient() {
     onDoubleClick?: () => void,
     extra?: CSSProperties,
   ) => (
-    <button
-      type="button"
+    <div
+      {...tappableProps(onClick)}
       aria-label={
         card.faceUp
           ? `${suitSymbol(card.suit)} ${rankLabel(card.rank)}`
           : "裏向きのカード"
       }
       aria-pressed={selected}
-      onClick={onClick}
       onDoubleClick={onDoubleClick}
       className={card.faceUp ? "juice-flip" : undefined}
       style={{ ...cardStyle(card, selected), ...extra }}
@@ -239,7 +253,7 @@ export default function SolitaireClient() {
           </span>
         </>
       ) : null}
-    </button>
+    </div>
   );
 
   return (
@@ -252,7 +266,7 @@ export default function SolitaireClient() {
       <div className="page-heading compact-heading">
         <h1>ソリティア</h1>
         <p className="muted">
-          クロンダイク形式の定番カードゲーム。カードをクリックで選んで移動先をクリック。ダブルクリックで組札へ送れます。
+          クロンダイク形式の定番カードゲーム。カードをタップで選んで移動先をタップ。ダブルタップで組札へ送れます。盤面を左スワイプでもどる、右スワイプで組札へ自動移動。
         </p>
       </div>
 
@@ -261,21 +275,20 @@ export default function SolitaireClient() {
         {game.status === "won" ? ` ・ 全てそろいました！ ${game.moves} 手、${formatTime(elapsed)} でクリアです。` : ""}
       </p>
 
-      <div style={{ maxWidth: 580, margin: "0 auto", padding: "4px 2px" }}>
+      <div {...boardGesture} style={{ maxWidth: 580, margin: "0 auto", padding: "4px 2px", touchAction: "pan-y" }}>
         {/* 上段: ストック / 捨て札 / 組札 */}
         <div style={{ display: "flex", gap: "1.4vw", justifyContent: "space-between", marginBottom: 14 }}>
           <div style={{ display: "flex", gap: "1.4vw" }}>
             {stockTop ? (
               renderCard(stockTop, false, () => { sfxFlip(); attempt(drawFromStock(game), true); })
             ) : (
-              <button
-                type="button"
+              <div
+                {...tappableProps(() => { sfxFlip(); attempt(drawFromStock(game), true); })}
                 style={slotStyle(false)}
                 aria-label="捨て札を戻して再循環"
-                onClick={() => { sfxFlip(); attempt(drawFromStock(game), true); }}
               >
                 ↻
-              </button>
+              </div>
             )}
             {wasteTop ? (
               renderCard(
@@ -298,17 +311,16 @@ export default function SolitaireClient() {
               return top ? (
                 <span key={i}>{renderCard(top, selected, () => onFoundation(i))}</span>
               ) : (
-                <button
+                <div
                   key={i}
-                  type="button"
+                  {...tappableProps(() => onFoundation(i))}
                   style={slotStyle(selected)}
                   aria-label={`組札 ${i + 1}（空）`}
-                  onClick={() => onFoundation(i)}
                 >
                   <span style={{ color: isRedSuit(SUITS[i]) ? "#c62828" : "#4b5563" }}>
                     {suitSymbol(SUITS[i])}
                   </span>
-                </button>
+                </div>
               );
             })}
           </div>
@@ -324,14 +336,13 @@ export default function SolitaireClient() {
           {game.tableau.map((pile, col) => (
             <div key={col} style={{ display: "flex", flexDirection: "column", width: CARD_W }}>
               {pile.length === 0 ? (
-                <button
-                  type="button"
+                <div
+                  {...tappableProps(() => moveSelectionToTableau(col))}
                   style={slotStyle(selection !== null)}
                   aria-label={`場札 ${col + 1}（空）`}
-                  onClick={() => moveSelectionToTableau(col)}
                 >
                   K
-                </button>
+                </div>
               ) : (
                 pile.map((card, index) => {
                   const selected =
@@ -365,21 +376,6 @@ export default function SolitaireClient() {
       </div>
 
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "center", marginTop: 16 }}>
-        <button type="button" style={btnStyle} onClick={undo} disabled={history.length === 0}>
-          ↩ もどる
-        </button>
-        <button type="button" style={btnStyle} onClick={autoAll}>
-          組札へ自動移動
-        </button>
-        {canAutoFinish(game) && (
-          <button
-            type="button"
-            style={{ ...btnStyle, borderColor: "#d97706", fontWeight: 700 }}
-            onClick={() => attempt(autoFinishSolitaire(game))}
-          >
-            自動で仕上げる
-          </button>
-        )}
         <button type="button" style={btnStyle} onClick={restart}>
           もう一度
         </button>

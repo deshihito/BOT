@@ -17,6 +17,7 @@ import {
   type CcState,
 } from "@/lib/chinchiro";
 import { useGamesNav } from "../GamesShell";
+import { useGesture } from "@/lib/gesture";
 import { sfxCorrect, sfxDice, sfxLose, sfxPlace, sfxTap, sfxWin, sfxWrong } from "@/lib/sfx";
 import { EndScreen } from "../GameJuice";
 
@@ -119,6 +120,11 @@ export default function ChinchiroClient() {
     setState(newGame());
   };
 
+  // 丼（自分のサイコロ）へのタップ/フリックで振る・振り直す。ボタンは置かない。
+  const bowlGesture = useGesture({
+    onTap: () => { if (state.phase === "roll" || state.phase === "decide") { sfxDice(); setState((s) => rollCc(s)); } },
+    onSwipe: () => { if (state.phase === "roll" || state.phase === "decide") { sfxDice(); setState((s) => rollCc(s)); } },
+  });
   const lastResult = state.history[state.history.length - 1];
   const winner = state.phase === "finished" ? ccWinner(state) : null;
 
@@ -151,7 +157,7 @@ export default function ChinchiroClient() {
       <div className="page-heading compact-heading">
         <h1>チンチロリン</h1>
         <p className="muted">
-          「振る」ボタンでサイコロを振ります。役が出たら、そのまま確定するか振り直すか選べます。
+          丼のサイコロをタップ（またはフリック）で振ります。役が出たら、役の表示をタップで確定するか、もう一度振り直せます。
         </p>
       </div>
 
@@ -188,37 +194,35 @@ export default function ChinchiroClient() {
               役: {handText(state.playerHand)} ・ 振った回数 {state.playerRolls} / {CC_MAX_ROLLS}
             </span>
           </div>
-          <DiceRow dice={state.playerDice} size={52} />
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <div {...bowlGesture} style={{ touchAction: "none", cursor: "pointer", display: "inline-block" }} aria-label="サイコロの丼: タップで振る">
+            <DiceRow dice={state.playerDice} size={52} />
+          </div>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
             {(state.phase === "roll" || state.phase === "decide") && (
-              <button
-                type="button"
-                className="classic-btn classic-btn-active"
-                style={{ minHeight: 48, minWidth: 140 }}
-                onClick={() => { sfxDice(); setState((s) => rollCc(s)); }}
-              >
-                {state.playerRolls === 0 ? "振る" : "振り直す"}
-              </button>
+              <p className="muted" style={{ margin: 0, fontSize: 13 }}>
+                丼のサイコロをタップ / フリックで{state.playerRolls === 0 ? "振る" : "振り直す"}
+                {state.phase === "decide" ? " ・ 確定は下の役表示をタップ" : ""}
+              </p>
             )}
             {state.phase === "decide" && (
-              <button
-                type="button"
-                className="classic-btn"
-                style={{ minHeight: 48, minWidth: 140 }}
+              <div
+                {...{ role: "button", tabIndex: 0 }}
+                style={{ minHeight: 48, minWidth: 140, display: "inline-flex", alignItems: "center", justifyContent: "center", borderRadius: 10, border: "2px solid var(--accent, #4a6fa5)", background: "var(--accent-soft, #e0eaff)", cursor: "pointer", fontWeight: 700, padding: "0 12px" }}
                 onClick={() => { sfxPlace(); setState((s) => keepCcHand(s)); }}
+                onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); sfxPlace(); setState((s) => keepCcHand(s)); } }}
               >
-                この役で確定
-              </button>
+                「{handText(state.playerHand)}」で確定
+              </div>
             )}
             {state.phase === "roundEnd" && (
-              <button
-                type="button"
-                className="classic-btn classic-btn-active"
-                style={{ minHeight: 48, minWidth: 140 }}
+              <div
+                {...{ role: "button", tabIndex: 0 }}
+                style={{ minHeight: 48, minWidth: 140, display: "inline-flex", alignItems: "center", justifyContent: "center", borderRadius: 10, border: "2px solid var(--accent, #4a6fa5)", background: "var(--accent-soft, #e0eaff)", cursor: "pointer", fontWeight: 700, padding: "0 12px" }}
                 onClick={() => { sfxTap(); setState((s) => nextCcRound(s)); }}
+                onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); sfxTap(); setState((s) => nextCcRound(s)); } }}
               >
-                次のラウンドへ
-              </button>
+                結果をタップで次のラウンドへ
+              </div>
             )}
           </div>
         </section>

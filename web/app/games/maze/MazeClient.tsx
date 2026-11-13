@@ -1,6 +1,6 @@
 "use client";
 // めいろ。ロジックは lib/maze.ts（完全迷路を生成し、最短路も lib で求める）。
-// 矢印キー／WASD／画面ボタンで移動。ヒントで最短路のマスをうっすら光らせる。端末内で完結。
+// 矢印キー／WASD／盤面スワイプで移動。ヒントで最短路のマスをうっすら光らせる。端末内で完結。
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -12,6 +12,7 @@ import {
   type MazeState,
 } from "@/lib/maze";
 import { sfxSlide, sfxWin } from "@/lib/sfx";
+import { tappableProps, useGesture } from "@/lib/gesture";
 import { EndScreen } from "../GameJuice";
 import { useGamesNav } from "../GamesShell";
 
@@ -99,16 +100,10 @@ export default function MazeClient() {
   const hintSet = useMemo(() => new Set(state.solution), [state.solution]);
   const maxWidth = Math.min(560, state.cols * 34);
 
-  const padBtn: React.CSSProperties = {
-    width: 52,
-    height: 52,
-    fontSize: 20,
-    borderRadius: 10,
-    border: "1px solid var(--line)",
-    background: "#fff",
-    color: "var(--text)",
-    cursor: "pointer",
-  };
+  // 盤面スワイプで移動（D-pad 廃止）。キーボードは矢印キー／WASD の window リスナーが受ける。
+  const boardGesture = useGesture({
+    onSwipe: (dir) => doMove(dir),
+  });
 
   return (
     <>
@@ -124,31 +119,29 @@ export default function MazeClient() {
 
       <div className="classic-controls" role="group" aria-label="迷路のサイズ">
         {SIZE_KEYS.map((key) => (
-          <button
+          <div
             key={key}
-            type="button"
+            {...tappableProps(() => restart(key))}
             aria-pressed={size === key}
             className={size === key ? "classic-btn classic-btn-active" : "classic-btn"}
-            onClick={() => restart(key)}
           >
             {MAZE_SIZES[key].label}（{MAZE_SIZES[key].cols}×{MAZE_SIZES[key].rows}）
-          </button>
+          </div>
         ))}
         <button type="button" className="classic-btn" onClick={() => restart(size)}>
           もう一度
         </button>
-        <button
-          type="button"
+        <div
+          {...tappableProps(() => setShowHint((v) => !v))}
           aria-pressed={showHint}
           className={showHint ? "classic-btn classic-btn-active" : "classic-btn"}
-          onClick={() => setShowHint((v) => !v)}
         >
           最短路ヒント
-        </button>
+        </div>
       </div>
 
       <p className="classic-status" role="status">
-        {state.moves} 手 ・ ⏱ {formatTime(seconds)}
+        {state.moves} 手 ・ 時間 {formatTime(seconds)}
         {state.status === "won"
           ? ` ・ ゴール！ ${state.moves} 手 / 最短 ${state.solution.length - 1} 手でした。`
           : showHint
@@ -157,8 +150,9 @@ export default function MazeClient() {
       </p>
 
       <div
+        {...boardGesture}
         role="grid"
-        aria-label="迷路の盤"
+        aria-label="迷路の盤（スワイプで移動）"
         style={{
           display: "grid",
           gridTemplateColumns: `repeat(${state.cols}, minmax(0, 1fr))`,
@@ -166,6 +160,7 @@ export default function MazeClient() {
           maxWidth,
           border: "2px solid var(--text)",
           background: "#fff",
+          touchAction: "none",
         }}
       >
         {state.walls.map((bits, i) => {
@@ -203,33 +198,8 @@ export default function MazeClient() {
         })}
       </div>
 
-      <div
-        aria-label="移動ボタン"
-        style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(3, 52px)",
-          gridTemplateRows: "repeat(2, 52px)",
-          gap: 6,
-          marginTop: 16,
-        }}
-      >
-        <span />
-        <button type="button" style={padBtn} aria-label="上へ" onClick={() => doMove("up")}>
-          ↑
-        </button>
-        <span />
-        <button type="button" style={padBtn} aria-label="左へ" onClick={() => doMove("left")}>
-          ←
-        </button>
-        <button type="button" style={padBtn} aria-label="下へ" onClick={() => doMove("down")}>
-          ↓
-        </button>
-        <button type="button" style={padBtn} aria-label="右へ" onClick={() => doMove("right")}>
-          →
-        </button>
-      </div>
       <p className="muted" style={{ fontSize: 13, marginTop: 10 }}>
-        矢印キー・WASD でも動けます。
+        盤面をスワイプでも移動できます。矢印キー・WASD でも動けます。
       </p>
 
       {state.status === "won" && (

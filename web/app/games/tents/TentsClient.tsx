@@ -13,6 +13,7 @@ import {
   type TentsViolation,
 } from "@/lib/tents";
 import { sfxCorrect, sfxPlace, sfxTap, sfxWin, sfxWrong } from "@/lib/sfx";
+import { tappableProps, useGesture } from "@/lib/gesture";
 import { EndScreen } from "../GameJuice";
 import { useGamesNav } from "../GamesShell";
 
@@ -110,6 +111,14 @@ export default function TentsClient() {
     setCheckResult(violations);
   };
 
+  // 盤面の下スワイプ = チェック。子のマスの onClick との二重発火は
+  // useGesture の suppressClickAfterSwipe が抑止する（kenken / kakuro と同じ）。
+  const boardGesture = useGesture({
+    onSwipe: (dir) => {
+      if (dir === "down") onCheck();
+    },
+  });
+
   const violationCells = new Set((checkResult ?? []).flatMap((v) => v.cells));
   const placedInRow = (r: number) => {
     let n = 0;
@@ -152,26 +161,22 @@ export default function TentsClient() {
       </nav>
       <div className="page-heading compact-heading">
         <h1>テントと木</h1>
-        <p className="muted">マスをタップすると 未定→テント→草→未定 と切り替わります。</p>
+        <p className="muted">マスをタップすると 未定→テント→草→未定 と切り替わります。盤面を下にスワイプするとチェックします。</p>
       </div>
 
       <div className="classic-controls" role="group" aria-label="盤の大きさ">
         {SIZES.map((s) => (
-          <button
+          <div
             key={s.key}
-            type="button"
+            {...tappableProps(() => restart(s.key))}
             aria-pressed={size === s.key}
             className={size === s.key ? "classic-btn classic-btn-active" : "classic-btn"}
-            onClick={() => restart(s.key)}
           >
             {s.label}
-          </button>
+          </div>
         ))}
         <button type="button" className="classic-btn" onClick={() => restart(size)}>
           もう一度
-        </button>
-        <button type="button" className="classic-btn" onClick={onCheck}>
-          チェック
         </button>
       </div>
 
@@ -181,6 +186,7 @@ export default function TentsClient() {
       </p>
 
       <div
+        {...boardGesture}
         style={{
           display: "grid",
           gridTemplateColumns: `32px repeat(${state.size}, minmax(0, 1fr))`,
@@ -188,9 +194,21 @@ export default function TentsClient() {
           width: "100%",
           maxWidth: state.size === 6 ? 420 : 520,
           margin: "0 auto",
+          touchAction: "none",
         }}
         role="grid"
-        aria-label="テントと木の盤"
+        aria-label="テントと木の盤（下にスワイプでチェック）"
+        tabIndex={0}
+        onKeyDown={(e) => {
+          // 盤面そのものにフォーカスがあるときだけ Enter でチェックする。
+          // ガードがないとマスにフォーカスして Enter を押したときに切替と
+          // チェックが両方走る（anagram / mastermind と同じ構図）。
+          if (e.target !== e.currentTarget) return;
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            onCheck();
+          }
+        }}
       >
         {/* 左上コーナー + 列の数 */}
         <div />
@@ -209,16 +227,25 @@ export default function TentsClient() {
             const mark = state.marks[i];
             const bad = violationCells.has(i);
             return (
-              <button
+              <div
                 key={i}
-                type="button"
                 role="gridcell"
+                tabIndex={isTree || state.status !== "playing" ? -1 : 0}
                 aria-label={
                   isTree ? "木" : mark === 1 ? "テント" : mark === 2 ? "草（テントなし）" : "未定"
                 }
-                disabled={isTree || state.status !== "playing"}
+                aria-disabled={isTree || state.status !== "playing"}
                 className={[mark === 1 ? "juice-pop" : "", bad ? "juice-shake" : ""].filter(Boolean).join(" ") || undefined}
-                onClick={() => onCell(i)}
+                onClick={isTree || state.status !== "playing" ? undefined : () => onCell(i)}
+                onKeyDown={
+                  isTree || state.status !== "playing"
+                    ? undefined
+                    : (e) => {
+                        if (e.key !== "Enter" && e.key !== " ") return;
+                        e.preventDefault();
+                        onCell(i);
+                      }
+                }
                 style={{
                   aspectRatio: "1",
                   minWidth: 0,
@@ -242,7 +269,7 @@ export default function TentsClient() {
                     <path d="M12 11.5 16.8 20H7.2Z" fill="#8d3b00" />
                   </svg>
                 ) : mark === 2 ? "・" : ""}
-              </button>
+              </div>
             );
           }),
         ])}

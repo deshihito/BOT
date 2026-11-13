@@ -12,6 +12,7 @@ import {
   type MushokuState,
 } from "@/lib/mushoku";
 import { sfxCorrect, sfxPlace, sfxTap, sfxWin, sfxWrong } from "@/lib/sfx";
+import { tappableProps, useGesture } from "@/lib/gesture";
 import { EndScreen } from "../GameJuice";
 import { useGamesNav } from "../GamesShell";
 
@@ -153,6 +154,14 @@ export default function MushokuClient() {
       ? `クリア！ ${seconds} 秒でした。`
       : "隠れた数字を推理して、筆算を完成させよう。部分積と積がすべて合えば正解です（別の解でもOK）。";
 
+  // 筆算面の下スワイプ = チェック。子のマスの onClick との二重発火は
+  // useGesture の suppressClickAfterSwipe が抑止する。
+  const checkGesture = useGesture({
+    onSwipe: (dir) => {
+      if (dir === "down") onCheck();
+    },
+  });
+
   return (
     <>
       <nav className="breadcrumbs" aria-label="パンくず">
@@ -162,20 +171,19 @@ export default function MushokuClient() {
       </nav>
       <div className="page-heading compact-heading">
         <h1>虫食い算</h1>
-        <p className="muted">マスを選んで数字を入れる、掛け算の筆算パズル。</p>
+        <p className="muted">マスを選んで数字を入れる、掛け算の筆算パズル。筆算面を下にスワイプでチェックします。</p>
       </div>
 
       <div className="classic-controls" role="group" aria-label="レベル">
         {LEVELS.map((l) => (
-          <button
+          <div
             key={l.key}
-            type="button"
+            {...tappableProps(() => restart(l.key))}
             aria-pressed={level === l.key}
             className={level === l.key ? "classic-btn classic-btn-active" : "classic-btn"}
-            onClick={() => restart(l.key)}
           >
             {l.label}
-          </button>
+          </div>
         ))}
         <button type="button" className="classic-btn" onClick={() => restart(level)}>
           もう一度
@@ -186,7 +194,7 @@ export default function MushokuClient() {
         {seconds} 秒{best !== undefined ? ` ・ ベスト ${best} 秒` : ""} ・ {statusText}
       </p>
 
-      <div style={{ maxWidth: 360, margin: "0 auto" }} role="group" aria-label="筆算">
+      <div style={{ maxWidth: 360, margin: "0 auto", touchAction: "none" }} role="group" aria-label="筆算（下にスワイプでチェック）" {...checkGesture}>
         {state.rowKinds.map((kind, row) => (
           <div
             key={row}
@@ -228,16 +236,15 @@ export default function MushokuClient() {
               const selected = selectedId === cell.id;
               const wrong = wrongIds.includes(cell.id);
               return (
-                <button
+                <div
                   key={col}
-                  type="button"
+                  {...tappableProps(() => {
+                    sfxTap();
+                    setSelectedId(cell.id);
+                  })}
                   className={wrong ? "juice-shake" : selected ? "juice-pulse" : undefined}
                   aria-label={`${row + 1}行目 ${col + 1}列目のマス${cell.input !== null ? `（${cell.input}）` : "（空き）"}`}
                   aria-pressed={selected}
-                  onClick={() => {
-                    sfxTap();
-                    setSelectedId(cell.id);
-                  }}
                   style={{
                     flex: 1,
                     minHeight: 52,
@@ -250,10 +257,13 @@ export default function MushokuClient() {
                     color: wrong ? "#dc2626" : "inherit",
                     cursor: "pointer",
                     touchAction: "manipulation",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
                   }}
                 >
                   {cell.input !== null ? cell.input : ""}
-                </button>
+                </div>
               );
             })}
           </div>
@@ -265,37 +275,40 @@ export default function MushokuClient() {
         role="group"
         aria-label="数字パッド"
       >
-        {[1, 2, 3, 4, 5, 6, 7, 8, 9, 0].map((d) => (
-          <button
-            key={d}
-            type="button"
-            className="classic-btn"
-            disabled={selectedId === null || state.status !== "playing"}
-            onClick={() => inputDigit(d)}
-            style={{ minHeight: 48, fontSize: 20, fontWeight: 800 }}
-          >
-            {d}
-          </button>
-        ))}
+        {[1, 2, 3, 4, 5, 6, 7, 8, 9, 0].map((d) => {
+          const padDisabled = selectedId === null || state.status !== "playing";
+          return (
+            <div
+              key={d}
+              {...(padDisabled
+                ? { "aria-disabled": true as const, tabIndex: -1 }
+                : tappableProps(() => inputDigit(d)))}
+              className="classic-btn"
+              style={{ minHeight: 48, fontSize: 20, fontWeight: 800, display: "flex", alignItems: "center", justifyContent: "center" }}
+            >
+              {d}
+            </div>
+          );
+        })}
       </div>
       <div style={{ display: "flex", gap: 8, justifyContent: "center", marginTop: 10, flexWrap: "wrap" }}>
-        <button
-          type="button"
+        <div
+          {...(selectedId === null || state.status !== "playing"
+            ? { "aria-disabled": true as const, tabIndex: -1 }
+            : tappableProps(() => inputDigit(null)))}
           className="classic-btn"
-          disabled={selectedId === null || state.status !== "playing"}
-          onClick={() => inputDigit(null)}
         >
           消す
-        </button>
-        <button
-          type="button"
+        </div>
+        <div
+          {...(state.status !== "playing"
+            ? { "aria-disabled": true as const, tabIndex: -1 }
+            : tappableProps(onCheck))}
           className="classic-btn classic-btn-active"
-          disabled={state.status !== "playing"}
-          onClick={onCheck}
-          style={{ minWidth: 140 }}
+          style={{ minWidth: 140, display: "flex", alignItems: "center", justifyContent: "center" }}
         >
           チェック
-        </button>
+        </div>
       </div>
       {message ? (
         <p className="classic-status" role="status" style={{ justifyContent: "center" }}>

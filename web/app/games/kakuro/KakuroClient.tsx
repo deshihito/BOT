@@ -11,6 +11,7 @@ import {
   type KakuroViolation,
 } from "@/lib/kakuro";
 import { sfxCorrect, sfxPlace, sfxTap, sfxWin, sfxWrong } from "@/lib/sfx";
+import { tappableProps, useGesture } from "@/lib/gesture";
 import { EndScreen } from "../GameJuice";
 import { useGamesNav } from "../GamesShell";
 
@@ -104,6 +105,27 @@ export default function KakuroClient() {
     setChecked(result.violations);
   };
 
+  // 盤面の下スワイプ = チェック。子のマスの onClick との二重発火は
+  // useGesture の suppressClickAfterSwipe が抑止する。
+  const boardGesture = useGesture({
+    onSwipe: (dir) => {
+      if (dir === "down") handleCheck();
+    },
+  });
+
+  // 物理キーボードでも数字を入れられる（画面パッドの代替）。
+  // パッドの div は Enter/Space のみ受けるため数字キーとの二重発火はない。
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA")) return;
+      if (/^[1-9]$/.test(e.key)) input(Number(e.key));
+      else if (e.key === "Backspace" || e.key === "Delete") input(0);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [input]);
+
   const badCells = useMemo(() => {
     const set = new Set<number>();
     if (checked) for (const v of checked) for (const c of v.cells) set.add(c);
@@ -118,7 +140,7 @@ export default function KakuroClient() {
         ? checked.length === 0
           ? "いまのところルール違反はありません。"
           : checked[0].message
-        : "白マスを選んで、下の数字パッドで入力します。";
+        : "白マスを選んで、下の数字パッドで入力します。盤面を下にスワイプするとチェックできます。";
 
   return (
     <>
@@ -138,9 +160,6 @@ export default function KakuroClient() {
         <button type="button" className="classic-btn" onClick={restart}>
           もう一度
         </button>
-        <button type="button" className="classic-btn" onClick={handleCheck}>
-          チェック
-        </button>
       </div>
 
       <p className="classic-status" role="status">
@@ -148,14 +167,27 @@ export default function KakuroClient() {
       </p>
 
       <div
+        {...boardGesture}
         role="grid"
-        aria-label="カックロの盤"
+        aria-label="カックロの盤（下にスワイプでチェック）"
+        tabIndex={0}
+        onKeyDown={(e) => {
+          // 盤面そのものにフォーカスがあるときだけ Enter でチェックする。
+          // ガードがないとマスにフォーカスして Enter を押したときに選択と
+          // チェックが両方走る（anagram / mastermind と同じ構図）。
+          if (e.target !== e.currentTarget) return;
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            handleCheck();
+          }
+        }}
         style={{
           display: "grid",
           gridTemplateColumns: `repeat(${size}, minmax(0, 1fr))`,
           maxWidth: 460,
           margin: "0 auto",
           border: "3px solid var(--text)",
+          touchAction: "none",
         }}
       >
         {state.cells.map((cell, i) => {
@@ -216,18 +248,32 @@ export default function KakuroClient() {
           }
           const value = state.values[i];
           return (
-            <button
+            <div
               key={i}
-              type="button"
               role="gridcell"
+              tabIndex={cell.given ? -1 : 0}
               aria-label={`${r + 1}行${c + 1}列${value ? ` ${value}` : ""}${cell.given ? "（はじめから入っている数字）" : ""}`}
               aria-pressed={selected === i}
-              disabled={cell.given}
+              aria-disabled={cell.given || undefined}
               className={badCells.has(i) ? "juice-shake" : value !== 0 && !cell.given ? "juice-pop" : undefined}
-              onClick={() => {
-                sfxTap();
-                setSelected(i);
-              }}
+              onClick={
+                cell.given
+                  ? undefined
+                  : () => {
+                      sfxTap();
+                      setSelected(i);
+                    }
+              }
+              onKeyDown={
+                cell.given
+                  ? undefined
+                  : (e) => {
+                      if (e.key !== "Enter" && e.key !== " ") return;
+                      e.preventDefault();
+                      sfxTap();
+                      setSelected(i);
+                    }
+              }
               style={{
                 aspectRatio: "1",
                 minWidth: 0,
@@ -247,7 +293,7 @@ export default function KakuroClient() {
               }}
             >
               {value !== 0 ? value : ""}
-            </button>
+            </div>
           );
         })}
       </div>
@@ -259,24 +305,22 @@ export default function KakuroClient() {
         style={{ justifyContent: "center", marginTop: 14 }}
       >
         {Array.from({ length: 9 }, (_, i) => i + 1).map((n) => (
-          <button
+          <div
             key={n}
-            type="button"
+            {...tappableProps(() => input(n))}
             className="classic-btn"
             style={{ minWidth: 40, minHeight: 44, fontSize: 17, fontWeight: 700 }}
-            onClick={() => input(n)}
           >
             {n}
-          </button>
+          </div>
         ))}
-        <button
-          type="button"
+        <div
+          {...tappableProps(() => input(0))}
           className="classic-btn"
           style={{ minWidth: 44, minHeight: 44 }}
-          onClick={() => input(0)}
         >
           消す
-        </button>
+        </div>
       </div>
 
       {state.status === "won" && (

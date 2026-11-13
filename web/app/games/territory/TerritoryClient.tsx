@@ -7,6 +7,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import OnlineShell from "../online/OnlineShell";
 import type { OnlineRoomApi, OnlineRoomView } from "../online/useOnlineRoom";
 import { playSe } from "@/lib/balku-sound";
+import { tappableProps, useGesture } from "@/lib/gesture";
 import {
   TERRITORY_PIECES,
   TERRITORY_SIZE,
@@ -79,6 +80,53 @@ function TerritoryBoard({ view, api }: { view: OnlineRoomView; api: OnlineRoomAp
     if (!state || !myTurn) return [];
     return enumerateTerritoryPlacements(state.board, mySeat, state.used[mySeat] ?? []);
   }, [state, mySeat, myTurn]);
+  const canPass = myTurn && myPlacements.length === 0;
+
+  const rotatePiece = () => {
+    if (selectedPiece === null) return;
+    playSe("click");
+    setRotation((r) => (r + 1) % 4);
+  };
+
+  const flipPiece = () => {
+    if (selectedPiece === null) return;
+    playSe("click");
+    setFlip((f) => !f);
+  };
+
+  const pass = () => {
+    // 送信中の二重送信を防ぐ（旧「パス」ボタンは api.busy で無効化されていた）。
+    if (!canPass || api.busy) return;
+    playSe("play");
+    void api.move({ type: "pass" });
+    setSelectedPiece(null);
+    setAnchor(null);
+  };
+
+  // 盤面スワイプ: 右 = 回転、左 = 反転、下 = パス。R / F / P キーでも同じ操作ができる。
+  // 早期 return より前（フック順序を変えないため）に置く。子のマス onClick との
+  // 二重発火は useGesture の suppressClickAfterSwipe が抑止する。
+  const boardGesture = useGesture({
+    onSwipe: (dir) => {
+      if (dir === "right") rotatePiece();
+      else if (dir === "left") flipPiece();
+      else if (dir === "down") pass();
+    },
+  });
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      // ルーム入力欄（OnlineShell 側）でのキー入力とは干渉させない。
+      const target = e.target as HTMLElement | null;
+      if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.tagName === "SELECT" || target.isContentEditable)) return;
+      // タップ対象物は Enter / Space しか受けないため R / F / P との二重発火はない。
+      if (e.key === "r" || e.key === "R") rotatePiece();
+      else if (e.key === "f" || e.key === "F") flipPiece();
+      else if (e.key === "p" || e.key === "P") pass();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  });
 
   if (!state) {
     return <p className="og-notice">対戦の開始を待っています…</p>;
@@ -103,7 +151,6 @@ function TerritoryBoard({ view, api }: { view: OnlineRoomView; api: OnlineRoomAp
     !state.used[mySeat][selectedPiece] &&
     isLegalTerritoryPlacement(state.board, mySeat, previewCells);
   const lastMoveSet = new Set(state.lastMove?.cells ?? []);
-  const canPass = myTurn && myPlacements.length === 0;
   const turnName = nameOf(state.turn);
   const winnerName =
     typeof state.winner === "number" ? nameOf(state.winner) : null;
@@ -115,19 +162,24 @@ function TerritoryBoard({ view, api }: { view: OnlineRoomView; api: OnlineRoomAp
   };
 
   const place = () => {
-    if (!previewLegal || selectedPiece === null || !previewCells) return;
+    // 送信中の二重送信を防ぐ（旧「ここに置く」ボタンは api.busy で無効化されていた）。
+    if (!previewLegal || selectedPiece === null || !previewCells || api.busy) return;
     playSe("play");
     void api.move({ type: "place", piece: selectedPiece, cells: previewCells });
     setSelectedPiece(null);
     setAnchor(null);
   };
 
-  const pass = () => {
-    if (!canPass) return;
-    playSe("play");
-    void api.move({ type: "pass" });
-    setSelectedPiece(null);
-    setAnchor(null);
+  // マスタップ = プレビュー位置を決める。プレビューが合法な位置をもう一度
+  // タップするとそのまま置く（「ここに置く」ボタンの代替）。
+  const onCell = (index: number) => {
+    if (!myTurn || selectedPiece === null) return;
+    if (anchor === index && previewLegal) {
+      place();
+      return;
+    }
+    playSe("select");
+    setAnchor(index);
   };
 
   return (
@@ -144,7 +196,7 @@ function TerritoryBoard({ view, api }: { view: OnlineRoomView; api: OnlineRoomAp
         ) : myTurn ? (
           <span>
             あなたの手番です
-            {canPass ? "（置ける場所がありません。パスしてください）" : `（置ける手 ${myPlacements.length} 件）`}
+            {canPass ? "（置ける場所がありません。盤面を下にスワイプでパスしてください）" : `（置ける手 ${myPlacements.length} 件）`}
           </span>
         ) : (
           <span>{turnName} の手番です（待機中）</span>
@@ -184,7 +236,8 @@ function TerritoryBoard({ view, api }: { view: OnlineRoomView; api: OnlineRoomAp
         {/* 盤面 */}
         <div
           role="grid"
-          aria-label="テリトリオ盤面"
+          aria-label="テリトリオ盤面（右スワイプで回転・左スワイプで反転・下スワイプでパス）"
+          {...boardGesture}
           style={{
             display: "grid",
             gridTemplateColumns: `repeat(${TERRITORY_SIZE}, minmax(0, 1fr))`,
@@ -194,6 +247,7 @@ function TerritoryBoard({ view, api }: { view: OnlineRoomView; api: OnlineRoomAp
             borderRadius: 10,
             background: "#ddd3bd",
             border: "2px solid #c9b489",
+            touchAction: "none",
           }}
         >
           {state.board.map((value, index) => {
@@ -207,10 +261,11 @@ function TerritoryBoard({ view, api }: { view: OnlineRoomView; api: OnlineRoomAp
             else if (inPreview) background = previewLegal ? "#8fce6e" : "#e79a8f";
             else if (isCorner) background = SEAT_BG[cornerSeat];
             return (
-              <button
+              <div
                 key={index}
-                type="button"
                 role="gridcell"
+                tabIndex={myTurn && selectedPiece !== null ? 0 : -1}
+                aria-disabled={!myTurn || selectedPiece === null}
                 aria-label={`${Math.floor(index / TERRITORY_SIZE) + 1}行${(index % TERRITORY_SIZE) + 1}列${
                   owner >= 0
                     ? ` ${nameOf(owner)}の陣地`
@@ -218,11 +273,12 @@ function TerritoryBoard({ view, api }: { view: OnlineRoomView; api: OnlineRoomAp
                       ? ` ${cornerSeat === 0 ? state.players[0]?.name ?? "" : state.players[1]?.name ?? ""}の開始角`
                       : ""
                 }${inPreview ? " プレビュー中" : ""}`}
-                disabled={!myTurn || selectedPiece === null}
                 className={owner >= 0 && isLast ? "juice-pop" : undefined}
-                onClick={() => {
-                  playSe("select");
-                  setAnchor(index);
+                onClick={() => onCell(index)}
+                onKeyDown={(e) => {
+                  if (e.key !== "Enter" && e.key !== " ") return;
+                  e.preventDefault();
+                  onCell(index);
                 }}
                 style={{
                   aspectRatio: "1",
@@ -239,7 +295,7 @@ function TerritoryBoard({ view, api }: { view: OnlineRoomView; api: OnlineRoomAp
                 }}
               >
                 {owner < 0 && isCorner ? "☆" : ""}
-              </button>
+              </div>
             );
           })}
         </div>
@@ -254,14 +310,15 @@ function TerritoryBoard({ view, api }: { view: OnlineRoomView; api: OnlineRoomAp
               const maxC = Math.max(...shape.map(([, c]) => c));
               const cellSet = new Set(shape.map(([r, c]) => `${r},${c}`));
               const selected = selectedPiece === piece;
+              const disabled = !myTurn || usedByMe;
               return (
-                <button
+                <div
                   key={piece}
-                  type="button"
-                  disabled={!myTurn || usedByMe}
+                  {...(disabled
+                    ? { "aria-disabled": true as const, tabIndex: -1 }
+                    : tappableProps(() => selectPiece(piece)))}
                   aria-pressed={selected}
                   aria-label={`${def.name}（${def.cells.length}マス）${usedByMe ? " 使用済み" : ""}`}
-                  onClick={() => selectPiece(piece)}
                   style={{
                     display: "flex",
                     flexDirection: "column",
@@ -303,56 +360,21 @@ function TerritoryBoard({ view, api }: { view: OnlineRoomView; api: OnlineRoomAp
                     })}
                   </span>
                   <span style={{ fontSize: 10, lineHeight: 1.1 }}>{def.name}</span>
-                </button>
+                </div>
               );
             })}
           </div>
 
-          <div className="og-actions" style={{ marginTop: 10 }}>
-            <button
-              type="button"
-              className="og-button"
-              disabled={selectedPiece === null}
-              onClick={() => {
-                playSe("click");
-                setRotation((r) => (r + 1) % 4);
-              }}
-            >
-              ↻ 回転
-            </button>
-            <button
-              type="button"
-              className="og-button"
-              disabled={selectedPiece === null}
-              onClick={() => {
-                playSe("click");
-                setFlip((f) => !f);
-              }}
-            >
-              ⇋ 反転
-            </button>
-            <button
-              type="button"
-              className="og-button og-button-primary"
-              disabled={!previewLegal || api.busy}
-              onClick={place}
-            >
-              ここに置く
-            </button>
-            <button type="button" className="og-button" disabled={!canPass || api.busy} onClick={pass}>
-              パス
-            </button>
-          </div>
           <p className="og-muted">
             {myTurn && selectedPiece === null && !canPass
-              ? "ピースを選んでから、盤面で置く位置（左上）をタップしてください。"
+              ? "ピースを選んでから、盤面で置く位置（左上）をタップしてください。盤面の右スワイプで回転、左スワイプで反転（R / F キーでも可）。"
               : myTurn && selectedPiece !== null
                 ? previewCells === null
                   ? "盤面をタップするとプレビューが出ます。はみ出す位置には置けません。"
                   : previewLegal
-                    ? "置けます。「ここに置く」で確定します。"
+                    ? "置けます。同じマスをもう一度タップすると置きます。"
                     : "そこには置けません（自分のピースと角で接し、辺では接しない置き方のみ可）。"
-                : "自分の角（☆）から始め、自分のピースと角でのみ接するように広げます。両者とも置けなくなったら終了し、マス数の多い方が勝ちです。"}
+                : "自分の角（☆）から始め、自分のピースと角でのみ接するように広げます。両者とも置けなくなったら終了し、マス数の多い方が勝ちです。置ける場所がないときは盤面を下にスワイプでパス（P キーでも可）。"}
           </p>
         </div>
       </div>
