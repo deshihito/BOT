@@ -490,3 +490,47 @@ class CustomFeedPanelTest(unittest.IsolatedAsyncioTestCase):
         select._values = ["0"]
         await select.callback(self._edit_interaction())
         self.assertEqual([f["name"] for f in view.custom_feeds], ["B"])
+
+
+class PollSendFailureRetryTest(unittest.IsolatedAsyncioTestCase):
+    """投稿に失敗した新着は既読にせず、次回に送り直すこと。"""
+
+    def setUp(self):
+        use_temp_settings(self)
+        self.channel = FakeChannel()
+        self.fail = False
+        outer = self
+
+        class FlakyChannel(FakeChannel):
+            async def send(self, content):
+                if outer.fail:
+                    raise RuntimeError("送信できない")
+                self.sent.append(content)
+
+        self.channel = FlakyChannel()
+
+        async def fetcher(session, feed_key):
+            return [make_item("https://example.com/n1", 10),
+                    make_item("https://example.com/n2", 11)]
+
+        self.cog = NewsCog(FakeBot(self.channel), fetcher=fetcher)
+
+    async def test_failed_post_is_retried_next_poll(self):
+        store = guild_settings.get_store()
+        await store.update(777, guild_settings.NEWS_SECTION,
+                           enabled=True, channel_id=4242,
+                           feeds=["top"],
+                           seen=["https://example.com/n1"])
+        self.fail = True
+        posted = await self.cog.poll_once()
+        self.assertEqual(posted, 0)
+        # 失敗した記事は既読になっていない
+        settings = guild_settings.news_settings(777)
+        self.assertNotIn("https://example.com/n2", settings["seen"])
+        # 直ると次のチェックで届く
+        self.fail = False
+        posted = await self.cog.poll_once()
+        self.assertEqual(posted, 1)
+        self.assertEqual(len(self.channel.sent), 1)
+        settings = guild_settings.news_settings(777)
+        self.assertIn("https://example.com/n2", settings["seen"])
