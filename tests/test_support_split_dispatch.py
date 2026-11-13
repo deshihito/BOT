@@ -21,9 +21,10 @@ NEW_VALUES = {
     "assist_reminder", "assist_goodbye", "globalchat_mod", "tempvoice_panel",
     "assist_embed_templates", "assist_warning_escalation", "assist_application_review",
     "assist_events_link", "levelup_card_theme", "binjou_custom", "quest_manual",
-    "news_notify",
+    "news_notify", "sokunuke_settings",
 }
-REMOVED_VALUES = {"bumprta_status", "bumprta_on", "bumprta_off", "bumprta_role", "sns_notify"}
+REMOVED_VALUES = {"bumprta_status", "bumprta_on", "bumprta_off", "bumprta_role", "sns_notify",
+                  "sokunuke_status", "sokunuke_on", "sokunuke_off", "sokunuke_vc_on", "sokunuke_vc_off"}
 
 
 def make_interaction():
@@ -49,11 +50,11 @@ def make_cog(cogs):
 
 class RegistryShapeTest(unittest.TestCase):
     def test_counts(self):
-        self.assertEqual(len(SUPPORT_ACTIONS), 88)
+        self.assertEqual(len(SUPPORT_ACTIONS), 84)
         counts = {genre: len(items) for genre, items in SUPPORT_ACTIONS_BY_GENRE.items()}
         self.assertEqual(counts, {
             "moderation": 17, "roles": 8, "logs": 5, "automation": 36,
-            "rta": 5, "boardnotify": 10, "sns": 5, "analysis": 2,
+            "rta": 1, "boardnotify": 10, "sns": 5, "analysis": 2,
         })
         values = {choice.value for choice in SUPPORT_ACTIONS}
         self.assertTrue(NEW_VALUES <= values)
@@ -86,6 +87,24 @@ class DispatchTest(unittest.IsolatedAsyncioTestCase):
         rta.bumprta_command.assert_awaited_once()
         choice = rta.bumprta_command.await_args.args[1]
         self.assertEqual(choice.value, "status")
+
+    async def test_legacy_sokunuke_values_still_dispatch(self):
+        sokunuke = types.SimpleNamespace(sokunuke_command=AsyncMock())
+        cog = make_cog({"SokuNukeRta": sokunuke})
+        interaction = make_interaction()
+        await cog.dispatch(interaction, "sokunuke_off")
+        sokunuke.sokunuke_command.assert_awaited_once()
+        choice = sokunuke.sokunuke_command.await_args.args[1]
+        self.assertEqual(choice.value, "off")
+
+    async def test_sokunuke_settings_dispatches_to_cog(self):
+        sokunuke = types.SimpleNamespace(sokunuke_command=AsyncMock())
+        cog = make_cog({"SokuNukeRta": sokunuke})
+        interaction = make_interaction()
+        await cog.dispatch(interaction, "sokunuke_settings")
+        sokunuke.sokunuke_command.assert_awaited_once()
+        choice = sokunuke.sokunuke_command.await_args.args[1]
+        self.assertEqual(choice.value, "settings")
 
     async def test_bumprta_service_opens_service_panel_not_fallthrough(self):
         rta = types.SimpleNamespace(

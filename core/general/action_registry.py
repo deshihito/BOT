@@ -140,11 +140,12 @@ AI_CONFIRM_IDS = frozenset({
 # /support のうち今回新たにショートカット候補へ加わる設定・モデレーション系パネル。
 # ショートカットには全件入れるが、AI tools の代理実行範囲はこのPRでは広げない
 # （設定・モデレーション系は明示操作に限定する従来方針の踏襲）。
-# 読み取り専用の状態確認である sokunuke_status のみ AI tools 候補にも入れる。
+# 即抜けRTAは設定パネル（sokunuke_settings）へ統合し、旧 value は
+# レジストリから外して dispatch 互換のみ残すため、候補には入らない。
 SUPPORT_AI_EXCLUDED_VALUES = frozenset({
     "sticky", "giveaway", "auth_panel", "role_panel", "language", "auto_react",
     "sns_notify", "quest_notify", "levelup_notify", "voice_trigger", "vc_auto_start", "globalchat", "bot_fixer",
-    "sokunuke_on", "sokunuke_off", "sokunuke_vc_on", "sokunuke_vc_off",
+    "sokunuke_settings",
     # 人物分析は他者の交流グラフを表示するパネルのため、明示操作に限定する。
     "person_analysis",
     # サーバー分析もサーバー全体の活動集計を表示するパネルのため、

@@ -216,6 +216,9 @@ class SupportCog(
         "assist_events_link": "manage_guild",
         # 旧ハブ値。アクションとしては廃止し、dispatch の互換分岐（案内のみ）用に残す。
         "server_assist": "manage_guild",
+        # 即抜けRTA設定パネル（統合先）。旧 value はアクションとしては廃止し、
+        # dispatch の互換分岐（sokunuke_command の従来動作）用に残す。
+        "sokunuke_settings": "manage_guild",
         "sokunuke_status": "manage_guild",
         "sokunuke_on": "manage_guild",
         "sokunuke_off": "manage_guild",
@@ -691,6 +694,9 @@ class SupportCog(
                 return await self._missing(interaction, "ニュース通知")
             return await cog.open_panel(interaction)
 
+        # 即抜けRTA: 新 value sokunuke_settings は設定パネルを開く。
+        # 旧 value（status/on/off/vc_on/vc_off）も互換のため従来どおり動作する
+        # （保存済みショートカット・/quick 経由の旧 value を死なせない）。
         if selected.startswith("sokunuke_"):
             cog = self.bot.get_cog("SokuNukeRta")
             if cog is None:

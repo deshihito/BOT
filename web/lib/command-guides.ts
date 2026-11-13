@@ -330,11 +330,7 @@ const FUNCTION_OVERRIDES: Record<string, { description?: string; note?: string }
   "support:voice_trigger": { description: "音声トリガーのサーバー側設定を行います。" },
   "support:vc_auto_start": { description: "BotがVCに参加したとき、読み上げや文字起こしなどを自動で始める設定です。" },
   // /support RTA設定
-  "support:sokunuke_status": { description: "即抜けRTAの計測状態を確認します。" },
-  "support:sokunuke_on": { description: "即抜けRTAの計測をオンにします。" },
-  "support:sokunuke_off": { description: "即抜けRTAの計測をオフにします。" },
-  "support:sokunuke_vc_on": { description: "VC自動参加をオンにします。" },
-  "support:sokunuke_vc_off": { description: "VC自動参加をオフにします。" },
+  "support:sokunuke_settings": { description: "即抜けRTAの計測・VC自動参加のオン/オフと、記録の送信先チャンネルを設定します。" },
   // /support boardNotify
   "support:bumprta_bump": { description: "DISBOARDの更新検知と、次回通知の状態を確認します。" },
   "support:bumprta_up": { description: "ディス速の更新検知と、次回通知の状態を確認します。" },

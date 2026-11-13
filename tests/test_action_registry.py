@@ -23,10 +23,12 @@ from core.general.action_registry import ActionRegistry, ActionSpec, ParamSpec  
 # 従来 SHORTCUT_ROOTS の support に無かった15件（仕様書 §2.2）。
 # 機能数再編で sns_notify は SNS ジャンル（sns_youtube 等）へ分割されたため、
 # 代表として sns_youtube に差し替える（件数は15のまま）。
+# 即抜けRTAは設定パネルへ統合（5件→ sokunuke_settings 1件）されたため、
+# 代表として sokunuke_settings に差し替える（件数は15→11）。
 MISSING_SUPPORT_VALUES = {
     "sticky", "giveaway", "auth_panel", "role_panel", "language", "auto_react",
     "sns_youtube", "quest_notify", "levelup_notify", "voice_trigger",
-    "sokunuke_status", "sokunuke_on", "sokunuke_off", "sokunuke_vc_on", "sokunuke_vc_off",
+    "sokunuke_settings",
 }
 
 
@@ -178,10 +180,13 @@ class AICandidatesTest(unittest.TestCase):
                     "vc:trigger_panel", "help:overview"):
             self.assertIn(key, self.candidates)
 
-    def test_new_support_candidates_are_limited_to_sokunuke_status(self):
-        # 今回増える support 15件のうち、AI 候補に入るのは読み取り専用の状態確認だけ。
-        self.assertIn("support:sokunuke_status", self.candidates)
-        for value in MISSING_SUPPORT_VALUES - {"sokunuke_status"}:
+    def test_new_support_candidates_exclude_sokunuke_settings(self):
+        # 即抜けRTAは設定パネル（sokunuke_settings）へ統合され、設定系パネルは
+        # 明示操作に限定するため AI 候補に入らない。旧 value（sokunuke_status
+        # 等）はレジストリから外れたため候補にも存在しない。
+        self.assertNotIn("support:sokunuke_settings", self.candidates)
+        self.assertNotIn("support:sokunuke_status", self.candidates)
+        for value in MISSING_SUPPORT_VALUES - {"sokunuke_settings"}:
             self.assertNotIn(f"support:{value}", self.candidates)
 
     def test_candidate_shape(self):

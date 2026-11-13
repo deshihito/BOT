@@ -163,11 +163,7 @@ SUPPORT_ACTIONS = [
     app_commands.Choice(name="BOT fixer", value="bot_fixer"),
     app_commands.Choice(name="他ボット制限（BOT fixer）", value="bot_fixer_bots"),
     app_commands.Choice(name="コマンドレート制限（BOT fixer）", value="bot_fixer_rates"),
-    app_commands.Choice(name="即抜けRTA状態", value="sokunuke_status"),
-    app_commands.Choice(name="即抜けRTA計測オン", value="sokunuke_on"),
-    app_commands.Choice(name="即抜けRTA計測オフ", value="sokunuke_off"),
-    app_commands.Choice(name="VC自動参加オン", value="sokunuke_vc_on"),
-    app_commands.Choice(name="VC自動参加オフ", value="sokunuke_vc_off"),
+    app_commands.Choice(name="即抜けRTA設定", value="sokunuke_settings"),
     app_commands.Choice(name="人物分析", value="person_analysis"),
     app_commands.Choice(name="サーバー分析", value="server_analytics"),
 ]
@@ -228,8 +224,7 @@ SUPPORT_ACTIONS_BY_GENRE = {
         "assist_shiritori_resident", "assist_luna_ai", "assist_warning_escalation", "assist_application_review",
     ),
     "rta": _support_actions(
-        "sokunuke_status", "sokunuke_on",
-        "sokunuke_off", "sokunuke_vc_on", "sokunuke_vc_off",
+        "sokunuke_settings",
     ),
     "boardnotify": _support_actions(
         "bumprta_bump", "bumprta_up", "bumprta_vote", "bumprta_takasumi",
