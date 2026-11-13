@@ -14,8 +14,10 @@ from __future__ import annotations
 
 import json
 import logging
+import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
 from urllib.parse import urlencode
 
 import aiohttp
@@ -162,3 +164,114 @@ def select_new(items: list[NewsItem], seen_links: list[str],
     if len(fresh) > cap:
         fresh = fresh[-cap:]
     return fresh, False
+
+
+# --- 任意の RSS / Atom フィード（サーバー管理者が登録したもの） ---
+#
+# 投稿するのは見出しとリンクだけ（本文は取得も転載もしない、一般的な
+# RSS リーダーの形式）。登録はサーバー管理者が行い、フィードの利用
+# 可否の判断もその管理者に委ねられる。
+
+ATOM_NS = "{http://www.w3.org/2005/Atom}"
+CUSTOM_FETCH_LIMIT = 25  # 1フィードから読む最新エントリ数
+
+
+def _child_text(elem: ET.Element, tag: str) -> str:
+    child = elem.find(tag)
+    if child is None or child.text is None:
+        return ""
+    return child.text.strip()
+
+
+def _parse_rfc822_date(raw: str) -> datetime | None:
+    try:
+        parsed = parsedate_to_datetime(raw)
+    except (TypeError, ValueError):
+        return None
+    if parsed is None:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed
+
+
+def _parse_iso_date(raw: str) -> datetime | None:
+    text = raw.strip()
+    if not text:
+        return None
+    if text.endswith("Z"):
+        text = text[:-1] + "+00:00"
+    try:
+        parsed = datetime.fromisoformat(text)
+    except ValueError:
+        return _parse_rfc822_date(raw)
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed
+
+
+def parse_feed_xml(text: str, limit: int = CUSTOM_FETCH_LIMIT) -> list[NewsItem]:
+    """RSS 2.0 / Atom の XML を NewsItem のリストにする（新しい順）。
+
+    解釈できない・項目が無い場合は空リスト。タイトルかリンクが無い
+    エントリは落とす（リンクは guid で代替できる場合のみ使う）。
+    """
+    try:
+        root = ET.fromstring(text)
+    except ET.ParseError:
+        return []
+    items: list[NewsItem] = []
+    if root.tag.endswith("}feed") or root.tag == "feed":
+        for entry in root.findall(f"{ATOM_NS}entry"):
+            title = _child_text(entry, f"{ATOM_NS}title")
+            link = ""
+            for link_elem in entry.findall(f"{ATOM_NS}link"):
+                rel = link_elem.get("rel") or "alternate"
+                if rel == "alternate" and link_elem.get("href"):
+                    link = link_elem.get("href", "").strip()
+                    break
+            if not link:
+                first = entry.find(f"{ATOM_NS}link")
+                if first is not None:
+                    link = (first.get("href") or "").strip()
+            published = (_child_text(entry, f"{ATOM_NS}published")
+                         or _child_text(entry, f"{ATOM_NS}updated"))
+            if title and link:
+                items.append(NewsItem(title=title, link=link,
+                                      published=_parse_iso_date(published),
+                                      feed_key="custom"))
+            if len(items) >= limit:
+                break
+        return items
+    channel = root.find("channel")
+    if channel is None:
+        return []
+    for entry in channel.findall("item"):
+        title = _child_text(entry, "title")
+        link = _child_text(entry, "link")
+        if not link:
+            guid = entry.find("guid")
+            if guid is not None and guid.get("isPermaLink") != "false":
+                link = (guid.text or "").strip()
+        published = _child_text(entry, "pubDate")
+        if title and link:
+            items.append(NewsItem(title=title, link=link,
+                                  published=_parse_rfc822_date(published),
+                                  feed_key="custom"))
+        if len(items) >= limit:
+            break
+    # 日時が分かるものは新しい順に並べ替える（フィード側の並びが
+    # 保証されないため。日時不明は末尾に元の順序で残す）
+    dated = [item for item in items if item.published is not None]
+    undated = [item for item in items if item.published is None]
+    dated.sort(key=lambda item: item.published, reverse=True)
+    return dated + undated
+
+
+async def fetch_custom_feed(session: aiohttp.ClientSession, url: str) -> list[NewsItem]:
+    """登録済みフィードを1つ取得する。失敗したら例外（呼び出し側で握る）。"""
+    async with session.get(url, timeout=FETCH_TIMEOUT,
+                           headers={"User-Agent": USER_AGENT}) as resp:
+        resp.raise_for_status()
+        text = await resp.text()
+    return parse_feed_xml(text)
