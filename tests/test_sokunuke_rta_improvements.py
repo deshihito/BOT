@@ -500,3 +500,28 @@ class SettingsPanelTest(unittest.IsolatedAsyncioTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class VoiceAutoJoinTimeoutTest(unittest.IsolatedAsyncioTestCase):
+    """VC自動参加の接続タイムアウトがイベント処理を落とさないこと。"""
+
+    def setUp(self):
+        use_store(self, FakeStore({"1": {SECTION: {"vc_auto_join_enabled": True}}}))
+        self.cog = SokuNukeRta(types.SimpleNamespace())
+
+    async def test_connect_timeout_is_swallowed(self):
+        channel = types.SimpleNamespace(
+            id=555, voice_states={},
+            connect=AsyncMock(side_effect=TimeoutError()))
+        member = types.SimpleNamespace(id=42, bot=False, display_name="誰か")
+        state = types.SimpleNamespace(channel=channel, member=member)
+        channel.voice_states = {42: state}
+        guild = types.SimpleNamespace(
+            id=1, voice_channels=[channel], stage_channels=[],
+            voice_client=None, get_member=lambda uid: member)
+        member.guild = guild
+        before = types.SimpleNamespace(channel=None)
+        after = types.SimpleNamespace(channel=channel)
+        # TimeoutError が伝播せず、警告だけで処理が終わること
+        await self.cog.on_voice_state_update(member, before, after)
+        channel.connect.assert_awaited_once()

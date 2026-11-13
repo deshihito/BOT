@@ -69,6 +69,7 @@ class NewsCog(commands.Cog):
     async def cog_load(self) -> None:
         if not self.poll_loop.is_running():
             self.poll_loop.start()
+            logger.info("news: ニュース通知の定期チェックを開始しました")
 
     async def cog_unload(self) -> None:
         if self.poll_loop.is_running():
@@ -135,6 +136,7 @@ class NewsCog(commands.Cog):
                                    exc_info=True)
 
         posted = 0
+        fresh_total = 0
         for guild_id, settings in targets:
             items: list[NewsItem] = []
             for key in settings["feeds"]:
@@ -146,6 +148,7 @@ class NewsCog(commands.Cog):
                 reverse=True)
             fresh, seeded = feeds_mod.select_new(
                 items, settings["seen"], MAX_POSTS_PER_POLL)
+            fresh_total += len(fresh)
             # 投稿の成否に関わらず見た記事は記録し、失敗したサーバーが
             # 次回も同じ新着を送り続けないようにする（天気の定時投稿と
             # 同じ割り切り）。
@@ -170,9 +173,15 @@ class NewsCog(commands.Cog):
             try:
                 await channel.send(format_post(fresh, settings["feeds"]))
                 posted += 1
+                logger.info("news: 投稿しました guild=%s channel=%s items=%d",
+                            guild_id, settings["channel_id"], len(fresh))
             except Exception:
                 logger.exception("news: 投稿に失敗 guild=%s channel=%s",
                                  guild_id, settings["channel_id"])
+        logger.info(
+            "news: チェック完了 targets=%d fetched=%d fresh=%d posted=%d",
+            len(targets), sum(len(v) for v in fetched.values()),
+            fresh_total, posted)
         return posted
 
     # --------------------------------------------------------------

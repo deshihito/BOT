@@ -226,14 +226,37 @@ class PlaybackMixin:
 
 
     async def _send_message(self, ctx_or_interaction, text=None, embed=None):
+        view = as_embed_v2(embed)
         try:
             if isinstance(ctx_or_interaction, discord.Interaction):
-                if ctx_or_interaction.response.is_done():
-                    await ctx_or_interaction.followup.send(content=text, view=as_embed_v2(embed))
-                else:
-                    await ctx_or_interaction.response.send_message(content=text, view=as_embed_v2(embed))
+                interaction = ctx_or_interaction
+                # インタラクションのトークンは発行から15分で失効する。
+                # 長時間の再生で保持した古い interaction は使わず、
+                # チャンネルへ直接送る（失効トークンで 401 を繰り返さない）。
+                age = (discord.utils.utcnow() - interaction.created_at).total_seconds()
+                if age <= 14 * 60:
+                    if interaction.response.is_done():
+                        await interaction.followup.send(content=text, view=view)
+                    else:
+                        await interaction.response.send_message(content=text, view=view)
+                    return
+                channel = interaction.channel
+                if channel is not None:
+                    await channel.send(content=text, view=view)
+                return
             elif hasattr(ctx_or_interaction, 'send'):
-                await ctx_or_interaction.send(content=text, view=as_embed_v2(embed))
+                await ctx_or_interaction.send(content=text, view=view)
+        except discord.HTTPException as e:
+            # 失効直後など、年齢判定をすり抜けた 401 はチャンネル送信で救う。
+            if isinstance(ctx_or_interaction, discord.Interaction) and e.status == 401:
+                channel = ctx_or_interaction.channel
+                if channel is not None:
+                    try:
+                        await channel.send(content=text, view=view)
+                        return
+                    except Exception:
+                        pass
+            logging.error(f"送信エラー: {e}")
         except Exception as e:
             logging.error(f"送信エラー: {e}")
 

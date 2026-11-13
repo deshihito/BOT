@@ -230,6 +230,12 @@ class SokuNukeRta(commands.Cog):
             await self._save(member.guild.id, records=records)
             try:
                 await self._announce_record(member, elapsed.total_seconds(), records)
+            except discord.Forbidden:
+                # 通知先チャンネルへの投稿権限がない（サーバー側の設定
+                # 問題）。記録そのものは保存済みなので警告だけに留める。
+                logger.warning(
+                    "即抜けRTAの記録通知先へ投稿できません（権限不足）: guild=%s",
+                    member.guild.id)
             except Exception:
                 # 記録そのものは保存済み。通知の失敗で退出処理を壊さない。
                 logger.exception("即抜けRTAの記録通知に失敗しました: guild=%s", member.guild.id)
@@ -288,6 +294,12 @@ class SokuNukeRta(commands.Cog):
             return
         try:
             await after.channel.connect(self_deaf=True)
+        except TimeoutError:
+            # ボイス接続のハンドシェイクがタイムアウトした（Discord側・
+            # 回線側の事情で起こる）。イベント処理を落とさず警告だけ残す。
+            logger.warning(
+                "VC自動参加がタイムアウトしました: guild=%s channel=%s",
+                member.guild.id, after.channel.id)
         except (discord.ClientException, discord.Forbidden, discord.HTTPException):
             logger.exception("VC自動参加に失敗しました: guild=%s channel=%s", member.guild.id, after.channel.id)
 
