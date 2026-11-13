@@ -51,6 +51,7 @@ test("parseRankingSnapshot は ID を含む余分な項目を落とし、数値�
       ],
       slow: [],
     },
+    servers: { today: [], week: [], month: [] },
   });
   // RTA キーが無い旧スナップショットは空配列として読む
   const legacy = m.parseRankingSnapshot({
@@ -62,6 +63,28 @@ test("parseRankingSnapshot は ID を含む余分な項目を落とし、数値�
   assert.deepEqual(legacy.up, []);
   assert.equal(m.parseRankingSnapshot(null), null);
   assert.equal(m.parseRankingSnapshot({ exp: [] }), null);
+});
+
+test("parseRankingSnapshot はサーバー対抗ボードを期間別に整える", () => {
+  const snapshot = m.parseRankingSnapshot({
+    updated_at: "2026-11-13T00:00:00+00:00",
+    exp: [],
+    coin: [],
+    servers: {
+      today: [
+        { name: "サーバーA", icon: "https://cdn.example/a.png", points: 100.9, actives: 5, messages: 80, vc_seconds: 600, guild_id: 999 },
+        { name: "サーバーB", points: 50, actives: 2.7, messages: 40, vc_seconds: 0 },
+        { name: "壊れた行", points: "abc" },
+      ],
+      week: "broken",
+    },
+  });
+  assert.deepEqual(snapshot.servers.today, [
+    { name: "サーバーA", icon: "https://cdn.example/a.png", points: 100, actives: 5, messages: 80, vc_seconds: 600 },
+    { name: "サーバーB", points: 50, actives: 2, messages: 40, vc_seconds: 0 },
+  ]);
+  assert.deepEqual(snapshot.servers.week, []);
+  assert.deepEqual(snapshot.servers.month, []);
 });
 
 test("parseBotStatusSnapshot は余分な項目を落とし、数値を整える", () => {

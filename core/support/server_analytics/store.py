@@ -42,8 +42,12 @@ RETENTION_DAYS = 35
 #: Overview / ヒートマップの対象期間（直近14日）。
 WINDOW_DAYS = 14
 
-#: guild_settings のセクション名。{"enabled": bool} だけを持つ。
+#: guild_settings のセクション名。{"enabled": bool, "ranking_optout": bool}。
 SERVER_ANALYTICS_SECTION = "server_analytics"
+
+#: サーバー対抗ランキングのオプトアウトを表すキー（セクション内）。
+#: 参加は既定で ON（キー無し = 参加）。True のギルドだけランキングから外す。
+RANKING_OPTOUT_KEY = "ranking_optout"
 
 _DEFAULT_PATH = data_paths.data_path("server_analytics.json")
 
@@ -83,6 +87,28 @@ def server_analytics_enabled(store, guild_id) -> bool:
         return False
     value = raw.get("enabled")
     return value if isinstance(value, bool) else False
+
+
+def section_ranking_opted_out(section) -> bool:
+    """セクション dict がランキングのオプトアウト状態かどうか。
+
+    参加は既定 ON なので、ranking_optout が明示的に True のときだけ
+    「参加しない」とみなす（未設定・型違いは参加側に倒す）。
+    """
+    if not isinstance(section, dict):
+        return False
+    return section.get(RANKING_OPTOUT_KEY) is True
+
+
+def server_ranking_opted_out(store, guild_id) -> bool:
+    """guild_settings のランキング参加状態（既定は参加）。読めない場合は参加扱い。"""
+    if guild_id is None:
+        return False
+    try:
+        raw = store.get(guild_id, SERVER_ANALYTICS_SECTION)
+    except Exception:
+        return False
+    return section_ranking_opted_out(raw)
 
 
 def extract_emojis(content: str | None) -> list[str]:
@@ -312,6 +338,23 @@ class ServerAnalyticsStore(DirtyFlushMixin):
     def has_data(self, guild_id: int) -> bool:
         with self._lock:
             return str(guild_id) in self._data["guilds"]
+
+    def all_guild_snapshots(self) -> dict[int, dict[str, Any]]:
+        """収集済み全ギルド分のスナップショット（サーバー対抗ランキング用）。
+
+        戻り値: {guild_id(int): guild_snapshot と同じ形}。ID として読めない
+        キーは落とす。
+        """
+        with self._lock:
+            guild_ids = list(self._data["guilds"].keys())
+        snapshots: dict[int, dict[str, Any]] = {}
+        for raw_id in guild_ids:
+            try:
+                guild_id = int(raw_id)
+            except (TypeError, ValueError):
+                continue
+            snapshots[guild_id] = self.guild_snapshot(guild_id)
+        return snapshots
 
 
 # ---------------------------------------------------------------------- 既定ストア

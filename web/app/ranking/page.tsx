@@ -5,9 +5,12 @@ import {
   PUBLIC_RANKING_KEY,
   PUBLIC_RANKING_NAMESPACE,
   RTA_SERVICE_LABELS,
+  SERVER_PERIODS,
   type PublicRankingSnapshot,
   type RankingEntry,
   type RtaEntry,
+  type ServerBoardSet,
+  type ServerRankingEntry,
 } from "@/lib/site";
 import Breadcrumbs from "../Breadcrumbs";
 import FactsStrip from "../FactsStrip";
@@ -15,23 +18,25 @@ import { InviteCtaBlock } from "../InviteCta";
 
 export const metadata = {
   title: "リーダーボード",
-  description: "AGOBOTのランキング。経験値・コイン保有と、bump系RTA（DISBOARD bump・Dis速 up・鯖ちゃんねる・TakasumiBOT・Dicoall・Discord Cafe・SharkBot・DiscordServers.io・DISCOM）の全サーバー記録を、サービス種類別のエントリで1つのボードにまとめて表示します。",
+  description: "AGOBOTのランキング。経験値・コイン保有と、bump系RTA（DISBOARD bump・Dis速 up・鯖ちゃんねる・TakasumiBOT・Dicoall・Discord Cafe・SharkBot・DiscordServers.io・DISCOM）の全サーバー記録を、サービス種類別のエントリで1つのボードにまとめて表示します。サーバー同士の活動量で競うサーバー対抗ランキングもあります。",
   alternates: { canonical: "/ranking" },
 };
 export const dynamic = "force-dynamic";
 
-type Axis = "exp" | "coin" | "rta";
+type Axis = "exp" | "coin" | "rta" | "servers";
 type Order = "asc" | "desc";
 type Speed = "fast" | "slow";
+type ServerPeriod = keyof ServerBoardSet;
 
 const AXES: { key: Axis; label: string; natural: Order; valueLabel: string }[] = [
   { key: "exp", label: "EXP総合", natural: "desc", valueLabel: "EXP" },
   { key: "coin", label: "コイン保有", natural: "desc", valueLabel: "コイン" },
   { key: "rta", label: "bump系RTA", natural: "asc", valueLabel: "タイム" },
+  { key: "servers", label: "サーバー対抗", natural: "desc", valueLabel: "pt" },
 ];
 
 type PageProps = {
-  searchParams: Promise<{ axis?: string; order?: string; speed?: string }>;
+  searchParams: Promise<{ axis?: string; order?: string; speed?: string; period?: string }>;
 };
 
 async function loadSnapshot(): Promise<PublicRankingSnapshot | null> {
@@ -60,18 +65,27 @@ function formatRecordAt(entry: RtaEntry): string {
   return entry.at ? formatDateTime(entry.at) : "—";
 }
 
-type HrefOptions = { speed?: Speed; order?: Order | null };
+type HrefOptions = { speed?: Speed; order?: Order | null; period?: ServerPeriod };
 
 function rankingHref(axis: Axis, options: HrefOptions = {}): string {
   const params = new URLSearchParams();
   if (axis !== "exp") params.set("axis", axis);
   if (axis === "rta") {
     if (options.speed && options.speed !== "fast") params.set("speed", options.speed);
+  } else if (axis === "servers") {
+    if (options.period && options.period !== "today") params.set("period", options.period);
   } else if (options.order) {
     params.set("order", options.order);
   }
   const query = params.toString();
   return query ? `/ranking?${query}` : "/ranking";
+}
+
+function formatVc(seconds: number): string {
+  const totalMinutes = Math.floor(Math.max(0, seconds) / 60);
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  return hours > 0 ? `${hours}時間${minutes}分` : `${minutes}分`;
 }
 
 function formatValue(axis: Axis, entry: RankingEntry): string {
@@ -92,11 +106,16 @@ export default async function RankingPage({ searchParams }: PageProps) {
 
   const snapshot = await loadSnapshot();
   const isRta = active.key === "rta";
+  const isServers = active.key === "servers";
   const plainEntries: RankingEntry[] =
-    snapshot && !isRta ? [...snapshot[active.key as "exp" | "coin"]] : [];
-  if (!isRta && effectiveOrder !== active.natural) plainEntries.reverse();
+    snapshot && !isRta && !isServers ? [...snapshot[active.key as "exp" | "coin"]] : [];
+  if (!isRta && !isServers && effectiveOrder !== active.natural) plainEntries.reverse();
   const rtaEntries: RtaEntry[] =
     snapshot && isRta ? snapshot.rta[speed] : [];
+  const period: ServerPeriod =
+    params.period === "week" || params.period === "month" ? params.period : "today";
+  const serverEntries: ServerRankingEntry[] =
+    snapshot && isServers ? snapshot.servers[period] : [];
 
   return (
     <section className="ranking-page">
@@ -105,7 +124,7 @@ export default async function RankingPage({ searchParams }: PageProps) {
       <FactsStrip
         facts={[
           { label: "集計範囲", value: "全サーバー横断" },
-          { label: "種類", value: "EXP・コイン・bump系RTA" },
+          { label: "種類", value: "EXP・コイン・bump系RTA・サーバー対抗" },
           { label: "更新", value: "1時間ごと" },
           { label: "表示件数", value: "各ボード上位50件" },
         ]}
@@ -115,7 +134,7 @@ export default async function RankingPage({ searchParams }: PageProps) {
         {AXES.map((a) => (
           <Link
             key={a.key}
-            href={rankingHref(a.key, a.key === "rta" ? { speed } : { order: chosenOrder })}
+            href={rankingHref(a.key, a.key === "rta" ? { speed } : a.key === "servers" ? { period } : { order: chosenOrder })}
             className={active.key === a.key ? "ranking-tab active" : "ranking-tab"}
             role="tab"
             aria-selected={active.key === a.key}
@@ -129,6 +148,62 @@ export default async function RankingPage({ searchParams }: PageProps) {
           <p>ランキングはまだ準備中です。集計が終わり次第、ここに表示されます。</p>
           <p><Link href="/">トップへ戻る</Link></p>
         </div>
+      ) : isServers ? (
+        <>
+          <div className="ranking-tabs" role="group" aria-label="集計期間">
+            <span className="muted">期間：</span>
+            {SERVER_PERIODS.map((p) => (
+              <Link
+                key={p.key}
+                href={rankingHref("servers", { period: p.key })}
+                className={period === p.key ? "ranking-tab active" : "ranking-tab"}
+                aria-pressed={period === p.key}
+              >
+                {p.label}
+              </Link>
+            ))}
+          </div>
+          <table className="ranking-table">
+            <thead>
+              <tr>
+                <th scope="col">順位</th>
+                <th scope="col">サーバー</th>
+                <th scope="col">pt</th>
+                <th scope="col">活動人数</th>
+                <th scope="col">発言数</th>
+                <th scope="col">VC時間</th>
+              </tr>
+            </thead>
+            <tbody>
+              {serverEntries.map((entry, index) => (
+                <tr key={index}>
+                  <td>{index + 1}</td>
+                  <td>
+                    {entry.icon ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={entry.icon}
+                        alt=""
+                        width={24}
+                        height={24}
+                        style={{ borderRadius: "50%", verticalAlign: "middle", marginRight: 8 }}
+                      />
+                    ) : null}
+                    {entry.name || "（名前を取得できませんでした）"}
+                  </td>
+                  <td>{entry.points.toLocaleString("ja-JP")}</td>
+                  <td>{entry.actives.toLocaleString("ja-JP")}人</td>
+                  <td>{entry.messages.toLocaleString("ja-JP")}</td>
+                  <td>{formatVc(entry.vc_seconds)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {serverEntries.length === 0 ? (
+            <p className="muted">まだこのボードに載っているサーバーがありません。</p>
+          ) : null}
+          <p className="muted">最終更新：{formatDateTime(snapshot.updated_at)}</p>
+        </>
       ) : isRta ? (
         <>
           <div className="ranking-tabs" role="group" aria-label="最速か最遅か">

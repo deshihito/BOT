@@ -7,9 +7,15 @@ Bot 内の全体ランキング（EXP総合・コイン保有・bump系RTA）と
 ``snapshot``）へ書き出す。Web は Bot API 経由でこれを読むだけ（F3 仕様）。
 
 プライバシー境界:
-- ユーザーID・サーバーID・サーバー名はスナップショットに含めない。
-- 名前は Bot 内ランキングと同じ平文の表示名（core/general/user_names.py）。
+- ユーザーID・サーバーIDはスナップショットに含めない。
+- ユーザー名は Bot 内ランキングと同じ平文の表示名
+  （core/general/user_names.py）。
 - 公開範囲は Bot 内の全体ランキングで既に表示されている範囲に限る。
+- 例外はサーバー対抗ランキング（servers）: こちらはサーバー名・
+  アイコン・活動量そのものが表示内容で、Discord 内の盤面と同じ範囲を
+  公開する。参加は既定 ON で、サーバー管理者はサーバー分析の設定から
+  オプトアウトできる（オプトアウトしたサーバーは載せない）。サーバー
+  ID はここでも含めない。
 """
 from __future__ import annotations
 
@@ -136,6 +142,38 @@ def _rta_board_entries(
     return entries
 
 
+#: サーバー対抗ランキングの期間キー（core/general/server_ranking の
+#: scoring.PERIODS と同じ並び。support 側の公開形としてここにも持つ）。
+SERVER_PERIODS = ("today", "week", "month")
+
+
+def _server_board_entries(
+    rows: Iterable[Mapping[str, Any]],
+    guild_info: Mapping[int, Mapping[str, Any]],
+) -> list[dict[str, Any]]:
+    """サーバー対抗の行を公開エントリにする（ID は出さない）。
+
+    guild_info は {guild_id: {"name": str, "icon": str|None}}。名前が
+    取れないギルド（Bot が抜けた等）は公開側でも落とす。
+    """
+    entries: list[dict[str, Any]] = []
+    for row in list(rows)[:TOP_N]:
+        info = guild_info.get(_as_int(row.get("guild_id"))) or {}
+        name = str(info.get("name") or "")
+        if not name:
+            continue
+        icon = info.get("icon")
+        entries.append({
+            "name": name,
+            "icon": icon if isinstance(icon, str) and icon else None,
+            "points": _as_int(row.get("points")),
+            "actives": _as_int(row.get("actives")),
+            "messages": _as_int(row.get("messages")),
+            "vc_seconds": _as_int(row.get("vc_seconds")),
+        })
+    return entries
+
+
 def build_snapshot(
     exp_rows: Iterable[Mapping[str, Any]],
     coin_rows: Iterable[Mapping[str, Any]],
@@ -145,6 +183,8 @@ def build_snapshot(
     bump_rows: Iterable[Mapping[str, Any]] = (),
     up_rows: Iterable[Mapping[str, Any]] = (),
     rta_boards: Optional[Mapping[str, Mapping[str, Iterable[Mapping[str, Any]]]]] = None,
+    server_boards: Optional[Mapping[str, Iterable[Mapping[str, Any]]]] = None,
+    server_guild_info: Optional[Mapping[int, Mapping[str, Any]]] = None,
 ) -> dict[str, Any]:
     """集計済みの行と表示名から公開スナップショットを作る（純粋関数）。
 
@@ -159,6 +199,11 @@ def build_snapshot(
         （ユーザー, サービス）エントリとして pooled され、潰されない。
         旧キーの bump / up は fast 側から従来形式（name / value のみ）で
         引き続き出す。
+    server_boards: {期間キー: サーバー対抗ランキングの行}。行は
+        core.general.server_ranking.scoring.build_rows の形
+        （guild_id / points / actives / messages / vc_seconds）。
+    server_guild_info: {guild_id: {"name", "icon"}}。名前・アイコンは
+        ここからのみ引き、行だけでは公開しない。
     戻り値に ID 類は一切含めない。
     """
     now = now or datetime.datetime.now(datetime.timezone.utc)
@@ -204,6 +249,13 @@ def build_snapshot(
         legacy_bump = bump_rows
         legacy_up = up_rows
 
+    guild_info = server_guild_info or {}
+    servers = {
+        period: _server_board_entries(
+            (server_boards or {}).get(period) or (), guild_info)
+        for period in SERVER_PERIODS
+    }
+
     return {
         "updated_at": now.isoformat(),
         "exp": exp_entries,
@@ -211,6 +263,7 @@ def build_snapshot(
         "bump": _rta_entries(legacy_bump, names),
         "up": _rta_entries(legacy_up, names),
         "rta": rta,
+        "servers": servers,
     }
 
 
@@ -279,6 +332,8 @@ async def collect_snapshot(bot: Any) -> dict[str, Any]:
                 boards[key] = []
         rta_boards[event_type] = boards
 
+    server_boards, server_guild_info = await _collect_server_boards(bot)
+
     user_ids: list[int] = []
     for row in list(exp_rows)[:TOP_N]:
         user_ids.append(_as_int(row.get("user_id")))
@@ -291,7 +346,67 @@ async def collect_snapshot(bot: Any) -> dict[str, Any]:
     names = await resolve_display_names(bot, user_ids)
     return build_snapshot(
         exp_rows, coin_rows, names, rta_boards=rta_boards,
+        server_boards=server_boards, server_guild_info=server_guild_info,
     )
+
+
+async def _collect_server_boards(bot: Any):
+    """サーバー対抗ランキングの集計（失敗しても公開全体は止めない）。
+
+    戻り値: ({期間: 行リスト}, {guild_id: {"name", "icon"}})。
+    データ源はサーバー分析の日次集計。Bot が抜けたサーバーは名前・
+    アイコンを表示できないため集計前に落とし、オプトアウトした
+    サーバーは scoring 側で除外する（Discord の盤面と同じ条件）。
+    """
+    try:
+        from core.general.server_ranking import scoring
+        from core.support import guild_settings
+        from core.support.server_analytics import store as sa_store
+
+        settings = guild_settings.get_store()
+        await settings.ensure_loaded()
+        sections = settings.all_sections(sa_store.SERVER_ANALYTICS_SECTION)
+        opted_out = set()
+        for gid, section in sections.items():
+            if not sa_store.section_ranking_opted_out(section):
+                continue
+            try:
+                opted_out.add(int(gid))
+            except (TypeError, ValueError):
+                continue
+        snapshots = sa_store.get_store().all_guild_snapshots()
+        if bot is not None:
+            snapshots = {
+                gid: snap for gid, snap in snapshots.items()
+                if bot.get_guild(gid) is not None
+            }
+        today = datetime.datetime.now(sa_store.JST).date()
+        boards = {
+            period: scoring.build_rows(
+                snapshots, period=period, today=today, opted_out=opted_out)
+            for period in scoring.PERIODS
+        }
+        guild_info: dict[int, dict[str, Any]] = {}
+        if bot is not None:
+            for rows in boards.values():
+                for row in rows[:TOP_N]:
+                    gid = _as_int(row.get("guild_id"))
+                    if gid in guild_info:
+                        continue
+                    guild = bot.get_guild(gid)
+                    if guild is None:
+                        continue
+                    icon = getattr(guild, "icon", None)
+                    guild_info[gid] = {
+                        "name": str(getattr(guild, "name", "") or ""),
+                        "icon": str(icon.url) if icon is not None else None,
+                    }
+        return boards, guild_info
+    except Exception:
+        logger.warning(
+            "公開ランキング: サーバー対抗ボードの集計に失敗しました"
+            "（空で続行します）", exc_info=True)
+        return {}, {}
 
 
 async def write_snapshot(bot: Any, kv: Optional[KVStore] = None) -> dict[str, Any]:

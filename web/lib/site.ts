@@ -55,7 +55,32 @@ export type PublicRankingSnapshot = {
   up: RankingEntry[];
   /** bump系RTA の単一ボード（全サービスの記録を種類別エントリで pooled）。 */
   rta: RtaBoardSet;
+  /** サーバー対抗ランキング（期間別）。旧スナップショットでは空になる。 */
+  servers: ServerBoardSet;
 };
+
+/** サーバー対抗ランキングの1行。icon はサーバーアイコンの CDN URL。 */
+export type ServerRankingEntry = {
+  name: string;
+  icon?: string;
+  points: number;
+  actives: number;
+  messages: number;
+  vc_seconds: number;
+};
+
+/** サーバー対抗ランキングの期間別ボード。キーは Discord 側の期間と一致。 */
+export type ServerBoardSet = {
+  today: ServerRankingEntry[];
+  week: ServerRankingEntry[];
+  month: ServerRankingEntry[];
+};
+
+export const SERVER_PERIODS: { key: keyof ServerBoardSet; label: string }[] = [
+  { key: "today", label: "今日" },
+  { key: "week", label: "7日" },
+  { key: "month", label: "30日" },
+];
 
 /** RTA の記録エントリ。at は記録日時 (ISO)、service は記録したサービス。 */
 export type RtaEntry = RankingEntry & { at?: string; service?: string };
@@ -147,6 +172,38 @@ function cleanRtaBoard(
   return { fast: [], slow: [] };
 }
 
+function cleanServerEntries(raw: unknown): ServerRankingEntry[] {
+  if (!Array.isArray(raw)) return [];
+  const entries: ServerRankingEntry[] = [];
+  for (const item of raw) {
+    if (typeof item !== "object" || item === null) continue;
+    const record = item as Record<string, unknown>;
+    if (typeof record.points !== "number" || !Number.isFinite(record.points)) continue;
+    const entry: ServerRankingEntry = {
+      name: typeof record.name === "string" ? record.name : "",
+      points: Math.trunc(record.points),
+      actives: cleanCount(record.actives),
+      messages: cleanCount(record.messages),
+      vc_seconds: cleanCount(record.vc_seconds),
+    };
+    if (typeof record.icon === "string" && record.icon !== "") entry.icon = record.icon;
+    entries.push(entry);
+  }
+  return entries;
+}
+
+function cleanServerBoards(raw: unknown): ServerBoardSet {
+  const source =
+    typeof raw === "object" && raw !== null && !Array.isArray(raw)
+      ? (raw as Record<string, unknown>)
+      : {};
+  return {
+    today: cleanServerEntries(source.today),
+    week: cleanServerEntries(source.week),
+    month: cleanServerEntries(source.month),
+  };
+}
+
 /** Bot が書いた生スナップショットを、表示に使える形へ検証して寄せる。 */
 export function parseRankingSnapshot(raw: unknown): PublicRankingSnapshot | null {
   if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return null;
@@ -161,6 +218,7 @@ export function parseRankingSnapshot(raw: unknown): PublicRankingSnapshot | null
     bump,
     up,
     rta: cleanRtaBoard(record.rta, { bump, up }),
+    servers: cleanServerBoards(record.servers),
   };
 }
 
