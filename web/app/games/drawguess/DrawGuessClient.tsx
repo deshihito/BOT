@@ -9,6 +9,7 @@
 // 描画は { type: "stroke", color, width, points }、回答は { type: "guess", text }。
 import { useEffect, useRef, useState } from "react";
 import { playSe } from "@/lib/balku-sound";
+import { tappableProps } from "@/lib/gesture";
 import OnlineShell from "../online/OnlineShell";
 import type { OnlineRoomApi, OnlineRoomView } from "../online/useOnlineRoom";
 
@@ -215,9 +216,12 @@ function Board({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
             <p style={{ fontWeight: 800, margin: "0 0 10px" }}>描くお題を選んでください</p>
             <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
               {state.wordOptions.map((word, i) => (
-                <button
+                <div
                   key={i}
-                  type="button"
+                  {...tappableProps(() => {
+                    playSe("play");
+                    void api.move({ type: "choose", index: i });
+                  })}
                   style={{
                     minHeight: 52,
                     padding: "12px 22px",
@@ -229,13 +233,9 @@ function Board({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
                     cursor: "pointer",
                     touchAction: "manipulation",
                   }}
-                  onClick={() => {
-                    playSe("play");
-                    void api.move({ type: "choose", index: i });
-                  }}
                 >
                   {word}
-                </button>
+                </div>
               ))}
             </div>
           </div>
@@ -292,12 +292,11 @@ function Board({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
             <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap", marginTop: 10 }}>
               <div role="group" aria-label="色" style={{ display: "flex", gap: 6 }}>
                 {DG_COLORS.map((c) => (
-                  <button
+                  <div
                     key={c}
-                    type="button"
+                    {...tappableProps(() => setColor(c))}
                     aria-label={`色 ${c}`}
                     aria-pressed={color === c}
-                    onClick={() => setColor(c)}
                     style={{
                       width: 40,
                       height: 40,
@@ -312,11 +311,10 @@ function Board({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
               </div>
               <div role="group" aria-label="太さ" style={{ display: "flex", gap: 6 }}>
                 {DG_WIDTHS.map((w) => (
-                  <button
+                  <div
                     key={w}
-                    type="button"
+                    {...tappableProps(() => setWidth(w))}
                     aria-pressed={width === w}
-                    onClick={() => setWidth(w)}
                     style={{
                       minWidth: 44,
                       height: 40,
@@ -330,16 +328,15 @@ function Board({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
                     }}
                   >
                     {w === DG_WIDTHS[0] ? "細" : w === DG_WIDTHS[1] ? "中" : "太"}
-                  </button>
+                  </div>
                 ))}
               </div>
-              <button
-                type="button"
+              <div
+                {...tappableProps(() => void api.move({ type: "clear" }))}
                 className="classic-btn"
-                onClick={() => void api.move({ type: "clear" })}
               >
                 全部消す
-              </button>
+              </div>
             </div>
           ) : null}
 
@@ -373,13 +370,13 @@ function Board({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
                     background: "#fffdf6",
                   }}
                 />
-                <button
-                  type="submit"
+                <div
+                  {...tappableProps(submitGuess)}
                   className="classic-btn"
                   style={{ minHeight: 48, padding: "10px 22px", fontSize: 16 }}
                 >
                   回答
-                </button>
+                </div>
               </form>
             )
           ) : null}

@@ -23,6 +23,7 @@ import {
   type DqState,
 } from "@/lib/dicequest";
 import { useGamesNav } from "../GamesShell";
+import { tappableProps, useGesture } from "@/lib/gesture";
 import { sfxDice, sfxPlace, sfxWin, sfxWrong } from "@/lib/sfx";
 import { EndScreen } from "../GameJuice";
 
@@ -70,6 +71,20 @@ export default function DiceQuestClient() {
 
   const restart = () => setState(createDiceQuestGame(Date.now() % 2147483647));
 
+  const doRoll = () => { sfxDice(); setState((s) => rollDqDice(s)); };
+  const doPass = () => { sfxWrong(); setState((s) => applyDqPass(s)); };
+  // ダイス置き場のタップ/フリック: 振る局面では振る、選択局面では「チェックしないで次へ」。
+  const diceKeyDown = (e: { key: string; preventDefault: () => void }) => {
+    if (e.key !== "Enter" && e.key !== " ") return;
+    e.preventDefault();
+    if (state.phase === "roll") doRoll();
+    else if (state.phase === "choice") doPass();
+  };
+  const diceGesture = useGesture({
+    onTap: () => { if (state.phase === "roll") doRoll(); else if (state.phase === "choice") doPass(); },
+    onSwipe: () => { if (state.phase === "roll") doRoll(); else if (state.phase === "choice") doPass(); },
+  });
+
   const endSoundRef = useRef<DqState | null>(null);
   useEffect(() => {
     if (state.phase !== "finished") return;
@@ -82,7 +97,7 @@ export default function DiceQuestClient() {
     state.phase === "finished"
       ? "ゲーム終了です。"
       : state.phase === "roll"
-        ? "サイコロを振ってください。"
+        ? "ダイス置き場をタップしてサイコロを振ってください。"
         : candidates.length > 0
           ? "光っているマスから1つ選んでチェックします。"
           : "チェックできるマスがありません。失敗として次へ進みます。";
@@ -102,27 +117,20 @@ export default function DiceQuestClient() {
       </div>
 
       <div className="classic-controls">
-        <button
-          type="button"
-          className="classic-btn"
-          disabled={state.phase !== "roll"}
-          onClick={() => { sfxDice(); setState((s) => rollDqDice(s)); }}
-        >
-          サイコロを振る
-        </button>
-        <button
-          type="button"
-          className="classic-btn"
-          disabled={state.phase !== "choice"}
-          onClick={() => { sfxWrong(); setState((s) => applyDqPass(s)); }}
-        >
-          チェックしない（失敗+1）
-        </button>
         <button type="button" className="classic-btn" onClick={restart}>
           もう一度
         </button>
+        <span className="muted" style={{ fontSize: 13 }}>
+          {state.phase === "roll" ? "ダイス置き場をタップで振る" : state.phase === "choice" ? "チェックは光るマスをタップ。しない場合はダイス置き場をタップ" : ""}
+        </span>
       </div>
 
+      {!state.dice && (
+        <div {...diceGesture} onKeyDown={diceKeyDown} role="button" tabIndex={0} aria-label="ダイス置き場（タップで振る）"
+          style={{ border: "2px dashed var(--line, #ccc)", borderRadius: 12, padding: "18px 14px", textAlign: "center", cursor: "pointer", margin: "6px 0 14px", touchAction: "none" }}>
+          ダイス置き場 — タップで振る
+        </div>
+      )}
       <p className="classic-status" role="status">
         スコア {score.total} 点 ・ {state.rolls} 投目 ・ 失敗{" "}
         {Array.from({ length: DQ_MAX_FAILURES }, (_, i) => (i < state.failures ? "✗" : "・")).join("")} ・{" "}
@@ -131,11 +139,14 @@ export default function DiceQuestClient() {
 
       {state.dice && (
         <div
+          {...diceGesture}
+          onKeyDown={diceKeyDown}
+          tabIndex={0}
           key={state.rolls}
           className="juice-pop"
           role="group"
-          aria-label="ダイスの目"
-          style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center", margin: "6px 0 14px" }}
+          aria-label="ダイス置き場（タップで振る / チェックしない）"
+          style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center", margin: "6px 0 14px", touchAction: "none" }}
         >
           <DiceFace value={state.dice.white[0]} bg="#ffffff" label="白ダイス" />
           <DiceFace value={state.dice.white[1]} bg="#ffffff" label="白ダイス" />
@@ -187,13 +198,12 @@ export default function DiceQuestClient() {
                   const isFinal = value === dqFinalNumber(color);
                   const finalLocked = isFinal && !checked && count < DQ_FINAL_MIN_CHECKS;
                   return (
-                    <button
+                    <div
                       key={value}
-                      type="button"
-                      disabled={!isCandidate}
+                      {...tappableProps(() => { if (isCandidate) { sfxPlace(); setState((s) => applyDqCheck(s, color, value)); } })}
+                      aria-disabled={!isCandidate}
                       aria-pressed={checked}
                       aria-label={`${DQ_COLOR_LABELS[color]} ${value}${checked ? "（チェック済み）" : ""}${isFinal ? "（最後の数字）" : ""}`}
-                      onClick={() => { sfxPlace(); setState((s) => applyDqCheck(s, color, value)); }}
                       style={{
                         aspectRatio: "1",
                         minHeight: 34,
@@ -205,6 +215,9 @@ export default function DiceQuestClient() {
                         fontSize: 14,
                         cursor: isCandidate ? "pointer" : "default",
                         padding: 0,
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
                         touchAction: "manipulation",
                         boxShadow: isCandidate ? `0 0 0 2px ${style.soft}` : undefined,
                       }}
@@ -215,7 +228,7 @@ export default function DiceQuestClient() {
                           <path d="M12 2.8a5.2 5.2 0 0 0-5.2 5.2v3H5.6A1.6 1.6 0 0 0 4 12.6v7.8A1.6 1.6 0 0 0 5.6 22h12.8a1.6 1.6 0 0 0 1.6-1.6v-7.8a1.6 1.6 0 0 0-1.6-1.6h-1.2V8A5.2 5.2 0 0 0 12 2.8Zm-3.2 8.2V8a3.2 3.2 0 1 1 6.4 0v3Z" fill="#8a6d3b" />
                         </svg>
                       ) : value}
-                    </button>
+                    </div>
                   );
                 })}
               </div>

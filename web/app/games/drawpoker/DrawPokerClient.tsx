@@ -17,6 +17,7 @@ import {
   type DpState,
 } from "@/lib/drawpoker";
 import { useGamesNav } from "../GamesShell";
+import { tappableProps, useGesture } from "@/lib/gesture";
 import { sfxCorrect, sfxDeal, sfxFlip, sfxPop, sfxTap, sfxWrong } from "@/lib/sfx";
 import { ScorePop } from "../GameJuice";
 
@@ -43,19 +44,6 @@ function rankLabel(rank: number): string {
 function isRed(card: DpCard): boolean {
   return card.suit === "heart" || card.suit === "diamond";
 }
-
-const mainBtn: React.CSSProperties = {
-  padding: "10px 22px",
-  borderRadius: 999,
-  border: "1px solid #8a90a3",
-  background: "#22304f",
-  color: "#fff",
-  fontSize: 16,
-  fontWeight: 700,
-  cursor: "pointer",
-  minHeight: 44,
-};
-const mainBtnDisabled: React.CSSProperties = { ...mainBtn, opacity: 0.4, cursor: "default" };
 
 export default function DrawPokerClient() {
   const { prefix } = useGamesNav();
@@ -119,6 +107,32 @@ export default function DrawPokerClient() {
   const currentHand = state.hand.length === 5 ? evaluateHand(state.hand) : null;
   const broke = state.phase !== "draw" && state.chips < DP_MIN_BET;
 
+  // カード置き場のタップ/下スワイプ: 賭け中・確定後は配る/次ラウンドへ（チップ切れは再支給）、
+  // 交換中は下スワイプで確定。札のタップ（交換選択）は各札の tappableProps が受ける。
+  const rowAction = () => {
+    if (state.phase === "draw") return;
+    if (broke) {
+      sfxPop();
+      setState((s) => refillDpChips(s));
+      return;
+    }
+    deal();
+  };
+  const rowGesture = useGesture({
+    onTap: rowAction,
+    onSwipe: (dir) => {
+      if (dir === "down" && state.phase === "draw") confirmDraw();
+    },
+  });
+  const rowKeyDown = (e: React.KeyboardEvent) => {
+    // 札にフォーカスがあるときは札側のキー処理に任せる（置き場自体へのフォーカス時のみ）。
+    if (e.target !== e.currentTarget) return;
+    if (e.key !== "Enter" && e.key !== " ") return;
+    e.preventDefault();
+    if (state.phase === "draw") confirmDraw();
+    else rowAction();
+  };
+
   const chipBtn = (amount: number): React.CSSProperties => ({
     padding: "8px 14px",
     borderRadius: 999,
@@ -140,7 +154,7 @@ export default function DrawPokerClient() {
       </p>
       <h1 style={{ fontSize: 22, margin: "0 0 6px" }}>♠ ドローポーカー</h1>
       <p style={{ margin: "0 0 12px", color: "#64748b", fontSize: 14, lineHeight: 1.6 }}>
-        ベット額を選んで「配る」を押し、交換したい札をタップで選んで確定します。
+        ベット額を選んでカード置き場をタップで配り、交換したい札をタップで選んで下スワイプで確定します。
       </p>
 
       <p style={{ fontSize: 16, fontWeight: 700, margin: "0 0 10px" }}>
@@ -150,7 +164,7 @@ export default function DrawPokerClient() {
 
       {state.phase === "draw" && (
         <p role="status" style={{ minHeight: 22, margin: "0 0 8px", fontWeight: 700 }}>
-          現在の役: {currentHand?.name} ／ 交換する札をタップで選んでください
+          現在の役: {currentHand?.name} ／ 交換する札をタップで選んで、下スワイプで確定
         </p>
       )}
       {state.phase === "settled" && state.result && (
@@ -160,7 +174,20 @@ export default function DrawPokerClient() {
         </p>
       )}
 
-      <div style={{ display: "flex", gap: 8, justifyContent: "center", margin: "14px 0 18px", flexWrap: "wrap" }}>
+      <div
+        {...rowGesture}
+        role="group"
+        tabIndex={0}
+        onKeyDown={rowKeyDown}
+        aria-label={
+          state.phase === "draw"
+            ? "カード置き場（下スワイプで交換を確定）"
+            : broke
+              ? "カード置き場（タップでチップを再支給）"
+              : "カード置き場（タップで配る）"
+        }
+        style={{ display: "flex", gap: 8, justifyContent: "center", margin: "14px 0 18px", flexWrap: "wrap", touchAction: "none" }}
+      >
         {state.hand.length === 0 &&
           [0, 1, 2, 3, 4].map((i) => (
             <div
@@ -176,14 +203,13 @@ export default function DrawPokerClient() {
         {state.hand.map((card, i) => {
           const dropping = discards.includes(i);
           return (
-            <button
+            <div
               key={`${state.round}-${i}-${card.suit}-${card.rank}`}
               className="juice-flip"
-              type="button"
-              disabled={state.phase !== "draw"}
+              {...tappableProps(() => toggleDiscard(i))}
+              aria-disabled={state.phase !== "draw"}
               aria-pressed={dropping}
               aria-label={`${SUIT_GLYPHS[card.suit]}の${rankLabel(card.rank)}${dropping ? "（交換する）" : "（残す）"}`}
-              onClick={() => toggleDiscard(i)}
               style={{
                 width: 60,
                 height: 86,
@@ -204,7 +230,7 @@ export default function DrawPokerClient() {
               <span style={{ fontSize: 22, lineHeight: 1 }}>{SUIT_GLYPHS[card.suit]}</span>
               <span style={{ fontSize: 20, fontWeight: 700, lineHeight: 1 }}>{rankLabel(card.rank)}</span>
               <span style={{ fontSize: 10, fontWeight: 700 }}>{dropping ? "交換" : "残す"}</span>
-            </button>
+            </div>
           );
         })}
       </div>
@@ -213,33 +239,31 @@ export default function DrawPokerClient() {
         <div>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
             {BET_OPTIONS.map((amount) => (
-              <button key={amount} type="button" style={chipBtn(amount)} onClick={() => { sfxTap(); setBet(amount); }} aria-pressed={bet === amount}>
+              <div
+                key={amount}
+                {...tappableProps(() => { sfxTap(); setBet(amount); })}
+                aria-pressed={bet === amount}
+                style={chipBtn(amount)}
+              >
                 {amount}
-              </button>
+              </div>
             ))}
           </div>
-          {broke ? (
-            <button type="button" style={mainBtn} onClick={() => { sfxPop(); setState((s) => refillDpChips(s)); }}>
-              チップを再支給する（{DP_INITIAL_CHIPS}）
-            </button>
-          ) : (
-            <button
-              type="button"
-              style={bet > state.chips ? mainBtnDisabled : mainBtn}
-              disabled={bet > state.chips}
-              onClick={deal}
-            >
-              {state.phase === "settled" ? "次のラウンドを配る" : "配る"}
-            </button>
-          )}
           {bet > state.chips && !broke && (
             <p style={{ color: "#dc2626", fontSize: 14 }}>チップが足りません。ベットを下げてください。</p>
           )}
+          <p style={{ color: "#64748b", fontSize: 14, margin: "0 0 4px" }}>
+            {broke
+              ? `チップが足りません。カード置き場をタップで再支給（${DP_INITIAL_CHIPS}）`
+              : state.phase === "settled"
+                ? "カード置き場をタップで次のラウンドを配る"
+                : `カード置き場をタップで配る（ベット ${bet}）`}
+          </p>
         </div>
       ) : (
-        <button type="button" style={mainBtn} onClick={confirmDraw}>
-          {discards.length === 0 ? "交換せずに確定" : `${discards.length}枚を交換して確定`}
-        </button>
+        <p style={{ color: "#64748b", fontSize: 14, margin: "0 0 4px" }}>
+          {discards.length === 0 ? "交換なしで確定 — カード置き場を下スワイプ" : `${discards.length}枚を交換 — カード置き場を下スワイプで確定`}
+        </p>
       )}
 
       <details style={{ marginTop: 24 }}>

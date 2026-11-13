@@ -18,6 +18,7 @@ import {
   type KanaWord,
 } from "@/lib/kanacross";
 import { sfxCorrect, sfxPlace, sfxTap, sfxWin, sfxWrong } from "@/lib/sfx";
+import { tappableProps, useGesture } from "@/lib/gesture";
 import { EndScreen } from "../GameJuice";
 import { useGamesNav } from "../GamesShell";
 
@@ -142,6 +143,16 @@ export default function KanacrossClient() {
         backspace();
         return;
       }
+      if (e.key === "Enter") {
+        // 選んだ単語のチェックは Enter でも行う。タップ対象物（マス・パレット・
+        // ヒント行・問題選択）にフォーカスがあるときは tappableProps 側が受ける
+        // ため、window 側は data-kanacross-ui ガードで無視する（二重発火防止）。
+        const target = e.target as HTMLElement | null;
+        if (target?.closest?.("[data-kanacross-ui]")) return;
+        e.preventDefault();
+        onCheck();
+        return;
+      }
       if (/^[ァ-ヶー]$/.test(e.key)) {
         inputChar(e.key);
       }
@@ -175,6 +186,14 @@ export default function KanacrossClient() {
     setNotice("");
   };
 
+  // 盤面の下スワイプ = 選んだ単語をチェック。子のマスの onClick との二重発火は
+  // useGesture の suppressClickAfterSwipe が抑止する。
+  const boardGesture = useGesture({
+    onSwipe: (dir) => {
+      if (dir === "down") onCheck();
+    },
+  });
+
   const wordList = (dir: KanaDirection, label: string) => (
     <section aria-label={label} style={{ flex: "1 1 220px" }}>
       <h2 style={{ fontSize: 15, margin: "0 0 6px" }}>{label}</h2>
@@ -186,9 +205,9 @@ export default function KanacrossClient() {
             const active = selectedWord?.id === w.id;
             return (
               <li key={w.id}>
-                <button
-                  type="button"
-                  onClick={() => selectWord(w)}
+                <div
+                  {...tappableProps(() => selectWord(w))}
+                  data-kanacross-ui=""
                   aria-pressed={active}
                   style={{
                     width: "100%",
@@ -207,7 +226,7 @@ export default function KanacrossClient() {
                     {w.length}文字 {st === "correct" ? "✓" : ""}
                   </strong>
                   {" "}— {w.hint}
-                </button>
+                </div>
               </li>
             );
           })}
@@ -225,23 +244,23 @@ export default function KanacrossClient() {
       <div className="page-heading compact-heading">
         <h1>カナクロス</h1>
         <p className="muted">
-          マスを選んで下のパレットで入力します。交差するマスでもう一度押すと方向が切り替わります。
+          マスを選んで下のパレットで入力します。交差するマスでもう一度押すと方向が切り替わります。盤面を下にスワイプ（または Enter）で選んだ単語をチェックします。
         </p>
       </div>
 
       <div className="classic-controls" style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 10 }} role="group" aria-label="問題の選択">
         {KANACROSS_PUZZLES.map((p, i) => (
-          <button
+          <div
             key={p.id}
-            type="button"
+            {...tappableProps(() => changePuzzle(i))}
+            data-kanacross-ui=""
             style={btnStyle}
             aria-pressed={state.puzzleIndex === i}
-            onClick={() => changePuzzle(i)}
           >
             {p.title}
-          </button>
+          </div>
         ))}
-        <button type="button" style={btnStyle} onClick={() => changePuzzle(state.puzzleIndex)}>
+        <button type="button" style={btnStyle} data-kanacross-ui="" onClick={() => changePuzzle(state.puzzleIndex)}>
           もう一度
         </button>
       </div>
@@ -257,10 +276,12 @@ export default function KanacrossClient() {
           <div
             role="grid"
             aria-label="カナクロスの盤"
+            {...boardGesture}
             style={{
               display: "grid",
               gridTemplateColumns: `repeat(${puzzle.cols}, 46px)`,
               gap: 3,
+              touchAction: "none",
             }}
           >
             {puzzle.solution.map((answer, i) => {
@@ -271,14 +292,20 @@ export default function KanacrossClient() {
               const inWord = selectedCells.includes(i);
               const correct = correctCells.has(i);
               return (
-                <button
+                <div
                   key={i}
-                  type="button"
                   role="gridcell"
+                  tabIndex={0}
+                  data-kanacross-ui=""
                   className={isSelected ? "juice-pulse" : correct ? "juice-pop" : undefined}
                   aria-label={`${Math.floor(i / puzzle.cols) + 1}行${(i % puzzle.cols) + 1}列${state.entries[i] ? ` ${state.entries[i]}` : " 空白"}`}
                   aria-pressed={isSelected}
                   onClick={() => onCell(i)}
+                  onKeyDown={(e) => {
+                    if (e.key !== "Enter" && e.key !== " ") return;
+                    e.preventDefault();
+                    onCell(i);
+                  }}
                   style={{
                     width: 46,
                     height: 46,
@@ -293,7 +320,7 @@ export default function KanacrossClient() {
                   }}
                 >
                   {state.entries[i]}
-                </button>
+                </div>
               );
             })}
           </div>
@@ -302,10 +329,10 @@ export default function KanacrossClient() {
             {KANA_PALETTE_ROWS.map((row, ri) => (
               <div key={ri} style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
                 {row.split("").map((ch) => (
-                  <button
+                  <div
                     key={ch}
-                    type="button"
-                    onClick={() => inputChar(ch)}
+                    {...tappableProps(() => inputChar(ch))}
+                    data-kanacross-ui=""
                     style={{
                       width: 42,
                       height: 42,
@@ -315,15 +342,18 @@ export default function KanacrossClient() {
                       fontSize: 17,
                       fontWeight: 700,
                       cursor: "pointer",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
                     }}
                   >
                     {ch}
-                  </button>
+                  </div>
                 ))}
                 {ri === KANA_PALETTE_ROWS.length - 1 && (
-                  <button
-                    type="button"
-                    onClick={backspace}
+                  <div
+                    {...tappableProps(backspace)}
+                    data-kanacross-ui=""
                     style={{
                       height: 42,
                       padding: "0 14px",
@@ -333,19 +363,16 @@ export default function KanacrossClient() {
                       fontSize: 14,
                       fontWeight: 700,
                       cursor: "pointer",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
                     }}
                   >
                     消す
-                  </button>
+                  </div>
                 )}
               </div>
             ))}
-          </div>
-
-          <div className="classic-controls" style={{ marginTop: 12 }}>
-            <button type="button" style={btnStyle} onClick={onCheck}>
-              選んだ単語をチェック
-            </button>
           </div>
         </div>
 

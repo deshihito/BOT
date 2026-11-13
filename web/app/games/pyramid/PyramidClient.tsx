@@ -21,6 +21,7 @@ import {
   type PyramidTarget,
 } from "@/lib/pyramid";
 import { sfxCorrect, sfxFlip, sfxLose, sfxTap, sfxWin } from "@/lib/sfx";
+import { tappableProps } from "@/lib/gesture";
 import { EndScreen } from "../GameJuice";
 import { useGamesNav } from "../GamesShell";
 
@@ -75,6 +76,11 @@ export default function PyramidClient() {
 
   const wasteTop = state.waste.length > 0 ? state.waste[state.waste.length - 1] : null;
   const exposed = new Set(exposedSlots(state));
+  // ストックめくりの無効条件（旧ボタンの disabled と同等）。
+  const stockDisabled =
+    state.status === "won" ||
+    state.status === "stuck" ||
+    (state.stock.length === 0 && state.waste.length === 0);
 
   const onTarget = (target: PyramidTarget, card: PyramidCard) => {
     if (state.status !== "playing") return;
@@ -173,15 +179,20 @@ export default function PyramidClient() {
               const isExposed = exposed.has(slot);
               const sel = isSelected({ kind: "pyramid", slot });
               const pos = pyramidSlotPos(slot);
+              // 覆われているカードはタップ対象外（旧ボタンの disabled と同等）。
+              const cellDisabled = !isExposed || state.status !== "playing";
               return (
-                <button
+                <div
                   key={slot}
-                  type="button"
-                  disabled={!isExposed || state.status !== "playing"}
+                  {...tappableProps(() => {
+                    if (cellDisabled) return;
+                    onTarget({ kind: "pyramid", slot }, card);
+                  })}
                   aria-label={`${pyramidSuitSymbol(card.suit)}${pyramidRankLabel(card.rank)}${isExposed ? "" : "（覆われています）"}`}
                   aria-pressed={sel}
+                  aria-disabled={cellDisabled}
+                  tabIndex={cellDisabled ? -1 : 0}
                   className={sel ? "juice-pulse" : undefined}
-                  onClick={() => onTarget({ kind: "pyramid", slot }, card)}
                   style={{
                     padding: 0,
                     border: "none",
@@ -197,7 +208,7 @@ export default function PyramidClient() {
                   data-col={pos.col}
                 >
                   <CardFace card={card} />
-                </button>
+                </div>
               );
             })}
           </div>
@@ -215,36 +226,33 @@ export default function PyramidClient() {
         }}
       >
         <div style={{ textAlign: "center" }}>
-          <button
-            type="button"
-            className="classic-btn"
-            disabled={
-              state.status === "won" ||
-              state.status === "stuck" ||
-              (state.stock.length === 0 && state.waste.length === 0)
-            }
-            onClick={() => {
+          <div
+            {...tappableProps(() => {
+              if (stockDisabled) return;
               // 捨て山の選択は「山そのもの」への参照なので、めくると別カードに移ってしまう。選択を解除する。
               sfxFlip();
               setSelected(null);
               setState((s) => flipPyramidStock(s));
-            }}
+            })}
+            className="classic-btn"
             aria-label={state.stock.length > 0 ? "ストックを1枚めくる" : "捨て山を裏返して再利用"}
+            aria-disabled={stockDisabled}
+            tabIndex={stockDisabled ? -1 : 0}
           >
             {state.stock.length > 0 ? `🂠 めくる（残り ${state.stock.length}）` : "↩ 捨て山を再利用"}
-          </button>
+          </div>
           <p className="muted" style={{ fontSize: 12, margin: "4px 0 0" }}>ストック</p>
         </div>
         <div style={{ textAlign: "center" }}>
           {wasteTop ? (
-            <button
+            <div
               key={state.waste.length}
-              type="button"
-              disabled={state.status !== "playing"}
+              {...tappableProps(() => onTarget({ kind: "waste" }, wasteTop))}
               aria-label={`捨て山の一番上 ${pyramidSuitSymbol(wasteTop.suit)}${pyramidRankLabel(wasteTop.rank)}`}
               aria-pressed={isSelected({ kind: "waste" })}
+              aria-disabled={state.status !== "playing"}
+              tabIndex={state.status !== "playing" ? -1 : 0}
               className="juice-flip"
-              onClick={() => onTarget({ kind: "waste" }, wasteTop)}
               style={{
                 padding: 0,
                 border: "none",
@@ -257,7 +265,7 @@ export default function PyramidClient() {
               }}
             >
               <CardFace card={wasteTop} />
-            </button>
+            </div>
           ) : (
             <span
               style={{

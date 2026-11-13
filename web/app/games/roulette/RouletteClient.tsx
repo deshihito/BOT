@@ -19,6 +19,7 @@ import {
 import { sfxCorrect, sfxSlide, sfxTap, sfxTick, sfxWrong } from "@/lib/sfx";
 import { ScorePop } from "../GameJuice";
 import { useGamesNav } from "../GamesShell";
+import { tappableProps, useGesture } from "@/lib/gesture";
 
 const CHIPS_KEY = "ago-roulette-chips";
 const AMOUNTS = [10, 50, 100, 500] as const;
@@ -125,6 +126,12 @@ export default function RouletteClient() {
     }, 70);
   };
 
+  // ホイールをフリック/スワイプで回す（スピンボタンは廃止）。チップ切れ時はホイールタップで再支給。
+  const wheelGesture = useGesture({
+    onSwipe: () => onSpin(),
+    onTap: () => { if (state.chips <= 0 && !spinning) setState((s) => refillChips(s)); },
+  });
+
   const last = state.lastResult;
   const shownPocket = spinning || displayPocket !== null ? displayPocket : last?.pocket ?? null;
 
@@ -137,11 +144,11 @@ export default function RouletteClient() {
       </nav>
       <div className="page-heading compact-heading">
         <h1>ルーレット</h1>
-        <p className="muted">欧式（0が1つ）のルーレット。賭けの種類と金額を選んでスピンします。</p>
+        <p className="muted">欧式（0が1つ）のルーレット。賭けの種類と金額をタップで選び、ホイールをフリックして回します。</p>
       </div>
 
       <div style={{ textAlign: "center", margin: "8px 0 4px" }} aria-live="polite">
-        <div
+        <div {...wheelGesture}
           key={spinning ? "spinning" : state.spins}
           className={!spinning && last ? "juice-pop" : undefined}
           style={{
@@ -157,6 +164,9 @@ export default function RouletteClient() {
             fontWeight: 800,
             border: "6px solid #d9a41c",
             fontVariantNumeric: "tabular-nums",
+            touchAction: "none",
+            cursor: "grab",
+            margin: "0 auto",
           }}
         >
           {shownPocket !== null ? shownPocket : "?"}
@@ -188,32 +198,24 @@ export default function RouletteClient() {
         <p style={{ fontWeight: 700, margin: "10px 0 6px" }}>賭けの種類</p>
         <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
           {OUTSIDE_BETS.map((bet) => (
-            <button
+            <div
               key={betKey(bet)}
-              type="button"
+              {...tappableProps(() => { if (!spinning) { sfxTap(); setSelected(bet); } })}
               className={betKey(selected) === betKey(bet) ? "classic-btn classic-btn-active" : "classic-btn"}
               aria-pressed={betKey(selected) === betKey(bet)}
-              disabled={spinning}
-              onClick={() => {
-                sfxTap();
-                setSelected(bet);
-              }}
+              aria-disabled={spinning}
             >
               {betLabel(bet)}
-            </button>
+            </div>
           ))}
-          <button
-            type="button"
+          <div
+            {...tappableProps(() => { if (!spinning) { sfxTap(); setSelected({ kind: "straight", value: straightNumber }); } })}
             className={selected.kind === "straight" ? "classic-btn classic-btn-active" : "classic-btn"}
             aria-pressed={selected.kind === "straight"}
-            disabled={spinning}
-            onClick={() => {
-              sfxTap();
-              setSelected({ kind: "straight", value: straightNumber });
-            }}
+            aria-disabled={spinning}
           >
             単数（配当35倍）
-          </button>
+          </div>
           {selected.kind === "straight" ? (
             <label style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
               数字
@@ -236,41 +238,24 @@ export default function RouletteClient() {
         <p style={{ fontWeight: 700, margin: "14px 0 6px" }}>賭け金</p>
         <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
           {AMOUNTS.map((a) => (
-            <button
+            <div
               key={a}
-              type="button"
+              {...tappableProps(() => { if (!spinning) { sfxTap(); setAmount(a); } })}
               className={amount === a ? "classic-btn classic-btn-active" : "classic-btn"}
               aria-pressed={amount === a}
-              disabled={spinning}
-              onClick={() => {
-                sfxTap();
-                setAmount(a);
-              }}
+              aria-disabled={spinning}
+              style={{ borderRadius: 999 }}
             >
               {a}
-            </button>
+            </div>
           ))}
         </div>
 
-        <div className="classic-controls">
-          <button
-            type="button"
-            className="classic-btn"
-            onClick={onSpin}
-            disabled={spinning || state.chips <= 0 || amount > state.chips}
-          >
-            {betLabel(currentBet)}に{amount}を賭けてスピン
-          </button>
-          {state.chips <= 0 ? (
-            <button
-              type="button"
-              className="classic-btn"
-              onClick={() => setState((s) => refillChips(s))}
-            >
-              チップを{ROULETTE_START_CHIPS}再支給
-            </button>
-          ) : null}
-        </div>
+        <p className="muted" style={{ fontSize: 13, margin: "12px 0 0" }}>
+          {state.chips <= 0
+            ? "チップ切れ: ホイールをタップで再支給"
+            : `ホイールをフリックで回す（${betLabel(currentBet)}に${amount}）`}
+        </p>
 
         {state.history.length > 0 ? (
           <p style={{ fontSize: 13, color: "#6b7280" }}>履歴: {state.history.slice(-15).join(" / ")}</p>

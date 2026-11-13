@@ -14,6 +14,8 @@ import {
   type McState,
 } from "@/lib/montecarlo";
 import { useGamesNav } from "../GamesShell";
+import { useGesture } from "@/lib/gesture";
+import { sfxFlip, sfxPop, sfxTap } from "@/lib/sfx";
 
 const RANK_LABELS = ["A", "2", "3", "4", "5", "6", "7", "8", "9", "10", "J", "Q", "K"];
 const SUITS = ["♠", "♥", "♦", "♣"];
@@ -58,10 +60,12 @@ export default function MonteCarloClient() {
     const card = state.board[index];
     if (!card) return;
     if (selected === null) {
+      sfxTap();
       setSelected(index);
       return;
     }
     if (selected === index) {
+      sfxTap();
       setSelected(null);
       return;
     }
@@ -69,12 +73,27 @@ export default function MonteCarloClient() {
       ([a, b]) => (a === selected && b === index) || (a === index && b === selected),
     );
     if (isPair) {
+      sfxPop();
       setState((s) => montecarloRemovePair(s, selected, index));
       setSelected(null);
     } else {
+      sfxTap();
       setSelected(index);
     }
   };
+
+  // 盤面の下スワイプで「詰める」（前へ寄せて山札から補充）。札のタップは各マスが受ける。
+  const consolidate = () => {
+    if (state.status !== "playing") return;
+    sfxFlip();
+    setState((s) => montecarloConsolidate(s));
+    setSelected(null);
+  };
+  const boardGesture = useGesture({
+    onSwipe: (dir) => {
+      if (dir === "down") consolidate();
+    },
+  });
 
   const statusText =
     state.status === "won"
@@ -91,25 +110,27 @@ export default function MonteCarloClient() {
       </p>
 
       <div
+        {...boardGesture}
         role="grid"
-        aria-label="モンテカルロの盤面"
+        aria-label="モンテカルロの盤面（下スワイプで詰める）"
         style={{
           display: "grid",
           gridTemplateColumns: `repeat(${MC_COLS}, minmax(0, 1fr))`,
           gap: 6,
           maxWidth: 430,
           margin: "0 auto",
+          touchAction: "none",
         }}
       >
         {state.board.map((card, i) => {
           const isSel = selected === i;
           const inPair = card !== null && pairSet.has(i);
           return (
-            <button
+            <div
               key={i}
-              type="button"
               role="gridcell"
-              disabled={!card}
+              tabIndex={card ? 0 : -1}
+              aria-disabled={!card}
               aria-pressed={isSel}
               aria-label={
                 card
@@ -117,6 +138,11 @@ export default function MonteCarloClient() {
                   : "空きマス"
               }
               onClick={() => onCell(i)}
+              onKeyDown={(e) => {
+                if (e.key !== "Enter" && e.key !== " ") return;
+                e.preventDefault();
+                onCell(i);
+              }}
               style={{
                 aspectRatio: "0.78",
                 border: isSel
@@ -135,33 +161,25 @@ export default function MonteCarloClient() {
               }}
             >
               {card ? <CardFace card={card} /> : ""}
-            </button>
+            </div>
           );
         })}
       </div>
 
       <div className="classic-controls" role="group" aria-label="操作" style={{ marginTop: 12 }}>
-        <button
-          type="button"
-          className="classic-btn classic-btn-active"
-          disabled={state.status !== "playing"}
-          onClick={() => {
-            setState((s) => montecarloConsolidate(s));
-            setSelected(null);
-          }}
-        >
-          詰める（山札から補充）
-        </button>
         <button type="button" className="classic-btn" onClick={restart}>
           もう一度
         </button>
         <Link className="classic-btn" href={`${prefix}/games`}>
           ゲーム一覧へ
         </Link>
+        <span className="muted" style={{ fontSize: 13 }}>
+          盤面を下にスワイプで詰める（山札から補充）
+        </span>
       </div>
       <p style={{ fontSize: 13, color: "#475569", marginTop: 10 }}>
         ルール: 縦・横・斜めに隣り合う同じ数字の2枚がペアで取り除けます（緑の枠）。
-        除去したあとは空きマスが残るので、「詰める」で前へ寄せて山札から補充してください。
+        除去したあとは空きマスが残るので、盤面を下にスワイプして前へ寄せ、山札から補充してください。
         山札が尽きてペアも作れなくなったら手詰まりです。
       </p>
     </div>

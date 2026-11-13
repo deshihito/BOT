@@ -8,6 +8,7 @@
 // ローカルの検証はサーバーと同じ evaluateCountdown を使う。
 import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { playSe } from "@/lib/balku-sound";
+import { tappableProps, useGesture } from "@/lib/gesture";
 import {
   evaluateCountdown,
   CD_TIME_LIMIT_MS,
@@ -237,6 +238,39 @@ function Board({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
     void api.move({ type: "submit", steps: sub.steps, pick: sub.pick });
   };
 
+  // 盤面ジェスチャ: 左スワイプ=1つ戻す、右スワイプ=やり直す、上スワイプ=提出。
+  // 子のタイルの onClick との二重発火は useGesture の suppressClickAfterSwipe
+  // が抑止する。提出は上スワイプのほか、提出のタップ対象物でも行える。
+  const boardGesture = useGesture({
+    onSwipe: (dir) => {
+      if (!canPlay) return;
+      if (dir === "left") undo();
+      else if (dir === "right") setBuilder(freshBuilder(numbers));
+      else if (dir === "up") onSubmit();
+    },
+  });
+
+  // U=1つ戻す、R=やり直す（タイル・演算子・操作の div は Enter/Space のみ
+  // のため二重発火なし）。OnlineShell の入力欄（ルームコード等）では無視する。
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (
+        target &&
+        (target.tagName === "INPUT" ||
+          target.tagName === "TEXTAREA" ||
+          target.tagName === "SELECT" ||
+          target.isContentEditable)
+      )
+        return;
+      if (!canPlay) return;
+      if (e.key === "u" || e.key === "U") undo();
+      else if (e.key === "r" || e.key === "R") setBuilder(freshBuilder(numbers));
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [canPlay, undo, numbers]);
+
   const remainingMs = state.roundEndsAt !== null ? Math.max(0, state.roundEndsAt - now) : null;
   const remainingRatio = remainingMs !== null ? remainingMs / CD_TIME_LIMIT_MS : 0;
   const winner = state.phase === "reveal" ? state.players.find((p) => (p.points ?? 0) > 0) : undefined;
@@ -329,9 +363,13 @@ function Board({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
                 </ul>
               </div>
             ) : (
-              <>
+              <div
+                {...boardGesture}
+                aria-label="数字カウントダウンの盤（左にスワイプで1つ戻す、右にスワイプでやり直す、上にスワイプで提出）"
+                style={{ touchAction: "none" }}
+              >
                 <p className="muted" style={{ textAlign: "center", margin: "0 0 8px" }}>
-                  数字タイル→演算子→数字タイルの順にタップして計算を組み立てます。各数字は1回まで、中間結果は正の整数だけ。最後の計算結果が答えになります。
+                  数字タイル→演算子→数字タイルの順にタップして計算を組み立てます。各数字は1回まで、中間結果は正の整数だけ。最後の計算結果が答えになります。盤面を左にスワイプで1つ戻す、右でやり直し、上で提出もできます。
                 </p>
 
                 {/* 使える数（元の数字＋計算結果） */}
@@ -339,30 +377,30 @@ function Board({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
                   {numbers.map((n, i) => {
                     const ref: CdRef = { kind: "num", index: i };
                     return (
-                      <button
+                      <div
                         key={`num-${i}`}
-                        type="button"
-                        disabled={!canPlay || b.usedNums[i]}
-                        onClick={() => tapTile(ref)}
+                        {...tappableProps(() => tapTile(ref))}
+                        aria-pressed={refEquals(b.sel, ref)}
+                        aria-disabled={!canPlay || b.usedNums[i] || undefined}
                         style={tileStyle(refEquals(b.sel, ref), b.usedNums[i])}
                       >
                         {n}
-                      </button>
+                      </div>
                     );
                   })}
                   {b.stepValues.map((v, i) => {
                     const ref: CdRef = { kind: "step", index: i };
                     return (
-                      <button
+                      <div
                         key={`step-${i}`}
-                        type="button"
+                        {...tappableProps(() => tapTile(ref))}
+                        aria-pressed={refEquals(b.sel, ref)}
+                        aria-disabled={!canPlay || b.usedSteps[i] || undefined}
                         className="juice-pop"
-                        disabled={!canPlay || b.usedSteps[i]}
-                        onClick={() => tapTile(ref)}
                         style={{ ...tileStyle(refEquals(b.sel, ref), b.usedSteps[i]), borderStyle: "dashed" }}
                       >
                         {v}
-                      </button>
+                      </div>
                     );
                   })}
                 </div>
@@ -370,12 +408,14 @@ function Board({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
                 {/* 演算子 */}
                 <div style={{ display: "flex", gap: 8, justifyContent: "center", marginTop: 10 }} role="group" aria-label="演算子">
                   {OPS.map((op) => (
-                    <button
+                    <div
                       key={op}
-                      type="button"
-                      disabled={!canPlay || b.sel === null}
+                      {...tappableProps(() => {
+                        if (canPlay && b.sel !== null)
+                          setBuilder((prev) => (prev ? { ...prev, op, error: null } : prev));
+                      })}
                       aria-pressed={b.op === op}
-                      onClick={() => setBuilder((prev) => (prev ? { ...prev, op, error: null } : prev))}
+                      aria-disabled={!canPlay || b.sel === null || undefined}
                       style={{
                         width: 56,
                         height: 48,
@@ -386,10 +426,13 @@ function Board({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
                         fontWeight: 800,
                         cursor: canPlay && b.sel !== null ? "pointer" : "default",
                         touchAction: "manipulation",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
                       }}
                     >
                       {OP_LABEL[op]}
-                    </button>
+                    </div>
                   ))}
                 </div>
 
@@ -417,28 +460,32 @@ function Board({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
                 ) : null}
 
                 <div style={{ display: "flex", gap: 8, justifyContent: "center", marginTop: 10, flexWrap: "wrap" }}>
-                  <button type="button" className="classic-btn" disabled={!canPlay || b.steps.length === 0} onClick={undo}>
-                    1つ戻す
-                  </button>
-                  <button
-                    type="button"
+                  <div
+                    {...tappableProps(undo)}
+                    aria-disabled={!canPlay || b.steps.length === 0 || undefined}
                     className="classic-btn"
-                    disabled={!canPlay}
-                    onClick={() => setBuilder(freshBuilder(numbers))}
+                  >
+                    1つ戻す
+                  </div>
+                  <div
+                    {...tappableProps(() => {
+                      if (canPlay) setBuilder(freshBuilder(numbers));
+                    })}
+                    aria-disabled={!canPlay || undefined}
+                    className="classic-btn"
                   >
                     やり直す
-                  </button>
-                  <button
-                    type="button"
+                  </div>
+                  <div
+                    {...tappableProps(onSubmit)}
+                    aria-disabled={!canPlay || answer === null || undefined}
                     className="classic-btn classic-btn-active"
-                    disabled={!canPlay || answer === null}
-                    onClick={onSubmit}
                     style={{ minWidth: 140 }}
                   >
                     {answer !== null ? `${answer} で提出` : "提出"}
-                  </button>
+                  </div>
                 </div>
-              </>
+              </div>
             )
           ) : null}
 

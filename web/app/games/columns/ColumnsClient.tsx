@@ -1,9 +1,9 @@
 "use client";
 // コラムス。ロジックは lib/columns.ts（落下・回転・連鎖消去）。
-// ボタン操作とキーボード（←→移動／↑回転／↓ソフトドロップ／スペース=ハードドロップ）。
+// 盤面のスワイプ／タップとキーボード（←→移動／↑回転／↓ソフトドロップ／スペース=ハードドロップ）。
 // 端末内で完結し、サーバーへ送信しない。
 import Link from "next/link";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   COLUMNS_COLS,
   COLUMNS_ROWS,
@@ -17,6 +17,7 @@ import {
 } from "@/lib/columns";
 import { useGamesNav } from "../GamesShell";
 import { sfxCorrect, sfxLose, sfxPlace, sfxSlide, sfxTap } from "@/lib/sfx";
+import { useGesture } from "@/lib/gesture";
 import { EndScreen, ScorePop } from "../GameJuice";
 
 const FALL_MS = 650;
@@ -85,9 +86,47 @@ export default function ColumnsClient() {
     sfxLose();
   }, [state]);
 
+  const restart = useCallback(() => {
+    prevBestRef.current = best;
+    prevScoreRef.current = 0;
+    prevClearedRef.current = 0;
+    setScorePop(null);
+    setState(newGame());
+    setStarted(true);
+  }, [best]);
+
+  const doMove = (dir: -1 | 1) => {
+    sfxSlide();
+    setState((s) => moveColumns(s, dir));
+  };
+  const doRotate = () => {
+    sfxTap();
+    // HEAD ではここが doRotate() の自己再帰になっており、回転ボタン・↑キーで
+    // スタックオーバーフローしていた（第5バッチで回転を盤面タップへ移す際に修正）。
+    setState((s) => rotateColumns(s));
+  };
+  const doStep = () => {
+    setState((s) => stepColumns(s));
+  };
+  const doDrop = () => {
+    sfxPlace();
+    setState((s) => dropColumns(s));
+  };
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (!started) return;
+      const target = e.target as HTMLElement | null;
+      if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA")) return;
+      // 未開始・ゲームオーバー時は Enter / Space で開始する。ボタンにフォーカスが
+      // あるときはネイティブの click に任せ、window 側では二重に開始しない。
+      if (!started || state.status === "gameover") {
+        if (e.key === "Enter" || e.key === " ") {
+          if (target && target.tagName === "BUTTON") return;
+          e.preventDefault();
+          restart();
+        }
+        return;
+      }
       if (e.key === "ArrowLeft") {
         e.preventDefault();
         doMove(-1);
@@ -107,32 +146,27 @@ export default function ColumnsClient() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [started]);
+  }, [started, state.status, restart]);
 
-  const restart = () => {
-    prevBestRef.current = best;
-    prevScoreRef.current = 0;
-    prevClearedRef.current = 0;
-    setScorePop(null);
-    setState(newGame());
-    setStarted(true);
-  };
-
-  const doMove = (dir: -1 | 1) => {
-    sfxSlide();
-    setState((s) => moveColumns(s, dir));
-  };
-  const doRotate = () => {
-    sfxTap();
-    doRotate();
-  };
-  const doStep = () => {
-    setState((s) => stepColumns(s));
-  };
-  const doDrop = () => {
-    sfxPlace();
-    setState((s) => dropColumns(s));
-  };
+  // 盤面ジェスチャ: 左右スワイプ=移動、下スワイプ=ソフトドロップ、
+  // 上スワイプ=ハードドロップ、タップ=回転（falling と同じ対応）。
+  // 未開始・ゲームオーバー時のタップは開始、スワイプは無効。
+  const boardGesture = useGesture({
+    onSwipe: (dir) => {
+      if (!started || state.status !== "playing") return;
+      if (dir === "left") doMove(-1);
+      else if (dir === "right") doMove(1);
+      else if (dir === "down") doStep();
+      else if (dir === "up") doDrop();
+    },
+    onTap: () => {
+      if (!started || state.status === "gameover") {
+        restart();
+        return;
+      }
+      if (state.status === "playing") doRotate();
+    },
+  });
 
   // 盤面＋落下中ブロックを合成して描く。
   const cells: (number | null)[] = [...state.board];
@@ -154,27 +188,12 @@ export default function ColumnsClient() {
       </nav>
       <div className="page-heading compact-heading">
         <h1>コラムス</h1>
-        <p className="muted">ボタンかキーボードで操作します（←→ 移動／↑ 回転／↓ 1段落とす／スペース 一気に落とす）。</p>
+        <p className="muted">盤面をスワイプ／タップして操作します（←→ 移動／↑ 一気に落とす／↓ 1段落とす／タップ 回転）。キーボード（矢印キー／スペース）でも動けます。</p>
       </div>
 
       <div className="classic-controls" role="group" aria-label="操作">
         <button type="button" className="classic-btn" onClick={restart}>
           {started ? "もう一度" : "スタート"}
-        </button>
-        <button type="button" className="classic-btn" onClick={() => doMove(-1)} disabled={!started}>
-          ← 左
-        </button>
-        <button type="button" className="classic-btn" onClick={doRotate} disabled={!started}>
-          ↻ 回転
-        </button>
-        <button type="button" className="classic-btn" onClick={() => doMove(1)} disabled={!started}>
-          右 →
-        </button>
-        <button type="button" className="classic-btn" onClick={doStep} disabled={!started}>
-          ↓ 落とす
-        </button>
-        <button type="button" className="classic-btn" onClick={doDrop} disabled={!started}>
-          ⤓ 一気に落とす
         </button>
       </div>
 
@@ -182,7 +201,7 @@ export default function ColumnsClient() {
         {state.status === "gameover" ? (
           <span>ゲームオーバー。スコア {state.score} 点でした。</span>
         ) : !started ? (
-          <span>スタートを押すと始まります。</span>
+          <span>盤面をタップすると始まります。</span>
         ) : null}
         <span>スコア {state.score}{scorePop ? <ScorePop key={scorePop.key} amount={scorePop.amount} /> : null}</span>
         <span>消去 {state.cleared} 個</span>
@@ -192,8 +211,9 @@ export default function ColumnsClient() {
 
       <div style={{ display: "flex", gap: 16, justifyContent: "center", alignItems: "flex-start", flexWrap: "wrap" }}>
         <div
+          {...boardGesture}
           role="img"
-          aria-label="コラムスの盤面"
+          aria-label="コラムスの盤面（スワイプで移動・落とす、タップで回転）"
           style={{
             display: "grid",
             gridTemplateColumns: `repeat(${COLUMNS_COLS}, 1fr)`,
@@ -202,6 +222,7 @@ export default function ColumnsClient() {
             padding: 6,
             background: "#1f2937",
             borderRadius: 10,
+            touchAction: "none",
           }}
         >
           {cells.map((v, i) => (

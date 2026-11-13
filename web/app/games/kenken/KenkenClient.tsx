@@ -12,6 +12,7 @@ import {
   type KenkenViolation,
 } from "@/lib/kenken";
 import { sfxCorrect, sfxPlace, sfxTap, sfxWin, sfxWrong } from "@/lib/sfx";
+import { tappableProps, useGesture } from "@/lib/gesture";
 import { EndScreen } from "../GameJuice";
 import { useGamesNav } from "../GamesShell";
 
@@ -102,6 +103,27 @@ export default function KenkenClient() {
     setChecked(result.violations);
   };
 
+  // 盤面の下スワイプ = チェック。子のマスの onClick との二重発火は
+  // useGesture の suppressClickAfterSwipe が抑止する。
+  const boardGesture = useGesture({
+    onSwipe: (dir) => {
+      if (dir === "down") onCheck();
+    },
+  });
+
+  // 物理キーボードでも数字を入れられる（画面パッドの代替）。
+  // パッドの div は Enter/Space のみ受けるため数字キーとの二重発火はない。
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA")) return;
+      if (/^[1-9]$/.test(e.key) && Number(e.key) <= size) input(Number(e.key));
+      else if (e.key === "Backspace" || e.key === "Delete") input(0);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [input, size]);
+
   const badCells = useMemo(() => {
     const set = new Set<number>();
     if (checked) for (const v of checked) for (const c of v.cells) set.add(c);
@@ -136,31 +158,23 @@ export default function KenkenClient() {
       <div className="page-heading compact-heading">
         <h1>ケンケン</h1>
         <p className="muted">
-          マスをタップして選び、下の数字パッドで入力します。太線で囲まれたまとまりがケージで、左上の数字が目標値です。
+          マスをタップして選び、下の数字パッドで入力します。太線で囲まれたまとまりがケージで、左上の数字が目標値です。盤面を下にスワイプするとチェックします。
         </p>
       </div>
 
       <div className="classic-controls" role="group" aria-label="サイズ">
         {SIZES.map((s) => (
-          <button
+          <div
             key={s.key}
-            type="button"
+            {...tappableProps(() => restart(s.key))}
             aria-pressed={size === s.key}
             className={size === s.key ? "classic-btn classic-btn-active" : "classic-btn"}
-            onClick={() => restart(s.key)}
           >
             {s.label}
-          </button>
+          </div>
         ))}
         <button type="button" className="classic-btn" onClick={() => restart(size)}>
           もう一度
-        </button>
-        <button
-          type="button"
-          className="classic-btn"
-          onClick={onCheck}
-        >
-          チェック
         </button>
       </div>
 
@@ -169,14 +183,27 @@ export default function KenkenClient() {
       </p>
 
       <div
+        {...boardGesture}
         role="grid"
-        aria-label="ケンケンの盤"
+        aria-label="ケンケンの盤（下にスワイプでチェック）"
+        tabIndex={0}
+        onKeyDown={(e) => {
+          // 盤面そのものにフォーカスがあるときだけ Enter でチェックする。
+          // ガードがないとマスにフォーカスして Enter を押したときに選択と
+          // チェックが両方走る（anagram / mastermind と同じ構図）。
+          if (e.target !== e.currentTarget) return;
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            onCheck();
+          }
+        }}
         style={{
           display: "grid",
           gridTemplateColumns: `repeat(${size}, minmax(0, 1fr))`,
           maxWidth: size === 4 ? 400 : 460,
           margin: "0 auto",
           border: "3px solid var(--text)",
+          touchAction: "none",
         }}
       >
         {state.values.map((value, i) => {
@@ -192,10 +219,10 @@ export default function KenkenClient() {
           const labelId = labelCell.get(i);
           const cage = labelId !== undefined ? state.cages[labelId] : null;
           return (
-            <button
+            <div
               key={i}
-              type="button"
               role="gridcell"
+              tabIndex={0}
               aria-label={`${r + 1}行${c + 1}列${value ? ` ${value}` : ""}`}
               aria-pressed={selected === i}
               className={
@@ -208,6 +235,12 @@ export default function KenkenClient() {
                       : undefined
               }
               onClick={() => {
+                sfxTap();
+                setSelected(i);
+              }}
+              onKeyDown={(e) => {
+                if (e.key !== "Enter" && e.key !== " ") return;
+                e.preventDefault();
                 sfxTap();
                 setSelected(i);
               }}
@@ -247,7 +280,7 @@ export default function KenkenClient() {
                 </span>
               ) : null}
               {value !== 0 ? value : ""}
-            </button>
+            </div>
           );
         })}
       </div>
@@ -259,24 +292,22 @@ export default function KenkenClient() {
         style={{ justifyContent: "center", marginTop: 14 }}
       >
         {Array.from({ length: size }, (_, i) => i + 1).map((n) => (
-          <button
+          <div
             key={n}
-            type="button"
+            {...tappableProps(() => input(n))}
             className="classic-btn"
             style={{ minWidth: 44, minHeight: 44, fontSize: 18, fontWeight: 700 }}
-            onClick={() => input(n)}
           >
             {n}
-          </button>
+          </div>
         ))}
-        <button
-          type="button"
+        <div
+          {...tappableProps(() => input(0))}
           className="classic-btn"
           style={{ minWidth: 44, minHeight: 44 }}
-          onClick={() => input(0)}
         >
           消す
-        </button>
+        </div>
       </div>
 
       {state.status === "won" ? (

@@ -19,6 +19,7 @@ import {
   type YahtzeeState,
 } from "@/lib/yahtzee";
 import { useGamesNav } from "../GamesShell";
+import { tappableProps, useGesture } from "@/lib/gesture";
 import { sfxDice, sfxPlace, sfxTap, sfxWin } from "@/lib/sfx";
 import { EndScreen } from "../GameJuice";
 
@@ -74,6 +75,11 @@ export default function YahtzeeClient() {
     sfxDice();
     setState((s) => rollYahtzeeDice(s));
   };
+  // ダイストレイ（ダイスの下の受け皿）をタップ/フリックで振る。ボタンは置かない。
+  const trayGesture = useGesture({
+    onTap: () => { if (!finished && rollsLeft > 0) roll(); },
+    onSwipe: () => { if (!finished && rollsLeft > 0) roll(); },
+  });
   const toggleHold = (i: number) => {
     sfxTap();
     setState((s) => toggleYahtzeeHold(s, i));
@@ -121,14 +127,13 @@ export default function YahtzeeClient() {
         {state.dice.map((d, i) => {
           const held = state.held[i];
           return (
-            <button
+            <div
               key={`${state.turnsDone}-${state.rollsUsed}-${i}-${d}`}
               className="juice-flip"
-              type="button"
-              disabled={finished || state.rollsUsed === 0}
+              {...tappableProps(() => { if (!finished && state.rollsUsed > 0) toggleHold(i); })}
+              aria-disabled={finished || state.rollsUsed === 0}
               aria-pressed={held}
               aria-label={`ダイス ${d}${held ? "（保持中）" : ""}`}
-              onClick={() => toggleHold(i)}
               style={{
                 width: 58,
                 height: 58,
@@ -145,21 +150,26 @@ export default function YahtzeeClient() {
               }}
             >
               {DICE_FACES[d]}
-            </button>
+            </div>
           );
         })}
       </div>
 
-      <div style={{ display: "flex", justifyContent: "center", margin: "8px 0 14px" }}>
-        <button
-          type="button"
-          className="classic-btn"
-          disabled={finished || rollsLeft <= 0}
-          onClick={roll}
-          style={{ minWidth: 180, fontWeight: 700 }}
-        >
-          ダイスを振る{state.rollsUsed > 0 ? `（あと ${rollsLeft} 回）` : ""}
-        </button>
+      <div
+        {...trayGesture}
+        role="button"
+        tabIndex={0}
+        onKeyDown={(e) => { if ((e.key === "Enter" || e.key === " ") && !finished && rollsLeft > 0) { e.preventDefault(); roll(); } }}
+        aria-disabled={finished || rollsLeft <= 0}
+        aria-label="ダイストレイ（タップで振る）"
+        style={{
+          maxWidth: 420, margin: "8px auto 14px", padding: "12px 16px", textAlign: "center",
+          borderRadius: 12, border: "2px dashed #b9a86a", background: "#fdf6da",
+          fontWeight: 700, cursor: finished || rollsLeft <= 0 ? "default" : "pointer",
+          opacity: finished || rollsLeft <= 0 ? 0.5 : 1, touchAction: "none", userSelect: "none",
+        }}
+      >
+        ダイストレイ — タップで振る{state.rollsUsed > 0 ? `（あと ${rollsLeft} 回）` : ""}
       </div>
 
       <div style={{ maxWidth: 520, margin: "0 auto" }} role="group" aria-label="スコアシート">
@@ -189,10 +199,9 @@ export default function YahtzeeClient() {
                   <span>{totals.upperBonus > 0 ? `+${totals.upperBonus}` : ""}</span>
                 </div>
               )}
-              <button
-                type="button"
-                disabled={!canRecord}
-                onClick={() => record(category)}
+              <div
+                {...tappableProps(() => { if (canRecord) record(category); })}
+                aria-disabled={!canRecord}
                 aria-label={
                   recorded !== null
                     ? `${YAHTZEE_CATEGORY_LABELS[category]} 記録済み ${recorded} 点`
@@ -224,7 +233,7 @@ export default function YahtzeeClient() {
                     "—"
                   )}
                 </span>
-              </button>
+              </div>
             </div>
           );
         })}

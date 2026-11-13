@@ -12,6 +12,7 @@ import {
   type NurikabeViolation,
 } from "@/lib/nurikabe";
 import { sfxCorrect, sfxPlace, sfxTap, sfxWin, sfxWrong } from "@/lib/sfx";
+import { tappableProps, useGesture } from "@/lib/gesture";
 import { EndScreen } from "../GameJuice";
 import { useGamesNav } from "../GamesShell";
 
@@ -93,6 +94,7 @@ export default function NurikabeClient() {
   };
 
   const onCheck = () => {
+    if (state.status !== "playing") return;
     const result = checkNurikabe(state);
     if (result.length === 0) {
       sfxCorrect();
@@ -101,6 +103,13 @@ export default function NurikabeClient() {
     }
     setViolations(result);
   };
+
+  // 盤面の下スワイプ=チェック。盤面フォーカス時の Enter でもチェックできる。
+  const boardGesture = useGesture({
+    onSwipe: (dir) => {
+      if (dir === "down") onCheck();
+    },
+  });
 
   const statusText =
     state.status === "won"
@@ -116,26 +125,22 @@ export default function NurikabeClient() {
       </nav>
       <div className="page-heading compact-heading">
         <h1>ぬりかべ</h1>
-        <p className="muted">マスをタップするたびに「海（塗り）→島→未定」と切り替わります。</p>
+        <p className="muted">マスをタップするたびに「海（塗り）→島→未定」と切り替わります。盤面を下にスワイプするとチェックします。</p>
       </div>
 
       <div className="classic-controls" role="group" aria-label="盤の大きさ">
         {SIZES.map((s) => (
-          <button
+          <div
             key={s.key}
-            type="button"
+            {...tappableProps(() => restart(s.key))}
             aria-pressed={size === s.key}
             className={size === s.key ? "classic-btn classic-btn-active" : "classic-btn"}
-            onClick={() => restart(s.key)}
           >
             {s.label}
-          </button>
+          </div>
         ))}
         <button type="button" className="classic-btn" onClick={() => restart(size)}>
           もう一度
-        </button>
-        <button type="button" className="classic-btn" onClick={onCheck} disabled={state.status !== "playing"}>
-          チェック
         </button>
       </div>
 
@@ -169,8 +174,19 @@ export default function NurikabeClient() {
       ) : null}
 
       <div
+        {...boardGesture}
         role="grid"
         aria-label="ぬりかべの盤面"
+        tabIndex={0}
+        onKeyDown={(e) => {
+          // 盤面そのものにフォーカスがあるときだけ Enter でチェックする。
+          // マスにフォーカスして Enter を押したときはマスの切り替えだけが走る
+          // （anagram / mastermind と同じ構図）。
+          if (e.target !== e.currentTarget) return;
+          if (e.key !== "Enter") return;
+          e.preventDefault();
+          onCheck();
+        }}
         style={{
           display: "grid",
           gridTemplateColumns: `repeat(${size}, 1fr)`,
@@ -178,6 +194,7 @@ export default function NurikabeClient() {
           width: "100%",
           maxWidth: size === 5 ? 420 : 520,
           margin: "0 auto",
+          touchAction: "none",
         }}
       >
         {state.marks.map((mark, i) => {
@@ -200,11 +217,12 @@ export default function NurikabeClient() {
           if (bad) {
             border = "2px solid #ef4444";
           }
+          const cellDisabled = isClue || state.status === "won";
           return (
-            <button
+            <div
               key={`${i}-${mark}`}
-              type="button"
               role="gridcell"
+              tabIndex={cellDisabled ? -1 : 0}
               className={bad ? "juice-shake" : mark !== 0 ? "juice-pop" : undefined}
               aria-label={
                 isClue
@@ -215,8 +233,17 @@ export default function NurikabeClient() {
                       ? "島"
                       : "未定"
               }
-              onClick={() => onCell(i)}
-              disabled={isClue || state.status === "won"}
+              aria-disabled={cellDisabled}
+              onClick={cellDisabled ? undefined : () => onCell(i)}
+              onKeyDown={
+                cellDisabled
+                  ? undefined
+                  : (e) => {
+                      if (e.key !== "Enter" && e.key !== " ") return;
+                      e.preventDefault();
+                      onCell(i);
+                    }
+              }
               style={{
                 aspectRatio: "1",
                 minWidth: 0,
@@ -231,7 +258,7 @@ export default function NurikabeClient() {
               }}
             >
               {isClue ? clue : mark === 1 ? "〜" : mark === 2 ? "・" : ""}
-            </button>
+            </div>
           );
         })}
       </div>

@@ -19,6 +19,7 @@ import {
   type BaccaratState,
 } from "@/lib/baccarat";
 import { useGamesNav } from "../GamesShell";
+import { tappableProps, useGesture } from "@/lib/gesture";
 import { sfxCorrect, sfxDeal, sfxPop, sfxTap, sfxWrong } from "@/lib/sfx";
 import { ScorePop } from "../GameJuice";
 
@@ -103,7 +104,6 @@ export default function BaccaratClient() {
   }, [hydrated, state.chips]);
 
   const broke = state.chips < BACCARAT_MIN_BET;
-  const canBet = state.phase === "betting" && !broke;
 
   // 結果確定時に収支へ効果音を連動させる。
   const resultSoundRef = useRef(-1);
@@ -136,6 +136,28 @@ export default function BaccaratClient() {
           ? "プレイヤーの勝ち！"
           : "バンカーの勝ち！";
 
+  // テーブルのタップ/フリック: 賭け中は配る、チップ切れは再支給、結果中は次のラウンドへ。
+  const tableAction = () => {
+    if (state.phase === "result") {
+      sfxTap();
+      setState((s) => nextBaccaratRound(s));
+      return;
+    }
+    if (state.phase !== "betting") return;
+    if (broke) {
+      sfxPop();
+      setState((s) => refillBaccarat(s));
+      return;
+    }
+    deal();
+  };
+  const tableGesture = useGesture({ onTap: tableAction, onSwipe: tableAction });
+  const tableKeyDown = (e: { key: string; preventDefault: () => void }) => {
+    if (e.key !== "Enter" && e.key !== " ") return;
+    e.preventDefault();
+    tableAction();
+  };
+
   return (
     <>
       <nav className="breadcrumbs" aria-label="パンくず">
@@ -146,7 +168,7 @@ export default function BaccaratClient() {
       <div className="page-heading compact-heading">
         <h1>バカラ</h1>
         <p className="muted">
-          賭け先と金額を選んで「配る」を押すと、カードが配られて結果が決まります。第3カードは正式ルールで自動的に引かれます。
+          賭け先と金額を選んでテーブルをタップすると、カードが配られて結果が決まります。第3カードは正式ルールで自動的に引かれます。
         </p>
       </div>
 
@@ -160,7 +182,20 @@ export default function BaccaratClient() {
         ) : null}
       </p>
 
-      <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 14 }}>
+      <div
+        {...tableGesture}
+        role="button"
+        tabIndex={0}
+        onKeyDown={tableKeyDown}
+        aria-label={
+          state.phase === "result"
+            ? "テーブル（タップで次のラウンドへ）"
+            : broke
+              ? "テーブル（タップでチップを再支給）"
+              : "テーブル（タップで配る）"
+        }
+        style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 14, touchAction: "none", cursor: "pointer" }}
+      >
         <HandRow title="プレイヤー" cards={state.playerCards} color="#2563eb" />
         <HandRow title="バンカー" cards={state.bankerCards} color="#dc2626" />
       </div>
@@ -169,16 +204,15 @@ export default function BaccaratClient() {
         <div style={{ display: "grid", gap: 12, maxWidth: 640 }}>
           <div className="classic-controls" role="group" aria-label="賭け先" style={{ margin: 0 }}>
             {BET_OPTIONS.map((opt) => (
-              <button
+              <div
                 key={opt.kind}
-                type="button"
+                {...tappableProps(() => { sfxTap(); setBetKind(opt.kind); })}
                 aria-pressed={betKind === opt.kind}
                 className={betKind === opt.kind ? "classic-btn classic-btn-active" : "classic-btn"}
-                onClick={() => { sfxTap(); setBetKind(opt.kind); }}
                 title={opt.note}
               >
                 {opt.label}
-              </button>
+              </div>
             ))}
           </div>
           <p className="muted" style={{ margin: 0 }}>
@@ -186,15 +220,14 @@ export default function BaccaratClient() {
           </p>
           <div className="classic-controls" role="group" aria-label="賭け金" style={{ margin: 0 }}>
             {AMOUNTS.map((a) => (
-              <button
+              <div
                 key={a}
-                type="button"
+                {...tappableProps(() => { sfxTap(); setAmount(a); })}
                 aria-pressed={amount === a}
                 className={amount === a ? "classic-btn classic-btn-active" : "classic-btn"}
-                onClick={() => { sfxTap(); setAmount(a); }}
               >
                 {a}
-              </button>
+              </div>
             ))}
           </div>
           {error ? (
@@ -202,38 +235,16 @@ export default function BaccaratClient() {
               {error}
             </p>
           ) : null}
-          {broke ? (
-            <button
-              type="button"
-              className="classic-btn"
-              onClick={() => { sfxPop(); setState((s) => refillBaccarat(s)); }}
-            >
-              チップを再支給する（{BACCARAT_START_CHIPS}）
-            </button>
-          ) : (
-            <button
-              type="button"
-              disabled={!canBet}
-              onClick={deal}
-              style={{
-                minHeight: 48,
-                borderRadius: 10,
-                border: "2px solid #166534",
-                background: "#16a34a",
-                color: "#fff",
-                fontSize: 16,
-                fontWeight: 800,
-                cursor: "pointer",
-              }}
-            >
-              配る（{amount} チップ賭ける）
-            </button>
-          )}
+          <p className="muted" style={{ margin: 0 }}>
+            {broke
+              ? `チップが足りません。テーブルをタップで再支給（${BACCARAT_START_CHIPS}）`
+              : `テーブルをタップで配る（${amount} チップ賭ける）`}
+          </p>
         </div>
       ) : (
-        <button type="button" className="classic-btn" onClick={() => { sfxTap(); setState((s) => nextBaccaratRound(s)); }}>
-          次のラウンドへ
-        </button>
+        <p className="muted" style={{ margin: 0 }}>
+          テーブルをタップで次のラウンドへ
+        </p>
       )}
 
       {state.history.length > 0 ? (

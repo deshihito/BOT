@@ -19,6 +19,7 @@ import {
   type PuttState,
 } from "@/lib/puttgolf";
 import { sfxCorrect, sfxSlide, sfxTap, sfxWin } from "@/lib/sfx";
+import { tappableProps, useGesture } from "@/lib/gesture";
 import { EndScreen } from "../GameJuice";
 import { useGamesNav } from "../GamesShell";
 
@@ -140,12 +141,27 @@ export default function PuttGolfClient() {
   };
 
   const aimAtCup = () => {
+    if (state.phase !== "playing" || rolling) return;
     sfxTap();
     setAngle(angleTo(ballPos, hole.cup));
     setPower(
       Math.max(5, Math.round(powerForDistance(Math.hypot(hole.cup.x - ballPos.x, hole.cup.y - ballPos.y)))),
     );
   };
+
+  // コースのタップが核操作。プレイ中は打つ、カップイン時は次のホールへ
+  // （旧「打つ」「次のホールへ」ボタンと同等。window キーリスナーはないため
+  // 二重発火の余地はない）。
+  const onCourseTap = () => {
+    if (state.phase === "playing") {
+      doShoot();
+    } else if (state.phase === "holed") {
+      sfxTap();
+      setState((s) => nextHole(s));
+    }
+  };
+
+  const courseGesture = useGesture({ onTap: onCourseTap });
 
   const playedHoles = state.holeIndex + (state.phase === "playing" ? 0 : 1);
   const parSoFar = state.holes.slice(0, playedHoles).reduce((s, h) => s + h.par, 0);
@@ -160,7 +176,7 @@ export default function PuttGolfClient() {
     state.phase === "finished"
       ? `全ホール終了！ 合計 ${state.totalStrokes} 打（パー ${totalPar(state)}、${scoreDiffLabel(state.totalStrokes - totalPar(state))}）でした。`
       : state.phase === "holed"
-        ? `ホール ${state.holeIndex + 1} を ${state.strokes[state.holeIndex]} 打でカップイン！`
+        ? `ホール ${state.holeIndex + 1} を ${state.strokes[state.holeIndex]} 打でカップイン！ コースをタップして次のホールへ。`
         : rolling
           ? "ボールが転がっています…"
           : `ホール ${state.holeIndex + 1} / 9（パー ${hole.par}）・ このホール ${state.strokes[state.holeIndex]} 打`;
@@ -175,7 +191,7 @@ export default function PuttGolfClient() {
       <div className="page-heading compact-heading">
         <h1>パットゴルフ</h1>
         <p className="muted">
-          角度と強さは下のスライダーで調整し、「打つ」ボタンで打ちます。矢印のマスは傾斜で、ボールが矢印の向きに流されます。
+          角度と強さは下のスライダーで調整し、コースをタップして打ちます。矢印のマスは傾斜で、ボールが矢印の向きに流されます。
         </p>
       </div>
 
@@ -183,21 +199,14 @@ export default function PuttGolfClient() {
         <button type="button" className="classic-btn" onClick={restart}>
           もう一度
         </button>
-        <button type="button" className="classic-btn" onClick={aimAtCup} disabled={state.phase !== "playing" || rolling}>
+        <div
+          {...tappableProps(aimAtCup)}
+          className="classic-btn"
+          aria-disabled={state.phase !== "playing" || rolling}
+          tabIndex={state.phase !== "playing" || rolling ? -1 : 0}
+        >
           カップを狙う
-        </button>
-        {state.phase === "holed" && (
-          <button
-            type="button"
-            className="classic-btn classic-btn-active"
-            onClick={() => {
-              sfxTap();
-              setState((s) => nextHole(s));
-            }}
-          >
-            次のホールへ
-          </button>
-        )}
+        </div>
       </div>
 
       <p className={`classic-status${state.phase === "holed" ? " juice-pulse" : ""}`} role="status">
@@ -224,6 +233,24 @@ export default function PuttGolfClient() {
         </EndScreen>
       )}
 
+      <div
+        {...courseGesture}
+        role="button"
+        tabIndex={0}
+        aria-label={
+          state.phase === "playing"
+            ? "コースをタップして打つ"
+            : state.phase === "holed"
+              ? "コースをタップして次のホールへ"
+              : "パットゴルフのコース"
+        }
+        onKeyDown={(e) => {
+          if (e.key !== "Enter" && e.key !== " ") return;
+          e.preventDefault();
+          onCourseTap();
+        }}
+        style={{ touchAction: "none", width: "100%", maxWidth: PG_WIDTH, borderRadius: 10 }}
+      >
       <svg
         viewBox={`0 0 ${PG_WIDTH} ${PG_HEIGHT}`}
         role="img"
@@ -281,6 +308,7 @@ export default function PuttGolfClient() {
           className={state.phase === "holed" ? "juice-pop" : undefined}
         />
       </svg>
+      </div>
 
       <div
         style={{
@@ -319,17 +347,9 @@ export default function PuttGolfClient() {
         </label>
       </div>
 
-      <div className="classic-controls" role="group" aria-label="打つ">
-        <button
-          type="button"
-          className="classic-btn classic-btn-active"
-          onClick={doShoot}
-          disabled={state.phase !== "playing" || rolling}
-          style={{ minWidth: 140, minHeight: 48, fontSize: 17, fontWeight: 700 }}
-        >
-          打つ
-        </button>
-      </div>
+      <p className="muted" style={{ textAlign: "center", fontSize: 13, marginTop: 10 }}>
+        コースをタップ（またはフォーカスして Enter / Space）で打つ。カップインしたらコースをタップして次のホールへ。
+      </p>
 
       <table
         aria-label="スコアカード"

@@ -15,6 +15,7 @@ import {
   type MmState,
 } from "@/lib/mastermind";
 import { sfxFlip, sfxLose, sfxPlace, sfxTap, sfxWin } from "@/lib/sfx";
+import { tappableProps, useGesture } from "@/lib/gesture";
 import { EndScreen } from "../GameJuice";
 import { useGamesNav } from "../GamesShell";
 
@@ -95,6 +96,24 @@ export default function MastermindClient() {
     setSlot(0);
   };
 
+  const clearGuess = () => {
+    if (state.status !== "playing") return;
+    sfxTap();
+    setCurrent(Array(MM_CODE_LENGTH).fill(null));
+    setSlot(0);
+  };
+
+  // 予想欄のジェスチャ: 上スワイプ = 判定する、左スワイプ = クリア。
+  // キーボードは予想欄フォーカス時の Enter / Space・Backspace / Delete。
+  // window リスナーはないため二重発火の余地はない。子のスロット onClick との
+  // 二重発火は useGesture の suppressClickAfterSwipe が抑止する。
+  const guessGesture = useGesture({
+    onSwipe: (dir) => {
+      if (dir === "up") onSubmit();
+      else if (dir === "left") clearGuess();
+    },
+  });
+
   return (
     <>
       <nav className="breadcrumbs" aria-label="パンくず">
@@ -111,15 +130,14 @@ export default function MastermindClient() {
 
       <div className="classic-controls" role="group" aria-label="難易度">
         {DIFFS.map((d) => (
-          <button
+          <div
             key={d.key}
-            type="button"
+            {...tappableProps(() => restart(d.key))}
             aria-pressed={difficulty === d.key}
             className={difficulty === d.key ? "classic-btn classic-btn-active" : "classic-btn"}
-            onClick={() => restart(d.key)}
           >
             {d.label}
-          </button>
+          </div>
         ))}
         <button type="button" className="classic-btn" onClick={() => restart(difficulty)}>
           もう一度
@@ -161,17 +179,36 @@ export default function MastermindClient() {
       )}
 
       <section aria-label="いまの予想" style={{ margin: "14px 0" }}>
-        <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+        <div
+          role="group"
+          tabIndex={0}
+          aria-label="いまの予想（上にスワイプで判定・左スワイプでクリア）"
+          {...guessGesture}
+          onKeyDown={(e) => {
+            // 子の予想スロット（tappableProps）の Enter / Space はスロット自身が
+            // 受けるため、予想欄そのものにフォーカスがあるときだけ判定する。
+            // ガードがないと予想が揃った状態でスロットに Enter を押したときに
+            // スロット選択と判定が両方走る（anagram と同じ構図）。
+            if ((e.key === "Enter" || e.key === " ") && e.target !== e.currentTarget) return;
+            if (e.key === "Enter" || e.key === " ") {
+              e.preventDefault();
+              onSubmit();
+            } else if (e.key === "Backspace" || e.key === "Delete") {
+              e.preventDefault();
+              clearGuess();
+            }
+          }}
+          style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", touchAction: "none" }}
+        >
           {current.map((id, i) => (
-            <button
+            <div
               key={i}
-              type="button"
-              aria-label={`${i + 1} 番目のマス${id ? `（${colorOf(id)?.label ?? id}）` : "（未選択）"}`}
-              aria-pressed={slot === i}
-              onClick={() => {
+              {...tappableProps(() => {
                 sfxTap();
                 setSlot(i);
-              }}
+              })}
+              aria-label={`${i + 1} 番目のマス${id ? `（${colorOf(id)?.label ?? id}）` : "（未選択）"}`}
+              aria-pressed={slot === i}
               style={{
                 padding: 4,
                 borderRadius: "50%",
@@ -181,32 +218,19 @@ export default function MastermindClient() {
               }}
             >
               <Peg color={colorOf(id)} size={36} />
-            </button>
+            </div>
           ))}
-          <button type="button" className="classic-btn" onClick={() => { sfxTap(); setCurrent(Array(MM_CODE_LENGTH).fill(null)); setSlot(0); }}>
-            クリア
-          </button>
-          <button
-            type="button"
-            className="classic-btn classic-btn-active"
-            disabled={!canSubmit}
-            onClick={onSubmit}
-            style={canSubmit ? undefined : { opacity: 0.5, cursor: "not-allowed" }}
-          >
-            判定する
-          </button>
         </div>
         <div style={{ display: "flex", gap: 10, marginTop: 12, flexWrap: "wrap" }} role="group" aria-label="色の選択">
           {palette.map((c) => (
-            <button
+            <div
               key={c.id}
-              type="button"
+              {...tappableProps(() => pickColor(c.id))}
               aria-label={`${c.label}を選ぶ`}
-              onClick={() => pickColor(c.id)}
               style={{ padding: 2, border: "none", background: "transparent", cursor: "pointer" }}
             >
               <Peg color={c} size={34} />
-            </button>
+            </div>
           ))}
         </div>
       </section>
@@ -214,7 +238,7 @@ export default function MastermindClient() {
       <section aria-label="履歴">
         <h2 style={{ fontSize: 16, margin: "14px 0 8px" }}>履歴</h2>
         {state.guesses.length === 0 ? (
-          <p className="muted">まだ判定していません。色を4つ選んで「判定する」を押してください。</p>
+          <p className="muted">まだ判定していません。色を4つ選んで、予想欄を上にスワイプで判定してください。</p>
         ) : (
           <ol style={{ listStyle: "none", padding: 0, margin: 0, display: "grid", gap: 8 }}>
             {[...state.guesses].reverse().map((g, ri) => {

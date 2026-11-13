@@ -122,11 +122,20 @@ function Board({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
             {(Object.keys(HAND_LABEL) as JankenHand[]).map((hand) => {
               const mine = state.you.yourHand === hand;
               return (
-                <button
+                <div
                   key={hand}
-                  type="button"
-                  disabled={!canThrow}
+                  role="button"
+                  tabIndex={canThrow ? 0 : -1}
+                  aria-disabled={!canThrow}
+                  aria-label={`手: ${HAND_LABEL[hand]}`}
                   onClick={() => {
+                    if (!canThrow) return;
+                    playSe("play");
+                    void api.move({ type: "throw", hand });
+                  }}
+                  onKeyDown={(e) => {
+                    if (!canThrow || (e.key !== "Enter" && e.key !== " ")) return;
+                    e.preventDefault();
                     playSe("play");
                     void api.move({ type: "throw", hand });
                   }}
@@ -142,10 +151,14 @@ function Board({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
                     fontWeight: 800,
                     cursor: canThrow ? "pointer" : "default",
                     touchAction: "manipulation",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    userSelect: "none",
                   }}
                 >
                   {HAND_LABEL[hand]}
-                </button>
+                </div>
               );
             })}
           </div>
@@ -156,7 +169,7 @@ function Board({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
                 ? "退出したため、この対戦では手を出せません。"
                 : state.you.submitted
                   ? `「${state.you.yourHand ? HAND_LABEL[state.you.yourHand] : ""}」で提出済み。全員の提出か制限時間で締め切られます。`
-                  : "手を選んでください。制限時間までに出さないと、そのラウンドは不参加（0点）です。"}
+                  : "手のカードをタップで出してください。制限時間までに出さないと、そのラウンドは不参加（0点）です。"}
             </p>
           ) : null}
 

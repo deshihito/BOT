@@ -17,6 +17,7 @@ import {
   type ShikakuViolation,
 } from "@/lib/shikaku";
 import { sfxCorrect, sfxPlace, sfxTap, sfxWin, sfxWrong } from "@/lib/sfx";
+import { tappableProps, useGesture } from "@/lib/gesture";
 import { EndScreen } from "../GameJuice";
 import { useGamesNav } from "../GamesShell";
 
@@ -154,6 +155,14 @@ export default function ShikakuClient() {
     setCheckResult(violations);
   };
 
+  // 盤面の下スワイプ = チェック。子のマスの onClick との二重発火は
+  // useGesture の suppressClickAfterSwipe が抑止する（kenken / kakuro / tents と同じ）。
+  const boardGesture = useGesture({
+    onSwipe: (dir) => {
+      if (dir === "down") onCheck();
+    },
+  });
+
   const violationCells = new Set((checkResult ?? []).flatMap((v) => v.cells));
   const covered = coveredCount(state);
   const total = state.size * state.size;
@@ -183,27 +192,23 @@ export default function ShikakuClient() {
       <div className="page-heading compact-heading">
         <h1>しかく</h1>
         <p className="muted">
-          角のマスを2回タップして長方形を描き、盤面を埋めます。
+          角のマスを2回タップして長方形を描き、盤面を埋めます。盤面を下にスワイプするとチェックします。
         </p>
       </div>
 
       <div className="classic-controls" role="group" aria-label="サイズと操作">
         {SIZES.map((s) => (
-          <button
+          <div
             key={s.key}
-            type="button"
+            {...tappableProps(() => restart(s.key))}
             aria-pressed={size === s.key}
             className={size === s.key ? "classic-btn classic-btn-active" : "classic-btn"}
-            onClick={() => restart(s.key)}
           >
             {s.label}
-          </button>
+          </div>
         ))}
         <button type="button" className="classic-btn" onClick={() => restart(size)}>
           もう一度
-        </button>
-        <button type="button" className="classic-btn" onClick={onCheck}>
-          チェック
         </button>
       </div>
 
@@ -213,8 +218,20 @@ export default function ShikakuClient() {
       </p>
 
       <div
+        {...boardGesture}
         role="grid"
-        aria-label="しかくの盤"
+        aria-label="しかくの盤（下にスワイプでチェック）"
+        tabIndex={0}
+        onKeyDown={(e) => {
+          // 盤面そのものにフォーカスがあるときだけ Enter でチェックする。
+          // ガードがないとマスにフォーカスして Enter を押したときに選択と
+          // チェックが両方走る（anagram / mastermind と同じ構図）。
+          if (e.target !== e.currentTarget) return;
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            onCheck();
+          }
+        }}
         style={{
           display: "grid",
           gridTemplateColumns: `repeat(${state.size}, minmax(0, 1fr))`,
@@ -222,6 +239,7 @@ export default function ShikakuClient() {
           width: "100%",
           maxWidth: 460,
           margin: "0 auto",
+          touchAction: "none",
         }}
       >
         {state.clues.map((clue, i) => {
@@ -240,10 +258,10 @@ export default function ShikakuClient() {
               }
             : {};
           return (
-            <button
+            <div
               key={i}
-              type="button"
               role="gridcell"
+              tabIndex={0}
               aria-label={
                 clue !== null
                   ? `数字 ${clue} のマス`
@@ -255,6 +273,11 @@ export default function ShikakuClient() {
                 isViolation ? "juice-shake" : isAnchor ? "juice-pulse" : rect ? "juice-pop" : undefined
               }
               onClick={() => onCell(i)}
+              onKeyDown={(e) => {
+                if (e.key !== "Enter" && e.key !== " ") return;
+                e.preventDefault();
+                onCell(i);
+              }}
               style={{
                 aspectRatio: "1",
                 minHeight: 44,
@@ -274,7 +297,7 @@ export default function ShikakuClient() {
               }}
             >
               {clue !== null ? clue : ""}
-            </button>
+            </div>
           );
         })}
       </div>

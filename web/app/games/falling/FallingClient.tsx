@@ -1,9 +1,9 @@
 "use client";
 // フォーリングブロック（落下パズル）。ロジックは lib/falling.ts（純粋関数）。
-// キーボードと画面ボタンの両方で操作でき、端末内で完結する（サーバー送信なし）。
+// キーボードと盤面のスワイプ／タップの両方で操作でき、端末内で完結する（サーバー送信なし）。
 // ベストスコアは localStorage の ago-falling-best に保存する。
 import Link from "next/link";
-import { useCallback, useEffect, useRef, useState, type CSSProperties } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   FALLING_COLS,
   FALLING_PIECE_COLORS,
@@ -25,6 +25,7 @@ import {
   type FallingState,
 } from "@/lib/falling";
 import { sfxCorrect, sfxLose, sfxPlace, sfxTap, sfxWin } from "@/lib/sfx";
+import { tappableProps, useGesture } from "@/lib/gesture";
 import { EndScreen } from "../GameJuice";
 import { useGamesNav } from "../GamesShell";
 
@@ -83,20 +84,6 @@ function Preview({ type, label }: { type: FallingPieceType | null; label: string
     </div>
   );
 }
-
-const ctrlBtn: CSSProperties = {
-  minHeight: 48,
-  padding: "8px 10px",
-  border: "1px solid #c9c9c9",
-  borderRadius: 10,
-  background: "#fff",
-  fontSize: 15,
-  fontWeight: 700,
-  cursor: "pointer",
-  touchAction: "manipulation",
-  userSelect: "none",
-  WebkitUserSelect: "none",
-};
 
 export default function FallingClient() {
   const { prefix } = useGamesNav();
@@ -180,10 +167,31 @@ export default function FallingClient() {
     act(holdPiece);
   }, [act]);
 
+  // 盤面ジェスチャ: 左右スワイプ=移動、下スワイプ=ソフトドロップ、
+  // タップ=回転、上スワイプ=ハードドロップ（操作パッド廃止）。
+  // キーボードは下の window リスナーが受けるため盤面にキー対応は付けない。
+  const boardGesture = useGesture({
+    onSwipe: (dir) => {
+      if (paused) return;
+      if (dir === "left") act(moveLeft);
+      else if (dir === "right") act(moveRight);
+      else if (dir === "down") act(softDrop);
+      else if (dir === "up") actHardDrop();
+    },
+    onTap: () => {
+      if (paused) return;
+      act((s) => rotatePiece(s, 1));
+    },
+  });
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement | null;
       if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA")) return;
+      // HOLD・一時停止の div にフォーカスがあるときの Space は tappableProps が
+      // 受けるため、window 側のハードドロップと二重発火しないよう無視する
+      // （reaction の Space 二重発火の教訓）。
+      if (e.key === " " && target?.closest?.("[data-falling-ui]")) return;
       if (e.key === "p" || e.key === "P") {
         setPaused((v) => !v);
         return;
@@ -249,15 +257,8 @@ export default function FallingClient() {
   const statusText = gameOver
     ? `ゲームオーバー。スコア ${state.score}（ベスト ${Math.max(best, state.score)}）でした。`
     : paused
-      ? "一時停止中です。Pキーかボタンで再開できます。"
+      ? "一時停止中です。Pキーか一時停止表示のタップで再開できます。"
       : "";
-
-  const press = (fn: (s: FallingState) => FallingState) => ({
-    onPointerDown: (e: React.PointerEvent) => {
-      e.preventDefault();
-      if (!paused) act(fn);
-    },
-  });
 
   return (
     <>
@@ -268,7 +269,7 @@ export default function FallingClient() {
       </nav>
       <div className="page-heading compact-heading">
         <h1>フォーリングブロック</h1>
-        <p className="muted">落ちてくるブロックをそろえてラインを消す落下パズル。キー操作と画面ボタンの両方に対応しています。</p>
+        <p className="muted">落ちてくるブロックをそろえてラインを消す落下パズル。盤面のスワイプ・タップとキー操作に対応しています。</p>
       </div>
 
       <p className="classic-status" role="status">
@@ -289,8 +290,9 @@ export default function FallingClient() {
         }}
       >
         <div
+          {...boardGesture}
           role="grid"
-          aria-label="フォーリングブロックの盤"
+          aria-label="フォーリングブロックの盤（左右スワイプで移動、下スワイプでソフトドロップ、タップで回転、上スワイプでハードドロップ）"
           style={{
             display: "grid",
             gridTemplateColumns: `repeat(${FALLING_COLS}, minmax(0, 1fr))`,
@@ -301,7 +303,7 @@ export default function FallingClient() {
             borderRadius: 10,
             background: "#1d2433",
             border: "2px solid #11182a",
-            touchAction: "manipulation",
+            touchAction: "none",
           }}
         >
           {Array.from({ length: FALLING_ROWS * FALLING_COLS }, (_, i) => {
@@ -336,74 +338,45 @@ export default function FallingClient() {
 
         <div style={{ display: "grid", gap: 14, minWidth: 92, justifyItems: "center" }}>
           <Preview type={state.next} label="NEXT" />
-          <Preview type={state.hold} label="HOLD" />
-          <button type="button" className="classic-btn" onClick={actHold} disabled={gameOver || !state.canHold}>
-            ホールド（C）
-          </button>
-          <button
-            type="button"
-            className="classic-btn"
+          <div
+            {...tappableProps(() => {
+              if (!gameOver && state.canHold) actHold();
+            })}
+            data-falling-ui
+            aria-disabled={gameOver || !state.canHold}
+            aria-label="ホールド（タップで入れ替え、Cキーでも可）"
+            style={{
+              cursor: gameOver || !state.canHold ? "default" : "pointer",
+              opacity: gameOver || !state.canHold ? 0.55 : 1,
+              borderRadius: 8,
+              touchAction: "manipulation",
+            }}
+          >
+            <Preview type={state.hold} label="HOLD" />
+          </div>
+          <div
+            {...tappableProps(() => {
+              if (!gameOver) setPaused((v) => !v);
+            })}
+            data-falling-ui
             aria-pressed={paused}
-            onClick={() => setPaused((v) => !v)}
-            disabled={gameOver}
+            aria-disabled={gameOver}
+            aria-label={paused ? "再開（P）" : "一時停止（P）"}
+            className="classic-btn"
+            style={{ opacity: gameOver ? 0.55 : 1 }}
           >
             {paused ? "再開（P）" : "一時停止（P）"}
-          </button>
-          <button type="button" className="classic-btn" onClick={restart}>
+          </div>
+          <button type="button" className="classic-btn" data-falling-ui onClick={restart}>
             もう一度
           </button>
         </div>
       </div>
 
-      <div
-        role="group"
-        aria-label="操作ボタン"
-        style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(6, minmax(0, 1fr))",
-          gap: 8,
-          width: "100%",
-          maxWidth: 560,
-          margin: "16px auto 0",
-        }}
-      >
-        <button type="button" style={ctrlBtn} aria-label="左へ" {...press(moveLeft)}>
-          ←
-        </button>
-        <button type="button" style={ctrlBtn} aria-label="右へ" {...press(moveRight)}>
-          →
-        </button>
-        <button type="button" style={ctrlBtn} aria-label="ソフトドロップ" {...press(softDrop)}>
-          ↓
-        </button>
-        <button type="button" style={ctrlBtn} aria-label="回転" {...press((s) => rotatePiece(s, 1))}>
-          ⟳ 回転
-        </button>
-        <button
-          type="button"
-          style={ctrlBtn}
-          aria-label="ハードドロップ"
-          onPointerDown={(e) => {
-            e.preventDefault();
-            if (!paused) actHardDrop();
-          }}
-        >
-          ⤓ 落下
-        </button>
-        <button
-          type="button"
-          style={ctrlBtn}
-          aria-label="ホールド"
-          onPointerDown={(e) => {
-            e.preventDefault();
-            if (!paused) actHold();
-          }}
-        >
-          ホールド
-        </button>
-      </div>
       <p className="classic-status" style={{ justifyContent: "center" }}>
-        操作: ←→ 移動 / ↓ ソフトドロップ / ↑・X 回転 / Z 左回転 / スペース ハードドロップ / C ホールド
+        操作: 盤面 左右スワイプ 移動 / 下スワイプ ソフトドロップ / タップ 回転 / 上スワイプ
+        ハードドロップ / HOLDタップ ホールド。キー: ←→ 移動 / ↓ ソフトドロップ / ↑・X 回転 /
+        Z 左回転 / スペース ハードドロップ / C ホールド / P 一時停止
       </p>
       {gameOver && (
         <div style={{ maxWidth: 560, margin: "16px auto 0" }}>

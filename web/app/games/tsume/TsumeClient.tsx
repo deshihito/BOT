@@ -16,6 +16,7 @@ import {
   type TsumeMove,
 } from "@/lib/tsume";
 import { sfxCorrect, sfxLose, sfxTap, sfxWin, sfxWrong } from "@/lib/sfx";
+import { tappableProps, useGesture } from "@/lib/gesture";
 import { EndScreen } from "../GameJuice";
 import { useGamesNav } from "../GamesShell";
 
@@ -96,6 +97,20 @@ export default function TsumeClient() {
     }
   };
 
+  const undo = () => {
+    if (state.snapshots.length === 0) return;
+    setState((s) => undoAttackerMove(s));
+    setSelection(null);
+    setPromoteChoice(null);
+  };
+
+  // 盤面の左スワイプで1手戻す（1手戻すボタン廃止）。駒のタップは各マスが受ける。
+  const boardGesture = useGesture({
+    onSwipe: (dir) => {
+      if (dir === "left") undo();
+    },
+  });
+
   const remaining = state.problem.moves - state.movesUsed;
 
   return (
@@ -107,35 +122,22 @@ export default function TsumeClient() {
       </nav>
       <div className="page-heading compact-heading">
         <h1>詰将棋</h1>
-        <p className="muted">持ち駒や盤の駒をタップして選び、光ったマスへ動かします。</p>
+        <p className="muted">持ち駒や盤の駒をタップして選び、光ったマスへ動かします。盤面を左にスワイプすると1手戻せます。</p>
       </div>
 
       <div className="classic-controls" role="group" aria-label="問題">
         {TSUME_PROBLEMS.map((p) => (
-          <button
+          <div
             key={p.id}
-            type="button"
+            {...tappableProps(() => startProblem(p.id))}
             aria-pressed={state.problem.id === p.id}
             className={state.problem.id === p.id ? "classic-btn classic-btn-active" : "classic-btn"}
-            onClick={() => startProblem(p.id)}
           >
             {p.title}（{p.moves}手）
-          </button>
+          </div>
         ))}
         <button type="button" className="classic-btn" onClick={() => startProblem(state.problem.id)}>
           もう一度
-        </button>
-        <button
-          type="button"
-          className="classic-btn"
-          disabled={state.snapshots.length === 0}
-          onClick={() => {
-            setState((s) => undoAttackerMove(s));
-            setSelection(null);
-            setPromoteChoice(null);
-          }}
-        >
-          1手戻す
         </button>
       </div>
 
@@ -165,23 +167,25 @@ export default function TsumeClient() {
           ))}
         </div>
         <div
+          {...boardGesture}
           role="grid"
-          aria-label="将棋盤"
+          aria-label="将棋盤（左スワイプで1手戻す）"
           style={{
             display: "grid",
             gridTemplateColumns: "repeat(9, minmax(0, 1fr))",
             border: "2px solid #8a6d3b",
             background: "#f2d38a",
+            touchAction: "none",
           }}
         >
           {state.pos.board.map((cell, i) => {
             const isTarget = targets.has(i);
             const isSelected = selection?.kind === "board" && selection.from === i;
             return (
-              <button
+              <div
                 key={i}
-                type="button"
                 role="gridcell"
+                tabIndex={0}
                 className={isSelected ? "juice-pulse" : undefined}
                 aria-label={
                   cell
@@ -189,6 +193,11 @@ export default function TsumeClient() {
                     : `${Math.floor(i / 9) + 1}段${9 - (i % 9)}筋 空き`
                 }
                 onClick={() => onCell(i)}
+                onKeyDown={(e) => {
+                  if (e.key !== "Enter" && e.key !== " ") return;
+                  e.preventDefault();
+                  onCell(i);
+                }}
                 style={{
                   aspectRatio: "1",
                   minHeight: 36,
@@ -220,7 +229,7 @@ export default function TsumeClient() {
                 ) : (
                   ""
                 )}
-              </button>
+              </div>
             );
           })}
         </div>
@@ -233,20 +242,19 @@ export default function TsumeClient() {
           {HAND_ORDER.filter((p) => (state.pos.handA[p] ?? 0) > 0).map((p) => {
             const selected = selection?.kind === "hand" && selection.piece === p;
             return (
-              <button
+              <div
                 key={p}
-                type="button"
-                aria-pressed={selected}
-                className={selected ? "classic-btn classic-btn-active" : "classic-btn"}
-                style={{ minWidth: 52, marginRight: 6, marginBottom: 6 }}
-                onClick={() => {
+                {...tappableProps(() => {
                   sfxTap();
                   setPromoteChoice(null);
                   setSelection(selected ? null : { kind: "hand", piece: p });
-                }}
+                })}
+                aria-pressed={selected}
+                className={selected ? "classic-btn classic-btn-active" : "classic-btn"}
+                style={{ minWidth: 52, marginRight: 6, marginBottom: 6 }}
               >
                 {PIECE_LABEL[p]} × {state.pos.handA[p]}
-              </button>
+              </div>
             );
           })}
           {Object.keys(state.pos.handD).length > 0 && (
@@ -263,13 +271,20 @@ export default function TsumeClient() {
           <div className="classic-controls juice-pop" role="group" aria-label="成り・不成の選択" style={{ marginTop: 8 }}>
             <span style={{ fontSize: 14 }}>成りますか？</span>
             {promoteChoice.map((m) => (
-              <button key={String(m.promote)} type="button" className="classic-btn" onClick={() => doMove(m)}>
+              <div
+                key={String(m.promote)}
+                {...tappableProps(() => doMove(m))}
+                className="classic-btn"
+              >
                 {m.promote ? `${PIECE_LABEL[m.piece]}に成る` : "成らない"}
-              </button>
+              </div>
             ))}
-            <button type="button" className="classic-btn" onClick={() => setPromoteChoice(null)}>
+            <div
+              {...tappableProps(() => setPromoteChoice(null))}
+              className="classic-btn"
+            >
               やめる
-            </button>
+            </div>
           </div>
         )}
 

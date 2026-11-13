@@ -20,6 +20,7 @@ import {
   type FcTarget,
 } from "@/lib/freecell";
 import { sfxFlip, sfxPlace, sfxSlide, sfxTap, sfxWin, sfxWrong } from "@/lib/sfx";
+import { tappableProps, useGesture } from "@/lib/gesture";
 import { EndScreen } from "../GameJuice";
 import { useGamesNav } from "../GamesShell";
 
@@ -35,9 +36,8 @@ function newGame(): FcState {
 function CardFace({ card, selected, onClick }: { card: FcCard; selected?: boolean; onClick?: () => void }) {
   const red = card.suit === "hearts" || card.suit === "diamonds";
   return (
-    <button
-      type="button"
-      onClick={onClick}
+    <div
+      {...(onClick ? tappableProps(onClick) : { "aria-disabled": true })}
       aria-label={`${rankLabel(card.rank)} ${suitSymbol(card.suit)}`}
       style={{
         width: "100%",
@@ -58,15 +58,14 @@ function CardFace({ card, selected, onClick }: { card: FcCard; selected?: boolea
     >
       {rankLabel(card.rank)}
       {suitSymbol(card.suit)}
-    </button>
+    </div>
   );
 }
 
 function EmptySlot({ label, onClick, highlight }: { label: string; onClick?: () => void; highlight?: boolean }) {
   return (
-    <button
-      type="button"
-      onClick={onClick}
+    <div
+      {...(onClick ? tappableProps(onClick) : { "aria-disabled": true })}
       aria-label={label}
       style={{
         width: "100%",
@@ -81,7 +80,7 @@ function EmptySlot({ label, onClick, highlight }: { label: string; onClick?: () 
       }}
     >
       {label}
-    </button>
+    </div>
   );
 }
 
@@ -229,6 +228,28 @@ export default function FreeCellClient() {
 
   const remaining = freecellRemaining(state);
 
+  // 盤面の横スワイプ: 左=1手戻す、右=自動送り（solitaire と同じ）。
+  // 子の札の onClick との二重発火は useGesture の suppressClickAfterSwipe が抑止する。
+  // 縦スクロールは残すため touchAction は pan-y。
+  const boardGesture = useGesture({
+    onSwipe: (dir) => {
+      if (dir === "left") onUndo();
+      else if (dir === "right") onAuto();
+    },
+  });
+
+  // U / A キーでも同じ操作ができる（札の div は Enter/Space のみのため二重発火なし）。
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA")) return;
+      if (e.key === "u" || e.key === "U") onUndo();
+      else if (e.key === "a" || e.key === "A") onAuto();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onUndo, onAuto]);
+
   return (
     <>
       <nav className="breadcrumbs" aria-label="パンくず">
@@ -239,27 +260,16 @@ export default function FreeCellClient() {
       <div className="page-heading compact-heading">
         <h1>フリーセル</h1>
         <p className="muted">
-          カードをタップして選び、置き先をタップして動かします。色を交互に小さい順に重ね、全カードを組札（A→K）へそろえればクリア。
+          カードをタップして選び、置き先をタップして動かします。色を交互に小さい順に重ね、全カードを組札（A→K）へそろえればクリア。盤面を左にスワイプで1手戻す、右にスワイプで自動送りします。
         </p>
       </div>
 
       <div className="classic-controls" role="group" aria-label="操作">
-        <button
-          type="button"
-          className="classic-btn"
-          onClick={onUndo}
-          disabled={(state.past ?? []).length === 0}
-        >
-          一手戻す
-        </button>
         <button type="button" className="classic-btn" onClick={retrySameDeal}>
           同じ盤面でもう一度
         </button>
         <button type="button" className="classic-btn" onClick={restart}>
           新しい盤面
-        </button>
-        <button type="button" className="classic-btn" onClick={onAuto}>
-          自動送り
         </button>
       </div>
 
@@ -274,7 +284,11 @@ export default function FreeCellClient() {
         {message ? <span>{message}</span> : null}
       </p>
 
-      <div style={{ maxWidth: 560, margin: "0 auto" }}>
+      <div
+        {...boardGesture}
+        aria-label="フリーセルの盤（左にスワイプで1手戻す、右にスワイプで自動送り）"
+        style={{ maxWidth: 560, margin: "0 auto", touchAction: "pan-y" }}
+      >
         {/* フリーセルと組札 */}
         <div style={{ display: "grid", gridTemplateColumns: "repeat(8, 1fr)", gap: 6, marginBottom: 14 }}>
           {state.freeCells.map((card, i) =>

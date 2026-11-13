@@ -99,11 +99,16 @@ export default function StopwatchClient() {
       </nav>
       <div className="page-heading compact-heading">
         <h1>ストップウォッチ</h1>
-        <p className="muted">ちょうど10.00秒だと思ったところでストップ。誤差の小ささを競います。</p>
+        <p className="muted">ちょうど10.00秒だと思ったところで時計をタップしてストップ。誤差の小ささを競います。</p>
       </div>
 
       <div style={{ maxWidth: 480, margin: "0 auto", textAlign: "center" }}>
         <div
+          role="button"
+          tabIndex={0}
+          aria-label={phase === "running" ? "時計をタップでストップ" : "時計をタップでスタート"}
+          onPointerDown={(e) => { e.preventDefault(); if (phase === "running") stop(); else start(); }}
+          onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); if (phase === "running") stop(); else start(); } }}
           aria-live="off"
           className={phase === "stopped" ? "juice-pulse" : undefined}
           style={{
@@ -113,6 +118,9 @@ export default function StopwatchClient() {
             lineHeight: 1.1,
             padding: "24px 0 8px",
             color: blinded ? "#9ca3af" : "inherit",
+            cursor: "pointer",
+            userSelect: "none",
+            touchAction: "manipulation",
           }}
         >
           {blinded ? "??.??" : formatSeconds(displayMs)}
@@ -143,17 +151,9 @@ export default function StopwatchClient() {
           </div>
         ) : null}
 
-        <div className="classic-controls" style={{ justifyContent: "center" }}>
-          {phase !== "running" ? (
-            <button type="button" className="classic-btn classic-btn-active" onClick={start} style={{ minWidth: 160, minHeight: 52, fontSize: 17 }}>
-              {phase === "stopped" ? "もう一度スタート" : "スタート"}
-            </button>
-          ) : (
-            <button type="button" className="classic-btn classic-btn-active" onClick={stop} style={{ minWidth: 160, minHeight: 52, fontSize: 17 }}>
-              ストップ！
-            </button>
-          )}
-        </div>
+        <p className="muted" style={{ margin: "0 0 4px" }}>
+          {phase === "running" ? "時計をタップでストップ" : "時計をタップでスタート"}
+        </p>
 
         <label
           style={{

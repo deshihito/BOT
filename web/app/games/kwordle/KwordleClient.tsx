@@ -6,6 +6,7 @@
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState, type CSSProperties } from "react";
 import { sfxLose, sfxPlace, sfxTap, sfxWin, sfxWrong } from "@/lib/sfx";
+import { tappableProps } from "@/lib/gesture";
 import { EndScreen } from "../GameJuice";
 import {
   createKwordleGame,
@@ -129,8 +130,13 @@ export default function KwordleClient() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.metaKey || e.ctrlKey || e.altKey) return;
-      if (e.key === "Enter") press("ENTER");
-      else if (e.key === "Backspace") press("BACK");
+      if (e.key === "Enter") {
+        // 画面キー・決定・消す・「もう一度」にフォーカスがあるときは、その要素の
+        // Enter ハンドラに任せ、window 側の決定と二重に走らせない（wordle の教訓）。
+        // Backspace・カナキーには div 側のハンドラがないためガードは Enter 分岐の中だけ。
+        if ((e.target as HTMLElement | null)?.closest?.("[data-kwordle-key]")) return;
+        press("ENTER");
+      } else if (e.key === "Backspace") press("BACK");
       else if (isKanaChar(e.key)) press(e.key);
     };
     window.addEventListener("keydown", onKey);
@@ -183,7 +189,7 @@ export default function KwordleClient() {
       </div>
 
       <div className="classic-controls" role="group" aria-label="操作">
-        <button type="button" className="classic-btn" onClick={restart}>
+        <button type="button" className="classic-btn" onClick={restart} data-kwordle-key="">
           もう一度
         </button>
       </div>
@@ -229,11 +235,11 @@ export default function KwordleClient() {
             {row.map((ch) => {
               const mark = keyState[ch];
               return (
-                <button
+                <div
                   key={ch}
-                  type="button"
+                  {...tappableProps(() => press(ch))}
                   aria-label={ch}
-                  onClick={() => press(ch)}
+                  data-kwordle-key=""
                   style={{
                     minWidth: 34,
                     minHeight: 44,
@@ -244,32 +250,37 @@ export default function KwordleClient() {
                     border: "1px solid #bbb",
                     background: mark ? MARK_COLORS[mark] : "#e8e8e8",
                     color: mark ? "#fff" : undefined,
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    cursor: "pointer",
+                    touchAction: "manipulation",
                   }}
                 >
                   {ch}
-                </button>
+                </div>
               );
             })}
           </div>
         ))}
         <div style={{ display: "flex", gap: 6, justifyContent: "center", marginTop: 2 }}>
-          <button
-            type="button"
+          <div
+            {...tappableProps(() => press("ENTER"))}
             className="classic-btn"
             style={{ minWidth: 96, minHeight: 44 }}
-            onClick={() => press("ENTER")}
+            data-kwordle-key=""
           >
             決定
-          </button>
-          <button
-            type="button"
+          </div>
+          <div
+            {...tappableProps(() => press("BACK"))}
             className="classic-btn"
             style={{ minWidth: 96, minHeight: 44 }}
-            onClick={() => press("BACK")}
             aria-label="1文字消す"
+            data-kwordle-key=""
           >
             ⌫ 消す
-          </button>
+          </div>
         </div>
       </div>
 

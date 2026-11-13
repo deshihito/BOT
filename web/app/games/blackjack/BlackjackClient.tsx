@@ -19,6 +19,7 @@ import {
   type Card,
 } from "@/lib/blackjack";
 import { useGamesNav } from "../GamesShell";
+import { tappableProps, useGesture } from "@/lib/gesture";
 import { sfxCorrect, sfxDeal, sfxPlace, sfxPop, sfxTap, sfxWrong } from "@/lib/sfx";
 import { ScorePop } from "../GameJuice";
 
@@ -85,20 +86,6 @@ function CardView({ card, hidden }: { card?: Card; hidden?: boolean }) {
   );
 }
 
-const btnStyle: React.CSSProperties = {
-  padding: "10px 18px",
-  borderRadius: 999,
-  border: "1px solid #8a90a3",
-  background: "#22304f",
-  color: "#fff",
-  fontSize: 16,
-  fontWeight: 700,
-  cursor: "pointer",
-  minHeight: 44,
-};
-
-const btnDisabled: React.CSSProperties = { ...btnStyle, opacity: 0.4, cursor: "default" };
-
 export default function BlackjackClient() {
   const { prefix } = useGamesNav();
   const [state, setState] = useState<BjState>(() =>
@@ -157,8 +144,29 @@ export default function BlackjackClient() {
     sfxDeal();
     setState((s) => doubleDown(s));
   };
+  const nextOrRefill = () => {
+    if (broke) {
+      sfxPop();
+      setState((s) => refillChips(s));
+    } else {
+      sfxTap();
+      setState((s) => nextRound(s));
+    }
+  };
+  // テーブル（手札エリア）への直接ジェスチャに一本化:
+  // 対局中: タップ=ヒット / 下スワイプ=スタンド / ダブルタップ=ダブル
+  // ベット中: タップ=配る / 結果表示中: タップ=次のラウンド（チップ切れ時は再支給）
+  const tableGesture = useGesture({
+    onTap: () => {
+      if (state.phase === "player") doHit();
+      else if (state.phase === "betting") { if (!broke && bet <= state.chips) dealRound(); }
+      else nextOrRefill();
+    },
+    onDoubleTap: () => { if (state.phase === "player" && canDouble(state)) doDouble(); },
+    onSwipe: (dir) => { if (state.phase === "player" && dir === "down") doStand(); },
+  });
 
-  const chipBtn = (amount: number): React.CSSProperties => ({
+  const chipStyle = (amount: number): React.CSSProperties => ({
     padding: "8px 14px",
     borderRadius: 999,
     border: bet === amount ? "2px solid #f2b33d" : "1px solid #8a90a3",
@@ -197,7 +205,7 @@ export default function BlackjackClient() {
         ) : null}
       </p>
 
-      <div style={{ display: "grid", gap: 18, maxWidth: 640 }}>
+      <div {...tableGesture} style={{ display: "grid", gap: 18, maxWidth: 640, touchAction: "none", cursor: "pointer" }} aria-label="テーブル: タップで進行、対局中は下スワイプでスタンド、ダブルタップでダブル">
         <section aria-label="ディーラーの手札">
           <p style={{ margin: "0 0 6px", fontWeight: 700 }}>
             ディーラー
@@ -237,58 +245,28 @@ export default function BlackjackClient() {
 
       <div className="classic-controls" style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 16 }}>
         {state.phase === "betting" && !broke && (
-          <>
-            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }} role="group" aria-label="ベット額">
-              {BET_OPTIONS.map((amount) => (
-                <button
-                  key={amount}
-                  type="button"
-                  style={chipBtn(amount)}
-                  disabled={amount > state.chips}
-                  onClick={() => { sfxTap(); setBet(amount); }}
-                >
-                  {amount}
-                </button>
-              ))}
-            </div>
-            <button
-              type="button"
-              style={bet <= state.chips ? btnStyle : btnDisabled}
-              disabled={bet > state.chips}
-              onClick={dealRound}
-            >
-              配る
-            </button>
-          </>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }} role="group" aria-label="ベット額チップ">
+            {BET_OPTIONS.map((amount) => (
+              <div
+                key={amount}
+                {...tappableProps(() => { if (amount <= state.chips) { sfxTap(); setBet(amount); } })}
+                aria-disabled={amount > state.chips}
+                style={chipStyle(amount)}
+              >
+                {amount}
+              </div>
+            ))}
+          </div>
         )}
-        {state.phase === "player" && (
-          <>
-            <button type="button" style={btnStyle} onClick={doHit}>
-              ヒット
-            </button>
-            <button type="button" style={btnStyle} onClick={doStand}>
-              スタンド
-            </button>
-            <button
-              type="button"
-              style={canDouble(state) ? btnStyle : btnDisabled}
-              disabled={!canDouble(state)}
-              onClick={doDouble}
-            >
-              ダブル
-            </button>
-          </>
-        )}
-        {state.phase === "settled" && (
-          <button type="button" style={btnStyle} onClick={() => { sfxTap(); setState((s) => nextRound(s)); }}>
-            次のラウンド
-          </button>
-        )}
-        {broke && (
-          <button type="button" style={btnStyle} onClick={() => { sfxPop(); setState((s) => refillChips(s)); }}>
-            チップを再支給（{BJ_INITIAL_CHIPS}）
-          </button>
-        )}
+        <p className="muted" style={{ margin: 0, fontSize: 13 }}>
+          {state.phase === "betting" && !broke
+            ? "チップをタップで選び、テーブルをタップで配る"
+            : state.phase === "player"
+              ? "手札をタップ=ヒット / 下へスワイプ=スタンド / ダブルタップ=ダブル"
+              : broke
+                ? "テーブルをタップでチップ再支給"
+                : "テーブルをタップで次のラウンドへ"}
+        </p>
       </div>
     </>
   );

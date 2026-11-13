@@ -12,6 +12,7 @@ import {
   type DiceRollState,
 } from "@/lib/diceroll";
 import { useGamesNav } from "../GamesShell";
+import { useGesture } from "@/lib/gesture";
 
 const BEST_KEY = "ago-diceroll-best";
 
@@ -19,7 +20,6 @@ function newGame(): DiceRollState {
   return createDiceRollGame(Date.now() % 2147483647);
 }
 
-const ARROW_LABEL: Record<DiceDir, string> = { N: "⬆", E: "➡", S: "⬇", W: "⬅" };
 const KEY_TO_DIR: Record<string, DiceDir> = {
   ArrowUp: "N",
   ArrowRight: "E",
@@ -128,6 +128,11 @@ export default function DiceRollClient() {
     setState(initial);
   };
 
+  // 盤面スワイプ＝その方向へサイコロを転がす（方向ボタンは廃止、矢印キーは残す）。
+  const boardGesture = useGesture({
+    onSwipe: (dir) => roll(dir === "up" ? "N" : dir === "right" ? "E" : dir === "down" ? "S" : "W"),
+  });
+
   const blockedSet = new Set(state.blocked);
   const o = state.orientation;
   const statusText =
@@ -145,7 +150,7 @@ export default function DiceRollClient() {
       <div className="page-heading compact-heading">
         <h1>ダイスロール</h1>
         <p className="muted">
-          矢印ボタンか矢印キーでサイコロを転がして、ゴールまで運びます。
+          盤面をスワイプした方向へサイコロが転がります。ゴールまで運びましょう（矢印キーでも転がせます）。
         </p>
       </div>
 
@@ -180,9 +185,12 @@ export default function DiceRollClient() {
       )}
 
       <div
+        {...boardGesture}
         role="grid"
-        aria-label="ダイスロールの盤"
+        aria-label="ダイスロールの盤（スワイプした方向へ転がります）"
         style={{
+          touchAction: "none",
+          cursor: "grab",
           display: "grid",
           gridTemplateColumns: `repeat(${state.cols}, minmax(0, 1fr))`,
           gap: 4,
@@ -273,64 +281,9 @@ export default function DiceRollClient() {
           </div>
         </div>
 
-        <div role="group" aria-label="転がす方向">
-          <p className="muted" style={{ textAlign: "center", margin: "0 0 6px" }}>
-            転がす（矢印キーでも可）
-          </p>
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "repeat(3, 52px)",
-              gap: 4,
-              justifyContent: "center",
-            }}
-          >
-            <span />
-            <button
-              type="button"
-              className="classic-btn"
-              style={{ minHeight: 52, fontSize: 20 }}
-              aria-label="北へ転がす"
-              disabled={state.status === "won"}
-              onClick={() => roll("N")}
-            >
-              {ARROW_LABEL.N}
-            </button>
-            <span />
-            <button
-              type="button"
-              className="classic-btn"
-              style={{ minHeight: 52, fontSize: 20 }}
-              aria-label="西へ転がす"
-              disabled={state.status === "won"}
-              onClick={() => roll("W")}
-            >
-              {ARROW_LABEL.W}
-            </button>
-            <span />
-            <button
-              type="button"
-              className="classic-btn"
-              style={{ minHeight: 52, fontSize: 20 }}
-              aria-label="東へ転がす"
-              disabled={state.status === "won"}
-              onClick={() => roll("E")}
-            >
-              {ARROW_LABEL.E}
-            </button>
-            <span />
-            <button
-              type="button"
-              className="classic-btn"
-              style={{ minHeight: 52, fontSize: 20 }}
-              aria-label="南へ転がす"
-              disabled={state.status === "won"}
-              onClick={() => roll("S")}
-            >
-              {ARROW_LABEL.S}
-            </button>
-            <span />
-          </div>
+        <div aria-hidden="true" style={{ textAlign: "center" }}>
+          <p className="muted" style={{ margin: "0 0 6px" }}>転がす</p>
+          <p style={{ margin: 0, fontSize: 15, fontWeight: 700 }}>盤面をスワイプした方向へ転がります</p>
         </div>
       </div>
     </>

@@ -18,6 +18,7 @@ import {
   type WordleStats,
 } from "@/lib/wordle";
 import { sfxFlip, sfxLose, sfxTap, sfxWin, sfxWrong } from "@/lib/sfx";
+import { tappableProps } from "@/lib/gesture";
 import { EndScreen } from "../GameJuice";
 import { useGamesNav } from "../GamesShell";
 
@@ -156,6 +157,11 @@ export default function WordleClient() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.metaKey || e.ctrlKey || e.altKey) return;
+      // 画面キーの div にフォーカスがあるときの Enter は div 側の tappableProps が
+      // 受けるため、window 側と二重発火しないよう無視する
+      // （reaction の Space 二重発火の教訓）。
+      const target = e.target as HTMLElement | null;
+      if (e.key === "Enter" && target?.closest?.("[data-wordle-key]")) return;
       if (e.key === "Enter") press("ENTER");
       else if (e.key === "Backspace") press("BACK");
       else if (/^[a-zA-Z]$/.test(e.key)) press(e.key.toUpperCase());
@@ -228,6 +234,10 @@ export default function WordleClient() {
       fontWeight: 700,
       cursor: "pointer",
       padding: 0,
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "center",
+      userSelect: "none",
     };
   };
 
@@ -243,6 +253,10 @@ export default function WordleClient() {
     fontWeight: 700,
     cursor: "pointer",
     padding: 0,
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    userSelect: "none",
   };
 
   return (
@@ -261,22 +275,22 @@ export default function WordleClient() {
       </div>
 
       <div className="classic-controls" role="group" aria-label="モード" style={{ justifyContent: "center" }}>
-        <button
-          type="button"
+        <div
+          {...tappableProps(() => startGame("daily"))}
+          data-wordle-key=""
           aria-pressed={mode === "daily"}
           className={mode === "daily" ? "classic-btn classic-btn-active" : "classic-btn"}
-          onClick={() => startGame("daily")}
         >
           デイリー（{dailyKeyFor(new Date())}）
-        </button>
-        <button
-          type="button"
+        </div>
+        <div
+          {...tappableProps(() => startGame("random"))}
+          data-wordle-key=""
           aria-pressed={mode === "random"}
           className={mode === "random" ? "classic-btn classic-btn-active" : "classic-btn"}
-          onClick={() => startGame("random")}
         >
           ランダム
-        </button>
+        </div>
       </div>
 
       <p className="classic-status" role="status" aria-live="polite">
@@ -332,25 +346,35 @@ export default function WordleClient() {
         {KEY_ROWS.map((row, rowIndex) => (
           <div key={row} style={{ display: "flex", gap: 5, justifyContent: "center", padding: rowIndex === 1 ? "0 5%" : undefined }}>
             {rowIndex === 2 ? (
-              <button type="button" style={wideKeyStyle} onClick={() => press("ENTER")} aria-label="決定">
+              <div
+                style={wideKeyStyle}
+                {...tappableProps(() => press("ENTER"))}
+                data-wordle-key=""
+                aria-label="決定"
+              >
                 Enter
-              </button>
+              </div>
             ) : null}
             {row.split("").map((letter) => (
-              <button
+              <div
                 key={letter}
-                type="button"
                 style={keyStyle(letter)}
-                onClick={() => press(letter)}
+                {...tappableProps(() => press(letter))}
+                data-wordle-key=""
                 aria-label={letter}
               >
                 {letter}
-              </button>
+              </div>
             ))}
             {rowIndex === 2 ? (
-              <button type="button" style={wideKeyStyle} onClick={() => press("BACK")} aria-label="1文字消す">
+              <div
+                style={wideKeyStyle}
+                {...tappableProps(() => press("BACK"))}
+                data-wordle-key=""
+                aria-label="1文字消す"
+              >
                 ⌫
-              </button>
+              </div>
             ) : null}
           </div>
         ))}
@@ -382,9 +406,10 @@ export default function WordleClient() {
                 </p>
               </div>
             )}
-            <button
-              type="button"
-              onClick={copyShare}
+            <div
+              {...tappableProps(() => void copyShare())}
+              data-wordle-key=""
+              aria-label="結果をコピー（シェア用）"
               style={{
                 marginTop: 10,
                 padding: "8px 14px",
@@ -394,10 +419,11 @@ export default function WordleClient() {
                 color: "#1f2937",
                 fontSize: 14,
                 cursor: "pointer",
+                display: "inline-block",
               }}
             >
               {copied ? "コピーしました" : "結果をコピー（シェア用）"}
-            </button>
+            </div>
           </EndScreen>
         </div>
       )}
@@ -405,6 +431,7 @@ export default function WordleClient() {
       <div style={{ display: "flex", justifyContent: "center", marginTop: 16 }}>
         <button
           type="button"
+          data-wordle-key=""
           onClick={restart}
           style={{
             padding: "8px 14px",

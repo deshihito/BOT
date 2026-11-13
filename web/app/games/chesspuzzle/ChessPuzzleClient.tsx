@@ -17,6 +17,7 @@ import {
   type CpPieceType,
 } from "@/lib/chesspuzzle";
 import { sfxPlace, sfxSlide, sfxTap, sfxWin, sfxWrong } from "@/lib/sfx";
+import { tappableProps, useGesture } from "@/lib/gesture";
 import { EndScreen } from "../GameJuice";
 import { useGamesNav } from "../GamesShell";
 
@@ -128,6 +129,7 @@ export default function ChessPuzzleClient() {
   };
 
   const showHint = () => {
+    if (state.status !== "playing") return;
     const h = hintMove(state);
     if (!h) {
       sfxWrong();
@@ -138,6 +140,35 @@ export default function ChessPuzzleClient() {
     setHint(h);
     setMessage(`ヒント: ${moveNotation(state.position, h)}`);
   };
+
+  const undoMove = () => {
+    if (state.history.length === 0) return;
+    sfxSlide();
+    setState((s) => undoPuzzleMove(s));
+    setSelected(null);
+    setPromoOptions(null);
+    setHint(null);
+    setMessage("");
+  };
+
+  // 盤面の左スワイプ = 1手戻す、上スワイプ = ヒント。H / U キーでも同じ操作ができる。
+  // 盤面の子のマス onClick との二重発火は useGesture の suppressClickAfterSwipe が抑止する。
+  const boardGesture = useGesture({
+    onSwipe: (dir) => {
+      if (dir === "left") undoMove();
+      else if (dir === "up") showHint();
+    },
+  });
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      // タップ対象物は Enter / Space しか受けないため H / U との二重発火はない。
+      if (e.key === "h" || e.key === "H") showHint();
+      else if (e.key === "u" || e.key === "U") undoMove();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  });
 
   const remaining = problem.mateIn - state.history.length;
   const statusText =
@@ -159,17 +190,16 @@ export default function ChessPuzzleClient() {
       </p>
       <h1 style={{ fontSize: 22, margin: "0 0 4px" }}>詰めチェス</h1>
       <p style={{ fontSize: 13, color: "#666", margin: "0 0 12px" }}>
-        白の駒をタップして選び、移動先のマスをタップして指します。
+        白の駒をタップして選び、移動先のマスをタップして指します。盤面を左にスワイプで1手戻す、上にスワイプでヒント（H / U キーでも可）。
       </p>
 
       <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 12 }} role="group" aria-label="問題を選ぶ">
         {CHESS_PROBLEMS.map((p, i) => (
-          <button
+          <div
             key={p.id}
-            type="button"
+            {...tappableProps(() => startProblem(p.id))}
             className="classic-btn"
             aria-pressed={p.id === state.problemId}
-            onClick={() => startProblem(p.id)}
             style={{
               minHeight: 40,
               padding: "6px 10px",
@@ -178,7 +208,7 @@ export default function ChessPuzzleClient() {
             }}
           >
             {i + 1}. {p.title}（{p.mateIn}手詰め）{solvedIds.includes(p.id) ? " ✓" : ""}
-          </button>
+          </div>
         ))}
       </div>
 
@@ -193,6 +223,7 @@ export default function ChessPuzzleClient() {
       <div
         role="grid"
         aria-label="チェス盤"
+        {...boardGesture}
         style={{
           display: "grid",
           gridTemplateColumns: "repeat(8, 1fr)",
@@ -200,6 +231,7 @@ export default function ChessPuzzleClient() {
           borderRadius: 6,
           overflow: "hidden",
           maxWidth: 440,
+          touchAction: "none",
         }}
       >
         {Array.from({ length: 64 }, (_, viewIndex) => {
@@ -213,13 +245,18 @@ export default function ChessPuzzleClient() {
           const isHintFrom = hint?.from === index;
           const isHintTo = hint?.to === index;
           return (
-            <button
+            <div
               key={index}
-              type="button"
               role="gridcell"
+              tabIndex={0}
               aria-label={`${squareName(index)}${piece ? ` ${piece.color === "w" ? "白" : "黒"}の${piece.type}` : ""}`}
               className={isSelected ? "juice-pulse" : undefined}
               onClick={() => onSquare(index)}
+              onKeyDown={(e) => {
+                if (e.key !== "Enter" && e.key !== " ") return;
+                e.preventDefault();
+                onSquare(index);
+              }}
               style={{
                 aspectRatio: "1",
                 minHeight: 44,
@@ -261,7 +298,7 @@ export default function ChessPuzzleClient() {
                   ●
                 </span>
               ) : null}
-            </button>
+            </div>
           );
         })}
       </div>
@@ -273,48 +310,27 @@ export default function ChessPuzzleClient() {
             const opt = promoOptions.find((m) => (m.promotion ?? "Q") === p);
             if (!opt) return null;
             return (
-              <button
+              <div
                 key={p}
-                type="button"
+                {...tappableProps(() => doMove(opt))}
                 className="classic-btn"
                 style={{ minHeight: 40, minWidth: 44, fontSize: 20 }}
-                onClick={() => doMove(opt)}
               >
                 {GLYPHS["w" + p]} {p}
-              </button>
+              </div>
             );
           })}
-          <button
-            type="button"
+          <div
+            {...tappableProps(() => setPromoOptions(null))}
             className="classic-btn"
             style={{ minHeight: 40 }}
-            onClick={() => setPromoOptions(null)}
           >
             やめる
-          </button>
+          </div>
         </div>
       )}
 
       <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 12 }}>
-        <button type="button" className="classic-btn" style={{ minHeight: 40 }} onClick={showHint} disabled={state.status !== "playing"}>
-          ヒント
-        </button>
-        <button
-          type="button"
-          className="classic-btn"
-          style={{ minHeight: 40 }}
-          onClick={() => {
-            sfxSlide();
-            setState((s) => undoPuzzleMove(s));
-            setSelected(null);
-            setPromoOptions(null);
-            setHint(null);
-            setMessage("");
-          }}
-          disabled={state.history.length === 0}
-        >
-          1手戻す
-        </button>
         <button type="button" className="classic-btn" style={{ minHeight: 40 }} onClick={() => startProblem(state.problemId)}>
           もう一度
         </button>
