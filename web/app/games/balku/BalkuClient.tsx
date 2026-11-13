@@ -51,13 +51,22 @@ type PublicRoom = { code: string; maxPlayers: number; playerCount: number; creat
 
 type EventBanner = { logId: string; title: string; tone: "good" | "warning" | "danger" };
 
-/* --- ドラッグ＆ドロップ（Pointer Events、マウス/タッチ共通） --- */
+/* --- ジェスチャ操作（Pointer Events、マウス/タッチ共通） ---
+   対戦中のゲームアクションはボタンではなくオブジェクトを直接触る
+   （ドラッグ／フリック／タップ）ことに一本化する。ドロップ先は
+   位置だけでなく「ゾーン方向への速いフリック」でも解決する。 */
 type DragPayload =
   | { source: "hand-project"; card: ProjectCard }
   | { source: "hand-material"; kind: MaterialKind }
-  | { source: "attached-material"; kind: MaterialKind };
+  | { source: "attached-material"; kind: MaterialKind }
+  | { source: "bundle" }
+  | { source: "opponent-bundle"; ownerSeat: number; submissionId: string }
+  | { source: "force-charge"; chargeId: string }
+  | { source: "bid-coin"; plus: number }
+  | { source: "market-material"; kind: MaterialKind }
+  | { source: "turn-token" };
 type DragState = { payload: DragPayload; x: number; y: number; label: string };
-type DropZoneId = "build" | "sell" | "hand";
+type DropZoneId = "build" | "sell" | "hand" | "submit-open" | "submit-down" | "auction" | "pass";
 type FlyState = { name: string; x: number; y: number; w: number; h: number; dx: number; dy: number; go: boolean };
 
 /* --- カード表現（ゲームの「物」は全部カードの見た目に統一する） --- */
@@ -72,14 +81,127 @@ const KIND_FACE: Record<string, string> = {
   ゴミ: "trash",
 };
 
-/** 素材カードの面。種類ごとの色面で、名前をそのまま読ませる。 */
+/** 素材の描き分けアイコン（絵文字ではなく SVG の線画で8種を描き分ける）。 */
+function MatIcon({ kind }: { kind: MaterialKind }) {
+  const common = {
+    viewBox: "0 0 24 24",
+    className: "balku-mat-icon",
+    fill: "none",
+    stroke: "currentColor",
+    strokeWidth: 1.7,
+    strokeLinecap: "round" as const,
+    strokeLinejoin: "round" as const,
+    "aria-hidden": true,
+  };
+  switch (kind) {
+    case "木材":
+      return (
+        <svg {...common}>
+          <rect x="2.5" y="6.5" width="19" height="6" rx="3" />
+          <circle cx="17.8" cy="9.5" r="1.5" />
+          <path d="M5 16.5h13M8.5 19.5h10" strokeDasharray="0" />
+          <rect x="4" y="14.5" width="16" height="5" rx="2.5" />
+        </svg>
+      );
+    case "鉄骨":
+      return (
+        <svg {...common}>
+          <path d="M5 4.5h14M5 19.5h14M12 4.5v15" />
+          <path d="M8.5 4.5v15M15.5 4.5v15" strokeWidth="0.9" opacity="0.55" />
+        </svg>
+      );
+    case "コンクリート":
+      return (
+        <svg {...common}>
+          <rect x="3.5" y="5.5" width="17" height="13" rx="1.5" />
+          <circle cx="8" cy="10" r="0.4" fill="currentColor" />
+          <circle cx="15.5" cy="9" r="0.4" fill="currentColor" />
+          <circle cx="11" cy="14.5" r="0.4" fill="currentColor" />
+          <circle cx="17.5" cy="14" r="0.4" fill="currentColor" />
+        </svg>
+      );
+    case "ガラス":
+      return (
+        <svg {...common}>
+          <rect x="4.5" y="3.5" width="15" height="17" rx="1.5" />
+          <path d="M8 17.5 16.5 6.5M11 19l6.5-8.5" strokeWidth="1.1" opacity="0.7" />
+        </svg>
+      );
+    case "銅線":
+      return (
+        <svg {...common}>
+          <circle cx="12" cy="12" r="8" />
+          <circle cx="12" cy="12" r="4.8" />
+          <circle cx="12" cy="12" r="1.6" />
+        </svg>
+      );
+    case "合金":
+      return (
+        <svg {...common}>
+          <path d="M6 15.5 8.8 8h6.4L18 15.5z" />
+          <path d="M4.5 19h15M9.8 11.5h4.4" />
+        </svg>
+      );
+    case "超伝導体":
+      return (
+        <svg {...common}>
+          <circle cx="12" cy="12" r="8.2" strokeDasharray="3.5 2.6" />
+          <path d="M12.8 6.5 9 13h2.6l-1.2 4.8L14.5 11h-2.7z" fill="currentColor" stroke="none" />
+        </svg>
+      );
+    default:
+      return (
+        <svg {...common}>
+          <path d="M8 5.5 12 3.8l3.4 1.4 4 2.2.6 4.2-1.8 4-3.8 3-4.6-.4-3.6-2.8L4.6 11 5.8 7.2z" />
+          <path d="M8.5 6.5 11 11l4.5-3M11 11l1 6M11 11l5.5 2.5" strokeWidth="1.1" opacity="0.7" />
+        </svg>
+      );
+  }
+}
+
+/** 素材カードの面。種類ごとの色面＋描き分けアイコンで、名前をそのまま読ませる。 */
 function MatFace({ kind, premium = false, mini = false }: { kind: MaterialKind; premium?: boolean; mini?: boolean }) {
   return (
     <span className={`balku-matface balku-matface-${KIND_FACE[kind] ?? "trash"}${mini ? " balku-matface-mini" : ""}`}>
-      {kind}
-      {premium ? " ★" : ""}
+      <MatIcon kind={kind} />
+      <span>{kind}</span>
+      {premium ? <span className="balku-mat-rare">レア</span> : null}
     </span>
   );
+}
+
+/** 残り時間バー（数字と併せて「減っていく」こと自体を見せる）。 */
+function TimerBar({ sec, total }: { sec: number; total: number }) {
+  const pct = Math.max(0, Math.min(100, (sec / total) * 100));
+  const level = pct <= 25 ? " balku-timerbar-danger" : pct <= 50 ? " balku-timerbar-warn" : "";
+  return (
+    <span className={`balku-timerbar${level}`} aria-hidden="true">
+      <span className="balku-timerbar-fill" style={{ width: `${pct}%` }} />
+    </span>
+  );
+}
+
+/** 最終精算の点数カウントアップ（精算行が現れてから短く数える）。 */
+function CountUp({ value, delayMs = 0 }: { value: number; delayMs?: number }) {
+  const [shown, setShown] = useState(0);
+  useEffect(() => {
+    let raf = 0;
+    let startAt: number | null = null;
+    const reduced = typeof window !== "undefined" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    if (reduced) {
+      setShown(value);
+      return;
+    }
+    const tick = (t: number) => {
+      if (startAt === null) startAt = t + delayMs;
+      const p = Math.min(1, Math.max(0, (t - startAt) / 550));
+      setShown(Math.round(value * p));
+      if (p < 1) raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [value, delayMs]);
+  return <>{shown}</>;
 }
 
 /** カード裏面（AGOシアン）。 */
@@ -145,14 +267,16 @@ export default function BalkuClient() {
   // 手札の先頭から割り当てる（エンジンの判定は種類カウントなので等価）。
   const [attachCounts, setAttachCounts] = useState<Record<string, number>>({});
   const [targetSeat, setTargetSeat] = useState<number | undefined>(undefined);
-  const [sellMode, setSellMode] = useState(false);
-  const [sellIds, setSellIds] = useState<string[]>([]);
-  // 素材の売却選択も種類ごとの枚数で持つ（企画カードは sellIds）。
-  const [sellMatCounts, setSellMatCounts] = useState<Record<string, number>>({});
-  const [confirmKey, setConfirmKey] = useState<string | null>(null);
   const [banner, setBanner] = useState<EventBanner | null>(null);
   // BALKU で開示された束の一時フラッシュ（key = "seat:submissionId"）
   const [flashKeys, setFlashKeys] = useState<Record<string, true>>({});
+  // 開示フリップ（裏→表にめくれる対象束。key は flashKeys と同じ）
+  const [flipKeys, setFlipKeys] = useState<Record<string, true>>({});
+  // 接収で消えた束の開示カード（場に短くフリップ表示する）
+  const [revealCard, setRevealCard] = useState<{ name: string; legal: boolean; key: string } | null>(null);
+  // 自分のコイン増減ポップ（前スナップショットとの差分）
+  const [coinPop, setCoinPop] = useState<{ delta: number; key: number } | null>(null);
+  const prevCoinsRef = useRef<number | null>(null);
   const viewRef = useRef<RoomView | null>(null);
   viewRef.current = view;
   const lastLogIdRef = useRef<string | null>(null);
@@ -173,11 +297,27 @@ export default function BalkuClient() {
   const [dropHot, setDropHot] = useState<DropZoneId | null>(null);
   const [fly, setFly] = useState<FlyState | null>(null);
   const [hoverCard, setHoverCard] = useState<string | null>(null);
-  const dragTrackRef = useRef<{ payload: DragPayload; label: string; startX: number; startY: number; active: boolean } | null>(null);
+  const dragTrackRef = useRef<{
+    payload: DragPayload;
+    label: string;
+    startX: number;
+    startY: number;
+    lastX: number;
+    lastY: number;
+    active: boolean;
+    mode: "undecided" | "drag" | "fan";
+    samples: { t: number; x: number; y: number }[];
+    fanEl: HTMLElement | null;
+    fanStartScroll: number;
+  } | null>(null);
   const suppressClickRef = useRef(false);
   const buildZoneRef = useRef<HTMLElement | null>(null);
   const sellZoneRef = useRef<HTMLDivElement | null>(null);
   const handZoneRef = useRef<HTMLElement | null>(null);
+  const seatsRef = useRef<HTMLDivElement | null>(null);
+  const auctionRef = useRef<HTMLDivElement | null>(null);
+  const openPadRef = useRef<HTMLDivElement | null>(null);
+  const downPadRef = useRef<HTMLDivElement | null>(null);
 
   // --- セッション復元と表示名 ---
   useEffect(() => {
@@ -407,7 +547,6 @@ export default function BalkuClient() {
       } else if (!res.ok) {
         setError(typeof data.error === "string" ? data.error : "操作できませんでした。");
       } else {
-        setConfirmKey(null);
         await fetchView(session);
       }
     } catch {
@@ -538,9 +677,6 @@ export default function BalkuClient() {
       setAttachCounts({});
       setTargetSeat(undefined);
     }
-    if (me) {
-      setSellIds((ids) => ids.filter((id) => me.hand.some((c) => c.id === id)));
-    }
     // me の同一性はポーリングごとに変わるため、手札の中身で判定する
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state?.turn, state?.activeSeat, me?.hand.length]);
@@ -635,15 +771,71 @@ export default function BalkuClient() {
       for (const k of flashes) cp[k] = true;
       return cp;
     });
+    setFlipKeys((prev) => {
+      const cp = { ...prev };
+      for (const k of flashes) cp[k] = true;
+      return cp;
+    });
+    // めくれた束は場の開示カードでも見せる（誰の束が何だったか一目で分かる）
+    if (state) {
+      for (const p of state.players) {
+        for (const sub of p.submitted) {
+          if (flashes.includes(`${p.seat}:${sub.id}`)) {
+            setRevealCard({ name: sub.project.name, legal: sub.legal, key: `${p.seat}:${sub.id}` });
+          }
+        }
+      }
+    }
     const timer = setTimeout(() => {
       setFlashKeys((prev) => {
         const cp = { ...prev };
         for (const k of flashes) delete cp[k];
         return cp;
       });
-    }, 700);
+      setFlipKeys((prev) => {
+        const cp = { ...prev };
+        for (const k of flashes) delete cp[k];
+        return cp;
+      });
+    }, 900);
     return () => clearTimeout(timer);
   }, [state]);
+
+  // --- 演出: 接収で消えた束は、ログの開示名で開示カードをフリップ表示する ---
+  useEffect(() => {
+    if (!latestLog) return;
+    const text = latestLog.text;
+    let name: string | null = null;
+    if (text.includes("BALKU成功")) {
+      name = text.match(/違法建築「([^」]+)」/)?.[1] ?? null;
+    } else if (text.includes("強制BALKU発動")) {
+      const quoted = [...text.matchAll(/「([^」]+)」/g)].map((m) => m[1]);
+      name = quoted.length >= 2 ? quoted[1] : null;
+    }
+    if (!name) return;
+    setRevealCard({ name, legal: false, key: `log:${latestLog.id}` });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [latestLog?.id]);
+
+  // 開示カードは短く出して消す
+  useEffect(() => {
+    if (!revealCard) return;
+    const timer = setTimeout(() => setRevealCard((r) => (r?.key === revealCard.key ? null : r)), 2100);
+    return () => clearTimeout(timer);
+  }, [revealCard]);
+
+  // --- 演出: 自分のコインが動いたら +N / −N を浮かせる ---
+  const myCoinsNow = state?.players.find((p) => p.seat === mySeat)?.coins;
+  useEffect(() => {
+    if (myCoinsNow === undefined) return;
+    const prev = prevCoinsRef.current;
+    prevCoinsRef.current = myCoinsNow;
+    if (prev === null || prev === myCoinsNow) return;
+    setCoinPop({ delta: myCoinsNow - prev, key: Date.now() });
+    const timer = setTimeout(() => setCoinPop(null), 1500);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [myCoinsNow]);
 
   const header = (
     <>
@@ -917,11 +1109,24 @@ export default function BalkuClient() {
           </div>
         )}
         <div className="balku-table">
-        <section className="balku-panel">
+        <section className="balku-panel balku-panel-results">
+          {st.winnerSeats.includes(mySeat) && (
+            <div className="balku-confetti" aria-hidden="true">
+              {Array.from({ length: 18 }, (_, i) => (
+                <span
+                  key={i}
+                  style={{
+                    left: `${(i * 53) % 96 + 2}%`,
+                    animationDelay: `${(i % 6) * 0.14}s`,
+                    background: ["#f5c518", "#39bfe8", "#57c785", "#fdf6dd"][i % 4],
+                  }}
+                />
+              ))}
+            </div>
+          )}
           <h2>最終精算</h2>
           <p className="balku-winner">
             {st.winnerSeats.length > 1 ? `共同勝利: ${winnerNames.join(" / ")}` : `勝者: ${winnerNames[0] ?? "—"}`}
-            {st.winnerSeats.includes(mySeat) ? "" : ""}
           </p>
           <table className="balku-results">
             <thead>
@@ -935,16 +1140,26 @@ export default function BalkuClient() {
             </thead>
             <tbody>
               {st.finalScores.map((score, index) => (
-                <tr key={score.seat} className={st.winnerSeats.includes(score.seat) ? "balku-result-win" : ""}>
+                <tr
+                  key={score.seat}
+                  className={`balku-result-row${st.winnerSeats.includes(score.seat) ? " balku-result-win" : ""}`}
+                  style={{ animationDelay: `${index * 0.35}s` }}
+                >
                   <td>{index + 1}</td>
                   <td>
                     {score.name}
                     {score.seat === mySeat ? "（あなた）" : ""}
                   </td>
-                  <td>{score.submittedPoints}</td>
-                  <td>{score.bonusPoints}</td>
                   <td>
-                    <strong>{score.points} PT</strong>
+                    <CountUp value={score.submittedPoints} delayMs={index * 350} />
+                  </td>
+                  <td>
+                    <CountUp value={score.bonusPoints} delayMs={index * 350} />
+                  </td>
+                  <td>
+                    <strong>
+                      <CountUp value={score.points} delayMs={index * 350} /> PT
+                    </strong>
                   </td>
                 </tr>
               ))}
@@ -998,11 +1213,8 @@ export default function BalkuClient() {
   const selectedMaterialCards = handMaterials.filter((c) => selectedMaterialIds.includes(c.id));
   const selectedLegal = selectedProject ? isLegalSubmission(selectedProject, selectedMaterialCards) : false;
 
-  /** 企画を施工ゾーンにセットする（タップ選択とドロップの共通入口）。 */
+  /** 企画を施工ゾーンにセットする（タップとドロップの共通入口）。 */
   const placeProject = (card: ProjectCard) => {
-    setSellMode(false);
-    setSellIds([]);
-    setSellMatCounts({});
     setSelectedProjectId(card.id);
     // 正規完成に必要な数を初期値にする（足りない種類は所持ぶんまで）。
     // selectLegalMaterials が返す実カード集合と種類カウントで等価になる。
@@ -1026,25 +1238,16 @@ export default function BalkuClient() {
     placeProject(card);
   };
 
-  const toggleProjectSell = (card: ProjectCard) => {
-    if (suppressClickRef.current) return;
-    setSellIds((ids) => (ids.includes(card.id) ? ids.filter((id) => id !== card.id) : [...ids, card.id]));
-  };
-
-  // 素材グループの売却選択: タップのたびに +1、所持数に達したら 0 に戻る
-  const cycleMatSell = (kind: MaterialKind) => {
-    if (suppressClickRef.current) return;
-    const owned = ownedCount(kind);
-    setSellMatCounts((prev) => {
-      const current = Math.min(prev[kind] ?? 0, owned);
-      return { ...prev, [kind]: current >= owned ? 0 : current + 1 };
-    });
-  };
-  const sellMatTotal = MARKET_MATERIALS.reduce((sum, kind) => sum + Math.min(sellMatCounts[kind] ?? 0, ownedCount(kind)), 0);
-  const sellTotal = sellIds.length + sellMatTotal;
-
   const submitSelected = (faceUp: boolean) => {
     if (!selectedProject) return;
+    if (!myTurn || busy) {
+      playSe("error");
+      return;
+    }
+    if (needsTarget && targetSeat === undefined) {
+      playSe("error");
+      return;
+    }
     // FLIP: 手札の企画カードの位置から施工ゾーンへカードを飛ばす
     try {
       const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -1079,16 +1282,27 @@ export default function BalkuClient() {
     setTargetSeat(undefined);
   };
 
-  /* --- ドラッグ＆ドロップの解決 ---
-     タップ操作は従来どおり全て可能で、ドラッグはその入口を増やすだけ。
-     ドロップ先は施工ゾーン（build）/ 売却ポケット（sell）/ 手札（hand）。 */
-  const zoneAt = (x: number, y: number): DropZoneId | null => {
-    const zones: [DropZoneId, HTMLElement | null][] = [
-      ["build", buildZoneRef.current],
-      ["sell", sellZoneRef.current],
-      ["hand", handZoneRef.current],
-    ];
-    for (const [id, el] of zones) {
+  /* --- ジェスチャの解決 ---
+     対戦中のアクションは全てここを通る。ドロップ先は
+     施工（build）/ 売却（sell）/ 自分の領域（hand）/ 提出パッド
+     （submit-open・submit-down）/ オークション（auction）/ 席（pass）。
+     強制BALKU の対象束だけは要素そのものを当たり判定にする。 */
+  const zoneEls = (): [DropZoneId, HTMLElement | null][] => [
+    ["submit-open", openPadRef.current],
+    ["submit-down", downPadRef.current],
+    ["sell", sellZoneRef.current],
+    ["auction", auctionRef.current],
+    ["build", buildZoneRef.current],
+    ["pass", seatsRef.current],
+    ["hand", handZoneRef.current],
+  ];
+
+  const zoneAt = (x: number, y: number, payload?: DragPayload): DropZoneId | null => {
+    if (payload?.source === "force-charge") {
+      const hit = document.elementFromPoint(x, y)?.closest?.("[data-bulk-target]");
+      if (hit) return "hand"; // 対象束の特定は endDrag 側の属性で確定させる
+    }
+    for (const [id, el] of zoneEls()) {
       if (!el) continue;
       const r = el.getBoundingClientRect();
       if (x >= r.left && x <= r.right && y >= r.top && y <= r.bottom) return id;
@@ -1096,8 +1310,45 @@ export default function BalkuClient() {
     return null;
   };
 
-  const resolveDrop = (payload: DragPayload, zone: DropZoneId | null) => {
+  /** フリック解決: ゾーンに届いていなくても、ゾーン方向への速いスワイプは到達と同等にする。 */
+  const flickZone = (track: { payload: DragPayload; startX: number; startY: number }, vx: number, vy: number): DropZoneId | null => {
+    const speed = Math.hypot(vx, vy);
+    if (speed < 0.5) return null;
+    const relevant: Partial<Record<DragPayload["source"], DropZoneId[]>> = {
+      "hand-project": ["build", "sell"],
+      "hand-material": ["build", "sell"],
+      "attached-material": ["hand"],
+      bundle: ["submit-open", "submit-down"],
+      "opponent-bundle": ["hand"],
+      "bid-coin": ["auction"],
+      "market-material": ["hand"],
+      "turn-token": ["pass"],
+    };
+    const wanted = relevant[track.payload.source] ?? [];
+    let best: { zone: DropZoneId; dot: number } | null = null;
+    for (const [id, el] of zoneEls()) {
+      if (!el || !wanted.includes(id)) continue;
+      const r = el.getBoundingClientRect();
+      const cx = r.left + r.width / 2 - track.startX;
+      const cy = r.top + r.height / 2 - track.startY;
+      const dist = Math.hypot(cx, cy);
+      if (dist < 24 || dist > 900) continue;
+      const dot = (vx * cx + vy * cy) / (speed * dist);
+      if (dot > 0.62 && (!best || dot > best.dot)) best = { zone: id, dot };
+    }
+    return best?.zone ?? null;
+  };
+
+  const resolveDrop = (payload: DragPayload, zone: DropZoneId | null, forceTarget?: { seat: number; submissionId: string }) => {
     if (!zone) return;
+    if (payload.source === "force-charge") {
+      if (forceTarget) {
+        void doMove({ type: "forceBulk", chargeId: payload.chargeId, targetSeat: forceTarget.seat, submissionId: forceTarget.submissionId });
+      } else {
+        playSe("error");
+      }
+      return;
+    }
     if (zone === "build") {
       if (payload.source === "hand-project") {
         playSe("play");
@@ -1123,18 +1374,58 @@ export default function BalkuClient() {
       }
       return;
     }
-    if (zone === "hand" && payload.source === "attached-material") {
-      playSe("draw");
-      setAttachCounts((prev) => ({ ...prev, [payload.kind]: Math.max(0, attachOf(payload.kind) - 1) }));
+    if (zone === "hand") {
+      if (payload.source === "attached-material") {
+        playSe("draw");
+        setAttachCounts((prev) => ({ ...prev, [payload.kind]: Math.max(0, attachOf(payload.kind) - 1) }));
+      } else if (payload.source === "market-material") {
+        void doMove({ type: "buyMaterial", material: payload.kind });
+      } else if (payload.source === "opponent-bundle") {
+        void doMove({ type: "bulkCall", targetSeat: payload.ownerSeat, submissionId: payload.submissionId });
+      }
+      return;
+    }
+    if (zone === "submit-open" || zone === "submit-down") {
+      if (payload.source === "bundle") submitSelected(zone === "submit-open");
+      return;
+    }
+    if (zone === "auction") {
+      if (payload.source === "bid-coin" && st.auction) {
+        void doMove({ type: "bid", amount: st.auction.highestBid + payload.plus });
+      }
+      return;
+    }
+    if (zone === "pass") {
+      if (payload.source === "turn-token") void doMove({ type: "endTurn" });
+      return;
     }
   };
 
-  const beginDrag = (payload: DragPayload, label: string) => (e: React.PointerEvent) => {
-    if (!myTurn || busy || me.eliminated) return;
+  /* ドラッグの可否はオブジェクトごとに決める（手番制約のない入札・BALKU と、
+     手番中だけの提出・購入などを分ける）。触れない時は呼び出し側で
+     balku-inert を付けて沈ませる。 */
+  const beginDrag = (payload: DragPayload, label: string, canDrag: boolean) => (e: React.PointerEvent) => {
+    if (!canDrag || busy) return;
     if (e.button !== undefined && e.button > 0) return;
-    dragTrackRef.current = { payload, label, startX: e.clientX, startY: e.clientY, active: false };
+    // 入れ子のドラッグ（束の中の添付素材など）は内側を優先する
+    e.stopPropagation();
+    const el = e.currentTarget as HTMLElement;
+    const fan = el.closest?.(".balku-fan") as HTMLElement | null;
+    dragTrackRef.current = {
+      payload,
+      label,
+      startX: e.clientX,
+      startY: e.clientY,
+      lastX: e.clientX,
+      lastY: e.clientY,
+      active: false,
+      mode: "undecided",
+      samples: [{ t: performance.now(), x: e.clientX, y: e.clientY }],
+      fanEl: payload.source === "hand-project" || payload.source === "hand-material" ? fan : null,
+      fanStartScroll: fan ? fan.scrollLeft : 0,
+    };
     try {
-      (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+      el.setPointerCapture(e.pointerId);
     } catch {
       // キャプチャできなくても move/up は要素上で追える
     }
@@ -1142,13 +1433,26 @@ export default function BalkuClient() {
   const moveDrag = (e: React.PointerEvent) => {
     const track = dragTrackRef.current;
     if (!track) return;
+    track.samples.push({ t: performance.now(), x: e.clientX, y: e.clientY });
+    if (track.samples.length > 24) track.samples.shift();
+    const dx = e.clientX - track.startX;
+    const dy = e.clientY - track.startY;
     if (!track.active) {
-      if (Math.hypot(e.clientX - track.startX, e.clientY - track.startY) < 7) return;
+      if (Math.hypot(dx, dy) < 7) return;
       track.active = true;
       playSe("draw");
+      // 手札ファンの上の横スワイプは「ファンを流す」専用に振り分ける
+      if (track.fanEl && Math.abs(dx) > Math.abs(dy) * 1.3) track.mode = "fan";
+      else track.mode = "drag";
     }
+    if (track.mode === "fan" && track.fanEl) {
+      track.fanEl.scrollLeft = track.fanStartScroll - dx;
+      return;
+    }
+    track.lastX = e.clientX;
+    track.lastY = e.clientY;
     setDrag({ payload: track.payload, x: e.clientX, y: e.clientY, label: track.label });
-    setDropHot(zoneAt(e.clientX, e.clientY));
+    setDropHot(zoneAt(e.clientX, e.clientY, track.payload));
   };
   const endDrag = (e: React.PointerEvent) => {
     const track = dragTrackRef.current;
@@ -1158,13 +1462,41 @@ export default function BalkuClient() {
     setTimeout(() => {
       suppressClickRef.current = false;
     }, 60);
-    const zone = zoneAt(e.clientX, e.clientY);
     setDropHot(null);
+    if (track.mode === "fan") {
+      setDrag(null);
+      return;
+    }
+    // 速度（直近サンプルから px/ms）
+    const nowT = performance.now();
+    const past = [...track.samples].reverse().find((s) => nowT - s.t >= 70) ?? track.samples[0];
+    const dt = Math.max(1, nowT - (past?.t ?? nowT));
+    const vx = (e.clientX - (past?.x ?? e.clientX)) / dt;
+    const vy = (e.clientY - (past?.y ?? e.clientY)) / dt;
+    // 強制BALKU は離した地点の束そのものが対象
+    let forceTarget: { seat: number; submissionId: string } | undefined;
+    if (track.payload.source === "force-charge") {
+      const hit = document.elementFromPoint(e.clientX, e.clientY)?.closest?.("[data-bulk-target]");
+      const raw = hit?.getAttribute("data-bulk-target");
+      if (raw) {
+        const [seatRaw, submissionId] = raw.split(":");
+        forceTarget = { seat: Number(seatRaw), submissionId };
+      }
+    }
+    let zone = zoneAt(e.clientX, e.clientY, track.payload);
+    if (track.payload.source === "force-charge") zone = forceTarget ? "hand" : null;
+    // 相手の束を自分の側へ「引いて離す」引き寄せ（閾値未満は無効＝確認を兼ねる）
+    if (!zone && track.payload.source === "opponent-bundle") {
+      const dy = e.clientY - track.startY;
+      if (dy > 56 && vy > 0.12) zone = "hand";
+    }
+    if (!zone) zone = flickZone(track, vx, vy);
     if (zone) {
       setDrag(null);
-      resolveDrop(track.payload, zone);
+      resolveDrop(track.payload, zone, forceTarget);
     } else {
-      // 対象外で離したら元の位置へ戻る
+      // 対象外で離したら元の位置へ戻る（スナップバック）
+      playSe("error");
       setDrag({ payload: track.payload, x: track.startX, y: track.startY, label: track.label });
       setTimeout(() => setDrag(null), 200);
     }
@@ -1174,8 +1506,8 @@ export default function BalkuClient() {
     setDrag(null);
     setDropHot(null);
   };
-  const dragHandlers = (payload: DragPayload, label: string) => ({
-    onPointerDown: beginDrag(payload, label),
+  const dragHandlers = (payload: DragPayload, label: string, canDrag: boolean) => ({
+    onPointerDown: beginDrag(payload, label, canDrag),
     onPointerMove: moveDrag,
     onPointerUp: endDrag,
     onPointerCancel: cancelDrag,
@@ -1209,9 +1541,36 @@ export default function BalkuClient() {
   const renderBundle = (owner: SnapshotPlayer, sub: SnapshotSubmission) => {
     const isMine = owner.seat === mySeat;
     const keyBase = `${owner.seat}:${sub.id}`;
+    // 相手の束は「自分の側へ引く」ジェスチャそのものが BALKU コール。
+    // 強制BALKU の権利オブジェクトのドロップ先にもなる。
+    const canBulk = !isMine && !me.eliminated && !owner.eliminated && st.phase === "active";
+    const bundleDrag = canBulk
+      ? dragHandlers({ source: "opponent-bundle", ownerSeat: owner.seat, submissionId: sub.id }, isMine ? "" : sub.faceUp ? sub.project.name : "伏せ企画", true)
+      : undefined;
+    const bundleCls = `${flashKeys[keyBase] ? " balku-bundle-flash" : ""}${flipKeys[keyBase] ? " balku-bundle-flip" : ""}${canBulk ? " balku-draggable balku-bundle-pullable" : ""}`;
+    // 支援技術向け: 束自体を focusable にし、Enter/Space を引き寄せ（BALKU）と等価にする
+    const bundleKeys = canBulk
+      ? {
+          tabIndex: 0,
+          role: "button" as const,
+          "aria-label": `${owner.name}の提出をBALKUする`,
+          onKeyDown: (e: React.KeyboardEvent) => {
+            if (e.key === "Enter" || e.key === " ") {
+              e.preventDefault();
+              void doMove({ type: "bulkCall", targetSeat: owner.seat, submissionId: sub.id });
+            }
+          },
+        }
+      : {};
     if (!sub.faceUp) {
       return (
-        <div key={sub.id} className={`balku-bundle balku-bundle-down${flashKeys[keyBase] ? " balku-bundle-flash" : ""}`}>
+        <div
+          key={sub.id}
+          data-bulk-target={canBulk ? keyBase : undefined}
+          className={`balku-bundle balku-bundle-down${bundleCls}`}
+          {...bundleDrag}
+          {...bundleKeys}
+        >
           <div className="balku-bundle-main">
             <span className="balku-bundle-name">{isMine ? sub.project.name : "伏せ企画"}</span>
             <span className="balku-badge balku-badge-hazard">伏せ</span>
@@ -1219,13 +1578,23 @@ export default function BalkuClient() {
             {isMine && <span className={sub.legal ? "balku-badge balku-badge-ok" : "balku-badge balku-badge-bad"}>{sub.legal ? "正規" : "違法"}</span>}
           </div>
           {renderBundleMats(sub, isMine)}
-          {!isMine && !me.eliminated && renderBulkButtons(owner, sub, keyBase)}
+          {canBulk && <span className="balku-bundle-pullhint" aria-hidden="true">▽ 引くとBALKU</span>}
         </div>
       );
     }
     return (
-      <div key={sub.id} className={`balku-bundle${flashKeys[keyBase] ? " balku-bundle-flash" : ""}`}>
-        {sub.legal && <span className="balku-stamp" aria-hidden="true">承認</span>}
+      <div
+        key={sub.id}
+        data-bulk-target={canBulk ? keyBase : undefined}
+        className={`balku-bundle${bundleCls}`}
+        {...bundleDrag}
+        {...bundleKeys}
+      >
+        {sub.legal ? (
+          <span className="balku-stamp" aria-hidden="true">承認</span>
+        ) : (
+          <span className="balku-stamp balku-stamp-bad" aria-hidden="true">違法</span>
+        )}
         <div className="balku-bundle-main">
           <span className="balku-bundle-name">{sub.project.name}</span>
           <span>{sub.project.points} PT</span>
@@ -1234,64 +1603,12 @@ export default function BalkuClient() {
         </div>
         <p className="balku-bundle-effect">{sub.project.effect.label}</p>
         {renderBundleMats(sub, true)}
-        {!isMine && !me.eliminated && renderBulkButtons(owner, sub, keyBase)}
-      </div>
-    );
-  };
-
-  const renderBulkButtons = (owner: SnapshotPlayer, sub: SnapshotSubmission, keyBase: string) => {
-    if (owner.eliminated) return null;
-    const bulkKey = `bulk:${keyBase}`;
-    const forceKey = `force:${keyBase}`;
-    const riskText = sub.faceUp && !sub.legal ? "違法が確定している束です。そのまま接収できます。" : "正規だった場合、対象以上の点数の企画を手札からロストします。不足すると全ロストで脱落します。";
-    return (
-      <div className="balku-bulk-area">
-        {confirmKey === bulkKey ? (
-          <div className="balku-confirm">
-            <p>{riskText}</p>
-            <div className="balku-actions">
-              <button type="button" className="balku-btn balku-btn-hazard" disabled={busy} onClick={() => doMove({ type: "bulkCall", targetSeat: owner.seat, submissionId: sub.id })}>
-                本当にBALKUする
-              </button>
-              <button type="button" className="balku-btn balku-btn-ghost" onClick={() => setConfirmKey(null)}>
-                やめる
-              </button>
-            </div>
-          </div>
-        ) : (
-          <button type="button" className="balku-btn balku-btn-hazard" disabled={busy} onClick={() => setConfirmKey(bulkKey)}>
-            BALKU
-          </button>
-        )}
-        {myCharges.length > 0 &&
-          (confirmKey === forceKey ? (
-            <div className="balku-confirm">
-              <p>強制BALKUは、正規・違法を問わず1回だけ接収できます（権利は消費されます）。</p>
-              <div className="balku-actions">
-                <button
-                  type="button"
-                  className="balku-btn balku-btn-hazard"
-                  disabled={busy}
-                  onClick={() => doMove({ type: "forceBulk", chargeId: myCharges[0].id, targetSeat: owner.seat, submissionId: sub.id })}
-                >
-                  本当に強制BALKUする
-                </button>
-                <button type="button" className="balku-btn balku-btn-ghost" onClick={() => setConfirmKey(null)}>
-                  やめる
-                </button>
-              </div>
-            </div>
-          ) : (
-            <button type="button" className="balku-btn" disabled={busy} onClick={() => setConfirmKey(forceKey)}>
-              強制BALKU
-            </button>
-          ))}
+        {canBulk && <span className="balku-bundle-pullhint" aria-hidden="true">▽ 引くとBALKU</span>}
       </div>
     );
   };
 
   const latestLogEntry = st.logs[0];
-  const sellCardIds = [...sellIds, ...buildMaterialIds(sellMatCounts)];
   // 手札ファンの重なり率（カードが多いほど深く重ねて横幅に収める）
   const projStep = handProjects.length <= 5 ? 118 : handProjects.length <= 8 ? 84 : handProjects.length <= 12 ? 60 : 44;
   const matKindsInHand = MARKET_MATERIALS.filter((kind) => ownedCount(kind) > 0);
@@ -1299,8 +1616,22 @@ export default function BalkuClient() {
   const dragProjectId = drag?.payload.source === "hand-project" ? drag.payload.card.id : null;
   const dragMatKind = drag?.payload.source === "hand-material" || drag?.payload.source === "attached-material" ? drag.payload.kind : null;
 
+  // 対象指定効果の宛先は「相手の席そのもの」をタップして決める
+  const targetPicking = Boolean(selectedProject && needsTarget && myTurn);
   const renderSeat = (p: SnapshotPlayer) => (
-    <div key={p.seat} className={`balku-seat${st.activeSeat === p.seat ? " balku-seat-active" : ""}`}>
+    <div
+      key={p.seat}
+      className={`balku-seat${st.activeSeat === p.seat ? " balku-seat-active" : ""}${targetPicking && !p.eliminated ? " balku-seat-targetable" : ""}${targetPicking && targetSeat === p.seat ? " balku-seat-targeted" : ""}`}
+      onClick={
+        targetPicking && !p.eliminated
+          ? () => {
+              if (suppressClickRef.current) return;
+              playSe("select");
+              setTargetSeat(p.seat);
+            }
+          : undefined
+      }
+    >
       <div className="balku-seat-head">
         <span className="balku-nameplate">{p.name}</span>
         {view.cpuSeats.includes(p.seat) && <span className="balku-badge balku-badge-cpu">CPU</span>}
@@ -1316,6 +1647,7 @@ export default function BalkuClient() {
           </span>
         )}
       </div>
+      {st.activeSeat === p.seat && turnSec !== null && <TimerBar sec={turnSec} total={60} />}
       <div className="balku-bundles">
         {p.submitted.length === 0 ? <p className="balku-table-note">提出なし</p> : p.submitted.map((sub) => renderBundle(p, sub))}
       </div>
@@ -1332,14 +1664,16 @@ export default function BalkuClient() {
         </div>
       )}
       <div className="balku-table balku-table-game">
-        {/* 上段：他社席 */}
-        <div className="balku-seats">{opponents.map((p) => renderSeat(p))}</div>
+        {/* 上段：他社席（手番トークンの放り先＝パス） */}
+        <div className="balku-seats" ref={seatsRef} data-drop="pass">
+          {opponents.map((p) => renderSeat(p))}
+        </div>
 
         {/* 中央：場（オークション／自分の提出／施工ゾーン）＋市場の棚 */}
         <div className="balku-fieldrow">
           <div className="balku-field">
             {st.auction && (
-              <div key={`${st.auction.roundOpened}:${st.auction.card.id}`} className="balku-auction" role="status">
+              <div key={`${st.auction.roundOpened}:${st.auction.card.id}`} className="balku-auction" role="status" ref={auctionRef} data-drop="auction">
                 <span className="balku-plate">オークション</span>
                 {st.auction.card.kind === "project" ? (
                   <span className="balku-card balku-card-small balku-card-static">
@@ -1356,20 +1690,29 @@ export default function BalkuClient() {
                   現在 {st.auction.highestBid}コイン
                   {st.auction.highestBidderSeat !== null ? `（${st.players.find((p) => p.seat === st.auction!.highestBidderSeat)?.name ?? ""}）` : "（入札なし）"}
                   <span className={auctionSec !== null && auctionSec <= 5 ? " balku-auction-danger" : ""}> ・ あと{auctionSec ?? 0}秒</span>
+                  {auctionSec !== null && <TimerBar sec={auctionSec} total={15} />}
                 </span>
-                <span className="balku-actions">
-                  {[1, 5].map((plus) => {
+                <span className="balku-bidcoins" aria-label="入札コイン（出品物へドラッグ）">
+                  {[1, 5, 10].map((plus) => {
                     const amount = st.auction!.highestBid + plus;
+                    const canBid = !busy && !me.eliminated && me.coins >= amount && st.auction!.highestBidderSeat !== mySeat;
                     return (
-                      <button
+                      <span
                         key={plus}
-                        type="button"
-                        className="balku-btn"
-                        disabled={busy || me.eliminated || me.coins < amount || st.auction!.highestBidderSeat === mySeat}
-                        onClick={() => doMove({ type: "bid", amount })}
+                        className={`balku-coin balku-draggable${canBid ? "" : " balku-inert"}`}
+                        {...dragHandlers({ source: "bid-coin", plus }, `+${plus}コイン`, canBid)}
+                        tabIndex={canBid ? 0 : -1}
+                        role="button"
+                        aria-label={`${amount}コインで入札`}
+                        onKeyDown={(e) => {
+                          if (canBid && (e.key === "Enter" || e.key === " ")) {
+                            e.preventDefault();
+                            void doMove({ type: "bid", amount });
+                          }
+                        }}
                       >
-                        {amount}コインで入札
-                      </button>
+                        +{plus}
+                      </span>
                     );
                   })}
                 </span>
@@ -1383,6 +1726,16 @@ export default function BalkuClient() {
               </div>
             </div>
 
+            {revealCard && (
+              <div key={revealCard.key} className="balku-reveal" role="status" aria-live="polite">
+                <span className="balku-plate">開示</span>
+                <span className="balku-reveal-card">
+                  <strong>{revealCard.name}</strong>
+                  <span className={`balku-stamp ${revealCard.legal ? "" : "balku-stamp-bad"}`}>{revealCard.legal ? "承認" : "違法"}</span>
+                </span>
+              </div>
+            )}
+
             <section
               ref={buildZoneRef}
               data-drop="build"
@@ -1395,7 +1748,20 @@ export default function BalkuClient() {
                   <span>企画カードをここへドラッグ（または手札でタップ）</span>
                 </p>
               ) : (
-                <>
+                <div
+                  className={`balku-build-bundle balku-draggable${myTurn ? "" : " balku-inert"}`}
+                  data-build-bundle={selectedProject.id}
+                  {...dragHandlers({ source: "bundle" }, selectedProject.name, myTurn)}
+                  tabIndex={0}
+                  role="button"
+                  aria-label={`${selectedProject.name}の束（Enterで公開提出）`}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      submitSelected(true);
+                    }
+                  }}
+                >
                   <div className="balku-build-head">
                     <strong>{selectedProject.name}</strong>
                     <span>{selectedProject.points} PT</span>
@@ -1414,7 +1780,7 @@ export default function BalkuClient() {
                             key={kind}
                             className="balku-attached-item balku-draggable"
                             title="手札へドラッグで戻す"
-                            {...dragHandlers({ source: "attached-material", kind }, kind)}
+                            {...dragHandlers({ source: "attached-material", kind }, kind, myTurn)}
                           >
                             <MatFace kind={kind} premium={kind === "超伝導体"} mini />
                             <span className="balku-attached-count">×{n}</span>
@@ -1426,27 +1792,18 @@ export default function BalkuClient() {
                   {Object.entries(selectedProject.requirements).length === 0 ? (
                     <p className="balku-table-note">素材不要</p>
                   ) : (
-                    <div className="balku-steppers">
+                    <div className="balku-reqrows">
                       {Object.entries(selectedProject.requirements).map(([kindRaw, needRaw]) => {
                         const kind = kindRaw as MaterialKind;
                         const need = needRaw ?? 0;
                         const owned = ownedCount(kind);
                         const attached = attachOf(kind);
                         return (
-                          <div key={kind} className="balku-stepper-row">
+                          <div key={kind} className="balku-reqrow">
                             <MatFace kind={kind} premium={kind === "超伝導体"} mini />
-                            <span className="balku-stepper-kind">{kind}</span>
-                            <span className="balku-stepper-meta">
-                              必要 {need} / 所持 {owned}
-                            </span>
-                            <span className="balku-stepper">
-                              <button type="button" aria-label={`${kind}を減らす`} disabled={attached <= 0} onClick={() => setAttachCounts((prev) => ({ ...prev, [kind]: Math.max(0, attachOf(kind) - 1) }))}>
-                                −
-                              </button>
-                              <span className="balku-stepper-count">{attached}</span>
-                              <button type="button" aria-label={`${kind}を増やす`} disabled={attached >= owned} onClick={() => setAttachCounts((prev) => ({ ...prev, [kind]: Math.min(owned, attachOf(kind) + 1) }))}>
-                                ＋
-                              </button>
+                            <span className="balku-reqrow-kind">{kind}</span>
+                            <span className="balku-reqrow-meta">
+                              必要 {need} / 所持 {owned} / 添付 {attached}
                             </span>
                             {attached >= need ? <span className="balku-badge balku-badge-ok">充足</span> : <span className="balku-badge balku-badge-bad">あと{need - attached}</span>}
                           </div>
@@ -1466,52 +1823,83 @@ export default function BalkuClient() {
                           .join(" / ")}）。公開すると違法建築になります。`}
                   </p>
                   {needsTarget && (
-                    <div className="balku-field-input">
-                      <span>効果の対象</span>
-                      <div className="balku-target-chips">
-                        {opponents
-                          .filter((p) => !p.eliminated)
-                          .map((p) => (
-                            <button key={p.seat} type="button" className={`balku-target-chip${targetSeat === p.seat ? " balku-target-chip-selected" : ""}`} onClick={() => setTargetSeat(p.seat)}>
-                              {p.name}（{p.coins}コイン / 手札{p.handCount}枚）
-                            </button>
-                          ))}
-                      </div>
-                    </div>
+                    <p className="balku-target-hint">
+                      効果の対象:{" "}
+                      {targetSeat === undefined ? (
+                        <strong>相手の席をタップ</strong>
+                      ) : (
+                        <strong>{opponents.find((p) => p.seat === targetSeat)?.name ?? ""}</strong>
+                      )}
+                    </p>
                   )}
-                  <div className="balku-actions">
-                    <button type="button" className="balku-btn balku-btn-primary" disabled={busy || !myTurn || (needsTarget && targetSeat === undefined)} onClick={() => submitSelected(true)}>
-                      公開で提出
-                    </button>
-                    <button type="button" className="balku-btn" disabled={busy || !myTurn || (needsTarget && targetSeat === undefined)} onClick={() => submitSelected(false)}>
-                      伏せて提出
-                    </button>
-                    <button
-                      type="button"
-                      className="balku-btn balku-btn-ghost"
-                      onClick={() => {
-                        setSelectedProjectId(null);
-                        setAttachCounts({});
-                        setTargetSeat(undefined);
-                      }}
-                    >
-                      選択をやめる
-                    </button>
-                  </div>
-                </>
+                </div>
               )}
             </section>
+            {selectedProject && (
+              <div className="balku-submitpads" aria-label="提出先">
+                <div
+                  ref={openPadRef}
+                  data-drop="submit-open"
+                  className={`balku-submitpad balku-submitpad-open${dropHot === "submit-open" ? " balku-drop-hot" : ""}${needsTarget && targetSeat === undefined ? " balku-submitpad-locked" : ""}`}
+                  tabIndex={0}
+                  role="button"
+                  aria-label="公開で提出"
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      submitSelected(true);
+                    }
+                  }}
+                >
+                  公開エリア
+                  <span>束を放つと表向きで提出</span>
+                </div>
+                <div
+                  ref={downPadRef}
+                  data-drop="submit-down"
+                  className={`balku-submitpad balku-submitpad-down${dropHot === "submit-down" ? " balku-drop-hot" : ""}${needsTarget && targetSeat === undefined ? " balku-submitpad-locked" : ""}`}
+                  tabIndex={0}
+                  role="button"
+                  aria-label="伏せて提出"
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      submitSelected(false);
+                    }
+                  }}
+                >
+                  伏せエリア
+                  <span>束を放つと裏向きで提出</span>
+                </div>
+              </div>
+            )}
           </div>
 
           <aside className="balku-shelf">
             <span className="balku-plate">調達市場</span>
             <div className="balku-market">
-              {MARKET_MATERIALS.map((kind) => (
-                <button key={kind} type="button" className="balku-market-card" disabled={busy || !myTurn || me.coins < getMarketPrice(kind)} onClick={() => doMove({ type: "buyMaterial", material: kind })}>
-                  <MatFace kind={kind} premium={kind === "超伝導体"} mini />
-                  <span className="balku-price-tag">{getMarketPrice(kind)}コイン</span>
-                </button>
-              ))}
+              {MARKET_MATERIALS.map((kind) => {
+                const canBuy = !busy && myTurn && me.coins >= getMarketPrice(kind);
+                return (
+                  <div
+                    key={kind}
+                    className={`balku-market-card balku-draggable${canBuy ? "" : " balku-inert"}`}
+                    {...dragHandlers({ source: "market-material", kind }, kind, canBuy)}
+                    tabIndex={canBuy ? 0 : -1}
+                    role="button"
+                    aria-label={`${kind}を${getMarketPrice(kind)}コインで購入（自分の領域へドラッグ）`}
+                    onKeyDown={(e) => {
+                      if (canBuy && (e.key === "Enter" || e.key === " ")) {
+                        e.preventDefault();
+                        void doMove({ type: "buyMaterial", material: kind });
+                      }
+                    }}
+                  >
+                    <MatFace kind={kind} premium={kind === "超伝導体"} mini />
+                    <span className="balku-price-tag">{getMarketPrice(kind)}コイン</span>
+                  </div>
+                );
+              })}
             </div>
             <div className="balku-logcorner" aria-label="ログ">
               {st.logs.slice(0, 4).map((log) => (
@@ -1534,13 +1922,50 @@ export default function BalkuClient() {
               山札 {st.deckCount} / {st.deckInitialCount}
             </span>
             <span className="balku-chip">第{st.turn}ターン</span>
-            <span key={myTurn ? `mine-${st.turn}` : "other"} className={`balku-chip${myTurn ? " balku-chip-now" : ""}`}>
-              {me.eliminated ? "脱落（観戦中）" : myTurn ? `あなたの手番${turnSec !== null ? ` ・ あと${turnSec}秒` : ""}` : `${activePlayer?.name ?? ""}の手番${turnSec !== null ? ` ・ あと${turnSec}秒` : ""}`}
-            </span>
-            <span className="balku-chip">
+            {myTurn && !me.eliminated ? (
+              <span
+                key={`mine-${st.turn}`}
+                className="balku-chip balku-chip-now balku-draggable balku-turntoken"
+                {...dragHandlers({ source: "turn-token" }, "手番トークン", true)}
+                tabIndex={0}
+                role="button"
+                aria-label="手番トークン（相手の席へ放つとパス）"
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    void doMove({ type: "endTurn" });
+                  }
+                }}
+              >
+                あなたの手番{turnSec !== null ? ` ・ あと${turnSec}秒` : ""} ｜ 席へ放つとパス
+              </span>
+            ) : (
+              <span key="other" className="balku-chip">
+                {me.eliminated ? "脱落（観戦中）" : `${activePlayer?.name ?? ""}の手番${turnSec !== null ? ` ・ あと${turnSec}秒` : ""}`}
+              </span>
+            )}
+            {turnSec !== null && st.phase === "active" && <TimerBar sec={turnSec} total={60} />}
+            <span className="balku-chip balku-chip-coins">
               {me.coins}コイン / {myBreakdown.points} PT（提出{myBreakdown.submittedPoints}＋ボーナス{myBreakdown.bonusPoints}）
+              {coinPop && (
+                <span key={coinPop.key} className={`balku-coin-pop${coinPop.delta < 0 ? " balku-coin-pop-minus" : ""}`} aria-hidden="true">
+                  {coinPop.delta > 0 ? `+${coinPop.delta}` : `${coinPop.delta}`}
+                </span>
+              )}
             </span>
-            {myCharges.length > 0 && <span className="balku-chip">強制BALKU権 {myCharges.length}</span>}
+            {myCharges.map((charge) => (
+              <span
+                key={charge.id}
+                className="balku-chip balku-chip-charge balku-draggable"
+                {...dragHandlers({ source: "force-charge", chargeId: charge.id }, "強制BALKU権", !me.eliminated && st.phase === "active")}
+                tabIndex={0}
+                role="button"
+                aria-label={`強制BALKU権（${charge.sourceProject}）：相手の束へドラッグで発動`}
+                title={`強制BALKU権（${charge.sourceProject}）：相手の束へドラッグで発動`}
+              >
+                強制BALKU権（{charge.sourceProject}）
+              </span>
+            ))}
             {syncMode === "polling" && <span className="balku-chip balku-sync-note">ポーリングで同期中</span>}
             <button type="button" className="balku-btn balku-btn-ghost balku-leave" onClick={leaveRoom} disabled={busy}>
               退出する
@@ -1548,37 +1973,13 @@ export default function BalkuClient() {
           </div>
 
           <div className="balku-hand-tools">
-            <button
-              type="button"
-              className={`balku-btn${sellMode ? " balku-btn-primary" : ""}`}
-              disabled={!myTurn}
-              onClick={() => {
-                setSellMode((v) => !v);
-                setSellIds([]);
-                setSellMatCounts({});
-                setSelectedProjectId(null);
-                setAttachCounts({});
-              }}
-            >
-              {sellMode ? "売却モードを終わる" : "売却モード"}
-            </button>
-            {sellMode && (
-              <button type="button" className="balku-btn balku-btn-primary" disabled={busy || sellTotal === 0} onClick={() => doMove({ type: "sellCards", cardIds: sellCardIds })}>
-                まとめて売却（{sellTotal}枚 → {sellTotal}コイン）
-              </button>
-            )}
-            {!sellMode && myTurn && (
-              <button type="button" className="balku-btn balku-btn-ghost" disabled={busy} onClick={() => doMove({ type: "endTurn" })}>
-                パスする
-              </button>
-            )}
             <div
               ref={sellZoneRef}
               data-drop="sell"
               className={`balku-sellpocket${drag ? " balku-drop-armed" : ""}${dropHot === "sell" ? " balku-drop-hot" : ""}`}
             >
               売却ポケット
-              <span>カードをドロップで +1コイン / 枚</span>
+              <span>カードをここへ放つと +1コイン / 枚</span>
             </div>
           </div>
 
@@ -1590,16 +1991,15 @@ export default function BalkuClient() {
             {handProjects.map((card, i) => {
               const ready = selectLegalMaterials(card, me.hand) !== null;
               const selected = selectedProjectId === card.id;
-              const inSell = sellIds.includes(card.id);
               return (
                 <button
                   key={card.id}
                   type="button"
                   data-hand-project={card.id}
                   style={i === 0 ? undefined : { marginLeft: projStep - 132 }}
-                  className={`balku-card balku-fan-item balku-draggable${ready ? " balku-card-ready" : ""}${selected ? " balku-card-selected" : ""}${inSell ? " balku-card-sell" : ""}${dragProjectId === card.id ? " balku-card-ghost" : ""}`}
-                  {...dragHandlers({ source: "hand-project", card }, card.name)}
-                  onClick={() => (sellMode ? toggleProjectSell(card) : selectProject(card))}
+                  className={`balku-card balku-fan-item balku-draggable${ready ? " balku-card-ready" : ""}${selected ? " balku-card-selected" : ""}${dragProjectId === card.id ? " balku-card-ghost" : ""}${myTurn ? "" : " balku-inert"}`}
+                  {...dragHandlers({ source: "hand-project", card }, card.name, myTurn)}
+                  onClick={() => selectProject(card)}
                   onMouseEnter={() => setHoverCard(`${card.name}（${card.points} PT）：${card.effect.label}`)}
                   onMouseLeave={() => setHoverCard(null)}
                   onFocus={() => setHoverCard(`${card.name}（${card.points} PT）：${card.effect.label}`)}
@@ -1628,8 +2028,7 @@ export default function BalkuClient() {
                       })
                     )}
                   </span>
-                  {ready && !sellMode && <span className="balku-badge balku-badge-ok">完成可能</span>}
-                  {inSell && <span className="balku-badge balku-badge-hazard">売却選択中</span>}
+                  {ready && <span className="balku-badge balku-badge-ok">完成可能</span>}
                 </button>
               );
             })}
@@ -1640,30 +2039,27 @@ export default function BalkuClient() {
             {matKindsInHand.map((kind, i) => {
               const owned = ownedCount(kind);
               const premium = handMaterials.some((c) => c.material === kind && c.rarity === "premium");
-              const sellCount = Math.min(sellMatCounts[kind] ?? 0, owned);
-              const attached = selectedProject && !sellMode ? attachOf(kind) : 0;
+              const attached = selectedProject ? attachOf(kind) : 0;
               return (
                 <button
                   key={kind}
                   type="button"
                   style={i === 0 ? undefined : { marginLeft: matStep - 80 }}
-                  className={`balku-matgroup balku-fan-item balku-draggable${sellMode && sellCount > 0 ? " balku-matgroup-sell" : ""}${attached > 0 ? " balku-matgroup-attached" : ""}${dragMatKind === kind && drag?.payload.source === "hand-material" ? " balku-card-ghost" : ""}`}
-                  {...dragHandlers({ source: "hand-material", kind }, kind)}
+                  className={`balku-matgroup balku-fan-item balku-draggable${attached > 0 ? " balku-matgroup-attached" : ""}${dragMatKind === kind && drag?.payload.source === "hand-material" ? " balku-card-ghost" : ""}${myTurn ? "" : " balku-inert"}`}
+                  {...dragHandlers({ source: "hand-material", kind }, kind, myTurn)}
                   onClick={() => {
                     if (suppressClickRef.current) return;
-                    if (sellMode) cycleMatSell(kind);
-                    else if (selectedProject && kind in selectedProject.requirements) {
+                    if (selectedProject && kind in selectedProject.requirements) {
                       playSe("play");
                       setAttachCounts((prev) => ({ ...prev, [kind]: Math.min(owned, attachOf(kind) + 1) }));
                     }
                   }}
                   onMouseEnter={() => setHoverCard(`${kind} ×${owned}${selectedProject ? "（タップ/ドロップで施工ゾーンへ添付）" : ""}`)}
                   onMouseLeave={() => setHoverCard(null)}
-                  aria-label={`${kind} ${owned}枚${sellMode ? `（売却選択 ${sellCount}枚）` : ""}`}
+                  aria-label={`${kind} ${owned}枚`}
                 >
                   <MatFace kind={kind} premium={premium} />
                   <span className="balku-matgroup-count">×{owned}</span>
-                  {sellMode && sellCount > 0 && <span className="balku-badge balku-badge-hazard">売却 {sellCount}</span>}
                   {attached > 0 && <span className="balku-badge balku-badge-ok">添付 {attached}</span>}
                 </button>
               );
@@ -1686,8 +2082,20 @@ export default function BalkuClient() {
                 <span>{drag.payload.card.points} PT</span>
               </span>
             </span>
-          ) : (
+          ) : drag.payload.source === "hand-material" || drag.payload.source === "attached-material" || drag.payload.source === "market-material" ? (
             <MatFace kind={drag.payload.kind} premium={drag.payload.kind === "超伝導体"} />
+          ) : drag.payload.source === "bid-coin" ? (
+            <span className="balku-coin">+{drag.payload.plus}</span>
+          ) : drag.payload.source === "opponent-bundle" ? (
+            <span className="balku-bundle balku-bundle-down balku-bundle-ghost">
+              <span className="balku-bundle-name">{drag.label}</span>
+            </span>
+          ) : (
+            <span className="balku-card balku-card-small balku-card-static">
+              <span className="balku-card-head">
+                <strong>{drag.label}</strong>
+              </span>
+            </span>
           )}
         </div>
       )}

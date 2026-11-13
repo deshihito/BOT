@@ -502,7 +502,9 @@ body:has(.op-shell) { background:#f4f8fd; }
    テーブルにカードが置いてある構図で統一する。
    体系: カードは全て比率 5:7（大=手札/場の企画、小=束/市場/添付）、
    余白は 8pt グリッド（8/16/24）、モーションは --balku-dur と
-   --balku-ease に一本化、ボタンは primary / hazard / ghost の3種のみ。 */
+   --balku-ease に一本化、ボタンは primary / hazard / ghost の3種のみ
+   （対戦中のゲームアクションにボタンは使わない。2026-11-13 の裁定で
+   タップ／スワイプ／ドラッグに一本化し、ボタンは対戦外の chrome だけに残す）。 */
 
 /* --- ページ側（ヘッダー直下の通知とサウンドトグル） --- */
 .balku-error { margin:0 0 14px; padding:10px 14px; border:1px solid #d9a0a0; border-radius:9px; background:#fdf0f0; color:#a34848; font-size:14px; }
@@ -614,7 +616,6 @@ button.balku-card { cursor:pointer; transition:transform var(--balku-dur) var(--
 button.balku-card:hover { box-shadow:0 10px 20px rgba(0,0,0,.45), inset 0 0 0 3px rgba(255,255,255,.35); }
 .balku-card-ready { outline:2px solid var(--balku-cyan); outline-offset:1px; }
 .balku-card-selected { outline:3px solid var(--balku-cyan); outline-offset:2px; }
-.balku-card-sell { outline:3px solid var(--balku-hazard); outline-offset:2px; }
 .balku-card-ghost { opacity:.35; }
 .balku-card-static { animation:none; }
 
@@ -645,13 +646,6 @@ button.balku-card:hover { box-shadow:0 10px 20px rgba(0,0,0,.45), inset 0 0 0 3p
 .balku-badge-bad { background:#fbe3e1 !important; color:#a33c34 !important; }
 .balku-badge-hazard { background:#f5c518 !important; color:#191919 !important; border:1px solid #191919; }
 .balku-badge-cpu { background:#2f7f9f !important; color:#fff !important; margin-left:6px; }
-.balku-bulk-area { display:flex; flex-wrap:wrap; gap:8px; margin-top:8px; }
-.balku-bulk-area .balku-btn { min-height:34px; padding:5px 12px; font-size:13px; }
-.balku-confirm { flex:1 1 230px; padding:10px 12px; border:1px solid #e8d9a8; border-radius:8px; background:#fffaf0; color:#25251f; font-size:12px; }
-.balku-confirm p { margin-bottom:8px; }
-.balku-confirm .balku-btn { background:#fffdf4; border-color:#cfc7a8; color:#25251f; }
-.balku-confirm .balku-btn-hazard { border:2px solid #191919; background:repeating-linear-gradient(45deg,#f5c518 0 10px,#191919 10px 20px); color:#fff; }
-.balku-confirm .balku-btn-ghost { background:transparent; border-color:transparent; color:#6d6a5e; }
 
 /* --- 中央：場 --- */
 .balku-fieldrow { display:grid; grid-template-columns:minmax(0,1fr) 176px; gap:16px; align-items:start; }
@@ -673,28 +667,20 @@ button.balku-card:hover { box-shadow:0 10px 20px rgba(0,0,0,.45), inset 0 0 0 3p
 .balku-attached { display:flex; flex-wrap:wrap; gap:8px; }
 .balku-attached-item { display:inline-flex; align-items:center; gap:6px; padding:4px 8px 4px 4px; border:1px solid rgba(233,242,244,.25); border-radius:8px; background:rgba(0,0,0,.25); }
 .balku-attached-count { font-size:13px; font-weight:800; }
-.balku-steppers { display:grid; gap:6px; }
-.balku-stepper-row { display:flex; flex-wrap:wrap; align-items:center; gap:8px; font-size:14px; }
-.balku-stepper-kind { min-width:3.2em; font-weight:700; }
-.balku-stepper-meta { color:#9fb6bd; font-size:13px; }
-.balku-stepper { display:inline-flex; align-items:center; gap:2px; margin-left:auto; }
-.balku-stepper button { width:32px; height:32px; border:1px solid rgba(233,242,244,.35); border-radius:8px; background:rgba(255,255,255,.08); color:#e9f2f4; font:inherit; font-weight:800; cursor:pointer; }
-.balku-stepper button:disabled { opacity:.35; cursor:not-allowed; }
-.balku-stepper-count { min-width:2em; text-align:center; font-weight:800; }
+.balku-reqrows { display:grid; gap:6px; }
+.balku-reqrow { display:flex; flex-wrap:wrap; align-items:center; gap:8px; font-size:14px; }
+.balku-reqrow-kind { min-width:3.2em; font-weight:700; }
+.balku-reqrow-meta { color:#9fb6bd; font-size:13px; }
 .balku-legal-ok { color:var(--balku-ok); font-size:14px; font-weight:700; }
 .balku-legal-ng { color:var(--balku-bad); font-size:14px; font-weight:700; }
-.balku-field-input { display:grid; gap:6px; font-size:14px; }
-.balku-field-input > span { color:#9fb6bd; font-size:13px; font-weight:700; }
-.balku-target-chips { display:flex; flex-wrap:wrap; gap:8px; }
-.balku-target-chip { padding:7px 12px; border:1px solid rgba(233,242,244,.35); border-radius:999px; background:rgba(255,255,255,.06); color:#e9f2f4; font:inherit; font-size:13px; cursor:pointer; }
-.balku-target-chip-selected { background:#2f7f9f; border-color:#39bfe8; color:#fff; font-weight:700; }
+.balku-target-hint { font-size:14px; color:#9fb6bd; }
+.balku-target-hint strong { color:#aee3f5; }
 
 /* --- 市場の棚＋ログ（台の隅） --- */
 .balku-shelf { display:grid; gap:8px; align-content:start; padding:12px; border:1px solid rgba(233,242,244,.12); border-radius:12px; background:rgba(255,255,255,.045); }
 .balku-market { display:grid; gap:8px; }
 .balku-market-card { display:flex; align-items:center; gap:8px; padding:6px 8px; border:1px solid rgba(233,242,244,.18); border-radius:10px; background:rgba(0,0,0,.22); color:#e9f2f4; font:inherit; cursor:pointer; transition:transform var(--balku-dur) var(--balku-ease), opacity var(--balku-dur); }
 .balku-market-card:active { transform:scale(.97); }
-.balku-market-card:disabled { filter:grayscale(1); opacity:.4; cursor:not-allowed; transform:none; }
 .balku-price-tag { margin-left:auto; padding:1px 8px; border-radius:999px; background:rgba(57,191,232,.18); color:#aee3f5; font-size:12px; font-weight:800; white-space:nowrap; }
 .balku-logcorner { display:grid; gap:4px; margin-top:8px; padding-top:8px; border-top:1px solid rgba(233,242,244,.12); }
 .balku-logline { font-size:11px; line-height:1.5; color:#9fb6bd; }
@@ -727,7 +713,6 @@ button.balku-card:hover { box-shadow:0 10px 20px rgba(0,0,0,.45), inset 0 0 0 3p
 .balku-matgroup { position:relative; display:grid; justify-items:center; gap:4px; padding:8px 6px 6px; border:1px solid rgba(0,0,0,.3); border-radius:10px; background:rgba(0,0,0,.25); color:#e9f2f4; font:inherit; cursor:pointer; transition:transform var(--balku-dur) var(--balku-ease), box-shadow var(--balku-dur) var(--balku-ease); }
 .balku-matgroup .balku-matface { box-shadow:3px -3px 0 rgba(255,255,255,.25),6px -6px 0 rgba(255,255,255,.12), 0 3px 8px rgba(0,0,0,.35); }
 .balku-fan-mats .balku-matgroup:hover, .balku-fan-mats .balku-matgroup:focus-visible { transform:translateY(-10px); }
-.balku-matgroup-sell { outline:3px solid var(--balku-hazard); outline-offset:1px; }
 .balku-matgroup-attached { box-shadow:0 0 0 2px var(--balku-cyan); }
 .balku-matgroup-count { font-size:13px; font-weight:800; }
 .balku-draggable { touch-action:none; user-select:none; -webkit-user-select:none; }
@@ -755,6 +740,65 @@ button.balku-card:hover { box-shadow:0 10px 20px rgba(0,0,0,.45), inset 0 0 0 3p
 @keyframes balku-shake { 0%,100% { transform:translateX(0); } 20% { transform:translateX(-5px); } 40% { transform:translateX(5px); } 60% { transform:translateX(-3px); } 80% { transform:translateX(3px); } }
 @keyframes balku-flash { 0% { box-shadow:0 0 0 3px rgba(245,197,24,.95); } 100% { box-shadow:0 0 0 3px rgba(245,197,24,0); } }
 .balku-bundle-flash { animation:balku-shake 450ms ease-in-out, balku-flash 600ms ease-out; }
+
+/* --- ジェスチャ一本化＋感触（2026-11-13） --- */
+/* 素材アイコン（SVG線画）とレア表示 */
+.balku-mat-icon { width:26px; height:26px; color:rgba(28,42,48,.78); }
+.balku-matface-mini .balku-mat-icon { width:16px; height:16px; }
+.balku-mat-rare { padding:0 5px; border-radius:999px; background:rgba(0,0,0,.55); color:#ffd968; font-size:9px; font-weight:800; letter-spacing:.08em; }
+/* 触れないオブジェクトは沈ませる */
+.balku-inert { opacity:.45 !important; filter:saturate(.45); cursor:not-allowed !important; }
+/* タイマーバー */
+.balku-timerbar { display:block; width:112px; max-width:100%; height:6px; margin-top:5px; border-radius:3px; background:rgba(255,255,255,.16); overflow:hidden; }
+.balku-timerbar-fill { display:block; height:100%; background:var(--balku-cyan); transition:width .5s linear; }
+.balku-timerbar-warn .balku-timerbar-fill { background:var(--balku-hazard); }
+.balku-timerbar-danger .balku-timerbar-fill { background:var(--balku-bad); }
+/* 開示フリップ（裏→表） */
+.balku-bundles { perspective:700px; }
+.balku-bundle-flip { animation:balku-flip calc(var(--balku-dur) * 3) var(--balku-ease), balku-shake 450ms ease-in-out; }
+@keyframes balku-flip { 0% { transform:rotateY(0deg); } 50% { transform:rotateY(88deg); } 100% { transform:rotateY(0deg); } }
+.balku-stamp-bad { border-color:#a33c34; color:#a33c34; }
+.balku-reveal { display:flex; align-items:center; gap:12px; }
+.balku-reveal-card { position:relative; display:inline-flex; align-items:center; gap:10px; padding:12px 18px; border:1px solid #d8cc9e; border-radius:8px; background:#fdf6dd; color:#25251f; font-size:15px; box-shadow:0 6px 16px rgba(0,0,0,.4); animation:balku-flip calc(var(--balku-dur) * 3) var(--balku-ease); }
+.balku-reveal-card .balku-stamp { position:static; }
+/* 相手の束の引き寄せ */
+.balku-bundle-pullable { cursor:grab; }
+.balku-bundle-pullable:active { cursor:grabbing; }
+.balku-bundle-pullhint { margin-top:auto; font-size:10px; font-weight:700; letter-spacing:.06em; opacity:.75; text-align:center; }
+.balku-bundle-ghost { width:110px; }
+/* 提出パッド（束の放り先） */
+.balku-submitpads { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+.balku-submitpad { display:grid; gap:2px; place-content:center; min-height:72px; padding:10px; border-radius:12px; font-size:15px; font-weight:800; letter-spacing:.08em; text-align:center; cursor:pointer; transition:box-shadow var(--balku-dur) var(--balku-ease), background var(--balku-dur); }
+.balku-submitpad span { font-size:11px; font-weight:400; letter-spacing:0; }
+.balku-submitpad-open { border:2px dashed rgba(120,200,230,.6); background:rgba(57,191,232,.07); color:#aee3f5; }
+.balku-submitpad-down { border:3px solid transparent; background:linear-gradient(#20303a,#20303a) padding-box, repeating-linear-gradient(45deg,#f5c518 0 10px,#191919 10px 20px) border-box; color:#f5c518; }
+.balku-submitpad-locked { opacity:.42; filter:grayscale(.7); }
+.balku-build-bundle { cursor:grab; border-radius:10px; }
+.balku-build-bundle:active { cursor:grabbing; }
+/* 対象選択は席そのもの */
+.balku-seat-targetable { cursor:pointer; box-shadow:inset 0 0 0 1px rgba(57,191,232,.65); animation:balku-pulse-once 1s ease-in-out infinite alternate; }
+.balku-seat-targeted { box-shadow:inset 0 0 0 3px var(--balku-cyan) !important; background:rgba(57,191,232,.13); }
+/* 入札コイン */
+.balku-bidcoins { display:inline-flex; gap:8px; }
+.balku-coin { display:inline-flex; align-items:center; justify-content:center; width:46px; height:46px; border-radius:50%; border:2px solid #a97e14; background:radial-gradient(circle at 35% 30%, #ffe98a, #f5c518 62%, #d9a90f); color:#4a3602; font-size:14px; font-weight:900; box-shadow:0 4px 10px rgba(0,0,0,.4), inset 0 0 0 3px rgba(255,255,255,.35); cursor:grab; }
+.balku-coin:active { cursor:grabbing; }
+/* 手番トークンとコイン増減 */
+.balku-turntoken { cursor:grab; }
+.balku-turntoken:active { cursor:grabbing; }
+.balku-chip-coins { position:relative; }
+.balku-chip-charge { border-color:rgba(245,197,24,.6); color:#f5c518; cursor:grab; }
+.balku-coin-pop { position:absolute; top:-14px; right:6px; color:var(--balku-ok); font-size:13px; font-weight:900; pointer-events:none; animation:balku-coin-pop 1.5s ease-out both; }
+.balku-coin-pop-minus { color:var(--balku-bad); }
+@keyframes balku-coin-pop { 0% { opacity:0; transform:translateY(6px); } 18% { opacity:1; } 100% { opacity:0; transform:translateY(-14px); } }
+/* 最終精算の段階表示と紙吹雪（CSS図形） */
+.balku-panel-results { position:relative; overflow:hidden; }
+.balku-result-row { animation:balku-in .36s var(--balku-ease) both; }
+.balku-confetti { position:absolute; inset:0; pointer-events:none; overflow:hidden; }
+.balku-confetti span { position:absolute; top:-12px; width:7px; height:11px; border-radius:2px; opacity:0; animation:balku-confetti-fall 1.7s ease-in both; }
+@keyframes balku-confetti-fall { 0% { opacity:1; transform:translateY(0) rotate(0deg); } 100% { opacity:0; transform:translateY(300px) rotate(560deg); } }
+/* テーブル内の横操作はジェスチャ側で受ける（縦スクロールだけブラウザに渡す） */
+.balku-fan { touch-action:pan-y; }
+.balku-seats, .balku-field, .balku-self { touch-action:pan-y; }
 
 /* --- ルーム内チャット（右下固定ウィジェット。テーブルの世界観で統一） --- */
 .balku-chat { position:fixed; right:16px; bottom:16px; z-index:60; display:flex; flex-direction:column; align-items:flex-end; }
