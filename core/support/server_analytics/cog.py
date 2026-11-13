@@ -56,13 +56,15 @@ class ServerAnalyticsView(discord.ui.View):
     """サーバー分析パネル（開いた本人のみ操作可・Components V2 で表示）。"""
 
     def __init__(self, cog: "ServerAnalyticsCog", guild_id: int, *,
-                 owner_id: int, enabled: bool, is_admin: bool):
+                 owner_id: int, enabled: bool, is_admin: bool,
+                 ranking_optout: bool = False):
         super().__init__(timeout=300)
         self.cog = cog
         self.guild_id = guild_id
         self.owner_id = owner_id
         self.enabled = enabled
         self.is_admin = is_admin
+        self.ranking_optout = ranking_optout
         self.mode = MODE_OVERVIEW
         self._png: bytes | None = None
         self._started_at = ""
@@ -129,6 +131,13 @@ class ServerAnalyticsView(discord.ui.View):
     # --------------------------------------------------------------
     # 表示
     # --------------------------------------------------------------
+    def _ranking_line(self) -> str:
+        if self.ranking_optout:
+            return ("サーバー対抗ランキング: **不参加**"
+                    "（サーバー名・アイコン・活動量は他サーバーに表示されません）")
+        return ("サーバー対抗ランキング: **参加中**"
+                "（サーバー名・アイコン・活動量がランキングに表示されます）")
+
     def embed(self) -> discord.Embed:
         if not self.enabled:
             description = (
@@ -139,6 +148,7 @@ class ServerAnalyticsView(discord.ui.View):
             )
             if not self.is_admin:
                 description += "\n収集の ON / OFF はサーバー管理者が変更できます。"
+            description += f"\n{self._ranking_line()}"
             return discord.Embed(
                 title="サーバー分析", description=description, color=0xFFFFFF)
         lines = []
@@ -147,6 +157,7 @@ class ServerAnalyticsView(discord.ui.View):
         if self._recorded_days == 0:
             lines.append("データはまだありません。"
                          "収集 ON 以降の活動から記録されます。")
+        lines.append(self._ranking_line())
         embed = discord.Embed(
             title="サーバー分析",
             description="\n".join(lines) or None,
@@ -200,6 +211,15 @@ class ServerAnalyticsView(discord.ui.View):
             )
             toggle.callback = self._on_toggle
             self.add_item(toggle)
+            ranking_toggle = discord.ui.Button(
+                label=("ランキングに参加する" if self.ranking_optout
+                       else "ランキングから外れる"),
+                style=discord.ButtonStyle.secondary,
+                custom_id="server_analytics:ranking_toggle",
+                row=row,
+            )
+            ranking_toggle.callback = self._on_ranking_toggle
+            self.add_item(ranking_toggle)
         close = discord.ui.Button(
             label="閉じる",
             style=discord.ButtonStyle.secondary,
@@ -244,6 +264,24 @@ class ServerAnalyticsView(discord.ui.View):
             return await interaction.response.send_message(
                 SETTINGS_UPDATE_FAILED, ephemeral=True)
         self.enabled = new_value
+        if not interaction.response.is_done():
+            await interaction.response.defer()
+        await self._edit(interaction)
+
+    async def _on_ranking_toggle(self, interaction: discord.Interaction):
+        if not _can_manage(interaction):
+            return await interaction.response.send_message(
+                MANAGE_GUILD_REQUIRED, ephemeral=True)
+        new_value = not self.ranking_optout
+        try:
+            await guild_settings.get_store().update(
+                self.guild_id, sa_store.SERVER_ANALYTICS_SECTION,
+                **{sa_store.RANKING_OPTOUT_KEY: new_value})
+        except Exception:
+            logger.exception("サーバー対抗ランキングの参加トグル更新に失敗しました")
+            return await interaction.response.send_message(
+                SETTINGS_UPDATE_FAILED, ephemeral=True)
+        self.ranking_optout = new_value
         if not interaction.response.is_done():
             await interaction.response.defer()
         await self._edit(interaction)
@@ -381,6 +419,8 @@ class ServerAnalyticsCog(commands.Cog):
             enabled=sa_store.server_analytics_enabled(
                 settings_store, interaction.guild_id),
             is_admin=_can_manage(interaction),
+            ranking_optout=sa_store.server_ranking_opted_out(
+                settings_store, interaction.guild_id),
         )
         await view.prepare()
         file = view.panel_file()

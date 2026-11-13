@@ -1,8 +1,8 @@
 {
   "version": 1,
-  "total": 253,
+  "total": 254,
   "counts": {
-    "general": 73,
+    "general": 74,
     "vc": 46,
     "game": 49,
     "support": 84,
@@ -296,6 +296,12 @@
               "id": "general:exp_ranking",
               "value": "exp_ranking",
               "title": "EXPランキング",
+              "description": ""
+            },
+            {
+              "id": "general:server_ranking",
+              "value": "server_ranking",
+              "title": "サーバー対抗ランキング",
               "description": ""
             },
             {

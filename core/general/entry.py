@@ -64,6 +64,7 @@ from core.general.shortcuts import *
 from core.general.panel import *
 from core.general.translation import *
 from core.general.exp.exp_ui import *
+from core.general.server_ranking.ui import ServerRankingView
 from core.general.ai_ui import *
 from core.general.exp.exp import _EXP_DATA, _EXP_LOCK, _as_float, _as_int, _exp_ensure, _exp_load, _exp_lock, _exp_root, _exp_save, _grant_chat_exp, _grant_vc_exp, _iter_voice_user_channels, _iter_voice_user_ids, _merge_exp, _read_exp_file, _store_fetch, _user_general_level, _write_exp_file
 from core.general.exp.levelup import _LEVELUP_CJK_FONTS, _LEVELUP_DISPLAY_FONTS, _LEVELUP_DISPLAY_PICK, _LEVELUP_FONT_PICK, _LEVELUP_LATIN_FONTS, _LEVELUP_SS, _levelup_display_font, _levelup_draw_tracked, _levelup_font, _levelup_pick_display_font, _levelup_pick_font, _levelup_safe_name
@@ -115,6 +116,7 @@ class RankingsView(discord.ui.View):
         ("ぬるぽRTA", "nurupo_board"),
         ("fujo status", "fujo_ranking"),
         ("EXP", "exp_ranking"),
+        ("サーバー対抗", "server_ranking"),
     )
 
     def __init__(self, cog, user_id: int):
@@ -402,6 +404,15 @@ class GeneralCog(
             await view.refresh_data()
             return await interaction.followup.send(
                 view=as_panel_v2(view)
+            )
+
+        if value == "server_ranking":
+            # サーバー分析の集計とアイコン取得を伴うため exp 系と同じく先にACKする。
+            await interaction.response.defer()
+            view = ServerRankingView(interaction.guild_id, bot=self.bot)
+            await view._load_latest()
+            return await interaction.followup.send(
+                view=as_panel_v2(view), files=[view.board_file()]
             )
 
         wallet = self.bot.get_cog("WalletCog")

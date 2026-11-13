@@ -82,11 +82,12 @@ class UnifiedBoardGenreTest(unittest.TestCase):
         # gvc_members のショートカット登録漏れ是正で vc 45→46 / 全体 255→256。
         # ニュース通知（support:news_notify）追加で全体 256→257。
         # 即抜けRTA設定の統合（support 5件→設定パネル1件）で全体 257→253。
+        # サーバー対抗ランキング（general:server_ranking）追加で general 73→74 / 全体 253→254。
         from core.general import action_registry
 
         specs = list(action_registry.default_registry()._by_id.values())
-        self.assertEqual(len(specs), 253)
-        self.assertEqual(len([s for s in specs if s.root == "general"]), 73)
+        self.assertEqual(len(specs), 254)
+        self.assertEqual(len([s for s in specs if s.root == "general"]), 74)
 
 
 class UnifiedBoardDispatchTest(unittest.IsolatedAsyncioTestCase):
