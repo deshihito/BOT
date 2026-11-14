@@ -1,14 +1,15 @@
 import { NextResponse } from "next/server";
 import { scorePage, scoreUx, validateViewUrl } from "@/lib/viewslopper";
-import { ViewFetchError, diagnose, fetchPage } from "@/lib/viewslopper-server";
+import { ViewFetchError, assess, diagnose, fetchPage } from "@/lib/viewslopper-server";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
 
 // viewslopper の診断エンドポイント。
-// POST { url } → サーバー側でページを取得し、決定的な計算で Slop Score を出し、
-// 診断文だけを LLM（ds1017）に書かせる。LLM が使えない場合はルールベース診断で返す。
-// スコアは LLM の成否で変わらない。
+// POST { url } → サーバー側でページを取得（SPA の殻しか取れない場合は描画経由で
+// 取り直す）し、採点の判断は LLM（ds1017）に寄せ、合計の集計だけコードで行う。
+// LLM が使えない場合は従来の決定的採点＋ルールベース診断にフォールバックする。
+// どちらの経路かは scoreSource で返す。
 
 function publicOrigin(request: Request) {
   const url = new URL(request.url);
@@ -34,21 +35,41 @@ export async function POST(request: Request) {
   }
   try {
     const page = await fetchPage(url);
-    const score = scorePage(page);
-    const ux = scoreUx(page.ux);
-    const diagnosis = await diagnose(page, score);
+    const heuristic = scorePage(page);
+    const heuristicUx = scoreUx(page.ux);
+    const assessed = await assess(page, heuristic);
+    if (assessed) {
+      return NextResponse.json({
+        url: page.url,
+        title: page.title,
+        description: page.description,
+        headings: page.headings,
+        textChars: page.text.length,
+        rendered: page.rendered === true,
+        score: assessed.total,
+        grade: assessed.grade,
+        dimensions: assessed.dimensions,
+        diagnosis: assessed.diagnosis,
+        diagnosisSource: "llm",
+        scoreSource: "llm",
+        ux: { friction: assessed.uxFriction, grade: assessed.uxGrade, findings: assessed.uxFindings, signals: page.ux },
+      });
+    }
+    const diagnosis = await diagnose(page, heuristic);
     return NextResponse.json({
       url: page.url,
       title: page.title,
       description: page.description,
       headings: page.headings,
       textChars: page.text.length,
-      score: score.total,
-      grade: score.grade,
-      dimensions: score.dimensions,
+      rendered: page.rendered === true,
+      score: heuristic.total,
+      grade: heuristic.grade,
+      dimensions: heuristic.dimensions,
       diagnosis: diagnosis.items,
       diagnosisSource: diagnosis.llm ? "llm" : "rules",
-      ux: { friction: ux.friction, grade: ux.grade, findings: ux.findings, signals: page.ux },
+      scoreSource: "rules",
+      ux: { friction: heuristicUx.friction, grade: heuristicUx.grade, findings: heuristicUx.findings, signals: page.ux },
     });
   } catch (error) {
     if (error instanceof ViewFetchError) {

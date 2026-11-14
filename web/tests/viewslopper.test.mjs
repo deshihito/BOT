@@ -118,6 +118,43 @@ test("本文抽出はUXシグナルも一緒に返す", () => {
   assert.equal(page.ux.hasViewport, true);
 });
 
+test("SPA の殻判定: 本文が薄くスクリプトが多いページだけ描画フォールバックする", () => {
+  const spaHtml = `<html><head><script src="/a.js"></script><script src="/b.js"></script><script src="/c.js"></script></head><body><div id="root"></div></body></html>`;
+  assert.equal(m.needsRenderFallback(spaHtml, 40), true);
+  assert.equal(m.needsRenderFallback(spaHtml, 5000), false);
+  assert.equal(m.needsRenderFallback("<html><body><p>静的な本文です</p></body></html>", 40), false);
+  assert.equal(m.needsRenderFallback('<html><body><div id="__next"></div></body></html>', 10), true);
+});
+
+test("LLM主採点: 応答検証は全次元・全軸が揃った場合だけ通し、集計は重み通り", () => {
+  const dims = ["cliche", "vague", "abstract", "repeat", "mechanical", "bait"].map((key, i) => ({
+    key, score: [100, 0, 0, 0, 0, 0][i], evidence: "根拠", why: "理由", fix: "直し方",
+  }));
+  const ux = ["flow", "structure", "firstview", "readability"].map((key) => ({
+    key, score: 50, evidence: "根拠", why: "理由", fix: "直し方",
+  }));
+  const parsed = m.parseAssessJson(JSON.stringify({ dimensions: dims, ux }));
+  assert.ok(parsed);
+  assert.equal(parsed.dimensions.length, 6);
+  assert.equal(parsed.ux.length, 4);
+  // 次元が1つ欠けたら不採用
+  assert.equal(m.parseAssessJson(JSON.stringify({ dimensions: dims.slice(0, 5), ux })), null);
+  assert.equal(m.parseAssessJson("JSONではない"), null);
+  const heuristic = m.scoreText(SOLID_TEXT);
+  const composed = m.composeAssessed(parsed, heuristic);
+  // cliche=100 が重み20 → 合計20
+  assert.equal(composed.total, 20);
+  assert.equal(composed.grade, "Light");
+  assert.equal(composed.uxFriction, 50);
+  assert.equal(composed.diagnosis.length, 1);
+  assert.equal(composed.diagnosis[0].dimension, "cliche");
+  // 採点メッセージにはアンカーと参考値が入る
+  const page = { url: "https://e.com", title: "t", description: "", headings: [], text: SOLID_TEXT, ux: m.emptyUxSignals() };
+  const msgs = m.buildAssessMessages(page, heuristic, page.ux);
+  assert.ok(msgs[0].content.includes("合計78点相当"));
+  assert.ok(msgs[1].content.includes("決定的スコア（参考値）"));
+});
+
 test("LLM診断メッセージはスコア固定を指示し、応答検証は不正要素を捨てる", () => {
   const page = { url: "https://e.com", title: "t", description: "", headings: [], text: SLOP_TEXT };
   const msgs = m.buildDiagnosisMessages(page, m.scoreText(SLOP_TEXT));

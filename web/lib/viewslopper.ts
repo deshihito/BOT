@@ -36,7 +36,21 @@ export type PageData = {
   headings: string[];
   text: string;
   ux: UxSignals;
+  /** 描画経由（レンダリング済みテキスト）で取得したページかどうか。 */
+  rendered?: boolean;
 };
+
+/**
+ * 直接取得した HTML が「SPA の殻」らしいかどうか。
+ * 本文が薄く、スクリプトが多く、アプリのルート要素がある場合は、
+ * サーバー側 fetch では中身が見えていない可能性が高い。
+ */
+export function needsRenderFallback(html: string, textChars: number): boolean {
+  if (textChars >= THIN_TEXT_CHARS) return false;
+  const scriptCount = (html.match(/<script[\s>]/gi) ?? []).length;
+  const hasAppRoot = /id=["'](root|app|__next)["']/i.test(html);
+  return scriptCount >= 3 || hasAppRoot;
+}
 
 /** HTML構造から取れる UX/配置 の生シグナル（レンダリングなしで数えられるものだけ）。 */
 export type UxSignals = {
@@ -645,6 +659,167 @@ export function buildDiagnosisMessages(page: PageData, score: ViewScore): ChatMe
     { role: "system", content: system },
     { role: "user", content: user },
   ];
+}
+
+// ---- LLM 主採点（2026-11-14 の設計変更） ----
+// 辞書＋統計の決定的採点は、実ページでは次元の大半が0になり、合計が狭い範囲に
+// 固まる（実測: 対象が全然違う4ページで 18/27/26/18）。そのため採点の判断は
+// LLM に寄せ、コード側は「重み付け集計」と「形式の検証」だけを担う。
+// 尺度を安定させるため、検証済みの基準サンプル（定型文=78、実記録=3）を
+// プロンプトにアンカーとして渡す。LLM が使えない場合は従来の決定的採点に落ちる。
+
+export type UxAxisKey = "flow" | "structure" | "firstview" | "readability";
+
+export const UX_AXIS_DEFS: readonly { key: UxAxisKey; label: string; weight: number }[] = [
+  { key: "flow", label: "導線", weight: 30 },
+  { key: "structure", label: "見出し・構造", weight: 25 },
+  { key: "firstview", label: "ファーストビュー", weight: 25 },
+  { key: "readability", label: "読みやすさ", weight: 20 },
+];
+
+export type LlmDimensionScore = { key: DimensionKey; score: number; evidence: string; why: string; fix: string };
+export type LlmUxScore = { key: UxAxisKey; score: number; evidence: string; why: string; fix: string };
+export type LlmAssessment = { dimensions: LlmDimensionScore[]; ux: LlmUxScore[] };
+
+const DIMENSION_RUBRIC: Record<DimensionKey, string> = {
+  cliche: "定型句・決まり文句: 誰が書いても同じになる言い回し、AI生成に典型的な締めや導入の量",
+  vague: "具体性の欠如: 数字・日付・固有名詞・実例で検証できる情報がどれだけ欠けているか",
+  abstract: "抽象語の裸使い: 『価値』『可能性』等が実例や数値の裏付けなく浮いている度合い",
+  repeat: "繰り返し・冗長: 同じ内容・同じ言い回しの反復で情報量が薄まっている度合い",
+  mechanical: "構造の機械性: 『まず/次に/最後に』型の均一な構成、文長や始まりの単調さ",
+  bait: "煽り・両論併記: バズワードや誇張、立場を取らずに逃げる両論併記の度合い",
+};
+
+/** LLM 主採点のメッセージ。決定的採点の数値は「参考値」として渡し、判断は本文でさせる。 */
+export function buildAssessMessages(page: PageData, heuristic: ViewScore, uxSignals: UxSignals): ChatMessage[] {
+  const dimLines = DIMENSION_DEFS.map((d) => `- ${d.key}（${d.label}）: ${DIMENSION_RUBRIC[d.key]}`).join("\n");
+  const refLines = heuristic.dimensions.map((d) => `- ${d.key}: ${d.score}`).join("\n");
+  const uxLines = [
+    `viewport: ${uxSignals.hasViewport ? "あり" : "なし"} / lang: ${uxSignals.hasLang ? "あり" : "なし"}`,
+    `h1: ${uxSignals.h1Count}個 / 見出しレベルの飛び: ${uxSignals.headingSkips}箇所`,
+    `ナビ内リンク: ${uxSignals.navLinkCount}本 / 全リンク: ${uxSignals.totalLinks}本`,
+    `画像: ${uxSignals.images}枚（alt無し ${uxSignals.imagesMissingAlt}、寸法指定無し ${uxSignals.imagesMissingSize}）`,
+    `入力欄: ${uxSignals.inputs}件（ラベル無し ${uxSignals.inputsMissingLabel}）`,
+    `最初の見出しまで: ${uxSignals.charsBeforeFirstHeading}字 / 冒頭CTA: ${uxSignals.hasEarlyCta ? "あり" : "なし"}`,
+    `300字超の段落: ${uxSignals.longParagraphs}件 / 小さい文字の指定: ${uxSignals.smallFontCount}箇所 / モーダル類: ${uxSignals.modalCount}件`,
+  ].join("\n");
+  const system = [
+    "あなたは Web ページの slop（薄くて定型的な中身）と UX・配置を採点する専門家です。",
+    "各次元を 0–100 で採点してください（高いほど slop / 摩擦が大きい）。",
+    "尺度のアンカー: 具体的な数字と固有名詞だけで書かれた実務記録は合計3点相当、定型句と抽象語だらけの典型的なAIブログ文は合計78点相当です。この尺度に合わせて判断してください。",
+    "渡される決定的スコアは辞書ベースの参考値です。意味を読んで判断し、参考値に引きずられないでください。",
+    "証拠は本文・タイトル・見出し・UXシグナルに実在する内容だけを使ってください。存在しない文を引用しないでください。",
+    '出力は JSON オブジェクトのみ。前後に説明文やコードフェンスを付けないでください。',
+    '{"dimensions":[{"key":次元キー,"score":0-100,"evidence":"根拠(最大120字)","why":"理由(60字以内)","fix":"直し方(60字以内)"} x6次元すべて],',
+    '"ux":[{"key":UX軸キー,"score":0-100,"evidence":"根拠(最大120字)","why":"理由(60字以内)","fix":"直し方(60字以内)"} x4軸すべて]}',
+    "次元キーは cliche / vague / abstract / repeat / mechanical / bait、UX軸キーは flow / structure / firstview / readability です。",
+  ].join("\n");
+  const user = [
+    `URL: ${page.url}`,
+    `タイトル: ${page.title || "(なし)"}`,
+    `説明文: ${page.description || "(なし)"}`,
+    `見出し: ${page.headings.join(" / ") || "(なし)"}`,
+    `取得方法: ${page.rendered ? "描画経由（JavaScript実行後のテキスト）" : "直接取得"}`,
+    "採点する次元:",
+    dimLines,
+    "決定的スコア（参考値）:",
+    refLines,
+    "UXシグナル（HTML構造から数えた事実）:",
+    uxLines,
+    "本文（先頭6000字）:",
+    page.text.slice(0, 6000) || "(本文を取得できなかった。タイトル・説明文・見出しだけで判断すること)",
+  ].join("\n");
+  return [
+    { role: "system", content: system },
+    { role: "user", content: user },
+  ];
+}
+
+function parseScoreEntries<T extends string>(
+  raw: unknown,
+  defs: readonly { key: T }[],
+): ({ key: T; score: number; evidence: string; why: string; fix: string }[] | null) {
+  if (!Array.isArray(raw)) return null;
+  const byKey = new Map<T, { key: T; score: number; evidence: string; why: string; fix: string }>();
+  for (const item of raw) {
+    if (!item || typeof item !== "object") continue;
+    const rec = item as Record<string, unknown>;
+    const key = rec.key as T;
+    if (!defs.some((d) => d.key === key) || byKey.has(key)) continue;
+    if (typeof rec.score !== "number" || !Number.isFinite(rec.score)) continue;
+    const str = (v: unknown, max: number) => (typeof v === "string" ? v.trim().slice(0, max) : "");
+    const why = str(rec.why, 200);
+    const fix = str(rec.fix, 200);
+    if (!why || !fix) continue;
+    byKey.set(key, { key, score: clamp(rec.score), evidence: str(rec.evidence, 160), why, fix });
+  }
+  if (byKey.size !== defs.length) return null;
+  return defs.map((d) => byKey.get(d.key)!);
+}
+
+/** LLM 主採点の応答を検証する。全次元・全軸が揃った場合だけ採用する。 */
+export function parseAssessJson(raw: string): LlmAssessment | null {
+  let text = raw.trim();
+  const fence = text.match(/```(?:json)?\s*([\s\S]*?)```/);
+  if (fence) text = fence[1].trim();
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    return null;
+  }
+  if (!parsed || typeof parsed !== "object") return null;
+  const rec = parsed as Record<string, unknown>;
+  const dimensions = parseScoreEntries(rec.dimensions, DIMENSION_DEFS);
+  const ux = parseScoreEntries(rec.ux, UX_AXIS_DEFS);
+  if (!dimensions || !ux) return null;
+  return { dimensions, ux };
+}
+
+/** LLM の次元スコアから合計と診断・UX所見を組み立てる（集計はコード側で決定的に行う）。 */
+export function composeAssessed(
+  assessment: LlmAssessment,
+  heuristic: ViewScore,
+): { total: number; grade: string; dimensions: DimensionResult[]; diagnosis: DiagnosisItem[]; uxFriction: number; uxGrade: string; uxFindings: UxFinding[] } {
+  const labelByKey = new Map(DIMENSION_DEFS.map((d) => [d.key, d.label]));
+  const hitsByKey = new Map(heuristic.dimensions.map((d) => [d.key, d.hits]));
+  const dimensions: DimensionResult[] = assessment.dimensions.map((d) => {
+    const def = DIMENSION_DEFS.find((x) => x.key === d.key)!;
+    return { key: d.key, label: def.label, score: d.score, weight: def.weight, hits: hitsByKey.get(d.key) ?? 0 };
+  });
+  const total = clamp(dimensions.reduce((sum, d) => sum + d.score * d.weight, 0) / 100);
+  const diagnosis: DiagnosisItem[] = [...assessment.dimensions]
+    .sort((a, b) => b.score - a.score)
+    .filter((d) => d.score >= 25)
+    .slice(0, 6)
+    .map((d) => ({
+      dimension: d.key,
+      label: labelByKey.get(d.key)!,
+      evidence: d.evidence,
+      why: d.why,
+      fix: d.fix,
+    }));
+  if (diagnosis.length === 0 && assessment.dimensions.length > 0) {
+    const top = [...assessment.dimensions].sort((a, b) => b.score - a.score)[0];
+    diagnosis.push({ dimension: top.key, label: labelByKey.get(top.key)!, evidence: top.evidence, why: top.why, fix: top.fix });
+  }
+  const uxFriction = clamp(assessment.ux.reduce((sum, a) => {
+    const def = UX_AXIS_DEFS.find((x) => x.key === a.key)!;
+    return sum + a.score * def.weight;
+  }, 0) / 100);
+  const uxLabelByKey = new Map(UX_AXIS_DEFS.map((d) => [d.key, d.label]));
+  const uxFindings: UxFinding[] = [...assessment.ux]
+    .sort((a, b) => b.score - a.score)
+    .filter((a) => a.score >= 30)
+    .slice(0, 6)
+    .map((a) => ({
+      axis: uxLabelByKey.get(a.key)!,
+      severity: (a.score >= 70 ? "high" : a.score >= 45 ? "mid" : "low") as UxFinding["severity"],
+      evidence: a.evidence,
+      why: a.why,
+      fix: a.fix,
+    }));
+  return { total, grade: grade(total), dimensions, diagnosis, uxFriction, uxGrade: uxGrade(uxFriction), uxFindings };
 }
 
 /** LLM 診断の応答 JSON を検証する。不正な要素は捨て、正しい要素だけ返す。 */
