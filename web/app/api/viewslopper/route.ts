@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { scorePage, scoreUx, validateViewUrl } from "@/lib/viewslopper";
-import { ViewFetchError, assess, diagnose, fetchPage } from "@/lib/viewslopper-server";
+import { ViewFetchError, assess, assessAppearance, diagnose, fetchPage } from "@/lib/viewslopper-server";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -37,7 +37,14 @@ export async function POST(request: Request) {
     const page = await fetchPage(url);
     const heuristic = scorePage(page);
     const heuristicUx = scoreUx(page.ux);
-    const assessed = await assess(page, heuristic);
+    // 本文採点と外観採点は独立に走らせる（外観はスクショ＋vision で時間がかかる）。
+    const [assessed, appearanceOutcome] = await Promise.all([
+      assess(page, heuristic),
+      assessAppearance(page),
+    ]);
+    const appearance = appearanceOutcome
+      ? { ...appearanceOutcome.result, screenshotUrl: appearanceOutcome.screenshotUrl }
+      : null;
     if (assessed) {
       return NextResponse.json({
         url: page.url,
@@ -53,6 +60,7 @@ export async function POST(request: Request) {
         diagnosisSource: "llm",
         scoreSource: "llm",
         ux: { friction: assessed.uxFriction, grade: assessed.uxGrade, findings: assessed.uxFindings, signals: page.ux },
+        appearance,
       });
     }
     const diagnosis = await diagnose(page, heuristic);
@@ -70,6 +78,7 @@ export async function POST(request: Request) {
       diagnosisSource: diagnosis.llm ? "llm" : "rules",
       scoreSource: "rules",
       ux: { friction: heuristicUx.friction, grade: heuristicUx.grade, findings: heuristicUx.findings, signals: page.ux },
+      appearance,
     });
   } catch (error) {
     if (error instanceof ViewFetchError) {

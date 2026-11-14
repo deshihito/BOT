@@ -148,11 +148,26 @@ test("LLM主採点: 応答検証は全次元・全軸が揃った場合だけ通
   assert.equal(composed.uxFriction, 50);
   assert.equal(composed.diagnosis.length, 1);
   assert.equal(composed.diagnosis[0].dimension, "cliche");
-  // 採点メッセージにはアンカーと参考値が入る
+  // 採点メッセージにはアンカーが入り、決定的スコアは渡さない（引きずり防止）
   const page = { url: "https://e.com", title: "t", description: "", headings: [], text: SOLID_TEXT, ux: m.emptyUxSignals() };
   const msgs = m.buildAssessMessages(page, heuristic, page.ux);
   assert.ok(msgs[0].content.includes("合計78点相当"));
-  assert.ok(msgs[1].content.includes("決定的スコア（参考値）"));
+  assert.ok(!msgs[1].content.includes("決定的スコア"));
+});
+
+test("外観採点: vision応答を検証し、重み付け集計と所見化する", () => {
+  const axes = ["template", "alignment", "typography", "identity"].map((key, i) => ({
+    key, score: [80, 40, 40, 40][i], evidence: "見えた根拠", why: "理由", fix: "直し方",
+  }));
+  const composed = m.composeAppearance(JSON.stringify({ axes }));
+  assert.ok(composed);
+  // 80*0.35 + 40*0.25 + 40*0.20 + 40*0.20 = 54
+  assert.equal(composed.score, 54);
+  assert.equal(composed.grade, "Slop気味");
+  assert.equal(composed.findings[0].axis, "テンプレ感");
+  // 軸が欠けた応答は不採用
+  assert.equal(m.composeAppearance(JSON.stringify({ axes: axes.slice(0, 3) })), null);
+  assert.equal(m.composeAppearance("not json"), null);
 });
 
 test("LLM診断メッセージはスコア固定を指示し、応答検証は不正要素を捨てる", () => {

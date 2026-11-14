@@ -690,10 +690,15 @@ const DIMENSION_RUBRIC: Record<DimensionKey, string> = {
   bait: "煽り・両論併記: バズワードや誇張、立場を取らずに逃げる両論併記の度合い",
 };
 
-/** LLM 主採点のメッセージ。決定的採点の数値は「参考値」として渡し、判断は本文でさせる。 */
+/**
+ * LLM 主採点のメッセージ。判断は本文とシグナルだけでさせる。
+ * 以前は決定的スコアを参考値として渡していたが、LLM がその数値に引きずられて
+ * 採点が狭い範囲に固まる一因になっていたため渡さない（2026-11-14 の実機FB）。
+ * heuristic 引数は呼び出し側の形を保つために残すが中では使わない。
+ */
 export function buildAssessMessages(page: PageData, heuristic: ViewScore, uxSignals: UxSignals): ChatMessage[] {
+  void heuristic;
   const dimLines = DIMENSION_DEFS.map((d) => `- ${d.key}（${d.label}）: ${DIMENSION_RUBRIC[d.key]}`).join("\n");
-  const refLines = heuristic.dimensions.map((d) => `- ${d.key}: ${d.score}`).join("\n");
   const uxLines = [
     `viewport: ${uxSignals.hasViewport ? "あり" : "なし"} / lang: ${uxSignals.hasLang ? "あり" : "なし"}`,
     `h1: ${uxSignals.h1Count}個 / 見出しレベルの飛び: ${uxSignals.headingSkips}箇所`,
@@ -707,7 +712,7 @@ export function buildAssessMessages(page: PageData, heuristic: ViewScore, uxSign
     "あなたは Web ページの slop（薄くて定型的な中身）と UX・配置を採点する専門家です。",
     "各次元を 0–100 で採点してください（高いほど slop / 摩擦が大きい）。",
     "尺度のアンカー: 具体的な数字と固有名詞だけで書かれた実務記録は合計3点相当、定型句と抽象語だらけの典型的なAIブログ文は合計78点相当です。この尺度に合わせて判断してください。",
-    "渡される決定的スコアは辞書ベースの参考値です。意味を読んで判断し、参考値に引きずられないでください。",
+    "中途半端な点に寄せないでください。良いページは一桁〜20点台、悪いページは60点以上を付けるつもりで、根拠に基づいて大胆に差を付けてください。",
     "証拠は本文・タイトル・見出し・UXシグナルに実在する内容だけを使ってください。存在しない文を引用しないでください。",
     '出力は JSON オブジェクトのみ。前後に説明文やコードフェンスを付けないでください。',
     '{"dimensions":[{"key":次元キー,"score":0-100,"evidence":"根拠(最大120字)","why":"理由(60字以内)","fix":"直し方(60字以内)"} x6次元すべて],',
@@ -722,8 +727,6 @@ export function buildAssessMessages(page: PageData, heuristic: ViewScore, uxSign
     `取得方法: ${page.rendered ? "描画経由（JavaScript実行後のテキスト）" : "直接取得"}`,
     "採点する次元:",
     dimLines,
-    "決定的スコア（参考値）:",
-    refLines,
     "UXシグナル（HTML構造から数えた事実）:",
     uxLines,
     "本文（先頭6000字）:",
@@ -820,6 +823,70 @@ export function composeAssessed(
       fix: a.fix,
     }));
   return { total, grade: grade(total), dimensions, diagnosis, uxFriction, uxGrade: uxGrade(uxFriction), uxFindings };
+}
+
+// ---- 外観採点（スクリーンショットを vision モデルが採点） ----
+// 本文と構造だけでは「見た目の slop」（定型AIデザイン、整列の雑さ、個性のなさ）は
+// 測れないため、描画後のスクリーンショットを別軸で採点する。
+
+export type AppearanceAxisKey = "template" | "alignment" | "typography" | "identity";
+
+export const APPEARANCE_AXIS_DEFS: readonly { key: AppearanceAxisKey; label: string; weight: number }[] = [
+  { key: "template", label: "テンプレ感", weight: 35 },
+  { key: "alignment", label: "整列と余白", weight: 25 },
+  { key: "typography", label: "文字の階層", weight: 20 },
+  { key: "identity", label: "個性のなさ", weight: 20 },
+];
+
+export const APPEARANCE_PROMPT = [
+  "あなたは Web ページの見た目（外観）の slop 度合いを採点する専門家です。渡されるスクリーンショットだけを見て採点してください。",
+  "各軸を 0–100 で採点してください（高いほど見た目が slop）。",
+  "template（テンプレ感）: AI生成サイトに典型的な定型レイアウト（紫〜青グラデーション、中央寄せヒーロー＋ボタン2つ、均一なカードグリッド、意味のない装飾）の量。",
+  "alignment（整列と余白）: 要素のズレ、詰め込み、余白の不統一、窮屈さやスカスカさ。",
+  "typography（文字の階層）: 見出しと本文の階層の分かりにくさ、読みにくさ、サイズの不揃い。",
+  "identity（個性のなさ）: ロゴと名前を隠したら他のどのサイトとも区別できない度合い。",
+  "尺度: 丁寧に作られた個性的なデザインは一桁〜20点台、量産テンプレ丸出しなら60点以上。中途半端な点に寄せず、見た根拠に基づいて差を付けてください。",
+  "証拠はスクリーンショットに実際に見えるものだけを書いてください。",
+  '出力は JSON オブジェクトのみ: {"axes":[{"key":"template","score":0-100,"evidence":"見えた根拠(最大120字)","why":"理由(60字以内)","fix":"直し方(60字以内)"} x4軸すべて]}',
+].join("\n");
+
+export type AppearanceResult = {
+  score: number;
+  grade: string;
+  findings: UxFinding[];
+};
+
+/** vision モデルの外観応答を検証し、重み付けで集計する。全軸そろわない応答は不採用。 */
+export function composeAppearance(raw: string): AppearanceResult | null {
+  let text = raw.trim();
+  const fence = text.match(/```(?:json)?\s*([\s\S]*?)```/);
+  if (fence) text = fence[1].trim();
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    return null;
+  }
+  if (!parsed || typeof parsed !== "object") return null;
+  const axes = parseScoreEntries((parsed as Record<string, unknown>).axes, APPEARANCE_AXIS_DEFS);
+  if (!axes) return null;
+  const score = clamp(axes.reduce((sum, a) => {
+    const def = APPEARANCE_AXIS_DEFS.find((x) => x.key === a.key)!;
+    return sum + a.score * def.weight;
+  }, 0) / 100);
+  const labelByKey = new Map(APPEARANCE_AXIS_DEFS.map((d) => [d.key, d.label]));
+  const findings: UxFinding[] = [...axes]
+    .sort((a, b) => b.score - a.score)
+    .filter((a) => a.score >= 30)
+    .slice(0, 4)
+    .map((a) => ({
+      axis: labelByKey.get(a.key)!,
+      severity: (a.score >= 70 ? "high" : a.score >= 45 ? "mid" : "low") as UxFinding["severity"],
+      evidence: a.evidence,
+      why: a.why,
+      fix: a.fix,
+    }));
+  return { score, grade: grade(score), findings };
 }
 
 /** LLM 診断の応答 JSON を検証する。不正な要素は捨て、正しい要素だけ返す。 */
