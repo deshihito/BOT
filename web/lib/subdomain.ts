@@ -3,6 +3,7 @@
 // 専用サブドメインのルートは、本体サイト上の公開パスへリダイレクトする。
 // 現在の割り当て:
 // - oneprompter.agobot.app → /one-prompter（One Prompter）
+// - viewslopper.agobot.app → /viewslopper（viewslopper）
 // - deshihito.agobot.app  → /folio/deshihito（ポートフォリオ枠・1人1ファイル）
 // - tadanoen.agobot.app   → /folio/tadanoen（ポートフォリオ枠・1人1ファイル）
 //
@@ -25,6 +26,7 @@ export const ONE_PROMPTER_PATH = "/one-prompter";
  */
 export const SUBDOMAIN_ROUTES: Readonly<Record<string, string>> = {
   [ONE_PROMPTER_HOST]: ONE_PROMPTER_PATH,
+  "viewslopper.agobot.app": "/viewslopper",
   "deshihito.agobot.app": "/folio/deshihito",
   "tadanoen.agobot.app": "/folio/tadanoen",
 };

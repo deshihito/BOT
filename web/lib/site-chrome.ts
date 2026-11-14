@@ -9,6 +9,8 @@
 /** 共通クロームを出さないパス（このパス自体と、その配下すべて）。 */
 export const CHROMELESS_PATHS: readonly string[] = [
   "/one-prompter",
+  // viewslopper も独立サービス（Slop Score の産出と診断）のため、画面は単独名義で完結させる。
+  "/viewslopper",
   // ポートフォリオ枠（1人1ファイル割り当て）。各ページは専用ヘッダー/
   // フッターを含めてページ内で完結させるため、共通クロームは出さない。
   "/folio",
