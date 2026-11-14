@@ -77,5 +77,30 @@ class LevelupCardRenderThemeTest(unittest.TestCase):
         )
 
 
+class LevelupCardXpBarTest(unittest.TestCase):
+    def test_xp_info_math(self):
+        from core.general.exp.levelup import levelup_xp_info
+
+        # 0 EXP: 両軸ともレベル1の先頭 → 進捗0、残りは各軸の必要量 (base=50)
+        prog, crem, vrem = levelup_xp_info(0, 0)
+        self.assertEqual(prog, 0.0)
+        self.assertEqual((crem, vrem), (50, 50))
+        # チャットだけ半分進めば進捗は平均で 0.25
+        prog, crem, vrem = levelup_xp_info(25, 0)
+        self.assertAlmostEqual(prog, 0.25)
+        self.assertEqual((crem, vrem), (25, 50))
+
+    def test_render_with_xp_bar(self):
+        from cogs.general import render_levelup_card
+
+        plain = render_levelup_card(None, "aoi", 8, 9, 1, theme="default")
+        barred = render_levelup_card(
+            None, "aoi", 8, 9, 1, theme="default",
+            xp_progress=0.25, xp_remain_chat=120, xp_remain_vc=340,
+        )
+        self.assertTrue(barred.startswith(b"\x89PNG"))
+        self.assertNotEqual(plain, barred)
+
+
 if __name__ == "__main__":
     unittest.main()
