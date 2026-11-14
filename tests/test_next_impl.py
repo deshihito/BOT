@@ -882,7 +882,7 @@ class AssetRankingTest(unittest.TestCase):
 class WiringTest(unittest.TestCase):
     def test_actions_registered(self):
         from core.general.common import GENERAL_ACTIONS, MONEY_PRISON_BLOCKED_VALUES
-        money_values = [v for _label, v in GENERAL_ACTIONS["money"]]
+        money_values = [v for _label, v in GENERAL_ACTIONS["play"]]
         rta_values = [v for _label, v in GENERAL_ACTIONS["rta"]]
         self.assertIn("bj_duel", money_values)
         self.assertIn("asset_leaderboard", rta_values)

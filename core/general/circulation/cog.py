@@ -61,6 +61,11 @@ logger = logging.getLogger(__name__)
 CIRCULATION_COLOR = 0xE67E22
 LOTTERY_ACCENT = (230, 126, 34)
 LOTTERY_FILENAME = "lottery_panel.png"
+#: 宝くじパネルのフッター（画像版/通常版で共通。定義はここ1箇所だけ）。
+_LOTTERY_FOOTER = (
+    f"チケットは1枚 {lottery_core.TICKET_PRICE} AGO、1人"
+    f"{lottery_core.MAX_TICKETS_PER_USER}枚まで。抽選は毎日"
+    f"{lottery_core.DRAW_HOUR}:00 です。")
 MINING_ID = "MINING"
 LOTTERY_ID = "LOTTERY"
 
@@ -182,10 +187,7 @@ def _lottery_embed(cog: "CirculationCog", user_id: int,
         # 数値表示は画像（lottery_panel_png）に寄せ、embed は画像参照と
         # フッターだけを持つ（本文の二重表示を避ける）。
         embed.set_image(url=f"attachment://{LOTTERY_FILENAME}")
-        embed.set_footer(
-            text=f"チケットは1枚 {lottery_core.TICKET_PRICE} AGO、1人"
-                 f"{lottery_core.MAX_TICKETS_PER_USER}枚まで。抽選は毎日"
-                 f"{lottery_core.DRAW_HOUR}:00 です。")
+        embed.set_footer(text=_LOTTERY_FOOTER)
         return embed
     hero, sections = lottery_panel_content(cog, user_id)
     embed.add_field(name=hero.label, value=f"**{hero.value}**", inline=True)
@@ -207,10 +209,7 @@ def _lottery_embed(cog: "CirculationCog", user_id: int,
             else:
                 lines.append(row.label)
         embed.add_field(name=section_title, value="\n".join(lines), inline=False)
-    embed.set_footer(
-        text=f"チケットは1枚 {lottery_core.TICKET_PRICE} AGO、1人"
-             f"{lottery_core.MAX_TICKETS_PER_USER}枚まで。抽選は毎日"
-             f"{lottery_core.DRAW_HOUR}:00 です。")
+    embed.set_footer(text=_LOTTERY_FOOTER)
     return embed
 
 

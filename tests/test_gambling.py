@@ -981,7 +981,7 @@ class RegistryTest(unittest.TestCase):
     def test_gambling_actions_are_registered_and_blocked(self):
         from core.general.common import GENERAL_ACTIONS
 
-        values = {value for _label, value in GENERAL_ACTIONS["money"]}
+        values = {value for _label, value in GENERAL_ACTIONS["play"]}
         for value in ("slot", "double", "blackjack", "dice"):
             self.assertIn(value, values)
             self.assertIn(f"general:{value}", action_registry.AI_BLOCKED_IDS)

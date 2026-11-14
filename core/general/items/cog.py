@@ -41,6 +41,8 @@ logger = logging.getLogger(__name__)
 ITEMS_COLOR = 0xE67E22
 ITEMS_ACCENT = (230, 126, 34)
 ITEMS_FILENAME = "items_panel.png"
+#: アイテムパネルのフッター（画像版/通常版で共通。定義はここ1箇所だけ）。
+_ITEMS_FOOTER = "買えない素材は合成や宝箱で手に入ります。"
 SHOP_ID = "ITEM_SHOP"
 BOX_ID = "TREASURE_BOX"
 
@@ -141,7 +143,7 @@ def _items_embed(store: items_core.ItemStore, user_id: int,
         # 数値表示は画像（items_panel_png）に寄せ、embed は画像参照と
         # フッターだけを持つ（本文の二重表示を避ける）。
         embed.set_image(url=f"attachment://{ITEMS_FILENAME}")
-        embed.set_footer(text="買えない素材は合成や宝箱で手に入ります。")
+        embed.set_footer(text=_ITEMS_FOOTER)
         return embed
     inventory_rows = _inventory_rows(store, user_id)
     if inventory_rows:
@@ -161,7 +163,7 @@ def _items_embed(store: items_core.ItemStore, user_id: int,
         embed.add_field(
             name="ショップ（効果・消費）", value="\n".join(consumable_lines),
             inline=False)
-    embed.set_footer(text="買えない素材は合成や宝箱で手に入ります。")
+    embed.set_footer(text=_ITEMS_FOOTER)
     return embed
 
 

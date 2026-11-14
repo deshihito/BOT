@@ -48,13 +48,12 @@ class CustomIdTest(unittest.TestCase):
     def test_general_panel(self):
         # 導線最適化 M9: 通常パネルには登録ボタン（panel:general:register）が常駐
         self.assertEqual(child_ids(GeneralPanel(None)), {"panel:general:genre", "panel:general:register"})
-        # 導線最適化ラウンド4: マネージャンルが25件を超えたためページめくり
-        # ボタン（action_prev / action_indicator / action_next）が付く。
+        # 経済導線整理B: money ジャンルは分割で10件・1ページになり、
+        # ページめくりボタン（action_prev / action_indicator / action_next）
+        # は付かない。
         self.assertEqual(
             child_ids(GeneralPanel(None, genre="money")),
             {"panel:general:genre", "panel:general:action", "panel:general:register",
-             "panel:general:action_prev", "panel:general:action_indicator",
-             "panel:general:action_next",
              # 機能再編: money⇔boardnotify_rta のジャンルワープボタン
              "panel:general:warp_general_boardnotify_rta"},
         )

@@ -665,11 +665,11 @@ class RegistryTest(unittest.TestCase):
     def test_circulation_actions_are_registered(self):
         registry = action_registry.default_registry()
         panel = registry.by_id("general:lottery")
-        self.assertEqual(panel.genre, "money")
+        self.assertEqual(panel.genre, "play")
         self.assertNotEqual(panel.risk, "blocked")
         for action_id in ("general:mining", "general:lottery_buy", "general:steal"):
             spec = registry.by_id(action_id)
-            self.assertEqual(spec.genre, "money", action_id)
+            self.assertEqual(spec.genre, "play", action_id)
             self.assertEqual(spec.risk, "blocked", action_id)
             self.assertNotIn("aitools", spec.surfaces, action_id)
 

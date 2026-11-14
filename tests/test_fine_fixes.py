@@ -313,7 +313,11 @@ class PrisonBlockTest(unittest.TestCase):
         self._tmp.cleanup()
 
     def test_dispatch_block_set_matches_money_genre(self):
-        money_values = {value for _label, value in GENERAL_ACTIONS["money"]}
+        # 経済導線整理Bで money は3ジャンルに分割されたため、合算で見る。
+        money_values = {
+            value
+            for genre in ("money", "trade_craft", "play")
+            for _label, value in GENERAL_ACTIONS[genre]}
         self.assertTrue(MONEY_PRISON_BLOCKED_VALUES <= money_values)
         display_values = {"money_panel", "status", "coin_leaderboard",
                           "market", "items", "workshop", "lottery"}

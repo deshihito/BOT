@@ -87,8 +87,7 @@ GAMBLING_RULES = {
         f"回数（{gambling_core.SLOT_MIN_SPINS}〜{gambling_core.SLOT_MAX_SPINS}）"
         "分のベットを先払いして回します。\n"
         "同じ数字が揃うほど配当が伸び、7が3つ以上揃うと確変に"
-        "入ります。6が5つ以上揃うと所持コイン全額没収、"
-        "連敗が続くと天井もあります。"),
+        "入ります。連敗が続くと天井もあります。"),
     "double": (
         "ベットして、GOで倍率を伸ばすか、CASHOUTで確定するか選ぶゲーム。"
         "GO成功で倍率が伸び、"
@@ -110,6 +109,8 @@ GAMBLING_RULES = {
         f"ベットは {gambling_core.DUEL_MIN_BET} AGO から。"),
 }
 
+# 没収警告の開示はベット判断の場（セッション画面）のここ1箇所だけにし、
+# ルール文（GAMBLING_RULES["slot"]）には重ねない（文言削減C、2026-11-14）。
 _SLOT_RISK_LINE = "⚠️ 6が5つ以上揃うと所持コイン全額没収"
 
 
