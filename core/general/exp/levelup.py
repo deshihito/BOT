@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from ..common import *
-from .exp import _REPO_ROOT
+from .exp import _REPO_ROOT, level_from_exp
 
 LEVELUP_SECTION = "levelup_notify"
 
@@ -210,6 +210,22 @@ def _levelup_safe_name(name: str, can_cjk: bool) -> str:
     return "".join(out).strip()
 
 
+def levelup_xp_info(chat_exp: int, vc_exp: int) -> tuple[float, int, int]:
+    """次の general レベルまでの (進捗 0..1, チャットの残りEXP, VCの残りEXP)。
+
+    進捗の定義はサーバー活動ボード (exp_board) の general 軸と同じ
+    「chat/vc 両軸のレベル内進捗の平均」。
+    """
+    _, ccur, cneed = level_from_exp(int(chat_exp or 0), CHAT_EXP_BASE, CHAT_EXP_RATIO)
+    _, vcur, vneed = level_from_exp(int(vc_exp or 0), VC_EXP_BASE, VC_EXP_RATIO)
+    frac = 0.0
+    if cneed > 0:
+        frac += ccur / cneed
+    if vneed > 0:
+        frac += vcur / vneed
+    return min(1.0, frac / 2.0), max(0, cneed - ccur), max(0, vneed - vcur)
+
+
 def render_levelup_card(
     avatar_bytes: bytes | None,
     name: str,
@@ -219,6 +235,9 @@ def render_levelup_card(
     *,
     bot_avatar_bytes: bytes | None = None,
     theme: str = "default",
+    xp_progress: float | None = None,
+    xp_remain_chat: int | None = None,
+    xp_remain_vc: int | None = None,
 ) -> bytes:
     """レベルアップ画像(PNG)を生成して bytes で返す。CPU処理なので to_thread で呼ぶこと。
 
@@ -359,7 +378,7 @@ def render_levelup_card(
     # --- ベースラインの計算 ---
     # 見出しの視覚的な中心はカード中央 (= アバターの中心軸) に合わせる。
     # 以前は中央より上に置いていたため、本文全体が上寄りに見えていた。
-    heading_cy = center_y
+    heading_cy = px(124) if xp_progress is not None else center_y
 
     def centered_baseline(text, font):
         """インク範囲の中心が heading_cy に来るベースラインを返す。
@@ -411,6 +430,37 @@ def render_levelup_card(
     )
 
     d.text((arrow_x0 + arrow_w + gap_after, n_top), new_text, font=nfont, fill=ACCENT, anchor="ls")
+
+    # ============================================================
+    # 次のレベルまでの進捗バー (XP 情報があるときだけ)
+    # ============================================================
+    if xp_progress is not None:
+        prog = min(1.0, max(0.0, float(xp_progress)))
+        if xp_remain_chat is not None and xp_remain_vc is not None:
+            label = (
+                f"次のレベルまで あと {xp_remain_chat + xp_remain_vc:,} EXP"
+                f"（チャット {xp_remain_chat:,} / VC {xp_remain_vc:,}）"
+            )
+        else:
+            label = "次のレベルまで"
+        pct_text = f"{prog * 100:.0f}%"
+        label_size = px(21)
+        lfont = _levelup_font(label_size)
+        while (
+            label_size > px(14)
+            and d.textlength(label, font=lfont) + px(16) + d.textlength(pct_text, font=lfont) > right - TX
+        ):
+            label_size -= px(1)
+            lfont = _levelup_font(label_size)
+        label_y = px(196)
+        d.text((TX, label_y), label, font=lfont, fill=MUTE, anchor="la")
+        d.text((right, label_y), pct_text, font=lfont, fill=INK, anchor="ra")
+        bar_y0, bar_y1 = px(228), px(244)
+        track = tuple(int(BG[i] * 0.35 + LINE[i] * 0.65) for i in range(3)) + (255,)
+        d.rounded_rectangle([TX, bar_y0, right, bar_y1], radius=px(8), fill=track)
+        if prog > 0:
+            fill_w = max(px(16), int((right - TX) * prog))
+            d.rounded_rectangle([TX, bar_y0, TX + fill_w, bar_y1], radius=px(8), fill=ACCENT)
 
     # ============================================================
     # 下部: 区切り線 + ユーザー名
@@ -481,7 +531,8 @@ class LevelUpMixin:
 
 
     async def render_levelup_image(
-        self, user, before: int, after: int, *, bot_avatar_bytes: bytes | None = None
+        self, user, before: int, after: int, *, bot_avatar_bytes: bytes | None = None,
+        chat_exp: int | None = None, vc_exp: int | None = None,
     ) -> bytes | None:
         """レベルアップ画像(PNGのbytes)を作る。Pillowが無い等で作れなければ None。/support のプレビューからも使う。"""
         avatar_bytes = None
@@ -494,11 +545,20 @@ class LevelUpMixin:
             bot_avatar_bytes = await self._fetch_bot_avatar()
         try:
             async with self._levelup_sem:
+                xp_kwargs: dict = {}
+                if chat_exp is not None and vc_exp is not None:
+                    prog, crem, vrem = levelup_xp_info(chat_exp, vc_exp)
+                    xp_kwargs = {
+                        "xp_progress": prog,
+                        "xp_remain_chat": crem,
+                        "xp_remain_vc": vrem,
+                    }
                 return await asyncio.to_thread(
                     render_levelup_card,
                     avatar_bytes, name, before, after, getattr(user, "id", 0),
                     bot_avatar_bytes=bot_avatar_bytes,
                     theme=levelup_card.get_theme(getattr(user, "id", 0)),
+                    **xp_kwargs,
                 )
         except ImportError:
             if not self._levelup_pillow_warned:
@@ -510,7 +570,7 @@ class LevelUpMixin:
             return None
 
 
-    async def _notify_levelup(self, guild: discord.Guild, user, before: int, after: int, *, fallback_channel=None):
+    async def _notify_levelup(self, guild: discord.Guild, user, before: int, after: int, *, fallback_channel=None, chat_exp: int | None = None, vc_exp: int | None = None):
         """generalレベルが上がった時の通知。user はユーザーオブジェクトかユーザーID。"""
         try:
             store = guild_settings.get_store()
@@ -556,7 +616,8 @@ class LevelUpMixin:
             if can_attach:
                 bot_avatar_bytes = await self._fetch_bot_avatar()
                 png = await self.render_levelup_image(
-                    user, before, after, bot_avatar_bytes=bot_avatar_bytes
+                    user, before, after, bot_avatar_bytes=bot_avatar_bytes,
+                    chat_exp=chat_exp, vc_exp=vc_exp,
                 )
                 if png:
                     kwargs["file"] = discord.File(io.BytesIO(png), filename="levelup.png")
