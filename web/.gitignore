@@ -4,3 +4,7 @@ out/
 next-env.d.ts
 *.tsbuildinfo
 .vercel
+
+# 背景透過の生成資産（prebuild で取得・コピーする）
+public/models/
+public/ort/
