@@ -57,6 +57,7 @@ const lib = await loadBundle(
     "shareCustomIdForRoom",
     "roomFromShareCustomId",
     "activityLandingPath",
+    "activityLandingUrl",
   ],
 );
 
@@ -121,14 +122,31 @@ test("shareLink の custom_id にルーム宛先を運び、起動側で復元�
   assert.equal(lib.roomFromShareCustomId(""), null);
 });
 
-test("Activity 起動の着地は既定で /games、music 明示だけ /activity/music", () => {
-  assert.equal(lib.activityLandingPath({ frameId: "f", instanceId: "i", activity: null }), "/games");
-  assert.equal(lib.activityLandingPath({ frameId: "f", instanceId: "i", activity: "music" }), "/activity/music");
-  assert.equal(lib.activityLandingPath({ frameId: "f", instanceId: "i", activity: "games" }), "/games");
+test("Activity 起動の着地はパラメータによらず /games に一本化", () => {
+  assert.equal(lib.activityLandingPath({ frameId: "f", instanceId: "i" }), "/games");
   // Activity 起動パラメータが無ければ振り分けない
-  assert.equal(lib.activityLandingPath({ frameId: null, instanceId: "i", activity: null }), null);
-  assert.equal(lib.activityLandingPath({ frameId: "f", instanceId: null, activity: "music" }), null);
-  assert.equal(lib.activityLandingPath({ frameId: undefined, instanceId: undefined, activity: undefined }), null);
+  assert.equal(lib.activityLandingPath({ frameId: null, instanceId: "i" }), null);
+  assert.equal(lib.activityLandingPath({ frameId: "f", instanceId: null }), null);
+  assert.equal(lib.activityLandingPath({ frameId: undefined, instanceId: undefined }), null);
+});
+
+test("Activity 着地 URL は公開オリジンで組み立て、クエリを引き継ぐ", () => {
+  const url = lib.activityLandingUrl({
+    frameId: "f",
+    instanceId: "i",
+    search: "?frame_id=f&instance_id=i&custom_id=room%3Areversi%3AABC234",
+  });
+  assert.equal(url, "https://agobot.app/games?frame_id=f&instance_id=i&custom_id=room%3Areversi%3AABC234");
+  // Location のホストが公開オリジンであること（内部アドレスを指さない）
+  const parsed = new URL(url);
+  assert.equal(parsed.origin, "https://agobot.app");
+  assert.equal(parsed.hostname, "agobot.app");
+  assert.ok(!parsed.hostname.includes("localhost"), "着地 URL が内部アドレスを指している");
+  assert.equal(parsed.pathname, "/games");
+  // クエリ無しでも着地先は同じ
+  assert.equal(lib.activityLandingUrl({ frameId: "f", instanceId: "i", search: "" }), "https://agobot.app/games");
+  // Activity 起動でなければ null
+  assert.equal(lib.activityLandingUrl({ frameId: null, instanceId: "i", search: "?frame_id=f" }), null);
 });
 
 // --- 配線の確認（ソースレベルの回帰防止） ---
@@ -137,10 +155,11 @@ function readSource(relPath) {
   return fs.readFileSync(path.join(webDir, relPath), "utf8");
 }
 
-test("middleware は Activity 着地を lib の振り分けで決める", () => {
+test("middleware は Activity 着地を lib の振り分けで決め、公開オリジンへ飛ばす", () => {
   const src = readSource("middleware.ts");
-  assert.ok(src.includes("activityLandingPath"), "middleware が activityLandingPath を使っていない");
-  assert.ok(!src.includes('activityUrl.pathname = "/activity/music"'), "音楽への固定リダイレクトが残っている");
+  assert.ok(src.includes("activityLandingUrl"), "middleware が activityLandingUrl を使っていない");
+  assert.ok(!src.includes("/activity/music"), "音楽へのリダイレクトが残っている");
+  assert.ok(!src.includes("nextUrl.clone()"), "内部アドレスを指しかねない clone 方式が残っている");
 });
 
 test("GamesShell は本人確認と shareLink 共有、custom_id 直送を持つ", () => {
@@ -148,7 +167,23 @@ test("GamesShell は本人確認と shareLink 共有、custom_id 直送を持つ
   assert.ok(src.includes("authenticateDiscordIdentity"), "GamesShell が本人確認を呼んでいない");
   assert.ok(src.includes("shareLink"), "GamesShell が shareLink を使っていない");
   assert.ok(src.includes("roomFromShareCustomId"), "GamesShell が custom_id を解釈していない");
-  assert.ok(src.includes("/activity/music"), "埋め込みバーから音楽への導線が無い");
+  assert.ok(!src.includes("/activity/music"), "廃止した音楽画面への導線が残っている");
+});
+
+test("音楽 Activity 画面と専用ルートは廃止され、旧 URL は /games へのスタブ", () => {
+  for (const rel of [
+    "app/activity/music/ActivityClient.tsx",
+    "app/api/activity/auth/route.ts",
+    "app/api/activity/music-state/route.ts",
+    "app/api/activity/music-video/route.ts",
+  ]) {
+    assert.ok(!fs.existsSync(path.join(webDir, rel)), `${rel} が残っている`);
+  }
+  const auth = readSource("lib/activity-auth.ts");
+  assert.ok(!auth.includes("createActivityToken"), "音楽用トークン発行が残っている");
+  assert.ok(!auth.includes("readActivityToken"), "音楽用トークン検証が残っている");
+  const stub = readSource("app/activity/music/page.tsx");
+  assert.ok(stub.includes('redirect("/games")'), "旧 URL のスタブが /games へ寄せていない");
 });
 
 test("games-auth ルートはコード交換だけを行い、音楽用トークンを発行しない", () => {

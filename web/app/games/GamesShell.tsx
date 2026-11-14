@@ -162,7 +162,6 @@ export default function GamesShell({ clientId, children }: { clientId: string; c
             <span className="games-embedded-brand">AGOBOT ゲーム</span>
             <span className="games-embedded-links">
               <Link href={`${prefix}/games`}>ゲーム一覧</Link>
-              <Link href={`${prefix}/activity/music`}>ミュージック</Link>
             </span>
             {identity && (
               <span className="games-embedded-identity">

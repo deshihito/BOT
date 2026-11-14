@@ -109,15 +109,33 @@ export function roomFromShareCustomId(raw: string | null | undefined): { gameId:
 
 /**
  * Activity 起動（ルート＋ frame_id / instance_id）の着地先。
- * 既定はゲーム（/games）。activity=music が明示された起動だけ
- * 従来どおり音楽ページへ送り、音楽側の導線は壊さない。
+ * 音楽 Activity 画面の廃止（2026-11-14）により、起動パラメータに
+ * よらずゲーム（/games）へ一本化した。
  * Activity 起動でなければ null（通常表示）。
  */
 export function activityLandingPath(args: {
   frameId: string | null | undefined;
   instanceId: string | null | undefined;
-  activity: string | null | undefined;
 }): string | null {
   if (!args.frameId || !args.instanceId) return null;
-  return args.activity === "music" ? "/activity/music" : "/games";
+  return "/games";
+}
+
+/**
+ * Activity 着地リダイレクトの絶対 URL。公開オリジン（SITE_URL）で
+ * 組み立てる。Cloudflare Tunnel 配下では nextUrl のオリジンが内部
+ * アドレス（localhost:3000）になり、そのままリダイレクトすると
+ * 外部クライアントも discordsays プロキシも到達できない（実際に
+ * 「discordsays.com が拒否されました」で着地できなかった）。
+ * クエリ（frame_id / instance_id / custom_id 等）は着地後の
+ * GamesShell が読むので、そのまま引き継ぐ。
+ */
+export function activityLandingUrl(args: {
+  frameId: string | null | undefined;
+  instanceId: string | null | undefined;
+  search: string;
+}): string | null {
+  const path = activityLandingPath({ frameId: args.frameId, instanceId: args.instanceId });
+  if (!path) return null;
+  return `${SITE_URL}${path}${args.search}`;
 }

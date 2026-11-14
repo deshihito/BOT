@@ -1,6 +1,6 @@
 // Discord Activity 内で本人確認まで進めるクライアント側フロー。
 // authorize（PKCE）→ サーバー側コード交換（/api/activity/games-auth）→
-// authenticate の順で、音楽用 ActivityClient と同じ型を使う。
+// authenticate の順に進める。
 // 失敗しても呼び出し側の表示は壊さない（null を返し、通常表示に倒す）。
 import type { DiscordSDK } from "@discord/embedded-app-sdk";
 import { buildDiscordIdentity, type DiscordIdentity } from "./discord-activity";
