@@ -26,6 +26,8 @@ export type CreateOnlineRoomInput = {
   maxPlayers?: number;
   isPublic: boolean;
   options?: unknown;
+  /** Discord 本人確認で得たアバター（任意）。ロビーの表示に使う。 */
+  avatarUrl?: string;
 };
 
 export type OnlineRoomApi = {
@@ -42,7 +44,7 @@ export type OnlineRoomApi = {
   setError: (value: string) => void;
   setNotice: (value: string) => void;
   createRoom: (input: CreateOnlineRoomInput) => Promise<boolean>;
-  joinRoom: (code: string, displayName: string) => Promise<boolean>;
+  joinRoom: (code: string, displayName: string, avatarUrl?: string) => Promise<boolean>;
   start: () => Promise<boolean>;
   restart: () => Promise<boolean>;
   leave: () => Promise<void>;
@@ -312,6 +314,7 @@ export function useOnlineRoom(gameId: string): OnlineRoomApi {
           ...(input.maxPlayers !== undefined ? { maxPlayers: input.maxPlayers } : {}),
           isPublic: input.isPublic,
           ...(input.options !== undefined ? { options: input.options } : {}),
+          ...(input.avatarUrl ? { avatarUrl: input.avatarUrl } : {}),
         });
         if (!res.ok) {
           setError(errorText(data, "ルームを作成できませんでした。"));
@@ -336,7 +339,7 @@ export function useOnlineRoom(gameId: string): OnlineRoomApi {
   );
 
   const joinRoom = useCallback(
-    async (code: string, rawName: string): Promise<boolean> => {
+    async (code: string, rawName: string, avatarUrl?: string): Promise<boolean> => {
       const name = validName(rawName);
       if (!name || busy) return false;
       const normalized = code.trim().toUpperCase();
@@ -347,7 +350,11 @@ export function useOnlineRoom(gameId: string): OnlineRoomApi {
       setBusy(true);
       setError("");
       try {
-        const { res, data } = await postJson(`${base}/rooms/join`, { code: normalized, displayName: name });
+        const { res, data } = await postJson(`${base}/rooms/join`, {
+          code: normalized,
+          displayName: name,
+          ...(avatarUrl ? { avatarUrl } : {}),
+        });
         if (!res.ok) {
           setError(errorText(data, "参加できませんでした。"));
           return false;

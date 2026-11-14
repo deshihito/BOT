@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { playableGames } from "@/lib/games-catalog";
 import FactsStrip from "../FactsStrip";
+import DiscordPlayCta from "./DiscordPlayCta";
 import { GamesBreadcrumb } from "./GamesChrome";
 import GamesGrid from "./GamesGrid";
 
@@ -33,6 +34,7 @@ export default function GamesPage() {
         ]}
         label="ゲームの判断材料"
       />
+      <DiscordPlayCta />
       <GamesGrid />
       <p className="quiet-note">
         チェスの対局データは端末の中だけで処理され、サーバーへ送信されることはありません。

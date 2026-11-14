@@ -30,6 +30,7 @@ import {
   unlockAudio,
   type BalkuSoundSettings,
 } from "@/lib/balku-sound";
+import { inviteUrlForGame, roomCodeFromSearch } from "@/lib/discord-activity";
 import { useGamesNav } from "../GamesShell";
 
 const SESSION_KEY = "balku-room-session";
@@ -363,7 +364,7 @@ function loadSession(): Session | null {
 }
 
 export default function BalkuClient() {
-  const { prefix } = useGamesNav();
+  const { prefix, identity, shareRoomInvite } = useGamesNav();
   const [session, setSession] = useState<Session | null>(null);
   const [view, setView] = useState<RoomView | null>(null);
   const [syncMode, setSyncMode] = useState<"sse" | "polling">("sse");
@@ -376,6 +377,8 @@ export default function BalkuClient() {
   const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [copiedLink, setCopiedLink] = useState(false);
+  const [inviteCode, setInviteCode] = useState<string | null>(null);
   const [now, setNow] = useState(() => Date.now());
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
   // 提出時の添付素材は「種類ごとの枚数」で持つ。実カードIDは送信時に
@@ -814,6 +817,50 @@ export default function BalkuClient() {
     }
   };
 
+  // 招待リンクは公開 URL（開くとそのまま参加フローに入る形）でコピーする。
+  const copyInviteLink = async () => {
+    if (!session) return;
+    const url = inviteUrlForGame("balku", session.code);
+    if (!url) return;
+    try {
+      await navigator.clipboard.writeText(url);
+      setCopiedLink(true);
+      setTimeout(() => setCopiedLink(false), 1500);
+    } catch {
+      setNotice(`招待リンク: ${url}`);
+    }
+  };
+
+  // Discord 内では共有モーダルを優先し、使えなければリンクコピーに倒す。
+  const shareInvite = async () => {
+    if (!session) return;
+    if (shareRoomInvite && (await shareRoomInvite("balku", session.code))) return;
+    await copyInviteLink();
+  };
+
+  // 招待リンク（?room=）から開かれたら、コード入力を経ずに参加導線を出す。
+  useEffect(() => {
+    const code = roomCodeFromSearch(window.location.search);
+    if (code) {
+      setInviteCode(code);
+      setJoinCode(code);
+    }
+  }, []);
+
+  // Discord 本人確認が取れていて保存名が無いときだけ、表示名の既定値にする。
+  const identityAppliedRef = useRef(false);
+  useEffect(() => {
+    if (!identity || identityAppliedRef.current) return;
+    identityAppliedRef.current = true;
+    let stored = "";
+    try {
+      stored = sessionStorage.getItem(NAME_KEY) ?? "";
+    } catch {
+      // 読めなくても既定値の適用は試みる
+    }
+    if (!stored) saveName(identity.name);
+  }, [identity, saveName]);
+
   // --- 対戦中の選択状態の掃除 ---
   const state = view?.state;
   const mySeat = view?.player.seat ?? -1;
@@ -1077,6 +1124,29 @@ export default function BalkuClient() {
             <strong>3.</strong> 山札が尽きたら最終精算。高得点の勝ち
           </li>
         </ol>
+        {inviteCode && (
+          <section className="balku-panel balku-invite-panel">
+            <h2>ルーム {inviteCode} への招待</h2>
+            <label className="balku-field">
+              <span>あなたの名前</span>
+              <input
+                className="balku-input"
+                value={name}
+                onChange={(e) => saveName(e.target.value)}
+                placeholder="2〜24文字"
+                maxLength={24}
+              />
+            </label>
+            <div className="balku-actions">
+              <button type="button" className="balku-btn balku-btn-primary" onClick={() => joinRoom(inviteCode)} disabled={busy}>
+                このルームに参加
+              </button>
+              <button type="button" className="balku-btn balku-btn-ghost" onClick={() => setInviteCode(null)}>
+                閉じる
+              </button>
+            </div>
+          </section>
+        )}
         <div className="balku-lobby-grid">
           <section className="balku-panel">
             <h2>ルームを作成 / 参加</h2>
@@ -1231,8 +1301,16 @@ export default function BalkuClient() {
             <button type="button" className="balku-btn" onClick={copyCode}>
               {copied ? "コピーしました" : "コードをコピー"}
             </button>
+            <button type="button" className="balku-btn" onClick={() => void copyInviteLink()}>
+              {copiedLink ? "コピーしました" : "招待リンクをコピー"}
+            </button>
+            {shareRoomInvite && (
+              <button type="button" className="balku-btn" onClick={() => void shareInvite()}>
+                Discordで招待
+              </button>
+            )}
           </div>
-          <p className="muted">このコードを共有すると、他のプレイヤーが参加できます。</p>
+          <p className="muted">招待リンクかコードを共有すると、他のプレイヤーが参加できます。</p>
           <div className="balku-player-list">
             {st.players.map((p) => {
               const isCpuSeat = view.cpuSeats.includes(p.seat);
@@ -2240,6 +2318,9 @@ export default function BalkuClient() {
                 <code className="balku-code">{session.code}</code>
                 <button type="button" className="balku-btn balku-btn-ghost" onClick={copyCode}>
                   {copied ? "コピーしました" : "コードをコピー"}
+                </button>
+                <button type="button" className="balku-btn balku-btn-ghost" onClick={() => void copyInviteLink()}>
+                  {copiedLink ? "コピーしました" : "招待リンクをコピー"}
                 </button>
               </div>
               {syncMode === "polling" && <p className="balku-sync-note">ポーリングで同期中</p>}
