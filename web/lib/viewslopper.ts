@@ -713,6 +713,8 @@ export function buildAssessMessages(page: PageData, heuristic: ViewScore, uxSign
     "各次元を 0–100 で採点してください（高いほど slop / 摩擦が大きい）。",
     "尺度のアンカー: 具体的な数字と固有名詞だけで書かれた実務記録は合計3点相当、定型句と抽象語だらけの典型的なAIブログ文は合計78点相当です。この尺度に合わせて判断してください。",
     "中途半端な点に寄せないでください。良いページは一桁〜20点台、悪いページは60点以上を付けるつもりで、根拠に基づいて大胆に差を付けてください。",
+    "UX軸の物差し（摩擦）: 主目的が1つに絞られ、開いて即実行できるページ（検索トップ等）は全軸一桁〜15。導線と情報が標準量の一般サイトは30〜45。リンクと要素が詰め込まれ主目的が埋もれるポータル/ニュースは65以上。",
+    "UX軸の判断基準: flow=主目的までの導線の短さと迷いのなさ、structure=見出しとまとまりで全体を掴めるか、firstview=開いた瞬間に主目的と次の一手が見えるか、readability=文章の壁・文字の読みにくさ。シグナルの数値は材料であって、それ自体を点にしないこと（例: 見出しタグが無くても、主目的が1つで即実行できるページの structure は低くてよい）。",
     "証拠は本文・タイトル・見出し・UXシグナルに実在する内容だけを使ってください。存在しない文を引用しないでください。",
     '出力は JSON オブジェクトのみ。前後に説明文やコードフェンスを付けないでください。',
     '{"dimensions":[{"key":次元キー,"score":0-100,"evidence":"根拠(最大120字)","why":"理由(60字以内)","fix":"直し方(60字以内)"} x6次元すべて],',
@@ -777,6 +779,33 @@ export function parseAssessJson(raw: string): LlmAssessment | null {
   const ux = parseScoreEntries(rec.ux, UX_AXIS_DEFS);
   if (!dimensions || !ux) return null;
   return { dimensions, ux };
+}
+
+/**
+ * 2回分の採点を平均化する。LLM 採点は同じページでも実行ごとにブレる
+ * （実測: Google トップの UX が 15 の回と 38 の回があった）ため、単発の
+ * 数値をそのまま出さず、2回並行で採って平均を採用する。
+ * 根拠テキストは、平均に近い側の回のものを残す。
+ */
+export function mergeAssessments(a: LlmAssessment, b: LlmAssessment): LlmAssessment {
+  const pickSide = (scoreA: number, scoreB: number, avg: number) =>
+    Math.abs(scoreA - avg) <= Math.abs(scoreB - avg) ? "a" : "b";
+  const mergeList = <K extends string>(
+    listA: { key: K; score: number; evidence: string; why: string; fix: string }[],
+    listB: { key: K; score: number; evidence: string; why: string; fix: string }[],
+  ) =>
+    listA.map((itemA) => {
+      const itemB = listB.find((x) => x.key === itemA.key);
+      if (!itemB) return itemA;
+      const avg = clamp((itemA.score + itemB.score) / 2);
+      const side = pickSide(itemA.score, itemB.score, avg);
+      const src = side === "a" ? itemA : itemB;
+      return { key: itemA.key, score: avg, evidence: src.evidence, why: src.why, fix: src.fix };
+    });
+  return {
+    dimensions: mergeList(a.dimensions, b.dimensions) as LlmAssessment["dimensions"],
+    ux: mergeList(a.ux, b.ux) as LlmAssessment["ux"],
+  };
 }
 
 /** LLM の次元スコアから合計と診断・UX所見を組み立てる（集計はコード側で決定的に行う）。 */

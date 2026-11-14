@@ -9,6 +9,7 @@ import {
   buildAssessMessages,
   composeAppearance,
   composeAssessed,
+  mergeAssessments,
   emptyUxSignals,
   extractPage,
   isPrivateIpLiteral,
@@ -128,15 +129,24 @@ async function fetchRendered(url: string): Promise<{ title: string; headings: st
  */
 export async function assess(page: PageData, heuristic: ViewScore): Promise<ReturnType<typeof composeAssessed> | null> {
   if (logfareApiKeys().length === 0) return null;
-  try {
-    const raw = await logfareChat(buildAssessMessages(page, heuristic, page.ux), { maxTokens: 2200 });
-    const parsed = parseAssessJson(raw);
-    if (!parsed) return null;
-    return composeAssessed(parsed, heuristic);
-  } catch (error) {
-    console.error("viewslopper: assess failed", error instanceof Error ? error.message : "unknown error");
+  const messages = buildAssessMessages(page, heuristic, page.ux);
+  // 同じページでも実行ごとに点がブレるため、2回並行で採って平均を採用する
+  // （片方だけ成功したらその1回分で成立させる）。
+  const runOnce = async () => {
+    try {
+      const raw = await logfareChat(messages, { maxTokens: 2200 });
+      return parseAssessJson(raw);
+    } catch {
+      return null;
+    }
+  };
+  const [first, second] = await Promise.all([runOnce(), runOnce()]);
+  const parsed = first && second ? mergeAssessments(first, second) : (first ?? second);
+  if (!parsed) {
+    console.error("viewslopper: assess failed (both runs unusable)");
     return null;
   }
+  return composeAssessed(parsed, heuristic);
 }
 
 /**

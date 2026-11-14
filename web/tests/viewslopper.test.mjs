@@ -202,6 +202,24 @@ test("診断履歴: 端末保存の追加・重複URLの最新化・上限・削
   assert.deepEqual(h.loadHistory(storage), []);
 });
 
+test("LLM採点の2回平均: スコアは平均化され、根拠は平均に近い側が残る", () => {
+  const mk = (base) => ({
+    dimensions: ["cliche", "vague", "abstract", "repeat", "mechanical", "bait"].map((key, i) => ({
+      key, score: base + i, evidence: `根拠${base}`, why: "理由", fix: "直し方",
+    })),
+    ux: ["flow", "structure", "firstview", "readability"].map((key) => ({
+      key, score: base, evidence: `根拠${base}`, why: "理由", fix: "直し方",
+    })),
+  });
+  const merged = m.mergeAssessments(mk(10), mk(30));
+  assert.equal(merged.dimensions[0].score, 20);
+  assert.equal(merged.ux[0].score, 20);
+  // 平均に近い側（どちらも等距離なら先勝ち）の根拠が残る
+  assert.equal(merged.ux[0].evidence, "根拠10");
+  const composed = m.composeAssessed(merged, m.scoreText(SOLID_TEXT));
+  assert.ok(composed.total >= 20 && composed.total <= 26);
+});
+
 test("16:9カード: 寸法・ファイル名・省略が仕様通り", async () => {
   const csrc = fs.readFileSync(path.join(import.meta.dirname, "..", "lib", "viewslopper-card.ts"), "utf8");
   const cjs = ts.transpileModule(csrc, { compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 } }).outputText;
