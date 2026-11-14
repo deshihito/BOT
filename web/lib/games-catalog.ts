@@ -1283,6 +1283,15 @@ export const WEB_GAMES: WebGame[] = [
     players: "1人（CPU対戦）",
   },
   {
+    slug: "worldbox",
+    title: "AGO WORLD BOX",
+    description:
+      "横スクロールの2Dサンドボックス。生成された世界を歩いて地面を掘り、集めたブロックを置いて自分の世界を作ります。掘った世界はそのまま保存され、続きから遊べます。",
+    status: "playable",
+    activity: true,
+    players: "1人",
+  },
+  {
     slug: "kwordle",
     title: "カタカナワードル",
     description:
