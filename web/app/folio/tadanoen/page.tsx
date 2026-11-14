@@ -10,7 +10,9 @@ import type { Metadata } from "next";
 // （空と水と緑、ガラスのツヤと泡）。同日の追加指示で全体の緑要素を
 // 強め、定番の低解像度イルカ画像を入れた。さらに同日の追加指示で
 // 参考コラージュに寄せ、地球のガラス球・雲・スカイライン・蝶・
-// 草花の要素を足した。アイコン画像は本人が
+// 草花の要素を足した。さらに同日の追加指示で、光沢の境界を
+// ハッキリさせ（上部で濃く下端で薄く、境界はシャープ）、
+// グラデーションは下に行くほど明るくなるガラス光沢に統一した。アイコン画像は本人が
 // 用意したらヒーローのプレースホルダと差し替える。
 // 専用ヘッダー/フッターはこのファイルの中で完結させる（サイト共通の
 // ヘッダー/フッターは lib/site-chrome.ts の /folio 判定で出ない）。
@@ -55,17 +57,17 @@ const BUBBLES = Array.from({ length: 42 }, (_, i) => {
 // カラム+余白）がこのページにも効いてしまうため、:has() でこのページ
 // 表示時だけ打ち消し、空を画面全体に広げる（Activity 画面と同じ手法）。
 const CSS = `
-body:has(.folio-fa){background:#79c98a}
+body:has(.folio-fa){background:#8fdcff}
 main:has(.folio-fa){max-width:none;min-height:0;margin:0;padding:0}
-.folio-fa{position:relative;min-height:100svh;overflow:hidden;color:#0d3a56;font-family:"Segoe UI","Hiragino Kaku Gothic ProN","Hiragino Sans","Noto Sans JP",system-ui,sans-serif;background:radial-gradient(1050px 520px at 86% -8%,rgba(255,246,190,.75),transparent 60%),radial-gradient(820px 520px at -10% 30%,rgba(255,255,255,.5),transparent 62%),radial-gradient(900px 560px at 108% 66%,rgba(170,255,190,.5),transparent 62%),linear-gradient(180deg,#1b8ae0 0%,#3fa9f5 20%,#8fd8ff 38%,#c8f7d8 54%,#8fe388 72%,#58b73e 88%,#3f9e2c 100%)}
+.folio-fa{position:relative;min-height:100svh;overflow:hidden;color:#0d3a56;font-family:"Segoe UI","Hiragino Kaku Gothic ProN","Hiragino Sans","Noto Sans JP",system-ui,sans-serif;background:radial-gradient(1050px 520px at 86% -8%,rgba(255,246,190,.6),transparent 60%),linear-gradient(180deg,#0d84e3 0%,#38a8f8 26%,#8fdcff 46%,#d2f9dc 64%,#c4f7a8 82%,#eaffd6 100%)}
 .folio-fa *{box-sizing:border-box}
 .folio-fa-bubbles{position:absolute;inset:0;pointer-events:none}
-.folio-fa-bubble{position:absolute;border-radius:50%;background:radial-gradient(circle at 32% 28%,rgba(255,255,255,.95),rgba(255,255,255,.28) 42%,rgba(255,255,255,.06) 62%,rgba(170,225,255,.22));border:1px solid rgba(255,255,255,.55);box-shadow:inset -3px -4px 8px rgba(120,190,240,.25),0 2px 8px rgba(30,110,180,.10);animation:folio-fa-float 7s ease-in-out infinite alternate}
+.folio-fa-bubble{position:absolute;border-radius:50%;background:radial-gradient(circle at 33% 26%,rgba(255,255,255,.98) 0 9%,rgba(255,255,255,.30) 20%,rgba(255,255,255,.05) 34%,rgba(255,255,255,0) 50%),radial-gradient(circle at 50% 118%,rgba(255,255,255,.5),rgba(255,255,255,0) 55%);border:1.5px solid rgba(255,255,255,.9);box-shadow:inset 0 -6px 10px rgba(160,225,255,.35);animation:folio-fa-float 7s ease-in-out infinite alternate}
 @keyframes folio-fa-float{from{transform:translateY(8px)}to{transform:translateY(-14px)}}
 .folio-fa-hills{position:absolute;left:0;right:0;bottom:0;width:100%;height:250px;pointer-events:none}
-.folio-fa-sun{position:absolute;top:4.6rem;right:4vw;width:230px;height:230px;border-radius:50%;background:radial-gradient(circle,rgba(255,252,210,.85) 0%,rgba(255,244,170,.38) 42%,transparent 70%);pointer-events:none}
+.folio-fa-sun{position:absolute;top:4.6rem;right:4vw;width:230px;height:230px;border-radius:50%;background:radial-gradient(circle,rgba(255,252,210,.55) 0%,rgba(255,244,170,.22) 42%,transparent 70%);pointer-events:none}
 .folio-fa-icon{position:absolute;top:6.5rem;right:6vw;width:172px;height:172px;border-radius:50%;object-fit:cover;box-shadow:0 0 0 6px rgba(255,255,255,.9),0 0 0 9px rgba(130,205,255,.55),0 20px 44px rgba(0,80,140,.38)}
-.folio-fa-icon-ph{display:grid;place-items:center;background:radial-gradient(circle at 34% 28%,#d8f3ff,#4db2ec 58%,#1a6fb5)}
+.folio-fa-icon-ph{display:grid;place-items:center;background:radial-gradient(circle at 35% 20%,rgba(255,255,255,.95) 0 20%,rgba(255,255,255,0) 24%),linear-gradient(180deg,#3fa9e0,#1a6fb5 58%,#63bdf2)}
 .folio-fa-fish{position:absolute;pointer-events:none;opacity:.85;animation:folio-fa-swim 9s ease-in-out infinite alternate}
 @keyframes folio-fa-swim{from{transform:translateX(-16px)}to{transform:translateX(22px)}}
 .folio-fa-inner{position:relative;z-index:1;max-width:880px;margin:0 auto;padding:0 20px 120px}
@@ -74,17 +76,17 @@ main:has(.folio-fa){max-width:none;min-height:0;margin:0;padding:0}
 .folio-fa-hero{padding:88px 0 30px;max-width:560px;position:relative}
 .folio-fa-hero h1{font-size:52px;margin:0 0 10px;letter-spacing:.05em;font-weight:700;color:#073e63;text-shadow:0 2px 0 rgba(255,255,255,.65),0 12px 28px rgba(0,90,160,.28)}
 .folio-fa-alias{color:#1a6ea8;letter-spacing:.12em;margin:0 0 18px;font-size:15px;font-weight:600;text-shadow:0 1px 0 rgba(255,255,255,.6)}
-.folio-fa-glass{position:relative;border:1px solid rgba(255,255,255,.95);border-radius:20px;background:linear-gradient(165deg,rgba(255,255,255,.80),rgba(255,255,255,.40) 55%,rgba(205,238,255,.45));box-shadow:inset 0 1px 0 rgba(255,255,255,1),inset 0 -20px 32px rgba(120,200,255,.14),0 14px 30px rgba(15,90,150,.20);backdrop-filter:blur(6px) saturate(1.35);-webkit-backdrop-filter:blur(6px) saturate(1.35);overflow:hidden}
-.folio-fa-glass::before{content:"";position:absolute;top:0;left:0;right:0;height:52%;background:linear-gradient(180deg,rgba(255,255,255,.68),rgba(255,255,255,0));pointer-events:none}
+.folio-fa-glass{position:relative;border:1px solid rgba(255,255,255,.98);border-radius:20px;background:linear-gradient(180deg,rgba(255,255,255,.48),rgba(255,255,255,.20) 52%,rgba(235,255,242,.42));box-shadow:inset 0 1px 0 #ffffff,inset 0 -1px 0 rgba(255,255,255,.65),0 14px 30px rgba(15,90,150,.18);overflow:hidden}
+.folio-fa-glass::before{content:"";position:absolute;top:0;left:0;right:0;height:50%;background:linear-gradient(180deg,rgba(255,255,255,.92) 0%,rgba(255,255,255,.34) 86%,rgba(255,255,255,0) 90%);pointer-events:none}
 .folio-fa-slot{padding:14px 16px;color:#33586e}
-.folio-fa-badge{display:inline-block;position:relative;z-index:1;font-size:10.5px;letter-spacing:.08em;color:#5b3a00;background:linear-gradient(180deg,#ffe1a0,#ffab2e);border:1px solid rgba(255,255,255,.9);border-radius:999px;padding:2px 9px;margin-bottom:8px;font-weight:700;box-shadow:inset 0 1px 0 rgba(255,255,255,.9),0 3px 8px rgba(200,120,0,.30)}
+.folio-fa-badge{display:inline-block;position:relative;z-index:1;font-size:10.5px;letter-spacing:.08em;color:#5b3a00;background:linear-gradient(180deg,#fff3cf 0%,#ffd873 47%,#ff9d1b 52%,#ffb84d 100%);border:1px solid rgba(255,255,255,.95);border-radius:999px;padding:2px 9px;margin-bottom:8px;font-weight:700;box-shadow:inset 0 1px 0 #ffffff,0 3px 8px rgba(200,120,0,.30)}
 .folio-fa-slotbody{position:relative;z-index:1}
 .folio-fa-stats{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-top:26px;max-width:560px}
 .folio-fa-stats .folio-fa-glass{min-height:74px}
 .folio-fa-divider{display:flex;gap:12px;align-items:center;justify-content:center;margin:46px 0 8px}
 .folio-fa section{margin-top:44px}
 .folio-fa h2{font-size:21px;letter-spacing:.12em;margin:0 0 16px;display:flex;align-items:center;gap:11px;font-weight:700;color:#07507e;text-shadow:0 1px 0 rgba(255,255,255,.65)}
-.folio-fa-h2icon{flex:none;width:30px;height:30px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;background:radial-gradient(circle at 32% 28%,#aee6ff,#2f9be8 62%,#1573bd);border:1px solid rgba(255,255,255,.95);box-shadow:inset 0 2px 3px rgba(255,255,255,.8),0 4px 10px rgba(10,90,160,.35)}
+.folio-fa-h2icon{flex:none;width:30px;height:30px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;background:radial-gradient(circle at 35% 20%,rgba(255,255,255,.98) 0 26%,rgba(255,255,255,0) 30%),linear-gradient(180deg,#4db2ec,#1a7fd4 55%,#5fc0f5);border:1px solid rgba(255,255,255,.98);box-shadow:inset 0 -3px 5px rgba(255,255,255,.45),0 4px 10px rgba(10,90,160,.35)}
 .folio-fa-works{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
 .folio-fa-works .folio-fa-glass{min-height:132px}
 .folio-fa-career{list-style:none;margin:0;padding:0 0 0 14px;border-left:3px solid transparent;border-image:linear-gradient(180deg,#39b6f0,#58c256) 1}
@@ -97,16 +99,17 @@ main:has(.folio-fa){max-width:none;min-height:0;margin:0;padding:0}
 .folio-fa-card p{position:relative;z-index:1;margin:4px 0;color:#123f5c;font-size:15px}
 .folio-fa-card p.sub{color:#5b84a0;font-size:13.5px}
 .folio-fa-tags{display:flex;flex-wrap:wrap;gap:8px}
-.folio-fa-tag{border:1px solid rgba(255,255,255,.95);border-radius:999px;padding:7px 16px;color:#33586e;font-size:13.5px;background:linear-gradient(180deg,rgba(255,255,255,.88),rgba(205,246,196,.55));box-shadow:inset 0 1px 0 rgba(255,255,255,1),0 4px 10px rgba(15,90,150,.16)}
+.folio-fa-tag{border:1px solid rgba(255,255,255,.98);border-radius:999px;padding:7px 16px;color:#1d4a33;font-size:13.5px;background:linear-gradient(180deg,#ffffff 0%,#f4fff2 47%,#a9e69b 52%,#d2f7c4 100%);box-shadow:inset 0 1px 0 #ffffff,0 4px 10px rgba(15,90,60,.18)}
 .folio-fa-links{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
 .folio-fa-footer{margin-top:72px;padding:18px 0 0;position:relative;border-top:1px solid transparent;border-image:linear-gradient(90deg,transparent,rgba(255,255,255,.9) 30%,rgba(255,255,255,.9) 70%,transparent) 1;display:flex;align-items:center;gap:8px;justify-content:center;color:#0d5a8a;font-size:12.5px;letter-spacing:.12em;font-weight:600;text-shadow:0 1px 0 rgba(255,255,255,.6)}
-.folio-fa-h2icon.g{background:radial-gradient(circle at 32% 28%,#d2f7b8,#57c256 62%,#2e8b34)}
-.folio-fa-stats .folio-fa-glass{background:linear-gradient(165deg,rgba(255,255,255,.82),rgba(226,250,214,.5) 55%,rgba(178,236,160,.5))}
-.folio-fa-dolphin{margin:36px 0 4px;max-width:520px;padding:9px;border-radius:20px;background:linear-gradient(165deg,rgba(255,255,255,.92),rgba(255,255,255,.45));border:1px solid rgba(255,255,255,.95);box-shadow:inset 0 1px 0 #fff,0 18px 36px rgba(10,90,60,.28);transform:rotate(-1.6deg)}
+.folio-fa-h2icon.g{background:radial-gradient(circle at 35% 20%,rgba(255,255,255,.98) 0 26%,rgba(255,255,255,0) 30%),linear-gradient(180deg,#7ed957,#2e9e3e 55%,#8fe388)}
+.folio-fa-stats .folio-fa-glass{background:linear-gradient(180deg,rgba(255,255,255,.5),rgba(240,255,235,.24) 52%,rgba(208,250,190,.5))}
+.folio-fa-dolphin{position:relative;margin:36px 0 4px;max-width:520px;padding:9px;border-radius:20px;background:linear-gradient(180deg,rgba(255,255,255,.75),rgba(255,255,255,.35) 55%,rgba(240,255,246,.6));border:1px solid rgba(255,255,255,.98);box-shadow:inset 0 1px 0 #fff,0 18px 36px rgba(10,90,60,.28);transform:rotate(-1.6deg)}
+.folio-fa-dolphin::after{content:"";position:absolute;left:9px;right:9px;top:9px;height:36%;border-radius:13px;background:linear-gradient(180deg,rgba(255,255,255,.55) 0%,rgba(255,255,255,.14) 84%,rgba(255,255,255,0) 88%);pointer-events:none}
 .folio-fa-dolphin img{display:block;width:100%;height:auto;border-radius:13px;image-rendering:pixelated}
-.folio-fa-cloud{position:absolute;width:280px;height:120px;pointer-events:none;opacity:.92;filter:blur(1.5px);background:radial-gradient(ellipse 62px 36px at 28% 62%,#ffffff 62%,transparent 64%),radial-gradient(ellipse 86px 50px at 54% 44%,#ffffff 62%,transparent 64%),radial-gradient(ellipse 56px 32px at 76% 64%,#ffffff 62%,transparent 64%);animation:folio-fa-drift 26s ease-in-out infinite alternate}
+.folio-fa-cloud{position:absolute;width:280px;height:120px;pointer-events:none;opacity:.98;background:radial-gradient(ellipse 62px 36px at 28% 62%,#ffffff 62%,transparent 64%),radial-gradient(ellipse 86px 50px at 54% 44%,#ffffff 62%,transparent 64%),radial-gradient(ellipse 56px 32px at 76% 64%,#ffffff 62%,transparent 64%);animation:folio-fa-drift 26s ease-in-out infinite alternate}
 @keyframes folio-fa-drift{from{transform:translateX(-24px)}to{transform:translateX(34px)}}
-.folio-fa-globe{position:absolute;border-radius:50%;pointer-events:none;background:radial-gradient(circle at 34% 26%,rgba(255,255,255,.95),rgba(255,255,255,0) 44%),radial-gradient(ellipse 46% 30% at 30% 34%,#57c256 58%,transparent 62%),radial-gradient(ellipse 34% 24% at 68% 58%,#43a047 58%,transparent 62%),radial-gradient(ellipse 22% 16% at 58% 22%,#74cc6e 58%,transparent 62%),radial-gradient(ellipse 18% 13% at 40% 74%,#4caf50 58%,transparent 62%),radial-gradient(circle at 50% 50%,#7ecbf2,#2f8fe0 68%,#1a6fb5);box-shadow:inset -14px -18px 34px rgba(0,60,120,.35),inset 6px 8px 18px rgba(255,255,255,.5),0 22px 44px rgba(0,80,140,.30);animation:folio-fa-bob 8s ease-in-out infinite alternate}
+.folio-fa-globe{position:absolute;border-radius:50%;pointer-events:none;filter:drop-shadow(0 22px 26px rgba(0,80,140,.35));animation:folio-fa-bob 8s ease-in-out infinite alternate}
 @keyframes folio-fa-bob{from{transform:translateY(6px)}to{transform:translateY(-10px)}}
 .folio-fa-skyline{position:absolute;left:0;right:0;bottom:118px;width:100%;height:110px;pointer-events:none;opacity:.5}
 .folio-fa-grass{position:absolute;left:0;right:0;bottom:0;width:100%;height:64px;pointer-events:none}
@@ -199,7 +202,37 @@ function Cloud({ top, left, scale, delay }: { top: string; left: string; scale: 
 }
 
 function Globe({ top, right, size, delay }: { top: string; right: string; size: number; delay: string }) {
-  return <div className="folio-fa-globe" style={{ top, right, width: size, height: size, animationDelay: delay }} aria-hidden="true" />;
+  return (
+    <svg className="folio-fa-globe" style={{ top, right, animationDelay: delay }} width={size} height={size} viewBox="0 0 100 100" aria-hidden="true">
+      <defs>
+        <clipPath id="folio-fa-globe-clip"><circle cx="50" cy="50" r="48" /></clipPath>
+        <linearGradient id="folio-fa-ocean" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor="#2f8fe0" />
+          <stop offset="55%" stopColor="#45a8ec" />
+          <stop offset="100%" stopColor="#8fd8ff" />
+        </linearGradient>
+        <linearGradient id="folio-fa-gloss" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor="#ffffff" stopOpacity=".92" />
+          <stop offset="82%" stopColor="#ffffff" stopOpacity=".34" />
+          <stop offset="88%" stopColor="#ffffff" stopOpacity="0" />
+          <stop offset="100%" stopColor="#ffffff" stopOpacity="0" />
+        </linearGradient>
+      </defs>
+      <g clipPath="url(#folio-fa-globe-clip)">
+        <rect width="100" height="100" fill="url(#folio-fa-ocean)" />
+        <g fill="#43b04c">
+          <path d="M12 36 L24 24 L40 25 L46 33 L37 39 L35 49 L25 45 L17 44 Z" />
+          <path d="M33 55 L45 52 L47 66 L40 82 L34 71 Z" />
+          <path d="M51 43 L65 40 L70 53 L63 71 L54 62 L51 52 Z" />
+          <path d="M46 20 L76 17 L90 30 L82 40 L63 35 L52 31 Z" />
+          <path d="M74 65 L87 62 L90 71 L78 75 Z" />
+        </g>
+        <ellipse cx="50" cy="30" rx="47" ry="29" fill="url(#folio-fa-gloss)" />
+        <ellipse cx="50" cy="97" rx="46" ry="16" fill="#ffffff" opacity=".22" />
+      </g>
+      <circle cx="50" cy="50" r="48" fill="none" stroke="rgba(255,255,255,.9)" strokeWidth="1.6" />
+    </svg>
+  );
 }
 
 function Butterfly({ top, left, delay }: { top: string; left: string; delay: string }) {
