@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import Link from "next/link";
 import ViewslopperClient from "./ViewslopperClient";
 
 const VS_DESCRIPTION = "URLを入れると、ページの Slop Score（0–100）と診断、さらにUX・配置の摩擦診断を返します。";
@@ -33,6 +34,11 @@ export default function ViewslopperPage() {
         URLを1つ入れると Slop Score と診断、UX・配置の摩擦、外観（見た目）のスコアが出ます。採点の判断はAIが行い、合計だけを重み付けで集計します（AIが使えない時はルール計算に切り替わります）。JavaScript で中身を作るページは、描画後の内容で判定します。
       </p>
       <ViewslopperClient />
+      <p style={{ marginTop: 28 }}>
+        <Link href="/viewslopper/history" style={{ color: "#8a8f98", fontSize: 13 }}>
+          保存した診断を見る →
+        </Link>
+      </p>
     </div>
   );
 }
