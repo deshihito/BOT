@@ -90,15 +90,25 @@ function formatUptime(startedAt: string | null, now: Date): string {
 
 const SAMPLES_PER_DAY = 288;
 
+/** 稼働率の分母。過去の日は1日分（288）だが、今日は深夜0時から現在までに
+ * 経過した5分スロット数だけを分母にする（まだ取れていない分を未稼働に数えない）。 */
+function expectedSamples(date: string, today: string, now: Date): number {
+  if (date !== today) return SAMPLES_PER_DAY;
+  const jst = new Date(now.getTime() + 9 * 3600_000);
+  const elapsedMinutes = jst.getUTCHours() * 60 + jst.getUTCMinutes();
+  return Math.min(SAMPLES_PER_DAY, Math.max(1, Math.floor(elapsedMinutes / 5)));
+}
+
 export default async function StatusPage() {
   const [snapshot, history] = await Promise.all([loadSnapshot(), loadHistory()]);
   const now = new Date();
   const fresh = snapshot !== null && isBotStatusFresh(snapshot, now);
   const uptimeDates = lastJstDates(now, 30);
+  const today = uptimeDates[uptimeDates.length - 1];
   const dayByDate = new Map((history?.days ?? []).map((day) => [day.date, day]));
   const uptimeRatios = uptimeDates.map((date) => {
     const day = dayByDate.get(date);
-    return day ? Math.min(1, day.samples / SAMPLES_PER_DAY) : null;
+    return day ? Math.min(1, day.samples / expectedSamples(date, today, now)) : null;
   });
   const recordedRatios = uptimeRatios.filter((ratio): ratio is number => ratio !== null);
   const uptimePct = recordedRatios.length > 0
@@ -183,10 +193,10 @@ export default async function StatusPage() {
                     date,
                     ratio: uptimeRatios[index],
                     samples: dayByDate.get(date)?.samples ?? null,
+                    expected: expectedSamples(date, today, now),
                   }))}
                   pct={uptimePct}
                   recordedDays={recordedRatios.length}
-                  samplesPerDay={SAMPLES_PER_DAY}
                 />
               </section>
               <div className="chart-grid">

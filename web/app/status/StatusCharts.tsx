@@ -151,11 +151,10 @@ export function InteractiveHoursChart({ points }: { points: Point[] }) {
 }
 
 /** 稼働率バー。日ごとのバーや合計表示をクリックすると、その数値をポップアップで出す。 */
-export function InteractiveUptime({ items, pct, recordedDays, samplesPerDay }: {
-  items: { date: string; ratio: number | null; samples: number | null }[];
+export function InteractiveUptime({ items, pct, recordedDays }: {
+  items: { date: string; ratio: number | null; samples: number | null; expected: number }[];
   pct: number | null;
   recordedDays: number;
-  samplesPerDay: number;
 }) {
   const [selected, setSelected] = useState<number | "summary" | null>(null);
   const selItem = typeof selected === "number" ? items[selected] : null;
@@ -207,7 +206,7 @@ export function InteractiveUptime({ items, pct, recordedDays, samplesPerDay }: {
             <strong>
               稼働率 {(selItem.ratio * 100).toFixed(1)}%
               {selItem.samples !== null ? (
-                <span className="chart-pop-sub">記録 {selItem.samples}/{samplesPerDay}</span>
+                <span className="chart-pop-sub">記録 {selItem.samples}/{selItem.expected}</span>
               ) : null}
             </strong>
           )}
