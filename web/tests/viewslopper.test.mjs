@@ -65,6 +65,59 @@ test("ルールベース診断は高い次元だけを出し、クリーンな�
   assert.equal(solidDiag[0].label, "総評");
 });
 
+const GOOD_HTML = `<html lang="ja"><head><title>良いページ</title><meta name="viewport" content="width=device-width, initial-scale=1"></head>
+<body><header><nav><a href="/a">A</a><a href="/b">B</a><a href="/c">C</a></nav></header>
+<main><h1>主題</h1><p>短い段落です。</p><button>始める</button>
+<img src="x.png" alt="説明" width="100" height="50">
+<form><label for="q">検索</label><input id="q" type="text"></form></main></body></html>`;
+
+const BAD_HTML = `<html><head><title>悪いページ</title><style>.x{font-size:9px}.y{font-size:10px}.z{font-size:11px}</style></head>
+<body><nav>${Array.from({ length: 30 }, (_, i) => `<a href="/n${i}">項目${i}</a>`).join("")}</nav>
+<div>${"<p>前置きの文章です。</p>".repeat(30)}</div>
+<h1>一つ目</h1><h1>二つ目</h1><h4>飛んだ見出し</h4>
+<p>${"長い段落の文章です。".repeat(40)}</p><p>${"別の長い段落です。".repeat(40)}</p>
+${'<img src="a.png">'.repeat(4)}
+${'<a href="/x">詳細はこちら</a>'.repeat(5)}
+<form><input type="text"><input type="email"></form>
+<div class="modal-x"></div><div class="cookie-popup"></div>
+</body></html>`;
+
+test("UXシグナル抽出は構造の事実を数える", () => {
+  const good = m.extractUxSignals(GOOD_HTML);
+  assert.equal(good.hasViewport, true);
+  assert.equal(good.hasLang, true);
+  assert.equal(good.h1Count, 1);
+  assert.equal(good.navLinkCount, 3);
+  assert.equal(good.imagesMissingAlt, 0);
+  assert.equal(good.inputsMissingLabel, 0);
+  assert.equal(good.hasEarlyCta, true);
+  const bad = m.extractUxSignals(BAD_HTML);
+  assert.equal(bad.hasViewport, false);
+  assert.equal(bad.h1Count, 2);
+  assert.ok(bad.navLinkCount >= 30);
+  assert.equal(bad.imagesMissingAlt, 4);
+  assert.equal(bad.inputsMissingLabel, 2);
+  assert.ok(bad.headingSkips >= 1);
+  assert.ok(bad.duplicateLinkTexts.length >= 1);
+});
+
+test("UX摩擦スコアは良いページを低く、悪いページを高く分ける", () => {
+  const good = m.scoreUx(m.extractUxSignals(GOOD_HTML));
+  const bad = m.scoreUx(m.extractUxSignals(BAD_HTML));
+  assert.ok(good.friction <= 25, `good=${good.friction}`);
+  assert.ok(bad.friction >= 60, `bad=${bad.friction}`);
+  assert.ok(bad.findings.length >= 4);
+  assert.ok(bad.findings.every((f) => f.evidence.length > 0 && f.fix.length > 0));
+  // 重大な所見が先に来る
+  assert.equal(bad.findings[0].severity, "high");
+});
+
+test("本文抽出はUXシグナルも一緒に返す", () => {
+  const page = m.extractPage(GOOD_HTML, "https://example.com/good");
+  assert.equal(page.ux.h1Count, 1);
+  assert.equal(page.ux.hasViewport, true);
+});
+
 test("LLM診断メッセージはスコア固定を指示し、応答検証は不正要素を捨てる", () => {
   const page = { url: "https://e.com", title: "t", description: "", headings: [], text: SLOP_TEXT };
   const msgs = m.buildDiagnosisMessages(page, m.scoreText(SLOP_TEXT));
