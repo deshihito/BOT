@@ -1570,6 +1570,9 @@ button.og-bs-cell:hover { background:#c3dcee; }
 .juice-end-score-label { display:block; font-size:13px; font-weight:700; color:var(--muted); }
 .juice-end-best { margin:0; padding:4px 14px; border-radius:999px; background:var(--accent-soft); color:var(--accent); font-size:14px; font-weight:800; }
 .juice-end-actions { display:flex; flex-wrap:wrap; gap:8px; justify-content:center; margin-top:2px; }
+.juice-end-hint { margin:0; font-size:12px; color:var(--muted); }
+.juice-goal-band { margin:0; padding:5px 12px; border-radius:999px; background:var(--accent-soft); color:var(--accent); font-size:13px; font-weight:700; text-align:center; }
+.juice-goal-band-beating { animation:juice-pulse-soft .6s ease-in-out 2; }
 .juice-confetti { position:absolute; inset:0; overflow:hidden; pointer-events:none; }
 .juice-confetti-piece { position:absolute; top:-4%; height:13px; border-radius:2px; animation-name:juice-confetti-fall; animation-timing-function:linear; animation-fill-mode:forwards; }
 /* スコア加算ポップ（ScorePop）。配置は親側で行う */

@@ -5,6 +5,7 @@
 import { useEffect, useRef, useState } from "react";
 import OnlineShell from "../online/OnlineShell";
 import type { OnlineRoomApi, OnlineRoomView } from "../online/useOnlineRoom";
+import { useRoomJuice } from "../GameJuice";
 import { playSe } from "@/lib/balku-sound";
 
 type ShiritoriEvent =
@@ -38,6 +39,8 @@ export default function ShiritoriClient() {
 
 function ShiritoriTable({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
   const state = view.state as ShiritoriView | null;
+  // 櫻井流バッチ2: 着手の反映に小ヒットストップ、決着に大ヒット＋フラッシュ（音は既存の playSe 系に任せる）。
+  useRoomJuice(`${state?.turn ?? ""}`, state?.finished ?? false);
   const mySeat = view.player.seat;
   const [word, setWord] = useState("");
   const [nowMs, setNowMs] = useState(() => Date.now());

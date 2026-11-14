@@ -9,6 +9,7 @@ import { useEffect, useRef, useState } from "react";
 const BombPassScene3D = dynamic(() => import("./BombPassScene3D"), { ssr: false });
 import OnlineShell from "../online/OnlineShell";
 import type { OnlineRoomApi, OnlineRoomView } from "../online/useOnlineRoom";
+import { useRoomJuice } from "../GameJuice";
 import { playSe } from "@/lib/balku-sound";
 
 type BombEvent =
@@ -48,6 +49,8 @@ export default function BombPassClient() {
 function BombTable({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
   const [webglFailed, setWebglFailed] = useState(false);
   const state = view.state as BombView | null;
+  // 櫻井流バッチ2: 着手の反映に小ヒットストップ、決着に大ヒット＋フラッシュ（音は既存の playSe 系に任せる）。
+  useRoomJuice(`${state?.round ?? ""}`, (state?.finished ?? false) || state?.phase === "finished");
   const mySeat = view.player.seat;
 
   const finishRef = useRef<string | null>(null);

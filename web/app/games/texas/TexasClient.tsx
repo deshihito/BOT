@@ -12,6 +12,7 @@ import { useEffect, useRef, useState } from "react";
 const TexasScene3D = dynamic(() => import("./TexasScene3D"), { ssr: false });
 import OnlineShell from "../online/OnlineShell";
 import type { OnlineRoomApi, OnlineRoomView } from "../online/useOnlineRoom";
+import { useRoomJuice } from "../GameJuice";
 import { playSe } from "@/lib/balku-sound";
 
 type TexasPlayerView = {
@@ -103,6 +104,8 @@ export default function TexasClient() {
 function TexasTable({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
   const [webglFailed, setWebglFailed] = useState(false);
   const state = view.state as TexasView | null;
+  // 櫻井流バッチ2: 着手の反映に小ヒットストップ、決着に大ヒット＋フラッシュ（音は既存の playSe 系に任せる）。
+  useRoomJuice(`${state?.turn ?? ""}:${state?.phase ?? ""}`, (state?.finished ?? false) || state?.phase === "finished");
   const mySeat = view.player.seat;
 
   const prevTurnRef = useRef<boolean>(false);

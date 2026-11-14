@@ -10,6 +10,7 @@ import { useEffect, useRef, useState } from "react";
 import { playSe } from "@/lib/balku-sound";
 import OnlineShell from "../online/OnlineShell";
 import type { OnlineRoomApi, OnlineRoomView } from "../online/useOnlineRoom";
+import { useRoomJuice } from "../GameJuice";
 
 /** サーバー側モジュール（lib/online/games/flashanzan.ts）と一致させること。 */
 const FA_SHOW_INTERVAL_MS = 1200;
@@ -63,6 +64,8 @@ function Bar({ ratio }: { ratio: number }) {
 
 function Board({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
   const state = view.state as FaView | null;
+  // 櫻井流バッチ2: 着手の反映に小ヒットストップ、決着に大ヒット＋フラッシュ（音は既存の playSe 系に任せる）。
+  useRoomJuice(`${state?.phase ?? ""}:${state?.round ?? ""}`, state?.phase === "finished");
   const mySeat = view.player.seat;
   const [now, setNow] = useState(() => Date.now());
   const [input, setInput] = useState("");

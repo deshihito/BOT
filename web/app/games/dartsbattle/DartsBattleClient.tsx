@@ -14,6 +14,7 @@ const DartsBattleScene3D = dynamic(() => import("./DartsBattleScene3D"), { ssr: 
 import { DART_SECTORS } from "@/lib/darts";
 import OnlineShell from "../online/OnlineShell";
 import type { OnlineRoomApi, OnlineRoomView } from "../online/useOnlineRoom";
+import { useRoomJuice } from "../GameJuice";
 
 const SEAT_COLORS = ["#ffd54a", "#4fc3f7", "#ff8a65", "#a5d6a7"];
 
@@ -55,6 +56,8 @@ function wedgePath(rOuter: number, rInner: number, a0: number, a1: number): stri
 
 function Board({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
   const state = view.state as DbView | null;
+  // 櫻井流バッチ2: 着手の反映に小ヒットストップ、決着に大ヒット＋フラッシュ（音は既存の playSe 系に任せる）。
+  useRoomJuice(`${state?.turn ?? ""}:${state?.round ?? ""}`, state?.finished ?? false);
   const mySeat = view.player.seat;
   const [webglFailed, setWebglFailed] = useState(false);
   const finishRef = useRef<string | null>(null);

@@ -15,6 +15,7 @@ const BattleshipScene3D = dynamic(() => import("./BattleshipScene3D"), { ssr: fa
 import { tappableProps, useGesture } from "@/lib/gesture";
 import OnlineShell from "../online/OnlineShell";
 import type { OnlineRoomApi, OnlineRoomView } from "../online/useOnlineRoom";
+import { useRoomJuice } from "../GameJuice";
 
 type ShotResult = string; // "hit" | "miss" | "sunk" など（文字列は緩く受ける）
 type Shot = { index: number; result: ShotResult };
@@ -52,6 +53,8 @@ function isHitResult(result: ShotResult): boolean {
 
 function Board({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
   const state = view.state as BattleshipState | null;
+  // 櫻井流バッチ2: 着手の反映に小ヒットストップ、決着に大ヒット＋フラッシュ（音は既存の playSe 系に任せる）。
+  useRoomJuice(`${state?.phase ?? ""}:${state?.turn ?? ""}`, state?.phase === "finished");
   const mySeat = view.player.seat;
   const [placed, setPlaced] = useState<PlacedShip[]>([]);
   const [horizontal, setHorizontal] = useState(true);

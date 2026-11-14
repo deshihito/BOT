@@ -13,6 +13,7 @@ import { playSe } from "@/lib/balku-sound";
 const DominoScene3D = dynamic(() => import("./DominoScene3D"), { ssr: false });
 import OnlineShell from "../online/OnlineShell";
 import type { OnlineRoomApi, OnlineRoomView } from "../online/useOnlineRoom";
+import { useRoomJuice } from "../GameJuice";
 
 type DominoPlaced = { tile: number; left: number; right: number };
 type DominoLogEntry = {
@@ -85,6 +86,8 @@ export default function DominoClient() {
 
 function DominoTable({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
   const state = view.state as DominoState | null;
+  // 櫻井流バッチ2: 着手の反映に小ヒットストップ、決着に大ヒット＋フラッシュ（音は既存の playSe 系に任せる）。
+  useRoomJuice(`${state?.turn ?? ""}`, state?.finished ?? false);
   const mySeat = view.player.seat;
   const [webglFailed, setWebglFailed] = useState(false);
   // 両端どちらにも置ける牌を選んだ状態（3D の置く側選択用。2D は側ボタンで直接置く）。

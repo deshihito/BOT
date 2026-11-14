@@ -19,6 +19,7 @@
 import { useEffect, useRef, useState } from "react";
 import OnlineShell, { useOnlineCreateOptions } from "../online/OnlineShell";
 import type { OnlineRoomApi, OnlineRoomView } from "../online/useOnlineRoom";
+import { useRoomJuice } from "../GameJuice";
 import { playSe } from "@/lib/balku-sound";
 
 /* --- 人狼のゲーム別ビュー（モジュール担当との契約） --- */
@@ -99,6 +100,8 @@ function formatClock(totalSec: number): string {
 
 function WerewolfTable({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
   const state = view.state as WerewolfState | null;
+  // 櫻井流バッチ2: 着手の反映に小ヒットストップ、決着に大ヒット＋フラッシュ（音は既存の playSe 系に任せる）。
+  useRoomJuice(`${state?.phase ?? ""}`, state?.phase === "finished");
   const mySeat = view.player.seat;
   const [now, setNow] = useState(() => Date.now());
 

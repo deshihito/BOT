@@ -14,6 +14,7 @@ import { playSe } from "@/lib/balku-sound";
 const BurstScene3D = dynamic(() => import("./BurstScene3D"), { ssr: false });
 import OnlineShell from "../online/OnlineShell";
 import type { OnlineRoomApi, OnlineRoomView } from "../online/useOnlineRoom";
+import { useRoomJuice } from "../GameJuice";
 
 /** サーバー側モジュール（lib/online/games/burst.ts）と一致させること。 */
 const BU_SELECT_LIMIT_MS = 30000;
@@ -58,6 +59,8 @@ type BurstView = {
 
 function Board({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
   const state = view.state as BurstView | null;
+  // 櫻井流バッチ2: 着手の反映に小ヒットストップ、決着に大ヒット＋フラッシュ（音は既存の playSe 系に任せる）。
+  useRoomJuice(`${state?.phase ?? ""}:${state?.round ?? ""}`, state?.phase === "finished");
   const mySeat = view.player.seat;
   const [webglFailed, setWebglFailed] = useState(false);
   const [selected, setSelected] = useState<number | null>(null);

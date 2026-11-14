@@ -11,6 +11,7 @@ import { playSe } from "@/lib/balku-sound";
 const BingoBattleScene3D = dynamic(() => import("./BingoBattleScene3D"), { ssr: false });
 import OnlineShell from "../online/OnlineShell";
 import type { OnlineRoomApi, OnlineRoomView } from "../online/useOnlineRoom";
+import { useRoomJuice } from "../GameJuice";
 
 type BbViewPlayer = {
   seat: number;
@@ -59,6 +60,8 @@ function ballLabel(n: number): string {
 
 function Board({ view }: { view: OnlineRoomView; api: OnlineRoomApi }) {
   const state = view.state as BbView | null;
+  // 櫻井流バッチ2: 着手の反映に小ヒットストップ、決着に大ヒット＋フラッシュ（音は既存の playSe 系に任せる）。
+  useRoomJuice(`${state?.phase ?? ""}`, state?.phase === "finished");
   const mySeat = view.player.seat;
   const finishRef = useRef<string | null>(null);
   const reachRef = useRef<string | null>(null);

@@ -19,7 +19,7 @@ import {
 } from "@/lib/slider2048";
 import { sfxLose, sfxSlide, sfxSpawn, sfxWin } from "@/lib/sfx";
 import { tappableProps, useGesture } from "@/lib/gesture";
-import { EndScreen } from "../GameJuice";
+import { EndScreen, GoalBand } from "../GameJuice";
 import { useGamesNav } from "../GamesShell";
 
 const KEY_DIRS: Record<string, SlideDir> = {
@@ -224,6 +224,9 @@ export default function SliderClient() {
         {state.status === "won" ? " ・ 2048 達成！" : ""}
         {state.status === "lost" ? " ・ もう動けません" : ""}
       </p>
+      <div style={{ maxWidth: 420, margin: "8px auto 0" }}>
+        <GoalBand current={state.score} best={startBestRef.current} unit="点" />
+      </div>
 
       <div
         role="grid"

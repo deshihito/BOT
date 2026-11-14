@@ -16,7 +16,7 @@ import {
   type StackerState,
 } from "@/lib/stacker";
 import { sfxCorrect, sfxLose, sfxPlace } from "@/lib/sfx";
-import { EndScreen } from "../GameJuice";
+import { EndScreen, GoalBand } from "../GameJuice";
 import { useGamesNav } from "../GamesShell";
 
 const BEST_KEY = "ago-stacker-best";
@@ -174,6 +174,9 @@ export default function StackerClient() {
         {state.lastPerfect && state.status === "playing" ? <span className="juice-pulse" style={{ display: "inline-block" }}> ・ ぴったり！</span> : ""}
         {state.status === "gameover" ? ` ・ 重ならず落下… ${state.score} 段で終了です。` : ""}
       </p>
+      <div style={{ maxWidth: 420, margin: "8px auto 0" }}>
+        <GoalBand current={state.score} best={prevBest ?? best} unit=" 段" />
+      </div>
 
       {webglFailed ? board2d : (
         <div style={{ maxWidth: 520, margin: "0 auto" }}>

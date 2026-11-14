@@ -15,7 +15,7 @@ import {
   type ReactionState,
 } from "@/lib/reaction";
 import { sfxCorrect, sfxTap, sfxWin, sfxWrong } from "@/lib/sfx";
-import { EndScreen } from "../GameJuice";
+import { EndScreen, GoalBand } from "../GameJuice";
 import { useGamesNav } from "../GamesShell";
 
 const BEST_KEY = "ago-reaction-best";
@@ -214,6 +214,9 @@ export default function ReactionClient() {
           ? `計測 ${session.round} / ${session.rounds} 回 ・ ベスト平均 ${best > 0 ? `${best} ms` : "—"}`
           : `ベスト平均 ${best > 0 ? `${best} ms` : "—"} ・ まだ計測していません`}
       </p>
+      <div style={{ maxWidth: 420, margin: "8px auto 0" }}>
+        <GoalBand current={summary && summary.count > 0 ? summary.averageMs : 0} best={best > 0 ? best : null} lowerIsBetter unit=" ms" label="ベスト平均" format={(n) => `${Math.round(n)}`} />
+      </div>
 
       <div
         role="button"

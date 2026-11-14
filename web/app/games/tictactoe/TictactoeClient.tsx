@@ -10,6 +10,7 @@ import { playSe } from "@/lib/balku-sound";
 const TictactoeScene3D = dynamic(() => import("./TictactoeScene3D"), { ssr: false });
 import OnlineShell from "../online/OnlineShell";
 import type { OnlineRoomApi, OnlineRoomView } from "../online/useOnlineRoom";
+import { useRoomJuice } from "../GameJuice";
 
 type TictactoeState = {
   board: number[];
@@ -28,6 +29,8 @@ function cellSeat(value: number): number {
 
 function Board({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
   const state = view.state as TictactoeState | null;
+  // 櫻井流バッチ2: 着手の反映に小ヒットストップ、決着に大ヒット＋フラッシュ（音は既存の playSe 系に任せる）。
+  useRoomJuice(`${state?.turn ?? ""}`, state?.finished ?? false);
   const mySeat = view.player.seat;
   const [webglFailed, setWebglFailed] = useState(false);
   const finishRef = useRef<string | null>(null);

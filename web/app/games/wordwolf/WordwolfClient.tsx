@@ -9,6 +9,7 @@ import { useEffect, useRef, useState } from "react";
 import { playSe } from "@/lib/balku-sound";
 import OnlineShell, { useOnlineCreateOptions } from "../online/OnlineShell";
 import type { OnlineRoomApi, OnlineRoomView } from "../online/useOnlineRoom";
+import { useRoomJuice } from "../GameJuice";
 
 type WwViewPlayer = { seat: number; name: string; left: boolean; voted: boolean; ready: boolean };
 
@@ -70,6 +71,8 @@ function formatClock(ms: number): string {
 
 function Board({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
   const state = view.state as WwView | null;
+  // 櫻井流バッチ2: 着手の反映に小ヒットストップ、決着に大ヒット＋フラッシュ（音は既存の playSe 系に任せる）。
+  useRoomJuice(`${state?.phase ?? ""}`, state?.phase === "finished");
   const mySeat = view.player.seat;
   const [now, setNow] = useState(() => Date.now());
   const [busy, setBusy] = useState(false);

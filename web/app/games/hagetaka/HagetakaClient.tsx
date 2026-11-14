@@ -13,6 +13,7 @@ const HagetakaScene3D = dynamic(() => import("./HagetakaScene3D"), { ssr: false 
 import { playSe } from "@/lib/balku-sound";
 import OnlineShell from "../online/OnlineShell";
 import type { OnlineRoomApi, OnlineRoomView } from "../online/useOnlineRoom";
+import { useRoomJuice } from "../GameJuice";
 
 type HagetakaHistoryEntry = {
   round: number;
@@ -44,6 +45,8 @@ function prizeLabel(value: number): string {
 function Board({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
   const [webglFailed, setWebglFailed] = useState(false);
   const state = view.state as HagetakaView | null;
+  // 櫻井流バッチ2: 着手の反映に小ヒットストップ、決着に大ヒット＋フラッシュ（音は既存の playSe 系に任せる）。
+  useRoomJuice(`${state?.phase ?? ""}`, state?.phase === "finished");
   const mySeat = view.player.seat;
   const finishRef = useRef<string | null>(null);
   const turnKeyRef = useRef<string | null>(null);
