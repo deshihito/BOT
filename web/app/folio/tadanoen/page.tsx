@@ -12,7 +12,7 @@ import type { Metadata } from "next";
 // 参考コラージュに寄せ、地球のガラス球・雲・スカイライン・蝶・
 // 草花の要素を足した。さらに同日の追加指示で、光沢の境界を
 // ハッキリさせ（上部で濃く下端で薄く、境界はシャープ）、
-// グラデーションは下に行くほど明るくなるガラス光沢に統一した。アイコン画像は本人が
+// グラデーションは下に行くほど明るくなるガラス光沢に統一した。さらに同日の追加指示で、その光沢を全UI要素（ヘッダー/ヒーロー/フッター/経歴ドット等）へ展開し、イルカ画像を About 欄の右上へ移し、配色全体をかなり鮮やかにした。アイコン画像は本人が
 // 用意したらヒーローのプレースホルダと差し替える。
 // 専用ヘッダー/フッターはこのファイルの中で完結させる（サイト共通の
 // ヘッダー/フッターは lib/site-chrome.ts の /folio 判定で出ない）。
@@ -57,9 +57,9 @@ const BUBBLES = Array.from({ length: 42 }, (_, i) => {
 // カラム+余白）がこのページにも効いてしまうため、:has() でこのページ
 // 表示時だけ打ち消し、空を画面全体に広げる（Activity 画面と同じ手法）。
 const CSS = `
-body:has(.folio-fa){background:#8fdcff}
+body:has(.folio-fa){background:#3ec6ff}
 main:has(.folio-fa){max-width:none;min-height:0;margin:0;padding:0}
-.folio-fa{position:relative;min-height:100svh;overflow:hidden;color:#0d3a56;font-family:"Segoe UI","Hiragino Kaku Gothic ProN","Hiragino Sans","Noto Sans JP",system-ui,sans-serif;background:radial-gradient(1050px 520px at 86% -8%,rgba(255,246,190,.6),transparent 60%),linear-gradient(180deg,#0d84e3 0%,#38a8f8 26%,#8fdcff 46%,#d2f9dc 64%,#c4f7a8 82%,#eaffd6 100%)}
+.folio-fa{position:relative;min-height:100svh;overflow:hidden;color:#0d3a56;font-family:"Segoe UI","Hiragino Kaku Gothic ProN","Hiragino Sans","Noto Sans JP",system-ui,sans-serif;background:radial-gradient(1050px 520px at 86% -8%,rgba(255,246,190,.6),transparent 60%),linear-gradient(180deg,#007cf0 0%,#00a2ff 22%,#3ec6ff 42%,#8df5c0 60%,#54e86a 78%,#c6ff9a 100%)}
 .folio-fa *{box-sizing:border-box}
 .folio-fa-bubbles{position:absolute;inset:0;pointer-events:none}
 .folio-fa-bubble{position:absolute;border-radius:50%;background:radial-gradient(circle at 33% 26%,rgba(255,255,255,.98) 0 9%,rgba(255,255,255,.30) 20%,rgba(255,255,255,.05) 34%,rgba(255,255,255,0) 50%),radial-gradient(circle at 50% 118%,rgba(255,255,255,.5),rgba(255,255,255,0) 55%);border:1.5px solid rgba(255,255,255,.9);box-shadow:inset 0 -6px 10px rgba(160,225,255,.35);animation:folio-fa-float 7s ease-in-out infinite alternate}
@@ -67,57 +67,59 @@ main:has(.folio-fa){max-width:none;min-height:0;margin:0;padding:0}
 .folio-fa-hills{position:absolute;left:0;right:0;bottom:0;width:100%;height:250px;pointer-events:none}
 .folio-fa-sun{position:absolute;top:4.6rem;right:4vw;width:230px;height:230px;border-radius:50%;background:radial-gradient(circle,rgba(255,252,210,.55) 0%,rgba(255,244,170,.22) 42%,transparent 70%);pointer-events:none}
 .folio-fa-icon{position:absolute;top:6.5rem;right:6vw;width:172px;height:172px;border-radius:50%;object-fit:cover;box-shadow:0 0 0 6px rgba(255,255,255,.9),0 0 0 9px rgba(130,205,255,.55),0 20px 44px rgba(0,80,140,.38)}
-.folio-fa-icon-ph{display:grid;place-items:center;background:radial-gradient(circle at 35% 20%,rgba(255,255,255,.95) 0 20%,rgba(255,255,255,0) 24%),linear-gradient(180deg,#3fa9e0,#1a6fb5 58%,#63bdf2)}
+.folio-fa-icon-ph{display:grid;place-items:center;background:radial-gradient(circle at 35% 20%,rgba(255,255,255,.95) 0 20%,rgba(255,255,255,0) 24%),linear-gradient(180deg,#00a2ff,#0072e0 58%,#4dc9ff)}
 .folio-fa-fish{position:absolute;pointer-events:none;opacity:.85;animation:folio-fa-swim 9s ease-in-out infinite alternate}
 @keyframes folio-fa-swim{from{transform:translateX(-16px)}to{transform:translateX(22px)}}
 .folio-fa-inner{position:relative;z-index:1;max-width:880px;margin:0 auto;padding:0 20px 120px}
-.folio-fa-header{display:flex;align-items:center;gap:10px;padding:20px 0 14px;position:relative;border-bottom:1px solid transparent;border-image:linear-gradient(90deg,transparent,rgba(255,255,255,.85) 30%,rgba(255,255,255,.85) 70%,transparent) 1}
-.folio-fa-header .name{font-size:17px;letter-spacing:.16em;font-weight:600;color:#07507e;text-shadow:0 1px 0 rgba(255,255,255,.7)}
-.folio-fa-hero{padding:88px 0 30px;max-width:560px;position:relative}
-.folio-fa-hero h1{font-size:52px;margin:0 0 10px;letter-spacing:.05em;font-weight:700;color:#073e63;text-shadow:0 2px 0 rgba(255,255,255,.65),0 12px 28px rgba(0,90,160,.28)}
+.folio-fa-header{display:flex;align-items:center;gap:10px;padding:12px 18px;margin-top:16px;border-radius:16px}
+.folio-fa-header .name{font-size:17px;letter-spacing:.16em;font-weight:600;color:#0063b3;text-shadow:0 1px 0 rgba(255,255,255,.7)}
+.folio-fa-hero{margin-top:64px;padding:30px 30px 34px;max-width:600px}
+.folio-fa-hero h1{font-size:52px;margin:0 0 10px;letter-spacing:.05em;font-weight:700;color:#0057a8;text-shadow:0 2px 0 rgba(255,255,255,.65),0 12px 28px rgba(0,90,160,.28)}
 .folio-fa-alias{color:#1a6ea8;letter-spacing:.12em;margin:0 0 18px;font-size:15px;font-weight:600;text-shadow:0 1px 0 rgba(255,255,255,.6)}
 .folio-fa-glass{position:relative;border:1px solid rgba(255,255,255,.98);border-radius:20px;background:linear-gradient(180deg,rgba(255,255,255,.48),rgba(255,255,255,.20) 52%,rgba(235,255,242,.42));box-shadow:inset 0 1px 0 #ffffff,inset 0 -1px 0 rgba(255,255,255,.65),0 14px 30px rgba(15,90,150,.18);overflow:hidden}
 .folio-fa-glass::before{content:"";position:absolute;top:0;left:0;right:0;height:50%;background:linear-gradient(180deg,rgba(255,255,255,.92) 0%,rgba(255,255,255,.34) 86%,rgba(255,255,255,0) 90%);pointer-events:none}
 .folio-fa-slot{padding:14px 16px;color:#33586e}
-.folio-fa-badge{display:inline-block;position:relative;z-index:1;font-size:10.5px;letter-spacing:.08em;color:#5b3a00;background:linear-gradient(180deg,#fff3cf 0%,#ffd873 47%,#ff9d1b 52%,#ffb84d 100%);border:1px solid rgba(255,255,255,.95);border-radius:999px;padding:2px 9px;margin-bottom:8px;font-weight:700;box-shadow:inset 0 1px 0 #ffffff,0 3px 8px rgba(200,120,0,.30)}
+.folio-fa-badge{display:inline-block;position:relative;z-index:1;font-size:10.5px;letter-spacing:.08em;color:#5b3a00;background:linear-gradient(180deg,#fff3cf 0%,#ffd873 47%,#ff8a00 52%,#ffb84d 100%);border:1px solid rgba(255,255,255,.95);border-radius:999px;padding:2px 9px;margin-bottom:8px;font-weight:700;box-shadow:inset 0 1px 0 #ffffff,0 3px 8px rgba(200,120,0,.30)}
 .folio-fa-slotbody{position:relative;z-index:1}
 .folio-fa-stats{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-top:26px;max-width:560px}
 .folio-fa-stats .folio-fa-glass{min-height:74px}
 .folio-fa-divider{display:flex;gap:12px;align-items:center;justify-content:center;margin:46px 0 8px}
 .folio-fa section{margin-top:44px}
-.folio-fa h2{font-size:21px;letter-spacing:.12em;margin:0 0 16px;display:flex;align-items:center;gap:11px;font-weight:700;color:#07507e;text-shadow:0 1px 0 rgba(255,255,255,.65)}
-.folio-fa-h2icon{flex:none;width:30px;height:30px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;background:radial-gradient(circle at 35% 20%,rgba(255,255,255,.98) 0 26%,rgba(255,255,255,0) 30%),linear-gradient(180deg,#4db2ec,#1a7fd4 55%,#5fc0f5);border:1px solid rgba(255,255,255,.98);box-shadow:inset 0 -3px 5px rgba(255,255,255,.45),0 4px 10px rgba(10,90,160,.35)}
+.folio-fa h2{font-size:21px;letter-spacing:.12em;margin:0 0 16px;display:flex;align-items:center;gap:11px;font-weight:700;color:#0063b3;text-shadow:0 1px 0 rgba(255,255,255,.65)}
+.folio-fa-h2icon{flex:none;width:30px;height:30px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;background:radial-gradient(circle at 35% 20%,rgba(255,255,255,.98) 0 26%,rgba(255,255,255,0) 30%),linear-gradient(180deg,#2fb9ff,#0072e0 55%,#4dc9ff);border:1px solid rgba(255,255,255,.98);box-shadow:inset 0 -3px 5px rgba(255,255,255,.45),0 4px 10px rgba(10,90,160,.35)}
 .folio-fa-works{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
 .folio-fa-works .folio-fa-glass{min-height:132px}
-.folio-fa-career{list-style:none;margin:0;padding:0 0 0 14px;border-left:3px solid transparent;border-image:linear-gradient(180deg,#39b6f0,#58c256) 1}
+.folio-fa-career{list-style:none;margin:0;padding:0 0 0 14px;border-left:3px solid transparent;border-image:linear-gradient(180deg,#00a2ff,#00c853) 1}
 .folio-fa-career li{position:relative;margin:0 0 12px 10px}
-.folio-fa-career li::before{content:"";position:absolute;left:-23.5px;top:18px;width:13px;height:13px;border-radius:50%;background:radial-gradient(circle at 34% 30%,#ffffff,#8fd8ff 55%,#2f9be8);border:1px solid rgba(255,255,255,.95);box-shadow:0 2px 8px rgba(10,90,160,.35)}
+.folio-fa-career li::before{content:"";position:absolute;left:-23.5px;top:18px;width:13px;height:13px;border-radius:50%;background:radial-gradient(circle at 35% 22%,rgba(255,255,255,.98) 0 30%,rgba(255,255,255,0) 34%),linear-gradient(180deg,#38b6ff,#0072e0 60%,#4dc9ff);border:1px solid rgba(255,255,255,.98);box-shadow:inset 0 -2px 3px rgba(255,255,255,.45),0 2px 8px rgba(10,90,160,.35)}
 .folio-fa-entry{padding:13px 16px;color:#123f5c;font-size:15.5px}
 .folio-fa-cards{display:grid;grid-template-columns:repeat(2,1fr);gap:12px}
 .folio-fa-card{padding:16px 18px}
-.folio-fa-card h3{position:relative;z-index:1;margin:0 0 10px;font-size:15.5px;letter-spacing:.07em;color:#0a6ebd;font-weight:700}
+.folio-fa-card h3{position:relative;z-index:1;margin:0 0 10px;font-size:15.5px;letter-spacing:.07em;color:#0072e0;font-weight:700}
 .folio-fa-card p{position:relative;z-index:1;margin:4px 0;color:#123f5c;font-size:15px}
 .folio-fa-card p.sub{color:#5b84a0;font-size:13.5px}
 .folio-fa-tags{display:flex;flex-wrap:wrap;gap:8px}
-.folio-fa-tag{border:1px solid rgba(255,255,255,.98);border-radius:999px;padding:7px 16px;color:#1d4a33;font-size:13.5px;background:linear-gradient(180deg,#ffffff 0%,#f4fff2 47%,#a9e69b 52%,#d2f7c4 100%);box-shadow:inset 0 1px 0 #ffffff,0 4px 10px rgba(15,90,60,.18)}
+.folio-fa-tag{border:1px solid rgba(255,255,255,.98);border-radius:999px;padding:7px 16px;color:#1d4a33;font-size:13.5px;background:linear-gradient(180deg,#ffffff 0%,#f4fff2 47%,#4be04b 52%,#b6ff9e 100%);box-shadow:inset 0 1px 0 #ffffff,0 4px 10px rgba(15,90,60,.18)}
 .folio-fa-links{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
-.folio-fa-footer{margin-top:72px;padding:18px 0 0;position:relative;border-top:1px solid transparent;border-image:linear-gradient(90deg,transparent,rgba(255,255,255,.9) 30%,rgba(255,255,255,.9) 70%,transparent) 1;display:flex;align-items:center;gap:8px;justify-content:center;color:#0d5a8a;font-size:12.5px;letter-spacing:.12em;font-weight:600;text-shadow:0 1px 0 rgba(255,255,255,.6)}
-.folio-fa-h2icon.g{background:radial-gradient(circle at 35% 20%,rgba(255,255,255,.98) 0 26%,rgba(255,255,255,0) 30%),linear-gradient(180deg,#7ed957,#2e9e3e 55%,#8fe388)}
-.folio-fa-stats .folio-fa-glass{background:linear-gradient(180deg,rgba(255,255,255,.5),rgba(240,255,235,.24) 52%,rgba(208,250,190,.5))}
-.folio-fa-dolphin{position:relative;margin:36px 0 4px;max-width:520px;padding:9px;border-radius:20px;background:linear-gradient(180deg,rgba(255,255,255,.75),rgba(255,255,255,.35) 55%,rgba(240,255,246,.6));border:1px solid rgba(255,255,255,.98);box-shadow:inset 0 1px 0 #fff,0 18px 36px rgba(10,90,60,.28);transform:rotate(-1.6deg)}
-.folio-fa-dolphin::after{content:"";position:absolute;left:9px;right:9px;top:9px;height:36%;border-radius:13px;background:linear-gradient(180deg,rgba(255,255,255,.55) 0%,rgba(255,255,255,.14) 84%,rgba(255,255,255,0) 88%);pointer-events:none}
-.folio-fa-dolphin img{display:block;width:100%;height:auto;border-radius:13px;image-rendering:pixelated}
+.folio-fa-footer{margin:72px auto 0;padding:10px 22px;width:fit-content;border-radius:999px;display:flex;align-items:center;gap:8px;justify-content:center;color:#0d5a8a;font-size:12.5px;letter-spacing:.12em;font-weight:600;text-shadow:0 1px 0 rgba(255,255,255,.6)}
+.folio-fa-h2icon.g{background:radial-gradient(circle at 35% 20%,rgba(255,255,255,.98) 0 26%,rgba(255,255,255,0) 30%),linear-gradient(180deg,#4be04b,#00a83c 55%,#7bf06a)}
+.folio-fa-stats .folio-fa-glass{background:linear-gradient(180deg,rgba(255,255,255,.5),rgba(240,255,235,.24) 52%,rgba(140,255,150,.55))}
+.folio-fa-aboutwrap{position:relative}
+.folio-fa-aboutwrap .folio-fa-slot{padding-right:196px;min-height:122px}
+.folio-fa-dolphin{position:absolute;top:-16px;right:12px;width:172px;margin:0;padding:6px;border-radius:16px;background:linear-gradient(180deg,rgba(255,255,255,.75),rgba(255,255,255,.35) 55%,rgba(240,255,246,.6));border:1px solid rgba(255,255,255,.98);box-shadow:inset 0 1px 0 #fff,0 18px 36px rgba(10,90,60,.28);transform:rotate(2.5deg);z-index:3}
+.folio-fa-dolphin::after{content:"";position:absolute;left:6px;right:6px;top:6px;height:36%;border-radius:11px;background:linear-gradient(180deg,rgba(255,255,255,.55) 0%,rgba(255,255,255,.14) 84%,rgba(255,255,255,0) 88%);pointer-events:none}
+.folio-fa-dolphin img{display:block;width:100%;height:auto;border-radius:11px;image-rendering:pixelated}
 .folio-fa-cloud{position:absolute;width:280px;height:120px;pointer-events:none;opacity:.98;background:radial-gradient(ellipse 62px 36px at 28% 62%,#ffffff 62%,transparent 64%),radial-gradient(ellipse 86px 50px at 54% 44%,#ffffff 62%,transparent 64%),radial-gradient(ellipse 56px 32px at 76% 64%,#ffffff 62%,transparent 64%);animation:folio-fa-drift 26s ease-in-out infinite alternate}
 @keyframes folio-fa-drift{from{transform:translateX(-24px)}to{transform:translateX(34px)}}
 .folio-fa-globe{position:absolute;border-radius:50%;pointer-events:none;filter:drop-shadow(0 22px 26px rgba(0,80,140,.35));animation:folio-fa-bob 8s ease-in-out infinite alternate}
 @keyframes folio-fa-bob{from{transform:translateY(6px)}to{transform:translateY(-10px)}}
-.folio-fa-skyline{position:absolute;left:0;right:0;bottom:118px;width:100%;height:110px;pointer-events:none;opacity:.5}
+.folio-fa-skyline{position:absolute;left:0;right:0;bottom:118px;width:100%;height:110px;pointer-events:none;opacity:.55}
 .folio-fa-grass{position:absolute;left:0;right:0;bottom:0;width:100%;height:64px;pointer-events:none}
 .folio-fa-butterfly{position:absolute;pointer-events:none;animation:folio-fa-flutter 11s ease-in-out infinite alternate;z-index:1}
 @keyframes folio-fa-flutter{0%{transform:translate(0,0) rotate(-6deg)}50%{transform:translate(26px,-30px) rotate(7deg)}100%{transform:translate(52px,-6px) rotate(-4deg)}}
 .folio-fa-sparkle{position:absolute;pointer-events:none;animation:folio-fa-twinkle 3.4s ease-in-out infinite alternate}
 @keyframes folio-fa-twinkle{from{opacity:.25;transform:scale(.7) rotate(0deg)}to{opacity:.95;transform:scale(1.15) rotate(20deg)}}
-@media (max-width:640px){.folio-fa-hero{padding-top:56px}.folio-fa-hero h1{font-size:32px}.folio-fa-sun{width:140px;height:140px;top:3.8rem}.folio-fa-icon{width:104px;height:104px;top:5.2rem;right:5vw}.folio-fa-stats{grid-template-columns:repeat(2,1fr)}.folio-fa-works,.folio-fa-links,.folio-fa-cards{grid-template-columns:1fr}}
+@media (max-width:640px){.folio-fa-hero{margin-top:40px;padding:22px}.folio-fa-hero h1{font-size:32px}.folio-fa-sun{width:140px;height:140px;top:3.8rem}.folio-fa-icon{width:104px;height:104px;top:5.2rem;right:5vw}.folio-fa-stats{grid-template-columns:repeat(2,1fr)}.folio-fa-works,.folio-fa-links,.folio-fa-cards{grid-template-columns:1fr}.folio-fa-aboutwrap{display:flex;flex-direction:column}.folio-fa-aboutwrap .folio-fa-slot{padding-right:16px;min-height:0}.folio-fa-dolphin{position:relative;order:-1;top:0;right:0;margin:0 0 10px auto;width:150px}}
 @media (prefers-reduced-motion:reduce){.folio-fa-bubble,.folio-fa-fish,.folio-fa-cloud,.folio-fa-globe,.folio-fa-butterfly,.folio-fa-sparkle{animation:none}}
 `;
 
@@ -135,9 +137,9 @@ function DropMark({ size = 22 }: { size?: number }) {
     <svg width={size} height={size} viewBox="0 0 64 64" aria-hidden="true">
       <defs>
         <radialGradient id="folio-fa-drop" cx="38%" cy="30%" r="80%">
-          <stop offset="0%" stopColor="#bfeaff" />
-          <stop offset="55%" stopColor="#3fa9e0" />
-          <stop offset="100%" stopColor="#1a6fb5" />
+          <stop offset="0%" stopColor="#a8e6ff" />
+          <stop offset="55%" stopColor="#00a2ff" />
+          <stop offset="100%" stopColor="#0072e0" />
         </radialGradient>
       </defs>
       <path d="M32 4C32 4 12 30 12 42a20 20 0 1 0 40 0C52 30 32 4 32 4z" fill="url(#folio-fa-drop)" />
@@ -207,9 +209,9 @@ function Globe({ top, right, size, delay }: { top: string; right: string; size: 
       <defs>
         <clipPath id="folio-fa-globe-clip"><circle cx="50" cy="50" r="48" /></clipPath>
         <linearGradient id="folio-fa-ocean" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor="#2f8fe0" />
-          <stop offset="55%" stopColor="#45a8ec" />
-          <stop offset="100%" stopColor="#8fd8ff" />
+          <stop offset="0%" stopColor="#0080ff" />
+          <stop offset="55%" stopColor="#00a8ff" />
+          <stop offset="100%" stopColor="#7be0ff" />
         </linearGradient>
         <linearGradient id="folio-fa-gloss" x1="0" y1="0" x2="0" y2="1">
           <stop offset="0%" stopColor="#ffffff" stopOpacity=".92" />
@@ -220,7 +222,7 @@ function Globe({ top, right, size, delay }: { top: string; right: string; size: 
       </defs>
       <g clipPath="url(#folio-fa-globe-clip)">
         <rect width="100" height="100" fill="url(#folio-fa-ocean)" />
-        <g fill="#43b04c">
+        <g fill="#00c853">
           <path d="M12 36 L24 24 L40 25 L46 33 L37 39 L35 49 L25 45 L17 44 Z" />
           <path d="M33 55 L45 52 L47 66 L40 82 L34 71 Z" />
           <path d="M51 43 L65 40 L70 53 L63 71 L54 62 L51 52 Z" />
@@ -240,9 +242,9 @@ function Butterfly({ top, left, delay }: { top: string; left: string; delay: str
     <svg className="folio-fa-butterfly" style={{ top, left, animationDelay: delay }} width="52" height="44" viewBox="0 0 52 44" aria-hidden="true">
       <defs>
         <linearGradient id="folio-fa-wing" x1="0" y1="0" x2="1" y2="1">
-          <stop offset="0%" stopColor="#8fd8ff" />
-          <stop offset="55%" stopColor="#37b6ff" />
-          <stop offset="100%" stopColor="#7a5cff" />
+          <stop offset="0%" stopColor="#4dc9ff" />
+          <stop offset="55%" stopColor="#0080ff" />
+          <stop offset="100%" stopColor="#8a2fff" />
         </linearGradient>
       </defs>
       <ellipse cx="14" cy="14" rx="12" ry="8" fill="url(#folio-fa-wing)" transform="rotate(-28 14 14)" opacity=".95" />
@@ -284,13 +286,13 @@ export default function TadanoenFolioPage() {
         ))}
       </div>
       <svg className="folio-fa-skyline" viewBox="0 0 1280 110" preserveAspectRatio="none" aria-hidden="true">
-        <path d="M0 110 L0 74 L34 74 L34 52 L58 52 L58 74 L92 74 L92 38 L124 38 L124 74 L160 74 L160 60 L196 60 L196 74 L238 74 L238 30 L276 30 L276 74 L318 74 L318 56 L352 56 L352 74 L398 74 L398 44 L436 44 L436 74 L486 74 L486 64 L528 64 L528 74 L574 74 L574 26 L616 26 L616 74 L664 74 L664 50 L700 50 L700 74 L748 74 L748 62 L790 62 L790 74 L840 74 L840 36 L880 36 L880 74 L928 74 L928 58 L964 58 L964 74 L1014 74 L1014 42 L1054 42 L1054 74 L1102 74 L1102 66 L1144 66 L1144 74 L1196 74 L1196 48 L1232 48 L1232 74 L1280 74 L1280 110 Z" fill="#0d5a8a" />
+        <path d="M0 110 L0 74 L34 74 L34 52 L58 52 L58 74 L92 74 L92 38 L124 38 L124 74 L160 74 L160 60 L196 60 L196 74 L238 74 L238 30 L276 30 L276 74 L318 74 L318 56 L352 56 L352 74 L398 74 L398 44 L436 44 L436 74 L486 74 L486 64 L528 64 L528 74 L574 74 L574 26 L616 26 L616 74 L664 74 L664 50 L700 50 L700 74 L748 74 L748 62 L790 62 L790 74 L840 74 L840 36 L880 36 L880 74 L928 74 L928 58 L964 58 L964 74 L1014 74 L1014 42 L1054 42 L1054 74 L1102 74 L1102 66 L1144 66 L1144 74 L1196 74 L1196 48 L1232 48 L1232 74 L1280 74 L1280 110 Z" fill="#0077c8" />
       </svg>
       <svg className="folio-fa-hills" viewBox="0 0 1280 190" preserveAspectRatio="none" aria-hidden="true">
-        <path d="M0 70 C200 20 380 96 560 66 C760 34 900 92 1080 62 C1180 46 1240 62 1280 54 L1280 190 L0 190 Z" fill="#a5dd8a" opacity=".55" />
-        <path d="M0 96 C160 40 300 128 470 96 C640 64 760 130 930 100 C1080 74 1180 110 1280 84 L1280 190 L0 190 Z" fill="#79c95e" opacity=".75" />
-        <path d="M0 138 C180 92 340 162 540 132 C740 104 880 164 1060 138 C1160 124 1220 142 1280 130 L1280 190 L0 190 Z" fill="#57b53e" opacity=".9" />
-        <path d="M0 168 C240 138 460 182 700 160 C920 142 1100 176 1280 158 L1280 190 L0 190 Z" fill="#3f9e2c" />
+        <path d="M0 70 C200 20 380 96 560 66 C760 34 900 92 1080 62 C1180 46 1240 62 1280 54 L1280 190 L0 190 Z" fill="#6ee86e" opacity=".6" />
+        <path d="M0 96 C160 40 300 128 470 96 C640 64 760 130 930 100 C1080 74 1180 110 1280 84 L1280 190 L0 190 Z" fill="#2ed94f" opacity=".8" />
+        <path d="M0 138 C180 92 340 162 540 132 C740 104 880 164 1060 138 C1160 124 1220 142 1280 130 L1280 190 L0 190 Z" fill="#00c853" opacity=".92" />
+        <path d="M0 168 C240 138 460 182 700 160 C920 142 1100 176 1280 158 L1280 190 L0 190 Z" fill="#00a83c" />
       </svg>
       <svg className="folio-fa-grass" viewBox="0 0 1280 64" preserveAspectRatio="none" aria-hidden="true">
         <path d="M0 64 L0 40 L16 18 L28 44 L44 12 L58 42 L76 22 L90 46 L108 16 L122 44 L140 26 L154 48 L172 14 L188 44 L204 24 L218 46 L236 18 L252 44 L268 28 L282 48 L300 12 L316 42 L332 22 L348 46 L364 20 L380 44 L396 26 L412 48 L428 16 L444 42 L460 24 L476 46 L492 14 L508 44 L524 28 L540 48 L556 18 L572 42 L588 22 L604 46 L620 12 L636 44 L652 26 L668 48 L684 20 L700 42 L716 24 L732 46 L748 16 L764 44 L780 28 L796 48 L812 14 L828 42 L844 22 L860 46 L876 18 L892 44 L908 26 L924 48 L940 12 L956 42 L972 24 L988 46 L1004 20 L1020 44 L1036 28 L1052 48 L1068 16 L1084 42 L1100 22 L1116 46 L1132 14 L1148 44 L1164 26 L1180 48 L1196 18 L1212 42 L1228 24 L1244 46 L1260 28 L1280 44 L1280 64 Z" fill="#2e8b34" />
@@ -311,15 +313,15 @@ export default function TadanoenFolioPage() {
       <Sparkle top="26rem" left="86%" size={16} delay="0.5s" />
       <Butterfly top="13.5rem" left="9%" delay="0s" />
       <div className="folio-fa-icon folio-fa-icon-ph" aria-hidden="true"><DropMark size={64} /></div>
-      <Fish top="11.5rem" left="6%" scale={1} color="#ff9f2e" delay="0s" />
-      <Fish top="15.5rem" left="13%" scale={0.7} flip color="#43b04c" delay="1.4s" />
+      <Fish top="11.5rem" left="6%" scale={1} color="#ff8a00" delay="0s" />
+      <Fish top="15.5rem" left="13%" scale={0.7} flip color="#00c853" delay="1.4s" />
       <div className="folio-fa-inner">
-        <header className="folio-fa-header">
+        <header className="folio-fa-header folio-fa-glass">
           <DropMark />
           <span className="name">tadanoen</span>
         </header>
 
-        <div className="folio-fa-hero">
+        <div className="folio-fa-hero folio-fa-glass">
           <h1>tadanoen</h1>
           <Slot label="キャッチコピー" />
           <div className="folio-fa-stats">
@@ -330,10 +332,6 @@ export default function TadanoenFolioPage() {
           </div>
         </div>
 
-        <figure className="folio-fa-dolphin">
-          <img src={DOLPHIN_SRC} alt="イルカ" />
-        </figure>
-
         <BubbleDivider />
 
         <section>
@@ -341,7 +339,12 @@ export default function TadanoenFolioPage() {
             <H2Icon g d="M12 21s-7.5-4.6-9.7-9A5.4 5.4 0 0 1 12 6.4 5.4 5.4 0 0 1 21.7 12C19.5 16.4 12 21 12 21z" />
             About
           </h2>
-          <Slot label="自己紹介" />
+          <div className="folio-fa-aboutwrap">
+            <Slot label="自己紹介" />
+            <figure className="folio-fa-dolphin">
+              <img src={DOLPHIN_SRC} alt="イルカ" />
+            </figure>
+          </div>
         </section>
 
         <section>
@@ -398,7 +401,7 @@ export default function TadanoenFolioPage() {
           </div>
         </section>
 
-        <footer className="folio-fa-footer">
+        <footer className="folio-fa-footer folio-fa-glass">
           <DropMark size={15} />
           <span>© tadanoen</span>
         </footer>
