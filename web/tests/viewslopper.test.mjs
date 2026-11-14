@@ -170,6 +170,38 @@ test("外観採点: vision応答を検証し、重み付け集計と所見化す
   assert.equal(m.composeAppearance("not json"), null);
 });
 
+test("診断履歴: 端末保存の追加・重複URLの最新化・上限・削除が効く", async () => {
+  const hsrc = fs.readFileSync(path.join(import.meta.dirname, "..", "lib", "viewslopper-history.ts"), "utf8");
+  const hjs = ts.transpileModule(hsrc, { compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 } }).outputText;
+  const h = await import("data:text/javascript;base64," + Buffer.from(hjs).toString("base64"));
+  const store = new Map();
+  const storage = {
+    getItem: (k) => (store.has(k) ? store.get(k) : null),
+    setItem: (k, v) => store.set(k, v),
+    removeItem: (k) => store.delete(k),
+  };
+  const mk = (url, score, at) => h.toHistoryEntry({ url, title: "t", score, grade: "Light", ux: { friction: 10 }, appearance: { score: 20 } }, at);
+  assert.equal(h.toHistoryEntry({ score: 1 }, 0), null);
+  let list = h.saveHistory(storage, mk("https://a.com/", 10, 1000));
+  assert.equal(list.length, 1);
+  assert.equal(list[0].uxFriction, 10);
+  assert.equal(list[0].appearanceScore, 20);
+  // 同じURLは最新に差し替わって先頭へ
+  h.saveHistory(storage, mk("https://b.com/", 30, 2000));
+  list = h.saveHistory(storage, mk("https://a.com/", 55, 3000));
+  assert.equal(list.length, 2);
+  assert.equal(list[0].url, "https://a.com/");
+  assert.equal(list[0].score, 55);
+  // 削除と全消去
+  list = h.removeHistoryEntry(storage, 3000);
+  assert.equal(list.length, 1);
+  h.clearHistory(storage);
+  assert.deepEqual(h.loadHistory(storage), []);
+  // 壊れたデータは空として扱う
+  store.set(h.HISTORY_KEY, "{broken");
+  assert.deepEqual(h.loadHistory(storage), []);
+});
+
 test("LLM診断メッセージはスコア固定を指示し、応答検証は不正要素を捨てる", () => {
   const page = { url: "https://e.com", title: "t", description: "", headings: [], text: SLOP_TEXT };
   const msgs = m.buildDiagnosisMessages(page, m.scoreText(SLOP_TEXT));
