@@ -9,6 +9,8 @@
 //   - 関数（render prop）を渡す場合は同じ { options, setOptions } を引数で受け取る
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import { loadSoundSettings, playSe, saveSoundSettings, unlockAudio, type BalkuSoundSettings } from "@/lib/balku-sound";
+import { inviteUrlForGame, roomCodeFromSearch } from "@/lib/discord-activity";
+import { useGamesNav } from "../GamesShell";
 import { useOnlineRoom, type OnlineRoomApi, type OnlineRoomView } from "./useOnlineRoom";
 
 export type OnlineCreateOptionsState = {
@@ -35,11 +37,15 @@ export type OnlineShellProps = {
 export default function OnlineShell({ gameId, title, playerRange, createOptions, children }: OnlineShellProps) {
   const api = useOnlineRoom(gameId);
   const { session, view } = api;
+  const nav = useGamesNav();
+  const identity = nav.identity;
   const [createMax, setCreateMax] = useState<number>(playerRange?.min ?? 2);
   const [isPublic, setIsPublic] = useState(true);
   const [joinCode, setJoinCode] = useState("");
   const [options, setOptions] = useState<unknown>(undefined);
   const [copied, setCopied] = useState(false);
+  const [copiedLink, setCopiedLink] = useState(false);
+  const [inviteCode, setInviteCode] = useState<string | null>(null);
   const [soundSettings, setSoundSettings] = useState<BalkuSoundSettings>({ bgm: true, se: true });
   const [chatText, setChatText] = useState("");
   const [chatSending, setChatSending] = useState(false);
@@ -82,6 +88,67 @@ export default function OnlineShell({ gameId, title, playerRange, createOptions,
       setTimeout(() => setCopied(false), 1500);
     } catch {
       api.setNotice(`ルームコード: ${session.code}`);
+    }
+  };
+
+  // 招待リンクは公開 URL（開くとそのまま参加フローに入る形）でコピーする。
+  const copyInviteLink = async () => {
+    if (!session) return;
+    const url = inviteUrlForGame(gameId, session.code);
+    if (!url) return;
+    try {
+      await navigator.clipboard.writeText(url);
+      setCopiedLink(true);
+      setTimeout(() => setCopiedLink(false), 1500);
+    } catch {
+      api.setNotice(`招待リンク: ${url}`);
+    }
+  };
+
+  // Discord 内では共有モーダルを優先し、使えなければリンクコピーに倒す。
+  const shareInvite = async () => {
+    if (!session) return;
+    if (nav.shareRoomInvite && (await nav.shareRoomInvite(gameId, session.code))) return;
+    await copyInviteLink();
+  };
+
+  // 招待リンク（?room=）から開かれたら、コード入力を経ずに参加パネルを出す。
+  useEffect(() => {
+    const code = roomCodeFromSearch(window.location.search);
+    if (code) {
+      setInviteCode(code);
+      setJoinCode(code);
+    }
+  }, []);
+
+  // Discord 本人確認が取れていて保存名が無いときだけ、表示名の既定値にする
+  // （ユーザーが自分で決めた名前は上書きしない）。
+  const identityAppliedRef = useRef(false);
+  useEffect(() => {
+    if (!identity || identityAppliedRef.current) return;
+    identityAppliedRef.current = true;
+    let stored = "";
+    try {
+      stored = localStorage.getItem("online-display-name") ?? "";
+    } catch {
+      // 読めなくても既定値の適用は試みる
+    }
+    if (!stored) api.setDisplayName(identity.name);
+    // api は毎レンダー変わるため、identity の到着時だけに限定する
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [identity]);
+
+  const joinInvite = async () => {
+    if (!inviteCode) return;
+    if (await api.joinRoom(inviteCode, api.displayName, identity?.avatarUrl)) {
+      setInviteCode(null);
+      try {
+        const url = new URL(window.location.href);
+        url.searchParams.delete("room");
+        window.history.replaceState(null, "", url.toString());
+      } catch {
+        // URL を戻せなくても参加自体は成立している
+      }
     }
   };
 
@@ -162,6 +229,14 @@ export default function OnlineShell({ gameId, title, playerRange, createOptions,
           <button type="button" className="og-btn og-btn-small" onClick={copyCode}>
             {copied ? "コピーしました" : "コードをコピー"}
           </button>
+          <button type="button" className="og-btn og-btn-small" onClick={() => void copyInviteLink()}>
+            {copiedLink ? "コピーしました" : "招待リンクをコピー"}
+          </button>
+          {nav.shareRoomInvite && (
+            <button type="button" className="og-btn og-btn-small" onClick={() => void shareInvite()}>
+              Discordで招待
+            </button>
+          )}
           <span className="og-sync">{api.syncMode === "sse" ? "接続中" : "接続中（ポーリング）"}</span>
         </div>
       )}
@@ -183,6 +258,29 @@ export default function OnlineShell({ gameId, title, playerRange, createOptions,
       <div className="og-shell">
         {header}
         <div className="og-entry">
+          {inviteCode && (
+            <section className="og-panel og-invite-panel">
+              <h3>ルーム {inviteCode} への招待</h3>
+              <label className="og-field">
+                <span>あなたの名前</span>
+                <input
+                  className="og-input"
+                  value={api.displayName}
+                  onChange={(e) => api.setDisplayName(e.target.value)}
+                  placeholder="2〜24文字"
+                  maxLength={24}
+                />
+              </label>
+              <div className="og-actions">
+                <button type="button" className="og-btn og-btn-primary" disabled={api.busy} onClick={() => void joinInvite()}>
+                  このルームに参加
+                </button>
+                <button type="button" className="og-btn og-btn-ghost" onClick={() => setInviteCode(null)}>
+                  閉じる
+                </button>
+              </div>
+            </section>
+          )}
           <section className="og-panel">
             <h3>ルームを作成 / 参加</h3>
             <label className="og-field">
@@ -230,6 +328,7 @@ export default function OnlineShell({ gameId, title, playerRange, createOptions,
                   ...(range ? { maxPlayers: createMax } : {}),
                   isPublic,
                   ...(options !== undefined ? { options } : {}),
+                  ...(identity ? { avatarUrl: identity.avatarUrl } : {}),
                 })
               }
             >
@@ -244,7 +343,7 @@ export default function OnlineShell({ gameId, title, playerRange, createOptions,
                 maxLength={6}
                 aria-label="ルームコード"
               />
-              <button type="button" className="og-btn" disabled={api.busy} onClick={() => void api.joinRoom(joinCode, api.displayName)}>
+              <button type="button" className="og-btn" disabled={api.busy} onClick={() => void api.joinRoom(joinCode, api.displayName, identity?.avatarUrl)}>
                 参加
               </button>
             </div>
@@ -266,7 +365,7 @@ export default function OnlineShell({ gameId, title, playerRange, createOptions,
                           {room.maxPlayers !== undefined ? ` / ${room.maxPlayers}` : ""} 人
                         </span>
                       )}
-                      <button type="button" className="og-btn" disabled={api.busy || full} onClick={() => void api.joinRoom(room.code, api.displayName)}>
+                      <button type="button" className="og-btn" disabled={api.busy || full} onClick={() => void api.joinRoom(room.code, api.displayName, identity?.avatarUrl)}>
                         参加
                       </button>
                     </div>
@@ -306,11 +405,12 @@ export default function OnlineShell({ gameId, title, playerRange, createOptions,
         <div className="og-main">
           <section className="og-panel og-lobby">
             <h3>待機中</h3>
-            <p className="og-muted">コードを共有すると、他のプレイヤーが参加できます。</p>
+            <p className="og-muted">招待リンクかコードを共有すると、他のプレイヤーが参加できます。</p>
             <div className="og-player-list">
               {view.players.map((p) => (
                 <div key={p.seat} className={`og-player-row${p.seat === mySeat ? " og-player-me" : ""}`}>
                   <span className="og-player-name">
+                    {p.avatar && <img className="og-avatar" src={p.avatar} alt="" width={24} height={24} />}
                     {p.name}
                     {p.seat === mySeat ? "（あなた）" : ""}
                     {p.isHost && <span className="og-badge og-badge-host">ホスト</span>}
@@ -338,6 +438,14 @@ export default function OnlineShell({ gameId, title, playerRange, createOptions,
               {isHost && view.cpuSupported && view.players.length < view.maxPlayers && (
                 <button type="button" className="og-btn" disabled={api.busy} onClick={() => void api.setCpu("add")}>
                   CPUを追加
+                </button>
+              )}
+              <button type="button" className="og-btn" onClick={() => void copyInviteLink()}>
+                {copiedLink ? "コピーしました" : "招待リンクをコピー"}
+              </button>
+              {nav.shareRoomInvite && (
+                <button type="button" className="og-btn" onClick={() => void shareInvite()}>
+                  Discordで招待
                 </button>
               )}
               <button type="button" className="og-btn og-btn-ghost" disabled={api.busy} onClick={() => void api.leave()}>

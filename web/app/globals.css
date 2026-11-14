@@ -438,6 +438,12 @@ body:has(.op-shell) { background:#f4f8fd; }
 .games-shell[data-activity-root] { max-width:880px; margin:0 auto; padding:18px 16px 48px; }
 .games-embedded-bar { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:14px; padding-bottom:10px; border-bottom:1px solid var(--line); font-size:14px; }
 .games-embedded-brand { font-weight:800; letter-spacing:.04em; }
+.games-embedded-links { display:inline-flex; gap:14px; }
+.games-embedded-identity { display:inline-flex; align-items:center; gap:8px; font-size:13px; font-weight:700; }
+.games-embedded-identity img { border-radius:50%; }
+.games-discord-cta { display:grid; justify-items:start; gap:10px; margin:20px 0; padding:20px 16px; border:1px solid var(--line); border-radius:9px; background:var(--soft); }
+.games-discord-cta h2 { margin:0; font-size:18px; }
+.games-discord-cta p { margin:0; }
 .games-grid { display:grid; gap:14px; }
 .game-card { display:flex; align-items:center; gap:16px; padding:18px; border:1px solid var(--line); border-radius:12px; background:#fff; color:var(--text); }
 .game-card:hover { background:var(--soft); text-decoration:none; }
@@ -1440,6 +1446,9 @@ button.og-card-selected:hover:not(:disabled) { transform:translateY(-10px); }
 .og-game-area { display:grid; gap:16px; min-width:0; }
 .og-panel { display:grid; gap:12px; padding:16px; border:1px solid var(--line); border-radius:9px; background:var(--soft); }
 .og-panel h3 { margin:0; font-size:16px; }
+.og-invite-panel { border-color:var(--accent); }
+.og-avatar { border-radius:50%; flex:none; }
+.balku-invite-panel { margin-bottom:14px; }
 .og-btn { display:inline-flex; align-items:center; justify-content:center; min-height:40px; padding:8px 16px; border:1px solid var(--line); border-radius:8px; background:#fff; color:var(--text); font:inherit; font-size:14px; font-weight:700; cursor:pointer; }
 .og-btn:hover { background:var(--accent-soft); }
 .og-btn:disabled { opacity:.45; cursor:not-allowed; }

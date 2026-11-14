@@ -23,7 +23,7 @@ export class OnlineRoomError extends Error {
   }
 }
 
-export type OnlinePlayerRecord = { token: string; seat: number; name: string; isHost: boolean; isCpu?: boolean };
+export type OnlinePlayerRecord = { token: string; seat: number; name: string; isHost: boolean; isCpu?: boolean; avatar?: string };
 
 /** ルーム内チャットの1件。playerId は発言時点の seat。 */
 export type OnlineChatMessage = { id: string; playerId: number; name: string; text: string; at: number };
@@ -54,7 +54,7 @@ export type OnlineRoomView = {
   cpuSupported: boolean;
   chatEnabled: boolean;
   player: { seat: number; displayName: string; isHost: boolean };
-  players: { seat: number; name: string; isHost: boolean; isCpu: boolean }[];
+  players: { seat: number; name: string; isHost: boolean; isCpu: boolean; avatar?: string }[];
   state: unknown;
   chat: OnlineChatMessage[];
   cpuSeats: number[];
@@ -254,7 +254,7 @@ function toView(record: OnlineRoomRecord, player: OnlinePlayerRecord): OnlineRoo
     player: { seat: player.seat, displayName: player.name, isHost: player.isHost },
     players: [...record.players]
       .sort((a, b) => a.seat - b.seat)
-      .map((p) => ({ seat: p.seat, name: p.name, isHost: p.isHost, isCpu: !!p.isCpu })),
+      .map((p) => ({ seat: p.seat, name: p.name, isHost: p.isHost, isCpu: !!p.isCpu, ...(p.avatar ? { avatar: p.avatar } : {}) })),
     state: isLobby ? null : game ? game.viewFor(record.gameState, player.seat) : null,
     chat: Array.isArray(record.chat) ? record.chat.slice(-CHAT_VIEW) : [],
     cpuSeats: record.players
@@ -360,7 +360,7 @@ async function progressRoom(record: OnlineRoomRecord, forceCpu: boolean): Promis
 
 export async function createOnlineRoom(
   gameId: string,
-  input: { displayName: string; maxPlayers?: number; isPublic?: boolean; options?: Record<string, unknown> },
+  input: { displayName: string; maxPlayers?: number; isPublic?: boolean; options?: Record<string, unknown>; avatarUrl?: string },
 ): Promise<{ code: string; playerToken: string }> {
   const game = requireGame(gameId);
   return serialize(async () => {
@@ -396,7 +396,7 @@ export async function createOnlineRoom(
       revision: 1,
       createdAt: now,
       updatedAt: now,
-      players: [{ token: playerToken, seat: 0, name: input.displayName, isHost: true }],
+      players: [{ token: playerToken, seat: 0, name: input.displayName, isHost: true, ...(input.avatarUrl ? { avatar: input.avatarUrl } : {}) }],
       gameState: null,
       options,
       chat: [],
@@ -410,7 +410,7 @@ export async function createOnlineRoom(
 
 export async function joinOnlineRoom(
   gameId: string,
-  input: { code: string; displayName: string },
+  input: { code: string; displayName: string; avatarUrl?: string },
 ): Promise<{ code: string; playerToken: string }> {
   requireGame(gameId);
   return serialize(async () => {
@@ -420,7 +420,7 @@ export async function joinOnlineRoom(
     if (record.players.length >= record.maxPlayers) throw new OnlineRoomError(400, "満席です。");
     const playerToken = newPlayerToken();
     const seat = record.players.length;
-    record.players.push({ token: playerToken, seat, name: input.displayName, isHost: false });
+    record.players.push({ token: playerToken, seat, name: input.displayName, isHost: false, ...(input.avatarUrl ? { avatar: input.avatarUrl } : {}) });
     await applyChange(record, record.gameState);
     return { code: record.code, playerToken };
   });
@@ -771,11 +771,23 @@ export function parseExpectedRevision(value: unknown): number {
   return value;
 }
 
+/**
+ * アバター URL は Discord CDN のものだけ通す（任意 URL の画像を
+ * プレイヤー表示に使わせない）。不正な値はエラーにせず未設定に倒す。
+ */
+const DISCORD_AVATAR_URL = /^https:\/\/cdn\.discordapp\.com\/(?:avatars|embed\/avatars)\/[^\s?#]+(?:\?[^\s#]*)?$/;
+
+export function parseAvatarUrl(value: unknown): string | undefined {
+  if (typeof value !== "string" || value.length > 512) return undefined;
+  return DISCORD_AVATAR_URL.test(value) ? value : undefined;
+}
+
 export function parseCreateRoomBody(body: unknown): {
   displayName: string;
   maxPlayers?: number;
   isPublic: boolean;
   options?: Record<string, unknown>;
+  avatarUrl?: string;
 } {
   const data = asBody(body);
   const displayName = parseDisplayName(data.displayName);
@@ -797,17 +809,24 @@ export function parseCreateRoomBody(body: unknown): {
     data.options && typeof data.options === "object" && !Array.isArray(data.options)
       ? (data.options as Record<string, unknown>)
       : undefined;
+  const avatarUrl = parseAvatarUrl(data.avatarUrl);
   return {
     displayName,
     ...(maxPlayers !== undefined ? { maxPlayers } : {}),
     isPublic,
     ...(options !== undefined ? { options } : {}),
+    ...(avatarUrl !== undefined ? { avatarUrl } : {}),
   };
 }
 
-export function parseJoinRoomBody(body: unknown): { code: string; displayName: string } {
+export function parseJoinRoomBody(body: unknown): { code: string; displayName: string; avatarUrl?: string } {
   const data = asBody(body);
-  return { code: parseRoomCode(data.code), displayName: parseDisplayName(data.displayName) };
+  const avatarUrl = parseAvatarUrl(data.avatarUrl);
+  return {
+    code: parseRoomCode(data.code),
+    displayName: parseDisplayName(data.displayName),
+    ...(avatarUrl !== undefined ? { avatarUrl } : {}),
+  };
 }
 
 export function parseTokenRevisionBody(body: unknown): { playerToken: string; expectedRevision: number } {

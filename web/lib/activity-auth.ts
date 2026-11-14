@@ -48,6 +48,66 @@ export function createActivityToken(userId: string, guildId: string, channelId: 
   return { token: `${encoded}.${sign(encoded)}`, expiresAt: payload.expiresAt };
 }
 
+export type DiscordOAuthUser = {
+  id: string;
+  username: string;
+  global_name?: string | null;
+  avatar?: string | null;
+};
+
+/**
+ * Activity の OAuth コード交換（PKCE）＋ /users/@me 取得。
+ * ゲーム側（games-auth ルート）が使う。音楽側ルートは Activity トークンの
+ * 発行まで含むため従来実装のままで、こちらは「本人確認まで」に閉じる。
+ * 失敗は Error を投げる（呼び出し側で HTTP 応答に変換する）。
+ */
+export async function exchangeDiscordActivityCode(args: {
+  clientId: string;
+  clientSecret: string;
+  code: string;
+  codeVerifier: string;
+}): Promise<{ accessToken: string; user: DiscordOAuthUser }> {
+  const form = new URLSearchParams([
+    ["client_id", args.clientId],
+    ["client_secret", args.clientSecret],
+    ["grant_type", "authorization_code"],
+    ["code", args.code],
+    ["code_verifier", args.codeVerifier],
+  ]);
+  const tokenResponse = await fetch("https://discord.com/api/oauth2/token", {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: form,
+    cache: "no-store",
+    signal: AbortSignal.timeout(8_000),
+  });
+  if (!tokenResponse.ok) throw new Error("authorization_failed");
+  const tokenData = (await tokenResponse.json()) as { access_token?: unknown };
+  if (typeof tokenData.access_token !== "string" || !tokenData.access_token) {
+    throw new Error("authorization_failed");
+  }
+
+  const userResponse = await fetch("https://discord.com/api/v10/users/@me", {
+    headers: { Authorization: `Bearer ${tokenData.access_token}` },
+    cache: "no-store",
+    signal: AbortSignal.timeout(8_000),
+  });
+  if (!userResponse.ok) throw new Error("authorization_failed");
+  const user = (await userResponse.json()) as Partial<DiscordOAuthUser>;
+  if (!isSnowflake(user.id) || typeof user.username !== "string") {
+    throw new Error("authorization_failed");
+  }
+  return {
+    accessToken: tokenData.access_token,
+    user: {
+      id: user.id,
+      username: user.username,
+      global_name: typeof user.global_name === "string" ? user.global_name : null,
+      avatar: typeof user.avatar === "string" ? user.avatar : null,
+    },
+  };
+}
+
 export function readActivityToken(value?: string): ActivityClaims | null {
   if (!signingSecret()) return null;
   if (!value || value.length > 2048) return null;

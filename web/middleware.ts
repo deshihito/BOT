@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { subdomainRedirectUrl } from "@/lib/subdomain";
+import { activityLandingPath } from "@/lib/discord-activity";
 
 export function middleware(request: NextRequest) {
   const { nextUrl } = request;
@@ -16,13 +17,16 @@ export function middleware(request: NextRequest) {
   if (subdomainUrl) {
     return NextResponse.redirect(subdomainUrl);
   }
-  if (
-    nextUrl.pathname === "/" &&
-    nextUrl.searchParams.has("frame_id") &&
-    nextUrl.searchParams.has("instance_id")
-  ) {
+  // Activity 起動の着地はゲーム（/games）。activity=music が明示された
+  // 起動だけ従来どおり音楽ページへ送る（振り分け規則は lib/discord-activity）。
+  const landing = activityLandingPath({
+    frameId: nextUrl.searchParams.get("frame_id"),
+    instanceId: nextUrl.searchParams.get("instance_id"),
+    activity: nextUrl.searchParams.get("activity"),
+  });
+  if (nextUrl.pathname === "/" && landing) {
     const activityUrl = nextUrl.clone();
-    activityUrl.pathname = "/activity/music";
+    activityUrl.pathname = landing;
     return NextResponse.redirect(activityUrl);
   }
   return NextResponse.next();
