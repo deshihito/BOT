@@ -4,9 +4,9 @@ import { buildDiscordIdentity } from "@/lib/discord-activity";
 
 export const runtime = "nodejs";
 
-// ゲーム用 Activity 認証。音楽用ルート（/api/activity/auth）と違い、
-// ギルド/チャンネルに紐づくトークンは発行しない。DM やグループ DM の
-// 起動でも使えるよう、コード交換と本人確認（identify）だけを行う。
+// ゲーム用 Activity 認証。ギルド/チャンネルに紐づくトークンは発行せず、
+// DM やグループ DM の起動でも使えるよう、コード交換と本人確認
+// （identify）だけを行う。
 // 返す identity はオンライン対戦の表示名/アバターの既定値に使う。
 const NO_STORE = { "Cache-Control": "no-store, max-age=0" };
 const PKCE_VERIFIER = /^[A-Za-z0-9._~-]{43,128}$/;
