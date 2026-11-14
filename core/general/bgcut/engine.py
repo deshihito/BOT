@@ -66,7 +66,7 @@ class UnavailableError(BgCutError):
 class ProcessResult:
     data: bytes
     filename: str
-    out_format: str  # "PNG" / "GIF" / "APNG"
+    out_format: str  # "PNG" / "GIF"
     width: int
     height: int
     in_bytes: int
@@ -401,41 +401,32 @@ def encode_anim_emoji(frames, durations, loop):
     raise BgCutError("256KB以内に収められませんでした")
 
 
-def _encode_apng(frames, durations, loop) -> bytes:
-    return _save_bytes(
-        frames[0], "PNG", save_all=True, append_images=frames[1:],
-        duration=durations, loop=loop,
-    )
-
-
 def encode_anim_sticker(frames, durations, loop):
-    """スタンプ用アニメーション: APNG ≤512KB（320×320）。無理なら GIF。"""
+    """スタンプ用アニメーション: GIF ≤512KB（320×320、透過は1bit）。
+
+    GIF で送られたものは GIF で返るのが利用者の期待のため、スタンプの
+    アニメーション出力は GIF を既定とする（APNG にはしない）。
+    """
+    # 優先順（画質を保てる順）: 寸法 → 色数 → フレーム間引き を段階的に落とす。
     ladder = [
-        (320, 1), (320, 2), (256, 1), (320, 3), (256, 2),
-        (192, 1), (256, 3), (192, 2), (128, 2), (128, 3), (96, 4),
+        (320, 1, 256), (320, 1, 128), (320, 2, 256),
+        (256, 1, 128), (320, 2, 128), (256, 2, 128),
+        (192, 1, 128), (320, 3, 128), (192, 2, 128),
+        (128, 2, 128), (192, 3, 64), (128, 3, 64),
+        (96, 4, 64), (96, 4, 32),
     ]
-    for fit_edge, step in ladder:
-        use_frames = [
-            _sticker_canvas(f, fit_edge) for f in frames[::step]
-        ] if step > 1 else [_sticker_canvas(f, fit_edge) for f in frames]
+    for fit_edge, step, colors in ladder:
+        use_frames = [_sticker_canvas(f, fit_edge) for f in frames[::step]]
         use_durations = _clamp_durations(_sample_durations(durations, step))
-        data = _encode_apng(use_frames, use_durations, loop)
+        data = _encode_gif(use_frames, use_durations, loop, colors)
         if len(data) <= STICKER_MAX_BYTES:
             notes = []
             if step > 1:
                 notes.append(f"容量内に収めるためフレームを間引きました（{len(frames)}→{len(use_frames)}）")
             if fit_edge < STICKER_SIZE:
                 notes.append("容量内に収めるため被写体を縮小しました")
-            return data, "APNG", (STICKER_SIZE, STICKER_SIZE), len(use_frames), notes
-    # GIF フォールバック（αは1bitになる）
-    for step, colors in ((1, 256), (2, 256), (2, 128), (3, 128), (4, 64)):
-        use_frames = [_sticker_canvas(f, STICKER_SIZE) for f in frames[::step]]
-        use_durations = _clamp_durations(_sample_durations(durations, step))
-        data = _encode_gif(use_frames, use_durations, loop, colors)
-        if len(data) <= STICKER_MAX_BYTES:
-            notes = ["APNGでは容量内に収まらなかったためGIFで出力しました（透過の縁が粗くなります）"]
-            if step > 1:
-                notes.append(f"フレームを間引きました（{len(frames)}→{len(use_frames)}）")
+            if colors < 256:
+                notes.append(f"色数を{colors}色に減らして容量内に収めました")
             return data, "GIF", (STICKER_SIZE, STICKER_SIZE), len(use_frames), notes
     raise BgCutError("512KB以内に収められませんでした")
 

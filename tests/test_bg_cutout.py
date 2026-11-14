@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """背景透過・絵文字/スタンプ化（core/general/bg_cutout.py + bgcut/engine.py）のテスト。
 
-エンジンのエンコード（上限内への段階劣化・320×320 化・GIF/APNG 化）と
+エンジンのエンコード（上限内への段階劣化・320×320 化・GIF 化）と
 入力ガードはモデル無しで確かめ、背景除去そのものは onnxruntime と
 モデルがある環境でのみ実推論で確かめる（無い環境では skip）。
 待ちフローは Discord に接続せず偽オブジェクトで確かめる。
@@ -119,14 +119,15 @@ class EncodeAnimTest(unittest.TestCase):
         out.seek(0)
         self.assertEqual(out.convert("RGBA").getpixel((1, 1))[3], 0)
 
-    def test_sticker_apng_within_limits_and_320(self):
+    def test_sticker_gif_within_limits_and_320(self):
         frames = _anim_frames(10)
         data, fmt, size, n_out, _notes = engine.encode_anim_sticker(
             frames, [80] * 10, 0)
-        self.assertEqual(fmt, "APNG")
+        self.assertEqual(fmt, "GIF")
         self.assertEqual(size, (320, 320))
         self.assertLessEqual(len(data), engine.STICKER_MAX_BYTES)
         out = Image.open(io.BytesIO(data))
+        self.assertEqual(out.format, "GIF")
         self.assertEqual(getattr(out, "n_frames", 1), 10)
         out.seek(0)
         frame = out.convert("RGBA")
@@ -140,6 +141,68 @@ class EncodeAnimTest(unittest.TestCase):
         self.assertTrue(was_sampled)
         self.assertLessEqual(len(sampled), engine.MAX_FRAMES)
         self.assertEqual(sum(durations), 50 * len(frames))
+
+
+class AnimGifRoundTripTest(unittest.TestCase):
+    """アニメGIF入力→アニメGIF出力の回帰テスト（背景除去は恒等に差し替え）。
+
+    スタンプ経路で GIF が APNG に化けて「GIF じゃなくなる」不具合の
+    再発防止。モデル不要で常時実行される。
+    """
+
+    DURATIONS = [100, 120, 80, 100, 90, 110]
+
+    def _gif_bytes(self):
+        frames = []
+        for i in range(6):
+            f = Image.new("RGB", (160, 160), (240, 240, 240))
+            ImageDraw.Draw(f).rectangle([30 + i * 8, 55, 80 + i * 8, 105],
+                                        fill=(30, 60, 200))
+            frames.append(f)
+        buf = io.BytesIO()
+        frames[0].save(buf, "GIF", save_all=True, append_images=frames[1:],
+                       duration=self.DURATIONS, loop=0)
+        return buf.getvalue()
+
+    def _output_durations(self, data):
+        out = Image.open(io.BytesIO(data))
+        durations = []
+        for i in range(getattr(out, "n_frames", 1)):
+            out.seek(i)
+            durations.append(out.info.get("duration"))
+        return out, durations
+
+    def test_sticker_keeps_gif_animation(self):
+        with patch.object(engine, "remove_background",
+                          side_effect=lambda img: img):
+            result = engine.process_bytes(self._gif_bytes(), "sticker")
+        self.assertEqual(result.out_format, "GIF")
+        self.assertEqual(result.filename, "sticker.gif")
+        self.assertEqual((result.width, result.height), (320, 320))
+        self.assertLessEqual(len(result.data), engine.STICKER_MAX_BYTES)
+        self.assertEqual(result.frames_in, 6)
+        self.assertGreater(result.frames_out, 1)
+        self.assertLessEqual(result.frames_out, 6)
+        out, durations = self._output_durations(result.data)
+        self.assertEqual(out.format, "GIF")
+        self.assertEqual(getattr(out, "n_frames", 1), result.frames_out)
+        if result.frames_out == 6:
+            self.assertEqual(durations, self.DURATIONS)
+
+    def test_emoji_keeps_gif_animation(self):
+        with patch.object(engine, "remove_background",
+                          side_effect=lambda img: img):
+            result = engine.process_bytes(self._gif_bytes(), "emoji")
+        self.assertEqual(result.out_format, "GIF")
+        self.assertEqual(result.filename, "emoji.gif")
+        self.assertLessEqual(len(result.data), engine.EMOJI_MAX_BYTES)
+        self.assertEqual(result.frames_in, 6)
+        self.assertGreater(result.frames_out, 1)
+        out, durations = self._output_durations(result.data)
+        self.assertEqual(out.format, "GIF")
+        self.assertEqual(getattr(out, "n_frames", 1), result.frames_out)
+        if result.frames_out == 6:
+            self.assertEqual(durations, self.DURATIONS)
 
 
 class GuardTest(unittest.TestCase):
@@ -197,7 +260,7 @@ class RemoveBackgroundTest(unittest.TestCase):
         frames[0].save(buf, "GIF", save_all=True, append_images=frames[1:],
                        duration=90, loop=0)
         result = engine.process_bytes(buf.getvalue(), "sticker")
-        self.assertEqual(result.out_format, "APNG")
+        self.assertEqual(result.out_format, "GIF")
         self.assertEqual((result.width, result.height), (320, 320))
         self.assertLessEqual(len(result.data), engine.STICKER_MAX_BYTES)
         self.assertEqual(result.frames_out, 6)
