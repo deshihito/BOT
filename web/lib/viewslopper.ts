@@ -35,7 +35,55 @@ export type PageData = {
   description: string;
   headings: string[];
   text: string;
+  ux: UxSignals;
 };
+
+/** HTML構造から取れる UX/配置 の生シグナル（レンダリングなしで数えられるものだけ）。 */
+export type UxSignals = {
+  hasViewport: boolean;
+  hasLang: boolean;
+  h1Count: number;
+  headingSkips: number;
+  navLinkCount: number;
+  totalLinks: number;
+  duplicateLinkTexts: { text: string; count: number }[];
+  images: number;
+  imagesMissingAlt: number;
+  imagesMissingSize: number;
+  inputs: number;
+  inputsMissingLabel: number;
+  smallFontCount: number;
+  modalCount: number;
+  charsBeforeFirstHeading: number;
+  hasEarlyCta: boolean;
+  longParagraphs: number;
+  maxParagraphChars: number;
+};
+
+export type UxFinding = {
+  axis: string;
+  severity: "high" | "mid" | "low";
+  evidence: string;
+  why: string;
+  fix: string;
+};
+
+export type UxResult = {
+  /** UX摩擦スコア 0–100（高いほど摩擦が大きい）。Slop Score と同じ向き。 */
+  friction: number;
+  grade: string;
+  findings: UxFinding[];
+};
+
+export function emptyUxSignals(): UxSignals {
+  return {
+    hasViewport: false, hasLang: false, h1Count: 0, headingSkips: 0,
+    navLinkCount: 0, totalLinks: 0, duplicateLinkTexts: [],
+    images: 0, imagesMissingAlt: 0, imagesMissingSize: 0,
+    inputs: 0, inputsMissingLabel: 0, smallFontCount: 0, modalCount: 0,
+    charsBeforeFirstHeading: 0, hasEarlyCta: false, longParagraphs: 0, maxParagraphChars: 0,
+  };
+}
 
 export type Evidence = {
   dimension: DimensionKey;
@@ -223,7 +271,156 @@ export function extractPage(html: string, url: string): PageData {
     lines.push(t);
   }
   const text = lines.join("\n").slice(0, MAX_SCORE_TEXT_CHARS);
-  return { url, title, description, headings, text };
+  return { url, title, description, headings, text, ux: extractUxSignals(html) };
+}
+
+const CTA_WORDS = [
+  "始める", "登録", "申し込", "購入", "ダウンロード", "無料", "予約", "注文", "ログイン",
+  "start", "sign up", "signup", "download", "buy", "get started",
+];
+
+/** HTML から UX/配置シグナルを数える。実レンダリングはしない前提で、構造から確実に言えることだけを取る。 */
+export function extractUxSignals(html: string): UxSignals {
+  const s = emptyUxSignals();
+  s.hasViewport = /<meta[^>]+name=["']viewport["']/i.test(html);
+  s.hasLang = /<html[^>]+lang=/i.test(html);
+
+  const levels = [...html.matchAll(/<h([1-6])[^>]*>/gi)].map((m) => Number(m[1]));
+  s.h1Count = levels.filter((l) => l === 1).length;
+  for (let i = 1; i < levels.length; i++) {
+    if (levels[i] > levels[i - 1] + 1) s.headingSkips++;
+  }
+
+  const navBlocks = [...html.matchAll(/<nav[\s\S]*?<\/nav>/gi)].map((m) => m[0]);
+  const headerBlocks = [...html.matchAll(/<header[\s\S]*?<\/header>/gi)].map((m) => m[0]);
+  const navSource = navBlocks.length > 0 ? navBlocks : headerBlocks;
+  s.navLinkCount = navSource.reduce((sum, b) => sum + (b.match(/<a\s[^>]*href/gi) ?? []).length, 0);
+  s.totalLinks = (html.match(/<a\s[^>]*href/gi) ?? []).length;
+
+  const linkTextCounts = new Map<string, number>();
+  for (const m of html.matchAll(/<a[^>]*>([\s\S]*?)<\/a>/gi)) {
+    const t = decodeEntities(stripTags(m[1])).replace(/\s+/g, " ").trim();
+    if (t.length >= 1 && t.length <= 30) linkTextCounts.set(t, (linkTextCounts.get(t) ?? 0) + 1);
+  }
+  s.duplicateLinkTexts = [...linkTextCounts.entries()]
+    .filter(([, c]) => c >= 3)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 3)
+    .map(([text, count]) => ({ text, count }));
+
+  const imgTags = [...html.matchAll(/<img[^>]*>/gi)].map((m) => m[0]);
+  s.images = imgTags.length;
+  s.imagesMissingAlt = imgTags.filter((t) => !/\balt=/i.test(t)).length;
+  s.imagesMissingSize = imgTags.filter((t) => !(/\bwidth=/i.test(t) && /\bheight=/i.test(t))).length;
+
+  const labelFors = new Set([...html.matchAll(/<label[^>]+for=["']([^"']+)["']/gi)].map((m) => m[1]));
+  const inputTags = [...html.matchAll(/<(input|select|textarea)[^>]*>/gi)]
+    .map((m) => m[0])
+    .filter((t) => !/type=["'](hidden|submit|button)["']/i.test(t));
+  s.inputs = inputTags.length;
+  s.inputsMissingLabel = inputTags.filter((t) => {
+    if (/aria-label=/i.test(t)) return false;
+    const id = t.match(/id=["']([^"']+)["']/i)?.[1];
+    return !(id && labelFors.has(id));
+  }).length;
+
+  s.smallFontCount = [...html.matchAll(/font-size:\s*(\d+(?:\.\d+)?)px/gi)]
+    .filter((m) => Number(m[1]) <= 11).length;
+  s.modalCount = (html.match(/<(div|section|dialog)[^>]+(?:class|id)=["'][^"']*(modal|popup|cookie)[^"']*["']/gi) ?? []).length;
+
+  const firstHeadingIdx = html.search(/<h1[^>]*>/i);
+  if (firstHeadingIdx === -1) {
+    s.charsBeforeFirstHeading = -1;
+  } else {
+    const before = html.slice(0, firstHeadingIdx)
+      .replace(/<(script|style|noscript|svg)[\s\S]*?<\/\1>/gi, " ");
+    s.charsBeforeFirstHeading = decodeEntities(stripTags(before)).replace(/\s+/g, " ").trim().length;
+  }
+
+  const bodyStart = html.search(/<body[^>]*>/i);
+  const early = html.slice(bodyStart === -1 ? 0 : bodyStart, (bodyStart === -1 ? 0 : bodyStart) + 6000);
+  s.hasEarlyCta =
+    /<button[^>]*>/i.test(early) ||
+    [...early.matchAll(/<a[^>]*>([\s\S]*?)<\/a>/gi)].some((m) => {
+      const t = decodeEntities(stripTags(m[1])).toLowerCase();
+      return CTA_WORDS.some((w) => t.includes(w));
+    }) ||
+    /(?:class|id)=["'][^"']*(cta|btn-primary)[^"']*["']/i.test(early);
+
+  const paraLens = [...html.matchAll(/<p[^>]*>([\s\S]*?)<\/p>/gi)]
+    .map((m) => decodeEntities(stripTags(m[1])).replace(/\s+/g, " ").trim().length)
+    .filter((n) => n > 0);
+  s.longParagraphs = paraLens.filter((n) => n > 300).length;
+  s.maxParagraphChars = paraLens.length > 0 ? Math.max(...paraLens) : 0;
+  return s;
+}
+
+function uxGrade(friction: number): string {
+  if (friction < 20) return "良好";
+  if (friction < 40) return "軽微";
+  if (friction < 60) return "要改善";
+  if (friction < 80) return "摩擦大";
+  return "深刻";
+}
+
+/**
+ * UX/配置の摩擦スコアと所見。観点は HCD の原則（導線は少なく、配置と構造が
+ * 次の一手を示す）に寄せる。全部入り口の数と構造から数えられる事実だけで組み、
+ * 実レンダリングでしか分からないこと（実寸のタップ領域など）は扱わない。
+ */
+export function scoreUx(s: UxSignals): UxResult {
+  let friction = 0;
+  const findings: (UxFinding & { points: number })[] = [];
+  const add = (points: number, axis: string, evidence: string, why: string, fix: string) => {
+    friction += points;
+    findings.push({
+      points, axis,
+      severity: points >= 12 ? "high" : points >= 7 ? "mid" : "low",
+      evidence, why, fix,
+    });
+  };
+
+  if (!s.hasViewport) add(18, "モバイル前提", "viewport メタタグなし", "スマホでの表示倍率が保証されず、モバイル利用が前提になっていない。", "viewport を入れ、モバイル幅を本体として設計する。");
+  if (s.h1Count === 0) add(12, "見出し構造", "h1 が0個", "ページの主題を表す見出しが構造上存在しない。", "主題を表す h1 を1つ置く。");
+  else if (s.h1Count > 1) add(8, "見出し構造", `h1 が${s.h1Count}個`, "主題が複数に分散し、何のページか構造から決められない。", "h1 は1つに絞り、残りは h2 以下に下げる。");
+  if (s.headingSkips > 0) add(Math.min(12, s.headingSkips * 6), "見出し構造", `見出しレベルの飛び ${s.headingSkips}箇所`, "階層が飛ぶと構造の読み取りが崩れる。", "見出しレベルを順番に使う。");
+  if (s.navLinkCount > 30) add(20, "導線の数", `ナビ内リンク ${s.navLinkCount}本`, "導線が多すぎて、次の一手を配置で示せていない。", "ナビは主要導線だけに絞り、残りは階層を分ける。");
+  else if (s.navLinkCount > 15) add(10, "導線の数", `ナビ内リンク ${s.navLinkCount}本`, "導線が多く、迷いの余地が大きい。", "使用頻度の低い導線をナビから外す。");
+  for (const dup of s.duplicateLinkTexts.slice(0, 2)) {
+    add(6, "導線の重複", `「${dup.text}」が${dup.count}回出現`, "同じ導線の重複は判断を分散させる。", "同じ行き先の導線は1つにまとめる。");
+  }
+  if (s.images >= 3 && s.imagesMissingAlt / s.images >= 0.3) {
+    add(10, "画像の扱い", `画像${s.images}枚中 ${s.imagesMissingAlt}枚に alt なし`, "画像の意味がテキスト側に渡っていない。", "意味のある画像には alt を付け、装飾は alt=\"\" で明示する。");
+  }
+  if (s.images >= 3 && s.imagesMissingSize / s.images >= 0.5) {
+    add(6, "画像の扱い", `画像${s.images}枚中 ${s.imagesMissingSize}枚に寸法指定なし`, "読み込み後にレイアウトが動き、配置が安定しない。", "width/height か aspect-ratio を指定する。");
+  }
+  if (s.inputsMissingLabel > 0) {
+    add(10, "フォーム", `入力欄${s.inputs}件中 ${s.inputsMissingLabel}件にラベルなし`, "何を入れる欄か構造から分からない。", "全入力欄に label か aria-label を付ける。");
+  }
+  if (s.charsBeforeFirstHeading > 600) {
+    add(10, "ファーストビュー", `最初の見出しまで ${s.charsBeforeFirstHeading} 字`, "見出しより前に文章が続き、冒頭でページの構造が掴めない。", "冒頭に見出しと要点を置き、説明は後ろに回す。");
+  } else if (s.charsBeforeFirstHeading === -1) {
+    add(6, "ファーストビュー", "見出し要素なし", "冒頭の掴みになる構造がない。", "冒頭に見出しを置く。");
+  }
+  if (!s.hasEarlyCta && s.totalLinks > 0) {
+    add(6, "ファーストビュー", "冒頭にボタン/CTAらしい導線なし", "読み始めてすぐの位置に次の一手がない。", "冒頭に主要導線を1つ置く。");
+  }
+  if (s.longParagraphs >= 2) {
+    add(8, "文章の壁", `300字超の段落が ${s.longParagraphs}件（最大${s.maxParagraphChars}字）`, "長い段落の連続は読む前に負荷が立つ。", "段落を分け、要点は見出しと構造で運ぶ。");
+  }
+  if (s.smallFontCount >= 3) {
+    add(6, "文字サイズ", `11px以下の指定が ${s.smallFontCount}箇所`, "小さい文字の多用は可読性の下限を割る。", "本文の文字サイズに下限を設ける。");
+  }
+  if (s.modalCount >= 2) {
+    add(8, "割り込み", `モーダル/ポップアップらしい要素が ${s.modalCount}件`, "割り込み要素が多いと本体の導線が霞む。", "割り込みは1つまでに絞る。");
+  }
+  if (!s.hasLang) add(4, "基本構造", "html の lang なし", "言語が構造で宣言されていない。", "html に lang を付ける。");
+
+  const total = clamp(friction);
+  const sorted = findings.sort((a, b) => b.points - a.points).slice(0, 8)
+    .map(({ points: _points, ...f }) => f);
+  return { friction: total, grade: uxGrade(total), findings: sorted };
 }
 
 /** 本文テキストの6次元採点（プロトタイプ score.py v1 の移植。カタカナ語は具体性に入れない）。 */

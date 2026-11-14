@@ -5,6 +5,7 @@
 
 import { lookup } from "node:dns/promises";
 import {
+  emptyUxSignals,
   extractPage,
   isPrivateIpLiteral,
   validateViewUrl,
@@ -70,7 +71,7 @@ export async function fetchPage(rawUrl: string): Promise<PageData> {
     if (buf.length > MAX_RESPONSE_BYTES) throw new ViewFetchError("ページが大きすぎます。");
     const bodyText = buf.toString("utf8");
     if (contentType.includes("text/plain")) {
-      return { url: current, title: "", description: "", headings: [], text: bodyText.slice(0, 20000) };
+      return { url: current, title: "", description: "", headings: [], text: bodyText.slice(0, 20000), ux: emptyUxSignals() };
     }
     if (!contentType.includes("html")) throw new ViewFetchError("HTMLページだけが診断対象です。");
     return extractPage(bodyText, current);

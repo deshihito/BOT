@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { scorePage, validateViewUrl } from "@/lib/viewslopper";
+import { scorePage, scoreUx, validateViewUrl } from "@/lib/viewslopper";
 import { ViewFetchError, diagnose, fetchPage } from "@/lib/viewslopper-server";
 
 export const runtime = "nodejs";
@@ -35,6 +35,7 @@ export async function POST(request: Request) {
   try {
     const page = await fetchPage(url);
     const score = scorePage(page);
+    const ux = scoreUx(page.ux);
     const diagnosis = await diagnose(page, score);
     return NextResponse.json({
       url: page.url,
@@ -47,6 +48,7 @@ export async function POST(request: Request) {
       dimensions: score.dimensions,
       diagnosis: diagnosis.items,
       diagnosisSource: diagnosis.llm ? "llm" : "rules",
+      ux: { friction: ux.friction, grade: ux.grade, findings: ux.findings, signals: page.ux },
     });
   } catch (error) {
     if (error instanceof ViewFetchError) {
