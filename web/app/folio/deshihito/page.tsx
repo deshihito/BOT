@@ -4,8 +4,9 @@ import type { Metadata } from "next";
 // ポートフォリオ枠: deshihito の割り当てファイル（1人1ファイル）
 // ------------------------------------------------------------
 // このファイルが deshihito.agobot.app の実体。編集権は本人にあり、
-// 中身（文章・実績・リンク等）は本人が書く。ここに入っているのは
-// 装飾（月モチーフのデザイン）と差し替え枠だけで、内容は埋めない。
+// 中身（文章・実績・リンク等）は本人が書く。管理側が用意するのは
+// 装飾（月モチーフのデザイン）と差し替え枠までで、内容は埋めない。
+// （経歴・マリンバの記載は 2026-11-14 に本人が書いた文の転記。）
 // 専用ヘッダー/フッターはこのファイルの中で完結させる（サイト共通の
 // ヘッダー/フッターは lib/site-chrome.ts の /folio 判定で出ない）。
 // ============================================================
@@ -14,16 +15,16 @@ const MOON_ICON =
   "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Ccircle cx='32' cy='32' r='30' fill='%230b1026'/%3E%3Cpath d='M42 10a24 24 0 1 0 12 32A26 26 0 0 1 42 10z' fill='%23e8c97a'/%3E%3C/svg%3E";
 
 export const metadata: Metadata = {
-  title: { absolute: "ひとのポートフォリオ" },
+  title: { absolute: "deshihito / lunamOOn" },
   alternates: { canonical: "/folio/deshihito" },
   openGraph: {
     type: "website",
     url: "/folio/deshihito",
-    siteName: "ひと",
-    title: "ひとのポートフォリオ",
+    siteName: "deshihito",
+    title: "deshihito / lunamOOn",
     images: [],
   },
-  twitter: { card: "summary", title: "ひとのポートフォリオ", images: [] },
+  twitter: { card: "summary", title: "deshihito / lunamOOn", images: [] },
   icons: { icon: MOON_ICON },
 };
 
@@ -62,11 +63,18 @@ const CSS = `
 .folio-dh-career{list-style:none;margin:0;padding:0 0 0 14px;border-left:1px solid rgba(232,201,122,.4)}
 .folio-dh-career li{position:relative;margin:0 0 12px 10px}
 .folio-dh-career li::before{content:"";position:absolute;left:-21px;top:20px;width:9px;height:9px;border-radius:50%;background:#e8c97a;box-shadow:0 0 10px rgba(232,201,122,.8)}
+.folio-dh-entry{border:1px solid rgba(232,201,122,.28);border-radius:12px;padding:13px 16px;color:#eef0ff;background:rgba(19,26,58,.5);font-size:15.5px}
+.folio-dh-alias{color:#b9c0e8;letter-spacing:.1em;margin:0 0 18px;font-size:15px}
+.folio-dh-cards{display:grid;grid-template-columns:repeat(2,1fr);gap:12px}
+.folio-dh-card{border:1px solid rgba(232,201,122,.28);border-radius:12px;padding:16px 18px;background:rgba(19,26,58,.5)}
+.folio-dh-card h3{margin:0 0 10px;font-size:15.5px;letter-spacing:.06em;color:#e8c97a;font-weight:600}
+.folio-dh-card p{margin:4px 0;color:#eef0ff;font-size:15px}
+.folio-dh-card p.sub{color:#b9c0e8;font-size:13.5px}
 .folio-dh-tags{display:flex;flex-wrap:wrap;gap:8px}
 .folio-dh-tag{border:1.5px dashed rgba(232,201,122,.55);border-radius:999px;padding:7px 16px;color:#b9c0e8;font-size:13.5px}
 .folio-dh-links{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
 .folio-dh-footer{margin-top:72px;padding-top:18px;border-top:1px solid transparent;border-image:linear-gradient(90deg,transparent,#e8c97a 30%,#e8c97a 70%,transparent) 1;display:flex;align-items:center;gap:8px;justify-content:center;color:#9aa3d4;font-size:12.5px;letter-spacing:.1em}
-@media (max-width:640px){.folio-dh-hero{padding-top:56px}.folio-dh-hero h1{font-size:40px}.folio-dh-moon{width:104px;height:104px;top:5.2rem;right:5vw}.folio-dh-stats{grid-template-columns:repeat(2,1fr)}.folio-dh-works,.folio-dh-links{grid-template-columns:1fr}}
+@media (max-width:640px){.folio-dh-hero{padding-top:56px}.folio-dh-hero h1{font-size:32px}.folio-dh-moon{width:104px;height:104px;top:5.2rem;right:5vw}.folio-dh-stats{grid-template-columns:repeat(2,1fr)}.folio-dh-works,.folio-dh-links,.folio-dh-cards{grid-template-columns:1fr}}
 @media (prefers-reduced-motion:reduce){.folio-dh-star{animation:none}}
 `;
 
@@ -131,11 +139,12 @@ export default function DeshihitoFolioPage() {
       <div className="folio-dh-inner">
         <header className="folio-dh-header">
           <MoonMark />
-          <span className="name">ひと</span>
+          <span className="name">deshihito</span>
         </header>
 
         <div className="folio-dh-hero">
-          <h1>ひと</h1>
+          <h1>deshihito / lunamOOn</h1>
+          <p className="folio-dh-alias">通称：でし</p>
           <Slot label="キャッチコピー" />
           <div className="folio-dh-stats">
             <Slot label="数字" />
@@ -162,14 +171,39 @@ export default function DeshihitoFolioPage() {
         </section>
 
         <section>
-          <h2>Career</h2>
+          <h2>経歴</h2>
           <ul className="folio-dh-career">
-            {["経歴", "経歴", "経歴", "経歴"].map((label, i) => (
+            {[
+              "10代",
+              "ハードウェア歴 6年",
+              "投資歴 3年",
+              "マーケティングの研究を行う",
+              "数千人規模のDiscordサーバーの鯖主経験 4回",
+              "30000人のユーザーカウントを誇るAGOBOTを運営。",
+              "TakasumiBOT サポーター/デベロッパー",
+            ].map((text, i) => (
               <li key={i}>
-                <Slot label={label} />
+                <div className="folio-dh-entry">{text}</div>
               </li>
             ))}
           </ul>
+        </section>
+
+        <section>
+          <h2>マリンバ</h2>
+          <div className="folio-dh-cards">
+            <div className="folio-dh-card">
+              <h3>国際音楽コンクール受賞歴</h3>
+              <p>1位：1回</p>
+              <p>2位：2回</p>
+              <p className="sub">以下入賞省略</p>
+            </div>
+            <div className="folio-dh-card">
+              <h3>全国</h3>
+              <p>2位：2回</p>
+              <p className="sub">以下入賞省略</p>
+            </div>
+          </div>
         </section>
 
         <section>
@@ -192,7 +226,7 @@ export default function DeshihitoFolioPage() {
 
         <footer className="folio-dh-footer">
           <MoonMark size={15} />
-          <span>© ひと</span>
+          <span>© deshihito</span>
         </footer>
       </div>
     </div>
