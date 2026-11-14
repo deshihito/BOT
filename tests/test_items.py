@@ -284,7 +284,7 @@ class RegistryTest(unittest.TestCase):
         for action_id in ("general:items", "general:item_buy",
                           "general:item_use", "general:box_open"):
             self.assertIn(action_id, by_id)
-            self.assertEqual(by_id[action_id].genre, "money")
+            self.assertEqual(by_id[action_id].genre, "trade_craft")
         for action_id in ("general:item_buy", "general:item_use", "general:box_open"):
             self.assertEqual(by_id[action_id].risk, "blocked")
             self.assertNotIn("aitools", by_id[action_id].surfaces)

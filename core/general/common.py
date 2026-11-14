@@ -56,6 +56,8 @@ EXP_STORE_KEY = "exp"
 # 機能名の列挙は書かない（空文字 = 説明なし）。
 GENERAL_GENRES = {
     "money": ("マネー", ""),
+    "trade_craft": ("取引・生産", ""),
+    "play": ("あそぶ", ""),
     "rta": ("ランキング", ""),
     "boardnotify_rta": ("boardNotify RTA", ""),
     "exp": ("EXP・レベル", "チャット・VC・generalのEXPとレベル"),
@@ -86,22 +88,41 @@ MONEY_PRISON_BLOCKED_VALUES = frozenset({
 })
 
 GENERAL_ACTIONS = {
+    # 経済系は旧 money 1ジャンル36件の平積み（セレクト2ページ）を、
+    # money パネルのカテゴリ分類に沿って3ジャンルへ分割した
+    # （経済導線整理B、2026-11-14）。アクションIDは不変で、所属だけが
+    # 変わる。money キー自体は残るため、保存済みショートカットの
+    # ジャンル解決（GENERAL_GENRE_ALIASES）は移行不要。
     "money": [
         ("マネーパネル", "money_panel"),
-        ("日報DM", "daily_report"),
         ("プレイヤー状況", "status"),
         ("コイン送金", "pay"),
+        ("コイン保有ランキング", "coin_leaderboard"),
+        ("日報DM", "daily_report"),
+        ("スターター受取", "starter_claim"),
+        ("デイリーボーナス受取", "daily_bonus_claim"),
+        ("脱獄試行", "jailbreak"),
+        ("クラン", "clan"),
+        ("クラン管理", "clan_manage"),
+    ],
+    "trade_craft": [
         ("市場", "market"),
         ("アゴトークンを買う", "token_buy"),
         ("アゴトークンを売る", "token_sell"),
         ("アイテム", "items"),
         ("アイテムを買う", "item_buy"),
         ("アイテムを使う", "item_use"),
+        ("アイテムを売る", "item_sell"),
         ("宝箱を開ける", "box_open"),
+        ("ロールショップ", "role_shop"),
+        ("ロールショップ商品管理", "role_shop_manage"),
         ("工房", "workshop"),
         ("加工機を買う", "machine_buy"),
         ("生産物を受け取る", "workshop_claim"),
         ("合成する", "craft"),
+        ("委託加工", "craft_commission"),
+    ],
+    "play": [
         ("採掘する", "mining"),
         ("宝くじ", "lottery"),
         ("宝くじを買う", "lottery_buy"),
@@ -111,18 +132,8 @@ GENERAL_ACTIONS = {
         ("ブラックジャック", "blackjack"),
         ("ブラックジャック対決", "bj_duel"),
         ("ダイスベット", "dice"),
-        ("コイン保有ランキング", "coin_leaderboard"),
-        ("ロールショップ", "role_shop"),
         ("ガチャ", "gacha"),
-        ("クラン", "clan"),
-        ("スターター受取", "starter_claim"),
-        ("デイリーボーナス受取", "daily_bonus_claim"),
-        ("脱獄試行", "jailbreak"),
-        ("アイテムを売る", "item_sell"),
-        ("ロールショップ商品管理", "role_shop_manage"),
-        ("委託加工", "craft_commission"),
         ("ガチャ編成", "gacha_party"),
-        ("クラン管理", "clan_manage"),
     ],
     "rta": [
         ("ランキング一覧", "rankings"),

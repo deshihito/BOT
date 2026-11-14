@@ -26,12 +26,6 @@
               "description": ""
             },
             {
-              "id": "general:daily_report",
-              "value": "daily_report",
-              "title": "日報DM",
-              "description": ""
-            },
-            {
               "id": "general:status",
               "value": "status",
               "title": "プレイヤー状況",
@@ -43,6 +37,55 @@
               "title": "コイン送金",
               "description": ""
             },
+            {
+              "id": "general:coin_leaderboard",
+              "value": "coin_leaderboard",
+              "title": "コイン保有ランキング",
+              "description": ""
+            },
+            {
+              "id": "general:daily_report",
+              "value": "daily_report",
+              "title": "日報DM",
+              "description": ""
+            },
+            {
+              "id": "general:starter_claim",
+              "value": "starter_claim",
+              "title": "スターター受取",
+              "description": ""
+            },
+            {
+              "id": "general:daily_bonus_claim",
+              "value": "daily_bonus_claim",
+              "title": "デイリーボーナス受取",
+              "description": ""
+            },
+            {
+              "id": "general:jailbreak",
+              "value": "jailbreak",
+              "title": "脱獄試行",
+              "description": ""
+            },
+            {
+              "id": "general:clan",
+              "value": "clan",
+              "title": "クラン",
+              "description": ""
+            },
+            {
+              "id": "general:clan_manage",
+              "value": "clan_manage",
+              "title": "クラン管理",
+              "description": ""
+            }
+          ]
+        },
+        {
+          "key": "trade_craft",
+          "label": "取引・生産",
+          "description": "",
+          "functions": [
             {
               "id": "general:market",
               "value": "market",
@@ -80,9 +123,27 @@
               "description": ""
             },
             {
+              "id": "general:item_sell",
+              "value": "item_sell",
+              "title": "アイテムを売る",
+              "description": ""
+            },
+            {
               "id": "general:box_open",
               "value": "box_open",
               "title": "宝箱を開ける",
+              "description": ""
+            },
+            {
+              "id": "general:role_shop",
+              "value": "role_shop",
+              "title": "ロールショップ",
+              "description": ""
+            },
+            {
+              "id": "general:role_shop_manage",
+              "value": "role_shop_manage",
+              "title": "ロールショップ商品管理",
               "description": ""
             },
             {
@@ -109,6 +170,19 @@
               "title": "合成する",
               "description": ""
             },
+            {
+              "id": "general:craft_commission",
+              "value": "craft_commission",
+              "title": "委託加工",
+              "description": ""
+            }
+          ]
+        },
+        {
+          "key": "play",
+          "label": "あそぶ",
+          "description": "",
+          "functions": [
             {
               "id": "general:mining",
               "value": "mining",
@@ -164,75 +238,15 @@
               "description": ""
             },
             {
-              "id": "general:coin_leaderboard",
-              "value": "coin_leaderboard",
-              "title": "コイン保有ランキング",
-              "description": ""
-            },
-            {
-              "id": "general:role_shop",
-              "value": "role_shop",
-              "title": "ロールショップ",
-              "description": ""
-            },
-            {
               "id": "general:gacha",
               "value": "gacha",
               "title": "ガチャ",
               "description": ""
             },
             {
-              "id": "general:clan",
-              "value": "clan",
-              "title": "クラン",
-              "description": ""
-            },
-            {
-              "id": "general:starter_claim",
-              "value": "starter_claim",
-              "title": "スターター受取",
-              "description": ""
-            },
-            {
-              "id": "general:daily_bonus_claim",
-              "value": "daily_bonus_claim",
-              "title": "デイリーボーナス受取",
-              "description": ""
-            },
-            {
-              "id": "general:jailbreak",
-              "value": "jailbreak",
-              "title": "脱獄試行",
-              "description": ""
-            },
-            {
-              "id": "general:item_sell",
-              "value": "item_sell",
-              "title": "アイテムを売る",
-              "description": ""
-            },
-            {
-              "id": "general:role_shop_manage",
-              "value": "role_shop_manage",
-              "title": "ロールショップ商品管理",
-              "description": ""
-            },
-            {
-              "id": "general:craft_commission",
-              "value": "craft_commission",
-              "title": "委託加工",
-              "description": ""
-            },
-            {
               "id": "general:gacha_party",
               "value": "gacha_party",
               "title": "ガチャ編成",
-              "description": ""
-            },
-            {
-              "id": "general:clan_manage",
-              "value": "clan_manage",
-              "title": "クラン管理",
               "description": ""
             }
           ]

@@ -47,6 +47,9 @@ WORKSHOP_COLOR = 0x95A5A6
 WORKSHOP_ACCENT = (96, 125, 139)
 WORKSHOP_FILENAME = "workshop_panel.png"
 CRAFT_FILENAME = "craft_panel.png"
+#: 合成パネルのフッター（画像版/通常版で共通。定義はここ1箇所だけ）。
+#: ボタン名（合成する/委託する）の説明はラベルで伝わるため置かない。
+_CRAFT_FOOTER = "組み合わせは試して見つけてください。"
 WORKSHOP_ID = "WORKSHOP"
 
 
@@ -165,7 +168,6 @@ def _workshop_embed(cog: "WorkshopCog", user_id: int,
         # 数値表示は画像（workshop_panel_png）に寄せ、embed は画像参照と
         # フッターだけを持つ（本文の二重表示を避ける）。
         embed.set_image(url=f"attachment://{WORKSHOP_FILENAME}")
-        embed.set_footer(text="生産物は「生産物を受け取る」でまとめて受け取れます。")
         return embed
     banner, sections = workshop_panel_content(cog, user_id)
     section_map = {title: rows for title, rows in sections}
@@ -189,7 +191,6 @@ def _workshop_embed(cog: "WorkshopCog", user_id: int,
         lines = [f"・{row.label} — {row.value}" for row in job_rows]
         embed.add_field(name="委託加工", value="\n".join(lines), inline=False)
     embed.add_field(name="加工機（購入）", value="\n".join(_tier_lines()), inline=False)
-    embed.set_footer(text="生産物は「生産物を受け取る」でまとめて受け取れます。")
     return embed
 
 
@@ -200,9 +201,7 @@ def _craft_embed(cog: "WorkshopCog", user_id: int,
         # 素材一覧は画像（craft_panel_png）に寄せ、embed は画像参照と
         # フッター（遊び方の案内）だけを持つ。
         embed.set_image(url=f"attachment://{CRAFT_FILENAME}")
-        embed.set_footer(
-            text="素材を2つ選んで「合成する」と即時、「委託する」と時間をかけてレア結果が出やすくなります。"
-                 "組み合わせは試して見つけてください。")
+        embed.set_footer(text=_CRAFT_FOOTER)
         return embed
     owned = [
         f"・{row.label} {row.value}"
@@ -213,9 +212,7 @@ def _craft_embed(cog: "WorkshopCog", user_id: int,
         inline=False)
     # レシピ（組み合わせの対応表）はユーザーに見せない。原典もそうで、
     # 試して見つけるのが仕様（2026-11-06 ユーザー指示）。
-    embed.set_footer(
-        text="素材を2つ選んで「合成する」と即時、「委託する」と時間をかけてレア結果が出やすくなります。"
-             "組み合わせは試して見つけてください。")
+    embed.set_footer(text=_CRAFT_FOOTER)
     return embed
 
 

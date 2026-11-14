@@ -119,7 +119,9 @@ const ROOT_META: RootMeta[] = [
 
 // ジャンル説明の補完（Bot 側にジャンル説明がある場合はそちらが正）。
 const GENRE_DESCRIPTIONS: Record<string, string> = {
-  "general:money": "コインの確認・送金から、市場、アイテム、工房、採掘、ギャンブルまで、AGOコインの機能をまとめています。",
+  "general:money": "コイン残高の確認や送金、受け取り、クランなど、AGOコインの基本機能をまとめています。",
+  "general:trade_craft": "市場でのトークン売買、アイテムの購入・使用・売却、工房での加工機や合成など、コインの取引と生産の機能をまとめています。",
+  "general:play": "採掘や宝くじ、ギャンブルやガチャなど、コインで遊ぶ機能をまとめています。",
   "general:rta": "各種ランキングを確認します。",
   "general:boardnotify_rta": "boardNotify対応サービスのRTA記録をランキングで確認します。",
   "general:garden": "植物を育てる栽培シミュレーションです。",

@@ -128,7 +128,8 @@ def _market_embed(store: market_core.MarketStore, user_id: int,
     if with_chart:
         # チャートは遷移させず、パネルを開いた時点で embed 内に出す。
         embed.set_image(url=f"attachment://{CHART_FILENAME}")
-    embed.set_footer(text="レートは5分ごとに更新されます。売買には手数料がかかります。")
+    # フッターは手数料の開示だけ（更新間隔の仕組み説明は毎回出さない）。
+    embed.set_footer(text="売買には手数料がかかります。")
     return embed
 
 

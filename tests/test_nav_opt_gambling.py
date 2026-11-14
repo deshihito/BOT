@@ -28,7 +28,10 @@ class GamblingPanelTextTest(unittest.TestCase):
     def test_rules_kept_behind_button(self):
         from cogs.game import GAMBLING_RULES
 
-        self.assertIn("全額没収", GAMBLING_RULES["slot"])
+        # 没収警告の開示はセッション画面のフッター1箇所だけ（文言削減C）。
+        # ルール文側には重ねない。
+        self.assertNotIn("全額没収", GAMBLING_RULES["slot"])
+        self.assertTrue(GAMBLING_RULES["slot"])
         for game in ("double", "blackjack", "dice"):
             self.assertTrue(GAMBLING_RULES[game], game)
 

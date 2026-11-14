@@ -11,7 +11,7 @@ class DiceNamingTest(unittest.TestCase):
     def test_general_label(self):
         from cogs.general import GENERAL_ACTIONS
 
-        labels = {value: label for label, value in GENERAL_ACTIONS["money"]}
+        labels = {value: label for label, value in GENERAL_ACTIONS["play"]}
         self.assertEqual(labels["dice"], "ダイスベット")
 
     def test_gambling_titles(self):

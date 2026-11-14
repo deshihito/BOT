@@ -68,7 +68,8 @@ def entry_line(entry: dict) -> str:
 ACTION_CATEGORY_MAP: dict[str, list[tuple[str, str | None]]] = {
     "support": [("general", "survival"), ("support", "automation"),
                 ("support", "analysis")],
-    "economy": [("general", "money"), ("general", "rta"),
+    "economy": [("general", "money"), ("general", "trade_craft"),
+                ("general", "play"), ("general", "rta"),
                 ("general", "boardnotify_rta")],
     "game": [("game", None)],
     "voice": [("vc", None)],

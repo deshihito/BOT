@@ -481,12 +481,12 @@ class RegistryTest(unittest.TestCase):
     def test_workshop_actions_are_registered(self):
         registry = action_registry.default_registry()
         panel = registry.by_id("general:workshop")
-        self.assertEqual(panel.genre, "money")
+        self.assertEqual(panel.genre, "trade_craft")
         self.assertNotEqual(panel.risk, "blocked")
         for action_id in ("general:machine_buy", "general:workshop_claim",
                           "general:craft"):
             spec = registry.by_id(action_id)
-            self.assertEqual(spec.genre, "money", action_id)
+            self.assertEqual(spec.genre, "trade_craft", action_id)
             self.assertEqual(spec.risk, "blocked", action_id)
             self.assertNotIn("aitools", spec.surfaces, action_id)
 
