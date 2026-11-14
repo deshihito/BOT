@@ -7,12 +7,16 @@ import dynamic from "next/dynamic";
 import { useEffect, useRef, useState } from "react";
 import {
   applyShikakuRect,
+  cluesInRect,
   coveredCount,
   createShikakuGame,
   isShikakuComplete,
+  nextShikakuHint,
+  rectCells,
   rectIndexAt,
   removeShikakuRectAt,
   shikakuViolations,
+  type ShikakuRect,
   type ShikakuSize,
   type ShikakuState,
   type ShikakuViolation,
@@ -47,6 +51,9 @@ function newGame(size: ShikakuSize): ShikakuState {
   return createShikakuGame(size, Date.now() % 2147483647);
 }
 
+/** 1ゲームで使えるヒントの回数（数独・ライツアウトと同じ作法）。 */
+const HINT_LIMIT = 3;
+
 function formatTime(sec: number): string {
   const m = Math.floor(sec / 60);
   const s = sec % 60;
@@ -62,6 +69,8 @@ export default function ShikakuClient() {
   const [seconds, setSeconds] = useState(0);
   const [best, setBest] = useState<number | null>(null);
   const [checkResult, setCheckResult] = useState<ShikakuViolation[] | null>(null);
+  const [hintsUsed, setHintsUsed] = useState(0);
+  const [hintRect, setHintRect] = useState<ShikakuRect | null>(null);
 
   useEffect(() => {
     if (state.status !== "playing") return;
@@ -108,11 +117,25 @@ export default function ShikakuClient() {
     setSeconds(0);
     setCheckResult(null);
     setWinResult(null);
+    setHintsUsed(0);
+    setHintRect(null);
+  };
+
+  // 詰み救済のヒント: 解のうち未完成の長方形を1つだけ範囲で示す（自動では描かない）。
+  const onHint = () => {
+    if (state.status === "won" || hintsUsed >= HINT_LIMIT) return;
+    const rect = nextShikakuHint(state);
+    if (!rect) return;
+    sfxTap();
+    setCheckResult(null);
+    setHintRect(rect);
+    setHintsUsed((n) => n + 1);
   };
 
   const onCell = (index: number) => {
     if (state.status === "won") return;
     setCheckResult(null);
+    setHintRect(null);
     if (anchor === null) {
       if (rectIndexAt(state, index) >= 0) {
         sfxTap();
@@ -154,6 +177,7 @@ export default function ShikakuClient() {
       return;
     }
     setCheckResult(null);
+    setHintRect(null);
     setAnchor(null);
     sfxPlace();
     const r1 = Math.floor(startIndex / state.size);
@@ -164,6 +188,7 @@ export default function ShikakuClient() {
   };
 
   const onCheck = () => {
+    setHintRect(null);
     if (isShikakuComplete(state)) {
       sfxCorrect();
       setCheckResult([]);
@@ -187,13 +212,16 @@ export default function ShikakuClient() {
   });
 
   const violationCells = new Set((checkResult ?? []).flatMap((v) => v.cells));
+  const hintCells = new Set(hintRect ? rectCells(hintRect, state.size) : []);
   const covered = coveredCount(state);
   const total = state.size * state.size;
 
   const statusText =
     state.status === "won"
       ? `完成！ ${formatTime(seconds)}でクリアです。`
-      : checkResult !== null
+      : hintRect !== null
+        ? `ヒント: 数字 ${cluesInRect(state, hintRect)[0]?.value ?? ""} の四角は ${hintRect.r1 + 1}行目${hintRect.c1 + 1}列 〜 ${hintRect.r2 + 1}行目${hintRect.c2 + 1}列 の範囲です。`
+        : checkResult !== null
         ? checkResult.length === 0
           ? covered === total
             ? "ルール違反はありません。"
@@ -239,6 +267,7 @@ export default function ShikakuClient() {
           const c = i % state.size;
           const isAnchor = anchor === i;
           const isViolation = violationCells.has(i);
+          const isHint = hintCells.has(i);
           const edge = rect
             ? {
                 borderTop: r === rect.r1 ? "2px solid #555" : "2px solid transparent",
@@ -279,7 +308,11 @@ export default function ShikakuClient() {
                     : "#fff",
                 ...edge,
                 border: isAnchor ? "2px solid #e2534a" : undefined,
-                boxShadow: isAnchor ? "0 0 0 2px #e2534a inset" : undefined,
+                boxShadow: isAnchor
+                  ? "0 0 0 2px #e2534a inset"
+                  : isHint
+                    ? "0 0 0 3px #38bdf8 inset"
+                    : undefined,
                 fontWeight: clue !== null ? 700 : 400,
                 fontSize: 17,
                 cursor: "pointer",
@@ -321,6 +354,14 @@ export default function ShikakuClient() {
         <button type="button" className="classic-btn" onClick={() => restart(size)}>
           もう一度
         </button>
+        <div
+          {...tappableProps(onHint)}
+          aria-disabled={state.status === "won" || hintsUsed >= HINT_LIMIT}
+          className="classic-btn"
+          style={state.status === "won" || hintsUsed >= HINT_LIMIT ? { opacity: 0.5 } : undefined}
+        >
+          ヒント（残り {HINT_LIMIT - hintsUsed}）
+        </div>
       </div>
 
       <p className="classic-status" role="status">

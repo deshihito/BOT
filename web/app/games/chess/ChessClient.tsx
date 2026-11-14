@@ -189,18 +189,30 @@ export default function ChessClient() {
     const fen = gameFen(game);
     const level = LEVELS[levelIndex];
     const requestId = ++requestRef.current;
+    // 人間らしさのための最小思考時間（櫻井流バッチ3 / planning #219）:
+    // 探索が速く終わっても即座には指さず、280〜450ms の幅で必ず間を置く。
+    // 手の選択そのもの（探索ロジック・深さ・ジッター）は変えない。
+    const startedAt = performance.now();
+    const minThinkMs = 280 + Math.random() * 170;
+    let applyTimer: number | undefined;
     const applyResult = (uci: string | null) => {
       if (cancelled) return;
-      setThinking(false);
-      if (!uci) return;
-      setGame((current) => {
-        if (current.status !== "playing" || gameFen(current) !== fen) return current;
-        try {
-          return applyUciMove(current, uci);
-        } catch {
-          return current;
-        }
-      });
+      const wait = Math.max(0, minThinkMs - (performance.now() - startedAt));
+      const doApply = () => {
+        if (cancelled) return;
+        setThinking(false);
+        if (!uci) return;
+        setGame((current) => {
+          if (current.status !== "playing" || gameFen(current) !== fen) return current;
+          try {
+            return applyUciMove(current, uci);
+          } catch {
+            return current;
+          }
+        });
+      };
+      if (wait > 0) applyTimer = window.setTimeout(doApply, wait);
+      else doApply();
     };
     const fallback = () => {
       window.setTimeout(() => {
@@ -231,6 +243,7 @@ export default function ChessClient() {
     }
     return () => {
       cancelled = true;
+      if (applyTimer !== undefined) window.clearTimeout(applyTimer);
       detach?.();
       setThinking(false);
     };

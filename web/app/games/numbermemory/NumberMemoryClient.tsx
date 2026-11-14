@@ -121,7 +121,8 @@ export default function NumberMemoryClient() {
       saveBest(next.bestDigits);
       setBest(loadBest());
       setPhase("correct");
-      later(() => showNumber(next), 1100);
+      // 正解表示は SE と文言で足りる。次の数字までの人工的な待ちは詰める（櫻井流バッチ3）。
+      later(() => showNumber(next), 650);
     } else {
       sfxWrong();
       sfxLose();

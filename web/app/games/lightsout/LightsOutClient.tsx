@@ -11,11 +11,12 @@ import {
   createLightsOutGame,
   litCount,
   pressCell,
+  remainingPresses,
   type LightsOutDifficulty,
   type LightsOutSize,
   type LightsOutState,
 } from "@/lib/lightsout";
-import { sfxFlip, sfxWin } from "@/lib/sfx";
+import { sfxFlip, sfxTap, sfxWin } from "@/lib/sfx";
 import { tappableProps } from "@/lib/gesture";
 import { EndScreen } from "../GameJuice";
 import { useGamesNav } from "../GamesShell";
@@ -36,6 +37,9 @@ function newGame(size: LightsOutSize, diff: LightsOutDifficulty): LightsOutState
   return createLightsOutGame(size, Date.now() % 2147483647, diff);
 }
 
+/** 1ゲームで使えるヒントの回数（数独の「ヒント残り」と同じ作法）。 */
+const HINT_LIMIT = 3;
+
 function formatTime(total: number): string {
   const m = Math.floor(total / 60);
   const s = total % 60;
@@ -49,6 +53,10 @@ export default function LightsOutClient() {
   const [difficulty, setDifficulty] = useState<LightsOutDifficulty>("normal");
   const [state, setState] = useState<LightsOutState>(() => newGame(5, "normal"));
   const [seconds, setSeconds] = useState(0);
+  const [hintsUsed, setHintsUsed] = useState(0);
+  const [hintIndex, setHintIndex] = useState<number | null>(null);
+  // プレイヤーが押したマスの偶奇（ヒントの残り解計算用。押下は可換・自己逆操作）。
+  const pressedParityRef = useRef<Set<number>>(new Set());
   const prevStatusRef = useRef(state.status);
 
   // 終局遷移の瞬間だけジングルを鳴らす。
@@ -66,7 +74,13 @@ export default function LightsOutClient() {
 
   const handlePress = (i: number) => {
     const next = pressCell(state, i);
-    if (next !== state && next.status !== "won") sfxFlip();
+    if (next !== state) {
+      const parity = pressedParityRef.current;
+      if (parity.has(i)) parity.delete(i);
+      else parity.add(i);
+      setHintIndex(null);
+      if (next.status !== "won") sfxFlip();
+    }
     setState(next);
   };
 
@@ -75,6 +89,19 @@ export default function LightsOutClient() {
     setDifficulty(nextDiff);
     setState(newGame(nextSize, nextDiff));
     setSeconds(0);
+    setHintsUsed(0);
+    setHintIndex(null);
+    pressedParityRef.current = new Set();
+  };
+
+  // 詰み救済のヒント: 解のうち「あと押すべきマス」を1つだけ位置で示す（自動では押さない）。
+  const onHint = () => {
+    if (state.status === "won" || hintsUsed >= HINT_LIMIT) return;
+    const rest = remainingPresses(state, pressedParityRef.current);
+    if (rest.length === 0) return;
+    sfxTap();
+    setHintIndex(rest[0]);
+    setHintsUsed((n) => n + 1);
   };
 
   const lit = litCount(state.cells);
@@ -111,12 +138,17 @@ export default function LightsOutClient() {
             aspectRatio: "1",
             minHeight: 52,
             borderRadius: 10,
-            border: on ? "1px solid #d97706" : "1px solid #334155",
+            border: i === hintIndex ? "2px solid #38bdf8" : on ? "1px solid #d97706" : "1px solid #334155",
             background: on ? "#fbbf24" : "#1e293b",
             color: on ? "#92400e" : "#64748b",
             fontSize: "clamp(18px, 6vw, 26px)",
             cursor: state.status === "won" ? "default" : "pointer",
-            boxShadow: on ? "0 0 12px rgba(251,191,36,0.55)" : "inset 0 1px 3px rgba(0,0,0,0.5)",
+            boxShadow:
+              i === hintIndex
+                ? "0 0 0 3px #38bdf8, 0 0 14px rgba(56,189,248,0.7)"
+                : on
+                  ? "0 0 12px rgba(251,191,36,0.55)"
+                  : "inset 0 1px 3px rgba(0,0,0,0.5)",
           }}
         >
           {on ? "●" : "·"}
@@ -164,11 +196,22 @@ export default function LightsOutClient() {
         <button type="button" className="classic-btn" onClick={() => restart(size, difficulty)}>
           もう一度
         </button>
+        <div
+          {...tappableProps(onHint)}
+          aria-disabled={state.status === "won" || hintsUsed >= HINT_LIMIT}
+          className="classic-btn"
+          style={state.status === "won" || hintsUsed >= HINT_LIMIT ? { opacity: 0.5 } : undefined}
+        >
+          ヒント（残り {HINT_LIMIT - hintsUsed}）
+        </div>
       </div>
 
       <p className="classic-status" role="status">
         点灯 {lit} / {state.cells.length} ・ {state.moves} 手 ・ 時間 {formatTime(seconds)}
         {state.status === "won" ? ` ・ 全消灯！ ${state.moves} 手でクリアです。` : ""}
+        {hintIndex !== null && state.status !== "won"
+          ? ` ・ ヒント: 上から ${Math.floor(hintIndex / size) + 1} 行目・左から ${(hintIndex % size) + 1} 列目のマスを押してみてください。`
+          : ""}
       </p>
 
       {webglFailed ? board2d : (
