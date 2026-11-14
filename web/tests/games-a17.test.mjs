@@ -1,5 +1,4 @@
 // A17 新規ゲーム2本のロジック検証（lib のみ、UI 非依存）。
-// - lib/blockpuzzle.ts: 配置・消去・補充・終了判定
 // - lib/watersort.ts: 生成の可解性・注ぎ規則・完成判定・アンドゥ
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -17,7 +16,6 @@ async function loadLib(name) {
   return import("data:text/javascript;base64," + Buffer.from(js).toString("base64"));
 }
 
-const bp = await loadLib("blockpuzzle.ts");
 const ws = await loadLib("watersort.ts");
 
 const shapeIdx = (name) => bp.BP_SHAPES.findIndex((s) => s.name === name);
@@ -36,117 +34,6 @@ function bpState(board, pieces) {
 }
 
 const emptyBoard = () => Array.from({ length: 81 }, () => null);
-
-// ---------- ブロックスパズル ----------
-
-test("ブロックスパズル: 初期状態は空盤＋未使用ブロック3つで、シード決定的", () => {
-  const a = bp.createBlockPuzzleGame(42);
-  const b = bp.createBlockPuzzleGame(42);
-  assert.equal(a.board.length, 81);
-  assert.ok(a.board.every((v) => v === null));
-  assert.equal(a.pieces.length, 3);
-  assert.ok(a.pieces.every((p) => !p.used));
-  assert.deepEqual(a.pieces, b.pieces);
-  assert.equal(a.status, "playing");
-});
-
-test("ブロックスパズル: 配置でマスが埋まり、スコアはマス数ぶん増える", () => {
-  const s = bp.createBlockPuzzleGame(7);
-  const piece = s.pieces[0];
-  const next = bp.placePiece(s, 0, 0, 0);
-  assert.notEqual(next, s);
-  const cells = bp.BP_SHAPES[piece.shape].cells.length;
-  assert.equal(next.score, cells);
-  assert.equal(next.placedCells, cells);
-  assert.equal(next.pieces[0].used, true);
-  for (const [dr, dc] of bp.BP_SHAPES[piece.shape].cells) {
-    assert.equal(next.board[dr * 9 + dc], piece.color);
-  }
-  // 元の状態は壊れていない（非破壊）
-  assert.ok(s.board.every((v) => v === null));
-});
-
-test("ブロックスパズル: 置けない場所・使用済みブロックは状態を変えない", () => {
-  const big = bpState(emptyBoard(), [
-    { shape: shapeIdx("3x3"), color: 0, used: false },
-    { shape: shapeIdx("1マス"), color: 1, used: false },
-    { shape: shapeIdx("1マス"), color: 2, used: false },
-  ]);
-  assert.equal(bp.placePiece(big, 0, 8, 8), big); // 盤外にはみ出す
-  assert.equal(bp.placePiece(big, 0, -1, 0), big); // 負の座標
-  assert.equal(bp.placePiece(big, 9, 0, 0), big); // 存在しないブロック
-  // (1,1) に置く。(0,0) だと 3x3 ユニットが完成して即消去されてしまうため、ずらして置く。
-  const placed = bp.placePiece(big, 0, 1, 1);
-  assert.notEqual(placed, big);
-  assert.equal(placed.board[1 * 9 + 1], 0);
-  assert.equal(bp.placePiece(placed, 0, 5, 5), placed); // 使用済みは再配置できない
-  assert.equal(bp.placePiece(placed, 1, 1, 1), placed); // 埋まったマスへは重ねられない
-});
-
-test("ブロックスパズル: 行をそろえると消えてボーナスが付く", () => {
-  const board = emptyBoard();
-  for (let c = 0; c < 8; c++) board[c] = 0; // 0行目の 0..7 列を埋める
-  const state = bpState(board, [
-    { shape: shapeIdx("1マス"), color: 1, used: false },
-    { shape: shapeIdx("2x2"), color: 2, used: false },
-    { shape: shapeIdx("2x2"), color: 3, used: false },
-  ]);
-  const next = bp.placePiece(state, 0, 0, 8);
-  assert.equal(next.lines, 1);
-  assert.equal(next.score, 1 + 10); // 1マス + 1ライン消去ボーナス 10
-  assert.ok(next.board.slice(0, 9).every((v) => v === null));
-});
-
-test("ブロックスパズル: 3x3 ブロックをそろえても消える", () => {
-  const board = emptyBoard();
-  for (let r = 0; r < 3; r++) {
-    for (let c = 0; c < 3; c++) {
-      if (r * 3 + c !== 8) board[r * 9 + c] = 2; // 右下1マスだけ空ける
-    }
-  }
-  const state = bpState(board, [
-    { shape: shapeIdx("1マス"), color: 4, used: false },
-    { shape: shapeIdx("2x2"), color: 0, used: false },
-    { shape: shapeIdx("2x2"), color: 1, used: false },
-  ]);
-  const next = bp.placePiece(state, 0, 2, 2);
-  assert.equal(next.lines, 1);
-  for (let r = 0; r < 3; r++) {
-    for (let c = 0; c < 3; c++) assert.equal(next.board[r * 9 + c], null);
-  }
-});
-
-test("ブロックスパズル: 3つ使い切ると新しい3つが補充される", () => {
-  const state = bpState(emptyBoard(), [
-    { shape: shapeIdx("1マス"), color: 0, used: false },
-    { shape: shapeIdx("1マス"), color: 1, used: false },
-    { shape: shapeIdx("1マス"), color: 2, used: false },
-  ]);
-  let s = bp.placePiece(state, 0, 0, 0);
-  s = bp.placePiece(s, 1, 0, 1);
-  s = bp.placePiece(s, 2, 0, 2);
-  assert.equal(s.pieces.length, 3);
-  assert.ok(s.pieces.every((p) => !p.used));
-  assert.equal(s.status, "playing");
-});
-
-test("ブロックスパズル: 残りブロックがどこにも置けなくなると終了", () => {
-  // 市松模様に穴を開けた盤。どの行・列・3x3 にも穴が複数残るので、1マス置いても消去は起きず、
-  // 3x3 ブロックは9マス連続の空きが無いため置けない。
-  const board = Array.from({ length: 81 }, (_, i) => {
-    const r = Math.floor(i / 9);
-    const c = i % 9;
-    return (r + c) % 2 === 0 ? null : 0;
-  });
-  const state = bpState(board, [
-    { shape: shapeIdx("1マス"), color: 1, used: false },
-    { shape: shapeIdx("3x3"), color: 2, used: false },
-    { shape: shapeIdx("3x3"), color: 3, used: false },
-  ]);
-  const next = bp.placePiece(state, 0, 0, 0);
-  assert.equal(next.lines, 0); // 穴が残るので何も消えない
-  assert.equal(next.status, "over");
-});
 
 // ---------- ウォーターソート ----------
 

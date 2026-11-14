@@ -28,13 +28,10 @@ const CLIENTS = {
   drawguess: "DrawGuessClient.tsx",
   breakout: "BreakoutClient.tsx",
   bowling: "BowlingClient.tsx",
-  tents: "TentsClient.tsx",
-  spider: "SpiderClient.tsx",
-  shikaku: "ShikakuClient.tsx",
   river: "RiverClient.tsx",
 };
 // 例外リスト（ゲーム外 chrome のリセットボタン）以外は 0 件であること。
-const BUTTON_BUDGET = { hanoi: 1, drawguess: 0, breakout: 1, bowling: 1, tents: 1, spider: 1, shikaku: 1, river: 1 };
+const BUTTON_BUDGET = { hanoi: 1, drawguess: 0, breakout: 1, bowling: 1, river: 1 };
 
 function read(game) {
   return fs.readFileSync(path.join(webDir, "app", "games", game, CLIENTS[game]), "utf8");
@@ -49,7 +46,7 @@ for (const [game, file] of Object.entries(CLIENTS)) {
 }
 
 test("gesture batch6: 残りボタンは chrome のリセット操作だけ", () => {
-  for (const game of ["hanoi", "breakout", "bowling", "tents", "spider", "shikaku", "river"]) {
+  for (const game of ["hanoi", "breakout", "bowling", "river"]) {
     const src = read(game);
     const buttons = src.match(/<button[\s\S]*?<\/button>/g) ?? [];
     assert.equal(buttons.length, 1, `${game}: 残りボタンが ${buttons.length} 件`);
@@ -67,8 +64,8 @@ test("gesture batch6: 8ゲームとも共通ヘルパー lib/gesture を使う",
   }
 });
 
-test("gesture batch6: スワイプ系5ゲームは盤面・対象物に useGesture を使う", () => {
-  for (const game of ["breakout", "tents", "spider", "shikaku", "river"]) {
+test("gesture batch6: スワイプ系2ゲームは盤面・対象物に useGesture を使う", () => {
+  for (const game of ["breakout", "river"]) {
     const src = read(game);
     assert.ok(src.includes("useGesture"), `${game}: useGesture を使っていない`);
   }
@@ -83,7 +80,7 @@ test("gesture batch6: スワイプ系5ゲームは盤面・対象物に useGestu
 });
 
 test("gesture batch6: ジェスチャ面は touchAction none（hanoi の柱はタップのみのため manipulation）", () => {
-  for (const game of ["breakout", "tents", "spider", "shikaku", "river"]) {
+  for (const game of ["breakout", "river"]) {
     const src = read(game);
     assert.ok(src.includes('touchAction: "none"'), `${game}: ジェスチャ面に touchAction none がない`);
   }
@@ -167,40 +164,8 @@ test("gesture batch6: bowling はボタン投球を廃止しキーボードで�
   );
 });
 
-test("gesture batch6: tents は盤面下スワイプでチェック、マスはタップ対象物化", () => {
-  const src = read("tents");
-  assert.ok(src.includes("boardGesture"), "盤面に useGesture が繋がっていない");
-  assert.ok(src.includes('dir === "down"'), "チェックが下スワイプになっていない");
-  assert.ok(src.includes("onCheck()"), "チェックへの接続が壊れている");
-  assert.ok(src.includes("tappableProps(() => restart(s.key))"), "サイズ選択がタップ対象になっていない");
-  assert.ok(src.includes('role="gridcell"'), "盤マスが gridcell のタップ対象になっていない");
-  assert.ok(src.includes("aria-disabled={isTree || state.status !== \"playing\"}"), "木・非プレイ中のマスの無効化がない");
-});
 
-test("gesture batch6: spider は盤面下スワイプ・D キーで山札から配る", () => {
-  const src = read("spider");
-  assert.ok(src.includes("boardGesture"), "盤面に useGesture が繋がっていない");
-  assert.ok(src.includes('dir === "down"'), "配るが下スワイプになっていない");
-  assert.ok(src.includes("tryDeal()"), "配るへの接続が壊れている");
-  assert.ok(src.includes("tappableProps(tryDeal)"), "配る対象物がタップ対象になっていない");
-  assert.ok(src.includes("tappableProps(() => onCardClick(col, index))"), "札がタップ対象になっていない");
-  assert.ok(src.includes("tappableProps(() => onEmptyColumnClick(col))"), "空き列がタップ対象になっていない");
-  assert.ok(src.includes('e.key === "d"'), "D キーでの配るがない");
-  // 旧ボタンの disabled 条件と同等に、残り0回・プレイ中でないときは無音の no-op
-  // （backgammon のバー復帰不能の教訓: 代替が実は機能しない罠を塞ぐ）。
-  assert.ok(src.includes("deals === 0 || state.status !== \"playing\""), "配るの無効条件がない");
-  assert.ok(src.includes("aria-disabled={dealDisabled}"), "配る対象物の無効表示がない");
-  assert.ok(src.includes("aria-disabled={!card.faceUp}"), "裏向きカードの無効化がない");
-});
 
-test("gesture batch6: shikaku は盤面下スワイプでチェック、マスはタップ対象物化", () => {
-  const src = read("shikaku");
-  assert.ok(src.includes("boardGesture"), "盤面に useGesture が繋がっていない");
-  assert.ok(src.includes('dir === "down"'), "チェックが下スワイプになっていない");
-  assert.ok(src.includes("onCheck()"), "チェックへの接続が壊れている");
-  assert.ok(src.includes("tappableProps(() => restart(s.key))"), "サイズ選択がタップ対象になっていない");
-  assert.ok(src.includes('role="gridcell"'), "盤マスが gridcell のタップ対象になっていない");
-});
 
 test("gesture batch6: river はボートの対岸スワイプで渡る、荷物はタップ対象物化", () => {
   const src = read("river");
@@ -215,16 +180,6 @@ test("gesture batch6: river はボートの対岸スワイプで渡る、荷物�
   assert.ok(!src.includes("← もどる"), "もどるボタンが残っている");
 });
 
-test("gesture batch6: tents / shikaku / river の Enter は1経路のみ（二重発火防止）", () => {
-  for (const game of ["tents", "shikaku", "river"]) {
-    const src = read(game);
-    // 盤面・ボートそのものにフォーカスがあるときだけ Enter でチェック・渡河する。
-    // ガードがないとマス・荷物にフォーカスして Enter を押したときに選択と
-    // チェック・渡河が両方走る（anagram / mastermind と同じ構図）。
-    assert.ok(src.includes("e.target !== e.currentTarget"), `${game}: 親子 onKeyDown のガードがない`);
-    assert.ok(src.includes('e.key === "Enter"'), `${game}: Enter での操作がない`);
-  }
-});
 
 test("gesture batch6: 8ゲームとも ⏱ が残っていない", () => {
   for (const game of Object.keys(CLIENTS)) {

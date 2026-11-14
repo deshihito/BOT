@@ -3,7 +3,9 @@
 // アクティビティのプロキシ配下では内部リンクに接頭辞が要るため、
 // リンク生成だけクライアント側で行う。
 // 絞り込み（1人用／CPU対戦／オンライン）とタイトル検索、ランダム1本もここで持つ。
-// 分類は catalog の players 表示文字列から導出する（カタログ側に新フィールドは足さない）。
+// 分類は catalog の players 表示文字列から導出する。
+// 格下げタイトル（catalog の demoted）は通常タイトルの後ろに区切って表示する。
+// 検索・絞り込みでは通常どおりヒットする。
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { WEB_GAMES, dailyPicksFor, getWebGame, type WebGame } from "@/lib/games-catalog";
@@ -192,6 +194,10 @@ export default function GamesGrid() {
     });
   }, [filter, query]);
 
+  // 格下げタイトルは通常タイトルの後ろに分離して出す（並び順はカタログ順を保つ）。
+  const primary = visible.filter((game) => !game.demoted);
+  const demoted = visible.filter((game) => game.demoted);
+
   const pickRandom = () => {
     const pool = WEB_GAMES.filter((g) => g.status === "playable");
     if (pool.length === 0) return;
@@ -273,11 +279,25 @@ export default function GamesGrid() {
       {visible.length === 0 ? (
         <p className="muted">条件に合うゲームがありません。絞り込みや検索を変えてみてください。</p>
       ) : (
-        <div className="games-grid">
-          {visible.map((game) => (
-            <GameCard key={game.slug} game={game} prefix={prefix} />
-          ))}
-        </div>
+        <>
+          {primary.length > 0 && (
+            <div className="games-grid">
+              {primary.map((game) => (
+                <GameCard key={game.slug} game={game} prefix={prefix} />
+              ))}
+            </div>
+          )}
+          {demoted.length > 0 && (
+            <section aria-label="その他のゲーム" style={{ marginTop: primary.length > 0 ? 36 : 0 }}>
+              <h2 style={{ margin: "0 0 14px" }}>その他のゲーム</h2>
+              <div className="games-grid">
+                {demoted.map((game) => (
+                  <GameCard key={game.slug} game={game} prefix={prefix} />
+                ))}
+              </div>
+            </section>
+          )}
+        </>
       )}
     </>
   );

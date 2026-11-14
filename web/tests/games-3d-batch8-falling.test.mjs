@@ -26,7 +26,6 @@ const countButtons = (dir) => {
 
 const BATCH = [
   { dir: "falling", client: "FallingClient.tsx", scene: "FallingScene3D.tsx", buttons: 1 },
-  { dir: "columns", client: "ColumnsClient.tsx", scene: "ColumnsScene3D.tsx", buttons: 1 },
 ];
 
 for (const g of BATCH) {
@@ -105,32 +104,5 @@ test("3D batch8-falling falling: ゴーストと落下中セルは親が lib の
   assert.match(client, /getPieceCells\(s\.active\.type, s\.active\.rotation\)/, "ゴーストセルは lib の getPieceCells で計算する");
 });
 
-test("3D batch8-falling columns: 宝石は GEM_FILL の色＋種別ごとの造形で判別する", () => {
-  const scene = read("app", "games", "columns", "ColumnsScene3D.tsx");
-  assert.match(scene, /GEM_FILL/, "宝石の色は現行 2D と同じ定数を使う");
-  assert.match(scene, /createGemGeometry/, "宝石の造形を作る");
-  assert.match(scene, /SphereGeometry/, "赤は球で表す");
-  assert.match(scene, /OctahedronGeometry/, "黄は八面体で表す");
-  assert.match(scene, /BoxGeometry\(0\.68, 0\.68, 0\.68\)/, "緑は立方体で表す");
-  assert.match(scene, /CylinderGeometry\(0\.38, 0\.38, 0\.64, 6\)/, "青は六角柱で表す");
-  assert.match(scene, /TorusGeometry/, "紫はトーラスで表す");
-  assert.match(scene, /boardGems/, "固定済み宝石は差分同期で管理する");
-  assert.match(scene, /activeDisplayY/, "落下中ブロックは補間用の表示位置を持つ");
-});
 
-test("3D batch8-falling columns: 落下・回転・消去の判定を 3D 側で再実装しない", () => {
-  const scene = read("app", "games", "columns", "ColumnsScene3D.tsx");
-  assert.doesNotMatch(
-    scene,
-    /(stepColumns|dropColumns|moveColumns|rotateColumns|findColumnMatches|collapseColumns|resolveColumnsBoard|pieceFits|lockPiece)\s*\(/,
-    "落下・回転・マッチ・消去判定を 3D 側で再実装しない",
-  );
-  const client = read("app", "games", "columns", "ColumnsClient.tsx");
-  assert.match(client, /return \{ board: s\.board, active: s\.active, placed: s\.placed, status: s\.status \}/, "シーンへ渡すのは lib の状態そのもの");
-});
 
-test("3D batch8-falling: ロジック層（lib/falling.ts, lib/columns.ts）に three が混入していない", () => {
-  for (const f of ["falling.ts", "columns.ts"]) {
-    assert.doesNotMatch(read("lib", f), /from "three"/, `lib/${f}`);
-  }
-});

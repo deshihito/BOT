@@ -10,7 +10,6 @@ import SliderClient from "../2048/SliderClient";
 import MemoryClient from "../memory/MemoryClient";
 import ReversiClient from "../reversi/ReversiClient";
 import Connect4Client from "../connect4/Connect4Client";
-import GomokuClient from "../gomoku/GomokuClient";
 import BattleshipClient from "../battleship/BattleshipClient";
 import DaifugoClient from "../daifugo/DaifugoClient";
 import WerewolfClient from "../werewolf/WerewolfClient";
@@ -30,14 +29,11 @@ import ColormatchClient from "../colormatch/ColormatchClient";
 import NumberMemoryClient from "../numbermemory/NumberMemoryClient";
 import MazeClient from "../maze/MazeClient";
 import MastermindClient from "../mastermind/MastermindClient";
-import HangmanClient from "../hangman/HangmanClient";
 import ReactionClient from "../reaction/ReactionClient";
 import AimClient from "../aim/AimClient";
 import DodgeClient from "../dodge/DodgeClient";
 import FallingClient from "../falling/FallingClient";
 import SimonClient from "../simon/SimonClient";
-import TictactoeClient from "../tictactoe/TictactoeClient";
-import CheckersClient from "../checkers/CheckersClient";
 import BabanukiClient from "../babanuki/BabanukiClient";
 import TerritoryClient from "../territory/TerritoryClient";
 import NonogramClient from "../nonogram/NonogramClient";
@@ -45,88 +41,46 @@ import PegClient from "../peg/PegClient";
 import HanoiClient from "../hanoi/HanoiClient";
 import SpeedClient from "../speed/SpeedClient";
 import SlotClient from "../slot/SlotClient";
-import BingoClient from "../bingo/BingoClient";
 import AmidaClient from "../amida/AmidaClient";
 import KanacrossClient from "../kanacross/KanacrossClient";
 import QuizClient from "../quiz/QuizClient";
-import NumberCodeClient from "../numbercode/NumberCodeClient";
-import StopwatchClient from "../stopwatch/StopwatchClient";
 import QuizBattleClient from "../quizbattle/QuizBattleClient";
 import DartsClient from "../darts/DartsClient";
 import TouchNumberClient from "../touchnumber/TouchNumberClient";
-import RouletteClient from "../roulette/RouletteClient";
 import WordwolfClient from "../wordwolf/WordwolfClient";
 import SpotDiffClient from "../spotdiff/SpotDiffClient";
 import FlagQuizClient from "../flagquiz/FlagQuizClient";
-import HighLowClient from "../highlow/HighLowClient";
 import DrawGuessClient from "../drawguess/DrawGuessClient";
 import SokobanClient from "../sokoban/SokobanClient";
-import SugorokuClient from "../sugoroku/SugorokuClient";
 import AnagramClient from "../anagram/AnagramClient";
-import JankenClient from "../janken/JankenClient";
 import PipeClient from "../pipe/PipeClient";
-import DrawPokerClient from "../drawpoker/DrawPokerClient";
 import BombPassClient from "../bombpass/BombPassClient";
 import ShiritoriClient from "../shiritori/ShiritoriClient";
-import NurikabeClient from "../nurikabe/NurikabeClient";
 import FreeCellClient from "../freecell/FreeCellClient";
-import ColumnsClient from "../columns/ColumnsClient";
 import MajorityClient from "../majority/MajorityClient";
-import HashiClient from "../hashi/HashiClient";
 import DiceQuestClient from "../dicequest/DiceQuestClient";
 import PentominoClient from "../pentomino/PentominoClient";
 import TexasClient from "../texas/TexasClient";
-import NumberLinkClient from "../numberlink/NumberLinkClient";
-import PyramidClient from "../pyramid/PyramidClient";
 import YahtzeeClient from "../yahtzee/YahtzeeClient";
 import NanjaClient from "../nanja/NanjaClient";
-import WordSearchClient from "../wordsearch/WordSearchClient";
-import BaccaratClient from "../baccarat/BaccaratClient";
 import LiarsDiceClient from "../liarsdice/LiarsDiceClient";
-import MinorityClient from "../minority/MinorityClient";
-import MushokuClient from "../mushoku/MushokuClient";
-import FloodItClient from "../floodit/FloodItClient";
 import LaserClient from "../laser/LaserClient";
 import CountdownClient from "../countdown/CountdownClient";
-import SpiderClient from "../spider/SpiderClient";
-import GolfClient from "../golf/GolfClient";
 import BackgammonClient from "../backgammon/BackgammonClient";
-import DominoClient from "../domino/DominoClient";
-import HalmaClient from "../halma/HalmaClient";
 import RushHourClient from "../rushhour/RushHourClient";
-import MonteCarloClient from "../montecarlo/MonteCarloClient";
 import CheatClient from "../cheat/CheatClient";
-import SameGameClient from "../samegame/SameGameClient";
-import TentsClient from "../tents/TentsClient";
 import HagetakaClient from "../hagetaka/HagetakaClient";
 import BurstClient from "../burst/BurstClient";
-import BlockPuzzleClient from "../blockpuzzle/BlockPuzzleClient";
 import WaterSortClient from "../watersort/WaterSortClient";
 import MahjongClient from "../mahjong/MahjongClient";
-import ShikakuClient from "../shikaku/ShikakuClient";
-import KenkenClient from "../kenken/KenkenClient";
-import BinairoClient from "../binairo/BinairoClient";
-import FlashAnzanClient from "../flashanzan/FlashAnzanClient";
-import KakuroClient from "../kakuro/KakuroClient";
 import CubeClient from "../cube/CubeClient";
-import DartsBattleClient from "../dartsbattle/DartsBattleClient";
-import SkyscrapersClient from "../skyscrapers/SkyscrapersClient";
-import SlantClient from "../slant/SlantClient";
 import StopBattleClient from "../stopbattle/StopBattleClient";
-import AkariClient from "../akari/AkariClient";
-import DiceRollClient from "../diceroll/DiceRollClient";
-import BingoBattleClient from "../bingobattle/BingoBattleClient";
-import AlphameticClient from "../alphametic/AlphameticClient";
 import RiverClient from "../river/RiverClient";
-import SimonBattleClient from "../simonbattle/SimonBattleClient";
-import KnightsTourClient from "../knightstour/KnightsTourClient";
-import QueensClient from "../queens/QueensClient";
 import CalcRaceClient from "../calcrace/CalcRaceClient";
 import CraneGameClient from "../cranegame/CraneGameClient";
 import MusicalChairsClient from "../musicalchairs/MusicalChairsClient";
 import MergeFruitClient from "../mergefruit/MergeFruitClient";
 import WordBasketClient from "../wordbasket/WordBasketClient";
-import IceMazeClient from "../icemaze/IceMazeClient";
 import TypeRaceClient from "../typerace/TypeRaceClient";
 import HeartsClient from "../hearts/HeartsClient";
 import PuttGolfClient from "../puttgolf/PuttGolfClient";
@@ -223,14 +177,6 @@ export default async function WebGamePage({ params }: { params: Promise<{ id: st
       <>
         <GameDetailHeader game={game} />
         <Connect4Client />
-      </>
-    );
-  }
-  if (game.slug === "gomoku" && game.status === "playable") {
-    return (
-      <>
-        <GameDetailHeader game={game} />
-        <GomokuClient />
       </>
     );
   }
@@ -386,14 +332,6 @@ export default async function WebGamePage({ params }: { params: Promise<{ id: st
       </>
     );
   }
-  if (game.slug === "hangman" && game.status === "playable") {
-    return (
-      <>
-        <GameDetailHeader game={game} />
-        <HangmanClient />
-      </>
-    );
-  }
   if (game.slug === "reaction" && game.status === "playable") {
     return (
       <>
@@ -431,22 +369,6 @@ export default async function WebGamePage({ params }: { params: Promise<{ id: st
       <>
         <GameDetailHeader game={game} />
         <SimonClient />
-      </>
-    );
-  }
-  if (game.slug === "tictactoe" && game.status === "playable") {
-    return (
-      <>
-        <GameDetailHeader game={game} />
-        <TictactoeClient />
-      </>
-    );
-  }
-  if (game.slug === "checkers" && game.status === "playable") {
-    return (
-      <>
-        <GameDetailHeader game={game} />
-        <CheckersClient />
       </>
     );
   }
@@ -506,14 +428,6 @@ export default async function WebGamePage({ params }: { params: Promise<{ id: st
       </>
     );
   }
-  if (game.slug === "bingo" && game.status === "playable") {
-    return (
-      <>
-        <GameDetailHeader game={game} />
-        <BingoClient />
-      </>
-    );
-  }
   if (game.slug === "amida" && game.status === "playable") {
     return (
       <>
@@ -535,22 +449,6 @@ export default async function WebGamePage({ params }: { params: Promise<{ id: st
       <>
         <GameDetailHeader game={game} />
         <QuizClient />
-      </>
-    );
-  }
-  if (game.slug === "numbercode" && game.status === "playable") {
-    return (
-      <>
-        <GameDetailHeader game={game} />
-        <NumberCodeClient />
-      </>
-    );
-  }
-  if (game.slug === "stopwatch" && game.status === "playable") {
-    return (
-      <>
-        <GameDetailHeader game={game} />
-        <StopwatchClient />
       </>
     );
   }
@@ -578,14 +476,6 @@ export default async function WebGamePage({ params }: { params: Promise<{ id: st
       </>
     );
   }
-  if (game.slug === "roulette" && game.status === "playable") {
-    return (
-      <>
-        <GameDetailHeader game={game} />
-        <RouletteClient />
-      </>
-    );
-  }
   if (game.slug === "wordwolf" && game.status === "playable") {
     return (
       <>
@@ -610,14 +500,6 @@ export default async function WebGamePage({ params }: { params: Promise<{ id: st
       </>
     );
   }
-  if (game.slug === "highlow" && game.status === "playable") {
-    return (
-      <>
-        <GameDetailHeader game={game} />
-        <HighLowClient />
-      </>
-    );
-  }
   if (game.slug === "drawguess" && game.status === "playable") {
     return (
       <>
@@ -634,14 +516,6 @@ export default async function WebGamePage({ params }: { params: Promise<{ id: st
       </>
     );
   }
-  if (game.slug === "sugoroku" && game.status === "playable") {
-    return (
-      <>
-        <GameDetailHeader game={game} />
-        <SugorokuClient />
-      </>
-    );
-  }
   if (game.slug === "anagram" && game.status === "playable") {
     return (
       <>
@@ -650,27 +524,11 @@ export default async function WebGamePage({ params }: { params: Promise<{ id: st
       </>
     );
   }
-  if (game.slug === "janken" && game.status === "playable") {
-    return (
-      <>
-        <GameDetailHeader game={game} />
-        <JankenClient />
-      </>
-    );
-  }
   if (game.slug === "pipe" && game.status === "playable") {
     return (
       <>
         <GameDetailHeader game={game} />
         <PipeClient />
-      </>
-    );
-  }
-  if (game.slug === "drawpoker" && game.status === "playable") {
-    return (
-      <>
-        <GameDetailHeader game={game} />
-        <DrawPokerClient />
       </>
     );
   }
@@ -690,14 +548,6 @@ export default async function WebGamePage({ params }: { params: Promise<{ id: st
       </>
     );
   }
-  if (game.slug === "nurikabe" && game.status === "playable") {
-    return (
-      <>
-        <GameDetailHeader game={game} />
-        <NurikabeClient />
-      </>
-    );
-  }
   if (game.slug === "freecell" && game.status === "playable") {
     return (
       <>
@@ -706,27 +556,11 @@ export default async function WebGamePage({ params }: { params: Promise<{ id: st
       </>
     );
   }
-  if (game.slug === "columns" && game.status === "playable") {
-    return (
-      <>
-        <GameDetailHeader game={game} />
-        <ColumnsClient />
-      </>
-    );
-  }
   if (game.slug === "majority" && game.status === "playable") {
     return (
       <>
         <GameDetailHeader game={game} />
         <MajorityClient />
-      </>
-    );
-  }
-  if (game.slug === "hashi" && game.status === "playable") {
-    return (
-      <>
-        <GameDetailHeader game={game} />
-        <HashiClient />
       </>
     );
   }
@@ -754,22 +588,6 @@ export default async function WebGamePage({ params }: { params: Promise<{ id: st
       </>
     );
   }
-  if (game.slug === "numberlink" && game.status === "playable") {
-    return (
-      <>
-        <GameDetailHeader game={game} />
-        <NumberLinkClient />
-      </>
-    );
-  }
-  if (game.slug === "pyramid" && game.status === "playable") {
-    return (
-      <>
-        <GameDetailHeader game={game} />
-        <PyramidClient />
-      </>
-    );
-  }
   if (game.slug === "yahtzee" && game.status === "playable") {
     return (
       <>
@@ -786,51 +604,11 @@ export default async function WebGamePage({ params }: { params: Promise<{ id: st
       </>
     );
   }
-  if (game.slug === "wordsearch" && game.status === "playable") {
-    return (
-      <>
-        <GameDetailHeader game={game} />
-        <WordSearchClient />
-      </>
-    );
-  }
-  if (game.slug === "baccarat" && game.status === "playable") {
-    return (
-      <>
-        <GameDetailHeader game={game} />
-        <BaccaratClient />
-      </>
-    );
-  }
   if (game.slug === "liarsdice" && game.status === "playable") {
     return (
       <>
         <GameDetailHeader game={game} />
         <LiarsDiceClient />
-      </>
-    );
-  }
-  if (game.slug === "minority" && game.status === "playable") {
-    return (
-      <>
-        <GameDetailHeader game={game} />
-        <MinorityClient />
-      </>
-    );
-  }
-  if (game.slug === "mushoku" && game.status === "playable") {
-    return (
-      <>
-        <GameDetailHeader game={game} />
-        <MushokuClient />
-      </>
-    );
-  }
-  if (game.slug === "floodit" && game.status === "playable") {
-    return (
-      <>
-        <GameDetailHeader game={game} />
-        <FloodItClient />
       </>
     );
   }
@@ -850,43 +628,11 @@ export default async function WebGamePage({ params }: { params: Promise<{ id: st
       </>
     );
   }
-  if (game.slug === "spider" && game.status === "playable") {
-    return (
-      <>
-        <GameDetailHeader game={game} />
-        <SpiderClient />
-      </>
-    );
-  }
-  if (game.slug === "golf" && game.status === "playable") {
-    return (
-      <>
-        <GameDetailHeader game={game} />
-        <GolfClient />
-      </>
-    );
-  }
   if (game.slug === "backgammon" && game.status === "playable") {
     return (
       <>
         <GameDetailHeader game={game} />
         <BackgammonClient />
-      </>
-    );
-  }
-  if (game.slug === "domino" && game.status === "playable") {
-    return (
-      <>
-        <GameDetailHeader game={game} />
-        <DominoClient />
-      </>
-    );
-  }
-  if (game.slug === "halma" && game.status === "playable") {
-    return (
-      <>
-        <GameDetailHeader game={game} />
-        <HalmaClient />
       </>
     );
   }
@@ -898,35 +644,11 @@ export default async function WebGamePage({ params }: { params: Promise<{ id: st
       </>
     );
   }
-  if (game.slug === "montecarlo" && game.status === "playable") {
-    return (
-      <>
-        <GameDetailHeader game={game} />
-        <MonteCarloClient />
-      </>
-    );
-  }
   if (game.slug === "cheat" && game.status === "playable") {
     return (
       <>
         <GameDetailHeader game={game} />
         <CheatClient />
-      </>
-    );
-  }
-  if (game.slug === "samegame" && game.status === "playable") {
-    return (
-      <>
-        <GameDetailHeader game={game} />
-        <SameGameClient />
-      </>
-    );
-  }
-  if (game.slug === "tents" && game.status === "playable") {
-    return (
-      <>
-        <GameDetailHeader game={game} />
-        <TentsClient />
       </>
     );
   }
@@ -946,14 +668,6 @@ export default async function WebGamePage({ params }: { params: Promise<{ id: st
       </>
     );
   }
-  if (game.slug === "blockpuzzle" && game.status === "playable") {
-    return (
-      <>
-        <GameDetailHeader game={game} />
-        <BlockPuzzleClient />
-      </>
-    );
-  }
   if (game.slug === "watersort" && game.status === "playable") {
     return (
       <>
@@ -970,75 +684,11 @@ export default async function WebGamePage({ params }: { params: Promise<{ id: st
       </>
     );
   }
-  if (game.slug === "shikaku" && game.status === "playable") {
-    return (
-      <>
-        <GameDetailHeader game={game} />
-        <ShikakuClient />
-      </>
-    );
-  }
-  if (game.slug === "kenken" && game.status === "playable") {
-    return (
-      <>
-        <GameDetailHeader game={game} />
-        <KenkenClient />
-      </>
-    );
-  }
-  if (game.slug === "binairo" && game.status === "playable") {
-    return (
-      <>
-        <GameDetailHeader game={game} />
-        <BinairoClient />
-      </>
-    );
-  }
-  if (game.slug === "flashanzan" && game.status === "playable") {
-    return (
-      <>
-        <GameDetailHeader game={game} />
-        <FlashAnzanClient />
-      </>
-    );
-  }
-  if (game.slug === "kakuro" && game.status === "playable") {
-    return (
-      <>
-        <GameDetailHeader game={game} />
-        <KakuroClient />
-      </>
-    );
-  }
   if (game.slug === "cube" && game.status === "playable") {
     return (
       <>
         <GameDetailHeader game={game} />
         <CubeClient />
-      </>
-    );
-  }
-  if (game.slug === "dartsbattle" && game.status === "playable") {
-    return (
-      <>
-        <GameDetailHeader game={game} />
-        <DartsBattleClient />
-      </>
-    );
-  }
-  if (game.slug === "skyscrapers" && game.status === "playable") {
-    return (
-      <>
-        <GameDetailHeader game={game} />
-        <SkyscrapersClient />
-      </>
-    );
-  }
-  if (game.slug === "slant" && game.status === "playable") {
-    return (
-      <>
-        <GameDetailHeader game={game} />
-        <SlantClient />
       </>
     );
   }
@@ -1050,67 +700,11 @@ export default async function WebGamePage({ params }: { params: Promise<{ id: st
       </>
     );
   }
-  if (game.slug === "akari" && game.status === "playable") {
-    return (
-      <>
-        <GameDetailHeader game={game} />
-        <AkariClient />
-      </>
-    );
-  }
-  if (game.slug === "diceroll" && game.status === "playable") {
-    return (
-      <>
-        <GameDetailHeader game={game} />
-        <DiceRollClient />
-      </>
-    );
-  }
-  if (game.slug === "bingobattle" && game.status === "playable") {
-    return (
-      <>
-        <GameDetailHeader game={game} />
-        <BingoBattleClient />
-      </>
-    );
-  }
-  if (game.slug === "alphametic" && game.status === "playable") {
-    return (
-      <>
-        <GameDetailHeader game={game} />
-        <AlphameticClient />
-      </>
-    );
-  }
   if (game.slug === "river" && game.status === "playable") {
     return (
       <>
         <GameDetailHeader game={game} />
         <RiverClient />
-      </>
-    );
-  }
-  if (game.slug === "simonbattle" && game.status === "playable") {
-    return (
-      <>
-        <GameDetailHeader game={game} />
-        <SimonBattleClient />
-      </>
-    );
-  }
-  if (game.slug === "knightstour" && game.status === "playable") {
-    return (
-      <>
-        <GameDetailHeader game={game} />
-        <KnightsTourClient />
-      </>
-    );
-  }
-  if (game.slug === "queens" && game.status === "playable") {
-    return (
-      <>
-        <GameDetailHeader game={game} />
-        <QueensClient />
       </>
     );
   }
@@ -1151,14 +745,6 @@ export default async function WebGamePage({ params }: { params: Promise<{ id: st
       <>
         <GameDetailHeader game={game} />
         <WordBasketClient />
-      </>
-    );
-  }
-  if (game.slug === "icemaze" && game.status === "playable") {
-    return (
-      <>
-        <GameDetailHeader game={game} />
-        <IceMazeClient />
       </>
     );
   }

@@ -1,7 +1,6 @@
 // 第2波・論理/推測系3本のロジック検証（lib のみ、UI 非依存）。
 // - lib/maze.ts: 完全迷路（全到達・ループなし）・最短路・移動合法判定
 // - lib/mastermind.ts: ヒット＆ブローの重複集計・10回制限・勝敗
-// - lib/hangman.ts: 単語リスト・文字開示・ミス上限・再入力無効
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
@@ -20,7 +19,6 @@ async function loadLib(name) {
 
 const maze = await loadLib("maze.ts");
 const mm = await loadLib("mastermind.ts");
-const hm = await loadLib("hangman.ts");
 
 // ---- めいろ ----
 
@@ -145,66 +143,4 @@ test("マスターマインド: 不正な予想（長さ・色範囲外）は受
   assert.equal(mm.submitGuess(state, ["red", "blue", "green", "orange"]), state);
   assert.equal(mm.submitGuess(state, ["red", "blue", "green", "pink"]), state);
   assert.equal(state.guesses.length, 0);
-});
-
-// ---- ハングマン ----
-
-test("ハングマン: 単語リストは80語以上で全て英大文字・カテゴリ付き", () => {
-  assert.ok(hm.HANGMAN_WORDS.length >= 80);
-  assert.ok(hm.HANGMAN_WORDS.every((w) => /^[A-Z]{3,}$/.test(w.word)));
-  assert.ok(hm.HANGMAN_WORDS.every((w) => typeof w.category === "string" && w.category.length > 0));
-  const unique = new Set(hm.HANGMAN_WORDS.map((w) => w.word));
-  assert.equal(unique.size, hm.HANGMAN_WORDS.length);
-});
-
-test("ハングマン: 同じシードでは同じ単語になる", () => {
-  const a = hm.createHangmanGame(123);
-  const b = hm.createHangmanGame(123);
-  assert.equal(a.word, b.word);
-  assert.equal(a.category, b.category);
-});
-
-test("ハングマン: 当たった文字は開示され、ミスは増えない", () => {
-  let state = hm.createHangmanFromWord("APPLE", "食べ物");
-  state = hm.guessLetter(state, "p"); // 小文字でも受理
-  assert.equal(state.misses, 0);
-  assert.equal(hm.displayWord(state), "_PP__");
-  state = hm.guessLetter(state, "A");
-  assert.equal(hm.displayWord(state), "APP__");
-});
-
-test("ハングマン: 同じ文字の再入力・不正入力は状態を変えない", () => {
-  let state = hm.createHangmanFromWord("BANANA", "食べ物");
-  state = hm.guessLetter(state, "Z");
-  assert.equal(state.misses, 1);
-  assert.equal(hm.guessLetter(state, "Z"), state);
-  assert.equal(hm.guessLetter(state, "1"), state);
-  assert.equal(hm.guessLetter(state, "AB"), state);
-  assert.equal(hm.guessLetter(state, ""), state);
-  assert.equal(hm.guessLetter(state, 3), state);
-});
-
-test("ハングマン: 全文字を当てると勝ち", () => {
-  let state = hm.createHangmanFromWord("CAT", "動物");
-  // CAT は2文字ではないので3文字単語として扱える（テスト専用語）
-  for (const ch of ["C", "A", "T"]) state = hm.guessLetter(state, ch);
-  assert.equal(state.status, "won");
-  assert.equal(hm.displayWord(state), "CAT");
-});
-
-test("ハングマン: ミス6回で負けになり、正解が全開示される", () => {
-  let state = hm.createHangmanFromWord("DOG", "動物");
-  for (const ch of ["A", "B", "C", "E", "F", "H"]) state = hm.guessLetter(state, ch);
-  assert.equal(state.misses, 6);
-  assert.equal(state.status, "lost");
-  assert.equal(hm.remainingMisses(state), 0);
-  assert.equal(hm.displayWord(state), "DOG");
-  assert.equal(hm.guessLetter(state, "D"), state);
-});
-
-test("ハングマン: 不正な単語では開始できない", () => {
-  assert.equal(hm.createHangmanFromWord("A", "x"), null);
-  assert.equal(hm.createHangmanFromWord("AB1", "x"), null);
-  assert.equal(hm.createHangmanFromWord(123, "x"), null);
-  assert.ok(hm.createHangmanFromWord("apple", "食べ物") !== null);
 });

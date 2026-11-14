@@ -22,8 +22,6 @@ const countButtons = (dir) => {
 };
 
 const BATCH = [
-  { dir: "floodit", client: "FloodItClient.tsx", scene: "FloodItScene3D.tsx", buttons: 2, lib: "floodit.ts" },
-  { dir: "samegame", client: "SameGameClient.tsx", scene: "SameGameScene3D.tsx", buttons: 2, lib: "samegame.ts" },
   { dir: "touchnumber", client: "TouchNumberClient.tsx", scene: "TouchNumberScene3D.tsx", buttons: 3, lib: "touchnumber.ts" },
 ];
 
@@ -58,62 +56,11 @@ for (const g of BATCH) {
   });
 }
 
-test("3D batch8-tiles floodit: 立体タイルは InstancedMesh で軽量化し、色は現行 2D と一致する", () => {
-  const scene = read("app", "games", "floodit", "FloodItScene3D.tsx");
-  assert.match(scene, /InstancedMesh/, "144 マスのタイルは InstancedMesh で描く");
-  assert.match(scene, /setColorAt/, "色は instanceColor で差分同期する");
-  assert.match(scene, /0xef4444/, "赤は現行 2D と同じ");
-  assert.match(scene, /0x22c55e/, "緑は現行 2D と同じ");
-  assert.match(scene, /0xa855f7/, "紫は現行 2D と同じ");
-});
 
-test("3D batch8-tiles floodit: 領域は高さの差分で表現し、領域集合は親の計算結果を使う", () => {
-  const scene = read("app", "games", "floodit", "FloodItScene3D.tsx");
-  assert.match(scene, /REGION_H/, "領域タイルは高くする");
-  assert.match(scene, /region\.has\(i\)/, "領域判定は親から渡された集合を使う");
-  assert.doesNotMatch(scene, /floodRegionIndices\(/, "領域計算を 3D 側で再実装しない");
-  const client = read("app", "games", "floodit", "FloodItClient.tsx");
-  assert.match(client, /region=\{region\}/, "領域は親の floodRegionIndices 結果を渡す");
-});
 
-test("3D batch8-tiles floodit: 盤タップとパレットが現行の pickColor（applyFloodMove）へ接続される", () => {
-  const scene = read("app", "games", "floodit", "FloodItScene3D.tsx");
-  assert.match(scene, /propsRef\.current\.onCell\(/, "タップが onCell を呼ぶ");
-  assert.doesNotMatch(scene, /applyFloodMove\(/, "塗り広げを 3D 側で再実装しない");
-  const client = read("app", "games", "floodit", "FloodItClient.tsx");
-  assert.match(client, /onCell=\{handleCellTap\}/, "3D 盤タップは handleCellTap へ接続する");
-  assert.match(client, /const handleCellTap[\s\S]*?pickColor\(color\)/, "盤タップはそのマスの色を pickColor へ渡す");
-  assert.match(client, /const pickColor[\s\S]*?applyFloodMove\(s, color\)/, "色選択は既存の applyFloodMove 経路を使う");
-  assert.match(client, /onClick=\{\(\) => pickColor\(color\)\}/, "DOM パレットも同じ pickColor へ接続する");
-});
 
-test("3D batch8-tiles samegame: 立体ブロックの色は現行 2D と一致する", () => {
-  const scene = read("app", "games", "samegame", "SameGameScene3D.tsx");
-  assert.match(scene, /0xe2534a/, "赤は現行 2D と同じ");
-  assert.match(scene, /0x3f7fbf/, "青は現行 2D と同じ");
-  assert.match(scene, /0x8d5bb5/, "紫は現行 2D と同じ");
-  assert.match(scene, /emissive/, "ホバーグループは発光で示す");
-});
 
-test("3D batch8-tiles samegame: タップとホバーが現行ハンドラへ接続され、消去判定を再実装しない", () => {
-  const scene = read("app", "games", "samegame", "SameGameScene3D.tsx");
-  assert.match(scene, /propsRef\.current\.onCell\(/, "タップが onCell を呼ぶ");
-  assert.match(scene, /propsRef\.current\.onHover\(/, "ホバーが onHover を呼ぶ");
-  assert.match(scene, /hover: true/, "ホバーのレイキャストを有効にする");
-  assert.doesNotMatch(scene, /removeSameGameGroup\(|sameGameGroupAt\(|sameGameSettle\(/, "消去・グループ・重力の判定を 3D 側で再実装しない");
-  const client = read("app", "games", "samegame", "SameGameClient.tsx");
-  assert.match(client, /onCell=\{tapBlockAt\}/, "既存の tapBlockAt へ接続する");
-  assert.match(client, /onHover=\{setHover\}/, "ホバーは既存の setHover へ接続する");
-  assert.match(client, /const tapBlockAt[\s\S]*?removeSameGameGroup\(s, i\)/, "消去は既存の removeSameGameGroup 経路を使う");
-  assert.match(client, /hoverGroup=\{hoverGroup\}/, "ホバーグループは親の計算結果を渡す");
-});
 
-test("3D batch8-tiles samegame: 落下・左詰めは目標位置への補間で追従する（差分同期）", () => {
-  const scene = read("app", "games", "samegame", "SameGameScene3D.tsx");
-  assert.match(scene, /b\.grp\.position\.z \+= \(b\.tz - b\.grp\.position\.z\) \* k/, "行方向（落下）を補間する");
-  assert.match(scene, /b\.grp\.position\.x \+= \(b\.tx - b\.grp\.position\.x\) \* k/, "列方向（左詰め）を補間する");
-  assert.match(scene, /落下/, "落下アニメーションの意図を冒頭コメントに明記する");
-});
 
 test("3D batch8-tiles touchnumber: 数字は上面テクスチャで大きく太く描く", () => {
   const scene = read("app", "games", "touchnumber", "TouchNumberScene3D.tsx");

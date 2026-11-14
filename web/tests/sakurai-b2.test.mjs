@@ -3,7 +3,7 @@
 //   goalBandState（ベストまでの残り計算、lowerIsBetter 対応）
 // - GameJuice の公開面: EndScreen v2（Rキー・sound opt-in・敗北演出・
 //   confettiOnLose）、GoalBand、useRoomJuice / useBoardJuice
-// - 配線: オンライン対戦35タイトルへの useRoomJuice、GoalBand 7タイトル、
+// - 配線: オンライン対戦タイトルへの useRoomJuice、GoalBand 7タイトル、
 //   simon への sfx 配線（二重再生を作らない形）
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -86,16 +86,19 @@ test("globals.css: ご褒美帯と終了ヒントのスタイルがある", () =
   assert.match(css, /\.juice-end-hint \{/);
 });
 
+// 2026-11-15 のカタログ削減で対戦10タイトル（bingobattle / checkers /
+// dartsbattle / domino / flashanzan / gomoku / janken / minority /
+// simonbattle / tictactoe）を削除したため、対象は残る25タイトル。
 const ROOM_TITLES = [
-  "babanuki", "battleship", "bingobattle", "bombpass", "burst", "calcrace",
-  "cheat", "checkers", "connect4", "countdown", "daifugo", "dartsbattle",
-  "domino", "drawguess", "flashanzan", "gomoku", "hagetaka", "janken",
-  "liarsdice", "majority", "minority", "musicalchairs", "nanja", "quizbattle",
-  "shiritori", "simonbattle", "speed", "stopbattle", "territory", "texas",
-  "tictactoe", "typerace", "werewolf", "wordbasket", "wordwolf",
+  "babanuki", "battleship", "bombpass", "burst", "calcrace",
+  "cheat", "connect4", "countdown", "daifugo",
+  "drawguess", "hagetaka",
+  "liarsdice", "majority", "musicalchairs", "nanja", "quizbattle",
+  "shiritori", "speed", "stopbattle", "territory", "texas",
+  "typerace", "werewolf", "wordbasket", "wordwolf",
 ];
 
-test("対戦35タイトル: useRoomJuice が配線され、lib/sfx を二重に被せていない", () => {
+test("対戦25タイトル: useRoomJuice が配線され、lib/sfx を二重に被せていない", () => {
   for (const title of ROOM_TITLES) {
     const dir = path.join(webDir, "app/games", title);
     const client = fs.readdirSync(dir).find((f) => f.endsWith("Client.tsx"));

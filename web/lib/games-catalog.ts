@@ -19,6 +19,12 @@ export type WebGame = {
   activity: boolean;
   /** プレイ人数の目安表示。 */
   players: string;
+  /**
+   * 格下げタイトルか（削減監査 2026-11-15 で決定）。
+   * 一覧ハブでは通常タイトルの後ろに分離表示され、日替わりおすすめの候補からも外れる。
+   * 検索・絞り込み・直接 URL では通常どおり辿れる。
+   */
+  demoted?: boolean;
 };
 
 export const WEB_GAMES: WebGame[] = [
@@ -66,6 +72,7 @@ export const WEB_GAMES: WebGame[] = [
     status: "playable",
     activity: true,
     players: "1人",
+    demoted: true,
   },
   {
     slug: "reversi",
@@ -81,15 +88,6 @@ export const WEB_GAMES: WebGame[] = [
     title: "四目並べ",
     description:
       "コマを落として縦・横・斜めのどれか4つを先にそろえる対戦パズル。ルームコードや公開ルームでオンライン対戦ができ、CPU相手にも遊べます。",
-    status: "playable",
-    activity: true,
-    players: "2人（オンライン/CPU対戦）",
-  },
-  {
-    slug: "gomoku",
-    title: "五目並べ",
-    description:
-      "石を交互に置いて5つ並べた方が勝ちの古典ボードゲーム。ルームコードや公開ルームでオンライン対戦ができ、CPU相手に1人でも遊べます。",
     status: "playable",
     activity: true,
     players: "2人（オンライン/CPU対戦）",
@@ -147,6 +145,7 @@ export const WEB_GAMES: WebGame[] = [
     status: "playable",
     activity: true,
     players: "1人",
+    demoted: true,
   },
   {
     slug: "lightsout",
@@ -156,6 +155,7 @@ export const WEB_GAMES: WebGame[] = [
     status: "playable",
     activity: true,
     players: "1人",
+    demoted: true,
   },
   {
     slug: "snake",
@@ -174,6 +174,7 @@ export const WEB_GAMES: WebGame[] = [
     status: "playable",
     activity: true,
     players: "1人",
+    demoted: true,
   },
   {
     slug: "pong",
@@ -183,6 +184,7 @@ export const WEB_GAMES: WebGame[] = [
     status: "playable",
     activity: true,
     players: "1人（CPU対戦）",
+    demoted: true,
   },
   {
     slug: "mole",
@@ -237,6 +239,7 @@ export const WEB_GAMES: WebGame[] = [
     status: "playable",
     activity: true,
     players: "1人",
+    demoted: true,
   },
   {
     slug: "colormatch",
@@ -246,6 +249,7 @@ export const WEB_GAMES: WebGame[] = [
     status: "playable",
     activity: true,
     players: "1人",
+    demoted: true,
   },
   {
     slug: "numbermemory",
@@ -255,6 +259,7 @@ export const WEB_GAMES: WebGame[] = [
     status: "playable",
     activity: true,
     players: "1人",
+    demoted: true,
   },
   {
     slug: "maze",
@@ -264,21 +269,13 @@ export const WEB_GAMES: WebGame[] = [
     status: "playable",
     activity: true,
     players: "1人",
+    demoted: true,
   },
   {
     slug: "mastermind",
     title: "マスターマインド",
     description:
       "隠された4つの色の並びを、ヒット＆ブローの手がかりから10回以内に当てる推理ゲーム。色は重複します。難易度で色数が変わります。",
-    status: "playable",
-    activity: true,
-    players: "1人",
-  },
-  {
-    slug: "hangman",
-    title: "ハングマン",
-    description:
-      "英単語の文字を1文字ずつ当てていく定番ゲーム。ミス6回で終了、カテゴリがヒントになります。画面キーとキーボードの両方で遊べます。",
     status: "playable",
     activity: true,
     players: "1人",
@@ -300,6 +297,7 @@ export const WEB_GAMES: WebGame[] = [
     status: "playable",
     activity: true,
     players: "1人",
+    demoted: true,
   },
   {
     slug: "dodge",
@@ -309,6 +307,7 @@ export const WEB_GAMES: WebGame[] = [
     status: "playable",
     activity: true,
     players: "1人",
+    demoted: true,
   },
   {
     slug: "falling",
@@ -327,24 +326,6 @@ export const WEB_GAMES: WebGame[] = [
     status: "playable",
     activity: true,
     players: "1人",
-  },
-  {
-    slug: "tictactoe",
-    title: "三目並べ",
-    description:
-      "○と×を交互に置いて縦・横・斜めの3つを先にそろえる定番ゲーム。ルームコードや公開ルームでオンライン対戦ができ、CPUは最善手を指すので引き分けに持ち込めるかが勝負です。",
-    status: "playable",
-    activity: true,
-    players: "2人（オンライン/CPU対戦）",
-  },
-  {
-    slug: "checkers",
-    title: "チェッカー",
-    description:
-      "斜めに進んで相手のコマを飛び越えて取り合う古典ボードゲーム。取れる手があるときは必ず取る強制取りと連続取りがあり、最奥列でキングに昇格します。オンライン対戦とCPU対戦の両方に対応。",
-    status: "playable",
-    activity: true,
-    players: "2人（オンライン/CPU対戦）",
   },
   {
     slug: "babanuki",
@@ -381,6 +362,7 @@ export const WEB_GAMES: WebGame[] = [
     status: "playable",
     activity: true,
     players: "1人",
+    demoted: true,
   },
   {
     slug: "hanoi",
@@ -390,6 +372,7 @@ export const WEB_GAMES: WebGame[] = [
     status: "playable",
     activity: true,
     players: "1人",
+    demoted: true,
   },
   {
     slug: "speed",
@@ -408,15 +391,6 @@ export const WEB_GAMES: WebGame[] = [
     status: "playable",
     activity: true,
     players: "1人",
-  },
-  {
-    slug: "bingo",
-    title: "ビンゴ",
-    description:
-      "5×5カードでCPU 3人と対戦するビンゴ。数字を引いて縦・横・斜めの1ラインを先にそろえた方が勝ち。自動進行もできます。",
-    status: "playable",
-    activity: true,
-    players: "1人（CPU対戦）",
   },
   {
     slug: "amida",
@@ -441,24 +415,6 @@ export const WEB_GAMES: WebGame[] = [
     title: "クイズ",
     description:
       "雑学・科学・歴史・スポーツ・アニメ・ゲームから10問出題される4択クイズ。連続正解でボーナスが付き、結果ではカテゴリ別の正答率も分かります。",
-    status: "playable",
-    activity: true,
-    players: "1人",
-  },
-  {
-    slug: "numbercode",
-    title: "ナンバーコード",
-    description:
-      "重複のない3桁の数字を当てる推理ゲーム。10回までの回答でコードを解き明かそう。",
-    status: "playable",
-    activity: true,
-    players: "1人",
-  },
-  {
-    slug: "stopwatch",
-    title: "ストップウォッチ",
-    description:
-      "ちょうど10.00秒で止める体内時計チャレンジ。5秒から表示が隠れるブラインドモードもあり、ベスト誤差は端末に記録されます。",
     status: "playable",
     activity: true,
     players: "1人",
@@ -489,15 +445,7 @@ export const WEB_GAMES: WebGame[] = [
     status: "playable",
     activity: true,
     players: "1人",
-  },
-  {
-    slug: "roulette",
-    title: "ルーレット",
-    description:
-      "欧式ルーレットにチップを賭けるカジノゲーム。赤黒や単数など9種の賭け方が選べます。チップは端末内だけの遊び用ポイントです。",
-    status: "playable",
-    activity: true,
-    players: "1人",
+    demoted: true,
   },
   {
     slug: "wordwolf",
@@ -516,6 +464,7 @@ export const WEB_GAMES: WebGame[] = [
     status: "playable",
     activity: true,
     players: "1人",
+    demoted: true,
   },
   {
     slug: "flagquiz",
@@ -525,15 +474,7 @@ export const WEB_GAMES: WebGame[] = [
     status: "playable",
     activity: true,
     players: "1人",
-  },
-  {
-    slug: "highlow",
-    title: "ハイ＆ロー",
-    description:
-      "次のカードが今より高いか低いかを当てる運試し。同数は引き分けで続行、外すと終了。連続正解のベスト記録が残ります。",
-    status: "playable",
-    activity: true,
-    players: "1人",
+    demoted: true,
   },
   {
     slug: "drawguess",
@@ -554,15 +495,6 @@ export const WEB_GAMES: WebGame[] = [
     players: "1人",
   },
   {
-    slug: "sugoroku",
-    title: "すごろく",
-    description:
-      "30マスのコースでCPU 2人と競争するレース。進む・戻る・1回休み・コインのマスをかいくぐり、先にゴールを目指します。",
-    status: "playable",
-    activity: true,
-    players: "1人（CPU対戦）",
-  },
-  {
     slug: "anagram",
     title: "アナグラム",
     description:
@@ -572,15 +504,6 @@ export const WEB_GAMES: WebGame[] = [
     players: "1人",
   },
   {
-    slug: "janken",
-    title: "じゃんけん大会",
-    description:
-      "2〜8人で同時に出す多人数じゃんけん。全5ラウンド、出た手が2種類だけのとき勝つ手の全員に1点。ルームコードや公開ルームでオンライン対戦できます。",
-    status: "playable",
-    activity: true,
-    players: "2〜8人（オンライン）",
-  },
-  {
     slug: "pipe",
     title: "パイプつなぎ",
     description:
@@ -588,15 +511,7 @@ export const WEB_GAMES: WebGame[] = [
     status: "playable",
     activity: true,
     players: "1人",
-  },
-  {
-    slug: "drawpoker",
-    title: "ドローポーカー",
-    description:
-      "5枚配って1回だけ交換し、役に応じて配当が付くビデオポーカー式。ワンペアはJ以上のペアだけ配当があります。チップは端末内だけの遊び用ポイントです。",
-    status: "playable",
-    activity: true,
-    players: "1人",
+    demoted: true,
   },
   {
     slug: "bombpass",
@@ -617,28 +532,10 @@ export const WEB_GAMES: WebGame[] = [
     players: "2〜6人（オンライン）",
   },
   {
-    slug: "nurikabe",
-    title: "ぬりかべ",
-    description:
-      "数字は島の大きさ。島同士は離し、海は全部つなげて2x2の塊を作らないように塗り分けるロジックパズル。5×5と7×7が選べます。",
-    status: "playable",
-    activity: true,
-    players: "1人",
-  },
-  {
     slug: "freecell",
     title: "フリーセル",
     description:
       "4つのフリーセルを一時置き場に使い、全カードを組札へAからKまでそろえるソリティア。まとめて動かせる枚数は空きの数で変わります。",
-    status: "playable",
-    activity: true,
-    players: "1人",
-  },
-  {
-    slug: "columns",
-    title: "コラムス",
-    description:
-      "3個縦の宝石を落として、縦・横・斜めに3つそろえて消すパズル。回転で並びを変え、連鎖で高得点を狙います。",
     status: "playable",
     activity: true,
     players: "1人",
@@ -651,15 +548,6 @@ export const WEB_GAMES: WebGame[] = [
     status: "playable",
     activity: true,
     players: "2〜8人（オンライン）",
-  },
-  {
-    slug: "hashi",
-    title: "橋をかけろ",
-    description:
-      "島と島を橋でつなぐロジックパズル。数字はその島から出る橋の総数で、橋は最大2本まで・交差禁止。全部の島が1つにつながればクリアです。",
-    status: "playable",
-    activity: true,
-    players: "1人",
   },
   {
     slug: "dicequest",
@@ -678,6 +566,7 @@ export const WEB_GAMES: WebGame[] = [
     status: "playable",
     activity: true,
     players: "1人",
+    demoted: true,
   },
   {
     slug: "texas",
@@ -687,24 +576,6 @@ export const WEB_GAMES: WebGame[] = [
     status: "playable",
     activity: true,
     players: "2〜6人（オンライン）",
-  },
-  {
-    slug: "numberlink",
-    title: "ナンバーリンク",
-    description:
-      "同じ数字同士を線でつなぎ、盤の全マスを埋めるパズル。線同士は重なれないので、引き回しが大事です。5×5と6×6が選べます。",
-    status: "playable",
-    activity: true,
-    players: "1人",
-  },
-  {
-    slug: "pyramid",
-    title: "ピラミッド",
-    description:
-      "合計13になるペア、または K 単体を取り除くソリティア。下の2枚が無くなったカードから使え、ストックは捨て山を裏返して再利用できます。",
-    status: "playable",
-    activity: true,
-    players: "1人",
   },
   {
     slug: "yahtzee",
@@ -725,24 +596,6 @@ export const WEB_GAMES: WebGame[] = [
     players: "2〜6人（オンライン）",
   },
   {
-    slug: "wordsearch",
-    title: "ワードサーチ",
-    description:
-      "9×9の文字盤に隠れたカタカナ単語を8語探すパズル。単語の最初と最後の文字をタップして選ぶ2タップ式で、縦・横・斜めの逆向きでも見つかります。ベストタイムは端末に記録されます。",
-    status: "playable",
-    activity: true,
-    players: "1人",
-  },
-  {
-    slug: "baccarat",
-    title: "バカラ",
-    description:
-      "プレイヤーとバンカー、9に近い方の勝ちを予想するカジノゲーム。第3カードは正式ルールで決まり、バンカー勝利の配当には5%の手数料がかかります。チップは端末内だけの遊び用ポイントです。",
-    status: "playable",
-    activity: true,
-    players: "1人",
-  },
-  {
     slug: "liarsdice",
     title: "ライアーズダイス",
     description:
@@ -752,33 +605,6 @@ export const WEB_GAMES: WebGame[] = [
     players: "2〜6人（オンライン）",
   },
   {
-    slug: "minority",
-    title: "少数決ゲーム",
-    description:
-      "二択のお題で少数派を選んだ人だけが残るオンライン対戦。同数なら全員残り、無回答は脱落。最後の1〜2人が優勝です。ルームコードや公開ルームで3〜8人が遊べます。",
-    status: "playable",
-    activity: true,
-    players: "3〜8人（オンライン）",
-  },
-  {
-    slug: "mushoku",
-    title: "虫食い算",
-    description:
-      "隠れた数字を推理して掛け算の筆算を完成させるパズル。部分積と積がすべて合えば正解で、整合する別の解でもクリアになります。2桁×2桁と3桁×2桁が選べます。",
-    status: "playable",
-    activity: true,
-    players: "1人",
-  },
-  {
-    slug: "floodit",
-    title: "フラッドフィル",
-    description:
-      "色を選んで左上から染め広げ、制限手数以内に盤全体を1色にするパズル。制限手数は必ず解ける範囲に設定され、ベスト手数は端末に記録されます。",
-    status: "playable",
-    activity: true,
-    players: "1人",
-  },
-  {
     slug: "laser",
     title: "レーザーミラー",
     description:
@@ -786,6 +612,7 @@ export const WEB_GAMES: WebGame[] = [
     status: "playable",
     activity: true,
     players: "1人",
+    demoted: true,
   },
   {
     slug: "countdown",
@@ -797,46 +624,10 @@ export const WEB_GAMES: WebGame[] = [
     players: "2〜6人（オンライン）",
   },
   {
-    slug: "spider",
-    title: "スパイダー",
-    description:
-      "1スート制の簡易版スパイダーソリティア。下降順にカードを重ね、KからAまでの13枚をそろえて取り除きます。8組そろえればクリアです。",
-    status: "playable",
-    activity: true,
-    players: "1人",
-  },
-  {
-    slug: "golf",
-    title: "ゴルフ",
-    description:
-      "台札の数字とプラスマイナス1のカードを場から取っていくソリティア。スートは不問で、KとAはつながりません。場札を全部取るのが目標です。",
-    status: "playable",
-    activity: true,
-    players: "1人",
-  },
-  {
     slug: "backgammon",
     title: "バックギャモン",
     description:
       "ダイスでコマを進める古代のボードゲーム。相手の単独コマはヒットしてバーへ送れます。CPUとの対戦で、先に全部上がった方が勝ちです。",
-    status: "playable",
-    activity: true,
-    players: "1人（CPU対戦）",
-  },
-  {
-    slug: "domino",
-    title: "ドミノ",
-    description:
-      "両端の目に合う牌をつないでいくオンライン対戦。手札を出し切るか、詰まったときに残りの目が一番少ない人が勝ち。ルームコードや公開ルームで2〜4人が遊べます。",
-    status: "playable",
-    activity: true,
-    players: "2〜4人（オンライン）",
-  },
-  {
-    slug: "halma",
-    title: "ハルマ",
-    description:
-      "星形の盤で対戦するチャイニーズチェッカー（2人戦）。隣のコマを飛び越えるジャンプ連鎖を駆使して、自分のコマ10個を相手の陣地へ先に移した方が勝ちです。",
     status: "playable",
     activity: true,
     players: "1人（CPU対戦）",
@@ -851,15 +642,6 @@ export const WEB_GAMES: WebGame[] = [
     players: "1人",
   },
   {
-    slug: "montecarlo",
-    title: "モンテカルロ",
-    description:
-      "縦・横・斜めに隣り合う同じ数字のペアを取り除くソリティア。除去後は「詰める」で前へ寄せて山札から補充します。全52枚を取り除けばクリアです。",
-    status: "playable",
-    activity: true,
-    players: "1人",
-  },
-  {
     slug: "cheat",
     title: "ブラフ",
     description:
@@ -867,24 +649,6 @@ export const WEB_GAMES: WebGame[] = [
     status: "playable",
     activity: true,
     players: "3〜6人（オンライン）",
-  },
-  {
-    slug: "samegame",
-    title: "セイムゲーム",
-    description:
-      "同色でつながったブロックをまとめて消すパズル。消すと上から落ちて列が詰まります。たくさんつながるほど高得点で、全部消すとボーナスです。",
-    status: "playable",
-    activity: true,
-    players: "1人",
-  },
-  {
-    slug: "tents",
-    title: "テントと木",
-    description:
-      "木のそば（縦横）にテントを1つずつ張るロジックパズル。テント同士は斜めでも隣り合えず、行と列の端の数字がテントの数を示します。6×6と8×8が選べます。",
-    status: "playable",
-    activity: true,
-    players: "1人",
   },
   {
     slug: "hagetaka",
@@ -905,15 +669,6 @@ export const WEB_GAMES: WebGame[] = [
     players: "2〜8人（オンライン）",
   },
   {
-    slug: "blockpuzzle",
-    title: "ブロックスパズル",
-    description:
-      "9×9の盤にブロックを置き、縦・横の列や3x3をそろえて消すパズル。ブロックは回転できず、置けるものが無くなったら終了。ベストスコアは端末に記録されます。",
-    status: "playable",
-    activity: true,
-    players: "1人",
-  },
-  {
     slug: "watersort",
     title: "ウォーターソート",
     description:
@@ -932,51 +687,6 @@ export const WEB_GAMES: WebGame[] = [
     players: "1人",
   },
   {
-    slug: "shikaku",
-    title: "しかく",
-    description:
-      "盤面を長方形に切り分け、各長方形に数字を1つだけ入れ、その数字と面積が等しくなるようにするロジックパズル。5×5と6×6が選べ、ベストタイムは端末に記録されます。",
-    status: "playable",
-    activity: true,
-    players: "1人",
-  },
-  {
-    slug: "kenken",
-    title: "ケンケン",
-    description:
-      "行と列に数字を1つずつ入れ、太線のケージは目標値と演算が合うようにする計算パズル。4×4と5×5が選べ、ベストタイムは端末に記録されます。",
-    status: "playable",
-    activity: true,
-    players: "1人",
-  },
-  {
-    slug: "binairo",
-    title: "バイナリー",
-    description:
-      "0と1を埋めるロジックパズル。行と列で0/1は同数、同じ数字が3つ以上並ばず、埋まった行同士・列同士は同じ並びになりません。",
-    status: "playable",
-    activity: true,
-    players: "1人",
-  },
-  {
-    slug: "flashanzan",
-    title: "フラッシュ暗算",
-    description:
-      "次々と表示される数字の合計を当てるオンライン対戦。ラウンドごとに数字の個数と桁数が増え、正解に一番近い人が得点、完全一致はボーナス。ルームコードや公開ルームで2〜6人が遊べます。",
-    status: "playable",
-    activity: true,
-    players: "2〜6人（オンライン）",
-  },
-  {
-    slug: "kakuro",
-    title: "カックロ",
-    description:
-      "黒マスの右上の数字は右方向、左下の数字は下方向の列の合計。列の中で数字が重ならないように1〜9を埋める計算クロスパズル。ベストタイムは端末に記録されます。",
-    status: "playable",
-    activity: true,
-    players: "1人",
-  },
-  {
     slug: "cube",
     title: "2x2キューブ",
     description:
@@ -984,33 +694,7 @@ export const WEB_GAMES: WebGame[] = [
     status: "playable",
     activity: true,
     players: "1人",
-  },
-  {
-    slug: "dartsbattle",
-    title: "ダーツ対戦",
-    description:
-      "オンライン対戦のカウントアップダーツ。全8ラウンド×3投の合計点を競います。着弾点には全員同じ条件のブレが入ります。ルームコードや公開ルームで2〜4人が遊べます。",
-    status: "playable",
-    activity: true,
-    players: "2〜4人（オンライン）",
-  },
-  {
-    slug: "skyscrapers",
-    title: "ビルディング",
-    description:
-      "行と列に高さ1〜Nのビルを1つずつ置くロジックパズル。外側の数字は、その方向から見えるビルの数。高いビルの後ろは見えません。4×4と5×5が選べ、ベストタイムは端末に記録されます。",
-    status: "playable",
-    activity: true,
-    players: "1人",
-  },
-  {
-    slug: "slant",
-    title: "スラント",
-    description:
-      "全部のマスに斜線を1本ずつ引くロジックパズル。点の数字は、その点につながる斜線の数と一致させ、斜線で輪を作らないようにします。ベストタイムは端末に記録されます。",
-    status: "playable",
-    activity: true,
-    players: "1人",
+    demoted: true,
   },
   {
     slug: "stopbattle",
@@ -1022,42 +706,6 @@ export const WEB_GAMES: WebGame[] = [
     players: "2〜8人（オンライン）",
   },
   {
-    slug: "akari",
-    title: "あかり",
-    description:
-      "電球を置いて全ての白マスを照らすロジックパズル。光は黒マスまで届き、電球同士は照らし合いません。数字のある黒マスは、接する電球の数がその数字と一致します。ベストタイムは端末に記録されます。",
-    status: "playable",
-    activity: true,
-    players: "1人",
-  },
-  {
-    slug: "diceroll",
-    title: "ダイスロール",
-    description:
-      "サイコロを転がしてゴールまで運ぶパズル。ゴールに止まったとき、上の目が指定の数字と一致すればクリア。転がすたびに目の向きが変わります。ベスト手数は端末に記録されます。",
-    status: "playable",
-    activity: true,
-    players: "1人",
-  },
-  {
-    slug: "bingobattle",
-    title: "ビンゴ対戦",
-    description:
-      "抽選は全員共通、カードは各自専用のオンライン対戦ビンゴ。数字は自動で引かれてマスも自動で開き、縦・横・斜めの1ラインを最初にそろえた人が勝ち。ルームコードや公開ルームで2〜8人が遊べます。",
-    status: "playable",
-    activity: true,
-    players: "2〜8人（オンライン）",
-  },
-  {
-    slug: "alphametic",
-    title: "覆面算",
-    description:
-      "カタカナの記号に数字を割り当てて、足し算の式を成立させるパズル。同じ記号は同じ数字、違う記号に同じ数字は使えず、先頭の記号に0は入りません。解は必ず1つだけです。ベストタイムは端末に記録されます。",
-    status: "playable",
-    activity: true,
-    players: "1人",
-  },
-  {
     slug: "river",
     title: "川渡り",
     description:
@@ -1065,33 +713,7 @@ export const WEB_GAMES: WebGame[] = [
     status: "playable",
     activity: true,
     players: "1人",
-  },
-  {
-    slug: "simonbattle",
-    title: "サイモン対戦",
-    description:
-      "光る色の並びをみんなで育てるオンライン対戦。手番の人は並びを再現して末尾に1色追加し、間違えた人は脱落。最後まで残った人が勝ち。ルームコードや公開ルームで2〜6人が遊べます。",
-    status: "playable",
-    activity: true,
-    players: "2〜6人（オンライン）",
-  },
-  {
-    slug: "knightstour",
-    title: "ナイトツアー",
-    description:
-      "チェスのナイトの動きだけで盤の全マスを1回ずつ訪れるパズル。必ず解ける盤だけが出題され、行き詰まったら1手戻せます。5×5と6×6が選べ、ベストタイムは端末に記録されます。",
-    status: "playable",
-    activity: true,
-    players: "1人",
-  },
-  {
-    slug: "queens",
-    title: "クイーン配置",
-    description:
-      "縦・横・斜めに利くクイーンを、互いに利き合わないように全部置く古典パズル。利き筋が見えるので、置ける場所を考えながら進められます。6×6と8×8が選べ、ベストタイムは端末に記録されます。",
-    status: "playable",
-    activity: true,
-    players: "1人",
+    demoted: true,
   },
   {
     slug: "calcrace",
@@ -1137,15 +759,6 @@ export const WEB_GAMES: WebGame[] = [
     status: "playable",
     activity: true,
     players: "2〜6人（オンライン）",
-  },
-  {
-    slug: "icemaze",
-    title: "氷の迷路",
-    description:
-      "方向を選ぶと壁にぶつかるまで滑り続けるパズル。ゴールを通り過ぎずにぴったり止まれればクリア。必ず解ける盤面だけが出題され、最短手数も表示されます。ベスト手数は端末に記録されます。",
-    status: "playable",
-    activity: true,
-    players: "1人",
   },
   {
     slug: "typerace",
@@ -1200,6 +813,7 @@ export const WEB_GAMES: WebGame[] = [
     status: "playable",
     activity: true,
     players: "1人（CPU対戦）",
+    demoted: true,
   },
   {
     slug: "penalty",
@@ -1218,6 +832,7 @@ export const WEB_GAMES: WebGame[] = [
     status: "playable",
     activity: true,
     players: "1人",
+    demoted: true,
   },
   {
     slug: "dragrace",
@@ -1227,6 +842,7 @@ export const WEB_GAMES: WebGame[] = [
     status: "playable",
     activity: true,
     players: "1人（CPU対戦）",
+    demoted: true,
   },
   {
     slug: "billiards",
@@ -1281,6 +897,7 @@ export const WEB_GAMES: WebGame[] = [
     status: "playable",
     activity: true,
     players: "1人（CPU対戦）",
+    demoted: true,
   },
   {
     slug: "kwordle",
@@ -1323,10 +940,10 @@ function dailyHash(key: string): number {
 /**
  * その日のおすすめ（日替わり選出）。JST の日付だけから決定的に選ぶため、
  * 同じ日は誰が見ても同じ顔ぶれになり、翌日には変わる。
- * デイリー帯で別枠表示するワードルは候補から除く。
+ * デイリー帯で別枠表示するワードルと、格下げタイトルは候補から除く。
  */
 export function dailyPicksFor(date: Date, count = 3): WebGame[] {
-  const pool = playableGames().filter((game) => game.slug !== "wordle");
+  const pool = playableGames().filter((game) => game.slug !== "wordle" && !game.demoted);
   let seed = dailyHash(jstDateKey(date));
   // mulberry32: シード付き疑似乱数。選出の再現性だけが目的なので軽いもので足りる。
   const rand = (): number => {

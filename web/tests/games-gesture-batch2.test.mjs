@@ -1,9 +1,11 @@
 // 第2バッチ ジェスチャ移行（2026-11-14 ユーザー裁定）の回帰テスト。
-// - 対象8ゲームのクライアントに実行ボタンが残っていないこと（静的検査）
-// dicequest / yahtzee / sugoroku / montecarlo の「もう一度」はゲーム外 chrome
+// - 対象ゲームのクライアントに実行ボタンが残っていないこと（静的検査）
+// dicequest / yahtzee の「もう一度」はゲーム外 chrome
 // （リセット操作）として例外リスト入り済みのため、上限件数だけを固定する。
-// - reaction / stopwatch は計測の遅延を避けるため lib/gesture ではなく
+// - reaction は計測の遅延を避けるため lib/gesture ではなく
 //   onPointerDown 直結のタップ面（計測開始・停止が pointerdown で発火すること）。
+// （対象は当初8ゲーム。2026-11-15 のカタログ削減で sugoroku / montecarlo /
+// baccarat / drawpoker / stopwatch を削除したため残り3ゲームが対象。）
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
@@ -14,15 +16,10 @@ const webDir = path.join(import.meta.dirname, "..");
 const CLIENTS = {
   dicequest: "DiceQuestClient.tsx",
   yahtzee: "YahtzeeClient.tsx",
-  sugoroku: "SugorokuClient.tsx",
-  baccarat: "BaccaratClient.tsx",
-  drawpoker: "DrawPokerClient.tsx",
   reaction: "ReactionClient.tsx",
-  stopwatch: "StopwatchClient.tsx",
-  montecarlo: "MonteCarloClient.tsx",
 };
 // 例外リスト（ゲーム外 chrome のリセットボタン）以外は 0 件であること。
-const BUTTON_BUDGET = { dicequest: 1, yahtzee: 1, sugoroku: 1, baccarat: 0, drawpoker: 0, reaction: 0, stopwatch: 0, montecarlo: 1 };
+const BUTTON_BUDGET = { dicequest: 1, yahtzee: 1, reaction: 0 };
 
 function read(game) {
   return fs.readFileSync(path.join(webDir, "app", "games", game, CLIENTS[game]), "utf8");
@@ -37,7 +34,7 @@ for (const [game, file] of Object.entries(CLIENTS)) {
 }
 
 test("gesture batch2: 残りボタンは chrome のリセット操作「もう一度」だけ", () => {
-  for (const game of ["dicequest", "yahtzee", "sugoroku", "montecarlo"]) {
+  for (const game of ["dicequest", "yahtzee"]) {
     const src = read(game);
     const buttons = src.match(/<button[\s\S]*?<\/button>/g) ?? [];
     assert.equal(buttons.length, 1, `${game}: 残りボタンが ${buttons.length} 件`);
@@ -46,47 +43,17 @@ test("gesture batch2: 残りボタンは chrome のリセット操作「もう�
   }
 });
 
-test("gesture batch2: ジェスチャ系6ゲームは共通ヘルパー lib/gesture を使う", () => {
-  for (const game of ["dicequest", "yahtzee", "sugoroku", "baccarat", "drawpoker", "montecarlo"]) {
+test("gesture batch2: ジェスチャ系2ゲームは共通ヘルパー lib/gesture を使う", () => {
+  for (const game of ["dicequest", "yahtzee"]) {
     const src = read(game);
     assert.ok(src.includes('from "@/lib/gesture"'), `${game}: lib/gesture を import していない`);
     assert.ok(src.includes("useGesture"), `${game}: useGesture を使っていない`);
   }
 });
 
-test("gesture batch2: baccarat はテーブルタップで配る・次ラウンド・再支給", () => {
-  const src = read("baccarat");
-  assert.ok(src.includes("tableGesture"), "テーブル面に useGesture が繋がっていない");
-  assert.ok(src.includes("placeBaccaratBet(s, betKind, amount)"), "配るアクションへの接続が壊れている");
-  assert.ok(src.includes("nextBaccaratRound(s)"), "次のラウンドへの接続が壊れている");
-  assert.ok(src.includes("refillBaccarat(s)"), "再支給への接続が壊れている");
-  assert.ok(src.includes("tappableProps"), "賭け先・賭け金の選択が対象物タップになっていない");
-});
 
-test("gesture batch2: drawpoker は置き場タップで配る・下スワイプで交換確定", () => {
-  const src = read("drawpoker");
-  assert.ok(src.includes("rowGesture"), "カード置き場に useGesture が繋がっていない");
-  assert.ok(src.includes("startRound(state, bet)"), "配るアクションへの接続が壊れている");
-  assert.ok(src.includes("drawCards(s, discards)"), "交換確定への接続が壊れている");
-  assert.ok(src.includes("refillDpChips(s)"), "再支給への接続が壊れている");
-  assert.ok(src.includes('dir === "down"'), "交換確定が下スワイプになっていない");
-  assert.ok(src.includes("toggleDiscard(i)"), "札の交換選択への接続が壊れている");
-});
 
-test("gesture batch2: montecarlo は札タップで選択・盤面下スワイプで詰める", () => {
-  const src = read("montecarlo");
-  assert.ok(src.includes("boardGesture"), "盤面に useGesture が繋がっていない");
-  assert.ok(src.includes("montecarloRemovePair(s, selected, index)"), "ペア除去への接続が壊れている");
-  assert.ok(src.includes("montecarloConsolidate(s)"), "詰めるへの接続が壊れている");
-  assert.ok(src.includes('dir === "down"'), "詰めるが下スワイプになっていない");
-  assert.ok(src.includes('role="gridcell"'), "札が gridcell のタップ対象になっていない");
-});
 
-test("gesture batch2: sugoroku の盤面はキーボードでもサイコロを振れる", () => {
-  const src = read("sugoroku");
-  assert.ok(src.includes('role="button"'), "盤面がタップ対象の role になっていない");
-  assert.ok(src.includes("rollDice(s)"), "サイコロを振るアクションへの接続が壊れている");
-});
 
 test("gesture batch2: reaction は pointerdown 直結のタップ面で計測する", () => {
   const src = read("reaction");
@@ -107,17 +74,8 @@ test("gesture batch2 (review): reaction の Space は window リスナー1経路
 });
 
 test("gesture batch2 (review): ジェスチャ面は touchAction none でフリックがスクロールに奪われない", () => {
-  const sugoroku = read("sugoroku");
-  assert.ok(sugoroku.includes('touchAction: "none"'), "sugoroku の盤面に touchAction none がない");
   const dicequest = read("dicequest");
   // 空の置き場とダイス表示中の置き場の2面とも none であること。
   assert.equal((dicequest.match(/touchAction: "none"/g) ?? []).length, 2, "dicequest のダイス置き場2面に touchAction none がない");
 });
 
-test("gesture batch2: stopwatch は pointerdown 直結の時計タップ面で開始・停止する", () => {
-  const src = read("stopwatch");
-  assert.ok(!src.includes("<button"), "stopwatch に button が残っている");
-  assert.ok(src.includes('role="button"'), "時計がタップ面になっていない");
-  assert.ok(src.includes("onPointerDown"), "開始・停止が pointerdown 直結になっていない");
-  assert.ok(src.includes('if (phase === "running") stop(); else start();'), "タップが開始・停止に繋がっていない");
-});

@@ -1,7 +1,6 @@
 // A45フェーズの内容充実（バンク増量第2弾）の検証。
 // - lib/online/games/wordwolf.ts: お題ペア 60組→70組（全単語重複なしの作法を維持）
 // - lib/online/games/majority.ts: バンク 75問→90問（4択形式・重複なし）
-// - lib/online/games/minority.ts: バンク 55問→65問（2択形式・重複なし）
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
@@ -35,7 +34,6 @@ async function loadOnline(name, exportsList) {
 
 const ww = await loadOnline("wordwolf.ts", ["WORDWOLF_PAIRS"]);
 const mj = await loadOnline("majority.ts", ["MAJORITY_QUESTIONS"]);
-const mn = await loadOnline("minority.ts", ["MINORITY_QUESTIONS"]);
 
 // ---------------------------------------------------------------- ワードウルフ 増量
 
@@ -98,27 +96,6 @@ test("多数決: バンクは100問・全て4択・必須フィールドと重�
 test("多数決: 増量分(A45)の代表トピックが含まれている", () => {
   const topics = mj.MAJORITY_QUESTIONS.map((q) => q.topic);
   for (const added of ["ハロウィンといえば？", "バレンタインといえば？", "七夕といえば？", "母の日といえば？", "都会といえば？", "引っ越しといえば？", "卒業といえば？"]) {
-    assert.ok(topics.includes(added), `増量トピック ${added} がない`);
-  }
-});
-
-// ---------------------------------------------------------------- 少数決 増量
-
-test("少数決: バンクは75問・全て2択・必須フィールドと重複なし", () => {
-  assert.equal(mn.MINORITY_QUESTIONS.length, 75);
-  const topics = mn.MINORITY_QUESTIONS.map((q) => q.topic);
-  assert.equal(new Set(topics).size, topics.length);
-  for (const q of mn.MINORITY_QUESTIONS) {
-    assert.ok(typeof q.topic === "string" && q.topic.length > 0);
-    assert.equal(q.choices.length, 2);
-    assert.notEqual(q.choices[0], q.choices[1]);
-    for (const c of q.choices) assert.ok(typeof c === "string" && c.length > 0);
-  }
-});
-
-test("少数決: 増量分(A45)の代表トピックが含まれている", () => {
-  const topics = mn.MINORITY_QUESTIONS.map((q) => q.topic);
-  for (const added of ["お好み焼きはどっち？", "年賀状はどっち？", "財布はどっち？", "サウナはどっち？", "置き時計はどっち？"]) {
     assert.ok(topics.includes(added), `増量トピック ${added} がない`);
   }
 });

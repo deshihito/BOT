@@ -1378,13 +1378,6 @@ button.og-cell:disabled { cursor:default; }
 .og-board-connect4-wrap .og-cell { background:#fdfdf8; border-radius:50%; }
 .og-disc-red { background:radial-gradient(circle at 35% 30%, #f08080, #c0392b 75%); box-shadow:inset 0 -2px 4px rgba(0,0,0,.3); }
 .og-disc-yellow { background:radial-gradient(circle at 35% 30%, #ffe9a3, #d9a41c 75%); box-shadow:inset 0 -2px 4px rgba(0,0,0,.3); }
-/* 五目並べ: 木盤＋黒白石 */
-.og-board-gomoku { background:#dcb87a; border:2px solid #b08d4f; }
-.og-board-gomoku .og-cell { background:transparent; border-radius:3px; box-shadow:inset 0 0 0 1px rgba(120,85,30,.45); }
-.og-board-gomoku button.og-cell:hover { background:rgba(255,255,255,.28); }
-.og-stone { display:block; width:88%; height:88%; border-radius:50%; pointer-events:none; }
-.og-stone-black { background:radial-gradient(circle at 35% 30%, #4a4a4a, #101010 72%); box-shadow:0 1px 3px rgba(0,0,0,.5); }
-.og-stone-white { background:radial-gradient(circle at 35% 30%, #ffffff, #d8d8d0 78%); box-shadow:0 1px 3px rgba(0,0,0,.45); }
 /* 海戦: 自海/攻撃海のセル状態色（命中=赤系、外れ=薄色、沈没=濃色、自艦=グレー） */
 .og-board-sea { background:#bcd6ea; border:2px solid #7fa8c9; gap:2px; }
 .og-sea-cell { background:#dcebf5; border-radius:2px; color:var(--text); font-size:13px; font-weight:700; line-height:1; }
@@ -1525,10 +1518,6 @@ button.og-reversi-cell:hover { background:#2a9266; }
 .og-c4-drop-btn { min-height:36px; border:1px solid var(--line); border-radius:8px; background:#fff; color:var(--accent); font:inherit; font-size:15px; font-weight:800; cursor:pointer; }
 .og-c4-drop-btn:hover:not(:disabled) { background:var(--accent-soft); }
 .og-c4-drop-btn:disabled { opacity:.4; cursor:not-allowed; }
-/* 五目並べ盤（og-gomoku-board / og-gomoku-cell） */
-.og-gomoku-board { display:grid; grid-template-columns:repeat(15,minmax(0,1fr)); grid-template-rows:repeat(15,minmax(0,1fr)); gap:2px; width:100%; max-width:620px; margin:0 auto; padding:8px; border-radius:10px; background:#dcb87a; border:2px solid #b08d4f; }
-.og-gomoku-cell { background:transparent; border-radius:3px; box-shadow:inset 0 0 0 1px rgba(120,85,30,.45); }
-button.og-gomoku-cell:hover { background:rgba(255,255,255,.28); }
 /* 海戦（og-bs-*）: 状態色は og-sea-* と同じ意味付け */
 .og-bs-seas { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:16px; align-items:start; }
 @media (max-width:760px) { .og-bs-seas { grid-template-columns:minmax(0,1fr); } }

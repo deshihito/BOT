@@ -22,7 +22,6 @@ const countButtons = (dir) => {
 };
 
 const BATCH = [
-  { dir: "drawpoker", client: "DrawPokerClient.tsx", scene: "DrawPokerScene3D.tsx", buttons: 0, chip: true },
   { dir: "texas", client: "TexasClient.tsx", scene: "TexasScene3D.tsx", buttons: 3, chip: true },
   { dir: "hearts", client: "HeartsClient.tsx", scene: "HeartsScene3D.tsx", buttons: 4, chip: false },
 ];
@@ -54,31 +53,8 @@ for (const g of BATCH) {
   });
 }
 
-test("3D batch3 drawpoker: 個別カードピック（pickId にカード index を持たせる）", () => {
-  const scene = read("app", "games", "drawpoker", "DrawPokerScene3D.tsx");
-  assert.match(scene, /pickId = `card-\$\{pickIndex\}`|pickId.*card-/, "カード index 入りの pickId を付ける");
-  assert.match(scene, /card-/, "pickId の接頭辞");
-  assert.match(scene, /onToggleCard/, "カードタップが捨て札トグルへ接続される");
-  const client = read("app", "games", "drawpoker", "DrawPokerClient.tsx");
-  assert.match(client, /onToggleCard=\{toggleDiscard\}/, "既存の toggleDiscard ハンドラへ接続する");
-});
 
-test("3D batch3 drawpoker: 捨て札の視覚状態（キープ=金縁/持ち上げ、捨て札=暗色/減光/沈ませる）がある", () => {
-  const scene = read("app", "games", "drawpoker", "DrawPokerScene3D.tsx");
-  assert.match(scene, /0xf2b33d/, "キープ札の金縁フレーム");
-  assert.match(scene, /discards/, "discards をシーンが受け取る");
-  assert.match(scene, /dropping/, "捨て札状態を位置・見た目に反映する");
-  assert.match(scene, /setCardDim|opacity/, "捨て札を暗くする");
-});
 
-test("3D batch3 drawpoker: 初期選択が suggestHolds と同期している（クライアントが提案から discards を作りシーンへ渡す）", () => {
-  const client = read("app", "games", "drawpoker", "DrawPokerClient.tsx");
-  assert.match(client, /suggestHolds/, "lib の提案を使う");
-  assert.match(client, /setDiscards\(next\.hand\.map/, "提案の補集合を初期 discards にする");
-  assert.match(client, /discards=\{discards\}/, "discards をシーンへ渡す");
-  const scene = read("app", "games", "drawpoker", "DrawPokerScene3D.tsx");
-  assert.match(scene, /DECK_POS/, "山札位置を起点に配る（交換後のフライインも同じ起点）");
-});
 
 test("3D batch3 texas: コミュニティカードとホールカード、ポットのチップ山がある", () => {
   const scene = read("app", "games", "texas", "TexasScene3D.tsx");
@@ -103,8 +79,3 @@ test("3D batch3 hearts: トリックと手札タップ（合法判定はクラ�
   assert.match(client, /onCardTap=\{handleCardTap\}/);
 });
 
-test("3D batch3: ロジック層（lib/drawpoker.ts, lib/hearts.ts）に three が混入していない", () => {
-  for (const f of ["drawpoker.ts", "hearts.ts"]) {
-    assert.doesNotMatch(read("lib", f), /from "three"/, `lib/${f}`);
-  }
-});

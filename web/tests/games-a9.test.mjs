@@ -1,7 +1,5 @@
 // A9フェーズの新規4本のロジック検証。
-// - lib/nurikabe.ts: 解の存在する生成（一意解優先）・ルール違反チェック・完成判定
 // - lib/freecell.ts: 決定的配布・移動検証・まとめて動かせる枚数・自動送り・勝利
-// - lib/columns.ts: 回転・マッチ検出・消去と連鎖・落下と固定
 // - lib/online/games/majority.ts: 秘匿（締切まで他人の回答が見えない）・多数決の採点・tick 締切
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -42,91 +40,11 @@ async function loadOnline(name, exportsList) {
   return import("data:text/javascript;base64," + Buffer.from(code).toString("base64"));
 }
 
-const nk = await loadLib("nurikabe.ts");
 const fc = await loadLib("freecell.ts");
-const col = await loadLib("columns.ts");
-const mj = await loadOnline("majority.ts", [
-  "gameModule",
-  "MAJORITY_QUESTIONS",
-  "MJ_TOTAL_QUESTIONS",
-  "MJ_POINTS_PER_VOTE",
-  "mjScoreFor",
-]);
+const mj = await loadOnline("majority.ts", [ "gameModule", "MAJORITY_QUESTIONS", "MJ_TOTAL_QUESTIONS", "MJ_POINTS_PER_VOTE", "mjScoreFor", ]);
 
 const rngStub = () => 0.5;
 const seats = (n) => Array.from({ length: n }, (_, i) => ({ seat: i, name: `P${i + 1}` }));
-
-// ---------------------------------------------------------------- ぬりかべ
-
-test("ぬりかべ: 生成した盤面は正解どおりに塗ると完成し、数字が島の大きさと一致する", () => {
-  for (const size of [5, 7]) {
-    for (const seed of [1, 7, 42, 1234]) {
-      const state = nk.createNurikabeGame(seed, size);
-      assert.equal(state.solution.length, size * size);
-      // 数字セルの総和 = 島セルの総数。
-      const clueSum = state.clues.reduce((s, v) => s + (v ?? 0), 0);
-      const landCount = state.solution.filter((s) => !s).length;
-      assert.equal(clueSum, landCount, `seed=${seed} size=${size}`);
-      // 正解どおりの marks で完成になる。
-      const marks = state.solution.map((sea, i) => (state.clues[i] !== null ? 2 : sea ? 1 : 2));
-      const solved = { ...state, marks };
-      assert.equal(nk.isNurikabeComplete(solved), true, `seed=${seed} size=${size}`);
-      assert.deepEqual(nk.nurikabeViolations(size, state.clues, marks, true), []);
-    }
-  }
-});
-
-test("ぬりかべ: 同じシードでは同じ盤面になる", () => {
-  const a = nk.createNurikabeGame(99, 5);
-  const b = nk.createNurikabeGame(99, 5);
-  assert.deepEqual(a.clues, b.clues);
-  assert.deepEqual(a.solution, b.solution);
-});
-
-test("ぬりかべ: 数字セルはタップしても変わらない／通常セルは3状態を循環する", () => {
-  const state = nk.createNurikabeGame(5, 5);
-  const clueIdx = state.clues.findIndex((c) => c !== null);
-  assert.ok(clueIdx >= 0);
-  assert.equal(nk.cycleNurikabeMark(state, clueIdx), state);
-  const plainIdx = state.clues.findIndex((c) => c === null);
-  let s = nk.cycleNurikabeMark(state, plainIdx);
-  assert.equal(s.marks[plainIdx], 1);
-  s = nk.cycleNurikabeMark(s, plainIdx);
-  assert.equal(s.marks[plainIdx], 2);
-  s = nk.cycleNurikabeMark(s, plainIdx);
-  assert.equal(s.marks[plainIdx], 0);
-});
-
-test("ぬりかべ: 2x2の海・くっついた島・大きすぎる島を違反として検出する", () => {
-  const size = 5;
-  const noClues = new Array(25).fill(null);
-  // 2x2 の海。
-  const seaMarks = new Array(25).fill(0);
-  seaMarks[0] = 1;
-  seaMarks[1] = 1;
-  seaMarks[5] = 1;
-  seaMarks[6] = 1;
-  const v1 = nk.nurikabeViolations(size, noClues, seaMarks, false);
-  assert.ok(v1.some((v) => v.type === "sea2x2"));
-  // 2つの数字が1つの島につながる。
-  const clues = new Array(25).fill(null);
-  clues[0] = 2;
-  clues[2] = 2;
-  const mergedMarks = new Array(25).fill(0);
-  mergedMarks[0] = 2;
-  mergedMarks[1] = 2;
-  mergedMarks[2] = 2;
-  const v2 = nk.nurikabeViolations(size, clues, mergedMarks, false);
-  assert.ok(v2.some((v) => v.type === "islandMerged"));
-  // 数字より大きい島。
-  const smallClues = new Array(25).fill(null);
-  smallClues[0] = 1;
-  const bigMarks = new Array(25).fill(0);
-  bigMarks[0] = 2;
-  bigMarks[1] = 2;
-  const v3 = nk.nurikabeViolations(size, smallClues, bigMarks, false);
-  assert.ok(v3.some((v) => v.type === "islandTooBig"));
-});
 
 // ---------------------------------------------------------------- フリーセル
 
@@ -277,82 +195,6 @@ test("フリーセル: 連続移動は1手ずつ戻れる／自動送りは undo
   const b2 = fc.undoFreecell(b1);
   assert.deepEqual(b2.columns, s.columns);
   assert.equal(b2.moves, s.moves);
-});
-
-// ---------------------------------------------------------------- コラムス
-
-const emptyBoard = () => new Array(col.COLUMNS_CELLS).fill(null);
-const idx = (r, c) => r * col.COLUMNS_COLS + c;
-
-test("コラムス: 初期状態は空盤に3個ブロックと次のブロックがあり、決定的", () => {
-  const a = col.createColumnsGame(7);
-  const b = col.createColumnsGame(7);
-  assert.deepEqual(a.active, b.active);
-  assert.deepEqual(a.next, b.next);
-  assert.equal(a.active.gems.length, 3);
-  assert.ok(a.board.every((v) => v === null));
-  assert.equal(a.status, "playing");
-});
-
-test("コラムス: 回転で宝石の並びが循環する", () => {
-  const s = col.createColumnsGame(3);
-  const [x, y, z] = s.active.gems;
-  const r = col.rotateColumns(s);
-  assert.deepEqual(r.active.gems, [z, x, y]);
-});
-
-test("コラムス: 縦・横・斜めの3つそろいを検出し、2つでは消えない", () => {
-  const board = emptyBoard();
-  // 縦3（列0の下3つ）
-  board[idx(9, 0)] = 0;
-  board[idx(10, 0)] = 0;
-  board[idx(11, 0)] = 0;
-  // 横3（最下段の列2..4）
-  board[idx(11, 2)] = 1;
-  board[idx(11, 3)] = 1;
-  board[idx(11, 4)] = 1;
-  // 斜め3
-  board[idx(9, 3)] = 2;
-  board[idx(10, 4)] = 2;
-  board[idx(11, 5)] = 2;
-  // 2つだけ（消えない）
-  board[idx(11, 1)] = 3;
-  board[idx(10, 1)] = 3;
-  const marked = col.findColumnMatches(board);
-  assert.equal(marked.filter(Boolean).length, 9);
-  const res = col.resolveColumnsBoard(board);
-  assert.equal(res.clearedCount, 9);
-  assert.equal(res.chains, 1);
-  assert.equal(res.gained, 90);
-  assert.equal(res.board[idx(11, 1)], 3); // 2つ組は残る（落ちて最下段）
-  assert.equal(res.board[idx(10, 1)], 3);
-});
-
-test("コラムス: 消去後に落ちた宝石がそろうと連鎖する", () => {
-  const board = emptyBoard();
-  // 列0を下から 赤,赤,青,青,青,赤 と積む（青3つが消え、上の赤が落ちて赤3つになる）。
-  const stack = [0, 0, 1, 1, 1, 0]; // 下から順
-  stack.forEach((color, k) => {
-    board[idx(col.COLUMNS_ROWS - 1 - k, 0)] = color;
-  });
-  const res = col.resolveColumnsBoard(board);
-  assert.equal(res.chains, 2);
-  assert.equal(res.clearedCount, 6);
-  assert.equal(res.gained, 30 + 60);
-  assert.ok(res.board.every((v) => v === null));
-});
-
-test("コラムス: ハードドロップで盤に3個固定され、積み上がるとゲームオーバー", () => {
-  let s = col.createColumnsGame(11);
-  s = col.dropColumns(s);
-  assert.equal(s.placed, 1);
-  const onBoard = s.board.filter((v) => v !== null).length;
-  assert.equal(onBoard + s.cleared, 3);
-  // 同じ列に積み続ければいずれゲームオーバーになる。
-  for (let i = 0; i < 40 && s.status === "playing"; i++) {
-    s = col.dropColumns(s);
-  }
-  assert.equal(s.status, "gameover");
 });
 
 // ---------------------------------------------------------------- 多数決ゲーム

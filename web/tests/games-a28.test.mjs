@@ -1,5 +1,4 @@
 // A28フェーズの検証。
-// - lib/icemaze.ts: 滑り・到達可能性（生成保証）・最短手数・1手戻す・通過ではクリアにならない
 // - lib/online/games/typerace.ts: 申告の検証（範囲・単調増加）・完走順の得点・締切・退出
 // - lib/quiz.ts: 増量後のバンク（180問・カテゴリ配分・形式・正解の一貫性）
 import { test } from "node:test";
@@ -41,15 +40,8 @@ async function loadOnline(name, exportsList) {
   return import("data:text/javascript;base64," + Buffer.from(code).toString("base64"));
 }
 
-const ice = await loadLib("icemaze.ts");
 const quiz = await loadLib("quiz.ts");
-const tr = await loadOnline("typerace.ts", [
-  "gameModule",
-  "TR_TEXTS",
-  "TR_TOTAL_ROUNDS",
-  "TR_TIME_LIMIT_MS",
-  "TR_RANK_POINTS",
-]);
+const tr = await loadOnline("typerace.ts", [ "gameModule", "TR_TEXTS", "TR_TOTAL_ROUNDS", "TR_TIME_LIMIT_MS", "TR_RANK_POINTS", ]);
 
 function makeRng(seed) {
   let s = seed >>> 0;
@@ -58,104 +50,6 @@ function makeRng(seed) {
     return s / 4294967296;
   };
 }
-
-// ---------------------------------------------------------------- icemaze
-
-test("氷の迷路: 同じシードでは同じ盤面になる", () => {
-  const a = ice.createIceMaze(42);
-  const b = ice.createIceMaze(42);
-  assert.deepEqual(a.walls, b.walls);
-  assert.equal(a.minMoves, b.minMoves);
-  assert.equal(a.player, a.start);
-  assert.equal(a.status, "playing");
-});
-
-test("氷の迷路: 生成された盤面は必ず到達可能で、最短手数は下限以上", () => {
-  for (const seed of [1, 7, 123, 999, 20261112]) {
-    const s = ice.createIceMaze(seed);
-    const recomputed = ice.computeMinMoves(s.cols, s.rows, s.walls, s.start, s.goal);
-    assert.equal(recomputed, s.minMoves, `seed ${seed}`);
-    assert.ok(s.minMoves >= ice.ICE_MIN_SOLUTION, `seed ${seed}: ${s.minMoves}`);
-    assert.equal(s.walls[s.start], false);
-    assert.equal(s.walls[s.goal], false);
-    assert.notEqual(s.start, s.goal);
-  }
-});
-
-test("氷の迷路: 最短路どおりに滑るとちょうど最短手数でクリアできる", () => {
-  const s0 = ice.createIceMaze(5);
-  // テスト側で BFS して経路（方向列）を求める。
-  const prev = new Map([[s0.start, null]]);
-  const queue = [s0.start];
-  while (queue.length > 0) {
-    const cur = queue.shift();
-    if (cur === s0.goal) break;
-    for (const dir of ["up", "right", "down", "left"]) {
-      const dest = ice.slideDestination(s0.cols, s0.rows, s0.walls, cur, dir);
-      if (dest === cur || prev.has(dest)) continue;
-      prev.set(dest, { from: cur, dir });
-      queue.push(dest);
-    }
-  }
-  const dirs = [];
-  let node = s0.goal;
-  while (node !== s0.start) {
-    const step = prev.get(node);
-    assert.ok(step, "経路が見つかるはず");
-    dirs.unshift(step.dir);
-    node = step.from;
-  }
-  assert.equal(dirs.length, s0.minMoves);
-  let s = s0;
-  for (const dir of dirs) s = ice.slideIce(s, dir);
-  assert.equal(s.status, "won");
-  assert.equal(s.moves, s0.minMoves);
-  assert.equal(s.player, s0.goal);
-});
-
-test("氷の迷路: ゴールを通過しただけではクリアにならず、止まればクリア", () => {
-  const base = {
-    cols: 5,
-    rows: 1,
-    walls: [false, false, false, false, false],
-    start: 0,
-    goal: 2,
-    player: 0,
-    moves: 0,
-    history: [],
-    status: "playing",
-    minMoves: 1,
-    seed: 0,
-  };
-  // 壁なし: 右へ滑るとゴールを通過して端まで行く。
-  const passed = ice.slideIce(base, "right");
-  assert.equal(passed.player, 4);
-  assert.equal(passed.status, "playing");
-  // 3 に壁があるとゴール (2) で止まってクリア。
-  const walled = { ...base, walls: [false, false, false, true, false] };
-  const stopped = ice.slideIce(walled, "right");
-  assert.equal(stopped.player, 2);
-  assert.equal(stopped.status, "won");
-});
-
-test("氷の迷路: 動けない方向は同一参照、undo で位置と手数が戻る、非破壊", () => {
-  const s0 = ice.createIceMaze(9);
-  const same = ice.slideIce(s0, "up"); // スタートは左上隅なので上には動けない
-  assert.equal(same, s0);
-  const moved = ice.slideIce(s0, "right");
-  assert.notEqual(moved, s0);
-  assert.equal(s0.player, s0.start, "元の状態は変わらない");
-  assert.equal(s0.moves, 0);
-  assert.equal(moved.moves, 1);
-  const back = ice.undoIce(moved);
-  assert.equal(back.player, s0.start);
-  assert.equal(back.moves, 0);
-  assert.equal(back.status, "playing");
-  assert.equal(ice.undoIce(s0), s0);
-  // クリア後の入力は受け付けない。
-  const won = { ...moved, status: "won" };
-  assert.equal(ice.slideIce(won, "left"), won);
-});
 
 // ---------------------------------------------------------------- typerace
 

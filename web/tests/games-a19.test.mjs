@@ -1,6 +1,5 @@
 // A19フェーズの新規2本＋増量のロジック検証。
 // - lib/mahjong.ts: フリー判定・ペア除去・可解性・詰み判定
-// - lib/shikaku.ts: 生成（解の分割）・完成判定・違反検出
 // - lib/online/games/shiritori.ts: 単語バンク増量後の妥当性（件数・重複なし・形式）
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -42,13 +41,7 @@ async function loadOnline(name, exportsList) {
 }
 
 const mj = await loadLib("mahjong.ts");
-const sh = await loadLib("shikaku.ts");
-const shi = await loadOnline("shiritori.ts", [
-  "SHIRITORI_WORDS",
-  "isValidWordForm",
-  "isBankWord",
-  "shiritoriTail",
-]);
+const shi = await loadOnline("shiritori.ts", [ "SHIRITORI_WORDS", "isValidWordForm", "isBankWord", "shiritoriTail", ]);
 
 // ---- 麻雀ソリティア ----
 
@@ -118,72 +111,6 @@ test("麻雀: ペアを取ると残りが減り、ヒントは盤に残ってい
   assert.ok(hint !== null);
   assert.equal(state.tiles[hint[0]].removed, false);
   assert.equal(state.tiles[hint[1]].removed, false);
-});
-
-// ---- しかく ----
-
-test("しかく: 生成した解は数字=面積・各長方形に数字1つで、全面を覆う", () => {
-  for (const size of [5, 6]) {
-    for (const seed of [1, 3, 17, 42, 777]) {
-      const state = sh.createShikakuGame(size, seed);
-      let covered = 0;
-      const cellsSeen = new Set();
-      for (const rect of state.solution) {
-        const area = sh.rectArea(rect);
-        covered += area;
-        const clues = [];
-        for (const idx of sh.rectCells(rect, size)) {
-          assert.ok(!cellsSeen.has(idx), "解の長方形が重なっている");
-          cellsSeen.add(idx);
-          if (state.clues[idx] !== null) clues.push(state.clues[idx]);
-        }
-        assert.deepEqual(clues, [area]);
-      }
-      assert.equal(covered, size * size);
-      assert.equal(cellsSeen.size, size * size);
-    }
-  }
-});
-
-test("しかく: 同じシードでは同じ問題になる", () => {
-  const a = sh.createShikakuGame(6, 99);
-  const b = sh.createShikakuGame(6, 99);
-  assert.deepEqual(a.clues, b.clues);
-  assert.deepEqual(a.solution, b.solution);
-});
-
-test("しかく: 解を描くと完成し、途中の状態は未完成", () => {
-  for (const size of [5, 6]) {
-    const state = sh.createShikakuGame(size, 42);
-    assert.equal(sh.isShikakuComplete(state), false);
-    const solved = sh.solveShikaku(state);
-    assert.equal(solved.status, "won");
-    assert.equal(sh.isShikakuComplete(solved), true);
-    assert.equal(sh.shikakuViolations(solved).length, 0);
-  }
-});
-
-test("しかく: 違反検出（数字なし・数字2つ・面積不一致）と重なる長方形の置き換え", () => {
-  const state = sh.createShikakuGame(5, 2);
-  // 数字の無い場所に小さな長方形を置く想定で、まず解の1つをそのまま置く（違反なし）。
-  const withOne = sh.applyShikakuRect(state, state.solution[0]);
-  assert.equal(sh.shikakuViolations(withOne).length, 0);
-  // 全面を1つの長方形にすると、数字が複数入って違反になる。
-  const whole = sh.applyShikakuRect(state, { r1: 0, c1: 0, r2: 4, c2: 4 });
-  assert.ok(sh.shikakuViolations(whole).some((v) => v.type === "multiClue"));
-  // 置き換えで前の長方形は消えている（全面1つだけ）。
-  assert.equal(whole.rects.length, 1);
-  // 取り除くと空に戻る。
-  const removed = sh.removeShikakuRectAt(whole, 0);
-  assert.equal(removed.rects.length, 0);
-});
-
-test("しかく: 盤外の長方形は無視され、座標は正規化される", () => {
-  const state = sh.createShikakuGame(5, 2);
-  const out = sh.applyShikakuRect(state, { r1: 0, c1: 0, r2: 9, c2: 9 });
-  assert.equal(out, state);
-  const flipped = sh.applyShikakuRect(state, { r1: 2, c1: 3, r2: 0, c2: 1 });
-  assert.deepEqual(flipped.rects[0], { r1: 0, c1: 1, r2: 2, c2: 3 });
 });
 
 // ---- しりとり単語バンク増量 ----

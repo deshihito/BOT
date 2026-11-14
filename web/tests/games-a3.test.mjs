@@ -1,6 +1,5 @@
 // A3 フェーズ4本のロジック検証（lib のみ、UI 非依存）。
 // - lib/slot.ts: 配当判定・チップ計算・確率表
-// - lib/bingo.ts: カード生成・ライン判定・進行と勝敗
 // - lib/amida.ts: 到達先計算（置換性）・経路トレース
 // - lib/kanacross.ts: 盤データ整合性・完成判定・単語チェック
 import { test } from "node:test";
@@ -20,7 +19,6 @@ async function loadLib(name) {
 }
 
 const slot = await loadLib("slot.ts");
-const bingo = await loadLib("bingo.ts");
 const amida = await loadLib("amida.ts");
 const kana = await loadLib("kanacross.ts");
 
@@ -70,62 +68,6 @@ test("スロット: 不正なベットは無効、破産時は再支給できる
   const broke = slot.createSlotGame(1, 0);
   assert.equal(slot.refillChips(broke).chips, slot.SLOT_INITIAL_CHIPS);
   assert.equal(slot.refillChips(s), s); // 残っているときは再支給しない
-});
-
-// ---------- ビンゴ ----------
-
-test("ビンゴ: 生成される全カードが正しく、抽選プールは1〜75の置換", () => {
-  const g = bingo.createBingoGame(7);
-  assert.ok(bingo.isValidCard(g.playerCard));
-  assert.equal(g.cpuCards.length, bingo.BINGO_CPU_COUNT);
-  for (const c of g.cpuCards) assert.ok(bingo.isValidCard(c));
-  assert.deepEqual(
-    [...g.pool].sort((x, y) => x - y),
-    Array.from({ length: 75 }, (_, i) => i + 1),
-  );
-  const g2 = bingo.createBingoGame(7);
-  assert.deepEqual(g.playerCard, g2.playerCard);
-});
-
-test("ビンゴ: 列の範囲と文字が正しい", () => {
-  assert.deepEqual(bingo.columnRange(0), { min: 1, max: 15 });
-  assert.deepEqual(bingo.columnRange(4), { min: 61, max: 75 });
-  assert.equal(bingo.columnLetter(1), "B");
-  assert.equal(bingo.columnLetter(31), "N");
-  assert.equal(bingo.columnLetter(75), "O");
-});
-
-test("ビンゴ: ライン完成とリーチの判定", () => {
-  const g = bingo.createBingoGame(3);
-  const card = g.playerCard;
-  const row0 = [0, 1, 2, 3, 4].map((i) => card.cells[i]).filter((v) => v !== 0);
-  // 横1行目を全部引いた状態 → row0 が完成
-  const full = bingo.completedLines(card, row0);
-  assert.ok(full.includes("row0"));
-  assert.equal(bingo.cardStatus(card, row0).bingo, true);
-  // 1つ欠け → リーチ
-  const almost = row0.slice(1);
-  assert.ok(bingo.reachLines(card, almost).includes("row0"));
-  const st = bingo.cardStatus(card, almost);
-  assert.equal(st.bingo, false);
-  assert.equal(st.reach, true);
-  assert.equal(st.minRemaining, 1);
-});
-
-test("ビンゴ: 最後まで進めると必ず決着し、勝者のカードはビンゴしている", () => {
-  let g = bingo.createBingoGame(99);
-  let guard = 0;
-  while (g.phase === "playing" && guard < 80) {
-    g = bingo.drawNext(g);
-    guard++;
-  }
-  assert.equal(g.phase, "finished");
-  assert.ok(g.winner !== null);
-  assert.equal(new Set(g.drawn).size, g.drawn.length);
-  const winnerCard = g.winner.type === "player" ? g.playerCard : g.cpuCards[g.winner.index];
-  assert.equal(bingo.cardStatus(winnerCard, g.drawn).bingo, true);
-  // 終了後の drawNext は無効
-  assert.equal(bingo.drawNext(g), g);
 });
 
 // ---------- あみだくじ ----------

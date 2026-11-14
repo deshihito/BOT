@@ -1,6 +1,4 @@
 // A25フェーズ新規3本のロジック検証（lib のみ、UI 非依存）。
-// - lib/knightstour.ts: 完全ツアーの構成・移動規則・行き詰まり・1手戻す
-// - lib/queens.ts: 解の構成・攻撃検出・利き筋・完成判定
 // - lib/online/games/calcrace.ts: 出題の正しさ・採点・ロック・進行・秘匿・退出
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -41,15 +39,7 @@ async function loadOnline(name, exportsList) {
   return new Function(body)();
 }
 
-const kt = await loadLib("knightstour.ts");
-const qn = await loadLib("queens.ts");
-const cr = await loadOnline("calcrace.ts", [
-  "gameModule",
-  "buildCrQuestions",
-  "crScoreFor",
-  "CR_TOTAL_QUESTIONS",
-  "CR_LOCK_MS",
-]);
+const cr = await loadOnline("calcrace.ts", [ "gameModule", "buildCrQuestions", "crScoreFor", "CR_TOTAL_QUESTIONS", "CR_LOCK_MS", ]);
 
 function makeRng(seed) {
   let s = seed | 0;
@@ -67,113 +57,6 @@ function isKnightMove(size, a, b) {
   const dc = Math.abs((a % size) - (b % size));
   return (dr === 1 && dc === 2) || (dr === 2 && dc === 1);
 }
-
-// ---------------------------------------------------------------- knightstour
-
-for (const size of [5, 6]) {
-  test(`ナイトツアー ${size}x${size}: 完全ツアーが構成され、解どおりに進めば勝利する`, () => {
-    for (const seed of [1, 42, 777]) {
-      const s = kt.createKnightsTour(size, seed);
-      assert.equal(s.solution.length, size * size);
-      assert.equal(new Set(s.solution).size, size * size);
-      for (let i = 1; i < s.solution.length; i++) {
-        assert.ok(isKnightMove(size, s.solution[i - 1], s.solution[i]), `seed=${seed} step=${i}`);
-      }
-      assert.deepEqual(s.path, [s.solution[0]]);
-      let cur = s;
-      for (let i = 1; i < s.solution.length; i++) {
-        cur = kt.moveKnight(cur, s.solution[i]);
-        assert.equal(cur.path.length, i + 1);
-      }
-      assert.equal(cur.status, "won");
-    }
-  });
-}
-
-test("ナイトツアー: 同じシードでは同じツアーになる（決定的）", () => {
-  const a = kt.createKnightsTour(6, 123);
-  const b = kt.createKnightsTour(6, 123);
-  assert.deepEqual(a.solution, b.solution);
-});
-
-test("ナイトツアー: ナイトの動きでない移動・再訪問・盤外は受け付けない", () => {
-  const s = kt.createKnightsTour(5, 5);
-  const head = s.path[0];
-  assert.equal(kt.moveKnight(s, head), s); // 同じマス
-  assert.equal(kt.moveKnight(s, -1), s);
-  assert.equal(kt.moveKnight(s, 25), s);
-  const nonKnight = Array.from({ length: 25 }, (_, i) => i).find(
-    (i) => i !== head && !isKnightMove(5, head, i),
-  );
-  assert.equal(kt.moveKnight(s, nonKnight), s);
-  const moves = kt.legalMoves(s);
-  assert.ok(moves.length > 0);
-  const s2 = kt.moveKnight(s, moves[0]);
-  assert.equal(kt.moveKnight(s2, head), s2); // 訪問済みには戻れない
-});
-
-test("ナイトツアー: 行き詰まると stuck になり、1手戻すと playing に戻る", () => {
-  const base = kt.createKnightsTour(5, 1);
-  // 中心(12)の全遷移先を訪問済みにし、(4,3)=23 から中心へ入ると行き詰まる盤を手で組む。
-  const custom = { ...base, path: [1, 3, 5, 9, 15, 19, 21, 23], status: "playing" };
-  const stuck = kt.moveKnight(custom, 12);
-  assert.equal(stuck.path.length, 9);
-  assert.equal(stuck.status, "stuck");
-  const back = kt.undoMove(stuck);
-  assert.equal(back.path.length, 8);
-  assert.equal(back.status, "playing");
-  assert.equal(kt.undoMove(base), base); // 開始マスのみでは戻せない
-});
-
-// ---------------------------------------------------------------- queens
-
-for (const size of [6, 8]) {
-  test(`クイーン配置 ${size}x${size}: 解が構成され、解どおりに置けば勝利する`, () => {
-    for (const seed of [2, 99]) {
-      const s = qn.createQueensGame(size, seed);
-      assert.equal(s.solution.length, size);
-      for (let i = 0; i < size; i++) {
-        for (let j = i + 1; j < size; j++) {
-          assert.equal(qn.queensAttack(size, s.solution[i], s.solution[j]), false);
-        }
-      }
-      let cur = s;
-      for (const cell of s.solution) cur = qn.toggleQueen(cur, cell);
-      assert.equal(cur.queens.length, size);
-      assert.equal(cur.status, "won");
-    }
-  });
-}
-
-test("クイーン配置: 同じシードでは同じ解になる（決定的）", () => {
-  assert.deepEqual(qn.createQueensGame(8, 7).solution, qn.createQueensGame(8, 7).solution);
-});
-
-test("クイーン配置: 利き合うペアと利き筋を検出できる", () => {
-  let s = qn.createQueensGame(8, 3);
-  s = qn.toggleQueen(s, 0); // (0,0)
-  s = qn.toggleQueen(s, 9); // (1,1) 斜めで利き合う
-  assert.deepEqual(qn.conflictingQueens(s), [0, 9]);
-  const attacked = qn.attackedSquares(s);
-  assert.ok(attacked.includes(1)); // 同じ行
-  assert.ok(attacked.includes(8)); // 同じ列
-  assert.ok(attacked.includes(18)); // (1,1) からの斜め (2,2)
-  assert.ok(!attacked.includes(0)); // クイーン自身のマスは含まない
-  assert.equal(s.status, "playing");
-});
-
-test("クイーン配置: 付け外しと上限・不正なマスの扱い", () => {
-  let s = qn.createQueensGame(6, 4);
-  s = qn.toggleQueen(s, 0);
-  assert.deepEqual(s.queens, [0]);
-  s = qn.toggleQueen(s, 0);
-  assert.deepEqual(s.queens, []);
-  assert.equal(qn.toggleQueen(s, -1), s);
-  assert.equal(qn.toggleQueen(s, 36), s);
-  for (let i = 0; i < 6; i++) s = qn.toggleQueen(s, i); // 1行目に6個
-  assert.equal(s.queens.length, 6);
-  assert.equal(qn.toggleQueen(s, 7), s); // 上限を超えて置けない
-});
 
 // ---------------------------------------------------------------- calcrace
 

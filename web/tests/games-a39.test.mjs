@@ -1,6 +1,5 @@
 // A39フェーズの内容充実（バンク増量）の検証。
 // - lib/online/games/majority.ts: バンク 60問→75問（4択形式・重複なし）
-// - lib/online/games/minority.ts: バンク 45問→55問（2択形式・重複なし）
 // - lib/online/games/drawguess.ts: お題バンク 110語→130語（かな表記・重複なし）
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -34,7 +33,6 @@ async function loadOnline(name, exportsList) {
 }
 
 const mj = await loadOnline("majority.ts", ["MAJORITY_QUESTIONS"]);
-const mn = await loadOnline("minority.ts", ["MINORITY_QUESTIONS"]);
 const dg = await loadOnline("drawguess.ts", ["DG_WORDS"]);
 
 // ---------------------------------------------------------------- 多数決 増量
@@ -54,27 +52,6 @@ test("多数決: バンクは100問・全て4択・必須フィールドと重�
 test("多数決: 増量分の代表トピックが含まれている", () => {
   const topics = mj.MAJORITY_QUESTIONS.map((q) => q.topic);
   for (const added of ["文房具といえば？", "動物園といえば？", "水族館といえば？", "梅雨といえば？", "春といえば？", "秋といえば？", "飛行機といえば？"]) {
-    assert.ok(topics.includes(added), `増量トピック ${added} がない`);
-  }
-});
-
-// ---------------------------------------------------------------- 少数決 増量
-
-test("少数決: バンクは75問・全て2択・必須フィールドと重複なし", () => {
-  assert.equal(mn.MINORITY_QUESTIONS.length, 75);
-  const topics = mn.MINORITY_QUESTIONS.map((q) => q.topic);
-  assert.equal(new Set(topics).size, topics.length);
-  for (const q of mn.MINORITY_QUESTIONS) {
-    assert.ok(typeof q.topic === "string" && q.topic.length > 0);
-    assert.equal(q.choices.length, 2);
-    assert.notEqual(q.choices[0], q.choices[1]);
-    for (const c of q.choices) assert.ok(typeof c === "string" && c.length > 0);
-  }
-});
-
-test("少数決: 増量分の代表トピックが含まれている", () => {
-  const topics = mn.MINORITY_QUESTIONS.map((q) => q.topic);
-  for (const added of ["カレーに合わせるのはどっち？", "うどんはどっち？", "お風呂の温度はどっち？", "スマホの文字入力はどっち？", "ごはんのお供はどっち？"]) {
     assert.ok(topics.includes(added), `増量トピック ${added} がない`);
   }
 });
