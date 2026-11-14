@@ -74,9 +74,56 @@ test("対象外のリクエストは null（通常表示に倒す）", () => {
   );
 });
 
+test("ポートフォリオ枠のサブドメインは割り当てファイルの公開パスへ飛ばす", () => {
+  assert.equal(
+    m.subdomainRedirectUrl({
+      pathname: "/",
+      forwardedHost: "deshihito.agobot.app",
+      hostname: "localhost",
+      search: "",
+    }),
+    "https://deshihito.agobot.app/folio/deshihito",
+  );
+  // クエリ文字列を引き継ぎ、localhost を含まない
+  const url = m.subdomainRedirectUrl({
+    pathname: "/",
+    forwardedHost: "deshihito.agobot.app",
+    hostname: "localhost",
+    search: "?src=x",
+  });
+  assert.equal(url, "https://deshihito.agobot.app/folio/deshihito?src=x");
+  assert.ok(!url.includes("localhost"));
+  // ルート以外と無関係なホストは対象外
+  assert.equal(
+    m.subdomainRedirectUrl({ pathname: "/folio/deshihito", forwardedHost: "deshihito.agobot.app", hostname: "localhost", search: "" }),
+    null,
+  );
+  assert.equal(
+    m.subdomainRedirectUrl({ pathname: "/", forwardedHost: "agobot.app", hostname: "localhost", search: "" }),
+    null,
+  );
+});
+
+test("汎用振り分けは One Prompter も同じ割り当て表で飛ばす", () => {
+  assert.equal(
+    m.subdomainRedirectUrl({
+      pathname: "/",
+      forwardedHost: "oneprompter.agobot.app",
+      hostname: "localhost",
+      search: "",
+    }),
+    "https://oneprompter.agobot.app/one-prompter",
+  );
+  // 後方互換ラッパーは他ホストを対象外に戻す
+  assert.equal(
+    m.onePrompterRedirectUrl({ pathname: "/", forwardedHost: "deshihito.agobot.app", hostname: "localhost", search: "" }),
+    null,
+  );
+});
+
 test("middleware はサブドメイン振り分けに rewrite を使わない", () => {
   const middleware = fs.readFileSync(path.join(import.meta.dirname, "..", "middleware.ts"), "utf8");
   assert.ok(!middleware.includes("NextResponse.rewrite"), "rewrite は Tunnel 配下で 500 の原因になる");
-  assert.ok(middleware.includes("onePrompterRedirectUrl"));
+  assert.ok(middleware.includes("subdomainRedirectUrl"));
   assert.ok(middleware.includes("NextResponse.redirect"));
 });

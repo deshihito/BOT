@@ -17,6 +17,13 @@ test("One Prompter のパスでは共通クロームを出さない", () => {
   assert.equal(m.isChromelessPath("/one-prompter/extra"), true);
 });
 
+test("ポートフォリオ枠（/folio 配下）では共通クロームを出さない", () => {
+  assert.equal(m.isChromelessPath("/folio"), true);
+  assert.equal(m.isChromelessPath("/folio/deshihito"), true);
+  assert.equal(m.isChromelessPath("/foliox"), false);
+  assert.equal(m.showsCtaBand("/folio/deshihito"), false);
+});
+
 test("それ以外のページでは共通クロームを出す", () => {
   assert.equal(m.isChromelessPath("/"), false);
   assert.equal(m.isChromelessPath("/games"), false);
