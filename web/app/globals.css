@@ -1562,4 +1562,3 @@ button.og-bs-cell:hover { background:#c3dcee; }
 .uptime-bar { cursor:pointer; }
 .uptime-bar.sel { outline:2px solid #0d3a56; outline-offset:1px; }
 .uptime-pct { background:none; border:none; padding:0; font:inherit; color:inherit; cursor:pointer; text-decoration:underline dotted; text-underline-offset:3px; }
-
