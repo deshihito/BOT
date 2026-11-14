@@ -11,6 +11,7 @@ import { useEffect, useRef, useState } from "react";
 import { playSe } from "@/lib/balku-sound";
 import OnlineShell from "../online/OnlineShell";
 import type { OnlineRoomApi, OnlineRoomView } from "../online/useOnlineRoom";
+import { useRoomJuice } from "../GameJuice";
 
 type SbViewPlayer = {
   seat: number;
@@ -43,6 +44,8 @@ function fmtSec(ms: number): string {
 
 function Board({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
   const state = view.state as SbView | null;
+  // 櫻井流バッチ2: 着手の反映に小ヒットストップ、決着に大ヒット＋フラッシュ（音は既存の playSe 系に任せる）。
+  useRoomJuice(`${state?.phase ?? ""}:${state?.round ?? ""}`, state?.phase === "finished");
   const mySeat = view.player.seat;
   const [now, setNow] = useState(() => Date.now());
   const finishRef = useRef<string | null>(null);

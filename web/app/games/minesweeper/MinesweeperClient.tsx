@@ -17,7 +17,7 @@ import {
 import { sfxFlip, sfxHit, sfxLose, sfxPlace, sfxTap, sfxWin } from "@/lib/sfx";
 import { juiceFlash, juiceHitstop, juiceShake, type JuiceIntensity } from "@/lib/juice";
 import { tappableProps } from "@/lib/gesture";
-import { EndScreen, JuiceHit } from "../GameJuice";
+import { EndScreen, GoalBand, JuiceHit } from "../GameJuice";
 import { useGamesNav } from "../GamesShell";
 
 const LEVELS = [
@@ -257,6 +257,9 @@ export default function MinesweeperClient() {
         残りの地雷 {state.mineTotal - state.flags} ・ {seconds} 秒
         {best !== null ? ` ・ ベスト ${best} 秒` : ""} ・ {statusText}
       </p>
+      <div style={{ maxWidth: 420, margin: "8px auto 0" }}>
+        <GoalBand current={seconds} best={best} lowerIsBetter unit=" 秒" label="ベストタイム" />
+      </div>
 
       <div ref={boardWrapRef} style={{ position: "relative", maxWidth: 640, margin: "0 auto" }}>
         {webglFailed ? board2d : (

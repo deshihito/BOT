@@ -5,6 +5,8 @@
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import {
+  endFanfare,
+  goalBandState,
   hitmarkLifetimeMs,
   juiceFlash,
   juiceHit,
@@ -15,6 +17,7 @@ import {
   type HitmarkOptions,
   type JuiceIntensity,
 } from "@/lib/juice";
+import { sfxCorrect, sfxJingle, sfxKo, sfxLose, sfxWin } from "@/lib/sfx";
 import { useGamesNav } from "./GamesShell";
 
 export type { JuiceIntensity } from "@/lib/juice";
@@ -181,11 +184,51 @@ export type EndScreenProps = {
   onRetry: () => void;
   /** 「もう一度」ボタンの文言を変えたいときだけ指定する。 */
   retryLabel?: string;
+  /**
+   * 終了ファンファーレを EndScreen 側で鳴らすかどうか（v2、既定 false）。
+   * 既存タイトルの大半は自前で勝敗ジングルを鳴らしているため、既定では
+   * 鳴らさず、二重再生を避ける。自前ジングルが無いタイトルだけ true にする。
+   * 種別は endFanfare() のルール（勝利+ベスト更新で KO 級に格上げ）。
+   */
+  sound?: boolean;
+  /**
+   * 敗北時にも紙吹雪を混ぜる（対戦系で勝者を祝う見せ方、#095）。
+   * 既定 false（自滅系の敗北で祝わない）。
+   */
+  confettiOnLose?: boolean;
   /** ゲーム固有の詳細（内訳・統計など）。 */
   children?: ReactNode;
 };
 
-/** 全ゲーム共通の終了画面。勝利時のみ紙吹雪（色付き div の落下）を出す。 */
+/** ファンファーレ種別 → 実際の SE 呼び出し。 */
+function playEndFanfare(outcome: EndScreenOutcome, newBest: boolean): void {
+  switch (endFanfare(outcome, newBest)) {
+    case "ko":
+      sfxKo();
+      break;
+    case "win":
+      sfxWin();
+      break;
+    case "lose":
+      sfxLose();
+      break;
+    case "draw":
+      sfxJingle(false);
+      break;
+    case "finish":
+      sfxCorrect();
+      break;
+  }
+}
+
+/**
+ * 全ゲーム共通の終了画面（v2）。
+ * - 勝利: 紙吹雪（ベスト更新時は増量）。敗北: 短く派手に、小シェイク＋
+ *   フラッシュで「やられた」を即認識させる（演出は短く、冷める前に
+ *   操作を返す #116）。confettiOnLose で敗北時も紙吹雪を混ぜられる。
+ * - リトライ: ボタンに加え R キーでも即リトライ（入力欄フォーカス時は無効）。
+ * - sound=true のときだけ終了ファンファーレを鳴らす（既定は二重再生防止で無音）。
+ */
 export function EndScreen({
   outcome,
   title,
@@ -195,14 +238,56 @@ export function EndScreen({
   previousBest,
   onRetry,
   retryLabel = "もう一度",
+  sound = false,
+  confettiOnLose = false,
   children,
 }: EndScreenProps) {
   const { prefix } = useGamesNav();
   const animatedScore = useAnimatedNumber(score ?? 0, 700);
-  const [confetti] = useState<ConfettiPiece[]>(() => (outcome === "win" ? makeConfetti(26) : []));
+  const sectionRef = useRef<HTMLElement | null>(null);
+  const retryRef = useRef(onRetry);
+  retryRef.current = onRetry;
+  const [confetti] = useState<ConfettiPiece[]>(() => {
+    if (outcome === "win") return makeConfetti(newBest ? 40 : 26);
+    if (outcome === "lose" && confettiOnLose) return makeConfetti(14);
+    return [];
+  });
+
+  // 敗北の第一印象: 小シェイク＋フラッシュを1回だけ（短く派手に）。
+  useEffect(() => {
+    if (outcome !== "lose") return;
+    juiceShake(sectionRef.current, 1);
+    juiceFlash(sectionRef.current);
+  }, [outcome]);
+
+  // 終了ファンファーレ（opt-in のときだけ、自前ジングルとの二重再生を避ける）。
+  useEffect(() => {
+    if (!sound) return;
+    playEndFanfare(outcome, Boolean(newBest));
+    // 初回マウント時に1回だけ鳴らす。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // R キーで即リトライ（#116）。入力欄・選択欄にフォーカスがあるときと
+  // 修飾キー併用時は邪魔をしない。
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "r" && e.key !== "R") return;
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      const target = e.target as HTMLElement | null;
+      if (target) {
+        const tag = target.tagName;
+        if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || target.isContentEditable) return;
+      }
+      e.preventDefault();
+      retryRef.current();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
 
   return (
-    <section className="juice-end juice-slide" aria-label="結果">
+    <section ref={sectionRef} className="juice-end juice-slide" aria-label="結果">
       {confetti.length > 0 && (
         <div className="juice-confetti" aria-hidden="true">
           {confetti.map((p, i) => (
@@ -243,6 +328,114 @@ export function EndScreen({
           ゲーム一覧へ
         </Link>
       </div>
+      <p className="juice-end-hint">Rキーでもう一度</p>
     </section>
   );
+}
+
+export type GoalBandProps = {
+  /** 現在のスコア/進捗。 */
+  current: number;
+  /** これまでのベスト。null/記録なしなら「記録なし」の表示になる。 */
+  best: number | null | undefined;
+  /** true なら小さいほど良い指標（タイム、反応速度など）。 */
+  lowerIsBetter?: boolean;
+  /** 数値の後ろに付ける単位（「点」「秒」など）。 */
+  unit?: string;
+  /** 目標の名前。既定は「ベスト」。 */
+  label?: string;
+  /** 数値の整形（ms→秒など）。既定はそのまま。 */
+  format?: (n: number) => string;
+};
+
+/**
+ * プレイ中のご褒美帯（#023 目の前に吊るされたご褒美 / #075）。
+ * 「ベストまであと○」という手の届く目標をプレイ中ずっと1行で見せる。
+ * 記録を超えている間は「ベスト更新中」として弾ませる。
+ */
+export function GoalBand({ current, best, lowerIsBetter = false, unit = "", label = "ベスト", format }: GoalBandProps) {
+  const fmt = format ?? ((n: number) => `${Math.round(n)}`);
+  const state = goalBandState(current, best, lowerIsBetter);
+  if (state.kind === "none") {
+    return (
+      <p className="juice-goal-band" role="status">
+        {label}記録はまだありません — 初記録を目指そう
+      </p>
+    );
+  }
+  if (state.kind === "beating") {
+    return (
+      <p className="juice-goal-band juice-goal-band-beating" role="status">
+        {label}更新中（現在 {fmt(current)}
+        {unit}）
+      </p>
+    );
+  }
+  return (
+    <p className="juice-goal-band" role="status">
+      {label} {fmt(best ?? 0)}
+      {unit} まであと {fmt(state.remaining)}
+      {unit}
+    </p>
+  );
+}
+
+/**
+ * オンライン対戦系の共通手応えフック（バッチ2）。
+ * OnlineShell が盤面を包む .og-game-area を対象に取るため、呼び出しは
+ * 「状態から決まる moveKey と finished を渡す」だけで済む（基盤側の
+ * OnlineShell 自体には触らない）。moveKey が変わるたびに小ヒットストップ、
+ * finished の false→true で大ヒット＋フラッシュ＋中シェイクを掛ける。
+ * 音は鳴らさない（対戦系の音響は balku-sound 側の担当で、二重化しない）。
+ */
+export function useRoomJuice(moveKey: unknown, finished: boolean): void {
+  const moveRef = useRef<unknown>(moveKey);
+  const finishedRef = useRef(finished);
+  useEffect(() => {
+    if (Object.is(moveRef.current, moveKey)) return;
+    moveRef.current = moveKey;
+    if (finishedRef.current) return;
+    const el = document.querySelector(".og-game-area");
+    if (el) juiceHitstop(el as unknown as HTMLElement, 1);
+  }, [moveKey]);
+  useEffect(() => {
+    const was = finishedRef.current;
+    finishedRef.current = finished;
+    if (was || !finished) return;
+    const el = document.querySelector(".og-game-area");
+    if (!el) return;
+    const target = el as unknown as HTMLElement;
+    juiceHit(target, 3);
+    juiceFlash(target);
+    juiceShake(target, 2);
+  }, [finished]);
+}
+
+/**
+ * 盤面系（特に対戦系）の共通手応えフック（バッチ2）。
+ * 返した ref を盤のラッパー要素へ付けるだけで:
+ * - moveKey が変わるたび（=着手が盤に反映されるたび）に小ヒットストップ
+ * - finished が false→true になった瞬間に大ヒットストップ＋フラッシュ＋中シェイク
+ * を掛ける。初回マウントでは何もしない。音は鳴らさない（各タイトルの
+ * 既存の音響系に任せ、二重再生を作らない）。
+ */
+export function useBoardJuice<T extends HTMLElement = HTMLDivElement>(moveKey: unknown, finished: boolean) {
+  const { ref, hit, flash, shake } = useJuice<T>();
+  const moveRef = useRef<unknown>(moveKey);
+  const finishedRef = useRef(finished);
+  useEffect(() => {
+    if (Object.is(moveRef.current, moveKey)) return;
+    moveRef.current = moveKey;
+    if (!finishedRef.current) hit(1);
+  }, [moveKey, hit]);
+  useEffect(() => {
+    const was = finishedRef.current;
+    finishedRef.current = finished;
+    if (!was && finished) {
+      hit(3);
+      flash();
+      shake(2);
+    }
+  }, [finished, hit, flash, shake]);
+  return ref;
 }

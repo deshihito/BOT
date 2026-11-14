@@ -14,6 +14,7 @@ import { playSe } from "@/lib/balku-sound";
 const MusicalChairsScene3D = dynamic(() => import("./MusicalChairsScene3D"), { ssr: false });
 import OnlineShell from "../online/OnlineShell";
 import type { OnlineRoomApi, OnlineRoomView } from "../online/useOnlineRoom";
+import { useRoomJuice } from "../GameJuice";
 
 type McResult = {
   round: number;
@@ -39,6 +40,8 @@ type McView = {
 
 function Board({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
   const state = view.state as McView | null;
+  // 櫻井流バッチ2: 着手の反映に小ヒットストップ、決着に大ヒット＋フラッシュ（音は既存の playSe 系に任せる）。
+  useRoomJuice(`${state?.phase ?? ""}:${state?.round ?? ""}`, state?.phase === "finished");
   const mySeat = view.player.seat;
   const [now, setNow] = useState(() => Date.now());
   const [webglFailed, setWebglFailed] = useState(false);

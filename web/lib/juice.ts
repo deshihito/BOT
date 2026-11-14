@@ -194,6 +194,47 @@ export function juiceSquash(el: JuiceElementLike | null | undefined, amount = 0.
   pulseClass(el, "juice-squash", durationMs);
 }
 
+/** 終了画面のファンファーレ種別（EndScreen v2 の音響ルール）。 */
+export type EndFanfare = "ko" | "win" | "lose" | "draw" | "finish";
+
+/**
+ * 終了結果 → 鳴らすべきファンファーレの対応（純粋関数）。
+ * 勝利はベスト更新を伴うときだけ KO 級に格上げする（#032 優先順位の最上位は
+ * 「決着」であり、その中でも記録更新は別格という読み替え）。
+ * finish（スコアアタックの完走）はベスト更新なら win、そうでなければ finish。
+ */
+export function endFanfare(outcome: "win" | "lose" | "draw" | "finish", newBest = false): EndFanfare {
+  if (outcome === "win") return newBest ? "ko" : "win";
+  if (outcome === "lose") return "lose";
+  if (outcome === "draw") return "draw";
+  return newBest ? "win" : "finish";
+}
+
+export type GoalBandState = {
+  /** none=記録なし / chasing=記録に届いていない / beating=記録超え中。 */
+  kind: "none" | "chasing" | "beating";
+  /** chasing のときの残り量（正の数）。それ以外は 0。 */
+  remaining: number;
+};
+
+/**
+ * プレイ中のご褒美帯（GoalBand）の状態計算（純粋関数、#023 目の前に吊るす）。
+ * best が null/undefined、または higher-better で 0 以下なら記録なし扱い。
+ * lowerIsBetter（タイム・反応速度など小さいほど良い）にも対応する。
+ */
+export function goalBandState(
+  current: number,
+  best: number | null | undefined,
+  lowerIsBetter = false,
+): GoalBandState {
+  if (best === null || best === undefined || !Number.isFinite(best)) return { kind: "none", remaining: 0 };
+  if (!lowerIsBetter && best <= 0) return { kind: "none", remaining: 0 };
+  if (lowerIsBetter && best <= 0) return { kind: "none", remaining: 0 };
+  const beating = lowerIsBetter ? current < best : current > best;
+  if (beating) return { kind: "beating", remaining: 0 };
+  return { kind: "chasing", remaining: Math.abs(best - current) };
+}
+
 export interface HitmarkOptions {
   /** 要素内座標（%指定、0〜100）。省略時は中央。 */
   xPct?: number;

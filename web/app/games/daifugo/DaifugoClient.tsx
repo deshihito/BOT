@@ -12,6 +12,7 @@ import OnlineShell, { useOnlineCreateOptions } from "../online/OnlineShell";
 // 3D シーンは three を含むため遅延読み込み（このページ専用チャンクに閉じる）。
 const DaifugoScene3D = dynamic(() => import("./DaifugoScene3D"), { ssr: false });
 import type { OnlineRoomApi, OnlineRoomView } from "../online/useOnlineRoom";
+import { useRoomJuice } from "../GameJuice";
 import { playSe } from "@/lib/balku-sound";
 
 /* --- 大富豪のゲーム別ビュー（モジュール担当との契約） --- */
@@ -131,6 +132,8 @@ export default function DaifugoClient() {
 
 function DaifugoTable({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
   const state = view.state as DaifugoState | null;
+  // 櫻井流バッチ2: 着手の反映に小ヒットストップ、決着に大ヒット＋フラッシュ（音は既存の playSe 系に任せる）。
+  useRoomJuice(`${state?.turn ?? ""}`, state?.finished ?? false);
   const mySeat = view.player.seat;
   const [selected, setSelected] = useState<number[]>([]);
   const [webglFailed, setWebglFailed] = useState(false);

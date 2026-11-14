@@ -13,6 +13,7 @@ import { playSe } from "@/lib/balku-sound";
 const NanjaScene3D = dynamic(() => import("./NanjaScene3D"), { ssr: false });
 import OnlineShell from "../online/OnlineShell";
 import type { OnlineRoomApi, OnlineRoomView } from "../online/useOnlineRoom";
+import { useRoomJuice } from "../GameJuice";
 
 type NanjaEvent =
   | { type: "flip"; seat: number; creature: number }
@@ -153,6 +154,8 @@ function CreatureBadge({ id, size }: { id: number; size: number }) {
 
 function Board({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
   const state = view.state as NanjaState | null;
+  // 櫻井流バッチ2: 着手の反映に小ヒットストップ、決着に大ヒット＋フラッシュ（音は既存の playSe 系に任せる）。
+  useRoomJuice(`${state?.phase ?? ""}`, state?.finished ?? false);
   const mySeat = view.player.seat;
   const [nameInput, setNameInput] = useState("");
   const [shoutInput, setShoutInput] = useState("");

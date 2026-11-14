@@ -12,6 +12,7 @@ import { playSe } from "@/lib/balku-sound";
 import { tappableProps } from "@/lib/gesture";
 import OnlineShell from "../online/OnlineShell";
 import type { OnlineRoomApi, OnlineRoomView } from "../online/useOnlineRoom";
+import { useRoomJuice } from "../GameJuice";
 
 /** サーバー側モジュール（lib/online/games/drawguess.ts の DG_COLORS / DG_WIDTHS）と一致させること。 */
 const DG_COLORS = ["#111827", "#ef4444", "#f97316", "#eab308", "#22c55e", "#3b82f6", "#a855f7", "#ffffff"];
@@ -72,6 +73,8 @@ function drawStrokes(canvas: HTMLCanvasElement, strokes: DgStroke[], extra: DgSt
 
 function Board({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
   const state = view.state as DgView | null;
+  // 櫻井流バッチ2: 着手の反映に小ヒットストップ、決着に大ヒット＋フラッシュ（音は既存の playSe 系に任せる）。
+  useRoomJuice(`${state?.phase ?? ""}:${state?.roundIndex ?? ""}`, state?.phase === "finished");
   const mySeat = view.player.seat;
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const drawingRef = useRef<[number, number][] | null>(null);

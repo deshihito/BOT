@@ -13,6 +13,7 @@ const JankenScene3D = dynamic(() => import("./JankenScene3D"), { ssr: false });
 import { playSe } from "@/lib/balku-sound";
 import OnlineShell from "../online/OnlineShell";
 import type { OnlineRoomApi, OnlineRoomView } from "../online/useOnlineRoom";
+import { useRoomJuice } from "../GameJuice";
 
 /** サーバー側モジュール（lib/online/games/janken.ts の JK_TIME_LIMIT_MS）と一致させること。 */
 const JK_TIME_LIMIT_MS = 15000;
@@ -49,6 +50,8 @@ type JankenView = {
 function Board({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
   const [webglFailed, setWebglFailed] = useState(false);
   const state = view.state as JankenView | null;
+  // 櫻井流バッチ2: 着手の反映に小ヒットストップ、決着に大ヒット＋フラッシュ（音は既存の playSe 系に任せる）。
+  useRoomJuice(`${state?.phase ?? ""}:${state?.round ?? ""}`, state?.phase === "finished");
   const mySeat = view.player.seat;
   const [now, setNow] = useState(() => Date.now());
   const finishRef = useRef<string | null>(null);

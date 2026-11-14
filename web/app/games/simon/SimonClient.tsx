@@ -7,7 +7,8 @@ import dynamic from "next/dynamic";
 import { useCallback, useEffect, useRef, useState, type CSSProperties } from "react";
 
 const SimonScene3D = dynamic(() => import("./SimonScene3D"), { ssr: false });
-import { EndScreen } from "../GameJuice";
+import { sfxCorrect, sfxTap } from "@/lib/sfx";
+import { EndScreen, GoalBand } from "../GameJuice";
 import { useGamesNav } from "../GamesShell";
 
 const BEST_KEY = "ago-simon-best";
@@ -151,6 +152,7 @@ export default function SimonClient() {
   );
 
   const start = useCallback(() => {
+    sfxTap();
     for (const t of timersRef.current) clearTimeout(t);
     timersRef.current = [];
     // 押下表示の消灯タイマーも消えるため、pressed を明示的にリセットする（常時点灯防止）。
@@ -199,6 +201,7 @@ export default function SimonClient() {
     }
     inputIndexRef.current++;
     if (inputIndexRef.current >= seq.length) {
+      sfxCorrect();
       saveBest(seq.length);
       setPhase("showing");
       setMessage(`ラウンド ${seq.length} クリア！ 次のラウンドへ…`);
@@ -299,6 +302,9 @@ export default function SimonClient() {
       <p className="classic-status" role="status">
         ラウンド {round === 0 ? "—" : round} ・ ベスト {best} ラウンド ・ {message}
       </p>
+      <div style={{ maxWidth: 420, margin: "8px auto 0" }}>
+        <GoalBand current={phase === "gameover" && result ? result.cleared : Math.max(0, round - 1)} best={best} unit=" ラウンド" />
+      </div>
 
 {webglFailed ? board2d : (
         <div style={{ maxWidth: 420, margin: "0 auto" }}>
@@ -330,6 +336,7 @@ export default function SimonClient() {
         <div style={{ maxWidth: 420, margin: "16px auto 0" }}>
           <EndScreen
             outcome="lose"
+            sound
             title="まちがい…"
             score={result.cleared}
             scoreLabel="クリアしたラウンド"

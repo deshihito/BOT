@@ -14,6 +14,7 @@ import { playSe } from "@/lib/balku-sound";
 const SimonBattleScene3D = dynamic(() => import("./SimonBattleScene3D"), { ssr: false });
 import OnlineShell from "../online/OnlineShell";
 import type { OnlineRoomApi, OnlineRoomView } from "../online/useOnlineRoom";
+import { useRoomJuice } from "../GameJuice";
 
 const PADS = [
   { name: "みどり", color: "#2fbf71", dark: "#1e7f4c", freq: 329.63 },
@@ -74,6 +75,8 @@ function Bar({ ratio }: { ratio: number }) {
 
 function Board({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
   const state = view.state as SbView | null;
+  // 櫻井流バッチ2: 着手の反映に小ヒットストップ、決着に大ヒット＋フラッシュ（音は既存の playSe 系に任せる）。
+  useRoomJuice(`${state?.phase ?? ""}:${state?.turnSeat ?? ""}:${state?.sequenceLength ?? ""}`, state?.phase === "finished");
   const mySeat = view.player.seat;
   const [now, setNow] = useState(() => Date.now());
   const [pressed, setPressed] = useState<number | null>(null);

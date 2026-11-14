@@ -15,7 +15,7 @@ import {
   type ScheduledMole,
 } from "@/lib/mole";
 import { sfxCorrect, sfxLose, sfxPlace, sfxWin, sfxWrong } from "@/lib/sfx";
-import { EndScreen, ScorePop } from "../GameJuice";
+import { EndScreen, GoalBand, ScorePop } from "../GameJuice";
 import { useGamesNav } from "../GamesShell";
 
 const BEST_KEY = "ago-mole-best";
@@ -302,6 +302,9 @@ export default function MoleClient() {
       <p className="classic-status" role="status">
         スコア {score} ・ ベスト {best} ・ {combo > 0 ? `${combo} コンボ！ ・ ` : ""}{statusText}
       </p>
+      <div style={{ maxWidth: 420, margin: "0 auto 12px" }}>
+        <GoalBand current={score} best={best} unit="点" />
+      </div>
 
       {/* タイムバー */}
       <div style={{ maxWidth: 420, margin: "0 auto 12px", height: 10, borderRadius: 999, background: "rgba(255,255,255,0.12)", overflow: "hidden" }} aria-hidden="true">

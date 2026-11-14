@@ -13,6 +13,7 @@ import OnlineShell from "../online/OnlineShell";
 // 3D シーンは three を含むため遅延読み込み（このページ専用チャンクに閉じる）。
 const LiarsDiceScene3D = dynamic(() => import("./LiarsDiceScene3D"), { ssr: false });
 import type { OnlineRoomApi, OnlineRoomView } from "../online/useOnlineRoom";
+import { useRoomJuice } from "../GameJuice";
 
 const DICE_FACES = ["⚀", "⚁", "⚂", "⚃", "⚄", "⚅"];
 
@@ -64,6 +65,8 @@ function nameOf(view: LdView, seat: number): string {
 
 function Board({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
   const state = view.state as LdView | null;
+  // 櫻井流バッチ2: 着手の反映に小ヒットストップ、決着に大ヒット＋フラッシュ（音は既存の playSe 系に任せる）。
+  useRoomJuice(`${state?.phase ?? ""}:${state?.round ?? ""}`, state?.phase === "finished");
   const mySeat = view.player.seat;
   const [count, setCount] = useState(1);
   const [face, setFace] = useState(2);

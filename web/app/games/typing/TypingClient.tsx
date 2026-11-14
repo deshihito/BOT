@@ -11,7 +11,7 @@ import {
   type TypingResult,
 } from "@/lib/typing";
 import { sfxCorrect, sfxTap, sfxWrong } from "@/lib/sfx";
-import { EndScreen } from "../GameJuice";
+import { EndScreen, GoalBand } from "../GameJuice";
 import { useGamesNav } from "../GamesShell";
 
 const DURATION_SECONDS = 60;
@@ -170,6 +170,9 @@ export default function TypingClient() {
         {best !== null ? ` ・ ベスト ${best} WPM` : ""}
         {phase === "ready" ? " ・ 入力欄に打ち始めると始まります" : ""}
       </p>
+      <div style={{ maxWidth: 420, margin: "8px auto 0" }}>
+        <GoalBand current={live?.wpm ?? result?.wpm ?? 0} best={best} unit=" WPM" />
+      </div>
 
       <div
         aria-label="課題文"
