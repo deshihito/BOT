@@ -96,8 +96,10 @@ FORCE_SIX_PROBABILITY = 0.5
 # --- double ---
 #: ダブルアップの最低ベット（AGO）。原典は1以上。
 DOUBLE_MIN_BET = 1
-#: GO 成功ごとの倍率の伸び（原典 ×1.9）。
-DOUBLE_MULTIPLIER_STEP = 1.9
+#: GO 成功ごとの倍率の伸び（原典 ×1.9。AGO ではインフレ対策A案で
+#: ×1.6 に変更: 通常時の期待値が 0.60×1.6=0.96 になり、配当の利益分を
+#: バンクロールから賄っても胴元収支が持続する。FEVER 時はボーナスとして残る）。
+DOUBLE_MULTIPLIER_STEP = 1.6
 #: 勝率。FEVER のときだけ上がる（原典 get_internal_rate）。
 DOUBLE_RATE_NORMAL = 0.60
 DOUBLE_RATE_FEVER = 0.75

@@ -22,6 +22,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from core.general import action_registry
 from core.game.gambling import gambling
+from core.general.circulation import economy_pool
 from core.general.items.items import ItemError
 from cogs import general as wallet_module
 from cogs.game import BetModal, BlackjackView, DiceModal, DiceView, DoubleView, GamblingCog, SlotStartModal, SlotView, _slot_embed
@@ -70,6 +71,14 @@ def _user_state(**overrides) -> dict:
             "win_streak": 0, "internal_mode": "NORMAL"}
     base.update(overrides)
     return base
+
+
+def _funded_economy(tmp: str) -> economy_pool.EconomyPoolStore:
+    """配当の利益分を全額賄えるバンクロール（A案の原資）を用意する。"""
+    path = Path(tmp) / "economy.json"
+    path.write_text(json.dumps({"pool": 10_000_000, "treasury": 0}),
+                    encoding="utf-8")
+    return economy_pool.EconomyPoolStore(path)
 
 
 def _slot_session(remaining: int = 10, total: int = 10) -> dict:
@@ -283,8 +292,8 @@ class DoubleStoreTest(unittest.TestCase):
             store.start_double("1", 1000)
             result = store.double_go("1")
             self.assertTrue(result["win"])
-            self.assertAlmostEqual(result["multiplier"], 1.9)
-            self.assertEqual(result["current_value"], 1900)
+            self.assertAlmostEqual(result["multiplier"], 1.6)
+            self.assertEqual(result["current_value"], 1600)
             self.assertFalse(result["finished"])
 
     def test_go_lose_ends_session_and_counts_streak(self):
@@ -375,7 +384,7 @@ class DoubleStoreTest(unittest.TestCase):
             store.start_double("1", 1000)
             store.double_go("1")
             result = store.double_cashout("1")
-            self.assertEqual(result["payout"], 1900)
+            self.assertEqual(result["payout"], 1600)
             self.assertIsNone(store.session("1"))
             # 500超の確定で HELL に落ちる（原典どおり）。
             self.assertEqual(store.user_state("1")["internal_mode"], "HELL")
@@ -493,7 +502,7 @@ class PersistenceTest(unittest.TestCase):
             reloaded = gambling.GamblingStore(Path(tmp) / "gambling.json")
             session = reloaded.session("1")
             self.assertIsNotNone(session)
-            self.assertAlmostEqual(session["multiplier"], 1.9)
+            self.assertAlmostEqual(session["multiplier"], 1.6)
             self.assertEqual(reloaded.user_state("1")["win_streak"], 1)
 
     def test_orphaned_refunds_cover_all_kinds(self):
@@ -552,7 +561,8 @@ class CogFlowTest(unittest.TestCase):
         bot = _FakeBot({"WalletCog": wallet})
         cog = GamblingCog(
             bot, store=store,
-            balance_reader=lambda uid: wallet.balances.get(uid, 0))
+            balance_reader=lambda uid: wallet.balances.get(uid, 0),
+            economy_store=_funded_economy(tmp))
         return cog, store
 
     def test_slot_start_insufficient_keeps_balance(self):
@@ -610,7 +620,7 @@ class CogFlowTest(unittest.TestCase):
             self.assertIn("成功", message)
             message = asyncio.run(cog.execute_double_cashout(1))
             self.assertIn("確定", message)
-            self.assertEqual(wallet.balances["1"], 9000 + 1900)
+            self.assertEqual(wallet.balances["1"], 9000 + 1600)
 
     def test_double_flow_lose_loses_bet(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -760,7 +770,8 @@ class ViewEditTest(unittest.TestCase):
         bot = _FakeBot({"WalletCog": wallet})
         cog = GamblingCog(
             bot, store=store,
-            balance_reader=lambda uid: wallet.balances.get(uid, 0))
+            balance_reader=lambda uid: wallet.balances.get(uid, 0),
+            economy_store=_funded_economy(tmp))
         return cog, store
 
     def test_slot_spin_edits_panel_instead_of_new_message(self):
@@ -856,7 +867,7 @@ class ViewEditTest(unittest.TestCase):
             self.assertEqual(len(interaction.edited_original), 1)
             embed = interaction.edited_original[0]["embed"]
             self.assertIn("成功", _field(embed, "結果"))
-            self.assertIn("1.90", _field(embed, "状態"))
+            self.assertIn("1.60", _field(embed, "状態"))
             internal = _field(embed, "内部状態")
             self.assertIn("NORMAL", internal)
             # HCD方針: 成功率のような内部数値はユーザー向け表示に出さない。
@@ -867,7 +878,7 @@ class ViewEditTest(unittest.TestCase):
             self.assertEqual(len(interaction.edited_original), 2)
             self.assertEqual(interaction.followup.sent, [])
             self.assertIsNone(store.session("1"))
-            self.assertEqual(wallet.balances["1"], 10000 - 1000 + 1900)
+            self.assertEqual(wallet.balances["1"], 10000 - 1000 + 1600)
             # 終了後は GO / CASHOUT が無効化される。
             self.assertTrue(_button(view, "GO").disabled)
             self.assertTrue(_button(view, "CASHOUT").disabled)

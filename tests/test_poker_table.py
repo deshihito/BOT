@@ -18,7 +18,7 @@ import game_fakes  # noqa: F401
 from core.game.game import party_ranking
 import core.game.poker.cog as poker
 from cogs.game import BettingRound, PokerTable, distribute_pot, settle_hand
-from cogs.general import INSUFFICIENT
+from cogs.general import INSUFFICIENT, NEW_USER_BALANCE
 
 
 def user(uid):
@@ -228,8 +228,9 @@ class PokerMoneyTest(unittest.IsolatedAsyncioTestCase):
     async def test_orphaned_chips_refunded_on_startup(self):
         self.cog.custody.set(999, 7, 250)
         await self.cog._refund_orphaned()
-        # 新規ユーザー行は NEW_USER_BALANCE(10) で作られてから 250 が足される
-        self.assertEqual(self.wallet.balances["7"], 260)
+        # 新規ユーザー行は NEW_USER_BALANCE で作られてから 250 が足される
+        self.assertEqual(self.wallet.balances["7"],
+                         NEW_USER_BALANCE + 250)
         self.assertEqual(self.cog.custody.entries(), {})
 
     def test_poker_registered_for_ranking(self):

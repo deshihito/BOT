@@ -518,11 +518,16 @@ class GamblingGuardAndRecycleTest(unittest.TestCase):
                      miss, miss, pair, miss]
             rng = _GamblingRandom(choices_results=reels)
             cog, economy = self._cog(tmp, wallet, rng)
+            # A案: 配当の利益分（100×3回）はバンクロール原資として
+            # 原資300を先に積む。台帳はベット返却分（3,000）だけを積む
+            # ため純損失は 7,000 で、プールは 300−300＋7,000×0.7 になる。
+            economy._state["pool"] = 300
             asyncio.run(cog.execute_slot_start(1, 10))
             _message, info = asyncio.run(cog.execute_slot_spin_bulk(1, 10))
             self.assertTrue(info["finished"])
-            # 純損失 = 先払い 10,000 − 配当 3,300 = 6,700 の70%がプールへ。
-            self.assertEqual(economy.pool_balance(), int(6_700 * 0.7))
+            # 純損失 = 先払い 10,000 − ベット返却分 3,000 = 7,000 の70%が
+            # プールへ（利益分300は原資から出て相殺される）。
+            self.assertEqual(economy.pool_balance(), 300 - 300 + int(7_000 * 0.7))
             self.assertEqual(wallet.balances["1"], 100_000 - 6_700)
 
 

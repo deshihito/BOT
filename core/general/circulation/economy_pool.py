@@ -78,6 +78,7 @@ FLUSH_INTERVAL_SECONDS = 60.0
 _INT_KEYS = (
     "pool", "treasury", "total_recycled", "total_paid",
     "total_released", "total_boosted", "lottery_boost_pending",
+    "total_house_paid",
 )
 
 
@@ -85,6 +86,7 @@ def _empty_state() -> dict[str, Any]:
     return {
         "pool": 0, "treasury": 0, "total_recycled": 0, "total_paid": 0,
         "total_released": 0, "total_boosted": 0, "lottery_boost_pending": 0,
+        "total_house_paid": 0,
         "last_release_date": None,
     }
 
@@ -220,6 +222,58 @@ class EconomyPoolStore(DirtyFlushMixin):
             self._state["pool"] = int(self._state["pool"]) + amount
             self._state["total_paid"] = max(
                 0, int(self._state["total_paid"]) - amount)
+            self._mark_dirty()
+
+    # ------------------------------------------------------------------
+    # 胴元バンクロール（インフレ対策A案）: ギャンブル配当の利益分の原資
+    # ------------------------------------------------------------------
+    def pay_house(self, amount: int) -> dict[str, int]:
+        """バンクロール（プール＋国庫）から支払い、内訳を返す。
+
+        プールから先に引き、不足分を国庫から引く。残高が不足する場合は
+        ある分だけ払う（双方とも負にならない）。配当の利益分を新規創出
+        ではなく還流の蓄積から賄うための支払いで、支払累計は
+        total_house_paid に積む（採掘の pay / total_paid とは別勘定）。
+        """
+        amount = int(amount)
+        if amount <= 0:
+            return {"paid": 0, "pool": 0, "treasury": 0}
+        with self._lock:
+            pool_part = min(amount, int(self._state["pool"]))
+            treasury_part = min(
+                amount - pool_part, int(self._state["treasury"]))
+            paid = pool_part + treasury_part
+            if paid <= 0:
+                return {"paid": 0, "pool": 0, "treasury": 0}
+            self._state["pool"] = int(self._state["pool"]) - pool_part
+            self._state["treasury"] = (
+                int(self._state["treasury"]) - treasury_part)
+            self._state["total_house_paid"] = (
+                int(self._state["total_house_paid"]) + paid)
+            self._mark_dirty()
+            return {"paid": paid, "pool": pool_part,
+                    "treasury": treasury_part}
+
+    def refund_house(self, breakdown: dict[str, int]) -> None:
+        """pay_house で払った分を内訳どおりに戻す（受け手側の反映失敗時）。
+
+        pool / treasury の各分を元の置き場へ戻し、total_house_paid を
+        払った分だけ減らす（0未満にはしない）。
+        """
+        try:
+            pool_part = max(0, int(breakdown.get("pool") or 0))
+            treasury_part = max(0, int(breakdown.get("treasury") or 0))
+        except (TypeError, ValueError):
+            return
+        if pool_part <= 0 and treasury_part <= 0:
+            return
+        with self._lock:
+            self._state["pool"] = int(self._state["pool"]) + pool_part
+            self._state["treasury"] = (
+                int(self._state["treasury"]) + treasury_part)
+            self._state["total_house_paid"] = max(
+                0, int(self._state["total_house_paid"])
+                - pool_part - treasury_part)
             self._mark_dirty()
 
     # ------------------------------------------------------------------ 国庫の出口（S1）

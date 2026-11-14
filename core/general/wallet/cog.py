@@ -23,7 +23,7 @@ ASSET_ACCENT = (13, 148, 136)
 logger = logging.getLogger(__name__)
 
 COIN_SETTER_USER_ID = 1320705325686587408
-NEW_USER_BALANCE = 10  # まだ行がないユーザーに最初に渡す残高
+NEW_USER_BALANCE = 10_000  # まだ行がないユーザーに最初に渡す残高（経済リセットの一律残高と一致）
 # 残高を書き換えるときに、ほかの処理と同時に更新されて食い違った場合の再試行回数
 BALANCE_UPDATE_ATTEMPTS = 5
 INSUFFICIENT = object()  # 残高不足を表す目印
@@ -150,8 +150,8 @@ class WalletCog(commands.Cog):
             data = response.data
 
             if not data:
-                config.db_api.table("users").insert({"user_id": user_id, "balance": 10, "debt": 0}).execute()
-                balance = 10
+                config.db_api.table("users").insert({"user_id": user_id, "balance": NEW_USER_BALANCE, "debt": 0}).execute()
+                balance = NEW_USER_BALANCE
                 debt = 0
             else:
                 balance = data[0]["balance"]

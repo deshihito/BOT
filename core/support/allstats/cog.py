@@ -193,7 +193,9 @@ class SystemStatsCog(commands.Cog):
                             f"**国庫:** `{snapshot['treasury']:,} AGO`\n"
                             f"**還流累計:** `{snapshot['total_recycled']:,} AGO`\n"
                             f"**国庫からの還流累計:** "
-                            f"`{snapshot.get('total_released', 0):,} AGO`"
+                            f"`{snapshot.get('total_released', 0):,} AGO`\n"
+                            f"**バンクロール支払累計:** "
+                            f"`{snapshot.get('total_house_paid', 0):,} AGO`"
                         ),
                         inline=False
                     )
