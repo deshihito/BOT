@@ -421,6 +421,18 @@ body:has(.op-shell) { background:#f4f8fd; }
    白背景＋白文字で真っ白に見えるバグがあった（:not(.selected) と
    この明示ルールの二重で防ぐ）。 */
 .op-shell .op-suboption.selected { background:#17191c; border-color:#17191c; color:#fff; }
+/* --- viewslopper 独自トーン（サイト共通テーマから独立） ---
+   共通CSSの要素セレクタ（header の白背景、footer の白背景・余白、main の
+   中央カラム＋min-height）が専用画面にも効いてしまい、初版ではヘッダーが
+   白地に白文字で消え、main とシェルの min-height が重なって巨大な空白が
+   できていた。.vs-shell がある場合だけページ背景と main を打ち消し、
+   シェル内の header/footer を素通しにする（data-activity-root の
+   main 打ち消しと同じ流儀）。 */
+body:has(.vs-shell) { background:#0e0f11; }
+body:has(.vs-shell) > main { max-width:none; min-height:0; margin:0; padding:0; }
+.vs-shell { min-height:100svh; background:#0e0f11; color:#f2f3f5; font-family:system-ui,-apple-system,"Hiragino Sans","Noto Sans JP",sans-serif; }
+.vs-shell .vs-header { background:transparent; position:static; border-bottom:1px solid #23252a; }
+.vs-shell .vs-footer { background:transparent; border-top:none; padding:0; }
 /* --- WEB ゲーム（/games） --- */
 .games-shell[data-activity-root] { max-width:880px; margin:0 auto; padding:18px 16px 48px; }
 .games-embedded-bar { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:14px; padding-bottom:10px; border-bottom:1px solid var(--line); font-size:14px; }
