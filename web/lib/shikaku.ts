@@ -218,3 +218,12 @@ export function solveShikaku(state: ShikakuState): ShikakuState {
   for (const rect of state.solution) s = applyShikakuRect(s, rect);
   return s;
 }
+
+/**
+ * ヒント用: 解の長方形のうち、プレイヤーがまだ正しく描けていない最初の1つ。
+ * 既に描けている長方形（座標が完全一致するもの）は読み飛ばす。全部描けていれば null。
+ */
+export function nextShikakuHint(state: ShikakuState): ShikakuRect | null {
+  const same = (a: ShikakuRect, b: ShikakuRect) => a.r1 === b.r1 && a.c1 === b.c1 && a.r2 === b.r2 && a.c2 === b.c2;
+  return state.solution.find((rect) => !state.rects.some((r) => same(r, rect))) ?? null;
+}

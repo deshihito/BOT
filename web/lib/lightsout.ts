@@ -136,3 +136,18 @@ export function solutionPresses(state: LightsOutState): number[] {
   for (const g of state.generation) counts.set(g, (counts.get(g) ?? 0) + 1);
   return [...counts.entries()].filter(([, n]) => n % 2 === 1).map(([i]) => i);
 }
+
+/**
+ * 現在の盤面から全消灯にするために「あと押す必要があるマス」の一覧（ヒント用）。
+ * 押下は可換で自己逆操作なので、解の集合とプレイヤーが既に押したマスの
+ * 偶奇（対称差）がそのまま残りの解になる。pressed はプレイヤーの押下履歴の
+ * 偶奇だけを表せばよく、同じマスが2回入っていれば相殺される。
+ */
+export function remainingPresses(state: LightsOutState, pressed: Iterable<number>): number[] {
+  const rest = new Set(solutionPresses(state));
+  for (const i of pressed) {
+    if (rest.has(i)) rest.delete(i);
+    else rest.add(i);
+  }
+  return [...rest].sort((a, b) => a - b);
+}

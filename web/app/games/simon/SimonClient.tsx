@@ -126,16 +126,18 @@ export default function SimonClient() {
       setMessage(`ラウンド ${seq.length}: 光る順番を覚えてください…`);
       const onMs = Math.max(320, 560 - seq.length * 12);
       const gapMs = 170;
+      // 再生開始までのリードインは「構え」に必要な分だけ残し、待ち時間を詰める（櫻井流バッチ3）。
+      const leadInMs = 350;
       seq.forEach((pad, i) => {
         schedule(() => {
           if (runIdRef.current !== runId) return;
           setLit(pad);
           playTone(pad, onMs);
-        }, 550 + i * (onMs + gapMs));
+        }, leadInMs + i * (onMs + gapMs));
         schedule(() => {
           if (runIdRef.current !== runId) return;
           setLit((cur) => (cur === pad ? null : cur));
-        }, 550 + i * (onMs + gapMs) + onMs);
+        }, leadInMs + i * (onMs + gapMs) + onMs);
       });
       schedule(
         () => {
@@ -145,7 +147,7 @@ export default function SimonClient() {
           setPhase("input");
           setMessage(`ラウンド ${seq.length}: 同じ順番で押してください（0 / ${seq.length}）`);
         },
-        550 + seq.length * (onMs + gapMs) + 120,
+        leadInMs + seq.length * (onMs + gapMs) + 120,
       );
     },
     [playTone, schedule],
