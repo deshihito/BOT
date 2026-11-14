@@ -10,6 +10,7 @@ core/game/game/game_records.py の g2048 に残る。
 （GamePanelView + MediaGallery）にした。方向ボタンは操作系なので従来
 どおりボタンで維持し、ロジック・記録は不変。
 """
+import asyncio
 import io
 
 import discord
@@ -93,7 +94,8 @@ class Board2048View(GamePanelView):
         if self.game.game_over():
             return await self._finish(interaction, "もう動かせません。ゲームオーバーです。")
         self._render()
-        await edit_panel_v2(interaction, self, files=[board_file(self.game)])
+        file = await asyncio.to_thread(board_file, self.game)
+        await edit_panel_v2(interaction, self, files=[file])
 
     async def _finish(self, interaction: discord.Interaction, status: str):
         self.finished = True
@@ -102,7 +104,8 @@ class Board2048View(GamePanelView):
         if entry is not None:
             self.status += "\n" + game_records.format_2048_line(entry, self.game.score, self.game.max_tile)
         self._render()
-        await edit_panel_v2(interaction, self, files=[board_file(self.game)])
+        file = await asyncio.to_thread(board_file, self.game)
+        await edit_panel_v2(interaction, self, files=[file])
         self.stop()
 
 
@@ -113,7 +116,8 @@ class Game2048Cog(commands.Cog):
     async def start_recruit(self, interaction: discord.Interaction):
         """/game のハブから呼ぶ。その場で盤面が始まる。"""
         view = Board2048View(self, interaction.user)
-        await interaction.response.send_message(view=view, file=board_file(view.game))
+        file = await asyncio.to_thread(board_file, view.game)
+        await interaction.response.send_message(view=view, file=file)
 
 
 async def setup(bot):

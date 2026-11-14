@@ -293,7 +293,7 @@ class Babanuki(commands.Cog):
         count = len(g.hands[target])
         body = (f"{g.name(uid)} さんの番です。{g.name(target)} さんの手札（{count}枚）から"
                 f"1枚選んでください（{TURN_SECONDS}秒）。\n\n{self.counts_text(g)}")
-        file = backs_file(count)
+        file = await asyncio.to_thread(backs_file, count)
         await game_panels.replace(channel, "party",
                                   view=TurnView(self, g, count, body=body, backs=file),
                                   file=file)
@@ -352,9 +352,10 @@ class Babanuki(commands.Cog):
         hand_cards = list(g.hands[interaction.user.id])
         hand = " ".join(hand_cards) or "なし"
         if hand_cards:
+            file = await asyncio.to_thread(hand_file, hand_cards)
             await interaction.response.send_message(
                 f"{g.drawn} を引きました。手札: {hand}", ephemeral=True,
-                file=hand_file(hand_cards))
+                file=file)
         else:
             await interaction.response.send_message(f"{g.drawn} を引きました。手札: {hand}", ephemeral=True)
 
@@ -366,8 +367,9 @@ class Babanuki(commands.Cog):
         hand = " ".join(hand_cards) or "なし（上がり）"
         if not hand_cards:
             return await interaction.response.send_message(f"あなたの手札: {hand}", ephemeral=True)
+        file = await asyncio.to_thread(hand_file, hand_cards)
         await interaction.response.send_message(f"あなたの手札: {hand}", ephemeral=True,
-                                                file=hand_file(hand_cards))
+                                                file=file)
 
     async def finish(self, channel, g: BabanukiGame):
         g.phase = "done"

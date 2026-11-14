@@ -242,7 +242,8 @@ class Yotsuba(commands.Cog):
             words = placed_words(game.pool[card_index][1], rotation)
         else:
             words = (None, None, None, None)
-        png = render_yotsuba(words, hints, title=f"{player_label(game, owner)}のヒント盤")
+        png = await asyncio.to_thread(
+            render_yotsuba, words, hints, title=f"{player_label(game, owner)}のヒント盤")
         body = (f"{player_label(game, owner)} <@{owner}> のヒント盤です。"
                 if not placed else f"{player_label(game, owner)} <@{owner}> の盤に置かれた配置です。")
         if not placed:

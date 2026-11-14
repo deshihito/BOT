@@ -251,7 +251,7 @@ class Hanabi(commands.Cog):
         return panel
 
     async def _send_board(self, channel, game: HanabiGame, edit: bool = False):
-        png = board_png(game, {})
+        png = await asyncio.to_thread(board_png, game, {})
         panel = self._panel(channel.id, game)
         file = discord.File(io.BytesIO(png), "board.png")
         msg = self.messages.get(channel.id)

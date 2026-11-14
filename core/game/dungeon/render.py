@@ -3,6 +3,7 @@ import discord
 import json
 import random
 import asyncio
+import threading
 import base64
 import io
 import time
@@ -141,12 +142,18 @@ def d_build_map_image(uid, floor, px, py, radius=D_VIEW_R):
 # クライアント/CDNキャッシュが古いフレームを表示し続ける（別のPNGに見える）。
 # フレームごとに一意な添付名を発行し、Embed画像URLもその名前へ合わせる。
 _MAP_SEQ = 0
+_MAP_SEQ_LOCK = threading.Lock()
 
 def d_next_map_filename():
-    """フレームごとに一意な添付ファイル名を発行する。"""
+    """フレームごとに一意な添付ファイル名を発行する。
+
+    描画は asyncio.to_thread でワーカースレッドからも呼ばれるため、
+    連番の採番はロックで直列化する（一意性がキャッシュ回避の要）。
+    """
     global _MAP_SEQ
-    _MAP_SEQ += 1
-    return f"map_{_MAP_SEQ:06d}.png"
+    with _MAP_SEQ_LOCK:
+        _MAP_SEQ += 1
+        return f"map_{_MAP_SEQ:06d}.png"
 
 def d_map_attachment(uid, floor, px, py, radius=D_VIEW_R):
     """現在の状態を描画し、(discord.File, Embed用画像URL) を返す。"""
@@ -161,12 +168,17 @@ def d_render_pillow(uid, floor, px, py, radius=D_VIEW_R):
     """マップをPillow画像として生成しdiscord.Fileを返す（互換API）。"""
     return d_map_attachment(uid, floor, px, py, radius)[0]
 
-async def d_render_image(uid, floor, px, py, bot, radius=D_VIEW_R):
-    """マップを画像として生成しDiscordにアップロード、URLを返す"""
+def _map_png_bytes(uid, floor, px, py, radius=D_VIEW_R) -> bytes:
+    """マップを描画して PNG バイト列にする（同期・PIL 処理のみ）。"""
     img = d_build_map_image(uid, floor, px, py, radius)
     buf = io.BytesIO()
     img.save(buf, format="PNG")
-    buf.seek(0)
+    return buf.getvalue()
+
+async def d_render_image(uid, floor, px, py, bot, radius=D_VIEW_R):
+    """マップを画像として生成しDiscordにアップロード、URLを返す"""
+    buf = io.BytesIO(await asyncio.to_thread(
+        _map_png_bytes, uid, floor, px, py, radius))
     try:
         ch = bot.get_channel(DUNGEON_IMG_CHANNEL_ID) or \
              await bot.fetch_channel(DUNGEON_IMG_CHANNEL_ID)

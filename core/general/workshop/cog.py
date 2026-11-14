@@ -272,6 +272,21 @@ class WorkshopView(discord.ui.View):
                 self._png = None
         return self._png
 
+    async def prepare_png(self) -> None:
+        """パネル画像をワーカースレッドで先に描いておく。
+
+        panel_png() の遅延描画を非同期側で済ませ、以降の panel_png() /
+        panel_files() / embed() はキャッシュを返すだけにする。
+        """
+        if not self._png_ready:
+            self._png_ready = True
+            try:
+                self._png = await asyncio.to_thread(
+                    workshop_panel_png, self.cog, self.user_id)
+            except Exception:
+                logger.exception("workshop: パネル画像の生成に失敗しました")
+                self._png = None
+
     def panel_files(self) -> list[discord.File] | None:
         png = self.panel_png()
         if png is None:
@@ -347,6 +362,21 @@ class CraftView(discord.ui.View):
                 logger.exception("workshop: 合成パネル画像の生成に失敗しました")
                 self._png = None
         return self._png
+
+    async def prepare_png(self) -> None:
+        """パネル画像をワーカースレッドで先に描いておく。
+
+        panel_png() の遅延描画を非同期側で済ませ、以降の panel_png() /
+        panel_files() / embed() はキャッシュを返すだけにする。
+        """
+        if not self._png_ready:
+            self._png_ready = True
+            try:
+                self._png = await asyncio.to_thread(
+                    craft_panel_png, self.cog, self.user_id)
+            except Exception:
+                logger.exception("workshop: 合成パネル画像の生成に失敗しました")
+                self._png = None
 
     def panel_files(self) -> list[discord.File] | None:
         png = self.panel_png()
@@ -432,6 +462,7 @@ class WorkshopCog(commands.Cog):
     # ------------------------------------------------------------------ 入口
     async def show_workshop(self, interaction: discord.Interaction):
         view = WorkshopView(self, interaction.user.id)
+        await view.prepare_png()
         files = view.panel_files()
         if files:
             await interaction.response.send_message(
@@ -456,6 +487,7 @@ class WorkshopCog(commands.Cog):
             return await interaction.response.send_message(
                 workshop_action_failed(exc), ephemeral=True)
         view = CraftView(self, interaction.user.id, commission=commission)
+        await view.prepare_png()
         files = view.panel_files()
         if files:
             await interaction.response.send_message(

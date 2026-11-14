@@ -118,6 +118,21 @@ class RoleShopView(discord.ui.View):
                 self._png = None
         return self._png
 
+    async def prepare_png(self) -> None:
+        """パネル画像をワーカースレッドで先に描いておく。
+
+        panel_png() の遅延描画を非同期側で済ませ、以降の panel_png() /
+        panel_files() / embed() はキャッシュを返すだけにする。
+        """
+        if not self._png_ready:
+            self._png_ready = True
+            try:
+                self._png = await asyncio.to_thread(
+                    role_shop_panel_png, self.snapshot)
+            except Exception:
+                logger.exception("role_shop: カタログ画像の生成に失敗しました")
+                self._png = None
+
     def panel_files(self) -> list[discord.File] | None:
         png = self.panel_png()
         if png is None:
@@ -162,6 +177,7 @@ class RoleShopView(discord.ui.View):
     async def _reload(self, interaction: discord.Interaction) -> None:
         self.snapshot = await self.cog.snapshot(self.guild, self.user_id)
         self._png_ready = False  # スナップショットが変わったので画像を作り直す
+        await self.prepare_png()
         self.refresh()
         container = getattr(self, "_v2", None)
         try:
@@ -396,6 +412,7 @@ class RoleShopCog(commands.Cog):
                 "ロールショップはサーバー内でのみ使えます。", ephemeral=True)
         snapshot = await self.snapshot(guild, interaction.user.id)
         view = RoleShopView(self, guild, interaction.user.id, snapshot)
+        await view.prepare_png()
         files = view.panel_files()
         if files:
             await interaction.response.send_message(

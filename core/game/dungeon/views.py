@@ -72,7 +72,7 @@ async def d_return_to_dungeon(interaction, uid, db_api, msg=""):
     """現在状態の統合パネルへ戻る。全画面共通の復帰処理。"""
     p = d_get_player(uid)
     view = d_dungeon_view(uid, db_api)
-    map_file, map_url = d_map_attachment(uid, p["floor"], p["x"], p["y"])
+    map_file, map_url = await asyncio.to_thread(d_map_attachment, uid, p["floor"], p["x"], p["y"])
     await interaction.edit_original_response(
         embed=view._embed(msg, image_url=map_url), view=view, attachments=[map_file]
     )
@@ -133,7 +133,7 @@ class DungeonStatusView(DungeonViewBase):
 
     async def _render(self, interaction, msg=""):
         p = self.sync_state()
-        map_file, map_url = d_map_attachment(self.uid, p["floor"], p["x"], p["y"])
+        map_file, map_url = await asyncio.to_thread(d_map_attachment, self.uid, p["floor"], p["x"], p["y"])
         await interaction.edit_original_response(
             embed=self._embed(msg, image_url=map_url), view=self, attachments=[map_file]
         )
@@ -151,7 +151,7 @@ class DungeonStatusView(DungeonViewBase):
         await interaction.response.defer()
         p = self.sync_state()
         op = DungeonOperationView(self.uid, p["floor"], p["x"], p["y"], self.db_api)
-        map_file, map_url = d_map_attachment(self.uid, p["floor"], p["x"], p["y"])
+        map_file, map_url = await asyncio.to_thread(d_map_attachment, self.uid, p["floor"], p["x"], p["y"])
         await interaction.edit_original_response(
             embed=op._embed("操作メニュー", image_url=map_url), view=op, attachments=[map_file]
         )
@@ -193,7 +193,7 @@ class DungeonStairsView(DungeonViewBase):
 
     async def _render(self, interaction, msg=""):
         p = self.sync_state()
-        map_file, map_url = d_map_attachment(self.uid, p["floor"], p["x"], p["y"])
+        map_file, map_url = await asyncio.to_thread(d_map_attachment, self.uid, p["floor"], p["x"], p["y"])
         await interaction.edit_original_response(
             embed=self._embed(msg, image_url=map_url), view=self, attachments=[map_file]
         )
@@ -288,7 +288,7 @@ class DungeonShopView(DungeonViewBase):
             msg = "コインが足りないか、購入に失敗しました。"
         await dg_save_player(self.uid, self.db_api)
         p = self.sync_state()
-        map_file, map_url = d_map_attachment(self.uid, p["floor"], p["x"], p["y"])
+        map_file, map_url = await asyncio.to_thread(d_map_attachment, self.uid, p["floor"], p["x"], p["y"])
         await i.edit_original_response(embed=self._embed(msg, image_url=map_url), view=self, attachments=[map_file])
 
     @discord.ui.button(label="パンを買う", style=discord.ButtonStyle.green)
@@ -369,7 +369,7 @@ class DungeonCombatView(DungeonViewBase):
 
     async def _render(self, interaction, msg=""):
         p = self.sync_state()
-        map_file, map_url = d_map_attachment(self.uid, p["floor"], p["x"], p["y"])
+        map_file, map_url = await asyncio.to_thread(d_map_attachment, self.uid, p["floor"], p["x"], p["y"])
         await interaction.edit_original_response(
             embed=self._embed(msg, image_url=map_url), view=self, attachments=[map_file]
         )
@@ -501,7 +501,7 @@ class DungeonCombatView(DungeonViewBase):
         self.stop()
         view = DungeonRewardChoiceView(self.uid, self.floor, self.x, self.y, self.db_api, choices)
         p = self.sync_state()
-        map_file, map_url = d_map_attachment(self.uid, p["floor"], p["x"], p["y"])
+        map_file, map_url = await asyncio.to_thread(d_map_attachment, self.uid, p["floor"], p["x"], p["y"])
         await i.edit_original_response(embed=self._embed(image_url=map_url), view=view, attachments=[map_file])
 
     async def _lose(self, i):
@@ -658,7 +658,7 @@ class DungeonMainView(DungeonViewBase):
         """現在のプレイヤー状態から1枚の画面（Embed＋画像）を作り直す。"""
         target = view or self
         target.floor, target.x, target.y = p["floor"], p["x"], p["y"]
-        map_file, map_url = d_map_attachment(self.uid, p["floor"], p["x"], p["y"])
+        map_file, map_url = await asyncio.to_thread(d_map_attachment, self.uid, p["floor"], p["x"], p["y"])
         await interaction.edit_original_response(
             embed=target._embed(msg, image_url=map_url), view=target, attachments=[map_file]
         )
@@ -850,7 +850,7 @@ class DungeonUnifiedView(DungeonMainView):
         self.stop()
         await interaction.response.defer()
         p = self.sync_state()
-        map_file, map_url = d_map_attachment(self.uid, p["floor"], p["x"], p["y"])
+        map_file, map_url = await asyncio.to_thread(d_map_attachment, self.uid, p["floor"], p["x"], p["y"])
         embed = self._embed("ダンジョンを終了しました。再開する場合は `/game` からダンジョンを選んでください。", image_url=map_url)
         await interaction.edit_original_response(embed=embed, view=None, attachments=[map_file])
 

@@ -735,7 +735,8 @@ class Shogi(commands.Cog):
             await safe_delete(notice)
         # 盤面画像の番号ラベルは、表示中のページの候補だけに付ける。
         render_labels = paginate_labels(labels, page)[0] if labels else labels
-        buf = s.renderer.render(s.game, labels=render_labels, selected=selected)
+        buf = await asyncio.to_thread(
+            s.renderer.render, s.game, labels=render_labels, selected=selected)
         file = discord.File(buf, "shogi.png")
         if labels:
             select_view = ShogiMovePanel(self, s, labels, page=page, body=description)

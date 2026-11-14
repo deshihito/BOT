@@ -216,10 +216,11 @@ class KoikoiPanel(GamePanelView):
         match: KoikoiMatch = self.session["match"]
         if match.phase != "play" or match.current != interaction.user.id:
             return await interaction.response.send_message("今はあなたの番ではありません。", ephemeral=True)
+        file = await asyncio.to_thread(hand_file, match, interaction.user.id)
         await interaction.response.send_message(
             "出す札を選んでください。（金の枠は場と合う札です）",
             view=HandView(self.cog, self.session), ephemeral=True,
-            file=hand_file(match, interaction.user.id))
+            file=file)
 
     def _make_decide_callback(self, koikoi: bool):
         async def callback(interaction: discord.Interaction):
@@ -356,7 +357,7 @@ class Koikoi(commands.Cog):
             old_notice = session.pop("last_notice", None)
             if old_notice is not None:
                 await safe_delete(old_notice)
-            board = public_board_file(match, members)
+            board = await asyncio.to_thread(public_board_file, match, members)
             panel_kwargs = {}
             if board is not None:
                 panel_kwargs["file"] = board

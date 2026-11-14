@@ -212,7 +212,8 @@ class GameControlView(GamePanelView):
         hand = self.game_engine.hands.get(interaction.user.id, [])
         hand_str = " ".join(hand) if hand else "手札がありません"
         if hand:
-            await interaction.response.send_message(view=text_panel("あなたの手札", hand_str), ephemeral=True, file=hand_file(hand))
+            file = await asyncio.to_thread(hand_file, hand)
+            await interaction.response.send_message(view=text_panel("あなたの手札", hand_str), ephemeral=True, file=file)
         else:
             await interaction.response.send_message(view=text_panel("あなたの手札", hand_str), ephemeral=True)
 
@@ -288,8 +289,9 @@ class Doubt(commands.Cog):
             *status_list,
         ]
         view = GameControlView(game, self, body="\n".join(lines))
+        file = await asyncio.to_thread(field_file, len(game.field))
         game.last_panel_msg = await game_panels.replace(
-            channel, "party", view=view, file=field_file(len(game.field)))
+            channel, "party", view=view, file=file)
 
     async def declare_winner(self, channel, game, winner_id):
         # メインパネルと宣言アナウンスを片付け、結果だけを残す。

@@ -11,6 +11,7 @@ PIL 画像（core/game/board_image.render_nonogram）に差し替え、パネル
 Components V2（GamePanelView + MediaGallery）にした。操作方式・
 ロジック・記録は不変。選択中の行・列ヒントとマスは画像上で強調される。
 """
+import asyncio
 import io
 import random
 import time
@@ -115,8 +116,9 @@ class NonogramView(GamePanelView):
 
     async def _refresh(self, interaction: discord.Interaction):
         self._render()
+        file = await asyncio.to_thread(board_file, self.board, self._selected())
         await edit_panel_v2(interaction, self,
-                            files=[board_file(self.board, self._selected())])
+                            files=[file])
 
     def _make_action_callback(self, value):
         async def callback(interaction: discord.Interaction):
@@ -154,8 +156,9 @@ class NonogramView(GamePanelView):
         if cleared and entry is not None:
             self.status += "\n" + game_records.format_timed_line(entry, self.puzzle.size_key)
         self._render()
+        file = await asyncio.to_thread(board_file, self.board, None)
         await edit_panel_v2(interaction, self,
-                            files=[board_file(self.board, None)])
+                            files=[file])
         self.stop()
 
 
@@ -182,7 +185,8 @@ class SizeView(GamePanelView):
         async def callback(interaction: discord.Interaction):
             puzzle = NonogramPuzzle.pick(size_key, rng=random.Random())
             view = NonogramView(self.cog, self.owner, puzzle)
-            await edit_panel_v2(interaction, view, files=[board_file(view.board, None)])
+            file = await asyncio.to_thread(board_file, view.board, None)
+            await edit_panel_v2(interaction, view, files=[file])
             self.stop()
         return callback
 

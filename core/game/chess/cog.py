@@ -478,7 +478,8 @@ class Chess(commands.Cog):
             desc, selected = turn_description(g), None
         else:
             desc, selected = "移動先の番号を選んでください。", g.selected
-        file = discord.File(render_board(g.board, page_labels, selected), filename="chess_board.png")
+        png = await asyncio.to_thread(render_board, g.board, page_labels, selected)
+        file = discord.File(png, filename="chess_board.png")
         await interaction.message.edit(attachments=[file],
                                        view=ChessMovePanel(self, g, labels, stage, page, body=desc))
 
@@ -501,7 +502,8 @@ class Chess(commands.Cog):
                 return
             move_labels = [(move_label(i), dest) for i, dest in enumerate(destinations)]
             first_page, _, _ = paginate_labels(move_labels, 0)
-            file = discord.File(render_board(g.board, first_page, chosen), filename="chess_board.png")
+            png = await asyncio.to_thread(render_board, g.board, first_page, chosen)
+            file = discord.File(png, filename="chess_board.png")
             await interaction.message.edit(attachments=[file],
                                            view=ChessMovePanel(self, g, move_labels, "destination",
                                                                body="移動先の番号を選んでください。"))
@@ -560,7 +562,8 @@ class Chess(commands.Cog):
                 sources.append(source)
         labels = [(move_label(i), pos) for i, pos in enumerate(sources[:len(MOVE_LABELS)])]
         first_page, _, _ = paginate_labels(labels, 0)
-        file = discord.File(render_board(g.board, first_page, g.selected), filename="chess_board.png")
+        png = await asyncio.to_thread(render_board, g.board, first_page, g.selected)
+        file = discord.File(png, filename="chess_board.png")
         panel = ChessMovePanel(self, g, labels, "source", body=turn_description(g))
         if g.current_msg is None:
             g.current_msg = await game_panels.replace(channel, "party", file=file, view=panel)

@@ -197,7 +197,7 @@ class Mendou(commands.Cog):
                 return
             game = MendouGame(players)
             self.channels[channel.id] = game
-            panel, board = self._panel(game)
+            panel, board = await self._panel(game)
             self.messages[channel.id] = await channel.send(view=panel, file=board)
             while not game.finished:
                 await asyncio.sleep(1.0)
@@ -220,9 +220,9 @@ class Mendou(commands.Cog):
             self.messages.pop(channel.id, None)
 
     # ------------------------------------------------------------------ パネル
-    def _panel(self, game: MendouGame) -> tuple[GamePanelView, discord.File | None]:
+    async def _panel(self, game: MendouGame) -> tuple[GamePanelView, discord.File | None]:
         panel = GamePanelView("📨 めんどうパス", status_text(game))
-        fronts = fronts_png(game)
+        fronts = await asyncio.to_thread(fronts_png, game)
         board = None
         if fronts is not None:
             panel.add_extra(discord.ui.MediaGallery(
@@ -237,8 +237,9 @@ class Mendou(commands.Cog):
             view = GamePanelView("あなたの手札", hand or "（なし）")
             view.add_extra(discord.ui.MediaGallery(
                 discord.MediaGalleryItem("attachment://mendou_hand.png")))
+            png = await asyncio.to_thread(hand_png, game, uid)
             await inter.response.send_message(
-                view=view, file=discord.File(io.BytesIO(hand_png(game, uid)), "mendou_hand.png"),
+                view=view, file=discord.File(io.BytesIO(png), "mendou_hand.png"),
                 ephemeral=True)
 
         async def on_pass(inter: discord.Interaction):
@@ -287,7 +288,7 @@ class Mendou(commands.Cog):
         msg = self.messages.get(channel.id)
         if msg is not None:
             try:
-                panel, board = self._panel(game)
+                panel, board = await self._panel(game)
                 await msg.edit(view=panel, attachments=[board] if board else [])
             except Exception:  # noqa: BLE001
                 logger.debug("Mendou: パネル更新に失敗", exc_info=True)

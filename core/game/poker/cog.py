@@ -136,6 +136,14 @@ def hand_file(hand, filename="poker_hand.png"):
     return discord.File(io.BytesIO(hand_image(hand)), filename=filename)
 
 
+def showdown_png(rows) -> bytes:
+    """ショーダウンの全員分の手札画像（呼び出し側で to_thread する）。"""
+    return render_cached(
+        ("poker-showdown", tuple((label, specs) for label, specs in rows)),
+        lambda: render_card_rows([(label, list(specs)) for label, specs in rows],
+                                 title="ショーダウン"))
+
+
 # ---------------------------------------------------------------------------
 # ベットラウンド（純ロジック）
 # ---------------------------------------------------------------------------
@@ -423,9 +431,10 @@ class BettingPanel(GamePanelView):
         if interaction.user.id not in t.hands:
             return await interaction.response.send_message("参加者だけが操作できます。", ephemeral=True)
         hand = t.hands[interaction.user.id]
+        file = await asyncio.to_thread(hand_file, hand)
         await interaction.response.send_message(
             f"あなたの手札（相手には見えません）: {' '.join(label_card(c) for c in hand)}",
-            ephemeral=True, file=hand_file(hand))
+            ephemeral=True, file=file)
 
     async def _leave(self, interaction):
         t, r = self.table, self.round
@@ -462,9 +471,10 @@ class DiscardSelect(discord.ui.Select):
         replacements = [t.deck.pop() for _ in discarded]
         t.hands[self.uid] = kept + replacements
         t.submitted.add(self.uid)
+        file = await asyncio.to_thread(hand_file, t.hands[self.uid])
         await interaction.response.send_message(
             f"{len(discarded)}枚を交換しました。交換後の手札: {' '.join(label_card(c) for c in t.hands[self.uid])}",
-            ephemeral=True, file=hand_file(t.hands[self.uid]))
+            ephemeral=True, file=file)
 
 
 class DrawPanel(GamePanelView):
@@ -485,9 +495,10 @@ class DrawPanel(GamePanelView):
             return await interaction.response.send_message("すでに交換を確定しています。", ephemeral=True)
         view = discord.ui.View(timeout=DRAW_SECONDS)
         view.add_item(DiscardSelect(self.cog, t, interaction.user.id))
+        file = await asyncio.to_thread(hand_file, t.hands[interaction.user.id])
         await interaction.response.send_message(
             "あなたの手札（相手には見えません）。交換したいカードを選択してください。",
-            ephemeral=True, view=view, file=hand_file(t.hands[interaction.user.id]))
+            ephemeral=True, view=view, file=file)
 
     async def _leave(self, interaction):
         t = self.table
@@ -868,10 +879,7 @@ class Poker(commands.Cog):
                 continue
             name = getattr(t.players[uid], "display_name", str(uid))
             rows.append((f"{name}（{labels[uid]}）", hand_specs(t.hands[uid])))
-        data = render_cached(
-            ("poker-showdown", tuple((label, specs) for label, specs in rows)),
-            lambda: render_card_rows([(label, list(specs)) for label, specs in rows],
-                                     title="ショーダウン"))
+        data = await asyncio.to_thread(showdown_png, rows)
         panel = GamePanelView("ポーカー：ショーダウン", "\n".join(lines), timeout=None)
         gallery = discord.ui.MediaGallery()
         gallery.add_item(media="attachment://poker_showdown.png")

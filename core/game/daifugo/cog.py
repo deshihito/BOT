@@ -483,13 +483,14 @@ class Daifugo(commands.Cog):
         plays = g.legal(interaction.user.id)
         hand_cards = list(g.hands[interaction.user.id])
         hand = " ".join(hand_cards)
+        file = await asyncio.to_thread(hand_file, hand_cards)
         if not plays:
             return await interaction.response.send_message(
                 f"出せるカードがありません。パスしてください。\nあなたの手札: {hand}",
-                ephemeral=True, file=hand_file(hand_cards))
+                ephemeral=True, file=file)
         await interaction.response.send_message(f"{table_text(g)}\nあなたの手札: {hand}",
                                                 view=PlayView(self, g, plays), ephemeral=True,
-                                                file=hand_file(hand_cards))
+                                                file=file)
 
     async def on_play(self, interaction: discord.Interaction, g: DaifugoGame, play):
         error = self._check_turn(interaction, g)
@@ -517,8 +518,9 @@ class Daifugo(commands.Cog):
         hand = " ".join(hand_cards) or "なし（上がり）"
         if not hand_cards:
             return await interaction.response.send_message(f"あなたの手札: {hand}", ephemeral=True)
+        file = await asyncio.to_thread(hand_file, hand_cards)
         await interaction.response.send_message(f"あなたの手札: {hand}", ephemeral=True,
-                                                file=hand_file(hand_cards))
+                                                file=file)
 
     async def finish(self, channel, g: DaifugoGame):
         g.phase = "done"

@@ -88,7 +88,8 @@ class CardCheckPanel(GamePanelView):
             "あなたのビンゴカード",
             caption + "\n橙色はマーク済み、★ はフリースポットです。",
             "bingo_card.png")
-        file = discord.File(io.BytesIO(card_png(card)), "bingo_card.png")
+        png = await asyncio.to_thread(card_png, card)
+        file = discord.File(io.BytesIO(png), "bingo_card.png")
         await interaction.response.send_message(view=panel, file=file, ephemeral=True)
 
 
@@ -163,8 +164,9 @@ class Bingo(commands.Cog):
         for uid in reach:
             lines.append(f"<@{uid}> さんが **リーチ** です！")
         # 引かれた番号の一覧は全体盤の画像が担う（テキストの列挙は重複なので廃止）。
+        file = await asyncio.to_thread(board_file, session)
         await tease.edit(view=CardCheckPanel(self, session, body="\n".join(lines), board=True),
-                         attachments=[board_file(session)])
+                         attachments=[file])
         # 前回の開示（または開始アナウンス）は新しい開示で役割を終える。
         previous = getattr(session, "last_draw_msg", None)
         if previous is not None and previous is not tease:
