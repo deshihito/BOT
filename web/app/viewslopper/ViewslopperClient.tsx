@@ -18,6 +18,8 @@ type Result = {
   dimensions: Dimension[];
   diagnosis: Diagnosis[];
   diagnosisSource: "llm" | "rules";
+  scoreSource?: "llm" | "rules";
+  rendered?: boolean;
   ux: { friction: number; grade: string; findings: UxFinding[]; signals: UxSignals };
 };
 
@@ -139,7 +141,8 @@ export default function ViewslopperClient() {
             ))}
           </div>
           <p style={{ color: "#6d7278", fontSize: 12, marginTop: 14 }}>
-            診断文の出所: {result.diagnosisSource === "llm" ? "AI（スコアは計算で固定）" : "ルールベース（AI不使用）"}
+            採点の出所: {result.scoreSource === "llm" ? "AI（次元ごとの判断はAI、合計は重み付け集計）" : "ルール計算（AIが使えないため決定的スコアで代替）"}
+            {result.rendered ? " / 取得: 描画経由（JavaScript実行後の内容で判定）" : ""}
           </p>
 
           <h2 style={{ fontSize: 18, margin: "32px 0 12px" }}>UX・配置</h2>
@@ -176,7 +179,7 @@ export default function ViewslopperClient() {
             </div>
           )}
           <p style={{ color: "#6d7278", fontSize: 12, marginTop: 14 }}>
-            UX・配置は実レンダリングなしで、HTMLの構造から数えられる事実だけで診断しています。
+            UX・配置は、HTMLの構造から数えた事実（下の数値）を材料に診断しています。見た目の実測はしていません。
           </p>
         </section>
       )}
