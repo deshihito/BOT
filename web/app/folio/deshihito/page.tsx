@@ -37,7 +37,12 @@ const STARS = Array.from({ length: 72 }, (_, i) => {
   return { x, y, s, d };
 });
 
+// globals.css の要素セレクタ（header/footer は白背景、main は中央寄せ
+// カラム+余白）がこのページにも効いてしまうため、:has() でこのページ
+// 表示時だけ打ち消し、夜空を画面全体に広げる（Activity 画面と同じ手法）。
 const CSS = `
+body:has(.folio-dh){background:#0a0f26}
+main:has(.folio-dh){max-width:none;min-height:0;margin:0;padding:0}
 .folio-dh{position:relative;min-height:100svh;overflow:hidden;background:radial-gradient(1100px 520px at 82% -6%,rgba(236,217,160,.14),transparent 62%),radial-gradient(900px 620px at -12% 88%,rgba(120,140,220,.12),transparent 60%),linear-gradient(180deg,#0a0f26 0%,#101736 46%,#182148 80%,#1d2852 100%);color:#eceeff;font-family:"Hiragino Kaku Gothic ProN","Hiragino Sans","Noto Sans JP",system-ui,sans-serif}
 .folio-dh *{box-sizing:border-box}
 .folio-dh::before{content:"";position:absolute;inset:0;background:radial-gradient(640px 300px at 50% 30%,rgba(190,200,255,.05),transparent 70%),radial-gradient(800px 380px at 24% 74%,rgba(190,200,255,.04),transparent 70%);filter:blur(6px);pointer-events:none}
@@ -47,7 +52,7 @@ const CSS = `
 .folio-dh-moon{position:absolute;top:6.5rem;right:6vw;width:172px;height:172px;border-radius:50%;opacity:.94;background:radial-gradient(circle at 38% 34%,rgba(253,246,221,.95) 0%,rgba(244,228,175,.88) 44%,rgba(236,217,160,.78) 78%,rgba(224,196,120,.68) 100%);box-shadow:0 0 70px 26px rgba(236,217,160,.20),0 0 170px 90px rgba(236,217,160,.10),inset 0 0 42px rgba(255,252,240,.35)}
 .folio-dh-moon::after{content:"";position:absolute;inset:0;border-radius:50%;background:radial-gradient(circle at 68% 62%,rgba(160,128,58,.12) 0 9%,transparent 10%),radial-gradient(circle at 30% 66%,rgba(160,128,58,.09) 0 6%,transparent 7%),radial-gradient(circle at 55% 22%,rgba(160,128,58,.08) 0 5%,transparent 6%)}
 .folio-dh-inner{position:relative;max-width:880px;margin:0 auto;padding:0 20px 64px}
-.folio-dh-header{display:flex;align-items:center;gap:10px;padding:20px 0 14px;border-bottom:1px solid transparent;border-image:linear-gradient(90deg,transparent,rgba(236,217,160,.55) 30%,rgba(236,217,160,.55) 70%,transparent) 1}
+.folio-dh-header{display:flex;align-items:center;gap:10px;padding:20px 0 14px;background:transparent;position:relative;top:auto;border-bottom:1px solid transparent;border-image:linear-gradient(90deg,transparent,rgba(236,217,160,.55) 30%,rgba(236,217,160,.55) 70%,transparent) 1}
 .folio-dh-header .name{font-size:17px;letter-spacing:.16em;font-weight:500}
 .folio-dh-hero{padding:88px 0 30px;max-width:560px}
 .folio-dh-hero h1{font-size:52px;margin:0 0 10px;letter-spacing:.07em;font-weight:500;text-shadow:0 2px 30px rgba(160,175,255,.25)}
@@ -74,7 +79,7 @@ const CSS = `
 .folio-dh-tags{display:flex;flex-wrap:wrap;gap:8px}
 .folio-dh-tag{border:1.5px dashed rgba(236,217,160,.38);border-radius:999px;padding:7px 16px;color:#c6ccef;font-size:13.5px;background:rgba(255,255,255,.03);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px)}
 .folio-dh-links{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
-.folio-dh-footer{margin-top:72px;padding-top:18px;border-top:1px solid transparent;border-image:linear-gradient(90deg,transparent,rgba(236,217,160,.55) 30%,rgba(236,217,160,.55) 70%,transparent) 1;display:flex;align-items:center;gap:8px;justify-content:center;color:#a5add6;font-size:12.5px;letter-spacing:.12em}
+.folio-dh-footer{margin-top:72px;padding:18px 0 0;background:transparent;position:relative;border-top:1px solid transparent;border-image:linear-gradient(90deg,transparent,rgba(236,217,160,.55) 30%,rgba(236,217,160,.55) 70%,transparent) 1;display:flex;align-items:center;gap:8px;justify-content:center;color:#a5add6;font-size:12.5px;letter-spacing:.12em}
 @media (max-width:640px){.folio-dh-hero{padding-top:56px}.folio-dh-hero h1{font-size:32px}.folio-dh-moon{width:104px;height:104px;top:5.2rem;right:5vw}.folio-dh-stats{grid-template-columns:repeat(2,1fr)}.folio-dh-works,.folio-dh-links,.folio-dh-cards{grid-template-columns:1fr}}
 @media (prefers-reduced-motion:reduce){.folio-dh-star{animation:none}}
 `;
