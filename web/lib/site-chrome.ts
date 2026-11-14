@@ -7,7 +7,12 @@
 // 完結させる（外枠は app/one-prompter/layout.tsx が持つ）。
 
 /** 共通クロームを出さないパス（このパス自体と、その配下すべて）。 */
-export const CHROMELESS_PATHS: readonly string[] = ["/one-prompter"];
+export const CHROMELESS_PATHS: readonly string[] = [
+  "/one-prompter",
+  // ポートフォリオ枠（1人1ファイル割り当て）。各ページは専用ヘッダー/
+  // フッターを含めてページ内で完結させるため、共通クロームは出さない。
+  "/folio",
+];
 
 /** 指定パスでサイト共通クロームを省くかどうか。 */
 export function isChromelessPath(pathname: string): boolean {
