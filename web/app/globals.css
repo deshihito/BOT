@@ -1553,3 +1553,12 @@ button.og-bs-cell:hover { background:#c3dcee; }
 .juice-confetti-piece { position:absolute; top:-4%; height:13px; border-radius:2px; animation-name:juice-confetti-fall; animation-timing-function:linear; animation-fill-mode:forwards; }
 /* スコア加算ポップ（ScorePop）。配置は親側で行う */
 .juice-score-pop { display:inline-block; font-size:15px; font-weight:800; color:var(--accent); pointer-events:none; animation:juice-score-pop .8s ease-out both; }
+.chart-wrap { position:relative; }
+.status-chart.clickable { cursor:pointer; }
+.chart-pop { position:absolute; z-index:6; transform:translate(-50%,-118%); background:#ffffff; border:1px solid var(--line); border-radius:8px; box-shadow:0 10px 26px rgba(13,58,86,.20); padding:6px 11px; font-size:13px; line-height:1.45; color:#0d3a56; white-space:nowrap; pointer-events:none; text-align:center; }
+.chart-pop-label { display:block; color:var(--muted); font-size:11.5px; }
+.chart-pop strong { font-size:14px; font-variant-numeric:tabular-nums; }
+.chart-pop-sub { display:block; color:var(--muted); font-size:11.5px; font-weight:400; }
+.uptime-bar { cursor:pointer; }
+.uptime-bar.sel { outline:2px solid #0d3a56; outline-offset:1px; }
+.uptime-pct { background:none; border:none; padding:0; font:inherit; color:inherit; cursor:pointer; text-decoration:underline dotted; text-underline-offset:3px; }
