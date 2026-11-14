@@ -84,6 +84,15 @@ test("ポートフォリオ枠のサブドメインは割り当てファイル�
     }),
     "https://deshihito.agobot.app/folio/deshihito",
   );
+  assert.equal(
+    m.subdomainRedirectUrl({
+      pathname: "/",
+      forwardedHost: "tadanoen.agobot.app",
+      hostname: "localhost",
+      search: "",
+    }),
+    "https://tadanoen.agobot.app/folio/tadanoen",
+  );
   // クエリ文字列を引き継ぎ、localhost を含まない
   const url = m.subdomainRedirectUrl({
     pathname: "/",
