@@ -2,7 +2,11 @@
 // ハノイの塔。ロジックは lib/hanoi.ts。
 // 柱を押して円盤を持ち上げ、置きたい柱を押して移す。自動解答の再生もできる。端末内で完結。
 import Link from "next/link";
+import dynamic from "next/dynamic";
 import { useEffect, useRef, useState } from "react";
+
+// 3D シーンは three を含むため遅延読み込み（このページ専用チャンクに閉じる）。
+const HanoiScene3D = dynamic(() => import("./HanoiScene3D"), { ssr: false });
 import {
   canMoveDisk,
   createHanoiGame,
@@ -23,6 +27,7 @@ const DISK_COLORS = ["#e5484d", "#f76b15", "#ffd60a", "#46a758", "#3e9bdc", "#8e
 
 export default function HanoiClient() {
   const { prefix } = useGamesNav();
+  const [webglFailed, setWebglFailed] = useState(false);
   const [disks, setDisks] = useState<number>(5);
   const [state, setState] = useState<HanoiState>(() => createHanoiGame(5));
   const [selected, setSelected] = useState<number | null>(null);
@@ -109,6 +114,27 @@ export default function HanoiClient() {
     }
   };
 
+  // 3D シーンのドラッグ（柱→柱）用: タップ2回分の意味を1回の移動として処理する。
+  const onMovePeg = (from: number, to: number) => {
+    if (auto) return;
+    if (state.status === "solved") return;
+    if (state.pegs[from].length === 0) return;
+    if (canMoveDisk(state, from, to)) {
+      const next = moveDisk(state, from, to);
+      if (next.status !== "solved") sfxPlace();
+      setState(next);
+      setWrongPeg(null);
+      setSelected(null);
+    } else {
+      const moving = hanoiTop(state, from);
+      const target = hanoiTop(state, to);
+      if (moving !== null && target !== null && moving > target) {
+        sfxWrong();
+        setWrongPeg(to);
+      }
+    }
+  };
+
   const min = hanoiMinMoves(disks);
   const solved = state.status === "solved";
 
@@ -119,6 +145,98 @@ export default function HanoiClient() {
     : selected !== null
       ? "置きたい柱を押してください（大きい円盤の上には置けません）。"
       : "柱を押すと一番上の円盤を持ち上げます。右端の柱へ全部移せればクリアです。";
+
+  const board2d = (
+    <div
+      style={{
+        display: "grid",
+        gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
+        gap: 10,
+        width: "min(94vw, 560px)",
+        margin: "0 auto",
+      }}
+    >
+      {state.pegs.map((stack, peg) => {
+        const topFirst = [...stack].reverse();
+        const isSelected = selected === peg;
+        return (
+          <div
+            key={peg}
+            {...tappableProps(() => onPeg(peg))}
+            aria-label={`${peg + 1}番目の柱${isSelected ? "（選択中）" : ""}`}
+            aria-pressed={isSelected}
+            className={wrongPeg === peg ? "juice-shake" : isSelected ? "juice-pulse" : undefined}
+            style={{
+              position: "relative",
+              height: 240,
+              display: "flex",
+              flexDirection: "column",
+              justifyContent: "flex-end",
+              alignItems: "center",
+              gap: 3,
+              padding: "10px 4px 12px",
+              borderRadius: 12,
+              border: isSelected ? "3px solid #d9a41c" : "2px solid #d8c9a3",
+              background: "#fbf7ec",
+              cursor: auto || solved ? "default" : "pointer",
+              touchAction: "manipulation",
+            }}
+          >
+            <span
+              aria-hidden="true"
+              style={{
+                position: "absolute",
+                left: "50%",
+                bottom: 10,
+                width: 6,
+                height: 200,
+                marginLeft: -3,
+                borderRadius: 3,
+                background: "#b09a6a",
+              }}
+            />
+            <span
+              aria-hidden="true"
+              style={{
+                position: "absolute",
+                left: "6%",
+                right: "6%",
+                bottom: 8,
+                height: 6,
+                borderRadius: 3,
+                background: "#8a7a52",
+              }}
+            />
+            {topFirst.map((disk, i) => {
+              const isTop = i === 0;
+              return (
+                <span
+                  key={disk}
+                  aria-hidden="true"
+                  className="juice-slide"
+                  style={{
+                    position: "relative",
+                    zIndex: 1,
+                    display: "block",
+                    width: `${(disk / disks) * 92}%`,
+                    height: 22,
+                    borderRadius: 6,
+                    background: DISK_COLORS[disk - 1] ?? "#697177",
+                    border: "1px solid rgba(0,0,0,0.25)",
+                    transform: isTop && isSelected ? "translateY(-8px)" : "none",
+                    boxShadow: isTop && isSelected ? "0 4px 8px rgba(0,0,0,0.3)" : "none",
+                  }}
+                />
+              );
+            })}
+            <span style={{ position: "relative", zIndex: 1, fontSize: 12, color: "#8a7a52", marginTop: 6 }}>
+              {peg === 0 ? "スタート" : peg === 2 ? "ゴール" : ""}
+            </span>
+          </div>
+        );
+      })}
+    </div>
+  );
 
   return (
     <>
@@ -167,95 +285,24 @@ export default function HanoiClient() {
         {state.moves} 手 / 最少 {min} 手 ・ {statusText}
       </p>
 
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
-          gap: 10,
-          width: "min(94vw, 560px)",
-          margin: "0 auto",
-        }}
-      >
-        {state.pegs.map((stack, peg) => {
-          const topFirst = [...stack].reverse();
-          const isSelected = selected === peg;
-          return (
-            <div
-              key={peg}
-              {...tappableProps(() => onPeg(peg))}
-              aria-label={`${peg + 1}番目の柱${isSelected ? "（選択中）" : ""}`}
-              aria-pressed={isSelected}
-              className={wrongPeg === peg ? "juice-shake" : isSelected ? "juice-pulse" : undefined}
-              style={{
-                position: "relative",
-                height: 240,
-                display: "flex",
-                flexDirection: "column",
-                justifyContent: "flex-end",
-                alignItems: "center",
-                gap: 3,
-                padding: "10px 4px 12px",
-                borderRadius: 12,
-                border: isSelected ? "3px solid #d9a41c" : "2px solid #d8c9a3",
-                background: "#fbf7ec",
-                cursor: auto || solved ? "default" : "pointer",
-                touchAction: "manipulation",
-              }}
-            >
-              <span
-                aria-hidden="true"
-                style={{
-                  position: "absolute",
-                  left: "50%",
-                  bottom: 10,
-                  width: 6,
-                  height: 200,
-                  marginLeft: -3,
-                  borderRadius: 3,
-                  background: "#b09a6a",
-                }}
-              />
-              <span
-                aria-hidden="true"
-                style={{
-                  position: "absolute",
-                  left: "6%",
-                  right: "6%",
-                  bottom: 8,
-                  height: 6,
-                  borderRadius: 3,
-                  background: "#8a7a52",
-                }}
-              />
-              {topFirst.map((disk, i) => {
-                const isTop = i === 0;
-                return (
-                  <span
-                    key={disk}
-                    aria-hidden="true"
-                    className="juice-slide"
-                    style={{
-                      position: "relative",
-                      zIndex: 1,
-                      display: "block",
-                      width: `${(disk / disks) * 92}%`,
-                      height: 22,
-                      borderRadius: 6,
-                      background: DISK_COLORS[disk - 1] ?? "#697177",
-                      border: "1px solid rgba(0,0,0,0.25)",
-                      transform: isTop && isSelected ? "translateY(-8px)" : "none",
-                      boxShadow: isTop && isSelected ? "0 4px 8px rgba(0,0,0,0.3)" : "none",
-                    }}
-                  />
-                );
-              })}
-              <span style={{ position: "relative", zIndex: 1, fontSize: 12, color: "#8a7a52", marginTop: 6 }}>
-                {peg === 0 ? "スタート" : peg === 2 ? "ゴール" : ""}
-              </span>
-            </div>
-          );
-        })}
-      </div>
+      {webglFailed ? (
+        board2d
+      ) : (
+        <div style={{ width: "min(94vw, 560px)", margin: "0 auto" }}>
+          <HanoiScene3D
+            pegs={state.pegs}
+            diskCount={disks}
+            selected={selected}
+            wrongPeg={wrongPeg}
+            interactive={!auto && !solved}
+            onPeg={onPeg}
+            onMovePeg={onMovePeg}
+            onFail={() => setWebglFailed(true)}
+            fallback={board2d}
+          />
+        </div>
+      )}
+
       <p className="muted" style={{ textAlign: "center", marginTop: 10 }}>
         「自動解答を見る」は、最初の配置から再生します。
       </p>

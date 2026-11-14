@@ -3,7 +3,11 @@
 // マスをタップしてクイーンを置く／外す。利き筋と利き合うペアを色で知らせる。
 // 端末内で完結し、サーバーへ送信しない。
 import Link from "next/link";
+import dynamic from "next/dynamic";
 import { useEffect, useMemo, useRef, useState } from "react";
+
+// 3D シーンは three を含むため遅延読み込み（このページ専用チャンクに閉じる）。
+const QueensScene3D = dynamic(() => import("./QueensScene3D"), { ssr: false });
 import {
   attackedSquares,
   conflictingQueens,
@@ -28,6 +32,7 @@ function newGame(size: SizeKey): QnState {
 
 export default function QueensClient() {
   const { prefix } = useGamesNav();
+  const [webglFailed, setWebglFailed] = useState(false);
   const [size, setSize] = useState<SizeKey>(8);
   const [state, setState] = useState<QnState>(() => newGame(8));
   const [seconds, setSeconds] = useState(0);
@@ -103,40 +108,8 @@ export default function QueensClient() {
           ? "赤いクイーン同士が利き合っています。どちらかを動かそう。"
           : "薄く色づいたマスは、どこかのクイーンの利き筋です。";
 
-  return (
-    <>
-      <nav className="breadcrumbs" aria-label="パンくず">
-        <Link href={`${prefix}/games`}>ゲーム</Link>
-        <span> / </span>
-        <span>クイーン配置</span>
-      </nav>
-      <div className="page-heading compact-heading">
-        <h1>クイーン配置</h1>
-        <p className="muted">マスをタップしてクイーンを置いたり外したりします。</p>
-      </div>
-
-      <div className="classic-controls" role="group" aria-label="盤の大きさ">
-        {SIZES.map((s) => (
-          <button
-            key={s.key}
-            type="button"
-            aria-pressed={size === s.key}
-            className={size === s.key ? "classic-btn classic-btn-active" : "classic-btn"}
-            onClick={() => restart(s.key)}
-          >
-            {s.label}
-          </button>
-        ))}
-        <button type="button" className="classic-btn" onClick={() => restart(size)}>
-          もう一度
-        </button>
-      </div>
-
-      <p className="classic-status" role="status">
-        {state.queens.length} / {state.size} 個 ・ {seconds} 秒
-        {best !== null ? ` ・ ベスト ${best} 秒` : ""} ・ {statusText}
-      </p>
-
+  // 2D 盤（WebGL が使えない場合のフォールバックとしてそのまま使う）。
+  const board2d = (
       <div
         role="grid"
         aria-label="クイーン配置の盤"
@@ -201,6 +174,55 @@ export default function QueensClient() {
           );
         })}
       </div>
+  );
+
+  return (
+    <>
+      <nav className="breadcrumbs" aria-label="パンくず">
+        <Link href={`${prefix}/games`}>ゲーム</Link>
+        <span> / </span>
+        <span>クイーン配置</span>
+      </nav>
+      <div className="page-heading compact-heading">
+        <h1>クイーン配置</h1>
+        <p className="muted">マスをタップしてクイーンを置いたり外したりします。</p>
+      </div>
+
+      <div className="classic-controls" role="group" aria-label="盤の大きさ">
+        {SIZES.map((s) => (
+          <button
+            key={s.key}
+            type="button"
+            aria-pressed={size === s.key}
+            className={size === s.key ? "classic-btn classic-btn-active" : "classic-btn"}
+            onClick={() => restart(s.key)}
+          >
+            {s.label}
+          </button>
+        ))}
+        <button type="button" className="classic-btn" onClick={() => restart(size)}>
+          もう一度
+        </button>
+      </div>
+
+      <p className="classic-status" role="status">
+        {state.queens.length} / {state.size} 個 ・ {seconds} 秒
+        {best !== null ? ` ・ ベスト ${best} 秒` : ""} ・ {statusText}
+      </p>
+
+      {webglFailed ? board2d : (
+        <div style={{ width: "100%", maxWidth: 480, margin: "0 auto" }}>
+          <QueensScene3D
+            size={state.size}
+            queens={state.queens}
+            conflicts={[...conflicts]}
+            attacked={[...attacked]}
+            onCell={handleCell}
+            onFail={() => setWebglFailed(true)}
+            fallback={board2d}
+          />
+        </div>
+      )}
 
       {state.status === "won" && (
         <div style={{ marginTop: 16 }}>

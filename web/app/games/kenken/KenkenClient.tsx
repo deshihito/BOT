@@ -2,7 +2,11 @@
 // ケンケン。ロジックは lib/kenken.ts（解先行生成・ルール検証で完成判定）。
 // マスを選んで下の数字パッドから入力する。端末内で完結し、サーバーへ送信しない。
 import Link from "next/link";
+import dynamic from "next/dynamic";
 import { useEffect, useMemo, useRef, useState } from "react";
+
+// 3D シーンは three を含むため遅延読み込み（このページ専用チャンクに閉じる）。
+const KenkenScene3D = dynamic(() => import("./KenkenScene3D"), { ssr: false });
 import {
   checkKenken,
   createKenkenGame,
@@ -27,6 +31,7 @@ function newGame(size: KenkenSize): KenkenState {
 
 export default function KenkenClient() {
   const { prefix } = useGamesNav();
+  const [webglFailed, setWebglFailed] = useState(false);
   const [size, setSize] = useState<KenkenSize>(4);
   const [state, setState] = useState<KenkenState>(() => newGame(4));
   const [selected, setSelected] = useState(0);
@@ -139,6 +144,11 @@ export default function KenkenClient() {
     return map;
   }, [state.cages]);
 
+  const selectCell = (i: number) => {
+    sfxTap();
+    setSelected(i);
+  };
+
   const statusText =
     state.status === "won"
       ? "完成！クリアです。"
@@ -148,40 +158,8 @@ export default function KenkenClient() {
           : checked[0].message
         : "マスを選んで数字を入れよう。各行・各列に同じ数字は1つだけ。ケージの計算も合わせよう。";
 
-  return (
-    <>
-      <nav className="breadcrumbs" aria-label="パンくず">
-        <Link href={`${prefix}/games`}>ゲーム</Link>
-        <span> / </span>
-        <span>ケンケン</span>
-      </nav>
-      <div className="page-heading compact-heading">
-        <h1>ケンケン</h1>
-        <p className="muted">
-          マスをタップして選び、下の数字パッドで入力します。太線で囲まれたまとまりがケージで、左上の数字が目標値です。盤面を下にスワイプするとチェックします。
-        </p>
-      </div>
-
-      <div className="classic-controls" role="group" aria-label="サイズ">
-        {SIZES.map((s) => (
-          <div
-            key={s.key}
-            {...tappableProps(() => restart(s.key))}
-            aria-pressed={size === s.key}
-            className={size === s.key ? "classic-btn classic-btn-active" : "classic-btn"}
-          >
-            {s.label}
-          </div>
-        ))}
-        <button type="button" className="classic-btn" onClick={() => restart(size)}>
-          もう一度
-        </button>
-      </div>
-
-      <p className="classic-status" role="status">
-        {seconds} 秒{best !== null ? ` ・ ベスト ${best} 秒` : ""} ・ {statusText}
-      </p>
-
+  // 2D 盤（WebGL が使えない場合のフォールバックとしてそのまま使う）。
+  const board2d = (
       <div
         {...boardGesture}
         role="grid"
@@ -284,6 +262,59 @@ export default function KenkenClient() {
           );
         })}
       </div>
+  );
+
+  return (
+    <>
+      <nav className="breadcrumbs" aria-label="パンくず">
+        <Link href={`${prefix}/games`}>ゲーム</Link>
+        <span> / </span>
+        <span>ケンケン</span>
+      </nav>
+      <div className="page-heading compact-heading">
+        <h1>ケンケン</h1>
+        <p className="muted">
+          マスをタップして選び、下の数字パッドで入力します。太線で囲まれたまとまりがケージで、左上の数字が目標値です。盤面を下にスワイプするとチェックします。
+        </p>
+      </div>
+
+      <div className="classic-controls" role="group" aria-label="サイズ">
+        {SIZES.map((s) => (
+          <div
+            key={s.key}
+            {...tappableProps(() => restart(s.key))}
+            aria-pressed={size === s.key}
+            className={size === s.key ? "classic-btn classic-btn-active" : "classic-btn"}
+          >
+            {s.label}
+          </div>
+        ))}
+        <button type="button" className="classic-btn" onClick={() => restart(size)}>
+          もう一度
+        </button>
+      </div>
+
+      <p className="classic-status" role="status">
+        {seconds} 秒{best !== null ? ` ・ ベスト ${best} 秒` : ""} ・ {statusText}
+      </p>
+
+      {webglFailed ? board2d : (
+        <div style={{ width: "100%", maxWidth: size === 4 ? 400 : 460, margin: "0 auto" }}>
+          <KenkenScene3D
+            values={state.values}
+            size={size}
+            cages={state.cages}
+            cageOf={state.cageOf}
+            selected={selected}
+            badCells={badCells}
+            onCell={selectCell}
+            onCheck={onCheck}
+            onFail={() => setWebglFailed(true)}
+            fallback={board2d}
+          />
+        </div>
+      )}
+
 
       <div
         className="classic-controls"

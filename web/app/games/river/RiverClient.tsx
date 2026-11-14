@@ -3,7 +3,11 @@
 // 荷物をタップでボートに乗せ、ボートを対岸へスワイプして渡る。端末内で完結し、
 // 問題ごとの最少渡河回数は localStorage の ago-river-best-<problemId> に保存する。
 import Link from "next/link";
+import dynamic from "next/dynamic";
 import { useEffect, useRef, useState, type CSSProperties } from "react";
+
+// 3D シーンは three を含むため遅延読み込み（このページ専用チャンクに閉じる）。
+const RiverScene3D = dynamic(() => import("./RiverScene3D"), { ssr: false });
 import {
   createRiverGame,
   crossRiver,
@@ -51,6 +55,7 @@ function bestKey(problemId: string): string {
 
 export default function RiverClient() {
   const { prefix } = useGamesNav();
+  const [webglFailed, setWebglFailed] = useState(false);
   const [state, setState] = useState<RiverState>(() => createRiverGame(RIVER_PROBLEMS[0].id));
   const [best, setBest] = useState<number | null>(null);
   const problem = getRiverProblem(state.problemId);
@@ -91,6 +96,13 @@ export default function RiverClient() {
   };
 
   const restart = () => setState(createRiverGame(state.problemId));
+
+  // 3D シーンの荷物タップも、2D チップと同じ乗せ降ろし経路へ接続する。
+  const handleItem = (id: string) => {
+    const next = toggleRiverItem(state, id);
+    if (next !== state) sfxPlace();
+    setState(next);
+  };
 
   const statusText =
     state.status === "won"
@@ -205,6 +217,76 @@ export default function RiverClient() {
     },
   });
 
+  // 2D 表示（WebGL が使えない場合のフォールバックとしてそのまま使う）。
+  const board2d = (
+  <div
+    style={{
+      display: "flex",
+      gap: 10,
+      alignItems: "stretch",
+      flexWrap: "wrap",
+      marginTop: 10,
+    }}
+  >
+    {bank("left", "左岸（出発）", "var(--soft)")}
+    <div
+      style={{
+        flex: "1 1 170px",
+        minHeight: 170,
+        borderRadius: 12,
+        padding: 10,
+        background: "#bfe3f2",
+        display: "flex",
+        flexDirection: "column",
+        gap: 8,
+        alignItems: state.farmerSide === "left" ? "flex-start" : "flex-end",
+      }}
+      role="group"
+      aria-label="川とボート"
+    >
+      <p style={{ margin: 0, fontWeight: 800 }}>川（ボートは{state.farmerSide === "left" ? "左岸" : "右岸"}）</p>
+      <div
+        {...boatGesture}
+        key={state.farmerSide}
+        role="button"
+        tabIndex={0}
+        aria-label={`ボート（${state.farmerSide === "left" ? "左岸" : "右岸"}、対岸へスワイプで渡る）`}
+        onKeyDown={(e) => {
+          // ボートそのものにフォーカスがあるときだけ Enter で渡る。
+          // ガードがないと荷物チップにフォーカスして Enter を押したときに
+          // 乗せ降ろしと渡河が両方走る（anagram / mastermind と同じ構図）。
+          if (e.target !== e.currentTarget) return;
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            cross();
+          }
+        }}
+        className="juice-slide"
+        style={{
+          border: "2px dashed rgba(0,0,0,0.35)",
+          borderRadius: 10,
+          padding: 8,
+          minWidth: 130,
+          background: "rgba(255,255,255,0.65)",
+          touchAction: "none",
+        }}
+      >
+        <p style={{ margin: "0 0 6px", fontWeight: 700, fontSize: 14 }}>
+          ボート（{boatItems.length} / {problem.capacity}）
+        </p>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+          {boatItems.length === 0 && <span className="muted">（空っぽ）</span>}
+          {boatItems.map((i) => chip(i.id, i.name, i.kanji, i.color, true, true))}
+        </div>
+      </div>
+      <p className="muted" style={{ margin: "6px 0 0", fontSize: 13 }}>
+        ボートを{state.farmerSide === "left" ? "右" : "左"}へスワイプ（またはボートにフォーカスして Enter）で渡ります。
+      </p>
+    </div>
+    {bank("right", "右岸（ゴール）", "var(--soft)")}
+  </div>
+  );
+
   return (
     <>
       <nav className="breadcrumbs" aria-label="パンくず">
@@ -238,72 +320,20 @@ export default function RiverClient() {
         {best !== null ? ` ・ あなたの最少 ${best} 回` : ""} ・ {statusText}
       </p>
 
-      <div
-        style={{
-          display: "flex",
-          gap: 10,
-          alignItems: "stretch",
-          flexWrap: "wrap",
-          marginTop: 10,
-        }}
-      >
-        {bank("left", "左岸（出発）", "var(--soft)")}
-        <div
-          style={{
-            flex: "1 1 170px",
-            minHeight: 170,
-            borderRadius: 12,
-            padding: 10,
-            background: "#bfe3f2",
-            display: "flex",
-            flexDirection: "column",
-            gap: 8,
-            alignItems: state.farmerSide === "left" ? "flex-start" : "flex-end",
-          }}
-          role="group"
-          aria-label="川とボート"
-        >
-          <p style={{ margin: 0, fontWeight: 800 }}>川（ボートは{state.farmerSide === "left" ? "左岸" : "右岸"}）</p>
-          <div
-            {...boatGesture}
-            key={state.farmerSide}
-            role="button"
-            tabIndex={0}
-            aria-label={`ボート（${state.farmerSide === "left" ? "左岸" : "右岸"}、対岸へスワイプで渡る）`}
-            onKeyDown={(e) => {
-              // ボートそのものにフォーカスがあるときだけ Enter で渡る。
-              // ガードがないと荷物チップにフォーカスして Enter を押したときに
-              // 乗せ降ろしと渡河が両方走る（anagram / mastermind と同じ構図）。
-              if (e.target !== e.currentTarget) return;
-              if (e.key === "Enter" || e.key === " ") {
-                e.preventDefault();
-                cross();
-              }
-            }}
-            className="juice-slide"
-            style={{
-              border: "2px dashed rgba(0,0,0,0.35)",
-              borderRadius: 10,
-              padding: 8,
-              minWidth: 130,
-              background: "rgba(255,255,255,0.65)",
-              touchAction: "none",
-            }}
-          >
-            <p style={{ margin: "0 0 6px", fontWeight: 700, fontSize: 14 }}>
-              ボート（{boatItems.length} / {problem.capacity}）
-            </p>
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-              {boatItems.length === 0 && <span className="muted">（空っぽ）</span>}
-              {boatItems.map((i) => chip(i.id, i.name, i.kanji, i.color, true, true))}
-            </div>
-          </div>
-          <p className="muted" style={{ margin: "6px 0 0", fontSize: 13 }}>
-            ボートを{state.farmerSide === "left" ? "右" : "左"}へスワイプ（またはボートにフォーカスして Enter）で渡ります。
-          </p>
+      {webglFailed ? board2d : (
+        <div style={{ width: "100%", maxWidth: 780, margin: "10px auto 0" }}>
+          <RiverScene3D
+            items={problem.items}
+            locations={state.locations}
+            farmerSide={state.farmerSide}
+            status={state.status}
+            onItem={handleItem}
+            onCross={cross}
+            onFail={() => setWebglFailed(true)}
+            fallback={board2d}
+          />
         </div>
-        {bank("right", "右岸（ゴール）", "var(--soft)")}
-      </div>
+      )}
 
       {state.status !== "playing" && (
         <EndScreen

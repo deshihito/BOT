@@ -2,7 +2,11 @@
 // 数独。ロジックは lib/sudoku.ts（唯一解を保って穴あけ、ヒント・矛盾チェック付き）。
 // 端末内で完結し、サーバーへ送信しない。
 import Link from "next/link";
+import dynamic from "next/dynamic";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+
+// 3D シーンは three を含むため遅延読み込み（このページ専用チャンクに閉じる）。
+const SudokuScene3D = dynamic(() => import("./SudokuScene3D"), { ssr: false });
 import {
   applyHint,
   clearCell,
@@ -37,6 +41,7 @@ function formatTime(total: number): string {
 
 export default function SudokuClient() {
   const { prefix } = useGamesNav();
+  const [webglFailed, setWebglFailed] = useState(false);
   const [difficulty, setDifficulty] = useState<SudokuDifficulty>("easy");
   const [state, setState] = useState<SudokuState>(() => newGame("easy"));
   const [selected, setSelected] = useState<number | null>(null);
@@ -57,6 +62,28 @@ export default function SudokuClient() {
   }, [state.status]);
 
   const conflicts = useMemo(() => conflictIndexes(state), [state]);
+
+  const mistakes = useMemo(() => {
+    const set = new Set<number>();
+    for (let i = 0; i < 81; i++) if (isMistake(state, i)) set.add(i);
+    return set;
+  }, [state]);
+
+  const selectCell = (i: number) => {
+    sfxTap();
+    setSelected(i);
+  };
+
+  // メモの正は DOM 側の注記でも担保する（3D ではドット表現のため）。
+  const notesSummary = useMemo(() => {
+    const parts: string[] = [];
+    state.notes.forEach((ns, i) => {
+      if (state.board[i] === 0 && ns.length > 0) {
+        parts.push(`${Math.floor(i / 9) + 1}行${(i % 9) + 1}列: ${ns.join(" ")}`);
+      }
+    });
+    return parts;
+  }, [state.notes, state.board]);
 
   const restart = (d: SudokuDifficulty) => {
     setDifficulty(d);
@@ -116,47 +143,8 @@ export default function SudokuClient() {
 
   const selectedValue = selected !== null ? state.board[selected] : 0;
 
-  return (
-    <>
-      <nav className="breadcrumbs" aria-label="パンくず">
-        <Link href={`${prefix}/games`}>ゲーム</Link>
-        <span> / </span>
-        <span>数独</span>
-      </nav>
-      <div className="page-heading compact-heading">
-        <h1>数独</h1>
-        <p className="muted">縦・横・3×3ブロックに1〜9を重ならないように入れる定番パズル。メモとヒントも使えます。</p>
-      </div>
-
-      <div className="classic-controls" role="group" aria-label="難易度">
-        {LEVELS.map((lv) => (
-          <div
-            key={lv.key}
-            {...tappableProps(() => restart(lv.key))}
-            aria-pressed={difficulty === lv.key}
-            className={difficulty === lv.key ? "classic-btn classic-btn-active" : "classic-btn"}
-          >
-            {lv.label}
-          </div>
-        ))}
-        <button type="button" className="classic-btn" onClick={() => restart(difficulty)}>
-          もう一度
-        </button>
-        <div
-          {...tappableProps(() => setNoteMode((v) => !v))}
-          aria-pressed={noteMode}
-          className={noteMode ? "classic-btn classic-btn-active" : "classic-btn"}
-        >
-          メモ{noteMode ? " ON" : " OFF"}
-        </div>
-      </div>
-
-      <p className="classic-status" role="status">
-        時間 {formatTime(seconds)} ・ ミス {state.mistakes} 回 ・ ヒント残り {state.hintsLeft} 回
-        {state.status === "won" ? ` ・ 完成！ ${formatTime(seconds)} でクリアです。` : ""}
-        {state.status !== "won" && selected === null ? " ・ マスを選んで数字を入れてください。" : ""}
-      </p>
-
+  // 2D 盤（WebGL が使えない場合のフォールバックとしてそのまま使う）。
+  const board2d = (
       <div
         {...boardGesture}
         role="grid"
@@ -263,6 +251,71 @@ export default function SudokuClient() {
           );
         })}
       </div>
+  );
+
+  return (
+    <>
+      <nav className="breadcrumbs" aria-label="パンくず">
+        <Link href={`${prefix}/games`}>ゲーム</Link>
+        <span> / </span>
+        <span>数独</span>
+      </nav>
+      <div className="page-heading compact-heading">
+        <h1>数独</h1>
+        <p className="muted">縦・横・3×3ブロックに1〜9を重ならないように入れる定番パズル。メモとヒントも使えます。</p>
+      </div>
+
+      <div className="classic-controls" role="group" aria-label="難易度">
+        {LEVELS.map((lv) => (
+          <div
+            key={lv.key}
+            {...tappableProps(() => restart(lv.key))}
+            aria-pressed={difficulty === lv.key}
+            className={difficulty === lv.key ? "classic-btn classic-btn-active" : "classic-btn"}
+          >
+            {lv.label}
+          </div>
+        ))}
+        <button type="button" className="classic-btn" onClick={() => restart(difficulty)}>
+          もう一度
+        </button>
+        <div
+          {...tappableProps(() => setNoteMode((v) => !v))}
+          aria-pressed={noteMode}
+          className={noteMode ? "classic-btn classic-btn-active" : "classic-btn"}
+        >
+          メモ{noteMode ? " ON" : " OFF"}
+        </div>
+      </div>
+
+      <p className="classic-status" role="status">
+        時間 {formatTime(seconds)} ・ ミス {state.mistakes} 回 ・ ヒント残り {state.hintsLeft} 回
+        {state.status === "won" ? ` ・ 完成！ ${formatTime(seconds)} でクリアです。` : ""}
+        {state.status !== "won" && selected === null ? " ・ マスを選んで数字を入れてください。" : ""}
+      </p>
+
+      {webglFailed ? board2d : (
+        <div style={{ width: "100%", maxWidth: 450 }}>
+          <SudokuScene3D
+            board={state.board}
+            givens={state.givens}
+            notes={state.notes}
+            selected={selected}
+            conflicts={conflicts}
+            mistakes={mistakes}
+            lastHint={state.lastHint}
+            onCell={selectCell}
+            onHint={onHint}
+            onFail={() => setWebglFailed(true)}
+            fallback={board2d}
+          />
+        </div>
+      )}
+      {notesSummary.length > 0 ? (
+        <p className="muted" style={{ fontSize: 13, marginTop: 8, maxWidth: 450 }}>
+          メモ: {notesSummary.join(" / ")}
+        </p>
+      ) : null}
 
       <div
         role="group"

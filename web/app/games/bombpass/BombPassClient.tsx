@@ -2,7 +2,11 @@
 // 爆弾パス（オンライン）クライアント。ルーム管理は OnlineShell が担い、
 // このコンポーネントは view.state（ゲーム別ビュー）の描画とパス操作だけを持つ。
 // 爆発までの残り時間はサーバー側でも伏せられ、ビューには含まれない（全員非表示）。
-import { useEffect, useRef } from "react";
+import dynamic from "next/dynamic";
+import { useEffect, useRef, useState } from "react";
+
+// 3D シーンは three を含むため遅延読み込み（このページ専用チャンクに閉じる）。
+const BombPassScene3D = dynamic(() => import("./BombPassScene3D"), { ssr: false });
 import OnlineShell from "../online/OnlineShell";
 import type { OnlineRoomApi, OnlineRoomView } from "../online/useOnlineRoom";
 import { playSe } from "@/lib/balku-sound";
@@ -42,6 +46,7 @@ export default function BombPassClient() {
 }
 
 function BombTable({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
+  const [webglFailed, setWebglFailed] = useState(false);
   const state = view.state as BombView | null;
   const mySeat = view.player.seat;
 
@@ -109,6 +114,78 @@ function BombTable({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) 
     minHeight: 44,
   };
 
+  // 3D シーンからのパス（既存のパスボタンと同じ move を送る）。
+  const doPass = (seat: number) => {
+    if (!isHolder) return;
+    if (!targets.some((t) => t.seat === seat)) return;
+    playSe("play");
+    void api.move({ type: "pass", target: seat });
+  };
+
+  // 2D テーブル（WebGL が使えない場合のフォールバックとしてそのまま使う）。
+  const board2d = (
+    <>
+    <ul style={{ listStyle: "none", padding: 0, margin: "0 0 16px", display: "flex", flexDirection: "column", gap: 8 }}>
+      {state.players.map((p) => (
+        <li
+          key={p.seat}
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 10,
+            padding: "8px 12px",
+            borderRadius: 10,
+            border: p.isHolder && !state.finished ? "2px solid #dc2626" : "1px solid #e2e8f0",
+            background: p.alive ? "#fff" : "#f1f5f9",
+            opacity: p.alive ? 1 : 0.6,
+            fontSize: 15,
+          }}
+        >
+          <span className={p.isHolder && !state.finished ? "juice-pulse" : undefined} style={{ fontSize: 20, display: "inline-block" }}>{p.isHolder && !state.finished ? (
+            <span aria-hidden style={{ display: "inline-block", width: 19, height: 19, borderRadius: "50%", background: "radial-gradient(circle at 35% 32%, #9ca3af, #111827 70%)", verticalAlign: "middle" }} />
+          ) : p.alive ? "○" : "✕"}</span>
+          <span style={{ fontWeight: p.seat === mySeat ? 700 : 400 }}>
+            {nameOf(p.seat)}
+            {p.left && "（退出）"}
+          </span>
+          <span style={{ marginLeft: "auto" }} aria-label={`失点 ${p.losses}`}>
+            失点: {"✖".repeat(p.losses) || "0"}
+            {p.losses > 0 && `（${p.losses}）`}
+          </span>
+        </li>
+      ))}
+    </ul>
+
+    {!state.finished && !state.you.alive && (
+      <p className="og-notice">あなたは脱落しました。最後まで見届けましょう。</p>
+    )}
+
+    {isHolder && (
+      <div className="juice-slide">
+        <p className="juice-pulse" style={{ fontWeight: 700, margin: "0 0 8px" }}>あなたが爆弾を持っています！ 誰かにパス：</p>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+          {targets.map((p) => (
+            <button
+              key={p.seat}
+              type="button"
+              style={btnStyle}
+              onClick={() => {
+                playSe("play");
+                void api.move({ type: "pass", target: p.seat });
+              }}
+            >
+              {nameOf(p.seat)} にパス
+            </button>
+          ))}
+        </div>
+      </div>
+    )}
+    {!state.finished && state.you.alive && !isHolder && (
+      <p style={{ color: "#64748b", fontSize: 14 }}>爆弾が回ってくるのを待っています…</p>
+    )}
+    </>
+  );
+
   return (
     <div>
       <p role="status" className={state.finished ? "juice-slide" : isHolder ? "juice-pulse" : undefined} style={{ fontWeight: 700, margin: "4px 0 10px" }}>
@@ -122,63 +199,23 @@ function BombTable({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) 
         {eventText(state.lastEvent)}
       </p>
 
-      <ul style={{ listStyle: "none", padding: 0, margin: "0 0 16px", display: "flex", flexDirection: "column", gap: 8 }}>
-        {state.players.map((p) => (
-          <li
-            key={p.seat}
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: 10,
-              padding: "8px 12px",
-              borderRadius: 10,
-              border: p.isHolder && !state.finished ? "2px solid #dc2626" : "1px solid #e2e8f0",
-              background: p.alive ? "#fff" : "#f1f5f9",
-              opacity: p.alive ? 1 : 0.6,
-              fontSize: 15,
-            }}
-          >
-            <span className={p.isHolder && !state.finished ? "juice-pulse" : undefined} style={{ fontSize: 20, display: "inline-block" }}>{p.isHolder && !state.finished ? (
-              <span aria-hidden style={{ display: "inline-block", width: 19, height: 19, borderRadius: "50%", background: "radial-gradient(circle at 35% 32%, #9ca3af, #111827 70%)", verticalAlign: "middle" }} />
-            ) : p.alive ? "○" : "✕"}</span>
-            <span style={{ fontWeight: p.seat === mySeat ? 700 : 400 }}>
-              {nameOf(p.seat)}
-              {p.left && "（退出）"}
-            </span>
-            <span style={{ marginLeft: "auto" }} aria-label={`失点 ${p.losses}`}>
-              失点: {"✖".repeat(p.losses) || "0"}
-              {p.losses > 0 && `（${p.losses}）`}
-            </span>
-          </li>
-        ))}
-      </ul>
-
-      {!state.finished && !state.you.alive && (
-        <p className="og-notice">あなたは脱落しました。最後まで見届けましょう。</p>
+      {webglFailed ? board2d : (
+        <BombPassScene3D
+          players={state.players.map((pl) => ({ seat: pl.seat, alive: pl.alive, left: pl.left, isHolder: pl.isHolder, isYou: pl.seat === mySeat, losses: pl.losses }))}
+          holderSeat={state.holder}
+          finished={state.finished}
+          canPass={isHolder}
+          mySeat={mySeat}
+          onPass={doPass}
+          onFail={() => setWebglFailed(true)}
+          fallback={board2d}
+        />
       )}
-
-      {isHolder && (
-        <div className="juice-slide">
-          <p className="juice-pulse" style={{ fontWeight: 700, margin: "0 0 8px" }}>あなたが爆弾を持っています！ 誰かにパス：</p>
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-            {targets.map((p) => (
-              <button
-                key={p.seat}
-                type="button"
-                style={btnStyle}
-                onClick={() => {
-                  playSe("play");
-                  void api.move({ type: "pass", target: p.seat });
-                }}
-              >
-                {nameOf(p.seat)} にパス
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
-      {!state.finished && state.you.alive && !isHolder && (
-        <p style={{ color: "#64748b", fontSize: 14 }}>爆弾が回ってくるのを待っています…</p>
+      {!webglFailed && (
+        <p style={{ color: "#475569", fontSize: 14, margin: "10px 0 0" }}>
+          {state.players.map((pl) => `${nameOf(pl.seat)}: 失点${pl.losses}${pl.alive ? "" : "（脱落）"}`).join(" ／ ")}
+          {isHolder ? " ／ あなたが所持中: 相手のトークンをタップでパス" : ""}
+        </p>
       )}
       <p style={{ color: "#64748b", fontSize: 13, marginTop: 16 }}>
         ルール: 爆発した瞬間に持っていた人が1失点。3失点で脱落し、最後の1人が勝ちです。爆発までの時間は誰にも分かりません。

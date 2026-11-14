@@ -3,6 +3,7 @@
 // 塗る／×印の2モード。マスを押したままなぞると連続で塗れる（ドラッグ塗り）。
 // 端末内で完結し、サーバーへ送信しない。
 import Link from "next/link";
+import dynamic from "next/dynamic";
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import {
   createNonogramGame,
@@ -17,6 +18,9 @@ import { sfxPlace, sfxTap, sfxWin } from "@/lib/sfx";
 import { tappableProps } from "@/lib/gesture";
 import { EndScreen } from "../GameJuice";
 import { useGamesNav } from "../GamesShell";
+
+// 3D シーンは three を含むため遅延読み込み（このページ専用チャンクに閉じる）。
+const NonogramScene3D = dynamic(() => import("./NonogramScene3D"), { ssr: false });
 
 type Mode = "fill" | "cross";
 
@@ -37,6 +41,7 @@ function formatTime(total: number): string {
 
 export default function NonogramClient() {
   const { prefix } = useGamesNav();
+  const [webglFailed, setWebglFailed] = useState(false);
   const [size, setSize] = useState<NonoSize>(10);
   const [state, setState] = useState<NonoState>(() => newGame(10));
   const [mode, setMode] = useState<Mode>("fill");
@@ -155,55 +160,8 @@ export default function NonogramClient() {
   if (best !== null) statusParts.push(`ベスト ${formatTime(best)}`);
   if (statusText) statusParts.push(statusText);
 
-  return (
-    <>
-      <nav className="breadcrumbs" aria-label="パンくず">
-        <Link href={`${prefix}/games`}>ゲーム</Link>
-        <span> / </span>
-        <span>ノノグラム</span>
-      </nav>
-      <div className="page-heading compact-heading">
-        <h1>ノノグラム</h1>
-        <p className="muted">数字を手がかりにマスを塗って、絵を完成させるパズルです。</p>
-      </div>
-
-      <div className="classic-controls" role="group" aria-label="盤のサイズ">
-        {SIZES.map((s) => (
-          <div
-            key={s.key}
-            {...tappableProps(() => restart(s.key))}
-            aria-pressed={size === s.key}
-            className={size === s.key ? "classic-btn classic-btn-active" : "classic-btn"}
-          >
-            {s.label}
-          </div>
-        ))}
-        <button type="button" className="classic-btn" onClick={() => restart(size)}>
-          別の問題
-        </button>
-      </div>
-
-      <div className="classic-controls" role="group" aria-label="入力モード">
-        <div
-          {...tappableProps(() => setMode("fill"))}
-          aria-pressed={mode === "fill"}
-          className={mode === "fill" ? "classic-btn classic-btn-active" : "classic-btn"}
-        >
-          ■ 塗る
-        </div>
-        <div
-          {...tappableProps(() => setMode("cross"))}
-          aria-pressed={mode === "cross"}
-          className={mode === "cross" ? "classic-btn classic-btn-active" : "classic-btn"}
-        >
-          × 印
-        </div>
-      </div>
-
-      <p className="classic-status" role="status">
-        {statusParts.join(" ・ ")}
-      </p>
-
+  // 2D 盤（WebGL が使えない場合のフォールバックとしてそのまま使う）。
+  const board2d = (
       <div
         role="grid"
         aria-label="ノノグラムの盤"
@@ -335,6 +293,141 @@ export default function NonogramClient() {
           </Fragment>
         ))}
       </div>
+  );
+
+  return (
+    <>
+      <nav className="breadcrumbs" aria-label="パンくず">
+        <Link href={`${prefix}/games`}>ゲーム</Link>
+        <span> / </span>
+        <span>ノノグラム</span>
+      </nav>
+      <div className="page-heading compact-heading">
+        <h1>ノノグラム</h1>
+        <p className="muted">数字を手がかりにマスを塗って、絵を完成させるパズルです。</p>
+      </div>
+
+      <div className="classic-controls" role="group" aria-label="盤のサイズ">
+        {SIZES.map((s) => (
+          <div
+            key={s.key}
+            {...tappableProps(() => restart(s.key))}
+            aria-pressed={size === s.key}
+            className={size === s.key ? "classic-btn classic-btn-active" : "classic-btn"}
+          >
+            {s.label}
+          </div>
+        ))}
+        <button type="button" className="classic-btn" onClick={() => restart(size)}>
+          別の問題
+        </button>
+      </div>
+
+      <div className="classic-controls" role="group" aria-label="入力モード">
+        <div
+          {...tappableProps(() => setMode("fill"))}
+          aria-pressed={mode === "fill"}
+          className={mode === "fill" ? "classic-btn classic-btn-active" : "classic-btn"}
+        >
+          ■ 塗る
+        </div>
+        <div
+          {...tappableProps(() => setMode("cross"))}
+          aria-pressed={mode === "cross"}
+          className={mode === "cross" ? "classic-btn classic-btn-active" : "classic-btn"}
+        >
+          × 印
+        </div>
+      </div>
+
+      <p className="classic-status" role="status">
+        {statusParts.join(" ・ ")}
+      </p>
+
+      {webglFailed ? board2d : (
+        <div style={{ maxWidth: 640, margin: "0 auto" }}>
+          {/* ヒント数字は盤外の情報として DOM 併記で担保する（3D は盤面マスのみ）。 */}
+          <div style={{ display: "flex", marginLeft: 44 }} aria-hidden="true">
+            {state.colHints.map((hints, c) => (
+              <div
+                key={`col3d-${c}`}
+                style={{
+                  flex: 1,
+                  display: "flex",
+                  flexDirection: "column",
+                  justifyContent: "flex-end",
+                  alignItems: "center",
+                  minHeight: maxColHints * (n === 15 ? 13 : 15),
+                  paddingBottom: 2,
+                  fontSize: n === 15 ? 10 : 12,
+                  lineHeight: n === 15 ? "13px" : "15px",
+                  fontWeight: 600,
+                  color: "#5a5148",
+                }}
+              >
+                {hints.map((h, i) => (
+                  <span
+                    key={i}
+                    style={
+                      satisfaction.cols[c][i]
+                        ? { opacity: 0.35, fontWeight: 400, textDecoration: "line-through" }
+                        : undefined
+                    }
+                  >
+                    {h}
+                  </span>
+                ))}
+              </div>
+            ))}
+          </div>
+          <div style={{ display: "flex" }}>
+            <div style={{ width: 44, display: "flex", flexDirection: "column" }} aria-hidden="true">
+              {state.rowHints.map((hints, r) => (
+                <div
+                  key={`row3d-${r}`}
+                  style={{
+                    flex: 1,
+                    display: "flex",
+                    justifyContent: "flex-end",
+                    alignItems: "center",
+                    gap: n === 15 ? 3 : 5,
+                    paddingRight: 5,
+                    fontSize: n === 15 ? 10 : 12,
+                    fontWeight: 600,
+                    color: "#5a5148",
+                  }}
+                >
+                  {hints.map((h, i) => (
+                    <span
+                      key={i}
+                      style={
+                        satisfaction.rows[r][i]
+                          ? { opacity: 0.35, fontWeight: 400, textDecoration: "line-through" }
+                          : undefined
+                      }
+                    >
+                      {h}
+                    </span>
+                  ))}
+                </div>
+              ))}
+            </div>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <NonogramScene3D
+                marks={state.marks}
+                solution={state.solution}
+                errors={state.errors}
+                size={n}
+                won={won}
+                onPaintStart={startPaint}
+                onPaintContinue={continuePaint}
+                onFail={() => setWebglFailed(true)}
+                fallback={board2d}
+              />
+            </div>
+          </div>
+        </div>
+      )}
       <p className="muted" style={{ textAlign: "center", marginTop: 10 }}>
         マスを押したままなぞると、まとめて塗ったり消したりできます。×印は「塗らないマス」のメモです。
       </p>

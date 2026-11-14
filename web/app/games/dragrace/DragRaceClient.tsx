@@ -3,7 +3,10 @@
 // グリーンへの反応と、各ギアのシフトタイミングだけでタイムが決まる。
 // 時刻の計測はここで行い、lib には経過 ms だけを渡す。端末内で完結する。
 import Link from "next/link";
+import dynamic from "next/dynamic";
 import { useEffect, useRef, useState } from "react";
+
+const DragRaceScene3D = dynamic(() => import("./DragRaceScene3D"), { ssr: false });
 import {
   GEAR_COUNT,
   OPTIMAL_SHIFT_MS,
@@ -46,6 +49,7 @@ export default function DragRaceClient() {
   const [notice, setNotice] = useState<string | null>(null);
   const [elapsed, setElapsed] = useState(0); // 発進からの経過 ms（表示・操作用）
   const [best, setBest] = useState<number | null>(null);
+  const [webglFailed, setWebglFailed] = useState(false);
   const greenAtRef = useRef(0);
   const launchAtRef = useRef(0);
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -233,56 +237,8 @@ export default function DragRaceClient() {
           : "走行中…"
         : "押しても何も起きません";
 
-  return (
+  const board2d = (
     <>
-      <nav className="breadcrumbs" aria-label="パンくず">
-        <Link href={`${prefix}/games`}>ゲーム</Link>
-        <span> / </span>
-        <span>ドラッグレース</span>
-      </nav>
-      <div className="page-heading compact-heading">
-        <h1>ドラッグレース</h1>
-        <p className="muted">
-          大きなボタン1つで、発進とシフトアップを操作します。
-        </p>
-      </div>
-
-      <div className="classic-controls" role="group" aria-label="相手の強さ">
-        {DIFFICULTIES.map((d) => (
-          <button
-            key={d.key}
-            type="button"
-            aria-pressed={difficulty === d.key}
-            className={difficulty === d.key ? "classic-btn classic-btn-active" : "classic-btn"}
-            onClick={() => restart(d.key)}
-          >
-            {d.label}
-          </button>
-        ))}
-        <button type="button" className="classic-btn" onClick={() => restart(difficulty)}>
-          もう一度
-        </button>
-        <button
-          type="button"
-          className="classic-btn"
-          onClick={startCountdown}
-          disabled={state.phase !== "ready"}
-        >
-          スタート
-        </button>
-      </div>
-
-      <p className="classic-status" role="status">
-        {best !== null ? `ベスト ${fmt(best)} ・ ` : ""}
-        {state.phase === "finished" || state.phase === "fouled"
-          ? `あなた ${state.phase === "fouled" ? "失格" : fmt(state.playerTotalMs)} / CPU ${fmt(state.cpuTotalMs)} ・ `
-          : state.reactionMs !== null
-            ? `反応 ${state.reactionMs}ms ・ `
-            : ""}
-        {statusText}
-      </p>
-
-      <div style={{ maxWidth: 640, margin: "0 auto" }}>
         {/* ライト */}
         <div
           role="img"
@@ -381,6 +337,72 @@ export default function DragRaceClient() {
             }}
           />
         </div>
+    </>
+  );
+
+  return (
+    <>
+      <nav className="breadcrumbs" aria-label="パンくず">
+        <Link href={`${prefix}/games`}>ゲーム</Link>
+        <span> / </span>
+        <span>ドラッグレース</span>
+      </nav>
+      <div className="page-heading compact-heading">
+        <h1>ドラッグレース</h1>
+        <p className="muted">
+          大きなボタン1つで、発進とシフトアップを操作します。
+        </p>
+      </div>
+
+      <div className="classic-controls" role="group" aria-label="相手の強さ">
+        {DIFFICULTIES.map((d) => (
+          <button
+            key={d.key}
+            type="button"
+            aria-pressed={difficulty === d.key}
+            className={difficulty === d.key ? "classic-btn classic-btn-active" : "classic-btn"}
+            onClick={() => restart(d.key)}
+          >
+            {d.label}
+          </button>
+        ))}
+        <button type="button" className="classic-btn" onClick={() => restart(difficulty)}>
+          もう一度
+        </button>
+        <button
+          type="button"
+          className="classic-btn"
+          onClick={startCountdown}
+          disabled={state.phase !== "ready"}
+        >
+          スタート
+        </button>
+      </div>
+
+      <p className="classic-status" role="status">
+        {best !== null ? `ベスト ${fmt(best)} ・ ` : ""}
+        {state.phase === "finished" || state.phase === "fouled"
+          ? `あなた ${state.phase === "fouled" ? "失格" : fmt(state.playerTotalMs)} / CPU ${fmt(state.cpuTotalMs)} ・ `
+          : state.reactionMs !== null
+            ? `反応 ${state.reactionMs}ms ・ `
+            : ""}
+        {statusText}
+      </p>
+
+      <div style={{ maxWidth: 640, margin: "0 auto" }}>
+        {webglFailed ? board2d : (
+          <DragRaceScene3D
+            playerProg={pProg / 100}
+            cpuProg={cProg / 100}
+            phase={state.phase}
+            green={green}
+            rpm={rpm}
+            inZone={inZone}
+            onAction={onAction}
+            onFail={() => setWebglFailed(true)}
+            fallback={board2d}
+          />
+        )}
 
         <button
           type="button"

@@ -3,7 +3,11 @@
 // リールは左から順に止まるアニメーションで、最終結果は lib のスピン結果と一致させる。
 // チップは端末内だけの遊び用ポイントで localStorage に保存する。サーバーへ送信しない。
 import Link from "next/link";
+import dynamic from "next/dynamic";
 import { useEffect, useRef, useState } from "react";
+
+// 3D シーンは three を含むため遅延読み込み（このページ専用チャンクに閉じる）。
+const SlotScene3D = dynamic(() => import("./SlotScene3D"), { ssr: false });
 import {
   SLOT_CHERRY_PAIR_MULT,
   SLOT_INITIAL_CHIPS,
@@ -35,6 +39,7 @@ function loadChips(): number {
 
 export default function SlotClient() {
   const { prefix } = useGamesNav();
+  const [webglFailed, setWebglFailed] = useState(false);
   const [state, setState] = useState<SlotState>(() => createSlotGame(Date.now() % 2147483647));
   const [bet, setBet] = useState<number>(100);
   const [hydrated, setHydrated] = useState(false);
@@ -134,6 +139,59 @@ export default function SlotClient() {
     opacity: amount > state.chips ? 0.35 : 1,
   });
 
+  const machine2d = (
+    <div {...machineGesture}
+      role="img"
+      aria-label={`リール: ${display.map((id) => slotSymbol(id).label).join("、")}。下へスワイプでスピン`}
+      className={!spinning && state.result && state.result.delta > 0 ? "juice-pulse" : undefined}
+      style={{
+        display: "flex",
+        gap: 10,
+        justifyContent: "center",
+        maxWidth: 420,
+        margin: "10px 0 18px",
+        padding: 16,
+        borderRadius: 16,
+        background: "#182238",
+        boxShadow: "inset 0 0 0 2px #f2b33d",
+        touchAction: "none",
+        cursor: "grab",
+      }}
+    >
+      {display.map((id, i) => (
+        <div
+          key={i}
+          style={{
+            width: 92,
+            height: 92,
+            borderRadius: 12,
+            background: "#ffffff",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            fontSize: 52,
+            opacity: spinning && stopped <= i ? 0.75 : 1,
+            transform: spinning && stopped <= i ? "translateY(2px)" : "none",
+            transition: "opacity 0.15s",
+            userSelect: "none",
+          }}
+        >
+          {slotSymbol(id).glyph}
+        </div>
+      ))}
+      <div aria-hidden="true" style={{ display: "flex", flexDirection: "column", alignItems: "center", width: 28 }}>
+        <div
+          style={{
+            width: 34, height: 34, borderRadius: "50%", background: "#c0392b",
+            border: "2px solid #f2b33d", marginBottom: -4, zIndex: 1,
+            transform: spinning ? "translateY(26px)" : "none", transition: "transform 0.25s",
+          }}
+        />
+        <div style={{ width: 8, height: 74, borderRadius: 4, background: "#8a90a3" }} />
+      </div>
+    </div>
+  );
+
   return (
     <>
       <nav className="breadcrumbs" aria-label="パンくず">
@@ -157,56 +215,21 @@ export default function SlotClient() {
         {spinning ? " ・ 回転中…" : ""}
       </p>
 
-      <div {...machineGesture}
-        role="img"
-        aria-label={`リール: ${display.map((id) => slotSymbol(id).label).join("、")}。下へスワイプでスピン`}
-        className={!spinning && state.result && state.result.delta > 0 ? "juice-pulse" : undefined}
-        style={{
-          display: "flex",
-          gap: 10,
-          justifyContent: "center",
-          maxWidth: 420,
-          margin: "10px 0 18px",
-          padding: 16,
-          borderRadius: 16,
-          background: "#182238",
-          boxShadow: "inset 0 0 0 2px #f2b33d",
-          touchAction: "none",
-          cursor: "grab",
-        }}
-      >
-        {display.map((id, i) => (
-          <div
-            key={i}
-            style={{
-              width: 92,
-              height: 92,
-              borderRadius: 12,
-              background: "#ffffff",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              fontSize: 52,
-              opacity: spinning && stopped <= i ? 0.75 : 1,
-              transform: spinning && stopped <= i ? "translateY(2px)" : "none",
-              transition: "opacity 0.15s",
-              userSelect: "none",
-            }}
-          >
-            {slotSymbol(id).glyph}
-          </div>
-        ))}
-        <div aria-hidden="true" style={{ display: "flex", flexDirection: "column", alignItems: "center", width: 28 }}>
-          <div
-            style={{
-              width: 34, height: 34, borderRadius: "50%", background: "#c0392b",
-              border: "2px solid #f2b33d", marginBottom: -4, zIndex: 1,
-              transform: spinning ? "translateY(26px)" : "none", transition: "transform 0.25s",
-            }}
+      {webglFailed ? (
+        machine2d
+      ) : (
+        <div style={{ maxWidth: 460, margin: "10px 0 18px" }}>
+          <SlotScene3D
+            display={display}
+            spinning={spinning}
+            stopped={stopped}
+            onPull={startSpin}
+            onTapMachine={() => { if (broke) setState((s) => refillChips(s)); }}
+            onFail={() => setWebglFailed(true)}
+            fallback={machine2d}
           />
-          <div style={{ width: 8, height: 74, borderRadius: 4, background: "#8a90a3" }} />
         </div>
-      </div>
+      )}
 
       <div className="classic-controls" style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
         {!broke && (

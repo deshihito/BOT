@@ -2,7 +2,12 @@
 // マスターマインド。ロジックは lib/mastermind.ts（ヒット＆ブローの集計・勝敗）。
 // 色を4つ並べて判定し、10回までに正解の並びを当てる。端末内で完結。
 import Link from "next/link";
+import dynamic from "next/dynamic";
 import { useEffect, useRef, useState } from "react";
+
+// 3D シーンは three を含むため遅延読み込み（このページ専用チャンクに閉じる）。
+// 答え（secret）はシーンへ渡さない（確定前に伏せる現行仕様を守る）。
+const MastermindScene3D = dynamic(() => import("./MastermindScene3D"), { ssr: false });
 import {
   createMastermindGame,
   isValidGuess,
@@ -48,6 +53,7 @@ function Peg({ color, size = 30 }: { color: MmColor | undefined; size?: number }
 
 export default function MastermindClient() {
   const { prefix } = useGamesNav();
+  const [webglFailed, setWebglFailed] = useState(false);
   const [difficulty, setDifficulty] = useState<MmDifficulty>("normal");
   const [state, setState] = useState<MmState>(() => newGame("normal"));
   const [current, setCurrent] = useState<(string | null)[]>(() => Array(MM_CODE_LENGTH).fill(null));
@@ -96,6 +102,12 @@ export default function MastermindClient() {
     setSlot(0);
   };
 
+  // スロット選択（2D のスロットと 3D のスロットタップで共用）。
+  const onSlotTap = (i: number) => {
+    sfxTap();
+    setSlot(i);
+  };
+
   const clearGuess = () => {
     if (state.status !== "playing") return;
     sfxTap();
@@ -113,6 +125,109 @@ export default function MastermindClient() {
       else if (dir === "left") clearGuess();
     },
   });
+
+  // 色パレットは 2D / 3D どちらでも DOM のまま使う（現行仕様）。
+  const paletteDom = (
+        <div style={{ display: "flex", gap: 10, marginTop: 12, flexWrap: "wrap" }} role="group" aria-label="色の選択">
+          {palette.map((c) => (
+            <div
+              key={c.id}
+              {...tappableProps(() => pickColor(c.id))}
+              aria-label={`${c.label}を選ぶ`}
+              style={{ padding: 2, border: "none", background: "transparent", cursor: "pointer" }}
+            >
+              <Peg color={c} size={34} />
+            </div>
+          ))}
+        </div>
+  );
+
+  // 2D 盤（予想欄＋履歴。WebGL が使えない場合のフォールバックとしてそのまま使う）。
+  const board2d = (
+    <>
+      <section aria-label="いまの予想" style={{ margin: "14px 0" }}>
+        <div
+          role="group"
+          tabIndex={0}
+          aria-label="いまの予想（上にスワイプで判定・左スワイプでクリア）"
+          {...guessGesture}
+          onKeyDown={(e) => {
+            // 子の予想スロット（tappableProps）の Enter / Space はスロット自身が
+            // 受けるため、予想欄そのものにフォーカスがあるときだけ判定する。
+            // ガードがないと予想が揃った状態でスロットに Enter を押したときに
+            // スロット選択と判定が両方走る（anagram と同じ構図）。
+            if ((e.key === "Enter" || e.key === " ") && e.target !== e.currentTarget) return;
+            if (e.key === "Enter" || e.key === " ") {
+              e.preventDefault();
+              onSubmit();
+            } else if (e.key === "Backspace" || e.key === "Delete") {
+              e.preventDefault();
+              clearGuess();
+            }
+          }}
+          style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", touchAction: "none" }}
+        >
+          {current.map((id, i) => (
+            <div
+              key={i}
+              {...tappableProps(() => onSlotTap(i))}
+              aria-label={`${i + 1} 番目のマス${id ? `（${colorOf(id)?.label ?? id}）` : "（未選択）"}`}
+              aria-pressed={slot === i}
+              style={{
+                padding: 4,
+                borderRadius: "50%",
+                border: slot === i ? "3px solid var(--accent)" : "3px solid transparent",
+                background: "transparent",
+                cursor: "pointer",
+              }}
+            >
+              <Peg color={colorOf(id)} size={36} />
+            </div>
+          ))}
+        </div>
+        {paletteDom}
+      </section>
+
+      <section aria-label="履歴">
+        <h2 style={{ fontSize: 16, margin: "14px 0 8px" }}>履歴</h2>
+        {state.guesses.length === 0 ? (
+          <p className="muted">まだ判定していません。色を4つ選んで、予想欄を上にスワイプで判定してください。</p>
+        ) : (
+          <ol style={{ listStyle: "none", padding: 0, margin: 0, display: "grid", gap: 8 }}>
+            {[...state.guesses].reverse().map((g, ri) => {
+              const turn = state.guesses.length - ri;
+              return (
+                <li
+                  key={turn}
+                  className="juice-slide"
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 10,
+                    flexWrap: "wrap",
+                    padding: "8px 10px",
+                    border: "1px solid var(--line)",
+                    borderRadius: 10,
+                    background: "#fff",
+                  }}
+                >
+                  <span style={{ fontWeight: 700, minWidth: 34 }}>{turn}.</span>
+                  <span style={{ display: "inline-flex", gap: 6 }}>
+                    {g.pegs.map((id, i) => (
+                      <Peg key={i} color={colorOf(id) ?? { id, label: id, value: "#999" }} size={24} />
+                    ))}
+                  </span>
+                  <span>
+                    ● ヒット {g.hits} ・ ○ ブロー {g.blows}
+                  </span>
+                </li>
+              );
+            })}
+          </ol>
+        )}
+      </section>
+    </>
+  );
 
   return (
     <>
@@ -178,101 +293,23 @@ export default function MastermindClient() {
         </div>
       )}
 
-      <section aria-label="いまの予想" style={{ margin: "14px 0" }}>
-        <div
-          role="group"
-          tabIndex={0}
-          aria-label="いまの予想（上にスワイプで判定・左スワイプでクリア）"
-          {...guessGesture}
-          onKeyDown={(e) => {
-            // 子の予想スロット（tappableProps）の Enter / Space はスロット自身が
-            // 受けるため、予想欄そのものにフォーカスがあるときだけ判定する。
-            // ガードがないと予想が揃った状態でスロットに Enter を押したときに
-            // スロット選択と判定が両方走る（anagram と同じ構図）。
-            if ((e.key === "Enter" || e.key === " ") && e.target !== e.currentTarget) return;
-            if (e.key === "Enter" || e.key === " ") {
-              e.preventDefault();
-              onSubmit();
-            } else if (e.key === "Backspace" || e.key === "Delete") {
-              e.preventDefault();
-              clearGuess();
-            }
-          }}
-          style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", touchAction: "none" }}
-        >
-          {current.map((id, i) => (
-            <div
-              key={i}
-              {...tappableProps(() => {
-                sfxTap();
-                setSlot(i);
-              })}
-              aria-label={`${i + 1} 番目のマス${id ? `（${colorOf(id)?.label ?? id}）` : "（未選択）"}`}
-              aria-pressed={slot === i}
-              style={{
-                padding: 4,
-                borderRadius: "50%",
-                border: slot === i ? "3px solid var(--accent)" : "3px solid transparent",
-                background: "transparent",
-                cursor: "pointer",
-              }}
-            >
-              <Peg color={colorOf(id)} size={36} />
-            </div>
-          ))}
+      {webglFailed ? board2d : (
+        <div style={{ width: "100%", maxWidth: 520, margin: "14px auto" }}>
+          <MastermindScene3D
+            guesses={state.guesses}
+            current={current}
+            slot={slot}
+            palette={palette}
+            status={state.status}
+            onSlotTap={onSlotTap}
+            onSubmitGuess={onSubmit}
+            onClearGuess={clearGuess}
+            onFail={() => setWebglFailed(true)}
+            fallback={board2d}
+          />
+          {paletteDom}
         </div>
-        <div style={{ display: "flex", gap: 10, marginTop: 12, flexWrap: "wrap" }} role="group" aria-label="色の選択">
-          {palette.map((c) => (
-            <div
-              key={c.id}
-              {...tappableProps(() => pickColor(c.id))}
-              aria-label={`${c.label}を選ぶ`}
-              style={{ padding: 2, border: "none", background: "transparent", cursor: "pointer" }}
-            >
-              <Peg color={c} size={34} />
-            </div>
-          ))}
-        </div>
-      </section>
-
-      <section aria-label="履歴">
-        <h2 style={{ fontSize: 16, margin: "14px 0 8px" }}>履歴</h2>
-        {state.guesses.length === 0 ? (
-          <p className="muted">まだ判定していません。色を4つ選んで、予想欄を上にスワイプで判定してください。</p>
-        ) : (
-          <ol style={{ listStyle: "none", padding: 0, margin: 0, display: "grid", gap: 8 }}>
-            {[...state.guesses].reverse().map((g, ri) => {
-              const turn = state.guesses.length - ri;
-              return (
-                <li
-                  key={turn}
-                  className="juice-slide"
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 10,
-                    flexWrap: "wrap",
-                    padding: "8px 10px",
-                    border: "1px solid var(--line)",
-                    borderRadius: 10,
-                    background: "#fff",
-                  }}
-                >
-                  <span style={{ fontWeight: 700, minWidth: 34 }}>{turn}.</span>
-                  <span style={{ display: "inline-flex", gap: 6 }}>
-                    {g.pegs.map((id, i) => (
-                      <Peg key={i} color={colorOf(id) ?? { id, label: id, value: "#999" }} size={24} />
-                    ))}
-                  </span>
-                  <span>
-                    ● ヒット {g.hits} ・ ○ ブロー {g.blows}
-                  </span>
-                </li>
-              );
-            })}
-          </ol>
-        )}
-      </section>
+      )}
     </>
   );
 }

@@ -2,7 +2,11 @@
 // ダイスロール。ロジックは lib/diceroll.ts（ランダムウォークで解を先に作る生成）。
 // 矢印ボタンかキーボードの矢印キーで転がす。端末内で完結し、サーバーへ送信しない。
 import Link from "next/link";
+import dynamic from "next/dynamic";
 import { useCallback, useEffect, useRef, useState } from "react";
+
+// 3D シーンは three を含むため遅延読み込み（このページ専用チャンクに閉じる）。
+const DiceRollScene3D = dynamic(() => import("./DiceRollScene3D"), { ssr: false });
 import { sfxDice, sfxTap, sfxWin } from "@/lib/sfx";
 import { EndScreen } from "../GameJuice";
 import {
@@ -58,6 +62,7 @@ export default function DiceRollClient() {
   const [best, setBest] = useState<number | null>(null);
   const [prevBest, setPrevBest] = useState<number | null>(null);
   const [isNewBest, setIsNewBest] = useState(false);
+  const [webglFailed, setWebglFailed] = useState(false);
   const wonRef = useRef<number | null>(null);
 
   useEffect(() => {
@@ -133,7 +138,9 @@ export default function DiceRollClient() {
     onSwipe: (dir) => roll(dir === "up" ? "N" : dir === "right" ? "E" : dir === "down" ? "S" : "W"),
   });
 
-  const blockedSet = new Set(state.blocked);
+  // 2D 盤面（WebGL が使えない場合のフォールバック）。
+  const board2D = <DiceRollBoard2D state={state} boardGesture={boardGesture} />;
+
   const o = state.orientation;
   const statusText =
     state.status === "won"
@@ -184,6 +191,74 @@ export default function DiceRollClient() {
         </EndScreen>
       )}
 
+      {webglFailed ? board2D : (
+        <DiceRollScene3D
+          key={state.seed}
+          rows={state.rows}
+          cols={state.cols}
+          blocked={state.blocked}
+          start={state.start}
+          goal={state.goal}
+          targetTop={state.targetTop}
+          pos={state.pos}
+          orientation={state.orientation}
+          moves={state.moves}
+          onRoll={roll}
+          onFail={() => setWebglFailed(true)}
+          fallback={board2D}
+        />
+      )}
+
+      <div
+        style={{
+          display: "flex",
+          gap: 24,
+          justifyContent: "center",
+          alignItems: "flex-start",
+          flexWrap: "wrap",
+          marginTop: 18,
+        }}
+      >
+        <div role="group" aria-label="サイコロの展開図">
+          <p className="muted" style={{ textAlign: "center", margin: "0 0 6px" }}>
+            いまの向き
+          </p>
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(3, 44px)",
+              gap: 4,
+              justifyContent: "center",
+            }}
+          >
+            <span />
+            <FaceCell value={o.north} label="北の目" />
+            <span />
+            <FaceCell value={o.west} label="西の目" />
+            <FaceCell value={o.top} label="上の目" strong />
+            <FaceCell value={o.east} label="東の目" />
+            <span />
+            <FaceCell value={o.south} label="南の目" />
+            <span />
+            <span />
+            <FaceCell value={o.bottom} label="下の目" />
+            <span />
+          </div>
+        </div>
+
+        <div aria-hidden="true" style={{ textAlign: "center" }}>
+          <p className="muted" style={{ margin: "0 0 6px" }}>転がす</p>
+          <p style={{ margin: 0, fontSize: 15, fontWeight: 700 }}>盤面をスワイプした方向へ転がります</p>
+        </div>
+      </div>
+    </>
+  );
+}
+
+function DiceRollBoard2D({ state, boardGesture }: { state: DiceRollState; boardGesture: ReturnType<typeof useGesture> }) {
+  const blockedSet = new Set(state.blocked);
+  const o = state.orientation;
+  return (
       <div
         {...boardGesture}
         role="grid"
@@ -243,49 +318,5 @@ export default function DiceRollClient() {
           );
         })}
       </div>
-
-      <div
-        style={{
-          display: "flex",
-          gap: 24,
-          justifyContent: "center",
-          alignItems: "flex-start",
-          flexWrap: "wrap",
-          marginTop: 18,
-        }}
-      >
-        <div role="group" aria-label="サイコロの展開図">
-          <p className="muted" style={{ textAlign: "center", margin: "0 0 6px" }}>
-            いまの向き
-          </p>
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "repeat(3, 44px)",
-              gap: 4,
-              justifyContent: "center",
-            }}
-          >
-            <span />
-            <FaceCell value={o.north} label="北の目" />
-            <span />
-            <FaceCell value={o.west} label="西の目" />
-            <FaceCell value={o.top} label="上の目" strong />
-            <FaceCell value={o.east} label="東の目" />
-            <span />
-            <FaceCell value={o.south} label="南の目" />
-            <span />
-            <span />
-            <FaceCell value={o.bottom} label="下の目" />
-            <span />
-          </div>
-        </div>
-
-        <div aria-hidden="true" style={{ textAlign: "center" }}>
-          <p className="muted" style={{ margin: "0 0 6px" }}>転がす</p>
-          <p style={{ margin: 0, fontSize: 15, fontWeight: 700 }}>盤面をスワイプした方向へ転がります</p>
-        </div>
-      </div>
-    </>
   );
 }

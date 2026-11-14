@@ -4,8 +4,11 @@
 //   drawn は全員共通の公開情報。自分のカードは you.card で全て見えるが、
 //   他人のカードは配られず、開いたマス数・リーチ・ビンゴ状態だけが分かる。
 //   抽選とマスの開放は自動で進むため、送るアクションは無い。
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
+import dynamic from "next/dynamic";
 import { playSe } from "@/lib/balku-sound";
+
+const BingoBattleScene3D = dynamic(() => import("./BingoBattleScene3D"), { ssr: false });
 import OnlineShell from "../online/OnlineShell";
 import type { OnlineRoomApi, OnlineRoomView } from "../online/useOnlineRoom";
 
@@ -60,6 +63,7 @@ function Board({ view }: { view: OnlineRoomView; api: OnlineRoomApi }) {
   const finishRef = useRef<string | null>(null);
   const reachRef = useRef<string | null>(null);
   const startRef = useRef<string | null>(null);
+  const [webglFailed, setWebglFailed] = useState(false);
 
   useEffect(() => {
     if (!state || state.phase !== "finished") return;
@@ -111,6 +115,45 @@ function Board({ view }: { view: OnlineRoomView; api: OnlineRoomApi }) {
   const recent = state.drawn.slice(-15);
   const myWin = state.winners?.includes(mySeat) ?? false;
 
+  const board2d = (
+    <div
+      style={{
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        gap: 14,
+        padding: "14px 18px",
+        borderRadius: 12,
+        background: "#1d2735",
+        color: "#dfe7ef",
+      }}
+      aria-label="抽選機（2D表示）"
+    >
+      <span
+        style={{
+          width: 64,
+          height: 64,
+          borderRadius: 999,
+          display: "inline-flex",
+          alignItems: "center",
+          justifyContent: "center",
+          fontSize: 20,
+          fontWeight: 800,
+          background: "var(--accent-soft)",
+          color: "var(--text)",
+          flexShrink: 0,
+        }}
+      >
+        {state.lastDrawn !== null ? ballLabel(state.lastDrawn) : "—"}
+      </span>
+      <span style={{ fontSize: 14 }}>
+        {state.lastDrawn !== null
+          ? `最新の数字は ${ballLabel(state.lastDrawn)} です。`
+          : "まもなく抽選が始まります。"}
+      </span>
+    </div>
+  );
+
   return (
     <div style={{ maxWidth: 640, margin: "0 auto" }}>
       <div className="og-score-row" role="status">
@@ -123,6 +166,18 @@ function Board({ view }: { view: OnlineRoomView; api: OnlineRoomApi }) {
           </span>
         ))}
       </div>
+
+      {webglFailed ? (
+        board2d
+      ) : (
+        <div style={{ margin: "10px 0 2px" }}>
+          <BingoBattleScene3D
+            drawn={state.drawn}
+            onFail={() => setWebglFailed(true)}
+            fallback={board2d}
+          />
+        </div>
+      )}
 
       <div style={{ textAlign: "center", padding: "12px 0 4px" }}>
         {state.phase === "drawing" ? (

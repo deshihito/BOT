@@ -2,7 +2,11 @@
 // ライツアウト。ロジックは lib/lightsout.ts（解ける盤を逆再生で生成）。
 // 押したマスと上下左右が反転する。全消灯でクリア。端末内で完結。
 import Link from "next/link";
+import dynamic from "next/dynamic";
 import { useEffect, useRef, useState } from "react";
+
+// 3D シーンは three を含むため遅延読み込み（このページ専用チャンクに閉じる）。
+const LightsOutScene3D = dynamic(() => import("./LightsOutScene3D"), { ssr: false });
 import {
   createLightsOutGame,
   litCount,
@@ -40,6 +44,7 @@ function formatTime(total: number): string {
 
 export default function LightsOutClient() {
   const { prefix } = useGamesNav();
+  const [webglFailed, setWebglFailed] = useState(false);
   const [size, setSize] = useState<LightsOutSize>(5);
   const [difficulty, setDifficulty] = useState<LightsOutDifficulty>("normal");
   const [state, setState] = useState<LightsOutState>(() => newGame(5, "normal"));
@@ -56,7 +61,7 @@ export default function LightsOutClient() {
   useEffect(() => {
     if (state.status === "won") return;
     const id = setInterval(() => setSeconds((s) => s + 1), 1000);
-    return () => clearInterval(id);
+  return () => clearInterval(id);
   }, [state.status]);
 
   const handlePress = (i: number) => {
@@ -73,6 +78,53 @@ export default function LightsOutClient() {
   };
 
   const lit = litCount(state.cells);
+
+  // 2D 盤（WebGL が使えない場合のフォールバックとしてそのまま使う）。
+  const board2d = (
+    <div
+      role="grid"
+      aria-label="ライツアウトの盤"
+      style={{
+        display: "grid",
+        gridTemplateColumns: `repeat(${size}, minmax(0, 1fr))`,
+        gap: 6,
+        maxWidth: 400,
+        width: "100%",
+      }}
+    >
+      {state.cells.map((on, i) => (
+        <div
+          key={i}
+          role="gridcell"
+          tabIndex={state.status === "won" ? -1 : 0}
+          aria-label={on ? "点灯" : "消灯"}
+          aria-pressed={on}
+          aria-disabled={state.status === "won"}
+          className={on ? "juice-flip" : undefined}
+          onClick={() => handlePress(i)}
+          onKeyDown={(e) => {
+            if (e.key !== "Enter" && e.key !== " ") return;
+            e.preventDefault();
+            handlePress(i);
+          }}
+          style={{
+            aspectRatio: "1",
+            minHeight: 52,
+            borderRadius: 10,
+            border: on ? "1px solid #d97706" : "1px solid #334155",
+            background: on ? "#fbbf24" : "#1e293b",
+            color: on ? "#92400e" : "#64748b",
+            fontSize: "clamp(18px, 6vw, 26px)",
+            cursor: state.status === "won" ? "default" : "pointer",
+            boxShadow: on ? "0 0 12px rgba(251,191,36,0.55)" : "inset 0 1px 3px rgba(0,0,0,0.5)",
+          }}
+        >
+          {on ? "●" : "·"}
+        </div>
+      ))}
+    </div>
+  );
+
 
   return (
     <>
@@ -119,48 +171,18 @@ export default function LightsOutClient() {
         {state.status === "won" ? ` ・ 全消灯！ ${state.moves} 手でクリアです。` : ""}
       </p>
 
-      <div
-        role="grid"
-        aria-label="ライツアウトの盤"
-        style={{
-          display: "grid",
-          gridTemplateColumns: `repeat(${size}, minmax(0, 1fr))`,
-          gap: 6,
-          maxWidth: 400,
-          width: "100%",
-        }}
-      >
-        {state.cells.map((on, i) => (
-          <div
-            key={i}
-            role="gridcell"
-            tabIndex={state.status === "won" ? -1 : 0}
-            aria-label={on ? "点灯" : "消灯"}
-            aria-pressed={on}
-            aria-disabled={state.status === "won"}
-            className={on ? "juice-flip" : undefined}
-            onClick={() => handlePress(i)}
-            onKeyDown={(e) => {
-              if (e.key !== "Enter" && e.key !== " ") return;
-              e.preventDefault();
-              handlePress(i);
-            }}
-            style={{
-              aspectRatio: "1",
-              minHeight: 52,
-              borderRadius: 10,
-              border: on ? "1px solid #d97706" : "1px solid #334155",
-              background: on ? "#fbbf24" : "#1e293b",
-              color: on ? "#92400e" : "#64748b",
-              fontSize: "clamp(18px, 6vw, 26px)",
-              cursor: state.status === "won" ? "default" : "pointer",
-              boxShadow: on ? "0 0 12px rgba(251,191,36,0.55)" : "inset 0 1px 3px rgba(0,0,0,0.5)",
-            }}
-          >
-            {on ? "●" : "·"}
-          </div>
-        ))}
-      </div>
+      {webglFailed ? board2d : (
+        <div style={{ width: "100%", maxWidth: 400 }}>
+          <LightsOutScene3D
+            cells={state.cells}
+            size={size}
+            won={state.status === "won"}
+            onPress={handlePress}
+            onFail={() => setWebglFailed(true)}
+            fallback={board2d}
+          />
+        </div>
+      )}
 
       <p className="muted" style={{ fontSize: 13, marginTop: 10 }}>
         端から攻めると解きやすいです。どの盤も必ず解けるように作られています。

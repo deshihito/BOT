@@ -2,7 +2,11 @@
 // ピンポン（Pong）。canvas で vs CPU。自分のパドルはマウス/タッチ/キー、
 // CPU は追従 AI。先に7点で勝利、難易度3段階。
 import Link from "next/link";
+import dynamic from "next/dynamic";
 import { useCallback, useEffect, useRef, useState } from "react";
+
+// 3D シーンは three を含むため遅延読み込み（このページ専用チャンクに閉じる）。
+const PongScene3D = dynamic(() => import("./PongScene3D"), { ssr: false });
 import { sfxCorrect, sfxLose, sfxTap, sfxWin, sfxWrong } from "@/lib/sfx";
 import { tappableProps } from "@/lib/gesture";
 import { EndScreen } from "../GameJuice";
@@ -40,6 +44,7 @@ export default function PongClient() {
   const serveTimerRef = useRef(0);
 
   const [phase, setPhaseState] = useState<Phase>("ready");
+  const [webglFailed, setWebglFailed] = useState(false);
   const [difficulty, setDifficulty] = useState<Difficulty>("normal");
   const [scores, setScores] = useState({ player: 0, cpu: 0 });
 
@@ -90,8 +95,9 @@ export default function PongClient() {
       rafRef.current = requestAnimationFrame(loop);
       const dt = Math.min(0.033, (now - last) / 1000);
       last = now;
+      // 物理は canvas の有無に依存しない (3D 表示時は canvas が無いため、
+      // ここで早期 return するとゲーム自体が止まる)。描画だけを下で分岐する。
       const canvas = canvasRef.current;
-      if (!canvas) return;
       const diff = diffRef.current;
 
       if (phaseRef.current === "playing") {
@@ -183,7 +189,8 @@ export default function PongClient() {
         }
       }
 
-      // 描画
+      // 描画 (2D フォールバック表示時のみ。3D 時はシーンが getState で追従)
+      if (!canvas) return;
       const dpr = Math.min(2, window.devicePixelRatio || 1);
       const cssW = canvas.clientWidth || FIELD_W;
       const scale = cssW / FIELD_W;
@@ -282,8 +289,12 @@ export default function PongClient() {
   // 誤発火を抑えるため、2回目が1回目とほぼ同じ高さ（48px以内）のときに
   // だけポーズする（意図的なダブルタップはその場で2回叩くため残る）。
   const lastPlayTapAtRef = useRef<{ t: number; y: number } | null>(null);
-  const onCanvasPointerDown = (clientY: number) => {
-    onPointer(clientY);
+  // タップの開始・再開・ダブルタップ判定だけを切り出したもの。2D では
+  // onCanvasPointerDown がパドル位置セット (onPointer) と一緒に呼び、
+  // 3D ではシーンが pointerdown の clientY をそのまま渡して直接呼ぶ
+  // (パドル位置はシーンの planePoint 由来の onTarget3D が担うため、
+  // ここでは位置を触らない)。判定の入力 (時刻・高さ) は 2D と同一。
+  const onTapLogic = (clientY: number) => {
     if (phaseRef.current === "ready" || phaseRef.current === "paused") {
       lastPlayTapAtRef.current = null;
       setPhase("playing");
@@ -299,6 +310,16 @@ export default function PongClient() {
       lastPlayTapAtRef.current = { t: now, y: clientY };
     }
   };
+  const onCanvasPointerDown = (clientY: number) => {
+    onPointer(clientY);
+    onTapLogic(clientY);
+  };
+
+  // --- 3D シーンとの接続 ---
+  // パドルの目標位置 (フィールド座標 y)。2D の onPointer と同じクランプ。
+  const handleTarget3D = useCallback((fieldY: number) => {
+    playerRef.current.y = Math.max(PADDLE_H / 2, Math.min(FIELD_H - PADDLE_H / 2, fieldY));
+  }, []);
 
   const winner = scores.player > scores.cpu ? "あなた" : "CPU";
   const statusText =
@@ -315,6 +336,21 @@ export default function PongClient() {
     background: "rgba(255,255,255,0.06)", color: "inherit", cursor: "pointer", fontWeight: 700, minHeight: 44, touchAction: "manipulation",
   };
   const activeBtn: React.CSSProperties = { ...btn, background: "#7ee787", color: "#07130c", borderColor: "#7ee787" };
+
+  // 既存 2D 表示 (WebGL が使えない環境へのフォールバックとしてシーンへも渡す)。
+  const board2d = (
+      <div style={{ maxWidth: 800, margin: "0 auto" }}>
+        <canvas
+          ref={canvasRef}
+          style={{ width: "100%", aspectRatio: `${FIELD_W} / ${FIELD_H}`, display: "block", borderRadius: 12, background: "#0d1520", touchAction: "none" }}
+          aria-label="ピンポンの盤"
+          onPointerMove={(e) => onPointer(e.clientY)}
+          onPointerDown={(e) => onCanvasPointerDown(e.clientY)}
+          onTouchStart={(e) => onPointer(e.touches[0].clientY)}
+          onTouchMove={(e) => onPointer(e.touches[0].clientY)}
+        />
+      </div>
+  );
 
   return (
     <>
@@ -346,17 +382,23 @@ export default function PongClient() {
         あなた <span key={`${scores.player}-${scores.cpu}`} className="juice-pulse" style={{ display: "inline-block" }}>{scores.player} - {scores.cpu}</span> CPU ・ {statusText}
       </p>
 
-      <div style={{ maxWidth: 800, margin: "0 auto" }}>
-        <canvas
-          ref={canvasRef}
-          style={{ width: "100%", aspectRatio: `${FIELD_W} / ${FIELD_H}`, display: "block", borderRadius: 12, background: "#0d1520", touchAction: "none" }}
-          aria-label="ピンポンの盤"
-          onPointerMove={(e) => onPointer(e.clientY)}
-          onPointerDown={(e) => onCanvasPointerDown(e.clientY)}
-          onTouchStart={(e) => onPointer(e.touches[0].clientY)}
-          onTouchMove={(e) => onPointer(e.touches[0].clientY)}
-        />
-      </div>
+{webglFailed ? board2d : (
+        <div style={{ maxWidth: 800, margin: "0 auto" }}>
+          <PongScene3D
+            getState={() => ({
+              ball: ballRef.current,
+              playerY: playerRef.current.y,
+              cpuY: cpuRef.current.y,
+              playerScore: scoresRef.current.player,
+              cpuScore: scoresRef.current.cpu,
+            })}
+            onTarget={handleTarget3D}
+            onPointerDown={onTapLogic}
+            onFail={() => setWebglFailed(true)}
+            fallback={board2d}
+          />
+        </div>
+      )}
 
       {phase === "finished" && (
         <div style={{ maxWidth: 520, margin: "14px auto 0" }}>

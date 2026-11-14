@@ -3,7 +3,12 @@
 // タップ選択式：動かしたい束の先頭カード→置き先の列の順にタップする。
 // 端末内で完結し、サーバーへ送信しない。
 import Link from "next/link";
+import dynamic from "next/dynamic";
 import { useEffect, useRef, useState } from "react";
+
+// 3D シーンは three を含むため遅延読み込み（このページ専用チャンクに閉じる）。
+const SpiderScene3D = dynamic(() => import("./SpiderScene3D"), { ssr: false });
+import type { SpiderDragSource } from "./SpiderScene3D";
 import {
   SPIDER_COLUMNS,
   canMoveSpiderRun,
@@ -29,6 +34,7 @@ function newGame(): SpiderState {
 export default function SpiderClient() {
   const { prefix } = useGamesNav();
   const [state, setState] = useState<SpiderState>(() => newGame());
+  const [webglFailed, setWebglFailed] = useState(false);
   const [selection, setSelection] = useState<Selection>(null);
   const [message, setMessage] = useState<string | null>(null);
 
@@ -47,6 +53,27 @@ export default function SpiderClient() {
     else sfxLose();
   }, [state]);
 
+  // 束の移動を試みる。合法なら効果音つきで適用し true、不正なら理由を表示し false。
+  const doMove = (fromCol: number, fromIndex: number, toCol: number): boolean => {
+    if (canMoveSpiderRun(state, fromCol, fromIndex, toCol)) {
+      sfxPlace();
+      setState((s) => moveSpider(s, fromCol, fromIndex, toCol));
+      setMessage(null);
+      return true;
+    }
+    sfxWrong();
+    setMessage("そこには置けません。下降順の束と、置き先の数字を確認してください。");
+    return false;
+  };
+
+  // 3D シーンのドラッグ落下: タップ移動と同じ判定（doMove）を通す。
+  const onDragDrop = (source: SpiderDragSource, toCol: number): boolean => {
+    if (state.status !== "playing" || source.col === toCol) return false;
+    const ok = doMove(source.col, source.index, toCol);
+    setSelection(null);
+    return ok;
+  };
+
   const onCardClick = (col: number, index: number) => {
     if (state.status !== "playing") return;
     const pile = state.columns[col];
@@ -54,14 +81,7 @@ export default function SpiderClient() {
     if (selection) {
       // 置き先としてこの列が選ばれた
       if (selection.col !== col) {
-        if (canMoveSpiderRun(state, selection.col, selection.index, col)) {
-          sfxPlace();
-          setState((s) => moveSpider(s, selection.col, selection.index, col));
-          setMessage(null);
-        } else {
-          sfxWrong();
-          setMessage("そこには置けません。下降順の束と、置き先の数字を確認してください。");
-        }
+        doMove(selection.col, selection.index, col);
         setSelection(null);
         return;
       }
@@ -142,47 +162,8 @@ export default function SpiderClient() {
     return () => window.removeEventListener("keydown", onKey);
   });
 
-  return (
-    <>
-      <nav className="breadcrumbs" aria-label="パンくず">
-        <Link href={`${prefix}/games`}>ゲーム</Link>
-        <span> / </span>
-        <span>スパイダー</span>
-      </nav>
-      <div className="page-heading compact-heading">
-        <h1>スパイダーソリティア</h1>
-        <p className="muted">
-          動かしたい束の先頭カードをタップし、続けて置き先の列をタップします。全カードがスペードの1スート制です。盤面を下にスワイプ（または D キー）で山札から配ります。
-        </p>
-      </div>
-
-      <div className="classic-controls" role="group" aria-label="操作">
-        <button type="button" className="classic-btn" onClick={restart}>
-          もう一度
-        </button>
-        <div
-          {...(dealDisabled ? {} : tappableProps(tryDeal))}
-          aria-disabled={dealDisabled}
-          className="classic-btn"
-          style={dealDisabled ? { opacity: 0.5, cursor: "default" } : undefined}
-        >
-          山札から配る（残り{deals}回）
-        </div>
-      </div>
-
-      <p className="classic-status" role="status">
-        手数 {state.moves} ・ 完成 {state.completed} / 8組
-        {state.status === "won"
-          ? " ・ 全8組そろった！クリアです。"
-          : state.status === "stuck"
-            ? " ・ 詰みです。動かせる手がもうありません。「もう一度」で新しい配布に挑戦してください。"
-            : message
-              ? ` ・ ${message}`
-              : selection
-                ? " ・ 置き先の列を選んでください。"
-                : " ・ 動かしたいカードを選んでください。"}
-      </p>
-
+  // 2D 盤面（WebGL が使えない場合のフォールバックとしてそのまま使う）。
+  const board2d = (
       <div
         {...boardGesture}
         role="group"
@@ -263,6 +244,63 @@ export default function SpiderClient() {
           </div>
         ))}
       </div>
+  );
+
+  return (
+    <>
+      <nav className="breadcrumbs" aria-label="パンくず">
+        <Link href={`${prefix}/games`}>ゲーム</Link>
+        <span> / </span>
+        <span>スパイダー</span>
+      </nav>
+      <div className="page-heading compact-heading">
+        <h1>スパイダーソリティア</h1>
+        <p className="muted">
+          動かしたい束の先頭カードをタップし、続けて置き先の列をタップします。全カードがスペードの1スート制です。盤面を下にスワイプ（または D キー）で山札から配ります。
+        </p>
+      </div>
+
+      <div className="classic-controls" role="group" aria-label="操作">
+        <button type="button" className="classic-btn" onClick={restart}>
+          もう一度
+        </button>
+        <div
+          {...(dealDisabled ? {} : tappableProps(tryDeal))}
+          aria-disabled={dealDisabled}
+          className="classic-btn"
+          style={dealDisabled ? { opacity: 0.5, cursor: "default" } : undefined}
+        >
+          山札から配る（残り{deals}回）
+        </div>
+      </div>
+
+      <p className="classic-status" role="status">
+        手数 {state.moves} ・ 完成 {state.completed} / 8組
+        {state.status === "won"
+          ? " ・ 全8組そろった！クリアです。"
+          : state.status === "stuck"
+            ? " ・ 詰みです。動かせる手がもうありません。「もう一度」で新しい配布に挑戦してください。"
+            : message
+              ? ` ・ ${message}`
+              : selection
+                ? " ・ 置き先の列を選んでください。"
+                : " ・ 動かしたいカードを選んでください。"}
+      </p>
+
+      {webglFailed ? board2d : (
+        <div style={{ maxWidth: 860, margin: "0 auto" }}>
+          <SpiderScene3D
+            state={state}
+            selection={selection}
+            onCardTap={onCardClick}
+            onEmptyColumnTap={onEmptyColumnClick}
+            onDealTap={tryDeal}
+            onDragDrop={onDragDrop}
+            onFail={() => setWebglFailed(true)}
+            fallback={board2d}
+          />
+        </div>
+      )}
 
       {state.status === "won" ? (
         <div style={{ maxWidth: 640, margin: "16px auto 0" }}>

@@ -3,7 +3,11 @@
 // 賭けは1スピンに1つ。ホイールは結果ポケットへ簡易アニメーションで止める。
 // チップは端末内だけの遊び用ポイントで、localStorage に保存する。
 import Link from "next/link";
+import dynamic from "next/dynamic";
 import { useEffect, useRef, useState } from "react";
+
+// 3D シーンは three を含むため遅延読み込み（このページ専用チャンクに閉じる）。
+const RouletteScene3D = dynamic(() => import("./RouletteScene3D"), { ssr: false });
 import {
   ROULETTE_START_CHIPS,
   ROULETTE_WHEEL,
@@ -58,7 +62,11 @@ export default function RouletteClient() {
   const [displayPocket, setDisplayPocket] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [hydrated, setHydrated] = useState(false);
+  const [webglFailed, setWebglFailed] = useState(false);
+  const [spinNonce, setSpinNonce] = useState(0);
+  const [pendingPocket, setPendingPocket] = useState<number | null>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const finalizeRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // 保存チップの読み込み（初回のみ）。
   useEffect(() => {
@@ -87,6 +95,7 @@ export default function RouletteClient() {
   useEffect(() => {
     return () => {
       if (timerRef.current) clearInterval(timerRef.current);
+      if (finalizeRef.current) clearTimeout(finalizeRef.current);
     };
   }, []);
 
@@ -108,22 +117,27 @@ export default function RouletteClient() {
     setSpinning(true);
     sfxSlide();
     const resultPocket = next.lastResult?.pocket ?? 0;
+    // 3D ホイールへ結果ポケットを渡し、ボールの落下アニメーションと同期して確定する。
+    setPendingPocket(resultPocket);
+    setSpinNonce((n) => n + 1);
     let ticks = 0;
     timerRef.current = setInterval(() => {
       ticks += 1;
       if (ticks % 4 === 0) sfxTick();
+      // 2D フォールバック表示用の数字シャッフル（3D では未使用）。
       setDisplayPocket(ROULETTE_WHEEL[Math.floor(Math.random() * ROULETTE_WHEEL.length)]);
-      if (ticks >= 14) {
-        if (timerRef.current) clearInterval(timerRef.current);
-        timerRef.current = null;
-        setDisplayPocket(resultPocket);
-        const delta = next.lastResult?.delta ?? 0;
-        if (delta > 0) sfxCorrect();
-        else if (delta < 0) sfxWrong();
-        setState(next);
-        setSpinning(false);
-      }
     }, 70);
+    finalizeRef.current = setTimeout(() => {
+      if (timerRef.current) clearInterval(timerRef.current);
+      timerRef.current = null;
+      finalizeRef.current = null;
+      setDisplayPocket(resultPocket);
+      const delta = next.lastResult?.delta ?? 0;
+      if (delta > 0) sfxCorrect();
+      else if (delta < 0) sfxWrong();
+      setState(next);
+      setSpinning(false);
+    }, 2600);
   };
 
   // ホイールをフリック/スワイプで回す（スピンボタンは廃止）。チップ切れ時はホイールタップで再支給。
@@ -148,6 +162,7 @@ export default function RouletteClient() {
       </div>
 
       <div style={{ textAlign: "center", margin: "8px 0 4px" }} aria-live="polite">
+        {webglFailed ? (
         <div {...wheelGesture}
           key={spinning ? "spinning" : state.spins}
           className={!spinning && last ? "juice-pop" : undefined}
@@ -171,6 +186,32 @@ export default function RouletteClient() {
         >
           {shownPocket !== null ? shownPocket : "?"}
         </div>
+        ) : (
+          <div style={{ position: "relative", maxWidth: 560, margin: "0 auto" }}>
+            <RouletteScene3D
+              resultPocket={spinning ? pendingPocket : last?.pocket ?? null}
+              spinning={spinning}
+              spinNonce={spinNonce}
+              canSpin={!spinning}
+              onFlickSpin={onSpin}
+              onTapWheel={() => { if (state.chips <= 0 && !spinning) setState((s) => refillChips(s)); }}
+              onFail={() => setWebglFailed(true)}
+              fallback={null}
+            />
+            <div
+              aria-hidden="true"
+              style={{
+                position: "absolute", left: 10, bottom: 10, minWidth: 56, height: 56, padding: "0 8px",
+                display: "flex", alignItems: "center", justifyContent: "center",
+                borderRadius: "50%", background: shownPocket !== null ? pocketBg(shownPocket) : "#6b7280",
+                color: "#fff", fontSize: 26, fontWeight: 800, border: "4px solid #d9a41c",
+                fontVariantNumeric: "tabular-nums",
+              }}
+            >
+              {shownPocket !== null ? shownPocket : "?"}
+            </div>
+          </div>
+        )}
         <p className="classic-status" role="status">
           チップ {state.chips} ・ スピン {state.spins} 回
           {!spinning && last ? ` ・ 前回 ${last.pocket}（${last.color === "green" ? "緑" : last.color === "red" ? "赤" : "黒"}） ${last.delta >= 0 ? `+${last.delta}` : last.delta}` : ""}

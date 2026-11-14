@@ -3,7 +3,11 @@
 // 列を選んでフルーツを落とし、同じ段階が2個以上くっつくと合体して大きくなる。
 // 端末内で完結し、サーバーへ送信しない。
 import Link from "next/link";
+import dynamic from "next/dynamic";
 import { useCallback, useEffect, useRef, useState } from "react";
+
+// 3D シーンは three を含むため遅延読み込み（このページ専用チャンクに閉じる）。
+const MergeFruitScene3D = dynamic(() => import("./MergeFruitScene3D"), { ssr: false });
 import { sfxLose, sfxPop, sfxSlide, sfxTap } from "@/lib/sfx";
 import { EndScreen, ScorePop } from "../GameJuice";
 import {
@@ -49,6 +53,7 @@ function FruitBadge({ level, size }: { level: number; size: number }) {
 export default function MergeFruitClient() {
   const { prefix } = useGamesNav();
   const [state, setState] = useState<MergeFruitState>(() => newGame());
+  const [webglFailed, setWebglFailed] = useState(false);
   const [best, setBest] = useState<number | null>(null);
   const [prevBest, setPrevBest] = useState<number | null>(null);
   const [isNewBest, setIsNewBest] = useState(false);
@@ -128,6 +133,85 @@ export default function MergeFruitClient() {
       ? "天井まで積み上がってゲームオーバー。"
       : "同じフルーツが2個以上くっつくと合体して大きくなります。すいかを目指そう。";
 
+  // 2D 盤面（WebGL が使えない場合のフォールバックとしてそのまま使う）。
+  const board2d = (
+    <div style={{ flex: "1 1 280px", minWidth: 260 }}>
+      <div
+        role="grid"
+        aria-label="フルーツの箱"
+        className={state.status === "gameover" ? "juice-shake" : undefined}
+        tabIndex={0}
+        onKeyDown={onKeyDown}
+        style={{
+          display: "grid",
+          gridTemplateColumns: `repeat(${MERGE_COLS}, minmax(0, 1fr))`,
+          gap: 3,
+          padding: 6,
+          border: "2px solid var(--line)",
+          borderTop: "2px dashed #c0392b",
+          borderRadius: 8,
+          background: "var(--soft)",
+          outlineOffset: 2,
+        }}
+      >
+        {state.board.map((v, i) => {
+          const r = Math.floor(i / MERGE_COLS);
+          const c = i % MERGE_COLS;
+          const isGhost = ghostRow === r && hoverCol === c && v === null;
+          const kind = v !== null ? FRUIT_KINDS[v] : null;
+          return (
+            <div
+              key={i}
+              role="gridcell"
+              aria-label={
+                kind ? `${kind.name}（${r + 1}段目・${c + 1}列目）` : `空き（${r + 1}段目・${c + 1}列目）`
+              }
+              onClick={() => drop(c)}
+              onMouseEnter={() => setHoverCol(c)}
+              style={{
+                aspectRatio: "1",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                borderRadius: 6,
+                background: isGhost ? "var(--accent-soft)" : "rgba(127,127,127,0.08)",
+                fontSize: "clamp(18px, 6vw, 30px)",
+                lineHeight: 1,
+                cursor: state.status === "playing" ? "pointer" : "default",
+                opacity: isGhost ? 0.45 : 1,
+              }}
+            >
+              {kind ? <FruitBadge level={v as number} size={30} /> : isGhost ? <FruitBadge level={state.current} size={30} /> : ""}
+            </div>
+          );
+        })}
+      </div>
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: `repeat(${MERGE_COLS}, minmax(0, 1fr))`,
+          gap: 3,
+          padding: "6px 6px 0",
+        }}
+      >
+        {Array.from({ length: MERGE_COLS }, (_, c) => (
+          <button
+            key={c}
+            type="button"
+            className={hoverCol === c ? "classic-btn classic-btn-active" : "classic-btn"}
+            aria-label={`${c + 1}列目に落とす`}
+            disabled={state.status !== "playing"}
+            onClick={() => drop(c)}
+            onMouseEnter={() => setHoverCol(c)}
+            style={{ minHeight: 44, padding: "4px 0" }}
+          >
+            ↓
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+
   return (
     <>
       <nav className="breadcrumbs" aria-label="パンくず">
@@ -205,81 +289,21 @@ export default function MergeFruitClient() {
           margin: "0 auto",
         }}
       >
-        <div style={{ flex: "1 1 280px", minWidth: 260 }}>
-          <div
-            role="grid"
-            aria-label="フルーツの箱"
-            className={state.status === "gameover" ? "juice-shake" : undefined}
-            tabIndex={0}
-            onKeyDown={onKeyDown}
-            style={{
-              display: "grid",
-              gridTemplateColumns: `repeat(${MERGE_COLS}, minmax(0, 1fr))`,
-              gap: 3,
-              padding: 6,
-              border: "2px solid var(--line)",
-              borderTop: "2px dashed #c0392b",
-              borderRadius: 8,
-              background: "var(--soft)",
-              outlineOffset: 2,
-            }}
-          >
-            {state.board.map((v, i) => {
-              const r = Math.floor(i / MERGE_COLS);
-              const c = i % MERGE_COLS;
-              const isGhost = ghostRow === r && hoverCol === c && v === null;
-              const kind = v !== null ? FRUIT_KINDS[v] : null;
-              return (
-                <div
-                  key={i}
-                  role="gridcell"
-                  aria-label={
-                    kind ? `${kind.name}（${r + 1}段目・${c + 1}列目）` : `空き（${r + 1}段目・${c + 1}列目）`
-                  }
-                  onClick={() => drop(c)}
-                  onMouseEnter={() => setHoverCol(c)}
-                  style={{
-                    aspectRatio: "1",
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    borderRadius: 6,
-                    background: isGhost ? "var(--accent-soft)" : "rgba(127,127,127,0.08)",
-                    fontSize: "clamp(18px, 6vw, 30px)",
-                    lineHeight: 1,
-                    cursor: state.status === "playing" ? "pointer" : "default",
-                    opacity: isGhost ? 0.45 : 1,
-                  }}
-                >
-                  {kind ? <FruitBadge level={v as number} size={30} /> : isGhost ? <FruitBadge level={state.current} size={30} /> : ""}
-                </div>
-              );
-            })}
+        {webglFailed ? board2d : (
+          <div style={{ flex: "1 1 280px", minWidth: 260 }}>
+            <MergeFruitScene3D
+              board={state.board}
+              current={state.current}
+              next={state.next}
+              hoverCol={hoverCol}
+              status={state.status}
+              onHoverCol={setHoverCol}
+              onDrop={drop}
+              onFail={() => setWebglFailed(true)}
+              fallback={board2d}
+            />
           </div>
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: `repeat(${MERGE_COLS}, minmax(0, 1fr))`,
-              gap: 3,
-              padding: "6px 6px 0",
-            }}
-          >
-            {Array.from({ length: MERGE_COLS }, (_, c) => (
-              <button
-                key={c}
-                type="button"
-                className={hoverCol === c ? "classic-btn classic-btn-active" : "classic-btn"}
-                aria-label={`${c + 1}列目に落とす`}
-                disabled={state.status !== "playing"}
-                onClick={() => drop(c)}
-                onMouseEnter={() => setHoverCol(c)}
-                style={{ minHeight: 44, padding: "4px 0" }}
-              >
-                ↓
-              </button>
-            ))}
-          </div>
-        </div>
+        )}
 
         <div style={{ flex: "0 1 160px", minWidth: 140 }}>
           <div

@@ -3,7 +3,11 @@
 // 盤面のスワイプ／タップとキーボード（←→移動／↑回転／↓ソフトドロップ／スペース=ハードドロップ）。
 // 端末内で完結し、サーバーへ送信しない。
 import Link from "next/link";
+import dynamic from "next/dynamic";
 import { useCallback, useEffect, useRef, useState } from "react";
+
+// 3D シーンは three を含むため遅延読み込み（このページ専用チャンクに閉じる）。
+const ColumnsScene3D = dynamic(() => import("./ColumnsScene3D"), { ssr: false });
 import {
   COLUMNS_COLS,
   COLUMNS_ROWS,
@@ -17,7 +21,7 @@ import {
 } from "@/lib/columns";
 import { useGamesNav } from "../GamesShell";
 import { sfxCorrect, sfxLose, sfxPlace, sfxSlide, sfxTap } from "@/lib/sfx";
-import { useGesture } from "@/lib/gesture";
+import { useGesture, type GestureDirection } from "@/lib/gesture";
 import { EndScreen, ScorePop } from "../GameJuice";
 
 const FALL_MS = 650;
@@ -29,6 +33,7 @@ function newGame(): ColumnsState {
 
 export default function ColumnsClient() {
   const { prefix } = useGamesNav();
+  const [webglFailed, setWebglFailed] = useState(false);
   const [state, setState] = useState<ColumnsState>(() => newGame());
   const [best, setBest] = useState<number | null>(null);
   const [started, setStarted] = useState(false);
@@ -37,6 +42,9 @@ export default function ColumnsClient() {
   const prevScoreRef = useRef(0);
   const prevClearedRef = useRef(0);
   const endSoundRef = useRef<ColumnsState | null>(null);
+  // 3D シーンが毎フレーム読む最新の状態（React 再描画を介さない）。
+  const stateRef = useRef(state);
+  stateRef.current = state;
 
   useEffect(() => {
     try {
@@ -148,25 +156,37 @@ export default function ColumnsClient() {
     return () => window.removeEventListener("keydown", onKey);
   }, [started, state.status, restart]);
 
-  // 盤面ジェスチャ: 左右スワイプ=移動、下スワイプ=ソフトドロップ、
-  // 上スワイプ=ハードドロップ、タップ=回転（falling と同じ対応）。
-  // 未開始・ゲームオーバー時のタップは開始、スワイプは無効。
+  // 盤面ジェスチャと 3D シーンで共有する操作ハンドラ: 左右スワイプ=移動、
+  // 下スワイプ=ソフトドロップ、上スワイプ=ハードドロップ、タップ=回転
+  // （falling と同じ対応）。未開始・ゲームオーバー時のタップは開始、
+  // スワイプは無効。
+  const handleSwipe = (dir: GestureDirection) => {
+    if (!started || state.status !== "playing") return;
+    if (dir === "left") doMove(-1);
+    else if (dir === "right") doMove(1);
+    else if (dir === "down") doStep();
+    else if (dir === "up") doDrop();
+  };
+  const handleTap = () => {
+    if (!started || state.status === "gameover") {
+      restart();
+      return;
+    }
+    if (state.status === "playing") doRotate();
+  };
+
   const boardGesture = useGesture({
     onSwipe: (dir) => {
-      if (!started || state.status !== "playing") return;
-      if (dir === "left") doMove(-1);
-      else if (dir === "right") doMove(1);
-      else if (dir === "down") doStep();
-      else if (dir === "up") doDrop();
+      handleSwipe(dir);
     },
-    onTap: () => {
-      if (!started || state.status === "gameover") {
-        restart();
-        return;
-      }
-      if (state.status === "playing") doRotate();
-    },
+    onTap: handleTap,
   });
+
+  // 3D シーンへ渡す表示状態（盤・落下中ブロックは lib の状態をそのまま渡す）。
+  const getViewState = useCallback(() => {
+    const s = stateRef.current;
+    return { board: s.board, active: s.active, placed: s.placed, status: s.status };
+  }, []);
 
   // 盤面＋落下中ブロックを合成して描く。
   const cells: (number | null)[] = [...state.board];
@@ -178,6 +198,38 @@ export default function ColumnsClient() {
       }
     }
   }
+
+  // 2D 盤（WebGL が使えない場合のフォールバックとしてそのまま使う）。
+  const board2d = (
+        <div
+          {...boardGesture}
+          role="img"
+          aria-label="コラムスの盤面（スワイプで移動・落とす、タップで回転）"
+          style={{
+            display: "grid",
+            gridTemplateColumns: `repeat(${COLUMNS_COLS}, 1fr)`,
+            gap: 3,
+            width: "min(78vw, 300px)",
+            padding: 6,
+            background: "#1f2937",
+            borderRadius: 10,
+            touchAction: "none",
+          }}
+        >
+          {cells.map((v, i) => (
+            <div
+              key={i}
+              className={v === null ? undefined : "juice-pop"}
+              style={{
+                aspectRatio: "1",
+                borderRadius: "50%",
+                background: v === null ? "rgba(255,255,255,0.07)" : GEM_FILL[v],
+                boxShadow: v === null ? "none" : "inset -2px -3px 0 rgba(0,0,0,0.18)",
+              }}
+            />
+          ))}
+        </div>
+  );
 
   return (
     <>
@@ -210,34 +262,17 @@ export default function ColumnsClient() {
       </p>
 
       <div style={{ display: "flex", gap: 16, justifyContent: "center", alignItems: "flex-start", flexWrap: "wrap" }}>
-        <div
-          {...boardGesture}
-          role="img"
-          aria-label="コラムスの盤面（スワイプで移動・落とす、タップで回転）"
-          style={{
-            display: "grid",
-            gridTemplateColumns: `repeat(${COLUMNS_COLS}, 1fr)`,
-            gap: 3,
-            width: "min(78vw, 300px)",
-            padding: 6,
-            background: "#1f2937",
-            borderRadius: 10,
-            touchAction: "none",
-          }}
-        >
-          {cells.map((v, i) => (
-            <div
-              key={i}
-              className={v === null ? undefined : "juice-pop"}
-              style={{
-                aspectRatio: "1",
-                borderRadius: "50%",
-                background: v === null ? "rgba(255,255,255,0.07)" : GEM_FILL[v],
-                boxShadow: v === null ? "none" : "inset -2px -3px 0 rgba(0,0,0,0.18)",
-              }}
+{webglFailed ? board2d : (
+          <div style={{ width: "min(78vw, 300px)" }}>
+            <ColumnsScene3D
+              getState={getViewState}
+              onSwipe={handleSwipe}
+              onTap={handleTap}
+              onFail={() => setWebglFailed(true)}
+              fallback={board2d}
             />
-          ))}
-        </div>
+          </div>
+        )}
         <div style={{ textAlign: "center" }}>
           <p className="muted" style={{ margin: "0 0 6px", fontSize: 13 }}>
             次

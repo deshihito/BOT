@@ -6,7 +6,11 @@
 // OnlineShell / useOnlineRoom の実 API に合わせた接続（統合時に確定）:
 // view.state は unknown で渡るため、ここで DaifugoState にキャストする。
 import { useEffect, useMemo, useRef, useState } from "react";
+import dynamic from "next/dynamic";
 import OnlineShell, { useOnlineCreateOptions } from "../online/OnlineShell";
+
+// 3D シーンは three を含むため遅延読み込み（このページ専用チャンクに閉じる）。
+const DaifugoScene3D = dynamic(() => import("./DaifugoScene3D"), { ssr: false });
 import type { OnlineRoomApi, OnlineRoomView } from "../online/useOnlineRoom";
 import { playSe } from "@/lib/balku-sound";
 
@@ -129,6 +133,7 @@ function DaifugoTable({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi 
   const state = view.state as DaifugoState | null;
   const mySeat = view.player.seat;
   const [selected, setSelected] = useState<number[]>([]);
+  const [webglFailed, setWebglFailed] = useState(false);
 
   // 選択状態の同期: view 更新で自分の手札から消えたカードは選択から落とす。
   const handKey = state ? state.yourHand.join(",") : "";
@@ -206,6 +211,51 @@ function DaifugoTable({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi 
   // モジュール側の log は時系列（末尾が最新）なので、末尾6件を新しい順に並べる
   const recentLog = [...(state.log ?? [])].slice(-6).reverse();
 
+  // 2D 盤面（場＋自分の手札。WebGL が使えない場合のフォールバックとしてそのまま使う）。
+  const board2d = (
+    <>
+      {/* 場 */}
+      <section className="og-field-area" aria-label="場のカード">
+        {state.field ? (
+          <>
+            <div className="og-field-cards">
+              {state.field.cards.map((id, i) => (
+                <span key={`${id}-${i}`} className={`og-card og-card-field juice-flip${isRedCard(id) ? " og-card-red" : ""}`}>
+                  <CardFace id={id} big />
+                </span>
+              ))}
+            </div>
+            <p className="og-status-line">{nameOf(state.field.seat)} が出しました</p>
+          </>
+        ) : (
+          <p className="og-status-line">場は流れています。好きなカードを出せます。</p>
+        )}
+      </section>
+
+      {/* 自分の手札 */}
+      {!state.finished && (
+        <div className="og-hand" role="group" aria-label="あなたの手札">
+          {state.yourHand.map((id) => {
+            const isSelected = selected.includes(id);
+            return (
+              <button
+                key={id}
+                type="button"
+                className={`og-card${isRedCard(id) ? " og-card-red" : ""}${isSelected ? " og-card-selected" : ""}`}
+                aria-pressed={isSelected}
+                aria-label={cardAriaLabel(id)}
+                disabled={!isMyTurn}
+                onClick={() => toggleCard(id)}
+              >
+                <CardFace id={id} />
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </>
+  );
+
   return (
     <div className="og-game og-daifugo">
       <div className={`og-turn-banner${isMyTurn ? " og-turn-mine juice-pulse" : ""}`} role="status" aria-live="polite">
@@ -248,23 +298,28 @@ function DaifugoTable({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi 
         ))}
       </div>
 
-      {/* 場 */}
-      <section className="og-field-area" aria-label="場のカード">
-        {state.field ? (
-          <>
-            <div className="og-field-cards">
-              {state.field.cards.map((id, i) => (
-                <span key={`${id}-${i}`} className={`og-card og-card-field juice-flip${isRedCard(id) ? " og-card-red" : ""}`}>
-                  <CardFace id={id} big />
-                </span>
-              ))}
-            </div>
-            <p className="og-status-line">{nameOf(state.field.seat)} が出しました</p>
-          </>
-        ) : (
-          <p className="og-status-line">場は流れています。好きなカードを出せます。</p>
-        )}
-      </section>
+      {webglFailed ? board2d : (
+        <DaifugoScene3D
+          yourHand={state.yourHand}
+          field={state.field}
+          others={state.others}
+          mySeat={mySeat}
+          totalPlayers={state.players?.length ?? (state.others.length + 1)}
+          selected={selected}
+          isMyTurn={isMyTurn}
+          turn={state.turn}
+          finished={state.finished}
+          onCardTap={toggleCard}
+          onFail={() => setWebglFailed(true)}
+          fallback={board2d}
+        />
+      )}
+      {!webglFailed && state.field && (
+        <p className="og-status-line">{nameOf(state.field.seat)} が出しました</p>
+      )}
+      {!webglFailed && !state.field && !state.finished && (
+        <p className="og-status-line">場は流れています。好きなカードを出せます。</p>
+      )}
 
       {/* 終了時の全順位 */}
       {state.finished && (
@@ -287,37 +342,17 @@ function DaifugoTable({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi 
         </section>
       )}
 
-      {/* 自分の手札と操作 */}
+      {/* 操作（出す／パスは既存 DOM のまま） */}
       {!state.finished && (
-        <>
-          <div className="og-hand" role="group" aria-label="あなたの手札">
-            {state.yourHand.map((id) => {
-              const isSelected = selected.includes(id);
-              return (
-                <button
-                  key={id}
-                  type="button"
-                  className={`og-card${isRedCard(id) ? " og-card-red" : ""}${isSelected ? " og-card-selected" : ""}`}
-                  aria-pressed={isSelected}
-                  aria-label={cardAriaLabel(id)}
-                  disabled={!isMyTurn}
-                  onClick={() => toggleCard(id)}
-                >
-                  <CardFace id={id} />
-                </button>
-              );
-            })}
-          </div>
-          <div className="og-actions">
-            <button type="button" className="og-button og-button-primary" disabled={!isMyTurn || selected.length === 0} onClick={playSelected}>
-              出す{selected.length > 0 ? `（${selected.length}枚）` : ""}
-            </button>
-            <button type="button" className="og-button" disabled={!isMyTurn} onClick={pass}>
-              パス
-            </button>
-            {state.yourRank === null && !isMyTurn && <span className="og-status-line">相手の手を待っています…</span>}
-          </div>
-        </>
+        <div className="og-actions">
+          <button type="button" className="og-button og-button-primary" disabled={!isMyTurn || selected.length === 0} onClick={playSelected}>
+            出す{selected.length > 0 ? `（${selected.length}枚）` : ""}
+          </button>
+          <button type="button" className="og-button" disabled={!isMyTurn} onClick={pass}>
+            パス
+          </button>
+          {state.yourRank === null && !isMyTurn && <span className="og-status-line">相手の手を待っています…</span>}
+        </div>
       )}
 
       {/* ログ（新しい順） */}

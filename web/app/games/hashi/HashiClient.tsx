@@ -3,7 +3,11 @@
 // 島と島の間のマスをタップすると橋が 1本→2本→なし と切り替わる。
 // 端末内で完結し、サーバーへ送信しない。
 import Link from "next/link";
+import dynamic from "next/dynamic";
 import { useEffect, useMemo, useRef, useState } from "react";
+
+// 3D シーンは three を含むため遅延読み込み（このページ専用チャンクに閉じる）。
+const HashiScene3D = dynamic(() => import("./HashiScene3D"), { ssr: false });
 import {
   createHashiGame,
   cycleHashiBridge,
@@ -58,6 +62,7 @@ function BridgeLines({ orientation, count }: { orientation: "h" | "v"; count: nu
 
 export default function HashiClient() {
   const { prefix } = useGamesNav();
+  const [webglFailed, setWebglFailed] = useState(false);
   const [size, setSize] = useState<HashiSize>(7);
   const [state, setState] = useState<HashiState>(() => newGame(7));
   const [seconds, setSeconds] = useState(0);
@@ -167,60 +172,8 @@ export default function HashiClient() {
       : notice ??
         `数字はその島から出る橋の総数。島と島の間のマスをタップして橋をかけよう（${satisfied}/${state.islands.length} 島が一致）。`;
 
-  return (
-    <>
-      <nav className="breadcrumbs" aria-label="パンくず">
-        <Link href={`${prefix}/games`}>ゲーム</Link>
-        <span> / </span>
-        <span>橋をかけろ</span>
-      </nav>
-      <div className="page-heading compact-heading">
-        <h1>橋をかけろ</h1>
-        <p className="muted">
-          島と島の間のマスをタップすると、橋が 1本→2本→なし の順に切り替わります。
-        </p>
-      </div>
-
-      <div className="classic-controls" role="group" aria-label="盤面サイズ">
-        {SIZES.map((s) => (
-          <button
-            key={s.key}
-            type="button"
-            aria-pressed={size === s.key}
-            className={size === s.key ? "classic-btn classic-btn-active" : "classic-btn"}
-            onClick={() => restart(s.key)}
-          >
-            {s.label}
-          </button>
-        ))}
-        <button type="button" className="classic-btn" onClick={() => restart(size)}>
-          もう一度
-        </button>
-        <button
-          type="button"
-          aria-pressed={showCheck}
-          className={showCheck ? "classic-btn classic-btn-active" : "classic-btn"}
-          onClick={() => {
-            sfxTap();
-            setShowCheck((v) => !v);
-          }}
-        >
-          チェック
-        </button>
-      </div>
-
-      <p className="classic-status" role="status">
-        {seconds} 秒{best !== null ? ` ・ ベスト ${best} 秒` : ""} ・ {statusText}
-      </p>
-
-      {violations.length > 0 && (
-        <ul className="muted" role="alert" style={{ margin: "4px 0 10px", paddingLeft: 18 }}>
-          {violations.map((v, i) => (
-            <li key={i}>{v.message}</li>
-          ))}
-        </ul>
-      )}
-
+  // 2D 盤（WebGL が使えない場合のフォールバックとしてそのまま使う）。
+  const board2d = (
       <div
         role="grid"
         aria-label="橋をかけろの盤"
@@ -301,6 +254,74 @@ export default function HashiClient() {
           return <div key={index} role="gridcell" style={{ aspectRatio: "1" }} />;
         })}
       </div>
+  );
+
+  return (
+    <>
+      <nav className="breadcrumbs" aria-label="パンくず">
+        <Link href={`${prefix}/games`}>ゲーム</Link>
+        <span> / </span>
+        <span>橋をかけろ</span>
+      </nav>
+      <div className="page-heading compact-heading">
+        <h1>橋をかけろ</h1>
+        <p className="muted">
+          島と島の間のマスをタップすると、橋が 1本→2本→なし の順に切り替わります。
+        </p>
+      </div>
+
+      <div className="classic-controls" role="group" aria-label="盤面サイズ">
+        {SIZES.map((s) => (
+          <button
+            key={s.key}
+            type="button"
+            aria-pressed={size === s.key}
+            className={size === s.key ? "classic-btn classic-btn-active" : "classic-btn"}
+            onClick={() => restart(s.key)}
+          >
+            {s.label}
+          </button>
+        ))}
+        <button type="button" className="classic-btn" onClick={() => restart(size)}>
+          もう一度
+        </button>
+        <button
+          type="button"
+          aria-pressed={showCheck}
+          className={showCheck ? "classic-btn classic-btn-active" : "classic-btn"}
+          onClick={() => {
+            sfxTap();
+            setShowCheck((v) => !v);
+          }}
+        >
+          チェック
+        </button>
+      </div>
+
+      <p className="classic-status" role="status">
+        {seconds} 秒{best !== null ? ` ・ ベスト ${best} 秒` : ""} ・ {statusText}
+      </p>
+
+      {violations.length > 0 && (
+        <ul className="muted" role="alert" style={{ margin: "4px 0 10px", paddingLeft: 18 }}>
+          {violations.map((v, i) => (
+            <li key={i}>{v.message}</li>
+          ))}
+        </ul>
+      )}
+
+      {webglFailed ? board2d : (
+        <div style={{ width: "100%", maxWidth: state.size === 7 ? 480 : 560, margin: "0 auto" }}>
+          <HashiScene3D
+            state={state}
+            degrees={degrees}
+            badIslandIds={[...badIslands]}
+            onBridgeCell={onBridgeCellTap}
+            onFail={() => setWebglFailed(true)}
+            fallback={board2d}
+          />
+        </div>
+      )}
 
       <p className="muted" style={{ marginTop: 12 }}>
         チェックを押すと、数字を超えた島などの間違いを表示します。

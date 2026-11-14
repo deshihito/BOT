@@ -1,8 +1,13 @@
 "use client";
 // 2x2 ルービックキューブ。ロジックは lib/cube.ts（ステッカーモデル）。
-// 展開図で6面を表示し、面ごとの回転ボタンで操作する。端末内で完結する。
+// 本体は 3D の立方体（CubeScene3D）で、面タップ=時計回り、面スワイプ=その
+// 方向への回転、背景ドラッグ=視点回転。WebGL 不可時は展開図＋回転ボタン（2D）
+// へフォールバックする。端末内で完結する。
 import Link from "next/link";
+import dynamic from "next/dynamic";
 import { useEffect, useRef, useState } from "react";
+
+const CubeScene3D = dynamic(() => import("./CubeScene3D"), { ssr: false });
 import { sfxTap, sfxWin } from "@/lib/sfx";
 import { EndScreen } from "../GameJuice";
 import {
@@ -69,6 +74,10 @@ export default function CubeClient() {
   const { prefix } = useGamesNav();
   const [state, setState] = useState<CubeState>(() => createCubeGame(Date.now() % 2147483647));
   const [best, setBest] = useState<number | null>(null);
+  const [webglFailed, setWebglFailed] = useState(false);
+  // 3D シーンの回転アニメーション用: 直近に適用した手と連番。
+  const [lastMove, setLastMove] = useState<{ move: CubeMove; seq: number } | null>(null);
+  const moveSeqRef = useRef(0);
 
   useEffect(() => {
     try {
@@ -107,11 +116,16 @@ export default function CubeClient() {
 
   const restart = () => {
     setState(createCubeGame(Date.now() % 2147483647));
+    setLastMove(null);
     setWinPrevBest(null);
     setWinNewBest(false);
   };
   const doMove = (move: CubeMove) => {
-    if (state.status !== "won") sfxTap();
+    // 完成後は lib が手を無効化するので、3D の回転アニメーションも起こさない。
+    if (state.status === "won") return;
+    sfxTap();
+    moveSeqRef.current += 1;
+    setLastMove({ move, seq: moveSeqRef.current });
     setState((s) => applyCubeMove(s, move));
   };
 
@@ -120,28 +134,8 @@ export default function CubeClient() {
       ? `完成！ ${state.moves} 手でそろえました。`
       : "全ての面を1色にそろえよう。";
 
-  return (
+  const board2d = (
     <>
-      <nav className="breadcrumbs" aria-label="パンくず">
-        <Link href={`${prefix}/games`}>ゲーム</Link>
-        <span> / </span>
-        <span>2x2キューブ</span>
-      </nav>
-      <div className="page-heading compact-heading">
-        <h1>2x2キューブ</h1>
-        <p className="muted">各面の ⟳⟲ ボタンで90度ずつ回して操作します。</p>
-      </div>
-
-      <div className="classic-controls" role="group" aria-label="操作">
-        <button type="button" className="classic-btn" onClick={restart}>
-          もう一度
-        </button>
-      </div>
-
-      <p className="classic-status" role="status">
-        {state.moves} 手{best !== null ? ` ・ ベスト ${best} 手` : ""} ・ {statusText}
-      </p>
-
       <div
         className={state.status === "won" ? "juice-pop" : undefined}
         style={{
@@ -218,6 +212,43 @@ export default function CubeClient() {
           </div>
         ))}
       </div>
+    </>
+  );
+
+  return (
+    <>
+      <nav className="breadcrumbs" aria-label="パンくず">
+        <Link href={`${prefix}/games`}>ゲーム</Link>
+        <span> / </span>
+        <span>2x2キューブ</span>
+      </nav>
+      <div className="page-heading compact-heading">
+        <h1>2x2キューブ</h1>
+        <p className="muted">面をタップで時計回り、面をなぞるとその方向に回ります。背景をドラッグすると視点が回ります。</p>
+      </div>
+
+      <div className="classic-controls" role="group" aria-label="操作">
+        <button type="button" className="classic-btn" onClick={restart}>
+          もう一度
+        </button>
+      </div>
+
+      <p className="classic-status" role="status">
+        {state.moves} 手{best !== null ? ` ・ ベスト ${best} 手` : ""} ・ {statusText}
+      </p>
+
+      {webglFailed ? board2d : (
+        <div style={{ maxWidth: 460, margin: "0 auto" }}>
+          <CubeScene3D
+            stickers={state.stickers}
+            status={state.status}
+            lastMove={lastMove}
+            onMove={doMove}
+            onFail={() => setWebglFailed(true)}
+            fallback={board2d}
+          />
+        </div>
+      )}
 
       {state.status === "won" && (
         <div style={{ maxWidth: 460, margin: "16px auto 0" }}>

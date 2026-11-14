@@ -3,7 +3,11 @@
 // 縦・横・斜めに隣接する同じランクのペアを取り除く。除去後は空きが残り、
 // 「詰める」で前へ寄せて山札から補充する方式。
 import Link from "next/link";
+import dynamic from "next/dynamic";
 import { useState } from "react";
+
+// 3D シーンは three を含むため遅延読み込み（このページ専用チャンクに閉じる）。
+const MonteCarloScene3D = dynamic(() => import("./MonteCarloScene3D"), { ssr: false });
 import {
   MC_COLS,
   createMonteCarlo,
@@ -41,6 +45,7 @@ function CardFace({ card }: { card: McCard }) {
 
 export default function MonteCarloClient() {
   const { prefix } = useGamesNav();
+  const [webglFailed, setWebglFailed] = useState(false);
   const [state, setState] = useState<McState>(() =>
     createMonteCarlo(Date.now() % 2147483647),
   );
@@ -102,13 +107,8 @@ export default function MonteCarloClient() {
         ? "手詰まりです。ペアが作れなくなりました。"
         : `取り除けるペアは ${pairs.length} 組あります。`;
 
-  return (
-    <div>
-      <p className="classic-status" role="status">
-        残り {remaining} 枚（山札 {state.stock.length} 枚）・ 取り除いた {state.removed} 枚 ・{" "}
-        {statusText}
-      </p>
-
+  // 2D 盤面（WebGL が使えない場合のフォールバック）。
+  const board2d = (
       <div
         {...boardGesture}
         role="grid"
@@ -165,6 +165,28 @@ export default function MonteCarloClient() {
           );
         })}
       </div>
+  );
+
+  return (
+    <div>
+      <p className="classic-status" role="status">
+        残り {remaining} 枚（山札 {state.stock.length} 枚）・ 取り除いた {state.removed} 枚 ・{" "}
+        {statusText}
+      </p>
+
+      {webglFailed ? board2d : (
+        <MonteCarloScene3D
+          board={state.board}
+          selected={selected}
+          pairCells={[...pairSet]}
+          stockCount={state.stock.length}
+          playing={state.status === "playing"}
+          onCellTap={onCell}
+          onConsolidate={consolidate}
+          onFail={() => setWebglFailed(true)}
+          fallback={board2d}
+        />
+      )}
 
       <div className="classic-controls" role="group" aria-label="操作" style={{ marginTop: 12 }}>
         <button type="button" className="classic-btn" onClick={restart}>

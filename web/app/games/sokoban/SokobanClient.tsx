@@ -2,7 +2,11 @@
 // 倉庫番。ロジックは lib/sokoban.ts。箱を全部ゴールの上に運ぶ定番パズル。
 // 盤面のスワイプとキーボード（矢印/WASD）で操作。1手戻し・最初から直し対応。
 import Link from "next/link";
+import dynamic from "next/dynamic";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+
+// 3D シーンは three を含むため遅延読み込み（このページ専用チャンクに閉じる）。
+const SokobanScene3D = dynamic(() => import("./SokobanScene3D"), { ssr: false });
 import {
   SOKOBAN_LEVELS,
   createSokobanGame,
@@ -47,6 +51,7 @@ function loadBest(level: number): SokobanBest {
 
 export default function SokobanClient() {
   const { prefix } = useGamesNav();
+  const [webglFailed, setWebglFailed] = useState(false);
   const [level, setLevel] = useState(0);
   const [state, setState] = useState<SokobanState>(() => createSokobanGame(0));
   const [best, setBest] = useState<SokobanBest>({ moves: null, pushes: null });
@@ -148,6 +153,24 @@ export default function SokobanClient() {
   // 4方向すべてが移動のため左スワイプへの割り当てはできない。
   // 直前400ms以内に移動・箱押しがあったダブルタップは戻すにしない
   // （anagram のヒント誤発火と同じ構図。素早い連続タップでの誤発火を防ぐ）。
+  // 1手戻す本体（操作として記録してから戻す）。
+  const applyUndoNow = useCallback(() => {
+    lastActionAtRef.current = Date.now();
+    setState((s) => {
+      const next = undoSokoban(s);
+      if (next !== s) sfxSlide();
+      return next;
+    });
+  }, []);
+
+  // 1手戻す（3D の床ダブルタップ用。遅延＋再判定は 2D のダブルタップと同じ）。
+  const requestUndo = useCallback(() => {
+    setTimeout(() => {
+      if (Date.now() - lastActionAtRef.current < 400) return;
+      applyUndoNow();
+    }, 80);
+  }, [applyUndoNow]);
+
   const boardGesture = useGesture({
     onSwipe: (dir) => {
       move(dir);
@@ -160,12 +183,7 @@ export default function SokobanClient() {
       // 遅延中に箱押し・移動があれば記録が更新され、戻すは抑止される。
       setTimeout(() => {
         if (Date.now() - lastActionAtRef.current < 400) return;
-        lastActionAtRef.current = Date.now();
-        setState((s) => {
-          const next = undoSokoban(s);
-          if (next !== s) sfxSlide();
-          return next;
-        });
+        applyUndoNow();
       }, 80);
     },
   });
@@ -263,6 +281,28 @@ export default function SokobanClient() {
     );
   };
 
+  // 2D 盤（WebGL が使えない場合のフォールバックとしてそのまま使う）。
+  const board2d = (
+    <div
+      {...boardGesture}
+      role="img"
+      aria-label="倉庫番の盤面（スワイプで移動、ダブルタップで1手戻す）"
+      style={{
+        display: "grid",
+        gridTemplateColumns: `repeat(${state.width}, ${cellPx}px)`,
+        gap: 2,
+        justifyContent: "center",
+        margin: "10px auto",
+        maxWidth: "100%",
+        overflowX: "auto",
+        padding: 4,
+        touchAction: "none",
+      }}
+    >
+      {Array.from({ length: state.width * state.height }, (_, i) => renderCell(i))}
+    </div>
+  );
+
   return (
     <>
       <nav className="breadcrumbs" aria-label="パンくず">
@@ -305,24 +345,25 @@ export default function SokobanClient() {
         </p>
       )}
 
-      <div
-        {...boardGesture}
-        role="img"
-        aria-label="倉庫番の盤面（スワイプで移動、ダブルタップで1手戻す）"
-        style={{
-          display: "grid",
-          gridTemplateColumns: `repeat(${state.width}, ${cellPx}px)`,
-          gap: 2,
-          justifyContent: "center",
-          margin: "10px auto",
-          maxWidth: "100%",
-          overflowX: "auto",
-          padding: 4,
-          touchAction: "none",
-        }}
-      >
-        {Array.from({ length: state.width * state.height }, (_, i) => renderCell(i))}
-      </div>
+      {webglFailed ? board2d : (
+        <div style={{ width: "100%", maxWidth: 640, margin: "10px auto" }}>
+          <SokobanScene3D
+            width={state.width}
+            height={state.height}
+            walls={state.walls}
+            goals={state.goals}
+            boxes={state.boxes}
+            player={state.player}
+            deadlocked={[...deadlocked]}
+            status={state.status}
+            onMove={move}
+            onBoxTap={onBoxClick}
+            onUndo={requestUndo}
+            onFail={() => setWebglFailed(true)}
+            fallback={board2d}
+          />
+        </div>
+      )}
       <p className="muted" style={{ textAlign: "center" }}>
         キーボードの矢印キー / WASD でも動けます（Ctrl+Z で1手戻し）。
       </p>

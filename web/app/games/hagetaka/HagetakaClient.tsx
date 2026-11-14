@@ -5,7 +5,11 @@
 //   決着は全員提出のタイミングで即座に行われ、前ラウンドの結果は lastResult / history で開示
 //   phase finished: standings が付く
 // 提出は { type: "bid", card }。
-import { useEffect, useRef } from "react";
+import dynamic from "next/dynamic";
+import { useEffect, useRef, useState } from "react";
+
+// 3D シーンは three を含むため遅延読み込み（このページ専用チャンクに閉じる）。
+const HagetakaScene3D = dynamic(() => import("./HagetakaScene3D"), { ssr: false });
 import { playSe } from "@/lib/balku-sound";
 import OnlineShell from "../online/OnlineShell";
 import type { OnlineRoomApi, OnlineRoomView } from "../online/useOnlineRoom";
@@ -38,6 +42,7 @@ function prizeLabel(value: number): string {
 }
 
 function Board({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
+  const [webglFailed, setWebglFailed] = useState(false);
   const state = view.state as HagetakaView | null;
   const mySeat = view.player.seat;
   const finishRef = useRef<string | null>(null);
@@ -67,6 +72,80 @@ function Board({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
   const lastTakerName = last?.taker !== null && last?.taker !== undefined
     ? state.players.find((p) => p.seat === last.taker)?.name
     : null;
+
+  // 3D シーンからの入札（既存の入札ボタンと同じ move を送る）。
+  const doBid = (card: number) => {
+    if (!canBid) return;
+    playSe("play");
+    void api.move({ type: "bid", card });
+  };
+
+  // 2D 盤（WebGL が使えない場合のフォールバックとしてそのまま使う）。
+  const board2d = (
+    <>
+      <p style={{ textAlign: "center", margin: "12px 0 4px" }}>
+        ラウンド {state.round + 1} / {state.totalRounds}
+      </p>
+      <div style={{ textAlign: "center", margin: "8px 0" }} role="group" aria-label="場の得点カード">
+        <span className="og-muted">場の得点カード: </span>
+        {state.table.map((v, i) => (
+          <span
+            key={`${state.round}-${i}-${v}`}
+            className="juice-pop"
+            style={{
+              display: "inline-block",
+              minWidth: 44,
+              padding: "8px 6px",
+              margin: "0 3px",
+              borderRadius: 8,
+              fontWeight: 700,
+              fontSize: 18,
+              color: "#fff",
+              background: v >= 0 ? "#43a35c" : "#e2534a",
+            }}
+          >
+            {prizeLabel(v)}
+          </span>
+        ))}
+        <span style={{ marginLeft: 8, fontWeight: 700 }}>合計 {prizeLabel(state.tableTotal)}</span>
+      </div>
+      <p className="og-muted" style={{ textAlign: "center" }}>
+        {state.tableTotal >= 0
+          ? "合計がプラスのときは、一番高い数字を出した人が取ります。"
+          : "合計がマイナスのときは、一番低い数字を出した人が引き取ります。"}
+        同じ数字同士は無効になり、決着しないと次へ持ち越します。
+      </p>
+
+      {canBid ? (
+        <div
+          role="group"
+          aria-label="入札カードを選ぶ"
+          style={{ display: "flex", flexWrap: "wrap", gap: 6, justifyContent: "center", margin: "12px 0" }}
+        >
+          {state.you.hand.map((card) => (
+            <button
+              key={card}
+              type="button"
+              className="og-btn"
+              style={{ minWidth: 48, minHeight: 52, fontSize: 17, fontWeight: 700 }}
+              onClick={() => {
+                playSe("play");
+                void api.move({ type: "bid", card });
+              }}
+            >
+              {card}
+            </button>
+          ))}
+        </div>
+      ) : (
+        <p style={{ textAlign: "center", margin: "12px 0" }}>
+          {state.you.left
+            ? "退出したため、この対戦には参加していません。"
+            : `あなたは ${state.you.yourCard} を出しました。全員の提出を待っています…`}
+        </p>
+      )}
+    </>
+  );
 
   return (
     <div style={{ maxWidth: 640, margin: "0 auto" }}>
@@ -99,67 +178,26 @@ function Board({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
         </div>
       ) : (
         <>
-          <p style={{ textAlign: "center", margin: "12px 0 4px" }}>
-            ラウンド {state.round + 1} / {state.totalRounds}
-          </p>
-          <div style={{ textAlign: "center", margin: "8px 0" }} role="group" aria-label="場の得点カード">
-            <span className="og-muted">場の得点カード: </span>
-            {state.table.map((v, i) => (
-              <span
-                key={`${state.round}-${i}-${v}`}
-                className="juice-pop"
-                style={{
-                  display: "inline-block",
-                  minWidth: 44,
-                  padding: "8px 6px",
-                  margin: "0 3px",
-                  borderRadius: 8,
-                  fontWeight: 700,
-                  fontSize: 18,
-                  color: "#fff",
-                  background: v >= 0 ? "#43a35c" : "#e2534a",
-                }}
-              >
-                {prizeLabel(v)}
-              </span>
-            ))}
-            <span style={{ marginLeft: 8, fontWeight: 700 }}>合計 {prizeLabel(state.tableTotal)}</span>
-          </div>
-          <p className="og-muted" style={{ textAlign: "center" }}>
-            {state.tableTotal >= 0
-              ? "合計がプラスのときは、一番高い数字を出した人が取ります。"
-              : "合計がマイナスのときは、一番低い数字を出した人が引き取ります。"}
-            同じ数字同士は無効になり、決着しないと次へ持ち越します。
-          </p>
-
-          {canBid ? (
-            <div
-              role="group"
-              aria-label="入札カードを選ぶ"
-              style={{ display: "flex", flexWrap: "wrap", gap: 6, justifyContent: "center", margin: "12px 0" }}
-            >
-              {state.you.hand.map((card) => (
-                <button
-                  key={card}
-                  type="button"
-                  className="og-btn"
-                  style={{ minWidth: 48, minHeight: 52, fontSize: 17, fontWeight: 700 }}
-                  onClick={() => {
-                    playSe("play");
-                    void api.move({ type: "bid", card });
-                  }}
-                >
-                  {card}
-                </button>
-              ))}
-            </div>
-          ) : (
-            <p style={{ textAlign: "center", margin: "12px 0" }}>
-              {state.you.left
-                ? "退出したため、この対戦には参加していません。"
-                : `あなたは ${state.you.yourCard} を出しました。全員の提出を待っています…`}
-            </p>
+          {webglFailed ? board2d : (
+            <HagetakaScene3D
+              phase={state.phase}
+              table={state.table}
+              hand={state.you.hand}
+              canBid={canBid}
+              yourCard={state.you.yourCard}
+              submitted={state.players.map((pl) => ({ seat: pl.seat, submitted: pl.submitted, isYou: pl.seat === mySeat }))}
+              lastBids={last ? last.bids.map((b) => ({ seat: b.seat, card: b.card, taker: last.taker === b.seat, isYou: b.seat === mySeat })) : null}
+              onBid={doBid}
+              onFail={() => setWebglFailed(true)}
+              fallback={board2d}
+            />
           )}
+          {!webglFailed && state.phase === "bidding" ? (
+            <p className="og-muted" style={{ textAlign: "center", margin: "6px 0 0" }}>
+              ラウンド {state.round + 1} / {state.totalRounds} ・ 場の得点カード合計 {prizeLabel(state.tableTotal)}
+              {state.you.submitted ? ` ・ あなたは ${state.you.yourCard} を出しました` : ""}
+            </p>
+          ) : null}
         </>
       )}
 

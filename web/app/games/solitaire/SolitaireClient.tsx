@@ -3,7 +3,12 @@
 // クリックで選択 → 移動先クリックで移動。ダブルクリックで組札へ自動移動。
 // ドラッグは使わず、スマホでもタップだけで完結する。端末内で完結し、サーバーへ送信しない。
 import Link from "next/link";
+import dynamic from "next/dynamic";
 import { useEffect, useRef, useState, type CSSProperties } from "react";
+
+// 3D シーンは three を含むため遅延読み込み（このページ専用チャンクに閉じる）。
+const SolitaireScene3D = dynamic(() => import("./SolitaireScene3D"), { ssr: false });
+import type { SolDragSource, SolDragTarget } from "./SolitaireScene3D";
 import {
   autoFinishSolitaire,
   autoMoveToFoundation,
@@ -46,6 +51,7 @@ function formatTime(totalSeconds: number): string {
 export default function SolitaireClient() {
   const { prefix } = useGamesNav();
   const [game, setGame] = useState<SolState>(() => createSolitaire(Date.now() % 2147483647));
+  const [webglFailed, setWebglFailed] = useState(false);
   const [history, setHistory] = useState<SolState[]>([]);
   const [selection, setSelection] = useState<Selection | null>(null);
   const [elapsed, setElapsed] = useState(0);
@@ -208,15 +214,53 @@ export default function SolitaireClient() {
     cursor: "pointer",
   };
 
+  const onWasteTap = () => {
+    sfxTap();
+    setSelection(selection?.kind === "waste" ? null : { kind: "waste" });
+  };
+
+  const onStockTap = () => {
+    sfxFlip();
+    attempt(drawFromStock(game), true);
+  };
+
+  // 3D シーンのドラッグ落下: 既存の移動関数だけで判定し、実際に動いたか返す。
+  const onDragDrop = (source: SolDragSource, target: SolDragTarget): boolean => {
+    let next: SolState = game;
+    if (target.kind === "tableau") {
+      if (source.kind === "waste") next = moveWasteToTableau(game, target.col);
+      else if (source.kind === "tableau") {
+        if (source.col !== target.col) {
+          next = moveTableauToTableau(game, source.col, source.index, target.col);
+        }
+      } else next = moveFoundationToTableau(game, source.pile, target.col);
+    } else {
+      if (source.kind === "waste") next = moveWasteToFoundation(game);
+      else if (source.kind === "tableau") {
+        const pile = game.tableau[source.col];
+        if (pile && source.index === pile.length - 1) {
+          next = moveTableauToFoundation(game, source.col);
+        }
+      }
+    }
+    if (next === game) return false;
+    attempt(next);
+    return true;
+  };
+
   // 盤面の左右スワイプ: 左=1手もどる、右=組札へ自動移動（仕上げ可能なら自動で仕上げる）。
+  const handleBoardSwipe = (dir: "left" | "right") => {
+    if (dir === "left") undo();
+    else if (dir === "right") {
+      if (canAutoFinish(game)) attempt(autoFinishSolitaire(game));
+      else autoAll();
+    }
+  };
+
   // ジェスチャは横方向だけのため touchAction は pan-y とし、縦スクロールを奪わない。
   const boardGesture = useGesture({
     onSwipe: (dir) => {
-      if (dir === "left") undo();
-      else if (dir === "right") {
-        if (canAutoFinish(game)) attempt(autoFinishSolitaire(game));
-        else autoAll();
-      }
+      if (dir === "left" || dir === "right") handleBoardSwipe(dir);
     },
   });
 
@@ -256,25 +300,8 @@ export default function SolitaireClient() {
     </div>
   );
 
-  return (
-    <>
-      <nav className="breadcrumbs" aria-label="パンくず">
-        <Link href={`${prefix}/games`}>ゲーム</Link>
-        <span> / </span>
-        <span>ソリティア</span>
-      </nav>
-      <div className="page-heading compact-heading">
-        <h1>ソリティア</h1>
-        <p className="muted">
-          クロンダイク形式の定番カードゲーム。カードをタップで選んで移動先をタップ。ダブルタップで組札へ送れます。盤面を左スワイプでもどる、右スワイプで組札へ自動移動。
-        </p>
-      </div>
-
-      <p className="classic-status" role="status">
-        {game.moves} 手 ・ 経過 {formatTime(elapsed)} ・ 組札 {foundationTotal(game)} / 52
-        {game.status === "won" ? ` ・ 全てそろいました！ ${game.moves} 手、${formatTime(elapsed)} でクリアです。` : ""}
-      </p>
-
+  // 2D 盤面（WebGL が使えない場合のフォールバックとしてそのまま使う）。
+  const board2d = (
       <div {...boardGesture} style={{ maxWidth: 580, margin: "0 auto", padding: "4px 2px", touchAction: "pan-y" }}>
         {/* 上段: ストック / 捨て札 / 組札 */}
         <div style={{ display: "flex", gap: "1.4vw", justifyContent: "space-between", marginBottom: 14 }}>
@@ -374,6 +401,46 @@ export default function SolitaireClient() {
           ))}
         </div>
       </div>
+  );
+
+  return (
+    <>
+      <nav className="breadcrumbs" aria-label="パンくず">
+        <Link href={`${prefix}/games`}>ゲーム</Link>
+        <span> / </span>
+        <span>ソリティア</span>
+      </nav>
+      <div className="page-heading compact-heading">
+        <h1>ソリティア</h1>
+        <p className="muted">
+          クロンダイク形式の定番カードゲーム。カードをタップで選んで移動先をタップ。ダブルタップで組札へ送れます。盤面を左スワイプでもどる、右スワイプで組札へ自動移動。
+        </p>
+      </div>
+
+      <p className="classic-status" role="status">
+        {game.moves} 手 ・ 経過 {formatTime(elapsed)} ・ 組札 {foundationTotal(game)} / 52 ・ 山札 {game.stock.length} 枚
+        {game.status === "won" ? ` ・ 全てそろいました！ ${game.moves} 手、${formatTime(elapsed)} でクリアです。` : ""}
+      </p>
+
+      {webglFailed ? board2d : (
+        <div style={{ maxWidth: 580, margin: "0 auto" }}>
+          <SolitaireScene3D
+            state={game}
+            selection={selection}
+            onStockTap={onStockTap}
+            onWasteTap={onWasteTap}
+            onWasteDoubleTap={() => attempt(tryMoveToFoundation(game, { kind: "waste" }))}
+            onTableauTap={onTableauCard}
+            onTableauDoubleTap={(col) => attempt(tryMoveToFoundation(game, { kind: "tableau", col }))}
+            onFoundationTap={onFoundation}
+            onEmptyTableauTap={moveSelectionToTableau}
+            onDragDrop={onDragDrop}
+            onBoardSwipe={handleBoardSwipe}
+            onFail={() => setWebglFailed(true)}
+            fallback={board2d}
+          />
+        </div>
+      )}
 
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "center", marginTop: 16 }}>
         <button type="button" style={btnStyle} onClick={restart}>

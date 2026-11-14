@@ -4,7 +4,11 @@
 // 操作だけを持つ。合法判定はモジュールの純粋ヘルパーをそのまま使い、
 // サーバー側の判定と一致させる（送信は { type: "place", piece, cells }）。
 import { useEffect, useMemo, useRef, useState } from "react";
+import dynamic from "next/dynamic";
 import OnlineShell from "../online/OnlineShell";
+
+// 3D シーンは three を含むため遅延読み込み（このページ専用チャンクに閉じる）。
+const TerritoryScene3D = dynamic(() => import("./TerritoryScene3D"), { ssr: false });
 import type { OnlineRoomApi, OnlineRoomView } from "../online/useOnlineRoom";
 import { playSe } from "@/lib/balku-sound";
 import { tappableProps, useGesture } from "@/lib/gesture";
@@ -48,6 +52,7 @@ function TerritoryBoard({ view, api }: { view: OnlineRoomView; api: OnlineRoomAp
   const [rotation, setRotation] = useState(0);
   const [flip, setFlip] = useState(false);
   const [anchor, setAnchor] = useState<number | null>(null);
+  const [webglFailed, setWebglFailed] = useState(false);
 
   const myTurn = !!state && !state.finished && state.turn === mySeat;
 
@@ -182,6 +187,75 @@ function TerritoryBoard({ view, api }: { view: OnlineRoomView; api: OnlineRoomAp
     setAnchor(index);
   };
 
+  // 2D 盤（WebGL が使えない場合のフォールバックとしてそのまま使う）。
+  const board2d = (
+    <div
+      role="grid"
+      aria-label="テリトリオ盤面（右スワイプで回転・左スワイプで反転・下スワイプでパス）"
+      {...boardGesture}
+      style={{
+        display: "grid",
+        gridTemplateColumns: `repeat(${TERRITORY_SIZE}, minmax(0, 1fr))`,
+        gap: 2,
+        width: "min(92vw, 420px)",
+        padding: 6,
+        borderRadius: 10,
+        background: "#ddd3bd",
+        border: "2px solid #c9b489",
+        touchAction: "none",
+      }}
+    >
+      {state.board.map((value, index) => {
+        const owner: 0 | 1 | -1 = value === 1 ? 0 : value === 2 ? 1 : -1;
+        const inPreview = previewSet.has(index);
+        const isLast = lastMoveSet.has(index);
+        const isCorner = index === 0 || index === TERRITORY_SIZE * TERRITORY_SIZE - 1;
+        const cornerSeat = index === 0 ? 0 : 1;
+        let background = "#fffdf6";
+        if (owner >= 0) background = SEAT_COLORS[owner];
+        else if (inPreview) background = previewLegal ? "#8fce6e" : "#e79a8f";
+        else if (isCorner) background = SEAT_BG[cornerSeat];
+        return (
+          <div
+            key={index}
+            role="gridcell"
+            tabIndex={myTurn && selectedPiece !== null ? 0 : -1}
+            aria-disabled={!myTurn || selectedPiece === null}
+            aria-label={`${Math.floor(index / TERRITORY_SIZE) + 1}行${(index % TERRITORY_SIZE) + 1}列${
+              owner >= 0
+                ? ` ${nameOf(owner)}の陣地`
+                : isCorner
+                  ? ` ${cornerSeat === 0 ? state.players[0]?.name ?? "" : state.players[1]?.name ?? ""}の開始角`
+                  : ""
+            }${inPreview ? " プレビュー中" : ""}`}
+            className={owner >= 0 && isLast ? "juice-pop" : undefined}
+            onClick={() => onCell(index)}
+            onKeyDown={(e) => {
+              if (e.key !== "Enter" && e.key !== " ") return;
+              e.preventDefault();
+              onCell(index);
+            }}
+            style={{
+              aspectRatio: "1",
+              border: isLast ? "2px solid #d9a41c" : "1px solid #d8c9a3",
+              borderRadius: 3,
+              background,
+              boxShadow: inPreview ? "inset 0 0 0 2px rgba(0,0,0,0.35)" : undefined,
+              cursor: myTurn && selectedPiece !== null ? "pointer" : "default",
+              touchAction: "manipulation",
+              padding: 0,
+              fontSize: 10,
+              color: SEAT_COLORS[cornerSeat],
+              lineHeight: 1,
+            }}
+          >
+            {owner < 0 && isCorner ? "☆" : ""}
+          </div>
+        );
+      })}
+    </div>
+  );
+
   return (
     <div className="og-game og-territory">
       <div className={`og-turn-banner${myTurn ? " og-turn-mine" : ""}${state.finished ? " juice-slide" : myTurn ? " juice-pulse" : ""}`} role="status" aria-live="polite">
@@ -234,71 +308,20 @@ function TerritoryBoard({ view, api }: { view: OnlineRoomView; api: OnlineRoomAp
 
       <div style={{ display: "flex", flexWrap: "wrap", gap: 16, alignItems: "flex-start" }}>
         {/* 盤面 */}
-        <div
-          role="grid"
-          aria-label="テリトリオ盤面（右スワイプで回転・左スワイプで反転・下スワイプでパス）"
-          {...boardGesture}
-          style={{
-            display: "grid",
-            gridTemplateColumns: `repeat(${TERRITORY_SIZE}, minmax(0, 1fr))`,
-            gap: 2,
-            width: "min(92vw, 420px)",
-            padding: 6,
-            borderRadius: 10,
-            background: "#ddd3bd",
-            border: "2px solid #c9b489",
-            touchAction: "none",
-          }}
-        >
-          {state.board.map((value, index) => {
-            const owner: 0 | 1 | -1 = value === 1 ? 0 : value === 2 ? 1 : -1;
-            const inPreview = previewSet.has(index);
-            const isLast = lastMoveSet.has(index);
-            const isCorner = index === 0 || index === TERRITORY_SIZE * TERRITORY_SIZE - 1;
-            const cornerSeat = index === 0 ? 0 : 1;
-            let background = "#fffdf6";
-            if (owner >= 0) background = SEAT_COLORS[owner];
-            else if (inPreview) background = previewLegal ? "#8fce6e" : "#e79a8f";
-            else if (isCorner) background = SEAT_BG[cornerSeat];
-            return (
-              <div
-                key={index}
-                role="gridcell"
-                tabIndex={myTurn && selectedPiece !== null ? 0 : -1}
-                aria-disabled={!myTurn || selectedPiece === null}
-                aria-label={`${Math.floor(index / TERRITORY_SIZE) + 1}行${(index % TERRITORY_SIZE) + 1}列${
-                  owner >= 0
-                    ? ` ${nameOf(owner)}の陣地`
-                    : isCorner
-                      ? ` ${cornerSeat === 0 ? state.players[0]?.name ?? "" : state.players[1]?.name ?? ""}の開始角`
-                      : ""
-                }${inPreview ? " プレビュー中" : ""}`}
-                className={owner >= 0 && isLast ? "juice-pop" : undefined}
-                onClick={() => onCell(index)}
-                onKeyDown={(e) => {
-                  if (e.key !== "Enter" && e.key !== " ") return;
-                  e.preventDefault();
-                  onCell(index);
-                }}
-                style={{
-                  aspectRatio: "1",
-                  border: isLast ? "2px solid #d9a41c" : "1px solid #d8c9a3",
-                  borderRadius: 3,
-                  background,
-                  boxShadow: inPreview ? "inset 0 0 0 2px rgba(0,0,0,0.35)" : undefined,
-                  cursor: myTurn && selectedPiece !== null ? "pointer" : "default",
-                  touchAction: "manipulation",
-                  padding: 0,
-                  fontSize: 10,
-                  color: SEAT_COLORS[cornerSeat],
-                  lineHeight: 1,
-                }}
-              >
-                {owner < 0 && isCorner ? "☆" : ""}
-              </div>
-            );
-          })}
-        </div>
+        {webglFailed ? board2d : (
+          <div {...boardGesture} style={{ touchAction: "none", width: "min(92vw, 420px)" }}>
+            <TerritoryScene3D
+              board={state.board}
+              size={TERRITORY_SIZE}
+              preview={previewSet}
+              previewLegal={previewLegal}
+              lastMove={lastMoveSet}
+              onCell={onCell}
+              onFail={() => setWebglFailed(true)}
+              fallback={board2d}
+            />
+          </div>
+        )}
 
         {/* ピースと操作 */}
         <div style={{ flex: "1 1 220px", minWidth: 220 }}>

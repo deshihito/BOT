@@ -3,7 +3,11 @@
 // view.state の契約: you/opponent（hand は場札で公開、stockCount のみ山札）、
 // centers は中央2山の一番上と枚数。着手は { type: "play", handIndex, center } か
 // { type: "connect" }（つなぎ札）。手番は無く、両者が同時に出せる。
+import dynamic from "next/dynamic";
 import { useEffect, useRef, useState } from "react";
+
+// 3D シーンは three を含むため遅延読み込み（このページ専用チャンクに閉じる）。
+const SpeedScene3D = dynamic(() => import("./SpeedScene3D"), { ssr: false });
 import { playSe } from "@/lib/balku-sound";
 import OnlineShell from "../online/OnlineShell";
 import type { OnlineRoomApi, OnlineRoomView } from "../online/useOnlineRoom";
@@ -67,6 +71,7 @@ function CardFace({ id, small }: { id: number; small?: boolean }) {
 function Board({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
   const state = view.state as SpeedState | null;
   const mySeat = view.player.seat;
+  const [webglFailed, setWebglFailed] = useState(false);
   const [selected, setSelected] = useState<number | null>(null);
   const finishRef = useRef<string | null>(null);
 
@@ -116,25 +121,16 @@ function Board({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
     setSelected(selected === handIndex ? null : handIndex);
   };
 
-  return (
-    <div className="og-board-wrap">
-      <div className={`og-turn-banner${state.finished ? " juice-slide" : " og-turn-mine"}`} role="status">
-        {state.finished
-          ? `勝者: ${winnerName ?? "—"}${state.winner === mySeat ? "" : ""}`
-          : "同時進行です。出せる札はどんどん出してください。"}
-      </div>
+  // 3D シーンの台札タップ（2D の中央の山ボタンと同じ意味: 選択中の場札が出せる山だけ反応する）。
+  const handleCenterTap = (center: number) => {
+    if (selected === null) return;
+    if (!selectedLegal.includes(center)) return;
+    playTo(selected, center);
+  };
 
-      <div className="og-score-row">
-        <span className="og-score">
-          {opponent.name}
-          {opponent.left ? "（退出）" : ""} ・ 残り {opponent.total} 枚（山札 {opponent.stockCount}）
-          {oppReady ? " ・ つなぎ準備OK" : ""}
-        </span>
-        <span className="og-score">
-          {you.name}（あなた） ・ 残り {you.total} 枚（山札 {you.stockCount}）
-        </span>
-      </div>
-
+  // 2D 盤面（相手の場札＋中央の山／あなたの場札。WebGL が使えない場合のフォールバック）。
+  const upper2d = (
+    <>
       <p className="og-muted" style={{ textAlign: "center", margin: "4px 0 2px" }}>
         相手の場札
       </p>
@@ -186,18 +182,11 @@ function Board({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
           );
         })}
       </div>
+    </>
+  );
 
-      {state.lastPlay && (
-        <p
-          key={`${state.lastPlay.card}-${state.centers[0].count + state.centers[1].count}`}
-          className="og-muted juice-slide"
-          style={{ textAlign: "center" }}
-        >
-          {state.lastPlay.seat === mySeat ? "あなた" : opponent.name} が {cardText(state.lastPlay.card).label}{" "}
-          を出しました
-        </p>
-      )}
-
+  const hand2d = (
+    <>
       <p className="og-muted" style={{ textAlign: "center", margin: "12px 0 2px" }}>
         あなたの場札（出せる札は枠が光ります）
       </p>
@@ -236,6 +225,69 @@ function Board({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
         })}
         {you.hand.length === 0 && <span className="og-muted">場札なし</span>}
       </div>
+    </>
+  );
+
+  return (
+    <div className="og-board-wrap">
+      <div className={`og-turn-banner${state.finished ? " juice-slide" : " og-turn-mine"}`} role="status">
+        {state.finished
+          ? `勝者: ${winnerName ?? "—"}${state.winner === mySeat ? "" : ""}`
+          : "同時進行です。出せる札はどんどん出してください。"}
+      </div>
+
+      <div className="og-score-row">
+        <span className="og-score">
+          {opponent.name}
+          {opponent.left ? "（退出）" : ""} ・ 残り {opponent.total} 枚（山札 {opponent.stockCount}）
+          {oppReady ? " ・ つなぎ準備OK" : ""}
+        </span>
+        <span className="og-score">
+          {you.name}（あなた） ・ 残り {you.total} 枚（山札 {you.stockCount}）
+        </span>
+      </div>
+
+      {webglFailed ? (
+        upper2d
+      ) : (
+        <SpeedScene3D
+          myHand={you.hand}
+          handLegal={you.hand.map((_, i) => legalCentersFor(i))}
+          selected={selected}
+          centers={state.centers}
+          opponentField={opponent.hand}
+          opponentStockCount={opponent.stockCount}
+          myStockCount={you.stockCount}
+          lastPlay={
+            state.lastPlay
+              ? { isMine: state.lastPlay.seat === mySeat, center: state.lastPlay.center, card: state.lastPlay.card }
+              : null
+          }
+          finished={state.finished}
+          onHandTap={onHandCard}
+          onCenterTap={handleCenterTap}
+          onFail={() => setWebglFailed(true)}
+          fallback={
+            <>
+              {upper2d}
+              {hand2d}
+            </>
+          }
+        />
+      )}
+
+      {state.lastPlay && (
+        <p
+          key={`${state.lastPlay.card}-${state.centers[0].count + state.centers[1].count}`}
+          className="og-muted juice-slide"
+          style={{ textAlign: "center" }}
+        >
+          {state.lastPlay.seat === mySeat ? "あなた" : opponent.name} が {cardText(state.lastPlay.card).label}{" "}
+          を出しました
+        </p>
+      )}
+
+      {webglFailed ? hand2d : null}
 
       <div style={{ display: "flex", justifyContent: "center", marginTop: 14 }}>
         {state.finished ? null : iAmReady ? (

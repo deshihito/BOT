@@ -2,7 +2,10 @@
 // ビンゴ。ロジックは lib/bingo.ts（5x5カード・抽選1〜75・ライン判定）。
 // CPU 3枚と同時に進行し、先にビンゴした方が勝ち。端末内で完結し、サーバーへ送信しない。
 import Link from "next/link";
+import dynamic from "next/dynamic";
 import { useEffect, useRef, useState } from "react";
+
+const BingoScene3D = dynamic(() => import("./BingoScene3D"), { ssr: false });
 import { sfxLose, sfxSpawn, sfxTap, sfxWin } from "@/lib/sfx";
 import { EndScreen } from "../GameJuice";
 import {
@@ -35,6 +38,7 @@ export default function BingoClient() {
   const { prefix } = useGamesNav();
   const [state, setState] = useState<BingoState>(() => createBingoGame(Date.now() % 2147483647));
   const [auto, setAuto] = useState(false);
+  const [webglFailed, setWebglFailed] = useState(false);
 
   useEffect(() => {
     if (!auto || state.phase !== "playing") return;
@@ -66,6 +70,11 @@ export default function BingoClient() {
     setState(createBingoGame(Date.now() % 2147483647));
   };
 
+  const handleDraw = () => {
+    sfxTap();
+    setState((s) => drawNext(s));
+  };
+
   const playerStatus = cardStatus(state.playerCard, state.drawn);
   const lineCellSet = new Set<number>();
   for (const line of BINGO_LINES) {
@@ -75,6 +84,45 @@ export default function BingoClient() {
   }
   const lastDrawn = state.drawn[state.drawn.length - 1];
   const playing = state.phase === "playing";
+
+  const board2d = (
+    <div
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: 14,
+        padding: "14px 18px",
+        borderRadius: 12,
+        background: "#1d2735",
+        color: "#dfe7ef",
+        maxWidth: 520,
+      }}
+      aria-label="抽選機（2D表示）"
+    >
+      <span
+        style={{
+          width: 64,
+          height: 64,
+          borderRadius: 999,
+          display: "inline-flex",
+          alignItems: "center",
+          justifyContent: "center",
+          fontSize: 20,
+          fontWeight: 800,
+          background: "#f2b33d",
+          color: "#1c2333",
+          flexShrink: 0,
+        }}
+      >
+        {lastDrawn !== undefined ? `${columnLetter(lastDrawn)}-${lastDrawn}` : "—"}
+      </span>
+      <span style={{ fontSize: 14 }}>
+        {lastDrawn !== undefined
+          ? `最新の数字は ${columnLetter(lastDrawn)}-${lastDrawn} です。下の抽選履歴でも確認できます。`
+          : "「次の数字を引く」で抽選が始まります。"}
+      </span>
+    </div>
+  );
 
   return (
     <>
@@ -103,14 +151,7 @@ export default function BingoClient() {
       <div className="classic-controls" style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 16 }}>
         {playing ? (
           <>
-            <button
-              type="button"
-              style={btnStyle}
-              onClick={() => {
-                sfxTap();
-                setState((s) => drawNext(s));
-              }}
-            >
+            <button type="button" style={btnStyle} onClick={handleDraw}>
               次の数字を引く
             </button>
             <button
@@ -127,6 +168,20 @@ export default function BingoClient() {
           </>
         ) : null}
       </div>
+
+      {webglFailed ? (
+        <div style={{ marginBottom: 16 }}>{board2d}</div>
+      ) : (
+        <div style={{ maxWidth: 520, marginBottom: 16 }}>
+          <BingoScene3D
+            drawn={state.drawn}
+            canDraw={playing}
+            onDraw={handleDraw}
+            onFail={() => setWebglFailed(true)}
+            fallback={board2d}
+          />
+        </div>
+      )}
 
       {!playing && (
         <EndScreen

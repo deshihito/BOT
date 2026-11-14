@@ -3,7 +3,10 @@
 // 音は WebAudio で色ごとに変える。音が出せない環境でも色の点滅だけで成立させる。
 // 端末内で完結し、ベストラウンドは localStorage の ago-simon-best に保存する。
 import Link from "next/link";
+import dynamic from "next/dynamic";
 import { useCallback, useEffect, useRef, useState, type CSSProperties } from "react";
+
+const SimonScene3D = dynamic(() => import("./SimonScene3D"), { ssr: false });
 import { EndScreen } from "../GameJuice";
 import { useGamesNav } from "../GamesShell";
 
@@ -35,6 +38,7 @@ function randomPad(): number {
 export default function SimonClient() {
   const { prefix } = useGamesNav();
   const [phase, setPhase] = useState<Phase>("idle");
+  const [webglFailed, setWebglFailed] = useState(false);
   const [sequence, setSequence] = useState<number[]>([]);
   const [lit, setLit] = useState<number | null>(null);
   const [pressed, setPressed] = useState<number | null>(null);
@@ -245,22 +249,8 @@ export default function SimonClient() {
     };
   };
 
-  return (
+  const board2d = (
     <>
-      <nav className="breadcrumbs" aria-label="パンくず">
-        <Link href={`${prefix}/games`}>ゲーム</Link>
-        <span> / </span>
-        <span>サイモン</span>
-      </nav>
-      <div className="page-heading compact-heading">
-        <h1>サイモン</h1>
-        <p className="muted">光る色と音の順番を覚えて、同じ順番で押していく記憶ゲーム。ラウンドごとに1つずつ長くなります。</p>
-      </div>
-
-      <p className="classic-status" role="status">
-        ラウンド {round === 0 ? "—" : round} ・ ベスト {best} ラウンド ・ {message}
-      </p>
-
       <div
         className={phase === "gameover" ? "juice-shake" : undefined}
         style={{
@@ -291,6 +281,36 @@ export default function SimonClient() {
         ))}
       </div>
 
+    </>
+  );
+
+  return (
+    <>
+      <nav className="breadcrumbs" aria-label="パンくず">
+        <Link href={`${prefix}/games`}>ゲーム</Link>
+        <span> / </span>
+        <span>サイモン</span>
+      </nav>
+      <div className="page-heading compact-heading">
+        <h1>サイモン</h1>
+        <p className="muted">光る色と音の順番を覚えて、同じ順番で押していく記憶ゲーム。ラウンドごとに1つずつ長くなります。</p>
+      </div>
+
+      <p className="classic-status" role="status">
+        ラウンド {round === 0 ? "—" : round} ・ ベスト {best} ラウンド ・ {message}
+      </p>
+
+{webglFailed ? board2d : (
+        <div style={{ maxWidth: 420, margin: "0 auto" }}>
+          <SimonScene3D
+            lit={lit}
+            pressed={pressed}
+            onPad={onPad}
+            onFail={() => setWebglFailed(true)}
+            fallback={board2d}
+          />
+        </div>
+      )}
       <div className="classic-controls" style={{ justifyContent: "center" }}>
         <button type="button" className="classic-btn classic-btn-active" onClick={start}>
           {phase === "idle" ? "スタート" : "もう一度"}

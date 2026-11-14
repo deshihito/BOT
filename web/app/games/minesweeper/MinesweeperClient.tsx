@@ -2,7 +2,11 @@
 // マインスイーパー。ロジックは lib/minesweeper.ts（初手は必ず安全）。
 // タップで開く／旗モードか右クリックで旗を立てる。端末内で完結し、サーバーへ送信しない。
 import Link from "next/link";
+import dynamic from "next/dynamic";
 import { useEffect, useRef, useState } from "react";
+
+// 3D シーンは three を含むため遅延読み込み（このページ専用チャンクに閉じる）。
+const MinesweeperScene3D = dynamic(() => import("./MinesweeperScene3D"), { ssr: false });
 import {
   chordCell,
   createMsGame,
@@ -53,6 +57,7 @@ function FlagIcon() {
 
 export default function MinesweeperClient() {
   const { prefix } = useGamesNav();
+  const [webglFailed, setWebglFailed] = useState(false);
   const [levelKey, setLevelKey] = useState<LevelKey>("easy");
   const [state, setState] = useState<MsState>(() => newGame("easy"));
   const [flagMode, setFlagMode] = useState(false);
@@ -132,6 +137,59 @@ export default function MinesweeperClient() {
           ? "マスを選んでスタート。最初のマスは必ず安全です。"
           : "地雷を避けてマスを開けていこう。数字は周囲の地雷の数です。";
 
+  // 2D 盤（WebGL が使えない場合のフォールバックとしてそのまま使う）。
+  const board2d = (
+    <div
+      className="ms-board"
+      style={{ gridTemplateColumns: `repeat(${state.cols}, minmax(0, 1fr))` }}
+      role="grid"
+      aria-label="マインスイーパーの盤"
+    >
+      {state.cells.map((cell, i) => {
+        const classes = [
+          "ms-cell",
+          cell.open ? "ms-cell-open" : "",
+          cell.open && cell.mine ? "ms-cell-mine" : "",
+          state.exploded === i ? "ms-cell-exploded" : "",
+          cell.open ? "juice-flip" : "",
+          state.exploded === i ? "juice-shake" : "",
+          !cell.open && cell.flagged ? "juice-pop" : "",
+        ]
+          .filter(Boolean)
+          .join(" ");
+        return (
+          <div
+            key={i}
+            role="gridcell"
+            tabIndex={0}
+            className={classes}
+            aria-label={
+              cell.open
+                ? cell.mine
+                  ? "地雷"
+                  : `周囲の地雷 ${cell.count}`
+                : cell.flagged
+                  ? "旗"
+                  : "閉じたマス"
+            }
+            onClick={() => onCell(i)}
+            onKeyDown={(e) => {
+              if (e.key !== "Enter" && e.key !== " ") return;
+              e.preventDefault();
+              onCell(i);
+            }}
+            onContextMenu={(e) => {
+              e.preventDefault();
+              toggleFlagWithSound(i);
+            }}
+          >
+            {cell.open ? (cell.mine ? <MineIcon /> : cell.count > 0 ? cell.count : "") : cell.flagged ? <FlagIcon /> : ""}
+          </div>
+        );
+      })}
+    </div>
+  );
+
   return (
     <>
       <nav className="breadcrumbs" aria-label="パンくず">
@@ -175,55 +233,21 @@ export default function MinesweeperClient() {
         {best !== null ? ` ・ ベスト ${best} 秒` : ""} ・ {statusText}
       </p>
 
-      <div
-        className="ms-board"
-        style={{ gridTemplateColumns: `repeat(${state.cols}, minmax(0, 1fr))` }}
-        role="grid"
-        aria-label="マインスイーパーの盤"
-      >
-        {state.cells.map((cell, i) => {
-          const classes = [
-            "ms-cell",
-            cell.open ? "ms-cell-open" : "",
-            cell.open && cell.mine ? "ms-cell-mine" : "",
-            state.exploded === i ? "ms-cell-exploded" : "",
-            cell.open ? "juice-flip" : "",
-            state.exploded === i ? "juice-shake" : "",
-            !cell.open && cell.flagged ? "juice-pop" : "",
-          ]
-            .filter(Boolean)
-            .join(" ");
-          return (
-            <div
-              key={i}
-              role="gridcell"
-              tabIndex={0}
-              className={classes}
-              aria-label={
-                cell.open
-                  ? cell.mine
-                    ? "地雷"
-                    : `周囲の地雷 ${cell.count}`
-                  : cell.flagged
-                    ? "旗"
-                    : "閉じたマス"
-              }
-              onClick={() => onCell(i)}
-              onKeyDown={(e) => {
-                if (e.key !== "Enter" && e.key !== " ") return;
-                e.preventDefault();
-                onCell(i);
-              }}
-              onContextMenu={(e) => {
-                e.preventDefault();
-                toggleFlagWithSound(i);
-              }}
-            >
-              {cell.open ? (cell.mine ? <MineIcon /> : cell.count > 0 ? cell.count : "") : cell.flagged ? <FlagIcon /> : ""}
-            </div>
-          );
-        })}
-      </div>
+      {webglFailed ? board2d : (
+        <div style={{ width: "100%", maxWidth: 640, margin: "0 auto" }}>
+          <MinesweeperScene3D
+            cells={state.cells}
+            rows={state.rows}
+            cols={state.cols}
+            exploded={state.exploded}
+            status={state.status}
+            onCell={onCell}
+            onToggleFlag={toggleFlagWithSound}
+            onFail={() => setWebglFailed(true)}
+            fallback={board2d}
+          />
+        </div>
+      )}
 
       {state.status === "won" && (
         <div style={{ marginTop: 14 }}>

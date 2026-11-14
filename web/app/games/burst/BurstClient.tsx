@@ -6,8 +6,12 @@
 //   開示と配置は lastSteps / history で確認できる
 //   phase finished: standings が付く
 // 提出は { type: "play", card }、列の選択は { type: "takeRow", row }。
+import dynamic from "next/dynamic";
 import { useEffect, useRef, useState } from "react";
 import { playSe } from "@/lib/balku-sound";
+
+// 3D シーンは three を含むため遅延読み込み（このページ専用チャンクに閉じる）。
+const BurstScene3D = dynamic(() => import("./BurstScene3D"), { ssr: false });
 import OnlineShell from "../online/OnlineShell";
 import type { OnlineRoomApi, OnlineRoomView } from "../online/useOnlineRoom";
 
@@ -55,6 +59,7 @@ type BurstView = {
 function Board({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
   const state = view.state as BurstView | null;
   const mySeat = view.player.seat;
+  const [webglFailed, setWebglFailed] = useState(false);
   const [selected, setSelected] = useState<number | null>(null);
   const [now, setNow] = useState(() => Date.now());
   const finishRef = useRef<string | null>(null);
@@ -104,6 +109,104 @@ function Board({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
   const remainingMs = deadline !== null ? Math.max(0, deadline - now) : null;
   const remainingRatio = remainingMs !== null ? remainingMs / BU_SELECT_LIMIT_MS : 0;
 
+  // 3D シーンからの操作（既存ハンドラと同じ意味・同じ move に接続する）。
+  const handleCardTap = (card: number) => {
+    if (!canPlay) return;
+    playSe("select");
+    setSelected(card);
+  };
+  const handleRowTap = (row: number) => {
+    if (!(state.phase === "choosing" && state.you.choosing)) return;
+    playSe("play");
+    void api.move({ type: "takeRow", row });
+  };
+
+  // 2D 盤面（場の列＋手札選択。WebGL が使えない場合のフォールバック）。
+  const board2d = (
+    <>
+      <div style={{ display: "grid", gap: 6, margin: "8px 0" }} role="group" aria-label="場の列">
+        {state.rows.map((row, i) => {
+          const chooseMode = state.you.choosing && state.phase === "choosing";
+          return (
+            <div
+              key={i}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 6,
+                flexWrap: "wrap",
+                padding: "6px 8px",
+                border: "1px solid var(--line, #ddd)",
+                borderRadius: 8,
+                background: row.count >= 5 ? "#fdf0ee" : undefined,
+              }}
+            >
+              <span style={{ fontWeight: 700, minWidth: 44 }}>列{i + 1}</span>
+              {row.cards.map((card, j) => (
+                <span
+                  key={`${state.round}-${j}-${card}`}
+                  className="juice-pop"
+                  style={{
+                    display: "inline-block",
+                    minWidth: 36,
+                    textAlign: "center",
+                    padding: "5px 4px",
+                    borderRadius: 6,
+                    background: j === row.cards.length - 1 ? "#3f7fbf" : "#e8eef5",
+                    color: j === row.cards.length - 1 ? "#fff" : undefined,
+                    fontWeight: j === row.cards.length - 1 ? 700 : 400,
+                  }}
+                >
+                  {card}
+                </span>
+              ))}
+              <span className="og-muted">
+                {row.count}枚 ・ 引き取ると {row.penalty}点
+              </span>
+              {chooseMode && (
+                <button
+                  type="button"
+                  className="og-btn og-btn-primary"
+                  style={{ minHeight: 44 }}
+                  onClick={() => {
+                    playSe("play");
+                    void api.move({ type: "takeRow", row: i });
+                  }}
+                >
+                  この列を取る
+                </button>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      {canPlay ? (
+        <div
+          role="group"
+          aria-label="出すカードを選ぶ"
+          style={{ display: "flex", flexWrap: "wrap", gap: 6, justifyContent: "center", margin: "10px 0" }}
+        >
+          {state.you.hand.map((card) => (
+            <button
+              key={card}
+              type="button"
+              aria-pressed={selected === card}
+              className={selected === card ? "og-btn og-btn-primary" : "og-btn"}
+              style={{ minWidth: 48, minHeight: 52, fontWeight: 700, fontSize: 16 }}
+              onClick={() => {
+                playSe("select");
+                setSelected(card);
+              }}
+            >
+              {card}
+            </button>
+          ))}
+        </div>
+      ) : null}
+    </>
+  );
+
   return (
     <div style={{ maxWidth: 680, margin: "0 auto" }}>
       <div className="og-score-row" role="status">
@@ -145,108 +248,46 @@ function Board({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
             </div>
           )}
 
-          <div style={{ display: "grid", gap: 6, margin: "8px 0" }} role="group" aria-label="場の列">
-            {state.rows.map((row, i) => {
-              const chooseMode = state.you.choosing && state.phase === "choosing";
-              return (
-                <div
-                  key={i}
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 6,
-                    flexWrap: "wrap",
-                    padding: "6px 8px",
-                    border: "1px solid var(--line, #ddd)",
-                    borderRadius: 8,
-                    background: row.count >= 5 ? "#fdf0ee" : undefined,
-                  }}
-                >
-                  <span style={{ fontWeight: 700, minWidth: 44 }}>列{i + 1}</span>
-                  {row.cards.map((card, j) => (
-                    <span
-                      key={`${state.round}-${j}-${card}`}
-                      className="juice-pop"
-                      style={{
-                        display: "inline-block",
-                        minWidth: 36,
-                        textAlign: "center",
-                        padding: "5px 4px",
-                        borderRadius: 6,
-                        background: j === row.cards.length - 1 ? "#3f7fbf" : "#e8eef5",
-                        color: j === row.cards.length - 1 ? "#fff" : undefined,
-                        fontWeight: j === row.cards.length - 1 ? 700 : 400,
-                      }}
-                    >
-                      {card}
-                    </span>
-                  ))}
-                  <span className="og-muted">
-                    {row.count}枚 ・ 引き取ると {row.penalty}点
-                  </span>
-                  {chooseMode && (
-                    <button
-                      type="button"
-                      className="og-btn og-btn-primary"
-                      style={{ minHeight: 44 }}
-                      onClick={() => {
-                        playSe("play");
-                        void api.move({ type: "takeRow", row: i });
-                      }}
-                    >
-                      この列を取る
-                    </button>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-
           {state.you.choosing ? (
             <p className="juice-pulse" style={{ textAlign: "center", fontWeight: 700, margin: "10px 0" }} role="alert">
               あなたの {state.you.pendingCard} はどの列にも置けません。取る列を選んでください（時間切れでペナルティ最小の列を自動で取ります）。
             </p>
-          ) : canPlay ? (
-            <>
-              <div
-                role="group"
-                aria-label="出すカードを選ぶ"
-                style={{ display: "flex", flexWrap: "wrap", gap: 6, justifyContent: "center", margin: "10px 0" }}
+          ) : null}
+
+          {webglFailed ? board2d : (
+            <BurstScene3D
+              rows={state.rows}
+              myHand={state.you.hand}
+              selected={selected}
+              canPlay={canPlay}
+              choosing={state.you.choosing}
+              pendingCard={state.you.pendingCard}
+              phase={state.phase}
+              onCardTap={handleCardTap}
+              onRowTap={handleRowTap}
+              onFail={() => setWebglFailed(true)}
+              fallback={board2d}
+            />
+          )}
+
+          {canPlay ? (
+            <div style={{ textAlign: "center", marginTop: 10 }}>
+              <button
+                type="button"
+                className="og-btn og-btn-primary"
+                style={{ minWidth: 160, minHeight: 48 }}
+                disabled={selected === null}
+                onClick={() => {
+                  if (selected !== null) {
+                    playSe("play");
+                    void api.move({ type: "play", card: selected });
+                  }
+                }}
               >
-                {state.you.hand.map((card) => (
-                  <button
-                    key={card}
-                    type="button"
-                    aria-pressed={selected === card}
-                    className={selected === card ? "og-btn og-btn-primary" : "og-btn"}
-                    style={{ minWidth: 48, minHeight: 52, fontWeight: 700, fontSize: 16 }}
-                    onClick={() => {
-                      playSe("select");
-                      setSelected(card);
-                    }}
-                  >
-                    {card}
-                  </button>
-                ))}
-              </div>
-              <div style={{ textAlign: "center" }}>
-                <button
-                  type="button"
-                  className="og-btn og-btn-primary"
-                  style={{ minWidth: 160, minHeight: 48 }}
-                  disabled={selected === null}
-                  onClick={() => {
-                    if (selected !== null) {
-                      playSe("play");
-                      void api.move({ type: "play", card: selected });
-                    }
-                  }}
-                >
-                  {selected !== null ? `${selected} を出す` : "カードを選んでください"}
-                </button>
-              </div>
-            </>
-          ) : (
+                {selected !== null ? `${selected} を出す` : "カードを選んでください"}
+              </button>
+            </div>
+          ) : state.you.choosing ? null : (
             <p style={{ textAlign: "center", margin: "10px 0" }}>
               {state.you.left
                 ? "退出したため、この対戦には参加していません。"

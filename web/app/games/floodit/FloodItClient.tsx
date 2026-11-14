@@ -3,7 +3,11 @@
 // 左上の領域と同じ色を広げていき、制限手数以内に盤全体を1色にする。
 // 制限手数は生成時の貪欲解 + 8手なので、必ず解ける。端末内で完結する。
 import Link from "next/link";
+import dynamic from "next/dynamic";
 import { useEffect, useMemo, useRef, useState } from "react";
+
+// 3D シーンは three を含むため遅延読み込み（このページ専用チャンクに閉じる）。
+const FloodItScene3D = dynamic(() => import("./FloodItScene3D"), { ssr: false });
 import {
   applyFloodMove,
   createFloodGame,
@@ -27,6 +31,7 @@ const BEST_KEY = "ago-floodit-best";
 
 export default function FloodItClient() {
   const { prefix } = useGamesNav();
+  const [webglFailed, setWebglFailed] = useState(false);
   const [state, setState] = useState<FloodState>(() => createFloodGame(Date.now() % 2147483647));
   const [best, setBest] = useState<number | null>(null);
   const [resultNewBest, setResultNewBest] = useState(false);
@@ -82,6 +87,19 @@ export default function FloodItClient() {
   const regionColor = state.cells[0];
   const remaining = state.maxMoves - state.movesUsed;
 
+  // 色を選ぶ現行ハンドラ。DOM パレットと 3D 盤タップの両方がここへ接続する。
+  const pickColor = (color: number) => {
+    if (state.status !== "playing" || color === regionColor) return;
+    sfxPlace();
+    setState((s) => applyFloodMove(s, color));
+  };
+
+  // 3D 盤のタップ = そのマスの色を選ぶ（判定は applyFloodMove が担う）。
+  const handleCellTap = (index: number) => {
+    const color = state.cells[index];
+    if (color !== undefined) pickColor(color);
+  };
+
   const statusText =
     state.status === "won"
       ? `全面そろえた！ ${state.movesUsed} 手でクリアです。`
@@ -89,29 +107,8 @@ export default function FloodItClient() {
         ? "手数を使い切りました。もう一度挑戦してみよう。"
         : "左上の領域とつながったマスが、選んだ色に広がります。";
 
-  return (
-    <>
-      <nav className="breadcrumbs" aria-label="パンくず">
-        <Link href={`${prefix}/games`}>ゲーム</Link>
-        <span> / </span>
-        <span>フラッドフィル</span>
-      </nav>
-      <div className="page-heading compact-heading">
-        <h1>フラッドフィル</h1>
-        <p className="muted">左上の領域をタップした色に染め替えながら広げていくパズル。</p>
-      </div>
-
-      <div className="classic-controls">
-        <button type="button" className="classic-btn" onClick={restart}>
-          もう一度
-        </button>
-      </div>
-
-      <p className="classic-status" role="status">
-        手数 {state.movesUsed} / {state.maxMoves}（残り {Math.max(0, remaining)}）・ 目安 {state.parMoves} 手
-        {best !== null ? ` ・ ベスト ${best} 手` : ""} ・ {statusText}
-      </p>
-
+  // 2D 盤（WebGL が使えない場合のフォールバックとしてそのまま使う）。
+  const board2d = (
       <div
         style={{
           display: "grid",
@@ -136,6 +133,43 @@ export default function FloodItClient() {
           />
         ))}
       </div>
+  );
+
+  return (
+    <>
+      <nav className="breadcrumbs" aria-label="パンくず">
+        <Link href={`${prefix}/games`}>ゲーム</Link>
+        <span> / </span>
+        <span>フラッドフィル</span>
+      </nav>
+      <div className="page-heading compact-heading">
+        <h1>フラッドフィル</h1>
+        <p className="muted">左上の領域をタップした色に染め替えながら広げていくパズル。</p>
+      </div>
+
+      <div className="classic-controls">
+        <button type="button" className="classic-btn" onClick={restart}>
+          もう一度
+        </button>
+      </div>
+
+      <p className="classic-status" role="status">
+        手数 {state.movesUsed} / {state.maxMoves}（残り {Math.max(0, remaining)}）・ 目安 {state.parMoves} 手
+        {best !== null ? ` ・ ベスト ${best} 手` : ""} ・ {statusText}
+      </p>
+
+      {webglFailed ? board2d : (
+        <div style={{ width: "100%", maxWidth: 480, margin: "0 auto" }}>
+          <FloodItScene3D
+            cells={state.cells}
+            size={state.size}
+            region={region}
+            onCell={handleCellTap}
+            onFail={() => setWebglFailed(true)}
+            fallback={board2d}
+          />
+        </div>
+      )}
 
       <div
         style={{ display: "flex", gap: 8, justifyContent: "center", marginTop: 16, flexWrap: "wrap" }}
@@ -151,10 +185,7 @@ export default function FloodItClient() {
               aria-label={def.name}
               aria-pressed={isCurrent}
               disabled={state.status !== "playing" || isCurrent}
-              onClick={() => {
-                sfxPlace();
-                setState((s) => applyFloodMove(s, color));
-              }}
+              onClick={() => pickColor(color)}
               style={{
                 width: 52,
                 height: 52,
@@ -170,7 +201,7 @@ export default function FloodItClient() {
         })}
       </div>
       <p className="og-muted" style={{ textAlign: "center" }}>
-        白い枠が今つながっている領域です。隣の色を取り込むように選ぶのがコツ。
+        つながっている領域は、2Dでは白い枠、3Dでは高いタイルで示されます。隣の色を取り込むように選ぶのがコツ。
       </p>
 
       {state.status !== "playing" && (

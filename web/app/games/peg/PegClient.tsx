@@ -2,7 +2,11 @@
 // ペグソリティア（英式33穴）。ロジックは lib/peg.ts。
 // ペグを選ぶと移動できる空き穴が光るので、そこを押して飛び越える。端末内で完結。
 import Link from "next/link";
+import dynamic from "next/dynamic";
 import { useEffect, useRef, useState } from "react";
+
+// 3D シーンは three を含むため遅延読み込み（このページ専用チャンクに閉じる）。
+const PegScene3D = dynamic(() => import("./PegScene3D"), { ssr: false });
 import {
   applyPegMove,
   createPegGame,
@@ -19,6 +23,7 @@ import { useGamesNav } from "../GamesShell";
 
 export default function PegClient() {
   const { prefix } = useGamesNav();
+  const [webglFailed, setWebglFailed] = useState(false);
   const [state, setState] = useState<PegState>(() => createPegGame());
   const [selected, setSelected] = useState<number | null>(null);
   const [history, setHistory] = useState<PegState[]>([]);
@@ -84,24 +89,8 @@ export default function PegClient() {
           ? "光っている空き穴を押すと、その方向へ飛び越えます。"
           : "ペグを押して選んでください。隣のペグを飛び越えて空き穴へ進めます。";
 
-  return (
-    <>
-      <nav className="breadcrumbs" aria-label="パンくず">
-        <Link href={`${prefix}/games`}>ゲーム</Link>
-        <span> / </span>
-        <span>ペグソリティア</span>
-      </nav>
-      <div className="page-heading compact-heading">
-        <h1>ペグソリティア</h1>
-        <p className="muted">
-          残りペグの少なさを競う一人パズル。最後まで動けなくても、残した数で評価が出ます。
-        </p>
-      </div>
-
-      <p className="classic-status" role="status">
-        残りペグ {remaining} 個 ・ {state.moves} 手 ・ {statusText}
-      </p>
-
+  // 2D 盤（WebGL が使えない場合のフォールバックとしてそのまま使う）。
+  const board2d = (
       <div
         role="grid"
         aria-label="ペグソリティアの盤"
@@ -187,6 +176,39 @@ export default function PegClient() {
           );
         })}
       </div>
+  );
+
+  return (
+    <>
+      <nav className="breadcrumbs" aria-label="パンくず">
+        <Link href={`${prefix}/games`}>ゲーム</Link>
+        <span> / </span>
+        <span>ペグソリティア</span>
+      </nav>
+      <div className="page-heading compact-heading">
+        <h1>ペグソリティア</h1>
+        <p className="muted">
+          残りペグの少なさを競う一人パズル。最後まで動けなくても、残した数で評価が出ます。
+        </p>
+      </div>
+
+      <p className="classic-status" role="status">
+        残りペグ {remaining} 個 ・ {state.moves} 手 ・ {statusText}
+      </p>
+
+      {webglFailed ? board2d : (
+        <div style={{ width: "min(92vw, 440px)", margin: "0 auto" }}>
+          <PegScene3D
+            cells={state.cells}
+            selected={selected}
+            destinations={destinations.map((m) => m.to)}
+            status={state.status}
+            onCell={onCell}
+            onFail={() => setWebglFailed(true)}
+            fallback={board2d}
+          />
+        </div>
+      )}
 
       <div className="classic-controls">
         <button type="button" className="classic-btn" onClick={undo} disabled={history.length === 0}>

@@ -5,7 +5,11 @@
 //   phase reveal: players[].hand / won が開示される
 //   phase finished: standings が付く
 // 提出は { type: "throw", hand }。制限時間はサーバー側の tick で締め切られる。
+import dynamic from "next/dynamic";
 import { useEffect, useRef, useState } from "react";
+
+// 3D シーンは three を含むため遅延読み込み（このページ専用チャンクに閉じる）。
+const JankenScene3D = dynamic(() => import("./JankenScene3D"), { ssr: false });
 import { playSe } from "@/lib/balku-sound";
 import OnlineShell from "../online/OnlineShell";
 import type { OnlineRoomApi, OnlineRoomView } from "../online/useOnlineRoom";
@@ -43,6 +47,7 @@ type JankenView = {
 };
 
 function Board({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
+  const [webglFailed, setWebglFailed] = useState(false);
   const state = view.state as JankenView | null;
   const mySeat = view.player.seat;
   const [now, setNow] = useState(() => Date.now());
@@ -77,6 +82,61 @@ function Board({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
   const remainingRatio = remainingMs !== null ? remainingMs / JK_TIME_LIMIT_MS : 0;
   const canThrow = state.phase === "choosing" && !state.you.submitted && !state.you.left;
   const lastWinners = state.phase !== "choosing" ? state.players.filter((p) => p.won) : [];
+
+  // 手の選択（2D。WebGL が使えない場合のフォールバックとしてそのまま使う）。
+  const board2d = (
+        <div style={{ display: "flex", gap: 10, justifyContent: "center", margin: "10px 0 6px" }}>
+          {(Object.keys(HAND_LABEL) as JankenHand[]).map((hand) => {
+            const mine = state.you.yourHand === hand;
+            return (
+              <div
+                key={hand}
+                role="button"
+                tabIndex={canThrow ? 0 : -1}
+                aria-disabled={!canThrow}
+                aria-label={`手: ${HAND_LABEL[hand]}`}
+                onClick={() => {
+                  if (!canThrow) return;
+                  playSe("play");
+                  void api.move({ type: "throw", hand });
+                }}
+                onKeyDown={(e) => {
+                  if (!canThrow || (e.key !== "Enter" && e.key !== " ")) return;
+                  e.preventDefault();
+                  playSe("play");
+                  void api.move({ type: "throw", hand });
+                }}
+                style={{
+                  minWidth: 104,
+                  minHeight: 64,
+                  padding: "10px 12px",
+                  borderRadius: 14,
+                  border: `2px solid ${mine ? "#4a6fa5" : "#d8c9a3"}`,
+                  background: mine ? "#e0eaff" : "#fffdf6",
+                  color: "inherit",
+                  fontSize: 19,
+                  fontWeight: 800,
+                  cursor: canThrow ? "pointer" : "default",
+                  touchAction: "manipulation",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  userSelect: "none",
+                }}
+              >
+                {HAND_LABEL[hand]}
+              </div>
+            );
+          })}
+        </div>
+  );
+
+  // 3D シーンからの提出（既存のタップ提出と同じ move を送る）。
+  const doThrow = (hand: JankenHand) => {
+    if (!canThrow) return;
+    playSe("play");
+    void api.move({ type: "throw", hand });
+  };
 
   return (
     <div style={{ maxWidth: 640, margin: "0 auto" }}>
@@ -118,51 +178,18 @@ function Board({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
             出た手が2種類だけのとき、勝つ手を出した全員に1点。1種類か3種類なら、あいこで全員0点です。
           </p>
 
-          <div style={{ display: "flex", gap: 10, justifyContent: "center", margin: "10px 0 6px" }}>
-            {(Object.keys(HAND_LABEL) as JankenHand[]).map((hand) => {
-              const mine = state.you.yourHand === hand;
-              return (
-                <div
-                  key={hand}
-                  role="button"
-                  tabIndex={canThrow ? 0 : -1}
-                  aria-disabled={!canThrow}
-                  aria-label={`手: ${HAND_LABEL[hand]}`}
-                  onClick={() => {
-                    if (!canThrow) return;
-                    playSe("play");
-                    void api.move({ type: "throw", hand });
-                  }}
-                  onKeyDown={(e) => {
-                    if (!canThrow || (e.key !== "Enter" && e.key !== " ")) return;
-                    e.preventDefault();
-                    playSe("play");
-                    void api.move({ type: "throw", hand });
-                  }}
-                  style={{
-                    minWidth: 104,
-                    minHeight: 64,
-                    padding: "10px 12px",
-                    borderRadius: 14,
-                    border: `2px solid ${mine ? "#4a6fa5" : "#d8c9a3"}`,
-                    background: mine ? "#e0eaff" : "#fffdf6",
-                    color: "inherit",
-                    fontSize: 19,
-                    fontWeight: 800,
-                    cursor: canThrow ? "pointer" : "default",
-                    touchAction: "manipulation",
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    userSelect: "none",
-                  }}
-                >
-                  {HAND_LABEL[hand]}
-                </div>
-              );
-            })}
-          </div>
-
+          {webglFailed ? board2d : (
+            <JankenScene3D
+              phase={state.phase}
+              canThrow={canThrow}
+              yourHand={state.you.yourHand}
+              players={state.players.map((p) => ({ seat: p.seat, submitted: p.submitted, isYou: p.seat === mySeat }))}
+              revealed={state.phase === "reveal" ? state.players.map((p) => ({ seat: p.seat, hand: p.hand ?? null, won: !!p.won, isYou: p.seat === mySeat })) : []}
+              onThrow={doThrow}
+              onFail={() => setWebglFailed(true)}
+              fallback={board2d}
+            />
+          )}
           {state.phase === "choosing" ? (
             <p className="og-muted" style={{ textAlign: "center" }}>
               {state.you.left

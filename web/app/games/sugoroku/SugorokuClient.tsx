@@ -2,7 +2,11 @@
 // すごろく。ロジックは lib/sugoroku.ts（30マス・CPU 2人とのレース）。
 // 自分の番は盤面タップでサイコロを振り、CPU の番と自動進行モードはタイマーで進む。
 import Link from "next/link";
+import dynamic from "next/dynamic";
 import { useEffect, useRef, useState } from "react";
+
+// 3D シーンは three を含むため遅延読み込み（このページ専用チャンクに閉じる）。
+const SugorokuScene3D = dynamic(() => import("./SugorokuScene3D"), { ssr: false });
 import {
   SUGOROKU_GOAL,
   createSugorokuGame,
@@ -59,6 +63,7 @@ function effectIcon(index: number): string {
 export default function SugorokuClient() {
   const { prefix } = useGamesNav();
   const [state, setState] = useState<SugorokuState>(() => createSugorokuGame(Date.now() % 2147483647));
+  const [webglFailed, setWebglFailed] = useState(false);
   const [auto, setAuto] = useState(false);
   const logRef = useRef<HTMLDivElement | null>(null);
 
@@ -89,6 +94,58 @@ export default function SugorokuClient() {
     onTap: () => { if (canRoll) { sfxDice(); setState((s) => rollDice(s)); } },
     onSwipe: () => { if (canRoll) { sfxDice(); setState((s) => rollDice(s)); } },
   });
+  const doRoll = () => { if (canRoll) { sfxDice(); setState((s) => rollDice(s)); } };
+
+  // 2D 盤面（WebGL が使えない場合のフォールバック）。
+  const board2D = (
+      <div
+        {...boardGesture}
+        role="button"
+        tabIndex={0}
+        onKeyDown={(e) => { if ((e.key === "Enter" || e.key === " ") && canRoll) { e.preventDefault(); sfxDice(); setState((s) => rollDice(s)); } }}
+        aria-label="すごろくのコース（タップでサイコロを振る）"
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(6, minmax(0, 1fr))",
+          gap: 5,
+          maxWidth: 640,
+          margin: "0 auto",
+          touchAction: "none",
+        }}
+      >
+        {Array.from({ length: SUGOROKU_GOAL + 1 }, (_, i) => {
+          const here = state.players.map((p, pi) => (p.position === i ? pi : -1)).filter((pi) => pi >= 0);
+          const e = squareEffect(i);
+          const effectText = i === 0 ? "スタート" : i === SUGOROKU_GOAL ? "ゴール" : describeEffect(e);
+          return (
+            <div
+              key={i}
+              style={{
+                minHeight: 62,
+                borderRadius: 8,
+                border: i === SUGOROKU_GOAL ? "2px solid #d9a41c" : "1px solid #e0d3b8",
+                background: here.length > 0 ? "#eef6ff" : "#fffdf6",
+                padding: "4px 5px",
+                fontSize: 11,
+                lineHeight: 1.35,
+              }}
+            >
+              <div style={{ fontWeight: 800, fontSize: 12 }}>
+                {i} {effectIcon(i)}
+              </div>
+              <div style={{ color: "#666" }}>{effectText}</div>
+              <div style={{ fontSize: 14, minHeight: 18 }}>
+                {here.map((pi) => (
+                  <span key={`${pi}-${state.players[pi].position}`} className="juice-pop" title={state.players[pi].name}>
+                    <PlayerDot index={pi} />
+                  </span>
+                ))}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+  );
 
   const endSoundRef = useRef<SugorokuState | null>(null);
   useEffect(() => {
@@ -156,54 +213,17 @@ export default function SugorokuClient() {
         ))}
       </div>
 
-      <div
-        {...boardGesture}
-        role="button"
-        tabIndex={0}
-        onKeyDown={(e) => { if ((e.key === "Enter" || e.key === " ") && canRoll) { e.preventDefault(); sfxDice(); setState((s) => rollDice(s)); } }}
-        aria-label="すごろくのコース（タップでサイコロを振る）"
-        style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(6, minmax(0, 1fr))",
-          gap: 5,
-          maxWidth: 640,
-          margin: "0 auto",
-          touchAction: "none",
-        }}
-      >
-        {Array.from({ length: SUGOROKU_GOAL + 1 }, (_, i) => {
-          const here = state.players.map((p, pi) => (p.position === i ? pi : -1)).filter((pi) => pi >= 0);
-          const e = squareEffect(i);
-          const effectText = i === 0 ? "スタート" : i === SUGOROKU_GOAL ? "ゴール" : describeEffect(e);
-          return (
-            <div
-              key={i}
-              style={{
-                minHeight: 62,
-                borderRadius: 8,
-                border: i === SUGOROKU_GOAL ? "2px solid #d9a41c" : "1px solid #e0d3b8",
-                background: here.length > 0 ? "#eef6ff" : "#fffdf6",
-                padding: "4px 5px",
-                fontSize: 11,
-                lineHeight: 1.35,
-              }}
-            >
-              <div style={{ fontWeight: 800, fontSize: 12 }}>
-                {i} {effectIcon(i)}
-              </div>
-              <div style={{ color: "#666" }}>{effectText}</div>
-              <div style={{ fontSize: 14, minHeight: 18 }}>
-                {here.map((pi) => (
-                  <span key={`${pi}-${state.players[pi].position}`} className="juice-pop" title={state.players[pi].name}>
-                    <PlayerDot index={pi} />
-                  </span>
-                ))}
-              </div>
-            </div>
-          );
-        })}
-      </div>
-
+      {webglFailed ? board2D : (
+        <SugorokuScene3D
+          positions={state.players.map((pl) => pl.position)}
+          lastRoll={state.lastRoll}
+          turns={state.turns}
+          canRoll={canRoll}
+          onRoll={doRoll}
+          onFail={() => setWebglFailed(true)}
+          fallback={board2D}
+        />
+      )}
       {state.status === "finished" && state.winner !== null ? (
         <div style={{ maxWidth: 640, margin: "0 auto 14px" }}>
           <EndScreen

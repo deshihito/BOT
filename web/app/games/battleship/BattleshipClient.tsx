@@ -7,7 +7,11 @@
 // 配置はローカルで組み立てて { type: "placeShips", ships: number[][] }、
 // 射撃は { type: "fire", index } を送る。
 import { useEffect, useMemo, useRef, useState } from "react";
+import dynamic from "next/dynamic";
 import { playSe } from "@/lib/balku-sound";
+
+// 3D シーンは three を含むため遅延読み込み（このページ専用チャンクに閉じる）。
+const BattleshipScene3D = dynamic(() => import("./BattleshipScene3D"), { ssr: false });
 import { tappableProps, useGesture } from "@/lib/gesture";
 import OnlineShell from "../online/OnlineShell";
 import type { OnlineRoomApi, OnlineRoomView } from "../online/useOnlineRoom";
@@ -53,6 +57,7 @@ function Board({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
   const [horizontal, setHorizontal] = useState(true);
   const [selectedSize, setSelectedSize] = useState<number>(FLEET_SIZES[0]);
   const [localError, setLocalError] = useState("");
+  const [webglFailed, setWebglFailed] = useState(false);
   const finishRef = useRef<string | null>(null);
   const lastShotRef = useRef<string | null>(null);
   const turnRef = useRef<number | null>(null);
@@ -197,6 +202,34 @@ function Board({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
 
   /* ---------- 配置フェーズ ---------- */
   if (state.phase === "placing") {
+    // 2D 配置盤（WebGL が使えない場合のフォールバックとしてそのまま使う）。
+    const board2dPlace = (
+    <div {...placementGesture} className="og-bs-board" role="grid" aria-label="自分の海（配置。左スワイプで全消し、右スワイプでランダム配置、上スワイプで確定）" style={{ touchAction: "none" }}>
+      {Array.from({ length: 100 }, (_, index) => {
+        const shipIndex = confirmed
+          ? state.you.ships.findIndex((s) => s.cells.includes(index))
+          : placed.findIndex((s) => s.cells.includes(index));
+        return (
+          <div
+            key={index}
+            role="gridcell"
+            tabIndex={confirmed ? -1 : 0}
+            className={`og-cell og-bs-cell${shipIndex >= 0 ? " og-bs-cell-ship juice-pop" : ""}`}
+            aria-disabled={confirmed}
+            aria-label={`${Math.floor(index / 10) + 1}行${(index % 10) + 1}列${shipIndex >= 0 ? " 艦あり" : ""}`}
+            onClick={() => tryPlace(index)}
+            onKeyDown={(e) => {
+              if (e.key !== "Enter" && e.key !== " ") return;
+              e.preventDefault();
+              tryPlace(index);
+            }}
+            style={{ cursor: confirmed ? "default" : "pointer" }}
+          />
+        );
+      })}
+    </div>
+    );
+
     return (
       <div className="og-board-wrap">
         <div className="og-turn-banner" role="status">
@@ -245,30 +278,23 @@ function Board({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
             )}
           </>
         )}
-        <div {...placementGesture} className="og-bs-board" role="grid" aria-label="自分の海（配置。左スワイプで全消し、右スワイプでランダム配置、上スワイプで確定）" style={{ touchAction: "none" }}>
-          {Array.from({ length: 100 }, (_, index) => {
-            const shipIndex = confirmed
-              ? state.you.ships.findIndex((s) => s.cells.includes(index))
-              : placed.findIndex((s) => s.cells.includes(index));
-            return (
-              <div
-                key={index}
-                role="gridcell"
-                tabIndex={confirmed ? -1 : 0}
-                className={`og-cell og-bs-cell${shipIndex >= 0 ? " og-bs-cell-ship juice-pop" : ""}`}
-                aria-disabled={confirmed}
-                aria-label={`${Math.floor(index / 10) + 1}行${(index % 10) + 1}列${shipIndex >= 0 ? " 艦あり" : ""}`}
-                onClick={() => tryPlace(index)}
-                onKeyDown={(e) => {
-                  if (e.key !== "Enter" && e.key !== " ") return;
-                  e.preventDefault();
-                  tryPlace(index);
-                }}
-                style={{ cursor: confirmed ? "default" : "pointer" }}
-              />
-            );
-          })}
-        </div>
+        {webglFailed ? board2dPlace : (
+          <div {...placementGesture} style={{ touchAction: "none", width: "100%", maxWidth: 480, margin: "0 auto" }}>
+            <BattleshipScene3D
+              label="自分の海（3D・配置）。マスをタップして艦を配置します"
+              ships={confirmed
+                ? state.you.ships.map((sh) => ({ cells: sh.cells, sunk: sh.sunk }))
+                : placed.map((sh) => ({ cells: sh.cells, sunk: false }))}
+              shots={[]}
+              lastShotIndex={null}
+              interactive={!confirmed}
+              height={360}
+              onCell={tryPlace}
+              onFail={() => setWebglFailed(true)}
+              fallback={board2dPlace}
+            />
+          </div>
+        )}
       </div>
     );
   }
@@ -286,6 +312,54 @@ function Board({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
     void api.move({ type: "fire", index });
   };
 
+  // 2D 盤（WebGL が使えない場合のフォールバックとしてそのまま使う）。
+  const board2dOwn = (
+    <div className="og-bs-board" role="grid" aria-label="自分の海">
+      {Array.from({ length: 100 }, (_, index) => {
+        const ship = myShipCells.get(index);
+        const hit = incoming.get(index);
+        return (
+          <div
+            key={index}
+            role="gridcell"
+            className={`og-cell og-bs-cell${ship ? " og-bs-cell-ship" : ""}${ship?.sunk ? " og-bs-cell-sunk" : ""}${hit ? (isHitResult(hit) ? " og-bs-cell-hit" : " og-bs-cell-miss") : ""}${state.lastShot?.index === index && state.lastShot.seat !== undefined && state.lastShot.seat !== mySeat ? " juice-pop" : ""}`}
+            aria-label={`${Math.floor(index / 10) + 1}行${(index % 10) + 1}列${ship ? " 艦あり" : ""}${hit ? (isHitResult(hit) ? " 被弾" : " 着水") : ""}`}
+          >
+            {hit ? (isHitResult(hit) ? "✕" : "・") : null}
+          </div>
+        );
+      })}
+    </div>
+  );
+  const board2dEnemy = (
+    <div className="og-bs-board" role="grid" aria-label="攻撃用の海">
+      {Array.from({ length: 100 }, (_, index) => {
+        const result = myShots.get(index);
+        const sunkCell = sunkEnemyCells.has(index);
+        const canFire = myTurn && result === undefined;
+        return (
+          <div
+            key={index}
+            role="gridcell"
+            tabIndex={canFire ? 0 : -1}
+            className={`og-cell og-bs-cell${sunkCell ? " og-bs-cell-sunk" : ""}${result ? (isHitResult(result) ? " og-bs-cell-hit" : " og-bs-cell-miss") : ""}${state.lastShot?.index === index ? " og-cell-last juice-pop" : ""}`}
+            aria-disabled={!canFire}
+            aria-label={`${Math.floor(index / 10) + 1}行${(index % 10) + 1}列${result ? (isHitResult(result) ? " 命中" : " はずれ") : ""}`}
+            onClick={() => fire(index)}
+            onKeyDown={(e) => {
+              if (e.key !== "Enter" && e.key !== " ") return;
+              e.preventDefault();
+              fire(index);
+            }}
+            style={{ cursor: canFire ? "pointer" : "default" }}
+          >
+            {result ? (isHitResult(result) ? "✕" : "・") : null}
+          </div>
+        );
+      })}
+    </div>
+  );
+
   return (
     <div className="og-board-wrap">
       <div className={`og-turn-banner${myTurn ? " og-turn-mine" : ""}${state.phase === "finished" ? " juice-slide" : myTurn ? " juice-pulse" : ""}`} role="status">
@@ -300,52 +374,39 @@ function Board({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
       <div className="og-bs-seas">
         <section className="og-bs-sea">
           <h3 className="og-bs-sea-title">自分の海</h3>
-          <div className="og-bs-board" role="grid" aria-label="自分の海">
-            {Array.from({ length: 100 }, (_, index) => {
-              const ship = myShipCells.get(index);
-              const hit = incoming.get(index);
-              return (
-                <div
-                  key={index}
-                  role="gridcell"
-                  className={`og-cell og-bs-cell${ship ? " og-bs-cell-ship" : ""}${ship?.sunk ? " og-bs-cell-sunk" : ""}${hit ? (isHitResult(hit) ? " og-bs-cell-hit" : " og-bs-cell-miss") : ""}${state.lastShot?.index === index && state.lastShot.seat !== undefined && state.lastShot.seat !== mySeat ? " juice-pop" : ""}`}
-                  aria-label={`${Math.floor(index / 10) + 1}行${(index % 10) + 1}列${ship ? " 艦あり" : ""}${hit ? (isHitResult(hit) ? " 被弾" : " 着水") : ""}`}
-                >
-                  {hit ? (isHitResult(hit) ? "✕" : "・") : null}
-                </div>
-              );
-            })}
-          </div>
+          {webglFailed ? board2dOwn : (
+            <div style={{ width: "100%", maxWidth: 480, margin: "0 auto" }}>
+              <BattleshipScene3D
+                label="自分の海（3D）"
+                ships={state.you.ships.map((sh) => ({ cells: sh.cells, sunk: sh.sunk }))}
+                shots={state.you.incoming}
+                lastShotIndex={state.lastShot && state.lastShot.seat !== undefined && state.lastShot.seat !== mySeat ? state.lastShot.index : null}
+                interactive={false}
+                height={280}
+                onFail={() => setWebglFailed(true)}
+                fallback={board2dOwn}
+              />
+            </div>
+          )}
           <p className="og-muted">残り艦隊: {state.you.ships.filter((s) => !s.sunk).length}隻</p>
         </section>
         <section className="og-bs-sea">
           <h3 className="og-bs-sea-title">攻撃用の海（相手: {opponentPlayer?.name ?? "—"}、残り{state.opponent.afloatCount}隻）</h3>
-          <div className="og-bs-board" role="grid" aria-label="攻撃用の海">
-            {Array.from({ length: 100 }, (_, index) => {
-              const result = myShots.get(index);
-              const sunkCell = sunkEnemyCells.has(index);
-              const canFire = myTurn && result === undefined;
-              return (
-                <div
-                  key={index}
-                  role="gridcell"
-                  tabIndex={canFire ? 0 : -1}
-                  className={`og-cell og-bs-cell${sunkCell ? " og-bs-cell-sunk" : ""}${result ? (isHitResult(result) ? " og-bs-cell-hit" : " og-bs-cell-miss") : ""}${state.lastShot?.index === index ? " og-cell-last juice-pop" : ""}`}
-                  aria-disabled={!canFire}
-                  aria-label={`${Math.floor(index / 10) + 1}行${(index % 10) + 1}列${result ? (isHitResult(result) ? " 命中" : " はずれ") : ""}`}
-                  onClick={() => fire(index)}
-                  onKeyDown={(e) => {
-                    if (e.key !== "Enter" && e.key !== " ") return;
-                    e.preventDefault();
-                    fire(index);
-                  }}
-                  style={{ cursor: canFire ? "pointer" : "default" }}
-                >
-                  {result ? (isHitResult(result) ? "✕" : "・") : null}
-                </div>
-              );
-            })}
-          </div>
+          {webglFailed ? board2dEnemy : (
+            <div style={{ width: "100%", maxWidth: 480, margin: "0 auto" }}>
+              <BattleshipScene3D
+                label="攻撃用の海（3D）。マスをタップして攻撃します"
+                ships={state.opponent.sunkShips.map((cells) => ({ cells, sunk: true }))}
+                shots={state.opponent.shots}
+                lastShotIndex={state.lastShot?.index ?? null}
+                interactive={myTurn}
+                height={280}
+                onCell={fire}
+                onFail={() => setWebglFailed(true)}
+                fallback={board2dEnemy}
+              />
+            </div>
+          )}
         </section>
       </div>
     </div>

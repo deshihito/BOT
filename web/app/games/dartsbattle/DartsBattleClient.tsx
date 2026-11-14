@@ -5,8 +5,12 @@
 //   turn / round / throwsThisTurn / lastThrow
 // 提出は { type: "throw", x, y }（0〜1000 の正規化座標）。
 // 着弾点の微ブレと得点判定はサーバー側で行われる。
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
+import dynamic from "next/dynamic";
 import { playSe } from "@/lib/balku-sound";
+
+// 3D シーンは three を含むため遅延読み込み（このページ専用チャンクに閉じる）。
+const DartsBattleScene3D = dynamic(() => import("./DartsBattleScene3D"), { ssr: false });
 import { DART_SECTORS } from "@/lib/darts";
 import OnlineShell from "../online/OnlineShell";
 import type { OnlineRoomApi, OnlineRoomView } from "../online/useOnlineRoom";
@@ -52,6 +56,7 @@ function wedgePath(rOuter: number, rInner: number, a0: number, a1: number): stri
 function Board({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
   const state = view.state as DbView | null;
   const mySeat = view.player.seat;
+  const [webglFailed, setWebglFailed] = useState(false);
   const finishRef = useRef<string | null>(null);
   const turnRef = useRef<string | null>(null);
 
@@ -89,6 +94,18 @@ function Board({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
     void api.move({ type: "throw", x, y });
   };
 
+  // 3D シーンからの投擲。シーンはボード正規化座標（中心 0、半径 1 = ダブル外周、
+  // y 上向き）を渡すので、提出形式（0〜1000、画面端が半径 1.2、y 下向き）へ変換する。
+  // サーバー側の変換（lib/online/games/dartsbattle.ts）の逆変換。
+  const handleThrow = (bx: number, by: number) => {
+    if (!myTurn) return;
+    const x = Math.round(((bx + 1.2) / 2.4) * 1000);
+    const y = Math.round(((1.2 - by) / 2.4) * 1000);
+    if (x < 0 || x > 1000 || y < 0 || y > 1000) return;
+    playSe("play");
+    void api.move({ type: "throw", x, y });
+  };
+
   // このラウンドの投擲だけを盤上に表示する。
   const roundDarts: { hit: DbThrowView; seat: number; key: string }[] = [];
   for (const p of state.players) {
@@ -98,6 +115,56 @@ function Board({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
       }
     });
   }
+
+  const board2d = (
+    <svg
+      viewBox="-120 -120 240 240"
+      role="img"
+      aria-label="ダーツボード"
+      onClick={handleClick}
+      style={{
+        width: "min(88vw, 420px)",
+        height: "auto",
+        display: "block",
+        margin: "0 auto",
+        cursor: myTurn ? "crosshair" : "default",
+        touchAction: "manipulation",
+      }}
+    >
+      <circle cx={0} cy={0} r={118} fill="#22252a" />
+      {DART_SECTORS.map((num, i) => {
+        const a0 = i * 18 - 9;
+        const a1 = i * 18 + 9;
+        const color = i % 2 === 0 ? "#c0392b" : "#1e8449";
+        const base = i % 2 === 0 ? "#1b1b1b" : "#e8dcc0";
+        const labelPos = polar(110, i * 18);
+        return (
+          <g key={num}>
+            <path d={wedgePath(100, 0, a0, a1)} fill={color} />
+            <path d={wedgePath(94, 0, a0, a1)} fill={base} />
+            <path d={wedgePath(58, 53, a0, a1)} fill={color} />
+            <text x={labelPos.x} y={labelPos.y} fill="#f5f5f5" fontSize={11} fontWeight={700} textAnchor="middle" dominantBaseline="middle">
+              {num}
+            </text>
+          </g>
+        );
+      })}
+      <circle cx={0} cy={0} r={16} fill="#1e8449" />
+      <circle cx={0} cy={0} r={7} fill="#c0392b" />
+      {roundDarts.map(({ hit, seat, key }, i) => (
+        <circle
+          key={key}
+          className={i === roundDarts.length - 1 ? "juice-pop" : undefined}
+          cx={hit.x * 100}
+          cy={-hit.y * 100}
+          r={3.4}
+          fill={SEAT_COLORS[seat % SEAT_COLORS.length]}
+          stroke="#212121"
+          strokeWidth={1}
+        />
+      ))}
+    </svg>
+  );
 
   return (
     <div style={{ maxWidth: 640, margin: "0 auto" }}>
@@ -142,53 +209,16 @@ function Board({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
               ? ` 直前: ${state.players[state.lastThrow.seat]?.name ?? ""} の ${state.lastThrow.hit.label}（${state.lastThrow.hit.score}点）`
               : ""}
           </p>
-          <svg
-            viewBox="-120 -120 240 240"
-            role="img"
-            aria-label="ダーツボード"
-            onClick={handleClick}
-            style={{
-              width: "min(88vw, 420px)",
-              height: "auto",
-              display: "block",
-              margin: "0 auto",
-              cursor: myTurn ? "crosshair" : "default",
-              touchAction: "manipulation",
-            }}
-          >
-            <circle cx={0} cy={0} r={118} fill="#22252a" />
-            {DART_SECTORS.map((num, i) => {
-              const a0 = i * 18 - 9;
-              const a1 = i * 18 + 9;
-              const color = i % 2 === 0 ? "#c0392b" : "#1e8449";
-              const base = i % 2 === 0 ? "#1b1b1b" : "#e8dcc0";
-              const labelPos = polar(110, i * 18);
-              return (
-                <g key={num}>
-                  <path d={wedgePath(100, 0, a0, a1)} fill={color} />
-                  <path d={wedgePath(94, 0, a0, a1)} fill={base} />
-                  <path d={wedgePath(58, 53, a0, a1)} fill={color} />
-                  <text x={labelPos.x} y={labelPos.y} fill="#f5f5f5" fontSize={11} fontWeight={700} textAnchor="middle" dominantBaseline="middle">
-                    {num}
-                  </text>
-                </g>
-              );
-            })}
-            <circle cx={0} cy={0} r={16} fill="#1e8449" />
-            <circle cx={0} cy={0} r={7} fill="#c0392b" />
-            {roundDarts.map(({ hit, seat, key }, i) => (
-              <circle
-                key={key}
-                className={i === roundDarts.length - 1 ? "juice-pop" : undefined}
-                cx={hit.x * 100}
-                cy={-hit.y * 100}
-                r={3.4}
-                fill={SEAT_COLORS[seat % SEAT_COLORS.length]}
-                stroke="#212121"
-                strokeWidth={1}
+          {webglFailed ? board2d : (
+            <div style={{ maxWidth: 420, margin: "0 auto" }}>
+              <DartsBattleScene3D
+                darts={roundDarts.map(({ hit, seat, key }) => ({ key, x: hit.x, y: hit.y, seat }))}
+                onThrow={handleThrow}
+                onFail={() => setWebglFailed(true)}
+                fallback={board2d}
               />
-            ))}
-          </svg>
+            </div>
+          )}
         </>
       ) : (
         <div className="juice-slide" style={{ textAlign: "center" }}>

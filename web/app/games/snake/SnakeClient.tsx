@@ -2,7 +2,11 @@
 // スネーク。ロジックは lib/snake.ts（純粋関数）。
 // canvas 描画、盤面スワイプで方向転換・タップで開始/ポーズ（ボタンなし）。矢印/WASDも可。ベストスコア保存。
 import Link from "next/link";
+import dynamic from "next/dynamic";
 import { useCallback, useEffect, useRef, useState } from "react";
+
+// 3D シーンは three を含むため遅延読み込み（このページ専用チャンクに閉じる）。
+const SnakeScene3D = dynamic(() => import("./SnakeScene3D"), { ssr: false });
 import {
   createSnakeGame,
   pauseSnake,
@@ -46,6 +50,7 @@ function loadBest(): number {
 
 export default function SnakeClient() {
   const { prefix } = useGamesNav();
+  const [webglFailed, setWebglFailed] = useState(false);
   const [state, setState] = useState<SnakeState>(() => createSnakeGame(20, 20, Date.now() % 2147483647));
   const [best, setBest] = useState(0);
   const [prevBest, setPrevBest] = useState<number | null>(null);
@@ -151,7 +156,8 @@ export default function SnakeClient() {
     const onResize = () => draw();
     window.addEventListener("resize", onResize);
     return () => window.removeEventListener("resize", onResize);
-  }, [state]);
+    // webglFailed で 2D へ切り替わった直後にも canvas を描き直す。
+  }, [state, webglFailed]);
 
   const move = useCallback((dir: SnakeDir) => {
     setState((s) => {
@@ -165,6 +171,23 @@ export default function SnakeClient() {
     onSwipe: (dir) => move(dir),
     onTap: () => setState((s) => (s.status === "playing" ? pauseSnake(s) : startSnake(s))),
   });
+
+  // 3D シーンのタップ = 盤面ジェスチャのタップと同じハンドラ（開始/ポーズ/再開）。
+  const handleTap3D = useCallback(() => {
+    setState((s) => (s.status === "playing" ? pauseSnake(s) : startSnake(s)));
+  }, []);
+
+  // 2D 盤（canvas。WebGL が使えない場合のフォールバックとしてそのまま使う）。
+  const board2d = (
+    <div style={{ maxWidth: 480, margin: "0 auto" }} className={state.status === "gameover" ? "juice-shake" : undefined}>
+      <canvas
+        ref={canvasRef}
+        style={{ width: "100%", aspectRatio: "1 / 1", display: "block", borderRadius: 12, background: "#14231a", touchAction: "none" }}
+        aria-label="スネークの盤（スワイプで方向転換、タップで開始・ポーズ）"
+        {...boardGesture}
+      />
+    </div>
+  );
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -215,14 +238,17 @@ export default function SnakeClient() {
         スコア <span key={state.score} className="juice-pulse" style={{ display: "inline-block" }}>{state.score}</span> ・ ベスト {best} ・ {statusText}
       </p>
 
-      <div style={{ maxWidth: 480, margin: "0 auto" }} className={state.status === "gameover" ? "juice-shake" : undefined}>
-        <canvas
-          ref={canvasRef}
-          style={{ width: "100%", aspectRatio: "1 / 1", display: "block", borderRadius: 12, background: "#14231a", touchAction: "none" }}
-          aria-label="スネークの盤（スワイプで方向転換、タップで開始・ポーズ）"
-          {...boardGesture}
-        />
-      </div>
+      {webglFailed ? board2d : (
+        <div style={{ maxWidth: 480, margin: "0 auto" }} className={state.status === "gameover" ? "juice-shake" : undefined}>
+          <SnakeScene3D
+            getState={() => stateRef.current}
+            onSwipe={move}
+            onTap={handleTap3D}
+            onFail={() => setWebglFailed(true)}
+            fallback={board2d}
+          />
+        </div>
+      )}
 
       {(state.status === "gameover" || state.status === "won") && (
         <div style={{ maxWidth: 480, margin: "14px auto 0" }}>

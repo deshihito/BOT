@@ -2,6 +2,7 @@
 // ぬりかべ。ロジックは lib/nurikabe.ts（解を先に作る生成＋ルール検証で完成判定）。
 // タップで 未定→海→島→未定 と切り替える。端末内で完結し、サーバーへ送信しない。
 import Link from "next/link";
+import dynamic from "next/dynamic";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   checkNurikabe,
@@ -16,6 +17,9 @@ import { tappableProps, useGesture } from "@/lib/gesture";
 import { EndScreen } from "../GameJuice";
 import { useGamesNav } from "../GamesShell";
 
+// 3D シーンは three を含むため遅延読み込み（このページ専用チャンクに閉じる）。
+const NurikabeScene3D = dynamic(() => import("./NurikabeScene3D"), { ssr: false });
+
 const SIZES: { key: NurikabeSize; label: string }[] = [
   { key: 5, label: "5×5" },
   { key: 7, label: "7×7" },
@@ -27,6 +31,7 @@ function newGame(size: NurikabeSize): NurikabeState {
 
 export default function NurikabeClient() {
   const { prefix } = useGamesNav();
+  const [webglFailed, setWebglFailed] = useState(false);
   const [size, setSize] = useState<NurikabeSize>(5);
   const [state, setState] = useState<NurikabeState>(() => newGame(5));
   const [seconds, setSeconds] = useState(0);
@@ -116,63 +121,8 @@ export default function NurikabeClient() {
       ? `クリア！ ${state.moves}手・${seconds}秒でした。`
       : "数字は島の大きさ。島は1つの数字だけを含み、海は全部つながって2x2の塊は禁止です。";
 
-  return (
-    <>
-      <nav className="breadcrumbs" aria-label="パンくず">
-        <Link href={`${prefix}/games`}>ゲーム</Link>
-        <span> / </span>
-        <span>ぬりかべ</span>
-      </nav>
-      <div className="page-heading compact-heading">
-        <h1>ぬりかべ</h1>
-        <p className="muted">マスをタップするたびに「海（塗り）→島→未定」と切り替わります。盤面を下にスワイプするとチェックします。</p>
-      </div>
-
-      <div className="classic-controls" role="group" aria-label="盤の大きさ">
-        {SIZES.map((s) => (
-          <div
-            key={s.key}
-            {...tappableProps(() => restart(s.key))}
-            aria-pressed={size === s.key}
-            className={size === s.key ? "classic-btn classic-btn-active" : "classic-btn"}
-          >
-            {s.label}
-          </div>
-        ))}
-        <button type="button" className="classic-btn" onClick={() => restart(size)}>
-          もう一度
-        </button>
-      </div>
-
-      <p className="classic-status" role="status">
-        <span>{statusText}</span>
-        <span>時間 {seconds}秒</span>
-        {best !== null ? <span>ベスト {best}秒</span> : null}
-      </p>
-
-      {violations.length > 0 ? (
-        <div
-          role="alert"
-          style={{
-            maxWidth: 520,
-            margin: "0 auto 12px",
-            padding: "10px 14px",
-            borderRadius: 10,
-            background: "#fef2f2",
-            border: "1px solid #fca5a5",
-            color: "#991b1b",
-            fontSize: 14,
-          }}
-        >
-          <strong>ルール違反があります</strong>
-          <ul style={{ margin: "6px 0 0", paddingLeft: 18 }}>
-            {[...new Set(violations.map((v) => v.message))].map((msg) => (
-              <li key={msg}>{msg}</li>
-            ))}
-          </ul>
-        </div>
-      ) : null}
-
+  // 2D 盤（WebGL が使えない場合のフォールバックとしてそのまま使う）。
+  const board2d = (
       <div
         {...boardGesture}
         role="grid"
@@ -262,7 +212,80 @@ export default function NurikabeClient() {
           );
         })}
       </div>
+  );
 
+  return (
+    <>
+      <nav className="breadcrumbs" aria-label="パンくず">
+        <Link href={`${prefix}/games`}>ゲーム</Link>
+        <span> / </span>
+        <span>ぬりかべ</span>
+      </nav>
+      <div className="page-heading compact-heading">
+        <h1>ぬりかべ</h1>
+        <p className="muted">マスをタップするたびに「海（塗り）→島→未定」と切り替わります。盤面を下にスワイプするとチェックします。</p>
+      </div>
+
+      <div className="classic-controls" role="group" aria-label="盤の大きさ">
+        {SIZES.map((s) => (
+          <div
+            key={s.key}
+            {...tappableProps(() => restart(s.key))}
+            aria-pressed={size === s.key}
+            className={size === s.key ? "classic-btn classic-btn-active" : "classic-btn"}
+          >
+            {s.label}
+          </div>
+        ))}
+        <button type="button" className="classic-btn" onClick={() => restart(size)}>
+          もう一度
+        </button>
+      </div>
+
+      <p className="classic-status" role="status">
+        <span>{statusText}</span>
+        <span>時間 {seconds}秒</span>
+        {best !== null ? <span>ベスト {best}秒</span> : null}
+      </p>
+
+      {violations.length > 0 ? (
+        <div
+          role="alert"
+          style={{
+            maxWidth: 520,
+            margin: "0 auto 12px",
+            padding: "10px 14px",
+            borderRadius: 10,
+            background: "#fef2f2",
+            border: "1px solid #fca5a5",
+            color: "#991b1b",
+            fontSize: 14,
+          }}
+        >
+          <strong>ルール違反があります</strong>
+          <ul style={{ margin: "6px 0 0", paddingLeft: 18 }}>
+            {[...new Set(violations.map((v) => v.message))].map((msg) => (
+              <li key={msg}>{msg}</li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+
+      {webglFailed ? board2d : (
+        <div style={{ width: "100%", maxWidth: size === 5 ? 420 : 520, margin: "0 auto" }}>
+          <NurikabeScene3D
+            marks={state.marks}
+            clues={state.clues}
+            size={size}
+            violationCells={[...violationCells]}
+            status={state.status}
+            onCell={onCell}
+            onCheck={onCheck}
+            onFail={() => setWebglFailed(true)}
+            fallback={board2d}
+          />
+        </div>
+      )}
       <p className="muted" style={{ textAlign: "center", marginTop: 12, fontSize: 13 }}>
         凡例：〜=海（塗り）／ ・=島 ／ 数字=島の大きさ（固定）
       </p>

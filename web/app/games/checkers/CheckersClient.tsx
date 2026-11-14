@@ -4,7 +4,11 @@
 // yourMoves に合法手（強制取り・連続取り反映済み）が入り、着手は { type: "move", from, to }。
 // コマを選ぶと移動可能マスがハイライトされ、連続取り中は同じコマが自動で選択され続ける。
 import { useEffect, useRef, useState } from "react";
+import dynamic from "next/dynamic";
 import { playSe } from "@/lib/balku-sound";
+
+// 3D シーンは three を含むため遅延読み込み（このページ専用チャンクに閉じる）。
+const CheckersScene3D = dynamic(() => import("./CheckersScene3D"), { ssr: false });
 import OnlineShell from "../online/OnlineShell";
 import type { OnlineRoomApi, OnlineRoomView } from "../online/useOnlineRoom";
 
@@ -36,6 +40,7 @@ function Board({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
   const state = view.state as CheckersState | null;
   const mySeat = view.player.seat;
   const [selected, setSelected] = useState<number | null>(null);
+  const [webglFailed, setWebglFailed] = useState(false);
   const finishRef = useRef<string | null>(null);
   const turnRef = useRef<number | null>(null);
 
@@ -106,43 +111,8 @@ function Board({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
     if (state.mustCaptureFrom === null) setSelected(null);
   };
 
-  return (
-    <div className="og-board-wrap">
-      <div className={`og-turn-banner${myTurn ? " og-turn-mine" : ""}${state.finished ? " juice-slide" : myTurn ? " juice-pulse" : ""}`} role="status">
-        {state.finished
-          ? state.winner === "draw"
-            ? "引き分け"
-            : `勝者: ${winnerName ?? "—"}${state.winner === mySeat ? "" : ""}`
-          : myTurn
-            ? state.mustCaptureFrom !== null
-              ? "連続取り中です。同じコマで続けて取ってください"
-              : hasCapture
-                ? "あなたの手番です。取れるコマがあるので取らなければなりません"
-                : "あなたの手番です。コマを選んでください"
-            : `${turnName} の手番です（待機中）`}
-      </div>
-      <div className="og-score-row">
-        {state.players.map((p) => (
-          <span
-            key={p.seat}
-            className={`og-score${state.turn === p.seat && !state.finished ? " og-score-turn" : ""}`}
-          >
-            <span
-              aria-hidden="true"
-              style={{
-                display: "inline-block",
-                width: 18,
-                height: 18,
-                borderRadius: "50%",
-                background: p.seat === 0 ? "#26262b" : "#c0392b",
-                boxShadow: "inset 0 0 0 2px rgba(255,255,255,0.35)",
-              }}
-            />
-            {p.name}
-            {p.seat === mySeat ? "（あなた）" : ""}: {state.counts[p.seat] ?? 0} 個
-          </span>
-        ))}
-      </div>
+  const board2d = (
+    <>
       <div
         role="grid"
         aria-label="チェッカー盤面"
@@ -244,6 +214,62 @@ function Board({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
           );
         })}
       </div>
+    </>
+  );
+
+  return (
+    <div className="og-board-wrap">
+      <div className={`og-turn-banner${myTurn ? " og-turn-mine" : ""}${state.finished ? " juice-slide" : myTurn ? " juice-pulse" : ""}`} role="status">
+        {state.finished
+          ? state.winner === "draw"
+            ? "引き分け"
+            : `勝者: ${winnerName ?? "—"}${state.winner === mySeat ? "" : ""}`
+          : myTurn
+            ? state.mustCaptureFrom !== null
+              ? "連続取り中です。同じコマで続けて取ってください"
+              : hasCapture
+                ? "あなたの手番です。取れるコマがあるので取らなければなりません"
+                : "あなたの手番です。コマを選んでください"
+            : `${turnName} の手番です（待機中）`}
+      </div>
+      <div className="og-score-row">
+        {state.players.map((p) => (
+          <span
+            key={p.seat}
+            className={`og-score${state.turn === p.seat && !state.finished ? " og-score-turn" : ""}`}
+          >
+            <span
+              aria-hidden="true"
+              style={{
+                display: "inline-block",
+                width: 18,
+                height: 18,
+                borderRadius: "50%",
+                background: p.seat === 0 ? "#26262b" : "#c0392b",
+                boxShadow: "inset 0 0 0 2px rgba(255,255,255,0.35)",
+              }}
+            />
+            {p.name}
+            {p.seat === mySeat ? "（あなた）" : ""}: {state.counts[p.seat] ?? 0} 個
+          </span>
+        ))}
+      </div>
+      {webglFailed ? (
+        board2d
+      ) : (
+        <div style={{ width: "min(94vw, 520px)", margin: "0 auto" }}>
+          <CheckersScene3D
+            board={state.board}
+            selected={selected}
+            targets={[...targetSet]}
+            captureTargets={[...captureTargets]}
+            lastMove={state.lastMove}
+            onCell={onCell}
+            onFail={() => setWebglFailed(true)}
+            fallback={board2d}
+          />
+        </div>
+      )}
       <p className="og-muted" style={{ textAlign: "center" }}>
         {mySeat === 0 ? "あなたは先手（黒）で、下段から上へ進みます。" : "あなたは後手（赤）で、上段から下へ進みます。"}
         取れる手があるときは必ず取らなければならず、続けて取れる場合は連続取りになります。最奥列に届くとキング（♛）になり、全方向へ動けます。

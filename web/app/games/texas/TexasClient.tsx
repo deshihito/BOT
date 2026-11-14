@@ -5,7 +5,11 @@
 // 契約: 自分の手札は yourCards、他人の手札は枚数（cardCount）だけが見える。
 // 共通カードは board に現在のストリートで公開された分だけ入る。
 // ルールはレイズなしの簡易版: アンティ10点＋各ストリート固定10点、全5ハンド。
-import { useEffect, useRef } from "react";
+import dynamic from "next/dynamic";
+import { useEffect, useRef, useState } from "react";
+
+// 3D シーンは three を含むため遅延読み込み（このページ専用チャンクに閉じる）。
+const TexasScene3D = dynamic(() => import("./TexasScene3D"), { ssr: false });
 import OnlineShell from "../online/OnlineShell";
 import type { OnlineRoomApi, OnlineRoomView } from "../online/useOnlineRoom";
 import { playSe } from "@/lib/balku-sound";
@@ -97,6 +101,7 @@ export default function TexasClient() {
 }
 
 function TexasTable({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
+  const [webglFailed, setWebglFailed] = useState(false);
   const state = view.state as TexasView | null;
   const mySeat = view.player.seat;
 
@@ -126,6 +131,16 @@ function TexasTable({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi })
     const p = state.players.find((pl) => pl.seat === seat);
     return p ? p.name : `プレイヤー${seat + 1}`;
   };
+  // 3D シーンからの操作（既存ボタンと同じ move を送る。意味は変えない）。
+  const doCall = () => {
+    playSe("play");
+    void api.move({ type: "act", move: "call" });
+  };
+  const doFold = () => {
+    playSe("play");
+    void api.move({ type: "act", move: "fold" });
+  };
+  const doNext = () => void api.move({ type: "next" });
   const me = state.players.find((p) => p.seat === mySeat);
   const recentLog = [...(state.log ?? [])].slice(-8).reverse();
 
@@ -158,61 +173,9 @@ function TexasTable({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi })
           ? `${nameOf(state.turn)} の手番です（待機中）`
           : "進行中です";
 
-  return (
-    <div className="og-game og-texas">
-      <div className={`og-turn-banner${state.yourTurn ? " og-turn-mine juice-pulse" : ""}`} role="status" aria-live="polite">
-        <span>{banner}</span>
-      </div>
-
-      <p className="og-status-line">
-        ハンド {state.handNumber} / {state.totalHands} ・ {STREET_LABELS[state.street]} ・ ポット{" "}
-        {state.pot} 点{me ? ` ・ あなたのチップ ${me.chips} 点` : ""}
-      </p>
-
-      {/* プレイヤー一覧 */}
-      <div className="og-members" aria-label="プレイヤー">
-        {state.players.map((p) => (
-          <div key={p.seat} className={`og-member${p.isTurn ? " og-member-turn" : ""}`}>
-            <span className="og-member-name">
-              {p.name}
-              {p.seat === mySeat ? "（あなた）" : ""}
-              {p.isTurn ? "（手番）" : ""}
-            </span>
-            <span className="og-member-meta">
-              {p.left
-                ? "退出"
-                : !p.inHand
-                  ? state.phase === "finished"
-                    ? `${p.chips} 点`
-                    : p.chips <= 0
-                      ? "脱落"
-                      : "不参加"
-                  : p.folded
-                    ? `フォールド ・ ${p.chips} 点`
-                    : `${p.chips} 点 ・ 出した合計 ${p.committed} 点${p.allIn ? " ・ オールイン" : ""}`}
-            </span>
-            {p.inHand && !p.folded && p.seat !== mySeat && (
-              <span style={{ display: "inline-flex", gap: 4, marginTop: 4 }}>
-                {Array.from({ length: p.cardCount }, (_, i) => (
-                  <span
-                    key={i}
-                    aria-hidden
-                    style={{
-                      display: "inline-block",
-                      width: 16,
-                      height: 22,
-                      borderRadius: 3,
-                      border: "1px solid #7a4a21",
-                      background: "repeating-linear-gradient(45deg, #a33b32 0 4px, #93332b 4px 8px)",
-                    }}
-                  />
-                ))}
-              </span>
-            )}
-          </div>
-        ))}
-      </div>
-
+  // 2D テーブル（WebGL が使えない場合のフォールバックとしてそのまま使う）。
+  const table2d = (
+    <>
       {/* 共通カード */}
       <section aria-label="共通カード" style={{ marginTop: 14 }}>
         <p className="og-status-line">共通カード</p>
@@ -275,6 +238,81 @@ function TexasTable({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi })
           )}
         </div>
       </section>
+    </>
+  );
+
+  return (
+    <div className="og-game og-texas">
+      <div className={`og-turn-banner${state.yourTurn ? " og-turn-mine juice-pulse" : ""}`} role="status" aria-live="polite">
+        <span>{banner}</span>
+      </div>
+
+      <p className="og-status-line">
+        ハンド {state.handNumber} / {state.totalHands} ・ {STREET_LABELS[state.street]} ・ ポット{" "}
+        {state.pot} 点{me ? ` ・ あなたのチップ ${me.chips} 点` : ""}
+      </p>
+
+      {/* プレイヤー一覧 */}
+      <div className="og-members" aria-label="プレイヤー">
+        {state.players.map((p) => (
+          <div key={p.seat} className={`og-member${p.isTurn ? " og-member-turn" : ""}`}>
+            <span className="og-member-name">
+              {p.name}
+              {p.seat === mySeat ? "（あなた）" : ""}
+              {p.isTurn ? "（手番）" : ""}
+            </span>
+            <span className="og-member-meta">
+              {p.left
+                ? "退出"
+                : !p.inHand
+                  ? state.phase === "finished"
+                    ? `${p.chips} 点`
+                    : p.chips <= 0
+                      ? "脱落"
+                      : "不参加"
+                  : p.folded
+                    ? `フォールド ・ ${p.chips} 点`
+                    : `${p.chips} 点 ・ 出した合計 ${p.committed} 点${p.allIn ? " ・ オールイン" : ""}`}
+            </span>
+            {p.inHand && !p.folded && p.seat !== mySeat && (
+              <span style={{ display: "inline-flex", gap: 4, marginTop: 4 }}>
+                {Array.from({ length: p.cardCount }, (_, i) => (
+                  <span
+                    key={i}
+                    aria-hidden
+                    style={{
+                      display: "inline-block",
+                      width: 16,
+                      height: 22,
+                      borderRadius: 3,
+                      border: "1px solid #7a4a21",
+                      background: "repeating-linear-gradient(45deg, #a33b32 0 4px, #93332b 4px 8px)",
+                    }}
+                  />
+                ))}
+              </span>
+            )}
+          </div>
+        ))}
+      </div>
+
+      {webglFailed ? table2d : (
+        <TexasScene3D
+          board={state.board}
+          yourCards={state.yourCards}
+          pot={state.pot}
+          players={state.players}
+          mySeat={mySeat}
+          handNumber={state.handNumber}
+          phase={state.phase}
+          yourTurn={state.yourTurn}
+          onCall={doCall}
+          onFold={doFold}
+          onNext={doNext}
+          onFail={() => setWebglFailed(true)}
+          fallback={table2d}
+        />
+      )}
 
       {/* アクション */}
       {state.phase === "betting" && state.yourTurn && (

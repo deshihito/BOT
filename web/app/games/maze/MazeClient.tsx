@@ -2,7 +2,11 @@
 // めいろ。ロジックは lib/maze.ts（完全迷路を生成し、最短路も lib で求める）。
 // 矢印キー／WASD／盤面スワイプで移動。ヒントで最短路のマスをうっすら光らせる。端末内で完結。
 import Link from "next/link";
+import dynamic from "next/dynamic";
 import { useEffect, useMemo, useRef, useState } from "react";
+
+// 3D シーンは three を含むため遅延読み込み（このページ専用チャンクに閉じる）。
+const MazeScene3D = dynamic(() => import("./MazeScene3D"), { ssr: false });
 import {
   createMazeGame,
   movePlayer,
@@ -45,6 +49,7 @@ const KEY_TO_DIR: Record<string, MazeDir> = {
 
 export default function MazeClient() {
   const { prefix } = useGamesNav();
+  const [webglFailed, setWebglFailed] = useState(false);
   const [size, setSize] = useState<MazeSizeKey>("medium");
   const [state, setState] = useState<MazeState>(() => newGame("medium"));
   const [showHint, setShowHint] = useState(false);
@@ -105,6 +110,59 @@ export default function MazeClient() {
     onSwipe: (dir) => doMove(dir),
   });
 
+  // 2D 盤（WebGL が使えない場合のフォールバックとしてそのまま使う）。
+  const board2d = (
+    <div
+      {...boardGesture}
+      role="grid"
+      aria-label="迷路の盤（スワイプで移動）"
+      style={{
+        display: "grid",
+        gridTemplateColumns: `repeat(${state.cols}, minmax(0, 1fr))`,
+        width: "100%",
+        maxWidth,
+        margin: "0 auto",
+        border: "2px solid var(--text)",
+        background: "#fff",
+        touchAction: "none",
+      }}
+    >
+      {state.walls.map((bits, i) => {
+        const isPlayer = i === state.player;
+        const isGoal = i === state.goal;
+        const onHint = showHint && hintSet.has(i);
+        return (
+          <div
+            key={i}
+            role="gridcell"
+            className={isPlayer ? "juice-pop" : undefined}
+            aria-label={isPlayer ? "現在位置" : isGoal ? "ゴール" : undefined}
+            style={{
+              aspectRatio: "1",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              fontSize: `clamp(9px, ${Math.round(340 / state.cols)}px, 20px)`,
+              borderTop: bits & 1 ? "2px solid var(--text)" : "2px solid transparent",
+              borderRight: bits & 2 ? "2px solid var(--text)" : "2px solid transparent",
+              borderBottom: bits & 4 ? "2px solid var(--text)" : "2px solid transparent",
+              borderLeft: bits & 8 ? "2px solid var(--text)" : "2px solid transparent",
+              background: isPlayer
+                ? "var(--accent-soft)"
+                : onHint
+                  ? "#fdf3c7"
+                  : isGoal
+                    ? "#e6f6e6"
+                    : "transparent",
+            }}
+          >
+            {isPlayer ? <span style={{ color: "#1565c0" }}>●</span> : isGoal ? <span style={{ color: "#2e7d32" }}>◎</span> : ""}
+          </div>
+        );
+      })}
+    </div>
+  );
+
   return (
     <>
       <nav className="breadcrumbs" aria-label="パンくず">
@@ -149,54 +207,23 @@ export default function MazeClient() {
             : ""}
       </p>
 
-      <div
-        {...boardGesture}
-        role="grid"
-        aria-label="迷路の盤（スワイプで移動）"
-        style={{
-          display: "grid",
-          gridTemplateColumns: `repeat(${state.cols}, minmax(0, 1fr))`,
-          width: "100%",
-          maxWidth,
-          border: "2px solid var(--text)",
-          background: "#fff",
-          touchAction: "none",
-        }}
-      >
-        {state.walls.map((bits, i) => {
-          const isPlayer = i === state.player;
-          const isGoal = i === state.goal;
-          const onHint = showHint && hintSet.has(i);
-          return (
-            <div
-              key={i}
-              role="gridcell"
-              className={isPlayer ? "juice-pop" : undefined}
-              aria-label={isPlayer ? "現在位置" : isGoal ? "ゴール" : undefined}
-              style={{
-                aspectRatio: "1",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                fontSize: `clamp(9px, ${Math.round(340 / state.cols)}px, 20px)`,
-                borderTop: bits & 1 ? "2px solid var(--text)" : "2px solid transparent",
-                borderRight: bits & 2 ? "2px solid var(--text)" : "2px solid transparent",
-                borderBottom: bits & 4 ? "2px solid var(--text)" : "2px solid transparent",
-                borderLeft: bits & 8 ? "2px solid var(--text)" : "2px solid transparent",
-                background: isPlayer
-                  ? "var(--accent-soft)"
-                  : onHint
-                    ? "#fdf3c7"
-                    : isGoal
-                      ? "#e6f6e6"
-                      : "transparent",
-              }}
-            >
-              {isPlayer ? <span style={{ color: "#1565c0" }}>●</span> : isGoal ? <span style={{ color: "#2e7d32" }}>◎</span> : ""}
-            </div>
-          );
-        })}
-      </div>
+      {webglFailed ? board2d : (
+        <div style={{ width: "100%", maxWidth, margin: "0 auto" }}>
+          <MazeScene3D
+            walls={state.walls}
+            cols={state.cols}
+            rows={state.rows}
+            player={state.player}
+            goal={state.goal}
+            showHint={showHint}
+            solution={state.solution}
+            status={state.status}
+            onMove={doMove}
+            onFail={() => setWebglFailed(true)}
+            fallback={board2d}
+          />
+        </div>
+      )}
 
       <p className="muted" style={{ fontSize: 13, marginTop: 10 }}>
         盤面をスワイプでも移動できます。矢印キー・WASD でも動けます。

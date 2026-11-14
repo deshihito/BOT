@@ -3,7 +3,11 @@
 // 玉方の応手はソルバーが自動で指す（詰みを逃れられる手があればそれを選ぶ）。
 // 端末内で完結し、サーバーへ送信しない。
 import Link from "next/link";
+import dynamic from "next/dynamic";
 import { useEffect, useMemo, useRef, useState } from "react";
+
+// 3D シーンは three を含むため遅延読み込み（このページ専用チャンクに閉じる）。
+const TsumeScene3D = dynamic(() => import("./TsumeScene3D"), { ssr: false });
 import {
   PIECE_LABEL,
   TSUME_PROBLEMS,
@@ -30,6 +34,7 @@ const HAND_ORDER: TsumeBasePiece[] = ["R", "B", "G", "S", "N", "L", "P"];
 export default function TsumeClient() {
   const { prefix } = useGamesNav();
   const [state, setState] = useState<TsumeGameState>(() => createTsumeGame(TSUME_PROBLEMS[0].id));
+  const [webglFailed, setWebglFailed] = useState(false);
   const [selection, setSelection] = useState<Selection>(null);
   const [promoteChoice, setPromoteChoice] = useState<TsumeMove[] | null>(null);
 
@@ -97,6 +102,14 @@ export default function TsumeClient() {
     }
   };
 
+  const onHandPiece = (piece: TsumeBasePiece) => {
+    sfxTap();
+    setPromoteChoice(null);
+    setSelection((cur) =>
+      cur?.kind === "hand" && cur.piece === piece ? null : { kind: "hand", piece },
+    );
+  };
+
   const undo = () => {
     if (state.snapshots.length === 0) return;
     setState((s) => undoAttackerMove(s));
@@ -113,44 +126,9 @@ export default function TsumeClient() {
 
   const remaining = state.problem.moves - state.movesUsed;
 
-  return (
+  // 2D 盤（WebGL が使えない場合のフォールバックとしてそのまま使う）。
+  const board2d = (
     <>
-      <nav className="breadcrumbs" aria-label="パンくず">
-        <Link href={`${prefix}/games`}>ゲーム</Link>
-        <span> / </span>
-        <span>詰将棋</span>
-      </nav>
-      <div className="page-heading compact-heading">
-        <h1>詰将棋</h1>
-        <p className="muted">持ち駒や盤の駒をタップして選び、光ったマスへ動かします。盤面を左にスワイプすると1手戻せます。</p>
-      </div>
-
-      <div className="classic-controls" role="group" aria-label="問題">
-        {TSUME_PROBLEMS.map((p) => (
-          <div
-            key={p.id}
-            {...tappableProps(() => startProblem(p.id))}
-            aria-pressed={state.problem.id === p.id}
-            className={state.problem.id === p.id ? "classic-btn classic-btn-active" : "classic-btn"}
-          >
-            {p.title}（{p.moves}手）
-          </div>
-        ))}
-        <button type="button" className="classic-btn" onClick={() => startProblem(state.problem.id)}>
-          もう一度
-        </button>
-      </div>
-
-      <p className="classic-status" role="status">
-        {state.status === "cleared"
-          ? "詰み！"
-          : state.status === "failed"
-            ? "詰みませんでした。"
-            : `あと ${remaining} 手で詰ませる問題です。`}{" "}
-        {state.message}
-      </p>
-
-      <div style={{ maxWidth: 460, margin: "0 auto" }}>
         <div
           style={{
             display: "grid",
@@ -233,7 +211,65 @@ export default function TsumeClient() {
             );
           })}
         </div>
+    </>
+  );
 
+
+  return (
+    <>
+      <nav className="breadcrumbs" aria-label="パンくず">
+        <Link href={`${prefix}/games`}>ゲーム</Link>
+        <span> / </span>
+        <span>詰将棋</span>
+      </nav>
+      <div className="page-heading compact-heading">
+        <h1>詰将棋</h1>
+        <p className="muted">持ち駒や盤の駒をタップして選び、光ったマスへ動かします。盤面を左にスワイプすると1手戻せます。</p>
+      </div>
+
+      <div className="classic-controls" role="group" aria-label="問題">
+        {TSUME_PROBLEMS.map((p) => (
+          <div
+            key={p.id}
+            {...tappableProps(() => startProblem(p.id))}
+            aria-pressed={state.problem.id === p.id}
+            className={state.problem.id === p.id ? "classic-btn classic-btn-active" : "classic-btn"}
+          >
+            {p.title}（{p.moves}手）
+          </div>
+        ))}
+        <button type="button" className="classic-btn" onClick={() => startProblem(state.problem.id)}>
+          もう一度
+        </button>
+      </div>
+
+      <p className="classic-status" role="status">
+        {state.status === "cleared"
+          ? "詰み！"
+          : state.status === "failed"
+            ? "詰みませんでした。"
+            : `あと ${remaining} 手で詰ませる問題です。`}{" "}
+        {state.message}
+      </p>
+
+      <div style={{ maxWidth: 460, margin: "0 auto" }}>
+        {webglFailed ? (
+          board2d
+        ) : (
+          <TsumeScene3D
+            board={state.pos.board}
+            handA={state.pos.handA}
+            handD={state.pos.handD}
+            selected={selection?.kind === "board" ? selection.from : null}
+            selectedHand={selection?.kind === "hand" ? selection.piece : null}
+            targets={[...targets.keys()]}
+            onCell={onCell}
+            onHand={onHandPiece}
+            onSwipeLeft={undo}
+            onFail={() => setWebglFailed(true)}
+            fallback={board2d}
+          />
+        )}
         <div style={{ marginTop: 10 }}>
           <span style={{ fontSize: 13, marginRight: 8 }}>攻め方の持ち駒:</span>
           {HAND_ORDER.filter((p) => (state.pos.handA[p] ?? 0) > 0).length === 0 && (
@@ -244,11 +280,7 @@ export default function TsumeClient() {
             return (
               <div
                 key={p}
-                {...tappableProps(() => {
-                  sfxTap();
-                  setPromoteChoice(null);
-                  setSelection(selected ? null : { kind: "hand", piece: p });
-                })}
+                {...tappableProps(() => onHandPiece(p))}
                 aria-pressed={selected}
                 className={selected ? "classic-btn classic-btn-active" : "classic-btn"}
                 style={{ minWidth: 52, marginRight: 6, marginBottom: 6 }}

@@ -2,7 +2,11 @@
 // 15パズル。ロジックは lib/fifteen.ts（解可能性を保証するシャッフル）。
 // 空白と同じ行・列のタイルをタップするとまとめてスライドする。端末内で完結。
 import Link from "next/link";
+import dynamic from "next/dynamic";
 import { useEffect, useRef, useState } from "react";
+
+// 3D シーンは three を含むため遅延読み込み（このページ専用チャンクに閉じる）。
+const FifteenScene3D = dynamic(() => import("./FifteenScene3D"), { ssr: false });
 import {
   canSlide,
   createFifteenGame,
@@ -32,6 +36,7 @@ function formatTime(total: number): string {
 
 export default function FifteenClient() {
   const { prefix } = useGamesNav();
+  const [webglFailed, setWebglFailed] = useState(false);
   const [size, setSize] = useState<FifteenSize>(4);
   const [state, setState] = useState<FifteenState>(() => newGame(4));
   const [seconds, setSeconds] = useState(0);
@@ -65,6 +70,51 @@ export default function FifteenClient() {
     setState(newGame(nextSize));
     setSeconds(0);
   };
+
+  // 2D 盤（WebGL が使えない場合のフォールバックとしてそのまま使う）。
+  const board2d = (
+    <div
+      role="grid"
+      aria-label="15パズルの盤"
+      style={{
+        display: "grid",
+        gridTemplateColumns: `repeat(${size}, minmax(0, 1fr))`,
+        gap: 6,
+        maxWidth: 420,
+        width: "100%",
+      }}
+    >
+      {state.tiles.map((value, i) => {
+        const isBlank = value === 0;
+        const correctPos = value !== 0 && value === i + 1;
+        const movable = !isBlank && canSlide(state, i);
+        return (
+          <button
+            key={i}
+            type="button"
+            role="gridcell"
+            disabled={isBlank}
+            aria-label={isBlank ? "空白" : `タイル ${value}`}
+            onClick={() => handleTile(i)}
+            style={{
+              aspectRatio: "1",
+              minHeight: 52,
+              borderRadius: 10,
+              border: isBlank ? "2px dashed #cbd5e1" : "1px solid #94a3b8",
+              background: isBlank ? "#f8fafc" : correctPos ? "#dcfce7" : "#fff",
+              color: "#1e293b",
+              fontSize: "clamp(18px, 6vw, 28px)",
+              fontWeight: 700,
+              cursor: isBlank ? "default" : movable ? "pointer" : "default",
+              opacity: isBlank ? 0.6 : 1,
+            }}
+          >
+            {isBlank ? "" : value}
+          </button>
+        );
+      })}
+    </div>
+  );
 
   return (
     <>
@@ -102,47 +152,18 @@ export default function FifteenClient() {
           : " ・ 空白の近くや同じ行・列のタイルをタップしてください。"}
       </p>
 
-      <div
-        role="grid"
-        aria-label="15パズルの盤"
-        style={{
-          display: "grid",
-          gridTemplateColumns: `repeat(${size}, minmax(0, 1fr))`,
-          gap: 6,
-          maxWidth: 420,
-          width: "100%",
-        }}
-      >
-        {state.tiles.map((value, i) => {
-          const isBlank = value === 0;
-          const correctPos = value !== 0 && value === i + 1;
-          const movable = !isBlank && canSlide(state, i);
-          return (
-            <button
-              key={i}
-              type="button"
-              role="gridcell"
-              disabled={isBlank}
-              aria-label={isBlank ? "空白" : `タイル ${value}`}
-              onClick={() => handleTile(i)}
-              style={{
-                aspectRatio: "1",
-                minHeight: 52,
-                borderRadius: 10,
-                border: isBlank ? "2px dashed #cbd5e1" : "1px solid #94a3b8",
-                background: isBlank ? "#f8fafc" : correctPos ? "#dcfce7" : "#fff",
-                color: "#1e293b",
-                fontSize: "clamp(18px, 6vw, 28px)",
-                fontWeight: 700,
-                cursor: isBlank ? "default" : movable ? "pointer" : "default",
-                opacity: isBlank ? 0.6 : 1,
-              }}
-            >
-              {isBlank ? "" : value}
-            </button>
-          );
-        })}
-      </div>
+      {webglFailed ? board2d : (
+        <div style={{ width: "100%", maxWidth: 420 }}>
+          <FifteenScene3D
+            tiles={state.tiles}
+            size={size}
+            status={state.status}
+            onTile={handleTile}
+            onFail={() => setWebglFailed(true)}
+            fallback={board2d}
+          />
+        </div>
+      )}
 
       <div style={{ display: "flex", gap: 4, marginTop: 14, flexWrap: "wrap" }} aria-hidden="true">
         {Array.from({ length: size * size - 1 }, (_, i) => i + 1).map((n) => (

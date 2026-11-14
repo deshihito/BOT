@@ -2,7 +2,11 @@
 // ビルディング（Skyscrapers）。ロジックは lib/skyscrapers.ts（解先行生成・ルール検証で完成判定）。
 // マスを選んで下の数字パッドで高さを入れる。端末内で完結し、サーバーへ送信しない。
 import Link from "next/link";
+import dynamic from "next/dynamic";
 import { useEffect, useMemo, useRef, useState } from "react";
+
+// 3D シーンは three を含むため遅延読み込み（このページ専用チャンクに閉じる）。
+const SkyscrapersScene3D = dynamic(() => import("./SkyscrapersScene3D"), { ssr: false });
 import {
   createSkyscrapersGame,
   setSkyValue,
@@ -25,6 +29,7 @@ function newGame(size: SkyscrapersSize, hard: boolean): SkyscrapersState {
 
 export default function SkyscrapersClient() {
   const { prefix } = useGamesNav();
+  const [webglFailed, setWebglFailed] = useState(false);
   const [size, setSize] = useState<SkyscrapersSize>(4);
   const [hard, setHard] = useState(false);
   const [state, setState] = useState<SkyscrapersState>(() => newGame(4, false));
@@ -80,6 +85,12 @@ export default function SkyscrapersClient() {
     setSeconds(0);
     setResultNewBest(false);
     setResultPrevBest(null);
+  };
+
+  const selectCell = (index: number) => {
+    if (state.status === "won") return;
+    sfxTap();
+    setSelected(index);
   };
 
   const inputValue = (v: number) => {
@@ -180,17 +191,11 @@ export default function SkyscrapersClient() {
           aria-label={`${gr}行${gc}列 ${value === 0 ? "空き" : `高さ ${value}`}`}
           aria-pressed={isSelected}
           className={badCells.has(index) ? "juice-shake" : value !== 0 ? "juice-pop" : undefined}
-          onClick={() => {
-            if (state.status === "won") return;
-            sfxTap();
-            setSelected(index);
-          }}
+          onClick={() => selectCell(index)}
           onKeyDown={(e) => {
             if (e.key !== "Enter" && e.key !== " ") return;
             e.preventDefault();
-            if (state.status === "won") return;
-            sfxTap();
-            setSelected(index);
+            selectCell(index);
           }}
           style={{
             aspectRatio: "1",
@@ -210,6 +215,23 @@ export default function SkyscrapersClient() {
       );
     }
   }
+
+  // 2D 盤（WebGL が使えない場合のフォールバックとしてそのまま使う）。
+  const board2d = (
+      <div
+        role="grid"
+        aria-label="ビルディングの盤"
+        style={{
+          display: "grid",
+          gridTemplateColumns: `repeat(${n + 2}, minmax(0, 1fr))`,
+          gap: 4,
+          maxWidth: 460,
+          margin: "0 auto",
+        }}
+      >
+        {gridCells}
+      </div>
+  );
 
   return (
     <>
@@ -253,19 +275,20 @@ export default function SkyscrapersClient() {
         {best !== null ? ` ・ ベスト ${best} 秒` : ""} ・ {statusText}
       </p>
 
-      <div
-        role="grid"
-        aria-label="ビルディングの盤"
-        style={{
-          display: "grid",
-          gridTemplateColumns: `repeat(${n + 2}, minmax(0, 1fr))`,
-          gap: 4,
-          maxWidth: 460,
-          margin: "0 auto",
-        }}
-      >
-        {gridCells}
-      </div>
+      {webglFailed ? board2d : (
+        <div style={{ width: "100%", maxWidth: 460, margin: "0 auto" }}>
+          <SkyscrapersScene3D
+            size={state.size}
+            values={state.values}
+            clues={state.clues}
+            selected={selected}
+            badCells={[...badCells]}
+            onSelect={selectCell}
+            onFail={() => setWebglFailed(true)}
+            fallback={board2d}
+          />
+        </div>
+      )}
 
       <div
         role="group"

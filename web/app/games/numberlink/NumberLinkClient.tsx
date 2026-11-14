@@ -3,7 +3,11 @@
 // 数字のマスから指（ポインタ）を滑らせて線を引く。他の線を横切ると、その線は切れる。
 // 端末内で完結し、サーバーへ送信しない。
 import Link from "next/link";
+import dynamic from "next/dynamic";
 import { useEffect, useRef, useState } from "react";
+
+// 3D シーンは three を含むため遅延読み込み（このページ専用チャンクに閉じる）。
+const NumberLinkScene3D = dynamic(() => import("./NumberLinkScene3D"), { ssr: false });
 import {
   applyStroke,
   checkNumberlink,
@@ -37,6 +41,7 @@ function pairColor(pair: number): string {
 
 export default function NumberLinkClient() {
   const { prefix } = useGamesNav();
+  const [webglFailed, setWebglFailed] = useState(false);
   const [size, setSize] = useState<NumberlinkSize>(5);
   const [state, setState] = useState<NumberlinkState>(() =>
     createNumberlink(5, Date.now() % 2147483647),
@@ -168,39 +173,8 @@ export default function NumberLinkClient() {
       ? "全部つながった！クリアです。"
       : `つながったペア ${check.connectedPairs}/${check.pairCount} ・ 埋まったマス ${check.filled}/${check.total}`;
 
-  return (
-    <>
-      <nav className="breadcrumbs" aria-label="パンくず">
-        <Link href={`${prefix}/games`}>ゲーム</Link>
-        <span> / </span>
-        <span>ナンバーリンク</span>
-      </nav>
-      <div className="page-heading compact-heading">
-        <h1>ナンバーリンク</h1>
-        <p className="muted">数字のマスから指を滑らせて、同じ数字まで線を引きます。</p>
-      </div>
-
-      <div className="classic-controls" role="group" aria-label="盤サイズ">
-        {([5, 6] as NumberlinkSize[]).map((s) => (
-          <button
-            key={s}
-            type="button"
-            aria-pressed={size === s}
-            className={size === s ? "classic-btn classic-btn-active" : "classic-btn"}
-            onClick={() => restart(s)}
-          >
-            {s}×{s}
-          </button>
-        ))}
-        <button type="button" className="classic-btn" onClick={() => restart(size)}>
-          もう一度
-        </button>
-      </div>
-
-      <p className="classic-status" role="status">
-        {statusText} ・ {seconds} 秒{best !== null ? ` ・ ベスト ${best} 秒` : ""}
-      </p>
-
+  // 2D 盤（WebGL が使えない場合のフォールバックとしてそのまま使う）。
+  const board2d = (
       <div
         ref={boardRef}
         role="grid"
@@ -267,6 +241,53 @@ export default function NumberLinkClient() {
           );
         })}
       </div>
+  );
+
+  return (
+    <>
+      <nav className="breadcrumbs" aria-label="パンくず">
+        <Link href={`${prefix}/games`}>ゲーム</Link>
+        <span> / </span>
+        <span>ナンバーリンク</span>
+      </nav>
+      <div className="page-heading compact-heading">
+        <h1>ナンバーリンク</h1>
+        <p className="muted">数字のマスから指を滑らせて、同じ数字まで線を引きます。</p>
+      </div>
+
+      <div className="classic-controls" role="group" aria-label="盤サイズ">
+        {([5, 6] as NumberlinkSize[]).map((s) => (
+          <button
+            key={s}
+            type="button"
+            aria-pressed={size === s}
+            className={size === s ? "classic-btn classic-btn-active" : "classic-btn"}
+            onClick={() => restart(s)}
+          >
+            {s}×{s}
+          </button>
+        ))}
+        <button type="button" className="classic-btn" onClick={() => restart(size)}>
+          もう一度
+        </button>
+      </div>
+
+      <p className="classic-status" role="status">
+        {statusText} ・ {seconds} 秒{best !== null ? ` ・ ベスト ${best} 秒` : ""}
+      </p>
+
+      {webglFailed ? board2d : (
+        <div style={{ width: "100%", maxWidth: 420, margin: "0 auto" }}>
+          <NumberLinkScene3D
+            state={state}
+            onStrokeStart={beginStroke}
+            onStrokeMove={extendStroke}
+            onStrokeEnd={endStroke}
+            onFail={() => setWebglFailed(true)}
+            fallback={board2d}
+          />
+        </div>
+      )}
 
       {state.status === "won" ? (
         <EndScreen

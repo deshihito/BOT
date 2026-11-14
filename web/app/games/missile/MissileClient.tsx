@@ -3,7 +3,10 @@
 // フィールドをタップした地点へ一番近い基地から迎撃弾を撃ち、爆風で敵ミサイルを壊す。
 // 端末内で完結し、サーバーへ送信しない。
 import Link from "next/link";
+import dynamic from "next/dynamic";
 import { useEffect, useRef, useState } from "react";
+
+const MissileScene3D = dynamic(() => import("./MissileScene3D"), { ssr: false });
 import {
   FIELD_H,
   FIELD_W,
@@ -31,6 +34,7 @@ function newGame(): MissileState {
 export default function MissileClient() {
   const { prefix } = useGamesNav();
   const [state, setState] = useState<MissileState>(() => newGame());
+  const [webglFailed, setWebglFailed] = useState(false);
   const [best, setBest] = useState<number | null>(null);
   const [endInfo, setEndInfo] = useState<{ newBest: boolean; prevBest: number | null } | null>(null);
   const svgRef = useRef<SVGSVGElement | null>(null);
@@ -81,6 +85,13 @@ export default function MissileClient() {
     }
   }, [state.phase, state.seed, state.wave, state.score, best]);
 
+  const fireAtPoint = (x: number, y: number) => {
+    const cur = stateRef.current;
+    const next = fireAt(cur, x, y);
+    if (next.interceptors.length > cur.interceptors.length) sfxTap();
+    setState(next);
+  };
+
   const onFire = (e: React.PointerEvent<SVGSVGElement>) => {
     const svg = svgRef.current;
     if (!svg) return;
@@ -88,10 +99,7 @@ export default function MissileClient() {
     if (rect.width <= 0 || rect.height <= 0) return;
     const x = ((e.clientX - rect.left) / rect.width) * FIELD_W;
     const y = ((e.clientY - rect.top) / rect.height) * FIELD_H;
-    const cur = stateRef.current;
-    const next = fireAt(cur, x, y);
-    if (next.interceptors.length > cur.interceptors.length) sfxTap();
-    setState(next);
+    fireAtPoint(x, y);
   };
 
   const restart = () => {
@@ -110,6 +118,117 @@ export default function MissileClient() {
         : totalAmmo(state) === 0
           ? "迎撃弾が尽きた…このウェーブは耐えるしかない。"
           : "空をタップして迎撃しよう。";
+
+  const board2d = (
+  <svg
+    ref={svgRef}
+    viewBox={`0 0 ${FIELD_W} ${FIELD_H}`}
+    role="img"
+    aria-label="ミサイル防衛のフィールド。タップした地点へ迎撃弾を撃ちます"
+    onPointerDown={onFire}
+    style={{
+      width: "100%",
+      maxWidth: 760,
+      display: "block",
+      margin: "0 auto",
+      background: "linear-gradient(#0b1026, #1b2a4a)",
+      borderRadius: 12,
+      touchAction: "manipulation",
+      cursor: state.phase === "playing" ? "crosshair" : "default",
+    }}
+  >
+    {/* 地面 */}
+    <rect x={0} y={GROUND_Y} width={FIELD_W} height={FIELD_H - GROUND_Y} fill="#2e4a2f" />
+    {/* 敵ミサイルの軌跡と弾頭 */}
+    {state.enemies.map((m) => {
+      const p = enemyPosition(m);
+      return (
+        <g key={m.id} aria-hidden>
+          <line x1={m.sx} y1={m.sy} x2={p.x} y2={p.y} stroke="#ff9d5c" strokeWidth={2} opacity={0.7} />
+          <circle cx={p.x} cy={p.y} r={5} fill="#ff5c5c" />
+        </g>
+      );
+    })}
+    {/* 迎撃弾 */}
+    {state.interceptors.map((it, i) => {
+      const p = interceptorPosition(it);
+      return (
+        <g key={i} aria-hidden>
+          <line x1={it.sx} y1={it.sy} x2={p.x} y2={p.y} stroke="#9fd8ff" strokeWidth={2} opacity={0.7} />
+          <circle cx={p.x} cy={p.y} r={4} fill="#cfeaff" />
+        </g>
+      );
+    })}
+    {/* 爆風 */}
+    {state.blasts.map((b, i) => (
+      <circle
+        key={i}
+        cx={b.x}
+        cy={b.y}
+        r={Math.max(0, blastRadius(b.ageSteps))}
+        fill="#ffb347"
+        opacity={0.45}
+        aria-hidden
+      />
+    ))}
+    {/* 構造物 */}
+    {state.structures.map((s, i) =>
+      s.kind === "city" ? (
+        <g key={i} aria-hidden>
+          {s.alive ? (
+            <>
+              <rect x={s.x - 22} y={GROUND_Y - 34} width={44} height={34} fill="#8fa8c8" />
+              <rect x={s.x - 14} y={GROUND_Y - 46} width={28} height={46} fill="#aebfd8" />
+            </>
+          ) : (
+            <rect x={s.x - 22} y={GROUND_Y - 8} width={44} height={8} fill="#555" />
+          )}
+          <text x={s.x} y={GROUND_Y + 24} textAnchor="middle" fontSize={15} fill="#dce8f5">
+            {s.alive ? "都市" : "壊滅"}
+          </text>
+        </g>
+      ) : (
+        <g key={i} aria-hidden>
+          {s.alive ? (
+            <polygon
+              points={`${s.x - 24},${GROUND_Y} ${s.x},${GROUND_Y - 30} ${s.x + 24},${GROUND_Y}`}
+              fill="#c8b06a"
+            />
+          ) : (
+            <rect x={s.x - 24} y={GROUND_Y - 8} width={48} height={8} fill="#555" />
+          )}
+          <text x={s.x} y={GROUND_Y + 24} textAnchor="middle" fontSize={15} fill="#dce8f5">
+            {s.alive ? "基地" : "壊滅"}
+          </text>
+        </g>
+      ),
+    )}
+    {state.phase === "over" && (
+      <text
+        x={FIELD_W / 2}
+        y={FIELD_H / 2}
+        textAnchor="middle"
+        fontSize={44}
+        fontWeight={700}
+        fill="#fff"
+      >
+        ゲームオーバー（ウェーブ{state.wave}・{state.score}点）
+      </text>
+    )}
+    {state.phase === "waveclear" && (
+      <text
+        x={FIELD_W / 2}
+        y={FIELD_H / 2}
+        textAnchor="middle"
+        fontSize={36}
+        fontWeight={700}
+        fill="#ffe28a"
+      >
+        ウェーブ{state.wave} クリア!
+      </text>
+    )}
+  </svg>
+  );
 
   return (
     <>
@@ -137,114 +256,11 @@ export default function MissileClient() {
         {aliveBases(state)}/3 ・ 残弾 {totalAmmo(state)} ・ 破壊 {state.kills} ・ {statusText}
       </p>
 
-      <svg
-        ref={svgRef}
-        viewBox={`0 0 ${FIELD_W} ${FIELD_H}`}
-        role="img"
-        aria-label="ミサイル防衛のフィールド。タップした地点へ迎撃弾を撃ちます"
-        onPointerDown={onFire}
-        style={{
-          width: "100%",
-          maxWidth: 760,
-          display: "block",
-          margin: "0 auto",
-          background: "linear-gradient(#0b1026, #1b2a4a)",
-          borderRadius: 12,
-          touchAction: "manipulation",
-          cursor: state.phase === "playing" ? "crosshair" : "default",
-        }}
-      >
-        {/* 地面 */}
-        <rect x={0} y={GROUND_Y} width={FIELD_W} height={FIELD_H - GROUND_Y} fill="#2e4a2f" />
-        {/* 敵ミサイルの軌跡と弾頭 */}
-        {state.enemies.map((m) => {
-          const p = enemyPosition(m);
-          return (
-            <g key={m.id} aria-hidden>
-              <line x1={m.sx} y1={m.sy} x2={p.x} y2={p.y} stroke="#ff9d5c" strokeWidth={2} opacity={0.7} />
-              <circle cx={p.x} cy={p.y} r={5} fill="#ff5c5c" />
-            </g>
-          );
-        })}
-        {/* 迎撃弾 */}
-        {state.interceptors.map((it, i) => {
-          const p = interceptorPosition(it);
-          return (
-            <g key={i} aria-hidden>
-              <line x1={it.sx} y1={it.sy} x2={p.x} y2={p.y} stroke="#9fd8ff" strokeWidth={2} opacity={0.7} />
-              <circle cx={p.x} cy={p.y} r={4} fill="#cfeaff" />
-            </g>
-          );
-        })}
-        {/* 爆風 */}
-        {state.blasts.map((b, i) => (
-          <circle
-            key={i}
-            cx={b.x}
-            cy={b.y}
-            r={Math.max(0, blastRadius(b.ageSteps))}
-            fill="#ffb347"
-            opacity={0.45}
-            aria-hidden
-          />
-        ))}
-        {/* 構造物 */}
-        {state.structures.map((s, i) =>
-          s.kind === "city" ? (
-            <g key={i} aria-hidden>
-              {s.alive ? (
-                <>
-                  <rect x={s.x - 22} y={GROUND_Y - 34} width={44} height={34} fill="#8fa8c8" />
-                  <rect x={s.x - 14} y={GROUND_Y - 46} width={28} height={46} fill="#aebfd8" />
-                </>
-              ) : (
-                <rect x={s.x - 22} y={GROUND_Y - 8} width={44} height={8} fill="#555" />
-              )}
-              <text x={s.x} y={GROUND_Y + 24} textAnchor="middle" fontSize={15} fill="#dce8f5">
-                {s.alive ? "都市" : "壊滅"}
-              </text>
-            </g>
-          ) : (
-            <g key={i} aria-hidden>
-              {s.alive ? (
-                <polygon
-                  points={`${s.x - 24},${GROUND_Y} ${s.x},${GROUND_Y - 30} ${s.x + 24},${GROUND_Y}`}
-                  fill="#c8b06a"
-                />
-              ) : (
-                <rect x={s.x - 24} y={GROUND_Y - 8} width={48} height={8} fill="#555" />
-              )}
-              <text x={s.x} y={GROUND_Y + 24} textAnchor="middle" fontSize={15} fill="#dce8f5">
-                {s.alive ? "基地" : "壊滅"}
-              </text>
-            </g>
-          ),
-        )}
-        {state.phase === "over" && (
-          <text
-            x={FIELD_W / 2}
-            y={FIELD_H / 2}
-            textAnchor="middle"
-            fontSize={44}
-            fontWeight={700}
-            fill="#fff"
-          >
-            ゲームオーバー（ウェーブ{state.wave}・{state.score}点）
-          </text>
-        )}
-        {state.phase === "waveclear" && (
-          <text
-            x={FIELD_W / 2}
-            y={FIELD_H / 2}
-            textAnchor="middle"
-            fontSize={36}
-            fontWeight={700}
-            fill="#ffe28a"
-          >
-            ウェーブ{state.wave} クリア!
-          </text>
-        )}
-      </svg>
+      {webglFailed ? board2d : (
+        <div style={{ maxWidth: 760, margin: "0 auto" }}>
+          <MissileScene3D getState={() => stateRef.current} onFire={fireAtPoint} onFail={() => setWebglFailed(true)} fallback={board2d} />
+        </div>
+      )}
       <p className="muted" style={{ textAlign: "center", marginTop: 8 }}>
         残弾はウェーブごとに補充されます。分裂したミサイルは爆風でまとめて壊せます。
       </p>

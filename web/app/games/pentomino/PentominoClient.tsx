@@ -4,7 +4,11 @@
 // ピース未選択で配置済みのマスをタップすると、そのピースを外せる。
 // 端末内で完結し、サーバーへ送信しない。
 import Link from "next/link";
+import dynamic from "next/dynamic";
 import { useEffect, useMemo, useRef, useState } from "react";
+
+// 3D シーンは three を含むため遅延読み込み（このページ専用チャンクに閉じる）。
+const PentominoScene3D = dynamic(() => import("./PentominoScene3D"), { ssr: false });
 import { sfxPlace, sfxTap, sfxWin, sfxWrong } from "@/lib/sfx";
 import { tappableProps, useGesture } from "@/lib/gesture";
 import { EndScreen } from "../GameJuice";
@@ -72,6 +76,7 @@ function PiecePreview({
 
 export default function PentominoClient() {
   const { prefix } = useGamesNav();
+  const [webglFailed, setWebglFailed] = useState(false);
   const [boardKey, setBoardKey] = useState<PentBoardKey>("6x10");
   const [state, setState] = useState<PentState>(() => createPentGame("6x10"));
   const [selected, setSelected] = useState<PentId | null>(null);
@@ -174,6 +179,68 @@ export default function PentominoClient() {
           ? `${selected} を置くマスをタップしてください（タップしたマスにピースの端が乗ります）。上のピース表示をタップで回転、左右スワイプで反転。`
           : "パレットからピースを選んでください。配置済みのマスをタップすると外せます。");
 
+  // 2D 盤（WebGL が使えない場合のフォールバックとしてそのまま使う）。
+  const board2d = (
+    <div
+      role="grid"
+      aria-label="ペントミノの盤"
+      style={{
+        display: "grid",
+        gridTemplateColumns: `repeat(${state.cols}, minmax(0, 1fr))`,
+        gap: 2,
+        width: "100%",
+        maxWidth: 600,
+        margin: "0 auto",
+      }}
+    >
+      {occupancy.map((occupant, index) => {
+        const isPreview = previewCells.has(index);
+        const color = occupant
+          ? pentPieceDef(occupant).color
+          : isPreview && selected
+            ? pentPieceDef(selected).color
+            : null;
+        return (
+          <div
+            key={index}
+            role="gridcell"
+            tabIndex={0}
+            className={occupant ? "juice-pop" : undefined}
+            aria-label={
+              occupant ? `ピース ${occupant}` : isPreview ? "配置プレビュー" : "空きマス"
+            }
+            onClick={() => onCell(index)}
+            onKeyDown={(e) => {
+              if (e.key !== "Enter" && e.key !== " ") return;
+              e.preventDefault();
+              onCell(index);
+            }}
+            onMouseEnter={() => setHover(index)}
+            onMouseLeave={() => setHover(null)}
+            style={{
+              aspectRatio: "1",
+              borderRadius: 4,
+              border: "1px solid var(--line)",
+              background: color ?? "#fafafa",
+              opacity: isPreview && !occupant ? 0.45 : 1,
+              padding: 0,
+              cursor: "pointer",
+              touchAction: "manipulation",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              color: "#fff",
+              fontWeight: 700,
+              fontSize: 11,
+            }}
+          >
+            {occupant ?? ""}
+          </div>
+        );
+      })}
+    </div>
+  );
+
   return (
     <>
       <nav className="breadcrumbs" aria-label="パンくず">
@@ -274,65 +341,21 @@ export default function PentominoClient() {
         </div>
       )}
 
-      {/* 盤面 */}
-      <div
-        role="grid"
-        aria-label="ペントミノの盤"
-        style={{
-          display: "grid",
-          gridTemplateColumns: `repeat(${state.cols}, minmax(0, 1fr))`,
-          gap: 2,
-          width: "100%",
-          maxWidth: 600,
-          margin: "0 auto",
-        }}
-      >
-        {occupancy.map((occupant, index) => {
-          const isPreview = previewCells.has(index);
-          const color = occupant
-            ? pentPieceDef(occupant).color
-            : isPreview && selected
-              ? pentPieceDef(selected).color
-              : null;
-          return (
-            <div
-              key={index}
-              role="gridcell"
-              tabIndex={0}
-              className={occupant ? "juice-pop" : undefined}
-              aria-label={
-                occupant ? `ピース ${occupant}` : isPreview ? "配置プレビュー" : "空きマス"
-              }
-              onClick={() => onCell(index)}
-              onKeyDown={(e) => {
-                if (e.key !== "Enter" && e.key !== " ") return;
-                e.preventDefault();
-                onCell(index);
-              }}
-              onMouseEnter={() => setHover(index)}
-              onMouseLeave={() => setHover(null)}
-              style={{
-                aspectRatio: "1",
-                borderRadius: 4,
-                border: "1px solid var(--line)",
-                background: color ?? "#fafafa",
-                opacity: isPreview && !occupant ? 0.45 : 1,
-                padding: 0,
-                cursor: "pointer",
-                touchAction: "manipulation",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                color: "#fff",
-                fontWeight: 700,
-                fontSize: 11,
-              }}
-            >
-              {occupant ?? ""}
-            </div>
-          );
-        })}
-      </div>
+      {/* 盤面（3D。WebGL が使えない場合は 2D 盤へフォールバック） */}
+      {webglFailed ? board2d : (
+        <div style={{ width: "100%", maxWidth: 640, margin: "0 auto" }}>
+          <PentominoScene3D
+            state={state}
+            occupancy={occupancy}
+            previewCells={previewCells}
+            selected={selected}
+            onCell={onCell}
+            onHover={setHover}
+            onFail={() => setWebglFailed(true)}
+            fallback={board2d}
+          />
+        </div>
+      )}
 
       {state.status === "won" && (
         <div style={{ marginTop: 14 }}>

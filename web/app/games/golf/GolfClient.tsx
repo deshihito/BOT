@@ -3,7 +3,10 @@
 // 台札と ±1 の関係にある列の一番下のカードをタップして取る。
 // 端末内で完結し、サーバーへ送信しない。
 import Link from "next/link";
+import dynamic from "next/dynamic";
 import { useEffect, useRef, useState } from "react";
+
+const GolfScene3D = dynamic(() => import("./GolfScene3D"), { ssr: false });
 import { sfxFlip, sfxLose, sfxPlace, sfxTap, sfxWin } from "@/lib/sfx";
 import { EndScreen } from "../GameJuice";
 import {
@@ -27,6 +30,7 @@ function newGame(): GolfState {
 
 function CardFace({ card }: { card: GolfCard }) {
   const red = golfIsRed(card.suit);
+
   return (
     <span
       style={{
@@ -48,6 +52,7 @@ function CardFace({ card }: { card: GolfCard }) {
 export default function GolfClient() {
   const { prefix } = useGamesNav();
   const [state, setState] = useState<GolfState>(() => newGame());
+  const [webglFailed, setWebglFailed] = useState(false);
   const endSfxRef = useRef<string | null>(null);
 
   useEffect(() => {
@@ -88,54 +93,8 @@ export default function GolfClient() {
             ? "取れるカードがありません。山札をめくりましょう。"
             : "取れるカードがありません。";
 
-  return (
+  const board2d = (
     <>
-      <nav className="breadcrumbs" aria-label="パンくず">
-        <Link href={`${prefix}/games`}>ゲーム</Link>
-        <span> / </span>
-        <span>ゴルフ</span>
-      </nav>
-      <div className="page-heading compact-heading">
-        <h1>ゴルフソリティア</h1>
-        <p className="muted">
-          台札と数字が1つ違いのカードが光ります。光ったカードをタップすると台札へ取れます。
-        </p>
-      </div>
-
-      <div className="classic-controls" role="group" aria-label="操作">
-        <button type="button" className="classic-btn" onClick={restart}>
-          もう一度
-        </button>
-        <button
-          type="button"
-          className="classic-btn"
-          onClick={handleFlip}
-          disabled={state.stock.length === 0 || state.status !== "playing"}
-        >
-          山札をめくる（残り{state.stock.length}枚）
-        </button>
-      </div>
-
-      <p className="classic-status" role="status">
-        手数 {state.moves} ・ 取った枚数 {state.taken} ・ 場の残り {remaining} 枚 ・ {statusText}
-      </p>
-
-      {state.status !== "playing" && (
-        <EndScreen
-          outcome={state.status === "won" ? "win" : "lose"}
-          score={state.taken}
-          scoreLabel="取った枚数"
-          onRetry={restart}
-        >
-          <p className="muted" style={{ margin: 0 }}>
-            {state.status === "won"
-              ? "場札を全部取った！クリアです。"
-              : `終了です。残り ${remaining} 枚でした。`}
-            {` 手数 ${state.moves} ・ 取った枚数 ${state.taken}`}
-          </p>
-        </EndScreen>
-      )}
-
       <div
         style={{
           display: "flex",
@@ -253,6 +212,69 @@ export default function GolfClient() {
           </div>
         ))}
       </div>
+    </>
+  );
+
+  return (
+    <>
+      <nav className="breadcrumbs" aria-label="パンくず">
+        <Link href={`${prefix}/games`}>ゲーム</Link>
+        <span> / </span>
+        <span>ゴルフ</span>
+      </nav>
+      <div className="page-heading compact-heading">
+        <h1>ゴルフソリティア</h1>
+        <p className="muted">
+          台札と数字が1つ違いのカードが光ります。光ったカードをタップすると台札へ取れます。
+        </p>
+      </div>
+
+      <div className="classic-controls" role="group" aria-label="操作">
+        <button type="button" className="classic-btn" onClick={restart}>
+          もう一度
+        </button>
+        <button
+          type="button"
+          className="classic-btn"
+          onClick={handleFlip}
+          disabled={state.stock.length === 0 || state.status !== "playing"}
+        >
+          山札をめくる（残り{state.stock.length}枚）
+        </button>
+      </div>
+
+      <p className="classic-status" role="status">
+        手数 {state.moves} ・ 取った枚数 {state.taken} ・ 場の残り {remaining} 枚 ・ {statusText}
+      </p>
+
+      {state.status !== "playing" && (
+        <EndScreen
+          outcome={state.status === "won" ? "win" : "lose"}
+          score={state.taken}
+          scoreLabel="取った枚数"
+          onRetry={restart}
+        >
+          <p className="muted" style={{ margin: 0 }}>
+            {state.status === "won"
+              ? "場札を全部取った！クリアです。"
+              : `終了です。残り ${remaining} 枚でした。`}
+            {` 手数 ${state.moves} ・ 取った枚数 ${state.taken}`}
+          </p>
+        </EndScreen>
+      )}
+
+{webglFailed ? board2d : (
+        <div style={{ maxWidth: 720, margin: "0 auto" }}>
+          <GolfScene3D
+            state={state}
+            playable={playable}
+            onTake={handleTake}
+            onFlip={handleFlip}
+            onFail={() => setWebglFailed(true)}
+            fallback={board2d}
+          />
+        </div>
+      )}
     </>
   );
 }

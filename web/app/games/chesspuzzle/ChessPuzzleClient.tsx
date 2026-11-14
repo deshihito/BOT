@@ -2,7 +2,11 @@
 // 詰めチェス。王手をかけ続けて指定手数で詰ませるパズル。ロジックとソルバーは lib/chesspuzzle.ts。
 // 黒の応手は「最も粘る手」が自動で指される。端末内で完結し、サーバーへ送信しない。
 import Link from "next/link";
+import dynamic from "next/dynamic";
 import { useEffect, useMemo, useRef, useState } from "react";
+
+// 3D シーンは three を含むため遅延読み込み（このページ専用チャンクに閉じる）。
+const ChessPuzzleScene3D = dynamic(() => import("./ChessPuzzleScene3D"), { ssr: false });
 import {
   CHESS_PROBLEMS,
   createChessPuzzleGame,
@@ -42,6 +46,7 @@ function loadSolved(): string[] {
 export default function ChessPuzzleClient() {
   const { prefix } = useGamesNav();
   const [state, setState] = useState<CpGameState>(() => createChessPuzzleGame(CHESS_PROBLEMS[0].id));
+  const [webglFailed, setWebglFailed] = useState(false);
   const [selected, setSelected] = useState<number | null>(null);
   const [promoOptions, setPromoOptions] = useState<CpMove[] | null>(null);
   const [hint, setHint] = useState<CpMove | null>(null);
@@ -160,6 +165,12 @@ export default function ChessPuzzleClient() {
     },
   });
 
+  // 3D 盤のフリックも既存の盤スワイプと同じ操作（左=1手戻す、上=ヒント）へ接続する。
+  const onBoardSwipe = (dir: "left" | "up") => {
+    if (dir === "left") undoMove();
+    else showHint();
+  };
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       // タップ対象物は Enter / Space しか受けないため H / U との二重発火はない。
@@ -183,43 +194,9 @@ export default function ChessPuzzleClient() {
               : `黒の応手: ${state.lastReply}。指定手数を超えました。そのまま詰ませることもできます。`
             : `${problem.mateIn} 手で詰ませてください。王手になる手だけ指せます。`);
 
-  return (
-    <div style={{ maxWidth: 560, margin: "0 auto", padding: 16 }}>
-      <p style={{ fontSize: 13, margin: "0 0 8px" }}>
-        <Link href={`${prefix}/games`}>ゲーム</Link> / 詰めチェス
-      </p>
-      <h1 style={{ fontSize: 22, margin: "0 0 4px" }}>詰めチェス</h1>
-      <p style={{ fontSize: 13, color: "#666", margin: "0 0 12px" }}>
-        白の駒をタップして選び、移動先のマスをタップして指します。盤面を左にスワイプで1手戻す、上にスワイプでヒント（H / U キーでも可）。
-      </p>
-
-      <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 12 }} role="group" aria-label="問題を選ぶ">
-        {CHESS_PROBLEMS.map((p, i) => (
-          <div
-            key={p.id}
-            {...tappableProps(() => startProblem(p.id))}
-            className="classic-btn"
-            aria-pressed={p.id === state.problemId}
-            style={{
-              minHeight: 40,
-              padding: "6px 10px",
-              fontWeight: p.id === state.problemId ? 700 : 400,
-              border: p.id === state.problemId ? "2px solid #3366cc" : undefined,
-            }}
-          >
-            {i + 1}. {p.title}（{p.mateIn}手詰め）{solvedIds.includes(p.id) ? " ✓" : ""}
-          </div>
-        ))}
-      </div>
-
-      <h2 style={{ fontSize: 17, margin: "0 0 2px" }}>
-        {problem.title}（{problem.mateIn}手詰め）
-      </h2>
-      <p style={{ fontSize: 13, color: "#666", margin: "0 0 8px" }}>{problem.comment}</p>
-      <p role="status" style={{ fontSize: 14, margin: "0 0 10px", minHeight: 20 }}>
-        {statusText}
-      </p>
-
+  // 2D 盤（WebGL が使えない場合のフォールバックとしてそのまま使う）。
+  const board2d = (
+    <>
       <div
         role="grid"
         aria-label="チェス盤"
@@ -302,6 +279,63 @@ export default function ChessPuzzleClient() {
           );
         })}
       </div>
+    </>
+  );
+
+  return (
+    <div style={{ maxWidth: 560, margin: "0 auto", padding: 16 }}>
+      <p style={{ fontSize: 13, margin: "0 0 8px" }}>
+        <Link href={`${prefix}/games`}>ゲーム</Link> / 詰めチェス
+      </p>
+      <h1 style={{ fontSize: 22, margin: "0 0 4px" }}>詰めチェス</h1>
+      <p style={{ fontSize: 13, color: "#666", margin: "0 0 12px" }}>
+        白の駒をタップして選び、移動先のマスをタップして指します。盤面を左にスワイプで1手戻す、上にスワイプでヒント（H / U キーでも可）。
+      </p>
+
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 12 }} role="group" aria-label="問題を選ぶ">
+        {CHESS_PROBLEMS.map((p, i) => (
+          <div
+            key={p.id}
+            {...tappableProps(() => startProblem(p.id))}
+            className="classic-btn"
+            aria-pressed={p.id === state.problemId}
+            style={{
+              minHeight: 40,
+              padding: "6px 10px",
+              fontWeight: p.id === state.problemId ? 700 : 400,
+              border: p.id === state.problemId ? "2px solid #3366cc" : undefined,
+            }}
+          >
+            {i + 1}. {p.title}（{p.mateIn}手詰め）{solvedIds.includes(p.id) ? " ✓" : ""}
+          </div>
+        ))}
+      </div>
+
+      <h2 style={{ fontSize: 17, margin: "0 0 2px" }}>
+        {problem.title}（{problem.mateIn}手詰め）
+      </h2>
+      <p style={{ fontSize: 13, color: "#666", margin: "0 0 8px" }}>{problem.comment}</p>
+      <p role="status" style={{ fontSize: 14, margin: "0 0 10px", minHeight: 20 }}>
+        {statusText}
+      </p>
+
+      {webglFailed ? (
+        board2d
+      ) : (
+        <div style={{ maxWidth: 440 }}>
+          <ChessPuzzleScene3D
+            board={state.position.board}
+            selected={selected}
+            targets={[...targets.keys()]}
+            hintFrom={hint?.from ?? null}
+            hintTo={hint?.to ?? null}
+            onSquare={onSquare}
+            onSwipe={onBoardSwipe}
+            onFail={() => setWebglFailed(true)}
+            fallback={board2d}
+          />
+        </div>
+      )}
 
       {promoOptions && (
         <div className="juice-pop" style={{ display: "flex", gap: 6, marginTop: 10, alignItems: "center" }} role="group" aria-label="昇格する駒を選ぶ">

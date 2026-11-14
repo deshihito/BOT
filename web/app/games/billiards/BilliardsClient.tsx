@@ -4,7 +4,11 @@
 // ベスト記録: localStorage `ago-billiards-best` にクリア時の最少スコア
 // （打数＋スクラッチ）を保存する。端末内で完結し、サーバーへ送信しない。
 import Link from "next/link";
+import dynamic from "next/dynamic";
 import { useEffect, useRef, useState } from "react";
+
+// 3D シーンは three を含むため遅延読み込み（このページ専用チャンクに閉じる）。
+const BilliardsScene3D = dynamic(() => import("./BilliardsScene3D"), { ssr: false });
 import {
   BL_BALL_COLORS,
   BL_BALL_RADIUS,
@@ -36,11 +40,20 @@ function loadBest(): number | null {
 
 export default function BilliardsClient() {
   const { prefix } = useGamesNav();
+  const [webglFailed, setWebglFailed] = useState(false);
   const [state, setState] = useState<BilliardsState>(() =>
     createBilliardsGame(Date.now() % 2147483647),
   );
   const [angle, setAngle] = useState(0);
   const [power, setPower] = useState(45);
+  const angleRef = useRef(0);
+  const powerRef = useRef(45);
+  const aim = (a: number, p: number) => {
+    angleRef.current = a;
+    powerRef.current = p;
+    setAngle(a);
+    setPower(p);
+  };
   const [displayBalls, setDisplayBalls] = useState<BlBall[]>(() => state.balls);
   const [rolling, setRolling] = useState(false);
   const [best, setBest] = useState<number | null>(null);
@@ -75,7 +88,9 @@ export default function BilliardsClient() {
             nearest = t;
           }
         }
-        setAngle(Math.round((Math.atan2(nearest.y - c.y, nearest.x - c.x) * 180) / Math.PI));
+        const nextAngle = Math.round((Math.atan2(nearest.y - c.y, nearest.x - c.x) * 180) / Math.PI);
+        angleRef.current = nextAngle;
+        setAngle(nextAngle);
       }
     }
   }, [state]);
@@ -128,7 +143,7 @@ export default function BilliardsClient() {
   const doShoot = () => {
     if (state.phase !== "aiming" || rolling) return;
     sfxSlide();
-    const { state: next, result } = shoot(state, angle, power);
+    const { state: next, result } = shoot(state, angleRef.current, powerRef.current);
     if (result.frames.length <= 1) {
       setState(next);
       return;
@@ -168,50 +183,7 @@ export default function BilliardsClient() {
             ? `前回 ${state.lastPocketed.length} 個落としました。残り ${remaining} 個です。`
             : "的球を全部落とせばクリアです。";
 
-  return (
-    <>
-      <nav className="breadcrumbs" aria-label="パンくず">
-        <Link href={`${prefix}/games`}>ゲーム</Link>
-        <span> / </span>
-        <span>ビリヤード</span>
-      </nav>
-      <div className="page-heading compact-heading">
-        <h1>ビリヤード</h1>
-        <p className="muted">
-          下のスライダーで角度と強さを決めて、「打つ」ボタンで手球を打ちます。
-        </p>
-      </div>
-
-      <div className="classic-controls" role="group" aria-label="操作">
-        <button type="button" className="classic-btn" onClick={restart}>
-          もう一度
-        </button>
-      </div>
-
-      <p
-        className={`classic-status${state.lastScratch ? " juice-shake" : state.lastPocketed.length > 0 ? " juice-pulse" : ""}`}
-        role="status"
-      >
-        スコア {score}（{state.shots} 打・スクラッチ {state.scratches}） ・ 残り {remaining} 個
-        {best !== null ? ` ・ ベスト ${best}` : ""} ・ {statusText}
-      </p>
-
-      {state.phase === "cleared" && (
-        <EndScreen
-          outcome="win"
-          title="全部の的球を落としました！"
-          score={score}
-          scoreLabel="スコア"
-          newBest={isNewBest}
-          previousBest={isNewBest ? null : prevBest}
-          onRetry={restart}
-        >
-          <p className="muted" style={{ margin: 0 }}>
-            {state.shots} 打 ・ スクラッチ {state.scratches}
-          </p>
-        </EndScreen>
-      )}
-
+  const board2d = (
       <svg
         viewBox={`0 0 ${BL_WIDTH} ${BL_HEIGHT}`}
         role="img"
@@ -271,6 +243,64 @@ export default function BilliardsClient() {
             </g>
           ))}
       </svg>
+  );
+
+  return (
+    <>
+      <nav className="breadcrumbs" aria-label="パンくず">
+        <Link href={`${prefix}/games`}>ゲーム</Link>
+        <span> / </span>
+        <span>ビリヤード</span>
+      </nav>
+      <div className="page-heading compact-heading">
+        <h1>ビリヤード</h1>
+        <p className="muted">
+          3Dテーブル上をドラッグして狙い（離す方向＝角度、距離＝強さ）、速くフリックすると打ちます。スライダーと「打つ」ボタンでも操作できます。
+        </p>
+      </div>
+
+      <div className="classic-controls" role="group" aria-label="操作">
+        <button type="button" className="classic-btn" onClick={restart}>
+          もう一度
+        </button>
+      </div>
+
+      <p
+        className={`classic-status${state.lastScratch ? " juice-shake" : state.lastPocketed.length > 0 ? " juice-pulse" : ""}`}
+        role="status"
+      >
+        スコア {score}（{state.shots} 打・スクラッチ {state.scratches}） ・ 残り {remaining} 個
+        {best !== null ? ` ・ ベスト ${best}` : ""} ・ {statusText}
+      </p>
+
+      {state.phase === "cleared" && (
+        <EndScreen
+          outcome="win"
+          title="全部の的球を落としました！"
+          score={score}
+          scoreLabel="スコア"
+          newBest={isNewBest}
+          previousBest={isNewBest ? null : prevBest}
+          onRetry={restart}
+        >
+          <p className="muted" style={{ margin: 0 }}>
+            {state.shots} 打 ・ スクラッチ {state.scratches}
+          </p>
+        </EndScreen>
+      )}
+
+{webglFailed ? board2d : (
+        <BilliardsScene3D
+          balls={displayBalls}
+          angle={angle}
+          power={power}
+          aiming={state.phase === "aiming" && !rolling}
+          onAim={aim}
+          onShoot={doShoot}
+          onFail={() => setWebglFailed(true)}
+          fallback={board2d}
+        />
+      )}
 
       <div
         style={{
@@ -289,7 +319,7 @@ export default function BilliardsClient() {
             max={180}
             value={angle}
             disabled={state.phase !== "aiming" || rolling}
-            onChange={(e) => setAngle(Number(e.target.value))}
+            onChange={(e) => { angleRef.current = Number(e.target.value); setAngle(Number(e.target.value)); }}
             style={{ width: "100%", minHeight: 40 }}
             aria-label="角度"
           />
@@ -302,7 +332,7 @@ export default function BilliardsClient() {
             max={100}
             value={power}
             disabled={state.phase !== "aiming" || rolling}
-            onChange={(e) => setPower(Number(e.target.value))}
+            onChange={(e) => { powerRef.current = Number(e.target.value); setPower(Number(e.target.value)); }}
             style={{ width: "100%", minHeight: 40 }}
             aria-label="強さ"
           />

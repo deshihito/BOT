@@ -2,7 +2,11 @@
 // テントと木。ロジックは lib/tents.ts（解を先に作る生成で必ず解ける）。
 // マスをタップすると 未定→テント→草→未定 と切り替わる。端末内で完結する。
 import Link from "next/link";
+import dynamic from "next/dynamic";
 import { useEffect, useRef, useState } from "react";
+
+// 3D シーンは three を含むため遅延読み込み（このページ専用チャンクに閉じる）。
+const TentsScene3D = dynamic(() => import("./TentsScene3D"), { ssr: false });
 import {
   createTentsGame,
   cycleTentsMark,
@@ -34,6 +38,7 @@ function formatTime(sec: number): string {
 
 export default function TentsClient() {
   const { prefix } = useGamesNav();
+  const [webglFailed, setWebglFailed] = useState(false);
   const [size, setSize] = useState<TentsSize>(6);
   const [state, setState] = useState<TentsState>(() => newGame(6));
   const [seconds, setSeconds] = useState(0);
@@ -152,6 +157,100 @@ export default function TentsClient() {
     color: placed === target ? "#43a35c" : placed > target ? "#e2534a" : undefined,
   });
 
+  // 2D 盤（WebGL が使えない場合のフォールバックとしてそのまま使う）。
+  // 行・列の数字ヒントは盤外の情報なので、3D でもこの DOM 併記が正。
+  const board2d = (
+  <div
+    {...boardGesture}
+    style={{
+      display: "grid",
+      gridTemplateColumns: `32px repeat(${state.size}, minmax(0, 1fr))`,
+      gap: 3,
+      width: "100%",
+      maxWidth: state.size === 6 ? 420 : 520,
+      margin: "0 auto",
+      touchAction: "none",
+    }}
+    role="grid"
+    aria-label="テントと木の盤（下にスワイプでチェック）"
+    tabIndex={0}
+    onKeyDown={(e) => {
+      // 盤面そのものにフォーカスがあるときだけ Enter でチェックする。
+      // ガードがないとマスにフォーカスして Enter を押したときに切替と
+      // チェックが両方走る（anagram / mastermind と同じ構図）。
+      if (e.target !== e.currentTarget) return;
+      if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        onCheck();
+      }
+    }}
+  >
+    {/* 左上コーナー + 列の数 */}
+    <div />
+    {state.colCounts.map((target, c) => (
+      <div key={`col-${c}`} style={countStyle(placedInCol(c), target)} role="img" aria-label={`列${c + 1}のテント数 ${target}`}>
+        {target}
+      </div>
+    ))}
+    {Array.from({ length: state.size }, (_, r) => [
+      <div key={`row-${r}`} style={countStyle(placedInRow(r), state.rowCounts[r])} role="img" aria-label={`行${r + 1}のテント数 ${state.rowCounts[r]}`}>
+        {state.rowCounts[r]}
+      </div>,
+      ...Array.from({ length: state.size }, (_, c) => {
+        const i = r * state.size + c;
+        const isTree = state.trees[i];
+        const mark = state.marks[i];
+        const bad = violationCells.has(i);
+        return (
+          <div
+            key={i}
+            role="gridcell"
+            tabIndex={isTree || state.status !== "playing" ? -1 : 0}
+            aria-label={
+              isTree ? "木" : mark === 1 ? "テント" : mark === 2 ? "草（テントなし）" : "未定"
+            }
+            aria-disabled={isTree || state.status !== "playing"}
+            className={[mark === 1 ? "juice-pop" : "", bad ? "juice-shake" : ""].filter(Boolean).join(" ") || undefined}
+            onClick={isTree || state.status !== "playing" ? undefined : () => onCell(i)}
+            onKeyDown={
+              isTree || state.status !== "playing"
+                ? undefined
+                : (e) => {
+                    if (e.key !== "Enter" && e.key !== " ") return;
+                    e.preventDefault();
+                    onCell(i);
+                  }
+            }
+            style={{
+              aspectRatio: "1",
+              minWidth: 0,
+              minHeight: 40,
+              border: bad ? "3px solid #e2534a" : "1px solid var(--line, #ccc)",
+              borderRadius: 6,
+              background: isTree ? "#e8f3e8" : mark === 1 ? "#fdeeda" : mark === 2 ? "#eef6ee" : "#fff",
+              fontSize: state.size === 6 ? 20 : 17,
+              cursor: isTree ? "default" : "pointer",
+              padding: 0,
+            }}
+          >
+            {isTree ? (
+              <svg viewBox="0 0 24 24" width="68%" height="68%" aria-hidden style={{ display: "block", margin: "0 auto" }}>
+                <path d="M12 1.5 19 11h-3.6L20 18.5H4L8.6 11H5Z" fill="#2e7d32" />
+                <rect x="10.9" y="18.5" width="2.2" height="3.6" fill="#6d4c41" />
+              </svg>
+            ) : mark === 1 ? (
+              <svg viewBox="0 0 24 24" width="68%" height="68%" aria-hidden style={{ display: "block", margin: "0 auto" }}>
+                <path d="M12 3.5 22 20H2Z" fill="#ef6c00" />
+                <path d="M12 11.5 16.8 20H7.2Z" fill="#8d3b00" />
+              </svg>
+            ) : mark === 2 ? "・" : ""}
+          </div>
+        );
+      }),
+    ])}
+  </div>
+  );
+
   return (
     <>
       <nav className="breadcrumbs" aria-label="パンくず">
@@ -185,95 +284,40 @@ export default function TentsClient() {
         {best !== null ? ` ・ ベスト ${formatTime(best)}` : ""} ・ {statusText}
       </p>
 
-      <div
-        {...boardGesture}
-        style={{
-          display: "grid",
-          gridTemplateColumns: `32px repeat(${state.size}, minmax(0, 1fr))`,
-          gap: 3,
-          width: "100%",
-          maxWidth: state.size === 6 ? 420 : 520,
-          margin: "0 auto",
-          touchAction: "none",
-        }}
-        role="grid"
-        aria-label="テントと木の盤（下にスワイプでチェック）"
-        tabIndex={0}
-        onKeyDown={(e) => {
-          // 盤面そのものにフォーカスがあるときだけ Enter でチェックする。
-          // ガードがないとマスにフォーカスして Enter を押したときに切替と
-          // チェックが両方走る（anagram / mastermind と同じ構図）。
-          if (e.target !== e.currentTarget) return;
-          if (e.key === "Enter" || e.key === " ") {
-            e.preventDefault();
-            onCheck();
-          }
-        }}
-      >
-        {/* 左上コーナー + 列の数 */}
-        <div />
-        {state.colCounts.map((target, c) => (
-          <div key={`col-${c}`} style={countStyle(placedInCol(c), target)} role="img" aria-label={`列${c + 1}のテント数 ${target}`}>
-            {target}
-          </div>
-        ))}
-        {Array.from({ length: state.size }, (_, r) => [
-          <div key={`row-${r}`} style={countStyle(placedInRow(r), state.rowCounts[r])} role="img" aria-label={`行${r + 1}のテント数 ${state.rowCounts[r]}`}>
-            {state.rowCounts[r]}
-          </div>,
-          ...Array.from({ length: state.size }, (_, c) => {
-            const i = r * state.size + c;
-            const isTree = state.trees[i];
-            const mark = state.marks[i];
-            const bad = violationCells.has(i);
-            return (
-              <div
-                key={i}
-                role="gridcell"
-                tabIndex={isTree || state.status !== "playing" ? -1 : 0}
-                aria-label={
-                  isTree ? "木" : mark === 1 ? "テント" : mark === 2 ? "草（テントなし）" : "未定"
-                }
-                aria-disabled={isTree || state.status !== "playing"}
-                className={[mark === 1 ? "juice-pop" : "", bad ? "juice-shake" : ""].filter(Boolean).join(" ") || undefined}
-                onClick={isTree || state.status !== "playing" ? undefined : () => onCell(i)}
-                onKeyDown={
-                  isTree || state.status !== "playing"
-                    ? undefined
-                    : (e) => {
-                        if (e.key !== "Enter" && e.key !== " ") return;
-                        e.preventDefault();
-                        onCell(i);
-                      }
-                }
-                style={{
-                  aspectRatio: "1",
-                  minWidth: 0,
-                  minHeight: 40,
-                  border: bad ? "3px solid #e2534a" : "1px solid var(--line, #ccc)",
-                  borderRadius: 6,
-                  background: isTree ? "#e8f3e8" : mark === 1 ? "#fdeeda" : mark === 2 ? "#eef6ee" : "#fff",
-                  fontSize: state.size === 6 ? 20 : 17,
-                  cursor: isTree ? "default" : "pointer",
-                  padding: 0,
-                }}
-              >
-                {isTree ? (
-                  <svg viewBox="0 0 24 24" width="68%" height="68%" aria-hidden style={{ display: "block", margin: "0 auto" }}>
-                    <path d="M12 1.5 19 11h-3.6L20 18.5H4L8.6 11H5Z" fill="#2e7d32" />
-                    <rect x="10.9" y="18.5" width="2.2" height="3.6" fill="#6d4c41" />
-                  </svg>
-                ) : mark === 1 ? (
-                  <svg viewBox="0 0 24 24" width="68%" height="68%" aria-hidden style={{ display: "block", margin: "0 auto" }}>
-                    <path d="M12 3.5 22 20H2Z" fill="#ef6c00" />
-                    <path d="M12 11.5 16.8 20H7.2Z" fill="#8d3b00" />
-                  </svg>
-                ) : mark === 2 ? "・" : ""}
+      {webglFailed ? board2d : (
+        <div style={{ width: "100%", maxWidth: state.size === 6 ? 420 : 520, margin: "0 auto" }}>
+          {/* 行・列ヒントは盤外の情報として DOM 併記で担保する（3D は盤面マスのみ）。 */}
+          <div style={{ display: "flex", marginLeft: 36 }} aria-hidden="true">
+            {state.colCounts.map((target, c) => (
+              <div key={`col3d-${c}`} style={{ flex: 1, ...countStyle(placedInCol(c), target) }}>
+                {target}
               </div>
-            );
-          }),
-        ])}
-      </div>
+            ))}
+          </div>
+          <div style={{ display: "flex" }}>
+            <div style={{ width: 36, display: "flex", flexDirection: "column" }} aria-hidden="true">
+              {state.rowCounts.map((target, r) => (
+                <div key={`row3d-${r}`} style={{ flex: 1, ...countStyle(placedInRow(r), target) }}>
+                  {target}
+                </div>
+              ))}
+            </div>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <TentsScene3D
+                size={state.size}
+                trees={state.trees}
+                marks={state.marks}
+                violationCells={[...violationCells]}
+                status={state.status}
+                onCell={onCell}
+                onCheck={onCheck}
+                onFail={() => setWebglFailed(true)}
+                fallback={board2d}
+              />
+            </div>
+          </div>
+        </div>
+      )}
       <p className="muted" style={{ textAlign: "center", marginTop: 10 }}>
         端の数字が緑になれば、その行・列のテント数は合っています。
       </p>
