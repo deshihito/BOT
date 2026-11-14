@@ -18,9 +18,10 @@ import {
   type SnakeDir,
   type SnakeState,
 } from "@/lib/snake";
-import { sfxLose, sfxPop, sfxWin } from "@/lib/sfx";
+import { sfxHit, sfxKo, sfxLose } from "@/lib/sfx";
+import { juiceFlash, juiceHitstop, juiceShake, type JuiceIntensity } from "@/lib/juice";
 import { useGesture } from "@/lib/gesture";
-import { EndScreen } from "../GameJuice";
+import { EndScreen, JuiceHit } from "../GameJuice";
 import { useGamesNav } from "../GamesShell";
 
 const BEST_KEY = "ago-snake-best";
@@ -55,6 +56,8 @@ export default function SnakeClient() {
   const [best, setBest] = useState(0);
   const [prevBest, setPrevBest] = useState<number | null>(null);
   const prevFoodsRef = useRef(0);
+  const boardWrapRef = useRef<HTMLDivElement | null>(null);
+  const [burst, setBurst] = useState<{ key: number; x: number; y: number; intensity: JuiceIntensity }>({ key: 0, x: 50, y: 50, intensity: 1 });
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const mountedRef = useRef(true);
   const stateRef = useRef(state);
@@ -71,8 +74,17 @@ export default function SnakeClient() {
   useEffect(() => {
     if (state.status === "gameover" || state.status === "won") {
       setPrevBest(best);
-      if (state.status === "won") sfxWin();
-      else sfxLose();
+      if (state.status === "won") {
+        sfxKo();
+        juiceHitstop(boardWrapRef.current, 2);
+        juiceFlash(boardWrapRef.current);
+      } else {
+        sfxLose();
+        // ぶつかった瞬間は止め＋振動＋フラッシュで「やられた」を認識させる（#003）。
+        juiceHitstop(boardWrapRef.current, 3);
+        juiceShake(boardWrapRef.current, 2);
+        juiceFlash(boardWrapRef.current);
+      }
       if (state.score > best) {
         setBest(state.score);
         try {
@@ -85,11 +97,24 @@ export default function SnakeClient() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state.status]);
 
-  // 餌を食べた瞬間だけ音を鳴らす（ループ内では鳴らさない）
+  // 餌を食べた瞬間だけ手応えを出す（ループ内では出さない）:
+  // ヒット音＋小ヒットストップ＋頭の位置にヒットマーク（#003/#130）。
   useEffect(() => {
-    if (state.foodsEaten > prevFoodsRef.current && state.status === "playing") sfxPop();
+    if (state.foodsEaten > prevFoodsRef.current && state.status === "playing") {
+      sfxHit(1);
+      juiceHitstop(boardWrapRef.current, 1);
+      const head = state.snake[0];
+      if (head) {
+        setBurst({
+          key: state.foodsEaten,
+          x: ((head.x + 0.5) / state.cols) * 100,
+          y: ((head.y + 0.5) / state.rows) * 100,
+          intensity: 1,
+        });
+      }
+    }
     prevFoodsRef.current = state.foodsEaten;
-  }, [state.foodsEaten, state.status]);
+  }, [state.foodsEaten, state.status, state.snake, state.cols, state.rows]);
 
   // ゲームループ
   useEffect(() => {
@@ -238,17 +263,20 @@ export default function SnakeClient() {
         スコア <span key={state.score} className="juice-pulse" style={{ display: "inline-block" }}>{state.score}</span> ・ ベスト {best} ・ {statusText}
       </p>
 
-      {webglFailed ? board2d : (
-        <div style={{ maxWidth: 480, margin: "0 auto" }} className={state.status === "gameover" ? "juice-shake" : undefined}>
-          <SnakeScene3D
-            getState={() => stateRef.current}
-            onSwipe={move}
-            onTap={handleTap3D}
-            onFail={() => setWebglFailed(true)}
-            fallback={board2d}
-          />
-        </div>
-      )}
+      <div ref={boardWrapRef} style={{ position: "relative", maxWidth: 480, margin: "0 auto" }}>
+        {webglFailed ? board2d : (
+          <div style={{ maxWidth: 480, margin: "0 auto" }} className={state.status === "gameover" ? "juice-shake" : undefined}>
+            <SnakeScene3D
+              getState={() => stateRef.current}
+              onSwipe={move}
+              onTap={handleTap3D}
+              onFail={() => setWebglFailed(true)}
+              fallback={board2d}
+            />
+          </div>
+        )}
+        <JuiceHit burstKey={burst.key} intensity={burst.intensity} xPct={burst.x} yPct={burst.y} continuous />
+      </div>
 
       {(state.status === "gameover" || state.status === "won") && (
         <div style={{ maxWidth: 480, margin: "14px auto 0" }}>

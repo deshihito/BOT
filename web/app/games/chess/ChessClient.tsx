@@ -22,6 +22,9 @@ import {
 } from "@/lib/chess-game";
 import { findBestMove } from "@/lib/chess-engine";
 import { parseFen } from "@/lib/chess-perft";
+import { sfxHit, sfxKo, sfxLose, sfxPlace, sfxTap, sfxWin } from "@/lib/sfx";
+import { juiceFlash, juiceHitstop, juiceShake, type JuiceIntensity } from "@/lib/juice";
+import { JuiceHit } from "../GameJuice";
 import { useGamesNav } from "../GamesShell";
 
 const LEVELS = [
@@ -68,6 +71,8 @@ export default function ChessClient() {
   const workerRef = useRef<Worker | null>(null);
   const workerFailedRef = useRef(false);
   const requestRef = useRef(0);
+  const boardWrapRef = useRef<HTMLDivElement | null>(null);
+  const [burst, setBurst] = useState<{ key: number; x: number; y: number; intensity: JuiceIntensity }>({ key: 0, x: 50, y: 50, intensity: 1 });
 
   const board = game.position.board;
   const isPlayerTurn = game.status === "playing" && game.position.side === playerColor;
@@ -92,6 +97,69 @@ export default function ChessClient() {
     }
     return null;
   }, [game.inCheck, game.status, game.position.side, board]);
+
+  // 手応え層（櫻井流バッチ1）: 着手のたびに、取った手はヒット音＋
+  // ヒットストップ、通常手は配置音＋小ヒットストップ、着手先に
+  // ヒットマークを出す。終局時は止めの音とフラッシュ/振動を足す。
+  const prevMovesRef = useRef(0);
+  const prevBoardRef = useRef<number[] | null>(null);
+  useEffect(() => {
+    const prevBoard = prevBoardRef.current;
+    prevBoardRef.current = [...board];
+    const prevCount = prevMovesRef.current;
+    prevMovesRef.current = game.moves.length;
+    if (!prevBoard || game.moves.length <= prevCount || !lastMove) return;
+    const movingPiece = prevBoard[lastMove.from] ?? 0;
+    const isPawn = (movingPiece & 7) === 1;
+    const captured =
+      (prevBoard[lastMove.to] ?? 0) !== 0 ||
+      (isPawn && (lastMove.from & 15) !== (lastMove.to & 15));
+    if (captured) {
+      sfxHit(2);
+      juiceHitstop(boardWrapRef.current, 2);
+    } else {
+      sfxPlace();
+      juiceHitstop(boardWrapRef.current, 1);
+    }
+    const file = lastMove.to & 15;
+    const rank = lastMove.to >> 4;
+    const xi = files.indexOf(file);
+    const yi = ranks.indexOf(rank);
+    if (xi >= 0 && yi >= 0) {
+      setBurst({
+        key: game.moves.length,
+        x: ((xi + 0.5) / 8) * 100,
+        y: ((yi + 0.5) / 8) * 100,
+        intensity: captured ? 2 : 1,
+      });
+    }
+    // files/ranks は表示向き（playerColor）で決まる値として扱う
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [game.moves.length, board, lastMove]);
+
+  const prevStatusRef = useRef(game.status);
+  useEffect(() => {
+    const prev = prevStatusRef.current;
+    prevStatusRef.current = game.status;
+    if (prev === game.status || game.status === "playing") return;
+    if (game.status === "checkmate") {
+      if (game.winner === playerColor) {
+        sfxKo();
+        juiceHitstop(boardWrapRef.current, 2);
+      } else {
+        sfxHit(3);
+        juiceHitstop(boardWrapRef.current, 3);
+      }
+      juiceShake(boardWrapRef.current, game.winner === playerColor ? 2 : 3);
+      juiceFlash(boardWrapRef.current);
+    } else if (game.status === "resigned") {
+      if (game.winner === playerColor) sfxWin();
+      else sfxLose();
+      juiceFlash(boardWrapRef.current);
+    } else if (game.status === "draw") {
+      juiceFlash(boardWrapRef.current);
+    }
+  }, [game.status, game.winner, playerColor]);
 
   const ensureWorker = (): Worker | null => {
     if (workerFailedRef.current) return null;
@@ -218,6 +286,8 @@ export default function ChessClient() {
       }
     }
     const ownPiece = piece !== 0 && (playerColor === WHITE ? piece <= 6 : piece >= 9);
+    // 駒を選んだ瞬間にタップ音で受け付けを見せる（#049 構えの瞬発）。
+    if (ownPiece && selected !== sq) sfxTap();
     setSelected(ownPiece ? sq : null);
   };
 
@@ -252,6 +322,7 @@ export default function ChessClient() {
                 const isDark = (rank + file) % 2 === 0;
                 const classes = [
                   "chess-square",
+                  "juice-pressable",
                   isDark ? "chess-square-dark" : "chess-square-light",
                   selected === sq ? "chess-square-selected" : "",
                   lastMove && (lastMove.from === sq || lastMove.to === sq) ? "chess-square-last" : "",
@@ -299,7 +370,7 @@ export default function ChessClient() {
       </div>
 
       <div className="chess-layout">
-        <div className="chess-board-area">
+        <div className="chess-board-area" ref={boardWrapRef} style={{ position: "relative" }}>
           {webglFailed ? (
             board2d
           ) : (
@@ -315,6 +386,7 @@ export default function ChessClient() {
               fallback={board2d}
             />
           )}
+          <JuiceHit burstKey={burst.key} intensity={burst.intensity} xPct={burst.x} yPct={burst.y} continuous />
           {promoMoves && (
             <div className="chess-promo" role="group" aria-label="昇格する駒の選択">
               <span>昇格先を選んでください</span>
