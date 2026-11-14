@@ -8,7 +8,9 @@ import type { Metadata } from "next";
 // 装飾と差し替え枠までで、内容は埋めない。
 // デザインは 2026-11-14 の指示でフルティガーエアロ風
 // （空と水と緑、ガラスのツヤと泡）。同日の追加指示で全体の緑要素を
-// 強め、定番の低解像度イルカ画像を入れた。アイコン画像は本人が
+// 強め、定番の低解像度イルカ画像を入れた。さらに同日の追加指示で
+// 参考コラージュに寄せ、地球のガラス球・雲・スカイライン・蝶・
+// 草花の要素を足した。アイコン画像は本人が
 // 用意したらヒーローのプレースホルダと差し替える。
 // 専用ヘッダー/フッターはこのファイルの中で完結させる（サイト共通の
 // ヘッダー/フッターは lib/site-chrome.ts の /folio 判定で出ない）。
@@ -55,7 +57,7 @@ const BUBBLES = Array.from({ length: 42 }, (_, i) => {
 const CSS = `
 body:has(.folio-fa){background:#79c98a}
 main:has(.folio-fa){max-width:none;min-height:0;margin:0;padding:0}
-.folio-fa{position:relative;min-height:100svh;overflow:hidden;color:#0d3a56;font-family:"Segoe UI","Hiragino Kaku Gothic ProN","Hiragino Sans","Noto Sans JP",system-ui,sans-serif;background:radial-gradient(1050px 520px at 86% -8%,rgba(255,246,190,.75),transparent 60%),radial-gradient(820px 520px at -10% 30%,rgba(255,255,255,.5),transparent 62%),radial-gradient(900px 560px at 108% 66%,rgba(170,255,190,.5),transparent 62%),linear-gradient(180deg,#2f97e6 0%,#5fb6f5 22%,#a8dcff 40%,#d9f6e2 57%,#a9e69b 76%,#79c95e 100%)}
+.folio-fa{position:relative;min-height:100svh;overflow:hidden;color:#0d3a56;font-family:"Segoe UI","Hiragino Kaku Gothic ProN","Hiragino Sans","Noto Sans JP",system-ui,sans-serif;background:radial-gradient(1050px 520px at 86% -8%,rgba(255,246,190,.75),transparent 60%),radial-gradient(820px 520px at -10% 30%,rgba(255,255,255,.5),transparent 62%),radial-gradient(900px 560px at 108% 66%,rgba(170,255,190,.5),transparent 62%),linear-gradient(180deg,#1b8ae0 0%,#3fa9f5 20%,#8fd8ff 38%,#c8f7d8 54%,#8fe388 72%,#58b73e 88%,#3f9e2c 100%)}
 .folio-fa *{box-sizing:border-box}
 .folio-fa-bubbles{position:absolute;inset:0;pointer-events:none}
 .folio-fa-bubble{position:absolute;border-radius:50%;background:radial-gradient(circle at 32% 28%,rgba(255,255,255,.95),rgba(255,255,255,.28) 42%,rgba(255,255,255,.06) 62%,rgba(170,225,255,.22));border:1px solid rgba(255,255,255,.55);box-shadow:inset -3px -4px 8px rgba(120,190,240,.25),0 2px 8px rgba(30,110,180,.10);animation:folio-fa-float 7s ease-in-out infinite alternate}
@@ -73,7 +75,7 @@ main:has(.folio-fa){max-width:none;min-height:0;margin:0;padding:0}
 .folio-fa-hero h1{font-size:52px;margin:0 0 10px;letter-spacing:.05em;font-weight:700;color:#073e63;text-shadow:0 2px 0 rgba(255,255,255,.65),0 12px 28px rgba(0,90,160,.28)}
 .folio-fa-alias{color:#1a6ea8;letter-spacing:.12em;margin:0 0 18px;font-size:15px;font-weight:600;text-shadow:0 1px 0 rgba(255,255,255,.6)}
 .folio-fa-glass{position:relative;border:1px solid rgba(255,255,255,.95);border-radius:20px;background:linear-gradient(165deg,rgba(255,255,255,.80),rgba(255,255,255,.40) 55%,rgba(205,238,255,.45));box-shadow:inset 0 1px 0 rgba(255,255,255,1),inset 0 -20px 32px rgba(120,200,255,.14),0 14px 30px rgba(15,90,150,.20);backdrop-filter:blur(6px) saturate(1.35);-webkit-backdrop-filter:blur(6px) saturate(1.35);overflow:hidden}
-.folio-fa-glass::before{content:"";position:absolute;top:0;left:0;right:0;height:46%;background:linear-gradient(180deg,rgba(255,255,255,.55),rgba(255,255,255,0));pointer-events:none}
+.folio-fa-glass::before{content:"";position:absolute;top:0;left:0;right:0;height:52%;background:linear-gradient(180deg,rgba(255,255,255,.68),rgba(255,255,255,0));pointer-events:none}
 .folio-fa-slot{padding:14px 16px;color:#33586e}
 .folio-fa-badge{display:inline-block;position:relative;z-index:1;font-size:10.5px;letter-spacing:.08em;color:#5b3a00;background:linear-gradient(180deg,#ffe1a0,#ffab2e);border:1px solid rgba(255,255,255,.9);border-radius:999px;padding:2px 9px;margin-bottom:8px;font-weight:700;box-shadow:inset 0 1px 0 rgba(255,255,255,.9),0 3px 8px rgba(200,120,0,.30)}
 .folio-fa-slotbody{position:relative;z-index:1}
@@ -102,8 +104,18 @@ main:has(.folio-fa){max-width:none;min-height:0;margin:0;padding:0}
 .folio-fa-stats .folio-fa-glass{background:linear-gradient(165deg,rgba(255,255,255,.82),rgba(226,250,214,.5) 55%,rgba(178,236,160,.5))}
 .folio-fa-dolphin{margin:36px 0 4px;max-width:520px;padding:9px;border-radius:20px;background:linear-gradient(165deg,rgba(255,255,255,.92),rgba(255,255,255,.45));border:1px solid rgba(255,255,255,.95);box-shadow:inset 0 1px 0 #fff,0 18px 36px rgba(10,90,60,.28);transform:rotate(-1.6deg)}
 .folio-fa-dolphin img{display:block;width:100%;height:auto;border-radius:13px;image-rendering:pixelated}
+.folio-fa-cloud{position:absolute;width:280px;height:120px;pointer-events:none;opacity:.92;filter:blur(1.5px);background:radial-gradient(ellipse 62px 36px at 28% 62%,#ffffff 62%,transparent 64%),radial-gradient(ellipse 86px 50px at 54% 44%,#ffffff 62%,transparent 64%),radial-gradient(ellipse 56px 32px at 76% 64%,#ffffff 62%,transparent 64%);animation:folio-fa-drift 26s ease-in-out infinite alternate}
+@keyframes folio-fa-drift{from{transform:translateX(-24px)}to{transform:translateX(34px)}}
+.folio-fa-globe{position:absolute;border-radius:50%;pointer-events:none;background:radial-gradient(circle at 34% 26%,rgba(255,255,255,.95),rgba(255,255,255,0) 44%),radial-gradient(ellipse 46% 30% at 30% 34%,#57c256 58%,transparent 62%),radial-gradient(ellipse 34% 24% at 68% 58%,#43a047 58%,transparent 62%),radial-gradient(ellipse 22% 16% at 58% 22%,#74cc6e 58%,transparent 62%),radial-gradient(ellipse 18% 13% at 40% 74%,#4caf50 58%,transparent 62%),radial-gradient(circle at 50% 50%,#7ecbf2,#2f8fe0 68%,#1a6fb5);box-shadow:inset -14px -18px 34px rgba(0,60,120,.35),inset 6px 8px 18px rgba(255,255,255,.5),0 22px 44px rgba(0,80,140,.30);animation:folio-fa-bob 8s ease-in-out infinite alternate}
+@keyframes folio-fa-bob{from{transform:translateY(6px)}to{transform:translateY(-10px)}}
+.folio-fa-skyline{position:absolute;left:0;right:0;bottom:118px;width:100%;height:110px;pointer-events:none;opacity:.5}
+.folio-fa-grass{position:absolute;left:0;right:0;bottom:0;width:100%;height:64px;pointer-events:none}
+.folio-fa-butterfly{position:absolute;pointer-events:none;animation:folio-fa-flutter 11s ease-in-out infinite alternate;z-index:1}
+@keyframes folio-fa-flutter{0%{transform:translate(0,0) rotate(-6deg)}50%{transform:translate(26px,-30px) rotate(7deg)}100%{transform:translate(52px,-6px) rotate(-4deg)}}
+.folio-fa-sparkle{position:absolute;pointer-events:none;animation:folio-fa-twinkle 3.4s ease-in-out infinite alternate}
+@keyframes folio-fa-twinkle{from{opacity:.25;transform:scale(.7) rotate(0deg)}to{opacity:.95;transform:scale(1.15) rotate(20deg)}}
 @media (max-width:640px){.folio-fa-hero{padding-top:56px}.folio-fa-hero h1{font-size:32px}.folio-fa-sun{width:140px;height:140px;top:3.8rem}.folio-fa-icon{width:104px;height:104px;top:5.2rem;right:5vw}.folio-fa-stats{grid-template-columns:repeat(2,1fr)}.folio-fa-works,.folio-fa-links,.folio-fa-cards{grid-template-columns:1fr}}
-@media (prefers-reduced-motion:reduce){.folio-fa-bubble,.folio-fa-fish{animation:none}}
+@media (prefers-reduced-motion:reduce){.folio-fa-bubble,.folio-fa-fish,.folio-fa-cloud,.folio-fa-globe,.folio-fa-butterfly,.folio-fa-sparkle{animation:none}}
 `;
 
 function Slot({ label, children }: { label: string; children?: React.ReactNode }) {
@@ -181,6 +193,43 @@ function Fish({ top, left, scale, flip, color, delay }: { top: string; left: str
   );
 }
 
+
+function Cloud({ top, left, scale, delay }: { top: string; left: string; scale: number; delay: string }) {
+  return <div className="folio-fa-cloud" style={{ top, left, transform: `scale(${scale})`, animationDelay: delay }} aria-hidden="true" />;
+}
+
+function Globe({ top, right, size, delay }: { top: string; right: string; size: number; delay: string }) {
+  return <div className="folio-fa-globe" style={{ top, right, width: size, height: size, animationDelay: delay }} aria-hidden="true" />;
+}
+
+function Butterfly({ top, left, delay }: { top: string; left: string; delay: string }) {
+  return (
+    <svg className="folio-fa-butterfly" style={{ top, left, animationDelay: delay }} width="52" height="44" viewBox="0 0 52 44" aria-hidden="true">
+      <defs>
+        <linearGradient id="folio-fa-wing" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0%" stopColor="#8fd8ff" />
+          <stop offset="55%" stopColor="#37b6ff" />
+          <stop offset="100%" stopColor="#7a5cff" />
+        </linearGradient>
+      </defs>
+      <ellipse cx="14" cy="14" rx="12" ry="8" fill="url(#folio-fa-wing)" transform="rotate(-28 14 14)" opacity=".95" />
+      <ellipse cx="38" cy="14" rx="12" ry="8" fill="url(#folio-fa-wing)" transform="rotate(28 38 14)" opacity=".95" />
+      <ellipse cx="16" cy="30" rx="9" ry="6" fill="url(#folio-fa-wing)" transform="rotate(24 16 30)" opacity=".85" />
+      <ellipse cx="36" cy="30" rx="9" ry="6" fill="url(#folio-fa-wing)" transform="rotate(-24 36 30)" opacity=".85" />
+      <ellipse cx="26" cy="22" rx="2.6" ry="10" fill="#0d3a56" />
+      <path d="M24 13C22 8 19 5 15 3M28 13C30 8 33 5 37 3" stroke="#0d3a56" strokeWidth="1.6" fill="none" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function Sparkle({ top, left, size, delay }: { top: string; left: string; size: number; delay: string }) {
+  return (
+    <svg className="folio-fa-sparkle" style={{ top, left, animationDelay: delay }} width={size} height={size} viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M12 0 L15 9 L24 12 L15 15 L12 24 L9 15 L0 12 L9 9 Z" fill="#fff6bf" stroke="rgba(255,255,255,.9)" strokeWidth="1" />
+    </svg>
+  );
+}
+
 export default function TadanoenFolioPage() {
   return (
     <div className="folio-fa">
@@ -201,13 +250,33 @@ export default function TadanoenFolioPage() {
           />
         ))}
       </div>
+      <svg className="folio-fa-skyline" viewBox="0 0 1280 110" preserveAspectRatio="none" aria-hidden="true">
+        <path d="M0 110 L0 74 L34 74 L34 52 L58 52 L58 74 L92 74 L92 38 L124 38 L124 74 L160 74 L160 60 L196 60 L196 74 L238 74 L238 30 L276 30 L276 74 L318 74 L318 56 L352 56 L352 74 L398 74 L398 44 L436 44 L436 74 L486 74 L486 64 L528 64 L528 74 L574 74 L574 26 L616 26 L616 74 L664 74 L664 50 L700 50 L700 74 L748 74 L748 62 L790 62 L790 74 L840 74 L840 36 L880 36 L880 74 L928 74 L928 58 L964 58 L964 74 L1014 74 L1014 42 L1054 42 L1054 74 L1102 74 L1102 66 L1144 66 L1144 74 L1196 74 L1196 48 L1232 48 L1232 74 L1280 74 L1280 110 Z" fill="#0d5a8a" />
+      </svg>
       <svg className="folio-fa-hills" viewBox="0 0 1280 190" preserveAspectRatio="none" aria-hidden="true">
         <path d="M0 70 C200 20 380 96 560 66 C760 34 900 92 1080 62 C1180 46 1240 62 1280 54 L1280 190 L0 190 Z" fill="#a5dd8a" opacity=".55" />
         <path d="M0 96 C160 40 300 128 470 96 C640 64 760 130 930 100 C1080 74 1180 110 1280 84 L1280 190 L0 190 Z" fill="#79c95e" opacity=".75" />
         <path d="M0 138 C180 92 340 162 540 132 C740 104 880 164 1060 138 C1160 124 1220 142 1280 130 L1280 190 L0 190 Z" fill="#57b53e" opacity=".9" />
         <path d="M0 168 C240 138 460 182 700 160 C920 142 1100 176 1280 158 L1280 190 L0 190 Z" fill="#3f9e2c" />
       </svg>
+      <svg className="folio-fa-grass" viewBox="0 0 1280 64" preserveAspectRatio="none" aria-hidden="true">
+        <path d="M0 64 L0 40 L16 18 L28 44 L44 12 L58 42 L76 22 L90 46 L108 16 L122 44 L140 26 L154 48 L172 14 L188 44 L204 24 L218 46 L236 18 L252 44 L268 28 L282 48 L300 12 L316 42 L332 22 L348 46 L364 20 L380 44 L396 26 L412 48 L428 16 L444 42 L460 24 L476 46 L492 14 L508 44 L524 28 L540 48 L556 18 L572 42 L588 22 L604 46 L620 12 L636 44 L652 26 L668 48 L684 20 L700 42 L716 24 L732 46 L748 16 L764 44 L780 28 L796 48 L812 14 L828 42 L844 22 L860 46 L876 18 L892 44 L908 26 L924 48 L940 12 L956 42 L972 24 L988 46 L1004 20 L1020 44 L1036 28 L1052 48 L1068 16 L1084 42 L1100 22 L1116 46 L1132 14 L1148 44 L1164 26 L1180 48 L1196 18 L1212 42 L1228 24 L1244 46 L1260 28 L1280 44 L1280 64 Z" fill="#2e8b34" />
+        <g fill="#ffffff">
+          <g transform="translate(120 44)"><circle r="3.2" fill="#ffd94d" /><circle cx="0" cy="-5" r="3" /><circle cx="4.8" cy="-1.6" r="3" /><circle cx="3" cy="4.2" r="3" /><circle cx="-3" cy="4.2" r="3" /><circle cx="-4.8" cy="-1.6" r="3" /></g>
+          <g transform="translate(520 50) scale(.8)"><circle r="3.2" fill="#ffd94d" /><circle cx="0" cy="-5" r="3" /><circle cx="4.8" cy="-1.6" r="3" /><circle cx="3" cy="4.2" r="3" /><circle cx="-3" cy="4.2" r="3" /><circle cx="-4.8" cy="-1.6" r="3" /></g>
+          <g transform="translate(880 42) scale(.9)"><circle r="3.2" fill="#ffd94d" /><circle cx="0" cy="-5" r="3" /><circle cx="4.8" cy="-1.6" r="3" /><circle cx="3" cy="4.2" r="3" /><circle cx="-3" cy="4.2" r="3" /><circle cx="-4.8" cy="-1.6" r="3" /></g>
+          <g transform="translate(1150 50) scale(.75)"><circle r="3.2" fill="#ffd94d" /><circle cx="0" cy="-5" r="3" /><circle cx="4.8" cy="-1.6" r="3" /><circle cx="3" cy="4.2" r="3" /><circle cx="-3" cy="4.2" r="3" /><circle cx="-4.8" cy="-1.6" r="3" /></g>
+        </g>
+      </svg>
       <div className="folio-fa-sun" aria-hidden="true" />
+      <Cloud top="4rem" left="4%" scale={1} delay="0s" />
+      <Cloud top="9.5rem" left="52%" scale={0.7} delay="2.2s" />
+      <Cloud top="2.2rem" left="68%" scale={0.55} delay="4s" />
+      <Globe top="21rem" right="5vw" size={148} delay="0.6s" />
+      <Sparkle top="12rem" left="16%" size={22} delay="0s" />
+      <Sparkle top="19rem" left="7%" size={14} delay="1.1s" />
+      <Sparkle top="26rem" left="86%" size={16} delay="0.5s" />
+      <Butterfly top="13.5rem" left="9%" delay="0s" />
       <div className="folio-fa-icon folio-fa-icon-ph" aria-hidden="true"><DropMark size={64} /></div>
       <Fish top="11.5rem" left="6%" scale={1} color="#ff9f2e" delay="0s" />
       <Fish top="15.5rem" left="13%" scale={0.7} flip color="#43b04c" delay="1.4s" />
