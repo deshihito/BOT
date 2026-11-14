@@ -1,8 +1,9 @@
 # -*- coding: utf-8 -*-
 """サーバー分析: 日次メタ集計の収集リスナと表示パネル。
 
-収集は guild_settings のトグル（server_analytics セクション、既定 OFF）が
-ON のギルドだけ。数えるのは件数・時間帯・絵文字の種別といったメタ情報
+収集は既定 ON（オプトアウト方式）で、guild_settings のトグル
+（server_analytics セクション）で管理者が明示的に OFF にしたギルド
+だけ止まる。数えるのは件数・時間帯・絵文字の種別といったメタ情報
 のみで、メッセージ本文は保存しない（絵文字は種別だけその場で数える）。
 
 表示は /support のアクション「サーバー分析」から開く。Overview（活動量
@@ -56,13 +57,15 @@ class ServerAnalyticsView(discord.ui.View):
     """サーバー分析パネル（開いた本人のみ操作可・Components V2 で表示）。"""
 
     def __init__(self, cog: "ServerAnalyticsCog", guild_id: int, *,
-                 owner_id: int, enabled: bool, is_admin: bool,
-                 ranking_optout: bool = False):
+                 owner_id: int, enabled: bool, explicit: bool = True,
+                 is_admin: bool, ranking_optout: bool = False):
         super().__init__(timeout=300)
         self.cog = cog
         self.guild_id = guild_id
         self.owner_id = owner_id
         self.enabled = enabled
+        #: 管理者が明示的に選んだ値かどうか。False なら未設定＝既定 ON。
+        self.explicit = explicit
         self.is_admin = is_admin
         self.ranking_optout = ranking_optout
         self.mode = MODE_OVERVIEW
@@ -141,22 +144,23 @@ class ServerAnalyticsView(discord.ui.View):
     def embed(self) -> discord.Embed:
         if not self.enabled:
             description = (
-                "このサーバーでは活動データの収集が **OFF** です。\n"
-                "サーバー管理者が収集を ON にすると、その時点から発言数・"
+                "このサーバーでは活動データの収集が **OFF** です"
+                "（収集は既定では ON で、サーバー管理者が停止しています）。\n"
+                "サーバー管理者が収集を再開すると、その時点から発言数・"
                 "VC 時間・絵文字の使用数などの記録が始まります"
-                "（過去の活動は記録されません。本文は保存しません）。"
+                "（停止中の活動は記録されません。本文は保存しません）。"
             )
             if not self.is_admin:
                 description += "\n収集の ON / OFF はサーバー管理者が変更できます。"
             description += f"\n{self._ranking_line()}"
             return discord.Embed(
                 title="サーバー分析", description=description, color=0xFFFFFF)
-        lines = []
+        lines = ["収集: ON" if self.explicit else "収集: ON（既定）"]
         if self._started_at:
             lines.append(f"収集開始: {_started_date(self._started_at)}")
         if self._recorded_days == 0:
             lines.append("データはまだありません。"
-                         "収集 ON 以降の活動から記録されます。")
+                         "収集開始以降の活動から記録されます。")
         lines.append(self._ranking_line())
         embed = discord.Embed(
             title="サーバー分析",
@@ -264,6 +268,8 @@ class ServerAnalyticsView(discord.ui.View):
             return await interaction.response.send_message(
                 SETTINGS_UPDATE_FAILED, ephemeral=True)
         self.enabled = new_value
+        #: 切替えた時点で、その値は管理者の明示設定になる。
+        self.explicit = True
         if not interaction.response.is_done():
             await interaction.response.defer()
         await self._edit(interaction)
@@ -418,6 +424,8 @@ class ServerAnalyticsCog(commands.Cog):
             owner_id=interaction.user.id,
             enabled=sa_store.server_analytics_enabled(
                 settings_store, interaction.guild_id),
+            explicit=sa_store.server_analytics_setting(
+                settings_store, interaction.guild_id) is not None,
             is_admin=_can_manage(interaction),
             ranking_optout=sa_store.server_ranking_opted_out(
                 settings_store, interaction.guild_id),

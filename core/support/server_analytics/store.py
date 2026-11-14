@@ -43,6 +43,9 @@ RETENTION_DAYS = 35
 WINDOW_DAYS = 14
 
 #: guild_settings のセクション名。{"enabled": bool, "ranking_optout": bool}。
+#: セクション自体が無いギルドは「未設定＝既定 ON」（オプトアウト方式）。
+#: 明示 OFF（{"enabled": False}）とは保存値の有無で区別できるため、
+#: 未設定ギルドの状態を enabled=False で保存してはいけない。
 SERVER_ANALYTICS_SECTION = "server_analytics"
 
 #: サーバー対抗ランキングのオプトアウトを表すキー（セクション内）。
@@ -75,8 +78,32 @@ def default_path() -> Path:
     return Path(os.environ.get("SERVER_ANALYTICS_PATH") or _DEFAULT_PATH)
 
 
+def server_analytics_setting(store, guild_id) -> bool | None:
+    """guild_settings に保存された明示的な収集トグルを返す。
+
+    True / False なら管理者が明示的に選んだ値。セクションが無い・
+    値が bool でない・読み取りに失敗した場合は None（＝明示設定なし）。
+    パネルが「既定で ON」なのか「明示 ON」なのかを区別するために使う。
+    """
+    if guild_id is None:
+        return None
+    try:
+        raw = store.get(guild_id, SERVER_ANALYTICS_SECTION)
+    except Exception:
+        return None
+    if not isinstance(raw, dict):
+        return None
+    value = raw.get("enabled")
+    return value if isinstance(value, bool) else None
+
+
 def server_analytics_enabled(store, guild_id) -> bool:
-    """guild_settings の収集トグル（既定 OFF）。読めない場合は OFF に倒す。"""
+    """収集が有効かどうか（既定 ON・オプトアウト方式）。
+
+    明示設定があればそれに従い（明示 OFF は常に尊重する）、未設定なら
+    ON。guild_id が無い場合と、設定の読み取り自体が失敗した場合は
+    OFF に倒す（読み取れない状態で勝手に集計を始めない fail-closed）。
+    """
     if guild_id is None:
         return False
     try:
@@ -84,9 +111,9 @@ def server_analytics_enabled(store, guild_id) -> bool:
     except Exception:
         return False
     if not isinstance(raw, dict):
-        return False
+        return True
     value = raw.get("enabled")
-    return value if isinstance(value, bool) else False
+    return value if isinstance(value, bool) else True
 
 
 def section_ranking_opted_out(section) -> bool:

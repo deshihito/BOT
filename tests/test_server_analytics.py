@@ -122,7 +122,7 @@ class StoreRecordTest(unittest.TestCase):
         self.assertEqual(snapshot["days"]["2026-11-09"]["messages"], 1)
         self.assertTrue(snapshot["started_at"])
 
-    def test_enabled_toggle_default_off(self):
+    def test_enabled_toggle_default_on(self):
         class FakeSettings:
             def __init__(self, value):
                 self.value = value
@@ -130,13 +130,54 @@ class StoreRecordTest(unittest.TestCase):
             def get(self, guild_id, section):
                 return self.value
 
-        self.assertFalse(sa_store.server_analytics_enabled(
+        # 未設定（セクション無し／空／enabled キー無し）は既定 ON。
+        self.assertTrue(sa_store.server_analytics_enabled(
+            FakeSettings(None), 1))
+        self.assertTrue(sa_store.server_analytics_enabled(
             FakeSettings({}), 1))
-        self.assertFalse(sa_store.server_analytics_enabled(
+        self.assertTrue(sa_store.server_analytics_enabled(
+            FakeSettings({"other": True}), 1))
+        # 不正な値は未設定として扱い、既定 ON。
+        self.assertTrue(sa_store.server_analytics_enabled(
             FakeSettings({"enabled": "yes"}), 1))
+        # 明示 ON は ON、明示 OFF は新既定でも尊重され OFF のまま。
         self.assertTrue(sa_store.server_analytics_enabled(
             FakeSettings({"enabled": True}), 1))
         self.assertFalse(sa_store.server_analytics_enabled(
+            FakeSettings({"enabled": False}), 1))
+        # guild_id が無い場合は集計しない。
+        self.assertFalse(sa_store.server_analytics_enabled(
+            FakeSettings({"enabled": True}), None))
+        self.assertFalse(sa_store.server_analytics_enabled(
+            FakeSettings(None), None))
+
+    def test_enabled_toggle_read_error_fails_closed(self):
+        class ExplodingSettings:
+            def get(self, guild_id, section):
+                raise RuntimeError("boom")
+
+        self.assertFalse(sa_store.server_analytics_enabled(
+            ExplodingSettings(), 1))
+
+    def test_setting_returns_explicit_value_only(self):
+        class FakeSettings:
+            def __init__(self, value):
+                self.value = value
+
+            def get(self, guild_id, section):
+                return self.value
+
+        self.assertIsNone(sa_store.server_analytics_setting(
+            FakeSettings(None), 1))
+        self.assertIsNone(sa_store.server_analytics_setting(
+            FakeSettings({}), 1))
+        self.assertIsNone(sa_store.server_analytics_setting(
+            FakeSettings({"enabled": "yes"}), 1))
+        self.assertIs(sa_store.server_analytics_setting(
+            FakeSettings({"enabled": True}), 1), True)
+        self.assertIs(sa_store.server_analytics_setting(
+            FakeSettings({"enabled": False}), 1), False)
+        self.assertIsNone(sa_store.server_analytics_setting(
             FakeSettings({"enabled": True}), None))
 
 
@@ -243,9 +284,12 @@ class CogCollectionTest(unittest.IsolatedAsyncioTestCase):
         self.cog._vc_since = {}
 
     async def _run_message(self, message, enabled=True):
+        await self._run_message_raw(message, {"enabled": enabled})
+
+    async def _run_message_raw(self, message, raw):
         fake_settings = types.SimpleNamespace(
             ensure_loaded=AsyncMock(),
-            get=lambda guild_id, section: {"enabled": enabled},
+            get=lambda guild_id, section: raw,
         )
         from core.support import guild_settings as gs_module
         with patch.object(gs_module, "get_store",
@@ -260,6 +304,14 @@ class CogCollectionTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(day["mentioned"], {20: 1})
         self.assertEqual(day["emojis"], {"🎉": 1})
 
+    async def test_message_recorded_when_unset(self):
+        # 未設定ギルド（セクション無し／空）は既定 ON で集計される。
+        await self._run_message_raw(make_message(), None)
+        self.assertTrue(self.store.has_data(1))
+        await self._run_message_raw(make_message(), {})
+        day = self.store.guild_snapshot(1)["days"]["2026-11-09"]
+        self.assertEqual(day["messages"], 2)
+
     async def test_message_skipped_when_disabled(self):
         await self._run_message(make_message(), enabled=False)
         self.assertFalse(self.store.has_data(1))
@@ -269,6 +321,113 @@ class CogCollectionTest(unittest.IsolatedAsyncioTestCase):
         await self._run_message(make_message(guild_id=None))
         await self._run_message(make_message(webhook_id=999))
         self.assertFalse(self.store.has_data(1))
+
+
+class PanelDisplayTest(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.store = sa_store.ServerAnalyticsStore(
+            Path(self.tmp.name) / "analytics.json")
+        self.cog = types.SimpleNamespace(store=self.store, bot=None)
+
+    def _view(self, *, enabled, explicit, is_admin=True):
+        return ServerAnalyticsView(
+            self.cog, 1, owner_id=1, enabled=enabled,
+            explicit=explicit, is_admin=is_admin)
+
+    def test_off_embed_explains_opt_out(self):
+        view = self._view(enabled=False, explicit=True, is_admin=False)
+        description = view.embed().description
+        self.assertIn("**OFF**", description)
+        self.assertIn("既定では ON", description)
+        self.assertIn("停止中の活動は記録されません", description)
+        self.assertIn("サーバー管理者が変更できます", description)
+
+    async def test_default_on_embed_shows_default_state(self):
+        view = self._view(enabled=True, explicit=False)
+        await view.prepare()
+        description = view.embed().description
+        self.assertIn("収集: ON（既定）", description)
+        self.assertIn("データはまだありません", description)
+
+    async def test_explicit_on_embed_has_no_default_marker(self):
+        view = self._view(enabled=True, explicit=True)
+        await view.prepare()
+        description = view.embed().description
+        self.assertIn("収集: ON", description)
+        self.assertNotIn("（既定）", description)
+
+
+class PanelToggleTest(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.store = sa_store.ServerAnalyticsStore(
+            Path(self.tmp.name) / "analytics.json")
+        self.cog = types.SimpleNamespace(store=self.store, bot=None)
+        self.saved = {}
+
+        outer = self
+
+        class FakeSettingsStore:
+            def get(self, guild_id, section):
+                return outer.saved.get(section)
+
+            async def update(self, guild_id, section, **kwargs):
+                outer.saved[section] = {"enabled": kwargs["enabled"]}
+
+        self.settings_store = FakeSettingsStore()
+
+    def _interaction(self):
+        return types.SimpleNamespace(
+            user=types.SimpleNamespace(
+                id=1,
+                guild_permissions=types.SimpleNamespace(
+                    administrator=True, manage_guild=False),
+            ),
+            response=types.SimpleNamespace(
+                is_done=lambda: False,
+                defer=AsyncMock(),
+                send_message=AsyncMock(),
+            ),
+        )
+
+    async def _toggle(self, view):
+        from core.support import guild_settings as gs_module
+        from core.support.server_analytics import cog as cog_module
+        with patch.object(gs_module, "get_store",
+                          return_value=self.settings_store), \
+                patch.object(cog_module, "edit_panel_v2",
+                             new=AsyncMock()), \
+                patch.object(cog_module, "as_panel_v2",
+                             new=lambda view: view):
+            await view._on_toggle(self._interaction())
+
+    async def test_toggle_off_then_on_persists_explicit_values(self):
+        view = ServerAnalyticsView(
+            self.cog, 1, owner_id=1, enabled=True, explicit=False,
+            is_admin=True)
+        await self._toggle(view)
+        # 既定 ON から止めると明示 OFF として保存され、新既定でも
+        # 解決結果は OFF のまま（勝手に再開されない）。
+        self.assertEqual(
+            self.saved[sa_store.SERVER_ANALYTICS_SECTION],
+            {"enabled": False})
+        self.assertFalse(view.enabled)
+        self.assertTrue(view.explicit)
+        self.assertFalse(sa_store.server_analytics_enabled(
+            self.settings_store, 1))
+        self.assertIs(sa_store.server_analytics_setting(
+            self.settings_store, 1), False)
+
+        await self._toggle(view)
+        self.assertEqual(
+            self.saved[sa_store.SERVER_ANALYTICS_SECTION],
+            {"enabled": True})
+        self.assertTrue(view.enabled)
+        self.assertTrue(sa_store.server_analytics_enabled(
+            self.settings_store, 1))
 
 
 class RegistrationTest(unittest.TestCase):
