@@ -88,8 +88,8 @@ class GenreReorgTest(unittest.TestCase):
         self.assertEqual(g.GENERAL_GENRES["make_image"], ("画像作成", ""))
         values = [v for _label, v in g.GENERAL_ACTIONS["make_image"]]
         # 機能再編: miq_refuse（引用拒否）/ miq_create（画像作成）が独立エントリ化
-        self.assertEqual(values, ["story54", "fast_html", "meme_create", "meme_help", "miq_settings",
-                                  "miq_refuse", "miq_create"])
+        self.assertEqual(values, ["story54", "fast_html", "bg_cutout", "meme_create", "meme_help",
+                                  "miq_settings", "miq_refuse", "miq_create"])
         labels = {v: label for label, v in g.GENERAL_ACTIONS["make_image"]}
         self.assertEqual(labels["story54"], "54字の物語")
 

@@ -179,6 +179,7 @@ GENERAL_ACTIONS = {
     "make_image": [
         ("54字の物語", "story54"),
         ("fastHTML", "fast_html"),
+        ("背景透過・絵文字/スタンプ化", "bg_cutout"),
         ("memeを作成", "meme_create"),
         ("使い方", "meme_help"),
         ("MIQ設定（見た目・引用拒否）", "miq_settings"),

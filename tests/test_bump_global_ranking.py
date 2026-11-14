@@ -83,11 +83,12 @@ class UnifiedBoardGenreTest(unittest.TestCase):
         # ニュース通知（support:news_notify）追加で全体 256→257。
         # 即抜けRTA設定の統合（support 5件→設定パネル1件）で全体 257→253。
         # サーバー対抗ランキング（general:server_ranking）追加で general 73→74 / 全体 253→254。
+        # 背景透過・絵文字/スタンプ化（general:bg_cutout）追加で general 74→75 / 全体 254→255。
         from core.general import action_registry
 
         specs = list(action_registry.default_registry()._by_id.values())
-        self.assertEqual(len(specs), 254)
-        self.assertEqual(len([s for s in specs if s.root == "general"]), 74)
+        self.assertEqual(len(specs), 255)
+        self.assertEqual(len([s for s in specs if s.root == "general"]), 75)
 
 
 class UnifiedBoardDispatchTest(unittest.IsolatedAsyncioTestCase):

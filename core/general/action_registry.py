@@ -81,6 +81,8 @@ AI_BLOCKED_IDS = frozenset({
     "general:story54",
     # fastHTMLもファイル投稿待ちの対話フローなので meme_create と同様に対象外。
     "general:fast_html",
+    # 背景透過も用途選択＋画像投稿待ちの対話フローなので同様に対象外。
+    "general:bg_cutout",
     # 機能数再編で独立化した入口のうち、コイン授受・加工・個人設定・対話
     # フローにあたるものは、元の集約先と同じ方針で AI 代理実行の対象外にする。
     "general:item_sell", "general:starter_claim", "general:daily_bonus_claim",

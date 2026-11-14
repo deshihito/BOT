@@ -215,7 +215,7 @@ class ConfirmTierTest(unittest.TestCase):
         "general:fujo_panic_disable", "general:shortcut_manage", "general:aitools",
         "general:ai_default", "general:image_default", "general:reasoning_default",
         "general:miq_settings", "general:meme_create", "general:story54",
-        "general:fast_html",
+        "general:fast_html", "general:bg_cutout",
         "general:token_buy", "general:token_sell",
         "general:item_buy", "general:item_use", "general:box_open",
         "general:machine_buy", "general:workshop_claim", "general:craft",

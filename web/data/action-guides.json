@@ -1,8 +1,8 @@
 {
   "version": 1,
-  "total": 254,
+  "total": 255,
   "counts": {
-    "general": 74,
+    "general": 75,
     "vc": 46,
     "game": 49,
     "support": 84,
@@ -501,6 +501,12 @@
               "id": "general:fast_html",
               "value": "fast_html",
               "title": "fastHTML",
+              "description": ""
+            },
+            {
+              "id": "general:bg_cutout",
+              "value": "bg_cutout",
+              "title": "背景透過・絵文字/スタンプ化",
               "description": ""
             },
             {
