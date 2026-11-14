@@ -212,6 +212,44 @@ test("診断履歴: 端末保存の追加・重複URLの最新化・上限・削
   assert.deepEqual(h.loadHistory(storage), []);
 });
 
+test("テキスト統計: 一覧主体の実文では繰り返しが暴れず、型の量産文では機械性が上がる", () => {
+  const listHeavy = [
+    "東京港は1878年に開港し、現在は年間4,100万トンの貨物を扱う。",
+    "この駅の利用者は1日平均3万2千人で、ピークは2011年だった。",
+    "橋の全長は984メートル、建設には地元産の石材が使われたそうだ。",
+    "標高2,101メートルの山頂には気象観測所があり、冬季は閉鎖される。",
+    "川幅は最下流で210メートルに広がり、河口には干潟が残っている。",
+    "森の面積は約640ヘクタールで、樹齢300年を超える杉が11本確認された。",
+    "湖の最大水深は58メートル、透明度は夏場に最も低下する傾向がある。",
+    "島の人口は昭和30年代のピーク時から8割減り、現在240人ほどだ。",
+    "谷底では6月でも残雪が見られ、登山道は7月上旬に開通した。",
+    "丘の上の展望台からは、晴れた日に約40キロ先の海岸線まで見渡せるらしい。",
+    "浜では毎年8月に地引き網の体験会が開かれ、去年は310人が参加した。",
+    "岬の灯台は1903年に点灯し、レンズは今も初代のものを修理しながら使っている。",
+  ].join("");
+  const st = m.computeTextStats(listHeavy);
+  assert.ok(st, "統計が成立する");
+  assert.ok(st.repeat <= 30, `repeat=${st.repeat}`);
+  assert.ok(st.startShare >= 0 && st.mechanical <= 40, `startShare=${st.startShare} mechanical=${st.mechanical}`);
+  const scaffold = "まず、導入として背景を説明します。次に、具体的な手順を説明します。さらに、応用例を説明します。また、注意点を説明します。そして、結果を説明します。一方で、課題も説明します。まとめると、全体像を説明します。最後に、今後の展望を説明します。";
+  const st2 = m.computeTextStats(scaffold.repeat(3));
+  assert.ok(st2.mechanical >= 45, `mechanical=${st2.mechanical}`);
+  assert.equal(m.computeTextStats("短い文。"), null);
+});
+
+test("composeAssessedは統計がある次元を実測値で上書きする", () => {
+  const dims = ["cliche", "vague", "abstract", "repeat", "mechanical", "bait"].map((key) => ({
+    key, score: key === "repeat" ? 100 : 10, evidence: "e", why: "w", fix: "f",
+  }));
+  const parsed = { dimensions: dims, ux: [] };
+  const stats = { sentenceCount: 50, repeat: 12, mechanical: 40, dupSentenceRatio: 0.02, gramRepeatRatio: 0.1, sentenceCv: 0.3, scaffoldShare: 0.5, startShare: 0.1 };
+  const composed = m.composeAssessed(parsed, m.scoreText(SOLID_TEXT), stats);
+  assert.equal(composed.dimensions.find((d) => d.key === "repeat").score, 12);
+  assert.equal(composed.dimensions.find((d) => d.key === "mechanical").score, 40);
+  const mechDiag = composed.diagnosis.find((d) => d.dimension === "mechanical");
+  assert.ok(mechDiag && mechDiag.evidence.includes("実測"));
+});
+
 test("LLM採点の2回平均: スコアは平均化され、根拠は平均に近い側が残る", () => {
   const mk = (base) => ({
     dimensions: ["cliche", "vague", "abstract", "repeat", "mechanical", "bait"].map((key, i) => ({
