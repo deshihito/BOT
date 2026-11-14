@@ -59,7 +59,7 @@ export async function POST(request: Request) {
         diagnosis: assessed.diagnosis,
         diagnosisSource: "llm",
         scoreSource: "llm",
-        ux: { friction: assessed.uxFriction, grade: assessed.uxGrade, findings: assessed.uxFindings, signals: page.ux },
+        ux: { friction: heuristicUx.friction, grade: heuristicUx.grade, findings: heuristicUx.findings, signals: page.ux },
         appearance,
       });
     }
