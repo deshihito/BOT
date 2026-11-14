@@ -5,7 +5,9 @@
 
 import { lookup } from "node:dns/promises";
 import {
+  APPEARANCE_PROMPT,
   buildAssessMessages,
+  composeAppearance,
   composeAssessed,
   emptyUxSignals,
   extractPage,
@@ -16,6 +18,7 @@ import {
   buildDiagnosisMessages,
   buildRuleDiagnosis,
   parseDiagnosisJson,
+  type AppearanceResult,
   type DiagnosisItem,
   type PageData,
   type ViewScore,
@@ -132,6 +135,102 @@ export async function assess(page: PageData, heuristic: ViewScore): Promise<Retu
     return composeAssessed(parsed, heuristic);
   } catch (error) {
     console.error("viewslopper: assess failed", error instanceof Error ? error.message : "unknown error");
+    return null;
+  }
+}
+
+/**
+ * 描画後のスクリーンショットを r.jina.ai から取る。本文の描画取得と同じ提供元で、
+ * 見出しテキストではなく画像そのものを返す経路。失敗したら null。
+ * screenshotUrl は署名付きで数時間で失効する（結果画面での即時表示用）。
+ */
+async function fetchScreenshot(url: string): Promise<{ dataUrl: string; screenshotUrl: string } | null> {
+  const response = await fetch(`https://r.jina.ai/${url}`, {
+    headers: { "User-Agent": USER_AGENT, "x-respond-with": "screenshot" },
+    signal: AbortSignal.timeout(RENDER_TIMEOUT_MS),
+  });
+  if (!response.ok) return null;
+  const buf = Buffer.from(await response.arrayBuffer());
+  if (buf.length === 0 || buf.length > 6_000_000) return null;
+  const contentType = response.headers.get("content-type") ?? "";
+  if (!contentType.startsWith("image/")) return null;
+  return {
+    dataUrl: `data:${contentType.split(";")[0]};base64,${buf.toString("base64")}`,
+    screenshotUrl: response.url,
+  };
+}
+
+// 外観採点の vision モデル優先順。LLL の鑑定と同じく、Logfare の公開カタログで
+// 画像入力（chat_vision:true）が実測確認できたモデルだけを並べる。
+// 既定の ds1017 はテキスト専用なのでここでは使わない。
+const APPEARANCE_MODEL_CHAIN: string[] = ["gemma-4-26b", "gemma-4-31b-it", "qwen-3.8-27b"];
+
+function logfareBaseUrl(): string {
+  return (process.env.LOGFARE_BASE_URL?.trim() || "https://logfare.ai/v1").replace(/\/+$/, "");
+}
+
+async function visionChat(dataUrl: string, prompt: string): Promise<string | null> {
+  const keys = logfareApiKeys();
+  if (keys.length === 0) return null;
+  const override = process.env.VIEWSLOPPER_VISION_MODEL?.trim();
+  const models = [...new Set([...(override ? [override] : []), ...APPEARANCE_MODEL_CHAIN])];
+  for (const model of models) {
+    const payload = {
+      model,
+      messages: [
+        {
+          role: "user",
+          content: [
+            { type: "text", text: prompt },
+            { type: "image_url", image_url: { url: dataUrl } },
+          ],
+        },
+      ],
+      max_tokens: 900,
+    };
+    for (const key of keys) {
+      let response: Response;
+      try {
+        response = await fetch(`${logfareBaseUrl()}/chat/completions`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` },
+          body: JSON.stringify(payload),
+          signal: AbortSignal.timeout(45_000),
+        });
+      } catch {
+        break; // 通信失敗はモデルを変えても同じなので次のモデルへ
+      }
+      if (response.status === 429) continue; // キー切替は 429 のときだけ（LLL と同じ）
+      if (!response.ok) break;
+      const data = (await response.json().catch(() => null)) as {
+        choices?: { message?: { content?: unknown } }[];
+      } | null;
+      const content = data?.choices?.[0]?.message?.content;
+      if (typeof content === "string" && content.trim()) return content;
+      break;
+    }
+  }
+  return null;
+}
+
+export type AppearanceOutcome = { result: AppearanceResult; screenshotUrl: string } | null;
+
+/**
+ * 外観採点: スクリーンショット取得 → vision モデルが4軸を採点 → コードが集計。
+ * 取得や採点ができなければ null（画面では外観セクションを出さない）。
+ */
+export async function assessAppearance(page: PageData): Promise<AppearanceOutcome> {
+  if (logfareApiKeys().length === 0) return null;
+  try {
+    const shot = await fetchScreenshot(page.url);
+    if (!shot) return null;
+    const raw = await visionChat(shot.dataUrl, APPEARANCE_PROMPT);
+    if (!raw) return null;
+    const result = composeAppearance(raw);
+    if (!result) return null;
+    return { result, screenshotUrl: shot.screenshotUrl };
+  } catch (error) {
+    console.error("viewslopper: appearance failed", error instanceof Error ? error.message : "unknown error");
     return null;
   }
 }

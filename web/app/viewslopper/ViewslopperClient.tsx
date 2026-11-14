@@ -21,6 +21,7 @@ type Result = {
   scoreSource?: "llm" | "rules";
   rendered?: boolean;
   ux: { friction: number; grade: string; findings: UxFinding[]; signals: UxSignals };
+  appearance?: { score: number; grade: string; findings: UxFinding[]; screenshotUrl: string } | null;
 };
 
 const SEVERITY_LABEL: Record<UxFinding["severity"], string> = { high: "重大", mid: "中", low: "軽微" };
@@ -179,8 +180,52 @@ export default function ViewslopperClient() {
             </div>
           )}
           <p style={{ color: "#6d7278", fontSize: 12, marginTop: 14 }}>
-            UX・配置は、HTMLの構造から数えた事実（下の数値）を材料に診断しています。見た目の実測はしていません。
+            UX・配置は、HTMLの構造から数えた事実（上の数値）を材料に診断しています。
           </p>
+
+          <h2 style={{ fontSize: 18, margin: "32px 0 12px" }}>外観（見た目）</h2>
+          {result.appearance ? (
+            <>
+              <div style={{ display: "flex", alignItems: "baseline", gap: 14, flexWrap: "wrap" }}>
+                <span style={{ fontSize: 40, fontWeight: 800, color: scoreColor(result.appearance.score), lineHeight: 1 }}>
+                  {result.appearance.score}
+                </span>
+                <span style={{ fontSize: 16, fontWeight: 700 }}>{result.appearance.grade}</span>
+                <span style={{ color: "#8a8f98", fontSize: 13 }}>外観スコア（0–100、高いほど見た目が slop）</span>
+              </div>
+              {/* 採点に使った描画画像そのもの。署名付きURLで数時間で失効する */}
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={result.appearance.screenshotUrl}
+                alt="採点に使ったページのスクリーンショット"
+                style={{ width: "100%", borderRadius: 12, border: "1px solid #23252a", marginTop: 14 }}
+              />
+              {result.appearance.findings.length === 0 ? (
+                <p style={{ color: "#b6bac2", marginTop: 12 }}>見た目については、目立った slop は検出されませんでした。</p>
+              ) : (
+                <div style={{ display: "grid", gap: 12, marginTop: 14 }}>
+                  {result.appearance.findings.map((f, i) => (
+                    <article key={i} style={{ border: "1px solid #23252a", borderRadius: 12, padding: "14px 16px", background: "#121316" }}>
+                      <p style={{ margin: 0, fontWeight: 700 }}>
+                        <span style={{ color: SEVERITY_COLOR[f.severity], fontSize: 12, border: `1px solid ${SEVERITY_COLOR[f.severity]}`, borderRadius: 999, padding: "2px 8px", marginRight: 8 }}>
+                          {SEVERITY_LABEL[f.severity]}
+                        </span>
+                        {f.axis}
+                      </p>
+                      <p style={{ margin: "8px 0 0", color: "#d6d9de" }}>{f.evidence}</p>
+                      <p style={{ margin: "6px 0", lineHeight: 1.7 }}>{f.why}</p>
+                      <p style={{ margin: 0, color: "#b6bac2", lineHeight: 1.7 }}>直し方: {f.fix}</p>
+                    </article>
+                  ))}
+                </div>
+              )}
+              <p style={{ color: "#6d7278", fontSize: 12, marginTop: 14 }}>
+                外観は描画後のスクリーンショットをAIが見て採点しています（テンプレ感 / 整列と余白 / 文字の階層 / 個性のなさ）。
+              </p>
+            </>
+          ) : (
+            <p style={{ color: "#b6bac2" }}>今回はスクリーンショットを取得できず、外観は採点できませんでした。</p>
+          )}
         </section>
       )}
     </div>
