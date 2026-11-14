@@ -973,6 +973,36 @@ class GamblingCog(commands.Cog):
         except Exception:
             logger.exception("gambling: 損失の還流に失敗しました amount=%s", amount)
 
+    def _fund_profit(self, profit: int) -> dict[str, int]:
+        """配当の利益分をバンクロール（プール＋国庫）から確保する（A案）。
+
+        配当は「ベット返却分（本人のエスクロー）＋利益分」に分解し、
+        利益分だけを economy_store.pay_house で賄う。戻り値は pay_house
+        の内訳 {"paid", "pool", "treasury"} で、実配当は
+        ベット分 + paid になる（バンクロール不足なら払える分まで）。
+        確保自体が失敗した場合は払わない側に倒す（新規創出をしない）。
+        """
+        profit = int(profit)
+        if profit <= 0:
+            return {"paid": 0, "pool": 0, "treasury": 0}
+        try:
+            return self.economy_store.pay_house(profit)
+        except Exception:
+            logger.exception(
+                "gambling: バンクロールからの確保に失敗しました profit=%s", profit)
+            return {"paid": 0, "pool": 0, "treasury": 0}
+
+    def _refund_profit(self, breakdown: dict[str, int]) -> None:
+        """_fund_profit で確保した分をバンクロールへ戻す（credit 失敗時）。"""
+        if int(breakdown.get("paid") or 0) <= 0:
+            return
+        try:
+            self.economy_store.refund_house(breakdown)
+        except Exception:
+            logger.exception(
+                "gambling: バンクロールへの巻き戻しに失敗しました breakdown=%s",
+                breakdown)
+
     async def cog_load(self) -> None:
         if not self.flush_loop.is_running():
             self.flush_loop.start()
@@ -1103,16 +1133,23 @@ class GamblingCog(commands.Cog):
         amount = int(taken) * items_core.DEVIL_REWARD_MULTIPLIER
         if amount <= 0:
             return 0
+        # 悪魔的な報酬はベット返却分が無い配当なので、全額をバンク
+        # ロールから賄う（A案）。不足する場合は払える分だけになる。
+        breakdown = self._fund_profit(amount)
+        paid = int(breakdown["paid"])
+        if paid <= 0:
+            return 0
         wallet = self._wallet()
         credit = await wallet._change_balance(
-            uid, amount, create_with=wallet_module.NEW_USER_BALANCE)
+            uid, paid, create_with=wallet_module.NEW_USER_BALANCE)
         if credit is None:
+            self._refund_profit(breakdown)
             logger.critical(
                 "gambling: 悪魔的な報酬の支払いに失敗しました。"
-                "手動で払ってください: user=%s amount=%s", uid, amount)
+                "手動で払ってください: user=%s amount=%s", uid, paid)
             return 0
-        await self._record_history(GAMBLING_ID, uid, amount, "devil_reward")
-        return amount
+        await self._record_history(GAMBLING_ID, uid, paid, "devil_reward")
+        return paid
 
     async def _refund_failed_start(self, uid: str, amount: int) -> bool:
         """開始失敗時のベット返金（E-5c）。成功したら True。
@@ -1233,6 +1270,7 @@ class GamblingCog(commands.Cog):
                 six_multiplier=items_core.SIX_SUPPRESS_MULTIPLIER)
             wallet = self._wallet()
             delta = 0
+            devil_amount = 0  # 悪魔的な報酬は配当台帳（_slot_rewards）に入れない
             lines = [f"🎰 {''.join(map(str, result['reels']))}"]
             for event in result["events"]:
                 lines.append(_SLOT_EVENT_LINES[event])
@@ -1283,23 +1321,35 @@ class GamblingCog(commands.Cog):
                         # 所持していれば確率で見返りがある（1回で消滅）。
                         devil = await self._try_devil_reward(uid, taken)
                         if devil > 0:
+                            devil_amount = devil
                             delta += devil
                             lines.append(
                                 f"😈 **悪魔的な報酬！** {devil:,} AGO が戻ってきた…")
             elif result["reward"] > 0:
-                credit = await wallet._change_balance(
-                    uid, result["reward"], create_with=wallet_module.NEW_USER_BALANCE)
-                if credit is None:
-                    logger.critical(
-                        "gambling: スロット配当の支払いに失敗しました。手動で払ってください: "
-                        "user=%s reward=%s", uid, result["reward"])
-                else:
-                    delta = result["reward"]
-                    await self._record_history(
-                        GAMBLING_ID, uid, result["reward"], "gamble_slot")
+                # 配当の利益分（ベット分を超えた分）はバンクロールから
+                # 賄う（A案）。実 credit 額は名目報酬から未払いの利益分を
+                # 引いた額。台帳へは下の集計でベット返却分だけが入る。
+                nominal = int(result["reward"])
+                profit = max(0, nominal - gambling_core.SLOT_BET)
+                breakdown = self._fund_profit(profit)
+                credited_reward = nominal - (profit - int(breakdown["paid"]))
+                if credited_reward > 0:
+                    credit = await wallet._change_balance(
+                        uid, credited_reward,
+                        create_with=wallet_module.NEW_USER_BALANCE)
+                    if credit is None:
+                        self._refund_profit(breakdown)
+                        logger.critical(
+                            "gambling: スロット配当の支払いに失敗しました。手動で払ってください: "
+                            "user=%s reward=%s", uid, credited_reward)
+                        credited_reward = 0
+                    else:
+                        delta = credited_reward
+                        await self._record_history(
+                            GAMBLING_ID, uid, credited_reward, "gamble_slot")
                 if "pity" not in result["events"]:
                     lines.append(
-                        f"{result['max_match']}揃い！ **{result['reward']:+,} AGO**")
+                        f"{result['max_match']}揃い！ **{credited_reward:+,} AGO**")
             elif result["reward"] < 0:
                 # 6ペナルティは残高を割らない: require_funds=True で、
                 # 不足時は残高まででクランプする（E-5a、没収ガードの
@@ -1324,8 +1374,15 @@ class GamblingCog(commands.Cog):
                     lines.append(f"**{-take:+,} AGO**")
                 else:
                     lines.append("ペナルティの引き落としはありませんでした。")
-            if delta > 0:
-                self._slot_rewards[uid] = self._slot_rewards.get(uid, 0) + delta
+            # 配当台帳には配当のうちベット返却分だけを積む（1スピン最大
+            # SLOT_BET）。利益分はバンクロール原資で別に引かれているため、
+            # ここで実額を積むと終了時の純損失還流から二重に引かれる。
+            # 悪魔的な報酬も台帳には含めない。
+            ledger_delta = delta - devil_amount
+            if ledger_delta > 0:
+                self._slot_rewards[uid] = (
+                    self._slot_rewards.get(uid, 0)
+                    + min(ledger_delta, gambling_core.SLOT_BET))
             if result["finished"]:
                 # 先払い総額から配当総額を引いた純損失を還流する
                 # （ペナルティ・没収分は発生時に還流済みなので含めない）。
@@ -1453,17 +1510,23 @@ class GamblingCog(commands.Cog):
             if blocked:
                 return gambling_action_failed(blocked)
             result = self.store.double_cashout(uid)
+            # 配当の利益分はバンクロールから賄う（A案）。実配当は
+            # ベット分 + 確保できた利益分。
+            breakdown = self._fund_profit(
+                int(result["payout"]) - int(result["bet"]))
+            actual_payout = int(result["bet"]) + int(breakdown["paid"])
             wallet = self._wallet()
             credit = await wallet._change_balance(
-                uid, result["payout"], create_with=wallet_module.NEW_USER_BALANCE)
+                uid, actual_payout, create_with=wallet_module.NEW_USER_BALANCE)
             if credit is None:
+                self._refund_profit(breakdown)
                 logger.critical(
                     "gambling: ダブルアップ配当の支払いに失敗しました。手動で払ってください: "
-                    "user=%s payout=%s", uid, result["payout"])
+                    "user=%s payout=%s", uid, actual_payout)
                 return gambling_action_failed(
                     "配当の支払いに失敗しました。Botの運営に連絡してください。")
-            await self._record_history(GAMBLING_ID, uid, result["payout"], "gamble_double")
-            return (f"{COIN} **確定！ {result['payout']:,} AGO 獲得！**\n"
+            await self._record_history(GAMBLING_ID, uid, actual_payout, "gamble_double")
+            return (f"{COIN} **確定！ {actual_payout:,} AGO 獲得！**\n"
                     f"コイン残高: {credit:,} AGO")
         except items_core.ItemError as exc:
             return gambling_action_failed(exc)
@@ -1551,28 +1614,37 @@ class GamblingCog(commands.Cog):
             if blocked:
                 return gambling_action_failed(blocked)
             result = self.store.blackjack_stand(uid)
+            # 配当の利益分はバンクロールから賄う（A案）。プッシュは
+            # ベット返却のみで引かない。実配当はベット分 + 確保できた
+            # 利益分で、最終盤面の delta も実額で持つ。
+            breakdown = {"paid": 0, "pool": 0, "treasury": 0}
+            actual_payout = int(result["payout"])
+            if result["outcome"] == "win":
+                breakdown = self._fund_profit(int(result["bet"]))
+                actual_payout = int(result["bet"]) + int(breakdown["paid"])
             self._blackjack_final[uid] = {
                 "player": list(result["player"]),
                 "dealer": list(result["dealer"]),
                 "bet": int(result["bet"]),
                 "outcome": result["outcome"],
-                "delta": int(result["payout"]) - int(result["bet"]),
+                "delta": actual_payout - int(result["bet"]),
             }
-            if result["payout"] > 0:
+            if actual_payout > 0:
                 wallet = self._wallet()
                 credit = await wallet._change_balance(
-                    uid, result["payout"], create_with=wallet_module.NEW_USER_BALANCE)
+                    uid, actual_payout, create_with=wallet_module.NEW_USER_BALANCE)
                 if credit is None:
+                    self._refund_profit(breakdown)
                     logger.critical(
                         "gambling: ブラックジャック配当の支払いに失敗しました。"
                         "手動で払ってください: user=%s payout=%s",
-                        uid, result["payout"])
+                        uid, actual_payout)
                     return gambling_action_failed(
                         "配当の支払いに失敗しました。Botの運営に連絡してください。")
                 await self._record_history(
-                    GAMBLING_ID, uid, result["payout"], "gamble_blackjack")
+                    GAMBLING_ID, uid, actual_payout, "gamble_blackjack")
             if result["outcome"] == "win":
-                headline = f"🎉 **勝ち！ +{result['bet']:,} AGO**"
+                headline = f"🎉 **勝ち！ +{actual_payout - int(result['bet']):,} AGO**"
             elif result["outcome"] == "push":
                 headline = "🤝 **引き分け**（ベットが戻りました）"
             else:
@@ -1807,10 +1879,14 @@ class GamblingCog(commands.Cog):
             await self._record_history(uid, GAMBLING_ID, bet, "gamble_dice")
             result = self.store.play_dice(max_value, number)
             if result["hit"]:
-                prize = bet * max_value
+                # 賞金の利益分（ベット分を超えた分）はバンクロールから
+                # 賄う（A案）。実賞金はベット分 + 確保できた利益分。
+                breakdown = self._fund_profit(bet * (max_value - 1))
+                prize = bet + int(breakdown["paid"])
                 credit = await wallet._change_balance(
                     uid, prize, create_with=wallet_module.NEW_USER_BALANCE)
                 if credit is None:
+                    self._refund_profit(breakdown)
                     logger.critical(
                         "gambling: ダイス賞金の支払いに失敗しました。手動で払ってください: "
                         "user=%s prize=%s", uid, prize)

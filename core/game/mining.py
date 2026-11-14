@@ -77,6 +77,11 @@ JACKPOT_RATE = 0.10
 JACKPOT_POOL_MIN_RATE = 0.01
 JACKPOT_POOL_MAX_RATE = 0.10
 
+#: 大量採掘の上乗せの絶対上限（インフレ対策A案）。割合で引いた額が
+#: プール残高に比例して暴れるのを切り離すためのキャップで、直下掘りの
+#: 倍率を適用した後にこの額でクランプする。
+JACKPOT_CAP_COINS = 10_000
+
 #: 直下掘り（次期仕様 S6-4）の特殊ダイス。セッション開始時に立てた
 #: フラグが残っている間だけ有効で、大量採掘の確率と量が上がる代わり
 #: に失敗率が大きく上がる（原典: 大量採掘 +50% / 失敗 90%）。
@@ -280,6 +285,8 @@ class MiningStore(DirtyFlushMixin):
             if direct:
                 rate *= DIRECT_JACKPOT_MULTIPLIER
             extra = max(1, int(pool_balance * rate)) if pool_balance > 0 else 0
+            # 絶対上限は直下掘りの倍率を適用した後にクランプする（A案）。
+            extra = min(extra, JACKPOT_CAP_COINS)
         requested = base_amount + extra
         return {
             "coins": max(0, min(requested, max(0, int(pool_balance)))),

@@ -147,7 +147,8 @@ class PayTest(unittest.TestCase):
     def test_new_receiver_gets_starting_balance_plus_amount(self):
         self.set_balance(SENDER, 100)
         asyncio.run(self.pay(user(RECEIVER), 30))
-        self.assertEqual(self.balance(RECEIVER), 40)
+        self.assertEqual(self.balance(RECEIVER),
+                         wallet_module.NEW_USER_BALANCE + 30)
 
     def test_self_pay_negative_zero_and_bots_are_rejected(self):
         self.set_balance(SENDER, 100)
@@ -257,7 +258,9 @@ class PayTest(unittest.TestCase):
             return await asyncio.gather(*(self.pay(user(RECEIVER), 30) for _ in range(3)))
         asyncio.run(run_all())
         self.assertEqual(self.balance(SENDER), 20)
-        self.assertEqual(self.balance(RECEIVER), 40)  # 最初の 10 + 1 回分の 30
+        # 新規行の初期残高 + 成功した 1 回分の 30
+        self.assertEqual(self.balance(RECEIVER),
+                         wallet_module.NEW_USER_BALANCE + 30)
 
 
 class GvcDeleteTest(unittest.TestCase):

@@ -776,6 +776,8 @@ class NewItemsTest(unittest.TestCase):
             item_store = items_core.ItemStore(Path(tmp) / "items.json")
             item_store.add("1", items_core.DEVIL_REWARD_ITEM, 1)
             economy = economy_core.EconomyPoolStore(Path(tmp) / "economy.json")
+            # A案: 悪魔的な報酬はバンクロール原資のため、原資を先に積む。
+            economy._state["pool"] = 100_000
             bot = _FakeBot({"WalletCog": wallet})
             cog = GamblingCog(
                 bot,
