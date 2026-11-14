@@ -7,8 +7,9 @@ import type { Metadata } from "next";
 // 中身（文章・実績・リンク等）は本人が書く。管理側が用意するのは
 // 装飾と差し替え枠までで、内容は埋めない。
 // デザインは 2026-11-14 の指示でフルティガーエアロ風
-// （空と水と緑、ガラスのツヤと泡）。アイコン画像は本人が用意したら
-// ヒーローのプレースホルダと差し替える。
+// （空と水と緑、ガラスのツヤと泡）。同日の追加指示で全体の緑要素を
+// 強め、定番の低解像度イルカ画像を入れた。アイコン画像は本人が
+// 用意したらヒーローのプレースホルダと差し替える。
 // 専用ヘッダー/フッターはこのファイルの中で完結させる（サイト共通の
 // ヘッダー/フッターは lib/site-chrome.ts の /folio 判定で出ない）。
 // ============================================================
@@ -32,6 +33,12 @@ export const metadata: Metadata = {
   icons: { icon: DROP_ICON },
 };
 
+// イルカ画像: フルティガーエアロ定番の低解像度ストック写真風に、
+// あえて 144px まで落として data URI で埋め込み、表示側で拡大する
+// （image-rendering: pixelated で粗さをそのまま見せる）。
+const DOLPHIN_SRC =
+  "data:image/png;base64,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";
+
 // 泡（装飾）。位置は決定的に生成してサーバー/クライアントで一致させる。
 const BUBBLES = Array.from({ length: 42 }, (_, i) => {
   const x = ((i * 137.508 + 7) % 100).toFixed(2);
@@ -46,14 +53,14 @@ const BUBBLES = Array.from({ length: 42 }, (_, i) => {
 // カラム+余白）がこのページにも効いてしまうため、:has() でこのページ
 // 表示時だけ打ち消し、空を画面全体に広げる（Activity 画面と同じ手法）。
 const CSS = `
-body:has(.folio-fa){background:#6fc3f7}
+body:has(.folio-fa){background:#79c98a}
 main:has(.folio-fa){max-width:none;min-height:0;margin:0;padding:0}
-.folio-fa{position:relative;min-height:100svh;overflow:hidden;color:#0d3a56;font-family:"Segoe UI","Hiragino Kaku Gothic ProN","Hiragino Sans","Noto Sans JP",system-ui,sans-serif;background:radial-gradient(1050px 520px at 86% -8%,rgba(255,246,190,.75),transparent 60%),radial-gradient(760px 460px at -12% 26%,rgba(255,255,255,.55),transparent 62%),radial-gradient(900px 500px at 108% 62%,rgba(190,255,220,.35),transparent 60%),linear-gradient(180deg,#2f97e6 0%,#5fb6f5 24%,#9fd8ff 46%,#d3f1ff 66%,#e9fcff 82%,#d9f6ff 100%)}
+.folio-fa{position:relative;min-height:100svh;overflow:hidden;color:#0d3a56;font-family:"Segoe UI","Hiragino Kaku Gothic ProN","Hiragino Sans","Noto Sans JP",system-ui,sans-serif;background:radial-gradient(1050px 520px at 86% -8%,rgba(255,246,190,.75),transparent 60%),radial-gradient(820px 520px at -10% 30%,rgba(255,255,255,.5),transparent 62%),radial-gradient(900px 560px at 108% 66%,rgba(170,255,190,.5),transparent 62%),linear-gradient(180deg,#2f97e6 0%,#5fb6f5 22%,#a8dcff 40%,#d9f6e2 57%,#a9e69b 76%,#79c95e 100%)}
 .folio-fa *{box-sizing:border-box}
 .folio-fa-bubbles{position:absolute;inset:0;pointer-events:none}
 .folio-fa-bubble{position:absolute;border-radius:50%;background:radial-gradient(circle at 32% 28%,rgba(255,255,255,.95),rgba(255,255,255,.28) 42%,rgba(255,255,255,.06) 62%,rgba(170,225,255,.22));border:1px solid rgba(255,255,255,.55);box-shadow:inset -3px -4px 8px rgba(120,190,240,.25),0 2px 8px rgba(30,110,180,.10);animation:folio-fa-float 7s ease-in-out infinite alternate}
 @keyframes folio-fa-float{from{transform:translateY(8px)}to{transform:translateY(-14px)}}
-.folio-fa-hills{position:absolute;left:0;right:0;bottom:0;width:100%;height:190px;pointer-events:none}
+.folio-fa-hills{position:absolute;left:0;right:0;bottom:0;width:100%;height:250px;pointer-events:none}
 .folio-fa-sun{position:absolute;top:4.6rem;right:4vw;width:230px;height:230px;border-radius:50%;background:radial-gradient(circle,rgba(255,252,210,.85) 0%,rgba(255,244,170,.38) 42%,transparent 70%);pointer-events:none}
 .folio-fa-icon{position:absolute;top:6.5rem;right:6vw;width:172px;height:172px;border-radius:50%;object-fit:cover;box-shadow:0 0 0 6px rgba(255,255,255,.9),0 0 0 9px rgba(130,205,255,.55),0 20px 44px rgba(0,80,140,.38)}
 .folio-fa-icon-ph{display:grid;place-items:center;background:radial-gradient(circle at 34% 28%,#d8f3ff,#4db2ec 58%,#1a6fb5)}
@@ -88,9 +95,13 @@ main:has(.folio-fa){max-width:none;min-height:0;margin:0;padding:0}
 .folio-fa-card p{position:relative;z-index:1;margin:4px 0;color:#123f5c;font-size:15px}
 .folio-fa-card p.sub{color:#5b84a0;font-size:13.5px}
 .folio-fa-tags{display:flex;flex-wrap:wrap;gap:8px}
-.folio-fa-tag{border:1px solid rgba(255,255,255,.95);border-radius:999px;padding:7px 16px;color:#33586e;font-size:13.5px;background:linear-gradient(180deg,rgba(255,255,255,.85),rgba(215,242,255,.5));box-shadow:inset 0 1px 0 rgba(255,255,255,1),0 4px 10px rgba(15,90,150,.16)}
+.folio-fa-tag{border:1px solid rgba(255,255,255,.95);border-radius:999px;padding:7px 16px;color:#33586e;font-size:13.5px;background:linear-gradient(180deg,rgba(255,255,255,.88),rgba(205,246,196,.55));box-shadow:inset 0 1px 0 rgba(255,255,255,1),0 4px 10px rgba(15,90,150,.16)}
 .folio-fa-links{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
 .folio-fa-footer{margin-top:72px;padding:18px 0 0;position:relative;border-top:1px solid transparent;border-image:linear-gradient(90deg,transparent,rgba(255,255,255,.9) 30%,rgba(255,255,255,.9) 70%,transparent) 1;display:flex;align-items:center;gap:8px;justify-content:center;color:#0d5a8a;font-size:12.5px;letter-spacing:.12em;font-weight:600;text-shadow:0 1px 0 rgba(255,255,255,.6)}
+.folio-fa-h2icon.g{background:radial-gradient(circle at 32% 28%,#d2f7b8,#57c256 62%,#2e8b34)}
+.folio-fa-stats .folio-fa-glass{background:linear-gradient(165deg,rgba(255,255,255,.82),rgba(226,250,214,.5) 55%,rgba(178,236,160,.5))}
+.folio-fa-dolphin{margin:36px 0 4px;max-width:520px;padding:9px;border-radius:20px;background:linear-gradient(165deg,rgba(255,255,255,.92),rgba(255,255,255,.45));border:1px solid rgba(255,255,255,.95);box-shadow:inset 0 1px 0 #fff,0 18px 36px rgba(10,90,60,.28);transform:rotate(-1.6deg)}
+.folio-fa-dolphin img{display:block;width:100%;height:auto;border-radius:13px;image-rendering:pixelated}
 @media (max-width:640px){.folio-fa-hero{padding-top:56px}.folio-fa-hero h1{font-size:32px}.folio-fa-sun{width:140px;height:140px;top:3.8rem}.folio-fa-icon{width:104px;height:104px;top:5.2rem;right:5vw}.folio-fa-stats{grid-template-columns:repeat(2,1fr)}.folio-fa-works,.folio-fa-links,.folio-fa-cards{grid-template-columns:1fr}}
 @media (prefers-reduced-motion:reduce){.folio-fa-bubble,.folio-fa-fish{animation:none}}
 `;
@@ -120,9 +131,9 @@ function DropMark({ size = 22 }: { size?: number }) {
   );
 }
 
-function H2Icon({ d }: { d: string }) {
+function H2Icon({ d, g }: { d: string; g?: boolean }) {
   return (
-    <span className="folio-fa-h2icon" aria-hidden="true">
+    <span className={g ? "folio-fa-h2icon g" : "folio-fa-h2icon"} aria-hidden="true">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#ffffff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
         <path d={d} />
       </svg>
@@ -191,6 +202,7 @@ export default function TadanoenFolioPage() {
         ))}
       </div>
       <svg className="folio-fa-hills" viewBox="0 0 1280 190" preserveAspectRatio="none" aria-hidden="true">
+        <path d="M0 70 C200 20 380 96 560 66 C760 34 900 92 1080 62 C1180 46 1240 62 1280 54 L1280 190 L0 190 Z" fill="#a5dd8a" opacity=".55" />
         <path d="M0 96 C160 40 300 128 470 96 C640 64 760 130 930 100 C1080 74 1180 110 1280 84 L1280 190 L0 190 Z" fill="#79c95e" opacity=".75" />
         <path d="M0 138 C180 92 340 162 540 132 C740 104 880 164 1060 138 C1160 124 1220 142 1280 130 L1280 190 L0 190 Z" fill="#57b53e" opacity=".9" />
         <path d="M0 168 C240 138 460 182 700 160 C920 142 1100 176 1280 158 L1280 190 L0 190 Z" fill="#3f9e2c" />
@@ -198,7 +210,7 @@ export default function TadanoenFolioPage() {
       <div className="folio-fa-sun" aria-hidden="true" />
       <div className="folio-fa-icon folio-fa-icon-ph" aria-hidden="true"><DropMark size={64} /></div>
       <Fish top="11.5rem" left="6%" scale={1} color="#ff9f2e" delay="0s" />
-      <Fish top="15.5rem" left="13%" scale={0.7} flip color="#37b6ff" delay="1.4s" />
+      <Fish top="15.5rem" left="13%" scale={0.7} flip color="#43b04c" delay="1.4s" />
       <div className="folio-fa-inner">
         <header className="folio-fa-header">
           <DropMark />
@@ -216,11 +228,15 @@ export default function TadanoenFolioPage() {
           </div>
         </div>
 
+        <figure className="folio-fa-dolphin">
+          <img src={DOLPHIN_SRC} alt="イルカ" />
+        </figure>
+
         <BubbleDivider />
 
         <section>
           <h2>
-            <H2Icon d="M12 21s-7.5-4.6-9.7-9A5.4 5.4 0 0 1 12 6.4 5.4 5.4 0 0 1 21.7 12C19.5 16.4 12 21 12 21z" />
+            <H2Icon g d="M12 21s-7.5-4.6-9.7-9A5.4 5.4 0 0 1 12 6.4 5.4 5.4 0 0 1 21.7 12C19.5 16.4 12 21 12 21z" />
             About
           </h2>
           <Slot label="自己紹介" />
@@ -240,7 +256,7 @@ export default function TadanoenFolioPage() {
 
         <section>
           <h2>
-            <H2Icon d="M3 12c2.5 0 2.5 2 5 2s2.5-2 5-2 2.5 2 5 2 2.5-2 3-2M3 18c2.5 0 2.5 2 5 2s2.5-2 5-2 2.5 2 5 2 2.5-2 3-2" />
+            <H2Icon g d="M3 12c2.5 0 2.5 2 5 2s2.5-2 5-2 2.5 2 5 2 2.5-2 3-2M3 18c2.5 0 2.5 2 5 2s2.5-2 5-2 2.5 2 5 2 2.5-2 3-2" />
             経歴
           </h2>
           <ul className="folio-fa-career">
@@ -270,7 +286,7 @@ export default function TadanoenFolioPage() {
 
         <section>
           <h2>
-            <H2Icon d="M10 14a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1.5 1.5M14 10a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7L12.5 19" />
+            <H2Icon g d="M10 14a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1.5 1.5M14 10a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7L12.5 19" />
             Links
           </h2>
           <div className="folio-fa-links">
