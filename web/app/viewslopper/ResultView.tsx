@@ -70,10 +70,10 @@ export default function ResultView({ result, savedAt }: { result: ViewResult; sa
                   {result.score}
                 </span>
                 <span style={{ fontSize: 18, fontWeight: 700 }}>{result.grade}</span>
-                <span style={{ color: "#8a8f98", fontSize: 13 }}>Slop Score（0–100、高いほど slop）</span>
+                <span style={{ color: "#8a8f98", fontSize: 13 }}>Slop Score</span>
               </div>
               <p style={{ color: "#b6bac2", margin: "10px 0 0", lineHeight: 1.6 }}>
-                {result.title || result.url}（本文 {result.textChars.toLocaleString()} 字を採点）
+                {result.title || result.url}
               </p>
               <div style={{ marginTop: 20, display: "grid", gap: 10 }}>
                 {result.dimensions.map((d) => (
@@ -102,8 +102,8 @@ export default function ResultView({ result, savedAt }: { result: ViewResult; sa
                 ))}
               </div>
               <p style={{ color: "#6d7278", fontSize: 12, marginTop: 14 }}>
-                採点の出所: {result.scoreSource === "llm" ? "AI（次元ごとの判断はAI、合計は重み付け集計）" : "ルール計算（AIが使えないため決定的スコアで代替）"}
-                {result.rendered ? " / 取得: 描画経由（JavaScript実行後の内容で判定）" : ""}
+                {result.scoreSource === "llm" ? "AI採点" : "ルール採点"}
+                {result.rendered ? " ・ 描画経由" : ""}
               </p>
 
               <h2 style={{ fontSize: 18, margin: "32px 0 12px" }}>UX・配置</h2>
@@ -112,16 +112,9 @@ export default function ResultView({ result, savedAt }: { result: ViewResult; sa
                   {result.ux.friction}
                 </span>
                 <span style={{ fontSize: 16, fontWeight: 700 }}>{result.ux.grade}</span>
-                <span style={{ color: "#8a8f98", fontSize: 13 }}>UX摩擦スコア（0–100、高いほど摩擦が大きい）</span>
               </div>
-              <p style={{ color: "#8a8f98", fontSize: 13, margin: "10px 0 0" }}>
-                ナビ内リンク {result.ux.signals.navLinkCount} 本 / 全リンク {result.ux.signals.totalLinks} 本 / h1 {result.ux.signals.h1Count} 個
-                / 画像 {result.ux.signals.images} 枚（alt無し {result.ux.signals.imagesMissingAlt}）
-                / 入力欄 {result.ux.signals.inputs} 件（ラベル無し {result.ux.signals.inputsMissingLabel}）
-                / viewport {result.ux.signals.hasViewport ? "あり" : "なし"}
-              </p>
               {result.ux.findings.length === 0 ? (
-                <p style={{ color: "#b6bac2", marginTop: 12 }}>構造から見える範囲では、目立った摩擦は検出されませんでした。</p>
+                <p style={{ color: "#b6bac2", marginTop: 12 }}>目立った摩擦はありません。</p>
               ) : (
                 <div style={{ display: "grid", gap: 12, marginTop: 14 }}>
                   {result.ux.findings.map((f, i) => (
@@ -139,11 +132,7 @@ export default function ResultView({ result, savedAt }: { result: ViewResult; sa
                   ))}
                 </div>
               )}
-              <p style={{ color: "#6d7278", fontSize: 12, marginTop: 14 }}>
-                UX・配置は、HTMLの構造から数えた事実（上の数値）を材料に診断しています。
-              </p>
-
-              <h2 style={{ fontSize: 18, margin: "32px 0 12px" }}>外観（見た目）</h2>
+              <h2 style={{ fontSize: 18, margin: "32px 0 12px" }}>外観</h2>
               {result.appearance ? (
                 <>
                   <div style={{ display: "flex", alignItems: "baseline", gap: 14, flexWrap: "wrap" }}>
@@ -151,7 +140,7 @@ export default function ResultView({ result, savedAt }: { result: ViewResult; sa
                       {result.appearance.score}
                     </span>
                     <span style={{ fontSize: 16, fontWeight: 700 }}>{result.appearance.grade}</span>
-                    <span style={{ color: "#8a8f98", fontSize: 13 }}>外観スコア（0–100、高いほど見た目が slop）</span>
+                    <span style={{ color: "#8a8f98", fontSize: 13 }}>外観スコア</span>
                   </div>
                   {/* 採点に使った描画画像そのもの。署名付きURLで数時間で失効する */}
                   {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -161,7 +150,7 @@ export default function ResultView({ result, savedAt }: { result: ViewResult; sa
                     style={{ width: "100%", borderRadius: 12, border: "1px solid #23252a", marginTop: 14 }}
                   />
                   {result.appearance.findings.length === 0 ? (
-                    <p style={{ color: "#b6bac2", marginTop: 12 }}>見た目については、目立った slop は検出されませんでした。</p>
+                    <p style={{ color: "#b6bac2", marginTop: 12 }}>目立った問題はありません。</p>
                   ) : (
                     <div style={{ display: "grid", gap: 12, marginTop: 14 }}>
                       {result.appearance.findings.map((f, i) => (
@@ -179,12 +168,9 @@ export default function ResultView({ result, savedAt }: { result: ViewResult; sa
                       ))}
                     </div>
                   )}
-                  <p style={{ color: "#6d7278", fontSize: 12, marginTop: 14 }}>
-                    外観は描画後のスクリーンショットをAIが見て採点しています（テンプレ感 / 整列と余白 / 文字の階層 / 個性のなさ）。
-                  </p>
                 </>
               ) : (
-                <p style={{ color: "#b6bac2" }}>今回はスクリーンショットを取得できず、外観は採点できませんでした。</p>
+                <p style={{ color: "#b6bac2" }}>外観は採点できませんでした。</p>
               )}
 
           <div style={{ marginTop: 32, borderTop: "1px solid #23252a", paddingTop: 20 }}>
@@ -204,7 +190,7 @@ export default function ResultView({ result, savedAt }: { result: ViewResult; sa
                   <a href={cardUrl} download={cardName} style={{ color: "#d6d9de" }}>
                     画像を保存する
                   </a>
-                  <span style={{ color: "#6d7278" }}>（iPhoneでは画像を長押しして「写真に追加」でも保存できます）</span>
+                  <span style={{ color: "#6d7278" }}>（長押しでも保存できます）</span>
                 </p>
               </div>
             )}

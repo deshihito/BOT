@@ -38,12 +38,12 @@ export default function ViewslopperHistoryPage() {
       </Link>
       <h1 style={{ fontSize: 24, margin: "14px 0 6px" }}>保存した診断</h1>
       <p style={{ color: "#8a8f98", fontSize: 13, margin: "0 0 20px", lineHeight: 1.7 }}>
-        この端末にだけ保存されています（最大50件、同じURLは最新のみ）。サーバーには送っていません。
+        この端末にのみ保存（最大50件）
       </p>
       {entries === null ? (
         <p style={{ color: "#8a8f98" }}>読み込み中…</p>
       ) : entries.length === 0 ? (
-        <p style={{ color: "#b6bac2" }}>まだ保存された診断がありません。診断すると自動でここに残ります。</p>
+        <p style={{ color: "#b6bac2" }}>まだ診断が保存されていません。</p>
       ) : (
         <>
           <div style={{ display: "grid", gap: 10 }}>

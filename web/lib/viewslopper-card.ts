@@ -135,33 +135,14 @@ export function drawScoreCard(canvas: HTMLCanvasElement, data: CardData): void {
   ctx.font = `22px ${FONT}`;
   ctx.fillText(fitText(ctx, data.url, 500), 56, 478 + titleLines.length * 42 + 8);
 
-  // 左下: サブスコアのチップ
-  const chips: string[] = [];
-  if (data.uxFriction !== null) chips.push(`UX摩擦 ${data.uxFriction} ${data.uxGrade}`);
-  if (data.appearanceScore !== null) chips.push(`外観 ${data.appearanceScore} ${data.appearanceGrade}`);
-  chips.push(data.scoreSource === "llm" ? "採点: AI" : "採点: ルール計算");
-  if (data.rendered) chips.push("取得: 描画経由");
-  ctx.font = `22px ${FONT}`;
-  let chipX = 56;
-  let chipY = 612;
-  for (const chip of chips) {
-    const w = ctx.measureText(chip).width + 32;
-    // チップは1行に収める（右側のバーは y≈570 で終わるため、この帯は全面使える）。
-    // 2行に折り返すとフッター（y=676）と衝突するので幅は画面端まで許す。
-    if (chipX + w > CARD_WIDTH - 56) {
-      chipX = 56;
-      chipY += 54;
-    }
-    ctx.fillStyle = "#17191c";
-    roundRect(ctx, chipX, chipY, w, 44, 22);
-    ctx.fill();
-    ctx.strokeStyle = "#2c2f36";
-    ctx.lineWidth = 1;
-    roundRect(ctx, chipX, chipY, w, 44, 22);
-    ctx.stroke();
-    ctx.fillStyle = "#d6d9de";
-    ctx.fillText(chip, chipX + 16, chipY + 30);
-    chipX += w + 12;
+  // 左下: サブスコアは数字だけを静かに並べる（説明文は置かない）
+  const stats: string[] = [];
+  if (data.uxFriction !== null) stats.push(`UX ${data.uxFriction}`);
+  if (data.appearanceScore !== null) stats.push(`外観 ${data.appearanceScore}`);
+  if (stats.length > 0) {
+    ctx.fillStyle = "#b6bac2";
+    ctx.font = `600 26px ${FONT}`;
+    ctx.fillText(stats.join("　　"), 56, 648);
   }
 
   // 右: 次元の内訳バー
@@ -189,10 +170,9 @@ export function drawScoreCard(canvas: HTMLCanvasElement, data: CardData): void {
     ctx.fillText(v, CARD_WIDTH - 56 - ctx.measureText(v).width, y + 24);
   });
 
-  // フッター
+  // フッターはドメインだけ
   ctx.fillStyle = "#6d7278";
   ctx.font = `20px ${FONT}`;
-  ctx.fillText("そのページ、どれだけ slop か。", 56, 676);
   const foot = "viewslopper.agobot.app";
   ctx.fillText(foot, CARD_WIDTH - 56 - ctx.measureText(foot).width, 676);
 }

@@ -33,7 +33,7 @@ export default function ViewslopperClient() {
       setResult(typed);
       try {
         saveHistory(window.localStorage, toHistoryEntry(typed, Date.now()));
-        setSavedNote("この端末に保存しました（下の「保存した診断」から見返せます）");
+        setSavedNote("保存しました");
       } catch {
         // 保存できなくても診断結果の表示は続ける
       }
