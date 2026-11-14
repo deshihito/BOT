@@ -389,17 +389,27 @@ export function scoreUx(s: UxSignals): UxResult {
     friction += points;
     findings.push({
       points, axis,
-      severity: points >= 12 ? "high" : points >= 7 ? "mid" : "low",
+      severity: points >= 10 ? "high" : points >= 6 ? "mid" : "low",
       evidence, why, fix,
     });
   };
 
-  if (!s.hasViewport) add(18, "モバイル前提", "viewport メタタグなし", "スマホでの表示倍率が保証されず、モバイル利用が前提になっていない。", "viewport を入れ、モバイル幅を本体として設計する。");
-  if (s.h1Count === 0) add(12, "見出し構造", "h1 が0個", "ページの主題を表す見出しが構造上存在しない。", "主題を表す h1 を1つ置く。");
-  else if (s.h1Count > 1) add(8, "見出し構造", `h1 が${s.h1Count}個`, "主題が複数に分散し、何のページか構造から決められない。", "h1 は1つに絞り、残りは h2 以下に下げる。");
+  // 主目的が単一の入力で即実行できるページ（検索トップ等）は、見出しタグの
+  // 有無のような実装様式を摩擦として数えない。構造ではなく目的で見る。
+  const singlePurpose = s.inputs >= 1 && s.totalLinks <= 20 && s.navLinkCount <= 5;
+
+  if (!s.hasViewport) add(10, "モバイル前提", "viewport メタタグなし", "スマホでの表示倍率が保証されず、モバイル利用が前提になっていない。", "viewport を入れ、モバイル幅を本体として設計する。");
+  if (!singlePurpose) {
+    if (s.h1Count === 0) add(12, "見出し構造", "h1 が0個", "ページの主題を表す見出しが構造上存在しない。", "主題を表す h1 を1つ置く。");
+    else if (s.h1Count >= 4) add(16, "見出し構造", `h1 が${s.h1Count}個`, "主題が大量に分散し、何のページか構造から決められない。", "h1 は1つに絞り、残りは h2 以下に下げる。");
+    else if (s.h1Count > 1) add(8, "見出し構造", `h1 が${s.h1Count}個`, "主題が複数に分散し、何のページか構造から決められない。", "h1 は1つに絞り、残りは h2 以下に下げる。");
+  }
   if (s.headingSkips > 0) add(Math.min(12, s.headingSkips * 6), "見出し構造", `見出しレベルの飛び ${s.headingSkips}箇所`, "階層が飛ぶと構造の読み取りが崩れる。", "見出しレベルを順番に使う。");
   if (s.navLinkCount > 30) add(20, "導線の数", `ナビ内リンク ${s.navLinkCount}本`, "導線が多すぎて、次の一手を配置で示せていない。", "ナビは主要導線だけに絞り、残りは階層を分ける。");
   else if (s.navLinkCount > 15) add(10, "導線の数", `ナビ内リンク ${s.navLinkCount}本`, "導線が多く、迷いの余地が大きい。", "使用頻度の低い導線をナビから外す。");
+  // nav 要素を使わないページでは上の観点が空振りするため、リンクの総量でも見る
+  if (s.totalLinks > 100) add(16, "導線の総量", `ページ内リンク ${s.totalLinks}本`, "リンクの総量が多く、主目的が導線の中に埋もれる。", "一次導線とその他を分け、その他は別の場所に寄せる。");
+  else if (s.totalLinks > 50) add(8, "導線の総量", `ページ内リンク ${s.totalLinks}本`, "リンクの総量が多めで、目移りの余地が大きい。", "使用頻度の低い導線を一次表示から外す。");
   for (const dup of s.duplicateLinkTexts.slice(0, 2)) {
     add(6, "導線の重複", `「${dup.text}」が${dup.count}回出現`, "同じ導線の重複は判断を分散させる。", "同じ行き先の導線は1つにまとめる。");
   }
@@ -414,7 +424,7 @@ export function scoreUx(s: UxSignals): UxResult {
   }
   if (s.charsBeforeFirstHeading > 600) {
     add(10, "ファーストビュー", `最初の見出しまで ${s.charsBeforeFirstHeading} 字`, "見出しより前に文章が続き、冒頭でページの構造が掴めない。", "冒頭に見出しと要点を置き、説明は後ろに回す。");
-  } else if (s.charsBeforeFirstHeading === -1) {
+  } else if (s.charsBeforeFirstHeading === -1 && !singlePurpose) {
     add(6, "ファーストビュー", "見出し要素なし", "冒頭の掴みになる構造がない。", "冒頭に見出しを置く。");
   }
   if (!s.hasEarlyCta && s.totalLinks > 0) {
@@ -431,7 +441,8 @@ export function scoreUx(s: UxSignals): UxResult {
   }
   if (!s.hasLang) add(4, "基本構造", "html の lang なし", "言語が構造で宣言されていない。", "html に lang を付ける。");
 
-  const total = clamp(friction);
+  // 単一目的ページは、残りの小さな減点が積み上がっても摩擦の上限を抑える
+  const total = clamp(singlePurpose ? Math.min(friction, 15) : friction);
   const sorted = findings.sort((a, b) => b.points - a.points).slice(0, 8)
     .map(({ points: _points, ...f }) => f);
   return { friction: total, grade: uxGrade(total), findings: sorted };
@@ -696,30 +707,18 @@ const DIMENSION_RUBRIC: Record<DimensionKey, string> = {
  * 採点が狭い範囲に固まる一因になっていたため渡さない（2026-11-14 の実機FB）。
  * heuristic 引数は呼び出し側の形を保つために残すが中では使わない。
  */
-export function buildAssessMessages(page: PageData, heuristic: ViewScore, uxSignals: UxSignals): ChatMessage[] {
+export function buildAssessMessages(page: PageData, heuristic: ViewScore): ChatMessage[] {
   void heuristic;
   const dimLines = DIMENSION_DEFS.map((d) => `- ${d.key}（${d.label}）: ${DIMENSION_RUBRIC[d.key]}`).join("\n");
-  const uxLines = [
-    `viewport: ${uxSignals.hasViewport ? "あり" : "なし"} / lang: ${uxSignals.hasLang ? "あり" : "なし"}`,
-    `h1: ${uxSignals.h1Count}個 / 見出しレベルの飛び: ${uxSignals.headingSkips}箇所`,
-    `ナビ内リンク: ${uxSignals.navLinkCount}本 / 全リンク: ${uxSignals.totalLinks}本`,
-    `画像: ${uxSignals.images}枚（alt無し ${uxSignals.imagesMissingAlt}、寸法指定無し ${uxSignals.imagesMissingSize}）`,
-    `入力欄: ${uxSignals.inputs}件（ラベル無し ${uxSignals.inputsMissingLabel}）`,
-    `最初の見出しまで: ${uxSignals.charsBeforeFirstHeading}字 / 冒頭CTA: ${uxSignals.hasEarlyCta ? "あり" : "なし"}`,
-    `300字超の段落: ${uxSignals.longParagraphs}件 / 小さい文字の指定: ${uxSignals.smallFontCount}箇所 / モーダル類: ${uxSignals.modalCount}件`,
-  ].join("\n");
   const system = [
-    "あなたは Web ページの slop（薄くて定型的な中身）と UX・配置を採点する専門家です。",
-    "各次元を 0–100 で採点してください（高いほど slop / 摩擦が大きい）。",
+    "あなたは Web ページの slop（薄くて定型的な中身）を採点する専門家です。",
+    "各次元を 0–100 で採点してください（高いほど slop が大きい）。",
     "尺度のアンカー: 具体的な数字と固有名詞だけで書かれた実務記録は合計3点相当、定型句と抽象語だらけの典型的なAIブログ文は合計78点相当です。この尺度に合わせて判断してください。",
     "中途半端な点に寄せないでください。良いページは一桁〜20点台、悪いページは60点以上を付けるつもりで、根拠に基づいて大胆に差を付けてください。",
-    "UX軸の物差し（摩擦）: 主目的が1つに絞られ、開いて即実行できるページ（検索トップ等）は全軸一桁〜15。導線と情報が標準量の一般サイトは30〜45。リンクと要素が詰め込まれ主目的が埋もれるポータル/ニュースは65以上。",
-    "UX軸の判断基準: flow=主目的までの導線の短さと迷いのなさ、structure=見出しとまとまりで全体を掴めるか、firstview=開いた瞬間に主目的と次の一手が見えるか、readability=文章の壁・文字の読みにくさ。シグナルの数値は材料であって、それ自体を点にしないこと（例: 見出しタグが無くても、主目的が1つで即実行できるページの structure は低くてよい）。",
-    "証拠は本文・タイトル・見出し・UXシグナルに実在する内容だけを使ってください。存在しない文を引用しないでください。",
+    "証拠は本文・タイトル・見出しに実在する内容だけを使ってください。存在しない文を引用しないでください。",
     '出力は JSON オブジェクトのみ。前後に説明文やコードフェンスを付けないでください。',
-    '{"dimensions":[{"key":次元キー,"score":0-100,"evidence":"根拠(最大120字)","why":"理由(60字以内)","fix":"直し方(60字以内)"} x6次元すべて],',
-    '"ux":[{"key":UX軸キー,"score":0-100,"evidence":"根拠(最大120字)","why":"理由(60字以内)","fix":"直し方(60字以内)"} x4軸すべて]}',
-    "次元キーは cliche / vague / abstract / repeat / mechanical / bait、UX軸キーは flow / structure / firstview / readability です。",
+    '{"dimensions":[{"key":次元キー,"score":0-100,"evidence":"根拠(最大120字)","why":"理由(60字以内)","fix":"直し方(60字以内)"} x6次元すべて]}',
+    "次元キーは cliche / vague / abstract / repeat / mechanical / bait です。UX・配置の採点は担当外です（別の決定的計算が担う）。",
   ].join("\n");
   const user = [
     `URL: ${page.url}`,
@@ -729,8 +728,6 @@ export function buildAssessMessages(page: PageData, heuristic: ViewScore, uxSign
     `取得方法: ${page.rendered ? "描画経由（JavaScript実行後のテキスト）" : "直接取得"}`,
     "採点する次元:",
     dimLines,
-    "UXシグナル（HTML構造から数えた事実）:",
-    uxLines,
     "本文（先頭6000字）:",
     page.text.slice(0, 6000) || "(本文を取得できなかった。タイトル・説明文・見出しだけで判断すること)",
   ].join("\n");
@@ -776,9 +773,9 @@ export function parseAssessJson(raw: string): LlmAssessment | null {
   if (!parsed || typeof parsed !== "object") return null;
   const rec = parsed as Record<string, unknown>;
   const dimensions = parseScoreEntries(rec.dimensions, DIMENSION_DEFS);
-  const ux = parseScoreEntries(rec.ux, UX_AXIS_DEFS);
-  if (!dimensions || !ux) return null;
-  return { dimensions, ux };
+  if (!dimensions) return null;
+  // UX は決定的計算に移したため、応答に含まれていても採用しない（後方互換で読み捨てる）
+  return { dimensions, ux: [] };
 }
 
 /**
@@ -804,7 +801,7 @@ export function mergeAssessments(a: LlmAssessment, b: LlmAssessment): LlmAssessm
     });
   return {
     dimensions: mergeList(a.dimensions, b.dimensions) as LlmAssessment["dimensions"],
-    ux: mergeList(a.ux, b.ux) as LlmAssessment["ux"],
+    ux: a.ux.length > 0 && b.ux.length > 0 ? (mergeList(a.ux, b.ux) as LlmAssessment["ux"]) : [],
   };
 }
 
@@ -812,7 +809,7 @@ export function mergeAssessments(a: LlmAssessment, b: LlmAssessment): LlmAssessm
 export function composeAssessed(
   assessment: LlmAssessment,
   heuristic: ViewScore,
-): { total: number; grade: string; dimensions: DimensionResult[]; diagnosis: DiagnosisItem[]; uxFriction: number; uxGrade: string; uxFindings: UxFinding[] } {
+): { total: number; grade: string; dimensions: DimensionResult[]; diagnosis: DiagnosisItem[] } {
   const labelByKey = new Map(DIMENSION_DEFS.map((d) => [d.key, d.label]));
   const hitsByKey = new Map(heuristic.dimensions.map((d) => [d.key, d.hits]));
   const dimensions: DimensionResult[] = assessment.dimensions.map((d) => {
@@ -835,23 +832,7 @@ export function composeAssessed(
     const top = [...assessment.dimensions].sort((a, b) => b.score - a.score)[0];
     diagnosis.push({ dimension: top.key, label: labelByKey.get(top.key)!, evidence: top.evidence, why: top.why, fix: top.fix });
   }
-  const uxFriction = clamp(assessment.ux.reduce((sum, a) => {
-    const def = UX_AXIS_DEFS.find((x) => x.key === a.key)!;
-    return sum + a.score * def.weight;
-  }, 0) / 100);
-  const uxLabelByKey = new Map(UX_AXIS_DEFS.map((d) => [d.key, d.label]));
-  const uxFindings: UxFinding[] = [...assessment.ux]
-    .sort((a, b) => b.score - a.score)
-    .filter((a) => a.score >= 30)
-    .slice(0, 6)
-    .map((a) => ({
-      axis: uxLabelByKey.get(a.key)!,
-      severity: (a.score >= 70 ? "high" : a.score >= 45 ? "mid" : "low") as UxFinding["severity"],
-      evidence: a.evidence,
-      why: a.why,
-      fix: a.fix,
-    }));
-  return { total, grade: grade(total), dimensions, diagnosis, uxFriction, uxGrade: uxGrade(uxFriction), uxFindings };
+  return { total, grade: grade(total), dimensions, diagnosis };
 }
 
 // ---- 外観採点（スクリーンショットを vision モデルが採点） ----

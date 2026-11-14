@@ -112,6 +112,16 @@ test("UX摩擦スコアは良いページを低く、悪いページを高く分
   assert.equal(bad.findings[0].severity, "high");
 });
 
+test("UX較正: 単一目的ページは低く、詰め込みポータルは高い", () => {
+  const base = m.emptyUxSignals();
+  // Google 型: 入力1つ・リンク少数・h1なし・viewport なし → 上限で抑えられる
+  const googleLike = { ...base, hasViewport: false, h1Count: 0, totalLinks: 11, inputs: 1, inputsMissingLabel: 1, charsBeforeFirstHeading: -1, hasEarlyCta: true, longParagraphs: 1 };
+  assert.ok(m.scoreUx(googleLike).friction <= 15, `google=${m.scoreUx(googleLike).friction}`);
+  // Yahoo 型: h1 が大量・リンク総量が多い → 高い
+  const portalLike = { ...base, hasViewport: true, h1Count: 29, navLinkCount: 11, totalLinks: 129, inputs: 1, charsBeforeFirstHeading: 12, hasEarlyCta: false };
+  assert.ok(m.scoreUx(portalLike).friction >= 40, `portal=${m.scoreUx(portalLike).friction}`);
+});
+
 test("本文抽出はUXシグナルも一緒に返す", () => {
   const page = m.extractPage(GOOD_HTML, "https://example.com/good");
   assert.equal(page.ux.h1Count, 1);
@@ -136,7 +146,8 @@ test("LLM主採点: 応答検証は全次元・全軸が揃った場合だけ通
   const parsed = m.parseAssessJson(JSON.stringify({ dimensions: dims, ux }));
   assert.ok(parsed);
   assert.equal(parsed.dimensions.length, 6);
-  assert.equal(parsed.ux.length, 4);
+  // UX は決定的計算に移したため、応答に含まれても採用しない
+  assert.equal(parsed.ux.length, 0);
   // 次元が1つ欠けたら不採用
   assert.equal(m.parseAssessJson(JSON.stringify({ dimensions: dims.slice(0, 5), ux })), null);
   assert.equal(m.parseAssessJson("JSONではない"), null);
@@ -145,12 +156,11 @@ test("LLM主採点: 応答検証は全次元・全軸が揃った場合だけ通
   // cliche=100 が重み20 → 合計20
   assert.equal(composed.total, 20);
   assert.equal(composed.grade, "Light");
-  assert.equal(composed.uxFriction, 50);
   assert.equal(composed.diagnosis.length, 1);
   assert.equal(composed.diagnosis[0].dimension, "cliche");
   // 採点メッセージにはアンカーが入り、決定的スコアは渡さない（引きずり防止）
   const page = { url: "https://e.com", title: "t", description: "", headings: [], text: SOLID_TEXT, ux: m.emptyUxSignals() };
-  const msgs = m.buildAssessMessages(page, heuristic, page.ux);
+  const msgs = m.buildAssessMessages(page, heuristic);
   assert.ok(msgs[0].content.includes("合計78点相当"));
   assert.ok(!msgs[1].content.includes("決定的スコア"));
 });

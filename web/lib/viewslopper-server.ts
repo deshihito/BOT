@@ -29,7 +29,10 @@ import { logfareApiKeys, logfareChat } from "./one-prompter-server";
 const FETCH_TIMEOUT_MS = 10_000;
 const MAX_RESPONSE_BYTES = 2_000_000;
 const MAX_REDIRECTS = 3;
-const USER_AGENT = "viewslopper/0.1 (+https://viewslopper.agobot.app)";
+// 取得はブラウザ UA で行う。自前 UA だと大手サイトが軽量版（リンクや見出しを
+// 大幅に削った変種）を返し、構造シグナルが実物とかけ離れる（実測: Yahoo の
+// リンク数 49 → ブラウザ UA では 129）。診断の材料は実物の HTML が前提。
+const USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36";
 
 export class ViewFetchError extends Error {}
 
