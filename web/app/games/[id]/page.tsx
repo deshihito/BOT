@@ -143,6 +143,7 @@ import BalanceStackClient from "../balancestack/BalanceStackClient";
 import ChinchiroClient from "../chinchiro/ChinchiroClient";
 import CrocodileClient from "../crocodile/CrocodileClient";
 import KwordleClient from "../kwordle/KwordleClient";
+import WorldBoxClient from "../worldbox/WorldBoxClient";
 
 export function generateStaticParams() {
   return WEB_GAMES.map((game) => ({ id: game.slug }));
@@ -1287,6 +1288,14 @@ export default async function WebGamePage({ params }: { params: Promise<{ id: st
       <>
         <GameDetailHeader game={game} />
         <KwordleClient />
+      </>
+    );
+  }
+  if (game.slug === "worldbox" && game.status === "playable") {
+    return (
+      <>
+        <GameDetailHeader game={game} />
+        <WorldBoxClient />
       </>
     );
   }
