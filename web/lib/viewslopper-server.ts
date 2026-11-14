@@ -9,6 +9,7 @@ import {
   buildAssessMessages,
   composeAppearance,
   composeAssessed,
+  computeTextStats,
   mergeAssessments,
   emptyUxSignals,
   extractPage,
@@ -149,7 +150,7 @@ export async function assess(page: PageData, heuristic: ViewScore): Promise<Retu
     console.error("viewslopper: assess failed (both runs unusable)");
     return null;
   }
-  return composeAssessed(parsed, heuristic);
+  return composeAssessed(parsed, heuristic, computeTextStats(page.text));
 }
 
 /**

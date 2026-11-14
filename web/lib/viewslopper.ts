@@ -672,6 +672,108 @@ export function buildDiagnosisMessages(page: PageData, score: ViewScore): ChatMe
   ];
 }
 
+// ---- テキスト統計: 繰り返しと機械性は「数えて」測る ----
+// この2次元は LLM が表層の反復（固有名詞・一覧・定型の並び）に引っ張られて
+// 暴れる（実測: Wikipedia の記事で repeat=100、他次元はほぼ0）。数えられる
+// 性質は印象で採らず、文の近似重複・反復率・文長のばらつき等から決定的に測る。
+// 本文が短いページでは統計が成立しないため null を返し、その場合は LLM 側の
+// 値を使う（プロンプト側にも「何が繰り返し/機械性ではないか」を明示してある）。
+
+export type TextStats = {
+  sentenceCount: number;
+  repeat: number;
+  mechanical: number;
+  dupSentenceRatio: number;
+  gramRepeatRatio: number;
+  sentenceCv: number;
+  scaffoldShare: number;
+  startShare: number;
+};
+
+const SCAFFOLD_STARTS = ["まず", "次に", "さらに", "また", "そして", "一方で", "まとめると", "結論として", "重要なのは", "例えば", "最後に", "第一に", "第二に"];
+
+function splitSentences(text: string): string[] {
+  const out: string[] = [];
+  for (const line of text.split(/\n+/)) {
+    for (const part of line.split(/(?<=[。！？!?])\s*/)) {
+      const t = part.trim();
+      if (t) out.push(t);
+    }
+  }
+  return out;
+}
+
+const normalizeForStats = (s: string): string =>
+  s.replace(/[\s、。・「」『』（）()\[\]［］]/g, "").replace(/[0-9０-９]/g, "0").toLowerCase();
+
+function charGrams(s: string, n: number): Set<string> {
+  const set = new Set<string>();
+  for (let i = 0; i + n <= s.length; i++) set.add(s.slice(i, i + n));
+  return set;
+}
+
+function jaccard(a: Set<string>, b: Set<string>): number {
+  let inter = 0;
+  for (const x of a) if (b.has(x)) inter++;
+  const union = a.size + b.size - inter;
+  return union === 0 ? 0 : inter / union;
+}
+
+export function computeTextStats(text: string): TextStats | null {
+  const sentences = splitSentences(text).filter((s) => s.length >= 5).slice(0, 300);
+  if (text.length < 250 || sentences.length < 6) return null;
+
+  const sets = sentences.map((s) => charGrams(normalizeForStats(s), 4));
+  let dupChars = 0;
+  for (let i = 0; i < sentences.length; i++) {
+    for (let j = 0; j < i; j++) {
+      if (sets[i].size > 0 && sets[j].size > 0 && jaccard(sets[i], sets[j]) >= 0.6) {
+        dupChars += sentences[i].length;
+        break;
+      }
+    }
+  }
+  const totalChars = sentences.reduce((a, s) => a + s.length, 0) || 1;
+  const dupSentenceRatio = dupChars / totalChars;
+
+  const flatNorm = normalizeForStats(text.replace(/\s+/g, ""));
+  const gramRepeatRatio = 1 - charGrams(flatNorm, 4).size / Math.max(1, flatNorm.length - 3);
+
+  const lens = sentences.map((s) => s.length);
+  const mean = lens.reduce((a, b) => a + b, 0) / lens.length;
+  const sd = Math.sqrt(lens.reduce((a, b) => a + (b - mean) ** 2, 0) / lens.length);
+  const sentenceCv = mean === 0 ? 0 : sd / mean;
+
+  const endCount = new Map<string, number>();
+  for (const s of sentences) {
+    const e = normalizeForStats(s).slice(-3);
+    if (e) endCount.set(e, (endCount.get(e) ?? 0) + 1);
+  }
+  const topEndingShare = endCount.size > 0 ? Math.max(...endCount.values()) / sentences.length : 0;
+
+  const startCount = new Map<string, number>();
+  let scaffold = 0;
+  for (const s of sentences) {
+    const head = normalizeForStats(s).slice(0, 3);
+    if (head) startCount.set(head, (startCount.get(head) ?? 0) + 1);
+    if (SCAFFOLD_STARTS.some((w) => s.startsWith(w))) scaffold++;
+  }
+  const startShare = startCount.size > 0 ? Math.max(...startCount.values()) / sentences.length : 0;
+  const scaffoldShare = scaffold / sentences.length;
+
+  const repeat = clamp(Math.round(
+    dupSentenceRatio * 220 + gramRepeatRatio * 55 + Math.max(0, startShare - 0.2) * 120,
+  ));
+  const mechanical = clamp(Math.round(Math.max(0,
+    Math.min(35, (0.52 - sentenceCv) * 130) + Math.max(0, topEndingShare - 0.45) * 90 + scaffoldShare * 70,
+  )));
+  return {
+    sentenceCount: sentences.length,
+    repeat, mechanical,
+    dupSentenceRatio, gramRepeatRatio, sentenceCv, scaffoldShare, startShare,
+  };
+}
+
 // ---- LLM 主採点（2026-11-14 の設計変更） ----
 // 辞書＋統計の決定的採点は、実ページでは次元の大半が0になり、合計が狭い範囲に
 // 固まる（実測: 対象が全然違う4ページで 18/27/26/18）。そのため採点の判断は
@@ -696,8 +798,8 @@ const DIMENSION_RUBRIC: Record<DimensionKey, string> = {
   cliche: "定型句・決まり文句: 誰が書いても同じになる言い回し、AI生成に典型的な締めや導入の量",
   vague: "具体性の欠如: 数字・日付・固有名詞・実例で検証できる情報がどれだけ欠けているか",
   abstract: "抽象語の裸使い: 『価値』『可能性』等が実例や数値の裏付けなく浮いている度合い",
-  repeat: "繰り返し・冗長: 同じ内容・同じ言い回しの反復で情報量が薄まっている度合い",
-  mechanical: "構造の機械性: 『まず/次に/最後に』型の均一な構成、文長や始まりの単調さ",
+  repeat: "繰り返し・冗長: 同じ内容・同じ言い回しの反復で情報量が薄まっている度合い。ただし固有名詞・商品名・ナビ文言・一覧項目の再掲は構造上必要な反復であり、繰り返しではない",
+  mechanical: "構造の機械性: 『まず/次に/最後に』型の均一な構成、文長や始まりの単調さ。ただし箇条書きや一覧そのものは機械性ではない（同型の文が量産されている場合だけ数える）",
   bait: "煽り・両論併記: バズワードや誇張、立場を取らずに逃げる両論併記の度合い",
 };
 
@@ -809,19 +911,50 @@ export function mergeAssessments(a: LlmAssessment, b: LlmAssessment): LlmAssessm
 export function composeAssessed(
   assessment: LlmAssessment,
   heuristic: ViewScore,
+  stats?: TextStats | null,
 ): { total: number; grade: string; dimensions: DimensionResult[]; diagnosis: DiagnosisItem[] } {
   const labelByKey = new Map(DIMENSION_DEFS.map((d) => [d.key, d.label]));
   const hitsByKey = new Map(heuristic.dimensions.map((d) => [d.key, d.hits]));
+  // 繰り返し・機械性は統計が成立するページでは実測値で上書きする（LLM の値は使わない）
+  const measuredEntry = (key: DimensionKey): DiagnosisItem | null => {
+    if (!stats) return null;
+    if (key === "repeat" && stats.repeat >= 25) {
+      return {
+        dimension: "repeat",
+        label: labelByKey.get("repeat")!,
+        evidence: `近似重複した文が全体の${Math.round(stats.dupSentenceRatio * 100)}%、表現の反復率${Math.round(stats.gramRepeatRatio * 100)}%（${stats.sentenceCount}文を実測）`,
+        why: "同じ内容の再掲で情報量が薄まっている（実測値）。",
+        fix: "重複した文を削り、残す側に情報を寄せる。",
+      };
+    }
+    if (key === "mechanical" && stats.mechanical >= 25) {
+      return {
+        dimension: "mechanical",
+        label: labelByKey.get("mechanical")!,
+        evidence: `文の長さのばらつき CV ${stats.sentenceCv.toFixed(2)}、接続詞で始まる文 ${Math.round(stats.scaffoldShare * 100)}%（${stats.sentenceCount}文を実測）`,
+        why: "文の型が均一で、量産された構造になっている（実測値）。",
+        fix: "文の長さと始まり方に変化を付け、型の羅列を崩す。",
+      };
+    }
+    return null;
+  };
+  const effectiveScore = (d: LlmDimensionScore): number => {
+    if (!stats) return d.score;
+    if (d.key === "repeat") return stats.repeat;
+    if (d.key === "mechanical") return stats.mechanical;
+    return d.score;
+  };
   const dimensions: DimensionResult[] = assessment.dimensions.map((d) => {
     const def = DIMENSION_DEFS.find((x) => x.key === d.key)!;
-    return { key: d.key, label: def.label, score: d.score, weight: def.weight, hits: hitsByKey.get(d.key) ?? 0 };
+    return { key: d.key, label: def.label, score: effectiveScore(d), weight: def.weight, hits: hitsByKey.get(d.key) ?? 0 };
   });
   const total = clamp(dimensions.reduce((sum, d) => sum + d.score * d.weight, 0) / 100);
   const diagnosis: DiagnosisItem[] = [...assessment.dimensions]
+    .map((d) => ({ ...d, score: effectiveScore(d) }))
     .sort((a, b) => b.score - a.score)
     .filter((d) => d.score >= 25)
     .slice(0, 6)
-    .map((d) => ({
+    .map((d) => measuredEntry(d.key) ?? ({
       dimension: d.key,
       label: labelByKey.get(d.key)!,
       evidence: d.evidence,
@@ -829,8 +962,8 @@ export function composeAssessed(
       fix: d.fix,
     }));
   if (diagnosis.length === 0 && assessment.dimensions.length > 0) {
-    const top = [...assessment.dimensions].sort((a, b) => b.score - a.score)[0];
-    diagnosis.push({ dimension: top.key, label: labelByKey.get(top.key)!, evidence: top.evidence, why: top.why, fix: top.fix });
+    const top = [...assessment.dimensions].map((d) => ({ ...d, score: effectiveScore(d) })).sort((a, b) => b.score - a.score)[0];
+    diagnosis.push(measuredEntry(top.key) ?? { dimension: top.key, label: labelByKey.get(top.key)!, evidence: top.evidence, why: top.why, fix: top.fix });
   }
   return { total, grade: grade(total), dimensions, diagnosis };
 }
