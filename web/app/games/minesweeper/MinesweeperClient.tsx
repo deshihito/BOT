@@ -14,9 +14,10 @@ import {
   toggleFlag,
   type MsState,
 } from "@/lib/minesweeper";
-import { sfxFlip, sfxLose, sfxPlace, sfxTap, sfxWin } from "@/lib/sfx";
+import { sfxFlip, sfxHit, sfxLose, sfxPlace, sfxTap, sfxWin } from "@/lib/sfx";
+import { juiceFlash, juiceHitstop, juiceShake, type JuiceIntensity } from "@/lib/juice";
 import { tappableProps } from "@/lib/gesture";
-import { EndScreen } from "../GameJuice";
+import { EndScreen, JuiceHit } from "../GameJuice";
 import { useGamesNav } from "../GamesShell";
 
 const LEVELS = [
@@ -63,6 +64,8 @@ export default function MinesweeperClient() {
   const [flagMode, setFlagMode] = useState(false);
   const [seconds, setSeconds] = useState(0);
   const [best, setBest] = useState<number | null>(null);
+  const boardWrapRef = useRef<HTMLDivElement | null>(null);
+  const [burst, setBurst] = useState<{ key: number; x: number; y: number; intensity: JuiceIntensity }>({ key: 0, x: 50, y: 50, intensity: 1 });
 
   useEffect(() => {
     if (state.status !== "playing") return;
@@ -95,8 +98,11 @@ export default function MinesweeperClient() {
     const prev = prevStatusRef.current;
     prevStatusRef.current = state.status;
     if (prev === state.status) return;
-    if (state.status === "won") sfxWin();
-    else if (state.status === "lost") sfxLose();
+    if (state.status === "won") {
+      sfxWin();
+      juiceHitstop(boardWrapRef.current, 2);
+      juiceFlash(boardWrapRef.current);
+    } else if (state.status === "lost") sfxLose();
   }, [state.status]);
 
   const restart = (key: LevelKey) => {
@@ -125,6 +131,24 @@ export default function MinesweeperClient() {
     if (next === state) return;
     // 終局時は終局ジングルに任せ、二重に鳴らさない。
     if (next.status !== "won" && next.status !== "lost") sfxFlip();
+    // 手応え層: 開いた位置にヒットマーク、一括開放は小ヒットストップ、
+    // 爆発は大ヒットストップ＋大振動＋フラッシュ＋ヒット音（#003/#103/#130）。
+    const openedDelta = next.opened - state.opened;
+    const x = (((index % state.cols) + 0.5) / state.cols) * 100;
+    const y = ((Math.floor(index / state.cols) + 0.5) / state.rows) * 100;
+    if (next.status === "lost") {
+      sfxHit(3);
+      juiceHitstop(boardWrapRef.current, 3);
+      juiceShake(boardWrapRef.current, 3);
+      juiceFlash(boardWrapRef.current);
+      setBurst({ key: Date.now(), x, y, intensity: 3 });
+    } else if (openedDelta >= 5) {
+      sfxHit(1);
+      juiceHitstop(boardWrapRef.current, 1);
+      setBurst({ key: Date.now(), x, y, intensity: 2 });
+    } else if (openedDelta > 0) {
+      setBurst({ key: Date.now(), x, y, intensity: 1 });
+    }
     setState(next);
   };
 
@@ -148,6 +172,7 @@ export default function MinesweeperClient() {
       {state.cells.map((cell, i) => {
         const classes = [
           "ms-cell",
+          "juice-pressable",
           cell.open ? "ms-cell-open" : "",
           cell.open && cell.mine ? "ms-cell-mine" : "",
           state.exploded === i ? "ms-cell-exploded" : "",
@@ -233,21 +258,24 @@ export default function MinesweeperClient() {
         {best !== null ? ` ・ ベスト ${best} 秒` : ""} ・ {statusText}
       </p>
 
-      {webglFailed ? board2d : (
-        <div style={{ width: "100%", maxWidth: 640, margin: "0 auto" }}>
-          <MinesweeperScene3D
-            cells={state.cells}
-            rows={state.rows}
-            cols={state.cols}
-            exploded={state.exploded}
-            status={state.status}
-            onCell={onCell}
-            onToggleFlag={toggleFlagWithSound}
-            onFail={() => setWebglFailed(true)}
-            fallback={board2d}
-          />
-        </div>
-      )}
+      <div ref={boardWrapRef} style={{ position: "relative", maxWidth: 640, margin: "0 auto" }}>
+        {webglFailed ? board2d : (
+          <div style={{ width: "100%", maxWidth: 640, margin: "0 auto" }}>
+            <MinesweeperScene3D
+              cells={state.cells}
+              rows={state.rows}
+              cols={state.cols}
+              exploded={state.exploded}
+              status={state.status}
+              onCell={onCell}
+              onToggleFlag={toggleFlagWithSound}
+              onFail={() => setWebglFailed(true)}
+              fallback={board2d}
+            />
+          </div>
+        )}
+        <JuiceHit burstKey={burst.key} intensity={burst.intensity} xPct={burst.x} yPct={burst.y} continuous={burst.intensity < 3} />
+      </div>
 
       {state.status === "won" && (
         <div style={{ marginTop: 14 }}>

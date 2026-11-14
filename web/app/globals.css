@@ -1574,6 +1574,47 @@ button.og-bs-cell:hover { background:#c3dcee; }
 .juice-confetti-piece { position:absolute; top:-4%; height:13px; border-radius:2px; animation-name:juice-confetti-fall; animation-timing-function:linear; animation-fill-mode:forwards; }
 /* スコア加算ポップ（ScorePop）。配置は親側で行う */
 .juice-score-pop { display:inline-block; font-size:15px; font-weight:800; color:var(--accent); pointer-events:none; animation:juice-score-pop .8s ease-out both; }
+/* 手応え層（櫻井流バッチ1、lib/juice.ts と対）。
+   ヒットストップ（#003/#047）: 配下のアニメーションを凍結し、受け側だけ
+   微振動させる。判定・レイアウトには触らない（見た目だけ）。 */
+.juice-hitstop, .juice-hitstop * { animation-play-state:paused !important; }
+@keyframes juice-vibrate-kf { 0%,100% { transform:translate(0,0); } 25% { transform:translate(var(--juice-vibrate-px,3px),0); } 55% { transform:translate(calc(var(--juice-vibrate-px,3px) * -0.6),0); } 80% { transform:translate(calc(var(--juice-vibrate-px,3px) * 0.3),0); } }
+.juice-vibrate { animation:juice-vibrate-kf .09s linear 2; }
+.juice-vibrate-sm { animation:juice-vibrate-kf .09s linear 1; --juice-vibrate-px:1.5px; }
+/* 画面振動3段（#103）: 小=縦のみ / 中=縦横 / 大=不規則＋収束。パターン自体を変える。 */
+@keyframes juice-shake-1-kf { 0%,100% { transform:translateY(0); } 25% { transform:translateY(-3px); } 55% { transform:translateY(2px); } 80% { transform:translateY(-1px); } }
+@keyframes juice-shake-2-kf { 0%,100% { transform:translate(0,0); } 20% { transform:translate(-6px,3px); } 45% { transform:translate(5px,-3px); } 70% { transform:translate(-3px,-2px); } 88% { transform:translate(1px,1px); } }
+@keyframes juice-shake-3-kf { 0%,100% { transform:translate(0,0); } 12% { transform:translate(-11px,7px); } 28% { transform:translate(9px,-8px); } 44% { transform:translate(-7px,-5px); } 61% { transform:translate(6px,4px); } 78% { transform:translate(-3px,2px); } 90% { transform:translate(1px,-1px); } }
+.juice-shake-1 { animation:juice-shake-1-kf .14s ease-out; }
+.juice-shake-2 { animation:juice-shake-2-kf .22s ease-out; }
+.juice-shake-3 { animation:juice-shake-3-kf .34s ease-out; }
+/* フラッシュ（#221）: 白一色にせず明暗を交互にしてコントラストを保つ。 */
+@keyframes juice-flash-kf { 0% { filter:brightness(1.7); } 30% { filter:brightness(.55); } 55% { filter:brightness(1.35); } 100% { filter:brightness(1); } }
+.juice-flash { animation:juice-flash-kf .18s linear; }
+/* ヒットマーク（#130）: 衝撃波リング＋火花の複合。暗色の縁を混ぜて明暗
+   どちらの背景でも見えるようにし、早く消す（寿命は lib/juice.ts 側）。 */
+.juice-hitmark-host { position:relative; }
+.juice-hitmark { position:absolute; left:var(--juice-mark-x,50%); top:var(--juice-mark-y,50%); width:0; height:0; pointer-events:none; z-index:8; }
+.juice-hitmark-ring { position:absolute; left:0; top:0; width:34px; height:34px; margin:-17px 0 0 -17px; border-radius:50%; border:3px solid #ffd94d; outline:2px solid rgba(24,28,34,.75); box-shadow:0 0 0 2px rgba(24,28,34,.35); animation:juice-hitmark-ring-kf .22s ease-out both; }
+.juice-hitmark-1 .juice-hitmark-ring { width:22px; height:22px; margin:-11px 0 0 -11px; border-width:2px; }
+.juice-hitmark-3 .juice-hitmark-ring { width:52px; height:52px; margin:-26px 0 0 -26px; border-width:4px; }
+@keyframes juice-hitmark-ring-kf { 0% { opacity:1; transform:scale(.3); } 100% { opacity:0; transform:scale(1.5); } }
+.juice-hitmark-spark { position:absolute; left:0; top:0; width:12px; height:3px; margin:-1.5px 0 0 -2px; border-radius:2px; background:#ffd94d; outline:1px solid rgba(24,28,34,.6); transform:rotate(var(--juice-spark-angle,0deg)); animation:juice-hitmark-spark-kf .2s ease-out both; }
+@keyframes juice-hitmark-spark-kf { 0% { opacity:1; transform:rotate(var(--juice-spark-angle,0deg)) translateX(6px) scaleX(1); } 100% { opacity:0; transform:rotate(var(--juice-spark-angle,0deg)) translateX(26px) scaleX(.4); } }
+/* スカッシュ＆ストレッチ（#120）: 体積保存スケールは lib/juice.ts が
+   --juice-sx / --juice-sy（積=1）で渡す。 */
+@keyframes juice-squash-kf { 0% { transform:scale(1,1); } 35% { transform:scale(var(--juice-sx,1.22),var(--juice-sy,.82)); } 70% { transform:scale(.96,1.04); } 100% { transform:scale(1,1); } }
+.juice-squash { animation:juice-squash-kf .18s ease-out; }
+/* 押下の即時反応（#049）: ゲーム内ボタン/タイル共通。押した瞬間に沈ませ、
+   「押して無反応」を構造的に無くす。SE は呼び出し側で sfxTap 系を鳴らす。 */
+.juice-pressable { transition:transform .07s ease-out; -webkit-tap-highlight-color:transparent; }
+.juice-pressable:active { transform:scale(.93); }
+.classic-btn:active, .og-btn:active { transform:scale(.96); }
+/* 動きを減らす設定では振動・フラッシュ・凍結を見せない（酔い対策）。 */
+@media (prefers-reduced-motion: reduce) {
+  .juice-shake-1, .juice-shake-2, .juice-shake-3, .juice-vibrate, .juice-vibrate-sm, .juice-flash, .juice-squash { animation:none; }
+  .juice-pressable:active, .classic-btn:active, .og-btn:active { transform:none; }
+}
 .chart-wrap { position:relative; }
 .status-chart.clickable { cursor:pointer; }
 .chart-pop { position:absolute; z-index:6; transform:translate(-50%,-118%); background:#ffffff; border:1px solid var(--line); border-radius:8px; box-shadow:0 10px 26px rgba(13,58,86,.20); padding:6px 11px; font-size:13px; line-height:1.45; color:#0d3a56; white-space:nowrap; pointer-events:none; text-align:center; }

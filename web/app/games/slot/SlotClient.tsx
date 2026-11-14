@@ -20,8 +20,9 @@ import {
   type SlotState,
   type SlotSymbolId,
 } from "@/lib/slot";
-import { sfxCorrect, sfxSlide, sfxTap, sfxTick, sfxWin } from "@/lib/sfx";
-import { ScorePop } from "../GameJuice";
+import { sfxCorrect, sfxHit, sfxKo, sfxSlide, sfxTap, sfxTick } from "@/lib/sfx";
+import { juiceFlash, juiceHitstop, juiceShake, type JuiceIntensity } from "@/lib/juice";
+import { JuiceHit, ScorePop } from "../GameJuice";
 import { useGamesNav } from "../GamesShell";
 import { tappableProps, useGesture } from "@/lib/gesture";
 
@@ -46,6 +47,8 @@ export default function SlotClient() {
   const [spinning, setSpinning] = useState(false);
   const [stopped, setStopped] = useState(3); // 止まっているリール数
   const [display, setDisplay] = useState<SlotSymbolId[]>(["seven", "star", "cherry"]);
+  const machineWrapRef = useRef<HTMLDivElement | null>(null);
+  const [burst, setBurst] = useState<{ key: number; intensity: JuiceIntensity }>({ key: 0, intensity: 2 });
   const timersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const pendingRef = useRef<SlotState | null>(null);
@@ -92,7 +95,7 @@ export default function SlotClient() {
     }, 80);
     [650, 1150, 1650].forEach((ms, i) => {
       const t = setTimeout(() => {
-        sfxTick();
+        if (i < 2) sfxTick();
         stoppedRef.current = i + 1;
         setStopped(i + 1);
         setDisplay((d) => {
@@ -106,9 +109,24 @@ export default function SlotClient() {
           setSpinning(false);
           if (pendingRef.current) {
             const delta = pendingRef.current.result?.delta ?? 0;
+            // 最終リールの停止＝確定の瞬間。当たりはヒットストップ＋
+            // ヒットマーク＋ヒット音、大当たりは KO 音＋フラッシュ（#003/#130）。
             if (delta > 0) {
-              if (delta >= bet * 5) sfxWin();
-              else sfxCorrect();
+              if (delta >= bet * 5) {
+                sfxKo();
+                juiceHitstop(machineWrapRef.current, 3);
+                juiceShake(machineWrapRef.current, 2);
+                juiceFlash(machineWrapRef.current);
+                setBurst({ key: Date.now(), intensity: 3 });
+              } else {
+                sfxHit(2);
+                sfxCorrect();
+                juiceHitstop(machineWrapRef.current, 2);
+                setBurst({ key: Date.now(), intensity: 2 });
+              }
+            } else {
+              sfxHit(1);
+              juiceHitstop(machineWrapRef.current, 1);
             }
             setState(pendingRef.current);
           }
@@ -215,21 +233,24 @@ export default function SlotClient() {
         {spinning ? " ・ 回転中…" : ""}
       </p>
 
-      {webglFailed ? (
-        machine2d
-      ) : (
-        <div style={{ maxWidth: 460, margin: "10px 0 18px" }}>
-          <SlotScene3D
-            display={display}
-            spinning={spinning}
-            stopped={stopped}
-            onPull={startSpin}
-            onTapMachine={() => { if (broke) setState((s) => refillChips(s)); }}
-            onFail={() => setWebglFailed(true)}
-            fallback={machine2d}
-          />
-        </div>
-      )}
+      <div ref={machineWrapRef} style={{ position: "relative", maxWidth: 460 }}>
+        {webglFailed ? (
+          machine2d
+        ) : (
+          <div style={{ maxWidth: 460, margin: "10px 0 18px" }}>
+            <SlotScene3D
+              display={display}
+              spinning={spinning}
+              stopped={stopped}
+              onPull={startSpin}
+              onTapMachine={() => { if (broke) setState((s) => refillChips(s)); }}
+              onFail={() => setWebglFailed(true)}
+              fallback={machine2d}
+            />
+          </div>
+        )}
+        <JuiceHit burstKey={burst.key} intensity={burst.intensity} xPct={50} yPct={50} />
+      </div>
 
       <div className="classic-controls" style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
         {!broke && (
@@ -237,6 +258,7 @@ export default function SlotClient() {
             {BET_OPTIONS.map((amount) => (
               <div
                 key={amount}
+                className="juice-pressable"
                 {...tappableProps(() => { if (!spinning && amount <= state.chips) { sfxTap(); setBet(amount); } })}
                 aria-disabled={spinning || amount > state.chips}
                 style={chipStyle(amount)}

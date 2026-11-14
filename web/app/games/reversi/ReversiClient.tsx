@@ -6,6 +6,9 @@
 import { useEffect, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import { playSe } from "@/lib/balku-sound";
+import { sfxHit } from "@/lib/sfx";
+import { juiceFlash, juiceHitstop, type JuiceIntensity } from "@/lib/juice";
+import { JuiceHit } from "../GameJuice";
 
 // 3D シーンは three を含むため遅延読み込み（このページ専用チャンクに閉じる）。
 const ReversiScene3D = dynamic(() => import("./ReversiScene3D"), { ssr: false });
@@ -39,8 +42,12 @@ function Board({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
   const prevBoardRef = useRef<number[] | null>(null);
   const [flipped, setFlipped] = useState<ReadonlySet<number>>(new Set());
   const [webglFailed, setWebglFailed] = useState(false);
+  const boardWrapRef = useRef<HTMLDivElement | null>(null);
+  const [burst, setBurst] = useState<{ key: number; x: number; y: number; intensity: JuiceIntensity }>({ key: 0, x: 50, y: 50, intensity: 1 });
 
   // 前回盤面と比較し、色が変わった石に反転アニメーションを付ける。
+  // あわせて手応え層: 反転数で強さを変えたヒット音＋ヒットストップ＋
+  // 着手位置のヒットマークを出す（#003/#130）。
   useEffect(() => {
     const cur = state?.board ?? null;
     const prev = prevBoardRef.current;
@@ -54,9 +61,20 @@ function Board({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
     }
     if (next.size === 0) return;
     setFlipped(next);
+    const intensity: JuiceIntensity = next.size >= 5 ? 2 : 1;
+    sfxHit(intensity);
+    juiceHitstop(boardWrapRef.current, intensity);
+    if (state?.lastMove != null) {
+      setBurst({
+        key: Date.now(),
+        x: (((state.lastMove % 8) + 0.5) / 8) * 100,
+        y: ((Math.floor(state.lastMove / 8) + 0.5) / 8) * 100,
+        intensity,
+      });
+    }
     const timer = setTimeout(() => setFlipped(new Set()), 800);
     return () => clearTimeout(timer);
-  }, [state?.board]);
+  }, [state?.board, state?.lastMove]);
 
   // 自分の手番が来たら知らせる
   useEffect(() => {
@@ -66,12 +84,14 @@ function Board({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
     if (prev !== null && prev !== state.turn && state.turn === mySeat) playSe("turn");
   }, [state, mySeat]);
 
-  // 終局の勝敗 SE（対局ごとに一度だけ）
+  // 終局の勝敗 SE（対局ごとに一度だけ）＋止めのヒットストップとフラッシュ
   useEffect(() => {
     if (!state?.finished) return;
     if (finishRef.current === view.code) return;
     finishRef.current = view.code;
     playSe(state.winner === "draw" ? "click" : state.winner === mySeat ? "win" : "lose");
+    juiceHitstop(boardWrapRef.current, 2);
+    juiceFlash(boardWrapRef.current);
   }, [state?.finished, state?.winner, mySeat, view.code]);
 
   if (!state) return <p className="og-muted">盤面を待っています…</p>;
@@ -92,7 +112,7 @@ function Board({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
             key={index}
             type="button"
             role="gridcell"
-            className={`og-cell og-reversi-cell${state.lastMove === index ? " og-cell-last" : ""}`}
+            className={`og-cell og-reversi-cell juice-pressable${state.lastMove === index ? " og-cell-last" : ""}`}
             disabled={!isLegal}
             aria-label={`${Math.floor(index / 8) + 1}行${(index % 8) + 1}列${seat >= 0 ? (seat === 0 ? " 黒" : " 白") : isLegal ? " 置けます" : ""}`}
             onClick={() => {
@@ -145,10 +165,10 @@ function Board({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
         ))}
       </div>
       {state.lastPass != null && state.lastPass !== false && !state.finished && <p className="og-notice-inline">置ける場所がなく、パスしました。</p>}
-      {webglFailed ? (
-        board2d
-      ) : (
-        <div style={{ width: "min(94vw, 520px)", margin: "0 auto" }}>
+      <div ref={boardWrapRef} style={{ position: "relative", width: "min(94vw, 560px)", margin: "0 auto" }}>
+        {webglFailed ? (
+          board2d
+        ) : (
           <ReversiScene3D
             cells={state.board.map(cellSeat)}
             legalMoves={[...legal]}
@@ -159,8 +179,9 @@ function Board({ view, api }: { view: OnlineRoomView; api: OnlineRoomApi }) {
             onFail={() => setWebglFailed(true)}
             fallback={board2d}
           />
-        </div>
-      )}
+        )}
+        <JuiceHit burstKey={burst.key} intensity={burst.intensity} xPct={burst.x} yPct={burst.y} continuous />
+      </div>
       {myTurn && legal.size === 0 && (
         <div className="og-actions">
           <button

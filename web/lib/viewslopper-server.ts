@@ -133,7 +133,7 @@ async function fetchRendered(url: string): Promise<{ title: string; headings: st
  */
 export async function assess(page: PageData, heuristic: ViewScore): Promise<ReturnType<typeof composeAssessed> | null> {
   if (logfareApiKeys().length === 0) return null;
-  const messages = buildAssessMessages(page, heuristic, page.ux);
+  const messages = buildAssessMessages(page, heuristic);
   // 同じページでも実行ごとに点がブレるため、2回並行で採って平均を採用する
   // （片方だけ成功したらその1回分で成立させる）。
   const runOnce = async () => {

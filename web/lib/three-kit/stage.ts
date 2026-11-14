@@ -6,6 +6,7 @@
 // next/dynamic (ssr: false) で遅延読み込みし、three を対象ゲームの
 // チャンクだけに閉じること（共通 First Load JS を太らせない）。
 import * as THREE from "three";
+import { clampIntensity, hitstopDurationMs, shakeOffsetAt, SHAKE_MS, type JuiceIntensity } from "../juice";
 
 export interface CameraPreset {
   position: [number, number, number];
@@ -46,6 +47,17 @@ export interface Stage {
   planePoint: (planeY: number, clientX: number, clientY: number) => THREE.Vector3 | null;
   /** カメラを即座にプリセット位置へ置く。 */
   setCamera: (preset: CameraPreset) => void;
+  /**
+   * ヒットストップ（櫻井流バッチ1、#003/#047）: アニメーションクロックを
+   * 強さ3段（40/70/120ms）で一時停止する。描画自体は続け、onFrame には
+   * dt=0・凍結した t が渡る。呼ばなければ従来動作のまま（オプトイン）。
+   */
+  hitstop: (intensity?: JuiceIntensity | number, power?: number) => void;
+  /**
+   * カメラシェイク（#103）: 強さでパターンを変え、振幅はカメラ距離で
+   * 補正する。distanceScale は追加の倍率（既定1）。呼ばなければ無効。
+   */
+  shake: (intensity?: JuiceIntensity | number, distanceScale?: number) => void;
   dispose: () => void;
 }
 
@@ -109,14 +121,36 @@ export function createStage(container: HTMLElement, options: StageOptions = {}):
     return new THREE.Vector3(o.x + d.x * t, planeY, o.z + d.z * t);
   };
 
-  const clock = new THREE.Clock();
+  // 手応え層（ヒットストップ/シェイク）はオプトイン。時刻は自前で積算し、
+  // 凍結中は dt=0・t 固定で onFrame を呼び続ける（描画は止めない）。
+  const lookTarget = new THREE.Vector3(...preset.lookAt);
+  let lastNow = performance.now();
+  let elapsed = 0;
+  let freezeUntil = 0;
+  let shakeStart = -1;
+  let shakeDuration = 0;
+  let shakeIntensity: JuiceIntensity = 2;
+  let shakeScale = 1;
+  const reducedMotion = () => {
+    try {
+      return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    } catch {
+      return false;
+    }
+  };
+
   let raf = 0;
   let disposed = false;
   const animate = () => {
     if (disposed) return;
     raf = requestAnimationFrame(animate);
-    const dt = Math.min(0.05, clock.getDelta());
-    options.onFrame?.(dt, clock.elapsedTime);
+    const now = performance.now();
+    const rawDt = Math.min(0.05, Math.max(0, (now - lastNow) / 1000));
+    lastNow = now;
+    const frozen = now < freezeUntil;
+    const dt = frozen ? 0 : rawDt;
+    if (!frozen) elapsed += dt;
+    options.onFrame?.(dt, elapsed);
     const w = container.clientWidth || 1;
     const h = container.clientHeight || 1;
     const pr = renderer.getPixelRatio();
@@ -125,7 +159,35 @@ export function createStage(container: HTMLElement, options: StageOptions = {}):
       camera.aspect = w / h;
       camera.updateProjectionMatrix();
     }
+    // カメラシェイク: 描画の間だけオフセットを足し、描画後に戻す
+    // （カメラの基準位置は壊さない）。振幅はカメラ距離で補正する（#103）。
+    let ox = 0;
+    let oy = 0;
+    let oz = 0;
+    if (shakeStart >= 0) {
+      const p = (now - shakeStart) / shakeDuration;
+      if (p >= 1) {
+        shakeStart = -1;
+      } else {
+        const off = shakeOffsetAt(shakeIntensity, p);
+        const dist = camera.position.distanceTo(lookTarget);
+        const k = 0.012 * shakeScale * (dist / 9);
+        ox = off.x * k;
+        oy = off.y * k;
+        oz = shakeIntensity === 3 ? off.y * k * 0.5 : 0;
+      }
+    }
+    if (ox !== 0 || oy !== 0 || oz !== 0) {
+      camera.position.x += ox;
+      camera.position.y += oy;
+      camera.position.z += oz;
+    }
     renderer.render(scene, camera);
+    if (ox !== 0 || oy !== 0 || oz !== 0) {
+      camera.position.x -= ox;
+      camera.position.y -= oy;
+      camera.position.z -= oz;
+    }
   };
   animate();
 
@@ -141,7 +203,19 @@ export function createStage(container: HTMLElement, options: StageOptions = {}):
       camera.position.set(...p.position);
       camera.fov = p.fov;
       camera.updateProjectionMatrix();
+      lookTarget.set(...p.lookAt);
       camera.lookAt(...p.lookAt);
+    },
+    hitstop: (intensity: JuiceIntensity | number = 2, power = 1) => {
+      const ms = hitstopDurationMs(clampIntensity(intensity), power);
+      freezeUntil = Math.max(freezeUntil, performance.now() + ms);
+    },
+    shake: (intensity: JuiceIntensity | number = 2, distanceScale = 1) => {
+      if (reducedMotion()) return;
+      shakeIntensity = clampIntensity(intensity);
+      shakeScale = Number.isFinite(distanceScale) && distanceScale > 0 ? distanceScale : 1;
+      shakeDuration = SHAKE_MS[shakeIntensity];
+      shakeStart = performance.now();
     },
     dispose: () => {
       disposed = true;
