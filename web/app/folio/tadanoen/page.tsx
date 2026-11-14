@@ -12,7 +12,7 @@ import type { Metadata } from "next";
 // 参考コラージュに寄せ、地球のガラス球・雲・スカイライン・蝶・
 // 草花の要素を足した。さらに同日の追加指示で、光沢の境界を
 // ハッキリさせ（上部で濃く下端で薄く、境界はシャープ）、
-// グラデーションは下に行くほど明るくなるガラス光沢に統一した。さらに同日の追加指示で、その光沢を全UI要素（ヘッダー/ヒーロー/フッター/経歴ドット等）へ展開し、イルカ画像を About 欄の右上へ移し、配色全体をかなり鮮やかにした。さらに泡は「ぼかした白い丸」ではなく縁とハイライトの境目がハッキリしたガラス球の質感に作り替え、パネルのスペキュラは上端から少し下げた位置から薄く効かせるようにした。アイコン画像は本人が
+// グラデーションは下に行くほど明るくなるガラス光沢に統一した。さらに同日の追加指示で、その光沢を全UI要素（ヘッダー/ヒーロー/フッター/経歴ドット等）へ展開し、イルカ画像を About 欄の右上へ移し、配色全体をかなり鮮やかにした。さらに泡は「ぼかした白い丸」ではなく縁とハイライトの境目がハッキリしたガラス球の質感に作り替え、パネルのスペキュラは上端から少し下げた位置から薄く効かせるようにした。地球儀は大陸を消して青一色（#0080ff）にした（光沢は維持）。アイコン画像は本人が
 // 用意したらヒーローのプレースホルダと差し替える。
 // 専用ヘッダー/フッターはこのファイルの中で完結させる（サイト共通の
 // ヘッダー/フッターは lib/site-chrome.ts の /folio 判定で出ない）。
@@ -208,11 +208,6 @@ function Globe({ top, right, size, delay }: { top: string; right: string; size: 
     <svg className="folio-fa-globe" style={{ top, right, animationDelay: delay }} width={size} height={size} viewBox="0 0 100 100" aria-hidden="true">
       <defs>
         <clipPath id="folio-fa-globe-clip"><circle cx="50" cy="50" r="48" /></clipPath>
-        <linearGradient id="folio-fa-ocean" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor="#0080ff" />
-          <stop offset="55%" stopColor="#00a8ff" />
-          <stop offset="100%" stopColor="#7be0ff" />
-        </linearGradient>
         <linearGradient id="folio-fa-gloss" x1="0" y1="0" x2="0" y2="1">
           <stop offset="0%" stopColor="#ffffff" stopOpacity=".92" />
           <stop offset="82%" stopColor="#ffffff" stopOpacity=".34" />
@@ -221,14 +216,7 @@ function Globe({ top, right, size, delay }: { top: string; right: string; size: 
         </linearGradient>
       </defs>
       <g clipPath="url(#folio-fa-globe-clip)">
-        <rect width="100" height="100" fill="url(#folio-fa-ocean)" />
-        <g fill="#00c853">
-          <path d="M12 36 L24 24 L40 25 L46 33 L37 39 L35 49 L25 45 L17 44 Z" />
-          <path d="M33 55 L45 52 L47 66 L40 82 L34 71 Z" />
-          <path d="M51 43 L65 40 L70 53 L63 71 L54 62 L51 52 Z" />
-          <path d="M46 20 L76 17 L90 30 L82 40 L63 35 L52 31 Z" />
-          <path d="M74 65 L87 62 L90 71 L78 75 Z" />
-        </g>
+        <rect width="100" height="100" fill="#0080ff" />
         <ellipse cx="50" cy="30" rx="47" ry="29" fill="url(#folio-fa-gloss)" />
         <ellipse cx="50" cy="97" rx="46" ry="16" fill="#ffffff" opacity=".22" />
       </g>
