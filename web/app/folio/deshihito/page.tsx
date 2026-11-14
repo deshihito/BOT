@@ -12,7 +12,7 @@ import type { Metadata } from "next";
 // ============================================================
 
 const MOON_ICON =
-  "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Ccircle cx='32' cy='32' r='30' fill='%230b1026'/%3E%3Cpath d='M42 10a24 24 0 1 0 12 32A26 26 0 0 1 42 10z' fill='%23e8c97a'/%3E%3C/svg%3E";
+  "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Ccircle cx='32' cy='32' r='30' fill='%230b1026'/%3E%3Cpath d='M42 10a24 24 0 1 0 12 32A26 26 0 0 1 42 10z' fill='%23ecd9a0'/%3E%3C/svg%3E";
 
 export const metadata: Metadata = {
   title: { absolute: "deshihito / lunamOOn" },
@@ -38,42 +38,43 @@ const STARS = Array.from({ length: 72 }, (_, i) => {
 });
 
 const CSS = `
-.folio-dh{position:relative;min-height:100svh;overflow:hidden;background:linear-gradient(180deg,#070b1d 0%,#0b1026 42%,#131a3a 78%,#1a2148 100%);color:#eef0ff;font-family:"Hiragino Kaku Gothic ProN","Hiragino Sans","Noto Sans JP",system-ui,sans-serif}
+.folio-dh{position:relative;min-height:100svh;overflow:hidden;background:radial-gradient(1100px 520px at 82% -6%,rgba(236,217,160,.14),transparent 62%),radial-gradient(900px 620px at -12% 88%,rgba(120,140,220,.12),transparent 60%),linear-gradient(180deg,#0a0f26 0%,#101736 46%,#182148 80%,#1d2852 100%);color:#eceeff;font-family:"Hiragino Kaku Gothic ProN","Hiragino Sans","Noto Sans JP",system-ui,sans-serif}
 .folio-dh *{box-sizing:border-box}
+.folio-dh::before{content:"";position:absolute;inset:0;background:radial-gradient(640px 300px at 50% 30%,rgba(190,200,255,.05),transparent 70%),radial-gradient(800px 380px at 24% 74%,rgba(190,200,255,.04),transparent 70%);filter:blur(6px);pointer-events:none}
 .folio-dh-stars{position:absolute;inset:0;pointer-events:none}
-.folio-dh-star{position:absolute;border-radius:50%;background:#dfe6ff;animation:folio-dh-tw 3.6s ease-in-out infinite}
-@keyframes folio-dh-tw{0%,100%{opacity:.25}50%{opacity:.95}}
-.folio-dh-moon{position:absolute;top:6.5rem;right:6vw;width:172px;height:172px;border-radius:50%;background:radial-gradient(circle at 38% 34%,#fdf6dd 0%,#f3e3ac 42%,#e8c97a 78%,#d9b45f 100%);box-shadow:0 0 60px 18px rgba(232,201,122,.28),0 0 140px 60px rgba(232,201,122,.12)}
-.folio-dh-moon::after{content:"";position:absolute;inset:0;border-radius:50%;background:radial-gradient(circle at 68% 62%,rgba(160,128,58,.20) 0 9%,transparent 10%),radial-gradient(circle at 30% 66%,rgba(160,128,58,.16) 0 6%,transparent 7%),radial-gradient(circle at 55% 22%,rgba(160,128,58,.14) 0 5%,transparent 6%)}
+.folio-dh-star{position:absolute;border-radius:50%;background:#e3e9ff;animation:folio-dh-tw 5.2s ease-in-out infinite}
+@keyframes folio-dh-tw{0%,100%{opacity:.12}50%{opacity:.6}}
+.folio-dh-moon{position:absolute;top:6.5rem;right:6vw;width:172px;height:172px;border-radius:50%;opacity:.94;background:radial-gradient(circle at 38% 34%,rgba(253,246,221,.95) 0%,rgba(244,228,175,.88) 44%,rgba(236,217,160,.78) 78%,rgba(224,196,120,.68) 100%);box-shadow:0 0 70px 26px rgba(236,217,160,.20),0 0 170px 90px rgba(236,217,160,.10),inset 0 0 42px rgba(255,252,240,.35)}
+.folio-dh-moon::after{content:"";position:absolute;inset:0;border-radius:50%;background:radial-gradient(circle at 68% 62%,rgba(160,128,58,.12) 0 9%,transparent 10%),radial-gradient(circle at 30% 66%,rgba(160,128,58,.09) 0 6%,transparent 7%),radial-gradient(circle at 55% 22%,rgba(160,128,58,.08) 0 5%,transparent 6%)}
 .folio-dh-inner{position:relative;max-width:880px;margin:0 auto;padding:0 20px 64px}
-.folio-dh-header{display:flex;align-items:center;gap:10px;padding:20px 0 14px;border-bottom:1px solid transparent;border-image:linear-gradient(90deg,transparent,#e8c97a 30%,#e8c97a 70%,transparent) 1}
-.folio-dh-header .name{font-size:17px;letter-spacing:.14em}
+.folio-dh-header{display:flex;align-items:center;gap:10px;padding:20px 0 14px;border-bottom:1px solid transparent;border-image:linear-gradient(90deg,transparent,rgba(236,217,160,.55) 30%,rgba(236,217,160,.55) 70%,transparent) 1}
+.folio-dh-header .name{font-size:17px;letter-spacing:.16em;font-weight:500}
 .folio-dh-hero{padding:88px 0 30px;max-width:560px}
-.folio-dh-hero h1{font-size:52px;margin:0 0 10px;letter-spacing:.08em;font-weight:600}
-.folio-dh-slot{border:1.5px dashed rgba(232,201,122,.55);border-radius:12px;padding:14px 16px;color:#b9c0e8;background:rgba(11,16,38,.45)}
-.folio-dh-badge{display:inline-block;font-size:10.5px;letter-spacing:.08em;color:#0b1026;background:#e8c97a;border-radius:999px;padding:2px 9px;margin-bottom:8px;font-weight:700}
+.folio-dh-hero h1{font-size:52px;margin:0 0 10px;letter-spacing:.07em;font-weight:500;text-shadow:0 2px 30px rgba(160,175,255,.25)}
+.folio-dh-slot{border:1.5px dashed rgba(236,217,160,.38);border-radius:16px;padding:14px 16px;color:#c6ccef;background:linear-gradient(160deg,rgba(255,255,255,.055),rgba(255,255,255,.018));backdrop-filter:blur(10px) saturate(1.15);-webkit-backdrop-filter:blur(10px) saturate(1.15);box-shadow:0 10px 34px rgba(3,6,20,.22)}
+.folio-dh-badge{display:inline-block;font-size:10.5px;letter-spacing:.08em;color:#141a36;background:rgba(236,217,160,.88);border-radius:999px;padding:2px 9px;margin-bottom:8px;font-weight:700}
 .folio-dh-stats{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-top:26px;max-width:560px}
 .folio-dh-stats .folio-dh-slot{min-height:74px}
-.folio-dh-phases{display:flex;gap:14px;align-items:center;justify-content:center;margin:46px 0 8px;opacity:.9}
+.folio-dh-phases{display:flex;gap:14px;align-items:center;justify-content:center;margin:46px 0 8px;opacity:.75}
 .folio-dh section{margin-top:44px}
-.folio-dh h2{font-size:21px;letter-spacing:.1em;margin:0 0 16px;display:flex;align-items:center;gap:10px;font-weight:600}
-.folio-dh h2::before{content:"";width:15px;height:15px;border-radius:50%;background:#e8c97a;box-shadow:-5px 2px 0 0 #131a3a;transform:rotate(24deg);flex:none}
+.folio-dh h2{font-size:21px;letter-spacing:.12em;margin:0 0 16px;display:flex;align-items:center;gap:10px;font-weight:500}
+.folio-dh h2::before{content:"";width:15px;height:15px;border-radius:50%;background:#ecd9a0;box-shadow:-5px 2px 0 0 #182148;transform:rotate(24deg);flex:none;opacity:.9}
 .folio-dh-works{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
 .folio-dh-works .folio-dh-slot{min-height:132px}
-.folio-dh-career{list-style:none;margin:0;padding:0 0 0 14px;border-left:1px solid rgba(232,201,122,.4)}
+.folio-dh-career{list-style:none;margin:0;padding:0 0 0 14px;border-left:1px solid rgba(236,217,160,.30)}
 .folio-dh-career li{position:relative;margin:0 0 12px 10px}
-.folio-dh-career li::before{content:"";position:absolute;left:-21px;top:20px;width:9px;height:9px;border-radius:50%;background:#e8c97a;box-shadow:0 0 10px rgba(232,201,122,.8)}
-.folio-dh-entry{border:1px solid rgba(232,201,122,.28);border-radius:12px;padding:13px 16px;color:#eef0ff;background:rgba(19,26,58,.5);font-size:15.5px}
-.folio-dh-alias{color:#b9c0e8;letter-spacing:.1em;margin:0 0 18px;font-size:15px}
+.folio-dh-career li::before{content:"";position:absolute;left:-21px;top:20px;width:9px;height:9px;border-radius:50%;background:#ecd9a0;box-shadow:0 0 12px rgba(236,217,160,.65)}
+.folio-dh-entry{border:1px solid rgba(238,230,200,.20);border-radius:16px;padding:13px 16px;color:#eceeff;background:linear-gradient(160deg,rgba(255,255,255,.06),rgba(255,255,255,.02));backdrop-filter:blur(10px) saturate(1.15);-webkit-backdrop-filter:blur(10px) saturate(1.15);box-shadow:0 10px 34px rgba(3,6,20,.20);font-size:15.5px}
+.folio-dh-alias{color:#c6ccef;letter-spacing:.12em;margin:0 0 18px;font-size:15px}
 .folio-dh-cards{display:grid;grid-template-columns:repeat(2,1fr);gap:12px}
-.folio-dh-card{border:1px solid rgba(232,201,122,.28);border-radius:12px;padding:16px 18px;background:rgba(19,26,58,.5)}
-.folio-dh-card h3{margin:0 0 10px;font-size:15.5px;letter-spacing:.06em;color:#e8c97a;font-weight:600}
-.folio-dh-card p{margin:4px 0;color:#eef0ff;font-size:15px}
-.folio-dh-card p.sub{color:#b9c0e8;font-size:13.5px}
+.folio-dh-card{border:1px solid rgba(238,230,200,.20);border-radius:16px;padding:16px 18px;background:linear-gradient(160deg,rgba(255,255,255,.06),rgba(255,255,255,.02));backdrop-filter:blur(10px) saturate(1.15);-webkit-backdrop-filter:blur(10px) saturate(1.15);box-shadow:0 10px 34px rgba(3,6,20,.20)}
+.folio-dh-card h3{margin:0 0 10px;font-size:15.5px;letter-spacing:.07em;color:#ecd9a0;font-weight:500}
+.folio-dh-card p{margin:4px 0;color:#eceeff;font-size:15px}
+.folio-dh-card p.sub{color:#aeb6dd;font-size:13.5px}
 .folio-dh-tags{display:flex;flex-wrap:wrap;gap:8px}
-.folio-dh-tag{border:1.5px dashed rgba(232,201,122,.55);border-radius:999px;padding:7px 16px;color:#b9c0e8;font-size:13.5px}
+.folio-dh-tag{border:1.5px dashed rgba(236,217,160,.38);border-radius:999px;padding:7px 16px;color:#c6ccef;font-size:13.5px;background:rgba(255,255,255,.03);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px)}
 .folio-dh-links{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
-.folio-dh-footer{margin-top:72px;padding-top:18px;border-top:1px solid transparent;border-image:linear-gradient(90deg,transparent,#e8c97a 30%,#e8c97a 70%,transparent) 1;display:flex;align-items:center;gap:8px;justify-content:center;color:#9aa3d4;font-size:12.5px;letter-spacing:.1em}
+.folio-dh-footer{margin-top:72px;padding-top:18px;border-top:1px solid transparent;border-image:linear-gradient(90deg,transparent,rgba(236,217,160,.55) 30%,rgba(236,217,160,.55) 70%,transparent) 1;display:flex;align-items:center;gap:8px;justify-content:center;color:#a5add6;font-size:12.5px;letter-spacing:.12em}
 @media (max-width:640px){.folio-dh-hero{padding-top:56px}.folio-dh-hero h1{font-size:32px}.folio-dh-moon{width:104px;height:104px;top:5.2rem;right:5vw}.folio-dh-stats{grid-template-columns:repeat(2,1fr)}.folio-dh-works,.folio-dh-links,.folio-dh-cards{grid-template-columns:1fr}}
 @media (prefers-reduced-motion:reduce){.folio-dh-star{animation:none}}
 `;
@@ -90,7 +91,7 @@ function Slot({ label, children }: { label: string; children?: React.ReactNode }
 function MoonMark({ size = 22 }: { size?: number }) {
   return (
     <svg width={size} height={size} viewBox="0 0 64 64" aria-hidden="true">
-      <path d="M42 6a26 26 0 1 0 16 36A28 28 0 0 1 42 6z" fill="#e8c97a" />
+      <path d="M42 6a26 26 0 1 0 16 36A28 28 0 0 1 42 6z" fill="#ecd9a0" />
     </svg>
   );
 }
@@ -102,11 +103,11 @@ function Phases() {
     <div className="folio-dh-phases" aria-hidden="true">
       {fills.map((f, i) => (
         <svg key={i} width="18" height="18" viewBox="0 0 20 20">
-          <circle cx="10" cy="10" r="8" fill="none" stroke="rgba(232,201,122,.5)" strokeWidth="1" />
+          <circle cx="10" cy="10" r="8" fill="none" stroke="rgba(236,217,160,.38)" strokeWidth="1" />
           {f > 0 && (
             <path
               d={`M10 2a8 8 0 0 1 0 16a${8 * Math.abs(1 - 2 * f)} 8 0 0 ${f > 0.5 ? 1 : 0} 0-16z`}
-              fill="#e8c97a"
+              fill="#ecd9a0"
               opacity="0.9"
             />
           )}
