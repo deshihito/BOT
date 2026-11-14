@@ -12,7 +12,7 @@ import type { Metadata } from "next";
 // 参考コラージュに寄せ、地球のガラス球・雲・スカイライン・蝶・
 // 草花の要素を足した。さらに同日の追加指示で、光沢の境界を
 // ハッキリさせ（上部で濃く下端で薄く、境界はシャープ）、
-// グラデーションは下に行くほど明るくなるガラス光沢に統一した。さらに同日の追加指示で、その光沢を全UI要素（ヘッダー/ヒーロー/フッター/経歴ドット等）へ展開し、イルカ画像を About 欄の右上へ移し、配色全体をかなり鮮やかにした。アイコン画像は本人が
+// グラデーションは下に行くほど明るくなるガラス光沢に統一した。さらに同日の追加指示で、その光沢を全UI要素（ヘッダー/ヒーロー/フッター/経歴ドット等）へ展開し、イルカ画像を About 欄の右上へ移し、配色全体をかなり鮮やかにした。さらに泡は「ぼかした白い丸」ではなく縁とハイライトの境目がハッキリしたガラス球の質感に作り替え、パネルのスペキュラは上端から少し下げた位置から薄く効かせるようにした。アイコン画像は本人が
 // 用意したらヒーローのプレースホルダと差し替える。
 // 専用ヘッダー/フッターはこのファイルの中で完結させる（サイト共通の
 // ヘッダー/フッターは lib/site-chrome.ts の /folio 判定で出ない）。
@@ -62,7 +62,7 @@ main:has(.folio-fa){max-width:none;min-height:0;margin:0;padding:0}
 .folio-fa{position:relative;min-height:100svh;overflow:hidden;color:#0d3a56;font-family:"Segoe UI","Hiragino Kaku Gothic ProN","Hiragino Sans","Noto Sans JP",system-ui,sans-serif;background:radial-gradient(1050px 520px at 86% -8%,rgba(255,246,190,.6),transparent 60%),linear-gradient(180deg,#007cf0 0%,#00a2ff 22%,#3ec6ff 42%,#8df5c0 60%,#54e86a 78%,#c6ff9a 100%)}
 .folio-fa *{box-sizing:border-box}
 .folio-fa-bubbles{position:absolute;inset:0;pointer-events:none}
-.folio-fa-bubble{position:absolute;border-radius:50%;background:radial-gradient(circle at 33% 26%,rgba(255,255,255,.98) 0 9%,rgba(255,255,255,.30) 20%,rgba(255,255,255,.05) 34%,rgba(255,255,255,0) 50%),radial-gradient(circle at 50% 118%,rgba(255,255,255,.5),rgba(255,255,255,0) 55%);border:1.5px solid rgba(255,255,255,.9);box-shadow:inset 0 -6px 10px rgba(160,225,255,.35);animation:folio-fa-float 7s ease-in-out infinite alternate}
+.folio-fa-bubble{position:absolute;border-radius:50%;background:radial-gradient(ellipse 62% 34% at 50% 13%,rgba(255,255,255,.95) 0 66%,rgba(255,255,255,.30) 72%,rgba(255,255,255,0) 76%),radial-gradient(ellipse 66% 30% at 50% 112%,rgba(255,255,255,.55) 0 55%,rgba(255,255,255,0) 66%),linear-gradient(180deg,rgba(255,255,255,.10),rgba(255,255,255,.02) 48%,rgba(255,255,255,.20));border:1.5px solid rgba(255,255,255,.95);box-shadow:inset 0 0 0 1px rgba(180,230,255,.30),0 2px 5px rgba(0,90,160,.20);animation:folio-fa-float 7s ease-in-out infinite alternate}
 @keyframes folio-fa-float{from{transform:translateY(8px)}to{transform:translateY(-14px)}}
 .folio-fa-hills{position:absolute;left:0;right:0;bottom:0;width:100%;height:250px;pointer-events:none}
 .folio-fa-sun{position:absolute;top:4.6rem;right:4vw;width:230px;height:230px;border-radius:50%;background:radial-gradient(circle,rgba(255,252,210,.55) 0%,rgba(255,244,170,.22) 42%,transparent 70%);pointer-events:none}
@@ -77,7 +77,7 @@ main:has(.folio-fa){max-width:none;min-height:0;margin:0;padding:0}
 .folio-fa-hero h1{font-size:52px;margin:0 0 10px;letter-spacing:.05em;font-weight:700;color:#0057a8;text-shadow:0 2px 0 rgba(255,255,255,.65),0 12px 28px rgba(0,90,160,.28)}
 .folio-fa-alias{color:#1a6ea8;letter-spacing:.12em;margin:0 0 18px;font-size:15px;font-weight:600;text-shadow:0 1px 0 rgba(255,255,255,.6)}
 .folio-fa-glass{position:relative;border:1px solid rgba(255,255,255,.98);border-radius:20px;background:linear-gradient(180deg,rgba(255,255,255,.48),rgba(255,255,255,.20) 52%,rgba(235,255,242,.42));box-shadow:inset 0 1px 0 #ffffff,inset 0 -1px 0 rgba(255,255,255,.65),0 14px 30px rgba(15,90,150,.18);overflow:hidden}
-.folio-fa-glass::before{content:"";position:absolute;top:0;left:0;right:0;height:50%;background:linear-gradient(180deg,rgba(255,255,255,.92) 0%,rgba(255,255,255,.34) 86%,rgba(255,255,255,0) 90%);pointer-events:none}
+.folio-fa-glass::before{content:"";position:absolute;top:6%;left:6px;right:6px;height:34%;border-radius:12px;border-top:1px solid rgba(255,255,255,.9);background:linear-gradient(180deg,rgba(255,255,255,.80) 0%,rgba(255,255,255,.30) 55%,rgba(255,255,255,0) 92%);pointer-events:none}
 .folio-fa-slot{padding:14px 16px;color:#33586e}
 .folio-fa-badge{display:inline-block;position:relative;z-index:1;font-size:10.5px;letter-spacing:.08em;color:#5b3a00;background:linear-gradient(180deg,#fff3cf 0%,#ffd873 47%,#ff8a00 52%,#ffb84d 100%);border:1px solid rgba(255,255,255,.95);border-radius:999px;padding:2px 9px;margin-bottom:8px;font-weight:700;box-shadow:inset 0 1px 0 #ffffff,0 3px 8px rgba(200,120,0,.30)}
 .folio-fa-slotbody{position:relative;z-index:1}
@@ -171,9 +171,9 @@ function BubbleDivider() {
             height: s,
             borderRadius: "50%",
             background:
-              "radial-gradient(circle at 32% 28%,rgba(255,255,255,.95),rgba(255,255,255,.28) 42%,rgba(255,255,255,.06) 62%,rgba(170,225,255,.22))",
-            border: "1px solid rgba(255,255,255,.55)",
-            boxShadow: "inset -3px -4px 8px rgba(120,190,240,.25)",
+              "radial-gradient(ellipse 62% 34% at 50% 13%,rgba(255,255,255,.95) 0 66%,rgba(255,255,255,.30) 72%,rgba(255,255,255,0) 76%),radial-gradient(ellipse 66% 30% at 50% 112%,rgba(255,255,255,.55) 0 55%,rgba(255,255,255,0) 66%),linear-gradient(180deg,rgba(255,255,255,.10),rgba(255,255,255,.02) 48%,rgba(255,255,255,.20))",
+            border: "1.5px solid rgba(255,255,255,.95)",
+            boxShadow: "inset 0 0 0 1px rgba(180,230,255,.30),0 1px 2px rgba(0,90,160,.18)",
           }}
         />
       ))}
