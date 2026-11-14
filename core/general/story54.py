@@ -154,7 +154,7 @@ class Story54Mixin:
     async def _story54_text_done(self, interaction: discord.Interaction, text: str):
         """54字の文章から画像を生成し、チャンネルへ公開で投稿する。"""
         try:
-            data = render_story54_png(text)
+            data = await asyncio.to_thread(render_story54_png, text)
         except ImportError:
             return await interaction.response.send_message(
                 "画像生成ライブラリが利用できません。", ephemeral=True)

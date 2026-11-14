@@ -316,7 +316,7 @@ class Othello(commands.Cog):
         g.phase = "playing"
         if g.mode != "cpu":
             g.players[BLACK], g.players[WHITE] = list(g.players.values())
-        file, image_url = board_attachment(g.board)
+        file, image_url = await asyncio.to_thread(board_attachment, g.board)
         await channel.send(view=board_panel("", "オセロを開始します。黒（●）が先手です。"), file=file)
         await self._play_loop(channel, g)
 
@@ -331,7 +331,7 @@ class Othello(commands.Cog):
                 if g.pass_count >= 2 or all(cell != EMPTY for row in g.board for cell in row):
                     break
                 g.turn = WHITE if g.turn == BLACK else BLACK
-                file, image_url = board_attachment(g.board)
+                file, image_url = await asyncio.to_thread(board_attachment, g.board)
                 passed_color = BLACK if g.turn == WHITE else WHITE
                 # パス通知は次の手番パネルに置き換わるまでの暫定表示として
                 # 追跡パネルに出す（次の replace / 終了時の clear で消える）。
@@ -348,7 +348,7 @@ class Othello(commands.Cog):
             g.acted = False
             color, uid = g.turn, g.current_user().id
             labelled_moves(moves)
-            file, image_url = board_attachment(g.board, moves)
+            file, image_url = await asyncio.to_thread(board_attachment, g.board, moves)
             body = (f"{g.players[color].mention} さんの番（{ '黒 ●' if color == BLACK else '白 ○'}）。\n"
                     "盤面画像の番号をセレクトメニューから選んでください。")
             turn_message = await game_panels.replace(channel, "party", file=file,
@@ -378,7 +378,7 @@ class Othello(commands.Cog):
             outcome += f"\n{rating_line}"
         if g.mode == "cpu":
             outcome += "\n（CPU戦はランキングに記録されません）"
-        file, image_url = board_attachment(g.board)
+        file, image_url = await asyncio.to_thread(board_attachment, g.board)
         # 役割を終えた手番パネルを片付け、結果（盤面つき）だけを残す。
         await game_panels.clear(channel, "party")
         await channel.send(view=board_panel("オセロ 終了", f"{outcome}\n黒: {black} / 白: {white}"), file=file)

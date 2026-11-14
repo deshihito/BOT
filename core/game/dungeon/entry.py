@@ -106,7 +106,7 @@ class DungeonCog(Cog):
         mv = DungeonUnifiedView(uid, floor, x, y, self.db_api)
 
         # 初期画像は専用チャンネルへ投げず、コマンド応答へ直接添付する。
-        map_file, map_url = d_map_attachment(uid, floor, x, y)
+        map_file, map_url = await asyncio.to_thread(d_map_attachment, uid, floor, x, y)
         em = mv._embed("ダンジョンへようこそ！ Clef自動操作と作戦はSTATUS画面から設定できます。", image_url=map_url)
         await interaction.followup.send(embed=em, view=mv, file=map_file)
 

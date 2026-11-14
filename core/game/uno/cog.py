@@ -264,7 +264,8 @@ class CardSelect(discord.ui.Select):
                 self.game.pending_draw_count += 4
                 self.game.active_plus_type = "Wild+4"
 
-            board_file = self.cog._board_file(interaction.channel, self.game)
+            board_file = await asyncio.to_thread(
+                self.cog._board_file, interaction.channel, self.game)
             view = WildColorView(self.game, selected_card, current_player_id, self.cog, action_msg, uno_penalty_check,
                                  body=f"<@{current_player_id}> さん、次の色を選択してください！（{int(COLOR_TIMEOUT)}秒以内）",
                                  board_file=board_file)
@@ -477,7 +478,8 @@ class GameControlView(GamePanelView):
             return await interaction.response.send_message("あなたはゲームに参加していないか、手札がありません。", ephemeral=True)
 
         hand_text = " / ".join([f"[{card}]" for card in user_hand])
-        hand_file = self.cog._hand_file(self.game, interaction.user.id)
+        hand_file = await asyncio.to_thread(
+            self.cog._hand_file, self.game, interaction.user.id)
         if hand_file is not None:
             return await interaction.response.send_message(
                 f"あなたの現在の手札 ({len(user_hand)}枚):\n{hand_text}",
@@ -794,7 +796,7 @@ class Uno(commands.Cog):
 
         if game.active_view is not None:
             game.active_view.stop()
-        board_file = self._board_file(channel, game)
+        board_file = await asyncio.to_thread(self._board_file, channel, game)
         view = GameControlView(game, playable_cards, self, body="\n".join(body), board_file=board_file)
         game.active_view = view
         if board_file is not None:
@@ -881,7 +883,7 @@ class Uno(commands.Cog):
         self.games[channel_id] = game
         awaiting = state.get("awaiting_color")
         if isinstance(awaiting, dict) and awaiting.get("player_id") in players:
-            board_file = self._board_file(channel, game)
+            board_file = await asyncio.to_thread(self._board_file, channel, game)
             view = WildColorView(game, awaiting.get("card_type"), awaiting["player_id"],
                                  self, awaiting.get("action_msg") or "",
                                  bool(awaiting.get("uno_penalty")),

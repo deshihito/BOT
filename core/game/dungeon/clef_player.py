@@ -227,7 +227,7 @@ class ClefDungeonPlayer:
             value=f"{p['floor']}F ({p['x']},{p['y']}) / HP {p['hp']}/{stats['max_hp']} / {d_job_name(uid)}",
             inline=False,
         )
-        map_file, map_url = d_map_attachment(uid, p["floor"], p["x"], p["y"])
+        map_file, map_url = await asyncio.to_thread(d_map_attachment, uid, p["floor"], p["x"], p["y"])
         embed.set_image(url=map_url)
         await message.edit(embed=embed, view=None if final else view, attachments=[map_file])
 

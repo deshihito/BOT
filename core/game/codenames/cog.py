@@ -120,9 +120,10 @@ class ControlPanel(GamePanelView):
         if interaction.user.id not in leaders:
             return await interaction.response.send_message("キーは各チームのリーダーだけが見られます。", ephemeral=True)
         game: CodenamesGame = session["game"]
+        file = await asyncio.to_thread(board_file, game, key_view=True)
         await interaction.response.send_message(
             f"キーカード（あなたは {TEAM_LABEL[self._team(interaction)]} のリーダー）",
-            file=board_file(game, key_view=True), ephemeral=True)
+            file=file, ephemeral=True)
 
     async def _hint(self, interaction: discord.Interaction):
         session = self.session
@@ -273,13 +274,15 @@ class Codenames(commands.Cog):
                     await party_ranking.shared().record_win(session["guild_id"], member.id, GAME_ID)
             # 盤面パネルを片付け、結果だけを残す（最終盤面の画像つき）。
             await game_panels.clear(channel, "party")
+            file = await asyncio.to_thread(board_file, game)
             await channel.send(view=text_panel("🕵 コードネーム 終了", status_text(game, session, note)),
-                               file=board_file(game))
+                               file=file)
             self.sessions.pop(channel.id, None)
             return
         view = ControlPanel(self, session, body=status_text(game, session, note),
                             guess_select=GuessSelect(self, session))
-        await game_panels.replace(channel, "party", view=view, file=board_file(game))
+        file = await asyncio.to_thread(board_file, game)
+        await game_panels.replace(channel, "party", view=view, file=file)
 
 
 async def setup(bot):

@@ -318,6 +318,21 @@ class ItemsView(discord.ui.View):
                 self._png = None
         return self._png
 
+    async def prepare_png(self) -> None:
+        """パネル画像をワーカースレッドで先に描いておく。
+
+        panel_png() の遅延描画を非同期側で済ませ、以降の panel_png() /
+        panel_files() / embed() はキャッシュを返すだけにする。
+        """
+        if not self._png_ready:
+            self._png_ready = True
+            try:
+                self._png = await asyncio.to_thread(
+                    items_panel_png, self.cog.store, self.user_id)
+            except Exception:
+                logger.exception("items: パネル画像の生成に失敗しました")
+                self._png = None
+
     def panel_files(self) -> list[discord.File] | None:
         png = self.panel_png()
         if png is None:
@@ -378,6 +393,7 @@ class ItemsCog(commands.Cog):
     # ------------------------------------------------------------------ 入口
     async def show_items(self, interaction: discord.Interaction):
         view = ItemsView(self, interaction.user.id)
+        await view.prepare_png()
         files = view.panel_files()
         if files:
             await interaction.response.send_message(

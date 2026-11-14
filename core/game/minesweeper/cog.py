@@ -16,6 +16,7 @@
 core/game/game/game_records.py に難易度キー別で残る（従来キーは不変、
 大盤面は新キー wide/expert）。
 """
+import asyncio
 import io
 import time
 
@@ -164,8 +165,10 @@ class BoardPanel(GamePanelView):
 
     async def _refresh(self, interaction: discord.Interaction, *, reveal: bool = False):
         self._render()
+        file = await asyncio.to_thread(
+            board_file, self.board, self._selected(), reveal=reveal)
         await edit_panel_v2(interaction, self,
-                            files=[board_file(self.board, self._selected(), reveal=reveal)])
+                            files=[file])
 
     # ------------------------------------------------------------------ 操作
     async def _act_callback(self, interaction: discord.Interaction):
@@ -207,8 +210,9 @@ class BoardPanel(GamePanelView):
             self.status += "\n" + game_records.format_sweeper_line(
                 entry, DIFFICULTIES[self.board.difficulty][0])
         self._render()
+        file = await asyncio.to_thread(board_file, self.board, None, reveal=True)
         await edit_panel_v2(interaction, self,
-                            files=[board_file(self.board, None, reveal=True)])
+                            files=[file])
         self.stop()
 
 
@@ -237,7 +241,8 @@ class DifficultyPanel(GamePanelView):
         async def callback(interaction: discord.Interaction):
             board = MinesweeperBoard(difficulty)
             panel = BoardPanel(self.cog, self.owner, board)
-            await edit_panel_v2(interaction, panel, files=[board_file(board)])
+            file = await asyncio.to_thread(board_file, board)
+            await edit_panel_v2(interaction, panel, files=[file])
             self.stop()
         return callback
 

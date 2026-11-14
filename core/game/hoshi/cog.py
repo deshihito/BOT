@@ -243,7 +243,7 @@ class Hoshi(commands.Cog):
             return
         panel.add_extra(discord.ui.MediaGallery(
             discord.MediaGalleryItem("attachment://hoshi_board.png")))
-        file = board_file(game)
+        file = await asyncio.to_thread(board_file, game)
         msg = self.messages.get(channel.id)
         if msg is None:
             self.messages[channel.id] = await channel.send(view=panel, file=file)

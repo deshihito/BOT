@@ -7,6 +7,7 @@
 """
 from __future__ import annotations
 
+import asyncio
 import io
 import logging
 import time
@@ -75,6 +76,15 @@ class GardenView(discord.ui.View):
         self.cog.store.settle_user(self.user_id, now)
         self.snapshot = self.cog.store.snapshot(self.user_id)
         self._png = render_garden_png(self.snapshot["pots"], now)
+
+    async def load_async(self) -> None:
+        """load() の非同期版。状態の読み直しは通常どおり行い、
+        画像描画だけをワーカースレッドへ逃がしてループを塞がない。"""
+        now = _now()
+        self.cog.store.settle_user(self.user_id, now)
+        self.snapshot = self.cog.store.snapshot(self.user_id)
+        self._png = await asyncio.to_thread(
+            render_garden_png, self.snapshot["pots"], now)
 
     def embed(self) -> discord.Embed:
         now = _now()
@@ -159,7 +169,7 @@ class GardenView(discord.ui.View):
     # 操作コールバック
     # ------------------------------------------------------------------
     async def _sync_panel(self, interaction: discord.Interaction) -> None:
-        self.load()
+        await self.load_async()
         self.refresh()
         await edit_panel_v2(interaction, as_panel_v2(self), files=[self.image_file()])
 
@@ -235,7 +245,7 @@ class GardenCog(commands.Cog):
 
     async def show_garden(self, interaction: discord.Interaction) -> None:
         view = GardenView(self, interaction.user.id)
-        view.load()
+        await view.load_async()
         view.refresh()
         await interaction.response.send_message(
             view=as_panel_v2(view), files=[view.image_file()])

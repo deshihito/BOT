@@ -134,7 +134,7 @@ class Ruins(commands.Cog):
                 + "、".join(f"<@{uid}>:{game.banked[uid]}" for uid in game.players)))
             while game.phase == "decide" and game.in_ruin:
                 event = game.reveal()
-                png = path_png(game)
+                png = await asyncio.to_thread(path_png, game)
                 panel = GamePanelView("探検の道", event_text(game, event))
                 panel.add_extra(discord.ui.MediaGallery(discord.MediaGalleryItem("attachment://path.png")))
                 await channel.send(file=discord.File(io.BytesIO(png), "path.png"), view=panel)

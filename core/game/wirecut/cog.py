@@ -266,14 +266,16 @@ class WireCut(commands.Cog):
         return panel
 
     async def _send_panel(self, channel, game: WireCutGame):
-        self.messages[channel.id] = await channel.send(file=board_file(game), view=self._panel(game))
+        file = await asyncio.to_thread(board_file, game)
+        self.messages[channel.id] = await channel.send(file=file, view=self._panel(game))
 
     async def _refresh_panel(self, channel, game: WireCutGame):
         msg = self.messages.get(channel.id)
         if msg is not None:
             try:
                 # 画像つきパネルは添付し直して編集する（花火大会の前例）
-                await edit_message_v2(msg, self._panel(game), files=[board_file(game)])
+                file = await asyncio.to_thread(board_file, game)
+                await edit_message_v2(msg, self._panel(game), files=[file])
             except Exception:  # noqa: BLE001
                 logger.debug("WireCut: パネル更新に失敗", exc_info=True)
 

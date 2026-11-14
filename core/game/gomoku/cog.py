@@ -273,7 +273,7 @@ class Gomoku(commands.Cog):
         g.phase = "playing"
         if g.mode != "cpu":
             g.players[BLACK], g.players[WHITE] = list(g.players.values())
-        file, url = board_attachment(g.board)
+        file, url = await asyncio.to_thread(board_attachment, g.board)
         await channel.send(view=board_panel(
             "", "五目並べを開始します。黒（●）が先手です。先に5つ並べた方が勝ちです。"), file=file)
         await self._play_loop(channel, g)
@@ -299,7 +299,7 @@ class Gomoku(commands.Cog):
                 continue
             g.acted = False
             user = g.current_user()
-            file, url = board_attachment(g.board, g.last_move)
+            file, url = await asyncio.to_thread(board_attachment, g.board, g.last_move)
             body = (f"{user.mention} さんの番（{'黒 ●' if g.turn == BLACK else '白 ○'}）。\n"
                     "X（横）→Y（縦）の順にセレクトで選んでください。")
             await game_panels.replace(channel, "party", file=file, view=MovePanel(self, g, body))
@@ -324,7 +324,7 @@ class Gomoku(commands.Cog):
             outcome += f"\n{rating_line}"
         if g.mode == "cpu":
             outcome += "\n（CPU戦はランキングに記録されません）"
-        file, url = board_attachment(g.board, g.last_move)
+        file, url = await asyncio.to_thread(board_attachment, g.board, g.last_move)
         # 役割を終えた手番パネルを片付け、結果（盤面つき）だけを残す。
         await game_panels.clear(channel, "party")
         await channel.send(view=board_panel("五目並べ 終了", outcome), file=file)

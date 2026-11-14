@@ -599,15 +599,17 @@ class BlackjackView(_SessionPanel, discord.ui.View):
         return png
 
     async def _prepare_files(self) -> None:
-        if self._avatar_tried:
-            return
-        self._avatar_tried = True
-        try:
-            avatars = await fetch_avatar_bytes(
-                getattr(self.cog, "bot", None), [self.user_id])
-            self._avatar_bytes = avatars.get(self.user_id)
-        except Exception:
-            self._avatar_bytes = None
+        if not self._avatar_tried:
+            self._avatar_tried = True
+            try:
+                avatars = await fetch_avatar_bytes(
+                    getattr(self.cog, "bot", None), [self.user_id])
+                self._avatar_bytes = avatars.get(self.user_id)
+            except Exception:
+                self._avatar_bytes = None
+        # 盤面 PNG の描画はワーカースレッドで先に行い、キャッシュさせる
+        # （panel_files() / _build_embed() はキャッシュを返すだけになる）。
+        await asyncio.to_thread(self._board_png)
 
     def panel_files(self) -> list[discord.File] | None:
         png = self._board_png()

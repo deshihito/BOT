@@ -206,7 +206,7 @@ class Connect4(commands.Cog):
         g.phase = "playing"
         if g.mode != "cpu":
             g.players[RED], g.players[YELLOW] = list(g.players.values())
-        file, url = board_attachment(g.board)
+        file, url = await asyncio.to_thread(board_attachment, g.board)
         await channel.send(view=board_panel(
             "", "四目並べを開始します。赤（🔴）が先手です。先に4つ並べた方が勝ちです。"), file=file)
         await self._play_loop(channel, g)
@@ -229,7 +229,7 @@ class Connect4(commands.Cog):
                 continue
             g.acted_col = None
             user = g.current_user()
-            file, url = board_attachment(g.board, g.last_move)
+            file, url = await asyncio.to_thread(board_attachment, g.board, g.last_move)
             body = (f"{user.mention} さんの番（{'赤 🔴' if g.turn == RED else '黄 🟡'}）。\n"
                     "落とす列 X をセレクトで選んでください。")
             await game_panels.replace(channel, "party", file=file, view=MovePanel(self, g, body))
@@ -255,7 +255,7 @@ class Connect4(commands.Cog):
             outcome += f"\n{rating_line}"
         if g.mode == "cpu":
             outcome += "\n（CPU戦はランキングに記録されません）"
-        file, url = board_attachment(g.board, g.last_move)
+        file, url = await asyncio.to_thread(board_attachment, g.board, g.last_move)
         # 役割を終えた手番パネルを片付け、結果（盤面つき）だけを残す。
         await game_panels.clear(channel, "party")
         await channel.send(view=board_panel("四目並べ 終了", outcome), file=file)

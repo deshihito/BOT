@@ -133,8 +133,9 @@ class TurnPanel(GamePanelView):
             legal = game.legal_cards()
             text += "\n出せるのは: " + "／".join(f"{r} {card_name(r)}" for r in legal)
         key = ("loveletter-hand", tuple(cards))
-        data = render_cached(key, lambda: render_loveletter_cards(
-            [(r, card_name(r)) for r in cards]))
+        data = await asyncio.to_thread(
+            render_cached, key,
+            lambda: render_loveletter_cards([(r, card_name(r)) for r in cards]))
         await interaction.response.send_message(
             text, file=discord.File(io.BytesIO(data), "hand.png"), ephemeral=True)
 

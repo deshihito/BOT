@@ -122,8 +122,10 @@ class SudokuView(GamePanelView):
 
     async def _refresh(self, interaction: discord.Interaction):
         self._render()
+        file = await asyncio.to_thread(
+            board_file, self.board, self.givens, self._selected())
         await edit_panel_v2(interaction, self,
-                            files=[board_file(self.board, self.givens, self._selected())])
+                            files=[file])
 
     async def _num_chosen(self, interaction: discord.Interaction, value: int):
         if self.row is None or self.col is None:
@@ -154,8 +156,9 @@ class SudokuView(GamePanelView):
         if cleared and entry is not None:
             self.status += "\n" + game_records.format_timed_line(entry, self.label)
         self._render()
+        file = await asyncio.to_thread(board_file, board, self.givens, None)
         await edit_panel_v2(interaction, self,
-                            files=[board_file(board, self.givens, None)])
+                            files=[file])
         self.stop()
 
 
@@ -187,8 +190,10 @@ class ModeView(GamePanelView):
             else:
                 puzzle, solution = await asyncio.to_thread(generate, random.Random(), difficulty)
             view = SudokuView(self.cog, self.owner, puzzle, solution, difficulty)
+            file = await asyncio.to_thread(
+                board_file, view.board, view.givens, None)
             await edit_panel_v2(interaction, view,
-                                files=[board_file(view.board, view.givens, None)])
+                                files=[file])
             self.stop()
         return callback
 

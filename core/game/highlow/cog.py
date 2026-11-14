@@ -7,6 +7,7 @@
 変更前は同点=外れだった）。連続正解数が記録（core/game/game/game_records.py
 の highlow）に残る。賭け要素はない。パネルは Components V2。
 """
+import asyncio
 import io
 import random
 
@@ -120,8 +121,9 @@ class HighLowPanel(GamePanelView):
                       f"{TIE_SECONDS}秒以内に選ばないと、ここでやめた扱いになります。")
             panel = HighLowPanel(self.cog, self.owner, game, status, prev=prev, mode="tie")
             panel.message = interaction.message
+            file = await asyncio.to_thread(state_file, game, prev)
             return await interaction.response.edit_message(
-                view=panel, attachments=[state_file(game, prev)])
+                view=panel, attachments=[file])
         if game.cleared:
             status = f"{card_label(prev)} → **{drawn}** … 正解！\n🎉 山札を全部当て切りました！"
             return await self.cog.finish_panel(interaction, self, status, prev=prev)
@@ -131,8 +133,9 @@ class HighLowPanel(GamePanelView):
             return await self.cog.finish_panel(interaction, self, status, prev=prev)
         status = f"{card_label(prev)} → **{drawn}** … 正解！連続 **{game.streak}回**。次はこのカードより高い？低い？"
         panel = HighLowPanel(self.cog, self.owner, game, status, prev=prev, mode="play")
+        file = await asyncio.to_thread(state_file, game, prev)
         await interaction.response.edit_message(
-            view=panel, attachments=[state_file(game, prev)])
+            view=panel, attachments=[file])
 
     async def _on_continue(self, interaction: discord.Interaction):
         if self.mode != "tie":
@@ -141,8 +144,9 @@ class HighLowPanel(GamePanelView):
         status = (f"同点の札 **{card_label(game.current)}** で続けます。"
                   f"連続正解は **{game.streak}回** のまま。次はこのカードより高い？低い？")
         panel = HighLowPanel(self.cog, self.owner, game, status, mode="play")
+        file = await asyncio.to_thread(state_file, game)
         await interaction.response.edit_message(
-            view=panel, attachments=[state_file(game)])
+            view=panel, attachments=[file])
 
     async def _on_stop_here(self, interaction: discord.Interaction):
         if self.mode != "tie":
@@ -162,7 +166,8 @@ class HighLowPanel(GamePanelView):
         if self.message is not None:
             panel = HighLowPanel(self.cog, self.owner, self.game, status, mode="done")
             try:
-                await self.message.edit(view=panel, attachments=[state_file(self.game)])
+                file = await asyncio.to_thread(state_file, self.game)
+                await self.message.edit(view=panel, attachments=[file])
             except Exception:
                 pass
 
@@ -183,8 +188,9 @@ class HighLow(commands.Cog):
         if entry is not None:
             status += "\n" + game_records.format_highlow_line(entry, game.streak)
         done = HighLowPanel(self, panel.owner, game, status, prev=prev, mode="done")
+        file = await asyncio.to_thread(state_file, game, prev)
         await interaction.response.edit_message(
-            view=done, attachments=[state_file(game, prev)])
+            view=done, attachments=[file])
         panel.stop()
 
     async def start_recruit(self, interaction: discord.Interaction):
@@ -192,7 +198,8 @@ class HighLow(commands.Cog):
         game = HighLowGame(rng=random.Random())
         panel = HighLowPanel(self, interaction.user, game,
                              "次のカードはこのカードより高い？低い？")
-        await interaction.response.send_message(view=panel, file=state_file(game))
+        file = await asyncio.to_thread(state_file, game)
+        await interaction.response.send_message(view=panel, file=file)
         panel.message = await interaction.original_response()
 
 
